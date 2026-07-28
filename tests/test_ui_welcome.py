@@ -373,7 +373,7 @@ def test_demo_runs_end_to_end_and_populates_the_window(window, demo_lot):
     assert window.histogram.has_data() is True, "直方圖沒有資料"
     assert window.histogram.bin_summary_text().strip()
     assert window.gallery.displayed_count() == 6
-    assert window.current_tab() == studio_mod.TAB_GALLERY
+    assert window.results_visible() is True
     assert window.btn_export.isEnabled() is True
     assert "Sample run finished" in window.status_text()
 
