@@ -1,5 +1,5 @@
-# FlexADC Studio 主視窗煙霧測試 — authored 2026-07-28 (M3 收尾).
-"""``flexadc/ui/studio.py`` 的離屏（offscreen）煙霧測試。
+# ADEPT Studio 主視窗煙霧測試 — authored 2026-07-28 (M3 收尾).
+"""``adept/ui/studio.py`` 的離屏（offscreen）煙霧測試。
 
 執行：``QT_QPA_PLATFORM=offscreen python3 -m pytest tests/test_ui_studio_smoke.py -q``
 
@@ -7,10 +7,10 @@
 
 ``tests/test_no_qt.py::test_no_qt_after_import`` 會檢查 ``sys.modules`` 裡沒有任何
 PySide6 模組。pytest 先蒐集全部測試檔、再開始跑，所以只要這個檔案在**模組層**
-``import PySide6``（或 import ``flexadc.ui.studio``），蒐集階段就會把 Qt 塞進
+``import PySide6``（或 import ``adept.ui.studio``），蒐集階段就會把 Qt 塞進
 ``sys.modules``，那個守門測試就會紅 —— 即使它先跑。
 
-因此：所有 Qt / ``flexadc.ui`` 的 import 都關在 :func:`_load_qt` 裡，由 module-scope
+因此：所有 Qt / ``adept.ui`` 的 import 都關在 :func:`_load_qt` 裡，由 module-scope
 的 ``qapp`` fixture 呼叫，再用 ``globals().update(...)`` 注入本模組命名空間。
 每個測試都必須（直接或間接）要求 ``qapp`` fixture，否則那些名字不存在。
 
@@ -37,11 +37,11 @@ def _load_qt() -> None:
     """把 Qt 與待測模組 import 進來，注入本模組的 globals（只在 fixture 裡呼叫）。"""
     from PySide6.QtWidgets import QApplication  # noqa: F401
 
-    from flexadc.ui import studio as studio_mod  # noqa: F401
-    from flexadc.ui import theme as theme_mod  # noqa: F401
-    from flexadc.ui import viewmodel as vm_mod  # noqa: F401
+    from adept.ui import studio as studio_mod  # noqa: F401
+    from adept.ui import theme as theme_mod  # noqa: F401
+    from adept.ui import viewmodel as vm_mod  # noqa: F401
 
-    from flexadc.core.pipeline import Recipe  # noqa: F401
+    from adept.core.pipeline import Recipe  # noqa: F401
 
     globals().update(locals())
 
@@ -84,7 +84,7 @@ def _loaded(window, synlot):
 # 1. 建構 + 卡片庫
 # --------------------------------------------------------------------------- #
 def test_window_constructs_with_library_cards(window):
-    assert window.windowTitle().startswith("FlexADC Studio")
+    assert window.windowTitle().startswith("ADEPT Studio")
     # 卡片庫用的是真實 registry，不是手捏假資料
     assert window.library.entry("snr_map") is not None
     assert window.library.entry("load_patch") is not None

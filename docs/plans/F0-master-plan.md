@@ -1,4 +1,4 @@
-# Flex-ADC 開發計畫（工作代號，名稱待定）
+# ADEPT 開發計畫（工作代號，名稱待定）
 
 > 一個 **flexible、多步驟、任何 Inspection 站點都適用**的 ADC 工具：
 > 讀 EBI patch（test+ref）或 RSEM 單張影像 + 對應 KLARF，
@@ -16,7 +16,7 @@
 | 決策點 | 結論 |
 |---|---|
 | 使用對象 | **推廣給部門同事**（不寫 code）→ UX 引導、防呆預設值、教學文件是一級需求，不是附屬品 |
-| 形態 | 桌面 GUI（PySide6），core/ui 嚴格分離；**CLI 附帶**（`flexadc run <recipe> <klarf>` 供排程/腳本） |
+| 形態 | 桌面 GUI（PySide6），core/ui 嚴格分離；**CLI 附帶**（`adept run <recipe> <klarf>` 供排程/腳本） |
 | 組裝方式 | 視覺化 pipeline 編輯器（step 卡片 + 自動生成的參數表單），底層 recipe JSON |
 | 輸入 | 兩者都吃：**EBI patch = test+ref 兩兩配對、8-bit、multi-page TIFF（格式參照 KLIP）**；RSEM = 單張/defect。ingest 自動判別；16-bit 防禦性支援 |
 | 輸出 | ① 無損寫回 KLARF（CLASSNUMBER、ROUGHBIN/FINEBIN、DSIZE）② **score + new class 寫入指定欄位並 gen 新 KLARF**（含 Top-N 篩選）③ CSV/Excel 報表 + overlay ④ per-defect feature vector 匯出（為未來 ML 備料） |
@@ -39,7 +39,7 @@
 ## 2. 架構總覽
 
 ```
-flexadc/
+adept/
 ├── core/                    # 純運算，零 Qt import（headless 可測）
 │   ├── ingest/              # KLARF + 影像載入、dataset 模型
 │   │   ├── klarf_core.py    # ← KLIP（整檔搬，補 per-defect ImageFileName 解析）
@@ -295,7 +295,7 @@ v2 擴充卡備選：上述兩張 + ML Classify、BSE/SE 多通道融合、雙 r
 
 | 里程碑 | 內容 | 驗收 |
 |---|---|---|
-| **M0 抽庫** | Vendoring §5 清單檔案進 `flexadc/core`；統一 KLARF parser（KLIP `klarf_core` 為底，補 ImageFileName；棄用重複的 `klarf_parser`）；修三摩擦（ROI 座標統一正規化、SNR 正負號統一、`compute_snr_map` 回傳）；合成影像單元測試 | `pytest` 全綠、core 零 Qt import |
+| **M0 抽庫** | Vendoring §5 清單檔案進 `adept/core`；統一 KLARF parser（KLIP `klarf_core` 為底，補 ImageFileName；棄用重複的 `klarf_parser`）；修三摩擦（ROI 座標統一正規化、SNR 正負號統一、`compute_snr_map` 回傳）；合成影像單元測試 | `pytest` 全綠、core 零 Qt import |
 | **M1 引擎** | Context/Step/registry/Recipe(DAG)/表達式/單顆執行 + **synthetic data generator + KLIP 產測試 KLARF fixture 庫** | CLI 對合成 KLARF+TIFF 跑通 die-to-die pipeline，輸出 features JSON |
 | **M2 批次** | ProcessPool + SQLite + 中間快取 + headless CLI + feature vector 匯出 | 10k 合成 patch < 2 min；改末端參數重跑 < 5 s |
 | **M3 Studio** | 四區塊 Studio + 即時中間輸出鏈 + 直方圖/門檻拖曳 | **首發案例：EBI patch 算分全程滑鼠完成**（想法→算法的證明點） |
@@ -325,7 +325,7 @@ v2 擴充卡備選：上述兩張 + ML Classify、BSE/SE 多通道融合、雙 r
 1. KLARF 變體超出 `klarf_core` 已知三種 → fab_probe 持續收集，M1 起建 fixture 庫。
 2. Golden Cell 相位（CPE `choose_origin` 是 stub）→ M4 補相位搜尋。
 3. 推廣後 recipe 品質參差 → recipe lint + 範例庫 + 參考卡緩解；權限/集中管理留 v2。
-4. 命名待定（Flex-ADC 為代號；可延續水果/自然系：PEAR、Fusi³…）。
+4. 命名待定（ADEPT 為代號；可延續水果/自然系：PEAR、Fusi³…）。
 
 ## 12. v2+ Backlog
 

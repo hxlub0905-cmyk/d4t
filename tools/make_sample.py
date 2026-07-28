@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# FlexADC synthetic sample generator — authored 2026-07-28 (M1).
+# ADEPT synthetic sample generator — authored 2026-07-28 (M1).
 """合成 EBI patch 測試 lot 產生器。
 
 產出一個 ingest 層可以直接吃的迷你 lot：
@@ -31,12 +31,12 @@ from typing import Any, Dict
 import numpy as np
 import tifffile
 
-# 讓 `python3 tools/make_sample.py` 不裝套件也能 import flexadc
+# 讓 `python3 tools/make_sample.py` 不裝套件也能 import adept
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
-from flexadc.core.ingest import dataset, klarf_core, tiff_index  # noqa: E402
+from adept.core.ingest import dataset, klarf_core, tiff_index  # noqa: E402
 
 LOT_NAME = "LOT_SYN"
 REAL_TYPES = ("bright_blob", "dark_blob", "bridge")
@@ -110,7 +110,7 @@ def _make_klarf_text(n: int, rows) -> str:
     lines = [
         "FileVersion 1 2;",
         "FileTimestamp 07-28-26 00:00:00;",
-        'InspectionStationID "SYN" "SYN" "FlexADC";',
+        'InspectionStationID "SYN" "SYN" "ADEPT";',
         "SampleType WAFER;",
         "ResultTimestamp 07-28-26 00:00:00;",
         f'LotID "{LOT_NAME}";',
@@ -250,7 +250,7 @@ def generate(out_dir, n: int = 24, real_frac: float = 0.5, size: int = 128,
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
-        description="產生 FlexADC 合成 EBI patch lot（KLARF 1.2 + 多頁 TIFF + ground truth）。")
+        description="產生 ADEPT 合成 EBI patch lot（KLARF 1.2 + 多頁 TIFF + ground truth）。")
     ap.add_argument("out_dir", help="輸出資料夾（不存在會建立）")
     ap.add_argument("--n", type=int, default=24, help="defect 數量（預設 24）")
     ap.add_argument("--real-frac", type=float, default=0.5,

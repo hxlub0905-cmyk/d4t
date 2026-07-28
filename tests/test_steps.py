@@ -1,4 +1,4 @@
-"""Tests for flexadc.core.steps — the 14-card step library (M1).
+"""Tests for adept.core.steps — the 14-card step library (M1).
 
 Each test builds a synthetic Context, runs one card through
 validate_params + run, and checks features / image streams / warnings.
@@ -10,10 +10,10 @@ import numpy as np
 import pytest
 import tifffile
 
-import flexadc.core.steps  # noqa: F401 — registration side-effect
-from flexadc.core.ingest.dataset import DefectItem, ImageRef
-from flexadc.core.pipeline.context import Context
-from flexadc.core.pipeline.step import REGISTRY, StepError
+import adept.core.steps  # noqa: F401 — registration side-effect
+from adept.core.ingest.dataset import DefectItem, ImageRef
+from adept.core.pipeline.context import Context
+from adept.core.pipeline.step import REGISTRY, StepError
 
 # 本卡片庫全部的 key（影像段 8 張 + 算法段 6 張）
 ALL_KEYS = [

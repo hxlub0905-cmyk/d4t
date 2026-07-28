@@ -1,7 +1,7 @@
 """M1 驗收：Recipe JSON serde、execution_order、lint 式 validate。
 
 本檔的 dummy Step 不進全域 REGISTRY —— 一律以 registry= 參數顯式傳入
-validate()，避免與並行開發中的 flexadc/core/steps/ 相互干擾。
+validate()，避免與並行開發中的 adept/core/steps/ 相互干擾。
 """
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from flexadc.core.pipeline import (
+from adept.core.pipeline import (
     CATEGORY_ALGO,
     CATEGORY_IMAGE,
     ParamSpec,

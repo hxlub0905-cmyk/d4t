@@ -1,16 +1,28 @@
-# Flex-ADC（工作代號）
+# ADEPT — Auto Defect Evaluation Pipeline Tool
 
-> Flexible、多步驟、任何 Inspection 站點都適用的 ADC 工具：
-> 讀 EBI patch（test+ref）或 RSEM 單張影像 + 對應 KLARF，
-> 用「步驟卡片組 pipeline」把腦中想法變成算法，對每顆 defect 算分、
-> 調參看整批分佈、寫回 KLARF。**站點差異封裝進 recipe，不封裝進程式碼。**
+> 彈性、多步驟、**任何 Inspection 站點都適用**的 ADC（Auto Defect Classification）工具。
+>
+> 讀半導體 E-beam Inspection 的 patch 影像（test + ref）或 Review SEM 單張影像 +
+> 對應的 KLARF，用「步驟卡片組 pipeline」把腦中的想法變成算法，對每顆 defect 算分、
+> 調參看整批分佈、再把結果寫回 KLARF。
+>
+> **核心理念：站點差異封裝進 recipe，不封裝進程式碼。**
+> 傳統 PADC / RADC 每個站點都要工程師重寫一份 code；ADEPT 讓不會寫 code 的人
+> 也能用滑鼠把想法組成算法，產出可量化的證據。
+
+| | |
+|---|---|
+| **輸入** | KLARF + multi-page patch TIFF（EBI）｜KLARF + per-defect 影像（Review SEM）｜純資料夾 |
+| **組裝** | 19 張步驟卡片，三段式：影像（把圖變乾淨）→ 算法（量出數字）→ ADC 判定（算分分 bin） |
+| **輸出** | 無損寫回 KLARF（class / bin / DSIZE）｜Top-N 新 KLARF｜CSV / Excel 報表｜feature vector（ML 備料） |
+| **介面** | PySide6 Studio 視覺化編輯器 ＋ CLI（可排程、可腳本化） |
 
 完整計畫見 [`docs/plans/F0-master-plan.md`](docs/plans/F0-master-plan.md)。
 
 ## 目前進度：M0 抽庫 ✅ · M1 引擎 ✅ · M2 批次 ✅ · M3 Studio UI ✅
 
 M0：六個既有專案（KLIP / GLAS / MMH / PEAR / cell-period-estimator / Perspective-Combination）
-的可重用演算法已 vendoring 進 `flexadc/core`，全部通過合成影像單元測試、零 Qt 依賴。
+的可重用演算法已 vendoring 進 `adept/core`，全部通過合成影像單元測試、零 Qt 依賴。
 
 M1：pipeline 引擎完成 —— Context/Step 契約、Recipe(DAG) + lint 驗證、score 表達式引擎
 （安全語意，不會爆給使用者看）、單顆執行引擎、14 張卡片、合成資料產生器、CLI。
@@ -29,20 +41,20 @@ ParamSpec 生成（每格都有白話說明、範圍防呆、錯誤即時紅字�
 
 ```bash
 # 開 Studio：
-python -m flexadc gui
+python -m adept gui
 
 # CLI 試玩（不需真實資料）：
 python tools/make_sample.py /tmp/lot --n 100         # 產合成 KLARF + patch TIFF
-python -m flexadc steps                              # 看所有卡片
-python -m flexadc validate examples/recipes/die_to_die_basic.json
-python -m flexadc run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 \
+python -m adept steps                              # 看所有卡片
+python -m adept validate examples/recipes/die_to_die_basic.json
+python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 \
     --workers 4 --cache /tmp/cache --db /tmp/runs.db --csv features.csv
-python -m flexadc runs --db /tmp/runs.db             # 批次歷史
-python -m flexadc rescore <run_id> --db /tmp/runs.db --threshold 60 --save   # 秒級調門檻
+python -m adept runs --db /tmp/runs.db             # 批次歷史
+python -m adept rescore <run_id> --db /tmp/runs.db --threshold 60 --save   # 秒級調門檻
 ```
 
 ```
-flexadc/
+adept/
 ├── ui/                  # PySide6 Studio（唯一允許 Qt 的地方）
 │   ├── viewmodel.py     #   RecipeModel（Qt-free 編輯模型）+ 直方圖/門檻計算
 │   ├── theme.py         #   GLAS 暖色主題 token + 三段分色
@@ -50,7 +62,7 @@ flexadc/
 │   │                    #   / HistogramWidget / FeatureTable / VerdictChip
 │   ├── workers.py       #   載入 / 預覽（請求合併）/ 試跑 背景執行緒
 │   ├── studio.py        #   StudioWindow 四區塊組裝
-│   └── app.py           #   進入點（python -m flexadc gui）
+│   └── app.py           #   進入點（python -m adept gui）
 ├── core/
 │   ├── ingest/          # KLARF 無損引擎(KLIP) + TIFF page 索引 + Dataset 自動判別
 │   │   ├── klarf_core.py    #   KLARF 1.2/1.8 讀寫/健檢/比對 + defect↔page 對應
@@ -89,7 +101,7 @@ QT_QPA_PLATFORM=offscreen pytest -q   # 全部測試（~6s，不需真實資料�
 ## Vendoring 慣例
 
 - 每個 vendored 模組檔頭註明來源專案/檔案與改動清單。
-- `flexadc/core` 禁止 Qt import（`tests/test_no_qt.py` 守門）。
+- `adept/core` 禁止 Qt import（`tests/test_no_qt.py` 守門）。
 - Python ≥ 3.9 相容（同樣由測試以 `ast.parse(feature_version=(3,9))` 守門）。
 
 ## 統一慣例（M0 修正的三個歷史摩擦）

@@ -14,8 +14,8 @@ import time
 
 import pytest
 
-from flexadc.core.pipeline import Recipe, RecipeNode, ScoreSpec
-from flexadc.core.store import RunStore, rescore
+from adept.core.pipeline import Recipe, RecipeNode, ScoreSpec
+from adept.core.store import RunStore, rescore
 
 
 # ---------------------------------------------------------------------------

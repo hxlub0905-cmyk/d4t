@@ -1,9 +1,9 @@
-"""Tests for flexadc.core.ingest.klarf_core (vendored KLIP engine)."""
+"""Tests for adept.core.ingest.klarf_core (vendored KLIP engine)."""
 from __future__ import annotations
 
 import os
 
-from flexadc.core.ingest import klarf_core
+from adept.core.ingest import klarf_core
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "sample_real.klarf")
 

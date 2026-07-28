@@ -1,10 +1,10 @@
-"""Tests for flexadc.core.algo.glv (vendored from PEAR)."""
+"""Tests for adept.core.algo.glv (vendored from PEAR)."""
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from flexadc.core.algo.glv import (
+from adept.core.algo.glv import (
     GLV_STATS,
     ROI,
     default_metrics,

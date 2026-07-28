@@ -1,11 +1,11 @@
-# FlexADC M3 背景工作層測試 — authored 2026-07-28.
-"""``flexadc.ui.workers`` 的 headless 測試（QT_QPA_PLATFORM=offscreen）。
+# ADEPT M3 背景工作層測試 — authored 2026-07-28.
+"""``adept.ui.workers`` 的 headless 測試（QT_QPA_PLATFORM=offscreen）。
 
 ★ 為什麼 Qt 是「延遲匯入」★
   ``tests/test_no_qt.py::test_no_qt_after_import`` 會檢查 ``sys.modules`` 裡
   沒有任何 Qt 模組。pytest 在跑第一個測試之前會先 **collect**（import）所有
   測試模組，所以本檔若在最上層 ``import PySide6`` 或 ``import
-  flexadc.ui.workers``（它自己 import PySide6），那道守門測試就會被這裡的
+  adept.ui.workers``（它自己 import PySide6），那道守門測試就會被這裡的
   import 汙染而失敗。
   因此：Qt 與 workers 一律在 ``qt`` fixture 裡才 import，並注入 module
   globals（``QtCore`` / ``workers``）給各測試與輔助函式使用。最上層只留
@@ -22,8 +22,8 @@ from pathlib import Path
 
 import pytest
 
-import flexadc.core.steps  # noqa: F401 — 觸發卡片註冊
-from flexadc.core.pipeline import Recipe
+import adept.core.steps  # noqa: F401 — 觸發卡片註冊
+from adept.core.pipeline import Recipe
 
 REPO = Path(__file__).resolve().parent.parent
 RECIPE_PATH = REPO / "examples" / "recipes" / "die_to_die_basic.json"
@@ -43,7 +43,7 @@ def qt():
     """延遲匯入 Qt 與 workers（見模組 docstring），建立唯一的 QApplication。"""
     from PySide6 import QtCore, QtWidgets
 
-    import flexadc.ui.workers as workers_mod
+    import adept.ui.workers as workers_mod
 
     g = globals()
     g["QtCore"] = QtCore

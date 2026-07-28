@@ -1,4 +1,4 @@
-"""Tests for flexadc.core.algo.align (vendored 2026-07-27).
+"""Tests for adept.core.algo.align (vendored 2026-07-27).
 
 Sign convention under test: target(x, y) == base(x - dx, y - dy) — the target
 content sits dx px right / dy px down of the base content, and every backend
@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 import pytest
 
-from flexadc.core.algo.align import (
+from adept.core.algo.align import (
     AlignResult,
     apply_alignment,
     alignment_overlap_slices,

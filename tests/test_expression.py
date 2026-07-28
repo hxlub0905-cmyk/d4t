@@ -5,7 +5,7 @@ import math
 
 import pytest
 
-from flexadc.core.pipeline import ExpressionError, parse_expression
+from adept.core.pipeline import ExpressionError, parse_expression
 
 
 def ev(text, variables=None):

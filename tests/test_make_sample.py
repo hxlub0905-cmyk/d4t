@@ -8,7 +8,7 @@ import sys
 import numpy as np
 import pytest
 
-from flexadc.core.ingest import dataset, klarf_core, tiff_index
+from adept.core.ingest import dataset, klarf_core, tiff_index
 
 _TOOLS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools")
 if _TOOLS not in sys.path:

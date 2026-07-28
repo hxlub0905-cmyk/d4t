@@ -16,10 +16,10 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from make_sample import generate  # noqa: E402
 
-import flexadc.core.steps  # noqa: F401,E402
-from flexadc.core.ingest.dataset import load_dataset  # noqa: E402
-from flexadc.core.pipeline import Recipe, run_batch  # noqa: E402
-from flexadc.core.pipeline.batch import _pool_context  # noqa: E402
+import adept.core.steps  # noqa: F401,E402
+from adept.core.ingest.dataset import load_dataset  # noqa: E402
+from adept.core.pipeline import Recipe, run_batch  # noqa: E402
+from adept.core.pipeline.batch import _pool_context  # noqa: E402
 
 RECIPE = REPO / "examples" / "recipes" / "die_to_die_basic.json"
 

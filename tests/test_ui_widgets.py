@@ -1,5 +1,5 @@
-# FlexADC Studio UI 元件測試 — authored 2026-07-28 (M3).
-"""``flexadc/ui/theme.py`` 與 ``flexadc/ui/widgets.py`` 的離屏（offscreen）測試。
+# ADEPT Studio UI 元件測試 — authored 2026-07-28 (M3).
+"""``adept/ui/theme.py`` 與 ``adept/ui/widgets.py`` 的離屏（offscreen）測試。
 
 執行：``QT_QPA_PLATFORM=offscreen python3 -m pytest tests/test_ui_widgets.py -q``
 
@@ -10,7 +10,7 @@ PySide6 模組。pytest 是「先蒐集全部測試檔、再開始跑」，所�
 **模組層** ``import PySide6``，蒐集階段就會把 Qt 塞進 ``sys.modules``，那個守門測試
 就會紅 —— 即使它先跑。
 
-因此：所有 Qt / ``flexadc.ui`` 的 import 都關在 :func:`_load_qt` 裡，由 module-scope
+因此：所有 Qt / ``adept.ui`` 的 import 都關在 :func:`_load_qt` 裡，由 module-scope
 的 ``qapp`` fixture 呼叫，再用 ``globals().update(...)`` 注入本模組命名空間。
 每個測試都必須要求 ``qapp`` fixture，否則那些名字不存在。
 
@@ -36,9 +36,9 @@ def _load_qt() -> None:
         QSpinBox,
     )
 
-    from flexadc.ui import theme as theme_mod  # noqa: F401
-    from flexadc.ui import widgets as widgets_mod  # noqa: F401
-    from flexadc.ui import viewmodel as vm_mod  # noqa: F401
+    from adept.ui import theme as theme_mod  # noqa: F401
+    from adept.ui import widgets as widgets_mod  # noqa: F401
+    from adept.ui import viewmodel as vm_mod  # noqa: F401
 
     globals().update(locals())
 
@@ -58,15 +58,15 @@ def qapp():
 # --------------------------------------------------------------------------- #
 def _steps():
     """真實 registry 的 describe() dict（不是手捏的假資料）。"""
-    import flexadc.core.steps  # noqa: F401 — 觸發註冊
-    from flexadc.core.pipeline import list_steps
+    import adept.core.steps  # noqa: F401 — 觸發註冊
+    from adept.core.pipeline import list_steps
 
     return [s.describe() for s in list_steps()]
 
 
 def _describe(key):
-    import flexadc.core.steps  # noqa: F401
-    from flexadc.core.pipeline import get_step
+    import adept.core.steps  # noqa: F401
+    from adept.core.pipeline import get_step
 
     return get_step(key).describe()
 
@@ -84,7 +84,7 @@ def _mouse(widget, etype, pos, button=None, buttons=None):
 # --------------------------------------------------------------------------- #
 # theme
 # --------------------------------------------------------------------------- #
-def test_theme_applies_and_has_flexadc_tokens(qapp):
+def test_theme_applies_and_has_adept_tokens(qapp):
     assert qapp.styleSheet(), "apply_theme 應該有裝上 QSS"
     qss = theme_mod.build_stylesheet()
     # 主要動作按鈕靠 objectName "primary"

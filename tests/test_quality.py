@@ -1,11 +1,11 @@
-"""Tests for flexadc.core.algo.quality (vendored from MMH)."""
+"""Tests for adept.core.algo.quality (vendored from MMH)."""
 from __future__ import annotations
 
 import cv2
 import numpy as np
 import pytest
 
-from flexadc.core.algo.quality import (
+from adept.core.algo.quality import (
     DEFAULT_LAP_THRESHOLD,
     check_lap_quality,
     compute_quality,

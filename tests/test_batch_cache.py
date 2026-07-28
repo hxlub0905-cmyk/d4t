@@ -1,4 +1,4 @@
-# FlexADC M2 驗收 — authored 2026-07-28.
+# ADEPT M2 驗收 — authored 2026-07-28.
 """M2 驗收：平行批次（run_batch）+ 影像段快取（StageCache / run_defect_cached）。
 
 鐵則：快取/平行的結果必須與 M1 循序 run_dataset **位元級一致**
@@ -16,9 +16,9 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from make_sample import generate  # noqa: E402
 
-import flexadc.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from flexadc.core.ingest.dataset import load_dataset  # noqa: E402
-from flexadc.core.pipeline import (  # noqa: E402
+import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from adept.core.ingest.dataset import load_dataset  # noqa: E402
+from adept.core.pipeline import (  # noqa: E402
     Recipe,
     RecipeNode,
     ScoreSpec,
@@ -30,8 +30,8 @@ from flexadc.core.pipeline import (  # noqa: E402
     run_defect,
     run_defect_cached,
 )
-from flexadc.core.pipeline.batch import pin_cv2_deterministic  # noqa: E402
-from flexadc.core.pipeline.cache import dataset_token  # noqa: E402
+from adept.core.pipeline.batch import pin_cv2_deterministic  # noqa: E402
+from adept.core.pipeline.cache import dataset_token  # noqa: E402
 
 N = 12
 KIND = "ebi_patch"

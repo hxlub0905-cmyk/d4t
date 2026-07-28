@@ -1,10 +1,10 @@
-"""Tests for flexadc.core.algo.stats (vendored from PEAR analysis)."""
+"""Tests for adept.core.algo.stats (vendored from PEAR analysis)."""
 from __future__ import annotations
 
 import numpy as np
 
-from flexadc.core.algo.glv import ROI
-from flexadc.core.algo.stats import (
+from adept.core.algo.glv import ROI
+from adept.core.algo.stats import (
     attribute_separability,
     cohens_d,
     group_outliers,
