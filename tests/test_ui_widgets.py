@@ -335,19 +335,30 @@ def test_param_form_empty_state(qapp):
 # --------------------------------------------------------------------------- #
 # 3. LibraryPanel
 # --------------------------------------------------------------------------- #
-def test_library_panel_sections_and_double_click(qapp):
+def test_library_panel_groups_and_double_click(qapp):
+    """F7-3：卡片庫改依**流程階段**分組（不是依 category 的影像／算法）。"""
     panel = widgets_mod.LibraryPanel()
     steps = _steps()
     panel.set_steps(steps)
 
-    assert panel.section_titles() == ["Image", "Algorithm", "ADC Decision"]
+    assert panel.section_titles() == [
+        "Input", "Enhance", "Region", "Compare", "Measure", "ADC"]
     assert set(panel.step_keys()) == {s["key"] for s in steps}
 
-    # 空的段落要留一行提示（目前 registry 沒有 adc 卡片）
+    # 每張卡都被歸進宣告的那一段
+    by_group = {}
+    for s_ in steps:
+        by_group.setdefault(s_["group"], set()).add(s_["key"])
+    assert "load_patch" in by_group["input"]
+    assert {"subtract", "align"} <= by_group["compare"]
+    assert "blob_segment" in by_group["region"]
+    assert {"glv_stats", "cd_measure", "roi_snr"} <= by_group["measure"]
+
+    # 空的段落要留一行提示（registry 目前沒有 adc 卡片）
     empties = [lbl for lbl in panel.findChildren(QLabel)
                if lbl.objectName() == "libEmpty"]
-    n_adc = sum(1 for s in steps if s["category"] == "adc")
-    assert len(empties) == (1 if n_adc == 0 else 0)
+    assert len(empties) == sum(
+        1 for g, _t, _s in panel.GROUPS if not by_group.get(g))
 
     got = []
     panel.add_requested.connect(got.append)
@@ -360,16 +371,83 @@ def test_library_panel_sections_and_double_click(qapp):
     QTest.mouseDClick(item, Qt.LeftButton)
     assert got == ["snr_map"]
 
-    # 另一條路：hover 出現的「加入 ▸」按鈕
+    # 另一條路：hover 出現的「Add」按鈕
     other = panel.entry("align")
-    assert other.add_button.text() == "Add ▸"
+    assert other.add_button.text() == "Add"
     other.add_button.click()
     assert got == ["snr_map", "align"]
 
     # 重新 set_steps 不會留下舊項目
-    panel.set_steps([s for s in steps if s["category"] == "image"])
+    panel.set_steps([s_ for s_ in steps if s_["group"] == "compare"])
     assert panel.entry("snr_map") is None
     assert panel.entry("align") is not None
+
+
+def test_library_search_filters_cards_and_hides_empty_sections(qapp):
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps(_steps())
+    everything = set(panel.visible_step_keys())
+
+    panel.set_query("snr")
+    hit = set(panel.visible_step_keys())
+    assert {"snr_map", "roi_snr", "blob_segment"} <= hit
+    assert "denoise" not in hit
+    assert "Input" not in panel.visible_section_titles(), \
+        "整組都沒命中的區塊標題要一起收起來"
+
+    # 多個詞是 AND；說明文字也在搜尋範圍內
+    panel.set_query("region blob")
+    assert set(panel.visible_step_keys()) == {"blob_segment"}
+
+    panel.set_query("")
+    assert set(panel.visible_step_keys()) == everything
+    assert panel.visible_section_titles() == panel.section_titles()
+
+
+def test_library_badges_unmet_prerequisites_but_still_allows_adding(qapp):
+    """前置條件沒滿足 → 標 ``needs …`` 並調淡，**但不擋著不給加**。
+
+    卡片庫的順序不是執行順序：使用者可能先放卡再補上游。擋住只會讓人以為壞了。
+    """
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps(_steps())
+
+    # 還不知道上游有什麼 -> 一個 badge 都不該出現（別在空流程上嚇人）
+    assert not [k for k in panel.step_keys() if panel.entry(k).badge_text()]
+
+    panel.set_available_streams(["test", "ref"])
+    assert panel.entry("snr_map").badge_text() == "needs diff"
+    assert panel.entry("subtract").badge_text() == "needs ref_aligned"
+    assert panel.entry("denoise").badge_text() == ""      # 只讀 test，滿足了
+
+    got = []
+    panel.add_requested.connect(got.append)
+    panel.entry("snr_map").add_button.click()
+    assert got == ["snr_map"], "有 badge 的卡仍然要加得進去"
+
+    # 上游補齊之後 badge 要消失
+    panel.set_available_streams(["test", "ref", "ref_aligned", "diff"])
+    assert panel.entry("snr_map").badge_text() == ""
+    assert panel.entry("subtract").badge_text() == ""
+
+
+def test_group_icons_are_painted_not_files(qapp):
+    """icon 一律 QPainter 畫 —— repo 有「只放純文字檔」的不變量。"""
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps(_steps())
+    icons = panel.findChildren(widgets_mod.GroupIcon)
+    assert len(icons) == len(panel.GROUPS)
+    assert all(i.width() > 0 and i.height() > 0 for i in icons)
+
+    # 換主題之後 icon 要跟著換色
+    before = [i.color for i in icons]
+    theme_mod.set_theme("dark")
+    try:
+        panel.refresh_colors()
+        assert [i.color for i in icons] != before
+    finally:
+        theme_mod.set_theme("light")
+        panel.refresh_colors()
 
 
 # --------------------------------------------------------------------------- #

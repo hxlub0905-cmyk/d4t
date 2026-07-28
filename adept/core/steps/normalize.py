@@ -18,7 +18,7 @@ from ..algo import histmatch as algo_histmatch
 from ..algo import normalize as algo_normalize
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step,
+    CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_ENHANCE,
 )
 from ._util import parse_key_list, require_image, to_uint8
 
@@ -49,6 +49,7 @@ class PercentileNormStep(Step):
     key = "percentile_norm"
     label = "Percentile normalise"
     category = CATEGORY_IMAGE
+    group = GROUP_ENHANCE
     help = ("Stretch image brightness over a percentile range (P2-P98 by "
             "default) to 0-255, removing brightness drift.")
     params = [
@@ -105,6 +106,7 @@ class GlvMaskNormStep(Step):
     key = "glv_mask_norm"
     label = "GLV band normalise"
     category = CATEGORY_IMAGE
+    group = GROUP_ENHANCE
     help = ("Estimate the brightness range from pixels inside a chosen gray "
             "band only, then stretch to 0-255 — this locks onto the brightness "
             "of one particular pattern.")
@@ -164,6 +166,7 @@ class HistMatchStep(Step):
     key = "hist_match"
     label = "Histogram match"
     category = CATEGORY_IMAGE
+    group = GROUP_ENHANCE
     help = ("Match the moving image's brightness distribution to the reference "
             "image so the two can be subtracted directly.")
     requires_ref = True

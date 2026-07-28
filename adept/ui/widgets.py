@@ -565,8 +565,78 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 # --------------------------------------------------------------------------- #
 # 3. LibraryPanel
 # --------------------------------------------------------------------------- #
+class GroupIcon(QWidget):
+    """流程階段的小圖示 —— **用 QPainter 畫，不吃任何圖檔**。
+
+    為什麼不用 ``.svg`` / ``.png``：repo 有「只放純文字檔」的不變量
+    （公司機的 DLP 會擋含二進位的壓縮檔，見 ``docs/HANDOVER.md`` §5）。
+    ``.svg`` 其實是純文字、過得了 DLP，但用 QPainter 連「要不要把圖檔加進
+    版控」這個問題都不用問，而且顏色直接吃 token —— 換主題時圖示自動跟著變。
+    """
+
+    _SIZE = 15
+
+    def __init__(self, group: str, color: str, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.group = str(group)
+        self.color = str(color)
+        self.setFixedSize(self._SIZE, self._SIZE)
+
+    def set_color(self, color: str) -> None:
+        self.color = str(color)
+        self.update()
+
+    def paintEvent(self, _e) -> None:      # noqa: D102 - Qt hook
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(QColor(self.color), 1.4)
+        pen.setCapStyle(Qt.RoundCap)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        w = h = float(self._SIZE)
+        g = self.group
+
+        if g == "input":                    # 匣子 + 往下的箭頭
+            p.drawRect(QRectF(2.0, 8.5, w - 4.0, h - 10.5))
+            p.drawLine(QPointF(w / 2, 1.5), QPointF(w / 2, 7.0))
+            p.drawLine(QPointF(w / 2 - 2.4, 4.6), QPointF(w / 2, 7.0))
+            p.drawLine(QPointF(w / 2 + 2.4, 4.6), QPointF(w / 2, 7.0))
+        elif g == "enhance":                # 亮度：半實心圓
+            p.drawEllipse(QRectF(2.0, 2.0, w - 4.0, h - 4.0))
+            p.setBrush(QColor(self.color))
+            p.setPen(Qt.NoPen)
+            p.drawPie(QRectF(2.0, 2.0, w - 4.0, h - 4.0), -90 * 16, 180 * 16)
+        elif g == "region":                 # 取景框（四個角）
+            for x0, y0, dx, dy in ((2.0, 2.0, 1, 1), (w - 2.0, 2.0, -1, 1),
+                                   (2.0, h - 2.0, 1, -1), (w - 2.0, h - 2.0, -1, -1)):
+                p.drawLine(QPointF(x0, y0), QPointF(x0 + 3.6 * dx, y0))
+                p.drawLine(QPointF(x0, y0), QPointF(x0, y0 + 3.6 * dy))
+            p.setBrush(QColor(self.color))
+            p.setPen(Qt.NoPen)
+            p.drawEllipse(QRectF(w / 2 - 1.6, h / 2 - 1.6, 3.2, 3.2))
+        elif g == "compare":                # 兩個交疊的方框
+            p.drawRect(QRectF(1.8, 1.8, w - 6.6, h - 6.6))
+            p.drawRect(QRectF(4.8, 4.8, w - 6.6, h - 6.6))
+        elif g == "measure":                # 尺（一條線 + 刻度）
+            p.drawLine(QPointF(2.0, h - 3.5), QPointF(w - 2.0, h - 3.5))
+            for i in range(4):
+                x = 3.0 + i * (w - 6.0) / 3.0
+                p.drawLine(QPointF(x, h - 3.5),
+                           QPointF(x, h - 3.5 - (6.0 if i % 2 == 0 else 3.5)))
+        else:                               # adc / 其他：打勾
+            p.drawLine(QPointF(2.5, h / 2), QPointF(w / 2 - 1.0, h - 3.5))
+            p.drawLine(QPointF(w / 2 - 1.0, h - 3.5), QPointF(w - 2.5, 3.0))
+        p.end()
+
+
 class _LibraryItem(QFrame):
-    """卡片庫的一列：名稱 + hover 才出現的「加入 ▸」；雙擊也能加入。"""
+    """卡片庫的一列：名稱 + hover 才出現的「Add」；雙擊也能加入。
+
+    ``set_missing(streams)`` 會把「上游還沒產出它要的影像流」這件事顯示成
+    一個灰字 badge（例：``needs diff``）並把整列調淡 —— 但**仍然可以加**。
+    卡片庫的順序不等於執行順序，使用者可能先放卡再補上游；擋著不給加只會
+    讓人以為工具壞了。
+    """
 
     activated = Signal(str)
 
@@ -574,39 +644,79 @@ class _LibraryItem(QFrame):
                  parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.step_key = str(describe.get("key", ""))
+        self.reads = [str(r) for r in (describe.get("reads") or ())]
         self.setObjectName("libItem")
         self.setCursor(Qt.PointingHandCursor)
-        self.setStyleSheet(
-            "QFrame#libItem { background:%s; border:1px solid %s; border-radius:6px; }"
-            % (TOKENS["bg_surface"], TOKENS["border_default"])
-        )
-        tip = str(describe.get("help", "")) or str(describe.get("label", ""))
+        self._base_tip = (str(describe.get("help", ""))
+                          or str(describe.get("label", "")))
         if describe.get("requires_ref"):
-            tip += " (needs a ref image)"
-        self.setToolTip(tip)
+            self._base_tip += " (needs a ref image)"
+        self.setToolTip(self._base_tip)
+        self.setStyleSheet(
+            "QFrame#libItem { background:transparent; border:1px solid transparent;"
+            " border-radius:5px; }"
+            "QFrame#libItem:hover { background:%s; border-color:%s; }"
+            % (TOKENS["hover_warm"], TOKENS["border_default"])
+        )
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(8, 4, 6, 4)
+        lay.setContentsMargins(10, 3, 6, 3)
         lay.setSpacing(6)
 
-        dot = QFrame()
-        dot.setFixedSize(6, 6)
-        dot.setStyleSheet("background:%s; border-radius:3px;" % color)
-        lay.addWidget(dot)
+        self.dot = QFrame()
+        self.dot.setFixedSize(5, 5)
+        self.dot.setStyleSheet("background:%s; border-radius:2px;" % color)
+        lay.addWidget(self.dot)
 
         self.label = QLabel(str(describe.get("label") or self.step_key))
-        self.label.setToolTip(tip)
+        self.label.setToolTip(self._base_tip)
         lay.addWidget(self.label, 1)
 
-        self.add_button = QPushButton("Add ▸")
+        self.badge = QLabel("")
+        self.badge.setObjectName("libBadge")
+        self.badge.setStyleSheet(
+            "color:%s; font-size:10px; border:1px solid %s; border-radius:3px;"
+            " padding:0px 4px;" % (TOKENS["text_disabled"], TOKENS["border_default"]))
+        self.badge.setVisible(False)
+        self.missing: List[str] = []
+        lay.addWidget(self.badge)
+
+        self.add_button = QPushButton("Add")
         self.add_button.setObjectName("cardButton")
         self.add_button.setCursor(Qt.PointingHandCursor)
         self.add_button.setToolTip("Append this card to the end of the pipeline")
-        self.add_button.setFixedWidth(58)
+        self.add_button.setFixedWidth(40)
         self.add_button.clicked.connect(
             lambda: self.activated.emit(self.step_key))
         self.add_button.setVisible(False)
         lay.addWidget(self.add_button)
+
+    # -- 前置條件 badge -----------------------------------------------------
+    def set_missing(self, missing: Sequence[str]) -> None:
+        """``missing`` = 這張卡要讀、但上游還沒有的影像流。"""
+        missing = [str(m) for m in (missing or ())]
+        self.missing = list(missing)
+        if missing:
+            self.badge.setText("needs %s" % ", ".join(missing))
+            self.badge.setVisible(True)
+            self.label.setStyleSheet("color:%s;" % TOKENS["text_disabled"])
+            self.setToolTip(
+                "%s\n\nNot available yet: this card reads %s, which nothing "
+                "upstream produces so far. You can still add it — the pipeline "
+                "order is up to you."
+                % (self._base_tip, ", ".join(missing)))
+        else:
+            self.badge.setVisible(False)
+            self.label.setStyleSheet("")
+            self.setToolTip(self._base_tip)
+
+    def badge_text(self) -> str:
+        """目前的 badge 文字（沒有就空字串）。
+
+        看的是 :attr:`missing` 而不是 ``badge.isVisible()`` —— 視窗還沒 show()
+        之前 Qt 的可見性一律是 False，headless 測試會全部誤判。
+        """
+        return self.badge.text() if self.missing else ""
 
     def enterEvent(self, e) -> None:      # noqa: D102 - Qt hook
         self.add_button.setVisible(True)
@@ -622,81 +732,149 @@ class _LibraryItem(QFrame):
 
 
 class LibraryPanel(QWidget):
-    """卡片庫：依三段式分類（影像／算法／ADC）分區，區塊標題帶各段顏色。
+    """卡片庫：依**流程階段**分組（F7-3），每組一個 QPainter 畫的 icon + 標題。
 
-    ``set_steps(list_of_describe_dicts)`` 之後，雙擊某列或按該列的「加入 ▸」
-    都會發出 ``add_requested(step_key)``。空的區塊會留一行提示，讓使用者知道
-    「這一段目前沒有卡片」而不是以為壞掉了。
+    為什麼不再依 ``category`` 分
+    ----------------------------
+    ``category``（影像／算法）描述的是「這張卡吐什麼型別」——那是引擎的分類
+    （快取切點、驗證順序）。使用者要的是「我想幹嘛」，所以改用 ``group``：
+
+        Input → Enhance → Region → Compare → Measure → ADC
+
+    讀起來是一句話，而且每段有一條機械可判定的規則（見 ``pipeline/step.py``）。
+
+    另外兩件讓 17 列不再瑣碎的事：
+
+    * **搜尋框** —— 打字即時過濾（比對名稱、key 與說明）。
+    * **前置條件 badge** —— ``set_available_streams()`` 之後，
+      上游還沒產出所需影像流的卡會標成 ``needs diff`` 並調淡。
     """
 
     add_requested = Signal(str)
 
-    _ORDER = ("image", "algo", "adc")
+    #: 顯示順序與標題。id 對應 ``pipeline/step.py`` 的 ``GROUP_*``。
+    GROUPS = (
+        ("input", "Input", "Load this defect's images"),
+        ("enhance", "Enhance", "Image in, image out"),
+        ("region", "Region", "Decide where to look"),
+        ("compare", "Compare", "Two images in, difference out"),
+        ("measure", "Measure", "Image + region in, numbers out"),
+        ("adc", "ADC", "Numbers in, score and bin out"),
+    )
+    _ORDER = tuple(g for g, _t, _s in GROUPS)
     _EMPTY_TEXT = "(no cards in this section)"
+    _NO_MATCH_TEXT = "(no card matches)"
+
+    #: group -> 取哪個 segment 的顏色（三段式的色彩語言不變，只是變細了）。
+    _GROUP_SEG = {"input": "image", "enhance": "image", "region": "algo",
+                  "compare": "image", "measure": "algo", "adc": "adc"}
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._items: Dict[str, _LibraryItem] = {}
+        self._describes: Dict[str, Dict[str, Any]] = {}
         self._section_boxes: Dict[str, QVBoxLayout] = {}
+        self._headers: Dict[str, QWidget] = {}
+        self._icons: Dict[str, GroupIcon] = {}
+        self._available: List[str] = []
+        self._query = ""
+        self._shown_groups: List[str] = []
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
+
+        self.search = QLineEdit(self)
+        self.search.setPlaceholderText("Search cards…")
+        self.search.setClearButtonEnabled(True)
+        self.search.setToolTip("Filter the card library by name or description")
+        self.search.textChanged.connect(self._on_search)
+        wrap = QWidget(self)
+        wl = QHBoxLayout(wrap)
+        wl.setContentsMargins(6, 6, 8, 4)
+        wl.addWidget(self.search)
+        outer.addWidget(wrap)
 
         self._scroll = QScrollArea(self)
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.NoFrame)
         self._host = QWidget()
         self._body = QVBoxLayout(self._host)
-        self._body.setContentsMargins(6, 6, 8, 6)
-        self._body.setSpacing(4)
+        self._body.setContentsMargins(6, 2, 8, 6)
+        self._body.setSpacing(2)
 
-        for cat in self._ORDER:
-            header = QLabel(theme.SEG_LABELS[cat])
-            header.setObjectName("libSectionHeader")
-            header.setProperty("category", cat)
-            header.setStyleSheet(
-                "background:%s; color:%s; border:1px solid %s; border-radius:5px;"
-                "padding:3px 8px; font-weight:700; font-size:11px;"
-                % (theme.seg_hex(cat, bg=True), theme.seg_hex(cat),
-                   theme.seg_hex(cat, bg=True))
-            )
-            self._body.addWidget(header)
+        for gid, title, subtitle in self.GROUPS:
+            self._body.addWidget(self._make_header(gid, title, subtitle))
             box = QVBoxLayout()
-            box.setContentsMargins(0, 0, 0, 4)
-            box.setSpacing(3)
+            box.setContentsMargins(0, 0, 0, 8)
+            box.setSpacing(1)
             self._body.addLayout(box)
-            self._section_boxes[cat] = box
+            self._section_boxes[gid] = box
 
         self._body.addStretch(1)
         self._scroll.setWidget(self._host)
-        outer.addWidget(self._scroll)
+        outer.addWidget(self._scroll, 1)
 
         self.set_steps([])
+
+    # -- 區塊標題（icon + 標題，取代舊的填滿色塊）---------------------------
+    def _make_header(self, gid: str, title: str, subtitle: str) -> QWidget:
+        colour = theme.seg_hex(self._GROUP_SEG.get(gid, "image"))
+        head = QWidget(self)
+        head.setObjectName("libSectionHeader")
+        head.setProperty("group", gid)
+        head.setToolTip(subtitle)
+        lay = QHBoxLayout(head)
+        lay.setContentsMargins(4, 8, 4, 2)
+        lay.setSpacing(7)
+
+        icon = GroupIcon(gid, colour, head)
+        icon.setToolTip(subtitle)
+        lay.addWidget(icon)
+        self._icons[gid] = icon
+
+        lbl = QLabel(title, head)
+        lbl.setObjectName("libSectionTitle")
+        lbl.setToolTip(subtitle)
+        lbl.setStyleSheet("color:%s; font-weight:700; font-size:11px;"
+                          % TOKENS["text_secondary"])
+        lay.addWidget(lbl)
+        lay.addStretch(1)
+        self._headers[gid] = head
+        return head
 
     # -- public API --------------------------------------------------------
     def set_steps(self, steps: Sequence[Dict[str, Any]]) -> None:
         """用 ``Step.describe()`` 的 dict 清單重建整個卡片庫。"""
         self._clear()
-        by_cat: Dict[str, List[Dict[str, Any]]] = {c: [] for c in self._ORDER}
+        self._describes = {str(d.get("key", "")): dict(d) for d in (steps or [])}
+        by_group: Dict[str, List[Dict[str, Any]]] = {g: [] for g in self._ORDER}
         for d in steps or []:
-            cat = str(d.get("category", ""))
-            by_cat.setdefault(cat, []).append(d)
-        for cat in self._ORDER:
-            box = self._section_boxes[cat]
-            entries = by_cat.get(cat, [])
+            gid = str(d.get("group") or "") or "enhance"
+            by_group.setdefault(gid, []).append(d)
+
+        for gid in self._ORDER:
+            box = self._section_boxes[gid]
+            entries = by_group.get(gid, [])
             if not entries:
-                empty = QLabel(self._EMPTY_TEXT)
-                empty.setObjectName("libEmpty")
-                empty.setStyleSheet("color:%s; font-size:11px; padding-left:8px;"
-                                    % TOKENS["text_disabled"])
-                box.addWidget(empty)
+                box.addWidget(self._empty_label(self._EMPTY_TEXT))
                 continue
+            seg = self._GROUP_SEG.get(gid, "image")
             for d in entries:
-                item = _LibraryItem(d, theme.seg_hex(cat), self._host)
+                item = _LibraryItem(d, theme.seg_hex(seg), self._host)
                 item.activated.connect(self.add_requested)
                 box.addWidget(item)
                 self._items[item.step_key] = item
+        self._apply_filter()
+        self._apply_badges()
+
+    def set_available_streams(self, streams: Sequence[str]) -> None:
+        """告訴卡片庫「目前 pipeline 到最後為止產出了哪些影像流」。
+
+        據此標出前置條件未滿足的卡。傳空清單 = 不知道（badge 全清）。
+        """
+        self._available = [str(s) for s in (streams or [])]
+        self._apply_badges()
 
     def entry(self, step_key: str) -> Optional[_LibraryItem]:
         """取得某張卡片的那一列（給主視窗做 highlight／給測試點擊）。"""
@@ -705,11 +883,81 @@ class LibraryPanel(QWidget):
     def step_keys(self) -> List[str]:
         return list(self._items)
 
+    def visible_step_keys(self) -> List[str]:
+        """目前**看得到**的卡（搜尋過濾之後）。
+
+        同樣用明確狀態（``_matches``）而不是 ``isVisible()``，理由見
+        :meth:`_LibraryItem.badge_text`。
+        """
+        return [k for k in self._items if self._matches(k)]
+
     def section_titles(self) -> List[str]:
         return [lbl.text() for lbl in self.findChildren(QLabel)
-                if lbl.objectName() == "libSectionHeader"]
+                if lbl.objectName() == "libSectionTitle"]
+
+    def visible_section_titles(self) -> List[str]:
+        """搜尋之後還有卡片的區塊標題（順序同 :data:`GROUPS`）。"""
+        return [title for gid, title, _sub in self.GROUPS
+                if gid in self._shown_groups]
+
+    def set_query(self, text: str) -> None:
+        """程式化設定搜尋字串（測試 / 外部呼叫用）。"""
+        self.search.setText(str(text or ""))
+
+    def refresh_colors(self) -> None:
+        """換主題之後重新取色（icon 與圓點都是自繪/內嵌樣式）。"""
+        for gid, icon in self._icons.items():
+            icon.set_color(theme.seg_hex(self._GROUP_SEG.get(gid, "image")))
 
     # -- internals ---------------------------------------------------------
+    def _empty_label(self, text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setObjectName("libEmpty")
+        lbl.setStyleSheet("color:%s; font-size:11px; padding-left:12px;"
+                          % TOKENS["text_disabled"])
+        return lbl
+
+    def _on_search(self, text: str) -> None:
+        self._query = str(text or "").strip().lower()
+        self._apply_filter()
+
+    def _matches(self, key: str) -> bool:
+        if not self._query:
+            return True
+        d = self._describes.get(key) or {}
+        hay = " ".join([key, str(d.get("label", "")), str(d.get("help", "")),
+                        str(d.get("group", ""))]).lower()
+        return all(tok in hay for tok in self._query.split())
+
+    def _apply_filter(self) -> None:
+        """過濾卡片，並把**整組都沒有命中**的區塊標題一起藏起來。"""
+        for key, item in self._items.items():
+            item.setVisible(self._matches(key))
+        shown: List[str] = []
+        for gid, head in self._headers.items():
+            box = self._section_boxes[gid]
+            hit = False
+            for i in range(box.count()):
+                w = box.itemAt(i).widget()
+                if isinstance(w, _LibraryItem):
+                    hit = hit or self._matches(w.step_key)
+                elif isinstance(w, QLabel):
+                    # 空區塊的提示語只在沒搜尋時顯示
+                    w.setVisible(not self._query)
+                    hit = hit or not self._query
+            head.setVisible(hit)
+            if hit:
+                shown.append(gid)
+        self._shown_groups = [g for g in self._ORDER if g in shown]
+
+    def _apply_badges(self) -> None:
+        avail = set(self._available)
+        for key, item in self._items.items():
+            if not self._available:
+                item.set_missing(())
+                continue
+            item.set_missing([r for r in item.reads if r not in avail])
+
     def _clear(self) -> None:
         self._items = {}
         for box in self._section_boxes.values():

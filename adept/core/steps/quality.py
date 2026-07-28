@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 from ..algo import quality as algo_quality
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, ParamSpec, Step, StepError, register_step,
+    CATEGORY_ALGO, ParamSpec, Step, StepError, register_step, GROUP_MEASURE,
 )
 from ._util import require_image
 
@@ -19,6 +19,7 @@ class FocusQualityStep(Step):
     key = "focus_quality"
     label = "Focus quality"
     category = CATEGORY_ALGO
+    group = GROUP_MEASURE
     help = ("Measure image sharpness with three metrics — higher is sharper. "
             "Useful for screening out defocused images.")
     params = [

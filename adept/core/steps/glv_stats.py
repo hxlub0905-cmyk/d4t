@@ -17,7 +17,7 @@ import numpy as np
 from ..algo import glv as algo_glv
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, ParamSpec, Step, StepError, register_step,
+    CATEGORY_ALGO, ParamSpec, Step, StepError, register_step, GROUP_MEASURE,
 )
 from ._util import parse_key_list, require_image
 
@@ -47,6 +47,7 @@ class GlvStatsStep(Step):
     key = "glv_stats"
     label = "Gray-level stats"
     category = CATEGORY_ALGO
+    group = GROUP_MEASURE
     help = ("Compute gray-level statistics (mean, standard deviation, "
             "percentiles…) over the whole image or a centre box, and write "
             "each one out as a feature.")

@@ -24,6 +24,40 @@ from .context import Context
 CATEGORY_IMAGE = "image"
 CATEGORY_ALGO = "algo"
 CATEGORY_ADC = "adc"
+
+# --------------------------------------------------------------------------- #
+# 流程階段（F7-3）—— 卡片庫的分組依據
+# --------------------------------------------------------------------------- #
+#: ``category`` 分的是「這張卡吐什麼型別」（引擎用：快取切點、驗證順序）；
+#: ``group`` 分的是「這張卡在解決什麼問題」（**使用者用**：卡片庫的分組）。
+#:
+#: 兩者是**獨立**的軸。舊 UI 直接拿 category 當分類，於是使用者看到的是
+#: 「影像／算法」—— 那描述的是輸出型別，不是意圖，所以被評為「太武斷」。
+#:
+#: 每一段的規則是機械可判定的（吃什麼、吐什麼），新卡片放哪不需要討論：
+#:
+#: =============  =========================  ==============================
+#: group          規則                       例
+#: =============  =========================  ==============================
+#: input          （固定頭節點）              load_patch
+#: enhance        影像 → 影像                normalize / denoise / snr_map
+#: region         影像 → 區域                blob_segment / ROI 卡
+#: compare        影像＋影像 → 影像           align / subtract
+#: measure        影像＋區域 → 數字           glv_stats / cd_measure
+#: adc            數字 → score → bin         （固定尾節點）
+#: =============  =========================  ==============================
+GROUP_INPUT = "input"
+GROUP_ENHANCE = "enhance"
+GROUP_REGION = "region"
+GROUP_COMPARE = "compare"
+GROUP_MEASURE = "measure"
+GROUP_ADC = "adc"
+
+#: 卡片庫的顯示順序（讀起來是一句話：
+#: Input → Enhance → Region → Compare → Measure → ADC）。
+GROUP_ORDER = (GROUP_INPUT, GROUP_ENHANCE, GROUP_REGION,
+               GROUP_COMPARE, GROUP_MEASURE, GROUP_ADC)
+_GROUPS = GROUP_ORDER
 _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC)
 
 PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key")
@@ -112,8 +146,11 @@ class Step(ABC):
     """所有卡片的基底。子類別必須設定 key/label/category 並實作 run()。"""
 
     key: ClassVar[str] = ""
-    label: ClassVar[str] = ""            # UI 顯示名（可中文）
+    label: ClassVar[str] = ""            # UI 顯示名
     category: ClassVar[str] = ""
+    #: 流程階段（卡片庫分組用）。空字串 = 依 category 推一個保守的預設，
+    #: 所以舊卡片不宣告也不會壞（見 :meth:`resolve_group`）。
+    group: ClassVar[str] = ""
     help: ClassVar[str] = ""             # 一行白話：這張卡做什麼
     params: ClassVar[List[ParamSpec]] = []
     reads: ClassVar[List[str]] = []      # 預設宣告；param 相依時覆寫 resolve_reads
@@ -165,12 +202,30 @@ class Step(ABC):
 
     # ---- UI 描述 ----------------------------------------------------------
     @classmethod
+    def resolve_group(cls) -> str:
+        """這張卡屬於哪個流程階段。
+
+        沒宣告 ``group`` 的卡片依 ``category`` 給一個保守預設 ——
+        影像段當 enhance、算法段當 measure、判定段當 adc。
+        這樣**新增 group 這個概念不會弄壞任何既有卡片**，
+        外掛或還沒遷移的卡照樣列得出來。
+        """
+        if cls.group:
+            return str(cls.group)
+        if cls.category == CATEGORY_ALGO:
+            return GROUP_MEASURE
+        if cls.category == CATEGORY_ADC:
+            return GROUP_ADC
+        return GROUP_ENHANCE
+
+    @classmethod
     def describe(cls) -> Dict[str, Any]:
         """給 UI / CLI 列表用的完整卡片描述。"""
         return {
             "key": cls.key,
             "label": cls.label,
             "category": cls.category,
+            "group": cls.resolve_group(),
             "help": cls.help,
             "requires_ref": cls.requires_ref,
             "params": [
