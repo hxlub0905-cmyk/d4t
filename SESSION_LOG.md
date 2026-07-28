@@ -301,3 +301,61 @@ GUI 側的三個切點：
 
 順手補完英文化漏掉的東西：**9 處全形標點**（`、`、`：`、全形空白 `　`）。
 `_has_cjk` 已擴到涵蓋 CJK 標點與全形 ASCII 變體 —— 標點是翻譯時最容易漏的。
+
+### F7-2 主題換色 + 平面化（607 tests）
+
+`TOKENS` 的**鍵名一個都沒改**，只換值 —— 所有顏色本來就集中在這裡
+（同時餵 QSS 與自繪 widget），所以換膚零呼叫端改動。
+暖奶油 `#f7f4ef` + 琥珀 `#f29f4b` + 填滿色塊 → 中性灰 + 克制的藍 + 細色條。
+新增 `PALETTES` 的 light/dark 兩組（鍵名逐一比對），`set_theme` **就地更新**
+`TOKENS`（不能換掉物件，各模組都 import 過它了）。工具列一顆 `◐` 切換，
+偏好存 QSettings。
+
+三個舊測試把暖色 hex 寫死了，改成斷言**性質**：大面積底色中性（RGB 極差 ≤ 8）、
+QSS 無陰影無漸層、雙色盤鍵名一致、`set_theme` 就地且可逆。這樣微調配色不會一直打壞測試。
+
+### F7-3 卡片分類重整（611 tests）
+
+`Step` 新增 `group`（與 `category` **獨立的軸**）：
+`category` 是引擎用的（快取切點、驗證順序），`group` 是使用者用的（卡片庫分組）。
+舊 UI 直接拿 category 當分類，於是使用者看到「影像／算法」—— 那描述輸出型別，
+不是意圖，這就是「太武斷」的根因。
+
+新分段：**Input → Enhance → Region → Compare → Measure → ADC**，
+每段附一條機械可判定的規則（吃什麼、吐什麼）寫在 `step.py` 的常數旁邊。
+`resolve_group()` 有依 category 的 fallback（外掛卡不會壞），但另一支測試要求
+**本 repo 內建的卡片一律明講** —— 否則新加的量測卡會安靜地掉進 Enhance。
+
+另外兩件讓 15 列不再瑣碎的事：搜尋框（比對名稱/key/說明/group）、
+前置條件 badge（`needs diff`，調淡但**仍可加入** —— 卡片庫順序不是執行順序）。
+區塊標題從填滿色塊改成 **QPainter 畫的 icon + 標題**（不加任何圖檔，
+顏色吃 token 所以跟著換膚）。
+
+踩到一個坑：`isVisible()` 在視窗 `show()` 之前一律是 False，
+headless 測試會全部誤判 —— 可見性與 badge 一律改用明確狀態。
+
+### F7-4 Region 段 + 量測卡遷移（623 tests，破壞性 schema）
+
+**ROI 從「藏在量測卡裡的參數」升成一級概念。**
+`Context.rois` / `algo/roi.py` 的 `NamedROI`/`MultiROISet` 從 M0 就存在、
+但從來沒有人寫過（`context.py:33` 註解寫著「M3 起由 ROI 卡填入」，那張卡沒做出來）。
+現在 `Context` 包了一層**以名字為鍵**的 API（`set_roi`/`require_roi`/`roi_rect`），
+底層仍用 MultiROISet 的 `label`，不另外發明資料結構。
+
+- 新卡 `roi_define`：`shape=center|whole`、`size` + **`size_unit=px|percent`**
+- `blob_segment` 的主 blob 也發布成具名 ROI（預設 `blob`）——
+  偵測出來的框與手畫的框走同一條路，這是最關鍵的一刀
+- `glv_stats`：`region`/`box_size` → `roi=<名字>`
+- `roi_snr`：`mode`/`box_size` → `roi=<名字>`
+- `cd_measure`：新增 `roi`（預設 `blob`）
+- 5 份範例 recipe 自動遷移（插入 `roi_define` 節點）
+
+**`percent` 修掉 CLAUDE.md §7 那個坑**：同一份 recipe 在 128² 與 256² 上
+看的是同一塊相對區域（`(48,48,32,32)` vs `(96,96,64,64)`）。
+
+驗收：`die_to_die_basic` 跑 100 顆合成 patch，分數分佈與重構前**逐項相同**
+（min 21 / median 45 / max 171、bin 0=52 · bin 1=48），對照 ground truth 98%。
+行為完全保持。
+
+`roi='blob'` 存的是像素座標，所以**不需要影像**就取得到 —— 下游把影像流蓋掉
+之後 CD 還是量得到（有測試鎖）。

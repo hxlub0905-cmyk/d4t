@@ -9,6 +9,7 @@
       "focus",
       "snr_patch",
       "blob_patch",
+      "glv_patch_roi",
       "glv_patch"
     ],
     "rsem": [
@@ -16,6 +17,7 @@
       "focus",
       "snr_rsem",
       "blob_rsem",
+      "glv_rsem_roi",
       "glv_rsem"
     ]
   },
@@ -74,9 +76,8 @@
       "step": "glv_stats",
       "params": {
         "source": "test",
-        "region": "center",
-        "box_size": 48,
-        "metrics": "glv_max,glv_median,glv_std"
+        "metrics": "glv_max,glv_median,glv_std",
+        "roi": "glv_patch_roi"
       },
       "enabled": true
     },
@@ -84,9 +85,30 @@
       "step": "glv_stats",
       "params": {
         "source": "test",
-        "region": "center",
-        "box_size": 96,
-        "metrics": "glv_max,glv_median,glv_std"
+        "metrics": "glv_max,glv_median,glv_std",
+        "roi": "glv_rsem_roi"
+      },
+      "enabled": true
+    },
+    "glv_patch_roi": {
+      "step": "roi_define",
+      "params": {
+        "name": "glv_patch_roi",
+        "shape": "center",
+        "size": 48.0,
+        "size_unit": "px",
+        "source": "test"
+      },
+      "enabled": true
+    },
+    "glv_rsem_roi": {
+      "step": "roi_define",
+      "params": {
+        "name": "glv_rsem_roi",
+        "shape": "center",
+        "size": 96.0,
+        "size_unit": "px",
+        "source": "test"
       },
       "enabled": true
     }

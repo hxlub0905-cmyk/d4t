@@ -49,6 +49,10 @@ class BlobSegmentStep(Step):
         ParamSpec(name="min_area", type="int", default=4, min=1, max=10000,
                   help=("Minimum area in pixels: anything smaller is treated as "
                         "noise and dropped.")),
+        ParamSpec(name="roi_out", type="str", default="blob",
+                  help=("Name given to the main blob's region, so Measure "
+                        "cards can point at it (leave as 'blob' unless you "
+                        "run two Blob segment cards).")),
         ParamSpec(name="snr_threshold", type="float", default=0.0, min=0.0, max=255.0,
                   help=("Segmentation threshold on the 0-255 map scale; "
                         "0 = decide automatically by Otsu (recommended).")),
@@ -75,6 +79,14 @@ class BlobSegmentStep(Step):
             snr_img, diff_img, min_area=int(p["min_area"]), snr_threshold=thr)
 
         ctx.meta["blobs"] = [_roi_to_dict(r) for r in rois]
+        # F7-4：主 blob 也寫成具名 ROI，讓它跟使用者畫的框走同一條路。
+        # meta["blobs"] 保留（overlay 與舊 recipe 還在讀）。
+        name = str(p["roi_out"]).strip()
+        if name and rois:
+            big0 = rois[0]
+            h0, w0 = snr_img.shape[:2]
+            ctx.set_roi(name, (big0.x / w0, big0.y / h0,
+                               max(1, big0.w) / w0, max(1, big0.h) / h0))
         feats = {"blob_count": float(len(rois)),
                  "blob_area": 0.0, "blob_aspect": 0.0,
                  "blob_dist_center": 0.0, "blob_snr": 0.0}

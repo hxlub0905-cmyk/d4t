@@ -118,7 +118,7 @@ def test_load_dataset_and_recipe(window, synlot):
 
     recipe = Recipe.load(str(EXAMPLE_RECIPE))
     assert window.model.node_order == recipe.routes["ebi_patch"]
-    assert len(window.pipeline.node_ids()) == 9
+    assert len(window.pipeline.node_ids()) == len(window.model.node_order)
     assert window.pipeline.node_ids() == window.model.node_order
     assert window.model.kind == "ebi_patch"
 

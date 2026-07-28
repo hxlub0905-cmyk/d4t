@@ -19,7 +19,7 @@ from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_ALGO, ParamSpec, Step, StepError, register_step, GROUP_MEASURE,
 )
-from ._util import parse_key_list, require_image
+from ._util import crop_to_roi, parse_key_list, require_image
 
 _P_ALIAS = re.compile(r"^glv_p(\d+)$")
 _Q_FORM = re.compile(r"^glv_q(\d+)$")
@@ -49,17 +49,15 @@ class GlvStatsStep(Step):
     category = CATEGORY_ALGO
     group = GROUP_MEASURE
     help = ("Compute gray-level statistics (mean, standard deviation, "
-            "percentiles…) over the whole image or a centre box, and write "
-            "each one out as a feature.")
+            "percentiles…) inside a region, and write each one out as a "
+            "feature.")
     params = [
         ParamSpec(name="source", type="image_key", default="test",
                   help="Image stream to compute statistics on."),
-        ParamSpec(name="region", type="choice", default="full",
-                  choices=["full", "center"],
-                  help=("full = the whole image; center = a centre box only "
-                        "(size set by box_size).")),
-        ParamSpec(name="box_size", type="int", default=32, min=2, max=1024,
-                  help="Box side length in pixels for center mode."),
+        ParamSpec(name="roi", type="str", default="",
+                  help=("Which region to measure in — the name given by a "
+                        "Define region card upstream. Leave empty for the "
+                        "whole image.")),
         ParamSpec(name="metrics", type="str", default="glv_mean,glv_std,glv_p50",
                   help=("Statistics to output (comma separated): glv_mean / "
                         "glv_std / glv_median / glv_min / glv_max / glv_q25 / "
@@ -86,15 +84,7 @@ class GlvStatsStep(Step):
         if not mids:
             raise StepError(self.key, "metrics is empty; list at least one statistic (e.g. glv_mean).")
 
-        if p["region"] == "center":
-            h, w = img.shape[:2]
-            box = min(int(p["box_size"]), h, w)
-            y0 = (h - box) // 2
-            x0 = (w - box) // 2
-            patch = img[y0:y0 + box, x0:x0 + box]
-        else:
-            patch = img
-        patch = np.asarray(patch)
+        patch = np.asarray(crop_to_roi(ctx, self.key, img, p["roi"]))
 
         feats: Dict[str, float] = {}
         for mid in mids:
