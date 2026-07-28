@@ -19,7 +19,7 @@
 
 完整計畫見 [`docs/plans/F0-master-plan.md`](docs/plans/F0-master-plan.md)。
 
-## 目前進度：M0 ✅ · M1 引擎 ✅ · M2 批次 ✅ · M3 Studio ✅ · M4 雙輸入 ✅ · M5 Gallery+Export ✅
+## 目前進度：M0–M6 全部完成 ✅（v1 功能齊備）
 
 M0：六個既有專案（KLIP / GLAS / MMH / PEAR / cell-period-estimator / Perspective-Combination）
 的可重用演算法已 vendoring 進 `adept/core`，全部通過合成影像單元測試、零 Qt 依賴。
@@ -51,6 +51,12 @@ M5：**Gallery + 輸出**。Gallery 把整批 defect 以縮圖網格攤開（虛
 ADCSCORE+ADCCLASS 欄／Top-N 篩選新檔），**寫回前一定先預覽會改什麼**；另有 CSV /
 Excel 報表（給 ground truth 就算抓漏率、誤殺率、混淆矩陣）與 overlay 影像。
 另附 `fab_probe/` 三支 stdlib-only 探測腳本，用來在廠內確認格式假設（見下）。
+
+M6：**推廣包**。離線安裝三件套（`fetch_wheels` → `install_offline` → `doctor`，
+全部 stdlib-only，因為它們得在套件裝好之前就能跑）讓 pip 連不出去的廠內機器也裝得起來；
+Studio 首次開啟有導覽，按一下「用範例資料試一次」就會自己產生合成資料、載入範本、
+跑完一批，直接看到有分數的直方圖與 Gallery；範例 recipe 庫有 5 份，
+每一份示範一種不同的作法（見 `examples/recipes/README.md`）。
 
 ```bash
 # 開 Studio：
@@ -153,7 +159,7 @@ QT_QPA_PLATFORM=offscreen pytest -q   # 全部測試（~6s，不需真實資料�
 ## Roadmap
 
 M0 抽庫 ✅ → M1 引擎 ✅ → M2 批次 ✅ → M3 Studio UI ✅ → M4 雙輸入+Golden Cell ✅ →
-M5 Gallery+Export ✅ → M6 推廣包。詳見 master plan。
+M5 Gallery+Export ✅ → M6 推廣包 ✅。詳見 master plan。
 
 ## 已知修正紀錄（開發過程中抓到的坑）
 

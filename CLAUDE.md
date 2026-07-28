@@ -58,11 +58,14 @@ adept/
 │   ├── viewmodel.py         #   RecipeModel（Qt-free，可 headless 測）
 │   ├── theme.py widgets.py  #   主題 token + 6 個資料驅動元件
 │   ├── gallery.py           #   同屏比多顆（虛擬捲動，撐 10k+）
+│   ├── welcome.py           #   首啟導覽 + 範例 recipe 庫對話框
 │   ├── export_dialog.py     #   輸出精靈（寫回前一定先預覽變更）
 │   ├── workers.py           #   載入/預覽(請求合併)/試跑 背景執行緒
 │   └── studio.py app.py     #   主視窗 + 進入點
 ├── tests/                   # 520+ 個測試，全部用合成資料，~30s 跑完
-├── tools/make_sample.py     # 合成 KLARF + patch TIFF 產生器（開發與 CI 的資料來源）
+├── tools/                   # make_sample(_rsem).py 合成資料；離線安裝三件套：
+│                            #   fetch_wheels.py（有網路的機器抓）→ install_offline.py
+│                            #   （air-gapped 機器裝）→ doctor.py（環境自檢）
 ├── examples/recipes/        # 範例 recipe（也是 UI「載入範本」的來源）
 ├── fab_probe/               # 廠內格式探測腳本（stdlib-only、純文字輸出），見 §8
 └── docs/plans/              # F0 = master plan；每個 milestone 一份
@@ -172,10 +175,27 @@ python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 
 | M3 Studio | ✅ | PySide6 四區塊視覺化編輯器 |
 | M4 雙輸入 | ✅ | RSEM 單張 ingest、輸入型別分流、Golden Cell + Cell 週期估測卡（`period.choose_origin` 相位搜尋已補完）。驗收達成：`examples/recipes/dual_route_basic.json` 同時吃 EBI patch 與 RSEM，跨 3 seeds × 2 種輸入共 144 顆合成 defect，正確率 95.1% |
 | M5 Gallery+Export | ✅ | Gallery（虛擬捲動、排序、直方圖點 bar 篩選）；KLARF 三種寫回模式（就地無損／另存含 ADCSCORE+ADCCLASS／Top-N）+ 寫回前預覽變更；CSV/Excel 報表（含抓漏率/誤殺率）；overlay；`fab_probe/` 三支探測腳本；CLI `adept export` |
-| **M6 推廣包** | ⬜ **下一步** | 離線安裝（wheels）、首啟導覽、範例 recipe 庫、快速參考卡 PDF |
+| M6 推廣包 | ✅ | 離線安裝三件套（`tools/fetch_wheels.py` / `install_offline.py` / `doctor.py`，全 stdlib-only）、首啟導覽 + 範例 recipe 庫對話框、5 份範例 recipe。快速參考卡 PDF 暫緩（移到 backlog） |
 
-v2 backlog：自由 DAG 畫布、ground-truth 標注 + 混淆矩陣、ML Classify 卡
+v2 backlog：快速參考卡 PDF、自由 DAG 畫布、ground-truth 標注 + 混淆矩陣、ML Classify 卡
 （吃現成的 feature vector CSV）、PCA Ref、Region Stats/FFT、BSE/SE 多通道融合。
+
+---
+
+## 9.5 部署到受限的廠內機器
+
+主要使用情境是**沒有 git、pip 連不出去、DLP 會擋含二進位的壓縮檔**的公司機。
+對應設計：
+
+- 整個 repo **只有純文字檔**（`.py`/`.md`/`.json`/`.toml`/`.txt`/`.yml`），
+  所以 GitHub「Download ZIP」下載得下來（那份 zip 不含 `.git`）。
+  **不要把 `.git` 打包給使用者** —— 二進位 pack 物件 + `hooks/*.sample` 腳本會觸發 DLP。
+- 相依套件走離線 wheels：`tools/fetch_wheels.py`（有網路的機器）→ 帶 `wheels\` 過去 →
+  `tools/install_offline.py`（廠內機器）。兩支都是 stdlib-only，因為它們在套件裝好之前就要能跑。
+- 裝不起來或跑不動時的第一件事：`python tools/doctor.py` —— 逐項 ✓/✗ 並附「怎麼修」。
+  最常見的失敗是 **wheels 的 Python 版本與機器上的不符**（cp39 的輪子配 py3.12），
+  `install_offline.py` 會在 pip 之前就攔下來並講清楚。
+- 詳細步驟：`docs/OFFLINE-INSTALL.md`；不用 git 的取得方式：`docs/NO-GIT-SETUP.md`。
 
 ---
 

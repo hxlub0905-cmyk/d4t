@@ -28,18 +28,19 @@ pip install -r requirements.txt
 
 需要 4 個套件：`numpy`、`opencv-python`、`tifffile`、`PySide6`。
 
-**如果公司擋 pip 對外連線**，請在有網路的機器上先下載離線 wheels：
+**如果公司擋 pip 對外連線**（很常見）：改走離線 wheels ——
+在有網路的機器上 `python tools/fetch_wheels.py`，把產生的 `wheels\` 資料夾帶進公司機，
+再跑 `python tools/install_offline.py`。完整步驟與疑難排解見
+**[`docs/OFFLINE-INSTALL.md`](OFFLINE-INSTALL.md)**。
+
+裝完（或安裝失敗想知道卡在哪）都可以跑環境自檢：
 
 ```
-pip download -r requirements.txt -d wheels --platform win_amd64 ^
-    --python-version 39 --only-binary=:all:
+python tools/doctor.py
 ```
 
-把 `wheels\` 資料夾一起帶進公司機，然後：
-
-```
-pip install --no-index --find-links=wheels -r requirements.txt
-```
+它會逐項檢查 Python 版本、每個套件、Qt 能不能開視窗、資料夾權限，
+每個沒過的項目都附一行「怎麼修」。
 
 ## 3. 確認能跑
 
