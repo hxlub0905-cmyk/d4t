@@ -17,7 +17,9 @@
 | **輸出** | 無損寫回 KLARF（class / bin / DSIZE）｜Top-N 新 KLARF｜CSV / Excel 報表｜feature vector（ML 備料） |
 | **介面** | PySide6 Studio 視覺化編輯器 ＋ CLI（可排程、可腳本化） |
 
-完整計畫見 [`docs/plans/F0-master-plan.md`](docs/plans/F0-master-plan.md)。
+完整計畫見 [`docs/plans/F0-master-plan.md`](docs/plans/F0-master-plan.md)；
+接手開發請先讀 **[`docs/HANDOVER.md`](docs/HANDOVER.md)**（由來、決策理由、來源專案脈絡、
+哪些已驗證哪些還是假設）與 [`CLAUDE.md`](CLAUDE.md)（操作手冊）。
 
 ## 目前進度：M0–M6 全部完成 ✅（v1 功能齊備）
 
