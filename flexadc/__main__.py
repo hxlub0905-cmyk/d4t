@@ -74,9 +74,11 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
+    import time
+
     import flexadc.core.steps  # noqa: F401
     from flexadc.core.ingest.dataset import load_dataset
-    from flexadc.core.pipeline import run_dataset, result_to_json_dict, validate
+    from flexadc.core.pipeline import run_batch, validate
 
     recipe = _load_recipe(args.recipe)
     if recipe is None:
@@ -98,16 +100,21 @@ def _cmd_run(args: argparse.Namespace) -> int:
     n_total = min(len(ds.items), args.limit) if args.limit else len(ds.items)
 
     def _progress(i: int, n: int, res) -> None:
-        if (i + 1) % 10 == 0 or (i + 1) == n:
+        if (i + 1) % 50 == 0 or (i + 1) == n:
             print(f"  … {i + 1}/{n}", flush=True)
 
-    print(f"\n執行 {n_total} 顆：")
-    results = run_dataset(recipe, ds, progress=_progress, limit=args.limit)
+    print(f"\n執行 {n_total} 顆（workers={args.workers or 'auto'}"
+          f"{'，cache=' + args.cache if args.cache else ''}）：")
+    t0 = time.perf_counter()
+    payload = run_batch(recipe, ds, workers=args.workers, cache_dir=args.cache,
+                        progress=_progress, limit=args.limit)
+    elapsed = time.perf_counter() - t0
 
-    ok = [r for r in results if r.ok]
-    fail = [r for r in results if not r.ok]
-    scores = [r.score for r in ok if r.score is not None]
-    print(f"\n完成：{len(ok)} 成功 / {len(fail)} 失敗")
+    ok = [r for r in payload if r.get("ok")]
+    fail = [r for r in payload if not r.get("ok")]
+    scores = [r.get("score") for r in ok if r.get("score") is not None]
+    per = (elapsed / max(len(payload), 1)) * 1000
+    print(f"\n完成：{len(ok)} 成功 / {len(fail)} 失敗 · {elapsed:.1f}s（{per:.1f} ms/顆）")
     if scores:
         import statistics
 
@@ -116,12 +123,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
         )
         bins: dict = {}
         for r in ok:
-            bins[r.bin] = bins.get(r.bin, 0) + 1
+            bins[r.get("bin")] = bins.get(r.get("bin"), 0) + 1
         print("bin 分佈：" + " · ".join(f"bin {b}={c}" for b, c in sorted(bins.items())))
     for r in fail[:5]:
-        print(f"  ✗ {r.defect_id}: {r.error}")
+        print(f"  ✗ {r.get('defect_id')}: {r.get('error')}")
 
-    payload = [result_to_json_dict(r) for r in results]
+    if args.db:
+        from flexadc.core.store import RunStore
+
+        with RunStore(args.db) as store:
+            run_id = store.save_run(recipe, payload, klarf_path=str(args.klarf),
+                                    dataset_kind=ds.kind, notes=args.notes or "")
+        print(f"→ 已存入批次歷史：run_id={run_id}（{args.db}）")
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -138,6 +151,52 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     + [feats.get(k) for k in feat_keys]
                 )
         print(f"→ CSV：{args.csv}")
+    return 0
+
+
+def _cmd_runs(args: argparse.Namespace) -> int:
+    from flexadc.core.store import RunStore
+
+    with RunStore(args.db) as store:
+        rows = store.list_runs()
+    if not rows:
+        print("（尚無批次歷史）")
+        return 0
+    for r in rows:
+        print(f"{r['run_id']}  {r['created_utc']}  recipe={r['recipe_id']}  "
+              f"kind={r['dataset_kind']}  n={r['n_total']}（ok {r['n_ok']} / fail {r['n_fail']}）"
+              f"{'  ' + r['notes'] if r.get('notes') else ''}")
+    return 0
+
+
+def _cmd_rescore(args: argparse.Namespace) -> int:
+    from flexadc.core.store import RunStore, rescore
+
+    bins = None
+    if args.bins:
+        try:
+            lo, hi = (int(x) for x in args.bins.split(","))
+            bins = {"below": lo, "above": hi}
+        except ValueError:
+            print("[錯誤] --bins 格式：below,above（例：0,1）", file=sys.stderr)
+            return 2
+    with RunStore(args.db) as store:
+        try:
+            summary = rescore(store, args.run_id, expr=args.expr,
+                              threshold=args.threshold, bins=bins,
+                              save_as=(True if args.save else None), notes=args.notes or "")
+        except KeyError as e:
+            print(f"[錯誤] {e}", file=sys.stderr)
+            return 2
+    print(f"rescore {summary['run_id']}：n={summary['n']}，錯誤 {summary['n_errors']}，"
+          f"耗時 {summary['elapsed_s']:.2f}s")
+    if summary.get("bin_counts"):
+        print("bin 分佈：" + " · ".join(f"bin {b}={c}" for b, c in sorted(summary["bin_counts"].items())))
+    if summary.get("score_min") is not None:
+        print(f"score：min {summary['score_min']:.3f} · median {summary['score_median']:.3f} · "
+              f"max {summary['score_max']:.3f}")
+    if summary.get("saved_run_id"):
+        print(f"→ 已另存為新 run：{summary['saved_run_id']}")
     return 0
 
 
@@ -162,7 +221,25 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_run.add_argument("--out", default=None, help="輸出 JSON 路徑")
     p_run.add_argument("--csv", default=None, help="輸出 CSV 路徑（feature vector）")
     p_run.add_argument("--limit", type=int, default=None, help="只跑前 N 顆（試跑）")
+    p_run.add_argument("--workers", type=int, default=None, help="平行 worker 數（預設=CPU 核心數；1=單進程）")
+    p_run.add_argument("--cache", default=None, help="影像段快取資料夾（改算法段參數重跑會大幅加速）")
+    p_run.add_argument("--db", default=None, help="存入批次歷史 SQLite（例：~/.flexadc/runs.db）")
+    p_run.add_argument("--notes", default=None, help="批次備註")
     p_run.set_defaults(func=_cmd_run)
+
+    p_runs = sub.add_parser("runs", help="列出批次歷史")
+    p_runs.add_argument("--db", required=True, help="批次歷史 SQLite 路徑")
+    p_runs.set_defaults(func=_cmd_runs)
+
+    p_rs = sub.add_parser("rescore", help="改分數表達式/門檻重算（不重跑影像，秒級）")
+    p_rs.add_argument("run_id")
+    p_rs.add_argument("--db", required=True, help="批次歷史 SQLite 路徑")
+    p_rs.add_argument("--expr", default=None, help="新的分數表達式（不給=沿用）")
+    p_rs.add_argument("--threshold", type=float, default=None, help="新門檻")
+    p_rs.add_argument("--bins", default=None, help="below,above（例：0,1）")
+    p_rs.add_argument("--save", action="store_true", help="另存為新 run")
+    p_rs.add_argument("--notes", default=None, help="備註")
+    p_rs.set_defaults(func=_cmd_rescore)
 
     args = ap.parse_args(argv)
     return args.func(args)

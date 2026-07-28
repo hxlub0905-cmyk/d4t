@@ -7,7 +7,7 @@
 
 完整計畫見 [`docs/plans/F0-master-plan.md`](docs/plans/F0-master-plan.md)。
 
-## 目前進度：M0 抽庫 ✅ · M1 引擎 ✅
+## 目前進度：M0 抽庫 ✅ · M1 引擎 ✅ · M2 批次 ✅
 
 M0：六個既有專案（KLIP / GLAS / MMH / PEAR / cell-period-estimator / Perspective-Combination）
 的可重用演算法已 vendoring 進 `flexadc/core`，全部通過合成影像單元測試、零 Qt 依賴。
@@ -16,13 +16,21 @@ M1：pipeline 引擎完成 —— Context/Step 契約、Recipe(DAG) + lint 驗�
 （安全語意，不會爆給使用者看）、單顆執行引擎、14 張卡片、合成資料產生器、CLI。
 端到端驗收：合成 lot（24 顆、真/假各半）上範例 recipe 分類正確率 ~94%（跨 seed）。
 
+M2：ProcessPool 平行批次（單顆爆不殺整批、progress/abort）、**影像段 checkpoint 快取**
+（改算法段參數/門檻只重算後半）、SQLite 批次歷史 + **rescore**（改表達式/門檻不重跑影像）、
+feature vector CSV 匯出。實測（2 核容器、2000 顆合成 patch）：cold 17.5 ms/顆 →
+warm cache 2.2 ms/顆 → rescore 0.17 s；換算 8 核廠內機 10k patch 約 1 分鐘、rescore 秒回。
+快取空間約 50 KB/顆（10k ≈ 500 MB，可隨時清）。
+
 ```bash
 # 試玩（不需真實資料）：
-python tools/make_sample.py /tmp/lot --n 24          # 產合成 KLARF + patch TIFF
+python tools/make_sample.py /tmp/lot --n 100         # 產合成 KLARF + patch TIFF
 python -m flexadc steps                              # 看所有卡片
 python -m flexadc validate examples/recipes/die_to_die_basic.json
 python -m flexadc run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 \
-    --out results.json --csv features.csv
+    --workers 4 --cache /tmp/cache --db /tmp/runs.db --csv features.csv
+python -m flexadc runs --db /tmp/runs.db             # 批次歷史
+python -m flexadc rescore <run_id> --db /tmp/runs.db --threshold 60 --save   # 秒級調門檻
 ```
 
 ```

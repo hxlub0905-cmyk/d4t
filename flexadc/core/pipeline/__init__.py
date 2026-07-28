@@ -32,10 +32,14 @@ from .recipe import (
 from .engine import (
     DefectResult,
     StepTrace,
+    image_segment_signature,
     result_to_json_dict,
     run_dataset,
     run_defect,
+    run_defect_cached,
 )
+from .cache import StageCache
+from .batch import run_batch
 
 __all__ = [
     # context
@@ -52,4 +56,6 @@ __all__ = [
     # engine
     "run_defect", "run_dataset", "DefectResult", "StepTrace",
     "result_to_json_dict",
+    # M2：checkpoint 快取與平行批次
+    "run_defect_cached", "image_segment_signature", "StageCache", "run_batch",
 ]
