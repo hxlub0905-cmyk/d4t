@@ -200,6 +200,17 @@ def _cmd_rescore(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_gui(_args: argparse.Namespace) -> int:
+    """開 Studio。PySide6 在此 lazy import —— core/CLI 本身不依賴 Qt。"""
+    try:
+        from flexadc.ui.app import main as gui_main
+    except ImportError as exc:
+        print(f"[錯誤] 無法載入圖形介面（需要 PySide6）：{exc}\n"
+              f"       安裝：pip install PySide6", file=sys.stderr)
+        return 2
+    return gui_main([])
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         prog="flexadc",
@@ -207,6 +218,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
+    sub.add_parser("gui", help="開啟 Studio 視覺化介面").set_defaults(func=_cmd_gui)
     sub.add_parser("steps", help="列出所有已註冊卡片").set_defaults(func=_cmd_steps)
 
     p_val = sub.add_parser("validate", help="Recipe 健檢（lint）")

@@ -15,8 +15,10 @@
 from __future__ import annotations
 
 import hashlib
+import multiprocessing as _mp
 import os
 import sys
+import threading
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional
 
@@ -121,6 +123,25 @@ def _dataset_token_for(dataset: Any) -> str:
     return "items:" + h.hexdigest()
 
 
+def _pool_context():
+    """挑選 multiprocessing 啟動方式：主執行緒用 fork、非主執行緒用 spawn。
+
+    為什麼要分：
+    - **fork**（Linux 預設）快、且呼叫端腳本不需要 ``if __name__ == "__main__"``
+      保護 —— CLI 與一般 script 都在主執行緒，維持這個便利性。
+    - 但 fork 若從**非主執行緒**（例如 Studio 的 QThread）呼叫，子行程會繼承
+      其他執行緒持有的鎖，實測 100% 死鎖（M3 Studio「試跑」按鈕）。這種情況
+      改用 **spawn**：每個 worker 多約 0.3 s 啟動成本，但不會卡死。
+      GUI/CLI 進入點都有 ``if __name__ == "__main__"`` 保護，spawn 安全。
+    - Windows 沒有 fork，一律 spawn（本函式自動退回）。
+    """
+    on_main = threading.current_thread() is threading.main_thread()
+    methods = _mp.get_all_start_methods()
+    if on_main and "fork" in methods:
+        return _mp.get_context("fork")
+    return _mp.get_context("spawn")
+
+
 def run_batch(recipe: Recipe, dataset: Any, *,
               workers: Optional[int] = None,
               cache_dir: Optional[str] = None,
@@ -174,6 +195,7 @@ def run_batch(recipe: Recipe, dataset: Any, *,
     recipe_json = recipe.to_json_dict()
     with ProcessPoolExecutor(
             max_workers=workers,
+            mp_context=_pool_context(),
             initializer=_init_worker,
             initargs=(recipe_json, kind, cache_dir, token, _REPO_ROOT)) as ex:
         fut_to_idx = {ex.submit(_run_one, item): i

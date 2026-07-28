@@ -7,7 +7,7 @@
 
 完整計畫見 [`docs/plans/F0-master-plan.md`](docs/plans/F0-master-plan.md)。
 
-## 目前進度：M0 抽庫 ✅ · M1 引擎 ✅ · M2 批次 ✅
+## 目前進度：M0 抽庫 ✅ · M1 引擎 ✅ · M2 批次 ✅ · M3 Studio UI ✅
 
 M0：六個既有專案（KLIP / GLAS / MMH / PEAR / cell-period-estimator / Perspective-Combination）
 的可重用演算法已 vendoring 進 `flexadc/core`，全部通過合成影像單元測試、零 Qt 依賴。
@@ -22,8 +22,16 @@ feature vector CSV 匯出。實測（2 核容器、2000 顆合成 patch）：col
 warm cache 2.2 ms/顆 → rescore 0.17 s；換算 8 核廠內機 10k patch 約 1 分鐘、rescore 秒回。
 快取空間約 50 KB/顆（10k ≈ 500 MB，可隨時清）。
 
+M3：**Studio 視覺化介面**（PySide6）—— 卡片庫｜Pipeline｜單顆預覽｜分數直方圖 四區塊，
+三段式分色（影像藍／算法橙／ADC 判定紫）。點卡片看該步驟的中間輸出、參數表單自動由
+ParamSpec 生成（每格都有白話說明、範圍防呆、錯誤即時紅字）、拖門檻線即時看 bin 數變化。
+**全程滑鼠，不用寫一行 code。**
+
 ```bash
-# 試玩（不需真實資料）：
+# 開 Studio：
+python -m flexadc gui
+
+# CLI 試玩（不需真實資料）：
 python tools/make_sample.py /tmp/lot --n 100         # 產合成 KLARF + patch TIFF
 python -m flexadc steps                              # 看所有卡片
 python -m flexadc validate examples/recipes/die_to_die_basic.json
@@ -35,6 +43,14 @@ python -m flexadc rescore <run_id> --db /tmp/runs.db --threshold 60 --save   # �
 
 ```
 flexadc/
+├── ui/                  # PySide6 Studio（唯一允許 Qt 的地方）
+│   ├── viewmodel.py     #   RecipeModel（Qt-free 編輯模型）+ 直方圖/門檻計算
+│   ├── theme.py         #   GLAS 暖色主題 token + 三段分色
+│   ├── widgets.py       #   ImageView / ParamForm / LibraryPanel / PipelinePanel
+│   │                    #   / HistogramWidget / FeatureTable / VerdictChip
+│   ├── workers.py       #   載入 / 預覽（請求合併）/ 試跑 背景執行緒
+│   ├── studio.py        #   StudioWindow 四區塊組裝
+│   └── app.py           #   進入點（python -m flexadc gui）
 ├── core/
 │   ├── ingest/          # KLARF 無損引擎(KLIP) + TIFF page 索引 + Dataset 自動判別
 │   │   ├── klarf_core.py    #   KLARF 1.2/1.8 讀寫/健檢/比對 + defect↔page 對應
@@ -65,9 +81,9 @@ flexadc/
 
 ```bash
 python -m venv .venv && .venv\Scripts\activate     # Windows
-pip install -r requirements.txt
+pip install -r requirements.txt   # 含 PySide6（Studio 用）
 pip install pytest
-pytest -q          # 全部測試（<1s，不需真實資料）
+QT_QPA_PLATFORM=offscreen pytest -q   # 全部測試（~6s，不需真實資料；Windows 免設 QT_QPA_PLATFORM）
 ```
 
 ## Vendoring 慣例
@@ -89,5 +105,14 @@ pytest -q          # 全部測試（<1s，不需真實資料）
 
 ## Roadmap
 
-M0 抽庫 ✅ → M1 引擎（Step/Recipe DAG/表達式）→ M2 批次 → M3 Studio UI →
-M4 雙輸入+Golden Cell → M5 Gallery+Export → M6 推廣包。詳見 master plan。
+M0 抽庫 ✅ → M1 引擎 ✅ → M2 批次 ✅ → M3 Studio UI ✅ → M4 雙輸入+Golden Cell →
+M5 Gallery+Export → M6 推廣包。詳見 master plan。
+
+## 已知修正紀錄（開發過程中抓到的坑）
+
+- **Fusi³ `ecc` 對位 backend 位移正負號**與其他四個 backend 相反 → 已修（`algo/align.py`）。
+- **OpenCV IPP 非決定性**：同張圖算兩次會有 ~1e-8 差異（SIMD 路徑依緩衝區位址而變），
+  導致快取結果無法 bit-identical → `batch.pin_cv2_deterministic()` 關閉 IPP。
+- **fork 死鎖**：Linux 預設 fork 若從非主執行緒（GUI 的 QThread）呼叫，
+  ProcessPool 100% 卡死 → `batch._pool_context()` 改為主執行緒 fork、非主執行緒 spawn
+  （迴歸測試 `tests/test_batch_thread_safety.py`）。

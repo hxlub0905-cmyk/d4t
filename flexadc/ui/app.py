@@ -1,0 +1,39 @@
+# FlexADC Studio 進入點 — authored 2026-07-28 (M3).
+"""``python -m flexadc.ui.app`` —— 開一個 FlexADC Studio 視窗。
+
+薄薄一層：建 QApplication → 套主題 → 開主視窗 → 進 event loop。
+所有邏輯都在 :mod:`flexadc.ui.studio`，這裡刻意什麼都不做，
+方便未來換成別的殼（嵌進廠內既有 app）時只改這一個檔。
+"""
+from __future__ import annotations
+
+import sys
+from typing import List, Optional, Sequence
+
+from PySide6.QtWidgets import QApplication
+
+from . import theme
+from .studio import StudioWindow
+
+__all__ = ["main"]
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """開視窗並跑到使用者關掉為止；回傳 process exit code。"""
+    args: List[str] = list(sys.argv if argv is None else argv)
+    if not args:
+        args = ["flexadc-studio"]
+
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(args)
+    theme.apply_theme(app)
+
+    win = StudioWindow()
+    win.resize(1440, 900)
+    win.show()
+    return int(app.exec())
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
