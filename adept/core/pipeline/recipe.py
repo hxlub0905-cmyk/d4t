@@ -103,15 +103,16 @@ class Recipe:
     @classmethod
     def from_json_dict(cls, d: Dict[str, Any]) -> "Recipe":
         if not isinstance(d, dict):
-            raise RecipeError(f"recipe JSON 頂層必須是物件（dict），收到 {type(d).__name__}")
+            raise RecipeError(f"the top level of a recipe JSON must be an object "
+                              f"(dict), got {type(d).__name__}")
         missing = [k for k in ("recipe_id", "routes", "nodes", "score") if k not in d]
         if missing:
-            raise RecipeError(f"recipe JSON 缺少必要欄位：{missing}")
+            raise RecipeError(f"recipe JSON is missing required fields: {missing}")
 
         nodes: Dict[str, RecipeNode] = {}
         for nid, nd in dict(d["nodes"]).items():
             if not isinstance(nd, dict) or "step" not in nd:
-                raise RecipeError(f"節點 '{nid}' 缺少 'step' 欄位")
+                raise RecipeError(f"step '{nid}' has no 'step' field")
             nodes[str(nid)] = RecipeNode(
                 id=str(nid),
                 step=str(nd["step"]),
@@ -121,7 +122,8 @@ class Recipe:
 
         sd = d["score"]
         if not isinstance(sd, dict) or "expr" not in sd:
-            raise RecipeError("score 區塊必須是物件且包含 'expr'")
+            raise RecipeError(
+                "the score block must be an object containing 'expr'")
         score = ScoreSpec(
             expr=str(sd["expr"]),
             threshold=float(sd.get("threshold", 0.0)),
@@ -134,7 +136,7 @@ class Recipe:
         for e in (d.get("edges") or []):
             e = list(e)
             if len(e) != 2:
-                raise RecipeError(f"edge 必須是 [from, to] 兩個節點 id，收到：{e}")
+                raise RecipeError(f"an edge must be [from, to] — two step ids; got: {e}")
             edges.append([str(e[0]), str(e[1])])
 
         return cls(
@@ -175,7 +177,8 @@ def execution_order(recipe: Recipe, kind: str) -> List[str]:
     """
     if kind not in recipe.routes:
         raise RecipeError(
-            f"未知的資料型別 route '{kind}'；此 recipe 只定義了：{sorted(recipe.routes)}")
+            f"unknown input-type route '{kind}'; this recipe only defines: "
+            f"{sorted(recipe.routes)}")
     route = list(recipe.routes[kind])
     if not route:
         return []
@@ -208,8 +211,8 @@ def execution_order(recipe: Recipe, kind: str) -> List[str]:
     if len(out) != len(route):
         stuck = [n for n in route if n not in out]
         raise RecipeError(
-            f"route '{kind}' 的步驟連線有循環（cycle），無法決定執行順序；"
-            f"卡住的節點：{stuck}")
+            f"route '{kind}' has a cycle in its step connections, so no "
+            f"execution order can be determined; stuck steps: {stuck}")
     return out
 
 
@@ -234,7 +237,7 @@ def _clean_params_for(step_cls: Type[Step], raw: Dict[str, Any],
     except ParamError as e:
         issues.append(Issue(
             code="bad-param", level="error", node_id=nid,
-            title="參數不合法", detail=str(e)))
+            title="Invalid parameter", detail=str(e)))
         try:
             return step_cls.validate_params(None)  # 全預設值
         except ParamError:  # pragma: no cover — 預設值本身壞掉屬程式錯誤
@@ -259,17 +262,19 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
         if key not in bins:
             issues.append(Issue(
                 code="bad-bins", level="error", node_id=None,
-                title="bin 設定不完整",
-                detail=f"score.bins 缺少 '{key}'（需要 below 與 above 兩個 bin 值），"
-                       f"目前只有：{sorted(bins)}"))
+                title="Incomplete bin settings",
+                detail=f"score.bins has no '{key}' (both below and above bin "
+                       f"values are required); it currently has: "
+                       f"{sorted(bins)}"))
 
     # ---- 要檢查哪些 route ----
     if kind is not None:
         if kind not in recipe.routes:
             issues.append(Issue(
                 code="unknown-route", level="error", node_id=None,
-                title=f"未知的資料型別 route '{kind}'",
-                detail=f"此 recipe 只定義了 route：{sorted(recipe.routes)}"))
+                title=f"Unknown input-type route '{kind}'",
+                detail=f"this recipe only defines routes: "
+                       f"{sorted(recipe.routes)}"))
             kinds: List[str] = []
         else:
             kinds = [kind]
@@ -283,9 +288,9 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
         if step_cls is None:
             issues.append(Issue(
                 code="unknown-step", level="error", node_id=nid,
-                title=f"未知的卡片 '{node.step}'",
-                detail=f"節點 '{nid}' 使用的 step '{node.step}' 不在卡片庫中；"
-                       f"可用的卡片：{sorted(registry)}"))
+                title=f"Unknown card '{node.step}'",
+                detail=f"step '{nid}' uses '{node.step}', which is not in the "
+                       f"card library; available cards: {sorted(registry)}"))
             continue
         clean_params[nid] = _clean_params_for(step_cls, node.params, issues, nid)
 
@@ -296,7 +301,7 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     except ExpressionError as e:
         issues.append(Issue(
             code="score-expr", level="error", node_id=None,
-            title="分數表達式解析失敗", detail=str(e)))
+            title="Score expression failed to parse", detail=str(e)))
 
     # ---- 每條 route：unknown-node / cycle / reads 模擬 / requires_ref ----
     for k in kinds:
@@ -305,14 +310,17 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             if nid not in recipe.nodes:
                 issues.append(Issue(
                     code="unknown-node", level="error", node_id=nid,
-                    title=f"route '{k}' 引用了不存在的節點 '{nid}'",
-                    detail=f"nodes 中沒有 '{nid}'；已定義的節點：{sorted(recipe.nodes)}"))
+                    title=f"route '{k}' refers to a step that does not exist: "
+                          f"'{nid}'",
+                    detail=f"nodes has no '{nid}'; defined steps: "
+                           f"{sorted(recipe.nodes)}"))
         try:
             order = execution_order(recipe, k)
         except RecipeError as e:
             issues.append(Issue(
                 code="cycle", level="error", node_id=None,
-                title=f"route '{k}' 的步驟連線有循環", detail=str(e)))
+                title=f"route '{k}' has a cycle in its step connections",
+                detail=str(e)))
             continue
 
         # reads-satisfaction 模擬：seed = 第一張啟用卡（load 卡）的 writes；
@@ -339,16 +347,17 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             if missing:
                 issues.append(Issue(
                     code="missing-image", level="error", node_id=nid,
-                    title=f"節點 '{nid}' 缺少上游影像",
-                    detail=f"route '{k}'：需要影像流 {missing}，"
-                           f"但上游目前只提供了 {sorted(avail)}"))
+                    title=f"step '{nid}' is missing an upstream image",
+                    detail=f"route '{k}': it needs image streams {missing}, but "
+                           f"upstream only provides {sorted(avail)}"))
             if k == "rsem" and getattr(step_cls, "requires_ref", False) \
                     and "ref" not in avail:
                 issues.append(Issue(
                     code="requires-ref", level="error", node_id=nid,
-                    title=f"節點 '{nid}' 需要 reference 影像",
-                    detail=f"step '{node.step}' 需要 ref，但 rsem 單張資料流沒有 ref，"
-                           f"且上游也沒有卡片產生 'ref'（目前提供：{sorted(avail)}）"))
+                    title=f"step '{nid}' needs a reference image",
+                    detail=f"'{node.step}' needs ref, but a single-image rsem "
+                           f"input has none and no upstream card produces "
+                           f"'ref' (currently provided: {sorted(avail)})"))
             avail |= set(step_cls.resolve_writes(p))
             feats |= set(step_cls.resolve_features(p))
 
@@ -358,8 +367,9 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             if unknown:
                 issues.append(Issue(
                     code="unknown-feature", level="warning", node_id=None,
-                    title="分數表達式用到未知特徵",
-                    detail=f"route '{k}'：變數 {unknown} 不在此 route 會產出的特徵"
-                           f"（{sorted(feats)}）中，執行時可能算不出分數"))
+                    title="Score expression uses unknown features",
+                    detail=f"route '{k}': the variables {unknown} are not among "
+                           f"the features this route produces ({sorted(feats)}), "
+                           f"so the score may not be computable at run time"))
 
     return issues

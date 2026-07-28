@@ -89,9 +89,9 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
         if node is None:
             traces.append(StepTrace(
                 node_id=nid, step_key="?", ok=False, ms=0.0,
-                error=f"節點 '{nid}' 不在 recipe.nodes 中", features_added={},
+                error=f"step '{nid}' is not in recipe.nodes", features_added={},
                 images_after=sorted(ctx.images)))
-            return ctx, f"[{nid}] 節點 '{nid}' 不在 recipe.nodes 中"
+            return ctx, f"[{nid}] step '{nid}' is not in recipe.nodes"
         if not node.enabled:
             if nid == upto_node:
                 break  # 目標節點被停用：停在它這裡、不執行它
@@ -103,7 +103,8 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
             step_cls = registry.get(node.step)
             if step_cls is None:
                 raise StepError(
-                    node.step, f"未知的 step '{node.step}'；已註冊：{sorted(registry)}")
+                    node.step,
+                    f"unknown step '{node.step}'; registered: {sorted(registry)}")
             params = step_cls.validate_params(node.params)
             ret = step_cls().run(ctx, params)
             if isinstance(ret, Context):
@@ -174,7 +175,8 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
     if upto_node is not None and upto_node not in order:
         return _finish(
             defect_id, ctx, traces, keep_context, False,
-            f"upto_node '{upto_node}' 不在 route '{kind}' 的執行順序 {order} 中")
+            f"upto_node '{upto_node}' is not in the execution order {order} "
+            f"of route '{kind}'")
 
     ctx, err = _run_nodes(recipe, order, 0, len(order), ctx, traces,
                           registry, upto_node)

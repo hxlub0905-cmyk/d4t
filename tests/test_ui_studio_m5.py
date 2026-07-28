@@ -102,7 +102,7 @@ def _mouse(widget, etype, pos, button=None, buttons=None):
 def test_right_column_has_two_obvious_tabs(window):
     tabs = window.right_tabs
     assert tabs.count() == 2
-    assert tabs.tabText(studio_mod.TAB_PREVIEW) == "單顆預覽"
+    assert tabs.tabText(studio_mod.TAB_PREVIEW) == "Single defect"
     assert tabs.tabText(studio_mod.TAB_GALLERY).startswith("Gallery")
     # 兩個分頁都要說明用途（推廣鐵則：使用者不必猜）
     assert tabs.tabToolTip(studio_mod.TAB_PREVIEW)
@@ -209,14 +209,14 @@ def test_defect_activated_switches_tab_and_moves_preview(ran):
 
     # 不存在的 id：切回單顆預覽 + 狀態列講清楚，不炸
     window.gallery.defect_activated.emit("不存在")
-    assert "找不到" in window.status_text()
+    assert "is not in the current dataset" in window.status_text()
 
 
 def test_gallery_selection_shows_count(ran):
     window = ran
     ids = window.gallery.displayed_ids()[:3]
     window.gallery.selection_changed.emit(list(ids))
-    assert window.status_text() == "已選 3 顆"
+    assert window.status_text() == "3 selected"
 
 
 # --------------------------------------------------------------------------- #
@@ -230,7 +230,7 @@ def test_bar_clicked_filters_gallery_and_switches_tab(ran):
 
     window.histogram.bar_clicked.emit(lo, hi)
     assert window.current_tab() == studio_mod.TAB_GALLERY
-    assert "已篩選 score" in window.status_text()
+    assert "Filtered to score" in window.status_text()
     assert window.gallery.filter_text()
     shown = window.gallery.displayed_count()
     assert shown < N
@@ -242,7 +242,7 @@ def test_bar_clicked_filters_gallery_and_switches_tab(ran):
     window.histogram.bar_clicked.emit(lo, hi)
     assert window.gallery.displayed_count() == N
     assert window.gallery.filter_text() == ""
-    assert "已取消" in window.status_text()
+    assert "cleared" in window.status_text()
 
 
 def test_chip_clears_filter_and_same_bar_refilters(ran):
@@ -252,7 +252,7 @@ def test_chip_clears_filter_and_same_bar_refilters(ran):
     window.histogram.bar_clicked.emit(lo, hi)
     filtered = window.gallery.displayed_count()
 
-    chips = [c for c in window.gallery.chips() if c.label_text.startswith("篩選")]
+    chips = [c for c in window.gallery.chips() if c.label_text.startswith("Filter")]
     assert chips, window.gallery.chip_texts()
     chips[0].click()                                    # Gallery 上的 ✕
     assert window.gallery.displayed_count() == N
@@ -291,7 +291,7 @@ def test_real_click_on_bar_does_not_move_the_threshold(ran, qapp):
     assert hist.threshold() == pytest.approx(before)
     assert window.model.threshold == pytest.approx(before)
     assert window.current_tab() == studio_mod.TAB_GALLERY
-    assert "已篩選 score" in window.status_text()
+    assert "Filtered to score" in window.status_text()
 
     window.gallery.clear_filter()
     window._score_filter = None
@@ -334,7 +334,7 @@ def test_export_action_disabled_before_run_enabled_after(qapp, synlot):
     try:
         assert win.btn_export.isEnabled() is False
         assert win.open_export_dialog() is None
-        assert "還沒有結果" in win.status_text()
+        assert "No results to export yet" in win.status_text()
 
         assert win.load_dataset_path(synlot["klarf"], sync=True) is True
         assert win.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True

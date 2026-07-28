@@ -22,22 +22,27 @@ class AlignStep(Step):
     """平移對位：phase/hybrid/ncc/ecc/template 後端擇一。"""
 
     key = "align"
-    label = "對位"
+    label = "Align"
     category = CATEGORY_IMAGE
-    help = "估計 ref 相對 test 的平移量並把 ref 移回對齊位置，之後相減才不會滿圖假訊號。"
+    help = ("Estimate how far ref is shifted from test and move ref back into "
+            "alignment, so the later subtraction is not full of false signal.")
     requires_ref = True
     params = [
         ParamSpec(name="moving", type="image_key", default="ref",
-                  help="要被移動對齊的影像流（通常是 ref）。"),
+                  help="Image stream to be moved into alignment (usually ref)."),
         ParamSpec(name="fixed", type="image_key", default="test",
-                  help="不動的基準影像流（通常是 test）。"),
+                  help="Reference stream that stays put (usually test)."),
         ParamSpec(name="method", type="choice", default="phase",
                   choices=["phase", "hybrid", "ncc", "ecc", "template"],
-                  help="對位後端：phase=快又穩（預設）；ncc=窮舉相關；ecc=迭代精修；template=中央模板匹配；hybrid 同 phase。"),
+                  help=("Alignment backend: phase = fast and robust (default); "
+                        "ncc = exhaustive correlation; ecc = iterative refinement; "
+                        "template = central template match; hybrid behaves like phase.")),
         ParamSpec(name="search_radius", type="int", default=8, min=1, max=64,
-                  help="搜尋半徑（像素）：預期的最大平移量，太小找不到、太大變慢。"),
+                  help=("Search radius in pixels: the largest shift you expect. "
+                        "Too small and it will not find the shift, too large "
+                        "and it gets slow.")),
         ParamSpec(name="out", type="image_key", default="ref_aligned",
-                  help="對齊後影像要寫入的影像流名稱。"),
+                  help="Name of the image stream the aligned result is written to."),
     ]
     reads = ["test", "ref"]
     writes = ["ref_aligned"]
@@ -57,8 +62,9 @@ class AlignStep(Step):
         moving = require_image(ctx, self.key, p["moving"])
         if fixed.shape[:2] != moving.shape[:2]:
             # 尺寸不合時無法對位：警告 + 零位移，不殺整批
-            ctx.warn(f"[{self.key}] '{p['fixed']}' 與 '{p['moving']}' 尺寸不同 "
-                     f"({fixed.shape[:2]} vs {moving.shape[:2]})，改用零位移。")
+            ctx.warn(f"[{self.key}] '{p['fixed']}' and '{p['moving']}' differ in "
+                     f"size ({fixed.shape[:2]} vs {moving.shape[:2]}); "
+                     f"using zero shift.")
             res = None
         else:
             try:
@@ -66,17 +72,19 @@ class AlignStep(Step):
                     fixed, moving, method=p["method"],
                     search_radius=int(p["search_radius"]))
             except Exception as e:   # 對位絕不讓整批掛掉
-                ctx.warn(f"[{self.key}] 對位計算失敗（{e}），改用零位移。")
+                ctx.warn(f"[{self.key}] alignment failed ({e}); using zero shift.")
                 res = None
 
         if res is None or res.status == "fail":
             if res is not None:
-                ctx.warn(f"[{self.key}] 對位失敗（score={res.final_score:.1f}），改用零位移。")
+                ctx.warn(f"[{self.key}] alignment did not converge "
+                         f"(score={res.final_score:.1f}); using zero shift.")
             dx, dy, score = 0.0, 0.0, (res.final_score if res is not None else 0.0)
             aligned = moving.copy()
         else:
             if res.status == "warn":
-                ctx.warn(f"[{self.key}] 對位品質偏低（score={res.final_score:.1f}），結果僅供參考。")
+                ctx.warn(f"[{self.key}] low alignment quality "
+                         f"(score={res.final_score:.1f}); treat results with care.")
             dx, dy = float(res.dx_subpixel), float(res.dy_subpixel)
             score = float(res.final_score)
             aligned = algo_align.apply_alignment(moving, dx, dy)

@@ -106,7 +106,7 @@ def test_controls_populate_from_real_klarf_columns(dlg, ran):
         assert name not in dlg.klarf_columns()
         assert dlg.column_enabled(name) is False, name
         hint = dlg.column_hint(name)
-        assert name in hint and "沒有" in hint, hint       # 講清楚為什麼不能選
+        assert name in hint and "has no" in hint, hint       # 講清楚為什麼不能選
         assert dlg.column_control(name).isChecked() is False
 
     # annotate：特徵多選清單 = 這批結果真的量到的特徵
@@ -153,9 +153,10 @@ def test_preview_fills_plan_and_enables_write(dlg, tmp_path):
 
     text = dlg.plan_text()
     assert text == dlg.plan_view.toPlainText()
-    for piece in ("模式：", "會改到 %d 列" % plan.n_rows_changed,
-                  "動到的既有欄位：CLASSNUMBER", "新增的欄位：（沒有）",
-                  "輸出檔會有 %d 列" % plan.n_rows_out, "輸出檔健檢："):
+    for piece in ("Mode: ", "Rows changed: %d defects" % plan.n_rows_changed,
+                  "Existing columns touched: CLASSNUMBER", "Columns added: (none)",
+                  "The output file will have %d defect rows" % plan.n_rows_out,
+                  "Output health check:"):
         assert piece in text, piece
     assert "✓" in text                                  # 這份檔案健檢是乾淨的
     assert dlg.btn_write.isEnabled() is True
@@ -165,13 +166,13 @@ def test_preview_fills_plan_and_enables_write(dlg, tmp_path):
     assert dlg.plan() is None
     assert dlg.plan_text() == ""
     assert dlg.btn_write.isEnabled() is False
-    assert "重新按" in dlg.plan_view.toPlainText()
+    assert "press “Preview changes” again" in dlg.plan_view.toPlainText()
 
 
 def test_write_without_preview_is_refused(dlg, tmp_path):
     dlg.set_output_path("klarf", str(tmp_path / "never.001"))
     assert dlg.run_export(sync=True) is None
-    assert "預覽" in dlg.error_text()
+    assert "Preview changes" in dlg.error_text()
     assert not (tmp_path / "never.001").exists()
 
 
@@ -206,7 +207,7 @@ def test_inplace_noop_write_is_byte_identical(dlg, ran, tmp_path):
 
     plan = dlg.preview_plan()
     assert plan is not None and plan.n_rows_changed == 0
-    assert "逐位元組相同" in dlg.plan_text()
+    assert "byte-for-byte identical" in dlg.plan_text()
 
     summary = dlg.run_export(sync=True)
     assert dlg.error_text() == ""
@@ -242,7 +243,7 @@ def test_annotate_adds_score_class_and_chosen_features(dlg, tmp_path):
     plan = dlg.preview_plan()
     assert plan is not None
     assert plan.columns_added == ["ADCSCORE", "ADCCLASS", "SNR_MAX"]
-    assert "新增的欄位：ADCSCORE、ADCCLASS、SNR_MAX" in dlg.plan_text()
+    assert "Columns added: ADCSCORE, ADCCLASS, SNR_MAX" in dlg.plan_text()
 
     assert dlg.run_export(sync=True) is not None
     doc = klarf_core.load(str(out))
@@ -262,7 +263,7 @@ def test_topn_keeps_only_the_best(dlg, tmp_path):
     plan = dlg.preview_plan()
     assert plan is not None
     assert plan.n_rows_out == 3
-    assert "輸出檔會有 3 列" in dlg.plan_text()
+    assert "The output file will have 3 defect rows" in dlg.plan_text()
 
     assert dlg.run_export(sync=True) is not None
     doc = klarf_core.load(str(out))
@@ -327,7 +328,7 @@ def test_csv_and_excel_checkboxes_produce_files(dlg, ran, tmp_path):
 
     from openpyxl import load_workbook
     wb = load_workbook(str(xlsx_path))
-    assert wb.sheetnames == ["摘要", "明細", "特徵統計"]
+    assert wb.sheetnames == ["Summary", "Details", "Feature stats"]
 
     assert "CSV" in dlg.summary_text() or "csv" in dlg.summary_text().lower()
 
@@ -352,4 +353,4 @@ def test_overlay_writes_pngs_with_limit(dlg, tmp_path):
 def test_nothing_selected_is_refused(dlg):
     dlg.chk_klarf.setChecked(False)
     assert dlg.run_export(sync=True) is None
-    assert "沒有勾選" in dlg.error_text()
+    assert "Nothing is selected" in dlg.error_text()

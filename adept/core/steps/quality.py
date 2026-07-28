@@ -17,12 +17,13 @@ class FocusQualityStep(Step):
     """對焦品質：Laplacian 變異數 / Tenengrad / FFT 高頻比。"""
 
     key = "focus_quality"
-    label = "對焦品質"
+    label = "Focus quality"
     category = CATEGORY_ALGO
-    help = "量影像清晰度（三種銳利度指標），數值越高越清楚，可用來篩掉失焦圖。"
+    help = ("Measure image sharpness with three metrics — higher is sharper. "
+            "Useful for screening out defocused images.")
     params = [
         ParamSpec(name="source", type="image_key", default="test",
-                  help="要量清晰度的影像流。"),
+                  help="Image stream to measure sharpness on."),
     ]
     reads = ["test"]
     writes: List[str] = []
@@ -37,7 +38,7 @@ class FocusQualityStep(Step):
         img = require_image(ctx, self.key, p["source"])
         q = algo_quality.compute_quality(img)
         if q.get("error"):
-            raise StepError(self.key, f"影像品質計算失敗：{q['error']}")
+            raise StepError(self.key, f"image quality computation failed: {q['error']}")
         ctx.add_features({
             "focus_lapvar": q["laplacian_var"],
             "focus_tenengrad": q["tenengrad"],

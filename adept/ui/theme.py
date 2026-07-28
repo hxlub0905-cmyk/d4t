@@ -131,9 +131,9 @@ _SEG_TOKENS = {
 }
 
 SEG_LABELS = {
-    "image": "影像 Image",
-    "algo": "算法 Algo",
-    "adc": "ADC 判定",
+    "image": "Image",
+    "algo": "Algorithm",
+    "adc": "ADC Decision",
 }
 
 
@@ -241,7 +241,7 @@ QPushButton:pressed { background: $hover_warm_strong; }
 QPushButton:focus { border: 1.5px solid $border_focus; }
 QPushButton:disabled { background: $disabled_bg; color: $disabled_text;
                        border-color: $border_default; }
-/* 主要動作（「試跑」「跑整批」）：objectName = "primary" */
+/* primary action (Run trial / Run all): objectName = "primary" */
 QPushButton#primary {
     background: $accent; color: #ffffff; border: 1px solid $accent_active;
     padding: 6px 20px; font-weight: 700;
@@ -262,7 +262,7 @@ QPushButton[variant="ghost"]:hover { background: $hover_warm; color: $text_prima
 QPushButton[variant="danger"] {
     background: $danger_bg; color: $danger_text; border: 1px solid $danger_border;
 }
-/* 卡片上的小方鈕（↑ ↓ ✕ / 加入 ▸） */
+/* small square buttons on cards (up / down / remove / add) */
 QPushButton#cardButton {
     background: transparent; color: $text_secondary;
     border: 1px solid transparent; border-radius: 5px;
@@ -383,7 +383,7 @@ QToolTip {
     padding: 4px 6px;
 }
 
-/* -- Studio 專用 object names ------------------------------------------ */
+/* -- Studio-specific object names -------------------------------------- */
 QLabel#paramTitle { color: $text_primary; font-size: 14px; font-weight: 700; }
 QLabel#paramStepHelp { color: $text_secondary; font-size: 11px; }
 QLabel#paramLabel { color: $text_primary; font-weight: 600; }

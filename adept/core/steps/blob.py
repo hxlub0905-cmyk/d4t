@@ -35,18 +35,22 @@ class BlobSegmentStep(Step):
     """Blob 分割：SNR 地圖 → 門檻 → 連通元件 → 候選缺陷清單。"""
 
     key = "blob_segment"
-    label = "Blob 分割"
+    label = "Blob segment"
     category = CATEGORY_ALGO
-    help = "在 SNR 地圖上切出一塊塊候選缺陷，記下最大塊的面積、長寬比、離中心距離與 SNR。"
+    help = ("Cut candidate defect blobs out of the SNR map and record the main "
+            "blob's area, aspect ratio, distance from centre and SNR.")
     params = [
         ParamSpec(name="source", type="image_key", default="snr_map",
-                  help="輸入 SNR 地圖的影像流。"),
+                  help="Input SNR map image stream."),
         ParamSpec(name="diff_source", type="image_key", default="diff",
-                  help="對應的差異圖影像流（用來量每塊的平均訊號）。"),
+                  help=("Matching difference image stream, used to measure each "
+                        "blob's mean signal.")),
         ParamSpec(name="min_area", type="int", default=4, min=1, max=10000,
-                  help="最小面積（像素）：比這小的塊視為雜訊丟掉。"),
+                  help=("Minimum area in pixels: anything smaller is treated as "
+                        "noise and dropped.")),
         ParamSpec(name="snr_threshold", type="float", default=0.0, min=0.0, max=255.0,
-                  help="分割門檻（0–255 地圖刻度）：0=Otsu 自動決定（建議）。"),
+                  help=("Segmentation threshold on the 0-255 map scale; "
+                        "0 = decide automatically by Otsu (recommended).")),
     ]
     reads = ["snr_map", "diff"]
     writes: List[str] = []
@@ -62,8 +66,9 @@ class BlobSegmentStep(Step):
         snr_img = require_image(ctx, self.key, p["source"])
         diff_img = require_image(ctx, self.key, p["diff_source"])
         if snr_img.shape[:2] != diff_img.shape[:2]:
-            raise StepError(self.key, f"'{p['source']}' 與 '{p['diff_source']}' 尺寸不同 "
-                                      f"({snr_img.shape[:2]} vs {diff_img.shape[:2]})，無法分割。")
+            raise StepError(self.key, f"'{p['source']}' and '{p['diff_source']}' differ in "
+                                      f"size ({snr_img.shape[:2]} vs "
+                                      f"{diff_img.shape[:2]}); cannot segment.")
         thr = None if float(p["snr_threshold"]) <= 0.0 else float(p["snr_threshold"])
         rois = algo_blob.segment_defects(
             snr_img, diff_img, min_area=int(p["min_area"]), snr_threshold=thr)

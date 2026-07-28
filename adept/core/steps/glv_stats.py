@@ -45,19 +45,25 @@ class GlvStatsStep(Step):
     """GLV 統計：整張或中央方框的灰階統計量。"""
 
     key = "glv_stats"
-    label = "灰階統計"
+    label = "Gray-level stats"
     category = CATEGORY_ALGO
-    help = "算影像（整張或中央方框）的灰階統計量（平均、標準差、分位數…），逐項寫成 feature。"
+    help = ("Compute gray-level statistics (mean, standard deviation, "
+            "percentiles…) over the whole image or a centre box, and write "
+            "each one out as a feature.")
     params = [
         ParamSpec(name="source", type="image_key", default="test",
-                  help="要統計的影像流。"),
+                  help="Image stream to compute statistics on."),
         ParamSpec(name="region", type="choice", default="full",
                   choices=["full", "center"],
-                  help="full=整張影像；center=只算中央方框（大小由 box_size 決定）。"),
+                  help=("full = the whole image; center = a centre box only "
+                        "(size set by box_size).")),
         ParamSpec(name="box_size", type="int", default=32, min=2, max=1024,
-                  help="center 模式的方框邊長（像素）。"),
+                  help="Box side length in pixels for center mode."),
         ParamSpec(name="metrics", type="str", default="glv_mean,glv_std,glv_p50",
-                  help="要輸出的統計項（逗號清單）：glv_mean/glv_std/glv_median/glv_min/glv_max/glv_q25/glv_q75，分位數可寫 glv_q90 或 glv_p90（glv_p50=中位數）。"),
+                  help=("Statistics to output (comma separated): glv_mean / "
+                        "glv_std / glv_median / glv_min / glv_max / glv_q25 / "
+                        "glv_q75. Percentiles can be written glv_q90 or glv_p90 "
+                        "(glv_p50 = median).")),
     ]
     reads = ["test"]
     writes: List[str] = []
@@ -77,7 +83,7 @@ class GlvStatsStep(Step):
         img = require_image(ctx, self.key, p["source"])
         mids = parse_key_list(p["metrics"])
         if not mids:
-            raise StepError(self.key, "metrics 是空的；請至少列一個統計項（例：glv_mean）。")
+            raise StepError(self.key, "metrics is empty; list at least one statistic (e.g. glv_mean).")
 
         if p["region"] == "center":
             h, w = img.shape[:2]
@@ -95,7 +101,8 @@ class GlvStatsStep(Step):
             if not canon:
                 raise StepError(
                     self.key,
-                    f"看不懂的統計項 '{mid}'；可用：{sorted(algo_glv.GLV_STATS)} 或 glv_q<0-100> / glv_p<0-100>。")
+                    f"unknown statistic '{mid}'; available: "
+                    f"{sorted(algo_glv.GLV_STATS)} or glv_q<0-100> / glv_p<0-100>.")
             feats[mid] = algo_glv.glv_value(patch, canon)   # feature 名照使用者列的寫
         ctx.add_features(feats)
         return ctx

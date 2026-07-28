@@ -39,20 +39,27 @@ class CellPeriodStep(Step):
     """量出圖上重複 cell 的 X/Y 週期（像素）。"""
 
     key = "cell_period"
-    label = "Cell 週期估測"
+    label = "Cell period"
     category = CATEGORY_ALGO
-    help = "量出圖上重複 cell 的 X/Y 週期（像素），供 Golden Cell 卡使用；順便回報這個週期有多可信。"
+    help = ("Measure the X/Y period of the repeating cells in the image (in "
+            "pixels) for the Golden Cell card, and report how trustworthy that "
+            "period is.")
     params = [
         ParamSpec(name="source", type="image_key", default="test",
-                  help="要量週期的影像流（通常是 test）。"),
+                  help="Image stream to measure the period on (usually test)."),
         ParamSpec(name="min_period", type="int", default=0, min=0, max=_MAX_PERIOD,
                   unit="px",
-                  help="最小週期（像素）；0 = 自動。知道 cell 至少多大時填，可避免抓到雜訊的小週期。"),
+                  help=("Minimum period in pixels; 0 = automatic. Set it when you "
+                        "know how small a cell can be, to avoid locking onto a "
+                        "small noise period.")),
         ParamSpec(name="max_period", type="int", default=0, min=0, max=_MAX_PERIOD,
                   unit="px",
-                  help="最大週期（像素）；0 = 自動（影像的一半）。知道 cell 最大多大時填。"),
+                  help=("Maximum period in pixels; 0 = automatic (half the image). "
+                        "Set it when you know how large a cell can be.")),
         ParamSpec(name="refine", type="bool", default=True,
-                  help="是否做 ±2 像素的微調搜尋：用實際疊圖的清晰度挑最好的週期，較準但稍慢。"),
+                  help=("Whether to run a +/-2 pixel refinement search, picking the "
+                        "period that actually stacks sharpest. More accurate, "
+                        "slightly slower.")),
     ]
     reads = ["test"]
     writes: List[str] = []
@@ -67,7 +74,8 @@ class CellPeriodStep(Step):
         lo, hi = _opt(p["min_period"]), _opt(p["max_period"])
         if lo is not None and hi is not None and hi < lo:
             raise StepError(self.key,
-                            f"max_period（{hi}）不可小於 min_period（{lo}）；請把兩個值對調或改成 0（自動）。")
+                            f"max_period ({hi}) cannot be smaller than min_period "
+                            f"({lo}); swap the two values or set them to 0 (automatic).")
         img = to_uint8(ensure_gray(require_image(ctx, self.key, p["source"])))
 
         res = algo_period.estimate_period(img, min_period=lo, max_period=hi)
@@ -79,14 +87,17 @@ class CellPeriodStep(Step):
 
         if px is None or py is None:
             if px is None and py is None:
-                why = "這張圖看起來沒有週期性結構（X、Y 兩軸都量不到重複的 cell）"
+                why = ("this image shows no periodic structure (no repeating "
+                       "cell found on either the X or the Y axis)")
             else:
                 axis = "X" if px is not None else "Y"
                 other = "Y" if px is not None else "X"
-                why = (f"這張圖只有 {axis} 軸看得到週期性結構，{other} 軸量不到"
-                       f"（可能是 line/space 之類的單向版圖）")
-            ctx.warn(f"[{self.key}] {why}，量不出完整的 cell 週期；"
-                     "Golden Cell 這條路線在這一站可能不適用（可改走有 ref 的比對路線）。")
+                why = (f"this image is periodic along {axis} only, with nothing "
+                       f"measurable along {other} (it may be a one-directional "
+                       f"layout such as line/space)")
+            ctx.warn(f"[{self.key}] {why}, so a full cell period cannot be "
+                     "measured. The Golden Cell route may not suit this layer — "
+                     "consider a comparison route that has a real ref image.")
         ctx.meta["cell_period"] = {"px": int(px or 0), "py": int(py or 0)}
         ctx.add_features({
             "cell_px": float(px or 0),
@@ -106,26 +117,36 @@ class GoldenCellStep(Step):
     """
 
     key = "golden_cell"
-    label = "Golden Cell 參考圖"
+    label = "Golden Cell reference"
     category = CATEGORY_IMAGE
-    help = "把圖上重複的 cell 疊起來合成一張乾淨的參考圖 —— 沒有 ref 影像時（例如 Review SEM 單張）用這張當比對基準。"
+    help = ("Stack the repeating cells into one clean reference image — use it "
+            "as the comparison baseline when there is no ref image (a single "
+            "Review SEM frame, for instance).")
     requires_ref = False          # 這張卡是「製造 ref」的人，自己不需要 ref
     params = [
         ParamSpec(name="source", type="image_key", default="test",
-                  help="要拿來疊 cell 的影像流（通常是 test）。"),
+                  help="Image stream whose cells are stacked (usually test)."),
         ParamSpec(name="out", type="image_key", default="ref",
-                  help="合成參考圖要寫入的影像流名稱；維持預設 'ref' 的話，後面的對位／相減卡完全不用改。"),
+                  help=("Name of the image stream the synthetic reference goes "
+                        "to. Leave it at 'ref' and the align/subtract cards "
+                        "downstream need no changes at all.")),
         ParamSpec(name="method", type="choice", default="median",
                   choices=["mean", "median"],
-                  help="疊圖方式：median（中位數）比較不會被缺陷污染，推薦；mean（平均）比較快也比較平滑。"),
+                  help=("Stacking method: median resists contamination by defects "
+                        "and is recommended; mean is faster and smoother.")),
         ParamSpec(name="px", type="int", default=0, min=0, max=_MAX_PERIOD, unit="px",
-                  help="X 方向 cell 週期（像素）；0 = 自動（先用 cell_period 卡的結果，沒有就自己估）。"),
+                  help=("Cell period along X in pixels; 0 = automatic (uses the "
+                        "cell_period card's result, or estimates its own).")),
         ParamSpec(name="py", type="int", default=0, min=0, max=_MAX_PERIOD, unit="px",
-                  help="Y 方向 cell 週期（像素）；0 = 自動（先用 cell_period 卡的結果，沒有就自己估）。"),
+                  help=("Cell period along Y in pixels; 0 = automatic (uses the "
+                        "cell_period card's result, or estimates its own).")),
         ParamSpec(name="phase_search", type="bool", default=True,
-                  help="自動找晶格相位（要從哪一格開始切），避免切錯位置疊出來糊掉；除非很趕時間否則建議開著。"),
+                  help=("Find the lattice phase automatically (where to start "
+                        "cutting cells) so the stack does not come out blurred. "
+                        "Leave it on unless you are in a hurry.")),
         ParamSpec(name="ghost_warn", type="float", default=0.0, min=0.0, max=100.0,
-                  help="疊圖品質（golden_ghost，0–100 越高越清晰）低於此值就發警告；0 = 不檢查。"),
+                  help=("Warn when stack quality (golden_ghost, 0-100, higher is "
+                        "sharper) falls below this value; 0 = do not check.")),
     ]
     reads = ["test"]
     writes = ["ref"]
@@ -161,9 +182,11 @@ class GoldenCellStep(Step):
         if ex is None or ey is None:
             raise StepError(
                 self.key,
-                "找不到重複的 cell 結構（X/Y 至少一軸量不到週期），無法合成 Golden Cell 參考圖。"
-                "這一站的影像可能本來就不是週期性版圖 —— 請改用有 ref 影像的比對路線"
-                "（die-to-die / cell-to-cell），或在參數裡直接填入已知的 px / py。")
+                "no repeating cell structure found (at least one axis has no "
+                "measurable period), so a Golden Cell reference cannot be built. "
+                "This layer may simply not be a periodic layout — use a comparison "
+                "route with a real ref image (die-to-die / cell-to-cell), or enter "
+                "the known px / py in the parameters.")
         return int(ex), int(ey)
 
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
@@ -176,8 +199,10 @@ class GoldenCellStep(Step):
         if px > w or py > h:
             raise StepError(
                 self.key,
-                f"cell 週期（{px}x{py} px）比影像（{w}x{h} px）還大，一格都疊不出來。"
-                "請確認週期參數，或改用有 ref 影像的比對路線。")
+                f"the cell period ({px}x{py} px) is larger than the image "
+                f"({w}x{h} px), so not a single cell can be stacked. Check the "
+                f"period parameters, or use a comparison route with a real ref "
+                f"image.")
 
         origin = (0, 0)
         if p["phase_search"]:
@@ -187,13 +212,15 @@ class GoldenCellStep(Step):
         if n_cells < 2:
             raise StepError(
                 self.key,
-                f"影像只切得出 {n_cells} 格完整 cell（週期 {px}x{py} px），疊不出有意義的參考圖。"
-                "這一站的影像可能不夠大或不是週期性版圖 —— 請改用有 ref 影像的比對路線。")
+                f"the image fits only {n_cells} complete cell(s) (period "
+                f"{px}x{py} px), which is not enough for a meaningful reference. "
+                f"The image may be too small or not a periodic layout — use a "
+                f"comparison route with a real ref image.")
 
         stacked = algo_golden.stack_cells(gray, px, py, method=p["method"],
                                           origin=origin)
         if stacked.shape[:2] != (py, px):   # 理論上不會發生；防呆
-            raise StepError(self.key, f"疊圖失敗（得到 {stacked.shape} 而非 {(py, px)}）。")
+            raise StepError(self.key, f"stacking failed (got {stacked.shape} instead of {(py, px)}).")
 
         score, lap_var, edge_contrast = algo_golden.ghosting_score(stacked)
 
@@ -207,8 +234,9 @@ class GoldenCellStep(Step):
 
         warn_at = float(p["ghost_warn"])
         if warn_at > 0 and score < warn_at:
-            ctx.warn(f"[{self.key}] 疊出來的參考圖偏糊（golden_ghost={score:.1f} < {warn_at:g}）："
-                     "週期或相位可能沒抓對，比對結果請當心。")
+            ctx.warn(f"[{self.key}] the stacked reference looks blurred "
+                     f"(golden_ghost={score:.1f} < {warn_at:g}): the period or "
+                     f"phase may be wrong, so treat the comparison with care.")
 
         ctx.meta["golden_cell"] = {
             "px": int(px), "py": int(py), "ox": int(ox), "oy": int(oy),

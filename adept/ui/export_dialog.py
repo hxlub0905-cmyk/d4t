@@ -100,15 +100,15 @@ __all__ = [
 MODES = ("inplace", "annotate", "topn")
 
 MODE_LABELS = {
-    "inplace": "就地改欄（無損）",
-    "annotate": "另存新檔（含分數欄）",
-    "topn": "Top-N 另存",
+    "inplace": "Edit in place (lossless)",
+    "annotate": "Save as new file (with score columns)",
+    "topn": "Top-N as new file",
 }
 
 MODE_HELP = {
-    "inplace": "只改這份 KLARF 已經有的欄位，其他每一個 byte 都與原檔一模一樣。",
-    "annotate": "產生一份新的 KLARF，多出 ADCSCORE / ADCCLASS 欄位，原檔不動。",
-    "topn": "產生一份新的 KLARF，只留分數最高的前幾顆（或超過門檻的），方便先看重點。",
+    "inplace": "Only touches columns this KLARF already has; every other byte is identical to the original.",
+    "annotate": "Writes a new KLARF with extra ADCSCORE / ADCCLASS columns; the original is untouched.",
+    "topn": "Writes a new KLARF keeping only the highest-scoring defects (or those above a threshold).",
 }
 
 #: inplace 模式支援的四個目標欄位（實際有沒有這一欄，看載入的 KLARF）。
@@ -123,7 +123,7 @@ DEFAULT_SIZE_FEATURE = "cd_x_nm"
 #: 疊圖檔名前綴。
 OVERLAY_PREFIX = "overlay_"
 
-_NO_BIN_COL = "（不寫入 bin 欄）"
+_NO_BIN_COL = "(do not write a bin column)"
 _LEVEL_MARK = {"error": "✗", "warn": "△", "info": "✓"}
 
 
@@ -232,35 +232,35 @@ def run_export_job(spec: Dict[str, Any],
         if progress is not None:
             progress(done, total, msg)
 
-    tick("準備輸出…")
+    tick("Preparing export…")
 
     kl = spec.get("klarf")
     if kl:
-        tick("寫回 KLARF…")
+        tick("Writing KLARF…")
         plan = apply_writeback(kl["doc"], list(kl.get("results") or results),
                                str(kl["mode"]), str(kl["out_path"]),
                                **dict(kl.get("opts") or {}))
         outputs.append(str(kl["out_path"]))
-        notes.append("KLARF（%s）：改 %d 列、輸出 %d 列。"
+        notes.append("KLARF (%s): %d rows changed, %d rows written."
                      % (MODE_LABELS.get(plan.mode, plan.mode),
                         plan.n_rows_changed, plan.n_rows_out))
         done += 1
 
     csv_path = spec.get("csv")
     if csv_path:
-        tick("寫出 CSV…")
+        tick("Writing CSV…")
         outputs.append(write_csv(results, str(csv_path)))
-        notes.append("CSV：%d 列明細。" % len(results))
+        notes.append("CSV: %d detail rows." % len(results))
         done += 1
 
     xl = spec.get("excel")
     if xl:
-        tick("寫出 Excel…")
+        tick("Writing Excel…")
         path = write_excel(results, str(xl["path"]),
                            recipe=xl.get("recipe"),
                            ground_truth=xl.get("ground_truth"))
         outputs.append(path)
-        notes.append("Excel：摘要 / 明細 / 特徵統計 三張工作表。")
+        notes.append("Excel: Summary / Details / Feature stats worksheets.")
         done += 1
 
     ov = spec.get("overlay")
@@ -274,7 +274,7 @@ def run_export_job(spec: Dict[str, Any],
         total = max(1, len(steps) - 1 + len(rows))
         for i, r in enumerate(rows, 1):
             did = str(r.get("defect_id", ""))
-            tick("疊圖 %d / %d（#%s）" % (i, len(rows), did))
+            tick("Overlay %d / %d (#%s)" % (i, len(rows), did))
             item = items.get(did)
             try:
                 images, feats, blobs = _overlay_images(item, recipe, kind)
@@ -295,13 +295,13 @@ def run_export_job(spec: Dict[str, Any],
                 n_ok += 1
                 done += 1
         outputs.append(out_dir)
-        notes.append("疊圖：成功 %d 張，放在 %s。" % (n_ok, out_dir))
+        notes.append("Overlays: %d written to %s." % (n_ok, out_dir))
         if n_fail:
-            notes.append("有 %d 顆 defect 畫不出疊圖（多半是影像讀不到），已略過。"
+            notes.append("Skipped %d defects whose overlay could not be drawn (usually unreadable images)."
                          % n_fail)
 
     if progress is not None:
-        progress(total, total, "完成")
+        progress(total, total, "Done")
     return {"outputs": outputs, "notes": notes, "plan": plan,
             "n_overlays": n_ok, "n_overlay_failed": n_fail}
 
@@ -372,7 +372,7 @@ class ExportDialog(QDialog):
                  default_dir: Optional[str] = None,
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("輸出…")
+        self.setWindowTitle("Export…")
         self.setMinimumSize(720, 560)
 
         self.results: List[Dict[str, Any]] = list(results or [])
@@ -432,7 +432,7 @@ class ExportDialog(QDialog):
         outer.setContentsMargins(10, 10, 10, 10)
         outer.setSpacing(8)
 
-        head = QLabel("這一批共 %d 顆 defect 的結果，要輸出成什麼？" % len(self.results),
+        head = QLabel("This batch has %d defect results — what would you like to export?" % len(self.results),
                       self)
         head.setObjectName("paramTitle")
         outer.addWidget(head)
@@ -462,11 +462,11 @@ class ExportDialog(QDialog):
         outer.addWidget(self.status_label)
 
         buttons = QDialogButtonBox(self)
-        self.btn_write = QPushButton("寫出", self)
+        self.btn_write = QPushButton("Write", self)
         self.btn_write.setObjectName("primary")
-        self.btn_write.setToolTip("按「預覽變更」確認過之後才會開放")
+        self.btn_write.setToolTip("Unlocked once you have pressed “Preview changes”")
         self.btn_write.clicked.connect(self._on_write_clicked)
-        self.btn_close = QPushButton("關閉", self)
+        self.btn_close = QPushButton("Close", self)
         self.btn_close.clicked.connect(self.reject)
         buttons.addButton(self.btn_write, QDialogButtonBox.AcceptRole)
         buttons.addButton(self.btn_close, QDialogButtonBox.RejectRole)
@@ -474,16 +474,16 @@ class ExportDialog(QDialog):
 
     # ---- (a) KLARF ------------------------------------------------------
     def _build_klarf_group(self) -> QWidget:
-        box = QGroupBox("(a) KLARF 寫回", self)
+        box = QGroupBox("(a) Write back to KLARF", self)
         lay = QVBoxLayout(box)
         lay.setSpacing(6)
 
-        self.chk_klarf = QCheckBox("把 ADC 判定寫回 KLARF", box)
+        self.chk_klarf = QCheckBox("Write the ADC verdict back to KLARF", box)
         self.chk_klarf.setChecked(self.doc is not None)
         self.chk_klarf.setEnabled(self.doc is not None)
         if self.doc is None:
-            self.chk_klarf.setToolTip("還沒有載入 KLARF，沒有東西可以寫回。")
-            hint = QLabel("（還沒有載入 KLARF —— 先在主視窗「開啟 KLARF…」）", box)
+            self.chk_klarf.setToolTip("No KLARF loaded — nothing to write back to.")
+            hint = QLabel("(No KLARF loaded — use “Open KLARF…” in the main window first)", box)
             hint.setObjectName("paramHint")
             lay.addWidget(self.chk_klarf)
             lay.addWidget(hint)
@@ -513,20 +513,21 @@ class ExportDialog(QDialog):
             lay.addWidget(page)
 
         row = QHBoxLayout()
-        row.addWidget(QLabel("輸出檔", box))
+        row.addWidget(QLabel("Output file", box))
         self.edit_klarf_out = QLineEdit(self._default_path("_adc.001"), box)
-        self.edit_klarf_out.setToolTip("寫出來的 KLARF 放哪裡（預設不覆蓋原檔）")
+        self.edit_klarf_out.setToolTip("Where the new KLARF goes (the original is not overwritten by default)")
         self.edit_klarf_out.textChanged.connect(self._invalidate_plan)
         row.addWidget(self.edit_klarf_out, 1)
-        btn = QPushButton("瀏覽…", box)
+        btn = QPushButton("Browse…", box)
         btn.clicked.connect(self._pick_klarf_out)
         row.addWidget(btn)
         lay.addLayout(row)
 
         prow = QHBoxLayout()
-        self.btn_preview = QPushButton("預覽變更", box)
-        self.btn_preview.setToolTip("乾跑一次：看清楚會改幾列、動到哪些欄位，"
-                                    "確認之後才會開放「寫出」")
+        self.btn_preview = QPushButton("Preview changes", box)
+        self.btn_preview.setToolTip("Dry run: shows exactly how many rows and "
+                                    "which columns change. “Write” unlocks "
+                                    "afterwards.")
         self.btn_preview.clicked.connect(self._on_preview_clicked)
         prow.addWidget(self.btn_preview)
         prow.addStretch(1)
@@ -536,7 +537,7 @@ class ExportDialog(QDialog):
         self.plan_view.setReadOnly(True)
         self.plan_view.setMinimumHeight(150)
         self.plan_view.setPlaceholderText(
-            "按「預覽變更」看這次會改什麼（不會寫任何檔案）。")
+            "Press “Preview changes” to see what this would do (no file is written).")
         lay.addWidget(self.plan_view)
         return box
 
@@ -556,8 +557,8 @@ class ExportDialog(QDialog):
         else:
             control.setEnabled(False)
             control.setChecked(False)
-            hint.setText("這份 KLARF 沒有「%s」欄位 —— 改用「另存新檔（含分數欄）」"
-                         "就能新增欄位。" % name)
+            hint.setText("This KLARF has no “%s” column — use “Save as new file "
+                         "(with score columns)” to add one." % name)
             control.setToolTip(hint.text())
         h.addWidget(hint, 1)
         self._col_controls[name] = control
@@ -570,7 +571,7 @@ class ExportDialog(QDialog):
         lay.setContentsMargins(16, 2, 2, 2)
         lay.setSpacing(4)
 
-        head = QLabel("要把判定寫進哪幾個既有欄位？（都不選 = 輸出檔與原檔完全相同）",
+        head = QLabel("Which existing columns should the verdict go into? (none selected = output identical to the original)",
                       page)
         head.setObjectName("paramHint")
         head.setWordWrap(True)
@@ -579,19 +580,19 @@ class ExportDialog(QDialog):
         self.chk_class_col = QCheckBox("CLASSNUMBER", page)
         self.chk_class_col.toggled.connect(self._invalidate_plan)
         lay.addWidget(self._column_row(page, "CLASSNUMBER", self.chk_class_col,
-                                       "把 bin 寫進分類欄（下游 review 站最常看這欄）。"))
+                                       "Write the bin into the class column (the one downstream review stations read most)."))
 
         self.rb_no_bin_col = QRadioButton(_NO_BIN_COL, page)
         self.rb_no_bin_col.setChecked(True)
-        self.rb_no_bin_col.setToolTip("bin 欄一次只能寫一個（KLARF 寫回引擎的限制）")
+        self.rb_no_bin_col.setToolTip("Only one bin column can be written at a time (a limit of the KLARF writer)")
         self.rb_no_bin_col.toggled.connect(self._invalidate_plan)
         lay.addWidget(self.rb_no_bin_col)
 
         self.bin_col_group = QButtonGroup(page)
         self.bin_col_group.addButton(self.rb_no_bin_col)
         for name, what in (
-                ("ROUGHBINNUMBER", "把 bin 寫進粗分 bin 欄。"),
-                ("FINEBINNUMBER", "把 bin 寫進細分 bin 欄。")):
+                ("ROUGHBINNUMBER", "Write the bin into the coarse bin column."),
+                ("FINEBINNUMBER", "Write the bin into the fine bin column.")):
             rb = QRadioButton(name, page)
             rb.toggled.connect(self._invalidate_plan)
             self.bin_col_group.addButton(rb)
@@ -600,12 +601,12 @@ class ExportDialog(QDialog):
         self.chk_size_col = QCheckBox("DSIZE", page)
         self.chk_size_col.toggled.connect(self._invalidate_plan)
         lay.addWidget(self._column_row(
-            page, "DSIZE", self.chk_size_col, "把量到的尺寸特徵寫進尺寸欄。"))
+            page, "DSIZE", self.chk_size_col, "Write the measured size feature into the size column."))
 
         srow = QHBoxLayout()
-        srow.addWidget(QLabel("　尺寸用哪個特徵", page))
+        srow.addWidget(QLabel("   Size feature", page))
         self.size_feature_combo = QComboBox(page)
-        self.size_feature_combo.setToolTip("DSIZE 要寫哪一個特徵的值")
+        self.size_feature_combo.setToolTip("Which feature value goes into DSIZE")
         for name in (self._features or [DEFAULT_SIZE_FEATURE]):
             self.size_feature_combo.addItem(name)
         if DEFAULT_SIZE_FEATURE in self._features:
@@ -621,14 +622,14 @@ class ExportDialog(QDialog):
         lay.setContentsMargins(16, 2, 2, 2)
         lay.setSpacing(4)
 
-        head = QLabel("會新增兩欄：ADCSCORE（分數）與 ADCCLASS（bin）。"
-                      "下面可以再挑要一起寫進去的特徵欄。", page)
+        head = QLabel("Adds two columns: ADCSCORE (score) and ADCCLASS (bin). "
+                      "Pick any extra feature columns below.", page)
         head.setObjectName("paramHint")
         head.setWordWrap(True)
         lay.addWidget(head)
 
         self.feature_list = QListWidget(page)
-        self.feature_list.setToolTip("勾起來的特徵會各自變成一個 KLARF 欄位")
+        self.feature_list.setToolTip("Each ticked feature becomes its own KLARF column")
         self.feature_list.setMaximumHeight(140)
         for name in self._features:
             it = QListWidgetItem(str(name), self.feature_list)
@@ -636,7 +637,7 @@ class ExportDialog(QDialog):
             it.setCheckState(Qt.Unchecked)
         if not self._features:
             self.feature_list.setEnabled(False)
-            empty = QLabel("（這批結果沒有任何特徵可以選）", page)
+            empty = QLabel("(this batch has no features to pick from)", page)
             empty.setObjectName("paramHint")
             lay.addWidget(self.feature_list)
             lay.addWidget(empty)
@@ -652,19 +653,19 @@ class ExportDialog(QDialog):
         lay.setSpacing(4)
 
         row1 = QHBoxLayout()
-        row1.addWidget(QLabel("取前幾顆", page))
+        row1.addWidget(QLabel("Keep top", page))
         self.spin_topn = QSpinBox(page)
         self.spin_topn.setRange(0, 1000000)
         self.spin_topn.setValue(min(100, max(1, len(self.results))))
-        self.spin_topn.setToolTip("依分數由高到低取這麼多顆；填 0 = 改用下面的分數門檻")
+        self.spin_topn.setToolTip("Keep this many defects by descending score; 0 = use the score threshold below instead")
         self.spin_topn.valueChanged.connect(self._invalidate_plan)
         row1.addWidget(self.spin_topn)
         row1.addStretch(1)
         lay.addLayout(row1)
 
         row2 = QHBoxLayout()
-        self.chk_min_score = QCheckBox("改用分數門檻（≥）", page)
-        self.chk_min_score.setToolTip("勾起來就改成「留下分數大於等於這個值的」")
+        self.chk_min_score = QCheckBox("Use a score threshold (>=) instead", page)
+        self.chk_min_score.setToolTip("Tick to keep every defect whose score is greater than or equal to this value")
         self.chk_min_score.toggled.connect(self._invalidate_plan)
         row2.addWidget(self.chk_min_score)
         self.spin_min_score = QDoubleSpinBox(page)
@@ -675,15 +676,16 @@ class ExportDialog(QDialog):
         row2.addStretch(1)
         lay.addLayout(row2)
 
-        self.chk_renumber = QCheckBox("DEFECTID 重新編號為 1、2、3…", page)
+        self.chk_renumber = QCheckBox("Renumber DEFECTID as 1, 2, 3…", page)
         self.chk_renumber.setChecked(True)
         self.chk_renumber.setToolTip(
-            "只留子集之後編號會跳號；勾起來會重新編。"
-            "注意：TIFF 頁碼不會跟著改（本工具不動原始影像）。")
+            "Keeping a subset leaves gaps in the ids; tick to renumber. Note: "
+            "TIFF page numbers are not renumbered (this tool never touches the "
+            "original images).")
         self.chk_renumber.toggled.connect(self._invalidate_plan)
         lay.addWidget(self.chk_renumber)
 
-        self.chk_topn_annotate = QCheckBox("同時加上 ADCSCORE / ADCCLASS 欄", page)
+        self.chk_topn_annotate = QCheckBox("Also add ADCSCORE / ADCCLASS columns", page)
         self.chk_topn_annotate.setChecked(True)
         self.chk_topn_annotate.toggled.connect(self._invalidate_plan)
         lay.addWidget(self.chk_topn_annotate)
@@ -691,53 +693,53 @@ class ExportDialog(QDialog):
 
     # ---- (b) 報表 --------------------------------------------------------
     def _build_report_group(self) -> QWidget:
-        box = QGroupBox("(b) 報表", self)
+        box = QGroupBox("(b) Reports", self)
         lay = QVBoxLayout(box)
         lay.setSpacing(6)
 
-        self.chk_csv = QCheckBox("CSV 明細（每顆一列，含所有特徵）", box)
+        self.chk_csv = QCheckBox("CSV details (one row per defect, all features)", box)
         self.chk_csv.toggled.connect(self._on_any_output_toggled)
         lay.addWidget(self.chk_csv)
         self.edit_csv_out, csv_row = self._path_row(
-            box, self._default_path("_features.csv"), "選 CSV 輸出位置",
+            box, self._default_path("_features.csv"), "Choose where the CSV goes",
             self._pick_csv_out)
         lay.addLayout(csv_row)
 
-        self.chk_excel = QCheckBox("Excel 報告（摘要 / 明細 / 特徵統計 三張表）", box)
+        self.chk_excel = QCheckBox("Excel report (Summary / Details / Feature stats)", box)
         self.chk_excel.toggled.connect(self._on_any_output_toggled)
         lay.addWidget(self.chk_excel)
         self.edit_excel_out, xl_row = self._path_row(
-            box, self._default_path("_report.xlsx"), "選 Excel 輸出位置",
+            box, self._default_path("_report.xlsx"), "Choose where the Excel file goes",
             self._pick_excel_out)
         lay.addLayout(xl_row)
         return box
 
     # ---- (c) 疊圖 --------------------------------------------------------
     def _build_overlay_group(self) -> QWidget:
-        box = QGroupBox("(c) Overlay 影像", self)
+        box = QGroupBox("(c) Overlay images", self)
         lay = QVBoxLayout(box)
         lay.setSpacing(6)
 
-        self.chk_overlay = QCheckBox("輸出疊圖 PNG（紅框標出主 blob）", box)
+        self.chk_overlay = QCheckBox("Write overlay PNGs (the main blob boxed in red)", box)
         self.chk_overlay.toggled.connect(self._on_any_output_toggled)
         lay.addWidget(self.chk_overlay)
 
         row = QHBoxLayout()
-        row.addWidget(QLabel("最多畫幾顆", box))
+        row.addWidget(QLabel("Draw at most", box))
         self.spin_overlay_limit = QSpinBox(box)
         self.spin_overlay_limit.setRange(1, 100000)
         self.spin_overlay_limit.setValue(min(50, max(1, len(self.results))))
-        self.spin_overlay_limit.setToolTip("依分數由高到低取這麼多顆來畫（畫圖很花時間）")
+        self.spin_overlay_limit.setToolTip("Draw this many defects by descending score (drawing is slow)")
         row.addWidget(self.spin_overlay_limit)
         row.addStretch(1)
         lay.addLayout(row)
 
         self.edit_overlay_dir, orow = self._path_row(
-            box, os.path.join(self._dir, "overlay"), "選疊圖輸出資料夾",
+            box, os.path.join(self._dir, "overlay"), "Choose the overlay output folder",
             self._pick_overlay_dir)
         lay.addLayout(orow)
 
-        hint = QLabel("疊圖會重跑一次流程以取得 diff 與 blob；沒有 recipe 時只畫原圖。",
+        hint = QLabel("Overlays re-run the pipeline to obtain diff and blob; without a recipe only the raw image is drawn.",
                       box)
         hint.setObjectName("paramHint")
         hint.setWordWrap(True)
@@ -750,7 +752,7 @@ class ExportDialog(QDialog):
         edit = QLineEdit(default, parent)
         edit.setToolTip(tip)
         row.addWidget(edit, 1)
-        btn = QPushButton("瀏覽…", parent)
+        btn = QPushButton("Browse…", parent)
         btn.setToolTip(tip)
         btn.clicked.connect(slot)
         row.addWidget(btn)
@@ -782,7 +784,7 @@ class ExportDialog(QDialog):
             return
         if self._plan is not None or self._plan_text:
             self.plan_view.setPlainText(
-                "設定改過了 —— 請重新按「預覽變更」確認這一版會做什麼。")
+                "Settings changed — press “Preview changes” again to confirm what this version would do.")
         self._plan = None
         self._plan_text = ""
         self._update_write_enabled()
@@ -926,7 +928,7 @@ class ExportDialog(QDialog):
         """
         self._error_text = ""
         if not self._klarf_enabled():
-            self._fail("沒有要寫回 KLARF —— 勾選「把 ADC 判定寫回 KLARF」再預覽。")
+            self._fail("Nothing to write back — tick “Write the ADC verdict back to KLARF” first.")
             return None
         try:
             plan = plan_writeback(self.doc, self.results, self.mode(),
@@ -934,7 +936,7 @@ class ExportDialog(QDialog):
         except ExportError as e:
             self._plan = None
             self._plan_text = ""
-            self.plan_view.setPlainText("✗ 這樣設定沒辦法寫出來：\n\n%s" % e)
+            self.plan_view.setPlainText("✗ These settings cannot be written:\n\n%s" % e)
             self._fail(str(e))
             self._update_write_enabled()
             return None
@@ -942,7 +944,7 @@ class ExportDialog(QDialog):
             self._plan = None
             self._plan_text = ""
             msg = "%s：%s" % (type(e).__name__, e)
-            self.plan_view.setPlainText("✗ 預覽失敗：\n\n%s" % msg)
+            self.plan_view.setPlainText("✗ Preview failed:\n\n%s" % msg)
             self._fail(msg)
             self._update_write_enabled()
             return None
@@ -950,7 +952,7 @@ class ExportDialog(QDialog):
         self._plan = plan
         self._plan_text = describe_plan(plan, self.output_path("klarf"))
         self.plan_view.setPlainText(self._plan_text)
-        self.status_label.setText("預覽完成 —— 確認上面的內容沒問題再按「寫出」。")
+        self.status_label.setText("Preview done — check the plan above, then press “Write”.")
         self._update_write_enabled()
         return plan
 
@@ -1002,20 +1004,20 @@ class ExportDialog(QDialog):
         self._error_text = ""
         self._summary = None
         if self._klarf_enabled() and self._plan is None:
-            self._fail("請先按「預覽變更」看過會發生什麼事，再寫出。")
+            self._fail("Press “Preview changes” first to see what would happen.")
             return None
         spec = self.export_spec()
         if not any(spec.get(k) for k in ("klarf", "csv", "excel", "overlay")):
-            self._fail("沒有勾選任何要輸出的東西。")
+            self._fail("Nothing is selected for export.")
             return None
         for key, label in (("csv", "CSV"), ("excel", "Excel")):
             target = spec.get(key)
             path = target if isinstance(target, str) else (target or {}).get("path")
             if target and not str(path or "").strip():
-                self._fail("要輸出 %s，但還沒有指定輸出檔路徑。" % label)
+                self._fail("%s is selected but no output path was given." % label)
                 return None
         if spec.get("klarf") and not str(spec["klarf"]["out_path"] or "").strip():
-            self._fail("要寫回 KLARF，但還沒有指定輸出檔路徑。")
+            self._fail("KLARF write-back is selected but no output path was given.")
             return None
 
         if sync:
@@ -1034,9 +1036,9 @@ class ExportDialog(QDialog):
         self.progress_bar.setRange(0, 0)         # 忙碌動畫，收到第一筆進度就換
         self.btn_write.setEnabled(False)
         if not self.worker.start(spec):
-            self.status_label.setText("已經在輸出了，請稍候。")
+            self.status_label.setText("An export is already running — please wait.")
             return None
-        self.status_label.setText("輸出中…")
+        self.status_label.setText("Exporting…")
         return None
 
     def _on_write_clicked(self) -> None:
@@ -1058,14 +1060,14 @@ class ExportDialog(QDialog):
         self.progress_bar.setVisible(False)
         outputs = list(self._summary.get("outputs") or [])
         notes = list(self._summary.get("notes") or [])
-        text = "輸出完成：\n" + "\n".join("· " + n for n in notes)
+        text = "Export finished:\n" + "\n".join("· " + n for n in notes)
         if outputs:
-            text += "\n檔案：\n" + "\n".join("　" + p for p in outputs)
+            text += "\nFiles:\n" + "\n".join("　" + p for p in outputs)
         self.status_label.setText(text)
         self._update_write_enabled()
         self.exported.emit(self._summary)
         if self._interactive:
-            QMessageBox.information(self, "輸出完成", text)
+            QMessageBox.information(self, "Export finished", text)
 
     def _on_failed(self, msg: str) -> None:
         self.progress_bar.setVisible(False)
@@ -1077,32 +1079,32 @@ class ExportDialog(QDialog):
         self._error_text = str(msg)
         self.status_label.setText("⚠ %s" % msg)
         if self._interactive:
-            QMessageBox.warning(self, "沒辦法輸出", str(msg))
+            QMessageBox.warning(self, "Cannot export", str(msg))
 
     # ---- 檔案對話框（測試不走這條路）--------------------------------------
     def _pick_klarf_out(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
-            self, "輸出 KLARF", self.output_path("klarf"),
-            "KLARF (*.001 *.klarf *.txt);;所有檔案 (*)")
+            self, "Export KLARF", self.output_path("klarf"),
+            "KLARF (*.001 *.klarf *.txt);;All files (*)")
         if path:
             self.set_output_path("klarf", path)
 
     def _pick_csv_out(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
-            self, "輸出 CSV", self.output_path("csv"), "CSV (*.csv);;所有檔案 (*)")
+            self, "Export CSV", self.output_path("csv"), "CSV (*.csv);;All files (*)")
         if path:
             self.set_output_path("csv", path)
 
     def _pick_excel_out(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
-            self, "輸出 Excel", self.output_path("excel"),
-            "Excel (*.xlsx);;所有檔案 (*)")
+            self, "Export Excel", self.output_path("excel"),
+            "Excel (*.xlsx);;All files (*)")
         if path:
             self.set_output_path("excel", path)
 
     def _pick_overlay_dir(self) -> None:
         path = QFileDialog.getExistingDirectory(
-            self, "選疊圖輸出資料夾", self.output_path("overlay"))
+            self, "Choose the overlay output folder", self.output_path("overlay"))
         if path:
             self.set_output_path("overlay", path)
 
@@ -1124,28 +1126,28 @@ def describe_plan(plan: Any, out_path: str = "") -> str:
     健檢結果用三種符號：``✓`` 沒問題 / ``△`` 提醒 / ``✗`` 會出事。
     """
     mode = getattr(plan, "mode", "?")
-    lines = ["模式：%s" % MODE_LABELS.get(mode, mode)]
+    lines = ["Mode: %s" % MODE_LABELS.get(mode, mode)]
     if out_path:
-        lines.append("輸出檔：%s" % out_path)
+        lines.append("Output file: %s" % out_path)
     lines.append("")
-    lines.append("會改到 %d 列 defect。" % int(getattr(plan, "n_rows_changed", 0)))
+    lines.append("Rows changed: %d defects." % int(getattr(plan, "n_rows_changed", 0)))
     touched = list(getattr(plan, "columns_touched", []) or [])
     added = list(getattr(plan, "columns_added", []) or [])
-    lines.append("動到的既有欄位：%s" % ("、".join(touched) if touched else "（沒有）"))
-    lines.append("新增的欄位：%s" % ("、".join(added) if added else "（沒有）"))
-    lines.append("輸出檔會有 %d 列 defect。" % int(getattr(plan, "n_rows_out", 0)))
+    lines.append("Existing columns touched: %s" % (", ".join(touched) if touched else "(none)"))
+    lines.append("Columns added: %s" % (", ".join(added) if added else "(none)"))
+    lines.append("The output file will have %d defect rows." % int(getattr(plan, "n_rows_out", 0)))
 
     notes = list(getattr(plan, "notes", []) or [])
     if notes:
         lines.append("")
-        lines.append("說明：")
+        lines.append("Notes:")
         lines.extend("· %s" % n for n in notes)
 
     lines.append("")
-    lines.append("輸出檔健檢：")
+    lines.append("Output health check:")
     issues = list(getattr(plan, "issues", []) or [])
     if not issues:
-        lines.append("✓ 沒有發現問題。")
+        lines.append("✓ No problems found.")
     for it in issues:
         level = str(getattr(it, "level", "info"))
         mark = _LEVEL_MARK.get(level, "△")
@@ -1153,7 +1155,7 @@ def describe_plan(plan: Any, out_path: str = "") -> str:
         count = int(getattr(it, "count", 0) or 0)
         head = "%s %s" % (mark, title)
         if count:
-            head += "（%d 筆）" % count
+            head += "(%d entries)" % count
         lines.append(head)
         detail = str(getattr(it, "detail", "") or "").strip()
         if detail:

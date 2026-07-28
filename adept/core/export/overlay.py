@@ -59,10 +59,10 @@ def to_display_rgb(arr: np.ndarray) -> np.ndarray:
         a = a[:, :, 0]
     if a.ndim not in (2, 3):
         raise ExportError(
-            "疊圖只吃 2 維灰階或 3 通道彩色影像，收到的形狀是 {}。".format(a.shape))
+            "Overlays accept a 2-D grayscale or 3-channel colour image only; got shape {}.".format(a.shape))
     if a.ndim == 3 and a.shape[2] not in (3, 4):
         raise ExportError(
-            "疊圖只吃 3 或 4 通道的彩色影像，收到 {} 通道。".format(a.shape[2]))
+            "Overlays accept 3- or 4-channel colour images only; got {} channels.".format(a.shape[2]))
 
     if a.dtype != np.uint8:
         f = a.astype(np.float32)
@@ -151,8 +151,8 @@ def _pick_base(images: Dict[str, Any]) -> Tuple[str, np.ndarray]:
         if images[k] is not None:
             return k, images[k]
     raise ExportError(
-        "這顆 defect 沒有可以畫的影像（images 是空的）。"
-        "請確認 pipeline 的載入卡有跑成功。")
+        "This defect has no image to draw (images is empty). Check that the "
+        "load card in the pipeline ran successfully.")
 
 
 def _draw_box(panel: np.ndarray, box: Tuple[int, int, int, int],
@@ -224,13 +224,13 @@ def render_overlay(images: Dict[str, Any],
     """
     if not isinstance(images, dict) or not images:
         raise ExportError(
-            "render_overlay 需要一個影像 dict（例如 ctx.images），收到的是空的。")
+            "render_overlay needs a dict of images (e.g. ctx.images); it got an empty one.")
     features = dict(features or {})
 
     if base_key is not None:
         if base_key not in images or images[base_key] is None:
             raise ExportError(
-                "指定的底圖影像流「{}」不存在；這顆 defect 有的是：{}。".format(
+                "The requested base image stream \"{}\" does not exist; this defect has: {}.".format(
                     base_key, "、".join(sorted(images))))
         base = images[base_key]
     else:
@@ -284,7 +284,7 @@ def write_png(arr: np.ndarray, path: str) -> str:
         a = cv2.cvtColor(a, cv2.COLOR_RGB2BGR)
     ok, buf = cv2.imencode(".png", a)
     if not ok:      # pragma: no cover — PNG 編碼失敗實務上只在記憶體不足時發生
-        raise ExportError("PNG 編碼失敗，無法寫出 {}。".format(path))
+        raise ExportError("PNG encoding failed; cannot write {}.".format(path))
     tmp = path + ".tmp"
     buf.tofile(tmp)
     os.replace(tmp, path)

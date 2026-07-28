@@ -88,7 +88,7 @@ def test_window_constructs_with_library_cards(window):
     # 卡片庫用的是真實 registry，不是手捏假資料
     assert window.library.entry("snr_map") is not None
     assert window.library.entry("load_patch") is not None
-    assert window.library.section_titles() == ["影像 Image", "算法 Algo", "ADC 判定"]
+    assert window.library.section_titles() == ["Image", "Algorithm", "ADC Decision"]
 
     # 空狀態：流程沒有節點、預覽沒有影像、直方圖沒有資料
     assert window.model.node_order == []
@@ -178,7 +178,7 @@ def test_param_edit_valid_then_invalid(window, synlot):
     window._on_param_edited("window", 999)
     assert window.model.nodes["snr"].params["window"] == 15
     assert window.param_form.has_error("window") is True
-    assert "上限" in window.param_form.hint_text("window")
+    assert "maximum" in window.param_form.hint_text("window")
 
     # 再改一個合法值 → 錯誤狀態清掉
     window._on_param_edited("window", 15)
@@ -227,7 +227,7 @@ def test_run_trial_fills_histogram(window, synlot):
     assert window.histogram.has_data() is True
     assert sum(window.histogram._counts) == 8
     assert window.histogram.bin_summary_text().startswith("bin ")
-    assert "試跑完成" in window.status_text()
+    assert "Run finished" in window.status_text()
 
 
 # --------------------------------------------------------------------------- #
@@ -248,7 +248,7 @@ def test_threshold_live_preview_vs_commit(window, synlot):
     window._on_threshold_changed(77.25)
     assert window.model.threshold == pytest.approx(before)
     live = window.histogram.bin_summary_text()
-    assert live == "　".join(
+    assert live == "   ".join(
         "bin %s=%s" % (k, v)
         for k, v in sorted(vm_mod.rebin(window.trial_scores, 77.25,
                                         window.model.bins).items()))
@@ -275,6 +275,86 @@ def test_save_recipe_round_trip(window, synlot, tmp_path):
     assert sorted(loaded.nodes) == sorted(window.model.nodes)
     assert loaded.nodes["snr"].params["window"] == \
         window.model.nodes["snr"].params["window"]
+
+
+# --------------------------------------------------------------------------- #
+# 8.5 M7 推廣鐵則：前置條件不滿足的動作要「變灰 + 說明原因」，不是按了才罵人
+# --------------------------------------------------------------------------- #
+def test_actions_are_disabled_until_their_preconditions_hold(qapp, synlot):
+    """按鈕的可用性要跟著狀態走，而且 tooltip 要講得出為什麼不能按。
+
+    舊行為是全部亮著、按下去才在狀態列說「還沒有載入資料集」——狀態列在螢幕
+    最下角，第一次用的人只會覺得「我按了，沒反應」。
+    """
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    try:
+        # 什麼都還沒有：跑不了、存不了、輸出不了
+        assert win.btn_trial.isEnabled() is False
+        assert win.act_run_all.isEnabled() is False
+        assert win.spin_trial_n.isEnabled() is False
+        assert win.btn_save_recipe.isEnabled() is False
+        assert win.btn_export.isEnabled() is False
+        for w in (win.btn_trial, win.btn_save_recipe, win.btn_export):
+            assert w.toolTip().strip(), "變灰的按鈕一定要說明原因"
+
+        # 只有資料集 → 還是不能跑（流程是空的），但理由要換一句
+        assert win.load_dataset_path(synlot["klarf"], sync=True) is True
+        assert win.btn_trial.isEnabled() is False
+        assert "pipeline is empty" in win.btn_trial.toolTip()
+        assert win.btn_save_recipe.isEnabled() is False
+
+        # 資料集 + 流程 → 可以跑；但還沒有結果，所以還不能輸出
+        assert win.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
+        assert win.btn_trial.isEnabled() is True
+        assert win.act_run_all.isEnabled() is True
+        assert win.spin_trial_n.isEnabled() is True
+        assert win.btn_save_recipe.isEnabled() is True
+        assert win.btn_export.isEnabled() is False
+        assert "No results yet" in win.btn_export.toolTip()
+
+        # 跑完 → 輸出解鎖
+        assert win.run_trial(8, workers=1, sync=True) is True
+        assert win.btn_export.isEnabled() is True
+    finally:
+        win.close()
+
+
+def test_trial_count_follows_the_dataset_size(qapp, synlot):
+    """對一份只有 8 顆的 lot 顯示「First 200」沒有意義，只會讓人以為看錯了。"""
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    try:
+        assert win.spin_trial_n.value() == studio_mod.DEFAULT_TRIAL_N
+        win.load_dataset_path(synlot["klarf"], sync=True)
+        assert win.spin_trial_n.value() == max(win.spin_trial_n.minimum(), 8)
+    finally:
+        win.close()
+
+
+def test_run_all_lives_in_the_trial_button_menu(window):
+    """主要動作只留一顆 ▶；破壞性比較大的「跑整批」降級成選單項目。"""
+    menu = window.btn_trial.menu()
+    assert menu is not None, "「跑整批」要收在試跑鈕的下拉裡"
+    assert [a.text() for a in menu.actions()] == ["Run all defects"]
+    assert window.btn_trial.text() == "▶ Run trial"
+    # 舊版並排的第二顆 ▶ 鈕已經不存在
+    assert not hasattr(window, "btn_full")
+
+
+# --------------------------------------------------------------------------- #
+# 8.6 M7：游標讀數有自己的位置，不准洗掉狀態列
+# --------------------------------------------------------------------------- #
+def test_cursor_readout_does_not_overwrite_the_status_bar(window, synlot):
+    _loaded(window, synlot)
+    window._status("Run finished: 8 defects")
+
+    window._on_cursor_info("x 12  y 30  ·  gray 187")
+    assert window.cursor_text() == "x 12  y 30  ·  gray 187"
+    assert window.status_text() == "Run finished: 8 defects", \
+        "滑鼠飄過影像不該把剛才的結果訊息洗掉"
+
+    window._on_cursor_info("")            # 游標離開影像
+    assert window.cursor_text() == ""
+    assert window.status_text() == "Run finished: 8 defects"
 
 
 # --------------------------------------------------------------------------- #

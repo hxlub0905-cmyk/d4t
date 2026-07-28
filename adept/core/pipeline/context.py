@@ -41,12 +41,14 @@ class Context:
             return self.images[key]
         except KeyError:
             raise ContextError(
-                f"影像流 '{key}' 不存在；目前有：{sorted(self.images)}"
+                f"image stream '{key}' does not exist; available: "
+                f"{sorted(self.images)}"
             ) from None
 
     def set_image(self, key: str, arr: np.ndarray) -> None:
         if not isinstance(arr, np.ndarray):
-            raise ContextError(f"set_image('{key}') 需要 numpy 陣列，收到 {type(arr).__name__}")
+            raise ContextError(f"set_image('{key}') needs a numpy array, got "
+                               f"{type(arr).__name__}")
         self.images[key] = arr
 
     # ---- features ---------------------------------------------------------

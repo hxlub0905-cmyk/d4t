@@ -25,19 +25,25 @@ class RoiSnrStep(Step):
     """ROI SNR：缺陷區對周邊背景的訊噪比與對比統計。"""
 
     key = "roi_snr"
-    label = "ROI 訊噪比"
+    label = "ROI SNR"
     category = CATEGORY_ALGO
-    help = "量缺陷區域相對周邊背景的訊噪比（含正負號：暗缺陷為負）與對比、邊緣銳利度。"
+    help = ("Measure the defect region's signal-to-noise against the "
+            "surrounding background (signed — dark defects are negative), "
+            "plus contrast and edge sharpness.")
     params = [
         ParamSpec(name="source", type="image_key", default="diff",
-                  help="量測用的影像流（通常是 diff；用未取絕對值的 diff 才看得出亮暗方向）。"),
+                  help=("Image stream to measure on (usually diff; leave diff "
+                        "unsigned to keep bright/dark direction visible).")),
         ParamSpec(name="mode", type="choice", default="blob",
                   choices=["blob", "center"],
-                  help="blob=用最大 blob 的 bbox 當 ROI（需先跑 blob_segment）；center=影像正中央固定方框。"),
+                  help=("blob = use the main blob's bounding box as the ROI "
+                        "(run blob_segment first); center = a fixed box at the "
+                        "middle of the image.")),
         ParamSpec(name="box_size", type="int", default=24, min=4, max=512,
-                  help="center 模式的方框邊長（像素）。"),
+                  help="Box side length in pixels for center mode."),
         ParamSpec(name="background_margin", type="int", default=20, min=1, max=200,
-                  help="背景取樣寬度（像素）：ROI 外圍這圈拿來當背景統計。"),
+                  help=("Background sampling width in pixels: the ring outside the "
+                        "ROI used for background statistics.")),
     ]
     reads = ["diff"]
     writes: List[str] = []
@@ -56,7 +62,8 @@ class RoiSnrStep(Step):
         if p["mode"] == "blob":
             blobs = ctx.meta.get("blobs") or []
             if not blobs:
-                ctx.warn(f"[{self.key}] meta['blobs'] 沒有任何區塊（請先跑 blob_segment），ROI SNR 全部記 0。")
+                ctx.warn(f"[{self.key}] meta['blobs'] is empty (run blob_segment "
+                     f"first); all ROI SNR features recorded as 0.")
                 ctx.add_features(dict(_ZERO))
                 return ctx
             big = blobs[0]  # 主 blob = SNR 最強者（meta["blobs"] 保留 segment 的 snr 降冪排序）
@@ -67,7 +74,8 @@ class RoiSnrStep(Step):
 
         res = algo_snr.roi_snr(img, rect, background_margin=int(p["background_margin"]))
         if res is None:
-            ctx.warn(f"[{self.key}] ROI {rect} 落在影像外或無效，ROI SNR 全部記 0。")
+            ctx.warn(f"[{self.key}] ROI {rect} is outside the image or invalid; "
+                     f"all ROI SNR features recorded as 0.")
             ctx.add_features(dict(_ZERO))
             return ctx
 

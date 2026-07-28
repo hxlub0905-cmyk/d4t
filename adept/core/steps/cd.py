@@ -32,15 +32,19 @@ class CdMeasureStep(Step):
     """CD 量測（M1：最大 blob 的 bbox 尺寸；可選次像素上下邊精修）。"""
 
     key = "cd_measure"
-    label = "CD 量測"
+    label = "CD measure"
     category = CATEGORY_ALGO
-    help = "量最大缺陷區塊的寬高（像素；有 nm_per_px 時也換算成 nm）。M1 為 bbox 粗估版。"
+    help = ("Measure the width and height of the main defect blob in pixels "
+            "(also in nm when nm_per_px is known). Currently a bounding-box "
+            "estimate.")
     params = [
         ParamSpec(name="source", type="image_key", default="diff",
-                  help="精修邊緣時取樣的影像流（通常是 diff）。"),
+                  help="Image stream sampled when refining edges (usually diff)."),
         ParamSpec(name="refine", type="choice", default="none",
                   choices=["none", "subpixel"],
-                  help="none=直接用 bbox；subpixel=在影像上把 bbox 上下邊精修到次像素（失敗自動退回 bbox）。"),
+                  help=("none = use the bounding box as is; subpixel = refine the "
+                        "top and bottom edges to sub-pixel precision (falls back "
+                        "to the bounding box on failure).")),
     ]
     reads = ["diff"]
     writes: List[str] = []
@@ -54,7 +58,8 @@ class CdMeasureStep(Step):
         p = self.validate_params(params)
         blobs = ctx.meta.get("blobs") or []
         if not blobs:
-            ctx.warn(f"[{self.key}] meta['blobs'] 沒有任何區塊（請先跑 blob_segment），CD 全部記 0。")
+            ctx.warn(f"[{self.key}] meta['blobs'] is empty (run blob_segment "
+                     f"first); all CD features recorded as 0.")
             ctx.add_features(dict(_ZERO))
             return ctx
 
@@ -69,7 +74,9 @@ class CdMeasureStep(Step):
         if p["refine"] == "subpixel":
             img = ctx.images.get(p["source"])
             if img is None:
-                ctx.warn(f"[{self.key}] 影像流 '{p['source']}' 不存在，無法次像素精修，改用 bbox。")
+                ctx.warn(f"[{self.key}] image stream '{p['source']}' does not "
+                          f"exist; cannot refine to sub-pixel, using the "
+                          f"bounding box.")
             else:
                 try:
                     top = algo_subpixel.refine_yedge_subpixel(
@@ -80,10 +87,14 @@ class CdMeasureStep(Step):
                             and bot.y_refined > top.y_refined):
                         cd_y_px = float(bot.y_refined - top.y_refined)
                     else:
-                        reason = top.fallback_reason or bot.fallback_reason or "邊緣順序顛倒"
-                        ctx.warn(f"[{self.key}] 次像素精修未成功（{reason}），改用 bbox 高度。")
+                        reason = (top.fallback_reason or bot.fallback_reason
+                                  or "edges came out in the wrong order")
+                        ctx.warn(f"[{self.key}] sub-pixel refinement did not "
+                                     f"succeed ({reason}); using the bounding-box "
+                                     f"height.")
                 except Exception as e:   # 精修絕不讓量測掛掉
-                    ctx.warn(f"[{self.key}] 次像素精修出錯（{e}），改用 bbox 高度。")
+                    ctx.warn(f"[{self.key}] sub-pixel refinement errored "
+                             f"({e}); using the bounding-box height.")
 
         feats = {"cd_x_px": float(cd_x_px), "cd_y_px": float(cd_y_px),
                  "cd_x_nm": 0.0, "cd_y_nm": 0.0, "area_nm2": 0.0}
@@ -94,6 +105,7 @@ class CdMeasureStep(Step):
             feats["cd_y_nm"] = cd_y_px * npp
             feats["area_nm2"] = float(big.get("area", 0)) * npp * npp
         else:
-            ctx.warn(f"[{self.key}] meta['nm_per_px'] 未設定，nm 尺寸記 0（僅輸出像素值）。")
+            ctx.warn(f"[{self.key}] meta['nm_per_px'] is not set; nm sizes "
+                     f"recorded as 0 (pixel values only).")
         ctx.add_features(feats)
         return ctx

@@ -28,13 +28,16 @@ class LoadPatchStep(Step):
     """把 DefectItem 的影像載入成 Context 影像流（一律轉成 uint8 灰階）。"""
 
     key = "load_patch"
-    label = "載入影像"
+    label = "Load images"
     category = CATEGORY_IMAGE
-    help = "把這顆 defect 的影像（test/ref 或單張）載入 pipeline，一律轉成 uint8 灰階。"
+    help = ("Load this defect's images (test/ref, or a single image) into the "
+            "pipeline, always converted to 8-bit grayscale.")
     params = [
         ParamSpec(
             name="channels", type="str", default="auto",
-            help="要載入哪些影像：auto=有什麼載什麼（rsem 單張會同時當作 test）；也可寫逗號清單，例如 test,ref。",
+            help=("Which images to load: auto = whatever is available "
+                  "(a single RSEM image is also exposed as test); or a comma "
+                  "separated list such as test,ref."),
         ),
     ]
     reads: List[str] = []
@@ -65,10 +68,11 @@ class LoadPatchStep(Step):
         item = ctx.meta.get("_defect_item")
         kind = ctx.meta.get("_dataset_kind")
         if item is None:
-            raise StepError(self.key, "Context 裡沒有 defect 資料（meta['_defect_item']）；此卡需由引擎在載入資料集後執行。")
+            raise StepError(self.key, "no defect data in the Context (meta['_defect_item']); this "
+                            "card must be run by the engine after a dataset is loaded.")
         images = getattr(item, "images", None)
         if not images:
-            raise StepError(self.key, f"defect {getattr(item, 'defect_id', '?')} 沒有任何影像可載入。")
+            raise StepError(self.key, f"defect {getattr(item, 'defect_id', '?')} has no images to load.")
 
         raw = str(p["channels"]).strip()
         if raw.lower() == "auto":
@@ -78,18 +82,20 @@ class LoadPatchStep(Step):
         else:
             wanted = [tok.strip() for tok in raw.split(",") if tok.strip()]
             if not wanted:
-                raise StepError(self.key, "channels 參數是空的；請填 auto 或逗號清單（例：test,ref）。")
+                raise StepError(self.key, "the channels parameter is empty; use auto or a comma "
+                                "separated list (e.g. test,ref).")
 
         loaded: List[str] = []
         for ch in wanted:
             if ch not in images:
                 raise StepError(
                     self.key,
-                    f"defect {getattr(item, 'defect_id', '?')} 沒有 channel '{ch}'（現有：{sorted(images)}）。")
+                    f"defect {getattr(item, 'defect_id', '?')} has no channel "
+                    f"'{ch}' (available: {sorted(images)}).")
             try:
                 arr = item.load(ch)
             except Exception as e:  # 檔案毀損 / 頁碼超界等
-                raise StepError(self.key, f"讀取 channel '{ch}' 失敗：{e}") from e
+                raise StepError(self.key, f"could not read channel '{ch}': {e}") from e
             arr_u8 = to_uint8(ensure_gray(arr))
             ctx.set_image(ch, arr_u8)
             loaded.append(ch)
@@ -98,7 +104,8 @@ class LoadPatchStep(Step):
         # 用預設參數（source="test"）就能直接吃到影像。
         if "single" in loaded and "test" not in ctx.images:
             ctx.set_image("test", ctx.images["single"])
-            note = f"單張資料流（kind={kind}）：'single' 已同步作為 'test' 供下游使用。"
+            note = (f"single-image input (kind={kind}): 'single' is also "
+                    f"exposed as 'test' for downstream cards.")
             ctx.meta.setdefault("notes", []).append(note)
 
         ctx.add_feature("n_channels", float(len(loaded)))

@@ -218,10 +218,10 @@ def test_write_excel_has_three_sheets(tmp_path):
     assert not (tmp_path / "r.xlsx.tmp").exists()      # atomic
 
     wb = openpyxl.load_workbook(out)
-    assert wb.sheetnames == ["摘要", "明細", "特徵統計"]
+    assert wb.sheetnames == ["Summary", "Details", "Feature stats"]
 
     # --- 明細：標題 + 每顆一列、凍結標題、自動篩選 ---
-    ws = wb["明細"]
+    ws = wb["Details"]
     header = [c.value for c in ws[1]]
     assert header == list(BASE_COLUMNS) + ["blob_snr", "cd_x_nm"]
     assert ws.max_row == 11
@@ -231,32 +231,32 @@ def test_write_excel_has_three_sheets(tmp_path):
         [str(i) for i in range(1, 11)]
 
     # --- 特徵統計：每個特徵一列 ---
-    ws = wb["特徵統計"]
-    assert [c.value for c in ws[1]] == ["特徵", "筆數", "最小", "中位數", "最大", "標準差"]
+    ws = wb["Feature stats"]
+    assert [c.value for c in ws[1]] == ["Feature", "Count", "Minimum", "Median", "Maximum", "Std dev"]
     assert [ws.cell(row=r, column=1).value for r in (2, 3)] == ["blob_snr", "cd_x_nm"]
     assert ws.cell(row=2, column=3).value == 1.0
     assert ws.cell(row=2, column=5).value == 10.0
 
     # --- 摘要：抓漏率 / 誤殺率 / 正確率 + 混淆矩陣都在裡面 ---
-    ws = wb["摘要"]
+    ws = wb["Summary"]
     cells = {}
     for row in ws.iter_rows(min_row=1, max_row=ws.max_row, max_col=2):
         if row[0].value is not None:
             cells[str(row[0].value)] = row[1].value
-    assert cells["defect 總數"] == 10
-    assert cells["recipe 名稱"] == "demo"
-    assert cells["分數表達式"] == "blob_snr * 2"
-    assert cells["門檻"] == 6.0
-    hit = [k for k in cells if k.startswith("抓漏率")]
-    kill = [k for k in cells if k.startswith("誤殺率")]
+    assert cells["Total defects"] == 10
+    assert cells["Recipe name"] == "demo"
+    assert cells["Score expression"] == "blob_snr * 2"
+    assert cells["Threshold"] == 6.0
+    hit = [k for k in cells if k.startswith("Miss rate")]
+    kill = [k for k in cells if k.startswith("False alarm rate")]
     assert hit and kill
     assert cells[hit[0]] == pytest.approx(0.2)
     assert cells[kill[0]] == pytest.approx(0.4)
-    assert cells["正確率"] == pytest.approx(0.7)
-    assert cells["實際：真缺陷"] == 4                   # TP
-    assert cells["實際：nuisance"] == 2                 # FP
+    assert cells["Accuracy"] == pytest.approx(0.7)
+    assert cells["Actual: real defect"] == 4                   # TP
+    assert cells["Actual: nuisance"] == 2                 # FP
     texts = [str(c.value) for row in ws.iter_rows() for c in row if c.value]
-    assert "混淆矩陣" in texts
+    assert "Confusion matrix" in texts
 
 
 def test_write_excel_without_ground_truth(tmp_path):
@@ -264,9 +264,9 @@ def test_write_excel_without_ground_truth(tmp_path):
     path = tmp_path / "b.xlsx"
     report.write_excel(hand_results(), str(path))
     wb = openpyxl.load_workbook(str(path))
-    assert wb.sheetnames == ["摘要", "明細", "特徵統計"]
-    texts = [str(c.value) for row in wb["摘要"].iter_rows() for c in row if c.value]
-    assert not any(t.startswith("抓漏率") for t in texts)
+    assert wb.sheetnames == ["Summary", "Details", "Feature stats"]
+    texts = [str(c.value) for row in wb["Summary"].iter_rows() for c in row if c.value]
+    assert not any(t.startswith("Miss rate") for t in texts)
 
 
 def test_write_excel_empty_results(tmp_path):
@@ -275,5 +275,5 @@ def test_write_excel_empty_results(tmp_path):
     path = tmp_path / "e.xlsx"
     report.write_excel([], str(path))
     wb = openpyxl.load_workbook(str(path))
-    assert wb["明細"].max_row == 1
-    assert wb["摘要"].cell(row=3, column=2).value == 0
+    assert wb["Details"].max_row == 1
+    assert wb["Summary"].cell(row=3, column=2).value == 0

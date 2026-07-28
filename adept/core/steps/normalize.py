@@ -37,7 +37,8 @@ def _apply_also(ctx: Context, step_key: str, also_raw: str):
         if k in ctx.images:
             present.append(k)
         else:
-            ctx.warn(f"[{step_key}] also_apply 的影像流 '{k}' 不存在，略過。")
+            ctx.warn(f"[{step_key}] also_apply stream '{k}' does not exist; "
+                     f"skipped.")
     return present
 
 
@@ -46,21 +47,26 @@ class PercentileNormStep(Step):
     """百分位正規化：P_low–P_high 拉伸到 0–255。"""
 
     key = "percentile_norm"
-    label = "百分位正規化"
+    label = "Percentile normalise"
     category = CATEGORY_IMAGE
-    help = "把影像亮度用百分位範圍（預設 P2–P98）拉伸到 0–255，消除亮度飄移。"
+    help = ("Stretch image brightness over a percentile range (P2-P98 by "
+            "default) to 0-255, removing brightness drift.")
     params = [
         ParamSpec(name="source", type="image_key", default="test",
-                  help="要正規化的主影像流。"),
+                  help="Main image stream to normalise."),
         ParamSpec(name="also_apply", type="str", default="ref",
-                  help="同時套用的其他影像流（逗號清單，可留空；不存在的流只警告不報錯）。"),
+                  help=("Other image streams to apply this to (comma separated, "
+                        "may be empty; a missing stream only warns).")),
         ParamSpec(name="p_low", type="float", default=2.0, min=0.0, max=50.0,
-                  help="下百分位（0–50）：低於此百分位的像素壓成 0。"),
+                  help=("Lower percentile (0-50): pixels below it are clipped "
+                        "to 0.")),
         ParamSpec(name="p_high", type="float", default=98.0, min=50.0, max=100.0,
-                  help="上百分位（50–100）：高於此百分位的像素壓成 255。"),
+                  help=("Upper percentile (50-100): pixels above it are clipped "
+                        "to 255.")),
         ParamSpec(name="anchor", type="choice", default="source",
                   choices=["self", "source"],
-                  help="source=其他影像用 source 的範圍（跨圖可比）；self=各自用自己的。"),
+                  help=("source = other images reuse source's range (comparable "
+                        "across images); self = each image uses its own.")),
     ]
     reads = ["test"]
     writes = ["test"]
@@ -77,7 +83,8 @@ class PercentileNormStep(Step):
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
         if p["p_low"] >= p["p_high"]:
-            raise StepError(self.key, f"p_low（{p['p_low']}）必須小於 p_high（{p['p_high']}）。")
+            raise StepError(self.key, f"p_low ({p['p_low']}) must be smaller than p_high "
+                            f"({p['p_high']}).")
         src = require_image(ctx, self.key, p["source"])
         lo, hi = algo_normalize.percentile_range(src, p["p_low"], p["p_high"])
         ctx.set_image(p["source"], _norm_to_u8(src, lo, hi))
@@ -96,21 +103,27 @@ class GlvMaskNormStep(Step):
     """GLV 帶正規化：只用指定灰階範圍內的像素估計拉伸範圍。"""
 
     key = "glv_mask_norm"
-    label = "GLV 帶正規化"
+    label = "GLV band normalise"
     category = CATEGORY_IMAGE
-    help = "只用指定灰階帶（GLV 範圍）內的像素估計亮度範圍再拉伸到 0–255，鎖定特定圖案的亮度。"
+    help = ("Estimate the brightness range from pixels inside a chosen gray "
+            "band only, then stretch to 0-255 — this locks onto the brightness "
+            "of one particular pattern.")
     params = [
         ParamSpec(name="source", type="image_key", default="test",
-                  help="要正規化的主影像流。"),
+                  help="Main image stream to normalise."),
         ParamSpec(name="also_apply", type="str", default="ref",
-                  help="同時套用的其他影像流（逗號清單，可留空；不存在的流只警告不報錯）。"),
+                  help=("Other image streams to apply this to (comma separated, "
+                        "may be empty; a missing stream only warns).")),
         ParamSpec(name="glv_low", type="int", default=0, min=0, max=255,
-                  help="灰階帶下限（0–255）：只有落在帶內的像素參與範圍估計。"),
+                  help=("Lower edge of the gray band (0-255): only pixels inside "
+                        "the band take part in the range estimate.")),
         ParamSpec(name="glv_high", type="int", default=255, min=0, max=255,
-                  help="灰階帶上限（0–255）：需大於等於 glv_low。"),
+                  help=("Upper edge of the gray band (0-255); must be greater "
+                        "than or equal to glv_low.")),
         ParamSpec(name="anchor", type="choice", default="source",
                   choices=["self", "source"],
-                  help="source=其他影像用 source 的範圍（跨圖可比）；self=各自用自己的。"),
+                  help=("source = other images reuse source's range (comparable "
+                        "across images); self = each image uses its own.")),
     ]
     reads = ["test"]
     writes = ["test"]
@@ -127,7 +140,8 @@ class GlvMaskNormStep(Step):
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
         if p["glv_low"] > p["glv_high"]:
-            raise StepError(self.key, f"glv_low（{p['glv_low']}）不能大於 glv_high（{p['glv_high']}）。")
+            raise StepError(self.key, f"glv_low ({p['glv_low']}) cannot be greater than "
+                            f"glv_high ({p['glv_high']}).")
         src = require_image(ctx, self.key, p["source"])
         lo, hi = algo_normalize.percentile_range_glv_masked(
             src.astype(np.float32), p["glv_low"], p["glv_high"])
@@ -148,18 +162,22 @@ class HistMatchStep(Step):
     """直方圖匹配：把 moving 的亮度分布對齊到 reference。"""
 
     key = "hist_match"
-    label = "直方圖匹配"
+    label = "Histogram match"
     category = CATEGORY_IMAGE
-    help = "把 moving 影像的亮度分布匹配到 reference 影像，讓兩張圖亮度可直接相減比較。"
+    help = ("Match the moving image's brightness distribution to the reference "
+            "image so the two can be subtracted directly.")
     requires_ref = True
     params = [
         ParamSpec(name="moving", type="image_key", default="test",
-                  help="要被調整亮度的影像流（結果覆寫回同一流）。"),
+                  help=("Image stream whose brightness is adjusted (the result "
+                        "overwrites the same stream).")),
         ParamSpec(name="reference", type="image_key", default="ref",
-                  help="亮度基準影像流（不會被改動）。"),
+                  help="Brightness reference stream (never modified)."),
         ParamSpec(name="method", type="choice", default="linear",
                   choices=["exact", "linear", "percentile"],
-                  help="匹配方式：linear=平均/標準差對齊（最自然）；exact=直方圖完全一致；percentile=P2–P98 對齊（抗離群點）。"),
+                  help=("Matching method: linear = align mean/standard deviation "
+                        "(most natural); exact = identical histograms; "
+                        "percentile = align P2-P98 (robust to outliers).")),
     ]
     reads = ["test", "ref"]
     writes = ["test"]
