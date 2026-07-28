@@ -21,6 +21,7 @@ from . import align          # align
 from . import arith          # subtract / invert
 from . import snr_map        # snr_map
 from . import blob           # blob_segment
+from . import region         # roi_define
 from . import cd             # cd_measure
 from . import roi_snr        # roi_snr
 from . import quality        # focus_quality

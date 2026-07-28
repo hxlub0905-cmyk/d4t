@@ -25,6 +25,47 @@ def require_image(ctx: Context, step_key: str, key: str) -> np.ndarray:
         raise StepError(step_key, f"missing image stream '{key}' ({e})") from None
 
 
+def roi_rect_or_none(ctx, step_key: str, image, roi_name):
+    """把 ``roi`` 參數解成像素矩形 ``(x, y, w, h)``；空字串 = 整張影像。
+
+    ``'blob'`` 是保留名：優先找同名 ROI（``blob_segment`` 會寫），
+    找不到才退回 ``meta['blobs']`` 的主 blob —— 這樣舊 recipe 與新 Region 段
+    可以並存，而且 ``blob_segment`` 之後也還是同一個名字。
+    找不到任何東西時回 ``None``（呼叫端決定要警告還是當成整張圖）。
+    """
+    import numpy as _np
+
+    name = str(roi_name or "").strip()
+    shape = None if image is None else _np.asarray(image).shape[:2]
+    if not name:
+        # 整張影像 —— 需要知道尺寸
+        return None if shape is None else (0, 0, int(shape[1]), int(shape[0]))
+    if name in ctx.roi_names():
+        # 具名 ROI 存的是正規化座標，一樣需要尺寸才展得開
+        return None if shape is None else ctx.roi_rect(name, shape)
+    if name == "blob":
+        # blob 的矩形已經是像素座標，**不需要影像**（影像流可能已被下游覆寫掉）
+        blobs = ctx.meta.get("blobs") or []
+        if blobs:
+            b = blobs[0]        # 主 blob = SNR 最強者（segment 已降冪排序）
+            return (int(b["x"]), int(b["y"]), int(b["w"]), int(b["h"]))
+        return None
+    # 具名 ROI 打錯字要講清楚，不要安靜地量整張圖
+    raise StepError(step_key,
+                    "region '%s' is not defined; available: %s. Add a Define "
+                    "region card upstream, or leave roi empty for the whole "
+                    "image." % (name, ctx.roi_names()))
+
+
+def crop_to_roi(ctx, step_key: str, image, roi_name):
+    """依 ``roi`` 參數裁出要量測的像素（找不到 blob 時退回整張圖）。"""
+    rect = roi_rect_or_none(ctx, step_key, image, roi_name)
+    if rect is None:
+        return image
+    x, y, w, h = rect
+    return image[y:y + h, x:x + w]
+
+
 def ensure_gray(arr: np.ndarray) -> np.ndarray:
     """彩色影像轉單通道灰階；灰階原樣回傳。"""
     a = np.asarray(arr)

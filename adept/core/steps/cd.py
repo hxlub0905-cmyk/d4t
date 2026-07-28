@@ -22,6 +22,7 @@ from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_ALGO, ParamSpec, Step, register_step, GROUP_MEASURE,
 )
+from ._util import roi_rect_or_none
 
 _ZERO = {"cd_x_px": 0.0, "cd_y_px": 0.0,
          "cd_x_nm": 0.0, "cd_y_nm": 0.0, "area_nm2": 0.0}
@@ -41,6 +42,9 @@ class CdMeasureStep(Step):
     params = [
         ParamSpec(name="source", type="image_key", default="diff",
                   help="Image stream sampled when refining edges (usually diff)."),
+        ParamSpec(name="roi", type="str", default="blob",
+                  help=("Which region to measure — the name given by a Blob "
+                        "segment or Define region card upstream.")),
         ParamSpec(name="refine", type="choice", default="none",
                   choices=["none", "subpixel"],
                   help=("none = use the bounding box as is; subpixel = refine the "
@@ -57,17 +61,28 @@ class CdMeasureStep(Step):
 
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
-        blobs = ctx.meta.get("blobs") or []
-        if not blobs:
-            ctx.warn(f"[{self.key}] meta['blobs'] is empty (run blob_segment "
-                     f"first); all CD features recorded as 0.")
+        # 尺寸來源：優先用參數指定的流，否則任何一張都可以。可能一張都沒有 ——
+        # roi="blob" 不需要影像（矩形已是像素座標），所以這裡不能提早 return。
+        shape_src = ctx.images.get(p["source"])
+        if shape_src is None:
+            shape_src = next(iter(ctx.images.values()), None)
+
+        rect = roi_rect_or_none(ctx, self.key, shape_src, p["roi"])
+        if rect is None:
+            ctx.warn(f"[{self.key}] no blob found (run Blob segment first, or "
+                     f"point roi at a Define region card); all CD features "
+                     f"recorded as 0.")
             ctx.add_features(dict(_ZERO))
             return ctx
 
-        big = blobs[0]  # 主 blob = SNR 最強者（meta["blobs"] 保留 segment 的 snr 降冪排序）
-        bx, by = float(big["x"]), float(big["y"])
-        bw, bh = float(big["w"]), float(big["h"])
-        cx = float(big.get("cx", bx + bw / 2.0))
+        bx, by = float(rect[0]), float(rect[1])
+        bw, bh = float(rect[2]), float(rect[3])
+        cx = bx + bw / 2.0
+
+        # 面積：blob 有真實的像素面積（不是 bbox 面積），使用者畫的框則是 w*h。
+        blobs = ctx.meta.get("blobs") or []
+        area_px = (float(blobs[0].get("area", bw * bh))
+                   if (blobs and str(p["roi"]).strip() == "blob") else bw * bh)
 
         cd_x_px = bw
         cd_y_px = bh
@@ -104,7 +119,7 @@ class CdMeasureStep(Step):
             npp = float(npp)
             feats["cd_x_nm"] = cd_x_px * npp
             feats["cd_y_nm"] = cd_y_px * npp
-            feats["area_nm2"] = float(big.get("area", 0)) * npp * npp
+            feats["area_nm2"] = area_px * npp * npp
         else:
             ctx.warn(f"[{self.key}] meta['nm_per_px'] is not set; nm sizes "
                      f"recorded as 0 (pixel values only).")

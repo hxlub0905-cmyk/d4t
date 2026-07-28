@@ -90,14 +90,18 @@ def make_recipe(snr_threshold: float = 200.0, search_radius: int = 8) -> Recipe:
         "blob": RecipeNode("blob", "blob_segment",
                            {"min_area": 6, "snr_threshold": snr_threshold}),
         "cd": RecipeNode("cd", "cd_measure", {}),
+        # F7-4：中心框從量測卡的參數搬到 Region 卡
+        "roi": RecipeNode("roi", "roi_define",
+                          {"name": "centre", "shape": "center", "size": 32.0,
+                           "size_unit": "px", "source": "diff"}),
         "glv": RecipeNode("glv", "glv_stats",
-                          {"source": "diff", "region": "center", "box_size": 32,
+                          {"source": "diff", "roi": "centre",
                            "metrics": "glv_max,glv_q99,glv_mean"}),
     }
     return Recipe(
         recipe_id="m2_batch_cache_test",
         routes={KIND: ["load", "norm", "align", "sub", "dn",
-                       "snr", "blob", "cd", "glv"]},
+                       "snr", "blob", "cd", "roi", "glv"]},
         nodes=nodes,
         score=ScoreSpec(expr="glv_max + (glv_max - glv_q99)", threshold=50.0,
                         bins={"below": 0, "above": 1}),
