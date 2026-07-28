@@ -52,16 +52,19 @@ adept/
 │   │   └── cache.py         #   影像段 checkpoint 快取（npz）
 │   ├── steps/               # 步驟卡片（每檔一類）
 │   ├── store/               # SQLite 批次歷史 + rescore
+│   ├── export/              # KLARF 三種寫回模式 + CSV/Excel 報表 + overlay
 │   └── calibration.py       # nm/px 校正 profile
 ├── ui/                      # PySide6 Studio（**唯一允許 Qt 的地方**）
 │   ├── viewmodel.py         #   RecipeModel（Qt-free，可 headless 測）
 │   ├── theme.py widgets.py  #   主題 token + 6 個資料驅動元件
+│   ├── gallery.py           #   同屏比多顆（虛擬捲動，撐 10k+）
+│   ├── export_dialog.py     #   輸出精靈（寫回前一定先預覽變更）
 │   ├── workers.py           #   載入/預覽(請求合併)/試跑 背景執行緒
 │   └── studio.py app.py     #   主視窗 + 進入點
-├── tests/                   # 291 個測試，全部用合成資料，<10s 跑完
+├── tests/                   # 520+ 個測試，全部用合成資料，~30s 跑完
 ├── tools/make_sample.py     # 合成 KLARF + patch TIFF 產生器（開發與 CI 的資料來源）
 ├── examples/recipes/        # 範例 recipe（也是 UI「載入範本」的來源）
-├── (fab_probe/)             # 廠內格式探測腳本 —— **尚未建立**，見 §8
+├── fab_probe/               # 廠內格式探測腳本（stdlib-only、純文字輸出），見 §8
 └── docs/plans/              # F0 = master plan；每個 milestone 一份
 ```
 
@@ -140,21 +143,24 @@ python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 
 | **MMH 次像素 batch 版偏移** | batch 版比 scalar 版低約 1.5 px | 刻意保留原行為，檔頭有記錄；要用精確值請用 scalar 版 |
 | **中心框幾何與影像尺寸綁死** | 同一組 `glv_stats` 參數在 128² patch 上準、在 256² RSEM 上漏抓（缺陷散佈超出框） | 幾何類參數要隨 route 走（見 `dual_route_basic.json`：兩條 route 各自一個 glv 節點），或改用無量綱分數如 `(glv_max-glv_median)/(glv_std+0.5)` |
 | **pytest 收集期 import Qt** | `test_no_qt_after_import` 失敗 | UI 測試一律 **lazy import**（在 fixture 內 import 並注入 globals） |
+| **KLARF variant D 誤判**（M5 修正） | 真實 1.8 檔（ImageList 欄不在最後、且無 IMAGECOUNT 欄）被 `lint()` 判定每一列都違法，Export 精靈跳紅字 | `row_len_ok` 改用 `effective_row_len()`：把 `Images N { … }` 子區塊折算成一欄。**注意 `image_layout()` 對這個變體仍回 None，而 export 的插欄位置正好因此落在最後 —— 那是對的，別「順手修好」它**。迴歸測試 `tests/test_klarf_variant_d.py` |
 
 ---
 
 ## 8. 待廠內驗證的假設（重要）
 
-開發全程用合成資料（真實資料不能出廠）。以下假設**必須在廠內確認**（`fab_probe/` 探測腳本尚未建立，已移至 M5 工作項）：
+開發全程用合成資料（真實資料不能出廠）。以下假設**必須在廠內用 `fab_probe/` 探測腳本確認**。
+那三支腳本是 stdlib-only 單檔、輸出純文字且預設遮蔽 Lot/Wafer/Device 等識別碼，
+設計成可以直接複製貼出廠區（細節與資料外流說明見 `fab_probe/README.md`）：
 
-1. **EBI patch 的 page→channel 對應**：目前假設每顆 defect 第一張 = test、第二張 = ref
-   （`dataset.load_dataset` 的 `channel_order` 參數）。真實 TiffSpec 語意待確認。
-2. **`nm_per_px` 來源**：KLARF 裡目前找不到，暫為 None（CD 量測的 nm 值因此為 0）。
-   需確認實際站點從哪拿（TIFF tag？recipe？calibration profile？）。
-3. **KLARF 變體**：`klarf_core` 已處理三種 image-layout 變體，實際站點可能還有新花樣。
-   每遇到一種新變體 → 做成最小化合成 fixture → 永久回歸測試。
+| 假設 | 現況 | 用哪支腳本確認 |
+|---|---|---|
+| 1. EBI patch 的 page→channel 對應 | 假設每顆 defect 第一張=test、第二張=ref（`load_dataset` 的 `channel_order`） | `probe_tiff.py FILE.tif --with-klarf FILE.klarf` → 看它回報的配對型態（pairs / single / triples）。`probe_stats.py` 的奇偶頁均值比較可佐證 |
+| 2. `nm_per_px` 來源 | 找不到，暫為 None（CD 量測的 nm 值因此是 0） | `probe_klarf.py` 的 nm_per_px 名稱搜尋段；`probe_tiff.py` 的解析度/描述標籤 |
+| 3. KLARF 變體 | `klarf_core` 已知四種（含 M5 修正的 variant D） | `probe_klarf.py` 的 image-layout 變體判定與證據 |
 
----
+**每遇到一種新變體 → 做成最小化合成 fixture → 永久回歸測試**（見
+`tests/test_klarf_variant_d.py` 的寫法：先斷言「這份檔案確實是該變體」當前提，再測行為）。
 
 ## 9. 進度與下一步
 
@@ -165,8 +171,8 @@ python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 
 | M2 批次 | ✅ | ProcessPool + 影像段快取 + SQLite 歷史 + rescore |
 | M3 Studio | ✅ | PySide6 四區塊視覺化編輯器 |
 | M4 雙輸入 | ✅ | RSEM 單張 ingest、輸入型別分流、Golden Cell + Cell 週期估測卡（`period.choose_origin` 相位搜尋已補完）。驗收達成：`examples/recipes/dual_route_basic.json` 同時吃 EBI patch 與 RSEM，跨 3 seeds × 2 種輸入共 144 顆合成 defect，正確率 95.1% |
-| M5 Gallery+Export | ⬜ | 縮圖網格 + 直方圖聯動；KLARF 三種寫回模式 + 報表 |
-| M6 推廣包 | ⬜ | 離線安裝、首啟導覽、範例 recipe、快速參考卡 |
+| M5 Gallery+Export | ✅ | Gallery（虛擬捲動、排序、直方圖點 bar 篩選）；KLARF 三種寫回模式（就地無損／另存含 ADCSCORE+ADCCLASS／Top-N）+ 寫回前預覽變更；CSV/Excel 報表（含抓漏率/誤殺率）；overlay；`fab_probe/` 三支探測腳本；CLI `adept export` |
+| **M6 推廣包** | ⬜ **下一步** | 離線安裝（wheels）、首啟導覽、範例 recipe 庫、快速參考卡 PDF |
 
 v2 backlog：自由 DAG 畫布、ground-truth 標注 + 混淆矩陣、ML Classify 卡
 （吃現成的 feature vector CSV）、PCA Ref、Region Stats/FFT、BSE/SE 多通道融合。

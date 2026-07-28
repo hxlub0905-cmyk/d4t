@@ -19,7 +19,7 @@
 
 完整計畫見 [`docs/plans/F0-master-plan.md`](docs/plans/F0-master-plan.md)。
 
-## 目前進度：M0 抽庫 ✅ · M1 引擎 ✅ · M2 批次 ✅ · M3 Studio UI ✅ · M4 雙輸入 ✅
+## 目前進度：M0 ✅ · M1 引擎 ✅ · M2 批次 ✅ · M3 Studio ✅ · M4 雙輸入 ✅ · M5 Gallery+Export ✅
 
 M0：六個既有專案（KLIP / GLAS / MMH / PEAR / cell-period-estimator / Perspective-Combination）
 的可重用演算法已 vendoring 進 `adept/core`，全部通過合成影像單元測試、零 Qt 依賴。
@@ -45,6 +45,13 @@ M4：**雙輸入** —— Review SEM 單張影像（KLARF + 每顆一張圖）�
 驗收：`examples/recipes/dual_route_basic.json` 一份 recipe、一個門檻，跨 3 seeds ×
 2 種輸入共 144 顆合成 defect，分類正確率 95.1%。
 
+M5：**Gallery + 輸出**。Gallery 把整批 defect 以縮圖網格攤開（虛擬捲動，10k 顆不卡），
+可按分數或任一特徵排序，**點直方圖的長條就篩出那個分數區間的 defect** —— 調參迴圈
+從一顆一顆點，變成一屏一屏掃。輸出精靈支援三種 KLARF 寫回（就地改欄無損／另存含
+ADCSCORE+ADCCLASS 欄／Top-N 篩選新檔），**寫回前一定先預覽會改什麼**；另有 CSV /
+Excel 報表（給 ground truth 就算抓漏率、誤殺率、混淆矩陣）與 overlay 影像。
+另附 `fab_probe/` 三支 stdlib-only 探測腳本，用來在廠內確認格式假設（見下）。
+
 ```bash
 # 開 Studio：
 python -m adept gui
@@ -57,6 +64,8 @@ python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 
     --workers 4 --cache /tmp/cache --db /tmp/runs.db --csv features.csv
 python -m adept runs --db /tmp/runs.db             # 批次歷史
 python -m adept rescore <run_id> --db /tmp/runs.db --threshold 60 --save   # 秒級調門檻
+python -m adept export <run_id> --db /tmp/runs.db --mode annotate \
+    --klarf-out out.001 --csv feat.csv --excel report.xlsx   # 寫回 KLARF + 報表
 ```
 
 ```
@@ -95,6 +104,20 @@ adept/
 └── tools/               # (M1+) 合成資料產生器、CLI
 ```
 
+## 廠內格式驗證
+
+開發全程用合成資料，有三個假設必須用真實檔案確認（page→channel 對應、
+`nm_per_px` 來源、KLARF 變體）。`fab_probe/` 裡三支 stdlib-only 單檔腳本負責這件事，
+輸出是**純文字、預設遮蔽 Lot/Wafer/Device 識別碼**，設計成可以直接複製貼出廠區：
+
+```
+python fab_probe\probe_klarf.py C:\path\to\file.klarf > report.txt
+python fab_probe\probe_tiff.py  C:\path\to\file.tif --with-klarf C:\path\to\file.klarf
+python fab_probe\probe_stats.py C:\path\to\file.tif
+```
+
+資料外流說明與逐項用途見 [`fab_probe/README.md`](fab_probe/README.md)。
+
 ## 沒有 git 的機器？
 
 整個 repo 只有純文字檔（`.py`/`.md`/`.json`/`.toml`/`.txt`/`.yml`），
@@ -130,7 +153,7 @@ QT_QPA_PLATFORM=offscreen pytest -q   # 全部測試（~6s，不需真實資料�
 ## Roadmap
 
 M0 抽庫 ✅ → M1 引擎 ✅ → M2 批次 ✅ → M3 Studio UI ✅ → M4 雙輸入+Golden Cell ✅ →
-M5 Gallery+Export → M6 推廣包。詳見 master plan。
+M5 Gallery+Export ✅ → M6 推廣包。詳見 master plan。
 
 ## 已知修正紀錄（開發過程中抓到的坑）
 

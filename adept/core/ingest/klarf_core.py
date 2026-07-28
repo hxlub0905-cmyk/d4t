@@ -521,13 +521,40 @@ class KlarfDoc:
                     return c
         return None
 
+    def image_block_span(self, row):
+        """回傳列中 ``Image(s) N { … }`` 子區塊的 (起始索引, token 數)；沒有回 None。
+
+        ADEPT 增補（M5）。有一種真實 1.8 變體（fab_probe 稱 variant D）：
+        影像欄是 ``ImageList`` 型別（例：IMAGEINFO）且**不在最後一欄**，
+        同時整份檔案沒有 IMAGECOUNT 欄。這種列裡 ``Images 1 { "a.jpg" … }``
+        佔多個 token 但只算一欄，若直接用 token 數比對欄數會全列誤判違法。
+        """
+        for k, tok in enumerate(row):
+            if tok not in ('Image', 'Images'):
+                continue
+            depth = 0
+            for j in range(k, len(row)):
+                depth += row[j].count('{') - row[j].count('}')
+                if '{' in row[j] or '}' in row[j]:
+                    if depth <= 0:
+                        return (k, j - k + 1)
+            return (k, len(row) - k)
+        return None
+
+    def effective_row_len(self, row):
+        """把影像子區塊算成一欄之後的等效欄數（ADEPT 增補，M5）。"""
+        span = self.image_block_span(row)
+        return len(row) if span is None else len(row) - (span[1] - 1)
+
     def row_len_ok(self, row):
         """該列 token 數是否合法。影像欄是變動長度：每張圖佔 image_layout()
            的 nfields 個 token，IMAGECOUNT=0 時可整欄省略。"""
         n = len(self.defect_columns)
         ic, il = self.image_col_index()
         if ic < 0:
-            return len(row) == n
+            # 沒有 IMAGECOUNT 欄。若列裡帶 Image(s){…} 子區塊（variant D），
+            # 把整個區塊折算成一欄再比對；否則維持原本的嚴格比對。
+            return self.effective_row_len(row) == n
         cnt = self.defect_image_count(row)
         layout = self.image_layout()
         if layout is not None:

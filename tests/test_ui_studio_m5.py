@@ -1,0 +1,372 @@
+# ADEPT Studio M5 接線測試 — authored 2026-07-28 (M5-3).
+"""``adept/ui/studio.py`` 的 M5 部分：Gallery 分頁、背景縮圖、直方圖聯動、輸出。
+
+執行：``QT_QPA_PLATFORM=offscreen python3 -m pytest tests/test_ui_studio_m5.py -q``
+
+**為什麼所有 Qt import 都是 lazy 的（別改回去）**
+
+``tests/test_no_qt.py::test_no_qt_after_import`` 會檢查 ``sys.modules`` 裡沒有任何
+PySide6 模組。pytest 先蒐集全部測試檔、再開始跑，所以只要這個檔案在**模組層**
+``import PySide6``（或 import ``adept.ui.studio``），蒐集階段就會把 Qt 塞進
+``sys.modules``，那個守門測試就會紅 —— 即使它先跑。
+
+因此：所有 Qt / ``adept.ui`` 的 import 都關在 :func:`_load_qt` 裡，由 module-scope
+的 ``qapp`` fixture 呼叫，再用 ``globals().update(...)`` 注入本模組命名空間。
+每個測試都必須（直接或間接）要求 ``qapp`` fixture，否則那些名字不存在。
+
+測試一律走 ``StudioWindow`` 的公開 API（``run_trial(sync=True)`` /
+``request_thumbs(sync=True)`` …）或直接 emit 元件的訊號，**不開任何對話框**、
+不依賴 event loop。唯一的例外是直方圖那顆真滑鼠事件（自己建 ``QMouseEvent``
+再 ``sendEvent``）—— 因為「點長條」與「拖門檻」的區分本來就是滑鼠行為。
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+REPO = Path(__file__).resolve().parent.parent
+EXAMPLE_RECIPE = REPO / "examples" / "recipes" / "die_to_die_basic.json"
+
+sys.path.insert(0, str(REPO / "tools"))
+from make_sample import generate  # noqa: E402
+
+N = 8
+
+
+def _load_qt() -> None:
+    """把 Qt 與待測模組 import 進來，注入本模組的 globals（只在 fixture 裡呼叫）。"""
+    from PySide6.QtCore import QEvent, QPointF, Qt  # noqa: F401
+    from PySide6.QtGui import QMouseEvent  # noqa: F401
+    from PySide6.QtWidgets import QApplication  # noqa: F401
+
+    from adept.ui import export_dialog as ex_mod  # noqa: F401
+    from adept.ui import studio as studio_mod  # noqa: F401
+    from adept.ui import theme as theme_mod  # noqa: F401
+
+    globals().update(locals())
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    """離屏 QApplication（整個模組共用一個）+ 套用主題。"""
+    _load_qt()
+    app = QApplication.instance() or QApplication([sys.argv[0] if sys.argv else "t"])
+    theme_mod.apply_theme(app)
+    yield app
+    app.processEvents()
+
+
+@pytest.fixture(scope="module")
+def synlot(tmp_path_factory):
+    return generate(str(tmp_path_factory.mktemp("m5_lot")), n=N, seed=7)
+
+
+@pytest.fixture(scope="module")
+def window(qapp, synlot):
+    """整個模組共用一個主視窗（已載入資料集 + 範例 recipe，尚未試跑）。"""
+    win = studio_mod.StudioWindow()
+    assert win.load_dataset_path(synlot["klarf"], sync=True) is True
+    assert win.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
+    # 巢狀 layout 要 show + processEvents 之後 viewport 才有真實尺寸，
+    # Gallery 的可視範圍計算（進而 thumbs_requested）才有意義。
+    win.resize(1200, 800)
+    win.show()
+    qapp.processEvents()
+    yield win
+    win.close()
+
+
+@pytest.fixture(scope="module")
+def ran(window, qapp):
+    """跑一次全批（同步），之後的測試共用這批結果。"""
+    assert window.run_trial(N, workers=1, sync=True) is True
+    qapp.processEvents()
+    return window
+
+
+def _mouse(widget, etype, pos, button=None, buttons=None):
+    """建構並派送一顆滑鼠事件（離屏環境下比 QTest 可靠）。"""
+    button = Qt.NoButton if button is None else button
+    buttons = button if buttons is None else buttons
+    ev = QMouseEvent(etype, QPointF(pos), QPointF(pos), button, buttons,
+                     Qt.NoModifier)
+    QApplication.sendEvent(widget, ev)
+
+
+# --------------------------------------------------------------------------- #
+# 1. Gallery 分頁
+# --------------------------------------------------------------------------- #
+def test_right_column_has_two_obvious_tabs(window):
+    tabs = window.right_tabs
+    assert tabs.count() == 2
+    assert tabs.tabText(studio_mod.TAB_PREVIEW) == "單顆預覽"
+    assert tabs.tabText(studio_mod.TAB_GALLERY).startswith("Gallery")
+    # 兩個分頁都要說明用途（推廣鐵則：使用者不必猜）
+    assert tabs.tabToolTip(studio_mod.TAB_PREVIEW)
+    assert tabs.tabToolTip(studio_mod.TAB_GALLERY)
+    assert tabs.widget(studio_mod.TAB_GALLERY) is window.gallery
+    assert window.current_tab() == studio_mod.TAB_PREVIEW      # 預設看單顆
+
+
+def test_gallery_populates_after_trial(ran):
+    window = ran
+    assert window.gallery.total_count() == N
+    assert window.gallery.displayed_count() == N
+    assert len(window.trial_results) == N
+
+    ids = window.gallery.displayed_ids()
+    assert sorted(ids) == sorted(str(r["defect_id"]) for r in window.trial_results)
+    # 縮圖一開始一律是 None（解碼是背景的事）
+    assert all(item["thumb"] is None for item in window.gallery.grid.items())
+    # bin 一定寫在說明文字裡（不是只有顏色）
+    assert "bin" in window.gallery.caption_at(0)
+
+    # 排序欄位 = score + 這批真的量到的特徵
+    keys = window.gallery.sort_keys()
+    assert keys[0] == "score"
+    assert "snr_max" in keys
+    assert "defect_id" in keys
+    feats = set()
+    for r in window.trial_results:
+        feats.update(r.get("features") or {})
+    assert set(keys) == {"score", "defect_id"} | feats
+
+
+# --------------------------------------------------------------------------- #
+# 2. 縮圖：Gallery 要 → 背景做 → 回來貼上
+# --------------------------------------------------------------------------- #
+def test_thumbs_requested_leads_to_thumbs(ran, qapp):
+    window = ran
+    seen = []
+    window.gallery.thumbs_requested.connect(lambda ids: seen.append(list(ids)))
+
+    window.show_gallery()
+    qapp.processEvents()
+    window.gallery.set_sort("score", True)      # 重排 → 重新盤點可視範圍
+    qapp.processEvents()
+
+    assert seen, "可視範圍變動時 Gallery 應該要求縮圖"
+    wanted = seen[-1]
+    assert all(w in window.gallery.displayed_ids() for w in wanted)
+
+    # 同步驅動（測試不靠 event loop）：真的去讀 TIFF 頁 + make_thumb
+    n = window.request_thumbs(wanted, sync=True)
+    assert n == len(wanted)
+
+    by_id = {i["defect_id"]: i for i in window.gallery.grid.items()}
+    for did in wanted:
+        arr = by_id[did]["thumb"]
+        assert isinstance(arr, np.ndarray)
+        size = window.gallery.thumb_size()
+        assert arr.shape[:2] == (size, size)
+        assert arr.dtype == np.uint8
+
+    # 認不得的 id 靜靜略過，不炸
+    assert window.request_thumbs(["沒有這顆"], sync=True) == 0
+    window.show_preview()
+
+
+def test_thumb_worker_run_sync_and_channel_pick(ran):
+    window = ran
+    items = list(window.dataset.items)
+    assert studio_mod.thumb_channel(items[0]) == "test"     # test → single → 其他
+
+    jobs = [(str(it.defect_id), it) for it in items[:3]]
+    out = studio_mod.ThumbWorker.run_sync(jobs, 64)
+    assert set(out) == {j[0] for j in jobs}
+    assert all(a.shape == (64, 64) for a in out.values())
+
+    # 壞掉的一顆不該殺掉整批（load 會 raise，run_sync 要吞掉）
+    class _Broken:
+        images = {"test": object()}
+
+        def load(self, channel):
+            raise OSError("image gone")
+
+    mixed = studio_mod.ThumbWorker.run_sync(jobs + [("bad", _Broken())], 64)
+    assert set(mixed) == {j[0] for j in jobs}
+    assert studio_mod.thumb_channel(_Broken()) == "test"
+
+
+# --------------------------------------------------------------------------- #
+# 3. Gallery → 單顆預覽
+# --------------------------------------------------------------------------- #
+def test_defect_activated_switches_tab_and_moves_preview(ran):
+    window = ran
+    window.show_gallery()
+    assert window.current_tab() == studio_mod.TAB_GALLERY
+
+    target = str(window.dataset.items[5].defect_id)
+    window.gallery.defect_activated.emit(target)
+
+    assert window.current_tab() == studio_mod.TAB_PREVIEW
+    assert window.defect_index == 5
+    assert str(window.dataset.items[window.defect_index].defect_id) == target
+    assert target in window.status_text()
+
+    # 不存在的 id：切回單顆預覽 + 狀態列講清楚，不炸
+    window.gallery.defect_activated.emit("不存在")
+    assert "找不到" in window.status_text()
+
+
+def test_gallery_selection_shows_count(ran):
+    window = ran
+    ids = window.gallery.displayed_ids()[:3]
+    window.gallery.selection_changed.emit(list(ids))
+    assert window.status_text() == "已選 3 顆"
+
+
+# --------------------------------------------------------------------------- #
+# 4. 直方圖 → Gallery（調參迴圈的另一半）
+# --------------------------------------------------------------------------- #
+def test_bar_clicked_filters_gallery_and_switches_tab(ran):
+    window = ran
+    window.show_preview()
+    window.gallery.clear_filter()
+    lo, hi = window.histogram.bar_range(0)
+
+    window.histogram.bar_clicked.emit(lo, hi)
+    assert window.current_tab() == studio_mod.TAB_GALLERY
+    assert "已篩選 score" in window.status_text()
+    assert window.gallery.filter_text()
+    shown = window.gallery.displayed_count()
+    assert shown < N
+    for item in window.gallery.grid.items():
+        if item["defect_id"] in window.gallery.displayed_ids():
+            assert lo <= item["score"] <= hi
+
+    # 再點同一根 → 取消篩選
+    window.histogram.bar_clicked.emit(lo, hi)
+    assert window.gallery.displayed_count() == N
+    assert window.gallery.filter_text() == ""
+    assert "已取消" in window.status_text()
+
+
+def test_chip_clears_filter_and_same_bar_refilters(ran):
+    window = ran
+    window.gallery.clear_filter()
+    lo, hi = window.histogram.bar_range(0)
+    window.histogram.bar_clicked.emit(lo, hi)
+    filtered = window.gallery.displayed_count()
+
+    chips = [c for c in window.gallery.chips() if c.label_text.startswith("篩選")]
+    assert chips, window.gallery.chip_texts()
+    chips[0].click()                                    # Gallery 上的 ✕
+    assert window.gallery.displayed_count() == N
+
+    # chip 按掉之後再點同一根 = 重新篩選（不是又切掉）
+    window.histogram.bar_clicked.emit(lo, hi)
+    assert window.gallery.displayed_count() == filtered
+    window.gallery.clear_filter()
+
+
+def test_real_click_on_bar_does_not_move_the_threshold(ran, qapp):
+    """按下 + 原地放開 = 點長條（篩 Gallery）；門檻一動也不動。"""
+    window = ran
+    hist = window.histogram
+    hist.resize(520, 200)
+    qapp.processEvents()
+    window.gallery.clear_filter()
+
+    before = window.model.threshold
+    hist.set_threshold(before)
+    committed = []
+    hist.threshold_committed.connect(committed.append)
+
+    rect = hist._plot_rect()
+    n = len(hist._counts)
+    bw = rect.width() / n
+    # 挑一根「離門檻線夠遠」的長條（不然那是抓門檻把手，不是點長條）
+    idx = max(range(n), key=lambda i: abs(rect.left() + bw * (i + 0.5)
+                                          - hist._x_at(hist.threshold())))
+    pos = QPointF(rect.left() + bw * (idx + 0.5), rect.center().y())
+
+    _mouse(hist, QEvent.MouseButtonPress, pos, Qt.LeftButton, Qt.LeftButton)
+    _mouse(hist, QEvent.MouseButtonRelease, pos, Qt.LeftButton, Qt.NoButton)
+
+    assert committed == [], "點長條不該 commit 門檻"
+    assert hist.threshold() == pytest.approx(before)
+    assert window.model.threshold == pytest.approx(before)
+    assert window.current_tab() == studio_mod.TAB_GALLERY
+    assert "已篩選 score" in window.status_text()
+
+    window.gallery.clear_filter()
+    window._score_filter = None
+
+
+def test_real_drag_still_commits_the_threshold(ran, qapp):
+    """按下 + 拖過去 + 放開 = 拖門檻（老行為不能壞）。"""
+    window = ran
+    hist = window.histogram
+    hist.resize(520, 200)
+    qapp.processEvents()
+    before_tab = window.current_tab()
+
+    bars = []
+    hist.bar_clicked.connect(lambda a, b: bars.append((a, b)))
+    committed = []
+    hist.threshold_committed.connect(committed.append)
+
+    rect = hist._plot_rect()
+    y = rect.center().y()
+    start = QPointF(rect.left() + 20, y)
+    end = QPointF(rect.right() - 20, y)
+    _mouse(hist, QEvent.MouseButtonPress, start, Qt.LeftButton, Qt.LeftButton)
+    _mouse(hist, QEvent.MouseMove, QPointF(rect.center().x(), y),
+           Qt.NoButton, Qt.LeftButton)
+    _mouse(hist, QEvent.MouseMove, end, Qt.NoButton, Qt.LeftButton)
+    _mouse(hist, QEvent.MouseButtonRelease, end, Qt.LeftButton, Qt.NoButton)
+
+    assert bars == [], "拖曳不該被當成點長條"
+    assert len(committed) == 1
+    assert window.model.threshold == pytest.approx(committed[0])
+    assert window.current_tab() == before_tab              # 拖門檻不換分頁
+
+
+# --------------------------------------------------------------------------- #
+# 5. 輸出動作
+# --------------------------------------------------------------------------- #
+def test_export_action_disabled_before_run_enabled_after(qapp, synlot):
+    win = studio_mod.StudioWindow()
+    try:
+        assert win.btn_export.isEnabled() is False
+        assert win.open_export_dialog() is None
+        assert "還沒有結果" in win.status_text()
+
+        assert win.load_dataset_path(synlot["klarf"], sync=True) is True
+        assert win.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
+        assert win.btn_export.isEnabled() is False, "載入資料集不等於有結果"
+
+        assert win.run_trial(N, workers=1, sync=True) is True
+        assert win.btn_export.isEnabled() is True
+
+        dlg = win.open_export_dialog()
+        assert isinstance(dlg, ex_mod.ExportDialog)
+        try:
+            assert dlg.klarf_columns() == list(win.dataset.klarf.defect_columns)
+            assert len(dlg.results) == N
+            assert dlg.recipe is not None
+        finally:
+            dlg.close()
+
+        # 換一份資料集 → 舊結果作廢，輸出鎖回去
+        assert win.load_dataset_path(synlot["klarf"], sync=True) is True
+        assert win.btn_export.isEnabled() is False
+        assert win.gallery.total_count() == 0
+    finally:
+        win.close()
+
+
+def test_close_stops_thumb_worker(qapp, synlot):
+    win = studio_mod.StudioWindow()
+    win.load_dataset_path(synlot["klarf"], sync=True)
+    win.load_recipe_path(str(EXAMPLE_RECIPE), sync=True)
+    win.run_trial(N, workers=1, sync=True)
+    win.request_thumbs(win.gallery.displayed_ids())        # 非同步：真的開執行緒
+    win.close()
+    assert win.thumb_worker.is_running() is False
+    assert win.thumb_worker.thread_obj is None
+    assert win.thumb_worker.pending_count() == 0

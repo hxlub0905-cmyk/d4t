@@ -16,7 +16,7 @@
 - :class:`ParamForm`        由 ``Step.describe()`` 自動生成的參數表單
 - :class:`LibraryPanel`     三段式卡片庫（影像／算法／ADC）
 - :class:`PipelinePanel`    有序節點清單 + Score/Bin 尾卡
-- :class:`HistogramWidget`  分數分佈 + 可拖曳門檻線
+- :class:`HistogramWidget`  分數分佈 + 可拖曳門檻線 + 可點擊長條（``bar_clicked``）
 - :class:`FeatureTable` / :class:`VerdictChip`  特徵表與判定 chip
 """
 
@@ -972,20 +972,42 @@ class PipelinePanel(QWidget):
 # 5. HistogramWidget
 # --------------------------------------------------------------------------- #
 class HistogramWidget(QWidget):
-    """分數分佈長條圖 + 可拖曳的門檻線。
+    """分數分佈長條圖 + 可拖曳的門檻線 + 可點擊的長條。
 
     資料來自 ``viewmodel.histogram(scores)``（edges 有 n+1 個、counts 有 n 個）。
     拖曳時持續發 ``threshold_changed``（上層用 ``viewmodel.rebin`` 秒回 bin 數），
     放開才發 ``threshold_committed``（上層才把值寫回 model / 重算）。
+
+    「點一根長條」與「拖門檻」怎麼分（別改成用計時器）
+    ------------------------------------------------
+    兩件事都從同一顆左鍵 press 開始，所以**在放開的那一刻**才決定它是哪一種：
+
+    ===========================================  ==========================
+    放開時的狀況                                  結果
+    ===========================================  ==========================
+    滑鼠移動 > :data:`_CLICK_SLOP` px             拖門檻 → ``threshold_committed``
+    press 落在門檻線 ±:data:`_HANDLE_PX` px 內    拖門檻（原地放開 = 重新確認門檻）
+    以上皆非，且點在某根長條上                     ``bar_clicked(lo, hi)``，
+                                                  **門檻退回按下去之前的值**
+    ===========================================  ==========================
+
+    最後一種情況會補發一次 ``threshold_changed(舊值)``，讓上層拖曳中的即時
+    bin 摘要跟著還原 —— 點長條**不會**動到門檻，也不會發 committed。
     """
 
     threshold_changed = Signal(float)
     threshold_committed = Signal(float)
+    #: 點一根長條：``(lo, hi)`` 是那根長條的分數區間（Studio 用來篩 Gallery）。
+    bar_clicked = Signal(float, float)
 
     _EMPTY_TEXT = "（試跑後顯示分數分佈）"
     # 上緣留 20px 給門檻線的標籤（「門檻 3.5」畫在圖面之上，不壓到長條）
     _M_LEFT, _M_RIGHT, _M_TOP, _M_BOTTOM = 46.0, 14.0, 20.0, 30.0
     _SUMMARY_H = 18.0
+    #: 按下點與門檻線的距離在這個範圍內 → 視為抓著門檻把手，不是點長條。
+    _HANDLE_PX = 6.0
+    #: 按下到放開的水平位移超過這個值 → 視為拖曳，不是點擊。
+    _CLICK_SLOP = 3.0
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -998,6 +1020,11 @@ class HistogramWidget(QWidget):
         self._bin_text = ""
         self._dragging = False
         self._hover_bin = -1
+        # 點擊 vs 拖曳的判定用（見 class docstring）
+        self._press_x: Optional[float] = None
+        self._press_threshold: Optional[float] = None
+        self._press_on_handle = False
+        self._moved = False
 
     # -- public API --------------------------------------------------------
     def set_data(self, edges: Sequence[float], counts: Sequence[int]) -> None:
@@ -1033,6 +1060,13 @@ class HistogramWidget(QWidget):
 
     def has_data(self) -> bool:
         return bool(self._counts) and sum(self._counts) > 0
+
+    def bar_range(self, index: int) -> Optional[Tuple[float, float]]:
+        """第 ``index`` 根長條的分數區間 ``(lo, hi)``；超出範圍回 None。"""
+        i = int(index)
+        if not self._counts or not (0 <= i < len(self._counts)):
+            return None
+        return (float(self._edges[i]), float(self._edges[i + 1]))
 
     # -- geometry ----------------------------------------------------------
     def _plot_rect(self) -> QRectF:
@@ -1160,12 +1194,21 @@ class HistogramWidget(QWidget):
         if not self._plot_rect().adjusted(-6, -6, 6, 6).contains(pos):
             return
         self._dragging = True
+        self._press_x = float(pos.x())
+        self._press_threshold = self._threshold
+        self._press_on_handle = (
+            self._threshold is not None
+            and abs(pos.x() - self._x_at(self._threshold)) <= self._HANDLE_PX)
+        self._moved = False
         self._set_from_mouse(pos.x())
         e.accept()
 
     def mouseMoveEvent(self, e) -> None:    # noqa: D102 - Qt hook
         pos = QPointF(e.position())
         if self._dragging:
+            if (self._press_x is not None
+                    and abs(pos.x() - self._press_x) > self._CLICK_SLOP):
+                self._moved = True
             self._set_from_mouse(pos.x())
             return
         self._update_hover(pos)
@@ -1174,8 +1217,22 @@ class HistogramWidget(QWidget):
         if not self._dragging:
             return
         self._dragging = False
+        idx = -1 if self._press_x is None else self._bar_at(self._press_x)
+        rng = self.bar_range(idx)
+        if not self._moved and not self._press_on_handle and rng is not None:
+            self._restore_press_threshold()
+            self.bar_clicked.emit(float(rng[0]), float(rng[1]))
+            return
         if self._threshold is not None:
             self.threshold_committed.emit(float(self._threshold))
+
+    def _restore_press_threshold(self) -> None:
+        """點長條：門檻退回按下去之前的值（並補一次 changed 讓上層還原顯示）。"""
+        old = self._press_threshold
+        self._threshold = None if old is None else self._clamp(float(old))
+        self.update()
+        if self._threshold is not None:
+            self.threshold_changed.emit(float(self._threshold))
 
     def leaveEvent(self, _e) -> None:       # noqa: D102 - Qt hook
         if self._hover_bin != -1:

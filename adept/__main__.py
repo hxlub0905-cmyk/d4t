@@ -200,6 +200,90 @@ def _cmd_rescore(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_export(args: argparse.Namespace) -> int:
+    """把批次歷史裡的一次執行結果輸出：寫回 KLARF / 報表。"""
+    import json
+
+    import adept.core.steps  # noqa: F401
+    from adept.core.export import (
+        ExportError, apply_writeback, plan_writeback, summarize,
+        write_csv, write_excel,
+    )
+    from adept.core.ingest import klarf_core
+    from adept.core.store import RunStore
+
+    with RunStore(args.db) as store:
+        try:
+            run = store.get_run(args.run_id)
+            results = list(store.iter_results(args.run_id))
+        except Exception as exc:  # noqa: BLE001 — CLI 邊界
+            print(f"[錯誤] 讀不到 run '{args.run_id}'：{exc}", file=sys.stderr)
+            return 2
+    print(f"run {args.run_id}：{len(results)} 筆結果"
+          f"（recipe={run.get('recipe_id')}，kind={run.get('dataset_kind')}）")
+
+    gt = None
+    if args.ground_truth:
+        with open(args.ground_truth, encoding="utf-8") as f:
+            gt = json.load(f)
+    s = summarize(results, ground_truth=gt)
+    print(f"成功 {s.get('n_ok')} / 失敗 {s.get('n_fail')}；"
+          f"bin 分佈 " + " · ".join(f"bin {b}={c}"
+                                   for b, c in sorted((s.get('bin_counts') or {}).items(),
+                                                      key=lambda kv: str(kv[0]))))
+    g = s.get("ground_truth") or {}
+    if g.get("n_evaluated"):
+        print(f"對照 ground truth（{g['n_evaluated']} 顆）："
+              f"正確率 {g.get('accuracy', 0):.1%}　"
+              f"抓漏率 {g.get('miss_rate', 0):.1%}（漏抓 {g.get('fn', 0)} 顆真缺陷）　"
+              f"誤殺率 {g.get('false_alarm_rate', 0):.1%}（誤判 {g.get('fp', 0)} 顆假點）")
+
+    if args.csv:
+        print(f"→ CSV：{write_csv(results, args.csv)}")
+    if args.excel:
+        try:
+            print(f"→ Excel：{write_excel(results, args.excel, ground_truth=gt)}")
+        except ExportError as exc:
+            print(f"[錯誤] {exc}", file=sys.stderr)
+            return 2
+
+    if args.klarf_out or args.dry_run:
+        src = args.klarf or run.get("klarf_path")
+        if not src:
+            print("[錯誤] 沒有來源 KLARF；請用 --klarf 指定。", file=sys.stderr)
+            return 2
+        doc = klarf_core.load(src)
+        opts = {}
+        if args.mode == "inplace":
+            opts = {"class_col": args.class_col, "bin_col": args.bin_col,
+                    "size_col": args.size_col}
+            opts = {k: v for k, v in opts.items() if v}
+        elif args.mode == "topn":
+            opts = {"n": args.top_n, "min_score": args.min_score}
+        try:
+            if args.dry_run:
+                plan = plan_writeback(doc, results, args.mode, **opts)
+            else:
+                plan = apply_writeback(doc, results, args.mode, args.klarf_out, **opts)
+        except ExportError as exc:
+            print(f"[錯誤] {exc}", file=sys.stderr)
+            return 2
+        print(f"\n寫回模式：{plan.mode}{'（預覽，未寫檔）' if args.dry_run else ''}")
+        print(f"  會改動 {plan.n_rows_changed} 列；輸出 {plan.n_rows_out} 列")
+        if plan.columns_touched:
+            print(f"  動到欄位：{', '.join(plan.columns_touched)}")
+        if plan.columns_added:
+            print(f"  新增欄位：{', '.join(plan.columns_added)}")
+        for note in plan.notes:
+            print(f"  · {note}")
+        for it in plan.issues:
+            mark = {"error": "✗", "warning": "△"}.get(getattr(it, "level", ""), "·")
+            print(f"  {mark} [{getattr(it, 'code', '?')}] {getattr(it, 'title', it)}")
+        if not args.dry_run:
+            print(f"→ KLARF：{args.klarf_out}")
+    return 0
+
+
 def _cmd_gui(_args: argparse.Namespace) -> int:
     """開 Studio。PySide6 在此 lazy import —— core/CLI 本身不依賴 Qt。"""
     try:
@@ -214,7 +298,7 @@ def _cmd_gui(_args: argparse.Namespace) -> int:
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         prog="adept",
-        description="ADEPT — 把想法變算法的 ADC 工具（M1 CLI）",
+        description="ADEPT — 把想法變算法的 ADC 工具",
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -242,6 +326,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_runs = sub.add_parser("runs", help="列出批次歷史")
     p_runs.add_argument("--db", required=True, help="批次歷史 SQLite 路徑")
     p_runs.set_defaults(func=_cmd_runs)
+
+    p_ex = sub.add_parser("export", help="輸出：寫回 KLARF / CSV / Excel 報表")
+    p_ex.add_argument("run_id")
+    p_ex.add_argument("--db", required=True, help="批次歷史 SQLite 路徑")
+    p_ex.add_argument("--mode", choices=["inplace", "annotate", "topn"], default="annotate",
+                      help="寫回模式：inplace=就地改欄（無損）／annotate=另存含分數欄／topn=只留前 N 名")
+    p_ex.add_argument("--klarf", default=None, help="來源 KLARF（預設用 run 紀錄裡的路徑）")
+    p_ex.add_argument("--klarf-out", default=None, help="輸出 KLARF 路徑")
+    p_ex.add_argument("--dry-run", action="store_true", help="只預覽會改什麼，不寫檔")
+    p_ex.add_argument("--class-col", default=None, help="inplace：bin 寫進哪個分類欄（例 CLASSNUMBER）")
+    p_ex.add_argument("--bin-col", default=None, help="inplace：bin 寫進哪個 bin 欄（例 ROUGHBINNUMBER）")
+    p_ex.add_argument("--size-col", default=None, help="inplace：CD 寫進哪個尺寸欄（例 DSIZE）")
+    p_ex.add_argument("--top-n", type=int, default=0, help="topn：取前幾名（0=改用 --min-score）")
+    p_ex.add_argument("--min-score", type=float, default=0.0, help="topn：分數門檻")
+    p_ex.add_argument("--csv", default=None, help="輸出 feature vector CSV")
+    p_ex.add_argument("--excel", default=None, help="輸出 Excel 報表（需要 openpyxl）")
+    p_ex.add_argument("--ground-truth", default=None, help="ground_truth.json（有的話會算正確率/抓漏率）")
+    p_ex.set_defaults(func=_cmd_export)
 
     p_rs = sub.add_parser("rescore", help="改分數表達式/門檻重算（不重跑影像，秒級）")
     p_rs.add_argument("run_id")
