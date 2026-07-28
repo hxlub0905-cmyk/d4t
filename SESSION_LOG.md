@@ -209,3 +209,67 @@ Perspective-Combination），把可重用演算法 vendoring 進 `adept/core`。
 
 ### 下一步
 M4 雙輸入 + Golden Cell（見 CLAUDE.md §9）。
+
+---
+
+## 2026-07-28 · M7 UI/UX 檢討（Claude Code session）
+
+接手 session：先讀 `docs/HANDOVER.md`，然後做 UI/UX 體檢。使用者的實際感受是
+**「東西太多、太像玩具」**，逐條拆解後根因只有一個：
+**v1 的 UI 是按引擎的結構長出來的，不是按使用者的工作流程長出來的。**
+
+### 已完成：A 組（新手第一分鐘會撞到的四件事）+ UI 全英文
+
+- **A1 動作可用性**：前置條件不滿足的按鈕改成**變灰 + tooltip 說明原因**。
+  舊行為是全部亮著、按下去才在狀態列抱怨 —— 狀態列在螢幕最下角，
+  第一次用的人只會覺得「我按了，沒反應」。新增 `_update_action_states()` 單一決策點。
+- **A2 游標讀數搬家**：`ImageView.cursor_info` 原本直接接到狀態列，
+  滑鼠飄過影像就把「試跑完成：100 顆…」洗掉。改成預覽區自己的標籤，
+  狀態列只留事件訊息。
+- **A3 工具列去重**：「載入範本（die-to-die）」與「範例 recipe」做的是同一件事
+  （都在載 `examples/recipes/` 的 JSON），且 die-to-die 對目標使用者是行話。
+  合併成單一入口「Templates…」。
+- **A4 主要動作只留一顆**：「全跑」收進「▶ Run trial」的下拉。
+  試跑筆數改成跟著資料集走（24 顆的 lot 不再顯示「First 200」）。
+- **UI 全英文**：使用者原話「中英夾雜很混亂」。工具列、面板、對話框、
+  卡片 label/help、ParamSpec help、參數與 recipe 驗證錯誤、score 表達式錯誤、
+  KLARF 寫回計畫書、CSV/Excel 報表標題全部英文化。
+  **docstring 與註解維持中文** —— 那是開發文件，是這個 repo 刻意累積的資產。
+  新增 `tests/test_ui_english_only.py` 走 AST 把不變量鎖住（只管字串常數，
+  docstring 節點跳過）；`__main__.py`（CLI 是另一個介面層）與 vendored 的
+  `klarf_core.py` 列在 PENDING 並註明理由，另有一個測試防止清單發霉。
+
+595 tests 綠。
+
+### 討論定案：F7（見 `docs/plans/F7-canvas-and-taxonomy.md`）
+
+三輪來回之後定下的方向：
+
+- **patch-only 收斂**（RSEM 先關掉但**不刪 code**）。刪掉等於丟掉整個 M4；
+  而且 `algo/period.py` 的相位搜尋是之後做 pattern-frame ROI 的唯一工具。
+- **卡片改依流程階段分類**：Input → Enhance → Region → Compare → Measure → ADC → Output，
+  每段附一條型別規則（吃什麼、吐什麼），新卡片放哪不用討論。
+  舊的「影像／算法」分的是**輸出型別**，不是**使用者意圖** —— 那是「太武斷」的根因。
+- **ROI 升成一級概念**。查證後發現 `Context.rois` / `Context.labels` 與
+  `algo/roi.py` 的 `NamedROI` / `MultiROISet` **早就存在但從來沒有人寫過**
+  （`context.py:33` 的註解寫著「M3 起由 ROI 卡填入」，那張卡沒做出來）。
+  ROI 現在是散在各量測卡裡的 `region=` / `box_size` 參數，正是 CLAUDE.md §7
+  那個「中心框幾何與影像尺寸綁死」的坑。
+- **但 Region 段先不照搬**：使用者指出機台的裁切是「以 defect 為正中心裁 x×x」，
+  所以 patch 裡有兩個座標系 —— **defect frame**（中心固定，穩定）與
+  **pattern frame**（晶格相位逐顆不同，不穩定）。v1 只做 defect frame 的 ROI。
+- **Align 降級**：使用者的領域知識 —— 機台輸出的 patch 兩兩對應本來就是
+  defect & reference，不需要對位。卡片保留但不進預設範本。
+  驗證方法已記在計畫書：`align_dx` / `align_dy` / `align_score` 都是 feature，
+  拿真實 lot 跑一次看 CSV 的分佈就知道。
+- **視覺目標是 n8n / KLIP 的語言**（中性灰、全平面、顏色只表達語意）。
+  現在的暖奶油 + 琥珀是 vendoring 自 CPE 的；使用者自己的 KLIP 已經是想要的風格。
+- **Output 是固定尾節點但底下仍是 Export 精靈** —— ADC 是 per-defect、
+  Export 是 per-batch，不該真的變成流程節點。
+
+### 下一步
+
+F7-1 patch-only 收斂 → F7-2 主題換色 → F7-3 卡片分類 → F7-4 Region 段 +
+量測卡遷移（破壞性 schema）→ F7-5 Results 視窗 → F7-6 畫布。
+
+`fab_probe/` 的三個原始假設仍然全部未驗證，優先度不因這次重構而降低。
