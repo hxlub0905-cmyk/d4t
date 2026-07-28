@@ -3,19 +3,20 @@
 
 版面（全部用 QSplitter，使用者拉得動）::
 
-    ┌ 工具列：開啟 KLARF／Recipe／存檔／範本 ｜ 試跑筆數 ▶試跑 ▶全跑 ┐
+    ┌ 工具列：開啟 KLARF／Recipe／存檔／範本 ｜ 輸出… ｜ 試跑筆數 ▶試跑 ▶全跑 ┐
     ├──────────┬──────────────────────┬──────────────────────────────┤
-    │ 卡片庫    │ 流程（PipelinePanel） │ 預覽：◀ ▶ 缺陷選單            │
-    │ Library  │ ──────────────────── │      影像流下拉               │
-    │ ~230px   │ 參數表單 / 分數編輯   │      ImageView                │
-    │          │ （QStackedWidget）    │      特徵表 + 判定 chip       │
+    │ 卡片庫    │ 流程（PipelinePanel） │ ［單顆預覽］［Gallery］        │
+    │ Library  │ ──────────────────── │  單顆：◀ ▶ 缺陷選單 / 影像流   │
+    │ ~230px   │ 參數表單 / 分數編輯   │        ImageView              │
+    │          │ （QStackedWidget）    │        特徵表 + 判定 chip     │
+    │          │                      │  Gallery：縮圖牆（同屏比多顆）  │
     ├──────────┴──────────────────────┴──────────────────────────────┤
-    │ 分數分佈直方圖（可拖門檻線）                                      │
+    │ 分數分佈直方圖（可拖門檻線、可點長條）                             │
     ├─────────────────────────────────────────────────────────────────┤
     │ 狀態列：進度 / 訊息                                              │
     └─────────────────────────────────────────────────────────────────┘
 
-三條資料流（別搞混）
+五條資料流（別搞混）
 --------------------
 1. **編輯流**：UI 事件 → :class:`~adept.ui.viewmodel.RecipeModel` 的方法 →
    model 通知 listener → 主視窗刷新 Pipeline/Score 顯示 + 排一次**去抖動
@@ -23,16 +24,31 @@
 2. **預覽流**：:class:`~adept.ui.workers.PreviewWorker` 算一顆 defect →
    ``ready`` → 填影像流下拉 / ImageView / 特徵表 / 判定 chip。
 3. **試跑流**：:class:`~adept.ui.workers.TrialWorker` 跑 N 顆 →
-   ``done`` → 直方圖 + bin 摘要 + 狀態列統計。
+   ``done`` → 直方圖 + bin 摘要 + Gallery + 狀態列統計。
+4. **縮圖流**（M5）：Gallery 捲到哪就要哪幾張縮圖 —— ``thumbs_requested(ids)``
+   → :class:`ThumbWorker`（背景執行緒讀檔 + :func:`~adept.ui.gallery.make_thumb`）
+   → ``ready(dict)`` → ``set_thumbs``。**解碼絕不在 GUI 執行緒**，而且忙碌時
+   新的請求會合併進待跑集合（``request`` 只累積、不排隊、不阻塞）。
+5. **輸出流**（M5）：工具列「輸出…」→ :class:`~adept.ui.export_dialog.ExportDialog`
+   （試跑/全跑有結果才會亮）。
 
-門檻的「秒回」路徑很重要：拖曳中只用 :func:`~adept.ui.viewmodel.rebin`
-重算 bin 數（**不寫 model、不重跑**），放開才 ``set_threshold``。
+調參迴圈的兩半（M5 的重點）
+---------------------------
+直方圖點一根長條 → ``bar_clicked(lo, hi)`` → Gallery 只留那個分數區間並自動
+切到 Gallery 分頁；再點同一根（或按掉 Gallery 上的條件 chip）就取消篩選。
+Gallery 雙擊某顆 → ``defect_activated`` → 切回「單顆預覽」並跳到那顆。
+門檻的「秒回」路徑仍然成立：拖曳中只用 :func:`~adept.ui.viewmodel.rebin`
+重算 bin 數（**不寫 model、不重跑**），放開才 ``set_threshold``；
+**點長條不會動到門檻**（見 ``HistogramWidget`` 的 click / drag 判定）。
 
-測試友善 API（完全不開對話框，見 tests/test_ui_studio_smoke.py）：
+測試友善 API（完全不開對話框，見 tests/test_ui_studio_smoke.py 與
+tests/test_ui_studio_m5.py）：
 :meth:`StudioWindow.load_dataset_path` / :meth:`~StudioWindow.load_recipe_path` /
 :meth:`~StudioWindow.load_template` / :meth:`~StudioWindow.select_node` /
 :meth:`~StudioWindow.set_defect_index` / :meth:`~StudioWindow.refresh_preview` /
-:meth:`~StudioWindow.run_trial` / :meth:`~StudioWindow.save_recipe_path`。
+:meth:`~StudioWindow.run_trial` / :meth:`~StudioWindow.save_recipe_path` /
+:meth:`~StudioWindow.show_gallery` / :meth:`~StudioWindow.show_preview` /
+:meth:`~StudioWindow.request_thumbs` / :meth:`~StudioWindow.open_export_dialog`。
 每個進入點都自我保護：沒有資料集 / 流程是空的 → 狀態列提示，不丟例外。
 """
 from __future__ import annotations
@@ -42,7 +58,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -57,6 +73,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QStatusBar,
+    QTabWidget,
     QToolBar,
     QToolButton,
     QVBoxLayout,
@@ -66,6 +83,8 @@ from PySide6.QtWidgets import (
 import adept.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
 from adept.core.pipeline import ParamError, Recipe, get_step, list_steps
 
+from .export_dialog import ExportDialog
+from .gallery import GalleryPanel, make_thumb
 from .viewmodel import RecipeModel, histogram, rebin
 from .widgets import (
     FeatureTable,
@@ -76,9 +95,10 @@ from .widgets import (
     PipelinePanel,
     VerdictChip,
 )
-from .workers import DatasetLoadWorker, PreviewWorker, TrialWorker
+from .workers import DatasetLoadWorker, PreviewWorker, TrialWorker, _ThreadedWorker
 
-__all__ = ["StudioWindow", "TEMPLATE_RECIPE", "DEFAULT_CACHE_DIR"]
+__all__ = ["StudioWindow", "ThumbWorker", "TEMPLATE_RECIPE", "DEFAULT_CACHE_DIR",
+           "THUMB_CHANNEL_PRIORITY", "TAB_PREVIEW", "TAB_GALLERY"]
 
 #: 卡片庫「ADC 判定」段固定顯示的 Score / Bin 項目。它不是 registry 裡的
 #: step（每條 pipeline 天生就有一張 ScoreSpec），但三段式的心智模型要完整 ——
@@ -117,6 +137,13 @@ TRIAL_WORKERS = None
 #: model 變動 → 重算預覽 的去抖動間隔（毫秒）。拖 spinbox 不會每格都重算。
 PREVIEW_DEBOUNCE_MS = 300
 
+#: 右欄分頁的索引（``right_tabs``）。
+TAB_PREVIEW = 0
+TAB_GALLERY = 1
+
+#: Gallery 縮圖要用哪個 channel（依序找第一個有的；都沒有就用第一個 channel）。
+THUMB_CHANNEL_PRIORITY = ("test", "single")
+
 _FEATURE_PLACEHOLDER = "插入特徵 ▾"
 _SCORE_HELP = ("分數是一條算式，變數就是上面流程產出的特徵名（例："
                "snr_max、blob_area、glv_max）。分數 ≥ 門檻 → bin 1，"
@@ -132,8 +159,118 @@ def _fmt(value: Any) -> str:
     return str(value)
 
 
+def thumb_channel(item: Any) -> Optional[str]:
+    """這顆 defect 的縮圖要讀哪個 channel：``test`` → ``single`` → 第一個有的。"""
+    images = dict(getattr(item, "images", {}) or {})
+    for name in THUMB_CHANNEL_PRIORITY:
+        if name in images:
+            return name
+    for name in images:
+        return str(name)
+    return None
+
+
+def load_thumb(item: Any, size: int) -> Optional[Any]:
+    """一顆 defect → ``size`` × ``size`` 的縮圖 ndarray（**Qt-free**，可跑在背景）。
+
+    讀不到圖（沒有 channel / 檔案不見了 / TIFF 壞頁）一律回 ``None`` ——
+    Gallery 會繼續畫「載入中…」的佔位磚，不會有人看到 traceback（鐵則 7 的精神）。
+    """
+    channel = thumb_channel(item)
+    if channel is None:
+        return None
+    arr = item.load(channel)
+    return make_thumb(arr, int(size))
+
+
+class ThumbWorker(_ThreadedWorker):
+    """Gallery 縮圖的背景解碼工（沿用 ``workers.py`` 的一次性 QThread 樣式）。
+
+    為什麼要有它：``make_thumb`` 前面那一步是**讀檔 + 解 TIFF 頁**，在 GUI
+    執行緒上做會讓捲動一格一格卡。所以 Gallery 只發「我要這些 id 的縮圖」，
+    真正的解碼在這裡。
+
+    **請求合併**：忙碌時 :meth:`request` 只是把 id 併進待跑集合（不排隊、
+    不阻塞、也不會為每次捲動各開一條執行緒），目前這批做完再一次做掉。
+    正在做的那批用 ``_inflight`` 記著，重複請求不會做第二次。
+
+    訊號：``ready(dict)``（``{defect_id: ndarray}``，回到 GUI 執行緒）、
+    ``failed(str)``（整批都讀不出來時才發，單顆失敗只是靜靜略過）。
+    """
+
+    ready = Signal(object)
+    failed = Signal(str)
+
+    #: 一批最多做幾張（做完立刻回 UI，剩下的下一批繼續 —— 縮圖要「陸續」出現）。
+    BATCH = 48
+
+    def __init__(self, parent: Optional[Any] = None) -> None:
+        super().__init__(parent)
+        self._pending: Dict[str, Any] = {}      # defect_id -> DefectItem
+        self._inflight: List[str] = []
+        self._size = 96
+
+    # ---- 對外 -------------------------------------------------------------
+    def request(self, jobs: Sequence[Any], size: int) -> None:
+        """要求做這些縮圖；``jobs`` 是 ``(defect_id, DefectItem)`` 的序列。"""
+        self._size = int(size)
+        for did, item in jobs or ():
+            did = str(did)
+            if did in self._inflight:
+                continue
+            self._pending[did] = item
+        if not self.is_running():
+            self._launch()
+
+    def pending_count(self) -> int:
+        """還沒開始做的縮圖張數（測試 / statusbar 用）。"""
+        return len(self._pending)
+
+    @staticmethod
+    def run_sync(jobs: Sequence[Any], size: int) -> Dict[str, Any]:
+        """同步做一批縮圖（不開執行緒），回傳 ``{defect_id: ndarray}``。"""
+        out: Dict[str, Any] = {}
+        for did, item in jobs or ():
+            try:
+                arr = load_thumb(item, int(size))
+            except Exception:               # noqa: BLE001 — 單顆壞掉不該殺整批
+                continue
+            if arr is not None:
+                out[str(did)] = arr
+        return out
+
+    # ---- 內部 -------------------------------------------------------------
+    def _launch(self) -> None:
+        if not self._pending:
+            return
+        ids = list(self._pending)[:self.BATCH]
+        batch = [(i, self._pending.pop(i)) for i in ids]
+        self._inflight = [i for i, _ in batch]
+        size = int(self._size)
+
+        def work() -> None:
+            out = ThumbWorker.run_sync(batch, size)
+            if out:
+                self.ready.emit(out)
+            elif batch:
+                self.failed.emit("有 %d 顆 defect 的縮圖讀不出來（影像檔可能不在）。"
+                                 % len(batch))
+
+        self._start_job(work)
+
+    def _job_finished(self) -> None:
+        """一批做完（GUI 執行緒）：還有待做的就接著做。"""
+        self._inflight = []
+        if self._pending:
+            self._launch()
+
+    def _before_stop(self) -> None:
+        self._pending = {}                  # 關窗：待做的縮圖全部作廢
+        self._inflight = []
+
+
 class StudioWindow(QMainWindow):
-    """ADEPT Studio 主視窗（M3 最終組裝）。"""
+    """ADEPT Studio 主視窗（M3 組裝 + M5 Gallery / 直方圖聯動 / 輸出）。"""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -143,6 +280,7 @@ class StudioWindow(QMainWindow):
         self.model = RecipeModel()
         self.dataset: Optional[Any] = None
         self.trial_scores: List[float] = []
+        self.trial_results: List[Dict[str, Any]] = []   # M5：Gallery / 輸出的來源
         self.defect_index: int = 0
         self.selected_node: Optional[str] = None
         self.recipe_path: Optional[str] = None
@@ -152,11 +290,14 @@ class StudioWindow(QMainWindow):
         self._user_stream: Optional[str] = None   # 使用者親手挑的影像流（會被保留）
         self._syncing = False            # 程式在寫 widget（別回頭觸發 model）
         self._trial_t0 = 0.0
+        self._items_by_id: Dict[str, Any] = {}    # defect_id -> DefectItem（縮圖用）
+        self._score_filter: Optional[Any] = None  # 直方圖點出來的 (lo, hi)
 
         # ---- 背景工作 ------------------------------------------------------
         self.dataset_worker = DatasetLoadWorker(self)
         self.preview_worker = PreviewWorker(self)
         self.trial_worker = TrialWorker(self)
+        self.thumb_worker = ThumbWorker(self)
 
         # ---- 去抖動計時器 --------------------------------------------------
         self._preview_timer = QTimer(self)
@@ -198,8 +339,12 @@ class StudioWindow(QMainWindow):
         self.btn_template = self._tool_button(
             "載入範本（die-to-die）", "載入內建的 die-to-die 範例流程",
             self.load_template)
+        self.btn_export = self._tool_button(
+            "輸出…", "把這批結果寫回 KLARF、出報表、出疊圖（要先試跑或全跑）",
+            self.open_export_dialog)
+        self.btn_export.setEnabled(False)      # 有結果才亮
         for b in (self.btn_open_klarf, self.btn_open_recipe,
-                  self.btn_save_recipe, self.btn_template):
+                  self.btn_save_recipe, self.btn_template, self.btn_export):
             bar.addWidget(b)
 
         spacer = QWidget(bar)
@@ -253,8 +398,8 @@ class StudioWindow(QMainWindow):
         middle.setStretchFactor(1, 2)
         self.middle_splitter = middle
 
-        # 右：預覽
-        right = self._build_preview_pane()
+        # 右：［單顆預覽］［Gallery］兩個分頁
+        right = self._build_right_tabs()
 
         top = QSplitter(Qt.Horizontal, self)
         top.addWidget(self.library)
@@ -339,6 +484,27 @@ class StudioWindow(QMainWindow):
         lay.addStretch(1)
         return pane
 
+    def _build_right_tabs(self) -> QWidget:
+        """右欄：兩個分頁 —— 單顆看細節、Gallery 一次看一整批。
+
+        分頁一定要「看得出來有兩個」：兩個分頁都寫明用途（不用圖示、不用
+        只有一個字的標籤），並各自掛 tooltip 說明什麼時候該用哪一頁。
+        """
+        self.preview_pane = self._build_preview_pane()
+        self.gallery = GalleryPanel(self)
+
+        tabs = QTabWidget(self)
+        tabs.setDocumentMode(False)
+        tabs.setTabPosition(QTabWidget.North)
+        tabs.addTab(self.preview_pane, "單顆預覽")
+        tabs.addTab(self.gallery, "Gallery（同屏比多顆）")
+        tabs.setTabToolTip(TAB_PREVIEW, "一次看一顆：影像流、特徵值、判定結果")
+        tabs.setTabToolTip(TAB_GALLERY, "一次看一整批的縮圖，用眼睛掃出調錯的地方"
+                                        "（試跑後才有內容）")
+        tabs.setCurrentIndex(TAB_PREVIEW)
+        self.right_tabs = tabs
+        return tabs
+
     def _build_preview_pane(self) -> QWidget:
         pane = QWidget(self)
         lay = QVBoxLayout(pane)
@@ -419,6 +585,11 @@ class StudioWindow(QMainWindow):
 
         self.histogram.threshold_changed.connect(self._on_threshold_changed)
         self.histogram.threshold_committed.connect(self._on_threshold_committed)
+        self.histogram.bar_clicked.connect(self._on_bar_clicked)
+
+        self.gallery.thumbs_requested.connect(self._on_thumbs_requested)
+        self.gallery.defect_activated.connect(self._on_defect_activated)
+        self.gallery.selection_changed.connect(self._on_gallery_selection)
 
     def _wire_workers(self) -> None:
         self.dataset_worker.loaded.connect(self._on_dataset_loaded)
@@ -434,6 +605,9 @@ class StudioWindow(QMainWindow):
         self.trial_worker.done.connect(self._on_trial_done_async)
         self.trial_worker.failed.connect(
             lambda msg: self._status("試跑失敗：%s" % msg))
+
+        self.thumb_worker.ready.connect(self._on_thumbs_ready)
+        self.thumb_worker.failed.connect(self._status)
 
     # ==================================================================== #
     # 狀態列
@@ -692,6 +866,14 @@ class StudioWindow(QMainWindow):
         self.dataset = dataset
         items = list(getattr(dataset, "items", []) or [])
         self.defect_index = 0
+        # 縮圖工只拿得到 defect_id，這張表是它回頭找 DefectItem 的唯一途徑
+        self._items_by_id = {str(getattr(it, "defect_id", "")): it for it in items}
+        # 換資料集 = 舊的結果與縮圖全部作廢
+        self.trial_results = []
+        self.trial_scores = []
+        self._score_filter = None
+        self.gallery.set_items([])
+        self.btn_export.setEnabled(False)
 
         self._syncing = True
         try:
@@ -1009,16 +1191,152 @@ class StudioWindow(QMainWindow):
     def _apply_trial_results(self, results: Sequence[Dict[str, Any]],
                              elapsed: float) -> None:
         results = list(results or [])
+        self.trial_results = results
         self.trial_scores = [r["score"] for r in results
                              if r.get("ok") and r.get("score") is not None]
         edges, counts = histogram(self.trial_scores)
         self.histogram.set_data(edges, counts)
         self.histogram.set_threshold(self.model.threshold)
         self._refresh_bin_summary(self.model.threshold)
+        self._populate_gallery(results)
+        self.btn_export.setEnabled(bool(results))
         ok = sum(1 for r in results if r.get("ok"))
         fail = len(results) - ok
         self._status("試跑完成：%d 顆（成功 %d、失敗 %d），耗時 %.1f 秒"
                      % (len(results), ok, fail, float(elapsed)))
+
+    # ==================================================================== #
+    # Gallery（M5）
+    # ==================================================================== #
+    def _populate_gallery(self, results: Sequence[Dict[str, Any]]) -> None:
+        """試跑/全跑結果 → Gallery。縮圖一律先給 ``None``，之後背景補上。
+
+        排序欄位 = ``score`` + 這批結果實際出現過的特徵名（沒跑到的特徵不會
+        出現在下拉裡 —— 使用者只看得到「這一批真的有的東西」）。
+        """
+        results = list(results or [])
+        feats: List[str] = []
+        for r in results:
+            for k in (r.get("features") or {}):
+                if k not in feats:
+                    feats.append(str(k))
+        self.gallery.set_sort_keys(["score"] + sorted(feats))
+        self.gallery.set_items([
+            {
+                "defect_id": str(r.get("defect_id", "")),
+                "ok": bool(r.get("ok", True)),
+                "score": r.get("score"),
+                "bin": r.get("bin"),
+                "features": dict(r.get("features") or {}),
+                "thumb": None,
+            }
+            for r in results
+        ])
+        # 新的一批 = 分數分佈變了：舊的分數篩選一定要清掉，不然使用者會看到
+        # 一個對不上新直方圖的區間（而且 chip 還掛在那裡）。
+        self.gallery.clear_filter()
+        self._score_filter = None
+
+    def show_gallery(self) -> None:
+        """切到 Gallery 分頁。"""
+        self.right_tabs.setCurrentIndex(TAB_GALLERY)
+
+    def show_preview(self) -> None:
+        """切回「單顆預覽」分頁。"""
+        self.right_tabs.setCurrentIndex(TAB_PREVIEW)
+
+    def current_tab(self) -> int:
+        """目前在哪個分頁（:data:`TAB_PREVIEW` / :data:`TAB_GALLERY`）——測試用。"""
+        return int(self.right_tabs.currentIndex())
+
+    # ---- 縮圖（永遠不在 GUI 執行緒解碼）------------------------------------
+    def _on_thumbs_requested(self, ids: Any) -> None:
+        self.request_thumbs(list(ids or []))
+
+    def request_thumbs(self, ids: Sequence[str], sync: bool = False) -> int:
+        """做這些 defect 的縮圖。``sync=True`` 直接算完（測試 / headless 用）。
+
+        回傳實際排進去（或同步做好）的張數；認不得的 id 靜靜略過。
+        """
+        jobs = [(str(i), self._items_by_id[str(i)])
+                for i in (ids or []) if str(i) in self._items_by_id]
+        if not jobs:
+            return 0
+        size = int(self.gallery.thumb_size())
+        if sync:
+            mapping = ThumbWorker.run_sync(jobs, size)
+            self._on_thumbs_ready(mapping)
+            return len(mapping)
+        self.thumb_worker.request(jobs, size)
+        return len(jobs)
+
+    def _on_thumbs_ready(self, mapping: Any) -> None:
+        """背景做好的縮圖回到 GUI 執行緒 —— 只有這裡碰 Gallery。"""
+        self.gallery.set_thumbs(dict(mapping or {}))
+
+    # ---- Gallery 的互動 ---------------------------------------------------
+    def _on_defect_activated(self, defect_id: str) -> None:
+        """Gallery 雙擊某顆 → 切回單顆預覽並跳過去。"""
+        did = str(defect_id)
+        items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
+        index = None
+        for i, it in enumerate(items):
+            if str(getattr(it, "defect_id", "")) == did:
+                index = i
+                break
+        self.show_preview()
+        if index is None:
+            self._status("在目前的資料集裡找不到 defect「%s」。" % did)
+            return
+        self.set_defect_index(index)
+        self._status("跳到 defect「%s」（第 %d / %d 顆）"
+                     % (did, index + 1, len(items)))
+
+    def _on_gallery_selection(self, ids: Any) -> None:
+        self._status("已選 %d 顆" % len(list(ids or [])))
+
+    # ---- 直方圖點長條 → Gallery 篩選 --------------------------------------
+    def _on_bar_clicked(self, lo: float, hi: float) -> None:
+        """點一根長條：只看那個分數區間；再點同一根就取消。
+
+        「同一根」的判斷要連 Gallery 目前**真的還在篩**一起看 —— 使用者可能
+        已經按掉 Gallery 上的條件 chip 了，那時候再點同一根當然是重新篩選。
+        """
+        rng = (float(lo), float(hi))
+        if self._score_filter == rng and self.gallery.filter_text():
+            self.gallery.clear_filter()
+            self._score_filter = None
+            self._status("已取消分數篩選（顯示全部 %d 顆）"
+                         % self.gallery.displayed_count())
+            return
+        self.gallery.filter_by_score_range(rng[0], rng[1])
+        self._score_filter = rng
+        self.show_gallery()
+        self._status("已篩選 score %.3g–%.3g（%d 顆）"
+                     % (rng[0], rng[1], self.gallery.displayed_count()))
+
+    # ==================================================================== #
+    # 輸出（M5）
+    # ==================================================================== #
+    def open_export_dialog(self) -> Optional[Any]:
+        """開輸出精靈；沒有結果就只在狀態列提示（不開空對話框）。"""
+        if not self.trial_results:
+            self._status("還沒有結果可以輸出 —— 先「▶ 試跑」或「▶ 全跑」。")
+            return None
+        dlg = ExportDialog(
+            self.trial_results,
+            doc=getattr(self.dataset, "klarf", None),
+            dataset=self.dataset,
+            recipe=self.model.to_recipe() if self.model.node_order else None,
+            parent=self)
+        dlg.exported.connect(self._on_exported)
+        self.export_dialog = dlg
+        dlg.show()
+        return dlg
+
+    def _on_exported(self, summary: Any) -> None:
+        outputs = list((summary or {}).get("outputs") or [])
+        self._status("輸出完成：%s" % ("、".join(outputs) if outputs else "（沒有檔案）"))
 
     # ==================================================================== #
     # 對話框（測試不走這條路）
@@ -1051,7 +1369,7 @@ class StudioWindow(QMainWindow):
     def closeEvent(self, event) -> None:      # noqa: D102 - Qt hook
         self._preview_timer.stop()
         for worker in (self.preview_worker, self.trial_worker,
-                       self.dataset_worker):
+                       self.dataset_worker, self.thumb_worker):
             try:
                 worker.stop()
             except Exception:              # noqa: BLE001 — 關窗不准擋路

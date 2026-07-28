@@ -4,6 +4,60 @@
 
 ---
 
+## 2026-07-28 · M5 Gallery + Export（347 → 514 tests）
+
+### Gallery（同屏比多顆）
+`adept/ui/gallery.py`：整個網格是**一個**自繪 widget（`QAbstractScrollArea`），
+只畫可視範圍 + 1 列 overscan，10 顆與 10,000 顆的 widget tree 完全相同
+（`set_items(10k)` 約 0.05 s）。QPixmap 轉換走 512 筆上限的 LRU。
+縮圖在背景執行緒解碼：gallery 發 `thumbs_requested(ids)` → Studio 的 `ThumbWorker`
+只解可視範圍那批（每批上限 48），in-flight 的 id 不重算。
+
+**直方圖點 bar → Gallery 篩選**是這一版的關鍵串接（調參迴圈的另一半）。
+難處在於同一個 widget 既要拖門檻又要點長條：解法是**在放開時才判定** ——
+按下時照舊記錄狀態，放開時若位移 > 3px 或按在門檻把手上就當拖曳，
+否則把門檻還原（並補發一次 `threshold_changed` 讓即時 bin 統計回捲）再發 `bar_clicked`。
+所以點長條保證不會動到門檻，兩種行為都有測試鎖住。
+
+### Export（三種 KLARF 寫回）
+`adept/core/export/`：
+- **inplace**：只走 `set_cell`，且值相同就不寫 —— 沒改到任何東西時輸出**逐位元組相同**（有測試）。
+  要求的欄位不存在時直接拋 `ExportError` 說明，不靜默略過。
+- **annotate**：1.2 改寫 `DefectRecordSpec`、1.8 改寫 `Columns N { … }`，
+  新欄位插在影像 token 起始欄之前，**影像區塊仍在列尾**；輸出重新解析後
+  `defect_image_map` / `load_dataset` 都仍正常。
+- **topn**：分數排序取前 N、DEFECTID 重新編號。**page 編號刻意不重映射**
+  （那需要一併重寫 TIFF），輸出檔必須與原 TIFF 放在一起 —— 這點寫進 plan 的 notes。
+
+UI 上最重要的設計是**「預覽變更」按鈕**：先跑 `plan_writeback` 乾跑，
+用白話列出會改幾列、動到哪些欄、新增哪些欄、健檢結果，預覽成功才解鎖「寫出」。
+任何控制項一改動就作廢重鎖。
+
+### fab_probe（廠內格式探測）
+三支 stdlib-only 單檔腳本，輸出純文字、預設遮蔽 Lot/Wafer/Device 識別碼，
+設計成可以複製貼出廠區。對應 CLAUDE.md §8 的三個假設。
+`probe_stats.py` 自己寫了 TIFF 解碼（未壓縮 / PackBits，8 與 16 bit，
+含 BigTIFF 與 big-endian），與 numpy 逐位元組比對驗證過；遇到解不了的壓縮
+會明講並跳過該頁而不是整支掛掉。
+
+### 順帶抓到並修掉一個真實資料上的 bug
+`probe_klarf.py` 跑在 `tests/fixtures/sample_real.klarf`（專案裡唯一一份真實來源的
+KLARF）上時發現**第四種變體**：`ImageList` 型別欄（IMAGEINFO）**不在最後一欄**，
+而且整份檔案沒有 IMAGECOUNT 欄。`row_len_ok` 原本用原始 token 數比對欄數，
+把佔 8 個 token 的 `Images 1 { … }` 當成 8 欄 → **每一列都被判違法**，
+`lint()` 對一份完全正常的檔案報 rowlen error。使用者會看到的症狀是：
+Export 精靈在寫回真實檔案前跳出嚇人的紅字。
+
+修法是加 `image_block_span()` / `effective_row_len()`，把子區塊折算成一欄。
+**刻意沒動 `image_layout()`** —— 它對這個變體回 None，而 export 的插欄位置
+正好因此落在最後，對這個變體來說是對的；「順手修好」它反而會把新欄位插錯位置。
+這點寫進 CLAUDE.md 的坑表了。迴歸測試 `tests/test_klarf_variant_d.py`。
+
+### 下一步
+M6 推廣包（離線 wheels 安裝、首啟導覽、範例 recipe 庫、快速參考卡）。
+
+---
+
 ## 2026-07-28 · M4 雙輸入 + Golden Cell（341 → 356 tests）
 
 驗收目標：**同一份 recipe 吃 EBI patch 與 Review SEM 兩種輸入**。達成，
