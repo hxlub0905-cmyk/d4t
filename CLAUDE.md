@@ -33,6 +33,17 @@
 【ADC 判定段】 features → score → bin → 寫回 KLARF
 ```
 
+**注意（F7-3 起）**：上面的三段是 `Step.category` —— **引擎**的分類
+（快取切點、驗證順序）。**使用者看到的**分組是另一個軸 `Step.group`：
+
+```
+Input → Enhance → Region → Compare → Measure → ADC
+```
+
+因為 category 描述的是「這張卡吐什麼型別」，不是「使用者想解決什麼問題」。
+兩個軸各有各的用途，不要合併。新卡片放哪一組：看它吃什麼、吐什麼
+（規則寫在 `pipeline/step.py` 的 `GROUP_*` 常數旁邊）。
+
 UI 三段分色（影像=藍 `#6f93b5`／算法=橙 `#c06a1d`／判定=紫 `#8a6fb5`）。
 這個分類不是裝飾 —— 它同時是 `Step.category`、快取切點、recipe 驗證順序的依據。
 
@@ -63,7 +74,9 @@ adept/
 │   └── calibration.py       # nm/px 校正 profile
 ├── ui/                      # PySide6 Studio（**唯一允許 Qt 的地方**）
 │   ├── scope.py             #   產品範圍開關：目前只吃 EBI patch（F7-1，見 §11）
-│   ├── viewmodel.py         #   RecipeModel（Qt-free，可 headless 測）
+│   ├── viewmodel.py         #   RecipeModel（Qt-free，可 headless 測；含 edges）
+│   ├── canvas.py            #   節點畫布（n8n 式；F7-6，純 UI，引擎零改動）
+│   ├── results.py           #   Results 視窗：直方圖 + Gallery + 輸出（F7-5）
 │   ├── theme.py widgets.py  #   主題 token + 6 個資料驅動元件
 │   ├── gallery.py           #   同屏比多顆（虛擬捲動，撐 10k+）
 │   ├── welcome.py           #   首啟導覽 + 範例 recipe 庫對話框
@@ -184,7 +197,7 @@ python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 
 | M4 雙輸入 | ✅ | RSEM 單張 ingest、輸入型別分流、Golden Cell + Cell 週期估測卡（`period.choose_origin` 相位搜尋已補完）。驗收達成：`examples/recipes/dual_route_basic.json` 同時吃 EBI patch 與 RSEM，跨 3 seeds × 2 種輸入共 144 顆合成 defect，正確率 95.1% |
 | M5 Gallery+Export | ✅ | Gallery（虛擬捲動、排序、直方圖點 bar 篩選）；KLARF 三種寫回模式（就地無損／另存含 ADCSCORE+ADCCLASS／Top-N）+ 寫回前預覽變更；CSV/Excel 報表（含抓漏率/誤殺率）；overlay；`fab_probe/` 三支探測腳本；CLI `adept export` |
 | M6 推廣包 | ✅ | 離線安裝三件套（`tools/fetch_wheels.py` / `install_offline.py` / `doctor.py`，全 stdlib-only）、首啟導覽 + 範例 recipe 庫對話框、5 份範例 recipe。快速參考卡 PDF 暫緩（移到 backlog） |
-| M7 UI/UX | 🚧 | A 組防呆（動作可用性、游標讀數搬家、工具列去重、主要動作只留一顆）+ **UI 全英文**（`tests/test_ui_english_only.py` 鎖住）。F7-1 patch-only 收斂完成。後續見 `docs/plans/F7-canvas-and-taxonomy.md` |
+| M7 UI/UX | ✅ | A 組防呆 + **UI 全英文**（`tests/test_ui_english_only.py` 鎖住）。F7 全數完成：patch-only 收斂（`ui/scope.py`）、中性色/平面主題 + 暗色、卡片依流程階段分組 + 搜尋 + 前置條件 badge、**Region 段（具名 ROI）**、Results 視窗、**節點畫布**。計畫書 `docs/plans/F7-canvas-and-taxonomy.md` |
 
 v2 backlog：快速參考卡 PDF、自由 DAG 畫布、ground-truth 標注 + 混淆矩陣、ML Classify 卡
 （吃現成的 feature vector CSV）、PCA Ref、Region Stats/FFT、BSE/SE 多通道融合。

@@ -99,6 +99,7 @@ import adept.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜�
 from adept.core.pipeline import ParamError, Recipe, get_step, list_steps
 
 from .export_dialog import ExportDialog
+from .canvas import PipelineCanvas
 from .gallery import make_thumb
 from .results import ResultsWindow, summarize_run
 from .scope import (
@@ -519,8 +520,8 @@ class StudioWindow(QMainWindow):
         self.library = LibraryPanel(self)
         self.library.setMinimumWidth(180)
 
-        # 中：流程 + （參數表單 / 分數編輯）
-        self.pipeline = PipelinePanel(self)
+        # 中：流程畫布 + （參數表單 / 分數編輯）
+        self.pipeline = PipelineCanvas(self)
         self.param_form = ParamForm(self)
         self.score_pane = self._build_score_pane()
         self.stack = QStackedWidget(self)
@@ -692,6 +693,8 @@ class StudioWindow(QMainWindow):
         self.pipeline.move_requested.connect(self._on_move_requested)
         self.pipeline.remove_requested.connect(self._on_remove_requested)
         self.pipeline.score_clicked.connect(self.show_score_page)
+        self.pipeline.edge_added.connect(self._on_edge_added)
+        self.pipeline.edge_removed.connect(self._on_edge_removed)
 
         self.param_form.param_edited.connect(self._on_param_edited)
 
@@ -866,7 +869,7 @@ class StudioWindow(QMainWindow):
                 "enabled": bool(node.enabled),
                 "summary": self._node_summary(node),
             })
-        self.pipeline.set_nodes(nodes)
+        self.pipeline.set_nodes(nodes, self.model.edges)
         if self.selected_node not in self.model.nodes:
             self.selected_node = None
         self.pipeline.set_selected(self.selected_node)
@@ -924,6 +927,23 @@ class StudioWindow(QMainWindow):
 
     def _on_move_requested(self, node_id: str, delta: int) -> None:
         self.model.move(str(node_id), int(delta))
+
+    # ---- 畫布連線（F7-6）--------------------------------------------------
+    def _on_edge_added(self, src: str, dst: str) -> None:
+        """拉一條線。會造成循環時 model 回 False —— 那條線就不會出現。
+
+        擋在這裡（而不是等執行時報錯）是刻意的：使用者看到的是「這條線拉不
+        起來」，不是「拉起來之後整條 pipeline 壞掉」。
+        """
+        if self.model.add_edge(str(src), str(dst)):
+            self._status("Connected %s → %s" % (src, dst))
+        else:
+            self._status("Cannot connect %s → %s (it would create a loop, or "
+                         "the connection already exists)." % (src, dst))
+
+    def _on_edge_removed(self, src: str, dst: str) -> None:
+        if self.model.remove_edge(str(src), str(dst)):
+            self._status("Disconnected %s → %s" % (src, dst))
 
     def _on_remove_requested(self, node_id: str) -> None:
         node_id = str(node_id)
