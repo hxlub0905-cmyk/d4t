@@ -1,25 +1,30 @@
-# FlexADC pipeline engine — authored 2026-07-28 (M1).
+# FlexADC pipeline engine — authored 2026-07-28 (M1; M2 加入 checkpoint 快取).
 """單顆執行引擎：對一顆 defect 依 recipe 跑完整 pipeline。
 
-M1 範圍：單進程、循序（批次 ProcessPool 與快取是 M2）。
-鐵則：**單顆爆 = 該顆 FAIL，不殺整批** —— :func:`run_defect` 永不 raise，
-所有錯誤（StepError / ContextError / RecipeError / 其他）都收進
-:class:`DefectResult`。
+M1：單進程、循序。M2：內部重構成可重用片段（種 Context → 跑節點區間 →
+算分），讓 :func:`run_defect_cached` 能從「影像段結束」的 checkpoint 續跑
+（影像段快取見 :mod:`.cache`，平行批次見 :mod:`.batch`）。
+
+鐵則：**單顆爆 = 該顆 FAIL，不殺整批** —— :func:`run_defect` 與
+:func:`run_defect_cached` 永不 raise，所有錯誤（StepError / ContextError /
+RecipeError / 快取讀寫失敗 / 其他）都收進 :class:`DefectResult` 或
+自動退回全程重算。
 """
 from __future__ import annotations
 
+import json
 import math
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 from .context import Context
 from .expression import parse_expression
 from .recipe import Recipe, RecipeError, execution_order
-from .step import REGISTRY, Step, StepError
+from .step import CATEGORY_IMAGE, REGISTRY, Step, StepError
 
-__all__ = ["StepTrace", "DefectResult", "run_defect", "run_dataset",
-           "result_to_json_dict"]
+__all__ = ["StepTrace", "DefectResult", "run_defect", "run_defect_cached",
+           "run_dataset", "image_segment_signature", "result_to_json_dict"]
 
 
 @dataclass
@@ -47,60 +52,46 @@ class DefectResult:
     context: Optional[Context]         # keep_context=True 才附上（不進 JSON）
 
 
-def run_defect(recipe: Recipe, item: Any, kind: str, *,
-               keep_context: bool = False,
-               upto_node: Optional[str] = None,
-               registry: Optional[Dict[str, Type[Step]]] = None) -> DefectResult:
-    """對單顆 defect 執行 ``kind`` 這條 route；**永不 raise**。
-
-    - Context.meta 先種入 ``_defect_item`` / ``_dataset_kind`` / ``_defect_id`` /
-      ``nm_per_px``（Load 卡讀這些 key）。
-    - 停用（enabled=False）節點跳過。
-    - ``upto_node``：跑到該節點**之後**就停（Studio 點卡看中間輸出用）；
-      強制 keep_context=True，score/bin 不算（None）；若該節點被停用則
-      停在它前面、不執行它；不在 route 上 → ok=False（不 raise）。
-    - 步驟全過後：score = expr(features)、features["score"] = score、
-      bin = bins["below"]（score < threshold）否則 bins["above"]。
-    """
-    if registry is None:
-        registry = REGISTRY
-    if upto_node is not None:
-        keep_context = True  # 中間輸出就是要看 context
-
-    defect_id = str(getattr(item, "defect_id", ""))
+# ---------------------------------------------------------------------------
+# 可重用片段（M2 重構；run_defect 的行為與 M1 完全相同）
+# ---------------------------------------------------------------------------
+def _seed_context(item: Any, kind: str, defect_id: str) -> Context:
+    """建立新 Context 並種入引擎慣例的 meta key（Load 卡讀這些）。"""
     ctx = Context()
     ctx.meta["_defect_item"] = item
     ctx.meta["_dataset_kind"] = kind
     ctx.meta["_defect_id"] = defect_id
     ctx.meta["nm_per_px"] = getattr(item, "nm_per_px", None)
-    traces: List[StepTrace] = []
+    return ctx
 
-    def _result(ok: bool, error: Optional[str],
-                score: Optional[float] = None,
-                bin_: Optional[int] = None) -> DefectResult:
-        return DefectResult(
-            defect_id=defect_id, ok=ok, error=error,
-            features=dict(ctx.features), score=score, bin=bin_,
-            traces=traces, context=(ctx if keep_context else None))
 
-    try:
-        order = execution_order(recipe, kind)
-    except RecipeError as e:
-        return _result(False, str(e))
+def _finish(defect_id: str, ctx: Context, traces: List[StepTrace],
+            keep_context: bool, ok: bool, error: Optional[str],
+            score: Optional[float] = None,
+            bin_: Optional[int] = None) -> DefectResult:
+    return DefectResult(
+        defect_id=defect_id, ok=ok, error=error,
+        features=dict(ctx.features), score=score, bin=bin_,
+        traces=traces, context=(ctx if keep_context else None))
 
-    if upto_node is not None and upto_node not in order:
-        return _result(
-            False,
-            f"upto_node '{upto_node}' 不在 route '{kind}' 的執行順序 {order} 中")
 
-    for nid in order:
+def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
+               ctx: Context, traces: List[StepTrace],
+               registry: Dict[str, Type[Step]],
+               upto_node: Optional[str]) -> Tuple[Context, Optional[str]]:
+    """執行 ``order[start:stop]`` 的節點；trace 逐一 append。
+
+    回傳 ``(ctx, error)``：error 為 None 表成功（或在 upto_node 停下）；
+    否則為 "[node_id] 訊息" 字串（呼叫端包成失敗結果）。
+    """
+    for nid in order[start:stop]:
         node = recipe.nodes.get(nid)
         if node is None:
             traces.append(StepTrace(
                 node_id=nid, step_key="?", ok=False, ms=0.0,
                 error=f"節點 '{nid}' 不在 recipe.nodes 中", features_added={},
                 images_after=sorted(ctx.images)))
-            return _result(False, f"[{nid}] 節點 '{nid}' 不在 recipe.nodes 中")
+            return ctx, f"[{nid}] 節點 '{nid}' 不在 recipe.nodes 中"
         if not node.enabled:
             if nid == upto_node:
                 break  # 目標節點被停用：停在它這裡、不執行它
@@ -123,7 +114,7 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
                 node_id=nid, step_key=node.step, ok=False, ms=ms,
                 error=str(e), features_added={},
                 images_after=sorted(ctx.images)))
-            return _result(False, f"[{nid}] {e}")
+            return ctx, f"[{nid}] {e}"
 
         ms = (time.perf_counter() - t0) * 1000.0
         added = {
@@ -136,28 +127,235 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
             images_after=sorted(ctx.images)))
         if nid == upto_node:
             break
+    return ctx, None
+
+
+def _eval_score(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
+    """ADC 判定：score = expr(features) → bin。失敗會 raise（呼叫端攔截）。"""
+    expr = parse_expression(recipe.score.expr)
+    score = expr.eval(ctx.features)
+    ctx.features["score"] = score
+    if score < float(recipe.score.threshold):
+        b = int(recipe.score.bins["below"])
+    else:
+        b = int(recipe.score.bins["above"])
+    return score, b
+
+
+def run_defect(recipe: Recipe, item: Any, kind: str, *,
+               keep_context: bool = False,
+               upto_node: Optional[str] = None,
+               registry: Optional[Dict[str, Type[Step]]] = None) -> DefectResult:
+    """對單顆 defect 執行 ``kind`` 這條 route；**永不 raise**。
+
+    - Context.meta 先種入 ``_defect_item`` / ``_dataset_kind`` / ``_defect_id`` /
+      ``nm_per_px``（Load 卡讀這些 key）。
+    - 停用（enabled=False）節點跳過。
+    - ``upto_node``：跑到該節點**之後**就停（Studio 點卡看中間輸出用）；
+      強制 keep_context=True，score/bin 不算（None）；若該節點被停用則
+      停在它前面、不執行它；不在 route 上 → ok=False（不 raise）。
+    - 步驟全過後：score = expr(features)、features["score"] = score、
+      bin = bins["below"]（score < threshold）否則 bins["above"]。
+    """
+    if registry is None:
+        registry = REGISTRY
+    if upto_node is not None:
+        keep_context = True  # 中間輸出就是要看 context
+
+    defect_id = str(getattr(item, "defect_id", ""))
+    ctx = _seed_context(item, kind, defect_id)
+    traces: List[StepTrace] = []
+
+    try:
+        order = execution_order(recipe, kind)
+    except RecipeError as e:
+        return _finish(defect_id, ctx, traces, keep_context, False, str(e))
+
+    if upto_node is not None and upto_node not in order:
+        return _finish(
+            defect_id, ctx, traces, keep_context, False,
+            f"upto_node '{upto_node}' 不在 route '{kind}' 的執行順序 {order} 中")
+
+    ctx, err = _run_nodes(recipe, order, 0, len(order), ctx, traces,
+                          registry, upto_node)
+    if err is not None:
+        return _finish(defect_id, ctx, traces, keep_context, False, err)
 
     if upto_node is not None:
-        return _result(True, None)  # 中間輸出模式：不算 score / bin
+        return _finish(defect_id, ctx, traces, keep_context, True, None)
 
     # ---- ADC 判定：score → bin ----
     try:
-        expr = parse_expression(recipe.score.expr)
-        score = expr.eval(ctx.features)
-        ctx.features["score"] = score
-        if score < float(recipe.score.threshold):
-            b = int(recipe.score.bins["below"])
-        else:
-            b = int(recipe.score.bins["above"])
+        score, b = _eval_score(recipe, ctx)
     except Exception as e:
-        return _result(False, f"[score] {e}")
-    return _result(True, None, score=score, bin_=b)
+        return _finish(defect_id, ctx, traces, keep_context, False, f"[score] {e}")
+    return _finish(defect_id, ctx, traces, keep_context, True, None,
+                   score=score, bin_=b)
+
+
+# ---------------------------------------------------------------------------
+# M2：影像段 checkpoint（signature）與快取續跑
+# ---------------------------------------------------------------------------
+def image_segment_signature(recipe: Recipe, kind: str,
+                            registry: Optional[Dict[str, Type[Step]]] = None
+                            ) -> Tuple[str, int]:
+    """算出 ``kind`` route 的影像段簽章與 checkpoint 索引。
+
+    checkpoint 索引 = 執行順序中「最後一個 enabled 且 category==image 的節點」
+    的下一個位置；沒有影像段節點 → 0（快取沒意義）。
+    簽章 = checkpoint 前所有 enabled 節點的
+    ``[(node_id, step_key, sorted-param-items), ...]`` + kind 的穩定 JSON 字串
+    （params 先過 ``validate_params`` 正規化：帶預設值、coerce 型別，
+    讓「寫不寫預設值」不影響簽章）。deterministic。
+
+    注意：未知 route / 循環會 raise :class:`RecipeError`
+    （:func:`run_defect_cached` 會攔截並退回 :func:`run_defect`）。
+    """
+    if registry is None:
+        registry = REGISTRY
+    order = execution_order(recipe, kind)
+
+    ckpt = 0
+    for i, nid in enumerate(order):
+        node = recipe.nodes.get(nid)
+        if node is None or not node.enabled:
+            continue
+        step_cls = registry.get(node.step)
+        if step_cls is not None and step_cls.category == CATEGORY_IMAGE:
+            ckpt = i + 1
+
+    sig_nodes: List[List[Any]] = []
+    for nid in order[:ckpt]:
+        node = recipe.nodes.get(nid)
+        if node is None or not node.enabled:
+            continue  # 停用節點不影響執行，也不進簽章
+        params: Dict[str, Any] = dict(node.params)
+        step_cls = registry.get(node.step)
+        if step_cls is not None:
+            try:
+                params = step_cls.validate_params(node.params)
+            except Exception:
+                params = dict(node.params)  # 壞參數：用原樣（執行時會爆，簽章仍穩定）
+        items = sorted((str(k), v) for k, v in params.items())
+        sig_nodes.append([nid, node.step, [list(kv) for kv in items]])
+
+    sig = json.dumps({"kind": kind, "nodes": sig_nodes},
+                     ensure_ascii=False, sort_keys=True, default=str,
+                     separators=(",", ":"))
+    return sig, ckpt
+
+
+def _json_safe(v: Any) -> bool:
+    try:
+        json.dumps(v)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _meta_snapshot(meta: Dict[str, Any]) -> Dict[str, Any]:
+    """meta 的可快取子集：去掉私有 key（``_`` 開頭，引擎每次重新種入）、
+    去掉 JSON 序列化不了的值（例如 ndarray、物件）。
+    涵蓋 warnings / notes / nm_per_px / align_dx / align_dy /
+    feature_overwrites … 等後段卡片可能讀到的一般值。"""
+    out: Dict[str, Any] = {}
+    for k, v in meta.items():
+        if str(k).startswith("_"):
+            continue
+        if _json_safe(v):
+            out[k] = v
+    return out
+
+
+def _restore_context(item: Any, kind: str, defect_id: str,
+                     snap: Dict[str, Any]) -> Context:
+    """由快取快照重建 Context：先種引擎 meta，再回填 images/features/meta。"""
+    ctx = _seed_context(item, kind, defect_id)
+    for name, arr in dict(snap.get("images") or {}).items():
+        ctx.images[str(name)] = arr
+    for name, val in dict(snap.get("features") or {}).items():
+        ctx.features[str(name)] = float(val)
+    for k, v in dict(snap.get("meta") or {}).items():
+        ctx.meta[str(k)] = v  # 快照不含 ``_`` 開頭 key，不會蓋掉剛種的
+    return ctx
+
+
+def run_defect_cached(recipe: Recipe, item: Any, kind: str,
+                      cache: Any, dataset_token: str, *,
+                      keep_context: bool = False,
+                      registry: Optional[Dict[str, Type[Step]]] = None
+                      ) -> DefectResult:
+    """帶影像段快取的單顆執行；**永不 raise**，結果與 :func:`run_defect`
+    位元級一致（features / score / bin）。
+
+    - 影像段（到 checkpoint 為止）命中快取 → 直接重建 Context 續跑算法段；
+      未命中 → 跑影像段、寫入快取（:class:`.cache.StageCache`）、續跑。
+    - checkpoint == 0（沒有影像段節點）或快取讀/寫失敗 → 退回全程重算，
+      不會 crash。
+    - 快取命中時 ``traces`` 只含 checkpoint 之後的節點（影像段沒真的跑）。
+    """
+    if registry is None:
+        registry = REGISTRY
+
+    try:
+        sig, ckpt = image_segment_signature(recipe, kind, registry=registry)
+    except Exception:
+        return run_defect(recipe, item, kind,
+                          keep_context=keep_context, registry=registry)
+    if cache is None or ckpt <= 0:
+        return run_defect(recipe, item, kind,
+                          keep_context=keep_context, registry=registry)
+
+    defect_id = str(getattr(item, "defect_id", ""))
+    key: Optional[str] = None
+    snap: Optional[Dict[str, Any]] = None
+    try:
+        key = cache.make_key(str(dataset_token), defect_id, sig)
+        snap = cache.get(key)
+    except Exception:
+        snap = None  # 快取層出包 → 當作 miss
+
+    order = execution_order(recipe, kind)  # signature 已驗證過，不會再 raise
+    traces: List[StepTrace] = []
+    ctx: Optional[Context] = None
+
+    if snap is not None:
+        try:
+            ctx = _restore_context(item, kind, defect_id, snap)
+        except Exception:
+            ctx = None  # 快照壞掉 → 退回重算影像段
+
+    if ctx is None:
+        # miss：跑影像段（order[:ckpt]），成功才寫快取
+        ctx = _seed_context(item, kind, defect_id)
+        ctx, err = _run_nodes(recipe, order, 0, ckpt, ctx, traces,
+                              registry, None)
+        if err is not None:
+            return _finish(defect_id, ctx, traces, keep_context, False, err)
+        if key is not None:
+            try:
+                cache.put(key, dict(ctx.images), dict(ctx.features),
+                          _meta_snapshot(ctx.meta))
+            except Exception:
+                pass  # 快取寫入失敗 → 不影響本次結果
+
+    # 續跑算法段 + ADC 判定
+    ctx, err = _run_nodes(recipe, order, ckpt, len(order), ctx, traces,
+                          registry, None)
+    if err is not None:
+        return _finish(defect_id, ctx, traces, keep_context, False, err)
+    try:
+        score, b = _eval_score(recipe, ctx)
+    except Exception as e:
+        return _finish(defect_id, ctx, traces, keep_context, False, f"[score] {e}")
+    return _finish(defect_id, ctx, traces, keep_context, True, None,
+                   score=score, bin_=b)
 
 
 def run_dataset(recipe: Recipe, dataset: Any, *,
                 progress: Optional[Callable[[int, int, DefectResult], Any]] = None,
                 limit: Optional[int] = None) -> List[DefectResult]:
-    """循序跑整個 dataset（M1 單進程；M2 換 ProcessPool，介面不變）。
+    """循序跑整個 dataset（M1 單進程；平行批次見 :func:`.batch.run_batch`）。
 
     - ``limit``：只跑前 N 顆（調參試跑用）。
     - ``progress(i, n, result)``：每顆跑完呼叫一次（i 為 0 起算的索引）。
