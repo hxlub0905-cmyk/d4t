@@ -5,3 +5,8 @@ build/
 dist/
 *.egg-info/
 .venv/
+
+# ADEPT runtime artefacts
+*.db
+*.npz
+/cache/
