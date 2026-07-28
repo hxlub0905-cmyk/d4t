@@ -105,7 +105,10 @@ from .scope import (
     visible_steps,
 )
 from .viewmodel import RecipeModel, histogram, rebin
-from .welcome import RecipeLibraryDialog, WelcomeDialog, welcome_disabled
+from .theme import DEFAULT_THEME, THEMES, apply_theme, current_theme
+from .welcome import (
+    RecipeLibraryDialog, WelcomeDialog, save_theme, welcome_disabled,
+)
 from .widgets import (
     FeatureTable,
     HistogramWidget,
@@ -455,9 +458,13 @@ class StudioWindow(QMainWindow):
             "Help", "Reopen the getting-started tour (includes “Try it with "
                     "sample data”)",
             lambda: self.show_welcome(force=True))
+        # 主題切換：一顆字元鈕，不佔位子也找得到（偏好存 QSettings）
+        self.btn_theme = self._tool_button(
+            "◐", "Switch between the light and dark theme",
+            self.toggle_theme)
         for b in (self.btn_open_klarf, self.btn_open_recipe,
                   self.btn_save_recipe, self.btn_examples,
-                  self.btn_export, self.btn_help):
+                  self.btn_export, self.btn_help, self.btn_theme):
             bar.addWidget(b)
 
         spacer = QWidget(bar)
@@ -948,6 +955,41 @@ class StudioWindow(QMainWindow):
         self.stack.setCurrentWidget(self.param_form)
         self._schedule_preview()
         return True
+
+    # ==================================================================== #
+    # 主題（F7-2）
+    # ==================================================================== #
+    def toggle_theme(self) -> str:
+        """light ⇄ dark；換完立刻重畫，偏好寫進 QSettings。
+
+        所有顏色都走 ``theme.TOKENS``，但**自繪 widget 是在建構式裡取色的**
+        （直方圖長條、節點卡色條、Gallery chip…），所以換膚之後要叫它們重畫。
+        """
+        order = list(THEMES)
+        try:
+            nxt = order[(order.index(current_theme()) + 1) % len(order)]
+        except ValueError:                  # pragma: no cover — 主題名壞掉
+            nxt = DEFAULT_THEME
+        return self.set_theme(nxt)
+
+    def set_theme(self, name: str) -> str:
+        app = QApplication.instance()
+        applied = apply_theme(app, name) if app is not None else str(name)
+        save_theme(applied)
+        self._repaint_for_theme()
+        self._status("Theme: %s" % applied)
+        return applied
+
+    def _repaint_for_theme(self) -> None:
+        """把在建構式裡吃過 token 的元件重建/重畫一次。"""
+        self.library.set_steps(
+            visible_steps([s.describe() for s in list_steps()])
+            + [_SCORE_LIBRARY_ENTRY])
+        self._refresh_pipeline()
+        self.gallery.refresh_styles()
+        for w in (self.histogram, self.image_view, self.verdict,
+                  self.feature_table, self.library, self.pipeline, self.gallery):
+            w.update()
 
     def show_score_page(self) -> None:
         """切到分數編輯頁（順便刷新特徵下拉）。"""

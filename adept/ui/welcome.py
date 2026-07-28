@@ -54,6 +54,7 @@ __all__ = [
     "WelcomeDialog", "RecipeLibraryDialog",
     "SETTINGS_ORG", "SETTINGS_APP", "SKIP_WELCOME_KEY",
     "app_settings", "welcome_disabled", "set_welcome_disabled",
+    "THEME_KEY", "saved_theme", "save_theme",
     "RECIPES_DIR", "DOCS_DIR", "list_recipe_files", "read_recipe_info",
     "quick_reference_pdf",
 ]
@@ -71,6 +72,9 @@ DOCS_DIR = _REPO / "docs"
 SETTINGS_ORG = "ADEPT"
 SETTINGS_APP = "Studio"
 SKIP_WELCOME_KEY = "welcome/skip"
+
+#: 主題偏好（F7-2）。與導覽旗標共用同一組 QSettings。
+THEME_KEY = "ui/theme"
 
 #: 三段式的一句話說明（和 CLAUDE.md §2 的心智模型逐字對應）。
 _SEG_LINES = (
@@ -106,6 +110,21 @@ def welcome_disabled() -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def saved_theme(default: str = "light") -> str:
+    """使用者上次選的主題（讀不到就回 ``default``）。"""
+    try:
+        return str(app_settings().value(THEME_KEY, default) or default)
+    except Exception:                       # noqa: BLE001 — 設定讀不到不該擋開窗
+        return default
+
+
+def save_theme(name: str) -> None:
+    """記住主題偏好（立刻 sync）。"""
+    st = app_settings()
+    st.setValue(THEME_KEY, str(name))
+    st.sync()
 
 
 def set_welcome_disabled(disabled: bool) -> None:
