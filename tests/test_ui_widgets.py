@@ -84,6 +84,11 @@ def _mouse(widget, etype, pos, button=None, buttons=None):
 # --------------------------------------------------------------------------- #
 # theme
 # --------------------------------------------------------------------------- #
+def _rgb(hexstr):
+    h = str(hexstr).lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
 def test_theme_applies_and_has_adept_tokens(qapp):
     assert qapp.styleSheet(), "apply_theme 應該有裝上 QSS"
     qss = theme_mod.build_stylesheet()
@@ -93,30 +98,65 @@ def test_theme_applies_and_has_adept_tokens(qapp):
                      "QScrollBar", "QSplitter::handle", "QHeaderView::section",
                      "QToolTip", "QAbstractItemView"):
         assert selector in qss, selector
-    # CPE 的暖奶油底 + 琥珀 accent 必須原封不動地延續
-    assert theme_mod.TOKENS["bg_page"] == "#f7f4ef"
-    assert theme_mod.TOKENS["accent"] == "#f29f4b"
+
+
+def test_theme_is_neutral_and_flat(qapp):
+    """F7-2 的兩條產品要求，用性質斷言而不是寫死色碼。
+
+    舊配色是暖奶油底 + 琥珀 accent + 填滿色塊，使用者的評語是「太像玩具」。
+    這裡鎖住的是**中性**（大面積不帶色相）與**平面**（無陰影漸層），
+    色碼本身還可以繼續微調。
+    """
+    for key in ("bg_page", "bg_panel", "bg_surface", "toolbar", "statusbar"):
+        r, g, b = _rgb(theme_mod.TOKENS[key])
+        assert max(r, g, b) - min(r, g, b) <= 8, \
+            "%s = %s 帶了明顯色相，大面積底色要中性" % (key, theme_mod.TOKENS[key])
+
+    qss = theme_mod.build_stylesheet()
+    for banned in ("box-shadow", "qlineargradient", "qradialgradient"):
+        assert banned not in qss, "平面設計不用 %s" % banned
+
+
+def test_light_and_dark_palettes_have_identical_keys(qapp):
+    light, dark = theme_mod.PALETTES["light"], theme_mod.PALETTES["dark"]
+    assert set(light) == set(dark), set(light) ^ set(dark)
+    assert set(theme_mod.TOKENS) == set(light)
+    # 暗色真的比較暗（拿最大的底色面積比）
+    assert sum(_rgb(dark["bg_page"])) < sum(_rgb(light["bg_page"]))
+
+
+def test_set_theme_is_in_place_and_reversible(qapp):
+    """``TOKENS`` 必須是**同一個物件** —— 各模組都 import 過它了。"""
+    before = theme_mod.TOKENS
+    try:
+        theme_mod.set_theme("dark")
+        assert theme_mod.TOKENS is before, "set_theme 不可以換掉 TOKENS 物件"
+        assert theme_mod.current_theme() == "dark"
+        assert theme_mod.TOKENS["bg_page"] == theme_mod.PALETTES["dark"]["bg_page"]
+        assert theme_mod.seg_hex("algo") == theme_mod.PALETTES["dark"]["seg_algo"]
+
+        # 不認得的名字要退回預設，不能炸
+        assert theme_mod.set_theme("nope") == theme_mod.DEFAULT_THEME
+    finally:
+        theme_mod.apply_theme(qapp, "light")
+    assert theme_mod.current_theme() == "light"
 
 
 def test_theme_segment_tokens(qapp):
     t = theme_mod.TOKENS
-    assert t["seg_image"] == "#6f93b5"
-    assert t["seg_algo"] == "#c06a1d"
-    assert t["seg_adc"] == "#8a6fb5"
-    assert t["seg_image_bg"] == "#e8eef5"
-    assert t["seg_algo_bg"] == "#f9ecd9"
-    assert t["seg_adc_bg"] == "#ece6f4"
+    for cat in ("image", "algo", "adc"):
+        assert t["seg_%s" % cat].startswith("#")
+        assert t["seg_%s_bg" % cat].startswith("#")
     for tone in ("good", "bad", "neutral"):
         for part in ("bg", "text", "border"):
             assert t["chip_%s_%s" % (tone, part)].startswith("#")
 
 
 def test_seg_color_mapping(qapp):
-    assert theme_mod.seg_color("image").name() == "#6f93b5"
-    assert theme_mod.seg_color("algo").name() == "#c06a1d"
-    assert theme_mod.seg_color("adc").name() == "#8a6fb5"
-    assert theme_mod.seg_color("algo", bg=True).name() == "#f9ecd9"
-    assert theme_mod.seg_bg("adc").name() == "#ece6f4"
+    for cat in ("image", "algo", "adc"):
+        assert theme_mod.seg_color(cat).name() == theme_mod.TOKENS["seg_%s" % cat]
+        assert theme_mod.seg_bg(cat).name() == theme_mod.TOKENS["seg_%s_bg" % cat]
+    assert theme_mod.seg_color("algo", bg=True).name() == theme_mod.TOKENS["seg_algo_bg"]
     # 未知分類要有中性退路，不能炸
     assert theme_mod.seg_color("nope").isValid()
 
@@ -563,3 +603,27 @@ def test_verdict_chip(qapp):
 
     chip.set_verdict(None)
     assert chip.text() == "—" and chip.verdict() is None
+
+
+# --------------------------------------------------------------------------- #
+# 7. F7-2 換膚：切主題之後畫面上的東西不能少，也不能殘留舊色
+# --------------------------------------------------------------------------- #
+def test_studio_theme_toggle_keeps_everything_and_repaints(qapp):
+    from adept.ui import studio as studio_mod
+
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    try:
+        cards_before = win.library.step_keys()
+        assert theme_mod.current_theme() == "light"
+
+        assert win.toggle_theme() == "dark"
+        assert theme_mod.TOKENS["bg_page"] == theme_mod.PALETTES["dark"]["bg_page"]
+        assert win.library.step_keys() == cards_before, \
+            "換膚會重建卡片庫 —— 內容不可以在過程中掉東西"
+        assert qapp.styleSheet().find(theme_mod.PALETTES["dark"]["bg_page"]) >= 0
+
+        assert win.toggle_theme() == "light"
+        assert theme_mod.TOKENS["bg_page"] == theme_mod.PALETTES["light"]["bg_page"]
+    finally:
+        win.close()
+        theme_mod.apply_theme(qapp, "light")

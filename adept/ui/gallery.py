@@ -246,10 +246,14 @@ class _Chip(QPushButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip(tip)
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.refresh_style()
+
+    def refresh_style(self) -> None:
+        """（重新）套用 token 顏色 —— 換主題時由 GalleryPanel 呼叫。"""
         self.setStyleSheet(
             "QPushButton#galleryChip { background:%s; color:%s;"
             " border:1px solid %s; border-radius:9px; padding:2px 9px;"
-            " font-size:11px; font-weight:600; min-height:16px; }"
+            " font-size:11px; font-weight:500; min-height:16px; }"
             "QPushButton#galleryChip:hover { background:%s; }"
             % (TOKENS["accent_bg"], TOKENS["accent_active"],
                TOKENS["accent_border"], TOKENS["hover_warm_strong"])
@@ -988,6 +992,13 @@ class GalleryPanel(QWidget):
 
     def chip_texts(self) -> List[str]:
         return [c.label_text for c in self._chips]
+
+    def refresh_styles(self) -> None:
+        """換主題之後重新取色（chip 與網格都是自繪/內嵌樣式）。"""
+        for chip in self._chips:
+            chip.refresh_style()
+        self.grid.viewport().update()
+        self.update()
 
     # -- 內部 ---------------------------------------------------------------
     def _on_sort_changed(self, idx: int) -> None:
