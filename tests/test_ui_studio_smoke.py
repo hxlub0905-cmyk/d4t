@@ -128,8 +128,8 @@ def test_load_dataset_and_recipe(window, synlot):
     # Score/Bin 尾卡摘要跟著 model 走
     summary = window.pipeline.score_summary_text()
     assert recipe.score.expr in summary and "50" in summary
-    # 節點摘要 = 非預設參數的 k=v（最多 3 個）
-    assert "window=15" in window.pipeline.card("snr").summary.text()
+    # 節點摘要 = 非預設參數的 k=v（最多 3 個）—— F7-6 起節點是自繪圖元
+    assert "window=15" in window.pipeline.card("snr").info["summary"]
 
 
 # --------------------------------------------------------------------------- #

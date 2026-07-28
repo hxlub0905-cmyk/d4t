@@ -25,8 +25,13 @@ class RecipeModel:
         self.author = ""
         self.description = ""
         self.version = 1
-        self.node_order: List[str] = []            # route 順序
+        self.node_order: List[str] = []            # route 順序（= 拓撲順序）
         self.nodes: Dict[str, RecipeNode] = {}
+        #: 顯式的節點連線（F7-6 畫布）。``node_order`` 仍然是執行順序，
+        #: 但有 edges 時它由拓撲排序算出來，不再是「使用者加卡片的順序」。
+        #: 引擎那邊 ``execution_order`` 本來就是「route 相鄰對 ∪ edges」，
+        #: 所以把 route 寫成拓撲順序與 edges 併存，語意一致且向後相容。
+        self.edges: List[Tuple[str, str]] = []
         self.expr = "0"
         self.threshold = 0.0
         self.bins = {"below": 0, "above": 1}
@@ -148,11 +153,69 @@ class RecipeModel:
                     streams.append(w)
         return streams
 
+    # ---- 連線（F7-6）------------------------------------------------------
+    def _topological_order(self, edges: List[Tuple[str, str]]) -> Optional[List[str]]:
+        """依 edges 的拓撲排序；有循環回 ``None``。
+
+        同層之間**維持目前 ``node_order`` 的相對順序** —— 使用者拉一條線不該
+        讓畫面上其他節點無關地跳動。
+        """
+        rank = {nid: i for i, nid in enumerate(self.node_order)}
+        indeg = {nid: 0 for nid in self.nodes}
+        succ: Dict[str, List[str]] = {nid: [] for nid in self.nodes}
+        for a, b in edges:
+            if a in indeg and b in indeg:
+                succ[a].append(b)
+                indeg[b] += 1
+        ready = sorted([n for n, d in indeg.items() if d == 0],
+                       key=lambda n: rank.get(n, 1 << 30))
+        out: List[str] = []
+        while ready:
+            n = ready.pop(0)
+            out.append(n)
+            for m in succ[n]:
+                indeg[m] -= 1
+                if indeg[m] == 0:
+                    ready.append(m)
+            ready.sort(key=lambda x: rank.get(x, 1 << 30))
+        return out if len(out) == len(self.nodes) else None
+
+    def add_edge(self, src: str, dst: str) -> bool:
+        """連一條線。會造成循環（或自迴圈／重複）就**不做事並回 False**。"""
+        src, dst = str(src), str(dst)
+        if src == dst or src not in self.nodes or dst not in self.nodes:
+            return False
+        if (src, dst) in self.edges:
+            return False
+        order = self._topological_order(self.edges + [(src, dst)])
+        if order is None:
+            return False                     # 循環 —— 擋在這裡，不讓它進 model
+        self.edges.append((src, dst))
+        self.node_order = order
+        self._changed()
+        return True
+
+    def remove_edge(self, src: str, dst: str) -> bool:
+        pair = (str(src), str(dst))
+        if pair not in self.edges:
+            return False
+        self.edges.remove(pair)
+        order = self._topological_order(self.edges)
+        if order is not None:
+            self.node_order = order
+        self._changed()
+        return True
+
+    def edges_of(self, node_id: str) -> List[Tuple[str, str]]:
+        nid = str(node_id)
+        return [e for e in self.edges if nid in e]
+
     # ---- Recipe 互轉 -------------------------------------------------------
     def to_recipe(self) -> Recipe:
         return Recipe(
             recipe_id=self.recipe_id,
             routes={self.kind: list(self.node_order)},
+            edges=[list(e) for e in self.edges],
             nodes={nid: RecipeNode(id=nid, step=n.step, params=dict(n.params),
                                    enabled=n.enabled)
                    for nid, n in self.nodes.items()},
@@ -170,6 +233,9 @@ class RecipeModel:
         m.description = recipe.description
         m.version = recipe.version
         m.node_order = list(recipe.routes.get(k, []))
+        in_route = set(m.node_order)
+        m.edges = [(str(a), str(b)) for a, b in (recipe.edges or [])
+                   if str(a) in in_route and str(b) in in_route]
         m.nodes = {nid: RecipeNode(id=nid, step=n.step, params=dict(n.params),
                                    enabled=n.enabled)
                    for nid, n in recipe.nodes.items() if nid in set(m.node_order)}
