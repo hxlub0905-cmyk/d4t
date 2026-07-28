@@ -1,0 +1,294 @@
+# FlexADC Studio 主視窗煙霧測試 — authored 2026-07-28 (M3 收尾).
+"""``flexadc/ui/studio.py`` 的離屏（offscreen）煙霧測試。
+
+執行：``QT_QPA_PLATFORM=offscreen python3 -m pytest tests/test_ui_studio_smoke.py -q``
+
+**為什麼所有 Qt import 都是 lazy 的（別改回去）**
+
+``tests/test_no_qt.py::test_no_qt_after_import`` 會檢查 ``sys.modules`` 裡沒有任何
+PySide6 模組。pytest 先蒐集全部測試檔、再開始跑，所以只要這個檔案在**模組層**
+``import PySide6``（或 import ``flexadc.ui.studio``），蒐集階段就會把 Qt 塞進
+``sys.modules``，那個守門測試就會紅 —— 即使它先跑。
+
+因此：所有 Qt / ``flexadc.ui`` 的 import 都關在 :func:`_load_qt` 裡，由 module-scope
+的 ``qapp`` fixture 呼叫，再用 ``globals().update(...)`` 注入本模組命名空間。
+每個測試都必須（直接或間接）要求 ``qapp`` fixture，否則那些名字不存在。
+
+測試一律走 ``StudioWindow`` 的公開 API（``load_dataset_path`` / ``select_node`` /
+``run_trial`` …）或直接 emit 元件的訊號，**不開任何對話框**、不依賴 event loop
+（背景 worker 全部走 ``sync=True`` 的同步路徑）。
+"""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parent.parent
+EXAMPLE_RECIPE = REPO / "examples" / "recipes" / "die_to_die_basic.json"
+
+sys.path.insert(0, str(REPO / "tools"))
+from make_sample import generate  # noqa: E402
+
+
+def _load_qt() -> None:
+    """把 Qt 與待測模組 import 進來，注入本模組的 globals（只在 fixture 裡呼叫）。"""
+    from PySide6.QtWidgets import QApplication  # noqa: F401
+
+    from flexadc.ui import studio as studio_mod  # noqa: F401
+    from flexadc.ui import theme as theme_mod  # noqa: F401
+    from flexadc.ui import viewmodel as vm_mod  # noqa: F401
+
+    from flexadc.core.pipeline import Recipe  # noqa: F401
+
+    globals().update(locals())
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    """離屏 QApplication（整個模組共用一個）+ 套用主題。"""
+    _load_qt()
+    app = QApplication.instance() or QApplication([sys.argv[0] if sys.argv else "t"])
+    theme_mod.apply_theme(app)
+    yield app
+    app.processEvents()
+
+
+@pytest.fixture(scope="module")
+def synlot(tmp_path_factory):
+    """合成 lot（8 顆 defect，seed=7）—— 與 M1 端到端測試同一支產生器。"""
+    out = tmp_path_factory.mktemp("studio_lot")
+    return generate(str(out), n=8, seed=7)
+
+
+@pytest.fixture(scope="module")
+def window(qapp):
+    """整個模組共用一個主視窗（最後一個測試才把它關掉）。"""
+    win = studio_mod.StudioWindow()
+    yield win
+    win.close()
+
+
+def _loaded(window, synlot):
+    """把資料集 + 範例 recipe 灌進視窗（冪等，讓每個測試都能單獨跑）。"""
+    if window.dataset is None:
+        assert window.load_dataset_path(synlot["klarf"], sync=True) is True
+    if not window.model.node_order:
+        assert window.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
+    return window
+
+
+# --------------------------------------------------------------------------- #
+# 1. 建構 + 卡片庫
+# --------------------------------------------------------------------------- #
+def test_window_constructs_with_library_cards(window):
+    assert window.windowTitle().startswith("FlexADC Studio")
+    # 卡片庫用的是真實 registry，不是手捏假資料
+    assert window.library.entry("snr_map") is not None
+    assert window.library.entry("load_patch") is not None
+    assert window.library.section_titles() == ["影像 Image", "算法 Algo", "ADC 判定"]
+
+    # 空狀態：流程沒有節點、預覽沒有影像、直方圖沒有資料
+    assert window.model.node_order == []
+    assert window.pipeline.node_ids() == []
+    assert window.image_view.has_image() is False
+    assert window.histogram.has_data() is False
+    assert window.status_text()          # 一開始就給使用者一句提示
+
+    # 工具列：試跑筆數 10–5000 預設 200，主要動作按鈕掛 objectName "primary"
+    assert (window.spin_trial_n.minimum(), window.spin_trial_n.maximum()) == (10, 5000)
+    assert window.spin_trial_n.value() == 200
+    assert window.btn_trial.objectName() == "primary"
+
+
+# --------------------------------------------------------------------------- #
+# 2. 載入資料集 + recipe
+# --------------------------------------------------------------------------- #
+def test_load_dataset_and_recipe(window, synlot):
+    _loaded(window, synlot)
+
+    assert window.dataset is not None
+    assert len(window.dataset.items) == 8
+    assert window.defect_combo.count() == 8
+    assert window.defect_index == 0
+    assert "8" in window.defect_label.text()
+
+    recipe = Recipe.load(str(EXAMPLE_RECIPE))
+    assert window.model.node_order == recipe.routes["ebi_patch"]
+    assert len(window.pipeline.node_ids()) == 9
+    assert window.pipeline.node_ids() == window.model.node_order
+    assert window.model.kind == "ebi_patch"
+
+    # 標題帶 recipe id，狀態列有講人話
+    assert "die_to_die_basic" in window.windowTitle()
+    assert window.status_text()
+    # Score/Bin 尾卡摘要跟著 model 走
+    summary = window.pipeline.score_summary_text()
+    assert recipe.score.expr in summary and "50" in summary
+    # 節點摘要 = 非預設參數的 k=v（最多 3 個）
+    assert "window=15" in window.pipeline.card("snr").summary.text()
+
+
+# --------------------------------------------------------------------------- #
+# 3. 選節點 + 預覽
+# --------------------------------------------------------------------------- #
+def test_select_node_and_preview(window, synlot):
+    _loaded(window, synlot)
+
+    assert window.select_node("snr") is True
+    assert window.selected_node == "snr"
+    assert window.pipeline.selected() == "snr"
+    assert window.stack.currentWidget() is window.param_form
+    assert window.param_form.step_key() == "snr_map"
+
+    assert window.refresh_preview(sync=True) is True
+    assert window.image_view.has_image() is True
+
+    streams = [window.stream_combo.itemText(i)
+               for i in range(window.stream_combo.count())]
+    assert "snr_map" in streams and "test" in streams
+    # 選了 snr 節點 → 預設看它寫出來的那條流
+    assert window.stream_combo.currentText() == "snr_map"
+
+    assert window.feature_table.rowCount() > 0
+    assert "snr_max" in window.feature_table.feature_names()
+
+    # 換一條影像流，畫面要跟著換（不用重跑 pipeline）
+    window.stream_combo.setCurrentText("test")
+    assert window.image_view.has_image() is True
+
+
+# --------------------------------------------------------------------------- #
+# 4. 參數編輯（合法 / 不合法）
+# --------------------------------------------------------------------------- #
+def test_param_edit_valid_then_invalid(window, synlot):
+    _loaded(window, synlot)
+    assert window.select_node("snr") is True
+
+    window._on_param_edited("window", 21)
+    assert window.model.nodes["snr"].params["window"] == 21
+    assert window.param_form.has_error("window") is False
+
+    window._on_param_edited("window", 15)
+    assert window.model.nodes["snr"].params["window"] == 15
+
+    # 999 超過 ParamSpec 上限 201 → 不可以丟例外，該列要變紅字，值不落地
+    window._on_param_edited("window", 999)
+    assert window.model.nodes["snr"].params["window"] == 15
+    assert window.param_form.has_error("window") is True
+    assert "上限" in window.param_form.hint_text("window")
+
+    # 再改一個合法值 → 錯誤狀態清掉
+    window._on_param_edited("window", 15)
+    assert window.param_form.has_error("window") is False
+
+
+# --------------------------------------------------------------------------- #
+# 5. 純滑鼠組流程（只發訊號，不碰 model）
+# --------------------------------------------------------------------------- #
+def test_mouse_only_pipeline_build(qapp):
+    win = studio_mod.StudioWindow()
+    try:
+        win.library.add_requested.emit("load_patch")
+        win.library.add_requested.emit("percentile_norm")
+        assert win.model.node_order == ["load_patch", "percentile_norm"]
+        assert win.pipeline.node_ids() == ["load_patch", "percentile_norm"]
+        # 加入後自動選取新節點，右邊換成它的參數表單
+        assert win.selected_node == "percentile_norm"
+        assert win.param_form.step_key() == "percentile_norm"
+
+        win.pipeline.move_requested.emit("percentile_norm", -1)
+        assert win.model.node_order == ["percentile_norm", "load_patch"]
+        assert win.pipeline.node_ids() == ["percentile_norm", "load_patch"]
+
+        # 停用 / 移除也要走同一條路
+        win.pipeline.node_toggled.emit("load_patch", False)
+        assert win.model.nodes["load_patch"].enabled is False
+        win.pipeline.remove_requested.emit("load_patch")
+        assert win.model.node_order == ["percentile_norm"]
+
+        # 點 Score 尾卡 → 換到分數編輯頁
+        win.pipeline.score_clicked.emit()
+        assert win.stack.currentWidget() is win.score_pane
+    finally:
+        win.close()
+
+
+# --------------------------------------------------------------------------- #
+# 6. 試跑 → 直方圖
+# --------------------------------------------------------------------------- #
+def test_run_trial_fills_histogram(window, synlot):
+    _loaded(window, synlot)
+
+    assert window.run_trial(8, workers=1, sync=True) is True
+    assert len(window.trial_scores) == 8
+    assert window.histogram.has_data() is True
+    assert sum(window.histogram._counts) == 8
+    assert window.histogram.bin_summary_text().startswith("bin ")
+    assert "試跑完成" in window.status_text()
+
+
+# --------------------------------------------------------------------------- #
+# 7. 門檻：拖曳只是預覽，放開才寫回 model
+# --------------------------------------------------------------------------- #
+def test_threshold_live_preview_vs_commit(window, synlot):
+    _loaded(window, synlot)
+    if not window.trial_scores:
+        window.run_trial(8, workers=1, sync=True)
+
+    window._on_threshold_committed(42.5)
+    assert window.model.threshold == pytest.approx(42.5)
+    assert window.model.to_recipe().score.threshold == pytest.approx(42.5)
+    assert window.threshold_spin.value() == pytest.approx(42.5)
+
+    # 拖曳中（changed）只重算 bin 摘要，絕對不能動 model
+    before = window.model.threshold
+    window._on_threshold_changed(77.25)
+    assert window.model.threshold == pytest.approx(before)
+    live = window.histogram.bin_summary_text()
+    assert live == "　".join(
+        "bin %s=%s" % (k, v)
+        for k, v in sorted(vm_mod.rebin(window.trial_scores, 77.25,
+                                        window.model.bins).items()))
+
+    window._on_threshold_committed(50.0)
+    assert window.model.threshold == pytest.approx(50.0)
+
+
+# --------------------------------------------------------------------------- #
+# 8. 存檔往返
+# --------------------------------------------------------------------------- #
+def test_save_recipe_round_trip(window, synlot, tmp_path):
+    _loaded(window, synlot)
+    out = tmp_path / "x.json"
+
+    assert window.save_recipe_path(str(out)) is True
+    assert out.is_file()
+    json.loads(out.read_text(encoding="utf-8"))     # 是合法 JSON
+
+    loaded = Recipe.load(str(out))
+    assert loaded.routes[window.model.kind] == window.model.node_order
+    assert loaded.score.expr == window.model.expr
+    assert loaded.score.threshold == pytest.approx(window.model.threshold)
+    assert sorted(loaded.nodes) == sorted(window.model.nodes)
+    assert loaded.nodes["snr"].params["window"] == \
+        window.model.nodes["snr"].params["window"]
+
+
+# --------------------------------------------------------------------------- #
+# 9. 關窗：三個 worker 都收乾淨
+# --------------------------------------------------------------------------- #
+def test_close_stops_workers(window, synlot):
+    _loaded(window, synlot)
+
+    # 真的丟一份非同步預覽出去（會開一條 QThread），再關窗
+    assert window.refresh_preview(sync=False) is True
+    window.close()
+
+    for worker in (window.preview_worker, window.trial_worker,
+                   window.dataset_worker):
+        assert worker.is_running() is False
+        assert worker.thread_obj is None
+    assert window._preview_timer.isActive() is False

@@ -6,14 +6,19 @@ import sys
 from pathlib import Path
 
 PKG = Path(__file__).resolve().parent.parent / "flexadc"
+CORE = PKG / "core"
 QT_PAT = re.compile(r"^\s*(import|from)\s+(PyQt\d?|PySide\d?|qtpy|Qt)\b", re.M)
 
 
-def test_no_qt_in_source():
+def test_no_qt_in_core_source():
+    """core 禁 Qt；flexadc/ui 是唯一允許 Qt 的地方（__main__ 須 lazy import）。"""
     offenders = []
-    for py in PKG.rglob("*.py"):
+    for py in CORE.rglob("*.py"):
         if QT_PAT.search(py.read_text(encoding="utf-8")):
             offenders.append(str(py))
+    main_py = PKG / "__main__.py"
+    if main_py.exists() and QT_PAT.search(main_py.read_text(encoding="utf-8")):
+        offenders.append(str(main_py))
     assert not offenders, f"Qt import found in: {offenders}"
 
 
