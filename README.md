@@ -19,7 +19,7 @@
 
 完整計畫見 [`docs/plans/F0-master-plan.md`](docs/plans/F0-master-plan.md)。
 
-## 目前進度：M0 抽庫 ✅ · M1 引擎 ✅ · M2 批次 ✅ · M3 Studio UI ✅
+## 目前進度：M0 抽庫 ✅ · M1 引擎 ✅ · M2 批次 ✅ · M3 Studio UI ✅ · M4 雙輸入 ✅
 
 M0：六個既有專案（KLIP / GLAS / MMH / PEAR / cell-period-estimator / Perspective-Combination）
 的可重用演算法已 vendoring 進 `adept/core`，全部通過合成影像單元測試、零 Qt 依賴。
@@ -38,6 +38,12 @@ M3：**Studio 視覺化介面**（PySide6）—— 卡片庫｜Pipeline｜單顆
 三段式分色（影像藍／算法橙／ADC 判定紫）。點卡片看該步驟的中間輸出、參數表單自動由
 ParamSpec 生成（每格都有白話說明、範圍防呆、錯誤即時紅字）、拖門檻線即時看 bin 數變化。
 **全程滑鼠，不用寫一行 code。**
+
+M4：**雙輸入** —— Review SEM 單張影像（KLARF + 每顆一張圖）與 EBI patch（test/ref 配對）
+都能吃，ingest 自動判別型別、recipe 自動走對應 route。沒有 ref 影像時由新的
+**Golden Cell 卡**把圖上重複的 cell 疊成一張乾淨參考圖（含晶格相位自動搜尋）。
+驗收：`examples/recipes/dual_route_basic.json` 一份 recipe、一個門檻，跨 3 seeds ×
+2 種輸入共 144 顆合成 defect，分類正確率 95.1%。
 
 ```bash
 # 開 Studio：
@@ -85,9 +91,15 @@ adept/
 │   └── calibration.py   # nm/px 校正 profile 管理                    (MMH)
 ├── tests/               # 合成影像單元測試 + 零 Qt / py3.9 語法守門
 ├── docs/plans/          # 開發計畫（F0 = master plan）
-├── fab_probe/           # (M1+) 廠內格式探測腳本
+├── (fab_probe/)         # 廠內格式探測腳本 —— 尚未建立，見 CLAUDE.md §8
 └── tools/               # (M1+) 合成資料產生器、CLI
 ```
+
+## 沒有 git 的機器？
+
+整個 repo 只有純文字檔（`.py`/`.md`/`.json`/`.toml`/`.txt`/`.yml`），
+不需要 git 也能用：GitHub → **Code** → **Download ZIP** → 解壓 → `pip install -r requirements.txt` → 跑。
+完整步驟（含公司擋 pip 時的離線 wheels 作法）見 **[`docs/NO-GIT-SETUP.md`](docs/NO-GIT-SETUP.md)**。
 
 ## 開發環境
 
@@ -117,7 +129,7 @@ QT_QPA_PLATFORM=offscreen pytest -q   # 全部測試（~6s，不需真實資料�
 
 ## Roadmap
 
-M0 抽庫 ✅ → M1 引擎 ✅ → M2 批次 ✅ → M3 Studio UI ✅ → M4 雙輸入+Golden Cell →
+M0 抽庫 ✅ → M1 引擎 ✅ → M2 批次 ✅ → M3 Studio UI ✅ → M4 雙輸入+Golden Cell ✅ →
 M5 Gallery+Export → M6 推廣包。詳見 master plan。
 
 ## 已知修正紀錄（開發過程中抓到的坑）

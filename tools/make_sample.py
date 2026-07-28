@@ -31,76 +31,28 @@ from typing import Any, Dict
 import numpy as np
 import tifffile
 
-# 讓 `python3 tools/make_sample.py` 不裝套件也能 import adept
+# 讓 `python3 tools/make_sample.py` 不裝套件也能 import adept（與同層的 _synth）
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
+_TOOLS = os.path.dirname(os.path.abspath(__file__))
+if _TOOLS not in sys.path:
+    sys.path.insert(0, _TOOLS)
 
 from adept.core.ingest import dataset, klarf_core, tiff_index  # noqa: E402
 
+# 圖案／缺陷合成的共用零件（與 make_sample_rsem.py 共用，數值行為完全相同）
+from _synth import (  # noqa: E402
+    NUISANCE_TYPE, REAL_TYPES,
+    pattern as _pattern,
+    plant_anomaly as _plant_anomaly,
+    rounded_square_tile as _rounded_square_tile,
+)
+
 LOT_NAME = "LOT_SYN"
-REAL_TYPES = ("bright_blob", "dark_blob", "bridge")
-NUISANCE_TYPE = "none"
 
 # KLARF 1.2 die pitch（µm）：XREL/YREL 會落在這個假 die 裡
 _DIE_PITCH_UM = 5000.0
-
-
-# ---------------------------------------------------------------- 圖案合成
-
-def _rounded_square_tile(pitch: int) -> np.ndarray:
-    """一格圓角方塊 cell（float32，暗底 60 / 亮方塊 200，1px 軟邊）。"""
-    p = int(pitch)
-    c = (p - 1) / 2.0
-    yy, xx = np.mgrid[0:p, 0:p]
-    xx = xx - c
-    yy = yy - c
-    half = p * 0.30          # 方塊半寬
-    rad = max(1.0, p * 0.15)  # 圓角半徑
-    qx = np.abs(xx) - (half - rad)
-    qy = np.abs(yy) - (half - rad)
-    outside = np.hypot(np.maximum(qx, 0.0), np.maximum(qy, 0.0))
-    inside = np.minimum(np.maximum(qx, qy), 0.0)
-    d = outside + inside - rad          # 圓角方塊 signed distance
-    t = np.clip(0.5 - d, 0.0, 1.0)      # 1px 軟邊
-    return (60.0 + t * (200.0 - 60.0)).astype(np.float32)
-
-
-def _pattern(size: int, pitch: int, off_x: int, off_y: int,
-             tile: np.ndarray) -> np.ndarray:
-    """以 (off_x, off_y) 相位取出 size×size 的週期圖案：P(x,y)=T((y+off_y)%p,(x+off_x)%p)。"""
-    p = int(pitch)
-    reps = size // p + 2
-    big = np.tile(tile, (reps, reps))
-    oy = off_y % p
-    ox = off_x % p
-    return big[oy:oy + size, ox:ox + size].copy()
-
-
-def _plant_anomaly(img: np.ndarray, kind: str, rng: np.random.Generator,
-                   pitch: int) -> None:
-    """在 test 圖上就地種一個缺陷（靠近中心、振幅 >= 50）。"""
-    h, w = img.shape
-    amp = float(rng.uniform(55.0, 95.0))            # 振幅保證 >= 50
-    cx = w / 2.0 + float(rng.uniform(-0.1, 0.1)) * w
-    cy = h / 2.0 + float(rng.uniform(-0.1, 0.1)) * h
-    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
-
-    if kind in ("bright_blob", "dark_blob"):
-        sigma = float(rng.uniform(1.8, 3.5))
-        bump = np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2.0 * sigma ** 2))
-        img += (amp if kind == "bright_blob" else -amp) * bump.astype(np.float32)
-    else:  # bridge：連接相鄰 cell 的短亮線（水平或垂直）
-        length = max(4.0, 1.8 * pitch)
-        thick = 1.2
-        if rng.random() < 0.5:
-            du, dv = xx - cx, yy - cy       # 水平線
-        else:
-            du, dv = yy - cy, xx - cx       # 垂直線
-        along = np.clip(np.abs(du) - length / 2.0, 0.0, None)
-        dist = np.hypot(along, np.abs(dv))
-        line = np.clip(1.0 - (dist - thick), 0.0, 1.0)
-        img += amp * line.astype(np.float32)
 
 
 # ---------------------------------------------------------------- KLARF 產生
