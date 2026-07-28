@@ -1,9 +1,9 @@
-"""Tests for flexadc.core.algo.blob (vendored 2026-07-27)."""
+"""Tests for adept.core.algo.blob (vendored 2026-07-27)."""
 from __future__ import annotations
 
 import numpy as np
 
-from flexadc.core.algo.blob import DefectROI, segment_defects
+from adept.core.algo.blob import DefectROI, segment_defects
 
 
 def _float_snr_map():

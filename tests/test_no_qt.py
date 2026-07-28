@@ -1,17 +1,17 @@
-"""M0 驗收：flexadc 全套件零 Qt import（原始碼掃描 + 實際 import 檢查）。"""
+"""M0 驗收：adept 全套件零 Qt import（原始碼掃描 + 實際 import 檢查）。"""
 from __future__ import annotations
 
 import re
 import sys
 from pathlib import Path
 
-PKG = Path(__file__).resolve().parent.parent / "flexadc"
+PKG = Path(__file__).resolve().parent.parent / "adept"
 CORE = PKG / "core"
 QT_PAT = re.compile(r"^\s*(import|from)\s+(PyQt\d?|PySide\d?|qtpy|Qt)\b", re.M)
 
 
 def test_no_qt_in_core_source():
-    """core 禁 Qt；flexadc/ui 是唯一允許 Qt 的地方（__main__ 須 lazy import）。"""
+    """core 禁 Qt；adept/ui 是唯一允許 Qt 的地方（__main__ 須 lazy import）。"""
     offenders = []
     for py in CORE.rglob("*.py"):
         if QT_PAT.search(py.read_text(encoding="utf-8")):
@@ -23,9 +23,9 @@ def test_no_qt_in_core_source():
 
 
 def test_no_qt_after_import():
-    import flexadc.core.algo  # noqa: F401
-    import flexadc.core.ingest  # noqa: F401
-    import flexadc.core.calibration  # noqa: F401
+    import adept.core.algo  # noqa: F401
+    import adept.core.ingest  # noqa: F401
+    import adept.core.calibration  # noqa: F401
 
     loaded = [m for m in sys.modules if m.split(".")[0] in ("PyQt5", "PyQt6", "PySide2", "PySide6")]
     assert not loaded, f"Qt modules loaded: {loaded}"

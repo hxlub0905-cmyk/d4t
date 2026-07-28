@@ -1,12 +1,12 @@
-"""Tests for flexadc.core.calibration (vendored from MMH)."""
+"""Tests for adept.core.calibration (vendored from MMH)."""
 from __future__ import annotations
 
 import json
 
 import pytest
 
-import flexadc.core.calibration as cal
-from flexadc.core.calibration import CalibrationManager, CalibrationProfile
+import adept.core.calibration as cal
+from adept.core.calibration import CalibrationManager, CalibrationProfile
 
 
 @pytest.fixture()

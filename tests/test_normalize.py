@@ -1,9 +1,9 @@
-"""Tests for flexadc.core.algo.normalize (vendored 2026-07-27)."""
+"""Tests for adept.core.algo.normalize (vendored 2026-07-27)."""
 from __future__ import annotations
 
 import numpy as np
 
-from flexadc.core.algo.normalize import (
+from adept.core.algo.normalize import (
     GLV_MASK_MIN_PIXELS,
     normalize_image,
     normalize_image_with_range,

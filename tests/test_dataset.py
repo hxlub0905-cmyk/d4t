@@ -1,11 +1,11 @@
-"""Tests for flexadc.core.ingest.dataset (KLARF/TIFF/folder -> Dataset)."""
+"""Tests for adept.core.ingest.dataset (KLARF/TIFF/folder -> Dataset)."""
 from __future__ import annotations
 
 import numpy as np
 import pytest
 import tifffile
 
-from flexadc.core.ingest import dataset, imageio
+from adept.core.ingest import dataset, imageio
 
 # ---------------------------------------------------------------- synthetic KLARFs
 

@@ -1,9 +1,9 @@
-"""Tests for flexadc.core.algo.roi (vendored 2026-07-27)."""
+"""Tests for adept.core.algo.roi (vendored 2026-07-27)."""
 from __future__ import annotations
 
 import numpy as np
 
-from flexadc.core.algo.roi import (
+from adept.core.algo.roi import (
     MultiROISet,
     NamedROI,
     ROIStats,

@@ -1,18 +1,18 @@
-"""Tests for flexadc.core.algo.period and .golden (vendored from
+"""Tests for adept.core.algo.period and .golden (vendored from
 cell-period-estimator)."""
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from flexadc.core.algo.golden import (
+from adept.core.algo.golden import (
     candidate_periods,
     ghosting_score,
     refine_period,
     stack_cells,
     tile_coords,
 )
-from flexadc.core.algo.period import choose_origin, estimate_period
+from adept.core.algo.period import choose_origin, estimate_period
 
 PX, PY = 24, 32
 

@@ -1,10 +1,10 @@
-"""Tests for flexadc.core.algo.subpixel (vendored from MMH cmg_recipe)."""
+"""Tests for adept.core.algo.subpixel (vendored from MMH cmg_recipe)."""
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from flexadc.core.algo.subpixel import (
+from adept.core.algo.subpixel import (
     SubpixelResult,
     aggregate_values,
     compute_sample_xs,

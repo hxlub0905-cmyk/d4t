@@ -1,13 +1,13 @@
-# FlexADC M3 viewmodel 測試（Qt-free）— authored 2026-07-28.
+# ADEPT M3 viewmodel 測試（Qt-free）— authored 2026-07-28.
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 
-import flexadc.core.steps  # noqa: F401 — 註冊卡片
-from flexadc.core.pipeline import ParamError, Recipe
-from flexadc.ui.viewmodel import RecipeModel, histogram, rebin
+import adept.core.steps  # noqa: F401 — 註冊卡片
+from adept.core.pipeline import ParamError, Recipe
+from adept.ui.viewmodel import RecipeModel, histogram, rebin
 
 RECIPE = Path(__file__).resolve().parent.parent / "examples" / "recipes" / "die_to_die_basic.json"
 
