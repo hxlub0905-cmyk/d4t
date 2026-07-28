@@ -110,7 +110,7 @@ def _qimage_from_uint8(arr: np.ndarray) -> QImage:
         h, w, _ = a.shape
         img = QImage(a.data, w, h, 4 * w, QImage.Format_RGBA8888)
     else:
-        raise ValueError(f"不支援的影像形狀：{a.shape}")
+        raise ValueError(f"Unsupported image shape: {a.shape}")
     return img.copy()
 
 
@@ -129,7 +129,7 @@ class ImageView(QWidget):
 
     _MIN_SCALE = 0.02
     _MAX_SCALE = 60.0
-    _EMPTY_TEXT = "（無影像）"
+    _EMPTY_TEXT = "(no image)"
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -303,7 +303,7 @@ class ImageView(QWidget):
         if 0 <= x < w and 0 <= y < h:
             v = self._image[y, x]
             gray = int(v) if np.ndim(v) == 0 else int(np.mean(v))
-            self.cursor_info.emit(f"x {x}  y {y}  ·  灰階 {gray}")
+            self.cursor_info.emit(f"x {x}  y {y}  ·  gray {gray}")
         else:
             self.cursor_info.emit("")
 
@@ -368,7 +368,7 @@ class ParamForm(QWidget):
 
     param_edited = Signal(str, object)
 
-    _EMPTY_TEXT = "（在左邊點一張卡片，或在流程中選一個節點）"
+    _EMPTY_TEXT = "(Pick a card from the library, or select a step in the pipeline)"
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -514,7 +514,7 @@ class ParamForm(QWidget):
             return w
 
         if ptype == "bool":
-            w = QCheckBox("啟用")
+            w = QCheckBox("Enabled")
             w.setChecked(bool(value))
             w.toggled.connect(lambda v, n=name: self._emit(n, bool(v)))
             return w
@@ -582,7 +582,7 @@ class _LibraryItem(QFrame):
         )
         tip = str(describe.get("help", "")) or str(describe.get("label", ""))
         if describe.get("requires_ref"):
-            tip += "（需要 ref 影像）"
+            tip += " (needs a ref image)"
         self.setToolTip(tip)
 
         lay = QHBoxLayout(self)
@@ -598,10 +598,10 @@ class _LibraryItem(QFrame):
         self.label.setToolTip(tip)
         lay.addWidget(self.label, 1)
 
-        self.add_button = QPushButton("加入 ▸")
+        self.add_button = QPushButton("Add ▸")
         self.add_button.setObjectName("cardButton")
         self.add_button.setCursor(Qt.PointingHandCursor)
-        self.add_button.setToolTip("把這張卡片加到流程尾端")
+        self.add_button.setToolTip("Append this card to the end of the pipeline")
         self.add_button.setFixedWidth(58)
         self.add_button.clicked.connect(
             lambda: self.activated.emit(self.step_key))
@@ -632,7 +632,7 @@ class LibraryPanel(QWidget):
     add_requested = Signal(str)
 
     _ORDER = ("image", "algo", "adc")
-    _EMPTY_TEXT = "（這一段目前沒有卡片）"
+    _EMPTY_TEXT = "(no cards in this section)"
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -764,18 +764,18 @@ class _NodeCard(QFrame):
 
         self.chk = QCheckBox()
         self.chk.setChecked(self.enabled_flag)
-        self.chk.setToolTip("暫時停用這個步驟（不刪除）")
+        self.chk.setToolTip("Temporarily skip this step (without removing it)")
         self.chk.toggled.connect(
             lambda v: self.enable_toggled.emit(self.node_id, bool(v)))
         lay.addWidget(self.chk)
 
-        self.btn_up = self._small("↑", "往前移一格")
+        self.btn_up = self._small("↑", "Move one step earlier")
         self.btn_up.clicked.connect(
             lambda: self.move_requested.emit(self.node_id, -1))
-        self.btn_down = self._small("↓", "往後移一格")
+        self.btn_down = self._small("↓", "Move one step later")
         self.btn_down.clicked.connect(
             lambda: self.move_requested.emit(self.node_id, +1))
-        self.btn_remove = self._small("✕", "從流程移除")
+        self.btn_remove = self._small("✕", "Remove from the pipeline")
         self.btn_remove.clicked.connect(
             lambda: self.remove_requested.emit(self.node_id))
         for b in (self.btn_up, self.btn_down, self.btn_remove):
@@ -826,7 +826,7 @@ class _ScoreCard(QFrame):
         super().__init__(parent)
         self.setObjectName("scoreCard")
         self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip("設定分數表達式與門檻")
+        self.setToolTip("Edit the score expression and threshold")
         self.setStyleSheet(
             "QFrame#scoreCard { background:%s; border:1px solid %s;"
             " border-radius:7px; }" % (theme.seg_hex("adc", bg=True),
@@ -848,7 +848,7 @@ class _ScoreCard(QFrame):
         box.setSpacing(1)
         title = QLabel("Score / Bin")
         title.setStyleSheet("color:%s; font-weight:700;" % theme.seg_hex("adc"))
-        self.summary = QLabel("（尚未設定分數）")
+        self.summary = QLabel("(no score set yet)")
         self.summary.setObjectName("scoreSummary")
         self.summary.setWordWrap(True)
         box.addWidget(title)
@@ -875,7 +875,7 @@ class PipelinePanel(QWidget):
     remove_requested = Signal(str)
     score_clicked = Signal()
 
-    _EMPTY_TEXT = "（流程還是空的 —— 從左邊的卡片庫雙擊加入第一張卡）"
+    _EMPTY_TEXT = "(Pipeline is empty — double-click a card in the library to add the first step)"
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -925,13 +925,13 @@ class PipelinePanel(QWidget):
         self._refresh_selection()
 
     def set_score_summary(self, expr: str, threshold: float) -> None:
-        """尾卡摘要：``score = <expr>　門檻 <threshold>``。"""
+        """尾卡摘要：``score = <expr>   threshold <threshold>``。"""
         expr = str(expr or "").strip()
         if not expr:
-            self.score_card.summary.setText("（尚未設定分數）")
+            self.score_card.summary.setText("(no score set yet)")
             return
         self.score_card.summary.setText(
-            "score = %s　門檻 %s" % (expr, _fmt_number(threshold)))
+            "score = %s   threshold %s" % (expr, _fmt_number(threshold)))
 
     def score_summary_text(self) -> str:
         return self.score_card.summary.text()
@@ -1000,7 +1000,7 @@ class HistogramWidget(QWidget):
     #: 點一根長條：``(lo, hi)`` 是那根長條的分數區間（Studio 用來篩 Gallery）。
     bar_clicked = Signal(float, float)
 
-    _EMPTY_TEXT = "（試跑後顯示分數分佈）"
+    _EMPTY_TEXT = "(Score distribution appears after a trial run)"
     # 上緣留 20px 給門檻線的標籤（「門檻 3.5」畫在圖面之上，不壓到長條）
     _M_LEFT, _M_RIGHT, _M_TOP, _M_BOTTOM = 46.0, 14.0, 20.0, 30.0
     _SUMMARY_H = 18.0
@@ -1047,11 +1047,11 @@ class HistogramWidget(QWidget):
         return self._threshold
 
     def set_bin_summary(self, bins: Optional[Dict[int, int]]) -> None:
-        """``{0: 812, 1: 96}`` -> 「bin 0=812　bin 1=96」。"""
+        """``{0: 812, 1: 96}`` -> 「bin 0=812   bin 1=96」。"""
         if not bins:
             self._bin_text = ""
         else:
-            self._bin_text = "　".join(
+            self._bin_text = "   ".join(
                 "bin %s=%s" % (k, bins[k]) for k in sorted(bins))
         self.update()
 
@@ -1170,7 +1170,7 @@ class HistogramWidget(QWidget):
             p.setBrush(Qt.NoBrush)
             p.drawLine(QPointF(x, r.top() - 3), QPointF(x, r.bottom() + 3))
             p.setPen(QColor(TOKENS["accent_active"]))
-            label = "門檻 %s" % _fmt_number(self._threshold)
+            label = "threshold %s" % _fmt_number(self._threshold)
             fm = p.fontMetrics()
             tw = fm.horizontalAdvance(label) + 4
             tx = min(max(x + 3, r.left()), max(r.left(), r.right() - tw))
@@ -1258,7 +1258,7 @@ class HistogramWidget(QWidget):
             self.setToolTip("")
         else:
             a, b = self._edges[idx], self._edges[idx + 1]
-            self.setToolTip("score %.3g–%.3g：%d 顆"
+            self.setToolTip("score %.3g–%.3g: %d defects"
                             % (a, b, self._counts[idx]))
         self.update()
 
@@ -1269,7 +1269,7 @@ class HistogramWidget(QWidget):
 def _fmt_number(value: Any) -> str:
     """數值 -> 好讀字串：整數不拖小數點、一般值 3 位、極小值退回有效位數。"""
     if isinstance(value, bool):
-        return "是" if value else "否"
+        return "Yes" if value else "No"
     try:
         f = float(value)
     except (TypeError, ValueError):
@@ -1292,7 +1292,7 @@ class FeatureTable(QTableWidget):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(0, 2, parent)
-        self.setHorizontalHeaderLabels(["特徵", "數值"])
+        self.setHorizontalHeaderLabels(["Feature", "Value"])
         self.verticalHeader().setVisible(False)
         self.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -1371,10 +1371,10 @@ class VerdictChip(QLabel):
         if b is None:
             text, tone = "—", "neutral"
         elif b == 1:
-            text = "bin 1 · ≥門檻"
+            text = "bin 1 · ≥ threshold"
             tone = "bad" if is_real_style else "good"
         elif b == 0:
-            text = "bin 0 · <門檻"
+            text = "bin 0 · < threshold"
             tone = "good" if is_real_style else "bad"
         else:
             text, tone = "bin %d" % b, "neutral"

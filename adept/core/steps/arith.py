@@ -22,19 +22,22 @@ class SubtractStep(Step):
     """影像相減：out = a - b（float32；absolute=True 時取絕對值）。"""
 
     key = "subtract"
-    label = "影像相減"
+    label = "Subtract"
     category = CATEGORY_IMAGE
-    help = "test 減 ref（對齊後）得到差異圖 diff，缺陷會在 diff 上凸顯出來；diff 流是 float32。"
+    help = ("test minus aligned ref gives the difference image diff, where "
+            "defects stand out. The diff stream is float32.")
     requires_ref = True
     params = [
         ParamSpec(name="a", type="image_key", default="test",
-                  help="被減數影像流（通常是 test）。"),
+                  help="Minuend image stream (usually test)."),
         ParamSpec(name="b", type="image_key", default="ref_aligned",
-                  help="減數影像流（通常是對齊後的 ref_aligned）。"),
+                  help="Subtrahend image stream (usually the aligned ref_aligned)."),
         ParamSpec(name="absolute", type="bool", default=True,
-                  help="True=取絕對值（亮暗缺陷都變正訊號）；False=保留正負號（可分辨亮/暗缺陷）。"),
+                  help=("True = absolute value (bright and dark defects both become "
+                        "positive signal); False = keep the sign so bright and dark "
+                        "defects stay distinguishable.")),
         ParamSpec(name="out", type="image_key", default="diff",
-                  help="差異圖要寫入的影像流名稱（float32）。"),
+                  help="Name of the image stream the difference is written to (float32)."),
     ]
     reads = ["test", "ref_aligned"]
     writes = ["diff"]
@@ -53,7 +56,8 @@ class SubtractStep(Step):
         a = require_image(ctx, self.key, p["a"])
         b = require_image(ctx, self.key, p["b"])
         if a.shape != b.shape:
-            raise StepError(self.key, f"'{p['a']}' 與 '{p['b']}' 尺寸不同（{a.shape} vs {b.shape}），無法相減。")
+            raise StepError(self.key, f"'{p['a']}' and '{p['b']}' differ in size "
+                            f"({a.shape} vs {b.shape}); cannot subtract.")
         diff = a.astype(np.float32) - b.astype(np.float32)
         if p["absolute"]:
             diff = np.abs(diff)
@@ -66,12 +70,13 @@ class InvertStep(Step):
     """影像反相：亮暗顛倒（uint8：255-x；[0,1] 浮點：1-x）。"""
 
     key = "invert"
-    label = "影像反相"
+    label = "Invert"
     category = CATEGORY_IMAGE
-    help = "亮暗顛倒（黑變白、白變黑），讓暗缺陷變成亮訊號方便後續處理。"
+    help = ("Flip bright and dark, so dark defects become bright signal for "
+            "the steps that follow.")
     params = [
         ParamSpec(name="target", type="image_key", default="test",
-                  help="要反相的影像流（就地覆寫）。"),
+                  help="Image stream to invert (overwritten in place)."),
     ]
     reads = ["test"]
     writes = ["test"]

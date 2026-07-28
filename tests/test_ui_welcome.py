@@ -286,8 +286,8 @@ def test_constructing_studio_never_pops_the_welcome(window):
 
 
 def test_toolbar_has_help_and_examples_entries(window):
-    assert window.btn_help.text() == "說明"
-    assert window.btn_examples.text() == "範例 recipe"
+    assert window.btn_help.text() == "Help"
+    assert window.btn_examples.text() == "Templates…"
     for b in (window.btn_help, window.btn_examples):
         assert b.toolTip().strip()
 
@@ -363,7 +363,7 @@ def test_demo_runs_end_to_end_and_populates_the_window(window, demo_lot):
     assert window.gallery.displayed_count() == 6
     assert window.current_tab() == studio_mod.TAB_GALLERY
     assert window.btn_export.isEnabled() is True
-    assert "範例資料試跑完成" in window.status_text()
+    assert "Sample run finished" in window.status_text()
 
 
 def test_demo_lot_generation_is_reused_not_regenerated(demo_lot):

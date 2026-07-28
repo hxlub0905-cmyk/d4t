@@ -105,8 +105,8 @@ def _recipe_to_dict(recipe: Any) -> Dict[str, Any]:
     if isinstance(recipe, dict):
         return dict(recipe)
     raise TypeError(
-        "recipe 必須是 Recipe 物件（有 to_json_dict）或 recipe JSON dict，"
-        "收到 {}".format(type(recipe).__name__))
+        "recipe must be a Recipe object (with to_json_dict) or a recipe JSON "
+        "dict, got {}".format(type(recipe).__name__))
 
 
 # ---------------------------------------------------------------------------
@@ -224,13 +224,13 @@ class RunStore:
             "SELECT * FROM runs WHERE run_id=?", (str(run_id),))
         row = cur.fetchone()
         if row is None:
-            raise KeyError("找不到 run '{}'（資料庫：{}）".format(run_id, self.db_path))
+            raise KeyError("run '{}' not found (database: {})".format(run_id, self.db_path))
         return dict(row)
 
     def iter_results(self, run_id: str) -> Iterator[Dict[str, Any]]:
         """逐顆 yield 結果 dict（features 已從 JSON 解析回 dict），依存入順序。"""
         if not self._run_exists(run_id):
-            raise KeyError("找不到 run '{}'（資料庫：{}）".format(run_id, self.db_path))
+            raise KeyError("run '{}' not found (database: {})".format(run_id, self.db_path))
         cur = self._conn.execute(
             "SELECT defect_id, ok, error, score, bin, features_json "
             "FROM results WHERE run_id=? ORDER BY rowid", (str(run_id),))
@@ -325,7 +325,7 @@ def rescore(store: RunStore, run_id: str, *,
         spec["bins"] = {str(k): int(v) for k, v in bins.items()}
     if "expr" not in spec:
         raise ValueError(
-            "run '{}' 的 recipe 沒有 score.expr，rescore 需要以 expr= 指定表達式"
+            "the recipe of run '{}' has no score.expr; rescore needs an expression via expr="
             .format(run_id))
     rdict["score"] = spec
 

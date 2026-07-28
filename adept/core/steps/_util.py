@@ -22,7 +22,7 @@ def require_image(ctx: Context, step_key: str, key: str) -> np.ndarray:
     try:
         return ctx.require_image(key)
     except ContextError as e:
-        raise StepError(step_key, f"缺少影像流 '{key}'（{e}）") from None
+        raise StepError(step_key, f"missing image stream '{key}' ({e})") from None
 
 
 def ensure_gray(arr: np.ndarray) -> np.ndarray:

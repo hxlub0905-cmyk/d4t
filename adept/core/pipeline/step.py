@@ -61,11 +61,13 @@ class ParamSpec:
 
     def __post_init__(self) -> None:
         if self.type not in PARAM_TYPES:
-            raise ParamError(f"參數 '{self.name}'：未知型別 '{self.type}'（允許：{PARAM_TYPES}）")
+            raise ParamError(f"parameter '{self.name}': unknown type '{self.type}' "
+                             f"(allowed: {PARAM_TYPES})")
         if not str(self.help).strip():
-            raise ParamError(f"參數 '{self.name}'：help（白話說明）不得為空 —— 推廣鐵則")
+            raise ParamError(f"parameter '{self.name}': help (a plain-language "
+                             f"description) must not be empty")
         if self.type == "choice" and not self.choices:
-            raise ParamError(f"參數 '{self.name}'：choice 型別需提供 choices")
+            raise ParamError(f"parameter '{self.name}': type 'choice' requires choices")
 
     def validate(self, value: Any) -> Any:
         """coerce + 檢查範圍；失敗拋 ParamError（訊息含參數名）。"""
@@ -85,21 +87,24 @@ class ParamSpec:
                 v = str(value)
                 if v not in (self.choices or []):
                     raise ParamError(
-                        f"參數 '{self.name}'：'{v}' 不在選項 {self.choices} 中"
+                        f"parameter '{self.name}': '{v}' is not one of {self.choices}"
                     )
             else:  # pragma: no cover — 擋在 __post_init__
-                raise ParamError(f"參數 '{self.name}'：未知型別")
+                raise ParamError(f"parameter '{self.name}': unknown type")
         except ParamError:
             raise
         except (TypeError, ValueError):
             raise ParamError(
-                f"參數 '{self.name}'：'{value}' 無法轉成 {self.type}"
+                f"parameter '{self.name}': '{value}' cannot be converted "
+                f"to {self.type}"
             ) from None
         if self.type in ("int", "float"):
             if self.min is not None and v < self.min:
-                raise ParamError(f"參數 '{self.name}'：{v} 低於下限 {self.min}")
+                raise ParamError(f"parameter '{self.name}': {v} is below the "
+                                 f"minimum of {self.min}")
             if self.max is not None and v > self.max:
-                raise ParamError(f"參數 '{self.name}'：{v} 高於上限 {self.max}")
+                raise ParamError(f"parameter '{self.name}': {v} is above the "
+                                 f"maximum of {self.max}")
         return v
 
 
@@ -124,7 +129,8 @@ class Step(ABC):
         spec_by_name = {p.name: p for p in cls.params}
         unknown = sorted(set(raw) - set(spec_by_name))
         if unknown:
-            raise ParamError(f"[{cls.key}] 未知參數：{unknown}（允許：{sorted(spec_by_name)}）")
+            raise ParamError(f"[{cls.key}] unknown parameters: {unknown} "
+                             f"(allowed: {sorted(spec_by_name)})")
         out: Dict[str, Any] = {}
         for name, spec in spec_by_name.items():
             out[name] = spec.validate(raw.get(name, spec.default))
@@ -190,13 +196,16 @@ REGISTRY: Dict[str, Type[Step]] = {}
 def register_step(cls: Type[Step]) -> Type[Step]:
     """類別裝飾器：把卡片註冊進全域 registry（key 重複 = 程式錯誤，立刻爆）。"""
     if not cls.key:
-        raise ValueError(f"{cls.__name__}: key 不得為空")
+        raise ValueError(f"{cls.__name__}: key must not be empty")
     if cls.category not in _CATEGORIES:
-        raise ValueError(f"{cls.__name__}: category 必須是 {_CATEGORIES}，收到 '{cls.category}'")
+        raise ValueError(f"{cls.__name__}: category must be one of {_CATEGORIES}, "
+                         f"got '{cls.category}'")
     if not str(cls.help).strip():
-        raise ValueError(f"{cls.__name__}: help（一行白話說明）不得為空 —— 推廣鐵則")
+        raise ValueError(f"{cls.__name__}: help (a one-line plain-language "
+                         f"description) must not be empty")
     if cls.key in REGISTRY:
-        raise ValueError(f"step key '{cls.key}' 已被 {REGISTRY[cls.key].__name__} 註冊")
+        raise ValueError(f"step key '{cls.key}' is already registered by "
+                         f"{REGISTRY[cls.key].__name__}")
     REGISTRY[cls.key] = cls
     return cls
 
@@ -205,7 +214,7 @@ def get_step(key: str) -> Type[Step]:
     try:
         return REGISTRY[key]
     except KeyError:
-        raise KeyError(f"未知的 step '{key}'；已註冊：{sorted(REGISTRY)}") from None
+        raise KeyError(f"unknown step '{key}'; registered: {sorted(REGISTRY)}") from None
 
 
 def list_steps(category: Optional[str] = None) -> List[Type[Step]]:

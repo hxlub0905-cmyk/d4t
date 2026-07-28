@@ -300,7 +300,7 @@ def test_library_panel_sections_and_double_click(qapp):
     steps = _steps()
     panel.set_steps(steps)
 
-    assert panel.section_titles() == ["影像 Image", "算法 Algo", "ADC 判定"]
+    assert panel.section_titles() == ["Image", "Algorithm", "ADC Decision"]
     assert set(panel.step_keys()) == {s["key"] for s in steps}
 
     # 空的段落要留一行提示（目前 registry 沒有 adc 卡片）
@@ -322,7 +322,7 @@ def test_library_panel_sections_and_double_click(qapp):
 
     # 另一條路：hover 出現的「加入 ▸」按鈕
     other = panel.entry("align")
-    assert other.add_button.text() == "加入 ▸"
+    assert other.add_button.text() == "Add ▸"
     other.add_button.click()
     assert got == ["snr_map", "align"]
 
@@ -489,7 +489,7 @@ def test_histogram_bin_summary_tooltip_and_empty(qapp):
     hist.set_bin_summary(vm_mod.rebin(scores, 3.0))
     text = hist.bin_summary_text()
     assert text.startswith("bin 0=") and "bin 1=" in text
-    assert text == "bin 0=5　bin 1=5"
+    assert text == "bin 0=5   bin 1=5"
 
     # hover 某根長條 -> tooltip「score a–b：N 顆」
     rect = hist._plot_rect()
@@ -498,8 +498,8 @@ def test_histogram_bin_summary_tooltip_and_empty(qapp):
     _mouse(hist, QEvent.MouseMove,
            QPointF(rect.left() + bw * (idx + 0.5), rect.bottom() - 4))
     tip = hist.toolTip()
-    assert "score" in tip and "顆" in tip and "–" in tip
-    assert tip.endswith("%d 顆" % counts[idx])
+    assert "score" in tip and "defects" in tip and "–" in tip
+    assert tip.endswith("%d defects" % counts[idx])
 
     hist.set_bin_summary({})
     assert hist.bin_summary_text() == ""
@@ -516,7 +516,7 @@ def test_feature_table_formatting_and_score_pinned_last(qapp):
         highlight={"snr_peak"},
     )
     assert table.columnCount() == 2
-    assert [table.horizontalHeaderItem(i).text() for i in range(2)] == ["特徵", "數值"]
+    assert [table.horizontalHeaderItem(i).text() for i in range(2)] == ["Feature", "Value"]
 
     names = table.feature_names()
     assert names[-1] == "score"                          # score 釘最後
@@ -545,21 +545,21 @@ def test_verdict_chip(qapp):
     assert chip.text() == "—" and chip.tone() == "neutral"
 
     chip.set_verdict(1)
-    assert chip.text() == "bin 1 · ≥門檻"
+    assert chip.text() == "bin 1 · ≥ threshold"
     assert chip.tone() == "good"
     assert theme_mod.TOKENS["chip_good_bg"] in chip.styleSheet()
     assert chip.verdict() == 1
 
     chip.set_verdict(0)
-    assert chip.text() == "bin 0 · <門檻"
+    assert chip.text() == "bin 0 · < threshold"
     assert chip.tone() == "bad"
     assert theme_mod.TOKENS["chip_bad_bg"] in chip.styleSheet()
 
     # is_real_style：bin 1 = 抓到真缺陷 = 壞消息（紅），bin 0 = 乾淨（綠）
     chip.set_verdict(1, is_real_style=True)
-    assert chip.text() == "bin 1 · ≥門檻" and chip.tone() == "bad"
+    assert chip.text() == "bin 1 · ≥ threshold" and chip.tone() == "bad"
     chip.set_verdict(0, is_real_style=True)
-    assert chip.text() == "bin 0 · <門檻" and chip.tone() == "good"
+    assert chip.text() == "bin 0 · < threshold" and chip.tone() == "good"
 
     chip.set_verdict(None)
     assert chip.text() == "—" and chip.verdict() is None

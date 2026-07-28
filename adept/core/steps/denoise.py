@@ -20,7 +20,8 @@ def _denoise_one(step_key: str, img: np.ndarray, method: str, ksize: int) -> np.
     if method == "median":
         # cv2.medianBlur：float32 只支援 ksize<=5；uint8 支援到大核
         if img.dtype != np.uint8 and ksize > 5:
-            raise StepError(step_key, f"median 濾波對浮點影像只支援 ksize 1/3/5（收到 {ksize}）；請改小 ksize 或先轉 uint8。")
+            raise StepError(step_key, f"median filtering of float images supports ksize 1/3/5 only "
+                        f"(got {ksize}); use a smaller ksize or convert to uint8 first.")
         src = img if img.dtype in (np.uint8, np.float32) else img.astype(np.float32)
         return cv2.medianBlur(src, ksize)
     # gaussian
@@ -32,19 +33,23 @@ class DenoiseStep(Step):
     """去雜訊：median（抑制點狀噪點）或 gaussian（整體平滑）。"""
 
     key = "denoise"
-    label = "去雜訊"
+    label = "Denoise"
     category = CATEGORY_IMAGE
-    help = "用中值或高斯濾波壓掉影像雜訊，讓後面的量測更穩定。"
+    help = ("Suppress image noise with a median or Gaussian filter so the "
+            "measurements that follow are steadier.")
     params = [
         ParamSpec(name="target", type="image_key", default="test",
-                  help="要去雜訊的主影像流（就地覆寫）。"),
+                  help="Main image stream to denoise (overwritten in place)."),
         ParamSpec(name="also_apply", type="str", default="",
-                  help="同時套用的其他影像流（逗號清單，可留空；不存在的流只警告不報錯）。"),
+                  help=("Other image streams to apply this to (comma separated, "
+                        "may be empty; a missing stream only warns).")),
         ParamSpec(name="method", type="choice", default="median",
                   choices=["median", "gaussian"],
-                  help="median=抑制孤立亮暗點（SEM 常用）；gaussian=整體柔化。"),
+                  help=("median = suppress isolated bright/dark specks (common "
+                        "for SEM); gaussian = soften everything.")),
         ParamSpec(name="ksize", type="int", default=3, min=1, max=15,
-                  help="濾波核大小（1–15 的奇數；1=不濾波，越大越平滑）。"),
+                  help=("Filter kernel size (odd, 1-15; 1 = no filtering, "
+                        "larger is smoother).")),
     ]
     reads = ["test"]
     writes = ["test"]
@@ -62,12 +67,14 @@ class DenoiseStep(Step):
         p = self.validate_params(params)
         ksize = int(p["ksize"])
         if ksize % 2 == 0:
-            raise StepError(self.key, f"ksize 必須是奇數（收到 {ksize}）；偶數核沒有中心像素，請改用 {ksize - 1} 或 {ksize + 1}。")
+            raise StepError(self.key, f"ksize must be odd (got {ksize}); an even kernel has no "
+                        f"centre pixel — use {ksize - 1} or {ksize + 1}.")
         tgt = require_image(ctx, self.key, p["target"])
         ctx.set_image(p["target"], _denoise_one(self.key, tgt, p["method"], ksize))
         for k in parse_key_list(p["also_apply"]):
             if k not in ctx.images:
-                ctx.warn(f"[{self.key}] also_apply 的影像流 '{k}' 不存在，略過。")
+                ctx.warn(f"[{self.key}] also_apply stream '{k}' does not "
+                         f"exist; skipped.")
                 continue
             ctx.set_image(k, _denoise_one(self.key, ctx.images[k], p["method"], ksize))
         return ctx
