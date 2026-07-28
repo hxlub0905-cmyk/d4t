@@ -1,6 +1,13 @@
 # CLAUDE.md — ADEPT 開發指南
 
-給 Claude Code / 開發者的專案脈絡。**每次 session 結束請更新 `SESSION_LOG.md`。**
+給 Claude Code / 開發者的專案脈絡（操作手冊）。
+**每次 session 結束請更新 `SESSION_LOG.md`。**
+
+> **第一次接手這個專案？先讀 [`docs/HANDOVER.md`](docs/HANDOVER.md)。**
+> 那份講「為什麼會長成這樣」：工具的由來與目的、需求訪談的結論與理由、
+> 六個來源專案各給了什麼（那份跨專案脈絡不在程式碼裡）、
+> 哪些事已驗證哪些還是假設、以及哪些設計「看起來可以隨便改但其實有理由」。
+> 這份 CLAUDE.md 則是「怎麼動手」。
 
 ---
 
