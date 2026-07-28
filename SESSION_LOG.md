@@ -4,6 +4,48 @@
 
 ---
 
+## 2026-07-28 · M4 雙輸入 + Golden Cell（341 → 356 tests）
+
+驗收目標：**同一份 recipe 吃 EBI patch 與 Review SEM 兩種輸入**。達成，
+`examples/recipes/dual_route_basic.json` 跨 3 seeds × 2 種輸入共 144 顆合成 defect，
+分類正確率 95.1%（同一條分數表達式、同一個門檻）。
+
+### 補完 `period.choose_origin` 相位搜尋
+原本是回傳 `(0,0)` 的 stub。改為掃描 `[0,px) x [0,py)` 的候選原點，用
+`stack_cells` + `ghosting_score` 的**原始 Laplacian 變異數**（非 0–100 分數，
+後者在乾淨圖上會飽和而失去排序）挑最銳利的相位；候選數上限 ~256 再 ±2 微調，
+512² / pitch 64 約 0.5 s。誠實的但書寫進 docstring：對完美週期圖，重建本身
+與相位無關，所以這個準則是**平移等變**而非絕對 —— 它鎖定的是「cell 邊界對齊
+圖案最強邊緣」的相位。測試據此驗證等變性（裁切 c 像素 → 原點位移 −c mod pitch）。
+
+### 兩張新卡片
+- **`cell_period`**（算法段）：量出 X/Y 週期，寫進 `ctx.meta["cell_period"]` 供下游用。
+  沒有週期性是 warning 不是 error。
+- **`golden_cell`**（影像段）：疊出參考圖，預設寫入 `out="ref"` ——
+  **這個預設是關鍵設計**：下游所有吃 ref 的卡片完全不用改，
+  rsem route 只是多插一張卡就能重用整條 EBI 的算法段。
+  輸出會平鋪回原尺寸/dtype/通道數，確保能直接相減。
+
+### RSEM 合成資料產生器
+`tools/make_sample_rsem.py`：每顆 defect 一張 PNG + KLARF 1.8 的
+`Images N { "path" "PNG" 1 "24" }` 區塊（語法是讀 `klarf_core` 反推並 round-trip
+驗證出來的，不是猜的）。256²、pitch 24、每張隨機相位。`tools/_synth.py` 抽出
+與 EBI 產生器共用的晶格/植入缺陷程式碼，`make_sample.py` 輸出維持位元組相同。
+
+### 調 recipe 時撞到的兩件事（都寫進 CLAUDE.md 的坑表）
+1. **幾何參數與影像尺寸綁死**：同一組 `glv_stats` 中心框在 128² patch 上準，
+   在 256² RSEM 上漏抓六顆 —— 缺陷散佈範圍（±10% 影像寬）超出固定框。
+   解法：幾何類參數隨 route 走（兩條 route 各自一個 glv 節點）。
+2. **共用門檻需要無量綱分數**：兩條 route 的絕對 GLV 尺度不同，
+   `glv_max + (glv_max - glv_q99)` 各自能分開但沒有共用門檻窗。
+   改用穩健 z 分數 `(glv_max - glv_median) / (glv_std + 0.5)`
+   （「最強殘差高出典型殘差幾個 sigma」）後，兩邊共用門檻 4.2 成立。
+
+### 下一步
+M5 Gallery + Export（見 CLAUDE.md §9）。`fab_probe/` 廠內探測腳本從 M4 順延到 M5。
+
+---
+
 ## 2026-07-28 · M0–M3 + 專案命名（Claude Cowork session）
 
 從零建立整個專案。原工作代號 FlexADC，完成 M3 後定名 **ADEPT**。

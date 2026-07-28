@@ -7,8 +7,9 @@
 
 已註冊的 key（影像段 → 算法段）：
   load_patch, percentile_norm, glv_mask_norm, hist_match, denoise,
-  align, subtract, invert,
-  snr_map, blob_segment, cd_measure, roi_snr, focus_quality, glv_stats
+  align, subtract, invert, golden_cell,
+  snr_map, blob_segment, cd_measure, roi_snr, focus_quality, glv_stats,
+  cell_period
 """
 from __future__ import annotations
 
@@ -24,8 +25,9 @@ from . import cd             # cd_measure
 from . import roi_snr        # roi_snr
 from . import quality        # focus_quality
 from . import glv_stats      # glv_stats
+from . import golden         # cell_period / golden_cell
 
 __all__ = [
     "load", "normalize", "denoise", "align", "arith",
-    "snr_map", "blob", "cd", "roi_snr", "quality", "glv_stats",
+    "snr_map", "blob", "cd", "roi_snr", "quality", "glv_stats", "golden",
 ]

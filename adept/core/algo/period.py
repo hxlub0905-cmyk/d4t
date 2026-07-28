@@ -3,9 +3,11 @@
 #   cell_period_estimator/core/period_core.py (vendored wholesale)
 # Adaptations:
 #   - Module vendored unchanged (pure NumPy/OpenCV, no Qt in the source).
-#   - `choose_origin` kept as the source's (0, 0) stub; TODO note added for
-#     the ADEPT M4 phase-search milestone.
-#   - No algorithmic changes.
+#   - `choose_origin` was the source's (0, 0) stub; ADEPT M4-1 replaced it
+#     with a real phase search (sub-sampled scan over [0, px) x [0, py),
+#     ranked by the stacked cell's raw Laplacian variance).  The old
+#     three-argument call still returns (0, 0) — `image` is opt-in.
+#   - No other algorithmic changes.
 """Period estimation core.
 
 Pure NumPy / OpenCV — no Qt imports here so the algorithms can be used
@@ -348,16 +350,118 @@ def _build_candidates(px: Optional[int], py: Optional[int],
     return out
 
 
-def choose_origin(shape: Tuple[int, ...], px: Optional[int],
-                  py: Optional[int]) -> Tuple[int, int]:
-    """Return the grid origin (top-left of the cell lattice).
+def _origin_axis_candidates(period: int, span: int, max_side: int) -> List[int]:
+    """Candidate origins along one axis (sub-sampled when ``period`` is big).
 
-    The default lattice is anchored at ``(0, 0)``; callers may override
-    this with a phase search if needed.
-
-    TODO(ADEPT M4): replace this stub with a proper phase search that
-    scans origin offsets in ``[0, px) x [0, py)`` and picks the offset
-    whose stacked cell is sharpest (e.g. maximal Laplacian variance via
-    ``adept.core.algo.golden.stack_cells`` / ``ghosting_score``).
+    Returns ``[0]`` when fewer than two whole cells fit along the axis —
+    a single row/column of cells carries no phase information and some
+    offsets would leave no complete cell at all.
     """
-    return (0, 0)
+    if span < 2 * period:
+        return [0]
+    step = 1 if period <= max_side else -(-period // max_side)  # ceil division
+    return list(range(0, period, step))
+
+
+def choose_origin(shape: Tuple[int, ...], px: Optional[int], py: Optional[int],
+                  image: Optional[np.ndarray] = None,
+                  method: str = "mean",
+                  max_evals: int = 256,
+                  refine: int = 2) -> Tuple[int, int]:
+    """Return the grid origin (top-left of the cell lattice) — phase search.
+
+    Convention
+    ----------
+    The returned ``(ox, oy)`` is the **lattice origin in pixels**, with
+    ``0 <= ox < px`` and ``0 <= oy < py``.  Feed it straight to the
+    ``origin=`` argument of :func:`adept.core.algo.golden.tile_coords` /
+    :func:`~adept.core.algo.golden.stack_cells`: cell ``(i, j)`` then
+    covers ``x in [ox + i*px, ox + (i+1)*px)`` and
+    ``y in [oy + j*py, oy + (j+1)*py)``.  Equivalently: cropping the
+    image so that it starts at ``(ox, oy)`` puts the lattice in phase,
+    after which every ``px`` / ``py`` pixels is a cell boundary.  Cells
+    that would run past the right/bottom border are dropped by
+    ``tile_coords``, so a larger origin simply wastes a little of the
+    image — it never shifts the answer's meaning.
+
+    What is optimised
+    -----------------
+    Each candidate origin is scored with
+    ``golden.ghosting_score(golden.stack_cells(...))[1]`` — the **raw
+    Laplacian variance** of the stacked cell.  **Higher is better**
+    (sharper stack = the cells landed on top of each other; a mis-phased
+    lattice smears structure across the cell border and the stack loses
+    contrast).  Ranking by the raw variance rather than the saturating
+    0..100 score matches :func:`golden.refine_period`; the 0..100 score
+    clips near the top and would lose the ordering.
+
+    ``method="mean"`` is used for scoring by default because the mean is
+    deliberately the phase-sensitive stack (the median hides small
+    misalignments), even when the caller later stacks with the median.
+
+    Search cost
+    -----------
+    The full grid is ``px * py`` offsets, which explodes for large
+    periods.  The scan is sub-sampled per axis so that at most
+    ``max_evals`` (~256) offsets are evaluated, then refined by a
+    ``±refine`` pixel neighbourhood scan around the coarse winner.
+
+    Guards (never raises, never returns an out-of-range origin)
+    ----------------------------------------------------------
+    ``image is None`` (backward-compatible call), ``px``/``py`` missing
+    or ``< 2``, a flat/constant image, or an image smaller than one cell
+    all return ``(0, 0)``.  An axis with fewer than two whole cells is
+    pinned to origin 0 (there is nothing to compare against).
+    """
+    from . import golden  # local import: keeps algo modules cycle-free
+
+    if image is None:
+        return (0, 0)
+    try:
+        px_i, py_i = int(px), int(py)   # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return (0, 0)
+    if px_i < 2 or py_i < 2:
+        return (0, 0)
+
+    gray = _to_gray(image)
+    if gray.ndim != 2 or gray.size == 0:
+        return (0, 0)
+    h, w = gray.shape[:2]
+    if h < py_i or w < px_i:          # not even one whole cell
+        return (0, 0)
+    if float(gray.std()) < 1e-6:      # flat image: every phase is identical
+        return (0, 0)
+
+    max_side = max(2, int(np.sqrt(max(int(max_evals), 4))))
+    xs = _origin_axis_candidates(px_i, w, max_side)
+    ys = _origin_axis_candidates(py_i, h, max_side)
+    if xs == [0] and ys == [0]:
+        return (0, 0)
+
+    def score(ox: int, oy: int) -> float:
+        stacked = golden.stack_cells(gray, px_i, py_i, method=method,
+                                     origin=(ox, oy))
+        return float(golden.ghosting_score(stacked)[1])
+
+    best_ox, best_oy, best_lv = 0, 0, -np.inf
+    for oy in ys:
+        for ox in xs:
+            lv = score(ox, oy)
+            if lv > best_lv:           # strict > → first winner wins (deterministic)
+                best_lv, best_ox, best_oy = lv, ox, oy
+
+    # Local refinement around the coarse winner (only where we sub-sampled).
+    refine = max(0, int(refine))
+    if refine and (len(xs) < px_i or len(ys) < py_i):
+        rx = [best_ox] if xs == [0] else [(best_ox + d) % px_i
+                                          for d in range(-refine, refine + 1)]
+        ry = [best_oy] if ys == [0] else [(best_oy + d) % py_i
+                                          for d in range(-refine, refine + 1)]
+        for oy in ry:
+            for ox in rx:
+                lv = score(ox, oy)
+                if lv > best_lv:
+                    best_lv, best_ox, best_oy = lv, ox, oy
+
+    return (int(best_ox) % px_i, int(best_oy) % py_i)

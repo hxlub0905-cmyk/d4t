@@ -61,7 +61,7 @@ adept/
 ├── tests/                   # 291 個測試，全部用合成資料，<10s 跑完
 ├── tools/make_sample.py     # 合成 KLARF + patch TIFF 產生器（開發與 CI 的資料來源）
 ├── examples/recipes/        # 範例 recipe（也是 UI「載入範本」的來源）
-├── fab_probe/               # 廠內格式探測腳本（stdlib-only，見 §8）
+├── (fab_probe/)             # 廠內格式探測腳本 —— **尚未建立**，見 §8
 └── docs/plans/              # F0 = master plan；每個 milestone 一份
 ```
 
@@ -138,13 +138,14 @@ python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 
 | **OpenCV IPP 非決定性** | 同張圖算兩次差 ~1e-8，快取結果對不起來 | `batch.pin_cv2_deterministic()` 關 IPP（每個 worker 都呼叫） |
 | **Fusi³ ecc 對位正負號** | ecc backend 位移與其他四個相反 | 已於 `algo/align.py` 修正並鎖測試 |
 | **MMH 次像素 batch 版偏移** | batch 版比 scalar 版低約 1.5 px | 刻意保留原行為，檔頭有記錄；要用精確值請用 scalar 版 |
+| **中心框幾何與影像尺寸綁死** | 同一組 `glv_stats` 參數在 128² patch 上準、在 256² RSEM 上漏抓（缺陷散佈超出框） | 幾何類參數要隨 route 走（見 `dual_route_basic.json`：兩條 route 各自一個 glv 節點），或改用無量綱分數如 `(glv_max-glv_median)/(glv_std+0.5)` |
 | **pytest 收集期 import Qt** | `test_no_qt_after_import` 失敗 | UI 測試一律 **lazy import**（在 fixture 內 import 並注入 globals） |
 
 ---
 
 ## 8. 待廠內驗證的假設（重要）
 
-開發全程用合成資料（真實資料不能出廠）。以下假設**必須在廠內用 `fab_probe/` 腳本確認**：
+開發全程用合成資料（真實資料不能出廠）。以下假設**必須在廠內確認**（`fab_probe/` 探測腳本尚未建立，已移至 M5 工作項）：
 
 1. **EBI patch 的 page→channel 對應**：目前假設每顆 defect 第一張 = test、第二張 = ref
    （`dataset.load_dataset` 的 `channel_order` 參數）。真實 TiffSpec 語意待確認。
@@ -163,7 +164,7 @@ python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 
 | M1 引擎 | ✅ | Context/Step/Recipe DAG/表達式/14 張卡/合成資料/CLI |
 | M2 批次 | ✅ | ProcessPool + 影像段快取 + SQLite 歷史 + rescore |
 | M3 Studio | ✅ | PySide6 四區塊視覺化編輯器 |
-| **M4 雙輸入** | ⬜ **下一步** | RSEM 單張 ingest、輸入型別分流、Golden Cell 卡（含 `period.choose_origin` 相位搜尋補完）。驗收：同一份 recipe 吃 EBI patch 與 RSEM |
+| M4 雙輸入 | ✅ | RSEM 單張 ingest、輸入型別分流、Golden Cell + Cell 週期估測卡（`period.choose_origin` 相位搜尋已補完）。驗收達成：`examples/recipes/dual_route_basic.json` 同時吃 EBI patch 與 RSEM，跨 3 seeds × 2 種輸入共 144 顆合成 defect，正確率 95.1% |
 | M5 Gallery+Export | ⬜ | 縮圖網格 + 直方圖聯動；KLARF 三種寫回模式 + 報表 |
 | M6 推廣包 | ⬜ | 離線安裝、首啟導覽、範例 recipe、快速參考卡 |
 

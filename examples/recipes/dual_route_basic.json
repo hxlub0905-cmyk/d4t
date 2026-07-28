@@ -1,8 +1,8 @@
 {
-  "recipe_id": "die_to_die_basic",
-  "version": 2,
+  "recipe_id": "dual_route_basic",
+  "version": 1,
   "author": "HX",
-  "description": "Die-to-die 假點過濾範本：正規化→對位→相減→去噪，中心區 GLV 峰值算分（合成資料 ~94% 正確）",
+  "description": "雙路線範本：EBI patch 用機台附的 ref；RSEM 單張沒有 ref → Golden Cell 自己疊一張當基準。兩路共用同一段算法與判定，只有影像尺寸相關的幾何參數不同。",
   "routes": {
     "ebi_patch": [
       "load",
@@ -13,13 +13,34 @@
       "snr",
       "blob",
       "cd",
-      "glv"
+      "glv_patch"
+    ],
+    "rsem": [
+      "load",
+      "golden",
+      "norm",
+      "align",
+      "sub",
+      "dn",
+      "snr",
+      "blob",
+      "cd",
+      "glv_rsem"
     ]
   },
   "nodes": {
     "load": {
       "step": "load_patch",
       "params": {},
+      "enabled": true
+    },
+    "golden": {
+      "step": "golden_cell",
+      "params": {
+        "source": "test",
+        "out": "ref",
+        "method": "median"
+      },
       "enabled": true
     },
     "norm": {
@@ -48,7 +69,7 @@
       "params": {
         "target": "diff",
         "method": "median",
-        "ksize": 3
+        "ksize": 5
       },
       "enabled": true
     },
@@ -73,21 +94,31 @@
       "params": {},
       "enabled": true
     },
-    "glv": {
+    "glv_patch": {
       "step": "glv_stats",
       "params": {
         "source": "diff",
         "region": "center",
-        "box_size": 32,
-        "metrics": "glv_max,glv_q99,glv_mean"
+        "box_size": 64,
+        "metrics": "glv_max,glv_median,glv_std"
+      },
+      "enabled": true
+    },
+    "glv_rsem": {
+      "step": "glv_stats",
+      "params": {
+        "source": "diff",
+        "region": "center",
+        "box_size": 128,
+        "metrics": "glv_max,glv_median,glv_std"
       },
       "enabled": true
     }
   },
   "edges": [],
   "score": {
-    "expr": "glv_max + (glv_max - glv_q99)",
-    "threshold": 50.0,
+    "expr": "(glv_max - glv_median) / (glv_std + 0.5)",
+    "threshold": 4.2,
     "bins": {
       "below": 0,
       "above": 1
