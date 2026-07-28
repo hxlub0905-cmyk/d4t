@@ -39,7 +39,15 @@ PENDING: Tuple[str, ...] = (
 
 
 def _has_cjk(text: str) -> bool:
-    return any("一" <= ch <= "鿿" for ch in text)
+    """CJK 文字**或全形標點**。
+
+    標點也要抓：``、``、``：``、全形空白 ``\u3000`` 這些混在英文句子裡一樣刺眼，
+    而且是翻譯時最容易漏掉的東西（M7 就漏了 9 處，全都是標點）。
+    """
+    return any("一" <= ch <= "鿿"        # CJK 統一表意文字
+               or "　" <= ch <= "〿"      # CJK 標點（、。「」，含全形空白）
+               or "！" <= ch <= "｠"      # 全形 ASCII 變體（：；！？（））
+               for ch in text)
 
 
 def _docstring_node_ids(tree: ast.AST) -> set:

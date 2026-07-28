@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .scope import recipe_is_supported
 from .theme import SEG_LABELS, TOKENS, seg_hex
 
 __all__ = [
@@ -475,7 +476,12 @@ class RecipeLibraryDialog(QDialog):
     # ---- 資料 -------------------------------------------------------------
     def reload(self) -> int:
         """重讀資料夾並重建清單；回傳有幾份 recipe。"""
-        self._entries = [read_recipe_info(p) for p in list_recipe_files(self.directory)]
+        # F7-1：只列至少有一條「這個 build 跑得動」的 route 的 recipe
+        # （純 rsem 的範本會被濾掉；雙 route 的照列，載進來會走 ebi_patch）。
+        self._entries = [info for info in
+                         (read_recipe_info(p)
+                          for p in list_recipe_files(self.directory))
+                         if recipe_is_supported(info)]
         self.list.clear()
         for info in self._entries:
             item = QListWidgetItem(self._item_text(info))
@@ -524,7 +530,7 @@ class RecipeLibraryDialog(QDialog):
     def _item_text(info: Dict[str, Any]) -> str:
         if info["error"]:
             return "%s\n(unreadable: %s)" % (info["file"], info["error"])
-        routes = "、".join(info["routes"]) or "(no route)"
+        routes = ", ".join(info["routes"]) or "(no route)"
         return "%s\nroute: %s · %d steps" % (
             info["recipe_id"], routes, int(info["n_steps"]))
 

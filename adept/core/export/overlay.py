@@ -231,7 +231,7 @@ def render_overlay(images: Dict[str, Any],
         if base_key not in images or images[base_key] is None:
             raise ExportError(
                 "The requested base image stream \"{}\" does not exist; this defect has: {}.".format(
-                    base_key, "、".join(sorted(images))))
+                    base_key, ", ".join(sorted(images))))
         base = images[base_key]
     else:
         base_key, base = _pick_base(images)
