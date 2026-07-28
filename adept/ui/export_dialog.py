@@ -335,7 +335,7 @@ class ExportWorker(_ThreadedWorker):
             except ExportError as e:
                 self.failed.emit(str(e))
             except Exception as e:      # noqa: BLE001 — UI 邊界，一律翻成訊息
-                self.failed.emit("%s：%s" % (type(e).__name__, e))
+                self.failed.emit("%s: %s" % (type(e).__name__, e))
             else:
                 self.done.emit(out)
 
@@ -499,7 +499,7 @@ class ExportDialog(QDialog):
             self.mode_group.addButton(rb)
             self.mode_buttons[mode] = rb
             lay.addWidget(rb)
-            help_label = QLabel("　　" + MODE_HELP[mode], box)
+            help_label = QLabel("    " + MODE_HELP[mode], box)
             help_label.setObjectName("paramHint")
             help_label.setWordWrap(True)
             lay.addWidget(help_label)
@@ -943,7 +943,7 @@ class ExportDialog(QDialog):
         except Exception as e:          # noqa: BLE001 — UI 邊界，絕不吐 traceback
             self._plan = None
             self._plan_text = ""
-            msg = "%s：%s" % (type(e).__name__, e)
+            msg = "%s: %s" % (type(e).__name__, e)
             self.plan_view.setPlainText("✗ Preview failed:\n\n%s" % msg)
             self._fail(msg)
             self._update_write_enabled()
@@ -1027,7 +1027,7 @@ class ExportDialog(QDialog):
                 self._fail(str(e))
                 return None
             except Exception as e:      # noqa: BLE001 — UI 邊界
-                self._fail("%s：%s" % (type(e).__name__, e))
+                self._fail("%s: %s" % (type(e).__name__, e))
                 return None
             self._on_done(out)
             return out
@@ -1062,7 +1062,7 @@ class ExportDialog(QDialog):
         notes = list(self._summary.get("notes") or [])
         text = "Export finished:\n" + "\n".join("· " + n for n in notes)
         if outputs:
-            text += "\nFiles:\n" + "\n".join("　" + p for p in outputs)
+            text += "\nFiles:\n" + "\n".join("   " + p for p in outputs)
         self.status_label.setText(text)
         self._update_write_enabled()
         self.exported.emit(self._summary)
@@ -1159,5 +1159,5 @@ def describe_plan(plan: Any, out_path: str = "") -> str:
         lines.append(head)
         detail = str(getattr(it, "detail", "") or "").strip()
         if detail:
-            lines.append("　　%s" % detail)
+            lines.append("    %s" % detail)
     return "\n".join(lines)

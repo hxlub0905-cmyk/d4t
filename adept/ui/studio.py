@@ -100,6 +100,10 @@ from adept.core.pipeline import ParamError, Recipe, get_step, list_steps
 
 from .export_dialog import ExportDialog
 from .gallery import GalleryPanel, make_thumb
+from .scope import (
+    is_supported_kind, recipe_is_supported, unsupported_kind_message,
+    visible_steps,
+)
 from .viewmodel import RecipeModel, histogram, rebin
 from .welcome import RecipeLibraryDialog, WelcomeDialog, welcome_disabled
 from .widgets import (
@@ -395,8 +399,10 @@ class StudioWindow(QMainWindow):
         self._wire_workers()
         self.model.add_listener(self._on_model_changed)
 
-        self.library.set_steps([s.describe() for s in list_steps()]
-                               + [_SCORE_LIBRARY_ENTRY])
+        # F7-1：卡片庫只列目前輸入型別用得到的卡（見 adept/ui/scope.py）
+        self.library.set_steps(
+            visible_steps([s.describe() for s in list_steps()])
+            + [_SCORE_LIBRARY_ENTRY])
         self._refresh_all()
         self._status("Ready — press “Help” for a guided start, or “Open KLARF…” "
                      "to load your data.")
@@ -1034,15 +1040,22 @@ class StudioWindow(QMainWindow):
             except Exception as e:      # noqa: BLE001 — UI 邊界，一律回報
                 self._status("Could not load dataset: %s: %s" % (type(e).__name__, e))
                 return False
-            self._on_dataset_loaded(ds)
-            return True
+            return self._on_dataset_loaded(ds)
         if not self.dataset_worker.start(path, tiff):
             self._status("A dataset is already loading — please wait.")
             return False
         self._status("Loading: %s" % os.path.basename(path))
         return True
 
-    def _on_dataset_loaded(self, dataset: Any) -> None:
+    def _on_dataset_loaded(self, dataset: Any) -> bool:
+        # F7-1：型別要到載完才知道，所以擋在這裡而不是 load_dataset_path。
+        # 擋下來時**不動既有狀態** —— 使用者手上原本那份資料集還在，
+        # 開錯一個檔不會把他正在調的東西弄丟。
+        kind = getattr(dataset, "kind", None)
+        if not is_supported_kind(kind):
+            self._status(unsupported_kind_message(kind))
+            return False
+
         self.dataset = dataset
         items = list(getattr(dataset, "items", []) or [])
         self.defect_index = 0
@@ -1079,10 +1092,11 @@ class StudioWindow(QMainWindow):
         msg = "Loaded %d defects (input type %s)" % (
             len(items), getattr(dataset, "kind", "?"))
         if warn:
-            msg += "　⚠ %s" % warn[0]
+            msg += "   ! %s" % warn[0]
         self._status(msg)
         if items:
             self.refresh_preview(force=False)
+        return True
 
     def _items(self) -> List[Any]:
         """目前資料集的 defect 清單（沒有資料集就是空的）。"""

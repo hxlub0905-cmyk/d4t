@@ -273,3 +273,31 @@ F7-1 patch-only 收斂 → F7-2 主題換色 → F7-3 卡片分類 → F7-4 Regi
 量測卡遷移（破壞性 schema）→ F7-5 Results 視窗 → F7-6 畫布。
 
 `fab_probe/` 的三個原始假設仍然全部未驗證，優先度不因這次重構而降低。
+
+### F7-1 patch-only 收斂（603 tests）
+
+新增 `adept/ui/scope.py` —— **一個檔案就是整個開關**：
+
+```python
+SUPPORTED_KINDS = ("ebi_patch",)                 # 加 "rsem" 就整條路線回來
+HIDDEN_STEPS = ("golden_cell", "cell_period")    # 清空就出現在卡片庫
+```
+
+GUI 側的三個切點：
+- 卡片庫過濾（17 列 → 15 列，掉的正好是最難懂的兩張）
+- 載到 rsem 資料集 → **擋下並講清楚原因 + 給替代路徑**（CLI 仍跑得動），
+  而且**不動既有狀態** —— 開錯一個檔不會把使用者正在調的東西弄丟
+- 範本庫過濾：判準是「至少有一條看得懂的 route」而不是「只有看得懂的 route」，
+  所以 `dual_route_basic` 照列（載進來走 ebi_patch），只有純 rsem 的被收起來
+
+`tests/test_ui_patch_only.py` 鎖兩件事，第二件才是重點：
+1. GUI 真的收斂了
+2. **core 一行都沒少**，而且「打開開關就回得來」是有測試保護的事實 ——
+   那支測試會 monkeypatch 兩個常數再驗一次整條 RSEM 路線
+
+裡面有一條 `test_period_module_is_not_orphaned`，作用是一張便利貼：
+`algo/period.py` 現在只被 Golden Cell 用到，看起來像可以陪葬，
+但它是之後做 pattern-frame ROI 的唯一工具。
+
+順手補完英文化漏掉的東西：**9 處全形標點**（`、`、`：`、全形空白 `　`）。
+`_has_cjk` 已擴到涵蓋 CJK 標點與全形 ASCII 變體 —— 標點是翻譯時最容易漏的。

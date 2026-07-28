@@ -62,6 +62,7 @@ adept/
 │   ├── export/              # KLARF 三種寫回模式 + CSV/Excel 報表 + overlay
 │   └── calibration.py       # nm/px 校正 profile
 ├── ui/                      # PySide6 Studio（**唯一允許 Qt 的地方**）
+│   ├── scope.py             #   產品範圍開關：目前只吃 EBI patch（F7-1，見 §11）
 │   ├── viewmodel.py         #   RecipeModel（Qt-free，可 headless 測）
 │   ├── theme.py widgets.py  #   主題 token + 6 個資料驅動元件
 │   ├── gallery.py           #   同屏比多顆（虛擬捲動，撐 10k+）
@@ -183,9 +184,35 @@ python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 
 | M4 雙輸入 | ✅ | RSEM 單張 ingest、輸入型別分流、Golden Cell + Cell 週期估測卡（`period.choose_origin` 相位搜尋已補完）。驗收達成：`examples/recipes/dual_route_basic.json` 同時吃 EBI patch 與 RSEM，跨 3 seeds × 2 種輸入共 144 顆合成 defect，正確率 95.1% |
 | M5 Gallery+Export | ✅ | Gallery（虛擬捲動、排序、直方圖點 bar 篩選）；KLARF 三種寫回模式（就地無損／另存含 ADCSCORE+ADCCLASS／Top-N）+ 寫回前預覽變更；CSV/Excel 報表（含抓漏率/誤殺率）；overlay；`fab_probe/` 三支探測腳本；CLI `adept export` |
 | M6 推廣包 | ✅ | 離線安裝三件套（`tools/fetch_wheels.py` / `install_offline.py` / `doctor.py`，全 stdlib-only）、首啟導覽 + 範例 recipe 庫對話框、5 份範例 recipe。快速參考卡 PDF 暫緩（移到 backlog） |
+| M7 UI/UX | 🚧 | A 組防呆（動作可用性、游標讀數搬家、工具列去重、主要動作只留一顆）+ **UI 全英文**（`tests/test_ui_english_only.py` 鎖住）。F7-1 patch-only 收斂完成。後續見 `docs/plans/F7-canvas-and-taxonomy.md` |
 
 v2 backlog：快速參考卡 PDF、自由 DAG 畫布、ground-truth 標注 + 混淆矩陣、ML Classify 卡
 （吃現成的 feature vector CSV）、PCA Ref、Region Stats/FFT、BSE/SE 多通道融合。
+
+---
+
+## 11. 產品範圍開關（F7-1）
+
+**Studio 目前只吃 EBI patch。** RSEM 的能力（ingest、Golden Cell、週期估測、
+範例 recipe、測試）**完全沒有被刪**，只是從 GUI 上收起來。
+
+要打開，改 `adept/ui/scope.py` 一個常數：
+
+```python
+SUPPORTED_KINDS = ("ebi_patch",)            # 加 "rsem" 就整條路線回來
+HIDDEN_STEPS = ("golden_cell", "cell_period")   # 清空就出現在卡片庫
+```
+
+`tests/test_ui_patch_only.py` 同時鎖住兩邊：GUI 真的收斂了，而且
+**打開開關就回得來**（那支測試會 monkeypatch 這兩個常數再驗一次）。
+
+> ⚠ **`adept/core/algo/period.py` 不要刪。** 它現在只被 Golden Cell 用到，
+> 看起來像是可以跟 RSEM 一起砍掉的東西 —— 但 `estimate_period` /
+> `choose_origin` 的相位搜尋是之後做 **pattern-frame ROI** 的唯一工具
+> （patch 是以 defect 為中心裁切的，晶格相位逐顆不同；
+> 見 `docs/plans/F7-canvas-and-taxonomy.md` §4）。
+
+CLI 不受影響：`python -m adept run` 照樣跑得動 rsem recipe。
 
 ---
 
