@@ -7,10 +7,23 @@
 
 完整計畫見 [`docs/plans/F0-master-plan.md`](docs/plans/F0-master-plan.md)。
 
-## 目前進度：M0 抽庫 ✅
+## 目前進度：M0 抽庫 ✅ · M1 引擎 ✅
 
-六個既有專案（KLIP / GLAS / MMH / PEAR / cell-period-estimator / Perspective-Combination）
+M0：六個既有專案（KLIP / GLAS / MMH / PEAR / cell-period-estimator / Perspective-Combination）
 的可重用演算法已 vendoring 進 `flexadc/core`，全部通過合成影像單元測試、零 Qt 依賴。
+
+M1：pipeline 引擎完成 —— Context/Step 契約、Recipe(DAG) + lint 驗證、score 表達式引擎
+（安全語意，不會爆給使用者看）、單顆執行引擎、14 張卡片、合成資料產生器、CLI。
+端到端驗收：合成 lot（24 顆、真/假各半）上範例 recipe 分類正確率 ~94%（跨 seed）。
+
+```bash
+# 試玩（不需真實資料）：
+python tools/make_sample.py /tmp/lot --n 24          # 產合成 KLARF + patch TIFF
+python -m flexadc steps                              # 看所有卡片
+python -m flexadc validate examples/recipes/die_to_die_basic.json
+python -m flexadc run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 \
+    --out results.json --csv features.csv
+```
 
 ```
 flexadc/

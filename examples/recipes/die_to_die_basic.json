@@ -1,0 +1,96 @@
+{
+  "recipe_id": "die_to_die_basic",
+  "version": 2,
+  "author": "HX",
+  "description": "Die-to-die 假點過濾範本：正規化→對位→相減→去噪，中心區 GLV 峰值算分（合成資料 ~94% 正確）",
+  "routes": {
+    "ebi_patch": [
+      "load",
+      "norm",
+      "align",
+      "sub",
+      "dn",
+      "snr",
+      "blob",
+      "cd",
+      "glv"
+    ]
+  },
+  "nodes": {
+    "load": {
+      "step": "load_patch",
+      "params": {},
+      "enabled": true
+    },
+    "norm": {
+      "step": "percentile_norm",
+      "params": {
+        "source": "test",
+        "also_apply": "ref"
+      },
+      "enabled": true
+    },
+    "align": {
+      "step": "align",
+      "params": {
+        "method": "phase",
+        "search_radius": 8
+      },
+      "enabled": true
+    },
+    "sub": {
+      "step": "subtract",
+      "params": {},
+      "enabled": true
+    },
+    "dn": {
+      "step": "denoise",
+      "params": {
+        "target": "diff",
+        "method": "median",
+        "ksize": 3
+      },
+      "enabled": true
+    },
+    "snr": {
+      "step": "snr_map",
+      "params": {
+        "window": 15,
+        "exclude_border": 8
+      },
+      "enabled": true
+    },
+    "blob": {
+      "step": "blob_segment",
+      "params": {
+        "min_area": 6,
+        "snr_threshold": 200
+      },
+      "enabled": true
+    },
+    "cd": {
+      "step": "cd_measure",
+      "params": {},
+      "enabled": true
+    },
+    "glv": {
+      "step": "glv_stats",
+      "params": {
+        "source": "diff",
+        "region": "center",
+        "box_size": 32,
+        "metrics": "glv_max,glv_q99,glv_mean"
+      },
+      "enabled": true
+    }
+  },
+  "edges": [],
+  "score": {
+    "expr": "glv_max + (glv_max - glv_q99)",
+    "threshold": 50.0,
+    "bins": {
+      "below": 0,
+      "above": 1
+    }
+  }
+}

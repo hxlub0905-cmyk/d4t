@@ -1,0 +1,105 @@
+# FlexADC step-card library — authored 2026-07-28 (M1).
+"""load_patch — 載入影像卡。
+
+從 ``ctx.meta["_defect_item"]``（ingest 層的 DefectItem，由引擎放入）讀出
+這顆 defect 的各 channel 像素並寫進 ``ctx.images``。
+
+writes 說明：類別層級靜態宣告 ``writes=["test"]`` 只是保守下限——實際會寫哪些
+影像流取決於 ``channels`` 參數與資料本身（ebi_patch 通常是 test+ref；rsem 單張
+會寫 single 並同時鏡射一份到 test），由 ``resolve_writes`` 在拿到參數後盡力
+解析，"auto" 模式下仍以執行期為準。
+"""
+from __future__ import annotations
+
+from typing import Any, Dict, List
+
+from ..pipeline.context import Context
+from ..pipeline.step import (
+    CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step,
+)
+from ._util import ensure_gray, to_uint8
+
+# "auto" 模式下 channel 的優先順序（其餘 channel 依名稱排序附加在後）
+_PREFERRED_ORDER = ("test", "ref", "single")
+
+
+@register_step
+class LoadPatchStep(Step):
+    """把 DefectItem 的影像載入成 Context 影像流（一律轉成 uint8 灰階）。"""
+
+    key = "load_patch"
+    label = "載入影像"
+    category = CATEGORY_IMAGE
+    help = "把這顆 defect 的影像（test/ref 或單張）載入 pipeline，一律轉成 uint8 灰階。"
+    params = [
+        ParamSpec(
+            name="channels", type="str", default="auto",
+            help="要載入哪些影像：auto=有什麼載什麼（rsem 單張會同時當作 test）；也可寫逗號清單，例如 test,ref。",
+        ),
+    ]
+    reads: List[str] = []
+    writes = ["test"]            # 保守靜態宣告；實際流以執行期解析為準（見模組 docstring）
+    features_out = ["n_channels"]
+
+    @classmethod
+    def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:
+        raw = str(params.get("channels", "auto")).strip()
+        if raw.lower() == "auto":
+            return list(cls.writes)     # auto：靜態下限，實際以執行期為準
+        return [tok.strip() for tok in raw.split(",") if tok.strip()] or list(cls.writes)
+
+    @classmethod
+    def resolve_writes_for_kind(cls, params: Dict[str, Any], kind: str) -> List[str]:
+        """validate 用的 kind-aware 宣告：ebi_patch → test+ref；rsem → single+test。"""
+        raw = str(params.get("channels", "auto")).strip()
+        if raw.lower() != "auto":
+            return cls.resolve_writes(params)
+        if kind == "ebi_patch":
+            return ["test", "ref"]
+        if kind == "rsem":
+            return ["single", "test"]   # single 會鏡射為 test（見 run()）
+        return list(cls.writes)
+
+    def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
+        p = self.validate_params(params)
+        item = ctx.meta.get("_defect_item")
+        kind = ctx.meta.get("_dataset_kind")
+        if item is None:
+            raise StepError(self.key, "Context 裡沒有 defect 資料（meta['_defect_item']）；此卡需由引擎在載入資料集後執行。")
+        images = getattr(item, "images", None)
+        if not images:
+            raise StepError(self.key, f"defect {getattr(item, 'defect_id', '?')} 沒有任何影像可載入。")
+
+        raw = str(p["channels"]).strip()
+        if raw.lower() == "auto":
+            avail = list(images.keys())
+            wanted = [c for c in _PREFERRED_ORDER if c in avail]
+            wanted += sorted(c for c in avail if c not in wanted)
+        else:
+            wanted = [tok.strip() for tok in raw.split(",") if tok.strip()]
+            if not wanted:
+                raise StepError(self.key, "channels 參數是空的；請填 auto 或逗號清單（例：test,ref）。")
+
+        loaded: List[str] = []
+        for ch in wanted:
+            if ch not in images:
+                raise StepError(
+                    self.key,
+                    f"defect {getattr(item, 'defect_id', '?')} 沒有 channel '{ch}'（現有：{sorted(images)}）。")
+            try:
+                arr = item.load(ch)
+            except Exception as e:  # 檔案毀損 / 頁碼超界等
+                raise StepError(self.key, f"讀取 channel '{ch}' 失敗：{e}") from e
+            arr_u8 = to_uint8(ensure_gray(arr))
+            ctx.set_image(ch, arr_u8)
+            loaded.append(ch)
+
+        # rsem / folder 單張資料流：把 single 同時鏡射為 test，讓下游卡片
+        # 用預設參數（source="test"）就能直接吃到影像。
+        if "single" in loaded and "test" not in ctx.images:
+            ctx.set_image("test", ctx.images["single"])
+            note = f"單張資料流（kind={kind}）：'single' 已同步作為 'test' 供下游使用。"
+            ctx.meta.setdefault("notes", []).append(note)
+
+        ctx.add_feature("n_channels", float(len(loaded)))
+        return ctx
