@@ -99,7 +99,8 @@ import adept.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜�
 from adept.core.pipeline import ParamError, Recipe, get_step, list_steps
 
 from .export_dialog import ExportDialog
-from .gallery import GalleryPanel, make_thumb
+from .gallery import make_thumb
+from .results import ResultsWindow, summarize_run
 from .scope import (
     is_supported_kind, recipe_is_supported, unsupported_kind_message,
     visible_steps,
@@ -111,7 +112,6 @@ from .welcome import (
 )
 from .widgets import (
     FeatureTable,
-    HistogramWidget,
     ImageView,
     LibraryPanel,
     ParamForm,
@@ -169,11 +169,17 @@ TRIAL_WORKERS = None
 #: model 變動 → 重算預覽 的去抖動間隔（毫秒）。拖 spinbox 不會每格都重算。
 PREVIEW_DEBOUNCE_MS = 300
 
+#: 主視窗三欄的出廠寬度：卡片庫 | 流程+參數 | 單顆預覽。
+#: F7-5 之後預覽拿到最寬的一欄（使用者要求「影像大一點、置中」），
+#: 因為直方圖與 Gallery 都搬去 Results 視窗了。
+COLUMN_SIZES = (220, 380, 760)
+
 #: 「試跑筆數」的出廠值。載入資料集時會再夾成 ``min(這個值, 資料集顆數)`` ——
 #: 對一份只有 24 顆的 lot 顯示 200 沒有任何意義，只會讓人以為自己看錯了。
 DEFAULT_TRIAL_N = 200
 
-#: 右欄分頁的索引（``right_tabs``）。
+#: 右欄分頁的索引 —— F7-5 之後右欄只剩單顆預覽，Gallery 搬進 Results 視窗。
+#: 常數保留是為了不打壞外部呼叫端；``TAB_GALLERY`` 現在等同「開 Results 視窗」。
 TAB_PREVIEW = 0
 TAB_GALLERY = 1
 
@@ -528,28 +534,26 @@ class StudioWindow(QMainWindow):
         middle.setStretchFactor(1, 2)
         self.middle_splitter = middle
 
-        # 右：［單顆預覽］［Gallery］兩個分頁
-        right = self._build_right_tabs()
+        # 右：單顆預覽（F7-5：Gallery 與直方圖搬到 Results 視窗，
+        #     主視窗只留「編流程 + 看單顆」，影像因此拿得到整欄高度）
+        self.preview_pane = self._build_preview_pane()
 
-        top = QSplitter(Qt.Horizontal, self)
-        top.addWidget(self.library)
-        top.addWidget(middle)
-        top.addWidget(right)
-        top.setStretchFactor(0, 0)
-        top.setStretchFactor(1, 2)
-        top.setStretchFactor(2, 3)
-        top.setSizes([230, 420, 620])
-        self.top_splitter = top
+        # Results 視窗（跑完才 show；先建好讓 histogram / gallery 一直有實體，
+        # 這樣所有既有接線與測試都不用管它現在開著沒有）
+        self.results = ResultsWindow(self)
+        self.histogram = self.results.histogram
+        self.gallery = self.results.gallery
+        self.results.export_requested.connect(self.open_export_dialog)
 
-        # 下：全寬直方圖
-        self.histogram = HistogramWidget(self)
-
-        root = QSplitter(Qt.Vertical, self)
-        root.addWidget(top)
-        root.addWidget(self.histogram)
-        root.setStretchFactor(0, 4)
-        root.setStretchFactor(1, 1)
-        root.setSizes([620, 190])
+        root = QSplitter(Qt.Horizontal, self)
+        root.addWidget(self.library)
+        root.addWidget(middle)
+        root.addWidget(self.preview_pane)
+        root.setStretchFactor(0, 0)
+        root.setStretchFactor(1, 2)
+        root.setStretchFactor(2, 4)
+        root.setSizes(list(COLUMN_SIZES))
+        self.top_splitter = root
         self.root_splitter = root
         self.setCentralWidget(root)
 
@@ -613,28 +617,6 @@ class StudioWindow(QMainWindow):
 
         lay.addStretch(1)
         return pane
-
-    def _build_right_tabs(self) -> QWidget:
-        """右欄：兩個分頁 —— 單顆看細節、Gallery 一次看一整批。
-
-        分頁一定要「看得出來有兩個」：兩個分頁都寫明用途（不用圖示、不用
-        只有一個字的標籤），並各自掛 tooltip 說明什麼時候該用哪一頁。
-        """
-        self.preview_pane = self._build_preview_pane()
-        self.gallery = GalleryPanel(self)
-
-        tabs = QTabWidget(self)
-        tabs.setDocumentMode(False)
-        tabs.setTabPosition(QTabWidget.North)
-        tabs.addTab(self.preview_pane, "Single defect")
-        tabs.addTab(self.gallery, "Gallery (compare many)")
-        tabs.setTabToolTip(TAB_PREVIEW, "One defect at a time: image streams, feature values, verdict")
-        tabs.setTabToolTip(TAB_GALLERY, "Thumbnails for the whole batch — scan "
-                                        "with your eyes for mis-tuned cases "
-                                        "(populated after a trial run)")
-        tabs.setCurrentIndex(TAB_PREVIEW)
-        self.right_tabs = tabs
-        return tabs
 
     def _build_preview_pane(self) -> QWidget:
         pane = QWidget(self)
@@ -1467,8 +1449,16 @@ class StudioWindow(QMainWindow):
         self._update_action_states()
         ok = sum(1 for r in results if r.get("ok"))
         fail = len(results) - ok
-        self._status("Run finished: %d defects (%d ok, %d failed) in %.1f s"
-                     % (len(results), ok, fail, float(elapsed)))
+        msg = ("Run finished: %d defects (%d ok, %d failed) in %.1f s"
+               % (len(results), ok, fail, float(elapsed)))
+        self._status(msg)
+        # F7-5：結果一到就把 Results 視窗帶出來 —— 使用者按 Run 想看的就是這個
+        self.results.set_summary(
+            summarize_run(len(results), ok, elapsed, self.trial_scores))
+        self.results.set_export_enabled(bool(results))
+        self.results.status(msg)
+        if results:
+            self.results.present()
 
     # ==================================================================== #
     # Gallery（M5）
@@ -1503,16 +1493,17 @@ class StudioWindow(QMainWindow):
         self._score_filter = None
 
     def show_gallery(self) -> None:
-        """切到 Gallery 分頁。"""
-        self.right_tabs.setCurrentIndex(TAB_GALLERY)
+        """把 Results 視窗叫出來（Gallery 與分數分佈都在那裡）。"""
+        self.results.present()
 
     def show_preview(self) -> None:
-        """切回「單顆預覽」分頁。"""
-        self.right_tabs.setCurrentIndex(TAB_PREVIEW)
+        """回到主視窗的單顆預覽。"""
+        self.raise_()
+        self.activateWindow()
 
-    def current_tab(self) -> int:
-        """目前在哪個分頁（:data:`TAB_PREVIEW` / :data:`TAB_GALLERY`）——測試用。"""
-        return int(self.right_tabs.currentIndex())
+    def results_visible(self) -> bool:
+        """Results 視窗現在開著嗎（測試用）。"""
+        return bool(self.results.isVisible())
 
     # ---- 縮圖（永遠不在 GUI 執行緒解碼）------------------------------------
     def _on_thumbs_requested(self, ids: Any) -> None:
@@ -1720,7 +1711,7 @@ class StudioWindow(QMainWindow):
     # ==================================================================== #
     def closeEvent(self, event) -> None:      # noqa: D102 - Qt hook
         self._preview_timer.stop()
-        for dlg in (self.welcome_dialog, self.library_dialog):
+        for dlg in (self.welcome_dialog, self.library_dialog, self.results):
             try:
                 if dlg is not None:
                     dlg.close()
