@@ -15,7 +15,7 @@ from typing import Any, Dict, List
 
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step,
+    CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_INPUT,
 )
 from ._util import ensure_gray, to_uint8
 
@@ -30,6 +30,7 @@ class LoadPatchStep(Step):
     key = "load_patch"
     label = "Load images"
     category = CATEGORY_IMAGE
+    group = GROUP_INPUT
     help = ("Load this defect's images (test/ref, or a single image) into the "
             "pipeline, always converted to 8-bit grayscale.")
     params = [

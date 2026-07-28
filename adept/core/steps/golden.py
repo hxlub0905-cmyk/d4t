@@ -20,7 +20,7 @@ from ..algo import golden as algo_golden
 from ..algo import period as algo_period
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step,
+    CATEGORY_ALGO, CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_COMPARE, GROUP_MEASURE,
 )
 from ._util import ensure_gray, require_image, to_uint8
 
@@ -41,6 +41,7 @@ class CellPeriodStep(Step):
     key = "cell_period"
     label = "Cell period"
     category = CATEGORY_ALGO
+    group = GROUP_MEASURE
     help = ("Measure the X/Y period of the repeating cells in the image (in "
             "pixels) for the Golden Cell card, and report how trustworthy that "
             "period is.")
@@ -119,6 +120,7 @@ class GoldenCellStep(Step):
     key = "golden_cell"
     label = "Golden Cell reference"
     category = CATEGORY_IMAGE
+    group = GROUP_COMPARE
     help = ("Stack the repeating cells into one clean reference image — use it "
             "as the comparison baseline when there is no ref image (a single "
             "Review SEM frame, for instance).")

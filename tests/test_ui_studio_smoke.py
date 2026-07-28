@@ -88,7 +88,8 @@ def test_window_constructs_with_library_cards(window):
     # 卡片庫用的是真實 registry，不是手捏假資料
     assert window.library.entry("snr_map") is not None
     assert window.library.entry("load_patch") is not None
-    assert window.library.section_titles() == ["Image", "Algorithm", "ADC Decision"]
+    assert window.library.section_titles() == [
+        "Input", "Enhance", "Region", "Compare", "Measure", "ADC"]
 
     # 空狀態：流程沒有節點、預覽沒有影像、直方圖沒有資料
     assert window.model.node_order == []

@@ -20,7 +20,7 @@ import numpy as np
 from ..algo import subpixel as algo_subpixel
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, ParamSpec, Step, register_step,
+    CATEGORY_ALGO, ParamSpec, Step, register_step, GROUP_MEASURE,
 )
 
 _ZERO = {"cd_x_px": 0.0, "cd_y_px": 0.0,
@@ -34,6 +34,7 @@ class CdMeasureStep(Step):
     key = "cd_measure"
     label = "CD measure"
     category = CATEGORY_ALGO
+    group = GROUP_MEASURE
     help = ("Measure the width and height of the main defect blob in pixels "
             "(also in nm when nm_per_px is known). Currently a bounding-box "
             "estimate.")

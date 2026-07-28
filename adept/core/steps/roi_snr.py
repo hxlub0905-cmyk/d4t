@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 from ..algo import snr as algo_snr
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, ParamSpec, Step, register_step,
+    CATEGORY_ALGO, ParamSpec, Step, register_step, GROUP_MEASURE,
 )
 from ._util import require_image
 
@@ -27,6 +27,7 @@ class RoiSnrStep(Step):
     key = "roi_snr"
     label = "ROI SNR"
     category = CATEGORY_ALGO
+    group = GROUP_MEASURE
     help = ("Measure the defect region's signal-to-noise against the "
             "surrounding background (signed — dark defects are negative), "
             "plus contrast and edge sharpness.")

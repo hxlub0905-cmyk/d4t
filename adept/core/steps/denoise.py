@@ -9,7 +9,7 @@ import numpy as np
 
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step,
+    CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_ENHANCE,
 )
 from ._util import parse_key_list, require_image
 
@@ -35,6 +35,7 @@ class DenoiseStep(Step):
     key = "denoise"
     label = "Denoise"
     category = CATEGORY_IMAGE
+    group = GROUP_ENHANCE
     help = ("Suppress image noise with a median or Gaussian filter so the "
             "measurements that follow are steadier.")
     params = [

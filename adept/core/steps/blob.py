@@ -13,7 +13,7 @@ from typing import Any, Dict, List
 from ..algo import blob as algo_blob
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, ParamSpec, Step, StepError, register_step,
+    CATEGORY_ALGO, ParamSpec, Step, StepError, register_step, GROUP_REGION,
 )
 from ._util import require_image
 
@@ -37,6 +37,7 @@ class BlobSegmentStep(Step):
     key = "blob_segment"
     label = "Blob segment"
     category = CATEGORY_ALGO
+    group = GROUP_REGION
     help = ("Cut candidate defect blobs out of the SNR map and record the main "
             "blob's area, aspect ratio, distance from centre and SNR.")
     params = [

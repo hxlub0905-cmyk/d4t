@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 from ..algo import align as algo_align
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_IMAGE, ParamSpec, Step, register_step,
+    CATEGORY_IMAGE, ParamSpec, Step, register_step, GROUP_COMPARE,
 )
 from ._util import require_image
 
@@ -24,6 +24,7 @@ class AlignStep(Step):
     key = "align"
     label = "Align"
     category = CATEGORY_IMAGE
+    group = GROUP_COMPARE
     help = ("Estimate how far ref is shifted from test and move ref back into "
             "alignment, so the later subtraction is not full of false signal.")
     requires_ref = True

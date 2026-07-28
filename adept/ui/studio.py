@@ -132,6 +132,7 @@ _SCORE_LIBRARY_ENTRY = {
     "key": _SCORE_LIBRARY_KEY,
     "label": "Score / Bin",
     "category": "adc",
+    "group": "adc",
     "help": "Combine the measured features into a score and split into bins by a threshold — every pipeline has exactly one; click to edit it.",
     "requires_ref": False,
     "params": [],
@@ -777,6 +778,7 @@ class StudioWindow(QMainWindow):
         self.histogram.set_threshold(self.model.threshold)
         self._refresh_bin_summary(self.model.threshold)
         self._update_action_states()
+        self._refresh_library_badges()
         self._schedule_preview()
 
     def _refresh_all(self) -> None:
@@ -786,6 +788,19 @@ class StudioWindow(QMainWindow):
         self.histogram.set_threshold(self.model.threshold)
         self._refresh_bin_summary(self.model.threshold)
         self._update_action_states()
+        self._refresh_library_badges()
+
+    def _refresh_library_badges(self) -> None:
+        """把「pipeline 目前產出了哪些影像流」餵給卡片庫（F7-3）。
+
+        卡片庫據此把前置條件未滿足的卡標成 ``needs diff`` 並調淡 ——
+        **但仍然可以加**。卡片庫的順序不是執行順序，使用者可能先放卡再補上游。
+        """
+        try:
+            streams = list(self.model.available_streams())
+        except Exception:                # noqa: BLE001 — 顯示用，壞了就不標
+            streams = []
+        self.library.set_available_streams(streams)
 
     # ---- 動作可用性（M7）--------------------------------------------------
     def _update_action_states(self) -> None:
@@ -985,6 +1000,7 @@ class StudioWindow(QMainWindow):
         self.library.set_steps(
             visible_steps([s.describe() for s in list_steps()])
             + [_SCORE_LIBRARY_ENTRY])
+        self.library.refresh_colors()
         self._refresh_pipeline()
         self.gallery.refresh_styles()
         for w in (self.histogram, self.image_view, self.verdict,

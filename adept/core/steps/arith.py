@@ -12,7 +12,7 @@ import numpy as np
 
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step,
+    CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_COMPARE, GROUP_ENHANCE,
 )
 from ._util import require_image
 
@@ -24,6 +24,7 @@ class SubtractStep(Step):
     key = "subtract"
     label = "Subtract"
     category = CATEGORY_IMAGE
+    group = GROUP_COMPARE
     help = ("test minus aligned ref gives the difference image diff, where "
             "defects stand out. The diff stream is float32.")
     requires_ref = True
@@ -72,6 +73,7 @@ class InvertStep(Step):
     key = "invert"
     label = "Invert"
     category = CATEGORY_IMAGE
+    group = GROUP_ENHANCE
     help = ("Flip bright and dark, so dark defects become bright signal for "
             "the steps that follow.")
     params = [

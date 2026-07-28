@@ -110,3 +110,24 @@ def test_step_cards_are_english():
             if _has_cjk(str(spec.help)):
                 bad.append("%s.%s.help = %r" % (step.key, spec.name, spec.help))
     assert not bad, "卡片庫仍有中文字串：\n  " + "\n  ".join(bad)
+
+
+def test_every_card_declares_a_known_group():
+    """F7-3：每張卡都要落在一個已知的流程階段，不能靠預設矇混過去。
+
+    ``resolve_group()`` 有依 category 的保守 fallback（讓外掛卡不會壞），
+    但**本 repo 內建的卡片一律要明講**——否則新加的量測卡會安靜地掉進
+    Enhance，而使用者永遠找不到它。
+    """
+    import adept.core.steps  # noqa: F401
+    from adept.core.pipeline import list_steps
+    from adept.core.pipeline.step import GROUP_ORDER
+
+    undeclared, unknown = [], []
+    for step in list_steps():
+        if not step.group:
+            undeclared.append(step.key)
+        elif step.group not in GROUP_ORDER:
+            unknown.append("%s -> %r" % (step.key, step.group))
+    assert not undeclared, "沒宣告 group 的卡片：%s" % undeclared
+    assert not unknown, "group 不在 GROUP_ORDER 裡：%s" % unknown
