@@ -10,3 +10,6 @@ dist/
 *.db
 *.npz
 /cache/
+
+# 離線安裝 wheels（各機器自行取得，不進版控）
+wheels/

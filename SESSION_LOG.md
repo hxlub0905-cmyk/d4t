@@ -4,6 +4,56 @@
 
 ---
 
+## 2026-07-28 · M6 推廣包（514 → 588 tests）· v1 功能齊備
+
+### 離線安裝三件套（對主要使用者最關鍵的一塊）
+使用情境是**沒有 git、pip 連不出去、DLP 擋含二進位壓縮檔**的公司機。
+`tools/fetch_wheels.py`（有網路的機器抓 Windows wheels，產 MANIFEST 含 sha256）→
+帶 `wheels\` 過去 → `tools/install_offline.py`（建 venv、`--no-index` 安裝）→
+`tools/doctor.py`（環境自檢）。三支都 **stdlib-only**，因為它們要在套件裝好之前就能跑
+（有測試用 ast 掃 module-level import 把這條約束鎖住）。
+
+`install_offline.py` 的八道 pre-flight 全部是「在 pip 之前就攔下來並講清楚」：
+最常見的失敗是 **wheels 的 Python 版本與機器上的不符**（cp39 輪子配 py3.12），
+它會讀 MANIFEST 比對、指出兩邊版本、給兩個選項。其餘涵蓋 requirements 找不到
+（→「你可能不在 ADEPT 資料夾裡」）、wheels 資料夾空的（→ 提示 DLP 可能吃掉了 zip）、
+磁碟空間、寫入權限，以及 `ensurepip` 被企業映像檔關掉時的 `--no-venv` 逃生路徑。
+
+`doctor.py` 逐項 ✓/✗/△ 並在每個沒過的項目附一行「怎麼修」，包含一個常見錯誤的
+專門偵測：**在錯的資料夾執行**（有 `adept\` 但 import 不到 → 直接叫他 cd）。
+Qt 能不能開視窗是在 **subprocess** 裡測的，這樣壞掉的 PySide6 不會把 doctor 一起帶走。
+
+### 首啟導覽
+`adept/ui/welcome.py`。核心是那顆**「用範例資料試一次」**按鈕：一按就自己產生合成資料、
+載入範本、跑完一批，使用者一分鐘內看到有分數的直方圖與 Gallery ——
+不需要先有真實資料、不需要先懂任何概念。導覽本身用三段式配色講清楚
+影像 → 算法 → ADC 判定 的心智模型。
+
+modal 不能污染測試，用了三層防護：constructor kwarg 自動偵測 `PYTEST_CURRENT_TEST`、
+`QTimer.singleShot(0, …)` 讓建構子永不阻塞、對話框一律 `show()` 不用 `exec()`。
+
+### 範例 recipe 庫（5 份，每份教一種作法）
+| recipe | 教什麼 |
+|---|---|
+| `die_to_die_basic` | 最典型：機台給 ref，對位相減 |
+| `dual_route_basic` | 一份 recipe 兩條 route，吃兩種輸入 |
+| `rsem_golden_cell` | 沒有 ref 就自己疊一張（且**不需要 norm 與 align** —— 自己減自己，增益偏移自動抵銷）|
+| `single_image_rules` | 完全沒有參考圖的保底流程：把口語規則寫成一條乘法算式 + 比較運算子當閘 |
+| `cd_gate` | 分數可以有物理單位：閘門確認真假、CD 決定重要性，門檻直接填「你在意的最小缺陷尺寸」|
+
+Agent 是**實測迭代**出這些算式的，不是照抄我給的建議 —— 例如原本建議 RSEM 用
+`blob_snr`，實測只有 ~55%，因為 `blob_snr` 在 uint8 SNR 地圖上會飽和在 255；
+改用 GLV 殘差才是誠實的贏家。`tests/test_example_recipes.py` 會確認每一份都能載入、
+validate 無 error、且真的能在合成資料上跑出有限分數 —— 這是防止範例庫腐爛的網子。
+
+### 暫緩
+快速參考卡 PDF 移到 backlog（使用者當下不需要）。
+
+### 狀態
+v1 規劃的六個 milestone 全部完成，588 tests。
+
+---
+
 ## 2026-07-28 · M5 Gallery + Export（347 → 514 tests）
 
 ### Gallery（同屏比多顆）

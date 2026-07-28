@@ -3,7 +3,8 @@
 
 版面（全部用 QSplitter，使用者拉得動）::
 
-    ┌ 工具列：開啟 KLARF／Recipe／存檔／範本 ｜ 輸出… ｜ 試跑筆數 ▶試跑 ▶全跑 ┐
+    ┌ 工具列：開啟 KLARF／Recipe／存檔／範本／範例 recipe ｜ 輸出… ｜ 說明
+    │         ｜ 試跑筆數 ▶試跑 ▶全跑                                      ┐
     ├──────────┬──────────────────────┬──────────────────────────────┤
     │ 卡片庫    │ 流程（PipelinePanel） │ ［單顆預覽］［Gallery］        │
     │ Library  │ ──────────────────── │  單顆：◀ ▶ 缺陷選單 / 影像流   │
@@ -48,18 +49,30 @@ tests/test_ui_studio_m5.py）：
 :meth:`~StudioWindow.set_defect_index` / :meth:`~StudioWindow.refresh_preview` /
 :meth:`~StudioWindow.run_trial` / :meth:`~StudioWindow.save_recipe_path` /
 :meth:`~StudioWindow.show_gallery` / :meth:`~StudioWindow.show_preview` /
-:meth:`~StudioWindow.request_thumbs` / :meth:`~StudioWindow.open_export_dialog`。
+:meth:`~StudioWindow.request_thumbs` / :meth:`~StudioWindow.open_export_dialog` /
+:meth:`~StudioWindow.show_welcome` / :meth:`~StudioWindow.open_recipe_library` /
+:meth:`~StudioWindow.run_demo`。
 每個進入點都自我保護：沒有資料集 / 流程是空的 → 狀態列提示，不丟例外。
+
+首次開啟導覽（M6）
+------------------
+:class:`~adept.ui.welcome.WelcomeDialog` 是產品的「上車處」：第一次開窗時
+（``show_welcome_on_start`` 預設 ``None`` = 依 QSettings 判斷，且**跑測試時
+一律不跳**）排一次非 modal 的顯示。它的三顆鈕只發訊號，動作由本視窗做 ——
+其中「用範例資料試一次」就是 :meth:`~StudioWindow.run_demo`：產合成資料 →
+載入 → 套 die-to-die 範本 → 試跑 → 切到 Gallery。
 """
 from __future__ import annotations
 
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -86,6 +99,7 @@ from adept.core.pipeline import ParamError, Recipe, get_step, list_steps
 from .export_dialog import ExportDialog
 from .gallery import GalleryPanel, make_thumb
 from .viewmodel import RecipeModel, histogram, rebin
+from .welcome import RecipeLibraryDialog, WelcomeDialog, welcome_disabled
 from .widgets import (
     FeatureTable,
     HistogramWidget,
@@ -98,7 +112,8 @@ from .widgets import (
 from .workers import DatasetLoadWorker, PreviewWorker, TrialWorker, _ThreadedWorker
 
 __all__ = ["StudioWindow", "ThumbWorker", "TEMPLATE_RECIPE", "DEFAULT_CACHE_DIR",
-           "THUMB_CHANNEL_PRIORITY", "TAB_PREVIEW", "TAB_GALLERY"]
+           "THUMB_CHANNEL_PRIORITY", "TAB_PREVIEW", "TAB_GALLERY",
+           "DEMO_DIR", "DEMO_DEFECTS", "DEMO_SEED", "generate_demo_lot"]
 
 #: 卡片庫「ADC 判定」段固定顯示的 Score / Bin 項目。它不是 registry 裡的
 #: step（每條 pipeline 天生就有一張 ScoreSpec），但三段式的心智模型要完整 ——
@@ -122,6 +137,13 @@ TEMPLATE_RECIPE = Path(__file__).resolve().parents[2] / "examples" / "recipes" \
 
 #: 試跑用的影像段快取位置（跨次試跑重用，第二次調參會明顯變快）。
 DEFAULT_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".adept", "cache")
+
+#: 「用範例資料試一次」把合成 lot 產在哪（使用者自己的檔案一律不碰）。
+DEMO_DIR = os.path.join(os.path.expanduser("~"), ".adept", "demo_lot")
+
+#: 範例資料的 defect 數與 seed（少到一分鐘內跑得完，多到直方圖看得出形狀）。
+DEMO_DEFECTS = 24
+DEMO_SEED = 7
 
 #: GUI 試跑用幾個 worker。None = 依 CPU 核心數自動。
 #:
@@ -181,6 +203,46 @@ def load_thumb(item: Any, size: int) -> Optional[Any]:
         return None
     arr = item.load(channel)
     return make_thumb(arr, int(size))
+
+
+def _running_under_pytest() -> bool:
+    """現在是不是在跑測試（測試裡建 ``StudioWindow()`` 不准彈導覽）。"""
+    return bool(os.environ.get("PYTEST_CURRENT_TEST")) or "pytest" in sys.modules
+
+
+def _welcome_on_start_default() -> bool:
+    """``show_welcome_on_start=None`` 時的預設：沒勾過「不再顯示」且不在測試中。"""
+    if _running_under_pytest():
+        return False
+    try:
+        return not welcome_disabled()
+    except Exception:                   # noqa: BLE001 — 設定讀不到不該擋開窗
+        return False
+
+
+def generate_demo_lot(out_dir: Any = None, n: int = DEMO_DEFECTS,
+                      seed: int = DEMO_SEED) -> Dict[str, str]:
+    """產一批合成 EBI patch 資料（「用範例資料試一次」的第一步）。
+
+    ``tools/make_sample.py`` 不是安裝進來的套件，所以這裡**延遲 import**：
+    把 repo 的 ``tools/`` 補進 ``sys.path`` 再 import ``make_sample.generate``。
+    延遲的另一個理由是它會拉進 tifffile —— 只按別的鈕的人不需要付這個成本。
+
+    同一組 ``(n, seed)`` 產出的位元組完全相同，所以已經產過就直接沿用
+    （第二次按這顆鈕是秒回的）。
+    """
+    out = str(out_dir) if out_dir is not None else DEMO_DIR
+    klarf = os.path.join(out, "LOT_SYN.001")
+    tiff = os.path.join(out, "LOT_SYN.tif")
+    if os.path.isfile(klarf) and os.path.isfile(tiff):
+        return {"out_dir": out, "klarf": klarf, "tiff": tiff}
+
+    tools_dir = str(Path(__file__).resolve().parents[2] / "tools")
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
+    from make_sample import generate      # noqa: E402 — 刻意延遲（見 docstring）
+
+    return generate(out, n=int(n), seed=int(seed))
 
 
 class ThumbWorker(_ThreadedWorker):
@@ -272,7 +334,17 @@ class ThumbWorker(_ThreadedWorker):
 class StudioWindow(QMainWindow):
     """ADEPT Studio 主視窗（M3 組裝 + M5 Gallery / 直方圖聯動 / 輸出）。"""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: Optional[QWidget] = None,
+                 show_welcome_on_start: Optional[bool] = None) -> None:
+        """``show_welcome_on_start``：
+
+        - ``True`` / ``False`` —— 明講要不要在開窗後跳導覽（測試用 ``False``）。
+        - ``None``（預設）—— 自己判斷：使用者沒勾過「不再顯示」**且**現在不是
+          在跑測試，才跳。**建構 StudioWindow() 在測試裡絕不可以彈出對話框**，
+          所以這裡把 ``pytest``／``PYTEST_CURRENT_TEST`` 也當成「不要跳」。
+          就算真的跳了，它也是非 modal 而且排在 event loop 的下一輪
+          （``QTimer.singleShot(0, …)``），建構式永遠不會被卡住。
+        """
         super().__init__(parent)
         self.setWindowTitle("ADEPT Studio")
 
@@ -292,6 +364,8 @@ class StudioWindow(QMainWindow):
         self._trial_t0 = 0.0
         self._items_by_id: Dict[str, Any] = {}    # defect_id -> DefectItem（縮圖用）
         self._score_filter: Optional[Any] = None  # 直方圖點出來的 (lo, hi)
+        self.welcome_dialog: Optional[Any] = None
+        self.library_dialog: Optional[Any] = None
 
         # ---- 背景工作 ------------------------------------------------------
         self.dataset_worker = DatasetLoadWorker(self)
@@ -317,7 +391,14 @@ class StudioWindow(QMainWindow):
         self.library.set_steps([s.describe() for s in list_steps()]
                                + [_SCORE_LIBRARY_ENTRY])
         self._refresh_all()
-        self._status("準備好了 —— 先「開啟 KLARF…」載入資料，或「載入範本」看一條完整流程。")
+        self._status("準備好了 —— 第一次用請按「說明」，"
+                     "或直接「開啟 KLARF…」載入資料。")
+
+        if show_welcome_on_start is None:
+            show_welcome_on_start = _welcome_on_start_default()
+        if show_welcome_on_start:
+            # 非 modal + 排到下一輪 event loop：建構式永遠不會被對話框卡住
+            QTimer.singleShot(0, lambda: self.show_welcome(force=False))
 
     # ==================================================================== #
     # 介面組裝
@@ -343,8 +424,16 @@ class StudioWindow(QMainWindow):
             "輸出…", "把這批結果寫回 KLARF、出報表、出疊圖（要先試跑或全跑）",
             self.open_export_dialog)
         self.btn_export.setEnabled(False)      # 有結果才亮
+        # 推廣鐵則：第一次用的人一定找得到入口 —— 這兩顆永遠在工具列上
+        self.btn_examples = self._tool_button(
+            "範例 recipe", "打開範例 recipe 庫：每一份都是可以直接跑的完整流程",
+            self.open_recipe_library)
+        self.btn_help = self._tool_button(
+            "說明", "重新打開首次開啟導覽（含「用範例資料試一次」）",
+            lambda: self.show_welcome(force=True))
         for b in (self.btn_open_klarf, self.btn_open_recipe,
-                  self.btn_save_recipe, self.btn_template, self.btn_export):
+                  self.btn_save_recipe, self.btn_template, self.btn_examples,
+                  self.btn_export, self.btn_help):
             bar.addWidget(b)
 
         spacer = QWidget(bar)
@@ -1339,6 +1428,91 @@ class StudioWindow(QMainWindow):
         self._status("輸出完成：%s" % ("、".join(outputs) if outputs else "（沒有檔案）"))
 
     # ==================================================================== #
+    # 首次開啟導覽 + 範例 recipe 庫（M6）
+    # ==================================================================== #
+    def show_welcome(self, force: bool = False) -> Optional[Any]:
+        """開（或重開）首次導覽。
+
+        ``force=False`` 時尊重「不再顯示」（勾過就回 ``None``）；工具列的
+        「說明」一律 ``force=True``。對話框是**非 modal** 的，所以這個方法
+        永遠會馬上回來 —— 測試可以直接拿回傳值來按鈕。
+        """
+        if not force and welcome_disabled():
+            return None
+        dlg = self.welcome_dialog
+        if dlg is None:
+            dlg = WelcomeDialog(self)
+            dlg.demo_requested.connect(self._on_demo_requested)
+            dlg.open_klarf_requested.connect(self._on_open_klarf)
+            dlg.library_requested.connect(self.open_recipe_library)
+            self.welcome_dialog = dlg
+        dlg.show()
+        dlg.raise_()
+        return dlg
+
+    def open_recipe_library(self) -> Optional[Any]:
+        """開範例 recipe 庫；選了哪份就直接載進流程面板。"""
+        dlg = self.library_dialog
+        if dlg is None:
+            dlg = RecipeLibraryDialog(parent=self)
+            dlg.recipe_chosen.connect(self._on_recipe_chosen)
+            self.library_dialog = dlg
+        else:
+            dlg.reload()
+        if dlg.count() == 0:
+            self._status("找不到任何範例 recipe（examples/recipes/ 是空的）。")
+        dlg.show()
+        dlg.raise_()
+        return dlg
+
+    def _on_recipe_chosen(self, path: str) -> None:
+        self.load_recipe_path(str(path))
+
+    def _on_demo_requested(self) -> None:
+        self.run_demo()
+
+    def run_demo(self, out_dir: Optional[Any] = None, n: int = DEMO_DEFECTS,
+                 sync: bool = True) -> bool:
+        """「用範例資料試一次」的完整動作 —— 這顆鈕是整個產品的入口。
+
+        產合成資料 → 載入資料集 → 載入 die-to-die 範本 → 試跑 → 切到
+        Gallery。做完畫面上就是「有分數分佈的直方圖 + 一整牆縮圖」，
+        使用者不必先懂任何東西。
+
+        產資料那一段會拉進 numpy/tifffile 並寫幾百 KB 的檔，在慢一點的機器上
+        會有一兩秒的停頓 —— 所以整段包在**等待游標**裡，畫面不會像當掉。
+        每一步都自我保護：任何一步失敗只在狀態列說明原因並回 ``False``。
+        """
+        self._status("正在準備範例資料…")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            paths = generate_demo_lot(out_dir, n=int(n))
+        except Exception as e:          # noqa: BLE001 — UI 邊界，一律回報
+            self._status("產生範例資料失敗：%s: %s" % (type(e).__name__, e))
+            return False
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        if not self.load_dataset_path(paths["klarf"], sync=True):
+            return False
+        if not self.load_template():
+            return False
+
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            ok = self.run_trial(int(n), workers=1, sync=bool(sync))
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not ok:
+            return False
+
+        self.show_gallery()
+        self._status(
+            "範例資料試跑完成 —— 下面的直方圖就是分數分佈（可以直接拖門檻線），"
+            "右邊是縮圖牆。接下來可以「開啟 KLARF…」換成你自己的資料。")
+        return True
+
+    # ==================================================================== #
     # 對話框（測試不走這條路）
     # ==================================================================== #
     def _on_open_klarf(self) -> None:
@@ -1368,6 +1542,12 @@ class StudioWindow(QMainWindow):
     # ==================================================================== #
     def closeEvent(self, event) -> None:      # noqa: D102 - Qt hook
         self._preview_timer.stop()
+        for dlg in (self.welcome_dialog, self.library_dialog):
+            try:
+                if dlg is not None:
+                    dlg.close()
+            except Exception:              # noqa: BLE001 — 關窗不准擋路
+                pass
         for worker in (self.preview_worker, self.trial_worker,
                        self.dataset_worker, self.thumb_worker):
             try:
