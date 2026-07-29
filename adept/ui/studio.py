@@ -174,7 +174,7 @@ PREVIEW_DEBOUNCE_MS = 300
 #: 主視窗三欄的出廠寬度：卡片庫 | 流程+參數 | 單顆預覽。
 #: F7-5 之後預覽拿到最寬的一欄（使用者要求「影像大一點、置中」），
 #: 因為直方圖與 Gallery 都搬去 Results 視窗了。
-COLUMN_SIZES = (220, 380, 760)
+COLUMN_SIZES = (256, 380, 724)
 
 #: 「試跑筆數」的出廠值。載入資料集時會再夾成 ``min(這個值, 資料集顆數)`` ——
 #: 對一份只有 24 顆的 lot 顯示 200 沒有任何意義，只會讓人以為自己看錯了。
@@ -564,7 +564,7 @@ class StudioWindow(QMainWindow):
     def _build_body(self) -> None:
         # 左：卡片庫
         self.library = LibraryPanel(self)
-        self.library.setMinimumWidth(180)
+        self.library.panel_toggled.connect(self._on_library_panel_toggled)
 
         # 中：流程畫布 + （參數表單 / 分數編輯）
         self.pipeline = PipelineCanvas(self)
@@ -835,6 +835,23 @@ class StudioWindow(QMainWindow):
             streams = []
         self.library.set_available_streams(streams)
 
+    def _on_library_panel_toggled(self, open_: bool) -> None:
+        """卡片區收起來時，把左欄的寬度真的還給工作區。
+
+        只搬左欄與中欄之間的那條分隔線 —— 右欄（單顆預覽）的寬度不動，
+        使用者自己調過的預覽大小不該因為收合卡片庫而被重設。
+        """
+        root = getattr(self, "root_splitter", None)
+        if root is None:
+            return
+        sizes = list(root.sizes())
+        if len(sizes) != 3 or sum(sizes) <= 0:
+            return
+        want = self.library.minimumWidth()
+        delta = want - sizes[0]
+        sizes[0], sizes[1] = want, max(240, sizes[1] - delta)
+        root.setSizes(sizes)
+
     # ---- 動作可用性（M7）--------------------------------------------------
     def _update_action_states(self) -> None:
         """按鈕的前置條件不滿足 → **變灰並在 tooltip 說明原因**。
@@ -904,6 +921,7 @@ class StudioWindow(QMainWindow):
             node = self.model.nodes.get(nid)
             if node is None:
                 continue
+            step_cls = None
             try:
                 step_cls = get_step(node.step)
                 label, category = step_cls.label, step_cls.category
@@ -916,6 +934,10 @@ class StudioWindow(QMainWindow):
                     node.params, self.model.kind))
             except Exception:              # noqa: BLE001 — 顯示用，壞了就空著
                 writes = []
+            try:
+                reads = list(step_cls.resolve_reads(node.params))
+            except Exception:              # noqa: BLE001
+                reads = []
             nodes.append({
                 "node_id": nid,
                 "step_key": node.step,
@@ -924,6 +946,8 @@ class StudioWindow(QMainWindow):
                 "enabled": bool(node.enabled),
                 "summary": self._node_summary(node),
                 "writes": writes,
+                "reads": reads,
+                "group": step_cls.resolve_group() if step_cls else "",
             })
         self.pipeline.set_nodes(nodes, self.model.edges)
         if self.selected_node not in self.model.nodes:

@@ -47,14 +47,14 @@ class PercentileNormStep(Step):
     """百分位正規化：P_low–P_high 拉伸到 0–255。"""
 
     key = "percentile_norm"
-    label = "Percentile normalise"
+    label = "Normalize · Percentile"
     category = CATEGORY_IMAGE
     group = GROUP_ENHANCE
     help = ("Stretch image brightness over a percentile range (P2-P98 by "
             "default) to 0-255, removing brightness drift.")
     params = [
         ParamSpec(name="source", type="image_key", default="test",
-                  help="Main image stream to normalise."),
+                  help="Main image stream to normalize."),
         ParamSpec(name="also_apply", type="str", default="ref",
                   help=("Other image streams to apply this to (comma separated, "
                         "may be empty; a missing stream only warns).")),
@@ -104,7 +104,7 @@ class GlvMaskNormStep(Step):
     """GLV 帶正規化：只用指定灰階範圍內的像素估計拉伸範圍。"""
 
     key = "glv_mask_norm"
-    label = "GLV band normalise"
+    label = "Normalize · GLV band"
     category = CATEGORY_IMAGE
     group = GROUP_ENHANCE
     help = ("Estimate the brightness range from pixels inside a chosen gray "
@@ -112,7 +112,7 @@ class GlvMaskNormStep(Step):
             "of one particular pattern.")
     params = [
         ParamSpec(name="source", type="image_key", default="test",
-                  help="Main image stream to normalise."),
+                  help="Main image stream to normalize."),
         ParamSpec(name="also_apply", type="str", default="ref",
                   help=("Other image streams to apply this to (comma separated, "
                         "may be empty; a missing stream only warns).")),
@@ -164,7 +164,7 @@ class HistMatchStep(Step):
     """直方圖匹配：把 moving 的亮度分布對齊到 reference。"""
 
     key = "hist_match"
-    label = "Histogram match"
+    label = "Normalize · Histogram match"
     category = CATEGORY_IMAGE
     group = GROUP_ENHANCE
     help = ("Match the moving image's brightness distribution to the reference "

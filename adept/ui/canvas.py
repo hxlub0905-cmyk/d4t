@@ -44,11 +44,22 @@ from PySide6.QtWidgets import (
 
 from . import theme
 from .theme import TOKENS
+from .widgets import draw_group_icon
+
+#: group -> 取哪個 segment 的顏色（與 ``LibraryPanel._GROUP_SEG`` 同一份對照）。
+_GROUP_SEG = {"input": "image", "enhance": "image", "region": "algo",
+              "compare": "image", "measure": "algo", "adc": "adc"}
 
 __all__ = ["PipelineCanvas", "NODE_W", "NODE_H", "COL_GAP", "ROW_GAP"]
 
 #: 一個節點最多畫幾個輸出埠（再多就擠不下，退回單一埠）。
 _MAX_PORTS = 4
+
+#: 埠標籤佔的寬度（畫在節點右緣之外，boundingRect 必須算進去）。
+_PORT_LABEL_W = 52.0
+
+#: 節點左側 icon 的邊長。
+_ICON = 18.0
 
 #: 節點卡尺寸與排版間距（畫布座標）。
 NODE_W, NODE_H = 168.0, 52.0
@@ -103,10 +114,21 @@ class _NodeItem(QGraphicsItem):
 
     # -- 幾何 ---------------------------------------------------------------
     def boundingRect(self) -> QRectF:
-        return QRectF(-_PORT_R, 0, NODE_W + 2 * _PORT_R, NODE_H)
+        """**要涵蓋所有畫得出去的東西**，否則拖動節點會留下殘影。
+
+        埠標籤（"test" / "ref"）畫在節點右緣之外 —— 之前 boundingRect 只算到
+        ``NODE_W + _PORT_R``，Qt 就只重繪那個範圍，標籤的舊位置沒被清掉。
+        """
+        extra = _PORT_LABEL_W if len(self.out_names()) > 1 else 0.0
+        return QRectF(-_PORT_R - 1, -1,
+                      NODE_W + 2 * _PORT_R + extra + 2, NODE_H + 2)
 
     def in_port(self) -> QPointF:
         return self.scenePos() + QPointF(0.0, NODE_H / 2.0)
+
+    def in_names(self) -> List[str]:
+        """這個節點讀哪些影像流（用來決定上游的線該接哪個埠）。"""
+        return [str(r) for r in (self.info.get("reads") or [])]
 
     def out_names(self) -> List[str]:
         """這個節點吐出的影像流名稱（決定畫幾個輸出埠）。
@@ -153,31 +175,41 @@ class _NodeItem(QGraphicsItem):
         p.setBrush(QColor(TOKENS["bg_surface"] if enabled else TOKENS["disabled_bg"]))
         p.drawRoundedRect(body, 6, 6)
 
-        # 左側階段色條
-        cat = str(self.info.get("category", "") or "image")
-        bar_col = QColor(theme.seg_hex(cat) if enabled else TOKENS["seg_disabled"])
+        # 左側階段色條 + icon —— 節點一眼看得出「這是哪一段的卡」，
+        # 而且用的是與左側 rail 完全相同的圖形（F7-8）。
+        gid = str(self.info.get("group", "") or "enhance")
+        seg = _GROUP_SEG.get(gid, "image")
+        bar_col = QColor(theme.seg_hex(seg) if enabled else TOKENS["seg_disabled"])
         path = QPainterPath()
         path.addRoundedRect(QRectF(0, 0, 3.0, NODE_H), 1.5, 1.5)
         p.fillPath(path, bar_col)
 
-        # 文字
+        icon_rect = QRectF(10, (NODE_H - _ICON) / 2.0, _ICON, _ICON)
+        p.save()
+        p.translate(icon_rect.topLeft())
+        draw_group_icon(p, gid, bar_col.name(), _ICON)
+        p.restore()
+
+        text_x = icon_rect.right() + 9
+        text_w = NODE_W - text_x - 8
+
         fg = TOKENS["text_primary"] if enabled else TOKENS["text_disabled"]
         p.setPen(QColor(fg))
         f = p.font()
         f.setBold(True)
         f.setPointSizeF(max(7.0, f.pointSizeF()))
         p.setFont(f)
-        p.drawText(QRectF(11, 6, NODE_W - 20, 16), Qt.AlignVCenter | Qt.AlignLeft,
+        p.drawText(QRectF(text_x, 7, text_w, 15), Qt.AlignVCenter | Qt.AlignLeft,
                    str(self.info.get("label", self.node_id)))
         f.setBold(False)
         f.setPointSizeF(max(6.0, f.pointSizeF() - 1.0))
         p.setFont(f)
         p.setPen(QColor(TOKENS["text_secondary"] if enabled else TOKENS["text_disabled"]))
-        p.drawText(QRectF(11, 22, NODE_W - 20, 14), Qt.AlignVCenter | Qt.AlignLeft,
+        p.drawText(QRectF(text_x, 22, text_w, 13), Qt.AlignVCenter | Qt.AlignLeft,
                    self.node_id)
         summary = str(self.info.get("summary", ""))
         if summary:
-            p.drawText(QRectF(11, 34, NODE_W - 20, 14),
+            p.drawText(QRectF(text_x, 34, text_w, 13),
                        Qt.AlignVCenter | Qt.AlignLeft, summary)
 
         # 連接埠。輸出可能不只一個 —— patch 的 Input 節點吐 test 與 ref 兩張
@@ -319,14 +351,33 @@ class PipelineCanvas(QGraphicsView):
             self._items[item.node_id] = item
 
         for a, b in self._pairs:
-            if a in self._items and b in self._items:
-                edge = _EdgeItem(self._items[a], self._items[b], self)
+            if a not in self._items or b not in self._items:
+                continue
+            src, dst = self._items[a], self._items[b]
+            for port in self._ports_between(src, dst):
+                edge = _EdgeItem(src, dst, self, port)
                 self._scene.addItem(edge)
                 self._edges.append(edge)
 
         self.set_selected(self._selected)
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self._scene.setSceneRect(rect)
+
+    @staticmethod
+    def _ports_between(src: "_NodeItem", dst: "_NodeItem") -> List[int]:
+        """一條依賴要畫成幾條線 —— 依**兩端共用的影像流**決定。
+
+        Input 節點吐 ``test`` 與 ``ref``；``subtract`` 兩張都讀，所以
+        Input → Subtract 會畫**兩條**線，各自從對應的埠出發。
+        這是推導出來的，不是存起來的 —— recipe JSON 的 edge 仍然是
+        ``[from, to]`` 兩個 id，格式不用改，重新載入也不會掉資訊。
+
+        兩端沒有共用的流（或下游沒宣告 reads）→ 退回單一條線。
+        """
+        outs = src.out_names()
+        wanted = set(dst.in_names())
+        ports = [i for i, name in enumerate(outs) if name in wanted]
+        return ports or [0]
 
     def node_ids(self) -> List[str]:
         return list(self._order)

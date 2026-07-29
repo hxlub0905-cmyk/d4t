@@ -568,14 +568,70 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 # --------------------------------------------------------------------------- #
 # 3. LibraryPanel
 # --------------------------------------------------------------------------- #
-class GroupIcon(QWidget):
-    """流程階段的小圖示 —— **用 QPainter 畫，不吃任何圖檔**。
+def draw_group_icon(p: QPainter, group: str, color: str, size: float) -> None:
+    """在 ``p`` 的目前原點畫一個 ``size`` × ``size`` 的階段圖示。
 
-    為什麼不用 ``.svg`` / ``.png``：repo 有「只放純文字檔」的不變量
-    （公司機的 DLP 會擋含二進位的壓縮檔，見 ``docs/HANDOVER.md`` §5）。
-    ``.svg`` 其實是純文字、過得了 DLP，但用 QPainter 連「要不要把圖檔加進
-    版控」這個問題都不用問，而且顏色直接吃 token —— 換主題時圖示自動跟著變。
+    **抽成自由函式**，是為了讓左側 rail 的按鈕、卡片庫的區塊標題、以及畫布上的
+    節點卡三處共用完全相同的圖形 —— 使用者在 rail 上看到的尺，在節點上看到的
+    也要是同一把尺，不然「圖示」就只是裝飾而不是語言。
+
+    不吃任何圖檔：repo 有「只放純文字檔」的不變量（公司機 DLP 會擋含二進位的
+    壓縮檔，見 ``docs/HANDOVER.md`` §5）。``.svg`` 其實是純文字、過得了 DLP，
+    但用 QPainter 連「要不要把圖檔加進版控」這個問題都不用問，而且顏色直接吃
+    token —— 換主題時圖示自動跟著變。
     """
+    p.setRenderHint(QPainter.Antialiasing, True)
+    pen = QPen(QColor(color), max(1.2, size / 11.0))
+    pen.setCapStyle(Qt.RoundCap)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    w = h = float(size)
+    m = w / 7.5                       # 邊界留白，隨尺寸縮放
+    g = str(group)
+
+    if g == "input":                    # 匣子 + 往下的箭頭
+        p.drawRect(QRectF(m, h * 0.55, w - 2 * m, h * 0.45 - m))
+        p.drawLine(QPointF(w / 2, m), QPointF(w / 2, h * 0.46))
+        p.drawLine(QPointF(w / 2 - w * 0.16, h * 0.30), QPointF(w / 2, h * 0.46))
+        p.drawLine(QPointF(w / 2 + w * 0.16, h * 0.30), QPointF(w / 2, h * 0.46))
+    elif g == "enhance":                # 亮度：半實心圓
+        p.drawEllipse(QRectF(m, m, w - 2 * m, h - 2 * m))
+        p.setBrush(QColor(color))
+        p.setPen(Qt.NoPen)
+        p.drawPie(QRectF(m, m, w - 2 * m, h - 2 * m), -90 * 16, 180 * 16)
+    elif g == "region":                 # 取景框（四個角）+ 中心點
+        c = w * 0.24
+        for x0, y0, dx, dy in ((m, m, 1, 1), (w - m, m, -1, 1),
+                               (m, h - m, 1, -1), (w - m, h - m, -1, -1)):
+            p.drawLine(QPointF(x0, y0), QPointF(x0 + c * dx, y0))
+            p.drawLine(QPointF(x0, y0), QPointF(x0, y0 + c * dy))
+        p.setBrush(QColor(color))
+        p.setPen(Qt.NoPen)
+        r = w * 0.11
+        p.drawEllipse(QRectF(w / 2 - r, h / 2 - r, 2 * r, 2 * r))
+    elif g == "compare":                # 兩個交疊的方框
+        side = w - 2 * m - w * 0.2
+        p.drawRect(QRectF(m, m, side, side))
+        p.drawRect(QRectF(m + w * 0.2, m + w * 0.2, side, side))
+    elif g == "measure":                # 尺（一條線 + 刻度）
+        base = h - m
+        p.drawLine(QPointF(m, base), QPointF(w - m, base))
+        for i in range(4):
+            x = m + i * (w - 2 * m) / 3.0
+            p.drawLine(QPointF(x, base),
+                       QPointF(x, base - (h * 0.40 if i % 2 == 0 else h * 0.23)))
+    elif g == "search":                 # 放大鏡（rail 上的搜尋鈕，不是流程階段）
+        r = w * 0.29
+        p.drawEllipse(QRectF(m, m, 2 * r, 2 * r))
+        p.drawLine(QPointF(m + 2 * r * 0.86, m + 2 * r * 0.86),
+                   QPointF(w - m, h - m))
+    else:                               # adc / 其他：打勾
+        p.drawLine(QPointF(m, h * 0.52), QPointF(w * 0.42, h - m))
+        p.drawLine(QPointF(w * 0.42, h - m), QPointF(w - m, m))
+
+
+class GroupIcon(QWidget):
+    """:func:`draw_group_icon` 的 widget 包裝（給 rail 與區塊標題用）。"""
 
     _SIZE = 15
 
@@ -593,44 +649,7 @@ class GroupIcon(QWidget):
 
     def paintEvent(self, _e) -> None:      # noqa: D102 - Qt hook
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, True)
-        pen = QPen(QColor(self.color), 1.4)
-        pen.setCapStyle(Qt.RoundCap)
-        p.setPen(pen)
-        p.setBrush(Qt.NoBrush)
-        w = h = float(self._SIZE)
-        g = self.group
-
-        if g == "input":                    # 匣子 + 往下的箭頭
-            p.drawRect(QRectF(2.0, 8.5, w - 4.0, h - 10.5))
-            p.drawLine(QPointF(w / 2, 1.5), QPointF(w / 2, 7.0))
-            p.drawLine(QPointF(w / 2 - 2.4, 4.6), QPointF(w / 2, 7.0))
-            p.drawLine(QPointF(w / 2 + 2.4, 4.6), QPointF(w / 2, 7.0))
-        elif g == "enhance":                # 亮度：半實心圓
-            p.drawEllipse(QRectF(2.0, 2.0, w - 4.0, h - 4.0))
-            p.setBrush(QColor(self.color))
-            p.setPen(Qt.NoPen)
-            p.drawPie(QRectF(2.0, 2.0, w - 4.0, h - 4.0), -90 * 16, 180 * 16)
-        elif g == "region":                 # 取景框（四個角）
-            for x0, y0, dx, dy in ((2.0, 2.0, 1, 1), (w - 2.0, 2.0, -1, 1),
-                                   (2.0, h - 2.0, 1, -1), (w - 2.0, h - 2.0, -1, -1)):
-                p.drawLine(QPointF(x0, y0), QPointF(x0 + 3.6 * dx, y0))
-                p.drawLine(QPointF(x0, y0), QPointF(x0, y0 + 3.6 * dy))
-            p.setBrush(QColor(self.color))
-            p.setPen(Qt.NoPen)
-            p.drawEllipse(QRectF(w / 2 - 1.6, h / 2 - 1.6, 3.2, 3.2))
-        elif g == "compare":                # 兩個交疊的方框
-            p.drawRect(QRectF(1.8, 1.8, w - 6.6, h - 6.6))
-            p.drawRect(QRectF(4.8, 4.8, w - 6.6, h - 6.6))
-        elif g == "measure":                # 尺（一條線 + 刻度）
-            p.drawLine(QPointF(2.0, h - 3.5), QPointF(w - 2.0, h - 3.5))
-            for i in range(4):
-                x = 3.0 + i * (w - 6.0) / 3.0
-                p.drawLine(QPointF(x, h - 3.5),
-                           QPointF(x, h - 3.5 - (6.0 if i % 2 == 0 else 3.5)))
-        else:                               # adc / 其他：打勾
-            p.drawLine(QPointF(2.5, h / 2), QPointF(w / 2 - 1.0, h - 3.5))
-            p.drawLine(QPointF(w / 2 - 1.0, h - 3.5), QPointF(w - 2.5, 3.0))
+        draw_group_icon(p, self.group, self.color, float(self._SIZE))
         p.end()
 
 
@@ -746,7 +765,7 @@ class StageButton(QFrame):
 
     clicked = Signal(str)
 
-    _ICON = 22
+    _ICON = 30
 
     def __init__(self, group: str, title: str, subtitle: str, colour: str,
                  parent: Optional[QWidget] = None):
@@ -758,9 +777,10 @@ class StageButton(QFrame):
         self._colour = colour
         self._active = False
 
+        self.setFixedWidth(58)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(4, 8, 4, 6)
-        lay.setSpacing(3)
+        lay.setContentsMargins(2, 7, 2, 5)
+        lay.setSpacing(2)
         lay.setAlignment(Qt.AlignHCenter)
 
         self.icon = GroupIcon(self.group, colour, self, size=self._ICON)
@@ -768,7 +788,7 @@ class StageButton(QFrame):
 
         self.label = QLabel(title, self)
         self.label.setAlignment(Qt.AlignHCenter)
-        self.label.setStyleSheet("font-size:10px; font-weight:600;")
+        self.label.setStyleSheet("font-size:9px; font-weight:600;")
         lay.addWidget(self.label)
 
         self.count = QLabel("", self)
@@ -827,6 +847,9 @@ class LibraryPanel(QWidget):
     """
 
     add_requested = Signal(str)
+    #: 卡片區展開/收起（``True`` = 展開）。主視窗據此縮放左欄寬度 ——
+    #: 收起來時整欄只留 rail，工作區才真的變寬。
+    panel_toggled = Signal(bool)
 
     #: 顯示順序與標題。id 對應 ``pipeline/step.py`` 的 ``GROUP_*``。
     GROUPS = (
@@ -845,6 +868,11 @@ class LibraryPanel(QWidget):
     _GROUP_SEG = {"input": "image", "enhance": "image", "region": "algo",
                   "compare": "image", "measure": "algo", "adc": "adc"}
 
+    #: 直式 icon rail 的寬度（收起來時整個 panel 就縮到只剩這條）。
+    RAIL_W = 66
+    #: 展開時卡片區至少要多寬（卡名 + badge 放得下）。
+    PANEL_W = 190
+
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._items: Dict[str, _LibraryItem] = {}
@@ -858,37 +886,56 @@ class LibraryPanel(QWidget):
 
         self._open_group: Optional[str] = None
 
-        outer = QVBoxLayout(self)
+        # 版面：**直式 rail（左）｜ 卡片區（右）**。
+        # F7-8：像工作列一樣由上而下，點了 icon 才顯示裡面的卡 ——
+        # 這樣左邊的操作區平常是乾淨的。
+        outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # -- 大 icon rail（F7-7）：先選階段，才展開裡面的卡片 ----------------
         self.rail = QWidget(self)
-        rail_lay = QGridLayout(self.rail)
-        rail_lay.setContentsMargins(6, 6, 6, 2)
-        rail_lay.setSpacing(3)
+        self.rail.setObjectName("stageRail")
+        self.rail.setFixedWidth(self.RAIL_W)
+        rail_lay = QVBoxLayout(self.rail)
+        rail_lay.setContentsMargins(2, 6, 2, 6)
+        rail_lay.setSpacing(2)
         self.stage_buttons: Dict[str, StageButton] = {}
-        for i, (gid, title, subtitle) in enumerate(self.GROUPS):
+        for gid, title, subtitle in self.GROUPS:
             btn = StageButton(gid, title, subtitle,
                               theme.seg_hex(self._GROUP_SEG.get(gid, "image")),
                               self.rail)
             btn.clicked.connect(self.toggle_group)
-            rail_lay.addWidget(btn, i // 3, i % 3)
+            rail_lay.addWidget(btn)
             self.stage_buttons[gid] = btn
+        rail_lay.addStretch(1)
+
+        # 搜尋鈕留在 rail 上（不是在 panel 裡）—— panel 收起來時搜尋框跟著藏，
+        # 沒有這顆就再也打不開搜尋了。
+        self.search_button = StageButton(
+            "search", "Search", "Find a card by name or description",
+            TOKENS["text_secondary"], self.rail)
+        self.search_button.clicked.connect(lambda _g: self.focus_search())
+        rail_lay.addWidget(self.search_button)
         outer.addWidget(self.rail)
+
+        # 右邊：搜尋 + 卡片清單（收起來時整塊隱藏）
+        self.panel = QWidget(self)
+        panel_lay = QVBoxLayout(self.panel)
+        panel_lay.setContentsMargins(0, 0, 0, 0)
+        panel_lay.setSpacing(0)
 
         self.search = QLineEdit(self)
         self.search.setPlaceholderText("Search cards…")
         self.search.setClearButtonEnabled(True)
         self.search.setToolTip("Filter the card library by name or description")
         self.search.textChanged.connect(self._on_search)
-        wrap = QWidget(self)
+        wrap = QWidget(self.panel)
         wl = QHBoxLayout(wrap)
         wl.setContentsMargins(6, 6, 8, 4)
         wl.addWidget(self.search)
-        outer.addWidget(wrap)
+        panel_lay.addWidget(wrap)
 
-        self._scroll = QScrollArea(self)
+        self._scroll = QScrollArea(self.panel)
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.NoFrame)
         self._host = QWidget()
@@ -906,7 +953,8 @@ class LibraryPanel(QWidget):
 
         self._body.addStretch(1)
         self._scroll.setWidget(self._host)
-        outer.addWidget(self._scroll, 1)
+        panel_lay.addWidget(self._scroll, 1)
+        outer.addWidget(self.panel, 1)
 
         self.set_steps([])
         self.toggle_group(self._ORDER[0])       # 開窗先展開 Input
@@ -1011,7 +1059,23 @@ class LibraryPanel(QWidget):
         self._open_group = None if (gid is None or self._open_group == gid) else gid
         for g, btn in self.stage_buttons.items():
             btn.set_active(g == self._open_group)
+        self._sync_panel()
         self._apply_filter()
+
+    def panel_open(self) -> bool:
+        """卡片區現在是展開的嗎（收起來時只剩 rail）。
+
+        用明確狀態而不是 ``isVisible()`` —— 視窗還沒 show 之前 ``isVisible()``
+        一律是 False，那會讓「收起來了嗎」在建構期永遠答錯。
+        """
+        return self._open_group is not None or bool(self._query)
+
+    def _sync_panel(self) -> None:
+        """展開狀態 -> panel 顯示 + 本身的最小寬度 + 通知外面重排欄寬。"""
+        show = self.panel_open()
+        self.panel.setVisible(show)
+        self.setMinimumWidth(self.RAIL_W + (self.PANEL_W if show else 0))
+        self.panel_toggled.emit(show)
 
     def open_group(self) -> Optional[str]:
         """目前展開的是哪一段（都收起來時回 None）。"""
@@ -1021,12 +1085,20 @@ class LibraryPanel(QWidget):
         """程式化設定搜尋字串（測試 / 外部呼叫用）。"""
         self.search.setText(str(text or ""))
 
+    def focus_search(self) -> None:
+        """展開卡片區並把游標放進搜尋框（rail 上的放大鏡鈕）。"""
+        if not self.panel_open():
+            self.toggle_group(self._ORDER[0])
+        self.search.setFocus(Qt.OtherFocusReason)
+        self.search.selectAll()
+
     def refresh_colors(self) -> None:
         """換主題之後重新取色（icon 與圓點都是自繪/內嵌樣式）。"""
         for gid, icon in self._icons.items():
             icon.set_color(theme.seg_hex(self._GROUP_SEG.get(gid, "image")))
         for gid, btn in self.stage_buttons.items():
             btn.refresh_colour(theme.seg_hex(self._GROUP_SEG.get(gid, "image")))
+        self.search_button.refresh_colour(TOKENS["text_secondary"])
 
     # -- internals ---------------------------------------------------------
     def _empty_label(self, text: str) -> QLabel:
@@ -1038,6 +1110,7 @@ class LibraryPanel(QWidget):
 
     def _on_search(self, text: str) -> None:
         self._query = str(text or "").strip().lower()
+        self._sync_panel()
         self._apply_filter()
 
     def _matches(self, key: str) -> bool:
