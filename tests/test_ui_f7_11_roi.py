@@ -208,3 +208,164 @@ def test_a_current_background_result_is_still_applied(window):
     window.profile_panel.set_data("", None)
     window._on_async_preview_ready(result)
     assert window.profile_panel.has_data() is True
+
+
+# --------------------------------------------------------------------------- #
+# 4. 區域跨顆檢視
+# --------------------------------------------------------------------------- #
+def _flat(seed: int = 0) -> np.ndarray:
+    """整張都是同一種材質 —— 沒有任何東西可以定位。"""
+    return np.random.default_rng(seed).normal(60.0, 4.0, (H, W)).astype(np.float32)
+
+
+@pytest.fixture(scope="module")
+def mixed_lot(tmp_path_factory):
+    """一批混合的資料：大部分看得到結構，每四顆有一顆整張均勻。"""
+    import tifffile
+    from make_sample import generate
+
+    out = generate(str(tmp_path_factory.mktemp("f7_11_mix")), n=12, seed=4)
+    rng = np.random.default_rng(7)
+    pages = []
+    for i in range(12):
+        ref = _flat(i) if i % 4 == 3 else _layout(int(rng.integers(-20, 21)), seed=i)
+        test = ref.copy()
+        test[60:68, 60:68] += 55.0
+        pages += [np.clip(test, 0, 255).astype(np.uint8),
+                  np.clip(ref, 0, 255).astype(np.uint8)]
+    tifffile.imwrite(out["tiff"], np.stack(pages))
+    return out
+
+
+@pytest.fixture
+def mixed_window(qapp, mixed_lot):
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    win.load_dataset_path(mixed_lot["klarf"], sync=True)
+    nid = win.model.add_step("roi_profile")
+    win.model.set_param(nid, "roi_out", "epi")
+    win.model.set_param(nid, "also_neighbours", True)
+    win.select_node(nid)
+    yield win
+    win.close()
+
+
+def test_the_thumbnail_placement_matches_the_thumbnail_itself(qapp):
+    """框畫在縮圖上，所以縮圖的 letterbox 偏移必須算得跟 ``make_thumb`` 一樣。
+
+    兩者分開放的話，哪天改了縮圖的縮放規則而忘了改另一邊，框就會整批偏掉 ——
+    而畫面上看起來只是「框好像有點歪」，不會有人聯想到是縮圖改過。
+    """
+    from adept.ui.gallery import make_thumb, thumb_placement
+
+    for shape in ((64, 128), (128, 64), (100, 100), (7, 250)):
+        img = np.full(shape, 255, np.uint8)         # 全白 -> 補的黑邊一目了然
+        thumb = make_thumb(img, 96)
+        x0, y0, tw, th = thumb_placement(shape, 96)
+        ys, xs = np.nonzero(thumb)
+        assert (int(xs.min()), int(ys.min())) == (x0, y0)
+        assert (int(xs.max()) + 1, int(ys.max()) + 1) == (x0 + tw, y0 + th)
+
+
+def test_the_boxes_follow_the_structure_across_defects(mixed_window):
+    """**這個視窗存在的理由**：在第 1 顆剛好的框，第 50 顆可能整個偏掉。"""
+    from adept.ui.region_check import check_regions
+
+    items = mixed_window._items()[:12]
+    results = check_regions(mixed_window.model.to_recipe(), items,
+                            mixed_window.model.kind, mixed_window.selected_node,
+                            ["epi"], thumb_size=120, source="ref")
+    located = [r for r in results if r["located"] and r["boxes"]]
+    assert len(located) >= 6
+    lefts = {round(r["boxes"][0][1][0]) for r in located}
+    assert len(lefts) > 1, "每顆的框都落在同一個位置 —— 那就沒有跟著結構跑"
+
+
+def test_a_patch_with_no_structure_is_marked_not_guessed(mixed_window):
+    from adept.ui.region_check import check_regions
+
+    results = check_regions(mixed_window.model.to_recipe(),
+                            mixed_window._items()[:12], mixed_window.model.kind,
+                            mixed_window.selected_node, ["epi"], 120, "ref")
+    fell_back = [r for r in results if not r["located"]]
+    assert fell_back, "這批刻意放了整張均勻的 patch"
+    for r in fell_back:
+        assert r["error"] is None, "退回整張圖是正常結果，不是錯誤"
+        assert r["boxes"], "退回之後區域仍然存在（就是整張圖）"
+
+
+def test_check_regions_never_raises_on_a_broken_pipeline(mixed_window):
+    """跟引擎「單顆爆不殺整批」同一個契約 —— 一顆壞掉只是一格壞掉。"""
+    from adept.ui.region_check import check_regions
+
+    nid = mixed_window.selected_node
+    mixed_window.model.set_param(nid, "source", "nope")      # 不存在的影像流
+    results = check_regions(mixed_window.model.to_recipe(),
+                            mixed_window._items()[:3], mixed_window.model.kind,
+                            nid, ["epi"], 120, "ref")
+    assert len(results) == 3
+    assert all(r["error"] for r in results)
+
+
+def test_the_window_summarises_and_can_show_only_the_failures(mixed_window):
+    assert mixed_window.region_check_available() is True
+    assert mixed_window.open_region_check(n=12, sync=True) is True
+
+    win = mixed_window.region_window
+    assert "12 defects" in win.summary_text()
+    assert "fell back" in win.summary_text()
+    assert len(win.visible_ids()) == 12
+
+    failed = win.failed_ids()
+    assert failed, "這批刻意放了定位不出來的 patch"
+    win.only_failed.setChecked(True)
+    assert win.visible_ids() == failed, "只看失敗的 —— 那些才是要看的"
+    win.only_failed.setChecked(False)
+    assert len(win.visible_ids()) == 12
+
+
+def test_clicking_a_thumbnail_jumps_to_that_defect(mixed_window):
+    assert mixed_window.open_region_check(n=6, sync=True) is True
+    win = mixed_window.region_window
+    seen = []
+    win.defect_activated.connect(seen.append)
+    win._cells[2].clicked.emit(win._cells[2].defect_id)
+    assert seen == [win._cells[2].defect_id]
+
+
+def test_the_button_only_appears_for_cards_that_define_a_region(mixed_window):
+    assert mixed_window.selected_regions() == ["epi", "epi_before", "epi_after"]
+    assert mixed_window.region_check_available() is True
+
+    other = mixed_window.model.add_step("glv_stats")
+    mixed_window.select_node(other)
+    assert mixed_window.selected_regions() == []
+    assert mixed_window.region_check_available() is False
+
+
+def test_without_a_dataset_the_button_is_off_and_says_why(qapp):
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    try:
+        nid = win.model.add_step("roi_profile")
+        win.select_node(nid)
+        assert win.selected_regions() == ["band"]
+        assert win.region_check_available() is False
+        assert win.open_region_check(n=4, sync=True) is False
+        assert "No dataset" in win.status_text()
+    finally:
+        win.close()
+
+
+def test_every_cell_paints(qapp, mixed_window):
+    """自繪元件的 bug 只在 paintEvent 真的跑過時才浮出來。"""
+    from PySide6.QtGui import QPixmap
+
+    assert mixed_window.open_region_check(n=12, sync=True) is True
+    win = mixed_window.region_window
+    for name in ("light", "dark"):
+        theme_mod.set_theme(name)
+        for cell in win._cells:
+            pm = QPixmap(cell.size())
+            pm.fill()
+            cell.render(pm)
+            assert not pm.isNull()
+    theme_mod.apply_theme(qapp, "light")

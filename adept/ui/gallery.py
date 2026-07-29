@@ -114,6 +114,26 @@ def make_thumb(arr: np.ndarray, size: int = 96) -> np.ndarray:
     return out
 
 
+def thumb_placement(shape: Any, size: int = 96) -> Tuple[int, int, int, int]:
+    """縮圖裡「影像實際落在哪」：``(x0, y0, w, h)``。
+
+    :func:`make_thumb` 用的是**置中的 letterbox**（等比縮放後四周補黑），
+    所以要把一個正規化座標的框畫到縮圖上，就得知道那個偏移與縮放。
+
+    **它與 make_thumb 是同一份算式，所以放在一起** —— 分開放的話，
+    哪天改了縮圖的縮放規則而忘了改這裡，框就會整批偏掉，
+    而且畫面上看起來只是「框好像有點歪」，不會有人聯想到是縮圖改過。
+    """
+    s = int(max(8, min(512, int(size))))
+    h, w = (int(shape[0]), int(shape[1])) if len(shape) >= 2 else (0, 0)
+    if h <= 0 or w <= 0:
+        return (0, 0, s, s)
+    scale = min(s / float(w), s / float(h))
+    tw = int(max(1, min(s, round(w * scale))))
+    th = int(max(1, min(s, round(h * scale))))
+    return ((s - tw) // 2, (s - th) // 2, tw, th)
+
+
 def _qimage_from_uint8(arr: np.ndarray) -> QImage:
     """uint8 (H,W) / (H,W,3) → QImage（deep copy，不依賴原 buffer）。
 
