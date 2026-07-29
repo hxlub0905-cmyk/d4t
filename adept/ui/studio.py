@@ -99,6 +99,7 @@ from PySide6.QtWidgets import (
 
 import adept.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
 from adept.core.pipeline import ParamError, Recipe, get_step, list_steps
+from adept.core.pipeline.step import CATEGORY_IMAGE, GROUP_ORDER
 
 from .export_dialog import ExportDialog
 from .canvas import PipelineCanvas
@@ -811,6 +812,7 @@ class StudioWindow(QMainWindow):
         self.pipeline.score_clicked.connect(self.show_score_page)
         self.pipeline.edge_added.connect(self._on_edge_added)
         self.pipeline.edge_removed.connect(self._on_edge_removed)
+        self.pipeline.add_after_requested.connect(self._on_add_after)
 
         self.param_form.param_edited.connect(self._on_param_edited)
 
@@ -1054,6 +1056,12 @@ class StudioWindow(QMainWindow):
                 reads = list(step_cls.resolve_reads(node.params))
             except Exception:              # noqa: BLE001
                 reads = []
+            try:
+                # Region 卡不寫影像流，它定義的是具名區域 —— 副標要講得出
+                # 「ref → cell」，否則那張卡在畫布上看起來什麼都不產出。
+                regions_out = list(step_cls.resolve_regions_out(node.params))
+            except Exception:              # noqa: BLE001
+                regions_out = []
             nodes.append({
                 "node_id": nid,
                 "step_key": node.step,
@@ -1063,6 +1071,7 @@ class StudioWindow(QMainWindow):
                 "summary": self._node_summary(node),
                 "writes": writes,
                 "reads": reads,
+                "regions_out": regions_out,
                 "group": step_cls.resolve_group() if step_cls else "",
                 "problem": problems.get(nid, ("", ""))[0],
                 "problem_level": problems.get(nid, ("", "error"))[1],
@@ -1119,6 +1128,137 @@ class StudioWindow(QMainWindow):
             return
         self._status("Added “%s”%s" % (node_id, self._unmet_needs(node_id)))
         self.select_node(node_id)
+
+    # ---- 從輸出埠接下一張卡（F7-14）---------------------------------------
+    def _streams_through(self, node_id: str) -> List[str]:
+        """一路累積到 ``node_id``（**含**它自己）為止有哪些影像流。"""
+        order = list(self.model.node_order)
+        nid = str(node_id)
+        if nid not in order:
+            return list(self.model.available_streams())
+        i = order.index(nid)
+        after = order[i + 1] if i + 1 < len(order) else None
+        if after is not None:
+            return list(self.model.available_streams(before_node=after))
+        return list(self.model.available_streams())
+
+    def cards_addable_after(self, node_id: str) -> List[Dict[str, Any]]:
+        """接在 ``node_id`` 後面**現在就接得上**的卡片（依階段排序）。
+
+        「接得上」不是使用者該自己判斷的事 —— 引擎本來就知道每張卡讀哪幾條流
+        （``resolve_reads``）。卡片庫列的是全部 22 張，然後把接不上的標成
+        ``needs diff`` 讓使用者自己想辦法；從埠上長出來的這份清單反過來：
+        **只列現在就成立的**，所以不必先懂影像流也做得出第一條 pipeline。
+        """
+        have = set(self._streams_through(node_id))
+        out: List[Dict[str, Any]] = []
+        for desc in visible_steps([s.describe() for s in list_steps()]) or []:
+            key = str(desc.get("key", ""))
+            try:
+                step_cls = get_step(key)
+                params = step_cls.validate_params({})
+                reads = [r for r in step_cls.resolve_reads(params) if r]
+            except Exception:                  # noqa: BLE001 — 顯示用
+                continue
+            if step_cls.category == CATEGORY_IMAGE and not self.model.node_order:
+                continue
+            if any(r not in have for r in reads):
+                continue
+            if key in {n.step for n in self.model.nodes.values()} and \
+                    key.startswith("load_"):
+                continue                       # 一條 pipeline 只有一張 Input 卡
+            out.append({"key": key, "label": step_cls.label,
+                        "group": step_cls.resolve_group(),
+                        "help": str(step_cls.help or "")})
+        order = {g: i for i, g in enumerate(GROUP_ORDER)}
+        out.sort(key=lambda d: (order.get(d["group"], 99), d["label"]))
+        return out
+
+    def add_card_after(self, node_id: str, step_key: str,
+                       stream: str = "") -> Optional[str]:
+        """把 ``step_key`` 接在 ``node_id`` 後面（順序 + 一條顯式連線）。
+
+        ``stream`` 是使用者按的那一顆「+」屬於哪個輸出埠。**這件事必須傳下去**：
+        從 ref 的埠接一張 Denoise 出來，結果那張卡預設做在 test 上，那顆「+」
+        就只是一個比較短的「新增卡片」—— 而使用者以為他已經表達了「對 ref 做」。
+        """
+        nid = str(node_id)
+        if nid not in self.model.nodes:
+            return None
+        at = self.model.node_order.index(nid) + 1
+        try:
+            new_id = self.model.add_step(str(step_key), at=at)
+        except (KeyError, ParamError) as e:
+            self._status("Could not add card: %s" % e)
+            return None
+        note = ""
+        if stream:
+            note = self._point_at_stream(new_id, str(stream))
+        # 顯式連線：使用者的動作是「從這個埠接下去」，那條線就該是實線。
+        # （route 相鄰本來就會產生一條虛線，但它表達的是順序，不是這個意圖。）
+        self.model.add_edge(nid, new_id)
+        self._status("Added “%s” after “%s”%s%s"
+                     % (new_id, nid, note, self._unmet_needs(new_id)))
+        self.select_node(new_id)
+        return new_id
+
+    def _point_at_stream(self, node_id: str, stream: str) -> str:
+        """把新卡的主要輸入指到 ``stream``（回一句給狀態列的話）。"""
+        node = self.model.nodes.get(str(node_id))
+        if node is None:
+            return ""
+        try:
+            specs = {p.name: p for p in get_step(node.step).params}
+        except KeyError:                       # pragma: no cover
+            return ""
+        for name in self._PRIMARY_PARAMS:
+            spec = specs.get(name)
+            if spec is None or spec.type not in ("image_key", "image_keys"):
+                continue
+            if str(node.params.get(name, "")) == stream:
+                return ""
+            try:
+                self.model.set_param(str(node_id), name, stream)
+            except ParamError:                 # pragma: no cover — 值就是流名
+                return ""
+            return " — working on “%s”" % stream
+        return ""
+
+    def _on_add_after(self, node_id: str, port: int) -> None:
+        """按下輸出埠旁邊的「+」：跳出「接得上的卡」清單。"""
+        nid = str(node_id)
+        cards = self.cards_addable_after(nid)
+        item = self.pipeline.card(nid)
+        names = item.out_names() if item is not None else []
+        stream = names[port] if 0 <= port < len(names) else ""
+        self._add_after_menu = QMenu(self)
+        title = ("What comes after “%s”?" % stream if stream
+                 else "What comes next?")
+        head = self._add_after_menu.addAction(title)
+        head.setEnabled(False)
+        if not cards:
+            none = self._add_after_menu.addAction("(nothing can connect here yet)")
+            none.setEnabled(False)
+        last_group = None
+        for card in cards:
+            if card["group"] != last_group:
+                self._add_after_menu.addSeparator()
+                last_group = card["group"]
+            act = self._add_after_menu.addAction(str(card["label"]))
+            act.setToolTip(str(card["help"]))
+            act.triggered.connect(
+                lambda _c=False, k=card["key"], n=nid, s=stream:
+                self.add_card_after(n, k, s))
+        item = self.pipeline.card(nid)
+        if item is not None:
+            anchors = item.plus_anchors_local()
+            i = max(0, min(int(port), len(anchors) - 1))
+            scene_pt = item.scenePos() + anchors[i]
+            self._add_after_menu.popup(
+                self.pipeline.viewport().mapToGlobal(
+                    self.pipeline.mapFromScene(scene_pt)))
+        else:                                  # pragma: no cover — 節點不見了
+            self._add_after_menu.popup(self.pipeline.mapToGlobal(self.pipeline.pos()))
 
     def _producers_of(self, stream: str) -> List[str]:
         """哪些卡片（用預設參數）會產出 ``stream``。"""
