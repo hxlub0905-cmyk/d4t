@@ -22,7 +22,9 @@ from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_ALGO, ParamSpec, Step, register_step, GROUP_MEASURE,
 )
-from ._util import roi_rect_or_none
+from ._util import (
+    output_prefix_spec, prefix_features, prefix_names, roi_rect_or_none,
+)
 
 _ZERO = {"cd_x_px": 0.0, "cd_y_px": 0.0,
          "cd_x_nm": 0.0, "cd_y_nm": 0.0, "area_nm2": 0.0}
@@ -50,6 +52,7 @@ class CdMeasureStep(Step):
                   help=("none = use the bounding box as is; subpixel = refine the "
                         "top and bottom edges to sub-pixel precision (falls back "
                         "to the bounding box on failure).")),
+        output_prefix_spec("blob"),
     ]
     reads = ["diff"]
     writes: List[str] = []
@@ -58,6 +61,10 @@ class CdMeasureStep(Step):
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
         return [params.get("source", "diff")]
+
+    @classmethod
+    def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
+        return prefix_names(params.get("output_prefix", ""), cls.features_out)
 
     @classmethod
     def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
@@ -77,7 +84,7 @@ class CdMeasureStep(Step):
             ctx.warn(f"[{self.key}] no blob found (run Blob segment first, or "
                      f"point roi at a Define region card); all CD features "
                      f"recorded as 0.")
-            ctx.add_features(dict(_ZERO))
+            ctx.add_features(prefix_features(p["output_prefix"], _ZERO))
             return ctx
 
         bx, by = float(rect[0]), float(rect[1])
@@ -128,5 +135,5 @@ class CdMeasureStep(Step):
         else:
             ctx.warn(f"[{self.key}] meta['nm_per_px'] is not set; nm sizes "
                      f"recorded as 0 (pixel values only).")
-        ctx.add_features(feats)
+        ctx.add_features(prefix_features(p["output_prefix"], feats))
         return ctx

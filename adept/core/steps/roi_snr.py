@@ -14,7 +14,10 @@ from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_ALGO, ParamSpec, Step, register_step, GROUP_MEASURE,
 )
-from ._util import require_image, roi_rect_or_none
+from ._util import (
+    output_prefix_spec, prefix_features, prefix_names, require_image,
+    roi_rect_or_none,
+)
 
 _ZERO = {"roi_snr_signed": 0.0, "roi_snr_abs": 0.0, "roi_contrast": 0.0,
          "roi_edge_sharpness": 0.0, "roi_dvi": 0.0}
@@ -42,6 +45,7 @@ class RoiSnrStep(Step):
         ParamSpec(name="background_margin", type="int", default=20, min=1, max=200,
                   help=("Background sampling width in pixels: the ring outside the "
                         "ROI used for background statistics.")),
+        output_prefix_spec("blob"),
     ]
     reads = ["diff"]
     writes: List[str] = []
@@ -51,6 +55,10 @@ class RoiSnrStep(Step):
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
         return [params.get("source", "diff")]
+
+    @classmethod
+    def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
+        return prefix_names(params.get("output_prefix", ""), cls.features_out)
 
     @classmethod
     def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
@@ -66,21 +74,21 @@ class RoiSnrStep(Step):
             ctx.warn(f"[{self.key}] no blob found (run Blob segment first, or "
                      f"point roi at a Define region card); all ROI SNR "
                      f"features recorded as 0.")
-            ctx.add_features(dict(_ZERO))
+            ctx.add_features(prefix_features(p["output_prefix"], _ZERO))
             return ctx
 
         res = algo_snr.roi_snr(img, rect, background_margin=int(p["background_margin"]))
         if res is None:
             ctx.warn(f"[{self.key}] ROI {rect} is outside the image or invalid; "
                      f"all ROI SNR features recorded as 0.")
-            ctx.add_features(dict(_ZERO))
+            ctx.add_features(prefix_features(p["output_prefix"], _ZERO))
             return ctx
 
-        ctx.add_features({
+        ctx.add_features(prefix_features(p["output_prefix"], {
             "roi_snr_signed": res.snr_signed,
             "roi_snr_abs": res.snr_abs,
             "roi_contrast": res.contrast,
             "roi_edge_sharpness": res.edge_sharpness,
             "roi_dvi": res.dvi,
-        })
+        }))
         return ctx

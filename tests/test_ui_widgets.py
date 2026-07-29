@@ -166,7 +166,8 @@ def test_self_painted_widgets_survive_an_actual_repaint(qapp):
 
     widgets = [widgets_mod.CurveEditor(), widgets_mod.CurveField(),
                widgets_mod.ImageView(), widgets_mod.GroupIcon("region", "#c06a1d"),
-               widgets_mod.HistogramWidget(), widgets_mod.VerdictChip()]
+               widgets_mod.HistogramWidget(), widgets_mod.VerdictChip(),
+               widgets_mod.ProfilePanel()]
     lib = widgets_mod.LibraryPanel()
     lib.set_steps(_steps())
     widgets.append(lib)

@@ -32,6 +32,7 @@ from PySide6.QtGui import (
     QFont,
     QImage,
     QPainter,
+    QPainterPath,
     QPen,
     QPixmap,
 )
@@ -503,6 +504,125 @@ def _make_slider(spec: Dict[str, Any], editor: QWidget) -> Optional[QSlider]:
     s.valueChanged.connect(from_slider)
     editor.valueChanged.connect(from_box)
     return s
+
+
+class ProfilePanel(QWidget):
+    """投影定位的曲線面板（F7-11）：曲線、轉折線、選中的那一段、中心線。
+
+    為什麼這張卡沒有這個面板就不成立
+    --------------------------------
+    「敏感度要調多少」對不會寫 code 的人是一個沒有答案的問題 —— 除非他看得到
+    曲線、看得到目前抓到幾條線、看得到抓到的線是不是落在他預期的地方。
+    沒有這個面板，這張卡就只是另一個要盲填的數字。
+
+    **畫的資料來自引擎那一次計算**（step 卡把它放進 ``ctx.meta["profiles"]``），
+    UI 不自己再算一次。不然「畫面上的框」跟「真的量下去的框」會不一樣，
+    而那種 bug 幾乎不可能靠肉眼發現。
+    """
+
+    _EMPTY = "(select a Locate region by profile card to see its curve)"
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._data: Dict[str, Any] = {}
+        self._name = ""
+        self.setMinimumHeight(96)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setToolTip("Gray level projected along the scan direction. "
+                        "Vertical lines are the boundaries that were found; "
+                        "the shaded section is the region this card produces.")
+
+    # -- public ------------------------------------------------------------
+    def set_data(self, name: str, data: Optional[Dict[str, Any]]) -> None:
+        self._name = str(name or "")
+        self._data = dict(data or {})
+        self.update()
+
+    def has_data(self) -> bool:
+        return bool(self._data.get("profile"))
+
+    def summary(self) -> str:
+        """一行文字摘要（測試與狀態列都用這個，不用去讀畫素）。"""
+        if not self.has_data():
+            return ""
+        d = self._data
+        picked = d.get("picked")
+        where = ("none" if not picked
+                 else "%d-%d px" % (int(picked[0]), int(picked[1])))
+        return ("%s · %d boundaries · %d sections · picked %s · confidence %.1f"
+                % (self._name, len(d.get("transitions") or []),
+                   len(d.get("bands") or []), where,
+                   float(d.get("confidence", 0.0))))
+
+    # -- paint -------------------------------------------------------------
+    def paintEvent(self, _e) -> None:      # noqa: D102 - Qt hook
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        rect = QRectF(self.rect()).adjusted(6, 6, -6, -6)
+        p.fillRect(QRectF(self.rect()), QColor(TOKENS["bg_surface"]))
+        p.setPen(QPen(QColor(TOKENS["border_default"]), 1.0))
+        p.drawRoundedRect(rect, 4, 4)
+
+        prof = [float(v) for v in (self._data.get("profile") or [])]
+        if len(prof) < 2:
+            p.setPen(QColor(TOKENS["text_disabled"]))
+            p.drawText(rect, Qt.AlignCenter, self._EMPTY)
+            p.end()
+            return
+
+        n = len(prof)
+        raw = [float(v) for v in (self._data.get("raw") or [])]
+        lo = min(min(prof), min(raw) if raw else min(prof))
+        hi = max(max(prof), max(raw) if raw else max(prof))
+        span = max(hi - lo, 1e-6)
+        plot = rect.adjusted(4, 16, -4, -4)
+
+        def to_x(i: float) -> float:
+            return plot.left() + plot.width() * (float(i) / max(1, n - 1))
+
+        def to_y(v: float) -> float:
+            return plot.bottom() - plot.height() * ((v - lo) / span)
+
+        # 選中的那一段：先畫底色，曲線才會壓在上面
+        picked = self._data.get("picked")
+        if picked:
+            x0, x1 = to_x(int(picked[0])), to_x(int(picked[1]))
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(TOKENS["accent_bg"]))
+            p.drawRect(QRectF(x0, plot.top(), max(1.0, x1 - x0), plot.height()))
+
+        # 平滑前的曲線畫在後面當對照 —— 使用者才看得出平滑吃掉了多少
+        if len(raw) == n:
+            p.setPen(QPen(QColor(TOKENS["border_input"]), 1.0))
+            p.setBrush(Qt.NoBrush)
+            path = QPainterPath(QPointF(to_x(0), to_y(raw[0])))
+            for i in range(1, n):
+                path.lineTo(QPointF(to_x(i), to_y(raw[i])))
+            p.drawPath(path)
+
+        p.setPen(QPen(QColor(TOKENS["text_primary"]), 1.6))
+        path = QPainterPath(QPointF(to_x(0), to_y(prof[0])))
+        for i in range(1, n):
+            path.lineTo(QPointF(to_x(i), to_y(prof[i])))
+        p.drawPath(path)
+
+        # 中心線 = 缺陷的位置（patch 是以缺陷為中心裁的）
+        p.setPen(QPen(QColor(TOKENS["text_secondary"]), 1.0, Qt.DashLine))
+        cx = to_x((n - 1) / 2.0)
+        p.drawLine(QPointF(cx, plot.top()), QPointF(cx, plot.bottom()))
+
+        p.setPen(QPen(QColor(TOKENS["accent"]), 1.4))
+        for t in (self._data.get("transitions") or []):
+            x = to_x(int(t))
+            p.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
+
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        f = p.font()
+        f.setPointSizeF(max(7.0, f.pointSizeF() - 1.0))
+        p.setFont(f)
+        p.drawText(QRectF(rect.left() + 6, rect.top() + 2, rect.width() - 12, 14),
+                   Qt.AlignVCenter | Qt.AlignLeft, self.summary())
+        p.end()
 
 
 class StreamPicker(QWidget):
