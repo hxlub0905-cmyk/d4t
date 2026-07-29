@@ -427,6 +427,10 @@ QToolBar::separator { background: $border_default; width: 1px; margin: 5px 6px; 
 /* -- status bar ------------------------------------------------------- */
 QStatusBar { background: $statusbar; color: $text_secondary;
              border-top: 1px solid $border_default; }
+/* A refusal must not look like a confirmation (F7-15). The status bar is the
+ * only place that says a trial was blocked by lint, or a card could not be
+ * added - in the same grey as "Added denoise", that reads as nothing said. */
+QStatusBar[level="error"] { color: $danger_text; font-weight: 600; }
 QStatusBar::item { border: 0; }
 
 /* -- group boxes (section cards) -------------------------------------- */
