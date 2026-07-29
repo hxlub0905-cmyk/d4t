@@ -158,7 +158,9 @@ _LIGHT: Dict[str, Any] = {
 
     # -- canvas (F7-6 節點畫布) ----------------------------------------------
     "canvas_bg": "#f0f1f4",
-    "canvas_grid": "#e0e3e8",
+    #: F7-8：背景從格線改成點陣之後這個值調深了一階。線鋪滿整片，太深會吵；
+    #: 點只有交會處那一顆，用原本的淺色就直接看不見了。
+    "canvas_grid": "#ced4de",
     "canvas_edge": "#9aa3ae",
     "canvas_edge_active": "#3574d6",
     # -- typography ----------------------------------------------------------
@@ -253,7 +255,7 @@ _DARK: Dict[str, Any] = dict(_LIGHT, **{
 
     "image_backdrop": "#3f4247",     # 與 light 相同 —— 見上面的說明
     "canvas_bg": "#16181d",
-    "canvas_grid": "#232730",
+    "canvas_grid": "#2f3540",
     "canvas_edge": "#5c6474",
     "canvas_edge_active": "#4b8bf5",
 })

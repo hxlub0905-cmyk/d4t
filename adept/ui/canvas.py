@@ -462,11 +462,19 @@ class PipelineCanvas(QGraphicsView):
         """與舊 ``PipelinePanel.score_summary_text()`` 同名同義。"""
         return self._score_summary
 
+    #: ``fit()`` 最多縮到多小。還沒拉線的 recipe 會排成一條很長的橫列，
+    #: 硬要全部塞進畫面會把節點縮成看不出字的小方塊 —— 那時候寧可留捲軸。
+    MIN_FIT_SCALE = 0.45
+
     def fit(self) -> None:
-        """整張圖縮放到看得完。"""
+        """整張圖縮放到看得完（但不縮到看不懂）。"""
         rect = self._scene.itemsBoundingRect()
-        if rect.isValid():
-            self.fitInView(rect.adjusted(-30, -30, 30, 30), Qt.KeepAspectRatio)
+        if not rect.isValid():
+            return
+        self.fitInView(rect.adjusted(-30, -30, 30, 30), Qt.KeepAspectRatio)
+        s = self.transform().m11()
+        if 0 < s < self.MIN_FIT_SCALE:
+            self.scale(self.MIN_FIT_SCALE / s, self.MIN_FIT_SCALE / s)
 
     def refresh_edges(self) -> None:
         for e in self._edges:

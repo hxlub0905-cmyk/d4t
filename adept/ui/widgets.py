@@ -854,7 +854,7 @@ class CurveEditor(QWidget):
             p.drawLine(prev, cur)
             prev = cur
 
-        p.setPen(QPen(QColor(TOKENS["surface_raised"]), 1.5))
+        p.setPen(QPen(QColor(TOKENS["bg_surface"]), 1.5))
         p.setBrush(accent)
         for x, y in self._points:
             c = self._to_px(x, y)
