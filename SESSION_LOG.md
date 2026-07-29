@@ -594,3 +594,21 @@ Subtract 一定缺上游）。改成 `ref` 會讓它立刻能跑，但接著會�
 原因。改成在乾淨的子行程裡 import core 再問。
 
 計畫書：`docs/plans/F7-canvas-and-taxonomy.md` §13。測試：`tests/test_ui_f7_9_feedback.py`。
+
+### 8. 卡片組合稽核挖出的兩個 bug（同一個 session）
+
+**快取只存了 Context 的一部分。** checkpoint 是執行順序上的**位置**（最後一張
+影像段卡的下一格），不是「所有影像段的卡」，所以「載入 → 先框出要看的地方 →
+再做影像處理 → 量測」這個**很自然**的順序，會把 Region 卡（algo）夾進快取段。
+v1 快照只存 images/features/meta，`ctx.rois` 沒存 —— 於是**第一次跑對、第二次
+跑錯**（`region 'main' is not defined`）。先寫出重現再修。快照現在涵蓋 rois 與
+labels，並帶 `FORMAT_VERSION`：版本不合當 miss，既有快取目錄不會把殘缺快照
+餵回來。迴歸測試刻意先斷言「checkpoint 真的吞掉了那張 Region 卡」，
+免得哪天切點改了、測試還在綠但已經沒測到那條路。
+
+**特徵是扁平的全域命名空間。** 兩張同型別的量測卡寫同一組名字，
+所以「量中心 + 量整片」這個一定會做的事，跑完只剩後面那張的值，
+而且前面那個**完全沒有辦法**從分數表達式指到。lint 以前說這份 recipe 是乾淨的。
+現在是 `feature-collision` warning，Studio 跑完在狀態列講出來（跑之前講會被
+「Running: 3 / 200」洗掉）。不擋執行 —— 同名覆寫有時是刻意的。
+根治要讓量測卡能自訂輸出名，那件事跟 ROI 段一起做。
