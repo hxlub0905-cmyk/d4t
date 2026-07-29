@@ -269,9 +269,27 @@ def _meta_snapshot(meta: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _roi_snapshot(ctx: Context) -> List[Any]:
+    """具名 ROI → ``[(name, (nx, ny, nw, nh)), ...]``（可 JSON 化）。"""
+    out: List[Any] = []
+    for roi in (ctx.rois.rois if ctx.rois is not None else ()):
+        try:
+            rect = tuple(float(v) for v in roi.norm_rect)
+        except Exception:              # noqa: BLE001 — 快取是盡力而為
+            continue
+        out.append((str(roi.label), rect))
+    return out
+
+
 def _restore_context(item: Any, kind: str, defect_id: str,
                      snap: Dict[str, Any]) -> Context:
-    """由快取快照重建 Context：先種引擎 meta，再回填 images/features/meta。"""
+    """由快取快照重建 Context。
+
+    **Context 的每一個欄位都要回來**，不只 images/features/meta。checkpoint 是
+    執行順序上的位置，不是「所有影像段的卡」，所以夾在中間的 Region 卡
+    （algo）會落在快取段裡 —— 漏掉 ``rois`` 的話會變成「第一次跑對、第二次跑
+    錯」。見 :mod:`.cache` 的模組說明。
+    """
     ctx = _seed_context(item, kind, defect_id)
     for name, arr in dict(snap.get("images") or {}).items():
         ctx.images[str(name)] = arr
@@ -279,6 +297,11 @@ def _restore_context(item: Any, kind: str, defect_id: str,
         ctx.features[str(name)] = float(val)
     for k, v in dict(snap.get("meta") or {}).items():
         ctx.meta[str(k)] = v  # 快照不含 ``_`` 開頭 key，不會蓋掉剛種的
+    for name, rect in (snap.get("rois") or []):
+        ctx.set_roi(str(name), rect)
+    labels = snap.get("labels")
+    if labels is not None:
+        ctx.labels = labels
     return ctx
 
 
@@ -337,7 +360,8 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
         if key is not None:
             try:
                 cache.put(key, dict(ctx.images), dict(ctx.features),
-                          _meta_snapshot(ctx.meta))
+                          _meta_snapshot(ctx.meta),
+                          rois=_roi_snapshot(ctx), labels=ctx.labels)
             except Exception:
                 pass  # 快取寫入失敗 → 不影響本次結果
 

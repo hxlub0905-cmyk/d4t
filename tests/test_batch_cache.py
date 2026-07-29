@@ -318,3 +318,74 @@ def test_run_batch_parallel_with_cache(ds, tmp_path):
     assert len(r1) == len(r2) == len(base) == N
     for a, b, c in zip(r1, r2, base):
         assert _slim(a) == _slim(b) == _slim(c)
+
+
+# ---------------------------------------------------------------------------
+# 8. 快照必須涵蓋整個 Context —— 不只 images / features / meta（F7-9 迴歸）
+# ---------------------------------------------------------------------------
+def _roi_then_image_recipe() -> Recipe:
+    """一份**很自然**、但會踩到快取切點的 recipe。
+
+    checkpoint 是執行順序上的**位置**（最後一張影像段卡的下一格），不是
+    「所有影像段的卡」。所以「先框出要看的地方，再做影像處理，最後量測」
+    這個順序會把 Region 卡（algo）夾在快取段裡面。
+    """
+    nodes = {
+        "load": RecipeNode("load", "load_patch", {}),
+        "roi": RecipeNode("roi", "roi_define",
+                          {"name": "main", "source": "test"}),
+        "dn": RecipeNode("dn", "denoise",
+                         {"target": "test", "method": "median", "ksize": 3}),
+        "glv": RecipeNode("glv", "glv_stats",
+                          {"source": "test", "roi": "main"}),
+    }
+    return Recipe(recipe_id="roi_in_cached_segment",
+                  routes={KIND: ["load", "roi", "dn", "glv"]}, nodes=nodes,
+                  score=ScoreSpec(expr="glv_mean", threshold=0.0,
+                                  bins={"below": 0, "above": 1}))
+
+
+def test_named_rois_survive_a_cache_hit(ds, tmp_path):
+    """第一次跑對、第二次跑錯，是最難查的一種 bug。
+
+    v1 的快照只存 images/features/meta，``ctx.rois`` 沒有存 —— 快取命中時
+    整個具名 ROI 表是空的，量測卡就報「region 'main' is not defined」。
+    """
+    rec = _roi_then_image_recipe()
+    _sig, ckpt = image_segment_signature(rec, KIND)
+    assert ckpt == 3, "前提：roi 卡確實落在快取段裡（不然這條測試沒在測東西）"
+
+    cache = StageCache(str(tmp_path / "roi_cache"))
+    token = dataset_token(ds.klarf_path if hasattr(ds, "klarf_path") else "lot")
+    item = ds.items[0]
+
+    first = run_defect_cached(rec, item, KIND, cache, token)
+    second = run_defect_cached(rec, item, KIND, cache, token)
+    assert cache.hits >= 1, "第二次應該要命中快取，不然沒測到那條路徑"
+
+    assert first.ok is True, first.error
+    assert second.ok is True, second.error
+    _assert_same_result(first, second)
+
+    # 而且要跟完全不用快取的結果一致
+    _assert_same_result(first, run_defect(rec, item, KIND))
+
+
+def test_an_old_format_snapshot_is_ignored_instead_of_trusted(ds, tmp_path):
+    """使用者的快取目錄可能是舊版寫的（缺 rois 欄位）。
+
+    版本對不上就當 miss 重算 —— 不然升級之後第一次跑仍然會踩到舊的殘缺快照。
+    """
+    import json
+
+    import numpy as np
+
+    cache = StageCache(str(tmp_path / "old"))
+    key = cache.make_key("tok", "d1", "sig")
+    path = cache._path(key)
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    payload = {"image_names": ["test"], "features": {}, "meta": {}}   # 無 version
+    np.savez_compressed(path, **{"img__test": np.zeros((4, 4), np.uint8),
+                                 "__payload__": np.array(json.dumps(payload))})
+    assert cache.get(key) is None
+    assert cache.misses == 1

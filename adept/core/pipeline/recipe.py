@@ -250,7 +250,7 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
 
     檢查項（code）：unknown-step / bad-param / unknown-node / unknown-route /
     cycle / missing-image / unknown-region / requires-ref / score-expr /
-    unknown-feature（warning）/ bad-bins。
+    unknown-feature（warning）/ feature-collision（warning）/ bad-bins。
     """
     if registry is None:
         registry = REGISTRY
@@ -328,6 +328,10 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
         avail: Set[str] = set()
         feats: Set[str] = {"score"}
         regions: Set[str] = set()
+        #: feature 名 -> 第一個產出它的節點。特徵是**扁平的全域命名空間**，
+        #: 所以兩張同型別的量測卡（例如量兩個 ROI 的 glv_stats）會寫同一組名字，
+        #: 後面那張安靜地蓋掉前面那張 —— 跑得完、有數字、少一半。
+        feat_owner: Dict[str, str] = {}
         first = True
         for nid in order:
             node = recipe.nodes.get(nid)
@@ -341,6 +345,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                 # 第一張卡（load）：reads / requires_ref 不檢查；
                 # writes 用 kind-aware 宣告（load 卡依資料型別決定會有哪些流）
                 avail |= set(step_cls.resolve_writes_for_kind(p, k))
+                for f in step_cls.resolve_features(p):
+                    feat_owner.setdefault(f, nid)
                 feats |= set(step_cls.resolve_features(p))
                 regions |= set(step_cls.resolve_regions_out(p))
                 first = False
@@ -375,6 +381,25 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                            f"defined: {sorted(regions)}). Add a Region card "
                            f"upstream, or clear the roi parameter to measure "
                            f"the whole image."))
+
+            # 特徵撞名：後面的卡會安靜地蓋掉前面的（Context.add_feature 允許
+            # 覆寫，只在 meta 留紀錄）。最典型的踩法是「量兩個 ROI」——
+            # 兩張 glv_stats 都寫 glv_mean，跑完只剩後面那張的值，而分數表達式
+            # 完全沒有辦法指到前面那一個。這是**警告**不是 error：同名覆寫有時
+            # 是刻意的（例如重跑一次 normalize），但它必須看得見。
+            for f in step_cls.resolve_features(p):
+                owner = feat_owner.get(f)
+                if owner is not None and owner != nid:
+                    issues.append(Issue(
+                        code="feature-collision", level="warning", node_id=nid,
+                        title=f"step '{nid}' overwrites the feature '{f}'",
+                        detail=f"route '{k}': '{f}' is already produced by "
+                               f"'{owner}'; the later value wins and the earlier "
+                               f"one cannot be referenced from the score "
+                               f"expression at all. Give one of the two cards a "
+                               f"different output name if you need both."))
+                else:
+                    feat_owner.setdefault(f, nid)
 
             avail |= set(step_cls.resolve_writes(p))
             feats |= set(step_cls.resolve_features(p))

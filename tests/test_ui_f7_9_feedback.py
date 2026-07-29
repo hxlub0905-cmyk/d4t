@@ -377,6 +377,49 @@ def test_a_measure_card_that_needs_a_region_nobody_defines_is_caught(qapp):
     assert [i.code for i in ok if i.level == "error"] == []
 
 
+def test_measuring_two_regions_warns_instead_of_silently_losing_one(qapp):
+    """特徵是**扁平的全域命名空間**，所以兩張同型別的量測卡會寫同一組名字。
+
+    「量中心 vs 量整片」是使用者一定會做的事，而以前的下場是：跑得完、
+    lint 全綠、後面那張把前面那張蓋掉，分數表達式**完全沒有辦法**指到前面
+    那個值。這是 warning 不是 error（同名覆寫有時是刻意的），但它必須看得見。
+    """
+    nodes = {
+        "load": RecipeNode("load", "load_patch", {}),
+        "roiA": RecipeNode("roiA", "roi_define", {"name": "center"}),
+        "roiB": RecipeNode("roiB", "roi_define",
+                           {"name": "wide", "size": 90.0, "size_unit": "percent"}),
+        "glvA": RecipeNode("glvA", "glv_stats",
+                           {"roi": "center", "metrics": "glv_mean"}),
+        "glvB": RecipeNode("glvB", "glv_stats",
+                           {"roi": "wide", "metrics": "glv_mean"}),
+    }
+    recipe = Recipe(
+        recipe_id="two_roi",
+        routes={"ebi_patch": ["load", "roiA", "roiB", "glvA", "glvB"]},
+        nodes=nodes, score=ScoreSpec(expr="glv_mean", threshold=0.0,
+                                     bins={"below": 0, "above": 1}))
+    issues = validate(recipe, kind="ebi_patch")
+    collisions = [i for i in issues if i.code == "feature-collision"]
+    assert len(collisions) == 1
+    assert collisions[0].level == "warning", "撞名不擋執行，但要講出來"
+    assert collisions[0].node_id == "glvB"
+    assert "glv_mean" in collisions[0].title
+    assert not [i for i in issues if i.level == "error"]
+
+
+def test_a_warning_does_not_block_the_run_but_is_reported_afterwards(window):
+    """警告描述的是「跑得完、數字卻不是你以為的那個」，所以不能擋，
+    但也不能不講。跑**之前**講會被「Running: 3 / 200」洗掉，所以跑完才講。"""
+    assert window.load_recipe_path(str(EXAMPLE), sync=True) is True
+    dup = window.model.add_step("glv_stats")          # 跟範例裡的 glv 撞名
+    window.model.set_param(dup, "source", "diff")
+
+    assert window.run_trial(6, workers=1, sync=True) is True
+    assert "Run finished" in window.status_text()
+    assert "overwrites the feature" in window.status_text()
+
+
 def test_the_shipped_example_recipes_have_no_combination_errors(qapp):
     """範例 recipe 是使用者的起點，它們自己必須全部過 lint。"""
     bad = {}
