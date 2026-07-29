@@ -54,10 +54,16 @@ class PercentileNormStep(Step):
             "default) to 0-255, removing brightness drift.")
     params = [
         ParamSpec(name="source", type="image_key", default="test",
-                  help="Main image stream to normalize."),
-        ParamSpec(name="also_apply", type="str", default="ref",
-                  help=("Other image streams to apply this to (comma separated, "
-                        "may be empty; a missing stream only warns).")),
+                  label="Apply to",
+                  help=("Which image stream this card works on; the result is "
+                        "written back to that same stream. Streams are the "
+                        "named lines on the canvas - test is the defect image, "
+                        "ref is the reference image.")),
+        ParamSpec(name="also_apply", type="image_keys", default="ref",
+                  label="Also apply to",
+                  help=("Other streams that get exactly the same treatment. "
+                        "Keep ref ticked so test and ref stay comparable; "
+                        "untick it to treat the two images differently.")),
         ParamSpec(name="p_low", type="float", default=2.0, min=0.0, max=50.0,
                   help=("Lower percentile (0-50): pixels below it are clipped "
                         "to 0.")),
@@ -112,10 +118,16 @@ class GlvMaskNormStep(Step):
             "of one particular pattern.")
     params = [
         ParamSpec(name="source", type="image_key", default="test",
-                  help="Main image stream to normalize."),
-        ParamSpec(name="also_apply", type="str", default="ref",
-                  help=("Other image streams to apply this to (comma separated, "
-                        "may be empty; a missing stream only warns).")),
+                  label="Apply to",
+                  help=("Which image stream this card works on; the result is "
+                        "written back to that same stream. Streams are the "
+                        "named lines on the canvas - test is the defect image, "
+                        "ref is the reference image.")),
+        ParamSpec(name="also_apply", type="image_keys", default="ref",
+                  label="Also apply to",
+                  help=("Other streams that get exactly the same treatment. "
+                        "Keep ref ticked so test and ref stay comparable; "
+                        "untick it to treat the two images differently.")),
         ParamSpec(name="glv_low", type="int", default=0, min=0, max=255,
                   help=("Lower edge of the gray band (0-255): only pixels inside "
                         "the band take part in the range estimate.")),
@@ -172,9 +184,11 @@ class HistMatchStep(Step):
     requires_ref = True
     params = [
         ParamSpec(name="moving", type="image_key", default="test",
+                  label="Adjust this stream",
                   help=("Image stream whose brightness is adjusted (the result "
                         "overwrites the same stream).")),
         ParamSpec(name="reference", type="image_key", default="ref",
+                  label="Match it to",
                   help="Brightness reference stream (never modified)."),
         ParamSpec(name="method", type="choice", default="linear",
                   choices=["exact", "linear", "percentile"],

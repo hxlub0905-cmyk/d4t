@@ -1,0 +1,440 @@
+# F7-9 驗收：第三輪試用回饋（顏色／埠／起手卡／影像流／卡片組合）。
+"""這一輪的四個回饋加上一個提問，逐條鎖在這裡。
+
+1. 「圖示很不錯，但太多都同個顏色（Input、Enhance、Compare 都是藍的）」
+2. 「移動 Load images 時還是會有殘點（test 跟 ref）」＋「新增的節點只有前面有
+   圓框，後面沒有」＋「一開始預設畫布上就應該有 load image 這個節點」
+3. 「target 跟 also apply 要怎麼使用？對應的節點又是什麼？」
+4. 「打開 compare 之後，點卡片時右上的 image stream 一直被切成 ref」
+5. 「也請幫我確認目前的卡片操作與組合是否相互會有問題」
+
+2 的前兩件事其實是**同一個 bug**：``paint()`` 拿場景座標去畫本地座標的東西。
+節點在原點時看起來正常（第一欄的 Input 剛好在那），一離開原點，輸出埠與埠標
+籤就被畫到「兩倍位移」的地方 —— 於是後面每張卡的右側圓點都跑到卡外面（看起來
+像沒有），而拖動 Input 會把標籤留在 ``boundingRect`` 之外（擦不掉，就是殘影）。
+所以這裡不測「畫面上看不看得到殘影」，而是測那個不變量本身。
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+
+from adept.core.pipeline import (          # noqa: E402 — Qt-free，可以直接 import
+    Recipe, RecipeNode, ScoreSpec, get_step, list_steps, validate,
+)
+import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+
+EXAMPLES = Path(__file__).resolve().parent.parent / "examples" / "recipes"
+EXAMPLE = EXAMPLES / "die_to_die_basic.json"
+
+
+def _import_qt(g):
+    from PySide6.QtWidgets import QApplication
+
+    from adept.ui import canvas as canvas_mod
+    from adept.ui import studio as studio_mod
+    from adept.ui import theme as theme_mod
+    from adept.ui import viewmodel as vm_mod
+    from adept.ui import widgets as widgets_mod
+    g.update(QApplication=QApplication, canvas_mod=canvas_mod,
+             studio_mod=studio_mod, theme_mod=theme_mod, vm_mod=vm_mod,
+             widgets_mod=widgets_mod)
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    _import_qt(globals())
+    app = QApplication.instance() or QApplication([])
+    theme_mod.apply_theme(app)
+    yield app
+
+
+@pytest.fixture(scope="module")
+def lot(tmp_path_factory):
+    from make_sample import generate
+    return generate(str(tmp_path_factory.mktemp("f7_9")), n=6, seed=11)
+
+
+@pytest.fixture
+def window(qapp, lot):
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    win.load_dataset_path(lot["klarf"], sync=True)
+    yield win
+    win.close()
+
+
+# --------------------------------------------------------------------------- #
+# 1. 六個階段六個顏色
+# --------------------------------------------------------------------------- #
+GROUPS = ("input", "enhance", "region", "compare", "measure", "adc")
+
+
+def _lab(hex_str):
+    """sRGB hex -> CIE L*a*b*（D65）。用感知距離判「看不看得出不一樣」。
+
+    RGB 的算術距離跟眼睛看到的差異對不上（藍色差 40 看得出來，綠色差 40
+    看不太出來），所以不要拿 RGB 距離當「顏色夠不夠分得開」的標準。
+    """
+    import math
+
+    s = hex_str.lstrip("#")
+    r, g, b = [int(s[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
+
+    def lin(c):
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = lin(r), lin(g), lin(b)
+    x = (r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047
+    y = (r * 0.2126 + g * 0.7152 + b * 0.0722)
+    z = (r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883
+
+    def f(c):
+        return c ** (1.0 / 3.0) if c > 0.008856 else 7.787 * c + 16.0 / 116.0
+
+    fx, fy, fz = f(x), f(y), f(z)
+    return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
+
+
+def _delta_e(a, b):
+    import math
+    return math.sqrt(sum((x - y) ** 2 for x, y in zip(_lab(a), _lab(b))))
+
+
+def test_every_stage_has_its_own_colour(qapp):
+    """回饋原話：「太多都同個顏色（input enhance 跟 compare 都是藍色）」。
+
+    以前是 ``group -> category -> 顏色``，六個階段只有三種色。這裡鎖的是
+    **性質**（兩兩感知上分得開），不是寫死色碼 —— 色票還可以再調。
+    ΔE ≥ 25 大約是「一眼看得出是兩個顏色」而不只是「同色的深淺」。
+    """
+    for name in ("light", "dark"):
+        theme_mod.set_theme(name)
+        colours = {g: theme_mod.group_hex(g) for g in GROUPS}
+        assert len(set(colours.values())) == len(GROUPS), \
+            "%s 主題有階段共用顏色：%s" % (name, colours)
+        for i, a in enumerate(GROUPS):
+            for b in GROUPS[i + 1:]:
+                d = _delta_e(colours[a], colours[b])
+                assert d >= 25, "%s 的 %s 與 %s 太接近（%s vs %s, ΔE=%.1f）" % (
+                    name, a, b, colours[a], colours[b], d)
+    theme_mod.apply_theme(qapp, "light")
+
+
+def test_the_stage_colours_stay_one_family(qapp):
+    """分得開之外還要**看起來像一套**：同一主題內明度不可以亂跳。
+
+    六個顏色如果亮度差很多，rail 上就會有幾個特別跳、幾個特別悶 ——
+    那是「六個顏色」，不是「一套色票」。
+    """
+    for name in ("light", "dark"):
+        theme_mod.set_theme(name)
+        lums = [_lab(theme_mod.group_hex(g))[0] for g in GROUPS]
+        assert max(lums) - min(lums) <= 15, \
+            "%s 主題的階段色明度差太多：%s" % (name, [round(x) for x in lums])
+    theme_mod.apply_theme(qapp, "light")
+
+
+def test_the_library_and_the_canvas_use_the_same_stage_colour(qapp):
+    """rail 上看到的顏色，跟畫布節點上的必須是同一個 —— 不然顏色不是語言。"""
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps([s.describe() for s in list_steps()])
+    for gid in GROUPS:
+        btn = panel.stage_buttons[gid]
+        assert theme_mod.group_hex(gid) in btn.styleSheet() \
+            or btn.icon.color == theme_mod.group_hex(gid)
+
+
+# --------------------------------------------------------------------------- #
+# 2. 埠：本地座標 vs 場景座標
+# --------------------------------------------------------------------------- #
+def _canvas_with_two_nodes(qapp):
+    canvas = canvas_mod.PipelineCanvas()
+    canvas.set_nodes([
+        {"node_id": "load", "label": "Load images", "group": "input",
+         "enabled": True, "summary": "", "reads": [], "writes": ["test", "ref"]},
+        {"node_id": "sub", "label": "Subtract", "group": "compare",
+         "enabled": True, "summary": "", "reads": ["test", "ref"],
+         "writes": ["diff"]},
+    ], [("load", "sub")])
+    return canvas
+
+
+def test_every_port_is_drawn_inside_the_nodes_bounding_rect(qapp):
+    """``paint()`` 只准畫在 ``boundingRect`` 裡面，否則就是殘影。
+
+    埠與埠標籤都畫在**本地座標**；``boundingRect`` 也是本地座標。把節點拖到
+    任何地方，這個關係都不可以變 —— 這正是「移動 Load images 會留下 test /
+    ref 殘點」與「後面的節點沒有圓框」的共同成因。
+    """
+    from PySide6.QtCore import QPointF
+
+    canvas = _canvas_with_two_nodes(qapp)
+    for pos in (QPointF(0, 0), QPointF(240, 130), QPointF(-90, 55)):
+        for item in (canvas.card("load"), canvas.card("sub")):
+            item.setPos(pos)
+            rect = item.boundingRect()
+            assert rect.contains(item.in_port_local()), "輸入埠畫到框外"
+            for anchor, name in zip(item.out_anchors_local(), item.out_names()):
+                assert rect.contains(anchor), \
+                    "%s 的輸出埠 %r 畫到 boundingRect 外面" % (item.node_id, name)
+                # 埠標籤畫在埠右邊 _PORT_LABEL_W 之內，也必須在框裡
+                label_right = anchor.x() + canvas_mod._PORT_LABEL_W - 1
+                assert label_right <= rect.right(), "埠標籤畫到框外（= 殘影）"
+
+
+def test_scene_anchors_track_the_node_position(qapp):
+    """場景座標 = 本地座標 + ``scenePos()``。連線用前者，繪製用後者。"""
+    from PySide6.QtCore import QPointF
+
+    canvas = _canvas_with_two_nodes(qapp)
+    item = canvas.card("load")
+    item.setPos(QPointF(311, 47))
+    for local, scene in zip(item.out_anchors_local(), item.out_anchors()):
+        assert scene == item.scenePos() + local
+    assert item.in_port() == item.scenePos() + item.in_port_local()
+    # 命中判定吃的是本地座標，拖走之後仍然要打得到
+    assert item.out_port_at(item.out_anchors_local()[1]) == 1
+
+
+def test_every_node_has_an_output_port_to_drag_from(qapp):
+    """回饋原話：「新增的節點只有前面有圓框，後面沒有圓框讓人可以連」。"""
+    canvas = _canvas_with_two_nodes(qapp)
+    for nid in ("load", "sub"):
+        item = canvas.card(nid)
+        assert len(item.out_anchors_local()) >= 1
+        for anchor in item.out_anchors_local():
+            assert anchor.x() == canvas_mod.NODE_W, "輸出埠必須貼在節點右緣"
+
+
+def test_output_ports_are_labelled_with_the_stream_they_carry(qapp):
+    """埠標籤就是 ``target`` / ``also apply`` 下拉裡的那些名字（回饋 3）。"""
+    canvas = _canvas_with_two_nodes(qapp)
+    assert canvas.card("load").out_names() == ["test", "ref"]
+    assert canvas.card("sub").out_names() == ["diff"]
+
+
+def test_an_unwired_recipe_wraps_instead_of_running_off_the_screen(qapp):
+    """九張還沒拉線的卡排成一列會超過 2500px，``fit()`` 只能縮到看不出字。
+
+    （而且它有下限 —— 縮成小方塊比留捲軸更糟，所以結果是「一排讀不出來的
+    小方塊 **加上** 一條捲軸」，兩邊都輸。）
+    """
+    ids = ["n%d" % i for i in range(9)]
+    pos = canvas_mod.layout_columns(ids, [])
+    assert max(c for c, _r in pos.values()) < canvas_mod.WRAP
+    assert max(r for _c, r in pos.values()) == (len(ids) - 1) // canvas_mod.WRAP
+    # 閱讀順序仍然是左到右、上到下
+    assert pos["n0"] == (0, 0) and pos["n3"] == (3, 0) and pos["n4"] == (0, 1)
+
+    width = canvas_mod.WRAP * (canvas_mod.NODE_W + canvas_mod.COL_GAP)
+    assert width < 1200, "換行之後整張圖要塞得進一般的工作區寬度"
+
+
+# --------------------------------------------------------------------------- #
+# 2b. 起手卡
+# --------------------------------------------------------------------------- #
+def test_a_new_model_starts_with_the_input_card(qapp):
+    m = vm_mod.RecipeModel.starter()
+    assert m.node_order == ["load_patch"]
+    assert m.nodes["load_patch"].step == "load_patch"
+    assert m.dirty is False, "使用者還沒做任何事，不該被當成「改過」"
+
+
+def test_the_studio_opens_with_the_input_card_on_the_canvas(window):
+    assert window.pipeline.node_ids() == ["load_patch"]
+    assert window.pipeline.card("load_patch") is not None
+    # 而且它是可以拖線出來的（patch 天生成對）
+    assert window.pipeline.card("load_patch").out_names() == ["test", "ref"]
+
+
+# --------------------------------------------------------------------------- #
+# 3. target / also apply
+# --------------------------------------------------------------------------- #
+def test_stream_params_have_plain_language_labels(qapp):
+    """``also_apply`` 不是一句話，"Also apply to" 才是。"""
+    for key in ("percentile_norm", "gamma", "brightness_contrast", "denoise"):
+        params = {p["name"]: p for p in get_step(key).describe()["params"]}
+        assert params["also_apply"]["label"] == "Also apply to"
+        assert params["also_apply"]["type"] == "image_keys"
+        primary = params.get("target") or params.get("source")
+        assert primary["label"] == "Apply to"
+        # 說明要講出「流是畫布上的線」與 test / ref 是什麼
+        assert "canvas" in primary["help"] and "ref" in primary["help"]
+
+
+def test_image_keys_values_are_normalised(qapp):
+    """手打的與勾出來的要等價 —— 存進 recipe 的字串不該因輸入方式而不同。"""
+    cls = get_step("percentile_norm")
+    assert cls.validate_params({"also_apply": " ref , ref ,,test "})["also_apply"] \
+        == "ref,test"
+    assert cls.validate_params({"also_apply": ""})["also_apply"] == ""
+    # 舊 recipe 的寫法照樣讀得進來（格式沒有變）
+    assert cls.validate_params({"also_apply": "ref"})["also_apply"] == "ref"
+
+
+def test_stream_picker_is_checkboxes_over_the_upstream_streams(qapp):
+    picker = widgets_mod.StreamPicker(["test", "ref", "diff"], "ref")
+    assert picker.stream_names() == ["test", "ref", "diff"]
+    assert picker.text() == "ref"
+
+    seen = []
+    picker.changed.connect(seen.append)
+    picker._boxes[0].setChecked(True)             # 也勾 test
+    assert seen[-1] == "test,ref"
+    picker._boxes[1].setChecked(False)            # 取消 ref -> 兩張圖分開處理
+    assert seen[-1] == "test"
+
+
+def test_a_stream_the_pipeline_no_longer_has_is_still_shown(qapp):
+    """recipe 指到一條現在不存在的流時，不可以看不到就靜靜消失。"""
+    picker = widgets_mod.StreamPicker(["test", "ref"], "ghost")
+    assert "ghost" in picker.stream_names()
+    assert picker.text() == "ghost"
+
+
+def test_editing_also_apply_from_the_form_reaches_the_model(window):
+    node_id = window.model.add_step("percentile_norm")
+    assert window.select_node(node_id) is True
+    picker = window.param_form.editor("also_apply")
+    assert isinstance(picker, widgets_mod.StreamPicker)
+    assert set(picker.stream_names()) >= {"test", "ref"}
+
+    # 取消 ref = 「test 跟 ref 分開處理」，這是使用者要的另一半功能
+    assert window.model.nodes[node_id].params["also_apply"] == "ref"
+    picker._boxes[picker.stream_names().index("ref")].setChecked(False)
+    assert window.model.nodes[node_id].params["also_apply"] == ""
+
+
+# --------------------------------------------------------------------------- #
+# 4. 點卡片時預覽顯示哪一張
+# --------------------------------------------------------------------------- #
+def test_selecting_a_card_shows_that_cards_main_stream(window):
+    """回饋 4：點 Normalize 卻跳到 ref，並排時左右變成同一張 ref。
+
+    成因是「這張卡寫過的最後一條流」被當成「這張卡的主要輸出」；Enhance 卡的
+    writes 是 ``[target] + also_apply``，所以最後一項永遠是 also_apply。
+    """
+    assert window.load_recipe_path(str(EXAMPLE), sync=True) is True
+    assert window.select_node("norm") is True
+    window.refresh_preview(sync=True)
+
+    assert window.stream_combo.currentText() == "test", \
+        "點 Normalize 應該看到它處理的 test，不是 also_apply 的 ref"
+    assert window.model.nodes["norm"].params["source"] == "test"
+
+
+def test_side_by_side_never_shows_the_same_image_twice(window):
+    assert window.load_recipe_path(str(EXAMPLE), sync=True) is True
+    assert window.set_compare(True) is True
+    window.select_node("norm")
+    window.refresh_preview(sync=True)
+    left, right = window.stream_combo.currentText(), window.stream_combo_b.currentText()
+    assert (left, right) == ("test", "ref")
+
+    # 使用者親手把右邊挑成 ref 之後，再點別張卡也不可以變成左右都是 ref
+    window._on_stream_b_changed("ref")
+    for node_id in ("norm", "sub", "dn"):
+        window.select_node(node_id)
+        window.refresh_preview(sync=True)
+        assert window.stream_combo.currentText() != window.stream_combo_b.currentText(), \
+            "節點 %s：左右顯示同一條流" % node_id
+
+
+# --------------------------------------------------------------------------- #
+# 5. 卡片組合
+# --------------------------------------------------------------------------- #
+def _recipe(seq):
+    nodes, order = {}, []
+    for i, key in enumerate(seq):
+        nid = "n%d" % i
+        nodes[nid] = RecipeNode(id=nid, step=key,
+                                params=get_step(key).validate_params({}))
+        order.append(nid)
+    return Recipe(recipe_id="combo", routes={"ebi_patch": order}, nodes=nodes,
+                  score=ScoreSpec(expr="0", threshold=0.0,
+                                  bins={"below": 0, "above": 1}))
+
+
+def test_a_measure_card_that_needs_a_region_nobody_defines_is_caught(qapp):
+    """以前這件事只有兩種下場，兩種都不好。
+
+    名字打錯 → 每顆 defect 跑到一半 StepError；名字剛好是保留字 ``blob`` 而
+    上游沒有 Blob 卡 → **安靜地改量整張圖**，跑得完、有數字、而且是錯的。
+    """
+    codes = [i.code for i in validate(
+        _recipe(["load_patch", "align", "subtract", "cd_measure"]),
+        kind="ebi_patch") if i.level == "error"]
+    assert "unknown-region" in codes
+
+    # 補上 Blob 卡（它定義 'blob'）之後就乾淨了
+    ok = validate(_recipe(["load_patch", "align", "subtract", "snr_map",
+                           "blob_segment", "cd_measure"]), kind="ebi_patch")
+    assert [i.code for i in ok if i.level == "error"] == []
+
+
+def test_the_shipped_example_recipes_have_no_combination_errors(qapp):
+    """範例 recipe 是使用者的起點，它們自己必須全部過 lint。"""
+    bad = {}
+    for path in sorted(EXAMPLES.glob("*.json")):
+        recipe = Recipe.load(str(path))
+        errs = [i for i in validate(recipe) if i.level == "error"]
+        if errs:
+            bad[path.name] = [(i.code, i.node_id) for i in errs]
+    assert not bad, bad
+
+
+def test_a_broken_combination_refuses_to_run_instead_of_failing_every_defect(window):
+    """引擎的契約是「單顆出錯不殺整批」，所以接錯的卡片以前會**跑完整批而且
+    每一顆都失敗**：進度條走完、結果是空的、原因埋在每顆的錯誤訊息裡。"""
+    node_id = window.model.add_step("subtract")      # 預設吃 ref_aligned
+    assert window.run_trial(6, workers=1, sync=True) is False
+    assert "Cannot run" in window.status_text()
+    assert "ref_aligned" in window.status_text()
+
+    # 指到真的存在的流之後就跑得動了
+    window.model.set_param(node_id, "b", "ref")
+    assert window.run_trial(6, workers=1, sync=True) is True
+
+
+def test_adding_a_card_says_what_is_still_missing_and_who_provides_it(window):
+    """卡片庫上那個 ``needs ref_aligned`` 的灰字 badge 對不會寫 code 的人沒有
+    動作可做 —— 他不知道 ref_aligned 是誰產的。"""
+    window.library.add_requested.emit("subtract")
+    msg = window.status_text()
+    assert "ref_aligned" in msg
+    assert "Align" in msg, "要講出哪一張卡會產出這條流"
+    assert "test" in msg and "ref" in msg, "也要講現在有哪些流可以改指"
+
+
+def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
+    """每一張卡都要有一條「照著加就會通」的路，否則它在 UI 上就是死路。
+
+    這是回饋 5（「卡片操作與組合是否相互會有問題」）的機械化版本：對每張卡
+    找一組前置卡，驗證整條 route 過得了 lint。找不到 = 那張卡沒有人用得起來。
+    """
+    from adept.ui.scope import visible_steps
+
+    # 前置鏈：能滿足所有 reads / regions 的最短已知順序
+    PREREQ = {
+        "subtract": ["align"],
+        "snr_map": ["align", "subtract"],
+        "blob_segment": ["align", "subtract", "snr_map"],
+        "cd_measure": ["align", "subtract", "snr_map", "blob_segment"],
+        "roi_snr": ["align", "subtract", "snr_map", "blob_segment"],
+    }
+    keys = [d["key"] for d in visible_steps([s.describe() for s in list_steps()])]
+    dead_ends = {}
+    for key in keys:
+        if key == "load_patch":
+            continue
+        seq = ["load_patch"] + PREREQ.get(key, []) + [key]
+        errs = [i for i in validate(_recipe(seq), kind="ebi_patch")
+                if i.level == "error"]
+        if errs:
+            dead_ends[key] = [(i.code, i.detail) for i in errs]
+    assert not dead_ends, "這些卡片沒有可行的組合：%s" % sorted(dead_ends)

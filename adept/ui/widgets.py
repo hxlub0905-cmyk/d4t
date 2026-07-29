@@ -377,7 +377,9 @@ class _ParamRow(QFrame):
         top = QHBoxLayout()
         top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(8)
-        self.name_label = QLabel(str(spec.get("name", "")))
+        # 顯示名優先用 ``label``（F7-9）。``name`` 是 recipe JSON 的鍵，
+        # 對使用者來說 ``also_apply`` 不是一句話，"Also apply to" 才是。
+        self.name_label = QLabel(str(spec.get("label") or spec.get("name", "")))
         self.name_label.setObjectName("paramLabel")
         self.name_label.setMinimumWidth(104)
         top.addWidget(self.name_label)
@@ -501,6 +503,79 @@ def _make_slider(spec: Dict[str, Any], editor: QWidget) -> Optional[QSlider]:
     s.valueChanged.connect(from_slider)
     editor.valueChanged.connect(from_box)
     return s
+
+
+class StreamPicker(QWidget):
+    """``image_keys`` 參數的編輯器：上游每一條影像流一個勾選框（F7-9）。
+
+    為什麼不是一個輸入框
+    --------------------
+    ``also_apply`` 以前是自由文字，值長這樣：``ref``。三個問題一次到齊 ——
+    使用者不知道**可以填什麼**（流名從來沒有列出來過）、不知道**填了會怎樣**、
+    打錯了也不會被擋（缺流只 warn，於是「我明明設了卻沒作用」）。
+    試用回饋原話：「target 跟 also apply 要怎麼使用？對應的節點又是什麼？」
+
+    勾選框把這三件事一次解掉：能填的就是列出來的那幾個，勾了就是套用。
+    而「兩張 patch 一起處理，還是各走各的」也就變成一個看得見的動作 ——
+    ref 勾著＝一起，取消＝分開（再加一張只對 ref 的卡）。
+
+    值的格式沒有變（仍是逗號分隔字串），所以既有 recipe 照樣讀得進來；
+    recipe 裡指到「現在的 pipeline 沒有這條流」的名字也會列出來並勾著，
+    不會因為看不到就被靜靜刪掉。
+    """
+
+    changed = Signal(str)
+
+    _EMPTY_TEXT = "(no upstream stream yet — add an Input card first)"
+
+    def __init__(self, streams: Sequence[str], value: str = "",
+                 parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._boxes: List[QCheckBox] = []
+        self._emitting = False
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
+
+        picked = [t.strip() for t in str(value or "").split(",") if t.strip()]
+        names: List[str] = []
+        for name in list(streams) + picked:      # 上游的在前，recipe 帶來的在後
+            name = str(name)
+            if name and name not in names:
+                names.append(name)
+
+        for name in names:
+            box = QCheckBox(name, self)
+            box.setChecked(name in picked)
+            box.toggled.connect(self._on_toggled)
+            lay.addWidget(box)
+            self._boxes.append(box)
+        if not names:
+            hint = QLabel(self._EMPTY_TEXT, self)
+            hint.setObjectName("paramHint")
+            lay.addWidget(hint)
+        lay.addStretch(1)
+
+    def text(self) -> str:
+        """目前的值（逗號分隔，順序同勾選框）。"""
+        return ",".join(b.text() for b in self._boxes if b.isChecked())
+
+    def set_text(self, value: str) -> None:
+        picked = {t.strip() for t in str(value or "").split(",") if t.strip()}
+        self._emitting = True
+        try:
+            for box in self._boxes:
+                box.setChecked(box.text() in picked)
+        finally:
+            self._emitting = False
+
+    def stream_names(self) -> List[str]:
+        return [b.text() for b in self._boxes]
+
+    def _on_toggled(self, _checked: bool) -> None:
+        if not self._emitting:
+            self.changed.emit(self.text())
 
 
 class ParamForm(QWidget):
@@ -703,6 +778,11 @@ class ParamForm(QWidget):
             w.set_text("" if value is None else str(value))
             w.curve_changed.connect(lambda t, n=name: self._emit(n, str(t)))
             w.curve_changed.connect(lambda _t: self._sync_curve_override())
+            return w
+
+        if ptype == "image_keys":
+            w = StreamPicker(streams, "" if value is None else str(value))
+            w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 
         if ptype == "image_key":
@@ -1330,7 +1410,9 @@ class LibraryPanel(QWidget):
     _EMPTY_TEXT = "(no cards in this section)"
     _NO_MATCH_TEXT = "(no card matches)"
 
-    #: group -> 取哪個 segment 的顏色（三段式的色彩語言不變，只是變細了）。
+    #: group -> 所屬的三段式 segment。**顏色不再從這裡取**（F7-9 起走
+    #: ``theme.group_hex``，六個階段各一個色相）；這份對照留著是因為
+    #: 「這個階段屬於哪一段」在說明文字與排序上仍然成立。
     _GROUP_SEG = {"input": "image", "enhance": "image", "region": "algo",
                   "compare": "image", "measure": "algo", "adc": "adc"}
 
@@ -1367,8 +1449,7 @@ class LibraryPanel(QWidget):
         rail_lay.setSpacing(2)
         self.stage_buttons: Dict[str, StageButton] = {}
         for gid, title, subtitle in self.GROUPS:
-            btn = StageButton(gid, title, subtitle,
-                              theme.seg_hex(self._GROUP_SEG.get(gid, "image")),
+            btn = StageButton(gid, title, subtitle, theme.group_hex(gid),
                               self.rail)
             btn.clicked.connect(self.toggle_group)
             rail_lay.addWidget(btn)
@@ -1427,7 +1508,7 @@ class LibraryPanel(QWidget):
 
     # -- 區塊標題（icon + 標題，取代舊的填滿色塊）---------------------------
     def _make_header(self, gid: str, title: str, subtitle: str) -> QWidget:
-        colour = theme.seg_hex(self._GROUP_SEG.get(gid, "image"))
+        colour = theme.group_hex(gid)
         head = QWidget(self)
         head.setObjectName("libSectionHeader")
         head.setProperty("group", gid)
@@ -1467,9 +1548,9 @@ class LibraryPanel(QWidget):
             if not entries:
                 box.addWidget(self._empty_label(self._EMPTY_TEXT))
                 continue
-            seg = self._GROUP_SEG.get(gid, "image")
+            colour = theme.group_hex(gid)
             for d in entries:
-                item = _LibraryItem(d, theme.seg_hex(seg), self._host)
+                item = _LibraryItem(d, colour, self._host)
                 item.activated.connect(self.add_requested)
                 box.addWidget(item)
                 self._items[item.step_key] = item
@@ -1561,9 +1642,9 @@ class LibraryPanel(QWidget):
     def refresh_colors(self) -> None:
         """換主題之後重新取色（icon 與圓點都是自繪/內嵌樣式）。"""
         for gid, icon in self._icons.items():
-            icon.set_color(theme.seg_hex(self._GROUP_SEG.get(gid, "image")))
+            icon.set_color(theme.group_hex(gid))
         for gid, btn in self.stage_buttons.items():
-            btn.refresh_colour(theme.seg_hex(self._GROUP_SEG.get(gid, "image")))
+            btn.refresh_colour(theme.group_hex(gid))
         self.search_button.refresh_colour(TOKENS["text_secondary"])
 
     # -- internals ---------------------------------------------------------

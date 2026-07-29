@@ -40,10 +40,16 @@ class DenoiseStep(Step):
             "measurements that follow are steadier.")
     params = [
         ParamSpec(name="target", type="image_key", default="test",
-                  help="Main image stream to denoise (overwritten in place)."),
-        ParamSpec(name="also_apply", type="str", default="",
-                  help=("Other image streams to apply this to (comma separated, "
-                        "may be empty; a missing stream only warns).")),
+                  label="Apply to",
+                  help=("Which image stream this card works on; the result is "
+                        "written back to that same stream. Streams are the "
+                        "named lines on the canvas - test is the defect image, "
+                        "ref is the reference image.")),
+        ParamSpec(name="also_apply", type="image_keys", default="",
+                  label="Also apply to",
+                  help=("Other streams that get exactly the same denoising. "
+                        "Tick ref as well if you want test and ref to stay "
+                        "comparable.")),
         ParamSpec(name="method", type="choice", default="median",
                   choices=["median", "gaussian"],
                   help=("median = suppress isolated bright/dark specks (common "

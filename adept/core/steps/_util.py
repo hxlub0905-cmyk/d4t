@@ -49,6 +49,12 @@ def roi_rect_or_none(ctx, step_key: str, image, roi_name):
         if blobs:
             b = blobs[0]        # 主 blob = SNR 最強者（segment 已降冪排序）
             return (int(b["x"]), int(b["y"]), int(b["w"]), int(b["h"]))
+        # 退回整張圖是刻意的（Blob 卡跑了但這顆沒找到東西是正常的），但
+        # **一定要說出來**：不講的話使用者拿到的是一組看起來很正常、實際上
+        # 量的是整張圖的數字，而那是最難發現的一種錯。
+        ctx.warn(f"[{step_key}] no blob was found on this defect, so region "
+                 f"'blob' falls back to the whole image; the numbers from this "
+                 f"card describe the whole patch, not a defect.")
         return None
     # 具名 ROI 打錯字要講清楚，不要安靜地量整張圖
     raise StepError(step_key,

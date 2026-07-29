@@ -38,6 +38,26 @@ class RecipeModel:
         self.dirty = False
         self._listeners: List[Callable[[], None]] = []
 
+    #: 新 recipe 的起手卡。每一條 pipeline 都得先有影像才有得做，所以空白畫布
+    #: 上第一件事一定是「加 Input」—— 那不是一個選擇，是一個儀式。
+    #: 試用回饋（F7-9）原話：「一開始預設畫布上就應該有 load image 這個節點」。
+    STARTER_STEP = "load_patch"
+
+    @classmethod
+    def starter(cls, kind: str = "ebi_patch") -> "RecipeModel":
+        """開新檔用的模型：畫布上已經放好 Input 卡，而且不算「改過」。
+
+        ``dirty`` 特意還原成 ``False`` —— 使用者什麼都還沒做，關窗時不該被問
+        「要存檔嗎」。
+        """
+        m = cls(kind=kind)
+        try:
+            m.add_step(cls.STARTER_STEP)
+        except KeyError:                 # pragma: no cover — 卡片庫壞了才會發生
+            pass
+        m.dirty = False
+        return m
+
     # ---- listener ---------------------------------------------------------
     def add_listener(self, fn: Callable[[], None]) -> None:
         self._listeners.append(fn)

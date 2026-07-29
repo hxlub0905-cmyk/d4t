@@ -52,6 +52,11 @@ class RoiSnrStep(Step):
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
         return [params.get("source", "diff")]
 
+    @classmethod
+    def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
+        name = str(params.get("roi", "blob") or "").strip()
+        return [name] if name else []
+
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
         img = require_image(ctx, self.key, p["source"])

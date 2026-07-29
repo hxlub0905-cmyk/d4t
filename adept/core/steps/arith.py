@@ -78,7 +78,11 @@ class InvertStep(Step):
             "the steps that follow.")
     params = [
         ParamSpec(name="target", type="image_key", default="test",
-                  help="Image stream to invert (overwritten in place)."),
+                  label="Apply to",
+                  help=("Which image stream to invert; the result is written "
+                        "back to that same stream. Streams are the named lines "
+                        "on the canvas - test is the defect image, ref is the "
+                        "reference image.")),
     ]
     reads = ["test"]
     writes = ["test"]

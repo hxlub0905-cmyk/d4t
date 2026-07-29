@@ -52,7 +52,7 @@ from typing import Any, Dict
 __all__ = [
     "TOKENS", "PALETTES", "THEMES", "DEFAULT_THEME", "current_theme",
     "set_theme", "SEG_LABELS", "seg_hex", "seg_color", "seg_bg",
-    "build_stylesheet", "apply_theme",
+    "group_hex", "group_color", "build_stylesheet", "apply_theme",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -115,6 +115,13 @@ _LIGHT: Dict[str, Any] = {
     "seg_image_bg": "#eaf0f6",
     "seg_algo_bg": "#f8f0e5",
     "seg_adc_bg": "#f0edf6",
+    # -- 流程階段色（F7-9）：六個階段各一個色相（見 group_hex 的說明）--------
+    "stage_input": "#2f8f80",
+    "stage_enhance": "#3f7fbf",
+    "stage_region": "#5f8f3f",
+    "stage_compare": "#b0507f",
+    "stage_measure": "#bf7030",
+    "stage_adc": "#8a5fbf",
     "seg_disabled": "#c2c7ce",
     "seg_disabled_bg": "#f0f1f3",
     # -- 判定 chip（good / bad / neutral）------------------------------------
@@ -224,6 +231,13 @@ _DARK: Dict[str, Any] = dict(_LIGHT, **{
     "seg_image_bg": "#1e2833",
     "seg_algo_bg": "#2c2519",
     "seg_adc_bg": "#26222f",
+    # -- 流程階段色（F7-9）---------------------------------------------------
+    "stage_input": "#5cbfae",
+    "stage_enhance": "#6fa6e0",
+    "stage_region": "#93c46a",
+    "stage_compare": "#dd7fac",
+    "stage_measure": "#e0a05c",
+    "stage_adc": "#b48fe0",
     "seg_disabled": "#4a505c",
     "seg_disabled_bg": "#22252b",
 
@@ -310,6 +324,44 @@ def seg_hex(category: str, bg: bool = False) -> str:
     """回傳 segment 顏色的 hex 字串（``bg=True`` 取柔和底色）。純字串、免 Qt。"""
     fg_key, bg_key = _SEG_TOKENS.get(str(category), ("text_secondary", "bg_panel"))
     return TOKENS[bg_key if bg else fg_key]
+
+
+# 流程階段 -> 色彩 token（F7-9）。順序同 ``pipeline/step.py`` 的 ``GROUP_ORDER``。
+_STAGE_TOKENS = {
+    "input": "stage_input",
+    "enhance": "stage_enhance",
+    "region": "stage_region",
+    "compare": "stage_compare",
+    "measure": "stage_measure",
+    "adc": "stage_adc",
+}
+
+
+def group_hex(group: str) -> str:
+    """流程階段 -> 顏色 hex。純字串、免 Qt。
+
+    為什麼階段色不再從 ``seg_hex`` 借（F7-9）
+    ----------------------------------------
+    F7-3 之前這裡是 ``group -> category -> 顏色``，於是六個階段只有三種色：
+    Input／Enhance／Compare 全是藍的。試用回饋原話是「圖示很不錯，但太多都同
+    個顏色」—— 圖示分得出來、顏色分不出來，等於顏色這個維度白給了。
+
+    現在每個階段各有一個色相，但**冷暖仍然對得上三段式**：
+    影像段（Input 藍綠／Enhance 藍／Compare 靛）走冷色、
+    算法段（Region 綠／Measure 橙）與 ADC（紫）維持原本的識別。
+    相鄰的兩階段永遠不同色系，所以在直式 rail 上由上而下掃過去分得開。
+
+    ``seg_hex`` 沒有被取代 —— 需要講「這是哪一段」的地方（首啟導覽的三段說明、
+    直方圖、Score/Bin 尾卡）仍然用它。兩個軸各有各的用途，見 CLAUDE.md §2。
+    """
+    return TOKENS[_STAGE_TOKENS.get(str(group), "stage_enhance")]
+
+
+def group_color(group: str):
+    """:func:`group_hex` 的 ``QColor`` 版。"""
+    from PySide6.QtGui import QColor
+
+    return QColor(group_hex(group))
 
 
 def seg_color(category: str, bg: bool = False):

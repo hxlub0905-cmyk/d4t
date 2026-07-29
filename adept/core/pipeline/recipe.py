@@ -249,7 +249,7 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     """lint 式驗證：收集**所有**問題後一次回傳（不會 raise）。
 
     檢查項（code）：unknown-step / bad-param / unknown-node / unknown-route /
-    cycle / missing-image / requires-ref / score-expr /
+    cycle / missing-image / unknown-region / requires-ref / score-expr /
     unknown-feature（warning）/ bad-bins。
     """
     if registry is None:
@@ -327,6 +327,7 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
         # 之後每張卡 reads 必須 ⊆ 累積 writes。停用節點跳過（與 runtime 一致）。
         avail: Set[str] = set()
         feats: Set[str] = {"score"}
+        regions: Set[str] = set()
         first = True
         for nid in order:
             node = recipe.nodes.get(nid)
@@ -341,6 +342,7 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                 # writes 用 kind-aware 宣告（load 卡依資料型別決定會有哪些流）
                 avail |= set(step_cls.resolve_writes_for_kind(p, k))
                 feats |= set(step_cls.resolve_features(p))
+                regions |= set(step_cls.resolve_regions_out(p))
                 first = False
                 continue
             missing = [x for x in step_cls.resolve_reads(p) if x not in avail]
@@ -358,8 +360,25 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                     detail=f"'{node.step}' needs ref, but a single-image rsem "
                            f"input has none and no upstream card produces "
                            f"'ref' (currently provided: {sorted(avail)})"))
+            # 具名區域走跟影像流一樣的檢查（F7-9）。沒有這一段的話，
+            # 「量測卡指到沒人定義的區域」在跑之前是看不出來的 ——
+            # 名字打錯要等執行期 StepError，而預設的 'blob' 少了上游的
+            # Blob 卡更慘：它會安靜地退回量整張圖，跑得完、有數字、且是錯的。
+            missing_roi = [x for x in step_cls.resolve_regions_in(p)
+                           if x not in regions]
+            if missing_roi:
+                issues.append(Issue(
+                    code="unknown-region", level="error", node_id=nid,
+                    title=f"step '{nid}' uses a region nobody defines",
+                    detail=f"route '{k}': it measures region(s) {missing_roi}, "
+                           f"but no upstream card defines them (currently "
+                           f"defined: {sorted(regions)}). Add a Region card "
+                           f"upstream, or clear the roi parameter to measure "
+                           f"the whole image."))
+
             avail |= set(step_cls.resolve_writes(p))
             feats |= set(step_cls.resolve_features(p))
+            regions |= set(step_cls.resolve_regions_out(p))
 
         # score 變數 ⊆ 此 route 會產出的特徵 ∪ {"score"}（僅警告）
         if expr is not None:

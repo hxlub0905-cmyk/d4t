@@ -99,6 +99,11 @@ class RegionDefineStep(Step):
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
         return [str(params.get("source", "test"))]
 
+    @classmethod
+    def resolve_regions_out(cls, params: Dict[str, Any]) -> List[str]:
+        name = str(params.get("name", "") or "").strip()
+        return [name] if name else []
+
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
         name = str(p["name"]).strip()

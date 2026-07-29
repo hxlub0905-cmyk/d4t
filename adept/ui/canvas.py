@@ -46,10 +46,6 @@ from . import theme
 from .theme import TOKENS
 from .widgets import draw_group_icon
 
-#: group -> 取哪個 segment 的顏色（與 ``LibraryPanel._GROUP_SEG`` 同一份對照）。
-_GROUP_SEG = {"input": "image", "enhance": "image", "region": "algo",
-              "compare": "image", "measure": "algo", "adc": "adc"}
-
 __all__ = ["PipelineCanvas", "NODE_W", "NODE_H", "COL_GAP", "ROW_GAP"]
 
 #: 一個節點最多畫幾個輸出埠（再多就擠不下，退回單一埠）。
@@ -72,6 +68,9 @@ _PORT_R = 5.0
 #: 連線中點的方向箭頭大小。畫布可以縮放平移，光看曲線不一定分得出資料往哪流。
 _ARROW = 5.0
 
+#: 還沒拉線時，一列最多排幾張卡（見 :func:`layout_columns`）。
+WRAP = 4
+
 
 def layout_columns(node_ids: Sequence[str],
                    edges: Sequence[Tuple[str, str]]) -> Dict[str, Tuple[int, int]]:
@@ -80,6 +79,12 @@ def layout_columns(node_ids: Sequence[str],
     欄 = 拓撲深度（最長前置路徑長度），列 = 同欄內依 ``node_ids`` 的原順序。
     沒有任何連線時每個節點各自深度 0 —— 那會全部疊在第一欄，所以退化情況下
     改成「一個接一個往右排」，讓空 recipe 加卡片時看起來仍然是一條鏈。
+
+    但那條鏈**會換行**（``WRAP``，F7-9）。一份九張卡、還沒拉線的 recipe 排成
+    一列會超過 2500px；``fit()`` 為了塞進畫面得縮到看不出字，而它又有下限
+    （縮成小方塊比留捲軸更糟），結果是「一排讀不出來的小方塊 + 一條捲軸」。
+    換行之後同樣九張卡是 3×3，每一張都讀得到字。閱讀順序仍然是左到右、
+    上到下 —— 跟文字一樣，不需要額外學。
     """
     ids = [str(n) for n in node_ids]
     idx = {n: i for i, n in enumerate(ids)}
@@ -89,7 +94,7 @@ def layout_columns(node_ids: Sequence[str],
             preds[b].append(a)
 
     if not any(preds[n] for n in ids):
-        return {n: (i, 0) for i, n in enumerate(ids)}   # 還沒連線 -> 直線排
+        return {n: (i % WRAP, i // WRAP) for i, n in enumerate(ids)}
 
     depth: Dict[str, int] = {}
     for n in ids:                       # ids 已是拓撲順序，一遍就夠
@@ -138,12 +143,15 @@ class _NodeItem(QGraphicsItem):
         埠標籤（"test" / "ref"）畫在節點右緣之外 —— 之前 boundingRect 只算到
         ``NODE_W + _PORT_R``，Qt 就只重繪那個範圍，標籤的舊位置沒被清掉。
         """
-        extra = _PORT_LABEL_W if len(self.out_names()) > 1 else 0.0
         return QRectF(-_PORT_R - 1, -1,
-                      NODE_W + 2 * _PORT_R + extra + 5, NODE_H + 5)
+                      NODE_W + 2 * _PORT_R + _PORT_LABEL_W + 5, NODE_H + 5)
 
     def in_port(self) -> QPointF:
-        return self.scenePos() + QPointF(0.0, NODE_H / 2.0)
+        return self.scenePos() + self.in_port_local()
+
+    @staticmethod
+    def in_port_local() -> QPointF:
+        return QPointF(0.0, NODE_H / 2.0)
 
     def in_names(self) -> List[str]:
         """這個節點讀哪些影像流（用來決定上游的線該接哪個埠）。"""
@@ -159,14 +167,26 @@ class _NodeItem(QGraphicsItem):
         names = [str(w) for w in (self.info.get("writes") or [])]
         return names[:_MAX_PORTS] or [""]
 
-    def out_anchors(self) -> List[QPointF]:
-        """每個輸出埠在**場景座標**的位置（由上而下均分節點右緣）。"""
+    def out_anchors_local(self) -> List[QPointF]:
+        """每個輸出埠在**本地座標**的位置（由上而下均分節點右緣）。
+
+        ``paint()`` 畫的是本地座標，連線算的是場景座標 —— 兩者差一個
+        ``scenePos()``。之前只有場景座標版，``paint()`` 直接拿去畫，於是節點一
+        離開原點，輸出埠就被畫到 ``2 × 位移`` 的地方：第一欄的 Input 看起來正常
+        （它剛好在原點），後面每一張卡的右側圓點都畫到卡外面去，看起來就是
+        **「新增的節點只有前面有圓框、後面沒有」**；拖動 Input 時埠標籤
+        （test/ref）也會離開 ``boundingRect``，留下擦不掉的殘影。
+        """
         n = len(self.out_names())
         if n <= 1:
-            return [self.scenePos() + QPointF(NODE_W, NODE_H / 2.0)]
+            return [QPointF(NODE_W, NODE_H / 2.0)]
         step = NODE_H / (n + 1)
-        return [self.scenePos() + QPointF(NODE_W, step * (i + 1))
-                for i in range(n)]
+        return [QPointF(NODE_W, step * (i + 1)) for i in range(n)]
+
+    def out_anchors(self) -> List[QPointF]:
+        """每個輸出埠在**場景座標**的位置（連線用）。"""
+        base = self.scenePos()
+        return [base + p for p in self.out_anchors_local()]
 
     def out_port(self, index: int = 0) -> QPointF:
         anchors = self.out_anchors()
@@ -174,9 +194,7 @@ class _NodeItem(QGraphicsItem):
 
     def out_port_at(self, pos: QPointF):
         """本地座標 ``pos`` 命中哪一個輸出埠（沒命中回 ``None``）。"""
-        base = self.scenePos()
-        for i, anchor in enumerate(self.out_anchors()):
-            local = anchor - base
+        for i, local in enumerate(self.out_anchors_local()):
             d = pos - local
             if (d.x() * d.x() + d.y() * d.y()) <= (_PORT_R * 3.0) ** 2:
                 return i
@@ -198,8 +216,7 @@ class _NodeItem(QGraphicsItem):
         p.drawRoundedRect(body.translated(1.5, 2.5), 7, 7)
 
         gid = str(self.info.get("group", "") or "enhance")
-        seg = _GROUP_SEG.get(gid, "image")
-        tile_col = QColor(theme.seg_hex(seg) if enabled else TOKENS["seg_disabled"])
+        tile_col = QColor(theme.group_hex(gid) if enabled else TOKENS["seg_disabled"])
 
         border = QColor(TOKENS["accent"] if selected else TOKENS["border_default"])
         # 停用的節點畫虛線框（n8n 的慣例）—— 不是消失，是「還在，但這次不跑」。
@@ -245,21 +262,25 @@ class _NodeItem(QGraphicsItem):
         if summary:
             _draw_elided(p, QRectF(text_x, 36, text_w, 13), summary)
 
-        # 連接埠。輸出可能不只一個 —— patch 的 Input 節點吐 test 與 ref 兩張
-        # （F7-7：使用者要求畫布上看得到「兩張圖」，因為 patch 天生成對）。
+        # 連接埠（**本地座標** —— 見 out_anchors_local 的說明）。
+        # 輸入是空心圈、輸出是實心點：一眼看得出線該從哪邊拉到哪邊。
         p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
         p.setBrush(QBrush(QColor(TOKENS["bg_surface"])))
-        p.drawEllipse(QPointF(0, NODE_H / 2), _PORT_R, _PORT_R)
+        p.drawEllipse(self.in_port_local(), _PORT_R, _PORT_R)
 
         outs = self.out_names()
         p.setBrush(QBrush(QColor(TOKENS["canvas_edge"])))
-        for name, anchor in zip(outs, self.out_anchors()):
+        for name, anchor in zip(outs, self.out_anchors_local()):
             p.drawEllipse(anchor, _PORT_R, _PORT_R)
-            if len(outs) > 1:                   # 一個埠時不標，免得變雜訊
-                p.setPen(QColor(TOKENS["text_secondary"]))
-                p.drawText(QRectF(anchor.x() + 7, anchor.y() - 7, 42, 14),
-                           Qt.AlignVCenter | Qt.AlignLeft, name)
-                p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
+            if not name:
+                continue
+            # 每個輸出埠都標上它吐的影像流名（F7-9）。以前只有多埠才標，
+            # 於是「這張卡到底做在哪一條流上」在畫布上是看不到的 ——
+            # 而 Enhance 卡的 target / also apply 講的正是這些名字。
+            p.setPen(QColor(TOKENS["text_secondary"]))
+            p.drawText(QRectF(anchor.x() + 7, anchor.y() - 7, _PORT_LABEL_W - 8, 14),
+                       Qt.AlignVCenter | Qt.AlignLeft, name)
+            p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
 
     # -- 互動 ---------------------------------------------------------------
     def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook

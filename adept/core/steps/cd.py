@@ -59,6 +59,11 @@ class CdMeasureStep(Step):
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
         return [params.get("source", "diff")]
 
+    @classmethod
+    def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
+        name = str(params.get("roi", "blob") or "").strip()
+        return [name] if name else []
+
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
         # 尺寸來源：優先用參數指定的流，否則任何一張都可以。可能一張都沒有 ——

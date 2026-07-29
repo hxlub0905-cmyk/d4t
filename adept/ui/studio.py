@@ -373,7 +373,9 @@ class StudioWindow(QMainWindow):
         self.setWindowTitle("ADEPT Studio")
 
         # ---- 狀態 ---------------------------------------------------------
-        self.model = RecipeModel()
+        # 開窗就先放好 Input 卡（F7-9）：空白畫布對不會寫 code 的人是一道
+        # 「現在要幹嘛」的關卡，而答案永遠是同一個 —— 先載入影像。
+        self.model = RecipeModel.starter()
         self.dataset: Optional[Any] = None
         self.trial_scores: List[float] = []
         self.trial_results: List[Dict[str, Any]] = []   # M5：Gallery / 輸出的來源
@@ -421,6 +423,10 @@ class StudioWindow(QMainWindow):
             visible_steps([s.describe() for s in list_steps()])
             + [_SCORE_LIBRARY_ENTRY])
         self._refresh_all()
+        if self.model.node_order:
+            # 起手卡直接選起來：右欄一開窗就是「可以動的東西」，
+            # 而不是一句「請先從卡片庫挑一張卡」。
+            self.select_node(self.model.node_order[0])
         self._status("Ready — press “Help” for a guided start, or “Open KLARF…” "
                      "to load your data.")
 
@@ -1030,8 +1036,51 @@ class StudioWindow(QMainWindow):
         except (KeyError, ParamError) as e:
             self._status("Could not add card: %s" % e)
             return
-        self._status("Added “%s”" % node_id)
+        self._status("Added “%s”%s" % (node_id, self._unmet_needs(node_id)))
         self.select_node(node_id)
+
+    def _producers_of(self, stream: str) -> List[str]:
+        """哪些卡片（用預設參數）會產出 ``stream``。"""
+        out: List[str] = []
+        for cls in visible_steps([s.describe() for s in list_steps()]) or []:
+            key = str(cls.get("key", ""))
+            try:
+                step_cls = get_step(key)
+                params = step_cls.validate_params({})
+                writes = step_cls.resolve_writes_for_kind(params, self.model.kind)
+            except Exception:              # noqa: BLE001 — 顯示用
+                continue
+            if stream in writes and step_cls.label:
+                out.append(str(step_cls.label))
+        return out
+
+    def _unmet_needs(self, node_id: str) -> str:
+        """剛加的卡少了什麼上游 —— 講成一句可以照做的話（回傳含前導空白）。
+
+        以前只有卡片庫上一個 ``needs ref_aligned`` 的灰字 badge。對不會寫 code
+        的人那句話沒有動作可做：他不知道 ``ref_aligned`` 是誰產的，也不知道
+        「不然還可以怎麼辦」。最常踩到的就是 Subtract —— 它預設吃對位過的
+        ``ref_aligned``，所以 Load 之後直接放 Subtract 一定缺一張上游。
+        """
+        node = self.model.nodes.get(str(node_id))
+        if node is None:
+            return ""
+        try:
+            step_cls = get_step(node.step)
+            needs = list(step_cls.resolve_reads(node.params))
+        except KeyError:
+            return ""
+        have = set(self.model.available_streams(before_node=str(node_id)))
+        missing = [s for s in needs if s and s not in have]
+        if not missing:
+            return ""
+        bits = []
+        for s in missing:
+            makers = self._producers_of(s)
+            bits.append("“%s” (add %s first)" % (s, " or ".join(makers))
+                        if makers else "“%s”" % s)
+        return (" — but it still needs the image stream %s, or point it at one "
+                "of: %s." % (", ".join(bits), ", ".join(sorted(have)) or "(none)"))
 
     def _on_node_toggled(self, node_id: str, enabled: bool) -> None:
         self.model.set_enabled(str(node_id), bool(enabled))
@@ -1476,10 +1525,27 @@ class StudioWindow(QMainWindow):
                 return list(getattr(tr, "features_added", {}) or {})
         return ()
 
+    #: 「這張卡主要做在哪一條流上」的參數名（依優先順序）。
+    #: Enhance 卡的慣例是 ``target``／``source`` 是主角，``also_apply`` 是附帶。
+    _PRIMARY_PARAMS = ("target", "source")
+
     def _default_stream(self, images: Dict[str, Any]) -> str:
+        """點一張卡時，左邊那張圖預設顯示哪一條流。
+
+        規則是**這張卡的主要輸出**，不是「它寫過的最後一條流」。這兩者以前被
+        當成同一件事（取 ``writes`` 的最後一個），但 Enhance 卡的
+        ``resolve_writes`` 是 ``[target] + also_apply``，於是預設值一路是
+        ``also_apply`` 的最後一項 —— 點 Normalize 就跳到 ``ref``。
+        並排比對開著、右邊又停在 ``ref`` 的時候，畫面就變成左右兩張一模一樣的
+        ref，每點一張卡都要手動切回來（F7-9 試用回饋 §4）。
+        """
         nid = self.selected_node
         node = self.model.nodes.get(nid) if nid else None
         if node is not None:
+            for name in self._PRIMARY_PARAMS:
+                val = str(node.params.get(name, "") or "")
+                if val in images:
+                    return val
             try:
                 writes = get_step(node.step).resolve_writes(node.params)
             except KeyError:
@@ -1504,6 +1570,11 @@ class StudioWindow(QMainWindow):
                 else self._default_stream(images))
         want_b = (self._user_stream_b if self._user_stream_b in images
                   else self._default_compare_stream(images, want))
+        if want_b == want:
+            # 左右同一條流 = 兩張一模一樣的圖，那是並排唯一沒有意義的狀態。
+            # 使用者親手挑的右邊也讓步 —— 他挑 ref 是為了「跟左邊比」，
+            # 不是為了「看兩次 ref」。
+            want_b = self._default_compare_stream(images, want)
         self._syncing = True
         try:
             self.stream_combo.clear()
@@ -1608,6 +1679,21 @@ class StudioWindow(QMainWindow):
         if not self.model.node_order:
             self._status("The pipeline is empty — add a card before running.")
             return False
+
+        # 跑之前先 lint（F7-9）。引擎的契約是「單顆出錯不殺整批」，所以一組接
+        # 錯的卡片以前的下場是**跑完 200 顆、每一顆都失敗**：進度條走完、結果
+        # 是空的、原因埋在每顆的錯誤訊息裡。同一份檢查 CLI 從 M1 就在用了，
+        # 只是 Studio 一直沒接上來。只擋 error，warning 照跑。
+        problems = [i for i in self.model.validate() if i.level == "error"]
+        if problems:
+            first = problems[0]
+            more = ("  (and %d more problem%s)"
+                    % (len(problems) - 1, "" if len(problems) == 2 else "s")
+                    if len(problems) > 1 else "")
+            self._status("Cannot run — %s: %s%s"
+                         % (first.title, first.detail, more))
+            return False
+
         limit = max(1, min(int(n), len(items)))
         recipe = self.model.to_recipe()
         cdir = None if cache_dir is None else str(cache_dir)
