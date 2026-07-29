@@ -248,9 +248,10 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
              registry: Optional[Dict[str, Type[Step]]] = None) -> List[Issue]:
     """lint 式驗證：收集**所有**問題後一次回傳（不會 raise）。
 
-    檢查項（code）：unknown-step / bad-param / unknown-node / unknown-route /
-    cycle / missing-image / unknown-region / requires-ref / score-expr /
-    unknown-feature（warning）/ feature-collision（warning）/ bad-bins。
+    檢查項（code）：unknown-step / bad-param / not-configured / unknown-node /
+    unknown-route / cycle / missing-image / unknown-region / requires-ref /
+    score-expr / unknown-feature（warning）/ feature-collision（warning）/
+    bad-bins。
     """
     if registry is None:
         registry = REGISTRY
@@ -293,6 +294,17 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                        f"card library; available cards: {sorted(registry)}"))
             continue
         clean_params[nid] = _clean_params_for(step_cls, node.params, issues, nid)
+
+        # 參數全部合法，卡片還是可能**沒設定完**（F7-13）。空字串的模板是完全
+        # 合法的 str —— 但那張卡跑起來每一顆都會失敗，而以前要跑過一次才知道。
+        try:
+            unset = list(step_cls.configuration_issues(clean_params[nid]))
+        except Exception:                       # noqa: BLE001 — 卡片自己的程式
+            unset = []
+        for msg in unset:
+            issues.append(Issue(
+                code="not-configured", level="error", node_id=nid,
+                title=f"{step_cls.label} is not set up yet", detail=str(msg)))
 
     # ---- score 表達式解析 ----
     expr = None

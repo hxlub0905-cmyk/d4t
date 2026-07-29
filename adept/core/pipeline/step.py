@@ -74,8 +74,12 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC)
 #: ``image_keys``（F7-9）是「一串影像流名」，值仍然是逗號分隔字串 ——
 #: **recipe JSON 的格式沒有變**，舊檔照樣讀得進來。差別在 UI：它拿到的是
 #: 上游每一條流的一個勾選框，而不是一個要自己打字、打錯只會靜靜警告的輸入框。
+#: ``template``（F7-13）是一個「值是一整份資料、不是一句話」的參數 ——
+#: 型別上仍是 str，但那個字串有六千多個字元，而且**沒有人能用打的**。
+#: 一個放不下、也編輯不了的值配一個文字框，等於邀請使用者去改它。
+#: UI 認得這個型別：它給的是「建一個」的按鈕加一行摘要，欄位本身唯讀。
 PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
-               "image_keys", "curve")
+               "image_keys", "curve", "template")
 
 
 class ParamError(ValueError):
@@ -141,7 +145,7 @@ class ParamSpec:
                     v = value.strip().lower() in ("1", "true", "yes", "on")
                 else:
                     v = bool(value)
-            elif self.type in ("str", "image_key"):
+            elif self.type in ("str", "image_key", "template"):
                 v = str(value)
             elif self.type == "image_keys":
                 # 正規化：去空白、去空項、去重複但保留順序。
@@ -258,6 +262,19 @@ class Step(ABC):
     @classmethod
     def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
         """這張卡需要哪些具名區域（空字串 = 整張影像，不算需求）。"""
+        return []
+
+    # ---- 「還沒設定完」（F7-13）--------------------------------------------
+    #: **參數合法 ≠ 設定完成。** ``roi_template`` 的 template 空字串是完全合法的
+    #: str，所以 ``validate_params`` 沒話說，lint 也沒話說 —— 但那張卡跑起來
+    #: 每一顆都會失敗。以前使用者要跑過一次才知道，而且是在跑完 200 顆之後。
+    #:
+    #: 這個方法讓卡片自己講「我還缺什麼」，而且是用**這張卡的話**講（模板要去
+    #: 按哪顆鈕），不是一句通用的「參數是必填的」。回傳的每一句都會變成一個
+    #: lint error，畫布上那張卡也會因此掛上警示標記。
+    @classmethod
+    def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
+        """這張卡還缺哪些設定才跑得起來（空 list = 沒問題）。"""
         return []
 
     # ---- 執行 -------------------------------------------------------------
