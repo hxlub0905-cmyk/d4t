@@ -39,7 +39,11 @@ from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsScene,
     QGraphicsView,
+    QHBoxLayout,
+    QLabel,
     QMenu,
+    QPushButton,
+    QWidget,
 )
 
 from . import theme
@@ -67,6 +71,11 @@ _PORT_R = 5.0
 
 #: 連線中點的方向箭頭大小。畫布可以縮放平移，光看曲線不一定分得出資料往哪流。
 _ARROW = 5.0
+
+#: 輸出埠外面那顆「+」的半徑，以及它佔掉的水平空間（``boundingRect`` 要算進去
+#: —— 畫得出去而 boundingRect 沒涵蓋，拖動節點就會留殘影，見 F7-8/F7-9）。
+_PLUS_R = 8.0
+_PLUS_SPAN = 2 * _PLUS_R + 10.0
 
 #: 還沒拉線時，一列最多排幾張卡（見 :func:`layout_columns`）。
 WRAP = 4
@@ -143,6 +152,9 @@ class _NodeItem(QGraphicsItem):
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
         self.setAcceptHoverEvents(True)
+        #: 滑鼠正停在哪一個輸出埠的「+」上（None = 都沒有）。用明確狀態而不是
+        #: 「重算一次滑鼠在哪」—— 繪製與命中判定要用完全同一份答案。
+        self._hover_plus: Optional[int] = None
         tip = "%s — %s" % (self.node_id, info.get("label", ""))
         if info.get("problem"):
             # 標記說「有問題」，滑鼠停上去說「是什麼問題」。標記本身放不下一句話，
@@ -158,7 +170,8 @@ class _NodeItem(QGraphicsItem):
         ``NODE_W + _PORT_R``，Qt 就只重繪那個範圍，標籤的舊位置沒被清掉。
         """
         return QRectF(-_PORT_R - 1, -1,
-                      NODE_W + 2 * _PORT_R + _PORT_LABEL_W + 5, NODE_H + 5)
+                      NODE_W + 2 * _PORT_R + _PORT_LABEL_W + _PLUS_SPAN,
+                      NODE_H + 5)
 
     def in_port(self) -> QPointF:
         return self.scenePos() + self.in_port_local()
@@ -205,6 +218,19 @@ class _NodeItem(QGraphicsItem):
     def out_port(self, index: int = 0) -> QPointF:
         anchors = self.out_anchors()
         return anchors[max(0, min(int(index), len(anchors) - 1))]
+
+    def plus_anchors_local(self) -> List[QPointF]:
+        """每個輸出埠的「+」在本地座標的位置（埠標籤之後）。"""
+        return [QPointF(a.x() + _PORT_LABEL_W + _PLUS_R - 4.0, a.y())
+                for a in self.out_anchors_local()]
+
+    def plus_at(self, pos: QPointF):
+        """本地座標 ``pos`` 命中哪一顆「+」（沒命中回 ``None``）。"""
+        for i, centre in enumerate(self.plus_anchors_local()):
+            d = pos - centre
+            if (d.x() * d.x() + d.y() * d.y()) <= (_PLUS_R + 2.0) ** 2:
+                return i
+        return None
 
     def out_port_at(self, pos: QPointF):
         """本地座標 ``pos`` 命中哪一個輸出埠（沒命中回 ``None``）。"""
@@ -278,7 +304,7 @@ class _NodeItem(QGraphicsItem):
         f.setPointSizeF(max(6.0, f.pointSizeF() - 1.0))
         p.setFont(f)
         p.setPen(QColor(TOKENS["text_secondary"] if enabled else TOKENS["text_disabled"]))
-        _draw_elided(p, QRectF(text_x, 24, text_w, 13), self.node_id)
+        _draw_elided(p, QRectF(text_x, 24, text_w, 13), self.subtitle())
         summary = str(self.info.get("summary", ""))
         if summary:
             _draw_elided(p, QRectF(text_x, 36, text_w, 13), summary)
@@ -299,9 +325,63 @@ class _NodeItem(QGraphicsItem):
             # 於是「這張卡到底做在哪一條流上」在畫布上是看不到的 ——
             # 而 Enhance 卡的 target / also apply 講的正是這些名字。
             p.setPen(QColor(TOKENS["text_secondary"]))
-            p.drawText(QRectF(anchor.x() + 7, anchor.y() - 7, _PORT_LABEL_W - 8, 14),
+            p.drawText(QRectF(anchor.x() + 4, anchor.y() - 7, _PORT_LABEL_W - 10, 14),
                        Qt.AlignVCenter | Qt.AlignLeft, name)
             p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
+
+        self._paint_plus(p, enabled)
+
+    def _paint_plus(self, p: QPainter, enabled: bool) -> None:
+        """每個輸出埠外面一顆「+」——「接下來要做什麼」的入口（F7-14）。
+
+        這是 n8n 最核心的一個動作，而它解的問題在這裡更明顯：卡片庫有 22 張卡，
+        使用者要自己判斷哪一張接得上目前這條流 —— 而「接得上」這件事引擎本來就
+        知道（``Step.resolve_reads``）。點這顆「+」跳出來的清單**只列接得上的**，
+        所以他不需要先懂影像流才做得出第一條 pipeline。
+
+        平常畫得很淡，滑鼠靠近才變成強調色：畫布上一排實心的 + 會蓋過真正的
+        主體（節點與連線）。
+        """
+        for i, centre in enumerate(self.plus_anchors_local()):
+            hot = (self._hover_plus == i)
+            col = QColor(TOKENS["accent"] if hot else TOKENS["canvas_edge"])
+            if not enabled:
+                col = QColor(TOKENS["text_disabled"])
+            body = QColor(TOKENS["accent"]) if hot else QColor(TOKENS["bg_surface"])
+            p.setPen(QPen(col, 1.2))
+            p.setBrush(QBrush(body))
+            p.drawEllipse(centre, _PLUS_R, _PLUS_R)
+            p.setPen(QPen(QColor("#ffffff") if hot else col, 1.6))
+            p.drawLine(QPointF(centre.x() - 4, centre.y()),
+                       QPointF(centre.x() + 4, centre.y()))
+            p.drawLine(QPointF(centre.x(), centre.y() - 4),
+                       QPointF(centre.x(), centre.y() + 4))
+
+    def subtitle(self) -> str:
+        """副標：**這張卡吃什麼、吐什麼**（F7-14）。
+
+        以前這一行印的是 node_id（``roi_template``）—— 那是 recipe JSON 的鍵，
+        使用者看了得不到任何新資訊：卡片名字就在它上面一行。n8n 的節點副標印的
+        是那張卡這次**被設定成做什麼**，所以整張畫布不點開就讀得懂。
+
+        重複的卡片（``glv_stats2``）才把 id 帶出來 —— 那時候「是哪一張」才真的
+        是使用者需要知道的事。
+        """
+        reads = [r for r in (self.info.get("reads") or []) if r]
+        outs = [w for w in (self.info.get("writes") or []) if w]
+        regions = [r for r in (self.info.get("regions_out") or []) if r]
+        right = " ".join(str(x) for x in (outs or regions))
+        left = " ".join(str(r) for r in reads)
+        if left and right:
+            body = "%s → %s" % (left, right)
+        else:
+            body = left or right or str(self.info.get("step_key", self.node_id))
+        step_key = str(self.info.get("step_key", ""))
+        if step_key and self.node_id != step_key:
+            # 同一張卡加了第二次：這時候 id 是有意義的（分數表達式指的是特徵名，
+            # 但 lint 訊息與前綴講的是這個 id）。
+            body = "%s · %s" % (self.node_id, body)
+        return body
 
     def problem(self) -> str:
         """這張卡現在有什麼問題（空字串 = 沒問題）。"""
@@ -333,7 +413,29 @@ class _NodeItem(QGraphicsItem):
                    Qt.AlignCenter, "!")
 
     # -- 互動 ---------------------------------------------------------------
+    def hoverMoveEvent(self, e) -> None:       # noqa: D102 - Qt hook
+        self.set_hover_plus(self.plus_at(e.pos()))
+        super().hoverMoveEvent(e)
+
+    def hoverLeaveEvent(self, e) -> None:      # noqa: D102 - Qt hook
+        self.set_hover_plus(None)
+        super().hoverLeaveEvent(e)
+
+    def set_hover_plus(self, index) -> None:
+        """哪一顆「+」是熱的（測試直接呼叫這個，不必模擬滑鼠）。"""
+        if self._hover_plus != index:
+            self._hover_plus = index
+            self.update()
+
     def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
+        if e.button() == Qt.LeftButton:
+            plus = self.plus_at(e.pos())
+            if plus is not None:
+                # 「+」比拉線先判：它就長在埠的旁邊，而點「+」是明確的動作，
+                # 拉線是拖曳 —— 誤判成拉線會變成一條拉到一半的線黏在游標上。
+                self.canvas.add_after_requested.emit(self.node_id, int(plus))
+                e.accept()
+                return
         hit = (self.out_port_at(e.pos())
                if e.button() == Qt.LeftButton else None)
         if hit is not None:
@@ -457,6 +559,7 @@ class PipelineCanvas(QGraphicsView):
     score_clicked = Signal()
     edge_added = Signal(str, str)
     edge_removed = Signal(str, str)
+    add_after_requested = Signal(str, int)     # (node_id, 輸出埠 index)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -478,6 +581,62 @@ class PipelineCanvas(QGraphicsView):
         self._link_from: Optional[_NodeItem] = None
         self._link_port = 0
         self._link_line = None
+        self._build_zoom_bar()
+
+    # ---- 縮放控制（F7-14）--------------------------------------------------
+    def _build_zoom_bar(self) -> None:
+        """左下角四顆小鈕：縮小 / 放大 / 全部看得完 / 回到 100%。
+
+        滾輪縮放本來就有，但**畫面上沒有任何東西說得出這件事** —— 而且滾過頭
+        之後沒有路回來：點陣底縮小之後每一格都一樣，使用者不知道自己在哪裡。
+        n8n 把這四顆固定放在左下角，這裡照做（順便顯示目前的百分比，
+        「我到底縮到多小了」也是看不出來的事）。
+        """
+        bar = QWidget(self)
+        bar.setObjectName("canvasZoom")
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(4, 3, 4, 3)
+        lay.setSpacing(2)
+        self._zoom_label = QLabel("100%", bar)
+        self._zoom_label.setObjectName("paramHint")
+        self._zoom_label.setMinimumWidth(38)
+        self._zoom_label.setAlignment(Qt.AlignCenter)
+
+        specs = (("−", "Zoom out", lambda: self.zoom_by(1 / 1.25)),
+                 ("+", "Zoom in", lambda: self.zoom_by(1.25)),
+                 ("⤢", "Fit the whole pipeline in view", self.fit),
+                 ("1:1", "Back to 100%", self.reset_zoom))
+        self._zoom_buttons = []
+        for text, tip, slot in specs:
+            b = QPushButton(text, bar)
+            b.setObjectName("cardButton")
+            b.setToolTip(tip)
+            b.setFixedSize(24 if text != "1:1" else 30, 22)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.clicked.connect(slot)
+            lay.addWidget(b)
+            self._zoom_buttons.append(b)
+        lay.addWidget(self._zoom_label)
+        bar.adjustSize()
+        self._zoom_bar = bar
+        self._place_zoom_bar()
+
+    def _place_zoom_bar(self) -> None:
+        bar = getattr(self, "_zoom_bar", None)
+        if bar is None:
+            return
+        bar.adjustSize()
+        bar.move(8, max(0, self.viewport().height() - bar.height() - 8))
+        bar.raise_()
+
+    def _sync_zoom_label(self) -> None:
+        label = getattr(self, "_zoom_label", None)
+        if label is not None:
+            label.setText("%d%%" % self.zoom_percent())
+
+    def resizeEvent(self, e) -> None:          # noqa: D102 - Qt hook
+        super().resizeEvent(e)
+        self._place_zoom_bar()
 
     # ---- 對外（與 PipelinePanel 對齊）--------------------------------------
     def set_nodes(self, nodes: Sequence[Dict[str, Any]],
@@ -581,6 +740,7 @@ class PipelineCanvas(QGraphicsView):
         s = self.transform().m11()
         if 0 < s < self.MIN_FIT_SCALE:
             self.scale(self.MIN_FIT_SCALE / s, self.MIN_FIT_SCALE / s)
+        self._sync_zoom_label()
 
     def refresh_edges(self) -> None:
         for e in self._edges:
@@ -644,9 +804,29 @@ class PipelineCanvas(QGraphicsView):
             return
         super().keyPressEvent(e)
 
+    #: 縮放範圍。沒有下限的話滾兩下就把整張圖縮成一個點，而且**看不出自己在
+    #: 哪裡**（背景是點陣，縮小之後每一格都長得一樣）；沒有上限則會滾進一片
+    #: 純色裡。兩種都只能靠「fit」把自己救回來，而在這之前使用者不知道有這顆鈕。
+    MIN_SCALE, MAX_SCALE = 0.25, 3.0
+
+    def zoom_percent(self) -> int:
+        return int(round(self.transform().m11() * 100))
+
+    def zoom_by(self, factor: float) -> None:
+        """縮放，並夾在 MIN_SCALE / MAX_SCALE 之間。"""
+        s = self.transform().m11()
+        target = max(self.MIN_SCALE, min(self.MAX_SCALE, s * float(factor)))
+        if abs(target - s) > 1e-9:
+            self.scale(target / s, target / s)
+        self._sync_zoom_label()
+
+    def reset_zoom(self) -> None:
+        """回到 100%（`fit` 之後想看清楚字的時候要的就是這個）。"""
+        self.resetTransform()
+        self._sync_zoom_label()
+
     def wheelEvent(self, e) -> None:           # noqa: D102
-        factor = 1.15 if e.angleDelta().y() > 0 else 1 / 1.15
-        self.scale(factor, factor)
+        self.zoom_by(1.15 if e.angleDelta().y() > 0 else 1 / 1.15)
         e.accept()
 
     #: 背景點陣間距（畫布座標）。
