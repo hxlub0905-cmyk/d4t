@@ -103,6 +103,7 @@ from adept.core.pipeline import ParamError, Recipe, get_step, list_steps
 from .export_dialog import ExportDialog
 from .canvas import PipelineCanvas
 from .gallery import make_thumb
+from .region_check import MAX_CHECK, RegionCheckWindow, regions_of_node
 from .results import ResultsWindow, summarize_run
 from .scope import (
     is_supported_kind, recipe_is_supported, unsupported_kind_message,
@@ -122,11 +123,17 @@ from .widgets import (
     ProfilePanel,
     VerdictChip,
 )
-from .workers import DatasetLoadWorker, PreviewWorker, TrialWorker, _ThreadedWorker
+from .workers import (
+    DatasetLoadWorker, PreviewWorker, RegionCheckWorker, TrialWorker,
+    _ThreadedWorker,
+)
 
 __all__ = ["StudioWindow", "ThumbWorker", "TEMPLATE_RECIPE", "DEFAULT_CACHE_DIR",
            "THUMB_CHANNEL_PRIORITY", "TAB_PREVIEW", "TAB_GALLERY",
            "DEMO_DIR", "DEMO_DEFECTS", "DEMO_SEED", "generate_demo_lot"]
+
+#: 區域跨顆檢視的縮圖邊長（px）。
+REGION_THUMB = 120
 
 #: 卡片庫「ADC 判定」段固定顯示的 Score / Bin 項目。它不是 registry 裡的
 #: step（每條 pipeline 天生就有一張 ScoreSpec），但三段式的心智模型要完整 ——
@@ -399,12 +406,15 @@ class StudioWindow(QMainWindow):
         self._async_epoch = 0                     # 背景那筆出發時的世代
         self.welcome_dialog: Optional[Any] = None
         self.library_dialog: Optional[Any] = None
+        self.region_window: Optional[Any] = None   # 區域跨顆檢視（F7-11）
+        self._region_regions: List[str] = []
 
         # ---- 背景工作 ------------------------------------------------------
         self.dataset_worker = DatasetLoadWorker(self)
         self.preview_worker = PreviewWorker(self)
         self.trial_worker = TrialWorker(self)
         self.thumb_worker = ThumbWorker(self)
+        self.region_check_worker = RegionCheckWorker(self)
 
         # ---- 去抖動計時器 --------------------------------------------------
         self._preview_timer = QTimer(self)
@@ -748,6 +758,18 @@ class StudioWindow(QMainWindow):
         irow.addWidget(self.image_view_b, 1)
         lay.addWidget(images, 3)
 
+        # 「這個區域在整批上都對嗎」（F7-11）。跟曲線面板一樣平常收起來，
+        # 只有選到會定義區域的卡片時才出現。
+        self.btn_region_check = QPushButton("Check this region across defects…",
+                                            pane)
+        self.btn_region_check.setObjectName("cardButton")
+        self.btn_region_check.setToolTip(
+            "Draw this region on many defects at once. A setting that looks "
+            "right on defect 1 can be completely off on defect 50 — the "
+            "structure sits in a different place on every patch.")
+        self.btn_region_check.setVisible(False)
+        lay.addWidget(self.btn_region_check)
+
         # 投影曲線面板（F7-11）。**平常收起來** —— 它只有在編輯投影定位卡的
         # 時候才有意義，常駐會把好不容易爭取到的影像高度又吃掉一塊。
         self.profile_panel = ProfilePanel(pane)
@@ -791,6 +813,7 @@ class StudioWindow(QMainWindow):
         self.btn_prev.clicked.connect(lambda: self.step_defect(-1))
         self.btn_next.clicked.connect(lambda: self.step_defect(+1))
         self.defect_combo.currentIndexChanged.connect(self._on_defect_combo)
+        self.btn_region_check.clicked.connect(lambda: self.open_region_check())
         self.stream_combo.currentTextChanged.connect(self._on_stream_changed)
         self.stream_combo_b.currentTextChanged.connect(self._on_stream_b_changed)
         self.compare_check.toggled.connect(self.set_compare)
@@ -818,6 +841,9 @@ class StudioWindow(QMainWindow):
 
         self.preview_worker.ready.connect(self._on_async_preview_ready)
         self.preview_worker.busy.connect(self._on_preview_busy)
+        self.region_check_worker.ready.connect(self._on_region_ready)
+        self.region_check_worker.failed.connect(
+            lambda msg: self._status("Region check failed: %s" % msg))
         self.preview_worker.failed.connect(
             lambda msg: self._status("Preview failed: %s" % msg))
 
@@ -859,6 +885,7 @@ class StudioWindow(QMainWindow):
         self._refresh_bin_summary(self.model.threshold)
         self._update_action_states()
         self._refresh_library_badges()
+        self._refresh_region_button()
         self._schedule_preview()
 
     def _refresh_all(self) -> None:
@@ -1149,6 +1176,7 @@ class StudioWindow(QMainWindow):
         streams = self.model.available_streams(before_node=node_id)
         self.param_form.set_step(describe, node.params, streams)
         self.stack.setCurrentWidget(self.param_form)
+        self._refresh_region_button()
         self._schedule_preview()
         return True
 
@@ -1585,6 +1613,87 @@ class StudioWindow(QMainWindow):
 
     #: 會產生投影曲線的卡片 key（面板只在編輯它的時候出現）。
     PROFILE_STEP = "roi_profile"
+
+    # ==================================================================== #
+    # 區域跨顆檢視（F7-11）
+    # ==================================================================== #
+    def selected_regions(self) -> List[str]:
+        """選取的節點會定義哪些具名區域（不是 Region 卡就是空的）。"""
+        node = self.model.nodes.get(self.selected_node or "")
+        return regions_of_node(node) if node is not None else []
+
+    def region_check_available(self) -> bool:
+        """現在按得下「跨顆檢視」嗎。
+
+        用明確狀態而不是 ``btn.isVisible()`` —— 視窗還沒 show 之前後者恆為
+        False（CLAUDE.md §7 的老坑）。
+        """
+        return bool(self.selected_regions()) and bool(self._items())
+
+    def _refresh_region_button(self) -> None:
+        regions = self.selected_regions()
+        has_data = bool(self._items())
+        self.btn_region_check.setVisible(bool(regions))
+        self.btn_region_check.setEnabled(bool(regions) and has_data)
+        if regions and not has_data:
+            self.btn_region_check.setToolTip(
+                "No dataset loaded yet — use “Open KLARF…” first.")
+
+    def open_region_check(self, n: Optional[int] = None,
+                          sync: bool = False) -> bool:
+        """把選取節點定義的區域畫到前 N 顆上。
+
+        為什麼要有這個視窗
+        ------------------
+        區域設定對不對是一個**關於整批**的問題：patch 是以缺陷為中心裁的，
+        所以結構在每張 patch 裡的位置本來就不一樣 —— 在第 1 顆剛好的框，
+        第 50 顆可能整個偏掉。看單顆永遠看不出這件事。
+        """
+        regions = self.selected_regions()
+        if not regions:
+            self._status("Select a card that defines a region first.")
+            return False
+        items = self._items()
+        if not items:
+            self._status("No dataset loaded yet — use “Open KLARF…” first.")
+            return False
+
+        limit = int(n if n is not None else self.spin_trial_n.value())
+        limit = max(1, min(limit, MAX_CHECK, len(items)))
+        node = self.model.nodes[self.selected_node]
+        source = str(node.params.get("source", "") or "") or None
+        args = (self.model.to_recipe(), items[:limit], self.model.kind,
+                self.selected_node, regions, REGION_THUMB, source)
+
+        if self.region_window is None:
+            self.region_window = RegionCheckWindow(self)
+            self.region_window.defect_activated.connect(self._on_defect_activated)
+
+        if sync:
+            self._apply_region_results(regions,
+                                       RegionCheckWorker.run_sync(*args))
+            return True
+        self._region_regions = regions
+        if not self.region_check_worker.start(*args):
+            self._status("Still checking the previous region — please wait.")
+            return False
+        self._status("Checking “%s” on %d defects…"
+                     % (", ".join(regions), limit))
+        return True
+
+    def _on_region_ready(self, results: Any) -> None:
+        self._apply_region_results(list(getattr(self, "_region_regions", []) or []),
+                                   list(results or []))
+
+    def _apply_region_results(self, regions: Sequence[str],
+                              results: Sequence[Dict[str, Any]]) -> None:
+        if self.region_window is None:
+            self.region_window = RegionCheckWindow(self)
+            self.region_window.defect_activated.connect(self._on_defect_activated)
+        self.region_window.set_results(list(regions), list(results))
+        self.region_window.show()
+        self.region_window.raise_()
+        self._status(self.region_window.summary_text())
 
     def _refresh_profile_panel(self, ctx: Any) -> None:
         """選到投影定位卡時，把**引擎這一次算出來的**曲線畫出來。
