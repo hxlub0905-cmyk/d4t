@@ -396,15 +396,19 @@ QToolBar {
     spacing: 6px;
     padding: 4px 6px;
 }
+/* Toolbar buttons look like buttons, not like a menu bar. Borderless text in
+ * a row reads as “File Edit View…”, and a menu bar is something you pull down,
+ * not something you press — so the whole strip stopped looking clickable. */
 QToolBar QToolButton {
-    background: transparent;
-    color: $text_secondary;
-    border: 1px solid transparent;
-    border-radius: 5px;
+    background: $bg_surface;
+    color: $text_primary;
+    border: 1px solid $border_input;
+    border-radius: 6px;
     padding: 6px 12px;
     font-weight: 500;
 }
-QToolBar QToolButton:hover { background: $hover_warm; color: $text_primary; }
+QToolBar QToolButton:hover { background: $hover_warm; color: $text_primary;
+                             border-color: $border_hover; }
 QToolBar QToolButton:pressed { background: $hover_warm_strong; }
 QToolBar QToolButton:checked {
     background: $accent_bg; color: $accent_active; border: 1px solid $accent_border;
@@ -473,8 +477,14 @@ QPushButton#primary:disabled {
 }
 QPushButton[variant="secondary"] {
     background: $bg_input; color: $accent_active; border: 1px solid $accent;
+    font-weight: 600;
 }
 QPushButton[variant="secondary"]:hover { background: $accent_bg; }
+QPushButton[variant="secondary"]:pressed { background: $accent_bg;
+                                           border: 1px solid $accent_active; }
+QPushButton[variant="secondary"]:disabled {
+    background: $disabled_bg; color: $disabled_text; border: 1px solid $border_default;
+}
 QPushButton[variant="ghost"] {
     background: transparent; color: $text_secondary; border: 1px solid transparent;
 }
@@ -512,7 +522,20 @@ QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
 QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {
     background: $disabled_bg; color: $disabled_text; border-color: $border_default;
 }
-QComboBox::drop-down { border: 0; width: 18px; }
+/* A dropdown must not be pixel-identical to a free-text field.
+ *
+ * `border: 0` here used to hide the arrow completely: styling this subcontrol
+ * hands it to the stylesheet, and a styled drop-down draws no arrow unless the
+ * rule also supplies a `down-arrow` image — which this repo cannot ship,
+ * because it is text-only (see CLAUDE.md §9.5). Leaving the border unset keeps
+ * the subcontrol on the base style, which paints the arrow itself.
+ *
+ * The visible consequence was that "Match on" (three fixed streams) and "Name
+ * this region" (free text) looked exactly the same, so there was no way to
+ * tell which fields could be opened and which had to be typed.
+ * tests/test_ui_controls_readable.py locks this. */
+QComboBox::drop-down { width: 20px; subcontrol-origin: padding;
+                       subcontrol-position: center right; }
 QComboBox QAbstractItemView {
     background: $bg_input; border: 1px solid $border_default;
     selection-background-color: $selection; selection-color: $text_primary;

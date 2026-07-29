@@ -511,6 +511,8 @@ class StudioWindow(QMainWindow):
         bar.addWidget(self.lbl_trial_n)
         self.spin_trial_n = QSpinBox(bar)
         self.spin_trial_n.setRange(10, 5000)
+        # 「First 200」旁邊沒有單位時，200 可以是任何東西（秒？百分比？）。
+        self.spin_trial_n.setSuffix(" defects")
         self.spin_trial_n.setValue(DEFAULT_TRIAL_N)
         self.spin_trial_n.setToolTip(
             "How many defects a trial run covers (keep it small while tuning)")
@@ -760,23 +762,15 @@ class StudioWindow(QMainWindow):
         irow.addWidget(self.image_view_b, 1)
         lay.addWidget(images, 3)
 
-        # 模板定位卡的入口（F7-12）。模板不可能用打字的 —— 這顆按鈕是唯一的路，
-        # 所以它必須就在那張卡旁邊，而不是藏在某個選單裡。
-        self.btn_build_template = QPushButton(
-            "Build template from a full-size image…", pane)
-        self.btn_build_template.setObjectName("cardButton")
-        self.btn_build_template.setToolTip(
-            "Measure the repeating cell from one full-size image and store it "
-            "inside this recipe. The image is only needed here — the recipe "
-            "stays a single file you can hand to someone else.")
-        self.btn_build_template.setVisible(False)
-        lay.addWidget(self.btn_build_template)
+        # 模板定位卡的入口在**參數列裡**（F7-13），不在這裡。它是那個參數的值
+        # 從哪來，不是一個預覽動作 —— 放在影像下方等於把「這個欄位怎麼填」的
+        # 答案擺到半個螢幕外，而欄位本身看起來只是「還沒填」。
 
         # 「這個區域在整批上都對嗎」（F7-11）。跟曲線面板一樣平常收起來，
         # 只有選到會定義區域的卡片時才出現。
         self.btn_region_check = QPushButton("Check this region across defects…",
                                             pane)
-        self.btn_region_check.setObjectName("cardButton")
+        self.btn_region_check.setProperty("variant", "secondary")
         self.btn_region_check.setToolTip(
             "Draw this region on many defects at once. A setting that looks "
             "right on defect 1 can be completely off on defect 50 — the "
@@ -828,7 +822,7 @@ class StudioWindow(QMainWindow):
         self.btn_next.clicked.connect(lambda: self.step_defect(+1))
         self.defect_combo.currentIndexChanged.connect(self._on_defect_combo)
         self.btn_region_check.clicked.connect(lambda: self.open_region_check())
-        self.btn_build_template.clicked.connect(lambda: self.open_template_dialog())
+        self.param_form.action_requested.connect(self._on_param_action)
         self.stream_combo.currentTextChanged.connect(self._on_stream_changed)
         self.stream_combo_b.currentTextChanged.connect(self._on_stream_b_changed)
         self.compare_check.toggled.connect(self.set_compare)
@@ -995,16 +989,49 @@ class StudioWindow(QMainWindow):
         except KeyError:
             return "(unknown card %s)" % node.step
         defaults = {p.name: p.default for p in step_cls.params}
+        # 有些參數的值不是給人看的（模板是一整張影像的內容，六千多個字元）。
+        # 直接串進摘要，那張卡的第三行就變成一段 base64 —— 元件會把它切掉，
+        # 於是看到的是「template=gc1:iVBORw0KGg…」，既沒有資訊也擠掉了真正
+        # 有用的參數。這種參數只講「有沒有設」。
+        opaque = {p.name: p.type for p in step_cls.params if p.type == "template"}
         parts: List[str] = []
         for name, value in node.params.items():
             if name in defaults and defaults[name] == value:
                 continue
-            parts.append("%s=%s" % (name, _fmt(value)))
+            if name in opaque:
+                parts.append("%s: set" % name)
+            else:
+                parts.append("%s=%s" % (name, _fmt(value)))
             if len(parts) >= 3:
                 break
         return " · ".join(parts)
 
+    def _node_problems(self) -> Dict[str, Any]:
+        """每個節點最嚴重的一則 lint 發現（畫布上的警示標記用）。
+
+        lint 本來就知道「這張卡缺模板」「這張卡指到不存在的區域」—— 但那個知識
+        以前只在按下 Run trial 的那一刻出現一次。卡片在畫布上看起來永遠是好的，
+        於是使用者要跑過才知道，而跑一次是好幾分鐘。
+        """
+        out: Dict[str, Any] = {}
+        try:
+            issues = self.model.validate()
+        except Exception:                        # noqa: BLE001 — 顯示用，壞了就沒標記
+            return out
+        for issue in issues:
+            nid = getattr(issue, "node_id", None)
+            if not nid:
+                continue
+            prev = out.get(nid)
+            # error 蓋過 warning；同級的取先出現的那則
+            if prev is not None and not (prev[1] == "warning"
+                                         and issue.level == "error"):
+                continue
+            out[nid] = (str(issue.detail or issue.title), str(issue.level))
+        return out
+
     def _refresh_pipeline(self) -> None:
+        problems = self._node_problems()
         nodes: List[Dict[str, Any]] = []
         for nid in self.model.node_order:
             node = self.model.nodes.get(nid)
@@ -1037,6 +1064,8 @@ class StudioWindow(QMainWindow):
                 "writes": writes,
                 "reads": reads,
                 "group": step_cls.resolve_group() if step_cls else "",
+                "problem": problems.get(nid, ("", ""))[0],
+                "problem_level": problems.get(nid, ("", "error"))[1],
             })
         self.pipeline.set_nodes(nodes, self.model.edges)
         if self.selected_node not in self.model.nodes:
@@ -1645,6 +1674,11 @@ class StudioWindow(QMainWindow):
         node = self.model.nodes.get(self.selected_node or "")
         return bool(node is not None and node.step == self.TEMPLATE_STEP)
 
+    def _on_param_action(self, param_name: str) -> None:
+        """某個參數說「我的值要用別的方式產生」（目前只有模板）。"""
+        if str(param_name) == "template":
+            self.open_template_dialog()
+
     def open_template_dialog(self) -> Optional[Any]:
         """開「從大圖建模板」對話框；接受之後把模板寫回這張卡。"""
         if not self.template_build_available():
@@ -1686,7 +1720,6 @@ class StudioWindow(QMainWindow):
         return bool(self.selected_regions()) and bool(self._items())
 
     def _refresh_region_button(self) -> None:
-        self.btn_build_template.setVisible(self.template_build_available())
         regions = self.selected_regions()
         has_data = bool(self._items())
         self.btn_region_check.setVisible(bool(regions))

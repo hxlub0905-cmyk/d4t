@@ -64,7 +64,7 @@ class RoiTemplateStep(Step):
                   "to test as well."),
         ),
         ParamSpec(
-            name="template", type="str", default="",
+            name="template", type="template", default="",
             label="Template",
             help=("The repeating cell this card matches against, stored inside "
                   "the recipe as text so the recipe stays a single file you can "
@@ -144,6 +144,19 @@ class RoiTemplateStep(Step):
     @classmethod
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
         return prefix_names(params.get("output_prefix", ""), cls.features_out)
+
+    @classmethod
+    def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
+        """沒有模板 = 還沒設定完，而不是「參數填錯」。
+
+        空字串是完全合法的 str，所以參數檢查沒話說 —— 但這張卡跑起來**每一顆**
+        都會失敗。使用者以前要跑過一次才知道，而且那時已經等完 200 顆了。
+        """
+        if str(params.get("template", "") or "").strip():
+            return []
+        return ["This card has no template yet. Select it and use “Build "
+                "template from a full-size image…” — a template is an image, "
+                "it cannot be typed in."]
 
     # ---- 執行 ---------------------------------------------------------------
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:

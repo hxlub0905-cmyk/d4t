@@ -71,6 +71,7 @@ __all__ = [
     "HistogramWidget",
     "FeatureTable",
     "VerdictChip",
+    "TemplateField",
     "to_uint8",
 ]
 
@@ -698,6 +699,85 @@ class StreamPicker(QWidget):
             self.changed.emit(self.text())
 
 
+class TemplateField(QWidget):
+    """``template`` 參數的編輯器：一顆「建一個」的按鈕 + 一行摘要（F7-13）。
+
+    為什麼不是文字框
+    ----------------
+    模板的值有六千多個字元，而且**沒有人能用打的**（它是一張影像的內容）。
+    給它一個文字框有三個後果：空的時候看起來像「還沒填的欄位」，而真正的入口
+    在半個螢幕外的另一塊面板上；填了之後那個框變成一整片 base64；而且它是
+    可編輯的 —— 一個放不下、也編輯不了的值配一個文字框，等於邀請使用者去改它。
+
+    這裡改成：**按鈕就在這一列**（它是這個參數的值從哪來，不是預覽的動作），
+    欄位本身只回答「現在有沒有模板、是什麼樣的模板」。
+    """
+
+    build_requested = Signal()
+
+    _EMPTY = "No template yet — this card cannot run until you build one."
+
+    def __init__(self, value: str = "", parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(3)
+
+        self.button = QPushButton("Build template from a full-size image…", self)
+        self.button.setProperty("variant", "secondary")
+        self.button.setToolTip(
+            "Measure the repeating cell from one full-size image and store it "
+            "inside this recipe. The image is only needed here — the recipe "
+            "stays a single file you can hand to someone else.")
+        self.button.clicked.connect(self.build_requested.emit)
+        lay.addWidget(self.button, 0, Qt.AlignLeft)
+
+        self.summary = QLabel("", self)
+        self.summary.setObjectName("paramHint")
+        self.summary.setWordWrap(True)
+        lay.addWidget(self.summary)
+
+        self._value = ""
+        self.set_text(value)
+
+    def text(self) -> str:
+        return self._value
+
+    def set_text(self, value: str) -> None:
+        self._value = str(value or "")
+        self.summary.setText(self.describe())
+        # 「還沒有模板」不是說明文字，是**這張卡現在跑不了**。用同一種灰字講，
+        # 它就沉進下面那段說明裡了。
+        self.summary.setStyleSheet(
+            "color:%s; font-size:11px;%s"
+            % (TOKENS["text_hint"] if self.has_template() else TOKENS["danger_text"],
+               "" if self.has_template() else " font-weight:600;"))
+        self.button.setText("Build template from a full-size image…"
+                            if not self._value else "Rebuild template…")
+
+    def has_template(self) -> bool:
+        return bool(self._value.strip())
+
+    def describe(self) -> str:
+        """一行白話：現在存的是什麼。**摘要是解出來的，不是記在旁邊的**——
+        記在旁邊的欄位會跟真正的值走散，而走散時畫面上看起來完全正常。"""
+        if not self.has_template():
+            return self._EMPTY
+        try:
+            from ..core.algo.template import decode_cell
+
+            cell = decode_cell(self._value)
+        except Exception:                       # noqa: BLE001 — 顯示用
+            cell = None
+        if cell is None or getattr(cell, "size", 0) == 0:
+            return ("A template is stored, but it cannot be read back. "
+                    "Build it again.")
+        h, w = cell.shape[:2]
+        return ("Stored in this recipe: one cell of %d × %d px (%.1f kB of "
+                "text). Mark the region on it with the four Region sliders "
+                "below." % (w, h, len(self._value) / 1024.0))
+
+
 class ParamForm(QWidget):
     """由 ``Step.describe()`` 的 ParamSpec dict 自動長出來的參數表單。
 
@@ -707,6 +787,9 @@ class ParamForm(QWidget):
     """
 
     param_edited = Signal(str, object)
+    #: 「這個參數的值要用別的方式產生」（目前只有 template）。表單不知道那是
+    #: 什麼對話框 —— 它只負責把請求送上去，由 Studio 決定要開什麼。
+    action_requested = Signal(str)
 
     _EMPTY_TEXT = "(Pick a card from the library, or select a step in the pipeline)"
 
@@ -903,6 +986,13 @@ class ParamForm(QWidget):
         if ptype == "image_keys":
             w = StreamPicker(streams, "" if value is None else str(value))
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
+            return w
+
+        if ptype == "template":
+            w = TemplateField("" if value is None else str(value))
+            # 值不是在這裡編的（模板是一張影像）——按鈕只是把請求往上送，
+            # 由 Studio 開對話框，成交之後照一般的路徑寫回參數。
+            w.build_requested.connect(lambda n=name: self.action_requested.emit(n))
             return w
 
         if ptype == "image_key":

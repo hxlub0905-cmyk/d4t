@@ -472,12 +472,25 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
     }
     keys = [d["key"] for d in visible_steps([s.describe() for s in list_steps()])]
     dead_ends = {}
+    needs_setup = {}
     for key in keys:
         if key == "load_patch":
             continue
         seq = ["load_patch"] + PREREQ.get(key, []) + [key]
         errs = [i for i in validate(_recipe(seq), kind="ebi_patch")
                 if i.level == "error"]
-        if errs:
-            dead_ends[key] = [(i.code, i.detail) for i in errs]
+        # ``not-configured`` 不是接線問題（F7-13）：那張卡缺的是一份要另外匯入
+        # 的東西（模板是一張影像），不是缺上游。它的路是通的，只是還沒設定完 ——
+        # 所以這裡不算死路，但**訊息必須指得出路在哪**，否則它就真的是死路了。
+        needs = [i for i in errs if i.code == "not-configured"]
+        rest = [i for i in errs if i.code != "not-configured"]
+        if needs:
+            needs_setup[key] = [i.detail for i in needs]
+        if rest:
+            dead_ends[key] = [(i.code, i.detail) for i in rest]
     assert not dead_ends, "這些卡片沒有可行的組合：%s" % sorted(dead_ends)
+    for key, details in needs_setup.items():
+        for detail in details:
+            assert "…" in detail or "..." in detail, (
+                "%s 說它還沒設定完，但沒有指向任何一個按得下去的東西：%s"
+                % (key, detail))

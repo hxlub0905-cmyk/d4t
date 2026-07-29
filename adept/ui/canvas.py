@@ -143,7 +143,12 @@ class _NodeItem(QGraphicsItem):
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
         self.setAcceptHoverEvents(True)
-        self.setToolTip("%s — %s" % (self.node_id, info.get("label", "")))
+        tip = "%s — %s" % (self.node_id, info.get("label", ""))
+        if info.get("problem"):
+            # 標記說「有問題」，滑鼠停上去說「是什麼問題」。標記本身放不下一句話，
+            # 而「有一個紅點但不知道為什麼」比沒有標記更讓人焦慮。
+            tip += "\n\n⚠ %s" % info["problem"]
+        self.setToolTip(tip)
 
     # -- 幾何 ---------------------------------------------------------------
     def boundingRect(self) -> QRectF:
@@ -251,8 +256,15 @@ class _NodeItem(QGraphicsItem):
         draw_group_icon(p, gid, tile_col.name(), _ICON)
         p.restore()
 
+        # 「這張卡還不能跑」的標記（F7-13）。lint 早就知道這件事，只是那個知識
+        # 以前留在跑之前的檢查裡 —— 於是一張缺模板的卡在畫布上看起來跟設定完整
+        # 的一模一樣，使用者要按下 Run trial 才會知道。
+        self._paint_badge(p, body)
+
         text_x = tile.right() + 9
-        text_w = NODE_W - text_x - 8
+        # 有警示標記時把標題讓開 —— 不讓的話標記正好蓋在卡片名字的尾巴上，
+        # 兩個東西都變得難讀。
+        text_w = NODE_W - text_x - (8 if not self.problem() else 22)
 
         fg = TOKENS["text_primary"] if enabled else TOKENS["text_disabled"]
         p.setPen(QColor(fg))
@@ -290,6 +302,35 @@ class _NodeItem(QGraphicsItem):
             p.drawText(QRectF(anchor.x() + 7, anchor.y() - 7, _PORT_LABEL_W - 8, 14),
                        Qt.AlignVCenter | Qt.AlignLeft, name)
             p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
+
+    def problem(self) -> str:
+        """這張卡現在有什麼問題（空字串 = 沒問題）。"""
+        return str(self.info.get("problem", "") or "")
+
+    def _paint_badge(self, p: QPainter, body: QRectF) -> None:
+        """右上角一個小圓標。錯誤紅、警告琥珀。
+
+        文字用 ``!`` 而不是圖形：這個標記只有 14 px，任何再細一點的形狀在
+        100% 縮放下都會糊成一個點。
+        """
+        why = self.problem()
+        if not why:
+            return
+        level = str(self.info.get("problem_level", "error"))
+        col = QColor(TOKENS["danger_text"] if level == "error"
+                     else TOKENS["warning"])
+        r = 7.0
+        centre = QPointF(body.right() - r - 3.0, body.top() + r + 3.0)
+        p.setPen(QPen(QColor(TOKENS["bg_surface"]), 1.5))
+        p.setBrush(QBrush(col))
+        p.drawEllipse(centre, r, r)
+        p.setPen(QPen(QColor("#ffffff"), 1.0))
+        f = p.font()
+        f.setBold(True)
+        f.setPointSizeF(8.0)
+        p.setFont(f)
+        p.drawText(QRectF(centre.x() - r, centre.y() - r, 2 * r, 2 * r),
+                   Qt.AlignCenter, "!")
 
     # -- 互動 ---------------------------------------------------------------
     def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
@@ -473,6 +514,10 @@ class PipelineCanvas(QGraphicsView):
         self.set_selected(self._selected)
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self._scene.setSceneRect(rect)
+
+    def node_item(self, node_id: str):
+        """畫布上那個節點（測試與外部檢查用；沒有回 ``None``）。"""
+        return self._items.get(str(node_id))
 
     @staticmethod
     def _ports_between(src: "_NodeItem", dst: "_NodeItem") -> List[int]:
