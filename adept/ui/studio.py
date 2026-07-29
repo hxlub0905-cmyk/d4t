@@ -761,7 +761,40 @@ class StudioWindow(QMainWindow):
         irow.setSpacing(4)
         irow.addWidget(self.image_view, 1)
         irow.addWidget(self.image_view_b, 1)
-        lay.addWidget(images, 3)
+
+        # 還沒載資料時，畫面上最大的一塊是**一片黑**，角落有一行極小的
+        # 「(no dataset loaded)」（F7-15）。首啟導覽關掉之後就沒有任何東西告訴
+        # 使用者下一步要做什麼 —— 而「下一步」只有兩個，就把那兩個放在這裡。
+        self.empty_state = QWidget(pane)
+        estack = QVBoxLayout(self.empty_state)
+        estack.addStretch(1)
+        title = QLabel("No data loaded yet", self.empty_state)
+        title.setObjectName("paramTitle")
+        title.setAlignment(Qt.AlignCenter)
+        estack.addWidget(title)
+        why = QLabel("Open a KLARF to see your patches here, or try the tool "
+                     "with generated sample data first.", self.empty_state)
+        why.setObjectName("paramHint")
+        why.setAlignment(Qt.AlignCenter)
+        why.setWordWrap(True)
+        estack.addWidget(why)
+        brow = QHBoxLayout()
+        brow.addStretch(1)
+        self.btn_empty_open = QPushButton("Open KLARF…", self.empty_state)
+        self.btn_empty_open.setObjectName("primary")
+        brow.addWidget(self.btn_empty_open)
+        self.btn_empty_sample = QPushButton("Try it with sample data",
+                                            self.empty_state)
+        self.btn_empty_sample.setProperty("variant", "secondary")
+        brow.addWidget(self.btn_empty_sample)
+        brow.addStretch(1)
+        estack.addLayout(brow)
+        estack.addStretch(1)
+
+        self.image_stack = QStackedWidget(pane)
+        self.image_stack.addWidget(self.empty_state)      # index 0
+        self.image_stack.addWidget(images)                # index 1
+        lay.addWidget(self.image_stack, 3)
 
         # 模板定位卡的入口在**參數列裡**（F7-13），不在這裡。它是那個參數的值
         # 從哪來，不是一個預覽動作 —— 放在影像下方等於把「這個欄位怎麼填」的
@@ -824,6 +857,8 @@ class StudioWindow(QMainWindow):
         self.btn_next.clicked.connect(lambda: self.step_defect(+1))
         self.defect_combo.currentIndexChanged.connect(self._on_defect_combo)
         self.btn_region_check.clicked.connect(lambda: self.open_region_check())
+        self.btn_empty_open.clicked.connect(self._on_open_klarf)
+        self.btn_empty_sample.clicked.connect(self._on_demo_requested)
         self.param_form.action_requested.connect(self._on_param_action)
         self.stream_combo.currentTextChanged.connect(self._on_stream_changed)
         self.stream_combo_b.currentTextChanged.connect(self._on_stream_b_changed)
@@ -848,21 +883,21 @@ class StudioWindow(QMainWindow):
         self.dataset_worker.loaded.connect(self._on_dataset_loaded)
         self.dataset_worker.failed.connect(
             lambda msg: (self._progress_done(),
-                         self._status("Could not load dataset: %s" % msg)))
+                         self._status("Could not load dataset: %s" % msg, "error")))
 
         self.preview_worker.ready.connect(self._on_async_preview_ready)
         self.preview_worker.busy.connect(self._on_preview_busy)
         self.region_check_worker.ready.connect(self._on_region_ready)
         self.region_check_worker.failed.connect(
-            lambda msg: self._status("Region check failed: %s" % msg))
+            lambda msg: self._status("Region check failed: %s" % msg, "error"))
         self.preview_worker.failed.connect(
-            lambda msg: self._status("Preview failed: %s" % msg))
+            lambda msg: self._status("Preview failed: %s" % msg, "error"))
 
         self.trial_worker.progress.connect(self._on_trial_progress)
         self.trial_worker.done.connect(self._on_trial_done_async)
         self.trial_worker.failed.connect(
             lambda msg: (self._progress_done(),
-                         self._status("Trial run failed: %s" % msg)))
+                         self._status("Trial run failed: %s" % msg, "error")))
 
         self.thumb_worker.ready.connect(self._on_thumbs_ready)
         self.thumb_worker.failed.connect(self._status)
@@ -870,12 +905,27 @@ class StudioWindow(QMainWindow):
     # ==================================================================== #
     # 狀態列
     # ==================================================================== #
-    def _status(self, msg: str) -> None:
-        self.statusBar().showMessage(str(msg))
+    def _status(self, msg: str, level: str = "info") -> None:
+        """狀態列。``level="error"`` 會把它變成紅字（F7-15）。
+
+        狀態列是**唯一**會講出「這件事沒成功」的地方（lint 擋下試跑、卡片加不
+        進去、模板存不起來），而它以前跟「Added denoise」用完全一樣的灰字，
+        在畫面最左下角。使用者按了一顆鈕、什麼都沒發生、而唯一的解釋長得跟
+        剛才那句成功訊息一模一樣 —— 那等於沒有講。
+        """
+        bar = self.statusBar()
+        bar.setProperty("level", "error" if level == "error" else "info")
+        bar.style().unpolish(bar)
+        bar.style().polish(bar)
+        bar.showMessage(str(msg))
 
     def status_text(self) -> str:
         """目前狀態列文字（測試用）。"""
         return self.statusBar().currentMessage()
+
+    def status_level(self) -> str:
+        """狀態列現在是不是在報錯（用明確狀態，不要去比對顏色）。"""
+        return str(self.statusBar().property("level") or "info")
 
     def cursor_text(self) -> str:
         """目前的游標讀數（測試用）。"""
@@ -951,6 +1001,9 @@ class StudioWindow(QMainWindow):
         n_items = len(self._items())
         has_steps = bool(self.model.node_order)
         can_run = bool(n_items) and has_steps
+
+        # 沒有資料時，最大的那一塊要說得出下一步（F7-15）
+        self.image_stack.setCurrentIndex(1 if n_items else 0)
 
         if can_run:
             run_why = ""
@@ -1124,7 +1177,7 @@ class StudioWindow(QMainWindow):
         try:
             node_id = self.model.add_step(str(step_key))
         except (KeyError, ParamError) as e:
-            self._status("Could not add card: %s" % e)
+            self._status("Could not add card: %s" % e, "error")
             return
         self._status("Added “%s”%s" % (node_id, self._unmet_needs(node_id)))
         self.select_node(node_id)
@@ -1189,7 +1242,7 @@ class StudioWindow(QMainWindow):
         try:
             new_id = self.model.add_step(str(step_key), at=at)
         except (KeyError, ParamError) as e:
-            self._status("Could not add card: %s" % e)
+            self._status("Could not add card: %s" % e, "error")
             return None
         note = ""
         if stream:
@@ -1348,7 +1401,7 @@ class StudioWindow(QMainWindow):
         node_id = str(node_id)
         node = self.model.nodes.get(node_id)
         if node is None:
-            self._status("No such step: “%s”." % node_id)
+            self._status("No such step: “%s”." % node_id, "error")
             return False
         self.selected_node = node_id
         self._user_stream = None       # 換節點 → 影像流回到「這個節點的輸出」
@@ -1416,7 +1469,7 @@ class StudioWindow(QMainWindow):
         """ParamForm 的唯一出口：驗證通過才寫回 model，失敗就把那列變紅字。"""
         node_id = self.selected_node
         if node_id is None or node_id not in self.model.nodes:
-            self._status("Select a step in the pipeline before editing parameters.")
+            self._status("Select a step in the pipeline before editing parameters.", "error")
             return
         try:
             self.model.set_param(node_id, str(name), value)
@@ -1526,7 +1579,7 @@ class StudioWindow(QMainWindow):
             try:
                 ds = DatasetLoadWorker.run_sync(path, tiff)
             except Exception as e:      # noqa: BLE001 — UI 邊界，一律回報
-                self._status("Could not load dataset: %s: %s" % (type(e).__name__, e))
+                self._status("Could not load dataset: %s: %s" % (type(e).__name__, e), "error")
                 return False
             return self._on_dataset_loaded(ds)
         if not self.dataset_worker.start(path, tiff):
@@ -1616,7 +1669,7 @@ class StudioWindow(QMainWindow):
         """跳到第 ``index`` 顆 defect（超出範圍會夾住）。"""
         items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
         if not items:
-            self._status("No dataset loaded yet — use “Open KLARF…” first.")
+            self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
             return False
         i = max(0, min(int(index), len(items) - 1))
         self.defect_index = i
@@ -1647,7 +1700,7 @@ class StudioWindow(QMainWindow):
         try:
             recipe = Recipe.load(path)
         except Exception as e:          # noqa: BLE001 — UI 邊界
-            self._status("Could not load recipe: %s: %s" % (type(e).__name__, e))
+            self._status("Could not load recipe: %s: %s" % (type(e).__name__, e), "error")
             return False
         kind = None
         ds_kind = str(getattr(self.dataset, "kind", "")) if self.dataset else ""
@@ -1694,7 +1747,7 @@ class StudioWindow(QMainWindow):
         try:
             self.model.to_recipe().save(path)
         except Exception as e:          # noqa: BLE001 — UI 邊界
-            self._status("Could not save: %s: %s" % (type(e).__name__, e))
+            self._status("Could not save: %s: %s" % (type(e).__name__, e), "error")
             return False
         self.recipe_path = path
         self.model.dirty = False
@@ -1728,7 +1781,7 @@ class StudioWindow(QMainWindow):
         item = self._current_item()
         if item is None:
             if force:
-                self._status("No dataset loaded yet — use “Open KLARF…” first.")
+                self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
             return False
 
         recipe = self.model.to_recipe()
@@ -1738,7 +1791,7 @@ class StudioWindow(QMainWindow):
                 result = PreviewWorker.run_sync(recipe, item, self.model.kind,
                                                 upto_node=upto)
             except Exception as e:      # noqa: BLE001 — UI 邊界
-                self._status("Preview failed: %s: %s" % (type(e).__name__, e))
+                self._status("Preview failed: %s: %s" % (type(e).__name__, e), "error")
                 return False
             self._on_preview_ready(result)
             return True
@@ -1822,7 +1875,7 @@ class StudioWindow(QMainWindow):
     def open_template_dialog(self) -> Optional[Any]:
         """開「從大圖建模板」對話框；接受之後把模板寫回這張卡。"""
         if not self.template_build_available():
-            self._status("Select a Locate region by template card first.")
+            self._status("Select a Locate region by template card first.", "error")
             return None
         node_id = self.selected_node
         dlg = TemplateDialog(self)
@@ -1840,7 +1893,7 @@ class StudioWindow(QMainWindow):
             self.model.set_param(node_id, "template", str(text))
             self.model.set_param(node_id, "locate_axis", str(axis))
         except ParamError as e:
-            self._status("Could not store the template: %s" % e)
+            self._status("Could not store the template: %s" % e, "error")
             return
         node = self.model.nodes[node_id]
         self.param_form.set_step(
@@ -1880,11 +1933,11 @@ class StudioWindow(QMainWindow):
         """
         regions = self.selected_regions()
         if not regions:
-            self._status("Select a card that defines a region first.")
+            self._status("Select a card that defines a region first.", "error")
             return False
         items = self._items()
         if not items:
-            self._status("No dataset loaded yet — use “Open KLARF…” first.")
+            self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
             return False
 
         limit = int(n if n is not None else self.spin_trial_n.value())
@@ -2105,7 +2158,7 @@ class StudioWindow(QMainWindow):
         """跑前 ``n`` 顆並更新直方圖。``sync=True`` 走同步路徑（測試用）。"""
         items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
         if not items:
-            self._status("No dataset loaded yet — use “Open KLARF…” first.")
+            self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
             return False
         if not self.model.node_order:
             self._status("The pipeline is empty — add a card before running.")
@@ -2123,7 +2176,7 @@ class StudioWindow(QMainWindow):
                     % (len(problems) - 1, "" if len(problems) == 2 else "s")
                     if len(problems) > 1 else "")
             self._status("Cannot run — %s: %s%s"
-                         % (first.title, first.detail, more))
+                         % (first.title, first.detail, more), "error")
             return False
         self._pending_warnings = [i for i in issues if i.level == "warning"]
 
@@ -2138,7 +2191,7 @@ class StudioWindow(QMainWindow):
                     recipe, self.dataset, limit,
                     workers=int(workers) if workers else 1, cache_dir=cdir)
             except Exception as e:      # noqa: BLE001 — UI 邊界
-                self._status("Trial run failed: %s: %s" % (type(e).__name__, e))
+                self._status("Trial run failed: %s: %s" % (type(e).__name__, e), "error")
                 return False
             self._apply_trial_results(results, time.time() - t0)
             return True
@@ -2159,7 +2212,7 @@ class StudioWindow(QMainWindow):
     def _on_full_clicked(self) -> None:
         items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
         if not items:
-            self._status("No dataset loaded yet — use “Open KLARF…” first.")
+            self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
             return
         self.run_trial(len(items), workers=TRIAL_WORKERS,
                        cache_dir=DEFAULT_CACHE_DIR)
@@ -2324,7 +2377,7 @@ class StudioWindow(QMainWindow):
     def open_export_dialog(self) -> Optional[Any]:
         """開輸出精靈；沒有結果就只在狀態列提示（不開空對話框）。"""
         if not self.trial_results:
-            self._status("No results to export yet — run a trial first.")
+            self._status("No results to export yet — run a trial first.", "error")
             return None
         dlg = ExportDialog(
             self.trial_results,
@@ -2403,7 +2456,7 @@ class StudioWindow(QMainWindow):
         try:
             paths = generate_demo_lot(out_dir, n=int(n))
         except Exception as e:          # noqa: BLE001 — UI 邊界，一律回報
-            self._status("Could not generate sample data: %s: %s" % (type(e).__name__, e))
+            self._status("Could not generate sample data: %s: %s" % (type(e).__name__, e), "error")
             return False
         finally:
             QApplication.restoreOverrideCursor()
