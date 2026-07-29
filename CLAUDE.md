@@ -78,6 +78,7 @@ adept/
 │   ├── canvas.py            #   節點畫布（n8n 式；F7-6，純 UI，引擎零改動）
 │   ├── results.py           #   Results 視窗：直方圖 + Gallery + 輸出（F7-5）
 │   ├── region_check.py      #   區域跨顆檢視：框畫在 N 顆縮圖上（F7-11）
+│   ├── template_dialog.py   #   從大圖疊 Golden Cell 模板（F7-12；模板存進 recipe）
 │   ├── theme.py widgets.py  #   主題 token + 6 個資料驅動元件
 │   ├── gallery.py           #   同屏比多顆（虛擬捲動，撐 10k+）
 │   ├── welcome.py           #   首啟導覽 + 範例 recipe 庫對話框
@@ -187,6 +188,9 @@ python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 
 | **量測卡指到沒人定義的 ROI**（F7-9 已修） | `cd_measure` 預設 `roi="blob"`，少了上游 Blob 卡時**安靜地改量整張圖** —— 跑得完、有數字、而且是錯的 | 具名區域現在跟影像流走同一條檢查：`Step.resolve_regions_in/out()` + `validate()` 的 `unknown-region`；`blob` 退回整張圖時會 `ctx.warn`。Studio 也在試跑前先跑 lint（以前完全沒跑，於是接錯的卡片會「跑完 200 顆、每顆都失敗」） |
 | **色調曲線用自然三次樣條** | 使用者把中間點往上拉，影像出現一圈**不存在的暗環** | 樣條會 overshoot。`algo/curve.py` 用保單調三次 Hermite（Fritsch–Carlson）。這是演算法自己造出來的假缺陷 —— 對判 defect 的工具是最糟的一種 bug。`tests/test_curve.py` 用四條最容易凹出去的曲線鎖住 |
 | **`isVisible()` 在 show 之前恆為 False** | 「這個面板收起來了嗎」在建構期永遠答錯 | 一律追明確狀態（`LibraryPanel.panel_open()`、`StudioWindow.compare_enabled()`、`_progress_on`），不要問 widget |
+| **模板比對：分數本身會騙人**（F7-12） | 全白／純雜訊的 patch 對任何模板都能拿到 NCC 0.44（門檻 0.3 → 過關），於是「碰巧」被當成「對得準」，框放到隨機的位置 | **沒有任何分數門檻分得出這兩者**（分數重疊）。要問的是另一個問題：**這張 patch 自己有沒有東西可比**（`min_structure`，實測無結構約 1、有結構 20 以上）。另外 margin 必須**先把比對曲面折回一個週期**再取次高峰，否則相鄰週期的次高峰讓 margin 恆為 0 —— 週期性把自己打敗了 |
+| **Golden Cell 的原點會飄**（F7-12） | 同一份 recipe、不同時間建的模板指到不同的地方，而且畫面上完全看不出來 | cell 的第 0 欄預設是大圖上的**任意切點**，換張圖就換了 —— 而使用者是在 cell 上標框的。`algo/template.py::anchor_cell()` 旋轉到**最強的上升邊**在第 0 欄；用最大正梯度而不是 `abs`，否則一個週期的兩個相反邊界會競爭，錨點在兩者之間跳 |
+| **`estimate_period` 在純雜訊上會回一個看似合理的週期**（F7-12） | 噪音圖疊出一個沒有意義的模板，然後安靜地拿去對每一顆 | 週期信心門檻 `MIN_PERIOD_CONFIDENCE = 40`（實測噪音 20.3）。「說我做不到」比「給一個沒有意義的答案」好得多。順帶：一維 layout（垂直條紋，只有 X 有週期）以前會被整個放棄 —— 那是最常見的情況，現在兩軸各自判斷，不重複的那軸取整個影像高度／寬度 |
 | **KLARF variant D 誤判**（M5 修正） | 真實 1.8 檔（ImageList 欄不在最後、且無 IMAGECOUNT 欄）被 `lint()` 判定每一列都違法，Export 精靈跳紅字 | `row_len_ok` 改用 `effective_row_len()`：把 `Images N { … }` 子區塊折算成一欄。**注意 `image_layout()` 對這個變體仍回 None，而 export 的插欄位置正好因此落在最後 —— 那是對的，別「順手修好」它**。迴歸測試 `tests/test_klarf_variant_d.py` |
 
 ---
@@ -218,6 +222,7 @@ python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 
 | M5 Gallery+Export | ✅ | Gallery（虛擬捲動、排序、直方圖點 bar 篩選）；KLARF 三種寫回模式（就地無損／另存含 ADCSCORE+ADCCLASS／Top-N）+ 寫回前預覽變更；CSV/Excel 報表（含抓漏率/誤殺率）；overlay；`fab_probe/` 三支探測腳本；CLI `adept export` |
 | M6 推廣包 | ✅ | 離線安裝三件套（`tools/fetch_wheels.py` / `install_offline.py` / `doctor.py`，全 stdlib-only）、首啟導覽 + 範例 recipe 庫對話框、5 份範例 recipe。快速參考卡 PDF 暫緩（移到 backlog） |
 | M7 UI/UX | ✅ | A 組防呆 + **UI 全英文**（`tests/test_ui_english_only.py` 鎖住）。F7 全數完成：patch-only 收斂（`ui/scope.py`）、中性色/平面主題 + 暗色、卡片依流程階段分組 + 搜尋 + 前置條件 badge、**Region 段（具名 ROI）**、Results 視窗、**節點畫布**。計畫書 `docs/plans/F7-canvas-and-taxonomy.md` |
+| F7-12 | ✅ | **ROI 定位第二批：Golden Cell 模板**。匯入一張原大圖 → 量週期 → 疊出一個完整 cell 當模板 → 在 cell 上標一次框，每顆 patch 用 NCC 對回相位再把框搬過來。patch **小於**一個週期沒關係（是把小 patch 滑進大模板，不是兩張小圖互相對位）。模板凍進 recipe（base64 純文字，不是路徑）。新卡 `roi_template` + `ui/template_dialog.py`。三道閘門見 §7 表。計畫書 §16。**未做**：用當次的大圖對凍住的 GC 做健檢 |
 | F7-11 | ✅ | **ROI 定位第一批**：量測卡 `output_prefix`（多區域的前置；Studio 挑了區域自動填名）、**投影定位卡** `roi_profile`（壓成曲線→找轉折→挑一段，可一次吐出鄰段）、**曲線面板**、**區域跨顆檢視**（把框畫到前 N 顆縮圖上，可只看定位失敗的）。定不出來就退回整張圖並標 `locate_ok=0`。順手修掉「過期的背景預覽會蓋掉新畫面」。計畫書 §15 |
 | F7-10 | ✅ | **route 的隱含順序畫成虛線**（畫布上「沒有線」以前不代表「沒有連接」，而使用者看到的是九張互不相干的卡）；**Enhance 補齊空間性 artifact**：新卡 `flatten`（背景梯度／掃描線條紋／top-hat／black-hat 五個方法一張卡）與 `local_contrast`（CLAHE），邊緣保留去噪塞進既有 `denoise`、雙流運算塞進既有 `subtract`。計畫書 §14 |
 | F7-9 | ✅ | 試用回饋第三輪：**六個階段六個顏色**（`theme.group_hex`，ΔE ≥ 25 且明度差 ≤ 15，兩條都有測試鎖）、**埠座標系 bug**（殘影＋「後面沒有圓框」同一個因）、**開窗就有 Input 起手卡**、**`image_keys` 參數型別**（`also_apply` 從自由文字變成勾選框）+ `ParamSpec.label`、**點卡片不再跳到 ref**、**具名 ROI 納入 lint** + Studio 試跑前先 lint。計畫書 §13 |

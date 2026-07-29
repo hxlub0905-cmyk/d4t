@@ -104,6 +104,7 @@ from .export_dialog import ExportDialog
 from .canvas import PipelineCanvas
 from .gallery import make_thumb
 from .region_check import MAX_CHECK, RegionCheckWindow, regions_of_node
+from .template_dialog import TemplateDialog
 from .results import ResultsWindow, summarize_run
 from .scope import (
     is_supported_kind, recipe_is_supported, unsupported_kind_message,
@@ -407,6 +408,7 @@ class StudioWindow(QMainWindow):
         self.welcome_dialog: Optional[Any] = None
         self.library_dialog: Optional[Any] = None
         self.region_window: Optional[Any] = None   # 區域跨顆檢視（F7-11）
+        self.template_dialog: Optional[Any] = None  # 建模板對話框（F7-12）
         self._region_regions: List[str] = []
 
         # ---- 背景工作 ------------------------------------------------------
@@ -758,6 +760,18 @@ class StudioWindow(QMainWindow):
         irow.addWidget(self.image_view_b, 1)
         lay.addWidget(images, 3)
 
+        # 模板定位卡的入口（F7-12）。模板不可能用打字的 —— 這顆按鈕是唯一的路，
+        # 所以它必須就在那張卡旁邊，而不是藏在某個選單裡。
+        self.btn_build_template = QPushButton(
+            "Build template from a full-size image…", pane)
+        self.btn_build_template.setObjectName("cardButton")
+        self.btn_build_template.setToolTip(
+            "Measure the repeating cell from one full-size image and store it "
+            "inside this recipe. The image is only needed here — the recipe "
+            "stays a single file you can hand to someone else.")
+        self.btn_build_template.setVisible(False)
+        lay.addWidget(self.btn_build_template)
+
         # 「這個區域在整批上都對嗎」（F7-11）。跟曲線面板一樣平常收起來，
         # 只有選到會定義區域的卡片時才出現。
         self.btn_region_check = QPushButton("Check this region across defects…",
@@ -814,6 +828,7 @@ class StudioWindow(QMainWindow):
         self.btn_next.clicked.connect(lambda: self.step_defect(+1))
         self.defect_combo.currentIndexChanged.connect(self._on_defect_combo)
         self.btn_region_check.clicked.connect(lambda: self.open_region_check())
+        self.btn_build_template.clicked.connect(lambda: self.open_template_dialog())
         self.stream_combo.currentTextChanged.connect(self._on_stream_changed)
         self.stream_combo_b.currentTextChanged.connect(self._on_stream_b_changed)
         self.compare_check.toggled.connect(self.set_compare)
@@ -1622,6 +1637,46 @@ class StudioWindow(QMainWindow):
         node = self.model.nodes.get(self.selected_node or "")
         return regions_of_node(node) if node is not None else []
 
+    #: 需要模板的卡片 key（那張卡的模板只能用這個對話框做出來）。
+    TEMPLATE_STEP = "roi_template"
+
+    def template_build_available(self) -> bool:
+        """選取的卡片需要模板嗎（用明確狀態，不要問 widget 的可見性）。"""
+        node = self.model.nodes.get(self.selected_node or "")
+        return bool(node is not None and node.step == self.TEMPLATE_STEP)
+
+    def open_template_dialog(self) -> Optional[Any]:
+        """開「從大圖建模板」對話框；接受之後把模板寫回這張卡。"""
+        if not self.template_build_available():
+            self._status("Select a Locate region by template card first.")
+            return None
+        node_id = self.selected_node
+        dlg = TemplateDialog(self)
+        dlg.accepted_template.connect(
+            lambda text, axis, nid=node_id: self._apply_template(nid, text, axis))
+        self.template_dialog = dlg
+        dlg.show()
+        return dlg
+
+    def _apply_template(self, node_id: str, text: str, axis: str) -> None:
+        """把疊好的模板寫進卡片參數（連同它適用的方向）。"""
+        if node_id not in self.model.nodes:
+            return
+        try:
+            self.model.set_param(node_id, "template", str(text))
+            self.model.set_param(node_id, "locate_axis", str(axis))
+        except ParamError as e:
+            self._status("Could not store the template: %s" % e)
+            return
+        node = self.model.nodes[node_id]
+        self.param_form.set_step(
+            get_step(node.step).describe(), node.params,
+            self.model.available_streams(before_node=node_id))
+        self._status("Template stored in this recipe — it repeats along %s. "
+                     "Now mark the region on the cell with the Region "
+                     "left/top/width/height sliders." % axis)
+        self._schedule_preview()
+
     def region_check_available(self) -> bool:
         """現在按得下「跨顆檢視」嗎。
 
@@ -1631,6 +1686,7 @@ class StudioWindow(QMainWindow):
         return bool(self.selected_regions()) and bool(self._items())
 
     def _refresh_region_button(self) -> None:
+        self.btn_build_template.setVisible(self.template_build_available())
         regions = self.selected_regions()
         has_data = bool(self._items())
         self.btn_region_check.setVisible(bool(regions))
