@@ -23,11 +23,28 @@ def test_no_qt_in_core_source():
 
 
 def test_no_qt_after_import():
-    import adept.core.algo  # noqa: F401
-    import adept.core.ingest  # noqa: F401
-    import adept.core.calibration  # noqa: F401
+    """在**乾淨的子行程**裡 import core，然後看 Qt 有沒有被拖進來。
 
-    loaded = [m for m in sys.modules if m.split(".")[0] in ("PyQt5", "PyQt6", "PySide2", "PySide6")]
+    以前是在測試行程裡直接看 ``sys.modules``，那讓這條測試變成**跟執行順序
+    有關**：只要有任何一個 UI 測試檔排在 ``test_no_qt.py`` 前面跑過，Qt 就
+    已經在 ``sys.modules`` 裡，這裡就會誤報 —— 而它報的位置離真正的原因
+    （另一個檔案的 fixture）很遠，看訊息完全猜不到。加一支新測試檔就可能踩到，
+    只因為檔名的字母序。子行程沒有這個問題：問的就是「單獨 import core 時
+    會不會拉進 Qt」，而那本來就是這條測試唯一想問的事。
+    """
+    import subprocess
+
+    code = (
+        "import sys\n"
+        "import adept.core.algo, adept.core.ingest, adept.core.calibration\n"
+        "qt = [m for m in sys.modules "
+        "      if m.split('.')[0] in ('PyQt5','PyQt6','PySide2','PySide6')]\n"
+        "print(','.join(sorted(qt)))\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code],
+                          cwd=str(PKG.parent), capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    loaded = [m for m in proc.stdout.strip().split(",") if m]
     assert not loaded, f"Qt modules loaded: {loaded}"
 
 

@@ -69,7 +69,12 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC)
 
 #: ``curve`` 是一個「值是控制點字串」的參數（見 ``pipeline/curve.py``）——
 #: 跟 ``image_key`` 一樣，型別上就是 str，但 UI 認得它、會給專用編輯器。
-PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key", "curve")
+#:
+#: ``image_keys``（F7-9）是「一串影像流名」，值仍然是逗號分隔字串 ——
+#: **recipe JSON 的格式沒有變**，舊檔照樣讀得進來。差別在 UI：它拿到的是
+#: 上游每一條流的一個勾選框，而不是一個要自己打字、打錯只會靜靜警告的輸入框。
+PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
+               "image_keys", "curve")
 
 
 class ParamError(ValueError):
@@ -91,6 +96,10 @@ class ParamSpec:
     ``help`` 必填：一行白話說明（不會寫 code 的人要能看懂）。
     ``type=="choice"`` 需附 ``choices``；``type=="image_key"`` 表示值是影像流名稱，
     UI 會提供下拉（目前 pipeline 上游的 writes 聯集）。
+
+    ``label``（F7-9，選填）是**顯示名**。``name`` 是 recipe JSON 的鍵，改不得；
+    但 ``also_apply`` 這種名字對製程工程師來說不是一句話。有 label 就顯示 label，
+    沒有就顯示 name —— 既有卡片一張都不用動。
     """
 
     name: str
@@ -101,6 +110,7 @@ class ParamSpec:
     max: Optional[float] = None
     choices: Optional[List[str]] = None
     unit: str = ""
+    label: str = ""
 
     def __post_init__(self) -> None:
         if self.type not in PARAM_TYPES:
@@ -126,6 +136,16 @@ class ParamSpec:
                     v = bool(value)
             elif self.type in ("str", "image_key"):
                 v = str(value)
+            elif self.type == "image_keys":
+                # 正規化：去空白、去空項、去重複但保留順序。
+                # 手打的 "ref, ref ,, test" 與 UI 勾出來的 "ref,test" 等價，
+                # 存進 recipe 的字串才不會因為輸入方式不同而長得不一樣。
+                seen: List[str] = []
+                for tok in str(value).split(","):
+                    tok = tok.strip()
+                    if tok and tok not in seen:
+                        seen.append(tok)
+                v = ",".join(seen)
             elif self.type == "curve":
                 # 擋在這裡而不是等 run() 才炸（鐵則 4）。順便正規化：
                 # 排序、去空白、統一小數位 —— 手打的字串與 UI 拉出來的一樣。
@@ -211,6 +231,23 @@ class Step(ABC):
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
         return list(cls.features_out)
 
+    # ---- 具名區域（F7-9）---------------------------------------------------
+    #: 影像流有 reads/writes 可以在 validate 裡模擬，**具名 ROI 以前沒有**。
+    #: 於是「量測卡指到一個沒人定義的區域」只有兩種下場：名字打錯 → 每顆
+    #: defect 執行到一半才 StepError；名字剛好是保留字 ``blob`` 而上游又沒有
+    #: Blob 卡 → **安靜地改量整張圖**，跑得完、有數字、而且是錯的。
+    #: 後者是最糟的一種：使用者看不出哪裡不對。所以區域也宣告成契約，
+    #: 跟影像流走同一條檢查路徑（``recipe.validate`` 的 unknown-region）。
+    @classmethod
+    def resolve_regions_out(cls, params: Dict[str, Any]) -> List[str]:
+        """這張卡會定義哪些具名區域。"""
+        return []
+
+    @classmethod
+    def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
+        """這張卡需要哪些具名區域（空字串 = 整張影像，不算需求）。"""
+        return []
+
     # ---- 執行 -------------------------------------------------------------
     @abstractmethod
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
@@ -249,6 +286,7 @@ class Step(ABC):
                     "name": p.name, "type": p.type, "default": p.default,
                     "help": p.help, "min": p.min, "max": p.max,
                     "choices": p.choices, "unit": p.unit,
+                    "label": p.label or p.name,
                 }
                 for p in cls.params
             ],

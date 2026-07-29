@@ -66,6 +66,11 @@ class BlobSegmentStep(Step):
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
         return [params.get("source", "snr_map"), params.get("diff_source", "diff")]
 
+    @classmethod
+    def resolve_regions_out(cls, params: Dict[str, Any]) -> List[str]:
+        name = str(params.get("roi_out", "blob") or "").strip()
+        return [name] if name else []
+
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
         snr_img = require_image(ctx, self.key, p["source"])

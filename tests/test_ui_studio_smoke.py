@@ -75,7 +75,9 @@ def _loaded(window, synlot):
     """把資料集 + 範例 recipe 灌進視窗（冪等，讓每個測試都能單獨跑）。"""
     if window.dataset is None:
         assert window.load_dataset_path(synlot["klarf"], sync=True) is True
-    if not window.model.node_order:
+    # 判斷依據是「載過 recipe 了沒」，不是「畫布上有沒有節點」——
+    # F7-9 起開窗就有一張起手 Input 卡，後者永遠是 True。
+    if window.recipe_path is None:
         assert window.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
     return window
 
@@ -91,9 +93,14 @@ def test_window_constructs_with_library_cards(window):
     assert window.library.section_titles() == [
         "Input", "Enhance", "Region", "Compare", "Measure", "ADC"]
 
-    # 空狀態：流程沒有節點、預覽沒有影像、直方圖沒有資料
-    assert window.model.node_order == []
-    assert window.pipeline.node_ids() == []
+    # 空狀態：畫布上只有起手的 Input 卡（F7-9），而且它已經被選起來 ——
+    # 一開窗右欄就有東西可以動，不是一句「請先挑一張卡」。
+    assert window.model.node_order == ["load_patch"]
+    assert window.pipeline.node_ids() == ["load_patch"]
+    assert window.selected_node == "load_patch"
+    assert window.param_form.step_key() == "load_patch"
+    assert window.model.dirty is False, "使用者什麼都還沒做，不該被問「要存檔嗎」"
+    # 預覽沒有影像、直方圖沒有資料
     assert window.image_view.has_image() is False
     assert window.histogram.has_data() is False
     assert window.status_text()          # 一開始就給使用者一句提示
@@ -235,7 +242,8 @@ def test_param_edit_valid_then_invalid(window, synlot):
 def test_mouse_only_pipeline_build(qapp):
     win = studio_mod.StudioWindow()
     try:
-        win.library.add_requested.emit("load_patch")
+        # 起手的 Input 卡已經在畫布上了（F7-9），所以只要再加一張
+        assert win.model.node_order == ["load_patch"]
         win.library.add_requested.emit("percentile_norm")
         assert win.model.node_order == ["load_patch", "percentile_norm"]
         assert win.pipeline.node_ids() == ["load_patch", "percentile_norm"]
@@ -332,14 +340,21 @@ def test_actions_are_disabled_until_their_preconditions_hold(qapp, synlot):
     """
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     try:
-        # 什麼都還沒有：跑不了、存不了、輸出不了
+        # 還沒有資料：跑不了、輸出不了（起手的 Input 卡讓「存檔」是可以的 ——
+        # 畫布上真的有一張卡，說「沒東西可存」才是騙人的）
         assert win.btn_trial.isEnabled() is False
         assert win.act_run_all.isEnabled() is False
         assert win.spin_trial_n.isEnabled() is False
-        assert win.btn_save_recipe.isEnabled() is False
         assert win.btn_export.isEnabled() is False
-        for w in (win.btn_trial, win.btn_save_recipe, win.btn_export):
+        assert "No dataset" in win.btn_trial.toolTip()
+        for w in (win.btn_trial, win.btn_export):
             assert w.toolTip().strip(), "變灰的按鈕一定要說明原因"
+
+        # 移掉起手卡 → 流程真的空了，理由要換一句，而且存不了
+        win.pipeline.remove_requested.emit("load_patch")
+        assert win.btn_save_recipe.isEnabled() is False
+        assert win.btn_save_recipe.toolTip().strip()
+        assert "add at least one card" in win.btn_trial.toolTip()
 
         # 只有資料集 → 還是不能跑（流程是空的），但理由要換一句
         assert win.load_dataset_path(synlot["klarf"], sync=True) is True

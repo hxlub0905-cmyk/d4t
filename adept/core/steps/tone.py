@@ -155,11 +155,16 @@ class BrightnessContrastStep(_ToneStep):
             "become easier to see and to measure.")
     params = [
         ParamSpec(name="target", type="image_key", default="test",
-                  help="Main image stream to adjust (overwritten in place)."),
-        ParamSpec(name="also_apply", type="str", default="ref",
-                  help=("Other image streams to apply the same adjustment to "
-                        "(comma separated, may be empty). Keep test and ref "
-                        "together or they stop being comparable.")),
+                  label="Apply to",
+                  help=("Which image stream this card works on; the result is "
+                        "written back to that same stream. Streams are the "
+                        "named lines on the canvas - test is the defect image, "
+                        "ref is the reference image.")),
+        ParamSpec(name="also_apply", type="image_keys", default="ref",
+                  label="Also apply to",
+                  help=("Other streams that get exactly the same adjustment. "
+                        "Keep ref ticked or test and ref stop being "
+                        "comparable; untick it to treat the two differently.")),
         ParamSpec(name="brightness", type="float", default=0.0,
                   min=-255.0, max=255.0,
                   help=("Added to every pixel, in gray levels. Positive "
@@ -198,11 +203,16 @@ class GammaStep(_ToneStep):
             "cannot do this. Draw your own curve for full control.")
     params = [
         ParamSpec(name="target", type="image_key", default="test",
-                  help="Main image stream to adjust (overwritten in place)."),
-        ParamSpec(name="also_apply", type="str", default="ref",
-                  help=("Other image streams to apply the same gamma to "
-                        "(comma separated, may be empty). Keep test and ref "
-                        "together or they stop being comparable.")),
+                  label="Apply to",
+                  help=("Which image stream this card works on; the result is "
+                        "written back to that same stream. Streams are the "
+                        "named lines on the canvas - test is the defect image, "
+                        "ref is the reference image.")),
+        ParamSpec(name="also_apply", type="image_keys", default="ref",
+                  label="Also apply to",
+                  help=("Other streams that get exactly the same gamma or "
+                        "curve. Keep ref ticked or test and ref stop being "
+                        "comparable; untick it to treat the two differently.")),
         ParamSpec(name="gamma", type="float", default=1.0, min=0.1, max=5.0,
                   help=("Below 1 brings out detail in the dark areas (common "
                         "for SEM); above 1 does the opposite. 1 = unchanged.")),

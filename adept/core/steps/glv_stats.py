@@ -73,6 +73,11 @@ class GlvStatsStep(Step):
         return [params.get("source", "test")]
 
     @classmethod
+    def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
+        name = str(params.get("roi", "") or "").strip()
+        return [name] if name else []
+
+    @classmethod
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
         mids = parse_key_list(params.get("metrics", "glv_mean,glv_std,glv_p50"))
         return mids or list(cls.features_out)
