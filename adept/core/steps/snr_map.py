@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 from ..algo import snr as algo_snr
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, ParamSpec, Step, StepError, register_step, GROUP_ENHANCE,
+    CATEGORY_ALGO, ParamSpec, Step, StepError, register_step, GROUP_REGION,
 )
 from ._util import require_image
 
@@ -24,7 +24,7 @@ class SnrMapStep(Step):
     key = "snr_map"
     label = "SNR map"
     category = CATEGORY_ALGO
-    group = GROUP_ENHANCE
+    group = GROUP_REGION
     help = ("Turn the difference image into a map of how much the signal "
             "stands out at each position (SNR), and report the peak as "
             "snr_max.")

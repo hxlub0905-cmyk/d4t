@@ -84,6 +84,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QPushButton,
     QSizePolicy,
+    QProgressBar,
     QSpinBox,
     QSplitter,
     QStackedWidget,
@@ -405,6 +406,7 @@ class StudioWindow(QMainWindow):
         self._build_toolbar()
         self._build_body()
         self.setStatusBar(QStatusBar(self))
+        self._build_progress()
 
         self._wire_widgets()
         self._wire_workers()
@@ -502,6 +504,50 @@ class StudioWindow(QMainWindow):
         self.btn_trial.setPopupMode(QToolButton.MenuButtonPopup)
         self.trial_menu = menu
         bar.addWidget(self.btn_trial)
+
+    def _build_progress(self) -> None:
+        """狀態列右側的進度條（F7-7）。
+
+        以前載入資料集與試跑都只有狀態列的一行字，那對「跑一批一萬顆」這種
+        會等好幾分鐘的動作是不夠的 —— 使用者看不出還要多久、也看不出它到底
+        在不在動。這條進度條在**閒著時完全隱藏**，不佔位子也不製造噪音。
+
+        載入 KLARF 沒有可回報的百分比（``load_dataset`` 是一次呼叫），所以那個
+        情況用**不定型**（range 0–0）的跑馬燈：它回答的是「還在動嗎」，
+        而不是「還剩多久」——謊報一個假的百分比比不報還糟。
+        """
+        self.progress = QProgressBar(self)
+        self.progress.setFixedWidth(220)
+        self.progress.setTextVisible(True)
+        self.progress.setVisible(False)
+        # 明確狀態：``isVisible()`` 在視窗 show() 之前一律 False，
+        # headless 測試會全部誤判（同 LibraryPanel 的 badge，見 widgets.py）。
+        self._progress_on = False
+        self.statusBar().addPermanentWidget(self.progress)
+
+    def _progress_busy(self, label: str) -> None:
+        """不定型跑馬燈（不知道總量時用）。"""
+        self.progress.setRange(0, 0)
+        self.progress.setFormat(str(label))
+        self.progress.setVisible(True)
+        self._progress_on = True
+
+    def _progress_set(self, done: int, total: int, label: str = "%v / %m") -> None:
+        self.progress.setRange(0, max(1, int(total)))
+        self.progress.setValue(int(done))
+        self.progress.setFormat(str(label))
+        self.progress.setVisible(True)
+        self._progress_on = True
+
+    def _progress_done(self) -> None:
+        self.progress.setVisible(False)
+        self.progress.setRange(0, 1)
+        self.progress.reset()
+        self._progress_on = False
+
+    def progress_visible(self) -> bool:
+        """進度條現在看得到嗎（測試用）。"""
+        return bool(self._progress_on)
 
     def _tool_button(self, text: str, tip: str, slot: Any,
                      primary: bool = False) -> QToolButton:
@@ -720,7 +766,8 @@ class StudioWindow(QMainWindow):
     def _wire_workers(self) -> None:
         self.dataset_worker.loaded.connect(self._on_dataset_loaded)
         self.dataset_worker.failed.connect(
-            lambda msg: self._status("Could not load dataset: %s" % msg))
+            lambda msg: (self._progress_done(),
+                         self._status("Could not load dataset: %s" % msg)))
 
         self.preview_worker.ready.connect(self._on_preview_ready)
         self.preview_worker.busy.connect(self._on_preview_busy)
@@ -730,7 +777,8 @@ class StudioWindow(QMainWindow):
         self.trial_worker.progress.connect(self._on_trial_progress)
         self.trial_worker.done.connect(self._on_trial_done_async)
         self.trial_worker.failed.connect(
-            lambda msg: self._status("Trial run failed: %s" % msg))
+            lambda msg: (self._progress_done(),
+                         self._status("Trial run failed: %s" % msg)))
 
         self.thumb_worker.ready.connect(self._on_thumbs_ready)
         self.thumb_worker.failed.connect(self._status)
@@ -861,6 +909,13 @@ class StudioWindow(QMainWindow):
                 label, category = step_cls.label, step_cls.category
             except KeyError:
                 label, category = node.step, ""
+            # writes 用 kind-aware 版本解析：patch 的 Input 節點因此吐
+            # ["test", "ref"]，畫布上就畫成兩個具名輸出埠（F7-7）。
+            try:
+                writes = list(step_cls.resolve_writes_for_kind(
+                    node.params, self.model.kind))
+            except Exception:              # noqa: BLE001 — 顯示用，壞了就空著
+                writes = []
             nodes.append({
                 "node_id": nid,
                 "step_key": node.step,
@@ -868,6 +923,7 @@ class StudioWindow(QMainWindow):
                 "category": category,
                 "enabled": bool(node.enabled),
                 "summary": self._node_summary(node),
+                "writes": writes,
             })
         self.pipeline.set_nodes(nodes, self.model.edges)
         if self.selected_node not in self.model.nodes:
@@ -1104,6 +1160,7 @@ class StudioWindow(QMainWindow):
         if not self.dataset_worker.start(path, tiff):
             self._status("A dataset is already loading — please wait.")
             return False
+        self._progress_busy("Loading %s…" % os.path.basename(path))
         self._status("Loading: %s" % os.path.basename(path))
         return True
 
@@ -1148,6 +1205,7 @@ class StudioWindow(QMainWindow):
 
         self._update_defect_label()
         self._update_action_states()
+        self._progress_done()
         warn = list(getattr(dataset, "warnings", []) or [])
         msg = "Loaded %d defects (input type %s)" % (
             len(items), getattr(dataset, "kind", "?"))
@@ -1433,6 +1491,7 @@ class StudioWindow(QMainWindow):
                                        workers=workers, cache_dir=cdir):
             self._status("A run is already in progress — please wait.")
             return False
+        self._progress_set(0, limit, "%v / %m defects")
         self._status("Running: 0 / %d" % limit)
         return True
 
@@ -1449,6 +1508,7 @@ class StudioWindow(QMainWindow):
                        cache_dir=DEFAULT_CACHE_DIR)
 
     def _on_trial_progress(self, done: int, total: int) -> None:
+        self._progress_set(int(done), int(total), "%v / %m defects")
         self._status("Running: %d / %d" % (int(done), int(total)))
 
     def _on_trial_done_async(self, results: Any) -> None:
@@ -1458,6 +1518,7 @@ class StudioWindow(QMainWindow):
     def _apply_trial_results(self, results: Sequence[Dict[str, Any]],
                              elapsed: float) -> None:
         results = list(results or [])
+        self._progress_done()
         self.trial_results = results
         self.trial_scores = [r["score"] for r in results
                              if r.get("ok") and r.get("score") is not None]

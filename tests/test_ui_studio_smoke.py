@@ -373,3 +373,31 @@ def test_close_stops_workers(window, synlot):
         assert worker.is_running() is False
         assert worker.thread_obj is None
     assert window._preview_timer.isActive() is False
+
+
+# --------------------------------------------------------------------------- #
+# 10. F7-7 進度條：載入與試跑要看得到進度，不能只有狀態列一行字
+# --------------------------------------------------------------------------- #
+def test_progress_bar_is_hidden_when_idle_and_tracks_a_run(window, synlot):
+    _loaded(window, synlot)
+    assert window.progress_visible() is False, "閒著時不該佔位子"
+
+    window._on_trial_progress(3, 8)
+    assert window.progress_visible() is True
+    assert window.progress.value() == 3
+    assert window.progress.maximum() == 8
+
+    window.run_trial(8, workers=1, sync=True)
+    assert window.progress_visible() is False, "跑完要收起來"
+
+
+def test_loading_uses_an_indeterminate_bar(window):
+    """載入 KLARF 沒有可回報的百分比 —— 用跑馬燈回答「還在動嗎」。
+
+    謊報一個假的百分比比不報還糟。
+    """
+    window._progress_busy("Loading…")
+    assert window.progress_visible() is True
+    assert (window.progress.minimum(), window.progress.maximum()) == (0, 0)
+    window._progress_done()
+    assert window.progress_visible() is False

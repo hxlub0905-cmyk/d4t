@@ -143,6 +143,19 @@ _LIGHT: Dict[str, Any] = {
     # -- section header tiers ------------------------------------------------
     "tier1_bg": "transparent",
     "tier1_text": "#79828f",
+    # -- 影像背景（F7-7）------------------------------------------------------
+    #: **light / dark 兩組刻意填同一個值。**
+    #:
+    #: 這個工具的核心工作是判斷 8-bit 灰階 patch 上的細微差異，而周圍的亮度
+    #: 會偏移人對灰階的感知（同時對比效應）。原本影像底用的是 ``bg_panel``
+    #: （淡色主題下近乎純白），那是最糟的組合：patch 會顯得比實際暗、
+    #: 感知對比被壓縮。影像評估的慣例是中性灰（Photoshop/Lightroom 的深灰、
+    #: 醫療影像 viewer 的黑底），理由就是不要讓背景去偏移判斷。
+    #:
+    #: 所以：**chrome 跟著主題走，影像區不跟。** 換主題時同一張 patch
+    #: 看起來要一樣。
+    "image_backdrop": "#3f4247",
+
     # -- canvas (F7-6 節點畫布) ----------------------------------------------
     "canvas_bg": "#f0f1f4",
     "canvas_grid": "#e0e3e8",
@@ -238,6 +251,7 @@ _DARK: Dict[str, Any] = dict(_LIGHT, **{
     "tier1_bg": "transparent",
     "tier1_text": "#8b93a1",
 
+    "image_backdrop": "#3f4247",     # 與 light 相同 —— 見上面的說明
     "canvas_bg": "#16181d",
     "canvas_grid": "#232730",
     "canvas_edge": "#5c6474",

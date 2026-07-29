@@ -2,12 +2,11 @@
   "recipe_id": "die_to_die_basic",
   "version": 2,
   "author": "HX",
-  "description": "Die-to-die 假點過濾範本：正規化→對位→相減→去噪，中心區 GLV 峰值算分（合成資料 ~94% 正確）",
+  "description": "Die-to-die nuisance filter: normalise -> subtract -> denoise, scored on the peak GLV in the centre region. No alignment step: the tool emits corresponding test/reference patch pairs already.",
   "routes": {
     "ebi_patch": [
       "load",
       "norm",
-      "align",
       "sub",
       "dn",
       "snr",
@@ -31,17 +30,11 @@
       },
       "enabled": true
     },
-    "align": {
-      "step": "align",
-      "params": {
-        "method": "phase",
-        "search_radius": 8
-      },
-      "enabled": true
-    },
     "sub": {
       "step": "subtract",
-      "params": {},
+      "params": {
+        "b": "ref"
+      },
       "enabled": true
     },
     "dn": {
