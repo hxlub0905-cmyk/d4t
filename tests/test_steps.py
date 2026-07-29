@@ -432,3 +432,56 @@ def test_glv_stats_matches_numpy_including_aliases():
     # 未知統計項 → StepError
     with pytest.raises(StepError):
         run_step("glv_stats", Context(images={"test": img}), metrics="glv_bogus")
+
+
+# ---------------------------------------------------------------- tone (F7-7)
+
+def test_brightness_contrast_pivots_around_mid_gray():
+    """對比以影像自己的中間值為支點 —— 以 0 為支點會順便把整張圖變亮。"""
+    img = np.array([[0, 64, 128, 192, 255]], dtype=np.uint8)
+    ctx = Context(images={"test": img.copy()})
+    run_step("brightness_contrast", ctx, contrast=2.0, also_apply="")
+    out = ctx.images["test"]
+    assert out[0, 2] == 128, "中灰是支點，不該移動"
+    assert out[0, 0] == 0 and out[0, 4] == 255           # 兩端夾住
+    assert int(out[0, 1]) < 64 and int(out[0, 3]) > 192  # 往兩邊拉開
+
+    ctx2 = Context(images={"test": img.copy()})
+    run_step("brightness_contrast", ctx2, brightness=20.0, also_apply="")
+    assert int(ctx2.images["test"][0, 2]) == 148
+    assert ctx2.images["test"].dtype == np.uint8, "uint8 進 uint8 出"
+
+
+def test_gamma_opens_up_dark_detail_and_is_reversible_at_one():
+    img = np.array([[0, 64, 128, 192, 255]], dtype=np.uint8)
+
+    ctx = Context(images={"test": img.copy()})
+    run_step("gamma", ctx, gamma=1.0, also_apply="")
+    np.testing.assert_array_equal(ctx.images["test"], img)   # 1 = 不動
+
+    ctx = Context(images={"test": img.copy()})
+    run_step("gamma", ctx, gamma=0.5, also_apply="")
+    assert int(ctx.images["test"][0, 1]) < 64, "gamma<1 要壓暗部（拉開細節）"
+
+    ctx = Context(images={"test": img.copy()})
+    run_step("gamma", ctx, gamma=2.0, also_apply="")
+    assert int(ctx.images["test"][0, 1]) > 64
+    # 端點永遠不動
+    assert int(ctx.images["test"][0, 0]) == 0
+    assert int(ctx.images["test"][0, 4]) == 255
+
+
+def test_tone_cards_keep_float_streams_float_and_apply_to_ref_too():
+    """diff 是 float32 —— 這兩張卡插在哪裡都不該偷偷改變型別。"""
+    f = np.linspace(-5.0, 5.0, 25, dtype=np.float32).reshape(5, 5)
+    ctx = Context(images={"test": f.copy(), "ref": f.copy()})
+    run_step("gamma", ctx, gamma=0.7)
+    assert ctx.images["test"].dtype == np.float32
+    assert ctx.images["ref"].dtype == np.float32
+    # also_apply 預設含 ref：test 與 ref 要一起動，否則就不能比了
+    np.testing.assert_allclose(ctx.images["test"], ctx.images["ref"])
+
+    # also_apply 指到不存在的流 -> 警告不報錯
+    ctx2 = Context(images={"test": f.copy()})
+    run_step("brightness_contrast", ctx2, also_apply="nope")
+    assert any("nope" in w for w in ctx2.meta.get("warnings", []))

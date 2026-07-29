@@ -98,10 +98,10 @@ def test_linking_two_nodes_records_an_edge(window):
 def test_a_link_that_would_loop_is_refused_at_draw_time(window):
     """**循環擋在拉線的當下**，不是等到執行時才爆。"""
     window.pipeline.link_to("load", "norm")
-    window.pipeline.link_to("norm", "align")
+    window.pipeline.link_to("norm", "sub")
     before = list(window.model.edges)
 
-    window.pipeline.link_to("align", "load")        # 會成環
+    window.pipeline.link_to("sub", "load")        # 會成環
     assert window.model.edges == before, "成環的線不可以落進 model"
     assert "loop" in window.status_text()
 
@@ -130,10 +130,10 @@ def test_edges_reorder_execution_and_survive_a_save_load_round_trip(window, tmp_
     from adept.core.pipeline import Recipe
 
     window.pipeline.link_to("load", "norm")
-    window.pipeline.link_to("norm", "align")
+    window.pipeline.link_to("norm", "sub")
     edges = list(window.model.edges)
     order = list(window.model.node_order)
-    assert order.index("load") < order.index("norm") < order.index("align")
+    assert order.index("load") < order.index("norm") < order.index("sub")
 
     out = tmp_path / "wired.json"
     assert window.save_recipe_path(str(out)) is True

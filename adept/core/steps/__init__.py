@@ -17,6 +17,7 @@ from . import _util          # 共用小工具（非卡片）
 from . import load           # load_patch
 from . import normalize      # percentile_norm / glv_mask_norm / hist_match
 from . import denoise        # denoise
+from . import tone           # brightness_contrast / gamma
 from . import align          # align
 from . import arith          # subtract / invert
 from . import snr_map        # snr_map

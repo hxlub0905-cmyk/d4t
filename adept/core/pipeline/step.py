@@ -40,12 +40,18 @@ CATEGORY_ADC = "adc"
 #: group          規則                       例
 #: =============  =========================  ==============================
 #: input          （固定頭節點）              load_patch
-#: enhance        影像 → 影像                normalize / denoise / snr_map
-#: region         影像 → 區域                blob_segment / ROI 卡
+#: enhance        影像 → 影像                normalize / gamma / denoise
+#: region         找出「要看哪裡」            snr_map / blob_segment / roi_define
 #: compare        影像＋影像 → 影像           align / subtract
 #: measure        影像＋區域 → 數字           glv_stats / cd_measure
 #: adc            數字 → score → bin         （固定尾節點）
 #: =============  =========================  ==============================
+#:
+#: **型別規則是預設的裁決方式，但不是唯一的。** ``snr_map`` 是影像進影像出，
+#: 照型別會落在 enhance —— 但它的**唯一**消費者是 ``blob_segment``
+#: （每一份範例 recipe 都是 snr → blob），而且它必須跑在 Compare 之後，
+#: 放在讀起來排第二的 Enhance 裡永遠用不到。所以規則補一條：
+#: **一張卡如果只為了餵另一段而存在，就跟著那一段走。**
 GROUP_INPUT = "input"
 GROUP_ENHANCE = "enhance"
 GROUP_REGION = "region"

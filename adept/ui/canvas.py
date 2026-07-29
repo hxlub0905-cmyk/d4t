@@ -47,6 +47,9 @@ from .theme import TOKENS
 
 __all__ = ["PipelineCanvas", "NODE_W", "NODE_H", "COL_GAP", "ROW_GAP"]
 
+#: 一個節點最多畫幾個輸出埠（再多就擠不下，退回單一埠）。
+_MAX_PORTS = 4
+
 #: 節點卡尺寸與排版間距（畫布座標）。
 NODE_W, NODE_H = 168.0, 52.0
 COL_GAP, ROW_GAP = 96.0, 26.0
@@ -105,13 +108,38 @@ class _NodeItem(QGraphicsItem):
     def in_port(self) -> QPointF:
         return self.scenePos() + QPointF(0.0, NODE_H / 2.0)
 
-    def out_port(self) -> QPointF:
-        return self.scenePos() + QPointF(NODE_W, NODE_H / 2.0)
+    def out_names(self) -> List[str]:
+        """這個節點吐出的影像流名稱（決定畫幾個輸出埠）。
 
-    def _port_hit(self, pos: QPointF, out: bool) -> bool:
-        anchor = QPointF(NODE_W if out else 0.0, NODE_H / 2.0)
-        d = pos - anchor
-        return (d.x() * d.x() + d.y() * d.y()) <= (_PORT_R * 3.0) ** 2
+        來自 ``Step.describe()`` 的 ``writes``。對 patch 的 Input 節點來說
+        那是 ``["test", "ref"]`` —— 畫布上就看得到「一張 defect、一張 reference」，
+        而不是一個什麼都不說的單一輸出。
+        """
+        names = [str(w) for w in (self.info.get("writes") or [])]
+        return names[:_MAX_PORTS] or [""]
+
+    def out_anchors(self) -> List[QPointF]:
+        """每個輸出埠在**場景座標**的位置（由上而下均分節點右緣）。"""
+        n = len(self.out_names())
+        if n <= 1:
+            return [self.scenePos() + QPointF(NODE_W, NODE_H / 2.0)]
+        step = NODE_H / (n + 1)
+        return [self.scenePos() + QPointF(NODE_W, step * (i + 1))
+                for i in range(n)]
+
+    def out_port(self, index: int = 0) -> QPointF:
+        anchors = self.out_anchors()
+        return anchors[max(0, min(int(index), len(anchors) - 1))]
+
+    def out_port_at(self, pos: QPointF):
+        """本地座標 ``pos`` 命中哪一個輸出埠（沒命中回 ``None``）。"""
+        base = self.scenePos()
+        for i, anchor in enumerate(self.out_anchors()):
+            local = anchor - base
+            d = pos - local
+            if (d.x() * d.x() + d.y() * d.y()) <= (_PORT_R * 3.0) ** 2:
+                return i
+        return None
 
     # -- 繪製 ---------------------------------------------------------------
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
@@ -152,18 +180,28 @@ class _NodeItem(QGraphicsItem):
             p.drawText(QRectF(11, 34, NODE_W - 20, 14),
                        Qt.AlignVCenter | Qt.AlignLeft, summary)
 
-        # 連接埠
-        for anchor, filled in ((QPointF(0, NODE_H / 2), False),
-                               (QPointF(NODE_W, NODE_H / 2), True)):
-            p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
-            p.setBrush(QBrush(QColor(TOKENS["bg_surface"] if not filled
-                                     else TOKENS["canvas_edge"])))
+        # 連接埠。輸出可能不只一個 —— patch 的 Input 節點吐 test 與 ref 兩張
+        # （F7-7：使用者要求畫布上看得到「兩張圖」，因為 patch 天生成對）。
+        p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
+        p.setBrush(QBrush(QColor(TOKENS["bg_surface"])))
+        p.drawEllipse(QPointF(0, NODE_H / 2), _PORT_R, _PORT_R)
+
+        outs = self.out_names()
+        p.setBrush(QBrush(QColor(TOKENS["canvas_edge"])))
+        for name, anchor in zip(outs, self.out_anchors()):
             p.drawEllipse(anchor, _PORT_R, _PORT_R)
+            if len(outs) > 1:                   # 一個埠時不標，免得變雜訊
+                p.setPen(QColor(TOKENS["text_secondary"]))
+                p.drawText(QRectF(anchor.x() + 7, anchor.y() - 7, 42, 14),
+                           Qt.AlignVCenter | Qt.AlignLeft, name)
+                p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
 
     # -- 互動 ---------------------------------------------------------------
     def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
-        if e.button() == Qt.LeftButton and self._port_hit(e.pos(), out=True):
-            self.canvas.begin_link(self)       # 從輸出埠拉線
+        hit = (self.out_port_at(e.pos())
+               if e.button() == Qt.LeftButton else None)
+        if hit is not None:
+            self.canvas.begin_link(self, hit)  # 從某一個輸出埠拉線
             e.accept()
             return
         self.canvas.node_selected.emit(self.node_id)
@@ -191,9 +229,10 @@ class _NodeItem(QGraphicsItem):
 class _EdgeItem(QGraphicsItem):
     """一條連線（三次貝茲，左→右）。點它可選取，``Delete`` 移除。"""
 
-    def __init__(self, src: _NodeItem, dst: _NodeItem, canvas: "PipelineCanvas"):
+    def __init__(self, src: _NodeItem, dst: _NodeItem, canvas: "PipelineCanvas",
+                 port: int = 0):
         super().__init__()
-        self.src, self.dst, self.canvas = src, dst, canvas
+        self.src, self.dst, self.canvas, self.port = src, dst, canvas, int(port)
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setZValue(-1.0)
         self.setToolTip("%s → %s  (select and press Delete to remove)"
@@ -203,7 +242,7 @@ class _EdgeItem(QGraphicsItem):
         return (self.src.node_id, self.dst.node_id)
 
     def path(self) -> QPainterPath:
-        a, b = self.src.out_port(), self.dst.in_port()
+        a, b = self.src.out_port(self.port), self.dst.in_port()
         dx = max(40.0, abs(b.x() - a.x()) * 0.5)
         p = QPainterPath(a)
         p.cubicTo(a + QPointF(dx, 0), b - QPointF(dx, 0), b)
@@ -259,6 +298,7 @@ class PipelineCanvas(QGraphicsView):
         self._selected: Optional[str] = None
         self._score_summary = ""
         self._link_from: Optional[_NodeItem] = None
+        self._link_port = 0
         self._link_line = None
 
     # ---- 對外（與 PipelinePanel 對齊）--------------------------------------
@@ -333,10 +373,11 @@ class PipelineCanvas(QGraphicsView):
             e.update()
 
     # ---- 拉線 -------------------------------------------------------------
-    def begin_link(self, src: _NodeItem) -> None:
+    def begin_link(self, src: _NodeItem, port: int = 0) -> None:
         self._link_from = src
+        self._link_port = int(port)
         self._link_line = self._scene.addPath(
-            QPainterPath(src.out_port()),
+            QPainterPath(src.out_port(port)),
             QPen(QColor(TOKENS["canvas_edge_active"]), 1.6, Qt.DashLine))
 
     def _drop_link(self, scene_pos: QPointF) -> None:
@@ -359,7 +400,7 @@ class PipelineCanvas(QGraphicsView):
     # ---- Qt hooks ---------------------------------------------------------
     def mouseMoveEvent(self, e) -> None:       # noqa: D102
         if self._link_from is not None and self._link_line is not None:
-            a = self._link_from.out_port()
+            a = self._link_from.out_port(getattr(self, "_link_port", 0))
             b = self.mapToScene(e.pos())
             dx = max(40.0, abs(b.x() - a.x()) * 0.5)
             path = QPainterPath(a)

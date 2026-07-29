@@ -240,12 +240,12 @@ def test_preview_worker_sequential_requests(qt, recipe, dataset, live):
     w.busy.connect(busy.append)
 
     item = dataset.items[1]
-    for i, node in enumerate(["norm", "align", "sub"]):
+    for i, node in enumerate(["norm", "sub", "dn"]):
         w.request(recipe, item, dataset.kind, upto_node=node)
         assert _pump(lambda: len(results) > i), f"第 {i} 筆預覽逾時"
     assert _pump(lambda: busy and busy[-1] is False)
 
-    assert [r.traces[-1].node_id for r in results] == ["norm", "align", "sub"]
+    assert [r.traces[-1].node_id for r in results] == ["norm", "sub", "dn"]
     assert busy.count(True) == 3
     _assert_reaped(w)
 

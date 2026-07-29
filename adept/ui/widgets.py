@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
+    QGridLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
@@ -233,8 +234,10 @@ class ImageView(QWidget):
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setPen(QPen(QColor(TOKENS["border_default"]), 1))
-        p.setBrush(QColor(TOKENS["bg_panel"]))
-        p.drawRoundedRect(rect, 7, 7)
+        # 中性灰底：不隨主題變，也不讓背景偏移對灰階的判斷（見 theme 的
+        # image_backdrop 說明）
+        p.setBrush(QColor(TOKENS["image_backdrop"]))
+        p.drawRoundedRect(rect, 6, 6)
         if self._pixmap is None:
             p.setPen(QColor(TOKENS["text_disabled"]))
             p.drawText(self.rect(), Qt.AlignCenter, self._EMPTY_TEXT)
@@ -576,10 +579,12 @@ class GroupIcon(QWidget):
 
     _SIZE = 15
 
-    def __init__(self, group: str, color: str, parent: Optional[QWidget] = None):
+    def __init__(self, group: str, color: str, parent: Optional[QWidget] = None,
+                 size: Optional[int] = None):
         super().__init__(parent)
         self.group = str(group)
         self.color = str(color)
+        self._SIZE = int(size or self._SIZE)
         self.setFixedSize(self._SIZE, self._SIZE)
 
     def set_color(self, color: str) -> None:
@@ -731,6 +736,77 @@ class _LibraryItem(QFrame):
             self.activated.emit(self.step_key)
 
 
+class StageButton(QFrame):
+    """左側 rail 的一顆大按鈕：icon + 階段名 + 卡片數。
+
+    這是 F7-7 的要求：**先用大 icon 分功能，按下去才帶出裡面的小功能。**
+    六個階段一次全展開，等於一開始就把 15 張卡攤在使用者面前 ——
+    那正是「太瑣碎」的來源。
+    """
+
+    clicked = Signal(str)
+
+    _ICON = 22
+
+    def __init__(self, group: str, title: str, subtitle: str, colour: str,
+                 parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.group = str(group)
+        self.setObjectName("stageButton")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("%s — %s" % (title, subtitle))
+        self._colour = colour
+        self._active = False
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(4, 8, 4, 6)
+        lay.setSpacing(3)
+        lay.setAlignment(Qt.AlignHCenter)
+
+        self.icon = GroupIcon(self.group, colour, self, size=self._ICON)
+        lay.addWidget(self.icon, 0, Qt.AlignHCenter)
+
+        self.label = QLabel(title, self)
+        self.label.setAlignment(Qt.AlignHCenter)
+        self.label.setStyleSheet("font-size:10px; font-weight:600;")
+        lay.addWidget(self.label)
+
+        self.count = QLabel("", self)
+        self.count.setAlignment(Qt.AlignHCenter)
+        self.count.setStyleSheet("font-size:9px; color:%s;" % TOKENS["text_disabled"])
+        lay.addWidget(self.count)
+        self._restyle()
+
+    def set_count(self, n: int) -> None:
+        self.count.setText("" if n <= 0 else str(int(n)))
+
+    def set_active(self, active: bool) -> None:
+        self._active = bool(active)
+        self._restyle()
+
+    def is_active(self) -> bool:
+        return self._active
+
+    def refresh_colour(self, colour: str) -> None:
+        self._colour = colour
+        self.icon.set_color(colour)
+        self._restyle()
+
+    def _restyle(self) -> None:
+        self.setStyleSheet(
+            "QFrame#stageButton { background:%s; border:1px solid %s;"
+            " border-radius:6px; }"
+            "QFrame#stageButton:hover { background:%s; }"
+            % (TOKENS["accent_bg"] if self._active else "transparent",
+               TOKENS["accent_border"] if self._active else "transparent",
+               TOKENS["hover_warm"]))
+
+    def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit(self.group)
+        super().mousePressEvent(e)
+
+
 class LibraryPanel(QWidget):
     """卡片庫：依**流程階段**分組（F7-3），每組一個 QPainter 畫的 icon + 標題。
 
@@ -780,9 +856,26 @@ class LibraryPanel(QWidget):
         self._query = ""
         self._shown_groups: List[str] = []
 
+        self._open_group: Optional[str] = None
+
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
+
+        # -- 大 icon rail（F7-7）：先選階段，才展開裡面的卡片 ----------------
+        self.rail = QWidget(self)
+        rail_lay = QGridLayout(self.rail)
+        rail_lay.setContentsMargins(6, 6, 6, 2)
+        rail_lay.setSpacing(3)
+        self.stage_buttons: Dict[str, StageButton] = {}
+        for i, (gid, title, subtitle) in enumerate(self.GROUPS):
+            btn = StageButton(gid, title, subtitle,
+                              theme.seg_hex(self._GROUP_SEG.get(gid, "image")),
+                              self.rail)
+            btn.clicked.connect(self.toggle_group)
+            rail_lay.addWidget(btn, i // 3, i % 3)
+            self.stage_buttons[gid] = btn
+        outer.addWidget(self.rail)
 
         self.search = QLineEdit(self)
         self.search.setPlaceholderText("Search cards…")
@@ -816,6 +909,7 @@ class LibraryPanel(QWidget):
         outer.addWidget(self._scroll, 1)
 
         self.set_steps([])
+        self.toggle_group(self._ORDER[0])       # 開窗先展開 Input
 
     # -- 區塊標題（icon + 標題，取代舊的填滿色塊）---------------------------
     def _make_header(self, gid: str, title: str, subtitle: str) -> QWidget:
@@ -865,6 +959,8 @@ class LibraryPanel(QWidget):
                 item.activated.connect(self.add_requested)
                 box.addWidget(item)
                 self._items[item.step_key] = item
+        for gid, btn in self.stage_buttons.items():
+            btn.set_count(len(by_group.get(gid, [])))
         self._apply_filter()
         self._apply_badges()
 
@@ -889,7 +985,10 @@ class LibraryPanel(QWidget):
         同樣用明確狀態（``_matches``）而不是 ``isVisible()``，理由見
         :meth:`_LibraryItem.badge_text`。
         """
-        return [k for k in self._items if self._matches(k)]
+        return [k for k in self._items
+                if self._matches(k)
+                and self._group_open(str((self._describes.get(k) or {})
+                                         .get("group") or ""))]
 
     def section_titles(self) -> List[str]:
         return [lbl.text() for lbl in self.findChildren(QLabel)
@@ -900,6 +999,24 @@ class LibraryPanel(QWidget):
         return [title for gid, title, _sub in self.GROUPS
                 if gid in self._shown_groups]
 
+    # -- 展開 / 收合（F7-7）--------------------------------------------------
+    def toggle_group(self, group: Optional[str]) -> None:
+        """點同一顆再點一次 = 收起來；點別顆 = 換過去（一次只開一段）。
+
+        傳 ``None`` 直接全部收起來（測試 / 外部呼叫用）。訊號帶過來的是
+        ``str``，所以這裡不能用 ``str(group)`` 一律轉字串 —— ``str(None)``
+        會變成 ``"None"``，看起來像一個真的存在的段名。
+        """
+        gid = None if group is None else str(group)
+        self._open_group = None if (gid is None or self._open_group == gid) else gid
+        for g, btn in self.stage_buttons.items():
+            btn.set_active(g == self._open_group)
+        self._apply_filter()
+
+    def open_group(self) -> Optional[str]:
+        """目前展開的是哪一段（都收起來時回 None）。"""
+        return self._open_group
+
     def set_query(self, text: str) -> None:
         """程式化設定搜尋字串（測試 / 外部呼叫用）。"""
         self.search.setText(str(text or ""))
@@ -908,6 +1025,8 @@ class LibraryPanel(QWidget):
         """換主題之後重新取色（icon 與圓點都是自繪/內嵌樣式）。"""
         for gid, icon in self._icons.items():
             icon.set_color(theme.seg_hex(self._GROUP_SEG.get(gid, "image")))
+        for gid, btn in self.stage_buttons.items():
+            btn.refresh_colour(theme.seg_hex(self._GROUP_SEG.get(gid, "image")))
 
     # -- internals ---------------------------------------------------------
     def _empty_label(self, text: str) -> QLabel:
@@ -929,22 +1048,29 @@ class LibraryPanel(QWidget):
                         str(d.get("group", ""))]).lower()
         return all(tok in hay for tok in self._query.split())
 
+    def _group_open(self, gid: str) -> bool:
+        """搜尋中 = 跨全部階段找；沒搜尋 = 只看展開的那一段。"""
+        return True if self._query else (gid == self._open_group)
+
     def _apply_filter(self) -> None:
-        """過濾卡片，並把**整組都沒有命中**的區塊標題一起藏起來。"""
+        """過濾卡片；沒展開的階段整段收起來。"""
         for key, item in self._items.items():
-            item.setVisible(self._matches(key))
+            gid = str((self._describes.get(key) or {}).get("group") or "")
+            item.setVisible(self._matches(key) and self._group_open(gid))
         shown: List[str] = []
         for gid, head in self._headers.items():
             box = self._section_boxes[gid]
             hit = False
+            opened = self._group_open(gid)
             for i in range(box.count()):
                 w = box.itemAt(i).widget()
                 if isinstance(w, _LibraryItem):
-                    hit = hit or self._matches(w.step_key)
+                    hit = hit or (self._matches(w.step_key) and opened)
                 elif isinstance(w, QLabel):
-                    # 空區塊的提示語只在沒搜尋時顯示
-                    w.setVisible(not self._query)
-                    hit = hit or not self._query
+                    # 空區塊的提示語只在該段展開、且沒搜尋時顯示
+                    show = opened and not self._query
+                    w.setVisible(show)
+                    hit = hit or show
             head.setVisible(hit)
             if hit:
                 shown.append(gid)

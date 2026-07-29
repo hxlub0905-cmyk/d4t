@@ -570,7 +570,8 @@ class _GridView(QAbstractScrollArea):
     # -- 繪圖 ---------------------------------------------------------------
     def paintEvent(self, _e) -> None:          # noqa: D102 - Qt hook
         p = QPainter(self.viewport())
-        p.fillRect(self.viewport().rect(), QColor(TOKENS["bg_panel"]))
+        # 縮圖牆也用中性灰 —— 這裡是用眼睛掃整批的地方，背景偏差影響最大
+        p.fillRect(self.viewport().rect(), QColor(TOKENS["image_backdrop"]))
         if not self._view:
             p.setPen(QColor(TOKENS["text_disabled"]))
             p.drawText(self.viewport().rect(), Qt.AlignCenter,

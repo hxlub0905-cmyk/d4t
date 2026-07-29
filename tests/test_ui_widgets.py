@@ -386,7 +386,8 @@ def test_library_panel_groups_and_double_click(qapp):
 def test_library_search_filters_cards_and_hides_empty_sections(qapp):
     panel = widgets_mod.LibraryPanel()
     panel.set_steps(_steps())
-    everything = set(panel.visible_step_keys())
+    panel.toggle_group(None)                 # 全部收起來，只靠搜尋
+    everything = set(panel.step_keys())
 
     panel.set_query("snr")
     hit = set(panel.visible_step_keys())
@@ -399,9 +400,14 @@ def test_library_search_filters_cards_and_hides_empty_sections(qapp):
     panel.set_query("region blob")
     assert set(panel.visible_step_keys()) == {"blob_segment"}
 
+    # F7-7：清空搜尋之後回到 rail 的狀態（這裡是全部收起來），不是全部攤開
     panel.set_query("")
-    assert set(panel.visible_step_keys()) == everything
-    assert panel.visible_section_titles() == panel.section_titles()
+    assert panel.open_group() is None
+    assert panel.visible_step_keys() == []
+
+    panel.toggle_group("enhance")
+    assert set(panel.visible_step_keys()) < everything
+    assert panel.visible_section_titles() == ["Enhance"]
 
 
 def test_library_badges_unmet_prerequisites_but_still_allows_adding(qapp):
@@ -435,8 +441,10 @@ def test_group_icons_are_painted_not_files(qapp):
     """icon 一律 QPainter 畫 —— repo 有「只放純文字檔」的不變量。"""
     panel = widgets_mod.LibraryPanel()
     panel.set_steps(_steps())
+    # 每個階段有兩個 icon：rail 上的大顆 + 展開區的小標題
     icons = panel.findChildren(widgets_mod.GroupIcon)
-    assert len(icons) == len(panel.GROUPS)
+    assert len(icons) == 2 * len(panel.GROUPS)
+    assert len(panel.stage_buttons) == len(panel.GROUPS)
     assert all(i.width() > 0 and i.height() > 0 for i in icons)
 
     # 換主題之後 icon 要跟著換色
@@ -705,3 +713,49 @@ def test_studio_theme_toggle_keeps_everything_and_repaints(qapp):
     finally:
         win.close()
         theme_mod.apply_theme(qapp, "light")
+
+
+# --------------------------------------------------------------------------- #
+# 8. F7-7 左側 rail：先選階段，才展開裡面的卡片
+# --------------------------------------------------------------------------- #
+def test_stage_rail_drills_down_one_stage_at_a_time(qapp):
+    """一開始就把 15 張卡攤開，正是「太瑣碎」的來源。"""
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps(_steps())
+
+    assert len(panel.stage_buttons) == len(panel.GROUPS)
+    # 每顆按鈕標出該段有幾張卡
+    for gid, _t, _s in panel.GROUPS:
+        n = sum(1 for d in _steps() if d["group"] == gid)
+        assert panel.stage_buttons[gid].count.text() == ("" if n == 0 else str(n))
+
+    panel.toggle_group("enhance")
+    assert panel.open_group() == "enhance"
+    assert panel.stage_buttons["enhance"].is_active() is True
+    visible = set(panel.visible_step_keys())
+    assert "gamma" in visible and "subtract" not in visible, \
+        "沒展開的階段不該出現在清單裡"
+
+    # 一次只開一段
+    panel.toggle_group("measure")
+    assert panel.open_group() == "measure"
+    assert panel.stage_buttons["enhance"].is_active() is False
+    assert "glv_stats" in panel.visible_step_keys()
+
+    # 點同一顆再一次 = 收起來
+    panel.toggle_group("measure")
+    assert panel.open_group() is None
+    assert panel.visible_step_keys() == []
+
+
+def test_search_still_reaches_across_collapsed_stages(qapp):
+    """收起來的階段不該把搜尋擋住 —— 搜尋是「我不知道它在哪一段」時用的。"""
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps(_steps())
+    panel.toggle_group(None)
+    assert panel.open_group() is None
+
+    panel.set_query("gamma")
+    assert panel.visible_step_keys() == ["gamma"]
+    panel.set_query("")
+    assert panel.visible_step_keys() == []
