@@ -441,10 +441,12 @@ def test_group_icons_are_painted_not_files(qapp):
     """icon 一律 QPainter 畫 —— repo 有「只放純文字檔」的不變量。"""
     panel = widgets_mod.LibraryPanel()
     panel.set_steps(_steps())
-    # 每個階段有兩個 icon：rail 上的大顆 + 展開區的小標題
+    # 每個階段有兩個 icon：rail 上的大顆 + 展開區的小標題；
+    # 再加 rail 底部的搜尋鈕（它不是流程階段，所以不在 stage_buttons 裡）
     icons = panel.findChildren(widgets_mod.GroupIcon)
-    assert len(icons) == 2 * len(panel.GROUPS)
+    assert len(icons) == 2 * len(panel.GROUPS) + 1
     assert len(panel.stage_buttons) == len(panel.GROUPS)
+    assert panel.search_button.group == "search"
     assert all(i.width() > 0 and i.height() > 0 for i in icons)
 
     # 換主題之後 icon 要跟著換色
@@ -759,3 +761,46 @@ def test_search_still_reaches_across_collapsed_stages(qapp):
     assert panel.visible_step_keys() == ["gamma"]
     panel.set_query("")
     assert panel.visible_step_keys() == []
+
+
+def test_rail_is_vertical_and_the_card_area_gives_its_width_back(qapp):
+    """F7-8：rail 像工作列一樣由上而下，收起來時整欄只剩那條圖示條。
+
+    寬度用 ``minimumWidth()`` 驗，不用 ``width()`` —— 沒 show 過的 widget
+    幾何還沒生效，那會驗到一個假的數字。
+    """
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps(_steps())
+
+    assert panel.rail.layout().__class__.__name__ == "QVBoxLayout"
+    assert panel.rail.width() == panel.RAIL_W
+    # 「圖示要大一點」：rail 上的 icon 明顯大於區塊標題的小 icon
+    assert panel.stage_buttons["input"].icon._SIZE > widgets_mod.GroupIcon._SIZE
+
+    seen = []
+    panel.panel_toggled.connect(seen.append)
+
+    panel.toggle_group(None)
+    assert panel.panel_open() is False
+    assert panel.minimumWidth() == panel.RAIL_W, "收起來就該把寬度還出去"
+
+    panel.toggle_group("region")
+    assert panel.panel_open() is True
+    assert panel.minimumWidth() == panel.RAIL_W + panel.PANEL_W
+    assert seen == [False, True]
+
+
+def test_the_search_button_survives_collapsing_the_card_area(qapp):
+    """搜尋框住在卡片區裡，卡片區收起來它也跟著不見 ——
+    所以 rail 上必須留一顆放大鏡，不然搜尋就再也叫不出來了。"""
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps(_steps())
+    panel.toggle_group(None)
+    assert panel.panel_open() is False
+
+    panel.search_button.clicked.emit("search")
+    assert panel.panel_open() is True, "按了放大鏡就要把卡片區帶回來"
+    # 而且搜尋框真的可以打字（不是被留在隱藏的容器裡）
+    assert panel.search.isVisibleTo(panel) is True
+    panel.set_query("gamma")
+    assert panel.visible_step_keys() == ["gamma"]
