@@ -25,14 +25,16 @@ from typing import Any, Dict, List
 
 import numpy as np
 
+from ..algo.curve import apply_curve_01
 from ..pipeline.context import Context
+from ..pipeline.curve import IDENTITY, is_identity, parse_curve
 from ..pipeline.step import (
     CATEGORY_IMAGE, GROUP_ENHANCE, ParamSpec, Step, register_step,
 )
 from ._util import parse_key_list, require_image
 
 __all__ = ["BrightnessContrastStep", "GammaStep", "apply_brightness_contrast",
-           "apply_gamma"]
+           "apply_gamma", "apply_curve"]
 
 
 def _value_range(arr: np.ndarray) -> tuple:
@@ -82,6 +84,24 @@ def apply_gamma(img: np.ndarray, gamma: float) -> np.ndarray:
     x = (img.astype(np.float64, copy=False) - lo) / span
     x = np.clip(x, 0.0, 1.0) ** (1.0 / g)
     return (x * span + lo).astype(img.dtype, copy=False)
+
+
+def apply_curve(img: np.ndarray, curve) -> np.ndarray:
+    """套用自訂色調曲線（控制點字串或 ``[(x, y), …]``）。
+
+    跟 :func:`apply_gamma` 走完全相同的正規化 / 反正規化流程 ——
+    差別只在中間那條轉移函數是使用者自己拉的，而不是 ``x ** (1/gamma)``。
+    所以兩者可以互換，換過去不會連帶改變亮度基準或數值型別。
+    """
+    pts = parse_curve(curve) if isinstance(curve, str) else list(curve)
+    if is_identity(pts):
+        return img
+    lo, hi = _value_range(img)
+    span = hi - lo
+    if span <= 0:
+        return img
+    x = (img.astype(np.float64, copy=False) - lo) / span
+    return (apply_curve_01(x, pts) * span + lo).astype(img.dtype, copy=False)
 
 
 class _ToneStep(Step):
@@ -159,13 +179,23 @@ class BrightnessContrastStep(_ToneStep):
 
 @register_step
 class GammaStep(_ToneStep):
-    """Gamma 校正（非線性重分佈灰階）。"""
+    """Gamma 校正 + 自訂色調曲線（非線性重分佈灰階）。
+
+    兩個旋鈕、一個結果
+    ------------------
+    ``gamma`` 是滑桿，一個數字就講完；``curve`` 是使用者自己拉的線，
+    想做「只提暗部、亮部原封不動」這種 gamma 做不到的事時用。
+
+    **曲線一旦不是 y=x 就完全接手，gamma 被忽略。** 選「兩個都套」會很難
+    debug：使用者把曲線拉平了卻還是暗，因為 gamma 還壓在那裡。
+    這條規則寫在 ``curve`` 的 help 裡，UI 也會在曲線生效時把 gamma 那列調淡。
+    """
 
     key = "gamma"
-    label = "Gamma"
+    label = "Gamma / Curve"
     help = ("Redistribute gray levels non-linearly: below 1 opens up dark "
             "detail, above 1 pushes it down. Linear brightness and contrast "
-            "cannot do this.")
+            "cannot do this. Draw your own curve for full control.")
     params = [
         ParamSpec(name="target", type="image_key", default="test",
                   help="Main image stream to adjust (overwritten in place)."),
@@ -176,9 +206,17 @@ class GammaStep(_ToneStep):
         ParamSpec(name="gamma", type="float", default=1.0, min=0.1, max=5.0,
                   help=("Below 1 brings out detail in the dark areas (common "
                         "for SEM); above 1 does the opposite. 1 = unchanged.")),
+        ParamSpec(name="curve", type="curve", default=IDENTITY,
+                  help=("Custom tone curve: input gray level across, output "
+                        "up. Drag a point to bend it. While it is a straight "
+                        "y = x line the gamma slider above is used instead; "
+                        "as soon as you bend it, the curve takes over.")),
     ]
 
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
+        pts = parse_curve(p["curve"])
+        if not is_identity(pts):
+            return self._apply_each(ctx, p, lambda im: apply_curve(im, pts))
         g = float(p["gamma"])
         return self._apply_each(ctx, p, lambda im: apply_gamma(im, g))

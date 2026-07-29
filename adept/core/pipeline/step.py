@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Dict, List, Optional, Type
 
 from .context import Context
+from .curve import CurveError, format_curve, parse_curve
 
 CATEGORY_IMAGE = "image"
 CATEGORY_ALGO = "algo"
@@ -66,7 +67,9 @@ GROUP_ORDER = (GROUP_INPUT, GROUP_ENHANCE, GROUP_REGION,
 _GROUPS = GROUP_ORDER
 _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC)
 
-PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key")
+#: ``curve`` 是一個「值是控制點字串」的參數（見 ``pipeline/curve.py``）——
+#: 跟 ``image_key`` 一樣，型別上就是 str，但 UI 認得它、會給專用編輯器。
+PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key", "curve")
 
 
 class ParamError(ValueError):
@@ -123,6 +126,10 @@ class ParamSpec:
                     v = bool(value)
             elif self.type in ("str", "image_key"):
                 v = str(value)
+            elif self.type == "curve":
+                # 擋在這裡而不是等 run() 才炸（鐵則 4）。順便正規化：
+                # 排序、去空白、統一小數位 —— 手打的字串與 UI 拉出來的一樣。
+                v = format_curve(parse_curve(value))
             elif self.type == "choice":
                 v = str(value)
                 if v not in (self.choices or []):
@@ -133,6 +140,9 @@ class ParamSpec:
                 raise ParamError(f"parameter '{self.name}': unknown type")
         except ParamError:
             raise
+        except CurveError as exc:
+            # CurveError 的訊息已經是白話的，別被下面的通用訊息蓋掉
+            raise ParamError(f"parameter '{self.name}': {exc}") from None
         except (TypeError, ValueError):
             raise ParamError(
                 f"parameter '{self.name}': '{value}' cannot be converted "

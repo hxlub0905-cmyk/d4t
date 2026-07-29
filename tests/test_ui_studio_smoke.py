@@ -161,6 +161,49 @@ def test_select_node_and_preview(window, synlot):
     assert window.image_view.has_image() is True
 
 
+def test_compare_shows_two_streams_with_linked_zoom_and_pan(window, synlot):
+    """F7-8：並排比對預設關著，開了就自動配成 test | ref 並連動。
+
+    預設關著是刻意的 —— F7-5 把 Gallery 搬走就是為了讓影像變大，
+    預設並排等於把剛爭取到的寬度再砍一半。
+    """
+    from PySide6.QtCore import QPointF
+
+    _loaded(window, synlot)
+    assert window.refresh_preview(sync=True) is True
+    window.stream_combo.setCurrentText("test")
+
+    assert window.compare_enabled() is False
+    assert window.image_view_b.has_image() is False
+
+    assert window.set_compare(True) is True
+    assert window.compare_check.isChecked() is True
+    # 左邊是 test → 右邊自動給 ref（並排最常見的用途就是比這一對）
+    assert window.stream_combo_b.currentText() == "ref"
+    assert window.image_view_b.has_image() is True
+
+    # 連動：沒有連動的並排，使用者得自己把兩邊拖到同一個位置才比得起來
+    window.image_view.zoom_by(2.0)
+    assert window.image_view_b.view_state()[0] == pytest.approx(
+        window.image_view.view_state()[0])
+    # 反向也要連動，而且不可以互相回寫到爆掉
+    window.image_view_b.zoom_by(1.5)
+    assert window.image_view.view_state()[0] == pytest.approx(
+        window.image_view_b.view_state()[0])
+
+    # 平移一樣連動
+    before = window.image_view_b.view_state()[1]
+    window.image_view.set_view(window.image_view.view_state()[0],
+                               QPointF(11.0, 7.0))
+    window.image_view.view_changed.emit(window.image_view.view_state()[0],
+                                        QPointF(11.0, 7.0))
+    assert window.image_view_b.view_state()[1] != before
+
+    # 關掉之後右邊要真的放掉影像，不然它會留在記憶體裡也留在畫面上
+    assert window.set_compare(False) is False
+    assert window.image_view_b.has_image() is False
+
+
 # --------------------------------------------------------------------------- #
 # 4. 參數編輯（合法 / 不合法）
 # --------------------------------------------------------------------------- #
