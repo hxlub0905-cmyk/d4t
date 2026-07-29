@@ -393,6 +393,7 @@ class StudioWindow(QMainWindow):
         self._trial_t0 = 0.0
         self._items_by_id: Dict[str, Any] = {}    # defect_id -> DefectItem（縮圖用）
         self._score_filter: Optional[Any] = None  # 直方圖點出來的 (lo, hi)
+        self._pending_warnings: List[Any] = []    # 跑前 lint 的警告（跑完才講）
         self.welcome_dialog: Optional[Any] = None
         self.library_dialog: Optional[Any] = None
 
@@ -1684,7 +1685,8 @@ class StudioWindow(QMainWindow):
         # 錯的卡片以前的下場是**跑完 200 顆、每一顆都失敗**：進度條走完、結果
         # 是空的、原因埋在每顆的錯誤訊息裡。同一份檢查 CLI 從 M1 就在用了，
         # 只是 Studio 一直沒接上來。只擋 error，warning 照跑。
-        problems = [i for i in self.model.validate() if i.level == "error"]
+        issues = self.model.validate()
+        problems = [i for i in issues if i.level == "error"]
         if problems:
             first = problems[0]
             more = ("  (and %d more problem%s)"
@@ -1693,6 +1695,7 @@ class StudioWindow(QMainWindow):
             self._status("Cannot run — %s: %s%s"
                          % (first.title, first.detail, more))
             return False
+        self._pending_warnings = [i for i in issues if i.level == "warning"]
 
         limit = max(1, min(int(n), len(items)))
         recipe = self.model.to_recipe()
@@ -1756,6 +1759,15 @@ class StudioWindow(QMainWindow):
         fail = len(results) - ok
         msg = ("Run finished: %d defects (%d ok, %d failed) in %.1f s"
                % (len(results), ok, fail, float(elapsed)))
+        # 跑之前的 lint 警告在這裡才講：跑之前講會被「Running: 3 / 200」洗掉。
+        # 警告不擋執行，但它描述的是「跑得完、數字卻不是你以為的那個」——
+        # 例如兩張量測卡撞名，後面那張把前面那張蓋掉了。
+        warns = list(getattr(self, "_pending_warnings", []) or [])
+        if warns:
+            more = ("  (and %d more warning%s)"
+                    % (len(warns) - 1, "" if len(warns) == 2 else "s")
+                    if len(warns) > 1 else "")
+            msg = "%s  ⚠ %s: %s%s" % (msg, warns[0].title, warns[0].detail, more)
         self._status(msg)
         # F7-5：結果一到就把 Results 視窗帶出來 —— 使用者按 Run 想看的就是這個
         self.results.set_summary(
