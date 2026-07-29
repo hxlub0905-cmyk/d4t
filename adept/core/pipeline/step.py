@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, ClassVar, Dict, List, Optional, Type
@@ -111,6 +112,12 @@ class ParamSpec:
     choices: Optional[List[str]] = None
     unit: str = ""
     label: str = ""
+    #: 文字參數的合法格式（正規表達式）。填了就在 ``validate_params`` 擋下來，
+    #: 而不是讓壞值跑到演算法裡（鐵則 4）。用在「這個字會變成特徵名的一部分」
+    #: 這種地方 —— 打了空白或減號，分數表達式就再也指不到那個特徵。
+    pattern: Optional[str] = None
+    #: ``pattern`` 不合時給使用者看的白話說明（不要讓他看到正規表達式）。
+    pattern_help: str = ""
 
     def __post_init__(self) -> None:
         if self.type not in PARAM_TYPES:
@@ -168,6 +175,11 @@ class ParamSpec:
                 f"parameter '{self.name}': '{value}' cannot be converted "
                 f"to {self.type}"
             ) from None
+        if self.pattern and isinstance(v, str) and not re.match(self.pattern, v):
+            raise ParamError(
+                "parameter '%s': '%s' is not allowed here%s"
+                % (self.name, v,
+                   (" - " + self.pattern_help) if self.pattern_help else ""))
         if self.type in ("int", "float"):
             if self.min is not None and v < self.min:
                 raise ParamError(f"parameter '{self.name}': {v} is below the "
@@ -287,6 +299,7 @@ class Step(ABC):
                     "help": p.help, "min": p.min, "max": p.max,
                     "choices": p.choices, "unit": p.unit,
                     "label": p.label or p.name,
+                    "pattern": p.pattern,
                 }
                 for p in cls.params
             ],

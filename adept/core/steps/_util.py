@@ -5,16 +5,54 @@
 - ``to_uint8``       把任何灰階陣列安全轉成 uint8 0–255（[0,1] 浮點自動 ×255）。
 - ``parse_key_list`` 逗號字串 → 影像流 key 清單（去空白、忽略空項）。
 - ``ensure_gray``    彩色（3 通道）輸入自動轉灰階。
+- ``output_prefix_spec`` / ``prefix_*``  量測卡的輸出名前綴（見下方說明）。
 """
 from __future__ import annotations
 
-from typing import List
+from typing import Dict, List
 
 import cv2
 import numpy as np
 
 from ..pipeline.context import Context, ContextError
-from ..pipeline.step import StepError
+from ..pipeline.step import ParamSpec, StepError
+
+# --------------------------------------------------------------------------- #
+# 輸出名前綴（F7-11）—— 讓同一張量測卡可以用在好幾個區域上
+# --------------------------------------------------------------------------- #
+#: 特徵名是**扁平的全域命名空間**，而且是分數表達式的變數名。所以前綴只能用
+#: 「可以當變數名」的字：開頭是字母或底線，後面接字母／數字／底線。
+#: 打了空白或減號的話，`glv mean` 這種名字在表達式裡是指不到的 —— 擋在這裡，
+#: 而不是等使用者寫完表達式才發現（鐵則 4）。
+FEATURE_PREFIX_PATTERN = r"^$|^[A-Za-z_][A-Za-z0-9_]*$"
+
+
+def output_prefix_spec(example: str = "center") -> ParamSpec:
+    """量測卡共用的 ``output_prefix`` 參數（每張卡的說明只差一個例子）。"""
+    return ParamSpec(
+        name="output_prefix", type="str", default="",
+        label="Name these results",
+        pattern=FEATURE_PREFIX_PATTERN,
+        pattern_help=("use letters, digits and underscores only, and do not "
+                      "start with a digit"),
+        help=("Put a name in front of every number this card produces, so two "
+              "of these cards measuring two different regions do not overwrite "
+              "each other. For example '%s' turns glv_mean into %s_glv_mean. "
+              "Leave it empty if this is the only card of its kind."
+              % (example, example)),
+    )
+
+
+def prefix_names(prefix: str, names: List[str]) -> List[str]:
+    """把前綴套到一串特徵名上（前綴為空 = 原樣回傳）。"""
+    p = str(prefix or "").strip()
+    return [f"{p}_{n}" for n in names] if p else list(names)
+
+
+def prefix_features(prefix: str, feats: Dict[str, float]) -> Dict[str, float]:
+    """把前綴套到一組特徵值上（前綴為空 = 原樣回傳）。"""
+    p = str(prefix or "").strip()
+    return {f"{p}_{k}": v for k, v in feats.items()} if p else dict(feats)
 
 
 def require_image(ctx: Context, step_key: str, key: str) -> np.ndarray:

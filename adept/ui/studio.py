@@ -119,6 +119,7 @@ from .widgets import (
     LibraryPanel,
     ParamForm,
     PipelinePanel,
+    ProfilePanel,
     VerdictChip,
 )
 from .workers import DatasetLoadWorker, PreviewWorker, TrialWorker, _ThreadedWorker
@@ -394,6 +395,8 @@ class StudioWindow(QMainWindow):
         self._items_by_id: Dict[str, Any] = {}    # defect_id -> DefectItem（縮圖用）
         self._score_filter: Optional[Any] = None  # 直方圖點出來的 (lo, hi)
         self._pending_warnings: List[Any] = []    # 跑前 lint 的警告（跑完才講）
+        self._preview_epoch = 0                   # 預覽的世代（丟掉過期結果用）
+        self._async_epoch = 0                     # 背景那筆出發時的世代
         self.welcome_dialog: Optional[Any] = None
         self.library_dialog: Optional[Any] = None
 
@@ -745,6 +748,12 @@ class StudioWindow(QMainWindow):
         irow.addWidget(self.image_view_b, 1)
         lay.addWidget(images, 3)
 
+        # 投影曲線面板（F7-11）。**平常收起來** —— 它只有在編輯投影定位卡的
+        # 時候才有意義，常駐會把好不容易爭取到的影像高度又吃掉一塊。
+        self.profile_panel = ProfilePanel(pane)
+        self.profile_panel.setVisible(False)
+        lay.addWidget(self.profile_panel)
+
         self.feature_table = FeatureTable(pane)
         self.feature_table.setMinimumHeight(120)
         lay.addWidget(self.feature_table, 2)
@@ -807,7 +816,7 @@ class StudioWindow(QMainWindow):
             lambda msg: (self._progress_done(),
                          self._status("Could not load dataset: %s" % msg)))
 
-        self.preview_worker.ready.connect(self._on_preview_ready)
+        self.preview_worker.ready.connect(self._on_async_preview_ready)
         self.preview_worker.busy.connect(self._on_preview_busy)
         self.preview_worker.failed.connect(
             lambda msg: self._status("Preview failed: %s" % msg))
@@ -1204,6 +1213,43 @@ class StudioWindow(QMainWindow):
             self._status(str(e))
         else:
             self.param_form.clear_errors()
+            self._autofill_output_prefix(node_id, str(name), value)
+
+    #: 挑了區域就順手把輸出名填成區域的名字（F7-11）。
+    _PREFIX_SOURCE = "roi"
+
+    def _autofill_output_prefix(self, node_id: str, name: str, value: Any) -> None:
+        """使用者挑了一個區域 → 輸出名還空著的話，就填成那個區域的名字。
+
+        為什麼要自動填
+        --------------
+        「兩張量測卡的特徵會互相蓋掉」是一個**命名空間**的問題，而製程工程師沒有
+        理由要懂那是什麼。但他做的動作已經表達了意圖 —— 他把這張卡指到 `epi`，
+        那結果本來就該叫 `epi_...`。所以由工具把話補完。
+
+        只在**空著**的時候填：使用者自己改過的名字不可以被蓋掉，
+        不然「我明明改了它又跳回去」比沒有這個功能更糟。
+        """
+        if name != self._PREFIX_SOURCE:
+            return
+        node = self.model.nodes.get(node_id)
+        if node is None or "output_prefix" not in node.params:
+            return
+        if str(node.params.get("output_prefix", "") or "").strip():
+            return                       # 使用者已經自己命名過了
+        wanted = str(value or "").strip()
+        if not wanted:
+            return
+        try:
+            self.model.set_param(node_id, "output_prefix", wanted)
+        except ParamError:
+            return                       # 區域名不能當變數名 -> 安靜跳過
+        self.param_form.set_step(
+            get_step(node.step).describe(), node.params,
+            self.model.available_streams(before_node=node_id))
+        self._status("Results from this card will be named “%s_…” so they do "
+                     "not collide with another card measuring a different "
+                     "region." % wanted)
 
     # ==================================================================== #
     # 分數編輯
@@ -1460,6 +1506,9 @@ class StudioWindow(QMainWindow):
         不要一直在狀態列鬼叫）；``force=True`` 會把原因寫到狀態列。
         """
         self._preview_timer.stop()
+        # 每要求一次預覽就換一個世代編號。背景那筆算完時如果編號已經不是它
+        # 出發時那個，就代表畫面上的東西比它新 —— 那筆結果直接丟掉。
+        self._preview_epoch += 1
         if not self.model.node_order:
             if force:
                 self._status("The pipeline is empty — add the first card from the library.")
@@ -1481,8 +1530,25 @@ class StudioWindow(QMainWindow):
                 return False
             self._on_preview_ready(result)
             return True
+        self._async_epoch = self._preview_epoch
         self.preview_worker.request(recipe, item, self.model.kind, upto_node=upto)
         return True
+
+    def _on_async_preview_ready(self, result: Any) -> None:
+        """背景預覽算完。**過期的結果直接丟掉。**
+
+        `PreviewWorker` 只合併「還沒開跑」的請求；已經在跑的那一筆照樣會跑完並
+        發出 ready。所以「先送出一筆背景預覽，接著又跑了一筆同步預覽」的時候，
+        舊的那筆會**後到**，把新的畫面蓋掉 —— 使用者看到的是他剛剛那個動作
+        之前的狀態，而且不會再更新，因為沒有人會再算一次。
+
+        這個順序在實際操作裡並不罕見（點卡片 → 立刻改參數），
+        只是以前的症狀是「影像閃一下」，不容易歸因；投影曲線面板讓它變成
+        「面板空白」，才浮出來。
+        """
+        if getattr(self, "_async_epoch", 0) != self._preview_epoch:
+            return
+        self._on_preview_ready(result)
 
     def _on_preview_busy(self, busy: bool) -> None:
         if busy:
@@ -1496,6 +1562,7 @@ class StudioWindow(QMainWindow):
 
         self._populate_streams(images)
         self._show_current_stream()
+        self._refresh_profile_panel(ctx)
 
         highlight = self._highlight_features(result)
         self.feature_table.set_features(getattr(result, "features", {}) or {},
@@ -1515,6 +1582,31 @@ class StudioWindow(QMainWindow):
             self._status("Preview done (%d image streams)%s"
                          % (len(images),
                             "   score %.4g" % score if score is not None else ""))
+
+    #: 會產生投影曲線的卡片 key（面板只在編輯它的時候出現）。
+    PROFILE_STEP = "roi_profile"
+
+    def _refresh_profile_panel(self, ctx: Any) -> None:
+        """選到投影定位卡時，把**引擎這一次算出來的**曲線畫出來。
+
+        面板不自己重算 —— 它讀 ``ctx.meta["profiles"]``。UI 自己再算一次是很容易
+        發生的事，但那會讓「畫面上的框」跟「真的量下去的框」有機會不一樣，
+        而那種 bug 幾乎不可能靠肉眼發現。
+        """
+        node = self.model.nodes.get(self.selected_node or "")
+        if node is None or node.step != self.PROFILE_STEP:
+            self.profile_panel.setVisible(False)
+            self.profile_panel.set_data("", None)
+            return
+        name = str(node.params.get("roi_out", "") or "")
+        profiles = dict(getattr(ctx, "meta", {}) or {}).get("profiles") or {}
+        self.profile_panel.set_data(name, profiles.get(name))
+        self.profile_panel.setVisible(True)
+
+    def profile_panel_visible(self) -> bool:
+        """面板現在開著嗎（用明確狀態，不要問 ``isVisible()``）。"""
+        node = self.model.nodes.get(self.selected_node or "")
+        return bool(node is not None and node.step == self.PROFILE_STEP)
 
     def _highlight_features(self, result: Any) -> Sequence[str]:
         """選取節點這一步新增/改值的特徵 → 在特徵表裡標色。"""

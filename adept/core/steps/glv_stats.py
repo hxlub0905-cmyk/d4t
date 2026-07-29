@@ -19,7 +19,10 @@ from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_ALGO, ParamSpec, Step, StepError, register_step, GROUP_MEASURE,
 )
-from ._util import crop_to_roi, parse_key_list, require_image
+from ._util import (
+    crop_to_roi, output_prefix_spec, parse_key_list, prefix_features,
+    prefix_names, require_image,
+)
 
 _P_ALIAS = re.compile(r"^glv_p(\d+)$")
 _Q_FORM = re.compile(r"^glv_q(\d+)$")
@@ -63,6 +66,7 @@ class GlvStatsStep(Step):
                         "glv_std / glv_median / glv_min / glv_max / glv_q25 / "
                         "glv_q75. Percentiles can be written glv_q90 or glv_p90 "
                         "(glv_p50 = median).")),
+        output_prefix_spec("center"),
     ]
     reads = ["test"]
     writes: List[str] = []
@@ -80,7 +84,8 @@ class GlvStatsStep(Step):
     @classmethod
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
         mids = parse_key_list(params.get("metrics", "glv_mean,glv_std,glv_p50"))
-        return mids or list(cls.features_out)
+        return prefix_names(params.get("output_prefix", ""),
+                            mids or list(cls.features_out))
 
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
@@ -100,5 +105,5 @@ class GlvStatsStep(Step):
                     f"unknown statistic '{mid}'; available: "
                     f"{sorted(algo_glv.GLV_STATS)} or glv_q<0-100> / glv_p<0-100>.")
             feats[mid] = algo_glv.glv_value(patch, canon)   # feature 名照使用者列的寫
-        ctx.add_features(feats)
+        ctx.add_features(prefix_features(p["output_prefix"], feats))
         return ctx
