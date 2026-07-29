@@ -125,6 +125,63 @@ def test_light_and_dark_palettes_have_identical_keys(qapp):
     assert sum(_rgb(dark["bg_page"])) < sum(_rgb(light["bg_page"]))
 
 
+def test_every_token_the_ui_asks_for_actually_exists():
+    """``TOKENS["typo"]`` 只會在**那個 widget 被畫出來的那一刻**炸。
+
+    離屏測試通常不觸發 ``paintEvent``（沒有人 grab 它），所以自繪元件裡
+    打錯的 token 名可以一路活到使用者打開那個畫面才 KeyError ——
+    已經發生過一次（``surface_raised``）。這裡靜態掃一遍，成本近乎零。
+
+    不需要 ``qapp``：純文字掃描，故意不 import Qt。
+    """
+    import ast
+    import pathlib
+
+    from adept.ui import theme as t
+
+    ui = pathlib.Path(__file__).resolve().parent.parent / "adept" / "ui"
+    bad = []
+    for py in sorted(ui.rglob("*.py")):
+        tree = ast.parse(py.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Subscript):
+                continue
+            target = node.value
+            name = (target.id if isinstance(target, ast.Name)
+                    else getattr(target, "attr", None))
+            if name != "TOKENS":
+                continue
+            key = node.slice
+            if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                if key.value not in t.PALETTES["light"]:
+                    bad.append("%s:%d  TOKENS[%r]"
+                               % (py.name, node.lineno, key.value))
+    assert not bad, "這些 token 不存在（畫到那個 widget 時才會 KeyError）：\n  " \
+                    + "\n  ".join(bad)
+
+
+def test_self_painted_widgets_survive_an_actual_repaint(qapp):
+    """真的畫一次。自繪元件的 bug 只在 ``paintEvent`` 執行時才浮出來。"""
+    from PySide6.QtGui import QPixmap
+
+    widgets = [widgets_mod.CurveEditor(), widgets_mod.CurveField(),
+               widgets_mod.ImageView(), widgets_mod.GroupIcon("region", "#c06a1d"),
+               widgets_mod.HistogramWidget(), widgets_mod.VerdictChip()]
+    lib = widgets_mod.LibraryPanel()
+    lib.set_steps(_steps())
+    widgets.append(lib)
+
+    for theme_name in ("light", "dark"):
+        theme_mod.set_theme(theme_name)
+        for w in widgets:
+            w.resize(220, 160)
+            pm = QPixmap(w.size())
+            pm.fill()
+            w.render(pm)          # KeyError / 例外會在這裡冒出來
+            assert not pm.isNull()
+    theme_mod.apply_theme(qapp, "light")
+
+
 def test_set_theme_is_in_place_and_reversible(qapp):
     """``TOKENS`` 必須是**同一個物件** —— 各模組都 import 過它了。"""
     before = theme_mod.TOKENS
