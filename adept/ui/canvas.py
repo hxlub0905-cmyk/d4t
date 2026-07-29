@@ -100,12 +100,21 @@ def layout_columns(node_ids: Sequence[str],
     for n in ids:                       # ids 已是拓撲順序，一遍就夠
         depth[n] = max((depth.get(p, 0) + 1 for p in preds[n]), default=0)
 
+    # 一「帶」= 換行之前的 WRAP 個深度。帶高取「最擠的那個深度有幾個節點」，
+    # 這樣換行之後上下兩帶不會疊在一起。
+    per_depth: Dict[int, int] = {}
+    for n in ids:
+        per_depth[depth[n]] = per_depth.get(depth[n], 0) + 1
+    band_h = max(per_depth.values(), default=1)
+
     rows: Dict[int, int] = {}
     out: Dict[str, Tuple[int, int]] = {}
     for n in sorted(ids, key=lambda x: (depth[x], idx[x])):
-        col = depth[n]
-        out[n] = (col, rows.get(col, 0))
-        rows[col] = rows.get(col, 0) + 1
+        d = depth[n]
+        band, col = divmod(d, WRAP)
+        r = rows.get(d, 0)
+        rows[d] = r + 1
+        out[n] = (col, band * band_h + r)
     return out
 
 
@@ -313,16 +322,34 @@ class _NodeItem(QGraphicsItem):
 
 
 class _EdgeItem(QGraphicsItem):
-    """一條連線（三次貝茲，左→右）。點它可選取，``Delete`` 移除。"""
+    """一條連線（三次貝茲，左→右）。點它可選取，``Delete`` 移除。
+
+    ``implicit=True`` 是 **route 的隱含順序**（F7-10），畫成虛線、不可選取。
+    引擎的依賴是「route 相鄰對 ∪ 顯式 edges」——
+    也就是說**畫布上沒有線，不代表沒有連接**。以前只畫顯式 edges，於是載入
+    一份沒拉過線的 recipe 看到的是「九張互不相干的卡」，但它其實是照順序跑的。
+    使用者只會得到兩種結論，兩種都是錯的：以為要自己連起來才會跑，
+    或以為沒連線的卡不會執行。
+
+    不可選取（也就刪不掉）是刻意的：隱含順序來自卡片的排列，
+    刪掉它在語意上等於「把這張卡從流程裡拿掉」，那是另一個動作。
+    """
 
     def __init__(self, src: _NodeItem, dst: _NodeItem, canvas: "PipelineCanvas",
-                 port: int = 0):
+                 port: int = 0, implicit: bool = False):
         super().__init__()
         self.src, self.dst, self.canvas, self.port = src, dst, canvas, int(port)
-        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        self.setZValue(-1.0)
-        self.setToolTip("%s → %s  (select and press Delete to remove)"
-                        % (src.node_id, dst.node_id))
+        self.implicit = bool(implicit)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, not self.implicit)
+        self.setZValue(-2.0 if self.implicit else -1.0)
+        if self.implicit:
+            self.setToolTip(
+                "%s runs before %s because of the order of the cards.\n"
+                "Drag from a port to make the connection explicit."
+                % (src.node_id, dst.node_id))
+        else:
+            self.setToolTip("%s → %s  (select and press Delete to remove)"
+                            % (src.node_id, dst.node_id))
 
     def pair(self) -> Tuple[str, str]:
         return (self.src.node_id, self.dst.node_id)
@@ -348,7 +375,13 @@ class _EdgeItem(QGraphicsItem):
         col = QColor(TOKENS["canvas_edge_active"] if self.isSelected()
                      else TOKENS["canvas_edge"])
         path = self.path()
-        p.setPen(QPen(col, 2.2 if self.isSelected() else 1.6))
+        if self.implicit:
+            # 虛線 + 半透明：看得出「有順序」，但不會跟使用者親手拉的線搶。
+            col.setAlpha(120)
+            pen = QPen(col, 1.3, Qt.DashLine)
+            p.setPen(pen)
+        else:
+            p.setPen(QPen(col, 2.2 if self.isSelected() else 1.6))
         p.setBrush(Qt.NoBrush)
         p.drawPath(path)
 
@@ -397,7 +430,8 @@ class PipelineCanvas(QGraphicsView):
         self._items: Dict[str, _NodeItem] = {}
         self._edges: List[_EdgeItem] = []
         self._order: List[str] = []
-        self._pairs: List[Tuple[str, str]] = []
+        self._pairs: List[Tuple[str, str]] = []      # 使用者拉的線
+        self._implicit: List[Tuple[str, str]] = []   # route 順序帶來的依賴
         self._selected: Optional[str] = None
         self._score_summary = ""
         self._link_from: Optional[_NodeItem] = None
@@ -413,7 +447,12 @@ class PipelineCanvas(QGraphicsView):
         self._order = [str(n.get("node_id", "")) for n in nodes]
         self._pairs = [(str(a), str(b)) for a, b in (edges or ())]
 
-        pos = layout_columns(self._order, self._pairs)
+        # route 的相鄰對也是**真的依賴**（engine 的 execution_order 是
+        # 「route 相鄰對 ∪ edges」），所以排版與繪製都要把它算進去。
+        self._implicit = [pair for pair in zip(self._order, self._order[1:])
+                          if pair not in set(self._pairs)]
+
+        pos = layout_columns(self._order, self._pairs + self._implicit)
         for info in nodes:
             item = _NodeItem(info, self)
             col, row = pos.get(item.node_id, (0, 0))
@@ -421,14 +460,15 @@ class PipelineCanvas(QGraphicsView):
             self._scene.addItem(item)
             self._items[item.node_id] = item
 
-        for a, b in self._pairs:
-            if a not in self._items or b not in self._items:
-                continue
-            src, dst = self._items[a], self._items[b]
-            for port in self._ports_between(src, dst):
-                edge = _EdgeItem(src, dst, self, port)
-                self._scene.addItem(edge)
-                self._edges.append(edge)
+        for pairs, implicit in ((self._pairs, False), (self._implicit, True)):
+            for a, b in pairs:
+                if a not in self._items or b not in self._items:
+                    continue
+                src, dst = self._items[a], self._items[b]
+                for port in self._ports_between(src, dst):
+                    edge = _EdgeItem(src, dst, self, port, implicit=implicit)
+                    self._scene.addItem(edge)
+                    self._edges.append(edge)
 
         self.set_selected(self._selected)
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)

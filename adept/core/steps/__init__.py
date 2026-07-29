@@ -18,6 +18,7 @@ from . import load           # load_patch
 from . import normalize      # percentile_norm / glv_mask_norm / hist_match
 from . import denoise        # denoise
 from . import tone           # brightness_contrast / gamma
+from . import flatten        # flatten / local_contrast
 from . import align          # align
 from . import arith          # subtract / invert
 from . import snr_map        # snr_map
@@ -30,6 +31,7 @@ from . import glv_stats      # glv_stats
 from . import golden         # cell_period / golden_cell
 
 __all__ = [
-    "load", "normalize", "denoise", "align", "arith",
-    "snr_map", "blob", "cd", "roi_snr", "quality", "glv_stats", "golden",
+    "load", "normalize", "denoise", "tone", "flatten", "align", "arith",
+    "region", "snr_map", "blob", "cd", "roi_snr", "quality", "glv_stats",
+    "golden",
 ]
