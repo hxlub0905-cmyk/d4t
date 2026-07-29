@@ -74,6 +74,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -383,6 +384,9 @@ class StudioWindow(QMainWindow):
         self._preview_images: Dict[str, Any] = {}
         self._last_result: Optional[Any] = None
         self._user_stream: Optional[str] = None   # 使用者親手挑的影像流（會被保留）
+        self._user_stream_b: Optional[str] = None  # 同上，並排的右邊那張
+        self._compare_on = False         # 並排比對開著嗎（F7-8）
+        self._view_syncing = False       # 正在把檢視狀態推給另一張圖
         self._syncing = False            # 程式在寫 widget（別回頭觸發 model）
         self._trial_t0 = 0.0
         self._items_by_id: Dict[str, Any] = {}    # defect_id -> DefectItem（縮圖用）
@@ -700,6 +704,18 @@ class StudioWindow(QMainWindow):
             "Which image stream to look at (test / ref / diff / snr_map …)")
         srow.addWidget(lbl_stream)
         srow.addWidget(self.stream_combo, 1)
+
+        # 並排比對（F7-8）—— 預設關著，見 _set_compare 的說明
+        self.compare_check = QCheckBox("Compare", pane)
+        self.compare_check.setToolTip(
+            "Show a second image stream side by side, with linked zoom and pan "
+            "— useful when tuning Enhance cards, to check test and ref still "
+            "match")
+        self.stream_combo_b = QComboBox(pane)
+        self.stream_combo_b.setToolTip("The stream shown on the right")
+        self.stream_combo_b.setVisible(False)
+        srow.addWidget(self.compare_check)
+        srow.addWidget(self.stream_combo_b, 1)
         # 游標讀數有自己的位置（M7）。以前它是寫進狀態列的，於是滑鼠只要飄過
         # 影像，剛才那句「Trial run finished: …」就被 x/y/gray 洗掉了 ——
         # 狀態列該留給「使用者要讀的事件」，一直在刷的東西不該跟它搶同一格。
@@ -712,7 +728,15 @@ class StudioWindow(QMainWindow):
         lay.addLayout(srow)
 
         self.image_view = ImageView(pane)
-        lay.addWidget(self.image_view, 3)
+        self.image_view_b = ImageView(pane)
+        self.image_view_b.setVisible(False)
+        images = QWidget(pane)
+        irow = QHBoxLayout(images)
+        irow.setContentsMargins(0, 0, 0, 0)
+        irow.setSpacing(4)
+        irow.addWidget(self.image_view, 1)
+        irow.addWidget(self.image_view_b, 1)
+        lay.addWidget(images, 3)
 
         self.feature_table = FeatureTable(pane)
         self.feature_table.setMinimumHeight(120)
@@ -752,8 +776,15 @@ class StudioWindow(QMainWindow):
         self.btn_next.clicked.connect(lambda: self.step_defect(+1))
         self.defect_combo.currentIndexChanged.connect(self._on_defect_combo)
         self.stream_combo.currentTextChanged.connect(self._on_stream_changed)
+        self.stream_combo_b.currentTextChanged.connect(self._on_stream_b_changed)
+        self.compare_check.toggled.connect(self.set_compare)
 
         self.image_view.cursor_info.connect(self._on_cursor_info)
+        self.image_view_b.cursor_info.connect(self._on_cursor_info)
+        self.image_view.view_changed.connect(
+            lambda s, o: self._link_views(self.image_view, self.image_view_b, s, o))
+        self.image_view_b.view_changed.connect(
+            lambda s, o: self._link_views(self.image_view_b, self.image_view, s, o))
 
         self.histogram.threshold_changed.connect(self._on_threshold_changed)
         self.histogram.threshold_committed.connect(self._on_threshold_committed)
@@ -1462,24 +1493,98 @@ class StudioWindow(QMainWindow):
         names = sorted(images)
         want = (self._user_stream if self._user_stream in images
                 else self._default_stream(images))
+        want_b = (self._user_stream_b if self._user_stream_b in images
+                  else self._default_compare_stream(images, want))
         self._syncing = True
         try:
             self.stream_combo.clear()
             self.stream_combo.addItems(names)
             if want in names:
                 self.stream_combo.setCurrentIndex(names.index(want))
+            self.stream_combo_b.clear()
+            self.stream_combo_b.addItems(names)
+            if want_b in names:
+                self.stream_combo_b.setCurrentIndex(names.index(want_b))
         finally:
             self._syncing = False
 
+    def _default_compare_stream(self, images: Dict[str, Any], left: str) -> str:
+        """並排的右邊預設放什麼：左邊是 test 就配 ref（反之亦然）。
+
+        並排最常見的用途就是「這張 Enhance 卡有沒有把 test 和 ref 調成不一樣」，
+        所以預設直接給那一對，不要讓使用者每次都自己挑。
+        """
+        pair = {"test": "ref", "ref": "test"}
+        mate = pair.get(str(left))
+        if mate and mate in images:
+            return mate
+        for k in ("ref", "diff", "test"):
+            if k in images and k != left:
+                return k
+        for k in sorted(images):
+            if k != left:
+                return str(k)
+        return str(left)
+
     def _show_current_stream(self) -> None:
-        name = self.stream_combo.currentText()
-        self.image_view.set_image(self._preview_images.get(name))
+        self.image_view.set_image(
+            self._preview_images.get(self.stream_combo.currentText()))
+        if self.compare_check.isChecked():
+            self.image_view_b.set_image(
+                self._preview_images.get(self.stream_combo_b.currentText()))
 
     def _on_stream_changed(self, text: str) -> None:
         if self._syncing:
             return
         self._user_stream = str(text) or None
         self._show_current_stream()
+
+    def _on_stream_b_changed(self, text: str) -> None:
+        if self._syncing:
+            return
+        self._user_stream_b = str(text) or None
+        self._show_current_stream()
+
+    # ---- 並排比對（F7-8）--------------------------------------------------
+    def set_compare(self, on: bool) -> bool:
+        """開／關並排的第二張圖。回傳最後的狀態。
+
+        **預設是關的**，這是刻意的：F7-5 把 Gallery 與直方圖搬走，就是為了讓
+        右欄的影像變大（使用者原話「影像最好大一點、置中」）。預設並排等於
+        把剛爭取到的寬度再砍一半。真正需要並排的是**調 Enhance 卡的時候**
+        （確認 test 與 ref 被調成一樣），那是一個明確的時機，一次點擊就到。
+
+        兩張圖的縮放與平移連動 —— 沒有連動的並排要使用者自己把兩邊拖到同一個
+        位置才比得起來，那還不如切換一張。
+        """
+        on = bool(on)
+        if self.compare_check.isChecked() != on:
+            self.compare_check.setChecked(on)     # 會再繞回這裡一次
+            return self.compare_check.isChecked()
+        self.image_view_b.setVisible(on)
+        self.stream_combo_b.setVisible(on)
+        self._compare_on = on
+        if on:
+            self._show_current_stream()
+            scale, offset = self.image_view.view_state()
+            self.image_view_b.set_view(scale, offset)
+        else:
+            self.image_view_b.set_image(None)
+        return on
+
+    def compare_enabled(self) -> bool:
+        """並排現在開著嗎。用明確狀態而非 ``isVisible()``（視窗還沒 show 時後者恆假）。"""
+        return bool(self._compare_on)
+
+    def _link_views(self, source: Any, target: Any, scale: float, offset) -> None:
+        """把 ``source`` 的檢視狀態推給 ``target``（單向，避免無限來回）。"""
+        if not self._compare_on or self._view_syncing:
+            return
+        self._view_syncing = True
+        try:
+            target.set_view(scale, offset)
+        finally:
+            self._view_syncing = False
 
     # ==================================================================== #
     # 試跑

@@ -33,7 +33,7 @@ def _load_qt() -> None:
     from PySide6.QtTest import QTest  # noqa: F401
     from PySide6.QtWidgets import (  # noqa: F401
         QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QLabel, QLineEdit,
-        QSpinBox,
+        QSlider, QSpinBox,
     )
 
     from adept.ui import theme as theme_mod  # noqa: F401
@@ -263,6 +263,140 @@ def test_param_form_int_and_image_key_from_snr_map(qapp):
     for spec in desc["params"]:
         assert form.hint_text(spec["name"]) == spec["help"]
         assert spec["help"]
+
+
+def test_bounded_numbers_get_a_slider_bound_both_ways(qapp):
+    """F7-8：有上下界的數字都配一支滑桿。
+
+    「gamma 要填多少」對不會寫 code 的人沒有答案 —— 他要的是一邊拖一邊看圖。
+    數字框留著，因為 recipe 是要交接給別人的，那需要一個確切的值。
+    """
+    form = widgets_mod.ParamForm()
+    edits = []
+    form.param_edited.connect(lambda n, v: edits.append((n, v)))
+    form.set_step(_describe("gamma"), {}, ["test", "ref"])
+
+    s = form.slider("gamma")
+    box = form.editor("gamma")
+    assert isinstance(s, QSlider) and isinstance(box, QDoubleSpinBox)
+    assert edits == [], "建表本身不可以噴 param_edited"
+
+    # 滑桿 -> 數字框 -> param_edited
+    s.setValue(s.minimum())
+    assert box.value() == pytest.approx(0.1)
+    assert edits[-1] == ("gamma", pytest.approx(0.1))
+    s.setValue(s.maximum())
+    assert box.value() == pytest.approx(5.0)
+
+    # 數字框 -> 滑桿（反向也要跟上，而且不可以互相回寫到爆掉）
+    box.setValue(1.0)
+    assert s.value() == pytest.approx(s.maximum() * (1.0 - 0.1) / (5.0 - 0.1),
+                                      abs=2)
+    assert len([e for e in edits if e[0] == "gamma"]) == 3
+
+    # 整數參數也有；沒有上下界的就沒有（硬給一支只會誤導）
+    form.set_step(_describe("snr_map"), {}, ["test", "diff"])
+    assert isinstance(form.slider("window"), QSlider)
+    assert (form.slider("window").minimum(),
+            form.slider("window").maximum()) == (5, 201)
+    form.set_step(_describe("load_patch"), {}, [])
+    assert form.slider("channels") is None
+
+
+def test_curve_editor_is_wysiwyg_and_feeds_the_recipe(qapp):
+    """曲線編輯器畫的線 = 影像上套的線（同一個 core 函式）。
+
+    UI 自己再實作一份插值太容易了，而那會讓使用者看到的和跑出來的不一樣。
+    """
+    from adept.core.algo.curve import curve_lut
+    from adept.core.steps.tone import apply_curve
+
+    form = widgets_mod.ParamForm()
+    edits = []
+    form.param_edited.connect(lambda n, v: edits.append((n, v)))
+    form.set_step(_describe("gamma"), {}, ["test", "ref"])
+
+    field = form.editor("curve")
+    assert isinstance(field, widgets_mod.CurveField)
+    assert field.text() == "0,0; 1,1" and field.is_identity() is True
+
+    # 拉一個點 -> 值進 param_edited（也就是進 recipe）
+    field.editor._insert(0.4, 0.7)
+    assert edits[-1] == ("curve", "0,0; 0.4,0.7; 1,1")
+    assert field.is_identity() is False
+
+    # 畫面上的曲線就是 core 的 LUT
+    lut = curve_lut(field.editor.points(), 256)
+    assert lut[0] == pytest.approx(0.0) and lut[-1] == pytest.approx(1.0)
+    assert np.all(np.diff(lut) >= -1e-12), "保單調：不可以 overshoot 出假的暗環"
+    assert lut[int(0.4 * 255)] > 0.4, "把中間點往上拉，中間就要變亮"
+
+    # 而且引擎吃得下同一個字串
+    img = np.linspace(0, 255, 64, dtype=np.uint8).reshape(8, 8)
+    out = apply_curve(img, field.text())
+    assert out.dtype == img.dtype and out[4, 0] > img[4, 0]
+
+    # 打字打到一半的不合法字串不可以把辛苦拉的線清掉
+    before = field.text()
+    assert field.set_text("0,0; 0.4,") is False
+    assert field.text() == before
+
+    field.editor.reset()
+    assert field.text() == "0,0; 1,1"
+
+
+def test_a_drawn_curve_visibly_takes_over_from_the_gamma_slider(qapp):
+    """規則寫在 steps/tone.py（曲線接管 gamma），這裡驗**使用者看得見**。
+
+    不然他會拉了曲線又去動 gamma，然後以為 gamma 壞了。
+    """
+    form = widgets_mod.ParamForm()
+    form.set_step(_describe("gamma"), {}, ["test", "ref"])
+    gamma_row = form._rows["gamma"]
+    assert gamma_row.property("dimmed") == "false"
+
+    form.editor("curve").editor._insert(0.3, 0.6)
+    assert gamma_row.property("dimmed") == "true"
+    assert "custom curve" in form.hint_text("gamma")
+    # 調淡不是鎖死 —— 使用者可能只是想比較兩種做法
+    assert gamma_row.isEnabled() is True
+
+    form.editor("curve").editor.reset()
+    assert gamma_row.property("dimmed") == "false"
+    assert form.hint_text("gamma") == gamma_row.spec["help"]
+
+
+def test_curve_points_can_be_dragged_and_the_ends_stay_put(qapp):
+    """頭尾的 x 鎖在 0 和 1 —— 曲線必須覆蓋整個灰階範圍，少一段就沒定義。"""
+    ed = widgets_mod.CurveEditor()
+    ed.resize(200, 200)
+    seen = []
+    ed.curve_changed.connect(seen.append)
+
+    idx = ed._insert(0.5, 0.5)
+    assert idx == 1 and len(ed.points()) == 3
+
+    def _drag(px_from, px_to):
+        _mouse(ed, QEvent.MouseButtonPress, px_from, Qt.LeftButton)
+        _mouse(ed, QEvent.MouseMove, px_to, Qt.LeftButton)
+        _mouse(ed, QEvent.MouseButtonRelease, px_to, Qt.LeftButton, Qt.NoButton)
+
+    # 拖中間那點往上
+    _drag(ed._to_px(0.5, 0.5), ed._to_px(0.5, 0.85))
+    assert ed.points()[1][1] > 0.7
+    assert seen, "拖曳要發訊號，不然參數不會進 recipe"
+
+    # 拖最後一點：y 動得了，x 不動
+    _drag(ed._to_px(1.0, 1.0), ed._to_px(0.6, 0.6))
+    assert ed.points()[-1][0] == pytest.approx(1.0)
+    assert ed.points()[-1][1] < 0.9
+
+    # 頭尾刪不掉，中間刪得掉
+    ed._remove(0)
+    ed._remove(len(ed.points()) - 1)
+    assert len(ed.points()) == 3
+    ed._remove(1)
+    assert len(ed.points()) == 2
 
 
 def test_param_form_bool_choice_and_str(qapp):

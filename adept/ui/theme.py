@@ -469,6 +469,27 @@ QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
     width: 16px; background: $bg_elevated; border-left: 1px solid $border_default;
 }
 
+/* -- sliders (F7-8) ----------------------------------------------------- *
+ * One per bounded parameter. The handle is deliberately larger than Qt's
+ * default: the whole point is dragging it while watching the image, and a
+ * handle you keep missing is the same as no slider at all.                */
+QSlider { background: transparent; min-height: 22px; }
+QSlider::groove:horizontal {
+    height: 4px; border-radius: 2px;
+    background: $border_default;
+}
+QSlider::sub-page:horizontal {
+    height: 4px; border-radius: 2px; background: $accent;
+}
+QSlider::handle:horizontal {
+    width: 12px; height: 12px; margin: -5px 0; border-radius: 6px;
+    background: $bg_elevated; border: 2px solid $accent;
+}
+QSlider::handle:horizontal:hover { border-color: $accent_active; }
+QSlider::handle:horizontal:pressed { background: $accent; }
+QSlider:disabled::sub-page:horizontal { background: $border_default; }
+QSlider:disabled::handle:horizontal { border-color: $border_default; }
+
 /* -- check boxes ------------------------------------------------------- */
 QCheckBox { background: transparent; spacing: 6px; }
 QCheckBox::indicator {

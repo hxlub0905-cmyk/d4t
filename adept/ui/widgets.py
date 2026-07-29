@@ -46,9 +46,12 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QDialog,
+    QDialogButtonBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -127,6 +130,10 @@ class ImageView(QWidget):
 
     zoom_changed = Signal(float)
     cursor_info = Signal(str)          # "x 12  y 30  ·  gray 187"（離開時空字串）
+    #: 縮放**或**平移之後的完整檢視狀態（scale, offset）。
+    #: 並排比對兩張圖時，兩邊靠這個訊號互相跟隨 —— 沒有連動的並排沒有意義，
+    #: 使用者得手動把兩邊拖到同一個位置才比得起來。
+    view_changed = Signal(float, QPointF)
 
     _MIN_SCALE = 0.02
     _MAX_SCALE = 60.0
@@ -197,6 +204,7 @@ class ImageView(QWidget):
                                (vh - ih * self._scale) / 2.0)
         self.update()
         self.zoom_changed.emit(self._scale)
+        self.view_changed.emit(self._scale, QPointF(self._offset))
 
     def zoom_by(self, factor: float, anchor: Optional[QPointF] = None) -> None:
         """以 ``anchor``（畫布座標，預設中心）為定點縮放。"""
@@ -215,6 +223,24 @@ class ImageView(QWidget):
         self._auto_fit = False
         self.update()
         self.zoom_changed.emit(self._scale)
+        self.view_changed.emit(self._scale, QPointF(self._offset))
+
+    def set_view(self, scale: float, offset: QPointF) -> None:
+        """直接套用另一張圖的檢視狀態（並排比對時用）。
+
+        **不回發 view_changed** —— 兩邊互相跟隨會無限來回。跟隨是單向的，
+        由發起操作的那一邊推過去。
+        """
+        s = float(np.clip(float(scale), self._MIN_SCALE, self._MAX_SCALE))
+        if s == self._scale and QPointF(offset) == self._offset:
+            return
+        self._scale = s
+        self._offset = QPointF(offset)
+        self._auto_fit = False
+        self.update()
+
+    def view_state(self) -> Tuple[float, QPointF]:
+        return self._scale, QPointF(self._offset)
 
     def zoom_in(self) -> None:
         self.zoom_by(1.25)
@@ -276,6 +302,7 @@ class ImageView(QWidget):
         if self._panning:
             self._offset = self._pan_offset + (pos - self._pan_start)
             self.update()
+            self.view_changed.emit(self._scale, QPointF(self._offset))
             return
         self._emit_cursor(pos)
 
@@ -314,14 +341,33 @@ class ImageView(QWidget):
 # --------------------------------------------------------------------------- #
 # 2. ParamForm
 # --------------------------------------------------------------------------- #
+#: 浮點滑桿的內部刻度數。滑桿只吃 int，所以 min..max 一律映射到 0..這個數。
+#: 1000 格對 gamma（0.1–5）約是 0.005 一格 —— 拖起來連續，又不會抖到看不出。
+_SLIDER_TICKS = 1000
+
+#: 整數參數的滑桿上限跨度。超過這個跨度就不給滑桿（一格好幾十，拖了也沒用），
+#: 留純數字框比較誠實。
+_SLIDER_MAX_INT_SPAN = 5000
+
+
 class _ParamRow(QFrame):
-    """一個參數 = 標題列（名稱 + 編輯器）+ 永遠看得見的白話說明第二行。"""
+    """一個參數 = 標題列（名稱 + 滑桿 + 數字框）+ 永遠看得見的白話說明第二行。
+
+    為什麼有上下界的數字都配一支滑桿（F7-8）
+    ----------------------------------------
+    「gamma 要填多少」對不會寫 code 的人是個沒有答案的問題 —— 他要的是
+    **一邊拖一邊看圖**。數字框逼人先想好一個數字再輸入，那個順序是反的。
+
+    數字框沒有被拿掉，是刻意的：滑桿負責找到大概的位置，數字框負責記錄與
+    重現（recipe 是要交接給別人的）。兩邊雙向綁定，改哪一邊另一邊都會跟上。
+    """
 
     def __init__(self, spec: Dict[str, Any], editor: QWidget,
                  parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.spec = spec
         self.editor = editor
+        self.slider: Optional[QSlider] = None
         self.setObjectName("paramRow")
 
         lay = QVBoxLayout(self)
@@ -335,7 +381,14 @@ class _ParamRow(QFrame):
         self.name_label.setObjectName("paramLabel")
         self.name_label.setMinimumWidth(104)
         top.addWidget(self.name_label)
-        top.addWidget(editor, 1)
+
+        self.slider = _make_slider(spec, editor)
+        if self.slider is not None:
+            top.addWidget(self.slider, 1)
+            editor.setMaximumWidth(96)
+            top.addWidget(editor, 0)
+        else:
+            top.addWidget(editor, 1)
         lay.addLayout(top)
 
         self.hint = QLabel(str(spec.get("help", "")))
@@ -359,6 +412,95 @@ class _ParamRow(QFrame):
 
     def has_error(self) -> bool:
         return self.hint.property("error") == "true"
+
+    def set_dimmed(self, dimmed: bool, why: str = "") -> None:
+        """把整列調淡（值還在、還能改，只是現在不生效）。
+
+        用在「另一個參數接管了這一個」的情況 —— 例如畫了曲線之後 gamma
+        就不再被用到。不 disable 是刻意的：使用者可能只是想比較兩種做法，
+        把它鎖死會逼他先把曲線拉平才改得動 gamma。
+        """
+        self.setProperty("dimmed", "true" if dimmed else "false")
+        self.setEnabled(True)
+        self.name_label.setStyleSheet(
+            "color:%s;" % (TOKENS["text_disabled"] if dimmed
+                           else TOKENS["text_primary"]))
+        if dimmed and why:
+            self.hint.setText("· " + why)
+            self.hint.setStyleSheet("color:%s; font-size:11px; font-style:italic;"
+                                    % TOKENS["text_disabled"])
+        elif not self.has_error():
+            self.hint.setText(str(self.spec.get("help", "")))
+            self.hint.setStyleSheet("color:%s; font-size:11px;" % TOKENS["text_hint"])
+
+
+def _make_slider(spec: Dict[str, Any], editor: QWidget) -> Optional[QSlider]:
+    """有上下界的 int / float 參數 → 一支跟數字框雙向綁定的滑桿。
+
+    回 ``None`` 表示這個參數不適合滑桿（沒界、跨度是 0、或整數跨度大到
+    一格好幾十）。這樣新卡片只要把 min/max 填好就自動有滑桿，
+    不必逐張卡去 UI 這邊登記。
+    """
+    ptype = str(spec.get("type", ""))
+    lo, hi = spec.get("min"), spec.get("max")
+    if ptype not in ("int", "float") or lo is None or hi is None:
+        return None
+    lo, hi = float(lo), float(hi)
+    if not (math.isfinite(lo) and math.isfinite(hi)) or hi <= lo:
+        return None
+
+    s = QSlider(Qt.Horizontal)
+    s.setObjectName("paramSlider")
+    s.setToolTip(str(spec.get("help", "")))
+    guard = {"busy": False}
+
+    if ptype == "int":
+        if hi - lo > _SLIDER_MAX_INT_SPAN:
+            return None
+        s.setRange(int(lo), int(hi))
+        s.setValue(int(editor.value()))
+
+        def from_slider(v: int) -> None:
+            if guard["busy"]:
+                return
+            guard["busy"] = True
+            editor.setValue(int(v))
+            guard["busy"] = False
+
+        def from_box(v: int) -> None:
+            if guard["busy"]:
+                return
+            guard["busy"] = True
+            s.setValue(int(v))
+            guard["busy"] = False
+    else:
+        s.setRange(0, _SLIDER_TICKS)
+        span = hi - lo
+
+        def to_tick(v: float) -> int:
+            return int(round((float(v) - lo) / span * _SLIDER_TICKS))
+
+        s.setValue(to_tick(editor.value()))
+
+        def from_slider(v: int) -> None:      # noqa: F811 — 兩型別各一份
+            if guard["busy"]:
+                return
+            guard["busy"] = True
+            editor.setValue(lo + (float(v) / _SLIDER_TICKS) * span)
+            guard["busy"] = False
+
+        def from_box(v: float) -> None:       # noqa: F811
+            if guard["busy"]:
+                return
+            guard["busy"] = True
+            s.setValue(to_tick(v))
+            guard["busy"] = False
+
+    # 兩邊互相回寫會無限來回（float 還會因為取整而每次都差一點點），
+    # 所以用 guard 擋住「因我而起的那一次回呼」。
+    s.valueChanged.connect(from_slider)
+    editor.valueChanged.connect(from_box)
+    return s
 
 
 class ParamForm(QWidget):
@@ -442,6 +584,25 @@ class ParamForm(QWidget):
                 self._rows[name] = row
         finally:
             self._building = False
+        self._sync_curve_override()
+
+    def _sync_curve_override(self) -> None:
+        """曲線一旦不是 y=x，就把 ``gamma`` 那列調淡並說明原因。
+
+        規則本身寫在 ``steps/tone.py``（曲線接管 gamma）。這裡只是**讓它看得
+        見** —— 不然使用者會拉了曲線又去動 gamma，然後發現 gamma 沒有反應。
+        """
+        curve_row = None
+        for name, row in self._rows.items():
+            if str(row.spec.get("type", "")) == "curve":
+                curve_row = row
+                break
+        if curve_row is None:
+            return
+        active = not curve_row.editor.is_identity()
+        gamma = self._rows.get("gamma")
+        if gamma is not None and not gamma.has_error():
+            gamma.set_dimmed(active, "Not used while a custom curve is drawn.")
 
     def step_key(self) -> Optional[str]:
         return None if not self._describe else str(self._describe.get("key"))
@@ -452,6 +613,11 @@ class ParamForm(QWidget):
     def editor(self, name: str) -> Optional[QWidget]:
         row = self._rows.get(name)
         return None if row is None else row.editor
+
+    def slider(self, name: str) -> Optional[QSlider]:
+        """那一列的滑桿（沒有上下界的參數沒有滑桿，回 ``None``）。"""
+        row = self._rows.get(name)
+        return None if row is None else row.slider
 
     def hint_text(self, name: str) -> str:
         row = self._rows.get(name)
@@ -532,6 +698,13 @@ class ParamForm(QWidget):
             w.currentTextChanged.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 
+        if ptype == "curve":
+            w = CurveField()
+            w.set_text("" if value is None else str(value))
+            w.curve_changed.connect(lambda t, n=name: self._emit(n, str(t)))
+            w.curve_changed.connect(lambda _t: self._sync_curve_override())
+            return w
+
         if ptype == "image_key":
             w = QComboBox()
             w.setEditable(True)          # 可挑上游影像流，也可自己打新流名
@@ -548,6 +721,299 @@ class ParamForm(QWidget):
         w.setText("" if value is None else str(value))
         w.textChanged.connect(lambda t, n=name: self._emit(n, str(t)))
         return w
+
+
+# --------------------------------------------------------------------------- #
+# 2b. CurveEditor —— 自己拉的色調曲線（F7-8）
+# --------------------------------------------------------------------------- #
+class CurveEditor(QWidget):
+    """可拖曳的色調曲線編輯器。橫軸 = 輸入灰階，縱軸 = 輸出灰階，兩軸都 0–1。
+
+    操作（右下角就寫著，不用先看說明）
+    ----------------------------------
+    * 拖控制點 = 改曲線；
+    * 在空白處按左鍵 = 加一個控制點；
+    * 對控制點右鍵（或雙擊）= 刪掉它。頭尾兩點刪不掉，
+      因為曲線必須覆蓋整個灰階範圍。
+
+    **畫出來的線就是影像上套的線** —— 這裡呼叫的是 core 的
+    ``algo.curve.curve_lut``，跟 ``gamma`` 卡執行時用的是同一個函式。
+    UI 自己再實作一份插值是很容易發生的事，那會讓使用者看到的和跑出來的不一樣。
+    這是本檔唯一一處 import ``adept.core``，理由就是這個 —— 而且它是純運算、
+    不碰引擎，沒有違反「元件不跑 pipeline」的約束。
+    """
+
+    curve_changed = Signal(str)
+
+    _PAD = 10.0                 # 邊界留白（點拖到角落時還抓得到）
+    _HIT = 9.0                  # 控制點的點擊半徑（螢幕像素）
+    _DOT = 4.0
+
+    def __init__(self, parent: Optional[QWidget] = None, compact: bool = True):
+        super().__init__(parent)
+        from ..core.pipeline.curve import IDENTITY, parse_curve
+
+        self._parse = parse_curve
+        self._points: List[Tuple[float, float]] = list(parse_curve(IDENTITY))
+        self._drag: Optional[int] = None
+        self._compact = bool(compact)
+        self.setMinimumSize(QSize(150, 130 if compact else 300))
+        if not compact:
+            self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CrossCursor)
+        self.setToolTip("Drag to bend · click to add a point · "
+                        "right-click a point to remove it")
+
+    # -- public API --------------------------------------------------------
+    def text(self) -> str:
+        from ..core.pipeline.curve import format_curve
+        return format_curve(self._points)
+
+    def points(self) -> List[Tuple[float, float]]:
+        return list(self._points)
+
+    def set_text(self, text: str, emit: bool = False) -> bool:
+        """從控制點字串載入。字串壞掉時**保持原樣並回 False**。
+
+        參數表單是「打字即生效」的，使用者打到一半必然出現不合法的中間狀態；
+        那時候把曲線清成 y=x 會讓他辛苦拉的線消失。
+        """
+        try:
+            pts = self._parse(text)
+        except ValueError:
+            return False
+        self._points = list(pts)
+        self.update()
+        if emit:
+            self.curve_changed.emit(self.text())
+        return True
+
+    def reset(self) -> None:
+        from ..core.pipeline.curve import IDENTITY
+        self.set_text(IDENTITY, emit=True)
+
+    def is_identity(self) -> bool:
+        from ..core.pipeline.curve import is_identity
+        return is_identity(self._points)
+
+    # -- 座標轉換 ----------------------------------------------------------
+    def _plot_rect(self) -> QRectF:
+        return QRectF(self.rect()).adjusted(self._PAD, self._PAD,
+                                            -self._PAD, -self._PAD)
+
+    def _to_px(self, x: float, y: float) -> QPointF:
+        r = self._plot_rect()
+        return QPointF(r.left() + x * r.width(), r.bottom() - y * r.height())
+
+    def _to_unit(self, p: QPointF) -> Tuple[float, float]:
+        r = self._plot_rect()
+        w = max(1.0, r.width())
+        h = max(1.0, r.height())
+        return (float(np.clip((p.x() - r.left()) / w, 0.0, 1.0)),
+                float(np.clip((r.bottom() - p.y()) / h, 0.0, 1.0)))
+
+    def _hit(self, p: QPointF) -> Optional[int]:
+        for i, (x, y) in enumerate(self._points):
+            if (self._to_px(x, y) - p).manhattanLength() <= self._HIT * 1.6:
+                return i
+        return None
+
+    # -- painting ----------------------------------------------------------
+    def paintEvent(self, _e) -> None:      # noqa: D102 - Qt hook
+        from ..core.algo.curve import curve_lut
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        p.setPen(QPen(QColor(TOKENS["border_default"]), 1))
+        p.setBrush(QColor(TOKENS["image_backdrop"]))
+        p.drawRoundedRect(r, 5, 5)
+
+        plot = self._plot_rect()
+        grid = QColor(TOKENS["border_default"])
+        grid.setAlpha(120)
+        p.setPen(QPen(grid, 1))
+        for i in range(1, 4):
+            f = i / 4.0
+            p.drawLine(self._to_px(f, 0.0), self._to_px(f, 1.0))
+            p.drawLine(self._to_px(0.0, f), self._to_px(1.0, f))
+
+        # y = x 參考線（虛線）—— 使用者隨時看得出自己偏離了多少
+        ref = QPen(QColor(TOKENS["text_disabled"]), 1, Qt.DashLine)
+        p.setPen(ref)
+        p.drawLine(self._to_px(0.0, 0.0), self._to_px(1.0, 1.0))
+
+        accent = QColor(theme.seg_hex("image"))
+        n = max(24, int(plot.width()))
+        lut = curve_lut(self._points, n)
+        p.setPen(QPen(accent, 2.0))
+        prev = self._to_px(0.0, float(lut[0]))
+        for i in range(1, n):
+            cur = self._to_px(i / (n - 1.0), float(lut[i]))
+            p.drawLine(prev, cur)
+            prev = cur
+
+        p.setPen(QPen(QColor(TOKENS["surface_raised"]), 1.5))
+        p.setBrush(accent)
+        for x, y in self._points:
+            c = self._to_px(x, y)
+            p.drawEllipse(c, self._DOT, self._DOT)
+        p.end()
+
+    # -- interaction -------------------------------------------------------
+    def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
+        pos = QPointF(e.position())
+        idx = self._hit(pos)
+        if e.button() == Qt.RightButton:
+            if idx is not None:
+                self._remove(idx)
+            return
+        if e.button() != Qt.LeftButton:
+            return
+        if idx is None:
+            idx = self._insert(*self._to_unit(pos))
+            if idx is None:
+                return
+        self._drag = idx
+        self.setCursor(Qt.ClosedHandCursor)
+
+    def mouseMoveEvent(self, e) -> None:       # noqa: D102 - Qt hook
+        if self._drag is None:
+            return
+        x, y = self._to_unit(QPointF(e.position()))
+        i = self._drag
+        if i == 0:
+            x = 0.0                       # 頭尾的 x 鎖住：曲線必須從 0 到 1
+        elif i == len(self._points) - 1:
+            x = 1.0
+        else:
+            # 不准越過鄰居 —— 越過去就不是函數了（同一個輸入兩個輸出）
+            x = float(np.clip(x, self._points[i - 1][0] + 0.01,
+                              self._points[i + 1][0] - 0.01))
+        self._points[i] = (x, y)
+        self.update()
+        self.curve_changed.emit(self.text())
+
+    def mouseReleaseEvent(self, _e) -> None:   # noqa: D102 - Qt hook
+        if self._drag is not None:
+            self._drag = None
+            self.setCursor(Qt.CrossCursor)
+
+    def mouseDoubleClickEvent(self, e) -> None:  # noqa: D102 - Qt hook
+        idx = self._hit(QPointF(e.position()))
+        if idx is not None:
+            self._remove(idx)
+
+    def _insert(self, x: float, y: float) -> Optional[int]:
+        """在 x 的位置插一個控制點；太靠近既有點就不插（會變成不合法的曲線）。"""
+        if any(abs(px - x) < 0.02 for px, _py in self._points):
+            return None
+        self._points.append((x, y))
+        self._points.sort(key=lambda pt: pt[0])
+        self.update()
+        self.curve_changed.emit(self.text())
+        return self._points.index((x, y))
+
+    def _remove(self, idx: int) -> None:
+        if idx <= 0 or idx >= len(self._points) - 1:
+            return                       # 頭尾刪不掉
+        del self._points[idx]
+        self.update()
+        self.curve_changed.emit(self.text())
+
+
+class CurveField(QWidget):
+    """參數表單裡的曲線欄位：小張的編輯器 + ``Reset`` / ``Enlarge…``。
+
+    小張的可以直接拉（常見的微調不用開視窗），要做細活再按 ``Enlarge…``
+    開一張大的。兩邊改的是同一組控制點。
+    """
+
+    curve_changed = Signal(str)
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(3)
+
+        self.editor = CurveEditor(self)
+        self.editor.curve_changed.connect(self._on_changed)
+        lay.addWidget(self.editor)
+
+        bar = QHBoxLayout()
+        bar.setContentsMargins(0, 0, 0, 0)
+        bar.setSpacing(5)
+        self.reset_button = QPushButton("Reset to y = x", self)
+        self.reset_button.setToolTip("Put the curve back to a straight line "
+                                     "(the gamma slider takes over again)")
+        self.reset_button.clicked.connect(self.editor.reset)
+        self.enlarge_button = QPushButton("Enlarge…", self)
+        self.enlarge_button.setToolTip("Open a big curve canvas")
+        self.enlarge_button.clicked.connect(self.open_dialog)
+        bar.addWidget(self.reset_button)
+        bar.addWidget(self.enlarge_button)
+        bar.addStretch(1)
+        lay.addLayout(bar)
+
+    def text(self) -> str:
+        return self.editor.text()
+
+    def set_text(self, text: str, emit: bool = False) -> bool:
+        return self.editor.set_text(text, emit=emit)
+
+    def is_identity(self) -> bool:
+        return self.editor.is_identity()
+
+    def open_dialog(self) -> "CurveDialog":
+        dlg = CurveDialog(self.editor.text(), self)
+        dlg.curve_changed.connect(self._adopt)
+        dlg.show()
+        self._dialog = dlg          # 保住參照，不然 show() 之後會被 GC
+        return dlg
+
+    def _adopt(self, text: str) -> None:
+        if self.editor.set_text(text):
+            self.curve_changed.emit(self.editor.text())
+
+    def _on_changed(self, text: str) -> None:
+        self.curve_changed.emit(text)
+
+
+class CurveDialog(QDialog):
+    """放大版的曲線畫布。非模態 —— 一邊拉曲線一邊看主視窗的預覽更新。"""
+
+    curve_changed = Signal(str)
+
+    def __init__(self, text: str, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setWindowTitle("Tone curve")
+        self.setModal(False)
+        self.resize(420, 460)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setSpacing(8)
+
+        head = QLabel("Input gray level across, output up. Drag a point to "
+                      "bend the curve; click an empty spot to add one; "
+                      "right-click a point to remove it.", self)
+        head.setWordWrap(True)
+        head.setObjectName("paramHint")
+        lay.addWidget(head)
+
+        self.editor = CurveEditor(self, compact=False)
+        self.editor.set_text(text)
+        self.editor.curve_changed.connect(self.curve_changed)
+        lay.addWidget(self.editor, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Close, parent=self)
+        reset = QPushButton("Reset to y = x", self)
+        reset.clicked.connect(self.editor.reset)
+        buttons.addButton(reset, QDialogButtonBox.ResetRole)
+        buttons.rejected.connect(self.close)
+        lay.addWidget(buttons)
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
