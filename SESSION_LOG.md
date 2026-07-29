@@ -395,3 +395,29 @@ headless 測試會全部誤判 —— 可見性與 badge 一律改用明確狀�
   為了存座標而改 JSON 格式會讓每份既有 recipe 都要遷移，代價和收益不成比例
 
 M7 至此完成。643 tests 綠。
+
+### CI 修正：`pytest` vs `python -m pytest`（643 tests）
+
+PR #1 開起來之後 CI 三個 job 全紅，錯誤是 `ModuleNotFoundError: No module named 'adept'`
+—— **收集階段就中斷，一個測試都沒真的跑到**。
+
+根因與這次的改動無關，是 pre-existing：
+
+| 指令 | CWD 進 `sys.path` 嗎 | 結果 |
+|---|---|---|
+| `python -m pytest -q` | 會 | 找得到 adept ✓ |
+| `pytest -q` | **不會** | ModuleNotFoundError ✗ |
+
+CI（`.github/workflows/ci.yml`）跑的是後者，本機開發（以及這整個 session）用的是前者，
+所以這件事從 CI 加進來（commit `de387c5`）之後一直沒被發現。
+
+修法：新增根目錄 `conftest.py`（pytest 載入 conftest 時會把它所在的目錄插進
+`sys.path`），裡面再明確補一次 repo 根與 `tools/`，讓意圖看得出來、
+也不依賴 pytest 的 import-mode 細節。
+
+**沒有選 `pip install -e .`** 的理由：廠內機器是解壓 zip 直接跑
+（見 `docs/NO-GIT-SETUP.md`），「從 repo 根目錄直接跑得動」是這個專案要維持的性質。
+
+驗證方式也記一下：本機 PATH 上第一個 `pytest` 是 uv 裝的獨立工具（自己的 venv、
+沒有 numpy），跟 CI 的情況不同 —— 要用與 `python -m` 同一個直譯器的那支
+（`/usr/local/bin/pytest`）才驗得準。加了 conftest 前後各跑一次確認因果。
