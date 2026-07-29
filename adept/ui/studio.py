@@ -1045,12 +1045,21 @@ class StudioWindow(QMainWindow):
 
         擋在這裡（而不是等執行時報錯）是刻意的：使用者看到的是「這條線拉不
         起來」，不是「拉起來之後整條 pipeline 壞掉」。
+
+        「已經連著了」與「會成環」必須講成兩句話。把第二個埠（ref）拖到已經
+        接了第一個埠（test）的節點上，是**很正常的操作** —— 而且畫面上兩條線
+        本來就都在了。這種時候回一句「Cannot connect」，會讓一個成功的動作
+        看起來像失敗。
         """
-        if self.model.add_edge(str(src), str(dst)):
+        src, dst = str(src), str(dst)
+        if self.model.has_edge(src, dst):
+            self._status("%s → %s is already connected — every image stream "
+                         "they share is already drawn." % (src, dst))
+        elif self.model.add_edge(src, dst):
             self._status("Connected %s → %s" % (src, dst))
         else:
-            self._status("Cannot connect %s → %s (it would create a loop, or "
-                         "the connection already exists)." % (src, dst))
+            self._status("Cannot connect %s → %s — that would make the "
+                         "pipeline loop back on itself." % (src, dst))
 
     def _on_edge_removed(self, src: str, dst: str) -> None:
         if self.model.remove_edge(str(src), str(dst)):

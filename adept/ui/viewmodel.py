@@ -180,6 +180,14 @@ class RecipeModel:
             ready.sort(key=lambda x: rank.get(x, 1 << 30))
         return out if len(out) == len(self.nodes) else None
 
+    def has_edge(self, src: str, dst: str) -> bool:
+        """這兩個節點之間已經有線了嗎。
+
+        給 UI 分辨「拉不起來（會成環）」與「本來就連著了」用 —— 對使用者來說
+        那是兩件完全不同的事，混成同一句話會讓成功的操作看起來像失敗。
+        """
+        return (str(src), str(dst)) in self.edges
+
     def add_edge(self, src: str, dst: str) -> bool:
         """連一條線。會造成循環（或自迴圈／重複）就**不做事並回 False**。"""
         src, dst = str(src), str(dst)
