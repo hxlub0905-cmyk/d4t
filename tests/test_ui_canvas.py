@@ -155,6 +155,58 @@ def test_adding_a_card_from_the_library_lands_on_the_canvas(window):
     assert window.pipeline.node_ids()[-1] in window.model.nodes
 
 
+# --------------------------------------------------------------------------- #
+# 5. 節點卡的外觀（F7-8）
+# --------------------------------------------------------------------------- #
+def test_long_text_is_elided_not_chopped_in_half(qapp):
+    """硬切在字的中間看起來像畫面壞掉，而且 ``source=diff · metri`` 這種殘句
+    會讓人以為參數值真的是那樣。"""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    img = QImage(200, 40, QImage.Format_ARGB32)
+    img.fill(0)
+    p = QPainter(img)
+    drawn = []
+    p.drawText = lambda rect, flags, text: drawn.append(text)   # 攔下真正畫的字
+    canvas_mod._draw_elided(p, QRectF(0, 0, 40, 14),
+                            "a very long parameter summary indeed")
+    canvas_mod._draw_elided(p, QRectF(0, 0, 180, 14), "short")
+    p.end()
+
+    assert drawn[0] != "a very long parameter summary indeed"
+    assert drawn[0].endswith("…")
+    assert drawn[1] == "short", "放得下的字不可以被動到"
+
+
+def test_every_node_paints_without_raising(window):
+    """``paint()`` 裡的例外被 Qt 吞掉只印到 stderr —— 測試不跑一次就看不到。
+
+    順便涵蓋停用節點（虛線框）與被選取節點（粗框）兩條分支。
+    """
+    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtGui import QImage, QPainter
+
+    window.pipeline.link_to("load", "sub")
+    window._on_node_toggled("cd", False)
+    assert window.select_node("sub") is True
+
+    scene = window.pipeline._scene
+    rect = scene.itemsBoundingRect()
+    assert rect.width() > 0 and rect.height() > 0
+    img = QImage(int(rect.width()) + 8, int(rect.height()) + 8,
+                 QImage.Format_ARGB32)
+    img.fill(0)
+    p = QPainter(img)
+    scene.render(p, QRectF(img.rect()), rect, Qt.KeepAspectRatio)
+    p.end()
+
+    # 真的畫出了東西（不是一張空的透明圖）
+    assert any(img.pixelColor(x, y).alpha() > 0
+               for x in range(0, img.width(), 7)
+               for y in range(0, img.height(), 7))
+
+
 def test_canvas_repaints_on_a_theme_switch(window):
     """節點卡是自繪的，顏色在 paint() 時才取 —— 換膚不需要重建畫布。"""
     try:

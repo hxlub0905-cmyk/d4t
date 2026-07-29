@@ -58,13 +58,19 @@ _MAX_PORTS = 4
 #: 埠標籤佔的寬度（畫在節點右緣之外，boundingRect 必須算進去）。
 _PORT_LABEL_W = 52.0
 
-#: 節點左側 icon 的邊長。
+#: 節點左側 icon 的邊長，以及裝著它的圓角色塊。
+#: 用**色塊**而不是細色條（F7-8）：n8n 的節點一眼認得出來，靠的就是左邊那顆
+#: 有顏色的圖示磚。細條太安靜，遠看整張畫布還是一排一模一樣的方框。
 _ICON = 18.0
+_TILE = 32.0
 
 #: 節點卡尺寸與排版間距（畫布座標）。
-NODE_W, NODE_H = 168.0, 52.0
+NODE_W, NODE_H = 190.0, 56.0
 COL_GAP, ROW_GAP = 96.0, 26.0
 _PORT_R = 5.0
+
+#: 連線中點的方向箭頭大小。畫布可以縮放平移，光看曲線不一定分得出資料往哪流。
+_ARROW = 5.0
 
 
 def layout_columns(node_ids: Sequence[str],
@@ -98,6 +104,19 @@ def layout_columns(node_ids: Sequence[str],
     return out
 
 
+def _draw_elided(p: QPainter, rect: QRectF, text: str) -> None:
+    """畫一行文字，太長就切成 ``像這樣…``。
+
+    直接 ``drawText`` 到一個放不下的矩形，Qt 會**硬切在字的中間**，看起來像
+    畫面壞掉；``參數摘要=diff · metri`` 這種殘句還會讓人以為值真的是那樣。
+    """
+    s = str(text)
+    fm = p.fontMetrics()
+    if fm.horizontalAdvance(s) > rect.width():
+        s = fm.elidedText(s, Qt.ElideRight, int(rect.width()))
+    p.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft, s)
+
+
 class _NodeItem(QGraphicsItem):
     """一張節點卡（自繪；顏色全部取自 ``theme.TOKENS``）。"""
 
@@ -121,7 +140,7 @@ class _NodeItem(QGraphicsItem):
         """
         extra = _PORT_LABEL_W if len(self.out_names()) > 1 else 0.0
         return QRectF(-_PORT_R - 1, -1,
-                      NODE_W + 2 * _PORT_R + extra + 2, NODE_H + 2)
+                      NODE_W + 2 * _PORT_R + extra + 5, NODE_H + 5)
 
     def in_port(self) -> QPointF:
         return self.scenePos() + QPointF(0.0, NODE_H / 2.0)
@@ -170,27 +189,43 @@ class _NodeItem(QGraphicsItem):
         body = QRectF(0, 0, NODE_W, NODE_H)
 
         p.setRenderHint(QPainter.Antialiasing, True)
-        border = QColor(TOKENS["accent"] if selected else TOKENS["border_default"])
-        p.setPen(QPen(border, 2.0 if selected else 1.0))
-        p.setBrush(QColor(TOKENS["bg_surface"] if enabled else TOKENS["disabled_bg"]))
-        p.drawRoundedRect(body, 6, 6)
 
-        # 左側階段色條 + icon —— 節點一眼看得出「這是哪一段的卡」，
-        # 而且用的是與左側 rail 完全相同的圖形（F7-8）。
+        # 投影：讓節點浮在網格之上。用畫的而不是 QGraphicsDropShadowEffect ——
+        # effect 會強迫 Qt 額外開一層離屏 buffer，為了 2px 的陰影不值得。
+        shadow = QColor(0, 0, 0, 46 if enabled else 22)
+        p.setPen(Qt.NoPen)
+        p.setBrush(shadow)
+        p.drawRoundedRect(body.translated(1.5, 2.5), 7, 7)
+
         gid = str(self.info.get("group", "") or "enhance")
         seg = _GROUP_SEG.get(gid, "image")
-        bar_col = QColor(theme.seg_hex(seg) if enabled else TOKENS["seg_disabled"])
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(0, 0, 3.0, NODE_H), 1.5, 1.5)
-        p.fillPath(path, bar_col)
+        tile_col = QColor(theme.seg_hex(seg) if enabled else TOKENS["seg_disabled"])
 
-        icon_rect = QRectF(10, (NODE_H - _ICON) / 2.0, _ICON, _ICON)
+        border = QColor(TOKENS["accent"] if selected else TOKENS["border_default"])
+        # 停用的節點畫虛線框（n8n 的慣例）—— 不是消失，是「還在，但這次不跑」。
+        pen = QPen(border, 2.0 if selected else 1.0)
+        if not enabled:
+            pen.setStyle(Qt.DashLine)
+        p.setPen(pen)
+        p.setBrush(QColor(TOKENS["bg_surface"] if enabled else TOKENS["disabled_bg"]))
+        p.drawRoundedRect(body, 7, 7)
+
+        # 左邊的圖示磚：淡色底 + 與左側 rail 完全相同的圖形（F7-8）。
+        tile = QRectF(8, (NODE_H - _TILE) / 2.0, _TILE, _TILE)
+        wash = QColor(tile_col)
+        wash.setAlpha(46 if enabled else 24)
+        p.setPen(QPen(tile_col if enabled else QColor(TOKENS["border_default"]), 1.0))
+        p.setBrush(wash)
+        p.drawRoundedRect(tile, 6, 6)
+
+        icon_rect = QRectF(tile.center().x() - _ICON / 2.0,
+                           tile.center().y() - _ICON / 2.0, _ICON, _ICON)
         p.save()
         p.translate(icon_rect.topLeft())
-        draw_group_icon(p, gid, bar_col.name(), _ICON)
+        draw_group_icon(p, gid, tile_col.name(), _ICON)
         p.restore()
 
-        text_x = icon_rect.right() + 9
+        text_x = tile.right() + 9
         text_w = NODE_W - text_x - 8
 
         fg = TOKENS["text_primary"] if enabled else TOKENS["text_disabled"]
@@ -199,18 +234,16 @@ class _NodeItem(QGraphicsItem):
         f.setBold(True)
         f.setPointSizeF(max(7.0, f.pointSizeF()))
         p.setFont(f)
-        p.drawText(QRectF(text_x, 7, text_w, 15), Qt.AlignVCenter | Qt.AlignLeft,
-                   str(self.info.get("label", self.node_id)))
+        _draw_elided(p, QRectF(text_x, 9, text_w, 15),
+                     str(self.info.get("label", self.node_id)))
         f.setBold(False)
         f.setPointSizeF(max(6.0, f.pointSizeF() - 1.0))
         p.setFont(f)
         p.setPen(QColor(TOKENS["text_secondary"] if enabled else TOKENS["text_disabled"]))
-        p.drawText(QRectF(text_x, 22, text_w, 13), Qt.AlignVCenter | Qt.AlignLeft,
-                   self.node_id)
+        _draw_elided(p, QRectF(text_x, 24, text_w, 13), self.node_id)
         summary = str(self.info.get("summary", ""))
         if summary:
-            p.drawText(QRectF(text_x, 34, text_w, 13),
-                       Qt.AlignVCenter | Qt.AlignLeft, summary)
+            _draw_elided(p, QRectF(text_x, 36, text_w, 13), summary)
 
         # 連接埠。輸出可能不只一個 —— patch 的 Input 節點吐 test 與 ref 兩張
         # （F7-7：使用者要求畫布上看得到「兩張圖」，因為 patch 天生成對）。
@@ -293,9 +326,26 @@ class _EdgeItem(QGraphicsItem):
         p.setRenderHint(QPainter.Antialiasing, True)
         col = QColor(TOKENS["canvas_edge_active"] if self.isSelected()
                      else TOKENS["canvas_edge"])
+        path = self.path()
         p.setPen(QPen(col, 2.2 if self.isSelected() else 1.6))
         p.setBrush(Qt.NoBrush)
-        p.drawPath(self.path())
+        p.drawPath(path)
+
+        # 中點的方向箭頭。畫布可以縮放、平移、節點也可以拖，光看一條曲線不一定
+        # 分得出資料往哪一邊流 —— 這是「這是一張流程圖」的最基本線索。
+        mid = path.pointAtPercent(0.5)
+        ang = path.angleAtPercent(0.5)
+        p.save()
+        p.translate(mid)
+        p.rotate(-ang)
+        head = QPainterPath(QPointF(_ARROW, 0.0))
+        head.lineTo(QPointF(-_ARROW * 0.8, _ARROW * 0.72))
+        head.lineTo(QPointF(-_ARROW * 0.8, -_ARROW * 0.72))
+        head.closeSubpath()
+        p.setPen(Qt.NoPen)
+        p.setBrush(col)
+        p.drawPath(head)
+        p.restore()
 
 
 class PipelineCanvas(QGraphicsView):
@@ -485,15 +535,28 @@ class PipelineCanvas(QGraphicsView):
         self.scale(factor, factor)
         e.accept()
 
+    #: 背景點陣間距（畫布座標）。
+    GRID = 22.0
+
     def drawBackground(self, p: QPainter, rect: QRectF) -> None:  # noqa: D102
+        """點陣底，不是格線底（F7-8）。
+
+        格線會在整張畫布上鋪滿橫豎線，跟連線同一種筆觸，於是「哪條是資料流、
+        哪條是背景」要看第二眼才分得出來。點只提供對齊的參考，不會跟線搶。
+        """
         p.fillRect(rect, QColor(TOKENS["canvas_bg"]))
-        step = 24.0
-        p.setPen(QPen(QColor(TOKENS["canvas_grid"]), 1.0))
-        x = rect.left() - (rect.left() % step)
-        while x < rect.right():
-            p.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
-            x += step
-        y = rect.top() - (rect.top() % step)
+        step = self.GRID
+        # 縮太小的時候點會糊成一片灰 —— 那時候乾脆不畫
+        if self.transform().m11() < 0.45:
+            return
+        p.setPen(QPen(QColor(TOKENS["canvas_grid"]), 1.6, Qt.SolidLine,
+                      Qt.RoundCap))
+        x0 = rect.left() - (rect.left() % step)
+        y0 = rect.top() - (rect.top() % step)
+        y = y0
         while y < rect.bottom():
-            p.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
+            x = x0
+            while x < rect.right():
+                p.drawPoint(QPointF(x, y))
+                x += step
             y += step
