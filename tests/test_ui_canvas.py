@@ -109,6 +109,35 @@ def test_a_link_that_would_loop_is_refused_at_draw_time(window):
     assert window.run_trial(6, workers=1, sync=True) is True
 
 
+def test_both_ports_can_land_on_the_same_node_and_each_gets_its_own_line(window):
+    """patch 天生成對：Input 吐 test 與 ref，Subtract 兩張都吃。
+
+    所以 **Input → Subtract 要畫兩條線**（不是一條沒說明白的線），而且把第二個
+    埠也拖到同一個節點上是很正常的操作 —— 那時候不可以回一句看起來像失敗的
+    「Cannot connect」。
+    """
+    load, sub = window.pipeline.card("load"), window.pipeline.card("sub")
+    assert load.out_names() == ["test", "ref"]
+    assert sub.in_names() == ["test", "ref"]
+
+    window.pipeline.link_to("load", "sub")
+    assert window.model.edges == [("load", "sub")], "model 仍然是一條依賴"
+    assert window.pipeline._ports_between(load, sub) == [0, 1]
+    assert len([e for e in window.pipeline._edges
+                if e.pair() == ("load", "sub")]) == 2, "兩條共用的流 = 兩條線"
+    assert "Connected" in window.status_text()
+
+    # 第二個埠拖到同一個節點：不是錯誤，訊息要講清楚兩條線本來就都在了
+    window.pipeline.link_to("load", "sub")
+    assert window.model.edges == [("load", "sub")]
+    assert "already connected" in window.status_text()
+    assert "Cannot" not in window.status_text()
+
+    # 而「會成環」仍然是另一句話，不可以跟上面混為一談
+    window.pipeline.link_to("sub", "load")
+    assert "loop" in window.status_text()
+
+
 def test_duplicate_and_self_links_are_ignored(window):
     window.pipeline.link_to("load", "norm")
     n = len(window.model.edges)
