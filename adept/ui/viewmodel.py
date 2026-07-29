@@ -37,6 +37,19 @@ class RecipeModel:
         self.bins = {"below": 0, "above": 1}
         self.dirty = False
         self._listeners: List[Callable[[], None]] = []
+        #: 復原堆疊（F7-16）。整個編輯狀態的快照，不是「反向操作」——
+        #: recipe 小（幾十個節點、純 JSON 值），存整份既簡單又不會漏掉
+        #: 副作用（``add_edge`` 會重排 ``node_order``、``set_param`` 會連帶
+        #: 補上相依預設值），而反向操作要為每一種變動各寫一次「怎麼倒回去」，
+        #: 每加一個新動作就多一個會忘記的地方。
+        self._undo: List[Dict[str, Any]] = []
+        self._redo: List[Dict[str, Any]] = []
+        #: 「同一個參數連續調整算一次」的鍵（滑桿拖一下會發幾十次 set_param）。
+        self._coalesce: Optional[str] = None
+
+    #: 復原最多記幾步。這是記憶體的保險，不是體驗上的取捨 ——
+    #: 沒有人會連按 60 次 Ctrl+Z，但一個沒有上限的堆疊在長 session 裡會一直長。
+    UNDO_DEPTH = 60
 
     #: 新 recipe 的起手卡。每一條 pipeline 都得先有影像才有得做，所以空白畫布
     #: 上第一件事一定是「加 Input」—— 那不是一個選擇，是一個儀式。
@@ -56,6 +69,7 @@ class RecipeModel:
         except KeyError:                 # pragma: no cover — 卡片庫壞了才會發生
             pass
         m.dirty = False
+        m.clear_history()      # 起手卡不是「使用者做過的一步」，Ctrl+Z 不該退掉它
         return m
 
     # ---- listener ---------------------------------------------------------
@@ -66,6 +80,86 @@ class RecipeModel:
         self.dirty = True
         for fn in list(self._listeners):
             fn()
+
+    # ---- 復原 / 重做（F7-16）-----------------------------------------------
+    def snapshot(self) -> Dict[str, Any]:
+        """整個編輯狀態的深拷貝（純 Python 值，可以直接比較）。"""
+        return {
+            "kind": self.kind, "recipe_id": self.recipe_id,
+            "author": self.author, "description": self.description,
+            "version": self.version,
+            "node_order": list(self.node_order),
+            "nodes": {nid: (n.step, dict(n.params), bool(n.enabled))
+                      for nid, n in self.nodes.items()},
+            "edges": [tuple(e) for e in self.edges],
+            "expr": self.expr, "threshold": self.threshold,
+            "bins": dict(self.bins),
+        }
+
+    def restore(self, snap: Dict[str, Any]) -> None:
+        """把狀態換成某一份快照（不發 listener，呼叫端負責）。"""
+        self.kind = snap["kind"]
+        self.recipe_id = snap["recipe_id"]
+        self.author = snap["author"]
+        self.description = snap["description"]
+        self.version = snap["version"]
+        self.node_order = list(snap["node_order"])
+        self.nodes = {nid: RecipeNode(id=nid, step=step, params=dict(params),
+                                      enabled=enabled)
+                      for nid, (step, params, enabled) in snap["nodes"].items()}
+        self.edges = [tuple(e) for e in snap["edges"]]
+        self.expr = snap["expr"]
+        self.threshold = snap["threshold"]
+        self.bins = dict(snap["bins"])
+
+    def _push_undo(self, coalesce: Optional[str] = None) -> None:
+        """在改動**之前**記一步。
+
+        ``coalesce`` 是「這次改的是哪一個東西」。同一個東西連續改（拖滑桿、
+        在輸入框裡打字）只記第一次 —— 不然按一次 Ctrl+Z 只會退回一個畫素，
+        使用者得按四十次才回得到動之前的樣子，那等於沒有復原。
+        """
+        if coalesce is not None and coalesce == self._coalesce and self._undo:
+            return
+        self._coalesce = coalesce
+        self._undo.append(self.snapshot())
+        if len(self._undo) > self.UNDO_DEPTH:
+            self._undo.pop(0)
+        self._redo.clear()
+
+    def end_coalescing(self) -> None:
+        """「這一段連續調整結束了」（換節點、換參數、存檔時呼叫）。"""
+        self._coalesce = None
+
+    def can_undo(self) -> bool:
+        return bool(self._undo)
+
+    def can_redo(self) -> bool:
+        return bool(self._redo)
+
+    def undo(self) -> bool:
+        if not self._undo:
+            return False
+        self._redo.append(self.snapshot())
+        self.restore(self._undo.pop())
+        self.end_coalescing()
+        self._changed()
+        return True
+
+    def redo(self) -> bool:
+        if not self._redo:
+            return False
+        self._undo.append(self.snapshot())
+        self.restore(self._redo.pop())
+        self.end_coalescing()
+        self._changed()
+        return True
+
+    def clear_history(self) -> None:
+        """開新檔／載入檔案之後：在那之前的事情不屬於這一份 recipe。"""
+        self._undo.clear()
+        self._redo.clear()
+        self.end_coalescing()
 
     # ---- 節點操作 ----------------------------------------------------------
     def _new_id(self, step_key: str) -> str:
@@ -79,6 +173,7 @@ class RecipeModel:
 
     def add_step(self, step_key: str, at: Optional[int] = None) -> str:
         step_cls = get_step(step_key)          # 未知 key 會 raise KeyError
+        self._push_undo()
         node_id = self._new_id(step_key)
         params = step_cls.validate_params({})  # 全預設
         self.nodes[node_id] = RecipeNode(id=node_id, step=step_key, params=params)
@@ -91,6 +186,7 @@ class RecipeModel:
 
     def remove(self, node_id: str) -> None:
         if node_id in self.nodes:
+            self._push_undo()
             del self.nodes[node_id]
             self.node_order = [n for n in self.node_order if n != node_id]
             self._changed()
@@ -101,12 +197,14 @@ class RecipeModel:
         i = self.node_order.index(node_id)
         j = max(0, min(len(self.node_order) - 1, i + delta))
         if i != j:
+            self._push_undo()
             self.node_order.insert(j, self.node_order.pop(i))
             self._changed()
 
     def set_enabled(self, node_id: str, enabled: bool) -> None:
         node = self.nodes.get(node_id)
         if node is not None and node.enabled != bool(enabled):
+            self._push_undo()
             node.enabled = bool(enabled)
             self._changed()
 
@@ -118,18 +216,21 @@ class RecipeModel:
         trial[name] = value
         clean = step_cls.validate_params(trial)   # 整組重驗（含相依預設）
         if clean != node.params:
+            self._push_undo("param:%s:%s" % (node_id, name))
             node.params = clean
             self._changed()
 
     # ---- score ------------------------------------------------------------
     def set_expr(self, expr: str) -> None:
         if expr != self.expr:
+            self._push_undo("expr")
             self.expr = expr
             self._changed()
 
     def set_threshold(self, thr: float) -> None:
         thr = float(thr)
         if thr != self.threshold:
+            self._push_undo("threshold")
             self.threshold = thr
             self._changed()
 
@@ -218,6 +319,7 @@ class RecipeModel:
         order = self._topological_order(self.edges + [(src, dst)])
         if order is None:
             return False                     # 循環 —— 擋在這裡，不讓它進 model
+        self._push_undo()
         self.edges.append((src, dst))
         self.node_order = order
         self._changed()
@@ -227,6 +329,7 @@ class RecipeModel:
         pair = (str(src), str(dst))
         if pair not in self.edges:
             return False
+        self._push_undo()
         self.edges.remove(pair)
         order = self._topological_order(self.edges)
         if order is not None:
@@ -271,6 +374,7 @@ class RecipeModel:
         m.threshold = float(recipe.score.threshold)
         m.bins = dict(recipe.score.bins)
         m.dirty = False
+        m.clear_history()
         return m
 
     def validate(self):

@@ -71,7 +71,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -83,6 +83,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMenu,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
     QProgressBar,
@@ -433,6 +434,7 @@ class StudioWindow(QMainWindow):
 
         self._wire_widgets()
         self._wire_workers()
+        self._build_shortcuts()
         self.model.add_listener(self._on_model_changed)
 
         # F7-1：卡片庫只列目前輸入型別用得到的卡（見 adept/ui/scope.py）
@@ -534,6 +536,87 @@ class StudioWindow(QMainWindow):
         self.trial_menu = menu
         bar.addWidget(self.btn_trial)
 
+    #: 鍵盤快捷鍵（F7-16）。以前一個都沒有 —— 而這是一個「一直在試」的工具，
+    #: 存檔、跑一次、退回上一步是每分鐘都在做的事，每一次都要把手移到滑鼠、
+    #: 找到那顆鈕、按下去。
+    #:
+    #: 每一組都照作業系統的慣例（Ctrl+S 存檔、Ctrl+Z 復原、Ctrl+0 回原尺寸），
+    #: 不自己發明 —— 使用者的肌肉記憶是從別的軟體帶過來的，這裡不該重學。
+    SHORTCUTS = (
+        ("Ctrl+O", "open_klarf"), ("Ctrl+Shift+O", "open_recipe"),
+        ("Ctrl+S", "save_recipe"), ("Ctrl+R", "run"),
+        ("Ctrl+Z", "undo"), ("Ctrl+Shift+Z", "redo"), ("Ctrl+Y", "redo"),
+        ("Ctrl+0", "zoom_reset"), ("Ctrl++", "zoom_in"), ("Ctrl+=", "zoom_in"),
+        ("Ctrl+-", "zoom_out"), ("Ctrl+Shift+F", "zoom_fit"),
+        ("Ctrl+F", "find_card"),
+        ("Ctrl+Left", "prev_defect"), ("Ctrl+Right", "next_defect"),
+    )
+
+    def _build_shortcuts(self) -> None:
+        handlers = {
+            "open_klarf": self._on_open_klarf,
+            "open_recipe": self._on_open_recipe,
+            "save_recipe": self._on_save_recipe,
+            "run": self._on_trial_clicked,
+            "undo": self.undo,
+            "redo": self.redo,
+            "zoom_reset": self.pipeline.reset_zoom,
+            "zoom_in": lambda: self.pipeline.zoom_by(1.25),
+            "zoom_out": lambda: self.pipeline.zoom_by(1 / 1.25),
+            "zoom_fit": self.pipeline.fit,
+            "find_card": self.focus_card_search,
+            "prev_defect": lambda: self.step_defect(-1),
+            "next_defect": lambda: self.step_defect(+1),
+        }
+        self._shortcuts = []
+        for keys, name in self.SHORTCUTS:
+            sc = QShortcut(QKeySequence(keys), self)
+            sc.activated.connect(handlers[name])
+            self._shortcuts.append(sc)
+
+        # 按鍵存在還不夠 —— 使用者要**發現得到**。工具列的 tooltip 是他唯一
+        # 會停留的地方，所以把快捷鍵寫進去（作業系統慣例：括號附在後面）。
+        #
+        # 註冊而不是「設一次」：``_update_action_states`` 每次 refresh 都會重寫
+        # 這幾顆的 tooltip（「還沒有東西可以存」之類的原因），設一次的話第一次
+        # refresh 就被蓋掉了。所以改成**設 tooltip 的那個動作自己會補上快捷鍵**。
+        self._tip_keys = {
+            id(self.btn_open_klarf): "Ctrl+O",
+            id(self.btn_open_recipe): "Ctrl+Shift+O",
+            id(self.btn_save_recipe): "Ctrl+S",
+            id(self.btn_trial): "Ctrl+R",
+            id(self.btn_empty_open): "Ctrl+O",
+        }
+        for w in (self.btn_open_klarf, self.btn_open_recipe,
+                  self.btn_save_recipe, self.btn_trial, self.btn_empty_open):
+            self._set_tip(w, w.toolTip())
+
+    def _set_tip(self, widget: Any, text: str) -> None:
+        """設 tooltip，並自動補上這顆鈕的快捷鍵。"""
+        keys = getattr(self, "_tip_keys", {}).get(id(widget))
+        widget.setToolTip("%s  (%s)" % (text, keys) if keys else str(text))
+
+    def focus_card_search(self) -> None:
+        """跳到卡片庫的搜尋框（收起來的話先展開）—— 與 rail 上的放大鏡同一條路。"""
+        self.library.focus_search()
+
+    # ---- 復原 / 重做 -------------------------------------------------------
+    def undo(self) -> bool:
+        """退回上一步。做不到的時候要**說出來** —— 按了 Ctrl+Z 卻什麼都沒發生，
+        使用者第一個念頭是「這個工具有沒有壞」，不是「已經沒得退了」。"""
+        if not self.model.undo():
+            self._status("Nothing to undo.")
+            return False
+        self._status("Undone.")
+        return True
+
+    def redo(self) -> bool:
+        if not self.model.redo():
+            self._status("Nothing to redo.")
+            return False
+        self._status("Redone.")
+        return True
+
     def _build_progress(self) -> None:
         """狀態列右側的進度條（F7-7）。
 
@@ -554,12 +637,45 @@ class StudioWindow(QMainWindow):
         self._progress_on = False
         self.statusBar().addPermanentWidget(self.progress)
 
+        # 「跑到一半發現參數設錯」是最常見的情況，而一萬顆要好幾分鐘（F7-16）。
+        # 引擎本來就支援中止（``run_batch`` 的 ``abort_check``、
+        # ``TrialWorker.abort``）—— 只是以前沒有任何地方按得到它，
+        # 於是使用者唯一的中止方式是把整個視窗關掉。
+        self.btn_stop = QPushButton("Stop", self)
+        self.btn_stop.setProperty("variant", "danger")
+        self.btn_stop.setToolTip(
+            "Stop this run. Defects already finished are kept — you get the "
+            "results for them, not nothing.")
+        self.btn_stop.setVisible(False)
+        self.btn_stop.clicked.connect(self.stop_run)
+        self.statusBar().addPermanentWidget(self.btn_stop)
+        self._stop_on = False
+
     def _progress_busy(self, label: str) -> None:
         """不定型跑馬燈（不知道總量時用）。"""
         self.progress.setRange(0, 0)
         self.progress.setFormat(str(label))
         self.progress.setVisible(True)
         self._progress_on = True
+
+    def _show_stop(self, on: bool) -> None:
+        """中止鈕只在真的有東西在跑的時候出現（明確狀態，不問 widget）。"""
+        self._stop_on = bool(on)
+        self.btn_stop.setVisible(bool(on))
+        self.btn_stop.setEnabled(bool(on))
+
+    def stop_available(self) -> bool:
+        return bool(self._stop_on)
+
+    def stop_run(self) -> bool:
+        """中止進行中的批次。已經跑完的那些顆**留著** —— 使用者按停止是想
+        「不要再等了」，不是「把剛才那五分鐘丟掉」。"""
+        if not self.trial_worker.is_running():
+            return False
+        self.trial_worker.abort()
+        self.btn_stop.setEnabled(False)
+        self._status("Stopping — keeping the defects that already finished…")
+        return True
 
     def _progress_set(self, done: int, total: int, label: str = "%v / %m") -> None:
         self.progress.setRange(0, max(1, int(total)))
@@ -569,6 +685,7 @@ class StudioWindow(QMainWindow):
         self._progress_on = True
 
     def _progress_done(self) -> None:
+        self._show_stop(False)
         self.progress.setVisible(False)
         self.progress.setRange(0, 1)
         self.progress.reset()
@@ -1015,9 +1132,10 @@ class StudioWindow(QMainWindow):
             run_why = "The pipeline is empty — add a card from the library first."
 
         self.btn_trial.setEnabled(can_run)
-        self.btn_trial.setToolTip(
-            run_why or "Run the current pipeline over the first %d defects and "
-                       "show the score distribution" % int(self.spin_trial_n.value()))
+        self._set_tip(self.btn_trial,
+                      run_why or "Run the current pipeline over the first %d "
+                                 "defects and show the score distribution"
+                      % int(self.spin_trial_n.value()))
         self.act_run_all.setEnabled(can_run)
         self.act_run_all.setToolTip(
             run_why or "Run all %d defects, not just the first %d"
@@ -1026,9 +1144,9 @@ class StudioWindow(QMainWindow):
         self.lbl_trial_n.setEnabled(can_run)
 
         self.btn_save_recipe.setEnabled(has_steps)
-        self.btn_save_recipe.setToolTip(
-            "Save the current pipeline as a recipe JSON" if has_steps
-            else "Nothing to save yet — the pipeline is empty.")
+        self._set_tip(self.btn_save_recipe,
+                      "Save the current pipeline as a recipe JSON" if has_steps
+                      else "Nothing to save yet — the pipeline is empty.")
 
         has_results = bool(self.trial_results)
         self.btn_export.setEnabled(has_results)
@@ -1405,6 +1523,9 @@ class StudioWindow(QMainWindow):
             return False
         self.selected_node = node_id
         self._user_stream = None       # 換節點 → 影像流回到「這個節點的輸出」
+        # 換卡片＝上一段連續調整結束（見 viewmodel 的 coalescing）。不切的話，
+        # 「調 A 卡的 gamma → 換到 B 卡 → 再調回 A 卡的 gamma」會被併成一步。
+        self.model.end_coalescing()
         self.pipeline.set_selected(node_id)
         try:
             describe = get_step(node.step).describe()
@@ -1751,6 +1872,7 @@ class StudioWindow(QMainWindow):
             return False
         self.recipe_path = path
         self.model.dirty = False
+        self.model.end_coalescing()      # 存檔＝一段編輯結束（見 viewmodel）
         self._status("Saved: %s" % path)
         return True
 
@@ -2202,6 +2324,7 @@ class StudioWindow(QMainWindow):
             self._status("A run is already in progress — please wait.")
             return False
         self._progress_set(0, limit, "%v / %m defects")
+        self._show_stop(True)
         self._status("Running: 0 / %d" % limit)
         return True
 
@@ -2240,8 +2363,13 @@ class StudioWindow(QMainWindow):
         self._update_action_states()
         ok = sum(1 for r in results if r.get("ok"))
         fail = len(results) - ok
-        msg = ("Run finished: %d defects (%d ok, %d failed) in %.1f s"
-               % (len(results), ok, fail, float(elapsed)))
+        # 被按停止的那一批**不能講「finished」**：數字是真的，但它描述的是
+        # 「你叫我停的時候跑到哪裡」，不是整批的結果。差一個字，後面所有
+        # 根據這批數字做的判斷就都建立在錯的前提上。
+        stopped = bool(self.trial_worker.is_aborted())
+        msg = ("%s: %d defects (%d ok, %d failed) in %.1f s"
+               % ("Run stopped" if stopped else "Run finished",
+                  len(results), ok, fail, float(elapsed)))
         # 跑之前的 lint 警告在這裡才講：跑之前講會被「Running: 3 / 200」洗掉。
         # 警告不擋執行，但它描述的是「跑得完、數字卻不是你以為的那個」——
         # 例如兩張量測卡撞名，後面那張把前面那張蓋掉了。
@@ -2498,18 +2626,63 @@ class StudioWindow(QMainWindow):
             return
         self.load_recipe_path(path)
 
-    def _on_save_recipe(self) -> None:
+    def _on_save_recipe(self) -> bool:
+        """回傳「真的存下去了嗎」—— 關窗前的確認要靠這個答案（F7-16）：
+        使用者在存檔對話框按取消，意思是「先別關」，不是「丟掉」。"""
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Recipe", self.recipe_path or "recipe.json",
             "Recipe JSON (*.json);;All files (*)")
         if not path:
-            return
-        self.save_recipe_path(path)
+            return False
+        return bool(self.save_recipe_path(path))
 
     # ==================================================================== #
     # 關窗
     # ==================================================================== #
+    #: 關窗前要不要問「還沒存」。測試整批把它關掉 —— 一個 modal 對話框會讓
+    #: headless 測試永遠停在那裡（而不是失敗），那種卡住最難查。
+    PROMPT_ON_CLOSE = True
+
+    def unsaved_changes(self) -> bool:
+        """有沒有還沒存的編輯（明確狀態，不要去猜）。"""
+        return bool(self.model.dirty)
+
+    def _ask_unsaved(self) -> str:
+        """問使用者要不要存。回 ``"save"`` / ``"discard"`` / ``"cancel"``。
+
+        單獨一個方法是為了測試接得住 —— 測試要驗的是「三個答案各自會怎樣」，
+        不是「QMessageBox 長什麼樣」。
+        """
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Unsaved changes")
+        box.setText("This recipe has changes you have not saved.")
+        box.setInformativeText(
+            "A recipe is the whole point of the tuning you just did — closing "
+            "now throws it away.")
+        box.setStandardButtons(QMessageBox.Save | QMessageBox.Discard
+                               | QMessageBox.Cancel)
+        box.setDefaultButton(QMessageBox.Save)
+        answer = box.exec()
+        return {QMessageBox.Save: "save",
+                QMessageBox.Discard: "discard"}.get(answer, "cancel")
+
+    def confirm_close(self) -> bool:
+        """可以關了嗎。存檔失敗（或使用者在存檔對話框按取消）**不算可以關**——
+        那是「我改變主意了」，不是「丟掉吧」。"""
+        if not (self.PROMPT_ON_CLOSE and self.unsaved_changes()):
+            return True
+        answer = self._ask_unsaved()
+        if answer == "cancel":
+            return False
+        if answer == "discard":
+            return True
+        return bool(self._on_save_recipe())
+
     def closeEvent(self, event) -> None:      # noqa: D102 - Qt hook
+        if not self.confirm_close():
+            event.ignore()
+            return
         self._preview_timer.stop()
         for dlg in (self.welcome_dialog, self.library_dialog, self.results):
             try:
