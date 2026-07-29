@@ -418,6 +418,19 @@ CI（`.github/workflows/ci.yml`）跑的是後者，本機開發（以及這整�
 **沒有選 `pip install -e .`** 的理由：廠內機器是解壓 zip 直接跑
 （見 `docs/NO-GIT-SETUP.md`），「從 repo 根目錄直接跑得動」是這個專案要維持的性質。
 
+修好之後 CI 終於跑到底，露出第二個問題：**636 passed, 6 skipped, 1 failed** ——
+workflow 手寫的 pip 清單漏了 `openpyxl`（它在 `pyproject.toml` 與 `requirements.txt`
+都是硬相依）。三支 Excel 報表測試用 `pytest.importorskip` 安靜跳過，
+所以這個缺口一直藏著，直到有一支測試真的斷言匯出要成功才爆出來。
+
+除了補上套件，workflow 多一步：裝完之後逐項確認 `requirements.txt` 的東西
+都 import 得到，漏了就指名報錯。安裝清單不能直接寫 `-r requirements.txt`，
+因為 CI 刻意把 `opencv-python` 換成 headless 版 —— 而那種「刻意的分歧」正是
+會安靜漂移的東西，所以用測試守住而不是靠人記得。
+
+結果：3.9 / 3.11 / 3.12 三個 job 全綠，**643 passed、零 skip**。
+註腳：在此之前所有「N tests 綠」都只在 `python -m pytest` 下成立；現在兩種都成立。
+
 驗證方式也記一下：本機 PATH 上第一個 `pytest` 是 uv 裝的獨立工具（自己的 venv、
 沒有 numpy），跟 CI 的情況不同 —— 要用與 `python -m` 同一個直譯器的那支
 （`/usr/local/bin/pytest`）才驗得準。加了 conftest 前後各跑一次確認因果。
