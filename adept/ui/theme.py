@@ -495,6 +495,13 @@ QPushButton[variant="ghost"] {
 QPushButton[variant="ghost"]:hover { background: $hover_warm; color: $text_primary; }
 QPushButton[variant="danger"] {
     background: $danger_bg; color: $danger_text; border: 1px solid $danger_border;
+    font-weight: 600;
+}
+QPushButton[variant="danger"]:hover { border-color: $danger_text; }
+/* Stop stays visible after it is pressed, disabled, so that "I already asked
+ * it to stop" is on screen while the current defects finish. */
+QPushButton[variant="danger"]:disabled {
+    background: $disabled_bg; color: $disabled_text; border-color: $border_default;
 }
 /* small square buttons on cards (up / down / remove / add) */
 QPushButton#cardButton {
