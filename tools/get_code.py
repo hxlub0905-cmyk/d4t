@@ -243,10 +243,34 @@ def main(argv=None) -> int:
             print("  （或先 `$env:HTTPS_PROXY='http://主機:埠'` 再跑，pip 也吃這個）")
             return 2
 
+        refused = "10061" in reason or "refused" in reason.lower()
+        if using and refused:
+            # **拒絕連線 ≠ 逾時。** 位址查得到、封包也到了，只是那個埠上沒有東西
+            # 在聽（或它主動拒絕）。最常見的原因是**埠不對** —— PAC 解出來的
+            # 網址沒有埠的時候 urllib 會用 80，而公司 proxy 幾乎不在 80。
+            host = using.split("//")[-1].rstrip("/")
+            print("\n  這是**拒絕連線**，不是逾時 —— 位址找得到，但那個埠上沒有")
+            print("  東西在聽。%s" % ("那個網址沒有埠，所以用了預設的 80。"
+                                     if ":" not in host else ""))
+            print("  試幾個常見的埠：")
+            for port in (8080, 3128, 8000, 9090):
+                print("    python get_code.py --proxy http://%s:%d" % (host, port))
+            print("\n  埠要從 PAC 檔裡看（`PROXY 主機:埠` 那一行）：")
+            print("    (Invoke-WebRequest (Get-ItemProperty 'HKCU:\\Software\\Microsoft"
+                  "\\Windows\\CurrentVersion\\Internet Settings').AutoConfigURL `")
+            print("        -UseBasicParsing).Content -split \"`n\" | Select-String PROXY")
+            print("\n  **或者改用 PowerShell 版**（`tools/get_code.ps1`）—— 它走 .NET，")
+            print("  也就是瀏覽器用的那一套：PAC 的多個候選會依序 fallback，")
+            print("  而且會對 proxy 做 Windows 整合驗證。Python 這兩件都做不到。")
+            print("    powershell -ExecutionPolicy Bypass -File .\\get_code.ps1")
+            return 2
+
         if using:
             print("\n  用的 proxy 是 %s —— 它沒有回應。確認位址與埠是對的，" % using)
             print("  有些公司 proxy 只放行特定網域，那就要請 IT 加"
                   " raw.githubusercontent.com。")
+            print("  也可以試 PowerShell 版（走 .NET，支援 PAC fallback 與整合驗證）：")
+            print("    powershell -ExecutionPolicy Bypass -File .\\get_code.ps1")
         else:
             print("\n  這台主機連不上。剩下的路：")
         print("  1. 請 IT 放行 codeload.github.com（zip 就會回來，這是根治）")
