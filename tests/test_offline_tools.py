@@ -419,6 +419,27 @@ def test_tools_are_python39_compatible(script):
 
 # ---------------------------------------------------------------- 不用 git、不用 zip 取得程式碼
 
+def _has_git_worktree():
+    """這台機器上跑得動 ``git ls-files`` 嗎。
+
+    **`get_code.py` 的目標使用者就是沒有 git 的機器**（zip 被擋、逐檔抓下來的
+    那一份沒有 `.git`）。所以下面兩支測試在那種機器上必須 skip 而不是 fail ——
+    兩條紅字對他來說就是「我下載壞了」，而其實一切正常。
+    """
+    try:
+        subprocess.run(["git", "ls-files"], cwd=REPO, check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    return True
+
+
+needs_git = pytest.mark.skipif(
+    not _has_git_worktree(),
+    reason="沒有 git（或不是 work tree）—— 這正是 get_code.py 服務的情況")
+
+
+@needs_git
 def test_the_manifest_is_in_sync_with_the_repo():
     """清單腐爛的症狀是**受限機器上安靜地少一個檔案** —— 抓下來的程式碼看起來
     是完整的，直到某個 import 爆掉。所以這裡拿 ``make_filelist`` 自己重算一次
@@ -437,6 +458,7 @@ def test_the_manifest_is_in_sync_with_the_repo():
             "清單少了：%s\n清單多了：%s" % (missing[:8], stale[:8]))
 
 
+@needs_git
 def test_the_manifest_covers_every_tracked_file_and_not_itself():
     listed = {line.split(" ", 1)[1] for line in make_filelist.build_lines(REPO)
               if not line.startswith("#")}
@@ -509,6 +531,9 @@ def test_a_good_download_lands_and_reports_success(tmp_path, monkeypatch):
     assert get_code.main(["--dest", str(dest)]) == 0
     assert (dest / "adept" / "fake.py").read_bytes() == real
     assert not list(dest.rglob("*.tmp")), "atomic 寫入的暫存檔要清掉（鐵則 5）"
+    # 清單自己不在自己的清單裡，但抓下來那一份還是要有它 —— 少了它，那份 repo
+    # 不完整而且**看不出來少了什麼**（實際跑一次才發現的）。
+    assert (dest / "tools" / "FILELIST.txt").read_text(encoding="utf-8") == manifest
 
 
 def test_an_empty_manifest_is_treated_as_a_failure(tmp_path, monkeypatch):

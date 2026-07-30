@@ -120,6 +120,11 @@ def main(argv=None) -> int:
         return 2
     print("清單  : %d 個檔案\n" % len(want))
 
+    # 清單自己不在自己的清單裡（SHA 沒辦法自我包含），但受限機器上還是需要它 ——
+    # 少了它，抓下來那份 repo 就不完整，而且**看不出來少了什麼**。
+    # 位元組已經在手上，直接落地。
+    write_atomic(a.dest, MANIFEST, raw.encode("utf-8"))
+
     bad, done = [], 0
     for sha, path in want:
         try:
