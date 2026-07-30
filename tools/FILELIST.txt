@@ -2,8 +2,8 @@
 # 由 tools/make_filelist.py 產生；tests/test_offline_tools.py 會擋住它腐爛。
 f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
-4048efcf763a5925f3f3e11096cac6f02a3e4bbf AGENTS.md
-a7c5e19aa5afaf0d7ab721467e9e1f8d9b85e8a6 CLAUDE.md
+046c43ff5c7e5d4a13725c461b0d13b3e2dff4ff AGENTS.md
+49115084f8578e5d852a39462285c104a7468b39 CLAUDE.md
 0e34f6c1f9b0afc82d5ffc4b5bba0533aa14a97e README.md
 3259add5ea7efeac637f05eb5a9f0bef7e8267a4 SESSION_LOG.md
 650a5d7c8bc6db42eed4054174823bfcfceb7eae adept/__init__.py
@@ -128,7 +128,7 @@ beebe8e22628acc8dff09406c184b3a0ecae0b91 tests/test_klarf_variant_d.py
 b614d74319ead1329a9b301b5967f2d4d8b5464f tests/test_no_qt.py
 3ca36d76191e3c0c2c801a13720a81874fd847d5 tests/test_no_real_fab_data.py
 f2f18a59cf739942f573f001c64cd77730bc5b09 tests/test_normalize.py
-5a6a4fe4ea9d0f5822041dd403696df112bcf621 tests/test_offline_tools.py
+868a6fe4cdf1bbe56732951631ddc15a2cabbf44 tests/test_offline_tools.py
 e027a9047fa771cca97915c533a7f90198c0fb18 tests/test_period_golden.py
 482763f96a3f9e39f90a7e6cbd97c6716b29db63 tests/test_phase_origin.py
 8c4b2aba1d0893acc999c5acb331fd00839518d9 tests/test_quality.py
@@ -177,4 +177,4 @@ ad250d60c5c5f97e757842046c23816230704ef1 tools/install_offline.py
 a096a20ac78fba6911826946334eb6ad2227ec23 tools/make_sample.py
 cd11d6aba3d087b6d30ea50e385fd44f3586f865 tools/make_sample_rsem.py
 ae9f681b299e9471105b94cd2d6304e92d62d56f tools/make_text_bundle.py
-2c51b9e35baacada4e1fde4cb37fcdccca31cc17 tools/release.py
+d0e4012adeb59416faf2ab12b13867916a2896a4 tools/release.py
