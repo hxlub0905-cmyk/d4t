@@ -104,6 +104,7 @@ from adept.core.pipeline.step import CATEGORY_IMAGE, GROUP_ORDER
 
 from .export_dialog import ExportDialog
 from .canvas import PipelineCanvas
+from .inspectors import inspector_for
 from .gallery import make_thumb
 from .region_check import MAX_CHECK, RegionCheckWindow, regions_of_node
 from .template_dialog import TemplateDialog
@@ -935,9 +936,44 @@ class StudioWindow(QMainWindow):
         self.profile_panel.setVisible(False)
         lay.addWidget(self.profile_panel)
 
+        # 右下角那一塊：**選哪張卡就換成那張卡的儀表**（F7-17）。
+        # 原本固定是一張「特徵 / 數值」表 —— 問題不是它佔位子，是那些數字沒有
+        # 辦法判讀（`blob_dist_center 11.170` 是大還是小？），而且使用者在問的
+        # 問題**每張卡都不一樣**。特徵表仍然留著，用切換列回去。
         self.feature_table = FeatureTable(pane)
         self.feature_table.setMinimumHeight(120)
-        lay.addWidget(self.feature_table, 2)
+
+        self.inspector_host = QWidget(pane)
+        ihost = QVBoxLayout(self.inspector_host)
+        ihost.setContentsMargins(0, 0, 0, 0)
+        ihost.setSpacing(2)
+        self.inspector_summary = QLabel("", self.inspector_host)
+        self.inspector_summary.setObjectName("paramHint")
+        self.inspector_summary.setWordWrap(True)
+        self.inspector_slot = QVBoxLayout()
+        self.inspector_slot.setContentsMargins(0, 0, 0, 0)
+        ihost.addLayout(self.inspector_slot, 1)
+        ihost.addWidget(self.inspector_summary)
+        self._inspector: Optional[Any] = None
+
+        self.bottom_stack = QStackedWidget(pane)
+        self.bottom_stack.addWidget(self.inspector_host)      # index 0
+        self.bottom_stack.addWidget(self.feature_table)       # index 1
+
+        tabs = QHBoxLayout()
+        tabs.setContentsMargins(0, 0, 0, 0)
+        tabs.setSpacing(4)
+        self.btn_tab_card = QPushButton("Card", pane)
+        self.btn_tab_features = QPushButton("Features", pane)
+        for i, b in enumerate((self.btn_tab_card, self.btn_tab_features)):
+            b.setCheckable(True)
+            b.setObjectName("cardButton")
+            b.setFixedHeight(20)
+            b.clicked.connect(lambda _c=False, k=i: self.show_bottom_page(k))
+            tabs.addWidget(b)
+        tabs.addStretch(1)
+        lay.addLayout(tabs)
+        lay.addWidget(self.bottom_stack, 2)
 
         vrow = QHBoxLayout()
         vrow.setSpacing(6)
@@ -1535,6 +1571,8 @@ class StudioWindow(QMainWindow):
         self.param_form.set_step(describe, node.params, streams)
         self.stack.setCurrentWidget(self.param_form)
         self._refresh_region_button()
+        self._install_inspector(node.step)     # 右下角換成這張卡的儀表（F7-17）
+        self._refresh_inspector(self._last_result)
         self._schedule_preview()
         return True
 
@@ -1951,6 +1989,7 @@ class StudioWindow(QMainWindow):
         self._show_current_stream()
         self._refresh_profile_panel(ctx)
 
+        self._refresh_inspector(result)
         highlight = self._highlight_features(result)
         self.feature_table.set_features(getattr(result, "features", {}) or {},
                                         highlight=highlight)
@@ -2033,6 +2072,70 @@ class StudioWindow(QMainWindow):
         False（CLAUDE.md §7 的老坑）。
         """
         return bool(self.selected_regions()) and bool(self._items())
+
+    # ---- 右下角：卡片儀表（F7-17）------------------------------------------
+    def show_bottom_page(self, index: int) -> None:
+        """0 = 這張卡的儀表，1 = 特徵表。"""
+        index = 1 if int(index) else 0
+        if index == 0 and self._inspector is None:
+            index = 1          # 這張卡沒有儀表 —— 不要給一片空白
+        self.bottom_stack.setCurrentIndex(index)
+        self.btn_tab_card.setChecked(index == 0)
+        self.btn_tab_features.setChecked(index == 1)
+        self.btn_tab_card.setEnabled(self._inspector is not None)
+
+    def bottom_page(self) -> int:
+        return int(self.bottom_stack.currentIndex())
+
+    def inspector(self) -> Optional[Any]:
+        """目前掛著的卡片儀表（沒有就 None）。"""
+        return self._inspector
+
+    def _install_inspector(self, step_key: str) -> None:
+        """換卡片時換儀表。沒有註冊儀表的卡就只剩特徵表。"""
+        cls = inspector_for(step_key)
+        current = type(self._inspector) if self._inspector is not None else None
+        if cls is not current:
+            if self._inspector is not None:
+                self.inspector_slot.removeWidget(self._inspector)
+                self._inspector.setParent(None)
+                self._inspector.deleteLater()
+                self._inspector = None
+            if cls is not None:
+                self._inspector = cls(self.inspector_host)
+                self.inspector_slot.addWidget(self._inspector)
+            self.btn_tab_card.setText(str(getattr(cls, "title", "Card"))
+                                      if cls is not None else "Card")
+        # **每次都要同步頁面**，不能因為「儀表類別沒變」就跳過：兩張都沒有儀表
+        # 的卡片連續選下去時，類別確實沒變（都是 None），但畫面若停在儀表那一頁
+        # 就是一片空白 —— 而那比原本的特徵表還糟。
+        self.show_bottom_page(0 if cls is not None else 1)
+
+    def _refresh_inspector(self, result: Any = None) -> None:
+        """把三種來源餵給儀表：這張卡的參數、這一顆的結果、整批的結果。"""
+        insp = self._inspector
+        if insp is None:
+            self.inspector_summary.setText("")
+            return
+        node = self.model.nodes.get(self.selected_node or "")
+        one: Dict[str, Any] = {}
+        if result is not None:
+            one = {"features": dict(getattr(result, "features", {}) or {})}
+        # meta 在 **context** 上，不在 result 上（result 只帶 features/score/bin）。
+        ctx = getattr(result, "context", None) if result is not None else None
+        meta = dict(getattr(ctx, "meta", {}) or {})
+        # 「這張卡產出哪些特徵」要問卡片庫（含 output_prefix）—— 儀表只負責畫。
+        feats: List[str] = []
+        if node is not None:
+            try:
+                feats = list(get_step(node.step).resolve_features(node.params))
+            except Exception:              # noqa: BLE001 — 顯示用
+                feats = []
+        insp.set_context(self.selected_node or "",
+                         params=dict(node.params) if node else {},
+                         result=one, batch=self.trial_results, meta=meta,
+                         feature_names=feats)
+        self.inspector_summary.setText(insp.summary())
 
     def _refresh_region_button(self) -> None:
         regions = self.selected_regions()
@@ -2360,6 +2463,7 @@ class StudioWindow(QMainWindow):
         self.histogram.set_threshold(self.model.threshold)
         self._refresh_bin_summary(self.model.threshold)
         self._populate_gallery(results)
+        self._refresh_inspector(self._last_result)   # 儀表吃的是整批（F7-17）
         self._update_action_states()
         ok = sum(1 for r in results if r.get("ok"))
         fail = len(results) - ok
