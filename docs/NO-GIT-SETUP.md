@@ -105,6 +105,39 @@ $env:HTTPS_PROXY = 'http://主機:埠'
 python get_code.py
 ```
 
+#### 拒絕連線（WinError 10061）→ 換 PowerShell 版
+
+**實際遇到過**，而且它跟逾時是不同的事：拒絕連線的意思是**位址找得到、封包也到
+了，但那個埠上沒有東西在聽**。最常見的原因是 PAC 解出來的網址**沒有埠**，
+於是 Python 用了預設的 80，而公司 proxy 幾乎不在 80。
+
+這時候先試常見的埠（`8080` / `3128` / `8000` / `9090`），不行就**改用
+PowerShell 版**：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\get_code.ps1
+```
+
+`tools/get_code.ps1` 跟 `.py` 版是**同一份契約**（同一份 `FILELIST.txt`、
+同樣驗 git blob SHA、同樣 atomic 寫入），差別在它走 .NET —— 也就是**瀏覽器用的
+那一套網路堆疊**。三件 Python 做不到的事它原生就有：
+
+| | `get_code.py` | `get_code.ps1` |
+|---|---|---|
+| 解 PAC | 借 .NET 算，只拿得到**第一個** proxy | 原生，多個候選會**依序 fallback** |
+| proxy 的 Windows 整合驗證（NTLM / Kerberos）| ✗ | ✓ |
+| TLS 版本 | 跟著 Python | 明確設 TLS 1.2（PS 5.1 預設 1.0，GitHub 收不了）|
+
+所以判斷方式很簡單：**瀏覽器連得到 GitHub 的話，PowerShell 通常就連得到。**
+`-ExecutionPolicy Bypass` 是必要的 —— PowerShell 預設不准跑腳本檔。
+拿這支的方式跟 `.py` 版一樣：在 blob 頁按複製鈕、貼進記事本。
+
+一行決定要不要走這條路（PowerShell 拿得到就代表值得）：
+
+```powershell
+Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/hxlub0905-cmyk/ADEPT/main/tools/FILELIST.txt' -UseBasicParsing -OutFile t.txt
+```
+
 - 三台主機都被擋的話，剩下的路是**在有網路的機器上取得，用你搬 `wheels\` 的
   同一條路搬過來**（見 [`OFFLINE-INSTALL.md`](OFFLINE-INSTALL.md)）。
 

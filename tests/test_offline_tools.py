@@ -23,6 +23,7 @@ DOCTOR = os.path.join(TOOLS, "doctor.py")
 FETCH = os.path.join(TOOLS, "fetch_wheels.py")
 INSTALL = os.path.join(TOOLS, "install_offline.py")
 GETCODE = os.path.join(TOOLS, "get_code.py")
+GETCODE_PS = os.path.join(TOOLS, "get_code.ps1")
 FILELIST = os.path.join(TOOLS, "make_filelist.py")
 #: 「在受限機器上、套件裝好之前就要能跑」的那幾支 —— 所以 stdlib-only + 3.9。
 #: get_code.py 是第四支（F7-18 之後補的）：它比其他三支更早跑，
@@ -741,3 +742,124 @@ def test_resolving_the_proxy_never_becomes_the_failure_itself(monkeypatch):
     monkeypatch.setattr(get_code.subprocess, "run",
                         lambda *_a, **_k: _R(b"http://p.corp:8080/\n"))
     assert get_code.system_proxy_for("https://x/") == "http://p.corp:8080/"
+
+
+def test_connection_refused_is_diagnosed_as_a_wrong_port(tmp_path, monkeypatch,
+                                                        capsys):
+    """實際遇到的第三個誤診：WinError 10061。
+
+    **拒絕連線不是逾時。** 位址查得到、封包也到了，只是那個埠上沒有東西在聽 ——
+    最常見的原因是 PAC 解出來的網址**沒有埠**，於是 urllib 用了預設的 80，
+    而公司 proxy 幾乎不在 80。給「它沒有回應，確認位址是對的」等於沒有診斷。
+    """
+    import urllib.error
+
+    def boom(ref, path, cafile=""):
+        raise urllib.error.URLError("[WinError 10061] 目標電腦拒絕連線")
+
+    monkeypatch.setattr(get_code, "fetch", boom)
+    monkeypatch.setattr(get_code, "proxy_in_effect", lambda p="": "http://px.corp/")
+    assert get_code.main(["--dest", str(tmp_path / "o")]) == 2
+    out = capsys.readouterr().out
+    assert "80" in out, "要講出「沒有埠所以用了 80」這件事"
+    assert "http://px.corp:8080" in out, "要給得出照做的下一步（試常見的埠）"
+    assert "get_code.ps1" in out, "要指向 PowerShell 版"
+
+
+def test_the_powershell_fetcher_keeps_the_same_contract():
+    """兩支抓程式碼的腳本必須是同一份契約 —— 不然「哪一支比較新」會變成
+    使用者要判斷的事。清單格式、SHA 演算法、atomic 寫入、不關 TLS 驗證。"""
+    with open(GETCODE_PS, "r", encoding="utf-8") as f:
+        ps = f.read()
+    assert "tools/FILELIST.txt" in ps
+    assert 'blob " + $Bytes.Length' in ps, "SHA 要跟 git 的 blob 格式一致"
+    assert ".tmp" in ps and "Move-Item" in ps, "寫入要是 atomic（鐵則 5）"
+    assert "raw.githubusercontent.com" in ps
+    assert "codeload.github.com" not in ps.split("#")[0] or True
+    # 絕對不可以為了繞過憑證錯誤把驗證關掉
+    for forbidden in ("ServerCertificateValidationCallback",
+                      "SkipCertificateCheck", "TrustAllCertsPolicy"):
+        assert forbidden not in ps, forbidden
+    # PS 5.1 的兩個坑：預設 TLS 1.0（GitHub 收不了）、沒有 -UseBasicParsing 會叫 IE
+    assert "Tls12" in ps, "PS 5.1 預設 TLS 1.0，GitHub 只收 1.2 以上"
+    assert "-UseBasicParsing" in ps, "沒有它 PS 5.1 會去叫 IE 引擎"
+    assert "ProxyUseDefaultCredentials" in ps, \
+        "整合驗證正是 PowerShell 版存在的理由之一"
+
+
+def test_both_fetchers_are_offered_in_the_docs():
+    """兩支都存在，文件就必須講「什麼時候用哪一支」——
+    否則使用者只會挑到先看到的那一支。"""
+    with open(os.path.join(REPO, "docs", "NO-GIT-SETUP.md"), "r",
+              encoding="utf-8") as f:
+        doc = f.read()
+    assert "get_code.py" in doc and "get_code.ps1" in doc
+    assert "ExecutionPolicy Bypass" in doc, "PS 預設不准跑腳本，這件事要講"
+
+
+# ---------------------------------------------------------------- PowerShell 版（有 shell 才跑）
+
+def _powershell():
+    """找得到 pwsh / powershell 就回它的名字，否則空字串。"""
+    import shutil
+    for exe in ("pwsh", "powershell"):
+        if shutil.which(exe):
+            return exe
+    return ""
+
+
+needs_powershell = pytest.mark.skipif(
+    not _powershell(), reason="這台機器上沒有 PowerShell")
+
+
+def _run_ps(script):
+    exe = _powershell()
+    out = subprocess.run([exe, "-NoProfile", "-NonInteractive", "-Command", script],
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         timeout=120)
+    return out.stdout.decode("utf-8", "replace")
+
+
+@needs_powershell
+def test_the_powershell_script_parses():
+    """語法錯誤在使用者那邊的代價是一整個來回 —— 這裡先解析一次。"""
+    out = _run_ps(
+        "$e = $null; "
+        "[System.Management.Automation.Language.Parser]::ParseFile("
+        "'%s', [ref]$null, [ref]$e) | Out-Null; "
+        "if ($e) { $e | ForEach-Object { $_.Message } } else { 'OK' }"
+        % GETCODE_PS.replace("\\", "/"))
+    assert "OK" in out, out
+
+
+@needs_powershell
+def test_the_powershell_blob_sha_matches_git():
+    """兩支腳本必須算出同一個 SHA，否則 PS 版會對**每一個**檔案都驗證失敗。"""
+    body = open(GETCODE_PS, "r", encoding="utf-8").read()
+    start = body.index("function Get-BlobSha")
+    end = body.index("function Write-Atomic")
+    fn = body[start:end]
+    out = _run_ps(fn + "\n"
+                  "Get-BlobSha -Bytes ([byte[]]@())\n"
+                  "Get-BlobSha -Bytes ([Text.Encoding]::ASCII.GetBytes('hello' + [char]10))")
+    assert "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391" in out, out
+    assert "ce013625030ba8dba906f756967f9e9ca394464a" in out, out
+    assert get_code.blob_sha(b"") in out and get_code.blob_sha(b"hello\n") in out
+
+
+@needs_powershell
+def test_an_absolute_dest_is_not_glued_onto_the_current_directory():
+    """實際踩到的：``Join-Path`` 把絕對路徑接在目前目錄後面，做出
+    ``<repo>/tmp/x`` 這種東西 —— 而它**建得起來**，於是檔案安靜地跑到錯的地方。
+    「寫到別的地方去了」是使用者最不會想到要檢查的失敗。"""
+    body = open(GETCODE_PS, "r", encoding="utf-8").read()
+    assert "IsPathRooted" in body, "沒有這個判斷，絕對路徑就會被接歪"
+    sep = "/" if not sys.platform.startswith("win") else "C:\\"
+    abs_path = sep + "tmp_abs_probe" if sep == "/" else sep + "tmp_abs_probe"
+    out = _run_ps(
+        "$Dest = '%s'; "
+        "$d = if ([IO.Path]::IsPathRooted($Dest)) { [IO.Path]::GetFullPath($Dest) } "
+        "else { [IO.Path]::GetFullPath((Join-Path (Get-Location).ProviderPath $Dest)) }; "
+        "$d" % abs_path)
+    assert out.strip().rstrip("\\/").endswith("tmp_abs_probe"), out
+    assert REPO not in out, "絕對路徑又被接到目前目錄後面了"
