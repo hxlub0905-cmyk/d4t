@@ -19,6 +19,12 @@ DLP 對它的規則跟 ``application/zip`` 完全不同）。
     python get_code.py                 # 抓到 .\\ADEPT\\
     python get_code.py --dest D:\\tools  # 抓到別的地方
     python get_code.py --ref main      # 指定分支（預設 main）
+    python get_code.py --ref a30a040…  # 指定 commit（要完全可重現時用這個）
+
+``--ref`` 給分支名的時候，抓到的是 **CDN 上的那一版** —— 剛推上去的東西可能要
+等幾分鐘才看得到（實測會拿到前一個 commit；清單與檔案來自同一份快照，
+所以 SHA 仍然全部對得上，不會誤報，但你拿到的是稍舊的一份）。
+要百分之百確定抓到哪一版，``--ref`` 直接給 commit SHA（commit 是不變的，沒有快取問題）。
 
 為什麼要驗 SHA
 --------------
