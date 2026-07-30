@@ -92,7 +92,46 @@
 | `tools/FILELIST.txt`（git blob SHA） | 「哪幾個檔案變了」的唯一依據。它腐爛的代價是**公司機上安靜地少一個檔案** |
 | 每一種搬運方式都**驗 SHA** | 剪貼簿與 proxy 都可能安靜地改掉內容（截斷、換行、攔截頁）。驗不過就不落地 |
 | `bundle/` 裡有產生出來的複本 | 那是搬運品，不是內容。**已刻意排除**在 `FILELIST.txt` 與打包來源之外（不然會遞迴長大） |
-| **repo 裡不得有廠內識別碼**（鐵則 8）| 這個 repo 是 public，而它是唯一的傳輸通道 —— 資料只能往「進公司」的方向走，不能往外 |
+| **repo 裡不得有廠內識別碼**（鐵則 8）| 這是唯一的傳輸通道，而資料只能往「進公司」的方向走，不能往外。`tests/test_no_real_fab_data.py` 守著；已經進了歷史的話見 §3.5 |
+
+### 3.5 識別碼已經進了 git 歷史怎麼辦
+
+**遮蔽現在的檔案不會動到歷史。** 舊的 commit 裡還是原值，`git log -p` 看得到。
+真的要清掉就得**改寫歷史**，而那件事的代價要先知道：
+
+- **所有 commit 的 SHA 都會變。** 任何已經 clone 過的人都要重新 clone；
+  開著的 PR 會失效（要重開）。
+- **GitHub 上舊的物件不會立刻消失** —— 用完整 SHA 的網址還點得到，
+  直到 GitHub 自己回收。repo 是 private 的話，那也只有有權限的人點得到。
+
+做法（**在家用機上**，用 `git filter-repo`）：
+
+```bash
+pip install git-filter-repo
+
+# 替換規則。⚠ 這個檔案本身含有要保護的東西 ——
+# 放在 **repo 外面**，做完就刪掉，絕對不要 commit。
+cat > ~/redact.txt <<'RULES'
+literal:真實的LOT==>AA0000.0X
+literal:真實的機台==>TOOL01
+RULES
+
+# 先在複本上試，確認只有那幾行變了
+git clone --no-local . /tmp/rewrite-test
+cd /tmp/rewrite-test && git filter-repo --replace-text ~/redact.txt --force
+
+# 確認乾淨了再對真的 repo 做
+git filter-repo --replace-text ~/redact.txt --force
+git push --force origin main
+rm ~/redact.txt
+```
+
+**替換一律等長**（`AA0000.0X` → `AA0000.0X`）。不是為了好看：`klarf_core` 是
+span-splice，長度變了不會壞，但等長讓「改寫前後只有那幾個字不同」這件事
+一眼驗得出來 —— 用 `diff -r` 比同一個 commit 的樹，差異行數應該正好等於
+識別碼出現的行數。
+
+**先在 `git clone --no-local` 的複本上跑過**再對真的做。filter-repo 沒有 undo。
 
 ---
 
