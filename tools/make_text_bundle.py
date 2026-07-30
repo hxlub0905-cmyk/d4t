@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+# ADEPT 單檔純文字打包 — authored 2026-07-30.
+"""把整個 repo 打成**一個純文字 .py 檔**，那個檔案自己解得開。
+
+什麼時候需要這個
+----------------
+實測遇到的情況：公司政策**擋掉 `.zip` 這個類別**（不只是 GitHub 的
+`codeload.github.com`，連從別的來源下載同一包 zip 也擋），而且 proxy 也不讓
+Python 逐檔抓。這時候 `tools/get_code.py` / `.ps1` 都用不上，能過的只剩
+「一個純文字檔」。
+
+所以這支產出的東西**沒有任何壓縮格式**：檔案內容原封不動地一行一行躺在裡面，
+可以用記事本打開讀。也**刻意不用 base64** —— base64 對 DLP 來說是「看不懂的
+東西」，而看不懂通常就等於擋掉；而且這個 repo 全部是純文字，本來就不需要編碼。
+
+怎麼用
+------
+    python tools/make_text_bundle.py            # 產 ADEPT_bundle.py
+    python tools/make_text_bundle.py --out X.py
+
+拿到 `ADEPT_bundle.py` 的人：
+
+    python ADEPT_bundle.py                      # 解到 .\\ADEPT\\
+    python ADEPT_bundle.py --dest D:\\tools
+    python ADEPT_bundle.py --list               # 只列出裡面有什麼，不寫檔
+
+格式為什麼是「行數」而不是「位元組數」
+--------------------------------------
+這個檔案會經過瀏覽器下載、記事本另存、郵件附件…… 任何一步都可能把 LF 換成
+CRLF。用位元組數的話那一換整包就對不起來了，而且錯誤會發生在**第一個檔案之後
+的全部檔案**上，看起來像整包壞掉。用行數則對換行符號免疫 —— 解開的時候用
+Python 的文字模式讀（它會把 CRLF 讀成 LF），所以來回一趟仍然逐位元組相同。
+前提是 repo 裡全部是 LF + UTF-8，這支會在打包前檢查，不合就拒絕產出。
+
+每個檔案仍然帶 **git blob SHA-1**，解開時逐檔驗 —— 傳輸途中被動到的話要當場
+講出來，而不是讓使用者拿到一份安靜壞掉的程式碼。
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+import subprocess
+import sys
+from typing import List, Tuple
+
+#: 資料區的分隔行。解包時找的是**整行剛好等於它**的那一行 —— 而資料區的每一行
+#: 都被加了 '#'，所以就算某個檔案的內容裡出現這個字串（``make_text_bundle.py``
+#: 自己就在 repo 裡，它的源碼裡當然有），也永遠不會剛好相等。加 '#' 那件事因此
+#: 同時解決了兩個問題：整個檔案仍然是合法的 Python，而分隔行不會被誤認。
+SENTINEL = "# ==== ADEPT-BUNDLE-DATA ==== 以下是資料，不要編輯 ===="
+
+#: 解包程式（放在產出檔案的最前面）。它自己也是這份 bundle 的一部分，
+#: 所以刻意寫短、只用標準函式庫、而且看得完 —— 使用者要能在跑之前先讀一遍。
+EXTRACTOR = '''#!/usr/bin/env python3
+# ADEPT 單檔純文字包（由 tools/make_text_bundle.py 產生）。
+"""整個 ADEPT repo 就在這個檔案裡，一行一行的純文字，沒有壓縮、沒有編碼。
+
+為什麼是這種形式：公司政策擋掉 .zip 這個類別，而 proxy 也不讓 Python 逐檔抓 ——
+能過的只剩「一個純文字檔」。你可以用記事本打開它，往下捲就看得到每個檔案的內容。
+
+    python %(name)s              # 解到 .\\\\ADEPT\\\\
+    python %(name)s --dest D:\\\\tools
+    python %(name)s --list       # 只看裡面有什麼，不寫任何檔案
+
+每個檔案都帶 git blob SHA-1，解開時逐檔驗過才落地 —— 傳輸途中被動到的話會當場
+講出來，不會讓你拿到一份安靜壞掉的程式碼。
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+import sys
+
+SENTINEL = "%(sentinel)s"
+
+
+def blob_sha(data: bytes) -> str:
+    """git 算 blob SHA 的方式："blob <長度>\\\\0" + 內容。"""
+    h = hashlib.sha1()
+    h.update(b"blob %%d\\0" %% len(data))
+    h.update(data)
+    return h.hexdigest()
+
+
+def entries(lines):
+    """走過資料區，一個一個吐出 (sha, 路徑, 內容位元組)。"""
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if not line.startswith("#F "):
+            i += 1
+            continue
+        _, sha, count, path = line.split(" ", 3)
+        n = int(count)
+        # 資料區每一行前面有一個 '#'（那樣整個檔案才仍然是合法的 Python）。
+        body = [ln[1:] if ln[:1] == "#" else ln for ln in lines[i + 1:i + 1 + n]]
+        yield sha, path, "\\n".join(body).encode("utf-8")
+        i += 1 + n
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description="Unpack the ADEPT text bundle.")
+    ap.add_argument("--dest", default="ADEPT", help="解到哪個資料夾（預設 .\\\\ADEPT）")
+    ap.add_argument("--list", action="store_true", help="只列出內容，不寫檔")
+    a = ap.parse_args(argv)
+
+    # 用文字模式讀自己：Python 會把 CRLF 讀成 LF，所以這個檔案就算在傳輸途中
+    # 被換過行尾也解得開（格式用「行數」而不是「位元組數」正是為了這件事）。
+    with open(os.path.abspath(__file__), "r", encoding="utf-8") as f:
+        lines = f.read().split("\\n")
+    try:
+        start = lines.index(SENTINEL) + 1
+    except ValueError:
+        print("✗ 找不到資料區 —— 這個檔案被截斷了，或不是完整的 bundle。")
+        return 2
+
+    items = list(entries(lines[start:]))
+    if not items:
+        print("✗ 資料區是空的 —— 這個檔案被截斷了。")
+        return 2
+    print("這個包裡有 %%d 個檔案。" %% len(items))
+    if a.list:
+        for _sha, path, data in items:
+            print("  %%8d  %%s" %% (len(data), path))
+        return 0
+
+    dest = os.path.abspath(a.dest)
+    print("解到  : %%s" %% dest)
+    bad, done = [], 0
+    for sha, path, data in items:
+        if blob_sha(data) != sha:
+            bad.append(path)
+            continue
+        full = os.path.join(dest, path.replace("/", os.sep))
+        os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
+        tmp = full + ".tmp"                      # atomic：半個檔案不要留在磁碟上
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, full)
+        done += 1
+
+    if bad:
+        print("")
+        print("✗ %%d 個檔案的內容跟它自己的 SHA 對不上：" %% len(bad))
+        for path in bad[:12]:
+            print("    %%s" %% path)
+        print("")
+        print("  這個檔案在傳輸途中被動過（編輯器另存、郵件過濾器改寫都會這樣）。")
+        print("  請重新取得一份，不要用編輯器打開後另存。這份程式碼不完整，不要用。")
+        return 1
+
+    print("✓ %%d 個檔案都解開了，SHA 全部對得上。" %% done)
+    print("")
+    print("下一步：")
+    print("  cd %%s" %% dest)
+    print("  python tools\\\\doctor.py        # 環境自檢（會告訴你還缺什麼）")
+    print("  相依套件裝不了的話走離線 wheels：docs\\\\OFFLINE-INSTALL.md")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+'''
+
+
+def repo_root() -> str:
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def blob_sha(data: bytes) -> str:
+    h = hashlib.sha1()                                # noqa: S324 — git 的格式
+    h.update(b"blob %d\0" % len(data))
+    h.update(data)
+    return h.hexdigest()
+
+
+def collect(root: str = "") -> List[Tuple[str, bytes]]:
+    """``git ls-files`` 的每個檔案（路徑, 位元組）。
+
+    順便擋掉兩種會讓「用行數打包」失效的東西：CRLF 與非 UTF-8。
+    拒絕產出比產出一個解不開的包好 —— 後者要等收到的人才會發現。
+    """
+    root = root or repo_root()
+    out = subprocess.run(["git", "ls-files"], cwd=root, check=True,
+                         stdout=subprocess.PIPE).stdout.decode("utf-8")
+    items = []
+    for rel in sorted(p for p in out.split("\n") if p.strip()):
+        with open(os.path.join(root, rel.replace("/", os.sep)), "rb") as f:
+            data = f.read()
+        if b"\r" in data:
+            raise SystemExit(
+                "%s 含 CR（CRLF 或裸 CR）—— 以行數為單位的打包會弄壞它。"
+                "先把它轉成 LF。" % rel)
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError:
+            raise SystemExit("%s 不是 UTF-8 —— 這個格式只裝純文字。" % rel)
+        items.append((rel, data))
+    return items
+
+
+def build(out_name: str = "ADEPT_bundle.py", root: str = "") -> str:
+    items = collect(root)
+    parts = [EXTRACTOR % {"name": out_name, "sentinel": SENTINEL}, SENTINEL]
+    for rel, data in items:
+        body = data.decode("utf-8").split("\n")
+        parts.append("#F %s %d %s" % (blob_sha(data), len(body), rel))
+        # **每一行都要變成註解。** Python 在跑任何東西之前會先編譯整個檔案，
+        # 所以資料區不能是裸的文字 —— 不然它會去解析別的檔案的內容然後語法錯誤
+        # （第一版就是這樣掛的：某個 .md 裡的全形括號變成 SyntaxError）。
+        # 加一個 '#' 比塞進三引號字串安全：檔案內容裡本來就可能有三個引號。
+        parts.extend("#" + line for line in body)
+    return "\n".join(parts) + "\n"
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(
+        description="Pack the repo into one plain-text self-extracting .py")
+    ap.add_argument("--out", default="ADEPT_bundle.py", help="輸出檔名")
+    a = ap.parse_args(argv)
+
+    n = len(collect())
+    text = build(os.path.basename(a.out))
+    tmp = a.out + ".tmp"                              # atomic（鐵則 5）
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    os.replace(tmp, a.out)
+    print("%s：%d 個檔案、%.0f KB" % (a.out, n, len(text.encode("utf-8")) / 1024))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

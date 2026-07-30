@@ -4,7 +4,7 @@ f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
 e1e5b25f7080123ac6a9558e8de5e03c8cb59caf CLAUDE.md
 0e34f6c1f9b0afc82d5ffc4b5bba0533aa14a97e README.md
-563bd9e1ddb77c2866627b6484bd390c63f44623 SESSION_LOG.md
+bdb5f00bf16a98cf28a45ed381ea4529613052b6 SESSION_LOG.md
 650a5d7c8bc6db42eed4054174823bfcfceb7eae adept/__init__.py
 2f6c872448859787dbe6cfba4ef6c2e819d576da adept/__main__.py
 8a51dfe499b3a9d81434c8a202f2d17c24b71c74 adept/core/__init__.py
@@ -83,7 +83,7 @@ fd02f73c653fd7aae2756928256e6631a03951bb adept/ui/viewmodel.py
 db4c0723c6a28cddd4c335d5214895f57915fc7d adept/ui/workers.py
 04c5ce471195ac4e2449126ce835b22b4c880cf3 conftest.py
 ba101eee94ed5f8183eba368989167fb1132a128 docs/HANDOVER.md
-2006eeadfe1dc6b9df700a435773dc36c1e0ea16 docs/NO-GIT-SETUP.md
+6251223bcbb56e61cce58bcf96ae57c7347a5ab4 docs/NO-GIT-SETUP.md
 b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 284baa3b08f76721a95eabc8674130af5fcfa202 docs/plans/F0-master-plan.md
 9cb008460ec1b323254bde1d79e35f33542b401a docs/plans/F7-canvas-and-taxonomy.md
@@ -127,7 +127,7 @@ beebe8e22628acc8dff09406c184b3a0ecae0b91 tests/test_klarf_variant_d.py
 b614d74319ead1329a9b301b5967f2d4d8b5464f tests/test_no_qt.py
 3ca36d76191e3c0c2c801a13720a81874fd847d5 tests/test_no_real_fab_data.py
 f2f18a59cf739942f573f001c64cd77730bc5b09 tests/test_normalize.py
-4c58d0038d547885e530a44c3254bcb49f09e595 tests/test_offline_tools.py
+a6114086fff30d4cf605adc5450ccc81ca93e05c tests/test_offline_tools.py
 e027a9047fa771cca97915c533a7f90198c0fb18 tests/test_period_golden.py
 482763f96a3f9e39f90a7e6cbd97c6716b29db63 tests/test_phase_origin.py
 8c4b2aba1d0893acc999c5acb331fd00839518d9 tests/test_quality.py
@@ -174,3 +174,4 @@ ad250d60c5c5f97e757842046c23816230704ef1 tools/install_offline.py
 d039f5a9b1aa7b2c57c7d68fabd13828f74383a1 tools/make_filelist.py
 a096a20ac78fba6911826946334eb6ad2227ec23 tools/make_sample.py
 cd11d6aba3d087b6d30ea50e385fd44f3586f865 tools/make_sample_rsem.py
+3f8e60fa36826f763aa706bc88387cc43a9ff650 tools/make_text_bundle.py
