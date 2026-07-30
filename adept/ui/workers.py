@@ -241,8 +241,10 @@ class PreviewWorker(_ThreadedWorker):
     def run_sync(recipe: Recipe, item: Any, kind: str,
                  upto_node: Optional[str] = None) -> DefectResult:
         """同步跑一筆預覽（不開執行緒）；``keep_context=True`` 以便看中間影像。"""
+        # ``track_changes``：預覽是單顆，記下「每張卡把影像流改成什麼樣」
+        # 的成本可以忽略，而 Enhance 的儀表就是靠這份資料（F7-17）。
         return run_defect(recipe, item, str(kind), keep_context=True,
-                          upto_node=upto_node)
+                          upto_node=upto_node, track_changes=True)
 
     def has_pending(self) -> bool:
         """是否還有待跑的請求（測試 / statusbar 用）。"""
@@ -255,7 +257,7 @@ class PreviewWorker(_ThreadedWorker):
         def work() -> None:
             try:
                 r = run_defect(recipe, item, kind, keep_context=True,
-                               upto_node=upto)
+                               upto_node=upto, track_changes=True)
             except Exception as e:          # noqa: BLE001 — 合約外的意外
                 self.failed.emit(f"{type(e).__name__}: {e}")
             else:

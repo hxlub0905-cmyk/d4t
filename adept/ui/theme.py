@@ -201,7 +201,7 @@ _DARK: Dict[str, Any] = dict(_LIGHT, **{
     "accent_hover": "#639cf8",
     "accent_active": "#3a76d8",
     "accent_bg": "#1d2a3f",
-    "accent_border": "#2f4straight",   # placeholder, fixed below
+    "accent_border": "#33507d",
     "selection": "#2b3d5c",
     "hover_warm": "#282c34",
     "hover_warm_strong": "#30353f",
@@ -273,7 +273,6 @@ _DARK: Dict[str, Any] = dict(_LIGHT, **{
     "canvas_edge": "#5c6474",
     "canvas_edge_active": "#4b8bf5",
 })
-_DARK["accent_border"] = "#33507d"
 
 #: 兩組色盤，鍵名完全一致（測試會逐鍵比對）。
 PALETTES: Dict[str, Dict[str, Any]] = {"light": _LIGHT, "dark": _DARK}
@@ -512,6 +511,12 @@ QPushButton#cardButton {
 QPushButton#cardButton:hover { background: $hover_warm_strong; color: $accent_active;
                                border: 1px solid $accent_border; }
 QPushButton#cardButton:disabled { color: $disabled_text; background: transparent; }
+/* The card / features switch under the image: the selected one has to look
+ * selected, or the pair reads as two labels rather than a choice (F7-17). */
+QPushButton#cardButton:checked {
+    background: $accent_bg; color: $accent_active;
+    border: 1px solid $accent_border; font-weight: 600;
+}
 
 /* -- inputs ------------------------------------------------------------ */
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {

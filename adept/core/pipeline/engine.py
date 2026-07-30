@@ -146,12 +146,16 @@ def _eval_score(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
 def run_defect(recipe: Recipe, item: Any, kind: str, *,
                keep_context: bool = False,
                upto_node: Optional[str] = None,
+               track_changes: bool = False,
                registry: Optional[Dict[str, Type[Step]]] = None) -> DefectResult:
     """對單顆 defect 執行 ``kind`` 這條 route；**永不 raise**。
 
     - Context.meta 先種入 ``_defect_item`` / ``_dataset_kind`` / ``_defect_id`` /
       ``nm_per_px``（Load 卡讀這些 key）。
     - 停用（enabled=False）節點跳過。
+    - ``track_changes``：把「每一次覆寫既有影像流的前後樣貌」記進
+      ``ctx.meta['stream_change']``（F7-17 的 Enhance 儀表要的）。**預設關**——
+      批次跑一萬顆時那份資料沒有人看，不值得每次 set_image 都算兩個直方圖。
     - ``upto_node``：跑到該節點**之後**就停（Studio 點卡看中間輸出用）；
       強制 keep_context=True，score/bin 不算（None）；若該節點被停用則
       停在它前面、不執行它；不在 route 上 → ok=False（不 raise）。
@@ -165,6 +169,7 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
 
     defect_id = str(getattr(item, "defect_id", ""))
     ctx = _seed_context(item, kind, defect_id)
+    ctx.track_changes = bool(track_changes)
     traces: List[StepTrace] = []
 
     try:

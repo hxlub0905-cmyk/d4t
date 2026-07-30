@@ -117,6 +117,25 @@ def test_theme_is_neutral_and_flat(qapp):
         assert banned not in qss, "平面設計不用 %s" % banned
 
 
+def test_every_colour_token_is_a_real_colour(qapp):
+    """Qt 對無效的顏色字串是**靜靜畫成黑色**，不會報錯（F7-17）。
+
+    暗色盤裡曾經有 ``"accent_border": "#2f4straight"`` —— 一個「稍後修正」的
+    佔位字串，靠 70 行之後的一句覆寫救著。那句覆寫要是哪天被搬走或漏掉，
+    畫面上只會多出幾條看不出所以然的黑邊，沒有任何錯誤訊息。
+    """
+    import re
+
+    hexish = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
+    bad = []
+    for name, palette in theme_mod.PALETTES.items():
+        for key, value in palette.items():
+            if isinstance(value, str) and value.startswith("#") \
+                    and not hexish.match(value):
+                bad.append("%s.%s = %r" % (name, key, value))
+    assert not bad, "不是合法顏色的 token：%s" % bad
+
+
 def test_light_and_dark_palettes_have_identical_keys(qapp):
     light, dark = theme_mod.PALETTES["light"], theme_mod.PALETTES["dark"]
     assert set(light) == set(dark), set(light) ^ set(dark)

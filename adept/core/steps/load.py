@@ -109,5 +109,33 @@ class LoadPatchStep(Step):
                     f"exposed as 'test' for downstream cards.")
             ctx.meta.setdefault("notes", []).append(note)
 
+        # 面板用（F7-17）：**每條影像流是從哪一頁來的、載進來長什麼樣**。
+        #
+        # 這不是裝飾。「每顆 defect 第一張是 test、第二張是 ref」是全專案第一條
+        # 待廠內驗證的假設（CLAUDE.md §8），而目前唯一的驗證方式是另外跑
+        # fab_probe 腳本。把配對與每一頁的平均灰階直接攤在畫面上，使用者載入
+        # 第一份真資料的當下就會看到「咦，第二張比較亮」—— 那就是順序反了的證據。
+        pages = []
+        for ch in loaded:
+            ref = images.get(ch)
+            arr = ctx.images.get(ch)
+            pages.append({
+                "channel": ch,
+                "page": None if ref is None else getattr(ref, "page", None),
+                "file": "" if ref is None else str(getattr(ref, "path", "")),
+                "shape": None if arr is None else [int(v) for v in arr.shape[:2]],
+                "mean": None if arr is None else float(arr.mean()),
+            })
+        ctx.meta["input"] = {
+            "kind": str(kind or ""),
+            "defect_id": str(getattr(item, "defect_id", "")),
+            "die": list(getattr(item, "die", None) or []),
+            "xrel_nm": getattr(item, "xrel_nm", None),
+            "yrel_nm": getattr(item, "yrel_nm", None),
+            "klarf_row": int(getattr(item, "klarf_row", -1)),
+            "nm_per_px": getattr(item, "nm_per_px", None),
+            "pages": pages,
+        }
+
         ctx.add_feature("n_channels", float(len(loaded)))
         return ctx
