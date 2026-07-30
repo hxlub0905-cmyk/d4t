@@ -2,7 +2,7 @@
 # 由 tools/make_filelist.py 產生；tests/test_offline_tools.py 會擋住它腐爛。
 f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
-046c43ff5c7e5d4a13725c461b0d13b3e2dff4ff AGENTS.md
+b0fb68ad9c930bc3a339b6beaace88a53621e39a AGENTS.md
 49115084f8578e5d852a39462285c104a7468b39 CLAUDE.md
 0e34f6c1f9b0afc82d5ffc4b5bba0533aa14a97e README.md
 3259add5ea7efeac637f05eb5a9f0bef7e8267a4 SESSION_LOG.md
