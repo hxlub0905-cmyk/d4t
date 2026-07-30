@@ -64,7 +64,26 @@ def main(argv=None) -> int:
         print("✗ 找不到資料區 —— 這個檔案被截斷了，或不是完整的 bundle。")
         return 2
 
-    items = list(entries(lines[start:]))
+    data = lines[start:]
+    # 分隔行的**下一行**宣告編碼。用「固定位置的宣告」而不是「掃某個開頭的樣式」
+    # ——「以 #B 開頭就是 base64」那種判斷會被內容咬到：資料區每一行都加了 '#'，
+    # 所以任何原本以 B 開頭的程式碼行（`BUNDLE_DIR = ...`）都會變成 `#B...`。
+    enc = data[0].strip() if data else ""
+    data = data[1:]
+    if enc == "#ENC lzma+base64":
+        b64 = [ln[2:] for ln in data if ln.startswith("#B")]
+        import base64
+        import lzma
+        try:
+            raw = lzma.decompress(base64.b64decode("".join(b64)))
+        except Exception as exc:                     # noqa: BLE001
+            print("✗ 資料區解不開：%s" % exc)
+            print("  這個檔案在複製／貼上的過程中被截斷或改掉了。請重新複製一次，")
+            print("  而且**不要**用編輯器打開後另存。")
+            return 2
+        data = raw.decode("utf-8").split("\n")
+
+    items = list(entries(data))
     if not items:
         print("✗ 資料區是空的 —— 這個檔案被截斷了。")
         return 2
@@ -147,6 +166,7 @@ if __name__ == "__main__":
     sys.exit(main())
 
 # ==== ADEPT-BUNDLE-DATA ==== 以下是資料，不要編輯 ====
+#ENC text
 #F 75df1028febe3a268f90fd2e4c507f13c5d7ad79 2720 adept/ui/widgets.py
 ## ADEPT Studio widget library — authored 2026-07-28 (M3).
 ## ImageView 的 zoom/pan 骨架 vendored from: PEAR/pear/ui/image_view.py（去掉 ROI 編輯）。
@@ -3531,7 +3551,7 @@ if __name__ == "__main__":
 #  `QT_QPA_PLATFORM=offscreen pytest -q`（Windows 不用設環境變數）。
 #- 新增卡片的完整範例在 `CLAUDE.md` §5。新算法 = 新 class + decorator，UI 與引擎零修改。
 #
-#F 08a0584487f2854df1c7796915fbf51f3d90397a 319 docs/NO-GIT-SETUP.md
+#F e3e7f60fa1eb70e61678ac8b40115effffaf4647 339 docs/NO-GIT-SETUP.md
 ## 在沒有 git 的機器上使用 ADEPT
 #
 #適用情境：**公司機沒有 git（或 git 被擋）。** 整個 repo 只有純文字檔
@@ -3556,9 +3576,30 @@ if __name__ == "__main__":
 #
 #三條路，用在不同時機 —— **不要每次都搬整包**：
 #
-#### 0a. 第一次搬整包：`bundle/` 裡的六批
+#### 0a. 第一次搬整包：一個檔案（推薦）
 #
-#`bundle/ADEPT_part1of6.py` … `part6of6.py`。對每一批做同一件事：
+#`bundle/ADEPT_bundle.py` —— **735 KB，一次複製就搬完整個 repo**。
+#
+#1. 在瀏覽器打開 `https://github.com/hxlub0905-cmyk/ADEPT/blob/main/bundle/ADEPT_bundle.py`
+#2. 按檔案右上角的**複製鈕**
+#3. 貼進記事本，存成 `ADEPT_bundle.py`
+#4. `python ADEPT_bundle.py --list`  ← 先看它會寫哪些檔案，**不寫任何東西**
+#5. `python ADEPT_bundle.py`
+#
+#它用 `lzma` + base64 壓過（stdlib，不需要裝東西）。為什麼是 lzma 而不是 gzip：
+#gzip 壓完 base64 是 991 KB，太貼近 GitHub 那個 1 MB 的顯示上限；lzma 是 735 KB。
+#
+#**代價**：內容是 base64，記事本打開看不懂。**解包程式本身仍然是可讀的 Python**
+#（檔案最前面約 90 行），而 `--list` 讓你在它寫任何檔案之前就看得到清單。
+#想逐字讀過全部內容的話用下面那個純文字版。
+#
+#### 0a-2. 同一件事的純文字版：六批
+#
+#`bundle/ADEPT_part1of6.py` … `part6of6.py`：**沒有壓縮、沒有 base64**，
+#每個檔案的內容一行一行原樣躺在裡面（每行前面加一個 `#`，所以整份仍是合法的
+#Python），記事本打開往下捲就看得到。代價是 6 次複製。
+#
+#對每一批做同一件事：
 #
 #1. 在瀏覽器打開 `https://github.com/hxlub0905-cmyk/ADEPT/blob/main/bundle/ADEPT_part1of6.py`
 #2. 按檔案右上角的**複製鈕**（從已經載入的網頁複製，不會再連別的主機）
@@ -3568,12 +3609,11 @@ if __name__ == "__main__":
 #**順序不重要，重複執行也沒關係。** 每一批解完會告訴你整個 repo 還缺幾個檔案，
 #全部到齊之後才會印「下一步」。
 #
-#為什麼是六批而不是一個檔案：**GitHub 不顯示超過 1 MB 的檔案** —— 整包 2.4 MB
-#在那台機器上根本點不開來複製。每一批 < 420 KB。
+#為什麼純文字版要分六批：**GitHub 不顯示超過 1 MB 的檔案**，而純文字整包是
+#2.4 MB —— 在那台機器上根本點不開來複製。每一批 < 420 KB。
 #
-#包裡沒有壓縮、**也沒有 base64**：每個檔案的內容一行一行原樣躺在裡面（每行前面
-#加一個 `#`，所以整個檔案仍然是合法的 Python）。你可以用記事本打開往下捲，
-#看得到每一個檔案。每個檔案帶 **git blob SHA-1**，貼歪或被截斷會**當場講出來**。
+#兩種版本的每個檔案都帶 **git blob SHA-1**，貼歪或被截斷會**當場講出來**，
+#而且一個檔案都不會落地。
 #
 #### 0b. 之後更新：先複製一個 12 KB 的清單
 #

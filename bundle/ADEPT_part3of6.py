@@ -64,7 +64,26 @@ def main(argv=None) -> int:
         print("✗ 找不到資料區 —— 這個檔案被截斷了，或不是完整的 bundle。")
         return 2
 
-    items = list(entries(lines[start:]))
+    data = lines[start:]
+    # 分隔行的**下一行**宣告編碼。用「固定位置的宣告」而不是「掃某個開頭的樣式」
+    # ——「以 #B 開頭就是 base64」那種判斷會被內容咬到：資料區每一行都加了 '#'，
+    # 所以任何原本以 B 開頭的程式碼行（`BUNDLE_DIR = ...`）都會變成 `#B...`。
+    enc = data[0].strip() if data else ""
+    data = data[1:]
+    if enc == "#ENC lzma+base64":
+        b64 = [ln[2:] for ln in data if ln.startswith("#B")]
+        import base64
+        import lzma
+        try:
+            raw = lzma.decompress(base64.b64decode("".join(b64)))
+        except Exception as exc:                     # noqa: BLE001
+            print("✗ 資料區解不開：%s" % exc)
+            print("  這個檔案在複製／貼上的過程中被截斷或改掉了。請重新複製一次，")
+            print("  而且**不要**用編輯器打開後另存。")
+            return 2
+        data = raw.decode("utf-8").split("\n")
+
+    items = list(entries(data))
     if not items:
         print("✗ 資料區是空的 —— 這個檔案被截斷了。")
         return 2
@@ -147,6 +166,7 @@ if __name__ == "__main__":
     sys.exit(main())
 
 # ==== ADEPT-BUNDLE-DATA ==== 以下是資料，不要編輯 ====
+#ENC text
 #F b69629982f34dd647e5a7ffcee693859f24cadb7 804 adept/ui/canvas.py
 ## ADEPT Studio 節點畫布 — authored 2026-07-28 (F7-6).
 #"""``PipelineCanvas`` —— n8n 風格的節點畫布，取代原本的直線清單。

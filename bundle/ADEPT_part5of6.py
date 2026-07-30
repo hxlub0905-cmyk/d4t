@@ -64,7 +64,26 @@ def main(argv=None) -> int:
         print("✗ 找不到資料區 —— 這個檔案被截斷了，或不是完整的 bundle。")
         return 2
 
-    items = list(entries(lines[start:]))
+    data = lines[start:]
+    # 分隔行的**下一行**宣告編碼。用「固定位置的宣告」而不是「掃某個開頭的樣式」
+    # ——「以 #B 開頭就是 base64」那種判斷會被內容咬到：資料區每一行都加了 '#'，
+    # 所以任何原本以 B 開頭的程式碼行（`BUNDLE_DIR = ...`）都會變成 `#B...`。
+    enc = data[0].strip() if data else ""
+    data = data[1:]
+    if enc == "#ENC lzma+base64":
+        b64 = [ln[2:] for ln in data if ln.startswith("#B")]
+        import base64
+        import lzma
+        try:
+            raw = lzma.decompress(base64.b64decode("".join(b64)))
+        except Exception as exc:                     # noqa: BLE001
+            print("✗ 資料區解不開：%s" % exc)
+            print("  這個檔案在複製／貼上的過程中被截斷或改掉了。請重新複製一次，")
+            print("  而且**不要**用編輯器打開後另存。")
+            return 2
+        data = raw.decode("utf-8").split("\n")
+
+    items = list(entries(data))
     if not items:
         print("✗ 資料區是空的 —— 這個檔案被截斷了。")
         return 2
@@ -147,6 +166,7 @@ if __name__ == "__main__":
     sys.exit(main())
 
 # ==== ADEPT-BUNDLE-DATA ==== 以下是資料，不要編輯 ====
+#ENC text
 #F 745560662f263dc8a471f910d8b4640c647dd68d 247 tests/fixtures/sample_real.klarf
 #Record FileRecord  "1.8"
 #{
@@ -5181,7 +5201,7 @@ if __name__ == "__main__":
 #    full = percentile_range(img)
 #    assert masked == full
 #
-#F a1d768507e961ffe06e398c556c8da7a12a6a8ed 1081 tests/test_offline_tools.py
+#F d313edc8f96154c7681042d0437c84b9d474bbec 1145 tests/test_offline_tools.py
 #"""Tests for tools/fetch_wheels.py · tools/install_offline.py · tools/doctor.py（M6-1 離線安裝包）。
 #
 #這三支是「bootstrap 工具」：它們要在**相依套件都還沒裝**的機器上跑，
@@ -6122,7 +6142,7 @@ if __name__ == "__main__":
 #    header = make_text_bundle.EXTRACTOR % {
 #        "name": "b.py", "sentinel": make_text_bundle.SENTINEL,
 #        "part": 1, "n_parts": 1, "total": 1}
-#    good = "\n".join([header, make_text_bundle.SENTINEL,
+#    good = "\n".join([header, make_text_bundle.SENTINEL, "#ENC text",
 #                      "#F %s 2 adept/x.py" % sha, "#print('hi')", "#"]) + "\n"
 #    bad = good.replace("#print('hi')", "#print('tampered')")
 #
@@ -6262,6 +6282,70 @@ if __name__ == "__main__":
 #        assert must in doc, must
 #    with open(os.path.join(REPO, "CLAUDE.md"), "r", encoding="utf-8") as f:
 #        assert "AGENTS.md" in f.read(), "CLAUDE.md 要指得到 AGENTS.md"
+#
+#
+#@needs_git
+#def test_the_compressed_bundle_fits_in_one_file_and_round_trips(tmp_path):
+#    """使用者問的正是這個：不能一包嗎。
+#
+#    可以 —— 但要用 lzma。整包 base64 之後 gzip 是 991 KB、lzma 是 701 KB，而
+#    **GitHub 不顯示超過 1 MB 的檔案**，所以那 290 KB 的差距就是「一次複製」與
+#    「六次複製」的差別。這條測試同時鎖住「塞得進去」與「解出來一樣」。
+#    """
+#    text = make_text_bundle.build("b.py", REPO, compress=True)
+#    kb = len(text.encode("utf-8")) / 1024
+#    assert kb < 900, "壓縮版 %.0f KB —— GitHub 可能就不顯示了" % kb
+#    ast.parse(text, filename="compressed")           # 仍然是合法的 Python
+#
+#    path = tmp_path / "b.py"
+#    path.write_text(text, encoding="utf-8", newline="\n")
+#    dest = tmp_path / "out"
+#    r = subprocess.run([sys.executable, str(path), "--dest", str(dest)],
+#                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+#                       timeout=300)
+#    assert r.returncode == 0, r.stdout.decode("utf-8", "replace")
+#    for rel in make_filelist.tracked_files(REPO) + ["tools/FILELIST.txt"]:
+#        src = pathlib.Path(REPO) / rel
+#        assert (dest / rel).read_bytes() == src.read_bytes(), rel
+#
+#
+#@needs_git
+#def test_both_encodings_carry_exactly_the_same_data(tmp_path):
+#    """壓縮版壓的就是純文字版那一段，所以兩種編碼共用同一個解析器 ——
+#    「壓縮版有 bug 但純文字版沒有」這種事不該存在。"""
+#    items = make_text_bundle.collect(REPO)
+#    body = "\n".join(make_text_bundle._data_lines(items))
+#    text = make_text_bundle.build("b.py", REPO, items=items, compress=True)
+#    b64 = "".join(ln[2:] for ln in text.splitlines() if ln.startswith("#B"))
+#    import base64 as _b64
+#    import lzma as _lzma
+#    assert _lzma.decompress(_b64.b64decode(b64)).decode("utf-8") == body
+#
+#
+#@needs_git
+#def test_a_truncated_compressed_bundle_says_so_instead_of_crashing(tmp_path):
+#    """複製一個 700 KB 的東西最可能的失敗是**貼不完整**。那時候不能丟 traceback,
+#    要講「重新複製一次，而且不要用編輯器另存」。"""
+#    text = make_text_bundle.build("b.py", REPO, compress=True)
+#    lines = text.splitlines()
+#    cut = [ln for ln in lines if not ln.startswith("#B")][:-0] or lines
+#    keep, dropped = [], 0
+#    for ln in lines:
+#        if ln.startswith("#B"):
+#            dropped += 1
+#            if dropped > 20:                          # 砍掉尾巴一大段
+#                continue
+#        keep.append(ln)
+#    path = tmp_path / "cut.py"
+#    path.write_text("\n".join(keep) + "\n", encoding="utf-8", newline="\n")
+#    r = subprocess.run([sys.executable, str(path), "--dest", str(tmp_path / "d")],
+#                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+#                       timeout=120)
+#    out = r.stdout.decode("utf-8", "replace")
+#    assert r.returncode == 2, out
+#    assert "Traceback" not in out, out
+#    assert "重新複製" in out, out
+#    assert not (tmp_path / "d").exists() or not list((tmp_path / "d").rglob("*.py"))
 #
 #F e027a9047fa771cca97915c533a7f90198c0fb18 108 tests/test_period_golden.py
 #"""Tests for adept.core.algo.period and .golden (vendored from
@@ -10352,137 +10436,4 @@ if __name__ == "__main__":
 #    dlg.chk_klarf.setChecked(False)
 #    assert dlg.run_export(sync=True) is None
 #    assert "Nothing is selected" in dlg.error_text()
-#
-#F 877d92d66b6b539947142476b9d7d8bd6f32c9a8 132 tests/test_ui_f7_10_route_edges.py
-## F7-10 驗收：畫布要畫出 route 的隱含順序。
-#"""**畫布上沒有線，不代表沒有連接。**
-#
-#引擎的依賴是「route 相鄰對 ∪ 顯式 edges」（``recipe.execution_order``），
-#但畫布以前只畫顯式 edges。於是載入一份沒拉過線的 recipe，使用者看到的是
-#九張互不相干的卡 —— 而它其實是照順序跑的。他只會得到兩種結論，兩種都是錯的：
-#以為要自己連起來才會跑，或以為沒連線的卡不會執行。
-#"""
-#from __future__ import annotations
-#
-#import sys
-#from pathlib import Path
-#
-#import pytest
-#
-#sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-#sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
-#
-#EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "recipes" \
-#    / "die_to_die_basic.json"
-#
-#
-#def _import_qt(g):
-#    from PySide6.QtWidgets import QApplication
-#
-#    from adept.ui import canvas as canvas_mod
-#    from adept.ui import studio as studio_mod
-#    from adept.ui import theme as theme_mod
-#    g.update(QApplication=QApplication, canvas_mod=canvas_mod,
-#             studio_mod=studio_mod, theme_mod=theme_mod)
-#
-#
-#@pytest.fixture(scope="module")
-#def qapp():
-#    _import_qt(globals())
-#    app = QApplication.instance() or QApplication([])
-#    theme_mod.apply_theme(app)
-#    yield app
-#
-#
-#@pytest.fixture(scope="module")
-#def lot(tmp_path_factory):
-#    from make_sample import generate
-#    return generate(str(tmp_path_factory.mktemp("f7_10")), n=6, seed=13)
-#
-#
-#@pytest.fixture
-#def window(qapp, lot):
-#    win = studio_mod.StudioWindow(show_welcome_on_start=False)
-#    win.load_dataset_path(lot["klarf"], sync=True)
-#    win.load_recipe_path(str(EXAMPLE), sync=True)
-#    yield win
-#    win.close()
-#
-#
-#def _edges(canvas, implicit):
-#    return [e for e in canvas._edges if e.implicit is implicit]
-#
-#
-#def test_a_recipe_with_no_explicit_links_still_shows_how_data_flows(window):
-#    """範例 recipe 一條線都沒拉，但它是一條鏈 —— 畫布要看得出來。"""
-#    assert window.model.edges == [], "前提：這份 recipe 沒有顯式 edges"
-#    n = len(window.model.node_order)
-#
-#    implicit = _edges(window.pipeline, True)
-#    assert implicit, "沒有畫出任何隱含連線 —— 使用者會以為卡片互不相干"
-#    pairs = {e.pair() for e in implicit}
-#    expected = set(zip(window.model.node_order, window.model.node_order[1:]))
-#    assert pairs == expected
-#
-#
-#def test_the_implicit_order_matches_what_the_engine_actually_does(window):
-#    """畫的東西必須是引擎真的依據的東西，不是另一套說法。"""
-#    from adept.core.pipeline import execution_order
-#
-#    order = execution_order(window.model.to_recipe(), window.model.kind)
-#    drawn = {e.pair() for e in _edges(window.pipeline, True)}
-#    drawn |= {e.pair() for e in _edges(window.pipeline, False)}
-#    for a, b in zip(order, order[1:]):
-#        assert (a, b) in drawn, "引擎認為 %s → %s，畫布上卻沒有這條線" % (a, b)
-#
-#
-#def test_implicit_links_look_different_and_cannot_be_deleted(window):
-#    """隱含順序來自卡片的排列。刪掉它在語意上等於「把卡片從流程裡拿掉」——
-#    那是另一個動作，不該用同一個 Delete 鍵完成。"""
-#    from PySide6.QtWidgets import QGraphicsItem
-#
-#    for e in _edges(window.pipeline, True):
-#        assert not e.flags() & QGraphicsItem.ItemIsSelectable
-#        assert "order of the cards" in e.toolTip()
-#    for e in _edges(window.pipeline, False):
-#        assert e.flags() & QGraphicsItem.ItemIsSelectable
-#
-#
-#def test_drawing_the_link_yourself_turns_it_into_a_real_one(window):
-#    """使用者把隱含的那條連起來 → 變成實線，而且不會畫成兩條。"""
-#    a, b = window.model.node_order[0], window.model.node_order[1]
-#    window.pipeline.link_to(a, b)
-#
-#    assert (a, b) in window.model.edges
-#    assert (a, b) in {e.pair() for e in _edges(window.pipeline, False)}
-#    assert (a, b) not in {e.pair() for e in _edges(window.pipeline, True)}, \
-#        "同一對節點不可以同時有實線與虛線"
-#
-#
-#def test_edge_pairs_still_reports_only_the_users_own_links(window):
-#    """存檔寫的是使用者拉的線。隱含順序來自 route，存進 edges 會重複記錄。"""
-#    assert window.pipeline.edge_pairs() == window.model.edges == []
-#    window.pipeline.link_to(window.model.node_order[0],
-#                            window.model.node_order[2])
-#    assert window.pipeline.edge_pairs() == window.model.edges
-#
-#
-#def test_a_long_chain_wraps_instead_of_running_off_the_screen(window):
-#    """隱含連線讓每一份 recipe 都有依賴，所以換行必須對深度排版也成立
-#    （不然九張卡又會排成一條 2500px 的橫列）。"""
-#    cols = set()
-#    for nid in window.pipeline.node_ids():
-#        item = window.pipeline.card(nid)
-#        cols.add(round(item.pos().x() / (canvas_mod.NODE_W + canvas_mod.COL_GAP)))
-#    assert max(cols) < canvas_mod.WRAP
-#    assert len(window.pipeline.node_ids()) > canvas_mod.WRAP, "前提：卡片數超過一行"
-#
-#
-#def test_a_single_card_has_no_dangling_link(window):
-#    """只有一張起手卡的時候不可以畫出「連到自己」之類的東西。"""
-#    canvas = canvas_mod.PipelineCanvas()
-#    canvas.set_nodes([{"node_id": "load", "label": "Load images",
-#                       "group": "input", "enabled": True, "summary": "",
-#                       "reads": [], "writes": ["test", "ref"]}], [])
-#    assert canvas._edges == []
 #

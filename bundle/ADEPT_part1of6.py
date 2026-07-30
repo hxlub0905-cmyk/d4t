@@ -64,7 +64,26 @@ def main(argv=None) -> int:
         print("✗ 找不到資料區 —— 這個檔案被截斷了，或不是完整的 bundle。")
         return 2
 
-    items = list(entries(lines[start:]))
+    data = lines[start:]
+    # 分隔行的**下一行**宣告編碼。用「固定位置的宣告」而不是「掃某個開頭的樣式」
+    # ——「以 #B 開頭就是 base64」那種判斷會被內容咬到：資料區每一行都加了 '#'，
+    # 所以任何原本以 B 開頭的程式碼行（`BUNDLE_DIR = ...`）都會變成 `#B...`。
+    enc = data[0].strip() if data else ""
+    data = data[1:]
+    if enc == "#ENC lzma+base64":
+        b64 = [ln[2:] for ln in data if ln.startswith("#B")]
+        import base64
+        import lzma
+        try:
+            raw = lzma.decompress(base64.b64decode("".join(b64)))
+        except Exception as exc:                     # noqa: BLE001
+            print("✗ 資料區解不開：%s" % exc)
+            print("  這個檔案在複製／貼上的過程中被截斷或改掉了。請重新複製一次，")
+            print("  而且**不要**用編輯器打開後另存。")
+            return 2
+        data = raw.decode("utf-8").split("\n")
+
+    items = list(entries(data))
     if not items:
         print("✗ 資料區是空的 —— 這個檔案被截斷了。")
         return 2
@@ -147,15 +166,16 @@ if __name__ == "__main__":
     sys.exit(main())
 
 # ==== ADEPT-BUNDLE-DATA ==== 以下是資料，不要編輯 ====
-#F 4030615f3a785b512d5bf12b223c0b996dfd139e 180 tools/FILELIST.txt
+#ENC text
+#F 917d62445dd64ec5ca0a2e569f048f6bee61e22c 180 tools/FILELIST.txt
 ## ADEPT 檔案清單 —— tools/get_code.py 用（每行：git blob SHA-1 + 路徑）。
 ## 由 tools/make_filelist.py 產生；tests/test_offline_tools.py 會擋住它腐爛。
 #f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 #f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
-#a1a0c8e12f57e17f7bfbf75f70c3a0d4e91d1e33 AGENTS.md
+#c38560d9f2766015feddcfc331772e5e2cb7c803 AGENTS.md
 #a3922dbc6000734e73ea730e8e521f207bb5c8ad CLAUDE.md
 #0e34f6c1f9b0afc82d5ffc4b5bba0533aa14a97e README.md
-#2a8f038b82940602ac42b1724959afe84d9ae30d SESSION_LOG.md
+#c9233f46dcf23540f22cff1cfc725a7674936c6e SESSION_LOG.md
 #650a5d7c8bc6db42eed4054174823bfcfceb7eae adept/__init__.py
 #2f6c872448859787dbe6cfba4ef6c2e819d576da adept/__main__.py
 #8a51dfe499b3a9d81434c8a202f2d17c24b71c74 adept/core/__init__.py
@@ -234,7 +254,7 @@ if __name__ == "__main__":
 #db4c0723c6a28cddd4c335d5214895f57915fc7d adept/ui/workers.py
 #04c5ce471195ac4e2449126ce835b22b4c880cf3 conftest.py
 #ba101eee94ed5f8183eba368989167fb1132a128 docs/HANDOVER.md
-#08a0584487f2854df1c7796915fbf51f3d90397a docs/NO-GIT-SETUP.md
+#e3e7f60fa1eb70e61678ac8b40115effffaf4647 docs/NO-GIT-SETUP.md
 #b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 #284baa3b08f76721a95eabc8674130af5fcfa202 docs/plans/F0-master-plan.md
 #9cb008460ec1b323254bde1d79e35f33542b401a docs/plans/F7-canvas-and-taxonomy.md
@@ -278,7 +298,7 @@ if __name__ == "__main__":
 #b614d74319ead1329a9b301b5967f2d4d8b5464f tests/test_no_qt.py
 #3ca36d76191e3c0c2c801a13720a81874fd847d5 tests/test_no_real_fab_data.py
 #f2f18a59cf739942f573f001c64cd77730bc5b09 tests/test_normalize.py
-#a1d768507e961ffe06e398c556c8da7a12a6a8ed tests/test_offline_tools.py
+#d313edc8f96154c7681042d0437c84b9d474bbec tests/test_offline_tools.py
 #e027a9047fa771cca97915c533a7f90198c0fb18 tests/test_period_golden.py
 #482763f96a3f9e39f90a7e6cbd97c6716b29db63 tests/test_phase_origin.py
 #8c4b2aba1d0893acc999c5acb331fd00839518d9 tests/test_quality.py
@@ -326,7 +346,7 @@ if __name__ == "__main__":
 #79318988a82fb09aa02a79cea32db78f966855b4 tools/make_filelist.py
 #a096a20ac78fba6911826946334eb6ad2227ec23 tools/make_sample.py
 #cd11d6aba3d087b6d30ea50e385fd44f3586f865 tools/make_sample_rsem.py
-#c078e47ba2a10ef1c380da1d54aea9cb0ca62fe4 tools/make_text_bundle.py
+#ae9f681b299e9471105b94cd2d6304e92d62d56f tools/make_text_bundle.py
 #
 #F f2bf0bd69e5c75960e7038807d0bfbf9474fbebd 65 .github/workflows/ci.yml
 #name: tests
@@ -411,7 +431,7 @@ if __name__ == "__main__":
 ## 離線安裝 wheels（各機器自行取得，不進版控）
 #wheels/
 #
-#F a1a0c8e12f57e17f7bfbf75f70c3a0d4e91d1e33 117 AGENTS.md
+#F c38560d9f2766015feddcfc331772e5e2cb7c803 125 AGENTS.md
 ## AGENTS.md — 開發環境與限制
 #
 #給任何要在這個專案上動手的人／agent。**先讀這一份**，再讀
@@ -461,17 +481,24 @@ if __name__ == "__main__":
 #
 #這條通道有兩個硬限制，設計必須繞開：
 #
-#1. **GitHub 不顯示超過 1 MB 的檔案。** 太大的檔案在那台機器上根本點不開來複製。
-#   所以搬運用的包一定要分批（`bundle/` 裡每一批 < 420 KB）。
-#   「打包成功但送不進去」是最糟的一種「做完了」。
-#2. **一次複製一個檔案。** 176 個檔案不可能一個一個貼，所以要有整包的形式；
+#1. **GitHub 不顯示超過 1 MB 的檔案。** 太大的檔案在那台機器上根本點不開來複製，
+#   而整個 repo 是 2.3 MB 的純文字。「打包成功但送不進去」是最糟的一種「做完了」。
+#   兩種解法並存，因為它們的取捨不同：
+#   - `ADEPT_bundle.py`：**lzma + base64 壓成 735 KB**，一次複製就搬完。
+#     （gzip 壓完是 991 KB —— 太貼近上限，所以是 lzma。）代價是內容變成不可讀的
+#     base64；但**解包程式本身仍然是可讀的 Python**，而且 `--list` 可以在寫任何
+#     檔案之前先列出它要寫什麼。
+#   - `ADEPT_part1of6.py` … `part6of6.py`：純文字、每批 < 420 KB、**記事本打開就
+#     讀得到每個檔案**。要在跑之前逐字看過內容的時候用這個。
+#2. **一次複製一個檔案。** 178 個檔案不可能一個一個貼，所以要有整包的形式；
 #   但更新的時候也不該重跑整套搬運，所以要有「只有這幾個變了」的機制。
 #
 #### 三條路，用在不同的時機
 #
 #| 情況 | 用什麼 | 成本 |
 #|---|---|---|
-#| **第一次搬整包** | `bundle/ADEPT_part1of6.py` … `part6of6.py`，每一批貼進去執行一次 | 6 次複製 |
+#| **第一次搬整包** | `bundle/ADEPT_bundle.py`（壓縮成一個檔案）| **1 次複製** |
+#| 同上，但想先讀過內容 | `bundle/ADEPT_part1of6.py` … `part6of6.py`（純文字，看得懂）| 6 次複製 |
 #| **之後更新** | 複製 `tools/FILELIST.txt`（12 KB）→ `python tools/check_files.py` → 它列出要重新複製哪幾個 | 1 次小複製 + 幾次針對性複製 |
 #| **只想跑格式探測** | 直接複製 `fab_probe/probe_*.py`（各 24–46 KB，stdlib-only 單檔，**不需要整個 repo**） | 1–3 次複製 |
 #
@@ -508,13 +535,14 @@ if __name__ == "__main__":
 ## 1. 檔案清單（新增/刪除檔案之後；順序是 git add 之後才跑）
 #git add -A && python tools/make_filelist.py && git add -A
 #
-## 2. 只有在要搬進公司機之前才需要重打包（會動到 6 個大檔案）
+## 2. 只有在要搬進公司機之前才需要重打包（兩種形式都要重產）
+#python tools/make_text_bundle.py --out bundle/ADEPT_bundle.py --compress
 #python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 #```
 #
 #第 1 件有測試守著（忘了跑會紅）。第 2 件**刻意沒有自動化** ——
-#`bundle/` 裡是 2.4 MB 的複本，每次 commit 都重產會讓 diff 變成噪音。
-#需要搬運的時候才跑。
+#`bundle/` 裡是整個 repo 的複本（壓縮版 735 KB + 純文字六批 2.4 MB），
+#每次 commit 都重產會讓 diff 變成噪音。需要搬運的時候才跑。
 #
 #---
 #
@@ -1074,7 +1102,7 @@ if __name__ == "__main__":
 #  ProcessPool 100% 卡死 → `batch._pool_context()` 改為主執行緒 fork、非主執行緒 spawn
 #  （迴歸測試 `tests/test_batch_thread_safety.py`）。
 #
-#F 2a8f038b82940602ac42b1724959afe84d9ae30d 1457 SESSION_LOG.md
+#F c9233f46dcf23540f22cff1cfc725a7674936c6e 1487 SESSION_LOG.md
 ## SESSION_LOG
 #
 #開發歷程。**每次 session 結束請在最上方新增一段。**
@@ -1110,6 +1138,36 @@ if __name__ == "__main__":
 #- **`tools/FILELIST.txt` 固定放第一批**，後面每一批解完都用它回報「還缺幾個」。
 #- **只貼一批的時候絕對不能印「下一步：跑 doctor」**。第一版就是這樣 ——
 #  少了一百多個檔案卻長得像整包到位了。這是這一整輪反覆在防的同一件事。
+#
+#### 「不能一包嗎」—— 可以，而我第一版漏了一個選項
+#
+#使用者問為什麼要六批。理由是真的（GitHub 的 1 MB 顯示上限），但我漏了壓縮：
+#
+#| 做法 | 大小 | 一包？ |
+#|---|---|---|
+#| 純文字 | 2367 KB | ✗ 六批 |
+#| gzip + base64 | 991 KB | ✗ 太貼近上限 |
+#| **lzma + base64** | **735 KB** | **✓ 一個檔案** |
+#
+#**lzma 與 gzip 的 290 KB 差距，正好就是「一次複製」與「六次複製」的差別。**
+#
+#我原本反對 base64 的理由是「DLP 看不懂就擋」—— 那個推理針對的是**下載**。
+#這裡的通道是「看一個本來就看得到的網頁、複製到剪貼簿」，沒有下載檢查，
+#所以那個反對站不住。前提換了，結論就要跟著換。
+#
+#兩種形式都留著，因為取捨不同：壓縮版一次搬完但內容不可讀；純文字版六次但
+#**記事本打開就看得到每個檔案**。壓縮版的解包程式本身仍是可讀的 Python，
+#而且 `--list` 可以在寫任何檔案之前先列出它要寫什麼 —— 那是「一次複製」與
+#「跑之前看得懂它要做什麼」之間的折衷。
+#
+#實作上刻意讓兩種編碼**共用同一個解析器**：壓縮版壓的就是純文字版那一段文字，
+#解開之後丟給同一個 `entries()`。有測試斷言「解壓出來的位元組等於純文字版的資料區」
+#—— 不然會出現「壓縮版有 bug 但純文字版沒有」這種最難查的分歧。
+#
+#順帶又踩到同一類坑第三次：第一版用「以 `#B` 開頭就是 base64」判斷編碼，
+#而資料區每一行都加了 `#`，所以任何原本以 `B` 開頭的程式碼行（`BUNDLE_DIR = …`）
+#都被當成 base64。**改成在固定位置放一行明確的宣告**（`#ENC text` /
+#`#ENC lzma+base64`）—— 判斷編碼要靠宣告，不能靠掃樣式。
 #
 #### 更新不該重跑整套搬運
 #
@@ -8492,297 +8550,4 @@ if __name__ == "__main__":
 #    text, plan = _build(doc, results, mode, **opts)
 #    _atomic_write_text(str(out_path), text)
 #    return plan
-#
-#F eeb80b55a38476ef2f80a5e10538a50bc935aa1b 292 adept/core/export/overlay.py
-## ADEPT overlay rendering — authored 2026-07-28 (M5-1).
-#"""缺陷疊圖：把「機器看到什麼」畫成一張人看得懂的圖。
-#
-#純 numpy/cv2，**不碰檔案**（除了 :func:`write_png`）—— 這樣 Studio 的
-#Gallery、CLI 的批次出圖、報表的插圖都能共用同一支渲染函式。
-#
-#:func:`render_overlay` 產出 RGB uint8 面板：
-#
-#- 底圖取 ``images["test"]``（EBI patch）或 ``images["single"]``（rSEM）；
-#- 主 blob 的 bounding box 畫**紅框**；
-#- 左上角可疊一行標籤（score / bin …），底下鋪半透明深色條方便閱讀；
-#- ``images`` 裡有 ``"diff"`` 時輸出 **[test | diff] 並排**（寬度剛好兩倍）。
-#
-#★ 字型限制 ★
-#  cv2 內建的 Hershey 字型**沒有中日韓字元**。標籤裡的非 ASCII 字元會被
-#  換成 ``?`` 再畫（不會炸、不會亂碼）。要中文標籤請在 UI 層用 Qt 畫。
-#
-#批次執行時 Context 不會保留（記憶體會爆），所以這裡**不提供**
-#``save_overlays(results_with_ctx, ...)``；改由呼叫端逐顆
-#``render_overlay`` → :func:`write_png`，要畫哪幾顆由 UI/CLI 決定。
-#"""
-#from __future__ import annotations
-#
-#import os
-#from typing import Any, Dict, Optional, Sequence, Tuple
-#
-#import cv2
-#import numpy as np
-#
-#from .klarf_out import ExportError
-#
-#__all__ = ["render_overlay", "write_png", "to_display_rgb",
-#           "primary_blob_box", "BOX_COLOR"]
-#
-##: 主 blob 外框的顏色（RGB）。
-#BOX_COLOR = (255, 32, 32)
-##: 標籤文字顏色（RGB）與底條顏色。
-#TEXT_COLOR = (255, 255, 255)
-#BANNER_COLOR = (0, 0, 0)
-#
-##: 底圖的挑選順序（第一個找得到的就用）。
-#BASE_PRIORITY = ("test", "single", "aligned", "ref", "diff")
-#
-#_FONT = cv2.FONT_HERSHEY_SIMPLEX
-#
-#
-## ---------------------------------------------------------------------------
-## 小工具
-## ---------------------------------------------------------------------------
-#def _ascii_only(text: str) -> str:
-#    """非 ASCII → '?'（cv2 的內建字型畫不出 CJK，但也不該讓它炸）。"""
-#    return "".join(ch if 32 <= ord(ch) < 127 else "?" for ch in str(text))
-#
-#
-#def to_display_rgb(arr: np.ndarray) -> np.ndarray:
-#    """任意 2-D/3-D 陣列 → 可顯示的 RGB uint8（float 圖自動拉伸到 0–255）。"""
-#    a = np.asarray(arr)
-#    if a.ndim == 3 and a.shape[2] == 1:
-#        a = a[:, :, 0]
-#    if a.ndim not in (2, 3):
-#        raise ExportError(
-#            "Overlays accept a 2-D grayscale or 3-channel colour image only; got shape {}.".format(a.shape))
-#    if a.ndim == 3 and a.shape[2] not in (3, 4):
-#        raise ExportError(
-#            "Overlays accept 3- or 4-channel colour images only; got {} channels.".format(a.shape[2]))
-#
-#    if a.dtype != np.uint8:
-#        f = a.astype(np.float32)
-#        lo = float(np.nanmin(f)) if f.size else 0.0
-#        hi = float(np.nanmax(f)) if f.size else 1.0
-#        f = np.nan_to_num(f, nan=lo, posinf=hi, neginf=lo)
-#        if hi - lo < 1e-12:
-#            a = np.zeros(f.shape, np.uint8)
-#        else:
-#            # 四捨五入（不是無條件捨去）：最大值才會剛好落在 255
-#            a = np.clip(np.rint((f - lo) * (255.0 / (hi - lo))),
-#                        0, 255).astype(np.uint8)
-#
-#    if a.ndim == 2:
-#        return cv2.cvtColor(a, cv2.COLOR_GRAY2RGB)
-#    if a.shape[2] == 4:
-#        return cv2.cvtColor(a, cv2.COLOR_RGBA2RGB)
-#    return np.ascontiguousarray(a)
-#
-#
-#def _blob_box(b: Any) -> Optional[Tuple[int, int, int, int]]:
-#    """blob（dict 或 DefectROI）→ (x, y, w, h)。"""
-#    if b is None:
-#        return None
-#    if isinstance(b, dict):
-#        if not all(k in b for k in ("x", "y", "w", "h")):
-#            return None
-#        vals = (b["x"], b["y"], b["w"], b["h"])
-#    elif hasattr(b, "bbox"):
-#        vals = tuple(b.bbox)
-#    elif all(hasattr(b, k) for k in ("x", "y", "w", "h")):
-#        vals = (b.x, b.y, b.w, b.h)
-#    elif isinstance(b, (tuple, list)) and len(b) >= 4:
-#        vals = tuple(b[:4])
-#    else:
-#        return None
-#    try:
-#        return (int(vals[0]), int(vals[1]), int(vals[2]), int(vals[3]))
-#    except (TypeError, ValueError):
-#        return None
-#
-#
-#def _blob_rank(b: Any) -> float:
-#    """主 blob 的挑選依據：SNR 最強者；沒有 SNR 就用面積。"""
-#    if isinstance(b, dict):
-#        v = b.get("snr_value", b.get("area", 0.0))
-#    else:
-#        v = getattr(b, "snr_value", getattr(b, "area", 0.0))
-#    try:
-#        return float(v)
-#    except (TypeError, ValueError):
-#        return 0.0
-#
-#
-#def primary_blob_box(blobs: Optional[Sequence[Any]] = None,
-#                     features: Optional[Dict[str, Any]] = None
-#                     ) -> Optional[Tuple[int, int, int, int]]:
-#    """挑出「主 blob」的框：blobs 裡 SNR 最強的那塊；
-#
-#    blobs 是空的時候，退而求其次看 features 有沒有
-#    ``blob_x`` / ``blob_y`` / ``blob_w`` / ``blob_h``。都沒有回 None。
-#    """
-#    best = None
-#    best_rank = None
-#    for b in (blobs or ()):
-#        box = _blob_box(b)
-#        if box is None:
-#            continue
-#        rank = _blob_rank(b)
-#        if best_rank is None or rank > best_rank:
-#            best, best_rank = box, rank
-#    if best is not None:
-#        return best
-#    f = features or {}
-#    if all(k in f for k in ("blob_x", "blob_y", "blob_w", "blob_h")):
-#        return _blob_box({k[5:]: f[k] for k in
-#                          ("blob_x", "blob_y", "blob_w", "blob_h")})
-#    return None
-#
-#
-#def _pick_base(images: Dict[str, Any]) -> Tuple[str, np.ndarray]:
-#    for k in BASE_PRIORITY:
-#        if k in images and images[k] is not None:
-#            return k, images[k]
-#    for k in sorted(images):
-#        if images[k] is not None:
-#            return k, images[k]
-#    raise ExportError(
-#        "This defect has no image to draw (images is empty). Check that the "
-#        "load card in the pipeline ran successfully.")
-#
-#
-#def _draw_box(panel: np.ndarray, box: Tuple[int, int, int, int],
-#              color: Tuple[int, int, int] = BOX_COLOR) -> None:
-#    """在 panel 上畫框（超出邊界會被裁到圖內，至少留 1 px 寬高）。"""
-#    h, w = panel.shape[:2]
-#    x, y, bw, bh = box
-#    x0 = max(0, min(int(x), w - 1))
-#    y0 = max(0, min(int(y), h - 1))
-#    x1 = max(x0, min(int(x) + max(1, int(bw)) - 1, w - 1))
-#    y1 = max(y0, min(int(y) + max(1, int(bh)) - 1, h - 1))
-#    thick = 1 if min(h, w) < 192 else 2
-#    cv2.rectangle(panel, (x0, y0), (x1, y1), tuple(int(c) for c in color), thick)
-#
-#
-#def _draw_label(panel: np.ndarray, label: str) -> None:
-#    """左上角一行標籤（深色底條 + 白字）。非 ASCII 會變成 '?'。"""
-#    text = _ascii_only(label).strip()
-#    if not text:
-#        return
-#    h, w = panel.shape[:2]
-#    scale = max(0.35, min(0.6, w / 320.0))
-#    thick = 1
-#    (tw, th), base = cv2.getTextSize(text, _FONT, scale, thick)
-#    pad = 3
-#    bh = min(h, th + base + 2 * pad)
-#    band = panel[0:bh, 0:min(w, tw + 2 * pad)]
-#    if band.size:
-#        band[:] = (band.astype(np.uint16) * 1 // 4).astype(np.uint8)  # 壓暗當底
-#    cv2.putText(panel, text, (pad, pad + th), _FONT, scale,
-#                tuple(int(c) for c in TEXT_COLOR), thick, cv2.LINE_AA)
-#
-#
-## ---------------------------------------------------------------------------
-## 主函式
-## ---------------------------------------------------------------------------
-#def render_overlay(images: Dict[str, Any],
-#                   features: Optional[Dict[str, Any]] = None, *,
-#                   blobs: Optional[Sequence[Any]] = None,
-#                   box: Optional[Sequence[int]] = None,
-#                   label: Optional[str] = None,
-#                   base_key: Optional[str] = None,
-#                   diff_key: str = "diff",
-#                   montage: bool = True) -> np.ndarray:
-#    """把一顆 defect 畫成 RGB uint8 面板。
-#
-#    參數
-#    ----
-#    images
-#        Context 的影像 dict（或其子集）。底圖依 ``test`` → ``single`` →
-#        ``aligned`` → ``ref`` → ``diff`` 的順序挑第一個找得到的；
-#        ``base_key`` 可以指定。
-#    features
-#        該顆的特徵 dict。兩個用途：(1) ``box`` 與 ``blobs`` 都沒給時，
-#        若含 ``blob_x/blob_y/blob_w/blob_h`` 就用它畫框；(2) ``label``
-#        沒給但含 ``score`` 時自動組出 ``score=…`` 標籤。
-#    blobs
-#        ``ctx.meta["blobs"]``（dict 清單）或 ``DefectROI`` 清單；
-#        取 SNR 最強的那塊畫紅框。
-#    box
-#        直接指定 ``(x, y, w, h)``，優先於 ``blobs`` / ``features``。
-#    label
-#        左上角文字（非 ASCII 會顯示成 ``?``，見模組 docstring）。
-#    montage
-#        ``images`` 有 ``diff`` 時是否輸出 **[底圖 | diff] 並排**
-#        （預設 True，寬度剛好是底圖的兩倍）。
-#
-#    回傳 ``(H, W, 3)`` 或 ``(H, 2W, 3)`` 的 uint8 RGB 陣列。
-#    """
-#    if not isinstance(images, dict) or not images:
-#        raise ExportError(
-#            "render_overlay needs a dict of images (e.g. ctx.images); it got an empty one.")
-#    features = dict(features or {})
-#
-#    if base_key is not None:
-#        if base_key not in images or images[base_key] is None:
-#            raise ExportError(
-#                "The requested base image stream \"{}\" does not exist; this defect has: {}.".format(
-#                    base_key, ", ".join(sorted(images))))
-#        base = images[base_key]
-#    else:
-#        base_key, base = _pick_base(images)
-#
-#    left = to_display_rgb(base)
-#    h, w = left.shape[:2]
-#
-#    the_box = _blob_box(box) if box is not None else primary_blob_box(blobs, features)
-#    if the_box is not None:
-#        _draw_box(left, the_box)
-#
-#    panel = left
-#    right_src = images.get(diff_key)
-#    if montage and diff_key != base_key and right_src is not None:
-#        right = to_display_rgb(right_src)
-#        if right.shape[:2] != (h, w):
-#            right = cv2.resize(right, (w, h), interpolation=cv2.INTER_NEAREST)
-#        if the_box is not None:
-#            _draw_box(right, the_box)
-#        panel = np.concatenate([left, right], axis=1)
-#        panel[:, w:w + 1] = 96          # 中間一條細分隔線（不改變總寬度）
-#
-#    if label is None:
-#        s = features.get("score")
-#        if s is not None:
-#            try:
-#                label = "score={:.3f}".format(float(s))
-#            except (TypeError, ValueError):
-#                label = None
-#    if label:
-#        _draw_label(panel, str(label))
-#
-#    return np.ascontiguousarray(panel.astype(np.uint8))
-#
-#
-#def write_png(arr: np.ndarray, path: str) -> str:
-#    """把疊圖存成 PNG —— atomic（``.tmp`` + :func:`os.replace`）、CJK 路徑安全。
-#
-#    走 ``cv2.imencode`` + ``ndarray.tofile``（``cv2.imwrite`` 在 Windows
-#    吃不到含中日韓字元的路徑）。輸入是 RGB，寫檔前轉成 cv2 要的 BGR。
-#    """
-#    path = str(path)
-#    parent = os.path.dirname(os.path.abspath(path))
-#    if parent:
-#        os.makedirs(parent, exist_ok=True)
-#    a = np.asarray(arr)
-#    if a.dtype != np.uint8 or a.ndim not in (2, 3):
-#        a = to_display_rgb(a)
-#    if a.ndim == 3 and a.shape[2] == 3:
-#        a = cv2.cvtColor(a, cv2.COLOR_RGB2BGR)
-#    ok, buf = cv2.imencode(".png", a)
-#    if not ok:      # pragma: no cover — PNG 編碼失敗實務上只在記憶體不足時發生
-#        raise ExportError("PNG encoding failed; cannot write {}.".format(path))
-#    tmp = path + ".tmp"
-#    buf.tofile(tmp)
-#    os.replace(tmp, path)
-#    return path
 #

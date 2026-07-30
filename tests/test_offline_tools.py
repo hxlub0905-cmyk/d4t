@@ -938,7 +938,7 @@ def test_a_tampered_bundle_refuses_to_land_anything(tmp_path):
     header = make_text_bundle.EXTRACTOR % {
         "name": "b.py", "sentinel": make_text_bundle.SENTINEL,
         "part": 1, "n_parts": 1, "total": 1}
-    good = "\n".join([header, make_text_bundle.SENTINEL,
+    good = "\n".join([header, make_text_bundle.SENTINEL, "#ENC text",
                       "#F %s 2 adept/x.py" % sha, "#print('hi')", "#"]) + "\n"
     bad = good.replace("#print('hi')", "#print('tampered')")
 
@@ -1078,3 +1078,67 @@ def test_the_two_machine_setup_is_written_down():
         assert must in doc, must
     with open(os.path.join(REPO, "CLAUDE.md"), "r", encoding="utf-8") as f:
         assert "AGENTS.md" in f.read(), "CLAUDE.md 要指得到 AGENTS.md"
+
+
+@needs_git
+def test_the_compressed_bundle_fits_in_one_file_and_round_trips(tmp_path):
+    """使用者問的正是這個：不能一包嗎。
+
+    可以 —— 但要用 lzma。整包 base64 之後 gzip 是 991 KB、lzma 是 701 KB，而
+    **GitHub 不顯示超過 1 MB 的檔案**，所以那 290 KB 的差距就是「一次複製」與
+    「六次複製」的差別。這條測試同時鎖住「塞得進去」與「解出來一樣」。
+    """
+    text = make_text_bundle.build("b.py", REPO, compress=True)
+    kb = len(text.encode("utf-8")) / 1024
+    assert kb < 900, "壓縮版 %.0f KB —— GitHub 可能就不顯示了" % kb
+    ast.parse(text, filename="compressed")           # 仍然是合法的 Python
+
+    path = tmp_path / "b.py"
+    path.write_text(text, encoding="utf-8", newline="\n")
+    dest = tmp_path / "out"
+    r = subprocess.run([sys.executable, str(path), "--dest", str(dest)],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       timeout=300)
+    assert r.returncode == 0, r.stdout.decode("utf-8", "replace")
+    for rel in make_filelist.tracked_files(REPO) + ["tools/FILELIST.txt"]:
+        src = pathlib.Path(REPO) / rel
+        assert (dest / rel).read_bytes() == src.read_bytes(), rel
+
+
+@needs_git
+def test_both_encodings_carry_exactly_the_same_data(tmp_path):
+    """壓縮版壓的就是純文字版那一段，所以兩種編碼共用同一個解析器 ——
+    「壓縮版有 bug 但純文字版沒有」這種事不該存在。"""
+    items = make_text_bundle.collect(REPO)
+    body = "\n".join(make_text_bundle._data_lines(items))
+    text = make_text_bundle.build("b.py", REPO, items=items, compress=True)
+    b64 = "".join(ln[2:] for ln in text.splitlines() if ln.startswith("#B"))
+    import base64 as _b64
+    import lzma as _lzma
+    assert _lzma.decompress(_b64.b64decode(b64)).decode("utf-8") == body
+
+
+@needs_git
+def test_a_truncated_compressed_bundle_says_so_instead_of_crashing(tmp_path):
+    """複製一個 700 KB 的東西最可能的失敗是**貼不完整**。那時候不能丟 traceback,
+    要講「重新複製一次，而且不要用編輯器另存」。"""
+    text = make_text_bundle.build("b.py", REPO, compress=True)
+    lines = text.splitlines()
+    cut = [ln for ln in lines if not ln.startswith("#B")][:-0] or lines
+    keep, dropped = [], 0
+    for ln in lines:
+        if ln.startswith("#B"):
+            dropped += 1
+            if dropped > 20:                          # 砍掉尾巴一大段
+                continue
+        keep.append(ln)
+    path = tmp_path / "cut.py"
+    path.write_text("\n".join(keep) + "\n", encoding="utf-8", newline="\n")
+    r = subprocess.run([sys.executable, str(path), "--dest", str(tmp_path / "d")],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       timeout=120)
+    out = r.stdout.decode("utf-8", "replace")
+    assert r.returncode == 2, out
+    assert "Traceback" not in out, out
+    assert "重新複製" in out, out
+    assert not (tmp_path / "d").exists() or not list((tmp_path / "d").rglob("*.py"))

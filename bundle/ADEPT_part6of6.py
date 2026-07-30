@@ -64,7 +64,26 @@ def main(argv=None) -> int:
         print("✗ 找不到資料區 —— 這個檔案被截斷了，或不是完整的 bundle。")
         return 2
 
-    items = list(entries(lines[start:]))
+    data = lines[start:]
+    # 分隔行的**下一行**宣告編碼。用「固定位置的宣告」而不是「掃某個開頭的樣式」
+    # ——「以 #B 開頭就是 base64」那種判斷會被內容咬到：資料區每一行都加了 '#'，
+    # 所以任何原本以 B 開頭的程式碼行（`BUNDLE_DIR = ...`）都會變成 `#B...`。
+    enc = data[0].strip() if data else ""
+    data = data[1:]
+    if enc == "#ENC lzma+base64":
+        b64 = [ln[2:] for ln in data if ln.startswith("#B")]
+        import base64
+        import lzma
+        try:
+            raw = lzma.decompress(base64.b64decode("".join(b64)))
+        except Exception as exc:                     # noqa: BLE001
+            print("✗ 資料區解不開：%s" % exc)
+            print("  這個檔案在複製／貼上的過程中被截斷或改掉了。請重新複製一次，")
+            print("  而且**不要**用編輯器打開後另存。")
+            return 2
+        data = raw.decode("utf-8").split("\n")
+
+    items = list(entries(data))
     if not items:
         print("✗ 資料區是空的 —— 這個檔案被截斷了。")
         return 2
@@ -147,6 +166,140 @@ if __name__ == "__main__":
     sys.exit(main())
 
 # ==== ADEPT-BUNDLE-DATA ==== 以下是資料，不要編輯 ====
+#ENC text
+#F 877d92d66b6b539947142476b9d7d8bd6f32c9a8 132 tests/test_ui_f7_10_route_edges.py
+## F7-10 驗收：畫布要畫出 route 的隱含順序。
+#"""**畫布上沒有線，不代表沒有連接。**
+#
+#引擎的依賴是「route 相鄰對 ∪ 顯式 edges」（``recipe.execution_order``），
+#但畫布以前只畫顯式 edges。於是載入一份沒拉過線的 recipe，使用者看到的是
+#九張互不相干的卡 —— 而它其實是照順序跑的。他只會得到兩種結論，兩種都是錯的：
+#以為要自己連起來才會跑，或以為沒連線的卡不會執行。
+#"""
+#from __future__ import annotations
+#
+#import sys
+#from pathlib import Path
+#
+#import pytest
+#
+#sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+#sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+#
+#EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "recipes" \
+#    / "die_to_die_basic.json"
+#
+#
+#def _import_qt(g):
+#    from PySide6.QtWidgets import QApplication
+#
+#    from adept.ui import canvas as canvas_mod
+#    from adept.ui import studio as studio_mod
+#    from adept.ui import theme as theme_mod
+#    g.update(QApplication=QApplication, canvas_mod=canvas_mod,
+#             studio_mod=studio_mod, theme_mod=theme_mod)
+#
+#
+#@pytest.fixture(scope="module")
+#def qapp():
+#    _import_qt(globals())
+#    app = QApplication.instance() or QApplication([])
+#    theme_mod.apply_theme(app)
+#    yield app
+#
+#
+#@pytest.fixture(scope="module")
+#def lot(tmp_path_factory):
+#    from make_sample import generate
+#    return generate(str(tmp_path_factory.mktemp("f7_10")), n=6, seed=13)
+#
+#
+#@pytest.fixture
+#def window(qapp, lot):
+#    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+#    win.load_dataset_path(lot["klarf"], sync=True)
+#    win.load_recipe_path(str(EXAMPLE), sync=True)
+#    yield win
+#    win.close()
+#
+#
+#def _edges(canvas, implicit):
+#    return [e for e in canvas._edges if e.implicit is implicit]
+#
+#
+#def test_a_recipe_with_no_explicit_links_still_shows_how_data_flows(window):
+#    """範例 recipe 一條線都沒拉，但它是一條鏈 —— 畫布要看得出來。"""
+#    assert window.model.edges == [], "前提：這份 recipe 沒有顯式 edges"
+#    n = len(window.model.node_order)
+#
+#    implicit = _edges(window.pipeline, True)
+#    assert implicit, "沒有畫出任何隱含連線 —— 使用者會以為卡片互不相干"
+#    pairs = {e.pair() for e in implicit}
+#    expected = set(zip(window.model.node_order, window.model.node_order[1:]))
+#    assert pairs == expected
+#
+#
+#def test_the_implicit_order_matches_what_the_engine_actually_does(window):
+#    """畫的東西必須是引擎真的依據的東西，不是另一套說法。"""
+#    from adept.core.pipeline import execution_order
+#
+#    order = execution_order(window.model.to_recipe(), window.model.kind)
+#    drawn = {e.pair() for e in _edges(window.pipeline, True)}
+#    drawn |= {e.pair() for e in _edges(window.pipeline, False)}
+#    for a, b in zip(order, order[1:]):
+#        assert (a, b) in drawn, "引擎認為 %s → %s，畫布上卻沒有這條線" % (a, b)
+#
+#
+#def test_implicit_links_look_different_and_cannot_be_deleted(window):
+#    """隱含順序來自卡片的排列。刪掉它在語意上等於「把卡片從流程裡拿掉」——
+#    那是另一個動作，不該用同一個 Delete 鍵完成。"""
+#    from PySide6.QtWidgets import QGraphicsItem
+#
+#    for e in _edges(window.pipeline, True):
+#        assert not e.flags() & QGraphicsItem.ItemIsSelectable
+#        assert "order of the cards" in e.toolTip()
+#    for e in _edges(window.pipeline, False):
+#        assert e.flags() & QGraphicsItem.ItemIsSelectable
+#
+#
+#def test_drawing_the_link_yourself_turns_it_into_a_real_one(window):
+#    """使用者把隱含的那條連起來 → 變成實線，而且不會畫成兩條。"""
+#    a, b = window.model.node_order[0], window.model.node_order[1]
+#    window.pipeline.link_to(a, b)
+#
+#    assert (a, b) in window.model.edges
+#    assert (a, b) in {e.pair() for e in _edges(window.pipeline, False)}
+#    assert (a, b) not in {e.pair() for e in _edges(window.pipeline, True)}, \
+#        "同一對節點不可以同時有實線與虛線"
+#
+#
+#def test_edge_pairs_still_reports_only_the_users_own_links(window):
+#    """存檔寫的是使用者拉的線。隱含順序來自 route，存進 edges 會重複記錄。"""
+#    assert window.pipeline.edge_pairs() == window.model.edges == []
+#    window.pipeline.link_to(window.model.node_order[0],
+#                            window.model.node_order[2])
+#    assert window.pipeline.edge_pairs() == window.model.edges
+#
+#
+#def test_a_long_chain_wraps_instead_of_running_off_the_screen(window):
+#    """隱含連線讓每一份 recipe 都有依賴，所以換行必須對深度排版也成立
+#    （不然九張卡又會排成一條 2500px 的橫列）。"""
+#    cols = set()
+#    for nid in window.pipeline.node_ids():
+#        item = window.pipeline.card(nid)
+#        cols.add(round(item.pos().x() / (canvas_mod.NODE_W + canvas_mod.COL_GAP)))
+#    assert max(cols) < canvas_mod.WRAP
+#    assert len(window.pipeline.node_ids()) > canvas_mod.WRAP, "前提：卡片數超過一行"
+#
+#
+#def test_a_single_card_has_no_dangling_link(window):
+#    """只有一張起手卡的時候不可以畫出「連到自己」之類的東西。"""
+#    canvas = canvas_mod.PipelineCanvas()
+#    canvas.set_nodes([{"node_id": "load", "label": "Load images",
+#                       "group": "input", "enabled": True, "summary": "",
+#                       "reads": [], "writes": ["test", "ref"]}], [])
+#    assert canvas._edges == []
+#
 #F 5f9141042b4721854e37278486c382f72059a412 372 tests/test_ui_f7_11_roi.py
 ## F7-11 驗收（UI）：輸出名前綴、投影曲線面板、過期預覽結果。
 #"""三件事都是為了同一個目的：**讓「量兩個區域」這件事真的做得起來。**
@@ -8905,7 +9058,7 @@ if __name__ == "__main__":
 #if __name__ == "__main__":
 #    raise SystemExit(main())
 #
-#F c078e47ba2a10ef1c380da1d54aea9cb0ca62fe4 326 tools/make_text_bundle.py
+#F ae9f681b299e9471105b94cd2d6304e92d62d56f 380 tools/make_text_bundle.py
 ##!/usr/bin/env python3
 ## ADEPT 單檔純文字打包 — authored 2026-07-30.
 #"""把整個 repo 打成**一個純文字 .py 檔**，那個檔案自己解得開。
@@ -9028,7 +9181,26 @@ if __name__ == "__main__":
 #        print("✗ 找不到資料區 —— 這個檔案被截斷了，或不是完整的 bundle。")
 #        return 2
 #
-#    items = list(entries(lines[start:]))
+#    data = lines[start:]
+#    # 分隔行的**下一行**宣告編碼。用「固定位置的宣告」而不是「掃某個開頭的樣式」
+#    # ——「以 #B 開頭就是 base64」那種判斷會被內容咬到：資料區每一行都加了 '#'，
+#    # 所以任何原本以 B 開頭的程式碼行（`BUNDLE_DIR = ...`）都會變成 `#B...`。
+#    enc = data[0].strip() if data else ""
+#    data = data[1:]
+#    if enc == "#ENC lzma+base64":
+#        b64 = [ln[2:] for ln in data if ln.startswith("#B")]
+#        import base64
+#        import lzma
+#        try:
+#            raw = lzma.decompress(base64.b64decode("".join(b64)))
+#        except Exception as exc:                     # noqa: BLE001
+#            print("✗ 資料區解不開：%%s" %% exc)
+#            print("  這個檔案在複製／貼上的過程中被截斷或改掉了。請重新複製一次，")
+#            print("  而且**不要**用編輯器打開後另存。")
+#            return 2
+#        data = raw.decode("utf-8").split("\\n")
+#
+#    items = list(entries(data))
 #    if not items:
 #        print("✗ 資料區是空的 —— 這個檔案被截斷了。")
 #        return 2
@@ -9176,21 +9348,47 @@ if __name__ == "__main__":
 #    return out
 #
 #
-#def build(out_name: str = "ADEPT_bundle.py", root: str = "",
-#          items: Optional[List[Tuple[str, bytes]]] = None,
-#          part: int = 1, n_parts: int = 1, total_files: int = 0) -> str:
-#    items = collect(root) if items is None else items
-#    parts = [EXTRACTOR % {"name": out_name, "sentinel": SENTINEL,
-#                          "part": part, "n_parts": n_parts,
-#                          "total": total_files or len(items)}, SENTINEL]
+##: base64 一行多長。太長的行在 GitHub 上要橫向捲，看起來像壞掉的檔案。
+#_B64_WIDTH = 120
+#
+#
+#def _data_lines(items: List[Tuple[str, bytes]]) -> List[str]:
+#    """資料區（純文字形式）。壓縮版壓的也是這一段，所以兩種編碼的內容一模一樣。"""
+#    out: List[str] = []
 #    for rel, data in items:
 #        body = data.decode("utf-8").split("\n")
-#        parts.append("#F %s %d %s" % (blob_sha(data), len(body), rel))
+#        out.append("#F %s %d %s" % (blob_sha(data), len(body), rel))
 #        # **每一行都要變成註解。** Python 在跑任何東西之前會先編譯整個檔案，
 #        # 所以資料區不能是裸的文字 —— 不然它會去解析別的檔案的內容然後語法錯誤
 #        # （第一版就是這樣掛的：某個 .md 裡的全形括號變成 SyntaxError）。
 #        # 加一個 '#' 比塞進三引號字串安全：檔案內容裡本來就可能有三個引號。
-#        parts.extend("#" + line for line in body)
+#        out.extend("#" + line for line in body)
+#    return out
+#
+#
+#def build(out_name: str = "ADEPT_bundle.py", root: str = "",
+#          items: Optional[List[Tuple[str, bytes]]] = None,
+#          part: int = 1, n_parts: int = 1, total_files: int = 0,
+#          compress: bool = False) -> str:
+#    items = collect(root) if items is None else items
+#    parts = [EXTRACTOR % {"name": out_name, "sentinel": SENTINEL,
+#                          "part": part, "n_parts": n_parts,
+#                          "total": total_files or len(items)}, SENTINEL]
+#    body = _data_lines(items)
+#    if compress:
+#        parts.append("#ENC lzma+base64")
+#        # **lzma 而不是 gzip。** 整包 base64 之後 gzip 是 991 KB、lzma 是 701 KB，
+#        # 而 GitHub 不顯示超過 1 MB 的檔案 —— 那 290 KB 的差距正好就是
+#        # 「一個檔案」與「還是要分成六批」的差別。
+#        import base64
+#        import lzma
+#        blob = base64.b64encode(lzma.compress(
+#            "\n".join(body).encode("utf-8"), preset=9)).decode("ascii")
+#        parts.extend("#B" + blob[i:i + _B64_WIDTH]
+#                     for i in range(0, len(blob), _B64_WIDTH))
+#        return "\n".join(parts) + "\n"
+#    parts.append("#ENC text")
+#    parts.extend(body)
 #    return "\n".join(parts) + "\n"
 #
 #
@@ -9199,12 +9397,20 @@ if __name__ == "__main__":
 #        description="Pack the repo into one plain-text self-extracting .py")
 #    ap.add_argument("--out", default="ADEPT_bundle.py",
 #                    help="輸出檔名（分批時會變成 ..._part1of6.py）")
+#    ap.add_argument("--compress", action="store_true",
+#                    help=("壓縮成**一個**檔案（lzma + base64，約 700 KB）。"
+#                          "一次複製就搬完，代價是內容不再是可以直接讀的文字 ——"
+#                          "解包程式本身仍然是可讀的 Python，而且 --list 可以先看"
+#                          "它會寫哪些檔案。"))
 #    ap.add_argument("--split", type=int, default=0, metavar="KB",
 #                    help=("每批最多幾 KB（0 = 不分批）。**GitHub 不顯示超過 1 MB "
 #                          "的檔案**，而剪貼簿是唯一的通道時就必須分批，"
 #                          "400 是安全值。"))
 #    a = ap.parse_args(argv)
 #
+#    if a.compress and a.split:
+#        print("--compress 已經塞得進一個檔案了，不要再 --split。")
+#        return 2
 #    items = collect()
 #    groups = _slice(items, a.split * 1024) if a.split else [items]
 #    out_dir = os.path.dirname(os.path.abspath(a.out))
@@ -9216,7 +9422,8 @@ if __name__ == "__main__":
 #    for i, group in enumerate(groups, 1):
 #        name = a.out if n_parts == 1 else "%s_part%dof%d%s" % (stem, i, n_parts, ext)
 #        text = build(os.path.basename(name), items=group, part=i,
-#                     n_parts=n_parts, total_files=len(items))
+#                     n_parts=n_parts, total_files=len(items),
+#                     compress=a.compress)
 #        tmp = name + ".tmp"                           # atomic（鐵則 5）
 #        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
 #            f.write(text)
