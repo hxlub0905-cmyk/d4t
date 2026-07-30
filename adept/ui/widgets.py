@@ -32,6 +32,7 @@ from PySide6.QtGui import (
     QFont,
     QImage,
     QPainter,
+    QPainterPath,
     QPen,
     QPixmap,
 )
@@ -42,12 +43,16 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
+    QGridLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QDialog,
+    QDialogButtonBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -66,6 +71,7 @@ __all__ = [
     "HistogramWidget",
     "FeatureTable",
     "VerdictChip",
+    "TemplateField",
     "to_uint8",
 ]
 
@@ -110,7 +116,7 @@ def _qimage_from_uint8(arr: np.ndarray) -> QImage:
         h, w, _ = a.shape
         img = QImage(a.data, w, h, 4 * w, QImage.Format_RGBA8888)
     else:
-        raise ValueError(f"不支援的影像形狀：{a.shape}")
+        raise ValueError(f"Unsupported image shape: {a.shape}")
     return img.copy()
 
 
@@ -126,10 +132,14 @@ class ImageView(QWidget):
 
     zoom_changed = Signal(float)
     cursor_info = Signal(str)          # "x 12  y 30  ·  gray 187"（離開時空字串）
+    #: 縮放**或**平移之後的完整檢視狀態（scale, offset）。
+    #: 並排比對兩張圖時，兩邊靠這個訊號互相跟隨 —— 沒有連動的並排沒有意義，
+    #: 使用者得手動把兩邊拖到同一個位置才比得起來。
+    view_changed = Signal(float, QPointF)
 
     _MIN_SCALE = 0.02
     _MAX_SCALE = 60.0
-    _EMPTY_TEXT = "（無影像）"
+    _EMPTY_TEXT = "(no image)"
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -196,6 +206,7 @@ class ImageView(QWidget):
                                (vh - ih * self._scale) / 2.0)
         self.update()
         self.zoom_changed.emit(self._scale)
+        self.view_changed.emit(self._scale, QPointF(self._offset))
 
     def zoom_by(self, factor: float, anchor: Optional[QPointF] = None) -> None:
         """以 ``anchor``（畫布座標，預設中心）為定點縮放。"""
@@ -214,6 +225,24 @@ class ImageView(QWidget):
         self._auto_fit = False
         self.update()
         self.zoom_changed.emit(self._scale)
+        self.view_changed.emit(self._scale, QPointF(self._offset))
+
+    def set_view(self, scale: float, offset: QPointF) -> None:
+        """直接套用另一張圖的檢視狀態（並排比對時用）。
+
+        **不回發 view_changed** —— 兩邊互相跟隨會無限來回。跟隨是單向的，
+        由發起操作的那一邊推過去。
+        """
+        s = float(np.clip(float(scale), self._MIN_SCALE, self._MAX_SCALE))
+        if s == self._scale and QPointF(offset) == self._offset:
+            return
+        self._scale = s
+        self._offset = QPointF(offset)
+        self._auto_fit = False
+        self.update()
+
+    def view_state(self) -> Tuple[float, QPointF]:
+        return self._scale, QPointF(self._offset)
 
     def zoom_in(self) -> None:
         self.zoom_by(1.25)
@@ -233,8 +262,10 @@ class ImageView(QWidget):
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setPen(QPen(QColor(TOKENS["border_default"]), 1))
-        p.setBrush(QColor(TOKENS["bg_panel"]))
-        p.drawRoundedRect(rect, 7, 7)
+        # 中性灰底：不隨主題變，也不讓背景偏移對灰階的判斷（見 theme 的
+        # image_backdrop 說明）
+        p.setBrush(QColor(TOKENS["image_backdrop"]))
+        p.drawRoundedRect(rect, 6, 6)
         if self._pixmap is None:
             p.setPen(QColor(TOKENS["text_disabled"]))
             p.drawText(self.rect(), Qt.AlignCenter, self._EMPTY_TEXT)
@@ -273,6 +304,7 @@ class ImageView(QWidget):
         if self._panning:
             self._offset = self._pan_offset + (pos - self._pan_start)
             self.update()
+            self.view_changed.emit(self._scale, QPointF(self._offset))
             return
         self._emit_cursor(pos)
 
@@ -303,7 +335,7 @@ class ImageView(QWidget):
         if 0 <= x < w and 0 <= y < h:
             v = self._image[y, x]
             gray = int(v) if np.ndim(v) == 0 else int(np.mean(v))
-            self.cursor_info.emit(f"x {x}  y {y}  ·  灰階 {gray}")
+            self.cursor_info.emit(f"x {x}  y {y}  ·  gray {gray}")
         else:
             self.cursor_info.emit("")
 
@@ -311,14 +343,92 @@ class ImageView(QWidget):
 # --------------------------------------------------------------------------- #
 # 2. ParamForm
 # --------------------------------------------------------------------------- #
+#: 浮點滑桿的內部刻度數。滑桿只吃 int，所以 min..max 一律映射到 0..這個數。
+#: 1000 格對 gamma（0.1–5）約是 0.005 一格 —— 拖起來連續，又不會抖到看不出。
+_SLIDER_TICKS = 1000
+
+#: 整數參數的滑桿上限跨度。超過這個跨度就不給滑桿（一格好幾十，拖了也沒用），
+#: 留純數字框比較誠實。
+_SLIDER_MAX_INT_SPAN = 5000
+
+
+class _HintLabel(QLabel):
+    """參數說明：平常一行（放不下就切成 ``像這樣…``），要用的時候整段攤開。
+
+    為什麼不直接讓它一直換行
+    ------------------------
+    一張卡有 11 個參數、每個帶 2–3 行灰字，加起來就是一面牆 —— 一定要捲，
+    而且**真正要緊的事會淹在裡面**（「這張卡還沒有模板」跟「這個滑桿越大越
+    平滑」長得一模一樣）。
+
+    為什麼不乾脆只留 tooltip
+    ------------------------
+    因為那等於把說明藏起來，而這個工具的使用者是不會寫 code 的製程工程師 ——
+    他要的是「我現在在動的這個東西是什麼」隨手看得到，不是「知道要把滑鼠停在
+    哪裡等一秒」。所以：正在用的那一列整段攤開，其餘各留一行。
+
+    切字自己算（``elidedText``），不交給 Qt 裁 —— Qt 會硬切在字的中間，
+    看起來像畫面壞掉（同 canvas 的 ``_draw_elided``）。
+    """
+
+    def __init__(self, text: str = "", parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setObjectName("paramHint")
+        self._full = str(text)
+        self._expanded = False
+        self.setWordWrap(False)
+        self._sync()
+
+    def full_text(self) -> str:
+        return self._full
+
+    def set_full_text(self, text: str) -> None:
+        self._full = str(text)
+        self._sync()
+
+    def set_expanded(self, expanded: bool) -> None:
+        if bool(expanded) != self._expanded:
+            self._expanded = bool(expanded)
+            self._sync()
+
+    def is_expanded(self) -> bool:
+        return self._expanded
+
+    def resizeEvent(self, e) -> None:          # noqa: D102 - Qt hook
+        super().resizeEvent(e)
+        if not self._expanded:
+            self._sync()
+
+    def _sync(self) -> None:
+        if self._expanded:
+            self.setWordWrap(True)
+            super().setText(self._full)
+            return
+        self.setWordWrap(False)
+        w = max(40, self.width())
+        super().setText(self.fontMetrics().elidedText(
+            self._full, Qt.ElideRight, w))
+
+
 class _ParamRow(QFrame):
-    """一個參數 = 標題列（名稱 + 編輯器）+ 永遠看得見的白話說明第二行。"""
+    """一個參數 = 標題列（名稱 + 滑桿 + 數字框）+ 永遠看得見的白話說明第二行。
+
+    為什麼有上下界的數字都配一支滑桿（F7-8）
+    ----------------------------------------
+    「gamma 要填多少」對不會寫 code 的人是個沒有答案的問題 —— 他要的是
+    **一邊拖一邊看圖**。數字框逼人先想好一個數字再輸入，那個順序是反的。
+
+    數字框沒有被拿掉，是刻意的：滑桿負責找到大概的位置，數字框負責記錄與
+    重現（recipe 是要交接給別人的）。兩邊雙向綁定，改哪一邊另一邊都會跟上。
+    """
 
     def __init__(self, spec: Dict[str, Any], editor: QWidget,
                  parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.spec = spec
         self.editor = editor
+        self.slider: Optional[QSlider] = None
+        self._active = False
         self.setObjectName("paramRow")
 
         lay = QVBoxLayout(self)
@@ -328,34 +438,460 @@ class _ParamRow(QFrame):
         top = QHBoxLayout()
         top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(8)
-        self.name_label = QLabel(str(spec.get("name", "")))
+        # 顯示名優先用 ``label``（F7-9）。``name`` 是 recipe JSON 的鍵，
+        # 對使用者來說 ``also_apply`` 不是一句話，"Also apply to" 才是。
+        self.name_label = QLabel(str(spec.get("label") or spec.get("name", "")))
         self.name_label.setObjectName("paramLabel")
         self.name_label.setMinimumWidth(104)
         top.addWidget(self.name_label)
-        top.addWidget(editor, 1)
+
+        self.slider = _make_slider(spec, editor)
+        if self.slider is not None:
+            top.addWidget(self.slider, 1)
+            editor.setMaximumWidth(96)
+            top.addWidget(editor, 0)
+        else:
+            top.addWidget(editor, 1)
         lay.addLayout(top)
 
-        self.hint = QLabel(str(spec.get("help", "")))
-        self.hint.setObjectName("paramHint")
-        self.hint.setWordWrap(True)
+        self.hint = _HintLabel(str(spec.get("help", "")), self)
         self.hint.setProperty("error", "false")
         lay.addWidget(self.hint)
 
+        # 說明只在**這一列被使用的時候**展開（F7-15）。11 個參數各配 2–3 行灰字
+        # 是一面牆：一定要捲，而且真正要緊的事（模板是空的）淹在裡面。收成一行
+        # 不是把資訊藏起來 —— 使用者在讀的永遠只有他正在動的那一個參數。
+        self.setAttribute(Qt.WA_Hover, True)
+        editor.installEventFilter(self)
+        for child in editor.findChildren(QWidget):
+            child.installEventFilter(self)
+        if self.slider is not None:
+            self.slider.installEventFilter(self)
+
+    # -- 「正在用這一列」（F7-15）-------------------------------------------
+    def eventFilter(self, obj, e):             # noqa: D102 - Qt hook
+        from PySide6.QtCore import QEvent
+
+        if e.type() in (QEvent.FocusIn, QEvent.Enter):
+            self.set_active(True)
+        elif e.type() == QEvent.FocusOut:
+            self.set_active(self.underMouse())
+        return False
+
+    def enterEvent(self, e) -> None:           # noqa: D102 - Qt hook
+        self.set_active(True)
+        super().enterEvent(e)
+
+    def leaveEvent(self, e) -> None:           # noqa: D102 - Qt hook
+        # 兩種「其實還在這一列」的情況不收起來：
+        #  * 焦點還在這一列的欄位上（使用者正在打字或拖滑桿）——
+        #    滑鼠離開輸入框那一瞬間把說明收掉，是在他眼前抽走東西；
+        #  * 滑鼠只是從列的空白處移進了**這一列自己的**輸入框。Qt 會先送
+        #    Leave 給列、再送 Enter 給子元件，照字面處理就是收起來又立刻攤開，
+        #    看起來是閃一下。所以直接問游標還在不在這一列的矩形裡。
+        if not (self._has_focus() or self._cursor_inside()):
+            self.set_active(False)
+        super().leaveEvent(e)
+
+    def _cursor_inside(self) -> bool:
+        from PySide6.QtGui import QCursor
+
+        try:
+            return self.rect().contains(self.mapFromGlobal(QCursor.pos()))
+        except Exception:                      # noqa: BLE001 — 沒有游標的環境
+            return False
+
+    def _has_focus(self) -> bool:
+        w = self.editor.focusWidget() if hasattr(self.editor, "focusWidget") else None
+        return bool(self.editor.hasFocus() or w is not None
+                    or (self.slider is not None and self.slider.hasFocus()))
+
+    def set_active(self, active: bool) -> None:
+        """這一列現在是不是使用者正在動的那一個（說明整段攤開）。"""
+        self._active = bool(active)
+        # 錯誤永遠攤開：那是他現在最需要讀完的一句話。
+        self.hint.set_expanded(self._active or self.has_error())
+
+    def is_active(self) -> bool:
+        return bool(getattr(self, "_active", False))
+
     def set_error(self, msg: Optional[str]) -> None:
         if msg:
-            self.hint.setText("⚠ " + str(msg))
+            self.hint.set_full_text("⚠ " + str(msg))
             self.hint.setProperty("error", "true")
             self.hint.setStyleSheet(
                 "color:%s; font-size:11px; font-weight:600;" % TOKENS["danger_text"])
+            self.hint.set_expanded(True)
         else:
-            self.hint.setText(str(self.spec.get("help", "")))
+            self.hint.set_full_text(str(self.spec.get("help", "")))
             self.hint.setProperty("error", "false")
             self.hint.setStyleSheet("color:%s; font-size:11px;" % TOKENS["text_hint"])
+            self.hint.set_expanded(self.is_active())
         self.hint.style().unpolish(self.hint)
         self.hint.style().polish(self.hint)
 
     def has_error(self) -> bool:
         return self.hint.property("error") == "true"
+
+    def set_dimmed(self, dimmed: bool, why: str = "") -> None:
+        """把整列調淡（值還在、還能改，只是現在不生效）。
+
+        用在「另一個參數接管了這一個」的情況 —— 例如畫了曲線之後 gamma
+        就不再被用到。不 disable 是刻意的：使用者可能只是想比較兩種做法，
+        把它鎖死會逼他先把曲線拉平才改得動 gamma。
+        """
+        self.setProperty("dimmed", "true" if dimmed else "false")
+        self.setEnabled(True)
+        self.name_label.setStyleSheet(
+            "color:%s;" % (TOKENS["text_disabled"] if dimmed
+                           else TOKENS["text_primary"]))
+        if dimmed and why:
+            self.hint.set_full_text("· " + why)
+            self.hint.setStyleSheet("color:%s; font-size:11px; font-style:italic;"
+                                    % TOKENS["text_disabled"])
+        elif not self.has_error():
+            self.hint.set_full_text(str(self.spec.get("help", "")))
+            self.hint.setStyleSheet("color:%s; font-size:11px;" % TOKENS["text_hint"])
+
+
+def _make_slider(spec: Dict[str, Any], editor: QWidget) -> Optional[QSlider]:
+    """有上下界的 int / float 參數 → 一支跟數字框雙向綁定的滑桿。
+
+    回 ``None`` 表示這個參數不適合滑桿（沒界、跨度是 0、或整數跨度大到
+    一格好幾十）。這樣新卡片只要把 min/max 填好就自動有滑桿，
+    不必逐張卡去 UI 這邊登記。
+    """
+    ptype = str(spec.get("type", ""))
+    lo, hi = spec.get("min"), spec.get("max")
+    if ptype not in ("int", "float") or lo is None or hi is None:
+        return None
+    lo, hi = float(lo), float(hi)
+    if not (math.isfinite(lo) and math.isfinite(hi)) or hi <= lo:
+        return None
+
+    s = QSlider(Qt.Horizontal)
+    s.setObjectName("paramSlider")
+    s.setToolTip(str(spec.get("help", "")))
+    guard = {"busy": False}
+
+    if ptype == "int":
+        if hi - lo > _SLIDER_MAX_INT_SPAN:
+            return None
+        s.setRange(int(lo), int(hi))
+        s.setValue(int(editor.value()))
+
+        def from_slider(v: int) -> None:
+            if guard["busy"]:
+                return
+            guard["busy"] = True
+            editor.setValue(int(v))
+            guard["busy"] = False
+
+        def from_box(v: int) -> None:
+            if guard["busy"]:
+                return
+            guard["busy"] = True
+            s.setValue(int(v))
+            guard["busy"] = False
+    else:
+        s.setRange(0, _SLIDER_TICKS)
+        span = hi - lo
+
+        def to_tick(v: float) -> int:
+            return int(round((float(v) - lo) / span * _SLIDER_TICKS))
+
+        s.setValue(to_tick(editor.value()))
+
+        def from_slider(v: int) -> None:      # noqa: F811 — 兩型別各一份
+            if guard["busy"]:
+                return
+            guard["busy"] = True
+            editor.setValue(lo + (float(v) / _SLIDER_TICKS) * span)
+            guard["busy"] = False
+
+        def from_box(v: float) -> None:       # noqa: F811
+            if guard["busy"]:
+                return
+            guard["busy"] = True
+            s.setValue(to_tick(v))
+            guard["busy"] = False
+
+    # 兩邊互相回寫會無限來回（float 還會因為取整而每次都差一點點），
+    # 所以用 guard 擋住「因我而起的那一次回呼」。
+    s.valueChanged.connect(from_slider)
+    editor.valueChanged.connect(from_box)
+    return s
+
+
+class ProfilePanel(QWidget):
+    """投影定位的曲線面板（F7-11）：曲線、轉折線、選中的那一段、中心線。
+
+    為什麼這張卡沒有這個面板就不成立
+    --------------------------------
+    「敏感度要調多少」對不會寫 code 的人是一個沒有答案的問題 —— 除非他看得到
+    曲線、看得到目前抓到幾條線、看得到抓到的線是不是落在他預期的地方。
+    沒有這個面板，這張卡就只是另一個要盲填的數字。
+
+    **畫的資料來自引擎那一次計算**（step 卡把它放進 ``ctx.meta["profiles"]``），
+    UI 不自己再算一次。不然「畫面上的框」跟「真的量下去的框」會不一樣，
+    而那種 bug 幾乎不可能靠肉眼發現。
+    """
+
+    _EMPTY = "(select a Locate region by profile card to see its curve)"
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._data: Dict[str, Any] = {}
+        self._name = ""
+        self.setMinimumHeight(96)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setToolTip("Gray level projected along the scan direction. "
+                        "Vertical lines are the boundaries that were found; "
+                        "the shaded section is the region this card produces.")
+
+    # -- public ------------------------------------------------------------
+    def set_data(self, name: str, data: Optional[Dict[str, Any]]) -> None:
+        self._name = str(name or "")
+        self._data = dict(data or {})
+        self.update()
+
+    def has_data(self) -> bool:
+        return bool(self._data.get("profile"))
+
+    def summary(self) -> str:
+        """一行文字摘要（測試與狀態列都用這個，不用去讀畫素）。"""
+        if not self.has_data():
+            return ""
+        d = self._data
+        picked = d.get("picked")
+        where = ("none" if not picked
+                 else "%d-%d px" % (int(picked[0]), int(picked[1])))
+        return ("%s · %d boundaries · %d sections · picked %s · confidence %.1f"
+                % (self._name, len(d.get("transitions") or []),
+                   len(d.get("bands") or []), where,
+                   float(d.get("confidence", 0.0))))
+
+    # -- paint -------------------------------------------------------------
+    def paintEvent(self, _e) -> None:      # noqa: D102 - Qt hook
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        rect = QRectF(self.rect()).adjusted(6, 6, -6, -6)
+        p.fillRect(QRectF(self.rect()), QColor(TOKENS["bg_surface"]))
+        p.setPen(QPen(QColor(TOKENS["border_default"]), 1.0))
+        p.drawRoundedRect(rect, 4, 4)
+
+        prof = [float(v) for v in (self._data.get("profile") or [])]
+        if len(prof) < 2:
+            p.setPen(QColor(TOKENS["text_disabled"]))
+            p.drawText(rect, Qt.AlignCenter, self._EMPTY)
+            p.end()
+            return
+
+        n = len(prof)
+        raw = [float(v) for v in (self._data.get("raw") or [])]
+        lo = min(min(prof), min(raw) if raw else min(prof))
+        hi = max(max(prof), max(raw) if raw else max(prof))
+        span = max(hi - lo, 1e-6)
+        plot = rect.adjusted(4, 16, -4, -4)
+
+        def to_x(i: float) -> float:
+            return plot.left() + plot.width() * (float(i) / max(1, n - 1))
+
+        def to_y(v: float) -> float:
+            return plot.bottom() - plot.height() * ((v - lo) / span)
+
+        # 選中的那一段：先畫底色，曲線才會壓在上面
+        picked = self._data.get("picked")
+        if picked:
+            x0, x1 = to_x(int(picked[0])), to_x(int(picked[1]))
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(TOKENS["accent_bg"]))
+            p.drawRect(QRectF(x0, plot.top(), max(1.0, x1 - x0), plot.height()))
+
+        # 平滑前的曲線畫在後面當對照 —— 使用者才看得出平滑吃掉了多少
+        if len(raw) == n:
+            p.setPen(QPen(QColor(TOKENS["border_input"]), 1.0))
+            p.setBrush(Qt.NoBrush)
+            path = QPainterPath(QPointF(to_x(0), to_y(raw[0])))
+            for i in range(1, n):
+                path.lineTo(QPointF(to_x(i), to_y(raw[i])))
+            p.drawPath(path)
+
+        p.setPen(QPen(QColor(TOKENS["text_primary"]), 1.6))
+        path = QPainterPath(QPointF(to_x(0), to_y(prof[0])))
+        for i in range(1, n):
+            path.lineTo(QPointF(to_x(i), to_y(prof[i])))
+        p.drawPath(path)
+
+        # 中心線 = 缺陷的位置（patch 是以缺陷為中心裁的）
+        p.setPen(QPen(QColor(TOKENS["text_secondary"]), 1.0, Qt.DashLine))
+        cx = to_x((n - 1) / 2.0)
+        p.drawLine(QPointF(cx, plot.top()), QPointF(cx, plot.bottom()))
+
+        p.setPen(QPen(QColor(TOKENS["accent"]), 1.4))
+        for t in (self._data.get("transitions") or []):
+            x = to_x(int(t))
+            p.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
+
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        f = p.font()
+        f.setPointSizeF(max(7.0, f.pointSizeF() - 1.0))
+        p.setFont(f)
+        p.drawText(QRectF(rect.left() + 6, rect.top() + 2, rect.width() - 12, 14),
+                   Qt.AlignVCenter | Qt.AlignLeft, self.summary())
+        p.end()
+
+
+class StreamPicker(QWidget):
+    """``image_keys`` 參數的編輯器：上游每一條影像流一個勾選框（F7-9）。
+
+    為什麼不是一個輸入框
+    --------------------
+    ``also_apply`` 以前是自由文字，值長這樣：``ref``。三個問題一次到齊 ——
+    使用者不知道**可以填什麼**（流名從來沒有列出來過）、不知道**填了會怎樣**、
+    打錯了也不會被擋（缺流只 warn，於是「我明明設了卻沒作用」）。
+    試用回饋原話：「target 跟 also apply 要怎麼使用？對應的節點又是什麼？」
+
+    勾選框把這三件事一次解掉：能填的就是列出來的那幾個，勾了就是套用。
+    而「兩張 patch 一起處理，還是各走各的」也就變成一個看得見的動作 ——
+    ref 勾著＝一起，取消＝分開（再加一張只對 ref 的卡）。
+
+    值的格式沒有變（仍是逗號分隔字串），所以既有 recipe 照樣讀得進來；
+    recipe 裡指到「現在的 pipeline 沒有這條流」的名字也會列出來並勾著，
+    不會因為看不到就被靜靜刪掉。
+    """
+
+    changed = Signal(str)
+
+    _EMPTY_TEXT = "(no upstream stream yet — add an Input card first)"
+
+    def __init__(self, streams: Sequence[str], value: str = "",
+                 parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._boxes: List[QCheckBox] = []
+        self._emitting = False
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
+
+        picked = [t.strip() for t in str(value or "").split(",") if t.strip()]
+        names: List[str] = []
+        for name in list(streams) + picked:      # 上游的在前，recipe 帶來的在後
+            name = str(name)
+            if name and name not in names:
+                names.append(name)
+
+        for name in names:
+            box = QCheckBox(name, self)
+            box.setChecked(name in picked)
+            box.toggled.connect(self._on_toggled)
+            lay.addWidget(box)
+            self._boxes.append(box)
+        if not names:
+            hint = QLabel(self._EMPTY_TEXT, self)
+            hint.setObjectName("paramHint")
+            lay.addWidget(hint)
+        lay.addStretch(1)
+
+    def text(self) -> str:
+        """目前的值（逗號分隔，順序同勾選框）。"""
+        return ",".join(b.text() for b in self._boxes if b.isChecked())
+
+    def set_text(self, value: str) -> None:
+        picked = {t.strip() for t in str(value or "").split(",") if t.strip()}
+        self._emitting = True
+        try:
+            for box in self._boxes:
+                box.setChecked(box.text() in picked)
+        finally:
+            self._emitting = False
+
+    def stream_names(self) -> List[str]:
+        return [b.text() for b in self._boxes]
+
+    def _on_toggled(self, _checked: bool) -> None:
+        if not self._emitting:
+            self.changed.emit(self.text())
+
+
+class TemplateField(QWidget):
+    """``template`` 參數的編輯器：一顆「建一個」的按鈕 + 一行摘要（F7-13）。
+
+    為什麼不是文字框
+    ----------------
+    模板的值有六千多個字元，而且**沒有人能用打的**（它是一張影像的內容）。
+    給它一個文字框有三個後果：空的時候看起來像「還沒填的欄位」，而真正的入口
+    在半個螢幕外的另一塊面板上；填了之後那個框變成一整片 base64；而且它是
+    可編輯的 —— 一個放不下、也編輯不了的值配一個文字框，等於邀請使用者去改它。
+
+    這裡改成：**按鈕就在這一列**（它是這個參數的值從哪來，不是預覽的動作），
+    欄位本身只回答「現在有沒有模板、是什麼樣的模板」。
+    """
+
+    build_requested = Signal()
+
+    _EMPTY = "No template yet — this card cannot run until you build one."
+
+    def __init__(self, value: str = "", parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(3)
+
+        self.button = QPushButton("Build template from a full-size image…", self)
+        self.button.setProperty("variant", "secondary")
+        self.button.setToolTip(
+            "Measure the repeating cell from one full-size image and store it "
+            "inside this recipe. The image is only needed here — the recipe "
+            "stays a single file you can hand to someone else.")
+        self.button.clicked.connect(self.build_requested.emit)
+        lay.addWidget(self.button, 0, Qt.AlignLeft)
+
+        self.summary = QLabel("", self)
+        self.summary.setObjectName("paramHint")
+        self.summary.setWordWrap(True)
+        lay.addWidget(self.summary)
+
+        self._value = ""
+        self.set_text(value)
+
+    def text(self) -> str:
+        return self._value
+
+    def set_text(self, value: str) -> None:
+        self._value = str(value or "")
+        self.summary.setText(self.describe())
+        # 「還沒有模板」不是說明文字，是**這張卡現在跑不了**。用同一種灰字講，
+        # 它就沉進下面那段說明裡了。
+        self.summary.setStyleSheet(
+            "color:%s; font-size:11px;%s"
+            % (TOKENS["text_hint"] if self.has_template() else TOKENS["danger_text"],
+               "" if self.has_template() else " font-weight:600;"))
+        self.button.setText("Build template from a full-size image…"
+                            if not self._value else "Rebuild template…")
+
+    def has_template(self) -> bool:
+        return bool(self._value.strip())
+
+    def describe(self) -> str:
+        """一行白話：現在存的是什麼。**摘要是解出來的，不是記在旁邊的**——
+        記在旁邊的欄位會跟真正的值走散，而走散時畫面上看起來完全正常。"""
+        if not self.has_template():
+            return self._EMPTY
+        try:
+            from ..core.algo.template import decode_cell
+
+            cell = decode_cell(self._value)
+        except Exception:                       # noqa: BLE001 — 顯示用
+            cell = None
+        if cell is None or getattr(cell, "size", 0) == 0:
+            return ("A template is stored, but it cannot be read back. "
+                    "Build it again.")
+        h, w = cell.shape[:2]
+        return ("Stored in this recipe: one cell of %d × %d px (%.1f kB of "
+                "text). Mark the region on it with the four Region sliders "
+                "below." % (w, h, len(self._value) / 1024.0))
 
 
 class ParamForm(QWidget):
@@ -367,8 +903,11 @@ class ParamForm(QWidget):
     """
 
     param_edited = Signal(str, object)
+    #: 「這個參數的值要用別的方式產生」（目前只有 template）。表單不知道那是
+    #: 什麼對話框 —— 它只負責把請求送上去，由 Studio 決定要開什麼。
+    action_requested = Signal(str)
 
-    _EMPTY_TEXT = "（在左邊點一張卡片，或在流程中選一個節點）"
+    _EMPTY_TEXT = "(Pick a card from the library, or select a step in the pipeline)"
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -439,6 +978,25 @@ class ParamForm(QWidget):
                 self._rows[name] = row
         finally:
             self._building = False
+        self._sync_curve_override()
+
+    def _sync_curve_override(self) -> None:
+        """曲線一旦不是 y=x，就把 ``gamma`` 那列調淡並說明原因。
+
+        規則本身寫在 ``steps/tone.py``（曲線接管 gamma）。這裡只是**讓它看得
+        見** —— 不然使用者會拉了曲線又去動 gamma，然後發現 gamma 沒有反應。
+        """
+        curve_row = None
+        for name, row in self._rows.items():
+            if str(row.spec.get("type", "")) == "curve":
+                curve_row = row
+                break
+        if curve_row is None:
+            return
+        active = not curve_row.editor.is_identity()
+        gamma = self._rows.get("gamma")
+        if gamma is not None and not gamma.has_error():
+            gamma.set_dimmed(active, "Not used while a custom curve is drawn.")
 
     def step_key(self) -> Optional[str]:
         return None if not self._describe else str(self._describe.get("key"))
@@ -450,9 +1008,18 @@ class ParamForm(QWidget):
         row = self._rows.get(name)
         return None if row is None else row.editor
 
-    def hint_text(self, name: str) -> str:
+    def slider(self, name: str) -> Optional[QSlider]:
+        """那一列的滑桿（沒有上下界的參數沒有滑桿，回 ``None``）。"""
         row = self._rows.get(name)
-        return "" if row is None else row.hint.text()
+        return None if row is None else row.slider
+
+    def hint_text(self, name: str) -> str:
+        """那一列的說明**全文**。
+
+        不是 ``hint.text()`` —— 收起來的時候那是切過的字（``像這樣…``），
+        而問「說明寫了什麼」的人要的從來不是「畫面上現在放得下多少」。"""
+        row = self._rows.get(name)
+        return "" if row is None else row.hint.full_text()
 
     def show_error(self, name: str, msg: str) -> None:
         """把 ``name`` 那一列的說明換成紅色錯誤訊息。"""
@@ -514,7 +1081,7 @@ class ParamForm(QWidget):
             return w
 
         if ptype == "bool":
-            w = QCheckBox("啟用")
+            w = QCheckBox("Enabled")
             w.setChecked(bool(value))
             w.toggled.connect(lambda v, n=name: self._emit(n, bool(v)))
             return w
@@ -527,6 +1094,25 @@ class ParamForm(QWidget):
             if text in choices:
                 w.setCurrentIndex(choices.index(text))
             w.currentTextChanged.connect(lambda t, n=name: self._emit(n, str(t)))
+            return w
+
+        if ptype == "curve":
+            w = CurveField()
+            w.set_text("" if value is None else str(value))
+            w.curve_changed.connect(lambda t, n=name: self._emit(n, str(t)))
+            w.curve_changed.connect(lambda _t: self._sync_curve_override())
+            return w
+
+        if ptype == "image_keys":
+            w = StreamPicker(streams, "" if value is None else str(value))
+            w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
+            return w
+
+        if ptype == "template":
+            w = TemplateField("" if value is None else str(value))
+            # 值不是在這裡編的（模板是一張影像）——按鈕只是把請求往上送，
+            # 由 Studio 開對話框，成交之後照一般的路徑寫回參數。
+            w.build_requested.connect(lambda n=name: self.action_requested.emit(n))
             return w
 
         if ptype == "image_key":
@@ -547,6 +1133,299 @@ class ParamForm(QWidget):
         return w
 
 
+# --------------------------------------------------------------------------- #
+# 2b. CurveEditor —— 自己拉的色調曲線（F7-8）
+# --------------------------------------------------------------------------- #
+class CurveEditor(QWidget):
+    """可拖曳的色調曲線編輯器。橫軸 = 輸入灰階，縱軸 = 輸出灰階，兩軸都 0–1。
+
+    操作（右下角就寫著，不用先看說明）
+    ----------------------------------
+    * 拖控制點 = 改曲線；
+    * 在空白處按左鍵 = 加一個控制點；
+    * 對控制點右鍵（或雙擊）= 刪掉它。頭尾兩點刪不掉，
+      因為曲線必須覆蓋整個灰階範圍。
+
+    **畫出來的線就是影像上套的線** —— 這裡呼叫的是 core 的
+    ``algo.curve.curve_lut``，跟 ``gamma`` 卡執行時用的是同一個函式。
+    UI 自己再實作一份插值是很容易發生的事，那會讓使用者看到的和跑出來的不一樣。
+    這是本檔唯一一處 import ``adept.core``，理由就是這個 —— 而且它是純運算、
+    不碰引擎，沒有違反「元件不跑 pipeline」的約束。
+    """
+
+    curve_changed = Signal(str)
+
+    _PAD = 10.0                 # 邊界留白（點拖到角落時還抓得到）
+    _HIT = 9.0                  # 控制點的點擊半徑（螢幕像素）
+    _DOT = 4.0
+
+    def __init__(self, parent: Optional[QWidget] = None, compact: bool = True):
+        super().__init__(parent)
+        from ..core.pipeline.curve import IDENTITY, parse_curve
+
+        self._parse = parse_curve
+        self._points: List[Tuple[float, float]] = list(parse_curve(IDENTITY))
+        self._drag: Optional[int] = None
+        self._compact = bool(compact)
+        self.setMinimumSize(QSize(150, 130 if compact else 300))
+        if not compact:
+            self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CrossCursor)
+        self.setToolTip("Drag to bend · click to add a point · "
+                        "right-click a point to remove it")
+
+    # -- public API --------------------------------------------------------
+    def text(self) -> str:
+        from ..core.pipeline.curve import format_curve
+        return format_curve(self._points)
+
+    def points(self) -> List[Tuple[float, float]]:
+        return list(self._points)
+
+    def set_text(self, text: str, emit: bool = False) -> bool:
+        """從控制點字串載入。字串壞掉時**保持原樣並回 False**。
+
+        參數表單是「打字即生效」的，使用者打到一半必然出現不合法的中間狀態；
+        那時候把曲線清成 y=x 會讓他辛苦拉的線消失。
+        """
+        try:
+            pts = self._parse(text)
+        except ValueError:
+            return False
+        self._points = list(pts)
+        self.update()
+        if emit:
+            self.curve_changed.emit(self.text())
+        return True
+
+    def reset(self) -> None:
+        from ..core.pipeline.curve import IDENTITY
+        self.set_text(IDENTITY, emit=True)
+
+    def is_identity(self) -> bool:
+        from ..core.pipeline.curve import is_identity
+        return is_identity(self._points)
+
+    # -- 座標轉換 ----------------------------------------------------------
+    def _plot_rect(self) -> QRectF:
+        return QRectF(self.rect()).adjusted(self._PAD, self._PAD,
+                                            -self._PAD, -self._PAD)
+
+    def _to_px(self, x: float, y: float) -> QPointF:
+        r = self._plot_rect()
+        return QPointF(r.left() + x * r.width(), r.bottom() - y * r.height())
+
+    def _to_unit(self, p: QPointF) -> Tuple[float, float]:
+        r = self._plot_rect()
+        w = max(1.0, r.width())
+        h = max(1.0, r.height())
+        return (float(np.clip((p.x() - r.left()) / w, 0.0, 1.0)),
+                float(np.clip((r.bottom() - p.y()) / h, 0.0, 1.0)))
+
+    def _hit(self, p: QPointF) -> Optional[int]:
+        for i, (x, y) in enumerate(self._points):
+            if (self._to_px(x, y) - p).manhattanLength() <= self._HIT * 1.6:
+                return i
+        return None
+
+    # -- painting ----------------------------------------------------------
+    def paintEvent(self, _e) -> None:      # noqa: D102 - Qt hook
+        from ..core.algo.curve import curve_lut
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        p.setPen(QPen(QColor(TOKENS["border_default"]), 1))
+        p.setBrush(QColor(TOKENS["image_backdrop"]))
+        p.drawRoundedRect(r, 5, 5)
+
+        plot = self._plot_rect()
+        grid = QColor(TOKENS["border_default"])
+        grid.setAlpha(120)
+        p.setPen(QPen(grid, 1))
+        for i in range(1, 4):
+            f = i / 4.0
+            p.drawLine(self._to_px(f, 0.0), self._to_px(f, 1.0))
+            p.drawLine(self._to_px(0.0, f), self._to_px(1.0, f))
+
+        # y = x 參考線（虛線）—— 使用者隨時看得出自己偏離了多少
+        ref = QPen(QColor(TOKENS["text_disabled"]), 1, Qt.DashLine)
+        p.setPen(ref)
+        p.drawLine(self._to_px(0.0, 0.0), self._to_px(1.0, 1.0))
+
+        accent = QColor(theme.seg_hex("image"))
+        n = max(24, int(plot.width()))
+        lut = curve_lut(self._points, n)
+        p.setPen(QPen(accent, 2.0))
+        prev = self._to_px(0.0, float(lut[0]))
+        for i in range(1, n):
+            cur = self._to_px(i / (n - 1.0), float(lut[i]))
+            p.drawLine(prev, cur)
+            prev = cur
+
+        p.setPen(QPen(QColor(TOKENS["bg_surface"]), 1.5))
+        p.setBrush(accent)
+        for x, y in self._points:
+            c = self._to_px(x, y)
+            p.drawEllipse(c, self._DOT, self._DOT)
+        p.end()
+
+    # -- interaction -------------------------------------------------------
+    def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
+        pos = QPointF(e.position())
+        idx = self._hit(pos)
+        if e.button() == Qt.RightButton:
+            if idx is not None:
+                self._remove(idx)
+            return
+        if e.button() != Qt.LeftButton:
+            return
+        if idx is None:
+            idx = self._insert(*self._to_unit(pos))
+            if idx is None:
+                return
+        self._drag = idx
+        self.setCursor(Qt.ClosedHandCursor)
+
+    def mouseMoveEvent(self, e) -> None:       # noqa: D102 - Qt hook
+        if self._drag is None:
+            return
+        x, y = self._to_unit(QPointF(e.position()))
+        i = self._drag
+        if i == 0:
+            x = 0.0                       # 頭尾的 x 鎖住：曲線必須從 0 到 1
+        elif i == len(self._points) - 1:
+            x = 1.0
+        else:
+            # 不准越過鄰居 —— 越過去就不是函數了（同一個輸入兩個輸出）
+            x = float(np.clip(x, self._points[i - 1][0] + 0.01,
+                              self._points[i + 1][0] - 0.01))
+        self._points[i] = (x, y)
+        self.update()
+        self.curve_changed.emit(self.text())
+
+    def mouseReleaseEvent(self, _e) -> None:   # noqa: D102 - Qt hook
+        if self._drag is not None:
+            self._drag = None
+            self.setCursor(Qt.CrossCursor)
+
+    def mouseDoubleClickEvent(self, e) -> None:  # noqa: D102 - Qt hook
+        idx = self._hit(QPointF(e.position()))
+        if idx is not None:
+            self._remove(idx)
+
+    def _insert(self, x: float, y: float) -> Optional[int]:
+        """在 x 的位置插一個控制點；太靠近既有點就不插（會變成不合法的曲線）。"""
+        if any(abs(px - x) < 0.02 for px, _py in self._points):
+            return None
+        self._points.append((x, y))
+        self._points.sort(key=lambda pt: pt[0])
+        self.update()
+        self.curve_changed.emit(self.text())
+        return self._points.index((x, y))
+
+    def _remove(self, idx: int) -> None:
+        if idx <= 0 or idx >= len(self._points) - 1:
+            return                       # 頭尾刪不掉
+        del self._points[idx]
+        self.update()
+        self.curve_changed.emit(self.text())
+
+
+class CurveField(QWidget):
+    """參數表單裡的曲線欄位：小張的編輯器 + ``Reset`` / ``Enlarge…``。
+
+    小張的可以直接拉（常見的微調不用開視窗），要做細活再按 ``Enlarge…``
+    開一張大的。兩邊改的是同一組控制點。
+    """
+
+    curve_changed = Signal(str)
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(3)
+
+        self.editor = CurveEditor(self)
+        self.editor.curve_changed.connect(self._on_changed)
+        lay.addWidget(self.editor)
+
+        bar = QHBoxLayout()
+        bar.setContentsMargins(0, 0, 0, 0)
+        bar.setSpacing(5)
+        self.reset_button = QPushButton("Reset to y = x", self)
+        self.reset_button.setToolTip("Put the curve back to a straight line "
+                                     "(the gamma slider takes over again)")
+        self.reset_button.clicked.connect(self.editor.reset)
+        self.enlarge_button = QPushButton("Enlarge…", self)
+        self.enlarge_button.setToolTip("Open a big curve canvas")
+        self.enlarge_button.clicked.connect(self.open_dialog)
+        bar.addWidget(self.reset_button)
+        bar.addWidget(self.enlarge_button)
+        bar.addStretch(1)
+        lay.addLayout(bar)
+
+    def text(self) -> str:
+        return self.editor.text()
+
+    def set_text(self, text: str, emit: bool = False) -> bool:
+        return self.editor.set_text(text, emit=emit)
+
+    def is_identity(self) -> bool:
+        return self.editor.is_identity()
+
+    def open_dialog(self) -> "CurveDialog":
+        dlg = CurveDialog(self.editor.text(), self)
+        dlg.curve_changed.connect(self._adopt)
+        dlg.show()
+        self._dialog = dlg          # 保住參照，不然 show() 之後會被 GC
+        return dlg
+
+    def _adopt(self, text: str) -> None:
+        if self.editor.set_text(text):
+            self.curve_changed.emit(self.editor.text())
+
+    def _on_changed(self, text: str) -> None:
+        self.curve_changed.emit(text)
+
+
+class CurveDialog(QDialog):
+    """放大版的曲線畫布。非模態 —— 一邊拉曲線一邊看主視窗的預覽更新。"""
+
+    curve_changed = Signal(str)
+
+    def __init__(self, text: str, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setWindowTitle("Tone curve")
+        self.setModal(False)
+        self.resize(420, 460)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setSpacing(8)
+
+        head = QLabel("Input gray level across, output up. Drag a point to "
+                      "bend the curve; click an empty spot to add one; "
+                      "right-click a point to remove it.", self)
+        head.setWordWrap(True)
+        head.setObjectName("paramHint")
+        lay.addWidget(head)
+
+        self.editor = CurveEditor(self, compact=False)
+        self.editor.set_text(text)
+        self.editor.curve_changed.connect(self.curve_changed)
+        lay.addWidget(self.editor, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Close, parent=self)
+        reset = QPushButton("Reset to y = x", self)
+        reset.clicked.connect(self.editor.reset)
+        buttons.addButton(reset, QDialogButtonBox.ResetRole)
+        buttons.rejected.connect(self.close)
+        lay.addWidget(buttons)
+
+
 def _safe_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
@@ -565,8 +1444,99 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 # --------------------------------------------------------------------------- #
 # 3. LibraryPanel
 # --------------------------------------------------------------------------- #
+def draw_group_icon(p: QPainter, group: str, color: str, size: float) -> None:
+    """在 ``p`` 的目前原點畫一個 ``size`` × ``size`` 的階段圖示。
+
+    **抽成自由函式**，是為了讓左側 rail 的按鈕、卡片庫的區塊標題、以及畫布上的
+    節點卡三處共用完全相同的圖形 —— 使用者在 rail 上看到的尺，在節點上看到的
+    也要是同一把尺，不然「圖示」就只是裝飾而不是語言。
+
+    不吃任何圖檔：repo 有「只放純文字檔」的不變量（公司機 DLP 會擋含二進位的
+    壓縮檔，見 ``docs/HANDOVER.md`` §5）。``.svg`` 其實是純文字、過得了 DLP，
+    但用 QPainter 連「要不要把圖檔加進版控」這個問題都不用問，而且顏色直接吃
+    token —— 換主題時圖示自動跟著變。
+    """
+    p.setRenderHint(QPainter.Antialiasing, True)
+    pen = QPen(QColor(color), max(1.2, size / 11.0))
+    pen.setCapStyle(Qt.RoundCap)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    w = h = float(size)
+    m = w / 7.5                       # 邊界留白，隨尺寸縮放
+    g = str(group)
+
+    if g == "input":                    # 匣子 + 往下的箭頭
+        p.drawRect(QRectF(m, h * 0.55, w - 2 * m, h * 0.45 - m))
+        p.drawLine(QPointF(w / 2, m), QPointF(w / 2, h * 0.46))
+        p.drawLine(QPointF(w / 2 - w * 0.16, h * 0.30), QPointF(w / 2, h * 0.46))
+        p.drawLine(QPointF(w / 2 + w * 0.16, h * 0.30), QPointF(w / 2, h * 0.46))
+    elif g == "enhance":                # 亮度：半實心圓
+        p.drawEllipse(QRectF(m, m, w - 2 * m, h - 2 * m))
+        p.setBrush(QColor(color))
+        p.setPen(Qt.NoPen)
+        p.drawPie(QRectF(m, m, w - 2 * m, h - 2 * m), -90 * 16, 180 * 16)
+    elif g == "region":                 # 取景框（四個角）+ 中心點
+        c = w * 0.24
+        for x0, y0, dx, dy in ((m, m, 1, 1), (w - m, m, -1, 1),
+                               (m, h - m, 1, -1), (w - m, h - m, -1, -1)):
+            p.drawLine(QPointF(x0, y0), QPointF(x0 + c * dx, y0))
+            p.drawLine(QPointF(x0, y0), QPointF(x0, y0 + c * dy))
+        p.setBrush(QColor(color))
+        p.setPen(Qt.NoPen)
+        r = w * 0.11
+        p.drawEllipse(QRectF(w / 2 - r, h / 2 - r, 2 * r, 2 * r))
+    elif g == "compare":                # 兩個交疊的方框
+        side = w - 2 * m - w * 0.2
+        p.drawRect(QRectF(m, m, side, side))
+        p.drawRect(QRectF(m + w * 0.2, m + w * 0.2, side, side))
+    elif g == "measure":                # 尺（一條線 + 刻度）
+        base = h - m
+        p.drawLine(QPointF(m, base), QPointF(w - m, base))
+        for i in range(4):
+            x = m + i * (w - 2 * m) / 3.0
+            p.drawLine(QPointF(x, base),
+                       QPointF(x, base - (h * 0.40 if i % 2 == 0 else h * 0.23)))
+    elif g == "search":                 # 放大鏡（rail 上的搜尋鈕，不是流程階段）
+        r = w * 0.29
+        p.drawEllipse(QRectF(m, m, 2 * r, 2 * r))
+        p.drawLine(QPointF(m + 2 * r * 0.86, m + 2 * r * 0.86),
+                   QPointF(w - m, h - m))
+    else:                               # adc / 其他：打勾
+        p.drawLine(QPointF(m, h * 0.52), QPointF(w * 0.42, h - m))
+        p.drawLine(QPointF(w * 0.42, h - m), QPointF(w - m, m))
+
+
+class GroupIcon(QWidget):
+    """:func:`draw_group_icon` 的 widget 包裝（給 rail 與區塊標題用）。"""
+
+    _SIZE = 15
+
+    def __init__(self, group: str, color: str, parent: Optional[QWidget] = None,
+                 size: Optional[int] = None):
+        super().__init__(parent)
+        self.group = str(group)
+        self.color = str(color)
+        self._SIZE = int(size or self._SIZE)
+        self.setFixedSize(self._SIZE, self._SIZE)
+
+    def set_color(self, color: str) -> None:
+        self.color = str(color)
+        self.update()
+
+    def paintEvent(self, _e) -> None:      # noqa: D102 - Qt hook
+        p = QPainter(self)
+        draw_group_icon(p, self.group, self.color, float(self._SIZE))
+        p.end()
+
+
 class _LibraryItem(QFrame):
-    """卡片庫的一列：名稱 + hover 才出現的「加入 ▸」；雙擊也能加入。"""
+    """卡片庫的一列：名稱 + hover 才出現的「Add」；雙擊也能加入。
+
+    ``set_missing(streams)`` 會把「上游還沒產出它要的影像流」這件事顯示成
+    一個灰字 badge（例：``needs diff``）並把整列調淡 —— 但**仍然可以加**。
+    卡片庫的順序不等於執行順序，使用者可能先放卡再補上游；擋著不給加只會
+    讓人以為工具壞了。
+    """
 
     activated = Signal(str)
 
@@ -574,39 +1544,79 @@ class _LibraryItem(QFrame):
                  parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.step_key = str(describe.get("key", ""))
+        self.reads = [str(r) for r in (describe.get("reads") or ())]
         self.setObjectName("libItem")
         self.setCursor(Qt.PointingHandCursor)
-        self.setStyleSheet(
-            "QFrame#libItem { background:%s; border:1px solid %s; border-radius:6px; }"
-            % (TOKENS["bg_surface"], TOKENS["border_default"])
-        )
-        tip = str(describe.get("help", "")) or str(describe.get("label", ""))
+        self._base_tip = (str(describe.get("help", ""))
+                          or str(describe.get("label", "")))
         if describe.get("requires_ref"):
-            tip += "（需要 ref 影像）"
-        self.setToolTip(tip)
+            self._base_tip += " (needs a ref image)"
+        self.setToolTip(self._base_tip)
+        self.setStyleSheet(
+            "QFrame#libItem { background:transparent; border:1px solid transparent;"
+            " border-radius:5px; }"
+            "QFrame#libItem:hover { background:%s; border-color:%s; }"
+            % (TOKENS["hover_warm"], TOKENS["border_default"])
+        )
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(8, 4, 6, 4)
+        lay.setContentsMargins(10, 3, 6, 3)
         lay.setSpacing(6)
 
-        dot = QFrame()
-        dot.setFixedSize(6, 6)
-        dot.setStyleSheet("background:%s; border-radius:3px;" % color)
-        lay.addWidget(dot)
+        self.dot = QFrame()
+        self.dot.setFixedSize(5, 5)
+        self.dot.setStyleSheet("background:%s; border-radius:2px;" % color)
+        lay.addWidget(self.dot)
 
         self.label = QLabel(str(describe.get("label") or self.step_key))
-        self.label.setToolTip(tip)
+        self.label.setToolTip(self._base_tip)
         lay.addWidget(self.label, 1)
 
-        self.add_button = QPushButton("加入 ▸")
+        self.badge = QLabel("")
+        self.badge.setObjectName("libBadge")
+        self.badge.setStyleSheet(
+            "color:%s; font-size:10px; border:1px solid %s; border-radius:3px;"
+            " padding:0px 4px;" % (TOKENS["text_disabled"], TOKENS["border_default"]))
+        self.badge.setVisible(False)
+        self.missing: List[str] = []
+        lay.addWidget(self.badge)
+
+        self.add_button = QPushButton("Add")
         self.add_button.setObjectName("cardButton")
         self.add_button.setCursor(Qt.PointingHandCursor)
-        self.add_button.setToolTip("把這張卡片加到流程尾端")
-        self.add_button.setFixedWidth(58)
+        self.add_button.setToolTip("Append this card to the end of the pipeline")
+        self.add_button.setFixedWidth(40)
         self.add_button.clicked.connect(
             lambda: self.activated.emit(self.step_key))
         self.add_button.setVisible(False)
         lay.addWidget(self.add_button)
+
+    # -- 前置條件 badge -----------------------------------------------------
+    def set_missing(self, missing: Sequence[str]) -> None:
+        """``missing`` = 這張卡要讀、但上游還沒有的影像流。"""
+        missing = [str(m) for m in (missing or ())]
+        self.missing = list(missing)
+        if missing:
+            self.badge.setText("needs %s" % ", ".join(missing))
+            self.badge.setVisible(True)
+            self.label.setStyleSheet("color:%s;" % TOKENS["text_disabled"])
+            self.setToolTip(
+                "%s\n\nNot available yet: this card reads %s, which nothing "
+                "upstream produces so far. You can still add it — the pipeline "
+                "order is up to you."
+                % (self._base_tip, ", ".join(missing)))
+        else:
+            self.badge.setVisible(False)
+            self.label.setStyleSheet("")
+            self.setToolTip(self._base_tip)
+
+    def badge_text(self) -> str:
+        """目前的 badge 文字（沒有就空字串）。
+
+        看的是 :attr:`missing` 而不是 ``badge.isVisible()`` —— 視窗還沒 show()
+        之前 Qt 的可見性一律是 False，headless 測試會全部誤判。
+        """
+        return self.badge.text() if self.missing else ""
 
     def enterEvent(self, e) -> None:      # noqa: D102 - Qt hook
         self.add_button.setVisible(True)
@@ -621,82 +1631,271 @@ class _LibraryItem(QFrame):
             self.activated.emit(self.step_key)
 
 
-class LibraryPanel(QWidget):
-    """卡片庫：依三段式分類（影像／算法／ADC）分區，區塊標題帶各段顏色。
+class StageButton(QFrame):
+    """左側 rail 的一顆大按鈕：icon + 階段名 + 卡片數。
 
-    ``set_steps(list_of_describe_dicts)`` 之後，雙擊某列或按該列的「加入 ▸」
-    都會發出 ``add_requested(step_key)``。空的區塊會留一行提示，讓使用者知道
-    「這一段目前沒有卡片」而不是以為壞掉了。
+    這是 F7-7 的要求：**先用大 icon 分功能，按下去才帶出裡面的小功能。**
+    六個階段一次全展開，等於一開始就把 15 張卡攤在使用者面前 ——
+    那正是「太瑣碎」的來源。
+    """
+
+    clicked = Signal(str)
+
+    _ICON = 30
+
+    def __init__(self, group: str, title: str, subtitle: str, colour: str,
+                 parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.group = str(group)
+        self.setObjectName("stageButton")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("%s — %s" % (title, subtitle))
+        self._colour = colour
+        self._active = False
+
+        self.setFixedWidth(58)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(2, 7, 2, 5)
+        lay.setSpacing(2)
+        lay.setAlignment(Qt.AlignHCenter)
+
+        self.icon = GroupIcon(self.group, colour, self, size=self._ICON)
+        lay.addWidget(self.icon, 0, Qt.AlignHCenter)
+
+        self.label = QLabel(title, self)
+        self.label.setAlignment(Qt.AlignHCenter)
+        self.label.setStyleSheet("font-size:9px; font-weight:600;")
+        lay.addWidget(self.label)
+
+        self.count = QLabel("", self)
+        self.count.setAlignment(Qt.AlignHCenter)
+        self.count.setStyleSheet("font-size:9px; color:%s;" % TOKENS["text_disabled"])
+        lay.addWidget(self.count)
+        self._restyle()
+
+    def set_count(self, n: int) -> None:
+        self.count.setText("" if n <= 0 else str(int(n)))
+
+    def set_active(self, active: bool) -> None:
+        self._active = bool(active)
+        self._restyle()
+
+    def is_active(self) -> bool:
+        return self._active
+
+    def refresh_colour(self, colour: str) -> None:
+        self._colour = colour
+        self.icon.set_color(colour)
+        self._restyle()
+
+    def _restyle(self) -> None:
+        self.setStyleSheet(
+            "QFrame#stageButton { background:%s; border:1px solid %s;"
+            " border-radius:6px; }"
+            "QFrame#stageButton:hover { background:%s; }"
+            % (TOKENS["accent_bg"] if self._active else "transparent",
+               TOKENS["accent_border"] if self._active else "transparent",
+               TOKENS["hover_warm"]))
+
+    def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit(self.group)
+        super().mousePressEvent(e)
+
+
+class LibraryPanel(QWidget):
+    """卡片庫：依**流程階段**分組（F7-3），每組一個 QPainter 畫的 icon + 標題。
+
+    為什麼不再依 ``category`` 分
+    ----------------------------
+    ``category``（影像／算法）描述的是「這張卡吐什麼型別」——那是引擎的分類
+    （快取切點、驗證順序）。使用者要的是「我想幹嘛」，所以改用 ``group``：
+
+        Input → Enhance → Region → Compare → Measure → ADC
+
+    讀起來是一句話，而且每段有一條機械可判定的規則（見 ``pipeline/step.py``）。
+
+    另外兩件讓 17 列不再瑣碎的事：
+
+    * **搜尋框** —— 打字即時過濾（比對名稱、key 與說明）。
+    * **前置條件 badge** —— ``set_available_streams()`` 之後，
+      上游還沒產出所需影像流的卡會標成 ``needs diff`` 並調淡。
     """
 
     add_requested = Signal(str)
+    #: 卡片區展開/收起（``True`` = 展開）。主視窗據此縮放左欄寬度 ——
+    #: 收起來時整欄只留 rail，工作區才真的變寬。
+    panel_toggled = Signal(bool)
 
-    _ORDER = ("image", "algo", "adc")
-    _EMPTY_TEXT = "（這一段目前沒有卡片）"
+    #: 顯示順序與標題。id 對應 ``pipeline/step.py`` 的 ``GROUP_*``。
+    GROUPS = (
+        ("input", "Input", "Load this defect's images"),
+        ("enhance", "Enhance", "Image in, image out"),
+        ("region", "Region", "Decide where to look"),
+        ("compare", "Compare", "Two images in, difference out"),
+        ("measure", "Measure", "Image + region in, numbers out"),
+        ("adc", "ADC", "Numbers in, score and bin out"),
+    )
+    _ORDER = tuple(g for g, _t, _s in GROUPS)
+    _EMPTY_TEXT = "(no cards in this section)"
+    _NO_MATCH_TEXT = "(no card matches)"
+
+    #: group -> 所屬的三段式 segment。**顏色不再從這裡取**（F7-9 起走
+    #: ``theme.group_hex``，六個階段各一個色相）；這份對照留著是因為
+    #: 「這個階段屬於哪一段」在說明文字與排序上仍然成立。
+    _GROUP_SEG = {"input": "image", "enhance": "image", "region": "algo",
+                  "compare": "image", "measure": "algo", "adc": "adc"}
+
+    #: 直式 icon rail 的寬度（收起來時整個 panel 就縮到只剩這條）。
+    RAIL_W = 66
+    #: 展開時卡片區至少要多寬（卡名 + badge 放得下）。
+    PANEL_W = 190
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._items: Dict[str, _LibraryItem] = {}
+        self._describes: Dict[str, Dict[str, Any]] = {}
         self._section_boxes: Dict[str, QVBoxLayout] = {}
+        self._headers: Dict[str, QWidget] = {}
+        self._icons: Dict[str, GroupIcon] = {}
+        self._available: List[str] = []
+        self._query = ""
+        self._shown_groups: List[str] = []
 
-        outer = QVBoxLayout(self)
+        self._open_group: Optional[str] = None
+
+        # 版面：**直式 rail（左）｜ 卡片區（右）**。
+        # F7-8：像工作列一樣由上而下，點了 icon 才顯示裡面的卡 ——
+        # 這樣左邊的操作區平常是乾淨的。
+        outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        self._scroll = QScrollArea(self)
+        self.rail = QWidget(self)
+        self.rail.setObjectName("stageRail")
+        self.rail.setFixedWidth(self.RAIL_W)
+        rail_lay = QVBoxLayout(self.rail)
+        rail_lay.setContentsMargins(2, 6, 2, 6)
+        rail_lay.setSpacing(2)
+        self.stage_buttons: Dict[str, StageButton] = {}
+        for gid, title, subtitle in self.GROUPS:
+            btn = StageButton(gid, title, subtitle, theme.group_hex(gid),
+                              self.rail)
+            btn.clicked.connect(self.toggle_group)
+            rail_lay.addWidget(btn)
+            self.stage_buttons[gid] = btn
+        rail_lay.addStretch(1)
+
+        # 搜尋鈕留在 rail 上（不是在 panel 裡）—— panel 收起來時搜尋框跟著藏，
+        # 沒有這顆就再也打不開搜尋了。
+        self.search_button = StageButton(
+            "search", "Search", "Find a card by name or description",
+            TOKENS["text_secondary"], self.rail)
+        self.search_button.clicked.connect(lambda _g: self.focus_search())
+        rail_lay.addWidget(self.search_button)
+        outer.addWidget(self.rail)
+
+        # 右邊：搜尋 + 卡片清單（收起來時整塊隱藏）
+        self.panel = QWidget(self)
+        panel_lay = QVBoxLayout(self.panel)
+        panel_lay.setContentsMargins(0, 0, 0, 0)
+        panel_lay.setSpacing(0)
+
+        self.search = QLineEdit(self)
+        self.search.setPlaceholderText("Search cards…")
+        self.search.setClearButtonEnabled(True)
+        self.search.setToolTip("Filter the card library by name or description")
+        self.search.textChanged.connect(self._on_search)
+        wrap = QWidget(self.panel)
+        wl = QHBoxLayout(wrap)
+        wl.setContentsMargins(6, 6, 8, 4)
+        wl.addWidget(self.search)
+        panel_lay.addWidget(wrap)
+
+        self._scroll = QScrollArea(self.panel)
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.NoFrame)
         self._host = QWidget()
         self._body = QVBoxLayout(self._host)
-        self._body.setContentsMargins(6, 6, 8, 6)
-        self._body.setSpacing(4)
+        self._body.setContentsMargins(6, 2, 8, 6)
+        self._body.setSpacing(2)
 
-        for cat in self._ORDER:
-            header = QLabel(theme.SEG_LABELS[cat])
-            header.setObjectName("libSectionHeader")
-            header.setProperty("category", cat)
-            header.setStyleSheet(
-                "background:%s; color:%s; border:1px solid %s; border-radius:5px;"
-                "padding:3px 8px; font-weight:700; font-size:11px;"
-                % (theme.seg_hex(cat, bg=True), theme.seg_hex(cat),
-                   theme.seg_hex(cat, bg=True))
-            )
-            self._body.addWidget(header)
+        for gid, title, subtitle in self.GROUPS:
+            self._body.addWidget(self._make_header(gid, title, subtitle))
             box = QVBoxLayout()
-            box.setContentsMargins(0, 0, 0, 4)
-            box.setSpacing(3)
+            box.setContentsMargins(0, 0, 0, 8)
+            box.setSpacing(1)
             self._body.addLayout(box)
-            self._section_boxes[cat] = box
+            self._section_boxes[gid] = box
 
         self._body.addStretch(1)
         self._scroll.setWidget(self._host)
-        outer.addWidget(self._scroll)
+        panel_lay.addWidget(self._scroll, 1)
+        outer.addWidget(self.panel, 1)
 
         self.set_steps([])
+        self.toggle_group(self._ORDER[0])       # 開窗先展開 Input
+
+    # -- 區塊標題（icon + 標題，取代舊的填滿色塊）---------------------------
+    def _make_header(self, gid: str, title: str, subtitle: str) -> QWidget:
+        colour = theme.group_hex(gid)
+        head = QWidget(self)
+        head.setObjectName("libSectionHeader")
+        head.setProperty("group", gid)
+        head.setToolTip(subtitle)
+        lay = QHBoxLayout(head)
+        lay.setContentsMargins(4, 8, 4, 2)
+        lay.setSpacing(7)
+
+        icon = GroupIcon(gid, colour, head)
+        icon.setToolTip(subtitle)
+        lay.addWidget(icon)
+        self._icons[gid] = icon
+
+        lbl = QLabel(title, head)
+        lbl.setObjectName("libSectionTitle")
+        lbl.setToolTip(subtitle)
+        lbl.setStyleSheet("color:%s; font-weight:700; font-size:11px;"
+                          % TOKENS["text_secondary"])
+        lay.addWidget(lbl)
+        lay.addStretch(1)
+        self._headers[gid] = head
+        return head
 
     # -- public API --------------------------------------------------------
     def set_steps(self, steps: Sequence[Dict[str, Any]]) -> None:
         """用 ``Step.describe()`` 的 dict 清單重建整個卡片庫。"""
         self._clear()
-        by_cat: Dict[str, List[Dict[str, Any]]] = {c: [] for c in self._ORDER}
+        self._describes = {str(d.get("key", "")): dict(d) for d in (steps or [])}
+        by_group: Dict[str, List[Dict[str, Any]]] = {g: [] for g in self._ORDER}
         for d in steps or []:
-            cat = str(d.get("category", ""))
-            by_cat.setdefault(cat, []).append(d)
-        for cat in self._ORDER:
-            box = self._section_boxes[cat]
-            entries = by_cat.get(cat, [])
+            gid = str(d.get("group") or "") or "enhance"
+            by_group.setdefault(gid, []).append(d)
+
+        for gid in self._ORDER:
+            box = self._section_boxes[gid]
+            entries = by_group.get(gid, [])
             if not entries:
-                empty = QLabel(self._EMPTY_TEXT)
-                empty.setObjectName("libEmpty")
-                empty.setStyleSheet("color:%s; font-size:11px; padding-left:8px;"
-                                    % TOKENS["text_disabled"])
-                box.addWidget(empty)
+                box.addWidget(self._empty_label(self._EMPTY_TEXT))
                 continue
+            colour = theme.group_hex(gid)
             for d in entries:
-                item = _LibraryItem(d, theme.seg_hex(cat), self._host)
+                item = _LibraryItem(d, colour, self._host)
                 item.activated.connect(self.add_requested)
                 box.addWidget(item)
                 self._items[item.step_key] = item
+        for gid, btn in self.stage_buttons.items():
+            btn.set_count(len(by_group.get(gid, [])))
+        self._apply_filter()
+        self._apply_badges()
+
+    def set_available_streams(self, streams: Sequence[str]) -> None:
+        """告訴卡片庫「目前 pipeline 到最後為止產出了哪些影像流」。
+
+        據此標出前置條件未滿足的卡。傳空清單 = 不知道（badge 全清）。
+        """
+        self._available = [str(s) for s in (streams or [])]
+        self._apply_badges()
 
     def entry(self, step_key: str) -> Optional[_LibraryItem]:
         """取得某張卡片的那一列（給主視窗做 highlight／給測試點擊）。"""
@@ -705,11 +1904,136 @@ class LibraryPanel(QWidget):
     def step_keys(self) -> List[str]:
         return list(self._items)
 
+    def visible_step_keys(self) -> List[str]:
+        """目前**看得到**的卡（搜尋過濾之後）。
+
+        同樣用明確狀態（``_matches``）而不是 ``isVisible()``，理由見
+        :meth:`_LibraryItem.badge_text`。
+        """
+        return [k for k in self._items
+                if self._matches(k)
+                and self._group_open(str((self._describes.get(k) or {})
+                                         .get("group") or ""))]
+
     def section_titles(self) -> List[str]:
         return [lbl.text() for lbl in self.findChildren(QLabel)
-                if lbl.objectName() == "libSectionHeader"]
+                if lbl.objectName() == "libSectionTitle"]
+
+    def visible_section_titles(self) -> List[str]:
+        """搜尋之後還有卡片的區塊標題（順序同 :data:`GROUPS`）。"""
+        return [title for gid, title, _sub in self.GROUPS
+                if gid in self._shown_groups]
+
+    # -- 展開 / 收合（F7-7）--------------------------------------------------
+    def toggle_group(self, group: Optional[str]) -> None:
+        """點同一顆再點一次 = 收起來；點別顆 = 換過去（一次只開一段）。
+
+        傳 ``None`` 直接全部收起來（測試 / 外部呼叫用）。訊號帶過來的是
+        ``str``，所以這裡不能用 ``str(group)`` 一律轉字串 —— ``str(None)``
+        會變成 ``"None"``，看起來像一個真的存在的段名。
+        """
+        gid = None if group is None else str(group)
+        self._open_group = None if (gid is None or self._open_group == gid) else gid
+        for g, btn in self.stage_buttons.items():
+            btn.set_active(g == self._open_group)
+        self._sync_panel()
+        self._apply_filter()
+
+    def panel_open(self) -> bool:
+        """卡片區現在是展開的嗎（收起來時只剩 rail）。
+
+        用明確狀態而不是 ``isVisible()`` —— 視窗還沒 show 之前 ``isVisible()``
+        一律是 False，那會讓「收起來了嗎」在建構期永遠答錯。
+        """
+        return self._open_group is not None or bool(self._query)
+
+    def _sync_panel(self) -> None:
+        """展開狀態 -> panel 顯示 + 本身的最小寬度 + 通知外面重排欄寬。"""
+        show = self.panel_open()
+        self.panel.setVisible(show)
+        self.setMinimumWidth(self.RAIL_W + (self.PANEL_W if show else 0))
+        self.panel_toggled.emit(show)
+
+    def open_group(self) -> Optional[str]:
+        """目前展開的是哪一段（都收起來時回 None）。"""
+        return self._open_group
+
+    def set_query(self, text: str) -> None:
+        """程式化設定搜尋字串（測試 / 外部呼叫用）。"""
+        self.search.setText(str(text or ""))
+
+    def focus_search(self) -> None:
+        """展開卡片區並把游標放進搜尋框（rail 上的放大鏡鈕）。"""
+        if not self.panel_open():
+            self.toggle_group(self._ORDER[0])
+        self.search.setFocus(Qt.OtherFocusReason)
+        self.search.selectAll()
+
+    def refresh_colors(self) -> None:
+        """換主題之後重新取色（icon 與圓點都是自繪/內嵌樣式）。"""
+        for gid, icon in self._icons.items():
+            icon.set_color(theme.group_hex(gid))
+        for gid, btn in self.stage_buttons.items():
+            btn.refresh_colour(theme.group_hex(gid))
+        self.search_button.refresh_colour(TOKENS["text_secondary"])
 
     # -- internals ---------------------------------------------------------
+    def _empty_label(self, text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setObjectName("libEmpty")
+        lbl.setStyleSheet("color:%s; font-size:11px; padding-left:12px;"
+                          % TOKENS["text_disabled"])
+        return lbl
+
+    def _on_search(self, text: str) -> None:
+        self._query = str(text or "").strip().lower()
+        self._sync_panel()
+        self._apply_filter()
+
+    def _matches(self, key: str) -> bool:
+        if not self._query:
+            return True
+        d = self._describes.get(key) or {}
+        hay = " ".join([key, str(d.get("label", "")), str(d.get("help", "")),
+                        str(d.get("group", ""))]).lower()
+        return all(tok in hay for tok in self._query.split())
+
+    def _group_open(self, gid: str) -> bool:
+        """搜尋中 = 跨全部階段找；沒搜尋 = 只看展開的那一段。"""
+        return True if self._query else (gid == self._open_group)
+
+    def _apply_filter(self) -> None:
+        """過濾卡片；沒展開的階段整段收起來。"""
+        for key, item in self._items.items():
+            gid = str((self._describes.get(key) or {}).get("group") or "")
+            item.setVisible(self._matches(key) and self._group_open(gid))
+        shown: List[str] = []
+        for gid, head in self._headers.items():
+            box = self._section_boxes[gid]
+            hit = False
+            opened = self._group_open(gid)
+            for i in range(box.count()):
+                w = box.itemAt(i).widget()
+                if isinstance(w, _LibraryItem):
+                    hit = hit or (self._matches(w.step_key) and opened)
+                elif isinstance(w, QLabel):
+                    # 空區塊的提示語只在該段展開、且沒搜尋時顯示
+                    show = opened and not self._query
+                    w.setVisible(show)
+                    hit = hit or show
+            head.setVisible(hit)
+            if hit:
+                shown.append(gid)
+        self._shown_groups = [g for g in self._ORDER if g in shown]
+
+    def _apply_badges(self) -> None:
+        avail = set(self._available)
+        for key, item in self._items.items():
+            if not self._available:
+                item.set_missing(())
+                continue
+            item.set_missing([r for r in item.reads if r not in avail])
+
     def _clear(self) -> None:
         self._items = {}
         for box in self._section_boxes.values():
@@ -764,18 +2088,18 @@ class _NodeCard(QFrame):
 
         self.chk = QCheckBox()
         self.chk.setChecked(self.enabled_flag)
-        self.chk.setToolTip("暫時停用這個步驟（不刪除）")
+        self.chk.setToolTip("Temporarily skip this step (without removing it)")
         self.chk.toggled.connect(
             lambda v: self.enable_toggled.emit(self.node_id, bool(v)))
         lay.addWidget(self.chk)
 
-        self.btn_up = self._small("↑", "往前移一格")
+        self.btn_up = self._small("↑", "Move one step earlier")
         self.btn_up.clicked.connect(
             lambda: self.move_requested.emit(self.node_id, -1))
-        self.btn_down = self._small("↓", "往後移一格")
+        self.btn_down = self._small("↓", "Move one step later")
         self.btn_down.clicked.connect(
             lambda: self.move_requested.emit(self.node_id, +1))
-        self.btn_remove = self._small("✕", "從流程移除")
+        self.btn_remove = self._small("✕", "Remove from the pipeline")
         self.btn_remove.clicked.connect(
             lambda: self.remove_requested.emit(self.node_id))
         for b in (self.btn_up, self.btn_down, self.btn_remove):
@@ -826,7 +2150,7 @@ class _ScoreCard(QFrame):
         super().__init__(parent)
         self.setObjectName("scoreCard")
         self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip("設定分數表達式與門檻")
+        self.setToolTip("Edit the score expression and threshold")
         self.setStyleSheet(
             "QFrame#scoreCard { background:%s; border:1px solid %s;"
             " border-radius:7px; }" % (theme.seg_hex("adc", bg=True),
@@ -848,7 +2172,7 @@ class _ScoreCard(QFrame):
         box.setSpacing(1)
         title = QLabel("Score / Bin")
         title.setStyleSheet("color:%s; font-weight:700;" % theme.seg_hex("adc"))
-        self.summary = QLabel("（尚未設定分數）")
+        self.summary = QLabel("(no score set yet)")
         self.summary.setObjectName("scoreSummary")
         self.summary.setWordWrap(True)
         box.addWidget(title)
@@ -875,7 +2199,7 @@ class PipelinePanel(QWidget):
     remove_requested = Signal(str)
     score_clicked = Signal()
 
-    _EMPTY_TEXT = "（流程還是空的 —— 從左邊的卡片庫雙擊加入第一張卡）"
+    _EMPTY_TEXT = "(Pipeline is empty — double-click a card in the library to add the first step)"
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -925,13 +2249,13 @@ class PipelinePanel(QWidget):
         self._refresh_selection()
 
     def set_score_summary(self, expr: str, threshold: float) -> None:
-        """尾卡摘要：``score = <expr>　門檻 <threshold>``。"""
+        """尾卡摘要：``score = <expr>   threshold <threshold>``。"""
         expr = str(expr or "").strip()
         if not expr:
-            self.score_card.summary.setText("（尚未設定分數）")
+            self.score_card.summary.setText("(no score set yet)")
             return
         self.score_card.summary.setText(
-            "score = %s　門檻 %s" % (expr, _fmt_number(threshold)))
+            "score = %s   threshold %s" % (expr, _fmt_number(threshold)))
 
     def score_summary_text(self) -> str:
         return self.score_card.summary.text()
@@ -1000,7 +2324,7 @@ class HistogramWidget(QWidget):
     #: 點一根長條：``(lo, hi)`` 是那根長條的分數區間（Studio 用來篩 Gallery）。
     bar_clicked = Signal(float, float)
 
-    _EMPTY_TEXT = "（試跑後顯示分數分佈）"
+    _EMPTY_TEXT = "(Score distribution appears after a trial run)"
     # 上緣留 20px 給門檻線的標籤（「門檻 3.5」畫在圖面之上，不壓到長條）
     _M_LEFT, _M_RIGHT, _M_TOP, _M_BOTTOM = 46.0, 14.0, 20.0, 30.0
     _SUMMARY_H = 18.0
@@ -1047,11 +2371,11 @@ class HistogramWidget(QWidget):
         return self._threshold
 
     def set_bin_summary(self, bins: Optional[Dict[int, int]]) -> None:
-        """``{0: 812, 1: 96}`` -> 「bin 0=812　bin 1=96」。"""
+        """``{0: 812, 1: 96}`` -> 「bin 0=812   bin 1=96」。"""
         if not bins:
             self._bin_text = ""
         else:
-            self._bin_text = "　".join(
+            self._bin_text = "   ".join(
                 "bin %s=%s" % (k, bins[k]) for k in sorted(bins))
         self.update()
 
@@ -1170,7 +2494,7 @@ class HistogramWidget(QWidget):
             p.setBrush(Qt.NoBrush)
             p.drawLine(QPointF(x, r.top() - 3), QPointF(x, r.bottom() + 3))
             p.setPen(QColor(TOKENS["accent_active"]))
-            label = "門檻 %s" % _fmt_number(self._threshold)
+            label = "threshold %s" % _fmt_number(self._threshold)
             fm = p.fontMetrics()
             tw = fm.horizontalAdvance(label) + 4
             tx = min(max(x + 3, r.left()), max(r.left(), r.right() - tw))
@@ -1258,7 +2582,7 @@ class HistogramWidget(QWidget):
             self.setToolTip("")
         else:
             a, b = self._edges[idx], self._edges[idx + 1]
-            self.setToolTip("score %.3g–%.3g：%d 顆"
+            self.setToolTip("score %.3g–%.3g: %d defects"
                             % (a, b, self._counts[idx]))
         self.update()
 
@@ -1269,7 +2593,7 @@ class HistogramWidget(QWidget):
 def _fmt_number(value: Any) -> str:
     """數值 -> 好讀字串：整數不拖小數點、一般值 3 位、極小值退回有效位數。"""
     if isinstance(value, bool):
-        return "是" if value else "否"
+        return "Yes" if value else "No"
     try:
         f = float(value)
     except (TypeError, ValueError):
@@ -1292,7 +2616,7 @@ class FeatureTable(QTableWidget):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(0, 2, parent)
-        self.setHorizontalHeaderLabels(["特徵", "數值"])
+        self.setHorizontalHeaderLabels(["Feature", "Value"])
         self.verticalHeader().setVisible(False)
         self.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -1371,10 +2695,10 @@ class VerdictChip(QLabel):
         if b is None:
             text, tone = "—", "neutral"
         elif b == 1:
-            text = "bin 1 · ≥門檻"
+            text = "bin 1 · ≥ threshold"
             tone = "bad" if is_real_style else "good"
         elif b == 0:
-            text = "bin 0 · <門檻"
+            text = "bin 0 · < threshold"
             tone = "good" if is_real_style else "bad"
         else:
             text, tone = "bin %d" % b, "neutral"

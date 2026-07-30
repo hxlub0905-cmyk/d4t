@@ -45,7 +45,7 @@ __all__ = ["summarize", "write_csv", "write_excel",
 BASE_COLUMNS = ("defect_id", "ok", "error", "score", "bin")
 
 #: bin 為 None（沒判定）時在 bin 分佈裡使用的 key。
-UNBINNED_KEY = "未判定"
+UNBINNED_KEY = "unbinned"
 
 
 # ---------------------------------------------------------------------------
@@ -101,9 +101,9 @@ def _gt_is_real(value: Any) -> Optional[bool]:
         return bool(value)
     if isinstance(value, str):
         s = value.strip().lower()
-        if s in ("1", "true", "yes", "y", "t", "real", "defect", "真"):
+        if s in ("1", "true", "yes", "y", "t", "real", "defect"):
             return True
-        if s in ("0", "false", "no", "n", "f", "nuisance", "假"):
+        if s in ("0", "false", "no", "n", "f", "nuisance"):
             return False
     return None
 
@@ -296,9 +296,9 @@ def write_csv(results: Sequence[Dict[str, Any]], path: str, *,
 # ---------------------------------------------------------------------------
 # Excel
 # ---------------------------------------------------------------------------
-_SHEET_SUMMARY = "摘要"
-_SHEET_DETAIL = "明細"
-_SHEET_FEATURES = "特徵統計"
+_SHEET_SUMMARY = "Summary"
+_SHEET_DETAIL = "Details"
+_SHEET_FEATURES = "Feature stats"
 
 _NUM_FMT = "0.0000"
 _PCT_FMT = "0.00%"
@@ -315,19 +315,19 @@ def _recipe_info(recipe: Any) -> List[Sequence[Any]]:
     else:
         return [("recipe", str(recipe))]
     score = rd.get("score") or {}
-    rows: List[Sequence[Any]] = [("recipe 名稱", rd.get("recipe_id", ""))]
+    rows: List[Sequence[Any]] = [("Recipe name", rd.get("recipe_id", ""))]
     if rd.get("description"):
-        rows.append(("說明", rd.get("description")))
+        rows.append(("Description", rd.get("description")))
     if score.get("expr") is not None:
-        rows.append(("分數表達式", str(score.get("expr"))))
+        rows.append(("Score expression", str(score.get("expr"))))
     if score.get("threshold") is not None:
-        rows.append(("門檻", _finite(score.get("threshold"))))
+        rows.append(("Threshold", _finite(score.get("threshold"))))
     if score.get("bins"):
-        rows.append(("bin 對應", ", ".join(
+        rows.append(("Bin mapping", ", ".join(
             "{}={}".format(k, v) for k, v in sorted(score["bins"].items()))))
     if rd.get("nodes") is not None:
         try:
-            rows.append(("步驟數", len(rd["nodes"])))
+            rows.append(("Step count", len(rd["nodes"])))
         except TypeError:
             pass
     return rows
@@ -367,8 +367,9 @@ def write_excel(results: Sequence[Dict[str, Any]], path: str, *,
         from openpyxl.styles import Alignment, Font, PatternFill
     except ImportError as e:      # pragma: no cover — requirements 已含 openpyxl
         raise ExportError(
-            "要匯出 Excel 需要 openpyxl 套件，但這台機器上找不到（{}）。\n"
-            "請先執行：pip install openpyxl，或改用「匯出 CSV」。".format(e)) from None
+            "Exporting to Excel needs the openpyxl package, which is not "
+            "installed on this machine ({}).\nRun: pip install openpyxl, or "
+            "export to CSV instead.".format(e)) from None
 
     results = list(results or [])
     path = str(path)
@@ -384,21 +385,21 @@ def write_excel(results: Sequence[Dict[str, Any]], path: str, *,
     # ---------------- 摘要 ----------------
     ws = wb.active
     ws.title = _SHEET_SUMMARY
-    rows: List[Sequence[Any]] = [("項目", "值"), ("__section__", "整體")]
+    rows: List[Sequence[Any]] = [("Item", "Value"), ("__section__", "Overall")]
     rows += [
-        ("defect 總數", s["n_total"]),
-        ("成功", s["n_ok"]),
-        ("失敗", s["n_fail"]),
-        ("有分數", s["n_scored"]),
+        ("Total defects", s["n_total"]),
+        ("Succeeded", s["n_ok"]),
+        ("Failed", s["n_fail"]),
+        ("Scored", s["n_scored"]),
     ]
-    rows.append(("__section__", "bin 分佈"))
+    rows.append(("__section__", "Bin distribution"))
     for k in sorted(s["bin_counts"], key=lambda x: (x == UNBINNED_KEY, x)):
         rows.append(("bin {}".format(k), s["bin_counts"][k]))
-    rows.append(("__section__", "分數"))
+    rows.append(("__section__", "Score"))
     rows += [
-        ("最小", s["score_min"]),
-        ("中位數", s["score_median"]),
-        ("最大", s["score_max"]),
+        ("Minimum", s["score_min"]),
+        ("Median", s["score_median"]),
+        ("Maximum", s["score_max"]),
     ]
     rinfo = _recipe_info(recipe)
     if rinfo:
@@ -406,17 +407,17 @@ def write_excel(results: Sequence[Dict[str, Any]], path: str, *,
         rows += rinfo
     gt = s["ground_truth"]
     if gt:
-        rows.append(("__section__", "與 ground truth 比對"))
+        rows.append(("__section__", "Against ground truth"))
         rows += [
-            ("有標註的顆數", gt["n_labelled"]),
-            ("實際列入計算", gt["n_evaluated"]),
-            ("抓漏率（真缺陷被判成 nuisance）", gt["miss_rate"]),
-            ("誤殺率（nuisance 被判成真缺陷）", gt["false_alarm_rate"]),
-            ("正確率", gt["accuracy"]),
-            ("__section__", "混淆矩陣"),
-            ("", "判定：真缺陷", "判定：nuisance"),
-            ("實際：真缺陷", gt["tp"], gt["fn"]),
-            ("實際：nuisance", gt["fp"], gt["tn"]),
+            ("Labelled defects", gt["n_labelled"]),
+            ("Actually evaluated", gt["n_evaluated"]),
+            ("Miss rate (real defect called nuisance)", gt["miss_rate"]),
+            ("False alarm rate (nuisance called real defect)", gt["false_alarm_rate"]),
+            ("Accuracy", gt["accuracy"]),
+            ("__section__", "Confusion matrix"),
+            ("", "Called: real defect", "Called: nuisance"),
+            ("Actual: real defect", gt["tp"], gt["fn"]),
+            ("Actual: nuisance", gt["fp"], gt["tn"]),
         ]
 
     r_i = 0
@@ -430,14 +431,14 @@ def write_excel(results: Sequence[Dict[str, Any]], path: str, *,
         for c_i, v in enumerate(row, 1):
             cell = ws.cell(row=r_i, column=c_i, value=v)
             if r_i == 1 or (c_i == 1 and isinstance(v, str)
-                            and v.startswith("實際：")):
+                            and v.startswith("Actual:")):
                 cell.font = bold
         label = str(row[0])
-        if label.startswith(("抓漏率", "誤殺率", "正確率")):
+        if label.startswith(("Miss rate", "False alarm rate", "Accuracy")):
             pct_rows.add(r_i)
     for r in pct_rows:
         ws.cell(row=r, column=2).number_format = _PCT_FMT
-    for label in ("最小", "中位數", "最大", "門檻"):
+    for label in ("Minimum", "Median", "Maximum", "Threshold"):
         for r in range(1, r_i + 1):
             if ws.cell(row=r, column=1).value == label:
                 ws.cell(row=r, column=2).number_format = _NUM_FMT
@@ -473,7 +474,7 @@ def write_excel(results: Sequence[Dict[str, Any]], path: str, *,
 
     # ---------------- 特徵統計 ----------------
     ws = wb.create_sheet(_SHEET_FEATURES)
-    fheader = ["特徵", "筆數", "最小", "中位數", "最大", "標準差"]
+    fheader = ["Feature", "Count", "Minimum", "Median", "Maximum", "Std dev"]
     ws.append(fheader)
     for c_i in range(1, len(fheader) + 1):
         c = ws.cell(row=1, column=c_i)

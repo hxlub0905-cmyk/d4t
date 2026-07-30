@@ -13,6 +13,7 @@
       "snr",
       "blob",
       "cd",
+      "glv_patch_roi",
       "glv_patch"
     ],
     "rsem": [
@@ -25,6 +26,7 @@
       "snr",
       "blob",
       "cd",
+      "glv_rsem_roi",
       "glv_rsem"
     ]
   },
@@ -98,9 +100,8 @@
       "step": "glv_stats",
       "params": {
         "source": "diff",
-        "region": "center",
-        "box_size": 64,
-        "metrics": "glv_max,glv_median,glv_std"
+        "metrics": "glv_max,glv_median,glv_std",
+        "roi": "glv_patch_roi"
       },
       "enabled": true
     },
@@ -108,9 +109,30 @@
       "step": "glv_stats",
       "params": {
         "source": "diff",
-        "region": "center",
-        "box_size": 128,
-        "metrics": "glv_max,glv_median,glv_std"
+        "metrics": "glv_max,glv_median,glv_std",
+        "roi": "glv_rsem_roi"
+      },
+      "enabled": true
+    },
+    "glv_patch_roi": {
+      "step": "roi_define",
+      "params": {
+        "name": "glv_patch_roi",
+        "shape": "center",
+        "size": 64.0,
+        "size_unit": "px",
+        "source": "diff"
+      },
+      "enabled": true
+    },
+    "glv_rsem_roi": {
+      "step": "roi_define",
+      "params": {
+        "name": "glv_rsem_roi",
+        "shape": "center",
+        "size": 128.0,
+        "size_unit": "px",
+        "source": "diff"
       },
       "enabled": true
     }

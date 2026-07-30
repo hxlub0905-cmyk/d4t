@@ -75,7 +75,9 @@ def _loaded(window, synlot):
     """把資料集 + 範例 recipe 灌進視窗（冪等，讓每個測試都能單獨跑）。"""
     if window.dataset is None:
         assert window.load_dataset_path(synlot["klarf"], sync=True) is True
-    if not window.model.node_order:
+    # 判斷依據是「載過 recipe 了沒」，不是「畫布上有沒有節點」——
+    # F7-9 起開窗就有一張起手 Input 卡，後者永遠是 True。
+    if window.recipe_path is None:
         assert window.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
     return window
 
@@ -88,11 +90,17 @@ def test_window_constructs_with_library_cards(window):
     # 卡片庫用的是真實 registry，不是手捏假資料
     assert window.library.entry("snr_map") is not None
     assert window.library.entry("load_patch") is not None
-    assert window.library.section_titles() == ["影像 Image", "算法 Algo", "ADC 判定"]
+    assert window.library.section_titles() == [
+        "Input", "Enhance", "Region", "Compare", "Measure", "ADC"]
 
-    # 空狀態：流程沒有節點、預覽沒有影像、直方圖沒有資料
-    assert window.model.node_order == []
-    assert window.pipeline.node_ids() == []
+    # 空狀態：畫布上只有起手的 Input 卡（F7-9），而且它已經被選起來 ——
+    # 一開窗右欄就有東西可以動，不是一句「請先挑一張卡」。
+    assert window.model.node_order == ["load_patch"]
+    assert window.pipeline.node_ids() == ["load_patch"]
+    assert window.selected_node == "load_patch"
+    assert window.param_form.step_key() == "load_patch"
+    assert window.model.dirty is False, "使用者什麼都還沒做，不該被問「要存檔嗎」"
+    # 預覽沒有影像、直方圖沒有資料
     assert window.image_view.has_image() is False
     assert window.histogram.has_data() is False
     assert window.status_text()          # 一開始就給使用者一句提示
@@ -117,7 +125,7 @@ def test_load_dataset_and_recipe(window, synlot):
 
     recipe = Recipe.load(str(EXAMPLE_RECIPE))
     assert window.model.node_order == recipe.routes["ebi_patch"]
-    assert len(window.pipeline.node_ids()) == 9
+    assert len(window.pipeline.node_ids()) == len(window.model.node_order)
     assert window.pipeline.node_ids() == window.model.node_order
     assert window.model.kind == "ebi_patch"
 
@@ -127,8 +135,8 @@ def test_load_dataset_and_recipe(window, synlot):
     # Score/Bin 尾卡摘要跟著 model 走
     summary = window.pipeline.score_summary_text()
     assert recipe.score.expr in summary and "50" in summary
-    # 節點摘要 = 非預設參數的 k=v（最多 3 個）
-    assert "window=15" in window.pipeline.card("snr").summary.text()
+    # 節點摘要 = 非預設參數的 k=v（最多 3 個）—— F7-6 起節點是自繪圖元
+    assert "window=15" in window.pipeline.card("snr").info["summary"]
 
 
 # --------------------------------------------------------------------------- #
@@ -160,6 +168,49 @@ def test_select_node_and_preview(window, synlot):
     assert window.image_view.has_image() is True
 
 
+def test_compare_shows_two_streams_with_linked_zoom_and_pan(window, synlot):
+    """F7-8：並排比對預設關著，開了就自動配成 test | ref 並連動。
+
+    預設關著是刻意的 —— F7-5 把 Gallery 搬走就是為了讓影像變大，
+    預設並排等於把剛爭取到的寬度再砍一半。
+    """
+    from PySide6.QtCore import QPointF
+
+    _loaded(window, synlot)
+    assert window.refresh_preview(sync=True) is True
+    window.stream_combo.setCurrentText("test")
+
+    assert window.compare_enabled() is False
+    assert window.image_view_b.has_image() is False
+
+    assert window.set_compare(True) is True
+    assert window.compare_check.isChecked() is True
+    # 左邊是 test → 右邊自動給 ref（並排最常見的用途就是比這一對）
+    assert window.stream_combo_b.currentText() == "ref"
+    assert window.image_view_b.has_image() is True
+
+    # 連動：沒有連動的並排，使用者得自己把兩邊拖到同一個位置才比得起來
+    window.image_view.zoom_by(2.0)
+    assert window.image_view_b.view_state()[0] == pytest.approx(
+        window.image_view.view_state()[0])
+    # 反向也要連動，而且不可以互相回寫到爆掉
+    window.image_view_b.zoom_by(1.5)
+    assert window.image_view.view_state()[0] == pytest.approx(
+        window.image_view_b.view_state()[0])
+
+    # 平移一樣連動
+    before = window.image_view_b.view_state()[1]
+    window.image_view.set_view(window.image_view.view_state()[0],
+                               QPointF(11.0, 7.0))
+    window.image_view.view_changed.emit(window.image_view.view_state()[0],
+                                        QPointF(11.0, 7.0))
+    assert window.image_view_b.view_state()[1] != before
+
+    # 關掉之後右邊要真的放掉影像，不然它會留在記憶體裡也留在畫面上
+    assert window.set_compare(False) is False
+    assert window.image_view_b.has_image() is False
+
+
 # --------------------------------------------------------------------------- #
 # 4. 參數編輯（合法 / 不合法）
 # --------------------------------------------------------------------------- #
@@ -178,7 +229,7 @@ def test_param_edit_valid_then_invalid(window, synlot):
     window._on_param_edited("window", 999)
     assert window.model.nodes["snr"].params["window"] == 15
     assert window.param_form.has_error("window") is True
-    assert "上限" in window.param_form.hint_text("window")
+    assert "maximum" in window.param_form.hint_text("window")
 
     # 再改一個合法值 → 錯誤狀態清掉
     window._on_param_edited("window", 15)
@@ -191,7 +242,8 @@ def test_param_edit_valid_then_invalid(window, synlot):
 def test_mouse_only_pipeline_build(qapp):
     win = studio_mod.StudioWindow()
     try:
-        win.library.add_requested.emit("load_patch")
+        # 起手的 Input 卡已經在畫布上了（F7-9），所以只要再加一張
+        assert win.model.node_order == ["load_patch"]
         win.library.add_requested.emit("percentile_norm")
         assert win.model.node_order == ["load_patch", "percentile_norm"]
         assert win.pipeline.node_ids() == ["load_patch", "percentile_norm"]
@@ -227,7 +279,7 @@ def test_run_trial_fills_histogram(window, synlot):
     assert window.histogram.has_data() is True
     assert sum(window.histogram._counts) == 8
     assert window.histogram.bin_summary_text().startswith("bin ")
-    assert "試跑完成" in window.status_text()
+    assert "Run finished" in window.status_text()
 
 
 # --------------------------------------------------------------------------- #
@@ -248,7 +300,7 @@ def test_threshold_live_preview_vs_commit(window, synlot):
     window._on_threshold_changed(77.25)
     assert window.model.threshold == pytest.approx(before)
     live = window.histogram.bin_summary_text()
-    assert live == "　".join(
+    assert live == "   ".join(
         "bin %s=%s" % (k, v)
         for k, v in sorted(vm_mod.rebin(window.trial_scores, 77.25,
                                         window.model.bins).items()))
@@ -278,6 +330,93 @@ def test_save_recipe_round_trip(window, synlot, tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# 8.5 M7 推廣鐵則：前置條件不滿足的動作要「變灰 + 說明原因」，不是按了才罵人
+# --------------------------------------------------------------------------- #
+def test_actions_are_disabled_until_their_preconditions_hold(qapp, synlot):
+    """按鈕的可用性要跟著狀態走，而且 tooltip 要講得出為什麼不能按。
+
+    舊行為是全部亮著、按下去才在狀態列說「還沒有載入資料集」——狀態列在螢幕
+    最下角，第一次用的人只會覺得「我按了，沒反應」。
+    """
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    try:
+        # 還沒有資料：跑不了、輸出不了（起手的 Input 卡讓「存檔」是可以的 ——
+        # 畫布上真的有一張卡，說「沒東西可存」才是騙人的）
+        assert win.btn_trial.isEnabled() is False
+        assert win.act_run_all.isEnabled() is False
+        assert win.spin_trial_n.isEnabled() is False
+        assert win.btn_export.isEnabled() is False
+        assert "No dataset" in win.btn_trial.toolTip()
+        for w in (win.btn_trial, win.btn_export):
+            assert w.toolTip().strip(), "變灰的按鈕一定要說明原因"
+
+        # 移掉起手卡 → 流程真的空了，理由要換一句，而且存不了
+        win.pipeline.remove_requested.emit("load_patch")
+        assert win.btn_save_recipe.isEnabled() is False
+        assert win.btn_save_recipe.toolTip().strip()
+        assert "add at least one card" in win.btn_trial.toolTip()
+
+        # 只有資料集 → 還是不能跑（流程是空的），但理由要換一句
+        assert win.load_dataset_path(synlot["klarf"], sync=True) is True
+        assert win.btn_trial.isEnabled() is False
+        assert "pipeline is empty" in win.btn_trial.toolTip()
+        assert win.btn_save_recipe.isEnabled() is False
+
+        # 資料集 + 流程 → 可以跑；但還沒有結果，所以還不能輸出
+        assert win.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
+        assert win.btn_trial.isEnabled() is True
+        assert win.act_run_all.isEnabled() is True
+        assert win.spin_trial_n.isEnabled() is True
+        assert win.btn_save_recipe.isEnabled() is True
+        assert win.btn_export.isEnabled() is False
+        assert "No results yet" in win.btn_export.toolTip()
+
+        # 跑完 → 輸出解鎖
+        assert win.run_trial(8, workers=1, sync=True) is True
+        assert win.btn_export.isEnabled() is True
+    finally:
+        win.close()
+
+
+def test_trial_count_follows_the_dataset_size(qapp, synlot):
+    """對一份只有 8 顆的 lot 顯示「First 200」沒有意義，只會讓人以為看錯了。"""
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    try:
+        assert win.spin_trial_n.value() == studio_mod.DEFAULT_TRIAL_N
+        win.load_dataset_path(synlot["klarf"], sync=True)
+        assert win.spin_trial_n.value() == max(win.spin_trial_n.minimum(), 8)
+    finally:
+        win.close()
+
+
+def test_run_all_lives_in_the_trial_button_menu(window):
+    """主要動作只留一顆 ▶；破壞性比較大的「跑整批」降級成選單項目。"""
+    menu = window.btn_trial.menu()
+    assert menu is not None, "「跑整批」要收在試跑鈕的下拉裡"
+    assert [a.text() for a in menu.actions()] == ["Run all defects"]
+    assert window.btn_trial.text() == "▶ Run trial"
+    # 舊版並排的第二顆 ▶ 鈕已經不存在
+    assert not hasattr(window, "btn_full")
+
+
+# --------------------------------------------------------------------------- #
+# 8.6 M7：游標讀數有自己的位置，不准洗掉狀態列
+# --------------------------------------------------------------------------- #
+def test_cursor_readout_does_not_overwrite_the_status_bar(window, synlot):
+    _loaded(window, synlot)
+    window._status("Run finished: 8 defects")
+
+    window._on_cursor_info("x 12  y 30  ·  gray 187")
+    assert window.cursor_text() == "x 12  y 30  ·  gray 187"
+    assert window.status_text() == "Run finished: 8 defects", \
+        "滑鼠飄過影像不該把剛才的結果訊息洗掉"
+
+    window._on_cursor_info("")            # 游標離開影像
+    assert window.cursor_text() == ""
+    assert window.status_text() == "Run finished: 8 defects"
+
+
+# --------------------------------------------------------------------------- #
 # 9. 關窗：三個 worker 都收乾淨
 # --------------------------------------------------------------------------- #
 def test_close_stops_workers(window, synlot):
@@ -292,3 +431,31 @@ def test_close_stops_workers(window, synlot):
         assert worker.is_running() is False
         assert worker.thread_obj is None
     assert window._preview_timer.isActive() is False
+
+
+# --------------------------------------------------------------------------- #
+# 10. F7-7 進度條：載入與試跑要看得到進度，不能只有狀態列一行字
+# --------------------------------------------------------------------------- #
+def test_progress_bar_is_hidden_when_idle_and_tracks_a_run(window, synlot):
+    _loaded(window, synlot)
+    assert window.progress_visible() is False, "閒著時不該佔位子"
+
+    window._on_trial_progress(3, 8)
+    assert window.progress_visible() is True
+    assert window.progress.value() == 3
+    assert window.progress.maximum() == 8
+
+    window.run_trial(8, workers=1, sync=True)
+    assert window.progress_visible() is False, "跑完要收起來"
+
+
+def test_loading_uses_an_indeterminate_bar(window):
+    """載入 KLARF 沒有可回報的百分比 —— 用跑馬燈回答「還在動嗎」。
+
+    謊報一個假的百分比比不報還糟。
+    """
+    window._progress_busy("Loading…")
+    assert window.progress_visible() is True
+    assert (window.progress.minimum(), window.progress.maximum()) == (0, 0)
+    window._progress_done()
+    assert window.progress_visible() is False

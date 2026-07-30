@@ -13,7 +13,7 @@ from typing import Any, Dict, List
 from ..algo import blob as algo_blob
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, ParamSpec, Step, StepError, register_step,
+    CATEGORY_ALGO, ParamSpec, Step, StepError, register_step, GROUP_REGION,
 )
 from ._util import require_image
 
@@ -35,18 +35,27 @@ class BlobSegmentStep(Step):
     """Blob 分割：SNR 地圖 → 門檻 → 連通元件 → 候選缺陷清單。"""
 
     key = "blob_segment"
-    label = "Blob 分割"
+    label = "Blob segment"
     category = CATEGORY_ALGO
-    help = "在 SNR 地圖上切出一塊塊候選缺陷，記下最大塊的面積、長寬比、離中心距離與 SNR。"
+    group = GROUP_REGION
+    help = ("Cut candidate defect blobs out of the SNR map and record the main "
+            "blob's area, aspect ratio, distance from centre and SNR.")
     params = [
         ParamSpec(name="source", type="image_key", default="snr_map",
-                  help="輸入 SNR 地圖的影像流。"),
+                  help="Input SNR map image stream."),
         ParamSpec(name="diff_source", type="image_key", default="diff",
-                  help="對應的差異圖影像流（用來量每塊的平均訊號）。"),
+                  help=("Matching difference image stream, used to measure each "
+                        "blob's mean signal.")),
         ParamSpec(name="min_area", type="int", default=4, min=1, max=10000,
-                  help="最小面積（像素）：比這小的塊視為雜訊丟掉。"),
+                  help=("Minimum area in pixels: anything smaller is treated as "
+                        "noise and dropped.")),
+        ParamSpec(name="roi_out", type="str", default="blob",
+                  help=("Name given to the main blob's region, so Measure "
+                        "cards can point at it (leave as 'blob' unless you "
+                        "run two Blob segment cards).")),
         ParamSpec(name="snr_threshold", type="float", default=0.0, min=0.0, max=255.0,
-                  help="分割門檻（0–255 地圖刻度）：0=Otsu 自動決定（建議）。"),
+                  help=("Segmentation threshold on the 0-255 map scale; "
+                        "0 = decide automatically by Otsu (recommended).")),
     ]
     reads = ["snr_map", "diff"]
     writes: List[str] = []
@@ -57,18 +66,32 @@ class BlobSegmentStep(Step):
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
         return [params.get("source", "snr_map"), params.get("diff_source", "diff")]
 
+    @classmethod
+    def resolve_regions_out(cls, params: Dict[str, Any]) -> List[str]:
+        name = str(params.get("roi_out", "blob") or "").strip()
+        return [name] if name else []
+
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
         snr_img = require_image(ctx, self.key, p["source"])
         diff_img = require_image(ctx, self.key, p["diff_source"])
         if snr_img.shape[:2] != diff_img.shape[:2]:
-            raise StepError(self.key, f"'{p['source']}' 與 '{p['diff_source']}' 尺寸不同 "
-                                      f"({snr_img.shape[:2]} vs {diff_img.shape[:2]})，無法分割。")
+            raise StepError(self.key, f"'{p['source']}' and '{p['diff_source']}' differ in "
+                                      f"size ({snr_img.shape[:2]} vs "
+                                      f"{diff_img.shape[:2]}); cannot segment.")
         thr = None if float(p["snr_threshold"]) <= 0.0 else float(p["snr_threshold"])
         rois = algo_blob.segment_defects(
             snr_img, diff_img, min_area=int(p["min_area"]), snr_threshold=thr)
 
         ctx.meta["blobs"] = [_roi_to_dict(r) for r in rois]
+        # F7-4：主 blob 也寫成具名 ROI，讓它跟使用者畫的框走同一條路。
+        # meta["blobs"] 保留（overlay 與舊 recipe 還在讀）。
+        name = str(p["roi_out"]).strip()
+        if name and rois:
+            big0 = rois[0]
+            h0, w0 = snr_img.shape[:2]
+            ctx.set_roi(name, (big0.x / w0, big0.y / h0,
+                               max(1, big0.w) / w0, max(1, big0.h) / h0))
         feats = {"blob_count": float(len(rois)),
                  "blob_area": 0.0, "blob_aspect": 0.0,
                  "blob_dist_center": 0.0, "blob_snr": 0.0}

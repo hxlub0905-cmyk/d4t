@@ -9,7 +9,8 @@
 
 每顆 defect 一組 test+ref uint8 影像對：
   - 共用的週期性圓角方格圖案（cell pitch 可調），每對隨機整體相位；
-  - ref 額外帶 |dx|,|dy| <= shift_max 的隨機平移（模擬對位誤差）；
+  - ref 額外帶 |dx|,|dy| <= shift_max 的隨機平移（**預設 0**：機台輸出的
+    test/ref patch 本來就兩兩對應，不需要對位。要測對位就把它調大）；
   - 兩張各自加獨立高斯雜訊；
   - REAL 缺陷只種在 test（亮點 / 暗點 / 橋接線，振幅 >= 50、靠近中心）；
   - NUISANCE 只有雜訊 + 平移，沒有真缺陷。
@@ -99,7 +100,7 @@ def _make_klarf_text(n: int, rows) -> str:
 
 def generate(out_dir, n: int = 24, real_frac: float = 0.5, size: int = 128,
              pitch: int = 16, noise: float = 6.0, seed: int = 7,
-             shift_max: int = 3) -> Dict[str, str]:
+             shift_max: int = 0) -> Dict[str, str]:
     """產生合成 lot 並自我驗證 ingest 層讀得回來。回傳輸出檔路徑 dict。"""
     if n < 1:
         raise ValueError(f"n 至少要 1（收到 {n}）")
@@ -211,7 +212,7 @@ def main(argv=None) -> int:
     ap.add_argument("--pitch", type=int, default=16, help="圖案 cell 週期（預設 16）")
     ap.add_argument("--noise", type=float, default=6.0, help="高斯雜訊 sigma（預設 6）")
     ap.add_argument("--seed", type=int, default=7, help="隨機種子（同 seed 產出相同位元組）")
-    ap.add_argument("--shift-max", type=int, default=3,
+    ap.add_argument("--shift-max", type=int, default=0,
                     help="ref 相對 test 的最大平移（像素，預設 3）")
     args = ap.parse_args(argv)
     paths = generate(args.out_dir, n=args.n, real_frac=args.real_frac,

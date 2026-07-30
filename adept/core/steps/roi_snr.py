@@ -12,9 +12,12 @@ from typing import Any, Dict, List
 from ..algo import snr as algo_snr
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, ParamSpec, Step, register_step,
+    CATEGORY_ALGO, ParamSpec, Step, register_step, GROUP_MEASURE,
 )
-from ._util import require_image
+from ._util import (
+    output_prefix_spec, prefix_features, prefix_names, require_image,
+    roi_rect_or_none,
+)
 
 _ZERO = {"roi_snr_signed": 0.0, "roi_snr_abs": 0.0, "roi_contrast": 0.0,
          "roi_edge_sharpness": 0.0, "roi_dvi": 0.0}
@@ -25,19 +28,24 @@ class RoiSnrStep(Step):
     """ROI SNR：缺陷區對周邊背景的訊噪比與對比統計。"""
 
     key = "roi_snr"
-    label = "ROI 訊噪比"
+    label = "ROI SNR"
     category = CATEGORY_ALGO
-    help = "量缺陷區域相對周邊背景的訊噪比（含正負號：暗缺陷為負）與對比、邊緣銳利度。"
+    group = GROUP_MEASURE
+    help = ("Measure the defect region's signal-to-noise against the "
+            "surrounding background (signed — dark defects are negative), "
+            "plus contrast and edge sharpness.")
     params = [
         ParamSpec(name="source", type="image_key", default="diff",
-                  help="量測用的影像流（通常是 diff；用未取絕對值的 diff 才看得出亮暗方向）。"),
-        ParamSpec(name="mode", type="choice", default="blob",
-                  choices=["blob", "center"],
-                  help="blob=用最大 blob 的 bbox 當 ROI（需先跑 blob_segment）；center=影像正中央固定方框。"),
-        ParamSpec(name="box_size", type="int", default=24, min=4, max=512,
-                  help="center 模式的方框邊長（像素）。"),
+                  help=("Image stream to measure on (usually diff; leave diff "
+                        "unsigned to keep bright/dark direction visible).")),
+        ParamSpec(name="roi", type="str", default="blob",
+                  help=("Which region to measure in — the name given by a "
+                        "Define region card, or 'blob' for the main blob found "
+                        "by Blob segment. Leave empty for the whole image.")),
         ParamSpec(name="background_margin", type="int", default=20, min=1, max=200,
-                  help="背景取樣寬度（像素）：ROI 外圍這圈拿來當背景統計。"),
+                  help=("Background sampling width in pixels: the ring outside the "
+                        "ROI used for background statistics.")),
+        output_prefix_spec("blob"),
     ]
     reads = ["diff"]
     writes: List[str] = []
@@ -48,34 +56,39 @@ class RoiSnrStep(Step):
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
         return [params.get("source", "diff")]
 
+    @classmethod
+    def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
+        return prefix_names(params.get("output_prefix", ""), cls.features_out)
+
+    @classmethod
+    def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
+        name = str(params.get("roi", "blob") or "").strip()
+        return [name] if name else []
+
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
         img = require_image(ctx, self.key, p["source"])
-        h, w = img.shape[:2]
 
-        if p["mode"] == "blob":
-            blobs = ctx.meta.get("blobs") or []
-            if not blobs:
-                ctx.warn(f"[{self.key}] meta['blobs'] 沒有任何區塊（請先跑 blob_segment），ROI SNR 全部記 0。")
-                ctx.add_features(dict(_ZERO))
-                return ctx
-            big = blobs[0]  # 主 blob = SNR 最強者（meta["blobs"] 保留 segment 的 snr 降冪排序）
-            rect = (int(big["x"]), int(big["y"]), int(big["w"]), int(big["h"]))
-        else:
-            box = min(int(p["box_size"]), h, w)
-            rect = ((w - box) // 2, (h - box) // 2, box, box)
+        rect = roi_rect_or_none(ctx, self.key, img, p["roi"])
+        if rect is None:
+            ctx.warn(f"[{self.key}] no blob found (run Blob segment first, or "
+                     f"point roi at a Define region card); all ROI SNR "
+                     f"features recorded as 0.")
+            ctx.add_features(prefix_features(p["output_prefix"], _ZERO))
+            return ctx
 
         res = algo_snr.roi_snr(img, rect, background_margin=int(p["background_margin"]))
         if res is None:
-            ctx.warn(f"[{self.key}] ROI {rect} 落在影像外或無效，ROI SNR 全部記 0。")
-            ctx.add_features(dict(_ZERO))
+            ctx.warn(f"[{self.key}] ROI {rect} is outside the image or invalid; "
+                     f"all ROI SNR features recorded as 0.")
+            ctx.add_features(prefix_features(p["output_prefix"], _ZERO))
             return ctx
 
-        ctx.add_features({
+        ctx.add_features(prefix_features(p["output_prefix"], {
             "roi_snr_signed": res.snr_signed,
             "roi_snr_abs": res.snr_abs,
             "roi_contrast": res.contrast,
             "roi_edge_sharpness": res.edge_sharpness,
             "roi_dvi": res.dvi,
-        })
+        }))
         return ctx

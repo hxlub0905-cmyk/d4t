@@ -1,19 +1,38 @@
-# ADEPT Studio theme — authored 2026-07-28 (M3).
-# Vendored from: cell-period-estimator/cell_period_estimator/ui/theme.py
-#   （GLAS 暖色淺色 token 系統 + apply_theme QSS）— 視覺語言延續自 CPE，
-#   ADEPT 只「加」不「改」：新增三段式 segment 色（image / algo / adc）與
-#   good / bad 判定 chip 色，暖奶油底 + 琥珀 accent 原封不動。
+# ADEPT Studio theme — authored 2026-07-28 (M3), repainted 2026-07-28 (F7-2).
+# Originally vendored from cell-period-estimator/…/ui/theme.py（GLAS 暖色 token
+# 系統 + apply_theme QSS）。F7-2 換掉了整組**顏色值**，但 token 的**鍵名一個都沒改**
+#   —— QSS 與所有自繪 widget 都是照鍵名取色，所以換膚不需要動任何呼叫端。
 """ADEPT Studio 佈景主題 —— 設計 token 的唯一真相來源。
 
 ``TOKENS`` 同時餵給 QSS（標準 widget）與自繪 widget（直方圖、節點卡、色條），
 顏色永遠不會兩邊走鐘。
+
+F7-2：為什麼整組換掉
+--------------------
+舊配色是暖奶油底（``#f7f4ef``）+ 琥珀 accent（``#f29f4b``），而且三段式用
+**填滿的彩色底塊**當區塊標題。暖色 + 高飽和 + 大色塊三個加起來，使用者的
+評語是「太像玩具」。
+
+新的目標是 n8n / KLIP 的語言：
+
+* **中性灰階** —— 大面積不帶色相，眼睛不會被背景搶走
+* **全平面** —— 沒有陰影、沒有漸層（n8n 2.0 也是刻意拿掉 3D 陰影的）
+* **顏色只表達語意** —— 段落色、狀態色、accent；裝飾一律不用色
+* **小圓角、細邊框、一致的 4/8px 間距**
+
+亮色與暗色
+----------
+``PALETTES`` 有 ``"light"`` / ``"dark"`` 兩組，鍵名完全相同。
+:func:`set_theme` 就地更新 ``TOKENS``（**不是換掉物件**）——
+因為各模組都是 ``from .theme import TOKENS`` 之後在建構式裡取值，
+就地更新才能讓已經 import 過的模組跟著變。
 
 三段式 segment 色（master plan §5）：
 
 ===========  ==========  ==========  ==========================================
 段           前景 token  底色 token  用在哪
 ===========  ==========  ==========  ==========================================
-影像 image   seg_image   seg_image_bg  Library 區塊標題、Pipeline 卡片左側色條
+影像 image   seg_image   seg_image_bg  Library 區塊圓點、Pipeline 卡片左側色條
 算法 algo    seg_algo    seg_algo_bg   同上 + 直方圖長條
 ADC  adc     seg_adc     seg_adc_bg    同上 + Score/Bin 尾卡
 ===========  ==========  ==========  ==========================================
@@ -30,98 +49,261 @@ from __future__ import annotations
 from string import Template
 from typing import Any, Dict
 
+__all__ = [
+    "TOKENS", "PALETTES", "THEMES", "DEFAULT_THEME", "current_theme",
+    "set_theme", "SEG_LABELS", "seg_hex", "seg_color", "seg_bg",
+    "group_hex", "group_color", "build_stylesheet", "apply_theme",
+]
+
 # --------------------------------------------------------------------------- #
 # Design tokens
 # --------------------------------------------------------------------------- #
-TOKENS: Dict[str, Any] = {
+#: 亮色（預設）。中性灰階 + 一個克制的藍當 accent。
+_LIGHT: Dict[str, Any] = {
     # -- backgrounds (low -> high elevation) -------------------------------
-    "bg_page": "#f7f4ef",
-    "bg_panel": "#faf7f3",
-    "bg_surface": "#fff8f2",
-    "bg_elevated": "#fff4e8",
+    "bg_page": "#f4f5f7",
+    "bg_panel": "#fafbfc",
+    "bg_surface": "#ffffff",
+    "bg_elevated": "#f7f8fa",
     "bg_input": "#ffffff",
-    "side_panel": "#fff7ee",
-    "toolbar": "#f2ece4",
-    "statusbar": "#f0e9e0",
+    "side_panel": "#fafbfc",
+    "toolbar": "#ffffff",
+    "statusbar": "#f7f8fa",
     # -- borders ------------------------------------------------------------
-    "border_default": "#e8d8c8",
-    "border_input": "#c8b8a8",
-    "border_hover": "#8a7060",
-    "border_focus": "#f29f4b",
+    "border_default": "#e3e6eb",
+    "border_input": "#cbd1d9",
+    "border_hover": "#9aa3ae",
+    "border_focus": "#3574d6",
     # -- text ---------------------------------------------------------------
-    "text_primary": "#3f3428",
-    "text_secondary": "#7a6a5a",
-    "text_hint": "#8a7660",
-    "text_disabled": "#b0a090",
-    # -- accent (amber) -----------------------------------------------------
-    "accent": "#f29f4b",
-    "accent_hover": "#f6b56b",
-    "accent_active": "#d97d1e",
-    "accent_bg": "#fff4e6",
-    "accent_border": "#efd8b8",
+    "text_primary": "#1f2430",
+    "text_secondary": "#5b6472",
+    "text_hint": "#79828f",
+    "text_disabled": "#aeb5bf",
+    # -- accent (restrained blue; KLIP 的視覺語言) ---------------------------
+    "accent": "#3574d6",
+    "accent_hover": "#4a86e2",
+    "accent_active": "#2b5eb0",
+    "accent_bg": "#eaf1fc",
+    "accent_border": "#c2d6f2",
     # -- selection / hover --------------------------------------------------
-    "selection": "#f6c38c",
-    "hover_warm": "#f6efe6",
-    "hover_warm_strong": "#fff4e8",
-    "focus_bg": "#fffef9",
+    "selection": "#d5e3f8",
+    "hover_warm": "#f0f2f5",          # 鍵名保留（歷史），已不是暖色
+    "hover_warm_strong": "#e6eaf0",
+    "focus_bg": "#ffffff",
     # -- semantic -----------------------------------------------------------
-    "success": "#7abf9a",
-    "success_bg": "#ebf7f0",
-    "success_border": "#9ec9ad",
-    "success_text": "#3e7f5d",
-    "danger": "#cc7b6c",
-    "danger_bg": "#feeee8",
-    "danger_border": "#e0a89e",
-    "danger_text": "#a8453a",
-    "warning": "#d9a24f",
-    "min_accent": "#d8894f",
-    "min_accent_bg": "#fff8f0",
-    "min_accent_border": "#f0c8a8",
-    "min_accent_text": "#9a5a2a",
-    "max_accent": "#6ea8cf",
-    "max_accent_bg": "#f0f7fc",
-    "max_accent_border": "#a8c8e0",
-    "max_accent_text": "#3a6a8a",
-    # -- ADEPT 三段式 segment 色 ------------------------------------------
-    "seg_image": "#6f93b5",       # 影像段（把圖變乾淨）
-    "seg_algo": "#c06a1d",        # 算法段（從圖量出數字）
-    "seg_adc": "#8a6fb5",         # 判定段（score / bin / 輸出）
-    "seg_image_bg": "#e8eef5",
-    "seg_algo_bg": "#f9ecd9",
-    "seg_adc_bg": "#ece6f4",
-    "seg_disabled": "#cdc2b4",    # 停用節點的左側色條
-    "seg_disabled_bg": "#f1ece5",
+    "success": "#3f9d6b",
+    "success_bg": "#eaf6f0",
+    "success_border": "#b6ddc7",
+    "success_text": "#2f7a52",
+    "danger": "#d05a4c",
+    "danger_bg": "#fdeeeb",
+    "danger_border": "#f0bdb5",
+    "danger_text": "#a83f33",
+    "warning": "#c2871f",
+    "min_accent": "#c2731f",
+    "min_accent_bg": "#fdf3e6",
+    "min_accent_border": "#eed3ad",
+    "min_accent_text": "#8f5615",
+    "max_accent": "#3574d6",
+    "max_accent_bg": "#eaf1fc",
+    "max_accent_border": "#c2d6f2",
+    "max_accent_text": "#2b5eb0",
+    # -- ADEPT 三段式 segment 色（去飽和，只當色條/圓點用）-------------------
+    "seg_image": "#4a7ba7",
+    "seg_algo": "#b0722f",
+    "seg_adc": "#7a68a6",
+    "seg_image_bg": "#eaf0f6",
+    "seg_algo_bg": "#f8f0e5",
+    "seg_adc_bg": "#f0edf6",
+    # -- 流程階段色（F7-9）：六個階段各一個色相（見 group_hex 的說明）--------
+    "stage_input": "#2f8f80",
+    "stage_enhance": "#3f7fbf",
+    "stage_region": "#5f8f3f",
+    "stage_compare": "#b0507f",
+    "stage_measure": "#bf7030",
+    "stage_adc": "#8a5fbf",
+    "seg_disabled": "#c2c7ce",
+    "seg_disabled_bg": "#f0f1f3",
     # -- 判定 chip（good / bad / neutral）------------------------------------
-    "chip_good_bg": "#e9f6ee",
+    "chip_good_bg": "#eaf6f0",
     "chip_good_text": "#2f7a52",
-    "chip_good_border": "#9ec9ad",
-    "chip_bad_bg": "#fdece8",
-    "chip_bad_text": "#a8453a",
-    "chip_bad_border": "#e0a89e",
-    "chip_neutral_bg": "#f2ece4",
-    "chip_neutral_text": "#8a7660",
-    "chip_neutral_border": "#e8d8c8",
+    "chip_good_border": "#b6ddc7",
+    "chip_bad_bg": "#fdeeeb",
+    "chip_bad_text": "#a83f33",
+    "chip_bad_border": "#f0bdb5",
+    "chip_neutral_bg": "#f0f2f5",
+    "chip_neutral_text": "#5b6472",
+    "chip_neutral_border": "#e3e6eb",
     # -- tooltip (inverted) -------------------------------------------------
-    "tooltip_bg": "#3f3428",
-    "tooltip_text": "#faf7f3",
-    "tooltip_border": "#2c2418",
+    "tooltip_bg": "#2b303b",
+    "tooltip_text": "#f4f5f7",
+    "tooltip_border": "#1f2430",
     # -- lists / scrollbars / disabled --------------------------------------
-    "list_bg": "#f2ece4",
-    "row_alt": "#faf5ee",
-    "scroll_track": "#faf5ee",
-    "scroll_thumb": "#d8c8b6",
-    "scroll_thumb_hover": "#b8a898",
-    "disabled_bg": "#faf6f0",
-    "disabled_text": "#c8b89e",
-    "tab_inactive": "#efe8de",
+    "list_bg": "#ffffff",
+    "row_alt": "#fafbfc",
+    "scroll_track": "transparent",
+    "scroll_thumb": "#cbd1d9",
+    "scroll_thumb_hover": "#aeb5bf",
+    "disabled_bg": "#f4f5f7",
+    "disabled_text": "#aeb5bf",
+    "tab_inactive": "transparent",
     # -- section header tiers ------------------------------------------------
-    "tier1_bg": "#fff4e8",
-    "tier1_text": "#c97028",
+    "tier1_bg": "transparent",
+    "tier1_text": "#79828f",
+    # -- 影像背景（F7-7）------------------------------------------------------
+    #: **light / dark 兩組刻意填同一個值。**
+    #:
+    #: 這個工具的核心工作是判斷 8-bit 灰階 patch 上的細微差異，而周圍的亮度
+    #: 會偏移人對灰階的感知（同時對比效應）。原本影像底用的是 ``bg_panel``
+    #: （淡色主題下近乎純白），那是最糟的組合：patch 會顯得比實際暗、
+    #: 感知對比被壓縮。影像評估的慣例是中性灰（Photoshop/Lightroom 的深灰、
+    #: 醫療影像 viewer 的黑底），理由就是不要讓背景去偏移判斷。
+    #:
+    #: 所以：**chrome 跟著主題走，影像區不跟。** 換主題時同一張 patch
+    #: 看起來要一樣。
+    "image_backdrop": "#3f4247",
+
+    # -- canvas (F7-6 節點畫布) ----------------------------------------------
+    "canvas_bg": "#f0f1f4",
+    #: F7-8：背景從格線改成點陣之後這個值調深了一階。線鋪滿整片，太深會吵；
+    #: 點只有交會處那一顆，用原本的淺色就直接看不見了。
+    "canvas_grid": "#ced4de",
+    "canvas_edge": "#9aa3ae",
+    "canvas_edge_active": "#3574d6",
     # -- typography ----------------------------------------------------------
     "font_stack": ("'Segoe UI','PingFang TC','Microsoft JhengHei',"
                    "'Helvetica Neue',Arial,sans-serif"),
     "mono_stack": "'Consolas','Courier New',monospace",
 }
+
+#: 暗色。n8n 的畫布是深中性色，不是純黑（純黑對比太硬，看久了刺眼）。
+_DARK: Dict[str, Any] = dict(_LIGHT, **{
+    "bg_page": "#191b20",
+    "bg_panel": "#1e2127",
+    "bg_surface": "#23262d",
+    "bg_elevated": "#2a2e36",
+    "bg_input": "#1b1e24",
+    "side_panel": "#1e2127",
+    "toolbar": "#1e2127",
+    "statusbar": "#1b1e24",
+
+    "border_default": "#333842",
+    "border_input": "#3d434f",
+    "border_hover": "#5c6474",
+    "border_focus": "#4b8bf5",
+
+    "text_primary": "#e3e6ec",
+    "text_secondary": "#a3abb8",
+    "text_hint": "#8b93a1",
+    "text_disabled": "#5c6474",
+
+    "accent": "#4b8bf5",
+    "accent_hover": "#639cf8",
+    "accent_active": "#3a76d8",
+    "accent_bg": "#1d2a3f",
+    "accent_border": "#33507d",
+    "selection": "#2b3d5c",
+    "hover_warm": "#282c34",
+    "hover_warm_strong": "#30353f",
+    "focus_bg": "#1b1e24",
+
+    "success": "#54b382",
+    "success_bg": "#1b2b23",
+    "success_border": "#2f5a45",
+    "success_text": "#6ec79a",
+    "danger": "#e07568",
+    "danger_bg": "#2e1e1c",
+    "danger_border": "#5c3630",
+    "danger_text": "#f0958a",
+    "warning": "#d8a145",
+    "min_accent": "#d8934a",
+    "min_accent_bg": "#2b2219",
+    "min_accent_border": "#5a4630",
+    "min_accent_text": "#e0a86a",
+    "max_accent": "#4b8bf5",
+    "max_accent_bg": "#1d2a3f",
+    "max_accent_border": "#33507d",
+    "max_accent_text": "#7aaaf8",
+
+    "seg_image": "#6f9fc8",
+    "seg_algo": "#d1994f",
+    "seg_adc": "#9e8bc8",
+    "seg_image_bg": "#1e2833",
+    "seg_algo_bg": "#2c2519",
+    "seg_adc_bg": "#26222f",
+    # -- 流程階段色（F7-9）---------------------------------------------------
+    "stage_input": "#5cbfae",
+    "stage_enhance": "#6fa6e0",
+    "stage_region": "#93c46a",
+    "stage_compare": "#dd7fac",
+    "stage_measure": "#e0a05c",
+    "stage_adc": "#b48fe0",
+    "seg_disabled": "#4a505c",
+    "seg_disabled_bg": "#22252b",
+
+    "chip_good_bg": "#1b2b23",
+    "chip_good_text": "#6ec79a",
+    "chip_good_border": "#2f5a45",
+    "chip_bad_bg": "#2e1e1c",
+    "chip_bad_text": "#f0958a",
+    "chip_bad_border": "#5c3630",
+    "chip_neutral_bg": "#282c34",
+    "chip_neutral_text": "#a3abb8",
+    "chip_neutral_border": "#333842",
+
+    "tooltip_bg": "#f4f5f7",
+    "tooltip_text": "#1f2430",
+    "tooltip_border": "#cbd1d9",
+
+    "list_bg": "#1b1e24",
+    "row_alt": "#1f2229",
+    "scroll_track": "transparent",
+    "scroll_thumb": "#3d434f",
+    "scroll_thumb_hover": "#5c6474",
+    "disabled_bg": "#22252b",
+    "disabled_text": "#5c6474",
+    "tab_inactive": "transparent",
+
+    "tier1_bg": "transparent",
+    "tier1_text": "#8b93a1",
+
+    "image_backdrop": "#3f4247",     # 與 light 相同 —— 見上面的說明
+    "canvas_bg": "#16181d",
+    "canvas_grid": "#2f3540",
+    "canvas_edge": "#5c6474",
+    "canvas_edge_active": "#4b8bf5",
+})
+
+#: 兩組色盤，鍵名完全一致（測試會逐鍵比對）。
+PALETTES: Dict[str, Dict[str, Any]] = {"light": _LIGHT, "dark": _DARK}
+THEMES = tuple(PALETTES)
+DEFAULT_THEME = "light"
+
+#: **活的** token 字典。``set_theme`` 就地更新它（見模組 docstring）。
+TOKENS: Dict[str, Any] = dict(_LIGHT)
+
+_CURRENT = {"name": DEFAULT_THEME}
+
+
+def current_theme() -> str:
+    """目前套用的主題名稱。"""
+    return _CURRENT["name"]
+
+
+def set_theme(name: str) -> str:
+    """切換色盤（**就地**更新 ``TOKENS``），回傳實際套用的名稱。
+
+    不認得的名字退回 :data:`DEFAULT_THEME`，不丟例外 —— 主題壞掉不該讓
+    使用者連視窗都開不起來（鐵則 7 的精神）。
+    """
+    key = str(name or "").strip().lower()
+    if key not in PALETTES:
+        key = DEFAULT_THEME
+    TOKENS.clear()
+    TOKENS.update(PALETTES[key])
+    _CURRENT["name"] = key
+    return key
+
 
 # 分類 -> (前景 token, 底色 token)。未知分類退回中性色。
 _SEG_TOKENS = {
@@ -131,9 +313,9 @@ _SEG_TOKENS = {
 }
 
 SEG_LABELS = {
-    "image": "影像 Image",
-    "algo": "算法 Algo",
-    "adc": "ADC 判定",
+    "image": "Image",
+    "algo": "Algorithm",
+    "adc": "ADC Decision",
 }
 
 
@@ -141,6 +323,44 @@ def seg_hex(category: str, bg: bool = False) -> str:
     """回傳 segment 顏色的 hex 字串（``bg=True`` 取柔和底色）。純字串、免 Qt。"""
     fg_key, bg_key = _SEG_TOKENS.get(str(category), ("text_secondary", "bg_panel"))
     return TOKENS[bg_key if bg else fg_key]
+
+
+# 流程階段 -> 色彩 token（F7-9）。順序同 ``pipeline/step.py`` 的 ``GROUP_ORDER``。
+_STAGE_TOKENS = {
+    "input": "stage_input",
+    "enhance": "stage_enhance",
+    "region": "stage_region",
+    "compare": "stage_compare",
+    "measure": "stage_measure",
+    "adc": "stage_adc",
+}
+
+
+def group_hex(group: str) -> str:
+    """流程階段 -> 顏色 hex。純字串、免 Qt。
+
+    為什麼階段色不再從 ``seg_hex`` 借（F7-9）
+    ----------------------------------------
+    F7-3 之前這裡是 ``group -> category -> 顏色``，於是六個階段只有三種色：
+    Input／Enhance／Compare 全是藍的。試用回饋原話是「圖示很不錯，但太多都同
+    個顏色」—— 圖示分得出來、顏色分不出來，等於顏色這個維度白給了。
+
+    現在每個階段各有一個色相，但**冷暖仍然對得上三段式**：
+    影像段（Input 藍綠／Enhance 藍／Compare 靛）走冷色、
+    算法段（Region 綠／Measure 橙）與 ADC（紫）維持原本的識別。
+    相鄰的兩階段永遠不同色系，所以在直式 rail 上由上而下掃過去分得開。
+
+    ``seg_hex`` 沒有被取代 —— 需要講「這是哪一段」的地方（首啟導覽的三段說明、
+    直方圖、Score/Bin 尾卡）仍然用它。兩個軸各有各的用途，見 CLAUDE.md §2。
+    """
+    return TOKENS[_STAGE_TOKENS.get(str(group), "stage_enhance")]
+
+
+def group_color(group: str):
+    """:func:`group_hex` 的 ``QColor`` 版。"""
+    from PySide6.QtGui import QColor
+
+    return QColor(group_hex(group))
 
 
 def seg_color(category: str, bg: bool = False):
@@ -175,22 +395,26 @@ QToolBar {
     spacing: 6px;
     padding: 4px 6px;
 }
+/* Toolbar buttons look like buttons, not like a menu bar. Borderless text in
+ * a row reads as “File Edit View…”, and a menu bar is something you pull down,
+ * not something you press — so the whole strip stopped looking clickable. */
 QToolBar QToolButton {
-    background: transparent;
-    color: $text_secondary;
-    border: 1px solid transparent;
+    background: $bg_surface;
+    color: $text_primary;
+    border: 1px solid $border_input;
     border-radius: 6px;
     padding: 6px 12px;
-    font-weight: 600;
+    font-weight: 500;
 }
-QToolBar QToolButton:hover { background: $hover_warm; color: $text_primary; }
+QToolBar QToolButton:hover { background: $hover_warm; color: $text_primary;
+                             border-color: $border_hover; }
 QToolBar QToolButton:pressed { background: $hover_warm_strong; }
 QToolBar QToolButton:checked {
     background: $accent_bg; color: $accent_active; border: 1px solid $accent_border;
 }
 QToolBar QToolButton#primary {
-    background: $accent; color: #ffffff; border: 1px solid $accent_active;
-    padding: 6px 18px; font-weight: 700;
+    background: $accent; color: #ffffff; border: 1px solid $accent;
+    padding: 6px 16px; font-weight: 600;
 }
 QToolBar QToolButton#primary:hover { background: $accent_hover; }
 QToolBar QToolButton#primary:pressed { background: $accent_active; }
@@ -202,27 +426,30 @@ QToolBar::separator { background: $border_default; width: 1px; margin: 5px 6px; 
 /* -- status bar ------------------------------------------------------- */
 QStatusBar { background: $statusbar; color: $text_secondary;
              border-top: 1px solid $border_default; }
+/* A refusal must not look like a confirmation (F7-15). The status bar is the
+ * only place that says a trial was blocked by lint, or a card could not be
+ * added - in the same grey as "Added denoise", that reads as nothing said. */
+QStatusBar[level="error"] { color: $danger_text; font-weight: 600; }
 QStatusBar::item { border: 0; }
 
 /* -- group boxes (section cards) -------------------------------------- */
 QGroupBox {
     background: $bg_surface;
     border: 1px solid $border_default;
-    border-radius: 9px;
+    border-radius: 6px;
     margin-top: 16px;
     padding: 12px 10px 10px 10px;
 }
 QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top left;
-    left: 8px;
-    top: 2px;
-    padding: 2px 8px;
-    background: $tier1_bg;
-    border: 1px solid $accent_border;
-    border-radius: 5px;
+    left: 2px;
+    top: 1px;
+    padding: 0px 4px;
+    background: transparent;
+    border: 0;
     color: $tier1_text;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
 }
 
@@ -232,19 +459,19 @@ QPushButton {
     color: $text_primary;
     border: 1px solid $border_input;
     border-radius: 6px;
-    padding: 5px 13px;
+    padding: 5px 12px;
     min-height: 18px;
-    font-weight: 600;
+    font-weight: 500;
 }
 QPushButton:hover { border-color: $border_hover; background: $hover_warm; }
 QPushButton:pressed { background: $hover_warm_strong; }
-QPushButton:focus { border: 1.5px solid $border_focus; }
+QPushButton:focus { border: 1px solid $border_focus; }
 QPushButton:disabled { background: $disabled_bg; color: $disabled_text;
                        border-color: $border_default; }
-/* 主要動作（「試跑」「跑整批」）：objectName = "primary" */
+/* primary action (Run trial / Run all): objectName = "primary" */
 QPushButton#primary {
-    background: $accent; color: #ffffff; border: 1px solid $accent_active;
-    padding: 6px 20px; font-weight: 700;
+    background: $accent; color: #ffffff; border: 1px solid $accent;
+    padding: 6px 18px; font-weight: 600;
 }
 QPushButton#primary:hover { background: $accent_hover; }
 QPushButton#primary:pressed { background: $accent_active; }
@@ -253,16 +480,29 @@ QPushButton#primary:disabled {
 }
 QPushButton[variant="secondary"] {
     background: $bg_input; color: $accent_active; border: 1px solid $accent;
+    font-weight: 600;
 }
 QPushButton[variant="secondary"]:hover { background: $accent_bg; }
+QPushButton[variant="secondary"]:pressed { background: $accent_bg;
+                                           border: 1px solid $accent_active; }
+QPushButton[variant="secondary"]:disabled {
+    background: $disabled_bg; color: $disabled_text; border: 1px solid $border_default;
+}
 QPushButton[variant="ghost"] {
     background: transparent; color: $text_secondary; border: 1px solid transparent;
 }
 QPushButton[variant="ghost"]:hover { background: $hover_warm; color: $text_primary; }
 QPushButton[variant="danger"] {
     background: $danger_bg; color: $danger_text; border: 1px solid $danger_border;
+    font-weight: 600;
 }
-/* 卡片上的小方鈕（↑ ↓ ✕ / 加入 ▸） */
+QPushButton[variant="danger"]:hover { border-color: $danger_text; }
+/* Stop stays visible after it is pressed, disabled, so that "I already asked
+ * it to stop" is on screen while the current defects finish. */
+QPushButton[variant="danger"]:disabled {
+    background: $disabled_bg; color: $disabled_text; border-color: $border_default;
+}
+/* small square buttons on cards (up / down / remove / add) */
 QPushButton#cardButton {
     background: transparent; color: $text_secondary;
     border: 1px solid transparent; border-radius: 5px;
@@ -271,12 +511,18 @@ QPushButton#cardButton {
 QPushButton#cardButton:hover { background: $hover_warm_strong; color: $accent_active;
                                border: 1px solid $accent_border; }
 QPushButton#cardButton:disabled { color: $disabled_text; background: transparent; }
+/* The card / features switch under the image: the selected one has to look
+ * selected, or the pair reads as two labels rather than a choice (F7-17). */
+QPushButton#cardButton:checked {
+    background: $accent_bg; color: $accent_active;
+    border: 1px solid $accent_border; font-weight: 600;
+}
 
 /* -- inputs ------------------------------------------------------------ */
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     background: $bg_input;
     color: $text_primary;
-    border: 1.5px solid $border_input;
+    border: 1px solid $border_input;
     border-radius: 5px;
     padding: 2px 6px;
     min-height: 22px;
@@ -287,12 +533,25 @@ QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover {
     border-color: $border_hover;
 }
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
-    border: 1.5px solid $border_focus; background: $focus_bg;
+    border: 1px solid $border_focus; background: $focus_bg;
 }
 QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {
     background: $disabled_bg; color: $disabled_text; border-color: $border_default;
 }
-QComboBox::drop-down { border: 0; width: 18px; }
+/* A dropdown must not be pixel-identical to a free-text field.
+ *
+ * `border: 0` here used to hide the arrow completely: styling this subcontrol
+ * hands it to the stylesheet, and a styled drop-down draws no arrow unless the
+ * rule also supplies a `down-arrow` image — which this repo cannot ship,
+ * because it is text-only (see CLAUDE.md §9.5). Leaving the border unset keeps
+ * the subcontrol on the base style, which paints the arrow itself.
+ *
+ * The visible consequence was that "Match on" (three fixed streams) and "Name
+ * this region" (free text) looked exactly the same, so there was no way to
+ * tell which fields could be opened and which had to be typed.
+ * tests/test_ui_controls_readable.py locks this. */
+QComboBox::drop-down { width: 20px; subcontrol-origin: padding;
+                       subcontrol-position: center right; }
 QComboBox QAbstractItemView {
     background: $bg_input; border: 1px solid $border_default;
     selection-background-color: $selection; selection-color: $text_primary;
@@ -303,11 +562,32 @@ QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
     width: 16px; background: $bg_elevated; border-left: 1px solid $border_default;
 }
 
+/* -- sliders (F7-8) ----------------------------------------------------- *
+ * One per bounded parameter. The handle is deliberately larger than Qt's
+ * default: the whole point is dragging it while watching the image, and a
+ * handle you keep missing is the same as no slider at all.                */
+QSlider { background: transparent; min-height: 22px; }
+QSlider::groove:horizontal {
+    height: 4px; border-radius: 2px;
+    background: $border_default;
+}
+QSlider::sub-page:horizontal {
+    height: 4px; border-radius: 2px; background: $accent;
+}
+QSlider::handle:horizontal {
+    width: 12px; height: 12px; margin: -5px 0; border-radius: 6px;
+    background: $bg_elevated; border: 2px solid $accent;
+}
+QSlider::handle:horizontal:hover { border-color: $accent_active; }
+QSlider::handle:horizontal:pressed { background: $accent; }
+QSlider:disabled::sub-page:horizontal { background: $border_default; }
+QSlider:disabled::handle:horizontal { border-color: $border_default; }
+
 /* -- check boxes ------------------------------------------------------- */
 QCheckBox { background: transparent; spacing: 6px; }
 QCheckBox::indicator {
     width: 14px; height: 14px;
-    border: 1.5px solid $border_input; border-radius: 3px; background: $bg_input;
+    border: 1px solid $border_input; border-radius: 3px; background: $bg_input;
 }
 QCheckBox::indicator:hover { border-color: $border_hover; }
 QCheckBox::indicator:checked { background: $accent; border-color: $accent_active; }
@@ -331,8 +611,8 @@ QTableView { gridline-color: $border_default; }
 QTableView::item { padding: 2px 6px; }
 QHeaderView { background: $list_bg; }
 QHeaderView::section {
-    background: $list_bg; color: $accent_active; border: 0;
-    border-bottom: 1px solid $border_default; padding: 4px 8px; font-weight: 700;
+    background: $bg_elevated; color: $text_secondary; border: 0;
+    border-bottom: 1px solid $border_default; padding: 5px 8px; font-weight: 600;
 }
 
 /* -- scroll area ------------------------------------------------------- */
@@ -342,9 +622,9 @@ QScrollArea > QWidget > QWidget { background: transparent; }
 /* -- splitter ---------------------------------------------------------- */
 QSplitter { background: $bg_page; }
 QSplitter::handle { background: $border_default; }
-QSplitter::handle:hover { background: $accent; }
-QSplitter::handle:horizontal { width: 3px; }
-QSplitter::handle:vertical { height: 3px; }
+QSplitter::handle:hover { background: $border_hover; }
+QSplitter::handle:horizontal { width: 1px; }
+QSplitter::handle:vertical { height: 1px; }
 
 /* -- scrollbars -------------------------------------------------------- */
 QScrollBar:vertical { background: $scroll_track; width: 11px; margin: 0; border: 0; }
@@ -366,7 +646,7 @@ QProgressBar {
 QProgressBar::chunk { background: $accent; border-radius: 5px; }
 
 /* -- tabs -------------------------------------------------------------- */
-QTabWidget::pane { border: 1px solid $border_default; border-radius: 7px;
+QTabWidget::pane { border: 1px solid $border_default; border-radius: 6px;
                    background: $bg_surface; }
 QTabBar::tab { background: $tab_inactive; color: $text_secondary;
                padding: 5px 14px; margin-right: 2px;
@@ -383,7 +663,7 @@ QToolTip {
     padding: 4px 6px;
 }
 
-/* -- Studio 專用 object names ------------------------------------------ */
+/* -- Studio-specific object names -------------------------------------- */
 QLabel#paramTitle { color: $text_primary; font-size: 14px; font-weight: 700; }
 QLabel#paramStepHelp { color: $text_secondary; font-size: 11px; }
 QLabel#paramLabel { color: $text_primary; font-weight: 600; }
@@ -402,10 +682,15 @@ def build_stylesheet() -> str:
     return _QSS.substitute(TOKENS)
 
 
-def apply_theme(app) -> None:
-    """把 GLAS 暖色主題（palette + stylesheet）套到 QApplication 上。"""
+def apply_theme(app, theme: str = None) -> str:
+    """把主題（palette + stylesheet）套到 QApplication 上，回傳套用的主題名。
+
+    ``theme=None`` 沿用目前的（預設 light）。傳 ``"dark"`` 就整個介面轉暗 ——
+    因為所有顏色都走 ``TOKENS``，換膚不需要動任何 widget。
+    """
     from PySide6.QtGui import QColor, QFont, QPalette
 
+    name = set_theme(theme if theme is not None else current_theme())
     app.setStyle("Fusion")  # 跨平台一致的 QSS 底座
 
     pal = app.palette()
@@ -427,3 +712,4 @@ def apply_theme(app) -> None:
     app.setFont(font)
 
     app.setStyleSheet(build_stylesheet())
+    return name

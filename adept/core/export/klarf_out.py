@@ -178,7 +178,8 @@ def _as_int(v: Any, default: int) -> int:
 
 
 def _cols_hint(doc: KlarfDoc) -> str:
-    return "、".join(doc.defect_columns) if doc.defect_columns else "（讀不到欄位定義）"
+    return (", ".join(doc.defect_columns) if doc.defect_columns
+            else "(column definitions unreadable)")
 
 
 def _require_col(doc: KlarfDoc, name: str, what: str) -> int:
@@ -186,10 +187,11 @@ def _require_col(doc: KlarfDoc, name: str, what: str) -> int:
     j = doc.col_index(name)
     if j < 0:
         raise ExportError(
-            "這份 KLARF 沒有「{name}」欄位，無法{what}。\n"
-            "這個檔案的 defect 欄位只有：{cols}。\n"
-            "請改指定其中一個既有欄位，或改用 annotate 模式（會新增欄位，"
-            "產生一份新的 KLARF，不動原檔）。".format(
+            "This KLARF has no \"{name}\" column, so it cannot {what}.\n"
+            "The defect columns in this file are: {cols}.\n"
+            "Point at one of the existing columns instead, or switch to annotate "
+            "mode (which adds columns and writes a new KLARF, leaving the "
+            "original untouched).".format(
                 name=name, what=what, cols=_cols_hint(doc)))
     return j
 
@@ -207,12 +209,14 @@ def _pair_results(doc: KlarfDoc, results: Sequence[Dict[str, Any]]
 
     if di < 0:
         notes.append(
-            "這份 KLARF 沒有 DEFECTID 欄位，改用「第 n 筆結果對第 n 列 defect」"
-            "的順序比對；若結果的順序和 KLARF 不同，對應會錯。")
+            "This KLARF has no DEFECTID column, so results are matched to rows "
+            "by position (nth result to nth defect row). If the results are in a "
+            "different order from the KLARF, the mapping will be wrong.")
         for k in range(len(results)):
             out.append(k if k < len(doc.defects) else None)
         if len(results) > len(doc.defects):
-            notes.append("結果比 KLARF 的 defect 列多 {} 筆，多的直接忽略。".format(
+            notes.append("There are {} more results than defect rows in the "
+                         "KLARF; the extras are ignored.".format(
                 len(results) - len(doc.defects)))
         return out, notes
 
@@ -234,8 +238,9 @@ def _pair_results(doc: KlarfDoc, results: Sequence[Dict[str, Any]]
         out.append(idx)
     if missed:
         notes.append(
-            "有 {} 筆結果在這份 KLARF 裡找不到相同 DEFECTID 的 defect，已略過"
-            "（通常是結果和 KLARF 不是同一片 wafer，請確認來源）。".format(missed))
+            "{} results have no defect with a matching DEFECTID in this KLARF "
+            "and were skipped (usually the results and the KLARF are not from "
+            "the same wafer — check the source).".format(missed))
     return out, notes
 
 
@@ -268,8 +273,9 @@ def _rewrite_spec_12(text: str, cols: Sequence[str]) -> str:
     m = re.search(r"DefectRecordSpec\s+\d+\s+[^;]+;", text)
     if m is None:
         raise ExportError(
-            "找不到 DefectRecordSpec，這份 KLARF 1.2 的欄位定義讀不到，"
-            "無法安全地追加欄位。請改用 inplace 模式。")
+            "No DefectRecordSpec found, so the column definitions of this "
+            "KLARF 1.2 cannot be read and columns cannot be appended safely. "
+            "Use inplace mode instead.")
     new = "DefectRecordSpec {} {} ;".format(len(cols), " ".join(cols))
     return text[:m.start()] + new + text[m.end():]
 
@@ -279,18 +285,21 @@ def _rewrite_columns_18(text: str, entries: Sequence[str]) -> str:
     dl = re.search(r"List\s+DefectList\s*\{", text)
     if dl is None:
         raise ExportError(
-            "找不到 List DefectList，這份 KLARF 1.8 的結構不是預期的樣子，"
-            "無法安全地追加欄位。請改用 inplace 模式。")
+            "No List DefectList found — the structure of this KLARF 1.8 is not "
+            "what was expected, so columns cannot be appended safely. Use "
+            "inplace mode instead.")
     b0 = text.index("{", dl.start())
     b1 = klarf_core._find_matching_brace(text, b0)
     if b1 < 0:
-        raise ExportError("KLARF 1.8 的 DefectList 大括號沒有成對，檔案可能已損壞。")
+        raise ExportError(
+            "The braces of the KLARF 1.8 DefectList are not balanced; the file "
+            "may be corrupt.")
     block = text[b0:b1 + 1]
     cm = re.search(r"Columns\s+\d+\s*\{[^}]*\}", block)
     if cm is None:
         raise ExportError(
-            "KLARF 1.8 的 DefectList 裡找不到 Columns 定義，無法安全地追加欄位。"
-            "請改用 inplace 模式。")
+            "No Columns definition inside the KLARF 1.8 DefectList, so columns "
+            "cannot be appended safely. Use inplace mode instead.")
     lines = []
     for k in range(0, len(entries), 4):
         lines.append("  ".join(e + "," for e in entries[k:k + 4]))
@@ -335,8 +344,8 @@ def _annotate(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
     cols = list(doc.defect_columns)
     if not cols:
         raise ExportError(
-            "讀不到這份 KLARF 的 defect 欄位定義，無法追加欄位。"
-            "請先用 KLARF 健檢確認檔案結構。")
+            "The defect column definitions of this KLARF cannot be read, so no "
+            "columns can be appended. Run the KLARF health check first.")
 
     new_names = [str(score_col), str(class_col)]
     feat_cols: List[Tuple[str, str]] = []       # (欄位名, 特徵名)
@@ -345,17 +354,22 @@ def _annotate(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
         feat_cols.append((name, str(f)))
         new_names.append(name)
         if name != str(f):
-            notes.append("特徵「{}」寫成 KLARF 欄位「{}」（欄位名只能用大寫英數與底線）。"
+            notes.append("Feature \"{}\" is written as KLARF column \"{}\" "
+                         "(column names allow upper-case letters, digits and "
+                         "underscores only)."
                          .format(f, name))
 
     dup = [n for n in new_names if doc.col_index(n) >= 0]
     if dup:
         raise ExportError(
-            "這份 KLARF 已經有欄位 {}，annotate 模式不會覆蓋既有欄位。\n"
-            "請改用 inplace 模式寫進既有欄位，或用 score_col= / class_col= "
-            "換一個還沒被用掉的欄位名。".format("、".join(dup)))
+            "This KLARF already has the columns {}, and annotate mode never "
+            "overwrites existing columns.\nUse inplace mode to write into the "
+            "existing columns, or pick an unused column name with score_col= / "
+            "class_col=.".format(", ".join(dup)))
     if len(set(new_names)) != len(new_names):
-        raise ExportError("要新增的欄位名有重複：{}。".format("、".join(new_names)))
+        raise ExportError(
+            "The new column names contain duplicates: {}.".format(
+                ", ".join(new_names)))
 
     pos = _insert_pos(doc)
 
@@ -390,12 +404,13 @@ def _annotate(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
     n_unfilled = sum(1 for f in filled if not f)
     if n_unfilled:
         notes.append(
-            "有 {} 列 defect 沒有對應的 ADC 結果，{} 欄填 {}、{} 欄填 {}"
-            "（代表「未判定」）。".format(
+            "{} defect rows have no matching ADC result; column {} is filled "
+            "with {} and column {} with {} (meaning \"not judged\").".format(
                 n_unfilled, score_col, _fmt_float(missing_score, decimals),
                 class_col, int(missing_class)))
     if n_missing_feat:
-        notes.append("有 {} 個特徵值在結果裡不存在，已填 {}。".format(
+        notes.append("{} feature values were absent from the results and were "
+                     "filled with {}.".format(
             n_missing_feat, _fmt_float(missing_score, decimals)))
 
     # ---- 插欄位名 ----
@@ -411,10 +426,12 @@ def _annotate(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
     if doc._il18 is not None and doc._il18 >= pos:
         doc._il18 += len(new_names)              # 1.8 的 ImageList 欄往後移了
 
-    layout_note = ("影像欄在第 {} 欄，新欄位插在它之前，"
-                   "IMAGELIST / Images 區塊仍然是列尾。".format(pos + 1))
+    layout_note = ("The image column is column {}; new columns are inserted "
+                   "before it, so the IMAGELIST / Images block stays at the end "
+                   "of the row.".format(pos + 1))
     notes.append(layout_note if doc.image_layout() is not None
-                 else "這份 KLARF 沒有影像欄，新欄位直接接在最後。")
+                 else "This KLARF has no image column, so new columns are "
+                      "appended at the end.")
     return list(new_names), notes
 
 
@@ -426,8 +443,9 @@ def _render_new_text(doc: KlarfDoc, new_cols: Sequence[str],
         entries = list(orig_entries18)
         if len(entries) != len(doc.defect_columns) - len(new_cols):
             raise ExportError(
-                "KLARF 1.8 的 Columns 定義解出 {} 個欄位，與解析出的 {} 個對不上，"
-                "為避免寫出壞檔已中止。".format(
+                "The KLARF 1.8 Columns definition yields {} columns, which does "
+                "not match the {} that were parsed; aborted to avoid writing a "
+                "broken file.".format(
                     len(entries), len(doc.defect_columns) - len(new_cols)))
         typed = []
         for name in new_cols:
@@ -445,26 +463,33 @@ def _image_notes(doc: KlarfDoc) -> List[str]:
     """抽子集／重新編號之後，影像參照還有效嗎？—— 一律講清楚。"""
     notes: List[str] = []
     if doc.total_image_count() <= 0:
-        notes.append("這份 KLARF 沒有帶影像資訊，不需要處理影像參照。")
+        notes.append("This KLARF carries no image information, so there are "
+                     "no image references to handle.")
         return notes
     if any(doc.defect_image_filename(r) for r in doc.defects):
         notes.append(
-            "影像參照：每列 defect 自帶影像檔名，抽出子集後仍指向原本那些影像檔"
-            "（路徑相對於 KLARF 所在資料夾）—— 請把輸出的 KLARF 放在與原檔"
-            "相同的資料夾，或一併搬走影像。")
+            "Image references: each defect row carries its own image file name, "
+            "and after subsetting these still point at the original image files "
+            "(paths are relative to the folder holding the KLARF). Put the "
+            "output KLARF in the same folder as the original, or move the images "
+            "along with it.")
         return notes
     mode = doc.defect_image_map().get("mode")
     if mode == "imagelist":
         notes.append(
-            "影像參照：IMAGELIST 的 TIFF 頁碼**原樣保留**，指向原本那份多頁 TIFF。"
-            "即使 DEFECTID 重新編號，頁碼也不會跟著改 —— 重新編頁等同要重寫 TIFF，"
-            "本工具不動原始影像。輸出的 KLARF 請與原 TIFF 放在同一個資料夾。")
+            "Image references: the IMAGELIST TIFF page numbers are kept exactly "
+            "as they are and still point at the original multi-page TIFF. Even "
+            "when DEFECTID is renumbered the page numbers do not follow — "
+            "renumbering pages would mean rewriting the TIFF, and this tool never "
+            "touches the original images. Keep the output KLARF in the same "
+            "folder as the original TIFF.")
     else:
         notes.append(
-            "⚠ 影像參照：這份 KLARF 的影像是「依 defect 出現順序連續配頁」"
-            "（IMAGELIST 沒有可用的頁碼），抽出子集之後頁序一定對不上。"
-            "若要保住影像，請改用 annotate 模式（保留全部 defect），"
-            "或連同 TIFF 一起重寫（本工具不做）。")
+            "! Image references: in this KLARF the images are paged "
+            "consecutively in defect order (IMAGELIST carries no usable page "
+            "numbers), so after subsetting the page order cannot line up. To keep "
+            "the images, use annotate mode (which keeps every defect), or rewrite "
+            "the TIFF as well (this tool does not).")
     return notes
 
 
@@ -486,19 +511,20 @@ def _build_inplace(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
 
     targets: List[Tuple[str, str]] = []          # (欄位名, 來源 'bin'/'size')
     if class_col:
-        _require_col(doc, class_col, "把 bin 寫進分類欄")
+        _require_col(doc, class_col, "write the bin into the class column")
         targets.append((str(class_col), "bin"))
     if bin_col:
-        _require_col(doc, bin_col, "把 bin 寫進 bin 欄")
+        _require_col(doc, bin_col, "write the bin into the bin column")
         targets.append((str(bin_col), "bin"))
     if size_col:
-        _require_col(doc, size_col, "把尺寸特徵寫進尺寸欄")
+        _require_col(doc, size_col, "write the size feature into the size column")
         targets.append((str(size_col), "size"))
 
     if not targets:
         plan.notes.append(
-            "沒有指定任何要寫入的欄位（class_col / bin_col / size_col 都是空的），"
-            "輸出檔會與原檔逐位元組相同。")
+            "No target column was given (class_col / bin_col / size_col are all "
+            "empty), so the output file will be byte-for-byte identical to the "
+            "original.")
 
     bmap = {str(k): v for k, v in (bin_map or {}).items()}
     changed_rows = set()
@@ -537,14 +563,19 @@ def _build_inplace(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
 
     if n_short:
         plan.notes.append(
-            "有 {} 個格子所在的 defect 列 token 數比欄位定義少，沒有這一格可以寫，"
-            "已略過（請先用 KLARF 健檢修補欄數）。".format(n_short))
+            "{} cells sit in defect rows with fewer tokens than the column "
+            "definition, so there is no cell to write into and they were skipped "
+            "(run the KLARF health check to repair the column count "
+            "first).".format(n_short))
     if n_skipped:
-        plan.notes.append("有 {} 顆 defect 執行失敗（ok=False），沒有寫回。".format(n_skipped))
+        plan.notes.append("{} defects failed to run (ok=False) and were not "
+                          "written back.".format(n_skipped))
     if n_no_bin:
-        plan.notes.append("有 {} 個格子因為結果沒有 bin 值而略過。".format(n_no_bin))
+        plan.notes.append("{} cells were skipped because the result has no bin "
+                          "value.".format(n_no_bin))
     if n_no_feat:
-        plan.notes.append("有 {} 個格子因為結果沒有特徵「{}」而略過。".format(
+        plan.notes.append("{} cells were skipped because the result has no "
+                          "feature \"{}\".".format(
             n_no_feat, size_feature))
 
     plan.columns_touched = [n for n, _s in targets]
@@ -565,8 +596,9 @@ def _build_annotate(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
     entries18 = _column_entries_18(doc) if doc._is18 else []
     if doc._is18 and not entries18:
         raise ExportError(
-            "讀不到這份 KLARF 1.8 的 Columns 欄位定義，無法安全地追加欄位"
-            "（怕寫出下游吃不到的壞檔）。請改用 inplace 模式。")
+            "The Columns definition of this KLARF 1.8 cannot be read, so "
+            "columns cannot be appended safely (the file could come out unusable "
+            "downstream). Use inplace mode instead.")
 
     added, anotes = _annotate(doc, results, pairs, **opts)
     plan.columns_added = added
@@ -590,8 +622,9 @@ def _build_topn(doc: KlarfDoc, results: Sequence[Dict[str, Any]], *,
     n = _as_int(n, 0)
     if n <= 0 and min_score is None:
         raise ExportError(
-            "topn 模式要指定「取幾顆」或「分數門檻」：n=前 N 顆（依分數由高到低），"
-            "或 min_score=只留分數大於等於這個值的 defect。兩個都沒給就不知道要留哪些。")
+            "topn mode needs either a count or a score threshold: n = the top N "
+            "by descending score, or min_score = keep defects scoring at least "
+            "this value. With neither, there is no way to tell what to keep.")
 
     # 影像參照的說明要在抽子集「之前」判斷（子集本身可能就解不出佈局）
     plan.notes.extend(_image_notes(doc))
@@ -616,7 +649,8 @@ def _build_topn(doc: KlarfDoc, results: Sequence[Dict[str, Any]], *,
         cands.append((idx, sf))
     if n_no_score:
         plan.notes.append(
-            "有 {} 顆 defect 沒有分數（跑失敗或分數是 nan），不會出現在輸出檔裡。"
+            "{} defects have no score (the run failed, or the score is nan) and "
+            "will not appear in the output file."
             .format(n_no_score))
 
     order = sorted(range(len(cands)), key=lambda k: (-cands[k][1], cands[k][0]))
@@ -624,13 +658,15 @@ def _build_topn(doc: KlarfDoc, results: Sequence[Dict[str, Any]], *,
     if n > 0:
         if min_score is not None:
             plan.notes.append(
-                "同時給了 n={} 與 min_score={}，以 n 為準（取分數最高的前 {} 顆）。"
+                "Both n={} and min_score={} were given; n wins (the top {} by "
+                "score)."
                 .format(n, min_score, n))
         picked = picked[:n]
     else:
         thr = float(min_score)
         picked = [p for p in picked if p[1] >= thr]
-        plan.notes.append("取分數 >= {} 的 defect，共 {} 顆。".format(thr, len(picked)))
+        plan.notes.append("Keeping defects scoring >= {}: {} in total.".format(
+            thr, len(picked)))
 
     keep_rows = [idx for idx, _s in picked]
     n_before = len(doc.defects)
@@ -638,34 +674,41 @@ def _build_topn(doc: KlarfDoc, results: Sequence[Dict[str, Any]], *,
     doc._defect_dirty = True
     doc.summary_stale = True
     plan.notes.append(
-        "原本 {} 顆 defect，輸出 {} 顆（依分數由高到低排列）。".format(
+        "{} defects originally, {} written out (ordered by descending "
+        "score).".format(
             n_before, len(doc.defects)))
     plan.notes.append(
-        "SummaryList 維持原檔數值（它是全片的統計，重算會洗掉真數字）；"
-        "健檢會提示「summary 與 DefectList 數量不符」，這在只留子集的檔案是正常的。")
+        "SummaryList keeps the original values (it is a whole-wafer statistic, "
+        "and recomputing it would wipe out the real numbers); "
+        "the health check will flag \"summary does not match DefectList count\", "
+        "which is normal for a file that only keeps a subset.")
 
     n_changed = 0
     if renumber:
         di = doc.col_index("DEFECTID")
         if di < 0:
-            plan.notes.append("沒有 DEFECTID 欄位，跳過重新編號。")
+            plan.notes.append(
+                "No DEFECTID column, so renumbering was skipped.")
         else:
             for k, row in enumerate(doc.defects, 1):
                 if di < len(row):
                     row[di] = str(k)
             n_changed = len(doc.defects)
             plan.columns_touched.append(doc.defect_columns[di])
-            plan.notes.append("DEFECTID 已重新編號為 1..{}。".format(len(doc.defects)))
+            plan.notes.append("DEFECTID renumbered to 1..{}.".format(
+                len(doc.defects)))
     else:
-        plan.notes.append("DEFECTID 沿用原檔數值（沒有重新編號）。")
+        plan.notes.append(
+            "DEFECTID keeps the original values (no renumbering).")
 
     pos = _insert_pos(doc)
     entries18 = _column_entries_18(doc) if doc._is18 else []
     if include_annotations:
         if doc._is18 and not entries18:
             raise ExportError(
-                "讀不到這份 KLARF 1.8 的 Columns 欄位定義，無法追加註記欄。"
-                "請用 include_annotations=False 只做篩選。")
+                "The Columns definition of this KLARF 1.8 cannot be read, so "
+                "annotation columns cannot be appended. Use "
+                "include_annotations=False to filter only.")
         # 列索引已經因為抽子集而改變：舊列索引 → 新列索引
         new_of_old = {old: new for new, old in enumerate(keep_rows)}
         sub_pairs = [None if p is None else new_of_old.get(p) for p in pairs]
@@ -695,18 +738,21 @@ def _build(doc: KlarfDoc, results: Sequence[Dict[str, Any]], mode: str,
     mode = str(mode).strip().lower()
     if mode not in _BUILDERS:
         raise ExportError(
-            "不認得的寫回模式「{}」。可用的有：{}"
-            "（inplace=只改既有欄位、annotate=新增欄位、topn=只留高分的）。"
-            .format(mode, "、".join(MODES)))
+            "Unrecognised write-back mode \"{}\". Available: {} "
+            "(inplace = edit existing columns only, annotate = add columns, "
+            "topn = keep the highest scoring only)."
+            .format(mode, ", ".join(MODES)))
     if doc is None:
-        raise ExportError("沒有給 KLARF，請先載入一份 KLARF 再寫回。")
+        raise ExportError(
+            "No KLARF was given — load a KLARF before writing back.")
     work = _clone(doc)
     try:
         return _BUILDERS[mode](work, list(results or []), **opts)
     except TypeError as e:                       # 參數打錯 → 講清楚哪個模式吃哪些參數
         if "unexpected keyword argument" in str(e):
             raise ExportError(
-                "「{}」模式收到看不懂的選項：{}。".format(mode, e)) from None
+                "Mode \"{}\" received an option it does not understand: "
+                "{}.".format(mode, e)) from None
         raise
 
 

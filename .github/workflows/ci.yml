@@ -30,9 +30,33 @@ jobs:
                                   libxcb-shape0 libxcb-xinerama0
 
       - name: Install Python deps
+        # 這一行是 requirements.txt 的鏡像，只換一個東西：opencv-python ->
+        # opencv-python-headless（runner 上沒有顯示裝置）。**加相依套件時兩邊都要改** ——
+        # 下面那一步會擋住漏掉的情況。
         run: |
           python -m pip install --upgrade pip
-          pip install numpy opencv-python-headless tifffile PySide6 pytest
+          pip install numpy opencv-python-headless tifffile PySide6 openpyxl pytest
+
+      - name: Check the install list still covers requirements.txt
+        # openpyxl 曾經漏在這裡：requirements.txt 有、CI 沒有，於是 Excel 匯出
+        # 的測試在 CI 上失敗而本機全綠。與其靠人記得，不如讓 CI 自己發現。
+        run: |
+          python - <<'EOF'
+          import re, sys, importlib.util
+          names = []
+          for line in open("requirements.txt", encoding="utf-8"):
+              line = line.strip()
+              if line and not line.startswith("#"):
+                  names.append(re.split(r"[<>=!~\[]", line, 1)[0].strip())
+          # 匯入名稱與套件名不一樣的例外
+          IMPORT_NAME = {"opencv-python": "cv2", "PySide6": "PySide6"}
+          missing = [n for n in names
+                     if importlib.util.find_spec(IMPORT_NAME.get(n, n)) is None]
+          if missing:
+              sys.exit("requirements.txt lists %s but CI did not install them; "
+                       "add them to the 'Install Python deps' step." % missing)
+          print("all of requirements.txt is importable:", names)
+          EOF
 
       - name: Run tests
         env:
