@@ -141,6 +141,35 @@ Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/hxlub0905-cmyk/ADEPT/m
 - 三台主機都被擋的話，剩下的路是**在有網路的機器上取得，用你搬 `wheels\` 的
   同一條路搬過來**（見 [`OFFLINE-INSTALL.md`](OFFLINE-INSTALL.md)）。
 
+### 連 .zip 這個類別都被擋 → 單檔純文字包
+
+**實測遇到過**：不只是 `codeload.github.com`，**從任何來源下載 `.zip` 都被擋**。
+這種情況下「請 IT 放行 codeload」也沒有用（拿到的還是 zip），而 `get_code.py` /
+`.ps1` 也要 proxy 通得過才行。能過的只剩「一個純文字檔」。
+
+`tools/make_text_bundle.py` 在**有網路的機器上**把整個 repo 打成一個
+`ADEPT_bundle.py` —— **沒有任何壓縮格式、沒有 base64**，每個檔案的內容原封不動
+一行一行躺在裡面（每行前面加一個 `#`，所以整個檔案仍然是合法的 Python）。
+你可以用記事本打開它往下捲，看得到每一個檔案。
+
+```
+python tools/make_text_bundle.py        # 產 ADEPT_bundle.py（約 2.4 MB 純文字）
+```
+
+把那個檔案帶到公司機（下載、郵件、隨身碟 —— 它就是一個 .py 檔），然後：
+
+```
+python ADEPT_bundle.py                  # 解到 .\ADEPT\
+python ADEPT_bundle.py --list           # 先看裡面有什麼，不寫任何檔案
+```
+
+每個檔案都帶 **git blob SHA-1**，解開時逐檔驗過才落地。傳輸途中被動到（編輯器
+另存、郵件過濾器改寫）會**當場講出來**，而不是給你一份安靜壞掉的程式碼。
+
+格式刻意用**行數**而不是位元組數：這個檔案很可能在某個環節被把 LF 換成 CRLF，
+而用位元組數的話那一換就會讓**第一個檔案之後的全部檔案**對不起來。
+（有測試把「換過行尾還解得開」鎖住。）
+
 ### DLP 掃內容
 
 如果只有這個 repo 的 zip 被擋，那要看的是**裡面有沒有公司的識別碼**。

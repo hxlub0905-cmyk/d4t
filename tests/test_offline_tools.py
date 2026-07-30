@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import os
+import pathlib
 import subprocess
 import sys
 
@@ -25,10 +26,11 @@ INSTALL = os.path.join(TOOLS, "install_offline.py")
 GETCODE = os.path.join(TOOLS, "get_code.py")
 GETCODE_PS = os.path.join(TOOLS, "get_code.ps1")
 FILELIST = os.path.join(TOOLS, "make_filelist.py")
+BUNDLE = os.path.join(TOOLS, "make_text_bundle.py")
 #: 「在受限機器上、套件裝好之前就要能跑」的那幾支 —— 所以 stdlib-only + 3.9。
 #: get_code.py 是第四支（F7-18 之後補的）：它比其他三支更早跑，
 #: 因為它的工作是把程式碼弄上那台機器。
-ALL_TOOLS = (FETCH, INSTALL, DOCTOR, GETCODE, FILELIST)
+ALL_TOOLS = (FETCH, INSTALL, DOCTOR, GETCODE, FILELIST, BUNDLE)
 
 if TOOLS not in sys.path:
     sys.path.insert(0, TOOLS)
@@ -38,6 +40,7 @@ import fetch_wheels                    # noqa: E402
 import install_offline                 # noqa: E402
 import get_code                       # noqa: E402
 import make_filelist                  # noqa: E402
+import make_text_bundle               # noqa: E402
 
 REQUIRED_DEPS = ("numpy", "cv2", "tifffile", "PySide6", "openpyxl")
 
@@ -863,3 +866,108 @@ def test_an_absolute_dest_is_not_glued_onto_the_current_directory():
         "$d" % abs_path)
     assert out.strip().rstrip("\\/").endswith("tmp_abs_probe"), out
     assert REPO not in out, "絕對路徑又被接到目前目錄後面了"
+
+
+# ---------------------------------------------------------------- 單檔純文字包
+
+@needs_git
+def test_the_text_bundle_round_trips_byte_for_byte(tmp_path):
+    """整個 repo 打成一個純文字檔、解開、逐位元組比對。
+
+    這條測試存在的理由是它抓過的兩個 bug（見下面兩支）—— 而那兩個 bug 都是
+    「產出來的東西看起來很正常，直到收到的人去跑它」那一類。
+    """
+    out = tmp_path / "ADEPT_bundle.py"
+    out.write_text(make_text_bundle.build(out.name, REPO), encoding="utf-8",
+                   newline="\n")
+    dest = tmp_path / "un"
+    r = subprocess.run([sys.executable, str(out), "--dest", str(dest)],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       timeout=300)
+    assert r.returncode == 0, r.stdout.decode("utf-8", "replace")
+
+    for rel in make_filelist.tracked_files(REPO) + ["tools/FILELIST.txt"]:
+        src = pathlib.Path(REPO) / rel
+        got = dest / rel
+        assert got.is_file(), "%s 沒有被解出來" % rel
+        assert got.read_bytes() == src.read_bytes(), rel
+
+
+@needs_git
+def test_the_bundle_is_still_valid_python(tmp_path):
+    """第一個 bug：資料區是裸的文字，於是 **Python 在跑之前先編譯整個檔案**，
+    去解析某個 .md 裡的全形括號然後 SyntaxError。資料區的每一行都必須是註解。"""
+    text = make_text_bundle.build("b.py", REPO)
+    ast.parse(text, filename="bundle")               # 這一行就是那個 bug 的守門
+
+    # 那個字串在產出的檔案裡出現**三次**：解包程式裡的賦值、真正的分隔行、
+    # 以及資料區裡（`make_text_bundle.py` 自己也在 repo 裡）。所以 split / rsplit
+    # 都不對，要找**整行剛好等於**它的那一行 —— 解包程式也是這樣做的，
+    # 而資料區每一行都被加了 '#'，所以資料裡的那一行永遠不會剛好相等。
+    lines = text.splitlines()
+    body = lines[lines.index(make_text_bundle.SENTINEL) + 1:]
+    assert body, "資料區是空的"
+    offenders = [ln for ln in body if ln and not ln.startswith("#")]
+    assert not offenders, offenders[:3]
+
+
+@needs_git
+def test_the_bundle_survives_having_its_line_endings_changed(tmp_path):
+    """第二個 bug 的反面。瀏覽器下載、記事本另存、郵件過濾器 —— 任何一步都可能
+    把 LF 換成 CRLF。格式用「行數」而不是「位元組數」就是為了對它免疫；
+    真的用位元組數的話，錯誤會出現在**第一個檔案之後的全部檔案**上。"""
+    src = make_text_bundle.build("b.py", REPO).encode("utf-8")
+    crlf = tmp_path / "crlf.py"
+    crlf.write_bytes(src.replace(b"\n", b"\r\n"))
+    dest = tmp_path / "un_crlf"
+    r = subprocess.run([sys.executable, str(crlf), "--dest", str(dest)],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       timeout=300)
+    assert r.returncode == 0, r.stdout.decode("utf-8", "replace")
+    one = pathlib.Path(REPO) / "tools" / "get_code.py"
+    assert (dest / "tools" / "get_code.py").read_bytes() == one.read_bytes()
+
+
+def test_a_tampered_bundle_refuses_to_land_anything(tmp_path):
+    """SHA 對不上的時候不可以寫出半份程式碼 —— 「看起來抓到了但其實是壞的」
+    是這一整輪反覆在防的東西。"""
+    body = b"print('hi')\n"
+    sha = make_text_bundle.blob_sha(body)
+    header = make_text_bundle.EXTRACTOR % {
+        "name": "b.py", "sentinel": make_text_bundle.SENTINEL}
+    good = "\n".join([header, make_text_bundle.SENTINEL,
+                      "#F %s 2 adept/x.py" % sha, "#print('hi')", "#"]) + "\n"
+    bad = good.replace("#print('hi')", "#print('tampered')")
+
+    for text, expect, should_exist in ((good, 0, True), (bad, 1, False)):
+        path = tmp_path / ("b_%d.py" % expect)
+        path.write_text(text, encoding="utf-8", newline="\n")
+        dest = tmp_path / ("d_%d" % expect)
+        r = subprocess.run([sys.executable, str(path), "--dest", str(dest)],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           timeout=120)
+        assert r.returncode == expect, r.stdout.decode("utf-8", "replace")
+        assert (dest / "adept" / "x.py").exists() is should_exist
+        if expect:
+            assert "SHA" in r.stdout.decode("utf-8", "replace")
+
+
+def test_the_bundle_refuses_to_pack_anything_it_cannot_round_trip(tmp_path,
+                                                                 monkeypatch):
+    """CRLF 或非 UTF-8 的檔案會讓「以行數為單位」的格式失效。
+    **拒絕產出**比產出一個解不開的包好 —— 後者要等收到的人才會發現。"""
+    (tmp_path / "a.txt").write_bytes(b"line\r\nline\r\n")
+    monkeypatch.setattr(make_text_bundle, "repo_root", lambda: str(tmp_path))
+    monkeypatch.setattr(make_text_bundle.subprocess, "run",
+                        lambda *_a, **_k: type("R", (), {"stdout": b"a.txt\n"})())
+    with pytest.raises(SystemExit) as e:
+        make_text_bundle.collect(str(tmp_path))
+    assert "CR" in str(e.value)
+
+
+def test_the_bundle_is_offered_in_the_docs():
+    with open(os.path.join(REPO, "docs", "NO-GIT-SETUP.md"), "r",
+              encoding="utf-8") as f:
+        doc = f.read()
+    assert "make_text_bundle.py" in doc
+    assert ".zip" in doc
