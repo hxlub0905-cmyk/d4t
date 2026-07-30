@@ -36,7 +36,7 @@ def hand_results():
             "error": None,
             "score": float(i),
             "bin": _BINS[i],
-            "features": {"blob_snr": float(i), "cd_x_nm": float(i) * 2.0},
+            "features": {"blob_snr": float(i), "cd_x_px": float(i) * 2.0},
         })
     return out
 
@@ -64,14 +64,14 @@ def test_summarize_basic_counts():
 
 def test_summarize_feature_stats():
     s = report.summarize(hand_results())
-    assert sorted(s["features"]) == ["blob_snr", "cd_x_nm"]
+    assert sorted(s["features"]) == ["blob_snr", "cd_x_px"]
     st = s["features"]["blob_snr"]
     assert st["n"] == 10
     assert st["min"] == 1.0
     assert st["median"] == 5.5
     assert st["max"] == 10.0
     assert st["std"] == pytest.approx(2.8722813, abs=1e-6)   # 母體標準差
-    assert s["features"]["cd_x_nm"]["max"] == 20.0
+    assert s["features"]["cd_x_px"]["max"] == 20.0
 
 
 def test_summarize_handles_failures_and_nan():
@@ -155,7 +155,7 @@ def test_write_csv_header_rows_and_bom(tmp_path):
 
     with open(out, "r", encoding="utf-8-sig", newline="") as f:
         rows = list(csv.reader(f))
-    assert rows[0] == list(BASE_COLUMNS) + ["blob_snr", "cd_x_nm"]
+    assert rows[0] == list(BASE_COLUMNS) + ["blob_snr", "cd_x_px"]
     assert len(rows) == 11
     assert rows[1] == ["1", "1", "", "1.0", "1", "1.0", "2.0"]
     assert rows[10][0] == "10"
@@ -223,7 +223,7 @@ def test_write_excel_has_three_sheets(tmp_path):
     # --- 明細：標題 + 每顆一列、凍結標題、自動篩選 ---
     ws = wb["Details"]
     header = [c.value for c in ws[1]]
-    assert header == list(BASE_COLUMNS) + ["blob_snr", "cd_x_nm"]
+    assert header == list(BASE_COLUMNS) + ["blob_snr", "cd_x_px"]
     assert ws.max_row == 11
     assert ws.freeze_panes == "A2"
     assert ws.auto_filter.ref is not None
@@ -233,7 +233,7 @@ def test_write_excel_has_three_sheets(tmp_path):
     # --- 特徵統計：每個特徵一列 ---
     ws = wb["Feature stats"]
     assert [c.value for c in ws[1]] == ["Feature", "Count", "Minimum", "Median", "Maximum", "Std dev"]
-    assert [ws.cell(row=r, column=1).value for r in (2, 3)] == ["blob_snr", "cd_x_nm"]
+    assert [ws.cell(row=r, column=1).value for r in (2, 3)] == ["blob_snr", "cd_x_px"]
     assert ws.cell(row=2, column=3).value == 1.0
     assert ws.cell(row=2, column=5).value == 10.0
 

@@ -256,7 +256,9 @@ def _cmd_export(args: argparse.Namespace) -> int:
         opts = {}
         if args.mode == "inplace":
             opts = {"class_col": args.class_col, "bin_col": args.bin_col,
-                    "size_col": args.size_col}
+                    "size_col": args.size_col,
+                    "size_feature": args.size_feature,
+                    "size_scale": args.size_scale}
             opts = {k: v for k, v in opts.items() if v}
         elif args.mode == "topn":
             opts = {"n": args.top_n, "min_score": args.min_score}
@@ -338,6 +340,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_ex.add_argument("--class-col", default=None, help="inplace：bin 寫進哪個分類欄（例 CLASSNUMBER）")
     p_ex.add_argument("--bin-col", default=None, help="inplace：bin 寫進哪個 bin 欄（例 ROUGHBINNUMBER）")
     p_ex.add_argument("--size-col", default=None, help="inplace：CD 寫進哪個尺寸欄（例 DSIZE）")
+    p_ex.add_argument("--size-feature", default=None,
+                      help="inplace：尺寸欄寫哪個特徵（預設 cd_x_px）")
+    p_ex.add_argument("--size-scale", type=float, default=None,
+                      help="inplace：尺寸值寫進去之前乘上的係數。量測全是 pixel，"
+                           "要寫 nm 就填 nm/px（預設 1 = 原樣寫 pixel）")
     p_ex.add_argument("--top-n", type=int, default=0, help="topn：取前幾名（0=改用 --min-score）")
     p_ex.add_argument("--min-score", type=float, default=0.0, help="topn：分數門檻")
     p_ex.add_argument("--csv", default=None, help="輸出 feature vector CSV")

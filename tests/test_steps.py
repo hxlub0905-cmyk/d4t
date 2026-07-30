@@ -317,20 +317,26 @@ def _cd_ctx(nm_per_px=None):
     return Context(images={"diff": diff}, meta=meta)
 
 
-def test_cd_measure_px_and_nm_paths():
-    ctx = _cd_ctx()                                     # 無 nm_per_px
+def test_cd_measure_reports_pixels_only():
+    """量測一律 pixel —— nm 換算是輸出那一刻由使用者填的（2026-07-30）。
+
+    以前這張卡在沒有 ``nm_per_px`` 時吐三個 0（``cd_x_nm`` / ``cd_y_nm`` /
+    ``area_nm2``）並記一條警告，而 ``nm_per_px`` **從來沒有來源**，所以那三個
+    0 是每一顆的常態 —— 它們進得了分數表達式、也寫得進 DSIZE 欄。這條測試鎖
+    住那三個名字不再出現，以及 pixel 面積有被吐出來（以前只在算 nm 時用到）。
+    """
+    ctx = _cd_ctx()
     run_step("cd_measure", ctx)
     assert ctx.features["cd_x_px"] == 10.0
     assert ctx.features["cd_y_px"] == 20.0
-    assert ctx.features["cd_x_nm"] == 0.0
-    assert ctx.features["area_nm2"] == 0.0
-    assert any("nm_per_px" in w for w in ctx.meta["warnings"])
+    assert ctx.features["area_px"] == 200.0            # blob 的真實像素面積
+    assert not [k for k in ctx.features if k.endswith(("_nm", "_nm2"))]
+    assert not [w for w in ctx.meta.get("warnings", []) if "nm_per_px" in w]
 
+    # 有 nm_per_px 也一樣：這張卡不換算，那件事已經不在它的職責裡。
     ctx2 = _cd_ctx(nm_per_px=2.5)
     run_step("cd_measure", ctx2)
-    assert ctx2.features["cd_x_nm"] == pytest.approx(25.0)
-    assert ctx2.features["cd_y_nm"] == pytest.approx(50.0)
-    assert ctx2.features["area_nm2"] == pytest.approx(200 * 2.5 * 2.5)
+    assert sorted(ctx2.features) == ["area_px", "cd_x_px", "cd_y_px"]
 
 
 def test_cd_measure_can_target_a_named_region():
@@ -361,7 +367,7 @@ def test_cd_measure_subpixel_refine_and_fallbacks():
     ctx3 = Context(images={"diff": np.zeros((32, 32), np.float32)})
     run_step("cd_measure", ctx3)
     assert all(ctx3.features[f] == 0.0 for f in
-               ("cd_x_px", "cd_y_px", "cd_x_nm", "cd_y_nm", "area_nm2"))
+               ("cd_x_px", "cd_y_px", "area_px"))
     assert ctx3.meta.get("warnings")
 
 

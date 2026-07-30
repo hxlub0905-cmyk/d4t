@@ -357,16 +357,22 @@ def test_the_page_to_stream_mapping_is_on_screen(window, tmp_path):
     assert all(d["mean"] is not None for d in pages)
 
 
-def test_it_says_the_pixel_size_is_unknown(window, tmp_path):
-    """nm/px 找不到來源是待驗證假設第 2 條，而它的後果（CD 的 nm 值是 0）
-    現在只寫在文件裡。"""
+def test_it_says_measurements_are_in_pixels(window, tmp_path):
+    """nm/px 沒有來源，而 2026-07-30 的決定是**不去猜**：量測全程 pixel，
+    換算搬到 Export（使用者自己填 nm/px）。
+
+    所以這一行要講的不是「有個值不見了」，而是**單位是什麼、要換算去哪裡填**。
+    以前它說「CD in nm will read 0」—— 那個 0 已經不存在了。
+    """
     from make_sample import generate
 
     out = generate(str(tmp_path / "lotG"), n=2, seed=31)
     window.load_dataset_path(out["klarf"], sync=True)
     window.select_node(window.model.node_order[0])
     window.refresh_preview(sync=True)
-    assert "nm/px unknown" in window.inspector().summary()
+    summary = window.inspector().summary()
+    assert "pixels" in summary and "export" in summary
+    assert "will read 0" not in summary
 
 
 # --------------------------------------------------------------------------- #

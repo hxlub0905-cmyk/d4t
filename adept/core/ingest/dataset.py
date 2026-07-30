@@ -21,12 +21,14 @@
      → kind="rsem"，images={"single": ...}，路徑相對 KLARF 所在資料夾解析。
   3. 兩者皆無 → 仍回 kind="rsem"（僅 defect 中繼資料，無影像）並加 warning。
 
-★ EBI patch 的 channel 指派假設（重要）★
+★ EBI patch 的 channel 指派（已確認 2026-07-30）★
   每個 defect 的 TIFF pages 依「出現順序」對應 channel_order：
   第 1 頁 = channel_order[0]（預設 "test"），第 2 頁 = channel_order[1]
   （預設 "ref"），多出來的頁依序命名 "img3", "img4", …。
-  這是暫定慣例——真實 TiffSpec 欄位語意（哪頁是 test / ref）待進廠
-  以實際檔案驗證後再修正。
+
+  **第 1 頁 = test、第 2 頁 = ref 已由使用者確認**，不再是待驗證的假設。
+  `channel_order` 參數保留：它擋的是另一件事 —— 一顆 defect 出三頁以上、
+  或某個站點的機台設定不同 —— 那時候不必改程式，換一個順序就好。
 """
 from __future__ import annotations
 
@@ -60,7 +62,9 @@ class DefectItem:
     xrel_nm: Optional[float]
     yrel_nm: Optional[float]
     images: Dict[str, ImageRef] = field(default_factory=dict)
-    nm_per_px: Optional[float] = None       # 目前無來源可推得；留待 in-fab 校正
+    # 目前無來源可推得。**這不擋任何事**：pipeline 全程用 pixel，換算是輸出
+    # 那一刻由使用者填的（見 steps/cd.py 與 export/klarf_out.py 的 size_scale）。
+    nm_per_px: Optional[float] = None
     klarf_row: int = -1                     # doc.defects 的列索引；folder 模式為 -1
     tags: Dict[str, str] = field(default_factory=dict)
 
@@ -151,7 +155,8 @@ def load_dataset(klarf_path, tiff_path=None,
 
     channel_order：EBI patch 模式下，每個 defect 的 TIFF 頁依出現順序
     指派到這些 channel（預設第 1 頁 = "test"、第 2 頁 = "ref"；多出的頁
-    命名 "img3", "img4", …）。此為暫定假設，真實 TiffSpec 語意待 in-fab 驗證。
+    命名 "img3", "img4", …）。**預設順序已確認**（見模組 docstring）；
+    這個參數是給「一顆多於兩頁」或站點慣例不同時換順序用的。
     """
     klarf_path = str(klarf_path)
     doc = klarf_core.load(klarf_path)

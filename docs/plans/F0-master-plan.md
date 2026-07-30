@@ -160,9 +160,9 @@ class Step(ABC):
 
 GLAS `gds_boolean` 的 tokenizer → AST → evaluator 移植改造：
 
-- 變數 = `features` 的 key（`snr_max`、`cd_x_nm`、`glv_mean_roi1`…），UI 下拉列出目前 pipeline 會產出的全部 key
+- 變數 = `features` 的 key（`snr_max`、`cd_x_px`、`glv_mean_roi1`…），UI 下拉列出目前 pipeline 會產出的全部 key
 - 運算：`+ - * / ** sqrt log abs min max`、比較與布林 `> < >= <= == and or not`
-- 兩用：`score = <expr>`（連續分數 → 直方圖/排序）與 bin 條件（`score >= 3 and cd_x_nm > 25`）
+- 兩用：`score = <expr>`（連續分數 → 直方圖/排序）與 bin 條件（`score >= 3 and cd_x_px > 25`）
 - v1 鎖定此運算元集，不做迴圈/自訂函數 —— 更複雜的邏輯就寫新 Step（本來就是擴充點）
 
 ---
@@ -219,7 +219,7 @@ Pipeline 在 UI 上呈現為**三段式**，對應「defect 分數由影像與�
 | **Threshold → Bin** | 門檻/條件 → bin/class | 新 |
 | **寫回 / 輸出** | KLARF 三模式 + 報表（§8） | KLIP + MMH exporters |
 
-特徵命名慣例：`<卡片>_<量>[_<roi>]`（`snr_max`、`cd_x_nm`、`glv_mean_roi1`）。
+特徵命名慣例：`<卡片>_<量>[_<roi>]`（`snr_max`、`cd_x_px`、`glv_mean_roi1`）。
 **v1 移除（列 backlog）**：PCA Ref、Region Stats/FFT。
 v2 擴充卡備選：上述兩張 + ML Classify、BSE/SE 多通道融合、雙 reference AND。
 

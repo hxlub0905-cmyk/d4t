@@ -716,14 +716,14 @@ def _fmt(v: float) -> str:
 class InputInspector(Inspector):
     """Load images：**哪一頁變成哪一條流**，以及每一頁載進來長什麼樣。
 
-    為什麼這一張最先要做
-    --------------------
-    「每顆 defect 的第一張是 test、第二張是 ref」是這個專案**第一條待廠內驗證
-    的假設**（CLAUDE.md §8）。它錯了的話，diff 會整個反號、所有分數都是錯的 ——
-    而畫面上完全看不出來，因為兩張圖本來就長得很像。
+    頁序已經確認（2026-07-30）
+    --------------------------
+    「每顆 defect 的第一張是 test、第二張是 ref」曾經是這個專案第一條待廠內
+    驗證的假設；使用者已經確認就是這個順序，所以它現在是**約定**，不是猜測。
 
-    目前唯一的驗證方式是另外跑 ``fab_probe/probe_tiff.py``。把配對關係跟每一頁
-    的平均灰階直接攤在這裡，使用者載入第一份真資料的當下就會看到不對勁。
+    面板留著，因為約定成立不代表每一份檔案都照著走 —— 三頁以上、單頁、或
+    ``channel_order`` 被改過的資料集，配對關係仍然只有這裡看得到。而它要回答的
+    問題也換了一個：**這兩張圖比得起來嗎**（整體亮度差很多就得先正規化）。
 
     資料來自 Load 卡放進 ``ctx.meta['input']`` 的那一份 —— 也就是引擎**實際載
     進來的東西**，不是 UI 從檔名猜的。
@@ -756,8 +756,9 @@ class InputInspector(Inspector):
         if info.get("nm_per_px"):
             bits.append("%.2f nm/px" % float(info["nm_per_px"]))
         else:
-            # 這也是待驗證假設之一：找不到來源，CD 的 nm 值因此是 0。
-            bits.append("nm/px unknown — CD in nm will read 0")
+            # 量測一律 pixel；換算是 Export 那一刻的事，而且由使用者填。
+            # （以前這裡說「CD 的 nm 值會是 0」—— 那個 0 已經不存在了。）
+            bits.append("measured in pixels — set nm/px when you export")
         return " · ".join(bits)
 
     def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
@@ -790,13 +791,14 @@ class InputInspector(Inspector):
                        "—" if mean is None else "%.1f" % mean)
 
         if spread >= 8.0:
-            # 兩張本來就該長得幾乎一樣（同一個位置、同一次掃描）。差很多的時候
-            # 最可能的解釋就是配對搞錯了 —— 那正是這個面板存在的理由。
+            # 兩張本來就該長得幾乎一樣（同一個位置、同一次掃描）。差很多不會讓
+            # 對位掛掉，但會讓相減的殘差整片偏掉 —— 而那看起來像訊號。
+            # 頁序已經確認，所以這裡講的是處置（先正規化），不是叫人去懷疑配對。
             p.setPen(QColor(TOKENS["warning"]))
             p.drawText(QRectF(rect.left(), rect.bottom() - 14, rect.width(), 14),
                        Qt.AlignLeft | Qt.AlignVCenter,
-                       "mean grey differs by %.0f between pages — check the "
-                       "page order" % spread)
+                       "mean grey differs by %.0f between pages — normalise "
+                       "before comparing" % spread)
 
 
 #: step key -> 儀表。沒列在這裡的卡用原本的特徵表（見模組說明的約定 1）。

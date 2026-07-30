@@ -4,6 +4,79 @@
 
 ---
 
+## 兩條待驗證假設結案：頁序確認、單位改成 pixel（2026-07-30）
+
+使用者看完專案盤點之後，直接把 `CLAUDE.md` §8 那三條假設處理掉兩條：
+
+> 1. EBI patch 的 page→channel 對應 → **確定第一張為 test、第二張為 ref**
+> 2. 可以先不處理 → **需要用到的運算值都先以 pixel 為單位，最後若需要 output 值
+>    再給 user 填寫（換算）就好**
+
+### 1. 頁序：從假設變成約定
+
+`load_dataset` 的 `channel_order=("test","ref")` 預設本來就是這個順序，所以**沒有
+任何行為要改** —— 要改的是那一圈「這是猜的」的註解，還有 F7-17 那塊 Input 儀表：
+它以前存在的理由是「讓使用者第一次載真資料就看得出順序反了」。
+
+理由沒了，面板沒有跟著砍掉，但**要換一個它現在回答得了的問題**。留下來的兩件事：
+配對關係（一顆出三頁以上、單頁鏡射成 test、`channel_order` 被改過 —— 只有這裡
+講得出實際載進來的是什麼），以及平均灰階要回答「**這兩張比得起來嗎**」。
+所以那句警告從「check the page order」改成「normalise before comparing」——
+同一個數字，換一個處置。頁序已經確定了，再叫人去懷疑配對只會浪費一次調查。
+
+`channel_order` 參數保留，但它擋的東西換了：不是「怕猜錯」，是「一顆多於兩頁」
+或站點慣例不同時不必改程式。
+
+### 2. 單位：把 0 拿掉，換成一格輸入
+
+`cd_measure` 以前在 `meta["nm_per_px"]` 缺席時吐三個 0（`cd_x_nm` / `cd_y_nm` /
+`area_nm2`）並記一條警告。而 `nm_per_px` **從來沒有來源**（KLARF 裡找不到，
+TIFF 標籤還沒確認），所以那三個 0 是每一顆的常態。
+
+問題不在「有個值缺了」，在於 **0 是個看起來很像答案的答案**：它進得了分數表達式
+（乘進去就把整個項歸零）、寫得進 DSIZE 欄，一路安靜到最後。警告只出現在 warnings
+清單裡，而那份清單在跑一萬顆的時候沒有人逐條看。
+
+新的分工照使用者說的切：
+
+- **pipeline 全程 pixel。** `features_out` 變成 `cd_x_px` / `cd_y_px` / **`area_px`**。
+  `area_px` 是新的 —— 它本來就算好了（blob 的真實像素面積，不是 bbox 面積），
+  但只被拿去乘 `nm²` 然後丟掉，從來沒有吐出來過。
+- **換算只發生在輸出，係數由使用者填。** `klarf_out` 的 inplace 模式多一個
+  `size_scale`（預設 1.0 = 原樣寫 pixel），Export 精靈 DSIZE 那一列多一格
+  `× scale`，CLI 多一個 `--size-scale`（順帶補了一直缺的 `--size-feature`）。
+  `DEFAULT_SIZE_FEATURE` 從 `cd_x_nm` 改成 `cd_x_px` —— 一個恆為 0 的東西不該
+  當預設。
+
+兩個實作上的判斷：
+
+- **換算要寫進 `plan.notes`。** 「寫回前一定先預覽變更」是既有的鐵則，而單位是
+  這次新增的、預覽裡看不出來的東西 —— DSIZE 那一欄寫 12.5 還是 40.0，光看數字
+  分不出是 px 還是 nm。所以 notes 會講「as is (pixels)」或「multiplied by 2.5」。
+- **壞的係數要在寫檔之前擋掉**，而且錯誤訊息要講得出「1 是什麼意思」。0 / 負數 /
+  NaN / 字串 / None 走同一條訊息（一開始寫成兩條，其中一條沒提到 1，測試抓到）。
+
+舊 recipe 引用 `cd_x_nm` 的話，`validate()` 的 `unknown-feature` warning 會指名它。
+沒有做 alias —— 那個變數以前恆為 0，那份分數本來就是錯的，**安靜地讓它繼續跑
+才是問題**。`core/calibration.py`（MMH 來的 nm/px profile 管理）沒有動：哪天真的
+量出站點的 nm/px，它就是存那個值的地方，Export 那一格可以從 profile 帶預設進來。
+
+### 測試
+
+`test_cd_measure_px_and_nm_paths` 改寫成 `test_cd_measure_reports_pixels_only`
+（斷言 `*_nm` 這類名字**不再出現**，而不是列舉新名字 —— 後者擋不住有人把它加回來）。
+Export 加三條：預設寫 pixel 且 notes 講得出來、`size_scale` 就是使用者填的 nm/px、
+壞係數在寫檔前被擋掉（5 種壞值參數化）。Input 儀表那條從「說 nm/px 不見了」改成
+「說單位是 pixel、要換算去哪裡填」。
+
+順手把 export/report/store 測試裡當假資料用的 `cd_x_nm` 全部改成 `cd_x_px` ——
+那個名字現在不存在，留著會讓下一個人以為它還在。
+
+### 這次沒動的
+
+第 3 條假設（KLARF 影像佈局變體）還在，`probe_klarf.py` 仍然是為它跑的。
+`fab_probe/` 另外兩支從「前提」降級成「交叉確認」，README 的表跟著改。
+
 ## 清掉 git 歷史裡的廠內識別碼（2026-07-30）
 
 使用者把 repo 改成 private 之後問怎麼清歷史。掃出來的範圍：

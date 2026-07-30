@@ -246,15 +246,40 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 
 ## 8. 待廠內驗證的假設（重要）
 
-開發全程用合成資料（真實資料不能出廠）。以下假設**必須在廠內用 `fab_probe/` 探測腳本確認**。
+開發全程用合成資料（真實資料不能出廠）。原本有三條假設，**2026-07-30 使用者結掉了
+前兩條**（一條確認、一條改設計繞開），剩下第 3 條要在廠內用 `fab_probe/` 探測腳本確認。
 那三支腳本是 stdlib-only 單檔、輸出純文字且預設遮蔽 Lot/Wafer/Device 等識別碼，
 設計成可以直接複製貼出廠區（細節與資料外流說明見 `fab_probe/README.md`）：
 
 | 假設 | 現況 | 用哪支腳本確認 |
 |---|---|---|
-| 1. EBI patch 的 page→channel 對應 | 假設每顆 defect 第一張=test、第二張=ref（`load_dataset` 的 `channel_order`） | `probe_tiff.py FILE.tif --with-klarf FILE.klarf` → 看它回報的配對型態（pairs / single / triples）。`probe_stats.py` 的奇偶頁均值比較可佐證 |
-| 2. `nm_per_px` 來源 | 找不到，暫為 None（CD 量測的 nm 值因此是 0） | `probe_klarf.py` 的 nm_per_px 名稱搜尋段；`probe_tiff.py` 的解析度/描述標籤 |
+| ~~1. EBI patch 的 page→channel 對應~~ | ✅ **已確認（2026-07-30）**：第一張 = test、第二張 = ref。`load_dataset` 的 `channel_order` 預設就是對的。參數保留是給「一顆多於兩頁」或站點慣例不同用的，不再是「怕猜錯」 | — |
+| ~~2. `nm_per_px` 來源~~ | ✅ **已用設計繞開（2026-07-30）**：不再需要這個值。見下面「單位一律 pixel」 | —（`probe_*.py` 若順手看到仍會回報，那是加分不是前提）|
 | 3. KLARF 變體 | `klarf_core` 已知四種（含 M5 修正的 variant D） | `probe_klarf.py` 的 image-layout 變體判定與證據 |
+
+### 單位一律 pixel，換算在輸出那一刻由使用者填（2026-07-30）
+
+`nm_per_px` 在 KLARF 裡找不到來源，而舊做法是「找不到就吐 0」——
+`cd_measure` 在沒有它的時候照樣吐 `cd_x_nm` / `cd_y_nm` / `area_nm2` 三個 **0**。
+那是最糟的一種缺值：**0 是個看起來很像答案的答案**，它進得了分數表達式、
+寫得進 DSIZE 欄，一路安靜到最後。而實務上它每一顆都是 0。
+
+現在的分工：
+
+- **pipeline 全程用 pixel。** `cd_measure` 吐 `cd_x_px` / `cd_y_px` / `area_px`
+  （`area_px` 是新的 —— 以前只在算 nm 的時候用到，沒有吐出來）。
+  卡片裡不做單位換算，**任何 `*_nm` 特徵都不該再出現**。
+- **換算只發生在輸出。** Export 精靈的 DSIZE 那一列多一格 `× scale`
+  （`klarf_out` 的 `size_scale`，CLI 是 `--size-scale`），預設 `1` = 原樣寫 pixel。
+  要寫 nm 就把 nm/px 填進去 —— **那個數字只有站點自己知道**，所以它是一格輸入，
+  不是一個猜出來的欄位。計畫書會把換算寫進 plan.notes，因為「這一欄是什麼單位」
+  不能只存在按下去那個人的腦子裡（鐵則：寫回前一定先預覽變更）。
+
+舊 recipe 若在分數表達式裡引用 `cd_x_nm`，`validate()` 會出 `unknown-feature`
+warning 指名它 —— 那正是要看到的（它以前恆為 0，那份分數本來就是錯的）。
+
+`core/calibration.py`（MMH 來的 nm/px profile 管理）**沒有被刪**：哪天真的量出
+站點的 nm/px，它就是存那個值的地方，Export 那一格可以從 profile 帶預設值進來。
 
 **每遇到一種新變體 → 做成最小化合成 fixture → 永久回歸測試**（見
 `tests/test_klarf_variant_d.py` 的寫法：先斷言「這份檔案確實是該變體」當前提，再測行為）。
@@ -271,6 +296,7 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 | M5 Gallery+Export | ✅ | Gallery（虛擬捲動、排序、直方圖點 bar 篩選）；KLARF 三種寫回模式（就地無損／另存含 ADCSCORE+ADCCLASS／Top-N）+ 寫回前預覽變更；CSV/Excel 報表（含抓漏率/誤殺率）；overlay；`fab_probe/` 三支探測腳本；CLI `adept export` |
 | M6 推廣包 | ✅ | 離線安裝三件套（`tools/fetch_wheels.py` / `install_offline.py` / `doctor.py`，全 stdlib-only）、首啟導覽 + 範例 recipe 庫對話框、5 份範例 recipe。快速參考卡 PDF 暫緩（移到 backlog） |
 | M7 UI/UX | ✅ | A 組防呆 + **UI 全英文**（`tests/test_ui_english_only.py` 鎖住）。F7 全數完成：patch-only 收斂（`ui/scope.py`）、中性色/平面主題 + 暗色、卡片依流程階段分組 + 搜尋 + 前置條件 badge、**Region 段（具名 ROI）**、Results 視窗、**節點畫布**。計畫書 `docs/plans/F7-canvas-and-taxonomy.md` |
+| 單位 | ✅ | **量測一律 pixel，換算搬到輸出**（2026-07-30 使用者決定）：`cd_measure` 拿掉 `cd_x_nm` / `cd_y_nm` / `area_nm2`（它們在沒有 `nm_per_px` 時**每一顆都是 0**，而那個欄位從來沒有來源），改吐 `cd_x_px` / `cd_y_px` / **`area_px`**（新的）。nm 換算由 Export 精靈的 `× scale` 一格輸入承接（`klarf_out` 的 `size_scale`、CLI `--size-scale`，預設 1 = 原樣寫 pixel），並寫進 plan.notes。同日確認 **page→channel 就是 test/ref**，兩條待驗證假設結案。見 §8 |
 | F7-18 | ✅ | **影像流是節點的事，不是控制列的事**（試用回饋第五輪）：拿掉輸出埠上常駐的「+」（入口收回卡片庫，接線與影像流由 `add_card_after` 承接）、**虛線給自己的色相**（`canvas_edge_implicit`；同色淡一點只說得出「比較不重要」）、**一張卡一條流**（七張 Enhance 卡的 `also_apply` / `anchor` 拿掉；`percentile_norm` / `glv_mask_norm` 補 `range_from` 保住「兩張圖還比得起來」）、**連線指定影像流**（`edge_added` 帶出發埠；同一對節點再拉一條是「我改變主意了」）。舊 recipe 由 `recipe._migrate_also_apply` 展開成多張卡，分數逐項相同。計畫書 §22 |
 | F7-17 | ✅ | **右下角變成「這張卡自己的儀表」**（依 `Step.key` 註冊，沒註冊的用原本的特徵表 → 加新卡不必動 UI）。四個：`load_patch` 的 **page→stream 對應**（廠內假設 #1 第一次看得見）、Enhance 九張卡的 **before/after 直方圖 + 削平計數**（新增 `Context.track_changes`，**只有預覽打開**）、`align` 的**整批位移散佈圖 + 搜尋半徑框**、五張量測卡的**整批分布 + 這一顆站在哪**。第二批：`roi_profile` 的曲線面板**收進同一個機制**（原本是平行的另一條路）、`roi_template` 的**三道閘門各自的門檻線**（match / certainty / **structure** 三種失敗的處置完全不同）。計畫書 §21 |
 | F7-16 | ✅ | **四張安全網**：**復原/重做**（存整份快照，不是反向操作；滑桿一次拖曳算一步）、**快捷鍵**（Ctrl+O/S/R/Z/0/±/F/←→，全照 OS 慣例，並寫進 tooltip）、**關窗前問「還沒存」**（存檔失敗不算可以關）、**跑到一半可以停**（引擎本來就支援，只是按不到；已跑完的留著，而且訊息講「stopped」不是「finished」）。計畫書 §20 |

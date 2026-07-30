@@ -8,8 +8,20 @@ v1 的 CD 定義是「最大 blob 的 bounding box 寬 / 高」：
 edge-pair / 多取樣線寬量測留待後續 milestone）。refine="subpixel"
 時只精修 bbox 的上下邊（Y 方向）成次像素，X 方向仍是 bbox 寬。
 
-meta["nm_per_px"] 存在時同步輸出 nm 尺寸（cd_x_nm / cd_y_nm / area_nm2），
-否則這三個 feature 為 0 並記警告。
+★ 單位：一律 pixel（2026-07-30 決定）★
+這張卡只吐 px。以前它會在 ``meta["nm_per_px"]`` 存在時同步吐
+``cd_x_nm`` / ``cd_y_nm`` / ``area_nm2``，但那個值**從來沒有來源**
+（KLARF 裡找不到、TIFF 標籤也還沒確認），所以實際上每一顆都是 0 ——
+而 0 是個看起來很像答案的答案：它進得了分數表達式、寫得進 DSIZE 欄，
+一路安靜到最後。
+
+現在的分工是：**pipeline 全程用 pixel 算，換算只發生在輸出的那一刻，
+而且由使用者自己填 nm/px**（Export 精靈的 DSIZE 那一列，見
+``adept.core.export.klarf_out`` 的 ``size_scale``）。這樣「這個數字是
+幾奈米」這件事有人負責，而不是靠一個猜不到來源的欄位。
+
+舊 recipe 若在分數表達式裡引用了 ``cd_x_nm``，``Recipe.validate()`` 會出
+``unknown-feature`` warning 指名那個變數 —— 那正是要看到的（它以前恆為 0）。
 """
 from __future__ import annotations
 
@@ -26,8 +38,7 @@ from ._util import (
     output_prefix_spec, prefix_features, prefix_names, roi_rect_or_none,
 )
 
-_ZERO = {"cd_x_px": 0.0, "cd_y_px": 0.0,
-         "cd_x_nm": 0.0, "cd_y_nm": 0.0, "area_nm2": 0.0}
+_ZERO = {"cd_x_px": 0.0, "cd_y_px": 0.0, "area_px": 0.0}
 
 
 @register_step
@@ -38,9 +49,9 @@ class CdMeasureStep(Step):
     label = "CD measure"
     category = CATEGORY_ALGO
     group = GROUP_MEASURE
-    help = ("Measure the width and height of the main defect blob in pixels "
-            "(also in nm when nm_per_px is known). Currently a bounding-box "
-            "estimate.")
+    help = ("Measure the width, height and area of the main defect blob, in "
+            "pixels. Currently a bounding-box estimate. Convert to nm at "
+            "export time, where you enter the nm per pixel yourself.")
     params = [
         ParamSpec(name="source", type="image_key", default="diff",
                   help="Image stream sampled when refining edges (usually diff)."),
@@ -56,7 +67,7 @@ class CdMeasureStep(Step):
     ]
     reads = ["diff"]
     writes: List[str] = []
-    features_out = ["cd_x_px", "cd_y_px", "cd_x_nm", "cd_y_nm", "area_nm2"]
+    features_out = ["cd_x_px", "cd_y_px", "area_px"]
 
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
@@ -124,16 +135,8 @@ class CdMeasureStep(Step):
                     ctx.warn(f"[{self.key}] sub-pixel refinement errored "
                              f"({e}); using the bounding-box height.")
 
+        # 全部 pixel。要 nm 的話在 Export 精靈填 nm/px（見模組 docstring）。
         feats = {"cd_x_px": float(cd_x_px), "cd_y_px": float(cd_y_px),
-                 "cd_x_nm": 0.0, "cd_y_nm": 0.0, "area_nm2": 0.0}
-        npp = ctx.nm_per_px
-        if npp is not None and float(npp) > 0:
-            npp = float(npp)
-            feats["cd_x_nm"] = cd_x_px * npp
-            feats["cd_y_nm"] = cd_y_px * npp
-            feats["area_nm2"] = area_px * npp * npp
-        else:
-            ctx.warn(f"[{self.key}] meta['nm_per_px'] is not set; nm sizes "
-                     f"recorded as 0 (pixel values only).")
+                 "area_px": float(area_px)}
         ctx.add_features(prefix_features(p["output_prefix"], feats))
         return ctx
