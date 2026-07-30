@@ -12,7 +12,7 @@ from ..pipeline.step import (
     CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_ENHANCE,
 )
 from ..algo import enhance as algo_enhance
-from ._util import parse_key_list, require_image
+from ._util import ONE_STREAM_HELP, require_image
 
 
 def _denoise_one(step_key: str, img: np.ndarray, method: str, ksize: int,
@@ -54,16 +54,7 @@ class DenoiseStep(Step):
             "flat areas and leaving edges (and small defects) intact.")
     params = [
         ParamSpec(name="target", type="image_key", default="test",
-                  label="Apply to",
-                  help=("Which image stream this card works on; the result is "
-                        "written back to that same stream. Streams are the "
-                        "named lines on the canvas - test is the defect image, "
-                        "ref is the reference image.")),
-        ParamSpec(name="also_apply", type="image_keys", default="",
-                  label="Also apply to",
-                  help=("Other streams that get exactly the same denoising. "
-                        "Tick ref as well if you want test and ref to stay "
-                        "comparable.")),
+                  label="Image stream", help=ONE_STREAM_HELP),
         ParamSpec(name="method", type="choice", default="median",
                   choices=["median", "gaussian", "bilateral", "nlm"],
                   help=("median = suppress isolated bright/dark specks (common "
@@ -90,7 +81,7 @@ class DenoiseStep(Step):
 
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
-        return [params.get("target", "test")] + parse_key_list(params.get("also_apply", ""))
+        return [str(params.get("target", "test"))]
 
     @classmethod
     def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:
@@ -106,11 +97,4 @@ class DenoiseStep(Step):
         tgt = require_image(ctx, self.key, p["target"])
         ctx.set_image(p["target"],
                       _denoise_one(self.key, tgt, p["method"], ksize, strength))
-        for k in parse_key_list(p["also_apply"]):
-            if k not in ctx.images:
-                ctx.warn(f"[{self.key}] also_apply stream '{k}' does not "
-                         f"exist; skipped.")
-                continue
-            ctx.set_image(k, _denoise_one(self.key, ctx.images[k], p["method"],
-                                          ksize, strength))
         return ctx

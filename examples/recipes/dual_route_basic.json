@@ -6,6 +6,7 @@
   "routes": {
     "ebi_patch": [
       "load",
+      "norm_ref",
       "norm",
       "align",
       "sub",
@@ -19,6 +20,7 @@
     "rsem": [
       "load",
       "golden",
+      "norm_ref",
       "norm",
       "align",
       "sub",
@@ -36,20 +38,18 @@
       "params": {},
       "enabled": true
     },
-    "golden": {
-      "step": "golden_cell",
+    "norm_ref": {
+      "step": "percentile_norm",
       "params": {
-        "source": "test",
-        "out": "ref",
-        "method": "median"
+        "source": "ref",
+        "range_from": "test"
       },
       "enabled": true
     },
     "norm": {
       "step": "percentile_norm",
       "params": {
-        "source": "test",
-        "also_apply": "ref"
+        "source": "test"
       },
       "enabled": true
     },
@@ -96,24 +96,6 @@
       "params": {},
       "enabled": true
     },
-    "glv_patch": {
-      "step": "glv_stats",
-      "params": {
-        "source": "diff",
-        "metrics": "glv_max,glv_median,glv_std",
-        "roi": "glv_patch_roi"
-      },
-      "enabled": true
-    },
-    "glv_rsem": {
-      "step": "glv_stats",
-      "params": {
-        "source": "diff",
-        "metrics": "glv_max,glv_median,glv_std",
-        "roi": "glv_rsem_roi"
-      },
-      "enabled": true
-    },
     "glv_patch_roi": {
       "step": "roi_define",
       "params": {
@@ -125,6 +107,24 @@
       },
       "enabled": true
     },
+    "glv_patch": {
+      "step": "glv_stats",
+      "params": {
+        "source": "diff",
+        "metrics": "glv_max,glv_median,glv_std",
+        "roi": "glv_patch_roi"
+      },
+      "enabled": true
+    },
+    "golden": {
+      "step": "golden_cell",
+      "params": {
+        "source": "test",
+        "out": "ref",
+        "method": "median"
+      },
+      "enabled": true
+    },
     "glv_rsem_roi": {
       "step": "roi_define",
       "params": {
@@ -133,6 +133,15 @@
         "size": 128.0,
         "size_unit": "px",
         "source": "diff"
+      },
+      "enabled": true
+    },
+    "glv_rsem": {
+      "step": "glv_stats",
+      "params": {
+        "source": "diff",
+        "metrics": "glv_max,glv_median,glv_std",
+        "roi": "glv_rsem_roi"
       },
       "enabled": true
     }

@@ -439,7 +439,7 @@ class _ParamRow(QFrame):
         top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(8)
         # 顯示名優先用 ``label``（F7-9）。``name`` 是 recipe JSON 的鍵，
-        # 對使用者來說 ``also_apply`` 不是一句話，"Also apply to" 才是。
+        # 對使用者來說 ``range_from`` 不是一句話，"Borrow range from" 才是。
         self.name_label = QLabel(str(spec.get("label") or spec.get("name", "")))
         self.name_label.setObjectName("paramLabel")
         self.name_label.setMinimumWidth(104)
@@ -747,18 +747,19 @@ class StreamPicker(QWidget):
 
     為什麼不是一個輸入框
     --------------------
-    ``also_apply`` 以前是自由文字，值長這樣：``ref``。三個問題一次到齊 ——
-    使用者不知道**可以填什麼**（流名從來沒有列出來過）、不知道**填了會怎樣**、
-    打錯了也不會被擋（缺流只 warn，於是「我明明設了卻沒作用」）。
-    試用回饋原話：「target 跟 also apply 要怎麼使用？對應的節點又是什麼？」
+    「一串影像流」如果是自由文字，三個問題一次到齊 —— 使用者不知道**可以填
+    什麼**（流名從來沒有列出來過）、不知道**填了會怎樣**、打錯了也不會被擋。
+    勾選框把這三件事一次解掉：能填的就是列出來的那幾個。
 
-    勾選框把這三件事一次解掉：能填的就是列出來的那幾個，勾了就是套用。
-    而「兩張 patch 一起處理，還是各走各的」也就變成一個看得見的動作 ——
-    ref 勾著＝一起，取消＝分開（再加一張只對 ref 的卡）。
+    F7-18 之後沒有內建卡片用這個型別
+    --------------------------------
+    唯一用它的是 Enhance 卡的 ``also_apply``，而那件事已經拆成節點了：
+    **一張卡一條流**，要對 ref 也做就再放一張卡接到 ref。留著這個編輯器是因為
+    「一串影像流」仍然是 ``ParamSpec`` 的合法型別（見 ``step.PARAM_TYPES``），
+    自訂卡片用得到；拿掉它等於要求下一張這種卡自己刻一個表單元件。
 
-    值的格式沒有變（仍是逗號分隔字串），所以既有 recipe 照樣讀得進來；
-    recipe 裡指到「現在的 pipeline 沒有這條流」的名字也會列出來並勾著，
-    不會因為看不到就被靜靜刪掉。
+    值的格式是逗號分隔字串；recipe 裡指到「現在的 pipeline 沒有這條流」的名字
+    也會列出來並勾著，不會因為看不到就被靜靜刪掉。
     """
 
     changed = Signal(str)

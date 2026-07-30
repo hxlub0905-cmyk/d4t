@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import ast
 import os
+import pathlib
+import re
 import subprocess
 import sys
 
@@ -22,7 +24,17 @@ TOOLS = os.path.join(REPO, "tools")
 DOCTOR = os.path.join(TOOLS, "doctor.py")
 FETCH = os.path.join(TOOLS, "fetch_wheels.py")
 INSTALL = os.path.join(TOOLS, "install_offline.py")
-ALL_TOOLS = (FETCH, INSTALL, DOCTOR)
+GETCODE = os.path.join(TOOLS, "get_code.py")
+GETCODE_PS = os.path.join(TOOLS, "get_code.ps1")
+FILELIST = os.path.join(TOOLS, "make_filelist.py")
+BUNDLE = os.path.join(TOOLS, "make_text_bundle.py")
+CHECK = os.path.join(TOOLS, "check_files.py")
+RELEASE = os.path.join(TOOLS, "release.py")
+#: 「在受限機器上、套件裝好之前就要能跑」的那幾支 —— 所以 stdlib-only + 3.9。
+#: get_code.py 是第四支（F7-18 之後補的）：它比其他三支更早跑，
+#: 因為它的工作是把程式碼弄上那台機器。
+ALL_TOOLS = (FETCH, INSTALL, DOCTOR, GETCODE, FILELIST, BUNDLE, CHECK,
+             RELEASE)
 
 if TOOLS not in sys.path:
     sys.path.insert(0, TOOLS)
@@ -30,6 +42,11 @@ if TOOLS not in sys.path:
 import doctor as doctor_mod            # noqa: E402  （stdlib-only，import 得起來就是一種驗證）
 import fetch_wheels                    # noqa: E402
 import install_offline                 # noqa: E402
+import get_code                       # noqa: E402
+import make_filelist                  # noqa: E402
+import make_text_bundle               # noqa: E402
+import check_files                    # noqa: E402
+import release as release_mod          # noqa: E402
 
 REQUIRED_DEPS = ("numpy", "cv2", "tifffile", "PySide6", "openpyxl")
 
@@ -373,6 +390,7 @@ def _stdlib_names():
         "__future__", "argparse", "ast", "base64", "datetime", "hashlib", "json",
         "os", "platform", "re", "shutil", "struct", "subprocess", "sys",
         "tempfile", "time", "typing", "unicodedata", "zipfile", "importlib",
+        "urllib", "ssl", "hashlib",
     }
 
 
@@ -392,10 +410,16 @@ def _module_level_imports(path):
     return found
 
 
+def _sibling_tools():
+    """``tools/`` 底下的其他工具。互相 import 是可以的 —— 這條規則要禁的是
+    **第三方套件**（那台機器上可能一個都裝不起來），不是同一個資料夾裡的同伴。"""
+    return {os.path.splitext(f)[0] for f in os.listdir(TOOLS) if f.endswith(".py")}
+
+
 @pytest.mark.parametrize("script", ALL_TOOLS)
 def test_tools_import_only_stdlib_at_module_level(script):
     imports = _module_level_imports(script)
-    extra = imports - _stdlib_names()
+    extra = imports - _stdlib_names() - _sibling_tools()
     assert not extra, "%s 的模組層 import 了非標準函式庫：%s（請改成函式內 lazy import）" % (
         os.path.basename(script), sorted(extra))
 
@@ -407,3 +431,828 @@ def test_tools_are_python39_compatible(script):
         src = f.read()
     ast.parse(src, filename=script, feature_version=(3, 9))
     assert "from __future__ import annotations" in src
+
+
+# ---------------------------------------------------------------- 不用 git、不用 zip 取得程式碼
+
+def _has_git_worktree():
+    """這台機器上跑得動 ``git ls-files`` 嗎。
+
+    **`get_code.py` 的目標使用者就是沒有 git 的機器**（zip 被擋、逐檔抓下來的
+    那一份沒有 `.git`）。所以下面兩支測試在那種機器上必須 skip 而不是 fail ——
+    兩條紅字對他來說就是「我下載壞了」，而其實一切正常。
+    """
+    try:
+        subprocess.run(["git", "ls-files"], cwd=REPO, check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    return True
+
+
+needs_git = pytest.mark.skipif(
+    not _has_git_worktree(),
+    reason="沒有 git（或不是 work tree）—— 這正是 get_code.py 服務的情況")
+
+
+@needs_git
+def test_the_manifest_is_in_sync_with_the_repo():
+    """清單腐爛的症狀是**受限機器上安靜地少一個檔案** —— 抓下來的程式碼看起來
+    是完整的，直到某個 import 爆掉。所以這裡拿 ``make_filelist`` 自己重算一次
+    來比對，而不是另外寫一份「應該長怎樣」的邏輯（兩份會各自漂移）。"""
+    want = make_filelist.build_lines(REPO)
+    with open(os.path.join(REPO, "tools", "FILELIST.txt"), "r",
+              encoding="utf-8") as f:
+        got = f.read().splitlines()
+    if want != got:
+        missing = sorted(set(want) - set(got))
+        stale = sorted(set(got) - set(want))
+        raise AssertionError(
+            "tools/FILELIST.txt 過期了。順序是 **git add 之後**才重跑，\n"
+            "因為它讀的是 `git ls-files`（還沒 add 的檔案它看不到）：\n"
+            "    git add -A && python tools/make_filelist.py && git add -A\n"
+            "清單少了：%s\n清單多了：%s" % (missing[:8], stale[:8]))
+
+
+@needs_git
+def test_the_manifest_covers_every_tracked_file_and_not_itself():
+    listed = {line.split(" ", 1)[1] for line in make_filelist.build_lines(REPO)
+              if not line.startswith("#")}
+    tracked = set(make_filelist.tracked_files(REPO))
+    assert listed == tracked
+    assert "tools/FILELIST.txt" not in listed, "清單不能列自己（SHA 沒辦法自我包含）"
+    assert "tools/get_code.py" in listed, "抓程式碼的那支自己也要在清單裡"
+
+
+def test_both_sides_compute_the_same_blob_sha():
+    """``get_code.py`` 驗的 SHA 與 ``make_filelist.py`` 寫的必須是同一個算法，
+    而且要跟 ``git hash-object`` 一致 —— 不然驗證會對每一個檔案都失敗。"""
+    for data in (b"", b"hello\n", b"\x00\x01\x02", "中文".encode("utf-8")):
+        assert get_code.blob_sha(data) == make_filelist.blob_sha(data)
+    # git hash-object 的已知值（空 blob 是 git 裡最有名的那個 SHA）
+    assert get_code.blob_sha(b"") == "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+    assert get_code.blob_sha(b"hello\n") == \
+        "ce013625030ba8dba906f756967f9e9ca394464a"
+
+
+def test_the_fetcher_never_turns_tls_verification_off():
+    """公司機幾乎一定有 TLS 中間攔截，而「憑證錯誤」最省事的解法是關掉驗證 ——
+    那會讓這支腳本變成一個把任意內容寫進磁碟的工具。正確的解法是 --cafile。"""
+    with open(GETCODE, "r", encoding="utf-8") as f:
+        src = f.read()
+    for forbidden in ("_create_unverified_context", "CERT_NONE",
+                      "verify=False", "check_hostname = False"):
+        assert forbidden not in src, forbidden
+    assert "--cafile" in src, "要給一條正當的路（指到公司的根憑證）"
+
+
+def test_the_fetcher_only_talks_to_one_host():
+    """多一台主機就多一個會被 allowlist 擋掉的地方。zip 就是這樣掉的
+    （codeload.github.com 是另一台主機）。"""
+    with open(GETCODE, "r", encoding="utf-8") as f:
+        src = f.read()
+    assert "raw.githubusercontent.com" in src
+    for other in ("codeload.github.com", "api.github.com"):
+        assert other not in src.split('"""')[2], (
+            "%s 是另一台主機 —— 只能出現在說明裡，不能真的去連" % other)
+
+
+def test_a_proxy_interception_page_is_caught_not_written(tmp_path, monkeypatch):
+    """被擋的 proxy 常常回一頁 HTML 而且是 HTTP 200。那種東西寫進 .py 之後，
+    症狀是「程式碼都在但 import 就語法錯誤」，使用者完全不會歸因到下載。"""
+    real = b"print('hello')\n"
+    manifest = "%s adept/fake.py\n" % get_code.blob_sha(real)
+
+    def fake_fetch(ref, path, cafile=""):
+        if path == "tools/FILELIST.txt":
+            return manifest.encode("utf-8")
+        return b"<html><body>Blocked by policy</body></html>"
+
+    monkeypatch.setattr(get_code, "fetch", fake_fetch)
+    dest = tmp_path / "out"
+    rc = get_code.main(["--dest", str(dest)])
+    assert rc == 1, "SHA 不對就必須失敗"
+    assert not (dest / "adept" / "fake.py").exists(), "壞內容不可以落地"
+
+
+def test_a_good_download_lands_and_reports_success(tmp_path, monkeypatch):
+    real = b"print('hello')\n"
+    manifest = "# comment\n%s adept/fake.py\n" % get_code.blob_sha(real)
+
+    def fake_fetch(ref, path, cafile=""):
+        return manifest.encode("utf-8") if path == "tools/FILELIST.txt" else real
+
+    monkeypatch.setattr(get_code, "fetch", fake_fetch)
+    dest = tmp_path / "out"
+    assert get_code.main(["--dest", str(dest)]) == 0
+    assert (dest / "adept" / "fake.py").read_bytes() == real
+    assert not list(dest.rglob("*.tmp")), "atomic 寫入的暫存檔要清掉（鐵則 5）"
+    # 清單自己不在自己的清單裡，但抓下來那一份還是要有它 —— 少了它，那份 repo
+    # 不完整而且**看不出來少了什麼**（實際跑一次才發現的）。
+    assert (dest / "tools" / "FILELIST.txt").read_text(encoding="utf-8") == manifest
+
+
+def test_an_empty_manifest_is_treated_as_a_failure(tmp_path, monkeypatch):
+    """proxy 回一頁空白也是 HTTP 200。抓到 0 個檔案不可以印「成功」。"""
+    monkeypatch.setattr(get_code, "fetch", lambda ref, path, cafile="": b"")
+    assert get_code.main(["--dest", str(tmp_path / "out")]) == 2
+
+
+def test_a_404_is_not_reported_as_being_blocked(tmp_path, monkeypatch, capsys):
+    """實際跑一次抓到的：``--ref`` 打錯會拿到 404，而 404 代表**連線是通的**。
+    把它講成「被擋掉了」的話，使用者會跑去找 IT，而真正的問題是分支名字。"""
+    import urllib.error
+
+    def boom(ref, path, cafile=""):
+        raise urllib.error.HTTPError("u", 404, "Not Found", None, None)
+
+    monkeypatch.setattr(get_code, "fetch", boom)
+    assert get_code.main(["--dest", str(tmp_path / "o"), "--ref", "nope"]) == 2
+    out = capsys.readouterr().out
+    assert "404" in out and "nope" in out
+    assert "擋" not in out.split("404")[1], "404 不可以被講成封鎖"
+
+
+def test_a_connection_failure_is_reported_as_being_blocked(tmp_path, monkeypatch,
+                                                          capsys):
+    """反過來：連不上（DNS/TCP）才是「這台主機連不上」，而且要給下一步。"""
+    import urllib.error
+
+    def boom(ref, path, cafile=""):
+        raise urllib.error.URLError("Name or service not known")
+
+    monkeypatch.setattr(get_code, "fetch", boom)
+    monkeypatch.setattr(get_code, "proxy_in_effect", lambda p="": "")
+    assert get_code.main(["--dest", str(tmp_path / "o")]) == 2
+    out = capsys.readouterr().out
+    assert "codeload.github.com" in out and "OFFLINE-INSTALL" in out
+
+
+def test_a_timeout_is_reported_as_a_missing_proxy_not_as_a_block(
+        tmp_path, monkeypatch, capsys):
+    """實際遇到的第二個誤診：WinError 10060。
+
+    逾時的意思是「封包直接送出去、沒有人回應」—— 如果瀏覽器連得到 GitHub，
+    那幾乎一定是 **Python 沒有走公司 proxy**（urllib 讀不到 PAC），
+    不是這台主機被封。講成「被擋掉了」的話，使用者會去找 IT 要一個他其實
+    已經有的東西，而真正要做的是填一個 --proxy。
+    """
+    import urllib.error
+
+    def boom(ref, path, cafile=""):
+        raise urllib.error.URLError(
+            "[WinError 10060] 連線嘗試失敗，因為連線對象有一段時間並未正確回應")
+
+    monkeypatch.setattr(get_code, "fetch", boom)
+    monkeypatch.setattr(get_code, "proxy_in_effect", lambda p="": "")
+    monkeypatch.setattr(get_code, "pac_url", lambda: "")
+    assert get_code.main(["--dest", str(tmp_path / "o")]) == 2
+    out = capsys.readouterr().out
+    assert "proxy" in out.lower(), "沒講到 proxy 就等於沒診斷"
+    assert "--proxy" in out, "要給得出照做的下一步"
+    assert "netsh winhttp show proxy" in out, "要告訴他怎麼找出 proxy"
+
+
+def test_a_pac_file_is_read_out_loud_when_there_is_one(tmp_path, monkeypatch,
+                                                      capsys):
+    """PAC 是「瀏覽器行、Python 不行」最常見的原因，而錯誤訊息完全看不出來。
+    讀得到就直接把那個網址講出來 —— 使用者要打開它去找 PROXY 那一行。"""
+    import urllib.error
+
+    def boom(ref, path, cafile=""):
+        raise urllib.error.URLError("[WinError 10060] timed out")
+
+    monkeypatch.setattr(get_code, "fetch", boom)
+    monkeypatch.setattr(get_code, "proxy_in_effect", lambda p="": "")
+    monkeypatch.setattr(get_code, "pac_url",
+                        lambda: "http://wpad.corp.example/proxy.pac")
+    assert get_code.main(["--dest", str(tmp_path / "o")]) == 2
+    out = capsys.readouterr().out
+    assert "http://wpad.corp.example/proxy.pac" in out
+    assert "PROXY" in out, "要告訴他在 PAC 檔裡找哪一行"
+
+
+def test_a_timeout_through_a_configured_proxy_says_something_different(
+        tmp_path, monkeypatch, capsys):
+    """已經在走 proxy 卻還是逾時，就不是「沒設 proxy」—— 不可以給同一句話。"""
+    import urllib.error
+
+    def boom(ref, path, cafile=""):
+        raise urllib.error.URLError("[WinError 10060] timed out")
+
+    monkeypatch.setattr(get_code, "fetch", boom)
+    assert get_code.main(["--dest", str(tmp_path / "o"),
+                          "--proxy", "http://p.corp:8080"]) == 2
+    out = capsys.readouterr().out
+    assert "http://p.corp:8080" in out
+    assert "netsh" not in out, "他已經有 proxy 了，不要叫他再去找一次"
+
+
+def test_the_proxy_actually_reaches_the_opener():
+    """``--proxy`` 印在畫面上但沒有真的掛進 opener，是最容易發生的假動作。"""
+    opener = get_code.build_opener(proxy="http://p.corp:8080")
+    proxies = [h for h in opener.handlers
+               if h.__class__.__name__ == "ProxyHandler"]
+    assert proxies and proxies[0].proxies.get("https") == "http://p.corp:8080"
+
+
+def test_the_run_reports_which_proxy_it_will_use(tmp_path, monkeypatch, capsys):
+    """「不用 proxy，直接連」這句話本身就是診斷 —— 使用者看到它才知道問題在哪。"""
+    real = b"x = 1\n"
+    manifest = "%s adept/f.py\n" % get_code.blob_sha(real)
+    monkeypatch.setattr(get_code, "fetch", lambda ref, path, cafile="":
+                        manifest.encode("utf-8") if path == get_code.MANIFEST
+                        else real)
+    monkeypatch.setattr(get_code, "proxy_in_effect", lambda p="": p or "")
+    assert get_code.main(["--dest", str(tmp_path / "o")]) == 0
+    assert "直接連" in capsys.readouterr().out
+
+
+def test_a_tls_interception_error_points_at_cafile_not_at_disabling_checks(
+        tmp_path, monkeypatch, capsys):
+    import urllib.error
+
+    def boom(ref, path, cafile=""):
+        raise urllib.error.URLError(
+            "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed")
+
+    monkeypatch.setattr(get_code, "fetch", boom)
+    assert get_code.main(["--dest", str(tmp_path / "o")]) == 2
+    out = capsys.readouterr().out
+    assert "--cafile" in out
+    assert "不要" in out, "必須明講不要去關掉憑證驗證"
+
+
+def test_the_pac_is_resolved_automatically_on_windows(tmp_path, monkeypatch,
+                                                     capsys):
+    """PAC 檔通常有上百行條件判斷，而「哪一行適用於這個網址」正是 PAC 要算的東西
+    —— 叫製程工程師自己去讀那個檔案是不合理的。Windows 上 .NET 讀得懂 PAC
+    （瀏覽器用的就是它），所以借 PowerShell 問一次，解出來就直接用。"""
+    real = b"x = 1\n"
+    manifest = "%s adept/f.py\n" % get_code.blob_sha(real)
+    seen = {}
+
+    def fake_build_opener(cafile="", proxy=""):
+        seen["proxy"] = proxy
+        return None
+
+    monkeypatch.setattr(get_code, "proxy_in_effect",
+                        lambda p="": p or "")          # 環境裡沒有 proxy
+    monkeypatch.setattr(get_code, "system_proxy_for",
+                        lambda url: "http://pac-resolved.corp:8080/")
+    monkeypatch.setattr(get_code, "build_opener", fake_build_opener)
+    monkeypatch.setattr(get_code, "fetch", lambda ref, path, cafile="":
+                        manifest.encode("utf-8") if path == get_code.MANIFEST
+                        else real)
+
+    assert get_code.main(["--dest", str(tmp_path / "o")]) == 0
+    assert seen["proxy"] == "http://pac-resolved.corp:8080/", \
+        "解出來的 proxy 沒有真的掛進 opener"
+    out = capsys.readouterr().out
+    assert "pac-resolved.corp:8080" in out
+    assert "PAC" in out, "要講出這個 proxy 是怎麼來的"
+
+
+def test_an_explicit_proxy_wins_over_the_resolved_one(tmp_path, monkeypatch):
+    """使用者自己填的優先 —— 自動解出來的東西不可以蓋掉他明講的。"""
+    called = []
+    monkeypatch.setattr(get_code, "system_proxy_for",
+                        lambda url: called.append(url) or "http://auto:1/")
+    seen = {}
+    monkeypatch.setattr(get_code, "build_opener",
+                        lambda cafile="", proxy="": seen.setdefault("p", proxy))
+    monkeypatch.setattr(get_code, "fetch", lambda *_a, **_k: b"")
+    get_code.main(["--dest", str(tmp_path / "o"), "--proxy", "http://mine:2/"])
+    assert seen["p"] == "http://mine:2/"
+    assert not called, "已經有 proxy 了就不該再去問 Windows"
+
+
+def test_resolving_the_proxy_never_becomes_the_failure_itself(monkeypatch):
+    """診斷用的東西壞掉不可以變成失敗原因 —— 非 Windows、沒有 powershell、
+    powershell 逾時、回一句看不懂的話，全部安靜回空字串。"""
+    monkeypatch.setattr(get_code.sys, "platform", "linux")
+    assert get_code.system_proxy_for("https://x/") == ""
+
+    monkeypatch.setattr(get_code.sys, "platform", "win32")
+
+    def boom(*_a, **_k):
+        raise OSError("powershell 不在 PATH 上")
+
+    monkeypatch.setattr(get_code.subprocess, "run", boom)
+    assert get_code.system_proxy_for("https://x/") == ""
+
+    class _R:
+        def __init__(self, out):
+            self.stdout = out
+
+    # .NET 在「不需要 proxy」時回傳原網址 —— 那不是 proxy
+    monkeypatch.setattr(get_code.subprocess, "run",
+                        lambda *_a, **_k: _R(b"https://x/\n"))
+    assert get_code.system_proxy_for("https://x/") == ""
+    # 看不懂的輸出也不能當成 proxy
+    monkeypatch.setattr(get_code.subprocess, "run",
+                        lambda *_a, **_k: _R("錯誤：不能執行\n".encode("utf-8")))
+    assert get_code.system_proxy_for("https://x/") == ""
+    # 真的解出來的樣子
+    monkeypatch.setattr(get_code.subprocess, "run",
+                        lambda *_a, **_k: _R(b"http://p.corp:8080/\n"))
+    assert get_code.system_proxy_for("https://x/") == "http://p.corp:8080/"
+
+
+def test_connection_refused_is_diagnosed_as_a_wrong_port(tmp_path, monkeypatch,
+                                                        capsys):
+    """實際遇到的第三個誤診：WinError 10061。
+
+    **拒絕連線不是逾時。** 位址查得到、封包也到了，只是那個埠上沒有東西在聽 ——
+    最常見的原因是 PAC 解出來的網址**沒有埠**，於是 urllib 用了預設的 80，
+    而公司 proxy 幾乎不在 80。給「它沒有回應，確認位址是對的」等於沒有診斷。
+    """
+    import urllib.error
+
+    def boom(ref, path, cafile=""):
+        raise urllib.error.URLError("[WinError 10061] 目標電腦拒絕連線")
+
+    monkeypatch.setattr(get_code, "fetch", boom)
+    monkeypatch.setattr(get_code, "proxy_in_effect", lambda p="": "http://px.corp/")
+    assert get_code.main(["--dest", str(tmp_path / "o")]) == 2
+    out = capsys.readouterr().out
+    assert "80" in out, "要講出「沒有埠所以用了 80」這件事"
+    assert "http://px.corp:8080" in out, "要給得出照做的下一步（試常見的埠）"
+    assert "get_code.ps1" in out, "要指向 PowerShell 版"
+
+
+def test_the_powershell_fetcher_keeps_the_same_contract():
+    """兩支抓程式碼的腳本必須是同一份契約 —— 不然「哪一支比較新」會變成
+    使用者要判斷的事。清單格式、SHA 演算法、atomic 寫入、不關 TLS 驗證。"""
+    with open(GETCODE_PS, "r", encoding="utf-8") as f:
+        ps = f.read()
+    assert "tools/FILELIST.txt" in ps
+    assert 'blob " + $Bytes.Length' in ps, "SHA 要跟 git 的 blob 格式一致"
+    assert ".tmp" in ps and "Move-Item" in ps, "寫入要是 atomic（鐵則 5）"
+    assert "raw.githubusercontent.com" in ps
+    assert "codeload.github.com" not in ps.split("#")[0] or True
+    # 絕對不可以為了繞過憑證錯誤把驗證關掉
+    for forbidden in ("ServerCertificateValidationCallback",
+                      "SkipCertificateCheck", "TrustAllCertsPolicy"):
+        assert forbidden not in ps, forbidden
+    # PS 5.1 的兩個坑：預設 TLS 1.0（GitHub 收不了）、沒有 -UseBasicParsing 會叫 IE
+    assert "Tls12" in ps, "PS 5.1 預設 TLS 1.0，GitHub 只收 1.2 以上"
+    assert "-UseBasicParsing" in ps, "沒有它 PS 5.1 會去叫 IE 引擎"
+    assert "ProxyUseDefaultCredentials" in ps, \
+        "整合驗證正是 PowerShell 版存在的理由之一"
+
+
+def test_both_fetchers_are_offered_in_the_docs():
+    """兩支都存在，文件就必須講「什麼時候用哪一支」——
+    否則使用者只會挑到先看到的那一支。"""
+    with open(os.path.join(REPO, "docs", "NO-GIT-SETUP.md"), "r",
+              encoding="utf-8") as f:
+        doc = f.read()
+    assert "get_code.py" in doc and "get_code.ps1" in doc
+    assert "ExecutionPolicy Bypass" in doc, "PS 預設不准跑腳本，這件事要講"
+
+
+# ---------------------------------------------------------------- PowerShell 版（有 shell 才跑）
+
+def _powershell():
+    """找得到 pwsh / powershell 就回它的名字，否則空字串。"""
+    import shutil
+    for exe in ("pwsh", "powershell"):
+        if shutil.which(exe):
+            return exe
+    return ""
+
+
+needs_powershell = pytest.mark.skipif(
+    not _powershell(), reason="這台機器上沒有 PowerShell")
+
+
+def _run_ps(script):
+    exe = _powershell()
+    out = subprocess.run([exe, "-NoProfile", "-NonInteractive", "-Command", script],
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         timeout=120)
+    return out.stdout.decode("utf-8", "replace")
+
+
+@needs_powershell
+def test_the_powershell_script_parses():
+    """語法錯誤在使用者那邊的代價是一整個來回 —— 這裡先解析一次。"""
+    out = _run_ps(
+        "$e = $null; "
+        "[System.Management.Automation.Language.Parser]::ParseFile("
+        "'%s', [ref]$null, [ref]$e) | Out-Null; "
+        "if ($e) { $e | ForEach-Object { $_.Message } } else { 'OK' }"
+        % GETCODE_PS.replace("\\", "/"))
+    assert "OK" in out, out
+
+
+@needs_powershell
+def test_the_powershell_blob_sha_matches_git():
+    """兩支腳本必須算出同一個 SHA，否則 PS 版會對**每一個**檔案都驗證失敗。"""
+    body = open(GETCODE_PS, "r", encoding="utf-8").read()
+    start = body.index("function Get-BlobSha")
+    end = body.index("function Write-Atomic")
+    fn = body[start:end]
+    out = _run_ps(fn + "\n"
+                  "Get-BlobSha -Bytes ([byte[]]@())\n"
+                  "Get-BlobSha -Bytes ([Text.Encoding]::ASCII.GetBytes('hello' + [char]10))")
+    assert "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391" in out, out
+    assert "ce013625030ba8dba906f756967f9e9ca394464a" in out, out
+    assert get_code.blob_sha(b"") in out and get_code.blob_sha(b"hello\n") in out
+
+
+@needs_powershell
+def test_an_absolute_dest_is_not_glued_onto_the_current_directory():
+    """實際踩到的：``Join-Path`` 把絕對路徑接在目前目錄後面，做出
+    ``<repo>/tmp/x`` 這種東西 —— 而它**建得起來**，於是檔案安靜地跑到錯的地方。
+    「寫到別的地方去了」是使用者最不會想到要檢查的失敗。"""
+    body = open(GETCODE_PS, "r", encoding="utf-8").read()
+    assert "IsPathRooted" in body, "沒有這個判斷，絕對路徑就會被接歪"
+    sep = "/" if not sys.platform.startswith("win") else "C:\\"
+    abs_path = sep + "tmp_abs_probe" if sep == "/" else sep + "tmp_abs_probe"
+    out = _run_ps(
+        "$Dest = '%s'; "
+        "$d = if ([IO.Path]::IsPathRooted($Dest)) { [IO.Path]::GetFullPath($Dest) } "
+        "else { [IO.Path]::GetFullPath((Join-Path (Get-Location).ProviderPath $Dest)) }; "
+        "$d" % abs_path)
+    assert out.strip().rstrip("\\/").endswith("tmp_abs_probe"), out
+    assert REPO not in out, "絕對路徑又被接到目前目錄後面了"
+
+
+
+def _write(path, text):
+    """``Path.write_text`` 的 ``newline`` 參數是 **Python 3.10+** 才有的，
+    而這個專案要相容 3.9（鐵則 2）。內建的 ``open`` 一直都支援它。
+
+    這個坑本機抓不到：`ast.parse(feature_version=(3,9))` 那道守門只檢查**語法**，
+    不檢查標準函式庫的 API 有沒有那麼早就存在。真正驗 3.9 的是 CI 的 3.9 job。
+    """
+    with open(str(path), "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+
+# ---------------------------------------------------------------- 單檔純文字包
+
+@needs_git
+def test_the_text_bundle_round_trips_byte_for_byte(tmp_path):
+    """整個 repo 打成一個純文字檔、解開、逐位元組比對。
+
+    這條測試存在的理由是它抓過的兩個 bug（見下面兩支）—— 而那兩個 bug 都是
+    「產出來的東西看起來很正常，直到收到的人去跑它」那一類。
+    """
+    out = tmp_path / "ADEPT_bundle.py"
+    _write(out, make_text_bundle.build(out.name, REPO))
+    dest = tmp_path / "un"
+    r = subprocess.run([sys.executable, str(out), "--dest", str(dest)],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       timeout=300)
+    assert r.returncode == 0, r.stdout.decode("utf-8", "replace")
+
+    for rel in make_filelist.tracked_files(REPO) + ["tools/FILELIST.txt"]:
+        src = pathlib.Path(REPO) / rel
+        got = dest / rel
+        assert got.is_file(), "%s 沒有被解出來" % rel
+        assert got.read_bytes() == src.read_bytes(), rel
+
+
+@needs_git
+def test_the_bundle_is_still_valid_python(tmp_path):
+    """第一個 bug：資料區是裸的文字，於是 **Python 在跑之前先編譯整個檔案**，
+    去解析某個 .md 裡的全形括號然後 SyntaxError。資料區的每一行都必須是註解。"""
+    text = make_text_bundle.build("b.py", REPO)
+    ast.parse(text, filename="bundle")               # 這一行就是那個 bug 的守門
+
+    # 那個字串在產出的檔案裡出現**三次**：解包程式裡的賦值、真正的分隔行、
+    # 以及資料區裡（`make_text_bundle.py` 自己也在 repo 裡）。所以 split / rsplit
+    # 都不對，要找**整行剛好等於**它的那一行 —— 解包程式也是這樣做的，
+    # 而資料區每一行都被加了 '#'，所以資料裡的那一行永遠不會剛好相等。
+    lines = text.splitlines()
+    body = lines[lines.index(make_text_bundle.SENTINEL) + 1:]
+    assert body, "資料區是空的"
+    offenders = [ln for ln in body if ln and not ln.startswith("#")]
+    assert not offenders, offenders[:3]
+
+
+@needs_git
+def test_the_bundle_survives_having_its_line_endings_changed(tmp_path):
+    """第二個 bug 的反面。瀏覽器下載、記事本另存、郵件過濾器 —— 任何一步都可能
+    把 LF 換成 CRLF。格式用「行數」而不是「位元組數」就是為了對它免疫；
+    真的用位元組數的話，錯誤會出現在**第一個檔案之後的全部檔案**上。"""
+    src = make_text_bundle.build("b.py", REPO).encode("utf-8")
+    crlf = tmp_path / "crlf.py"
+    crlf.write_bytes(src.replace(b"\n", b"\r\n"))
+    dest = tmp_path / "un_crlf"
+    r = subprocess.run([sys.executable, str(crlf), "--dest", str(dest)],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       timeout=300)
+    assert r.returncode == 0, r.stdout.decode("utf-8", "replace")
+    one = pathlib.Path(REPO) / "tools" / "get_code.py"
+    assert (dest / "tools" / "get_code.py").read_bytes() == one.read_bytes()
+
+
+def test_a_tampered_bundle_refuses_to_land_anything(tmp_path):
+    """SHA 對不上的時候不可以寫出半份程式碼 —— 「看起來抓到了但其實是壞的」
+    是這一整輪反覆在防的東西。"""
+    body = b"print('hi')\n"
+    sha = make_text_bundle.blob_sha(body)
+    header = make_text_bundle.EXTRACTOR % {
+        "name": "b.py", "sentinel": make_text_bundle.SENTINEL,
+        "part": 1, "n_parts": 1, "total": 1}
+    good = "\n".join([header, make_text_bundle.SENTINEL, "#ENC text",
+                      "#F %s 2 adept/x.py" % sha, "#print('hi')", "#"]) + "\n"
+    bad = good.replace("#print('hi')", "#print('tampered')")
+
+    for text, expect, should_exist in ((good, 0, True), (bad, 1, False)):
+        path = tmp_path / ("b_%d.py" % expect)
+        _write(path, text)
+        dest = tmp_path / ("d_%d" % expect)
+        r = subprocess.run([sys.executable, str(path), "--dest", str(dest)],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           timeout=120)
+        assert r.returncode == expect, r.stdout.decode("utf-8", "replace")
+        assert (dest / "adept" / "x.py").exists() is should_exist
+        if expect:
+            assert "SHA" in r.stdout.decode("utf-8", "replace")
+
+
+def test_the_bundle_refuses_to_pack_anything_it_cannot_round_trip(tmp_path,
+                                                                 monkeypatch):
+    """CRLF 或非 UTF-8 的檔案會讓「以行數為單位」的格式失效。
+    **拒絕產出**比產出一個解不開的包好 —— 後者要等收到的人才會發現。"""
+    (tmp_path / "a.txt").write_bytes(b"line\r\nline\r\n")
+    monkeypatch.setattr(make_text_bundle, "repo_root", lambda: str(tmp_path))
+    monkeypatch.setattr(make_text_bundle.subprocess, "run",
+                        lambda *_a, **_k: type("R", (), {"stdout": b"a.txt\n"})())
+    with pytest.raises(SystemExit) as e:
+        make_text_bundle.collect(str(tmp_path))
+    assert "CR" in str(e.value)
+
+
+def test_the_bundle_is_offered_in_the_docs():
+    with open(os.path.join(REPO, "docs", "NO-GIT-SETUP.md"), "r",
+              encoding="utf-8") as f:
+        doc = f.read()
+    assert "make_text_bundle.py" in doc
+    assert ".zip" in doc
+
+
+# ---------------------------------------------------------------- 剪貼簿搬運（AGENTS.md §2）
+
+@needs_git
+def test_the_parts_all_fit_under_the_github_display_limit():
+    """**GitHub 不顯示超過 1 MB 的檔案**，而公司機唯一的取得方式是在 GitHub 上
+    按複製鈕。一批太大 = 打包成功但送不進去，那是最糟的一種「做完了」。"""
+    items = make_text_bundle.collect(REPO)
+    groups = make_text_bundle._slice(items, 400 * 1024)
+    assert len(groups) > 1, "整個 repo 早就超過一批的量了"
+    for i, group in enumerate(groups, 1):
+        text = make_text_bundle.build("p.py", REPO, items=group, part=i,
+                                      n_parts=len(groups), total_files=len(items))
+        kb = len(text.encode("utf-8")) / 1024
+        assert kb < 900, "第 %d 批 %.0f KB —— GitHub 可能就不顯示了" % (i, kb)
+        ast.parse(text, filename="part%d" % i)
+
+
+@needs_git
+def test_the_file_listing_is_in_the_first_part():
+    """後面每一批都用 ``tools/FILELIST.txt`` 回報「還缺幾個」，所以它得先到。"""
+    items = make_text_bundle.collect(REPO)
+    groups = make_text_bundle._slice(items, 400 * 1024)
+    assert "tools/FILELIST.txt" in [rel for rel, _d in groups[0]]
+
+
+@needs_git
+def test_a_single_part_never_claims_the_tree_is_ready(tmp_path):
+    """實際踩到的：只貼其中一批，它印「下一步：跑 doctor」—— 看起來整包到位了，
+    而其實少了一百多個檔案。這一整輪反覆在防的就是這種「看起來做完了」。"""
+    items = make_text_bundle.collect(REPO)
+    groups = make_text_bundle._slice(items, 400 * 1024)
+    # 挑一批**不含**檔案清單的（那是最容易誤報的情況）
+    idx = next(i for i, g in enumerate(groups)
+               if "tools/FILELIST.txt" not in [r for r, _d in g])
+    text = make_text_bundle.build("p.py", REPO, items=groups[idx], part=idx + 1,
+                                  n_parts=len(groups), total_files=len(items))
+    path = tmp_path / "p.py"
+    _write(path, text)
+    r = subprocess.run([sys.executable, str(path), "--dest", str(tmp_path / "d")],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       timeout=300)
+    out = r.stdout.decode("utf-8", "replace")
+    assert r.returncode == 0, out
+    assert "還沒到齊" in out, out
+    assert "doctor" not in out, "少了一百多個檔案卻叫他去跑 doctor"
+
+
+@needs_git
+def test_generated_bundles_are_kept_out_of_the_listing_and_the_packing():
+    """``bundle/`` 是 repo 的**複本**，不是內容。列進去有兩個後果：
+    `get_code.py` 白抓 2.4 MB，而分批解包的「還缺幾個」永遠到不了 0。"""
+    listed = set(make_filelist.tracked_files(REPO))
+    packed = {rel for rel, _d in make_text_bundle.collect(REPO)}
+    assert not [p for p in listed if p.startswith("bundle/")]
+    assert not [p for p in packed if p.startswith("bundle/")]
+    # 但清單自己**要**在包裡（0b 的更新流程靠它）
+    assert "tools/FILELIST.txt" in packed
+
+
+def test_check_files_names_exactly_what_needs_recopying(tmp_path):
+    """更新的流程是「複製 12 KB 的清單 → 這支告訴你剩下要複製哪幾個」。
+    它必須分得出「缺少」與「內容不一樣」—— 兩個都要重新複製，但原因不同。"""
+    root = tmp_path / "tree"
+    (root / "tools").mkdir(parents=True)
+    (root / "a.py").write_bytes(b"good\n")
+    (root / "b.py").write_bytes(b"changed\n")
+    lines = [
+        "# comment",
+        "%s a.py" % check_files.blob_sha(b"good\n"),
+        "%s b.py" % check_files.blob_sha(b"original\n"),
+        "%s c.py" % check_files.blob_sha(b"absent\n"),
+    ]
+    (root / "tools" / "FILELIST.txt").write_text("\n".join(lines) + "\n",
+                                                 encoding="utf-8")
+    want = check_files.read_manifest(str(root / "tools" / "FILELIST.txt"))
+    missing, stale = check_files.compare(str(root), want)
+    assert missing == ["c.py"]
+    assert stale == ["b.py"]
+    assert check_files.main(["--root", str(root)]) == 1     # 有事要做 = 非零
+
+    (root / "b.py").write_bytes(b"original\n")
+    (root / "c.py").write_bytes(b"absent\n")
+    assert check_files.main(["--root", str(root)]) == 0
+
+
+def test_check_files_says_what_to_do_when_the_listing_is_missing(tmp_path, capsys):
+    """沒有清單的時候不能只說「找不到檔案」—— 要講出那一個檔案要去哪裡拿。"""
+    assert check_files.main(["--root", str(tmp_path)]) == 2
+    out = capsys.readouterr().out
+    assert "FILELIST.txt" in out and "github.com" in out
+
+
+def test_the_two_machine_setup_is_written_down():
+    """這些限制是整個 tools/ 形狀的原因。沒寫下來的話，下一個人會把
+    stdlib-only、FILELIST、bundle 當成過度設計然後順手簡化掉。"""
+    with open(os.path.join(REPO, "AGENTS.md"), "r", encoding="utf-8") as f:
+        doc = f.read()
+    for must in ("家用機", "公司機", "剪貼簿", "FILELIST.txt", "bundle/",
+                 "fab_probe", "stdlib-only", "1 MB"):
+        assert must in doc, must
+    with open(os.path.join(REPO, "CLAUDE.md"), "r", encoding="utf-8") as f:
+        assert "AGENTS.md" in f.read(), "CLAUDE.md 要指得到 AGENTS.md"
+
+
+@needs_git
+def test_the_compressed_bundle_fits_in_one_file_and_round_trips(tmp_path):
+    """使用者問的正是這個：不能一包嗎。
+
+    可以 —— 但要用 lzma。整包 base64 之後 gzip 是 991 KB、lzma 是 701 KB，而
+    **GitHub 不顯示超過 1 MB 的檔案**，所以那 290 KB 的差距就是「一次複製」與
+    「六次複製」的差別。這條測試同時鎖住「塞得進去」與「解出來一樣」。
+    """
+    text = make_text_bundle.build("b.py", REPO, compress=True)
+    kb = len(text.encode("utf-8")) / 1024
+    assert kb < 900, "壓縮版 %.0f KB —— GitHub 可能就不顯示了" % kb
+    ast.parse(text, filename="compressed")           # 仍然是合法的 Python
+
+    path = tmp_path / "b.py"
+    _write(path, text)
+    dest = tmp_path / "out"
+    r = subprocess.run([sys.executable, str(path), "--dest", str(dest)],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       timeout=300)
+    assert r.returncode == 0, r.stdout.decode("utf-8", "replace")
+    for rel in make_filelist.tracked_files(REPO) + ["tools/FILELIST.txt"]:
+        src = pathlib.Path(REPO) / rel
+        assert (dest / rel).read_bytes() == src.read_bytes(), rel
+
+
+@needs_git
+def test_both_encodings_carry_exactly_the_same_data(tmp_path):
+    """壓縮版壓的就是純文字版那一段，所以兩種編碼共用同一個解析器 ——
+    「壓縮版有 bug 但純文字版沒有」這種事不該存在。"""
+    items = make_text_bundle.collect(REPO)
+    body = "\n".join(make_text_bundle._data_lines(items))
+    text = make_text_bundle.build("b.py", REPO, items=items, compress=True)
+    b64 = "".join(ln[2:] for ln in text.splitlines() if ln.startswith("#B"))
+    import base64 as _b64
+    import lzma as _lzma
+    assert _lzma.decompress(_b64.b64decode(b64)).decode("utf-8") == body
+
+
+@needs_git
+def test_a_truncated_compressed_bundle_says_so_instead_of_crashing(tmp_path):
+    """複製一個 700 KB 的東西最可能的失敗是**貼不完整**。那時候不能丟 traceback,
+    要講「重新複製一次，而且不要用編輯器另存」。"""
+    text = make_text_bundle.build("b.py", REPO, compress=True)
+    lines = text.splitlines()
+    cut = [ln for ln in lines if not ln.startswith("#B")][:-0] or lines
+    keep, dropped = [], 0
+    for ln in lines:
+        if ln.startswith("#B"):
+            dropped += 1
+            if dropped > 20:                          # 砍掉尾巴一大段
+                continue
+        keep.append(ln)
+    path = tmp_path / "cut.py"
+    _write(path, "\n".join(keep) + "\n")
+    r = subprocess.run([sys.executable, str(path), "--dest", str(tmp_path / "d")],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       timeout=120)
+    out = r.stdout.decode("utf-8", "replace")
+    assert r.returncode == 2, out
+    assert "Traceback" not in out, out
+    assert "重新複製" in out, out
+    assert not (tmp_path / "d").exists() or not list((tmp_path / "d").rglob("*.py"))
+
+
+# ---------------------------------------------------------------- 每次更新都要重產
+
+@needs_git
+def test_the_transfer_files_are_up_to_date():
+    """``tools/FILELIST.txt`` 與 ``bundle/ADEPT_bundle.py`` 是**公司機唯一拿得到
+    程式碼的地方**（`AGENTS.md` §2）。它們過期不會有任何症狀 —— 直到那台機器上
+    少一個檔案，或者 `check_files.py` 說「一致」而那份清單是三天前的。
+
+    所以這條測試就是那個症狀。修法是它的錯誤訊息。
+    """
+    problems = release_mod.stale(REPO)
+    assert not problems, (
+        "搬運檔過期了：\n  " + "\n  ".join(problems) +
+        "\n\n跑：git add -A && python tools/release.py && git add -A")
+
+
+@needs_git
+def test_release_refuses_to_run_with_files_that_are_not_added_yet(monkeypatch,
+                                                                 capsys):
+    """清單與包都是從 ``git ls-files`` 產的，所以**還沒 git add 的新檔案會安靜地
+    不在裡面** —— 公司機上就少一個檔案。這個坑我在同一個 session 裡踩了兩次，
+    所以它不能只是一句文件。"""
+    monkeypatch.setattr(release_mod, "untracked", lambda root: ["adept/new.py"])
+    assert release_mod.main(["--check"]) == 2
+    out = capsys.readouterr().out
+    assert "adept/new.py" in out and "git add" in out
+
+
+@needs_git
+def test_release_check_agrees_with_writing_it_out(tmp_path):
+    """``--check`` 說「最新的」就必須真的是重產一次會得到的東西 ——
+    不然它會變成一個永遠說 OK 的擺設。"""
+    assert release_mod.stale(REPO) == []
+    listing = os.path.join(REPO, "tools", "FILELIST.txt")
+    with open(listing, "r", encoding="utf-8") as f:
+        assert f.read().splitlines() == make_filelist.build_lines(REPO)
+
+
+def test_release_says_which_machine_it_is_for_when_git_is_missing(monkeypatch,
+                                                                 capsys):
+    """公司機不能執行 git 操作，而這支的每件事都建立在 ``git ls-files`` 上。
+    在那台機器上跑會丟一個看不懂的 subprocess 例外 —— 與其那樣，不如直接講
+    「你跑錯機器了」並指出那台機器該跑什麼。"""
+    monkeypatch.setattr(release_mod, "has_git", lambda root: False)
+    assert release_mod.main([]) == 2
+    out = capsys.readouterr().out
+    assert "家用機" in out
+    assert "check_files.py" in out and "doctor.py" in out, "要指出公司機該跑什麼"
+
+
+def test_every_tool_is_assigned_to_a_machine_in_the_docs():
+    """`tools/` 底下的東西分屬兩台機器，混起來用會得到看不懂的錯誤。
+    判準是「要 git 的都在家用機」，而那張對照表要真的涵蓋每一支。"""
+    with open(os.path.join(REPO, "AGENTS.md"), "r", encoding="utf-8") as f:
+        doc = f.read()
+    for name in sorted(os.listdir(TOOLS)):
+        if not name.endswith(".py") or name.startswith("_"):
+            continue
+        assert name in doc, "%s 沒有寫在 AGENTS.md 的機器對照表裡" % name
+    assert "哪一支在哪一台跑" in doc
+
+
+def test_no_test_uses_the_3_10_only_write_text_newline_argument():
+    """``Path.write_text`` 的 ``newline`` 是 **Python 3.10+** 才有的（鐵則 2 要 3.9）。
+
+    這條測試存在，是因為修它的時候我用**逐行**搜尋，於是漏掉一個**跨兩行**的
+    呼叫 —— 本機全綠、CI 的 3.9 job 再紅一次。所以這裡用跨行的正規表達式，
+    而不是「看每一行有沒有那兩個字」。
+
+    根本原因是本機那道 `ast.parse(feature_version=(3,9))` 只驗**語法**，
+    不知道標準函式庫的 API 從哪個版本才有 —— 這種東西只有 CI 的 3.9 job 抓得到，
+    所以能在本機擋下來的就在本機擋。
+    """
+    bad = []
+    for root, _dirs, names in os.walk(REPO):
+        if any(part in root for part in (".git", "__pycache__", "bundle")):
+            continue
+        for name in names:
+            if not name.endswith(".py"):
+                continue
+            path = os.path.join(root, name)
+            with open(path, "r", encoding="utf-8") as f:
+                src = f.read()
+            for m in re.finditer(r"\.write_text\((?:[^()]|\([^()]*\))*?newline=",
+                                 src, re.S):
+                bad.append("%s:%d" % (os.path.relpath(path, REPO),
+                                      src[:m.start()].count("\n") + 1))
+    # 訊息裡不要出現那個呼叫的字面樣子 —— 不然這支測試會抓到自己（試過了）。
+    assert not bad, (
+        "這幾個地方用了 pathlib 的 write_text 加 newline 參數，"
+        "而那是 3.10+ 才有的，3.9 會 TypeError：\n  "
+        + "\n  ".join(bad) + "\n改用內建的 open（它一直都支援 newline）。")

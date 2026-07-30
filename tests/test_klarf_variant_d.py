@@ -8,6 +8,12 @@
 於是**每一列都被判定違法**，`lint()` 對一份完全正常的檔案報 rowlen error。
 
 對使用者的影響：Export 精靈在寫回前跑健檢，會對真實檔案跳出嚇人的紅字。
+
+**這份 fixture 的識別碼是遮蔽過的**（Lot／Wafer／機台／device／recipe 名稱／
+廠區代號／缺陷分類名稱一律換成合成值，等長替換）。下面每一條斷言看的都是
+**結構** —— 版本、欄位佈局、ImageList 在第幾欄、round-trip 逐位元組相同 ——
+沒有一條看值，所以遮蔽不影響這支測試想守的東西。
+守門的測試在 `tests/test_no_real_fab_data.py`（鐵則 8）。
 """
 from __future__ import annotations
 

@@ -1,10 +1,11 @@
-# F7-14 驗收：從畫布上就做得完一條 pipeline。
+# F7-14 驗收：從畫布上就做得完一條 pipeline（F7-18 修訂）。
 """這一輪補的是「n8n 的手感」裡真正有功能的那部分 —— 不是外觀。
 
-以前要加一張卡，使用者得回左邊的卡片庫，從 22 張裡自己判斷哪一張接得上目前
-這條流。但**「接得上」這件事引擎本來就知道**（`Step.resolve_reads`）。
-所以「+」跳出來的清單只列現在就成立的卡，而且會把使用者按的那個埠的影像流
-帶進新卡的主要輸入 —— 否則那顆「+」只是一個比較短的「新增卡片」。
+**F7-18 拿掉了輸出埠上的「+」**（使用者的原話：那個加號會永久存在，還是從旁邊
+的卡片庫手動加就好）。它做對的那兩件事沒有跟著消失，只是換了入口：
+`add_card_after` 仍然「接在這一張後面」並且「做在對的那條流上」，而卡片庫在
+選著一張卡的時候就走這條路。埠本身照樣拉得動線 —— 拉線現在還會**指定影像流**
+（見 `test_ui_f7_18_streams_as_nodes.py`）。
 """
 from __future__ import annotations
 
@@ -44,95 +45,35 @@ def window(qapp):
 
 
 # --------------------------------------------------------------------------- #
-# 1. 輸出埠上的「+」
+# 1. 輸出埠（F7-18：不再掛一顆常駐的「+」）
 # --------------------------------------------------------------------------- #
-def test_every_output_port_has_its_own_plus(window):
-    """兩個輸出埠（test / ref）= 兩顆「+」。一顆共用的「+」沒辦法表達
-    「我要對 ref 做這件事」。"""
+def test_the_ports_carry_no_permanent_plus(window):
+    """使用者的原話：「加號會永久存在」。一張畫布上每個輸出埠各掛一顆，
+    等於在主體（節點與連線）旁邊常駐一排跟資料流無關的裝飾。"""
     item = window.pipeline.card(window.model.node_order[0])
     assert item.out_names() == ["test", "ref"]
-    assert len(item.plus_anchors_local()) == 2
+    assert not hasattr(item, "plus_anchors_local")
+    assert not hasattr(item, "plus_at")
 
-    for i, centre in enumerate(item.plus_anchors_local()):
-        assert item.plus_at(centre) == i
-        assert item.boundingRect().contains(centre), (
-            "「+」畫在 boundingRect 外面 —— 拖動節點會留殘影（F7-8/F7-9 的老坑）")
-    # 埠本身仍然拉得動線：兩個命中區不能互相吃掉
-    assert item.plus_at(item.out_anchors_local()[0]) is None
-    assert item.out_port_at(item.out_anchors_local()[0]) == 0
+    # boundingRect 也要跟著縮回來 —— 留著那塊空間會讓節點之間互相吃到點擊。
+    right = item.boundingRect().right()
+    assert right < canvas_mod.NODE_W + canvas_mod._PORT_LABEL_W + 12
 
 
-def test_pressing_the_plus_asks_for_that_port(window):
-    seen = []
-    window.pipeline.add_after_requested.connect(
-        lambda nid, port: seen.append((nid, port)))
-    nid = window.model.node_order[0]
-    item = window.pipeline.card(nid)
-
-    class _Ev:                       # 只要 button() 與 pos() 兩個方法
-        def __init__(self, pos):
-            self._p = pos
-
-        def button(self):
-            from PySide6.QtCore import Qt
-            return Qt.LeftButton
-
-        def pos(self):
-            return self._p
-
-        def accept(self):
-            pass
-
-    item.mousePressEvent(_Ev(item.plus_anchors_local()[1]))
-    assert seen == [(nid, 1)]
+def test_the_ports_themselves_still_start_a_connection(window):
+    """拿掉「+」不能連帶把拉線弄丟 —— 那是畫布唯一的輸入方式。"""
+    item = window.pipeline.card(window.model.node_order[0])
+    for i, anchor in enumerate(item.out_anchors_local()):
+        assert item.out_port_at(anchor) == i
+        assert item.boundingRect().contains(anchor)
 
 
 # --------------------------------------------------------------------------- #
-# 2. 清單只列接得上的
+# 3. 接在哪一張後面、做在哪一條流上
 # --------------------------------------------------------------------------- #
-def test_the_menu_only_offers_cards_that_can_connect_right_now(window):
-    """Load 之後直接放 Subtract 一定缺上游（它吃 diff 之前的 ref_aligned）——
-    那張卡不該出現在「接下來」的清單裡，因為那是使用者現在做不到的事。"""
-    src = window.model.node_order[0]
-    keys = [c["key"] for c in window.cards_addable_after(src)]
-    assert "align" in keys
-    assert "subtract" not in keys, "Subtract 還缺 ref_aligned"
-    assert "blob_segment" not in keys
-    assert "load_patch" not in keys, "一條 pipeline 只有一張 Input 卡"
-
-    a = window.add_card_after(src, "align")
-    keys_after = [c["key"] for c in window.cards_addable_after(a)]
-    assert "subtract" in keys_after, "Align 產出 ref_aligned 之後就接得上了"
-
-
-def test_the_menu_is_ordered_by_stage(window):
-    """清單順序照流程階段（Input→Enhance→Region→Compare→Measure→ADC），
-    不是照字母 —— 使用者腦中的順序是流程。"""
-    from adept.core.pipeline.step import GROUP_ORDER
-
-    cards = window.cards_addable_after(window.model.node_order[0])
-    seen = [c["group"] for c in cards]
-    ranks = [GROUP_ORDER.index(g) for g in seen]
-    assert ranks == sorted(ranks)
-
-
-def test_the_menu_says_which_stream_it_is_about(window):
-    nid = window.model.node_order[0]
-    window._on_add_after(nid, 1)
-    try:
-        texts = [a.text() for a in window._add_after_menu.actions() if a.text()]
-        assert "ref" in texts[0], texts[0]
-        assert "Align" in texts
-    finally:
-        window._add_after_menu.close()
-
-
-# --------------------------------------------------------------------------- #
-# 3. 按哪個埠是有意義的
-# --------------------------------------------------------------------------- #
-def test_the_new_card_works_on_the_stream_you_pressed(window):
-    """從 ref 的埠接出一張 Denoise，結果那張卡做在 test 上 —— 那顆「+」就只是
-    一個比較短的「新增卡片」，而使用者以為他已經講了「對 ref 做」。"""
+def test_the_new_card_works_on_the_stream_it_was_added_for(window):
+    """接在一張做 ref 的卡後面，結果新卡做在 test 上，使用者就得回控制列改參數
+    —— 而那正是他說「變很複雜」的東西。"""
     src = window.model.node_order[0]
     nid = window.add_card_after(src, "denoise", "ref")
     assert window.model.nodes[nid].params["target"] == "ref"
