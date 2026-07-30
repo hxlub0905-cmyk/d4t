@@ -32,6 +32,18 @@
 4. `python ADEPT_bundle.py --list`  ← 先看它會寫哪些檔案，**不寫任何東西**
 5. `python ADEPT_bundle.py`
 
+> ⚠ **記事本另存的時候會偷加 `.txt`。** 它的「存檔類型」預設是「文字文件
+> (\*.txt)」，所以你打 `ADEPT_bundle.py` 會被存成 `ADEPT_bundle.py.txt` ——
+> 而檔案總管預設**把已知副檔名藏起來**，所以看起來完全正常，只有 Python 會說
+> 「No such file or directory」。（實際踩到過。）
+>
+> 避開的方式：另存對話框裡把**存檔類型改成「所有檔案 (\*.\*)」**，
+> 或是**檔名前後加引號**：`"ADEPT_bundle.py"`。
+> 已經存錯了也不用改名 —— Python 不在乎副檔名，直接
+> `python ADEPT_bundle.py.txt` 就會動。
+>
+> 順帶建議把副檔名顯示打開：檔案總管 → 檢視 → 顯示 → 副檔名。
+
 它用 `lzma` + base64 壓過（stdlib，不需要裝東西）。為什麼是 lzma 而不是 gzip：
 gzip 壓完 base64 是 991 KB，太貼近 GitHub 那個 1 MB 的顯示上限；lzma 是 735 KB。
 
@@ -39,15 +51,24 @@ gzip 壓完 base64 是 991 KB，太貼近 GitHub 那個 1 MB 的顯示上限；l
 （檔案最前面約 90 行），而 `--list` 讓你在它寫任何檔案之前就看得到清單。
 想逐字讀過全部內容的話用下面那個純文字版。
 
-### 0a-2. 同一件事的純文字版：六批
+### 0a-2. 同一件事的純文字版：六批（要先在家用機產）
 
-`bundle/ADEPT_part1of6.py` … `part6of6.py`：**沒有壓縮、沒有 base64**，
+想在跑之前**逐字讀過內容**的話，在家用機上跑：
+
+```
+python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
+```
+
+會得到 `ADEPT_part1of6.py` … `part6of6.py`：**沒有壓縮、沒有 base64**，
 每個檔案的內容一行一行原樣躺在裡面（每行前面加一個 `#`，所以整份仍是合法的
 Python），記事本打開往下捲就看得到。代價是 6 次複製。
 
+（這個版本**不固定放在 repo 裡** —— 它每次更新會動到 2.4 MB，
+diff 全是噪音。需要的時候再產。）
+
 對每一批做同一件事：
 
-1. 在瀏覽器打開 `https://github.com/hxlub0905-cmyk/ADEPT/blob/main/bundle/ADEPT_part1of6.py`
+1. 在瀏覽器打開那一批的檔案
 2. 按檔案右上角的**複製鈕**（從已經載入的網頁複製，不會再連別的主機）
 3. 貼進記事本，存成同名的 `.py`
 4. `python ADEPT_part1of6.py`

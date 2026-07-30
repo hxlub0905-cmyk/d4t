@@ -184,18 +184,18 @@ python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 
     --workers 4 --cache /tmp/cache --db /tmp/runs.db --csv features.csv
 ```
 
-**新增或刪除檔案之後**要更新受限機器用的檔案清單（順序是 `git add` 之後才跑，
-因為它讀的是 `git ls-files`）：
+**每次改完之後**要重產公司機拿得到的那兩樣東西（順序是 `git add` 之後才跑，
+因為它們讀的是 `git ls-files`）：
 
 ```bash
-git add -A && python tools/make_filelist.py && git add -A
+git add -A && python tools/release.py && git add -A
 ```
 
 `tests/test_offline_tools.py` 會擋住那份清單腐爛 —— 忘了跑的話，那個檔案在
 「下載被擋、只能用剪貼簿搬」的機器上會**安靜地少掉**（見 §9.5 與 `AGENTS.md`）。
 
-**要把程式碼搬進公司機之前**才需要重打包（會動到 `bundle/` 底下 6 個大檔案，
-所以刻意不自動化 —— 每次 commit 都重產會讓 diff 變成噪音）：
+想要**看得懂的**純文字版（六批，記事本讀得到每個檔案）才另外產 ——
+它每次更新會動到 2.4 MB，所以不固定放在 repo 裡：
 
 ```bash
 python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
