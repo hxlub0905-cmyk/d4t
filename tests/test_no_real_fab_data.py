@@ -96,13 +96,21 @@ def test_fixture_identifier_fields_look_synthetic(path):
 
 
 def test_the_guard_would_actually_catch_a_real_looking_lot(tmp_path):
-    """白名單式的檢查最容易變成「什麼都通過」—— 先證明它擋得下東西。"""
+    """白名單式的檢查最容易變成「什麼都通過」—— 先證明它擋得下東西。
+
+    **反例一律用憑空編的字，不可以用真的。** 這條規則我自己第一版就違反了：
+    負面案例直接寫了真實的 lot 與機台代號，於是這支「防止真實識別碼進 repo」
+    的測試本身變成了真實識別碼進 repo 的管道。抓到它的方式是把整包壓成 zip
+    之後掃一遍 —— 那件事本來就該在推上去之前做。
+
+    反例要的是**形狀**（不符合合成命名規則），不是內容。
+    """
     assert _ok("AA0000.0X") is True
     assert _ok("DEV001_LAYERA_STP_BSTP_CST_DS01_E01") is True
-    # 真實 KLARF 長這樣：lot 帶製程／層別編碼，機台是廠內代號
-    assert _ok("AA0000.0X") is False
-    assert _ok("XXCMP_SCF_XXEX_WPH_HC8K_PV10") is False
-    assert _ok("TOOL01") is False
+    # 憑空編的，但形狀像真的：lot 帶尾碼、recipe 帶層別／步驟、機台是四碼＋數字
+    assert _ok("QQ1234.5Z") is False
+    assert _ok("WWXY_ZZZ_QQQ_VVV_UUU_TT99") is False
+    assert _ok("ZZZZ99") is False
 
 
 def test_at_least_one_fixture_is_actually_checked():
