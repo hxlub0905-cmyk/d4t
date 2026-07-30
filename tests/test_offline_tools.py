@@ -28,10 +28,12 @@ GETCODE_PS = os.path.join(TOOLS, "get_code.ps1")
 FILELIST = os.path.join(TOOLS, "make_filelist.py")
 BUNDLE = os.path.join(TOOLS, "make_text_bundle.py")
 CHECK = os.path.join(TOOLS, "check_files.py")
+RELEASE = os.path.join(TOOLS, "release.py")
 #: 「在受限機器上、套件裝好之前就要能跑」的那幾支 —— 所以 stdlib-only + 3.9。
 #: get_code.py 是第四支（F7-18 之後補的）：它比其他三支更早跑，
 #: 因為它的工作是把程式碼弄上那台機器。
-ALL_TOOLS = (FETCH, INSTALL, DOCTOR, GETCODE, FILELIST, BUNDLE, CHECK)
+ALL_TOOLS = (FETCH, INSTALL, DOCTOR, GETCODE, FILELIST, BUNDLE, CHECK,
+             RELEASE)
 
 if TOOLS not in sys.path:
     sys.path.insert(0, TOOLS)
@@ -43,6 +45,7 @@ import get_code                       # noqa: E402
 import make_filelist                  # noqa: E402
 import make_text_bundle               # noqa: E402
 import check_files                    # noqa: E402
+import release as release_mod          # noqa: E402
 
 REQUIRED_DEPS = ("numpy", "cv2", "tifffile", "PySide6", "openpyxl")
 
@@ -406,10 +409,16 @@ def _module_level_imports(path):
     return found
 
 
+def _sibling_tools():
+    """``tools/`` 底下的其他工具。互相 import 是可以的 —— 這條規則要禁的是
+    **第三方套件**（那台機器上可能一個都裝不起來），不是同一個資料夾裡的同伴。"""
+    return {os.path.splitext(f)[0] for f in os.listdir(TOOLS) if f.endswith(".py")}
+
+
 @pytest.mark.parametrize("script", ALL_TOOLS)
 def test_tools_import_only_stdlib_at_module_level(script):
     imports = _module_level_imports(script)
-    extra = imports - _stdlib_names()
+    extra = imports - _stdlib_names() - _sibling_tools()
     assert not extra, "%s 的模組層 import 了非標準函式庫：%s（請改成函式內 lazy import）" % (
         os.path.basename(script), sorted(extra))
 
@@ -870,6 +879,17 @@ def test_an_absolute_dest_is_not_glued_onto_the_current_directory():
     assert REPO not in out, "絕對路徑又被接到目前目錄後面了"
 
 
+
+def _write(path, text):
+    """``Path.write_text`` 的 ``newline`` 參數是 **Python 3.10+** 才有的，
+    而這個專案要相容 3.9（鐵則 2）。內建的 ``open`` 一直都支援它。
+
+    這個坑本機抓不到：`ast.parse(feature_version=(3,9))` 那道守門只檢查**語法**，
+    不檢查標準函式庫的 API 有沒有那麼早就存在。真正驗 3.9 的是 CI 的 3.9 job。
+    """
+    with open(str(path), "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+
 # ---------------------------------------------------------------- 單檔純文字包
 
 @needs_git
@@ -944,7 +964,7 @@ def test_a_tampered_bundle_refuses_to_land_anything(tmp_path):
 
     for text, expect, should_exist in ((good, 0, True), (bad, 1, False)):
         path = tmp_path / ("b_%d.py" % expect)
-        path.write_text(text, encoding="utf-8", newline="\n")
+        _write(path, text)
         dest = tmp_path / ("d_%d" % expect)
         r = subprocess.run([sys.executable, str(path), "--dest", str(dest)],
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -1013,7 +1033,7 @@ def test_a_single_part_never_claims_the_tree_is_ready(tmp_path):
     text = make_text_bundle.build("p.py", REPO, items=groups[idx], part=idx + 1,
                                   n_parts=len(groups), total_files=len(items))
     path = tmp_path / "p.py"
-    path.write_text(text, encoding="utf-8", newline="\n")
+    _write(path, text)
     r = subprocess.run([sys.executable, str(path), "--dest", str(tmp_path / "d")],
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                        timeout=300)
@@ -1094,7 +1114,7 @@ def test_the_compressed_bundle_fits_in_one_file_and_round_trips(tmp_path):
     ast.parse(text, filename="compressed")           # 仍然是合法的 Python
 
     path = tmp_path / "b.py"
-    path.write_text(text, encoding="utf-8", newline="\n")
+    _write(path, text)
     dest = tmp_path / "out"
     r = subprocess.run([sys.executable, str(path), "--dest", str(dest)],
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -1133,7 +1153,7 @@ def test_a_truncated_compressed_bundle_says_so_instead_of_crashing(tmp_path):
                 continue
         keep.append(ln)
     path = tmp_path / "cut.py"
-    path.write_text("\n".join(keep) + "\n", encoding="utf-8", newline="\n")
+    _write(path, "\n".join(keep) + "\n")
     r = subprocess.run([sys.executable, str(path), "--dest", str(tmp_path / "d")],
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                        timeout=120)
@@ -1142,3 +1162,41 @@ def test_a_truncated_compressed_bundle_says_so_instead_of_crashing(tmp_path):
     assert "Traceback" not in out, out
     assert "重新複製" in out, out
     assert not (tmp_path / "d").exists() or not list((tmp_path / "d").rglob("*.py"))
+
+
+# ---------------------------------------------------------------- 每次更新都要重產
+
+@needs_git
+def test_the_transfer_files_are_up_to_date():
+    """``tools/FILELIST.txt`` 與 ``bundle/ADEPT_bundle.py`` 是**公司機唯一拿得到
+    程式碼的地方**（`AGENTS.md` §2）。它們過期不會有任何症狀 —— 直到那台機器上
+    少一個檔案，或者 `check_files.py` 說「一致」而那份清單是三天前的。
+
+    所以這條測試就是那個症狀。修法是它的錯誤訊息。
+    """
+    problems = release_mod.stale(REPO)
+    assert not problems, (
+        "搬運檔過期了：\n  " + "\n  ".join(problems) +
+        "\n\n跑：git add -A && python tools/release.py && git add -A")
+
+
+@needs_git
+def test_release_refuses_to_run_with_files_that_are_not_added_yet(monkeypatch,
+                                                                 capsys):
+    """清單與包都是從 ``git ls-files`` 產的，所以**還沒 git add 的新檔案會安靜地
+    不在裡面** —— 公司機上就少一個檔案。這個坑我在同一個 session 裡踩了兩次，
+    所以它不能只是一句文件。"""
+    monkeypatch.setattr(release_mod, "untracked", lambda root: ["adept/new.py"])
+    assert release_mod.main(["--check"]) == 2
+    out = capsys.readouterr().out
+    assert "adept/new.py" in out and "git add" in out
+
+
+@needs_git
+def test_release_check_agrees_with_writing_it_out(tmp_path):
+    """``--check`` 說「最新的」就必須真的是重產一次會得到的東西 ——
+    不然它會變成一個永遠說 OK 的擺設。"""
+    assert release_mod.stale(REPO) == []
+    listing = os.path.join(REPO, "tools", "FILELIST.txt")
+    with open(listing, "r", encoding="utf-8") as f:
+        assert f.read().splitlines() == make_filelist.build_lines(REPO)

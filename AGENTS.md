@@ -54,8 +54,9 @@
      （gzip 壓完是 991 KB —— 太貼近上限，所以是 lzma。）代價是內容變成不可讀的
      base64；但**解包程式本身仍然是可讀的 Python**，而且 `--list` 可以在寫任何
      檔案之前先列出它要寫什麼。
-   - `ADEPT_part1of6.py` … `part6of6.py`：純文字、每批 < 420 KB、**記事本打開就
-     讀得到每個檔案**。要在跑之前逐字看過內容的時候用這個。
+   - `--split 400` 產的純文字六批：每批 < 420 KB、**記事本打開就讀得到每個
+     檔案**。要在跑之前逐字看過內容的時候才產（它每次更新會動到 2.4 MB，
+     所以不固定放在 repo 裡）。
 2. **一次複製一個檔案。** 178 個檔案不可能一個一個貼，所以要有整包的形式；
    但更新的時候也不該重跑整套搬運，所以要有「只有這幾個變了」的機制。
 
@@ -64,7 +65,7 @@
 | 情況 | 用什麼 | 成本 |
 |---|---|---|
 | **第一次搬整包** | `bundle/ADEPT_bundle.py`（壓縮成一個檔案）| **1 次複製** |
-| 同上，但想先讀過內容 | `bundle/ADEPT_part1of6.py` … `part6of6.py`（純文字，看得懂）| 6 次複製 |
+| 同上，但想先讀過內容 | 在家用機跑 `make_text_bundle.py --split 400` 產純文字六批 | 6 次複製 |
 | **之後更新** | 複製 `tools/FILELIST.txt`（12 KB）→ `python tools/check_files.py` → 它列出要重新複製哪幾個 | 1 次小複製 + 幾次針對性複製 |
 | **只想跑格式探測** | 直接複製 `fab_probe/probe_*.py`（各 24–46 KB，stdlib-only 單檔，**不需要整個 repo**） | 1–3 次複製 |
 
@@ -86,7 +87,7 @@
 | 設計 | 為什麼 |
 |---|---|
 | `tools/` 底下每一支都是 **stdlib-only** | 它們要在「套件還沒裝好」或「根本裝不了」的機器上跑。有測試（`test_offline_tools.py`）掃 module-level import 把這條鎖住 |
-| **Python 3.9 相容語法** | 公司機的 Python 版本不由我們決定。測試用 `ast.parse(feature_version=(3,9))` 掃全套件 |
+| **Python 3.9 相容** | 公司機的 Python 版本不由我們決定。⚠ 本機那道 `ast.parse(feature_version=(3,9))` **只檢查語法，不檢查標準函式庫的 API**（實例：`Path.write_text(newline=…)` 是 3.10+ 才有的，本機全綠、CI 的 3.9 job 才紅）。真正驗 3.9 的是 CI |
 | 整個 repo **只有純文字檔** | 剪貼簿通道只搬得動文字；而且純文字才能在 GitHub 上被看到與複製 |
 | `tools/FILELIST.txt`（git blob SHA） | 「哪幾個檔案變了」的唯一依據。它腐爛的代價是**公司機上安靜地少一個檔案** |
 | 每一種搬運方式都**驗 SHA** | 剪貼簿與 proxy 都可能安靜地改掉內容（截斷、換行、攔截頁）。驗不過就不落地 |
@@ -95,20 +96,29 @@
 
 ---
 
-## 4. 每次改動之後要做的兩件事
+## 4. 每次改動之後的固定動作
 
 ```bash
-# 1. 檔案清單（新增/刪除檔案之後；順序是 git add 之後才跑）
-git add -A && python tools/make_filelist.py && git add -A
-
-# 2. 只有在要搬進公司機之前才需要重打包（兩種形式都要重產）
-python tools/make_text_bundle.py --out bundle/ADEPT_bundle.py --compress
-python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
+git add -A && python tools/release.py && git add -A
 ```
 
-第 1 件有測試守著（忘了跑會紅）。第 2 件**刻意沒有自動化** ——
-`bundle/` 裡是整個 repo 的複本（壓縮版 735 KB + 純文字六批 2.4 MB），
-每次 commit 都重產會讓 diff 變成噪音。需要搬運的時候才跑。
+一行做完兩件事，**順序不能顛倒**（包裡面含著那份清單）：
+
+1. `tools/FILELIST.txt` —— 公司機用它判斷「哪幾個檔案要重新複製」
+2. `bundle/ADEPT_bundle.py` —— 整包壓成一個 738 KB 的 `.py`，按複製鈕就搬得走
+
+`git add` 要在前面：兩者都是從 `git ls-files` 產的，**還沒 add 的新檔案會安靜地
+不在裡面** —— 公司機上就少一個檔案。`release.py` 會擋下這種情況並叫你先 add。
+
+**有測試守著**（`test_the_transfer_files_are_up_to_date`）：忘了跑會紅，
+而錯誤訊息就是上面那一行。過期不會有任何症狀，所以不能靠記得。
+
+純文字六批版（`--split 400`，記事本讀得懂）**不再固定產出** —— 它每次更新會動到
+2.4 MB，diff 全是噪音。需要逐字審內容的時候再產：
+
+```bash
+python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
+```
 
 ---
 
