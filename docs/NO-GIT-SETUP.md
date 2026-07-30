@@ -56,6 +56,9 @@ GitHub 產生的 zip **不含 `.git` 資料夾**，所以裡面 174 個檔案全
   python get_code.py --cafile corp.pem  # 公司有 TLS 中間攔截時
   ```
 
+  抓下來的內容跟 GitHub 上**逐位元組相同**（實測比對過），而且那一份自己
+  跑得起來（`pytest -q` 只會 skip 掉兩支需要 git 的清單檢查）。
+
   它會對每個檔案驗 **git blob SHA**。這不是龜毛 —— 被擋的 proxy 常常回一頁
   登入頁或警告 HTML，而且是 **HTTP 200**。那種東西寫進 `.py` 之後，症狀會變成
   「程式碼看起來都在，但 import 就爆語法錯誤」，而你完全不會歸因到下載。
