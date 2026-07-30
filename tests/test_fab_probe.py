@@ -28,9 +28,9 @@ N_EBI = 6
 N_RSEM = 4
 
 # 真實感的識別碼（遮蔽測試用）：這些字串預設絕不可以出現在報告裡
-REAL_LOT = "N9Y320.2F"
-REAL_WAFER = "N9Y320.18"
-REAL_DEVICE = "TSXK07NM01"
+REAL_LOT = "AA0000.0X"
+REAL_WAFER = "AA0000.01"
+REAL_DEVICE = "DEVICE0001"
 
 
 # ---------------------------------------------------------------- fixtures
@@ -222,9 +222,9 @@ def test_tiff_text_tag_redaction_rule():
         spec.loader.exec_module(mod)
     finally:
         sys.dont_write_bytecode = saved
-    text = 'LotID N9Y320.2F PixelSize=3.25nm Mag=50000 Cam1 SN=AB12345678'
+    text = 'LotID AA0000.0X PixelSize=3.25nm Mag=50000 Cam1 SN=AB12345678'
     red = mod.redact_text(text)
-    assert "N9Y320.2F" not in red and "AB12345678" not in red
+    assert "AA0000.0X" not in red and "AB12345678" not in red
     assert "3.25nm" in red and "50000" in red          # 數值一定要保留
     assert "PixelSize" in red and "LotID" in red       # 欄位名保留
     assert mod.redact_text(text, include_ids=True) == text

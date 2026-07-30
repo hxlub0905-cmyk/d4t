@@ -1,14 +1,14 @@
 Record FileRecord  "1.8"
 {
-  Record LotRecord "N9Y320.2F"
+  Record LotRecord "AA0000.0X"
   {
-    Record WaferRecord "N9Y320.18"
+    Record WaferRecord "AA0000.01"
     {
       Field DieOrigin 2 {0, 0}
       Field OrientationInstructions 1 {""}
-      Field ProcessEquipmentState 7 {"KPSS41", "", "", "", "", "", ""}
+      Field ProcessEquipmentState 7 {"TOOL01", "", "", "", "", "", ""}
       Field SampleCenterLocation 2 {20434404, 10607650}
-      Field ScribeID 1 {"N9Y320.18"}
+      Field ScribeID 1 {"AA0000.01"}
       Field SlotNumber 1 {1}
 
       List DefectList
@@ -216,18 +216,18 @@ Record FileRecord  "1.8"
         }
       }
     }
-    Field DeviceID 1 {"TMVG10"}
+    Field DeviceID 1 {"DEV001"}
     Field DiePitch 2 {23376636, 32874750}
-    Field FabID 1 {"FAB12"}
-    Field InspectionStationID 3 {"KPSS41", "PRIMEVISION", "KPSS41"}
+    Field FabID 1 {"FAB01"}
+    Field InspectionStationID 3 {"TOOL01", "PRIMEVISION", "TOOL01"}
     Field OrientationMarkLocation 1 {0}
-    Field RecipeID 3 {"TMVG10_MGCMP_SCF_MGEX_WPH_HC8K_PV10", "01-29-2026", "12:40:34"}
+    Field RecipeID 3 {"DEV001_LAYERA_STP_BSTP_CST_DS01_E01", "01-01-2026", "12:40:34"}
     Field RecipeVersion 3 {"", "", ""}
-    Field ResultTimestamp 2 {"04-12-2026", "13:17:11"}
+    Field ResultTimestamp 2 {"01-02-2026", "13:17:11"}
     Field SampleOrientationMarkType 1 {"NOTCH"}
     Field SampleSize 2 {300000000, 0}
     Field SampleType 1 {"WAFER"}
-    Field StepID 1 {"MGCMP_SCF_MGEX_WPH_HC8K_PV10"}
+    Field StepID 1 {"LAYERA_STP_BSTP_CST_DS01_E01"}
 
     List ClassLookupList
     {
@@ -236,11 +236,11 @@ Record FileRecord  "1.8"
       {
          0 "No Review" "";
          212 "Grey VC" "";
-         1076 "CMG Cut fail" "";
+         1076 "Class A fail" "";
       }
     }
   }
-  Field FileTimestamp 2 {"05-20-2026", "14:12:33"}
+  Field FileTimestamp 2 {"01-03-2026", "14:12:33"}
 
 }
 EndOfFile;

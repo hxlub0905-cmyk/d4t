@@ -14,8 +14,47 @@ ADEPT 完全支援這種用法 —— 整個 repo 只有純文字檔（`.py` / `
 **Download ZIP** → 解壓到任意資料夾。
 
 解壓後會得到 `ADEPT-main\`，裡面就是完整程式碼。
-（GitHub 產生的 zip **不含 `.git` 資料夾**，所以是純文字包，
-企業 DLP 掃描不會有問題。）
+GitHub 產生的 zip **不含 `.git` 資料夾**，所以裡面 170 個檔案全部是純文字
+（`.py` / `.md` / `.json` / `.toml` / `.txt` / `.yml` / 一份 `.klarf`），約 830 KB。
+
+### 如果 Download ZIP 被公司擋掉
+
+**這件事跟 repo 的內容不一定有關係**，先分辨是哪一種 —— 三種原因的處置完全不同：
+
+| 先做這個測試 | 結果 | 那就是 |
+|---|---|---|
+| 直接開 `https://codeload.github.com/hxlub0905-cmyk/ADEPT/zip/refs/heads/main` | 這個網址被擋，但 `github.com` 的網頁看得到 | **主機層的封鎖**。Download ZIP 其實是從 `codeload.github.com` 出來的（不同主機），公司的 allowlist 常常只放了 `github.com`。請 IT 加 `codeload.github.com` |
+| 隨便下載另一個無關的公開 repo 的 zip | 也被擋 | **政策層面禁止 .zip 這個類別**，跟哪個 repo 無關。走下面的替代路徑 |
+| 上面兩個都正常，只有這個 repo 的 zip 被擋 | — | **DLP 掃到了內容**。看 §「DLP 掃內容」那一段 |
+
+替代路徑（依省事程度排）：
+
+1. **改抓 `.tar.gz`**：把網址的 `/zip/` 換成 `/tar.gz/`（同一台主機，但有些
+   規則只列了 `.zip`）。Windows 的 `tar -xf` 從 Win10 1803 起內建。
+2. **請 IT 放行 `codeload.github.com`**（如果測試指向主機層封鎖，這是根治）。
+3. **逐檔抓純文字**：`raw.githubusercontent.com` 送的是 `text/plain`，DLP 對它的
+   規則跟 `application/zip` 完全不同，常常是通的。170 個檔案手抓不現實，但
+   只要先手抓一支 stdlib-only 的小腳本，剩下的就交給它。需要的話開 issue，
+   我們把那支腳本加進 `tools/`。
+
+### DLP 掃內容
+
+如果只有這個 repo 的 zip 被擋，那要看的是**裡面有沒有公司的識別碼**。
+`tests/fixtures/sample_real.klarf` 是唯一一份真實來源的檔案（它就是這樣抓到
+KLARF variant D 的），它裡面的 Lot／Wafer／機台／device／**recipe 名稱**
+（recipe 名稱通常編碼了層別與製程步驟）與缺陷分類名稱**都已經遮蔽成合成值**，
+而且有一支測試守著（`tests/test_no_real_fab_data.py`）：
+
+```
+pytest -q tests/test_no_real_fab_data.py
+```
+
+加新 fixture 時那支測試會擋下沒遮蔽的值。**遮蔽是等長替換，測試只看結構不看值，
+所以遮蔽不會弄壞任何斷言。**
+
+⚠ 遮蔽只影響「現在的檔案」。**已經推上去的 git 歷史裡還留著原本的值** ——
+DLP 掃的是下載下來的 zip（GitHub 的 zip 不含 `.git`，所以看不到歷史），
+但如果要求是「repo 裡完全不能有」，那需要重寫歷史或把 repo 改成 private。
 
 ## 2. 安裝相依套件
 
