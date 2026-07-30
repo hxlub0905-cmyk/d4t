@@ -2,7 +2,7 @@
 # 由 tools/make_filelist.py 產生；tests/test_offline_tools.py 會擋住它腐爛。
 f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
-b0fb68ad9c930bc3a339b6beaace88a53621e39a AGENTS.md
+09937f7ecbf1c5d74e8b4e61ad85cfe1f494154a AGENTS.md
 49115084f8578e5d852a39462285c104a7468b39 CLAUDE.md
 0e34f6c1f9b0afc82d5ffc4b5bba0533aa14a97e README.md
 3259add5ea7efeac637f05eb5a9f0bef7e8267a4 SESSION_LOG.md
@@ -126,7 +126,7 @@ f99c2421fe691efb20e27f690a066aa2024a325e tests/test_klarf_core.py
 beebe8e22628acc8dff09406c184b3a0ecae0b91 tests/test_klarf_variant_d.py
 66c195b31faf49fd4341defcd22770e86e05c39a tests/test_make_sample.py
 b614d74319ead1329a9b301b5967f2d4d8b5464f tests/test_no_qt.py
-3ca36d76191e3c0c2c801a13720a81874fd847d5 tests/test_no_real_fab_data.py
+33071fd9690ad145172ab6a178471283523e3c75 tests/test_no_real_fab_data.py
 f2f18a59cf739942f573f001c64cd77730bc5b09 tests/test_normalize.py
 9b5177333a44475dcbf3d5d4db4caba87a932aa5 tests/test_offline_tools.py
 e027a9047fa771cca97915c533a7f90198c0fb18 tests/test_period_golden.py
