@@ -67,6 +67,35 @@ GitHub 產生的 zip **不含 `.git` 資料夾**，所以裡面 174 個檔案全
   ⚠ 憑證錯誤請用 `--cafile` 指到公司的根憑證，**不要去關掉 TLS 驗證**
   （那會讓這支腳本變成一個把任意內容寫進磁碟的工具；有測試守著這件事）。
 
+#### 逾時（WinError 10060）＝ 沒走 proxy，不是被擋
+
+**實際遇到過。** 逾時的意思是「封包直接送出去、沒有人回應」。
+如果你的**瀏覽器連得到 GitHub**，那答案幾乎一定是：
+**這台機器要透過公司 proxy 才連得出去，而 Python 沒有走 proxy。**
+
+原因：`urllib` 會讀 `HTTPS_PROXY` 環境變數與 Windows 登錄檔裡**手動設定**的
+proxy，但**讀不到 PAC（自動設定指令碼）** —— 而公司幾乎都用 PAC。
+瀏覽器懂 PAC，Python 不懂，所以同一台機器上一個通一個不通。
+
+`get_code.py` 遇到逾時會自己去登錄檔把 PAC 的網址讀出來告訴你。找 proxy 位址：
+
+```powershell
+netsh winhttp show proxy
+Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' |
+    Select ProxyServer, AutoConfigURL
+pip config list          # pip 連得出去的話，proxy 就在這裡
+```
+
+`AutoConfigURL` 有值就是 PAC：**用瀏覽器打開那個網址**，在裡面找
+`PROXY 主機:埠` 那一行。然後：
+
+```powershell
+python get_code.py --proxy http://主機:埠
+# 或者設環境變數（pip 也吃這個，一次解決兩個問題）
+$env:HTTPS_PROXY = 'http://主機:埠'
+python get_code.py
+```
+
 - 三台主機都被擋的話，剩下的路是**在有網路的機器上取得，用你搬 `wheels\` 的
   同一條路搬過來**（見 [`OFFLINE-INSTALL.md`](OFFLINE-INSTALL.md)）。
 

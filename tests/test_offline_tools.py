@@ -559,16 +559,97 @@ def test_a_404_is_not_reported_as_being_blocked(tmp_path, monkeypatch, capsys):
 
 def test_a_connection_failure_is_reported_as_being_blocked(tmp_path, monkeypatch,
                                                           capsys):
-    """反過來：連不上（DNS/TCP）才是「這台主機也被擋掉了」，而且要給下一步。"""
+    """反過來：連不上（DNS/TCP）才是「這台主機連不上」，而且要給下一步。"""
     import urllib.error
 
     def boom(ref, path, cafile=""):
         raise urllib.error.URLError("Name or service not known")
 
     monkeypatch.setattr(get_code, "fetch", boom)
+    monkeypatch.setattr(get_code, "proxy_in_effect", lambda p="": "")
     assert get_code.main(["--dest", str(tmp_path / "o")]) == 2
     out = capsys.readouterr().out
     assert "codeload.github.com" in out and "OFFLINE-INSTALL" in out
+
+
+def test_a_timeout_is_reported_as_a_missing_proxy_not_as_a_block(
+        tmp_path, monkeypatch, capsys):
+    """實際遇到的第二個誤診：WinError 10060。
+
+    逾時的意思是「封包直接送出去、沒有人回應」—— 如果瀏覽器連得到 GitHub，
+    那幾乎一定是 **Python 沒有走公司 proxy**（urllib 讀不到 PAC），
+    不是這台主機被封。講成「被擋掉了」的話，使用者會去找 IT 要一個他其實
+    已經有的東西，而真正要做的是填一個 --proxy。
+    """
+    import urllib.error
+
+    def boom(ref, path, cafile=""):
+        raise urllib.error.URLError(
+            "[WinError 10060] 連線嘗試失敗，因為連線對象有一段時間並未正確回應")
+
+    monkeypatch.setattr(get_code, "fetch", boom)
+    monkeypatch.setattr(get_code, "proxy_in_effect", lambda p="": "")
+    monkeypatch.setattr(get_code, "pac_url", lambda: "")
+    assert get_code.main(["--dest", str(tmp_path / "o")]) == 2
+    out = capsys.readouterr().out
+    assert "proxy" in out.lower(), "沒講到 proxy 就等於沒診斷"
+    assert "--proxy" in out, "要給得出照做的下一步"
+    assert "netsh winhttp show proxy" in out, "要告訴他怎麼找出 proxy"
+
+
+def test_a_pac_file_is_read_out_loud_when_there_is_one(tmp_path, monkeypatch,
+                                                      capsys):
+    """PAC 是「瀏覽器行、Python 不行」最常見的原因，而錯誤訊息完全看不出來。
+    讀得到就直接把那個網址講出來 —— 使用者要打開它去找 PROXY 那一行。"""
+    import urllib.error
+
+    def boom(ref, path, cafile=""):
+        raise urllib.error.URLError("[WinError 10060] timed out")
+
+    monkeypatch.setattr(get_code, "fetch", boom)
+    monkeypatch.setattr(get_code, "proxy_in_effect", lambda p="": "")
+    monkeypatch.setattr(get_code, "pac_url",
+                        lambda: "http://wpad.corp.example/proxy.pac")
+    assert get_code.main(["--dest", str(tmp_path / "o")]) == 2
+    out = capsys.readouterr().out
+    assert "http://wpad.corp.example/proxy.pac" in out
+    assert "PROXY" in out, "要告訴他在 PAC 檔裡找哪一行"
+
+
+def test_a_timeout_through_a_configured_proxy_says_something_different(
+        tmp_path, monkeypatch, capsys):
+    """已經在走 proxy 卻還是逾時，就不是「沒設 proxy」—— 不可以給同一句話。"""
+    import urllib.error
+
+    def boom(ref, path, cafile=""):
+        raise urllib.error.URLError("[WinError 10060] timed out")
+
+    monkeypatch.setattr(get_code, "fetch", boom)
+    assert get_code.main(["--dest", str(tmp_path / "o"),
+                          "--proxy", "http://p.corp:8080"]) == 2
+    out = capsys.readouterr().out
+    assert "http://p.corp:8080" in out
+    assert "netsh" not in out, "他已經有 proxy 了，不要叫他再去找一次"
+
+
+def test_the_proxy_actually_reaches_the_opener():
+    """``--proxy`` 印在畫面上但沒有真的掛進 opener，是最容易發生的假動作。"""
+    opener = get_code.build_opener(proxy="http://p.corp:8080")
+    proxies = [h for h in opener.handlers
+               if h.__class__.__name__ == "ProxyHandler"]
+    assert proxies and proxies[0].proxies.get("https") == "http://p.corp:8080"
+
+
+def test_the_run_reports_which_proxy_it_will_use(tmp_path, monkeypatch, capsys):
+    """「不用 proxy，直接連」這句話本身就是診斷 —— 使用者看到它才知道問題在哪。"""
+    real = b"x = 1\n"
+    manifest = "%s adept/f.py\n" % get_code.blob_sha(real)
+    monkeypatch.setattr(get_code, "fetch", lambda ref, path, cafile="":
+                        manifest.encode("utf-8") if path == get_code.MANIFEST
+                        else real)
+    monkeypatch.setattr(get_code, "proxy_in_effect", lambda p="": p or "")
+    assert get_code.main(["--dest", str(tmp_path / "o")]) == 0
+    assert "直接連" in capsys.readouterr().out
 
 
 def test_a_tls_interception_error_points_at_cafile_not_at_disabling_checks(

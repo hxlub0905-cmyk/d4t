@@ -20,6 +20,12 @@ DLP 對它的規則跟 ``application/zip`` 完全不同）。
     python get_code.py --dest D:\\tools  # 抓到別的地方
     python get_code.py --ref main      # 指定分支（預設 main）
     python get_code.py --ref a30a040…  # 指定 commit（要完全可重現時用這個）
+    python get_code.py --proxy http://proxy.corp.com:8080   # 要走公司 proxy
+
+**瀏覽器連得到但這支逾時（WinError 10060）＝ 沒走 proxy，不是被擋。**
+urllib 會讀 ``HTTPS_PROXY`` 與 Windows 登錄檔裡**手動設定**的 proxy，
+但**讀不到 PAC（自動設定指令碼）**，而公司幾乎都用 PAC。這支會去把 PAC 的網址
+讀出來講給你聽，並告訴你要填什麼。
 
 ``--ref`` 給分支名的時候，抓到的是 **CDN 上的那一版** —— 剛推上去的東西可能要
 等幾分鐘才看得到（實測會拿到前一個 commit；清單與檔案來自同一份快照，
@@ -48,14 +54,62 @@ MANIFEST = "tools/FILELIST.txt"
 TIMEOUT = 30
 
 
-def fetch(ref: str, path: str, cafile: str = "") -> bytes:
-    url = RAW % (REPO, ref, path)
-    kw = {"timeout": TIMEOUT}
+def build_opener(cafile: str = "", proxy: str = ""):
+    """做一個 opener（proxy 與公司憑證都掛在這裡）。
+
+    不給 ``proxy`` 的話走 urllib 的預設 —— 它會讀 ``HTTPS_PROXY`` 環境變數，
+    在 Windows 上也會讀登錄檔裡**手動設定**的 proxy。
+    **但它讀不到 PAC（自動設定指令碼）**，而公司幾乎都用 PAC ——
+    那種情況下 urllib 會直接連出去，然後逾時（WinError 10060）。
+    """
+    handlers = []
+    if proxy:
+        handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
     if cafile:
         import ssl
-        kw["context"] = ssl.create_default_context(cafile=cafile)
-    with urllib.request.urlopen(url, **kw) as r:      # noqa: S310 — 固定 https
+        handlers.append(urllib.request.HTTPSHandler(
+            context=ssl.create_default_context(cafile=cafile)))
+    return urllib.request.build_opener(*handlers)
+
+
+#: ``main()`` 建好之後放在這裡，``fetch()`` 用它（``fetch`` 的簽名保持簡單，
+#: 測試才好 monkeypatch 掉整個網路層）。
+_OPENER = None
+
+
+def fetch(ref: str, path: str, cafile: str = "") -> bytes:
+    url = RAW % (REPO, ref, path)
+    opener = _OPENER or build_opener(cafile)
+    with opener.open(url, timeout=TIMEOUT) as r:      # noqa: S310 — 固定 https
         return r.read()
+
+
+def proxy_in_effect(proxy: str = "") -> str:
+    """現在實際會用哪個 proxy（沒有就回空字串）。"""
+    if proxy:
+        return proxy
+    return urllib.request.getproxies().get("https", "")
+
+
+def pac_url() -> str:
+    """Windows 登錄檔裡的 PAC（自動設定指令碼）網址；沒有或不是 Windows 回空字串。
+
+    這是「瀏覽器連得到、Python 連不到」最常見的原因，而且從錯誤訊息完全看不出來
+    —— 所以直接去把它讀出來講給使用者聽。
+    """
+    if not sys.platform.startswith("win"):
+        return ""
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Internet Settings")
+        try:
+            return str(winreg.QueryValueEx(key, "AutoConfigURL")[0] or "")
+        finally:
+            winreg.CloseKey(key)
+    except Exception:                                 # noqa: BLE001 — 診斷用
+        return ""
 
 
 def blob_sha(data: bytes) -> str:
@@ -81,10 +135,16 @@ def main(argv=None) -> int:
     ap.add_argument("--ref", default="main", help="分支或 tag（預設 main）")
     ap.add_argument("--cafile", default="",
                     help="公司的根憑證 .pem（TLS 被中間攔截時才需要）")
+    ap.add_argument("--proxy", default="",
+                    help="公司 proxy，例如 http://proxy.corp.com:8080")
     a = ap.parse_args(argv)
+
+    global _OPENER
+    _OPENER = build_opener(a.cafile, a.proxy)
 
     print("來源  : https://raw.githubusercontent.com/%s (%s)" % (REPO, a.ref))
     print("目的地: %s" % os.path.abspath(a.dest))
+    print("Proxy : %s" % (proxy_in_effect(a.proxy) or "（不用 proxy，直接連）"))
     try:
         raw = fetch(a.ref, MANIFEST, a.cafile).decode("utf-8")
     except urllib.error.HTTPError as e:
@@ -102,13 +162,49 @@ def main(argv=None) -> int:
             print("  %s" % e.reason)
         return 2
     except urllib.error.URLError as e:
-        # 連不上（DNS / TCP / TLS）—— 這才是「被擋掉了」。
-        print("\n✗ 連不上 raw.githubusercontent.com：%s" % e.reason)
-        if "CERTIFICATE" in str(e.reason).upper():
-            print("  看起來是 TLS 被公司中間攔截。用 --cafile 指到公司的根憑證，")
+        # 連不上（DNS / TCP / TLS）。**這裡不能一律講「被擋掉了」** ——
+        # 逾時（WinError 10060 / timed out）的意思是「直接連出去、封包沒人回」，
+        # 而那通常代表 **Python 沒有走公司 proxy**，不是這台主機被封。
+        # 瀏覽器連得到、Python 連不到，幾乎都是這件事。
+        reason = str(e.reason)
+        print("\n✗ 連不上 raw.githubusercontent.com：%s" % reason)
+        if "CERTIFICATE" in reason.upper():
+            print("  這是 TLS 被公司中間攔截。用 --cafile 指到公司的根憑證，")
             print("  **不要**去關掉憑證驗證。")
             return 2
-        print("  這台主機也被擋掉了。剩下的路只有：")
+
+        timed_out = ("10060" in reason or "timed out" in reason.lower()
+                     or "timeout" in reason.lower())
+        using = proxy_in_effect(a.proxy)
+        if timed_out and not using:
+            pac = pac_url()
+            print("\n  這是**逾時**，不是被拒絕 —— 封包直接送出去而沒有人回應。")
+            print("  如果你的瀏覽器連得到 GitHub，那答案幾乎一定是：")
+            print("  **這台機器要透過公司 proxy 才連得出去，而 Python 沒有走 proxy。**")
+            if pac:
+                print("\n  找到了：你的 proxy 是用 PAC 自動設定檔設的 ——")
+                print("    %s" % pac)
+                print("  urllib **讀不到 PAC**，所以它直接連出去然後逾時。")
+                print("  用瀏覽器打開上面那個網址，在裡面找 `PROXY 主機:埠`，然後：")
+            else:
+                print("\n  先找出 proxy（PowerShell，任一個有值就用它）：")
+                print("    netsh winhttp show proxy")
+                print("    Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows"
+                      "\\CurrentVersion\\Internet Settings' |"
+                      " Select ProxyServer, AutoConfigURL")
+                print("    pip config list          # pip 能連的話，proxy 就在這裡")
+                print("  AutoConfigURL 有值 = PAC 檔：用瀏覽器打開它，找 `PROXY 主機:埠`。")
+                print("  然後：")
+            print("    python get_code.py --proxy http://主機:埠")
+            print("  （或先 `$env:HTTPS_PROXY='http://主機:埠'` 再跑，pip 也吃這個）")
+            return 2
+
+        if using:
+            print("\n  用的 proxy 是 %s —— 它沒有回應。確認位址與埠是對的，" % using)
+            print("  有些公司 proxy 只放行特定網域，那就要請 IT 加"
+                  " raw.githubusercontent.com。")
+        else:
+            print("\n  這台主機連不上。剩下的路：")
         print("  1. 請 IT 放行 codeload.github.com（zip 就會回來，這是根治）")
         print("  2. 在有網路的機器上取得，用你搬 wheels\\ 的同一條路搬過來")
         print("     （見 docs/OFFLINE-INSTALL.md）")
