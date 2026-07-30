@@ -367,3 +367,129 @@ def test_it_says_the_pixel_size_is_unknown(window, tmp_path):
     window.select_node(window.model.node_order[0])
     window.refresh_preview(sync=True)
     assert "nm/px unknown" in window.inspector().summary()
+
+
+# --------------------------------------------------------------------------- #
+# 6. roi_profile：曲線面板收進同一個機制
+# --------------------------------------------------------------------------- #
+def test_the_profile_curve_is_now_a_card_panel_like_the_rest(window):
+    """F7-11 時它直接掛在預覽面板上 —— 一條跟儀表機制平行的路。兩條並存的
+    下場是加新面板的人不知道走哪一條，然後兩邊各長一半。"""
+    nid = window.model.add_step("roi_profile")
+    window.select_node(nid)
+    assert isinstance(window.inspector(), insp_mod.ProfileInspector)
+    assert window.bottom_page() == 0
+    # 舊的對外名字還在（狀態列與既有測試都用它）
+    assert window.profile_panel is window.inspector().panel
+
+
+def test_the_old_name_still_answers_when_another_card_is_selected(window):
+    """`profile_panel` 在別的卡片上要回一個**空的替身**，不是 None ——
+    呼叫端不必到處寫 if is None。"""
+    window.select_node(window.model.node_order[0])
+    assert window.profile_panel is not None
+    assert window.profile_panel.has_data() is False
+    assert window.profile_panel_visible() is False
+
+
+# --------------------------------------------------------------------------- #
+# 7. roi_template：定位失敗有三個完全不同的原因
+# --------------------------------------------------------------------------- #
+def _match(score=0.9, margin=0.4, structure=30.0, ok=True):
+    return {"templates": {"cell": {
+        "cell_w": 40, "cell_h": 240, "phase_x": 7, "phase_y": 0,
+        "score": score, "margin": margin, "structure": structure,
+        "ok": ok, "norm": [0.0, 0.0, 1.0, 1.0], "axis": "x"}}}
+
+
+_TPL_PARAMS = {"roi_out": "cell", "min_score": 0.3, "min_margin": 0.05,
+               "min_structure": 5.0, "template": "gc1:xxx"}
+
+
+def test_it_names_which_gate_failed(qapp):
+    """三個原因的**處置完全不同**，分不出來的話使用者會一直去調錯的門檻。"""
+    insp = insp_mod.TemplateInspector()
+
+    insp.set_context("roi_template", params=_TPL_PARAMS,
+                     meta=_match(score=0.1, ok=False))
+    assert insp.failing() == ["match"]
+    assert "does not look like the template" in insp.summary()
+
+    insp.set_context("roi_template", params=_TPL_PARAMS,
+                     meta=_match(margin=0.01, ok=False))
+    assert insp.failing() == ["certainty"]
+    assert "more than one position fits" in insp.summary()
+
+
+def test_no_structure_is_not_a_setting_to_fix(qapp):
+    """整張 patch 都在同一種材質裡 —— 那不是參數問題，退回整張圖就是對的答案。
+    不講清楚的話使用者會去把門檻一路調低，直到它開始亂放框。"""
+    insp = insp_mod.TemplateInspector()
+    insp.set_context("roi_template", params=_TPL_PARAMS,
+                     meta=_match(structure=1.0, ok=False))
+    assert insp.failing() == ["structure"]
+    text = insp.summary()
+    assert "nothing to match" in text
+    assert "not a setting to fix" in text
+
+
+def test_a_good_match_says_where_it_landed(qapp):
+    insp = insp_mod.TemplateInspector()
+    insp.set_context("roi_template", params=_TPL_PARAMS, meta=_match())
+    assert insp.failing() == []
+    assert "matched at phase 7,0" in insp.summary()
+
+
+def test_it_says_to_build_a_template_first(qapp):
+    insp = insp_mod.TemplateInspector()
+    insp.set_context("roi_template", params={"roi_out": "cell", "template": ""})
+    assert insp.has_data() is False
+    assert "No template yet" in insp.empty_reason()
+
+
+@pytest.mark.parametrize("theme_name", ["light", "dark"])
+def test_the_gate_bars_paint(qapp, theme_name):
+    from PySide6.QtGui import QColor, QPixmap
+
+    theme_mod.apply_theme(qapp, theme_name)
+    insp = insp_mod.TemplateInspector()
+    insp.resize(320, 160)
+    insp.set_context("roi_template", params=_TPL_PARAMS,
+                     meta=_match(score=0.1, ok=False))
+    pm = QPixmap(insp.size())
+    pm.fill(QColor("#ffffff"))
+    insp.render(pm)
+    assert not pm.isNull()
+    theme_mod.apply_theme(qapp, "light")
+
+
+def test_it_reads_the_engine_verdict_end_to_end(window, tmp_path):
+    """整條路：卡片跑完把三個數字放進 ctx.meta['templates'] → 儀表。"""
+    import numpy as np
+
+    from adept.core.algo import template as at
+    from make_sample import generate
+
+    out = generate(str(tmp_path / "lotT"), n=4, seed=61)
+    window.load_dataset_path(out["klarf"], sync=True)
+    nid = window.model.add_step("roi_template")
+    window.select_node(nid)
+
+    img = np.zeros((240, 320), np.float32)
+    for k in range(8):
+        x = k * 40
+        img[:, x:x + 40] = 120.0
+        img[:, x + 14:x + 34] = 60.0
+        img[:, x + 12:x + 16] = 210.0
+        img[:, x + 32:x + 36] = 210.0
+    img += np.random.default_rng(0).normal(0, 4, img.shape).astype(np.float32)
+    window._apply_template(nid, at.encode_cell(at.build_golden_cell(img).cell),
+                           "x")
+    assert window.refresh_preview(sync=True) is True
+
+    insp = window.inspector()
+    assert isinstance(insp, insp_mod.TemplateInspector)
+    assert insp.has_data() is True
+    names = [g[0] for g in insp.gates()]
+    assert names == ["match", "certainty", "structure"]
+    assert window.inspector_summary.text() != ""
