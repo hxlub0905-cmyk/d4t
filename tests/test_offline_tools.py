@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import os
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -900,8 +901,7 @@ def test_the_text_bundle_round_trips_byte_for_byte(tmp_path):
     「產出來的東西看起來很正常，直到收到的人去跑它」那一類。
     """
     out = tmp_path / "ADEPT_bundle.py"
-    out.write_text(make_text_bundle.build(out.name, REPO), encoding="utf-8",
-                   newline="\n")
+    _write(out, make_text_bundle.build(out.name, REPO))
     dest = tmp_path / "un"
     r = subprocess.run([sys.executable, str(out), "--dest", str(dest)],
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -1224,3 +1224,35 @@ def test_every_tool_is_assigned_to_a_machine_in_the_docs():
             continue
         assert name in doc, "%s 沒有寫在 AGENTS.md 的機器對照表裡" % name
     assert "哪一支在哪一台跑" in doc
+
+
+def test_no_test_uses_the_3_10_only_write_text_newline_argument():
+    """``Path.write_text`` 的 ``newline`` 是 **Python 3.10+** 才有的（鐵則 2 要 3.9）。
+
+    這條測試存在，是因為修它的時候我用**逐行**搜尋，於是漏掉一個**跨兩行**的
+    呼叫 —— 本機全綠、CI 的 3.9 job 再紅一次。所以這裡用跨行的正規表達式，
+    而不是「看每一行有沒有那兩個字」。
+
+    根本原因是本機那道 `ast.parse(feature_version=(3,9))` 只驗**語法**，
+    不知道標準函式庫的 API 從哪個版本才有 —— 這種東西只有 CI 的 3.9 job 抓得到，
+    所以能在本機擋下來的就在本機擋。
+    """
+    bad = []
+    for root, _dirs, names in os.walk(REPO):
+        if any(part in root for part in (".git", "__pycache__", "bundle")):
+            continue
+        for name in names:
+            if not name.endswith(".py"):
+                continue
+            path = os.path.join(root, name)
+            with open(path, "r", encoding="utf-8") as f:
+                src = f.read()
+            for m in re.finditer(r"\.write_text\((?:[^()]|\([^()]*\))*?newline=",
+                                 src, re.S):
+                bad.append("%s:%d" % (os.path.relpath(path, REPO),
+                                      src[:m.start()].count("\n") + 1))
+    # 訊息裡不要出現那個呼叫的字面樣子 —— 不然這支測試會抓到自己（試過了）。
+    assert not bad, (
+        "這幾個地方用了 pathlib 的 write_text 加 newline 參數，"
+        "而那是 3.10+ 才有的，3.9 會 TypeError：\n  "
+        + "\n  ".join(bad) + "\n改用內建的 open（它一直都支援 newline）。")
