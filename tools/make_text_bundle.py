@@ -120,7 +120,26 @@ def main(argv=None) -> int:
         print("✗ 找不到資料區 —— 這個檔案被截斷了，或不是完整的 bundle。")
         return 2
 
-    items = list(entries(lines[start:]))
+    data = lines[start:]
+    # 分隔行的**下一行**宣告編碼。用「固定位置的宣告」而不是「掃某個開頭的樣式」
+    # ——「以 #B 開頭就是 base64」那種判斷會被內容咬到：資料區每一行都加了 '#'，
+    # 所以任何原本以 B 開頭的程式碼行（`BUNDLE_DIR = ...`）都會變成 `#B...`。
+    enc = data[0].strip() if data else ""
+    data = data[1:]
+    if enc == "#ENC lzma+base64":
+        b64 = [ln[2:] for ln in data if ln.startswith("#B")]
+        import base64
+        import lzma
+        try:
+            raw = lzma.decompress(base64.b64decode("".join(b64)))
+        except Exception as exc:                     # noqa: BLE001
+            print("✗ 資料區解不開：%%s" %% exc)
+            print("  這個檔案在複製／貼上的過程中被截斷或改掉了。請重新複製一次，")
+            print("  而且**不要**用編輯器打開後另存。")
+            return 2
+        data = raw.decode("utf-8").split("\\n")
+
+    items = list(entries(data))
     if not items:
         print("✗ 資料區是空的 —— 這個檔案被截斷了。")
         return 2
@@ -268,21 +287,47 @@ def _slice(items: List[Tuple[str, bytes]], limit: int
     return out
 
 
-def build(out_name: str = "ADEPT_bundle.py", root: str = "",
-          items: Optional[List[Tuple[str, bytes]]] = None,
-          part: int = 1, n_parts: int = 1, total_files: int = 0) -> str:
-    items = collect(root) if items is None else items
-    parts = [EXTRACTOR % {"name": out_name, "sentinel": SENTINEL,
-                          "part": part, "n_parts": n_parts,
-                          "total": total_files or len(items)}, SENTINEL]
+#: base64 一行多長。太長的行在 GitHub 上要橫向捲，看起來像壞掉的檔案。
+_B64_WIDTH = 120
+
+
+def _data_lines(items: List[Tuple[str, bytes]]) -> List[str]:
+    """資料區（純文字形式）。壓縮版壓的也是這一段，所以兩種編碼的內容一模一樣。"""
+    out: List[str] = []
     for rel, data in items:
         body = data.decode("utf-8").split("\n")
-        parts.append("#F %s %d %s" % (blob_sha(data), len(body), rel))
+        out.append("#F %s %d %s" % (blob_sha(data), len(body), rel))
         # **每一行都要變成註解。** Python 在跑任何東西之前會先編譯整個檔案，
         # 所以資料區不能是裸的文字 —— 不然它會去解析別的檔案的內容然後語法錯誤
         # （第一版就是這樣掛的：某個 .md 裡的全形括號變成 SyntaxError）。
         # 加一個 '#' 比塞進三引號字串安全：檔案內容裡本來就可能有三個引號。
-        parts.extend("#" + line for line in body)
+        out.extend("#" + line for line in body)
+    return out
+
+
+def build(out_name: str = "ADEPT_bundle.py", root: str = "",
+          items: Optional[List[Tuple[str, bytes]]] = None,
+          part: int = 1, n_parts: int = 1, total_files: int = 0,
+          compress: bool = False) -> str:
+    items = collect(root) if items is None else items
+    parts = [EXTRACTOR % {"name": out_name, "sentinel": SENTINEL,
+                          "part": part, "n_parts": n_parts,
+                          "total": total_files or len(items)}, SENTINEL]
+    body = _data_lines(items)
+    if compress:
+        parts.append("#ENC lzma+base64")
+        # **lzma 而不是 gzip。** 整包 base64 之後 gzip 是 991 KB、lzma 是 701 KB，
+        # 而 GitHub 不顯示超過 1 MB 的檔案 —— 那 290 KB 的差距正好就是
+        # 「一個檔案」與「還是要分成六批」的差別。
+        import base64
+        import lzma
+        blob = base64.b64encode(lzma.compress(
+            "\n".join(body).encode("utf-8"), preset=9)).decode("ascii")
+        parts.extend("#B" + blob[i:i + _B64_WIDTH]
+                     for i in range(0, len(blob), _B64_WIDTH))
+        return "\n".join(parts) + "\n"
+    parts.append("#ENC text")
+    parts.extend(body)
     return "\n".join(parts) + "\n"
 
 
@@ -291,12 +336,20 @@ def main(argv=None) -> int:
         description="Pack the repo into one plain-text self-extracting .py")
     ap.add_argument("--out", default="ADEPT_bundle.py",
                     help="輸出檔名（分批時會變成 ..._part1of6.py）")
+    ap.add_argument("--compress", action="store_true",
+                    help=("壓縮成**一個**檔案（lzma + base64，約 700 KB）。"
+                          "一次複製就搬完，代價是內容不再是可以直接讀的文字 ——"
+                          "解包程式本身仍然是可讀的 Python，而且 --list 可以先看"
+                          "它會寫哪些檔案。"))
     ap.add_argument("--split", type=int, default=0, metavar="KB",
                     help=("每批最多幾 KB（0 = 不分批）。**GitHub 不顯示超過 1 MB "
                           "的檔案**，而剪貼簿是唯一的通道時就必須分批，"
                           "400 是安全值。"))
     a = ap.parse_args(argv)
 
+    if a.compress and a.split:
+        print("--compress 已經塞得進一個檔案了，不要再 --split。")
+        return 2
     items = collect()
     groups = _slice(items, a.split * 1024) if a.split else [items]
     out_dir = os.path.dirname(os.path.abspath(a.out))
@@ -308,7 +361,8 @@ def main(argv=None) -> int:
     for i, group in enumerate(groups, 1):
         name = a.out if n_parts == 1 else "%s_part%dof%d%s" % (stem, i, n_parts, ext)
         text = build(os.path.basename(name), items=group, part=i,
-                     n_parts=n_parts, total_files=len(items))
+                     n_parts=n_parts, total_files=len(items),
+                     compress=a.compress)
         tmp = name + ".tmp"                           # atomic（鐵則 5）
         with open(tmp, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
