@@ -3,11 +3,18 @@
 給 Claude Code / 開發者的專案脈絡（操作手冊）。
 **每次 session 結束請更新 `SESSION_LOG.md`。**
 
-> **第一次接手這個專案？先讀 [`docs/HANDOVER.md`](docs/HANDOVER.md)。**
-> 那份講「為什麼會長成這樣」：工具的由來與目的、需求訪談的結論與理由、
-> 六個來源專案各給了什麼（那份跨專案脈絡不在程式碼裡）、
-> 哪些事已驗證哪些還是假設、以及哪些設計「看起來可以隨便改但其實有理由」。
-> 這份 CLAUDE.md 則是「怎麼動手」。
+> **第一次接手這個專案？三份文件，先讀前兩份。**
+>
+> - **[`AGENTS.md`](AGENTS.md) —— 環境。** 開發在家用機、執行在公司機，兩台的
+>   限制正好互補：**有真實資料的那一台不能裝 git、目前什麼都下載不了**，
+>   唯一的傳輸通道是「在 GitHub 上看到檔案、按複製鈕」。不知道這些的話，很多
+>   設計看起來是多餘的然後就會被「順手簡化」掉 —— 為什麼 `tools/` 全是
+>   stdlib-only、為什麼有 `FILELIST.txt`、為什麼有 `bundle/`。
+> - **[`docs/HANDOVER.md`](docs/HANDOVER.md) —— 為什麼長成這樣。** 工具的由來與
+>   目的、需求訪談的結論與理由、六個來源專案各給了什麼（那份跨專案脈絡不在
+>   程式碼裡）、哪些事已驗證哪些還是假設、哪些設計「看起來可以隨便改但其實有
+>   理由」。
+> - **這份 CLAUDE.md —— 怎麼動手。**
 
 ---
 
@@ -185,7 +192,14 @@ git add -A && python tools/make_filelist.py && git add -A
 ```
 
 `tests/test_offline_tools.py` 會擋住那份清單腐爛 —— 忘了跑的話，那個檔案在
-「zip 被擋、只能逐檔抓」的機器上會**安靜地少掉**（見 §9.5 與 `tools/get_code.py`）。
+「下載被擋、只能用剪貼簿搬」的機器上會**安靜地少掉**（見 §9.5 與 `AGENTS.md`）。
+
+**要把程式碼搬進公司機之前**才需要重打包（會動到 `bundle/` 底下 6 個大檔案，
+所以刻意不自動化 —— 每次 commit 都重產會讓 diff 變成噪音）：
+
+```bash
+python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
+```
 
 新功能請開 `docs/plans/F<n>-<name>.md`（沿用 GLAS/MMH 慣例），完成後更新 `SESSION_LOG.md`。
 
@@ -299,8 +313,19 @@ CLI 不受影響：`python -m adept run` 照樣跑得動 rsem recipe。
 
 ## 9.5 部署到受限的廠內機器
 
-主要使用情境是**沒有 git、pip 連不出去、DLP 會擋含二進位的壓縮檔**的公司機。
-對應設計：
+**完整的環境限制看 [`AGENTS.md`](AGENTS.md)** —— 開發在家用機（有 git、能下載、
+但**沒有真實資料**），執行在公司機（**只有那裡有資料**，但不能裝 git、
+目前什麼都下載不了）。唯一的傳輸通道是**在 GitHub 上看到檔案並按複製鈕**。
+
+三條路，用在不同時機：
+
+| 情況 | 用什麼 |
+|---|---|
+| 第一次搬整包 | `bundle/ADEPT_part1of6.py` … `part6of6.py`，每一批貼進去跑一次（分批是因為 **GitHub 不顯示超過 1 MB 的檔案**）|
+| 之後更新 | 複製 `tools/FILELIST.txt`（12 KB）→ `python tools/check_files.py` → 它列出要重新複製哪幾個 |
+| 只想跑格式探測 | 直接複製 `fab_probe/probe_*.py`（stdlib-only 單檔，**不需要整個 repo**）|
+
+網路哪天通了還有 `tools/get_code.py` / `.ps1`（逐檔抓）。其餘對應設計：
 
 - 整個 repo **只有純文字檔**（`.py`/`.md`/`.json`/`.toml`/`.txt`/`.yml` + 一份 `.klarf`），
   所以 GitHub「Download ZIP」下載得下來（那份 zip 不含 `.git`；170 個檔案、約 830 KB）。
