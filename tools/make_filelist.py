@@ -29,6 +29,11 @@ from typing import List
 #: ``get_code.py`` 是先抓這份清單才開始抓別的，所以它不需要被驗。
 MANIFEST = "tools/FILELIST.txt"
 
+#: 產出物不進清單。`bundle/` 裡是 `make_text_bundle.py` 產的搬運用檔案 ——
+#: 它們是 repo 的**複本**，不是內容。列進去有兩個後果：`get_code.py` 會白抓
+#: 2.4 MB，而分批解包的「還缺幾個」永遠到不了 0（那幾個檔案本來就不在包裡）。
+EXCLUDE_DIRS = ("bundle",)
+
 HEADER = (
     "# ADEPT 檔案清單 —— tools/get_code.py 用（每行：git blob SHA-1 + 路徑）。",
     "# 由 tools/make_filelist.py 產生；tests/test_offline_tools.py 會擋住它腐爛。",
@@ -44,7 +49,15 @@ def tracked_files(root: str = "") -> List[str]:
     root = root or repo_root()
     out = subprocess.run(["git", "ls-files"], cwd=root, check=True,
                          stdout=subprocess.PIPE).stdout.decode("utf-8")
-    return sorted(p for p in out.split("\n") if p.strip() and p.strip() != MANIFEST)
+    keep = []
+    for raw in out.split("\n"):
+        rel = raw.strip()
+        if not rel or rel == MANIFEST:
+            continue
+        if any(rel.startswith(d + "/") for d in EXCLUDE_DIRS):
+            continue
+        keep.append(rel)
+    return sorted(keep)
 
 
 def blob_sha(data: bytes) -> str:

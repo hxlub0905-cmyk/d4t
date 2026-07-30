@@ -27,10 +27,11 @@ GETCODE = os.path.join(TOOLS, "get_code.py")
 GETCODE_PS = os.path.join(TOOLS, "get_code.ps1")
 FILELIST = os.path.join(TOOLS, "make_filelist.py")
 BUNDLE = os.path.join(TOOLS, "make_text_bundle.py")
+CHECK = os.path.join(TOOLS, "check_files.py")
 #: 「在受限機器上、套件裝好之前就要能跑」的那幾支 —— 所以 stdlib-only + 3.9。
 #: get_code.py 是第四支（F7-18 之後補的）：它比其他三支更早跑，
 #: 因為它的工作是把程式碼弄上那台機器。
-ALL_TOOLS = (FETCH, INSTALL, DOCTOR, GETCODE, FILELIST, BUNDLE)
+ALL_TOOLS = (FETCH, INSTALL, DOCTOR, GETCODE, FILELIST, BUNDLE, CHECK)
 
 if TOOLS not in sys.path:
     sys.path.insert(0, TOOLS)
@@ -41,6 +42,7 @@ import install_offline                 # noqa: E402
 import get_code                       # noqa: E402
 import make_filelist                  # noqa: E402
 import make_text_bundle               # noqa: E402
+import check_files                    # noqa: E402
 
 REQUIRED_DEPS = ("numpy", "cv2", "tifffile", "PySide6", "openpyxl")
 
@@ -934,7 +936,8 @@ def test_a_tampered_bundle_refuses_to_land_anything(tmp_path):
     body = b"print('hi')\n"
     sha = make_text_bundle.blob_sha(body)
     header = make_text_bundle.EXTRACTOR % {
-        "name": "b.py", "sentinel": make_text_bundle.SENTINEL}
+        "name": "b.py", "sentinel": make_text_bundle.SENTINEL,
+        "part": 1, "n_parts": 1, "total": 1}
     good = "\n".join([header, make_text_bundle.SENTINEL,
                       "#F %s 2 adept/x.py" % sha, "#print('hi')", "#"]) + "\n"
     bad = good.replace("#print('hi')", "#print('tampered')")
@@ -971,3 +974,107 @@ def test_the_bundle_is_offered_in_the_docs():
         doc = f.read()
     assert "make_text_bundle.py" in doc
     assert ".zip" in doc
+
+
+# ---------------------------------------------------------------- 剪貼簿搬運（AGENTS.md §2）
+
+@needs_git
+def test_the_parts_all_fit_under_the_github_display_limit():
+    """**GitHub 不顯示超過 1 MB 的檔案**，而公司機唯一的取得方式是在 GitHub 上
+    按複製鈕。一批太大 = 打包成功但送不進去，那是最糟的一種「做完了」。"""
+    items = make_text_bundle.collect(REPO)
+    groups = make_text_bundle._slice(items, 400 * 1024)
+    assert len(groups) > 1, "整個 repo 早就超過一批的量了"
+    for i, group in enumerate(groups, 1):
+        text = make_text_bundle.build("p.py", REPO, items=group, part=i,
+                                      n_parts=len(groups), total_files=len(items))
+        kb = len(text.encode("utf-8")) / 1024
+        assert kb < 900, "第 %d 批 %.0f KB —— GitHub 可能就不顯示了" % (i, kb)
+        ast.parse(text, filename="part%d" % i)
+
+
+@needs_git
+def test_the_file_listing_is_in_the_first_part():
+    """後面每一批都用 ``tools/FILELIST.txt`` 回報「還缺幾個」，所以它得先到。"""
+    items = make_text_bundle.collect(REPO)
+    groups = make_text_bundle._slice(items, 400 * 1024)
+    assert "tools/FILELIST.txt" in [rel for rel, _d in groups[0]]
+
+
+@needs_git
+def test_a_single_part_never_claims_the_tree_is_ready(tmp_path):
+    """實際踩到的：只貼其中一批，它印「下一步：跑 doctor」—— 看起來整包到位了，
+    而其實少了一百多個檔案。這一整輪反覆在防的就是這種「看起來做完了」。"""
+    items = make_text_bundle.collect(REPO)
+    groups = make_text_bundle._slice(items, 400 * 1024)
+    # 挑一批**不含**檔案清單的（那是最容易誤報的情況）
+    idx = next(i for i, g in enumerate(groups)
+               if "tools/FILELIST.txt" not in [r for r, _d in g])
+    text = make_text_bundle.build("p.py", REPO, items=groups[idx], part=idx + 1,
+                                  n_parts=len(groups), total_files=len(items))
+    path = tmp_path / "p.py"
+    path.write_text(text, encoding="utf-8", newline="\n")
+    r = subprocess.run([sys.executable, str(path), "--dest", str(tmp_path / "d")],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       timeout=300)
+    out = r.stdout.decode("utf-8", "replace")
+    assert r.returncode == 0, out
+    assert "還沒到齊" in out, out
+    assert "doctor" not in out, "少了一百多個檔案卻叫他去跑 doctor"
+
+
+@needs_git
+def test_generated_bundles_are_kept_out_of_the_listing_and_the_packing():
+    """``bundle/`` 是 repo 的**複本**，不是內容。列進去有兩個後果：
+    `get_code.py` 白抓 2.4 MB，而分批解包的「還缺幾個」永遠到不了 0。"""
+    listed = set(make_filelist.tracked_files(REPO))
+    packed = {rel for rel, _d in make_text_bundle.collect(REPO)}
+    assert not [p for p in listed if p.startswith("bundle/")]
+    assert not [p for p in packed if p.startswith("bundle/")]
+    # 但清單自己**要**在包裡（0b 的更新流程靠它）
+    assert "tools/FILELIST.txt" in packed
+
+
+def test_check_files_names_exactly_what_needs_recopying(tmp_path):
+    """更新的流程是「複製 12 KB 的清單 → 這支告訴你剩下要複製哪幾個」。
+    它必須分得出「缺少」與「內容不一樣」—— 兩個都要重新複製，但原因不同。"""
+    root = tmp_path / "tree"
+    (root / "tools").mkdir(parents=True)
+    (root / "a.py").write_bytes(b"good\n")
+    (root / "b.py").write_bytes(b"changed\n")
+    lines = [
+        "# comment",
+        "%s a.py" % check_files.blob_sha(b"good\n"),
+        "%s b.py" % check_files.blob_sha(b"original\n"),
+        "%s c.py" % check_files.blob_sha(b"absent\n"),
+    ]
+    (root / "tools" / "FILELIST.txt").write_text("\n".join(lines) + "\n",
+                                                 encoding="utf-8")
+    want = check_files.read_manifest(str(root / "tools" / "FILELIST.txt"))
+    missing, stale = check_files.compare(str(root), want)
+    assert missing == ["c.py"]
+    assert stale == ["b.py"]
+    assert check_files.main(["--root", str(root)]) == 1     # 有事要做 = 非零
+
+    (root / "b.py").write_bytes(b"original\n")
+    (root / "c.py").write_bytes(b"absent\n")
+    assert check_files.main(["--root", str(root)]) == 0
+
+
+def test_check_files_says_what_to_do_when_the_listing_is_missing(tmp_path, capsys):
+    """沒有清單的時候不能只說「找不到檔案」—— 要講出那一個檔案要去哪裡拿。"""
+    assert check_files.main(["--root", str(tmp_path)]) == 2
+    out = capsys.readouterr().out
+    assert "FILELIST.txt" in out and "github.com" in out
+
+
+def test_the_two_machine_setup_is_written_down():
+    """這些限制是整個 tools/ 形狀的原因。沒寫下來的話，下一個人會把
+    stdlib-only、FILELIST、bundle 當成過度設計然後順手簡化掉。"""
+    with open(os.path.join(REPO, "AGENTS.md"), "r", encoding="utf-8") as f:
+        doc = f.read()
+    for must in ("家用機", "公司機", "剪貼簿", "FILELIST.txt", "bundle/",
+                 "fab_probe", "stdlib-only", "1 MB"):
+        assert must in doc, must
+    with open(os.path.join(REPO, "CLAUDE.md"), "r", encoding="utf-8") as f:
+        assert "AGENTS.md" in f.read(), "CLAUDE.md 要指得到 AGENTS.md"

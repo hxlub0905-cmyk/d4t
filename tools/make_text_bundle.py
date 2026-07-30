@@ -42,12 +42,14 @@ import hashlib
 import os
 import subprocess
 import sys
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 #: 資料區的分隔行。解包時找的是**整行剛好等於它**的那一行 —— 而資料區的每一行
 #: 都被加了 '#'，所以就算某個檔案的內容裡出現這個字串（``make_text_bundle.py``
 #: 自己就在 repo 裡，它的源碼裡當然有），也永遠不會剛好相等。加 '#' 那件事因此
 #: 同時解決了兩個問題：整個檔案仍然是合法的 Python，而分隔行不會被誤認。
+BUNDLE_DIR = "bundle"
+
 SENTINEL = "# ==== ADEPT-BUNDLE-DATA ==== 以下是資料，不要編輯 ===="
 
 #: 解包程式（放在產出檔案的最前面）。它自己也是這份 bundle 的一部分，
@@ -74,6 +76,8 @@ import os
 import sys
 
 SENTINEL = "%(sentinel)s"
+PART, N_PARTS = %(part)d, %(n_parts)d   # 這是第幾批 / 共幾批（1/1 = 沒有分批）
+TOTAL = %(total)d                       # 整個 repo 有幾個檔案，不是這一批有幾個
 
 
 def blob_sha(data: bytes) -> str:
@@ -152,6 +156,41 @@ def main(argv=None) -> int:
         return 1
 
     print("✓ %%d 個檔案都解開了，SHA 全部對得上。" %% done)
+
+    # 分批的時候要講「還缺幾個」—— 不然使用者不知道自己貼完了沒有。
+    # 判斷依據是 tools/FILELIST.txt（它固定在第一批），而不是這一批的數量。
+    listing = os.path.join(dest, "tools", "FILELIST.txt")
+    have_listing = os.path.isfile(listing)
+    missing = []
+    if have_listing:
+        with open(listing, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    rel = line.split(" ", 1)[1]
+                    if not os.path.isfile(os.path.join(dest,
+                                                       rel.replace("/", os.sep))):
+                        missing.append(rel)
+
+    if N_PARTS > 1 and not have_listing:
+        # 還沒拿到檔案清單，所以「缺幾個」算不出來。**這時候絕對不能印
+        # 「下一步：跑 doctor」** —— 那看起來就像整包已經到位了。
+        print("")
+        print("這是第 %%d 批 / 共 %%d 批，整個 repo 有 %%d 個檔案 —— **還沒到齊**。"
+              %% (PART, N_PARTS, TOTAL))
+        print("把其他批也貼進來執行（順序不重要，重複執行也沒關係）。")
+        print("第 1 批裡有檔案清單，貼過它之後每一批都會告訴你還缺哪些。")
+        return 0
+
+    if missing:
+        print("")
+        print("這是第 %%d 批 / 共 %%d 批。整個 repo 還缺 %%d 個檔案 —— 在其他批裡。"
+              %% (PART, N_PARTS, len(missing)))
+        print("把其他批也貼進來執行（順序不重要，重複執行也沒關係）。缺的例如：")
+        for rel in missing[:6]:
+            print("    %%s" %% rel)
+        return 0
+
     print("")
     print("下一步：")
     print("  cd %%s" %% dest)
@@ -187,6 +226,10 @@ def collect(root: str = "") -> List[Tuple[str, bytes]]:
                          stdout=subprocess.PIPE).stdout.decode("utf-8")
     items = []
     for rel in sorted(p for p in out.split("\n") if p.strip()):
+        if rel.startswith(BUNDLE_DIR + "/"):
+            # 產出物自己不進包裡 —— 不然每打一次包，repo 就多一份上一次的包，
+            # 而且是指數成長。
+            continue
         with open(os.path.join(root, rel.replace("/", os.sep)), "rb") as f:
             data = f.read()
         if b"\r" in data:
@@ -201,9 +244,37 @@ def collect(root: str = "") -> List[Tuple[str, bytes]]:
     return items
 
 
-def build(out_name: str = "ADEPT_bundle.py", root: str = "") -> str:
-    items = collect(root)
-    parts = [EXTRACTOR % {"name": out_name, "sentinel": SENTINEL}, SENTINEL]
+def _slice(items: List[Tuple[str, bytes]], limit: int
+           ) -> List[List[Tuple[str, bytes]]]:
+    """依大小切成幾批。``limit`` 是每批的內容上限（位元組）。
+
+    為什麼一定要切：**GitHub 不顯示超過 1 MB 的檔案**，而公司機唯一的取得方式是
+    「在 GitHub 上看到、按複製鈕、貼進記事本」。一個 2.3 MB 的包在那台機器上
+    根本點不開來複製 —— 打包成功但送不進去，是最糟的一種「做完了」。
+
+    ``tools/FILELIST.txt`` 固定放在第一批：後面每一批解完都用它回報「還缺幾個」，
+    所以它必須先到。
+    """
+    first = [it for it in items if it[0] == "tools/FILELIST.txt"]
+    rest = [it for it in items if it[0] != "tools/FILELIST.txt"]
+    out: List[List[Tuple[str, bytes]]] = [list(first)]
+    size = sum(len(d) for _r, d in first)
+    for rel, data in rest:
+        if size + len(data) > limit and out[-1]:
+            out.append([])
+            size = 0
+        out[-1].append((rel, data))
+        size += len(data)
+    return out
+
+
+def build(out_name: str = "ADEPT_bundle.py", root: str = "",
+          items: Optional[List[Tuple[str, bytes]]] = None,
+          part: int = 1, n_parts: int = 1, total_files: int = 0) -> str:
+    items = collect(root) if items is None else items
+    parts = [EXTRACTOR % {"name": out_name, "sentinel": SENTINEL,
+                          "part": part, "n_parts": n_parts,
+                          "total": total_files or len(items)}, SENTINEL]
     for rel, data in items:
         body = data.decode("utf-8").split("\n")
         parts.append("#F %s %d %s" % (blob_sha(data), len(body), rel))
@@ -218,16 +289,35 @@ def build(out_name: str = "ADEPT_bundle.py", root: str = "") -> str:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Pack the repo into one plain-text self-extracting .py")
-    ap.add_argument("--out", default="ADEPT_bundle.py", help="輸出檔名")
+    ap.add_argument("--out", default="ADEPT_bundle.py",
+                    help="輸出檔名（分批時會變成 ..._part1of6.py）")
+    ap.add_argument("--split", type=int, default=0, metavar="KB",
+                    help=("每批最多幾 KB（0 = 不分批）。**GitHub 不顯示超過 1 MB "
+                          "的檔案**，而剪貼簿是唯一的通道時就必須分批，"
+                          "400 是安全值。"))
     a = ap.parse_args(argv)
 
-    n = len(collect())
-    text = build(os.path.basename(a.out))
-    tmp = a.out + ".tmp"                              # atomic（鐵則 5）
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(text)
-    os.replace(tmp, a.out)
-    print("%s：%d 個檔案、%.0f KB" % (a.out, n, len(text.encode("utf-8")) / 1024))
+    items = collect()
+    groups = _slice(items, a.split * 1024) if a.split else [items]
+    out_dir = os.path.dirname(os.path.abspath(a.out))
+    if out_dir and not os.path.isdir(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+    stem, ext = os.path.splitext(a.out)
+    n_parts = len(groups)
+
+    for i, group in enumerate(groups, 1):
+        name = a.out if n_parts == 1 else "%s_part%dof%d%s" % (stem, i, n_parts, ext)
+        text = build(os.path.basename(name), items=group, part=i,
+                     n_parts=n_parts, total_files=len(items))
+        tmp = name + ".tmp"                           # atomic（鐵則 5）
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        os.replace(tmp, name)
+        print("%s：%d 個檔案、%.0f KB"
+              % (name, len(group), len(text.encode("utf-8")) / 1024))
+    if n_parts > 1:
+        print("\n共 %d 批、%d 個檔案。每一批都可以單獨執行，順序不重要，"
+              "重複執行也沒關係。" % (n_parts, len(items)))
     return 0
 
 
