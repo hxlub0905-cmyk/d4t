@@ -22,7 +22,12 @@ TOOLS = os.path.join(REPO, "tools")
 DOCTOR = os.path.join(TOOLS, "doctor.py")
 FETCH = os.path.join(TOOLS, "fetch_wheels.py")
 INSTALL = os.path.join(TOOLS, "install_offline.py")
-ALL_TOOLS = (FETCH, INSTALL, DOCTOR)
+GETCODE = os.path.join(TOOLS, "get_code.py")
+FILELIST = os.path.join(TOOLS, "make_filelist.py")
+#: 「在受限機器上、套件裝好之前就要能跑」的那幾支 —— 所以 stdlib-only + 3.9。
+#: get_code.py 是第四支（F7-18 之後補的）：它比其他三支更早跑，
+#: 因為它的工作是把程式碼弄上那台機器。
+ALL_TOOLS = (FETCH, INSTALL, DOCTOR, GETCODE, FILELIST)
 
 if TOOLS not in sys.path:
     sys.path.insert(0, TOOLS)
@@ -30,6 +35,8 @@ if TOOLS not in sys.path:
 import doctor as doctor_mod            # noqa: E402  （stdlib-only，import 得起來就是一種驗證）
 import fetch_wheels                    # noqa: E402
 import install_offline                 # noqa: E402
+import get_code                       # noqa: E402
+import make_filelist                  # noqa: E402
 
 REQUIRED_DEPS = ("numpy", "cv2", "tifffile", "PySide6", "openpyxl")
 
@@ -373,6 +380,7 @@ def _stdlib_names():
         "__future__", "argparse", "ast", "base64", "datetime", "hashlib", "json",
         "os", "platform", "re", "shutil", "struct", "subprocess", "sys",
         "tempfile", "time", "typing", "unicodedata", "zipfile", "importlib",
+        "urllib", "ssl", "hashlib",
     }
 
 
@@ -407,3 +415,147 @@ def test_tools_are_python39_compatible(script):
         src = f.read()
     ast.parse(src, filename=script, feature_version=(3, 9))
     assert "from __future__ import annotations" in src
+
+
+# ---------------------------------------------------------------- 不用 git、不用 zip 取得程式碼
+
+def test_the_manifest_is_in_sync_with_the_repo():
+    """清單腐爛的症狀是**受限機器上安靜地少一個檔案** —— 抓下來的程式碼看起來
+    是完整的，直到某個 import 爆掉。所以這裡拿 ``make_filelist`` 自己重算一次
+    來比對，而不是另外寫一份「應該長怎樣」的邏輯（兩份會各自漂移）。"""
+    want = make_filelist.build_lines(REPO)
+    with open(os.path.join(REPO, "tools", "FILELIST.txt"), "r",
+              encoding="utf-8") as f:
+        got = f.read().splitlines()
+    if want != got:
+        missing = sorted(set(want) - set(got))
+        stale = sorted(set(got) - set(want))
+        raise AssertionError(
+            "tools/FILELIST.txt 過期了。順序是 **git add 之後**才重跑，\n"
+            "因為它讀的是 `git ls-files`（還沒 add 的檔案它看不到）：\n"
+            "    git add -A && python tools/make_filelist.py && git add -A\n"
+            "清單少了：%s\n清單多了：%s" % (missing[:8], stale[:8]))
+
+
+def test_the_manifest_covers_every_tracked_file_and_not_itself():
+    listed = {line.split(" ", 1)[1] for line in make_filelist.build_lines(REPO)
+              if not line.startswith("#")}
+    tracked = set(make_filelist.tracked_files(REPO))
+    assert listed == tracked
+    assert "tools/FILELIST.txt" not in listed, "清單不能列自己（SHA 沒辦法自我包含）"
+    assert "tools/get_code.py" in listed, "抓程式碼的那支自己也要在清單裡"
+
+
+def test_both_sides_compute_the_same_blob_sha():
+    """``get_code.py`` 驗的 SHA 與 ``make_filelist.py`` 寫的必須是同一個算法，
+    而且要跟 ``git hash-object`` 一致 —— 不然驗證會對每一個檔案都失敗。"""
+    for data in (b"", b"hello\n", b"\x00\x01\x02", "中文".encode("utf-8")):
+        assert get_code.blob_sha(data) == make_filelist.blob_sha(data)
+    # git hash-object 的已知值（空 blob 是 git 裡最有名的那個 SHA）
+    assert get_code.blob_sha(b"") == "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+    assert get_code.blob_sha(b"hello\n") == \
+        "ce013625030ba8dba906f756967f9e9ca394464a"
+
+
+def test_the_fetcher_never_turns_tls_verification_off():
+    """公司機幾乎一定有 TLS 中間攔截，而「憑證錯誤」最省事的解法是關掉驗證 ——
+    那會讓這支腳本變成一個把任意內容寫進磁碟的工具。正確的解法是 --cafile。"""
+    with open(GETCODE, "r", encoding="utf-8") as f:
+        src = f.read()
+    for forbidden in ("_create_unverified_context", "CERT_NONE",
+                      "verify=False", "check_hostname = False"):
+        assert forbidden not in src, forbidden
+    assert "--cafile" in src, "要給一條正當的路（指到公司的根憑證）"
+
+
+def test_the_fetcher_only_talks_to_one_host():
+    """多一台主機就多一個會被 allowlist 擋掉的地方。zip 就是這樣掉的
+    （codeload.github.com 是另一台主機）。"""
+    with open(GETCODE, "r", encoding="utf-8") as f:
+        src = f.read()
+    assert "raw.githubusercontent.com" in src
+    for other in ("codeload.github.com", "api.github.com"):
+        assert other not in src.split('"""')[2], (
+            "%s 是另一台主機 —— 只能出現在說明裡，不能真的去連" % other)
+
+
+def test_a_proxy_interception_page_is_caught_not_written(tmp_path, monkeypatch):
+    """被擋的 proxy 常常回一頁 HTML 而且是 HTTP 200。那種東西寫進 .py 之後，
+    症狀是「程式碼都在但 import 就語法錯誤」，使用者完全不會歸因到下載。"""
+    real = b"print('hello')\n"
+    manifest = "%s adept/fake.py\n" % get_code.blob_sha(real)
+
+    def fake_fetch(ref, path, cafile=""):
+        if path == "tools/FILELIST.txt":
+            return manifest.encode("utf-8")
+        return b"<html><body>Blocked by policy</body></html>"
+
+    monkeypatch.setattr(get_code, "fetch", fake_fetch)
+    dest = tmp_path / "out"
+    rc = get_code.main(["--dest", str(dest)])
+    assert rc == 1, "SHA 不對就必須失敗"
+    assert not (dest / "adept" / "fake.py").exists(), "壞內容不可以落地"
+
+
+def test_a_good_download_lands_and_reports_success(tmp_path, monkeypatch):
+    real = b"print('hello')\n"
+    manifest = "# comment\n%s adept/fake.py\n" % get_code.blob_sha(real)
+
+    def fake_fetch(ref, path, cafile=""):
+        return manifest.encode("utf-8") if path == "tools/FILELIST.txt" else real
+
+    monkeypatch.setattr(get_code, "fetch", fake_fetch)
+    dest = tmp_path / "out"
+    assert get_code.main(["--dest", str(dest)]) == 0
+    assert (dest / "adept" / "fake.py").read_bytes() == real
+    assert not list(dest.rglob("*.tmp")), "atomic 寫入的暫存檔要清掉（鐵則 5）"
+
+
+def test_an_empty_manifest_is_treated_as_a_failure(tmp_path, monkeypatch):
+    """proxy 回一頁空白也是 HTTP 200。抓到 0 個檔案不可以印「成功」。"""
+    monkeypatch.setattr(get_code, "fetch", lambda ref, path, cafile="": b"")
+    assert get_code.main(["--dest", str(tmp_path / "out")]) == 2
+
+
+def test_a_404_is_not_reported_as_being_blocked(tmp_path, monkeypatch, capsys):
+    """實際跑一次抓到的：``--ref`` 打錯會拿到 404，而 404 代表**連線是通的**。
+    把它講成「被擋掉了」的話，使用者會跑去找 IT，而真正的問題是分支名字。"""
+    import urllib.error
+
+    def boom(ref, path, cafile=""):
+        raise urllib.error.HTTPError("u", 404, "Not Found", None, None)
+
+    monkeypatch.setattr(get_code, "fetch", boom)
+    assert get_code.main(["--dest", str(tmp_path / "o"), "--ref", "nope"]) == 2
+    out = capsys.readouterr().out
+    assert "404" in out and "nope" in out
+    assert "擋" not in out.split("404")[1], "404 不可以被講成封鎖"
+
+
+def test_a_connection_failure_is_reported_as_being_blocked(tmp_path, monkeypatch,
+                                                          capsys):
+    """反過來：連不上（DNS/TCP）才是「這台主機也被擋掉了」，而且要給下一步。"""
+    import urllib.error
+
+    def boom(ref, path, cafile=""):
+        raise urllib.error.URLError("Name or service not known")
+
+    monkeypatch.setattr(get_code, "fetch", boom)
+    assert get_code.main(["--dest", str(tmp_path / "o")]) == 2
+    out = capsys.readouterr().out
+    assert "codeload.github.com" in out and "OFFLINE-INSTALL" in out
+
+
+def test_a_tls_interception_error_points_at_cafile_not_at_disabling_checks(
+        tmp_path, monkeypatch, capsys):
+    import urllib.error
+
+    def boom(ref, path, cafile=""):
+        raise urllib.error.URLError(
+            "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed")
+
+    monkeypatch.setattr(get_code, "fetch", boom)
+    assert get_code.main(["--dest", str(tmp_path / "o")]) == 2
+    out = capsys.readouterr().out
+    assert "--cafile" in out
+    assert "不要" in out, "必須明講不要去關掉憑證驗證"

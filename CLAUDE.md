@@ -177,6 +177,16 @@ python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 
     --workers 4 --cache /tmp/cache --db /tmp/runs.db --csv features.csv
 ```
 
+**新增或刪除檔案之後**要更新受限機器用的檔案清單（順序是 `git add` 之後才跑，
+因為它讀的是 `git ls-files`）：
+
+```bash
+git add -A && python tools/make_filelist.py && git add -A
+```
+
+`tests/test_offline_tools.py` 會擋住那份清單腐爛 —— 忘了跑的話，那個檔案在
+「zip 被擋、只能逐檔抓」的機器上會**安靜地少掉**（見 §9.5 與 `tools/get_code.py`）。
+
 新功能請開 `docs/plans/F<n>-<name>.md`（沿用 GLAS/MMH 慣例），完成後更新 `SESSION_LOG.md`。
 
 ---
@@ -304,8 +314,14 @@ CLI 不受影響：`python -m adept run` 照樣跑得動 rsem recipe。
 - Download ZIP 是從 **`codeload.github.com`** 出來的，不是 `github.com`。
   「以前下載得到、現在被擋」最常見的原因是 proxy allowlist 只放了後者，
   跟 repo 內容無關。分辨方式與替代路徑見 `docs/NO-GIT-SETUP.md`。
+- **連 zip 都下載不了**（實際遇到：proxy 只放行 `github.com`，沒放 `codeload`）→
+  `tools/get_code.py`：只用 `raw.githubusercontent.com` **一台主機**逐檔抓，
+  每個檔案對 `tools/FILELIST.txt` 的 git blob SHA 驗過才落地。
+  驗 SHA 不是龜毛：被擋的 proxy 常常回一頁 HTML 而且是 **HTTP 200**，
+  那種東西寫進 `.py` 之後症狀是「程式碼都在但 import 就語法錯誤」。
+  清單由 `tools/make_filelist.py` 產生，有測試擋它腐爛（見 §6）。
 - 相依套件走離線 wheels：`tools/fetch_wheels.py`（有網路的機器）→ 帶 `wheels\` 過去 →
-  `tools/install_offline.py`（廠內機器）。兩支都是 stdlib-only，因為它們在套件裝好之前就要能跑。
+  `tools/install_offline.py`（廠內機器）。全部 stdlib-only，因為它們在套件裝好之前就要能跑。
 - 裝不起來或跑不動時的第一件事：`python tools/doctor.py` —— 逐項 ✓/✗ 並附「怎麼修」。
   最常見的失敗是 **wheels 的 Python 版本與機器上的不符**（cp39 的輪子配 py3.12），
   `install_offline.py` 會在 pip 之前就攔下來並講清楚。
