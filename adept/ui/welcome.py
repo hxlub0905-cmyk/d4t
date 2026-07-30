@@ -47,12 +47,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .scope import recipe_is_supported
 from .theme import SEG_LABELS, TOKENS, seg_hex
 
 __all__ = [
     "WelcomeDialog", "RecipeLibraryDialog",
     "SETTINGS_ORG", "SETTINGS_APP", "SKIP_WELCOME_KEY",
     "app_settings", "welcome_disabled", "set_welcome_disabled",
+    "THEME_KEY", "saved_theme", "save_theme",
     "RECIPES_DIR", "DOCS_DIR", "list_recipe_files", "read_recipe_info",
     "quick_reference_pdf",
 ]
@@ -71,20 +73,26 @@ SETTINGS_ORG = "ADEPT"
 SETTINGS_APP = "Studio"
 SKIP_WELCOME_KEY = "welcome/skip"
 
+#: 主題偏好（F7-2）。與導覽旗標共用同一組 QSettings。
+THEME_KEY = "ui/theme"
+
 #: 三段式的一句話說明（和 CLAUDE.md §2 的心智模型逐字對應）。
 _SEG_LINES = (
-    ("image", "把圖變乾淨、變可比"),
-    ("algo", "從圖量出數字（量化證據）"),
-    ("adc", "分數 → bin → 寫回 KLARF"),
+    ("image", "Make images clean and comparable"),
+    ("algo", "Measure numbers from images (quantified evidence)"),
+    ("adc", "Score -> bin -> write back to KLARF"),
 )
 
 _INTRO = (
-    "ADEPT 讀進機台的 patch／Review SEM 影像與 KLARF，讓你用一張張「步驟卡片」"
-    "組成一條流程：對每一顆 defect 算出一個分數、用門檻分 bin，再把結果寫回 KLARF。"
-    "\n不用寫程式 —— 你只要決定「什麼樣子叫做真缺陷」，流程負責把它算出來。"
+    "ADEPT reads the tool's patch / Review SEM images together with their KLARF "
+    "and lets you build a pipeline out of step cards: it scores every defect, "
+    "splits them into bins by a threshold, and writes the result back to KLARF."
+    "\nNo programming needed — you decide what a real defect looks like, and the "
+    "pipeline works it out."
 )
 
-_FOOTER_HINT = "第一次用？直接按左邊那顆 —— 大約一分鐘就會看到一批算好分數的結果。"
+_FOOTER_HINT = ("First time here? Press the button on the left — you will be looking "
+                "at scored results in about a minute.")
 
 
 # --------------------------------------------------------------------------- #
@@ -102,6 +110,21 @@ def welcome_disabled() -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def saved_theme(default: str = "light") -> str:
+    """使用者上次選的主題（讀不到就回 ``default``）。"""
+    try:
+        return str(app_settings().value(THEME_KEY, default) or default)
+    except Exception:                       # noqa: BLE001 — 設定讀不到不該擋開窗
+        return default
+
+
+def save_theme(name: str) -> None:
+    """記住主題偏好（立刻 sync）。"""
+    st = app_settings()
+    st.setValue(THEME_KEY, str(name))
+    st.sync()
 
 
 def set_welcome_disabled(disabled: bool) -> None:
@@ -139,7 +162,7 @@ def read_recipe_info(path: Any) -> Dict[str, Any]:
         with open(str(p), "r", encoding="utf-8") as f:
             d = json.load(f)
         if not isinstance(d, dict):
-            raise ValueError("最外層不是一個 JSON 物件")
+            raise ValueError("top level is not a JSON object")
     except Exception as e:                       # noqa: BLE001 — UI 邊界
         info["error"] = "%s: %s" % (type(e).__name__, e)
         return info
@@ -179,7 +202,7 @@ def quick_reference_pdf(directory: Any = None) -> Optional[Path]:
         return None
     for p in pdfs:
         low = p.name.lower()
-        if any(k in low for k in ("quick", "reference", "參考", "卡")):
+        if any(k in low for k in ("quick", "reference", "quickref", "card")):
             return p
     return pdfs[0]
 
@@ -257,7 +280,7 @@ class WelcomeDialog(QDialog):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("歡迎使用 ADEPT")
+        self.setWindowTitle("Welcome to ADEPT")
         self.setModal(False)          # 永遠不擋住主視窗（測試也才不會卡住）
         self.setMinimumWidth(620)
 
@@ -265,7 +288,7 @@ class WelcomeDialog(QDialog):
         root.setContentsMargins(18, 16, 18, 14)
         root.setSpacing(12)
 
-        title = QLabel("ADEPT —— 用卡片組出你自己的缺陷判定流程", self)
+        title = QLabel("ADEPT — build your own defect decision pipeline from cards", self)
         title.setObjectName("paramTitle")
         root.addWidget(title)
 
@@ -283,24 +306,25 @@ class WelcomeDialog(QDialog):
         # ---- 三顆真的會做事的鈕 ------------------------------------------
         row = QHBoxLayout()
         row.setSpacing(8)
-        self.btn_demo = QPushButton("用範例資料試一次", self)
+        self.btn_demo = QPushButton("Try it with sample data", self)
         self.btn_demo.setObjectName("primary")
         self.btn_demo.setCursor(Qt.PointingHandCursor)
         self.btn_demo.setToolTip(
-            "產一批合成資料 → 載入 → 套用 die-to-die 範本 → 試跑，"
-            "直接看到分數分佈與縮圖牆（不會動到你的任何檔案）")
+            "Generate synthetic data, load it, apply the die-to-die template and "
+            "trial-run it — you land straight on a score histogram and a wall of "
+            "thumbnails (none of your own files are touched)")
         self.btn_demo.setMinimumHeight(34)
         self.btn_demo.clicked.connect(self.click_demo)
 
-        self.btn_open = QPushButton("開啟我自己的 KLARF", self)
+        self.btn_open = QPushButton("Open my own KLARF", self)
         self.btn_open.setCursor(Qt.PointingHandCursor)
-        self.btn_open.setToolTip("關掉這個視窗，直接去選一份 KLARF 檔")
+        self.btn_open.setToolTip("Close this window and go straight to picking a KLARF file")
         self.btn_open.setMinimumHeight(34)
         self.btn_open.clicked.connect(self.click_open)
 
-        self.btn_library = QPushButton("看範例 recipe", self)
+        self.btn_library = QPushButton("Browse templates", self)
         self.btn_library.setCursor(Qt.PointingHandCursor)
-        self.btn_library.setToolTip("打開範例 recipe 庫：每一份都是可以直接跑的完整流程")
+        self.btn_library.setToolTip("Open the template library — every entry is a complete, runnable pipeline")
         self.btn_library.setMinimumHeight(34)
         self.btn_library.clicked.connect(self.click_library)
 
@@ -319,16 +343,17 @@ class WelcomeDialog(QDialog):
         # ---- 底列：不再顯示 / 快速參考卡 / 關閉 ----------------------------
         bottom = QHBoxLayout()
         bottom.setSpacing(8)
-        self.chk_dont_show = QCheckBox("不再顯示", self)
+        self.chk_dont_show = QCheckBox("Do not show again", self)
         self.chk_dont_show.setToolTip(
-            "之後開啟就不會再跳出這個視窗；隨時可以從工具列的「說明」再打開")
+            "This window will not open on start-up any more; Help on the toolbar "
+            "always brings it back")
         self.chk_dont_show.setChecked(welcome_disabled())
         self.chk_dont_show.toggled.connect(self._on_dont_show_toggled)
         bottom.addWidget(self.chk_dont_show)
         bottom.addStretch(1)
 
         self.quickref_path = quick_reference_pdf()
-        self.btn_quickref = QPushButton("快速參考卡", self)
+        self.btn_quickref = QPushButton("Quick reference card", self)
         self.btn_quickref.setProperty("variant", "ghost")
         self.btn_quickref.setCursor(Qt.PointingHandCursor)
         self.btn_quickref.setStyleSheet(
@@ -339,16 +364,17 @@ class WelcomeDialog(QDialog):
         if self.quickref_path is None:
             self.btn_quickref.setEnabled(False)
             self.btn_quickref.setToolTip(
-                "docs/ 裡還沒有快速參考卡 PDF —— 這一版的離線安裝包會附上。")
+                "No quick-reference PDF in docs/ yet — it ships with the "
+                "offline installer.")
         else:
-            self.btn_quickref.setToolTip("用系統預設的 PDF 閱讀器開啟：%s"
+            self.btn_quickref.setToolTip("Open with the system PDF viewer: %s"
                                          % self.quickref_path.name)
         self.btn_quickref.clicked.connect(self.open_quick_reference)
         bottom.addWidget(self.btn_quickref)
 
-        self.btn_close = QPushButton("先自己看看", self)
+        self.btn_close = QPushButton("Explore on my own", self)
         self.btn_close.setCursor(Qt.PointingHandCursor)
-        self.btn_close.setToolTip("關掉導覽，直接進 Studio")
+        self.btn_close.setToolTip("Close the tour and go straight to Studio")
         self.btn_close.clicked.connect(self.close)
         bottom.addWidget(self.btn_close)
         root.addLayout(bottom)
@@ -411,7 +437,7 @@ class RecipeLibraryDialog(QDialog):
     def __init__(self, directory: Any = None,
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("範例 recipe 庫")
+        self.setWindowTitle("Template library")
         self.setModal(False)
         self.setMinimumSize(720, 420)
         self.directory = Path(str(directory)) if directory is not None else RECIPES_DIR
@@ -420,8 +446,8 @@ class RecipeLibraryDialog(QDialog):
         root.setContentsMargins(16, 14, 16, 12)
         root.setSpacing(10)
 
-        head = QLabel("挑一份最接近你站點情況的，載進來再改參數 —— "
-                      "不要從空白的流程開始。", self)
+        head = QLabel("Pick the one closest to your layer, load it, then tune the "
+                      "parameters — do not start from an empty pipeline.", self)
         head.setWordWrap(True)
         head.setStyleSheet("color:%s;" % TOKENS["text_secondary"])
         root.addWidget(head)
@@ -451,13 +477,13 @@ class RecipeLibraryDialog(QDialog):
         self.path_label = QLabel("", self)
         self.path_label.setObjectName("paramHint")
         bottom.addWidget(self.path_label, 1)
-        self.btn_load = QPushButton("載入", self)
+        self.btn_load = QPushButton("Load", self)
         self.btn_load.setObjectName("primary")
         self.btn_load.setCursor(Qt.PointingHandCursor)
-        self.btn_load.setToolTip("把這份 recipe 載進 Studio 的流程面板")
+        self.btn_load.setToolTip("Load this recipe into the Studio pipeline panel")
         self.btn_load.clicked.connect(self.load_selected)
         bottom.addWidget(self.btn_load)
-        self.btn_close = QPushButton("關閉", self)
+        self.btn_close = QPushButton("Close", self)
         self.btn_close.setCursor(Qt.PointingHandCursor)
         self.btn_close.clicked.connect(self.close)
         bottom.addWidget(self.btn_close)
@@ -469,19 +495,24 @@ class RecipeLibraryDialog(QDialog):
     # ---- 資料 -------------------------------------------------------------
     def reload(self) -> int:
         """重讀資料夾並重建清單；回傳有幾份 recipe。"""
-        self._entries = [read_recipe_info(p) for p in list_recipe_files(self.directory)]
+        # F7-1：只列至少有一條「這個 build 跑得動」的 route 的 recipe
+        # （純 rsem 的範本會被濾掉；雙 route 的照列，載進來會走 ebi_patch）。
+        self._entries = [info for info in
+                         (read_recipe_info(p)
+                          for p in list_recipe_files(self.directory))
+                         if recipe_is_supported(info)]
         self.list.clear()
         for info in self._entries:
             item = QListWidgetItem(self._item_text(info))
             item.setData(Qt.UserRole, info["path"])
             item.setToolTip(info["description"] or info["error"] or info["file"])
             if info["error"]:
-                item.setToolTip("這份檔案讀不開：%s" % info["error"])
+                item.setToolTip("This file could not be read: %s" % info["error"])
             self.list.addItem(item)
         if self._entries:
             self.list.setCurrentRow(0)
         else:
-            self.detail.setText("`examples/recipes/` 裡還沒有任何 recipe JSON。")
+            self.detail.setText("No recipe JSON in `examples/recipes/` yet.")
             self.btn_load.setEnabled(False)
         return len(self._entries)
 
@@ -517,9 +548,9 @@ class RecipeLibraryDialog(QDialog):
     @staticmethod
     def _item_text(info: Dict[str, Any]) -> str:
         if info["error"]:
-            return "%s\n（讀不開：%s）" % (info["file"], info["error"])
-        routes = "、".join(info["routes"]) or "（沒有 route）"
-        return "%s\nroute：%s · %d 個步驟" % (
+            return "%s\n(unreadable: %s)" % (info["file"], info["error"])
+        routes = ", ".join(info["routes"]) or "(no route)"
+        return "%s\nroute: %s · %d steps" % (
             info["recipe_id"], routes, int(info["n_steps"]))
 
     def _on_row_changed(self, row: int) -> None:
@@ -536,17 +567,17 @@ class RecipeLibraryDialog(QDialog):
     @staticmethod
     def _detail_text(info: Dict[str, Any]) -> str:
         if info["error"]:
-            return "這份檔案讀不開：\n%s" % info["error"]
-        lines = [info["description"] or "（這份 recipe 沒有寫說明）", ""]
+            return "This file could not be read:\n%s" % info["error"]
+        lines = [info["description"] or "(this recipe has no description)", ""]
         for route in info["routes"]:
-            lines.append("• route %s：%d 個步驟"
+            lines.append("• route %s: %d steps"
                          % (route, int(info["route_steps"].get(route, 0))))
         lines.append("")
-        lines.append("分數 = %s" % (info["expr"] or "（沒有寫分數表達式）"))
+        lines.append("score = %s" % (info["expr"] or "(no score expression)"))
         if info["threshold"] is not None:
-            lines.append("門檻 = %g（分數 ≥ 門檻 → bin 1）" % float(info["threshold"]))
+            lines.append("threshold = %g (score >= threshold -> bin 1)" % float(info["threshold"]))
         if info["author"]:
-            lines.append("作者：%s" % info["author"])
+            lines.append("Author: %s" % info["author"])
         return "\n".join(lines)
 
     # ---- 動作 -------------------------------------------------------------

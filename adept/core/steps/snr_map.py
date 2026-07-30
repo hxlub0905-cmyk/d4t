@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 from ..algo import snr as algo_snr
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, ParamSpec, Step, StepError, register_step,
+    CATEGORY_ALGO, ParamSpec, Step, StepError, register_step, GROUP_REGION,
 )
 from ._util import require_image
 
@@ -22,22 +22,30 @@ class SnrMapStep(Step):
     """區域 SNR 地圖：局部平均對局部標準差的突出程度。"""
 
     key = "snr_map"
-    label = "SNR 地圖"
+    label = "SNR map"
     category = CATEGORY_ALGO
-    help = "把差異圖換算成每個位置的訊號突出度（SNR）地圖，並回報全圖峰值 snr_max。"
+    group = GROUP_REGION
+    help = ("Turn the difference image into a map of how much the signal "
+            "stands out at each position (SNR), and report the peak as "
+            "snr_max.")
     params = [
         ParamSpec(name="source", type="image_key", default="diff",
-                  help="輸入差異圖的影像流（通常是 subtract 產出的 diff）。"),
+                  help=("Input difference image stream (usually the diff "
+                        "produced by subtract).")),
         ParamSpec(name="window", type="int", default=31, min=5, max=201,
-                  help="局部統計視窗大小（5–201 的奇數）：約為預期缺陷大小的 2–4 倍。"),
+                  help=("Local statistics window size (odd, 5-201): roughly "
+                        "2-4x the defect size you expect.")),
         ParamSpec(name="clip_sigma", type="float", default=3.0, min=0.5, max=20.0,
-                  help="SNR 上限（sigma）：地圖顯示用的飽和值，超過就壓在這裡。"),
+                  help=("SNR ceiling in sigma: the saturation value for the "
+                        "map; anything above is clamped here.")),
         ParamSpec(name="clip_percentile", type="float", default=99.5, min=50.0, max=100.0,
-                  help="正規化基準百分位：用此百分位的值當作地圖的 1.0。"),
+                  help=("Normalisation percentile: the value at this "
+                        "percentile becomes 1.0 on the map.")),
         ParamSpec(name="exclude_border", type="int", default=16, min=0, max=100,
-                  help="邊框排除寬度（像素）：影像邊緣統計不可靠，先清零避免假峰值。"),
+                  help=("Border exclusion width in pixels: edge statistics are "
+                        "unreliable, so they are zeroed to avoid false peaks.")),
         ParamSpec(name="out", type="image_key", default="snr_map",
-                  help="SNR 地圖要寫入的影像流名稱（float32、0–1）。"),
+                  help="Name of the image stream the SNR map is written to (float32, 0-1)."),
     ]
     reads = ["diff"]
     writes = ["snr_map"]
@@ -55,11 +63,13 @@ class SnrMapStep(Step):
         p = self.validate_params(params)
         window = int(p["window"])
         if window % 2 == 0:
-            raise StepError(self.key, f"window 必須是奇數（收到 {window}）；請改用 {window - 1} 或 {window + 1}。")
+            raise StepError(self.key, f"window must be odd (got {window}); use {window - 1} or "
+                        f"{window + 1}.")
         src = require_image(ctx, self.key, p["source"])
         h, w = src.shape[:2]
         if 2 * int(p["exclude_border"]) >= min(h, w):
-            raise StepError(self.key, f"exclude_border（{p['exclude_border']}）太大，會把 {w}x{h} 的整張圖清空；請改小。")
+            raise StepError(self.key, f"exclude_border ({p['exclude_border']}) is too large — it "
+                        f"would blank the whole {w}x{h} image; use a smaller value.")
         res = algo_snr.compute_snr_map(
             src,
             window_size=window,

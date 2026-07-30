@@ -71,8 +71,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -80,8 +82,11 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
+    QProgressBar,
     QSpinBox,
     QSplitter,
     QStackedWidget,
@@ -95,25 +100,44 @@ from PySide6.QtWidgets import (
 
 import adept.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
 from adept.core.pipeline import ParamError, Recipe, get_step, list_steps
+from adept.core.pipeline.step import CATEGORY_IMAGE, GROUP_ORDER
 
 from .export_dialog import ExportDialog
-from .gallery import GalleryPanel, make_thumb
+from .canvas import PipelineCanvas
+from .inspectors import inspector_for
+from .gallery import make_thumb
+from .region_check import MAX_CHECK, RegionCheckWindow, regions_of_node
+from .template_dialog import TemplateDialog
+from .results import ResultsWindow, summarize_run
+from .scope import (
+    is_supported_kind, recipe_is_supported, unsupported_kind_message,
+    visible_steps,
+)
 from .viewmodel import RecipeModel, histogram, rebin
-from .welcome import RecipeLibraryDialog, WelcomeDialog, welcome_disabled
+from .theme import DEFAULT_THEME, THEMES, apply_theme, current_theme
+from .welcome import (
+    RecipeLibraryDialog, WelcomeDialog, save_theme, welcome_disabled,
+)
 from .widgets import (
     FeatureTable,
-    HistogramWidget,
     ImageView,
     LibraryPanel,
     ParamForm,
     PipelinePanel,
+    ProfilePanel,
     VerdictChip,
 )
-from .workers import DatasetLoadWorker, PreviewWorker, TrialWorker, _ThreadedWorker
+from .workers import (
+    DatasetLoadWorker, PreviewWorker, RegionCheckWorker, TrialWorker,
+    _ThreadedWorker,
+)
 
 __all__ = ["StudioWindow", "ThumbWorker", "TEMPLATE_RECIPE", "DEFAULT_CACHE_DIR",
            "THUMB_CHANNEL_PRIORITY", "TAB_PREVIEW", "TAB_GALLERY",
            "DEMO_DIR", "DEMO_DEFECTS", "DEMO_SEED", "generate_demo_lot"]
+
+#: 區域跨顆檢視的縮圖邊長（px）。
+REGION_THUMB = 120
 
 #: 卡片庫「ADC 判定」段固定顯示的 Score / Bin 項目。它不是 registry 裡的
 #: step（每條 pipeline 天生就有一張 ScoreSpec），但三段式的心智模型要完整 ——
@@ -123,7 +147,8 @@ _SCORE_LIBRARY_ENTRY = {
     "key": _SCORE_LIBRARY_KEY,
     "label": "Score / Bin",
     "category": "adc",
-    "help": "把量到的特徵組成分數，並用門檻分 bin —— 每條 pipeline 固定有一張，點此編輯。",
+    "group": "adc",
+    "help": "Combine the measured features into a score and split into bins by a threshold — every pipeline has exactly one; click to edit it.",
     "requires_ref": False,
     "params": [],
     "reads": [],
@@ -159,23 +184,34 @@ TRIAL_WORKERS = None
 #: model 變動 → 重算預覽 的去抖動間隔（毫秒）。拖 spinbox 不會每格都重算。
 PREVIEW_DEBOUNCE_MS = 300
 
-#: 右欄分頁的索引（``right_tabs``）。
+#: 主視窗三欄的出廠寬度：卡片庫 | 流程+參數 | 單顆預覽。
+#: F7-5 之後預覽拿到最寬的一欄（使用者要求「影像大一點、置中」），
+#: 因為直方圖與 Gallery 都搬去 Results 視窗了。
+COLUMN_SIZES = (256, 470, 674)
+
+#: 「試跑筆數」的出廠值。載入資料集時會再夾成 ``min(這個值, 資料集顆數)`` ——
+#: 對一份只有 24 顆的 lot 顯示 200 沒有任何意義，只會讓人以為自己看錯了。
+DEFAULT_TRIAL_N = 200
+
+#: 右欄分頁的索引 —— F7-5 之後右欄只剩單顆預覽，Gallery 搬進 Results 視窗。
+#: 常數保留是為了不打壞外部呼叫端；``TAB_GALLERY`` 現在等同「開 Results 視窗」。
 TAB_PREVIEW = 0
 TAB_GALLERY = 1
 
 #: Gallery 縮圖要用哪個 channel（依序找第一個有的；都沒有就用第一個 channel）。
 THUMB_CHANNEL_PRIORITY = ("test", "single")
 
-_FEATURE_PLACEHOLDER = "插入特徵 ▾"
-_SCORE_HELP = ("分數是一條算式，變數就是上面流程產出的特徵名（例："
-               "snr_max、blob_area、glv_max）。分數 ≥ 門檻 → bin 1，"
-               "否則 bin 0。可用 + - * / ( ) 與 sqrt / abs / min / max。")
+_FEATURE_PLACEHOLDER = "Insert feature ▾"
+_SCORE_HELP = ("The score is an expression whose variables are the feature names "
+               "produced by the pipeline above (e.g. snr_max, blob_area, "
+               "glv_max). score >= threshold -> bin 1, otherwise bin 0. "
+               "You can use + - * / ( ) and sqrt / abs / min / max.")
 
 
 def _fmt(value: Any) -> str:
     """參數摘要用的短字串（float 去掉多餘的 0）。"""
     if isinstance(value, bool):
-        return "是" if value else "否"
+        return "Yes" if value else "No"
     if isinstance(value, float):
         return ("%g" % value)
     return str(value)
@@ -315,8 +351,8 @@ class ThumbWorker(_ThreadedWorker):
             if out:
                 self.ready.emit(out)
             elif batch:
-                self.failed.emit("有 %d 顆 defect 的縮圖讀不出來（影像檔可能不在）。"
-                                 % len(batch))
+                self.failed.emit("Could not read thumbnails for %d defects "
+                                 "(the image files may be missing)." % len(batch))
 
         self._start_job(work)
 
@@ -349,7 +385,9 @@ class StudioWindow(QMainWindow):
         self.setWindowTitle("ADEPT Studio")
 
         # ---- 狀態 ---------------------------------------------------------
-        self.model = RecipeModel()
+        # 開窗就先放好 Input 卡（F7-9）：空白畫布對不會寫 code 的人是一道
+        # 「現在要幹嘛」的關卡，而答案永遠是同一個 —— 先載入影像。
+        self.model = RecipeModel.starter()
         self.dataset: Optional[Any] = None
         self.trial_scores: List[float] = []
         self.trial_results: List[Dict[str, Any]] = []   # M5：Gallery / 輸出的來源
@@ -360,18 +398,28 @@ class StudioWindow(QMainWindow):
         self._preview_images: Dict[str, Any] = {}
         self._last_result: Optional[Any] = None
         self._user_stream: Optional[str] = None   # 使用者親手挑的影像流（會被保留）
+        self._user_stream_b: Optional[str] = None  # 同上，並排的右邊那張
+        self._compare_on = False         # 並排比對開著嗎（F7-8）
+        self._view_syncing = False       # 正在把檢視狀態推給另一張圖
         self._syncing = False            # 程式在寫 widget（別回頭觸發 model）
         self._trial_t0 = 0.0
         self._items_by_id: Dict[str, Any] = {}    # defect_id -> DefectItem（縮圖用）
         self._score_filter: Optional[Any] = None  # 直方圖點出來的 (lo, hi)
+        self._pending_warnings: List[Any] = []    # 跑前 lint 的警告（跑完才講）
+        self._preview_epoch = 0                   # 預覽的世代（丟掉過期結果用）
+        self._async_epoch = 0                     # 背景那筆出發時的世代
         self.welcome_dialog: Optional[Any] = None
         self.library_dialog: Optional[Any] = None
+        self.region_window: Optional[Any] = None   # 區域跨顆檢視（F7-11）
+        self.template_dialog: Optional[Any] = None  # 建模板對話框（F7-12）
+        self._region_regions: List[str] = []
 
         # ---- 背景工作 ------------------------------------------------------
         self.dataset_worker = DatasetLoadWorker(self)
         self.preview_worker = PreviewWorker(self)
         self.trial_worker = TrialWorker(self)
         self.thumb_worker = ThumbWorker(self)
+        self.region_check_worker = RegionCheckWorker(self)
 
         # ---- 去抖動計時器 --------------------------------------------------
         self._preview_timer = QTimer(self)
@@ -383,16 +431,24 @@ class StudioWindow(QMainWindow):
         self._build_toolbar()
         self._build_body()
         self.setStatusBar(QStatusBar(self))
+        self._build_progress()
 
         self._wire_widgets()
         self._wire_workers()
+        self._build_shortcuts()
         self.model.add_listener(self._on_model_changed)
 
-        self.library.set_steps([s.describe() for s in list_steps()]
-                               + [_SCORE_LIBRARY_ENTRY])
+        # F7-1：卡片庫只列目前輸入型別用得到的卡（見 adept/ui/scope.py）
+        self.library.set_steps(
+            visible_steps([s.describe() for s in list_steps()])
+            + [_SCORE_LIBRARY_ENTRY])
         self._refresh_all()
-        self._status("準備好了 —— 第一次用請按「說明」，"
-                     "或直接「開啟 KLARF…」載入資料。")
+        if self.model.node_order:
+            # 起手卡直接選起來：右欄一開窗就是「可以動的東西」，
+            # 而不是一句「請先從卡片庫挑一張卡」。
+            self.select_node(self.model.node_order[0])
+        self._status("Ready — press “Help” for a guided start, or “Open KLARF…” "
+                     "to load your data.")
 
         if show_welcome_on_start is None:
             show_welcome_on_start = _welcome_on_start_default()
@@ -404,56 +460,241 @@ class StudioWindow(QMainWindow):
     # 介面組裝
     # ==================================================================== #
     def _build_toolbar(self) -> None:
-        bar = QToolBar("主要動作", self)
+        """工具列（M7 精簡）。
+
+        兩處刻意的取捨：
+
+        * **「載入範本」併進「Templates…」** —— 舊版兩顆鈕做的是同一件事
+          （都在載 ``examples/recipes/`` 底下的 JSON），而 die-to-die 對第一次
+          用的人是行話。現在只留一個入口，範本庫自己把 die-to-die 排第一。
+        * **「全跑」收進「Run trial」的下拉** —— 兩顆長得一樣的 ▶ 鈕擺在一起，
+          新手分不出差別也不知道該按哪顆。主要動作只留一顆，破壞性比較大的
+          「跑整批」降級成選單項目。
+        """
+        bar = QToolBar("Main actions", self)
         bar.setMovable(False)
         bar.setFloatable(False)
         self.toolbar = bar
         self.addToolBar(bar)
 
         self.btn_open_klarf = self._tool_button(
-            "開啟 KLARF…", "載入一份 KLARF（可另外指定 patch TIFF）",
+            "Open KLARF…", "Load a KLARF (the patch TIFF can be picked separately)",
             self._on_open_klarf)
         self.btn_open_recipe = self._tool_button(
-            "開啟 Recipe…", "載入一份 recipe JSON", self._on_open_recipe)
+            "Open Recipe…", "Load a recipe JSON", self._on_open_recipe)
         self.btn_save_recipe = self._tool_button(
-            "存 Recipe…", "把目前流程存成 recipe JSON", self._on_save_recipe)
-        self.btn_template = self._tool_button(
-            "載入範本（die-to-die）", "載入內建的 die-to-die 範例流程",
-            self.load_template)
-        self.btn_export = self._tool_button(
-            "輸出…", "把這批結果寫回 KLARF、出報表、出疊圖（要先試跑或全跑）",
-            self.open_export_dialog)
-        self.btn_export.setEnabled(False)      # 有結果才亮
-        # 推廣鐵則：第一次用的人一定找得到入口 —— 這兩顆永遠在工具列上
+            "Save Recipe…", "Save the current pipeline as a recipe JSON",
+            self._on_save_recipe)
         self.btn_examples = self._tool_button(
-            "範例 recipe", "打開範例 recipe 庫：每一份都是可以直接跑的完整流程",
+            "Templates…",
+            "Open the template library — every entry is a complete, runnable "
+            "pipeline. Start here rather than from an empty pipeline.",
             self.open_recipe_library)
+        self.btn_export = self._tool_button(
+            "Export…",
+            "Write these results back to KLARF, or produce reports and overlays",
+            self.open_export_dialog)
         self.btn_help = self._tool_button(
-            "說明", "重新打開首次開啟導覽（含「用範例資料試一次」）",
+            "Help", "Reopen the getting-started tour (includes “Try it with "
+                    "sample data”)",
             lambda: self.show_welcome(force=True))
+        # 主題切換：一顆字元鈕，不佔位子也找得到（偏好存 QSettings）
+        self.btn_theme = self._tool_button(
+            "◐", "Switch between the light and dark theme",
+            self.toggle_theme)
         for b in (self.btn_open_klarf, self.btn_open_recipe,
-                  self.btn_save_recipe, self.btn_template, self.btn_examples,
-                  self.btn_export, self.btn_help):
+                  self.btn_save_recipe, self.btn_examples,
+                  self.btn_export, self.btn_help, self.btn_theme):
             bar.addWidget(b)
 
         spacer = QWidget(bar)
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(spacer)
 
-        bar.addWidget(QLabel("試跑筆數 ", bar))
+        self.lbl_trial_n = QLabel("First ", bar)
+        bar.addWidget(self.lbl_trial_n)
         self.spin_trial_n = QSpinBox(bar)
         self.spin_trial_n.setRange(10, 5000)
-        self.spin_trial_n.setValue(200)
-        self.spin_trial_n.setToolTip("試跑要跑前幾顆 defect（調參時先跑少一點）")
+        # 「First 200」旁邊沒有單位時，200 可以是任何東西（秒？百分比？）。
+        self.spin_trial_n.setSuffix(" defects")
+        self.spin_trial_n.setValue(DEFAULT_TRIAL_N)
+        self.spin_trial_n.setToolTip(
+            "How many defects a trial run covers (keep it small while tuning)")
         bar.addWidget(self.spin_trial_n)
 
         self.btn_trial = self._tool_button(
-            "▶ 試跑", "用目前流程跑前 N 顆，看分數分佈",
+            "▶ Run trial", "Run the current pipeline over the first N defects "
+                           "and show the score distribution",
             self._on_trial_clicked, primary=True)
-        self.btn_full = self._tool_button(
-            "▶ 全跑", "跑完整個資料集", self._on_full_clicked)
+        # 「跑整批」是同一顆鈕的次要動作：點主體 = 試跑，點箭頭才看得到它。
+        menu = QMenu(self.btn_trial)
+        self.act_run_all = QAction("Run all defects", menu)
+        self.act_run_all.setToolTip("Run the whole dataset, not just the first N")
+        self.act_run_all.triggered.connect(self._on_full_clicked)
+        menu.addAction(self.act_run_all)
+        self.btn_trial.setMenu(menu)
+        self.btn_trial.setPopupMode(QToolButton.MenuButtonPopup)
+        self.trial_menu = menu
         bar.addWidget(self.btn_trial)
-        bar.addWidget(self.btn_full)
+
+    #: 鍵盤快捷鍵（F7-16）。以前一個都沒有 —— 而這是一個「一直在試」的工具，
+    #: 存檔、跑一次、退回上一步是每分鐘都在做的事，每一次都要把手移到滑鼠、
+    #: 找到那顆鈕、按下去。
+    #:
+    #: 每一組都照作業系統的慣例（Ctrl+S 存檔、Ctrl+Z 復原、Ctrl+0 回原尺寸），
+    #: 不自己發明 —— 使用者的肌肉記憶是從別的軟體帶過來的，這裡不該重學。
+    SHORTCUTS = (
+        ("Ctrl+O", "open_klarf"), ("Ctrl+Shift+O", "open_recipe"),
+        ("Ctrl+S", "save_recipe"), ("Ctrl+R", "run"),
+        ("Ctrl+Z", "undo"), ("Ctrl+Shift+Z", "redo"), ("Ctrl+Y", "redo"),
+        ("Ctrl+0", "zoom_reset"), ("Ctrl++", "zoom_in"), ("Ctrl+=", "zoom_in"),
+        ("Ctrl+-", "zoom_out"), ("Ctrl+Shift+F", "zoom_fit"),
+        ("Ctrl+F", "find_card"),
+        ("Ctrl+Left", "prev_defect"), ("Ctrl+Right", "next_defect"),
+    )
+
+    def _build_shortcuts(self) -> None:
+        handlers = {
+            "open_klarf": self._on_open_klarf,
+            "open_recipe": self._on_open_recipe,
+            "save_recipe": self._on_save_recipe,
+            "run": self._on_trial_clicked,
+            "undo": self.undo,
+            "redo": self.redo,
+            "zoom_reset": self.pipeline.reset_zoom,
+            "zoom_in": lambda: self.pipeline.zoom_by(1.25),
+            "zoom_out": lambda: self.pipeline.zoom_by(1 / 1.25),
+            "zoom_fit": self.pipeline.fit,
+            "find_card": self.focus_card_search,
+            "prev_defect": lambda: self.step_defect(-1),
+            "next_defect": lambda: self.step_defect(+1),
+        }
+        self._shortcuts = []
+        for keys, name in self.SHORTCUTS:
+            sc = QShortcut(QKeySequence(keys), self)
+            sc.activated.connect(handlers[name])
+            self._shortcuts.append(sc)
+
+        # 按鍵存在還不夠 —— 使用者要**發現得到**。工具列的 tooltip 是他唯一
+        # 會停留的地方，所以把快捷鍵寫進去（作業系統慣例：括號附在後面）。
+        #
+        # 註冊而不是「設一次」：``_update_action_states`` 每次 refresh 都會重寫
+        # 這幾顆的 tooltip（「還沒有東西可以存」之類的原因），設一次的話第一次
+        # refresh 就被蓋掉了。所以改成**設 tooltip 的那個動作自己會補上快捷鍵**。
+        self._tip_keys = {
+            id(self.btn_open_klarf): "Ctrl+O",
+            id(self.btn_open_recipe): "Ctrl+Shift+O",
+            id(self.btn_save_recipe): "Ctrl+S",
+            id(self.btn_trial): "Ctrl+R",
+            id(self.btn_empty_open): "Ctrl+O",
+        }
+        for w in (self.btn_open_klarf, self.btn_open_recipe,
+                  self.btn_save_recipe, self.btn_trial, self.btn_empty_open):
+            self._set_tip(w, w.toolTip())
+
+    def _set_tip(self, widget: Any, text: str) -> None:
+        """設 tooltip，並自動補上這顆鈕的快捷鍵。"""
+        keys = getattr(self, "_tip_keys", {}).get(id(widget))
+        widget.setToolTip("%s  (%s)" % (text, keys) if keys else str(text))
+
+    def focus_card_search(self) -> None:
+        """跳到卡片庫的搜尋框（收起來的話先展開）—— 與 rail 上的放大鏡同一條路。"""
+        self.library.focus_search()
+
+    # ---- 復原 / 重做 -------------------------------------------------------
+    def undo(self) -> bool:
+        """退回上一步。做不到的時候要**說出來** —— 按了 Ctrl+Z 卻什麼都沒發生，
+        使用者第一個念頭是「這個工具有沒有壞」，不是「已經沒得退了」。"""
+        if not self.model.undo():
+            self._status("Nothing to undo.")
+            return False
+        self._status("Undone.")
+        return True
+
+    def redo(self) -> bool:
+        if not self.model.redo():
+            self._status("Nothing to redo.")
+            return False
+        self._status("Redone.")
+        return True
+
+    def _build_progress(self) -> None:
+        """狀態列右側的進度條（F7-7）。
+
+        以前載入資料集與試跑都只有狀態列的一行字，那對「跑一批一萬顆」這種
+        會等好幾分鐘的動作是不夠的 —— 使用者看不出還要多久、也看不出它到底
+        在不在動。這條進度條在**閒著時完全隱藏**，不佔位子也不製造噪音。
+
+        載入 KLARF 沒有可回報的百分比（``load_dataset`` 是一次呼叫），所以那個
+        情況用**不定型**（range 0–0）的跑馬燈：它回答的是「還在動嗎」，
+        而不是「還剩多久」——謊報一個假的百分比比不報還糟。
+        """
+        self.progress = QProgressBar(self)
+        self.progress.setFixedWidth(220)
+        self.progress.setTextVisible(True)
+        self.progress.setVisible(False)
+        # 明確狀態：``isVisible()`` 在視窗 show() 之前一律 False，
+        # headless 測試會全部誤判（同 LibraryPanel 的 badge，見 widgets.py）。
+        self._progress_on = False
+        self.statusBar().addPermanentWidget(self.progress)
+
+        # 「跑到一半發現參數設錯」是最常見的情況，而一萬顆要好幾分鐘（F7-16）。
+        # 引擎本來就支援中止（``run_batch`` 的 ``abort_check``、
+        # ``TrialWorker.abort``）—— 只是以前沒有任何地方按得到它，
+        # 於是使用者唯一的中止方式是把整個視窗關掉。
+        self.btn_stop = QPushButton("Stop", self)
+        self.btn_stop.setProperty("variant", "danger")
+        self.btn_stop.setToolTip(
+            "Stop this run. Defects already finished are kept — you get the "
+            "results for them, not nothing.")
+        self.btn_stop.setVisible(False)
+        self.btn_stop.clicked.connect(self.stop_run)
+        self.statusBar().addPermanentWidget(self.btn_stop)
+        self._stop_on = False
+
+    def _progress_busy(self, label: str) -> None:
+        """不定型跑馬燈（不知道總量時用）。"""
+        self.progress.setRange(0, 0)
+        self.progress.setFormat(str(label))
+        self.progress.setVisible(True)
+        self._progress_on = True
+
+    def _show_stop(self, on: bool) -> None:
+        """中止鈕只在真的有東西在跑的時候出現（明確狀態，不問 widget）。"""
+        self._stop_on = bool(on)
+        self.btn_stop.setVisible(bool(on))
+        self.btn_stop.setEnabled(bool(on))
+
+    def stop_available(self) -> bool:
+        return bool(self._stop_on)
+
+    def stop_run(self) -> bool:
+        """中止進行中的批次。已經跑完的那些顆**留著** —— 使用者按停止是想
+        「不要再等了」，不是「把剛才那五分鐘丟掉」。"""
+        if not self.trial_worker.is_running():
+            return False
+        self.trial_worker.abort()
+        self.btn_stop.setEnabled(False)
+        self._status("Stopping — keeping the defects that already finished…")
+        return True
+
+    def _progress_set(self, done: int, total: int, label: str = "%v / %m") -> None:
+        self.progress.setRange(0, max(1, int(total)))
+        self.progress.setValue(int(done))
+        self.progress.setFormat(str(label))
+        self.progress.setVisible(True)
+        self._progress_on = True
+
+    def _progress_done(self) -> None:
+        self._show_stop(False)
+        self.progress.setVisible(False)
+        self.progress.setRange(0, 1)
+        self.progress.reset()
+        self._progress_on = False
+
+    def progress_visible(self) -> bool:
+        """進度條現在看得到嗎（測試用）。"""
+        return bool(self._progress_on)
 
     def _tool_button(self, text: str, tip: str, slot: Any,
                      primary: bool = False) -> QToolButton:
@@ -470,10 +711,10 @@ class StudioWindow(QMainWindow):
     def _build_body(self) -> None:
         # 左：卡片庫
         self.library = LibraryPanel(self)
-        self.library.setMinimumWidth(180)
+        self.library.panel_toggled.connect(self._on_library_panel_toggled)
 
-        # 中：流程 + （參數表單 / 分數編輯）
-        self.pipeline = PipelinePanel(self)
+        # 中：流程畫布 + （參數表單 / 分數編輯）
+        self.pipeline = PipelineCanvas(self)
         self.param_form = ParamForm(self)
         self.score_pane = self._build_score_pane()
         self.stack = QStackedWidget(self)
@@ -487,28 +728,26 @@ class StudioWindow(QMainWindow):
         middle.setStretchFactor(1, 2)
         self.middle_splitter = middle
 
-        # 右：［單顆預覽］［Gallery］兩個分頁
-        right = self._build_right_tabs()
+        # 右：單顆預覽（F7-5：Gallery 與直方圖搬到 Results 視窗，
+        #     主視窗只留「編流程 + 看單顆」，影像因此拿得到整欄高度）
+        self.preview_pane = self._build_preview_pane()
 
-        top = QSplitter(Qt.Horizontal, self)
-        top.addWidget(self.library)
-        top.addWidget(middle)
-        top.addWidget(right)
-        top.setStretchFactor(0, 0)
-        top.setStretchFactor(1, 2)
-        top.setStretchFactor(2, 3)
-        top.setSizes([230, 420, 620])
-        self.top_splitter = top
+        # Results 視窗（跑完才 show；先建好讓 histogram / gallery 一直有實體，
+        # 這樣所有既有接線與測試都不用管它現在開著沒有）
+        self.results = ResultsWindow(self)
+        self.histogram = self.results.histogram
+        self.gallery = self.results.gallery
+        self.results.export_requested.connect(self.open_export_dialog)
 
-        # 下：全寬直方圖
-        self.histogram = HistogramWidget(self)
-
-        root = QSplitter(Qt.Vertical, self)
-        root.addWidget(top)
-        root.addWidget(self.histogram)
-        root.setStretchFactor(0, 4)
-        root.setStretchFactor(1, 1)
-        root.setSizes([620, 190])
+        root = QSplitter(Qt.Horizontal, self)
+        root.addWidget(self.library)
+        root.addWidget(middle)
+        root.addWidget(self.preview_pane)
+        root.setStretchFactor(0, 0)
+        root.setStretchFactor(1, 2)
+        root.setStretchFactor(2, 4)
+        root.setSizes(list(COLUMN_SIZES))
+        self.top_splitter = root
         self.root_splitter = root
         self.setCentralWidget(root)
 
@@ -518,48 +757,48 @@ class StudioWindow(QMainWindow):
         lay.setContentsMargins(2, 2, 8, 2)
         lay.setSpacing(4)
 
-        title = QLabel("Score / Bin 判定", pane)
+        title = QLabel("Score / Bin decision", pane)
         title.setObjectName("paramTitle")
         lay.addWidget(title)
 
-        head = QLabel("流程的最後一步：把特徵算成一個分數，再用門檻切成 bin。", pane)
+        head = QLabel("The last step of the pipeline: turn features into one score, then split into bins by a threshold.", pane)
         head.setObjectName("paramStepHelp")
         head.setWordWrap(True)
         lay.addWidget(head)
 
         row1 = QHBoxLayout()
         row1.setSpacing(8)
-        lbl_expr = QLabel("分數表達式", pane)
+        lbl_expr = QLabel("Score expression", pane)
         lbl_expr.setObjectName("paramLabel")
         lbl_expr.setMinimumWidth(104)
         self.expr_edit = QLineEdit(pane)
-        self.expr_edit.setPlaceholderText("例：glv_max + (glv_max - glv_q99)")
-        self.expr_edit.setToolTip("用特徵名寫一條算式，算出來就是這顆 defect 的分數")
+        self.expr_edit.setPlaceholderText("e.g. glv_max + (glv_max - glv_q99)")
+        self.expr_edit.setToolTip("Write an expression over feature names — the result is this defect's score")
         row1.addWidget(lbl_expr)
         row1.addWidget(self.expr_edit, 1)
         lay.addLayout(row1)
 
         row2 = QHBoxLayout()
         row2.setSpacing(8)
-        lbl_ins = QLabel("插入特徵", pane)
+        lbl_ins = QLabel("Insert feature", pane)
         lbl_ins.setObjectName("paramLabel")
         lbl_ins.setMinimumWidth(104)
         self.feature_combo = QComboBox(pane)
-        self.feature_combo.setToolTip("選一個特徵名，會插到表達式游標的位置")
+        self.feature_combo.setToolTip("Pick a feature name to insert at the cursor in the expression")
         row2.addWidget(lbl_ins)
         row2.addWidget(self.feature_combo, 1)
         lay.addLayout(row2)
 
         row3 = QHBoxLayout()
         row3.setSpacing(8)
-        lbl_thr = QLabel("判定門檻", pane)
+        lbl_thr = QLabel("Decision threshold", pane)
         lbl_thr.setObjectName("paramLabel")
         lbl_thr.setMinimumWidth(104)
         self.threshold_spin = QDoubleSpinBox(pane)
         self.threshold_spin.setDecimals(3)
         self.threshold_spin.setRange(-1e9, 1e9)
         self.threshold_spin.setSingleStep(0.5)
-        self.threshold_spin.setToolTip("分數 ≥ 門檻 → bin 1（要抓的），否則 bin 0")
+        self.threshold_spin.setToolTip("score >= threshold -> bin 1 (the ones you want), otherwise bin 0")
         row3.addWidget(lbl_thr)
         row3.addWidget(self.threshold_spin, 1)
         lay.addLayout(row3)
@@ -573,27 +812,6 @@ class StudioWindow(QMainWindow):
         lay.addStretch(1)
         return pane
 
-    def _build_right_tabs(self) -> QWidget:
-        """右欄：兩個分頁 —— 單顆看細節、Gallery 一次看一整批。
-
-        分頁一定要「看得出來有兩個」：兩個分頁都寫明用途（不用圖示、不用
-        只有一個字的標籤），並各自掛 tooltip 說明什麼時候該用哪一頁。
-        """
-        self.preview_pane = self._build_preview_pane()
-        self.gallery = GalleryPanel(self)
-
-        tabs = QTabWidget(self)
-        tabs.setDocumentMode(False)
-        tabs.setTabPosition(QTabWidget.North)
-        tabs.addTab(self.preview_pane, "單顆預覽")
-        tabs.addTab(self.gallery, "Gallery（同屏比多顆）")
-        tabs.setTabToolTip(TAB_PREVIEW, "一次看一顆：影像流、特徵值、判定結果")
-        tabs.setTabToolTip(TAB_GALLERY, "一次看一整批的縮圖，用眼睛掃出調錯的地方"
-                                        "（試跑後才有內容）")
-        tabs.setCurrentIndex(TAB_PREVIEW)
-        self.right_tabs = tabs
-        return tabs
-
     def _build_preview_pane(self) -> QWidget:
         pane = QWidget(self)
         lay = QVBoxLayout(pane)
@@ -605,14 +823,14 @@ class StudioWindow(QMainWindow):
         self.btn_prev = QPushButton("◀", pane)
         self.btn_prev.setObjectName("cardButton")
         self.btn_prev.setFixedWidth(28)
-        self.btn_prev.setToolTip("上一顆 defect")
+        self.btn_prev.setToolTip("Previous defect")
         self.btn_next = QPushButton("▶", pane)
         self.btn_next.setObjectName("cardButton")
         self.btn_next.setFixedWidth(28)
-        self.btn_next.setToolTip("下一顆 defect")
+        self.btn_next.setToolTip("Next defect")
         self.defect_combo = QComboBox(pane)
-        self.defect_combo.setToolTip("直接跳到某一顆 defect")
-        self.defect_label = QLabel("（尚未載入資料集）", pane)
+        self.defect_combo.setToolTip("Jump straight to a defect")
+        self.defect_label = QLabel("(no dataset loaded)", pane)
         self.defect_label.setObjectName("paramHint")
         nav.addWidget(self.btn_prev)
         nav.addWidget(self.btn_next)
@@ -622,25 +840,145 @@ class StudioWindow(QMainWindow):
 
         srow = QHBoxLayout()
         srow.setSpacing(6)
-        lbl_stream = QLabel("影像流", pane)
+        lbl_stream = QLabel("Image stream", pane)
         lbl_stream.setObjectName("paramLabel")
         self.stream_combo = QComboBox(pane)
-        self.stream_combo.setToolTip("要看哪一條影像流（test / ref / diff / snr_map …）")
+        self.stream_combo.setToolTip(
+            "Which image stream to look at (test / ref / diff / snr_map …)")
         srow.addWidget(lbl_stream)
         srow.addWidget(self.stream_combo, 1)
+
+        # 並排比對（F7-8）—— 預設關著，見 _set_compare 的說明
+        self.compare_check = QCheckBox("Compare", pane)
+        self.compare_check.setToolTip(
+            "Show a second image stream side by side, with linked zoom and pan "
+            "— useful when tuning Enhance cards, to check test and ref still "
+            "match")
+        self.stream_combo_b = QComboBox(pane)
+        self.stream_combo_b.setToolTip("The stream shown on the right")
+        self.stream_combo_b.setVisible(False)
+        srow.addWidget(self.compare_check)
+        srow.addWidget(self.stream_combo_b, 1)
+        # 游標讀數有自己的位置（M7）。以前它是寫進狀態列的，於是滑鼠只要飄過
+        # 影像，剛才那句「Trial run finished: …」就被 x/y/gray 洗掉了 ——
+        # 狀態列該留給「使用者要讀的事件」，一直在刷的東西不該跟它搶同一格。
+        self.cursor_label = QLabel("", pane)
+        self.cursor_label.setObjectName("paramHint")
+        self.cursor_label.setMinimumWidth(150)
+        self.cursor_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.cursor_label.setToolTip("Cursor position and gray level")
+        srow.addWidget(self.cursor_label)
         lay.addLayout(srow)
 
         self.image_view = ImageView(pane)
-        lay.addWidget(self.image_view, 3)
+        self.image_view_b = ImageView(pane)
+        self.image_view_b.setVisible(False)
+        images = QWidget(pane)
+        irow = QHBoxLayout(images)
+        irow.setContentsMargins(0, 0, 0, 0)
+        irow.setSpacing(4)
+        irow.addWidget(self.image_view, 1)
+        irow.addWidget(self.image_view_b, 1)
 
+        # 還沒載資料時，畫面上最大的一塊是**一片黑**，角落有一行極小的
+        # 「(no dataset loaded)」（F7-15）。首啟導覽關掉之後就沒有任何東西告訴
+        # 使用者下一步要做什麼 —— 而「下一步」只有兩個，就把那兩個放在這裡。
+        self.empty_state = QWidget(pane)
+        estack = QVBoxLayout(self.empty_state)
+        estack.addStretch(1)
+        title = QLabel("No data loaded yet", self.empty_state)
+        title.setObjectName("paramTitle")
+        title.setAlignment(Qt.AlignCenter)
+        estack.addWidget(title)
+        why = QLabel("Open a KLARF to see your patches here, or try the tool "
+                     "with generated sample data first.", self.empty_state)
+        why.setObjectName("paramHint")
+        why.setAlignment(Qt.AlignCenter)
+        why.setWordWrap(True)
+        estack.addWidget(why)
+        brow = QHBoxLayout()
+        brow.addStretch(1)
+        self.btn_empty_open = QPushButton("Open KLARF…", self.empty_state)
+        self.btn_empty_open.setObjectName("primary")
+        brow.addWidget(self.btn_empty_open)
+        self.btn_empty_sample = QPushButton("Try it with sample data",
+                                            self.empty_state)
+        self.btn_empty_sample.setProperty("variant", "secondary")
+        brow.addWidget(self.btn_empty_sample)
+        brow.addStretch(1)
+        estack.addLayout(brow)
+        estack.addStretch(1)
+
+        self.image_stack = QStackedWidget(pane)
+        self.image_stack.addWidget(self.empty_state)      # index 0
+        self.image_stack.addWidget(images)                # index 1
+        lay.addWidget(self.image_stack, 3)
+
+        # 模板定位卡的入口在**參數列裡**（F7-13），不在這裡。它是那個參數的值
+        # 從哪來，不是一個預覽動作 —— 放在影像下方等於把「這個欄位怎麼填」的
+        # 答案擺到半個螢幕外，而欄位本身看起來只是「還沒填」。
+
+        # 「這個區域在整批上都對嗎」（F7-11）。跟曲線面板一樣平常收起來，
+        # 只有選到會定義區域的卡片時才出現。
+        self.btn_region_check = QPushButton("Check this region across defects…",
+                                            pane)
+        self.btn_region_check.setProperty("variant", "secondary")
+        self.btn_region_check.setToolTip(
+            "Draw this region on many defects at once. A setting that looks "
+            "right on defect 1 can be completely off on defect 50 — the "
+            "structure sits in a different place on every patch.")
+        self.btn_region_check.setVisible(False)
+        lay.addWidget(self.btn_region_check)
+
+        # 投影曲線面板（F7-11）。**平常收起來** —— 它只有在編輯投影定位卡的
+        # 時候才有意義，常駐會把好不容易爭取到的影像高度又吃掉一塊。
+        # 投影曲線面板搬進卡片儀表（F7-17）：它本來就是「這張卡自己的儀表」，
+        # 只是 F7-11 當時直接掛在這裡，變成一條跟儀表機制平行的路。兩條並存的
+        # 下場是加新面板的人不知道走哪一條，然後兩邊各長一半。
+
+        # 右下角那一塊：**選哪張卡就換成那張卡的儀表**（F7-17）。
+        # 原本固定是一張「特徵 / 數值」表 —— 問題不是它佔位子，是那些數字沒有
+        # 辦法判讀（`blob_dist_center 11.170` 是大還是小？），而且使用者在問的
+        # 問題**每張卡都不一樣**。特徵表仍然留著，用切換列回去。
         self.feature_table = FeatureTable(pane)
         self.feature_table.setMinimumHeight(120)
-        lay.addWidget(self.feature_table, 2)
+
+        self.inspector_host = QWidget(pane)
+        ihost = QVBoxLayout(self.inspector_host)
+        ihost.setContentsMargins(0, 0, 0, 0)
+        ihost.setSpacing(2)
+        self.inspector_summary = QLabel("", self.inspector_host)
+        self.inspector_summary.setObjectName("paramHint")
+        self.inspector_summary.setWordWrap(True)
+        self.inspector_slot = QVBoxLayout()
+        self.inspector_slot.setContentsMargins(0, 0, 0, 0)
+        ihost.addLayout(self.inspector_slot, 1)
+        ihost.addWidget(self.inspector_summary)
+        self._inspector: Optional[Any] = None
+
+        self.bottom_stack = QStackedWidget(pane)
+        self.bottom_stack.addWidget(self.inspector_host)      # index 0
+        self.bottom_stack.addWidget(self.feature_table)       # index 1
+
+        tabs = QHBoxLayout()
+        tabs.setContentsMargins(0, 0, 0, 0)
+        tabs.setSpacing(4)
+        self.btn_tab_card = QPushButton("Card", pane)
+        self.btn_tab_features = QPushButton("Features", pane)
+        for i, b in enumerate((self.btn_tab_card, self.btn_tab_features)):
+            b.setCheckable(True)
+            b.setObjectName("cardButton")
+            b.setFixedHeight(20)
+            b.clicked.connect(lambda _c=False, k=i: self.show_bottom_page(k))
+            tabs.addWidget(b)
+        tabs.addStretch(1)
+        lay.addLayout(tabs)
+        lay.addWidget(self.bottom_stack, 2)
 
         vrow = QHBoxLayout()
         vrow.setSpacing(6)
         self.verdict = VerdictChip(pane)
-        vrow.addWidget(QLabel("判定", pane))
+        vrow.addWidget(QLabel("Verdict", pane))
         vrow.addWidget(self.verdict)
         vrow.addStretch(1)
         lay.addLayout(vrow)
@@ -658,6 +996,9 @@ class StudioWindow(QMainWindow):
         self.pipeline.move_requested.connect(self._on_move_requested)
         self.pipeline.remove_requested.connect(self._on_remove_requested)
         self.pipeline.score_clicked.connect(self.show_score_page)
+        self.pipeline.edge_added.connect(self._on_edge_added)
+        self.pipeline.edge_removed.connect(self._on_edge_removed)
+        self.pipeline.add_after_requested.connect(self._on_add_after)
 
         self.param_form.param_edited.connect(self._on_param_edited)
 
@@ -668,9 +1009,20 @@ class StudioWindow(QMainWindow):
         self.btn_prev.clicked.connect(lambda: self.step_defect(-1))
         self.btn_next.clicked.connect(lambda: self.step_defect(+1))
         self.defect_combo.currentIndexChanged.connect(self._on_defect_combo)
+        self.btn_region_check.clicked.connect(lambda: self.open_region_check())
+        self.btn_empty_open.clicked.connect(self._on_open_klarf)
+        self.btn_empty_sample.clicked.connect(self._on_demo_requested)
+        self.param_form.action_requested.connect(self._on_param_action)
         self.stream_combo.currentTextChanged.connect(self._on_stream_changed)
+        self.stream_combo_b.currentTextChanged.connect(self._on_stream_b_changed)
+        self.compare_check.toggled.connect(self.set_compare)
 
         self.image_view.cursor_info.connect(self._on_cursor_info)
+        self.image_view_b.cursor_info.connect(self._on_cursor_info)
+        self.image_view.view_changed.connect(
+            lambda s, o: self._link_views(self.image_view, self.image_view_b, s, o))
+        self.image_view_b.view_changed.connect(
+            lambda s, o: self._link_views(self.image_view_b, self.image_view, s, o))
 
         self.histogram.threshold_changed.connect(self._on_threshold_changed)
         self.histogram.threshold_committed.connect(self._on_threshold_committed)
@@ -683,17 +1035,22 @@ class StudioWindow(QMainWindow):
     def _wire_workers(self) -> None:
         self.dataset_worker.loaded.connect(self._on_dataset_loaded)
         self.dataset_worker.failed.connect(
-            lambda msg: self._status("載入資料集失敗：%s" % msg))
+            lambda msg: (self._progress_done(),
+                         self._status("Could not load dataset: %s" % msg, "error")))
 
-        self.preview_worker.ready.connect(self._on_preview_ready)
+        self.preview_worker.ready.connect(self._on_async_preview_ready)
         self.preview_worker.busy.connect(self._on_preview_busy)
+        self.region_check_worker.ready.connect(self._on_region_ready)
+        self.region_check_worker.failed.connect(
+            lambda msg: self._status("Region check failed: %s" % msg, "error"))
         self.preview_worker.failed.connect(
-            lambda msg: self._status("預覽失敗：%s" % msg))
+            lambda msg: self._status("Preview failed: %s" % msg, "error"))
 
         self.trial_worker.progress.connect(self._on_trial_progress)
         self.trial_worker.done.connect(self._on_trial_done_async)
         self.trial_worker.failed.connect(
-            lambda msg: self._status("試跑失敗：%s" % msg))
+            lambda msg: (self._progress_done(),
+                         self._status("Trial run failed: %s" % msg, "error")))
 
         self.thumb_worker.ready.connect(self._on_thumbs_ready)
         self.thumb_worker.failed.connect(self._status)
@@ -701,16 +1058,35 @@ class StudioWindow(QMainWindow):
     # ==================================================================== #
     # 狀態列
     # ==================================================================== #
-    def _status(self, msg: str) -> None:
-        self.statusBar().showMessage(str(msg))
+    def _status(self, msg: str, level: str = "info") -> None:
+        """狀態列。``level="error"`` 會把它變成紅字（F7-15）。
+
+        狀態列是**唯一**會講出「這件事沒成功」的地方（lint 擋下試跑、卡片加不
+        進去、模板存不起來），而它以前跟「Added denoise」用完全一樣的灰字，
+        在畫面最左下角。使用者按了一顆鈕、什麼都沒發生、而唯一的解釋長得跟
+        剛才那句成功訊息一模一樣 —— 那等於沒有講。
+        """
+        bar = self.statusBar()
+        bar.setProperty("level", "error" if level == "error" else "info")
+        bar.style().unpolish(bar)
+        bar.style().polish(bar)
+        bar.showMessage(str(msg))
 
     def status_text(self) -> str:
         """目前狀態列文字（測試用）。"""
         return self.statusBar().currentMessage()
 
+    def status_level(self) -> str:
+        """狀態列現在是不是在報錯（用明確狀態，不要去比對顏色）。"""
+        return str(self.statusBar().property("level") or "info")
+
+    def cursor_text(self) -> str:
+        """目前的游標讀數（測試用）。"""
+        return self.cursor_label.text()
+
     def _on_cursor_info(self, text: str) -> None:
-        if text:
-            self._status(text)
+        """游標讀數 → 預覽區自己的標籤（**不碰狀態列**，見 ``_build_preview_pane``）。"""
+        self.cursor_label.setText(str(text or ""))
 
     # ==================================================================== #
     # model → UI
@@ -721,6 +1097,9 @@ class StudioWindow(QMainWindow):
         self._sync_score_widgets()
         self.histogram.set_threshold(self.model.threshold)
         self._refresh_bin_summary(self.model.threshold)
+        self._update_action_states()
+        self._refresh_library_badges()
+        self._refresh_region_button()
         self._schedule_preview()
 
     def _refresh_all(self) -> None:
@@ -729,34 +1108,167 @@ class StudioWindow(QMainWindow):
         self._refresh_feature_combo()
         self.histogram.set_threshold(self.model.threshold)
         self._refresh_bin_summary(self.model.threshold)
+        self._update_action_states()
+        self._refresh_library_badges()
+
+    def _refresh_library_badges(self) -> None:
+        """把「pipeline 目前產出了哪些影像流」餵給卡片庫（F7-3）。
+
+        卡片庫據此把前置條件未滿足的卡標成 ``needs diff`` 並調淡 ——
+        **但仍然可以加**。卡片庫的順序不是執行順序，使用者可能先放卡再補上游。
+        """
+        try:
+            streams = list(self.model.available_streams())
+        except Exception:                # noqa: BLE001 — 顯示用，壞了就不標
+            streams = []
+        self.library.set_available_streams(streams)
+
+    def _on_library_panel_toggled(self, open_: bool) -> None:
+        """卡片區收起來時，把左欄的寬度真的還給工作區。
+
+        只搬左欄與中欄之間的那條分隔線 —— 右欄（單顆預覽）的寬度不動，
+        使用者自己調過的預覽大小不該因為收合卡片庫而被重設。
+        """
+        root = getattr(self, "root_splitter", None)
+        if root is None:
+            return
+        sizes = list(root.sizes())
+        if len(sizes) != 3 or sum(sizes) <= 0:
+            return
+        want = self.library.minimumWidth()
+        delta = want - sizes[0]
+        sizes[0], sizes[1] = want, max(240, sizes[1] - delta)
+        root.setSizes(sizes)
+
+    # ---- 動作可用性（M7）--------------------------------------------------
+    def _update_action_states(self) -> None:
+        """按鈕的前置條件不滿足 → **變灰並在 tooltip 說明原因**。
+
+        舊行為是「按下去才在狀態列說『還沒有載入資料集』」。狀態列在螢幕最下
+        角，第一次用的人根本不會往那裡看 —— 對他而言就是「我按了，沒反應」。
+        推廣鐵則要求：擋在前面，而且要講得出為什麼。
+
+        這裡只碰 ``setEnabled`` / ``setToolTip``，不改 model、不觸發預覽，
+        所以任何 refresh 路徑都可以放心呼叫。
+        """
+        n_items = len(self._items())
+        has_steps = bool(self.model.node_order)
+        can_run = bool(n_items) and has_steps
+
+        # 沒有資料時，最大的那一塊要說得出下一步（F7-15）
+        self.image_stack.setCurrentIndex(1 if n_items else 0)
+
+        if can_run:
+            run_why = ""
+        elif not n_items and not has_steps:
+            run_why = "Load a KLARF and add at least one card first."
+        elif not n_items:
+            run_why = "No dataset loaded yet — use “Open KLARF…” first."
+        else:
+            run_why = "The pipeline is empty — add a card from the library first."
+
+        self.btn_trial.setEnabled(can_run)
+        self._set_tip(self.btn_trial,
+                      run_why or "Run the current pipeline over the first %d "
+                                 "defects and show the score distribution"
+                      % int(self.spin_trial_n.value()))
+        self.act_run_all.setEnabled(can_run)
+        self.act_run_all.setToolTip(
+            run_why or "Run all %d defects, not just the first %d"
+                       % (n_items, int(self.spin_trial_n.value())))
+        self.spin_trial_n.setEnabled(can_run)
+        self.lbl_trial_n.setEnabled(can_run)
+
+        self.btn_save_recipe.setEnabled(has_steps)
+        self._set_tip(self.btn_save_recipe,
+                      "Save the current pipeline as a recipe JSON" if has_steps
+                      else "Nothing to save yet — the pipeline is empty.")
+
+        has_results = bool(self.trial_results)
+        self.btn_export.setEnabled(has_results)
+        self.btn_export.setToolTip(
+            "Write these results back to KLARF, or produce reports and overlays"
+            if has_results
+            else "No results yet — run a trial first.")
 
     def _node_summary(self, node: Any) -> str:
         """最多 3 個「非預設」參數，渲染成 ``k=v`` 串起來。"""
         try:
             step_cls = get_step(node.step)
         except KeyError:
-            return "（未知的卡片 %s）" % node.step
+            return "(unknown card %s)" % node.step
         defaults = {p.name: p.default for p in step_cls.params}
+        # 有些參數的值不是給人看的（模板是一整張影像的內容，六千多個字元）。
+        # 直接串進摘要，那張卡的第三行就變成一段 base64 —— 元件會把它切掉，
+        # 於是看到的是「template=gc1:iVBORw0KGg…」，既沒有資訊也擠掉了真正
+        # 有用的參數。這種參數只講「有沒有設」。
+        opaque = {p.name: p.type for p in step_cls.params if p.type == "template"}
         parts: List[str] = []
         for name, value in node.params.items():
             if name in defaults and defaults[name] == value:
                 continue
-            parts.append("%s=%s" % (name, _fmt(value)))
+            if name in opaque:
+                parts.append("%s: set" % name)
+            else:
+                parts.append("%s=%s" % (name, _fmt(value)))
             if len(parts) >= 3:
                 break
         return " · ".join(parts)
 
+    def _node_problems(self) -> Dict[str, Any]:
+        """每個節點最嚴重的一則 lint 發現（畫布上的警示標記用）。
+
+        lint 本來就知道「這張卡缺模板」「這張卡指到不存在的區域」—— 但那個知識
+        以前只在按下 Run trial 的那一刻出現一次。卡片在畫布上看起來永遠是好的，
+        於是使用者要跑過才知道，而跑一次是好幾分鐘。
+        """
+        out: Dict[str, Any] = {}
+        try:
+            issues = self.model.validate()
+        except Exception:                        # noqa: BLE001 — 顯示用，壞了就沒標記
+            return out
+        for issue in issues:
+            nid = getattr(issue, "node_id", None)
+            if not nid:
+                continue
+            prev = out.get(nid)
+            # error 蓋過 warning；同級的取先出現的那則
+            if prev is not None and not (prev[1] == "warning"
+                                         and issue.level == "error"):
+                continue
+            out[nid] = (str(issue.detail or issue.title), str(issue.level))
+        return out
+
     def _refresh_pipeline(self) -> None:
+        problems = self._node_problems()
         nodes: List[Dict[str, Any]] = []
         for nid in self.model.node_order:
             node = self.model.nodes.get(nid)
             if node is None:
                 continue
+            step_cls = None
             try:
                 step_cls = get_step(node.step)
                 label, category = step_cls.label, step_cls.category
             except KeyError:
                 label, category = node.step, ""
+            # writes 用 kind-aware 版本解析：patch 的 Input 節點因此吐
+            # ["test", "ref"]，畫布上就畫成兩個具名輸出埠（F7-7）。
+            try:
+                writes = list(step_cls.resolve_writes_for_kind(
+                    node.params, self.model.kind))
+            except Exception:              # noqa: BLE001 — 顯示用，壞了就空著
+                writes = []
+            try:
+                reads = list(step_cls.resolve_reads(node.params))
+            except Exception:              # noqa: BLE001
+                reads = []
+            try:
+                # Region 卡不寫影像流，它定義的是具名區域 —— 副標要講得出
+                # 「ref → cell」，否則那張卡在畫布上看起來什麼都不產出。
+                regions_out = list(step_cls.resolve_regions_out(node.params))
+            except Exception:              # noqa: BLE001
+                regions_out = []
             nodes.append({
                 "node_id": nid,
                 "step_key": node.step,
@@ -764,8 +1276,14 @@ class StudioWindow(QMainWindow):
                 "category": category,
                 "enabled": bool(node.enabled),
                 "summary": self._node_summary(node),
+                "writes": writes,
+                "reads": reads,
+                "regions_out": regions_out,
+                "group": step_cls.resolve_group() if step_cls else "",
+                "problem": problems.get(nid, ("", ""))[0],
+                "problem_level": problems.get(nid, ("", "error"))[1],
             })
-        self.pipeline.set_nodes(nodes)
+        self.pipeline.set_nodes(nodes, self.model.edges)
         if self.selected_node not in self.model.nodes:
             self.selected_node = None
         self.pipeline.set_selected(self.selected_node)
@@ -808,15 +1326,189 @@ class StudioWindow(QMainWindow):
             # 「Score / Bin」不是可增刪的卡片 —— 每條 pipeline 固定有一張，
             # 點它就是去編輯分數表達式與門檻（三段式的最後一段）。
             self.show_score_page()
-            self._status("編輯分數 / 門檻")
+            self._status("Editing the score / threshold")
             return
         try:
             node_id = self.model.add_step(str(step_key))
         except (KeyError, ParamError) as e:
-            self._status("加入卡片失敗：%s" % e)
+            self._status("Could not add card: %s" % e, "error")
             return
-        self._status("已加入「%s」" % node_id)
+        self._status("Added “%s”%s" % (node_id, self._unmet_needs(node_id)))
         self.select_node(node_id)
+
+    # ---- 從輸出埠接下一張卡（F7-14）---------------------------------------
+    def _streams_through(self, node_id: str) -> List[str]:
+        """一路累積到 ``node_id``（**含**它自己）為止有哪些影像流。"""
+        order = list(self.model.node_order)
+        nid = str(node_id)
+        if nid not in order:
+            return list(self.model.available_streams())
+        i = order.index(nid)
+        after = order[i + 1] if i + 1 < len(order) else None
+        if after is not None:
+            return list(self.model.available_streams(before_node=after))
+        return list(self.model.available_streams())
+
+    def cards_addable_after(self, node_id: str) -> List[Dict[str, Any]]:
+        """接在 ``node_id`` 後面**現在就接得上**的卡片（依階段排序）。
+
+        「接得上」不是使用者該自己判斷的事 —— 引擎本來就知道每張卡讀哪幾條流
+        （``resolve_reads``）。卡片庫列的是全部 22 張，然後把接不上的標成
+        ``needs diff`` 讓使用者自己想辦法；從埠上長出來的這份清單反過來：
+        **只列現在就成立的**，所以不必先懂影像流也做得出第一條 pipeline。
+        """
+        have = set(self._streams_through(node_id))
+        out: List[Dict[str, Any]] = []
+        for desc in visible_steps([s.describe() for s in list_steps()]) or []:
+            key = str(desc.get("key", ""))
+            try:
+                step_cls = get_step(key)
+                params = step_cls.validate_params({})
+                reads = [r for r in step_cls.resolve_reads(params) if r]
+            except Exception:                  # noqa: BLE001 — 顯示用
+                continue
+            if step_cls.category == CATEGORY_IMAGE and not self.model.node_order:
+                continue
+            if any(r not in have for r in reads):
+                continue
+            if key in {n.step for n in self.model.nodes.values()} and \
+                    key.startswith("load_"):
+                continue                       # 一條 pipeline 只有一張 Input 卡
+            out.append({"key": key, "label": step_cls.label,
+                        "group": step_cls.resolve_group(),
+                        "help": str(step_cls.help or "")})
+        order = {g: i for i, g in enumerate(GROUP_ORDER)}
+        out.sort(key=lambda d: (order.get(d["group"], 99), d["label"]))
+        return out
+
+    def add_card_after(self, node_id: str, step_key: str,
+                       stream: str = "") -> Optional[str]:
+        """把 ``step_key`` 接在 ``node_id`` 後面（順序 + 一條顯式連線）。
+
+        ``stream`` 是使用者按的那一顆「+」屬於哪個輸出埠。**這件事必須傳下去**：
+        從 ref 的埠接一張 Denoise 出來，結果那張卡預設做在 test 上，那顆「+」
+        就只是一個比較短的「新增卡片」—— 而使用者以為他已經表達了「對 ref 做」。
+        """
+        nid = str(node_id)
+        if nid not in self.model.nodes:
+            return None
+        at = self.model.node_order.index(nid) + 1
+        try:
+            new_id = self.model.add_step(str(step_key), at=at)
+        except (KeyError, ParamError) as e:
+            self._status("Could not add card: %s" % e, "error")
+            return None
+        note = ""
+        if stream:
+            note = self._point_at_stream(new_id, str(stream))
+        # 顯式連線：使用者的動作是「從這個埠接下去」，那條線就該是實線。
+        # （route 相鄰本來就會產生一條虛線，但它表達的是順序，不是這個意圖。）
+        self.model.add_edge(nid, new_id)
+        self._status("Added “%s” after “%s”%s%s"
+                     % (new_id, nid, note, self._unmet_needs(new_id)))
+        self.select_node(new_id)
+        return new_id
+
+    def _point_at_stream(self, node_id: str, stream: str) -> str:
+        """把新卡的主要輸入指到 ``stream``（回一句給狀態列的話）。"""
+        node = self.model.nodes.get(str(node_id))
+        if node is None:
+            return ""
+        try:
+            specs = {p.name: p for p in get_step(node.step).params}
+        except KeyError:                       # pragma: no cover
+            return ""
+        for name in self._PRIMARY_PARAMS:
+            spec = specs.get(name)
+            if spec is None or spec.type not in ("image_key", "image_keys"):
+                continue
+            if str(node.params.get(name, "")) == stream:
+                return ""
+            try:
+                self.model.set_param(str(node_id), name, stream)
+            except ParamError:                 # pragma: no cover — 值就是流名
+                return ""
+            return " — working on “%s”" % stream
+        return ""
+
+    def _on_add_after(self, node_id: str, port: int) -> None:
+        """按下輸出埠旁邊的「+」：跳出「接得上的卡」清單。"""
+        nid = str(node_id)
+        cards = self.cards_addable_after(nid)
+        item = self.pipeline.card(nid)
+        names = item.out_names() if item is not None else []
+        stream = names[port] if 0 <= port < len(names) else ""
+        self._add_after_menu = QMenu(self)
+        title = ("What comes after “%s”?" % stream if stream
+                 else "What comes next?")
+        head = self._add_after_menu.addAction(title)
+        head.setEnabled(False)
+        if not cards:
+            none = self._add_after_menu.addAction("(nothing can connect here yet)")
+            none.setEnabled(False)
+        last_group = None
+        for card in cards:
+            if card["group"] != last_group:
+                self._add_after_menu.addSeparator()
+                last_group = card["group"]
+            act = self._add_after_menu.addAction(str(card["label"]))
+            act.setToolTip(str(card["help"]))
+            act.triggered.connect(
+                lambda _c=False, k=card["key"], n=nid, s=stream:
+                self.add_card_after(n, k, s))
+        item = self.pipeline.card(nid)
+        if item is not None:
+            anchors = item.plus_anchors_local()
+            i = max(0, min(int(port), len(anchors) - 1))
+            scene_pt = item.scenePos() + anchors[i]
+            self._add_after_menu.popup(
+                self.pipeline.viewport().mapToGlobal(
+                    self.pipeline.mapFromScene(scene_pt)))
+        else:                                  # pragma: no cover — 節點不見了
+            self._add_after_menu.popup(self.pipeline.mapToGlobal(self.pipeline.pos()))
+
+    def _producers_of(self, stream: str) -> List[str]:
+        """哪些卡片（用預設參數）會產出 ``stream``。"""
+        out: List[str] = []
+        for cls in visible_steps([s.describe() for s in list_steps()]) or []:
+            key = str(cls.get("key", ""))
+            try:
+                step_cls = get_step(key)
+                params = step_cls.validate_params({})
+                writes = step_cls.resolve_writes_for_kind(params, self.model.kind)
+            except Exception:              # noqa: BLE001 — 顯示用
+                continue
+            if stream in writes and step_cls.label:
+                out.append(str(step_cls.label))
+        return out
+
+    def _unmet_needs(self, node_id: str) -> str:
+        """剛加的卡少了什麼上游 —— 講成一句可以照做的話（回傳含前導空白）。
+
+        以前只有卡片庫上一個 ``needs ref_aligned`` 的灰字 badge。對不會寫 code
+        的人那句話沒有動作可做：他不知道 ``ref_aligned`` 是誰產的，也不知道
+        「不然還可以怎麼辦」。最常踩到的就是 Subtract —— 它預設吃對位過的
+        ``ref_aligned``，所以 Load 之後直接放 Subtract 一定缺一張上游。
+        """
+        node = self.model.nodes.get(str(node_id))
+        if node is None:
+            return ""
+        try:
+            step_cls = get_step(node.step)
+            needs = list(step_cls.resolve_reads(node.params))
+        except KeyError:
+            return ""
+        have = set(self.model.available_streams(before_node=str(node_id)))
+        missing = [s for s in needs if s and s not in have]
+        if not missing:
+            return ""
+        bits = []
+        for s in missing:
+            makers = self._producers_of(s)
+            bits.append("“%s” (add %s first)" % (s, " or ".join(makers))
+                        if makers else "“%s”" % s)
+        return (" — but it still needs the image stream %s, or point it at one "
+                "of: %s." % (", ".join(bits), ", ".join(sorted(have)) or "(none)"))
 
     def _on_node_toggled(self, node_id: str, enabled: bool) -> None:
         self.model.set_enabled(str(node_id), bool(enabled))
@@ -824,23 +1516,52 @@ class StudioWindow(QMainWindow):
     def _on_move_requested(self, node_id: str, delta: int) -> None:
         self.model.move(str(node_id), int(delta))
 
+    # ---- 畫布連線（F7-6）--------------------------------------------------
+    def _on_edge_added(self, src: str, dst: str) -> None:
+        """拉一條線。會造成循環時 model 回 False —— 那條線就不會出現。
+
+        擋在這裡（而不是等執行時報錯）是刻意的：使用者看到的是「這條線拉不
+        起來」，不是「拉起來之後整條 pipeline 壞掉」。
+
+        「已經連著了」與「會成環」必須講成兩句話。把第二個埠（ref）拖到已經
+        接了第一個埠（test）的節點上，是**很正常的操作** —— 而且畫面上兩條線
+        本來就都在了。這種時候回一句「Cannot connect」，會讓一個成功的動作
+        看起來像失敗。
+        """
+        src, dst = str(src), str(dst)
+        if self.model.has_edge(src, dst):
+            self._status("%s → %s is already connected — every image stream "
+                         "they share is already drawn." % (src, dst))
+        elif self.model.add_edge(src, dst):
+            self._status("Connected %s → %s" % (src, dst))
+        else:
+            self._status("Cannot connect %s → %s — that would make the "
+                         "pipeline loop back on itself." % (src, dst))
+
+    def _on_edge_removed(self, src: str, dst: str) -> None:
+        if self.model.remove_edge(str(src), str(dst)):
+            self._status("Disconnected %s → %s" % (src, dst))
+
     def _on_remove_requested(self, node_id: str) -> None:
         node_id = str(node_id)
         self.model.remove(node_id)
         if self.selected_node == node_id:
             self.selected_node = None
             self.param_form.set_step(None, {}, [])
-        self._status("已移除「%s」" % node_id)
+        self._status("Removed “%s”" % node_id)
 
     def select_node(self, node_id: str) -> bool:
         """選取一個節點：右邊換成它的參數表單，預覽跑到它為止。"""
         node_id = str(node_id)
         node = self.model.nodes.get(node_id)
         if node is None:
-            self._status("找不到節點「%s」。" % node_id)
+            self._status("No such step: “%s”." % node_id, "error")
             return False
         self.selected_node = node_id
         self._user_stream = None       # 換節點 → 影像流回到「這個節點的輸出」
+        # 換卡片＝上一段連續調整結束（見 viewmodel 的 coalescing）。不切的話，
+        # 「調 A 卡的 gamma → 換到 B 卡 → 再調回 A 卡的 gamma」會被併成一步。
+        self.model.end_coalescing()
         self.pipeline.set_selected(node_id)
         try:
             describe = get_step(node.step).describe()
@@ -849,8 +1570,47 @@ class StudioWindow(QMainWindow):
         streams = self.model.available_streams(before_node=node_id)
         self.param_form.set_step(describe, node.params, streams)
         self.stack.setCurrentWidget(self.param_form)
+        self._refresh_region_button()
+        self._install_inspector(node.step)     # 右下角換成這張卡的儀表（F7-17）
+        self._refresh_inspector(self._last_result)
         self._schedule_preview()
         return True
+
+    # ==================================================================== #
+    # 主題（F7-2）
+    # ==================================================================== #
+    def toggle_theme(self) -> str:
+        """light ⇄ dark；換完立刻重畫，偏好寫進 QSettings。
+
+        所有顏色都走 ``theme.TOKENS``，但**自繪 widget 是在建構式裡取色的**
+        （直方圖長條、節點卡色條、Gallery chip…），所以換膚之後要叫它們重畫。
+        """
+        order = list(THEMES)
+        try:
+            nxt = order[(order.index(current_theme()) + 1) % len(order)]
+        except ValueError:                  # pragma: no cover — 主題名壞掉
+            nxt = DEFAULT_THEME
+        return self.set_theme(nxt)
+
+    def set_theme(self, name: str) -> str:
+        app = QApplication.instance()
+        applied = apply_theme(app, name) if app is not None else str(name)
+        save_theme(applied)
+        self._repaint_for_theme()
+        self._status("Theme: %s" % applied)
+        return applied
+
+    def _repaint_for_theme(self) -> None:
+        """把在建構式裡吃過 token 的元件重建/重畫一次。"""
+        self.library.set_steps(
+            visible_steps([s.describe() for s in list_steps()])
+            + [_SCORE_LIBRARY_ENTRY])
+        self.library.refresh_colors()
+        self._refresh_pipeline()
+        self.gallery.refresh_styles()
+        for w in (self.histogram, self.image_view, self.verdict,
+                  self.feature_table, self.library, self.pipeline, self.gallery):
+            w.update()
 
     def show_score_page(self) -> None:
         """切到分數編輯頁（順便刷新特徵下拉）。"""
@@ -868,7 +1628,7 @@ class StudioWindow(QMainWindow):
         """ParamForm 的唯一出口：驗證通過才寫回 model，失敗就把那列變紅字。"""
         node_id = self.selected_node
         if node_id is None or node_id not in self.model.nodes:
-            self._status("先在流程中選一個節點，再調整參數。")
+            self._status("Select a step in the pipeline before editing parameters.", "error")
             return
         try:
             self.model.set_param(node_id, str(name), value)
@@ -877,6 +1637,43 @@ class StudioWindow(QMainWindow):
             self._status(str(e))
         else:
             self.param_form.clear_errors()
+            self._autofill_output_prefix(node_id, str(name), value)
+
+    #: 挑了區域就順手把輸出名填成區域的名字（F7-11）。
+    _PREFIX_SOURCE = "roi"
+
+    def _autofill_output_prefix(self, node_id: str, name: str, value: Any) -> None:
+        """使用者挑了一個區域 → 輸出名還空著的話，就填成那個區域的名字。
+
+        為什麼要自動填
+        --------------
+        「兩張量測卡的特徵會互相蓋掉」是一個**命名空間**的問題，而製程工程師沒有
+        理由要懂那是什麼。但他做的動作已經表達了意圖 —— 他把這張卡指到 `epi`，
+        那結果本來就該叫 `epi_...`。所以由工具把話補完。
+
+        只在**空著**的時候填：使用者自己改過的名字不可以被蓋掉，
+        不然「我明明改了它又跳回去」比沒有這個功能更糟。
+        """
+        if name != self._PREFIX_SOURCE:
+            return
+        node = self.model.nodes.get(node_id)
+        if node is None or "output_prefix" not in node.params:
+            return
+        if str(node.params.get("output_prefix", "") or "").strip():
+            return                       # 使用者已經自己命名過了
+        wanted = str(value or "").strip()
+        if not wanted:
+            return
+        try:
+            self.model.set_param(node_id, "output_prefix", wanted)
+        except ParamError:
+            return                       # 區域名不能當變數名 -> 安靜跳過
+        self.param_form.set_step(
+            get_step(node.step).describe(), node.params,
+            self.model.available_streams(before_node=node_id))
+        self._status("Results from this card will be named “%s_…” so they do "
+                     "not collide with another card measuring a different "
+                     "region." % wanted)
 
     # ==================================================================== #
     # 分數編輯
@@ -919,12 +1716,12 @@ class StudioWindow(QMainWindow):
     def _on_threshold_changed(self, value: float) -> None:
         """拖曳中：**只**重算 bin 數（秒回），絕不寫 model、不重跑。"""
         self._refresh_bin_summary(float(value))
-        self._status("門檻 %.3g（放開滑鼠才套用）" % float(value))
+        self._status("Threshold %.3g (applied when you release the mouse)" % float(value))
 
     def _on_threshold_committed(self, value: float) -> None:
         """放開滑鼠：這時才寫回 model（會觸發刷新與預覽）。"""
         self.model.set_threshold(float(value))
-        self._status("門檻已設為 %.3g" % float(value))
+        self._status("Threshold set to %.3g" % float(value))
 
     # ==================================================================== #
     # 資料集
@@ -935,26 +1732,39 @@ class StudioWindow(QMainWindow):
         path = str(path)
         tiff = None if tiff is None else str(tiff)
         if not os.path.isfile(path):
-            self._status("找不到檔案：%s" % path)
+            self._status("File not found: %s" % path)
             return False
         if sync:
             try:
                 ds = DatasetLoadWorker.run_sync(path, tiff)
             except Exception as e:      # noqa: BLE001 — UI 邊界，一律回報
-                self._status("載入資料集失敗：%s: %s" % (type(e).__name__, e))
+                self._status("Could not load dataset: %s: %s" % (type(e).__name__, e), "error")
                 return False
-            self._on_dataset_loaded(ds)
-            return True
+            return self._on_dataset_loaded(ds)
         if not self.dataset_worker.start(path, tiff):
-            self._status("已經在載入資料集了，請稍候。")
+            self._status("A dataset is already loading — please wait.")
             return False
-        self._status("載入中：%s" % os.path.basename(path))
+        self._progress_busy("Loading %s…" % os.path.basename(path))
+        self._status("Loading: %s" % os.path.basename(path))
         return True
 
-    def _on_dataset_loaded(self, dataset: Any) -> None:
+    def _on_dataset_loaded(self, dataset: Any) -> bool:
+        # F7-1：型別要到載完才知道，所以擋在這裡而不是 load_dataset_path。
+        # 擋下來時**不動既有狀態** —— 使用者手上原本那份資料集還在，
+        # 開錯一個檔不會把他正在調的東西弄丟。
+        kind = getattr(dataset, "kind", None)
+        if not is_supported_kind(kind):
+            self._status(unsupported_kind_message(kind))
+            return False
+
         self.dataset = dataset
         items = list(getattr(dataset, "items", []) or [])
         self.defect_index = 0
+        # 試跑筆數跟著資料集走：對一份 24 顆的 lot 顯示「First 200」只會讓人困惑
+        if items:
+            self.spin_trial_n.setValue(
+                max(self.spin_trial_n.minimum(),
+                    min(DEFAULT_TRIAL_N, len(items))))
         # 縮圖工只拿得到 defect_id，這張表是它回頭找 DefectItem 的唯一途徑
         self._items_by_id = {str(getattr(it, "defect_id", "")): it for it in items}
         # 換資料集 = 舊的結果與縮圖全部作廢
@@ -962,7 +1772,6 @@ class StudioWindow(QMainWindow):
         self.trial_scores = []
         self._score_filter = None
         self.gallery.set_items([])
-        self.btn_export.setEnabled(False)
 
         self._syncing = True
         try:
@@ -979,17 +1788,26 @@ class StudioWindow(QMainWindow):
             self.model.kind = str(getattr(dataset, "kind", self.model.kind))
 
         self._update_defect_label()
+        self._update_action_states()
+        self._progress_done()
         warn = list(getattr(dataset, "warnings", []) or [])
-        msg = "已載入 %d 顆 defect（型別 %s）" % (
+        msg = "Loaded %d defects (input type %s)" % (
             len(items), getattr(dataset, "kind", "?"))
         if warn:
-            msg += "　⚠ %s" % warn[0]
+            msg += "   ! %s" % warn[0]
         self._status(msg)
         if items:
             self.refresh_preview(force=False)
+        return True
+
+    def _items(self) -> List[Any]:
+        """目前資料集的 defect 清單（沒有資料集就是空的）。"""
+        if not self.dataset:
+            return []
+        return list(getattr(self.dataset, "items", []) or [])
 
     def _current_item(self) -> Optional[Any]:
-        items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
+        items = self._items()
         if not items:
             return None
         i = max(0, min(int(self.defect_index), len(items) - 1))
@@ -999,18 +1817,18 @@ class StudioWindow(QMainWindow):
     def _update_defect_label(self) -> None:
         items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
         if not items:
-            self.defect_label.setText("（尚未載入資料集）")
+            self.defect_label.setText("(no dataset loaded)")
             return
         i = max(0, min(int(self.defect_index), len(items) - 1))
         self.defect_label.setText(
-            "%s · 第 %d / %d 顆" % (getattr(self.dataset, "kind", "?"),
-                                    i + 1, len(items)))
+            "%s · defect %d / %d" % (getattr(self.dataset, "kind", "?"),
+                                     i + 1, len(items)))
 
     def set_defect_index(self, index: int) -> bool:
         """跳到第 ``index`` 顆 defect（超出範圍會夾住）。"""
         items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
         if not items:
-            self._status("還沒有載入資料集 —— 請先「開啟 KLARF…」。")
+            self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
             return False
         i = max(0, min(int(index), len(items) - 1))
         self.defect_index = i
@@ -1041,7 +1859,7 @@ class StudioWindow(QMainWindow):
         try:
             recipe = Recipe.load(path)
         except Exception as e:          # noqa: BLE001 — UI 邊界
-            self._status("載入 recipe 失敗：%s: %s" % (type(e).__name__, e))
+            self._status("Could not load recipe: %s: %s" % (type(e).__name__, e), "error")
             return False
         kind = None
         ds_kind = str(getattr(self.dataset, "kind", "")) if self.dataset else ""
@@ -1051,11 +1869,12 @@ class StudioWindow(QMainWindow):
         self.recipe_path = path
         self.setWindowTitle("ADEPT Studio — %s" % self.model.recipe_id)
         n = len(self.model.node_order)
-        self._status("已載入 recipe「%s」（%d 個步驟，route %s）"
+        self._status("Loaded recipe “%s” (%d steps, route %s)"
                      % (self.model.recipe_id, n, self.model.kind))
         if ds_kind and ds_kind not in recipe.routes:
-            self._status("已載入 recipe「%s」，但它沒有 '%s' 這條 route —— "
-                         "預覽/試跑會失敗。" % (self.model.recipe_id, ds_kind))
+            self._status("Loaded recipe “%s”, but it has no '%s' route — "
+                         "preview and trial runs will fail."
+                         % (self.model.recipe_id, ds_kind))
         self.refresh_preview(sync=sync, force=False)
         return True
 
@@ -1074,7 +1893,7 @@ class StudioWindow(QMainWindow):
         """載入內建的 die-to-die 範本；檔案不在就只在狀態列抱怨，不炸。"""
         path = TEMPLATE_RECIPE
         if not path.is_file():
-            self._status("找不到內建範本：%s" % path)
+            self._status("Built-in template not found: %s" % path)
             return False
         return self.load_recipe_path(str(path))
 
@@ -1082,16 +1901,17 @@ class StudioWindow(QMainWindow):
         """把目前 model 存成 recipe JSON。"""
         path = str(path)
         if not self.model.node_order:
-            self._status("流程還是空的，沒有東西可以存。")
+            self._status("The pipeline is empty — nothing to save.")
             return False
         try:
             self.model.to_recipe().save(path)
         except Exception as e:          # noqa: BLE001 — UI 邊界
-            self._status("存檔失敗：%s: %s" % (type(e).__name__, e))
+            self._status("Could not save: %s: %s" % (type(e).__name__, e), "error")
             return False
         self.recipe_path = path
         self.model.dirty = False
-        self._status("已存檔：%s" % path)
+        self.model.end_coalescing()      # 存檔＝一段編輯結束（見 viewmodel）
+        self._status("Saved: %s" % path)
         return True
 
     # ==================================================================== #
@@ -1111,14 +1931,17 @@ class StudioWindow(QMainWindow):
         不要一直在狀態列鬼叫）；``force=True`` 會把原因寫到狀態列。
         """
         self._preview_timer.stop()
+        # 每要求一次預覽就換一個世代編號。背景那筆算完時如果編號已經不是它
+        # 出發時那個，就代表畫面上的東西比它新 —— 那筆結果直接丟掉。
+        self._preview_epoch += 1
         if not self.model.node_order:
             if force:
-                self._status("流程還是空的 —— 先從左邊卡片庫加入第一張卡。")
+                self._status("The pipeline is empty — add the first card from the library.")
             return False
         item = self._current_item()
         if item is None:
             if force:
-                self._status("還沒有載入資料集 —— 請先「開啟 KLARF…」。")
+                self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
             return False
 
         recipe = self.model.to_recipe()
@@ -1128,16 +1951,33 @@ class StudioWindow(QMainWindow):
                 result = PreviewWorker.run_sync(recipe, item, self.model.kind,
                                                 upto_node=upto)
             except Exception as e:      # noqa: BLE001 — UI 邊界
-                self._status("預覽失敗：%s: %s" % (type(e).__name__, e))
+                self._status("Preview failed: %s: %s" % (type(e).__name__, e), "error")
                 return False
             self._on_preview_ready(result)
             return True
+        self._async_epoch = self._preview_epoch
         self.preview_worker.request(recipe, item, self.model.kind, upto_node=upto)
         return True
 
+    def _on_async_preview_ready(self, result: Any) -> None:
+        """背景預覽算完。**過期的結果直接丟掉。**
+
+        `PreviewWorker` 只合併「還沒開跑」的請求；已經在跑的那一筆照樣會跑完並
+        發出 ready。所以「先送出一筆背景預覽，接著又跑了一筆同步預覽」的時候，
+        舊的那筆會**後到**，把新的畫面蓋掉 —— 使用者看到的是他剛剛那個動作
+        之前的狀態，而且不會再更新，因為沒有人會再算一次。
+
+        這個順序在實際操作裡並不罕見（點卡片 → 立刻改參數），
+        只是以前的症狀是「影像閃一下」，不容易歸因；投影曲線面板讓它變成
+        「面板空白」，才浮出來。
+        """
+        if getattr(self, "_async_epoch", 0) != self._preview_epoch:
+            return
+        self._on_preview_ready(result)
+
     def _on_preview_busy(self, busy: bool) -> None:
         if busy:
-            self._status("預覽計算中…")
+            self._status("Computing preview…")
 
     def _on_preview_ready(self, result: Any) -> None:
         self._last_result = result
@@ -1148,6 +1988,7 @@ class StudioWindow(QMainWindow):
         self._populate_streams(images)
         self._show_current_stream()
 
+        self._refresh_inspector(result)
         highlight = self._highlight_features(result)
         self.feature_table.set_features(getattr(result, "features", {}) or {},
                                         highlight=highlight)
@@ -1157,14 +1998,230 @@ class StudioWindow(QMainWindow):
 
         if not getattr(result, "ok", False):
             # 失敗照樣把已經算出來的影像留在畫面上（診斷比清空有用）
-            self._status("預覽有問題：%s" % (getattr(result, "error", None) or "未知錯誤"))
+            self._status("Preview problem: %s"
+                         % (getattr(result, "error", None) or "unknown error"))
         elif self.selected_node:
-            self._status("預覽：跑到「%s」為止（%d 條影像流）"
+            self._status("Preview: stopped after “%s” (%d image streams)"
                          % (self.selected_node, len(images)))
         else:
-            self._status("預覽完成（%d 條影像流）%s"
+            self._status("Preview done (%d image streams)%s"
                          % (len(images),
-                            "　分數 %.4g" % score if score is not None else ""))
+                            "   score %.4g" % score if score is not None else ""))
+
+    #: 會產生投影曲線的卡片 key（面板只在編輯它的時候出現）。
+    PROFILE_STEP = "roi_profile"
+
+    # ==================================================================== #
+    # 區域跨顆檢視（F7-11）
+    # ==================================================================== #
+    def selected_regions(self) -> List[str]:
+        """選取的節點會定義哪些具名區域（不是 Region 卡就是空的）。"""
+        node = self.model.nodes.get(self.selected_node or "")
+        return regions_of_node(node) if node is not None else []
+
+    #: 需要模板的卡片 key（那張卡的模板只能用這個對話框做出來）。
+    TEMPLATE_STEP = "roi_template"
+
+    def template_build_available(self) -> bool:
+        """選取的卡片需要模板嗎（用明確狀態，不要問 widget 的可見性）。"""
+        node = self.model.nodes.get(self.selected_node or "")
+        return bool(node is not None and node.step == self.TEMPLATE_STEP)
+
+    def _on_param_action(self, param_name: str) -> None:
+        """某個參數說「我的值要用別的方式產生」（目前只有模板）。"""
+        if str(param_name) == "template":
+            self.open_template_dialog()
+
+    def open_template_dialog(self) -> Optional[Any]:
+        """開「從大圖建模板」對話框；接受之後把模板寫回這張卡。"""
+        if not self.template_build_available():
+            self._status("Select a Locate region by template card first.", "error")
+            return None
+        node_id = self.selected_node
+        dlg = TemplateDialog(self)
+        dlg.accepted_template.connect(
+            lambda text, axis, nid=node_id: self._apply_template(nid, text, axis))
+        self.template_dialog = dlg
+        dlg.show()
+        return dlg
+
+    def _apply_template(self, node_id: str, text: str, axis: str) -> None:
+        """把疊好的模板寫進卡片參數（連同它適用的方向）。"""
+        if node_id not in self.model.nodes:
+            return
+        try:
+            self.model.set_param(node_id, "template", str(text))
+            self.model.set_param(node_id, "locate_axis", str(axis))
+        except ParamError as e:
+            self._status("Could not store the template: %s" % e, "error")
+            return
+        node = self.model.nodes[node_id]
+        self.param_form.set_step(
+            get_step(node.step).describe(), node.params,
+            self.model.available_streams(before_node=node_id))
+        self._status("Template stored in this recipe — it repeats along %s. "
+                     "Now mark the region on the cell with the Region "
+                     "left/top/width/height sliders." % axis)
+        self._schedule_preview()
+
+    def region_check_available(self) -> bool:
+        """現在按得下「跨顆檢視」嗎。
+
+        用明確狀態而不是 ``btn.isVisible()`` —— 視窗還沒 show 之前後者恆為
+        False（CLAUDE.md §7 的老坑）。
+        """
+        return bool(self.selected_regions()) and bool(self._items())
+
+    # ---- 右下角：卡片儀表（F7-17）------------------------------------------
+    def show_bottom_page(self, index: int) -> None:
+        """0 = 這張卡的儀表，1 = 特徵表。"""
+        index = 1 if int(index) else 0
+        if index == 0 and self._inspector is None:
+            index = 1          # 這張卡沒有儀表 —— 不要給一片空白
+        self.bottom_stack.setCurrentIndex(index)
+        self.btn_tab_card.setChecked(index == 0)
+        self.btn_tab_features.setChecked(index == 1)
+        self.btn_tab_card.setEnabled(self._inspector is not None)
+
+    def bottom_page(self) -> int:
+        return int(self.bottom_stack.currentIndex())
+
+    def inspector(self) -> Optional[Any]:
+        """目前掛著的卡片儀表（沒有就 None）。"""
+        return self._inspector
+
+    def _install_inspector(self, step_key: str) -> None:
+        """換卡片時換儀表。沒有註冊儀表的卡就只剩特徵表。"""
+        cls = inspector_for(step_key)
+        current = type(self._inspector) if self._inspector is not None else None
+        if cls is not current:
+            if self._inspector is not None:
+                self.inspector_slot.removeWidget(self._inspector)
+                self._inspector.setParent(None)
+                self._inspector.deleteLater()
+                self._inspector = None
+            if cls is not None:
+                self._inspector = cls(self.inspector_host)
+                self.inspector_slot.addWidget(self._inspector)
+            self.btn_tab_card.setText(str(getattr(cls, "title", "Card"))
+                                      if cls is not None else "Card")
+        # **每次都要同步頁面**，不能因為「儀表類別沒變」就跳過：兩張都沒有儀表
+        # 的卡片連續選下去時，類別確實沒變（都是 None），但畫面若停在儀表那一頁
+        # 就是一片空白 —— 而那比原本的特徵表還糟。
+        self.show_bottom_page(0 if cls is not None else 1)
+
+    def _refresh_inspector(self, result: Any = None) -> None:
+        """把三種來源餵給儀表：這張卡的參數、這一顆的結果、整批的結果。"""
+        insp = self._inspector
+        if insp is None:
+            self.inspector_summary.setText("")
+            return
+        node = self.model.nodes.get(self.selected_node or "")
+        one: Dict[str, Any] = {}
+        if result is not None:
+            one = {"features": dict(getattr(result, "features", {}) or {})}
+        # meta 在 **context** 上，不在 result 上（result 只帶 features/score/bin）。
+        ctx = getattr(result, "context", None) if result is not None else None
+        meta = dict(getattr(ctx, "meta", {}) or {})
+        # 「這張卡產出哪些特徵」要問卡片庫（含 output_prefix）—— 儀表只負責畫。
+        feats: List[str] = []
+        if node is not None:
+            try:
+                feats = list(get_step(node.step).resolve_features(node.params))
+            except Exception:              # noqa: BLE001 — 顯示用
+                feats = []
+        insp.set_context(self.selected_node or "",
+                         params=dict(node.params) if node else {},
+                         result=one, batch=self.trial_results, meta=meta,
+                         feature_names=feats)
+        self.inspector_summary.setText(insp.summary())
+
+    def _refresh_region_button(self) -> None:
+        regions = self.selected_regions()
+        has_data = bool(self._items())
+        self.btn_region_check.setVisible(bool(regions))
+        self.btn_region_check.setEnabled(bool(regions) and has_data)
+        if regions and not has_data:
+            self.btn_region_check.setToolTip(
+                "No dataset loaded yet — use “Open KLARF…” first.")
+
+    def open_region_check(self, n: Optional[int] = None,
+                          sync: bool = False) -> bool:
+        """把選取節點定義的區域畫到前 N 顆上。
+
+        為什麼要有這個視窗
+        ------------------
+        區域設定對不對是一個**關於整批**的問題：patch 是以缺陷為中心裁的，
+        所以結構在每張 patch 裡的位置本來就不一樣 —— 在第 1 顆剛好的框，
+        第 50 顆可能整個偏掉。看單顆永遠看不出這件事。
+        """
+        regions = self.selected_regions()
+        if not regions:
+            self._status("Select a card that defines a region first.", "error")
+            return False
+        items = self._items()
+        if not items:
+            self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
+            return False
+
+        limit = int(n if n is not None else self.spin_trial_n.value())
+        limit = max(1, min(limit, MAX_CHECK, len(items)))
+        node = self.model.nodes[self.selected_node]
+        source = str(node.params.get("source", "") or "") or None
+        args = (self.model.to_recipe(), items[:limit], self.model.kind,
+                self.selected_node, regions, REGION_THUMB, source)
+
+        if self.region_window is None:
+            self.region_window = RegionCheckWindow(self)
+            self.region_window.defect_activated.connect(self._on_defect_activated)
+
+        if sync:
+            self._apply_region_results(regions,
+                                       RegionCheckWorker.run_sync(*args))
+            return True
+        self._region_regions = regions
+        if not self.region_check_worker.start(*args):
+            self._status("Still checking the previous region — please wait.")
+            return False
+        self._status("Checking “%s” on %d defects…"
+                     % (", ".join(regions), limit))
+        return True
+
+    def _on_region_ready(self, results: Any) -> None:
+        self._apply_region_results(list(getattr(self, "_region_regions", []) or []),
+                                   list(results or []))
+
+    def _apply_region_results(self, regions: Sequence[str],
+                              results: Sequence[Dict[str, Any]]) -> None:
+        if self.region_window is None:
+            self.region_window = RegionCheckWindow(self)
+            self.region_window.defect_activated.connect(self._on_defect_activated)
+        self.region_window.set_results(list(regions), list(results))
+        self.region_window.show()
+        self.region_window.raise_()
+        self._status(self.region_window.summary_text())
+
+    @property
+    def profile_panel(self) -> Any:
+        """投影曲線面板 —— 現在住在 ``ProfileInspector`` 裡面（F7-17）。
+
+        保留這個名字是因為它是「這張卡的面板」的對外身分（測試與狀態列都用
+        它）。選的不是投影定位卡時回一個**空的替身**，這樣呼叫端不必到處
+        寫 ``if is None``。
+        """
+        insp = self._inspector
+        panel = getattr(insp, "panel", None)
+        if panel is not None:
+            return panel
+        if getattr(self, "_no_profile", None) is None:
+            self._no_profile = ProfilePanel(self)
+            self._no_profile.setVisible(False)
+        return self._no_profile
+
+    def profile_panel_visible(self) -> bool:
+        """面板現在開著嗎（用明確狀態，不要問 ``isVisible()``）。"""
+        node = self.model.nodes.get(self.selected_node or "")
+        return bool(node is not None and node.step == self.PROFILE_STEP)
 
     def _highlight_features(self, result: Any) -> Sequence[str]:
         """選取節點這一步新增/改值的特徵 → 在特徵表裡標色。"""
@@ -1176,10 +2233,27 @@ class StudioWindow(QMainWindow):
                 return list(getattr(tr, "features_added", {}) or {})
         return ()
 
+    #: 「這張卡主要做在哪一條流上」的參數名（依優先順序）。
+    #: Enhance 卡的慣例是 ``target``／``source`` 是主角，``also_apply`` 是附帶。
+    _PRIMARY_PARAMS = ("target", "source")
+
     def _default_stream(self, images: Dict[str, Any]) -> str:
+        """點一張卡時，左邊那張圖預設顯示哪一條流。
+
+        規則是**這張卡的主要輸出**，不是「它寫過的最後一條流」。這兩者以前被
+        當成同一件事（取 ``writes`` 的最後一個），但 Enhance 卡的
+        ``resolve_writes`` 是 ``[target] + also_apply``，於是預設值一路是
+        ``also_apply`` 的最後一項 —— 點 Normalize 就跳到 ``ref``。
+        並排比對開著、右邊又停在 ``ref`` 的時候，畫面就變成左右兩張一模一樣的
+        ref，每點一張卡都要手動切回來（F7-9 試用回饋 §4）。
+        """
         nid = self.selected_node
         node = self.model.nodes.get(nid) if nid else None
         if node is not None:
+            for name in self._PRIMARY_PARAMS:
+                val = str(node.params.get(name, "") or "")
+                if val in images:
+                    return val
             try:
                 writes = get_step(node.step).resolve_writes(node.params)
             except KeyError:
@@ -1202,24 +2276,103 @@ class StudioWindow(QMainWindow):
         names = sorted(images)
         want = (self._user_stream if self._user_stream in images
                 else self._default_stream(images))
+        want_b = (self._user_stream_b if self._user_stream_b in images
+                  else self._default_compare_stream(images, want))
+        if want_b == want:
+            # 左右同一條流 = 兩張一模一樣的圖，那是並排唯一沒有意義的狀態。
+            # 使用者親手挑的右邊也讓步 —— 他挑 ref 是為了「跟左邊比」，
+            # 不是為了「看兩次 ref」。
+            want_b = self._default_compare_stream(images, want)
         self._syncing = True
         try:
             self.stream_combo.clear()
             self.stream_combo.addItems(names)
             if want in names:
                 self.stream_combo.setCurrentIndex(names.index(want))
+            self.stream_combo_b.clear()
+            self.stream_combo_b.addItems(names)
+            if want_b in names:
+                self.stream_combo_b.setCurrentIndex(names.index(want_b))
         finally:
             self._syncing = False
 
+    def _default_compare_stream(self, images: Dict[str, Any], left: str) -> str:
+        """並排的右邊預設放什麼：左邊是 test 就配 ref（反之亦然）。
+
+        並排最常見的用途就是「這張 Enhance 卡有沒有把 test 和 ref 調成不一樣」，
+        所以預設直接給那一對，不要讓使用者每次都自己挑。
+        """
+        pair = {"test": "ref", "ref": "test"}
+        mate = pair.get(str(left))
+        if mate and mate in images:
+            return mate
+        for k in ("ref", "diff", "test"):
+            if k in images and k != left:
+                return k
+        for k in sorted(images):
+            if k != left:
+                return str(k)
+        return str(left)
+
     def _show_current_stream(self) -> None:
-        name = self.stream_combo.currentText()
-        self.image_view.set_image(self._preview_images.get(name))
+        self.image_view.set_image(
+            self._preview_images.get(self.stream_combo.currentText()))
+        if self.compare_check.isChecked():
+            self.image_view_b.set_image(
+                self._preview_images.get(self.stream_combo_b.currentText()))
 
     def _on_stream_changed(self, text: str) -> None:
         if self._syncing:
             return
         self._user_stream = str(text) or None
         self._show_current_stream()
+
+    def _on_stream_b_changed(self, text: str) -> None:
+        if self._syncing:
+            return
+        self._user_stream_b = str(text) or None
+        self._show_current_stream()
+
+    # ---- 並排比對（F7-8）--------------------------------------------------
+    def set_compare(self, on: bool) -> bool:
+        """開／關並排的第二張圖。回傳最後的狀態。
+
+        **預設是關的**，這是刻意的：F7-5 把 Gallery 與直方圖搬走，就是為了讓
+        右欄的影像變大（使用者原話「影像最好大一點、置中」）。預設並排等於
+        把剛爭取到的寬度再砍一半。真正需要並排的是**調 Enhance 卡的時候**
+        （確認 test 與 ref 被調成一樣），那是一個明確的時機，一次點擊就到。
+
+        兩張圖的縮放與平移連動 —— 沒有連動的並排要使用者自己把兩邊拖到同一個
+        位置才比得起來，那還不如切換一張。
+        """
+        on = bool(on)
+        if self.compare_check.isChecked() != on:
+            self.compare_check.setChecked(on)     # 會再繞回這裡一次
+            return self.compare_check.isChecked()
+        self.image_view_b.setVisible(on)
+        self.stream_combo_b.setVisible(on)
+        self._compare_on = on
+        if on:
+            self._show_current_stream()
+            scale, offset = self.image_view.view_state()
+            self.image_view_b.set_view(scale, offset)
+        else:
+            self.image_view_b.set_image(None)
+        return on
+
+    def compare_enabled(self) -> bool:
+        """並排現在開著嗎。用明確狀態而非 ``isVisible()``（視窗還沒 show 時後者恆假）。"""
+        return bool(self._compare_on)
+
+    def _link_views(self, source: Any, target: Any, scale: float, offset) -> None:
+        """把 ``source`` 的檢視狀態推給 ``target``（單向，避免無限來回）。"""
+        if not self._compare_on or self._view_syncing:
+            return
+        self._view_syncing = True
+        try:
+            target.set_view(scale, offset)
+        finally:
+            self._view_syncing = False
 
     # ==================================================================== #
     # 試跑
@@ -1229,11 +2382,28 @@ class StudioWindow(QMainWindow):
         """跑前 ``n`` 顆並更新直方圖。``sync=True`` 走同步路徑（測試用）。"""
         items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
         if not items:
-            self._status("還沒有載入資料集 —— 請先「開啟 KLARF…」。")
+            self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
             return False
         if not self.model.node_order:
-            self._status("流程還是空的 —— 先加入卡片再試跑。")
+            self._status("The pipeline is empty — add a card before running.")
             return False
+
+        # 跑之前先 lint（F7-9）。引擎的契約是「單顆出錯不殺整批」，所以一組接
+        # 錯的卡片以前的下場是**跑完 200 顆、每一顆都失敗**：進度條走完、結果
+        # 是空的、原因埋在每顆的錯誤訊息裡。同一份檢查 CLI 從 M1 就在用了，
+        # 只是 Studio 一直沒接上來。只擋 error，warning 照跑。
+        issues = self.model.validate()
+        problems = [i for i in issues if i.level == "error"]
+        if problems:
+            first = problems[0]
+            more = ("  (and %d more problem%s)"
+                    % (len(problems) - 1, "" if len(problems) == 2 else "s")
+                    if len(problems) > 1 else "")
+            self._status("Cannot run — %s: %s%s"
+                         % (first.title, first.detail, more), "error")
+            return False
+        self._pending_warnings = [i for i in issues if i.level == "warning"]
+
         limit = max(1, min(int(n), len(items)))
         recipe = self.model.to_recipe()
         cdir = None if cache_dir is None else str(cache_dir)
@@ -1245,7 +2415,7 @@ class StudioWindow(QMainWindow):
                     recipe, self.dataset, limit,
                     workers=int(workers) if workers else 1, cache_dir=cdir)
             except Exception as e:      # noqa: BLE001 — UI 邊界
-                self._status("試跑失敗：%s: %s" % (type(e).__name__, e))
+                self._status("Trial run failed: %s: %s" % (type(e).__name__, e), "error")
                 return False
             self._apply_trial_results(results, time.time() - t0)
             return True
@@ -1253,9 +2423,11 @@ class StudioWindow(QMainWindow):
         self._trial_t0 = time.time()
         if not self.trial_worker.start(recipe, self.dataset, limit,
                                        workers=workers, cache_dir=cdir):
-            self._status("已經在試跑了，請稍候。")
+            self._status("A run is already in progress — please wait.")
             return False
-        self._status("試跑中：0 / %d" % limit)
+        self._progress_set(0, limit, "%v / %m defects")
+        self._show_stop(True)
+        self._status("Running: 0 / %d" % limit)
         return True
 
     def _on_trial_clicked(self) -> None:
@@ -1265,13 +2437,14 @@ class StudioWindow(QMainWindow):
     def _on_full_clicked(self) -> None:
         items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
         if not items:
-            self._status("還沒有載入資料集 —— 請先「開啟 KLARF…」。")
+            self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
             return
         self.run_trial(len(items), workers=TRIAL_WORKERS,
                        cache_dir=DEFAULT_CACHE_DIR)
 
     def _on_trial_progress(self, done: int, total: int) -> None:
-        self._status("試跑中：%d / %d" % (int(done), int(total)))
+        self._progress_set(int(done), int(total), "%v / %m defects")
+        self._status("Running: %d / %d" % (int(done), int(total)))
 
     def _on_trial_done_async(self, results: Any) -> None:
         self._apply_trial_results(list(results or []),
@@ -1280,6 +2453,7 @@ class StudioWindow(QMainWindow):
     def _apply_trial_results(self, results: Sequence[Dict[str, Any]],
                              elapsed: float) -> None:
         results = list(results or [])
+        self._progress_done()
         self.trial_results = results
         self.trial_scores = [r["score"] for r in results
                              if r.get("ok") and r.get("score") is not None]
@@ -1288,11 +2462,34 @@ class StudioWindow(QMainWindow):
         self.histogram.set_threshold(self.model.threshold)
         self._refresh_bin_summary(self.model.threshold)
         self._populate_gallery(results)
-        self.btn_export.setEnabled(bool(results))
+        self._refresh_inspector(self._last_result)   # 儀表吃的是整批（F7-17）
+        self._update_action_states()
         ok = sum(1 for r in results if r.get("ok"))
         fail = len(results) - ok
-        self._status("試跑完成：%d 顆（成功 %d、失敗 %d），耗時 %.1f 秒"
-                     % (len(results), ok, fail, float(elapsed)))
+        # 被按停止的那一批**不能講「finished」**：數字是真的，但它描述的是
+        # 「你叫我停的時候跑到哪裡」，不是整批的結果。差一個字，後面所有
+        # 根據這批數字做的判斷就都建立在錯的前提上。
+        stopped = bool(self.trial_worker.is_aborted())
+        msg = ("%s: %d defects (%d ok, %d failed) in %.1f s"
+               % ("Run stopped" if stopped else "Run finished",
+                  len(results), ok, fail, float(elapsed)))
+        # 跑之前的 lint 警告在這裡才講：跑之前講會被「Running: 3 / 200」洗掉。
+        # 警告不擋執行，但它描述的是「跑得完、數字卻不是你以為的那個」——
+        # 例如兩張量測卡撞名，後面那張把前面那張蓋掉了。
+        warns = list(getattr(self, "_pending_warnings", []) or [])
+        if warns:
+            more = ("  (and %d more warning%s)"
+                    % (len(warns) - 1, "" if len(warns) == 2 else "s")
+                    if len(warns) > 1 else "")
+            msg = "%s  ⚠ %s: %s%s" % (msg, warns[0].title, warns[0].detail, more)
+        self._status(msg)
+        # F7-5：結果一到就把 Results 視窗帶出來 —— 使用者按 Run 想看的就是這個
+        self.results.set_summary(
+            summarize_run(len(results), ok, elapsed, self.trial_scores))
+        self.results.set_export_enabled(bool(results))
+        self.results.status(msg)
+        if results:
+            self.results.present()
 
     # ==================================================================== #
     # Gallery（M5）
@@ -1327,16 +2524,17 @@ class StudioWindow(QMainWindow):
         self._score_filter = None
 
     def show_gallery(self) -> None:
-        """切到 Gallery 分頁。"""
-        self.right_tabs.setCurrentIndex(TAB_GALLERY)
+        """把 Results 視窗叫出來（Gallery 與分數分佈都在那裡）。"""
+        self.results.present()
 
     def show_preview(self) -> None:
-        """切回「單顆預覽」分頁。"""
-        self.right_tabs.setCurrentIndex(TAB_PREVIEW)
+        """回到主視窗的單顆預覽。"""
+        self.raise_()
+        self.activateWindow()
 
-    def current_tab(self) -> int:
-        """目前在哪個分頁（:data:`TAB_PREVIEW` / :data:`TAB_GALLERY`）——測試用。"""
-        return int(self.right_tabs.currentIndex())
+    def results_visible(self) -> bool:
+        """Results 視窗現在開著嗎（測試用）。"""
+        return bool(self.results.isVisible())
 
     # ---- 縮圖（永遠不在 GUI 執行緒解碼）------------------------------------
     def _on_thumbs_requested(self, ids: Any) -> None:
@@ -1375,14 +2573,14 @@ class StudioWindow(QMainWindow):
                 break
         self.show_preview()
         if index is None:
-            self._status("在目前的資料集裡找不到 defect「%s」。" % did)
+            self._status("Defect “%s” is not in the current dataset." % did)
             return
         self.set_defect_index(index)
-        self._status("跳到 defect「%s」（第 %d / %d 顆）"
+        self._status("Jumped to defect “%s” (%d / %d)"
                      % (did, index + 1, len(items)))
 
     def _on_gallery_selection(self, ids: Any) -> None:
-        self._status("已選 %d 顆" % len(list(ids or [])))
+        self._status("%d selected" % len(list(ids or [])))
 
     # ---- 直方圖點長條 → Gallery 篩選 --------------------------------------
     def _on_bar_clicked(self, lo: float, hi: float) -> None:
@@ -1395,13 +2593,13 @@ class StudioWindow(QMainWindow):
         if self._score_filter == rng and self.gallery.filter_text():
             self.gallery.clear_filter()
             self._score_filter = None
-            self._status("已取消分數篩選（顯示全部 %d 顆）"
+            self._status("Score filter cleared (showing all %d)"
                          % self.gallery.displayed_count())
             return
         self.gallery.filter_by_score_range(rng[0], rng[1])
         self._score_filter = rng
         self.show_gallery()
-        self._status("已篩選 score %.3g–%.3g（%d 顆）"
+        self._status("Filtered to score %.3g–%.3g (%d defects)"
                      % (rng[0], rng[1], self.gallery.displayed_count()))
 
     # ==================================================================== #
@@ -1410,7 +2608,7 @@ class StudioWindow(QMainWindow):
     def open_export_dialog(self) -> Optional[Any]:
         """開輸出精靈；沒有結果就只在狀態列提示（不開空對話框）。"""
         if not self.trial_results:
-            self._status("還沒有結果可以輸出 —— 先「▶ 試跑」或「▶ 全跑」。")
+            self._status("No results to export yet — run a trial first.", "error")
             return None
         dlg = ExportDialog(
             self.trial_results,
@@ -1425,7 +2623,8 @@ class StudioWindow(QMainWindow):
 
     def _on_exported(self, summary: Any) -> None:
         outputs = list((summary or {}).get("outputs") or [])
-        self._status("輸出完成：%s" % ("、".join(outputs) if outputs else "（沒有檔案）"))
+        self._status("Export finished: %s"
+                     % (", ".join(outputs) if outputs else "(no files)"))
 
     # ==================================================================== #
     # 首次開啟導覽 + 範例 recipe 庫（M6）
@@ -1460,7 +2659,7 @@ class StudioWindow(QMainWindow):
         else:
             dlg.reload()
         if dlg.count() == 0:
-            self._status("找不到任何範例 recipe（examples/recipes/ 是空的）。")
+            self._status("No templates found (examples/recipes/ is empty).")
         dlg.show()
         dlg.raise_()
         return dlg
@@ -1483,12 +2682,12 @@ class StudioWindow(QMainWindow):
         會有一兩秒的停頓 —— 所以整段包在**等待游標**裡，畫面不會像當掉。
         每一步都自我保護：任何一步失敗只在狀態列說明原因並回 ``False``。
         """
-        self._status("正在準備範例資料…")
+        self._status("Preparing sample data…")
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             paths = generate_demo_lot(out_dir, n=int(n))
         except Exception as e:          # noqa: BLE001 — UI 邊界，一律回報
-            self._status("產生範例資料失敗：%s: %s" % (type(e).__name__, e))
+            self._status("Could not generate sample data: %s: %s" % (type(e).__name__, e), "error")
             return False
         finally:
             QApplication.restoreOverrideCursor()
@@ -1508,8 +2707,9 @@ class StudioWindow(QMainWindow):
 
         self.show_gallery()
         self._status(
-            "範例資料試跑完成 —— 下面的直方圖就是分數分佈（可以直接拖門檻線），"
-            "右邊是縮圖牆。接下來可以「開啟 KLARF…」換成你自己的資料。")
+            "Sample run finished — the histogram below is the score "
+            "distribution (drag the threshold line), and the wall of thumbnails "
+            "is on the right. Next, use “Open KLARF…” to switch to your own data.")
         return True
 
     # ==================================================================== #
@@ -1517,32 +2717,77 @@ class StudioWindow(QMainWindow):
     # ==================================================================== #
     def _on_open_klarf(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "開啟 KLARF", "", "KLARF (*.001 *.klarf *.txt);;所有檔案 (*)")
+            self, "Open KLARF", "", "KLARF (*.001 *.klarf *.txt);;All files (*)")
         if not path:
             return
         self.load_dataset_path(path)
 
     def _on_open_recipe(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "開啟 Recipe", "", "Recipe JSON (*.json);;所有檔案 (*)")
+            self, "Open Recipe", "", "Recipe JSON (*.json);;All files (*)")
         if not path:
             return
         self.load_recipe_path(path)
 
-    def _on_save_recipe(self) -> None:
+    def _on_save_recipe(self) -> bool:
+        """回傳「真的存下去了嗎」—— 關窗前的確認要靠這個答案（F7-16）：
+        使用者在存檔對話框按取消，意思是「先別關」，不是「丟掉」。"""
         path, _ = QFileDialog.getSaveFileName(
-            self, "存 Recipe", self.recipe_path or "recipe.json",
-            "Recipe JSON (*.json);;所有檔案 (*)")
+            self, "Save Recipe", self.recipe_path or "recipe.json",
+            "Recipe JSON (*.json);;All files (*)")
         if not path:
-            return
-        self.save_recipe_path(path)
+            return False
+        return bool(self.save_recipe_path(path))
 
     # ==================================================================== #
     # 關窗
     # ==================================================================== #
+    #: 關窗前要不要問「還沒存」。測試整批把它關掉 —— 一個 modal 對話框會讓
+    #: headless 測試永遠停在那裡（而不是失敗），那種卡住最難查。
+    PROMPT_ON_CLOSE = True
+
+    def unsaved_changes(self) -> bool:
+        """有沒有還沒存的編輯（明確狀態，不要去猜）。"""
+        return bool(self.model.dirty)
+
+    def _ask_unsaved(self) -> str:
+        """問使用者要不要存。回 ``"save"`` / ``"discard"`` / ``"cancel"``。
+
+        單獨一個方法是為了測試接得住 —— 測試要驗的是「三個答案各自會怎樣」，
+        不是「QMessageBox 長什麼樣」。
+        """
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Unsaved changes")
+        box.setText("This recipe has changes you have not saved.")
+        box.setInformativeText(
+            "A recipe is the whole point of the tuning you just did — closing "
+            "now throws it away.")
+        box.setStandardButtons(QMessageBox.Save | QMessageBox.Discard
+                               | QMessageBox.Cancel)
+        box.setDefaultButton(QMessageBox.Save)
+        answer = box.exec()
+        return {QMessageBox.Save: "save",
+                QMessageBox.Discard: "discard"}.get(answer, "cancel")
+
+    def confirm_close(self) -> bool:
+        """可以關了嗎。存檔失敗（或使用者在存檔對話框按取消）**不算可以關**——
+        那是「我改變主意了」，不是「丟掉吧」。"""
+        if not (self.PROMPT_ON_CLOSE and self.unsaved_changes()):
+            return True
+        answer = self._ask_unsaved()
+        if answer == "cancel":
+            return False
+        if answer == "discard":
+            return True
+        return bool(self._on_save_recipe())
+
     def closeEvent(self, event) -> None:      # noqa: D102 - Qt hook
+        if not self.confirm_close():
+            event.ignore()
+            return
         self._preview_timer.stop()
-        for dlg in (self.welcome_dialog, self.library_dialog):
+        for dlg in (self.welcome_dialog, self.library_dialog, self.results):
             try:
                 if dlg is not None:
                     dlg.close()

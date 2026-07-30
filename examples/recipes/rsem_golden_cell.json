@@ -12,6 +12,7 @@
       "dn",
       "snr",
       "blob",
+      "glv_roi",
       "glv"
     ]
   },
@@ -81,9 +82,19 @@
       "step": "glv_stats",
       "params": {
         "source": "diff",
-        "region": "center",
-        "box_size": 128,
-        "metrics": "glv_max,glv_median,glv_std"
+        "metrics": "glv_max,glv_median,glv_std",
+        "roi": "glv_roi"
+      },
+      "enabled": true
+    },
+    "glv_roi": {
+      "step": "roi_define",
+      "params": {
+        "name": "glv_roi",
+        "shape": "center",
+        "size": 128.0,
+        "size_unit": "px",
+        "source": "diff"
       },
       "enabled": true
     }

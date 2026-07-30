@@ -38,7 +38,8 @@ from adept.core.ingest.dataset import Dataset, load_dataset
 from adept.core.pipeline import Recipe, run_batch, run_defect
 from adept.core.pipeline.engine import DefectResult
 
-__all__ = ["DatasetLoadWorker", "PreviewWorker", "TrialWorker"]
+__all__ = ["DatasetLoadWorker", "PreviewWorker", "TrialWorker",
+           "RegionCheckWorker"]
 
 #: ``stop()`` 等背景執行緒收工的預設上限（毫秒）。
 DEFAULT_JOIN_MS = 15000
@@ -240,8 +241,10 @@ class PreviewWorker(_ThreadedWorker):
     def run_sync(recipe: Recipe, item: Any, kind: str,
                  upto_node: Optional[str] = None) -> DefectResult:
         """同步跑一筆預覽（不開執行緒）；``keep_context=True`` 以便看中間影像。"""
+        # ``track_changes``：預覽是單顆，記下「每張卡把影像流改成什麼樣」
+        # 的成本可以忽略，而 Enhance 的儀表就是靠這份資料（F7-17）。
         return run_defect(recipe, item, str(kind), keep_context=True,
-                          upto_node=upto_node)
+                          upto_node=upto_node, track_changes=True)
 
     def has_pending(self) -> bool:
         """是否還有待跑的請求（測試 / statusbar 用）。"""
@@ -254,7 +257,7 @@ class PreviewWorker(_ThreadedWorker):
         def work() -> None:
             try:
                 r = run_defect(recipe, item, kind, keep_context=True,
-                               upto_node=upto)
+                               upto_node=upto, track_changes=True)
             except Exception as e:          # noqa: BLE001 — 合約外的意外
                 self.failed.emit(f"{type(e).__name__}: {e}")
             else:
@@ -345,3 +348,59 @@ class TrialWorker(_ThreadedWorker):
     # ---- 內部 -------------------------------------------------------------
     def _before_stop(self) -> None:
         self._abort.set()                   # 關窗：讓 run_batch 早點收手
+
+
+# ---------------------------------------------------------------------------
+# 4) 區域跨顆檢視（F7-11）
+# ---------------------------------------------------------------------------
+class RegionCheckWorker(_ThreadedWorker):
+    """在背景把一個具名區域畫到前 N 顆的縮圖上（見 ``ui/region_check.py``）。
+
+    為什麼要開背景執行緒：它**每顆都要跑一次 pipeline** 到那張 Region 卡為止。
+    N 顆就是 N 次，在 GUI 執行緒做會讓整個視窗僵住幾秒 —— 而使用者按下這個按鈕
+    的當下，正是他在調參數、最需要介面有反應的時候。
+
+    訊號：``ready(list)``、``busy(bool)``、``failed(str)``。
+    """
+
+    ready = Signal(object)
+    busy = Signal(bool)
+    failed = Signal(str)
+
+    def start(self, recipe: Recipe, items: Any, kind: str, node_id: str,
+              regions: Any, thumb_size: int = 120,
+              source: Optional[str] = None) -> bool:
+        """開背景執行緒檢查；已有工作在跑時回傳 False（不排隊）。
+
+        不排隊是刻意的：這個動作是使用者明確按下去的，重複按第二次的意思是
+        「用現在的設定再看一次」，而不是「排兩份」。
+        """
+        if self.is_running():
+            return False
+        args = (recipe, list(items), str(kind), str(node_id),
+                list(regions), int(thumb_size), source)
+
+        def job() -> None:
+            from .region_check import check_regions
+            try:
+                out = check_regions(*args)
+            except Exception as e:          # noqa: BLE001 — 合約外的意外
+                self.failed.emit(f"{type(e).__name__}: {e}")
+            else:
+                self.ready.emit(out)
+
+        self.busy.emit(True)
+        self._start_job(job)
+        return True
+
+    @staticmethod
+    def run_sync(recipe: Recipe, items: Any, kind: str, node_id: str,
+                 regions: Any, thumb_size: int = 120,
+                 source: Optional[str] = None) -> List[Dict[str, Any]]:
+        """同步版（測試用）。"""
+        from .region_check import check_regions
+        return check_regions(recipe, list(items), str(kind), str(node_id),
+                             list(regions), int(thumb_size), source)
+
+    def _job_finished(self) -> None:
+        self.busy.emit(False)

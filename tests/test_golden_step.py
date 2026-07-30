@@ -81,7 +81,7 @@ def test_cell_period_on_non_periodic_warns_but_does_not_raise():
     assert ctx.features["cell_px"] == 0.0 and ctx.features["cell_py"] == 0.0
     assert ctx.meta["cell_period"] == {"px": 0, "py": 0}
     warns = ctx.meta.get("warnings") or []
-    assert any("沒有週期性結構" in w for w in warns), warns
+    assert any("no periodic structure" in w for w in warns), warns
 
 
 def test_cell_period_rejects_inverted_bounds(defective):
@@ -170,7 +170,7 @@ def test_golden_cell_ghost_warn_fires(defective):
     ctx = Context(images={"test": defective})
     run_step("golden_cell", ctx, ghost_warn=100.0)   # 不可能達到的門檻
     warns = ctx.meta.get("warnings") or []
-    assert any("偏糊" in w for w in warns), warns
+    assert any("looks blurred" in w for w in warns), warns
 
 
 def test_golden_cell_float_source_keeps_scale(clean):
@@ -190,7 +190,7 @@ def test_golden_cell_on_non_periodic_raises_helpful_error():
     with pytest.raises(StepError) as ei:
         run_step("golden_cell", ctx)
     msg = str(ei.value)
-    assert "cell" in msg and "週期" in msg
+    assert "cell" in msg and "period" in msg
     assert "ref" in msg or "比對路線" in msg      # 要告訴使用者改走哪條路
 
 
@@ -198,14 +198,14 @@ def test_golden_cell_period_larger_than_image_raises(defective):
     ctx = Context(images={"test": defective[:40, :40]})
     with pytest.raises(StepError) as ei:
         run_step("golden_cell", ctx, px=64, py=64)
-    assert "比影像" in str(ei.value)
+    assert "larger than the image" in str(ei.value)
 
 
 def test_golden_cell_too_few_cells_raises(defective):
     ctx = Context(images={"test": defective[:24, :24]})
     with pytest.raises(StepError) as ei:
         run_step("golden_cell", ctx, px=20, py=20)
-    assert "完整 cell" in str(ei.value)
+    assert "complete cell(s)" in str(ei.value)
 
 
 # ---------------------------------------------------------------- 推廣鐵則

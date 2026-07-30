@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication
 
 from . import theme
 from .studio import StudioWindow
+from .welcome import saved_theme
 
 __all__ = ["main"]
 
@@ -27,7 +28,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     app = QApplication.instance()
     if app is None:
         app = QApplication(args)
-    theme.apply_theme(app)
+    theme.apply_theme(app, saved_theme(theme.DEFAULT_THEME))
 
     win = StudioWindow()
     win.resize(1440, 900)

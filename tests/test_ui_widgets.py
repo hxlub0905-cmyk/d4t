@@ -33,7 +33,7 @@ def _load_qt() -> None:
     from PySide6.QtTest import QTest  # noqa: F401
     from PySide6.QtWidgets import (  # noqa: F401
         QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QLabel, QLineEdit,
-        QSpinBox,
+        QSlider, QSpinBox,
     )
 
     from adept.ui import theme as theme_mod  # noqa: F401
@@ -84,6 +84,11 @@ def _mouse(widget, etype, pos, button=None, buttons=None):
 # --------------------------------------------------------------------------- #
 # theme
 # --------------------------------------------------------------------------- #
+def _rgb(hexstr):
+    h = str(hexstr).lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
 def test_theme_applies_and_has_adept_tokens(qapp):
     assert qapp.styleSheet(), "apply_theme 應該有裝上 QSS"
     qss = theme_mod.build_stylesheet()
@@ -93,30 +98,142 @@ def test_theme_applies_and_has_adept_tokens(qapp):
                      "QScrollBar", "QSplitter::handle", "QHeaderView::section",
                      "QToolTip", "QAbstractItemView"):
         assert selector in qss, selector
-    # CPE 的暖奶油底 + 琥珀 accent 必須原封不動地延續
-    assert theme_mod.TOKENS["bg_page"] == "#f7f4ef"
-    assert theme_mod.TOKENS["accent"] == "#f29f4b"
+
+
+def test_theme_is_neutral_and_flat(qapp):
+    """F7-2 的兩條產品要求，用性質斷言而不是寫死色碼。
+
+    舊配色是暖奶油底 + 琥珀 accent + 填滿色塊，使用者的評語是「太像玩具」。
+    這裡鎖住的是**中性**（大面積不帶色相）與**平面**（無陰影漸層），
+    色碼本身還可以繼續微調。
+    """
+    for key in ("bg_page", "bg_panel", "bg_surface", "toolbar", "statusbar"):
+        r, g, b = _rgb(theme_mod.TOKENS[key])
+        assert max(r, g, b) - min(r, g, b) <= 8, \
+            "%s = %s 帶了明顯色相，大面積底色要中性" % (key, theme_mod.TOKENS[key])
+
+    qss = theme_mod.build_stylesheet()
+    for banned in ("box-shadow", "qlineargradient", "qradialgradient"):
+        assert banned not in qss, "平面設計不用 %s" % banned
+
+
+def test_every_colour_token_is_a_real_colour(qapp):
+    """Qt 對無效的顏色字串是**靜靜畫成黑色**，不會報錯（F7-17）。
+
+    暗色盤裡曾經有 ``"accent_border": "#2f4straight"`` —— 一個「稍後修正」的
+    佔位字串，靠 70 行之後的一句覆寫救著。那句覆寫要是哪天被搬走或漏掉，
+    畫面上只會多出幾條看不出所以然的黑邊，沒有任何錯誤訊息。
+    """
+    import re
+
+    hexish = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
+    bad = []
+    for name, palette in theme_mod.PALETTES.items():
+        for key, value in palette.items():
+            if isinstance(value, str) and value.startswith("#") \
+                    and not hexish.match(value):
+                bad.append("%s.%s = %r" % (name, key, value))
+    assert not bad, "不是合法顏色的 token：%s" % bad
+
+
+def test_light_and_dark_palettes_have_identical_keys(qapp):
+    light, dark = theme_mod.PALETTES["light"], theme_mod.PALETTES["dark"]
+    assert set(light) == set(dark), set(light) ^ set(dark)
+    assert set(theme_mod.TOKENS) == set(light)
+    # 暗色真的比較暗（拿最大的底色面積比）
+    assert sum(_rgb(dark["bg_page"])) < sum(_rgb(light["bg_page"]))
+
+
+def test_every_token_the_ui_asks_for_actually_exists():
+    """``TOKENS["typo"]`` 只會在**那個 widget 被畫出來的那一刻**炸。
+
+    離屏測試通常不觸發 ``paintEvent``（沒有人 grab 它），所以自繪元件裡
+    打錯的 token 名可以一路活到使用者打開那個畫面才 KeyError ——
+    已經發生過一次（``surface_raised``）。這裡靜態掃一遍，成本近乎零。
+
+    不需要 ``qapp``：純文字掃描，故意不 import Qt。
+    """
+    import ast
+    import pathlib
+
+    from adept.ui import theme as t
+
+    ui = pathlib.Path(__file__).resolve().parent.parent / "adept" / "ui"
+    bad = []
+    for py in sorted(ui.rglob("*.py")):
+        tree = ast.parse(py.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Subscript):
+                continue
+            target = node.value
+            name = (target.id if isinstance(target, ast.Name)
+                    else getattr(target, "attr", None))
+            if name != "TOKENS":
+                continue
+            key = node.slice
+            if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                if key.value not in t.PALETTES["light"]:
+                    bad.append("%s:%d  TOKENS[%r]"
+                               % (py.name, node.lineno, key.value))
+    assert not bad, "這些 token 不存在（畫到那個 widget 時才會 KeyError）：\n  " \
+                    + "\n  ".join(bad)
+
+
+def test_self_painted_widgets_survive_an_actual_repaint(qapp):
+    """真的畫一次。自繪元件的 bug 只在 ``paintEvent`` 執行時才浮出來。"""
+    from PySide6.QtGui import QPixmap
+
+    widgets = [widgets_mod.CurveEditor(), widgets_mod.CurveField(),
+               widgets_mod.ImageView(), widgets_mod.GroupIcon("region", "#c06a1d"),
+               widgets_mod.HistogramWidget(), widgets_mod.VerdictChip(),
+               widgets_mod.ProfilePanel()]
+    lib = widgets_mod.LibraryPanel()
+    lib.set_steps(_steps())
+    widgets.append(lib)
+
+    for theme_name in ("light", "dark"):
+        theme_mod.set_theme(theme_name)
+        for w in widgets:
+            w.resize(220, 160)
+            pm = QPixmap(w.size())
+            pm.fill()
+            w.render(pm)          # KeyError / 例外會在這裡冒出來
+            assert not pm.isNull()
+    theme_mod.apply_theme(qapp, "light")
+
+
+def test_set_theme_is_in_place_and_reversible(qapp):
+    """``TOKENS`` 必須是**同一個物件** —— 各模組都 import 過它了。"""
+    before = theme_mod.TOKENS
+    try:
+        theme_mod.set_theme("dark")
+        assert theme_mod.TOKENS is before, "set_theme 不可以換掉 TOKENS 物件"
+        assert theme_mod.current_theme() == "dark"
+        assert theme_mod.TOKENS["bg_page"] == theme_mod.PALETTES["dark"]["bg_page"]
+        assert theme_mod.seg_hex("algo") == theme_mod.PALETTES["dark"]["seg_algo"]
+
+        # 不認得的名字要退回預設，不能炸
+        assert theme_mod.set_theme("nope") == theme_mod.DEFAULT_THEME
+    finally:
+        theme_mod.apply_theme(qapp, "light")
+    assert theme_mod.current_theme() == "light"
 
 
 def test_theme_segment_tokens(qapp):
     t = theme_mod.TOKENS
-    assert t["seg_image"] == "#6f93b5"
-    assert t["seg_algo"] == "#c06a1d"
-    assert t["seg_adc"] == "#8a6fb5"
-    assert t["seg_image_bg"] == "#e8eef5"
-    assert t["seg_algo_bg"] == "#f9ecd9"
-    assert t["seg_adc_bg"] == "#ece6f4"
+    for cat in ("image", "algo", "adc"):
+        assert t["seg_%s" % cat].startswith("#")
+        assert t["seg_%s_bg" % cat].startswith("#")
     for tone in ("good", "bad", "neutral"):
         for part in ("bg", "text", "border"):
             assert t["chip_%s_%s" % (tone, part)].startswith("#")
 
 
 def test_seg_color_mapping(qapp):
-    assert theme_mod.seg_color("image").name() == "#6f93b5"
-    assert theme_mod.seg_color("algo").name() == "#c06a1d"
-    assert theme_mod.seg_color("adc").name() == "#8a6fb5"
-    assert theme_mod.seg_color("algo", bg=True).name() == "#f9ecd9"
-    assert theme_mod.seg_bg("adc").name() == "#ece6f4"
+    for cat in ("image", "algo", "adc"):
+        assert theme_mod.seg_color(cat).name() == theme_mod.TOKENS["seg_%s" % cat]
+        assert theme_mod.seg_bg(cat).name() == theme_mod.TOKENS["seg_%s_bg" % cat]
+    assert theme_mod.seg_color("algo", bg=True).name() == theme_mod.TOKENS["seg_algo_bg"]
     # 未知分類要有中性退路，不能炸
     assert theme_mod.seg_color("nope").isValid()
 
@@ -225,6 +342,140 @@ def test_param_form_int_and_image_key_from_snr_map(qapp):
         assert spec["help"]
 
 
+def test_bounded_numbers_get_a_slider_bound_both_ways(qapp):
+    """F7-8：有上下界的數字都配一支滑桿。
+
+    「gamma 要填多少」對不會寫 code 的人沒有答案 —— 他要的是一邊拖一邊看圖。
+    數字框留著，因為 recipe 是要交接給別人的，那需要一個確切的值。
+    """
+    form = widgets_mod.ParamForm()
+    edits = []
+    form.param_edited.connect(lambda n, v: edits.append((n, v)))
+    form.set_step(_describe("gamma"), {}, ["test", "ref"])
+
+    s = form.slider("gamma")
+    box = form.editor("gamma")
+    assert isinstance(s, QSlider) and isinstance(box, QDoubleSpinBox)
+    assert edits == [], "建表本身不可以噴 param_edited"
+
+    # 滑桿 -> 數字框 -> param_edited
+    s.setValue(s.minimum())
+    assert box.value() == pytest.approx(0.1)
+    assert edits[-1] == ("gamma", pytest.approx(0.1))
+    s.setValue(s.maximum())
+    assert box.value() == pytest.approx(5.0)
+
+    # 數字框 -> 滑桿（反向也要跟上，而且不可以互相回寫到爆掉）
+    box.setValue(1.0)
+    assert s.value() == pytest.approx(s.maximum() * (1.0 - 0.1) / (5.0 - 0.1),
+                                      abs=2)
+    assert len([e for e in edits if e[0] == "gamma"]) == 3
+
+    # 整數參數也有；沒有上下界的就沒有（硬給一支只會誤導）
+    form.set_step(_describe("snr_map"), {}, ["test", "diff"])
+    assert isinstance(form.slider("window"), QSlider)
+    assert (form.slider("window").minimum(),
+            form.slider("window").maximum()) == (5, 201)
+    form.set_step(_describe("load_patch"), {}, [])
+    assert form.slider("channels") is None
+
+
+def test_curve_editor_is_wysiwyg_and_feeds_the_recipe(qapp):
+    """曲線編輯器畫的線 = 影像上套的線（同一個 core 函式）。
+
+    UI 自己再實作一份插值太容易了，而那會讓使用者看到的和跑出來的不一樣。
+    """
+    from adept.core.algo.curve import curve_lut
+    from adept.core.steps.tone import apply_curve
+
+    form = widgets_mod.ParamForm()
+    edits = []
+    form.param_edited.connect(lambda n, v: edits.append((n, v)))
+    form.set_step(_describe("gamma"), {}, ["test", "ref"])
+
+    field = form.editor("curve")
+    assert isinstance(field, widgets_mod.CurveField)
+    assert field.text() == "0,0; 1,1" and field.is_identity() is True
+
+    # 拉一個點 -> 值進 param_edited（也就是進 recipe）
+    field.editor._insert(0.4, 0.7)
+    assert edits[-1] == ("curve", "0,0; 0.4,0.7; 1,1")
+    assert field.is_identity() is False
+
+    # 畫面上的曲線就是 core 的 LUT
+    lut = curve_lut(field.editor.points(), 256)
+    assert lut[0] == pytest.approx(0.0) and lut[-1] == pytest.approx(1.0)
+    assert np.all(np.diff(lut) >= -1e-12), "保單調：不可以 overshoot 出假的暗環"
+    assert lut[int(0.4 * 255)] > 0.4, "把中間點往上拉，中間就要變亮"
+
+    # 而且引擎吃得下同一個字串
+    img = np.linspace(0, 255, 64, dtype=np.uint8).reshape(8, 8)
+    out = apply_curve(img, field.text())
+    assert out.dtype == img.dtype and out[4, 0] > img[4, 0]
+
+    # 打字打到一半的不合法字串不可以把辛苦拉的線清掉
+    before = field.text()
+    assert field.set_text("0,0; 0.4,") is False
+    assert field.text() == before
+
+    field.editor.reset()
+    assert field.text() == "0,0; 1,1"
+
+
+def test_a_drawn_curve_visibly_takes_over_from_the_gamma_slider(qapp):
+    """規則寫在 steps/tone.py（曲線接管 gamma），這裡驗**使用者看得見**。
+
+    不然他會拉了曲線又去動 gamma，然後以為 gamma 壞了。
+    """
+    form = widgets_mod.ParamForm()
+    form.set_step(_describe("gamma"), {}, ["test", "ref"])
+    gamma_row = form._rows["gamma"]
+    assert gamma_row.property("dimmed") == "false"
+
+    form.editor("curve").editor._insert(0.3, 0.6)
+    assert gamma_row.property("dimmed") == "true"
+    assert "custom curve" in form.hint_text("gamma")
+    # 調淡不是鎖死 —— 使用者可能只是想比較兩種做法
+    assert gamma_row.isEnabled() is True
+
+    form.editor("curve").editor.reset()
+    assert gamma_row.property("dimmed") == "false"
+    assert form.hint_text("gamma") == gamma_row.spec["help"]
+
+
+def test_curve_points_can_be_dragged_and_the_ends_stay_put(qapp):
+    """頭尾的 x 鎖在 0 和 1 —— 曲線必須覆蓋整個灰階範圍，少一段就沒定義。"""
+    ed = widgets_mod.CurveEditor()
+    ed.resize(200, 200)
+    seen = []
+    ed.curve_changed.connect(seen.append)
+
+    idx = ed._insert(0.5, 0.5)
+    assert idx == 1 and len(ed.points()) == 3
+
+    def _drag(px_from, px_to):
+        _mouse(ed, QEvent.MouseButtonPress, px_from, Qt.LeftButton)
+        _mouse(ed, QEvent.MouseMove, px_to, Qt.LeftButton)
+        _mouse(ed, QEvent.MouseButtonRelease, px_to, Qt.LeftButton, Qt.NoButton)
+
+    # 拖中間那點往上
+    _drag(ed._to_px(0.5, 0.5), ed._to_px(0.5, 0.85))
+    assert ed.points()[1][1] > 0.7
+    assert seen, "拖曳要發訊號，不然參數不會進 recipe"
+
+    # 拖最後一點：y 動得了，x 不動
+    _drag(ed._to_px(1.0, 1.0), ed._to_px(0.6, 0.6))
+    assert ed.points()[-1][0] == pytest.approx(1.0)
+    assert ed.points()[-1][1] < 0.9
+
+    # 頭尾刪不掉，中間刪得掉
+    ed._remove(0)
+    ed._remove(len(ed.points()) - 1)
+    assert len(ed.points()) == 3
+    ed._remove(1)
+    assert len(ed.points()) == 2
+
+
 def test_param_form_bool_choice_and_str(qapp):
     form = widgets_mod.ParamForm()
     edits = []
@@ -295,19 +546,30 @@ def test_param_form_empty_state(qapp):
 # --------------------------------------------------------------------------- #
 # 3. LibraryPanel
 # --------------------------------------------------------------------------- #
-def test_library_panel_sections_and_double_click(qapp):
+def test_library_panel_groups_and_double_click(qapp):
+    """F7-3：卡片庫改依**流程階段**分組（不是依 category 的影像／算法）。"""
     panel = widgets_mod.LibraryPanel()
     steps = _steps()
     panel.set_steps(steps)
 
-    assert panel.section_titles() == ["影像 Image", "算法 Algo", "ADC 判定"]
+    assert panel.section_titles() == [
+        "Input", "Enhance", "Region", "Compare", "Measure", "ADC"]
     assert set(panel.step_keys()) == {s["key"] for s in steps}
 
-    # 空的段落要留一行提示（目前 registry 沒有 adc 卡片）
+    # 每張卡都被歸進宣告的那一段
+    by_group = {}
+    for s_ in steps:
+        by_group.setdefault(s_["group"], set()).add(s_["key"])
+    assert "load_patch" in by_group["input"]
+    assert {"subtract", "align"} <= by_group["compare"]
+    assert "blob_segment" in by_group["region"]
+    assert {"glv_stats", "cd_measure", "roi_snr"} <= by_group["measure"]
+
+    # 空的段落要留一行提示（registry 目前沒有 adc 卡片）
     empties = [lbl for lbl in panel.findChildren(QLabel)
                if lbl.objectName() == "libEmpty"]
-    n_adc = sum(1 for s in steps if s["category"] == "adc")
-    assert len(empties) == (1 if n_adc == 0 else 0)
+    assert len(empties) == sum(
+        1 for g, _t, _s in panel.GROUPS if not by_group.get(g))
 
     got = []
     panel.add_requested.connect(got.append)
@@ -320,16 +582,93 @@ def test_library_panel_sections_and_double_click(qapp):
     QTest.mouseDClick(item, Qt.LeftButton)
     assert got == ["snr_map"]
 
-    # 另一條路：hover 出現的「加入 ▸」按鈕
+    # 另一條路：hover 出現的「Add」按鈕
     other = panel.entry("align")
-    assert other.add_button.text() == "加入 ▸"
+    assert other.add_button.text() == "Add"
     other.add_button.click()
     assert got == ["snr_map", "align"]
 
     # 重新 set_steps 不會留下舊項目
-    panel.set_steps([s for s in steps if s["category"] == "image"])
+    panel.set_steps([s_ for s_ in steps if s_["group"] == "compare"])
     assert panel.entry("snr_map") is None
     assert panel.entry("align") is not None
+
+
+def test_library_search_filters_cards_and_hides_empty_sections(qapp):
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps(_steps())
+    panel.toggle_group(None)                 # 全部收起來，只靠搜尋
+    everything = set(panel.step_keys())
+
+    panel.set_query("snr")
+    hit = set(panel.visible_step_keys())
+    assert {"snr_map", "roi_snr", "blob_segment"} <= hit
+    assert "denoise" not in hit
+    assert "Input" not in panel.visible_section_titles(), \
+        "整組都沒命中的區塊標題要一起收起來"
+
+    # 多個詞是 AND；說明文字也在搜尋範圍內
+    panel.set_query("region blob")
+    assert set(panel.visible_step_keys()) == {"blob_segment"}
+
+    # F7-7：清空搜尋之後回到 rail 的狀態（這裡是全部收起來），不是全部攤開
+    panel.set_query("")
+    assert panel.open_group() is None
+    assert panel.visible_step_keys() == []
+
+    panel.toggle_group("enhance")
+    assert set(panel.visible_step_keys()) < everything
+    assert panel.visible_section_titles() == ["Enhance"]
+
+
+def test_library_badges_unmet_prerequisites_but_still_allows_adding(qapp):
+    """前置條件沒滿足 → 標 ``needs …`` 並調淡，**但不擋著不給加**。
+
+    卡片庫的順序不是執行順序：使用者可能先放卡再補上游。擋住只會讓人以為壞了。
+    """
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps(_steps())
+
+    # 還不知道上游有什麼 -> 一個 badge 都不該出現（別在空流程上嚇人）
+    assert not [k for k in panel.step_keys() if panel.entry(k).badge_text()]
+
+    panel.set_available_streams(["test", "ref"])
+    assert panel.entry("snr_map").badge_text() == "needs diff"
+    assert panel.entry("subtract").badge_text() == "needs ref_aligned"
+    assert panel.entry("denoise").badge_text() == ""      # 只讀 test，滿足了
+
+    got = []
+    panel.add_requested.connect(got.append)
+    panel.entry("snr_map").add_button.click()
+    assert got == ["snr_map"], "有 badge 的卡仍然要加得進去"
+
+    # 上游補齊之後 badge 要消失
+    panel.set_available_streams(["test", "ref", "ref_aligned", "diff"])
+    assert panel.entry("snr_map").badge_text() == ""
+    assert panel.entry("subtract").badge_text() == ""
+
+
+def test_group_icons_are_painted_not_files(qapp):
+    """icon 一律 QPainter 畫 —— repo 有「只放純文字檔」的不變量。"""
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps(_steps())
+    # 每個階段有兩個 icon：rail 上的大顆 + 展開區的小標題；
+    # 再加 rail 底部的搜尋鈕（它不是流程階段，所以不在 stage_buttons 裡）
+    icons = panel.findChildren(widgets_mod.GroupIcon)
+    assert len(icons) == 2 * len(panel.GROUPS) + 1
+    assert len(panel.stage_buttons) == len(panel.GROUPS)
+    assert panel.search_button.group == "search"
+    assert all(i.width() > 0 and i.height() > 0 for i in icons)
+
+    # 換主題之後 icon 要跟著換色
+    before = [i.color for i in icons]
+    theme_mod.set_theme("dark")
+    try:
+        panel.refresh_colors()
+        assert [i.color for i in icons] != before
+    finally:
+        theme_mod.set_theme("light")
+        panel.refresh_colors()
 
 
 # --------------------------------------------------------------------------- #
@@ -489,7 +828,7 @@ def test_histogram_bin_summary_tooltip_and_empty(qapp):
     hist.set_bin_summary(vm_mod.rebin(scores, 3.0))
     text = hist.bin_summary_text()
     assert text.startswith("bin 0=") and "bin 1=" in text
-    assert text == "bin 0=5　bin 1=5"
+    assert text == "bin 0=5   bin 1=5"
 
     # hover 某根長條 -> tooltip「score a–b：N 顆」
     rect = hist._plot_rect()
@@ -498,8 +837,8 @@ def test_histogram_bin_summary_tooltip_and_empty(qapp):
     _mouse(hist, QEvent.MouseMove,
            QPointF(rect.left() + bw * (idx + 0.5), rect.bottom() - 4))
     tip = hist.toolTip()
-    assert "score" in tip and "顆" in tip and "–" in tip
-    assert tip.endswith("%d 顆" % counts[idx])
+    assert "score" in tip and "defects" in tip and "–" in tip
+    assert tip.endswith("%d defects" % counts[idx])
 
     hist.set_bin_summary({})
     assert hist.bin_summary_text() == ""
@@ -516,7 +855,7 @@ def test_feature_table_formatting_and_score_pinned_last(qapp):
         highlight={"snr_peak"},
     )
     assert table.columnCount() == 2
-    assert [table.horizontalHeaderItem(i).text() for i in range(2)] == ["特徵", "數值"]
+    assert [table.horizontalHeaderItem(i).text() for i in range(2)] == ["Feature", "Value"]
 
     names = table.feature_names()
     assert names[-1] == "score"                          # score 釘最後
@@ -545,21 +884,134 @@ def test_verdict_chip(qapp):
     assert chip.text() == "—" and chip.tone() == "neutral"
 
     chip.set_verdict(1)
-    assert chip.text() == "bin 1 · ≥門檻"
+    assert chip.text() == "bin 1 · ≥ threshold"
     assert chip.tone() == "good"
     assert theme_mod.TOKENS["chip_good_bg"] in chip.styleSheet()
     assert chip.verdict() == 1
 
     chip.set_verdict(0)
-    assert chip.text() == "bin 0 · <門檻"
+    assert chip.text() == "bin 0 · < threshold"
     assert chip.tone() == "bad"
     assert theme_mod.TOKENS["chip_bad_bg"] in chip.styleSheet()
 
     # is_real_style：bin 1 = 抓到真缺陷 = 壞消息（紅），bin 0 = 乾淨（綠）
     chip.set_verdict(1, is_real_style=True)
-    assert chip.text() == "bin 1 · ≥門檻" and chip.tone() == "bad"
+    assert chip.text() == "bin 1 · ≥ threshold" and chip.tone() == "bad"
     chip.set_verdict(0, is_real_style=True)
-    assert chip.text() == "bin 0 · <門檻" and chip.tone() == "good"
+    assert chip.text() == "bin 0 · < threshold" and chip.tone() == "good"
 
     chip.set_verdict(None)
     assert chip.text() == "—" and chip.verdict() is None
+
+
+# --------------------------------------------------------------------------- #
+# 7. F7-2 換膚：切主題之後畫面上的東西不能少，也不能殘留舊色
+# --------------------------------------------------------------------------- #
+def test_studio_theme_toggle_keeps_everything_and_repaints(qapp):
+    from adept.ui import studio as studio_mod
+
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    try:
+        cards_before = win.library.step_keys()
+        assert theme_mod.current_theme() == "light"
+
+        assert win.toggle_theme() == "dark"
+        assert theme_mod.TOKENS["bg_page"] == theme_mod.PALETTES["dark"]["bg_page"]
+        assert win.library.step_keys() == cards_before, \
+            "換膚會重建卡片庫 —— 內容不可以在過程中掉東西"
+        assert qapp.styleSheet().find(theme_mod.PALETTES["dark"]["bg_page"]) >= 0
+
+        assert win.toggle_theme() == "light"
+        assert theme_mod.TOKENS["bg_page"] == theme_mod.PALETTES["light"]["bg_page"]
+    finally:
+        win.close()
+        theme_mod.apply_theme(qapp, "light")
+
+
+# --------------------------------------------------------------------------- #
+# 8. F7-7 左側 rail：先選階段，才展開裡面的卡片
+# --------------------------------------------------------------------------- #
+def test_stage_rail_drills_down_one_stage_at_a_time(qapp):
+    """一開始就把 15 張卡攤開，正是「太瑣碎」的來源。"""
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps(_steps())
+
+    assert len(panel.stage_buttons) == len(panel.GROUPS)
+    # 每顆按鈕標出該段有幾張卡
+    for gid, _t, _s in panel.GROUPS:
+        n = sum(1 for d in _steps() if d["group"] == gid)
+        assert panel.stage_buttons[gid].count.text() == ("" if n == 0 else str(n))
+
+    panel.toggle_group("enhance")
+    assert panel.open_group() == "enhance"
+    assert panel.stage_buttons["enhance"].is_active() is True
+    visible = set(panel.visible_step_keys())
+    assert "gamma" in visible and "subtract" not in visible, \
+        "沒展開的階段不該出現在清單裡"
+
+    # 一次只開一段
+    panel.toggle_group("measure")
+    assert panel.open_group() == "measure"
+    assert panel.stage_buttons["enhance"].is_active() is False
+    assert "glv_stats" in panel.visible_step_keys()
+
+    # 點同一顆再一次 = 收起來
+    panel.toggle_group("measure")
+    assert panel.open_group() is None
+    assert panel.visible_step_keys() == []
+
+
+def test_search_still_reaches_across_collapsed_stages(qapp):
+    """收起來的階段不該把搜尋擋住 —— 搜尋是「我不知道它在哪一段」時用的。"""
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps(_steps())
+    panel.toggle_group(None)
+    assert panel.open_group() is None
+
+    panel.set_query("gamma")
+    assert panel.visible_step_keys() == ["gamma"]
+    panel.set_query("")
+    assert panel.visible_step_keys() == []
+
+
+def test_rail_is_vertical_and_the_card_area_gives_its_width_back(qapp):
+    """F7-8：rail 像工作列一樣由上而下，收起來時整欄只剩那條圖示條。
+
+    寬度用 ``minimumWidth()`` 驗，不用 ``width()`` —— 沒 show 過的 widget
+    幾何還沒生效，那會驗到一個假的數字。
+    """
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps(_steps())
+
+    assert panel.rail.layout().__class__.__name__ == "QVBoxLayout"
+    assert panel.rail.width() == panel.RAIL_W
+    # 「圖示要大一點」：rail 上的 icon 明顯大於區塊標題的小 icon
+    assert panel.stage_buttons["input"].icon._SIZE > widgets_mod.GroupIcon._SIZE
+
+    seen = []
+    panel.panel_toggled.connect(seen.append)
+
+    panel.toggle_group(None)
+    assert panel.panel_open() is False
+    assert panel.minimumWidth() == panel.RAIL_W, "收起來就該把寬度還出去"
+
+    panel.toggle_group("region")
+    assert panel.panel_open() is True
+    assert panel.minimumWidth() == panel.RAIL_W + panel.PANEL_W
+    assert seen == [False, True]
+
+
+def test_the_search_button_survives_collapsing_the_card_area(qapp):
+    """搜尋框住在卡片區裡，卡片區收起來它也跟著不見 ——
+    所以 rail 上必須留一顆放大鏡，不然搜尋就再也叫不出來了。"""
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps(_steps())
+    panel.toggle_group(None)
+    assert panel.panel_open() is False
+
+    panel.search_button.clicked.emit("search")
+    assert panel.panel_open() is True, "按了放大鏡就要把卡片區帶回來"
+    # 而且搜尋框真的可以打字（不是被留在隱藏的容器裡）
+    assert panel.search.isVisibleTo(panel) is True
+    panel.set_query("gamma")
+    assert panel.visible_step_keys() == ["gamma"]

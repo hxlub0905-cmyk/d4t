@@ -52,7 +52,7 @@ from .widgets import to_uint8
 __all__ = ["GalleryPanel", "make_thumb", "THUMB_SIZES", "CACHE_CAP"]
 
 #: 縮圖大小選項（顯示名稱, 邊長 px）—— 小 / 中 / 大。
-THUMB_SIZES: Tuple[Tuple[str, int], ...] = (("小", 64), ("中", 96), ("大", 144))
+THUMB_SIZES: Tuple[Tuple[str, int], ...] = (("S", 64), ("M", 96), ("L", 144))
 
 #: QPixmap LRU 快取上限（筆數）。key = (defect_id, 縮圖邊長)。
 CACHE_CAP = 512
@@ -87,7 +87,7 @@ def make_thumb(arr: np.ndarray, size: int = 96) -> np.ndarray:
         elif a.shape[2] != 3:
             a = a[:, :, 0]
     if a.ndim not in (2, 3):
-        raise ValueError("make_thumb 只吃 (H,W) 或 (H,W,3/4) 的影像，收到 %r"
+        raise ValueError("make_thumb accepts (H,W) or (H,W,3/4) images only, got %r"
                          % (a.shape,))
 
     colour = a.ndim == 3
@@ -114,6 +114,26 @@ def make_thumb(arr: np.ndarray, size: int = 96) -> np.ndarray:
     return out
 
 
+def thumb_placement(shape: Any, size: int = 96) -> Tuple[int, int, int, int]:
+    """縮圖裡「影像實際落在哪」：``(x0, y0, w, h)``。
+
+    :func:`make_thumb` 用的是**置中的 letterbox**（等比縮放後四周補黑），
+    所以要把一個正規化座標的框畫到縮圖上，就得知道那個偏移與縮放。
+
+    **它與 make_thumb 是同一份算式，所以放在一起** —— 分開放的話，
+    哪天改了縮圖的縮放規則而忘了改這裡，框就會整批偏掉，
+    而且畫面上看起來只是「框好像有點歪」，不會有人聯想到是縮圖改過。
+    """
+    s = int(max(8, min(512, int(size))))
+    h, w = (int(shape[0]), int(shape[1])) if len(shape) >= 2 else (0, 0)
+    if h <= 0 or w <= 0:
+        return (0, 0, s, s)
+    scale = min(s / float(w), s / float(h))
+    tw = int(max(1, min(s, round(w * scale))))
+    th = int(max(1, min(s, round(h * scale))))
+    return ((s - tw) // 2, (s - th) // 2, tw, th)
+
+
 def _qimage_from_uint8(arr: np.ndarray) -> QImage:
     """uint8 (H,W) / (H,W,3) → QImage（deep copy，不依賴原 buffer）。
 
@@ -131,7 +151,7 @@ def _qimage_from_uint8(arr: np.ndarray) -> QImage:
         h, w, _ = a.shape
         img = QImage(a.data, w, h, 4 * w, QImage.Format_RGBA8888)
     else:
-        raise ValueError("不支援的縮圖形狀：%r" % (a.shape,))
+        raise ValueError("Unsupported thumbnail shape: %r" % (a.shape,))
     return img.copy()
 
 
@@ -198,22 +218,22 @@ def make_filter(spec: Any) -> Tuple[Optional[Callable[[Dict[str, Any]], bool]], 
     if spec is None:
         return None, ""
     if callable(spec):
-        return (lambda it: bool(spec(it))), "自訂篩選"
+        return (lambda it: bool(spec(it))), "custom filter"
     if isinstance(spec, str):
         spec = {"mode": spec}
     if not isinstance(spec, dict):
-        raise TypeError("篩選條件看不懂：%r" % (spec,))
+        raise TypeError("Unrecognised filter spec: %r" % (spec,))
 
     mode = str(spec.get("mode", "all"))
     if mode == "all":
         return None, ""
     if mode == "failed":
-        return (lambda it: not bool(it.get("ok", True))), "只看失敗"
+        return (lambda it: not bool(it.get("ok", True))), "failed only"
     if mode == "bin":
         want = spec.get("bin")
         want = None if want is None else int(want)
         return ((lambda it: it.get("bin") == want),
-                "只看 bin %s" % ("—" if want is None else want))
+                "bin %s only" % ("—" if want is None else want))
     if mode == "score_range":
         lo = spec.get("lo")
         hi = spec.get("hi")
@@ -229,8 +249,8 @@ def make_filter(spec: Any) -> Tuple[Optional[Callable[[Dict[str, Any]], bool]], 
             f = float(s)
             return not math.isnan(f) and lo_f <= f <= hi_f
 
-        return _in_range, "分數 %s ~ %s" % (_fmt_score(lo_f), _fmt_score(hi_f))
-    raise ValueError("不認得的篩選模式：%r" % (mode,))
+        return _in_range, "score %s ~ %s" % (_fmt_score(lo_f), _fmt_score(hi_f))
+    raise ValueError("Unknown filter mode: %r" % (mode,))
 
 
 # --------------------------------------------------------------------------- #
@@ -246,10 +266,14 @@ class _Chip(QPushButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip(tip)
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.refresh_style()
+
+    def refresh_style(self) -> None:
+        """（重新）套用 token 顏色 —— 換主題時由 GalleryPanel 呼叫。"""
         self.setStyleSheet(
             "QPushButton#galleryChip { background:%s; color:%s;"
             " border:1px solid %s; border-radius:9px; padding:2px 9px;"
-            " font-size:11px; font-weight:600; min-height:16px; }"
+            " font-size:11px; font-weight:500; min-height:16px; }"
             "QPushButton#galleryChip:hover { background:%s; }"
             % (TOKENS["accent_bg"], TOKENS["accent_active"],
                TOKENS["accent_border"], TOKENS["hover_warm_strong"])
@@ -270,8 +294,8 @@ class _GridView(QAbstractScrollArea):
     defect_activated = Signal(str)
     thumbs_requested = Signal(object)       # list[str]：可視範圍內還沒有縮圖的
 
-    _EMPTY_TEXT = "（試跑後，這裡會顯示所有 defect 的縮圖）"
-    _NO_MATCH_TEXT = "（沒有符合目前條件的 defect —— 把上面的條件 chip 拿掉試試）"
+    _EMPTY_TEXT = "(Thumbnails for every defect appear here after a trial run)"
+    _NO_MATCH_TEXT = "(No defect matches the current filter — try removing a chip above)"
 
     _MARGIN = 10
     _GAP = 8
@@ -566,7 +590,8 @@ class _GridView(QAbstractScrollArea):
     # -- 繪圖 ---------------------------------------------------------------
     def paintEvent(self, _e) -> None:          # noqa: D102 - Qt hook
         p = QPainter(self.viewport())
-        p.fillRect(self.viewport().rect(), QColor(TOKENS["bg_panel"]))
+        # 縮圖牆也用中性灰 —— 這裡是用眼睛掃整批的地方，背景偏差影響最大
+        p.fillRect(self.viewport().rect(), QColor(TOKENS["image_backdrop"]))
         if not self._view:
             p.setPen(QColor(TOKENS["text_disabled"]))
             p.drawText(self.viewport().rect(), Qt.AlignCenter,
@@ -611,7 +636,7 @@ class _GridView(QAbstractScrollArea):
             p.setBrush(QColor(TOKENS["bg_elevated"]))
             p.drawRect(img_rect)
             p.setPen(QColor(TOKENS["text_disabled"]))
-            p.drawText(img_rect, Qt.AlignCenter, "載入中…")
+            p.drawText(img_rect, Qt.AlignCenter, "loading…")
         else:
             p.setRenderHint(QPainter.SmoothPixmapTransform, False)
             x = img_rect.left() + (img_rect.width() - pm.width()) // 2
@@ -700,7 +725,7 @@ def caption_of(item: Dict[str, Any]) -> str:
     """
     parts = ["#%s" % item.get("defect_id", "")]
     if not item.get("ok", True):
-        parts.append("失敗")
+        parts.append("FAILED")
         return " · ".join(parts)
     b = item.get("bin")
     parts.append("bin %d" % int(b) if b is not None else "bin —")
@@ -747,10 +772,10 @@ class GalleryPanel(QWidget):
     defect_activated = Signal(str)
     thumbs_requested = Signal(object)       # list[str]
 
-    _ORDER_DESC = "↓ 高到低"
-    _ORDER_ASC = "↑ 低到高"
+    _ORDER_DESC = "↓ High to low"
+    _ORDER_ASC = "↑ Low to high"
     #: 排序下拉的第一項 = 不排序（維持 set_items 給的原始順序）。
-    NO_SORT = "（原始順序）"
+    NO_SORT = "(original order)"
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -765,36 +790,36 @@ class GalleryPanel(QWidget):
 
         self.count_label = QLabel("")
         self.count_label.setObjectName("galleryCount")
-        self.count_label.setToolTip("目前篩選後顯示的顆數 / 這一批的總顆數")
+        self.count_label.setToolTip("Defects shown after filtering / total in this batch")
         self.count_label.setStyleSheet("color:%s; font-weight:700;"
                                        % TOKENS["text_primary"])
         head.addWidget(self.count_label)
         head.addSpacing(6)
 
-        sort_label = QLabel("排序")
-        sort_label.setToolTip("挑一個欄位排序（分數、任一特徵，或 defect 編號）")
+        sort_label = QLabel("Sort by")
+        sort_label.setToolTip("Sort by a field: score, any feature, or defect id")
         head.addWidget(sort_label)
 
         self.sort_combo = QComboBox()
-        self.sort_combo.setToolTip("挑一個欄位排序（分數、任一特徵，或 defect 編號）")
+        self.sort_combo.setToolTip("Sort by a field: score, any feature, or defect id")
         self.sort_combo.setMinimumWidth(120)
         self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)
         head.addWidget(self.sort_combo)
 
         self.order_button = QPushButton(self._ORDER_DESC)
-        self.order_button.setToolTip("切換由高到低 / 由低到高")
+        self.order_button.setToolTip("Toggle descending / ascending")
         self.order_button.setProperty("variant", "ghost")
         self.order_button.clicked.connect(self._toggle_order)
         head.addWidget(self.order_button)
 
         head.addStretch(1)
 
-        zoom_label = QLabel("縮圖")
-        zoom_label.setToolTip("縮圖要多大：小看得多、大看得清楚")
+        zoom_label = QLabel("Thumbnail")
+        zoom_label.setToolTip("Thumbnail size: smaller shows more, larger shows more detail")
         head.addWidget(zoom_label)
 
         self.zoom_combo = QComboBox()
-        self.zoom_combo.setToolTip("縮圖要多大：小看得多、大看得清楚")
+        self.zoom_combo.setToolTip("Thumbnail size: smaller shows more, larger shows more detail")
         for name, px in THUMB_SIZES:
             self.zoom_combo.addItem(name, px)
         self.zoom_combo.setCurrentIndex(1)
@@ -989,6 +1014,13 @@ class GalleryPanel(QWidget):
     def chip_texts(self) -> List[str]:
         return [c.label_text for c in self._chips]
 
+    def refresh_styles(self) -> None:
+        """換主題之後重新取色（chip 與網格都是自繪/內嵌樣式）。"""
+        for chip in self._chips:
+            chip.refresh_style()
+        self.grid.viewport().update()
+        self.update()
+
     # -- 內部 ---------------------------------------------------------------
     def _on_sort_changed(self, idx: int) -> None:
         key = None if idx <= 0 else self.sort_combo.currentText()
@@ -1017,7 +1049,7 @@ class GalleryPanel(QWidget):
         self._chips.append(chip)
 
     def _refresh_header(self) -> None:
-        self.count_label.setText("顯示 %d / 共 %d 顆"
+        self.count_label.setText("Showing %d / %d defects"
                                  % (self.grid.displayed_count(),
                                     self.grid.total_count()))
         self.order_button.setText(self._ORDER_DESC if self.grid.sort_descending()
@@ -1026,10 +1058,10 @@ class GalleryPanel(QWidget):
         key = self.grid.sort_key()
         if key:
             arrow = "↓" if self.grid.sort_descending() else "↑"
-            self._add_chip("排序：%s %s" % (key, arrow),
-                           "點一下取消排序，回到原始順序",
+            self._add_chip("Sort: %s %s" % (key, arrow),
+                           "Click to clear sorting and return to the original order",
                            lambda: self.set_sort(None, self.grid.sort_descending()))
         ftext = self.grid.filter_text()
         if ftext:
-            self._add_chip("篩選：%s" % ftext, "點一下移除這個篩選條件",
+            self._add_chip("Filter: %s" % ftext, "Click to remove this filter",
                            self.clear_filter)

@@ -157,21 +157,22 @@ def test_make_thumb_non_square_tiny_and_colour(qapp):
 def test_set_items_header_count_and_empty_state(qapp):
     p = _panel(qapp, _items(20))
     assert p.total_count() == 20 and p.displayed_count() == 20
-    assert p.header_text() == "顯示 20 / 共 20 顆"
+    assert p.header_text() == "Showing 20 / 20 defects"
     assert p.empty_text() == ""                       # 有 tile 就沒有空狀態文字
     assert len(p.displayed_ids()) == 20
 
     p.set_items([])
     qapp.processEvents()
-    assert p.header_text() == "顯示 0 / 共 0 顆"
-    assert p.empty_text() == "（試跑後，這裡會顯示所有 defect 的縮圖）"
+    assert p.header_text() == "Showing 0 / 0 defects"
+    assert p.empty_text() == ("(Thumbnails for every defect appear here after "
+                              "a trial run)")
 
     # 篩到一顆都不剩 -> 換另一句（並且告訴使用者怎麼救）
     p.set_items(_items(5))
     p.filter_by_score_range(100.0, 200.0)
     assert p.displayed_count() == 0
-    assert "沒有符合" in p.empty_text()
-    assert p.header_text() == "顯示 0 / 共 5 顆"
+    assert "No defect matches" in p.empty_text()
+    assert p.header_text() == "Showing 0 / 5 defects"
 
 
 # --------------------------------------------------------------------------- #
@@ -282,13 +283,13 @@ def test_sort_controls_and_chip(qapp):
     assert p.sort_keys() == ["score", "snr", "area", "defect_id"]
     assert p.sort_combo.itemText(0) == gal_mod.GalleryPanel.NO_SORT
     assert p.sort_key() == "score"
-    assert p.chip_texts() == ["排序：score ↓"]
+    assert p.chip_texts() == ["Sort: score ↓"]
 
     # 換方向鈕
     p.order_button.click()
     assert p.sort_descending() is False
     assert p.displayed_ids()[0] == "D000"
-    assert p.chip_texts() == ["排序：score ↑"]
+    assert p.chip_texts() == ["Sort: score ↑"]
 
     # 下拉換欄位
     p.sort_combo.setCurrentIndex(p.sort_keys().index("area") + 1)
@@ -312,20 +313,20 @@ def test_filter_by_score_range_and_clear(qapp):
 
     p.filter_by_score_range(3.0, 5.0)             # 直方圖點一根 bar 走這條
     assert p.displayed_ids() == ["D003", "D004", "D005"]
-    assert p.header_text() == "顯示 3 / 共 10 顆"
-    assert "分數" in p.filter_text()
-    assert any(c.startswith("篩選：") for c in p.chip_texts())
+    assert p.header_text() == "Showing 3 / 10 defects"
+    assert "score" in p.filter_text()
+    assert any(c.startswith("Filter:") for c in p.chip_texts())
 
     p.clear_filter()
     assert p.displayed_count() == 10
-    assert p.header_text() == "顯示 10 / 共 10 顆"
+    assert p.header_text() == "Showing 10 / 10 defects"
     assert p.filter_text() == ""
-    assert not any(c.startswith("篩選：") for c in p.chip_texts())
+    assert not any(c.startswith("Filter:") for c in p.chip_texts())
 
     # 點篩選 chip 也能移除
     p.filter_by_score_range(0.0, 1.0)
     assert p.displayed_count() == 2
-    chip = [c for c in p.chips() if c.label_text.startswith("篩選：")][0]
+    chip = [c for c in p.chips() if c.label_text.startswith("Filter:")][0]
     chip.click()
     qapp.processEvents()
     assert p.displayed_count() == 10
@@ -344,11 +345,11 @@ def test_filter_bin_failed_and_custom(qapp):
 
     p.show_failed_only()
     assert p.displayed_ids() == ["D002"]
-    assert p.header_text() == "顯示 1 / 共 10 顆"
+    assert p.header_text() == "Showing 1 / 10 defects"
 
     p.set_filter(lambda it: (it.get("features") or {}).get("area", 0) >= 10)
     assert p.displayed_count() == 5
-    assert p.filter_text() == "自訂篩選"
+    assert p.filter_text() == "custom filter"
 
     p.set_filter(None)
     assert p.displayed_count() == 10
@@ -425,7 +426,7 @@ def test_bin_colour_bar_and_caption_carry_the_bin_number(qapp):
     assert p.bin_color("D001") == T["success"]     # bin 1 = 過門檻（綠）
     assert p.bin_color("D000") == T["seg_disabled"]  # bin 0 = 低調灰
     assert p.bin_color("D003") == T["danger"]      # 跑失敗 = 紅
-    assert "失敗" in p.caption_of("D003")
+    assert "FAILED" in p.caption_of("D003")
 
 
 # --------------------------------------------------------------------------- #
@@ -459,30 +460,31 @@ def test_pixmap_cache_is_bounded(qapp):
 
 
 # --------------------------------------------------------------------------- #
-# 9. 推廣鐵則：每個看得到的控制項都要有中文說明
+# 9. 推廣鐵則：每個看得到的控制項都要有說明，而且 UI 一律英文
 # --------------------------------------------------------------------------- #
-def test_every_control_has_a_chinese_tooltip(qapp):
+def test_every_control_has_an_english_tooltip(qapp):
     p = _panel(qapp, _items(6))
     p.filter_by_score_range(1.0, 4.0)
 
-    for name, widget in (("筆數", p.count_label), ("排序下拉", p.sort_combo),
-                         ("排序方向", p.order_button), ("縮圖大小", p.zoom_combo)):
+    for name, widget in (("count", p.count_label), ("sort combo", p.sort_combo),
+                         ("sort order", p.order_button), ("zoom", p.zoom_combo)):
         tip = widget.toolTip()
-        assert tip, "%s 沒有 tooltip" % name
-        assert _has_cjk(tip), "%s 的 tooltip 不是中文：%r" % (name, tip)
+        assert tip, "%s has no tooltip" % name
+        # UI 一律英文（中英夾雜對使用者是噪音）—— 這裡順便當成不變量鎖住
+        assert not _has_cjk(tip), "%s tooltip is not English: %r" % (name, tip)
 
-    assert p.zoom_combo.itemText(0) == "小"
+    assert p.zoom_combo.itemText(0) == "S"
     assert [p.zoom_combo.itemText(i) for i in range(p.zoom_combo.count())] == \
-        ["小", "中", "大"]
+        ["S", "M", "L"]
     assert [s[1] for s in gal_mod.THUMB_SIZES] == [64, 96, 144]
 
     chips = p.chips()
-    assert chips, "排序 / 篩選條件要以 chip 呈現"
+    assert chips, "sort / filter conditions must be shown as chips"
     for chip in chips:
-        assert chip.toolTip() and _has_cjk(chip.toolTip())
+        assert chip.toolTip() and not _has_cjk(chip.toolTip())
         assert chip.text().endswith("✕")           # 看得出來可以移除
-        assert _has_cjk(chip.label_text)
+        assert chip.label_text and not _has_cjk(chip.label_text)
 
-    # 空狀態與載入中佔位也是中文白話
+    # 空狀態與載入中佔位也是白話英文
     p.set_items([])
-    assert _has_cjk(p.empty_text())
+    assert p.empty_text() and not _has_cjk(p.empty_text())

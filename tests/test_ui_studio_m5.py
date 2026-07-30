@@ -97,18 +97,19 @@ def _mouse(widget, etype, pos, button=None, buttons=None):
 
 
 # --------------------------------------------------------------------------- #
-# 1. Gallery 分頁
+# 1. Results 視窗（F7-5：Gallery 與直方圖從主視窗搬出去）
 # --------------------------------------------------------------------------- #
-def test_right_column_has_two_obvious_tabs(window):
-    tabs = window.right_tabs
-    assert tabs.count() == 2
-    assert tabs.tabText(studio_mod.TAB_PREVIEW) == "單顆預覽"
-    assert tabs.tabText(studio_mod.TAB_GALLERY).startswith("Gallery")
-    # 兩個分頁都要說明用途（推廣鐵則：使用者不必猜）
-    assert tabs.tabToolTip(studio_mod.TAB_PREVIEW)
-    assert tabs.tabToolTip(studio_mod.TAB_GALLERY)
-    assert tabs.widget(studio_mod.TAB_GALLERY) is window.gallery
-    assert window.current_tab() == studio_mod.TAB_PREVIEW      # 預設看單顆
+def test_results_live_in_their_own_window(window):
+    """主視窗只留「編流程 + 看單顆」；跑完才有意義的東西在 Results 視窗。"""
+    assert window.gallery is window.results.gallery
+    assert window.histogram is window.results.histogram
+    assert window.results_visible() is False, "還沒跑就不該有結果視窗"
+
+    # 主視窗的中央區只剩三欄：卡片庫 | 流程+參數 | 單顆預覽
+    root = window.root_splitter
+    assert root.count() == 3
+    assert root.widget(0) is window.library
+    assert root.widget(2) is window.preview_pane
 
 
 def test_gallery_populates_after_trial(ran):
@@ -143,9 +144,18 @@ def test_thumbs_requested_leads_to_thumbs(ran, qapp):
     seen = []
     window.gallery.thumbs_requested.connect(lambda ids: seen.append(list(ids)))
 
+    # F7-5：Gallery 在 Results 視窗裡，要先給它真實的 viewport 尺寸。
+    window.results.resize(900, 640)
     window.show_gallery()
     qapp.processEvents()
-    window.gallery.set_sort("score", True)      # 重排 → 重新盤點可視範圍
+
+    # ``_maybe_request_thumbs`` 對「和上次相同的可視範圍」會提早 return，
+    # 而 ``ran`` 是 module-scoped —— 前面的測試已經觸發過第一次請求了。
+    # 把那個備忘重置，才驗得到「量到可視範圍就會要縮圖」這件事本身。
+    # （這一批全部塞得進畫面，所以範圍從頭到尾都是 (0, N)，
+    #   單純再 resize 一次是不會重發的。）
+    window.gallery.grid._last_request = None
+    window.gallery.grid.resize(860, 520)
     qapp.processEvents()
 
     assert seen, "可視範圍變動時 Gallery 應該要求縮圖"
@@ -197,26 +207,26 @@ def test_thumb_worker_run_sync_and_channel_pick(ran):
 def test_defect_activated_switches_tab_and_moves_preview(ran):
     window = ran
     window.show_gallery()
-    assert window.current_tab() == studio_mod.TAB_GALLERY
+    assert window.results_visible() is True
 
     target = str(window.dataset.items[5].defect_id)
     window.gallery.defect_activated.emit(target)
 
-    assert window.current_tab() == studio_mod.TAB_PREVIEW
+    assert window.results_visible() is True   # 結果視窗不會因為跳單顆而關掉
     assert window.defect_index == 5
     assert str(window.dataset.items[window.defect_index].defect_id) == target
     assert target in window.status_text()
 
     # 不存在的 id：切回單顆預覽 + 狀態列講清楚，不炸
     window.gallery.defect_activated.emit("不存在")
-    assert "找不到" in window.status_text()
+    assert "is not in the current dataset" in window.status_text()
 
 
 def test_gallery_selection_shows_count(ran):
     window = ran
     ids = window.gallery.displayed_ids()[:3]
     window.gallery.selection_changed.emit(list(ids))
-    assert window.status_text() == "已選 3 顆"
+    assert window.status_text() == "3 selected"
 
 
 # --------------------------------------------------------------------------- #
@@ -229,8 +239,8 @@ def test_bar_clicked_filters_gallery_and_switches_tab(ran):
     lo, hi = window.histogram.bar_range(0)
 
     window.histogram.bar_clicked.emit(lo, hi)
-    assert window.current_tab() == studio_mod.TAB_GALLERY
-    assert "已篩選 score" in window.status_text()
+    assert window.results_visible() is True
+    assert "Filtered to score" in window.status_text()
     assert window.gallery.filter_text()
     shown = window.gallery.displayed_count()
     assert shown < N
@@ -242,7 +252,7 @@ def test_bar_clicked_filters_gallery_and_switches_tab(ran):
     window.histogram.bar_clicked.emit(lo, hi)
     assert window.gallery.displayed_count() == N
     assert window.gallery.filter_text() == ""
-    assert "已取消" in window.status_text()
+    assert "cleared" in window.status_text()
 
 
 def test_chip_clears_filter_and_same_bar_refilters(ran):
@@ -252,7 +262,7 @@ def test_chip_clears_filter_and_same_bar_refilters(ran):
     window.histogram.bar_clicked.emit(lo, hi)
     filtered = window.gallery.displayed_count()
 
-    chips = [c for c in window.gallery.chips() if c.label_text.startswith("篩選")]
+    chips = [c for c in window.gallery.chips() if c.label_text.startswith("Filter")]
     assert chips, window.gallery.chip_texts()
     chips[0].click()                                    # Gallery 上的 ✕
     assert window.gallery.displayed_count() == N
@@ -290,8 +300,8 @@ def test_real_click_on_bar_does_not_move_the_threshold(ran, qapp):
     assert committed == [], "點長條不該 commit 門檻"
     assert hist.threshold() == pytest.approx(before)
     assert window.model.threshold == pytest.approx(before)
-    assert window.current_tab() == studio_mod.TAB_GALLERY
-    assert "已篩選 score" in window.status_text()
+    assert window.results_visible() is True
+    assert "Filtered to score" in window.status_text()
 
     window.gallery.clear_filter()
     window._score_filter = None
@@ -303,7 +313,7 @@ def test_real_drag_still_commits_the_threshold(ran, qapp):
     hist = window.histogram
     hist.resize(520, 200)
     qapp.processEvents()
-    before_tab = window.current_tab()
+    before_visible = window.results_visible()
 
     bars = []
     hist.bar_clicked.connect(lambda a, b: bars.append((a, b)))
@@ -323,7 +333,7 @@ def test_real_drag_still_commits_the_threshold(ran, qapp):
     assert bars == [], "拖曳不該被當成點長條"
     assert len(committed) == 1
     assert window.model.threshold == pytest.approx(committed[0])
-    assert window.current_tab() == before_tab              # 拖門檻不換分頁
+    assert window.results_visible() == before_visible   # 拖門檻不改變視窗狀態
 
 
 # --------------------------------------------------------------------------- #
@@ -334,7 +344,7 @@ def test_export_action_disabled_before_run_enabled_after(qapp, synlot):
     try:
         assert win.btn_export.isEnabled() is False
         assert win.open_export_dialog() is None
-        assert "還沒有結果" in win.status_text()
+        assert "No results to export yet" in win.status_text()
 
         assert win.load_dataset_path(synlot["klarf"], sync=True) is True
         assert win.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True

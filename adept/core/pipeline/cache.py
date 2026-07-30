@@ -8,11 +8,21 @@ Context 快照（images + features + meta 子集）存成 npz，之後同一顆�
 
 儲存格式：``dir/<key[:2]>/<key>.npz``
   - ``img__<name>``：各影像流 ndarray（savez_compressed，無損）
+  - ``__labels__``：ROI label map（若有）
   - ``__payload__``：0 維字串陣列，內容是 JSON
-    ``{"image_names": [...], "features": {...}, "meta": {...},
-       "dtypes": {...}, "shapes": {...}}``
+    ``{"version": N, "image_names": [...], "features": {...}, "meta": {...},
+       "rois": [[name, nx, ny, nw, nh], ...], "dtypes": {...}, "shapes": {...}}``
 寫入走 atomic（先寫 ``.tmp`` 再 ``os.replace``）；讀到壞檔 → 盡力刪掉、
 回 None（呼叫端退回重算，永不 crash）。
+
+**快照必須涵蓋 Context 的每一個欄位。**（F7-9 修）v1 只存了
+images/features/meta，漏了 ``rois`` 與 ``labels``。checkpoint 是執行順序上的
+**位置**（最後一張影像段卡的下一格），不是「所有影像段的卡」—— 所以放在中間
+的 Region 卡（``roi_define`` / ``blob_segment``，都是 algo）會落在快取段裡。
+於是：第一次跑（miss）正常，**第二次跑（hit）ROI 不見了**，量測卡報
+「region 'main' is not defined」。第一次對、第二次錯是最難查的一種 bug，
+所以 ``FORMAT_VERSION`` 存進 payload，版本對不上一律當 miss 重算 ——
+既有的快取目錄不會把舊的殘缺快照餵回來。
 """
 from __future__ import annotations
 
@@ -47,6 +57,10 @@ class StageCache:
     平行批次時各 worker 有自己的 instance 與計數）。
     """
 
+    #: 快照格式版本。**欄位有增減就要 +1** —— 版本對不上的舊快照一律當 miss，
+    #: 不然使用者既有的快取目錄會繼續餵回缺欄位的快照。
+    FORMAT_VERSION = 2
+
     def __init__(self, dir: str) -> None:
         self.dir = str(dir)
         os.makedirs(self.dir, exist_ok=True)
@@ -71,8 +85,8 @@ class StageCache:
 
     # ---- get / put ---------------------------------------------------------
     def get(self, key: str) -> Optional[Dict[str, Any]]:
-        """回 ``{"images": {name: ndarray}, "features": {...}, "meta": {...}}``
-        或 None（不存在 / 壞檔；壞檔會盡力刪掉）。"""
+        """回 ``{"images", "features", "meta", "rois", "labels"}``
+        或 None（不存在 / 壞檔 / 舊格式；壞檔會盡力刪掉）。"""
         path = self._path(key)
         if not os.path.isfile(path):
             self.misses += 1
@@ -80,11 +94,18 @@ class StageCache:
         try:
             with np.load(path, allow_pickle=False) as z:
                 payload = json.loads(str(z["__payload__"][()]))
+                if int(payload.get("version", 1)) != self.FORMAT_VERSION:
+                    # 舊格式（缺欄位）—— 當作沒有，讓呼叫端重算並覆寫
+                    self.misses += 1
+                    return None
                 images = {str(n): z["img__" + str(n)]
                           for n in payload["image_names"]}
                 features = {str(k): float(v)
                             for k, v in dict(payload.get("features") or {}).items()}
                 meta = dict(payload.get("meta") or {})
+                rois = [(str(r[0]), tuple(float(v) for v in r[1:5]))
+                        for r in (payload.get("rois") or [])]
+                labels = z["__labels__"] if "__labels__" in z.files else None
         except Exception:
             try:
                 os.remove(path)  # 壞檔：盡力清掉，下次直接 miss
@@ -93,10 +114,12 @@ class StageCache:
             self.misses += 1
             return None
         self.hits += 1
-        return {"images": images, "features": features, "meta": meta}
+        return {"images": images, "features": features, "meta": meta,
+                "rois": rois, "labels": labels}
 
     def put(self, key: str, images: Dict[str, np.ndarray],
-            features: Dict[str, float], meta: Dict[str, Any]) -> None:
+            features: Dict[str, float], meta: Dict[str, Any],
+            rois: Any = None, labels: Any = None) -> None:
         """寫入一筆快照（atomic：先 ``.tmp`` 再 ``os.replace``）。
 
         失敗會 raise（磁碟滿、唯讀…）—— 呼叫端（run_defect_cached）自行
@@ -107,15 +130,21 @@ class StageCache:
 
         imgs = {str(n): np.asarray(a) for n, a in dict(images or {}).items()}
         payload = {
+            "version": self.FORMAT_VERSION,
             "image_names": sorted(imgs),
             "features": {str(k): float(v)
                          for k, v in dict(features or {}).items()},
             "meta": dict(meta or {}),
+            # 具名 ROI（正規化座標，跟 Context.set_roi 同一個格式）
+            "rois": [[str(name)] + [float(v) for v in rect]
+                     for name, rect in (rois or [])],
             # dtype / shape 註記（除錯、日後版本檢查用；載入以 npz 內容為準）
             "dtypes": {n: str(a.dtype) for n, a in imgs.items()},
             "shapes": {n: list(a.shape) for n, a in imgs.items()},
         }
         arrays: Dict[str, np.ndarray] = {"img__" + n: a for n, a in imgs.items()}
+        if labels is not None:
+            arrays["__labels__"] = np.asarray(labels)
         arrays["__payload__"] = np.array(
             json.dumps(payload, ensure_ascii=False, sort_keys=True))
 

@@ -189,7 +189,7 @@ def test_inplace_skips_failed_defects(lot, tmp_path):
     assert got["3"] == "0"                 # 原值保留
     assert plan.n_rows_changed == sum(
         1 for r in results if r["ok"] and r["bin"] != 0)
-    assert any("失敗" in n for n in plan.notes)
+    assert any("failed to run" in n for n in plan.notes)
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +284,7 @@ def test_annotate_marks_unmatched_rows(lot, tmp_path):
     new = klarf_core.load(str(out))
     ki = new.col_index("ADCCLASS")
     assert sum(1 for r in new.defects if r[ki] == "-1") == N - 3
-    assert any("未判定" in n for n in plan.notes)
+    assert any("not judged" in n for n in plan.notes)
 
 
 # ---------------------------------------------------------------------------
@@ -336,7 +336,7 @@ def test_topn_count_order_and_renumber(lot):
                 os.path.abspath(ref.images[ch].path)
             assert os.path.isfile(item.images[ch].path)
 
-    assert any("影像參照" in n for n in plan.notes)
+    assert any("Image references" in n for n in plan.notes)
     os.remove(out)
 
 
@@ -378,7 +378,7 @@ def test_topn_skips_defects_without_score(lot, tmp_path):
     out = tmp_path / "ns.001"
     plan = klarf_out.apply_writeback(doc, results, "topn", str(out), n=N)
     assert plan.n_rows_out == N - 1
-    assert any("沒有分數" in n for n in plan.notes)
+    assert any("have no score" in n for n in plan.notes)
 
 
 # ---------------------------------------------------------------------------

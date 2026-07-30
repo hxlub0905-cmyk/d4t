@@ -15,7 +15,7 @@ from typing import Any, Dict, List
 
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step,
+    CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_INPUT,
 )
 from ._util import ensure_gray, to_uint8
 
@@ -28,13 +28,17 @@ class LoadPatchStep(Step):
     """把 DefectItem 的影像載入成 Context 影像流（一律轉成 uint8 灰階）。"""
 
     key = "load_patch"
-    label = "載入影像"
+    label = "Load images"
     category = CATEGORY_IMAGE
-    help = "把這顆 defect 的影像（test/ref 或單張）載入 pipeline，一律轉成 uint8 灰階。"
+    group = GROUP_INPUT
+    help = ("Load this defect's images (test/ref, or a single image) into the "
+            "pipeline, always converted to 8-bit grayscale.")
     params = [
         ParamSpec(
             name="channels", type="str", default="auto",
-            help="要載入哪些影像：auto=有什麼載什麼（rsem 單張會同時當作 test）；也可寫逗號清單，例如 test,ref。",
+            help=("Which images to load: auto = whatever is available "
+                  "(a single RSEM image is also exposed as test); or a comma "
+                  "separated list such as test,ref."),
         ),
     ]
     reads: List[str] = []
@@ -65,10 +69,11 @@ class LoadPatchStep(Step):
         item = ctx.meta.get("_defect_item")
         kind = ctx.meta.get("_dataset_kind")
         if item is None:
-            raise StepError(self.key, "Context 裡沒有 defect 資料（meta['_defect_item']）；此卡需由引擎在載入資料集後執行。")
+            raise StepError(self.key, "no defect data in the Context (meta['_defect_item']); this "
+                            "card must be run by the engine after a dataset is loaded.")
         images = getattr(item, "images", None)
         if not images:
-            raise StepError(self.key, f"defect {getattr(item, 'defect_id', '?')} 沒有任何影像可載入。")
+            raise StepError(self.key, f"defect {getattr(item, 'defect_id', '?')} has no images to load.")
 
         raw = str(p["channels"]).strip()
         if raw.lower() == "auto":
@@ -78,18 +83,20 @@ class LoadPatchStep(Step):
         else:
             wanted = [tok.strip() for tok in raw.split(",") if tok.strip()]
             if not wanted:
-                raise StepError(self.key, "channels 參數是空的；請填 auto 或逗號清單（例：test,ref）。")
+                raise StepError(self.key, "the channels parameter is empty; use auto or a comma "
+                                "separated list (e.g. test,ref).")
 
         loaded: List[str] = []
         for ch in wanted:
             if ch not in images:
                 raise StepError(
                     self.key,
-                    f"defect {getattr(item, 'defect_id', '?')} 沒有 channel '{ch}'（現有：{sorted(images)}）。")
+                    f"defect {getattr(item, 'defect_id', '?')} has no channel "
+                    f"'{ch}' (available: {sorted(images)}).")
             try:
                 arr = item.load(ch)
             except Exception as e:  # 檔案毀損 / 頁碼超界等
-                raise StepError(self.key, f"讀取 channel '{ch}' 失敗：{e}") from e
+                raise StepError(self.key, f"could not read channel '{ch}': {e}") from e
             arr_u8 = to_uint8(ensure_gray(arr))
             ctx.set_image(ch, arr_u8)
             loaded.append(ch)
@@ -98,8 +105,37 @@ class LoadPatchStep(Step):
         # 用預設參數（source="test"）就能直接吃到影像。
         if "single" in loaded and "test" not in ctx.images:
             ctx.set_image("test", ctx.images["single"])
-            note = f"單張資料流（kind={kind}）：'single' 已同步作為 'test' 供下游使用。"
+            note = (f"single-image input (kind={kind}): 'single' is also "
+                    f"exposed as 'test' for downstream cards.")
             ctx.meta.setdefault("notes", []).append(note)
+
+        # 面板用（F7-17）：**每條影像流是從哪一頁來的、載進來長什麼樣**。
+        #
+        # 這不是裝飾。「每顆 defect 第一張是 test、第二張是 ref」是全專案第一條
+        # 待廠內驗證的假設（CLAUDE.md §8），而目前唯一的驗證方式是另外跑
+        # fab_probe 腳本。把配對與每一頁的平均灰階直接攤在畫面上，使用者載入
+        # 第一份真資料的當下就會看到「咦，第二張比較亮」—— 那就是順序反了的證據。
+        pages = []
+        for ch in loaded:
+            ref = images.get(ch)
+            arr = ctx.images.get(ch)
+            pages.append({
+                "channel": ch,
+                "page": None if ref is None else getattr(ref, "page", None),
+                "file": "" if ref is None else str(getattr(ref, "path", "")),
+                "shape": None if arr is None else [int(v) for v in arr.shape[:2]],
+                "mean": None if arr is None else float(arr.mean()),
+            })
+        ctx.meta["input"] = {
+            "kind": str(kind or ""),
+            "defect_id": str(getattr(item, "defect_id", "")),
+            "die": list(getattr(item, "die", None) or []),
+            "xrel_nm": getattr(item, "xrel_nm", None),
+            "yrel_nm": getattr(item, "yrel_nm", None),
+            "klarf_row": int(getattr(item, "klarf_row", -1)),
+            "nm_per_px": getattr(item, "nm_per_px", None),
+            "pages": pages,
+        }
 
         ctx.add_feature("n_channels", float(len(loaded)))
         return ctx

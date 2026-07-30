@@ -89,9 +89,9 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
         if node is None:
             traces.append(StepTrace(
                 node_id=nid, step_key="?", ok=False, ms=0.0,
-                error=f"節點 '{nid}' 不在 recipe.nodes 中", features_added={},
+                error=f"step '{nid}' is not in recipe.nodes", features_added={},
                 images_after=sorted(ctx.images)))
-            return ctx, f"[{nid}] 節點 '{nid}' 不在 recipe.nodes 中"
+            return ctx, f"[{nid}] step '{nid}' is not in recipe.nodes"
         if not node.enabled:
             if nid == upto_node:
                 break  # 目標節點被停用：停在它這裡、不執行它
@@ -103,7 +103,8 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
             step_cls = registry.get(node.step)
             if step_cls is None:
                 raise StepError(
-                    node.step, f"未知的 step '{node.step}'；已註冊：{sorted(registry)}")
+                    node.step,
+                    f"unknown step '{node.step}'; registered: {sorted(registry)}")
             params = step_cls.validate_params(node.params)
             ret = step_cls().run(ctx, params)
             if isinstance(ret, Context):
@@ -145,12 +146,16 @@ def _eval_score(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
 def run_defect(recipe: Recipe, item: Any, kind: str, *,
                keep_context: bool = False,
                upto_node: Optional[str] = None,
+               track_changes: bool = False,
                registry: Optional[Dict[str, Type[Step]]] = None) -> DefectResult:
     """對單顆 defect 執行 ``kind`` 這條 route；**永不 raise**。
 
     - Context.meta 先種入 ``_defect_item`` / ``_dataset_kind`` / ``_defect_id`` /
       ``nm_per_px``（Load 卡讀這些 key）。
     - 停用（enabled=False）節點跳過。
+    - ``track_changes``：把「每一次覆寫既有影像流的前後樣貌」記進
+      ``ctx.meta['stream_change']``（F7-17 的 Enhance 儀表要的）。**預設關**——
+      批次跑一萬顆時那份資料沒有人看，不值得每次 set_image 都算兩個直方圖。
     - ``upto_node``：跑到該節點**之後**就停（Studio 點卡看中間輸出用）；
       強制 keep_context=True，score/bin 不算（None）；若該節點被停用則
       停在它前面、不執行它；不在 route 上 → ok=False（不 raise）。
@@ -164,6 +169,7 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
 
     defect_id = str(getattr(item, "defect_id", ""))
     ctx = _seed_context(item, kind, defect_id)
+    ctx.track_changes = bool(track_changes)
     traces: List[StepTrace] = []
 
     try:
@@ -174,7 +180,8 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
     if upto_node is not None and upto_node not in order:
         return _finish(
             defect_id, ctx, traces, keep_context, False,
-            f"upto_node '{upto_node}' 不在 route '{kind}' 的執行順序 {order} 中")
+            f"upto_node '{upto_node}' is not in the execution order {order} "
+            f"of route '{kind}'")
 
     ctx, err = _run_nodes(recipe, order, 0, len(order), ctx, traces,
                           registry, upto_node)
@@ -267,9 +274,27 @@ def _meta_snapshot(meta: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _roi_snapshot(ctx: Context) -> List[Any]:
+    """具名 ROI → ``[(name, (nx, ny, nw, nh)), ...]``（可 JSON 化）。"""
+    out: List[Any] = []
+    for roi in (ctx.rois.rois if ctx.rois is not None else ()):
+        try:
+            rect = tuple(float(v) for v in roi.norm_rect)
+        except Exception:              # noqa: BLE001 — 快取是盡力而為
+            continue
+        out.append((str(roi.label), rect))
+    return out
+
+
 def _restore_context(item: Any, kind: str, defect_id: str,
                      snap: Dict[str, Any]) -> Context:
-    """由快取快照重建 Context：先種引擎 meta，再回填 images/features/meta。"""
+    """由快取快照重建 Context。
+
+    **Context 的每一個欄位都要回來**，不只 images/features/meta。checkpoint 是
+    執行順序上的位置，不是「所有影像段的卡」，所以夾在中間的 Region 卡
+    （algo）會落在快取段裡 —— 漏掉 ``rois`` 的話會變成「第一次跑對、第二次跑
+    錯」。見 :mod:`.cache` 的模組說明。
+    """
     ctx = _seed_context(item, kind, defect_id)
     for name, arr in dict(snap.get("images") or {}).items():
         ctx.images[str(name)] = arr
@@ -277,6 +302,11 @@ def _restore_context(item: Any, kind: str, defect_id: str,
         ctx.features[str(name)] = float(val)
     for k, v in dict(snap.get("meta") or {}).items():
         ctx.meta[str(k)] = v  # 快照不含 ``_`` 開頭 key，不會蓋掉剛種的
+    for name, rect in (snap.get("rois") or []):
+        ctx.set_roi(str(name), rect)
+    labels = snap.get("labels")
+    if labels is not None:
+        ctx.labels = labels
     return ctx
 
 
@@ -335,7 +365,8 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
         if key is not None:
             try:
                 cache.put(key, dict(ctx.images), dict(ctx.features),
-                          _meta_snapshot(ctx.meta))
+                          _meta_snapshot(ctx.meta),
+                          rois=_roi_snapshot(ctx), labels=ctx.labels)
             except Exception:
                 pass  # 快取寫入失敗 → 不影響本次結果
 

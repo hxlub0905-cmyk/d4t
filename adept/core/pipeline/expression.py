@@ -46,7 +46,8 @@ class ExpressionError(ValueError):
         self.text = text
         self.pos = max(0, int(pos))
         msg = (
-            f"分數表達式有問題（第 {self.pos + 1} 個字元附近）：{desc}\n"
+            f"Problem in the score expression (near character "
+            f"{self.pos + 1}): {desc}\n"
             f"{_INDENT}{text}\n"
             f"{_INDENT}{' ' * self.pos}^"
         )
@@ -86,7 +87,9 @@ def _tokenize(text: str) -> List[_Token]:
                     while i < n and text[i].isdigit():
                         i += 1
                 else:
-                    raise ExpressionError("科學記號（e）後面要接數字，例如 1e3", text, i)
+                    raise ExpressionError(
+                        "scientific notation (e) must be followed by digits, "
+                        "e.g. 1e3", text, i)
             toks.append(("num", float(text[start:i]), start))
             continue
         # ---- 識別字 / 關鍵字 ----
@@ -119,10 +122,14 @@ def _tokenize(text: str) -> List[_Token]:
             i += 1
             continue
         if c == "=":
-            raise ExpressionError("單一個 '=' 不能拿來比較，「等於」請寫成 '=='", text, i)
+            raise ExpressionError(
+                "a single '=' cannot be used to compare; write 'equals' as "
+                "'=='", text, i)
         if c == "!":
-            raise ExpressionError("'!' 不能單獨使用，「不等於」請寫成 '!='", text, i)
-        raise ExpressionError(f"看不懂的符號 '{c}'", text, i)
+            raise ExpressionError(
+                "'!' cannot be used on its own; write 'not equal' as '!='",
+                text, i)
+        raise ExpressionError(f"unrecognised character '{c}'", text, i)
     toks.append(("end", "", n))
     return toks
 
@@ -165,11 +172,14 @@ class _Parser:
         kind, _, pos = self._peek()
         if kind == "end":
             raise ExpressionError(
-                "表達式是空的，請輸入一個計算式（例如 snr_max * 2）", self.text, pos)
+                "the expression is empty — enter a formula such as "
+                "snr_max * 2", self.text, pos)
         node = self.parse_or()
         kind, _, pos = self._peek()
         if kind != "end":
-            raise ExpressionError("表達式到這裡應該已經結束，後面多了看不懂的內容", self.text, pos)
+            raise ExpressionError(
+                "the expression should have ended here; there is extra content "
+                "after it", self.text, pos)
         return node
 
     # ---- 各優先度層 -------------------------------------------------------
@@ -252,15 +262,18 @@ class _Parser:
             node = self.parse_or()
             k2, _, p2 = self._peek()
             if k2 != "rparen":
-                raise ExpressionError("缺少右括號 ')'", self.text, p2)
+                raise ExpressionError("missing a closing bracket ')'", self.text, p2)
             self._next()
             return node
-        raise ExpressionError("這裡應該要有數字、變數或左括號", self.text, pos)
+        raise ExpressionError(
+            "a number, a variable or an opening bracket is expected here",
+            self.text, pos)
 
     def parse_call(self, name: str, name_pos: int) -> tuple:
         if name not in _FIXED_ARITY and name not in _VARIADIC:
             raise ExpressionError(
-                f"'{name}' 不是支援的函數（支援：abs、exp、log、max、min、sqrt）",
+                f"'{name}' is not a supported function "
+                f"(supported: abs, exp, log, max, min, sqrt)",
                 self.text, name_pos)
         self._next()  # 吃掉 '('
         args: List[tuple] = []
@@ -278,15 +291,18 @@ class _Parser:
                     self._next()
                     break
                 raise ExpressionError(
-                    "函數的參數之間要用逗號分隔，最後要有右括號 ')'", self.text, pos)
+                    "function arguments must be separated by commas and end "
+                    "with a closing bracket ')'", self.text, pos)
         # ---- 參數個數在「解析期」就檢查，不等執行才爆 ----
         if name in _FIXED_ARITY and len(args) != _FIXED_ARITY[name]:
             raise ExpressionError(
-                f"函數 {name}() 需要 1 個參數，但這裡給了 {len(args)} 個",
+                f"function {name}() takes 1 argument, but {len(args)} were "
+                f"given",
                 self.text, name_pos)
         if name in _VARIADIC and len(args) < 1:
             raise ExpressionError(
-                f"函數 {name}() 至少需要 1 個參數", self.text, name_pos)
+                f"function {name}() needs at least 1 argument", self.text,
+                name_pos)
         return ("call", name, tuple(args))
 
 
@@ -329,28 +345,32 @@ def _safe_call(name: str, args: List[float]) -> float:
         return float(min(args))
     if name == "max":
         return float(max(args))
-    raise ExpressionError(f"'{name}' 不是支援的函數")  # pragma: no cover — parser 已擋
+    raise ExpressionError(f"'{name}' is not a supported function")  # pragma: no cover — parser 已擋
 
 
 def _lookup_var(name: str, pos: int, variables: Mapping[str, Any], text: str) -> float:
     try:
         v = variables[name]
     except (KeyError, TypeError):
-        avail = "、".join(sorted(variables)) if variables else "（目前沒有任何變數）"
+        avail = (", ".join(sorted(variables)) if variables
+             else "(no variables are available yet)")
         raise ExpressionError(
-            f"變數 '{name}' 找不到；目前可用的變數：{avail}", text, pos) from None
+            f"variable '{name}' not found; available variables: {avail}",
+            text, pos) from None
     if isinstance(v, bool):
         return 1.0 if v else 0.0
     if v is None or isinstance(v, (str, bytes)):
         raise ExpressionError(
-            f"變數 '{name}' 的值不是數字（拿到 {type(v).__name__}：{v!r}），"
-            f"請檢查上游卡片是否正確產出這個特徵", text, pos)
+            f"variable '{name}' is not a number (got {type(v).__name__}: "
+            f"{v!r}) — check that the upstream card really produces this "
+            f"feature", text, pos)
     try:
         return float(v)
     except (TypeError, ValueError):
         raise ExpressionError(
-            f"變數 '{name}' 的值不是數字（拿到 {type(v).__name__}），"
-            f"請檢查上游卡片是否正確產出這個特徵", text, pos) from None
+            f"variable '{name}' is not a number (got {type(v).__name__}) — "
+            f"check that the upstream card really produces this feature",
+            text, pos) from None
 
 
 def _eval(node: tuple, variables: Mapping[str, Any], text: str) -> float:
@@ -404,7 +424,7 @@ def _eval(node: tuple, variables: Mapping[str, Any], text: str) -> float:
     if tag == "call":
         args = [_eval(a, variables, text) for a in node[2]]
         return _safe_call(node[1], args)
-    raise ExpressionError(f"內部錯誤：未知的 AST 節點 {tag!r}")  # pragma: no cover
+    raise ExpressionError(f"internal error: unknown AST node {tag!r}")  # pragma: no cover
 
 
 def _collect_vars(node: tuple, out: Set[str]) -> None:
@@ -457,7 +477,9 @@ class Expression:
 def parse_expression(text: str) -> Expression:
     """解析表達式文字；語法錯誤 raise :class:`ExpressionError`（含 caret 指位）。"""
     if not isinstance(text, str):
-        raise ExpressionError(f"表達式必須是文字，收到 {type(text).__name__}", str(text), 0)
+        raise ExpressionError(
+            f"the expression must be text, got {type(text).__name__}",
+            str(text), 0)
     parser = _Parser(text)
     ast = parser.parse()
     names: Set[str] = set()
