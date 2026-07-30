@@ -1200,3 +1200,27 @@ def test_release_check_agrees_with_writing_it_out(tmp_path):
     listing = os.path.join(REPO, "tools", "FILELIST.txt")
     with open(listing, "r", encoding="utf-8") as f:
         assert f.read().splitlines() == make_filelist.build_lines(REPO)
+
+
+def test_release_says_which_machine_it_is_for_when_git_is_missing(monkeypatch,
+                                                                 capsys):
+    """公司機不能執行 git 操作，而這支的每件事都建立在 ``git ls-files`` 上。
+    在那台機器上跑會丟一個看不懂的 subprocess 例外 —— 與其那樣，不如直接講
+    「你跑錯機器了」並指出那台機器該跑什麼。"""
+    monkeypatch.setattr(release_mod, "has_git", lambda root: False)
+    assert release_mod.main([]) == 2
+    out = capsys.readouterr().out
+    assert "家用機" in out
+    assert "check_files.py" in out and "doctor.py" in out, "要指出公司機該跑什麼"
+
+
+def test_every_tool_is_assigned_to_a_machine_in_the_docs():
+    """`tools/` 底下的東西分屬兩台機器，混起來用會得到看不懂的錯誤。
+    判準是「要 git 的都在家用機」，而那張對照表要真的涵蓋每一支。"""
+    with open(os.path.join(REPO, "AGENTS.md"), "r", encoding="utf-8") as f:
+        doc = f.read()
+    for name in sorted(os.listdir(TOOLS)):
+        if not name.endswith(".py") or name.startswith("_"):
+            continue
+        assert name in doc, "%s 沒有寫在 AGENTS.md 的機器對照表裡" % name
+    assert "哪一支在哪一台跑" in doc

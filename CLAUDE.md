@@ -184,12 +184,14 @@ python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 
     --workers 4 --cache /tmp/cache --db /tmp/runs.db --csv features.csv
 ```
 
-**每次改完之後**要重產公司機拿得到的那兩樣東西（順序是 `git add` 之後才跑，
-因為它們讀的是 `git ls-files`）：
+**每次改完之後**（**在家用機上** —— 公司機不能執行 git 操作）要重產公司機拿得到
+的那兩樣東西。順序是 `git add` 之後才跑，因為它們讀的是 `git ls-files`：
 
 ```bash
 git add -A && python tools/release.py && git add -A
 ```
+
+哪一支工具在哪一台機器跑，見 [`AGENTS.md`](AGENTS.md) §4.5。
 
 `tests/test_offline_tools.py` 會擋住那份清單腐爛 —— 忘了跑的話，那個檔案在
 「下載被擋、只能用剪貼簿搬」的機器上會**安靜地少掉**（見 §9.5 與 `AGENTS.md`）。

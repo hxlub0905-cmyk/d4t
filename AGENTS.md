@@ -96,11 +96,15 @@
 
 ---
 
-## 4. 每次改動之後的固定動作
+## 4. 每次改動之後的固定動作（**家用機**）
 
 ```bash
+# ── 家用機（有 git）───────────────────────────────────────────
 git add -A && python tools/release.py && git add -A
 ```
+
+**這一節從頭到尾都是家用機的事。公司機不能執行 git 操作，也不需要跑這些。**
+`release.py` 在沒有 git 的機器上會直接說「你跑錯機器了」並指向那台機器該跑的東西。
 
 一行做完兩件事，**順序不能顛倒**（包裡面含著那份清單）：
 
@@ -122,9 +126,40 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 
 ---
 
+## 4.5 哪一支在哪一台跑
+
+`tools/` 底下的東西**分屬兩台機器**，混起來用會得到看不懂的錯誤：
+
+| 工具 | 哪一台 | 要 git 嗎 | 做什麼 |
+|---|---|---|---|
+| `release.py` | **家用機** | ✅ 要 | 重產清單 + 搬運包（每次改完都跑）|
+| `make_filelist.py` / `make_text_bundle.py` | **家用機** | ✅ 要 | `release.py` 底下的兩支，通常不直接叫 |
+| `fetch_wheels.py` | **家用機** | ❌ | 抓 Windows wheels，帶 `wheels\` 過去 |
+| `check_files.py` | **公司機** | ❌ | 哪幾個檔案跟 GitHub 上不一樣（要先複製 `FILELIST.txt`）|
+| `install_offline.py` | **公司機** | ❌ | 用 `wheels\` 裝相依套件 |
+| `doctor.py` | **公司機** | ❌ | 環境自檢 |
+| `fab_probe/probe_*.py` | **公司機** | ❌ | 探測真實資料的格式（單檔，不需要整個 repo）|
+| `get_code.py` / `.ps1` | 公司機（**目前用不了**）| ❌ | 網路通的時候才逐檔抓 |
+
+判準很簡單：**要 git 的都在家用機。** 公司機那幾支一律 stdlib-only 且不碰 git。
+
+### 公司機上改的東西怎麼回來
+
+公司機不能 push。它能做的是**把文字複製出來**（跟 `fab_probe` 的輸出同一條路）：
+
+- **recipe**（Studio 存出來的 JSON）—— 小檔案，用記事本打開全選複製，貼回家用機
+- **`fab_probe` 的輸出** —— 本來就是設計成純文字可以貼出來的
+- **CSV／報表** —— 太大就先在公司機上看，把結論帶回來就好
+
+所以「在公司機上長期改程式碼」不是這個專案支援的工作方式 ——
+**程式碼在家用機改，recipe 與量測結果從公司機帶回來。**
+
+---
+
 ## 5. 開發流程本身
 
-見 [`CLAUDE.md`](CLAUDE.md) §6。測試在家用機上跑：
+見 [`CLAUDE.md`](CLAUDE.md) §6。**測試只在家用機上跑**（公司機沒有 pytest，
+也不該把時間花在那裡）：
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest -q       # Windows 不用設那個變數

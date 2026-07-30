@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 # ADEPT 更新搬運檔 — authored 2026-07-30.
-"""改完程式碼之後跑這一支：重產**公司機拿得到的那兩樣東西**。
+"""**在家用機上**改完程式碼之後跑這一支：重產公司機拿得到的那兩樣東西。
 
     git add -A && python tools/release.py && git add -A
+
+⚠ **這支是給有 git 的那台機器（家用機）用的。** 公司機不能執行 git 操作，
+也不需要跑這支 —— 它只負責「拿到程式碼並執行」，見 `AGENTS.md` §2。
 
 它做兩件事，順序不能顛倒：
 
@@ -41,6 +44,22 @@ BUNDLE = os.path.join("bundle", "ADEPT_bundle.py")
 
 def repo_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def has_git(root: str) -> bool:
+    """這台機器跑得動 git 嗎。
+
+    公司機不能執行 git 操作，而這支的每一件事都建立在 ``git ls-files`` 上 ——
+    在那台機器上跑會丟一個看不懂的 subprocess 例外。與其那樣，不如直接講出
+    「你跑錯機器了」以及那台機器該做什麼。
+    """
+    try:
+        subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=root,
+                       check=True, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    return True
 
 
 def untracked(root: str) -> List[str]:
@@ -149,6 +168,17 @@ def main(argv=None) -> int:
                     help="只檢查有沒有過期，不寫檔（過期回非零）")
     a = ap.parse_args(argv)
     root = repo_root()
+
+    if not has_git(root):
+        print("✗ 這台機器上沒有 git（或這不是一個 git work tree）。")
+        print("")
+        print("  這支是**給家用機用的** —— 它重產「公司機拿得到程式碼」所需的兩個檔案，")
+        print("  而那件事需要 git。公司機不需要跑它。")
+        print("")
+        print("  在公司機上你要的大概是這兩支之一：")
+        print("    python tools/check_files.py    # 哪幾個檔案跟 GitHub 上不一樣")
+        print("    python tools/doctor.py         # 環境自檢")
+        return 2
 
     loose = untracked(root)
     if loose:
