@@ -299,9 +299,18 @@ class EnhanceInspector(Inspector):
     WARN_CLIP = 0.01
 
     def stream(self) -> str:
-        """這張卡的主要輸出流（也就是要比 before/after 的那一條）。"""
-        return str(self.params.get("target") or self.params.get("source")
-                   or "test")
+        """這張卡的主要輸出流（也就是要比 before/after 的那一條）。
+
+        F7-20 起 Enhance 卡的參數是 ``streams``（一串，逗號分隔），所以這裡取
+        第一條。``target`` / ``source`` 留著是為了舊 recipe 與非 Enhance 的卡。
+
+        ⚠ 一張卡吃兩條流的時候，這個面板目前只畫得出第一條 —— 兩條各一組
+        before/after 是 F7-19 畫布那一半的事（計畫書 §23.7）。
+        """
+        raw = str(self.params.get("streams") or self.params.get("target")
+                  or self.params.get("source") or "test")
+        first = raw.split(",")[0].strip()
+        return first or "test"
 
     def record(self) -> Dict[str, Any]:
         changes = dict(self.meta.get("stream_change") or {})
@@ -803,22 +812,18 @@ class InputInspector(Inspector):
 
 #: step key -> 儀表。沒列在這裡的卡用原本的特徵表（見模組說明的約定 1）。
 #:
-#: Enhance 九張卡共用同一個儀表：它們做的事不同，但**要回答的問題是同一個**
-#: （我把資訊弄掉了嗎）。
+#: Enhance 的卡共用同一個儀表：它們做的事不同，但**要回答的問題是同一個**
+#: （我把資訊弄掉了嗎）。F7-20 把九張併成四張，所以這裡只剩四個 key ——
+#: 少的那五個不是被拿掉，是變成 ``normalize`` / ``tone`` 的一個下拉選項。
 INSPECTORS: Dict[str, type] = {
     "load_patch": InputInspector,
     "roi_profile": ProfileInspector,
     "roi_template": TemplateInspector,
     "align": AlignInspector,
-    "brightness_contrast": EnhanceInspector,
-    "gamma": EnhanceInspector,
+    "tone": EnhanceInspector,
+    "normalize": EnhanceInspector,
     "denoise": EnhanceInspector,
     "flatten": EnhanceInspector,
-    "invert": EnhanceInspector,
-    "local_contrast": EnhanceInspector,
-    "glv_mask_norm": EnhanceInspector,
-    "hist_match": EnhanceInspector,
-    "percentile_norm": EnhanceInspector,
     "glv_stats": MeasureInspector,
     "cd_measure": MeasureInspector,
     "focus_quality": MeasureInspector,

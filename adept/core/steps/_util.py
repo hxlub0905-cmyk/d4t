@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 
 from ..pipeline.context import Context, ContextError
-from ..pipeline.step import ParamSpec, StepError
+from ..pipeline.step import ParamSpec, Step, StepError
 
 # --------------------------------------------------------------------------- #
 # 輸出名前綴（F7-11）—— 讓同一張量測卡可以用在好幾個區域上
@@ -45,6 +45,93 @@ ONE_STREAM_HELP = (
     "the defect image, ref is the reference image. One card works on one "
     "stream: connect a stream to this card on the canvas (or pick it here), "
     "and add a second card if the other image needs the same treatment.")
+
+
+# --------------------------------------------------------------------------- #
+# 一張卡是**一次處理**，可以吃好幾條流（F7-19）
+# --------------------------------------------------------------------------- #
+#: 多流 Enhance 卡的主要參數說明。
+#:
+#: F7-18 的「一張卡一條流」保護的不變量是**畫布不能說謊**，而它用的手段是最
+#: 保守的那個。代價是一份 recipe 會有一對 Normalize、一對 Denoise，**而它們
+#: 必須維持同樣的參數才比得起來** —— 改了一張忘了另一張，是那個形狀帶進來的
+#: 新的安靜失敗（見計畫書 §22.7 第一條）。
+#:
+#: 現在改成：接幾條流進來就處理幾條，**每條流一個埠**，所以第二條流在畫布上
+#: 有一條真的線 —— 不變量還在，只是換一個手段達成。要讓兩條流吃不同的處理，
+#: 就放兩張卡（那才是它們該長得不一樣的時候）。
+STREAMS_HELP = (
+    "Which image streams this card processes. Each one is read, processed "
+    "with the settings below, and written back to itself - so connecting both "
+    "test and ref means both get exactly the same treatment, which is what "
+    "keeps them comparable. Streams are the named lines on the canvas. If the "
+    "two images need DIFFERENT settings, use two cards instead.")
+
+
+def streams_spec(default: str = "test") -> ParamSpec:
+    """多流 Enhance 卡共用的 ``streams`` 參數。"""
+    return ParamSpec(name="streams", type="image_keys", default=default,
+                     label="Image streams", help=STREAMS_HELP)
+
+
+class MultiStreamStep(Step):
+    """共用基底：對 ``streams`` 裡的每一條流各做一次同樣的處理。
+
+    卡片只實作 :meth:`build_op`（回傳一個 ``img -> img`` 的函式），迴圈由這裡
+    負責 —— **不要在每張卡裡各寫一次迴圈**，那會變成四份會各自長歪的程式碼。
+
+    ``build_op`` 在迴圈**之前**呼叫一次，所以需要「先量再套」的方法
+    （``range_from``：借另一條流的拉伸範圍）拿到的一定是**還沒被這張卡改過**
+    的原始值。F7-18 那個「借範圍的卡要排在前面、否則借到拉伸後的範圍」的陷阱
+    （§22.7 第三條）就是這樣消失的：量與套用發生在同一次執行裡，中間插不進
+    別的卡。
+    """
+
+    category = None          # 子類指定（CATEGORY_IMAGE）
+    reads = ["test"]
+    writes = ["test"]
+    features_out: List[str] = []
+
+    #: 除了 ``streams`` 之外還會讀哪些流（例如借範圍的那條）。子類覆寫。
+    @classmethod
+    def extra_reads(cls, params: Dict[str, object]) -> List[str]:
+        return []
+
+    @classmethod
+    def stream_list(cls, params: Dict[str, object]) -> List[str]:
+        keys = parse_key_list(params.get("streams", "test"))
+        return keys or ["test"]
+
+    @classmethod
+    def resolve_writes(cls, params: Dict[str, object]) -> List[str]:
+        return cls.stream_list(params)
+
+    @classmethod
+    def resolve_reads(cls, params: Dict[str, object]) -> List[str]:
+        out = list(cls.stream_list(params))
+        for k in cls.extra_reads(params):
+            if k and k not in out:
+                out.append(k)
+        return out
+
+    def build_op(self, ctx: Context, params: Dict[str, object]):
+        """回傳 ``img -> img``。迴圈之前呼叫一次（見類別 docstring）。"""
+        raise NotImplementedError
+
+    def skip_stream(self, key: str, params: Dict[str, object]) -> bool:
+        """這一條流要不要跳過（預設都不跳）。"""
+        return False
+
+    def run(self, ctx: Context, params: Dict[str, object]) -> Context:
+        p = self.validate_params(params)
+        keys = self.stream_list(p)
+        op = self.build_op(ctx, p)
+        for key in keys:
+            if self.skip_stream(key, p):
+                continue
+            img = require_image(ctx, self.key, key)
+            ctx.set_image(key, op(img))
+        return ctx
 
 
 def output_prefix_spec(example: str = "center") -> ParamSpec:

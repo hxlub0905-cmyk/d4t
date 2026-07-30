@@ -202,7 +202,7 @@ def _change(before, after, was_lo=0.0, was_hi=0.0, lo=0.0, hi=0.0):
 
 def test_the_enhance_panel_needs_the_engine_record(qapp):
     insp = insp_mod.EnhanceInspector()
-    insp.set_context("gamma", params={"target": "test"})
+    insp.set_context("tone", params={"streams": "test"})
     assert insp.has_data() is False
     assert "“test”" in insp.empty_reason()
 
@@ -210,7 +210,7 @@ def test_the_enhance_panel_needs_the_engine_record(qapp):
 def test_it_reports_how_much_the_card_flattened(qapp):
     """削平是 Enhance 唯一會安靜毀掉資訊的方式：那些畫素之間的差異回不來了。"""
     insp = insp_mod.EnhanceInspector()
-    insp.set_context("brightness_contrast", params={"target": "test"},
+    insp.set_context("tone", params={"streams": "test"},
                      meta=_change([10, 20, 10], [40, 0, 40],
                                   was_lo=0.0, was_hi=0.0, lo=0.30, hi=0.12))
     assert insp.has_data() is True
@@ -225,7 +225,7 @@ def test_it_does_not_blame_this_card_for_pre_existing_black(qapp):
     """原圖本來就有一片全黑（缺陷本身、或上一張卡幹的）—— 那不是這張卡的帳，
     而每次都喊狼來了跟不喊一樣沒有用。"""
     insp = insp_mod.EnhanceInspector()
-    insp.set_context("denoise", params={"target": "test"},
+    insp.set_context("denoise", params={"streams": "test"},
                      meta=_change([5, 5], [5, 5], was_lo=0.22, lo=0.22))
     assert insp.clipped()[0] == 0.22
     assert insp.added_clipping() == (0.0, 0.0)
@@ -240,9 +240,13 @@ def test_it_follows_the_stream_the_card_works_on(qapp):
                                     "clipped_low": 0.5, "clipped_high": 0.0,
                                     "was_clipped_low": 0.0,
                                     "was_clipped_high": 0.0}
-    insp.set_context("denoise", params={"target": "ref"}, meta=meta)
+    insp.set_context("denoise", params={"streams": "ref"}, meta=meta)
     assert insp.stream() == "ref"
     assert insp.clipped()[0] == 0.5
+
+    # 兩條流的卡：目前畫得出第一條（計畫書 §23.7）—— 重點是它**不會退回 test**
+    insp.set_context("denoise", params={"streams": "ref,test"}, meta=meta)
+    assert insp.stream() == "ref"
 
 
 def test_the_engine_only_records_when_asked(qapp, tmp_path):
@@ -271,7 +275,7 @@ def test_the_studio_preview_turns_recording_on(window, tmp_path):
     out = generate(str(tmp_path / "lotE"), n=4, seed=23)
     window.load_dataset_path(out["klarf"], sync=True)
     src = window.model.node_order[0]
-    b = window.add_card_after(src, "brightness_contrast", "test")
+    b = window.add_card_after(src, "tone", "test")
     window.model.set_param(b, "contrast", 4.0)
     window.select_node(b)
     assert window.refresh_preview(sync=True) is True

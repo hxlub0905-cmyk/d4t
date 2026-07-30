@@ -122,6 +122,26 @@ class ParamSpec:
     pattern: Optional[str] = None
     #: ``pattern`` 不合時給使用者看的白話說明（不要讓他看到正規表達式）。
     pattern_help: str = ""
+    #: 只有在另一個參數等於某幾個值時才顯示這一列（F7-20）。
+    #: 形如 ``("method", ("percentile", "glv_band"))``。
+    #:
+    #: 為什麼需要：把四張 Normalize 卡併成一張之後，那張卡有十個參數，
+    #: 而任何一個方法只用得到其中兩三個。全部攤出來的話，使用者要自己判斷
+    #: 「我選了 CLAHE，那 p_low 還算不算數」—— 而那正是**看得懂**與**看不懂**
+    #: 的分界。以前的替代方案是在 help 裡寫「（stripe 方法用不到）」
+    #: （見 ``flatten`` 的 ``size``），那是一句道歉，不是一個設計。
+    #:
+    #: ⚠ 這是**顯示**規則，不是驗證規則：藏起來的參數照樣有預設值、照樣
+    #: 通過 ``validate_params``。卡片自己要保證用不到的參數不影響結果
+    #: （``resolve_reads`` 也一樣 —— 不要回報一條只有別的方法才讀的流）。
+    show_when: Optional[tuple] = None
+
+    def visible_for(self, params: Optional[Dict[str, Any]]) -> bool:
+        """在這組參數下，這一列該不該顯示（沒有 ``show_when`` 就永遠顯示）。"""
+        if not self.show_when:
+            return True
+        name, values = self.show_when[0], tuple(self.show_when[1])
+        return str((params or {}).get(name, "")) in {str(v) for v in values}
 
     def __post_init__(self) -> None:
         if self.type not in PARAM_TYPES:
@@ -247,6 +267,17 @@ class Step(ABC):
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
         return list(cls.features_out)
 
+    @classmethod
+    def resolve_requires_ref(cls, params: Dict[str, Any]) -> bool:
+        """在這組參數下，這張卡是不是真的需要一條 ``ref``（F7-20）。
+
+        以前 ``requires_ref`` 是類別常數，因為一張卡只做一件事。合併之後
+        「需不需要 ref」跟著 ``method`` 走：Normalize 選 *Match to another
+        stream* 才需要，選 Percentile 不需要。用常數的話，rsem route 上
+        只要放了 Normalize 就會被誤判成缺 ref。
+        """
+        return bool(cls.requires_ref)
+
     # ---- 具名區域（F7-9）---------------------------------------------------
     #: 影像流有 reads/writes 可以在 validate 裡模擬，**具名 ROI 以前沒有**。
     #: 於是「量測卡指到一個沒人定義的區域」只有兩種下場：名字打錯 → 每顆
@@ -317,6 +348,9 @@ class Step(ABC):
                     "choices": p.choices, "unit": p.unit,
                     "label": p.label or p.name,
                     "pattern": p.pattern,
+                    # ``("method", ("percentile",))`` → JSON-safe 的兩個 list。
+                    "show_when": (None if not p.show_when
+                                  else [p.show_when[0], list(p.show_when[1])]),
                 }
                 for p in cls.params
             ],

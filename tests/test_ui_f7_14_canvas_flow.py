@@ -76,11 +76,11 @@ def test_the_new_card_works_on_the_stream_it_was_added_for(window):
     —— 而那正是他說「變很複雜」的東西。"""
     src = window.model.node_order[0]
     nid = window.add_card_after(src, "denoise", "ref")
-    assert window.model.nodes[nid].params["target"] == "ref"
+    assert window.model.nodes[nid].params["streams"] == "ref"
     assert "ref" in window.status_text()
 
     other = window.add_card_after(src, "denoise", "test")
-    assert window.model.nodes[other].params["target"] == "test"
+    assert window.model.nodes[other].params["streams"] == "test"
 
 
 def test_adding_after_a_card_puts_it_after_that_card(window):

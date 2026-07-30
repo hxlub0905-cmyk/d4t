@@ -17,7 +17,7 @@ def test_build_route_by_mouse_ops():
     changes = []
     m.add_listener(lambda: changes.append(1))
     a = m.add_step("load_patch")
-    b = m.add_step("percentile_norm")
+    b = m.add_step("normalize")
     c = m.add_step("align")
     assert m.node_order == [a, b, c] and changes
     # 重複 key → 唯一 id

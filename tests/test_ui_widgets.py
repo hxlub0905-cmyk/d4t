@@ -351,7 +351,7 @@ def test_bounded_numbers_get_a_slider_bound_both_ways(qapp):
     form = widgets_mod.ParamForm()
     edits = []
     form.param_edited.connect(lambda n, v: edits.append((n, v)))
-    form.set_step(_describe("gamma"), {}, ["test", "ref"])
+    form.set_step(_describe("tone"), {}, ["test", "ref"])
 
     s = form.slider("gamma")
     box = form.editor("gamma")
@@ -391,7 +391,7 @@ def test_curve_editor_is_wysiwyg_and_feeds_the_recipe(qapp):
     form = widgets_mod.ParamForm()
     edits = []
     form.param_edited.connect(lambda n, v: edits.append((n, v)))
-    form.set_step(_describe("gamma"), {}, ["test", "ref"])
+    form.set_step(_describe("tone"), {}, ["test", "ref"])
 
     field = form.editor("curve")
     assert isinstance(field, widgets_mod.CurveField)
@@ -428,7 +428,7 @@ def test_a_drawn_curve_visibly_takes_over_from_the_gamma_slider(qapp):
     不然他會拉了曲線又去動 gamma，然後以為 gamma 壞了。
     """
     form = widgets_mod.ParamForm()
-    form.set_step(_describe("gamma"), {}, ["test", "ref"])
+    form.set_step(_describe("tone"), {}, ["test", "ref"])
     gamma_row = form._rows["gamma"]
     assert gamma_row.property("dimmed") == "false"
 
@@ -946,7 +946,7 @@ def test_stage_rail_drills_down_one_stage_at_a_time(qapp):
     assert panel.open_group() == "enhance"
     assert panel.stage_buttons["enhance"].is_active() is True
     visible = set(panel.visible_step_keys())
-    assert "gamma" in visible and "subtract" not in visible, \
+    assert "tone" in visible and "subtract" not in visible, \
         "沒展開的階段不該出現在清單裡"
 
     # 一次只開一段
@@ -968,8 +968,8 @@ def test_search_still_reaches_across_collapsed_stages(qapp):
     panel.toggle_group(None)
     assert panel.open_group() is None
 
-    panel.set_query("gamma")
-    assert panel.visible_step_keys() == ["gamma"]
+    panel.set_query("tone")
+    assert panel.visible_step_keys() == ["tone"]
     panel.set_query("")
     assert panel.visible_step_keys() == []
 
@@ -1013,5 +1013,32 @@ def test_the_search_button_survives_collapsing_the_card_area(qapp):
     assert panel.panel_open() is True, "按了放大鏡就要把卡片區帶回來"
     # 而且搜尋框真的可以打字（不是被留在隱藏的容器裡）
     assert panel.search.isVisibleTo(panel) is True
-    panel.set_query("gamma")
-    assert panel.visible_step_keys() == ["gamma"]
+    panel.set_query("tone")
+    assert panel.visible_step_keys() == ["tone"]
+
+
+def test_rows_appear_and_disappear_with_the_method(qapp):
+    """F7-20：``show_when`` 在畫面上真的生效，而且改下拉就立刻重算。
+
+    藏起來而不是變淡，是因為兩者講的是不同的事：變淡（``_sync_curve_override``）
+    是「這一格還在，只是現在沒作用」；藏起來是「這一格根本不是這張卡的一部分」。
+    """
+    import adept.core.steps  # noqa: F401 — 觸發卡片註冊
+    from adept.core.pipeline import get_step
+
+    form = widgets_mod.ParamForm()
+    form.set_step(get_step("normalize").describe(), {}, ["test", "ref"])
+
+    assert form._rows["p_low"].isVisibleTo(form) is True
+    assert form._rows["tiles"].isVisibleTo(form) is False
+    assert form._rows["reference"].isVisibleTo(form) is False
+
+    form._emit("method", "local")
+    assert form._rows["p_low"].isVisibleTo(form) is False
+    assert form._rows["tiles"].isVisibleTo(form) is True
+
+    form._emit("method", "match")
+    assert form._rows["reference"].isVisibleTo(form) is True
+    assert form._rows["tiles"].isVisibleTo(form) is False
+    # streams / method 本身沒有 show_when，永遠在
+    assert form._rows["streams"].isVisibleTo(form) is True

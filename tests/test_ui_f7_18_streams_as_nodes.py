@@ -48,36 +48,70 @@ def window(qapp):
 # --------------------------------------------------------------------------- #
 # 1. 一張卡一條流
 # --------------------------------------------------------------------------- #
-ENHANCE_CARDS = ("percentile_norm", "glv_mask_norm", "denoise", "flatten",
-                 "local_contrast", "brightness_contrast", "gamma")
+ENHANCE_CARDS = ("normalize", "tone", "denoise", "flatten")
 
 
-def test_no_enhance_card_quietly_writes_a_second_stream():
-    """這是這一輪的核心不變量。
+def test_a_card_only_writes_the_streams_that_are_wired_into_it():
+    """核心不變量還在，但**達成它的手段換了**（F7-18 → F7-19，計畫書 §23.1）。
 
-    一張卡寫兩條流有兩個後果，兩個都只有在**看不到**的地方發作：畫布上那張卡
-    看起來只在一條鏈上，但它其實動了另一條；而「要不要一起動」變成控制列裡的
-    一組勾選框，於是 test 是主角、ref 是附帶。
+    F7-18 保護的從來不是「一張卡一條流」—— 那只是當時最保守的手段。真正的
+    不變量是**畫布不能說謊**：卡片動到的每一條流，在畫面上都要有一條線。
+    ``also_apply`` 違反它是因為第二條流是控制列裡的一個勾選框，畫布上根本
+    看不到。
+
+    F7-19 讓一張卡吃 N 條流，但每一條都是接進來的、每一條都有埠 —— 不變量
+    因此仍然成立。所以這條測試問的問題從「是不是只寫一條」改成
+    **「寫出去的是不是正好等於接進來的那幾條」**，那才是不變量本身。
+
+    ``also_apply`` / ``anchor`` 仍然不准回來：它們是「畫布上看不到的第二條流」
+    的具體形狀。
     """
     import adept.core.steps  # noqa: F401 — 觸發卡片註冊
     from adept.core.pipeline import get_step
 
     for key in ENHANCE_CARDS:
         cls = get_step(key)
+        # 預設：一條流進、同一條出
         params = cls.validate_params({})
-        assert cls.resolve_writes(params) == [params.get("target")
-                                              or params.get("source")], key
+        assert cls.resolve_writes(params) == ["test"], key
+        # 兩條流進 → 正好那兩條出，一條不多
+        both = cls.validate_params({"streams": "test,ref"})
+        assert cls.resolve_writes(both) == ["test", "ref"], key
         names = [p.name for p in cls.params]
         assert "also_apply" not in names, key
         assert "anchor" not in names, key
 
 
-def test_the_two_normalize_cards_can_still_share_one_range():
-    """唯一會被「一張卡一條流」弄丟的能力，要有一個看得見的替代品。
+def test_one_card_gives_both_streams_the_same_treatment():
+    """F7-19 要買到的東西：成對的處理**不可能**再漂移開。
 
-    ``anchor="source"`` 的意思是「ref 用 test 量出來的範圍」—— 那是「兩張圖
-    正規化完還比得起來」的關鍵。現在它是 ``range_from``，而且它是一條**影像流
-    的名字**，所以在畫布上就是接進這張卡的第二條線。
+    F7-18 之後一份 recipe 會有一對 Normalize、一對 Denoise，而它們必須維持
+    同樣的參數才比得起來 —— 改了一張忘了另一張是那個形狀帶進來的新的安靜
+    失敗（計畫書 §22.7 第一條，原本打算用一條 lint warning 補）。
+
+    一張卡就一組參數，所以這件事現在是**結構上不可能**，不是靠檢查擋。
+    """
+    import numpy as np
+
+    import adept.core.steps  # noqa: F401 — 觸發卡片註冊
+    from adept.core.pipeline import get_step
+    from adept.core.pipeline.context import Context
+
+    img = np.tile(np.linspace(0, 200, 64).astype(np.uint8), (64, 1))
+    ctx = Context(images={"test": img.copy(), "ref": img.copy()})
+    get_step("tone")().run(ctx, {"streams": "test,ref", "brightness": 20.0})
+    assert np.array_equal(ctx.images["test"], ctx.images["ref"])
+
+
+def test_two_streams_can_still_share_one_range():
+    """``range_from`` 原樣保留 —— F7-19 沒有為它發明新東西（計畫書 §23.3）。
+
+    ``anchor="source"`` 的意思是「ref 用 test 量出來的範圍」，那是「兩張圖
+    正規化完還比得起來」的關鍵。它現在是 ``range_from``，是一條**影像流的
+    名字**，所以在畫布上就是接進這張卡的第二條線。
+
+    而且順序陷阱消失了：基準值在迴圈**之前**量好，那時候這張卡還沒改過任何
+    東西 —— 兩條流是同一張卡處理的，中間插不進別的卡（§22.7 第三條）。
     """
     import numpy as np
 
@@ -89,17 +123,24 @@ def test_the_two_normalize_cards_can_still_share_one_range():
     src = np.tile(row, (128, 1))
     half = (src.astype(np.float32) / 2).astype(np.uint8)
 
-    cls = get_step("percentile_norm")
-    assert cls.resolve_reads(cls.validate_params({"source": "ref"})) == ["ref"]
+    cls = get_step("normalize")
+    assert cls.resolve_reads(cls.validate_params({"streams": "ref"})) == ["ref"]
     assert cls.resolve_reads(cls.validate_params(
-        {"source": "ref", "range_from": "test"})) == ["ref", "test"]
+        {"streams": "ref", "range_from": "test"})) == ["ref", "test"]
 
+    # 兩張卡的老寫法（仍然合法）
     ctx = Context(images={"test": src.copy(), "ref": half.copy()})
-    cls().run(ctx, {"source": "ref", "range_from": "test"})
-    cls().run(ctx, {"source": "test"})
+    cls().run(ctx, {"streams": "ref", "range_from": "test"})
+    cls().run(ctx, {"streams": "test"})
     assert ctx.images["test"].max() == 255
     # ref 借了 test 的範圍 → 它保持「只有一半亮」，兩張仍然比得起來
     assert abs(ctx.images["ref"].mean() - ctx.images["test"].mean() / 2) < 8
+
+    # 一張卡的新寫法：**結果必須一樣**，而且不必再擔心誰排前面
+    one = Context(images={"test": src.copy(), "ref": half.copy()})
+    cls().run(one, {"streams": "test,ref", "range_from": "test"})
+    assert np.array_equal(one.images["test"], ctx.images["test"])
+    assert np.array_equal(one.images["ref"], ctx.images["ref"])
 
 
 def test_old_recipes_with_also_apply_still_load_and_mean_the_same_thing(tmp_path):
@@ -131,12 +172,13 @@ def test_old_recipes_with_also_apply_still_load_and_mean_the_same_thing(tmp_path
 
     # anchor=source：借範圍的那張要排在**前面**，此時 test 還沒被拉伸過 ——
     # 反過來的話 ref 借到的是「已經拉成 0–255」的範圍，數字就不一樣了。
-    assert rec.nodes["norm_ref"].params == {"source": "ref", "range_from": "test",
-                                            }
-    assert rec.nodes["norm"].params == {"source": "test", "range_from": ""}
+    assert rec.nodes["norm_ref"].params == {"streams": "ref", "range_from": "test",
+                                            "method": "percentile"}
+    assert rec.nodes["norm"].params == {"streams": "test", "range_from": "",
+                                        "method": "percentile"}
     # denoise 是逐張獨立的運算，順序無所謂，維持原本的先後
-    assert rec.nodes["dn_ref"].params["target"] == "ref"
-    assert rec.nodes["dn"].params["target"] == "test"
+    assert rec.nodes["dn_ref"].params["streams"] == "ref"
+    assert rec.nodes["dn"].params["streams"] == "test"
 
     # 存回去就是新格式（再讀一次不會又長出節點）
     out = tmp_path / "again.json"
@@ -158,11 +200,11 @@ def test_the_shipped_examples_are_already_in_the_new_shape():
 def test_dragging_from_the_ref_port_points_the_card_at_ref(window):
     src = window.model.node_order[0]
     nid = window.add_card_after(src, "denoise", "test")
-    assert window.model.nodes[nid].params["target"] == "test"
+    assert window.model.nodes[nid].params["streams"] == "test"
 
     # 從 Input 的第二個輸出埠（ref）拉一條線過去
     window.pipeline.link_to(src, nid, port=1)
-    assert window.model.nodes[nid].params["target"] == "ref"
+    assert window.model.nodes[nid].params["streams"] == "ref"
     assert "ref" in window.status_text()
 
 
@@ -174,12 +216,12 @@ def test_a_second_line_between_the_same_two_cards_is_not_refused(window):
     這張卡不准你碰 ref。
     """
     src = window.model.node_order[0]
-    nid = window.add_card_after(src, "gamma", "test")
+    nid = window.add_card_after(src, "tone", "test")
     window.pipeline.link_to(src, nid, port=0)
     assert window.model.has_edge(src, nid) is True
 
     window.pipeline.link_to(src, nid, port=1)      # 同一對節點，另一個埠
-    assert window.model.nodes[nid].params["target"] == "ref"
+    assert window.model.nodes[nid].params["streams"] == "ref"
     assert "ref" in window.status_text()
 
 
@@ -188,12 +230,12 @@ def test_a_line_that_would_loop_leaves_no_trace(window):
     改成做 ref 了」。"""
     src = window.model.node_order[0]
     first = window.add_card_after(src, "denoise", "test")
-    second = window.add_card_after(first, "gamma", "ref")   # 它的輸出埠是 ref
+    second = window.add_card_after(first, "tone", "ref")   # 它的輸出埠是 ref
     assert (first, second) in window.model.edges
 
     window.pipeline.link_to(second, first, port=0)   # 反過來拉：會成環
     assert window.model.has_edge(second, first) is False
-    assert window.model.nodes[first].params["target"] == "test"
+    assert window.model.nodes[first].params["streams"] == "test"
     assert "Cannot connect" in window.status_text()
     assert window.status_level() == "error"
 
@@ -214,10 +256,10 @@ def test_adding_from_the_library_follows_the_selected_card(window):
     on_ref = window.add_card_after(src, "denoise", "ref")
     window.select_node(on_ref)
 
-    window._on_add_requested("gamma")
+    window._on_add_requested("tone")
     nid = window.selected_node
     assert nid != on_ref
-    assert window.model.nodes[nid].params["target"] == "ref"
+    assert window.model.nodes[nid].params["streams"] == "ref"
     order = window.model.node_order
     assert order.index(on_ref) < order.index(nid)
     assert (on_ref, nid) in window.model.edges

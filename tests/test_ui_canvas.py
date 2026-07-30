@@ -179,7 +179,7 @@ def test_edges_reorder_execution_and_survive_a_save_load_round_trip(window, tmp_
 # --------------------------------------------------------------------------- #
 def test_adding_a_card_from_the_library_lands_on_the_canvas(window):
     before = len(window.pipeline.node_ids())
-    window.library.entry("invert").add_button.click()
+    window.library.entry("tone").add_button.click()
     assert len(window.pipeline.node_ids()) == before + 1
     assert window.pipeline.node_ids()[-1] in window.model.nodes
 

@@ -913,6 +913,8 @@ class ParamForm(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._rows: Dict[str, _ParamRow] = {}
+        #: 目前這張卡每個參數的值 —— ``show_when`` 要靠它判斷哪幾列該在。
+        self._values: Dict[str, Any] = {}
         self._describe: Optional[Dict[str, Any]] = None
         self._building = False
 
@@ -969,9 +971,11 @@ class ParamForm(QWidget):
             self._step_help.setText(str(describe.get("help", "")))
             self._step_help.setVisible(bool(describe.get("help")))
             self._placeholder.setVisible(False)
+            self._values = {}
             for spec in describe.get("params", []):
                 name = str(spec.get("name", ""))
                 value = current_params.get(name, spec.get("default"))
+                self._values[name] = value
                 editor = self._make_editor(spec, value, streams)
                 editor.setToolTip(str(spec.get("help", "")))
                 row = _ParamRow(spec, editor, self._host)
@@ -979,6 +983,7 @@ class ParamForm(QWidget):
                 self._rows[name] = row
         finally:
             self._building = False
+        self._sync_visible_rows()
         self._sync_curve_override()
 
     def _sync_curve_override(self) -> None:
@@ -1049,7 +1054,25 @@ class ParamForm(QWidget):
     def _emit(self, name: str, value: Any) -> None:
         if self._building:
             return
+        self._values[name] = value
+        # 改了控制別人的那一格（例如 Normalize 的 method）→ 立刻重算哪幾列該在。
+        self._sync_visible_rows()
         self.param_edited.emit(name, value)
+
+    def _sync_visible_rows(self) -> None:
+        """依 ``show_when`` 顯示／隱藏各列（F7-20）。
+
+        為什麼是隱藏而不是變淡：``_sync_curve_override`` 的「變淡」講的是
+        「這一格還在，只是現在沒有作用」—— 使用者可能想把曲線拉直再用 gamma。
+        ``show_when`` 講的是**完全不同的另一件事**：選了 CLAHE 的時候
+        ``p_low`` 根本不是這張卡的一部分，留在畫面上只會讓人問「那它算不算數」。
+        """
+        for name, row in self._rows.items():
+            spec = row.spec.get("show_when")
+            if not spec:
+                continue
+            ctrl, values = str(spec[0]), [str(v) for v in spec[1]]
+            row.setVisible(str(self._values.get(ctrl, "")) in values)
 
     def _make_editor(self, spec: Dict[str, Any], value: Any,
                      streams: Sequence[str]) -> QWidget:

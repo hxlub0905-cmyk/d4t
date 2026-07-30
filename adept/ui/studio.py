@@ -1373,7 +1373,7 @@ class StudioWindow(QMainWindow):
     #: 主要影像流的參數名（依優先順序）。Enhance 卡一律叫 ``target`` 或
     #: ``source``，而**一張卡只做一條流** —— 要對另一張圖做同一件事就再放一張
     #: 卡，那才是畫布看得懂的說法。
-    _PRIMARY_PARAMS = ("target", "source")
+    _PRIMARY_PARAMS = ("streams", "target", "source")
 
     def _primary_stream_of(self, node_id: str) -> str:
         """``node_id`` 這張卡做在哪一條流上（接下去的卡預設跟著它走）。"""

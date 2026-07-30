@@ -12,7 +12,7 @@ from ..pipeline.step import (
     CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_ENHANCE,
 )
 from ..algo import enhance as algo_enhance
-from ._util import ONE_STREAM_HELP, require_image
+from ._util import MultiStreamStep, streams_spec
 
 
 def _denoise_one(step_key: str, img: np.ndarray, method: str, ksize: int,
@@ -42,7 +42,7 @@ def _denoise_one(step_key: str, img: np.ndarray, method: str, ksize: int,
 
 
 @register_step
-class DenoiseStep(Step):
+class DenoiseStep(MultiStreamStep):
     """去雜訊：median / gaussian（全平滑）與 bilateral / nlm（保留邊緣）。"""
 
     key = "denoise"
@@ -53,8 +53,7 @@ class DenoiseStep(Step):
             "steadier - either smoothing everything, or smoothing only the "
             "flat areas and leaving edges (and small defects) intact.")
     params = [
-        ParamSpec(name="target", type="image_key", default="test",
-                  label="Image stream", help=ONE_STREAM_HELP),
+        streams_spec("test"),
         ParamSpec(name="method", type="choice", default="median",
                   choices=["median", "gaussian", "bilateral", "nlm"],
                   help=("median = suppress isolated bright/dark specks (common "
@@ -68,33 +67,21 @@ class DenoiseStep(Step):
                         "larger is smoother).")),
         ParamSpec(name="strength", type="float", default=1.0, min=0.1, max=5.0,
                   label="Smoothing strength",
+                  show_when=("method", ("bilateral", "nlm")),
                   help=("How aggressively bilateral / nlm smooth, measured "
                         "against this image's own noise level - so 1 means "
                         "the same thing on a quiet lot and a noisy one. "
                         "Above about 2, small defects start disappearing "
-                        "along with the noise. Not used by median or "
-                        "gaussian.")),
+                        "along with the noise.")),
     ]
     reads = ["test"]
     writes = ["test"]
     features_out: List[str] = []
 
-    @classmethod
-    def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
-        return [str(params.get("target", "test"))]
-
-    @classmethod
-    def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:
-        return cls.resolve_reads(params)
-
-    def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
-        p = self.validate_params(params)
+    def build_op(self, ctx: Context, p: Dict[str, Any]):
         ksize = int(p["ksize"])
         if ksize % 2 == 0:
             raise StepError(self.key, f"ksize must be odd (got {ksize}); an even kernel has no "
                         f"centre pixel — use {ksize - 1} or {ksize + 1}.")
-        strength = float(p["strength"])
-        tgt = require_image(ctx, self.key, p["target"])
-        ctx.set_image(p["target"],
-                      _denoise_one(self.key, tgt, p["method"], ksize, strength))
-        return ctx
+        strength, method = float(p["strength"]), str(p["method"])
+        return lambda img: _denoise_one(self.key, img, method, ksize, strength)

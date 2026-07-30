@@ -1,18 +1,34 @@
-# ADEPT step-card library — authored 2026-07-29 (F7-7).
-"""tone — 亮度／對比／gamma 調整卡（Enhance 段）。
+# ADEPT step-card library — authored 2026-07-29 (F7-7); merged into one card 2026-07-30 (F7-20).
+"""tone —— **一張** Adjust tone 卡：亮度／對比／gamma／曲線／反相。
+
+為什麼是一張卡而不是三張
+------------------------
+Brightness/Contrast、Gamma/Curve、Invert 全都是**同一件事**：拿一條轉移曲線
+把灰階重新映射，逐像素、跟鄰居無關。它們在卡片庫佔三列，但使用者的問題只有
+一個 ——「我要把這張圖調得看得清楚一點」。
+
+跟 ``normalize.py`` 的 ``method`` 下拉不同，這裡**不是四選一**：亮度、gamma、
+反相是可以**同時**做的，而且常常要同時做（先提亮、再拉暗部、最後反相）。
+所以它們是同一張卡上的幾個旋鈕，全部預設不作用（0 / 1 / 恆等曲線 / 關）。
+`gamma` 卡本來就是這個形狀（gamma 與 curve 兩個旋鈕一個結果），這一輪只是把
+另外兩張也收進來。
+
+**套用順序固定：亮度/對比 → gamma 或曲線 → 反相。** 順序不可調 ——
+可調的話同一組數字會有六種結果，而畫面上看不出來是哪一種。要別的順序就放兩張卡
+（那時候順序在畫布上看得見）。
 
 跟 ``normalize.py`` 的差別（很重要，不要混用）
 ---------------------------------------------
-* ``percentile_norm`` / ``glv_mask_norm`` 是**自動**的：從影像自己算出範圍再拉伸，
-  目的是「把兩張圖變成可以比」。
-* 這一檔是**手動**的：使用者直接指定要加多少亮度、拉多少對比、套什麼 gamma。
-  目的是「讓我看得清楚 / 讓後面的量測落在好用的數值範圍」。
+* ``normalize`` 是**自動**的：從影像自己算出範圍再拉伸，目的是「把兩張圖變成
+  可以比」。
+* 這一檔是**手動**的：使用者直接指定要加多少亮度、套什麼 gamma。目的是
+  「讓我看得清楚 / 讓後面的量測落在好用的數值範圍」。
 
-兩者都可以用，順序也隨意 —— 但如果流程裡已經有正規化卡，通常手動調整要放在
-它**之後**，否則正規化會把你剛調的東西再拉回去。
+兩者都可以用，但如果流程裡已經有正規化卡，通常手動調整要放在它**之後**，
+否則正規化會把你剛調的東西再拉回去。
 
-為什麼 gamma 值得一張卡
------------------------
+為什麼 gamma 要留一個旋鈕
+-------------------------
 SEM 的暗部細節常常擠在低灰階區。gamma < 1 會把暗部拉開、gamma > 1 壓暗部拉亮部，
 這是線性的亮度／對比做不到的 —— 它對灰階是**非線性**重分佈。
 
@@ -31,10 +47,10 @@ from ..pipeline.curve import IDENTITY, is_identity, parse_curve
 from ..pipeline.step import (
     CATEGORY_IMAGE, GROUP_ENHANCE, ParamSpec, Step, register_step,
 )
-from ._util import ONE_STREAM_HELP, require_image
+from ._util import MultiStreamStep, streams_spec
 
-__all__ = ["BrightnessContrastStep", "GammaStep", "apply_brightness_contrast",
-           "apply_gamma", "apply_curve"]
+__all__ = ["ToneStep", "apply_brightness_contrast", "apply_gamma",
+           "apply_curve", "apply_invert"]
 
 
 def _value_range(arr: np.ndarray) -> tuple:
@@ -104,94 +120,88 @@ def apply_curve(img: np.ndarray, curve) -> np.ndarray:
     return (apply_curve_01(x, pts) * span + lo).astype(img.dtype, copy=False)
 
 
-class _ToneStep(Step):
-    """共用：一張卡做一條影像流（同 normalize / flatten 卡的慣例，見 F7-18）。"""
+def apply_invert(img: np.ndarray) -> np.ndarray:
+    """亮暗顛倒。uint8：``255-x``；落在 [0,1] 的浮點：``1-x``；其餘浮點：``255-x``。
 
-    category = CATEGORY_IMAGE
-    group = GROUP_ENHANCE
-    reads = ["test"]
-    writes = ["test"]
-    features_out: List[str] = []
-
-    @classmethod
-    def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
-        return [str(params.get("target", "test"))]
-
-    @classmethod
-    def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:
-        return cls.resolve_reads(params)
-
-    def _apply(self, ctx: Context, params: Dict[str, Any], fn) -> Context:
-        key = str(params.get("target", "test"))
-        img = require_image(ctx, self.key, key)
-        ctx.set_image(key, fn(img))
-        return ctx
+    浮點分兩種是刻意的：``diff`` 這類流可能是 0–255 的浮點，也可能是 0–1 的
+    正規化結果，而「反相」對兩者的正確答案不同。判斷用實際的數值範圍，
+    不是用 dtype。
+    """
+    if img.dtype == np.uint8:
+        return (255 - img).astype(np.uint8)
+    f = img.astype(np.float32)
+    if f.size > 0 and float(f.min()) >= 0.0 and float(f.max()) <= 1.5:
+        return (1.0 - np.clip(f, 0.0, 1.0)).astype(np.float32)
+    return (255.0 - np.clip(f, 0.0, 255.0)).astype(np.float32)
 
 
 @register_step
-class BrightnessContrastStep(_ToneStep):
-    """手動亮度 / 對比。"""
+class ToneStep(MultiStreamStep):
+    """手動色調調整：亮度／對比／gamma／曲線／反相，一張卡。
 
-    key = "brightness_contrast"
-    label = "Brightness / Contrast"
-    help = ("Manually shift brightness and stretch contrast, so faint defects "
-            "become easier to see and to measure.")
-    params = [
-        ParamSpec(name="target", type="image_key", default="test",
-                  label="Image stream", help=ONE_STREAM_HELP),
-        ParamSpec(name="brightness", type="float", default=0.0,
-                  min=-255.0, max=255.0,
-                  help=("Added to every pixel, in gray levels. Positive "
-                        "brightens, negative darkens; 0 leaves it alone.")),
-        ParamSpec(name="contrast", type="float", default=1.0,
-                  min=0.0, max=10.0,
-                  help=("Contrast multiplier around mid gray. 1 = unchanged, "
-                        "2 = twice the spread, 0.5 = half.")),
-    ]
-
-    def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
-        p = self.validate_params(params)
-        b, c = float(p["brightness"]), float(p["contrast"])
-        return self._apply(
-            ctx, p, lambda im: apply_brightness_contrast(im, b, c))
-
-
-@register_step
-class GammaStep(_ToneStep):
-    """Gamma 校正 + 自訂色調曲線（非線性重分佈灰階）。
-
-    兩個旋鈕、一個結果
+    幾個旋鈕、一個結果
     ------------------
-    ``gamma`` 是滑桿，一個數字就講完；``curve`` 是使用者自己拉的線，
-    想做「只提暗部、亮部原封不動」這種 gamma 做不到的事時用。
+    每個旋鈕的預設值都是「不作用」，所以只調你要的那個。順序固定
+    **亮度/對比 → gamma 或曲線 → 反相**（見模組 docstring）。
 
     **曲線一旦不是 y=x 就完全接手，gamma 被忽略。** 選「兩個都套」會很難
     debug：使用者把曲線拉平了卻還是暗，因為 gamma 還壓在那裡。
     這條規則寫在 ``curve`` 的 help 裡，UI 也會在曲線生效時把 gamma 那列調淡。
     """
 
-    key = "gamma"
-    label = "Gamma / Curve"
-    help = ("Redistribute gray levels non-linearly: below 1 opens up dark "
-            "detail, above 1 pushes it down. Linear brightness and contrast "
-            "cannot do this. Draw your own curve for full control.")
+    key = "tone"
+    label = "Adjust tone"
+    category = CATEGORY_IMAGE
+    group = GROUP_ENHANCE
+    help = ("Manually adjust brightness, contrast, gamma or a custom curve, "
+            "and optionally flip bright and dark - so faint defects become "
+            "easier to see and to measure.")
     params = [
-        ParamSpec(name="target", type="image_key", default="test",
-                  label="Image stream", help=ONE_STREAM_HELP),
+        streams_spec("test"),
+        ParamSpec(name="brightness", type="float", default=0.0,
+                  min=-255.0, max=255.0, label="Brightness",
+                  help=("Added to every pixel, in gray levels. Positive "
+                        "brightens, negative darkens; 0 leaves it alone.")),
+        ParamSpec(name="contrast", type="float", default=1.0,
+                  min=0.0, max=10.0, label="Contrast",
+                  help=("Contrast multiplier around mid gray. 1 = unchanged, "
+                        "2 = twice the spread, 0.5 = half.")),
         ParamSpec(name="gamma", type="float", default=1.0, min=0.1, max=5.0,
+                  label="Gamma",
                   help=("Below 1 brings out detail in the dark areas (common "
                         "for SEM); above 1 does the opposite. 1 = unchanged.")),
         ParamSpec(name="curve", type="curve", default=IDENTITY,
+                  label="Custom curve",
                   help=("Custom tone curve: input gray level across, output "
                         "up. Drag a point to bend it. While it is a straight "
                         "y = x line the gamma slider above is used instead; "
                         "as soon as you bend it, the curve takes over.")),
+        ParamSpec(name="invert", type="bool", default=False, label="Invert",
+                  help=("Flip bright and dark, so dark defects become bright "
+                        "signal for the steps that follow. Applied last, "
+                        "after everything above.")),
     ]
+    reads = ["test"]
+    writes = ["test"]
+    features_out: List[str] = []
 
-    def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
-        p = self.validate_params(params)
+    def build_op(self, ctx: Context, p: Dict[str, Any]):
+        b, c = float(p["brightness"]), float(p["contrast"])
         pts = parse_curve(p["curve"])
-        if not is_identity(pts):
-            return self._apply(ctx, p, lambda im: apply_curve(im, pts))
+        curved = not is_identity(pts)
         g = float(p["gamma"])
-        return self._apply(ctx, p, lambda im: apply_gamma(im, g))
+        inv = bool(p["invert"])
+
+        def op(img: np.ndarray) -> np.ndarray:
+            out = img
+            if b != 0.0 or c != 1.0:
+                out = apply_brightness_contrast(out, b, c)
+            if curved:
+                out = apply_curve(out, pts)
+            elif g != 1.0:
+                out = apply_gamma(out, g)
+            if inv:
+                out = apply_invert(out)
+            return out
+
+        return op

@@ -80,14 +80,14 @@ def make_recipe(snr_threshold: float = 200.0, search_radius: int = 8) -> Recipe:
     nodes = {
         "load": RecipeNode("load", "load_patch", {}),
         # 一張卡一條流（F7-18）：ref 先做（借 test 還沒被拉伸的範圍），test 再做。
-        "norm_ref": RecipeNode("norm_ref", "percentile_norm",
-                               {"source": "ref", "range_from": "test"}),
-        "norm": RecipeNode("norm", "percentile_norm", {"source": "test"}),
+        "norm_ref": RecipeNode("norm_ref", "normalize",
+                               {"streams": "ref", "range_from": "test"}),
+        "norm": RecipeNode("norm", "normalize", {"streams": "test"}),
         "align": RecipeNode("align", "align",
                             {"method": "phase", "search_radius": search_radius}),
         "sub": RecipeNode("sub", "subtract", {}),
         "dn": RecipeNode("dn", "denoise",
-                         {"target": "diff", "method": "median", "ksize": 3}),
+                         {"streams": "diff", "method": "median", "ksize": 3}),
         "snr": RecipeNode("snr", "snr_map", {"window": 15, "exclude_border": 8}),
         "blob": RecipeNode("blob", "blob_segment",
                            {"min_area": 6, "snr_threshold": snr_threshold}),
@@ -337,7 +337,7 @@ def _roi_then_image_recipe() -> Recipe:
         "roi": RecipeNode("roi", "roi_define",
                           {"name": "main", "source": "test"}),
         "dn": RecipeNode("dn", "denoise",
-                         {"target": "test", "method": "median", "ksize": 3}),
+                         {"streams": "test", "method": "median", "ksize": 3}),
         "glv": RecipeNode("glv", "glv_stats",
                           {"source": "test", "roi": "main"}),
     }

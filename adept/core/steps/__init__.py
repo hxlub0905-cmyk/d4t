@@ -6,7 +6,7 @@
 ``adept.core.pipeline.step.REGISTRY`` / ``list_steps()`` 取卡。
 
 已註冊的 key（影像段 → 算法段）：
-  load_patch, percentile_norm, glv_mask_norm, hist_match, denoise,
+  load_patch, normalize, tone, denoise,
   align, subtract, invert, golden_cell,
   snr_map, blob_segment, cd_measure, roi_snr, focus_quality, glv_stats,
   cell_period
@@ -15,10 +15,10 @@ from __future__ import annotations
 
 from . import _util          # 共用小工具（非卡片）
 from . import load           # load_patch
-from . import normalize      # percentile_norm / glv_mask_norm / hist_match
+from . import normalize      # normalize（percentile / glv_band / match / local）
 from . import denoise        # denoise
-from . import tone           # brightness_contrast / gamma
-from . import flatten        # flatten / local_contrast
+from . import tone           # tone（亮度/對比/gamma/曲線/反相）
+from . import flatten        # flatten
 from . import align          # align
 from . import arith          # subtract / invert
 from . import snr_map        # snr_map

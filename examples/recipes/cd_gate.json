@@ -24,17 +24,19 @@
       "enabled": true
     },
     "norm_ref": {
-      "step": "percentile_norm",
+      "step": "normalize",
       "params": {
-        "source": "ref",
-        "range_from": "test"
+        "range_from": "test",
+        "streams": "ref",
+        "method": "percentile"
       },
       "enabled": true
     },
     "norm": {
-      "step": "percentile_norm",
+      "step": "normalize",
       "params": {
-        "source": "test"
+        "streams": "test",
+        "method": "percentile"
       },
       "enabled": true
     },
@@ -54,9 +56,9 @@
     "dn": {
       "step": "denoise",
       "params": {
-        "target": "diff",
         "method": "median",
-        "ksize": 3
+        "ksize": 3,
+        "streams": "diff"
       },
       "enabled": true
     },

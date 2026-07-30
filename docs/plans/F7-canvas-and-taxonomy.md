@@ -1422,3 +1422,108 @@ class Step(ABC):
 「`resolve_writes` 只回主流」的那幾條。**改寫時要在 docstring 裡寫明理由**
 （那條測試鎖的是 F7-18 達成不變量的**手段**，不是不變量本身，見 23.1）——
 否則下一個人看到的是「有人把一條防止畫布說謊的測試刪掉了」。
+
+---
+
+## 24. F7-20：正規化那一家收成一張卡（已實作）
+
+使用者看著卡片庫說的：
+
+> 「正規化相關功能的就放在一起（我看有好多種 GLV Band、Histogram Match、
+>   CLAHE、Percentile）他們都是正規化，放在一起讓 user 勾選用哪一種即可，
+>   不要分那麼多。同理，類似可歸類的影像操作放在一起。」
+
+這不是新規則，是**把 repo 裡已經有的規則貫徹到底**。`flatten` 的檔頭（F7-10）
+早就寫著一樣的話：
+
+> 「背景平坦化」「去掃描線條紋」「top-hat」「black-hat」看起來是四種不同的東西，
+> 但它們的結構完全一樣……所以它們是同一張卡的 `method`，不是四張卡 ——
+> 卡片庫多四列，使用者要多讀四段說明才能知道該用哪一個；一張卡的一個下拉，
+> 他只要讀一次。
+
+那條理由對 Normalize 一字不改地成立，只是當時沒有回頭套用。
+
+### 24.1 Enhance：9 張 → 4 張
+
+| 新卡 | 併進來的 | 形狀 |
+|---|---|---|
+| **Normalize** | `percentile_norm` / `glv_mask_norm` / `hist_match` / `local_contrast` | `method` 四選一 |
+| **Adjust tone** | `brightness_contrast` / `gamma` / `invert` | **不是**四選一，是幾個旋鈕 |
+| Denoise | （不變） | 既有的 `method` |
+| Remove background / stripes | （不變） | 既有的 `method` |
+
+**Normalize 是四選一、Tone 不是** —— 這個差別是有理由的，不要為了整齊而統一：
+正規化你只會選一種（選了 CLAHE 就不會同時做 percentile）；但亮度、gamma、反相
+**常常要同時做**（先提亮、再拉暗部、最後反相）。所以前者是下拉，後者是幾個
+預設不作用的旋鈕。`gamma` 卡本來就是這個形狀（gamma 與 curve 兩個旋鈕一個
+結果），這一輪只是把另外兩張也收進來。
+
+Tone 的套用順序**固定**：亮度/對比 → gamma 或曲線 → 反相。可調的話同一組數字
+會有六種結果，而畫面上看不出來是哪一種；要別的順序就放兩張卡（那時候順序在
+畫布上看得見）。
+
+### 24.2 `ParamSpec.show_when`：參數跟著方法出現與消失
+
+沒有這個機制的話，合併後的 Normalize 有十個參數而任何一個方法只用得到兩三個。
+以前的替代方案是在 help 裡寫「（stripe 方法用不到）」（`flatten` 的 `size`）——
+**那是一句道歉，不是一個設計**，而且使用者還是得自己判斷「我選了 CLAHE，
+那 p_low 還算不算數」。
+
+```python
+ParamSpec(name="p_low", …, show_when=("method", ("percentile",)))
+```
+
+三件事要記住：
+
+1. **這是顯示規則，不是驗證規則。** 藏起來的參數照樣有預設值、照樣通過
+   `validate_params`。卡片自己要保證用不到的參數不影響結果 ——
+   `resolve_reads` 也一樣，不要回報一條只有別的方法才讀的流。
+2. **藏起來 ≠ 變淡。** 變淡（`_sync_curve_override`）講的是「這一格還在，
+   只是現在沒作用」，使用者可能想把曲線拉直再用 gamma。`show_when` 講的是
+   「這一格根本不是這張卡的一部分」。兩者不要混用。
+3. 順手把 `flatten` 的 `size`/`strength` 與 `denoise` 的 `strength` 也接上去，
+   那三句道歉可以刪掉了。
+
+### 24.3 `requires_ref` 要跟著方法走
+
+`requires_ref` 以前是類別常數，因為一張卡只做一件事。合併之後只有
+`method="match"` 真的需要另一條流 —— 用常數的話，rsem route 上只要放了
+Normalize 就會被誤判成缺 ref。所以多了 `Step.resolve_requires_ref(params)`，
+`validate()` 改呼叫它。
+
+### 24.4 順帶把 F7-19 的引擎那一半做掉
+
+合併之後 Enhance 只剩四張卡，正好是 F7-19 要改的那幾張，所以一起做：
+新的共用基底 `MultiStreamStep`（`steps/_util.py`）把主流參數從
+`target`/`source` 換成 **`streams`**（`type="image_keys"`），對每一條流各做一次
+同樣的處理。卡片只實作 `build_op`（回傳 `img -> img`），迴圈由基底負責 ——
+不要在四張卡裡各寫一次。
+
+`build_op` 在迴圈**之前**呼叫一次，所以 `range_from` 拿到的一定是還沒被這張卡
+改過的原始值 —— §22.7 第三條那個順序陷阱就是這樣消失的。
+
+**F7-19 還沒做完的是畫布那一半**：輸入側目前仍然只有一個埠（見 §23.6），
+所以「接兩條線進去」現在要在參數列上勾。引擎與 recipe 格式都已經就位。
+
+### 24.5 遷移
+
+`_migrate_merged_cards`（`recipe.py`）：舊 key → 新 key、主流參數 → `streams`、
+「是哪一張卡」→ `method` 的值。`hist_match` 的舊 `method`（exact/linear/
+percentile）跟新的方法選擇撞名，改叫 `match_method`。
+
+⚠ **必須跑在 `_migrate_also_apply` 之後**：那一道會把 `also_apply` 展開成好幾張
+**舊 key** 的卡，展開出來的那幾張也要一起換名。先展開再收合看起來繞了一圈，
+但遷移鏈要一段一段接（見 §23.8）。
+
+### 24.6 驗證
+
+照 §22.6 那條，不讀程式碼：`die_to_die_basic` 與 `cd_gate` 各跑 100 顆合成
+patch，合併前後 `min / median / max` 與 bin 數量**逐項相同**
+（20.230 / 32.115 / 175.000、bin 0 = 54 · bin 1 = 46；cd_gate 0/0/33.0、60/40）。
+五份範例 recipe 就地改寫成新格式後再驗一次，仍然相同。
+
+改寫掉的既有測試：`test_no_enhance_card_quietly_writes_a_second_stream` →
+`test_a_card_only_writes_the_streams_that_are_wired_into_it`。**docstring 裡寫了
+理由**：F7-18 保護的不是「一張卡一條流」，是「畫布不能說謊」；問題因此從
+「是不是只寫一條」改成「寫出去的是不是正好等於接進來的那幾條」——
+那才是不變量本身（§23.1）。

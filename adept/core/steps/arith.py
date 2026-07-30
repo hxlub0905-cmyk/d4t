@@ -1,5 +1,8 @@
 # ADEPT step-card library — authored 2026-07-28 (M1).
-"""影像算術卡：subtract / invert。
+"""影像算術卡：subtract。
+
+``invert`` 已於 F7-20 併進 ``tone`` 卡（它跟亮度/gamma 一樣是逐像素的
+色調映射，使用者的問題只有一個「把這張圖調得看得清楚」）。
 
 注意：subtract 產出的 diff 流是 **float32**（可能含負值，取決於 absolute），
 下游卡（snr_map / blob_segment / roi_snr…）都吃得下 float32。
@@ -12,7 +15,7 @@ import numpy as np
 
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_COMPARE, GROUP_ENHANCE,
+    CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_COMPARE,
 )
 from ._util import require_image
 
@@ -97,49 +100,4 @@ class SubtractStep(Step):
             if p["absolute"]:
                 out = np.abs(out)
         ctx.set_image(p["out"], out.astype(np.float32))
-        return ctx
-
-
-@register_step
-class InvertStep(Step):
-    """影像反相：亮暗顛倒（uint8：255-x；[0,1] 浮點：1-x）。"""
-
-    key = "invert"
-    label = "Invert"
-    category = CATEGORY_IMAGE
-    group = GROUP_ENHANCE
-    help = ("Flip bright and dark, so dark defects become bright signal for "
-            "the steps that follow.")
-    params = [
-        ParamSpec(name="target", type="image_key", default="test",
-                  label="Apply to",
-                  help=("Which image stream to invert; the result is written "
-                        "back to that same stream. Streams are the named lines "
-                        "on the canvas - test is the defect image, ref is the "
-                        "reference image.")),
-    ]
-    reads = ["test"]
-    writes = ["test"]
-    features_out: List[str] = []
-
-    @classmethod
-    def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
-        return [params.get("target", "test")]
-
-    @classmethod
-    def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:
-        return [params.get("target", "test")]
-
-    def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
-        p = self.validate_params(params)
-        img = require_image(ctx, self.key, p["target"])
-        if img.dtype == np.uint8:
-            out = (255 - img).astype(np.uint8)
-        else:
-            f = img.astype(np.float32)
-            if f.size > 0 and float(f.min()) >= 0.0 and float(f.max()) <= 1.5:
-                out = (1.0 - np.clip(f, 0.0, 1.0)).astype(np.float32)
-            else:
-                out = (255.0 - np.clip(f, 0.0, 255.0)).astype(np.float32)
-        ctx.set_image(p["target"], out)
         return ctx

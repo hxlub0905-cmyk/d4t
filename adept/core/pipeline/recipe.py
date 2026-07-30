@@ -159,6 +159,69 @@ def _migrate_also_apply(nodes: Dict[str, "RecipeNode"],
         routes[k] = out
 
 
+# ---------------------------------------------------------------------------
+# 舊 recipe 相容遷移（F7-20）：合併卡片 + 主流參數改名 streams
+# ---------------------------------------------------------------------------
+#: 舊 step key → (新 key, 主流參數的舊名, 要補上的固定參數, 參數改名表)
+#:
+#: 四張 Normalize 卡與三張 tone 卡在 F7-20 各自併成一張，方法變成一個下拉。
+#: 遷移要做的事有三件：換 key、把主流參數改名成 ``streams``、把「是哪一張卡」
+#: 這個資訊變成 ``method`` 的值。
+#:
+#: 為什麼要遷移而不是直接不認得：跟 §22.6 同一個理由 —— recipe 是使用者存在
+#: 磁碟上、拿來交接的檔案，認不得等於「工具壞了」。
+_MERGED_CARDS: Dict[str, tuple] = {
+    # 舊 key:          (新 key,      主流舊名,    固定參數,                   改名表)
+    "percentile_norm": ("normalize", "source", {"method": "percentile"}, {}),
+    "glv_mask_norm":   ("normalize", "source", {"method": "glv_band"}, {}),
+    "local_contrast":  ("normalize", "target", {"method": "local"}, {}),
+    # hist_match 的舊 ``method``（exact/linear/percentile）跟合併後的方法選擇
+    # 撞名，所以改叫 match_method。
+    "hist_match":      ("normalize", "moving", {"method": "match"},
+                        {"method": "match_method"}),
+    "brightness_contrast": ("tone", "target", {}, {}),
+    "gamma":               ("tone", "target", {}, {}),
+    "invert":              ("tone", "target", {"invert": True}, {}),
+}
+
+#: 沒有合併、但主流參數一起改名成 ``streams`` 的卡（F7-19）。
+_RENAMED_STREAM_PARAM: Dict[str, str] = {
+    "denoise": "target",
+    "flatten": "target",
+}
+
+
+def _migrate_merged_cards(nodes: Dict[str, "RecipeNode"]) -> None:
+    """把 F7-20 之前的卡片名與參數名換成合併後的（就地改寫 nodes）。
+
+    ⚠ 這一道**必須跑在 :func:`_migrate_also_apply` 之後**：那一道會把
+    ``also_apply`` 展開成好幾張**舊 key** 的卡，展開出來的那幾張也要一起換名。
+    先展開再收合看起來繞了一圈，但遷移鏈要一段一段接 —— 寫一條
+    「``also_apply`` 直接變 ``streams``」的捷徑只有舊檔案會走到，
+    永遠不會有人在上面測試。
+    """
+    for nid, node in list(nodes.items()):
+        params = dict(node.params)
+        merged = _MERGED_CARDS.get(node.step)
+        if merged is not None:
+            new_key, primary_name, fixed, renames = merged
+            for old, new in renames.items():
+                if old in params:
+                    params[new] = params.pop(old)
+            if primary_name in params:
+                params["streams"] = params.pop(primary_name)
+            for k, v in fixed.items():
+                params.setdefault(k, v)
+            nodes[nid] = RecipeNode(id=node.id, step=new_key, params=params,
+                                    enabled=node.enabled)
+            continue
+        primary_name = _RENAMED_STREAM_PARAM.get(node.step)
+        if primary_name is not None and primary_name in params:
+            params["streams"] = params.pop(primary_name)
+            nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
+                                    enabled=node.enabled)
+
+
 @dataclass
 class Recipe:
     """一份完整 recipe（單一 JSON 檔可互傳）。"""
@@ -238,6 +301,8 @@ class Recipe:
         # 做在這裡而不是各張卡的 validate_params 裡，因為它會**增加節點**——
         # 那是 recipe 層級的事，一張卡看不到自己以外的東西。
         _migrate_also_apply(nodes, routes)
+        # 再把合併掉的卡片名／參數名換過來（順序不可顛倒，見函式 docstring）。
+        _migrate_merged_cards(nodes)
 
         return cls(
             recipe_id=str(d["recipe_id"]),
@@ -470,7 +535,7 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                     title=f"step '{nid}' is missing an upstream image",
                     detail=f"route '{k}': it needs image streams {missing}, but "
                            f"upstream only provides {sorted(avail)}"))
-            if k == "rsem" and getattr(step_cls, "requires_ref", False) \
+            if k == "rsem" and step_cls.resolve_requires_ref(p) \
                     and "ref" not in avail:
                 issues.append(Issue(
                     code="requires-ref", level="error", node_id=nid,
