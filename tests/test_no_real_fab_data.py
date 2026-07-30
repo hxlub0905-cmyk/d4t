@@ -46,7 +46,7 @@ _SYNTHETIC = re.compile(
     r"|DEV\d{3}(?:_[0-9A-Z_]+)?"            # device / recipe
     r"|TOOL\d{2}|FAB\d{2}"                  # 機台 / 廠區
     r"|LOT_SYN[0-9A-Z_.]*|SYN[0-9A-Z_.]*"   # make_sample 產的
-    r"|LAYER[0-9A-Z_]*"
+    r"|LAYER[0-9A-Z_]*|STEP\d{2}"          # 既有合成 fixture 用的
     r")$"
 )
 
@@ -108,9 +108,60 @@ def test_the_guard_would_actually_catch_a_real_looking_lot(tmp_path):
     assert _ok("AA0000.0X") is True
     assert _ok("DEV001_LAYERA_STP_BSTP_CST_DS01_E01") is True
     # 憑空編的，但形狀像真的：lot 帶尾碼、recipe 帶層別／步驟、機台是四碼＋數字
-    assert _ok("QQ1234.5Z") is False
-    assert _ok("WWXY_ZZZ_QQQ_VVV_UUU_TT99") is False
-    assert _ok("ZZZZ99") is False
+    assert _ok("QQ1234.5Z") is False                 # FAKE-ID
+    assert _ok("WWXY_ZZZ_QQQ_VVV_UUU_TT99") is False  # FAKE-ID
+    assert _ok("ZZZZ99") is False                    # FAKE-ID
+
+
+#: 「看起來像廠內識別碼」的形狀。**這不是黑名單**（黑名單等於把要保護的東西寫進
+#: repo）—— 它比對的是**樣子**，然後要求那個值必須是合成的（`_ok`）。
+#:
+#: 為什麼要有這一條：fixture 之外還有一個一直在漏的地方 —— **文件**。
+#: 我在同一個 session 裡把真實的 lot／機台代號寫進說明文字四次，
+#: 其中一次還是在「怎麼防止識別碼進 repo」那一段的例子裡。
+_ID_SHAPES = (
+    re.compile(r"\b[A-Z][A-Z0-9]{4,7}\.[0-9A-Z]{1,3}\b"),   # lot / wafer
+    re.compile(r"\b[A-Z]{4}\d{2}\b"),                       # 機台代號
+)
+
+#: 只掃這些 —— 這是實際會漏的地方（文件與測試），掃全部程式碼會被一堆
+#: 正常的識別字誤判。
+_SCAN = ("*.md", "tests/*.py")
+
+#: 這一行上的東西是**刻意編出來的反例**（用來示範「這種形狀會被擋下來」）。
+#: 需要一個明講的標記，因為那種例子本來就不能符合合成命名規則 —— 不然它就
+#: 示範不了任何東西。標記是逐行的，而且要作者自己寫下去，所以 review 看得到。
+_FAKE_MARK = "FAKE-ID"
+
+
+def _scan_files():
+    root = Path(__file__).resolve().parent.parent
+    out = []
+    for pattern in _SCAN:
+        out.extend(sorted(root.glob(pattern)))
+    return out
+
+
+@pytest.mark.parametrize("path", _scan_files(), ids=lambda p: p.name)
+def test_documents_do_not_carry_real_looking_identifiers(path):
+    """文件裡的例子也要是編出來的。
+
+    修法一律是**把例子換成編的**，不是把真值加進白名單。
+    """
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    bad = []
+    for i, line in enumerate(lines, 1):
+        if _FAKE_MARK in line:
+            continue                                # 明講「這是編的」
+        for shape in _ID_SHAPES:
+            for m in shape.finditer(line):
+                if not _ok(m.group(0)):
+                    bad.append((i, m.group(0)))
+    assert not bad, (
+        "這些看起來像真的廠內識別碼（lot／wafer／機台）：\n"
+        + "\n".join("  第 %d 行: %r" % b for b in bad)
+        + "\n把例子換成編的（合成命名規則見這個檔案上方），不要加進白名單。"
+        + "\n真的是刻意示範「會被擋下來的形狀」的話，那一行加上 " + _FAKE_MARK + "。")
 
 
 def test_at_least_one_fixture_is_actually_checked():
