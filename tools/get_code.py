@@ -23,9 +23,13 @@ DLP 對它的規則跟 ``application/zip`` 完全不同）。
     python get_code.py --proxy http://proxy.corp.com:8080   # 要走公司 proxy
 
 **瀏覽器連得到但這支逾時（WinError 10060）＝ 沒走 proxy，不是被擋。**
-urllib 會讀 ``HTTPS_PROXY`` 與 Windows 登錄檔裡**手動設定**的 proxy，
-但**讀不到 PAC（自動設定指令碼）**，而公司幾乎都用 PAC。這支會去把 PAC 的網址
-讀出來講給你聽，並告訴你要填什麼。
+``urllib`` 會讀 ``HTTPS_PROXY`` 與 Windows 登錄檔裡**手動設定**的 proxy，
+但**讀不到 PAC（自動設定指令碼）**，而公司幾乎都用 PAC —— 瀏覽器懂 PAC、
+Python 不懂，所以同一台機器上一個通一個不通。
+
+所以在 Windows 上，沒有其他 proxy 設定時這支會**自己請 .NET 把 PAC 解開**
+（``GetSystemWebProxy().GetProxy(url)``，跟瀏覽器同一套設定），解得出來就直接
+用，開頭那行 ``Proxy :`` 會講它是怎麼來的。解不出來才要你自己填 ``--proxy``。
 
 ``--ref`` 給分支名的時候，抓到的是 **CDN 上的那一版** —— 剛推上去的東西可能要
 等幾分鐘才看得到（實測會拿到前一個 commit；清單與檔案來自同一份快照，
@@ -44,6 +48,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -89,6 +94,36 @@ def proxy_in_effect(proxy: str = "") -> str:
     if proxy:
         return proxy
     return urllib.request.getproxies().get("https", "")
+
+
+def system_proxy_for(url: str) -> str:
+    """問 Windows「連這個網址要走哪個 proxy」—— **PAC 會被解開**。
+
+    ``urllib`` 讀不到 PAC，但 .NET 讀得到（瀏覽器用的是同一套設定），
+    所以在 Windows 上借 PowerShell 問一次。這比叫使用者自己打開 PAC 檔去找
+    ``PROXY 主機:埠`` 好太多了 —— 那種檔案通常有上百行條件判斷，而且「哪一行
+    適用於這個網址」正是 PAC 要算的東西。
+
+    ``GetProxy()`` 在「不需要 proxy」時會回傳原網址，所以那種情況回空字串。
+    任何一步失敗都回空字串（診斷用的東西不可以自己變成失敗原因）。
+    """
+    if not sys.platform.startswith("win"):
+        return ""
+    ps = ("[System.Net.WebRequest]::GetSystemWebProxy()"
+          ".GetProxy('%s').AbsoluteUri" % url)
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=25)
+    except Exception:                                 # noqa: BLE001 — 診斷用
+        return ""
+    got = out.stdout.decode("utf-8", "replace").strip().splitlines()
+    got = got[-1].strip() if got else ""
+    if not got or got.rstrip("/") == url.rstrip("/"):
+        return ""                                     # .NET 說不用 proxy
+    if not got.startswith(("http://", "https://")):
+        return ""
+    return got
 
 
 def pac_url() -> str:
@@ -139,12 +174,20 @@ def main(argv=None) -> int:
                     help="公司 proxy，例如 http://proxy.corp.com:8080")
     a = ap.parse_args(argv)
 
+    # 沒人給 proxy、環境也沒有的時候，去問 Windows（PAC 就是在這裡被解開的）。
+    # 使用者不該為了下載一份程式碼去讀一個上百行的 PAC 檔。
+    proxy, how = a.proxy, ""
+    if not proxy and not proxy_in_effect():
+        proxy = system_proxy_for(RAW % (REPO, a.ref, MANIFEST))
+        if proxy:
+            how = "（從 Windows 的自動設定（PAC）解出來的）"
+
     global _OPENER
-    _OPENER = build_opener(a.cafile, a.proxy)
+    _OPENER = build_opener(a.cafile, proxy)
 
     print("來源  : https://raw.githubusercontent.com/%s (%s)" % (REPO, a.ref))
     print("目的地: %s" % os.path.abspath(a.dest))
-    print("Proxy : %s" % (proxy_in_effect(a.proxy) or "（不用 proxy，直接連）"))
+    print("Proxy : %s%s" % (proxy_in_effect(proxy) or "（不用 proxy，直接連）", how))
     try:
         raw = fetch(a.ref, MANIFEST, a.cafile).decode("utf-8")
     except urllib.error.HTTPError as e:
@@ -175,17 +218,18 @@ def main(argv=None) -> int:
 
         timed_out = ("10060" in reason or "timed out" in reason.lower()
                      or "timeout" in reason.lower())
-        using = proxy_in_effect(a.proxy)
+        using = proxy_in_effect(proxy)
         if timed_out and not using:
             pac = pac_url()
             print("\n  這是**逾時**，不是被拒絕 —— 封包直接送出去而沒有人回應。")
             print("  如果你的瀏覽器連得到 GitHub，那答案幾乎一定是：")
             print("  **這台機器要透過公司 proxy 才連得出去，而 Python 沒有走 proxy。**")
             if pac:
-                print("\n  找到了：你的 proxy 是用 PAC 自動設定檔設的 ——")
+                print("\n  你的 proxy 是用 PAC 自動設定檔設的 ——")
                 print("    %s" % pac)
-                print("  urllib **讀不到 PAC**，所以它直接連出去然後逾時。")
-                print("  用瀏覽器打開上面那個網址，在裡面找 `PROXY 主機:埠`，然後：")
+                print("  我試著請 Windows 幫我解開它（.NET 讀得懂 PAC），但沒有解出")
+                print("  可以用的 proxy。請用瀏覽器打開上面那個網址，找 `PROXY 主機:埠`，")
+                print("  然後：")
             else:
                 print("\n  先找出 proxy（PowerShell，任一個有值就用它）：")
                 print("    netsh winhttp show proxy")

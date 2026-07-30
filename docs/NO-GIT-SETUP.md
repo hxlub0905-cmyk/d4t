@@ -77,14 +77,23 @@ GitHub 產生的 zip **不含 `.git` 資料夾**，所以裡面 174 個檔案全
 proxy，但**讀不到 PAC（自動設定指令碼）** —— 而公司幾乎都用 PAC。
 瀏覽器懂 PAC，Python 不懂，所以同一台機器上一個通一個不通。
 
-`get_code.py` 遇到逾時會自己去登錄檔把 PAC 的網址讀出來告訴你。找 proxy 位址：
+**Windows 上 `get_code.py` 會自己解 PAC**：沒有其他 proxy 設定時，它請 .NET
+算出「連這個網址該走哪個 proxy」（`GetSystemWebProxy().GetProxy(url)` —— 瀏覽器
+用的就是同一套設定），解得出來就直接用。開頭那行 `Proxy :` 會講它是怎麼來的。
+PAC 檔通常有上百行條件判斷，而「哪一行適用於這個網址」正是 PAC 要算的東西，
+不該由你手算。
+
+自動解不出來（或不是 Windows）才需要自己找 proxy 位址：
 
 ```powershell
 netsh winhttp show proxy
 Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' |
     Select ProxyServer, AutoConfigURL
-pip config list          # pip 連得出去的話，proxy 就在這裡
 ```
+
+⚠ **不要**用 `pip config list` 來找 proxy：很多公司的 pip 是走**內部 PyPI 鏡像**
+（`index-url` 指到內網），根本沒有 proxy 設定 —— 而且那個輸出裡常常**含帳號密碼**，
+貼給別人看之前要遮掉。
 
 `AutoConfigURL` 有值就是 PAC：**用瀏覽器打開那個網址**，在裡面找
 `PROXY 主機:埠` 那一行。然後：
