@@ -253,28 +253,31 @@ def test_the_studio_opens_with_the_input_card_on_the_canvas(window):
 
 
 # --------------------------------------------------------------------------- #
-# 3. target / also apply
+# 3. 這張卡做在哪一條流上（F7-18 起：一張卡一條流）
 # --------------------------------------------------------------------------- #
 def test_stream_params_have_plain_language_labels(qapp):
-    """``also_apply`` 不是一句話，"Also apply to" 才是。"""
+    """參數名是 recipe 的鍵，不是給人看的字。"""
     for key in ("percentile_norm", "gamma", "brightness_contrast", "denoise"):
         params = {p["name"]: p for p in get_step(key).describe()["params"]}
-        assert params["also_apply"]["label"] == "Also apply to"
-        assert params["also_apply"]["type"] == "image_keys"
         primary = params.get("target") or params.get("source")
-        assert primary["label"] == "Apply to"
+        assert primary["label"] == "Image stream"
         # 說明要講出「流是畫布上的線」與 test / ref 是什麼
         assert "canvas" in primary["help"] and "ref" in primary["help"]
 
 
 def test_image_keys_values_are_normalised(qapp):
-    """手打的與勾出來的要等價 —— 存進 recipe 的字串不該因輸入方式而不同。"""
-    cls = get_step("percentile_norm")
-    assert cls.validate_params({"also_apply": " ref , ref ,,test "})["also_apply"] \
-        == "ref,test"
-    assert cls.validate_params({"also_apply": ""})["also_apply"] == ""
-    # 舊 recipe 的寫法照樣讀得進來（格式沒有變）
-    assert cls.validate_params({"also_apply": "ref"})["also_apply"] == "ref"
+    """``image_keys`` 是「一串影像流」的型別：手打的與勾出來的要等價。
+
+    F7-18 之後沒有卡片用它（``also_apply`` 拆成節點了），但型別與正規化規則
+    仍然是 ParamSpec 的契約 —— 值的格式跟輸入方式無關這件事要繼續成立。
+    """
+    from adept.core.pipeline.step import ParamSpec
+
+    spec = ParamSpec(name="streams", type="image_keys", default="",
+                     help="which streams")
+    assert spec.validate(" ref , ref ,,test ") == "ref,test"
+    assert spec.validate("") == ""
+    assert spec.validate("ref") == "ref"
 
 
 def test_stream_picker_is_checkboxes_over_the_upstream_streams(qapp):
@@ -297,17 +300,21 @@ def test_a_stream_the_pipeline_no_longer_has_is_still_shown(qapp):
     assert picker.text() == "ghost"
 
 
-def test_editing_also_apply_from_the_form_reaches_the_model(window):
-    node_id = window.model.add_step("percentile_norm")
-    assert window.select_node(node_id) is True
-    picker = window.param_form.editor("also_apply")
-    assert isinstance(picker, widgets_mod.StreamPicker)
-    assert set(picker.stream_names()) >= {"test", "ref"}
+def test_each_image_source_gets_its_own_card(window):
+    """「test 跟 ref 就是兩張不同的 image source，都要可以做操作」（F7-18）。
 
-    # 取消 ref = 「test 跟 ref 分開處理」，這是使用者要的另一半功能
-    assert window.model.nodes[node_id].params["also_apply"] == "ref"
-    picker._boxes[picker.stream_names().index("ref")].setChecked(False)
-    assert window.model.nodes[node_id].params["also_apply"] == ""
+    以前那件事是一張卡上的一組勾選框；現在它就是**兩張卡**，而畫布上因此看得到
+    兩條各自的處理鏈。
+    """
+    src = window.model.node_order[0]
+    on_test = window.add_card_after(src, "percentile_norm", "test")
+    on_ref = window.add_card_after(src, "percentile_norm", "ref")
+    assert window.model.nodes[on_test].params["source"] == "test"
+    assert window.model.nodes[on_ref].params["source"] == "ref"
+    for nid in (on_test, on_ref):
+        cls = get_step(window.model.nodes[nid].step)
+        assert cls.resolve_writes(window.model.nodes[nid].params) == \
+            [window.model.nodes[nid].params["source"]]
 
 
 # --------------------------------------------------------------------------- #
@@ -316,15 +323,15 @@ def test_editing_also_apply_from_the_form_reaches_the_model(window):
 def test_selecting_a_card_shows_that_cards_main_stream(window):
     """回饋 4：點 Normalize 卻跳到 ref，並排時左右變成同一張 ref。
 
-    成因是「這張卡寫過的最後一條流」被當成「這張卡的主要輸出」；Enhance 卡的
-    writes 是 ``[target] + also_apply``，所以最後一項永遠是 also_apply。
+    成因是「這張卡寫過的最後一條流」被當成「這張卡的主要輸出」；當時 Enhance
+    卡的 writes 是 ``[主流] + 附帶的那一串``，所以最後一項永遠是附帶的那條。
     """
     assert window.load_recipe_path(str(EXAMPLE), sync=True) is True
     assert window.select_node("norm") is True
     window.refresh_preview(sync=True)
 
     assert window.stream_combo.currentText() == "test", \
-        "點 Normalize 應該看到它處理的 test，不是 also_apply 的 ref"
+        "點 Normalize 應該看到它處理的 test"
     assert window.model.nodes["norm"].params["source"] == "test"
 
 

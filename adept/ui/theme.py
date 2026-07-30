@@ -170,6 +170,11 @@ _LIGHT: Dict[str, Any] = {
     "canvas_grid": "#ced4de",
     "canvas_edge": "#9aa3ae",
     "canvas_edge_active": "#3574d6",
+    #: 隱含順序的虛線（F7-18）。以前它是 ``canvas_edge`` 加透明度 —— 同一個
+    #: 顏色淡一點，於是「這條線是我拉的」跟「這條線是排列順序帶來的」看起來
+    #: 只差在深淺，而深淺在畫布上還會被縮放與背景影響。兩者在語意上是兩種
+    #: 東西（一條刪得掉、一條刪不掉），所以給它自己的色相。
+    "canvas_edge_implicit": "#b08a5a",
     # -- typography ----------------------------------------------------------
     "font_stack": ("'Segoe UI','PingFang TC','Microsoft JhengHei',"
                    "'Helvetica Neue',Arial,sans-serif"),
@@ -272,6 +277,7 @@ _DARK: Dict[str, Any] = dict(_LIGHT, **{
     "canvas_grid": "#2f3540",
     "canvas_edge": "#5c6474",
     "canvas_edge_active": "#4b8bf5",
+    "canvas_edge_implicit": "#a2794a",
 })
 
 #: 兩組色盤，鍵名完全一致（測試會逐鍵比對）。

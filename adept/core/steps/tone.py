@@ -31,7 +31,7 @@ from ..pipeline.curve import IDENTITY, is_identity, parse_curve
 from ..pipeline.step import (
     CATEGORY_IMAGE, GROUP_ENHANCE, ParamSpec, Step, register_step,
 )
-from ._util import parse_key_list, require_image
+from ._util import ONE_STREAM_HELP, require_image
 
 __all__ = ["BrightnessContrastStep", "GammaStep", "apply_brightness_contrast",
            "apply_gamma", "apply_curve"]
@@ -105,7 +105,7 @@ def apply_curve(img: np.ndarray, curve) -> np.ndarray:
 
 
 class _ToneStep(Step):
-    """共用：主影像流 + ``also_apply``（同 normalize 卡的慣例）。"""
+    """共用：一張卡做一條影像流（同 normalize / flatten 卡的慣例，見 F7-18）。"""
 
     category = CATEGORY_IMAGE
     group = GROUP_ENHANCE
@@ -114,34 +114,17 @@ class _ToneStep(Step):
     features_out: List[str] = []
 
     @classmethod
-    def _targets(cls, params: Dict[str, Any]) -> List[str]:
-        keys = [str(params.get("target", "test"))]
-        keys += parse_key_list(params.get("also_apply", ""))
-        seen, out = set(), []
-        for k in keys:
-            if k and k not in seen:
-                seen.add(k)
-                out.append(k)
-        return out
-
-    @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
-        return cls._targets(params)
+        return [str(params.get("target", "test"))]
 
     @classmethod
     def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:
-        return cls._targets(params)
+        return cls.resolve_reads(params)
 
-    def _apply_each(self, ctx: Context, params: Dict[str, Any], fn) -> Context:
-        primary = str(params.get("target", "test"))
-        require_image(ctx, self.key, primary)          # 主流不存在才算錯
-        for key in self._targets(params):
-            img = ctx.images.get(key)
-            if img is None:
-                ctx.warn(f"[{self.key}] also_apply stream '{key}' does not "
-                         f"exist; skipped.")
-                continue
-            ctx.set_image(key, fn(img))
+    def _apply(self, ctx: Context, params: Dict[str, Any], fn) -> Context:
+        key = str(params.get("target", "test"))
+        img = require_image(ctx, self.key, key)
+        ctx.set_image(key, fn(img))
         return ctx
 
 
@@ -155,16 +138,7 @@ class BrightnessContrastStep(_ToneStep):
             "become easier to see and to measure.")
     params = [
         ParamSpec(name="target", type="image_key", default="test",
-                  label="Apply to",
-                  help=("Which image stream this card works on; the result is "
-                        "written back to that same stream. Streams are the "
-                        "named lines on the canvas - test is the defect image, "
-                        "ref is the reference image.")),
-        ParamSpec(name="also_apply", type="image_keys", default="ref",
-                  label="Also apply to",
-                  help=("Other streams that get exactly the same adjustment. "
-                        "Keep ref ticked or test and ref stop being "
-                        "comparable; untick it to treat the two differently.")),
+                  label="Image stream", help=ONE_STREAM_HELP),
         ParamSpec(name="brightness", type="float", default=0.0,
                   min=-255.0, max=255.0,
                   help=("Added to every pixel, in gray levels. Positive "
@@ -178,7 +152,7 @@ class BrightnessContrastStep(_ToneStep):
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
         b, c = float(p["brightness"]), float(p["contrast"])
-        return self._apply_each(
+        return self._apply(
             ctx, p, lambda im: apply_brightness_contrast(im, b, c))
 
 
@@ -203,16 +177,7 @@ class GammaStep(_ToneStep):
             "cannot do this. Draw your own curve for full control.")
     params = [
         ParamSpec(name="target", type="image_key", default="test",
-                  label="Apply to",
-                  help=("Which image stream this card works on; the result is "
-                        "written back to that same stream. Streams are the "
-                        "named lines on the canvas - test is the defect image, "
-                        "ref is the reference image.")),
-        ParamSpec(name="also_apply", type="image_keys", default="ref",
-                  label="Also apply to",
-                  help=("Other streams that get exactly the same gamma or "
-                        "curve. Keep ref ticked or test and ref stop being "
-                        "comparable; untick it to treat the two differently.")),
+                  label="Image stream", help=ONE_STREAM_HELP),
         ParamSpec(name="gamma", type="float", default=1.0, min=0.1, max=5.0,
                   help=("Below 1 brings out detail in the dark areas (common "
                         "for SEM); above 1 does the opposite. 1 = unchanged.")),
@@ -227,6 +192,6 @@ class GammaStep(_ToneStep):
         p = self.validate_params(params)
         pts = parse_curve(p["curve"])
         if not is_identity(pts):
-            return self._apply_each(ctx, p, lambda im: apply_curve(im, pts))
+            return self._apply(ctx, p, lambda im: apply_curve(im, pts))
         g = float(p["gamma"])
-        return self._apply_each(ctx, p, lambda im: apply_gamma(im, g))
+        return self._apply(ctx, p, lambda im: apply_gamma(im, g))

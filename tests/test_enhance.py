@@ -217,41 +217,45 @@ def test_the_new_cards_are_in_the_enhance_stage_and_visible_in_the_gui():
 def test_flatten_card_runs_every_method_on_test_and_ref(method):
     ctx = Context(images={"test": _patch(gradient=40.0),
                           "ref": _patch(gradient=40.0, defect=0.0, seed=2)})
-    _run("flatten", ctx, target="test", also_apply="ref", method=method, size=21)
+    # 一張卡一條流（F7-18）：兩張圖都要處理就放兩張卡。
+    _run("flatten", ctx, target="test", method=method, size=21)
+    _run("flatten", ctx, target="ref", method=method, size=21)
     for key in ("test", "ref"):
         assert ctx.images[key].dtype == np.float32
         assert ctx.images[key].shape == (64, 64)
         assert not np.any(np.isnan(ctx.images[key]))
 
 
-def test_flatten_only_touches_the_streams_you_ticked():
+def test_flatten_only_touches_its_own_stream():
     ctx = Context(images={"test": _patch(gradient=40.0),
                           "ref": _patch(gradient=40.0, seed=3)})
     before = ctx.images["ref"].copy()
-    _run("flatten", ctx, target="test", also_apply="", method="background")
-    assert np.array_equal(ctx.images["ref"], before), "沒勾的流不可以被動到"
+    _run("flatten", ctx, target="test", method="background")
+    assert np.array_equal(ctx.images["ref"], before), "沒接進來的流不可以被動到"
     assert not np.array_equal(ctx.images["test"], before)
 
 
 def test_local_contrast_card_runs():
     ctx = Context(images={"test": _patch(), "ref": _patch(seed=4)})
-    _run("local_contrast", ctx, target="test", also_apply="ref",
-         clip_limit=3.0, tiles=4)
+    _run("local_contrast", ctx, target="test", clip_limit=3.0, tiles=4)
     assert ctx.images["test"].dtype == np.float32
     assert float(ctx.images["test"].std()) > 0.0
 
 
-def test_a_missing_also_apply_stream_only_warns():
+def test_pointing_a_card_at_a_stream_that_does_not_exist_says_so():
+    """指到不存在的流是**錯誤**，不是警告 —— 那張卡什麼都沒做，而使用者以為做了。"""
+    from adept.core.pipeline.step import StepError
+
     ctx = Context(images={"test": _patch()})
-    _run("flatten", ctx, target="test", also_apply="ghost", method="background")
-    assert any("ghost" in w for w in ctx.meta.get("warnings", []))
+    with pytest.raises(StepError) as e:
+        _run("flatten", ctx, target="ghost", method="background")
+    assert "ghost" in str(e.value)
 
 
 @pytest.mark.parametrize("method", ["median", "gaussian", "bilateral", "nlm"])
 def test_denoise_card_runs_every_method(method):
     ctx = Context(images={"test": _patch(), "ref": _patch(seed=5)})
-    _run("denoise", ctx, target="test", also_apply="ref", method=method,
-         ksize=5, strength=1.0)
+    _run("denoise", ctx, target="test", method=method, ksize=5, strength=1.0)
     assert ctx.images["test"].shape == (64, 64)
     assert not np.any(np.isnan(ctx.images["test"]))
 

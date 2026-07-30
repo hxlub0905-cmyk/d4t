@@ -6,6 +6,7 @@
   "routes": {
     "ebi_patch": [
       "load",
+      "norm_ref",
       "norm",
       "sub",
       "dn",
@@ -22,11 +23,18 @@
       "params": {},
       "enabled": true
     },
+    "norm_ref": {
+      "step": "percentile_norm",
+      "params": {
+        "source": "ref",
+        "range_from": "test"
+      },
+      "enabled": true
+    },
     "norm": {
       "step": "percentile_norm",
       "params": {
-        "source": "test",
-        "also_apply": "ref"
+        "source": "test"
       },
       "enabled": true
     },
@@ -67,15 +75,6 @@
       "params": {},
       "enabled": true
     },
-    "glv": {
-      "step": "glv_stats",
-      "params": {
-        "source": "diff",
-        "metrics": "glv_max,glv_q99,glv_mean",
-        "roi": "glv_roi"
-      },
-      "enabled": true
-    },
     "glv_roi": {
       "step": "roi_define",
       "params": {
@@ -84,6 +83,15 @@
         "size": 32.0,
         "size_unit": "px",
         "source": "diff"
+      },
+      "enabled": true
+    },
+    "glv": {
+      "step": "glv_stats",
+      "params": {
+        "source": "diff",
+        "metrics": "glv_max,glv_q99,glv_mean",
+        "roi": "glv_roi"
       },
       "enabled": true
     }

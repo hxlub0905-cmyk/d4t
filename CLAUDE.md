@@ -141,9 +141,16 @@ class MyCardStep(Step):
 `steps/__init__.py` import 它即完成註冊 —— **UI 與引擎零修改**，卡片庫自動出現。
 param 相依 I/O（例如輸出流名稱由參數決定）覆寫 `resolve_reads/resolve_writes/resolve_features`。
 
+> **一張卡只做一條影像流**（F7-18）。Enhance 卡吃 `target`（或 `source`）一條流、
+> 寫回同一條，`resolve_writes` 就只回那一條。要對 ref 也做同一件事就**再放一張卡**
+> —— 「要對哪幾張圖做」是畫布上的事（哪條線接進來），不是控制列上的一組勾選框。
+> 一張卡寫兩條流會讓畫布說謊：它畫在 test 那條鏈上，卻同時改寫了 ref。
+> 需要「借另一條流的資訊」時，那件事要有自己的參數（例：`percentile_norm` 的
+> `range_from`），而且型別是 `image_key` —— 它在畫布上就是第二條接進來的線。
+
 > **參數名是 recipe 的鍵，不是給人看的字**（F7-9）。`ParamSpec` 有選填的
-> `label`：有就顯示 label，沒有就顯示 `name`。`also_apply` 對製程工程師不是
-> 一句話，`Also apply to` 才是。同理，「一串影像流」請用 `type="image_keys"`
+> `label`：有就顯示 label，沒有就顯示 `name`。`range_from` 對製程工程師不是
+> 一句話，`Borrow range from` 才是。同理，「一串影像流」請用 `type="image_keys"`
 > 而不是 `str` —— 值的格式一樣（逗號分隔字串），但 UI 會給上游每一條流一個
 > 勾選框，使用者不必猜能填什麼，也不會打錯字。
 
@@ -200,6 +207,11 @@ python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 
 | **Golden Cell 的原點會飄**（F7-12） | 同一份 recipe、不同時間建的模板指到不同的地方，而且畫面上完全看不出來 | cell 的第 0 欄預設是大圖上的**任意切點**，換張圖就換了 —— 而使用者是在 cell 上標框的。`algo/template.py::anchor_cell()` 旋轉到**最強的上升邊**在第 0 欄；用最大正梯度而不是 `abs`，否則一個週期的兩個相反邊界會競爭，錨點在兩者之間跳 |
 | **`estimate_period` 在純雜訊上會回一個看似合理的週期**（F7-12） | 噪音圖疊出一個沒有意義的模板，然後安靜地拿去對每一顆 | 週期信心門檻 `MIN_PERIOD_CONFIDENCE = 40`（實測噪音 20.3）。「說我做不到」比「給一個沒有意義的答案」好得多。順帶：一維 layout（垂直條紋，只有 X 有週期）以前會被整個放棄 —— 那是最常見的情況，現在兩軸各自判斷，不重複的那軸取整個影像高度／寬度 |
 | **KLARF variant D 誤判**（M5 修正） | 真實 1.8 檔（ImageList 欄不在最後、且無 IMAGECOUNT 欄）被 `lint()` 判定每一列都違法，Export 精靈跳紅字 | `row_len_ok` 改用 `effective_row_len()`：把 `Images N { … }` 子區塊折算成一欄。**注意 `image_layout()` 對這個變體仍回 None，而 export 的插欄位置正好因此落在最後 —— 那是對的，別「順手修好」它**。迴歸測試 `tests/test_klarf_variant_d.py` |
+| **一張卡偷偷寫了第二條流**（F7-18 已改） | 畫布上那張 Denoise 畫在 test 那條鏈上，它其實同時改了 ref；而「要不要一起做」藏在控制列的 `also_apply` 勾選框裡，於是 test 是主角、ref 是附帶 | **一張卡一條流**：`resolve_writes` 只回主流。要對 ref 做就再放一張卡接到 ref。需要借另一條流的資訊時給它自己的 `image_key` 參數（`percentile_norm.range_from`），那條線在畫布上看得見。舊 recipe 的 `also_apply` 由 `recipe._migrate_also_apply` 展開成多張卡 |
+| **拆卡片時的順序陷阱**（F7-18） | `anchor="source"` 拆成兩張卡之後，如果 test 那張先跑，ref 借到的是「已經拉成 0–255」的範圍 —— 數字不一樣，而兩張輸出都是看起來正常的圖 | 借範圍的那幾張要排在**前面**。這類遷移不要讀程式碼驗證：跑同一份 recipe 100 顆，比 `min/median/max` 與 bin 數量是否逐項相同（`tests/test_ui_f7_18_streams_as_nodes.py`）|
+| **兩個節點之間只拉得動一條線**（F7-18 已修） | 先從 test 拉、再從 ref 拉，第二條只得到一句 `already connected` 然後什麼都沒發生 —— 使用者的結論是「這張卡不准我碰 ref」 | `edge_added` 帶第三個參數（**這條線從哪個輸出埠出發**），Studio 據此把下游卡的主要輸入指到那條流。同一對節點再拉一條要當成「我改變主意了」處理 |
+| **常駐在節點旁邊的裝飾**（F7-18 已清） | 每個輸出埠一顆「+」，十張卡的 pipeline 就有十幾顆加號跟資料流搶畫面 | 入口收回卡片庫；「+」做對的事（接上線、接在對的流上）改由「選著一張卡時從卡片庫加」承接（`add_card_after`）。加完**選取新卡**，連按三張才會長成一條鏈而不是倒過來 |
+| **虛線只是實線淡一點** | 「這條是我拉的」與「這條是排列順序帶來的」看起來只差深淺，而深淺會被縮放與主題影響 | 不同語意給不同**色相**（`canvas_edge_implicit`）。測試要鎖兩層：token 的色相差得出來，而且 `paint()` 真的去讀了它（畫進 pixmap 比主色相）|
 
 ---
 
@@ -230,6 +242,7 @@ python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 
 | M5 Gallery+Export | ✅ | Gallery（虛擬捲動、排序、直方圖點 bar 篩選）；KLARF 三種寫回模式（就地無損／另存含 ADCSCORE+ADCCLASS／Top-N）+ 寫回前預覽變更；CSV/Excel 報表（含抓漏率/誤殺率）；overlay；`fab_probe/` 三支探測腳本；CLI `adept export` |
 | M6 推廣包 | ✅ | 離線安裝三件套（`tools/fetch_wheels.py` / `install_offline.py` / `doctor.py`，全 stdlib-only）、首啟導覽 + 範例 recipe 庫對話框、5 份範例 recipe。快速參考卡 PDF 暫緩（移到 backlog） |
 | M7 UI/UX | ✅ | A 組防呆 + **UI 全英文**（`tests/test_ui_english_only.py` 鎖住）。F7 全數完成：patch-only 收斂（`ui/scope.py`）、中性色/平面主題 + 暗色、卡片依流程階段分組 + 搜尋 + 前置條件 badge、**Region 段（具名 ROI）**、Results 視窗、**節點畫布**。計畫書 `docs/plans/F7-canvas-and-taxonomy.md` |
+| F7-18 | ✅ | **影像流是節點的事，不是控制列的事**（試用回饋第五輪）：拿掉輸出埠上常駐的「+」（入口收回卡片庫，接線與影像流由 `add_card_after` 承接）、**虛線給自己的色相**（`canvas_edge_implicit`；同色淡一點只說得出「比較不重要」）、**一張卡一條流**（七張 Enhance 卡的 `also_apply` / `anchor` 拿掉；`percentile_norm` / `glv_mask_norm` 補 `range_from` 保住「兩張圖還比得起來」）、**連線指定影像流**（`edge_added` 帶出發埠；同一對節點再拉一條是「我改變主意了」）。舊 recipe 由 `recipe._migrate_also_apply` 展開成多張卡，分數逐項相同。計畫書 §22 |
 | F7-17 | ✅ | **右下角變成「這張卡自己的儀表」**（依 `Step.key` 註冊，沒註冊的用原本的特徵表 → 加新卡不必動 UI）。四個：`load_patch` 的 **page→stream 對應**（廠內假設 #1 第一次看得見）、Enhance 九張卡的 **before/after 直方圖 + 削平計數**（新增 `Context.track_changes`，**只有預覽打開**）、`align` 的**整批位移散佈圖 + 搜尋半徑框**、五張量測卡的**整批分布 + 這一顆站在哪**。第二批：`roi_profile` 的曲線面板**收進同一個機制**（原本是平行的另一條路）、`roi_template` 的**三道閘門各自的門檻線**（match / certainty / **structure** 三種失敗的處置完全不同）。計畫書 §21 |
 | F7-16 | ✅ | **四張安全網**：**復原/重做**（存整份快照，不是反向操作；滑桿一次拖曳算一步）、**快捷鍵**（Ctrl+O/S/R/Z/0/±/F/←→，全照 OS 慣例，並寫進 tooltip）、**關窗前問「還沒存」**（存檔失敗不算可以關）、**跑到一半可以停**（引擎本來就支援，只是按不到；已跑完的留著，而且訊息講「stopped」不是「finished」）。計畫書 §20 |
 | F7-15 | ✅ | **畫面上的字要能被讀完**（C 組）：參數說明**收成一行、用到才攤開**（錯誤永遠攤開；`hint_text()` 回全文）、沒資料時最大的那一塊給「Open KLARF… / Try it with sample data」、**狀態列的拒絕變紅字**（`_status(msg, "error")` + QSS，逐條列舉哪些算 error）。計畫書 §19 |

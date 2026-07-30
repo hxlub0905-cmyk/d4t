@@ -79,8 +79,10 @@ def make_recipe(snr_threshold: float = 200.0, search_radius: int = 8) -> Recipe:
     """die-to-die 節點組（同 examples/recipes/die_to_die_basic.json）。"""
     nodes = {
         "load": RecipeNode("load", "load_patch", {}),
-        "norm": RecipeNode("norm", "percentile_norm",
-                           {"source": "test", "also_apply": "ref"}),
+        # 一張卡一條流（F7-18）：ref 先做（借 test 還沒被拉伸的範圍），test 再做。
+        "norm_ref": RecipeNode("norm_ref", "percentile_norm",
+                               {"source": "ref", "range_from": "test"}),
+        "norm": RecipeNode("norm", "percentile_norm", {"source": "test"}),
         "align": RecipeNode("align", "align",
                             {"method": "phase", "search_radius": search_radius}),
         "sub": RecipeNode("sub", "subtract", {}),
@@ -100,7 +102,7 @@ def make_recipe(snr_threshold: float = 200.0, search_radius: int = 8) -> Recipe:
     }
     return Recipe(
         recipe_id="m2_batch_cache_test",
-        routes={KIND: ["load", "norm", "align", "sub", "dn",
+        routes={KIND: ["load", "norm_ref", "norm", "align", "sub", "dn",
                        "snr", "blob", "cd", "roi", "glv"]},
         nodes=nodes,
         score=ScoreSpec(expr="glv_max + (glv_max - glv_q99)", threshold=50.0,
@@ -196,7 +198,7 @@ def test_algo_param_change_keeps_cache(ds, synlot, tmp_path):
     sig_a, ck_a = image_segment_signature(rec_a, KIND)
     sig_b, ck_b = image_segment_signature(rec_b, KIND)
     assert sig_a == sig_b
-    assert ck_a == ck_b == 5      # load, norm, align, sub, dn 之後
+    assert ck_a == ck_b == 6      # load, norm_ref, norm, align, sub, dn 之後
 
     token = dataset_token(synlot["klarf"])
     cache = StageCache(str(tmp_path / "cache"))
