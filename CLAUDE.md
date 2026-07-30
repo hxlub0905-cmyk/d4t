@@ -107,6 +107,9 @@ adept/
 5. **檔案寫入一律 atomic**（`.tmp` + `os.replace`）。
 6. **KLARF 寫回必須無損**：沒被改到的 byte 要與原檔逐位元組相同（`klarf_core` 的 span-splice）。
 7. **單顆 defect 出錯不得殺掉整批**（`run_defect` 從不 raise，回 `ok=False`）。
+8. **repo 裡不得有未遮蔽的廠內識別碼**（Lot／Wafer／機台／device／recipe 名稱／
+   廠區代號／缺陷分類名稱）。測試 fixture 也一樣 —— 它們斷言的是**結構**，
+   值遮蔽掉一條測試都不會壞。`tests/test_no_real_fab_data.py` 會擋。
 
 ---
 
@@ -289,9 +292,18 @@ CLI 不受影響：`python -m adept run` 照樣跑得動 rsem recipe。
 主要使用情境是**沒有 git、pip 連不出去、DLP 會擋含二進位的壓縮檔**的公司機。
 對應設計：
 
-- 整個 repo **只有純文字檔**（`.py`/`.md`/`.json`/`.toml`/`.txt`/`.yml`），
-  所以 GitHub「Download ZIP」下載得下來（那份 zip 不含 `.git`）。
+- 整個 repo **只有純文字檔**（`.py`/`.md`/`.json`/`.toml`/`.txt`/`.yml` + 一份 `.klarf`），
+  所以 GitHub「Download ZIP」下載得下來（那份 zip 不含 `.git`；170 個檔案、約 830 KB）。
   **不要把 `.git` 打包給使用者** —— 二進位 pack 物件 + `hooks/*.sample` 腳本會觸發 DLP。
+- **「純文字」是必要條件，不是充分條件。** DLP 也掃**內容**，而最容易破功的地方是
+  測試 fixture：一份真實的 KLARF 帶著 Lot／Wafer／機台／device／**recipe 名稱**
+  （通常編碼了層別與製程步驟）、缺陷分類名稱，甚至廠區代號 —— 而那些值對測試
+  完全沒有用（`test_klarf_variant_d.py` 斷言的全是結構）。已全部遮蔽，
+  並由 `tests/test_no_real_fab_data.py` 守著（白名單 + 合成命名規則，
+  **不是列出不准出現的字** —— 那等於把要保護的東西寫進 repo）。
+- Download ZIP 是從 **`codeload.github.com`** 出來的，不是 `github.com`。
+  「以前下載得到、現在被擋」最常見的原因是 proxy allowlist 只放了後者，
+  跟 repo 內容無關。分辨方式與替代路徑見 `docs/NO-GIT-SETUP.md`。
 - 相依套件走離線 wheels：`tools/fetch_wheels.py`（有網路的機器）→ 帶 `wheels\` 過去 →
   `tools/install_offline.py`（廠內機器）。兩支都是 stdlib-only，因為它們在套件裝好之前就要能跑。
 - 裝不起來或跑不動時的第一件事：`python tools/doctor.py` —— 逐項 ✓/✗ 並附「怎麼修」。
