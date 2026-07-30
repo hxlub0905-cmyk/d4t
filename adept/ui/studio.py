@@ -932,9 +932,9 @@ class StudioWindow(QMainWindow):
 
         # 投影曲線面板（F7-11）。**平常收起來** —— 它只有在編輯投影定位卡的
         # 時候才有意義，常駐會把好不容易爭取到的影像高度又吃掉一塊。
-        self.profile_panel = ProfilePanel(pane)
-        self.profile_panel.setVisible(False)
-        lay.addWidget(self.profile_panel)
+        # 投影曲線面板搬進卡片儀表（F7-17）：它本來就是「這張卡自己的儀表」，
+        # 只是 F7-11 當時直接掛在這裡，變成一條跟儀表機制平行的路。兩條並存的
+        # 下場是加新面板的人不知道走哪一條，然後兩邊各長一半。
 
         # 右下角那一塊：**選哪張卡就換成那張卡的儀表**（F7-17）。
         # 原本固定是一張「特徵 / 數值」表 —— 問題不是它佔位子，是那些數字沒有
@@ -1987,7 +1987,6 @@ class StudioWindow(QMainWindow):
 
         self._populate_streams(images)
         self._show_current_stream()
-        self._refresh_profile_panel(ctx)
 
         self._refresh_inspector(result)
         highlight = self._highlight_features(result)
@@ -2202,22 +2201,22 @@ class StudioWindow(QMainWindow):
         self.region_window.raise_()
         self._status(self.region_window.summary_text())
 
-    def _refresh_profile_panel(self, ctx: Any) -> None:
-        """選到投影定位卡時，把**引擎這一次算出來的**曲線畫出來。
+    @property
+    def profile_panel(self) -> Any:
+        """投影曲線面板 —— 現在住在 ``ProfileInspector`` 裡面（F7-17）。
 
-        面板不自己重算 —— 它讀 ``ctx.meta["profiles"]``。UI 自己再算一次是很容易
-        發生的事，但那會讓「畫面上的框」跟「真的量下去的框」有機會不一樣，
-        而那種 bug 幾乎不可能靠肉眼發現。
+        保留這個名字是因為它是「這張卡的面板」的對外身分（測試與狀態列都用
+        它）。選的不是投影定位卡時回一個**空的替身**，這樣呼叫端不必到處
+        寫 ``if is None``。
         """
-        node = self.model.nodes.get(self.selected_node or "")
-        if node is None or node.step != self.PROFILE_STEP:
-            self.profile_panel.setVisible(False)
-            self.profile_panel.set_data("", None)
-            return
-        name = str(node.params.get("roi_out", "") or "")
-        profiles = dict(getattr(ctx, "meta", {}) or {}).get("profiles") or {}
-        self.profile_panel.set_data(name, profiles.get(name))
-        self.profile_panel.setVisible(True)
+        insp = self._inspector
+        panel = getattr(insp, "panel", None)
+        if panel is not None:
+            return panel
+        if getattr(self, "_no_profile", None) is None:
+            self._no_profile = ProfilePanel(self)
+            self._no_profile.setVisible(False)
+        return self._no_profile
 
     def profile_panel_visible(self) -> bool:
         """面板現在開著嗎（用明確狀態，不要問 ``isVisible()``）。"""

@@ -38,12 +38,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
-from PySide6.QtWidgets import QSizePolicy, QWidget
+from PySide6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
 from .theme import TOKENS
 
 __all__ = ["Inspector", "AlignInspector", "EnhanceInspector",
            "MeasureInspector", "InputInspector",
+           "ProfileInspector", "TemplateInspector",
            "INSPECTORS", "inspector_for"]
 
 
@@ -404,6 +405,166 @@ class EnhanceInspector(Inspector):
         p.drawText(legend, Qt.AlignCenter, "outline = before · filled = after")
 
 
+class ProfileInspector(Inspector):
+    """`roi_profile`：投影曲線 + 找到的轉折 + 選中的那一段。
+
+    這一塊是 F7-11 就做好的（``widgets.ProfilePanel``），只是當時直接掛在預覽
+    面板上 —— 也就是一條**跟儀表機制平行的路**。兩條路並存的下場是：加新面板的
+    人不知道該走哪一條，然後兩邊各長一半。所以把它收進來，畫的還是同一個元件。
+
+    「敏感度要調多少」對不會寫 code 的人是沒有答案的問題，除非他看得到曲線、
+    看得到目前抓到幾條線、看得到線落在哪 —— 沒有這個面板，那張卡就只是另一個
+    要盲填的數字。
+    """
+
+    title = "Profile"
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        from .widgets import ProfilePanel
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.panel = ProfilePanel(self)
+        # 原本掛在預覽面板上時它是**固定高**（那裡的高度是搶來的）。搬進儀表
+        # 之後那一格本來就是給它的，不撐開的話曲線只佔下半截、上面一片空白。
+        self.panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        lay.addWidget(self.panel)
+
+    def region(self) -> str:
+        return str(self.params.get("roi_out") or "")
+
+    def set_context(self, *a, **kw) -> None:   # noqa: D102
+        super().set_context(*a, **kw)
+        profiles = dict(self.meta.get("profiles") or {})
+        name = self.region()
+        self.panel.set_data(name, profiles.get(name))
+
+    def has_data(self) -> bool:
+        return bool(self.panel.has_data())
+
+    def summary(self) -> str:
+        return self.panel.summary()
+
+    def paintEvent(self, _e) -> None:          # noqa: D102 - 內容由子元件畫
+        pass
+
+
+class TemplateInspector(Inspector):
+    """`roi_template`：三道閘門各自過了沒，以及這張 patch 對到哪個相位。
+
+    為什麼是這三根柱子
+    ------------------
+    定位失敗的時候，卡片只講「定不出來，退回整張圖」。但那有三個完全不同的
+    原因，而**處置完全不同**：
+
+    * **match 太低** —— 模板不對（或這批圖跟建模板那張差太多）；
+    * **certainty 太低** —— 對得上的位置不只一個（週期性太強或門檻太緊）；
+    * **structure 太低** —— **這張 patch 上根本沒有東西可比**。這個不是要調
+      參數，是本來就該退回整張圖。
+
+    分不出來的話，使用者會一直去調前兩個門檻，而問題其實在第三個。
+    """
+
+    title = "Match"
+
+    _GATES = (("match", "score", "min_score", 1.0),
+              ("certainty", "margin", "min_margin", 1.0),
+              ("structure", "structure", "min_structure", 40.0))
+
+    def record(self) -> Dict[str, Any]:
+        templates = dict(self.meta.get("templates") or {})
+        name = str(self.params.get("roi_out") or "")
+        return dict(templates.get(name) or (
+            list(templates.values())[0] if len(templates) == 1 else {}))
+
+    def has_data(self) -> bool:
+        return bool(self.record())
+
+    def empty_reason(self) -> str:
+        if not str(self.params.get("template") or "").strip():
+            return ("No template yet — build one from a full-size image, then "
+                    "this panel shows why each defect did or did not match.")
+        return "Select a defect to see how well it matched the template."
+
+    def gates(self) -> List[Tuple[str, float, float, bool]]:
+        """``(名稱, 量到的值, 門檻, 過了沒)``。"""
+        rec = self.record()
+        out = []
+        for label, key, param, _full in self._GATES:
+            got = float(rec.get(key, 0.0) or 0.0)
+            need = float(self.params.get(param, 0.0) or 0.0)
+            out.append((label, got, need, got >= need))
+        return out
+
+    def failing(self) -> List[str]:
+        return [g[0] for g in self.gates() if not g[3]]
+
+    def summary(self) -> str:
+        rec = self.record()
+        if not rec:
+            return ""
+        if rec.get("ok"):
+            return ("matched at phase %d,%d · %s"
+                    % (int(rec.get("phase_x", 0)), int(rec.get("phase_y", 0)),
+                       " · ".join("%s %.2f" % (g[0], g[1])
+                                  for g in self.gates())))
+        bad = self.failing()
+        why = {
+            "structure": ("this patch has nothing to match — it sits inside "
+                          "one material. That is not a setting to fix; the "
+                          "region falls back to the whole image, which is the "
+                          "right answer here."),
+            "certainty": ("more than one position fits equally well. Lower "
+                          "“Minimum certainty” only if you can live with a "
+                          "coin flip."),
+            "match": ("the patch does not look like the template. Check the "
+                      "template was built from this layer."),
+        }
+        first = bad[0] if bad else "match"
+        return "could not place the region — %s: %s" % (first, why[first])
+
+    def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
+        gates = self.gates()
+        row_h = min(30.0, rect.height() / (len(gates) + 1))
+        for i, ((label, got, need, ok), (_l, _k, _p, full)) in enumerate(
+                zip(gates, self._GATES)):
+            band = QRectF(rect.left(), rect.top() + i * row_h,
+                          rect.width(), row_h - 4)
+            p.setPen(QColor(TOKENS["text_secondary"]))
+            p.drawText(QRectF(band.left(), band.top(), 76, band.height()),
+                       Qt.AlignLeft | Qt.AlignVCenter, label)
+
+            bar = QRectF(band.left() + 80, band.top() + band.height() / 2 - 5,
+                         max(20.0, band.width() - 150), 10)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(QColor(TOKENS["hover_warm_strong"])))
+            p.drawRoundedRect(bar, 3, 3)
+            frac = max(0.0, min(1.0, got / full if full else 0.0))
+            p.setBrush(QBrush(QColor(TOKENS["success"] if ok
+                                     else TOKENS["danger_text"])))
+            p.drawRoundedRect(QRectF(bar.left(), bar.top(),
+                                     max(2.0, bar.width() * frac),
+                                     bar.height()), 3, 3)
+            # 門檻線：沒有它，柱子的長度沒有意義（多長才算夠？）
+            nx = bar.left() + bar.width() * max(0.0, min(1.0, need / full
+                                                         if full else 0.0))
+            p.setPen(QPen(QColor(TOKENS["text_primary"]), 1.4))
+            p.drawLine(QPointF(nx, bar.top() - 3), QPointF(nx, bar.bottom() + 3))
+
+            p.setPen(QColor(TOKENS["text_primary"]))
+            p.drawText(QRectF(bar.right() + 8, band.top(), 62, band.height()),
+                       Qt.AlignRight | Qt.AlignVCenter, "%.2f" % got)
+
+        rec = self.record()
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        p.drawText(QRectF(rect.left(), rect.bottom() - 14, rect.width(), 14),
+                   Qt.AlignLeft | Qt.AlignVCenter,
+                   "cell %d × %d px · phase %d,%d · line = the threshold"
+                   % (int(rec.get("cell_w", 0)), int(rec.get("cell_h", 0)),
+                      int(rec.get("phase_x", 0)), int(rec.get("phase_y", 0))))
+
+
 class MeasureInspector(Inspector):
     """量測卡共用：**這張卡自己產出的每個數字，整批長什麼樣、這一顆站在哪。**
 
@@ -644,6 +805,8 @@ class InputInspector(Inspector):
 #: （我把資訊弄掉了嗎）。
 INSPECTORS: Dict[str, type] = {
     "load_patch": InputInspector,
+    "roi_profile": ProfileInspector,
+    "roi_template": TemplateInspector,
     "align": AlignInspector,
     "brightness_contrast": EnhanceInspector,
     "gamma": EnhanceInspector,
