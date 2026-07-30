@@ -665,3 +665,79 @@ def test_a_tls_interception_error_points_at_cafile_not_at_disabling_checks(
     out = capsys.readouterr().out
     assert "--cafile" in out
     assert "不要" in out, "必須明講不要去關掉憑證驗證"
+
+
+def test_the_pac_is_resolved_automatically_on_windows(tmp_path, monkeypatch,
+                                                     capsys):
+    """PAC 檔通常有上百行條件判斷，而「哪一行適用於這個網址」正是 PAC 要算的東西
+    —— 叫製程工程師自己去讀那個檔案是不合理的。Windows 上 .NET 讀得懂 PAC
+    （瀏覽器用的就是它），所以借 PowerShell 問一次，解出來就直接用。"""
+    real = b"x = 1\n"
+    manifest = "%s adept/f.py\n" % get_code.blob_sha(real)
+    seen = {}
+
+    def fake_build_opener(cafile="", proxy=""):
+        seen["proxy"] = proxy
+        return None
+
+    monkeypatch.setattr(get_code, "proxy_in_effect",
+                        lambda p="": p or "")          # 環境裡沒有 proxy
+    monkeypatch.setattr(get_code, "system_proxy_for",
+                        lambda url: "http://pac-resolved.corp:8080/")
+    monkeypatch.setattr(get_code, "build_opener", fake_build_opener)
+    monkeypatch.setattr(get_code, "fetch", lambda ref, path, cafile="":
+                        manifest.encode("utf-8") if path == get_code.MANIFEST
+                        else real)
+
+    assert get_code.main(["--dest", str(tmp_path / "o")]) == 0
+    assert seen["proxy"] == "http://pac-resolved.corp:8080/", \
+        "解出來的 proxy 沒有真的掛進 opener"
+    out = capsys.readouterr().out
+    assert "pac-resolved.corp:8080" in out
+    assert "PAC" in out, "要講出這個 proxy 是怎麼來的"
+
+
+def test_an_explicit_proxy_wins_over_the_resolved_one(tmp_path, monkeypatch):
+    """使用者自己填的優先 —— 自動解出來的東西不可以蓋掉他明講的。"""
+    called = []
+    monkeypatch.setattr(get_code, "system_proxy_for",
+                        lambda url: called.append(url) or "http://auto:1/")
+    seen = {}
+    monkeypatch.setattr(get_code, "build_opener",
+                        lambda cafile="", proxy="": seen.setdefault("p", proxy))
+    monkeypatch.setattr(get_code, "fetch", lambda *_a, **_k: b"")
+    get_code.main(["--dest", str(tmp_path / "o"), "--proxy", "http://mine:2/"])
+    assert seen["p"] == "http://mine:2/"
+    assert not called, "已經有 proxy 了就不該再去問 Windows"
+
+
+def test_resolving_the_proxy_never_becomes_the_failure_itself(monkeypatch):
+    """診斷用的東西壞掉不可以變成失敗原因 —— 非 Windows、沒有 powershell、
+    powershell 逾時、回一句看不懂的話，全部安靜回空字串。"""
+    monkeypatch.setattr(get_code.sys, "platform", "linux")
+    assert get_code.system_proxy_for("https://x/") == ""
+
+    monkeypatch.setattr(get_code.sys, "platform", "win32")
+
+    def boom(*_a, **_k):
+        raise OSError("powershell 不在 PATH 上")
+
+    monkeypatch.setattr(get_code.subprocess, "run", boom)
+    assert get_code.system_proxy_for("https://x/") == ""
+
+    class _R:
+        def __init__(self, out):
+            self.stdout = out
+
+    # .NET 在「不需要 proxy」時回傳原網址 —— 那不是 proxy
+    monkeypatch.setattr(get_code.subprocess, "run",
+                        lambda *_a, **_k: _R(b"https://x/\n"))
+    assert get_code.system_proxy_for("https://x/") == ""
+    # 看不懂的輸出也不能當成 proxy
+    monkeypatch.setattr(get_code.subprocess, "run",
+                        lambda *_a, **_k: _R("錯誤：不能執行\n".encode("utf-8")))
+    assert get_code.system_proxy_for("https://x/") == ""
+    # 真的解出來的樣子
+    monkeypatch.setattr(get_code.subprocess, "run",
+                        lambda *_a, **_k: _R(b"http://p.corp:8080/\n"))
+    assert get_code.system_proxy_for("https://x/") == "http://p.corp:8080/"
