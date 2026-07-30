@@ -64,6 +64,101 @@ class ScoreSpec:
     bins: Dict[str, int]
 
 
+# ---------------------------------------------------------------------------
+# 舊 recipe 相容遷移（F7-18）：``also_apply`` → 一張卡一條流
+# ---------------------------------------------------------------------------
+#: 哪些卡片以前有 ``also_apply``，以及它們的主要影像流參數叫什麼。
+_ALSO_APPLY_CARDS: Dict[str, str] = {
+    "percentile_norm": "source",
+    "glv_mask_norm": "source",
+    "denoise": "target",
+    "flatten": "target",
+    "local_contrast": "target",
+    "brightness_contrast": "target",
+    "gamma": "target",
+}
+
+#: 這兩張卡另外還有 ``anchor``：``source`` = 其他流借主流量出來的拉伸範圍。
+#: 那個能力現在叫 ``range_from``（一條影像流的名字），所以遷移得動兩個參數。
+_ANCHOR_CARDS = ("percentile_norm", "glv_mask_norm")
+
+
+def _fresh_id(taken: Dict[str, Any], base: str) -> str:
+    nid = base
+    i = 2
+    while nid in taken:
+        nid = "%s_%d" % (base, i)
+        i += 1
+    return nid
+
+
+def _migrate_also_apply(nodes: Dict[str, "RecipeNode"],
+                        routes: Dict[str, List[str]]) -> None:
+    """把 ``also_apply`` 展開成一張卡一條流（就地改寫 nodes 與 routes）。
+
+    為什麼要遷移而不是直接不認得
+    ----------------------------
+    ``also_apply`` 是使用者存在磁碟上的 recipe 裡的字，而 recipe 是拿來交接的
+    東西。認不得它會讓一份跑得好好的檔案在升級之後變成 ``unknown parameters``
+    —— 對不會寫 code 的人那就是「工具壞了」。
+
+    為什麼順序看 ``anchor``
+    -----------------------
+    ``anchor="source"`` 的語意是「ref 用 **test 原本的** 灰階範圍」。拆成兩張卡
+    之後，如果 test 那張先跑，它會把 test 拉成 0–255，ref 那張再去借就借到
+    「拉伸後」的範圍 —— 數字不一樣，而畫面上兩者都是一張看起來正常的圖。
+    所以 ``anchor="source"`` 時把借範圍的那幾張排在**前面**，此時主流還沒被改過，
+    輸出與舊版逐位元組相同。``anchor="self"`` 沒有這個相依，維持原順序。
+    """
+    extra: Dict[str, tuple] = {}          # 原節點 id -> (新節點 ids, 要不要排前面)
+    for nid, node in list(nodes.items()):
+        primary_name = _ALSO_APPLY_CARDS.get(node.step)
+        if primary_name is None:
+            continue
+        params = dict(node.params)
+        if "also_apply" not in params and "anchor" not in params:
+            continue
+        also_raw = params.pop("also_apply", "")
+        anchor = params.pop("anchor", None)
+        primary = str(params.get(primary_name, "") or "")
+        also: List[str] = []
+        for tok in str(also_raw or "").split(","):
+            tok = tok.strip()
+            if tok and tok != primary and tok not in also:
+                also.append(tok)
+        borrow = node.step in _ANCHOR_CARDS and str(anchor or "source") == "source"
+        if node.step in _ANCHOR_CARDS:
+            params.setdefault("range_from", "")
+        node.params = params
+
+        made: List[str] = []
+        for stream in also:
+            new_id = _fresh_id(nodes, "%s_%s" % (nid, stream))
+            p = dict(params)
+            p[primary_name] = stream
+            if node.step in _ANCHOR_CARDS:
+                p["range_from"] = primary if borrow else ""
+            nodes[new_id] = RecipeNode(id=new_id, step=node.step, params=p,
+                                       enabled=node.enabled)
+            made.append(new_id)
+        if made:
+            extra[nid] = (made, borrow)
+
+    if not extra:
+        return
+    for k, route in list(routes.items()):
+        out: List[str] = []
+        for nid in route:
+            made, first = extra.get(nid, ([], False))
+            if first:
+                out.extend(made)
+                out.append(nid)
+            else:
+                out.append(nid)
+                out.extend(made)
+        routes[k] = out
+
+
 @dataclass
 class Recipe:
     """一份完整 recipe（單一 JSON 檔可互傳）。"""
@@ -138,6 +233,11 @@ class Recipe:
             if len(e) != 2:
                 raise RecipeError(f"an edge must be [from, to] — two step ids; got: {e}")
             edges.append([str(e[0]), str(e[1])])
+
+        # 舊 recipe（F7-18 之前）的 also_apply / anchor：展開成一張卡一條流。
+        # 做在這裡而不是各張卡的 validate_params 裡，因為它會**增加節點**——
+        # 那是 recipe 層級的事，一張卡看不到自己以外的東西。
+        _migrate_also_apply(nodes, routes)
 
         return cls(
             recipe_id=str(d["recipe_id"]),

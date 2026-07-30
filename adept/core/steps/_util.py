@@ -27,6 +27,26 @@ from ..pipeline.step import ParamSpec, StepError
 FEATURE_PREFIX_PATTERN = r"^$|^[A-Za-z_][A-Za-z0-9_]*$"
 
 
+# --------------------------------------------------------------------------- #
+# 一張卡做一條流（F7-18）
+# --------------------------------------------------------------------------- #
+#: Enhance 卡的主要參數共用的說明。
+#:
+#: 以前每張卡是「``target`` + ``also_apply``」兩個參數：主流一個、附帶的一串。
+#: 那個形狀把 ``test`` 講成主角、``ref`` 講成附帶 —— 但它們就是兩張不同的
+#: 輸入影像，兩張都該可以獨立處理。而「要對哪幾張做」是**畫布上的事**
+#: （哪條線接進來），不是控制列上的一組勾選框。
+#:
+#: 所以現在一張卡就是一條流：要對 ref 也做同一件事，就再放一張卡接到 ref。
+#: 畫布上因此看得到兩條各自的處理鏈，而不是一張卡偷偷動了兩條流。
+ONE_STREAM_HELP = (
+    "Which image stream this card works on; the result is written back to "
+    "that same stream. Streams are the named lines on the canvas - test is "
+    "the defect image, ref is the reference image. One card works on one "
+    "stream: connect a stream to this card on the canvas (or pick it here), "
+    "and add a second card if the other image needs the same treatment.")
+
+
 def output_prefix_spec(example: str = "center") -> ParamSpec:
     """量測卡共用的 ``output_prefix`` 參數（每張卡的說明只差一個例子）。"""
     return ParamSpec(

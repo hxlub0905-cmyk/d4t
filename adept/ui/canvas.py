@@ -72,11 +72,6 @@ _PORT_R = 5.0
 #: 連線中點的方向箭頭大小。畫布可以縮放平移，光看曲線不一定分得出資料往哪流。
 _ARROW = 5.0
 
-#: 輸出埠外面那顆「+」的半徑，以及它佔掉的水平空間（``boundingRect`` 要算進去
-#: —— 畫得出去而 boundingRect 沒涵蓋，拖動節點就會留殘影，見 F7-8/F7-9）。
-_PLUS_R = 8.0
-_PLUS_SPAN = 2 * _PLUS_R + 10.0
-
 #: 還沒拉線時，一列最多排幾張卡（見 :func:`layout_columns`）。
 WRAP = 4
 
@@ -151,10 +146,6 @@ class _NodeItem(QGraphicsItem):
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
-        self.setAcceptHoverEvents(True)
-        #: 滑鼠正停在哪一個輸出埠的「+」上（None = 都沒有）。用明確狀態而不是
-        #: 「重算一次滑鼠在哪」—— 繪製與命中判定要用完全同一份答案。
-        self._hover_plus: Optional[int] = None
         tip = "%s — %s" % (self.node_id, info.get("label", ""))
         if info.get("problem"):
             # 標記說「有問題」，滑鼠停上去說「是什麼問題」。標記本身放不下一句話，
@@ -170,7 +161,7 @@ class _NodeItem(QGraphicsItem):
         ``NODE_W + _PORT_R``，Qt 就只重繪那個範圍，標籤的舊位置沒被清掉。
         """
         return QRectF(-_PORT_R - 1, -1,
-                      NODE_W + 2 * _PORT_R + _PORT_LABEL_W + _PLUS_SPAN,
+                      NODE_W + 2 * _PORT_R + _PORT_LABEL_W,
                       NODE_H + 5)
 
     def in_port(self) -> QPointF:
@@ -218,19 +209,6 @@ class _NodeItem(QGraphicsItem):
     def out_port(self, index: int = 0) -> QPointF:
         anchors = self.out_anchors()
         return anchors[max(0, min(int(index), len(anchors) - 1))]
-
-    def plus_anchors_local(self) -> List[QPointF]:
-        """每個輸出埠的「+」在本地座標的位置（埠標籤之後）。"""
-        return [QPointF(a.x() + _PORT_LABEL_W + _PLUS_R - 4.0, a.y())
-                for a in self.out_anchors_local()]
-
-    def plus_at(self, pos: QPointF):
-        """本地座標 ``pos`` 命中哪一顆「+」（沒命中回 ``None``）。"""
-        for i, centre in enumerate(self.plus_anchors_local()):
-            d = pos - centre
-            if (d.x() * d.x() + d.y() * d.y()) <= (_PLUS_R + 2.0) ** 2:
-                return i
-        return None
 
     def out_port_at(self, pos: QPointF):
         """本地座標 ``pos`` 命中哪一個輸出埠（沒命中回 ``None``）。"""
@@ -329,34 +307,6 @@ class _NodeItem(QGraphicsItem):
                        Qt.AlignVCenter | Qt.AlignLeft, name)
             p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
 
-        self._paint_plus(p, enabled)
-
-    def _paint_plus(self, p: QPainter, enabled: bool) -> None:
-        """每個輸出埠外面一顆「+」——「接下來要做什麼」的入口（F7-14）。
-
-        這是 n8n 最核心的一個動作，而它解的問題在這裡更明顯：卡片庫有 22 張卡，
-        使用者要自己判斷哪一張接得上目前這條流 —— 而「接得上」這件事引擎本來就
-        知道（``Step.resolve_reads``）。點這顆「+」跳出來的清單**只列接得上的**，
-        所以他不需要先懂影像流才做得出第一條 pipeline。
-
-        平常畫得很淡，滑鼠靠近才變成強調色：畫布上一排實心的 + 會蓋過真正的
-        主體（節點與連線）。
-        """
-        for i, centre in enumerate(self.plus_anchors_local()):
-            hot = (self._hover_plus == i)
-            col = QColor(TOKENS["accent"] if hot else TOKENS["canvas_edge"])
-            if not enabled:
-                col = QColor(TOKENS["text_disabled"])
-            body = QColor(TOKENS["accent"]) if hot else QColor(TOKENS["bg_surface"])
-            p.setPen(QPen(col, 1.2))
-            p.setBrush(QBrush(body))
-            p.drawEllipse(centre, _PLUS_R, _PLUS_R)
-            p.setPen(QPen(QColor("#ffffff") if hot else col, 1.6))
-            p.drawLine(QPointF(centre.x() - 4, centre.y()),
-                       QPointF(centre.x() + 4, centre.y()))
-            p.drawLine(QPointF(centre.x(), centre.y() - 4),
-                       QPointF(centre.x(), centre.y() + 4))
-
     def subtitle(self) -> str:
         """副標：**這張卡吃什麼、吐什麼**（F7-14）。
 
@@ -413,29 +363,7 @@ class _NodeItem(QGraphicsItem):
                    Qt.AlignCenter, "!")
 
     # -- 互動 ---------------------------------------------------------------
-    def hoverMoveEvent(self, e) -> None:       # noqa: D102 - Qt hook
-        self.set_hover_plus(self.plus_at(e.pos()))
-        super().hoverMoveEvent(e)
-
-    def hoverLeaveEvent(self, e) -> None:      # noqa: D102 - Qt hook
-        self.set_hover_plus(None)
-        super().hoverLeaveEvent(e)
-
-    def set_hover_plus(self, index) -> None:
-        """哪一顆「+」是熱的（測試直接呼叫這個，不必模擬滑鼠）。"""
-        if self._hover_plus != index:
-            self._hover_plus = index
-            self.update()
-
     def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
-        if e.button() == Qt.LeftButton:
-            plus = self.plus_at(e.pos())
-            if plus is not None:
-                # 「+」比拉線先判：它就長在埠的旁邊，而點「+」是明確的動作，
-                # 拉線是拖曳 —— 誤判成拉線會變成一條拉到一半的線黏在游標上。
-                self.canvas.add_after_requested.emit(self.node_id, int(plus))
-                e.accept()
-                return
         hit = (self.out_port_at(e.pos())
                if e.button() == Qt.LeftButton else None)
         if hit is not None:
@@ -519,10 +447,13 @@ class _EdgeItem(QGraphicsItem):
                      else TOKENS["canvas_edge"])
         path = self.path()
         if self.implicit:
-            # 虛線 + 半透明：看得出「有順序」，但不會跟使用者親手拉的線搶。
-            col.setAlpha(120)
-            pen = QPen(col, 1.3, Qt.DashLine)
-            p.setPen(pen)
+            # **自己的顏色**，不是實線色調淡（F7-18）。同色淡一點只說得出
+            # 「比較不重要」；這兩種線在語意上是不同的東西 —— 一條是使用者拉的
+            # （刪得掉、表達意圖），一條是卡片排列帶來的順序（刪不掉，想讓它
+            # 變成真的連線就自己拉一條）。虛線講的是「這裡可以拉」，那需要
+            # 一眼認得出來，而深淺在縮放與換主題之後就不一定分得出來了。
+            col = QColor(TOKENS["canvas_edge_implicit"])
+            p.setPen(QPen(col, 1.4, Qt.DashLine))
         else:
             p.setPen(QPen(col, 2.2 if self.isSelected() else 1.6))
         p.setBrush(Qt.NoBrush)
@@ -557,9 +488,13 @@ class PipelineCanvas(QGraphicsView):
     move_requested = Signal(str, int)          # 相容用，畫布不發
     remove_requested = Signal(str)
     score_clicked = Signal()
-    edge_added = Signal(str, str)
+    #: ``(來源節點, 目標節點, 這條線帶的影像流名)``。第三個參數是 F7-18 加的：
+    #: 使用者從 ``ref`` 那個埠拉一條線到某張卡，講的就是「這張卡做在 ref 上」。
+    #: 沒有它的話，畫布只能表達「先後順序」，而「對哪一張圖做」還是得回到
+    #: 控制列上的下拉去設 —— 那正是使用者說「變很複雜」的東西。
+    #: 來源節點只有一個沒有名字的輸出埠時是空字串。
+    edge_added = Signal(str, str, str)
     edge_removed = Signal(str, str)
-    add_after_requested = Signal(str, int)     # (node_id, 輸出埠 index)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -757,6 +692,7 @@ class PipelineCanvas(QGraphicsView):
 
     def _drop_link(self, scene_pos: QPointF) -> None:
         src, self._link_from = self._link_from, None
+        port = int(getattr(self, "_link_port", 0))
         if self._link_line is not None:
             self._scene.removeItem(self._link_line)
             self._link_line = None
@@ -764,13 +700,24 @@ class PipelineCanvas(QGraphicsView):
             return
         for item in self._scene.items(scene_pos):
             if isinstance(item, _NodeItem) and item is not src:
-                self.edge_added.emit(src.node_id, item.node_id)
+                self.edge_added.emit(src.node_id, item.node_id,
+                                     self.stream_of(src, port))
                 return
 
-    def link_to(self, src_id: str, dst_id: str) -> None:
-        """程式化拉一條線（測試用；等同使用者從輸出拖到輸入）。"""
-        if str(src_id) in self._items and str(dst_id) in self._items:
-            self.edge_added.emit(str(src_id), str(dst_id))
+    @staticmethod
+    def stream_of(src: "_NodeItem", port: int) -> str:
+        """``src`` 的第 ``port`` 個輸出埠吐的影像流名（沒有名字回空字串）。"""
+        names = src.out_names()
+        if 0 <= port < len(names):
+            return str(names[port] or "")
+        return ""
+
+    def link_to(self, src_id: str, dst_id: str, port: int = 0) -> None:
+        """程式化拉一條線（測試用；等同使用者從第 ``port`` 個輸出埠拖過去）。"""
+        src = self._items.get(str(src_id))
+        if src is not None and str(dst_id) in self._items:
+            self.edge_added.emit(str(src_id), str(dst_id),
+                                 self.stream_of(src, int(port)))
 
     # ---- Qt hooks ---------------------------------------------------------
     def mouseMoveEvent(self, e) -> None:       # noqa: D102

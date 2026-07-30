@@ -31,19 +31,11 @@ from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_IMAGE, GROUP_ENHANCE, ParamSpec, Step, register_step,
 )
-from ._util import parse_key_list, require_image
-
-#: ``Apply to`` / ``Also apply to`` 兩個參數的共同說明（見 CLAUDE.md §5）。
-_APPLY_HELP = ("Which image stream this card works on; the result is written "
-               "back to that same stream. Streams are the named lines on the "
-               "canvas - test is the defect image, ref is the reference image.")
-_ALSO_HELP = ("Other streams that get exactly the same treatment. Keep ref "
-              "ticked so test and ref stay comparable; untick it to treat the "
-              "two images differently.")
+from ._util import ONE_STREAM_HELP, require_image
 
 
-class _StreamsStep(Step):
-    """共用：主影像流 + ``also_apply``（同 tone / normalize 卡的慣例）。"""
+class _StreamStep(Step):
+    """共用：一張卡做一條影像流（同 tone / normalize 卡的慣例，見 F7-18）。"""
 
     category = CATEGORY_IMAGE
     group = GROUP_ENHANCE
@@ -52,39 +44,22 @@ class _StreamsStep(Step):
     features_out: List[str] = []
 
     @classmethod
-    def _targets(cls, params: Dict[str, Any]) -> List[str]:
-        keys = [str(params.get("target", "test"))]
-        keys += parse_key_list(params.get("also_apply", ""))
-        seen, out = set(), []
-        for k in keys:
-            if k and k not in seen:
-                seen.add(k)
-                out.append(k)
-        return out
-
-    @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
-        return cls._targets(params)
+        return [str(params.get("target", "test"))]
 
     @classmethod
     def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:
-        return cls._targets(params)
+        return cls.resolve_reads(params)
 
-    def _apply_each(self, ctx: Context, params: Dict[str, Any], fn) -> Context:
-        primary = str(params.get("target", "test"))
-        require_image(ctx, self.key, primary)      # 主流不存在才算錯
-        for key in self._targets(params):
-            img = ctx.images.get(key)
-            if img is None:
-                ctx.warn(f"[{self.key}] also_apply stream '{key}' does not "
-                         f"exist; skipped.")
-                continue
-            ctx.set_image(key, np.asarray(fn(img), dtype=np.float32))
+    def _apply(self, ctx: Context, params: Dict[str, Any], fn) -> Context:
+        key = str(params.get("target", "test"))
+        img = require_image(ctx, self.key, key)
+        ctx.set_image(key, np.asarray(fn(img), dtype=np.float32))
         return ctx
 
 
 @register_step
-class FlattenStep(_StreamsStep):
+class FlattenStep(_StreamStep):
     """移除大尺度的假訊號：亮度梯度、掃描線條紋、不平的背景。"""
 
     key = "flatten"
@@ -94,9 +69,7 @@ class FlattenStep(_StreamsStep):
             "- so they stop showing up in the difference image.")
     params = [
         ParamSpec(name="target", type="image_key", default="test",
-                  label="Apply to", help=_APPLY_HELP),
-        ParamSpec(name="also_apply", type="image_keys", default="ref",
-                  label="Also apply to", help=_ALSO_HELP),
+                  label="Image stream", help=ONE_STREAM_HELP),
         ParamSpec(
             name="method", type="choice", default="background",
             choices=["background", "stripes_h", "stripes_v",
@@ -155,11 +128,11 @@ class FlattenStep(_StreamsStep):
                 out = out + float(np.nanmean(np.asarray(img, dtype=np.float32)))
             return out
 
-        return self._apply_each(ctx, p, fn)
+        return self._apply(ctx, p, fn)
 
 
 @register_step
-class LocalContrastStep(_StreamsStep):
+class LocalContrastStep(_StreamStep):
     """CLAHE：分格子做直方圖等化，暗區裡的小缺陷也拉得起來。"""
 
     key = "local_contrast"
@@ -169,9 +142,7 @@ class LocalContrastStep(_StreamsStep):
             "- a global stretch can never do that.")
     params = [
         ParamSpec(name="target", type="image_key", default="test",
-                  label="Apply to", help=_APPLY_HELP),
-        ParamSpec(name="also_apply", type="image_keys", default="ref",
-                  label="Also apply to", help=_ALSO_HELP),
+                  label="Image stream", help=ONE_STREAM_HELP),
         ParamSpec(
             name="clip_limit", type="float", default=2.0, min=0.1, max=40.0,
             label="Contrast limit",
@@ -192,5 +163,5 @@ class LocalContrastStep(_StreamsStep):
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
         clip, tiles = float(p["clip_limit"]), int(p["tiles"])
-        return self._apply_each(
+        return self._apply(
             ctx, p, lambda img: algo_enhance.clahe(img, clip, tiles))

@@ -146,7 +146,16 @@ def test_the_curve_takes_over_from_gamma_once_it_is_bent():
     assert not np.array_equal(c, a)
 
 
-def test_the_curve_applies_to_ref_as_well_so_the_pair_stays_comparable():
-    """test 調了 ref 沒調，diff 會整片亮起來 —— 那是假缺陷。"""
-    ctx = GammaStep().run(_ctx(), {"curve": "0,0; 0.4,0.75; 1,1"})
+def test_two_cards_keep_the_pair_comparable_and_one_card_does_not():
+    """test 調了 ref 沒調，diff 會整片亮起來 —— 那是假缺陷。
+
+    F7-18 之後那件事由**兩張卡**表達（畫布上一條線接 test、一條接 ref），
+    而不是一張卡的 also_apply。這條測試因此鎖兩件事：一張卡真的只動自己那條，
+    而放上第二張卡之後兩邊又對得起來了。
+    """
+    bent = "0,0; 0.4,0.75; 1,1"
+    ctx = GammaStep().run(_ctx(), {"curve": bent})
+    assert not np.array_equal(ctx.images["test"], ctx.images["ref"])
+
+    ctx = GammaStep().run(ctx, {"target": "ref", "curve": bent})
     assert np.array_equal(ctx.images["test"], ctx.images["ref"])

@@ -123,27 +123,30 @@ def _ramp(size=128):
     return np.tile(row, (size, 1))
 
 
-def test_percentile_norm_range_and_anchor():
+def test_percentile_norm_range_and_borrowed_range():
+    """一張卡一條流（F7-18）；``range_from`` 是「兩張圖還比得起來」那條路。"""
     src = _ramp()
     half = (src.astype(np.float32) / 2).astype(np.uint8)
 
-    # anchor=source：other 影像用 source 的範圍 → 亮度只有一半（跨圖可比）
+    # range_from=test：ref 用 test 的範圍 → 亮度只有一半（跨圖可比）
     ctx = Context(images={"test": src.copy(), "ref": half.copy()})
-    run_step("percentile_norm", ctx, anchor="source")
+    run_step("percentile_norm", ctx, source="ref", range_from="test")
+    run_step("percentile_norm", ctx, source="test")
     out_t, out_r = ctx.images["test"], ctx.images["ref"]
     assert out_t.dtype == np.uint8 and out_r.dtype == np.uint8
     assert out_t.min() == 0 and out_t.max() == 255       # 範圍拉滿
     assert abs(out_r.mean() - out_t.mean() / 2) < 8      # ref 保持相對亮度
 
-    # anchor=self：各自拉自己的範圍 → 兩張平均亮度趨於一致
+    # range_from 空著：各自拉自己的範圍 → 兩張平均亮度趨於一致
     ctx2 = Context(images={"test": src.copy(), "ref": half.copy()})
-    run_step("percentile_norm", ctx2, anchor="self")
+    run_step("percentile_norm", ctx2, source="test")
+    run_step("percentile_norm", ctx2, source="ref")
     assert abs(ctx2.images["ref"].mean() - ctx2.images["test"].mean()) < 8
 
-    # also_apply 缺流：只警告不報錯
+    # 借不到範圍就報錯 —— 不靜靜改用自己的（輸出都是一張正常的圖，差別只在數字）
     ctx3 = Context(images={"test": src.copy()})
-    run_step("percentile_norm", ctx3, also_apply="ref,ghost")
-    assert len(ctx3.meta.get("warnings", [])) == 2
+    with pytest.raises(StepError):
+        run_step("percentile_norm", ctx3, source="test", range_from="ghost")
 
     # p_low >= p_high → StepError
     with pytest.raises(StepError):
@@ -155,7 +158,7 @@ def test_glv_mask_norm_band_anchoring():
     img = np.full((64, 64), 100, dtype=np.uint8)
     img[10:40, 10:40] = np.linspace(150, 200, 900).reshape(30, 30).astype(np.uint8)
     ctx = Context(images={"test": img.copy()})
-    run_step("glv_mask_norm", ctx, glv_low=150, glv_high=200, also_apply="")
+    run_step("glv_mask_norm", ctx, glv_low=150, glv_high=200)
     out = ctx.images["test"]
     assert out.dtype == np.uint8
     assert out[0, 0] == 0            # 帶外的背景被壓到 0
@@ -185,14 +188,15 @@ def test_denoise_even_ksize_is_steperror():
         run_step("denoise", ctx, ksize=4)
 
 
-def test_denoise_median_removes_salt_and_warn_missing_also():
+def test_denoise_median_removes_salt_and_leaves_other_streams_alone():
     img = np.full((64, 64), 100, dtype=np.uint8)
     idx = _rng(2).integers(0, 64, size=(60, 2))
     img[idx[:, 0], idx[:, 1]] = 255                     # 鹽噪點
-    ctx = Context(images={"test": img.copy()})
-    run_step("denoise", ctx, method="median", ksize=3, also_apply="ghost")
+    ctx = Context(images={"test": img.copy(), "ref": img.copy()})
+    run_step("denoise", ctx, method="median", ksize=3)
     assert int(ctx.images["test"].max()) < 255          # 噪點被壓掉
-    assert ctx.meta.get("warnings")                     # 缺流警告
+    # 一張卡一條流（F7-18）：ref 沒被接進這張卡，就不該被動到。
+    np.testing.assert_array_equal(ctx.images["ref"], img)
 
 
 # ---------------------------------------------------------------- align
@@ -440,14 +444,14 @@ def test_brightness_contrast_pivots_around_mid_gray():
     """對比以影像自己的中間值為支點 —— 以 0 為支點會順便把整張圖變亮。"""
     img = np.array([[0, 64, 128, 192, 255]], dtype=np.uint8)
     ctx = Context(images={"test": img.copy()})
-    run_step("brightness_contrast", ctx, contrast=2.0, also_apply="")
+    run_step("brightness_contrast", ctx, contrast=2.0)
     out = ctx.images["test"]
     assert out[0, 2] == 128, "中灰是支點，不該移動"
     assert out[0, 0] == 0 and out[0, 4] == 255           # 兩端夾住
     assert int(out[0, 1]) < 64 and int(out[0, 3]) > 192  # 往兩邊拉開
 
     ctx2 = Context(images={"test": img.copy()})
-    run_step("brightness_contrast", ctx2, brightness=20.0, also_apply="")
+    run_step("brightness_contrast", ctx2, brightness=20.0)
     assert int(ctx2.images["test"][0, 2]) == 148
     assert ctx2.images["test"].dtype == np.uint8, "uint8 進 uint8 出"
 
@@ -456,32 +460,38 @@ def test_gamma_opens_up_dark_detail_and_is_reversible_at_one():
     img = np.array([[0, 64, 128, 192, 255]], dtype=np.uint8)
 
     ctx = Context(images={"test": img.copy()})
-    run_step("gamma", ctx, gamma=1.0, also_apply="")
+    run_step("gamma", ctx, gamma=1.0)
     np.testing.assert_array_equal(ctx.images["test"], img)   # 1 = 不動
 
     ctx = Context(images={"test": img.copy()})
-    run_step("gamma", ctx, gamma=0.5, also_apply="")
+    run_step("gamma", ctx, gamma=0.5)
     assert int(ctx.images["test"][0, 1]) < 64, "gamma<1 要壓暗部（拉開細節）"
 
     ctx = Context(images={"test": img.copy()})
-    run_step("gamma", ctx, gamma=2.0, also_apply="")
+    run_step("gamma", ctx, gamma=2.0)
     assert int(ctx.images["test"][0, 1]) > 64
     # 端點永遠不動
     assert int(ctx.images["test"][0, 0]) == 0
     assert int(ctx.images["test"][0, 4]) == 255
 
 
-def test_tone_cards_keep_float_streams_float_and_apply_to_ref_too():
-    """diff 是 float32 —— 這兩張卡插在哪裡都不該偷偷改變型別。"""
+def test_tone_cards_keep_float_streams_float_and_only_touch_their_own():
+    """diff 是 float32 —— 這兩張卡插在哪裡都不該偷偷改變型別。
+
+    順便鎖住 F7-18 的約定：**一張卡一條流**。要 test 與 ref 一起動，就放兩張卡
+    （畫布上因此看得到兩條各自的鏈），而不是一張卡偷偷寫了兩條流。
+    """
     f = np.linspace(-5.0, 5.0, 25, dtype=np.float32).reshape(5, 5)
     ctx = Context(images={"test": f.copy(), "ref": f.copy()})
     run_step("gamma", ctx, gamma=0.7)
     assert ctx.images["test"].dtype == np.float32
     assert ctx.images["ref"].dtype == np.float32
-    # also_apply 預設含 ref：test 與 ref 要一起動，否則就不能比了
+    np.testing.assert_allclose(ctx.images["ref"], f)     # ref 沒被接進來
+
+    run_step("gamma", ctx, target="ref", gamma=0.7)      # 第二張卡做 ref
     np.testing.assert_allclose(ctx.images["test"], ctx.images["ref"])
 
-    # also_apply 指到不存在的流 -> 警告不報錯
+    # 指到不存在的流 -> 白話 StepError（不是靜靜跳過）
     ctx2 = Context(images={"test": f.copy()})
-    run_step("brightness_contrast", ctx2, also_apply="nope")
-    assert any("nope" in w for w in ctx2.meta.get("warnings", []))
+    with pytest.raises(StepError):
+        run_step("brightness_contrast", ctx2, target="nope")

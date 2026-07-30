@@ -100,7 +100,6 @@ from PySide6.QtWidgets import (
 
 import adept.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
 from adept.core.pipeline import ParamError, Recipe, get_step, list_steps
-from adept.core.pipeline.step import CATEGORY_IMAGE, GROUP_ORDER
 
 from .export_dialog import ExportDialog
 from .canvas import PipelineCanvas
@@ -998,7 +997,6 @@ class StudioWindow(QMainWindow):
         self.pipeline.score_clicked.connect(self.show_score_page)
         self.pipeline.edge_added.connect(self._on_edge_added)
         self.pipeline.edge_removed.connect(self._on_edge_removed)
-        self.pipeline.add_after_requested.connect(self._on_add_after)
 
         self.param_form.param_edited.connect(self._on_param_edited)
 
@@ -1328,6 +1326,15 @@ class StudioWindow(QMainWindow):
             self.show_score_page()
             self._status("Editing the score / threshold")
             return
+        # 選著一張卡的時候，新的卡接在它後面、做在**它那條流**上（F7-18）。
+        # 埠上的「+」被拿掉了（永遠掛在那裡太吵，使用者要的是從旁邊的卡片庫加），
+        # 但它做對的那兩件事要留著：接上線，而且接在對的那條流上。
+        # 加完就選取新卡 —— 所以連按三張卡片會長成一條鏈，順序就是按下去的順序。
+        after = self.selected_node if self.selected_node in self.model.nodes else None
+        if after is not None:
+            self.add_card_after(after, str(step_key),
+                                self._primary_stream_of(after))
+            return
         try:
             node_id = self.model.add_step(str(step_key))
         except (KeyError, ParamError) as e:
@@ -1336,58 +1343,13 @@ class StudioWindow(QMainWindow):
         self._status("Added “%s”%s" % (node_id, self._unmet_needs(node_id)))
         self.select_node(node_id)
 
-    # ---- 從輸出埠接下一張卡（F7-14）---------------------------------------
-    def _streams_through(self, node_id: str) -> List[str]:
-        """一路累積到 ``node_id``（**含**它自己）為止有哪些影像流。"""
-        order = list(self.model.node_order)
-        nid = str(node_id)
-        if nid not in order:
-            return list(self.model.available_streams())
-        i = order.index(nid)
-        after = order[i + 1] if i + 1 < len(order) else None
-        if after is not None:
-            return list(self.model.available_streams(before_node=after))
-        return list(self.model.available_streams())
-
-    def cards_addable_after(self, node_id: str) -> List[Dict[str, Any]]:
-        """接在 ``node_id`` 後面**現在就接得上**的卡片（依階段排序）。
-
-        「接得上」不是使用者該自己判斷的事 —— 引擎本來就知道每張卡讀哪幾條流
-        （``resolve_reads``）。卡片庫列的是全部 22 張，然後把接不上的標成
-        ``needs diff`` 讓使用者自己想辦法；從埠上長出來的這份清單反過來：
-        **只列現在就成立的**，所以不必先懂影像流也做得出第一條 pipeline。
-        """
-        have = set(self._streams_through(node_id))
-        out: List[Dict[str, Any]] = []
-        for desc in visible_steps([s.describe() for s in list_steps()]) or []:
-            key = str(desc.get("key", ""))
-            try:
-                step_cls = get_step(key)
-                params = step_cls.validate_params({})
-                reads = [r for r in step_cls.resolve_reads(params) if r]
-            except Exception:                  # noqa: BLE001 — 顯示用
-                continue
-            if step_cls.category == CATEGORY_IMAGE and not self.model.node_order:
-                continue
-            if any(r not in have for r in reads):
-                continue
-            if key in {n.step for n in self.model.nodes.values()} and \
-                    key.startswith("load_"):
-                continue                       # 一條 pipeline 只有一張 Input 卡
-            out.append({"key": key, "label": step_cls.label,
-                        "group": step_cls.resolve_group(),
-                        "help": str(step_cls.help or "")})
-        order = {g: i for i, g in enumerate(GROUP_ORDER)}
-        out.sort(key=lambda d: (order.get(d["group"], 99), d["label"]))
-        return out
-
     def add_card_after(self, node_id: str, step_key: str,
                        stream: str = "") -> Optional[str]:
         """把 ``step_key`` 接在 ``node_id`` 後面（順序 + 一條顯式連線）。
 
-        ``stream`` 是使用者按的那一顆「+」屬於哪個輸出埠。**這件事必須傳下去**：
-        從 ref 的埠接一張 Denoise 出來，結果那張卡預設做在 test 上，那顆「+」
-        就只是一個比較短的「新增卡片」—— 而使用者以為他已經表達了「對 ref 做」。
+        ``stream`` 是新卡要做在哪一條影像流上。**這件事必須傳下去**：接在一張
+        做 ref 的卡後面，結果新卡預設做在 test 上，使用者就得回控制列改參數 ——
+        而那正是他說「變很複雜」的東西。
         """
         nid = str(node_id)
         if nid not in self.model.nodes:
@@ -1398,10 +1360,8 @@ class StudioWindow(QMainWindow):
         except (KeyError, ParamError) as e:
             self._status("Could not add card: %s" % e, "error")
             return None
-        note = ""
-        if stream:
-            note = self._point_at_stream(new_id, str(stream))
-        # 顯式連線：使用者的動作是「從這個埠接下去」，那條線就該是實線。
+        note = self._point_at_stream(new_id, str(stream)) if stream else ""
+        # 顯式連線：使用者的動作是「接在這張後面」，那條線就該是實線。
         # （route 相鄰本來就會產生一條虛線，但它表達的是順序，不是這個意圖。）
         self.model.add_edge(nid, new_id)
         self._status("Added “%s” after “%s”%s%s"
@@ -1409,10 +1369,36 @@ class StudioWindow(QMainWindow):
         self.select_node(new_id)
         return new_id
 
-    def _point_at_stream(self, node_id: str, stream: str) -> str:
-        """把新卡的主要輸入指到 ``stream``（回一句給狀態列的話）。"""
+    # ---- 「這張卡做在哪一條流上」（F7-18）----------------------------------
+    #: 主要影像流的參數名（依優先順序）。Enhance 卡一律叫 ``target`` 或
+    #: ``source``，而**一張卡只做一條流** —— 要對另一張圖做同一件事就再放一張
+    #: 卡，那才是畫布看得懂的說法。
+    _PRIMARY_PARAMS = ("target", "source")
+
+    def _primary_stream_of(self, node_id: str) -> str:
+        """``node_id`` 這張卡做在哪一條流上（接下去的卡預設跟著它走）。"""
         node = self.model.nodes.get(str(node_id))
         if node is None:
+            return ""
+        for name in self._PRIMARY_PARAMS:
+            val = str(node.params.get(name, "") or "")
+            if val:
+                return val
+        try:
+            writes = get_step(node.step).resolve_writes(node.params)
+        except KeyError:                           # pragma: no cover
+            return ""
+        return str(writes[0]) if writes else ""
+
+    def _point_at_stream(self, node_id: str, stream: str) -> str:
+        """把 ``node_id`` 的主要輸入指到 ``stream``（回一句給狀態列的話）。
+
+        這是「用節點表達要對哪一張圖做」的實作點：使用者從 ``ref`` 那顆輸出埠
+        拉一條線過來，講的就是**這張卡做在 ref 上**。以前那句話只能在控制列的
+        下拉裡講，畫布只表達得出先後順序 —— 於是 test 是主角、ref 是附帶。
+        """
+        node = self.model.nodes.get(str(node_id))
+        if node is None or not stream:
             return ""
         try:
             specs = {p.name: p for p in get_step(node.step).params}
@@ -1428,44 +1414,8 @@ class StudioWindow(QMainWindow):
                 self.model.set_param(str(node_id), name, stream)
             except ParamError:                 # pragma: no cover — 值就是流名
                 return ""
-            return " — working on “%s”" % stream
+            return " — “%s” now works on %s" % (node_id, stream)
         return ""
-
-    def _on_add_after(self, node_id: str, port: int) -> None:
-        """按下輸出埠旁邊的「+」：跳出「接得上的卡」清單。"""
-        nid = str(node_id)
-        cards = self.cards_addable_after(nid)
-        item = self.pipeline.card(nid)
-        names = item.out_names() if item is not None else []
-        stream = names[port] if 0 <= port < len(names) else ""
-        self._add_after_menu = QMenu(self)
-        title = ("What comes after “%s”?" % stream if stream
-                 else "What comes next?")
-        head = self._add_after_menu.addAction(title)
-        head.setEnabled(False)
-        if not cards:
-            none = self._add_after_menu.addAction("(nothing can connect here yet)")
-            none.setEnabled(False)
-        last_group = None
-        for card in cards:
-            if card["group"] != last_group:
-                self._add_after_menu.addSeparator()
-                last_group = card["group"]
-            act = self._add_after_menu.addAction(str(card["label"]))
-            act.setToolTip(str(card["help"]))
-            act.triggered.connect(
-                lambda _c=False, k=card["key"], n=nid, s=stream:
-                self.add_card_after(n, k, s))
-        item = self.pipeline.card(nid)
-        if item is not None:
-            anchors = item.plus_anchors_local()
-            i = max(0, min(int(port), len(anchors) - 1))
-            scene_pt = item.scenePos() + anchors[i]
-            self._add_after_menu.popup(
-                self.pipeline.viewport().mapToGlobal(
-                    self.pipeline.mapFromScene(scene_pt)))
-        else:                                  # pragma: no cover — 節點不見了
-            self._add_after_menu.popup(self.pipeline.mapToGlobal(self.pipeline.pos()))
 
     def _producers_of(self, stream: str) -> List[str]:
         """哪些卡片（用預設參數）會產出 ``stream``。"""
@@ -1516,27 +1466,36 @@ class StudioWindow(QMainWindow):
     def _on_move_requested(self, node_id: str, delta: int) -> None:
         self.model.move(str(node_id), int(delta))
 
-    # ---- 畫布連線（F7-6）--------------------------------------------------
-    def _on_edge_added(self, src: str, dst: str) -> None:
+    # ---- 畫布連線（F7-6；F7-18 起帶著影像流）-------------------------------
+    def _on_edge_added(self, src: str, dst: str, stream: str = "") -> None:
         """拉一條線。會造成循環時 model 回 False —— 那條線就不會出現。
 
         擋在這裡（而不是等執行時報錯）是刻意的：使用者看到的是「這條線拉不
         起來」，不是「拉起來之後整條 pipeline 壞掉」。
 
-        「已經連著了」與「會成環」必須講成兩句話。把第二個埠（ref）拖到已經
-        接了第一個埠（test）的節點上，是**很正常的操作** —— 而且畫面上兩條線
-        本來就都在了。這種時候回一句「Cannot connect」，會讓一個成功的動作
-        看起來像失敗。
+        ``stream`` 是**線從哪個輸出埠出發**（F7-18）。從 ref 那顆埠拉過去，
+        意思就是「這張卡做在 ref 上」，所以下游那張卡的主要輸入跟著改。
+        以前這件事只能在控制列的下拉裡講，於是同一個動作在畫布上做不完。
+
+        兩個節點之間**已經有線**也照樣要處理那句話：先從 test 拉、再從 ref 拉
+        是很正常的操作（「我改變主意了，這張卡要做在 ref 上」），而以前它只會
+        得到一句「already connected」然後什麼都沒發生 —— 看起來就像畫布不准
+        你碰 ref。
         """
-        src, dst = str(src), str(dst)
+        src, dst, stream = str(src), str(dst), str(stream or "")
         if self.model.has_edge(src, dst):
-            self._status("%s → %s is already connected — every image stream "
+            note = self._point_at_stream(dst, stream)
+            self._status(note.lstrip(" —").strip() if note else
+                         "%s → %s is already connected — every image stream "
                          "they share is already drawn." % (src, dst))
         elif self.model.add_edge(src, dst):
-            self._status("Connected %s → %s" % (src, dst))
+            # 影像流在**線真的接起來之後**才改。會成環的那條線沒有落地，
+            # 它不該留下任何痕跡 —— 尤其不是「那張卡安靜地改成做 ref 了」。
+            self._status("Connected %s → %s%s"
+                         % (src, dst, self._point_at_stream(dst, stream)))
         else:
             self._status("Cannot connect %s → %s — that would make the "
-                         "pipeline loop back on itself." % (src, dst))
+                         "pipeline loop back on itself." % (src, dst), "error")
 
     def _on_edge_removed(self, src: str, dst: str) -> None:
         if self.model.remove_edge(str(src), str(dst)):
@@ -2233,19 +2192,16 @@ class StudioWindow(QMainWindow):
                 return list(getattr(tr, "features_added", {}) or {})
         return ()
 
-    #: 「這張卡主要做在哪一條流上」的參數名（依優先順序）。
-    #: Enhance 卡的慣例是 ``target``／``source`` 是主角，``also_apply`` 是附帶。
-    _PRIMARY_PARAMS = ("target", "source")
-
     def _default_stream(self, images: Dict[str, Any]) -> str:
         """點一張卡時，左邊那張圖預設顯示哪一條流。
 
         規則是**這張卡的主要輸出**，不是「它寫過的最後一條流」。這兩者以前被
-        當成同一件事（取 ``writes`` 的最後一個），但 Enhance 卡的
-        ``resolve_writes`` 是 ``[target] + also_apply``，於是預設值一路是
-        ``also_apply`` 的最後一項 —— 點 Normalize 就跳到 ``ref``。
-        並排比對開著、右邊又停在 ``ref`` 的時候，畫面就變成左右兩張一模一樣的
-        ref，每點一張卡都要手動切回來（F7-9 試用回饋 §4）。
+        當成同一件事（取 ``writes`` 的最後一個），但當時 Enhance 卡的
+        ``resolve_writes`` 是 ``[主流] + 附帶的那一串``，於是預設值一路是那一串
+        的最後一項 —— 點 Normalize 就跳到 ``ref``。並排比對開著、右邊又停在
+        ``ref`` 的時候，畫面就變成左右兩張一模一樣的 ref，每點一張卡都要手動
+        切回來（F7-9 試用回饋 §4）。F7-18 之後一張卡只寫一條流，兩者又合一了，
+        但這條規則仍然是對的（``roi_template`` 這類卡的 writes 不只一項）。
         """
         nid = self.selected_node
         node = self.model.nodes.get(nid) if nid else None
