@@ -415,6 +415,16 @@ QToolBar QToolButton {
 QToolBar QToolButton:hover { background: $hover_warm; color: $text_primary;
                              border-color: $border_hover; }
 QToolBar QToolButton:pressed { background: $hover_warm_strong; }
+QToolBar QToolButton:disabled { color: $text_disabled; border-color: $border_default; }
+/* One hairline between groups: seven equal-weight buttons in a row read as a
+ * single run, so you have to read all of them to find the one you want. */
+QToolBar::separator {
+    background: $border_default;
+    width: 1px;
+    margin: 4px 4px;
+}
+/* The stretcher between the left and right halves must not look like a control. */
+QWidget#toolbarSpacer { background: transparent; border: 0; }
 QToolBar QToolButton:checked {
     background: $accent_bg; color: $accent_active; border: 1px solid $accent_border;
 }

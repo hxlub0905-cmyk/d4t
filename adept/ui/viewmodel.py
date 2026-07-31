@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import math
+from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from adept.core.pipeline import (
@@ -46,6 +47,9 @@ class RecipeModel:
         self._redo: List[Dict[str, Any]] = []
         #: 「同一個參數連續調整算一次」的鍵（滑桿拖一下會發幾十次 set_param）。
         self._coalesce: Optional[str] = None
+        #: 「這一整段算一步復原」用的深度計數（見 :meth:`compound`）。
+        self._compound_depth = 0
+        self._compound_pushed = False
 
     #: 復原最多記幾步。這是記憶體的保險，不是體驗上的取捨 ——
     #: 沒有人會連按 60 次 Ctrl+Z，但一個沒有上限的堆疊在長 session 裡會一直長。
@@ -112,6 +116,28 @@ class RecipeModel:
         self.threshold = snap["threshold"]
         self.bins = dict(snap["bins"])
 
+    @contextmanager
+    def compound(self, name: str = "compound"):
+        """把這個區塊裡的所有改動合併成**一步**復原（F7-22）。
+
+        「加一張卡」在 model 上其實是好幾個動作：``add_step`` → ``set_param``
+        （指到那條影像流）→ ``add_edge``。各記一步的話，使用者加了一張卡、
+        按一次 Ctrl+Z，看到的是**卡還在但線不見了**這種中間狀態 ——
+        那比不能復原更糟，因為畫面上出現了他從來沒有做出來過的東西。
+
+        ``coalesce`` 解不了這件事：它比對的是「改的是不是同一個東西」，
+        而這裡本來就是三個不同的東西。
+        """
+        if self._compound_depth == 0:
+            self._compound_pushed = False
+        self._compound_depth += 1
+        try:
+            yield
+        finally:
+            self._compound_depth -= 1
+            if self._compound_depth == 0:
+                self._coalesce = None
+
     def _push_undo(self, coalesce: Optional[str] = None) -> None:
         """在改動**之前**記一步。
 
@@ -119,7 +145,12 @@ class RecipeModel:
         在輸入框裡打字）只記第一次 —— 不然按一次 Ctrl+Z 只會退回一個畫素，
         使用者得按四十次才回得到動之前的樣子，那等於沒有復原。
         """
-        if coalesce is not None and coalesce == self._coalesce and self._undo:
+        if self._compound_depth > 0:
+            # 一整段只記最前面那一次（見 :meth:`compound`）。
+            if self._compound_pushed:
+                return
+            self._compound_pushed = True
+        elif coalesce is not None and coalesce == self._coalesce and self._undo:
             return
         self._coalesce = coalesce
         self._undo.append(self.snapshot())

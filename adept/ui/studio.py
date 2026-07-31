@@ -459,7 +459,7 @@ class StudioWindow(QMainWindow):
     # 介面組裝
     # ==================================================================== #
     def _build_toolbar(self) -> None:
-        """工具列（M7 精簡）。
+        """工具列（M7 精簡；F7-22 分組）。
 
         兩處刻意的取捨：
 
@@ -469,6 +469,21 @@ class StudioWindow(QMainWindow):
         * **「全跑」收進「Run trial」的下拉** —— 兩顆長得一樣的 ▶ 鈕擺在一起，
           新手分不出差別也不知道該按哪顆。主要動作只留一顆，破壞性比較大的
           「跑整批」降級成選單項目。
+
+        分組（F7-22）
+        -------------
+        以前是七顆長得一模一樣的鈕排成一列，沒有任何分隔 —— 讀起來是一串等權重
+        的東西，使用者得逐顆讀完才知道哪顆是自己要的。現在照**做什麼事**分四段，
+        中間用分隔線：
+
+            檔案（開/存） │ 起手與輸出 │ 復原 │ ……… │ 說明・主題 │ 試跑
+
+        `Help` 與主題移到右邊：它們是**隨時可用但不屬於流程**的東西，混在檔案
+        操作裡只會讓左邊那段變長。試跑仍然在最右邊 —— 它是這個畫面的主要動作。
+
+        **復原／重做這一輪才長出按鈕。** F7-16 給了 Ctrl+Z / Ctrl+Shift+Z，
+        但工具列上沒有對應的鈕 —— 而目標使用者是不寫 code 的工程師，
+        「這個軟體能不能反悔」這件事不該只寫在快捷鍵裡。
         """
         bar = QToolBar("Main actions", self)
         bar.setMovable(False)
@@ -493,6 +508,10 @@ class StudioWindow(QMainWindow):
             "Export…",
             "Write these results back to KLARF, or produce reports and overlays",
             self.open_export_dialog)
+        self.btn_undo = self._tool_button(
+            "↶", "Undo the last change", self.undo)
+        self.btn_redo = self._tool_button(
+            "↷", "Redo the change you just undid", self.redo)
         self.btn_help = self._tool_button(
             "Help", "Reopen the getting-started tour (includes “Try it with "
                     "sample data”)",
@@ -501,14 +520,25 @@ class StudioWindow(QMainWindow):
         self.btn_theme = self._tool_button(
             "◐", "Switch between the light and dark theme",
             self.toggle_theme)
-        for b in (self.btn_open_klarf, self.btn_open_recipe,
-                  self.btn_save_recipe, self.btn_examples,
-                  self.btn_export, self.btn_help, self.btn_theme):
-            bar.addWidget(b)
+
+        # 一段 = 一種事情；段與段之間一條分隔線。
+        for group in ((self.btn_open_klarf, self.btn_open_recipe,
+                       self.btn_save_recipe),
+                      (self.btn_examples, self.btn_export),
+                      (self.btn_undo, self.btn_redo)):
+            for b in group:
+                bar.addWidget(b)
+            bar.addSeparator()
 
         spacer = QWidget(bar)
+        spacer.setObjectName("toolbarSpacer")
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(spacer)
+
+        # 右邊：不屬於流程、但要隨時找得到的兩顆。
+        bar.addWidget(self.btn_help)
+        bar.addWidget(self.btn_theme)
+        bar.addSeparator()
 
         self.lbl_trial_n = QLabel("First ", bar)
         bar.addWidget(self.lbl_trial_n)
@@ -586,9 +616,13 @@ class StudioWindow(QMainWindow):
             id(self.btn_save_recipe): "Ctrl+S",
             id(self.btn_trial): "Ctrl+R",
             id(self.btn_empty_open): "Ctrl+O",
+            # F7-22：這兩顆這一輪才長出來，快捷鍵 F7-16 就有了。
+            id(self.btn_undo): "Ctrl+Z",
+            id(self.btn_redo): "Ctrl+Shift+Z",
         }
         for w in (self.btn_open_klarf, self.btn_open_recipe,
-                  self.btn_save_recipe, self.btn_trial, self.btn_empty_open):
+                  self.btn_save_recipe, self.btn_trial, self.btn_empty_open,
+                  self.btn_undo, self.btn_redo):
             self._set_tip(w, w.toolTip())
 
     def _set_tip(self, widget: Any, text: str) -> None:
@@ -1186,6 +1220,17 @@ class StudioWindow(QMainWindow):
         self.spin_trial_n.setEnabled(can_run)
         self.lbl_trial_n.setEnabled(can_run)
 
+        # 復原／重做：沒得退的時候要**看得出來**沒得退（F7-22）。
+        # 這兩顆是新長出來的鈕，而 model 早就答得出這兩個問題了。
+        self.btn_undo.setEnabled(self.model.can_undo())
+        self._set_tip(self.btn_undo,
+                      "Undo the last change" if self.model.can_undo()
+                      else "Nothing to undo yet.")
+        self.btn_redo.setEnabled(self.model.can_redo())
+        self._set_tip(self.btn_redo,
+                      "Redo the change you just undid" if self.model.can_redo()
+                      else "Nothing to redo.")
+
         self.btn_save_recipe.setEnabled(has_steps)
         self._set_tip(self.btn_save_recipe,
                       "Save the current pipeline as a recipe JSON" if has_steps
@@ -1380,15 +1425,18 @@ class StudioWindow(QMainWindow):
         if nid not in self.model.nodes:
             return None
         at = self.model.node_order.index(nid) + 1
-        try:
-            new_id = self.model.add_step(str(step_key), at=at)
-        except (KeyError, ParamError) as e:
-            self._status("Could not add card: %s" % e, "error")
-            return None
-        note = self._point_at_stream(new_id, str(stream)) if stream else ""
-        # 顯式連線：使用者的動作是「接在這張後面」，那條線就該是實線。
-        # （route 相鄰本來就會產生一條虛線，但它表達的是順序，不是這個意圖。）
-        self.model.add_edge(nid, new_id)
+        # 使用者做的是**一個**動作（加一張卡），所以復原也該是一步 —— 底下是
+        # add_step + set_param + add_edge 三個 model 動作（F7-22）。
+        with self.model.compound("add-card"):
+            try:
+                new_id = self.model.add_step(str(step_key), at=at)
+            except (KeyError, ParamError) as e:
+                self._status("Could not add card: %s" % e, "error")
+                return None
+            note = self._point_at_stream(new_id, str(stream)) if stream else ""
+            # 顯式連線：使用者的動作是「接在這張後面」，那條線就該是實線。
+            # （route 相鄰本來就會產生一條虛線，但它表達的是順序，不是這個意圖。）
+            self.model.add_edge(nid, new_id)
         self._status("Added “%s” after “%s”%s%s"
                      % (new_id, nid, note, self._unmet_needs(new_id)))
         self.select_node(new_id)

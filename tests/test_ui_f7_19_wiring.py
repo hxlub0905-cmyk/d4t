@@ -432,3 +432,70 @@ def test_only_a_card_drag_is_accepted(window):
 
     assert CARD_MIME.startswith("application/")
     assert window.pipeline.acceptDrops() is True
+
+
+# --------------------------------------------------------------------------- #
+# 7. 工具列整理（F7-22）
+# --------------------------------------------------------------------------- #
+def test_the_toolbar_is_grouped_not_one_long_row(window):
+    """七顆等權重的鈕排成一列，讀起來是一串 —— 使用者得逐顆讀完才知道要按哪顆。
+
+    分成「檔案｜起手與輸出｜復原｜…｜說明・主題｜試跑」，段與段之間一條分隔線。
+    """
+    actions = window.toolbar.actions()
+    seps = [i for i, a in enumerate(actions) if a.isSeparator()]
+    assert len(seps) >= 3, "至少要三條分隔線（四段）"
+
+    def index_of(widget):
+        for i, a in enumerate(actions):
+            if window.toolbar.widgetForAction(a) is widget:
+                return i
+        raise AssertionError("not on the toolbar: %r" % widget)
+
+    # 檔案那段在最前面，試跑在最後面
+    assert index_of(window.btn_open_klarf) < seps[0]
+    assert index_of(window.btn_trial) == len(actions) - 1
+    # Help 與主題被移到右邊（在撐開的空白之後），不再混在檔案操作裡
+    assert index_of(window.btn_help) > index_of(window.btn_export)
+    assert index_of(window.btn_help) > index_of(window.btn_undo)
+
+
+def test_undo_has_a_button_not_only_a_shortcut(window):
+    """F7-16 給了 Ctrl+Z，但工具列上沒有對應的鈕。
+
+    目標使用者是不寫 code 的工程師 —— 「這個軟體能不能反悔」不該只寫在
+    快捷鍵裡。而且沒得退的時候要**看得出來**沒得退。
+    """
+    assert window.btn_undo.isEnabled() is False
+    assert "Nothing to undo" in window.btn_undo.toolTip()
+    assert window.btn_redo.isEnabled() is False
+
+    src = window.model.node_order[0]
+    window.add_card_after(src, "denoise")
+    assert window.btn_undo.isEnabled() is True
+    assert "Ctrl+Z" in window.btn_undo.toolTip(), "tooltip 要帶快捷鍵"
+
+    window.btn_undo.click()
+    assert window.btn_redo.isEnabled() is True
+    assert window.model.node_order == [src]
+
+
+def test_adding_one_card_is_one_undo(window):
+    """使用者做的是**一個**動作，所以復原也該是一步。
+
+    加一張卡在 model 上其實是三個動作（add_step → set_param 指影像流 →
+    add_edge）。各記一步的話，按一次 Ctrl+Z 會看到**卡還在但線不見了** ——
+    那比不能復原更糟，因為畫面上出現了他從來沒有做出來過的東西。
+
+    這件事以前沒人發現，是因為工具列上根本沒有復原鈕（只有快捷鍵）。
+    """
+    src = window.model.node_order[0]
+    before = list(window.model.node_order)
+    before_edges = list(window.model.edges)
+
+    window.add_card_after(src, "denoise", "ref")
+    assert len(window.model.node_order) == len(before) + 1
+
+    assert window.undo() is True
+    assert window.model.node_order == before, "一次就要回到原狀"
+    assert list(window.model.edges) == before_edges
