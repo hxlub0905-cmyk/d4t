@@ -6,7 +6,8 @@
 #   - added `from __future__ import annotations` (ADEPT convention)
 #   - extracted read_tiff_pages() + helpers (TYPE_SIZE / COMPRESSION /
 #     PHOTOMETRIC / TAGS / _read_values / _page_geom) verbatim
-#   - added n_pages(path) built on read_tiff_pages (still dependency-free)
+#   - added n_pages(path)/count_pages(path): a tag-free IFD walk (dependency-free)
+#   - added a cached TiffFile handle for read_page (see _tiff_handle)
 #   - added read_page(path, page_index) -> np.ndarray via LAZY
 #     `import tifffile` inside the function (pixel decode only there)
 #   - Chinese comments kept verbatim.
@@ -19,6 +20,8 @@ from __future__ import annotations
 
 import os
 import struct
+import threading
+from collections import OrderedDict
 
 
 # ---------------------------------------------------------------- TIFF 走訪
@@ -73,30 +76,78 @@ def _read_values(f, en, vtype, count, raw, big):
     return list(struct.unpack(en + fmt * count, data))
 
 
+def _open_header(f):
+    """讀 TIFF 檔頭，回傳 ``(endian, is_bigtiff, first_ifd_offset)``。"""
+    head = f.read(8)
+    if len(head) < 8:
+        raise ValueError("File too short to be a TIFF.")
+    if head[:2] == b'II':
+        en = '<'
+    elif head[:2] == b'MM':
+        en = '>'
+    else:
+        raise ValueError("Not a TIFF (missing II/MM byte-order mark).")
+    magic = struct.unpack(en + 'H', head[2:4])[0]
+    big = (magic == 43)
+    if magic == 42:
+        next_ifd = struct.unpack(en + 'I', head[4:8])[0]
+    elif big:
+        off_size, zero = struct.unpack(en + 'HH', head[4:8])
+        if off_size != 8 or zero != 0:
+            raise ValueError("Malformed BigTIFF header.")
+        next_ifd = struct.unpack(en + 'Q', f.read(8))[0]
+    else:
+        raise ValueError(f"Unknown TIFF magic {magic} (expected 42 or 43).")
+    return en, big, next_ifd
+
+
+def count_pages(path) -> int:
+    """**只數頁數**：走 IFD 鏈，但完全不解析 tag。
+
+    為什麼要另外寫一支
+    ------------------
+    ``load_dataset`` 對這個 TIFF 唯一的問題是「有幾頁」（拿去跟 KLARF 的
+    defect 數對映），但它以前是呼叫 :func:`read_tiff_pages` —— 那支會**每一頁
+    都把所有認得的 tag 讀出來**，而讀 tag 常常要為了 out-of-line 的值再 seek
+    一次。實測 4000 頁要 116 ms，而那份資料除了 ``n_pages`` 以外一個欄位都沒被
+    用到。
+
+    這一支每頁只做三件事：seek 到 IFD、讀 entry 數、跳過那些 entry 讀下一個
+    IFD 位址。同樣是純標準函式庫。
+
+    ⚠ 廠內的 TIFF 可能放在網路碟上，那裡每一次 seek 都是一次來回 —— 少做的
+    seek 不只是省 CPU。
+    """
+    with open(path, 'rb') as f:
+        en, big, next_ifd = _open_header(f)
+        esize = 20 if big else 12
+        n_off = 8 if big else 4
+        count_size = 8 if big else 2
+        seen = set()
+        n = 0
+        while next_ifd:
+            if next_ifd in seen or n > 100000:
+                raise ValueError("IFD chain loops — corrupt TIFF.")
+            seen.add(next_ifd)
+            f.seek(next_ifd)
+            n_entries = struct.unpack(en + ('Q' if big else 'H'),
+                                      f.read(count_size))[0]
+            n += 1
+            f.seek(next_ifd + count_size + esize * n_entries)
+            next_ifd = struct.unpack(en + ('Q' if big else 'I'),
+                                     f.read(n_off))[0]
+        return n
+
+
 def read_tiff_pages(path):
-    """回傳 (pages, info)。pages = [dict,...]（每頁一筆），info = 檔案層資訊。"""
+    """回傳 (pages, info)。pages = [dict,...]（每頁一筆），info = 檔案層資訊。
+
+    要**完整的每頁資訊**（`fab_probe` 的報告、健檢）才用這支；只要頁數請用
+    :func:`count_pages`，它便宜一個數量級。
+    """
     pages = []
     with open(path, 'rb') as f:
-        head = f.read(8)
-        if len(head) < 8:
-            raise ValueError("File too short to be a TIFF.")
-        if head[:2] == b'II':
-            en = '<'
-        elif head[:2] == b'MM':
-            en = '>'
-        else:
-            raise ValueError("Not a TIFF (missing II/MM byte-order mark).")
-        magic = struct.unpack(en + 'H', head[2:4])[0]
-        big = (magic == 43)
-        if magic == 42:
-            next_ifd = struct.unpack(en + 'I', head[4:8])[0]
-        elif big:
-            off_size, zero = struct.unpack(en + 'HH', head[4:8])
-            if off_size != 8 or zero != 0:
-                raise ValueError("Malformed BigTIFF header.")
-            next_ifd = struct.unpack(en + 'Q', f.read(8))[0]
-        else:
-            raise ValueError(f"Unknown TIFF magic {magic} (expected 42 or 43).")
+        en, big, next_ifd = _open_header(f)
 
         seen = set()
         while next_ifd:
@@ -150,18 +201,101 @@ def _page_geom(p):
 
 def n_pages(path) -> int:
     """回傳多頁 TIFF 的頁數（純 IFD 走訪，不解碼像素、不需第三方套件）。"""
-    _pages, info = read_tiff_pages(path)
-    return info["n_pages"]
+    return count_pages(path)
+
+
+# --------------------------------------------------------------------------- #
+# 開著的 TIFF handle 快取
+# --------------------------------------------------------------------------- #
+#: ``path -> (TiffFile, stat_key)``。只留少數幾個 —— 一個 lot 通常就一個 TIFF。
+_OPEN: "OrderedDict[str, tuple]" = OrderedDict()
+_OPEN_MAX = 4
+_OPEN_LOCK = threading.Lock()
+
+
+def _stat_key(path):
+    st = os.stat(path)
+    # **pid 是版本鍵的一部分**，這不是多餘的。
+    #
+    # 批次是 fork 出來的（`batch._pool_context`：主執行緒 fork）。fork 會把父
+    # 行程開著的檔案描述子複製給每一個子行程，而複製出來的 fd **共用同一個檔案
+    # 偏移量** —— 於是四個 worker 各自 seek 再 read，會互相把對方的位置移掉，
+    # 讀回來的是別頁的位元組。那不會丟例外、不會變慢，只會讓某幾顆 defect 拿到
+    # 錯的影像。
+    #
+    # 帶上 pid，子行程一進來就發現「這個 handle 不是我的」而重開一個自己的。
+    return (os.getpid(), st.st_mtime_ns, st.st_size)
+
+
+def _tiff_handle(path):
+    """拿一個開好的 ``tifffile.TiffFile``（同一個檔就重複使用）。
+
+    為什麼要快取
+    ------------
+    ``read_page`` 以前每次呼叫都 ``with tifffile.TiffFile(path)`` 開一次檔，
+    而且用 ``len(tf.pages)`` 檢查範圍 —— **那一行會強迫 tifffile 走完整條 IFD
+    鏈**。於是「換下一顆 defect」＝ 兩張圖 ＝ 兩次全檔走訪：實測一個 4000 頁的
+    TIFF 每張圖 16 ms，而那張圖本身只有 16 KB。整條 pipeline 才 9 ms，
+    所以絕大部分的等待花在重複打開同一個檔案上。
+
+    快取以 ``(mtime_ns, size)`` 當版本：檔案被換掉就重開，不會餵回舊內容。
+
+    行程內共用，所以要鎖 —— 預覽跑在 QThread、批次跑在子行程（各自一份快取）。
+    """
+    import tifffile  # lazy: pixel decode only; structural code above stays pure-stdlib
+
+    path = str(path)
+    key = _stat_key(path)
+    with _OPEN_LOCK:
+        hit = _OPEN.get(path)
+        if hit is not None and hit[1] == key:
+            _OPEN.move_to_end(path)
+            return hit[0]
+        if hit is not None:               # 檔案變了：關掉舊的
+            try:
+                hit[0].close()
+            except Exception:             # noqa: BLE001 — 關檔失敗不該擋住讀取
+                pass
+            _OPEN.pop(path, None)
+        tf = tifffile.TiffFile(path)
+        _OPEN[path] = (tf, key)
+        while len(_OPEN) > _OPEN_MAX:
+            _old, (old_tf, _k) = _OPEN.popitem(last=False)
+            try:
+                old_tf.close()
+            except Exception:             # noqa: BLE001
+                pass
+        return tf
+
+
+def close_cached_tiffs() -> None:
+    """關掉所有快取的 TIFF handle（換 lot、關視窗、測試收尾時呼叫）。"""
+    with _OPEN_LOCK:
+        for tf, _key in _OPEN.values():
+            try:
+                tf.close()
+            except Exception:             # noqa: BLE001
+                pass
+        _OPEN.clear()
 
 
 def read_page(path, page_index):
     """解碼並回傳第 page_index（0-based）頁的像素 (np.ndarray)。
 
     像素解碼交給 tifffile（lazy import：只有真的要讀像素才需要它）。
+    檔案 handle 會被快取重複使用，見 :func:`_tiff_handle`。
     """
-    import tifffile  # lazy: pixel decode only; structural code above stays pure-stdlib
-    with tifffile.TiffFile(path) as tf:
-        if page_index < 0 or page_index >= len(tf.pages):
-            raise IndexError(
-                f"TIFF page {page_index} out of range (0..{len(tf.pages) - 1})")
-        return tf.pages[page_index].asarray()
+    tf = _tiff_handle(path)
+    if page_index < 0:
+        raise IndexError(f"TIFF page {page_index} out of range (0..?)")
+    try:
+        page = tf.pages[page_index]
+    except IndexError:
+        # **只有出錯時才問總頁數** —— 問一次就要走完整條 IFD 鏈，
+        # 而那正是這支函式在避免的事。
+        raise IndexError(
+            f"TIFF page {page_index} out of range "
+            f"(0..{len(tf.pages) - 1})") from None
+    if page is None:
+        raise IndexError(f"TIFF page {page_index} out of range (0..?)")
+    return page.asarray()
