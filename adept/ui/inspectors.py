@@ -65,6 +65,7 @@ class Inspector(QWidget):
         self.batch: List[Dict[str, Any]] = []
         self.meta: Dict[str, Any] = {}
         self.feature_names: List[str] = []
+        self.shown_streams: List[str] = []
         self.node_id = ""
         self.setMinimumHeight(120)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -73,12 +74,16 @@ class Inspector(QWidget):
                     result: Optional[Dict[str, Any]] = None,
                     batch: Optional[Sequence[Dict[str, Any]]] = None,
                     meta: Optional[Dict[str, Any]] = None,
-                    feature_names: Optional[Sequence[str]] = None) -> None:
+                    feature_names: Optional[Sequence[str]] = None,
+                    shown_streams: Optional[Sequence[str]] = None) -> None:
         self.node_id = str(node_id or "")
         self.params = dict(params or {})
         self.result = dict(result or {})
         self.batch = [dict(r) for r in (batch or [])]
         self.meta = dict(meta or {})
+        #: 預覽區**現在正在看**哪幾條流（並排比對打開時是左右那兩條）。
+        #: 儀表要跟著畫面走：畫面上兩張圖，底下就該是兩張直方圖。
+        self.shown_streams = [str(s) for s in (shown_streams or []) if s]
         #: 這張卡**自己**產出哪些特徵（含 output_prefix）。解析要用卡片庫，
         #: 那是 Studio 的事 —— 儀表只負責畫。
         self.feature_names = [str(f) for f in (feature_names or [])]
@@ -312,26 +317,52 @@ class EnhanceInspector(Inspector):
         first = raw.split(",")[0].strip()
         return first or "test"
 
-    def record(self) -> Dict[str, Any]:
+    def streams(self) -> List[str]:
+        """這張卡處理的每一條流（``streams`` 是逗號分隔的一串）。"""
+        raw = str(self.params.get("streams") or self.params.get("target")
+                  or self.params.get("source") or "test")
+        keys = [k.strip() for k in raw.split(",") if k.strip()]
+        return keys or ["test"]
+
+    def panes(self) -> List[str]:
+        """要畫幾張直方圖、各是哪一條流。
+
+        **跟著預覽畫面走**：並排比對打開時畫面上是兩張圖，底下就該是兩張
+        直方圖，而且左右順序一樣 —— 使用者是拿它們互相對照的，順序對不上就
+        每次都要重新認一次哪張配哪張。
+
+        只取這張卡真的動過的流：並排的右邊可能是 ``diff``（這張 Enhance 卡沒
+        碰過它），那畫一張空的圖只是佔位子。都沒有的話退回這張卡的第一條流。
+        """
         changes = dict(self.meta.get("stream_change") or {})
-        return dict(changes.get(self.stream()) or {})
+        mine = self.streams()
+        if self.shown_streams:
+            picked = [s for s in self.shown_streams if s in changes]
+            if picked:
+                return picked
+        return [s for s in mine if s in changes] or mine[:1]
+
+    def record(self, key: Optional[str] = None) -> Dict[str, Any]:
+        changes = dict(self.meta.get("stream_change") or {})
+        return dict(changes.get(key or self.stream()) or {})
 
     def has_data(self) -> bool:
-        rec = self.record()
-        return bool(rec.get("before")) and bool(rec.get("after"))
+        return any(bool(self.record(k).get("before"))
+                   and bool(self.record(k).get("after"))
+                   for k in self.panes())
 
     def empty_reason(self) -> str:
         return ("Select a defect to see what this card does to “%s” — the "
                 "grey levels before it ran and after." % self.stream())
 
-    def clipped(self) -> Tuple[float, float]:
-        rec = self.record()
+    def clipped(self, key: Optional[str] = None) -> Tuple[float, float]:
+        rec = self.record(key)
         return (float(rec.get("clipped_low", 0.0)),
                 float(rec.get("clipped_high", 0.0)))
 
-    def added_clipping(self) -> Tuple[float, float]:
+    def added_clipping(self, key: Optional[str] = None) -> Tuple[float, float]:
         """**這張卡自己**新增的削平（原圖本來就黑掉的部分不算它的帳）。"""
-        rec = self.record()
+        rec = self.record(key)
         lo = float(rec.get("clipped_low", 0.0)) - float(rec.get("was_clipped_low", 0.0))
         hi = float(rec.get("clipped_high", 0.0)) - float(rec.get("was_clipped_high", 0.0))
         return (max(0.0, lo), max(0.0, hi))
@@ -339,10 +370,17 @@ class EnhanceInspector(Inspector):
     def summary(self) -> str:
         if not self.has_data():
             return ""
-        lo, hi = self.clipped()
-        text = ("“%s” · %.1f%% of pixels at black, %.1f%% at white"
-                % (self.stream(), lo * 100.0, hi * 100.0))
-        alo, ahi = self.added_clipping()
+        panes = self.panes()
+        bits = []
+        worst = 0.0
+        for key in panes:
+            lo, hi = self.clipped(key)
+            bits.append("“%s” %.1f%% at black, %.1f%% at white"
+                        % (key, lo * 100.0, hi * 100.0))
+            alo, ahi = self.added_clipping(key)
+            worst = max(worst, alo, ahi)
+        text = " · ".join(bits)
+        alo = ahi = worst
         if max(alo, ahi) >= self.WARN_CLIP:
             text += ("  ⚠ this card flattened %.1f%% of the patch onto the "
                      "ends of the scale — those pixels no longer differ from "
@@ -351,9 +389,42 @@ class EnhanceInspector(Inspector):
         return text
 
     def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
-        rec = self.record()
+        panes = self.panes()
+        if not panes:
+            return
+        # 並排比對打開時畫兩張 —— 左右的順序跟畫面上兩張圖一樣。
+        gap = 14.0
+        w = (rect.width() - gap * (len(panes) - 1)) / float(len(panes))
+        for i, key in enumerate(panes):
+            box = QRectF(rect.left() + i * (w + gap), rect.top(), w, rect.height())
+            self._paint_one(p, box, key, with_axis_title=(i == 0))
+
+    def _paint_one(self, p: QPainter, rect: QRectF, key: str,
+                   with_axis_title: bool) -> None:
+        """一條流的 before/after 直方圖。
+
+        軸要講得出自己是什麼
+        --------------------
+        使用者原話：「histogram 我有點看不太懂，橫軸是 GLV 縱軸是 pixel counts？
+        細線是什麼？」—— 三個問題，三個都是**畫面上沒寫**。以前只有兩端的
+        ``black`` / ``white`` 跟一句 ``outline = before · filled = after``，
+        而那句話要先知道 outline 指的是那條細線才讀得懂。
+
+        現在：橫軸寫 ``gray level  0 → 255``、縱軸寫 ``pixels``，圖例直接**畫**
+        一小段細線與一小塊實心方塊配上字，不要求使用者把名詞對應到圖形。
+        """
+        rec = self.record(key)
+        head = QRectF(rect.left(), rect.top(), rect.width(), 13)
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        p.drawText(head, Qt.AlignLeft | Qt.AlignVCenter, "“%s”" % key)
+        if with_axis_title:
+            p.drawText(head, Qt.AlignRight | Qt.AlignVCenter, "pixels ↑")
+
         before = [float(v) for v in rec.get("before") or []]
         after = [float(v) for v in rec.get("after") or []]
+        if not before and not after:
+            p.drawText(rect, Qt.AlignCenter, "no record for this stream")
+            return
         n = max(len(before), len(after))
         # **高度用平方根。** 削平會在兩端堆出兩根極高的柱子（六成的畫素都在那裡），
         # 線性刻度下其餘的分布會被壓成一條貼著底的線 —— 而那正是要比較的形狀。
@@ -362,12 +433,12 @@ class EnhanceInspector(Inspector):
         after = [math.sqrt(v) for v in after]
         top = max(max(before or [1.0]), max(after or [1.0]), 1.0)
 
-        plot = QRectF(rect.left(), rect.top() + 14,
-                      rect.width(), max(20.0, rect.height() - 30))
+        plot = QRectF(rect.left(), rect.top() + 20,
+                      rect.width(), max(20.0, rect.height() - 52))
         bw = plot.width() / float(n)
 
         def bars(vals: List[float], col: QColor, filled: bool) -> None:
-            p.setPen(Qt.NoPen if filled else QPen(col, 1.2))
+            p.setPen(Qt.NoPen if filled else QPen(col, 1.4))
             p.setBrush(QBrush(col) if filled else Qt.NoBrush)
             path_pts = []
             for i, v in enumerate(vals):
@@ -394,8 +465,8 @@ class EnhanceInspector(Inspector):
                    QPointF(plot.right(), plot.bottom()))
 
         # 兩端的削平：把貼在 0 / 255 的那一格標成警示色，不然它只是一根高柱子
-        lo, hi = self.clipped()
-        alo, ahi = self.added_clipping()
+        lo, hi = self.clipped(key)
+        alo, ahi = self.added_clipping(key)
         for frac, added, at_left in ((lo, alo, True), (hi, ahi, False)):
             if frac <= 0.0005:
                 continue
@@ -406,12 +477,35 @@ class EnhanceInspector(Inspector):
             p.setBrush(QBrush(col))
             p.drawRect(QRectF(x, plot.top() - 6, max(2.0, bw), 4))
 
-        # 圖例放**底部**：頂端那一列是削平標記的位置，兩個擠在一起會疊字。
-        legend = QRectF(rect.left(), plot.bottom() + 1, rect.width(), 13)
+        # 橫軸：兩端的 0 / 255 加上中間那句「這是什麼軸」。
+        axis = QRectF(rect.left(), plot.bottom() + 1, rect.width(), 13)
         p.setPen(QColor(TOKENS["text_secondary"]))
-        p.drawText(legend, Qt.AlignLeft | Qt.AlignVCenter, "black")
-        p.drawText(legend, Qt.AlignRight | Qt.AlignVCenter, "white")
-        p.drawText(legend, Qt.AlignCenter, "outline = before · filled = after")
+        p.drawText(axis, Qt.AlignLeft | Qt.AlignVCenter, "0 black")
+        p.drawText(axis, Qt.AlignRight | Qt.AlignVCenter, "white 255")
+        p.drawText(axis, Qt.AlignCenter, "gray level")
+
+        # 圖例：**畫**一段細線與一塊實心方塊，不要只寫「outline / filled」——
+        # 那要求使用者先把名詞對回圖形，而那正是他卡住的地方。
+        self._paint_legend(p, QRectF(rect.left(), axis.bottom() + 1,
+                                     rect.width(), 14), faint, bar)
+
+    @staticmethod
+    def _paint_legend(p: QPainter, box: QRectF, line_col: QColor,
+                      fill_col: QColor) -> None:
+        y = box.center().y()
+        x = box.left()
+        p.setPen(QPen(line_col, 1.4))
+        p.drawLine(QPointF(x, y), QPointF(x + 12, y))
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        p.drawText(QRectF(x + 16, box.top(), 60, box.height()),
+                   Qt.AlignLeft | Qt.AlignVCenter, "before")
+        x += 74
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(fill_col))
+        p.drawRect(QRectF(x, y - 4, 12, 8))
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        p.drawText(QRectF(x + 16, box.top(), 60, box.height()),
+                   Qt.AlignLeft | Qt.AlignVCenter, "after")
 
 
 class ProfileInspector(Inspector):

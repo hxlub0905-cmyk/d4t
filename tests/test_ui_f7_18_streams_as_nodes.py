@@ -197,23 +197,35 @@ def test_the_shipped_examples_are_already_in_the_new_shape():
 # --------------------------------------------------------------------------- #
 # 2. 連線說出「這張卡做在哪一條流上」
 # --------------------------------------------------------------------------- #
-def test_dragging_from_the_ref_port_points_the_card_at_ref(window):
+def test_dragging_from_the_ref_port_wires_ref_into_the_card(window):
+    """從哪個埠拉線，就決定那張卡碰哪一條流 —— 這一點沒變。
+
+    **變的是第二條線的意思**（F7-19，使用者第八輪回饋）。F7-18 當時定成
+    「取代」（我改變主意了，這張卡改做 ref），因為那時一張卡本來就只做得了
+    一條流。F7-20 之後一張卡吃 N 條，取代就變成擋路的：畫布上做得出來的最多
+    一條，第二條得回控制列去勾 —— 而那正是 F7-18 想拿掉的東西。
+
+    所以現在是**累加**：先 test 再 ref = 兩條都做。詳見
+    ``test_ui_f7_19_wiring.py``。
+    """
     src = window.model.node_order[0]
     nid = window.add_card_after(src, "denoise", "test")
     assert window.model.nodes[nid].params["streams"] == "test"
 
     # 從 Input 的第二個輸出埠（ref）拉一條線過去
     window.pipeline.link_to(src, nid, port=1)
-    assert window.model.nodes[nid].params["streams"] == "ref"
+    assert window.model.nodes[nid].params["streams"] == "test,ref"
     assert "ref" in window.status_text()
 
 
 def test_a_second_line_between_the_same_two_cards_is_not_refused(window):
     """使用者原話：「很多張卡片都會限制或阻撓」。
 
-    先從 test 拉、再從 ref 拉是很正常的操作（「我改變主意了」），而以前那第二
-    條線只會得到一句 already connected 然後什麼都沒發生 —— 畫面上看起來就像
-    這張卡不准你碰 ref。
+    先從 test 拉、再從 ref 拉是很正常的操作，而以前那第二條線只會得到一句
+    already connected 然後什麼都沒發生 —— 畫面上看起來就像這張卡不准你碰 ref。
+    **這條測試守的是「第二條線一定要有反應」**，那件事沒變。
+
+    變的是那個反應是什麼：F7-18 是取代，F7-19 起是累加（兩條都做）。
     """
     src = window.model.node_order[0]
     nid = window.add_card_after(src, "tone", "test")
@@ -221,7 +233,7 @@ def test_a_second_line_between_the_same_two_cards_is_not_refused(window):
     assert window.model.has_edge(src, nid) is True
 
     window.pipeline.link_to(src, nid, port=1)      # 同一對節點，另一個埠
-    assert window.model.nodes[nid].params["streams"] == "ref"
+    assert window.model.nodes[nid].params["streams"] == "test,ref"
     assert "ref" in window.status_text()
 
 

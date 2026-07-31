@@ -1390,12 +1390,34 @@ class StudioWindow(QMainWindow):
             return ""
         return str(writes[0]) if writes else ""
 
-    def _point_at_stream(self, node_id: str, stream: str) -> str:
-        """把 ``node_id`` 的主要輸入指到 ``stream``（回一句給狀態列的話）。
+    def _point_at_stream(self, node_id: str, stream: str,
+                         accumulate: bool = False) -> str:
+        """把 ``node_id`` 的輸入接上 ``stream``（回一句給狀態列的話）。
 
         這是「用節點表達要對哪一張圖做」的實作點：使用者從 ``ref`` 那顆輸出埠
-        拉一條線過來，講的就是**這張卡做在 ref 上**。以前那句話只能在控制列的
+        拉一條線過來，講的就是**這張卡也做 ref**。以前那句話只能在控制列的
         下拉裡講，畫布只表達得出先後順序 —— 於是 test 是主角、ref 是附帶。
+
+        **累加還是取代，看參數型別**（F7-19）：
+
+        - ``image_keys``（一串流，例如 Enhance 卡的 ``streams``）且
+          ``accumulate=True`` → **累加**。先拉 test 再拉 ref 的意思是「兩張都
+          做」，不是「改成只做 ref」。這正是使用者說的「希望是能夠互相連動
+          的」—— 以前第二條線把第一條的設定蓋掉，於是畫布上做不出「兩條都
+          接」，得回控制列去勾。
+        - ``image_key``（單一具名角色，例如 ``subtract`` 的 ``a`` / ``b``）→
+          **取代**。往 ``a`` 再拉一條是「改接別的」，不是「a 有兩條」。
+
+        ``accumulate`` 由呼叫端決定，而它的判準是**這條線是不是新的依賴**：
+
+        - **第一條線**（``add_edge`` 成功）→ 取代。卡片預設的 ``streams="test"``
+          是規格的預設值，不是使用者拉的線；把 ref 累加上去的話，他拉了一條卻
+          得到兩條，而畫布就說謊了。
+        - **同一對節點的第二條線**（``has_edge``）→ 累加。那才是「這條也接上」。
+        - 從卡片庫加一張新卡（``add_card_after``）→ 取代，理由同第一條。
+
+        累加不必回頭處理畫線：畫布的線數是從「兩端共用的影像流」推出來的
+        （``_ports_between``），``streams`` 一多一條，那條線就自己出現了。
         """
         node = self.model.nodes.get(str(node_id))
         if node is None or not stream:
@@ -1408,12 +1430,24 @@ class StudioWindow(QMainWindow):
             spec = specs.get(name)
             if spec is None or spec.type not in ("image_key", "image_keys"):
                 continue
-            if str(node.params.get(name, "")) == stream:
-                return ""
+            current = str(node.params.get(name, "") or "")
+            if spec.type == "image_keys" and accumulate:
+                keys = [k.strip() for k in current.split(",") if k.strip()]
+                if stream in keys:
+                    return ""
+                keys.append(stream)
+                value, joined = ",".join(keys), True
+            else:
+                if current == stream:
+                    return ""
+                value, joined = stream, False
             try:
-                self.model.set_param(str(node_id), name, stream)
+                self.model.set_param(str(node_id), name, value)
             except ParamError:                 # pragma: no cover — 值就是流名
                 return ""
+            if joined and "," in value:
+                return (" — “%s” now works on %s (same settings for both)"
+                        % (node_id, " and ".join(value.split(","))))
             return " — “%s” now works on %s" % (node_id, stream)
         return ""
 
@@ -1484,10 +1518,12 @@ class StudioWindow(QMainWindow):
         """
         src, dst, stream = str(src), str(dst), str(stream or "")
         if self.model.has_edge(src, dst):
-            note = self._point_at_stream(dst, stream)
+            # 同一對節點再拉一條 —— 對 image_keys 的卡這是「這條也接上」，
+            # 所以要真的多一條線出來，不是回一句 already connected。
+            note = self._point_at_stream(dst, stream, accumulate=True)
             self._status(note.lstrip(" —").strip() if note else
-                         "%s → %s is already connected — every image stream "
-                         "they share is already drawn." % (src, dst))
+                         "%s → %s is already connected on %s."
+                         % (src, dst, stream or "that stream"))
         elif self.model.add_edge(src, dst):
             # 影像流在**線真的接起來之後**才改。會成環的那條線沒有落地，
             # 它不該留下任何痕跡 —— 尤其不是「那張卡安靜地改成做 ref 了」。
@@ -2089,10 +2125,16 @@ class StudioWindow(QMainWindow):
                 feats = list(get_step(node.step).resolve_features(node.params))
             except Exception:              # noqa: BLE001 — 顯示用
                 feats = []
+        # 儀表要跟著**畫面上正在看的東西**走：並排比對打開時是左右那兩條流，
+        # 所以底下的直方圖也是兩張、順序一樣（使用者是拿它們互相對照的）。
+        shown = [self.stream_combo.currentText()]
+        if self._compare_on:
+            shown.append(self.stream_combo_b.currentText())
         insp.set_context(self.selected_node or "",
                          params=dict(node.params) if node else {},
                          result=one, batch=self.trial_results, meta=meta,
-                         feature_names=feats)
+                         feature_names=feats,
+                         shown_streams=[s for s in shown if s])
         self.inspector_summary.setText(insp.summary())
 
     def _refresh_region_button(self) -> None:
@@ -2203,13 +2245,21 @@ class StudioWindow(QMainWindow):
         切回來（F7-9 試用回饋 §4）。F7-18 之後一張卡只寫一條流，兩者又合一了，
         但這條規則仍然是對的（``roi_template`` 這類卡的 writes 不只一項）。
         """
+        # 並排打開時左邊固定從 test 起跳（右邊就是 ref）——「兩張輸入影像」是
+        # 並排唯一的用途，而每次點卡片都要重認一次哪邊是哪邊的話，比對就慢了。
+        if self._compare_on and "test" in images:
+            return "test"
         nid = self.selected_node
         node = self.model.nodes.get(nid) if nid else None
         if node is not None:
             for name in self._PRIMARY_PARAMS:
-                val = str(node.params.get(name, "") or "")
-                if val in images:
-                    return val
+                # ``streams`` 是**一串**（"test,ref"）—— 整串當流名去比一定
+                # 落空，然後就掉到下面的 writes 分支取最後一項，於是點一張
+                # 兩條流的 Normalize 會跳到 ref。取第一條才是「這張卡的主流」。
+                for val in str(node.params.get(name, "") or "").split(","):
+                    val = val.strip()
+                    if val in images:
+                        return val
             try:
                 writes = get_step(node.step).resolve_writes(node.params)
             except KeyError:
@@ -2309,11 +2359,16 @@ class StudioWindow(QMainWindow):
         self.stream_combo_b.setVisible(on)
         self._compare_on = on
         if on:
+            # 打開的當下重挑一次左右兩條流：預設是 test / ref。手動挑過的
+            # (``_user_stream``) 仍然優先 —— 這裡只負責「還沒挑過」的情況。
+            self._populate_streams(self._preview_images or {})
             self._show_current_stream()
             scale, offset = self.image_view.view_state()
             self.image_view_b.set_view(scale, offset)
         else:
             self.image_view_b.set_image(None)
+        # 儀表跟著畫面走：兩張圖 → 兩張直方圖（見 _refresh_inspector）。
+        self._refresh_inspector(getattr(self, "_last_result", None))
         return on
 
     def compare_enabled(self) -> bool:

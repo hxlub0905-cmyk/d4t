@@ -217,7 +217,7 @@ def test_it_reports_how_much_the_card_flattened(qapp):
     assert insp.clipped() == (0.30, 0.12)
     assert insp.added_clipping() == (0.30, 0.12)
     text = insp.summary()
-    assert "30.0% of pixels at black" in text
+    assert "30.0% at black" in text and "“test”" in text
     assert "⚠" in text and "measure card downstream" in text
 
 

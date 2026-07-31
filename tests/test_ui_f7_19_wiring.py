@@ -1,0 +1,254 @@
+# F7-19 驗收（畫布那一半）：在畫布上接得出「兩條流都做」。
+"""使用者第八輪回饋：
+
+> 「USER 還是沒辦法隨意在畫布上連線，例如我在 Load image 後放上 Normalize 卡，
+>   我先在畫布上連 test，但我也想將 ref 牽線過去時，會變成只牽 ref 過去；
+>   如果要牽兩條必須點選後方卡片然後 source 兩個都勾才行。
+>   **我希望是能夠互相連動的。**」
+
+F7-18 把「同一對節點再拉一條線」定義成**取代**（「我改變主意了，這張卡改做
+ref」）。那在「一張卡一條流」的世界裡是對的，因為那時候一張卡本來就只能做一條。
+F7-20 讓一張卡吃 N 條流之後，那個語意就變成擋路的了：畫布上做得出來的最多只有
+一條，第二條要回控制列去勾 —— 而那正是 F7-18 想拿掉的東西。
+
+所以規則改成**看參數型別**：
+
+* ``image_keys``（一串流）→ **累加**。先拉 test 再拉 ref = 兩張都做。
+* ``image_key``（單一具名角色，``subtract`` 的 a / b）→ **取代**。
+  往 a 再拉一條是「改接別的」，不是「a 有兩條」。
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+
+def _import_qt(g):
+    from PySide6.QtWidgets import QApplication
+
+    from adept.ui import canvas as canvas_mod
+    from adept.ui import studio as studio_mod
+    from adept.ui import theme as theme_mod
+    g.update(QApplication=QApplication, canvas_mod=canvas_mod,
+             studio_mod=studio_mod, theme_mod=theme_mod)
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    _import_qt(globals())
+    app = QApplication.instance() or QApplication([])
+    theme_mod.apply_theme(app, "light")
+    yield app
+
+
+@pytest.fixture
+def window(qapp):
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    win.resize(1200, 700)
+    yield win
+    win.close()
+
+
+# --------------------------------------------------------------------------- #
+# 1. 累加：先拉 test 再拉 ref = 兩張都做
+# --------------------------------------------------------------------------- #
+def test_wiring_a_second_stream_adds_it_instead_of_replacing(window):
+    """使用者原話的那個情境，逐字重演一次。"""
+    src = window.model.node_order[0]
+    nid = window.add_card_after(src, "normalize")
+
+    window.pipeline.link_to(src, nid, port=0)          # test
+    assert window.model.nodes[nid].params["streams"] == "test"
+
+    window.pipeline.link_to(src, nid, port=1)          # ref —— 以前這裡會蓋掉
+    assert window.model.nodes[nid].params["streams"] == "test,ref"
+    assert "test" in window.status_text() and "ref" in window.status_text()
+
+
+def test_the_second_line_actually_appears_on_the_canvas(window):
+    """接上去要看得見。畫布不能說謊 —— 那是 F7-18 起就在守的東西。
+
+    線的數量是從「兩端共用的影像流」推出來的（``_ports_between``），所以
+    ``streams`` 一多一條，那條線就自己出現了，不必另外記。
+    """
+    src = window.model.node_order[0]
+    nid = window.add_card_after(src, "normalize")
+    window.pipeline.link_to(src, nid, port=0)
+    a, b = window.pipeline.card(src), window.pipeline.card(nid)
+    assert window.pipeline._ports_between(a, b) == [0]
+
+    window.pipeline.link_to(src, nid, port=1)
+    a, b = window.pipeline.card(src), window.pipeline.card(nid)
+    assert window.pipeline._ports_between(a, b) == [0, 1], \
+        "兩條流都接上了，畫布上就要有兩條線"
+
+
+def test_wiring_the_same_stream_twice_changes_nothing(window):
+    """重複拉同一條不該把它加兩次（``test,test`` 會讓那張卡做兩遍）。"""
+    src = window.model.node_order[0]
+    nid = window.add_card_after(src, "normalize")
+    window.pipeline.link_to(src, nid, port=0)
+    window.pipeline.link_to(src, nid, port=0)
+    assert window.model.nodes[nid].params["streams"] == "test"
+
+
+def test_both_streams_then_get_the_same_settings(window):
+    """累加買到的東西：兩條流吃**同一組設定**，所以它們還比得起來。
+
+    這是「成對的卡各自漂移」那個安靜失敗的結構性解法（計畫書 §22.7 第一條）。
+    """
+    from adept.core.pipeline import get_step
+
+    src = window.model.node_order[0]
+    nid = window.add_card_after(src, "normalize")
+    window.pipeline.link_to(src, nid, port=0)
+    window.pipeline.link_to(src, nid, port=1)
+    window.model.set_param(nid, "p_low", 5.0)
+
+    params = window.model.nodes[nid].params
+    cls = get_step("normalize")
+    assert cls.resolve_writes(cls.validate_params(params)) == ["test", "ref"]
+    assert float(params["p_low"]) == 5.0        # 一組參數，不是兩組
+
+
+# --------------------------------------------------------------------------- #
+# 2. 角色埠仍然是取代
+# --------------------------------------------------------------------------- #
+def test_a_role_port_is_still_replaced_not_accumulated(window):
+    """``subtract`` 的 a / b 是**角色**：數量固定、接錯位置就算錯。
+
+    往 a 再拉一條的意思是「改接別的」。如果這裡也累加，``a`` 會變成
+    ``test,ref`` —— 一個 ``image_key`` 塞了兩個名字，那張卡執行時會找不到
+    那條流，而使用者完全看不出自己做錯了什麼。
+    """
+    src = window.model.node_order[0]
+    nid = window.add_card_after(src, "subtract")
+    before = dict(window.model.nodes[nid].params)
+
+    window.pipeline.link_to(src, nid, port=0)
+    window.pipeline.link_to(src, nid, port=1)
+    after = window.model.nodes[nid].params
+    for key in ("a", "b"):
+        assert "," not in str(after[key]), key
+    # subtract 沒有主流參數，連線不該亂改它的 a / b
+    assert after == before
+
+
+# --------------------------------------------------------------------------- #
+# 3. 兩條流的卡照樣跑得動（接完就能按試跑）
+# --------------------------------------------------------------------------- #
+def test_a_two_stream_card_runs(window, tmp_path):
+    """接完兩條線之後直接跑，兩條流都要真的被處理到。"""
+    import numpy as np
+
+    from adept.core.pipeline import get_step
+    from adept.core.pipeline.context import Context
+
+    src = window.model.node_order[0]
+    nid = window.add_card_after(src, "normalize")
+    window.pipeline.link_to(src, nid, port=0)
+    window.pipeline.link_to(src, nid, port=1)
+
+    row = np.linspace(0, 120, 64).astype(np.uint8)
+    ctx = Context(images={"test": np.tile(row, (64, 1)),
+                          "ref": np.tile(row // 2, (64, 1))})
+    get_step("normalize")().run(ctx, window.model.nodes[nid].params)
+    assert ctx.images["test"].max() == 255
+    assert ctx.images["ref"].max() == 255
+
+
+# --------------------------------------------------------------------------- #
+# 4. 並排比對：左 test 右 ref，底下兩張直方圖
+# --------------------------------------------------------------------------- #
+def test_compare_defaults_to_test_on_the_left_and_ref_on_the_right(window, tmp_path):
+    """使用者原話：「開啟 Compare（雙圖模式）就是預設左側 test 右側 ref」。
+
+    以前左邊跟著「這張卡處理哪條流」走，所以點一張做 ref 的卡就變成左 ref
+    右 test —— 每點一張卡都要重認一次哪邊是哪邊，而並排的用途正是互相對照。
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    from make_sample import generate
+
+    out = generate(str(tmp_path / "lotC"), n=4, seed=11)
+    window.load_dataset_path(out["klarf"], sync=True)
+    src = window.model.node_order[0]
+    nid = window.add_card_after(src, "normalize", "ref")   # 一張做 ref 的卡
+    window.select_node(nid)
+    window.refresh_preview(sync=True)
+
+    assert window.set_compare(True) is True
+    assert window.stream_combo.currentText() == "test"
+    assert window.stream_combo_b.currentText() == "ref"
+
+
+def test_compare_shows_one_histogram_per_image(window, tmp_path):
+    """畫面上兩張圖，底下就要兩張直方圖，而且左右順序一樣。"""
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    from make_sample import generate
+
+    out = generate(str(tmp_path / "lotD"), n=4, seed=12)
+    window.load_dataset_path(out["klarf"], sync=True)
+    src = window.model.node_order[0]
+    nid = window.add_card_after(src, "normalize")
+    window.pipeline.link_to(src, nid, port=1)          # 兩條流都接上
+    window.select_node(nid)
+    window.refresh_preview(sync=True)
+
+    insp = window.inspector()
+    assert insp.panes() == ["test"], "沒開並排時就一張"
+
+    window.set_compare(True)
+    window.refresh_preview(sync=True)
+    assert window.inspector().panes() == ["test", "ref"]
+    assert "“test”" in window.inspector().summary()
+    assert "“ref”" in window.inspector().summary()
+
+
+def test_the_histogram_says_what_its_axes_are(qapp):
+    """使用者原話：「histogram 我有點看不太懂，橫軸是 GLV 縱軸是 pixel counts？
+    細線是什麼？」—— 三個問題，三個都是畫面上沒寫。
+
+    用畫素比對太脆弱，所以這裡驗的是**那些字真的被畫出去了**：把面板 render
+    到 pixmap 的同時攔下每一次 drawText。
+    """
+    from PySide6.QtGui import QColor, QPixmap
+
+    from adept.ui import inspectors as insp_mod
+
+    insp = insp_mod.EnhanceInspector()
+    insp.resize(420, 220)
+    insp.set_context("tone", params={"streams": "test"}, meta={"stream_change": {
+        "test": {"before": [3, 9, 4], "after": [1, 12, 3],
+                 "clipped_low": 0.0, "clipped_high": 0.0,
+                 "was_clipped_low": 0.0, "was_clipped_high": 0.0}}})
+
+    drawn = []
+    real = insp_mod.QPainter.drawText
+
+    def spy(self, *a):
+        for x in a:
+            if isinstance(x, str):
+                drawn.append(x)
+        return real(self, *a)
+
+    insp_mod.QPainter.drawText = spy
+    try:
+        pm = QPixmap(insp.size())
+        pm.fill(QColor("#ffffff"))
+        insp.render(pm)
+    finally:
+        insp_mod.QPainter.drawText = real
+
+    text = " | ".join(drawn)
+    assert "gray level" in text, "橫軸要講得出自己是什麼"
+    assert "pixels" in text, "縱軸也要"
+    assert "black" in text and "white" in text
+    # 「細線是什麼」要用圖例回答，而且是畫一段線配一個字，不是叫人對應名詞
+    assert "before" in text and "after" in text
+    assert "outline" not in text, "不要再用 outline / filled 這種要先翻譯的字"
