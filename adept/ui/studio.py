@@ -726,6 +726,10 @@ class StudioWindow(QMainWindow):
         middle.setStretchFactor(0, 3)
         middle.setStretchFactor(1, 2)
         self.middle_splitter = middle
+        # 設定面板**預設收起來**（F7-22）：畫布是這個畫面的主體，而參數表以前
+        # 常駐佔掉這一欄的四成高度。雙擊一張卡才攤開 —— 那是 n8n 的動作，
+        # 而且「我要編這張卡」本來就是一個明確的意圖，不是選取的副作用。
+        self._params_open = False
 
         # 右：單顆預覽（F7-5：Gallery 與直方圖搬到 Results 視窗，
         #     主視窗只留「編流程 + 看單顆」，影像因此拿得到整欄高度）
@@ -746,6 +750,9 @@ class StudioWindow(QMainWindow):
         root.setStretchFactor(1, 2)
         root.setStretchFactor(2, 4)
         root.setSizes(list(COLUMN_SIZES))
+        # 開窗就是收起來的狀態（畫布拿整欄）。放在版面建好之後，
+        # 因為 setSizes 要有實際尺寸才算得出來。
+        middle.setSizes([1, 0])
         self.top_splitter = root
         self.root_splitter = root
         self.setCentralWidget(root)
@@ -991,6 +998,7 @@ class StudioWindow(QMainWindow):
         self.library.add_requested.connect(self._on_add_requested)
 
         self.pipeline.node_selected.connect(self.select_node)
+        self.pipeline.node_activated.connect(self._on_node_activated)
         self.pipeline.node_toggled.connect(self._on_node_toggled)
         self.pipeline.move_requested.connect(self._on_move_requested)
         self.pipeline.remove_requested.connect(self._on_remove_requested)
@@ -1587,6 +1595,32 @@ class StudioWindow(QMainWindow):
         self._schedule_preview()
         return True
 
+    # ---- 設定面板：預設收起，雙擊卡片才攤開（F7-22）------------------------
+    def _on_node_activated(self, node_id: str) -> None:
+        """雙擊一張卡：選它 + 把設定攤開。"""
+        if self.select_node(str(node_id)):
+            self.set_params_open(True)
+
+    def params_open(self) -> bool:
+        """設定面板現在攤開著嗎。
+
+        追**明確狀態**而不是問 widget：`isVisible()` 在視窗 show 之前恆為
+        False，那個坑這個 repo 踩過（見 CLAUDE.md §7）。
+        """
+        return bool(self._params_open)
+
+    def set_params_open(self, on: bool) -> bool:
+        """攤開／收起設定面板。收起來時畫布拿到整欄高度。"""
+        on = bool(on)
+        self._params_open = on
+        total = sum(self.middle_splitter.sizes()) or self.middle_splitter.height()
+        if on:
+            keep = max(180, int(total * 0.42))
+            self.middle_splitter.setSizes([max(0, total - keep), keep])
+        else:
+            self.middle_splitter.setSizes([total, 0])
+        return on
+
     # ==================================================================== #
     # 主題（F7-2）
     # ==================================================================== #
@@ -1628,6 +1662,7 @@ class StudioWindow(QMainWindow):
         self._refresh_feature_combo()
         self._sync_score_widgets()
         self.stack.setCurrentWidget(self.score_pane)
+        self.set_params_open(True)   # 分數面板本來就是「我要編」
 
     def show_param_page(self) -> None:
         self.stack.setCurrentWidget(self.param_form)

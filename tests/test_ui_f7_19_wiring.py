@@ -28,7 +28,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def _import_qt(g):
+    from PySide6.QtCore import QPointF
     from PySide6.QtWidgets import QApplication
+
+    g["QPointF"] = QPointF
 
     from adept.ui import canvas as canvas_mod
     from adept.ui import studio as studio_mod
@@ -320,3 +323,77 @@ def test_the_clipping_mark_sits_on_the_bar_it_is_about(qapp):
     # 警示色只出現在左邊那一小段（最左那一格），不是散在整張圖上
     assert max(cols) < img.width() * 0.35, \
         "標記要貼在最左那根柱子上，不是飄在別的地方"
+
+
+# --------------------------------------------------------------------------- #
+# 6. n8n 化第二批（F7-22）：畫布拿整欄、線上的 ×、排整齊
+# --------------------------------------------------------------------------- #
+def test_the_canvas_gets_the_whole_column_until_you_open_a_card(window):
+    """設定面板以前常駐佔掉這一欄四成的高度，而畫布才是這個畫面的主體。
+
+    單擊只是選取（右邊預覽會跑到那張卡），**雙擊才攤開設定** —— 那是 n8n 的
+    動作，而且「我要編這張卡」本來就是明確的意圖，不該是選取的副作用。
+    """
+    assert window.params_open() is False
+
+    src = window.model.node_order[0]
+    window.select_node(src)
+    assert window.params_open() is False, "單擊不該把面板打開"
+    # 但表單的內容仍然是最新的 —— 收起來是版面的事，不是資料的事
+    assert window.param_form.step_key() == "load_patch"
+
+    window.pipeline.card(src).mouseDoubleClickEvent(_FakeDouble())
+    assert window.params_open() is True
+    assert window.selected_node == src
+
+    window.set_params_open(False)
+    assert window.params_open() is False
+
+
+class _FakeDouble:
+    """QGraphicsSceneMouseEvent 的替身（只用到 accept()）。"""
+
+    def accept(self):
+        pass
+
+
+def test_a_line_can_be_cut_where_it_is(window):
+    """接錯線的人要看得到怎麼斷開。
+
+    選起來按 Delete 本來就做得到，但畫面上沒有任何東西講出這件事 —— 刪除的
+    入口要長在被刪的那條線上面。
+    """
+    src = window.model.node_order[0]
+    nid = window.add_card_after(src, "denoise")
+    assert window.model.has_edge(src, nid) is True
+
+    edge = next(e for e in window.pipeline._edges
+                if not e.implicit and e.pair() == (src, nid))
+    assert edge.acceptHoverEvents() is True
+    # × 畫在線的中點，而 boundingRect 一定要蓋得住它（不然移開會留殘影）
+    assert edge.boundingRect().contains(edge.cut_center())
+    assert edge.cut_hit(edge.cut_center()) is True
+    assert edge.cut_hit(edge.cut_center() + QPointF(40, 40)) is False
+
+
+def test_the_dashed_line_has_no_cut_button(window):
+    """隱含的虛線刪不掉（它來自卡片的排列順序，不是使用者拉的），
+    所以不該長出一個看起來刪得掉的 ×。"""
+    src = window.model.node_order[0]
+    window.add_card_after(src, "denoise")
+    implicit = [e for e in window.pipeline._edges if e.implicit]
+    for e in implicit:
+        assert e.acceptHoverEvents() is False
+
+
+def test_tidy_puts_the_cards_back_on_the_grid(window):
+    """節點拖得動，拖過就亂了 —— 而以前只能自己一個個搬回去。"""
+    src = window.model.node_order[0]
+    nid = window.add_card_after(src, "denoise")
+    item = window.pipeline.card(nid)
+    before = item.pos()
+    item.setPos(before.x() + 321.0, before.y() + 234.0)
+    assert item.pos() != before
+
+    window.pipeline.tidy()
+    assert item.pos() == before, "排整齊要把它放回自動排版的位置"
