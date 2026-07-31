@@ -397,3 +397,38 @@ def test_tidy_puts_the_cards_back_on_the_grid(window):
 
     window.pipeline.tidy()
     assert item.pos() == before, "排整齊要把它放回自動排版的位置"
+
+
+def test_a_card_can_be_dragged_from_the_library_onto_the_canvas(window):
+    """「Add」是**工具決定位置**（接在選著的那張後面）；拖是**使用者決定位置**。
+
+    兩個都留著 —— n8n 兩種都有，而第一次用的人多半先看到按鈕。
+    """
+    from PySide6.QtCore import QMimeData
+
+    from adept.ui.widgets import CARD_MIME
+
+    before = list(window.model.node_order)
+    entry = window.library.entry("denoise")
+    assert entry is not None
+
+    mime = QMimeData()
+    mime.setData(CARD_MIME, entry.step_key.encode("utf-8"))
+    window.pipeline.card_dropped.emit("denoise", 640.0, 320.0)
+
+    order = window.model.node_order
+    assert len(order) == len(before) + 1
+    nid = window.selected_node
+    assert window.model.nodes[nid].step == "denoise"
+    item = window.pipeline.card(nid)
+    # 落在放開的地方（節點以中心對齊落點）
+    assert abs(item.pos().x() + canvas_mod.NODE_W / 2.0 - 640.0) < 1.0
+    assert abs(item.pos().y() + canvas_mod.NODE_H / 2.0 - 320.0) < 1.0
+
+
+def test_only_a_card_drag_is_accepted(window):
+    """自訂 MIME 型別，不是純文字 —— 不然從別的視窗拖一段字進來也會變成新增卡片。"""
+    from adept.ui.widgets import CARD_MIME
+
+    assert CARD_MIME.startswith("application/")
+    assert window.pipeline.acceptDrops() is True

@@ -210,7 +210,8 @@ def n_pages(path) -> int:
 #: ``path -> (TiffFile, stat_key)``。只留少數幾個 —— 一個 lot 通常就一個 TIFF。
 _OPEN: "OrderedDict[str, tuple]" = OrderedDict()
 _OPEN_MAX = 4
-_OPEN_LOCK = threading.Lock()
+#: RLock：``read_page`` 全程持有，而它會呼叫也要拿鎖的取 handle。
+_OPEN_LOCK = threading.RLock()
 
 
 def _stat_key(path):
@@ -227,8 +228,10 @@ def _stat_key(path):
     return (os.getpid(), st.st_mtime_ns, st.st_size)
 
 
-def _tiff_handle(path):
+def _tiff_handle_locked(path):
     """拿一個開好的 ``tifffile.TiffFile``（同一個檔就重複使用）。
+
+    **呼叫端必須持有 ``_OPEN_LOCK``**（見 :func:`read_page` 的說明）。
 
     為什麼要快取
     ------------
@@ -246,7 +249,7 @@ def _tiff_handle(path):
 
     path = str(path)
     key = _stat_key(path)
-    with _OPEN_LOCK:
+    with _OPEN_LOCK:                      # RLock：呼叫端通常已經持有
         hit = _OPEN.get(path)
         if hit is not None and hit[1] == key:
             _OPEN.move_to_end(path)
@@ -258,6 +261,21 @@ def _tiff_handle(path):
                 pass
             _OPEN.pop(path, None)
         tf = tifffile.TiffFile(path)
+        # **開檔的當下就把整份頁面清單建起來，一次。**
+        #
+        # tifffile 的 ``tf.pages`` 是 lazy 的：索引到第 i 頁才去解析那一段 IFD，
+        # 而它靠的是「檔案位置停在上一頁結尾」這個內部狀態。問題是
+        # ``page.asarray()`` 會為了讀像素移動檔案位置 —— 所以「讀第 0 頁的像素、
+        # 再要第 1 頁」在**同一個 handle** 上會從錯的位置開始解析，tifffile 丟出
+        # ``suspicious number of tags 8827`` 之類的訊息。
+        #
+        # 以前每次讀都重開檔，所以碰不到；快取住 handle 之後它每次換 defect 都
+        # 會發生（實測第二張圖必失敗）。``len()`` 逼它把清單一次走完，之後的索引
+        # 就只是查表，不再依賴檔案位置。
+        #
+        # 這一趟 IFD 走訪本來就要付（原本是**每讀一張圖付一次**）；現在是
+        # 每開一次檔付一次。4000 頁的檔案：第一次 35 ms，之後每張 0.4 ms。
+        len(tf.pages)
         _OPEN[path] = (tf, key)
         while len(_OPEN) > _OPEN_MAX:
             _old, (old_tf, _k) = _OPEN.popitem(last=False)
@@ -284,18 +302,25 @@ def read_page(path, page_index):
 
     像素解碼交給 tifffile（lazy import：只有真的要讀像素才需要它）。
     檔案 handle 會被快取重複使用，見 :func:`_tiff_handle`。
+
+    **整段讀取是序列化的**（鎖從拿 handle 一路持有到 ``asarray()`` 回來）。
+    一個 ``TiffFile`` 底下就是一個檔案描述子，而讀一頁像素是「seek 到那一頁、
+    讀下去」—— 兩個執行緒共用同一個 handle 就會互相把位置移掉，讀回來的是別頁
+    的位元組。Studio 真的會這樣：點一張卡會排一次背景預覽，而使用者可能同時
+    觸發另一次，兩個執行緒就同時進來了。實測症狀是 tifffile 丟
+    ``suspicious number of tags 13111`` —— 它把像素當成 IFD 在解析。
+
+    這跟 :func:`_stat_key` 裡的 pid 是同一件事的兩半：**fork 出來的子行程共用
+    偏移量、同一行程的執行緒共用 handle**。前者用版本鍵擋，後者用鎖擋。
+
+    序列化的代價可以忽略：一次讀 0.4 ms，而預覽本來就有請求合併。
     """
-    tf = _tiff_handle(path)
-    if page_index < 0:
-        raise IndexError(f"TIFF page {page_index} out of range (0..?)")
-    try:
-        page = tf.pages[page_index]
-    except IndexError:
-        # **只有出錯時才問總頁數** —— 問一次就要走完整條 IFD 鏈，
-        # 而那正是這支函式在避免的事。
-        raise IndexError(
-            f"TIFF page {page_index} out of range "
-            f"(0..{len(tf.pages) - 1})") from None
-    if page is None:
-        raise IndexError(f"TIFF page {page_index} out of range (0..?)")
-    return page.asarray()
+    with _OPEN_LOCK:
+        tf = _tiff_handle_locked(path)
+        # 頁面清單在開檔時就建好了（見 :func:`_tiff_handle_locked`），所以問總數
+        # 不用再走一次 IFD —— 範圍檢查是免費的，訊息也講得出「總共幾頁」。
+        n = len(tf.pages)
+        if page_index < 0 or page_index >= n:
+            raise IndexError(
+                f"TIFF page {page_index} out of range (0..{n - 1})")
+        return tf.pages[page_index].asarray()

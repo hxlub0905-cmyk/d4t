@@ -48,7 +48,7 @@ from PySide6.QtWidgets import (
 
 from . import theme
 from .theme import TOKENS
-from .widgets import draw_group_icon
+from .widgets import CARD_MIME, draw_group_icon
 
 __all__ = ["PipelineCanvas", "NODE_W", "NODE_H", "COL_GAP", "ROW_GAP"]
 
@@ -562,6 +562,8 @@ class PipelineCanvas(QGraphicsView):
     #: 來源節點只有一個沒有名字的輸出埠時是空字串。
     edge_added = Signal(str, str, str)
     edge_removed = Signal(str, str)
+    #: 從卡片庫拖一張卡丟到畫布上：``(step_key, 場景 x, 場景 y)``（F7-22）。
+    card_dropped = Signal(str, float, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -569,6 +571,7 @@ class PipelineCanvas(QGraphicsView):
         self.setScene(self._scene)
         self.setRenderHint(QPainter.Antialiasing, True)
         self.setDragMode(QGraphicsView.RubberBandDrag)
+        self.setAcceptDrops(True)                 # 卡片庫拖進來（F7-22）
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setFrameShape(QGraphicsView.NoFrame)
         self.setMinimumHeight(180)
@@ -746,6 +749,40 @@ class PipelineCanvas(QGraphicsView):
         if 0 < s < self.MIN_FIT_SCALE:
             self.scale(self.MIN_FIT_SCALE / s, self.MIN_FIT_SCALE / s)
         self._sync_zoom_label()
+
+    # ---- 從卡片庫拖進來（F7-22）-------------------------------------------
+    def dragEnterEvent(self, e) -> None:            # noqa: D102 - Qt hook
+        if e.mimeData().hasFormat(CARD_MIME):
+            e.acceptProposedAction()
+        else:
+            super().dragEnterEvent(e)
+
+    def dragMoveEvent(self, e) -> None:             # noqa: D102 - Qt hook
+        if e.mimeData().hasFormat(CARD_MIME):
+            e.acceptProposedAction()
+        else:
+            super().dragMoveEvent(e)
+
+    def dropEvent(self, e) -> None:                 # noqa: D102 - Qt hook
+        if not e.mimeData().hasFormat(CARD_MIME):
+            return super().dropEvent(e)
+        key = bytes(e.mimeData().data(CARD_MIME)).decode("utf-8")
+        # 落點：**滑鼠放開的地方**（場景座標），這正是拖曳相對於「Add」的差別。
+        # 位置不寫進 recipe（見模組 docstring），所以它只影響現在看到的畫面 ——
+        # 重新載入會回到自動排版，那是既有的行為，這裡不改。
+        pos = self.mapToScene(e.position().toPoint()
+                              if hasattr(e, "position") else e.pos())
+        self.card_dropped.emit(str(key), float(pos.x()), float(pos.y()))
+        e.acceptProposedAction()
+
+    def place_dropped(self, node_id: str, x: float, y: float) -> bool:
+        """把剛加進來的節點移到落點（Studio 加完卡之後回頭呼叫）。"""
+        item = self._items.get(str(node_id))
+        if item is None:
+            return False
+        item.setPos(float(x) - NODE_W / 2.0, float(y) - NODE_H / 2.0)
+        self.refresh_edges()
+        return True
 
     def tidy(self) -> None:
         """把節點重新排回自動排版的位置（F7-22）。

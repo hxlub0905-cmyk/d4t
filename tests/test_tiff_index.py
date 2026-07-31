@@ -207,3 +207,47 @@ def test_a_forked_child_does_not_reuse_the_parents_handle(tmp_path):
     os.waitpid(pid, 0)
     tiff_index.close_cached_tiffs()
     assert list(got) == [11, 22, 33, 44]
+
+
+def test_two_threads_reading_the_same_file_do_not_corrupt_each_other(tmp_path):
+    """同一行程的兩個執行緒共用一個 handle，會互相把檔案位置移掉。
+
+    一個 ``TiffFile`` 底下就是一個檔案描述子，而讀一頁像素是「seek 到那一頁、
+    讀下去」。兩個執行緒交錯做這件事，讀回來的是別頁的位元組 —— 實測 tifffile
+    會丟 ``suspicious number of tags 13111``（它把像素當成 IFD 在解析）。
+
+    Studio 真的會這樣：點一張卡會排一次背景預覽，同步預覽又跑一次，
+    於是兩個執行緒同時進來。這條測試在加鎖之前**必失敗**。
+
+    這跟 fork 那條是同一件事的兩半：子行程共用偏移量、執行緒共用 handle。
+    """
+    import threading
+
+    arrays = [np.full((16, 16), v, dtype=np.uint8) for v in (10, 60, 110, 160)]
+    p = tmp_path / "threads.tif"
+    _write_multipage(p, arrays)
+    tiff_index.close_cached_tiffs()
+
+    errors = []
+    wrong = []
+
+    def hammer(page, want):
+        for _ in range(30):
+            try:
+                got = tiff_index.read_page(str(p), page)
+            except Exception as e:                       # noqa: BLE001
+                errors.append("%s" % e)
+                return
+            if int(got[0, 0]) != want:
+                wrong.append((page, int(got[0, 0])))
+                return
+
+    threads = [threading.Thread(target=hammer, args=(i, v))
+               for i, v in enumerate((10, 60, 110, 160))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    tiff_index.close_cached_tiffs()
+    assert not errors, errors[:3]
+    assert not wrong, "讀到別頁的像素：%r" % wrong[:3]

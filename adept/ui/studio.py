@@ -999,6 +999,7 @@ class StudioWindow(QMainWindow):
 
         self.pipeline.node_selected.connect(self.select_node)
         self.pipeline.node_activated.connect(self._on_node_activated)
+        self.pipeline.card_dropped.connect(self._on_card_dropped)
         self.pipeline.node_toggled.connect(self._on_node_toggled)
         self.pipeline.move_requested.connect(self._on_move_requested)
         self.pipeline.remove_requested.connect(self._on_remove_requested)
@@ -1600,6 +1601,19 @@ class StudioWindow(QMainWindow):
         """雙擊一張卡：選它 + 把設定攤開。"""
         if self.select_node(str(node_id)):
             self.set_params_open(True)
+
+    def _on_card_dropped(self, step_key: str, x: float, y: float) -> None:
+        """從卡片庫拖一張卡丟到畫布上（F7-22）。
+
+        接法跟按「Add」完全一樣（``_on_add_requested`` → ``add_card_after``），
+        差別只在**落點**：丟在哪裡就擺在哪裡。位置不寫進 recipe，所以這只影響
+        現在看到的畫面 —— 那是既有的行為（見 canvas 模組 docstring），
+        重新載入會回到自動排版。
+        """
+        self._on_add_requested(str(step_key))
+        nid = self.selected_node
+        if nid:
+            self.pipeline.place_dropped(nid, float(x), float(y))
 
     def params_open(self) -> bool:
         """設定面板現在攤開著嗎。
