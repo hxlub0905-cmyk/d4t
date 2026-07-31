@@ -252,3 +252,71 @@ def test_the_histogram_says_what_its_axes_are(qapp):
     # 「細線是什麼」要用圖例回答，而且是畫一段線配一個字，不是叫人對應名詞
     assert "before" in text and "after" in text
     assert "outline" not in text, "不要再用 outline / filled 這種要先翻譯的字"
+
+
+# --------------------------------------------------------------------------- #
+# 5. 兩個打磨（F7-21 第二批）
+# --------------------------------------------------------------------------- #
+def test_the_node_does_not_say_the_same_thing_twice(window):
+    """副標已經印 ``test ref → test ref``，摘要就不要再印 ``streams=test,ref``。
+
+    第三行是拿來放「這張卡被設定成什麼」的（門檻、方法、半徑）。被一個跟上面
+    那行同義的字佔掉，等於少了一行資訊。
+    """
+    src = window.model.node_order[0]
+    nid = window.add_card_after(src, "normalize")
+    window.pipeline.link_to(src, nid, port=1)
+    assert window.model.nodes[nid].params["streams"] == "test,ref"
+
+    node = window.model.nodes[nid]
+    summary = window._node_summary(node, shown=["test", "ref"])
+    assert "streams" not in summary
+
+    # 但**沒有**被副標講到的設定仍然要出現 —— 這一行不是「什麼都不印」。
+    window.model.set_param(nid, "p_low", 7.0)
+    summary = window._node_summary(window.model.nodes[nid],
+                                   shown=["test", "ref"])
+    assert "p_low" in summary
+
+
+def test_a_stream_the_subtitle_does_not_mention_is_still_shown(window):
+    """借範圍的那條流不在 reads→writes 那一行裡，所以它要留在摘要中。"""
+    src = window.model.node_order[0]
+    nid = window.add_card_after(src, "normalize", "ref")
+    window.model.set_param(nid, "range_from", "test")
+    summary = window._node_summary(window.model.nodes[nid], shown=["ref"])
+    assert "range_from" in summary
+
+
+def test_the_clipping_mark_sits_on_the_bar_it_is_about(qapp):
+    """削平標記要長在被標記的那根柱子上。
+
+    以前它是畫在圖的**正上方**一小塊色塊 —— 離它在講的那根柱子有半張圖那麼遠，
+    於是看起來像一個獨立的裝飾：看得到，但看不出來在指什麼。
+
+    這裡驗的是「警示色出現在最左／最右那一格的柱子範圍內」，用畫素數，
+    不去斷言確切座標（那會鎖死版面）。
+    """
+    from PySide6.QtGui import QColor, QImage
+
+    from adept.ui import inspectors as insp_mod
+    from adept.ui import theme as theme_module
+
+    warn = QColor(theme_module.TOKENS["danger_text"]).rgb()
+    insp = insp_mod.EnhanceInspector()
+    insp.resize(300, 200)
+    # 六成畫素壓在黑端 → 一定要標出來
+    insp.set_context("tone", params={"streams": "test"}, meta={"stream_change": {
+        "test": {"before": [1, 5, 5, 1], "after": [30, 2, 2, 1],
+                 "clipped_low": 0.6, "clipped_high": 0.0,
+                 "was_clipped_low": 0.0, "was_clipped_high": 0.0}}})
+    img = QImage(insp.size(), QImage.Format_RGB32)
+    img.fill(QColor("#ffffff"))
+    insp.render(img)
+
+    cols = [x for x in range(img.width()) for y in range(img.height())
+            if img.pixel(x, y) == warn]
+    assert cols, "削平了六成，畫面上要看得到警示色"
+    # 警示色只出現在左邊那一小段（最左那一格），不是散在整張圖上
+    assert max(cols) < img.width() * 0.35, \
+        "標記要貼在最左那根柱子上，不是飄在別的地方"

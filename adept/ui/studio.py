@@ -1189,8 +1189,14 @@ class StudioWindow(QMainWindow):
             if has_results
             else "No results yet — run a trial first.")
 
-    def _node_summary(self, node: Any) -> str:
-        """最多 3 個「非預設」參數，渲染成 ``k=v`` 串起來。"""
+    def _node_summary(self, node: Any, shown: Optional[Sequence[str]] = None) -> str:
+        """最多 3 個「非預設」參數，渲染成 ``k=v`` 串起來。
+
+        ``shown`` 是**副標那一行已經講過的影像流名**（``test ref → test ref``）。
+        指定影像流的那些參數會被跳掉 —— 它們的值就是副標的來源，兩行講同一件事
+        只是把第三行佔掉，而第三行本來是拿來放「這張卡被設定成什麼」的
+        （F7-21：``streams=test,ref`` 跟上面那行完全重複）。
+        """
         try:
             step_cls = get_step(node.step)
         except KeyError:
@@ -1201,10 +1207,18 @@ class StudioWindow(QMainWindow):
         # 於是看到的是「template=gc1:iVBORw0KGg…」，既沒有資訊也擠掉了真正
         # 有用的參數。這種參數只講「有沒有設」。
         opaque = {p.name: p.type for p in step_cls.params if p.type == "template"}
+        stream_params = {p.name for p in step_cls.params
+                         if p.type in ("image_key", "image_keys")}
+        seen = {str(s) for s in (shown or [])}
         parts: List[str] = []
         for name, value in node.params.items():
             if name in defaults and defaults[name] == value:
                 continue
+            if name in stream_params and seen:
+                # 這個參數挑的流副標已經列出來了 → 不要再講一次。
+                picked = {v.strip() for v in str(value).split(",") if v.strip()}
+                if picked and picked <= seen:
+                    continue
             if name in opaque:
                 parts.append("%s: set" % name)
             else:
@@ -1273,7 +1287,9 @@ class StudioWindow(QMainWindow):
                 "label": label,
                 "category": category,
                 "enabled": bool(node.enabled),
-                "summary": self._node_summary(node),
+                # 副標那行印的是 reads → writes/regions；摘要不要再講一次
+                "summary": self._node_summary(
+                    node, shown=list(reads) + list(writes) + list(regions_out)),
                 "writes": writes,
                 "reads": reads,
                 "regions_out": regions_out,

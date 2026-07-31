@@ -464,7 +464,11 @@ class EnhanceInspector(Inspector):
         p.drawLine(QPointF(plot.left(), plot.bottom()),
                    QPointF(plot.right(), plot.bottom()))
 
-        # 兩端的削平：把貼在 0 / 255 的那一格標成警示色，不然它只是一根高柱子
+        # 兩端的削平：把貼在 0 / 255 的那一格**整根柱子**染成警示色。
+        #
+        # 以前是在圖的正上方畫一小塊色塊。那個位置離它在講的那根柱子有半張圖那麼
+        # 遠，於是它看起來像是一個獨立的裝飾 —— 使用者看得到它，但看不出來它在指
+        # 什麼。標記要長在被標記的東西上面。
         lo, hi = self.clipped(key)
         alo, ahi = self.added_clipping(key)
         for frac, added, at_left in ((lo, alo, True), (hi, ahi, False)):
@@ -472,10 +476,17 @@ class EnhanceInspector(Inspector):
                 continue
             col = QColor(TOKENS["danger_text"] if added >= self.WARN_CLIP
                          else TOKENS["warning"])
+            idx = 0 if at_left else (len(after) - 1)
+            h = ((after[idx] / top) * plot.height()) if 0 <= idx < len(after) else 0.0
             x = plot.left() if at_left else plot.right() - bw
+            w = max(1.0, bw - 0.6)
             p.setPen(Qt.NoPen)
             p.setBrush(QBrush(col))
-            p.drawRect(QRectF(x, plot.top() - 6, max(2.0, bw), 4))
+            if h > 0:
+                p.drawRect(QRectF(x, plot.bottom() - h, w, h))
+            # 柱子再矮也要看得見，所以柱頂再壓一小塊（柱高 0 時它就是全部）。
+            cap = QRectF(x, plot.bottom() - max(h, 3.0) - 3.0, max(3.0, w), 3.0)
+            p.drawRect(cap)
 
         # 橫軸：兩端的 0 / 255 加上中間那句「這是什麼軸」。
         axis = QRectF(rect.left(), plot.bottom() + 1, rect.width(), 13)
