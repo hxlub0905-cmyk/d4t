@@ -44,6 +44,46 @@ class RecipeError(ValueError):
     """Recipe 結構性錯誤（循環、未知 route、JSON 缺欄位…）。"""
 
 
+def _app_version() -> str:
+    """現在跑的這一版 ADEPT。"""
+    from adept import __version__
+    return str(__version__)
+
+
+def _version_tuple(text: str):
+    """``"0.2.1"`` → ``(0, 2, 1)``；比不出來回 ``None``（就不硬說誰新誰舊）。"""
+    parts = []
+    for chunk in str(text or "").split("."):
+        digits = ""
+        for ch in chunk:
+            if not ch.isdigit():
+                break
+            digits += ch
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts) if parts else None
+
+
+def version_skew(recipe_version: str) -> str:
+    """這份 recipe 是不是**比現在這個程式新**存的；是的話回一句白話，否則空字串。
+
+    講得出這句話，「unknown parameters」才有正確的意思。沒有它，使用者看到的
+    是「這份檔案壞了」，於是他會去重做一份 recipe —— 而該做的是更新程式。
+    """
+    theirs = str(recipe_version or "").strip()
+    if not theirs:
+        return ""
+    mine = _app_version()
+    if theirs == mine:
+        return ""
+    a, b = _version_tuple(theirs), _version_tuple(mine)
+    if a is not None and b is not None and a <= b:
+        return ""                      # 檔案比較舊 → 遷移的事，不是版本落差
+    return ("This recipe was saved by ADEPT %s and this build is %s — update "
+            "ADEPT on this machine before using it." % (theirs, mine))
+
+
 # ---------------------------------------------------------------------------
 # 資料模型
 # ---------------------------------------------------------------------------
@@ -233,12 +273,25 @@ class Recipe:
     author: str = ""
     description: str = ""
     edges: List[List[str]] = field(default_factory=list)  # 額外 DAG 邊
+    #: **哪一版的 ADEPT 存的**（存檔時自動填；舊檔案沒有這欄，是空字串）。
+    #:
+    #: 為什麼需要：開發在家用機、執行在公司機，而公司機是用複製檔案更新的
+    #: （`AGENTS.md`），所以兩邊的版本本來就會不同步。一份新版存的 recipe 在
+    #: 舊版上打開，看到的是「unknown parameters: ['…']」—— 那句話的意思是
+    #: 「這份檔案壞了」，但真正的情況是「我的程式舊了」。差一個字，使用者會去
+    #: 重做一份 recipe 而不是去更新程式。
+    #: 新建的 recipe 就是「這一版寫的」，所以預設值是現在這一版 ——
+    #: 空字串保留給**舊檔案**（那些檔案是真的沒有這個欄位）。
+    app_version: str = field(default_factory=_app_version)
 
     # ---- JSON serde -------------------------------------------------------
     def to_json_dict(self) -> Dict[str, Any]:
         return {
             "recipe_id": self.recipe_id,
             "version": int(self.version),
+            # 存檔時一律寫**現在這一版**（不是讀進來的那一版）——
+            # 這個欄位要回答的是「這個檔案是誰寫的」。
+            "app_version": _app_version(),
             "author": self.author,
             "description": self.description,
             "routes": {k: list(v) for k, v in self.routes.items()},
@@ -309,6 +362,7 @@ class Recipe:
             routes=routes,
             nodes=nodes,
             score=score,
+            app_version=str(d.get("app_version", "") or ""),
             version=int(d.get("version", 1)),
             author=str(d.get("author", "")),
             description=str(d.get("description", "")),
@@ -395,14 +449,22 @@ class Issue:
 
 
 def _clean_params_for(step_cls: Type[Step], raw: Dict[str, Any],
-                      issues: List[Issue], nid: str) -> Dict[str, Any]:
-    """驗證參數；壞參數記 Issue 並改用預設值，讓後續模擬檢查照常進行。"""
+                      issues: List[Issue], nid: str,
+                      skew: str = "") -> Dict[str, Any]:
+    """驗證參數；壞參數記 Issue 並改用預設值，讓後續模擬檢查照常進行。
+
+    ``skew`` 有值時附在訊息後面 —— 「認不得這個參數」最常見的原因不是檔案壞了，
+    是**這台的程式比較舊**（開發機與公司機是靠複製檔案同步的，見 AGENTS.md）。
+    """
     try:
         return step_cls.validate_params(raw)
     except ParamError as e:
+        detail = str(e)
+        if skew:
+            detail = "%s  %s" % (detail, skew)
         issues.append(Issue(
             code="bad-param", level="error", node_id=nid,
-            title="Invalid parameter", detail=str(e)))
+            title="Invalid parameter", detail=detail))
         try:
             return step_cls.validate_params(None)  # 全預設值
         except ParamError:  # pragma: no cover — 預設值本身壞掉屬程式錯誤
@@ -448,6 +510,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
         kinds = list(recipe.routes)
 
     # ---- 每個節點：step 存在？參數合法？----
+    # 認不得的參數 / 認不得的卡片，最常見的原因是**這台的程式比較舊**。
+    skew = version_skew(getattr(recipe, "app_version", ""))
     clean_params: Dict[str, Dict[str, Any]] = {}
     for nid, node in recipe.nodes.items():
         step_cls = registry.get(node.step)
@@ -455,10 +519,12 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             issues.append(Issue(
                 code="unknown-step", level="error", node_id=nid,
                 title=f"Unknown card '{node.step}'",
-                detail=f"step '{nid}' uses '{node.step}', which is not in the "
-                       f"card library; available cards: {sorted(registry)}"))
+                detail=(f"step '{nid}' uses '{node.step}', which is not in the "
+                        f"card library; available cards: {sorted(registry)}"
+                        + (f"  {skew}" if skew else ""))))
             continue
-        clean_params[nid] = _clean_params_for(step_cls, node.params, issues, nid)
+        clean_params[nid] = _clean_params_for(step_cls, node.params, issues,
+                                              nid, skew)
 
         # 參數全部合法，卡片還是可能**沒設定完**（F7-13）。空字串的模板是完全
         # 合法的 str —— 但那張卡跑起來每一顆都會失敗，而以前要跑過一次才知道。

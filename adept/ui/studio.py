@@ -100,6 +100,7 @@ from PySide6.QtWidgets import (
 
 import adept.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
 from adept.core.pipeline import ParamError, Recipe, get_step, list_steps
+from adept.core.pipeline.recipe import version_skew
 
 from .export_dialog import ExportDialog
 from .canvas import PipelineCanvas
@@ -1977,8 +1978,14 @@ class StudioWindow(QMainWindow):
         self.recipe_path = path
         self.setWindowTitle("ADEPT Studio — %s" % self.model.recipe_id)
         n = len(self.model.node_order)
-        self._status("Loaded recipe “%s” (%d steps, route %s)"
-                     % (self.model.recipe_id, n, self.model.kind))
+        # 版本落差要在**載入的那一刻**講，不是等他按了試跑才從 lint 冒出來 ——
+        # 那時候他已經在調參數了，而該做的是先更新程式（見 recipe.version_skew）。
+        skew = version_skew(getattr(recipe, "app_version", ""))
+        if skew:
+            self._status(skew, "error")
+        else:
+            self._status("Loaded recipe “%s” (%d steps, route %s)"
+                         % (self.model.recipe_id, n, self.model.kind))
         if ds_kind and ds_kind not in recipe.routes:
             self._status("Loaded recipe “%s”, but it has no '%s' route — "
                          "preview and trial runs will fail."
