@@ -17,8 +17,8 @@ from adept.core.pipeline.step import REGISTRY, StepError
 
 # 本卡片庫全部的 key（影像段 8 張 + 算法段 6 張）
 ALL_KEYS = [
-    "load_patch", "percentile_norm", "glv_mask_norm", "hist_match",
-    "denoise", "align", "subtract", "invert",
+    "load_patch", "normalize", "tone",
+    "denoise", "align", "subtract",
     "snr_map", "blob_segment", "cd_measure", "roi_snr",
     "focus_quality", "glv_stats",
 ]
@@ -130,8 +130,8 @@ def test_percentile_norm_range_and_borrowed_range():
 
     # range_from=test：ref 用 test 的範圍 → 亮度只有一半（跨圖可比）
     ctx = Context(images={"test": src.copy(), "ref": half.copy()})
-    run_step("percentile_norm", ctx, source="ref", range_from="test")
-    run_step("percentile_norm", ctx, source="test")
+    run_step("normalize", ctx, streams="ref", range_from="test")
+    run_step("normalize", ctx, streams="test")
     out_t, out_r = ctx.images["test"], ctx.images["ref"]
     assert out_t.dtype == np.uint8 and out_r.dtype == np.uint8
     assert out_t.min() == 0 and out_t.max() == 255       # 範圍拉滿
@@ -139,18 +139,18 @@ def test_percentile_norm_range_and_borrowed_range():
 
     # range_from 空著：各自拉自己的範圍 → 兩張平均亮度趨於一致
     ctx2 = Context(images={"test": src.copy(), "ref": half.copy()})
-    run_step("percentile_norm", ctx2, source="test")
-    run_step("percentile_norm", ctx2, source="ref")
+    run_step("normalize", ctx2, streams="test")
+    run_step("normalize", ctx2, streams="ref")
     assert abs(ctx2.images["ref"].mean() - ctx2.images["test"].mean()) < 8
 
     # 借不到範圍就報錯 —— 不靜靜改用自己的（輸出都是一張正常的圖，差別只在數字）
     ctx3 = Context(images={"test": src.copy()})
     with pytest.raises(StepError):
-        run_step("percentile_norm", ctx3, source="test", range_from="ghost")
+        run_step("normalize", ctx3, streams="test", range_from="ghost")
 
     # p_low >= p_high → StepError
     with pytest.raises(StepError):
-        run_step("percentile_norm", Context(images={"test": src.copy()}),
+        run_step("normalize", Context(images={"test": src.copy()}),
                  p_low=50.0, p_high=50.0)
 
 
@@ -158,13 +158,13 @@ def test_glv_mask_norm_band_anchoring():
     img = np.full((64, 64), 100, dtype=np.uint8)
     img[10:40, 10:40] = np.linspace(150, 200, 900).reshape(30, 30).astype(np.uint8)
     ctx = Context(images={"test": img.copy()})
-    run_step("glv_mask_norm", ctx, glv_low=150, glv_high=200)
+    run_step("normalize", ctx, method="glv_band", glv_low=150, glv_high=200)
     out = ctx.images["test"]
     assert out.dtype == np.uint8
     assert out[0, 0] == 0            # 帶外的背景被壓到 0
     assert out[10:40, 10:40].max() == 255   # 帶內像素被拉滿
     with pytest.raises(StepError):
-        run_step("glv_mask_norm", Context(images={"test": img.copy()}),
+        run_step("normalize", Context(images={"test": img.copy()}), method="glv_band",
                  glv_low=200, glv_high=100)
 
 
@@ -173,7 +173,7 @@ def test_hist_match_linear_means_close():
     mov = np.clip(rng.normal(60, 10, (128, 128)), 0, 255).astype(np.uint8)
     ref = np.clip(rng.normal(180, 20, (128, 128)), 0, 255).astype(np.uint8)
     ctx = Context(images={"test": mov, "ref": ref})
-    run_step("hist_match", ctx, method="linear")
+    run_step("normalize", ctx, method="match", match_method="linear")
     out = ctx.images["test"]
     assert out.dtype == np.uint8
     assert abs(float(out.mean()) - float(ref.mean())) < 2.0
@@ -250,7 +250,7 @@ def test_subtract_float32_with_visible_blob():
 def test_invert_uint8():
     img = _ramp(32)
     ctx = Context(images={"test": img.copy()})
-    run_step("invert", ctx)
+    run_step("tone", ctx, invert=True)
     assert np.array_equal(ctx.images["test"], 255 - img)
 
 
@@ -317,20 +317,26 @@ def _cd_ctx(nm_per_px=None):
     return Context(images={"diff": diff}, meta=meta)
 
 
-def test_cd_measure_px_and_nm_paths():
-    ctx = _cd_ctx()                                     # 無 nm_per_px
+def test_cd_measure_reports_pixels_only():
+    """量測一律 pixel —— nm 換算是輸出那一刻由使用者填的（2026-07-30）。
+
+    以前這張卡在沒有 ``nm_per_px`` 時吐三個 0（``cd_x_nm`` / ``cd_y_nm`` /
+    ``area_nm2``）並記一條警告，而 ``nm_per_px`` **從來沒有來源**，所以那三個
+    0 是每一顆的常態 —— 它們進得了分數表達式、也寫得進 DSIZE 欄。這條測試鎖
+    住那三個名字不再出現，以及 pixel 面積有被吐出來（以前只在算 nm 時用到）。
+    """
+    ctx = _cd_ctx()
     run_step("cd_measure", ctx)
     assert ctx.features["cd_x_px"] == 10.0
     assert ctx.features["cd_y_px"] == 20.0
-    assert ctx.features["cd_x_nm"] == 0.0
-    assert ctx.features["area_nm2"] == 0.0
-    assert any("nm_per_px" in w for w in ctx.meta["warnings"])
+    assert ctx.features["area_px"] == 200.0            # blob 的真實像素面積
+    assert not [k for k in ctx.features if k.endswith(("_nm", "_nm2"))]
+    assert not [w for w in ctx.meta.get("warnings", []) if "nm_per_px" in w]
 
+    # 有 nm_per_px 也一樣：這張卡不換算，那件事已經不在它的職責裡。
     ctx2 = _cd_ctx(nm_per_px=2.5)
     run_step("cd_measure", ctx2)
-    assert ctx2.features["cd_x_nm"] == pytest.approx(25.0)
-    assert ctx2.features["cd_y_nm"] == pytest.approx(50.0)
-    assert ctx2.features["area_nm2"] == pytest.approx(200 * 2.5 * 2.5)
+    assert sorted(ctx2.features) == ["area_px", "cd_x_px", "cd_y_px"]
 
 
 def test_cd_measure_can_target_a_named_region():
@@ -361,7 +367,7 @@ def test_cd_measure_subpixel_refine_and_fallbacks():
     ctx3 = Context(images={"diff": np.zeros((32, 32), np.float32)})
     run_step("cd_measure", ctx3)
     assert all(ctx3.features[f] == 0.0 for f in
-               ("cd_x_px", "cd_y_px", "cd_x_nm", "cd_y_nm", "area_nm2"))
+               ("cd_x_px", "cd_y_px", "area_px"))
     assert ctx3.meta.get("warnings")
 
 
@@ -444,14 +450,14 @@ def test_brightness_contrast_pivots_around_mid_gray():
     """對比以影像自己的中間值為支點 —— 以 0 為支點會順便把整張圖變亮。"""
     img = np.array([[0, 64, 128, 192, 255]], dtype=np.uint8)
     ctx = Context(images={"test": img.copy()})
-    run_step("brightness_contrast", ctx, contrast=2.0)
+    run_step("tone", ctx, contrast=2.0)
     out = ctx.images["test"]
     assert out[0, 2] == 128, "中灰是支點，不該移動"
     assert out[0, 0] == 0 and out[0, 4] == 255           # 兩端夾住
     assert int(out[0, 1]) < 64 and int(out[0, 3]) > 192  # 往兩邊拉開
 
     ctx2 = Context(images={"test": img.copy()})
-    run_step("brightness_contrast", ctx2, brightness=20.0)
+    run_step("tone", ctx2, brightness=20.0)
     assert int(ctx2.images["test"][0, 2]) == 148
     assert ctx2.images["test"].dtype == np.uint8, "uint8 進 uint8 出"
 
@@ -460,15 +466,15 @@ def test_gamma_opens_up_dark_detail_and_is_reversible_at_one():
     img = np.array([[0, 64, 128, 192, 255]], dtype=np.uint8)
 
     ctx = Context(images={"test": img.copy()})
-    run_step("gamma", ctx, gamma=1.0)
+    run_step("tone", ctx, gamma=1.0)
     np.testing.assert_array_equal(ctx.images["test"], img)   # 1 = 不動
 
     ctx = Context(images={"test": img.copy()})
-    run_step("gamma", ctx, gamma=0.5)
+    run_step("tone", ctx, gamma=0.5)
     assert int(ctx.images["test"][0, 1]) < 64, "gamma<1 要壓暗部（拉開細節）"
 
     ctx = Context(images={"test": img.copy()})
-    run_step("gamma", ctx, gamma=2.0)
+    run_step("tone", ctx, gamma=2.0)
     assert int(ctx.images["test"][0, 1]) > 64
     # 端點永遠不動
     assert int(ctx.images["test"][0, 0]) == 0
@@ -483,15 +489,15 @@ def test_tone_cards_keep_float_streams_float_and_only_touch_their_own():
     """
     f = np.linspace(-5.0, 5.0, 25, dtype=np.float32).reshape(5, 5)
     ctx = Context(images={"test": f.copy(), "ref": f.copy()})
-    run_step("gamma", ctx, gamma=0.7)
+    run_step("tone", ctx, gamma=0.7)
     assert ctx.images["test"].dtype == np.float32
     assert ctx.images["ref"].dtype == np.float32
     np.testing.assert_allclose(ctx.images["ref"], f)     # ref 沒被接進來
 
-    run_step("gamma", ctx, target="ref", gamma=0.7)      # 第二張卡做 ref
+    run_step("tone", ctx, streams="ref", gamma=0.7)      # 第二張卡做 ref
     np.testing.assert_allclose(ctx.images["test"], ctx.images["ref"])
 
     # 指到不存在的流 -> 白話 StepError（不是靜靜跳過）
     ctx2 = Context(images={"test": f.copy()})
     with pytest.raises(StepError):
-        run_step("brightness_contrast", ctx2, target="nope")
+        run_step("tone", ctx2, streams="nope")

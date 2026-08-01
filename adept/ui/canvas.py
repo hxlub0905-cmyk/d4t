@@ -48,7 +48,7 @@ from PySide6.QtWidgets import (
 
 from . import theme
 from .theme import TOKENS
-from .widgets import draw_group_icon
+from .widgets import CARD_MIME, draw_group_icon
 
 __all__ = ["PipelineCanvas", "NODE_W", "NODE_H", "COL_GAP", "ROW_GAP"]
 
@@ -71,6 +71,8 @@ _PORT_R = 5.0
 
 #: 連線中點的方向箭頭大小。畫布可以縮放平移，光看曲線不一定分得出資料往哪流。
 _ARROW = 5.0
+#: 線上那顆「斷開」× 的半徑（F7-22）。
+_CUT_R = 8.0
 
 #: 還沒拉線時，一列最多排幾張卡（見 :func:`layout_columns`）。
 WRAP = 4
@@ -373,6 +375,16 @@ class _NodeItem(QGraphicsItem):
         self.canvas.node_selected.emit(self.node_id)
         super().mousePressEvent(e)
 
+    def mouseDoubleClickEvent(self, e) -> None:  # noqa: D102 - Qt hook
+        """雙擊 = 打開這張卡的設定（F7-22，n8n 的動作）。
+
+        參數面板平常是收起來的，畫布因此吃得到整欄。單擊仍然只是選取
+        （右邊的預覽會跟著跑到這張卡為止），雙擊才把設定攤開。
+        """
+        self.canvas.node_selected.emit(self.node_id)
+        self.canvas.node_activated.emit(self.node_id)
+        e.accept()
+
     def itemChange(self, change, value):        # noqa: D102 - Qt hook
         if change == QGraphicsItem.ItemPositionHasChanged:
             self.canvas.refresh_edges()
@@ -411,16 +423,48 @@ class _EdgeItem(QGraphicsItem):
         super().__init__()
         self.src, self.dst, self.canvas, self.port = src, dst, canvas, int(port)
         self.implicit = bool(implicit)
+        self._hover = False
         self.setFlag(QGraphicsItem.ItemIsSelectable, not self.implicit)
         self.setZValue(-2.0 if self.implicit else -1.0)
+        if not self.implicit:
+            # 滑鼠移上來要出現「斷開」的 ×（F7-22）。隱含的虛線沒有這回事：
+            # 它刪不掉（那條線來自卡片的排列順序，不是使用者拉的）。
+            self.setAcceptHoverEvents(True)
         if self.implicit:
             self.setToolTip(
                 "%s runs before %s because of the order of the cards.\n"
                 "Drag from a port to make the connection explicit."
                 % (src.node_id, dst.node_id))
         else:
-            self.setToolTip("%s → %s  (select and press Delete to remove)"
+            self.setToolTip("%s → %s  (click the × to disconnect)"
                             % (src.node_id, dst.node_id))
+
+    # ---- 斷開鈕（F7-22）---------------------------------------------------
+    def cut_center(self) -> QPointF:
+        """×（斷開鈕）的圓心 —— 線的中點。"""
+        return self.path().pointAtPercent(0.5)
+
+    def cut_hit(self, pos: QPointF) -> bool:
+        d = pos - self.cut_center()
+        return (d.x() * d.x() + d.y() * d.y()) <= (_CUT_R + 2.0) ** 2
+
+    def hoverEnterEvent(self, e) -> None:       # noqa: D102 - Qt hook
+        self._hover = True
+        self.update()
+        super().hoverEnterEvent(e)
+
+    def hoverLeaveEvent(self, e) -> None:       # noqa: D102 - Qt hook
+        self._hover = False
+        self.update()
+        super().hoverLeaveEvent(e)
+
+    def mousePressEvent(self, e) -> None:       # noqa: D102 - Qt hook
+        if (not self.implicit and self._hover
+                and e.button() == Qt.LeftButton and self.cut_hit(e.pos())):
+            self.canvas.edge_removed.emit(self.src.node_id, self.dst.node_id)
+            e.accept()
+            return
+        super().mousePressEvent(e)
 
     def pair(self) -> Tuple[str, str]:
         return (self.src.node_id, self.dst.node_id)
@@ -433,7 +477,12 @@ class _EdgeItem(QGraphicsItem):
         return p
 
     def boundingRect(self) -> QRectF:
-        return self.path().boundingRect().adjusted(-6, -6, 6, 6)
+        # ``_CUT_R + 2`` 是那顆 × 的半徑。**boundingRect 必須涵蓋所有畫得出去的
+        # 東西** —— 一條水平的線本身高度接近 0，而 × 畫在中點上下各 8 px；
+        # 不加寬的話 Qt 只會重繪那條細長條，滑鼠移開之後 × 的舊位置擦不掉。
+        # （這個坑在節點那邊踩過三次了：埠標籤、埠圓點、輸出埠的 +。）
+        pad = max(6.0, _CUT_R + 3.0)
+        return self.path().boundingRect().adjusted(-pad, -pad, pad, pad)
 
     def shape(self) -> QPainterPath:
         stroker_pen = QPen(Qt.black, 10.0)
@@ -458,6 +507,22 @@ class _EdgeItem(QGraphicsItem):
             p.setPen(QPen(col, 2.2 if self.isSelected() else 1.6))
         p.setBrush(Qt.NoBrush)
         p.drawPath(path)
+
+        # 滑鼠在線上 → 中點換成一顆「斷開」的 ×（F7-22）。
+        #
+        # 選起來按 Delete 本來就做得到，但**畫面上沒有任何東西講出這件事** ——
+        # 接錯一條線的人會卡在那裡。刪除的入口要長在被刪的東西上面。
+        # 箭頭跟 × 二選一：兩個都畫在中點會疊成一團。
+        if self._hover and not self.implicit:
+            c = self.cut_center()
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(QColor(TOKENS["danger_text"])))
+            p.drawEllipse(c, _CUT_R, _CUT_R)
+            p.setPen(QPen(QColor(TOKENS["bg_surface"]), 1.6))
+            d = _CUT_R * 0.45
+            p.drawLine(c + QPointF(-d, -d), c + QPointF(d, d))
+            p.drawLine(c + QPointF(-d, d), c + QPointF(d, -d))
+            return
 
         # 中點的方向箭頭。畫布可以縮放、平移、節點也可以拖，光看一條曲線不一定
         # 分得出資料往哪一邊流 —— 這是「這是一張流程圖」的最基本線索。
@@ -484,6 +549,8 @@ class PipelineCanvas(QGraphicsView):
     """
 
     node_selected = Signal(str)
+    #: 雙擊一張卡 = 「我要編它」（F7-22）。單擊只是選取。
+    node_activated = Signal(str)
     node_toggled = Signal(str, bool)
     move_requested = Signal(str, int)          # 相容用，畫布不發
     remove_requested = Signal(str)
@@ -495,6 +562,8 @@ class PipelineCanvas(QGraphicsView):
     #: 來源節點只有一個沒有名字的輸出埠時是空字串。
     edge_added = Signal(str, str, str)
     edge_removed = Signal(str, str)
+    #: 從卡片庫拖一張卡丟到畫布上：``(step_key, 場景 x, 場景 y)``（F7-22）。
+    card_dropped = Signal(str, float, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -502,6 +571,7 @@ class PipelineCanvas(QGraphicsView):
         self.setScene(self._scene)
         self.setRenderHint(QPainter.Antialiasing, True)
         self.setDragMode(QGraphicsView.RubberBandDrag)
+        self.setAcceptDrops(True)                 # 卡片庫拖進來（F7-22）
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setFrameShape(QGraphicsView.NoFrame)
         self.setMinimumHeight(180)
@@ -520,7 +590,7 @@ class PipelineCanvas(QGraphicsView):
 
     # ---- 縮放控制（F7-14）--------------------------------------------------
     def _build_zoom_bar(self) -> None:
-        """左下角四顆小鈕：縮小 / 放大 / 全部看得完 / 回到 100%。
+        """左下角幾顆小鈕：縮小 / 放大 / 全部看得完 / 回到 100% / 排整齊。
 
         滾輪縮放本來就有，但**畫面上沒有任何東西說得出這件事** —— 而且滾過頭
         之後沒有路回來：點陣底縮小之後每一格都一樣，使用者不知道自己在哪裡。
@@ -540,13 +610,16 @@ class PipelineCanvas(QGraphicsView):
         specs = (("−", "Zoom out", lambda: self.zoom_by(1 / 1.25)),
                  ("+", "Zoom in", lambda: self.zoom_by(1.25)),
                  ("⤢", "Fit the whole pipeline in view", self.fit),
-                 ("1:1", "Back to 100%", self.reset_zoom))
+                 ("1:1", "Back to 100%", self.reset_zoom),
+                 # 排整齊跟縮放是同一類東西（都只動「怎麼看」，不動 recipe），
+                 # 所以放同一排，而不是放到會改檔案的工具列上。
+                 ("⌗", "Tidy up — put the cards back on the grid", self.tidy))
         self._zoom_buttons = []
         for text, tip, slot in specs:
             b = QPushButton(text, bar)
             b.setObjectName("cardButton")
             b.setToolTip(tip)
-            b.setFixedSize(24 if text != "1:1" else 30, 22)
+            b.setFixedSize(24 if text not in ("1:1",) else 30, 22)
             b.setFocusPolicy(Qt.NoFocus)
             b.clicked.connect(slot)
             lay.addWidget(b)
@@ -676,6 +749,58 @@ class PipelineCanvas(QGraphicsView):
         if 0 < s < self.MIN_FIT_SCALE:
             self.scale(self.MIN_FIT_SCALE / s, self.MIN_FIT_SCALE / s)
         self._sync_zoom_label()
+
+    # ---- 從卡片庫拖進來（F7-22）-------------------------------------------
+    def dragEnterEvent(self, e) -> None:            # noqa: D102 - Qt hook
+        if e.mimeData().hasFormat(CARD_MIME):
+            e.acceptProposedAction()
+        else:
+            super().dragEnterEvent(e)
+
+    def dragMoveEvent(self, e) -> None:             # noqa: D102 - Qt hook
+        if e.mimeData().hasFormat(CARD_MIME):
+            e.acceptProposedAction()
+        else:
+            super().dragMoveEvent(e)
+
+    def dropEvent(self, e) -> None:                 # noqa: D102 - Qt hook
+        if not e.mimeData().hasFormat(CARD_MIME):
+            return super().dropEvent(e)
+        key = bytes(e.mimeData().data(CARD_MIME)).decode("utf-8")
+        # 落點：**滑鼠放開的地方**（場景座標），這正是拖曳相對於「Add」的差別。
+        # 位置不寫進 recipe（見模組 docstring），所以它只影響現在看到的畫面 ——
+        # 重新載入會回到自動排版，那是既有的行為，這裡不改。
+        pos = self.mapToScene(e.position().toPoint()
+                              if hasattr(e, "position") else e.pos())
+        self.card_dropped.emit(str(key), float(pos.x()), float(pos.y()))
+        e.acceptProposedAction()
+
+    def place_dropped(self, node_id: str, x: float, y: float) -> bool:
+        """把剛加進來的節點移到落點（Studio 加完卡之後回頭呼叫）。"""
+        item = self._items.get(str(node_id))
+        if item is None:
+            return False
+        item.setPos(float(x) - NODE_W / 2.0, float(y) - NODE_H / 2.0)
+        self.refresh_edges()
+        return True
+
+    def tidy(self) -> None:
+        """把節點重新排回自動排版的位置（F7-22）。
+
+        節點是拖得動的，而拖過之後就只能自己一個個搬回去 —— 這在 n8n 是一顆
+        「Tidy up」。排版本來就有（:func:`layout_columns`，每次重建畫布都在用），
+        所以這裡只是**把它再套一次**，不是新的排版邏輯。
+
+        位置不寫進 recipe（見模組 docstring），所以這個動作不會讓檔案變髒，
+        也就不需要進復原堆疊。
+        """
+        pos = layout_columns(self._order, self._pairs + self._implicit)
+        for nid, item in self._items.items():
+            col, row = pos.get(nid, (0, 0))
+            item.setPos(col * (NODE_W + COL_GAP), row * (NODE_H + ROW_GAP))
+        self.refresh_edges()
+        rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
+        self._scene.setSceneRect(rect)
 
     def refresh_edges(self) -> None:
         for e in self._edges:

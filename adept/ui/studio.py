@@ -100,6 +100,7 @@ from PySide6.QtWidgets import (
 
 import adept.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
 from adept.core.pipeline import ParamError, Recipe, get_step, list_steps
+from adept.core.pipeline.recipe import version_skew
 
 from .export_dialog import ExportDialog
 from .canvas import PipelineCanvas
@@ -459,7 +460,7 @@ class StudioWindow(QMainWindow):
     # 介面組裝
     # ==================================================================== #
     def _build_toolbar(self) -> None:
-        """工具列（M7 精簡）。
+        """工具列（M7 精簡；F7-22 分組）。
 
         兩處刻意的取捨：
 
@@ -469,6 +470,21 @@ class StudioWindow(QMainWindow):
         * **「全跑」收進「Run trial」的下拉** —— 兩顆長得一樣的 ▶ 鈕擺在一起，
           新手分不出差別也不知道該按哪顆。主要動作只留一顆，破壞性比較大的
           「跑整批」降級成選單項目。
+
+        分組（F7-22）
+        -------------
+        以前是七顆長得一模一樣的鈕排成一列，沒有任何分隔 —— 讀起來是一串等權重
+        的東西，使用者得逐顆讀完才知道哪顆是自己要的。現在照**做什麼事**分四段，
+        中間用分隔線：
+
+            檔案（開/存） │ 起手與輸出 │ 復原 │ ……… │ 說明・主題 │ 試跑
+
+        `Help` 與主題移到右邊：它們是**隨時可用但不屬於流程**的東西，混在檔案
+        操作裡只會讓左邊那段變長。試跑仍然在最右邊 —— 它是這個畫面的主要動作。
+
+        **復原／重做這一輪才長出按鈕。** F7-16 給了 Ctrl+Z / Ctrl+Shift+Z，
+        但工具列上沒有對應的鈕 —— 而目標使用者是不寫 code 的工程師，
+        「這個軟體能不能反悔」這件事不該只寫在快捷鍵裡。
         """
         bar = QToolBar("Main actions", self)
         bar.setMovable(False)
@@ -493,6 +509,10 @@ class StudioWindow(QMainWindow):
             "Export…",
             "Write these results back to KLARF, or produce reports and overlays",
             self.open_export_dialog)
+        self.btn_undo = self._tool_button(
+            "↶", "Undo the last change", self.undo)
+        self.btn_redo = self._tool_button(
+            "↷", "Redo the change you just undid", self.redo)
         self.btn_help = self._tool_button(
             "Help", "Reopen the getting-started tour (includes “Try it with "
                     "sample data”)",
@@ -501,14 +521,25 @@ class StudioWindow(QMainWindow):
         self.btn_theme = self._tool_button(
             "◐", "Switch between the light and dark theme",
             self.toggle_theme)
-        for b in (self.btn_open_klarf, self.btn_open_recipe,
-                  self.btn_save_recipe, self.btn_examples,
-                  self.btn_export, self.btn_help, self.btn_theme):
-            bar.addWidget(b)
+
+        # 一段 = 一種事情；段與段之間一條分隔線。
+        for group in ((self.btn_open_klarf, self.btn_open_recipe,
+                       self.btn_save_recipe),
+                      (self.btn_examples, self.btn_export),
+                      (self.btn_undo, self.btn_redo)):
+            for b in group:
+                bar.addWidget(b)
+            bar.addSeparator()
 
         spacer = QWidget(bar)
+        spacer.setObjectName("toolbarSpacer")
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(spacer)
+
+        # 右邊：不屬於流程、但要隨時找得到的兩顆。
+        bar.addWidget(self.btn_help)
+        bar.addWidget(self.btn_theme)
+        bar.addSeparator()
 
         self.lbl_trial_n = QLabel("First ", bar)
         bar.addWidget(self.lbl_trial_n)
@@ -586,9 +617,13 @@ class StudioWindow(QMainWindow):
             id(self.btn_save_recipe): "Ctrl+S",
             id(self.btn_trial): "Ctrl+R",
             id(self.btn_empty_open): "Ctrl+O",
+            # F7-22：這兩顆這一輪才長出來，快捷鍵 F7-16 就有了。
+            id(self.btn_undo): "Ctrl+Z",
+            id(self.btn_redo): "Ctrl+Shift+Z",
         }
         for w in (self.btn_open_klarf, self.btn_open_recipe,
-                  self.btn_save_recipe, self.btn_trial, self.btn_empty_open):
+                  self.btn_save_recipe, self.btn_trial, self.btn_empty_open,
+                  self.btn_undo, self.btn_redo):
             self._set_tip(w, w.toolTip())
 
     def _set_tip(self, widget: Any, text: str) -> None:
@@ -726,6 +761,10 @@ class StudioWindow(QMainWindow):
         middle.setStretchFactor(0, 3)
         middle.setStretchFactor(1, 2)
         self.middle_splitter = middle
+        # 設定面板**預設收起來**（F7-22）：畫布是這個畫面的主體，而參數表以前
+        # 常駐佔掉這一欄的四成高度。雙擊一張卡才攤開 —— 那是 n8n 的動作，
+        # 而且「我要編這張卡」本來就是一個明確的意圖，不是選取的副作用。
+        self._params_open = False
 
         # 右：單顆預覽（F7-5：Gallery 與直方圖搬到 Results 視窗，
         #     主視窗只留「編流程 + 看單顆」，影像因此拿得到整欄高度）
@@ -746,6 +785,9 @@ class StudioWindow(QMainWindow):
         root.setStretchFactor(1, 2)
         root.setStretchFactor(2, 4)
         root.setSizes(list(COLUMN_SIZES))
+        # 開窗就是收起來的狀態（畫布拿整欄）。放在版面建好之後，
+        # 因為 setSizes 要有實際尺寸才算得出來。
+        middle.setSizes([1, 0])
         self.top_splitter = root
         self.root_splitter = root
         self.setCentralWidget(root)
@@ -991,6 +1033,8 @@ class StudioWindow(QMainWindow):
         self.library.add_requested.connect(self._on_add_requested)
 
         self.pipeline.node_selected.connect(self.select_node)
+        self.pipeline.node_activated.connect(self._on_node_activated)
+        self.pipeline.card_dropped.connect(self._on_card_dropped)
         self.pipeline.node_toggled.connect(self._on_node_toggled)
         self.pipeline.move_requested.connect(self._on_move_requested)
         self.pipeline.remove_requested.connect(self._on_remove_requested)
@@ -1177,6 +1221,17 @@ class StudioWindow(QMainWindow):
         self.spin_trial_n.setEnabled(can_run)
         self.lbl_trial_n.setEnabled(can_run)
 
+        # 復原／重做：沒得退的時候要**看得出來**沒得退（F7-22）。
+        # 這兩顆是新長出來的鈕，而 model 早就答得出這兩個問題了。
+        self.btn_undo.setEnabled(self.model.can_undo())
+        self._set_tip(self.btn_undo,
+                      "Undo the last change" if self.model.can_undo()
+                      else "Nothing to undo yet.")
+        self.btn_redo.setEnabled(self.model.can_redo())
+        self._set_tip(self.btn_redo,
+                      "Redo the change you just undid" if self.model.can_redo()
+                      else "Nothing to redo.")
+
         self.btn_save_recipe.setEnabled(has_steps)
         self._set_tip(self.btn_save_recipe,
                       "Save the current pipeline as a recipe JSON" if has_steps
@@ -1189,8 +1244,14 @@ class StudioWindow(QMainWindow):
             if has_results
             else "No results yet — run a trial first.")
 
-    def _node_summary(self, node: Any) -> str:
-        """最多 3 個「非預設」參數，渲染成 ``k=v`` 串起來。"""
+    def _node_summary(self, node: Any, shown: Optional[Sequence[str]] = None) -> str:
+        """最多 3 個「非預設」參數，渲染成 ``k=v`` 串起來。
+
+        ``shown`` 是**副標那一行已經講過的影像流名**（``test ref → test ref``）。
+        指定影像流的那些參數會被跳掉 —— 它們的值就是副標的來源，兩行講同一件事
+        只是把第三行佔掉，而第三行本來是拿來放「這張卡被設定成什麼」的
+        （F7-21：``streams=test,ref`` 跟上面那行完全重複）。
+        """
         try:
             step_cls = get_step(node.step)
         except KeyError:
@@ -1201,10 +1262,18 @@ class StudioWindow(QMainWindow):
         # 於是看到的是「template=gc1:iVBORw0KGg…」，既沒有資訊也擠掉了真正
         # 有用的參數。這種參數只講「有沒有設」。
         opaque = {p.name: p.type for p in step_cls.params if p.type == "template"}
+        stream_params = {p.name for p in step_cls.params
+                         if p.type in ("image_key", "image_keys")}
+        seen = {str(s) for s in (shown or [])}
         parts: List[str] = []
         for name, value in node.params.items():
             if name in defaults and defaults[name] == value:
                 continue
+            if name in stream_params and seen:
+                # 這個參數挑的流副標已經列出來了 → 不要再講一次。
+                picked = {v.strip() for v in str(value).split(",") if v.strip()}
+                if picked and picked <= seen:
+                    continue
             if name in opaque:
                 parts.append("%s: set" % name)
             else:
@@ -1273,7 +1342,9 @@ class StudioWindow(QMainWindow):
                 "label": label,
                 "category": category,
                 "enabled": bool(node.enabled),
-                "summary": self._node_summary(node),
+                # 副標那行印的是 reads → writes/regions；摘要不要再講一次
+                "summary": self._node_summary(
+                    node, shown=list(reads) + list(writes) + list(regions_out)),
                 "writes": writes,
                 "reads": reads,
                 "regions_out": regions_out,
@@ -1355,15 +1426,18 @@ class StudioWindow(QMainWindow):
         if nid not in self.model.nodes:
             return None
         at = self.model.node_order.index(nid) + 1
-        try:
-            new_id = self.model.add_step(str(step_key), at=at)
-        except (KeyError, ParamError) as e:
-            self._status("Could not add card: %s" % e, "error")
-            return None
-        note = self._point_at_stream(new_id, str(stream)) if stream else ""
-        # 顯式連線：使用者的動作是「接在這張後面」，那條線就該是實線。
-        # （route 相鄰本來就會產生一條虛線，但它表達的是順序，不是這個意圖。）
-        self.model.add_edge(nid, new_id)
+        # 使用者做的是**一個**動作（加一張卡），所以復原也該是一步 —— 底下是
+        # add_step + set_param + add_edge 三個 model 動作（F7-22）。
+        with self.model.compound("add-card"):
+            try:
+                new_id = self.model.add_step(str(step_key), at=at)
+            except (KeyError, ParamError) as e:
+                self._status("Could not add card: %s" % e, "error")
+                return None
+            note = self._point_at_stream(new_id, str(stream)) if stream else ""
+            # 顯式連線：使用者的動作是「接在這張後面」，那條線就該是實線。
+            # （route 相鄰本來就會產生一條虛線，但它表達的是順序，不是這個意圖。）
+            self.model.add_edge(nid, new_id)
         self._status("Added “%s” after “%s”%s%s"
                      % (new_id, nid, note, self._unmet_needs(new_id)))
         self.select_node(new_id)
@@ -1373,7 +1447,7 @@ class StudioWindow(QMainWindow):
     #: 主要影像流的參數名（依優先順序）。Enhance 卡一律叫 ``target`` 或
     #: ``source``，而**一張卡只做一條流** —— 要對另一張圖做同一件事就再放一張
     #: 卡，那才是畫布看得懂的說法。
-    _PRIMARY_PARAMS = ("target", "source")
+    _PRIMARY_PARAMS = ("streams", "target", "source")
 
     def _primary_stream_of(self, node_id: str) -> str:
         """``node_id`` 這張卡做在哪一條流上（接下去的卡預設跟著它走）。"""
@@ -1390,12 +1464,34 @@ class StudioWindow(QMainWindow):
             return ""
         return str(writes[0]) if writes else ""
 
-    def _point_at_stream(self, node_id: str, stream: str) -> str:
-        """把 ``node_id`` 的主要輸入指到 ``stream``（回一句給狀態列的話）。
+    def _point_at_stream(self, node_id: str, stream: str,
+                         accumulate: bool = False) -> str:
+        """把 ``node_id`` 的輸入接上 ``stream``（回一句給狀態列的話）。
 
         這是「用節點表達要對哪一張圖做」的實作點：使用者從 ``ref`` 那顆輸出埠
-        拉一條線過來，講的就是**這張卡做在 ref 上**。以前那句話只能在控制列的
+        拉一條線過來，講的就是**這張卡也做 ref**。以前那句話只能在控制列的
         下拉裡講，畫布只表達得出先後順序 —— 於是 test 是主角、ref 是附帶。
+
+        **累加還是取代，看參數型別**（F7-19）：
+
+        - ``image_keys``（一串流，例如 Enhance 卡的 ``streams``）且
+          ``accumulate=True`` → **累加**。先拉 test 再拉 ref 的意思是「兩張都
+          做」，不是「改成只做 ref」。這正是使用者說的「希望是能夠互相連動
+          的」—— 以前第二條線把第一條的設定蓋掉，於是畫布上做不出「兩條都
+          接」，得回控制列去勾。
+        - ``image_key``（單一具名角色，例如 ``subtract`` 的 ``a`` / ``b``）→
+          **取代**。往 ``a`` 再拉一條是「改接別的」，不是「a 有兩條」。
+
+        ``accumulate`` 由呼叫端決定，而它的判準是**這條線是不是新的依賴**：
+
+        - **第一條線**（``add_edge`` 成功）→ 取代。卡片預設的 ``streams="test"``
+          是規格的預設值，不是使用者拉的線；把 ref 累加上去的話，他拉了一條卻
+          得到兩條，而畫布就說謊了。
+        - **同一對節點的第二條線**（``has_edge``）→ 累加。那才是「這條也接上」。
+        - 從卡片庫加一張新卡（``add_card_after``）→ 取代，理由同第一條。
+
+        累加不必回頭處理畫線：畫布的線數是從「兩端共用的影像流」推出來的
+        （``_ports_between``），``streams`` 一多一條，那條線就自己出現了。
         """
         node = self.model.nodes.get(str(node_id))
         if node is None or not stream:
@@ -1408,12 +1504,24 @@ class StudioWindow(QMainWindow):
             spec = specs.get(name)
             if spec is None or spec.type not in ("image_key", "image_keys"):
                 continue
-            if str(node.params.get(name, "")) == stream:
-                return ""
+            current = str(node.params.get(name, "") or "")
+            if spec.type == "image_keys" and accumulate:
+                keys = [k.strip() for k in current.split(",") if k.strip()]
+                if stream in keys:
+                    return ""
+                keys.append(stream)
+                value, joined = ",".join(keys), True
+            else:
+                if current == stream:
+                    return ""
+                value, joined = stream, False
             try:
-                self.model.set_param(str(node_id), name, stream)
+                self.model.set_param(str(node_id), name, value)
             except ParamError:                 # pragma: no cover — 值就是流名
                 return ""
+            if joined and "," in value:
+                return (" — “%s” now works on %s (same settings for both)"
+                        % (node_id, " and ".join(value.split(","))))
             return " — “%s” now works on %s" % (node_id, stream)
         return ""
 
@@ -1484,10 +1592,12 @@ class StudioWindow(QMainWindow):
         """
         src, dst, stream = str(src), str(dst), str(stream or "")
         if self.model.has_edge(src, dst):
-            note = self._point_at_stream(dst, stream)
+            # 同一對節點再拉一條 —— 對 image_keys 的卡這是「這條也接上」，
+            # 所以要真的多一條線出來，不是回一句 already connected。
+            note = self._point_at_stream(dst, stream, accumulate=True)
             self._status(note.lstrip(" —").strip() if note else
-                         "%s → %s is already connected — every image stream "
-                         "they share is already drawn." % (src, dst))
+                         "%s → %s is already connected on %s."
+                         % (src, dst, stream or "that stream"))
         elif self.model.add_edge(src, dst):
             # 影像流在**線真的接起來之後**才改。會成環的那條線沒有落地，
             # 它不該留下任何痕跡 —— 尤其不是「那張卡安靜地改成做 ref 了」。
@@ -1535,6 +1645,45 @@ class StudioWindow(QMainWindow):
         self._schedule_preview()
         return True
 
+    # ---- 設定面板：預設收起，雙擊卡片才攤開（F7-22）------------------------
+    def _on_node_activated(self, node_id: str) -> None:
+        """雙擊一張卡：選它 + 把設定攤開。"""
+        if self.select_node(str(node_id)):
+            self.set_params_open(True)
+
+    def _on_card_dropped(self, step_key: str, x: float, y: float) -> None:
+        """從卡片庫拖一張卡丟到畫布上（F7-22）。
+
+        接法跟按「Add」完全一樣（``_on_add_requested`` → ``add_card_after``），
+        差別只在**落點**：丟在哪裡就擺在哪裡。位置不寫進 recipe，所以這只影響
+        現在看到的畫面 —— 那是既有的行為（見 canvas 模組 docstring），
+        重新載入會回到自動排版。
+        """
+        self._on_add_requested(str(step_key))
+        nid = self.selected_node
+        if nid:
+            self.pipeline.place_dropped(nid, float(x), float(y))
+
+    def params_open(self) -> bool:
+        """設定面板現在攤開著嗎。
+
+        追**明確狀態**而不是問 widget：`isVisible()` 在視窗 show 之前恆為
+        False，那個坑這個 repo 踩過（見 CLAUDE.md §7）。
+        """
+        return bool(self._params_open)
+
+    def set_params_open(self, on: bool) -> bool:
+        """攤開／收起設定面板。收起來時畫布拿到整欄高度。"""
+        on = bool(on)
+        self._params_open = on
+        total = sum(self.middle_splitter.sizes()) or self.middle_splitter.height()
+        if on:
+            keep = max(180, int(total * 0.42))
+            self.middle_splitter.setSizes([max(0, total - keep), keep])
+        else:
+            self.middle_splitter.setSizes([total, 0])
+        return on
+
     # ==================================================================== #
     # 主題（F7-2）
     # ==================================================================== #
@@ -1576,6 +1725,7 @@ class StudioWindow(QMainWindow):
         self._refresh_feature_combo()
         self._sync_score_widgets()
         self.stack.setCurrentWidget(self.score_pane)
+        self.set_params_open(True)   # 分數面板本來就是「我要編」
 
     def show_param_page(self) -> None:
         self.stack.setCurrentWidget(self.param_form)
@@ -1828,8 +1978,14 @@ class StudioWindow(QMainWindow):
         self.recipe_path = path
         self.setWindowTitle("ADEPT Studio — %s" % self.model.recipe_id)
         n = len(self.model.node_order)
-        self._status("Loaded recipe “%s” (%d steps, route %s)"
-                     % (self.model.recipe_id, n, self.model.kind))
+        # 版本落差要在**載入的那一刻**講，不是等他按了試跑才從 lint 冒出來 ——
+        # 那時候他已經在調參數了，而該做的是先更新程式（見 recipe.version_skew）。
+        skew = version_skew(getattr(recipe, "app_version", ""))
+        if skew:
+            self._status(skew, "error")
+        else:
+            self._status("Loaded recipe “%s” (%d steps, route %s)"
+                         % (self.model.recipe_id, n, self.model.kind))
         if ds_kind and ds_kind not in recipe.routes:
             self._status("Loaded recipe “%s”, but it has no '%s' route — "
                          "preview and trial runs will fail."
@@ -2089,10 +2245,16 @@ class StudioWindow(QMainWindow):
                 feats = list(get_step(node.step).resolve_features(node.params))
             except Exception:              # noqa: BLE001 — 顯示用
                 feats = []
+        # 儀表要跟著**畫面上正在看的東西**走：並排比對打開時是左右那兩條流，
+        # 所以底下的直方圖也是兩張、順序一樣（使用者是拿它們互相對照的）。
+        shown = [self.stream_combo.currentText()]
+        if self._compare_on:
+            shown.append(self.stream_combo_b.currentText())
         insp.set_context(self.selected_node or "",
                          params=dict(node.params) if node else {},
                          result=one, batch=self.trial_results, meta=meta,
-                         feature_names=feats)
+                         feature_names=feats,
+                         shown_streams=[s for s in shown if s])
         self.inspector_summary.setText(insp.summary())
 
     def _refresh_region_button(self) -> None:
@@ -2203,13 +2365,21 @@ class StudioWindow(QMainWindow):
         切回來（F7-9 試用回饋 §4）。F7-18 之後一張卡只寫一條流，兩者又合一了，
         但這條規則仍然是對的（``roi_template`` 這類卡的 writes 不只一項）。
         """
+        # 並排打開時左邊固定從 test 起跳（右邊就是 ref）——「兩張輸入影像」是
+        # 並排唯一的用途，而每次點卡片都要重認一次哪邊是哪邊的話，比對就慢了。
+        if self._compare_on and "test" in images:
+            return "test"
         nid = self.selected_node
         node = self.model.nodes.get(nid) if nid else None
         if node is not None:
             for name in self._PRIMARY_PARAMS:
-                val = str(node.params.get(name, "") or "")
-                if val in images:
-                    return val
+                # ``streams`` 是**一串**（"test,ref"）—— 整串當流名去比一定
+                # 落空，然後就掉到下面的 writes 分支取最後一項，於是點一張
+                # 兩條流的 Normalize 會跳到 ref。取第一條才是「這張卡的主流」。
+                for val in str(node.params.get(name, "") or "").split(","):
+                    val = val.strip()
+                    if val in images:
+                        return val
             try:
                 writes = get_step(node.step).resolve_writes(node.params)
             except KeyError:
@@ -2309,11 +2479,16 @@ class StudioWindow(QMainWindow):
         self.stream_combo_b.setVisible(on)
         self._compare_on = on
         if on:
+            # 打開的當下重挑一次左右兩條流：預設是 test / ref。手動挑過的
+            # (``_user_stream``) 仍然優先 —— 這裡只負責「還沒挑過」的情況。
+            self._populate_streams(self._preview_images or {})
             self._show_current_stream()
             scale, offset = self.image_view.view_state()
             self.image_view_b.set_view(scale, offset)
         else:
             self.image_view_b.set_image(None)
+        # 儀表跟著畫面走：兩張圖 → 兩張直方圖（見 _refresh_inspector）。
+        self._refresh_inspector(getattr(self, "_last_result", None))
         return on
 
     def compare_enabled(self) -> bool:

@@ -114,8 +114,10 @@ adept/
 
 ## 廠內格式驗證
 
-開發全程用合成資料，有三個假設必須用真實檔案確認（page→channel 對應、
-`nm_per_px` 來源、KLARF 變體）。`fab_probe/` 裡三支 stdlib-only 單檔腳本負責這件事，
+開發全程用合成資料，原本有三個假設要用真實檔案確認。2026-07-30 結掉兩個：
+**page→channel 對應已確認**（第一張 = test、第二張 = ref），**`nm_per_px` 用設計繞開**
+（量測全程用 pixel，nm 換算搬到輸出時由使用者填 nm/px）。剩下 **KLARF 變體**還要確認。
+`fab_probe/` 裡三支 stdlib-only 單檔腳本負責這件事，
 輸出是**純文字、預設遮蔽 Lot/Wafer/Device 識別碼**，設計成可以直接複製貼出廠區：
 
 ```

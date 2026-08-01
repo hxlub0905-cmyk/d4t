@@ -63,7 +63,7 @@ def make_results(n=N, scores=None):
             "error": None,
             "score": s,
             "bin": 1 if i < n // 2 else 0,
-            "features": {"cd_x_nm": 12.5 + i, "blob_snr": 3.0 + i},
+            "features": {"cd_x_px": 12.5 + i, "blob_snr": 3.0 + i},
         })
     return out
 
@@ -162,6 +162,62 @@ def test_inplace_bin_map_and_size_column(lot, tmp_path):
     assert vals == ["7", "9"]
 
 
+# --------------------------------------------------------------------------- #
+# 單位換算：pipeline 全程 pixel，nm 由使用者在輸出時填（2026-07-30）
+# --------------------------------------------------------------------------- #
+# 這個合成 KLARF 沒有 DSIZE 欄，所以這幾條借 CLASSNUMBER 當「尺寸欄」——
+# 要驗的是**寫進去的數值**，跟欄位叫什麼名字無關。
+
+def test_size_column_writes_the_pixel_value_unchanged_by_default(lot, tmp_path):
+    """預設不換算。「不換算」比「用一個猜來的係數換算」誠實。"""
+    doc = klarf_core.load(lot["klarf"])
+    results = make_results()
+    out = tmp_path / "px.001"
+    plan = klarf_out.apply_writeback(doc, results, "inplace", str(out),
+                                     size_col="CLASSNUMBER",
+                                     size_feature="cd_x_px")
+    new = klarf_core.load(str(out))
+    ci, di = new.col_index("CLASSNUMBER"), new.col_index("DEFECTID")
+    got = {r[di]: float(r[ci]) for r in new.defects}
+    assert got == {r["defect_id"]: pytest.approx(r["features"]["cd_x_px"])
+                   for r in results}
+    # 預覽要講得出單位 —— 否則「這一欄是什麼單位」只存在按下去那個人的腦子裡。
+    assert any("pixels" in n for n in plan.notes)
+
+
+def test_size_scale_is_the_nm_per_px_the_user_typed_in(lot, tmp_path):
+    """換算的位置：輸出的那一刻，係數由使用者給。
+
+    以前是 cd_measure 讀 ``meta['nm_per_px']`` 自己乘 —— 而那個欄位沒有來源，
+    所以每一顆的 nm 都是 0。現在係數是 export 的一個參數，沒填就是 pixel。
+    """
+    doc = klarf_core.load(lot["klarf"])
+    results = make_results()
+    out = tmp_path / "nm.001"
+    plan = klarf_out.apply_writeback(doc, results, "inplace", str(out),
+                                     size_col="CLASSNUMBER",
+                                     size_feature="cd_x_px", size_scale=2.5)
+    new = klarf_core.load(str(out))
+    ci, di = new.col_index("CLASSNUMBER"), new.col_index("DEFECTID")
+    got = {r[di]: float(r[ci]) for r in new.defects}
+    assert got == {r["defect_id"]: pytest.approx(r["features"]["cd_x_px"] * 2.5)
+                   for r in results}
+    assert any("2.5" in n for n in plan.notes)
+
+
+@pytest.mark.parametrize("bad", [0, -1.0, "nope", None, float("nan")])
+def test_a_bad_size_scale_is_refused_before_anything_is_written(lot, tmp_path, bad):
+    """填錯的係數要在寫檔之前擋下來，而且訊息要說得出「1 是什麼意思」。"""
+    doc = klarf_core.load(lot["klarf"])
+    out = tmp_path / "bad.001"
+    with pytest.raises(ExportError) as ei:
+        klarf_out.apply_writeback(doc, make_results(), "inplace", str(out),
+                                  size_col="CLASSNUMBER",
+                                  size_feature="cd_x_px", size_scale=bad)
+    assert "1" in str(ei.value)                 # 講得出怎麼寫成 pixel
+    assert not out.exists()                     # 失敗不留半個檔
+
+
 def test_inplace_missing_column_raises_with_help(lot, tmp_path):
     """要寫的欄位不存在 → 報錯（而且訊息要看得懂、要指出可行的下一步）。"""
     doc = klarf_core.load(lot["klarf"])
@@ -204,28 +260,28 @@ def test_annotate_adds_columns_and_keeps_images(lot, tmp_path):
     # 輸出放在原資料夾，影像（多頁 TIFF / per-defect PNG）才找得到
     out = os.path.join(os.path.dirname(src), "annotated.001")
     plan = klarf_out.apply_writeback(doc, results, "annotate", out,
-                                     extra_features=["cd_x_nm"])
+                                     extra_features=["cd_x_px"])
 
-    assert plan.columns_added == ["ADCSCORE", "ADCCLASS", "CD_X_NM"]
+    assert plan.columns_added == ["ADCSCORE", "ADCCLASS", "CD_X_PX"]
     assert plan.n_rows_out == N
     assert plan.n_rows_changed == N
     assert error_codes(plan.issues) == base_errors      # 沒有新的 error
 
     new = klarf_core.load(out)
     cols = [c.upper() for c in new.defect_columns]
-    assert "ADCSCORE" in cols and "ADCCLASS" in cols and "CD_X_NM" in cols
+    assert "ADCSCORE" in cols and "ADCCLASS" in cols and "CD_X_PX" in cols
     assert len(new.defects) == N
 
     # --- 值 round-trip ---
     di = new.col_index("DEFECTID")
     si = new.col_index("ADCSCORE")
     ki = new.col_index("ADCCLASS")
-    fi = new.col_index("CD_X_NM")
+    fi = new.col_index("CD_X_PX")
     for r in results:
         row = next(x for x in new.defects if x[di] == r["defect_id"])
         assert float(row[si]) == pytest.approx(r["score"], abs=1e-4)
         assert int(row[ki]) == r["bin"]
-        assert float(row[fi]) == pytest.approx(r["features"]["cd_x_nm"], abs=1e-4)
+        assert float(row[fi]) == pytest.approx(r["features"]["cd_x_px"], abs=1e-4)
 
     # --- 影像尾巴活著 ---
     old = klarf_core.load(src)

@@ -18,7 +18,7 @@ from adept.core.pipeline.curve import (
     IDENTITY, CurveError, format_curve, is_identity, parse_curve,
 )
 from adept.core.pipeline.step import ParamError, ParamSpec
-from adept.core.steps.tone import GammaStep, apply_curve, apply_gamma
+from adept.core.steps.tone import ToneStep, apply_curve, apply_gamma
 
 
 # --------------------------------------------------------------------------- #
@@ -62,7 +62,7 @@ def test_the_param_form_blocks_it_not_the_algorithm():
     assert "curve" in str(exc.value) and "outside" in str(exc.value)
 
     with pytest.raises(ParamError):
-        GammaStep.validate_params({"curve": "garbage"})
+        ToneStep.validate_params({"curve": "garbage"})
 
 
 # --------------------------------------------------------------------------- #
@@ -131,7 +131,7 @@ def test_the_curve_keeps_the_dtype_and_the_value_range():
 
 def test_the_curve_takes_over_from_gamma_once_it_is_bent():
     """兩個旋鈕一個結果：曲線不是 y=x 時 gamma 完全不生效。"""
-    step = GammaStep()
+    step = ToneStep()
     bent = "0,0; 0.4,0.75; 1,1"
 
     # gamma 給一個很極端的值，但曲線接手 -> 結果與 gamma 無關
@@ -154,8 +154,8 @@ def test_two_cards_keep_the_pair_comparable_and_one_card_does_not():
     而放上第二張卡之後兩邊又對得起來了。
     """
     bent = "0,0; 0.4,0.75; 1,1"
-    ctx = GammaStep().run(_ctx(), {"curve": bent})
+    ctx = ToneStep().run(_ctx(), {"curve": bent})
     assert not np.array_equal(ctx.images["test"], ctx.images["ref"])
 
-    ctx = GammaStep().run(ctx, {"target": "ref", "curve": bent})
+    ctx = ToneStep().run(ctx, {"streams": "ref", "curve": bent})
     assert np.array_equal(ctx.images["test"], ctx.images["ref"])

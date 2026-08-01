@@ -53,9 +53,9 @@
     "dn": {
       "step": "denoise",
       "params": {
-        "target": "diff",
         "method": "median",
-        "ksize": 5
+        "ksize": 5,
+        "streams": "diff"
       },
       "enabled": true
     },

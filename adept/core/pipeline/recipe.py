@@ -44,6 +44,46 @@ class RecipeError(ValueError):
     """Recipe 結構性錯誤（循環、未知 route、JSON 缺欄位…）。"""
 
 
+def _app_version() -> str:
+    """現在跑的這一版 ADEPT。"""
+    from adept import __version__
+    return str(__version__)
+
+
+def _version_tuple(text: str):
+    """``"0.2.1"`` → ``(0, 2, 1)``；比不出來回 ``None``（就不硬說誰新誰舊）。"""
+    parts = []
+    for chunk in str(text or "").split("."):
+        digits = ""
+        for ch in chunk:
+            if not ch.isdigit():
+                break
+            digits += ch
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts) if parts else None
+
+
+def version_skew(recipe_version: str) -> str:
+    """這份 recipe 是不是**比現在這個程式新**存的；是的話回一句白話，否則空字串。
+
+    講得出這句話，「unknown parameters」才有正確的意思。沒有它，使用者看到的
+    是「這份檔案壞了」，於是他會去重做一份 recipe —— 而該做的是更新程式。
+    """
+    theirs = str(recipe_version or "").strip()
+    if not theirs:
+        return ""
+    mine = _app_version()
+    if theirs == mine:
+        return ""
+    a, b = _version_tuple(theirs), _version_tuple(mine)
+    if a is not None and b is not None and a <= b:
+        return ""                      # 檔案比較舊 → 遷移的事，不是版本落差
+    return ("This recipe was saved by ADEPT %s and this build is %s — update "
+            "ADEPT on this machine before using it." % (theirs, mine))
+
+
 # ---------------------------------------------------------------------------
 # 資料模型
 # ---------------------------------------------------------------------------
@@ -159,6 +199,69 @@ def _migrate_also_apply(nodes: Dict[str, "RecipeNode"],
         routes[k] = out
 
 
+# ---------------------------------------------------------------------------
+# 舊 recipe 相容遷移（F7-20）：合併卡片 + 主流參數改名 streams
+# ---------------------------------------------------------------------------
+#: 舊 step key → (新 key, 主流參數的舊名, 要補上的固定參數, 參數改名表)
+#:
+#: 四張 Normalize 卡與三張 tone 卡在 F7-20 各自併成一張，方法變成一個下拉。
+#: 遷移要做的事有三件：換 key、把主流參數改名成 ``streams``、把「是哪一張卡」
+#: 這個資訊變成 ``method`` 的值。
+#:
+#: 為什麼要遷移而不是直接不認得：跟 §22.6 同一個理由 —— recipe 是使用者存在
+#: 磁碟上、拿來交接的檔案，認不得等於「工具壞了」。
+_MERGED_CARDS: Dict[str, tuple] = {
+    # 舊 key:          (新 key,      主流舊名,    固定參數,                   改名表)
+    "percentile_norm": ("normalize", "source", {"method": "percentile"}, {}),
+    "glv_mask_norm":   ("normalize", "source", {"method": "glv_band"}, {}),
+    "local_contrast":  ("normalize", "target", {"method": "local"}, {}),
+    # hist_match 的舊 ``method``（exact/linear/percentile）跟合併後的方法選擇
+    # 撞名，所以改叫 match_method。
+    "hist_match":      ("normalize", "moving", {"method": "match"},
+                        {"method": "match_method"}),
+    "brightness_contrast": ("tone", "target", {}, {}),
+    "gamma":               ("tone", "target", {}, {}),
+    "invert":              ("tone", "target", {"invert": True}, {}),
+}
+
+#: 沒有合併、但主流參數一起改名成 ``streams`` 的卡（F7-19）。
+_RENAMED_STREAM_PARAM: Dict[str, str] = {
+    "denoise": "target",
+    "flatten": "target",
+}
+
+
+def _migrate_merged_cards(nodes: Dict[str, "RecipeNode"]) -> None:
+    """把 F7-20 之前的卡片名與參數名換成合併後的（就地改寫 nodes）。
+
+    ⚠ 這一道**必須跑在 :func:`_migrate_also_apply` 之後**：那一道會把
+    ``also_apply`` 展開成好幾張**舊 key** 的卡，展開出來的那幾張也要一起換名。
+    先展開再收合看起來繞了一圈，但遷移鏈要一段一段接 —— 寫一條
+    「``also_apply`` 直接變 ``streams``」的捷徑只有舊檔案會走到，
+    永遠不會有人在上面測試。
+    """
+    for nid, node in list(nodes.items()):
+        params = dict(node.params)
+        merged = _MERGED_CARDS.get(node.step)
+        if merged is not None:
+            new_key, primary_name, fixed, renames = merged
+            for old, new in renames.items():
+                if old in params:
+                    params[new] = params.pop(old)
+            if primary_name in params:
+                params["streams"] = params.pop(primary_name)
+            for k, v in fixed.items():
+                params.setdefault(k, v)
+            nodes[nid] = RecipeNode(id=node.id, step=new_key, params=params,
+                                    enabled=node.enabled)
+            continue
+        primary_name = _RENAMED_STREAM_PARAM.get(node.step)
+        if primary_name is not None and primary_name in params:
+            params["streams"] = params.pop(primary_name)
+            nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
+                                    enabled=node.enabled)
+
+
 @dataclass
 class Recipe:
     """一份完整 recipe（單一 JSON 檔可互傳）。"""
@@ -170,12 +273,25 @@ class Recipe:
     author: str = ""
     description: str = ""
     edges: List[List[str]] = field(default_factory=list)  # 額外 DAG 邊
+    #: **哪一版的 ADEPT 存的**（存檔時自動填；舊檔案沒有這欄，是空字串）。
+    #:
+    #: 為什麼需要：開發在家用機、執行在公司機，而公司機是用複製檔案更新的
+    #: （`AGENTS.md`），所以兩邊的版本本來就會不同步。一份新版存的 recipe 在
+    #: 舊版上打開，看到的是「unknown parameters: ['…']」—— 那句話的意思是
+    #: 「這份檔案壞了」，但真正的情況是「我的程式舊了」。差一個字，使用者會去
+    #: 重做一份 recipe 而不是去更新程式。
+    #: 新建的 recipe 就是「這一版寫的」，所以預設值是現在這一版 ——
+    #: 空字串保留給**舊檔案**（那些檔案是真的沒有這個欄位）。
+    app_version: str = field(default_factory=_app_version)
 
     # ---- JSON serde -------------------------------------------------------
     def to_json_dict(self) -> Dict[str, Any]:
         return {
             "recipe_id": self.recipe_id,
             "version": int(self.version),
+            # 存檔時一律寫**現在這一版**（不是讀進來的那一版）——
+            # 這個欄位要回答的是「這個檔案是誰寫的」。
+            "app_version": _app_version(),
             "author": self.author,
             "description": self.description,
             "routes": {k: list(v) for k, v in self.routes.items()},
@@ -238,12 +354,15 @@ class Recipe:
         # 做在這裡而不是各張卡的 validate_params 裡，因為它會**增加節點**——
         # 那是 recipe 層級的事，一張卡看不到自己以外的東西。
         _migrate_also_apply(nodes, routes)
+        # 再把合併掉的卡片名／參數名換過來（順序不可顛倒，見函式 docstring）。
+        _migrate_merged_cards(nodes)
 
         return cls(
             recipe_id=str(d["recipe_id"]),
             routes=routes,
             nodes=nodes,
             score=score,
+            app_version=str(d.get("app_version", "") or ""),
             version=int(d.get("version", 1)),
             author=str(d.get("author", "")),
             description=str(d.get("description", "")),
@@ -330,14 +449,22 @@ class Issue:
 
 
 def _clean_params_for(step_cls: Type[Step], raw: Dict[str, Any],
-                      issues: List[Issue], nid: str) -> Dict[str, Any]:
-    """驗證參數；壞參數記 Issue 並改用預設值，讓後續模擬檢查照常進行。"""
+                      issues: List[Issue], nid: str,
+                      skew: str = "") -> Dict[str, Any]:
+    """驗證參數；壞參數記 Issue 並改用預設值，讓後續模擬檢查照常進行。
+
+    ``skew`` 有值時附在訊息後面 —— 「認不得這個參數」最常見的原因不是檔案壞了，
+    是**這台的程式比較舊**（開發機與公司機是靠複製檔案同步的，見 AGENTS.md）。
+    """
     try:
         return step_cls.validate_params(raw)
     except ParamError as e:
+        detail = str(e)
+        if skew:
+            detail = "%s  %s" % (detail, skew)
         issues.append(Issue(
             code="bad-param", level="error", node_id=nid,
-            title="Invalid parameter", detail=str(e)))
+            title="Invalid parameter", detail=detail))
         try:
             return step_cls.validate_params(None)  # 全預設值
         except ParamError:  # pragma: no cover — 預設值本身壞掉屬程式錯誤
@@ -383,6 +510,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
         kinds = list(recipe.routes)
 
     # ---- 每個節點：step 存在？參數合法？----
+    # 認不得的參數 / 認不得的卡片，最常見的原因是**這台的程式比較舊**。
+    skew = version_skew(getattr(recipe, "app_version", ""))
     clean_params: Dict[str, Dict[str, Any]] = {}
     for nid, node in recipe.nodes.items():
         step_cls = registry.get(node.step)
@@ -390,10 +519,12 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             issues.append(Issue(
                 code="unknown-step", level="error", node_id=nid,
                 title=f"Unknown card '{node.step}'",
-                detail=f"step '{nid}' uses '{node.step}', which is not in the "
-                       f"card library; available cards: {sorted(registry)}"))
+                detail=(f"step '{nid}' uses '{node.step}', which is not in the "
+                        f"card library; available cards: {sorted(registry)}"
+                        + (f"  {skew}" if skew else ""))))
             continue
-        clean_params[nid] = _clean_params_for(step_cls, node.params, issues, nid)
+        clean_params[nid] = _clean_params_for(step_cls, node.params, issues,
+                                              nid, skew)
 
         # 參數全部合法，卡片還是可能**沒設定完**（F7-13）。空字串的模板是完全
         # 合法的 str —— 但那張卡跑起來每一顆都會失敗，而以前要跑過一次才知道。
@@ -470,7 +601,7 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                     title=f"step '{nid}' is missing an upstream image",
                     detail=f"route '{k}': it needs image streams {missing}, but "
                            f"upstream only provides {sorted(avail)}"))
-            if k == "rsem" and getattr(step_cls, "requires_ref", False) \
+            if k == "rsem" and step_cls.resolve_requires_ref(p) \
                     and "ref" not in avail:
                 issues.append(Issue(
                     code="requires-ref", level="error", node_id=nid,

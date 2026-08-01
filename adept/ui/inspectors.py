@@ -65,6 +65,7 @@ class Inspector(QWidget):
         self.batch: List[Dict[str, Any]] = []
         self.meta: Dict[str, Any] = {}
         self.feature_names: List[str] = []
+        self.shown_streams: List[str] = []
         self.node_id = ""
         self.setMinimumHeight(120)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -73,12 +74,16 @@ class Inspector(QWidget):
                     result: Optional[Dict[str, Any]] = None,
                     batch: Optional[Sequence[Dict[str, Any]]] = None,
                     meta: Optional[Dict[str, Any]] = None,
-                    feature_names: Optional[Sequence[str]] = None) -> None:
+                    feature_names: Optional[Sequence[str]] = None,
+                    shown_streams: Optional[Sequence[str]] = None) -> None:
         self.node_id = str(node_id or "")
         self.params = dict(params or {})
         self.result = dict(result or {})
         self.batch = [dict(r) for r in (batch or [])]
         self.meta = dict(meta or {})
+        #: 預覽區**現在正在看**哪幾條流（並排比對打開時是左右那兩條）。
+        #: 儀表要跟著畫面走：畫面上兩張圖，底下就該是兩張直方圖。
+        self.shown_streams = [str(s) for s in (shown_streams or []) if s]
         #: 這張卡**自己**產出哪些特徵（含 output_prefix）。解析要用卡片庫，
         #: 那是 Studio 的事 —— 儀表只負責畫。
         self.feature_names = [str(f) for f in (feature_names or [])]
@@ -299,30 +304,65 @@ class EnhanceInspector(Inspector):
     WARN_CLIP = 0.01
 
     def stream(self) -> str:
-        """這張卡的主要輸出流（也就是要比 before/after 的那一條）。"""
-        return str(self.params.get("target") or self.params.get("source")
-                   or "test")
+        """這張卡的主要輸出流（也就是要比 before/after 的那一條）。
 
-    def record(self) -> Dict[str, Any]:
+        F7-20 起 Enhance 卡的參數是 ``streams``（一串，逗號分隔），所以這裡取
+        第一條。``target`` / ``source`` 留著是為了舊 recipe 與非 Enhance 的卡。
+
+        ⚠ 一張卡吃兩條流的時候，這個面板目前只畫得出第一條 —— 兩條各一組
+        before/after 是 F7-19 畫布那一半的事（計畫書 §23.7）。
+        """
+        raw = str(self.params.get("streams") or self.params.get("target")
+                  or self.params.get("source") or "test")
+        first = raw.split(",")[0].strip()
+        return first or "test"
+
+    def streams(self) -> List[str]:
+        """這張卡處理的每一條流（``streams`` 是逗號分隔的一串）。"""
+        raw = str(self.params.get("streams") or self.params.get("target")
+                  or self.params.get("source") or "test")
+        keys = [k.strip() for k in raw.split(",") if k.strip()]
+        return keys or ["test"]
+
+    def panes(self) -> List[str]:
+        """要畫幾張直方圖、各是哪一條流。
+
+        **跟著預覽畫面走**：並排比對打開時畫面上是兩張圖，底下就該是兩張
+        直方圖，而且左右順序一樣 —— 使用者是拿它們互相對照的，順序對不上就
+        每次都要重新認一次哪張配哪張。
+
+        只取這張卡真的動過的流：並排的右邊可能是 ``diff``（這張 Enhance 卡沒
+        碰過它），那畫一張空的圖只是佔位子。都沒有的話退回這張卡的第一條流。
+        """
         changes = dict(self.meta.get("stream_change") or {})
-        return dict(changes.get(self.stream()) or {})
+        mine = self.streams()
+        if self.shown_streams:
+            picked = [s for s in self.shown_streams if s in changes]
+            if picked:
+                return picked
+        return [s for s in mine if s in changes] or mine[:1]
+
+    def record(self, key: Optional[str] = None) -> Dict[str, Any]:
+        changes = dict(self.meta.get("stream_change") or {})
+        return dict(changes.get(key or self.stream()) or {})
 
     def has_data(self) -> bool:
-        rec = self.record()
-        return bool(rec.get("before")) and bool(rec.get("after"))
+        return any(bool(self.record(k).get("before"))
+                   and bool(self.record(k).get("after"))
+                   for k in self.panes())
 
     def empty_reason(self) -> str:
         return ("Select a defect to see what this card does to “%s” — the "
                 "grey levels before it ran and after." % self.stream())
 
-    def clipped(self) -> Tuple[float, float]:
-        rec = self.record()
+    def clipped(self, key: Optional[str] = None) -> Tuple[float, float]:
+        rec = self.record(key)
         return (float(rec.get("clipped_low", 0.0)),
                 float(rec.get("clipped_high", 0.0)))
 
-    def added_clipping(self) -> Tuple[float, float]:
+    def added_clipping(self, key: Optional[str] = None) -> Tuple[float, float]:
         """**這張卡自己**新增的削平（原圖本來就黑掉的部分不算它的帳）。"""
-        rec = self.record()
+        rec = self.record(key)
         lo = float(rec.get("clipped_low", 0.0)) - float(rec.get("was_clipped_low", 0.0))
         hi = float(rec.get("clipped_high", 0.0)) - float(rec.get("was_clipped_high", 0.0))
         return (max(0.0, lo), max(0.0, hi))
@@ -330,10 +370,17 @@ class EnhanceInspector(Inspector):
     def summary(self) -> str:
         if not self.has_data():
             return ""
-        lo, hi = self.clipped()
-        text = ("“%s” · %.1f%% of pixels at black, %.1f%% at white"
-                % (self.stream(), lo * 100.0, hi * 100.0))
-        alo, ahi = self.added_clipping()
+        panes = self.panes()
+        bits = []
+        worst = 0.0
+        for key in panes:
+            lo, hi = self.clipped(key)
+            bits.append("“%s” %.1f%% at black, %.1f%% at white"
+                        % (key, lo * 100.0, hi * 100.0))
+            alo, ahi = self.added_clipping(key)
+            worst = max(worst, alo, ahi)
+        text = " · ".join(bits)
+        alo = ahi = worst
         if max(alo, ahi) >= self.WARN_CLIP:
             text += ("  ⚠ this card flattened %.1f%% of the patch onto the "
                      "ends of the scale — those pixels no longer differ from "
@@ -342,9 +389,42 @@ class EnhanceInspector(Inspector):
         return text
 
     def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
-        rec = self.record()
+        panes = self.panes()
+        if not panes:
+            return
+        # 並排比對打開時畫兩張 —— 左右的順序跟畫面上兩張圖一樣。
+        gap = 14.0
+        w = (rect.width() - gap * (len(panes) - 1)) / float(len(panes))
+        for i, key in enumerate(panes):
+            box = QRectF(rect.left() + i * (w + gap), rect.top(), w, rect.height())
+            self._paint_one(p, box, key, with_axis_title=(i == 0))
+
+    def _paint_one(self, p: QPainter, rect: QRectF, key: str,
+                   with_axis_title: bool) -> None:
+        """一條流的 before/after 直方圖。
+
+        軸要講得出自己是什麼
+        --------------------
+        使用者原話：「histogram 我有點看不太懂，橫軸是 GLV 縱軸是 pixel counts？
+        細線是什麼？」—— 三個問題，三個都是**畫面上沒寫**。以前只有兩端的
+        ``black`` / ``white`` 跟一句 ``outline = before · filled = after``，
+        而那句話要先知道 outline 指的是那條細線才讀得懂。
+
+        現在：橫軸寫 ``gray level  0 → 255``、縱軸寫 ``pixels``，圖例直接**畫**
+        一小段細線與一小塊實心方塊配上字，不要求使用者把名詞對應到圖形。
+        """
+        rec = self.record(key)
+        head = QRectF(rect.left(), rect.top(), rect.width(), 13)
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        p.drawText(head, Qt.AlignLeft | Qt.AlignVCenter, "“%s”" % key)
+        if with_axis_title:
+            p.drawText(head, Qt.AlignRight | Qt.AlignVCenter, "pixels ↑")
+
         before = [float(v) for v in rec.get("before") or []]
         after = [float(v) for v in rec.get("after") or []]
+        if not before and not after:
+            p.drawText(rect, Qt.AlignCenter, "no record for this stream")
+            return
         n = max(len(before), len(after))
         # **高度用平方根。** 削平會在兩端堆出兩根極高的柱子（六成的畫素都在那裡），
         # 線性刻度下其餘的分布會被壓成一條貼著底的線 —— 而那正是要比較的形狀。
@@ -353,12 +433,12 @@ class EnhanceInspector(Inspector):
         after = [math.sqrt(v) for v in after]
         top = max(max(before or [1.0]), max(after or [1.0]), 1.0)
 
-        plot = QRectF(rect.left(), rect.top() + 14,
-                      rect.width(), max(20.0, rect.height() - 30))
+        plot = QRectF(rect.left(), rect.top() + 20,
+                      rect.width(), max(20.0, rect.height() - 52))
         bw = plot.width() / float(n)
 
         def bars(vals: List[float], col: QColor, filled: bool) -> None:
-            p.setPen(Qt.NoPen if filled else QPen(col, 1.2))
+            p.setPen(Qt.NoPen if filled else QPen(col, 1.4))
             p.setBrush(QBrush(col) if filled else Qt.NoBrush)
             path_pts = []
             for i, v in enumerate(vals):
@@ -384,25 +464,59 @@ class EnhanceInspector(Inspector):
         p.drawLine(QPointF(plot.left(), plot.bottom()),
                    QPointF(plot.right(), plot.bottom()))
 
-        # 兩端的削平：把貼在 0 / 255 的那一格標成警示色，不然它只是一根高柱子
-        lo, hi = self.clipped()
-        alo, ahi = self.added_clipping()
+        # 兩端的削平：把貼在 0 / 255 的那一格**整根柱子**染成警示色。
+        #
+        # 以前是在圖的正上方畫一小塊色塊。那個位置離它在講的那根柱子有半張圖那麼
+        # 遠，於是它看起來像是一個獨立的裝飾 —— 使用者看得到它，但看不出來它在指
+        # 什麼。標記要長在被標記的東西上面。
+        lo, hi = self.clipped(key)
+        alo, ahi = self.added_clipping(key)
         for frac, added, at_left in ((lo, alo, True), (hi, ahi, False)):
             if frac <= 0.0005:
                 continue
             col = QColor(TOKENS["danger_text"] if added >= self.WARN_CLIP
                          else TOKENS["warning"])
+            idx = 0 if at_left else (len(after) - 1)
+            h = ((after[idx] / top) * plot.height()) if 0 <= idx < len(after) else 0.0
             x = plot.left() if at_left else plot.right() - bw
+            w = max(1.0, bw - 0.6)
             p.setPen(Qt.NoPen)
             p.setBrush(QBrush(col))
-            p.drawRect(QRectF(x, plot.top() - 6, max(2.0, bw), 4))
+            if h > 0:
+                p.drawRect(QRectF(x, plot.bottom() - h, w, h))
+            # 柱子再矮也要看得見，所以柱頂再壓一小塊（柱高 0 時它就是全部）。
+            cap = QRectF(x, plot.bottom() - max(h, 3.0) - 3.0, max(3.0, w), 3.0)
+            p.drawRect(cap)
 
-        # 圖例放**底部**：頂端那一列是削平標記的位置，兩個擠在一起會疊字。
-        legend = QRectF(rect.left(), plot.bottom() + 1, rect.width(), 13)
+        # 橫軸：兩端的 0 / 255 加上中間那句「這是什麼軸」。
+        axis = QRectF(rect.left(), plot.bottom() + 1, rect.width(), 13)
         p.setPen(QColor(TOKENS["text_secondary"]))
-        p.drawText(legend, Qt.AlignLeft | Qt.AlignVCenter, "black")
-        p.drawText(legend, Qt.AlignRight | Qt.AlignVCenter, "white")
-        p.drawText(legend, Qt.AlignCenter, "outline = before · filled = after")
+        p.drawText(axis, Qt.AlignLeft | Qt.AlignVCenter, "0 black")
+        p.drawText(axis, Qt.AlignRight | Qt.AlignVCenter, "white 255")
+        p.drawText(axis, Qt.AlignCenter, "gray level")
+
+        # 圖例：**畫**一段細線與一塊實心方塊，不要只寫「outline / filled」——
+        # 那要求使用者先把名詞對回圖形，而那正是他卡住的地方。
+        self._paint_legend(p, QRectF(rect.left(), axis.bottom() + 1,
+                                     rect.width(), 14), faint, bar)
+
+    @staticmethod
+    def _paint_legend(p: QPainter, box: QRectF, line_col: QColor,
+                      fill_col: QColor) -> None:
+        y = box.center().y()
+        x = box.left()
+        p.setPen(QPen(line_col, 1.4))
+        p.drawLine(QPointF(x, y), QPointF(x + 12, y))
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        p.drawText(QRectF(x + 16, box.top(), 60, box.height()),
+                   Qt.AlignLeft | Qt.AlignVCenter, "before")
+        x += 74
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(fill_col))
+        p.drawRect(QRectF(x, y - 4, 12, 8))
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        p.drawText(QRectF(x + 16, box.top(), 60, box.height()),
+                   Qt.AlignLeft | Qt.AlignVCenter, "after")
 
 
 class ProfileInspector(Inspector):
@@ -716,14 +830,14 @@ def _fmt(v: float) -> str:
 class InputInspector(Inspector):
     """Load images：**哪一頁變成哪一條流**，以及每一頁載進來長什麼樣。
 
-    為什麼這一張最先要做
-    --------------------
-    「每顆 defect 的第一張是 test、第二張是 ref」是這個專案**第一條待廠內驗證
-    的假設**（CLAUDE.md §8）。它錯了的話，diff 會整個反號、所有分數都是錯的 ——
-    而畫面上完全看不出來，因為兩張圖本來就長得很像。
+    頁序已經確認（2026-07-30）
+    --------------------------
+    「每顆 defect 的第一張是 test、第二張是 ref」曾經是這個專案第一條待廠內
+    驗證的假設；使用者已經確認就是這個順序，所以它現在是**約定**，不是猜測。
 
-    目前唯一的驗證方式是另外跑 ``fab_probe/probe_tiff.py``。把配對關係跟每一頁
-    的平均灰階直接攤在這裡，使用者載入第一份真資料的當下就會看到不對勁。
+    面板留著，因為約定成立不代表每一份檔案都照著走 —— 三頁以上、單頁、或
+    ``channel_order`` 被改過的資料集，配對關係仍然只有這裡看得到。而它要回答的
+    問題也換了一個：**這兩張圖比得起來嗎**（整體亮度差很多就得先正規化）。
 
     資料來自 Load 卡放進 ``ctx.meta['input']`` 的那一份 —— 也就是引擎**實際載
     進來的東西**，不是 UI 從檔名猜的。
@@ -756,8 +870,9 @@ class InputInspector(Inspector):
         if info.get("nm_per_px"):
             bits.append("%.2f nm/px" % float(info["nm_per_px"]))
         else:
-            # 這也是待驗證假設之一：找不到來源，CD 的 nm 值因此是 0。
-            bits.append("nm/px unknown — CD in nm will read 0")
+            # 量測一律 pixel；換算是 Export 那一刻的事，而且由使用者填。
+            # （以前這裡說「CD 的 nm 值會是 0」—— 那個 0 已經不存在了。）
+            bits.append("measured in pixels — set nm/px when you export")
         return " · ".join(bits)
 
     def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
@@ -790,33 +905,30 @@ class InputInspector(Inspector):
                        "—" if mean is None else "%.1f" % mean)
 
         if spread >= 8.0:
-            # 兩張本來就該長得幾乎一樣（同一個位置、同一次掃描）。差很多的時候
-            # 最可能的解釋就是配對搞錯了 —— 那正是這個面板存在的理由。
+            # 兩張本來就該長得幾乎一樣（同一個位置、同一次掃描）。差很多不會讓
+            # 對位掛掉，但會讓相減的殘差整片偏掉 —— 而那看起來像訊號。
+            # 頁序已經確認，所以這裡講的是處置（先正規化），不是叫人去懷疑配對。
             p.setPen(QColor(TOKENS["warning"]))
             p.drawText(QRectF(rect.left(), rect.bottom() - 14, rect.width(), 14),
                        Qt.AlignLeft | Qt.AlignVCenter,
-                       "mean grey differs by %.0f between pages — check the "
-                       "page order" % spread)
+                       "mean grey differs by %.0f between pages — normalise "
+                       "before comparing" % spread)
 
 
 #: step key -> 儀表。沒列在這裡的卡用原本的特徵表（見模組說明的約定 1）。
 #:
-#: Enhance 九張卡共用同一個儀表：它們做的事不同，但**要回答的問題是同一個**
-#: （我把資訊弄掉了嗎）。
+#: Enhance 的卡共用同一個儀表：它們做的事不同，但**要回答的問題是同一個**
+#: （我把資訊弄掉了嗎）。F7-20 把九張併成四張，所以這裡只剩四個 key ——
+#: 少的那五個不是被拿掉，是變成 ``normalize`` / ``tone`` 的一個下拉選項。
 INSPECTORS: Dict[str, type] = {
     "load_patch": InputInspector,
     "roi_profile": ProfileInspector,
     "roi_template": TemplateInspector,
     "align": AlignInspector,
-    "brightness_contrast": EnhanceInspector,
-    "gamma": EnhanceInspector,
+    "tone": EnhanceInspector,
+    "normalize": EnhanceInspector,
     "denoise": EnhanceInspector,
     "flatten": EnhanceInspector,
-    "invert": EnhanceInspector,
-    "local_contrast": EnhanceInspector,
-    "glv_mask_norm": EnhanceInspector,
-    "hist_match": EnhanceInspector,
-    "percentile_norm": EnhanceInspector,
     "glv_stats": MeasureInspector,
     "cd_measure": MeasureInspector,
     "focus_quality": MeasureInspector,

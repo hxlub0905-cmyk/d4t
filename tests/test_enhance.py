@@ -205,11 +205,11 @@ def test_only_two_new_cards_were_added_for_six_new_abilities():
 def test_the_new_cards_are_in_the_enhance_stage_and_visible_in_the_gui():
     from adept.ui.scope import visible_steps
 
-    for key in ("flatten", "local_contrast"):
+    for key in ("flatten", "normalize"):
         assert get_step(key).resolve_group() == "enhance"
     keys = [d["key"] for d in visible_steps(
-        [get_step(k).describe() for k in ("flatten", "local_contrast")])]
-    assert keys == ["flatten", "local_contrast"]
+        [get_step(k).describe() for k in ("flatten", "normalize")])]
+    assert keys == ["flatten", "normalize"]
 
 
 @pytest.mark.parametrize("method", ["background", "stripes_h", "stripes_v",
@@ -218,8 +218,8 @@ def test_flatten_card_runs_every_method_on_test_and_ref(method):
     ctx = Context(images={"test": _patch(gradient=40.0),
                           "ref": _patch(gradient=40.0, defect=0.0, seed=2)})
     # 一張卡一條流（F7-18）：兩張圖都要處理就放兩張卡。
-    _run("flatten", ctx, target="test", method=method, size=21)
-    _run("flatten", ctx, target="ref", method=method, size=21)
+    _run("flatten", ctx, streams="test", method=method, size=21)
+    _run("flatten", ctx, streams="ref", method=method, size=21)
     for key in ("test", "ref"):
         assert ctx.images[key].dtype == np.float32
         assert ctx.images[key].shape == (64, 64)
@@ -230,14 +230,14 @@ def test_flatten_only_touches_its_own_stream():
     ctx = Context(images={"test": _patch(gradient=40.0),
                           "ref": _patch(gradient=40.0, seed=3)})
     before = ctx.images["ref"].copy()
-    _run("flatten", ctx, target="test", method="background")
+    _run("flatten", ctx, streams="test", method="background")
     assert np.array_equal(ctx.images["ref"], before), "沒接進來的流不可以被動到"
     assert not np.array_equal(ctx.images["test"], before)
 
 
 def test_local_contrast_card_runs():
     ctx = Context(images={"test": _patch(), "ref": _patch(seed=4)})
-    _run("local_contrast", ctx, target="test", clip_limit=3.0, tiles=4)
+    _run("normalize", ctx, method="local", streams="test", clip_limit=3.0, tiles=4)
     assert ctx.images["test"].dtype == np.float32
     assert float(ctx.images["test"].std()) > 0.0
 
@@ -248,14 +248,14 @@ def test_pointing_a_card_at_a_stream_that_does_not_exist_says_so():
 
     ctx = Context(images={"test": _patch()})
     with pytest.raises(StepError) as e:
-        _run("flatten", ctx, target="ghost", method="background")
+        _run("flatten", ctx, streams="ghost", method="background")
     assert "ghost" in str(e.value)
 
 
 @pytest.mark.parametrize("method", ["median", "gaussian", "bilateral", "nlm"])
 def test_denoise_card_runs_every_method(method):
     ctx = Context(images={"test": _patch(), "ref": _patch(seed=5)})
-    _run("denoise", ctx, target="test", method=method, ksize=5, strength=1.0)
+    _run("denoise", ctx, streams="test", method=method, ksize=5, strength=1.0)
     assert ctx.images["test"].shape == (64, 64)
     assert not np.any(np.isnan(ctx.images["test"]))
 
@@ -293,3 +293,110 @@ def test_subtract_keeps_its_original_behaviour_by_default():
     ctx = Context(images={"test": a, "ref_aligned": b})
     _run("subtract", ctx)                       # 全預設
     assert float(ctx.images["diff"].mean()) == pytest.approx(40.0)   # absolute
+
+
+# --------------------------------------------------------------------------- #
+# F7-20：正規化的四種做法收成一張卡；參數跟著方法出現／消失
+# --------------------------------------------------------------------------- #
+def test_normalize_is_one_card_with_four_methods():
+    """使用者原話：「他們都是正規化，放在一起讓 user 勾選用哪一種即可」。
+
+    四種方法解決的是同一個問題（把灰階重新映射好讓兩張圖比得起來），差別只在
+    拉伸範圍怎麼決定。卡片庫多三列，使用者就要多讀三段說明才知道該用哪一個。
+    """
+    from adept.core.pipeline import REGISTRY, get_step
+
+    enhance = sorted(k for k, v in REGISTRY.items() if v.group == "enhance")
+    assert enhance == ["denoise", "flatten", "normalize", "tone"]
+    for gone in ("percentile_norm", "glv_mask_norm", "hist_match",
+                 "local_contrast", "brightness_contrast", "gamma", "invert"):
+        assert gone not in REGISTRY, gone
+
+    methods = {p.name: p for p in get_step("normalize").params}["method"]
+    assert methods.choices == ["percentile", "glv_band", "match", "local"]
+
+
+@pytest.mark.parametrize("method,shown,hidden", [
+    ("percentile", ("p_low", "p_high", "range_from"), ("glv_low", "tiles", "reference")),
+    ("glv_band", ("glv_low", "glv_high", "range_from"), ("p_low", "tiles", "reference")),
+    ("match", ("reference", "match_method"), ("p_low", "glv_low", "tiles", "range_from")),
+    ("local", ("clip_limit", "tiles"), ("p_low", "glv_low", "reference", "range_from")),
+])
+def test_only_the_parameters_that_apply_are_shown(method, shown, hidden):
+    """``show_when``：選了 CLAHE 的時候 ``p_low`` 根本不是這張卡的一部分。
+
+    以前的替代方案是在 help 裡寫「（stripe 方法用不到）」—— 那是一句道歉，
+    不是一個設計，而且使用者還是得自己判斷「那它算不算數」。
+    """
+    from adept.core.pipeline import get_step
+
+    specs = {p.name: p for p in get_step("normalize").params}
+    params = {"method": method}
+    for name in shown:
+        assert specs[name].visible_for(params) is True, name
+    for name in hidden:
+        assert specs[name].visible_for(params) is False, name
+    # streams / method 本身永遠在
+    assert specs["streams"].visible_for(params) is True
+    assert specs["method"].visible_for(params) is True
+
+
+def test_normalize_only_needs_a_ref_when_it_is_matching():
+    """``requires_ref`` 跟著方法走，不是跟著卡走。
+
+    用常數的話，rsem route 上只要放了 Normalize 就會被誤判成缺 ref ——
+    而那四種方法裡只有一種真的要另一張圖。
+    """
+    from adept.core.pipeline import get_step
+
+    cls = get_step("normalize")
+    assert cls.resolve_requires_ref(cls.validate_params({"method": "match"})) is True
+    for m in ("percentile", "glv_band", "local"):
+        assert cls.resolve_requires_ref(cls.validate_params({"method": m})) is False
+
+
+def test_a_card_processes_every_stream_wired_into_it():
+    """F7-19：接幾條就處理幾條，出來也是那幾條。"""
+    from adept.core.pipeline import get_step
+    from adept.core.pipeline.context import Context
+
+    ctx = Context(images={"test": _patch(), "ref": _patch(seed=5)})
+    before_ref = ctx.images["ref"].copy()
+    cls = get_step("normalize")
+    assert cls.resolve_writes(cls.validate_params({"streams": "test,ref"})) == \
+        ["test", "ref"]
+    cls().run(ctx, {"streams": "test,ref"})
+    assert not np.array_equal(ctx.images["ref"], before_ref), "ref 也要被處理到"
+    assert ctx.images["test"].max() == 255 and ctx.images["ref"].max() == 255
+
+
+def test_matching_leaves_the_reference_alone_even_if_it_is_listed():
+    """把 reference 對齊到它自己是 no-op，但那會讓人以為它被處理過了。"""
+    from adept.core.pipeline import get_step
+    from adept.core.pipeline.context import Context
+
+    ctx = Context(images={"test": _patch(), "ref": _patch(seed=9)})
+    before = ctx.images["ref"].copy()
+    get_step("normalize")().run(
+        ctx, {"streams": "test,ref", "method": "match", "reference": "ref"})
+    assert np.array_equal(ctx.images["ref"], before)
+
+
+def test_tone_applies_its_knobs_in_a_fixed_order():
+    """亮度／gamma／反相是可以**同時**做的，所以它們是旋鈕不是四選一。
+
+    順序固定（亮度 → gamma/曲線 → 反相），因為可調的話同一組數字會有六種
+    結果，而畫面上看不出來是哪一種。
+    """
+    from adept.core.steps.tone import (apply_brightness_contrast, apply_gamma,
+                                       apply_invert)
+    from adept.core.pipeline import get_step
+    from adept.core.pipeline.context import Context
+
+    img = _patch()
+    ctx = Context(images={"test": img.copy()})
+    get_step("tone")().run(ctx, {"streams": "test", "brightness": 10.0,
+                                 "gamma": 0.7, "invert": True})
+    expect = apply_invert(apply_gamma(
+        apply_brightness_contrast(img, 10.0, 1.0), 0.7))
+    assert np.array_equal(ctx.images["test"], expect)

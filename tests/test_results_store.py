@@ -42,7 +42,7 @@ def _fake_result(i, *, feats=None, ok=True, error=None):
         feats = {
             "snr_max": float(i),
             "blob_area": float(i * 3 + 1),
-            "cd_x_nm": 20.0 + i * 0.5,
+            "cd_x_px": 20.0 + i * 0.5,
             "glv_mean": 128.0,
             "glv_std": 7.5,
             "focus": 0.8,
@@ -108,7 +108,7 @@ def test_save_load_roundtrip_120_rows(tmp_path):
         r7 = by_id["D00007"]
         assert r7["ok"] is True and r7["error"] is None
         assert r7["features"]["snr_max"] == 7.0
-        assert r7["features"]["cd_x_nm"] == pytest.approx(23.5)
+        assert r7["features"]["cd_x_px"] == pytest.approx(23.5)
         assert r7["score"] == 14.0 and r7["bin"] == 1
         # nan/inf → None
         r5 = by_id["D00005"]
@@ -195,7 +195,7 @@ def test_export_csv_header_union_and_bom(tmp_path):
     out = str(tmp_path / "out.csv")
     results = [
         _fake_result(0, feats={"snr_max": 1.5, "blob_area": 9.0, "score": 3.0}),
-        _fake_result(1, feats={"snr_max": 2.5, "cd_x_nm": 21.0, "score": 5.0}),
+        _fake_result(1, feats={"snr_max": 2.5, "cd_x_px": 21.0, "score": 5.0}),
         _fake_result(2, feats={}, ok=False, error="[load] 讀檔失敗（測試）"),
     ]
     with RunStore(db) as store:
@@ -210,7 +210,7 @@ def test_export_csv_header_union_and_bom(tmp_path):
     header, data = rows[0], rows[1:]
     # 基本欄 + 排序後 feature key 聯集
     assert header == ["defect_id", "ok", "error", "score", "bin",
-                      "blob_area", "cd_x_nm", "score", "snr_max"]
+                      "blob_area", "cd_x_px", "score", "snr_max"]
     assert len(data) == 3
     by_id = {r[0]: r for r in data}
     # 缺的 feature 留空；中文 error 原樣
@@ -293,16 +293,16 @@ def test_rescore_missing_feature_counts_errors_without_crashing(tmp_path):
         results = []
         for i in range(100):
             feats = {"snr_max": float(i), "blob_area": float(i)}
-            if i % 5 != 0:  # 80 顆有 cd_x_nm、20 顆缺
-                feats["cd_x_nm"] = 20.0 + i
+            if i % 5 != 0:  # 80 顆有 cd_x_px、20 顆缺
+                feats["cd_x_px"] = 20.0 + i
             results.append(_fake_result(i, feats=feats))
         run_id = store.save_run(
             _recipe_dict(expr="snr_max", threshold=50.0), results)
 
-        s = rescore(store, run_id, expr="cd_x_nm * 2", threshold=100.0,
+        s = rescore(store, run_id, expr="cd_x_px * 2", threshold=100.0,
                     save_as=True)
         assert s["n"] == 100
-        assert s["n_errors"] == 20  # 缺 cd_x_nm 的顆數
+        assert s["n_errors"] == 20  # 缺 cd_x_px 的顆數
         assert sum(s["bin_counts"].values()) == 80  # 其餘照常算分
         assert s["score_min"] == 42.0  # i=1 → (20+1)*2
 
@@ -310,7 +310,7 @@ def test_rescore_missing_feature_counts_errors_without_crashing(tmp_path):
         rows = {r["defect_id"]: r for r in store.iter_results(s["saved_run_id"])}
         bad = rows["D00005"]
         assert bad["ok"] is False and bad["score"] is None and bad["bin"] is None
-        assert "cd_x_nm" in bad["error"]
+        assert "cd_x_px" in bad["error"]
         good = rows["D00006"]
         assert good["ok"] is True and good["score"] == 52.0
 
@@ -343,7 +343,7 @@ def test_rescore_10k_rows_under_5s(tmp_path):
             feats = {
                 "snr_max": (i % 97) * 0.25,
                 "blob_area": float(i % 311),
-                "cd_x_nm": 18.0 + (i % 53) * 0.1,
+                "cd_x_px": 18.0 + (i % 53) * 0.1,
                 "glv_mean": 120.0 + (i % 17),
                 "glv_std": 6.0,
                 "focus": 0.5 + (i % 7) * 0.05,
@@ -356,7 +356,7 @@ def test_rescore_10k_rows_under_5s(tmp_path):
 
         t0 = time.perf_counter()
         s = rescore(store, run_id,
-                    expr="snr_max * sqrt(blob_area) + cd_x_nm / glv_std",
+                    expr="snr_max * sqrt(blob_area) + cd_x_px / glv_std",
                     threshold=30.0, save_as=True)
         wall = time.perf_counter() - t0
 
@@ -368,5 +368,5 @@ def test_rescore_10k_rows_under_5s(tmp_path):
         # 抽查一顆數值正確
         r = next(store.iter_results(s["saved_run_id"]))
         f = r["features"]
-        expect = f["snr_max"] * math.sqrt(f["blob_area"]) + f["cd_x_nm"] / f["glv_std"]
+        expect = f["snr_max"] * math.sqrt(f["blob_area"]) + f["cd_x_px"] / f["glv_std"]
         assert r["score"] == pytest.approx(expect)

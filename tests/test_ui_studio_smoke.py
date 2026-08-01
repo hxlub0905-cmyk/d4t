@@ -244,22 +244,22 @@ def test_mouse_only_pipeline_build(qapp):
     try:
         # 起手的 Input 卡已經在畫布上了（F7-9），所以只要再加一張
         assert win.model.node_order == ["load_patch"]
-        win.library.add_requested.emit("percentile_norm")
-        assert win.model.node_order == ["load_patch", "percentile_norm"]
-        assert win.pipeline.node_ids() == ["load_patch", "percentile_norm"]
+        win.library.add_requested.emit("normalize")
+        assert win.model.node_order == ["load_patch", "normalize"]
+        assert win.pipeline.node_ids() == ["load_patch", "normalize"]
         # 加入後自動選取新節點，右邊換成它的參數表單
-        assert win.selected_node == "percentile_norm"
-        assert win.param_form.step_key() == "percentile_norm"
+        assert win.selected_node == "normalize"
+        assert win.param_form.step_key() == "normalize"
 
-        win.pipeline.move_requested.emit("percentile_norm", -1)
-        assert win.model.node_order == ["percentile_norm", "load_patch"]
-        assert win.pipeline.node_ids() == ["percentile_norm", "load_patch"]
+        win.pipeline.move_requested.emit("normalize", -1)
+        assert win.model.node_order == ["normalize", "load_patch"]
+        assert win.pipeline.node_ids() == ["normalize", "load_patch"]
 
         # 停用 / 移除也要走同一條路
         win.pipeline.node_toggled.emit("load_patch", False)
         assert win.model.nodes["load_patch"].enabled is False
         win.pipeline.remove_requested.emit("load_patch")
-        assert win.model.node_order == ["percentile_norm"]
+        assert win.model.node_order == ["normalize"]
 
         # 點 Score 尾卡 → 換到分數編輯頁
         win.pipeline.score_clicked.emit()

@@ -26,9 +26,10 @@ import math
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QMimeData, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
     QColor,
+    QDrag,
     QFont,
     QImage,
     QPainter,
@@ -38,6 +39,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -913,6 +915,8 @@ class ParamForm(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._rows: Dict[str, _ParamRow] = {}
+        #: 目前這張卡每個參數的值 —— ``show_when`` 要靠它判斷哪幾列該在。
+        self._values: Dict[str, Any] = {}
         self._describe: Optional[Dict[str, Any]] = None
         self._building = False
 
@@ -969,9 +973,11 @@ class ParamForm(QWidget):
             self._step_help.setText(str(describe.get("help", "")))
             self._step_help.setVisible(bool(describe.get("help")))
             self._placeholder.setVisible(False)
+            self._values = {}
             for spec in describe.get("params", []):
                 name = str(spec.get("name", ""))
                 value = current_params.get(name, spec.get("default"))
+                self._values[name] = value
                 editor = self._make_editor(spec, value, streams)
                 editor.setToolTip(str(spec.get("help", "")))
                 row = _ParamRow(spec, editor, self._host)
@@ -979,6 +985,7 @@ class ParamForm(QWidget):
                 self._rows[name] = row
         finally:
             self._building = False
+        self._sync_visible_rows()
         self._sync_curve_override()
 
     def _sync_curve_override(self) -> None:
@@ -1049,7 +1056,25 @@ class ParamForm(QWidget):
     def _emit(self, name: str, value: Any) -> None:
         if self._building:
             return
+        self._values[name] = value
+        # 改了控制別人的那一格（例如 Normalize 的 method）→ 立刻重算哪幾列該在。
+        self._sync_visible_rows()
         self.param_edited.emit(name, value)
+
+    def _sync_visible_rows(self) -> None:
+        """依 ``show_when`` 顯示／隱藏各列（F7-20）。
+
+        為什麼是隱藏而不是變淡：``_sync_curve_override`` 的「變淡」講的是
+        「這一格還在，只是現在沒有作用」—— 使用者可能想把曲線拉直再用 gamma。
+        ``show_when`` 講的是**完全不同的另一件事**：選了 CLAHE 的時候
+        ``p_low`` 根本不是這張卡的一部分，留在畫面上只會讓人問「那它算不算數」。
+        """
+        for name, row in self._rows.items():
+            spec = row.spec.get("show_when")
+            if not spec:
+                continue
+            ctrl, values = str(spec[0]), [str(v) for v in spec[1]]
+            row.setVisible(str(self._values.get(ctrl, "")) in values)
 
     def _make_editor(self, spec: Dict[str, Any], value: Any,
                      streams: Sequence[str]) -> QWidget:
@@ -1530,6 +1555,11 @@ class GroupIcon(QWidget):
         p.end()
 
 
+#: 從卡片庫拖出去時帶的 MIME 型別（F7-22）。用自訂型別而不是純文字：
+#: 純文字會讓「從別的視窗拖一段字進畫布」也變成新增卡片。
+CARD_MIME = "application/x-adept-card"
+
+
 class _LibraryItem(QFrame):
     """卡片庫的一列：名稱 + hover 才出現的「Add」；雙擊也能加入。
 
@@ -1630,6 +1660,33 @@ class _LibraryItem(QFrame):
     def mouseDoubleClickEvent(self, e) -> None:   # noqa: D102 - Qt hook
         if e.button() == Qt.LeftButton:
             self.activated.emit(self.step_key)
+
+    # -- 拖到畫布上（F7-22）-------------------------------------------------
+    #
+    # 「Add」是**工具決定位置**（接在選著的那張後面）；拖是**使用者決定位置**。
+    # 兩個都留著：n8n 兩種都有，而且第一次用的人多半先看到按鈕。
+    def mousePressEvent(self, e) -> None:         # noqa: D102 - Qt hook
+        if e.button() == Qt.LeftButton:
+            self._press_at = e.pos()
+        super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e) -> None:          # noqa: D102 - Qt hook
+        start = getattr(self, "_press_at", None)
+        if start is None or not (e.buttons() & Qt.LeftButton):
+            return super().mouseMoveEvent(e)
+        if (e.pos() - start).manhattanLength() < QApplication.startDragDistance():
+            return super().mouseMoveEvent(e)
+        self._press_at = None
+        self.start_drag()
+
+    def start_drag(self) -> None:
+        """開始把這張卡拖出去（測試直接呼叫這支，不模擬滑鼠軌跡）。"""
+        mime = QMimeData()
+        mime.setData(CARD_MIME, self.step_key.encode("utf-8"))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.setPixmap(self.grab())
+        drag.exec(Qt.CopyAction)
 
 
 class StageButton(QFrame):

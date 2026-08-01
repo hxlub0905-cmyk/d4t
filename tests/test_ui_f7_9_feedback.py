@@ -257,10 +257,10 @@ def test_the_studio_opens_with_the_input_card_on_the_canvas(window):
 # --------------------------------------------------------------------------- #
 def test_stream_params_have_plain_language_labels(qapp):
     """參數名是 recipe 的鍵，不是給人看的字。"""
-    for key in ("percentile_norm", "gamma", "brightness_contrast", "denoise"):
+    for key in ("normalize", "tone", "denoise", "flatten"):
         params = {p["name"]: p for p in get_step(key).describe()["params"]}
-        primary = params.get("target") or params.get("source")
-        assert primary["label"] == "Image stream"
+        primary = params.get("streams")
+        assert primary["label"] == "Image streams"
         # 說明要講出「流是畫布上的線」與 test / ref 是什麼
         assert "canvas" in primary["help"] and "ref" in primary["help"]
 
@@ -307,14 +307,14 @@ def test_each_image_source_gets_its_own_card(window):
     兩條各自的處理鏈。
     """
     src = window.model.node_order[0]
-    on_test = window.add_card_after(src, "percentile_norm", "test")
-    on_ref = window.add_card_after(src, "percentile_norm", "ref")
-    assert window.model.nodes[on_test].params["source"] == "test"
-    assert window.model.nodes[on_ref].params["source"] == "ref"
+    on_test = window.add_card_after(src, "normalize", "test")
+    on_ref = window.add_card_after(src, "normalize", "ref")
+    assert window.model.nodes[on_test].params["streams"] == "test"
+    assert window.model.nodes[on_ref].params["streams"] == "ref"
     for nid in (on_test, on_ref):
         cls = get_step(window.model.nodes[nid].step)
         assert cls.resolve_writes(window.model.nodes[nid].params) == \
-            [window.model.nodes[nid].params["source"]]
+            [window.model.nodes[nid].params["streams"]]
 
 
 # --------------------------------------------------------------------------- #
@@ -332,7 +332,7 @@ def test_selecting_a_card_shows_that_cards_main_stream(window):
 
     assert window.stream_combo.currentText() == "test", \
         "點 Normalize 應該看到它處理的 test"
-    assert window.model.nodes["norm"].params["source"] == "test"
+    assert window.model.nodes["norm"].params["streams"] == "test"
 
 
 def test_side_by_side_never_shows_the_same_image_twice(window):

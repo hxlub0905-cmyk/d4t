@@ -93,7 +93,7 @@ from .workers import _ThreadedWorker  # 同一套一次性 QThread 樣式（別�
 __all__ = [
     "ExportDialog", "ExportWorker", "run_export_job",
     "INPLACE_COLUMNS", "MODES", "MODE_LABELS", "MODE_HELP",
-    "OVERLAY_PREFIX", "DEFAULT_SIZE_FEATURE",
+    "OVERLAY_PREFIX", "DEFAULT_SIZE_FEATURE", "DEFAULT_SIZE_SCALE",
 ]
 
 #: 寫回模式（順序 = 畫面上的順序）。
@@ -118,7 +118,15 @@ INPLACE_COLUMNS = ("CLASSNUMBER", "ROUGHBINNUMBER", "FINEBINNUMBER", "DSIZE")
 _BIN_COLUMNS = ("ROUGHBINNUMBER", "FINEBINNUMBER")
 
 #: DSIZE 預設寫哪個特徵。
-DEFAULT_SIZE_FEATURE = "cd_x_nm"
+#:
+#: pipeline 全程用 pixel（2026-07-30 決定，見 ``adept/core/steps/cd.py``），
+#: 所以這裡預設也是 px 的那個特徵；要寫成物理尺寸的話由使用者在下面那格填
+#: nm/px。以前預設是 ``cd_x_nm``，而那個值**每一顆都是 0** —— 它有來源了才
+#: 該回來當預設。
+DEFAULT_SIZE_FEATURE = "cd_x_px"
+
+#: DSIZE 的換算係數預設（1 = 原樣寫 pixel，不換算）。
+DEFAULT_SIZE_SCALE = 1.0
 
 #: 疊圖檔名前綴。
 OVERLAY_PREFIX = "overlay_"
@@ -614,6 +622,30 @@ class ExportDialog(QDialog):
         self.size_feature_combo.currentIndexChanged.connect(self._invalidate_plan)
         srow.addWidget(self.size_feature_combo, 1)
         lay.addLayout(srow)
+
+        # 換算係數：pipeline 量出來的是 pixel，DSIZE 想寫物理尺寸的話，
+        # 「一個 pixel 是幾 nm」只有站點自己知道 —— 所以是一格輸入，不是
+        # 一個猜出來的值。1 = 原樣寫 pixel。
+        krow = QHBoxLayout()
+        krow.addWidget(QLabel("   × scale", page))
+        self.size_scale_spin = QDoubleSpinBox(page)
+        self.size_scale_spin.setDecimals(4)
+        self.size_scale_spin.setRange(0.0001, 1e6)
+        self.size_scale_spin.setValue(DEFAULT_SIZE_SCALE)
+        self.size_scale_spin.setToolTip(
+            "Multiplied into the size feature before it is written. Features "
+            "are measured in pixels, so enter your nm per pixel to write "
+            "nanometres. Leave it at 1 to write pixels.")
+        self.size_scale_spin.valueChanged.connect(self._invalidate_plan)
+        krow.addWidget(self.size_scale_spin, 1)
+        lay.addLayout(krow)
+
+        scale_hint = QLabel(
+            "Measurements are in pixels. Enter nm per pixel here if DSIZE "
+            "should be in nanometres — 1 writes the pixel value.", page)
+        scale_hint.setObjectName("paramHint")
+        scale_hint.setWordWrap(True)
+        lay.addWidget(scale_hint)
         return page
 
     def _build_annotate_page(self, parent: QWidget) -> QWidget:
@@ -906,6 +938,7 @@ class ExportDialog(QDialog):
             if self.chk_size_col.isChecked():
                 opts["size_col"] = "DSIZE"
                 opts["size_feature"] = self.size_feature_combo.currentText()
+                opts["size_scale"] = float(self.size_scale_spin.value())
             return opts
         if mode == "annotate":
             return {"extra_features": self.selected_features()}

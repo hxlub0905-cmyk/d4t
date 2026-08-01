@@ -76,11 +76,11 @@ def test_the_new_card_works_on_the_stream_it_was_added_for(window):
     —— 而那正是他說「變很複雜」的東西。"""
     src = window.model.node_order[0]
     nid = window.add_card_after(src, "denoise", "ref")
-    assert window.model.nodes[nid].params["target"] == "ref"
+    assert window.model.nodes[nid].params["streams"] == "ref"
     assert "ref" in window.status_text()
 
     other = window.add_card_after(src, "denoise", "test")
-    assert window.model.nodes[other].params["target"] == "test"
+    assert window.model.nodes[other].params["streams"] == "test"
 
 
 def test_adding_after_a_card_puts_it_after_that_card(window):
@@ -137,7 +137,8 @@ def test_zoom_is_clamped_at_both_ends(window):
 def test_the_zoom_controls_are_on_screen_and_say_the_current_zoom(window):
     view = window.pipeline
     window.show()
-    assert len(view._zoom_buttons) == 4
+    # 四顆縮放 + 一顆「排整齊」（F7-22 加的；都只動「怎麼看」，不動 recipe）
+    assert len(view._zoom_buttons) == 5
     assert view._zoom_bar.isVisibleTo(view)
     view.zoom_by(1.25)
     assert view._zoom_label.text() == "%d%%" % view.zoom_percent()

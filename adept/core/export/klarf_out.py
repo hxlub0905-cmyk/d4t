@@ -500,7 +500,8 @@ def _build_inplace(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
                    *, class_col: Optional[str] = None,
                    bin_col: Optional[str] = None,
                    size_col: Optional[str] = None,
-                   size_feature: str = "cd_x_nm",
+                   size_feature: str = "cd_x_px",
+                   size_scale: float = 1.0,
                    bin_map: Optional[Dict[Any, Any]] = None,
                    decimals: int = 4,
                    skip_failed: bool = True,
@@ -525,6 +526,30 @@ def _build_inplace(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
             "No target column was given (class_col / bin_col / size_col are all "
             "empty), so the output file will be byte-for-byte identical to the "
             "original.")
+
+    # 單位換算是**輸出時**的事，而且使用者自己填（pipeline 全程用 pixel，
+    # 見 adept/core/steps/cd.py 的模組 docstring）。scale=1 就是把 pixel
+    # 原樣寫進去 —— 那也是預設，因為「不換算」比「用一個猜來的係數換算」誠實。
+    try:
+        scale = float(size_scale)
+        ok_scale = scale > 0 and scale != float("inf")
+    except (TypeError, ValueError):
+        ok_scale = False
+    if not ok_scale:
+        raise ExportError(
+            "The size scale must be a positive number — it is what each size "
+            "value is multiplied by on its way into the size column (your nm "
+            "per pixel, for instance). Use 1 to write the measured pixel value "
+            "unchanged. Got: {!r}.".format(size_scale))
+
+    if size_col:
+        # 預覽必須講出換算，否則「DSIZE 那一欄的數字是什麼單位」只存在於
+        # 按下去的那個人的腦子裡。
+        plan.notes.append(
+            "Size column \"{}\" is written from feature \"{}\" {}.".format(
+                size_col, size_feature,
+                "as is (pixels)" if scale == 1.0
+                else "multiplied by {:g} (e.g. nm per pixel)".format(scale)))
 
     bmap = {str(k): v for k, v in (bin_map or {}).items()}
     changed_rows = set()
@@ -553,7 +578,8 @@ def _build_inplace(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
                 if v is None:
                     n_no_feat += 1
                     continue
-                val = _fmt_float(v, decimals)
+                val = _fmt_float(_num(v) * scale if scale != 1.0 else v,
+                                 decimals)
             if j >= len(row):
                 n_short += 1
                 continue
@@ -780,7 +806,9 @@ def apply_writeback(doc: KlarfDoc, results: Sequence[Dict[str, Any]], mode: str,
         ``class_col`` / ``bin_col``（把 bin 寫進這些既有欄位，例如
         ``CLASSNUMBER`` / ``ROUGHBINNUMBER`` / ``FINEBINNUMBER``）、
         ``size_col``（把 ``size_feature`` 寫進去，例如 ``DSIZE``）、
-        ``size_feature``（預設 ``"cd_x_nm"``）、``bin_map``
+        ``size_feature``（預設 ``"cd_x_px"``）、``size_scale``
+        （預設 ``1.0``；寫進去之前乘上的係數 —— pipeline 全程用 pixel，
+        要 nm 的話由**使用者填 nm/px**，見 ``steps/cd.py``）、``bin_map``
         （``{bin: 要寫的值}``，預設原樣寫）、``decimals``（預設 4）、
         ``skip_failed``（預設 True：ok=False 的不寫）。
         指定的欄位不存在 → :class:`ExportError`。

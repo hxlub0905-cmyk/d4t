@@ -151,12 +151,27 @@ class MyCardStep(Step):
 `steps/__init__.py` import 它即完成註冊 —— **UI 與引擎零修改**，卡片庫自動出現。
 param 相依 I/O（例如輸出流名稱由參數決定）覆寫 `resolve_reads/resolve_writes/resolve_features`。
 
-> **一張卡只做一條影像流**（F7-18）。Enhance 卡吃 `target`（或 `source`）一條流、
-> 寫回同一條，`resolve_writes` 就只回那一條。要對 ref 也做同一件事就**再放一張卡**
-> —— 「要對哪幾張圖做」是畫布上的事（哪條線接進來），不是控制列上的一組勾選框。
-> 一張卡寫兩條流會讓畫布說謊：它畫在 test 那條鏈上，卻同時改寫了 ref。
-> 需要「借另一條流的資訊」時，那件事要有自己的參數（例：`percentile_norm` 的
-> `range_from`），而且型別是 `image_key` —— 它在畫布上就是第二條接進來的線。
+> **一張卡是一次處理，寫出去的正好等於接進來的**（F7-19／F7-20）。Enhance 卡
+> 繼承 `MultiStreamStep`（`steps/_util.py`）：吃 `streams`（一串影像流）、
+> 只實作 `build_op` 回一個 `img -> img`，迴圈交給基底。接 test 也接 ref，
+> 兩條就吃**同一組設定** —— 那正是「兩張圖還比得起來」的前提。
+> 要讓兩條流吃**不同**設定才放兩張卡。
+>
+> 真正的不變量是**畫布不能說謊**：卡片動到的每一條流，畫面上都要有一條線。
+> （F7-18 的「一張卡一條流」是當時達成它的手段，不是不變量本身 —— 見計畫書
+> §23.1。`also_apply` 那種「藏在控制列的第二條流」仍然不准回來。）
+> 需要「借另一條流的資訊」時，那件事要有自己的參數（例：`normalize` 的
+> `range_from`），型別是 `image_key` —— 它在畫布上就是第二條接進來的線。
+
+> **同一個家族的做法收成一張卡的 `method`**（F7-10／F7-20）。四種正規化、
+> 五種去背景、四種去雜訊各是一張卡的下拉，不是十三張卡 —— 卡片庫多一列，
+> 使用者就要多讀一段說明才知道該用哪一個。**方法相依的參數用
+> `ParamSpec.show_when`**（例 `show_when=("method", ("percentile",))`），
+> 不要在 help 裡寫「（這個方法用不到）」那種道歉。
+> 注意 `show_when` 是**顯示**規則不是驗證規則：藏起來的參數照樣有預設值，
+> 卡片自己要保證用不到的參數不影響結果（`resolve_reads` 也一樣）。
+> 但**「可以同時做」的東西不要做成四選一** —— `tone` 的亮度／gamma／反相是
+> 幾個預設不作用的旋鈕，因為使用者常常要一起用。
 
 > **參數名是 recipe 的鍵，不是給人看的字**（F7-9）。`ParamSpec` 有選填的
 > `label`：有就顯示 label，沒有就顯示 `name`。`range_from` 對製程工程師不是
@@ -225,6 +240,10 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 | **特徵是扁平的全域命名空間**（F7-11 已解） | 兩張同型別的量測卡（例：量兩個 ROI 的 `glv_stats`）都寫 `glv_mean`，後面那張**安靜地蓋掉**前面那張，分數表達式指不到前面那個值 | 量測卡有 `output_prefix`（Studio 挑了區域會自動填成區域名），撞名時 `validate()` 仍會出 `feature-collision` warning、Studio 跑完在狀態列講出來 |
 | **量測卡指到沒人定義的 ROI**（F7-9 已修） | `cd_measure` 預設 `roi="blob"`，少了上游 Blob 卡時**安靜地改量整張圖** —— 跑得完、有數字、而且是錯的 | 具名區域現在跟影像流走同一條檢查：`Step.resolve_regions_in/out()` + `validate()` 的 `unknown-region`；`blob` 退回整張圖時會 `ctx.warn`。Studio 也在試跑前先跑 lint（以前完全沒跑，於是接錯的卡片會「跑完 200 顆、每顆都失敗」） |
 | **色調曲線用自然三次樣條** | 使用者把中間點往上拉，影像出現一圈**不存在的暗環** | 樣條會 overshoot。`algo/curve.py` 用保單調三次 Hermite（Fritsch–Carlson）。這是演算法自己造出來的假缺陷 —— 對判 defect 的工具是最糟的一種 bug。`tests/test_curve.py` 用四條最容易凹出去的曲線鎖住 |
+| **每讀一張圖就重開整個 TIFF**（2026-07-31 已修） | 「換下一顆 defect」明顯卡頓，而整條 pipeline 明明只要 9 ms | `read_page` 以前每次都 `with tifffile.TiffFile(path)` 開一次檔，而且用 `len(tf.pages)` 檢查範圍 —— **那一行會強迫走完整條 IFD 鏈**。4000 頁的 TIFF 每張圖 16 ms，而圖本身只有 16 KB。改成快取開好的 handle（版本鍵 = `(pid, mtime, size)`），換一顆 32 ms → 0.4 ms。同理 `load_dataset` 只要「幾頁」卻呼叫會解析所有 tag 的 `read_tiff_pages`，改用 `count_pages` 後 117 ms → 19 ms |
+| **fork 出來的子行程共用檔案偏移量**（同上一輪一起處理） | 批次某幾顆拿到別頁的影像 —— 不丟例外、不變慢，只是錯 | fork 複製的 fd **共用同一個 offset**，四個 worker 各自 seek+read 會互相把位置移掉。所以 TIFF handle 的快取鍵含 `os.getpid()`：子行程一進來就發現「這不是我的」而重開。`tests/test_tiff_index.py` 真的 fork 一個子行程去驗 |
+| **快取住的 TIFF handle 被兩個執行緒共用**（2026-07-31 已修） | 預覽**偶爾**失敗、訊息是 tifffile 的 `suspicious number of tags 13111`；單獨跑那條測試 6 次過 5 次 | 一個 `TiffFile` 底下就是一個 fd，讀一頁像素是「seek 過去、讀下來」。Studio 點一張卡會排一次背景預覽，同步預覽又跑一次，兩個執行緒交錯 seek 就把對方的位置移掉 —— tifffile 把像素當 IFD 解析。`read_page` 現在**全程持有 RLock**（拿 handle 到 `asarray()` 回來）。另外開檔時就 `len(tf.pages)` 把頁面清單建好：tifffile 的 lazy 解析依賴「檔案位置停在上一頁結尾」，而 `asarray()` 會移動它，所以**同一個 handle 讀完第 0 頁再要第 1 頁必失敗**。跟 fork 那條是同一件事的兩半 —— 子行程共用偏移量、執行緒共用 handle |
+| **兩台機器版本不同步時，訊息會誤導**（2026-07-31 已修） | 新版存的 recipe 在舊版打開，只說 `unknown parameters: ['…']` —— 使用者的結論是「這份檔案壞了」，於是去重做一份 recipe，而該做的是更新程式 | recipe 存檔時寫 `app_version`；`recipe.version_skew()` 判斷「這份檔案比這個程式新」，並把那句話接在 `bad-param` / `unknown-step` 的訊息後面，載入的當下也在狀態列講一次。**公司機是用複製檔案更新的（`AGENTS.md`），所以版本不同步是常態不是意外** |
 | **`isVisible()` 在 show 之前恆為 False** | 「這個面板收起來了嗎」在建構期永遠答錯 | 一律追明確狀態（`LibraryPanel.panel_open()`、`StudioWindow.compare_enabled()`、`_progress_on`），不要問 widget |
 | **`drawPolygon` 傳散的 `QPointF`**（F7-17） | 整個行程 **segfault**（不是丟例外，所以看不到任何訊息，只有 exit 139） | PySide6 會綁到別的 overload。要傳 `QPolygonF([...])`。自繪面板加任何多邊形時注意 |
 | **暗色盤裡的佔位字串**（F7-17 已清） | `accent_border` 的值是 `"#2f4straight"`，靠 70 行後的一句覆寫救著 | Qt 對無效色字串是**靜靜畫成黑色**，不會報錯。色盤裡不要留「稍後修正」的值；`tests/` 有一條掃描所有 token 是否為合法 hex |
@@ -236,7 +255,7 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 | **Golden Cell 的原點會飄**（F7-12） | 同一份 recipe、不同時間建的模板指到不同的地方，而且畫面上完全看不出來 | cell 的第 0 欄預設是大圖上的**任意切點**，換張圖就換了 —— 而使用者是在 cell 上標框的。`algo/template.py::anchor_cell()` 旋轉到**最強的上升邊**在第 0 欄；用最大正梯度而不是 `abs`，否則一個週期的兩個相反邊界會競爭，錨點在兩者之間跳 |
 | **`estimate_period` 在純雜訊上會回一個看似合理的週期**（F7-12） | 噪音圖疊出一個沒有意義的模板，然後安靜地拿去對每一顆 | 週期信心門檻 `MIN_PERIOD_CONFIDENCE = 40`（實測噪音 20.3）。「說我做不到」比「給一個沒有意義的答案」好得多。順帶：一維 layout（垂直條紋，只有 X 有週期）以前會被整個放棄 —— 那是最常見的情況，現在兩軸各自判斷，不重複的那軸取整個影像高度／寬度 |
 | **KLARF variant D 誤判**（M5 修正） | 真實 1.8 檔（ImageList 欄不在最後、且無 IMAGECOUNT 欄）被 `lint()` 判定每一列都違法，Export 精靈跳紅字 | `row_len_ok` 改用 `effective_row_len()`：把 `Images N { … }` 子區塊折算成一欄。**注意 `image_layout()` 對這個變體仍回 None，而 export 的插欄位置正好因此落在最後 —— 那是對的，別「順手修好」它**。迴歸測試 `tests/test_klarf_variant_d.py` |
-| **一張卡偷偷寫了第二條流**（F7-18 已改） | 畫布上那張 Denoise 畫在 test 那條鏈上，它其實同時改了 ref；而「要不要一起做」藏在控制列的 `also_apply` 勾選框裡，於是 test 是主角、ref 是附帶 | **一張卡一條流**：`resolve_writes` 只回主流。要對 ref 做就再放一張卡接到 ref。需要借另一條流的資訊時給它自己的 `image_key` 參數（`percentile_norm.range_from`），那條線在畫布上看得見。舊 recipe 的 `also_apply` 由 `recipe._migrate_also_apply` 展開成多張卡 |
+| **一張卡偷偷寫了第二條流**（F7-18 已改） | 畫布上那張 Denoise 畫在 test 那條鏈上，它其實同時改了 ref；而「要不要一起做」藏在控制列的 `also_apply` 勾選框裡，於是 test 是主角、ref 是附帶 | **一張卡一條流**：`resolve_writes` 只回主流。要對 ref 做就再放一張卡接到 ref。需要借另一條流的資訊時給它自己的 `image_key` 參數（`percentile_norm.range_from`），那條線在畫布上看得見。舊 recipe 的 `also_apply` 由 `recipe._migrate_also_apply` 展開成多張卡。**F7-19/F7-20 起改用另一個手段達成同一個不變量**：一張卡吃 N 條流，但每一條都有埠、都有線（見 §5 的框與計畫書 §23.1）—— 不變量是「畫布不能說謊」，不是「一張卡一條流」|
 | **拆卡片時的順序陷阱**（F7-18） | `anchor="source"` 拆成兩張卡之後，如果 test 那張先跑，ref 借到的是「已經拉成 0–255」的範圍 —— 數字不一樣，而兩張輸出都是看起來正常的圖 | 借範圍的那幾張要排在**前面**。這類遷移不要讀程式碼驗證：跑同一份 recipe 100 顆，比 `min/median/max` 與 bin 數量是否逐項相同（`tests/test_ui_f7_18_streams_as_nodes.py`）|
 | **兩個節點之間只拉得動一條線**（F7-18 已修） | 先從 test 拉、再從 ref 拉，第二條只得到一句 `already connected` 然後什麼都沒發生 —— 使用者的結論是「這張卡不准我碰 ref」 | `edge_added` 帶第三個參數（**這條線從哪個輸出埠出發**），Studio 據此把下游卡的主要輸入指到那條流。同一對節點再拉一條要當成「我改變主意了」處理 |
 | **常駐在節點旁邊的裝飾**（F7-18 已清） | 每個輸出埠一顆「+」，十張卡的 pipeline 就有十幾顆加號跟資料流搶畫面 | 入口收回卡片庫；「+」做對的事（接上線、接在對的流上）改由「選著一張卡時從卡片庫加」承接（`add_card_after`）。加完**選取新卡**，連按三張才會長成一條鏈而不是倒過來 |
@@ -246,15 +265,40 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 
 ## 8. 待廠內驗證的假設（重要）
 
-開發全程用合成資料（真實資料不能出廠）。以下假設**必須在廠內用 `fab_probe/` 探測腳本確認**。
+開發全程用合成資料（真實資料不能出廠）。原本有三條假設，**2026-07-30 使用者結掉了
+前兩條**（一條確認、一條改設計繞開），剩下第 3 條要在廠內用 `fab_probe/` 探測腳本確認。
 那三支腳本是 stdlib-only 單檔、輸出純文字且預設遮蔽 Lot/Wafer/Device 等識別碼，
 設計成可以直接複製貼出廠區（細節與資料外流說明見 `fab_probe/README.md`）：
 
 | 假設 | 現況 | 用哪支腳本確認 |
 |---|---|---|
-| 1. EBI patch 的 page→channel 對應 | 假設每顆 defect 第一張=test、第二張=ref（`load_dataset` 的 `channel_order`） | `probe_tiff.py FILE.tif --with-klarf FILE.klarf` → 看它回報的配對型態（pairs / single / triples）。`probe_stats.py` 的奇偶頁均值比較可佐證 |
-| 2. `nm_per_px` 來源 | 找不到，暫為 None（CD 量測的 nm 值因此是 0） | `probe_klarf.py` 的 nm_per_px 名稱搜尋段；`probe_tiff.py` 的解析度/描述標籤 |
+| ~~1. EBI patch 的 page→channel 對應~~ | ✅ **已確認（2026-07-30）**：第一張 = test、第二張 = ref。`load_dataset` 的 `channel_order` 預設就是對的。參數保留是給「一顆多於兩頁」或站點慣例不同用的，不再是「怕猜錯」 | — |
+| ~~2. `nm_per_px` 來源~~ | ✅ **已用設計繞開（2026-07-30）**：不再需要這個值。見下面「單位一律 pixel」 | —（`probe_*.py` 若順手看到仍會回報，那是加分不是前提）|
 | 3. KLARF 變體 | `klarf_core` 已知四種（含 M5 修正的 variant D） | `probe_klarf.py` 的 image-layout 變體判定與證據 |
+
+### 單位一律 pixel，換算在輸出那一刻由使用者填（2026-07-30）
+
+`nm_per_px` 在 KLARF 裡找不到來源，而舊做法是「找不到就吐 0」——
+`cd_measure` 在沒有它的時候照樣吐 `cd_x_nm` / `cd_y_nm` / `area_nm2` 三個 **0**。
+那是最糟的一種缺值：**0 是個看起來很像答案的答案**，它進得了分數表達式、
+寫得進 DSIZE 欄，一路安靜到最後。而實務上它每一顆都是 0。
+
+現在的分工：
+
+- **pipeline 全程用 pixel。** `cd_measure` 吐 `cd_x_px` / `cd_y_px` / `area_px`
+  （`area_px` 是新的 —— 以前只在算 nm 的時候用到，沒有吐出來）。
+  卡片裡不做單位換算，**任何 `*_nm` 特徵都不該再出現**。
+- **換算只發生在輸出。** Export 精靈的 DSIZE 那一列多一格 `× scale`
+  （`klarf_out` 的 `size_scale`，CLI 是 `--size-scale`），預設 `1` = 原樣寫 pixel。
+  要寫 nm 就把 nm/px 填進去 —— **那個數字只有站點自己知道**，所以它是一格輸入，
+  不是一個猜出來的欄位。計畫書會把換算寫進 plan.notes，因為「這一欄是什麼單位」
+  不能只存在按下去那個人的腦子裡（鐵則：寫回前一定先預覽變更）。
+
+舊 recipe 若在分數表達式裡引用 `cd_x_nm`，`validate()` 會出 `unknown-feature`
+warning 指名它 —— 那正是要看到的（它以前恆為 0，那份分數本來就是錯的）。
+
+`core/calibration.py`（MMH 來的 nm/px profile 管理）**沒有被刪**：哪天真的量出
+站點的 nm/px，它就是存那個值的地方，Export 那一格可以從 profile 帶預設值進來。
 
 **每遇到一種新變體 → 做成最小化合成 fixture → 永久回歸測試**（見
 `tests/test_klarf_variant_d.py` 的寫法：先斷言「這份檔案確實是該變體」當前提，再測行為）。
@@ -271,6 +315,12 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 | M5 Gallery+Export | ✅ | Gallery（虛擬捲動、排序、直方圖點 bar 篩選）；KLARF 三種寫回模式（就地無損／另存含 ADCSCORE+ADCCLASS／Top-N）+ 寫回前預覽變更；CSV/Excel 報表（含抓漏率/誤殺率）；overlay；`fab_probe/` 三支探測腳本；CLI `adept export` |
 | M6 推廣包 | ✅ | 離線安裝三件套（`tools/fetch_wheels.py` / `install_offline.py` / `doctor.py`，全 stdlib-only）、首啟導覽 + 範例 recipe 庫對話框、5 份範例 recipe。快速參考卡 PDF 暫緩（移到 backlog） |
 | M7 UI/UX | ✅ | A 組防呆 + **UI 全英文**（`tests/test_ui_english_only.py` 鎖住）。F7 全數完成：patch-only 收斂（`ui/scope.py`）、中性色/平面主題 + 暗色、卡片依流程階段分組 + 搜尋 + 前置條件 badge、**Region 段（具名 ROI）**、Results 視窗、**節點畫布**。計畫書 `docs/plans/F7-canvas-and-taxonomy.md` |
+| F7-22 | ✅ | **畫布再往 n8n 靠一步**：**參數表預設收起、雙擊卡片才攤開**（畫布因此拿到整欄；`params_open()` 追明確狀態）、**線上 hover 出現斷開 ×**（虛線不給 —— 它刪不掉）、**「排整齊」按鈕**（放縮放鈕旁邊：兩者都只動「怎麼看」）、**卡片庫可以拖到畫布**（自訂 MIME，不是純文字）。計畫書 §26 |
+| F7-21 | ✅ | **畫布上接得出「兩條都做」＋ 直方圖看得懂**（試用回饋第八輪）：同一對節點的**第二條線改成累加**（`image_keys` 才累加；`subtract` 的 a/b 這種角色埠仍然取代。而且**第一條線是取代** —— 卡片預設的 `streams="test"` 是規格預設值不是使用者拉的線，第一條就累加的話他拉一條會得到兩條）、**並排預設左 test 右 ref**、**並排時一條流一張直方圖**（`set_context` 多 `shown_streams`）、**直方圖標出軸與圖例**（`gray level` / `pixels`，圖例改成畫一段線＋一塊方塊，不再用 `outline = before` 那種要先翻譯的字）。順手修掉 F7-20 的回歸：`_default_stream` 拿 `"test,ref"` 整串去比流名比不到，會掉回 writes 最後一項 → 點 Normalize 跳到 ref。計畫書 §25 |
+| F7-20 | ✅ | **正規化那一家收成一張卡**（試用回饋第七輪）：Enhance **9 張 → 4 張** —— Normalize（percentile / glv_band / match / local 四選一）、Adjust tone（亮度・對比・gamma・曲線・反相，**不是**四選一，是可以同時做的幾個旋鈕）、Denoise、Remove background。新增 `ParamSpec.show_when`（參數跟著方法出現／消失，取代 help 裡那句「這個方法用不到」的道歉）與 `Step.resolve_requires_ref`。順帶做掉 F7-19 的引擎那一半：`MultiStreamStep` 讓一張卡吃 N 條流（`streams`），`range_from` 的順序陷阱因此消失。**畫布那一半還沒做**（輸入側仍是單一埠）。舊 recipe 由 `recipe._migrate_merged_cards` 換名，分數逐項相同。計畫書 §24 |
+| F7-19 | ✅ | 引擎於 F7-20、畫布於 F7-21 完成。原始計畫與復盤見下一列與 §23 |
+| F7-19（計畫） | ✅ | **一張卡是「一次處理」，不是一條流**（試用回饋第六輪）：卡片頭尾都變成每條流一個埠，接幾條就處理幾條（N 進 N 出）。**這不是 `also_apply` 回來** —— F7-18 保護的不變量是「畫布不能說謊」，而這一輪的第二條流有真的線、真的埠。順手解掉 §22.7 全部三條未解。**不做卡片分類、不新增參數**：既有的 `range_from` 原樣保留（它已經是畫布上一條線），要讓兩條流吃不同處理就放兩張卡 —— 計畫第一版為此發明了 `measure_on` + 三類卡，被使用者當場擋下來，理由與復盤寫在 §23.3。計畫書 §23；引擎已完成於 F7-20，剩畫布的輸入埠 |
+| 單位 | ✅ | **量測一律 pixel，換算搬到輸出**（2026-07-30 使用者決定）：`cd_measure` 拿掉 `cd_x_nm` / `cd_y_nm` / `area_nm2`（它們在沒有 `nm_per_px` 時**每一顆都是 0**，而那個欄位從來沒有來源），改吐 `cd_x_px` / `cd_y_px` / **`area_px`**（新的）。nm 換算由 Export 精靈的 `× scale` 一格輸入承接（`klarf_out` 的 `size_scale`、CLI `--size-scale`，預設 1 = 原樣寫 pixel），並寫進 plan.notes。同日確認 **page→channel 就是 test/ref**，兩條待驗證假設結案。見 §8 |
 | F7-18 | ✅ | **影像流是節點的事，不是控制列的事**（試用回饋第五輪）：拿掉輸出埠上常駐的「+」（入口收回卡片庫，接線與影像流由 `add_card_after` 承接）、**虛線給自己的色相**（`canvas_edge_implicit`；同色淡一點只說得出「比較不重要」）、**一張卡一條流**（七張 Enhance 卡的 `also_apply` / `anchor` 拿掉；`percentile_norm` / `glv_mask_norm` 補 `range_from` 保住「兩張圖還比得起來」）、**連線指定影像流**（`edge_added` 帶出發埠；同一對節點再拉一條是「我改變主意了」）。舊 recipe 由 `recipe._migrate_also_apply` 展開成多張卡，分數逐項相同。計畫書 §22 |
 | F7-17 | ✅ | **右下角變成「這張卡自己的儀表」**（依 `Step.key` 註冊，沒註冊的用原本的特徵表 → 加新卡不必動 UI）。四個：`load_patch` 的 **page→stream 對應**（廠內假設 #1 第一次看得見）、Enhance 九張卡的 **before/after 直方圖 + 削平計數**（新增 `Context.track_changes`，**只有預覽打開**）、`align` 的**整批位移散佈圖 + 搜尋半徑框**、五張量測卡的**整批分布 + 這一顆站在哪**。第二批：`roi_profile` 的曲線面板**收進同一個機制**（原本是平行的另一條路）、`roi_template` 的**三道閘門各自的門檻線**（match / certainty / **structure** 三種失敗的處置完全不同）。計畫書 §21 |
 | F7-16 | ✅ | **四張安全網**：**復原/重做**（存整份快照，不是反向操作；滑桿一次拖曳算一步）、**快捷鍵**（Ctrl+O/S/R/Z/0/±/F/←→，全照 OS 慣例，並寫進 tooltip）、**關窗前問「還沒存」**（存檔失敗不算可以關）、**跑到一半可以停**（引擎本來就支援，只是按不到；已跑完的留著，而且訊息講「stopped」不是「finished」）。計畫書 §20 |
