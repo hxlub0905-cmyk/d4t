@@ -42,13 +42,12 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMenu,
-    QPushButton,
     QWidget,
 )
 
 from . import theme
 from .theme import TOKENS
-from .widgets import CARD_MIME, draw_group_icon
+from .widgets import CARD_MIME, draw_group_icon, small_button
 
 __all__ = ["PipelineCanvas", "NODE_W", "NODE_H", "COL_GAP", "ROW_GAP"]
 
@@ -616,10 +615,10 @@ class PipelineCanvas(QGraphicsView):
                  ("⌗", "Tidy up — put the cards back on the grid", self.tidy))
         self._zoom_buttons = []
         for text, tip, slot in specs:
-            b = QPushButton(text, bar)
-            b.setObjectName("cardButton")
-            b.setToolTip(tip)
-            b.setFixedSize(24 if text not in ("1:1",) else 30, 22)
+            # 這一排浮在畫布上，所以要 ``kind="icon"``（自己的底）。``1:1`` 是
+            # 唯一放得下文字的那顆，用 ``wide``；其餘一律方的。
+            b = small_button(text, tip, bar, kind="icon",
+                             shape="wide" if text == "1:1" else "square")
             b.setFocusPolicy(Qt.NoFocus)
             b.clicked.connect(slot)
             lay.addWidget(b)

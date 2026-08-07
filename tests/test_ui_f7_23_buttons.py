@@ -1,4 +1,4 @@
-# F7-23 驗收（第一批，只動 theme.py）：按鈕要說得出自己現在是什麼狀態。
+# F7-23 驗收：按鈕要說得出自己現在是什麼狀態（第一、二輪）。
 """這一支跟 ``test_ui_controls_readable.py`` 是同一種測法 —— **量畫出來的畫素**。
 
 理由一樣：這裡每一條都不是「功能壞了」。快捷鍵按得到、按鈕點得下去、
@@ -11,6 +11,10 @@ disabled 真的擋住了動作 —— 每一項功能都是好的，壞的是**�
 * ``QToolBar::separator`` 寫了兩次，值不一樣，帶著說明的那一份是死的。
 
 所以一律問「畫出來長什麼樣」。
+
+第二輪（尺寸、游標、拆掉那顆 ``MenuButtonPopup``）在檔案後半，測法不同 ——
+那些問的是「這件事還是不是每個呼叫端各自記得」，所以量 ``sizeHint()``、
+掃游標、靜態掃 ``setFixedSize``。
 """
 from __future__ import annotations
 
@@ -319,3 +323,154 @@ def test_the_toolbar_separator_is_defined_once(qapp):
     qss = theme_mod.build_stylesheet()
     assert qss.count("QToolBar::separator") == 1, \
         "QToolBar::separator 被定義了 %d 次" % qss.count("QToolBar::separator")
+
+
+# --------------------------------------------------------------------------- #
+# 第二輪：尺寸與游標不該是每個呼叫端各自記得的事
+# --------------------------------------------------------------------------- #
+def _studio(qapp):
+    from adept.ui import studio as studio_mod
+
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    win.show()
+    qapp.processEvents()
+    return win
+
+
+def test_every_small_button_is_the_same_size(qapp):
+    """六個呼叫端曾經寫死六種尺寸：22×22、24×22、30×22、寬 28、寬 40、高 20。
+
+    同一種視覺語言，卻沒有兩顆是一樣大的 —— 而且要改的時候得先找出那六個地方。
+    現在尺寸由 QSS 的 ``control_sm`` 決定，呼叫端只說「方的還是帶文字的」。
+    """
+    from PySide6.QtWidgets import QPushButton
+
+    win = _studio(qapp)
+    try:
+        smalls = [b for b in win.findChildren(QPushButton)
+                  if b.objectName() == "cardButton"]
+        assert len(smalls) >= 9, "小按鈕應該至少有九顆（縮放列 5 + 導覽 2 + 切換 2）"
+
+        odd = []
+        heights = {}
+        for b in smalls:
+            shape = b.property("shape")
+            if shape not in ("square", "wide"):
+                odd.append("%r 沒有宣告形狀（%r）" % (b.text(), shape))
+                continue
+            hint = b.sizeHint()
+            heights.setdefault(hint.height(), []).append(b.text())
+            if shape == "square" and hint.width() != hint.height():
+                odd.append("%r 宣告是方的，實際 %d×%d"
+                           % (b.text(), hint.width(), hint.height()))
+        assert not odd, "\n  ".join(odd)
+
+        # 高度只准有一種。不去驗「等於 control_sm」—— QSS 的 min/max-height 管的
+        # 是內容框，加上邊框才是外框尺寸，把那個算式抄進測試只是把 Qt 的盒模型
+        # 複製一份。這裡要問的是「六種尺寸收成一種了沒有」。
+        assert len(heights) == 1, \
+            "小按鈕還有 %d 種高度：%s" % (len(heights), heights)
+        # 而且那一種確實是 control_sm 撐出來的（改 token 要改得動）
+        want = int(str(theme_mod.TOKENS["control_sm"]).replace("px", ""))
+        got = next(iter(heights))
+        assert want <= got <= want + 4, \
+            "小按鈕高 %d，但 control_sm 是 %d —— 尺寸不是它決定的" % (got, want)
+    finally:
+        win.close()
+
+
+def test_nobody_hard_codes_a_button_size_any_more(qapp):
+    """尺寸寫死在呼叫端就會慢慢長回六種。靜態掃一遍，成本近乎零。"""
+    import ast
+    import pathlib
+
+    ui = pathlib.Path(__file__).resolve().parent.parent / "adept" / "ui"
+    banned = {"setFixedSize", "setFixedWidth", "setFixedHeight"}
+    hits = []
+    for py in sorted(ui.rglob("*.py")):
+        src = py.read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in banned):
+                line = src.splitlines()[node.lineno - 1]
+                # 只管按鈕。進度條、色條、縮圖那些固定尺寸是它們的規格。
+                if "btn" in line or "button" in line.lower():
+                    hits.append("%s:%d  %s" % (py.name, node.lineno, line.strip()))
+    assert not hits, "按鈕的尺寸請交給 QSS 的 shape，不要寫在呼叫端：\n  " \
+                     + "\n  ".join(hits)
+
+
+def test_every_button_says_it_can_be_clicked(qapp):
+    """滑過去有沒有變手指，是使用者判斷「這能不能點」的第一個訊號。
+
+    以前這是每個呼叫端自己記得要做的事，於是只做到一半 —— 工具列、卡片庫、
+    節點卡有，Stop、Open KLARF…、輸出精靈那四顆、畫布縮放列全都沒有。
+    現在是視窗建好之後掃一次的規則（``widgets.apply_button_cursors``）。
+    """
+    from PySide6.QtWidgets import QPushButton
+
+    win = _studio(qapp)
+    try:
+        # 參數列是選到卡片才長出來的，所以先選一張，把那批也納入檢查
+        if win.model.node_order:
+            win.select_node(win.model.node_order[0])
+        qapp.processEvents()
+
+        wrong = []
+        for b in win.findChildren(QWidget):
+            if not isinstance(b, (QPushButton, QToolButton)):
+                continue
+            if b.cursor().shape() != Qt.PointingHandCursor:
+                wrong.append("%s %r" % (type(b).__name__, b.text()))
+        assert not wrong, "這些按鈕滑過去沒有變手指：\n  " + "\n  ".join(wrong)
+    finally:
+        win.close()
+
+
+def test_importance_is_horizontal_not_vertical(qapp):
+    """primary 比別人**寬**，不比別人高。
+
+    以前 `#primary` 的垂直 padding 多 1px，於是空白狀態下「Open KLARF…」比
+    旁邊的「Try it with sample data」高 2px —— 兩顆並排的鈕對不齊，是那種
+    說不出哪裡怪但就是怪的畫面。
+    """
+    from PySide6.QtWidgets import QPushButton
+
+    host = QWidget()
+    lay = QVBoxLayout(host)
+    plain = QPushButton("Try it with sample data", host)
+    plain.setProperty("variant", "secondary")
+    primary = QPushButton("Open KLARF…", host)
+    primary.setObjectName("primary")
+    for b in (plain, primary):
+        lay.addWidget(b)
+    host.show()
+    qapp.processEvents()
+
+    assert plain.sizeHint().height() == primary.sizeHint().height(), \
+        "primary %d vs 一般鈕 %d" % (primary.sizeHint().height(),
+                                     plain.sizeHint().height())
+    assert primary.sizeHint().width() > 0
+    host.hide()
+
+
+def test_run_trial_no_longer_leaves_half_of_itself_to_qt(qapp):
+    """``MenuButtonPopup`` 的那半邊完全歸 Qt 管，而 QSS 修不了它。
+
+    量過的結論在計畫書 §27.5：只要給 ``::menu-button`` 一個盒子（背景、邊框、
+    圓角**任一**），Qt 就把繪製交給 stylesheet，而 stylesheet 沒有 ``image``
+    就不畫箭頭 —— 這個 repo 塞不了圖檔。所以拆成兩顆普通按鈕。
+
+    這條鎖的是「別退回去」：主鈕不掛 menu（掛了 Qt 就會自己畫那半邊），
+    箭頭鈕也不掛（掛了 Qt 會再加一個自己的下拉指示器，等於兩個箭頭）。
+    """
+    win = _studio(qapp)
+    try:
+        assert win.btn_trial.menu() is None
+        assert win.btn_trial_more.menu() is None
+        assert win.btn_trial.popupMode() != QToolButton.MenuButtonPopup
+        assert [a.text() for a in win.trial_menu.actions()] == ["Run all defects"]
+    finally:
+        win.close()

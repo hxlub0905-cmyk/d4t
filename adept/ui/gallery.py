@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
 )
 
 from .theme import TOKENS
-from .widgets import to_uint8
+from .widgets import apply_button_cursors, to_uint8
 
 __all__ = ["GalleryPanel", "make_thumb", "THUMB_SIZES", "CACHE_CAP"]
 
@@ -846,6 +846,7 @@ class GalleryPanel(QWidget):
         self.set_sort_keys(["score"])
         self.grid.set_thumb_size(int(THUMB_SIZES[1][1]))
         self._refresh_header()
+        apply_button_cursors(self)
 
     # -- 資料（主視窗呼叫）---------------------------------------------------
     def set_items(self, items: Sequence[Dict[str, Any]]) -> None:

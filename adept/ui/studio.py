@@ -70,7 +70,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -126,6 +126,8 @@ from .widgets import (
     PipelinePanel,
     ProfilePanel,
     VerdictChip,
+    apply_button_cursors,
+    small_button,
 )
 from .workers import (
     DatasetLoadWorker, PreviewWorker, RegionCheckWorker, TrialWorker,
@@ -436,6 +438,9 @@ class StudioWindow(QMainWindow):
         self._wire_widgets()
         self._wire_workers()
         self._build_shortcuts()
+        # 「滑過去變手指」以前是每個呼叫端自己記得要做的事，於是只做到一半。
+        # 現在改成視窗建好之後掃一次（見 widgets.apply_button_cursors）。
+        apply_button_cursors(self)
         self.model.add_listener(self._on_model_changed)
 
         # F7-1：卡片庫只列目前輸入型別用得到的卡（見 adept/ui/scope.py）
@@ -562,10 +567,27 @@ class StudioWindow(QMainWindow):
         self.act_run_all.setToolTip("Run the whole dataset, not just the first N")
         self.act_run_all.triggered.connect(self._on_full_clicked)
         menu.addAction(self.act_run_all)
-        self.btn_trial.setMenu(menu)
-        self.btn_trial.setPopupMode(QToolButton.MenuButtonPopup)
         self.trial_menu = menu
         bar.addWidget(self.btn_trial)
+
+        # 箭頭是**第二顆真的按鈕**，不是 ``MenuButtonPopup``（F7-23 第二輪）。
+        #
+        # 以前這兩個動作是同一顆 QToolButton 的兩半，而那半邊的外觀完全歸 Qt
+        # 管：它用自己的淺色按鈕樣式畫在我們的藍底上，也不理會圓角 —— 全 UI
+        # 最重要的一顆鈕，右邊掛著一塊跟主題無關的東西。
+        #
+        # 補樣式補不起來：只要給 ``::menu-button`` 一個盒子（背景、邊框、圓角
+        # **任一**），Qt 就把繪製整個交給 stylesheet，而 stylesheet 沒有
+        # ``image`` 就不畫箭頭 —— 這個 repo 是純文字的（CLAUDE.md §9.5）塞不了
+        # 圖檔。實測只有 ``width`` 是安全的。同一條坑 F7-13 在
+        # ``QComboBox::drop-down`` 上踩過，這次量到 ``::menu-button`` 上。
+        #
+        # 所以拆成兩顆普通按鈕，兩顆都是我們控制得了的。這顆**不設 menu**：
+        # 設了 Qt 又會自己加一個下拉指示器，等於畫兩個箭頭。
+        self.btn_trial_more = self._tool_button(
+            "▾", "More ways to run — including the whole dataset",
+            self._popup_trial_menu, primary=True)
+        bar.addWidget(self.btn_trial_more)
 
     #: 鍵盤快捷鍵（F7-16）。以前一個都沒有 —— 而這是一個「一直在試」的工具，
     #: 存檔、跑一次、退回上一步是每分鐘都在做的事，每一次都要把手移到滑鼠、
@@ -730,6 +752,11 @@ class StudioWindow(QMainWindow):
         """進度條現在看得到嗎（測試用）。"""
         return bool(self._progress_on)
 
+    def _popup_trial_menu(self) -> None:
+        """把「跑整批」的選單開在箭頭鈕正下方（貼齊左緣，像一般的下拉）。"""
+        b = self.btn_trial_more
+        self.trial_menu.popup(b.mapToGlobal(QPoint(0, b.height())))
+
     def _tool_button(self, text: str, tip: str, slot: Any,
                      primary: bool = False) -> QToolButton:
         b = QToolButton(self)
@@ -861,14 +888,8 @@ class StudioWindow(QMainWindow):
 
         nav = QHBoxLayout()
         nav.setSpacing(6)
-        self.btn_prev = QPushButton("◀", pane)
-        self.btn_prev.setObjectName("cardButton")
-        self.btn_prev.setFixedWidth(28)
-        self.btn_prev.setToolTip("Previous defect")
-        self.btn_next = QPushButton("▶", pane)
-        self.btn_next.setObjectName("cardButton")
-        self.btn_next.setFixedWidth(28)
-        self.btn_next.setToolTip("Next defect")
+        self.btn_prev = small_button("◀", "Previous defect", pane, kind="icon")
+        self.btn_next = small_button("▶", "Next defect", pane, kind="icon")
         self.defect_combo = QComboBox(pane)
         self.defect_combo.setToolTip("Jump straight to a defect")
         self.defect_label = QLabel("(no dataset loaded)", pane)
@@ -1004,12 +1025,10 @@ class StudioWindow(QMainWindow):
         tabs = QHBoxLayout()
         tabs.setContentsMargins(0, 0, 0, 0)
         tabs.setSpacing(4)
-        self.btn_tab_card = QPushButton("Card", pane)
-        self.btn_tab_features = QPushButton("Features", pane)
+        self.btn_tab_card = small_button("Card", parent=pane, shape="wide")
+        self.btn_tab_features = small_button("Features", parent=pane, shape="wide")
         for i, b in enumerate((self.btn_tab_card, self.btn_tab_features)):
             b.setCheckable(True)
-            b.setObjectName("cardButton")
-            b.setFixedHeight(20)
             b.clicked.connect(lambda _c=False, k=i: self.show_bottom_page(k))
             tabs.addWidget(b)
         tabs.addStretch(1)
@@ -1214,6 +1233,11 @@ class StudioWindow(QMainWindow):
                       run_why or "Run the current pipeline over the first %d "
                                  "defects and show the score distribution"
                       % int(self.spin_trial_n.value()))
+        # 箭頭鈕與主鈕同進退：選單裡唯一那一項擋住的時候，還打得開一個
+        # 「每一項都是灰的」的選單，等於讓使用者多按一次才知道不能按。
+        self.btn_trial_more.setEnabled(can_run)
+        self._set_tip(self.btn_trial_more,
+                      run_why or "More ways to run — including the whole dataset")
         self.act_run_all.setEnabled(can_run)
         self.act_run_all.setToolTip(
             run_why or "Run all %d defects, not just the first %d"

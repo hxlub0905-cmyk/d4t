@@ -75,7 +75,54 @@ __all__ = [
     "VerdictChip",
     "TemplateField",
     "to_uint8",
+    "small_button",
+    "apply_button_cursors",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# 按鈕的兩個小工具（F7-23 第二輪）
+# --------------------------------------------------------------------------- #
+def small_button(text: str, tip: str = "", parent: Optional[QWidget] = None,
+                 shape: str = "square", kind: str = "ghost") -> QPushButton:
+    """一顆小按鈕（卡片控制、畫布縮放、換 defect、Card/Features 切換）。
+
+    **尺寸不在這裡填。** ``shape`` 只說「方的還是帶文字的」，實際邊長由 QSS 的
+    ``control_sm`` 決定 —— 以前六個呼叫端各自寫死一組尺寸（22×22、24×22、
+    30×22、寬 28、寬 40、高 20），於是同一種視覺語言沒有兩顆一樣大。
+
+    ``kind="icon"`` 給浮在畫布或影像上的那幾顆一個自己的底：那裡沒有卡片當
+    底色，透明的按鈕要滑到才看得出是按鈕（同 F7-13 給工具列加邊框的理由）。
+    """
+    b = QPushButton(text, parent)
+    b.setObjectName("cardButton")
+    b.setProperty("shape", str(shape))
+    b.setProperty("kind", str(kind))
+    b.setCursor(Qt.PointingHandCursor)
+    if tip:
+        b.setToolTip(str(tip))
+    return b
+
+
+def apply_button_cursors(root: QWidget) -> int:
+    """把 ``root`` 底下每一顆按鈕的游標設成手指，回傳處理了幾顆。
+
+    以前這是每個呼叫端自己記得要做的事，結果只做到一半 —— 工具列、卡片庫、
+    節點卡有，Stop、Open KLARF…、輸出精靈的四顆、畫布縮放列全都沒有。
+    「滑過去有沒有變手指」是使用者判斷「這能不能點」的第一個訊號，
+    不該取決於寫那一行的人當天有沒有想到。
+
+    所以改成**規則**：一個視窗建好之後掃一次。勾選框與單選鈕不算 ——
+    它們是 ``QAbstractButton`` 但慣例上維持箭頭。
+    """
+    from PySide6.QtWidgets import QToolButton
+
+    n = 0
+    for w in root.findChildren(QWidget):
+        if isinstance(w, (QPushButton, QToolButton)):
+            w.setCursor(Qt.PointingHandCursor)
+            n += 1
+    return n
 
 
 # --------------------------------------------------------------------------- #
@@ -987,6 +1034,9 @@ class ParamForm(QWidget):
             self._building = False
         self._sync_visible_rows()
         self._sync_curve_override()
+        # 參數列是**選到哪張卡才長出來的**，所以視窗建好時掃的那一次抓不到
+        # 它們（模板鈕、曲線的兩顆…）。每次重建之後再掃一次。
+        apply_button_cursors(self)
 
     def _sync_curve_override(self) -> None:
         """曲線一旦不是 y=x，就把 ``gamma`` 那列調淡並說明原因。
@@ -1612,11 +1662,8 @@ class _LibraryItem(QFrame):
         self.missing: List[str] = []
         lay.addWidget(self.badge)
 
-        self.add_button = QPushButton("Add")
-        self.add_button.setObjectName("cardButton")
-        self.add_button.setCursor(Qt.PointingHandCursor)
-        self.add_button.setToolTip("Append this card to the end of the pipeline")
-        self.add_button.setFixedWidth(40)
+        self.add_button = small_button(
+            "Add", "Append this card to the end of the pipeline", shape="wide")
         self.add_button.clicked.connect(
             lambda: self.activated.emit(self.step_key))
         self.add_button.setVisible(False)
@@ -2166,12 +2213,7 @@ class _NodeCard(QFrame):
         self.set_selected(False)
 
     def _small(self, text: str, tip: str) -> QPushButton:
-        b = QPushButton(text)
-        b.setObjectName("cardButton")
-        b.setToolTip(tip)
-        b.setFixedSize(QSize(22, 22))
-        b.setCursor(Qt.PointingHandCursor)
-        return b
+        return small_button(text, tip)
 
     def set_selected(self, selected: bool) -> None:
         self.selected = bool(selected)

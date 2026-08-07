@@ -39,7 +39,7 @@ from adept.core.algo import template as algo_template
 from adept.core.ingest.imageio import load_gray
 
 from .theme import TOKENS
-from .widgets import _qimage_from_uint8
+from .widgets import _qimage_from_uint8, apply_button_cursors
 
 __all__ = ["TemplateDialog", "CellView"]
 
@@ -146,6 +146,7 @@ class TemplateDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         outer.addWidget(self.buttons)
         self._set_ready(False)
+        apply_button_cursors(self)
 
     # ---- 對外（測試也走這條，不必真的開檔案對話框）------------------------
     def load_image(self, image: Any, name: str = "") -> bool:

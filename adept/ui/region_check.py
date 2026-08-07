@@ -43,7 +43,7 @@ from adept.core.pipeline.engine import run_defect
 
 from .gallery import make_thumb, thumb_placement
 from .theme import TOKENS
-from .widgets import _qimage_from_uint8
+from .widgets import _qimage_from_uint8, apply_button_cursors
 
 __all__ = ["check_regions", "regions_of_node", "RegionThumb", "RegionCheckWindow"]
 
@@ -257,6 +257,7 @@ class RegionCheckWindow(QDialog):
         self._grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self._scroll.setWidget(self._host)
         outer.addWidget(self._scroll, 1)
+        apply_button_cursors(self)
 
     # ---- 對外 -------------------------------------------------------------
     def set_results(self, regions: Sequence[str],

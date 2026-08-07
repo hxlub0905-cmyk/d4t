@@ -88,6 +88,7 @@ from adept.core.export import (
     write_png,
 )
 
+from .widgets import apply_button_cursors
 from .workers import _ThreadedWorker  # 同一套一次性 QThread 樣式（別另外發明一種）
 
 __all__ = [
@@ -479,6 +480,7 @@ class ExportDialog(QDialog):
         buttons.addButton(self.btn_write, QDialogButtonBox.AcceptRole)
         buttons.addButton(self.btn_close, QDialogButtonBox.RejectRole)
         outer.addWidget(buttons)
+        apply_button_cursors(self)
 
     # ---- (a) KLARF ------------------------------------------------------
     def _build_klarf_group(self) -> QWidget:

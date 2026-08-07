@@ -195,6 +195,10 @@ _LIGHT: Dict[str, Any] = {
     "radius_sm": "4px",
     "radius_md": "6px",
     "radius_pill": "999px",
+    #: 小按鈕（畫布縮放列、卡片上的 ↑↓✕、換 defect 的 ◀▶、Card/Features）的邊長。
+    #: F7-23 第二輪之前這是六個各自寫死的尺寸（22×22、24×22、30×22、寬 28、
+    #: 寬 40、高 20）—— 同一種視覺語言，但沒有兩顆是一樣大的。
+    "control_sm": "24px",
 }
 
 #: 暗色。n8n 的畫布是深中性色，不是純黑（純黑對比太硬，看久了刺眼）。
@@ -420,12 +424,19 @@ QToolBar {
 /* Toolbar buttons look like buttons, not like a menu bar. Borderless text in
  * a row reads as “File Edit View…”, and a menu bar is something you pull down,
  * not something you press — so the whole strip stopped looking clickable. */
+/* One vertical rhythm for every button in the app (F7-23 round 2):
+ * 1px border + 5px padding + 18px min-height = 30px, full stop. Importance is
+ * expressed horizontally - primary is wider, never taller. It used to be
+ * taller too, so in the empty state "Open KLARF..." stood 2px above the
+ * "Try it with sample data" next to it, and the toolbar had no min-height at
+ * all, which left its row depending on the font's text height. */
 QToolBar QToolButton {
     background: $bg_surface;
     color: $text_primary;
     border: 1px solid $border_input;
     border-radius: $radius_md;
-    padding: 6px 12px;
+    padding: 5px 12px;
+    min-height: 18px;
     font-weight: 500;
 }
 QToolBar QToolButton:hover { background: $hover_warm; color: $text_primary;
@@ -451,7 +462,7 @@ QToolBar QToolButton:checked {
 }
 QToolBar QToolButton#primary {
     background: $accent; color: #ffffff; border: 1px solid $accent;
-    padding: 6px 16px; font-weight: 600;
+    padding: 5px 16px; font-weight: 600;
 }
 QToolBar QToolButton#primary:hover { background: $accent_hover; }
 QToolBar QToolButton#primary:pressed { background: $accent_active; }
@@ -513,7 +524,7 @@ QPushButton:disabled { background: $disabled_bg; color: $disabled_text;
 /* primary action (Run trial / Run all): objectName = "primary" */
 QPushButton#primary {
     background: $accent; color: #ffffff; border: 1px solid $accent;
-    padding: 6px 18px; font-weight: 600;
+    padding: 5px 18px; font-weight: 600;
 }
 QPushButton#primary:hover { background: $accent_hover; }
 QPushButton#primary:pressed { background: $accent_active; }
@@ -545,11 +556,38 @@ QPushButton[variant="danger"]:hover { border-color: $danger_text; }
 QPushButton[variant="danger"]:disabled {
     background: $disabled_bg; color: $disabled_text; border-color: $border_default;
 }
-/* small square buttons on cards (up / down / remove / add) */
+/* Small buttons: card controls, the canvas zoom bar, defect nav, the
+ * Card/Features switch.
+ *
+ * #cardButton says what KIND of button it is; [shape] says how big it is; and
+ * [kind="icon"] gives it a surface of its own. Six call sites used to hard-code
+ * six sizes for what is visually one button - 22x22, 24x22, 30x22, w28, w40,
+ * h20 - so no two of them lined up. Geometry is the sheet's business now; the
+ * call site only says which of the two shapes it wants.
+ *
+ * Note #cardButton deliberately declares no padding or height any more: an id
+ * selector outranks [shape], so leaving them here would silently win. */
 QPushButton#cardButton {
     background: transparent; color: $text_secondary;
     border: 1px solid transparent; border-radius: $radius_sm;
-    padding: 0px; font-weight: 700; min-height: 20px;
+    font-weight: 700;
+}
+QPushButton[shape="square"] {
+    min-width: $control_sm; max-width: $control_sm;
+    min-height: $control_sm; max-height: $control_sm; padding: 0px;
+}
+QPushButton[shape="wide"] {
+    min-height: $control_sm; max-height: $control_sm; padding: 0px 8px;
+}
+/* Buttons that float over the canvas or over an image need a surface, or they
+ * are invisible until you happen to hover the right patch of background -
+ * which is the same reason F7-13 gave the toolbar buttons a border. The ones
+ * that live inside a card stay transparent: there the card is the surface. */
+QPushButton#cardButton[kind="icon"] {
+    background: $bg_surface; border: 1px solid $border_default;
+}
+QPushButton#cardButton[kind="icon"]:hover {
+    background: $hover_warm; border-color: $border_hover; color: $accent_active;
 }
 QPushButton#cardButton:hover { background: $hover_warm_strong; color: $accent_active;
                                border: 1px solid $accent_border; }
@@ -590,12 +628,12 @@ QPushButton:focus, QPushButton[variant="secondary"]:focus,
 QPushButton[variant="danger"]:focus {
     border: 2px solid $border_focus; padding: 4px 11px;
 }
-QToolBar QToolButton:focus { border: 2px solid $border_focus; padding: 5px 11px; }
+QToolBar QToolButton:focus { border: 2px solid $border_focus; padding: 4px 11px; }
 QPushButton#primary:focus {
-    border: 2px solid $focus_ring_inverse; padding: 5px 17px;
+    border: 2px solid $focus_ring_inverse; padding: 4px 17px;
 }
 QToolBar QToolButton#primary:focus {
-    border: 2px solid $focus_ring_inverse; padding: 5px 15px;
+    border: 2px solid $focus_ring_inverse; padding: 4px 15px;
 }
 /* These two already have a 1px border (transparent), so the ring costs them
  * nothing - but they must restate their padding, or the blanket rule's
@@ -604,8 +642,7 @@ QPushButton[variant="ghost"]:focus {
     border: 1px solid $border_focus; padding: 5px 12px;
 }
 QPushButton#cardButton:focus {
-    border: 1px solid $border_focus; padding: 0px;
-    background: $accent_bg; color: $accent_active;
+    border: 1px solid $border_focus; background: $accent_bg; color: $accent_active;
 }
 
 /* -- inputs ------------------------------------------------------------ */

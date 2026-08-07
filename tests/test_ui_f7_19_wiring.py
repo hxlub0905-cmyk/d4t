@@ -454,7 +454,9 @@ def test_the_toolbar_is_grouped_not_one_long_row(window):
 
     # 檔案那段在最前面，試跑在最後面
     assert index_of(window.btn_open_klarf) < seps[0]
-    assert index_of(window.btn_trial) == len(actions) - 1
+    # 試跑那一段在最後面 —— F7-23 起它是兩顆（主體 + ▾），不是一顆
+    assert index_of(window.btn_trial) == len(actions) - 2
+    assert index_of(window.btn_trial_more) == len(actions) - 1
     # Help 與主題被移到右邊（在撐開的空白之後），不再混在檔案操作裡
     assert index_of(window.btn_help) > index_of(window.btn_export)
     assert index_of(window.btn_help) > index_of(window.btn_undo)
