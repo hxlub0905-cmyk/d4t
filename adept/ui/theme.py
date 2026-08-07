@@ -85,6 +85,11 @@ _LIGHT: Dict[str, Any] = {
     "accent_active": "#2b5eb0",
     "accent_bg": "#eaf1fc",
     "accent_border": "#c2d6f2",
+    #: 焦點框畫在**按鈕的填色上面**（Qt 的 ``outline`` 對按鈕不生效，見 QSS 裡
+    #: 的說明），所以環的顏色要跟那顆按鈕自己的底對比 —— 淡底用 accent
+    #: （``border_focus``），accent 底用這個。**light / dark 刻意同值**：
+    #: 兩個主題的 primary 底都是藍的，白環在兩邊都對比得出來。
+    "focus_ring_inverse": "#ffffff",
     # -- selection / hover --------------------------------------------------
     "selection": "#d5e3f8",
     "hover_warm": "#f0f2f5",          # 鍵名保留（歷史），已不是暖色
@@ -179,6 +184,17 @@ _LIGHT: Dict[str, Any] = {
     "font_stack": ("'Segoe UI','PingFang TC','Microsoft JhengHei',"
                    "'Helvetica Neue',Arial,sans-serif"),
     "mono_stack": "'Consolas','Courier New',monospace",
+    # -- geometry（F7-23）-----------------------------------------------------
+    #: 圓角也是設計語言的一部分，不是每個呼叫端各填一個數字。F7-23 之前 QSS 裡
+    #: 有六個值（3 / 4 / 5 / 6 / 7 / 9 px）散在各處，而它們之間沒有任何規則 ——
+    #: 一顆按鈕與它旁邊的輸入框差 1px，看得出來但說不出為什麼。
+    #:
+    #: 三個尺度就夠了：``sm`` 給指示器與清單列（14–20px 高的東西），
+    #: ``md`` 給所有「一塊面」（按鈕、輸入框、卡片、頁籤、面板），
+    #: ``pill`` 給 chip。**light / dark 同值** —— 換膚換的是顏色，不是形狀。
+    "radius_sm": "4px",
+    "radius_md": "6px",
+    "radius_pill": "999px",
 }
 
 #: 暗色。n8n 的畫布是深中性色，不是純黑（純黑對比太硬，看久了刺眼）。
@@ -408,7 +424,7 @@ QToolBar QToolButton {
     background: $bg_surface;
     color: $text_primary;
     border: 1px solid $border_input;
-    border-radius: 6px;
+    border-radius: $radius_md;
     padding: 6px 12px;
     font-weight: 500;
 }
@@ -417,11 +433,16 @@ QToolBar QToolButton:hover { background: $hover_warm; color: $text_primary;
 QToolBar QToolButton:pressed { background: $hover_warm_strong; }
 QToolBar QToolButton:disabled { color: $text_disabled; border-color: $border_default; }
 /* One hairline between groups: seven equal-weight buttons in a row read as a
- * single run, so you have to read all of them to find the one you want. */
+ * single run, so you have to read all of them to find the one you want.
+ *
+ * This rule used to be written twice, with different margins, and the copy that
+ * won was the one 20 lines below with no comment on it - so the explanation and
+ * the behaviour lived in different places. Values here are the ones that were
+ * actually in effect. */
 QToolBar::separator {
     background: $border_default;
     width: 1px;
-    margin: 4px 4px;
+    margin: 5px 6px;
 }
 /* The stretcher between the left and right halves must not look like a control. */
 QWidget#toolbarSpacer { background: transparent; border: 0; }
@@ -434,10 +455,16 @@ QToolBar QToolButton#primary {
 }
 QToolBar QToolButton#primary:hover { background: $accent_hover; }
 QToolBar QToolButton#primary:pressed { background: $accent_active; }
+/* Disabled, but still recognisably the main action (F7-23).
+ *
+ * This used to be the same grey-on-grey as every other disabled button, so with
+ * no dataset open the whole toolbar was one flat strip and "where is the thing
+ * I am supposed to press" had no answer - which is exactly the moment a new
+ * user needs one. Keeping the pale accent plate says "this is the main action,
+ * it just isn't available yet"; the muted text still says "not now". */
 QToolBar QToolButton#primary:disabled {
-    background: $disabled_bg; color: $disabled_text; border: 1px solid $border_default;
+    background: $accent_bg; color: $text_disabled; border: 1px solid $accent_border;
 }
-QToolBar::separator { background: $border_default; width: 1px; margin: 5px 6px; }
 
 /* -- status bar ------------------------------------------------------- */
 QStatusBar { background: $statusbar; color: $text_secondary;
@@ -452,7 +479,7 @@ QStatusBar::item { border: 0; }
 QGroupBox {
     background: $bg_surface;
     border: 1px solid $border_default;
-    border-radius: 6px;
+    border-radius: $radius_md;
     margin-top: 16px;
     padding: 12px 10px 10px 10px;
 }
@@ -474,14 +501,13 @@ QPushButton {
     background: $bg_input;
     color: $text_primary;
     border: 1px solid $border_input;
-    border-radius: 6px;
+    border-radius: $radius_md;
     padding: 5px 12px;
     min-height: 18px;
     font-weight: 500;
 }
 QPushButton:hover { border-color: $border_hover; background: $hover_warm; }
 QPushButton:pressed { background: $hover_warm_strong; }
-QPushButton:focus { border: 1px solid $border_focus; }
 QPushButton:disabled { background: $disabled_bg; color: $disabled_text;
                        border-color: $border_default; }
 /* primary action (Run trial / Run all): objectName = "primary" */
@@ -491,8 +517,9 @@ QPushButton#primary {
 }
 QPushButton#primary:hover { background: $accent_hover; }
 QPushButton#primary:pressed { background: $accent_active; }
+/* See the toolbar copy above for why disabled-primary keeps the accent plate. */
 QPushButton#primary:disabled {
-    background: $disabled_bg; color: $disabled_text; border: 1px solid $border_default;
+    background: $accent_bg; color: $text_disabled; border: 1px solid $accent_border;
 }
 QPushButton[variant="secondary"] {
     background: $bg_input; color: $accent_active; border: 1px solid $accent;
@@ -521,7 +548,7 @@ QPushButton[variant="danger"]:disabled {
 /* small square buttons on cards (up / down / remove / add) */
 QPushButton#cardButton {
     background: transparent; color: $text_secondary;
-    border: 1px solid transparent; border-radius: 5px;
+    border: 1px solid transparent; border-radius: $radius_sm;
     padding: 0px; font-weight: 700; min-height: 20px;
 }
 QPushButton#cardButton:hover { background: $hover_warm_strong; color: $accent_active;
@@ -534,12 +561,59 @@ QPushButton#cardButton:checked {
     border: 1px solid $accent_border; font-weight: 600;
 }
 
+/* -- keyboard focus (F7-23) --------------------------------------------- *
+ * Focus has to be visible on EVERY button, and until F7-23 it was visible on
+ * exactly one kind: a plain QPushButton. Two separate things were hiding it.
+ *
+ * 1. Specificity. `QPushButton#primary` is an id selector, so it outranks
+ *    `QPushButton:focus` and its own `border` wins; `[variant="..."]` ties
+ *    with `:focus` and wins by being written later in this sheet. So Run
+ *    trial, Stop, and Try it with sample data had no focus state at all - and
+ *    no toolbar button ever had one, because there was no QToolButton:focus
+ *    rule to begin with. Every variant therefore needs its own :focus rule;
+ *    a single blanket one is silently outranked.
+ *
+ * 2. `outline` does nothing here. Qt accepts the property and paints nothing
+ *    for buttons under Fusion - measured, with and without outline-offset -
+ *    so the ring has to be a border, drawn inside the button.
+ *
+ * Being inside costs a pixel, so each rule pays it back out of its own
+ * padding: the label must not move when you tab onto it. And the ring colour
+ * is whatever contrasts with THAT button's fill - accent on the pale fills,
+ * white on the accent fill. The small transparent buttons keep a 1px ring
+ * because they have no padding to give back, but transparent -> accent is a
+ * big enough change on its own.
+ *
+ * This is the other half of F7-16: shortcuts made the keyboard path work,
+ * this makes it visible. */
+QPushButton:focus, QPushButton[variant="secondary"]:focus,
+QPushButton[variant="danger"]:focus {
+    border: 2px solid $border_focus; padding: 4px 11px;
+}
+QToolBar QToolButton:focus { border: 2px solid $border_focus; padding: 5px 11px; }
+QPushButton#primary:focus {
+    border: 2px solid $focus_ring_inverse; padding: 5px 17px;
+}
+QToolBar QToolButton#primary:focus {
+    border: 2px solid $focus_ring_inverse; padding: 5px 15px;
+}
+/* These two already have a 1px border (transparent), so the ring costs them
+ * nothing - but they must restate their padding, or the blanket rule's
+ * 1px-compensation above applies to them and the label shifts anyway. */
+QPushButton[variant="ghost"]:focus {
+    border: 1px solid $border_focus; padding: 5px 12px;
+}
+QPushButton#cardButton:focus {
+    border: 1px solid $border_focus; padding: 0px;
+    background: $accent_bg; color: $accent_active;
+}
+
 /* -- inputs ------------------------------------------------------------ */
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     background: $bg_input;
     color: $text_primary;
     border: 1px solid $border_input;
-    border-radius: 5px;
+    border-radius: $radius_md;
     padding: 2px 6px;
     min-height: 22px;
     selection-background-color: $selection;
@@ -603,7 +677,7 @@ QSlider:disabled::handle:horizontal { border-color: $border_default; }
 QCheckBox { background: transparent; spacing: 6px; }
 QCheckBox::indicator {
     width: 14px; height: 14px;
-    border: 1px solid $border_input; border-radius: 3px; background: $bg_input;
+    border: 1px solid $border_input; border-radius: $radius_sm; background: $bg_input;
 }
 QCheckBox::indicator:hover { border-color: $border_hover; }
 QCheckBox::indicator:checked { background: $accent; border-color: $accent_active; }
@@ -617,11 +691,11 @@ QLabel:disabled { color: $text_disabled; }
 /* -- views / lists / tables -------------------------------------------- */
 QAbstractItemView {
     background: $list_bg; alternate-background-color: $row_alt;
-    border: 1px solid $border_default; border-radius: 6px;
+    border: 1px solid $border_default; border-radius: $radius_md;
     selection-background-color: $selection; selection-color: $text_primary;
     outline: 0;
 }
-QListView::item, QTreeView::item { padding: 3px 4px; border-radius: 4px; }
+QListView::item, QTreeView::item { padding: 3px 4px; border-radius: $radius_sm; }
 QListView::item:hover, QTreeView::item:hover { background: $hover_warm; }
 QTableView { gridline-color: $border_default; }
 QTableView::item { padding: 2px 6px; }
@@ -642,7 +716,9 @@ QSplitter::handle:hover { background: $border_hover; }
 QSplitter::handle:horizontal { width: 1px; }
 QSplitter::handle:vertical { height: 1px; }
 
-/* -- scrollbars -------------------------------------------------------- */
+/* -- scrollbars -------------------------------------------------------- *
+ * The 5px here is deliberately NOT $radius_sm: an 11px-wide bar with a 5px
+ * radius is a capsule, and it should stay a capsule if the token ever moves. */
 QScrollBar:vertical { background: $scroll_track; width: 11px; margin: 0; border: 0; }
 QScrollBar::handle:vertical { background: $scroll_thumb; border-radius: 5px;
                               min-height: 24px; }
@@ -657,22 +733,24 @@ QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 /* -- progress bar ------------------------------------------------------ */
 QProgressBar {
     background: $bg_elevated; border: 1px solid $border_default;
-    border-radius: 5px; text-align: center; min-height: 14px; color: $text_secondary;
+    border-radius: $radius_md; text-align: center; min-height: 14px;
+    color: $text_secondary;
 }
-QProgressBar::chunk { background: $accent; border-radius: 5px; }
+QProgressBar::chunk { background: $accent; border-radius: $radius_md; }
 
 /* -- tabs -------------------------------------------------------------- */
-QTabWidget::pane { border: 1px solid $border_default; border-radius: 6px;
+QTabWidget::pane { border: 1px solid $border_default; border-radius: $radius_md;
                    background: $bg_surface; }
 QTabBar::tab { background: $tab_inactive; color: $text_secondary;
                padding: 5px 14px; margin-right: 2px;
-               border-top-left-radius: 6px; border-top-right-radius: 6px; }
+               border-top-left-radius: $radius_md;
+               border-top-right-radius: $radius_md; }
 QTabBar::tab:selected { background: $bg_surface; color: $accent_active;
                         font-weight: 700; }
 
 /* -- menus / tooltips -------------------------------------------------- */
 QMenu { background: $bg_surface; border: 1px solid $border_default; padding: 4px; }
-QMenu::item { padding: 4px 18px; border-radius: 4px; }
+QMenu::item { padding: 4px 18px; border-radius: $radius_sm; }
 QMenu::item:selected { background: $selection; color: $text_primary; }
 QToolTip {
     background: $tooltip_bg; color: $tooltip_text; border: 1px solid $tooltip_border;
