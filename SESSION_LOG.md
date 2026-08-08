@@ -78,10 +78,50 @@ id 選擇器贏過 `[shape]`，留著的話 shape 會安靜地不生效（第一
 `setFixedWidth` / `setFixedHeight` 出現在按鈕上。尺寸寫死在呼叫端就會慢慢長
 回六種。
 
+### 第三輪（同一個 session）：外觀回到 QSS
+
+`_Chip`、`StageButton`、`LibraryItem`（含 badge）以前各自在建構式裡用 `TOKENS`
+拼一段 stylesheet 字串。那讓 theme.py 那句「顏色永遠不會兩邊走鐘」**對使用者
+看最久的那幾個元件是假的** —— 它只在有人記得換膚時逐顆重套的前提下成立。
+而其中一條真的沒被呼叫：卡片庫裡帶「needs diff」badge 的列會留在上一個主題的
+灰色。
+
+搬過去的關鍵是 **repolish**：`setProperty` 只是存值，`[active="true"]` 要等
+下一次 polish 才生效，少這一步是「狀態改了、畫面沒動」而且不報錯。
+新增 `widgets.restyle()`。
+
+順帶三件小的：`pressed` 從「hover 再深一階」（ΔL*≈3.5，等於沒有回饋）改成真的
+跳一階（新 token `pressed_bg`）；`#cardButton:hover` 從動三件事收成兩件
+（最小的按鈕不該有最大的反應）；`QPushButton` 補上 `:checked`。
+
+#### 差點做出一個叫 pill 的方角
+
+第一輪加 `radius_pill` 時填的是 CSS 慣用的 `999px`。**Qt 不夾範圍** ——
+超出去就直接放棄圓角畫矩形，不報錯。量出來 999px 的左緣輪廓與 0px 逐列相同。
+改成真的半高 11px。這個 token 到第三輪才第一次進 QSS，所以還沒有人看到過它
+畫錯，但那正是這種 bug 的樣子：名字說得斬釘截鐵，畫面沒有任何地方對得起來。
+
+量這條時踩到兩個會讓測試「永遠是綠的」的陷阱（都寫進測試註解）：要畫 host 不能
+單獨畫 chip（Qt 先用 widget 自己的底填滿整個矩形再畫圓角框）；host 的底要用 id
+選擇器（主 QSS 的 `QMainWindow, QWidget, QDialog` 會贏過型別選擇器）。
+
+#### 看過但沒動
+
+gallery chip 的 `✕`：整顆一起 hover 換底已經把它綁成一個單位，而三個修法都比
+現狀差（拆兩顆命中區太擠、拿掉就沒有東西說得出「可移除」、QPushButton 吃不了
+rich text）。理由記在計畫書 §27.7，免得下一輪再盤點一次。
+
+#### 一次自己造成的意外
+
+跑「拿掉 restyle 看測試會不會紅」的驗證之後，用 `git checkout -- widgets.py`
+還原 —— 那把**整個第三輪還沒 commit 的 widgets.py 改動一起丟了**（那支檔案的
+第二輪部分已經 commit，所以 checkout 回到的是第二輪）。重做了一次。
+要驗「拿掉某一行測試會不會紅」，改動要走臨時複本或 stash，不要用 checkout。
+
 ### 還沒做
 
-第三輪把 chip / stageButton / libItem 搬回 QSS、第四輪字元圖示改自繪
-（`⤢` `⌗` `↶` `◐` 在 Windows 的 Segoe UI 覆蓋不完整，而廠內機器就是 Windows）。
+第四輪字元圖示改自繪（`⤢` `⌗` `↶` `◐` 在 Windows 的 Segoe UI 覆蓋不完整，
+而廠內機器就是 Windows）。
 
 ---
 

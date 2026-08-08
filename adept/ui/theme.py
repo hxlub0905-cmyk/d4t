@@ -94,6 +94,11 @@ _LIGHT: Dict[str, Any] = {
     "selection": "#d5e3f8",
     "hover_warm": "#f0f2f5",          # 鍵名保留（歷史），已不是暖色
     "hover_warm_strong": "#e6eaf0",
+    #: 按下去的那一階（F7-23 第三輪）。以前 ``:pressed`` 用的是
+    #: ``hover_warm_strong`` —— 跟 hover 只差 ΔL≈3.5，而按住的時間大約 100ms，
+    #: 在 24px 的小鈕上等於沒有回饋。全平面設計不能用陰影表達「壓下去」，
+    #: 那底色就得真的跳一階。
+    "pressed_bg": "#d9dee6",
     "focus_bg": "#ffffff",
     # -- semantic -----------------------------------------------------------
     "success": "#3f9d6b",
@@ -192,9 +197,14 @@ _LIGHT: Dict[str, Any] = {
     #: 三個尺度就夠了：``sm`` 給指示器與清單列（14–20px 高的東西），
     #: ``md`` 給所有「一塊面」（按鈕、輸入框、卡片、頁籤、面板），
     #: ``pill`` 給 chip。**light / dark 同值** —— 換膚換的是顏色，不是形狀。
+    #:
+    #: ⚠ ``pill`` 是**真的半高**（11px = chip 的 22px 高的一半），不是 CSS 那個
+    #: ``999px`` 慣用寫法。**Qt 不會把超出範圍的圓角夾回去** —— 實測 999px 畫出來
+    #: 的是**方角**（左緣輪廓量到一整排 0），而且不報錯。名字叫 pill、畫出來是
+    #: 方的，是最難發現的一種。chip 的高度改了，這個值要跟著改。
     "radius_sm": "4px",
     "radius_md": "6px",
-    "radius_pill": "999px",
+    "radius_pill": "11px",
     #: 小按鈕（畫布縮放列、卡片上的 ↑↓✕、換 defect 的 ◀▶、Card/Features）的邊長。
     #: F7-23 第二輪之前這是六個各自寫死的尺寸（22×22、24×22、30×22、寬 28、
     #: 寬 40、高 20）—— 同一種視覺語言，但沒有兩顆是一樣大的。
@@ -230,6 +240,7 @@ _DARK: Dict[str, Any] = dict(_LIGHT, **{
     "selection": "#2b3d5c",
     "hover_warm": "#282c34",
     "hover_warm_strong": "#30353f",
+    "pressed_bg": "#3d434f",
     "focus_bg": "#1b1e24",
 
     "success": "#54b382",
@@ -441,7 +452,8 @@ QToolBar QToolButton {
 }
 QToolBar QToolButton:hover { background: $hover_warm; color: $text_primary;
                              border-color: $border_hover; }
-QToolBar QToolButton:pressed { background: $hover_warm_strong; }
+QToolBar QToolButton:pressed { background: $pressed_bg;
+                               border-color: $border_hover; }
 QToolBar QToolButton:disabled { color: $text_disabled; border-color: $border_default; }
 /* One hairline between groups: seven equal-weight buttons in a row read as a
  * single run, so you have to read all of them to find the one you want.
@@ -518,7 +530,16 @@ QPushButton {
     font-weight: 500;
 }
 QPushButton:hover { border-color: $border_hover; background: $hover_warm; }
-QPushButton:pressed { background: $hover_warm_strong; }
+/* Pressed has to be a real step, not a shade (F7-23 round 3). It used to reuse
+ * the hover colour one notch darker - about 3.5 in L* - and a press lasts
+ * roughly 100ms, so on a 24px button that read as nothing happening. A flat
+ * design has no shadow to fall back on, so the fill itself has to move. */
+QPushButton:pressed { background: $pressed_bg; border-color: $border_hover; }
+/* A checkable QPushButton had no checked rule at all; only #cardButton did.
+ * The next checkable button anyone adds would have looked unchecked forever. */
+QPushButton:checked {
+    background: $accent_bg; color: $accent_active; border-color: $accent_border;
+}
 QPushButton:disabled { background: $disabled_bg; color: $disabled_text;
                        border-color: $border_default; }
 /* primary action (Run trial / Run all): objectName = "primary" */
@@ -589,8 +610,14 @@ QPushButton#cardButton[kind="icon"] {
 QPushButton#cardButton[kind="icon"]:hover {
     background: $hover_warm; border-color: $border_hover; color: $accent_active;
 }
-QPushButton#cardButton:hover { background: $hover_warm_strong; color: $accent_active;
-                               border: 1px solid $accent_border; }
+/* Hover moves two things here, same as every other button. It used to move
+ * three - fill, border AND text colour - so the smallest, least important
+ * button in the app had the loudest reaction of any of them. Accent text is
+ * kept for :checked, where it means something. */
+QPushButton#cardButton:hover { background: $hover_warm_strong;
+                               border: 1px solid $border_default; }
+QPushButton#cardButton:pressed { background: $pressed_bg;
+                                 border: 1px solid $border_hover; }
 QPushButton#cardButton:disabled { color: $disabled_text; background: transparent; }
 /* The card / features switch under the image: the selected one has to look
  * selected, or the pair reads as two labels rather than a choice (F7-17). */
@@ -644,6 +671,42 @@ QPushButton[variant="ghost"]:focus {
 QPushButton#cardButton:focus {
     border: 1px solid $border_focus; background: $accent_bg; color: $accent_active;
 }
+
+/* -- library rows, stage rail, gallery chips (F7-23 round 3) ------------ *
+ * These three used to carry a stylesheet string each, built in their own
+ * constructor from TOKENS. That made theme.py's promise - one source of truth,
+ * the colours never drift apart - false for exactly the widgets a user looks at
+ * most, and it only held together because someone remembered to call
+ * refresh_style()/_restyle() on every theme switch. One of them wasn't called:
+ * a library row with a "needs diff" badge kept the old theme's grey.
+ *
+ * What genuinely varies per instance stays in the widget: the stage colour of
+ * the rail icon and the category dot are computed from the step, not the theme.
+ */
+QFrame#libItem { background: transparent; border: 1px solid transparent;
+                 border-radius: $radius_sm; }
+QFrame#libItem:hover { background: $hover_warm; border-color: $border_default; }
+/* A card whose inputs are not on the canvas yet is dimmed, badge and all. */
+QFrame#libItem[missing="true"] QLabel { color: $text_disabled; }
+QLabel#libBadge { color: $text_disabled; font-size: 10px;
+                  border: 1px solid $border_default; border-radius: $radius_sm;
+                  padding: 0px 4px; }
+
+QFrame#stageButton { background: transparent; border: 1px solid transparent;
+                     border-radius: $radius_md; }
+QFrame#stageButton:hover { background: $hover_warm; }
+QFrame#stageButton[active="true"] { background: $accent_bg;
+                                    border-color: $accent_border; }
+QLabel#stageCount { font-size: 9px; color: $text_disabled; }
+
+QPushButton#galleryChip {
+    background: $accent_bg; color: $accent_active;
+    border: 1px solid $accent_border; border-radius: $radius_pill;
+    padding: 2px 9px; font-size: 11px; font-weight: 500; min-height: 16px;
+}
+QPushButton#galleryChip:hover { background: $hover_warm_strong; }
+QPushButton#galleryChip:pressed { background: $pressed_bg; }
+QPushButton#galleryChip:focus { border: 1px solid $border_focus; }
 
 /* -- inputs ------------------------------------------------------------ */
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {

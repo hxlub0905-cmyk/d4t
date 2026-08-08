@@ -474,3 +474,220 @@ def test_run_trial_no_longer_leaves_half_of_itself_to_qt(qapp):
         assert [a.text() for a in win.trial_menu.actions()] == ["Run all defects"]
     finally:
         win.close()
+
+
+# --------------------------------------------------------------------------- #
+# 第三輪：外觀回到 QSS，而狀態的變化要看得見
+# --------------------------------------------------------------------------- #
+def _silhouette(qapp, widget, host):
+    """widget 左緣的輪廓：每一列第一個「不是背板」的 x。
+
+    圓角看得出來的話，這串數字上下兩端會是遞減／遞增的弧；方角則是一整排 0。
+    """
+    host.show()
+    qapp.processEvents()
+    pm = QPixmap(host.size())
+    pm.fill(QColor(BACKDROP))
+    host.render(pm)
+    img = pm.toImage()
+    r = widget.geometry()
+    out = []
+    for y in range(r.top(), r.bottom() + 1):
+        first = 0
+        for x in range(r.left(), min(img.width(), r.left() + 24)):
+            if img.pixelColor(x, y).name() != BACKDROP:
+                first = x - r.left()
+                break
+        out.append(first)
+    return out
+
+
+def test_the_pill_token_is_actually_round(qapp):
+    """``radius_pill`` 必須真的畫出膠囊 —— 而 CSS 的 ``999px`` 寫法在 Qt 是**方的**。
+
+    Qt 不會把超出範圍的圓角夾回半高，它直接放棄圓角、畫一個矩形，而且不報錯。
+    一個叫 ``pill`` 的 token 畫出方角，是最難發現的那種錯：名字說得斬釘截鐵，
+    畫面上沒有任何地方對得起來，也沒有訊息。
+
+    （第一輪加這個 token 時填的正是 ``999px``；還沒有人用到就先被這條抓下來。）
+    """
+    from PySide6.QtWidgets import QHBoxLayout, QPushButton
+
+    # 兩件事都是必要的，少一件這條測試就永遠是綠的：
+    #
+    # 1. **畫 host，不要單獨畫 chip。** Qt 會用 widget 自己的底把整個矩形填滿，
+    #    再把有圓角的框畫上去 —— 單獨 render 那顆 chip，圓角外面那幾格拿到的
+    #    還是 chip 的底色，輪廓完全量不出來。
+    # 2. host 的底要用 **id 選擇器**：主 QSS 裡的
+    #    ``QMainWindow, QWidget, QDialog { background: … }`` 會贏過型別選擇器，
+    #    於是背板變成 bg_page，而 bg_page 不是我們要比對的那個顏色。
+    qapp.setStyleSheet("%s\nQWidget#pillHost { background: %s; }"
+                       % (theme_mod.build_stylesheet(), BACKDROP))
+    try:
+        host = QWidget()
+        host.setObjectName("pillHost")
+        lay = QHBoxLayout(host)
+        lay.setContentsMargins(8, 8, 8, 8)
+        chip = QPushButton("Sort: score", host)
+        chip.setObjectName("galleryChip")
+        lay.addWidget(chip)
+        host.show()
+        qapp.processEvents()
+        host.resize(180, 42)
+        qapp.processEvents()
+        profile = _silhouette(qapp, chip, host)
+        host.hide()
+    finally:
+        theme_mod.apply_theme(qapp, "light")
+
+    assert max(profile) >= 3, \
+        "chip 的左緣是直的（輪廓 %s）—— radius_pill 沒有生效" % profile
+    # 最圓的地方在上下兩端、最平的地方在中線，那才是膠囊而不是隨便一個圓角
+    middle = profile[len(profile) // 2]
+    assert middle == 0, "膠囊的中線應該貼齊左緣，實際縮了 %d px" % middle
+
+
+def _lab_L(hex_str):
+    """sRGB hex -> CIE L*（只要亮度，判斷「差得看不看得出來」夠用）。"""
+    s = hex_str.lstrip("#")
+    rgb = [int(s[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
+    lin = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in rgb]
+    y = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+    return 116 * (y ** (1 / 3.0)) - 16 if y > 0.008856 else 903.3 * y
+
+
+@pytest.mark.parametrize("theme_name", ("light", "dark"))
+def test_pressed_is_a_step_you_can_actually_see(qapp, theme_name):
+    """按下去的回饋以前是 hover 再深一階 —— 量出來 ΔL* ≈ 3.5。
+
+    而按住的時間大約 100ms、按鈕可能只有 24px。全平面設計沒有陰影可以用，
+    那底色就得真的跳一階。
+    """
+    pal = theme_mod.PALETTES[theme_name]
+    d = abs(_lab_L(pal["pressed_bg"]) - _lab_L(pal["hover_warm"]))
+    assert d >= 6.0, \
+        "%s：pressed 與 hover 只差 ΔL* %.1f，按下去看不出來" % (theme_name, d)
+
+
+def test_a_checkable_button_looks_checked(qapp):
+    """``QPushButton`` 以前完全沒有 ``:checked`` 規則。
+
+    現在能用的只有 ``#cardButton:checked``（F7-17 為了 Card/Features 那一組加
+    的）—— 下一個做成 checkable 的一般鈕會永遠看起來像沒選中。
+    """
+    from PySide6.QtWidgets import QPushButton
+
+    host = QWidget()
+    lay = QVBoxLayout(host)
+    b = QPushButton("Compare", host)
+    b.setCheckable(True)
+    lay.addWidget(b)
+    host.show()
+    qapp.processEvents()
+
+    off = _fill_colour(b)
+    b.setChecked(True)
+    qapp.processEvents()
+    on = _fill_colour(b)
+    host.hide()
+
+    assert off != on, "選起來之後填色沒有變（%s）" % off.name()
+    assert on == QColor(theme_mod.TOKENS["accent_bg"]), \
+        "選中的底色應該是 accent_bg，實際是 %s" % on.name()
+
+
+def test_the_stage_button_repolishes_when_it_opens(qapp):
+    """外觀搬進 QSS 之後，**改屬性不會自己重畫** —— 少一次 polish 就完全沒反應。
+
+    這是把 per-widget stylesheet 換成 ``[active="true"]`` 時最容易漏的一步：
+    ``setProperty`` 只是存一個值，而且不報錯。
+    """
+    from adept.ui import widgets as widgets_mod
+
+    host = QWidget()
+    lay = QVBoxLayout(host)
+    btn = widgets_mod.StageButton("region", "Region", "where to look",
+                                  theme_mod.group_hex("region"), host)
+    lay.addWidget(btn)
+    host.show()
+    qapp.processEvents()
+
+    closed = _fill_colour(btn)
+    btn.set_active(True)
+    qapp.processEvents()
+    opened = _fill_colour(btn)
+    host.hide()
+
+    assert closed != opened, "打開的那一段看起來跟沒打開一樣（%s）" % closed.name()
+    assert opened == QColor(theme_mod.TOKENS["accent_bg"])
+
+
+def test_a_library_row_follows_a_theme_switch(qapp):
+    """換膚之後卡片庫的列要跟著換色 —— 以前那要靠有人記得逐顆重套。
+
+    最容易漏的是 badge：它是 ``set_missing`` 當下用 ``TOKENS`` 組出來的字串，
+    而換主題的那條路只走了 rail 上的階段鈕。於是「needs diff」那幾列會留在
+    上一個主題的灰色，而畫面其他地方都變了。
+    """
+    from adept.ui import widgets as widgets_mod
+
+    describe = {"key": "subtract", "label": "Subtract", "help": "test - ref",
+                "reads": ["diff"], "group": "compare"}
+    host = QWidget()
+    lay = QVBoxLayout(host)
+    row = widgets_mod._LibraryItem(describe, theme_mod.group_hex("compare"), host)
+    row.set_missing(["diff"])
+    lay.addWidget(row)
+    host.show()
+    qapp.processEvents()
+
+    def badge_ink():
+        pm = QPixmap(row.badge.size())
+        pm.fill(QColor(BACKDROP))
+        row.badge.render(pm)
+        img = pm.toImage()
+        seen = {}
+        for x in range(img.width()):
+            for y in range(img.height()):
+                c = img.pixelColor(x, y).name()
+                if c != BACKDROP:
+                    seen[c] = seen.get(c, 0) + 1
+        return seen
+
+    theme_mod.apply_theme(qapp, "light")
+    qapp.processEvents()
+    light = badge_ink()
+    theme_mod.apply_theme(qapp, "dark")
+    qapp.processEvents()
+    dark = badge_ink()
+    host.hide()
+    theme_mod.apply_theme(qapp, "light")
+
+    assert light and dark, "badge 沒有畫出任何東西"
+    assert set(light) != set(dark), \
+        "換主題之後 badge 的顏色一模一樣 —— 它沒有跟著 QSS 走"
+
+
+def test_the_widgets_stopped_writing_their_own_palette(qapp):
+    """這三個元件不准再自己組 stylesheet 字串。
+
+    留著的話下一個人只會照抄，而抄過去的那一份不會跟著換膚 —— theme.py
+    docstring 那句「顏色永遠不會兩邊走鐘」就繼續是半真的。
+
+    ``nodeCard`` / ``scoreCard`` / ``VerdictChip`` **不在這條裡**：它們的顏色
+    是依 category / 判定算出來的，本來就該留在 widget（見 QSS 那一段的說明）。
+    """
+    import pathlib
+
+    ui = pathlib.Path(__file__).resolve().parent.parent / "adept" / "ui"
+    offenders = []
+    for name, marker in (("widgets.py", "QFrame#libItem"),
+                         ("widgets.py", "QFrame#stageButton"),
+                         ("gallery.py", "QPushButton#galleryChip")):
+        src = (ui / name).read_text(encoding="utf-8")
+        # 只找**組 stylesheet 字串**的地方（註解裡提到選擇器不算）
+        for line in src.splitlines():
+            stripped = line.strip()
+            if marker in line and not stripped.startswith("#"):
+                offenders.append("%s: %s" % (name, stripped))
+    assert not offenders, "還有元件在自己畫色盤：\n  " + "\n  ".join(offenders)

@@ -77,6 +77,7 @@ __all__ = [
     "to_uint8",
     "small_button",
     "apply_button_cursors",
+    "restyle",
 ]
 
 
@@ -102,6 +103,19 @@ def small_button(text: str, tip: str = "", parent: Optional[QWidget] = None,
     if tip:
         b.setToolTip(str(tip))
     return b
+
+
+def restyle(widget: QWidget) -> None:
+    """屬性改了之後重新套一次 QSS。
+
+    Qt **不會**自己重算：``setProperty("active", True)`` 只是存一個值，選擇器
+    ``[active="true"]`` 要等下一次 polish 才會生效。少了這一步的症狀是
+    「狀態明明改了，畫面沒動」—— 而且不報錯。
+    """
+    style = widget.style()
+    style.unpolish(widget)
+    style.polish(widget)
+    widget.update()
 
 
 def apply_button_cursors(root: QWidget) -> int:
@@ -1633,12 +1647,7 @@ class _LibraryItem(QFrame):
         if describe.get("requires_ref"):
             self._base_tip += " (needs a ref image)"
         self.setToolTip(self._base_tip)
-        self.setStyleSheet(
-            "QFrame#libItem { background:transparent; border:1px solid transparent;"
-            " border-radius:5px; }"
-            "QFrame#libItem:hover { background:%s; border-color:%s; }"
-            % (TOKENS["hover_warm"], TOKENS["border_default"])
-        )
+        self.setProperty("missing", "false")
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(10, 3, 6, 3)
@@ -1655,9 +1664,6 @@ class _LibraryItem(QFrame):
 
         self.badge = QLabel("")
         self.badge.setObjectName("libBadge")
-        self.badge.setStyleSheet(
-            "color:%s; font-size:10px; border:1px solid %s; border-radius:3px;"
-            " padding:0px 4px;" % (TOKENS["text_disabled"], TOKENS["border_default"]))
         self.badge.setVisible(False)
         self.missing: List[str] = []
         lay.addWidget(self.badge)
@@ -1674,10 +1680,11 @@ class _LibraryItem(QFrame):
         """``missing`` = 這張卡要讀、但上游還沒有的影像流。"""
         missing = [str(m) for m in (missing or ())]
         self.missing = list(missing)
+        self.setProperty("missing", "true" if missing else "false")
+        restyle(self)
         if missing:
             self.badge.setText("needs %s" % ", ".join(missing))
             self.badge.setVisible(True)
-            self.label.setStyleSheet("color:%s;" % TOKENS["text_disabled"])
             self.setToolTip(
                 "%s\n\nNot available yet: this card reads %s, which nothing "
                 "upstream produces so far. You can still add it — the pipeline "
@@ -1685,7 +1692,6 @@ class _LibraryItem(QFrame):
                 % (self._base_tip, ", ".join(missing)))
         else:
             self.badge.setVisible(False)
-            self.label.setStyleSheet("")
             self.setToolTip(self._base_tip)
 
     def badge_text(self) -> str:
@@ -1774,33 +1780,26 @@ class StageButton(QFrame):
 
         self.count = QLabel("", self)
         self.count.setAlignment(Qt.AlignHCenter)
-        self.count.setStyleSheet("font-size:9px; color:%s;" % TOKENS["text_disabled"])
+        self.count.setObjectName("stageCount")
         lay.addWidget(self.count)
-        self._restyle()
+        self.setProperty("active", "false")
 
     def set_count(self, n: int) -> None:
         self.count.setText("" if n <= 0 else str(int(n)))
 
     def set_active(self, active: bool) -> None:
         self._active = bool(active)
-        self._restyle()
+        self.setProperty("active", "true" if self._active else "false")
+        restyle(self)
 
     def is_active(self) -> bool:
         return self._active
 
     def refresh_colour(self, colour: str) -> None:
+        # 這裡**只剩**階段色（那是每一顆各自的顏色，不是主題的）。底色、邊框、
+        # 圓角、hover、選中都在 QSS 裡了。
         self._colour = colour
         self.icon.set_color(colour)
-        self._restyle()
-
-    def _restyle(self) -> None:
-        self.setStyleSheet(
-            "QFrame#stageButton { background:%s; border:1px solid %s;"
-            " border-radius:6px; }"
-            "QFrame#stageButton:hover { background:%s; }"
-            % (TOKENS["accent_bg"] if self._active else "transparent",
-               TOKENS["accent_border"] if self._active else "transparent",
-               TOKENS["hover_warm"]))
 
     def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
         if e.button() == Qt.LeftButton:
