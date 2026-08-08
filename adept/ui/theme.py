@@ -504,6 +504,20 @@ QToolBar QToolButton[variant="secondary"]:focus {
 QToolBar QToolButton[variant="secondary"]:disabled {
     background: $disabled_bg; color: $disabled_text; border: 1px solid $border_default;
 }
+/* Run trial and its ▾ are one control with two halves, so the corners that
+ * face each other are square and the 1px between them shows the bar through.
+ * Sitting apart with the toolbar's usual 6px gap, they read as two unrelated
+ * buttons - and the arrow is not another feature, it is this button's other
+ * way of running. */
+QToolBar QToolButton#primary[seg="left"] {
+    border-top-right-radius: 0; border-bottom-right-radius: 0;
+}
+QToolBar QToolButton#primary[seg="right"] {
+    border-top-left-radius: 0; border-bottom-left-radius: 0;
+    padding-left: 7px; padding-right: 7px;
+}
+QToolBar QToolButton#primary[seg="right"]:focus { padding-left: 6px; padding-right: 6px; }
+QWidget#toolbarGroup { background: transparent; border: 0; }
 QToolBar QToolButton#primary:hover { background: $accent_hover; }
 QToolBar QToolButton#primary:pressed { background: $accent_active; }
 /* Disabled, but still recognisably the main action (F7-23).

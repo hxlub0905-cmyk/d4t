@@ -454,9 +454,12 @@ def test_the_toolbar_is_grouped_not_one_long_row(window):
 
     # 檔案那段在最前面，試跑在最後面
     assert index_of(window.btn_open_klarf) < seps[0]
-    # 試跑那一段在最後面 —— F7-23 起它是兩顆（主體 + ▾），不是一顆
-    assert index_of(window.btn_trial) == len(actions) - 2
-    assert index_of(window.btn_trial_more) == len(actions) - 1
+    # 試跑那一段在最後面。F7-23 起它是兩顆（主體 + ▾），而 F7-24 第二輪把那
+    # 兩顆包進同一個容器 —— 中間只留 1px，讓它讀起來是「一件事的兩個半邊」
+    # 而不是兩顆不相干的按鈕。所以工具列上的最後一格是那個容器。
+    assert index_of(window.trial_group) == len(actions) - 1
+    assert window.btn_trial.parent() is window.trial_group
+    assert window.btn_trial_more.parent() is window.trial_group
     # Help 與主題被移到右邊（在撐開的空白之後），不再混在檔案操作裡
     assert index_of(window.btn_help) > index_of(window.btn_export)
     assert index_of(window.btn_help) > index_of(window.btn_undo)

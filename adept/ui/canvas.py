@@ -765,7 +765,16 @@ class PipelineCanvas(QGraphicsView):
 
     #: ``fit()`` 最多縮到多小。還沒拉線的 recipe 會排成一條很長的橫列，
     #: 硬要全部塞進畫面會把節點縮成看不出字的小方塊 —— 那時候寧可留捲軸。
-    MIN_FIT_SCALE = 0.45
+    #: ``fit`` 縮到這裡就停 —— **再小下去就不是「看得完」了**。
+    #:
+    #: 0.45 是憑感覺挑的，實際跑起來一份十張卡的 pipeline 落在 52%，那時候卡片
+    #: 的**副標**（``norm_ref · ref test → ref``，也就是「這張卡吃什麼吐什麼」）
+    #: 已經是一團灰。把同一張圖畫在 52 / 60 / 70 / 80 / 100% 逐級看過：標題到
+    #: 60% 還讀得出來，副標要到 **70%** 才回來。
+    #:
+    #: 所以下限是 0.7。代價是很長的 pipeline 會超出畫面、要捲 —— 那是划算的：
+    #: **讀不出來的全景不算全景**，而想看整體形狀的人本來就會再按一次縮小。
+    MIN_FIT_SCALE = 0.7
 
     def fit(self) -> None:
         """整張圖縮放到看得完（但不縮到看不懂、也不放大）。"""
@@ -781,7 +790,24 @@ class PipelineCanvas(QGraphicsView):
             # 這時候 ``fitInView`` 會把它放大到三倍去填滿版面 —— 卡片變成巨無霸，
             # 而使用者按的是「全部看得完」不是「放到最大」。
             self.scale(1.0 / s, 1.0 / s)
+        self._anchor_start(rect)
         self._sync_zoom_label()
+
+    def _anchor_start(self, rect: QRectF) -> None:
+        """塞不下的時候，靠**開頭**對齊，不要置中。
+
+        撞到 ``MIN_FIT_SCALE`` 之後內容一定比畫面寬，而 ``fitInView`` 是置中的
+        —— 於是兩端各被切掉一半，第一張卡（``Load images``）跟最後一張同時看
+        不見。**pipeline 是從左往右讀的**，看不完的時候該看到的是開頭：
+        使用者要嘛從那裡接下去，要嘛往右捲。上下同理。
+        """
+        view = self.mapToScene(self.viewport().rect()).boundingRect()
+        if view.width() < rect.width():
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().minimum())
+        if view.height() < rect.height():
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().minimum())
 
     def fit_later(self) -> None:
         """等畫布真的有尺寸了再 fit 一次。

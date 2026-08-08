@@ -589,7 +589,6 @@ class StudioWindow(QMainWindow):
         self.act_run_all.triggered.connect(self._on_full_clicked)
         menu.addAction(self.act_run_all)
         self.trial_menu = menu
-        bar.addWidget(self.btn_trial)
 
         # 箭頭是**第二顆真的按鈕**，不是 ``MenuButtonPopup``（F7-23 第二輪）。
         #
@@ -608,7 +607,26 @@ class StudioWindow(QMainWindow):
         self.btn_trial_more = self._tool_button(
             "", "More ways to run — including the whole dataset",
             self._popup_trial_menu, primary=True, icon="chevron_down")
-        bar.addWidget(self.btn_trial_more)
+
+        # 兩顆**放進同一個容器**，中間只留 1px（F7-24 第二輪）。
+        #
+        # 分開放在工具列上時它們吃全域的 6px 間距，讀起來像兩顆不相干的按鈕 ——
+        # 而箭頭是 ``Run trial`` 的次要動作，不是另一個功能。1px 的縫加上內側
+        # 拉直的圓角（QSS 的 ``[seg]``）就是一個分段控制項：**一件事，兩個半邊**。
+        #
+        # 注意這跟 F7-23 拆掉 ``MenuButtonPopup`` 不衝突：那一輪要的是「這半邊的
+        # 外觀歸我們管」，而這裡正是在管它 —— 差別在現在兩個半邊都是真的按鈕。
+        self.btn_trial.setProperty("seg", "left")
+        self.btn_trial_more.setProperty("seg", "right")
+        group = QWidget(bar)
+        group.setObjectName("toolbarGroup")
+        glay = QHBoxLayout(group)
+        glay.setContentsMargins(0, 0, 0, 0)
+        glay.setSpacing(1)
+        glay.addWidget(self.btn_trial)
+        glay.addWidget(self.btn_trial_more)
+        self.trial_group = group
+        bar.addWidget(group)
 
     #: 鍵盤快捷鍵（F7-16）。以前一個都沒有 —— 而這是一個「一直在試」的工具，
     #: 存檔、跑一次、退回上一步是每分鐘都在做的事，每一次都要把手移到滑鼠、

@@ -67,15 +67,16 @@ def test_a_whole_recipe_is_placed_where_you_can_see_it(window, qapp):
     content = view._scene.itemsBoundingRect()
     assert content.isValid() and content.width() > 0
 
-    # 問的是「**擺正**了沒有」，不是「一格不漏地全在畫面裡」——``fit`` 有
-    # ``MIN_FIT_SCALE`` 的下限（不縮到看不懂），所以一條很長的 pipeline 本來就
-    # 會有一點溢出。壞掉的樣子是「內容縮在角落、旁邊一大片空白」，那在數字上
-    # 就是兩個中心差很遠。
-    dx = abs(visible.center().x() - content.center().x())
-    dy = abs(visible.center().y() - content.center().y())
-    assert dx <= content.width() * 0.1 and dy <= max(content.height(), 120) * 0.2, \
-        "內容沒有擺在畫面中央：可視中心 %s vs 內容中心 %s" \
-        % (visible.center(), content.center())
+    # 問的是「**開頭在不在畫面上**」。塞得下的時候整條都在；塞不下的時候
+    # （撞到 MIN_FIT_SCALE）要靠左對齊 —— pipeline 是從左往右讀的，置中會把
+    # 第一張卡跟最後一張同時切掉。壞掉的樣子是內容縮在角落、旁邊一大片空白。
+    assert visible.left() <= content.left() + 4, \
+        "pipeline 的開頭被切掉了：可視左緣 %.0f vs 內容左緣 %.0f" \
+        % (visible.left(), content.left())
+    assert visible.top() <= content.top() + 4
+    if visible.width() >= content.width():
+        dx = abs(visible.center().x() - content.center().x())
+        assert dx <= content.width() * 0.1, "塞得下卻沒有置中"
 
 
 def test_fit_shrinks_but_never_blows_up(window, qapp):
@@ -300,3 +301,63 @@ def test_an_edge_that_runs_backwards_stays_near_its_two_ends(window, qapp):
            if l > reach + 2 or r > reach + 2]
     assert not bad, \
         "這些往回走的線甩得太遠（允許 %.0f px）：%s" % (reach, bad)
+
+
+# --------------------------------------------------------------------------- #
+# 7. 第二輪：從實際畫面看出來的兩件
+# --------------------------------------------------------------------------- #
+def test_the_fit_floor_keeps_the_card_subtitles_readable(window, qapp):
+    """自動 fit 縮到 52%，卡片的**副標**就變成一團灰。
+
+    副標是「這張卡吃什麼吐什麼」（``norm_ref · ref test → ref``），也就是畫布
+    上最需要讀的東西。把同一張圖畫在 52 / 60 / 70 / 80 / 100% 逐級看過：標題到
+    60% 還在，副標要到 70% 才回來。**讀不出來的全景不算全景。**
+    """
+    view = window.pipeline
+    assert view.MIN_FIT_SCALE >= 0.7, \
+        "fit 的下限是 %.2f —— 那個倍率下副標讀不出來" % view.MIN_FIT_SCALE
+
+    assert window.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
+    qapp.processEvents()
+    assert view.zoom_percent() >= 70, \
+        "開這份 recipe 之後停在 %d%%" % view.zoom_percent()
+
+
+def test_run_trial_and_its_arrow_read_as_one_control(window, qapp):
+    """箭頭是 ``Run trial`` 的另一種跑法，不是另一個功能。
+
+    分開放在工具列上時它們吃全域的 6px 間距，讀起來像兩顆不相干的按鈕。
+    現在包進同一個容器、中間 1px，而且**面對面的那兩個角是方的** —— 那是一個
+    分段控制項的樣子：一件事，兩個半邊。
+    """
+    from PySide6.QtGui import QColor, QPixmap
+
+    assert window.btn_trial.parent() is window.trial_group
+    assert window.btn_trial_more.parent() is window.trial_group
+    gap = window.btn_trial_more.x() - (window.btn_trial.x()
+                                       + window.btn_trial.width())
+    assert 0 <= gap <= 2, "兩個半邊之間隔了 %d px" % gap
+
+    # 內側的角要是方的。畫 **容器**、而且容器的底要用 id 選擇器 —— 單獨畫按鈕
+    # 的話 Qt 會先用它自己的底填滿整個矩形，圓不圓完全看不出來（同 F7-23 第三輪
+    # 量 radius_pill 時踩到的兩個陷阱）。
+    qapp.setStyleSheet("%s\nQWidget#toolbarGroup { background: %s; }"
+                       % (theme_mod.build_stylesheet(), BACKDROP_F724))
+    try:
+        qapp.processEvents()
+        group = window.trial_group
+        pm = QPixmap(group.size())
+        pm.fill(QColor(BACKDROP_F724))
+        group.render(pm)
+        img = pm.toImage()
+        b = window.btn_trial
+        inner = img.pixelColor(b.x() + b.width() - 1, b.y())      # 右上（內側）
+        outer = img.pixelColor(b.x(), b.y())                      # 左上（外側）
+    finally:
+        theme_mod.apply_theme(qapp, "light")
+
+    assert inner != QColor(BACKDROP_F724), "內側的角還是圓的（面對面那一邊）"
+    assert outer == QColor(BACKDROP_F724), "外側的角變方了（那一邊該保持圓角）"
+
+
+BACKDROP_F724 = "#808080"
