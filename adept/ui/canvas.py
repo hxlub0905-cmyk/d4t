@@ -468,11 +468,35 @@ class _EdgeItem(QGraphicsItem):
     def pair(self) -> Tuple[str, str]:
         return (self.src.node_id, self.dst.node_id)
 
+    #: 往回走的線，控制點往外推多遠（固定值，**不隨距離長大**）。
+    BACK_REACH = 46.0
+
     def path(self) -> QPainterPath:
+        """左→右的三次貝茲；**往回走的線走另一個形狀**。
+
+        埠是固定的：出在右邊、進在左邊。所以當下游那張卡排在上游**左邊**時
+        （換行 —— 上一列的最後一張接下一列的第一張），這條線本來就得往回走。
+
+        以前不管往哪走都用同一條式子（控制點水平推 ``|Δx| * 0.5``）。往前走時
+        那是對的，往回走時 Δx 是一整列的寬度，於是控制點被推到 a 的右邊 350px
+        與 b 的左邊 350px —— 一條連兩張卡的線橫掃了七百多 px，還甩到比第一張卡
+        更左邊。三列就是三條這種折線橫過整張畫布，**比它要表達的「順序」還
+        搶眼**，而它表達的只是「這兩張卡有先後」。
+
+        往回走改成：水平只推一個固定的小距離，剩下的量交給**垂直**方向。
+        線因此收在兩列之間的帶子裡，兩端各只超出 ``BACK_REACH``。
+        """
         a, b = self.src.out_port(self.port), self.dst.in_port()
-        dx = max(40.0, abs(b.x() - a.x()) * 0.5)
+        dx = b.x() - a.x()
         p = QPainterPath(a)
-        p.cubicTo(a + QPointF(dx, 0), b - QPointF(dx, 0), b)
+        if dx >= 2 * self.BACK_REACH:
+            h = max(40.0, dx * 0.5)
+            p.cubicTo(a + QPointF(h, 0), b - QPointF(h, 0), b)
+            return p
+        h = self.BACK_REACH
+        v = max(30.0, abs(b.y() - a.y()) * 0.5)
+        sign = 1.0 if b.y() >= a.y() else -1.0
+        p.cubicTo(a + QPointF(h, sign * v), b - QPointF(h, sign * v), b)
         return p
 
     def boundingRect(self) -> QRectF:

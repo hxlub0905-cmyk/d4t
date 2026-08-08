@@ -189,3 +189,114 @@ def test_the_two_actions_worth_pressing_are_the_two_with_colour(window, qapp):
     for b in plain:
         assert b.objectName() != "primary"
         assert b.property("variant") is None, b.text()
+
+
+# --------------------------------------------------------------------------- #
+# 5. 儀表要說得出自己畫的是什麼（同 §28.6 的第一件）
+# --------------------------------------------------------------------------- #
+def _paint(widget, w=520, h=340):
+    """把 widget 畫出來，回傳 QImage（自繪面板的 bug 只在 paintEvent 才浮出來）。"""
+    from PySide6.QtGui import QColor, QPixmap
+
+    widget.resize(w, h)
+    pm = QPixmap(widget.size())
+    pm.fill(QColor("#808080"))
+    widget.render(pm)
+    return pm.toImage()
+
+
+def _spread_with_data(qapp):
+    from adept.ui import inspectors as insp
+
+    panel = insp.MeasureInspector()
+    batch = [{"features": {"glv_mean": 40.0 + i, "glv_max": 200.0 + 2 * i}}
+             for i in range(24)]
+    panel.set_context("glv", params={}, result={"features": {"glv_mean": 52.0,
+                                                            "glv_max": 231.0}},
+                      batch=batch, feature_names=["glv_mean", "glv_max"])
+    return panel
+
+
+def _diff(a, b):
+    """兩張圖有多少格不一樣。"""
+    return sum(1 for x in range(a.width()) for y in range(a.height())
+               if a.pixelColor(x, y) != b.pixelColor(x, y))
+
+
+def test_the_spread_panel_says_what_its_axis_is(qapp):
+    """三排長條、右邊一個數字、中間一條紅線 —— 而畫面上沒有一個地方說得出
+    橫軸從哪到哪、紅線是什麼、右邊那個數字又是誰的。
+
+    F7-21 幫 Enhance 的直方圖補了軸與圖例，這個量測卡儀表沒跟上 —— 同一種東西
+    兩套做法，兩邊各長一半（正是 F7-23 第三輪在清的那種）。
+
+    測法：**把那段程式關掉，畫面要真的變**。第一版是「數某個 token 顏色的畫素
+    夠不夠多」，結果對著改之前的程式也通過 —— 抗鋸齒的字邊本來就會經過那個
+    顏色附近。量顏色之前要先確定那個顏色只有你要找的東西會畫。
+    """
+    from adept.ui import inspectors as insp
+
+    panel = _spread_with_data(qapp)
+    assert panel.has_data() is True
+    full = _paint(panel)
+
+    # (1) 兩端的刻度：把「一排要多高才畫刻度」調到不可能達到
+    keep = insp.MeasureInspector.AXIS_MIN_ROW_H
+    try:
+        insp.MeasureInspector.AXIS_MIN_ROW_H = 10 ** 6
+        without_axis = _paint(panel)
+    finally:
+        insp.MeasureInspector.AXIS_MIN_ROW_H = keep
+    assert _diff(full, without_axis) > 60, "關掉刻度之後畫面沒有變 —— 它沒有真的畫"
+
+    # (2) 圖例：同一招
+    keep = insp.MeasureInspector.LEGEND_H
+    try:
+        insp.MeasureInspector.LEGEND_H = 10 ** 6
+        without_legend = _paint(panel)
+    finally:
+        insp.MeasureInspector.LEGEND_H = keep
+    assert _diff(full, without_legend) > 60, "關掉圖例之後畫面沒有變"
+
+
+def test_the_spread_panel_degrades_instead_of_squashing(qapp):
+    """面板拖矮的時候，長條比刻度與圖例重要 —— 兩者都要讓位，不是擠成一團。"""
+    panel = _spread_with_data(qapp)
+    tall = _paint(panel, 520, 340)
+    short = _paint(panel, 520, 120)        # 最小高度
+    assert short.height() == 120           # 畫得出來、不炸
+    assert _diff(tall, short) > 0
+    assert panel.summary()
+
+
+# --------------------------------------------------------------------------- #
+# 6. 往回走的線不要橫掃整張畫布（§28.6 的第二件）
+# --------------------------------------------------------------------------- #
+def test_an_edge_that_runs_backwards_stays_near_its_two_ends(window, qapp):
+    """換行的那條線（上一列最後一張 → 下一列第一張）本來就得往回走。
+
+    以前它跟往前走的線共用同一條式子：控制點水平推 ``|Δx| * 0.5``，而往回走時
+    Δx 是一整列的寬度 —— 於是一條連兩張卡的線橫掃七百多 px，還甩到比第一張卡
+    更左邊。三列就三條這種折線橫過整張畫布，比它要表達的「順序」還搶眼。
+    """
+    assert window.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
+    qapp.processEvents()
+
+    view = window.pipeline
+    backwards = []
+    for edge in view._edges:
+        a = edge.src.out_port(edge.port)
+        b = edge.dst.in_port()
+        if b.x() >= a.x():
+            continue
+        box = edge.path().boundingRect()
+        over_left = a.x() and (min(a.x(), b.x()) - box.left())
+        over_right = box.right() - max(a.x(), b.x())
+        backwards.append((edge.pair(), over_left, over_right))
+
+    assert backwards, "這份 recipe 應該至少有一條往回走的線（換行）"
+    reach = view._edges[0].BACK_REACH
+    bad = [(pair, l, r) for pair, l, r in backwards
+           if l > reach + 2 or r > reach + 2]
+    assert not bad, \
+        "這些往回走的線甩得太遠（允許 %.0f px）：%s" % (reach, bad)
