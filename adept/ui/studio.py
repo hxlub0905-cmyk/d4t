@@ -120,15 +120,22 @@ from .welcome import (
 )
 from .widgets import (
     FeatureTable,
+    IconButton,
     ImageView,
     LibraryPanel,
     ParamForm,
     PipelinePanel,
     ProfilePanel,
     VerdictChip,
+    _GlyphMixin,
     apply_button_cursors,
     small_button,
 )
+
+
+class _GlyphToolButton(_GlyphMixin, QToolButton):
+    """工具列上會自己畫圖示的 QToolButton（``_tool_button(icon=…)`` 用）。"""
+
 from .workers import (
     DatasetLoadWorker, PreviewWorker, RegionCheckWorker, TrialWorker,
     _ThreadedWorker,
@@ -515,17 +522,17 @@ class StudioWindow(QMainWindow):
             "Write these results back to KLARF, or produce reports and overlays",
             self.open_export_dialog)
         self.btn_undo = self._tool_button(
-            "↶", "Undo the last change", self.undo)
+            "", "Undo the last change", self.undo, icon="undo")
         self.btn_redo = self._tool_button(
-            "↷", "Redo the change you just undid", self.redo)
+            "", "Redo the change you just undid", self.redo, icon="redo")
         self.btn_help = self._tool_button(
             "Help", "Reopen the getting-started tour (includes “Try it with "
                     "sample data”)",
             lambda: self.show_welcome(force=True))
         # 主題切換：一顆字元鈕，不佔位子也找得到（偏好存 QSettings）
         self.btn_theme = self._tool_button(
-            "◐", "Switch between the light and dark theme",
-            self.toggle_theme)
+            "", "Switch between the light and dark theme",
+            self.toggle_theme, icon="theme")
 
         # 一段 = 一種事情；段與段之間一條分隔線。
         for group in ((self.btn_open_klarf, self.btn_open_recipe,
@@ -558,9 +565,9 @@ class StudioWindow(QMainWindow):
         bar.addWidget(self.spin_trial_n)
 
         self.btn_trial = self._tool_button(
-            "▶ Run trial", "Run the current pipeline over the first N defects "
-                           "and show the score distribution",
-            self._on_trial_clicked, primary=True)
+            "Run trial", "Run the current pipeline over the first N defects "
+                         "and show the score distribution",
+            self._on_trial_clicked, primary=True, icon="play")
         # 「跑整批」是同一顆鈕的次要動作：點主體 = 試跑，點箭頭才看得到它。
         menu = QMenu(self.btn_trial)
         self.act_run_all = QAction("Run all defects", menu)
@@ -585,8 +592,8 @@ class StudioWindow(QMainWindow):
         # 所以拆成兩顆普通按鈕，兩顆都是我們控制得了的。這顆**不設 menu**：
         # 設了 Qt 又會自己加一個下拉指示器，等於畫兩個箭頭。
         self.btn_trial_more = self._tool_button(
-            "▾", "More ways to run — including the whole dataset",
-            self._popup_trial_menu, primary=True)
+            "", "More ways to run — including the whole dataset",
+            self._popup_trial_menu, primary=True, icon="chevron_down")
         bar.addWidget(self.btn_trial_more)
 
     #: 鍵盤快捷鍵（F7-16）。以前一個都沒有 —— 而這是一個「一直在試」的工具，
@@ -758,14 +765,22 @@ class StudioWindow(QMainWindow):
         self.trial_menu.popup(b.mapToGlobal(QPoint(0, b.height())))
 
     def _tool_button(self, text: str, tip: str, slot: Any,
-                     primary: bool = False) -> QToolButton:
-        b = QToolButton(self)
+                     primary: bool = False,
+                     icon: Optional[str] = None) -> QToolButton:
+        """工具列上的一顆鈕。``icon`` 給的是**自繪**圖示的名字（不是字元）。
+
+        有文字又有圖示時（只有 ``Run trial``），圖示畫在左邊那一格 ——
+        QSS 的 ``[hasGlyph="true"]`` 把左邊 padding 撐開，文字才不會疊上去。
+        """
+        b = _GlyphToolButton(self) if icon else QToolButton(self)
         b.setText(text)
         b.setToolTip(tip)
         b.setToolButtonStyle(Qt.ToolButtonTextOnly)
         b.setCursor(Qt.PointingHandCursor)
         if primary:
             b.setObjectName("primary")
+        if icon:
+            b._init_glyph(icon, "left" if text else "center")
         b.clicked.connect(slot)
         return b
 
@@ -888,8 +903,8 @@ class StudioWindow(QMainWindow):
 
         nav = QHBoxLayout()
         nav.setSpacing(6)
-        self.btn_prev = small_button("◀", "Previous defect", pane, kind="icon")
-        self.btn_next = small_button("▶", "Next defect", pane, kind="icon")
+        self.btn_prev = IconButton("prev", "Previous defect", pane, kind="icon")
+        self.btn_next = IconButton("next", "Next defect", pane, kind="icon")
         self.defect_combo = QComboBox(pane)
         self.defect_combo.setToolTip("Jump straight to a defect")
         self.defect_label = QLabel("(no dataset loaded)", pane)

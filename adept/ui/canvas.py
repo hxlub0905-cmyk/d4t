@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
 
 from . import theme
 from .theme import TOKENS
-from .widgets import CARD_MIME, draw_group_icon, small_button
+from .widgets import CARD_MIME, IconButton, draw_group_icon, small_button
 
 __all__ = ["PipelineCanvas", "NODE_W", "NODE_H", "COL_GAP", "ROW_GAP"]
 
@@ -606,19 +606,23 @@ class PipelineCanvas(QGraphicsView):
         self._zoom_label.setMinimumWidth(38)
         self._zoom_label.setAlignment(Qt.AlignCenter)
 
-        specs = (("−", "Zoom out", lambda: self.zoom_by(1 / 1.25)),
-                 ("+", "Zoom in", lambda: self.zoom_by(1.25)),
-                 ("⤢", "Fit the whole pipeline in view", self.fit),
-                 ("1:1", "Back to 100%", self.reset_zoom),
+        # ``1:1`` 留成文字（數字與冒號是 ASCII，哪台機器都畫得出來）；其餘四顆
+        # 改成自繪圖示 —— ``⤢`` 與 ``⌗`` 在 Windows 的 Segoe UI 根本沒有
+        # （F7-23 第四輪，見 widgets.draw_glyph_icon）。
+        specs = (("zoom_out", "Zoom out", lambda: self.zoom_by(1 / 1.25)),
+                 ("zoom_in", "Zoom in", lambda: self.zoom_by(1.25)),
+                 ("fit", "Fit the whole pipeline in view", self.fit),
+                 (None, "Back to 100%", self.reset_zoom),
                  # 排整齊跟縮放是同一類東西（都只動「怎麼看」，不動 recipe），
                  # 所以放同一排，而不是放到會改檔案的工具列上。
-                 ("⌗", "Tidy up — put the cards back on the grid", self.tidy))
+                 ("tidy", "Tidy up — put the cards back on the grid", self.tidy))
         self._zoom_buttons = []
-        for text, tip, slot in specs:
-            # 這一排浮在畫布上，所以要 ``kind="icon"``（自己的底）。``1:1`` 是
-            # 唯一放得下文字的那顆，用 ``wide``；其餘一律方的。
-            b = small_button(text, tip, bar, kind="icon",
-                             shape="wide" if text == "1:1" else "square")
+        for icon, tip, slot in specs:
+            # 這一排浮在畫布上，所以要 ``kind="icon"``（自己的底）。
+            if icon is None:
+                b = small_button("1:1", tip, bar, kind="icon", shape="wide")
+            else:
+                b = IconButton(icon, tip, bar, kind="icon")
             b.setFocusPolicy(Qt.NoFocus)
             b.clicked.connect(slot)
             lay.addWidget(b)

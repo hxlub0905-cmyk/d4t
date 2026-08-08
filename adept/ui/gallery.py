@@ -260,7 +260,9 @@ class _Chip(QPushButton):
     """標頭上的一顆條件 chip：``排序：score ↓  ✕``。點一下就把該條件拿掉。"""
 
     def __init__(self, text: str, tip: str, parent: Optional[QWidget] = None):
-        super().__init__("%s  ✕" % text, parent)
+        # ``×`` 是 U+00D7（Latin-1），不是 U+2715 那個 Dingbats 的 ``✕`` ——
+        # 後者在 Windows 上要退到 Segoe UI Symbol（F7-23 第四輪）。
+        super().__init__("%s  ×" % text, parent)
         self.setObjectName("galleryChip")
         self.label_text = text
         self.setCursor(Qt.PointingHandCursor)

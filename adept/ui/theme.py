@@ -476,6 +476,13 @@ QToolBar QToolButton#primary {
     background: $accent; color: #ffffff; border: 1px solid $accent;
     padding: 5px 16px; font-weight: 600;
 }
+/* Icon-only buttons carry no label, so the horizontal padding that sizes a
+ * text button would leave them enormous; and a button that draws its own glyph
+ * next to a label has to be told to leave room for it (F7-23 round 4). */
+QToolBar QToolButton[glyph="true"] { padding: 5px 8px; }
+QToolBar QToolButton[hasGlyph="true"] { padding-left: 26px; }
+QToolBar QToolButton#primary[hasGlyph="true"] { padding-left: 30px; }
+QToolBar QToolButton#primary[hasGlyph="true"]:focus { padding-left: 29px; }
 QToolBar QToolButton#primary:hover { background: $accent_hover; }
 QToolBar QToolButton#primary:pressed { background: $accent_active; }
 /* Disabled, but still recognisably the main action (F7-23).

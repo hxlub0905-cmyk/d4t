@@ -401,8 +401,11 @@ def test_run_all_lives_in_the_trial_button_menu(window):
     箭頭改成一顆自己的按鈕的理由（QSS 修不了那半邊的外觀）見計畫書 §27.5。
     """
     assert [a.text() for a in window.trial_menu.actions()] == ["Run all defects"]
-    assert window.btn_trial.text() == "▶ Run trial"
-    assert window.btn_trial_more.text() == "▾"
+    # F7-23 第四輪把 ``▶`` 與 ``▾`` 換成自繪圖示（那兩個字元在廠內的 Windows
+    # 上不保證有字型），所以問的是圖示的名字，不是那顆字。
+    assert window.btn_trial.text() == "Run trial"
+    assert window.btn_trial.glyph_name() == "play"
+    assert window.btn_trial_more.glyph_name() == "chevron_down"
     # 主鈕本身不再掛選單 —— 掛著的話 Qt 會回頭自己畫那個下拉區
     assert window.btn_trial.menu() is None
     assert window.btn_trial_more.menu() is None, \

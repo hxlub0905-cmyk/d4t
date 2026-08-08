@@ -36,6 +36,7 @@ from PySide6.QtGui import (
     QPainterPath,
     QPen,
     QPixmap,
+    QPolygonF,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -78,6 +79,9 @@ __all__ = [
     "small_button",
     "apply_button_cursors",
     "restyle",
+    "IconButton",
+    "GLYPH_ICONS",
+    "draw_glyph_icon",
 ]
 
 
@@ -103,6 +107,206 @@ def small_button(text: str, tip: str = "", parent: Optional[QWidget] = None,
     if tip:
         b.setToolTip(str(tip))
     return b
+
+
+#: 按鈕上畫得出來的圖示（F7-23 第四輪）。名字是**這顆鈕在做什麼**，
+#: 不是它長什麼樣 —— 呼叫端說 ``"fit"``，不說「兩端帶箭頭的斜線」。
+GLYPH_ICONS = (
+    "undo", "redo", "theme", "prev", "next", "play", "chevron_down",
+    "zoom_in", "zoom_out", "fit", "tidy", "up", "down", "close",
+)
+
+
+def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
+                    dark: bool = False) -> None:
+    """在 ``p`` 的目前原點畫一個 ``size`` × ``size`` 的按鈕圖示。
+
+    為什麼不用字元（F7-23 第四輪）
+    ------------------------------
+    這些位置本來放的是 ``↶ ↷ ◐ ◀ ▶ − + ⤢ ⌗ ↑ ↓ ✕ ▾``。問題不是它們醜，是
+    **廠內機器是 Windows，而 Segoe UI 蓋不到其中好幾個**（``⤢`` U+2922、
+    ``⌗`` U+2317、``↶↷`` U+21B6/B7 都要退到 Segoe UI Symbol）。退字型的結果是
+    同一排按鈕裡每顆字的大小與 baseline 都不一樣，最壞是豆腐框 —— 而**我們在
+    這裡看不到**（開發機不是那台）。
+
+    這跟 :func:`draw_group_icon` 是同一條路，理由也一樣：repo 只放純文字檔
+    （見 ``docs/HANDOVER.md`` §5），而用 QPainter 連「要不要把圖檔加進版控」
+    這個問題都不用問，顏色還直接吃呼叫端給的值（所以換膚、變灰全部自動跟著）。
+
+    ``dark`` 只有 ``theme`` 這一顆用得到：主題鈕以前不管在哪個主題都是同一個
+    ``◐``，看不出**現在是哪一個**、也看不出按下去會變成什麼。
+    """
+    p.setRenderHint(QPainter.Antialiasing, True)
+    pen = QPen(QColor(color), max(1.2, size / 9.0))
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    w = h = float(size)
+    m = w / 6.0
+    n = str(name)
+
+    def triangle(points):
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        p.drawPolygon(QPolygonF([QPointF(x, y) for x, y in points]))
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+
+    if n in ("undo", "redo"):
+        # 一個 U 形迴轉 + 箭頭。redo 是把 undo **左右翻過來**畫的，兩顆因此
+        # 永遠對稱 —— 分開手繪的話遲早會差一兩個畫素，而它們就並排放著。
+        #
+        # 15px 下線要細（``size/11``）：原本用 ``size/9`` 的弧糊成一塊，
+        # 看起來像個實心的月牙而不是一支箭。
+        if n == "redo":
+            p.translate(w, 0.0)
+            p.scale(-1.0, 1.0)
+        thin = QPen(QColor(color), max(1.1, size / 11.0))
+        thin.setCapStyle(Qt.RoundCap)
+        thin.setJoinStyle(Qt.RoundJoin)
+        p.setPen(thin)
+        box = QRectF(m, h * 0.26, w - 2 * m, h * 0.44)
+        p.drawArc(box, 0, 180 * 16)                 # 上半圈
+        left = QPointF(box.left(), box.center().y())
+        p.drawLine(QPointF(box.right(), box.center().y()),
+                   QPointF(box.right(), h - m))     # 右邊的尾巴
+        a = w * 0.15
+        p.drawLine(left, QPointF(left.x() - a * 0.8, left.y() - a))
+        p.drawLine(left, QPointF(left.x() + a * 0.8, left.y() - a))
+        p.setPen(pen)
+        if n == "redo":
+            p.scale(-1.0, 1.0)
+            p.translate(-w, 0.0)
+    elif n == "theme":
+        # 半實心圓。**實心的那一半跟著目前的主題翻面** —— 不然這顆鈕在兩個
+        # 主題下長得一模一樣，等於沒有回答「現在是哪一個」。
+        box = QRectF(m, m, w - 2 * m, h - 2 * m)
+        p.drawEllipse(box)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        p.drawPie(box, (90 if dark else -90) * 16, 180 * 16)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+    elif n in ("prev", "next", "play"):
+        cx, cy = w / 2, h / 2
+        a = w * (0.26 if n == "play" else 0.24)
+        b = h * 0.30
+        if n == "prev":
+            triangle(((cx + a, cy - b), (cx + a, cy + b), (cx - a, cy)))
+        else:
+            triangle(((cx - a, cy - b), (cx - a, cy + b), (cx + a, cy)))
+    elif n in ("up", "down", "chevron_down"):
+        cx = w / 2
+        a = w * 0.26
+        top, bot = h * 0.40, h * 0.62
+        if n == "up":
+            p.drawLine(QPointF(cx - a, bot), QPointF(cx, top))
+            p.drawLine(QPointF(cx + a, bot), QPointF(cx, top))
+        else:
+            p.drawLine(QPointF(cx - a, top), QPointF(cx, bot))
+            p.drawLine(QPointF(cx + a, top), QPointF(cx, bot))
+    elif n == "close":
+        p.drawLine(QPointF(m, m), QPointF(w - m, h - m))
+        p.drawLine(QPointF(w - m, m), QPointF(m, h - m))
+    elif n in ("zoom_in", "zoom_out"):
+        p.drawLine(QPointF(m, h / 2), QPointF(w - m, h / 2))
+        if n == "zoom_in":
+            p.drawLine(QPointF(w / 2, m), QPointF(w / 2, h - m))
+    elif n == "fit":
+        # 四個角的取景括號 —— 比原本的 ``⤢`` 更說得出「整個看得完」，
+        # 而且跟 Region 卡的圖示是同一種語言（``draw_group_icon`` 的 region）。
+        # 括號要**短**：0.26 的長度在 15px 下兩隻手臂幾乎接起來，看起來就是一個
+        # 缺了幾格的矩形，不是四個角。
+        c = w * 0.17
+        for x0, y0, dx, dy in ((m, m, 1, 1), (w - m, m, -1, 1),
+                               (m, h - m, 1, -1), (w - m, h - m, -1, -1)):
+            p.drawLine(QPointF(x0, y0), QPointF(x0 + c * dx, y0))
+            p.drawLine(QPointF(x0, y0), QPointF(x0, y0 + c * dy))
+    elif n == "tidy":
+        # 2×2 的方格：「把卡片排回格線上」。**實心**的 —— 描邊版在 15px 下
+        # 線比方格中間的空隙還粗，四個框糊成一團。
+        side = (w - 2 * m) * 0.40
+        gap = (w - 2 * m) - 2 * side
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        for i in (0, 1):
+            for j in (0, 1):
+                p.drawRect(QRectF(m + i * (side + gap), m + j * (side + gap),
+                                  side, side))
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+    else:
+        raise ValueError("unknown icon: %r (known: %s)"
+                         % (name, ", ".join(GLYPH_ICONS)))
+
+
+def _paint_glyph(widget: QWidget, name: str, side: str = "center") -> None:
+    """把 ``name`` 畫到 ``widget`` 上（給 icon 按鈕的 ``paintEvent`` 用）。
+
+    顏色取自 **widget 自己的 palette**，而 palette 的 ``ButtonText`` 是 Qt 從
+    QSS 的 ``color`` 解析出來的 —— 所以換膚、變灰（``:disabled`` 那條）全部
+    自動跟著，這裡不必知道任何 token 名字，也不必在換主題時被誰通知。
+    """
+    from PySide6.QtGui import QPalette
+
+    r = widget.contentsRect()
+    size = max(9.0, min(float(min(r.width(), r.height())), 15.0))
+    colour = widget.palette().color(QPalette.ButtonText).name()
+    p = QPainter(widget)
+    if side == "left":
+        # 用 ``rect()`` 而不是 ``contentsRect()``：QSS 樣式下的 contentsRect
+        # **尺寸**扣掉了 padding，但**原點仍然是 (0, 0)** —— 它不是一個可以拿來
+        # 定位的框。而圖示要畫的正是被 padding 撐開的那一塊。
+        size = min(size, 14.0)
+        x = widget.rect().left() + 7.0
+        y = widget.rect().center().y() - size / 2.0 + 0.5
+    else:
+        x = r.center().x() - size / 2.0 + 0.5
+        y = r.center().y() - size / 2.0 + 0.5
+    p.translate(x, y)
+    draw_glyph_icon(p, name, size, colour, dark=theme.current_theme() == "dark")
+    p.end()
+
+
+class _GlyphMixin(object):
+    """給按鈕加一個自繪圖示。文字仍然可以有（``side="left"`` 時畫在左邊）。"""
+
+    def _init_glyph(self, name: str, side: str = "center") -> None:
+        if name not in GLYPH_ICONS:
+            raise ValueError("unknown icon: %r" % (name,))
+        self._glyph_name = name
+        self._glyph_side = side
+        if side != "left":
+            # 沒有文字的按鈕對讀螢幕軟體與 Qt 的測試工具是空的。tooltip 已經
+            # 寫了那句話，直接拿來當名字，不要再發明第二份說明。
+            self.setAccessibleName(self.toolTip() or name)
+            self.setProperty("glyph", "true")
+        else:
+            self.setProperty("hasGlyph", "true")
+
+    def glyph_name(self) -> str:
+        return getattr(self, "_glyph_name", "")
+
+    def paintEvent(self, e) -> None:       # noqa: D102 - Qt hook
+        super().paintEvent(e)
+        _paint_glyph(self, self._glyph_name, self._glyph_side)
+
+
+class IconButton(_GlyphMixin, QPushButton):
+    """小的圖示按鈕（畫布縮放列、節點卡的移動/刪除、換 defect）。"""
+
+    def __init__(self, icon: str, tip: str = "",
+                 parent: Optional[QWidget] = None,
+                 kind: str = "ghost"):
+        QPushButton.__init__(self, "", parent)
+        self.setObjectName("cardButton")
+        self.setProperty("shape", "square")
+        self.setProperty("kind", str(kind))
+        self.setCursor(Qt.PointingHandCursor)
+        if tip:
+            self.setToolTip(str(tip))
+        self._init_glyph(icon)
 
 
 def restyle(widget: QWidget) -> None:
@@ -2197,13 +2401,13 @@ class _NodeCard(QFrame):
             lambda v: self.enable_toggled.emit(self.node_id, bool(v)))
         lay.addWidget(self.chk)
 
-        self.btn_up = self._small("↑", "Move one step earlier")
+        self.btn_up = self._small("up", "Move one step earlier")
         self.btn_up.clicked.connect(
             lambda: self.move_requested.emit(self.node_id, -1))
-        self.btn_down = self._small("↓", "Move one step later")
+        self.btn_down = self._small("down", "Move one step later")
         self.btn_down.clicked.connect(
             lambda: self.move_requested.emit(self.node_id, +1))
-        self.btn_remove = self._small("✕", "Remove from the pipeline")
+        self.btn_remove = self._small("close", "Remove from the pipeline")
         self.btn_remove.clicked.connect(
             lambda: self.remove_requested.emit(self.node_id))
         for b in (self.btn_up, self.btn_down, self.btn_remove):
@@ -2211,8 +2415,8 @@ class _NodeCard(QFrame):
 
         self.set_selected(False)
 
-    def _small(self, text: str, tip: str) -> QPushButton:
-        return small_button(text, tip)
+    def _small(self, icon: str, tip: str) -> QPushButton:
+        return IconButton(icon, tip)
 
     def set_selected(self, selected: bool) -> None:
         self.selected = bool(selected)

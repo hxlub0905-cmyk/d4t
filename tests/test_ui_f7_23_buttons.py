@@ -691,3 +691,169 @@ def test_the_widgets_stopped_writing_their_own_palette(qapp):
             if marker in line and not stripped.startswith("#"):
                 offenders.append("%s: %s" % (name, stripped))
     assert not offenders, "還有元件在自己畫色盤：\n  " + "\n  ".join(offenders)
+
+
+# --------------------------------------------------------------------------- #
+# 第四輪：圖示用畫的，不用字元
+# --------------------------------------------------------------------------- #
+def _ink_count(widget, qapp):
+    """widget 畫出來之後，有多少畫素不是它自己的底色。"""
+    qapp.processEvents()
+    pm = QPixmap(widget.size())
+    pm.fill(QColor(BACKDROP))
+    widget.render(pm)
+    img = pm.toImage()
+    bg = _fill_colour(widget)
+    n = 0
+    for x in range(img.width()):
+        for y in range(img.height()):
+            p = img.pixelColor(x, y)
+            if (abs(p.red() - bg.red()) + abs(p.green() - bg.green())
+                    + abs(p.blue() - bg.blue())) > 40:
+                n += 1
+    return n
+
+
+def test_every_icon_name_actually_draws_something(qapp):
+    """每一個圖示都要畫得出東西 —— 而且**打錯名字要當場炸**。
+
+    以前這些位置放的是字元。打錯一個字元不會有人發現（畫面上就是一個奇怪的
+    符號）；而字型缺字的時候畫出來是豆腐框，那也不會有人發現 —— 因為缺字的是
+    廠內那台 Windows，我們在這裡看不到。名字換成 ``GLYPH_ICONS`` 之後，
+    兩種錯都在建構的當下就擋掉。
+    """
+    from PySide6.QtGui import QPainter
+
+    from adept.ui import widgets as widgets_mod
+
+    blank = []
+    for name in widgets_mod.GLYPH_ICONS:
+        pm = QPixmap(24, 24)
+        pm.fill(QColor("#ffffff"))
+        p = QPainter(pm)
+        widgets_mod.draw_glyph_icon(p, name, 24.0, "#000000")
+        p.end()
+        img = pm.toImage()
+        ink = sum(1 for x in range(24) for y in range(24)
+                  if img.pixelColor(x, y) != QColor("#ffffff"))
+        if ink < 12:
+            blank.append("%s（只有 %d 個畫素）" % (name, ink))
+    assert not blank, "這些圖示畫出來幾乎是空的：\n  " + "\n  ".join(blank)
+
+    with pytest.raises(ValueError):
+        pm = QPixmap(24, 24)
+        p = QPainter(pm)
+        try:
+            widgets_mod.draw_glyph_icon(p, "no_such_icon", 24.0, "#000000")
+        finally:
+            p.end()
+
+
+def test_no_button_relies_on_a_glyph_the_fab_machine_may_not_have(qapp):
+    """按鈕的文字裡不准再出現「不保證有字型」的字元。
+
+    廠內是 Windows，而 Segoe UI 蓋不到底下這幾個 —— 要退到 Segoe UI Symbol。
+    退字型的結果是同一排按鈕裡每顆字的大小與 baseline 都不一樣，最壞是豆腐框。
+    **而我們在這裡看不到**（開發機不是那台），所以只能用規則擋。
+
+    這串**刻意不是「所有非 ASCII」**：
+
+    * ``↶↷``(U+21B6/B7)、``⤢``(U+2922)、``⌗``(U+2317) —— Segoe UI 沒有
+    * ``◐``(U+25D0)、``◀▶``(U+25C0/B6)、``▾``(U+25BE)、``△``(U+25B3) ——
+      Geometric Shapes，靠 Segoe UI Symbol 補，而且 ``▶`` 在某些設定下會被當
+      emoji 換一整套字型
+    * ``✓✗✕``(U+2713/17/15) —— Dingbats，同上
+
+    **不在這串裡的**：``−``(U+2212) 與 ``←↑→↓``(U+2190–93) 是 Segoe UI 的基本
+    覆蓋範圍，``×``(U+00D7) 更是 Latin-1 —— 它們留成文字是安全的，
+    把它們也一起畫掉只會多一堆沒有換到東西的改動。``1:1`` 這種 ASCII 同理。
+    """
+    from PySide6.QtWidgets import QPushButton
+
+    risky = "↶↷◐◀▶⤢⌗✕▾△✗✓"
+    win = _studio(qapp)
+    try:
+        if win.model.node_order:
+            win.select_node(win.model.node_order[0])
+        qapp.processEvents()
+        bad = []
+        for b in win.findChildren(QWidget):
+            if not isinstance(b, (QPushButton, QToolButton)):
+                continue
+            hit = [ch for ch in b.text() if ch in risky]
+            if hit:
+                bad.append("%r 用了 %s" % (b.text(), " ".join(hit)))
+        assert not bad, "這些按鈕還在靠字元當圖示：\n  " + "\n  ".join(bad)
+    finally:
+        win.close()
+
+
+def test_an_icon_button_says_what_it_is_without_a_label(qapp):
+    """沒有文字的按鈕對讀螢幕軟體是**空的**。
+
+    tooltip 已經寫了那句話，直接拿來當 accessible name —— 不要為同一件事再發明
+    第二份說明，那兩份遲早會不一樣。
+    """
+    from adept.ui import widgets as widgets_mod
+
+    b = widgets_mod.IconButton("fit", "Fit the whole pipeline in view")
+    assert b.text() == ""
+    assert b.accessibleName() == "Fit the whole pipeline in view"
+
+    win = _studio(qapp)
+    try:
+        nameless = [w.glyph_name() for w in (win.btn_undo, win.btn_redo,
+                                             win.btn_theme, win.btn_prev,
+                                             win.btn_next)
+                    if not w.accessibleName()]
+        assert not nameless, "這些圖示鈕沒有名字：%s" % nameless
+    finally:
+        win.close()
+
+
+def test_the_icon_follows_the_button_it_is_drawn_on(qapp):
+    """圖示的顏色取自 widget 自己的 palette（Qt 從 QSS 的 ``color`` 解析出來的）。
+
+    所以換膚與變灰完全不必通知任何人 —— 這正是第三輪那條教訓的延續：
+    要嘛交給 QSS，要嘛就會有人忘記重套。
+    """
+    from adept.ui import widgets as widgets_mod
+
+    host = QWidget()
+    lay = QVBoxLayout(host)
+    b = widgets_mod.IconButton("close", "Remove from the pipeline", host)
+    lay.addWidget(b)
+    host.show()
+    qapp.processEvents()
+
+    on = _ink_count(b, qapp)
+    b.setEnabled(False)
+    off = _ink_count(b, qapp)
+    host.hide()
+
+    assert on > 8, "圖示根本沒畫出來（%d 個畫素）" % on
+    assert off != on, "變灰之後圖示一模一樣 —— 顏色沒有跟著 palette 走"
+
+
+def test_the_theme_button_says_which_theme_is_on(qapp):
+    """以前不管在哪個主題，那顆鈕都是同一個 ``◐``。
+
+    看不出現在是哪一個、也看不出按下去會變成什麼 —— 一顆只有兩個狀態的開關，
+    卻沒有任何地方顯示它現在在哪一邊。
+    """
+    from PySide6.QtGui import QPainter
+
+    from adept.ui import widgets as widgets_mod
+
+    def render(dark):
+        pm = QPixmap(24, 24)
+        pm.fill(QColor("#ffffff"))
+        p = QPainter(pm)
+        widgets_mod.draw_glyph_icon(p, "theme", 24.0, "#000000", dark=dark)
+        p.end()
+        return pm.toImage()
+
+    light, dark = render(False), render(True)
+    diff = sum(1 for x in range(24) for y in range(24)
+               if light.pixelColor(x, y) != dark.pixelColor(x, y))
+    assert diff > 40, "兩個主題下的主題鈕長得一樣（只差 %d 個畫素）" % diff
