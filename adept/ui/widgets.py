@@ -15,7 +15,6 @@
 - :class:`ImageView`        ndarray 檢視器（滾輪縮放、拖曳平移、雙擊 fit）
 - :class:`ParamForm`        由 ``Step.describe()`` 自動生成的參數表單
 - :class:`LibraryPanel`     三段式卡片庫（影像／算法／ADC）
-- :class:`PipelinePanel`    有序節點清單 + Score/Bin 尾卡
 - :class:`HistogramWidget`  分數分佈 + 可拖曳門檻線 + 可點擊長條（``bar_clicked``）
 - :class:`FeatureTable` / :class:`VerdictChip`  特徵表與判定 chip
 """
@@ -70,7 +69,6 @@ __all__ = [
     "ImageView",
     "ParamForm",
     "LibraryPanel",
-    "PipelinePanel",
     "HistogramWidget",
     "FeatureTable",
     "VerdictChip",
@@ -114,6 +112,8 @@ def small_button(text: str, tip: str = "", parent: Optional[QWidget] = None,
 GLYPH_ICONS = (
     "undo", "redo", "theme", "prev", "next", "play", "chevron_down",
     "zoom_in", "zoom_out", "fit", "tidy", "up", "down", "close",
+    # 工具列那五顆（F7-24）
+    "folder", "document", "save", "templates", "export",
 )
 
 
@@ -236,6 +236,45 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
                                   side, side))
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
+    elif n == "folder":
+        p.drawLine(QPointF(m, h * 0.30), QPointF(w * 0.44, h * 0.30))
+        p.drawLine(QPointF(w * 0.44, h * 0.30), QPointF(w * 0.54, h * 0.42))
+        p.drawRect(QRectF(m, h * 0.42, w - 2 * m, h * 0.42))
+    elif n == "document":
+        fold = w * 0.26
+        p.drawLine(QPointF(m + w * 0.06, m), QPointF(w - m - fold, m))
+        p.drawLine(QPointF(w - m - fold, m), QPointF(w - m - w * 0.06, m + fold))
+        p.drawLine(QPointF(w - m - w * 0.06, m + fold),
+                   QPointF(w - m - w * 0.06, h - m))
+        p.drawLine(QPointF(w - m - w * 0.06, h - m), QPointF(m + w * 0.06, h - m))
+        p.drawLine(QPointF(m + w * 0.06, h - m), QPointF(m + w * 0.06, m))
+    elif n in ("save", "export"):
+        # 一對：``save`` 是箭頭**進**托盤（存到磁碟），``export`` 是箭頭**出**
+        # 托盤（送出去）。方向相反，形狀一樣 —— 兩顆並排時對比得出來。
+        tray_y = h - m
+        p.drawLine(QPointF(m, tray_y - h * 0.12), QPointF(m, tray_y))
+        p.drawLine(QPointF(m, tray_y), QPointF(w - m, tray_y))
+        p.drawLine(QPointF(w - m, tray_y), QPointF(w - m, tray_y - h * 0.12))
+        a = w * 0.17
+        if n == "save":
+            tip = QPointF(w / 2, h * 0.62)
+            p.drawLine(QPointF(w / 2, m), tip)
+            p.drawLine(tip, QPointF(w / 2 - a, tip.y() - a))
+            p.drawLine(tip, QPointF(w / 2 + a, tip.y() - a))
+        else:
+            tip = QPointF(w / 2, m)
+            p.drawLine(QPointF(w / 2, h * 0.62), tip)
+            p.drawLine(tip, QPointF(w / 2 - a, tip.y() + a))
+            p.drawLine(tip, QPointF(w / 2 + a, tip.y() + a))
+    elif n == "templates":
+        # 一疊卡：範本庫是**一堆現成的 pipeline**，不是一張圖。
+        #
+        # 第一版畫成「外框 + 三條橫線」，在 15px 下三條線的間距比線本身還細，
+        # 整個糊成一塊實心格子，而且跟 ``document`` 太像。
+        off = w * 0.17
+        p.drawLine(QPointF(m + off, m), QPointF(w - m, m))
+        p.drawLine(QPointF(w - m, m), QPointF(w - m, h - m - off))
+        p.drawRect(QRectF(m, m + off, w - 2 * m - off, h - 2 * m - off))
     else:
         raise ValueError("unknown icon: %r (known: %s)"
                          % (name, ", ".join(GLYPH_ICONS)))
@@ -2351,248 +2390,6 @@ class LibraryPanel(QWidget):
                 if w is not None:
                     w.setParent(None)
                     w.deleteLater()
-
-
-# --------------------------------------------------------------------------- #
-# 4. PipelinePanel
-# --------------------------------------------------------------------------- #
-class _NodeCard(QFrame):
-    """流程中的一個節點卡：左側 4px 段落色條 + 名稱/摘要 + 啟用勾 + ↑ ↓ ✕。"""
-
-    # 注意：不要把訊號取名 move / remove —— 會蓋掉 QWidget.move() 等既有方法。
-    clicked = Signal(str)
-    enable_toggled = Signal(str, bool)
-    move_requested = Signal(str, int)
-    remove_requested = Signal(str)
-
-    def __init__(self, node: Dict[str, Any], parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self.node_id = str(node.get("node_id", ""))
-        self.category = str(node.get("category", ""))
-        self.enabled_flag = bool(node.get("enabled", True))
-        self.setObjectName("nodeCard")
-        self.setCursor(Qt.PointingHandCursor)
-
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 6, 0)
-        lay.setSpacing(6)
-
-        self.bar = QFrame()
-        self.bar.setFixedWidth(4)
-        self.bar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-        lay.addWidget(self.bar)
-
-        text_box = QVBoxLayout()
-        text_box.setContentsMargins(2, 5, 0, 5)
-        text_box.setSpacing(1)
-        self.label = QLabel(str(node.get("label") or node.get("step_key") or ""))
-        self.label.setObjectName("nodeLabel")
-        self.summary = QLabel(str(node.get("summary", "") or ""))
-        self.summary.setObjectName("nodeSummary")
-        self.summary.setWordWrap(True)
-        text_box.addWidget(self.label)
-        text_box.addWidget(self.summary)
-        lay.addLayout(text_box, 1)
-
-        self.chk = QCheckBox()
-        self.chk.setChecked(self.enabled_flag)
-        self.chk.setToolTip("Temporarily skip this step (without removing it)")
-        self.chk.toggled.connect(
-            lambda v: self.enable_toggled.emit(self.node_id, bool(v)))
-        lay.addWidget(self.chk)
-
-        self.btn_up = self._small("up", "Move one step earlier")
-        self.btn_up.clicked.connect(
-            lambda: self.move_requested.emit(self.node_id, -1))
-        self.btn_down = self._small("down", "Move one step later")
-        self.btn_down.clicked.connect(
-            lambda: self.move_requested.emit(self.node_id, +1))
-        self.btn_remove = self._small("close", "Remove from the pipeline")
-        self.btn_remove.clicked.connect(
-            lambda: self.remove_requested.emit(self.node_id))
-        for b in (self.btn_up, self.btn_down, self.btn_remove):
-            lay.addWidget(b)
-
-        self.set_selected(False)
-
-    def _small(self, icon: str, tip: str) -> QPushButton:
-        return IconButton(icon, tip)
-
-    def set_selected(self, selected: bool) -> None:
-        self.selected = bool(selected)
-        on = self.enabled_flag
-        bar_color = theme.seg_hex(self.category) if on else TOKENS["seg_disabled"]
-        self.bar.setStyleSheet("background:%s; border:0; border-top-left-radius:7px;"
-                               "border-bottom-left-radius:7px;" % bar_color)
-        if selected:
-            bg, border, width = TOKENS["accent_bg"], TOKENS["accent"], 2
-        else:
-            bg = TOKENS["bg_surface"] if on else TOKENS["seg_disabled_bg"]
-            border, width = TOKENS["border_default"], 1
-        self.setStyleSheet(
-            "QFrame#nodeCard { background:%s; border:%dpx solid %s; border-radius:7px; }"
-            % (bg, width, border)
-        )
-        text_color = TOKENS["text_primary"] if on else TOKENS["text_disabled"]
-        sub_color = TOKENS["text_secondary"] if on else TOKENS["text_disabled"]
-        self.label.setStyleSheet("color:%s; font-weight:700;" % text_color)
-        self.summary.setStyleSheet("color:%s; font-size:11px;" % sub_color)
-
-    def mousePressEvent(self, e) -> None:   # noqa: D102 - Qt hook
-        if e.button() == Qt.LeftButton:
-            self.clicked.emit(self.node_id)
-        super().mousePressEvent(e)
-
-
-class _ScoreCard(QFrame):
-    """流程尾端固定存在的「Score / Bin」卡（ADC 段顏色）。點一下 -> 編分數。"""
-
-    clicked = Signal()
-
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self.setObjectName("scoreCard")
-        self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip("Edit the score expression and threshold")
-        self.setStyleSheet(
-            "QFrame#scoreCard { background:%s; border:1px solid %s;"
-            " border-radius:7px; }" % (theme.seg_hex("adc", bg=True),
-                                       theme.seg_hex("adc"))
-        )
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 8, 0)
-        lay.setSpacing(6)
-
-        bar = QFrame()
-        bar.setFixedWidth(4)
-        bar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-        bar.setStyleSheet("background:%s; border:0; border-top-left-radius:7px;"
-                          "border-bottom-left-radius:7px;" % theme.seg_hex("adc"))
-        lay.addWidget(bar)
-
-        box = QVBoxLayout()
-        box.setContentsMargins(2, 5, 0, 5)
-        box.setSpacing(1)
-        title = QLabel("Score / Bin")
-        title.setStyleSheet("color:%s; font-weight:700;" % theme.seg_hex("adc"))
-        self.summary = QLabel("(no score set yet)")
-        self.summary.setObjectName("scoreSummary")
-        self.summary.setWordWrap(True)
-        box.addWidget(title)
-        box.addWidget(self.summary)
-        lay.addLayout(box, 1)
-
-    def mousePressEvent(self, e) -> None:   # noqa: D102 - Qt hook
-        if e.button() == Qt.LeftButton:
-            self.clicked.emit()
-        super().mousePressEvent(e)
-
-
-class PipelinePanel(QWidget):
-    """有序的節點清單（資料驅動）+ 固定的 Score/Bin 尾卡。
-
-    ``set_nodes`` 吃 dict 清單，每個 dict：
-    ``{node_id, step_key, label, category, enabled, summary}``。
-    重建時會保留目前選取的節點（只要它還在），所以改參數 -> 重繪 -> 選取不會亂跳。
-    """
-
-    node_selected = Signal(str)
-    node_toggled = Signal(str, bool)
-    move_requested = Signal(str, int)
-    remove_requested = Signal(str)
-    score_clicked = Signal()
-
-    _EMPTY_TEXT = "(Pipeline is empty — double-click a card in the library to add the first step)"
-
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self._cards: Dict[str, _NodeCard] = {}
-        self._order: List[str] = []
-        self._selected: Optional[str] = None
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(4)
-
-        self._scroll = QScrollArea(self)
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setFrameShape(QFrame.NoFrame)
-        self._host = QWidget()
-        self._list = QVBoxLayout(self._host)
-        self._list.setContentsMargins(4, 4, 8, 4)
-        self._list.setSpacing(4)
-        self._placeholder = QLabel(self._EMPTY_TEXT)
-        self._placeholder.setObjectName("placeholder")
-        self._placeholder.setWordWrap(True)
-        self._list.addWidget(self._placeholder)
-        self._list.addStretch(1)
-        self._scroll.setWidget(self._host)
-        outer.addWidget(self._scroll, 1)
-
-        self.score_card = _ScoreCard(self)
-        self.score_card.clicked.connect(self.score_clicked)
-        outer.addWidget(self.score_card)
-
-    # -- public API --------------------------------------------------------
-    def set_nodes(self, nodes: Sequence[Dict[str, Any]]) -> None:
-        self._clear()
-        self._order = []
-        for node in nodes or []:
-            card = _NodeCard(node, self._host)
-            card.clicked.connect(self._on_card_clicked)
-            card.enable_toggled.connect(self.node_toggled)
-            card.move_requested.connect(self.move_requested)
-            card.remove_requested.connect(self.remove_requested)
-            self._list.insertWidget(self._list.count() - 1, card)
-            self._cards[card.node_id] = card
-            self._order.append(card.node_id)
-        self._placeholder.setVisible(not self._order)
-        if self._selected not in self._cards:
-            self._selected = None
-        self._refresh_selection()
-
-    def set_score_summary(self, expr: str, threshold: float) -> None:
-        """尾卡摘要：``score = <expr>   threshold <threshold>``。"""
-        expr = str(expr or "").strip()
-        if not expr:
-            self.score_card.summary.setText("(no score set yet)")
-            return
-        self.score_card.summary.setText(
-            "score = %s   threshold %s" % (expr, _fmt_number(threshold)))
-
-    def score_summary_text(self) -> str:
-        return self.score_card.summary.text()
-
-    def selected(self) -> Optional[str]:
-        return self._selected
-
-    def set_selected(self, node_id: Optional[str]) -> None:
-        """設定選取（不發 ``node_selected``；那是使用者點擊才發的）。"""
-        self._selected = node_id if node_id in self._cards else None
-        self._refresh_selection()
-
-    def node_ids(self) -> List[str]:
-        return list(self._order)
-
-    def card(self, node_id: str) -> Optional[_NodeCard]:
-        return self._cards.get(node_id)
-
-    # -- internals ---------------------------------------------------------
-    def _on_card_clicked(self, node_id: str) -> None:
-        self._selected = node_id
-        self._refresh_selection()
-        self.node_selected.emit(node_id)
-
-    def _refresh_selection(self) -> None:
-        for nid, card in self._cards.items():
-            card.set_selected(nid == self._selected)
-
-    def _clear(self) -> None:
-        for card in self._cards.values():
-            self._list.removeWidget(card)
-            card.setParent(None)
-            card.deleteLater()
-        self._cards = {}
 
 
 # --------------------------------------------------------------------------- #

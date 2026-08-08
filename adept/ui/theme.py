@@ -67,7 +67,12 @@ _LIGHT: Dict[str, Any] = {
     "bg_elevated": "#f7f8fa",
     "bg_input": "#ffffff",
     "side_panel": "#fafbfc",
-    "toolbar": "#ffffff",
+    #: 工具列的底**不能跟按鈕同色**（F7-24）。原本兩邊都是 ``#ffffff``，
+    #: 於是那一排按鈕只靠一條 1px 的淺灰邊框跟背景分開 —— 使用者的評語是
+    #: 「有點單調」，而單調的來源不是缺顏色，是**缺層次**：七顆白鈕貼在白條上。
+    #: 暗色盤本來就沒有這個問題（toolbar 比 bg_surface 暗一階），所以只有
+    #: 亮色要改。
+    "toolbar": "#f7f8fa",
     "statusbar": "#f7f8fa",
     # -- borders ------------------------------------------------------------
     "border_default": "#e3e6eb",
@@ -483,6 +488,22 @@ QToolBar QToolButton[glyph="true"] { padding: 5px 8px; }
 QToolBar QToolButton[hasGlyph="true"] { padding-left: 26px; }
 QToolBar QToolButton#primary[hasGlyph="true"] { padding-left: 30px; }
 QToolBar QToolButton#primary[hasGlyph="true"]:focus { padding-left: 29px; }
+/* The second-most important action on the bar (Export) gets the accent as an
+ * outline, not a fill - the fill belongs to Run trial. Two coloured buttons on
+ * the whole bar, and they are the two the user actually came to press. */
+QToolBar QToolButton[variant="secondary"] {
+    background: $bg_surface; color: $accent_active; border: 1px solid $accent;
+    font-weight: 600;
+}
+QToolBar QToolButton[variant="secondary"]:hover { background: $accent_bg; }
+QToolBar QToolButton[variant="secondary"]:pressed { background: $accent_bg;
+                                                    border-color: $accent_active; }
+QToolBar QToolButton[variant="secondary"]:focus {
+    border: 2px solid $border_focus; padding: 4px 11px;
+}
+QToolBar QToolButton[variant="secondary"]:disabled {
+    background: $disabled_bg; color: $disabled_text; border: 1px solid $border_default;
+}
 QToolBar QToolButton#primary:hover { background: $accent_hover; }
 QToolBar QToolButton#primary:pressed { background: $accent_active; }
 /* Disabled, but still recognisably the main action (F7-23).

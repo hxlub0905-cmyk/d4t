@@ -6,7 +6,7 @@
     ┌ 工具列：開啟 KLARF／Recipe／存檔／範本／範例 recipe ｜ 輸出… ｜ 說明
     │         ｜ 試跑筆數 ▶試跑 ▶全跑                                      ┐
     ├──────────┬──────────────────────┬──────────────────────────────┤
-    │ 卡片庫    │ 流程（PipelinePanel） │ ［單顆預覽］［Gallery］        │
+    │ 卡片庫    │ 流程（PipelineCanvas）│ ［單顆預覽］［Gallery］        │
     │ Library  │ ──────────────────── │  單顆：◀ ▶ 缺陷選單 / 影像流   │
     │ ~230px   │ 參數表單 / 分數編輯   │        ImageView              │
     │          │ （QStackedWidget）    │        特徵表 + 判定 chip     │
@@ -124,7 +124,6 @@ from .widgets import (
     ImageView,
     LibraryPanel,
     ParamForm,
-    PipelinePanel,
     ProfilePanel,
     VerdictChip,
     _GlyphMixin,
@@ -147,6 +146,14 @@ __all__ = ["StudioWindow", "ThumbWorker", "TEMPLATE_RECIPE", "DEFAULT_CACHE_DIR"
 
 #: 區域跨顆檢視的縮圖邊長（px）。
 REGION_THUMB = 120
+
+#: 預覽區那兩個下拉框的寬度上限（px）。
+#:
+#: 它們裝的是 defect id 與影像流名字，都很短。以前兩個都吃 ``stretch 1``，
+#: 於是在寬螢幕上各自變成一個八百多 px、裡面只寫著「1」或「diff」的框 ——
+#: 版面把最多的空間給了資訊量最少的東西。
+DEFECT_COMBO_MAX = 220
+STREAM_COMBO_MAX = 180
 
 #: 卡片庫「ADC 判定」段固定顯示的 Score / Bin 項目。它不是 registry 裡的
 #: step（每條 pipeline 天生就有一張 ScoreSpec），但三段式的心智模型要完整 ——
@@ -455,6 +462,7 @@ class StudioWindow(QMainWindow):
             visible_steps([s.describe() for s in list_steps()])
             + [_SCORE_LIBRARY_ENTRY])
         self._refresh_all()
+        self.pipeline.fit_later()
         if self.model.node_order:
             # 起手卡直接選起來：右欄一開窗就是「可以動的東西」，
             # 而不是一句「請先從卡片庫挑一張卡」。
@@ -506,21 +514,27 @@ class StudioWindow(QMainWindow):
 
         self.btn_open_klarf = self._tool_button(
             "Open KLARF…", "Load a KLARF (the patch TIFF can be picked separately)",
-            self._on_open_klarf)
+            self._on_open_klarf, icon="folder")
         self.btn_open_recipe = self._tool_button(
-            "Open Recipe…", "Load a recipe JSON", self._on_open_recipe)
+            "Open Recipe…", "Load a recipe JSON", self._on_open_recipe,
+            icon="document")
         self.btn_save_recipe = self._tool_button(
             "Save Recipe…", "Save the current pipeline as a recipe JSON",
-            self._on_save_recipe)
+            self._on_save_recipe, icon="save")
         self.btn_examples = self._tool_button(
             "Templates…",
             "Open the template library — every entry is a complete, runnable "
             "pipeline. Start here rather than from an empty pipeline.",
-            self.open_recipe_library)
+            self.open_recipe_library, icon="templates")
         self.btn_export = self._tool_button(
             "Export…",
             "Write these results back to KLARF, or produce reports and overlays",
-            self.open_export_dialog)
+            self.open_export_dialog, icon="export")
+        # Export 是這條流程的**終點**，也是「跑完之後要做的那件事」—— 它跟旁邊
+        # 那幾顆檔案操作不同級。所以給它 accent 的外框（不是填滿，填滿的是
+        # Run trial）。這不是裝飾：工具列上唯一有顏色的兩顆，正好是使用者
+        # 真正要按的那兩顆。
+        self.btn_export.setProperty("variant", "secondary")
         self.btn_undo = self._tool_button(
             "", "Undo the last change", self.undo, icon="undo")
         self.btn_redo = self._tool_button(
@@ -909,10 +923,16 @@ class StudioWindow(QMainWindow):
         self.defect_combo.setToolTip("Jump straight to a defect")
         self.defect_label = QLabel("(no dataset loaded)", pane)
         self.defect_label.setObjectName("paramHint")
+        # 下拉框**不吃 stretch**。它裝的是一個 defect id，而以前它拿了
+        # ``stretch 1``，於是在寬螢幕上是一個 800px 寬、裡面寫著「1」的框，
+        # 而真正有資訊的那句（``ebi_patch · defect 1 / 24``）被擠到最右邊。
+        # 空間給誰，就是在說什麼比較重要。
+        self.defect_combo.setMaximumWidth(DEFECT_COMBO_MAX)
+        self.defect_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         nav.addWidget(self.btn_prev)
         nav.addWidget(self.btn_next)
-        nav.addWidget(self.defect_combo, 1)
-        nav.addWidget(self.defect_label)
+        nav.addWidget(self.defect_combo)
+        nav.addWidget(self.defect_label, 1)
         lay.addLayout(nav)
 
         srow = QHBoxLayout()
@@ -922,8 +942,11 @@ class StudioWindow(QMainWindow):
         self.stream_combo = QComboBox(pane)
         self.stream_combo.setToolTip(
             "Which image stream to look at (test / ref / diff / snr_map …)")
+        # 同上：影像流的名字是 ``test`` / ``ref`` / ``diff`` / ``snr_map``，
+        # 最長也就那樣，不需要整列。
+        self.stream_combo.setMaximumWidth(STREAM_COMBO_MAX)
         srow.addWidget(lbl_stream)
-        srow.addWidget(self.stream_combo, 1)
+        srow.addWidget(self.stream_combo)
 
         # 並排比對（F7-8）—— 預設關著，見 _set_compare 的說明
         self.compare_check = QCheckBox("Compare", pane)
@@ -934,8 +957,10 @@ class StudioWindow(QMainWindow):
         self.stream_combo_b = QComboBox(pane)
         self.stream_combo_b.setToolTip("The stream shown on the right")
         self.stream_combo_b.setVisible(False)
+        self.stream_combo_b.setMaximumWidth(STREAM_COMBO_MAX)
         srow.addWidget(self.compare_check)
-        srow.addWidget(self.stream_combo_b, 1)
+        srow.addWidget(self.stream_combo_b)
+        srow.addStretch(1)
         # 游標讀數有自己的位置（M7）。以前它是寫進狀態列的，於是滑鼠只要飄過
         # 影像，剛才那句「Trial run finished: …」就被 x/y/gray 洗掉了 ——
         # 狀態列該留給「使用者要讀的事件」，一直在刷的東西不該跟它搶同一格。
@@ -2042,6 +2067,13 @@ class StudioWindow(QMainWindow):
         self.param_form.set_step(None, {}, [])
         self.stack.setCurrentWidget(self.param_form)
         self._refresh_all()
+        # 換了一整份 pipeline 就把它擺好給人看。以前開一份 recipe 之後卡片是
+        # 擠在角落的，畫面上一大片空白，而使用者的第一個動作永遠是自己去按
+        # 「全部看得完」—— 那顆鈕該是「我又滾亂了」時用的，不是每次開檔的儀式。
+        #
+        # **只在這裡**（整份換掉）做，不在 ``_refresh_all`` 做：加一張卡就重新
+        # 縮放一次，等於使用者每動一下畫面就跳一次。
+        self.pipeline.fit_later()
 
     def load_template(self) -> bool:
         """載入內建的 die-to-die 範本；檔案不在就只在狀態列抱怨，不炸。"""

@@ -648,6 +648,7 @@ class PipelineCanvas(QGraphicsView):
     def resizeEvent(self, e) -> None:          # noqa: D102 - Qt hook
         super().resizeEvent(e)
         self._place_zoom_bar()
+        self._consume_pending_fit()
 
     # ---- 對外（與 PipelinePanel 對齊）--------------------------------------
     def set_nodes(self, nodes: Sequence[Dict[str, Any]],
@@ -743,7 +744,7 @@ class PipelineCanvas(QGraphicsView):
     MIN_FIT_SCALE = 0.45
 
     def fit(self) -> None:
-        """整張圖縮放到看得完（但不縮到看不懂）。"""
+        """整張圖縮放到看得完（但不縮到看不懂、也不放大）。"""
         rect = self._scene.itemsBoundingRect()
         if not rect.isValid():
             return
@@ -751,7 +752,31 @@ class PipelineCanvas(QGraphicsView):
         s = self.transform().m11()
         if 0 < s < self.MIN_FIT_SCALE:
             self.scale(self.MIN_FIT_SCALE / s, self.MIN_FIT_SCALE / s)
+        elif s > 1.0:
+            # **fit 只會縮，不會放。** 一條只有兩張卡的 pipeline 塞得進畫布，
+            # 這時候 ``fitInView`` 會把它放大到三倍去填滿版面 —— 卡片變成巨無霸，
+            # 而使用者按的是「全部看得完」不是「放到最大」。
+            self.scale(1.0 / s, 1.0 / s)
         self._sync_zoom_label()
+
+    def fit_later(self) -> None:
+        """等畫布真的有尺寸了再 fit 一次。
+
+        ``fitInView`` 算的是「要縮多少才塞得進 viewport」，而 viewport 在
+        ``show()`` 之前是一個預設值 —— 在那個時間點 fit，算出來的倍率會直接
+        留在畫面上，使用者看到的是一個對不上自己視窗的縮放。
+        """
+        self._fit_pending = True
+        self._consume_pending_fit()
+
+    def _consume_pending_fit(self) -> None:
+        if getattr(self, "_fit_pending", False) and self.viewport().width() > 80:
+            self._fit_pending = False
+            self.fit()
+
+    def showEvent(self, e) -> None:            # noqa: D102 - Qt hook
+        super().showEvent(e)
+        self._consume_pending_fit()
 
     # ---- 從卡片庫拖進來（F7-22）-------------------------------------------
     def dragEnterEvent(self, e) -> None:            # noqa: D102 - Qt hook

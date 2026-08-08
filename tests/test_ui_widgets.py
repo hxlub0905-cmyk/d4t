@@ -674,88 +674,15 @@ def test_group_icons_are_painted_not_files(qapp):
 # --------------------------------------------------------------------------- #
 # 4. PipelinePanel
 # --------------------------------------------------------------------------- #
-def _nodes():
-    return [
-        {"node_id": "load_patch", "step_key": "load_patch", "label": "載入影像",
-         "category": "image", "enabled": True, "summary": "channels=auto"},
-        {"node_id": "align", "step_key": "align", "label": "對位",
-         "category": "image", "enabled": False, "summary": "phase · r=8"},
-        {"node_id": "snr_map", "step_key": "snr_map", "label": "SNR 地圖",
-         "category": "algo", "enabled": True, "summary": "window=31"},
-        {"node_id": "verdict", "step_key": "verdict", "label": "判定",
-         "category": "adc", "enabled": True, "summary": ""},
-    ]
-
-
-def test_pipeline_panel_signals_and_styling(qapp):
-    panel = widgets_mod.PipelinePanel()
-    nodes = _nodes()
-    panel.set_nodes(nodes)
-    assert panel.node_ids() == ["load_patch", "align", "snr_map", "verdict"]
-
-    selected, toggled, moved, removed, scored = [], [], [], [], []
-    panel.node_selected.connect(selected.append)
-    panel.node_toggled.connect(lambda n, v: toggled.append((n, v)))
-    panel.move_requested.connect(lambda n, d: moved.append((n, d)))
-    panel.remove_requested.connect(removed.append)
-    panel.score_clicked.connect(lambda: scored.append(True))
-
-    # 左側 4px 色條 = 該段顏色；停用的節點轉灰
-    algo_card = panel.card("snr_map")
-    assert algo_card.bar.width() == 4
-    assert theme_mod.seg_hex("algo") in algo_card.bar.styleSheet()
-    disabled_card = panel.card("align")
-    assert theme_mod.TOKENS["seg_disabled"] in disabled_card.bar.styleSheet()
-    assert disabled_card.chk.isChecked() is False
-
-    # 點卡片 -> 選取 + accent ring
-    _mouse(algo_card, QEvent.MouseButtonPress, QPointF(30, 10),
-           Qt.LeftButton, Qt.LeftButton)
-    assert selected == ["snr_map"]
-    assert panel.selected() == "snr_map"
-    assert theme_mod.TOKENS["accent"] in algo_card.styleSheet()
-    assert theme_mod.TOKENS["accent"] not in panel.card("verdict").styleSheet()
-
-    # 每張卡的 ↑ ↓ ✕ 與啟用勾
-    panel.card("snr_map").btn_up.click()
-    panel.card("snr_map").btn_down.click()
-    panel.card("verdict").btn_remove.click()
-    panel.card("align").chk.setChecked(True)
-    assert moved == [("snr_map", -1), ("snr_map", 1)]
-    assert removed == ["verdict"]
-    assert toggled == [("align", True)]
-
-    # 固定尾卡 Score / Bin
-    panel.set_score_summary("snr_peak * 2", 3.5)
-    text = panel.score_summary_text()
-    assert "snr_peak * 2" in text and "3.5" in text
-    _mouse(panel.score_card, QEvent.MouseButtonPress, QPointF(20, 10),
-           Qt.LeftButton, Qt.LeftButton)
-    assert scored == [True]
-
-
-def test_pipeline_panel_selection_survives_set_nodes(qapp):
-    panel = widgets_mod.PipelinePanel()
-    panel.set_nodes(_nodes())
-    panel.set_selected("align")
-    assert panel.selected() == "align"
-
-    # 重新餵資料（改了摘要）：選取要留著
-    nodes = _nodes()
-    nodes[1]["summary"] = "ncc · r=12"
-    panel.set_nodes(nodes)
-    assert panel.selected() == "align"
-    assert theme_mod.TOKENS["accent"] in panel.card("align").styleSheet()
-    assert panel.card("align").summary.text() == "ncc · r=12"
-
-    # 被選的節點消失了 -> 選取清掉，不留幽靈
-    panel.set_nodes([n for n in nodes if n["node_id"] != "align"])
-    assert panel.selected() is None
-    assert panel.card("align") is None
-
-    panel.set_nodes([])
-    assert panel.node_ids() == []
-
+# （PipelinePanel 的兩支測試連同那個 widget 一起刪掉了 —— 見下面的說明）
+#
+# 它是 M3 的直式節點清單，F7-6 的畫布把它整個取代掉了，之後 studio.py 只剩一行
+# import、從來沒有實例化過。留著的代價不是那 240 行程式碼，是**每一輪主題工作
+# 都要繞過它**：F7-23 第三輪把三個元件的 stylesheet 搬進 QSS 時，`nodeCard` 與
+# `scoreCard` 被判為「顏色依 category 算出來、該留在 widget」而放過 —— 那個判斷
+# 本身沒錯，錯的是它們根本不在畫面上。畫布那邊的對應行為由
+# `tests/test_ui_canvas.py` 蓋著（選取、訊號、重畫、換膚）。
+# --------------------------------------------------------------------------- #
 
 # --------------------------------------------------------------------------- #
 # 5. HistogramWidget
