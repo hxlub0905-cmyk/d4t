@@ -6,7 +6,7 @@
     ┌ 工具列：開啟 KLARF／Recipe／存檔／範本／範例 recipe ｜ 輸出… ｜ 說明
     │         ｜ 試跑筆數 ▶試跑 ▶全跑                                      ┐
     ├──────────┬──────────────────────┬──────────────────────────────┤
-    │ 卡片庫    │ 流程（PipelinePanel） │ ［單顆預覽］［Gallery］        │
+    │ 卡片庫    │ 流程（PipelineCanvas）│ ［單顆預覽］［Gallery］        │
     │ Library  │ ──────────────────── │  單顆：◀ ▶ 缺陷選單 / 影像流   │
     │ ~230px   │ 參數表單 / 分數編輯   │        ImageView              │
     │          │ （QStackedWidget）    │        特徵表 + 判定 chip     │
@@ -70,7 +70,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -120,13 +120,21 @@ from .welcome import (
 )
 from .widgets import (
     FeatureTable,
+    IconButton,
     ImageView,
     LibraryPanel,
     ParamForm,
-    PipelinePanel,
     ProfilePanel,
     VerdictChip,
+    _GlyphMixin,
+    apply_button_cursors,
+    small_button,
 )
+
+
+class _GlyphToolButton(_GlyphMixin, QToolButton):
+    """工具列上會自己畫圖示的 QToolButton（``_tool_button(icon=…)`` 用）。"""
+
 from .workers import (
     DatasetLoadWorker, PreviewWorker, RegionCheckWorker, TrialWorker,
     _ThreadedWorker,
@@ -138,6 +146,14 @@ __all__ = ["StudioWindow", "ThumbWorker", "TEMPLATE_RECIPE", "DEFAULT_CACHE_DIR"
 
 #: 區域跨顆檢視的縮圖邊長（px）。
 REGION_THUMB = 120
+
+#: 預覽區那兩個下拉框的寬度上限（px）。
+#:
+#: 它們裝的是 defect id 與影像流名字，都很短。以前兩個都吃 ``stretch 1``，
+#: 於是在寬螢幕上各自變成一個八百多 px、裡面只寫著「1」或「diff」的框 ——
+#: 版面把最多的空間給了資訊量最少的東西。
+DEFECT_COMBO_MAX = 220
+STREAM_COMBO_MAX = 180
 
 #: 卡片庫「ADC 判定」段固定顯示的 Score / Bin 項目。它不是 registry 裡的
 #: step（每條 pipeline 天生就有一張 ScoreSpec），但三段式的心智模型要完整 ——
@@ -436,6 +452,9 @@ class StudioWindow(QMainWindow):
         self._wire_widgets()
         self._wire_workers()
         self._build_shortcuts()
+        # 「滑過去變手指」以前是每個呼叫端自己記得要做的事，於是只做到一半。
+        # 現在改成視窗建好之後掃一次（見 widgets.apply_button_cursors）。
+        apply_button_cursors(self)
         self.model.add_listener(self._on_model_changed)
 
         # F7-1：卡片庫只列目前輸入型別用得到的卡（見 adept/ui/scope.py）
@@ -443,6 +462,7 @@ class StudioWindow(QMainWindow):
             visible_steps([s.describe() for s in list_steps()])
             + [_SCORE_LIBRARY_ENTRY])
         self._refresh_all()
+        self.pipeline.fit_later()
         if self.model.node_order:
             # 起手卡直接選起來：右欄一開窗就是「可以動的東西」，
             # 而不是一句「請先從卡片庫挑一張卡」。
@@ -494,33 +514,39 @@ class StudioWindow(QMainWindow):
 
         self.btn_open_klarf = self._tool_button(
             "Open KLARF…", "Load a KLARF (the patch TIFF can be picked separately)",
-            self._on_open_klarf)
+            self._on_open_klarf, icon="folder")
         self.btn_open_recipe = self._tool_button(
-            "Open Recipe…", "Load a recipe JSON", self._on_open_recipe)
+            "Open Recipe…", "Load a recipe JSON", self._on_open_recipe,
+            icon="document")
         self.btn_save_recipe = self._tool_button(
             "Save Recipe…", "Save the current pipeline as a recipe JSON",
-            self._on_save_recipe)
+            self._on_save_recipe, icon="save")
         self.btn_examples = self._tool_button(
             "Templates…",
             "Open the template library — every entry is a complete, runnable "
             "pipeline. Start here rather than from an empty pipeline.",
-            self.open_recipe_library)
+            self.open_recipe_library, icon="templates")
         self.btn_export = self._tool_button(
             "Export…",
             "Write these results back to KLARF, or produce reports and overlays",
-            self.open_export_dialog)
+            self.open_export_dialog, icon="export")
+        # Export 是這條流程的**終點**，也是「跑完之後要做的那件事」—— 它跟旁邊
+        # 那幾顆檔案操作不同級。所以給它 accent 的外框（不是填滿，填滿的是
+        # Run trial）。這不是裝飾：工具列上唯一有顏色的兩顆，正好是使用者
+        # 真正要按的那兩顆。
+        self.btn_export.setProperty("variant", "secondary")
         self.btn_undo = self._tool_button(
-            "↶", "Undo the last change", self.undo)
+            "", "Undo the last change", self.undo, icon="undo")
         self.btn_redo = self._tool_button(
-            "↷", "Redo the change you just undid", self.redo)
+            "", "Redo the change you just undid", self.redo, icon="redo")
         self.btn_help = self._tool_button(
             "Help", "Reopen the getting-started tour (includes “Try it with "
                     "sample data”)",
             lambda: self.show_welcome(force=True))
         # 主題切換：一顆字元鈕，不佔位子也找得到（偏好存 QSettings）
         self.btn_theme = self._tool_button(
-            "◐", "Switch between the light and dark theme",
-            self.toggle_theme)
+            "", "Switch between the light and dark theme",
+            self.toggle_theme, icon="theme")
 
         # 一段 = 一種事情；段與段之間一條分隔線。
         for group in ((self.btn_open_klarf, self.btn_open_recipe,
@@ -553,19 +579,54 @@ class StudioWindow(QMainWindow):
         bar.addWidget(self.spin_trial_n)
 
         self.btn_trial = self._tool_button(
-            "▶ Run trial", "Run the current pipeline over the first N defects "
-                           "and show the score distribution",
-            self._on_trial_clicked, primary=True)
+            "Run trial", "Run the current pipeline over the first N defects "
+                         "and show the score distribution",
+            self._on_trial_clicked, primary=True, icon="play")
         # 「跑整批」是同一顆鈕的次要動作：點主體 = 試跑，點箭頭才看得到它。
         menu = QMenu(self.btn_trial)
         self.act_run_all = QAction("Run all defects", menu)
         self.act_run_all.setToolTip("Run the whole dataset, not just the first N")
         self.act_run_all.triggered.connect(self._on_full_clicked)
         menu.addAction(self.act_run_all)
-        self.btn_trial.setMenu(menu)
-        self.btn_trial.setPopupMode(QToolButton.MenuButtonPopup)
         self.trial_menu = menu
-        bar.addWidget(self.btn_trial)
+
+        # 箭頭是**第二顆真的按鈕**，不是 ``MenuButtonPopup``（F7-23 第二輪）。
+        #
+        # 以前這兩個動作是同一顆 QToolButton 的兩半，而那半邊的外觀完全歸 Qt
+        # 管：它用自己的淺色按鈕樣式畫在我們的藍底上，也不理會圓角 —— 全 UI
+        # 最重要的一顆鈕，右邊掛著一塊跟主題無關的東西。
+        #
+        # 補樣式補不起來：只要給 ``::menu-button`` 一個盒子（背景、邊框、圓角
+        # **任一**），Qt 就把繪製整個交給 stylesheet，而 stylesheet 沒有
+        # ``image`` 就不畫箭頭 —— 這個 repo 是純文字的（CLAUDE.md §9.5）塞不了
+        # 圖檔。實測只有 ``width`` 是安全的。同一條坑 F7-13 在
+        # ``QComboBox::drop-down`` 上踩過，這次量到 ``::menu-button`` 上。
+        #
+        # 所以拆成兩顆普通按鈕，兩顆都是我們控制得了的。這顆**不設 menu**：
+        # 設了 Qt 又會自己加一個下拉指示器，等於畫兩個箭頭。
+        self.btn_trial_more = self._tool_button(
+            "", "More ways to run — including the whole dataset",
+            self._popup_trial_menu, primary=True, icon="chevron_down")
+
+        # 兩顆**放進同一個容器**，中間只留 1px（F7-24 第二輪）。
+        #
+        # 分開放在工具列上時它們吃全域的 6px 間距，讀起來像兩顆不相干的按鈕 ——
+        # 而箭頭是 ``Run trial`` 的次要動作，不是另一個功能。1px 的縫加上內側
+        # 拉直的圓角（QSS 的 ``[seg]``）就是一個分段控制項：**一件事，兩個半邊**。
+        #
+        # 注意這跟 F7-23 拆掉 ``MenuButtonPopup`` 不衝突：那一輪要的是「這半邊的
+        # 外觀歸我們管」，而這裡正是在管它 —— 差別在現在兩個半邊都是真的按鈕。
+        self.btn_trial.setProperty("seg", "left")
+        self.btn_trial_more.setProperty("seg", "right")
+        group = QWidget(bar)
+        group.setObjectName("toolbarGroup")
+        glay = QHBoxLayout(group)
+        glay.setContentsMargins(0, 0, 0, 0)
+        glay.setSpacing(1)
+        glay.addWidget(self.btn_trial)
+        glay.addWidget(self.btn_trial_more)
+        self.trial_group = group
+        bar.addWidget(group)
 
     #: 鍵盤快捷鍵（F7-16）。以前一個都沒有 —— 而這是一個「一直在試」的工具，
     #: 存檔、跑一次、退回上一步是每分鐘都在做的事，每一次都要把手移到滑鼠、
@@ -730,15 +791,28 @@ class StudioWindow(QMainWindow):
         """進度條現在看得到嗎（測試用）。"""
         return bool(self._progress_on)
 
+    def _popup_trial_menu(self) -> None:
+        """把「跑整批」的選單開在箭頭鈕正下方（貼齊左緣，像一般的下拉）。"""
+        b = self.btn_trial_more
+        self.trial_menu.popup(b.mapToGlobal(QPoint(0, b.height())))
+
     def _tool_button(self, text: str, tip: str, slot: Any,
-                     primary: bool = False) -> QToolButton:
-        b = QToolButton(self)
+                     primary: bool = False,
+                     icon: Optional[str] = None) -> QToolButton:
+        """工具列上的一顆鈕。``icon`` 給的是**自繪**圖示的名字（不是字元）。
+
+        有文字又有圖示時（只有 ``Run trial``），圖示畫在左邊那一格 ——
+        QSS 的 ``[hasGlyph="true"]`` 把左邊 padding 撐開，文字才不會疊上去。
+        """
+        b = _GlyphToolButton(self) if icon else QToolButton(self)
         b.setText(text)
         b.setToolTip(tip)
         b.setToolButtonStyle(Qt.ToolButtonTextOnly)
         b.setCursor(Qt.PointingHandCursor)
         if primary:
             b.setObjectName("primary")
+        if icon:
+            b._init_glyph(icon, "left" if text else "center")
         b.clicked.connect(slot)
         return b
 
@@ -861,22 +935,22 @@ class StudioWindow(QMainWindow):
 
         nav = QHBoxLayout()
         nav.setSpacing(6)
-        self.btn_prev = QPushButton("◀", pane)
-        self.btn_prev.setObjectName("cardButton")
-        self.btn_prev.setFixedWidth(28)
-        self.btn_prev.setToolTip("Previous defect")
-        self.btn_next = QPushButton("▶", pane)
-        self.btn_next.setObjectName("cardButton")
-        self.btn_next.setFixedWidth(28)
-        self.btn_next.setToolTip("Next defect")
+        self.btn_prev = IconButton("prev", "Previous defect", pane, kind="icon")
+        self.btn_next = IconButton("next", "Next defect", pane, kind="icon")
         self.defect_combo = QComboBox(pane)
         self.defect_combo.setToolTip("Jump straight to a defect")
         self.defect_label = QLabel("(no dataset loaded)", pane)
         self.defect_label.setObjectName("paramHint")
+        # 下拉框**不吃 stretch**。它裝的是一個 defect id，而以前它拿了
+        # ``stretch 1``，於是在寬螢幕上是一個 800px 寬、裡面寫著「1」的框，
+        # 而真正有資訊的那句（``ebi_patch · defect 1 / 24``）被擠到最右邊。
+        # 空間給誰，就是在說什麼比較重要。
+        self.defect_combo.setMaximumWidth(DEFECT_COMBO_MAX)
+        self.defect_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         nav.addWidget(self.btn_prev)
         nav.addWidget(self.btn_next)
-        nav.addWidget(self.defect_combo, 1)
-        nav.addWidget(self.defect_label)
+        nav.addWidget(self.defect_combo)
+        nav.addWidget(self.defect_label, 1)
         lay.addLayout(nav)
 
         srow = QHBoxLayout()
@@ -886,8 +960,11 @@ class StudioWindow(QMainWindow):
         self.stream_combo = QComboBox(pane)
         self.stream_combo.setToolTip(
             "Which image stream to look at (test / ref / diff / snr_map …)")
+        # 同上：影像流的名字是 ``test`` / ``ref`` / ``diff`` / ``snr_map``，
+        # 最長也就那樣，不需要整列。
+        self.stream_combo.setMaximumWidth(STREAM_COMBO_MAX)
         srow.addWidget(lbl_stream)
-        srow.addWidget(self.stream_combo, 1)
+        srow.addWidget(self.stream_combo)
 
         # 並排比對（F7-8）—— 預設關著，見 _set_compare 的說明
         self.compare_check = QCheckBox("Compare", pane)
@@ -898,8 +975,10 @@ class StudioWindow(QMainWindow):
         self.stream_combo_b = QComboBox(pane)
         self.stream_combo_b.setToolTip("The stream shown on the right")
         self.stream_combo_b.setVisible(False)
+        self.stream_combo_b.setMaximumWidth(STREAM_COMBO_MAX)
         srow.addWidget(self.compare_check)
-        srow.addWidget(self.stream_combo_b, 1)
+        srow.addWidget(self.stream_combo_b)
+        srow.addStretch(1)
         # 游標讀數有自己的位置（M7）。以前它是寫進狀態列的，於是滑鼠只要飄過
         # 影像，剛才那句「Trial run finished: …」就被 x/y/gray 洗掉了 ——
         # 狀態列該留給「使用者要讀的事件」，一直在刷的東西不該跟它搶同一格。
@@ -1004,12 +1083,10 @@ class StudioWindow(QMainWindow):
         tabs = QHBoxLayout()
         tabs.setContentsMargins(0, 0, 0, 0)
         tabs.setSpacing(4)
-        self.btn_tab_card = QPushButton("Card", pane)
-        self.btn_tab_features = QPushButton("Features", pane)
+        self.btn_tab_card = small_button("Card", parent=pane, shape="wide")
+        self.btn_tab_features = small_button("Features", parent=pane, shape="wide")
         for i, b in enumerate((self.btn_tab_card, self.btn_tab_features)):
             b.setCheckable(True)
-            b.setObjectName("cardButton")
-            b.setFixedHeight(20)
             b.clicked.connect(lambda _c=False, k=i: self.show_bottom_page(k))
             tabs.addWidget(b)
         tabs.addStretch(1)
@@ -1214,6 +1291,11 @@ class StudioWindow(QMainWindow):
                       run_why or "Run the current pipeline over the first %d "
                                  "defects and show the score distribution"
                       % int(self.spin_trial_n.value()))
+        # 箭頭鈕與主鈕同進退：選單裡唯一那一項擋住的時候，還打得開一個
+        # 「每一項都是灰的」的選單，等於讓使用者多按一次才知道不能按。
+        self.btn_trial_more.setEnabled(can_run)
+        self._set_tip(self.btn_trial_more,
+                      run_why or "More ways to run — including the whole dataset")
         self.act_run_all.setEnabled(can_run)
         self.act_run_all.setToolTip(
             run_why or "Run all %d defects, not just the first %d"
@@ -2003,6 +2085,13 @@ class StudioWindow(QMainWindow):
         self.param_form.set_step(None, {}, [])
         self.stack.setCurrentWidget(self.param_form)
         self._refresh_all()
+        # 換了一整份 pipeline 就把它擺好給人看。以前開一份 recipe 之後卡片是
+        # 擠在角落的，畫面上一大片空白，而使用者的第一個動作永遠是自己去按
+        # 「全部看得完」—— 那顆鈕該是「我又滾亂了」時用的，不是每次開檔的儀式。
+        #
+        # **只在這裡**（整份換掉）做，不在 ``_refresh_all`` 做：加一張卡就重新
+        # 縮放一次，等於使用者每動一下畫面就跳一次。
+        self.pipeline.fit_later()
 
     def load_template(self) -> bool:
         """載入內建的 die-to-die 範本；檔案不在就只在狀態列抱怨，不炸。"""

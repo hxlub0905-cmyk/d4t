@@ -15,7 +15,6 @@
 - :class:`ImageView`        ndarray 檢視器（滾輪縮放、拖曳平移、雙擊 fit）
 - :class:`ParamForm`        由 ``Step.describe()`` 自動生成的參數表單
 - :class:`LibraryPanel`     三段式卡片庫（影像／算法／ADC）
-- :class:`PipelinePanel`    有序節點清單 + Score/Bin 尾卡
 - :class:`HistogramWidget`  分數分佈 + 可拖曳門檻線 + 可點擊長條（``bar_clicked``）
 - :class:`FeatureTable` / :class:`VerdictChip`  特徵表與判定 chip
 """
@@ -36,6 +35,7 @@ from PySide6.QtGui import (
     QPainterPath,
     QPen,
     QPixmap,
+    QPolygonF,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -69,13 +69,317 @@ __all__ = [
     "ImageView",
     "ParamForm",
     "LibraryPanel",
-    "PipelinePanel",
     "HistogramWidget",
     "FeatureTable",
     "VerdictChip",
     "TemplateField",
     "to_uint8",
+    "small_button",
+    "apply_button_cursors",
+    "restyle",
+    "IconButton",
+    "GLYPH_ICONS",
+    "draw_glyph_icon",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# 按鈕的兩個小工具（F7-23 第二輪）
+# --------------------------------------------------------------------------- #
+def small_button(text: str, tip: str = "", parent: Optional[QWidget] = None,
+                 shape: str = "square", kind: str = "ghost") -> QPushButton:
+    """一顆小按鈕（卡片控制、畫布縮放、換 defect、Card/Features 切換）。
+
+    **尺寸不在這裡填。** ``shape`` 只說「方的還是帶文字的」，實際邊長由 QSS 的
+    ``control_sm`` 決定 —— 以前六個呼叫端各自寫死一組尺寸（22×22、24×22、
+    30×22、寬 28、寬 40、高 20），於是同一種視覺語言沒有兩顆一樣大。
+
+    ``kind="icon"`` 給浮在畫布或影像上的那幾顆一個自己的底：那裡沒有卡片當
+    底色，透明的按鈕要滑到才看得出是按鈕（同 F7-13 給工具列加邊框的理由）。
+    """
+    b = QPushButton(text, parent)
+    b.setObjectName("cardButton")
+    b.setProperty("shape", str(shape))
+    b.setProperty("kind", str(kind))
+    b.setCursor(Qt.PointingHandCursor)
+    if tip:
+        b.setToolTip(str(tip))
+    return b
+
+
+#: 按鈕上畫得出來的圖示（F7-23 第四輪）。名字是**這顆鈕在做什麼**，
+#: 不是它長什麼樣 —— 呼叫端說 ``"fit"``，不說「兩端帶箭頭的斜線」。
+GLYPH_ICONS = (
+    "undo", "redo", "theme", "prev", "next", "play", "chevron_down",
+    "zoom_in", "zoom_out", "fit", "tidy", "up", "down", "close",
+    # 工具列那五顆（F7-24）
+    "folder", "document", "save", "templates", "export",
+)
+
+
+def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
+                    dark: bool = False) -> None:
+    """在 ``p`` 的目前原點畫一個 ``size`` × ``size`` 的按鈕圖示。
+
+    為什麼不用字元（F7-23 第四輪）
+    ------------------------------
+    這些位置本來放的是 ``↶ ↷ ◐ ◀ ▶ − + ⤢ ⌗ ↑ ↓ ✕ ▾``。問題不是它們醜，是
+    **廠內機器是 Windows，而 Segoe UI 蓋不到其中好幾個**（``⤢`` U+2922、
+    ``⌗`` U+2317、``↶↷`` U+21B6/B7 都要退到 Segoe UI Symbol）。退字型的結果是
+    同一排按鈕裡每顆字的大小與 baseline 都不一樣，最壞是豆腐框 —— 而**我們在
+    這裡看不到**（開發機不是那台）。
+
+    這跟 :func:`draw_group_icon` 是同一條路，理由也一樣：repo 只放純文字檔
+    （見 ``docs/HANDOVER.md`` §5），而用 QPainter 連「要不要把圖檔加進版控」
+    這個問題都不用問，顏色還直接吃呼叫端給的值（所以換膚、變灰全部自動跟著）。
+
+    ``dark`` 只有 ``theme`` 這一顆用得到：主題鈕以前不管在哪個主題都是同一個
+    ``◐``，看不出**現在是哪一個**、也看不出按下去會變成什麼。
+    """
+    p.setRenderHint(QPainter.Antialiasing, True)
+    pen = QPen(QColor(color), max(1.2, size / 9.0))
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    w = h = float(size)
+    m = w / 6.0
+    n = str(name)
+
+    def triangle(points):
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        p.drawPolygon(QPolygonF([QPointF(x, y) for x, y in points]))
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+
+    if n in ("undo", "redo"):
+        # 一個 U 形迴轉 + 箭頭。redo 是把 undo **左右翻過來**畫的，兩顆因此
+        # 永遠對稱 —— 分開手繪的話遲早會差一兩個畫素，而它們就並排放著。
+        #
+        # 15px 下線要細（``size/11``）：原本用 ``size/9`` 的弧糊成一塊，
+        # 看起來像個實心的月牙而不是一支箭。
+        if n == "redo":
+            p.translate(w, 0.0)
+            p.scale(-1.0, 1.0)
+        thin = QPen(QColor(color), max(1.1, size / 11.0))
+        thin.setCapStyle(Qt.RoundCap)
+        thin.setJoinStyle(Qt.RoundJoin)
+        p.setPen(thin)
+        box = QRectF(m, h * 0.26, w - 2 * m, h * 0.44)
+        p.drawArc(box, 0, 180 * 16)                 # 上半圈
+        left = QPointF(box.left(), box.center().y())
+        p.drawLine(QPointF(box.right(), box.center().y()),
+                   QPointF(box.right(), h - m))     # 右邊的尾巴
+        a = w * 0.15
+        p.drawLine(left, QPointF(left.x() - a * 0.8, left.y() - a))
+        p.drawLine(left, QPointF(left.x() + a * 0.8, left.y() - a))
+        p.setPen(pen)
+        if n == "redo":
+            p.scale(-1.0, 1.0)
+            p.translate(-w, 0.0)
+    elif n == "theme":
+        # 半實心圓。**實心的那一半跟著目前的主題翻面** —— 不然這顆鈕在兩個
+        # 主題下長得一模一樣，等於沒有回答「現在是哪一個」。
+        box = QRectF(m, m, w - 2 * m, h - 2 * m)
+        p.drawEllipse(box)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        p.drawPie(box, (90 if dark else -90) * 16, 180 * 16)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+    elif n in ("prev", "next", "play"):
+        cx, cy = w / 2, h / 2
+        a = w * (0.26 if n == "play" else 0.24)
+        b = h * 0.30
+        if n == "prev":
+            triangle(((cx + a, cy - b), (cx + a, cy + b), (cx - a, cy)))
+        else:
+            triangle(((cx - a, cy - b), (cx - a, cy + b), (cx + a, cy)))
+    elif n in ("up", "down", "chevron_down"):
+        cx = w / 2
+        a = w * 0.26
+        top, bot = h * 0.40, h * 0.62
+        if n == "up":
+            p.drawLine(QPointF(cx - a, bot), QPointF(cx, top))
+            p.drawLine(QPointF(cx + a, bot), QPointF(cx, top))
+        else:
+            p.drawLine(QPointF(cx - a, top), QPointF(cx, bot))
+            p.drawLine(QPointF(cx + a, top), QPointF(cx, bot))
+    elif n == "close":
+        p.drawLine(QPointF(m, m), QPointF(w - m, h - m))
+        p.drawLine(QPointF(w - m, m), QPointF(m, h - m))
+    elif n in ("zoom_in", "zoom_out"):
+        p.drawLine(QPointF(m, h / 2), QPointF(w - m, h / 2))
+        if n == "zoom_in":
+            p.drawLine(QPointF(w / 2, m), QPointF(w / 2, h - m))
+    elif n == "fit":
+        # 四個角的取景括號 —— 比原本的 ``⤢`` 更說得出「整個看得完」，
+        # 而且跟 Region 卡的圖示是同一種語言（``draw_group_icon`` 的 region）。
+        # 括號要**短**：0.26 的長度在 15px 下兩隻手臂幾乎接起來，看起來就是一個
+        # 缺了幾格的矩形，不是四個角。
+        c = w * 0.17
+        for x0, y0, dx, dy in ((m, m, 1, 1), (w - m, m, -1, 1),
+                               (m, h - m, 1, -1), (w - m, h - m, -1, -1)):
+            p.drawLine(QPointF(x0, y0), QPointF(x0 + c * dx, y0))
+            p.drawLine(QPointF(x0, y0), QPointF(x0, y0 + c * dy))
+    elif n == "tidy":
+        # 2×2 的方格：「把卡片排回格線上」。**實心**的 —— 描邊版在 15px 下
+        # 線比方格中間的空隙還粗，四個框糊成一團。
+        side = (w - 2 * m) * 0.40
+        gap = (w - 2 * m) - 2 * side
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        for i in (0, 1):
+            for j in (0, 1):
+                p.drawRect(QRectF(m + i * (side + gap), m + j * (side + gap),
+                                  side, side))
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+    elif n == "folder":
+        p.drawLine(QPointF(m, h * 0.30), QPointF(w * 0.44, h * 0.30))
+        p.drawLine(QPointF(w * 0.44, h * 0.30), QPointF(w * 0.54, h * 0.42))
+        p.drawRect(QRectF(m, h * 0.42, w - 2 * m, h * 0.42))
+    elif n == "document":
+        fold = w * 0.26
+        p.drawLine(QPointF(m + w * 0.06, m), QPointF(w - m - fold, m))
+        p.drawLine(QPointF(w - m - fold, m), QPointF(w - m - w * 0.06, m + fold))
+        p.drawLine(QPointF(w - m - w * 0.06, m + fold),
+                   QPointF(w - m - w * 0.06, h - m))
+        p.drawLine(QPointF(w - m - w * 0.06, h - m), QPointF(m + w * 0.06, h - m))
+        p.drawLine(QPointF(m + w * 0.06, h - m), QPointF(m + w * 0.06, m))
+    elif n in ("save", "export"):
+        # 一對：``save`` 是箭頭**進**托盤（存到磁碟），``export`` 是箭頭**出**
+        # 托盤（送出去）。方向相反，形狀一樣 —— 兩顆並排時對比得出來。
+        tray_y = h - m
+        p.drawLine(QPointF(m, tray_y - h * 0.12), QPointF(m, tray_y))
+        p.drawLine(QPointF(m, tray_y), QPointF(w - m, tray_y))
+        p.drawLine(QPointF(w - m, tray_y), QPointF(w - m, tray_y - h * 0.12))
+        a = w * 0.17
+        if n == "save":
+            tip = QPointF(w / 2, h * 0.62)
+            p.drawLine(QPointF(w / 2, m), tip)
+            p.drawLine(tip, QPointF(w / 2 - a, tip.y() - a))
+            p.drawLine(tip, QPointF(w / 2 + a, tip.y() - a))
+        else:
+            tip = QPointF(w / 2, m)
+            p.drawLine(QPointF(w / 2, h * 0.62), tip)
+            p.drawLine(tip, QPointF(w / 2 - a, tip.y() + a))
+            p.drawLine(tip, QPointF(w / 2 + a, tip.y() + a))
+    elif n == "templates":
+        # 一疊卡：範本庫是**一堆現成的 pipeline**，不是一張圖。
+        #
+        # 第一版畫成「外框 + 三條橫線」，在 15px 下三條線的間距比線本身還細，
+        # 整個糊成一塊實心格子，而且跟 ``document`` 太像。
+        off = w * 0.17
+        p.drawLine(QPointF(m + off, m), QPointF(w - m, m))
+        p.drawLine(QPointF(w - m, m), QPointF(w - m, h - m - off))
+        p.drawRect(QRectF(m, m + off, w - 2 * m - off, h - 2 * m - off))
+    else:
+        raise ValueError("unknown icon: %r (known: %s)"
+                         % (name, ", ".join(GLYPH_ICONS)))
+
+
+def _paint_glyph(widget: QWidget, name: str, side: str = "center") -> None:
+    """把 ``name`` 畫到 ``widget`` 上（給 icon 按鈕的 ``paintEvent`` 用）。
+
+    顏色取自 **widget 自己的 palette**，而 palette 的 ``ButtonText`` 是 Qt 從
+    QSS 的 ``color`` 解析出來的 —— 所以換膚、變灰（``:disabled`` 那條）全部
+    自動跟著，這裡不必知道任何 token 名字，也不必在換主題時被誰通知。
+    """
+    from PySide6.QtGui import QPalette
+
+    r = widget.contentsRect()
+    size = max(9.0, min(float(min(r.width(), r.height())), 15.0))
+    colour = widget.palette().color(QPalette.ButtonText).name()
+    p = QPainter(widget)
+    if side == "left":
+        # 用 ``rect()`` 而不是 ``contentsRect()``：QSS 樣式下的 contentsRect
+        # **尺寸**扣掉了 padding，但**原點仍然是 (0, 0)** —— 它不是一個可以拿來
+        # 定位的框。而圖示要畫的正是被 padding 撐開的那一塊。
+        size = min(size, 14.0)
+        x = widget.rect().left() + 7.0
+        y = widget.rect().center().y() - size / 2.0 + 0.5
+    else:
+        x = r.center().x() - size / 2.0 + 0.5
+        y = r.center().y() - size / 2.0 + 0.5
+    p.translate(x, y)
+    draw_glyph_icon(p, name, size, colour, dark=theme.current_theme() == "dark")
+    p.end()
+
+
+class _GlyphMixin(object):
+    """給按鈕加一個自繪圖示。文字仍然可以有（``side="left"`` 時畫在左邊）。"""
+
+    def _init_glyph(self, name: str, side: str = "center") -> None:
+        if name not in GLYPH_ICONS:
+            raise ValueError("unknown icon: %r" % (name,))
+        self._glyph_name = name
+        self._glyph_side = side
+        if side != "left":
+            # 沒有文字的按鈕對讀螢幕軟體與 Qt 的測試工具是空的。tooltip 已經
+            # 寫了那句話，直接拿來當名字，不要再發明第二份說明。
+            self.setAccessibleName(self.toolTip() or name)
+            self.setProperty("glyph", "true")
+        else:
+            self.setProperty("hasGlyph", "true")
+
+    def glyph_name(self) -> str:
+        return getattr(self, "_glyph_name", "")
+
+    def paintEvent(self, e) -> None:       # noqa: D102 - Qt hook
+        super().paintEvent(e)
+        _paint_glyph(self, self._glyph_name, self._glyph_side)
+
+
+class IconButton(_GlyphMixin, QPushButton):
+    """小的圖示按鈕（畫布縮放列、節點卡的移動/刪除、換 defect）。"""
+
+    def __init__(self, icon: str, tip: str = "",
+                 parent: Optional[QWidget] = None,
+                 kind: str = "ghost"):
+        QPushButton.__init__(self, "", parent)
+        self.setObjectName("cardButton")
+        self.setProperty("shape", "square")
+        self.setProperty("kind", str(kind))
+        self.setCursor(Qt.PointingHandCursor)
+        if tip:
+            self.setToolTip(str(tip))
+        self._init_glyph(icon)
+
+
+def restyle(widget: QWidget) -> None:
+    """屬性改了之後重新套一次 QSS。
+
+    Qt **不會**自己重算：``setProperty("active", True)`` 只是存一個值，選擇器
+    ``[active="true"]`` 要等下一次 polish 才會生效。少了這一步的症狀是
+    「狀態明明改了，畫面沒動」—— 而且不報錯。
+    """
+    style = widget.style()
+    style.unpolish(widget)
+    style.polish(widget)
+    widget.update()
+
+
+def apply_button_cursors(root: QWidget) -> int:
+    """把 ``root`` 底下每一顆按鈕的游標設成手指，回傳處理了幾顆。
+
+    以前這是每個呼叫端自己記得要做的事，結果只做到一半 —— 工具列、卡片庫、
+    節點卡有，Stop、Open KLARF…、輸出精靈的四顆、畫布縮放列全都沒有。
+    「滑過去有沒有變手指」是使用者判斷「這能不能點」的第一個訊號，
+    不該取決於寫那一行的人當天有沒有想到。
+
+    所以改成**規則**：一個視窗建好之後掃一次。勾選框與單選鈕不算 ——
+    它們是 ``QAbstractButton`` 但慣例上維持箭頭。
+    """
+    from PySide6.QtWidgets import QToolButton
+
+    n = 0
+    for w in root.findChildren(QWidget):
+        if isinstance(w, (QPushButton, QToolButton)):
+            w.setCursor(Qt.PointingHandCursor)
+            n += 1
+    return n
 
 
 # --------------------------------------------------------------------------- #
@@ -987,6 +1291,9 @@ class ParamForm(QWidget):
             self._building = False
         self._sync_visible_rows()
         self._sync_curve_override()
+        # 參數列是**選到哪張卡才長出來的**，所以視窗建好時掃的那一次抓不到
+        # 它們（模板鈕、曲線的兩顆…）。每次重建之後再掃一次。
+        apply_button_cursors(self)
 
     def _sync_curve_override(self) -> None:
         """曲線一旦不是 y=x，就把 ``gamma`` 那列調淡並說明原因。
@@ -1583,12 +1890,7 @@ class _LibraryItem(QFrame):
         if describe.get("requires_ref"):
             self._base_tip += " (needs a ref image)"
         self.setToolTip(self._base_tip)
-        self.setStyleSheet(
-            "QFrame#libItem { background:transparent; border:1px solid transparent;"
-            " border-radius:5px; }"
-            "QFrame#libItem:hover { background:%s; border-color:%s; }"
-            % (TOKENS["hover_warm"], TOKENS["border_default"])
-        )
+        self.setProperty("missing", "false")
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(10, 3, 6, 3)
@@ -1605,18 +1907,12 @@ class _LibraryItem(QFrame):
 
         self.badge = QLabel("")
         self.badge.setObjectName("libBadge")
-        self.badge.setStyleSheet(
-            "color:%s; font-size:10px; border:1px solid %s; border-radius:3px;"
-            " padding:0px 4px;" % (TOKENS["text_disabled"], TOKENS["border_default"]))
         self.badge.setVisible(False)
         self.missing: List[str] = []
         lay.addWidget(self.badge)
 
-        self.add_button = QPushButton("Add")
-        self.add_button.setObjectName("cardButton")
-        self.add_button.setCursor(Qt.PointingHandCursor)
-        self.add_button.setToolTip("Append this card to the end of the pipeline")
-        self.add_button.setFixedWidth(40)
+        self.add_button = small_button(
+            "Add", "Append this card to the end of the pipeline", shape="wide")
         self.add_button.clicked.connect(
             lambda: self.activated.emit(self.step_key))
         self.add_button.setVisible(False)
@@ -1627,10 +1923,11 @@ class _LibraryItem(QFrame):
         """``missing`` = 這張卡要讀、但上游還沒有的影像流。"""
         missing = [str(m) for m in (missing or ())]
         self.missing = list(missing)
+        self.setProperty("missing", "true" if missing else "false")
+        restyle(self)
         if missing:
             self.badge.setText("needs %s" % ", ".join(missing))
             self.badge.setVisible(True)
-            self.label.setStyleSheet("color:%s;" % TOKENS["text_disabled"])
             self.setToolTip(
                 "%s\n\nNot available yet: this card reads %s, which nothing "
                 "upstream produces so far. You can still add it — the pipeline "
@@ -1638,7 +1935,6 @@ class _LibraryItem(QFrame):
                 % (self._base_tip, ", ".join(missing)))
         else:
             self.badge.setVisible(False)
-            self.label.setStyleSheet("")
             self.setToolTip(self._base_tip)
 
     def badge_text(self) -> str:
@@ -1727,33 +2023,26 @@ class StageButton(QFrame):
 
         self.count = QLabel("", self)
         self.count.setAlignment(Qt.AlignHCenter)
-        self.count.setStyleSheet("font-size:9px; color:%s;" % TOKENS["text_disabled"])
+        self.count.setObjectName("stageCount")
         lay.addWidget(self.count)
-        self._restyle()
+        self.setProperty("active", "false")
 
     def set_count(self, n: int) -> None:
         self.count.setText("" if n <= 0 else str(int(n)))
 
     def set_active(self, active: bool) -> None:
         self._active = bool(active)
-        self._restyle()
+        self.setProperty("active", "true" if self._active else "false")
+        restyle(self)
 
     def is_active(self) -> bool:
         return self._active
 
     def refresh_colour(self, colour: str) -> None:
+        # 這裡**只剩**階段色（那是每一顆各自的顏色，不是主題的）。底色、邊框、
+        # 圓角、hover、選中都在 QSS 裡了。
         self._colour = colour
         self.icon.set_color(colour)
-        self._restyle()
-
-    def _restyle(self) -> None:
-        self.setStyleSheet(
-            "QFrame#stageButton { background:%s; border:1px solid %s;"
-            " border-radius:6px; }"
-            "QFrame#stageButton:hover { background:%s; }"
-            % (TOKENS["accent_bg"] if self._active else "transparent",
-               TOKENS["accent_border"] if self._active else "transparent",
-               TOKENS["hover_warm"]))
 
     def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
         if e.button() == Qt.LeftButton:
@@ -2101,253 +2390,6 @@ class LibraryPanel(QWidget):
                 if w is not None:
                     w.setParent(None)
                     w.deleteLater()
-
-
-# --------------------------------------------------------------------------- #
-# 4. PipelinePanel
-# --------------------------------------------------------------------------- #
-class _NodeCard(QFrame):
-    """流程中的一個節點卡：左側 4px 段落色條 + 名稱/摘要 + 啟用勾 + ↑ ↓ ✕。"""
-
-    # 注意：不要把訊號取名 move / remove —— 會蓋掉 QWidget.move() 等既有方法。
-    clicked = Signal(str)
-    enable_toggled = Signal(str, bool)
-    move_requested = Signal(str, int)
-    remove_requested = Signal(str)
-
-    def __init__(self, node: Dict[str, Any], parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self.node_id = str(node.get("node_id", ""))
-        self.category = str(node.get("category", ""))
-        self.enabled_flag = bool(node.get("enabled", True))
-        self.setObjectName("nodeCard")
-        self.setCursor(Qt.PointingHandCursor)
-
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 6, 0)
-        lay.setSpacing(6)
-
-        self.bar = QFrame()
-        self.bar.setFixedWidth(4)
-        self.bar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-        lay.addWidget(self.bar)
-
-        text_box = QVBoxLayout()
-        text_box.setContentsMargins(2, 5, 0, 5)
-        text_box.setSpacing(1)
-        self.label = QLabel(str(node.get("label") or node.get("step_key") or ""))
-        self.label.setObjectName("nodeLabel")
-        self.summary = QLabel(str(node.get("summary", "") or ""))
-        self.summary.setObjectName("nodeSummary")
-        self.summary.setWordWrap(True)
-        text_box.addWidget(self.label)
-        text_box.addWidget(self.summary)
-        lay.addLayout(text_box, 1)
-
-        self.chk = QCheckBox()
-        self.chk.setChecked(self.enabled_flag)
-        self.chk.setToolTip("Temporarily skip this step (without removing it)")
-        self.chk.toggled.connect(
-            lambda v: self.enable_toggled.emit(self.node_id, bool(v)))
-        lay.addWidget(self.chk)
-
-        self.btn_up = self._small("↑", "Move one step earlier")
-        self.btn_up.clicked.connect(
-            lambda: self.move_requested.emit(self.node_id, -1))
-        self.btn_down = self._small("↓", "Move one step later")
-        self.btn_down.clicked.connect(
-            lambda: self.move_requested.emit(self.node_id, +1))
-        self.btn_remove = self._small("✕", "Remove from the pipeline")
-        self.btn_remove.clicked.connect(
-            lambda: self.remove_requested.emit(self.node_id))
-        for b in (self.btn_up, self.btn_down, self.btn_remove):
-            lay.addWidget(b)
-
-        self.set_selected(False)
-
-    def _small(self, text: str, tip: str) -> QPushButton:
-        b = QPushButton(text)
-        b.setObjectName("cardButton")
-        b.setToolTip(tip)
-        b.setFixedSize(QSize(22, 22))
-        b.setCursor(Qt.PointingHandCursor)
-        return b
-
-    def set_selected(self, selected: bool) -> None:
-        self.selected = bool(selected)
-        on = self.enabled_flag
-        bar_color = theme.seg_hex(self.category) if on else TOKENS["seg_disabled"]
-        self.bar.setStyleSheet("background:%s; border:0; border-top-left-radius:7px;"
-                               "border-bottom-left-radius:7px;" % bar_color)
-        if selected:
-            bg, border, width = TOKENS["accent_bg"], TOKENS["accent"], 2
-        else:
-            bg = TOKENS["bg_surface"] if on else TOKENS["seg_disabled_bg"]
-            border, width = TOKENS["border_default"], 1
-        self.setStyleSheet(
-            "QFrame#nodeCard { background:%s; border:%dpx solid %s; border-radius:7px; }"
-            % (bg, width, border)
-        )
-        text_color = TOKENS["text_primary"] if on else TOKENS["text_disabled"]
-        sub_color = TOKENS["text_secondary"] if on else TOKENS["text_disabled"]
-        self.label.setStyleSheet("color:%s; font-weight:700;" % text_color)
-        self.summary.setStyleSheet("color:%s; font-size:11px;" % sub_color)
-
-    def mousePressEvent(self, e) -> None:   # noqa: D102 - Qt hook
-        if e.button() == Qt.LeftButton:
-            self.clicked.emit(self.node_id)
-        super().mousePressEvent(e)
-
-
-class _ScoreCard(QFrame):
-    """流程尾端固定存在的「Score / Bin」卡（ADC 段顏色）。點一下 -> 編分數。"""
-
-    clicked = Signal()
-
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self.setObjectName("scoreCard")
-        self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip("Edit the score expression and threshold")
-        self.setStyleSheet(
-            "QFrame#scoreCard { background:%s; border:1px solid %s;"
-            " border-radius:7px; }" % (theme.seg_hex("adc", bg=True),
-                                       theme.seg_hex("adc"))
-        )
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 8, 0)
-        lay.setSpacing(6)
-
-        bar = QFrame()
-        bar.setFixedWidth(4)
-        bar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-        bar.setStyleSheet("background:%s; border:0; border-top-left-radius:7px;"
-                          "border-bottom-left-radius:7px;" % theme.seg_hex("adc"))
-        lay.addWidget(bar)
-
-        box = QVBoxLayout()
-        box.setContentsMargins(2, 5, 0, 5)
-        box.setSpacing(1)
-        title = QLabel("Score / Bin")
-        title.setStyleSheet("color:%s; font-weight:700;" % theme.seg_hex("adc"))
-        self.summary = QLabel("(no score set yet)")
-        self.summary.setObjectName("scoreSummary")
-        self.summary.setWordWrap(True)
-        box.addWidget(title)
-        box.addWidget(self.summary)
-        lay.addLayout(box, 1)
-
-    def mousePressEvent(self, e) -> None:   # noqa: D102 - Qt hook
-        if e.button() == Qt.LeftButton:
-            self.clicked.emit()
-        super().mousePressEvent(e)
-
-
-class PipelinePanel(QWidget):
-    """有序的節點清單（資料驅動）+ 固定的 Score/Bin 尾卡。
-
-    ``set_nodes`` 吃 dict 清單，每個 dict：
-    ``{node_id, step_key, label, category, enabled, summary}``。
-    重建時會保留目前選取的節點（只要它還在），所以改參數 -> 重繪 -> 選取不會亂跳。
-    """
-
-    node_selected = Signal(str)
-    node_toggled = Signal(str, bool)
-    move_requested = Signal(str, int)
-    remove_requested = Signal(str)
-    score_clicked = Signal()
-
-    _EMPTY_TEXT = "(Pipeline is empty — double-click a card in the library to add the first step)"
-
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self._cards: Dict[str, _NodeCard] = {}
-        self._order: List[str] = []
-        self._selected: Optional[str] = None
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(4)
-
-        self._scroll = QScrollArea(self)
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setFrameShape(QFrame.NoFrame)
-        self._host = QWidget()
-        self._list = QVBoxLayout(self._host)
-        self._list.setContentsMargins(4, 4, 8, 4)
-        self._list.setSpacing(4)
-        self._placeholder = QLabel(self._EMPTY_TEXT)
-        self._placeholder.setObjectName("placeholder")
-        self._placeholder.setWordWrap(True)
-        self._list.addWidget(self._placeholder)
-        self._list.addStretch(1)
-        self._scroll.setWidget(self._host)
-        outer.addWidget(self._scroll, 1)
-
-        self.score_card = _ScoreCard(self)
-        self.score_card.clicked.connect(self.score_clicked)
-        outer.addWidget(self.score_card)
-
-    # -- public API --------------------------------------------------------
-    def set_nodes(self, nodes: Sequence[Dict[str, Any]]) -> None:
-        self._clear()
-        self._order = []
-        for node in nodes or []:
-            card = _NodeCard(node, self._host)
-            card.clicked.connect(self._on_card_clicked)
-            card.enable_toggled.connect(self.node_toggled)
-            card.move_requested.connect(self.move_requested)
-            card.remove_requested.connect(self.remove_requested)
-            self._list.insertWidget(self._list.count() - 1, card)
-            self._cards[card.node_id] = card
-            self._order.append(card.node_id)
-        self._placeholder.setVisible(not self._order)
-        if self._selected not in self._cards:
-            self._selected = None
-        self._refresh_selection()
-
-    def set_score_summary(self, expr: str, threshold: float) -> None:
-        """尾卡摘要：``score = <expr>   threshold <threshold>``。"""
-        expr = str(expr or "").strip()
-        if not expr:
-            self.score_card.summary.setText("(no score set yet)")
-            return
-        self.score_card.summary.setText(
-            "score = %s   threshold %s" % (expr, _fmt_number(threshold)))
-
-    def score_summary_text(self) -> str:
-        return self.score_card.summary.text()
-
-    def selected(self) -> Optional[str]:
-        return self._selected
-
-    def set_selected(self, node_id: Optional[str]) -> None:
-        """設定選取（不發 ``node_selected``；那是使用者點擊才發的）。"""
-        self._selected = node_id if node_id in self._cards else None
-        self._refresh_selection()
-
-    def node_ids(self) -> List[str]:
-        return list(self._order)
-
-    def card(self, node_id: str) -> Optional[_NodeCard]:
-        return self._cards.get(node_id)
-
-    # -- internals ---------------------------------------------------------
-    def _on_card_clicked(self, node_id: str) -> None:
-        self._selected = node_id
-        self._refresh_selection()
-        self.node_selected.emit(node_id)
-
-    def _refresh_selection(self) -> None:
-        for nid, card in self._cards.items():
-            card.set_selected(nid == self._selected)
-
-    def _clear(self) -> None:
-        for card in self._cards.values():
-            self._list.removeWidget(card)
-            card.setParent(None)
-            card.deleteLater()
-        self._cards = {}
 
 
 # --------------------------------------------------------------------------- #

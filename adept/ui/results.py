@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
 )
 
 from .gallery import GalleryPanel
-from .widgets import HistogramWidget
+from .widgets import HistogramWidget, apply_button_cursors
 
 __all__ = ["ResultsWindow"]
 
@@ -106,6 +106,7 @@ class ResultsWindow(QMainWindow):
         self.splitter = split
         self.setCentralWidget(split)
         self.setStatusBar(QStatusBar(self))
+        apply_button_cursors(self)
 
     # ---- 對外 -------------------------------------------------------------
     def set_summary(self, text: str) -> None:

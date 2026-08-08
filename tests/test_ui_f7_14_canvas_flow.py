@@ -123,6 +123,9 @@ def test_zoom_is_clamped_at_both_ends(window):
     """沒有下限，滾兩下就把整張圖縮成一個點，而且點陣底每一格都長得一樣 ——
     使用者不知道自己在哪裡，也不知道有哪顆鈕救得回來。"""
     view = window.pipeline
+    # 明確從 100% 出發：開一份 recipe 現在會自動 fit（見 canvas.fit_later），
+    # 所以「起點一定是 100%」已經不成立 —— 而這條測的是兩端的夾制，不是起點。
+    view.reset_zoom()
     assert view.zoom_percent() == 100
     for _ in range(30):
         view.zoom_by(1 / 1.25)

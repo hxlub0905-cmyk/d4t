@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
 )
 
 from .theme import TOKENS
-from .widgets import to_uint8
+from .widgets import apply_button_cursors, to_uint8
 
 __all__ = ["GalleryPanel", "make_thumb", "THUMB_SIZES", "CACHE_CAP"]
 
@@ -260,24 +260,17 @@ class _Chip(QPushButton):
     """標頭上的一顆條件 chip：``排序：score ↓  ✕``。點一下就把該條件拿掉。"""
 
     def __init__(self, text: str, tip: str, parent: Optional[QWidget] = None):
-        super().__init__("%s  ✕" % text, parent)
+        # ``×`` 是 U+00D7（Latin-1），不是 U+2715 那個 Dingbats 的 ``✕`` ——
+        # 後者在 Windows 上要退到 Segoe UI Symbol（F7-23 第四輪）。
+        super().__init__("%s  ×" % text, parent)
         self.setObjectName("galleryChip")
         self.label_text = text
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip(tip)
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        self.refresh_style()
-
-    def refresh_style(self) -> None:
-        """（重新）套用 token 顏色 —— 換主題時由 GalleryPanel 呼叫。"""
-        self.setStyleSheet(
-            "QPushButton#galleryChip { background:%s; color:%s;"
-            " border:1px solid %s; border-radius:9px; padding:2px 9px;"
-            " font-size:11px; font-weight:500; min-height:16px; }"
-            "QPushButton#galleryChip:hover { background:%s; }"
-            % (TOKENS["accent_bg"], TOKENS["accent_active"],
-               TOKENS["accent_border"], TOKENS["hover_warm_strong"])
-        )
+        # 外觀全在 QSS 的 ``QPushButton#galleryChip``（F7-23 第三輪）。以前每顆
+        # chip 自己帶一份 stylesheet 字串，換主題得靠 GalleryPanel 記得逐顆
+        # 重套 —— 而 chip 是**跑完才長出來的**，那條路很容易漏。
 
 
 # --------------------------------------------------------------------------- #
@@ -846,6 +839,7 @@ class GalleryPanel(QWidget):
         self.set_sort_keys(["score"])
         self.grid.set_thumb_size(int(THUMB_SIZES[1][1]))
         self._refresh_header()
+        apply_button_cursors(self)
 
     # -- 資料（主視窗呼叫）---------------------------------------------------
     def set_items(self, items: Sequence[Dict[str, Any]]) -> None:
@@ -1015,9 +1009,11 @@ class GalleryPanel(QWidget):
         return [c.label_text for c in self._chips]
 
     def refresh_styles(self) -> None:
-        """換主題之後重新取色（chip 與網格都是自繪/內嵌樣式）。"""
-        for chip in self._chips:
-            chip.refresh_style()
+        """換主題之後重畫。
+
+        chip 已經走 QSS（換膚自動跟著走），這裡剩下的是**自繪**的網格 ——
+        它的顏色是 ``paintEvent`` 當下從 ``TOKENS`` 讀的，所以要它重畫一次。
+        """
         self.grid.viewport().update()
         self.update()
 

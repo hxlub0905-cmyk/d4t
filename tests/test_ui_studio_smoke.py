@@ -343,6 +343,9 @@ def test_actions_are_disabled_until_their_preconditions_hold(qapp, synlot):
         # 還沒有資料：跑不了、輸出不了（起手的 Input 卡讓「存檔」是可以的 ——
         # 畫布上真的有一張卡，說「沒東西可存」才是騙人的）
         assert win.btn_trial.isEnabled() is False
+        # 箭頭是 F7-23 起的第二顆真按鈕，要跟主鈕同進退 —— 還打得開一個
+        # 「每一項都是灰的」選單，等於讓使用者多按一次才知道不能按。
+        assert win.btn_trial_more.isEnabled() is False
         assert win.act_run_all.isEnabled() is False
         assert win.spin_trial_n.isEnabled() is False
         assert win.btn_export.isEnabled() is False
@@ -365,6 +368,7 @@ def test_actions_are_disabled_until_their_preconditions_hold(qapp, synlot):
         # 資料集 + 流程 → 可以跑；但還沒有結果，所以還不能輸出
         assert win.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
         assert win.btn_trial.isEnabled() is True
+        assert win.btn_trial_more.isEnabled() is True
         assert win.act_run_all.isEnabled() is True
         assert win.spin_trial_n.isEnabled() is True
         assert win.btn_save_recipe.isEnabled() is True
@@ -390,13 +394,25 @@ def test_trial_count_follows_the_dataset_size(qapp, synlot):
 
 
 def test_run_all_lives_in_the_trial_button_menu(window):
-    """主要動作只留一顆 ▶；破壞性比較大的「跑整批」降級成選單項目。"""
-    menu = window.btn_trial.menu()
-    assert menu is not None, "「跑整批」要收在試跑鈕的下拉裡"
-    assert [a.text() for a in menu.actions()] == ["Run all defects"]
-    assert window.btn_trial.text() == "▶ Run trial"
+    """主要動作只留一顆 ▶；破壞性比較大的「跑整批」降級成選單項目。
+
+    F7-23 第二輪把那顆 ``MenuButtonPopup`` 拆成兩顆真的按鈕（主體 + ▾）——
+    **選單的擁有者換了，但這條測試問的事沒有換**：跑整批仍然只在下拉裡。
+    箭頭改成一顆自己的按鈕的理由（QSS 修不了那半邊的外觀）見計畫書 §27.5。
+    """
+    assert [a.text() for a in window.trial_menu.actions()] == ["Run all defects"]
+    # F7-23 第四輪把 ``▶`` 與 ``▾`` 換成自繪圖示（那兩個字元在廠內的 Windows
+    # 上不保證有字型），所以問的是圖示的名字，不是那顆字。
+    assert window.btn_trial.text() == "Run trial"
+    assert window.btn_trial.glyph_name() == "play"
+    assert window.btn_trial_more.glyph_name() == "chevron_down"
+    # 主鈕本身不再掛選單 —— 掛著的話 Qt 會回頭自己畫那個下拉區
+    assert window.btn_trial.menu() is None
+    assert window.btn_trial_more.menu() is None, \
+        "箭頭鈕也不能掛 menu，否則 Qt 會再加一個自己的下拉指示器"
     # 舊版並排的第二顆 ▶ 鈕已經不存在
     assert not hasattr(window, "btn_full")
+
 
 
 # --------------------------------------------------------------------------- #

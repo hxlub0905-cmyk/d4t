@@ -42,13 +42,12 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMenu,
-    QPushButton,
     QWidget,
 )
 
 from . import theme
 from .theme import TOKENS
-from .widgets import CARD_MIME, draw_group_icon
+from .widgets import CARD_MIME, IconButton, draw_group_icon, small_button
 
 __all__ = ["PipelineCanvas", "NODE_W", "NODE_H", "COL_GAP", "ROW_GAP"]
 
@@ -469,11 +468,35 @@ class _EdgeItem(QGraphicsItem):
     def pair(self) -> Tuple[str, str]:
         return (self.src.node_id, self.dst.node_id)
 
+    #: 往回走的線，控制點往外推多遠（固定值，**不隨距離長大**）。
+    BACK_REACH = 46.0
+
     def path(self) -> QPainterPath:
+        """左→右的三次貝茲；**往回走的線走另一個形狀**。
+
+        埠是固定的：出在右邊、進在左邊。所以當下游那張卡排在上游**左邊**時
+        （換行 —— 上一列的最後一張接下一列的第一張），這條線本來就得往回走。
+
+        以前不管往哪走都用同一條式子（控制點水平推 ``|Δx| * 0.5``）。往前走時
+        那是對的，往回走時 Δx 是一整列的寬度，於是控制點被推到 a 的右邊 350px
+        與 b 的左邊 350px —— 一條連兩張卡的線橫掃了七百多 px，還甩到比第一張卡
+        更左邊。三列就是三條這種折線橫過整張畫布，**比它要表達的「順序」還
+        搶眼**，而它表達的只是「這兩張卡有先後」。
+
+        往回走改成：水平只推一個固定的小距離，剩下的量交給**垂直**方向。
+        線因此收在兩列之間的帶子裡，兩端各只超出 ``BACK_REACH``。
+        """
         a, b = self.src.out_port(self.port), self.dst.in_port()
-        dx = max(40.0, abs(b.x() - a.x()) * 0.5)
+        dx = b.x() - a.x()
         p = QPainterPath(a)
-        p.cubicTo(a + QPointF(dx, 0), b - QPointF(dx, 0), b)
+        if dx >= 2 * self.BACK_REACH:
+            h = max(40.0, dx * 0.5)
+            p.cubicTo(a + QPointF(h, 0), b - QPointF(h, 0), b)
+            return p
+        h = self.BACK_REACH
+        v = max(30.0, abs(b.y() - a.y()) * 0.5)
+        sign = 1.0 if b.y() >= a.y() else -1.0
+        p.cubicTo(a + QPointF(h, sign * v), b - QPointF(h, sign * v), b)
         return p
 
     def boundingRect(self) -> QRectF:
@@ -607,19 +630,23 @@ class PipelineCanvas(QGraphicsView):
         self._zoom_label.setMinimumWidth(38)
         self._zoom_label.setAlignment(Qt.AlignCenter)
 
-        specs = (("−", "Zoom out", lambda: self.zoom_by(1 / 1.25)),
-                 ("+", "Zoom in", lambda: self.zoom_by(1.25)),
-                 ("⤢", "Fit the whole pipeline in view", self.fit),
-                 ("1:1", "Back to 100%", self.reset_zoom),
+        # ``1:1`` 留成文字（數字與冒號是 ASCII，哪台機器都畫得出來）；其餘四顆
+        # 改成自繪圖示 —— ``⤢`` 與 ``⌗`` 在 Windows 的 Segoe UI 根本沒有
+        # （F7-23 第四輪，見 widgets.draw_glyph_icon）。
+        specs = (("zoom_out", "Zoom out", lambda: self.zoom_by(1 / 1.25)),
+                 ("zoom_in", "Zoom in", lambda: self.zoom_by(1.25)),
+                 ("fit", "Fit the whole pipeline in view", self.fit),
+                 (None, "Back to 100%", self.reset_zoom),
                  # 排整齊跟縮放是同一類東西（都只動「怎麼看」，不動 recipe），
                  # 所以放同一排，而不是放到會改檔案的工具列上。
-                 ("⌗", "Tidy up — put the cards back on the grid", self.tidy))
+                 ("tidy", "Tidy up — put the cards back on the grid", self.tidy))
         self._zoom_buttons = []
-        for text, tip, slot in specs:
-            b = QPushButton(text, bar)
-            b.setObjectName("cardButton")
-            b.setToolTip(tip)
-            b.setFixedSize(24 if text not in ("1:1",) else 30, 22)
+        for icon, tip, slot in specs:
+            # 這一排浮在畫布上，所以要 ``kind="icon"``（自己的底）。
+            if icon is None:
+                b = small_button("1:1", tip, bar, kind="icon", shape="wide")
+            else:
+                b = IconButton(icon, tip, bar, kind="icon")
             b.setFocusPolicy(Qt.NoFocus)
             b.clicked.connect(slot)
             lay.addWidget(b)
@@ -645,6 +672,7 @@ class PipelineCanvas(QGraphicsView):
     def resizeEvent(self, e) -> None:          # noqa: D102 - Qt hook
         super().resizeEvent(e)
         self._place_zoom_bar()
+        self._consume_pending_fit()
 
     # ---- 對外（與 PipelinePanel 對齊）--------------------------------------
     def set_nodes(self, nodes: Sequence[Dict[str, Any]],
@@ -737,10 +765,19 @@ class PipelineCanvas(QGraphicsView):
 
     #: ``fit()`` 最多縮到多小。還沒拉線的 recipe 會排成一條很長的橫列，
     #: 硬要全部塞進畫面會把節點縮成看不出字的小方塊 —— 那時候寧可留捲軸。
-    MIN_FIT_SCALE = 0.45
+    #: ``fit`` 縮到這裡就停 —— **再小下去就不是「看得完」了**。
+    #:
+    #: 0.45 是憑感覺挑的，實際跑起來一份十張卡的 pipeline 落在 52%，那時候卡片
+    #: 的**副標**（``norm_ref · ref test → ref``，也就是「這張卡吃什麼吐什麼」）
+    #: 已經是一團灰。把同一張圖畫在 52 / 60 / 70 / 80 / 100% 逐級看過：標題到
+    #: 60% 還讀得出來，副標要到 **70%** 才回來。
+    #:
+    #: 所以下限是 0.7。代價是很長的 pipeline 會超出畫面、要捲 —— 那是划算的：
+    #: **讀不出來的全景不算全景**，而想看整體形狀的人本來就會再按一次縮小。
+    MIN_FIT_SCALE = 0.7
 
     def fit(self) -> None:
-        """整張圖縮放到看得完（但不縮到看不懂）。"""
+        """整張圖縮放到看得完（但不縮到看不懂、也不放大）。"""
         rect = self._scene.itemsBoundingRect()
         if not rect.isValid():
             return
@@ -748,7 +785,48 @@ class PipelineCanvas(QGraphicsView):
         s = self.transform().m11()
         if 0 < s < self.MIN_FIT_SCALE:
             self.scale(self.MIN_FIT_SCALE / s, self.MIN_FIT_SCALE / s)
+        elif s > 1.0:
+            # **fit 只會縮，不會放。** 一條只有兩張卡的 pipeline 塞得進畫布，
+            # 這時候 ``fitInView`` 會把它放大到三倍去填滿版面 —— 卡片變成巨無霸，
+            # 而使用者按的是「全部看得完」不是「放到最大」。
+            self.scale(1.0 / s, 1.0 / s)
+        self._anchor_start(rect)
         self._sync_zoom_label()
+
+    def _anchor_start(self, rect: QRectF) -> None:
+        """塞不下的時候，靠**開頭**對齊，不要置中。
+
+        撞到 ``MIN_FIT_SCALE`` 之後內容一定比畫面寬，而 ``fitInView`` 是置中的
+        —— 於是兩端各被切掉一半，第一張卡（``Load images``）跟最後一張同時看
+        不見。**pipeline 是從左往右讀的**，看不完的時候該看到的是開頭：
+        使用者要嘛從那裡接下去，要嘛往右捲。上下同理。
+        """
+        view = self.mapToScene(self.viewport().rect()).boundingRect()
+        if view.width() < rect.width():
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().minimum())
+        if view.height() < rect.height():
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().minimum())
+
+    def fit_later(self) -> None:
+        """等畫布真的有尺寸了再 fit 一次。
+
+        ``fitInView`` 算的是「要縮多少才塞得進 viewport」，而 viewport 在
+        ``show()`` 之前是一個預設值 —— 在那個時間點 fit，算出來的倍率會直接
+        留在畫面上，使用者看到的是一個對不上自己視窗的縮放。
+        """
+        self._fit_pending = True
+        self._consume_pending_fit()
+
+    def _consume_pending_fit(self) -> None:
+        if getattr(self, "_fit_pending", False) and self.viewport().width() > 80:
+            self._fit_pending = False
+            self.fit()
+
+    def showEvent(self, e) -> None:            # noqa: D102 - Qt hook
+        super().showEvent(e)
+        self._consume_pending_fit()
 
     # ---- 從卡片庫拖進來（F7-22）-------------------------------------------
     def dragEnterEvent(self, e) -> None:            # noqa: D102 - Qt hook

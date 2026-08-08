@@ -482,7 +482,7 @@ def test_every_control_has_an_english_tooltip(qapp):
     assert chips, "sort / filter conditions must be shown as chips"
     for chip in chips:
         assert chip.toolTip() and not _has_cjk(chip.toolTip())
-        assert chip.text().endswith("✕")           # 看得出來可以移除
+        assert chip.text().endswith("×")           # 看得出來可以移除
         assert chip.label_text and not _has_cjk(chip.label_text)
 
     # 空狀態與載入中佔位也是白話英文

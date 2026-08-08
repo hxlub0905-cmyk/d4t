@@ -49,6 +49,7 @@ from PySide6.QtWidgets import (
 
 from .scope import recipe_is_supported
 from .theme import SEG_LABELS, TOKENS, seg_hex
+from .widgets import apply_button_cursors
 
 __all__ = [
     "WelcomeDialog", "RecipeLibraryDialog",
@@ -378,6 +379,7 @@ class WelcomeDialog(QDialog):
         self.btn_close.clicked.connect(self.close)
         bottom.addWidget(self.btn_close)
         root.addLayout(bottom)
+        apply_button_cursors(self)
 
     # ---- 小零件 ----------------------------------------------------------
     def _separator(self) -> QFrame:
@@ -491,6 +493,7 @@ class RecipeLibraryDialog(QDialog):
 
         self._entries: List[Dict[str, Any]] = []
         self.reload()
+        apply_button_cursors(self)
 
     # ---- 資料 -------------------------------------------------------------
     def reload(self) -> int:

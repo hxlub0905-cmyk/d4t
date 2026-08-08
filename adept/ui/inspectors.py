@@ -750,13 +750,58 @@ class MeasureInspector(Inspector):
         mid = (abs(lo) + abs(hi)) / 2.0 or 1.0
         return (hi - lo) / mid < 0.01
 
+    #: 圖例那一條的高度；放不下就不畫（面板可以很矮）。
+    LEGEND_H = 15
+    #: 一排要有這麼高，兩端的刻度才擠得下。
+    AXIS_MIN_ROW_H = 34
+    AXIS_H = 12
+
     def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
         names = self.rows()
-        row_h = rect.height() / float(len(names))
+        # 圖例畫一次就好（每一排都畫是噪音），而且**放得下才畫** ——
+        # 面板可以被拖到很矮，那時候長條本身比圖例重要。
+        body = rect
+        with_legend = rect.height() >= len(names) * 26 + self.LEGEND_H
+        if with_legend:
+            body = QRectF(rect.left(), rect.top(), rect.width(),
+                          rect.height() - self.LEGEND_H)
+            self._paint_legend(p, QRectF(rect.left(), body.bottom(),
+                                         rect.width(), self.LEGEND_H))
+
+        row_h = body.height() / float(len(names))
         for i, name in enumerate(names):
-            band = QRectF(rect.left(), rect.top() + i * row_h,
-                          rect.width(), row_h - 2)
+            band = QRectF(body.left(), body.top() + i * row_h,
+                          body.width(), row_h - 2)
             self._paint_row(p, band, name)
+
+    def _paint_legend(self, p: QPainter, box: QRectF) -> None:
+        """紅線是什麼、藍柱是什麼 —— **畫**出來，不要只用名詞描述。
+
+        跟 :class:`EnhanceInspector` 的圖例同一種語言（F7-21）。以前這個面板
+        什麼都沒有：三排長條、右邊一個數字、中間一條紅線，而畫面上沒有一個地方
+        說得出橫軸是什麼、紅線是什麼、右邊那個數字又是誰的。
+        """
+        y = box.center().y()
+        x = box.left()
+        p.setPen(QPen(QColor(TOKENS["danger_text"]), 1.6))
+        p.drawLine(QPointF(x, y - 5), QPointF(x, y + 5))
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        p.drawText(QRectF(x + 7, box.top(), 150, box.height()),
+                   Qt.AlignLeft | Qt.AlignVCenter, "this defect")
+        x += 84
+        col = QColor(TOKENS["accent"])
+        col.setAlpha(150)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(col))
+        p.drawRect(QRectF(x, y - 4, 11, 8))
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        p.drawText(QRectF(x + 15, box.top(), 200, box.height()),
+                   Qt.AlignLeft | Qt.AlignVCenter, "the batch")
+        # 右邊那一欄的數字是**這一顆的值**，不是整批的最大值 —— 那是看這個面板
+        # 的人第一個會猜錯的東西。窄的時候不畫：疊在「the batch」上面比不寫更糟。
+        if box.width() > 340:
+            p.drawText(box, Qt.AlignRight | Qt.AlignVCenter,
+                       "value = this defect")
 
     def _paint_row(self, p: QPainter, band: QRectF, name: str) -> None:
         vals = self.feature_values(name)
@@ -776,11 +821,22 @@ class MeasureInspector(Inspector):
         p.drawText(value, Qt.AlignRight | Qt.AlignVCenter,
                    "—" if here is None else _fmt(here))
 
+        # 橫軸的兩端。**每一排的單位都不一樣**（``glv_mean`` 與 ``area_px`` 不是
+        # 同一把尺），所以刻度要跟著那一排走，不能像 Enhance 那樣共用一句
+        # 「0 → 255」。沒有這兩個數字，長條的位置只說得出「比較左邊」，
+        # 說不出「比較左邊是多少」。
+        with_axis = band.height() >= self.AXIS_MIN_ROW_H
+        axis_h = self.AXIS_H if with_axis else 0.0
         plot = QRectF(label.right() + 4, band.top() + 2,
                       value.left() - label.right() - 10,
-                      max(6.0, band.height() - 6))
+                      max(6.0, band.height() - 6 - axis_h))
         if plot.width() < 20:
             return
+        if with_axis:
+            axis = QRectF(plot.left(), plot.bottom() + 1, plot.width(), axis_h)
+            p.setPen(QColor(TOKENS["text_hint"]))
+            p.drawText(axis, Qt.AlignLeft | Qt.AlignVCenter, _fmt(lo))
+            p.drawText(axis, Qt.AlignRight | Qt.AlignVCenter, _fmt(hi))
 
         counts = [0] * self.BINS
         for v in vals:
