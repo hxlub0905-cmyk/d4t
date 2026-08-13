@@ -59,7 +59,26 @@ MG 不是 EPI。
 `make_sample.py --pattern lines`（兩軸不同週期的線陣列）、
 `examples/recipes/cross_regions.json`。
 
-驗收 `tests/test_roi_cross.py`（14）+ `tests/test_ui_f8_cross.py`（6）。
+### 第二輪（同日試用回饋）
+
+**框即時疊在預覽影像上**（`ImageView.set_overlay`）—— 原話「不然都一定按 Check
+this region across defects… 跑完才能看，不能實時調整」。只畫**選著那張卡**的
+區域（一份 recipe 常有好幾張 Region 卡），離中心最近的那個畫成醒目色（缺陷永遠
+在那裡，而一堆一模一樣的框裡看不出哪個是「這一顆」的）。
+
+**三層以上的灰階**：站點的 MG 約 220 最亮、EPI 約 180 次之，而中位數二分法會把
+兩者併成同一組。改成**排名**（`brightest` / `second_brightest` / …），分幾群由
+排名決定 —— 使用者只要回答「第幾亮」，不必再猜「這張圖有幾種材質」。分群切在
+排序後最大的間隙上（自然斷點），不用 k-means：不需要種子，同一張圖每次答案相同
+（批次快取的前提）。⚠ **每個方向各自判斷** —— MG 直、EPI 橫，所以兩邊都填
+`brightest`；排名是給「同一個方向有三層」用的。舊值由
+`recipe._migrate_renamed_values` 換名（相容性是檔案格式的事，不是把兩個意思一樣
+的選項留在下拉裡）。
+
+**交錯的 pitch**（`*_pitch_2`）：站點的 EPI 間距有兩種。晶格從錨點往兩邊走、
+間距依序取那兩個值；錨點落在哪一相看不出來，所以**每一相都排一次留誤差最小的**。
+
+驗收 `tests/test_roi_cross.py`（21）+ `tests/test_ui_f8_cross.py`（10）。
 計畫書 `docs/plans/F8-rule-based-roi.md`。
 
 ---

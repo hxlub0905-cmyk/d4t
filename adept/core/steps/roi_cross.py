@@ -68,13 +68,17 @@ class RoiCrossStep(Step):
         ),
         # ---- 直的那組條紋 -------------------------------------------------
         ParamSpec(
-            name="vertical_select", type="choice", default="dark",
+            name="vertical_select", type="choice", default="brightest",
             choices=list(algo_grid.SELECT_RULES),
-            label="Upright stripes are the",
-            help=("Which of the up-and-down stripes to use: the darker ones or "
-                  "the brighter ones. This is relative to the rest of this "
-                  "image, not an absolute gray level, so the same recipe still "
-                  "works when the tool drifts."),
+            label="Take the up-and-down stripes that are",
+            help=("Which of the up-and-down stripes to use, by rank: brightest "
+                  "= the brightest group in this image, second_brightest = the "
+                  "next group in, and the same from the dark end. This is "
+                  "relative to the rest of this image, not an absolute gray "
+                  "level, so the same recipe still works when the tool drifts. "
+                  "Use the ranks when the image has more than two materials - "
+                  "for example brightest for the metal and second_brightest "
+                  "for the layer under it."),
         ),
         ParamSpec(
             name="vertical_pitch", type="float", default=0.0, min=0.0,
@@ -86,6 +90,14 @@ class RoiCrossStep(Step):
                   "on from a single stripe instead of needing several."),
         ),
         ParamSpec(
+            name="vertical_pitch_2", type="float", default=0.0, min=0.0,
+            max=10000.0, unit="px", label="…and every other one is",
+            help=("Only when the spacing alternates between two values - put "
+                  "the second spacing here and leave it 0 otherwise. Some "
+                  "layouts repeat as wide, narrow, wide, narrow rather than at "
+                  "one steady pitch, and a single pitch cannot describe that."),
+        ),
+        ParamSpec(
             name="vertical_sensitivity", type="float", default=0.35, min=0.0,
             max=1.0, label="Upright edge sensitivity",
             help=("How steep a change counts as the edge of an up-and-down "
@@ -95,9 +107,9 @@ class RoiCrossStep(Step):
         ),
         # ---- 橫的那組條紋 -------------------------------------------------
         ParamSpec(
-            name="horizontal_select", type="choice", default="bright",
+            name="horizontal_select", type="choice", default="brightest",
             choices=list(algo_grid.SELECT_RULES),
-            label="Flat stripes are the",
+            label="Take the left-to-right stripes that are",
             help="Same as above, for the stripes that run left to right.",
         ),
         ParamSpec(
@@ -105,6 +117,12 @@ class RoiCrossStep(Step):
             max=10000.0, unit="px", label="Flat stripe pitch",
             help=("How far apart the left-to-right stripes are, in pixels. "
                   "Leave 0 to measure it from the image."),
+        ),
+        ParamSpec(
+            name="horizontal_pitch_2", type="float", default=0.0, min=0.0,
+            max=10000.0, unit="px", label="…and every other one is",
+            help=("Only when the spacing alternates between two values - put "
+                  "the second spacing here and leave it 0 otherwise."),
         ),
         ParamSpec(
             name="horizontal_sensitivity", type="float", default=0.35, min=0.0,
@@ -229,7 +247,9 @@ class RoiCrossStep(Step):
             horizontal_sensitivity=float(p["horizontal_sensitivity"]),
             smooth=int(p["smooth"]),
             vertical_pitch=float(p["vertical_pitch"]),
+            vertical_pitch_2=float(p["vertical_pitch_2"]),
             horizontal_pitch=float(p["horizontal_pitch"]),
+            horizontal_pitch_2=float(p["horizontal_pitch_2"]),
             placement=str(p["place"]), box_size=float(p["box_size"]),
             side=str(p["side"]), gap=float(p["gap"]), inset=float(p["inset"]),
             min_confidence=float(p["min_confidence"]),
@@ -309,6 +329,7 @@ def _stripe_meta(s: "algo_grid.StripeSet") -> Dict[str, Any]:
         "selected": [[int(a), int(b)] for a, b in s.selected],
         "pitch_measured": float(s.pitch_measured),
         "pitch_used": float(s.pitch_used),
+        "pitches_used": [float(v) for v in s.pitches_used],
         "pitch_error": float(s.pitch_error),
         "filled": int(s.filled),
         "confidence": float(s.confidence),

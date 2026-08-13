@@ -58,7 +58,17 @@ __all__ = ["StripeSet", "CrossResult", "find_stripes", "select_bands",
 
 #: 「要哪一組條紋」。用**相對**亮度（跟這張圖上其他段比），不是絕對灰階 ——
 #: 絕對值會隨機台與曝光漂移，一份 recipe 就綁死在一台機器上。
-SELECT_RULES = ("dark", "bright", "all")
+#:
+#: **不是只有兩層。** 實際的 layout 常常三層以上（站點回報：MG 最亮約 220、
+#: EPI 次之約 180、其餘更暗），而中位數二分法會把 220 跟 180 併成同一組 ——
+#: 於是「我要 EPI」講不出來。所以規則是**排名**：分幾群由排名決定
+#: （見 :func:`level_groups`），使用者只要回答「第幾亮的那一組」。
+#: ``dark`` / ``bright`` 保留為 ``darkest`` / ``brightest`` 的舊名。
+SELECT_RULES = ("brightest", "second_brightest", "third_brightest",
+                "darkest", "second_darkest", "third_darkest", "all")
+
+#: 舊名 → 新名（F8 第一版只有兩層時用的字）。
+_SELECT_ALIASES = {"dark": "darkest", "bright": "brightest"}
 
 #: 框放在交會處的哪裡。``beside_*`` / ``between_*`` 後面接的是**被貼住的那組
 #: 條紋**，另一組永遠是限制框長度的那一邊 —— 所以五個值各自說得完自己是什麼，
@@ -96,6 +106,8 @@ class StripeSet:
     pitch_used: float = 0.0
     #: 找到的條紋中心離晶格有多遠（像素中位數）。沒給 pitch 是 -1。
     pitch_error: float = -1.0
+    #: 實際使用的 pitch 清單（交錯時不只一個）。
+    pitches_used: List[float] = field(default_factory=list)
     #: 有幾根條紋是**晶格補上的**（影像上沒抓到，靠已知 pitch 推出來）。
     filled: int = 0
     confidence: float = 0.0
@@ -130,29 +142,99 @@ class CrossResult:
 # --------------------------------------------------------------------------- #
 # 一個方向的條紋
 # --------------------------------------------------------------------------- #
-def select_bands(bands: Sequence[Tuple[int, int]], levels: Sequence[float],
-                 rule: str = "dark") -> List[Tuple[int, int]]:
-    """挑出「要哪一組條紋」—— 依**相對**亮度，不是絕對灰階。
+#: ``SELECT_RULES`` → ``(從哪一端數, 第幾組)``。0 = 最外面那一組。
+_RANKS = {"brightest": ("hi", 0), "second_brightest": ("hi", 1),
+          "third_brightest": ("hi", 2), "darkest": ("lo", 0),
+          "second_darkest": ("lo", 1), "third_darkest": ("lo", 2)}
 
-    門檻取所有段亮度的中位數：暗的那組落在下面、亮的那組落在上面。整張只有
-    一段（沒找到任何邊界）時兩種規則都回那一段 —— 那不是「挑中了」，
-    是「沒得挑」，交給上層用段數判斷。
+
+def level_groups(levels: Sequence[float], k: int) -> List[int]:
+    """把每一段的亮度分成 ``k`` 群，回傳每段的群編號（0 = 最暗那群）。
+
+    切在**排序後最大的 k−1 個間隙**上（一維自然斷點）。為什麼不是等分或
+    k-means：材質之間的灰階差本來就是一個個台階，而台階與台階之間的間隙遠大於
+    同一種材質內部的起伏 —— 找間隙就是在找台階，而且不需要迭代、不需要種子，
+    同一張圖每次跑的答案完全相同（批次快取的前提）。
+    """
+    lv = [float(v) for v in levels]
+    k = max(1, int(k))
+    if k <= 1 or len(lv) <= 1:
+        return [0] * len(lv)
+
+    order = sorted(range(len(lv)), key=lambda i: lv[i])
+    gaps = sorted(range(1, len(order)),
+                  key=lambda j: lv[order[j]] - lv[order[j - 1]],
+                  reverse=True)[:k - 1]
+    cuts = set(gaps)
+    group_of = [0] * len(lv)
+    g = 0
+    for j, i in enumerate(order):
+        if j in cuts:
+            g += 1
+        group_of[i] = g
+    return group_of
+
+
+def select_bands(bands: Sequence[Tuple[int, int]], levels: Sequence[float],
+                 rule: str = "brightest") -> List[Tuple[int, int]]:
+    """挑出「要哪一組條紋」—— 依**相對**亮度的排名，不是絕對灰階。
+
+    分成幾群由排名決定：要「最亮的」就分兩群，要「第二亮的」就分三群，
+    以此類推。這樣使用者只要回答一個問題（第幾亮），不必再猜「這張圖有幾種
+    材質」—— 而後者他通常答得出來，但那是**另一個**問題，多問一次就多一次
+    填錯的機會。
+
+    只有一段（沒找到任何邊界）時原樣回傳 —— 那不是「挑中了」是「沒得挑」，
+    交給上層用段數判斷。
     """
     bands, levels = list(bands), list(levels)
     if not bands:
         return []
-    if str(rule) == "all" or len(bands) < 2:
+    rule = _SELECT_ALIASES.get(str(rule), str(rule))
+    if rule == "all" or len(bands) < 2:
         return bands
-    mid = float(np.median(np.asarray(levels, dtype=np.float64)))
-    if str(rule) == "bright":
-        picked = [b for b, lv in zip(bands, levels) if lv >= mid]
-    else:
-        picked = [b for b, lv in zip(bands, levels) if lv < mid]
+
+    end, rank = _RANKS.get(rule, ("hi", 0))
+    k = rank + 2
+    groups = level_groups(levels, k)
+    want = (max(groups) - rank) if end == "hi" else rank
+    picked = [b for b, g in zip(bands, groups) if g == want]
+    # 段數不夠分那麼多群的時候會挑不到 —— 退回整組比回空的好，
+    # 但上層看得到段數，所以不會把「沒得挑」誤認為「挑到了」。
     return picked or bands
 
 
+def _walk(anchor: float, pitches: Sequence[float], length: int,
+          phase: int) -> List[float]:
+    """從 ``anchor`` 往兩邊走，間距**依序**取 ``pitches``（循環）。
+
+    一個 pitch 是等距晶格；兩個就是「寬、窄、寬、窄…」那種交錯的排法
+    （站點回報 EPI 與 EPI 之間有兩種間距）。``phase`` 決定從 anchor 往右走的
+    第一步用哪一個 —— 錨點落在交錯的哪一相是看不出來的，所以呼叫端把每一相
+    都試一次，留誤差最小的那個。
+    """
+    p = [float(v) for v in pitches if float(v) >= 2.0]
+    if not p:
+        return [anchor]
+    span = max(p)
+    out = [anchor]
+
+    c, i = anchor, int(phase)
+    while c < length + span:
+        c += p[i % len(p)]
+        i += 1
+        out.append(c)
+
+    c, i = anchor, int(phase) - 1
+    while c > -span:
+        c -= p[i % len(p)]
+        i -= 1
+        out.append(c)
+    return sorted(out)
+
+
 def _fill_by_pitch(bands: Sequence[Tuple[int, int]], pitch: float, length: int,
-                   tol: float = DEFAULT_PITCH_TOL
+                   tol: float = DEFAULT_PITCH_TOL, pitch_2: float = 0.0
                    ) -> Tuple[List[Tuple[int, int]], float, int, bool]:
     """已知 pitch → 把這一組條紋補成完整的一排。回 ``(條紋, 誤差, 補了幾根, 用了嗎)``。
 
@@ -171,7 +253,8 @@ def _fill_by_pitch(bands: Sequence[Tuple[int, int]], pitch: float, length: int,
     兩者衝突時相信影像，並把證據留給上層講出來。
     """
     got = [(int(a), int(b)) for a, b in bands]
-    if pitch < 2.0 or not got or length <= 0:
+    pitches = [float(p) for p in (pitch, pitch_2) if float(p) >= 2.0]
+    if not pitches or not got or length <= 0:
         return got, -1.0, 0, False
 
     centres = [(a + b) / 2.0 for a, b in got]
@@ -179,15 +262,22 @@ def _fill_by_pitch(bands: Sequence[Tuple[int, int]], pitch: float, length: int,
     mid = length / 2.0
     anchor = min(centres, key=lambda c: abs(c - mid))
 
-    k0 = int(np.floor((0.0 - anchor) / pitch)) - 1
-    k1 = int(np.ceil((float(length) - anchor) / pitch)) + 1
-    lat = [anchor + k * pitch for k in range(k0, k1 + 1)]
-    lat = [c for c in lat if c + width / 2.0 > 0 and c - width / 2.0 < length]
-    if not lat:
+    # 交錯的 pitch 有好幾個「相」，而錨點落在哪一相是看不出來的 ——
+    # 每一相都排一次，留最貼合影像的那個。
+    best, best_err = None, None
+    for phase in range(len(pitches)):
+        cand = [c for c in _walk(anchor, pitches, int(length), phase)
+                if c + width / 2.0 > 0 and c - width / 2.0 < length]
+        if not cand:
+            continue
+        e = float(np.median([min(abs(c - v) for v in cand) for c in centres]))
+        if best_err is None or e < best_err:
+            best, best_err = cand, e
+    if best is None:
         return got, -1.0, 0, False
 
-    err = float(np.median([min(abs(c - v) for v in lat) for c in centres]))
-    if err > pitch * float(tol):
+    lat, err = best, best_err
+    if err > min(pitches) * float(tol):
         return got, err, 0, False
 
     out = []
@@ -199,8 +289,9 @@ def _fill_by_pitch(bands: Sequence[Tuple[int, int]], pitch: float, length: int,
 
 
 def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
-                 select: str = "dark", sensitivity: float = 0.35,
+                 select: str = "brightest", sensitivity: float = 0.35,
                  smooth: int = 3, min_gap: int = 4, pitch: float = 0.0,
+                 pitch_2: float = 0.0,
                  pitch_tol: float = DEFAULT_PITCH_TOL) -> StripeSet:
     """找出一個方向上的條紋，並挑出要的那一組。
 
@@ -234,10 +325,16 @@ def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
     out.pitch_used = out.pitch_measured
 
     filled, err, n_new, used = _fill_by_pitch(picked, float(pitch),
-                                              int(prof.size), pitch_tol)
+                                              int(prof.size), pitch_tol,
+                                              float(pitch_2))
     out.pitch_error = err
     if used:
-        out.filled, out.pitch_used = n_new, float(pitch)
+        given = [float(p) for p in (pitch, pitch_2) if float(p) >= 2.0]
+        # 兩種間距交錯時，「pitch 是多少」沒有單一答案 —— 報平均（那是實際的
+        # 平均間距），完整的一組留在 ``pitches_used`` 給面板與特徵用。
+        out.filled = n_new
+        out.pitches_used = given
+        out.pitch_used = float(np.mean(given))
     out.selected = filled
     return out
 
@@ -355,13 +452,15 @@ def cross_boxes(x: StripeSet, y: StripeSet,
     return boxes
 
 
-def locate_crossings(img: Any, vertical_select: str = "dark",
-                     horizontal_select: str = "bright",
+def locate_crossings(img: Any, vertical_select: str = "brightest",
+                     horizontal_select: str = "brightest",
                      vertical_sensitivity: float = 0.35,
                      horizontal_sensitivity: float = 0.35,
                      smooth: int = 3, min_gap: int = 4,
                      vertical_pitch: float = 0.0,
+                     vertical_pitch_2: float = 0.0,
                      horizontal_pitch: float = 0.0,
+                     horizontal_pitch_2: float = 0.0,
                      placement: str = "crossing", box_size: float = 4.0,
                      side: str = "both", gap: float = 1.0, inset: float = 0.0,
                      min_confidence: float = 5.0,
@@ -380,10 +479,12 @@ def locate_crossings(img: Any, vertical_select: str = "dark",
 
     xs = find_stripes(img, axis=algo_profile.AXIS_X, select=vertical_select,
                       sensitivity=vertical_sensitivity, smooth=smooth,
-                      min_gap=min_gap, pitch=vertical_pitch)
+                      min_gap=min_gap, pitch=vertical_pitch,
+                      pitch_2=vertical_pitch_2)
     ys = find_stripes(img, axis=algo_profile.AXIS_Y, select=horizontal_select,
                       sensitivity=horizontal_sensitivity, smooth=smooth,
-                      min_gap=min_gap, pitch=horizontal_pitch)
+                      min_gap=min_gap, pitch=horizontal_pitch,
+                      pitch_2=horizontal_pitch_2)
 
     conf = min(float(xs.confidence), float(ys.confidence))
     res = CrossResult(x=xs, y=ys, confidence=conf)

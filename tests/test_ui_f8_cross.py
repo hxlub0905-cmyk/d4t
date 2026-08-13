@@ -182,3 +182,71 @@ def test_every_box_is_drawn_not_just_the_first(qapp, cross_window):
     for r in drawn:
         assert len(r["boxes"]) > 4, (
             "只畫了 %d 個框 —— 多框區域被畫成一個了" % len(r["boxes"]))
+
+
+# --------------------------------------------------------------------------- #
+# 3. 框要**即時**疊在預覽影像上
+# --------------------------------------------------------------------------- #
+def test_the_boxes_show_up_on_the_preview_without_opening_another_window(
+        qapp, cross_window):
+    """使用者原話：「不然都一定按 Check this region across defects… 跑完才能看，
+    不能實時調整」。
+
+    定位卡的參數是**一邊拖一邊看**決定的（F7-8）。框只出現在另一個要按鈕、
+    要跑完一批的視窗裡，等於把「調敏感度」變成改一次跑一次 —— 而那要試十幾次。
+    """
+    win = cross_window
+    win.refresh_preview(sync=True)
+
+    n = win.image_view.overlay_count()
+    assert n > 4, "預覽影像上沒有框（只有 %d 個）" % n
+    assert len(win.region_overlay()) == n
+
+
+def test_the_overlay_follows_the_parameters_live(qapp, cross_window):
+    """改一個參數，框當場就要不一樣 —— 這是「即時」的定義。"""
+    win = cross_window
+    nid = win.selected_node
+    win.refresh_preview(sync=True)
+    before = list(win.region_overlay())
+
+    win.model.set_param(nid, "place", "between_vertical")
+    win.refresh_preview(sync=True)
+    after = list(win.region_overlay())
+
+    assert before and after
+    assert before != after, "換了放法，畫面上的框卻沒變"
+
+
+def test_the_box_the_defect_sits_in_is_marked_out(qapp, cross_window):
+    """一堆一模一樣的框裡看不出哪個是「這一顆」的。缺陷永遠在 patch 正中心，
+    所以離中心最近的那個要畫得不一樣。"""
+    win = cross_window
+    win.refresh_preview(sync=True)
+    boxes = win.region_overlay()
+    focus = win._focus_box_index(boxes)
+
+    assert 0 <= focus < len(boxes)
+    nx, ny, nw, nh = boxes[focus]
+    d = (nx + nw / 2.0 - 0.5) ** 2 + (ny + nh / 2.0 - 0.5) ** 2
+    assert all(d <= (b[0] + b[2] / 2.0 - 0.5) ** 2
+               + (b[1] + b[3] / 2.0 - 0.5) ** 2 + 1e-9 for b in boxes)
+    assert win.image_view._overlay_focus == focus
+
+
+def test_only_the_selected_card_draws_its_boxes(qapp, cross_window):
+    """一份 recipe 常有好幾張 Region 卡，全部畫出來會變成一團分不清誰是誰的線。
+    使用者現在在調的就是手上那一張。"""
+    win = cross_window
+    other = win.model.add_step("roi_define")
+    win.model.set_param(other, "name", "middle")
+    win.model.set_param(other, "shape", "center")
+    win.select_node(other)
+    win.refresh_preview(sync=True)
+    assert len(win.region_overlay()) == 1, "選著中心框那張卡，卻畫出了別張的框"
+
+    win.select_node(win.selected_node)
+    win.select_node([n for n in win.model.node_order
+                     if win.model.nodes[n].step == "roi_cross"][0])
+    win.refresh_preview(sync=True)
+    assert len(win.region_overlay()) > 4

@@ -34,23 +34,33 @@ from adept.core.pipeline.context import Context  # noqa: E402
 from adept.core.pipeline.step import StepError  # noqa: E402
 
 SIZE = 128
-MG_PITCH, MG_W = 24, 8          # 直的 Metal Gate（暗）
-EPI_PITCH, EPI_W = 34, 14       # 橫的 EPI（亮）
-BASE, EPI_LV, MG_LV = 90.0, 170.0, 45.0
+MG_PITCH, MG_W = 24, 8          # 直的 Metal Gate
+EPI_PITCH, EPI_W = 34, 14       # 橫的 EPI
+#: 灰階照站點回報的極性：**MG 最亮（約 220）、EPI 次之（約 180）**、其餘更暗。
+#: 這件事值得照抄而不是隨便挑：極性反過來的話，「要哪一組」的預設值就會是錯的，
+#: 而錯的結果是一組**看起來完全正常**的數字（框落在別種材質上）。
+BASE, EPI_LV, MG_LV = 120.0, 180.0, 220.0
 
 
 def _mg_epi(ox: int = 0, oy: int = 0, noise: float = 2.0, seed: int = 0,
-            epi_width: int = EPI_W, defect: float = 0.0) -> np.ndarray:
-    """直的 MG（暗）壓在橫的 EPI（亮）上面。``ox``/``oy`` 是晶格相位。
+            epi_width: int = EPI_W, defect: float = 0.0,
+            poly: float = 0.0) -> np.ndarray:
+    """直的 MG 壓在橫的 EPI 上面。``ox``/``oy`` 是晶格相位。
 
     相位逐顆不同正是這件事的難處：patch 是以**缺陷**為中心裁的，不是以晶格
     為中心，所以「畫面上的固定位置」跨 defect 不成立。
+
+    ``poly`` > 0 時，在兩根 MG 之間再插一根**比較不亮**的直條紋 —— 那讓
+    **直的那個方向有三層灰階**，也就是 ``second_brightest`` 要處理的情況。
     """
     rng = np.random.default_rng(seed)
     img = np.full((SIZE, SIZE), BASE, np.float32)
     if epi_width > 0:
         img[(np.arange(SIZE) + oy) % EPI_PITCH < epi_width, :] = EPI_LV
-    img[:, (np.arange(SIZE) + ox) % MG_PITCH < MG_W] = MG_LV
+    col = (np.arange(SIZE) + ox) % MG_PITCH
+    if poly > 0:
+        img[:, (col >= MG_W + 4) & (col < MG_W + 4 + MG_W)] = float(poly)
+    img[:, col < MG_W] = MG_LV
     if defect:
         img[SIZE // 2 - 3:SIZE // 2 + 3, SIZE // 2 - 3:SIZE // 2 + 3] += defect
     return img + rng.normal(0, noise, (SIZE, SIZE)).astype(np.float32)
@@ -60,6 +70,8 @@ def _locate(img, **kw):
     kw.setdefault("placement", "beside_vertical")
     kw.setdefault("box_size", 5)
     kw.setdefault("inset", 3)
+    kw.setdefault("vertical_select", "brightest")     # MG 是最亮的那組欄
+    kw.setdefault("horizontal_select", "brightest")   # EPI 是最亮的那組列
     return algo_grid.locate_crossings(img, **kw)
 
 
@@ -94,9 +106,13 @@ def test_leaving_no_clearance_quietly_poisons_the_numbers():
     本身在 SEM 上就糊在好幾個像素上。``gap=0`` 時 5px 的框吃進一欄另一種材質，
     平均值被拉掉一成多，**而那仍然是個看起來很正常的數字**。
     """
+    # **極性會決定偏差往哪一邊倒**，所以這條刻意用「MG 比較暗」的那一種 ——
+    # 站點的實際極性（MG 最亮）在這組參數下剛好不overlap，但那是巧合不是保證：
+    # 邊界是混合區這件事跟誰亮誰暗無關，而 gap 擋的是那個。
     img = _mg_epi()
-    dirty = _levels(img, _locate(img, gap=0).boxes)
-    clean = _levels(img, _locate(img, gap=1).boxes)
+    img = np.where(img > (MG_LV + EPI_LV) / 2.0, BASE - 40.0, img).astype(np.float32)
+    dirty = _levels(img, _locate(img, gap=0, vertical_select="darkest").boxes)
+    clean = _levels(img, _locate(img, gap=1, vertical_select="darkest").boxes)
 
     assert min(dirty) < EPI_LV - 15, "這條測試的前提（gap=0 會吃到隔壁）不成立了"
     assert min(clean) > EPI_LV - 8
@@ -104,15 +120,22 @@ def test_leaving_no_clearance_quietly_poisons_the_numbers():
 
 
 def test_the_boxes_follow_the_lattice_phase():
-    """相位逐顆不同 —— 框固定在畫面上的話這張卡就沒有意義。"""
+    """相位逐顆不同 —— 框固定在畫面上的話這張卡就沒有意義。
+
+    要問的是「跟著結構跑」而不是「往同一個方向移動」：``center_box`` 是**離
+    patch 中心最近的那一個**，相位一移，最近的那根就換成隔壁那根，位置因此會
+    跳一個 pitch。真正的不變量是**每一個框都還落在 EPI 上**。
+    """
     seen = []
-    for ox in (0, 5, 11):
-        res = _locate(_mg_epi(ox=ox))
+    for ox in (0, 5, 11, 17):
+        img = _mg_epi(ox=ox)
+        res = _locate(img)
         assert res.ok is True and res.center_box is not None
-        seen.append(res.center_box[0])
-    assert len(set(seen)) == 3, "相位換了三次，中心框卻沒有動：%s" % seen
-    # 相位往右移，框跟著往右（不是隨機跳）
-    assert seen[0] > seen[1] > seen[2] or seen[0] < seen[1] < seen[2]
+        lv = _levels(img, res.boxes)
+        assert min(lv) > EPI_LV - 8, \
+            "相位 %d 時有框掉出 EPI（最低 %.1f）" % (ox, min(lv))
+        seen.append(tuple(b[0] for b in res.boxes[:4]))
+    assert len(set(seen)) == 4, "相位換了四次，框卻停在原地：%s" % (seen,)
 
 
 # --------------------------------------------------------------------------- #
@@ -124,8 +147,8 @@ def test_a_known_pitch_fills_in_a_stripe_the_image_lost():
     faint = _mg_epi()
     faint[:, :MG_W] = BASE          # 把最左邊那根 MG 抹掉
 
-    without = algo_grid.find_stripes(faint, axis="x", select="dark")
-    with_pitch = algo_grid.find_stripes(faint, axis="x", select="dark",
+    without = algo_grid.find_stripes(faint, axis="x", select="brightest")
+    with_pitch = algo_grid.find_stripes(faint, axis="x", select="brightest",
                                         pitch=MG_PITCH)
     assert with_pitch.filled >= 1, "已知 pitch 卻沒有把漏掉的那根補回來"
     assert len(with_pitch.selected) > len(without.selected)
@@ -138,7 +161,7 @@ def test_a_wrong_pitch_loses_to_the_image():
     兩者衝突時相信影像，並把證據（``pitch_error``）留下來讓上層講出來 ——
     安靜地照一個錯的 pitch 排格子，會給出一整排位置錯誤但看起來很整齊的框。
     """
-    s = algo_grid.find_stripes(_mg_epi(), axis="x", select="dark",
+    s = algo_grid.find_stripes(_mg_epi(), axis="x", select="brightest",
                                pitch=MG_PITCH * 1.7)
     assert s.filled == 0
     assert s.pitch_error > 0
@@ -153,7 +176,7 @@ def test_the_lattice_sits_on_the_stripe_centres_not_on_the_edges():
     只有**中心**才是每 24 一次。拿邊界去對等距晶格，會把一根條紋的兩條邊併成
     一格 —— 條紋寬度整個消失、框落到隨機的地方，**而且看起來還很像對的**。
     """
-    s = algo_grid.find_stripes(_mg_epi(), axis="x", select="dark",
+    s = algo_grid.find_stripes(_mg_epi(), axis="x", select="brightest",
                                pitch=MG_PITCH)
     widths = [b - a for a, b in s.selected]
     assert all(abs(w - MG_W) <= 2 for w in widths), \
@@ -191,7 +214,8 @@ def _ctx(**img_kw) -> Context:
 def _run(ctx: Context, **params) -> Context:
     p = {"source": "ref", "place": "beside_vertical", "box_size": 5.0,
          "inset": 3.0, "vertical_pitch": MG_PITCH,
-         "horizontal_pitch": EPI_PITCH}
+         "horizontal_pitch": EPI_PITCH,
+         "vertical_select": "brightest", "horizontal_select": "brightest"}
     p.update(params)
     return get_step("roi_cross")().run(ctx, p)
 
@@ -219,11 +243,12 @@ def test_stats_are_measured_across_all_the_boxes():
                                       "output_prefix": "epi"})
     assert ctx.features["epi_glv_mean"] == pytest.approx(EPI_LV, abs=6.0)
 
-    # 整張圖的平均混了三種材質 —— 框確實有在挑東西
+    # 整張圖混了三種材質，框裡只有一種 —— 用**離散程度**比才問得出這件事
+    # （平均值可能碰巧接近，那是巧合不是證據）。
     get_step("glv_stats")().run(ctx, {"source": "test", "roi": "",
-                                      "metrics": "glv_mean",
+                                      "metrics": "glv_std",
                                       "output_prefix": "whole"})
-    assert ctx.features["whole_glv_mean"] < EPI_LV - 30
+    assert ctx.features["whole_glv_std"] > ctx.features["epi_glv_std"] * 3
 
 
 def test_a_card_that_needs_one_box_says_so_instead_of_taking_the_first():
@@ -269,3 +294,135 @@ def test_how_many_stripes_were_invented_is_visible():
     _run(ctx)
     assert ctx.features["cross_filled"] >= 1.0
     assert ctx.features["cross_pitch_x_px"] == pytest.approx(MG_PITCH)
+
+
+# --------------------------------------------------------------------------- #
+# 5. 三層以上的灰階（站點：MG 約 220 最亮、EPI 約 180 次之）
+# --------------------------------------------------------------------------- #
+def test_two_materials_in_one_direction_are_told_apart_by_rank():
+    """中位數二分法會把 220 跟 180 併成「亮的那一組」—— 於是「我要第二亮的那組」
+    講不出來。所以規則是排名：要第幾亮，就分幾群。"""
+    img = _mg_epi(poly=185.0)          # 直的方向多一組比較不亮的條紋
+
+    top = algo_grid.find_stripes(img, axis="x", select="brightest")
+    second = algo_grid.find_stripes(img, axis="x", select="second_brightest")
+
+    assert top.selected and second.selected
+    assert not set(top.selected) & set(second.selected), "兩組挑到同一批條紋"
+
+    prof = top.profile
+    hi = np.mean([prof[a:b].mean() for a, b in top.selected])
+    mid = np.mean([prof[a:b].mean() for a, b in second.selected])
+    assert hi > mid + 8, "第二亮的那組沒有比最亮的暗（%.1f vs %.1f）" % (hi, mid)
+
+
+def test_level_groups_splits_at_the_gaps_not_evenly():
+    """材質之間的灰階差是一個個台階，台階之間的間隙遠大於材質內部的起伏 ——
+    所以切在最大的間隙上。等分會把同一種材質切成兩半。"""
+    levels = [120.0, 122.0, 119.0, 180.0, 181.0, 220.0, 219.0]
+    groups = algo_grid.level_groups(levels, 3)
+    assert groups[:3] == [0, 0, 0]         # 120 那三個同一群
+    assert groups[3] == groups[4]          # 180 那兩個同一群
+    assert groups[5] == groups[6]          # 220 那兩個同一群
+    assert len(set(groups)) == 3
+
+
+def test_the_rank_is_relative_so_a_gain_change_does_not_break_it():
+    """整張圖亮度漂移不該讓「第幾亮」換人 —— 那正是不用絕對灰階的理由。"""
+    img = _mg_epi(poly=185.0)
+    a = algo_grid.find_stripes(img, axis="x", select="second_brightest")
+    b = algo_grid.find_stripes(img * 0.75 + 20.0, axis="x",
+                               select="second_brightest")
+    assert a.selected == b.selected
+
+
+# --------------------------------------------------------------------------- #
+# 6. 交錯的 pitch（站點：EPI 與 EPI 之間有兩種間距）
+# --------------------------------------------------------------------------- #
+def _alternating(gap_a: int = 14, gap_b: int = 26, width: int = 10,
+                 noise: float = 2.0, drop: int = -1) -> np.ndarray:
+    """橫條紋的間距在兩個值之間交錯（寬、窄、寬、窄…）。
+
+    ``drop`` >= 0 時把第幾根抹掉 —— 用來驗「已知 pitch 補得回漏掉的那一根」。
+    """
+    rng = np.random.default_rng(1)
+    img = np.full((SIZE, SIZE), BASE, np.float32)
+    y, i, kept = 6, 0, 0
+    while y + width < SIZE:
+        if kept != drop:
+            img[y:y + width, :] = EPI_LV
+        kept += 1
+        y += width + (gap_a if i % 2 == 0 else gap_b)
+        i += 1
+    # 直的那組照樣要有 —— 交會處是兩組條紋**共同**定義的，少一組整張就定位不了，
+    # 而這幾條測的是「交錯的間距」不是「單軸也能過」。
+    img[:, np.arange(SIZE) % MG_PITCH < MG_W] = MG_LV
+    return img + rng.normal(0, noise, (SIZE, SIZE)).astype(np.float32)
+
+
+def test_two_alternating_pitches_are_accepted():
+    """一個 pitch 描述不了「寬、窄、寬、窄」的排法 —— 硬用單一 pitch 去對，
+    誤差會大到整組被丟掉，等於這個功能沒有用。"""
+    img = _alternating()
+    # 條紋寬 10、間距 14/26 → 中心距在 24 與 36 之間交錯
+    both = algo_grid.find_stripes(img, axis="y", select="brightest",
+                                  pitch=24.0, pitch_2=36.0)
+    single = algo_grid.find_stripes(img, axis="y", select="brightest",
+                                    pitch=24.0)
+
+    assert both.pitches_used == [24.0, 36.0]
+    assert both.pitch_error < single.pitch_error, (
+        "交錯的 pitch 沒有比單一 pitch 更貼合（%.2f vs %.2f）"
+        % (both.pitch_error, single.pitch_error))
+
+
+def test_an_alternating_pitch_fills_in_a_missing_stripe():
+    img = _alternating(drop=2)
+    without = algo_grid.find_stripes(img, axis="y", select="brightest")
+    filled = algo_grid.find_stripes(img, axis="y", select="brightest",
+                                    pitch=24.0, pitch_2=36.0)
+    assert filled.filled >= 1, "抹掉的那一根沒有被補回來"
+    assert len(filled.selected) > len(without.selected)
+
+
+def test_the_card_passes_both_pitches_through():
+    img = _alternating()
+    ctx = Context(images={"test": img.copy(), "ref": img.copy()})
+    get_step("roi_cross")().run(ctx, {
+        "source": "ref", "place": "crossing", "roi_out": "xing",
+        "vertical_select": "brightest", "horizontal_select": "brightest",
+        "horizontal_pitch": 24.0, "horizontal_pitch_2": 36.0})
+    rec = ctx.meta["crossings"]["xing"]
+    assert rec["y"]["pitches_used"] == [24.0, 36.0]
+    # 兩種間距時「pitch 是多少」沒有單一答案 —— 特徵報的是平均
+    assert ctx.features["cross_pitch_y_px"] == pytest.approx(30.0)
+
+
+def test_an_old_recipe_still_loads_after_the_rank_rename():
+    """F8 第一版只有兩層，「要哪一組」是 dark / bright。改成排名之後，
+    舊檔案裡的那兩個值仍然說得通（就是排名的兩端）—— **相容性是檔案格式的事，
+    不是把兩個意思一樣的選項留在下拉選單裡**。"""
+    import json
+    import tempfile
+
+    from adept.core.pipeline import Recipe
+
+    doc = {
+        "recipe_id": "old", "version": 1,
+        "routes": {"ebi_patch": ["load", "x"]},
+        "nodes": {
+            "load": {"step": "load_patch", "params": {}},
+            "x": {"step": "roi_cross",
+                  "params": {"vertical_select": "dark",
+                             "horizontal_select": "bright"}},
+        },
+        "score": {"expr": "1", "threshold": 0.5},
+    }
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
+                                     encoding="utf-8") as f:
+        json.dump(doc, f)
+        path = f.name
+
+    r = Recipe.load(path)
+    assert r.nodes["x"].params["vertical_select"] == "darkest"
+    assert r.nodes["x"].params["horizontal_select"] == "brightest"

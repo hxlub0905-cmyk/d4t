@@ -29,7 +29,7 @@ import heapq
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Type
+from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
 from .expression import ExpressionError, parse_expression
 from .step import ParamError, Step, REGISTRY
@@ -231,6 +231,38 @@ _RENAMED_STREAM_PARAM: Dict[str, str] = {
 }
 
 
+#: 改過名的**參數值**：``(step, param) -> {舊值: 新值}``。
+#:
+#: F8 第一版的 ``roi_cross`` 只有兩層灰階，所以「要哪一組」是 ``dark`` /
+#: ``bright``。實際的 layout 常常三層以上（站點回報 MG 約 220、EPI 約 180），
+#: 二分法把那兩層併在一起，於是規則改成排名。舊檔案的兩個值仍然說得通
+#: —— 它們就是排名的兩端。
+#:
+#: 為什麼是遷移而不是把舊值留在 choices 裡：留著的話下拉選單會有兩個意思一樣
+#: 的選項，而使用者不知道該挑哪個。**相容性是檔案格式的事，不是 UI 的事。**
+_RENAMED_VALUES: Dict[Tuple[str, str], Dict[str, str]] = {
+    ("roi_cross", "vertical_select"): {"dark": "darkest", "bright": "brightest"},
+    ("roi_cross", "horizontal_select"): {"dark": "darkest", "bright": "brightest"},
+}
+
+
+def _migrate_renamed_values(nodes: Dict[str, "RecipeNode"]) -> None:
+    """把改過名的參數**值**換成新的（就地改寫 nodes）。"""
+    for nid, node in list(nodes.items()):
+        params = dict(node.params)
+        touched = False
+        for (step, name), mapping in _RENAMED_VALUES.items():
+            if node.step != step or name not in params:
+                continue
+            new = mapping.get(str(params[name]))
+            if new is not None:
+                params[name] = new
+                touched = True
+        if touched:
+            nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
+                                    enabled=node.enabled)
+
+
 def _migrate_merged_cards(nodes: Dict[str, "RecipeNode"]) -> None:
     """把 F7-20 之前的卡片名與參數名換成合併後的（就地改寫 nodes）。
 
@@ -356,6 +388,8 @@ class Recipe:
         _migrate_also_apply(nodes, routes)
         # 再把合併掉的卡片名／參數名換過來（順序不可顛倒，見函式 docstring）。
         _migrate_merged_cards(nodes)
+        # 最後把改過名的**參數值**換掉（F8：兩層的 dark/bright → 排名）。
+        _migrate_renamed_values(nodes)
 
         return cls(
             recipe_id=str(d["recipe_id"]),

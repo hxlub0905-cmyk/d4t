@@ -462,6 +462,9 @@ class ImageView(QWidget):
         self._panning = False
         self._pan_start = QPointF()
         self._pan_offset = QPointF()
+        #: 疊在影像上的 ROI 框（正規化座標）。見 :meth:`set_overlay`。
+        self._overlay: List[Tuple[float, float, float, float]] = []
+        self._overlay_focus = -1
 
     # -- public API --------------------------------------------------------
     def set_image(self, arr: Optional[np.ndarray]) -> None:
@@ -557,6 +560,51 @@ class ImageView(QWidget):
         self.zoom_by(1 / 1.25)
 
     # -- transforms --------------------------------------------------------
+    def set_overlay(self, rects: Optional[Sequence[Sequence[float]]],
+                    focus: int = -1) -> None:
+        """把 ROI 框疊在影像上（**正規化**座標 ``(nx, ny, nw, nh)``）。
+
+        為什麼要疊在這裡而不是只有「跨顆檢視」那個視窗
+        ----------------------------------------------
+        定位卡的參數是**一邊拖一邊看**決定的（F7-8 那條：「先想好一個數字再
+        輸入」那個順序是反的）。框只出現在另一個要按鈕、要跑完一批才看得到的
+        視窗裡，等於把這件事變成「改一次、跑一次、再回來看」——
+        而敏感度這種參數要試十幾次。
+
+        座標用正規化的，所以縮放平移都跟著影像走，換一顆 patch 尺寸也不用重算。
+        ``focus`` 是要特別標出來的那一個（交會定位的 ``_center``：缺陷所在的
+        那一塊），畫成實線＋角標，其餘畫細線 —— 一堆一模一樣的框看不出哪個是
+        「這一顆」的。
+        """
+        self._overlay = [tuple(float(v) for v in r) for r in (rects or [])
+                         if r is not None and len(tuple(r)) == 4]
+        self._overlay_focus = int(focus)
+        self.update()
+
+    def overlay_count(self) -> int:
+        """現在疊了幾個框（測試與狀態列讀這個，不去讀畫素）。"""
+        return len(self._overlay)
+
+    def _paint_overlay(self, p: QPainter) -> None:
+        if self._pixmap is None or not self._overlay:
+            return
+        iw, ih = self._pixmap.width(), self._pixmap.height()
+        s = self._scale or 1.0
+        accent = QColor(TOKENS["accent"])
+        # 框在小 patch 上會很細，所以線寬不隨縮放變薄（**框是給人看的標記，
+        # 不是影像內容**）；但也不要粗到把 5px 的框整個蓋掉。
+        thin = QPen(accent, 1.0)
+        thin.setCosmetic(True)
+        thick = QPen(QColor(TOKENS["danger_text"]), 1.8)
+        thick.setCosmetic(True)
+        p.setBrush(Qt.NoBrush)
+        for i, (nx, ny, nw, nh) in enumerate(self._overlay):
+            r = QRectF(self._offset.x() + nx * iw * s,
+                       self._offset.y() + ny * ih * s,
+                       max(1.0, nw * iw * s), max(1.0, nh * ih * s))
+            p.setPen(thick if i == self._overlay_focus else thin)
+            p.drawRect(r)
+
     def _to_image(self, p: QPointF) -> QPointF:
         s = self._scale or 1.0
         return QPointF((p.x() - self._offset.x()) / s,
@@ -583,6 +631,8 @@ class ImageView(QWidget):
                         self._pixmap.width() * self._scale,
                         self._pixmap.height() * self._scale)
         p.drawPixmap(target, self._pixmap, QRectF(self._pixmap.rect()))
+        p.setRenderHint(QPainter.SmoothPixmapTransform, False)
+        self._paint_overlay(p)
         p.end()
 
     # -- interaction -------------------------------------------------------

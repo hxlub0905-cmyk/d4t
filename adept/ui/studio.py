@@ -68,7 +68,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
@@ -2535,6 +2535,53 @@ class StudioWindow(QMainWindow):
         if self.compare_check.isChecked():
             self.image_view_b.set_image(
                 self._preview_images.get(self.stream_combo_b.currentText()))
+        self._refresh_region_overlay()
+
+    def region_overlay(self) -> List[Tuple[float, float, float, float]]:
+        """**選著的那張卡**這一顆定出來的框（正規化座標，可能有好幾個）。
+
+        只畫選著那張卡自己宣告的區域（``resolve_regions_out``），不是 context
+        裡所有的框：一份 recipe 常常有好幾張 Region 卡，全部畫出來會變成一團
+        分不清誰是誰的線，而使用者現在在調的就是手上那一張。
+        """
+        node = self.model.nodes.get(self.selected_node or "")
+        ctx = getattr(getattr(self, "_last_result", None), "context", None)
+        if node is None or ctx is None:
+            return []
+        try:
+            names = list(get_step(node.step).resolve_regions_out(node.params))
+        except Exception:                  # noqa: BLE001 — 顯示用，不能擋畫面
+            return []
+        out: List[Tuple[float, float, float, float]] = []
+        for name in names:
+            # ``_center`` 是同一組框裡的一個，畫兩次只會變成粗一點的線。
+            # 它的角色由 focus 表達（見下面），不是多畫一個框。
+            if name.endswith("_center"):
+                continue
+            out.extend(tuple(float(v) for v in r)
+                       for r in ctx.roi_norm_rects(name))
+        return out
+
+    def _refresh_region_overlay(self) -> None:
+        """把框疊到預覽影像上。**每次預覽算完都會走這裡**，所以拖參數的時候
+        框是跟著動的 —— 那正是這種參數唯一調得動的方式（F7-8）。"""
+        boxes = self.region_overlay()
+        focus = self._focus_box_index(boxes)
+        for view in (self.image_view, self.image_view_b):
+            view.set_overlay(boxes, focus)
+
+    def _focus_box_index(self, boxes: Sequence[Sequence[float]]) -> int:
+        """哪一個框要畫成醒目的那一個 —— 離影像正中心最近的那個。
+
+        缺陷永遠在 patch 正中心（裁切方式保證的），所以那一塊就是「**這一顆**
+        發生了什麼」的所在。一堆一模一樣的框裡看不出哪個是它。
+        """
+        best, best_d = -1, None
+        for i, (nx, ny, nw, nh) in enumerate(boxes):
+            d = (nx + nw / 2.0 - 0.5) ** 2 + (ny + nh / 2.0 - 0.5) ** 2
+            if best_d is None or d < best_d:
+                best, best_d = i, d
+        return best
 
     def _on_stream_changed(self, text: str) -> None:
         if self._syncing:
