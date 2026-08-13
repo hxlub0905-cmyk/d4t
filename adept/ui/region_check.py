@@ -112,9 +112,12 @@ def check_regions(recipe: Any, items: Sequence[Any], kind: str, node_id: str,
         for name in wanted:
             if name not in names:
                 continue
-            nx, ny, nw, nh = ctx.require_roi(name).norm_rect
-            entry["boxes"].append((name, (
-                x0 + nx * tw, y0 + ny * th, max(1.0, nw * tw), max(1.0, nh * th))))
+            # **每一塊都要畫。** 一個名字底下可以有好幾個框（F8 的交會定位），
+            # 只畫第一個的話畫面會說謊：使用者看到一個框、實際上量的是八個。
+            for nx, ny, nw, nh in ctx.roi_norm_rects(name):
+                entry["boxes"].append((name, (
+                    x0 + nx * tw, y0 + ny * th,
+                    max(1.0, nw * tw), max(1.0, nh * th))))
 
         # ``locate_ok`` 是投影定位卡吐的旗標；沒有這個特徵的 Region 卡
         # （例如手畫的框）一律當成定位成功 —— 它本來就不需要定位。

@@ -1,0 +1,184 @@
+# F8 驗收（UI 那一半）：交會定位在畫面上看得懂、而且不說謊。
+"""兩件事：
+
+1. **儀表要兩條曲線。** 交會處是兩組條紋共同定義的，所以失敗也有兩種，
+   而且處置完全不同（調哪一組 sensitivity／pitch，還是這種 patch 本來就沒有
+   橫的條紋）。只給一條曲線或一個信心值，使用者只知道「失敗了」。
+2. **區域檢視要畫出每一個框。** 一個名字底下有八個框、畫面上只出現一個的話，
+   使用者會以為量的是那一塊 —— 而畫面上沒有任何東西透露這件事。
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from adept.core.pipeline import get_step  # noqa: E402
+from adept.core.pipeline.context import Context  # noqa: E402
+
+SIZE, MG_PITCH, EPI_PITCH = 128, 24, 34
+
+
+_TOOLS = str(Path(__file__).resolve().parent.parent / "tools")
+if _TOOLS not in sys.path:
+    sys.path.insert(0, _TOOLS)
+
+
+def _import_qt(g):
+    from PySide6.QtWidgets import QApplication
+
+    from adept.ui import inspectors as insp_mod
+    from adept.ui import region_check as rc_mod
+    from adept.ui import studio as studio_mod
+    from adept.ui import theme as theme_mod
+    g.update(QApplication=QApplication, insp_mod=insp_mod, rc_mod=rc_mod,
+             studio_mod=studio_mod, theme_mod=theme_mod)
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    _import_qt(globals())
+    app = QApplication.instance() or QApplication([])
+    theme_mod.apply_theme(app, "light")
+    yield app
+
+
+@pytest.fixture(scope="module")
+def lines_lot(tmp_path_factory):
+    """兩軸不同週期的線陣列 —— F8 要練的就是這種 layout。"""
+    from make_sample import generate
+
+    return generate(str(tmp_path_factory.mktemp("f8_lines")), n=6, seed=4,
+                    size=128, pitch=18, noise=4.0, pattern="lines")
+
+
+@pytest.fixture
+def cross_window(qapp, lines_lot):
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    win.load_dataset_path(lines_lot["klarf"], sync=True)
+    nid = win.model.add_step("roi_cross")
+    win.model.set_param(nid, "roi_out", "xing")
+    win.model.set_param(nid, "place", "beside_vertical")
+    win.select_node(nid)
+    yield win
+    win.close()
+
+
+def _img(ox: int = 0, epi_width: int = 14) -> np.ndarray:
+    rng = np.random.default_rng(0)
+    img = np.full((SIZE, SIZE), 90.0, np.float32)
+    if epi_width:
+        img[np.arange(SIZE) % EPI_PITCH < epi_width, :] = 170.0
+    img[:, (np.arange(SIZE) + ox) % MG_PITCH < 8] = 45.0
+    return img + rng.normal(0, 2.0, (SIZE, SIZE)).astype(np.float32)
+
+
+def _run(epi_width: int = 14) -> Context:
+    img = _img(epi_width=epi_width)
+    ctx = Context(images={"test": img.copy(), "ref": img.copy()})
+    get_step("roi_cross")().run(ctx, {
+        "source": "ref", "place": "beside_vertical", "box_size": 5.0,
+        "inset": 3.0, "roi_out": "xing",
+        "vertical_pitch": MG_PITCH, "horizontal_pitch": EPI_PITCH})
+    return ctx
+
+
+# --------------------------------------------------------------------------- #
+# 1. 儀表
+# --------------------------------------------------------------------------- #
+def test_the_inspector_is_registered_for_the_card(qapp):
+    """依 ``Step.key`` 註冊 —— 加一張卡不必動 UI，但**這張**卡需要它自己的儀表。"""
+    assert insp_mod.inspector_for("roi_cross") is insp_mod.CrossInspector
+
+
+def test_both_directions_get_their_own_curve(qapp):
+    """一條曲線答不出「該調哪一半」。"""
+    ctx = _run()
+    panel = insp_mod.CrossInspector()
+    panel.set_context("cross", {"roi_out": "xing"}, meta=ctx.meta)
+
+    assert panel.has_data() is True
+    assert panel.across.has_data() is True, "直的那組沒有曲線"
+    assert panel.down.has_data() is True, "橫的那組沒有曲線"
+    # 兩條曲線是**不同**的資料，不是同一條畫兩次
+    assert panel.across.summary() != panel.down.summary()
+
+
+def test_the_summary_says_how_many_boxes_and_what_pitch(qapp):
+    ctx = _run()
+    panel = insp_mod.CrossInspector()
+    panel.set_context("cross", {"roi_out": "xing"}, meta=ctx.meta)
+    text = panel.summary()
+    assert "boxes" in text and "pitch" in text
+    assert "%d boxes" % ctx.roi_count("xing") in text
+
+
+def test_a_failure_says_which_direction_had_nothing(qapp):
+    """使用者下一步要做什麼完全取決於是哪一邊。"""
+    ctx = _run(epi_width=0)          # 只有直的條紋
+    panel = insp_mod.CrossInspector()
+    panel.set_context("cross", {"roi_out": "xing"}, meta=ctx.meta)
+    text = panel.summary()
+    assert "not located" in text and "flat stripes" in text
+
+
+def test_the_curve_panel_shades_every_selected_stripe(qapp):
+    """``ProfilePanel`` 原本只塗**一段**（投影定位挑一段）。交會定位一整排都要
+    —— 只塗一段的話，面板會少講「這張卡其實用到了這一整排」。"""
+    ctx = _run()
+    panel = insp_mod.CrossInspector()
+    panel.set_context("cross", {"roi_out": "xing"}, meta=ctx.meta)
+    rec = ctx.meta["crossings"]["xing"]
+    assert len(rec["x"]["selected"]) > 2
+    # 摘要走的是 selected 那條路（講條紋數與 pitch，不是「挑了哪一段」）
+    assert "stripes" in panel.across.summary()
+
+    # 量畫素，而且跟**只塗一段**的同一個面板比 —— 比對照組不比絕對顏色，
+    # 這樣換主題、換 token 都不會讓這條測試變成假警報。
+    from adept.ui.widgets import ProfilePanel
+
+    data = dict(rec["x"])
+    # 三個對照：完全不塗（只有曲線）／塗一段／塗整排。減掉「只有曲線」那一份
+    # 才量得到**塗的面積本身** —— 曲線的畫素三種情況都有。
+    none = _shaded_columns(ProfilePanel(), dict(data, selected=[]))
+    one = _shaded_columns(ProfilePanel(), dict(data, selected=data["selected"][:1]))
+    many = _shaded_columns(ProfilePanel(), data)
+    assert one > none, "連一段都沒塗到"
+    assert (many - none) > (one - none) * 2, (
+        "整排只塗出 %d 欄，一段是 %d 欄（曲線本身佔 %d 欄）—— 沒有全部塗出來"
+        % (many - none, one - none, none))
+
+
+def _shaded_columns(panel, data) -> int:
+    """面板中間那一列上，有幾欄不是純底色（= 被塗到的寬度）。"""
+    from PySide6.QtGui import QColor, QImage
+
+    panel.set_data("x", data)
+    panel.resize(240, 120)
+    img = QImage(240, 120, QImage.Format_ARGB32)
+    img.fill(0)
+    panel.render(img)
+    bg = QColor(insp_mod.TOKENS["bg_surface"]).rgb()
+    return sum(1 for x in range(12, 228)
+               if QImage.pixelColor(img, x, 100).rgb() != bg)
+
+
+# --------------------------------------------------------------------------- #
+# 2. 區域檢視不能說謊
+# --------------------------------------------------------------------------- #
+def test_every_box_is_drawn_not_just_the_first(qapp, cross_window):
+    """畫面上出現一個框、實際上量了八個 —— 這種落差沒有任何提示。"""
+    win = cross_window
+    results = rc_mod.check_regions(win.model.to_recipe(), win._items()[:6],
+                                   win.model.kind, win.selected_node,
+                                   ["xing"], 120, "ref")
+    drawn = [r for r in results if r["located"] and r["boxes"]]
+    assert drawn, "這批應該定位得出來"
+    for r in drawn:
+        assert len(r["boxes"]) > 4, (
+            "只畫了 %d 個框 —— 多框區域被畫成一個了" % len(r["boxes"]))

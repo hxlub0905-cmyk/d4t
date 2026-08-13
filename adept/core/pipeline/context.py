@@ -113,11 +113,77 @@ class Context:
                 self.rois.remove_roi(roi.id)
         self.rois.add_roi(rect, label=name)
 
+    def set_roi_boxes(self, name: str, norm_rects: Any) -> None:
+        """一個名字對應**好幾個**框（同名覆寫；F8）。
+
+        為什麼一個名字可以有多個框
+        --------------------------
+        「MG 與 EPI 的交界」在一張 patch 上不只一處 —— 好幾根直線乘上好幾根
+        橫線，交會處自然是分散的好幾塊，而且**數量隨影像而異**（換一顆
+        defect、換一個 patch 尺寸就不一樣）。若讓卡片吐 ``cross_0`` …
+        ``cross_n``，recipe 就得寫死一個數量，而那個數量根本不存在。
+
+        所以「區域」升級成「一個名字 + 一組框」。單框只是 N=1 的情形，
+        既有的 ``set_roi`` 與所有量測卡完全不受影響。
+        """
+        from ..algo.roi import MultiROISet
+
+        name = str(name)
+        rects = [tuple(float(v) for v in r) for r in (norm_rects or ())]
+        for rect in rects:
+            if len(rect) != 4:
+                raise ContextError(
+                    f"set_roi_boxes('{name}') needs (nx, ny, nw, nh) per box, "
+                    f"got {rect!r}")
+        if self.rois is None:
+            self.rois = MultiROISet()
+        for roi in list(self.rois.rois):
+            if roi.label == name:
+                self.rois.remove_roi(roi.id)
+        for rect in rects:
+            self.rois.add_roi(rect, label=name)
+
     def roi_names(self) -> List[str]:
-        """目前定義了哪些 ROI 名字（依加入順序）。"""
+        """目前定義了哪些 ROI 名字（依加入順序，**不重複**）。
+
+        多框區域底下是好幾個同 label 的 ROI，但對使用者與 lint 來說那是
+        **一個**名字 —— 列成 ``['cross', 'cross', 'cross']`` 的訊息只會讓人
+        以為自己接錯了什麼。
+        """
         if self.rois is None:
             return []
-        return [r.label for r in self.rois.rois]
+        out: List[str] = []
+        for roi in self.rois.rois:
+            if roi.label not in out:
+                out.append(roi.label)
+        return out
+
+    def roi_count(self, name: str) -> int:
+        """這個名字底下有幾個框（0 = 沒定義）。"""
+        name = str(name)
+        if self.rois is None:
+            return 0
+        return sum(1 for roi in self.rois.rois if roi.label == name)
+
+    def roi_norm_rects(self, name: str) -> List[Any]:
+        """以名字取**所有**正規化矩形 ``[(nx, ny, nw, nh), …]``（不需要影像尺寸）。
+
+        畫框的地方要用這個而不是 ``require_roi(...).norm_rect`` —— 後者只回
+        第一個，於是多框區域在畫面上會少掉其餘每一塊。那不只是漏畫：
+        使用者看到一個框、實際上量的是八個，**而畫面上沒有任何東西透露這件事**。
+        """
+        name = str(name)
+        if self.rois is None:
+            return []
+        return [roi.norm_rect for roi in self.rois.rois if roi.label == name]
+
+    def roi_rects(self, name: str, shape: Any) -> List[Any]:
+        """以名字取**所有**像素矩形 ``[(x, y, w, h), …]``。"""
+        name = str(name)
+        self.require_roi(name)          # 不存在時給的是帶說明的錯誤
+        hw = tuple(shape)[:2]
+        return [roi.to_pixel_rect(hw)
+                for roi in self.rois.rois if roi.label == name]
 
     def require_roi(self, name: str) -> Any:
         """以名字取一個 ``NamedROI``；不存在時拋帶說明的 ContextError。"""

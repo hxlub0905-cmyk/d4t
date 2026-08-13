@@ -186,6 +186,18 @@ def roi_rect_or_none(ctx, step_key: str, image, roi_name):
         # 整張影像 —— 需要知道尺寸
         return None if shape is None else (0, 0, int(shape[1]), int(shape[0]))
     if name in ctx.roi_names():
+        # 多框區域（F8）拿不到「一個矩形」。**不要偷偷回第一個** —— 那會給出
+        # 一組看起來正常、實際上只描述了其中一塊的數字。要幾何的卡（量 CD、
+        # 量框本身）本來就該指名單一的框，而每張多框卡都會另外給一個
+        # ``<name>_center``（離 patch 中心最近的那一塊，也就是缺陷所在的那塊）。
+        if ctx.roi_count(name) > 1:
+            raise StepError(
+                step_key,
+                "region '%s' is %d separate boxes, and this card needs a "
+                "single one. Point it at '%s_center' (the box nearest the "
+                "middle of the patch, which is where the defect is), or use a "
+                "card that can measure across several boxes."
+                % (name, ctx.roi_count(name), name))
         # 具名 ROI 存的是正規化座標，一樣需要尺寸才展得開
         return None if shape is None else ctx.roi_rect(name, shape)
     if name == "blob":
@@ -215,6 +227,31 @@ def crop_to_roi(ctx, step_key: str, image, roi_name):
         return image
     x, y, w, h = rect
     return image[y:y + h, x:x + w]
+
+
+def roi_pixels(ctx, step_key: str, image, roi_name) -> np.ndarray:
+    """區域裡的**像素本身**（一維），多框就把每一塊接起來（F8）。
+
+    統計量（平均、標準差、百分位）只需要「有哪些像素」，不需要它們排成什麼
+    形狀 —— 所以分散的 N 個框對這類卡而言就是一個像素母體。這也讓
+    「這一組交界整體長什麼樣」問得出來，而那正是多框區域存在的理由。
+
+    單框與整張圖走同一條路（N=1），所以呼叫端不必先問「這個區域有幾塊」。
+    """
+    name = str(roi_name or "").strip()
+    arr = np.asarray(image)
+    if name and name in ctx.roi_names() and ctx.roi_count(name) > 1:
+        shape = arr.shape[:2]
+        parts = [arr[y:y + h, x:x + w].reshape(-1)
+                 for x, y, w, h in ctx.roi_rects(name, shape)
+                 if w > 0 and h > 0]
+        parts = [p for p in parts if p.size]
+        if not parts:
+            raise StepError(step_key,
+                            "region '%s' has boxes but none of them covers any "
+                            "pixel of this image." % name)
+        return np.concatenate(parts)
+    return np.asarray(crop_to_roi(ctx, step_key, image, name)).reshape(-1)
 
 
 def ensure_gray(arr: np.ndarray) -> np.ndarray:

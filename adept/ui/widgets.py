@@ -969,6 +969,20 @@ class ProfilePanel(QWidget):
         if not self.has_data():
             return ""
         d = self._data
+        if d.get("selected"):
+            # 交會定位：講的是「這個方向抓到幾根條紋、間距多少」——
+            # 而不是「挑了哪一段」，因為它一整排都要。
+            bits = ["%s · %d stripes" % (self._name, len(d["selected"]))]
+            pitch = float(d.get("pitch_used") or 0.0)
+            if pitch > 0:
+                bits.append("pitch %.1f px" % pitch)
+            filled = int(d.get("filled") or 0)
+            if filled:
+                # 這幾根影像上看不到，是靠已知 pitch 推出來的。框仍然對，
+                # 但「憑什麼對」換了一個依據 —— 使用者有權知道。
+                bits.append("%d filled in" % filled)
+            bits.append("confidence %.1f" % float(d.get("confidence", 0.0)))
+            return " · ".join(bits)
         picked = d.get("picked")
         where = ("none" if not picked
                  else "%d-%d px" % (int(picked[0]), int(picked[1])))
@@ -1006,12 +1020,18 @@ class ProfilePanel(QWidget):
         def to_y(v: float) -> float:
             return plot.bottom() - plot.height() * ((v - lo) / span)
 
-        # 選中的那一段：先畫底色，曲線才會壓在上面
-        picked = self._data.get("picked")
-        if picked:
-            x0, x1 = to_x(int(picked[0])), to_x(int(picked[1]))
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor(TOKENS["accent_bg"]))
+        # 選中的段：先畫底色，曲線才會壓在上面。
+        # ``picked`` 是一段（投影定位），``selected`` 是**好幾段**（交會定位
+        # 的那一組條紋）—— 兩者都畫得出來，因為只畫其中一段的話，面板就會
+        # 少講「這張卡其實用到了這一整排」。
+        shaded = self._data.get("selected")
+        if not shaded:
+            one = self._data.get("picked")
+            shaded = [one] if one else []
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(TOKENS["accent_bg"]))
+        for band in shaded:
+            x0, x1 = to_x(int(band[0])), to_x(int(band[1]))
             p.drawRect(QRectF(x0, plot.top(), max(1.0, x1 - x0), plot.height()))
 
         # 平滑前的曲線畫在後面當對照 —— 使用者才看得出平滑吃掉了多少

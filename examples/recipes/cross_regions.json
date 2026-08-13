@@ -1,0 +1,117 @@
+{
+  "recipe_id": "cross_regions",
+  "version": 1,
+  "author": "HX",
+  "description": "純規則的 ROI 定位：不需要 GDS、也不需要 Golden Cell 模板，只看 patch 自己。兩個方向各投影一次找出兩組條紋（直的 Metal Gate、橫的 EPI），交會處就是要量的地方 —— 一張 patch 上通常有好幾處，所以這張卡吐的是一組框。框貼著直線的兩側、落在橫線上，也就是「兩種材質的交界，量在另一種材質上」。定位在 ref 上做一次、兩張圖共用，所以 test − ref 的差只來自缺陷。分數同時看『交界處的差異』與『定位成不成功』——locate_ok 為 0 的那幾顆量的是整張圖，不該跟其他顆混在一起比。 門檻 40 只是這份合成資料上的示範值 —— 真正的門檻一定要在自己的站點上、用 Results 的直方圖挑。",
+  "routes": {
+    "ebi_patch": [
+      "load",
+      "norm_ref",
+      "norm",
+      "align",
+      "cross",
+      "sub",
+      "glv_cross",
+      "glv_cross_ref",
+      "glv_here"
+    ]
+  },
+  "nodes": {
+    "load": {
+      "step": "load_patch",
+      "params": {},
+      "enabled": true
+    },
+    "norm_ref": {
+      "step": "normalize",
+      "params": {
+        "streams": "ref",
+        "method": "percentile",
+        "range_from": "test"
+      },
+      "enabled": true
+    },
+    "norm": {
+      "step": "normalize",
+      "params": {
+        "streams": "test",
+        "method": "percentile"
+      },
+      "enabled": true
+    },
+    "align": {
+      "step": "align",
+      "params": {
+        "method": "phase",
+        "search_radius": 8
+      },
+      "enabled": true
+    },
+    "cross": {
+      "step": "roi_cross",
+      "params": {
+        "source": "ref",
+        "vertical_select": "dark",
+        "vertical_pitch": 0.0,
+        "vertical_sensitivity": 0.35,
+        "horizontal_select": "bright",
+        "horizontal_pitch": 0.0,
+        "horizontal_sensitivity": 0.35,
+        "smooth": 3,
+        "place": "beside_vertical",
+        "box_size": 5.0,
+        "side": "both",
+        "gap": 1.0,
+        "inset": 2.0,
+        "roi_out": "xing",
+        "max_boxes": 128,
+        "min_confidence": 5.0
+      },
+      "enabled": true
+    },
+    "sub": {
+      "step": "subtract",
+      "params": {},
+      "enabled": true
+    },
+    "glv_cross": {
+      "step": "glv_stats",
+      "params": {
+        "source": "diff",
+        "roi": "xing",
+        "metrics": "glv_max,glv_mean,glv_std",
+        "output_prefix": "xing"
+      },
+      "enabled": true
+    },
+    "glv_cross_ref": {
+      "step": "glv_stats",
+      "params": {
+        "source": "ref",
+        "roi": "xing",
+        "metrics": "glv_mean,glv_std",
+        "output_prefix": "xingref"
+      },
+      "enabled": true
+    },
+    "glv_here": {
+      "step": "glv_stats",
+      "params": {
+        "source": "diff",
+        "roi": "xing_center",
+        "metrics": "glv_max,glv_mean",
+        "output_prefix": "here"
+      },
+      "enabled": true
+    }
+  },
+  "edges": [],
+  "score": {
+    "expr": "locate_ok * max(here_glv_max, xing_glv_max)",
+    "threshold": 40.0,
+    "bins": {
+      "below": 0,
+      "above": 1
+    }
+  }
+}

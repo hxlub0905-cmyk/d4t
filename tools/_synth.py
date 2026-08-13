@@ -51,6 +51,31 @@ def pattern(size: int, pitch: int, off_x: int, off_y: int,
     return big[oy:oy + size, ox:ox + size].copy()
 
 
+def line_grid(size: int, x_pitch: int, x_width: int, y_pitch: int,
+              y_width: int, off_x: int, off_y: int,
+              base: float = 90.0, flat: float = 170.0,
+              upright: float = 45.0) -> np.ndarray:
+    """兩組**正交且週期不同**的條紋：直的線壓在橫的線上（F8）。
+
+    ``rounded_square_tile`` + :func:`pattern` 那條路是把一個**方形** tile 鋪開，
+    所以兩軸的週期一定相同。實際的 layout 不是那樣 —— 直的 Metal Gate 與橫的
+    EPI 各有各的 pitch，而「交會處在哪裡」正是這兩個週期共同決定的。
+
+    直的線畫在後面（金屬壓在磊晶上），所以交會處的灰階是直線的。
+    ``roi_cross`` 要框的就是**貼著直線、落在橫線上**的那一小條。
+
+    相位 ``off_x`` / ``off_y`` 逐顆不同 —— patch 是以缺陷為中心裁的，不是以
+    晶格為中心，所以這件事是這類資料的本質，不是為了讓測試好看。
+    """
+    n = int(size)
+    img = np.full((n, n), float(base), dtype=np.float32)
+    if int(y_width) > 0 and int(y_pitch) > 0:
+        img[(np.arange(n) + int(off_y)) % int(y_pitch) < int(y_width), :] = float(flat)
+    if int(x_width) > 0 and int(x_pitch) > 0:
+        img[:, (np.arange(n) + int(off_x)) % int(x_pitch) < int(x_width)] = float(upright)
+    return img
+
+
 def plant_anomaly(img: np.ndarray, kind: str, rng: np.random.Generator,
                   pitch: int) -> None:
     """在圖上就地種一個缺陷（靠近中心、振幅 >= 50）。"""

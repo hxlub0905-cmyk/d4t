@@ -44,7 +44,7 @@ from .theme import TOKENS
 
 __all__ = ["Inspector", "AlignInspector", "EnhanceInspector",
            "MeasureInspector", "InputInspector",
-           "ProfileInspector", "TemplateInspector",
+           "ProfileInspector", "CrossInspector", "TemplateInspector",
            "INSPECTORS", "inspector_for"]
 
 
@@ -564,6 +564,77 @@ class ProfileInspector(Inspector):
         pass
 
 
+class CrossInspector(Inspector):
+    """`roi_cross`：兩個方向各一條曲線，加上一行「這一顆到底拿到了什麼」。
+
+    為什麼要兩條曲線
+    ----------------
+    交會處是兩組條紋**共同**定義的，所以失敗也有兩種，而且處置完全不同：
+    直的那組沒抓到、還是橫的那組沒抓到。只給一條曲線（或只給一個信心值）的話，
+    使用者只知道「失敗了」，卻不知道該去調哪一半 —— 而這張卡有兩組
+    sensitivity / pitch。
+
+    畫的資料來自引擎那一次計算（``ctx.meta["crossings"]``），UI 不自己再算。
+    """
+
+    title = "Crossings"
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        from .widgets import ProfilePanel
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        self.across = ProfilePanel(self)
+        self.down = ProfilePanel(self)
+        for panel in (self.across, self.down):
+            panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            lay.addWidget(panel)
+
+    def region(self) -> str:
+        return str(self.params.get("roi_out") or "")
+
+    def record(self) -> Dict[str, Any]:
+        crossings = dict(self.meta.get("crossings") or {})
+        name = self.region()
+        return dict(crossings.get(name) or (
+            list(crossings.values())[0] if len(crossings) == 1 else {}))
+
+    def set_context(self, *a, **kw) -> None:   # noqa: D102
+        super().set_context(*a, **kw)
+        rec = self.record()
+        self.across.set_data("upright stripes", rec.get("x"))
+        self.down.set_data("flat stripes", rec.get("y"))
+
+    def has_data(self) -> bool:
+        return bool(self.record())
+
+    def empty_reason(self) -> str:
+        return "Run a trial to see the two curves this card locks onto."
+
+    def summary(self) -> str:
+        rec = self.record()
+        if not rec:
+            return ""
+        if not rec.get("ok"):
+            # 失敗的時候 reason 就是全部的資訊 —— 它已經講了是哪個方向。
+            return "not located — %s" % (rec.get("reason") or "unknown")
+        bits = ["%d boxes" % len(rec.get("boxes") or [])]
+        for tag, key in (("upright", "x"), ("flat", "y")):
+            s = dict(rec.get(key) or {})
+            bits.append("%s pitch %.1f px" % (tag, float(s.get("pitch_used", 0.0))))
+        filled = sum(int((rec.get(k) or {}).get("filled", 0)) for k in ("x", "y"))
+        if filled:
+            bits.append("%d stripe(s) filled in from the pitch you gave" % filled)
+        if rec.get("reason"):
+            bits.append(str(rec["reason"]))
+        return " · ".join(bits)
+
+    def paintEvent(self, _e) -> None:          # noqa: D102 - 內容由子元件畫
+        pass
+
+
 class TemplateInspector(Inspector):
     """`roi_template`：三道閘門各自過了沒，以及這張 patch 對到哪個相位。
 
@@ -979,6 +1050,7 @@ class InputInspector(Inspector):
 INSPECTORS: Dict[str, type] = {
     "load_patch": InputInspector,
     "roi_profile": ProfileInspector,
+    "roi_cross": CrossInspector,
     "roi_template": TemplateInspector,
     "align": AlignInspector,
     "tone": EnhanceInspector,

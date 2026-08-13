@@ -24,6 +24,7 @@ from . import arith          # subtract / invert
 from . import snr_map        # snr_map
 from . import blob           # blob_segment
 from . import region         # roi_define
+from . import roi_cross      # roi_cross
 from . import roi_profile    # roi_profile
 from . import roi_template   # roi_template
 from . import cd             # cd_measure
@@ -34,6 +35,6 @@ from . import golden         # cell_period / golden_cell
 
 __all__ = [
     "load", "normalize", "denoise", "tone", "flatten", "align", "arith",
-    "region", "roi_profile", "roi_template", "snr_map", "blob", "cd", "roi_snr", "quality", "glv_stats",
+    "region", "roi_cross", "roi_profile", "roi_template", "snr_map", "blob", "cd", "roi_snr", "quality", "glv_stats",
     "golden",
 ]
