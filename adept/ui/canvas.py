@@ -34,7 +34,14 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QPainter,
+    QPainterPath,
+    QPainterPathStroker,
+    QPen,
+)
 from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsScene,
@@ -67,11 +74,19 @@ _TILE = 32.0
 NODE_W, NODE_H = 190.0, 56.0
 COL_GAP, ROW_GAP = 96.0, 26.0
 _PORT_R = 5.0
+#: 埠的**命中**半徑（比畫出來的圓點大 —— 5px 的點用滑鼠瞄很痛苦）。
+#: ``out_port_at`` 與 ``_NodeItem.shape`` 都讀它：命中範圍只能有一個定義，
+#: 分成兩份遲早會對不起來，而「對不起來」的症狀是「點了沒反應」。
+_PORT_GRAB = _PORT_R * 3.0
 
 #: 連線中點的方向箭頭大小。畫布可以縮放平移，光看曲線不一定分得出資料往哪流。
 _ARROW = 5.0
 #: 線上那顆「斷開」× 的半徑（F7-22）。
 _CUT_R = 8.0
+
+#: 連線的 z 值。節點是 0，所以線平常畫在卡片**底下**（n8n 也是這樣，
+#: 卡片才是主角）；滑鼠移上來的那一條抬到卡片之上 —— 見 ``hoverEnterEvent``。
+_Z_EDGE, _Z_EDGE_IMPLICIT, _Z_EDGE_HOVER = -1.0, -2.0, 1.0
 
 #: 還沒拉線時，一列最多排幾張卡（見 :func:`layout_columns`）。
 WRAP = 4
@@ -165,6 +180,36 @@ class _NodeItem(QGraphicsItem):
                       NODE_W + 2 * _PORT_R + _PORT_LABEL_W,
                       NODE_H + 5)
 
+    def shape(self) -> QPainterPath:
+        """**點得到的範圍不是畫得到的範圍。**
+
+        ``QGraphicsItem`` 預設的 ``shape()`` 就是 ``boundingRect()``，
+        而上面那個 rect 是為了「畫得出去的東西要重繪得到」（埠標籤在節點右緣
+        之外）**刻意加寬**的 —— 加寬的代價是這張卡順便把右邊 56px 的空白
+        也一起**收成自己的滑鼠命中區**，而且那塊空白看起來完全是畫布。
+
+        那塊空白正是連線的家：兩欄相距 ``COL_GAP``（96px），而一條相鄰欄的
+        貝茲曲線中點落在 ``(a.x + b.x) / 2`` —— 也就是上游卡右緣往右 48px，
+        還在那 56px 裡面。線上那顆「斷開」的 ×（F7-22）就畫在中點上，
+        於是**每一條同列相鄰的線，它的 × 都被上游那張卡的隱形命中區蓋住**：
+
+        * hover 事件會**穿過**不收 hover 的圖元（卡片不收），所以 × 照樣畫得
+          出來 —— 使用者看得到它。
+        * 滑鼠**按下**不會穿過。z 值大的節點（0）贏過連線（-1），
+          於是那一下被卡片收走，變成「選取上游那張卡」。
+
+        看得到、按得到、然後什麼都沒發生。這是最難查的一種 —— 沒有錯誤訊息，
+        而且畫面上真的有東西動（另一張卡被選起來了）。
+
+        所以命中區自己講清楚：**卡片本體 + 兩側埠的抓取半徑**，不含標籤。
+        標籤是印出來給人讀的字，本來就不該是可以按的東西。
+        """
+        p = QPainterPath()
+        p.addRoundedRect(
+            QRectF(-_PORT_GRAB, -1.0, NODE_W + 2 * _PORT_GRAB, NODE_H + 2.0),
+            7, 7)
+        return p
+
     def in_port(self) -> QPointF:
         return self.scenePos() + self.in_port_local()
 
@@ -215,7 +260,7 @@ class _NodeItem(QGraphicsItem):
         """本地座標 ``pos`` 命中哪一個輸出埠（沒命中回 ``None``）。"""
         for i, local in enumerate(self.out_anchors_local()):
             d = pos - local
-            if (d.x() * d.x() + d.y() * d.y()) <= (_PORT_R * 3.0) ** 2:
+            if (d.x() * d.x() + d.y() * d.y()) <= _PORT_GRAB ** 2:
                 return i
         return None
 
@@ -424,7 +469,7 @@ class _EdgeItem(QGraphicsItem):
         self.implicit = bool(implicit)
         self._hover = False
         self.setFlag(QGraphicsItem.ItemIsSelectable, not self.implicit)
-        self.setZValue(-2.0 if self.implicit else -1.0)
+        self.setZValue(_Z_EDGE_IMPLICIT if self.implicit else _Z_EDGE)
         if not self.implicit:
             # 滑鼠移上來要出現「斷開」的 ×（F7-22）。隱含的虛線沒有這回事：
             # 它刪不掉（那條線來自卡片的排列順序，不是使用者拉的）。
@@ -439,21 +484,31 @@ class _EdgeItem(QGraphicsItem):
                             % (src.node_id, dst.node_id))
 
     # ---- 斷開鈕（F7-22）---------------------------------------------------
+    #: 斷開鈕的命中半徑。畫出來的圓是 ``_CUT_R``，多給 2px 是因為使用者瞄的是
+    #: 圓心不是圓周 —— 但 :meth:`shape` 必須用**同一個值**，見那裡的說明。
+    CUT_GRAB = _CUT_R + 2.0
+
     def cut_center(self) -> QPointF:
         """×（斷開鈕）的圓心 —— 線的中點。"""
         return self.path().pointAtPercent(0.5)
 
     def cut_hit(self, pos: QPointF) -> bool:
         d = pos - self.cut_center()
-        return (d.x() * d.x() + d.y() * d.y()) <= (_CUT_R + 2.0) ** 2
+        return (d.x() * d.x() + d.y() * d.y()) <= self.CUT_GRAB ** 2
 
     def hoverEnterEvent(self, e) -> None:       # noqa: D102 - Qt hook
         self._hover = True
+        # 提到節點之上（節點是 0）。滑鼠已經在這條線上了，這時候它就是使用者
+        # 正在瞄的東西 —— 而它平常畫在卡片底下，中點只要被任何一張卡蓋到，
+        # 那顆 × 就既看不見也按不到。抬起來之後「看得到的」與「按得到的」
+        # 恆等，不必再去推敲這條線的中點會落在誰身上。離開時放回去。
+        self.setZValue(_Z_EDGE_HOVER)
         self.update()
         super().hoverEnterEvent(e)
 
     def hoverLeaveEvent(self, e) -> None:       # noqa: D102 - Qt hook
         self._hover = False
+        self.setZValue(_Z_EDGE)
         self.update()
         super().hoverLeaveEvent(e)
 
@@ -508,10 +563,24 @@ class _EdgeItem(QGraphicsItem):
         return self.path().boundingRect().adjusted(-pad, -pad, pad, pad)
 
     def shape(self) -> QPainterPath:
-        stroker_pen = QPen(Qt.black, 10.0)
-        from PySide6.QtGui import QPainterPathStroker
-        st = QPainterPathStroker(stroker_pen)
-        return st.createStroke(self.path())
+        """線本身（加粗到 10px 好瞄）**加上斷開鈕那顆圓**。
+
+        少了那顆圓的話，畫出來的 × 有一圈是點不到的：stroke 只給線的兩側各
+        5px，而 × 的半徑是 ``_CUT_R``（8）、``cut_hit`` 更收到 ``CUT_GRAB``
+        （10）。差的那幾 px 不是邊角料 —— 它是那顆圓**四分之一以上的面積**，
+        而且滑鼠一走進去就離開了 shape，於是 hover 結束、× 當場消失，
+        按下去的是空的畫布。使用者的描述會是「有時候按得動，有時候按不動」。
+
+        所以這裡跟 ``cut_hit`` 讀同一個 ``CUT_GRAB``：**點得到的範圍與
+        判定命中的範圍是同一個定義**，不會再各自演化。
+        """
+        st = QPainterPathStroker(QPen(Qt.black, 10.0))
+        path = st.createStroke(self.path())
+        if not self.implicit:
+            disc = QPainterPath()
+            disc.addEllipse(self.cut_center(), self.CUT_GRAB, self.CUT_GRAB)
+            path = path.united(disc)
+        return path
 
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         p.setRenderHint(QPainter.Antialiasing, True)
