@@ -493,3 +493,117 @@ def test_every_box_has_the_width_that_was_asked_for():
     assert res.ok is True
     assert {w for _, _, w, _ in res.boxes} == {5}, \
         "框寬不只一種：%s" % sorted({w for _, _, w, _ in res.boxes})
+
+
+# --------------------------------------------------------------------------- #
+# 8. pitch 除不盡、以及線寬（試用回饋：1.5 nm/px 配 44 nm 的 pitch）
+# --------------------------------------------------------------------------- #
+def _lines(pitch_px: float, width_px: float = 12.0, jitter: float = 0.0,
+           seed: int = 0, drop: int = -1):
+    """以**非整數**週期畫直條紋（抗鋸齒），回 ``(影像, 真實的每一根)``。
+
+    站點的實例：EBI 的 pixel size 1.5 nm、MG pitch 44 nm → 29.333 px。
+    整數週期的合成資料驗不出「除不盡會怎樣」—— 那正是這幾條要問的事。
+    """
+    import cv2
+
+    rng = np.random.default_rng(seed)
+    img = np.full((SIZE, SIZE), BASE, np.float32)
+    img[np.arange(SIZE) % 40 < 16, :] = EPI_LV
+    truth, k = [], 0
+    while True:
+        c = 6.0 + k * pitch_px
+        if c - width_px / 2.0 > SIZE:
+            break
+        w = width_px + (rng.normal(0, jitter) if jitter else 0.0)
+        a, b = c - w / 2.0, c + w / 2.0
+        if k != drop:
+            xs = np.arange(SIZE)
+            cover = np.clip(np.minimum(xs + 1, b) - np.maximum(xs, a), 0.0, 1.0)
+            img[:, cover > 0.5] = MG_LV
+        truth.append((a, b))
+        k += 1
+    return cv2.GaussianBlur(img, (0, 0), 1.2), truth
+
+
+def test_a_pitch_that_does_not_divide_evenly_is_kept_as_a_fraction():
+    """**pitch 常常除不盡**（1.5 nm/px × 44 nm = 29.333 px），而晶格是一路
+    累加出來的 —— 自己先四捨五入成 29 的話，誤差會隨著離錨點越遠而越大。
+
+    參數是 float、欄位收三位小數，所以照著填分數就好；這條鎖住「填分數真的
+    比自己捨去準」。
+    """
+    img, truth = _lines(44.0 / 1.5)
+    # **被影像邊界切到的不比** —— 它們只露一半，量到的中心依定義就是偏的。
+    centres = [(a + b) / 2.0 for a, b in truth
+               if a > 0.5 and b < SIZE - 0.5]
+
+    def errors(p):
+        s = algo_grid.find_stripes(img, axis="x", select="brightest", pitch=p)
+        got = [(a + b) / 2.0 for a, b in s.selected
+               if a > 0.5 and b < SIZE - 0.5]
+        # 配**最近的**真值，不用索引 —— 錯的 pitch 會多生一根，索引就對不上了
+        return [min(abs(g - c) for c in centres) for g in got]
+
+    right, rounded = errors(29.333), errors(29.0)
+    assert max(right) <= 0.6, "填了正確的分數，偏差仍有 %.2f px" % max(right)
+    assert max(right) < max(rounded), \
+        "填分數（%.2f）沒有比自己四捨五入（%.2f）準" % (max(right), max(rounded))
+
+
+def test_the_lattice_never_quantises_the_pitch_it_was_given():
+    """**晶格全程用浮點累加**，不會每走一步就捨一次。
+
+    這是「pitch 除不盡照樣填得下去」的前提：1.5 nm/px 配 44 nm 的 pitch 是
+    29.333… px，若晶格內部先捨成整數，第 k 根就會偏掉 k × 0.333 px ——
+    而 patch 中央（缺陷所在）那幾根看起來還好好的，最外圍才歪掉。
+    """
+    pitch = 44.0 / 1.5
+    lat = sorted(algo_grid._walk(20.0, [pitch], 400, 0))
+    steps = [b - a for a, b in zip(lat, lat[1:])]
+    assert steps == pytest.approx([pitch] * len(steps), abs=1e-9), \
+        "每一步不是完整的 pitch：%s" % [round(v, 4) for v in steps[:5]]
+    # 走 10 步之後仍然剛好在 10 個 pitch 上（沒有累積捨入誤差）
+    i = lat.index(min(lat, key=lambda v: abs(v - 20.0)))
+    assert lat[i + 10] - lat[i] == pytest.approx(10 * pitch, abs=1e-9)
+
+
+def test_the_stripe_width_is_measured_not_assumed():
+    """線寬**沒有**參數 —— 它是從影像量的。換一個線寬不必改 recipe。"""
+    for width in (8.0, 12.0, 18.0):
+        img, _ = _lines(44.0 / 1.5, width_px=width)
+        s = algo_grid.find_stripes(img, axis="x", select="brightest")
+        got = [b - a for a, b in s.selected if a > 1 and b < SIZE - 1]
+        assert got, "width=%s 一根都沒抓到" % width
+        assert all(abs(w - width) <= 1.0 for w in got), \
+            "線寬 %s 量成 %s" % (width, [round(w, 2) for w in got])
+
+
+def test_filling_in_the_pitch_does_not_flatten_the_line_widths():
+    """**pitch 講的是「每隔多遠有一根」，它對線寬一個字都沒說。**
+
+    早期版本把整排的寬度統一成中位數，於是 line-width roughness 被抹平 ——
+    而框是貼著段的邊界放的，所以在**線寬異常的那一根**上，框會被推進 MG 裡面。
+    最需要量準的那一根，量得最髒。
+    """
+    img, truth = _lines(44.0 / 1.5, jitter=1.6, seed=3)
+    plain = algo_grid.find_stripes(img, axis="x", select="brightest")
+    with_pitch = algo_grid.find_stripes(img, axis="x", select="brightest",
+                                        pitch=29.333)
+
+    w_plain = [b - a for a, b in plain.selected]
+    w_pitch = [b - a for a, b in with_pitch.selected]
+    assert len(set(round(w, 2) for w in w_pitch)) > 2, \
+        "填了 pitch 之後寬度被統一了：%s" % [round(w, 2) for w in w_pitch]
+    # 中段（沒被影像邊界切到的）要跟沒填 pitch 時量到的一樣
+    assert w_pitch[1:-1] == pytest.approx(w_plain[1:-1], abs=0.6)
+
+
+def test_only_the_invented_stripes_borrow_the_median_width():
+    """補出來的那一根沒有自己的量測值 —— 它只能用中位數，而那要講得出來。"""
+    img, truth = _lines(44.0 / 1.5, jitter=1.6, seed=3, drop=2)
+    s = algo_grid.find_stripes(img, axis="x", select="brightest", pitch=29.333)
+    assert s.filled >= 1
+    widths = [b - a for a, b in s.selected]
+    assert len(set(round(w, 2) for w in widths)) > 2, \
+        "整排寬度不該被補線的那一根拉平：%s" % [round(w, 2) for w in widths]

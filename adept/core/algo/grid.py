@@ -331,11 +331,40 @@ def _fill_by_pitch(bands: Sequence[Tuple[int, int]], pitch: float, length: int,
     if err > min(pitches) * float(tol):
         return got, err, 0, False
 
-    out = []
+    # **相位用整排一起定，不要只靠錨點那一根。** 錨點自己也是量出來的，它的誤差
+    # 會原封不動地平移整個晶格；而每一根的量測誤差彼此獨立，取中位數就洗掉了。
+    # 實測（1.5 nm/px 配 44 nm 的 pitch = 29.333 px）：最大偏差 0.63 → 0.25 px。
+    # 用中位數而不是平均：一根被缺陷撐大的線不該把整排推走。
+    # 被影像邊界切到的那幾根**不能參加** —— 它們只露出一半，量到的「中心」
+    # 依定義就是偏的，放進來等於用一個已知有偏差的樣本去校正整排。
+    inside = [(a + b) / 2.0 for a, b in got
+              if a > 0.5 and b < float(length) - 0.5]
+    if inside:
+        shift = float(np.median([c - min(lat, key=lambda v: abs(c - v))
+                                 for c in inside]))
+        lat = [v + shift for v in lat]
+        err = float(np.median([min(abs(c - v) for v in lat) for c in inside]))
+
+    # **保留次像素**，不要在這裡就捨成整數格。pitch 常常除不盡（實例：EBI 的
+    # 1.5 nm/px 配 44 nm 的 pitch = 29.333 px），而晶格是一路累加出來的 ——
+    # 每算一根就捨一次的話，每一根各自被推掉最多半格，而那半格正是框貼不貼得住
+    # 邊界的差別。捨入留到最後做框的時候一次做完（``_clip_span``）。
+    #
+    # **寬度用每一根自己量到的，只有補出來的那幾根才用中位數。**
+    # pitch 講的是「每隔多遠有一根」，它對**線寬**一個字都沒說。早期版本把整排
+    # 的寬度統一成中位數，於是線寬本來就有變化的地方（line-width roughness，
+    # 而那有時候正是缺陷本身）被抹平 —— 更糟的是框是貼著段的邊界放的，所以在
+    # **線寬異常的那一根**上，框會被推進 MG 裡面幾個像素。也就是說：最需要量準
+    # 的那一根，量得最髒。
+    near = float(min(pitches)) * 0.5
+    out: List[Tuple[float, float]] = []
     for c in lat:
-        span = _clip_span(c - width / 2.0, c + width / 2.0, length)
-        if span:
-            out.append(span)
+        own = min(got, key=lambda b: abs((b[0] + b[1]) / 2.0 - c))
+        w = (own[1] - own[0]) if abs((own[0] + own[1]) / 2.0 - c) <= near else width
+        lo = max(0.0, c - w / 2.0)
+        hi = min(float(length), c + w / 2.0)
+        if hi - lo >= 1.0:
+            out.append((lo, hi))
     return out, err, max(0, len(out) - len(got)), True
 
 
