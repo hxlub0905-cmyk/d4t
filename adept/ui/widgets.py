@@ -1001,9 +1001,12 @@ class ProfilePanel(QWidget):
         self._name = ""
         self.setMinimumHeight(96)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setToolTip("Gray level projected along the scan direction. "
-                        "Vertical lines are the boundaries that were found; "
-                        "the shaded section is the region this card produces.")
+        self.setToolTip(
+            "Gray level projected along the scan direction. Vertical lines are "
+            "the boundaries that were found; the shaded sections are the "
+            "stripes this card uses. The dashed line marked 'defect' is the "
+            "middle of the patch, which is where the tool put the defect - it "
+            "is a marker, not something you set.")
 
     # -- public ------------------------------------------------------------
     def set_data(self, name: str, data: Optional[Dict[str, Any]]) -> None:
@@ -1099,10 +1102,18 @@ class ProfilePanel(QWidget):
             path.lineTo(QPointF(to_x(i), to_y(prof[i])))
         p.drawPath(path)
 
-        # 中心線 = 缺陷的位置（patch 是以缺陷為中心裁的）
+        # 中心線 = 缺陷的位置（patch 是以缺陷為中心裁的）。
+        # **標上字**：它是一條參考線不是一個控制項，而使用者問過「這條線我是
+        # 可以做操作的嗎」—— 一條沒有說明的虛線看起來就像可以拖的東西。
         p.setPen(QPen(QColor(TOKENS["text_secondary"]), 1.0, Qt.DashLine))
         cx = to_x((n - 1) / 2.0)
         p.drawLine(QPointF(cx, plot.top()), QPointF(cx, plot.bottom()))
+        f = p.font()
+        f.setPointSizeF(max(6.0, f.pointSizeF() - 2.0))
+        p.setFont(f)
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        p.drawText(QRectF(cx + 3, plot.bottom() - 12, 64, 11),
+                   Qt.AlignLeft | Qt.AlignVCenter, "defect")
 
         p.setPen(QPen(QColor(TOKENS["accent"]), 1.4))
         for t in (self._data.get("transitions") or []):
@@ -1289,6 +1300,11 @@ class ParamForm(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._rows: Dict[str, _ParamRow] = {}
+        #: 小標題：``section 名 -> [QLabel]`` 與 ``參數名 -> section 名``。
+        #: 整組都被 ``show_when`` 藏起來時，標題也要跟著不見 —— 一個底下什麼
+        #: 都沒有的標題比沒有標題更讓人以為畫面壞了。
+        self._sections: Dict[str, List[QWidget]] = {}
+        self._section_of: Dict[str, str] = {}
         #: 目前這張卡每個參數的值 —— ``show_when`` 要靠它判斷哪幾列該在。
         self._values: Dict[str, Any] = {}
         self._describe: Optional[Dict[str, Any]] = None
@@ -1348,8 +1364,19 @@ class ParamForm(QWidget):
             self._step_help.setVisible(bool(describe.get("help")))
             self._placeholder.setVisible(False)
             self._values = {}
+            section = None
             for spec in describe.get("params", []):
                 name = str(spec.get("name", ""))
+                # 小標題：換組的時候插一行（F8 第三輪）。參數清單的**順序**就是
+                # 分組，所以卡片作者不必額外宣告什麼 —— 把同一組的排在一起就好。
+                want = str(spec.get("section", "") or "")
+                if want != section:
+                    section = want
+                    if want:
+                        head = QLabel(want, self._host)
+                        head.setObjectName("paramSection")
+                        self._form.insertWidget(self._form.count() - 1, head)
+                        self._sections.setdefault(want, []).append(head)
                 value = current_params.get(name, spec.get("default"))
                 self._values[name] = value
                 editor = self._make_editor(spec, value, streams)
@@ -1357,6 +1384,8 @@ class ParamForm(QWidget):
                 row = _ParamRow(spec, editor, self._host)
                 self._form.insertWidget(self._form.count() - 1, row)
                 self._rows[name] = row
+                if want:
+                    self._section_of[name] = want
         finally:
             self._building = False
         self._sync_visible_rows()
@@ -1385,6 +1414,16 @@ class ParamForm(QWidget):
 
     def step_key(self) -> Optional[str]:
         return None if not self._describe else str(self._describe.get("key"))
+
+    def section_names(self) -> List[str]:
+        """這張卡分了哪幾組小標題（依出現順序）。"""
+        return list(self._sections)
+
+    def section_visible(self, name: str) -> bool:
+        """某一組的標題現在看不看得到（**追明確狀態**，不問 ``isVisible()`` ——
+        視窗還沒 show 之前那個恆為 False，見 CLAUDE.md §7）。"""
+        heads = self._sections.get(str(name)) or []
+        return bool(heads) and all(not h.isHidden() for h in heads)
 
     def param_names(self) -> List[str]:
         return list(self._rows)
@@ -1429,6 +1468,12 @@ class ParamForm(QWidget):
             row.setParent(None)
             row.deleteLater()
         self._rows = {}
+        for heads in self._sections.values():
+            for head in heads:
+                self._form.removeWidget(head)
+                head.setParent(None)
+                head.deleteLater()
+        self._sections, self._section_of = {}, {}
 
     def _emit(self, name: str, value: Any) -> None:
         if self._building:
@@ -1452,6 +1497,17 @@ class ParamForm(QWidget):
                 continue
             ctrl, values = str(spec[0]), [str(v) for v in spec[1]]
             row.setVisible(str(self._values.get(ctrl, "")) in values)
+
+        # 整組都藏起來時標題也要不見 —— 一個底下什麼都沒有的標題，
+        # 比沒有標題更讓人以為畫面壞了。
+        alive = {}
+        for name, row in self._rows.items():
+            sec = self._section_of.get(name)
+            if sec:
+                alive[sec] = alive.get(sec, False) or row.isVisibleTo(self)
+        for sec, heads in self._sections.items():
+            for head in heads:
+                head.setVisible(alive.get(sec, True))
 
     def _make_editor(self, spec: Dict[str, Any], value: Any,
                      streams: Sequence[str]) -> QWidget:

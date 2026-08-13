@@ -310,9 +310,10 @@ def test_two_materials_in_one_direction_are_told_apart_by_rank():
     assert top.selected and second.selected
     assert not set(top.selected) & set(second.selected), "兩組挑到同一批條紋"
 
+    # 段的邊界是**次像素**的（見 algo_grid.refine_edges），所以要切陣列得先取整
     prof = top.profile
-    hi = np.mean([prof[a:b].mean() for a, b in top.selected])
-    mid = np.mean([prof[a:b].mean() for a, b in second.selected])
+    hi = np.mean([prof[int(a):int(b) + 1].mean() for a, b in top.selected])
+    mid = np.mean([prof[int(a):int(b) + 1].mean() for a, b in second.selected])
     assert hi > mid + 8, "第二亮的那組沒有比最亮的暗（%.1f vs %.1f）" % (hi, mid)
 
 
@@ -333,7 +334,10 @@ def test_the_rank_is_relative_so_a_gain_change_does_not_break_it():
     a = algo_grid.find_stripes(img, axis="x", select="second_brightest")
     b = algo_grid.find_stripes(img * 0.75 + 20.0, axis="x",
                                select="second_brightest")
-    assert a.selected == b.selected
+    # 次像素邊界比到小數點後幾位沒有意義（灰階換算會動到最後幾個 bit）——
+    # 要問的是「挑到的是不是同一批條紋」。
+    assert ([(round(x), round(y)) for x, y in a.selected]
+            == [(round(x), round(y)) for x, y in b.selected])
 
 
 # --------------------------------------------------------------------------- #
@@ -426,3 +430,66 @@ def test_an_old_recipe_still_loads_after_the_rank_rename():
     r = Recipe.load(path)
     assert r.nodes["x"].params["vertical_select"] == "darkest"
     assert r.nodes["x"].params["horizontal_select"] == "brightest"
+
+
+# --------------------------------------------------------------------------- #
+# 7. 框不可以左右歪（試用回饋：「Box 目前好像左右會歪歪的」）
+# --------------------------------------------------------------------------- #
+def _blurred_mg(ox: int = 3) -> np.ndarray:
+    """邊界糊掉的版本 —— 真實 SEM 的邊界佔好幾個像素，而**這個 bug 只在糊的
+    邊界上出現**（銳利的階梯剛好沒有平台）。"""
+    import cv2
+
+    img = _mg_epi(ox=ox, noise=0.0)
+    return cv2.GaussianBlur(img, (0, 0), 1.2)
+
+
+def test_the_two_boxes_beside_a_stripe_are_the_same_distance_from_it():
+    """**這是使用者回報的「左右歪歪的」。**
+
+    ``|梯度|`` 的峰通常是 2 格寬的平台，而挑局部極大的規則左右不對稱
+    （``> 左鄰`` 但 ``>= 右鄰``），於是同一根條紋的兩條邊各挑到平台的不同側 ——
+    段往一邊胖一格，貼在兩側的框就一邊有縫一邊沒縫。
+
+    兩個框量的是同一種材質，所以**數字上完全看不出來**，只有畫面上看得出來。
+    """
+    img = _blurred_mg()
+    s = algo_grid.find_stripes(img, axis="x", select="brightest")
+    spans = sorted(algo_grid._edge_spans(s.selected, 5.0, "both", 1.0, SIZE))
+
+    checked = 0
+    for a, b in s.selected:
+        if a <= 0 or b >= SIZE - 1:
+            continue                      # 邊緣被切掉的不算
+        left = [t for t in spans if t[1] <= a]
+        right = [t for t in spans if t[0] >= b]
+        if not left or not right:
+            continue
+        gap_l = a - max(left, key=lambda t: t[1])[1]
+        gap_r = min(right, key=lambda t: t[0])[0] - b
+        assert abs(gap_l - gap_r) < 0.01, (
+            "條紋 [%.1f, %.1f) 左縫 %.2f 右縫 %.2f —— 框歪了"
+            % (a, b, gap_l, gap_r))
+        checked += 1
+    assert checked >= 3, "這條測試沒有真的檢查到幾根條紋"
+
+
+def test_the_stripe_width_survives_the_edge_detection():
+    """段寬要等於真實的條紋寬。差一格不會報錯，但它就是上一條那個歪掉的來源。"""
+    s = algo_grid.find_stripes(_blurred_mg(), axis="x", select="brightest")
+    widths = [b - a for a, b in s.selected if a > 0 and b < SIZE - 1]
+    assert widths
+    for w in widths:
+        assert abs(w - MG_W) < 0.6, "段寬 %.2f，真值 %d" % (w, MG_W)
+
+
+def test_every_box_has_the_width_that_was_asked_for():
+    """切到影像邊緣而窄掉的框要**丟掉**，不是留一個比較短的。
+
+    那幾個框的意義是「同一種東西的同一種取樣」；一個只有六成寬的殘框戴著同一個
+    名字進 mask，統計上是稀釋、畫面上是那一排裡突然有一個比較短。
+    """
+    res = _locate(_blurred_mg(), box_size=5, gap=1)
+    assert res.ok is True
+    assert {w for _, _, w, _ in res.boxes} == {5}, \
+        "框寬不只一種：%s" % sorted({w for _, _, w, _ in res.boxes})

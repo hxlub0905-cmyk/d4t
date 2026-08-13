@@ -250,3 +250,63 @@ def test_only_the_selected_card_draws_its_boxes(qapp, cross_window):
                      if win.model.nodes[n].step == "roi_cross"][0])
     win.refresh_preview(sync=True)
     assert len(win.region_overlay()) > 4
+
+
+# --------------------------------------------------------------------------- #
+# 4. 參數表要看得出結構（試用回饋：「UI 有點亂，有些我不知道是什麼功能」）
+# --------------------------------------------------------------------------- #
+def test_the_parameters_are_grouped_under_headings(qapp, cross_window):
+    """19 個參數攤成一排時，每一列看起來都同等重要、同等神秘 —— 而它們其實在
+    回答**三個不同的問題**（直的條紋在哪、橫的條紋在哪、框放在交會處的哪裡）。
+
+    ``show_when`` 解的是「這一列現在算不算數」，這個解的是「這一列在回答哪個
+    問題」，兩者不能互相取代。
+    """
+    form = cross_window.param_form
+    assert form.step_key() == "roi_cross"
+    assert len(form.section_names()) >= 4, \
+        "參數沒有分組：%s" % (form.section_names(),)
+
+    # 每一個參數都要屬於某一組 —— 漏掉的那幾個會浮在最上面，看起來像是別組的
+    from adept.core.pipeline import get_step
+    for spec in get_step("roi_cross").describe()["params"]:
+        assert spec["section"], "參數 '%s' 沒有分組" % spec["name"]
+
+
+def test_the_shared_smoothing_is_not_filed_under_one_direction(qapp):
+    """``smooth`` 兩個方向共用 —— 掛在「橫的條紋」底下會讓人以為只影響那一邊。"""
+    from adept.core.pipeline import get_step
+
+    specs = {s["name"]: s for s in get_step("roi_cross").describe()["params"]}
+    assert specs["smooth"]["section"] == specs["source"]["section"]
+    assert specs["smooth"]["section"] != specs["horizontal_select"]["section"]
+    assert "both" in specs["smooth"]["label"].lower()
+
+
+def test_a_heading_with_nothing_under_it_disappears(qapp, cross_window):
+    """``show_when`` 把一整組藏起來時標題也要不見 —— 一個底下什麼都沒有的標題，
+    比沒有標題更讓人以為畫面壞了。"""
+    form = cross_window.param_form
+    nid = cross_window.selected_node
+
+    # box_size / side 只在 beside_* 時出現；換成 crossing 之後那兩列消失，
+    # 但它們那一組還有 gap / inset，所以標題要留著。
+    cross_window.model.set_param(nid, "place", "crossing")
+    cross_window.select_node(nid)
+    assert form.section_visible("4 · Where the box goes") is True
+
+    # 而完全沒有可見成員的組要收起來（用一張只有 show_when 參數的假卡驗）
+    fake = {"key": "fake", "label": "Fake", "help": "",
+            "params": [
+                {"name": "m", "type": "choice", "default": "a",
+                 "choices": ["a", "b"], "help": "h", "label": "m",
+                 "min": None, "max": None, "unit": "", "pattern": None,
+                 "show_when": None, "section": "Always"},
+                {"name": "x", "type": "int", "default": 1, "help": "h",
+                 "label": "x", "min": 0, "max": 9, "unit": "", "pattern": None,
+                 "show_when": ["m", ["b"]], "section": "Only for b"},
+            ]}
+    form.set_step(fake, {"m": "a"}, [])
+    assert form.section_visible("Only for b") is False
+    form.set_step(fake, {"m": "b"}, [])
+    assert form.section_visible("Only for b") is True

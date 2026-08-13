@@ -35,6 +35,13 @@ from ._util import (
 _BESIDE = ("beside_vertical", "beside_horizontal")
 
 
+def _prefix_in_section() -> ParamSpec:
+    """``output_prefix`` 是共用的那一顆，只差要掛在哪一個小標題底下。"""
+    spec = output_prefix_spec("cross")
+    spec.section = "5 · Name and limits"
+    return spec
+
+
 def _norm(rect, shape) -> tuple:
     """像素矩形 → 正規化 (nx, ny, nw, nh)。"""
     h, w = float(shape[0]), float(shape[1])
@@ -57,6 +64,7 @@ class RoiCrossStep(Step):
     params = [
         ParamSpec(
             name="source", type="image_key", default="ref",
+            section="1 · Which image",
             label="Find the pattern in",
             help=("Which image stream to look for the pattern in. Use ref: it "
                   "has no defect on it, so nothing interferes with the search, "
@@ -66,9 +74,19 @@ class RoiCrossStep(Step):
                   "then the difference between them is no longer only the "
                   "defect."),
         ),
+        ParamSpec(
+            name="smooth", type="int", default=3, min=1, max=99, unit="px",
+            section="1 · Which image",
+            label="Curve smoothing (both directions)",
+            help=("Smooth both curves before looking for edges. Too little and "
+                  "image noise becomes false edges; too much and real edges "
+                  "get rounded away. This one is shared - it is about how the "
+                  "image is read, not about either set of stripes."),
+        ),
         # ---- 直的那組條紋 -------------------------------------------------
         ParamSpec(
             name="vertical_select", type="choice", default="brightest",
+            section="2 · The up-and-down stripes",
             choices=list(algo_grid.SELECT_RULES),
             label="Take the up-and-down stripes that are",
             help=("Which of the up-and-down stripes to use, by rank: brightest "
@@ -82,6 +100,7 @@ class RoiCrossStep(Step):
         ),
         ParamSpec(
             name="vertical_pitch", type="float", default=0.0, min=0.0,
+            section="2 · The up-and-down stripes",
             max=10000.0, unit="px", label="Upright stripe pitch",
             help=("How far apart the up-and-down stripes are, in pixels. Leave "
                   "0 to measure it from the image. Filling it in (you know it "
@@ -91,6 +110,7 @@ class RoiCrossStep(Step):
         ),
         ParamSpec(
             name="vertical_pitch_2", type="float", default=0.0, min=0.0,
+            section="2 · The up-and-down stripes",
             max=10000.0, unit="px", label="…and every other one is",
             help=("Only when the spacing alternates between two values - put "
                   "the second spacing here and leave it 0 otherwise. Some "
@@ -99,6 +119,7 @@ class RoiCrossStep(Step):
         ),
         ParamSpec(
             name="vertical_sensitivity", type="float", default=0.35, min=0.0,
+            section="2 · The up-and-down stripes",
             max=1.0, label="Upright edge sensitivity",
             help=("How steep a change counts as the edge of an up-and-down "
                   "stripe, compared with the steepest change in this image. "
@@ -108,37 +129,35 @@ class RoiCrossStep(Step):
         # ---- 橫的那組條紋 -------------------------------------------------
         ParamSpec(
             name="horizontal_select", type="choice", default="brightest",
+            section="3 · The left-to-right stripes",
             choices=list(algo_grid.SELECT_RULES),
             label="Take the left-to-right stripes that are",
             help="Same as above, for the stripes that run left to right.",
         ),
         ParamSpec(
             name="horizontal_pitch", type="float", default=0.0, min=0.0,
+            section="3 · The left-to-right stripes",
             max=10000.0, unit="px", label="Flat stripe pitch",
             help=("How far apart the left-to-right stripes are, in pixels. "
                   "Leave 0 to measure it from the image."),
         ),
         ParamSpec(
             name="horizontal_pitch_2", type="float", default=0.0, min=0.0,
+            section="3 · The left-to-right stripes",
             max=10000.0, unit="px", label="…and every other one is",
             help=("Only when the spacing alternates between two values - put "
                   "the second spacing here and leave it 0 otherwise."),
         ),
         ParamSpec(
             name="horizontal_sensitivity", type="float", default=0.35, min=0.0,
+            section="3 · The left-to-right stripes",
             max=1.0, label="Flat edge sensitivity",
             help="Same as above, for the stripes that run left to right.",
-        ),
-        ParamSpec(
-            name="smooth", type="int", default=3, min=1, max=99, unit="px",
-            label="Curve smoothing",
-            help=("Smooth both curves before looking for edges. Too little and "
-                  "image noise becomes false edges; too much and real edges "
-                  "get rounded away."),
         ),
         # ---- 框放哪 --------------------------------------------------------
         ParamSpec(
             name="place", type="choice", default="beside_vertical",
+            section="4 · Where the box goes",
             choices=list(algo_grid.PLACEMENTS), label="Put the box",
             help=("crossing = the whole overlap, which contains both "
                   "materials; beside_vertical = a thin box hugging the side of "
@@ -150,6 +169,7 @@ class RoiCrossStep(Step):
         ),
         ParamSpec(
             name="box_size", type="float", default=5.0, min=1.0, max=1000.0,
+            section="4 · Where the box goes",
             unit="px", label="Box thickness",
             show_when=("place", _BESIDE),
             help=("How thick the box beside the stripe is. Thicker averages "
@@ -158,6 +178,7 @@ class RoiCrossStep(Step):
         ),
         ParamSpec(
             name="side", type="choice", default="both",
+            section="4 · Where the box goes",
             choices=list(algo_grid.SIDES), label="Which side",
             show_when=("place", _BESIDE),
             help=("both = a box on each side of every stripe; start = only the "
@@ -165,6 +186,7 @@ class RoiCrossStep(Step):
         ),
         ParamSpec(
             name="gap", type="float", default=1.0, min=0.0, max=100.0,
+            section="4 · Where the box goes",
             unit="px", label="Keep clear of the edge",
             help=("How far to stay away from the edge itself. An edge is "
                   "blurred over a few pixels and the gray level there belongs "
@@ -175,6 +197,7 @@ class RoiCrossStep(Step):
         ),
         ParamSpec(
             name="inset", type="float", default=2.0, min=0.0, max=100.0,
+            section="4 · Where the box goes",
             unit="px", label="Keep clear of the other stripes",
             help=("How far to stay inside the stripe that limits the length of "
                   "the box. A box touching both kinds of edge cannot tell you "
@@ -183,6 +206,7 @@ class RoiCrossStep(Step):
         # ---- 產出 ----------------------------------------------------------
         ParamSpec(
             name="roi_out", type="str", default="cross",
+            section="5 · Name and limits",
             label="Name this region", pattern=FEATURE_PREFIX_PATTERN,
             pattern_help=("use letters, digits and underscores only, and do "
                           "not start with a digit"),
@@ -194,6 +218,7 @@ class RoiCrossStep(Step):
         ),
         ParamSpec(
             name="max_boxes", type="int", default=64, min=1, max=4096,
+            section="5 · Name and limits",
             label="At most this many boxes",
             help=("A guard for images with very fine patterns. The boxes "
                   "nearest the middle are kept, because that is where the "
@@ -201,6 +226,7 @@ class RoiCrossStep(Step):
         ),
         ParamSpec(
             name="min_confidence", type="float", default=5.0, min=0.0,
+            section="5 · Name and limits",
             max=200.0, label="Give up below",
             help=("How much of each curve must be real signal rather than "
                   "noise. Some patches sit entirely inside one material and "
@@ -209,7 +235,7 @@ class RoiCrossStep(Step):
                   "marks the defect instead of guessing. A featureless patch "
                   "scores about 1; anything with structure scores 20 or more."),
         ),
-        output_prefix_spec("cross"),
+        _prefix_in_section(),
     ]
     reads = ["ref"]
     writes: List[str] = []

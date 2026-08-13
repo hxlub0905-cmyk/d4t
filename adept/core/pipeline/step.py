@@ -135,6 +135,16 @@ class ParamSpec:
     #: 通過 ``validate_params``。卡片自己要保證用不到的參數不影響結果
     #: （``resolve_reads`` 也一樣 —— 不要回報一條只有別的方法才讀的流）。
     show_when: Optional[tuple] = None
+    #: 這一列屬於哪一個小標題（F8 第三輪）。同一個 section 的參數會被畫在
+    #: 一起、上面加一行標題；空字串 = 不屬於任何一組（畫在最前面）。
+    #:
+    #: 為什麼需要：``roi_cross`` 有 19 個參數，攤成一排的時候使用者的回饋是
+    #: 「有些我不知道是什麼功能，也不知道怎麼調」。這些參數其實**回答三個不同
+    #: 的問題**（直的條紋在哪、橫的條紋在哪、框放在交會處的哪裡），而攤平的
+    #: 清單把那個結構整個藏起來 —— 於是每一列看起來都同等重要、同等神秘。
+    #: ``show_when`` 解的是「這一列現在算不算數」，這個解的是「這一列在回答
+    #: 哪個問題」，兩者不能互相取代。
+    section: str = ""
 
     def visible_for(self, params: Optional[Dict[str, Any]]) -> bool:
         """在這組參數下，這一列該不該顯示（沒有 ``show_when`` 就永遠顯示）。"""
@@ -351,6 +361,7 @@ class Step(ABC):
                     # ``("method", ("percentile",))`` → JSON-safe 的兩個 list。
                     "show_when": (None if not p.show_when
                                   else [p.show_when[0], list(p.show_when[1])]),
+                    "section": p.section,
                 }
                 for p in cls.params
             ],

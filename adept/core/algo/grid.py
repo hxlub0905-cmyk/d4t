@@ -45,6 +45,7 @@ patch 上是決定性的差別。
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Sequence, Tuple
 
@@ -95,7 +96,9 @@ class StripeSet:
     profile: np.ndarray
     raw: np.ndarray
     edges: List[int] = field(default_factory=list)
-    bands: List[Tuple[int, int]] = field(default_factory=list)
+    #: 精修到次像素的轉折位置（段的幾何用這個，見 :func:`refine_edges`）。
+    edges_sub: List[float] = field(default_factory=list)
+    bands: List[Tuple[float, float]] = field(default_factory=list)
     #: 每一段的平均亮度（跟 ``bands`` 等長）。
     levels: List[float] = field(default_factory=list)
     #: **要的那一組**條紋（暗的或亮的），已套用已知 pitch 的補線。
@@ -204,6 +207,54 @@ def select_bands(bands: Sequence[Tuple[int, int]], levels: Sequence[float],
     return picked or bands
 
 
+def refine_edges(prof: Any, edges: Sequence[int]) -> List[float]:
+    """把整數的轉折位置精修到**次像素**（拋物線內插梯度峰）。
+
+    為什麼非做不可 —— 這是 F8 第二輪抓到的「框左右歪一點」
+    ------------------------------------------------------
+    邊界在影像上是糊的，所以 ``|梯度|`` 的峰**通常是一個 2 格寬的平台**：一根
+    真實起點在 21 的條紋，量到的是 ``grad[20] == grad[21]``（實測完全相等）。
+    而 ``find_transitions`` 挑局部極大的條件左右不對稱
+    （``> 左鄰`` 但 ``>= 右鄰``），於是同一根條紋的兩條邊會**各挑到平台的不同
+    側** —— 實測左邊界一律 −1、右邊界 0，段寬 8 變成 9。
+
+    後果不是「差一格」而已：``beside_*`` 的框是貼著段的兩側放的，段往左胖了
+    一格，**左邊那個框就往外挪一格、右邊那個沒有** —— 兩個框到 MG 的距離不一樣，
+    畫面上看起來就是「一邊貼著、一邊有縫」。而且它們量的是同一種材質，
+    所以數字上完全看不出來。
+
+    拋物線內插對稱地把峰放回 20.5 —— 那正是真實邊界（第 21 格是第一格亮的，
+    所以邊界在 20 與 21 之間）。實測：平台 ``(12.079, 17.855, 17.855)`` →
+    偏移 +0.5，與真值一致。
+    """
+    p = np.asarray(prof, dtype=np.float64)
+    if p.size < 3:
+        return [float(e) for e in edges]
+    g = np.abs(np.gradient(p))
+    out: List[float] = []
+    for e in edges:
+        i = int(e)
+        if i <= 0 or i >= g.size - 1:
+            out.append(float(i))
+            continue
+        a, b, c = float(g[i - 1]), float(g[i]), float(g[i + 1])
+        denom = a - 2.0 * b + c
+        # 平坦（denom≈0）時內插沒有意義 —— 原樣回傳比外插到天邊好。
+        delta = 0.0 if abs(denom) < 1e-9 else 0.5 * (a - c) / denom
+        out.append(float(i) + max(-1.0, min(1.0, delta)))
+    return out
+
+
+def _bands_from(edges: Sequence[float], length: int
+                ) -> List[Tuple[float, float]]:
+    """轉折之間就是一段（**保留次像素**）。影像兩端也算邊界。"""
+    if length <= 0:
+        return []
+    inner = sorted(float(e) for e in edges if 0.0 < float(e) < float(length))
+    marks = [0.0] + inner + [float(length)]
+    return [(a, b) for a, b in zip(marks, marks[1:]) if b > a]
+
+
 def _walk(anchor: float, pitches: Sequence[float], length: int,
           phase: int) -> List[float]:
     """從 ``anchor`` 往兩邊走，間距**依序**取 ``pitches``（循環）。
@@ -252,7 +303,7 @@ def _fill_by_pitch(bands: Sequence[Tuple[int, int]], pitch: float, length: int,
     pitch 是外面（GDS）帶進來的假設，影像是這一顆真的長的樣子，
     兩者衝突時相信影像，並把證據留給上層講出來。
     """
-    got = [(int(a), int(b)) for a, b in bands]
+    got = [(float(a), float(b)) for a, b in bands]
     pitches = [float(p) for p in (pitch, pitch_2) if float(p) >= 2.0]
     if not pitches or not got or length <= 0:
         return got, -1.0, 0, False
@@ -311,11 +362,15 @@ def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
         return out
 
     gap = max(1, int(min_gap) or 4)
-    out.edges = list(algo_profile.find_transitions(
+    rough = list(algo_profile.find_transitions(
         prof, sensitivity=sensitivity, min_gap=gap))
+    out.edges = list(rough)                    # 面板畫線用（整數就夠）
+    # 段的幾何用**精修過的**位置 —— 差半格會讓框的左右不對稱，見 refine_edges。
+    out.edges_sub = refine_edges(prof, rough)
     out.confidence = algo_profile.profile_confidence(prof, raw)
-    out.bands = algo_profile.bands_from(out.edges, int(prof.size))
-    out.levels = [float(prof[a:b].mean()) if b > a else 0.0
+    out.bands = _bands_from(out.edges_sub, int(prof.size))
+    out.levels = [float(prof[_half_up(a):_half_up(b)].mean())
+                  if _half_up(b) > _half_up(a) else 0.0
                   for a, b in out.bands]
 
     picked = select_bands(out.bands, out.levels, select)
@@ -342,19 +397,40 @@ def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
 # --------------------------------------------------------------------------- #
 # 交會 → 方框
 # --------------------------------------------------------------------------- #
+#: 捨入前先吃掉的浮點雜訊（像素）。次像素邊界算出來是 ``20.499997`` 而不是
+#: ``20.5`` —— 差在最後幾個 bit，但那決定了捨上還是捨下，**而一根條紋的左右
+#: 兩條邊剛好會落在不同邊**：實測左邊的框離 MG 兩格、右邊只有一格。
+#: 1e-6 px 沒有任何幾何意義，只是把「數學上是 .5」還原成 .5。
+_ROUND_EPS = 1e-6
+
+
+def _half_up(v: float) -> int:
+    """四捨五入，**一律往上**（含浮點雜訊的容差）。
+
+    Python 內建的 ``round()`` 是 banker's rounding：``round(14.5) == 14`` 但
+    ``round(15.5) == 16``。次像素邊界精修之後每一條邊都正好落在 ``.5`` 上，
+    於是同一個框的左右兩邊會用不同的規則進位 —— 框的寬度時而 5 時而 6，
+    而使用者填的是 5。
+    """
+    return int(math.floor(float(v) + 0.5 + _ROUND_EPS))
+
+
 def _clip_span(a: float, b: float, limit: int) -> Optional[Tuple[int, int]]:
-    lo, hi = int(round(max(0.0, min(a, b)))), int(round(min(float(limit), max(a, b))))
+    lo = _half_up(max(0.0, min(a, b)))
+    hi = _half_up(min(float(limit), max(a, b)))
     return (lo, hi) if hi > lo else None
 
 
-def _spans_between(bands: Sequence[Tuple[int, int]], length: int
+def _spans_between(bands: Sequence[Tuple[float, float]], length: int
                    ) -> List[Tuple[int, int]]:
     """相鄰兩段**之間**的空隙（也就是「沒有被這組條紋蓋到」的地方）。"""
     out: List[Tuple[int, int]] = []
     ordered = sorted(bands)
     for (_, end), (start, _) in zip(ordered, ordered[1:]):
         if start > end:
-            out.append((int(end), int(start)))
+            span = _clip_span(end, start, length)
+            if span:
+                out.append(span)
     return out
 
 
@@ -378,7 +454,7 @@ def _edge_spans(bands: Sequence[Tuple[int, int]], width: float, side: str,
     g = max(0.0, float(gap))
     out: List[Tuple[int, int]] = []
     for band in bands:
-        a, b = int(band[0]), int(band[1])
+        a, b = float(band[0]), float(band[1])
         wanted = []
         if str(side) in ("both", "start"):
             wanted.append((a - g - w, a - g))
@@ -386,7 +462,12 @@ def _edge_spans(bands: Sequence[Tuple[int, int]], width: float, side: str,
             wanted.append((b + g, b + g + w))
         for lo, hi in wanted:
             span = _clip_span(lo, hi, length)
-            if span and (span[1] - span[0]) >= w * 0.5:
+            # **切到影像邊緣而窄掉的丟掉。** 這幾個框的意義是「同一種東西的
+            # 同一種取樣」，一個只有六成寬的殘框戴著同一個名字進 mask，
+            # 統計上是稀釋，畫面上是那一排框裡突然有一個比較短 —— 兩種都是
+            # 在說謊。沒切到的時候寬度一定剛好等於使用者填的值（兩端用同一個
+            # 捨入規則、相差整數個 w），所以這一關只會擋到真的被切掉的。
+            if span and (span[1] - span[0]) >= w - 0.5:
                 out.append(span)
     return out
 
@@ -406,7 +487,7 @@ def _spans_for(placement: str, axis: str, bands: Sequence[Tuple[int, int]],
     pad = max(0.0, float(inset))
     out = []
     for a, b in bands:
-        span = _clip_span(a + pad, b - pad, length)
+        span = _clip_span(float(a) + pad, float(b) - pad, length)
         if span:
             out.append(span)
     return out

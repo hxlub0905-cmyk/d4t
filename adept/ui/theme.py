@@ -902,6 +902,13 @@ QToolTip {
 /* -- Studio-specific object names -------------------------------------- */
 QLabel#paramTitle { color: $text_primary; font-size: 14px; font-weight: 700; }
 QLabel#paramStepHelp { color: $text_secondary; font-size: 11px; }
+/* Section heading in the parameter form. A signpost, not content: it has to
+   read as a heading (weight, colour, space above) without competing with the
+   parameters themselves. */
+QLabel#paramSection {
+    color: $text_secondary; font-size: 10px; font-weight: 600;
+    padding: 10px 0 2px 2px; border-bottom: 1px solid $border_default;
+}
 QLabel#paramLabel { color: $text_primary; font-weight: 600; }
 QLabel#paramHint { color: $text_hint; font-size: 11px; }
 QLabel#paramHint[error="true"] { color: $danger_text; font-size: 11px; font-weight: 600; }
