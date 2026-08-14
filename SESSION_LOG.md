@@ -4,6 +4,37 @@
 
 ---
 
+## 參數說明搬進 tooltip —— 列面上只留「非讀不可」的字（2026-08-14）
+
+使用者的原話：「描述功能的文字太多，而且移過去會顯示、移走又消失，如果我是
+user 我會覺得很亂 —— 建議把這些描述文字拿掉，讓下方精簡一點。」
+
+這推翻的是 F7-15 的「一行、hover 攤開」。那一輪修掉了 Enter/Leave 打架的閃爍
+（CLAUDE.md §7），但修好之後它**還是**跟著滑鼠此起彼落 —— 滑鼠掃過整張表，
+每一列輪流長高又縮回去。技術上沒有 bug，體感上就是亂。F7-15 當時拒絕
+tooltip 的理由（「使用者要隨手看得到」）讓位給使用者自己的判斷。
+
+### 改了什麼（全部在 `ui/widgets.py`，引擎零改動）
+
+- **`_ParamRow`**：常駐/hover 攤開的說明整個拿掉（`WA_Hover`、eventFilter、
+  enter/leaveEvent、`set_active` 一併刪除）。說明全文設成**整列**的 tooltip
+  （名稱、空白處、editor 都感應）。列面上只剩兩種會出現的字，出現就整段攤開：
+  - 紅色錯誤（`show_error`）—— 驗證擋下來的原因，非讀不可；
+  - 「這一格現在不生效」的調淡註記（`set_dimmed`，例：畫了曲線之後的 gamma）。
+  新增 `hint_visible()` 供測試問明確狀態。
+- **卡片層級的說明**（ParamForm 頂端那一段）同一個決定：收成一行
+  （`_HintLabel` 的 elide，不讓 Qt 硬切字中間）、全文住 tooltip。
+- 錯誤與註記的優先序：錯誤 > 註記 > 什麼都不畫（`_dim_note` 追明確狀態）。
+
+### 驗收
+
+`tests/test_ui_f7_15_reading_load.py` 第 1 節改鎖新行為（hint 預設隱藏、
+tooltip 有全文、錯誤出現整段且清掉就收乾淨、列高一行）。其餘 API
+（`hint_text()`、`show_error()`）不變，`test_ui_widgets.py` 原樣通過。
+
+之後要 release 的話，說明的出口是 SOP／圖解文件，不是畫面 —— 使用者已經
+講了方向。tooltip 是過渡期的保底。
+
 ## F8：純規則的 ROI 定位 —— 兩組條紋的交會處（2026-08-13）
 
 使用者試用 `Locate region by profile` 之後說「我沒辦法做 ROI 定位」。他有兩招，

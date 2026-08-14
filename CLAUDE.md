@@ -193,6 +193,9 @@ python -m venv .venv && .venv\Scripts\activate      # Windows
 pip install -r requirements.txt && pip install pytest
 
 QT_QPA_PLATFORM=offscreen pytest -q                # 全部測試（Windows 不用設 QT_QPA_PLATFORM）
+# 開發迴圈**只跑改到的測試檔**（pytest -q tests/test_xxx.py）——
+# 全套在家用機 ~30s，但在雲端 session 的容器上要好幾分鐘（UI + 批次測試吃 CPU）。
+# 全套留到 commit 前跑一次就好。
 python tools/make_sample.py /tmp/lot --n 100       # 產合成資料
 python -m adept gui                                # 開 Studio
 python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 \
@@ -248,7 +251,7 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 | **`drawPolygon` 傳散的 `QPointF`**（F7-17） | 整個行程 **segfault**（不是丟例外，所以看不到任何訊息，只有 exit 139） | PySide6 會綁到別的 overload。要傳 `QPolygonF([...])`。自繪面板加任何多邊形時注意 |
 | **暗色盤裡的佔位字串**（F7-17 已清） | `accent_border` 的值是 `"#2f4straight"`，靠 70 行後的一句覆寫救著 | Qt 對無效色字串是**靜靜畫成黑色**，不會報錯。色盤裡不要留「稍後修正」的值；`tests/` 有一條掃描所有 token 是否為合法 hex |
 | **`_update_action_states` 會蓋掉 tooltip**（F7-16 已修） | 把快捷鍵寫進工具列 tooltip，第一次 refresh 之後就不見了 | 那幾顆的 tooltip 每次 refresh 都會依前置條件重寫（「還沒有東西可以存」）。所以不能「建構時附加一次」，要讓**設 tooltip 的那個動作自己補上快捷鍵**（`_set_tip`）。`test_ui_f7_16_safety_net.py` 會 refresh 一次再驗 |
-| **Qt 的 Enter/Leave 在父子之間會打架**（F7-15 已修） | 滑鼠從參數列的空白處移進**那一列自己的**輸入框，說明就閃一下（收起來又立刻攤開） | Qt 先送 `Leave` 給父元件、再送 `Enter` 給子元件。照字面處理必閃。`leaveEvent` 改成直接問**游標還在不在自己的矩形裡**（`rect().contains(mapFromGlobal(QCursor.pos()))`），不要相信事件的字面意思 |
+| **Qt 的 Enter/Leave 在父子之間會打架**（F7-15 已修） | 滑鼠從參數列的空白處移進**那一列自己的**輸入框，說明就閃一下（收起來又立刻攤開） | Qt 先送 `Leave` 給父元件、再送 `Enter` 給子元件。照字面處理必閃。`leaveEvent` 改成直接問**游標還在不在自己的矩形裡**（`rect().contains(mapFromGlobal(QCursor.pos()))`），不要相信事件的字面意思。（2026-08-14 起參數列的 hover 攤開整個拿掉了 —— 修好之後它還是「跟著滑鼠閃」，使用者實測嫌亂；說明搬進 tooltip。教訓本身仍適用於其他 hover 元件） |
 | **`:focus` 被 id / attribute 選擇器安靜蓋掉**（F7-23 已修） | Tab 到「Run trial」「Stop」或任何一顆工具列按鈕，畫面上零回饋 —— 而 QSS 裡明明有 `QPushButton:focus` | QSS 照 CSS2 特異性：`QPushButton#primary`（id）贏過 `QPushButton:focus`，`[variant="…"]` 同分但寫在後面也贏，於是那條總括規則只對「沒有 objectName 也沒有 variant」的按鈕生效；工具列更單純 —— 從頭到尾沒有 `QToolButton:focus`。**每一種變體都要有自己的一條 `:focus`**。另外 **Qt 的 `outline` 對按鈕不生效**（收下屬性但什麼都不畫，加不加 `outline-offset` 都一樣），框只能用 border 畫在裡面 —— 那就會吃掉 1px，必須從自己的 padding 還回去，否則 Tab 過去文字會跳一格。`tests/test_ui_f7_23_buttons.py` 對八種按鈕逐一量畫素，並用 `contentsRect()` 鎖住「文字不准移動」|
 | **`contentsRect()` 的原點永遠是 (0, 0)**（F7-23 第四輪） | 想把圖示畫進 QSS 撐開的那塊 padding 裡，用 `contentsRect()` 定位會畫錯地方 | QSS 樣式下 contentsRect 的**尺寸**確實扣掉了 padding（所以拿它比對「文字區有沒有移動」是對的），但**原點沒有跟著移** —— 它不是一個可以拿來定位的框。要畫在 padding 裡就用 `rect()` |
 | **小圖示不能照大圖示的比例縮**（F7-23 第四輪） | 自繪圖示在 22px 下好看，放到按鈕上的 15px 就糊成一團 | 三個實例：`undo` 的弧用 `size/9` 的線變成實心月牙（改 `size/11`）；`fit` 的四個角括號用 0.26 長度兩臂幾乎接起來變成矩形（改 0.17）；`tidy` 的 2×2 描邊方格線比空隙還粗（改實心）。**加新圖示時用實際尺寸（≤15px）看過再收工** —— `tests/test_ui_f7_23_buttons.py` 只擋得住「畫出來是空的」|

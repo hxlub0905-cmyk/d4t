@@ -46,9 +46,11 @@ def window(qapp):
 
 
 # --------------------------------------------------------------------------- #
-# 1. 參數說明：一行，用到才攤開
+# 1. 參數說明：住在 tooltip，列面上不佔一行
+#    （2026-08-14 起取代 F7-15 的「一行、hover 攤開」—— 攤開/收合跟著滑鼠
+#      此起彼落地閃，使用者的形容是「移過去會顯示、移走又消失，很亂」。）
 # --------------------------------------------------------------------------- #
-def test_help_is_one_line_until_you_use_that_row(window, qapp):
+def test_help_lives_in_the_tooltip_not_on_the_row(window, qapp):
     window.show()
     nid = window.model.add_step("roi_template")
     window.select_node(nid)
@@ -56,20 +58,14 @@ def test_help_is_one_line_until_you_use_that_row(window, qapp):
 
     form = window.param_form
     row = form._rows["min_structure"]
-    assert row.hint.is_expanded() is False
-    assert row.hint.wordWrap() is False, "收起來的說明不能換行 —— 那就沒有收"
-    # 切字自己算，不讓 Qt 硬切在字的中間
-    assert row.hint.text().endswith("…")
-    assert len(row.hint.text()) < len(form.hint_text("min_structure"))
-
-    row.set_active(True)
-    assert row.hint.is_expanded() is True
-    assert row.hint.wordWrap() is True
-    assert row.hint.text() == form.hint_text("min_structure")
+    assert row.hint_visible() is False, "說明不再常駐在列面上"
+    full = form.hint_text("min_structure")
+    assert row.toolTip() == full, "整列都要能停出全文"
+    assert row.name_label.toolTip() == full
 
 
 def test_the_full_text_is_still_the_full_text(window):
-    """收起來只是**畫面上**的事。問「這個參數的說明寫了什麼」的人要的，
+    """畫面上不畫只是**畫面上**的事。問「這個參數的說明寫了什麼」的人要的，
     從來不是「現在放得下多少」。"""
     nid = window.model.add_step("roi_template")
     window.select_node(nid)
@@ -79,33 +75,36 @@ def test_the_full_text_is_still_the_full_text(window):
     assert editor.toolTip() == full, "滑鼠停上去也要看得到全文"
 
 
-def test_an_error_stays_open(window):
-    """錯誤是他現在最需要讀完的一句話 —— 不能因為滑鼠移開就切掉。"""
+def test_an_error_is_painted_on_the_row_and_stays(window):
+    """錯誤是他現在最需要讀完的一句話 —— 它是唯一准許回到列面上的說明，
+    而且出現就是整段（不裁切、不跟著滑鼠收合）。"""
     nid = window.model.add_step("roi_template")
     window.select_node(nid)
     form = window.param_form
     row = form._rows["min_score"]
     form.show_error("min_score", "must be between -1 and 1")
-    assert row.hint.is_expanded() is True
-    row.set_active(False)
-    assert row.hint.is_expanded() is True, "錯誤被收起來了"
+    assert row.hint_visible() is True
+    assert row.hint.is_expanded() is True, "錯誤要整段攤開，不裁切"
+    assert "must be between" in row.hint.text()
     form.clear_errors()
-    assert row.hint.is_expanded() is False
+    assert row.hint_visible() is False, "錯誤清掉之後列面要收乾淨"
+    assert form.hint_text("min_score") == row.spec["help"]
 
 
-def test_more_parameters_fit_on_screen_than_before(window, qapp):
-    """這一項的重點就是**看得到幾個參數**。11 個參數 × 3 行 vs × 1 行。"""
+def test_rows_are_one_line_tall_without_hints(window, qapp):
+    """這一項的重點就是**看得到幾個參數**。拿掉常駐說明之後，每一列只剩
+    標題列一行高；掛上錯誤那一列才長高。"""
     window.show()
     nid = window.model.add_step("roi_template")
     window.select_node(nid)
     qapp.processEvents()
     form = window.param_form
-    collapsed = sum(r.sizeHint().height() for r in form._rows.values())
-    for r in form._rows.values():
-        r.set_active(True)
+    assert all(r.hint_visible() is False for r in form._rows.values())
+    plain = form._rows["min_score"].sizeHint().height()
+    form.show_error("min_score", "must be between -1 and 1")
     qapp.processEvents()
-    expanded = sum(r.sizeHint().height() for r in form._rows.values())
-    assert collapsed < expanded * 0.75, (collapsed, expanded)
+    with_error = form._rows["min_score"].sizeHint().height()
+    assert with_error > plain, (plain, with_error)
 
 
 # --------------------------------------------------------------------------- #

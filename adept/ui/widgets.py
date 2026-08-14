@@ -779,22 +779,14 @@ _SLIDER_MAX_INT_SPAN = 5000
 
 
 class _HintLabel(QLabel):
-    """參數說明：平常一行（放不下就切成 ``像這樣…``），要用的時候整段攤開。
+    """列面上那句「非讀不可」的字（錯誤／不生效註記）。
 
-    為什麼不直接讓它一直換行
-    ------------------------
-    一張卡有 11 個參數、每個帶 2–3 行灰字，加起來就是一面牆 —— 一定要捲，
-    而且**真正要緊的事會淹在裡面**（「這張卡還沒有模板」跟「這個滑桿越大越
-    平滑」長得一模一樣）。
-
-    為什麼不乾脆只留 tooltip
-    ------------------------
-    因為那等於把說明藏起來，而這個工具的使用者是不會寫 code 的製程工程師 ——
-    他要的是「我現在在動的這個東西是什麼」隨手看得到，不是「知道要把滑鼠停在
-    哪裡等一秒」。所以：正在用的那一列整段攤開，其餘各留一行。
-
-    切字自己算（``elidedText``），不交給 Qt 裁 —— Qt 會硬切在字的中間，
-    看起來像畫面壞掉（同 canvas 的 ``_draw_elided``）。
+    歷史：F7-15 它是常駐的參數說明（一行、hover 攤開），2026-08-14 說明整段
+    搬進 tooltip —— hover 攤開/收合跟著滑鼠此起彼落地閃，比一面牆更亂。
+    現在這個 label 平常是隱藏的，只在「有一句話必須讀完」時出現，而且出現
+    就是整段（``set_expanded(True)``）。收合模式留著給還需要它的呼叫端；
+    收合時切字自己算（``elidedText``），不交給 Qt 裁 —— Qt 會硬切在字的
+    中間，看起來像畫面壞掉（同 canvas 的 ``_draw_elided``）。
     """
 
     def __init__(self, text: str = "", parent: Optional[QWidget] = None):
@@ -837,7 +829,7 @@ class _HintLabel(QLabel):
 
 
 class _ParamRow(QFrame):
-    """一個參數 = 標題列（名稱 + 滑桿 + 數字框）+ 永遠看得見的白話說明第二行。
+    """一個參數 = 一列（名稱 + 滑桿 + 數字框）。說明住在 tooltip 裡。
 
     為什麼有上下界的數字都配一支滑桿（F7-8）
     ----------------------------------------
@@ -846,6 +838,14 @@ class _ParamRow(QFrame):
 
     數字框沒有被拿掉，是刻意的：滑桿負責找到大概的位置，數字框負責記錄與
     重現（recipe 是要交接給別人的）。兩邊雙向綁定，改哪一邊另一邊都會跟上。
+
+    說明文字為什麼不畫在列的下面（2026-08-14，取代 F7-15 的 hover 攤開）
+    ------------------------------------------------------------------
+    F7-15 把說明收成一行、hover 才攤開 —— 但攤開/收合跟著滑鼠此起彼落，
+    使用者的形容是「移過去會顯示、移走又消失，很亂」。說明整段搬進
+    tooltip（整列都感應，停上去就看得到全文），列面上只留兩種**非讀不可**
+    的字：紅色錯誤（驗證擋下來的原因）與「這一格現在不生效」的調淡註記。
+    那兩種不是說明，是狀態 —— 出現就攤開整段，不玩收合。
     """
 
     def __init__(self, spec: Dict[str, Any], editor: QWidget,
@@ -854,7 +854,7 @@ class _ParamRow(QFrame):
         self.spec = spec
         self.editor = editor
         self.slider: Optional[QSlider] = None
-        self._active = False
+        self._dim_note = ""
         self.setObjectName("paramRow")
 
         lay = QVBoxLayout(self)
@@ -882,64 +882,17 @@ class _ParamRow(QFrame):
 
         self.hint = _HintLabel(str(spec.get("help", "")), self)
         self.hint.setProperty("error", "false")
+        # 出現的時候一定是「必須讀完的一句話」（錯誤／不生效註記），
+        # 所以永遠整段攤開；平常整列收起來只有一行高。
+        self.hint.set_expanded(True)
+        self.hint.hide()
         lay.addWidget(self.hint)
 
-        # 說明只在**這一列被使用的時候**展開（F7-15）。11 個參數各配 2–3 行灰字
-        # 是一面牆：一定要捲，而且真正要緊的事（模板是空的）淹在裡面。收成一行
-        # 不是把資訊藏起來 —— 使用者在讀的永遠只有他正在動的那一個參數。
-        self.setAttribute(Qt.WA_Hover, True)
-        editor.installEventFilter(self)
-        for child in editor.findChildren(QWidget):
-            child.installEventFilter(self)
-        if self.slider is not None:
-            self.slider.installEventFilter(self)
-
-    # -- 「正在用這一列」（F7-15）-------------------------------------------
-    def eventFilter(self, obj, e):             # noqa: D102 - Qt hook
-        from PySide6.QtCore import QEvent
-
-        if e.type() in (QEvent.FocusIn, QEvent.Enter):
-            self.set_active(True)
-        elif e.type() == QEvent.FocusOut:
-            self.set_active(self.underMouse())
-        return False
-
-    def enterEvent(self, e) -> None:           # noqa: D102 - Qt hook
-        self.set_active(True)
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:           # noqa: D102 - Qt hook
-        # 兩種「其實還在這一列」的情況不收起來：
-        #  * 焦點還在這一列的欄位上（使用者正在打字或拖滑桿）——
-        #    滑鼠離開輸入框那一瞬間把說明收掉，是在他眼前抽走東西；
-        #  * 滑鼠只是從列的空白處移進了**這一列自己的**輸入框。Qt 會先送
-        #    Leave 給列、再送 Enter 給子元件，照字面處理就是收起來又立刻攤開，
-        #    看起來是閃一下。所以直接問游標還在不在這一列的矩形裡。
-        if not (self._has_focus() or self._cursor_inside()):
-            self.set_active(False)
-        super().leaveEvent(e)
-
-    def _cursor_inside(self) -> bool:
-        from PySide6.QtGui import QCursor
-
-        try:
-            return self.rect().contains(self.mapFromGlobal(QCursor.pos()))
-        except Exception:                      # noqa: BLE001 — 沒有游標的環境
-            return False
-
-    def _has_focus(self) -> bool:
-        w = self.editor.focusWidget() if hasattr(self.editor, "focusWidget") else None
-        return bool(self.editor.hasFocus() or w is not None
-                    or (self.slider is not None and self.slider.hasFocus()))
-
-    def set_active(self, active: bool) -> None:
-        """這一列現在是不是使用者正在動的那一個（說明整段攤開）。"""
-        self._active = bool(active)
-        # 錯誤永遠攤開：那是他現在最需要讀完的一句話。
-        self.hint.set_expanded(self._active or self.has_error())
-
-    def is_active(self) -> bool:
-        return bool(getattr(self, "_active", False))
+        # 說明全文住在 tooltip：整列（含名稱與空白處）都感應得到。
+        tip = str(spec.get("help", ""))
+        if tip:
+            self.setToolTip(tip)
+            self.name_label.setToolTip(tip)
 
     def set_error(self, msg: Optional[str]) -> None:
         if msg:
@@ -947,17 +900,19 @@ class _ParamRow(QFrame):
             self.hint.setProperty("error", "true")
             self.hint.setStyleSheet(
                 "color:%s; font-size:11px; font-weight:600;" % TOKENS["danger_text"])
-            self.hint.set_expanded(True)
+            self.hint.show()
         else:
-            self.hint.set_full_text(str(self.spec.get("help", "")))
             self.hint.setProperty("error", "false")
-            self.hint.setStyleSheet("color:%s; font-size:11px;" % TOKENS["text_hint"])
-            self.hint.set_expanded(self.is_active())
+            self._show_dim_note_or_hide()
         self.hint.style().unpolish(self.hint)
         self.hint.style().polish(self.hint)
 
     def has_error(self) -> bool:
         return self.hint.property("error") == "true"
+
+    def hint_visible(self) -> bool:
+        """列面上現在有沒有一句攤開的字（**明確狀態**，不問 ``isVisible()``）。"""
+        return not self.hint.isHidden()
 
     def set_dimmed(self, dimmed: bool, why: str = "") -> None:
         """把整列調淡（值還在、還能改，只是現在不生效）。
@@ -971,13 +926,21 @@ class _ParamRow(QFrame):
         self.name_label.setStyleSheet(
             "color:%s;" % (TOKENS["text_disabled"] if dimmed
                            else TOKENS["text_primary"]))
-        if dimmed and why:
-            self.hint.set_full_text("· " + why)
+        self._dim_note = str(why) if (dimmed and why) else ""
+        if not self.has_error():
+            self._show_dim_note_or_hide()
+
+    def _show_dim_note_or_hide(self) -> None:
+        """沒有錯誤的時候，列面上唯一可能出現的字是「不生效」註記。"""
+        if self._dim_note:
+            self.hint.set_full_text("· " + self._dim_note)
             self.hint.setStyleSheet("color:%s; font-size:11px; font-style:italic;"
                                     % TOKENS["text_disabled"])
-        elif not self.has_error():
+            self.hint.show()
+        else:
             self.hint.set_full_text(str(self.spec.get("help", "")))
             self.hint.setStyleSheet("color:%s; font-size:11px;" % TOKENS["text_hint"])
+            self.hint.hide()
 
 
 def _make_slider(spec: Dict[str, Any], editor: QWidget) -> Optional[QSlider]:
@@ -1657,9 +1620,10 @@ class ParamForm(QWidget):
 
         self._title = QLabel("")
         self._title.setObjectName("paramTitle")
-        self._step_help = QLabel("")
+        # 卡片自己的一句話。收成一行（放不下就 ``像這樣…``）、全文住 tooltip
+        # —— 跟參數列同一個決定（2026-08-14）：說明是查閱用的，不佔版面。
+        self._step_help = _HintLabel("")
         self._step_help.setObjectName("paramStepHelp")
-        self._step_help.setWordWrap(True)
         outer.addWidget(self._title)
         outer.addWidget(self._step_help)
 
@@ -1702,15 +1666,17 @@ class ParamForm(QWidget):
             if not describe:
                 self._title.setText("")
                 self._title.setVisible(False)
-                self._step_help.setText("")
+                self._step_help.set_full_text("")
                 self._step_help.setVisible(False)
                 self._placeholder.setVisible(True)
                 return
             self._title.setText(str(describe.get("label")
                                     or describe.get("key") or ""))
             self._title.setVisible(True)
-            self._step_help.setText(str(describe.get("help", "")))
-            self._step_help.setVisible(bool(describe.get("help")))
+            step_help = str(describe.get("help", ""))
+            self._step_help.set_full_text(step_help)
+            self._step_help.setToolTip(step_help)
+            self._step_help.setVisible(bool(step_help))
             self._placeholder.setVisible(False)
             self._values = {}
             self._advanced = set()
