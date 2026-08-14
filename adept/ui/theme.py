@@ -900,13 +900,6 @@ QToolTip {
 }
 
 /* -- Studio-specific object names -------------------------------------- */
-/* The settings drawer floats over the canvas' right edge (F8-UI). It needs
-   its own opaque ground and a hard left border — without them it reads as
-   "the canvas grew some widgets", not "a panel slid over the canvas". */
-QFrame#paramDrawer {
-    background: $bg_surface;
-    border-left: 1px solid $border_default;
-}
 QLabel#paramTitle { color: $text_primary; font-size: 14px; font-weight: 700; }
 QLabel#paramStepHelp { color: $text_secondary; font-size: 11px; }
 /* Section heading in the parameter form. A signpost, not content: it has to

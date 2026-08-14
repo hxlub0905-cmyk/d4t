@@ -90,9 +90,10 @@ class RoiMaskStep(Step):
         # mask，下游的 Normalize 又會退回整張圖：跑得完、有數字、而且什麼都
         # 沒做。參數合法 ≠ 設定完成（F7-13）。
         if not cls.region_list(params):
-            return ["Name at least one region in the Regions box - add a "
-                    "region card (Profile / Golden Cell template / Crossings) "
-                    "above this one first."]
+            return ["Name at least one region in the Regions box. No regions "
+                    "yet? Add one of the ROI cards from the library first "
+                    "(Library → ROI…) - its region names fill in here "
+                    "automatically."]
         return []
 
     # ---- 運算 -------------------------------------------------------------

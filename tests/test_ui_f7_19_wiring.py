@@ -328,26 +328,23 @@ def test_the_clipping_mark_sits_on_the_bar_it_is_about(qapp):
 # --------------------------------------------------------------------------- #
 # 6. n8n 化第二批（F7-22）：畫布拿整欄、線上的 ×、排整齊
 # --------------------------------------------------------------------------- #
-def test_the_canvas_gets_the_whole_column_until_you_open_a_card(window):
-    """設定面板以前常駐佔掉這一欄四成的高度，而畫布才是這個畫面的主體。
-
-    單擊只是選取（右邊預覽會跑到那張卡），**雙擊才攤開設定** —— 那是 n8n 的
-    動作，而且「我要編這張卡」本來就是明確的意圖，不該是選取的副作用。
+def test_the_settings_pane_is_open_by_default_and_collapsible(window):
+    """D 案（2026-08-14 使用者拍板）：畫布會 zoom、又有彈出視窗，平面上
+    只需要中上一塊 —— 設定**預設攤開**、拿大頭。F7-22 的「雙擊才攤開」
+    因此退役：雙擊仍然可以把收起來的設定重新攤開，但那不再是唯一入口。
     """
-    assert window.params_open() is False
+    assert window.params_open() is True, "設定預設攤開（D 案）"
 
     src = window.model.node_order[0]
     window.select_node(src)
-    assert window.params_open() is False, "單擊不該把面板打開"
-    # 但表單的內容仍然是最新的 —— 收起來是版面的事，不是資料的事
     assert window.param_form.step_key() == "load_patch"
 
-    window.pipeline.card(src).mouseDoubleClickEvent(_FakeDouble())
-    assert window.params_open() is True
-    assert window.selected_node == src
-
-    window.set_params_open(False)
+    window.set_params_open(False)          # 「現在只想看流程」
     assert window.params_open() is False
+
+    window.pipeline.card(src).mouseDoubleClickEvent(_FakeDouble())
+    assert window.params_open() is True, "雙擊把收起來的設定重新攤開"
+    assert window.selected_node == src
 
 
 class _FakeDouble:

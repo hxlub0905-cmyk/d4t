@@ -5,7 +5,9 @@
   自動排版要跟上游對齊（barycenter），讓大部分的線根本不用斜。
 * 3-2 卡片要回應：hover 邊框亮一階（由 view 判斷 —— 卡片自己收 hover
   會把線上的 × 悶死，見 test_ui_canvas_cut_button）、選中有光暈。
-* 3-3 設定是**畫布右緣的抽屜**，畫布永遠整欄大小 —— 不再被砍掉四成高度。
+* 3-3 → D 案（使用者當天退掉右緣抽屜後拍板）：畫布只佔中欄**上面一塊**
+  （它會 zoom），設定拿大頭；看全貌用 zoom bar 的**彈出視窗**，彈出時
+  主視窗的設定自動補滿、關窗還原。
 * 3-4 右欄與參數區的間距走 8px 節奏。
 """
 from __future__ import annotations
@@ -152,38 +154,91 @@ def test_a_selected_card_paints_differently_from_a_plain_one(window, qapp):
 
 
 # --------------------------------------------------------------------------- #
-# 3-3 設定抽屜
+# 3-3 → D 案：畫布佔中上一塊、設定拿大頭、看全貌用彈出視窗
+#（右緣抽屜當天被使用者退掉：「pipeline 往右長，抽屜也吃右邊，
+#  兩個在搶同一個方向的空間」。）
 # --------------------------------------------------------------------------- #
-def test_settings_are_a_drawer_over_the_canvas(window, qapp):
-    """攤開設定時畫布不變小 —— 抽屜浮在中欄右緣、吃滿高度。"""
+def test_the_canvas_is_the_top_block_and_settings_get_the_rest(window, qapp):
+    """中欄上下切：畫布在上、設定在下，而且**設定拿大頭** ——
+    畫布會 zoom、又有彈出視窗，平面上不需要大面積。"""
     window.show()
+    window.resize(1400, 900)
     qapp.processEvents()
     col = window.canvas_column
-    canvas_before = window.pipeline.size()
+    assert col.widget(0) is window.pipeline, "畫布要在中欄的上面"
+    assert col.widget(1) is window.stack, "設定在下面"
+    assert window.params_open() is True, "設定預設攤開（D 案）"
+    top, bottom = col.sizes()
+    assert bottom > top, "設定要拿大頭（畫布 2 / 設定 3）：%s" % col.sizes()
+
+    window.set_params_open(False)
+    assert window.canvas_column.sizes()[1] == 0, "收起來時畫布拿整欄"
+    window.set_params_open(True)
+
+
+def test_the_canvas_pops_out_into_its_own_window(window, qapp):
+    """zoom bar 上的彈出鈕：把 pipeline 開在自己的視窗（全尺寸）。
+
+    第二個視窗是另一份 PipelineCanvas 接**同一個 model**：節點一樣、
+    選取同步 —— 它不是截圖，是活的。
+    """
+    window.show()
+    window.resize(1400, 900)
+    qapp.processEvents()
+    assert window.canvas_popout_open() is False
+    before = list(window.canvas_column.sizes())
+    window.open_canvas_window()
+    assert window.canvas_popout_open() is True
+    # 畫布已經在別的視窗全尺寸攤開 —— 主視窗的設定往上補滿（flexible）
+    assert window.canvas_column.sizes()[0] == 0, \
+        "彈出時主視窗的畫布要把位子讓給設定"
+
+    view = window._popout_view
+    assert view.node_ids() == window.pipeline.node_ids(), "兩份畫布同一份 recipe"
 
     nid = window.pipeline.node_ids()[1]
     window.select_node(nid)
-    window.set_params_open(True)
+    assert view.selected() == nid, "選取要跨視窗同步"
+
+    # 加一張卡，兩邊都要長出來
+    n2 = window.model.add_step("denoise")
+    qapp.processEvents()
+    assert n2 in view.node_ids(), "model 動了，彈出視窗要跟著動"
+
+    window._canvas_popout.close()
+    qapp.processEvents()
+    assert window.canvas_popout_open() is False
+    assert window.canvas_column.sizes()[0] > 0, "關窗要把畫布的位子還回來"
+    assert sum(window.canvas_column.sizes()) > 0
+    got = window.canvas_column.sizes()
+    assert abs(got[0] - before[0]) <= 2, "還原的是彈出前的比例：%s vs %s" % (got, before)
+
+    # 關掉之後再動 model 不可以炸（懸空參照）
+    window.model.add_step("tone")
     qapp.processEvents()
 
-    assert window.params_open() is True
-    drawer = window.param_drawer
-    assert drawer.geometry().right() >= col.width() - 2, "抽屜要貼齊右緣"
-    assert drawer.geometry().height() == col.height(), "抽屜要吃滿整欄高度"
-    assert drawer.width() >= 320, "窄過 320px 的參數表塞不下一支滑桿"
-    assert window.pipeline.size() == canvas_before, \
-        "畫布被抽屜擠小了 —— 它該浮在上面，不是搶版面"
 
-    window.set_params_open(False)
-    assert window.params_open() is False
-    assert drawer.isHidden(), "收起來就要不見，不能留一條空欄"
-
-
-def test_the_drawer_has_a_close_button(window, qapp):
-    """抽屜要有自己的關閉鈕 —— 「怎麼把它弄走」不能只靠再雙擊一次卡片。"""
-    window.set_params_open(True)
-    window.btn_close_params.click()
-    assert window.params_open() is False
+def test_a_new_mask_card_inherits_the_regions_defined_upstream(window, qapp):
+    """使用者的直覺：「Profile / Template 應該直接吐 mask」。名字不該要他
+    重打一次 —— 加一張 Region → mask，上游（例：Profile，key=roi_cross）
+    定義過的區域名自動填進去。"""
+    window.show()
+    qapp.processEvents()
+    with_regions = window.model.add_step("roi_cross")
+    qapp.processEvents()
+    window.select_node(with_regions)
+    window._on_add_requested("roi_mask")
+    qapp.processEvents()
+    nid = window.selected_node
+    node = window.model.nodes[nid]
+    assert node.step == "roi_mask"
+    filled = str(node.params.get("regions", ""))
+    assert filled, "上游有具名區域，regions 不該是空的"
+    from adept.core.pipeline.step import get_step as _get
+    outs = _get("roi_cross").resolve_regions_out(
+        window.model.nodes[with_regions].params)
+    for name in outs:
+        assert name in filled
 
 
 # --------------------------------------------------------------------------- #

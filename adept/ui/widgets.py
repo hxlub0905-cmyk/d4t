@@ -115,6 +115,8 @@ GLYPH_ICONS = (
     "zoom_in", "zoom_out", "fit", "tidy", "up", "down", "close",
     # 工具列那五顆（F7-24）
     "folder", "document", "save", "templates", "export",
+    # 畫布彈出視窗（F8-UI D 案）
+    "popout",
 )
 
 
@@ -235,6 +237,18 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
             for j in (0, 1):
                 p.drawRect(QRectF(m + i * (side + gap), m + j * (side + gap),
                                   side, side))
+    elif n == "popout":
+        # 左下一個小框 + 往右上飛的箭頭：「在自己的視窗打開」。兩筆都粗、
+        # 都直 —— 15px 下任何斜的小箭頭頭都會糊，所以箭頭頭用兩條短直線。
+        box_side = (w - 2 * m) * 0.62
+        p.drawRect(QRectF(m, h - m - box_side, box_side, box_side))
+        ax0 = m + box_side * 0.55
+        ay0 = h - m - box_side * 0.55
+        ax1, ay1 = w - m, m
+        p.drawLine(QPointF(ax0, ay0), QPointF(ax1, ay1))
+        head = (w - 2 * m) * 0.38
+        p.drawLine(QPointF(ax1, ay1), QPointF(ax1 - head, ay1))
+        p.drawLine(QPointF(ax1, ay1), QPointF(ax1, ay1 + head))
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
     elif n == "folder":

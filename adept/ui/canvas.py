@@ -700,9 +700,15 @@ class PipelineCanvas(QGraphicsView):
     edge_removed = Signal(str, str)
     #: 從卡片庫拖一張卡丟到畫布上：``(step_key, 場景 x, 場景 y)``（F7-22）。
     card_dropped = Signal(str, float, float)
+    #: 「在自己的視窗打開畫布」（F8-UI D 案）。畫布在主視窗只佔中上一塊
+    #: （它會 zoom，不需要常駐大面積），要看全貌就彈出去。
+    popout_requested = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, popout_button: bool = True):
         super().__init__(parent)
+        #: 彈出視窗裡的那份畫布把這顆鈕關掉 —— 從彈出視窗再彈一個視窗，
+        #: 沒有那種需求，只有無限套娃。
+        self._popout_button = bool(popout_button)
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
         self.setRenderHint(QPainter.Antialiasing, True)
@@ -749,13 +755,18 @@ class PipelineCanvas(QGraphicsView):
         # ``1:1`` 留成文字（數字與冒號是 ASCII，哪台機器都畫得出來）；其餘四顆
         # 改成自繪圖示 —— ``⤢`` 與 ``⌗`` 在 Windows 的 Segoe UI 根本沒有
         # （F7-23 第四輪，見 widgets.draw_glyph_icon）。
-        specs = (("zoom_out", "Zoom out", lambda: self.zoom_by(1 / 1.25)),
+        specs = [("zoom_out", "Zoom out", lambda: self.zoom_by(1 / 1.25)),
                  ("zoom_in", "Zoom in", lambda: self.zoom_by(1.25)),
                  ("fit", "Fit the whole pipeline in view", self.fit),
                  (None, "Back to 100%", self.reset_zoom),
                  # 排整齊跟縮放是同一類東西（都只動「怎麼看」，不動 recipe），
                  # 所以放同一排，而不是放到會改檔案的工具列上。
-                 ("tidy", "Tidy up — put the cards back on the grid", self.tidy))
+                 ("tidy", "Tidy up — put the cards back on the grid", self.tidy)]
+        if self._popout_button:
+            # 「彈出視窗」也是「怎麼看」的一種 —— 主視窗的畫布只佔中上一塊
+            # （D 案），要看全貌就到自己的視窗看。
+            specs.append(("popout", "Open the pipeline in its own window",
+                          self.popout_requested.emit))
         self._zoom_buttons = []
         for icon, tip, slot in specs:
             # 這一排浮在畫布上，所以要 ``kind="icon"``（自己的底）。
