@@ -4,6 +4,36 @@
 
 ---
 
+## 第七輪：擬真 BSE 測試資料產生器收進 tools/（2026-08-14）
+
+跟使用者五輪迭代（layout → 擬真 SEM → inner spacer → 梯度與紋理 →
+BSE 物理與線寬）收斂出 `tools/make_mgepi_real.py`：MG×EPI×inner-spacer
+的擬真 BSE 合成 lot，缺陷（Hf）一律在 spacer 中間亮起，絕對 GLV 與
+MG+bloom 重疊 —— **整張圖的 max 挑不出它，只有量 spacer ROI 看得到**。
+這批資料的存在理由就是逼出 ROI 流程。`tools/validate_mgepi.py` 是
+可分性驗證，也是量測邏輯的參考實作（實測 whole-max 重疊、
+spacer test-max gap +6.6、(t−r)+ max gap +3.4，後兩者零重疊）。
+
+被反例逼出來的量測教訓（詳見 validate_mgepi.py 檔頭，接 pipeline 照抄）：
+
+- **GLV band mask 定不出 spacer**：缺陷把 spacer「亮出範圍」之後它就
+  不再像 spacer，mask 會把缺陷自己剔除。要用幾何找谷。
+- **先選帶、再壓剖面**：整欄平均把 spacer 的谷跟行間更暗的 STI 混在
+  一起，找谷會找到行間去 —— 只在 EPI 列上壓欄剖面。
+- **在 ref 上定位、在 test/diff 上量**：缺陷會把 test 的谷推亮、定位
+  帶偏一欄（實測讓 diff 指標從分得開變成分不開）。
+- **ROI 取整段谷底**（~4 px 平底，缺陷可能停在另一端）、**避開 patch
+  邊界 ≥4 px**（截斷的 spacer 找谷會挑到 MG 側壁半坡）、**max 前先
+  3×3 均值**（匹配濾波）、**diff 只取正向**（Hf 一律亮起；LER 的
+  test/ref 不合是雙向的，取正殺掉一半 nuisance）。
+
+產生器自己的坑（都修在檔內並留註解）：梯形覆蓋率的斜坡要**跨在名義
+邊緣上**（往帶內吃的寫法 soft 越大線越細 —— 使用者抓到 MG/EPI 都變細）；
+spacer 亮度上限要壓在 EPI 下限之下 ≥13 GLV（EPI 抽到暗端的 die 剖面
+會整段平掉，找谷變亂挑）。
+
+---
+
 ## 第六輪：金色虛線退役、手動佈局不被自動整理（2026-08-14）
 
 - **route 隱含順序的金色虛線整套移除**（使用者：「會混淆」）。F7-10 畫它的
