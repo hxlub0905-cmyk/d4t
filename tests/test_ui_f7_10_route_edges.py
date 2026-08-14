@@ -1,10 +1,10 @@
-# F7-10 驗收：畫布要畫出 route 的隱含順序。
-"""**畫布上沒有線，不代表沒有連接。**
+# F7-10 驗收（2026-08-14 改版）：route 的隱含順序**不再畫成線**。
+"""F7-10 畫了金色虛線表達 route 順序；使用者實測半個月後退掉它：「會混淆」。
 
-引擎的依賴是「route 相鄰對 ∪ 顯式 edges」（``recipe.execution_order``），
-但畫布以前只畫顯式 edges。於是載入一份沒拉過線的 recipe，使用者看到的是
-九張互不相干的卡 —— 而它其實是照順序跑的。他只會得到兩種結論，兩種都是錯的：
-以為要自己連起來才會跑，或以為沒連線的卡不會執行。
+退掉的只有**畫**這件事：引擎的依賴仍是「route 相鄰對 ∪ 顯式 edges」、
+排版仍照隱含順序分欄（卡片的排列本身就表達順序，左→右、上→下）。
+F7-10 當年擔心的「沒有線以為互不相干」由現在的預設行為緩解：從卡片庫加卡
+與拖放都會建**顯式**連線，新做的 recipe 天生有線。這一檔改鎖新行為。
 """
 from __future__ import annotations
 
@@ -53,58 +53,33 @@ def window(qapp, lot):
     win.close()
 
 
-def _edges(canvas, implicit):
-    return [e for e in canvas._edges if e.implicit is implicit]
+def _edges(canvas):
+    return list(canvas._edges)
 
 
-def test_a_recipe_with_no_explicit_links_still_shows_how_data_flows(window):
-    """範例 recipe 一條線都沒拉，但它是一條鏈 —— 畫布要看得出來。"""
+def test_route_order_is_not_painted_as_lines(window):
+    """範例 recipe 一條線都沒拉 → 畫布上**零條線**（虛線退役），
+    但排版仍照順序分欄 —— 卡片的排列本身就是順序。"""
     assert window.model.edges == [], "前提：這份 recipe 沒有顯式 edges"
-    n = len(window.model.node_order)
-
-    implicit = _edges(window.pipeline, True)
-    assert implicit, "沒有畫出任何隱含連線 —— 使用者會以為卡片互不相干"
-    pairs = {e.pair() for e in implicit}
-    expected = set(zip(window.model.node_order, window.model.node_order[1:]))
-    assert pairs == expected
+    assert window.pipeline._edges == [], "route 順序不該畫成任何線"
+    # 排版仍照隱含順序：不是全部疊在第 0 欄
+    xs = {round(window.pipeline.card(nid).pos().x())
+          for nid in window.pipeline.node_ids()}
+    assert len(xs) > 1, "排版沒有吃隱含順序 —— 卡片全疊在同一欄"
 
 
-def test_the_implicit_order_matches_what_the_engine_actually_does(window):
-    """畫的東西必須是引擎真的依據的東西，不是另一套說法。"""
-    from adept.core.pipeline import execution_order
-
-    order = execution_order(window.model.to_recipe(), window.model.kind)
-    drawn = {e.pair() for e in _edges(window.pipeline, True)}
-    drawn |= {e.pair() for e in _edges(window.pipeline, False)}
-    for a, b in zip(order, order[1:]):
-        assert (a, b) in drawn, "引擎認為 %s → %s，畫布上卻沒有這條線" % (a, b)
-
-
-def test_implicit_links_look_different_and_cannot_be_deleted(window):
-    """隱含順序來自卡片的排列。刪掉它在語意上等於「把卡片從流程裡拿掉」——
-    那是另一個動作，不該用同一個 Delete 鍵完成。"""
-    from PySide6.QtWidgets import QGraphicsItem
-
-    for e in _edges(window.pipeline, True):
-        assert not e.flags() & QGraphicsItem.ItemIsSelectable
-        assert "order of the cards" in e.toolTip()
-    for e in _edges(window.pipeline, False):
-        assert e.flags() & QGraphicsItem.ItemIsSelectable
-
-
-def test_drawing_the_link_yourself_turns_it_into_a_real_one(window):
-    """使用者把隱含的那條連起來 → 變成實線，而且不會畫成兩條。"""
+def test_drawing_the_link_yourself_makes_a_solid_line(window):
+    """使用者自己拉的線照樣是實線，而且只有一條。"""
     a, b = window.model.node_order[0], window.model.node_order[1]
     window.pipeline.link_to(a, b)
 
     assert (a, b) in window.model.edges
-    assert (a, b) in {e.pair() for e in _edges(window.pipeline, False)}
-    assert (a, b) not in {e.pair() for e in _edges(window.pipeline, True)}, \
-        "同一對節點不可以同時有實線與虛線"
+    pairs = [e.pair() for e in window.pipeline._edges]
+    assert pairs.count((a, b)) >= 1
 
 
 def test_edge_pairs_still_reports_only_the_users_own_links(window):
-    """存檔寫的是使用者拉的線。隱含順序來自 route，存進 edges 會重複記錄。"""
+    """存檔寫的是使用者拉的線。route 順序不進 edges（也不再畫）。"""
     assert window.pipeline.edge_pairs() == window.model.edges == []
     window.pipeline.link_to(window.model.node_order[0],
                             window.model.node_order[2])
@@ -112,7 +87,7 @@ def test_edge_pairs_still_reports_only_the_users_own_links(window):
 
 
 def test_a_long_chain_wraps_instead_of_running_off_the_screen(window):
-    """隱含連線讓每一份 recipe 都有依賴，所以換行必須對深度排版也成立
+    """隱含順序讓每一份 recipe 都有依賴（就算不畫），換行必須對深度排版成立
     （不然九張卡又會排成一條 2500px 的橫列）。"""
     cols = set()
     for nid in window.pipeline.node_ids():

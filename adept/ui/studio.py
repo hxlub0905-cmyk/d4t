@@ -1862,6 +1862,9 @@ class StudioWindow(QMainWindow):
         total = sum(self._pre_popout_sizes) or self.canvas_column.height()
         self.canvas_column.setSizes([0, total])
         self._refresh_pipeline()          # 把現在的節點畫進新視窗
+        # 開窗那一刻跟主視窗長得一樣（含使用者拖過的位置）——
+        # 「彈出去被自動整理」正是使用者退掉的行為。
+        view.copy_positions_from(self.pipeline)
         dlg.show()
         view.fit_later()
 
@@ -2204,6 +2207,7 @@ class StudioWindow(QMainWindow):
         self._user_stream = None
         for view in self._canvases():
             view.set_selected(None)
+            view.forget_positions()   # 換了一份 recipe，別繼承上一份拖過的位置
         self.param_form.set_step(None, {}, [])
         self.stack.setCurrentWidget(self.param_form)
         self._refresh_all()

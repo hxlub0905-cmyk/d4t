@@ -365,7 +365,7 @@ def test_a_line_can_be_cut_where_it_is(window):
     assert window.model.has_edge(src, nid) is True
 
     edge = next(e for e in window.pipeline._edges
-                if not e.implicit and e.pair() == (src, nid))
+                if e.pair() == (src, nid))
     assert edge.acceptHoverEvents() is True
     # × 畫在線的中點，而 boundingRect 一定要蓋得住它（不然移開會留殘影）
     assert edge.boundingRect().contains(edge.cut_center())
@@ -373,14 +373,14 @@ def test_a_line_can_be_cut_where_it_is(window):
     assert edge.cut_hit(edge.cut_center() + QPointF(40, 40)) is False
 
 
-def test_the_dashed_line_has_no_cut_button(window):
-    """隱含的虛線刪不掉（它來自卡片的排列順序，不是使用者拉的），
-    所以不該長出一個看起來刪得掉的 ×。"""
+def test_route_order_has_no_lines_at_all(window):
+    """route 順序的金色虛線 2026-08-14 退役（使用者：「會混淆」）——
+    畫布上只有使用者拉的線，每一條都有 ×。"""
     src = window.model.node_order[0]
-    window.add_card_after(src, "denoise")
-    implicit = [e for e in window.pipeline._edges if e.implicit]
-    for e in implicit:
-        assert e.acceptHoverEvents() is False
+    nid = window.add_card_after(src, "denoise")
+    pairs = {e.pair() for e in window.pipeline._edges}
+    assert pairs == set(window.model.edges), \
+        "畫布上的線要恰好等於使用者拉的 edges"
 
 
 def test_tidy_puts_the_cards_back_on_the_grid(window):

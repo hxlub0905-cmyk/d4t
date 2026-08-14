@@ -69,6 +69,10 @@ def test_forward_edges_leave_and_enter_horizontally(window, qapp):
     """
     window.show()
     qapp.processEvents()
+    # 虛線退役後畫布只畫顯式線 —— 自己拉一條跨列的前行線來驗形狀。
+    order = window.model.node_order
+    window.model.add_edge(order[0], order[canvas_mod.WRAP + 1])
+    qapp.processEvents()
     checked = 0
     for edge in window.pipeline._edges:
         a = edge.src.out_port(edge.port)
@@ -224,6 +228,59 @@ def test_the_canvas_pops_out_into_its_own_window(window, qapp):
 
 
 # --------------------------------------------------------------------------- #
+# 第六輪：手動排的位置不准被「自動整理」掉
+# --------------------------------------------------------------------------- #
+def test_dragged_positions_survive_edits_and_popout(window, qapp):
+    """使用者拖好的佈局，改一個參數／開彈出視窗之後**不可以**跳回自動排版
+    （使用者原話：「不要幫我自動整理節點」）。要整批排回去有「排整齊」。"""
+    from PySide6.QtCore import QPointF
+
+    window.show()
+    qapp.processEvents()
+    nid = window.pipeline.node_ids()[1]
+    item = window.pipeline.node_item(nid)
+    item.setPos(QPointF(333.0, 444.0))
+
+    window.model.set_param(nid, list(window.model.nodes[nid].params)[0],
+                           window.model.nodes[nid].params[
+                               list(window.model.nodes[nid].params)[0]])
+    window.model.add_step("denoise")        # 觸發整張畫布重建
+    qapp.processEvents()
+    moved = window.pipeline.node_item(nid).pos()
+    assert (round(moved.x()), round(moved.y())) == (333, 444), \
+        "重建畫布把手動位置整理掉了：%s" % moved
+
+    window.open_canvas_window()
+    qapp.processEvents()
+    twin = window._popout_view.node_item(nid).pos()
+    assert (round(twin.x()), round(twin.y())) == (333, 444), \
+        "彈出視窗沒有沿用主視窗的位置"
+    window._canvas_popout.close()
+    qapp.processEvents()
+
+    # tidy 仍然是明確的「排回去」
+    window.pipeline.tidy()
+    back = window.pipeline.node_item(nid).pos()
+    assert (round(back.x()), round(back.y())) != (333, 444)
+
+
+def test_loading_another_recipe_forgets_old_positions(window, qapp):
+    """位置保留只在「同一份 recipe 一直編」的前提下成立 —— 換檔案之後，
+    上一份剛好同名的節點（load 幾乎每份都有）不該繼承拖過的位置。"""
+    from PySide6.QtCore import QPointF
+
+    window.show()
+    qapp.processEvents()
+    nid = window.pipeline.node_ids()[0]
+    window.pipeline.node_item(nid).setPos(QPointF(555.0, 555.0))
+    assert window.load_recipe_path(str(EXAMPLE), sync=True) is True
+    qapp.processEvents()
+    pos = window.pipeline.node_item(window.pipeline.node_ids()[0]).pos()
+    assert (round(pos.x()), round(pos.y())) != (555, 555), \
+        "換了一份 recipe 還繼承舊位置"
+
+
+# --------------------------------------------------------------------------- #
 # 第五輪：量測卡的 overlay 與勾選的統計量
 # --------------------------------------------------------------------------- #
 def test_a_measure_card_draws_the_region_it_reads(window, qapp):
@@ -267,7 +324,8 @@ def test_glv_metrics_are_ticked_not_typed(window, qapp):
 def _mouse_event(etype, pos, button, buttons):
     from PySide6.QtCore import QPointF
     from PySide6.QtGui import QMouseEvent
-    return QMouseEvent(etype, QPointF(pos), button, buttons,
+    # 6 參數版（含 globalPos）—— 5 參數版在 Qt6 是 deprecated，CI 會警告。
+    return QMouseEvent(etype, QPointF(pos), QPointF(pos), button, buttons,
                        canvas_mod.Qt.NoModifier)
 
 

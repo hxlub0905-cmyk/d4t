@@ -282,6 +282,15 @@ def test_an_edge_that_runs_backwards_stays_near_its_two_ends(window, qapp):
     """
     assert window.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
     qapp.processEvents()
+    # 隱含順序的虛線 2026-08-14 退役 —— 換行那條線現在要自己拉（顯式），
+    # 這條測試鎖的是**形狀**，線是誰畫的不重要。
+    from adept.ui import canvas as canvas_mod
+
+    order = window.model.node_order
+    wrap_at = canvas_mod.WRAP
+    assert len(order) > wrap_at, "前提：這份 recipe 要長到會換行"
+    window.model.add_edge(order[wrap_at - 1], order[wrap_at])
+    qapp.processEvents()
 
     view = window.pipeline
     backwards = []

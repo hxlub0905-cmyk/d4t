@@ -61,7 +61,9 @@
     },
     "sub": {
       "step": "subtract",
-      "params": {},
+      "params": {
+        "b": "ref_aligned"
+      },
       "enabled": true
     },
     "dn": {

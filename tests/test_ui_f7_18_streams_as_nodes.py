@@ -278,59 +278,16 @@ def test_adding_from_the_library_follows_the_selected_card(window):
 
 
 # --------------------------------------------------------------------------- #
-# 3. 虛線不能跟實線同一個顏色
+# 3. 虛線退役（2026-08-14）：route 順序不再畫成線
+#    （F7-18 給了虛線自己的色相；使用者實測後整條退掉 ——「會混淆」。
+#      這裡改鎖「真的沒畫」，孤兒 token 也一併移除。）
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("theme_name", ["light", "dark"])
-def test_the_implicit_edge_has_its_own_hue(qapp, theme_name):
-    """同色淡一點只說得出「比較不重要」。這兩種線是不同的東西：一條是使用者
-    拉的（刪得掉），一條是卡片排列帶來的順序（刪不掉，虛線的意思是「這裡可以
-    拉」）。而深淺在縮放與換主題之後就不一定分得出來了。"""
-    from PySide6.QtGui import QColor
-
-    theme_mod.apply_theme(qapp, theme_name)
-    solid = QColor(theme_mod.TOKENS["canvas_edge"])
-    dashed = QColor(theme_mod.TOKENS["canvas_edge_implicit"])
-    assert dashed.isValid() and solid.isValid()
-    # 色相差得出來（不是同一個灰的深淺），而且亮度不能差太多（同一套色票）
-    assert abs(dashed.hue() - solid.hue()) > 20
-    assert abs(dashed.lightness() - solid.lightness()) < 70
-    theme_mod.apply_theme(qapp, "light")
-
-
-def test_the_canvas_actually_paints_the_two_kinds_differently(window, qapp):
-    """token 換了不代表畫出來不一樣 —— ``paint()`` 也要真的去讀它。"""
-    from PySide6.QtGui import QColor, QPixmap
-
+def test_route_order_draws_no_dashed_lines(window, qapp):
     assert window.load_recipe_path(str(EXAMPLE / "die_to_die_basic.json"),
                                    sync=True) is True
-    # 這份範例只有 route 順序（全虛線）—— 親手拉一條，兩種線才都在畫面上。
+    assert window.pipeline._edges == [], "route 順序不該畫成任何線"
+    # 親手拉一條 → 唯一的線是實線
     window._on_edge_added("load", "sub", "test")
-    edges = window.pipeline._edges
-    assert any(e.implicit for e in edges), "這份 recipe 應該有隱含順序的虛線"
-    assert any(not e.implicit for e in edges), "也要有使用者拉的實線"
-
-    def dominant_hue(edge):
-        """畫出來那條線的主色相（抗鋸齒會混出一堆中間色，取最常見的那個）。"""
-        from PySide6.QtGui import QPainter
-
-        rect = edge.boundingRect()
-        pm = QPixmap(int(rect.width()) + 4, int(rect.height()) + 4)
-        pm.fill(QColor("#ffffff"))
-        p = QPainter(pm)
-        p.translate(-rect.topLeft())
-        edge.paint(p, None, None)
-        p.end()
-        img = pm.toImage()
-        counts = {}
-        for x in range(img.width()):
-            for y in range(img.height()):
-                c = img.pixelColor(x, y)
-                if c.hue() >= 0 and c != QColor("#ffffff"):
-                    counts[c.hue()] = counts.get(c.hue(), 0) + 1
-        assert counts, "這條線根本沒畫出有顏色的畫素"
-        return max(counts.items(), key=lambda kv: kv[1])[0]
-
-    solid = dominant_hue(next(e for e in edges if not e.implicit))
-    dashed = dominant_hue(next(e for e in edges if e.implicit))
-    assert abs(solid - dashed) > 60, (
-        "虛線與實線畫出來仍然是同一個色相（solid=%d dashed=%d）" % (solid, dashed))
+    assert len(window.pipeline._edges) >= 1
+    assert "canvas_edge_implicit" not in theme_mod.TOKENS, \
+        "虛線退役了，色票不要留孤兒 token"

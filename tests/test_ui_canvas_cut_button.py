@@ -88,7 +88,7 @@ def _wired_pair(window, step_key="denoise"):
     nid = window.add_card_after(src, step_key)
     assert window.model.has_edge(src, nid) is True
     edge = next(e for e in window.pipeline._edges
-                if not e.implicit and e.pair() == (src, nid))
+                if e.pair() == (src, nid))
     return src, nid, edge
 
 

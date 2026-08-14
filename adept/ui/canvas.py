@@ -86,7 +86,7 @@ _CUT_R = 8.0
 
 #: 連線的 z 值。節點是 0，所以線平常畫在卡片**底下**（n8n 也是這樣，
 #: 卡片才是主角）；滑鼠移上來的那一條抬到卡片之上 —— 見 ``hoverEnterEvent``。
-_Z_EDGE, _Z_EDGE_IMPLICIT, _Z_EDGE_HOVER = -1.0, -2.0, 1.0
+_Z_EDGE, _Z_EDGE_HOVER = -1.0, 1.0
 
 #: 還沒拉線時，一列最多排幾張卡（見 :func:`layout_columns`）。
 WRAP = 4
@@ -500,37 +500,25 @@ class _NodeItem(QGraphicsItem):
 class _EdgeItem(QGraphicsItem):
     """一條連線（三次貝茲，左→右）。點它可選取，``Delete`` 移除。
 
-    ``implicit=True`` 是 **route 的隱含順序**（F7-10），畫成虛線、不可選取。
-    引擎的依賴是「route 相鄰對 ∪ 顯式 edges」——
-    也就是說**畫布上沒有線，不代表沒有連接**。以前只畫顯式 edges，於是載入
-    一份沒拉過線的 recipe 看到的是「九張互不相干的卡」，但它其實是照順序跑的。
-    使用者只會得到兩種結論，兩種都是錯的：以為要自己連起來才會跑，
-    或以為沒連線的卡不會執行。
-
-    不可選取（也就刪不掉）是刻意的：隱含順序來自卡片的排列，
-    刪掉它在語意上等於「把這張卡從流程裡拿掉」，那是另一個動作。
+    歷史：F7-10 起這裡還有第二種線 —— route 隱含順序的金色虛線
+    （``implicit=True``）。**2026-08-14 使用者退掉了它**：「會混淆」。
+    引擎的依賴仍然是「route 相鄰對 ∪ 顯式 edges」（那沒有變，變的只有
+    畫不畫），排版也仍然吃隱含順序（``set_nodes`` 的 ``self._implicit``）。
+    F7-10 擔心的「沒有線以為互不相干」由現在的預設行為緩解：從卡片庫加卡
+    （``add_card_after``）與拖放都會建**顯式**連線，新做的 recipe 天生有線。
     """
 
     def __init__(self, src: _NodeItem, dst: _NodeItem, canvas: "PipelineCanvas",
-                 port: int = 0, implicit: bool = False):
+                 port: int = 0):
         super().__init__()
         self.src, self.dst, self.canvas, self.port = src, dst, canvas, int(port)
-        self.implicit = bool(implicit)
         self._hover = False
-        self.setFlag(QGraphicsItem.ItemIsSelectable, not self.implicit)
-        self.setZValue(_Z_EDGE_IMPLICIT if self.implicit else _Z_EDGE)
-        if not self.implicit:
-            # 滑鼠移上來要出現「斷開」的 ×（F7-22）。隱含的虛線沒有這回事：
-            # 它刪不掉（那條線來自卡片的排列順序，不是使用者拉的）。
-            self.setAcceptHoverEvents(True)
-        if self.implicit:
-            self.setToolTip(
-                "%s runs before %s because of the order of the cards.\n"
-                "Drag from a port to make the connection explicit."
-                % (src.node_id, dst.node_id))
-        else:
-            self.setToolTip("%s → %s  (click the × to disconnect)"
-                            % (src.node_id, dst.node_id))
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setZValue(_Z_EDGE)
+        # 滑鼠移上來要出現「斷開」的 ×（F7-22）。
+        self.setAcceptHoverEvents(True)
+        self.setToolTip("%s → %s  (click the × to disconnect)"
+                        % (src.node_id, dst.node_id))
 
     # ---- 斷開鈕（F7-22）---------------------------------------------------
     #: 斷開鈕的命中半徑。畫出來的圓是 ``_CUT_R``，多給 2px 是因為使用者瞄的是
@@ -562,7 +550,7 @@ class _EdgeItem(QGraphicsItem):
         super().hoverLeaveEvent(e)
 
     def mousePressEvent(self, e) -> None:       # noqa: D102 - Qt hook
-        if (not self.implicit and self._hover
+        if (self._hover
                 and e.button() == Qt.LeftButton and self.cut_hit(e.pos())):
             self.canvas.edge_removed.emit(self.src.node_id, self.dst.node_id)
             e.accept()
@@ -628,10 +616,9 @@ class _EdgeItem(QGraphicsItem):
         """
         st = QPainterPathStroker(QPen(Qt.black, 10.0))
         path = st.createStroke(self.path())
-        if not self.implicit:
-            disc = QPainterPath()
-            disc.addEllipse(self.cut_center(), self.CUT_GRAB, self.CUT_GRAB)
-            path = path.united(disc)
+        disc = QPainterPath()
+        disc.addEllipse(self.cut_center(), self.CUT_GRAB, self.CUT_GRAB)
+        path = path.united(disc)
         return path
 
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
@@ -639,16 +626,7 @@ class _EdgeItem(QGraphicsItem):
         col = QColor(TOKENS["canvas_edge_active"] if self.isSelected()
                      else TOKENS["canvas_edge"])
         path = self.path()
-        if self.implicit:
-            # **自己的顏色**，不是實線色調淡（F7-18）。同色淡一點只說得出
-            # 「比較不重要」；這兩種線在語意上是不同的東西 —— 一條是使用者拉的
-            # （刪得掉、表達意圖），一條是卡片排列帶來的順序（刪不掉，想讓它
-            # 變成真的連線就自己拉一條）。虛線講的是「這裡可以拉」，那需要
-            # 一眼認得出來，而深淺在縮放與換主題之後就不一定分得出來了。
-            col = QColor(TOKENS["canvas_edge_implicit"])
-            p.setPen(QPen(col, 1.4, Qt.DashLine))
-        else:
-            p.setPen(QPen(col, 2.2 if self.isSelected() else 1.6))
+        p.setPen(QPen(col, 2.2 if self.isSelected() else 1.6))
         p.setBrush(Qt.NoBrush)
         p.drawPath(path)
 
@@ -657,7 +635,7 @@ class _EdgeItem(QGraphicsItem):
         # 選起來按 Delete 本來就做得到，但**畫面上沒有任何東西講出這件事** ——
         # 接錯一條線的人會卡在那裡。刪除的入口要長在被刪的東西上面。
         # 箭頭跟 × 二選一：兩個都畫在中點會疊成一團。
-        if self._hover and not self.implicit:
+        if self._hover:
             c = self.cut_center()
             p.setPen(Qt.NoPen)
             p.setBrush(QBrush(QColor(TOKENS["danger_text"])))
@@ -818,41 +796,71 @@ class PipelineCanvas(QGraphicsView):
         self._consume_pending_fit()
 
     # ---- 對外（與 PipelinePanel 對齊）--------------------------------------
+    def forget_positions(self) -> None:
+        """下一次 ``set_nodes`` 不要沿用現在的節點位置（換了一份 recipe 時用）。
+
+        位置平常是**保留**的（見 set_nodes）—— 但那是「同一份 recipe 一直在
+        編」的前提。換檔案之後，上一份剛好同名的節點（load_patch 幾乎每份都
+        有）不該繼承拖過的位置。
+        """
+        self._keep_positions = False
+
     def set_nodes(self, nodes: Sequence[Dict[str, Any]],
                   edges: Sequence[Tuple[str, str]] = ()) -> None:
-        """重建整張畫布。``nodes`` 依執行順序，``edges`` 是顯式連線。"""
+        """重建整張畫布。``nodes`` 依執行順序，``edges`` 是顯式連線。
+
+        **既有節點的位置保留**（2026-08-14 使用者要求）：重建發生在每一次
+        model 變動（改參數、開彈出視窗…），以前每次都重跑自動排版 ——
+        使用者剛拖好的佈局在改一個參數之後就被「自動整理」掉。現在只有
+        **新**節點拿排版位置；要整批排回去，按「排整齊」（tidy）。
+        """
+        prev = ({nid: item.pos() for nid, item in self._items.items()}
+                if getattr(self, "_keep_positions", True) else {})
+        self._keep_positions = True
         self._scene.clear()
         self._hover_node = None            # 舊的圖元剛被 clear() 銷毀
         self._items, self._edges = {}, []
         self._order = [str(n.get("node_id", "")) for n in nodes]
         self._pairs = [(str(a), str(b)) for a, b in (edges or ())]
 
-        # route 的相鄰對也是**真的依賴**（engine 的 execution_order 是
-        # 「route 相鄰對 ∪ edges」），所以排版與繪製都要把它算進去。
+        # route 的相鄰對是**真的依賴**（engine 的 execution_order 是
+        # 「route 相鄰對 ∪ edges」），**排版**照樣把它算進去 —— 但 2026-08-14
+        # 起不再畫成金色虛線（使用者：「會混淆」）。畫布上只畫使用者拉的線；
+        # 順序上的依賴由卡片的排列（左→右、上→下）表達。
         self._implicit = [pair for pair in zip(self._order, self._order[1:])
                           if pair not in set(self._pairs)]
 
         pos = layout_columns(self._order, self._pairs + self._implicit)
         for info in nodes:
             item = _NodeItem(info, self)
-            col, row = pos.get(item.node_id, (0, 0))
-            item.setPos(col * (NODE_W + COL_GAP), row * (NODE_H + ROW_GAP))
+            if item.node_id in prev:
+                item.setPos(prev[item.node_id])
+            else:
+                col, row = pos.get(item.node_id, (0, 0))
+                item.setPos(col * (NODE_W + COL_GAP), row * (NODE_H + ROW_GAP))
             self._scene.addItem(item)
             self._items[item.node_id] = item
 
-        for pairs, implicit in ((self._pairs, False), (self._implicit, True)):
-            for a, b in pairs:
-                if a not in self._items or b not in self._items:
-                    continue
-                src, dst = self._items[a], self._items[b]
-                for port in self._ports_between(src, dst):
-                    edge = _EdgeItem(src, dst, self, port, implicit=implicit)
-                    self._scene.addItem(edge)
-                    self._edges.append(edge)
+        for a, b in self._pairs:
+            if a not in self._items or b not in self._items:
+                continue
+            src, dst = self._items[a], self._items[b]
+            for port in self._ports_between(src, dst):
+                edge = _EdgeItem(src, dst, self, port)
+                self._scene.addItem(edge)
+                self._edges.append(edge)
 
         self.set_selected(self._selected)
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self._scene.setSceneRect(rect)
+
+    def copy_positions_from(self, other: "PipelineCanvas") -> None:
+        """把另一份畫布的節點位置搬過來（彈出視窗開啟時跟主視窗一致）。"""
+        for nid, item in other._items.items():
+            mine = self._items.get(nid)
+            if mine is not None:
+                mine.setPos(item.pos())
+        self.refresh_edges()
 
     def node_item(self, node_id: str):
         """畫布上那個節點（測試與外部檢查用；沒有回 ``None``）。"""
