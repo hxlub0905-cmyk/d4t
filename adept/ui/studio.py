@@ -2300,6 +2300,8 @@ class StudioWindow(QMainWindow):
         current = type(self._inspector) if self._inspector is not None else None
         if cls is not current:
             if self._inspector is not None:
+                # 面板被拆掉就不會再有「放開」——影像上的綠帶會永遠留著。
+                self._on_measure_ended()
                 self.inspector_slot.removeWidget(self._inspector)
                 self._inspector.setParent(None)
                 self._inspector.deleteLater()
@@ -2307,12 +2309,39 @@ class StudioWindow(QMainWindow):
             if cls is not None:
                 self._inspector = cls(self.inspector_host)
                 self.inspector_slot.addWidget(self._inspector)
+                self._connect_inspector(self._inspector)
             self.btn_tab_card.setText(str(getattr(cls, "title", "Card"))
                                       if cls is not None else "Card")
         # **每次都要同步頁面**，不能因為「儀表類別沒變」就跳過：兩張都沒有儀表
         # 的卡片連續選下去時，類別確實沒變（都是 None），但畫面若停在儀表那一頁
         # 就是一片空白 —— 而那比原本的特徵表還糟。
         self.show_bottom_page(0 if cls is not None else 1)
+
+    def _connect_inspector(self, insp: Any) -> None:
+        """儀表能發的選配訊號在這裡接起來。
+
+        用 ``getattr`` 探而不是 ``isinstance``：加一個會量測的儀表時，這裡不必
+        跟著改（F7-17 那條「加新卡不必動 UI」的延伸）。
+        """
+        sig = getattr(insp, "measure_changed", None)
+        if sig is not None:
+            sig.connect(self._on_measure)
+        sig = getattr(insp, "measure_ended", None)
+        if sig is not None:
+            sig.connect(self._on_measure_ended)
+
+    def _on_measure(self, axis: str, start: float, end: float) -> None:
+        """曲線面板上按著量測尺 → 影像上標出同一段（F8）。
+
+        兩張圖都標：並排比對開著的時候，使用者量的是「這個位置」而不是
+        「左邊那張的這個位置」。
+        """
+        for view in (self.image_view, self.image_view_b):
+            view.set_measure(axis, start, end)
+
+    def _on_measure_ended(self) -> None:
+        for view in (self.image_view, self.image_view_b):
+            view.clear_measure()
 
     def _refresh_inspector(self, result: Any = None) -> None:
         """把三種來源餵給儀表：這張卡的參數、這一顆的結果、整批的結果。"""

@@ -30,6 +30,7 @@ from PySide6.QtGui import (
     QColor,
     QDrag,
     QFont,
+    QFontMetricsF,
     QImage,
     QPainter,
     QPainterPath,
@@ -465,6 +466,8 @@ class ImageView(QWidget):
         #: 疊在影像上的 ROI 框（正規化座標）。見 :meth:`set_overlay`。
         self._overlay: List[Tuple[float, float, float, float]] = []
         self._overlay_focus = -1
+        #: 量測尺按著時的那一條帶（axis, 起, 迄；影像像素）。見 :meth:`set_measure`。
+        self._measure: Optional[Tuple[str, float, float]] = None
 
     # -- public API --------------------------------------------------------
     def set_image(self, arr: Optional[np.ndarray]) -> None:
@@ -585,6 +588,37 @@ class ImageView(QWidget):
         """現在疊了幾個框（測試與狀態列讀這個，不去讀畫素）。"""
         return len(self._overlay)
 
+    def set_measure(self, axis: str, start: float, end: float) -> None:
+        """曲線面板上的量測尺按著時，在影像上標出**同一段**（F8 量測尺）。
+
+        為什麼影像上也要標
+        ------------------
+        曲線面板上的一段只是「第 40 到第 74 個取樣點」。使用者要判斷的是
+        「我量到的是不是兩根 MG 的距離」—— 那個問題只有看影像答得出來。
+        少了這條同步標記，量測尺量到的東西就得靠腦補對回圖上。
+
+        座標是**影像像素**（投影曲線一個取樣點 = 一個像素列／行，所以兩者
+        就是同一個索引）。``axis`` 為 ``"x"`` 時標的是兩條垂直線之間，
+        ``"y"`` 是兩條水平線之間。
+        """
+        axis = str(axis or "")
+        if axis not in ("x", "y"):
+            self.clear_measure()
+            return
+        a, b = float(start), float(end)
+        self._measure = (axis, min(a, b), max(a, b))
+        self.update()
+
+    def clear_measure(self) -> None:
+        """放開量測尺 —— 標記跟著消失（它是「現在正在量」的回饋，不是註記）。"""
+        if self._measure is not None:
+            self._measure = None
+            self.update()
+
+    def measure_span(self) -> Optional[Tuple[str, float, float]]:
+        """現在標著的那一段（沒有就 None）。測試與狀態列讀這個。"""
+        return self._measure
+
     def _paint_overlay(self, p: QPainter) -> None:
         if self._pixmap is None or not self._overlay:
             return
@@ -604,6 +638,41 @@ class ImageView(QWidget):
                        max(1.0, nw * iw * s), max(1.0, nh * ih * s))
             p.setPen(thick if i == self._overlay_focus else thin)
             p.drawRect(r)
+
+    def _paint_measure(self, p: QPainter) -> None:
+        """量測尺按著時的那一條帶：兩條綠線 + 中間一層很淡的綠。
+
+        畫在 ROI 框**之後**，因為它是「使用者手上正在做的事」—— 被框壓住的話
+        就得先找它在哪。顏色跟框刻意不同色相（框是 accent，尺是綠）：兩者同時
+        在畫面上，而「哪一條是我剛剛拉的」不能只靠深淺分辨。
+        """
+        if self._pixmap is None or self._measure is None:
+            return
+        axis, a, b = self._measure
+        iw, ih = self._pixmap.width(), self._pixmap.height()
+        s = self._scale or 1.0
+        if axis == "x":
+            band = QRectF(self._offset.x() + a * s, self._offset.y(),
+                          max(1.0, (b - a) * s), ih * s)
+        else:
+            band = QRectF(self._offset.x(), self._offset.y() + a * s,
+                          iw * s, max(1.0, (b - a) * s))
+        green = QColor(TOKENS["success"])
+        fill = QColor(green)
+        fill.setAlpha(48)
+        p.setPen(Qt.NoPen)
+        p.setBrush(fill)
+        p.drawRect(band)
+        pen = QPen(green, 1.6)
+        pen.setCosmetic(True)          # 縮到很小時線不能跟著消失
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        if axis == "x":
+            for x in (band.left(), band.right()):
+                p.drawLine(QPointF(x, band.top()), QPointF(x, band.bottom()))
+        else:
+            for y in (band.top(), band.bottom()):
+                p.drawLine(QPointF(band.left(), y), QPointF(band.right(), y))
 
     def _to_image(self, p: QPointF) -> QPointF:
         s = self._scale or 1.0
@@ -633,6 +702,7 @@ class ImageView(QWidget):
         p.drawPixmap(target, self._pixmap, QRectF(self._pixmap.rect()))
         p.setRenderHint(QPainter.SmoothPixmapTransform, False)
         self._paint_overlay(p)
+        self._paint_measure(p)
         p.end()
 
     # -- interaction -------------------------------------------------------
@@ -993,12 +1063,19 @@ class ProfilePanel(QWidget):
     而那種 bug 幾乎不可能靠肉眼發現。
     """
 
-    _EMPTY = "(select a Locate region by profile card to see its curve)"
+    #: 量測尺按著時，這一段量到哪裡（axis, 起, 迄；單位是**影像像素**）。
+    #: 上面那張影像靠它同步標出同一段 —— 見 :meth:`ImageView.set_measure`。
+    measure_changed = Signal(str, float, float)
+    #: 放開了。標記要跟著消失，它是「現在正在量」的回饋不是註記。
+    measure_ended = Signal()
+
+    _EMPTY = "(select a Profile card to see its curve)"
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._data: Dict[str, Any] = {}
         self._name = ""
+        self._ruler: Optional[Tuple[float, float]] = None
         self.setMinimumHeight(96)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setToolTip(
@@ -1006,16 +1083,119 @@ class ProfilePanel(QWidget):
             "the boundaries that were found; the shaded sections are the "
             "stripes this card uses. The dashed line marked 'defect' is the "
             "middle of the patch, which is where the tool put the defect - it "
-            "is a marker, not something you set.")
+            "is a marker, not something you set.\n\n"
+            "Press and drag across the curve to measure: the green band shows "
+            "the same stretch on the image above, and the readout gives the "
+            "distance in pixels - and the pitch, if you dragged across more "
+            "than one stripe. Let go to clear it.")
 
     # -- public ------------------------------------------------------------
     def set_data(self, name: str, data: Optional[Dict[str, Any]]) -> None:
         self._name = str(name or "")
         self._data = dict(data or {})
+        self._end_ruler()
+        self.setCursor(Qt.CrossCursor if self.has_data() else Qt.ArrowCursor)
         self.update()
 
     def has_data(self) -> bool:
         return bool(self._data.get("profile"))
+
+    # -- ruler (F8) --------------------------------------------------------
+    def axis(self) -> str:
+        """這條曲線是哪一軸的投影（``"x"`` 直的條紋／``"y"`` 橫的）。"""
+        return str(self._data.get("axis") or "")
+
+    def ruler_span(self) -> Optional[Tuple[float, float]]:
+        """量測尺現在夾住的那一段（起 ≤ 迄，影像像素）；沒在量就 None。"""
+        if self._ruler is None:
+            return None
+        a, b = self._ruler
+        return (min(a, b), max(a, b))
+
+    def ruler_text(self) -> str:
+        """量測尺的讀數。
+
+        為什麼不只講「幾個像素」
+        ----------------------
+        使用者拉這一把的目的多半是**問出 pitch**（他不知道 pitch 是多少，
+        所以才要量）。而「量一個週期」是所有量法裡最不準的一種 —— 兩端各差
+        一個像素，pitch 就差兩個。橫跨好幾根條紋再除以根數，誤差就被根數除掉。
+        所以只要這一段裡有兩根以上抓到的條紋，就順便把 pitch 算給他。
+        """
+        span = self.ruler_span()
+        if span is None:
+            return ""
+        a, b = span
+        bits = ["%.1f px" % (b - a)]
+        mids = self._centers_in(a, b)
+        if len(mids) >= 2:
+            bits.append("%d stripes" % len(mids))
+            bits.append("pitch %.1f px" % ((mids[-1] - mids[0]) / (len(mids) - 1)))
+        return " · ".join(bits)
+
+    def _centers_in(self, a: float, b: float) -> List[float]:
+        """這一段裡有幾根條紋的**中心**（用中心不用邊，邊有升有降會多算一倍）。"""
+        bands = self._data.get("selected") or self._data.get("bands") or []
+        out = []
+        for band in bands:
+            try:
+                mid = (float(band[0]) + float(band[1])) / 2.0
+            except (TypeError, IndexError, ValueError):
+                continue
+            if a <= mid <= b:
+                out.append(mid)
+        return sorted(out)
+
+    def _plot_rect(self) -> QRectF:
+        """曲線畫在哪一塊。
+
+        **繪製與命中判定共用這一個** —— 兩邊各自算一次的話，量測尺會跟曲線
+        差幾個像素，而那種偏差肉眼看不出來卻會讓讀數一直是錯的。
+        """
+        return QRectF(self.rect()).adjusted(6, 6, -6, -6).adjusted(4, 16, -4, -4)
+
+    def _index_at(self, x: float) -> float:
+        """widget 的 x 座標 → 曲線上的取樣點（= 影像像素）。"""
+        n = len(self._data.get("profile") or [])
+        plot = self._plot_rect()
+        if n < 2 or plot.width() <= 0:
+            return 0.0
+        t = (float(x) - plot.left()) / plot.width()
+        return max(0.0, min(float(n - 1), t * (n - 1)))
+
+    def _end_ruler(self) -> None:
+        if self._ruler is not None:
+            self._ruler = None
+            self.measure_ended.emit()
+            self.update()
+
+    def _emit_ruler(self) -> None:
+        span = self.ruler_span()
+        if span is not None:
+            self.measure_changed.emit(self.axis(), span[0], span[1])
+
+    def mousePressEvent(self, e) -> None:          # noqa: D102 - Qt hook
+        if e.button() != Qt.LeftButton or not self.has_data():
+            return
+        i = self._index_at(e.position().x())
+        self._ruler = (i, i)
+        self._emit_ruler()
+        self.update()
+        e.accept()
+
+    def mouseMoveEvent(self, e) -> None:           # noqa: D102 - Qt hook
+        if self._ruler is None:
+            return
+        self._ruler = (self._ruler[0], self._index_at(e.position().x()))
+        self._emit_ruler()
+        self.update()
+        e.accept()
+
+    def mouseReleaseEvent(self, e) -> None:        # noqa: D102 - Qt hook
+        if e.button() != Qt.LeftButton or self._ruler is None:
+            return
+        self._end_ruler()
+        e.accept()
 
     def summary(self) -> str:
         """一行文字摘要（測試與狀態列都用這個，不用去讀畫素）。"""
@@ -1065,7 +1245,7 @@ class ProfilePanel(QWidget):
         lo = min(min(prof), min(raw) if raw else min(prof))
         hi = max(max(prof), max(raw) if raw else max(prof))
         span = max(hi - lo, 1e-6)
-        plot = rect.adjusted(4, 16, -4, -4)
+        plot = self._plot_rect()
 
         def to_x(i: float) -> float:
             return plot.left() + plot.width() * (float(i) / max(1, n - 1))
@@ -1120,6 +1300,8 @@ class ProfilePanel(QWidget):
             x = to_x(int(t))
             p.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
 
+        self._paint_ruler(p, plot, to_x)
+
         p.setPen(QColor(TOKENS["text_secondary"]))
         f = p.font()
         f.setPointSizeF(max(7.0, f.pointSizeF() - 1.0))
@@ -1127,6 +1309,43 @@ class ProfilePanel(QWidget):
         p.drawText(QRectF(rect.left() + 6, rect.top() + 2, rect.width() - 12, 14),
                    Qt.AlignVCenter | Qt.AlignLeft, self.summary())
         p.end()
+
+    def _paint_ruler(self, p: QPainter, plot: QRectF, to_x) -> None:
+        """量測尺：兩條綠線、中間一層淡綠、加上讀數。
+
+        綠色是刻意跟畫面上其他東西**換一個色相**的：曲線是墨色、轉折線是
+        accent、選中的段是 accent 的淡底 —— 量測尺再從那一家挑一個色階的話，
+        「哪一條是我剛剛拉的」就只剩深淺可分，而深淺會被主題與縮放吃掉。
+        """
+        rul = self.ruler_span()
+        if rul is None:
+            return
+        x0, x1 = to_x(rul[0]), to_x(rul[1])
+        green = QColor(TOKENS["success"])
+        if x1 - x0 >= 1.0:
+            fill = QColor(green)
+            fill.setAlpha(40)
+            p.setPen(Qt.NoPen)
+            p.setBrush(fill)
+            p.drawRect(QRectF(x0, plot.top(), x1 - x0, plot.height()))
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(green, 1.4))
+        for x in (x0, x1):
+            p.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
+
+        text = self.ruler_text()
+        if not text:
+            return
+        f = p.font()
+        f.setPointSizeF(max(7.0, f.pointSizeF() - 1.0))
+        p.setFont(f)
+        w = QFontMetricsF(f).horizontalAdvance(text) + 8.0
+        # 讀數貼著自己量的那一段（不要放到面板角落 —— 兩條曲線各有一把尺，
+        # 放在固定位置的話讀數就得先對回是哪一把）；但不准跑出畫面外。
+        left = min(max(plot.left(), min(x0, x1) + 3.0), plot.right() - w)
+        p.setPen(green)
+        p.drawText(QRectF(left, plot.top() + 1, w, 12),
+                   Qt.AlignLeft | Qt.AlignVCenter, text)
 
 
 class StreamPicker(QWidget):

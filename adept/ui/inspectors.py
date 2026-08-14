@@ -36,7 +36,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
@@ -534,6 +534,11 @@ class CrossInspector(Inspector):
 
     title = "Crossings"
 
+    #: 量測尺（F8）：轉發兩條曲線各自的訊號，讓主視窗在影像上標同一段。
+    #: 這裡不做判斷，只轉發 —— 儀表不該知道影像檢視器存不存在。
+    measure_changed = Signal(str, float, float)
+    measure_ended = Signal()
+
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         from .widgets import ProfilePanel
@@ -545,6 +550,8 @@ class CrossInspector(Inspector):
         self.down = ProfilePanel(self)
         for panel in (self.across, self.down):
             panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            panel.measure_changed.connect(self.measure_changed)
+            panel.measure_ended.connect(self.measure_ended)
             lay.addWidget(panel)
 
     def region(self) -> str:
