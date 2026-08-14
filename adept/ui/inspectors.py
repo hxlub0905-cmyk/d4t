@@ -541,14 +541,35 @@ class CrossInspector(Inspector):
     #: 「把量到的間距填進參數格」→ 主視窗做 ``model.set_param``。
     #: 儀表不碰模型（它連 recipe 長什麼樣都不知道），只說出請求。
     param_requested = Signal(str, object)
+    #: 「用**整批** patch 量一次，把結果填進參數」（F8 第七輪的一鍵校正）。
+    #: 儀表發不動這件事 —— 它沒有 dataset 也沒有 recipe，只有主視窗有。
+    calibrate_requested = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        from .widgets import ProfilePanel
+        from .widgets import ProfilePanel, small_button
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
+
+        # 一鍵校正。放在兩條曲線的上面：它做的事是「把這兩條曲線在整批上
+        # 各量一次」，而按鈕要貼著它講的東西。
+        self.calibrate_btn = small_button(
+            "Measure pitch && width from this lot", shape="wide",
+            tip=("Measure the stripe spacing and width on every loaded "
+                 "defect and fill the answers into this card. One patch "
+                 "measures with a little noise and a small patch often "
+                 "cannot even tell that the spacing alternates - the whole "
+                 "lot can. Uses the card's current material settings "
+                 "(which stripes, how many kinds), so set those first."),
+            parent=self)
+        self.calibrate_btn.clicked.connect(self.calibrate_requested)
+        head = QVBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.addWidget(self.calibrate_btn, 0, Qt.AlignLeft)
+        lay.addLayout(head)
+
         self.across = ProfilePanel(self)
         self.down = ProfilePanel(self)
         for panel in (self.across, self.down):

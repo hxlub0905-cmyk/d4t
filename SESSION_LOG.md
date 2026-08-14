@@ -120,6 +120,23 @@ this region across defects… 跑完才能看，不能實時調整」。只畫**
 裡好幾個像素，**最需要量準的那一根量得最髒**。改成每根用自己量到的寬度，
 只有靠 pitch 補出來的那幾根才借中位數。
 
+### 第七輪：一鍵校正（2026-08-14）
+
+「我可能有 50 張 100 張 patch，直接用這些 calculate 找出最好的設定？Use 彼此
+之間還是有 variation。」對 —— pitch 是**設計常數**，每張量的是同一個數字，
+單張的 ±0.5 px 雜訊聚合就除掉。`calibrate_axis`（`algo/grid.py`）聚合的是
+**原始間距**不是每張的結論：第一版聚合結論，交錯 40/33 的批安靜地錯成 36.5
+（單張大多只看得到三根線，而 50 張完全同意那個不存在的平均值）。分群判讀六個
+情境全實測：單一 pitch ✓、交錯 ✓（比值非整數＋同張交替）、缺線摺回 ✓（整數倍
+＋高群零星）、挑錯組拒填 ✓（整數倍＋兩群一樣多 —— 純度判別被資料打臉，
+mixing 0.36，改用豐度）、純雜訊拒 ✓（信心閘門）、混批 ✓。批次不同意就**拒填
+並講出兩群**，不硬給中位數。UI：`CrossInspector` 頂上一顆
+`Measure pitch & width from this lot`，`CalibrateWorker` 背景跑
+`collect_source_images`（跟區域檢視同一條路，量卡片實際看的那條流），填回走
+`set_param`（可復原）。順帶修掉「Use」按鈕被 `shape="square"` 的
+`max-width: 22px` 切到只剩一半數字。驗收 `test_roi_cross_calibrate.py`（9）+
+`test_ui_f8_calibrate.py`（7）。
+
 ### 第五輪：量測尺、CPODE、給定線寬（2026-08-14）
 
 **量測尺。** pitch 欄位可以留白，但條紋一髒，那張卡就會要求使用者填一個他不知道

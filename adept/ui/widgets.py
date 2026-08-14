@@ -1099,7 +1099,10 @@ class ProfilePanel(QWidget):
 
         # 「量給我填」。浮在面板上（同 kind="icon" 那幾顆的理由：這裡沒有卡片
         # 當底色）。只有在**它會改變什麼**的時候才出現 —— 見 _sync_button。
-        self._fill_btn = small_button("", kind="icon", parent=self)
+        # ⚠ shape 一定要 "wide"：square 的 QSS 是 max-width 22px，文字按鈕
+        # 放進去只剩「Use 4…」—— 使用者回報「只看得到一半的數字」就是它。
+        self._fill_btn = small_button("", shape="wide", kind="icon",
+                                      parent=self)
         self._fill_btn.setVisible(False)
         self._fill_btn.clicked.connect(self._request_pitch)
 

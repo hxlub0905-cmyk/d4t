@@ -60,6 +60,33 @@ def regions_of_node(node: Any) -> List[str]:
         return []
 
 
+def collect_source_images(recipe: Any, items: Sequence[Any], kind: str,
+                          node_id: str, source: str,
+                          limit: int = MAX_CHECK) -> List[Any]:
+    """對每一顆跑到 ``node_id`` 為止，取出那張卡要讀的 ``source`` 影像。
+
+    一鍵校正（F8 第七輪）用的：量 pitch 要量在**卡片實際看的那條流**上 ——
+    上游若有 Denoise/Normalize，量原始檔就量錯了對象。跑 pipeline 的方式跟
+    :func:`check_regions` 完全相同，所以「量到的」與「跑起來的」一定一致。
+
+    **永不 raise**：單顆出錯就少一張（校正是統計，缺幾張沒關係；
+    但如果整批都掛，回傳空清單，聚合那一層會講出來）。
+    """
+    out: List[Any] = []
+    for item in list(items)[:int(limit)]:
+        try:
+            res = run_defect(recipe, item, kind, keep_context=True,
+                             upto_node=node_id)
+        except Exception:                    # noqa: BLE001 — 單顆爆不殺整批
+            continue
+        ctx = getattr(res, "context", None)
+        images = dict(getattr(ctx, "images", {}) or {}) if ctx is not None else {}
+        img = images.get(str(source))
+        if img is not None:
+            out.append(np.asarray(img))
+    return out
+
+
 def check_regions(recipe: Any, items: Sequence[Any], kind: str, node_id: str,
                   regions: Sequence[str], thumb_size: int = 120,
                   source: Optional[str] = None) -> List[Dict[str, Any]]:

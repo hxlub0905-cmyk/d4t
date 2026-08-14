@@ -136,7 +136,8 @@ class _GlyphToolButton(_GlyphMixin, QToolButton):
     """工具列上會自己畫圖示的 QToolButton（``_tool_button(icon=…)`` 用）。"""
 
 from .workers import (
-    DatasetLoadWorker, PreviewWorker, RegionCheckWorker, TrialWorker,
+    CalibrateWorker, DatasetLoadWorker, PreviewWorker, RegionCheckWorker,
+    TrialWorker,
     _ThreadedWorker,
 )
 
@@ -436,6 +437,11 @@ class StudioWindow(QMainWindow):
         self.trial_worker = TrialWorker(self)
         self.thumb_worker = ThumbWorker(self)
         self.region_check_worker = RegionCheckWorker(self)
+        self.calibrate_worker = CalibrateWorker(self)
+        self.calibrate_worker.ready.connect(self._on_calibrated)
+        self.calibrate_worker.failed.connect(
+            lambda msg: self._status("Measuring across the lot failed: %s"
+                                     % msg, "error"))
 
         # ---- 去抖動計時器 --------------------------------------------------
         self._preview_timer = QTimer(self)
@@ -2332,6 +2338,82 @@ class StudioWindow(QMainWindow):
         sig = getattr(insp, "param_requested", None)
         if sig is not None:
             sig.connect(self._on_param_requested)
+        sig = getattr(insp, "calibrate_requested", None)
+        if sig is not None:
+            sig.connect(self._on_calibrate_requested)
+
+    #: 一鍵校正最多量幾顆。統計上 50 顆已經把單張雜訊除到 1/7，再多只是等待。
+    CALIBRATE_LIMIT = 60
+
+    def _on_calibrate_requested(self) -> None:
+        """一鍵校正（F8 第七輪）：整批量 pitch/線寬，量完填回這張卡。
+
+        跟「量測尺」「Use」是同一件事的三個尺度：拖一把尺（手動、單段）、
+        按 Use（自動、單張）、按這顆（自動、整批）。批次的價值在統計 ——
+        pitch 是設計常數，每張量的都是同一個數字，中位數把單張的雜訊除掉；
+        小 patch 看不出「間距交錯」，一批看得出。
+        """
+        nid = self.selected_node
+        node = self.model.nodes.get(nid or "")
+        if node is None or node.step != self.PROFILE_STEP:
+            return
+        items = self._items()
+        if not items:
+            self._status("Load a KLARF first - measuring across the lot "
+                         "needs the lot.", "error")
+            return
+        if not self.calibrate_worker.start(
+                self.model.to_recipe(), items[:self.CALIBRATE_LIMIT],
+                self.model.kind, nid, dict(node.params)):
+            self._status("Still measuring - please wait.")
+            return
+        self._status("Measuring stripe pitch and width on %d defects…"
+                     % min(len(items), self.CALIBRATE_LIMIT))
+
+    def _on_calibrated(self, result: Any) -> None:
+        """量完了：能填的填進卡片（走 set_param，可復原），不能填的講原因。"""
+        nid = self.selected_node
+        node = self.model.nodes.get(nid or "")
+        if node is None or node.step != self.PROFILE_STEP:
+            return                        # 量的過程中使用者換卡了 —— 別亂寫
+        res = dict(result or {})
+        filled, refused = [], []
+        for axis, side, word in (("x", "vertical", "upright"),
+                                 ("y", "horizontal", "flat")):
+            cal = res.get(axis)
+            if cal is None:
+                continue
+            if cal.note:
+                refused.append("%s: %s" % (word, cal.note))
+                continue
+            self.model.set_param(nid, "%s_pitch" % side, round(cal.pitch, 3))
+            self.model.set_param(nid, "%s_pitch_2" % side,
+                                 round(cal.pitch_2, 3))
+            bits = ("pitch %.1f / %.1f px" % (cal.pitch, cal.pitch_2)
+                    if cal.pitch_2 >= 2.0 else "pitch %.1f px" % cal.pitch)
+            if cal.width >= 1.0:
+                self.model.set_param(nid, "%s_width" % side,
+                                     round(cal.width, 3))
+                bits += ", width %.1f px" % cal.width
+            filled.append("%s %s (%d defects, %.0f%% agree)"
+                          % (word, bits, cal.n_used, cal.agree * 100.0))
+        node = self.model.nodes.get(nid)
+        self.param_form.set_step(
+            get_step(node.step).describe(), node.params,
+            self.model.available_streams(before_node=nid))
+        if refused:
+            # 拒絕的那一半是**主角**：它講的是「這批 patch 自己不同意」，
+            # 而那正是 kinds 沒設對的樣子。填了的也要一起講 —— 只報壞消息
+            # 的話，使用者會以為整件事失敗了，然後把填好的那一半也改掉。
+            msg = "Not filled in - %s" % " · ".join(refused)
+            if filled:
+                msg = "Filled %s. %s" % (" · ".join(filled), msg)
+            self._status(msg, "error")
+        elif filled:
+            self._status("Measured across the lot: %s." % " · ".join(filled))
+        else:
+            self._status("Nothing to measure - no defects had stripes.",
+                         "error")
 
     def _on_param_requested(self, name: str, value: Any) -> None:
         """儀表說「這一格該是這個值」（目前只有「量給我填」用到）。

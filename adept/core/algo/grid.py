@@ -56,7 +56,7 @@ from . import profile as algo_profile
 __all__ = ["StripeSet", "CrossResult", "find_stripes", "select_bands",
            "cross_boxes", "locate_crossings",
            "SELECT_RULES", "PLACEMENTS", "SIDES", "FILL_RULES",
-           "measure_pitches"]
+           "measure_pitches", "calibrate_axis", "AxisCalibration"]
 
 #: 「要哪一組條紋」。用**相對**亮度（跟這張圖上其他段比），不是絕對灰階 ——
 #: 絕對值會隨機台與曝光漂移，一份 recipe 就綁死在一台機器上。
@@ -835,6 +835,203 @@ def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
                  for c in found] if filled else []
         out.snap_shift = float(max(moved)) if moved else 0.0
     return out
+
+
+# --------------------------------------------------------------------------- #
+# 整批一起量（一鍵校正）
+# --------------------------------------------------------------------------- #
+#: 一張 patch 量到的值離整批的主流值多遠（比例）還算同一群。
+#: 單張的量測雜訊實測 ~2%（±0.5 px 在 24 px 上）；要分開的錯誤群是
+#: 「剛好一半」（挑錯組）—— 中間有 48% 的空檔，15% 取在雜訊與錯誤之間。
+CAL_TOL = 0.15
+
+#: 至少要有幾張量得到，聚合出來的數字才有意義。兩張的中位數跟擲硬幣沒兩樣。
+CAL_MIN_USED = 3
+
+#: 至少要有多少比例的 patch 落在主流群裡，才敢把主流值填回 recipe。
+#: 低於它就是「這批 patch 自己不同意」—— 而那**是資訊不是雜訊**（例：一半的
+#: patch 有 CPODE 而 kinds 沒設，那一半量到半個 pitch）。這時要講出兩群，
+#: 不能硬取中位數 —— 中位數會落在其中一群上，看起來像個答案。
+CAL_AGREE = 0.7
+
+
+class AxisCalibration(NamedTuple):
+    """一個方向整批量出來的結論。``note`` 非空 = 不要填，原因在裡面。"""
+
+    pitch: float
+    pitch_2: float          # 0 = 不交錯
+    width: float            # 0 = 量不出穩定的線寬
+    n_used: int             # 幾張真的量到了可用的間距
+    n_total: int
+    agree: float            # 所有間距樣本裡，落在採用的群裡的比例
+    note: str
+
+
+def _gap_clusters(values: Sequence[float]) -> List[List[float]]:
+    """把間距樣本切成幾群：排序後，相鄰值跳超過 ``CAL_TOL`` 就斷開。
+
+    比固定 k 的分群誠實 —— 這裡事先不知道會有幾群（單一 pitch 是一群、
+    交錯是兩群、批次不同意也是兩群、亂掉是更多群），而「有幾群」本身
+    就是要回答的問題之一。
+    """
+    vs = sorted(float(v) for v in values)
+    if not vs:
+        return []
+    out: List[List[float]] = [[vs[0]]]
+    for v in vs[1:]:
+        if v - out[-1][-1] > out[-1][-1] * CAL_TOL:
+            out.append([])
+        out[-1].append(v)
+    return out
+
+
+def calibrate_axis(images: Sequence[Any], axis: str,
+                   select: str = "brightest", kinds: int = 0,
+                   sensitivity: float = 0.35, smooth: int = 3,
+                   min_gap: int = 4,
+                   min_confidence: float = 5.0) -> AxisCalibration:
+    """對一批 patch **自由量測**（不給 pitch），聚合出一個方向的 pitch 與線寬。
+
+    為什麼整批一起量（F8 第七輪，使用者要的一鍵計算）
+    --------------------------------------------------
+    pitch 是**設計常數** —— 這一批的每一張 patch 量的都是同一個數字。單張的
+    量測有 ±0.5 px 的雜訊，而使用者逐張按「Use」看到的正是這個 variation。
+
+    為什麼聚合的是**原始間距**，不是每張的結論
+    ------------------------------------------
+    第一版聚合每張的 ``pitch_measured``，在交錯的 layout 上安靜地錯掉：
+    128px 配 40/33 的 patch 大多只看得到三根線（兩個間距），單張的結論是
+    「36.5」—— 一個**沒有任何一對線真的距離 36.5** 的平均值，而且 50 張彼此
+    完全同意這個錯的數字（agree = 1.00）。把 50 張的間距倒在一起就是 100 多個
+    樣本，40 與 33 兩群一目了然 —— 批次的價值正是把「每張三根線」變成
+    「一批一百個間距」。
+
+    分群之後的判讀（每一支都對應一個真實案例）：
+
+    * **一群** → 單一 pitch。
+    * **兩群、同一張 patch 裡兩群混著出現** → 這是**空間上**的結構：
+      比值接近整數（2×）是「有幾根線沒抓到」（間距變兩倍），摺回去；
+      比值不是整數（40/33 = 1.21）是**交錯** —— 設計出來的兩個尺寸不會剛好
+      差整數倍。
+    * **兩群、但每張 patch 只落在其中一群** → 這是**批次**在不同意：一半的
+      patch 量到 24、另一半量到 12（CPODE 而 kinds 沒設的樣子）。這時**不要
+      硬給一個數字** —— 講出兩群，下一步是調 kinds 再量一次。
+    """
+    per_patch: List[List[float]] = []
+    widths: List[float] = []
+    n_total = 0
+    for img in images:
+        n_total += 1
+        try:
+            s = find_stripes(img, axis=axis, select=select, kinds=kinds,
+                             sensitivity=sensitivity, smooth=smooth,
+                             min_gap=min_gap)
+        except Exception:                    # noqa: BLE001 — 單張爆不殺整批
+            continue
+        if s.confidence < float(min_confidence):
+            # 沒有結構的 patch 量不出 pitch —— 但它量得出**一個假的**：雜訊
+            # 邊緣被 min_gap 排成等距（實測純雜訊批「量到」8.4 px、agree
+            # 0.98）。跟卡片同一道信心閘門，無結構 ≈ 1、有結構 ≥ 20。
+            continue
+        # 只收**沒被影像邊界切到**的線的中心 —— 半根線的中心依定義是偏的。
+        whole = sorted((a + b) / 2.0 for a, b in s.selected
+                       if a > 0.5 and b < float(s.length) - 0.5)
+        gaps = [b - a for a, b in zip(whole, whole[1:]) if b - a >= 2.0]
+        if gaps:
+            per_patch.append(gaps)
+        if s.width_used >= 1.0 and s.selected:
+            widths.append(float(s.width_used))
+
+    n_used = len(per_patch)
+    if n_used < CAL_MIN_USED:
+        return AxisCalibration(0.0, 0.0, 0.0, n_used, n_total, 0.0,
+                               "only %d of %d defects had stripes to measure "
+                               "in this direction" % (n_used, n_total))
+
+    all_gaps = [g for gaps in per_patch for g in gaps]
+    clusters = _gap_clusters(all_gaps)
+    # 太小的群當離群丟掉（一根被缺陷撐開的間距），但要記著丟了多少 ——
+    # agree 算的是「所有樣本裡有多少落在最後解釋得了的群」，丟掉的算不同意。
+    floor = max(2, int(0.08 * len(all_gaps)))
+    kept = [c for c in clusters if len(c) >= floor]
+    width = float(np.median(widths)) if widths else 0.0
+
+    def _agree(*groups: List[float]) -> float:
+        return sum(len(g) for g in groups) / float(len(all_gaps))
+
+    if len(kept) == 1:
+        return AxisCalibration(float(np.median(kept[0])), 0.0, width,
+                               n_used, n_total, _agree(kept[0]), "")
+    if not kept:
+        return AxisCalibration(0.0, 0.0, 0.0, n_used, n_total, 0.0,
+                               "the spacings measured here scatter too much "
+                               "to settle on a value - check the curve panel "
+                               "on a few defects first")
+
+    meds = [float(np.median(c)) for c in kept]
+
+    def side(v: float) -> int:
+        return min(range(len(meds)), key=lambda i: abs(v - meds[i]))
+
+    def _camps() -> AxisCalibration:
+        """兩群都很多 —— 批次或挑組出了事，講出兩群與下一步，不給數字。"""
+        by_patch = [float(np.median(g)) for g in per_patch if g]
+        n_hi = sum(1 for m in by_patch if side(m) == len(meds) - 1)
+        return AxisCalibration(0.0, 0.0, 0.0, n_used, n_total,
+                               _agree(max(kept, key=len)),
+                               "the defects do not agree: %d of them measure "
+                               "about %.1f px, %d about %.1f px. If a third "
+                               "material sits on the same grid, raise 'how "
+                               "many kinds' and measure again."
+                               % (len(by_patch) - n_hi, meds[0], n_hi,
+                                  meds[-1]))
+
+    # 高群跟基本群怎麼分「缺線」與「挑錯組」：看**大小**，不是看形狀。
+    # 缺線（含被 kinds 正確跳過的 CPODE 格）是零星例外 —— 每缺一根才多一個
+    # 「整數倍」樣本，高群一定遠小於基本群。挑錯組（三種材質只分兩群）的
+    # 兩群一樣多（實測 118 vs 130）—— 那不是例外，是一半的 patch 在量另一個
+    # 東西。純度（同一張 patch 有沒有混群）分不開這兩者：實測挑錯組的批
+    # mixing 有 0.36 —— 污染的 patch 自己就會混。
+    base = kept[0]
+    rest = kept[1:]
+    folds = [round(float(np.median(c)) / meds[0]) for c in rest]
+    int_ok = [abs(float(np.median(c)) / meds[0] - f) < 0.10 and f >= 2
+              for c, f in zip(rest, folds)]
+    sparse = [len(c) <= 0.35 * len(base) for c in rest]
+
+    if rest and all(int_ok):
+        if all(sparse):
+            folded = [v for v in base] + [v / f for c, f in zip(rest, folds)
+                                          for v in c]
+            return AxisCalibration(float(np.median(folded)), 0.0, width,
+                                   n_used, n_total, _agree(*kept), "")
+        return _camps()
+
+    if len(kept) >= 2:
+        lo, hi = meds[0], meds[1]
+
+        def _combo(m: float) -> bool:
+            return any(abs(m - (i * lo + j * hi)) <= m * 0.10
+                       for i in range(4) for j in range(4) if i + j >= 2)
+
+        voters = [g for g in per_patch if len(g) >= 2]
+        mixed = sum(1 for g in voters
+                    if len({side(v) for v in g if side(v) <= 1}) >= 2)
+        mixing = mixed / float(len(voters)) if voters else 0.0
+        if (hi / max(lo, 1e-6) < 1.9 and mixing >= 0.15
+                and all(_combo(float(np.median(c))) for c in kept[2:])):
+            # 兩個基本值、同一張 patch 裡交替出現、更大的群是兩者的整數組合
+            # （73 = 40 + 33 = 跨過交錯排上缺的一根）—— 交錯。
+            return AxisCalibration(hi, lo, width, n_used, n_total,
+                                   _agree(*kept), "")
+        if len(kept) == 2:
+            return _camps()
+
+    return AxisCalibration(0.0, 0.0, 0.0, n_used, n_total,
+                           _agree(max(kept, key=len)),
+                           "the spacings measured here do not settle into one "
+                           "or two values - check the curve panel on a few "
+                           "defects first")
 
 
 # --------------------------------------------------------------------------- #
