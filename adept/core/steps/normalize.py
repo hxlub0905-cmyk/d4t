@@ -126,6 +126,15 @@ class NormalizeStep(MultiStreamStep):
                   label="Borrow range from",
                   show_when=("method", ("percentile", "glv_band")),
                   help=_RANGE_FROM_HELP),
+        ParamSpec(name="use_within", type="image_key", default="",
+                  label="Use only",
+                  show_when=("method", ("percentile", "glv_band")),
+                  help=("Leave empty to measure the range from every pixel. "
+                        "Name a mask stream (from a Region-to-mask card) and "
+                        "the range is measured only from pixels inside the "
+                        "mask - the stretch is still applied to the whole "
+                        "image. Use it when how much of each pattern is in "
+                        "the crop changes from patch to patch.")),
         # ---- match --------------------------------------------------------
         ParamSpec(name="reference", type="image_key", default="ref",
                   label="Match it to", show_when=("method", ("match",)),
@@ -163,7 +172,8 @@ class NormalizeStep(MultiStreamStep):
     def extra_reads(cls, params: Dict[str, Any]) -> List[str]:
         method = str(params.get("method", "percentile"))
         if method in ("percentile", "glv_band"):
-            return [str(params.get("range_from", "") or "").strip()]
+            return [str(params.get("range_from", "") or "").strip(),
+                    str(params.get("use_within", "") or "").strip()]
         if method == "match":
             return [str(params.get("reference", "ref"))]
         return []
@@ -197,6 +207,12 @@ class NormalizeStep(MultiStreamStep):
         ``range_from`` 有填就在**迴圈之前**把那條流讀出來 —— 那時候這張卡還沒
         改過任何東西，所以借到的一定是原始值。留空的話 basis 是 None，
         每一條流各自量自己（那是 F7-18 之前就有的行為，沒有變）。
+
+        ``use_within``（F8c）：範圍只從 mask 內的像素量，**套用仍是整張圖**。
+        動機：MG 佔多少面積是隨 crop 變的（64px 的 patch 一根 MG 進出畫面就是
+        12%），整張圖的 percentile 因此逐顆漂 —— 同一片 EPI，隔壁多一根 MG，
+        正規化完就變一個值。mask 讓「拿來定範圍的那群像素」跨 patch 是同一種
+        圖案。
         """
         if glv:
             if p["glv_low"] > p["glv_high"]:
@@ -209,14 +225,37 @@ class NormalizeStep(MultiStreamStep):
 
         borrow = str(p.get("range_from", "") or "").strip()
         basis = (require_image(ctx, self.key, borrow) if borrow else None)
+        within = str(p.get("use_within", "") or "").strip()
+        mask = (require_image(ctx, self.key, within) if within else None)
+
+        def pixels_for_range(src: np.ndarray) -> np.ndarray:
+            """量範圍用的那群像素（套用永遠是整張 ``img``，不在這裡）。"""
+            if mask is None:
+                return src
+            if mask.shape[:2] != src.shape[:2]:
+                raise StepError(
+                    self.key,
+                    f"the mask '{within}' is {mask.shape[1]}x{mask.shape[0]} "
+                    f"but the image is {src.shape[1]}x{src.shape[0]} - point "
+                    f"the Region-to-mask card's 'Size like' at the same "
+                    f"stream this card processes.")
+            sel = np.asarray(src)[np.asarray(mask) > 0]
+            if sel.size == 0:
+                # 全 0 的 mask（區域落在影像外）：退回整張圖，但要講 ——
+                # 安靜地退回去，使用者會以為「只用 EPI」一直在生效。
+                ctx.warn(f"normalize: mask '{within}' selects no pixels; "
+                         f"measuring the range from the whole image instead.")
+                return src
+            return sel
 
         def op(img: np.ndarray) -> np.ndarray:
             src = img if basis is None else basis
+            sel = pixels_for_range(src)
             if glv:
                 lo, hi = algo_normalize.percentile_range_glv_masked(
-                    np.asarray(src, dtype=np.float32), p["glv_low"], p["glv_high"])
+                    np.asarray(sel, dtype=np.float32), p["glv_low"], p["glv_high"])
             else:
-                lo, hi = algo_normalize.percentile_range(src, p["p_low"], p["p_high"])
+                lo, hi = algo_normalize.percentile_range(sel, p["p_low"], p["p_high"])
             return _norm_to_u8(img, lo, hi)
 
         return op

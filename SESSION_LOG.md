@@ -4,6 +4,56 @@
 
 ---
 
+## 畫布 n8n 化第二批（F8-UI）＋ F8c ROI mask（2026-08-14）
+
+同一天的第二個 session。使用者核准了四項 UI 改善（3-1～3-4），
+接著把 F8 §7 排隊中的 (c) 做掉。
+
+### F8-UI：四項（驗收 `tests/test_ui_f8_ui_polish.py`，7 條）
+
+- **3-1 線要像 n8n**：兩件事。前行線的水平推力下限 40 → `COL_GAP*0.67`
+  （推力太小時三次貝茲**退化成斜的直線**，縮放 70% 後更明顯）；
+  `layout_columns` 同欄列序改 **barycenter**（跟上游的列對齊）——
+  大部分的線因此接近水平，交叉不是被畫得更好看，是**根本不發生**。
+- **3-2 卡片要回應**：hover 邊框亮一階＋選中加一圈 3px 半透明 accent 光暈。
+  踩到一個現成的地雷：卡片 `setAcceptHoverEvents(True)` 會讓 hover 事件
+  **不再穿過卡片**，壓在線中點上的卡把「斷開」的 × 悶死
+  （`test_ui_canvas_cut_button` 當場紅掉）。改成 **view 層**在
+  `mouseMoveEvent` 裡判斷誰在 hover（`_sync_hover_node`），卡片仍然不收
+  hover 事件。光暈畫在卡片邊緣之外 → `boundingRect` 跟著加寬（殘影守則）。
+- **3-3 設定變成畫布右緣的抽屜（overlay）**：F7-22 的上下切分攤開時把畫布
+  砍掉四成高度，而攤開參數正是「一邊調一邊看」的時候。現在畫布**永遠**
+  整欄大小，抽屜浮在右緣（寬 320–420px、吃滿高度、有關閉鈕）。
+  `middle_splitter` 改名 `canvas_column`（它不再是 splitter，名字不能說謊）。
+- **3-4 間距 8px 節奏**：右欄與參數區的 2/4/6px 雜項統一成 8 ——
+  「差一點對齊」比沒對齊更亂。
+
+### F8c：`roi_mask` 卡 + Normalize 的 `Use only`
+
+動機（計畫書 §7 原文）：跨 patch 比 EPI 的 GLV 時 **MG 佔多少面積隨 crop
+而變**，任何吃整張圖統計的卡都把這個變異灌進 EPI 的數字。
+
+- 新卡 `roi_mask`（`steps/roi_mask.py`，CATEGORY_IMAGE / GROUP_REGION）：
+  具名區域 → 0/255 mask 影像流，多名字 = 聯集。`regions` 留空是
+  `not-configured`（F7-13 那條路），指到沒人定義的名字走 `unknown-region`。
+- Normalize 加 `use_within`（label **Use only**，percentile / glv_band 才
+  出現）：範圍只從 mask 內的像素量，**套用仍是整張圖**。mask 尺寸不合 →
+  StepError 指名去改 `Size like`；全 0 mask → 退回整張圖 + `ctx.warn`。
+- **界線**：mask 給影像段用；量測卡照樣引用 ROI 名字（兩條平行的路會腐爛，
+  F7-17 的教訓）。
+
+驗收（`tests/test_roi_mask.py`，10 條）照計畫書原話量，實驗設計時學到的
+一課記在計畫書 §7：整張圖 percentile 最痛的不是 MG 面積 12% ↔ 24% 的變動
+（p98 兩邊都落在 MG 上，反而穩），是面積**跨過百分位門檻**的那一下 ——
+「一根 MG 進出畫面」，p98 從 EPI 的頂翻成 MG 的 230。只用 EPI 之後
+分散度收斂到一半以下（實測 ~1/20）。
+
+### 順帶
+
+早上的 tooltip 化（見下一段）在這輪繼續：卡片層級說明也收成一行。
+測試在雲端容器跑全套要 20 分鐘以上（家用機 ~30s）——
+CLAUDE.md §6 已加「開發迴圈只跑改到的測試檔」。
+
 ## 參數說明搬進 tooltip —— 列面上只留「非讀不可」的字（2026-08-14）
 
 使用者的原話：「描述功能的文字太多，而且移過去會顯示、移走又消失，如果我是
