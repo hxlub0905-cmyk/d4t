@@ -193,7 +193,7 @@ class Context:
                 return roi
         raise ContextError(
             f"ROI '{name}' is not defined; available: {self.roi_names()}. "
-            f"Add a Region card upstream, or leave the roi parameter empty "
+            f"Add an ROI card upstream, or leave the roi parameter empty "
             f"to use the whole image.")
 
     def roi_rect(self, name: str, shape: Any) -> Any:

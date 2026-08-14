@@ -26,7 +26,7 @@ import adept.core.steps  # noqa: F401 — 觸發卡片註冊
 from adept.core.pipeline import Recipe
 
 REPO = Path(__file__).resolve().parent.parent
-RECIPE_PATH = REPO / "examples" / "recipes" / "die_to_die_basic.json"
+RECIPE_PATH = REPO / "tests" / "fixtures" / "recipes" / "die_to_die_basic.json"
 
 sys.path.insert(0, str(REPO / "tools"))
 from make_sample import generate  # noqa: E402

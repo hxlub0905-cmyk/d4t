@@ -48,7 +48,7 @@ class RoiTemplateStep(Step):
     """模板定位：把 patch 對回 Golden Cell 的相位，再把標好的框搬過來。"""
 
     key = "roi_template"
-    label = "Locate region by template"
+    label = "Template"
     category = CATEGORY_ALGO
     group = GROUP_REGION
     help = ("Match each patch against one repeating cell of the layout, so a "

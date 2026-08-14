@@ -28,7 +28,7 @@ import numpy as np
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-EXAMPLE_RECIPE = REPO / "examples" / "recipes" / "die_to_die_basic.json"
+EXAMPLE_RECIPE = REPO / "tests" / "fixtures" / "recipes" / "die_to_die_basic.json"
 
 sys.path.insert(0, str(REPO / "tools"))
 from make_sample import generate  # noqa: E402

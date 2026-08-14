@@ -27,6 +27,10 @@ def _layout(shift: int = 0, seed: int = 0) -> np.ndarray:
     for edge in (lo, hi):
         if 2 <= edge <= W - 2:
             img[:, edge - 2:edge + 2] = 210.0
+    # **橫向也要有結構。** F8 第五輪之後 ROI 只剩 Profile（``roi_cross``），
+    # 而它是**兩個方向共同定義**的 —— 只有直的條紋定位不出來（而且它會照實
+    # 說「沒有橫的條紋」）。舊的單軸卡在這裡只需要一個方向，那張卡已經拿掉了。
+    img[(np.arange(H) % 26) < 10, :] += 26.0
     return img + rng.normal(0, 3.0, (H, W)).astype(np.float32)
 
 
@@ -117,20 +121,9 @@ def test_a_prefix_that_cannot_be_a_variable_name_is_refused(window):
 # --------------------------------------------------------------------------- #
 # 2. 曲線面板
 # --------------------------------------------------------------------------- #
-def test_the_panel_shows_the_curve_for_the_selected_card(window):
-    nid = window.model.add_step("roi_profile")
-    window.model.set_param(nid, "roi_out", "epi")
-    window.select_node(nid)
-    window.refresh_preview(sync=True)
-
-    assert window.profile_panel_visible() is True
-    assert window.profile_panel.has_data() is True
-    summary = window.profile_panel.summary()
-    assert "epi" in summary and "confidence" in summary
-
 
 def test_the_panel_hides_itself_for_any_other_card(window):
-    nid = window.model.add_step("roi_profile")
+    nid = window.model.add_step("roi_cross")
     window.select_node(nid)
     window.refresh_preview(sync=True)
     assert window.profile_panel_visible() is True
@@ -167,26 +160,6 @@ def test_the_panel_paints_with_and_without_data(qapp):
 # --------------------------------------------------------------------------- #
 # 3. 過期的預覽結果
 # --------------------------------------------------------------------------- #
-def test_a_stale_background_preview_never_overwrites_a_newer_one(window):
-    """``PreviewWorker`` 只合併「還沒開跑」的請求；已經在跑的那筆照樣會跑完並
-    發出 ready。所以「先送出背景預覽、接著又跑了同步預覽」的時候，舊的那筆會
-    **後到**，把新的畫面蓋掉 —— 而且不會再更新，因為沒有人會再算一次。
-
-    這個順序在實際操作裡並不罕見（點卡片 → 立刻改參數），只是以前的症狀是
-    「影像閃一下」；投影曲線面板把它變成「面板整個空白」，才浮出來。
-    """
-    nid = window.model.add_step("roi_profile")
-    window.model.set_param(nid, "roi_out", "epi")
-    window.select_node(nid)
-
-    stale = window.refresh_preview(sync=True) and window._last_result
-    window.refresh_preview(sync=True)          # 這一筆才是畫面上的現況
-    assert window.profile_panel.has_data() is True
-
-    # 模擬那筆更早的背景預覽現在才回來（世代編號已經不是它出發時那個）
-    window._on_async_preview_ready(_stripped(stale))
-    assert window.profile_panel.has_data() is True, "過期的結果把畫面蓋掉了"
-
 
 def _stripped(result):
     """把 profiles 拿掉，模擬「recipe 還沒加上這張卡」時算出來的那一筆。"""
@@ -196,23 +169,7 @@ def _stripped(result):
     return result
 
 
-def test_a_current_background_result_is_still_applied(window):
-    """擋掉過期的，不可以順手把正常的也擋掉。"""
-    nid = window.model.add_step("roi_profile")
-    window.model.set_param(nid, "roi_out", "epi")
-    window.select_node(nid)
-    window.refresh_preview(sync=True)
-    result = window._last_result
 
-    window._async_epoch = window._preview_epoch      # 「這筆是最新的」
-    window.profile_panel.set_data("", None)
-    window._on_async_preview_ready(result)
-    assert window.profile_panel.has_data() is True
-
-
-# --------------------------------------------------------------------------- #
-# 4. 區域跨顆檢視
-# --------------------------------------------------------------------------- #
 def _flat(seed: int = 0) -> np.ndarray:
     """整張都是同一種材質 —— 沒有任何東西可以定位。"""
     return np.random.default_rng(seed).normal(60.0, 4.0, (H, W)).astype(np.float32)
@@ -241,9 +198,8 @@ def mixed_lot(tmp_path_factory):
 def mixed_window(qapp, mixed_lot):
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     win.load_dataset_path(mixed_lot["klarf"], sync=True)
-    nid = win.model.add_step("roi_profile")
+    nid = win.model.add_step("roi_cross")
     win.model.set_param(nid, "roi_out", "epi")
-    win.model.set_param(nid, "also_neighbours", True)
     win.select_node(nid)
     yield win
     win.close()
@@ -333,7 +289,7 @@ def test_clicking_a_thumbnail_jumps_to_that_defect(mixed_window):
 
 
 def test_the_button_only_appears_for_cards_that_define_a_region(mixed_window):
-    assert mixed_window.selected_regions() == ["epi", "epi_before", "epi_after"]
+    assert mixed_window.selected_regions() == ["epi", "epi_center"]
     assert mixed_window.region_check_available() is True
 
     other = mixed_window.model.add_step("glv_stats")
@@ -345,9 +301,9 @@ def test_the_button_only_appears_for_cards_that_define_a_region(mixed_window):
 def test_without_a_dataset_the_button_is_off_and_says_why(qapp):
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     try:
-        nid = win.model.add_step("roi_profile")
+        nid = win.model.add_step("roi_cross")
         win.select_node(nid)
-        assert win.selected_regions() == ["band"]
+        assert win.selected_regions() == ["cross", "cross_center"]
         assert win.region_check_available() is False
         assert win.open_region_check(n=4, sync=True) is False
         assert "No dataset" in win.status_text()

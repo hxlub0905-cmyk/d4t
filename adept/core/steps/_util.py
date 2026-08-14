@@ -173,9 +173,6 @@ def require_image(ctx: Context, step_key: str, key: str) -> np.ndarray:
 def roi_rect_or_none(ctx, step_key: str, image, roi_name):
     """把 ``roi`` 參數解成像素矩形 ``(x, y, w, h)``；空字串 = 整張影像。
 
-    ``'blob'`` 是保留名：優先找同名 ROI（``blob_segment`` 會寫），
-    找不到才退回 ``meta['blobs']`` 的主 blob —— 這樣舊 recipe 與新 Region 段
-    可以並存，而且 ``blob_segment`` 之後也還是同一個名字。
     找不到任何東西時回 ``None``（呼叫端決定要警告還是當成整張圖）。
     """
     import numpy as _np
@@ -200,24 +197,11 @@ def roi_rect_or_none(ctx, step_key: str, image, roi_name):
                 % (name, ctx.roi_count(name), name))
         # 具名 ROI 存的是正規化座標，一樣需要尺寸才展得開
         return None if shape is None else ctx.roi_rect(name, shape)
-    if name == "blob":
-        # blob 的矩形已經是像素座標，**不需要影像**（影像流可能已被下游覆寫掉）
-        blobs = ctx.meta.get("blobs") or []
-        if blobs:
-            b = blobs[0]        # 主 blob = SNR 最強者（segment 已降冪排序）
-            return (int(b["x"]), int(b["y"]), int(b["w"]), int(b["h"]))
-        # 退回整張圖是刻意的（Blob 卡跑了但這顆沒找到東西是正常的），但
-        # **一定要說出來**：不講的話使用者拿到的是一組看起來很正常、實際上
-        # 量的是整張圖的數字，而那是最難發現的一種錯。
-        ctx.warn(f"[{step_key}] no blob was found on this defect, so region "
-                 f"'blob' falls back to the whole image; the numbers from this "
-                 f"card describe the whole patch, not a defect.")
-        return None
     # 具名 ROI 打錯字要講清楚，不要安靜地量整張圖
     raise StepError(step_key,
-                    "region '%s' is not defined; available: %s. Add a Define "
-                    "region card upstream, or leave roi empty for the whole "
-                    "image." % (name, ctx.roi_names()))
+                    "region '%s' is not defined; available: %s. Add an ROI "
+                    "card upstream, or leave roi empty for the whole image."
+                    % (name, ctx.roi_names()))
 
 
 def crop_to_roi(ctx, step_key: str, image, roi_name):

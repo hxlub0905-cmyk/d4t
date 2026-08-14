@@ -89,21 +89,15 @@ def make_recipe(snr_threshold: float = 200.0, search_radius: int = 8) -> Recipe:
         "dn": RecipeNode("dn", "denoise",
                          {"streams": "diff", "method": "median", "ksize": 3}),
         "snr": RecipeNode("snr", "snr_map", {"window": 15, "exclude_border": 8}),
-        "blob": RecipeNode("blob", "blob_segment",
-                           {"min_area": 6, "snr_threshold": snr_threshold}),
-        "cd": RecipeNode("cd", "cd_measure", {}),
-        # F7-4：中心框從量測卡的參數搬到 Region 卡
-        "roi": RecipeNode("roi", "roi_define",
-                          {"name": "centre", "shape": "center", "size": 32.0,
-                           "size_unit": "px", "source": "diff"}),
+        "cd": RecipeNode("cd", "cd_measure", {"source": "diff"}),
         "glv": RecipeNode("glv", "glv_stats",
-                          {"source": "diff", "roi": "centre",
+                          {"source": "diff",
                            "metrics": "glv_max,glv_q99,glv_mean"}),
     }
     return Recipe(
         recipe_id="m2_batch_cache_test",
         routes={KIND: ["load", "norm_ref", "norm", "align", "sub", "dn",
-                       "snr", "blob", "cd", "roi", "glv"]},
+                       "snr", "cd", "glv"]},
         nodes=nodes,
         score=ScoreSpec(expr="glv_max + (glv_max - glv_q99)", threshold=50.0,
                         bins={"below": 0, "above": 1}),
@@ -334,8 +328,11 @@ def _roi_then_image_recipe() -> Recipe:
     """
     nodes = {
         "load": RecipeNode("load", "load_patch", {}),
-        "roi": RecipeNode("roi", "roi_define",
-                          {"name": "main", "source": "test"}),
+        # ROI 卡在 F8 第五輪只剩 Profile / Template / GDS —— 這裡用 Profile
+        # （``roi_cross``），它跟被拿掉的 ``roi_define`` 一樣是 algo 段，
+        # 一樣會落在快取段裡面，所以這條迴歸測的東西沒有變。
+        "roi": RecipeNode("roi", "roi_cross",
+                          {"source": "test", "roi_out": "main"}),
         "dn": RecipeNode("dn", "denoise",
                          {"streams": "test", "method": "median", "ksize": 3}),
         "glv": RecipeNode("glv", "glv_stats",
@@ -391,3 +388,40 @@ def test_an_old_format_snapshot_is_ignored_instead_of_trusted(ds, tmp_path):
                                  "__payload__": np.array(json.dumps(payload))})
     assert cache.get(key) is None
     assert cache.misses == 1
+
+
+def test_a_multi_box_roi_survives_a_cache_hit_with_every_box():
+    """**一個名字可能有好幾個框**（F8 的交會定位），而還原時逐一 ``set_roi``
+    是錯的 —— 它會先刪掉同名的，17 個框還原完只剩最後一個。
+
+    這是 F7-9 那條「第一次跑對、第二次跑錯」的第二形態，而且更難發現：
+    不是整組不見（那會報 region not defined），是**只剩一個**，兩邊都跑得完、
+    都有數字，只有數字不一樣。
+    """
+    import numpy as np
+
+    from adept.core.pipeline.context import Context
+    from adept.core.pipeline.engine import _restore_context, _roi_snapshot
+
+    ctx = Context(images={"test": np.zeros((32, 32), np.float32)})
+    boxes = [(i / 10.0, 0.1, 0.05, 0.2) for i in range(6)]
+    ctx.set_roi_boxes("xing", boxes)
+    ctx.set_roi("one", (0.4, 0.4, 0.2, 0.2))
+    assert ctx.roi_count("xing") == 6
+
+    snap = {"images": {}, "features": {}, "meta": {},
+            "rois": _roi_snapshot(ctx), "labels": None}
+    back = _restore_context(_FakeItem(), KIND, "1", snap)
+
+    assert back.roi_count("xing") == 6, \
+        "多框區域還原之後只剩 %d 個" % back.roi_count("xing")
+    assert back.roi_count("one") == 1
+    assert back.roi_names() == ["xing", "one"]
+
+
+class _FakeItem:
+    """``_seed_context`` 只會讀這幾個欄位。"""
+    defect_id = "1"
+    test_path = ref_path = None
+    test_page = ref_page = 0
+    meta: dict = {}

@@ -2204,7 +2204,7 @@ class LibraryPanel(QWidget):
     GROUPS = (
         ("input", "Input", "Load this defect's images"),
         ("enhance", "Enhance", "Image in, image out"),
-        ("region", "Region", "Decide where to look"),
+        ("region", "ROI", "Decide where to look"),
         ("compare", "Compare", "Two images in, difference out"),
         ("measure", "Measure", "Image + region in, numbers out"),
         ("adc", "ADC", "Numbers in, score and bin out"),

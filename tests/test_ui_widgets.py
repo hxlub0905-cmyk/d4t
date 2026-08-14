@@ -553,7 +553,7 @@ def test_library_panel_groups_and_double_click(qapp):
     panel.set_steps(steps)
 
     assert panel.section_titles() == [
-        "Input", "Enhance", "Region", "Compare", "Measure", "ADC"]
+        "Input", "Enhance", "ROI", "Compare", "Measure", "ADC"]
     assert set(panel.step_keys()) == {s["key"] for s in steps}
 
     # 每張卡都被歸進宣告的那一段
@@ -562,7 +562,7 @@ def test_library_panel_groups_and_double_click(qapp):
         by_group.setdefault(s_["group"], set()).add(s_["key"])
     assert "load_patch" in by_group["input"]
     assert {"subtract", "align"} <= by_group["compare"]
-    assert "blob_segment" in by_group["region"]
+    assert "roi_cross" in by_group["region"]
     assert {"glv_stats", "cd_measure", "roi_snr"} <= by_group["measure"]
 
     # 空的段落要留一行提示（registry 目前沒有 adc 卡片）
@@ -602,14 +602,14 @@ def test_library_search_filters_cards_and_hides_empty_sections(qapp):
 
     panel.set_query("snr")
     hit = set(panel.visible_step_keys())
-    assert {"snr_map", "roi_snr", "blob_segment"} <= hit
+    assert {"snr_map", "roi_snr"} <= hit
     assert "denoise" not in hit
     assert "Input" not in panel.visible_section_titles(), \
         "整組都沒命中的區塊標題要一起收起來"
 
     # 多個詞是 AND；說明文字也在搜尋範圍內
-    panel.set_query("region blob")
-    assert set(panel.visible_step_keys()) == {"blob_segment"}
+    panel.set_query("region signal")
+    assert set(panel.visible_step_keys()) == {"roi_snr"}
 
     # F7-7：清空搜尋之後回到 rail 的狀態（這裡是全部收起來），不是全部攤開
     panel.set_query("")

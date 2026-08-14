@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-RECIPE = REPO / "examples" / "recipes" / "die_to_die_basic.json"
+RECIPE = REPO / "tests" / "fixtures" / "recipes" / "die_to_die_basic.json"
 
 sys.path.insert(0, str(REPO / "tools"))
 from make_sample import generate  # noqa: E402
@@ -59,7 +59,7 @@ def test_pipeline_separates_real_from_nuisance(synlot):
     assert correct >= 22, f"分類正確 {correct}/24"
     # 每顆都要有完整 feature vector（供 ML 匯出）
     for r in results:
-        for key in ("snr_max", "blob_area", "cd_x_px", "glv_max", "score"):
+        for key in ("snr_max", "cd_x_px", "glv_max", "score"):
             assert key in r.features, f"{r.defect_id} 缺 {key}"
 
 

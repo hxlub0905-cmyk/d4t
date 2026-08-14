@@ -247,7 +247,7 @@ def test_library_emits_recipe_chosen_with_the_right_path(qapp):
 
 
 def test_library_reads_a_custom_directory_and_survives_broken_json(tmp_path, qapp):
-    good = json.loads((RECIPES_DIR / "die_to_die_basic.json").read_text(encoding="utf-8"))
+    good = json.loads((RECIPES_DIR / "cross_regions.json").read_text(encoding="utf-8"))
     (tmp_path / "a_good.json").write_text(json.dumps(good), encoding="utf-8")
     (tmp_path / "b_broken.json").write_text("{ this is not json", encoding="utf-8")
     dlg = welcome_mod.RecipeLibraryDialog(directory=tmp_path)
@@ -330,13 +330,13 @@ def test_library_choice_loads_the_recipe_into_the_model(window):
     lib = window.open_recipe_library()
     try:
         names = [e["recipe_id"] for e in lib.entries()]
-        idx = names.index("die_to_die_basic")
+        idx = names.index("cross_regions")
         assert lib.select(idx) is True
         path = lib.load_selected()
         assert path is not None
     finally:
         lib.close()
-    assert window.model.recipe_id == "die_to_die_basic"
+    assert window.model.recipe_id == "cross_regions"
     assert window.model.node_order, "載入 recipe 之後流程不該是空的"
 
 
@@ -366,7 +366,7 @@ def test_demo_runs_end_to_end_and_populates_the_window(window, demo_lot):
 
     assert window.dataset is not None
     assert len(window.dataset.items) == 6
-    assert window.model.recipe_id == "die_to_die_basic"
+    assert window.model.recipe_id == "cross_regions"
     assert len(window.trial_results) == 6
     assert all(r.get("ok") for r in window.trial_results)
     assert len(window.trial_scores) == 6

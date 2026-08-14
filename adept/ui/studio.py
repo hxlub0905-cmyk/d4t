@@ -174,7 +174,7 @@ _SCORE_LIBRARY_ENTRY = {
 
 #: 「載入範本」讀的檔案（repo 內的 die-to-die 範例）。
 TEMPLATE_RECIPE = Path(__file__).resolve().parents[2] / "examples" / "recipes" \
-    / "die_to_die_basic.json"
+    / "cross_regions.json"
 
 #: 試跑用的影像段快取位置（跨次試跑重用，第二次調參會明顯變快）。
 DEFAULT_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".adept", "cache")
@@ -2213,7 +2213,7 @@ class StudioWindow(QMainWindow):
                             "   score %.4g" % score if score is not None else ""))
 
     #: 會產生投影曲線的卡片 key（面板只在編輯它的時候出現）。
-    PROFILE_STEP = "roi_profile"
+    PROFILE_STEP = "roi_cross"
 
     # ==================================================================== #
     # 區域跨顆檢視（F7-11）

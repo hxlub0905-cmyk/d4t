@@ -606,7 +606,7 @@ def test_the_stage_button_repolishes_when_it_opens(qapp):
 
     host = QWidget()
     lay = QVBoxLayout(host)
-    btn = widgets_mod.StageButton("region", "Region", "where to look",
+    btn = widgets_mod.StageButton("region", "ROI", "where to look",
                                   theme_mod.group_hex("region"), host)
     lay.addWidget(btn)
     host.show()

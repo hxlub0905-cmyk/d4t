@@ -9,7 +9,7 @@ import adept.core.steps  # noqa: F401 — 註冊卡片
 from adept.core.pipeline import ParamError, Recipe
 from adept.ui.viewmodel import RecipeModel, histogram, rebin
 
-RECIPE = Path(__file__).resolve().parent.parent / "examples" / "recipes" / "die_to_die_basic.json"
+RECIPE = Path(__file__).resolve().parent / "fixtures" / "recipes" / "die_to_die_basic.json"
 
 
 def test_build_route_by_mouse_ops():

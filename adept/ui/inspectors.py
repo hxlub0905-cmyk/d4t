@@ -44,7 +44,7 @@ from .theme import TOKENS
 
 __all__ = ["Inspector", "AlignInspector", "EnhanceInspector",
            "MeasureInspector", "InputInspector",
-           "ProfileInspector", "CrossInspector", "TemplateInspector",
+           "CrossInspector", "TemplateInspector",
            "INSPECTORS", "inspector_for"]
 
 
@@ -517,51 +517,6 @@ class EnhanceInspector(Inspector):
         p.setPen(QColor(TOKENS["text_secondary"]))
         p.drawText(QRectF(x + 16, box.top(), 60, box.height()),
                    Qt.AlignLeft | Qt.AlignVCenter, "after")
-
-
-class ProfileInspector(Inspector):
-    """`roi_profile`：投影曲線 + 找到的轉折 + 選中的那一段。
-
-    這一塊是 F7-11 就做好的（``widgets.ProfilePanel``），只是當時直接掛在預覽
-    面板上 —— 也就是一條**跟儀表機制平行的路**。兩條路並存的下場是：加新面板的
-    人不知道該走哪一條，然後兩邊各長一半。所以把它收進來，畫的還是同一個元件。
-
-    「敏感度要調多少」對不會寫 code 的人是沒有答案的問題，除非他看得到曲線、
-    看得到目前抓到幾條線、看得到線落在哪 —— 沒有這個面板，那張卡就只是另一個
-    要盲填的數字。
-    """
-
-    title = "Profile"
-
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        from .widgets import ProfilePanel
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        self.panel = ProfilePanel(self)
-        # 原本掛在預覽面板上時它是**固定高**（那裡的高度是搶來的）。搬進儀表
-        # 之後那一格本來就是給它的，不撐開的話曲線只佔下半截、上面一片空白。
-        self.panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        lay.addWidget(self.panel)
-
-    def region(self) -> str:
-        return str(self.params.get("roi_out") or "")
-
-    def set_context(self, *a, **kw) -> None:   # noqa: D102
-        super().set_context(*a, **kw)
-        profiles = dict(self.meta.get("profiles") or {})
-        name = self.region()
-        self.panel.set_data(name, profiles.get(name))
-
-    def has_data(self) -> bool:
-        return bool(self.panel.has_data())
-
-    def summary(self) -> str:
-        return self.panel.summary()
-
-    def paintEvent(self, _e) -> None:          # noqa: D102 - 內容由子元件畫
-        pass
 
 
 class CrossInspector(Inspector):
@@ -1049,7 +1004,6 @@ class InputInspector(Inspector):
 #: 少的那五個不是被拿掉，是變成 ``normalize`` / ``tone`` 的一個下拉選項。
 INSPECTORS: Dict[str, type] = {
     "load_patch": InputInspector,
-    "roi_profile": ProfileInspector,
     "roi_cross": CrossInspector,
     "roi_template": TemplateInspector,
     "align": AlignInspector,
@@ -1062,7 +1016,6 @@ INSPECTORS: Dict[str, type] = {
     "focus_quality": MeasureInspector,
     "roi_snr": MeasureInspector,
     "cell_period": MeasureInspector,
-    "blob_segment": MeasureInspector,
 }
 
 

@@ -42,9 +42,13 @@ N_DEFECTS = 6
 RECIPE_FILES = sorted(RECIPES_DIR.glob("*.json"))
 RECIPE_IDS = [p.stem for p in RECIPE_FILES]
 
-#: 這一版庫裡「至少」要有的幾份（少了就是有人刪掉了教學用的範例）。
-REQUIRED = {"die_to_die_basic", "dual_route_basic", "rsem_golden_cell",
-            "single_image_rules", "cd_gate"}
+#: 這一版庫裡「至少」要有的幾份。
+#:
+#: F8 第五輪：ROI 收斂成 Profile / Template / GDS 三條路，舊的五份教學範例
+#: 全部依賴被拿掉的 ``roi_define`` / ``blob_segment``，使用者決定「等 APP 完成
+#: 再給範例」。所以現在只剩示範新 ROI 卡的那一份 —— 這條測試仍然守著
+#: 「庫不可以是空的」，只是門檻降到一份。
+REQUIRED = {"cross_regions"}
 
 
 # --------------------------------------------------------------------------- #

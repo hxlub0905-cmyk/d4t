@@ -54,7 +54,7 @@ class RoiCrossStep(Step):
     """交會定位：兩組條紋交叉出格子，在格子上放一組框。"""
 
     key = "roi_cross"
-    label = "Locate regions where patterns cross"
+    label = "Profile"
     category = CATEGORY_ALGO
     group = GROUP_REGION
     help = ("Find the upright stripes and the flat stripes in the image, then "
