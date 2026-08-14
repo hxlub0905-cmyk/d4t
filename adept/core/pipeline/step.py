@@ -145,6 +145,17 @@ class ParamSpec:
     #: ``show_when`` 解的是「這一列現在算不算數」，這個解的是「這一列在回答
     #: 哪個問題」，兩者不能互相取代。
     section: str = ""
+    #: 這一列預設收起來，按「Show advanced settings」才出現（F8 第六輪）。
+    #:
+    #: 跟 ``section`` 的差別是**軸不一樣**：``section`` 講「這一列在回答哪個
+    #: 問題」，這個講「**要不要現在回答**」。判準是一句話 —— 這一格填了預設值
+    #: 就能跑得出正確答案的話，它就是進階的；反之（``pitch`` 那種，站點知道
+    #: 但程式猜不到的東西）不管多難懂都要留在外面。
+    #:
+    #: 為什麼不是把它們刪掉：``smooth`` / ``sensitivity`` 這幾個在**調不出來**
+    #: 的那一天是唯一的出路，而那一天使用者最需要它們就在手邊。收起來不是
+    #: 貶低它們，是承認「第一次打開這張卡的人不該從這裡開始」。
+    advanced: bool = False
 
     def visible_for(self, params: Optional[Dict[str, Any]]) -> bool:
         """在這組參數下，這一列該不該顯示（沒有 ``show_when`` 就永遠顯示）。"""
@@ -362,6 +373,7 @@ class Step(ABC):
                     "show_when": (None if not p.show_when
                                   else [p.show_when[0], list(p.show_when[1])]),
                     "section": p.section,
+                    "advanced": p.advanced,
                 }
                 for p in cls.params
             ],

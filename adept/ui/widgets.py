@@ -1555,10 +1555,15 @@ class ParamForm(QWidget):
         #: 都沒有的標題比沒有標題更讓人以為畫面壞了。
         self._sections: Dict[str, List[QWidget]] = {}
         self._section_of: Dict[str, str] = {}
+        #: 標了 ``advanced`` 的那幾列（預設收起來）。
+        self._advanced: set = set()
         #: 目前這張卡每個參數的值 —— ``show_when`` 要靠它判斷哪幾列該在。
         self._values: Dict[str, Any] = {}
         self._describe: Optional[Dict[str, Any]] = None
         self._building = False
+        #: 進階參數收起來了嗎（**追明確狀態**，不問 widget —— CLAUDE.md §7）。
+        #: 換一張卡就收回去：上一張卡展開過不代表這一張也要。
+        self._advanced_open = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -1583,6 +1588,14 @@ class ParamForm(QWidget):
         self._placeholder.setObjectName("placeholder")
         self._placeholder.setWordWrap(True)
         self._form.addWidget(self._placeholder)
+        # 「還有幾格」的入口。放在**進階那幾列的上面**（插在它們之前），
+        # 這樣按下去展開的東西就在按鈕底下 —— 不必回頭找。
+        self._advanced_btn = QPushButton("", self._host)
+        self._advanced_btn.setObjectName("advancedToggle")
+        self._advanced_btn.setCursor(Qt.PointingHandCursor)
+        self._advanced_btn.setVisible(False)
+        self._advanced_btn.clicked.connect(self.toggle_advanced)
+        self._form.addWidget(self._advanced_btn)
         self._form.addStretch(1)
         self._scroll.setWidget(self._host)
         outer.addWidget(self._scroll, 1)
@@ -1614,6 +1627,8 @@ class ParamForm(QWidget):
             self._step_help.setVisible(bool(describe.get("help")))
             self._placeholder.setVisible(False)
             self._values = {}
+            self._advanced = set()
+            self._advanced_open = False
             section = None
             for spec in describe.get("params", []):
                 name = str(spec.get("name", ""))
@@ -1636,6 +1651,8 @@ class ParamForm(QWidget):
                 self._rows[name] = row
                 if want:
                     self._section_of[name] = want
+                if bool(spec.get("advanced")):
+                    self._advanced.add(name)
         finally:
             self._building = False
         self._sync_visible_rows()
@@ -1665,6 +1682,21 @@ class ParamForm(QWidget):
     def step_key(self) -> Optional[str]:
         return None if not self._describe else str(self._describe.get("key"))
 
+    def advanced_open(self) -> bool:
+        """進階那幾列現在攤開了嗎（**明確狀態**，不問 widget）。"""
+        return bool(self._advanced_open)
+
+    def advanced_names(self) -> List[str]:
+        """這張卡有哪幾列是進階的。"""
+        return [n for n in self._rows if n in self._advanced]
+
+    def toggle_advanced(self) -> None:
+        self.set_advanced_open(not self._advanced_open)
+
+    def set_advanced_open(self, open_: bool) -> None:
+        self._advanced_open = bool(open_)
+        self._sync_visible_rows()
+
     def section_names(self) -> List[str]:
         """這張卡分了哪幾組小標題（依出現順序）。"""
         return list(self._sections)
@@ -1677,6 +1709,26 @@ class ParamForm(QWidget):
 
     def param_names(self) -> List[str]:
         return list(self._rows)
+
+    def row_visible(self, name: str) -> bool:
+        """那一列現在看不看得到（**明確狀態**，不問 ``isVisible()``）。"""
+        row = self._rows.get(str(name))
+        return bool(row is not None and not row.isHidden())
+
+    def values(self) -> Dict[str, Any]:
+        """目前表單上每一格的值（收起來的那幾格照樣在 —— 這是顯示規則）。"""
+        return dict(self._values)
+
+    def advanced_button_text(self) -> str:
+        return str(self._advanced_btn.text())
+
+    def advanced_button_visible(self) -> bool:
+        return bool(self._advanced_names_now())
+
+    def _advanced_names_now(self) -> List[str]:
+        """按下去會出現的那幾格 —— 被 ``show_when`` 排除的不算。"""
+        return [n for n in self._rows
+                if n in self._advanced and self._shown_by_rules(n)]
 
     def editor(self, name: str) -> Optional[QWidget]:
         row = self._rows.get(name)
@@ -1724,6 +1776,7 @@ class ParamForm(QWidget):
                 head.setParent(None)
                 head.deleteLater()
         self._sections, self._section_of = {}, {}
+        self._advanced = set()
 
     def _emit(self, name: str, value: Any) -> None:
         if self._building:
@@ -1743,10 +1796,23 @@ class ParamForm(QWidget):
         """
         for name, row in self._rows.items():
             spec = row.spec.get("show_when")
-            if not spec:
-                continue
-            ctrl, values = str(spec[0]), [str(v) for v in spec[1]]
-            row.setVisible(str(self._values.get(ctrl, "")) in values)
+            shown = True
+            if spec:
+                ctrl, values = str(spec[0]), [str(v) for v in spec[1]]
+                shown = str(self._values.get(ctrl, "")) in values
+            # 兩個規則是 **and**：進階的那一列被 show_when 排除掉的時候，
+            # 展開進階也不該把它變出來（那一列在這個方法下根本不算數）。
+            if name in self._advanced and not self._advanced_open:
+                shown = False
+            row.setVisible(shown)
+
+        n = len(self._advanced_names_now())
+        self._advanced_btn.setVisible(n > 0)
+        # 講**幾格**，不要只講「進階」：使用者要判斷的是「我漏看了什麼」，
+        # 而一個沒有數字的標籤答不出那個問題。
+        self._advanced_btn.setText(
+            "Hide %d more settings" % n if self._advanced_open
+            else "Show %d more settings" % n)
 
         # 整組都藏起來時標題也要不見 —— 一個底下什麼都沒有的標題，
         # 比沒有標題更讓人以為畫面壞了。
@@ -1758,6 +1824,14 @@ class ParamForm(QWidget):
         for sec, heads in self._sections.items():
             for head in heads:
                 head.setVisible(alive.get(sec, True))
+
+    def _shown_by_rules(self, name: str) -> bool:
+        """撇開「進階收起來了」這件事，這一列本身算不算數（``show_when``）。"""
+        row = self._rows.get(name)
+        spec = None if row is None else row.spec.get("show_when")
+        if not spec:
+            return row is not None
+        return str(self._values.get(str(spec[0]), "")) in [str(v) for v in spec[1]]
 
     def _make_editor(self, spec: Dict[str, Any], value: Any,
                      streams: Sequence[str]) -> QWidget:

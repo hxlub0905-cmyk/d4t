@@ -39,6 +39,7 @@ def _prefix_in_section() -> ParamSpec:
     """``output_prefix`` 是共用的那一顆，只差要掛在哪一個小標題底下。"""
     spec = output_prefix_spec("cross")
     spec.section = "5 · Name and limits"
+    spec.advanced = True          # 只有同型別的量測卡撞名時才要動它
     return spec
 
 
@@ -82,6 +83,7 @@ class RoiCrossStep(Step):
                   "image noise becomes false edges; too much and real edges "
                   "get rounded away. This one is shared - it is about how the "
                   "image is read, not about either set of stripes."),
+            advanced=True,
         ),
         # ---- 直的那組條紋 -------------------------------------------------
         ParamSpec(
@@ -152,6 +154,7 @@ class RoiCrossStep(Step):
                   "stripe, compared with the steepest change in this image. "
                   "Lower finds more edges. Watch the panel and drag until the "
                   "lines land where you expect."),
+            advanced=True,
         ),
         # ---- 橫的那組條紋 -------------------------------------------------
         ParamSpec(
@@ -193,6 +196,7 @@ class RoiCrossStep(Step):
             section="3 · The left-to-right stripes",
             max=1.0, label="Flat edge sensitivity",
             help="Same as above, for the stripes that run left to right.",
+            advanced=True,
         ),
         # ---- 框放哪 --------------------------------------------------------
         ParamSpec(
@@ -280,6 +284,7 @@ class RoiCrossStep(Step):
             help=("A guard for images with very fine patterns. The boxes "
                   "nearest the middle are kept, because that is where the "
                   "defect is."),
+            advanced=True,
         ),
         ParamSpec(
             name="min_confidence", type="float", default=5.0, min=0.0,
@@ -291,6 +296,7 @@ class RoiCrossStep(Step):
                   "method, so this card falls back to the whole image and "
                   "marks the defect instead of guessing. A featureless patch "
                   "scores about 1; anything with structure scores 20 or more."),
+            advanced=True,
         ),
         _prefix_in_section(),
     ]

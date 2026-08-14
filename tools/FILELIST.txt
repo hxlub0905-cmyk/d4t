@@ -45,7 +45,7 @@ bc5822860c73a424460de963c0a7ef1b940bd71e adept/core/pipeline/context.py
 1736dedc4f51ff96e50741e02f220480d1f5c02a adept/core/pipeline/engine.py
 6c3c9c1cc1e6d1ee5d121f9994968f4f780e3cc5 adept/core/pipeline/expression.py
 94e351926e6a7b284bedaf41d1e3af9bfe0a435a adept/core/pipeline/recipe.py
-c8f47ff7c2df18f63a31e2741756326ba0001e9b adept/core/pipeline/step.py
+7e85891a63ec329cd0ab82ec443ccb481c866f62 adept/core/pipeline/step.py
 c08caf9bb969ead9de3dd2524baae3a786e47aeb adept/core/steps/__init__.py
 59e1698c9ba21910c98b1cbb39b336bf19a2af2d adept/core/steps/_util.py
 55a5a0bcc01184359f6a4f5bf5aca5c6c99c37d9 adept/core/steps/align.py
@@ -58,7 +58,7 @@ c08caf9bb969ead9de3dd2524baae3a786e47aeb adept/core/steps/__init__.py
 1d5b8d8a4cda39001d8af5e380244f4a0d76ee39 adept/core/steps/load.py
 630cc5d1261bb1281f308a1a9cfbb27e241d4dd2 adept/core/steps/normalize.py
 6e906a1610e0dfc2de6ecfee1773cd78652035a2 adept/core/steps/quality.py
-b9167e757afddf45fecc6c519a08d53a4f00e245 adept/core/steps/roi_cross.py
+f86ba46925ed2c7145d981c38b55941fc9336e57 adept/core/steps/roi_cross.py
 707bd6514e6e203cb59009819e538b927383ac9d adept/core/steps/roi_snr.py
 bcf3709d08b6695b8ff62034847221874d8488c6 adept/core/steps/roi_template.py
 c33655e28ad9322d8b1d4b456cead4afb6c9cb4d adept/core/steps/snr_map.py
@@ -76,10 +76,10 @@ c4308e82f6a24159e112dd8021104b90ea4cdf97 adept/ui/region_check.py
 3291d88808ce6ac13388b852978fe9a28f54f016 adept/ui/scope.py
 7d3d04f5f1b35ff15304a963245d4449815084f0 adept/ui/studio.py
 5d647c32055d4a73128c92853c0425729fdac6b9 adept/ui/template_dialog.py
-b8bd3c839068ee78cc3271696da33e79ecdc727d adept/ui/theme.py
+196bb1a2cce3493bf9d49da5d8ca1fda0918ad4e adept/ui/theme.py
 1f15c3ec5920e70e72aa96db92324d25134021ba adept/ui/viewmodel.py
 d3cece8a28de021fe573697b0b12723c0e871aa8 adept/ui/welcome.py
-9468f5cd123c6862350a4b4f55a2bf1b9c8b389a adept/ui/widgets.py
+7d5fc9915f7988d788074ca83ce0948ec1469f45 adept/ui/widgets.py
 db4c0723c6a28cddd4c335d5214895f57915fc7d adept/ui/workers.py
 04c5ce471195ac4e2449126ce835b22b4c880cf3 conftest.py
 ebcac66089ac8d2cbb061c18116a0e4dc4330eac docs/HANDOVER.md
@@ -159,6 +159,7 @@ cf69282154d0e937931153a9614a3644e57ba772 tests/test_ui_f7_19_wiring.py
 41586da4c6352be593849acd6438cdba108c79ae tests/test_ui_f7_23_buttons.py
 5bf585e3ceee37bade3e2a8bade82ead5aebdae6 tests/test_ui_f7_24_layout.py
 deb86a50afc1b3e40d17a03a7f8964d1b44ac5c4 tests/test_ui_f7_9_feedback.py
+7536b72440a3bcc6bea1de3f569fc2b0ba87c0d1 tests/test_ui_f8_advanced.py
 9a85b969b913fe0510288108ae59e89febac4932 tests/test_ui_f8_cross.py
 7fe333dfccbc1eeda4bb27b902826601feeb74fa tests/test_ui_f8_ruler.py
 90ebc45e44ce408457f916c895ed1ad081a08d63 tests/test_ui_gallery.py

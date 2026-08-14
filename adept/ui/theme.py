@@ -909,6 +909,19 @@ QLabel#paramSection {
     color: $text_secondary; font-size: 10px; font-weight: 600;
     padding: 10px 0 2px 2px; border-bottom: 1px solid $border_default;
 }
+/* "Show N more settings". Deliberately not a real-looking button: it does not
+   change anything about the recipe, it only changes how much of the form you
+   are looking at. Same weight as a section heading, aligned with it. */
+QPushButton#advancedToggle {
+    color: $accent; background: transparent; border: 0;
+    font-size: 11px; font-weight: 600;
+    padding: 8px 2px 2px 2px; text-align: left;
+}
+QPushButton#advancedToggle:hover { color: $accent_hover; }
+QPushButton#advancedToggle:focus {
+    border: 1px solid $border_focus; border-radius: $radius_sm;
+    padding: 7px 1px 1px 1px;
+}
 QLabel#paramLabel { color: $text_primary; font-weight: 600; }
 QLabel#paramHint { color: $text_hint; font-size: 11px; }
 QLabel#paramHint[error="true"] { color: $danger_text; font-size: 11px; font-weight: 600; }
