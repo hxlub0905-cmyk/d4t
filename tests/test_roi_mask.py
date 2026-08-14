@@ -51,6 +51,24 @@ def test_the_card_declares_its_contract():
     assert cls.resolve_regions_in(p) == ["epi", "mg"]
 
 
+def test_cleared_source_and_out_fields_run_exactly_as_declared():
+    """``Size like`` / ``Write mask to`` 是可編輯的下拉，清空是清得出來的。
+
+    清空之後 lint 與畫布講的是 test → mask（resolve_* 的預設），執行就必須
+    也是 test → mask —— 兩邊各自演化的話，下游 Normalize 會找不到它明明
+    看得到的那條流（PR #6 review 抓到的）。
+    """
+    cls = get_step("roi_mask")
+    p = {"regions": "epi", "source": "", "out": "  "}
+    assert cls.resolve_reads(p) == ["test"]
+    assert cls.resolve_writes(p) == ["mask"]
+
+    ctx = _ctx_with_regions()
+    cls().run(ctx, dict(p))
+    assert "mask" in ctx.images, "執行寫出去的流要跟宣告的一致"
+    assert ctx.images["mask"].shape == (H, W)
+
+
 def test_an_empty_regions_box_is_not_configured():
     """空的 regions 是合法的 str，但跑起來是全 0 的 mask ——
     參數合法 ≠ 設定完成（F7-13），要在 lint 就講。"""

@@ -74,11 +74,13 @@ class RoiMaskStep(Step):
 
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
-        return [str(params.get("source", "test") or "test")]
+        # 與 run() 的正規化**同一套**（空／空白 → 預設值）。兩邊各自演化的
+        # 下場：lint 與畫布講 test → mask，執行卻去找 '' —— 畫布在說謊。
+        return [str(params.get("source", "test") or "").strip() or "test"]
 
     @classmethod
     def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:
-        return [str(params.get("out", "mask") or "mask")]
+        return [str(params.get("out", "mask") or "").strip() or "mask"]
 
     @classmethod
     def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
@@ -99,7 +101,13 @@ class RoiMaskStep(Step):
     # ---- 運算 -------------------------------------------------------------
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
-        src = require_image(ctx, self.key, p["source"])
+        # 空字串照 resolve_reads / resolve_writes 的同一套預設走。那兩個
+        # 欄位是可編輯的下拉，清空是清得出來的 —— 清空之後 lint 與畫布講的
+        # 是 test → mask，執行就**必須**也是 test → mask，否則就是「畫布在
+        # 說謊」：下游 Normalize 找不到它明明看得到的那條流。
+        source = str(p["source"] or "").strip() or "test"
+        out = str(p["out"] or "").strip() or "mask"
+        src = require_image(ctx, self.key, source)
         h, w = src.shape[:2]
         mask = np.zeros((h, w), dtype=np.uint8)
         for name in self.region_list(p):
@@ -118,5 +126,5 @@ class RoiMaskStep(Step):
             ctx.warn("roi_mask: the regions cover no pixels at this patch "
                      "size; downstream cards will fall back to the whole "
                      "image.")
-        ctx.set_image(p["out"], mask)
+        ctx.set_image(out, mask)
         return ctx

@@ -711,6 +711,11 @@ class PipelineCanvas(QGraphicsView):
         self._popout_button = bool(popout_button)
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
+        # 節點 hover（_sync_hover_node）與線上的 × 都吃「沒按鍵也送 move」。
+        # QGraphicsView 建構時本來就會把 viewport 的 mouseTracking 打開
+        # （item hover 靠它），這行是把**依賴講明**：哪天換了 viewport 或
+        # base style 把它關掉，hover 會安靜地只剩拖曳時有效。
+        self.viewport().setMouseTracking(True)
         self.setRenderHint(QPainter.Antialiasing, True)
         self.setDragMode(QGraphicsView.RubberBandDrag)
         self.setAcceptDrops(True)                 # 卡片庫拖進來（F7-22）

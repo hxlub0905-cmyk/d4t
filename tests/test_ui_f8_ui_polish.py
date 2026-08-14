@@ -112,6 +112,11 @@ def test_hover_is_tracked_by_the_view_not_the_item(window, qapp):
     assert item.acceptHoverEvents() is False, \
         "卡片不能自己收 hover（見 test_ui_canvas_cut_button）"
 
+    # 沒按鍵的滑鼠移動要送得進 mouseMoveEvent —— viewport 的 mouseTracking
+    # 必須開著（QGraphicsView 預設就開，這裡鎖住「它不准被關掉」；
+    # 關掉的症狀是 hover 只在拖曳時有效，PR #6 review 提出的情境）。
+    assert window.pipeline.viewport().hasMouseTracking() is True
+
     view_pos = window.pipeline.mapFromScene(
         item.scenePos().x() + 20, item.scenePos().y() + 20)
     window.pipeline._sync_hover_node(view_pos)
