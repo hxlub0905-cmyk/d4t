@@ -61,11 +61,18 @@ class GlvStatsStep(Step):
                   help=("Which region to measure in — the name given by a "
                         "Define region card upstream. Leave empty for the "
                         "whole image.")),
-        ParamSpec(name="metrics", type="str", default="glv_mean,glv_std,glv_p50",
-                  help=("Statistics to output (comma separated): glv_mean / "
-                        "glv_std / glv_median / glv_min / glv_max / glv_q25 / "
-                        "glv_q75. Percentiles can be written glv_q90 or glv_p90 "
-                        "(glv_p50 = median).")),
+        # 勾選而不是用打的（2026-08-14 使用者要求）。清單是常用的那幾個；
+        # 手寫 recipe 仍可以放任何 glv_q<0-100>（清單外的值會列出來並勾著）。
+        ParamSpec(name="metrics", type="multi_choice",
+                  default="glv_mean,glv_std,glv_p50",
+                  label="Statistics",
+                  choices=["glv_mean", "glv_std", "glv_p50", "glv_min",
+                           "glv_max", "glv_q25", "glv_q75", "glv_q90",
+                           "glv_q99"],
+                  help=("Tick the statistics to output - each becomes a "
+                        "feature with the same name. glv_p50 is the median; "
+                        "hand-written recipes may also use any percentile "
+                        "like glv_q37.")),
         output_prefix_spec("center"),
     ]
     reads = ["test"]

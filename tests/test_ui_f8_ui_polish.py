@@ -223,6 +223,99 @@ def test_the_canvas_pops_out_into_its_own_window(window, qapp):
     qapp.processEvents()
 
 
+# --------------------------------------------------------------------------- #
+# 第五輪：量測卡的 overlay 與勾選的統計量
+# --------------------------------------------------------------------------- #
+def test_a_measure_card_draws_the_region_it_reads(window, qapp):
+    """選著量測卡時，預覽要畫出**它在量的那個區域**（使用者：「mask 蓋在
+    diff 上」）。以前只有 Region 卡畫框 —— 量測卡 roi 填錯只能用數字猜。"""
+    m = window.model
+    pr = m.add_step("roi_cross")
+    gs = m.add_step("glv_stats")
+    m.set_param(gs, "roi", "cross")
+    window.select_node(gs)
+    window.refresh_preview(sync=True)
+    qapp.processEvents()
+    assert window.image_view.overlay_count() > 0, \
+        "量測卡引用的區域沒有畫到預覽上"
+    # Region 卡自己的框照舊
+    window.select_node(pr)
+    window.refresh_preview(sync=True)
+    qapp.processEvents()
+    assert window.image_view.overlay_count() > 0
+
+
+def test_glv_metrics_are_ticked_not_typed(window, qapp):
+    """統計量用勾的不是用打的（使用者要求）。清單外的手寫值（glv_q37）
+    照樣列出來並勾著 —— 看不到就被靜靜刪掉是最糟的一種「幫忙」。"""
+    from adept.ui.widgets import MultiChoicePicker
+
+    m = window.model
+    gs = m.add_step("glv_stats")
+    m.set_param(gs, "metrics", "glv_mean,glv_q37")
+    window.select_node(gs)
+    qapp.processEvents()
+    editor = window.param_form.editor("metrics")
+    assert isinstance(editor, MultiChoicePicker)
+    assert "glv_q37" in editor.choice_names(), "recipe 帶來的自由值要列出來"
+    assert editor.text() == "glv_mean,glv_q37"
+
+
+# --------------------------------------------------------------------------- #
+# 第五輪：右鍵平移 + 拖出邊界的卡片要捲得到
+# --------------------------------------------------------------------------- #
+def _mouse_event(etype, pos, button, buttons):
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+    return QMouseEvent(etype, QPointF(pos), button, buttons,
+                       canvas_mod.Qt.NoModifier)
+
+
+def test_right_drag_pans_the_canvas(window, qapp):
+    """右鍵按住拖曳 = 平移（使用者要求）。拖了就不出選單。"""
+    from PySide6.QtCore import QEvent, QPoint
+
+    window.show()
+    qapp.processEvents()
+    view = window.pipeline
+    view.zoom_by(2.0)                      # 放大到一定捲得動
+    qapp.processEvents()
+    h0 = view.horizontalScrollBar().value()
+
+    view.mousePressEvent(_mouse_event(
+        QEvent.MouseButtonPress, QPoint(200, 80),
+        canvas_mod.Qt.RightButton, canvas_mod.Qt.RightButton))
+    view.mouseMoveEvent(_mouse_event(
+        QEvent.MouseMove, QPoint(120, 60),
+        canvas_mod.Qt.NoButton, canvas_mod.Qt.RightButton))
+    assert view._pan_moved is True
+    assert view.horizontalScrollBar().value() != h0, "畫布沒有跟著右鍵拖動"
+
+    opened = []
+    for item in view._items.values():
+        item.show_context_menu = lambda *_a, it=item: opened.append(it)  # type: ignore
+    view.mouseReleaseEvent(_mouse_event(
+        QEvent.MouseButtonRelease, QPoint(120, 60),
+        canvas_mod.Qt.RightButton, canvas_mod.Qt.NoButton))
+    assert view._pan_last is None
+    assert not opened, "拖曳之後放開不可以彈出右鍵選單"
+
+
+def test_a_card_dragged_past_the_edge_stays_reachable(window, qapp):
+    """卡片拖出 sceneRect 之外，那一塊是捲不到的 —— 埠與標籤就這樣
+    「不見」（使用者回報）。sceneRect 要跟著拖曳長大。"""
+    window.show()
+    qapp.processEvents()
+    view = window.pipeline
+    nid = view.node_ids()[-1]
+    item = view.node_item(nid)
+    far_x = view.scene().sceneRect().right() + 400
+    item.setPos(far_x, item.scenePos().y())    # itemChange → refresh_edges
+    qapp.processEvents()
+    assert view.scene().sceneRect().right() >= far_x + canvas_mod.NODE_W, \
+        "sceneRect 沒有跟著長大，拖出去的卡捲不到"
+
+
 def test_a_new_mask_card_inherits_the_regions_defined_upstream(window, qapp):
     """使用者的直覺：「Profile / Template 應該直接吐 mask」。名字不該要他
     重打一次 —— 加一張 Mask from regions，上游（例：Profile，key=roi_cross）

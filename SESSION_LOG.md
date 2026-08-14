@@ -4,6 +4,33 @@
 
 ---
 
+## 第五輪：右鍵平移、消失的埠、假的 Align 前置、量測卡的框與勾選（2026-08-14）
+
+使用者實測 D 案版面後的一批回饋（5 項）＋一條假想 flow 的檢視。
+
+- **右鍵拖曳平移畫布**（使用者要求）。右鍵被平移接管後，選單改在
+  「原地放開」時開（`show_context_menu` 抽出來共用）；view 的
+  `contextMenuEvent` 要吞掉，否則 Linux 在按下的瞬間就彈選單，永遠拖不起來。
+- **「有些卡片後方的埠不見了」查出兩個因**：(1) fit 的 0.7 下限讓四欄
+  pipeline 塞不進概覽條 —— D 案反轉了前提（主畫布是概覽、細節在設定區與
+  彈出視窗），主畫布下限放寬到 0.5、彈出視窗維持 0.7（F7-24 的量測結論
+  沒變，變的是誰負責讓人讀）；(2) 卡片拖出 sceneRect 之外那塊**捲不到**
+  —— sceneRect 現在跟著拖曳長大（只長不縮，縮回由 set_nodes/tidy 做）。
+- **subtract 預設 `b` 從 `ref_aligned` 改 `ref`**（使用者指正：patch 本來
+  就對齊，「一定要先 Align」是預設值造出來的假前置）。Align 留給未來
+  非 patch 輸入或站點量到殘餘位移時用。連動改了 badge 測試與
+  `_unmet_needs` 的例子（改用 snr_map 缺 diff 觸發）。
+- **量測卡的 metrics 用勾的不是用打的**：新參數型別 `multi_choice`
+  （`MultiChoicePicker`，一列三格的勾選網格）。刻意**不**強制值落在
+  choices 裡 —— 手寫 recipe 的 `glv_q37` 照樣合法、照樣列出來勾著。
+  目前只有 `glv_stats.metrics` 用它。
+- **量測卡也畫框**：`region_overlay()` 除了選著那張卡**定義**的區域
+  （F7-11），現在也畫它**引用**的（`resolve_regions_in`）—— 選
+  Gray-level stats / Mask from regions 時，預覽直接回答「我在量哪裡」。
+  `_center` 只在「定義」那邊跳過；明確引用它的量測卡當然要畫。
+
+驗收集中在 `tests/test_ui_f8_ui_polish.py`（+6 條）。
+
 ## D 案：畫布佔中上、設定拿大頭、看全貌用彈出視窗（2026-08-14 第三輪）
 
 **右緣抽屜活了半天就被退掉了** —— 使用者的理由一句話就成立：「n8n 的節點

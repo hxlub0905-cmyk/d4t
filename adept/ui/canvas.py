@@ -475,17 +475,25 @@ class _NodeItem(QGraphicsItem):
             self.canvas.refresh_edges()
         return super().itemChange(change, value)
 
-    def contextMenuEvent(self, e) -> None:      # noqa: D102 - Qt hook
+    def show_context_menu(self, screen_pos) -> None:
+        """這張卡的右鍵選單。
+
+        入口有兩個：Qt 原生的 contextMenuEvent（鍵盤選單鍵等），以及
+        view 的「右鍵原地放開」（右鍵拖曳被平移接管之後，選單改由那裡開）。
+        """
         menu = QMenu()
         act_toggle = menu.addAction(
             "Skip this step" if self.info.get("enabled", True) else "Enable this step")
         act_remove = menu.addAction("Remove")
-        chosen = menu.exec(e.screenPos())
+        chosen = menu.exec(screen_pos)
         if chosen is act_toggle:
             self.canvas.node_toggled.emit(
                 self.node_id, not bool(self.info.get("enabled", True)))
         elif chosen is act_remove:
             self.canvas.remove_requested.emit(self.node_id)
+
+    def contextMenuEvent(self, e) -> None:      # noqa: D102 - Qt hook
+        self.show_context_menu(e.screenPos())
         e.accept()
 
 
@@ -736,6 +744,9 @@ class PipelineCanvas(QGraphicsView):
         #: 現在游標壓著哪張卡（hover 回饋）。由這裡追而不是讓卡片自己收
         #: hover 事件 —— 卡片一收，事件就穿不過去，線上的 × 會被悶死。
         self._hover_node: Optional[_NodeItem] = None
+        #: 右鍵平移的狀態（None = 沒在平移）。
+        self._pan_last = None
+        self._pan_moved = False
         self._build_zoom_bar()
 
     # ---- 縮放控制（F7-14）--------------------------------------------------
@@ -907,6 +918,11 @@ class PipelineCanvas(QGraphicsView):
     #:
     #: 所以下限是 0.7。代價是很長的 pipeline 會超出畫面、要捲 —— 那是划算的：
     #: **讀不出來的全景不算全景**，而想看整體形狀的人本來就會再按一次縮小。
+    #:
+    #: D 案（2026-08-14）之後這是**類別預設**，不再是唯一的答案：主視窗的
+    #: 畫布變成中上的一條**概覽**（副標的細節住在下方設定區與彈出視窗），
+    #: 「全部看得完」比「副標讀得出」重要 —— Studio 把主畫布的這個值調成
+    #: 0.5（見 _build_body），彈出視窗維持 0.7（它就是拿來讀的）。
     MIN_FIT_SCALE = 0.7
 
     def fit(self) -> None:
@@ -1017,6 +1033,11 @@ class PipelineCanvas(QGraphicsView):
         for e in self._edges:
             e.prepareGeometryChange()
             e.update()
+        # 卡片拖到 sceneRect 外面，那一塊是**捲不到的** —— 埠與標籤就這樣
+        # 「不見」（使用者回報的）。所以 sceneRect 跟著拖曳長大（只長不縮：
+        # 拖曳中一直重算縮小的話畫面會跳；縮回來由 set_nodes / tidy 做）。
+        grown = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
+        self._scene.setSceneRect(self._scene.sceneRect().united(grown))
 
     # ---- 拉線 -------------------------------------------------------------
     def begin_link(self, src: _NodeItem, port: int = 0) -> None:
@@ -1076,14 +1097,37 @@ class PipelineCanvas(QGraphicsView):
             self._hover_node = None
         super().leaveEvent(e)
 
+    @staticmethod
+    def _view_pos(e):
+        # ``QMouseEvent.pos()`` 在 Qt6 是 deprecated（CI 的警告）。
+        return e.position().toPoint() if hasattr(e, "position") else e.pos()
+
+    def mousePressEvent(self, e) -> None:      # noqa: D102
+        # 右鍵按住拖曳 = 平移畫布（使用者要求）。原地放開仍然要出得來
+        # 節點的右鍵選單 —— 那條路移到 mouseReleaseEvent。
+        if e.button() == Qt.RightButton:
+            self._pan_last = self._view_pos(e)
+            self._pan_moved = False
+            e.accept()
+            return
+        super().mousePressEvent(e)
+
     def mouseMoveEvent(self, e) -> None:       # noqa: D102
-        # ``QMouseEvent.pos()`` 在 Qt6 是 deprecated（CI 的警告）——
-        # 跟 dropEvent 同一套寫法。
-        self._sync_hover_node(e.position().toPoint()
-                              if hasattr(e, "position") else e.pos())
+        if self._pan_last is not None and (e.buttons() & Qt.RightButton):
+            pos = self._view_pos(e)
+            d = pos - self._pan_last
+            if d.manhattanLength() > 2:
+                self._pan_moved = True
+            self._pan_last = pos
+            h, v = self.horizontalScrollBar(), self.verticalScrollBar()
+            h.setValue(h.value() - d.x())
+            v.setValue(v.value() - d.y())
+            e.accept()
+            return
+        self._sync_hover_node(self._view_pos(e))
         if self._link_from is not None and self._link_line is not None:
             a = self._link_from.out_port(getattr(self, "_link_port", 0))
-            b = self.mapToScene(e.pos())
+            b = self.mapToScene(self._view_pos(e))
             dx = max(40.0, abs(b.x() - a.x()) * 0.5)
             path = QPainterPath(a)
             path.cubicTo(a + QPointF(dx, 0), b - QPointF(dx, 0), b)
@@ -1093,11 +1137,29 @@ class PipelineCanvas(QGraphicsView):
         super().mouseMoveEvent(e)
 
     def mouseReleaseEvent(self, e) -> None:    # noqa: D102
+        if e.button() == Qt.RightButton and self._pan_last is not None:
+            moved, self._pan_moved = self._pan_moved, False
+            self._pan_last = None
+            if not moved:
+                # 原地放開 = 右鍵選單（拖了就是平移，不出選單）。
+                for item in self.items(self._view_pos(e)):
+                    if isinstance(item, _NodeItem):
+                        gp = (e.globalPosition().toPoint()
+                              if hasattr(e, "globalPosition") else e.globalPos())
+                        item.show_context_menu(gp)
+                        break
+            e.accept()
+            return
         if self._link_from is not None:
-            self._drop_link(self.mapToScene(e.pos()))
+            self._drop_link(self.mapToScene(self._view_pos(e)))
             e.accept()
             return
         super().mouseReleaseEvent(e)
+
+    def contextMenuEvent(self, e) -> None:     # noqa: D102
+        # 右鍵被平移接管。不吞掉的話，Linux 在**按下的瞬間**就彈選單，
+        # 平移永遠拖不起來；選單改在「原地放開」時開（見 mouseReleaseEvent）。
+        e.accept()
 
     def keyPressEvent(self, e) -> None:        # noqa: D102
         if e.key() in (Qt.Key_Delete, Qt.Key_Backspace):

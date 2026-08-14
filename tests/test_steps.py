@@ -234,7 +234,7 @@ def test_subtract_float32_with_visible_blob():
     pattern = _smooth_pattern(size, seed=8).astype(np.float32)
     test = np.clip(pattern + 90 * _blob(size, 64, 64, 3.0), 0, 255).astype(np.uint8)
     ref = np.clip(pattern, 0, 255).astype(np.uint8)
-    ctx = Context(images={"test": test, "ref_aligned": ref})
+    ctx = Context(images={"test": test, "ref": ref})
     run_step("subtract", ctx)
     diff = ctx.images["diff"]
     assert diff.dtype == np.float32                     # diff 流是 float32
@@ -244,7 +244,7 @@ def test_subtract_float32_with_visible_blob():
     with pytest.raises(StepError):
         run_step("subtract", Context(images={
             "test": np.zeros((8, 8), np.uint8),
-            "ref_aligned": np.zeros((9, 9), np.uint8)}))
+            "ref": np.zeros((9, 9), np.uint8)}))
 
 
 def test_invert_uint8():

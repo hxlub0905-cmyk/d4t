@@ -1516,6 +1516,66 @@ class StreamPicker(QWidget):
             self.changed.emit(self.text())
 
 
+class MultiChoicePicker(QWidget):
+    """``multi_choice`` 參數的編輯器：固定選項的勾選網格（2026-08-14）。
+
+    使用者的原話：「支援的量測數值希望是選的而不是用打的。」自由文字的三個
+    問題跟 ``StreamPicker`` 那邊一模一樣 —— 不知道能填什麼、不知道填了會怎樣、
+    打錯不會被擋。差別只在選項是**卡片宣告的**（``ParamSpec.choices``），
+    不是上游流。排成一欄三格的網格 —— 九個統計量排成一橫列會把表單撐爆。
+
+    recipe 帶進來、不在清單上的值（手寫的 ``glv_q37``）照樣列出來並勾著 ——
+    看不到就被靜靜刪掉，是最糟的一種「幫忙」。
+    """
+
+    changed = Signal(str)
+    _PER_ROW = 3
+
+    def __init__(self, choices: Sequence[str], value: str = "",
+                 parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._boxes: List[QCheckBox] = []
+        self._emitting = False
+
+        grid = QGridLayout(self)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(2)
+
+        picked = [t.strip() for t in str(value or "").split(",") if t.strip()]
+        names: List[str] = []
+        for name in list(choices) + picked:      # 卡片宣告的在前，recipe 的在後
+            name = str(name)
+            if name and name not in names:
+                names.append(name)
+        for i, name in enumerate(names):
+            box = QCheckBox(name, self)
+            box.setChecked(name in picked)
+            box.toggled.connect(self._on_toggled)
+            grid.addWidget(box, i // self._PER_ROW, i % self._PER_ROW)
+            self._boxes.append(box)
+
+    def text(self) -> str:
+        """目前的值（逗號分隔，順序同勾選框）。"""
+        return ",".join(b.text() for b in self._boxes if b.isChecked())
+
+    def set_text(self, value: str) -> None:
+        picked = {t.strip() for t in str(value or "").split(",") if t.strip()}
+        self._emitting = True
+        try:
+            for box in self._boxes:
+                box.setChecked(box.text() in picked)
+        finally:
+            self._emitting = False
+
+    def choice_names(self) -> List[str]:
+        return [b.text() for b in self._boxes]
+
+    def _on_toggled(self, _checked: bool) -> None:
+        if not self._emitting:
+            self.changed.emit(self.text())
+
+
 class TemplateField(QWidget):
     """``template`` 參數的編輯器：一顆「建一個」的按鈕 + 一行摘要（F7-13）。
 
@@ -1954,6 +2014,12 @@ class ParamForm(QWidget):
 
         if ptype == "image_keys":
             w = StreamPicker(streams, "" if value is None else str(value))
+            w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
+            return w
+
+        if ptype == "multi_choice":
+            w = MultiChoicePicker([str(c) for c in (spec.get("choices") or [])],
+                                  "" if value is None else str(value))
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 

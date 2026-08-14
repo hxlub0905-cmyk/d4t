@@ -837,6 +837,9 @@ class StudioWindow(QMainWindow):
         # 所以：上下切回來、比例反過來（畫布 2 / 設定 3）、設定**預設攤開**，
         # 「看全貌」由 zoom bar 的彈出視窗鈕承接（open_canvas_window）。
         self.pipeline = PipelineCanvas(self)
+        # 主畫布是概覽條（D 案）：fit 的「全部看得完」贏過「副標讀得出」。
+        # 讀細節的地方是下方設定區與彈出視窗（那份維持類別預設 0.7）。
+        self.pipeline.MIN_FIT_SCALE = 0.5
         self.param_form = ParamForm(self)
         self.score_pane = self._build_score_pane()
         self.stack = QStackedWidget(self)
@@ -1684,10 +1687,11 @@ class StudioWindow(QMainWindow):
     def _unmet_needs(self, node_id: str) -> str:
         """剛加的卡少了什麼上游 —— 講成一句可以照做的話（回傳含前導空白）。
 
-        以前只有卡片庫上一個 ``needs ref_aligned`` 的灰字 badge。對不會寫 code
-        的人那句話沒有動作可做：他不知道 ``ref_aligned`` 是誰產的，也不知道
-        「不然還可以怎麼辦」。最常踩到的就是 Subtract —— 它預設吃對位過的
-        ``ref_aligned``，所以 Load 之後直接放 Subtract 一定缺一張上游。
+        以前只有卡片庫上一個 ``needs diff`` 之類的灰字 badge。對不會寫 code
+        的人那句話沒有動作可做：他不知道那條流是誰產的，也不知道「不然還可以
+        怎麼辦」。例：Load 之後直接放 SNR map，它預設吃 ``diff``，一定缺
+        一張上游的 Compare。（Subtract 以前也是常客 —— 它曾預設吃
+        ``ref_aligned``；2026-08-14 起改吃 ``ref``，patch 本來就對齊。）
         """
         node = self.model.nodes.get(str(node_id))
         if node is None:
@@ -2782,26 +2786,43 @@ class StudioWindow(QMainWindow):
         self._refresh_region_overlay()
 
     def region_overlay(self) -> List[Tuple[float, float, float, float]]:
-        """**選著的那張卡**這一顆定出來的框（正規化座標，可能有好幾個）。
+        """**選著的那張卡**牽涉到的框（正規化座標，可能有好幾個）。
 
-        只畫選著那張卡自己宣告的區域（``resolve_regions_out``），不是 context
-        裡所有的框：一份 recipe 常常有好幾張 Region 卡，全部畫出來會變成一團
-        分不清誰是誰的線，而使用者現在在調的就是手上那一張。
+        兩種來源，同一個畫法：
+        - 這張卡**定義**的區域（``resolve_regions_out``，F7-11 起）——
+          調 Region 卡時看框跟著參數動；
+        - 這張卡**引用**的區域（``resolve_regions_in``，2026-08-14 使用者
+          要求）—— 選 Gray-level stats / Mask from regions 時，畫面直接回答
+          「我到底在量哪裡」。以前量測卡選起來預覽上什麼都沒有，roi 填錯
+          只能用數字猜。
+
+        仍然只畫**選著那張卡**的，不是 context 裡所有的框：一份 recipe 常常
+        有好幾張 Region 卡，全部畫出來分不清誰是誰。
         """
         node = self.model.nodes.get(self.selected_node or "")
         ctx = getattr(getattr(self, "_last_result", None), "context", None)
         if node is None or ctx is None:
             return []
         try:
-            names = list(get_step(node.step).resolve_regions_out(node.params))
+            step_cls = get_step(node.step)
+            produced = list(step_cls.resolve_regions_out(node.params))
+            consumed = list(step_cls.resolve_regions_in(node.params))
         except Exception:                  # noqa: BLE001 — 顯示用，不能擋畫面
             return []
-        out: List[Tuple[float, float, float, float]] = []
-        for name in names:
+        names: List[str] = []
+        for name in produced:
             # ``_center`` 是同一組框裡的一個，畫兩次只會變成粗一點的線。
             # 它的角色由 focus 表達（見下面），不是多畫一個框。
-            if name.endswith("_center"):
+            # （**引用**的不套這條 —— 量測卡明確指著 ``cross_center`` 時，
+            #   那個框就是它在量的地方，當然要畫。）
+            if name.endswith("_center") or name in names:
                 continue
+            names.append(name)
+        for name in consumed:
+            if name and name not in names:
+                names.append(name)
+        out: List[Tuple[float, float, float, float]] = []
+        for name in names:
             out.extend(tuple(float(v) for v in r)
                        for r in ctx.roi_norm_rects(name))
         return out
