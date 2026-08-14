@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, List, NamedTuple, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -55,7 +55,8 @@ from . import profile as algo_profile
 
 __all__ = ["StripeSet", "CrossResult", "find_stripes", "select_bands",
            "cross_boxes", "locate_crossings",
-           "SELECT_RULES", "PLACEMENTS", "SIDES"]
+           "SELECT_RULES", "PLACEMENTS", "SIDES", "FILL_RULES",
+           "measure_pitches"]
 
 #: 「要哪一組條紋」。用**相對**亮度（跟這張圖上其他段比），不是絕對灰階 ——
 #: 絕對值會隨機台與曝光漂移，一份 recipe 就綁死在一台機器上。
@@ -97,6 +98,28 @@ DEFAULT_PITCH_TOL = 0.25
 #: 所以判斷用的是那個位置實際的灰階，不是額外再問使用者一次。
 FILL_RULES = ("fill", "skip", "skip_clear")
 
+#: 兩個 pitch 交錯時，贏的那個相要比第二名好上「兩個 pitch 差距」的多少比例，
+#: 才算真的分得出來。見 :func:`_fill_by_pitch`。
+_PHASE_MARGIN = 0.15
+
+
+class _Fill(NamedTuple):
+    """``_fill_by_pitch`` 的結果。
+
+    用具名的而不是六個一組的 tuple：這個回傳值一路長到六項，而中間四項都是
+    數字 —— 呼叫端拆錯一個位置不會有任何錯誤訊息，只會安靜地把「補了幾根」
+    當成「線寬」。
+    """
+
+    bands: List[Tuple[float, float]]
+    error: float
+    invented: int
+    used: bool
+    width: float
+    #: 為什麼沒用（空字串 = 用了，或者根本沒給 pitch）。**要講出來**：
+    #: 「我分不出來」是一個有用的答案，「我猜一個」不是。
+    note: str
+
 
 @dataclass
 class StripeSet:
@@ -118,6 +141,9 @@ class StripeSet:
     selected: List[Tuple[int, int]] = field(default_factory=list)
     #: 從影像上量到的週期 = **同一組條紋**的中心距中位數；量不到是 0。
     pitch_measured: float = 0.0
+    #: 間距看起來是**交錯**的時候，第二個量到的值（不交錯就是 0）。
+    #: 有這個才答得出使用者的「有辦法自動量好填進左邊那兩格嗎」。
+    pitch_measured_2: float = 0.0
     #: 實際用來排晶格的 pitch（沒給或對不上就等於 ``pitch_measured``）。
     pitch_used: float = 0.0
     #: 找到的條紋中心離晶格有多遠（像素中位數）。沒給 pitch 是 -1。
@@ -138,6 +164,12 @@ class StripeSet:
     width_used: float = 0.0
     #: 線寬是使用者給的（True）還是量出來的（False）。
     width_fixed: bool = False
+    #: 給了 pitch 卻沒有用的原因（空字串 = 用了，或者沒給）。
+    pitch_note: str = ""
+    #: 晶格把條紋**搬了多遠**（找到的中心 → 它變成的格點，取最大值）。
+    #: 使用者看到的「藍框跟藍線對不齊」就是這個數字 —— 它是刻意的
+    #: （次像素精修 + 對齊到你給的 pitch），但沒講出來就只是「怪」。
+    snap_shift: float = 0.0
     confidence: float = 0.0
 
     @property
@@ -341,6 +373,50 @@ def _fixed_width(bands: Sequence[Tuple[float, float]], width: float,
     return out
 
 
+def measure_pitches(centres: Sequence[float]) -> Tuple[float, float]:
+    """從一排條紋的中心量出間距。回 ``(pitch, 第二個 pitch)``，不交錯時第二個 0。
+
+    使用者的問題是「不知道 pitch 的時候怎麼辦」，而畫面上的曲線其實已經知道了。
+    這個函式就是那個答案的來源（量測尺是手動版，這是自動版）。
+
+    兩件事會把天真的「相鄰間距取中位數」弄錯，而它們要用**相反**的方法處理：
+
+    * **交錯的間距**（寬、窄、寬、窄）—— 中位數落在兩者之間，兩個都不對。
+      認法：把間距按奇偶位置分兩組，**兩組都要至少兩個**（看過它重複一次）
+      而且中位數差得夠開。少於兩個的話「一寬一窄」跟「其中一個是雜訊」
+      分不開，而後者常見得多。
+    * **中間缺了幾根**（太淡、或者那裡是別的材質）—— 缺一根就多一個
+      「兩倍」的間距，而中位數會被它拉走。認法：每個間距除以它最接近的
+      整數倍，再取中位數。
+
+    順序不能反：先問交錯，因為「除以整數倍」會把交錯的寬間距當成窄的兩倍，
+    然後兩個答案都毀掉。
+    """
+    cs = sorted(float(c) for c in centres)
+    if len(cs) < 2:
+        return 0.0, 0.0
+    diffs = [b - a for a, b in zip(cs, cs[1:]) if b - a > 1e-6]
+    if not diffs:
+        return 0.0, 0.0
+
+    even = [d for i, d in enumerate(diffs) if i % 2 == 0]
+    odd = [d for i, d in enumerate(diffs) if i % 2 == 1]
+    if len(even) >= 2 and len(odd) >= 2:
+        a, b = float(np.median(even)), float(np.median(odd))
+        # 兩組**各自**還要是齊的。少了這一關，一排等距的線中間缺一根就會被
+        # 當成交錯：間距 [24, 24, 48, 24] 的奇偶兩組是 [24, 48] 與 [24, 24]，
+        # 中位數 36 與 24 差得夠開 —— 但 [24, 48] 自己根本不成一組。
+        even_ok = (max(even) - min(even)) <= max(a, 1e-6) * 0.15
+        odd_ok = (max(odd) - min(odd)) <= max(b, 1e-6) * 0.15
+        if even_ok and odd_ok and abs(a - b) > max(a, b) * 0.15:
+            return a, b
+
+    # 缺了幾根的情況：最小的那個間距當單位，其餘除以最接近的整數倍。
+    unit = min(diffs)
+    steps = [d / max(1.0, float(_half_up(d / unit))) for d in diffs]
+    return float(np.median(steps)), 0.0
+
+
 def _pitch_list(*pitches: float) -> List[float]:
     """收下的 pitch 裡真的是 pitch 的那幾個（0 = 沒給，1 px 沒有意義）。"""
     return [float(p) for p in pitches if float(p) >= 2.0]
@@ -398,8 +474,7 @@ def _split_by_material(prof: Any, lattice: Sequence[Tuple[float, float]],
 
 def _fill_by_pitch(bands: Sequence[Tuple[int, int]], pitch: float, length: int,
                    tol: float = DEFAULT_PITCH_TOL, pitch_2: float = 0.0,
-                   width_fixed: float = 0.0
-                   ) -> Tuple[List[Tuple[int, int]], float, int, bool, float]:
+                   width_fixed: float = 0.0) -> "_Fill":
     """已知 pitch → 把這一組條紋補成完整的一排。回 ``(條紋, 誤差, 補了幾根, 用了嗎)``。
 
     **晶格排在條紋的中心上，不是排在邊界上。** 這是這裡最容易做錯的一件事：
@@ -420,33 +495,66 @@ def _fill_by_pitch(bands: Sequence[Tuple[int, int]], pitch: float, length: int,
     pitches = [float(p) for p in (pitch, pitch_2) if float(p) >= 2.0]
     fixed = float(width_fixed) if float(width_fixed) > 0 else 0.0
     if not got or length <= 0:
-        return got, -1.0, 0, False, fixed
+        return _Fill(got, -1.0, 0, False, fixed, "")
     measured = float(np.median([b - a for a, b in got]))
     width = fixed or measured
     if not pitches:
-        return got, -1.0, 0, False, width
+        return _Fill(got, -1.0, 0, False, width, "")
 
     centres = [(a + b) / 2.0 for a, b in got]
+    # 被影像邊界切到的那幾根**量到的中心是偏的**（只露出一半），所以凡是拿
+    # 中心當證據的地方都要排除它們。
+    inside = [c for (a, b), c in zip(got, centres)
+              if a > 0.5 and b < float(length) - 0.5]
     mid = length / 2.0
     anchor = min(centres, key=lambda c: abs(c - mid))
 
     # 交錯的 pitch 有好幾個「相」，而錨點落在哪一相是看不出來的 ——
     # 每一相都排一次，留最貼合影像的那個。
-    best, best_err = None, None
+    scored = []
     for phase in range(len(pitches)):
         cand = [c for c in _walk(anchor, pitches, int(length), phase)
                 if c + width / 2.0 > 0 and c - width / 2.0 < length]
         if not cand:
             continue
-        e = float(np.median([min(abs(c - v) for v in cand) for c in centres]))
-        if best_err is None or e < best_err:
-            best, best_err = cand, e
-    if best is None:
-        return got, -1.0, 0, False, width
+        d = [min(abs(c - v) for v in cand) for c in centres]
+        # **挑相位用平均，判合不合用中位數 —— 兩個問題，兩把尺。**
+        # 中位數對「其中一根對不上」是免疫的，而那正是相位錯掉的**唯一**症狀：
+        # 實測（間距 24/36、三根線）錯的那個相有一根差 12 px，另外兩根 0，
+        # 中位數是 0.000，跟正確的相一模一樣 —— 於是兩個相看起來一樣好。
+        # 判「這個 pitch 對不對」時中位數仍然是對的（一根被缺陷撐大的線不該
+        # 讓整份 recipe 失效），所以下面的 err 沒有跟著改。
+        scored.append((float(np.mean(d)), float(np.median(d)), phase, cand))
+    if not scored:
+        return _Fill(got, -1.0, 0, False, width, "")
+    scored.sort(key=lambda t: t[0])
+    best_rank, best_err, _phase, best = scored[0]
+
+    # **相位定不出來就不要定。**（F8 第六輪，使用者回報「y 方向常常錯位」）
+    #
+    # 「寬、窄、寬、窄」的排法有兩個相，而分辨它們**唯一**的證據是相鄰兩根線
+    # 之間的距離 —— 也就是說，至少要有兩根**沒有被邊界切到**的線才問得出來。
+    # 少於兩根時兩個相一樣貼合（實測 64px 的 patch 配 40/33：只有一根完整的線，
+    # 兩個相的誤差都是 0.00），程式照樣挑一個，然後**把那根看得見的線搬到錯的
+    # 位置** —— 實測搬了 33 px，而 pitch_error 回報 0.00。
+    #
+    # 兩根以上還要分得夠開：贏的那個相要比第二名好上「兩個 pitch 差距」的一定
+    # 比例，否則那只是雜訊在決定。差不出來時**退回影像自己量到的**，並講出來 ——
+    # 「我分不出來」是一個有用的答案，「我猜一個」不是。
+    if len(pitches) > 1:
+        spread = abs(pitches[0] - pitches[1])
+        if len(inside) < 2:
+            return _Fill(got, -1.0, 0, False, width,
+                         "two spacings need at least two whole stripes to tell "
+                         "them apart, and this patch has %d" % len(inside))
+        if len(scored) > 1 and (scored[1][0] - best_rank) < spread * _PHASE_MARGIN:
+            return _Fill(got, -1.0, 0, False, width,
+                         "cannot tell which of the two spacings comes first "
+                         "(they fit equally well here)")
 
     lat, err = best, best_err
     if err > min(pitches) * float(tol):
-        return got, err, 0, False, width
+        return _Fill(got, err, 0, False, width, "")
 
     # **相位用整排一起定，不要只靠錨點那一根。** 錨點自己也是量出來的，它的誤差
     # 會原封不動地平移整個晶格；而每一根的量測誤差彼此獨立，取中位數就洗掉了。
@@ -454,8 +562,6 @@ def _fill_by_pitch(bands: Sequence[Tuple[int, int]], pitch: float, length: int,
     # 用中位數而不是平均：一根被缺陷撐大的線不該把整排推走。
     # 被影像邊界切到的那幾根**不能參加** —— 它們只露出一半，量到的「中心」
     # 依定義就是偏的，放進來等於用一個已知有偏差的樣本去校正整排。
-    inside = [(a + b) / 2.0 for a, b in got
-              if a > 0.5 and b < float(length) - 0.5]
     if inside:
         shift = float(np.median([c - min(lat, key=lambda v: abs(c - v))
                                  for c in inside]))
@@ -484,7 +590,7 @@ def _fill_by_pitch(bands: Sequence[Tuple[int, int]], pitch: float, length: int,
         hi = min(float(length), c + w / 2.0)
         if hi - lo >= 1.0:
             out.append((lo, hi))
-    return out, err, max(0, len(out) - len(got)), True, width
+    return _Fill(out, err, max(0, len(out) - len(got)), True, width, "")
 
 
 def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
@@ -542,17 +648,22 @@ def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
                   for a, b in out.bands]
 
     picked = select_bands(out.bands, out.levels, select, kinds)
-    centres = sorted((a + b) / 2.0 for a, b in picked)
-    if len(centres) >= 2:
-        out.pitch_measured = float(np.median(np.diff(np.asarray(centres))))
+    # 量間距只用**沒有被影像邊界切到**的那幾根 —— 只露一半的線量到的中心
+    # 依定義就是偏的，而這個數字是要拿去填回參數格的。
+    whole = [(a + b) / 2.0 for a, b in picked
+             if a > 0.5 and b < float(prof.size) - 0.5]
+    centres = sorted(whole if len(whole) >= 3
+                     else [(a + b) / 2.0 for a, b in picked])
+    out.pitch_measured, out.pitch_measured_2 = measure_pitches(centres)
     out.pitch_used = out.pitch_measured
 
     given = _pitch_list(pitch, pitch_2)
-    filled, err, _n_new, used, w_used = _fill_by_pitch(
-        picked, float(pitch), int(prof.size), pitch_tol, float(pitch_2),
-        float(width))
+    fit = _fill_by_pitch(picked, float(pitch), int(prof.size), pitch_tol,
+                         float(pitch_2), float(width))
+    filled, err, used = list(fit.bands), fit.error, fit.used
     out.pitch_error = err
-    out.width_used = w_used
+    out.pitch_note = fit.note
+    out.width_used = fit.width
     out.width_fixed = float(width) > 0
     # 晶格沒排（沒給 pitch，或給的跟影像對不上）時線寬照樣要照給的來 ——
     # 這是兩件事：一個講「每隔多遠有一根」，一個講「一根多寬」。
@@ -583,6 +694,12 @@ def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
         out.pitches_used = given
         out.pitch_used = float(np.mean(given))
     out.selected = filled
+    # 晶格把每一根搬了多遠 —— 使用者看到的「藍框跟藍線對不齊」就是這個。
+    if used and picked:
+        found = [(a + b) / 2.0 for a, b in picked]
+        moved = [min(abs(c - (a + b) / 2.0) for a, b in filled)
+                 for c in found] if filled else []
+        out.snap_shift = float(max(moved)) if moved else 0.0
     return out
 
 

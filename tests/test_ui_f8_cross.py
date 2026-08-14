@@ -316,3 +316,101 @@ def test_the_spots_left_out_are_drawn_on_the_curve(qapp):
     without = _shaded_columns(ProfilePanel(), dict(data, blocked=[]))
     assert with_marks > without + 4, (
         "被擋掉的那兩格沒有畫出來（%d vs %d 欄）" % (with_marks, without))
+
+
+# --------------------------------------------------------------------------- #
+# 5. 「量給我填」與「藍框跟線為什麼對不齊」（F8 第六輪）
+# --------------------------------------------------------------------------- #
+def test_the_panel_offers_the_pitch_it_measured(qapp):
+    """使用者原話：「有辦法自動 measure 填入左側數值嗎」。曲線本來就知道答案，
+    要他看著面板上的數字再手動打一次，是在製造一個可以打錯的機會。"""
+    rec = _run().meta["crossings"]["xing"]["x"]
+    insp = insp_mod.CrossInspector()      # 留著參考：子元件跟著父物件一起活
+    panel = insp.across
+    panel.set_data("upright stripes", dict(rec, pitches_used=[]))
+
+    assert panel.measured_pitches()[0] == pytest.approx(MG_PITCH, abs=1.5)
+    text = panel.fill_button_text()
+    assert text.startswith("Use ") and "px" in text, text
+
+
+def test_the_offer_disappears_once_it_is_already_that_value(qapp):
+    """按了不會改變任何東西的按鈕比沒有那顆按鈕糟 —— 使用者會以為自己按錯了。"""
+    rec = _run().meta["crossings"]["xing"]["x"]
+    insp = insp_mod.CrossInspector()
+    panel = insp.across
+    panel.set_data("upright stripes",
+                   dict(rec, pitch_measured=24.0, pitch_measured_2=0.0,
+                        pitches_used=[24.0]))
+    assert panel.fill_button_text() == ""
+
+
+def test_pressing_it_asks_for_both_pitch_boxes(qapp):
+    """只送第一格的話，上一次留下來的交錯值會跟新量到的單一 pitch 湊成一組
+    沒有人量過的組合。"""
+    rec = _run().meta["crossings"]["xing"]["x"]
+    insp = insp_mod.CrossInspector()
+    seen = []
+    insp.param_requested.connect(lambda n, v: seen.append((n, v)))
+    insp.across.set_data("upright stripes", dict(rec, pitches_used=[]))
+    insp.across._request_pitch()
+
+    assert [n for n, _v in seen] == ["vertical_pitch", "vertical_pitch_2"]
+    assert seen[0][1] == pytest.approx(MG_PITCH, abs=1.5)
+    assert seen[1][1] == 0.0
+
+    seen.clear()
+    insp.down.set_data("flat stripes",
+                       dict(rec, axis="y", pitch_measured=40.0,
+                            pitch_measured_2=33.0, pitches_used=[]))
+    insp.down._request_pitch()
+    assert [n for n, _v in seen] == ["horizontal_pitch", "horizontal_pitch_2"]
+    assert (seen[0][1], seen[1][1]) == (40.0, 33.0)
+
+
+def test_the_button_writes_it_into_the_card_and_can_be_undone(qapp, cross_window):
+    """走的是跟使用者自己動參數表同一條路 —— 一個會改 recipe 而撤不掉的
+    按鈕，比沒有那顆按鈕糟。"""
+    win = cross_window
+    nid = win.selected_node
+    win.refresh_preview(sync=True)
+    before = win.model.nodes[nid].params.get("vertical_pitch")
+
+    insp = win.inspector()
+    assert isinstance(insp, insp_mod.CrossInspector)
+    assert insp.across.fill_button_text(), "沒有量到可以填的東西"
+    insp.across._request_pitch()
+
+    after = win.model.nodes[nid].params.get("vertical_pitch")
+    assert after != before and float(after) > 2.0
+    # 參數表也要跟著顯示新值 —— 不然畫面上那一格還是舊的，而使用者按了鈕
+    assert float(win.param_form.values()["vertical_pitch"]) == float(after)
+
+    win.undo()
+    assert win.model.nodes[nid].params.get("vertical_pitch") == before
+
+
+def test_the_summary_explains_the_gap_between_the_lines_and_the_blocks(qapp):
+    """使用者原話：「藍框跟線的實際意義是什麼（我發現有時候兩者會 shift）」。
+    shift 是刻意的，但沒講出來就只是「怪」—— 而「怪」的下一步通常是去亂調
+    敏感度。"""
+    from adept.ui.widgets import ProfilePanel
+
+    rec = _run().meta["crossings"]["xing"]["x"]
+    moved, still = ProfilePanel(), ProfilePanel()
+    moved.set_data("upright stripes", dict(rec, snap_shift=2.1))
+    still.set_data("upright stripes", dict(rec, snap_shift=0.0))
+    assert "snapped 2.1 px" in moved.summary()
+    assert "snapped" not in still.summary()
+
+
+def test_a_pitch_that_was_given_but_not_used_is_called_out(qapp):
+    """使用者會以為那格生效了，然後拿一份其實是「照影像自己量」的結果去跑整批。"""
+    from adept.ui.widgets import ProfilePanel
+
+    rec = _run().meta["crossings"]["xing"]["x"]
+    panel = ProfilePanel()
+    panel.set_data("flat stripes",
+                   dict(rec, pitch_note="cannot tell which of the two "
+                                        "spacings comes first"))
+    assert "pitch not used" in panel.summary()

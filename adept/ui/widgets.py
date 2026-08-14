@@ -1068,6 +1068,10 @@ class ProfilePanel(QWidget):
     measure_changed = Signal(str, float, float)
     #: 放開了。標記要跟著消失，它是「現在正在量」的回饋不是註記。
     measure_ended = Signal()
+    #: 「把量到的間距填進參數格」（axis, pitch, 第二個 pitch）。
+    #: 使用者原話：「有辦法自動 measure 填入左側數值嗎」。曲線本來就知道答案，
+    #: 而要他看著面板上的數字再手動打一次，是在製造一個可以打錯的機會。
+    pitch_requested = Signal(str, float, float)
 
     _EMPTY = "(select a Profile card to see its curve)"
 
@@ -1079,26 +1083,81 @@ class ProfilePanel(QWidget):
         self.setMinimumHeight(96)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setToolTip(
-            "Gray level projected along the scan direction. Vertical lines are "
-            "the boundaries that were found; the shaded sections are the "
-            "stripes this card uses. The dashed line marked 'defect' is the "
-            "middle of the patch, which is where the tool put the defect - it "
-            "is a marker, not something you set.\n\n"
+            "Gray level projected along the scan direction.\n\n"
+            "The thin upright lines are the edges found in this image. The "
+            "shaded blocks are the stripes the card will actually use - which "
+            "is not the same thing: the edges are refined to sub-pixel, and if "
+            "you filled in a pitch the stripes are then snapped onto that "
+            "regular grid. So the blocks can sit a pixel or two off the lines, "
+            "and the summary says how far.\n\n"
+            "The dashed line marked 'defect' is the middle of the patch, which "
+            "is where the tool put the defect - a marker, not a setting.\n\n"
             "Press and drag across the curve to measure: the green band shows "
             "the same stretch on the image above, and the readout gives the "
             "distance in pixels - and the pitch, if you dragged across more "
             "than one stripe. Let go to clear it.")
 
+        # 「量給我填」。浮在面板上（同 kind="icon" 那幾顆的理由：這裡沒有卡片
+        # 當底色）。只有在**它會改變什麼**的時候才出現 —— 見 _sync_button。
+        self._fill_btn = small_button("", kind="icon", parent=self)
+        self._fill_btn.setVisible(False)
+        self._fill_btn.clicked.connect(self._request_pitch)
+
     # -- public ------------------------------------------------------------
     def set_data(self, name: str, data: Optional[Dict[str, Any]]) -> None:
         self._name = str(name or "")
         self._data = dict(data or {})
+        self._sync_button()
         self._end_ruler()
         self.setCursor(Qt.CrossCursor if self.has_data() else Qt.ArrowCursor)
         self.update()
 
     def has_data(self) -> bool:
         return bool(self._data.get("profile"))
+
+    # -- 「量給我填」 ------------------------------------------------------
+    def measured_pitches(self) -> Tuple[float, float]:
+        """這條曲線量到的間距（第二個是 0 代表不交錯）。"""
+        return (float(self._data.get("pitch_measured") or 0.0),
+                float(self._data.get("pitch_measured_2") or 0.0))
+
+    def fill_button_text(self) -> str:
+        """按鈕上的字（空字串 = 這時候不該有按鈕）。"""
+        a, b = self.measured_pitches()
+        if a < 2.0:
+            return ""
+        used = [float(v) for v in (self._data.get("pitches_used") or [])]
+        want = [round(v, 1) for v in ((a, b) if b >= 2.0 else (a,))]
+        if [round(v, 1) for v in used] == want:
+            return ""            # 已經是這個值了 —— 按了什麼都不會變
+        return ("Use %s px" % " / ".join("%.1f" % v for v in want))
+
+    def _request_pitch(self) -> None:
+        a, b = self.measured_pitches()
+        if a >= 2.0:
+            self.pitch_requested.emit(self.axis(), a, b if b >= 2.0 else 0.0)
+
+    def _sync_button(self) -> None:
+        text = self.fill_button_text()
+        self._fill_btn.setText(text)
+        self._fill_btn.setVisible(bool(text))
+        self._fill_btn.setToolTip(
+            "Put the spacing measured on this curve into the pitch box for "
+            "this direction. Use it when you do not know the pitch from the "
+            "layout - once it is filled in, the card can check what it finds, "
+            "fill in stripes that were too faint, and lock on from a single "
+            "stripe." if text else "")
+        if text:
+            self._fill_btn.adjustSize()
+            self._place_button()
+
+    def _place_button(self) -> None:
+        b = self._fill_btn
+        b.move(max(2, self.width() - b.width() - 10), 4)
+
+    def resizeEvent(self, e) -> None:      # noqa: D102 - Qt hook
+        super().resizeEvent(e)
+        self._place_button()
 
     # -- ruler (F8) --------------------------------------------------------
     def axis(self) -> str:
@@ -1220,6 +1279,17 @@ class ProfilePanel(QWidget):
                 # 這幾根影像上看不到，是靠已知 pitch 推出來的。框仍然對，
                 # 但「憑什麼對」換了一個依據 —— 使用者有權知道。
                 bits.append("%d filled in" % filled)
+            shift = float(d.get("snap_shift") or 0.0)
+            if shift >= 0.5:
+                # 使用者原話：「藍框跟線有時候會 shift」。它是刻意的（次像素
+                # 精修 + 對齊到你給的 pitch），但沒講出來就只是「怪」，
+                # 而「怪」的下一步通常是去亂調敏感度。
+                bits.append("snapped %.1f px" % shift)
+            note = str(d.get("pitch_note") or "")
+            if note:
+                # 給了 pitch 卻沒有用 —— 這件事一定要講。使用者會以為那格
+                # 生效了，然後拿一份其實是「照影像自己量」的結果去跑整批。
+                bits.append("pitch not used: %s" % note)
             blocked = len(d.get("blocked") or ())
             if blocked:
                 # 「這一格我故意不放」跟「這一格我沒找到」在畫面上長得一模一樣。

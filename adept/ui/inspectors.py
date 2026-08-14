@@ -538,6 +538,9 @@ class CrossInspector(Inspector):
     #: 這裡不做判斷，只轉發 —— 儀表不該知道影像檢視器存不存在。
     measure_changed = Signal(str, float, float)
     measure_ended = Signal()
+    #: 「把量到的間距填進參數格」→ 主視窗做 ``model.set_param``。
+    #: 儀表不碰模型（它連 recipe 長什麼樣都不知道），只說出請求。
+    param_requested = Signal(str, object)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -552,7 +555,21 @@ class CrossInspector(Inspector):
             panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
             panel.measure_changed.connect(self.measure_changed)
             panel.measure_ended.connect(self.measure_ended)
+            panel.pitch_requested.connect(self._on_pitch_requested)
             lay.addWidget(panel)
+
+    def _on_pitch_requested(self, axis: str, pitch: float,
+                            pitch_2: float) -> None:
+        """曲線的軸 → 這張卡的參數名。
+
+        ``axis="x"`` 是沿 X 走的曲線，找到的是**直的**條紋 → ``vertical_*``。
+        這一步每次都要在腦裡轉一次，所以它只寫在這裡一個地方。
+        """
+        side = "vertical" if str(axis) == "x" else "horizontal"
+        self.param_requested.emit("%s_pitch" % side, float(pitch))
+        # 第二格一定要跟著送 —— 只送第一格的話，上一次留下來的交錯值會跟
+        # 新量到的單一 pitch 湊成一組沒有人量過的組合。
+        self.param_requested.emit("%s_pitch_2" % side, float(pitch_2))
 
     def region(self) -> str:
         return str(self.params.get("roi_out") or "")

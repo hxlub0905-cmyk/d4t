@@ -422,6 +422,12 @@ def _stripe_meta(s: "algo_grid.StripeSet") -> Dict[str, Any]:
         "bands": [[int(a), int(b)] for a, b in s.bands],
         "selected": [[int(a), int(b)] for a, b in s.selected],
         "pitch_measured": float(s.pitch_measured),
+        # 量到的第二個間距（不交錯就是 0）。面板的「量給我填」讀這兩個。
+        "pitch_measured_2": float(s.pitch_measured_2),
+        # 給了 pitch 卻沒有用的原因，以及晶格把條紋搬了多遠 —— 後者就是
+        # 使用者看到的「藍框跟藍線對不齊」。
+        "pitch_note": str(s.pitch_note),
+        "snap_shift": float(s.snap_shift),
         "pitch_used": float(s.pitch_used),
         "pitches_used": [float(v) for v in s.pitches_used],
         "pitch_error": float(s.pitch_error),

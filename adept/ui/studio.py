@@ -2329,6 +2329,27 @@ class StudioWindow(QMainWindow):
         sig = getattr(insp, "measure_ended", None)
         if sig is not None:
             sig.connect(self._on_measure_ended)
+        sig = getattr(insp, "param_requested", None)
+        if sig is not None:
+            sig.connect(self._on_param_requested)
+
+    def _on_param_requested(self, name: str, value: Any) -> None:
+        """儀表說「這一格該是這個值」（目前只有「量給我填」用到）。
+
+        走的是跟使用者自己動參數表**同一條路**（``set_param`` → 復原堆疊 →
+        重跑預覽），所以它可以被 Ctrl+Z 撤銷 —— 一個會改 recipe 而撤不掉的
+        按鈕，比沒有那顆按鈕糟。
+        """
+        nid = self.selected_node
+        if not nid or nid not in self.model.nodes:
+            return
+        self._on_param_edited(str(name), value)
+        # 參數表要跟著顯示新值 —— 不然畫面上那一格還是舊的，而使用者按了鈕。
+        node = self.model.nodes.get(nid)
+        if node is not None:
+            self.param_form.set_step(
+                get_step(node.step).describe(), node.params,
+                self.model.available_streams(before_node=nid))
 
     def _on_measure(self, axis: str, start: float, end: float) -> None:
         """曲線面板上按著量測尺 → 影像上標出同一段（F8）。
