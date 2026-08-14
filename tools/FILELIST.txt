@@ -16,7 +16,7 @@ ed44cb755d91d7f3adf6018672969a6cb68932f0 adept/core/algo/curve.py
 31ed355760ee79e887ddc627c0bc970c77bdfe42 adept/core/algo/enhance.py
 9e85e8aedef61131545e67fef5e323dbb56a5d57 adept/core/algo/glv.py
 a77ccf39e51b71d68671878245eed04422b4f24e adept/core/algo/golden.py
-c86221b50aff72d150ad7dea86120db7f42f429a adept/core/algo/grid.py
+0fee1e14d43726a6943fe3d289531494bc32b8e3 adept/core/algo/grid.py
 48cc527868f1d0336d9ed15803aaf54910347842 adept/core/algo/histmatch.py
 9e8715a433ecb84d49151964ed5aea05f8c18dc4 adept/core/algo/normalize.py
 e048c1f3680e5559d0c79d7f080629fecc161549 adept/core/algo/period.py
@@ -58,7 +58,7 @@ c08caf9bb969ead9de3dd2524baae3a786e47aeb adept/core/steps/__init__.py
 1d5b8d8a4cda39001d8af5e380244f4a0d76ee39 adept/core/steps/load.py
 630cc5d1261bb1281f308a1a9cfbb27e241d4dd2 adept/core/steps/normalize.py
 6e906a1610e0dfc2de6ecfee1773cd78652035a2 adept/core/steps/quality.py
-f3241a83b49006719cc24b7024646507b323ec14 adept/core/steps/roi_cross.py
+b9167e757afddf45fecc6c519a08d53a4f00e245 adept/core/steps/roi_cross.py
 707bd6514e6e203cb59009819e538b927383ac9d adept/core/steps/roi_snr.py
 bcf3709d08b6695b8ff62034847221874d8488c6 adept/core/steps/roi_template.py
 c33655e28ad9322d8b1d4b456cead4afb6c9cb4d adept/core/steps/snr_map.py
@@ -79,7 +79,7 @@ c4308e82f6a24159e112dd8021104b90ea4cdf97 adept/ui/region_check.py
 b8bd3c839068ee78cc3271696da33e79ecdc727d adept/ui/theme.py
 1f15c3ec5920e70e72aa96db92324d25134021ba adept/ui/viewmodel.py
 d3cece8a28de021fe573697b0b12723c0e871aa8 adept/ui/welcome.py
-f3f8c605947ac499c4da639bd9ec7661bb42ca92 adept/ui/widgets.py
+9468f5cd123c6862350a4b4f55a2bf1b9c8b389a adept/ui/widgets.py
 db4c0723c6a28cddd4c335d5214895f57915fc7d adept/ui/workers.py
 04c5ce471195ac4e2449126ce835b22b4c880cf3 conftest.py
 ebcac66089ac8d2cbb061c18116a0e4dc4330eac docs/HANDOVER.md
@@ -133,8 +133,8 @@ e027a9047fa771cca97915c533a7f90198c0fb18 tests/test_period_golden.py
 a9c5ff3484614e2603acbe90c98394f22f5eae2c tests/test_recipe.py
 f90b258ab8544e5eadc1b54b55ff558db1cc3041 tests/test_results_store.py
 16cd9995a97eb6b919044e2c72fe1bcddb954e2a tests/test_roi.py
-88eda6a5b1b05326b19635e5c2d5299232608e6e tests/test_roi_cross.py
-509980dc95b0d4f1f5314432ff94545b37e52a89 tests/test_roi_cross_lattice.py
+89fb007d43ba13010286d1f883b59cce7fc04421 tests/test_roi_cross.py
+1f2c2d4861d0d6955604dfa9b690177b7e2a63c0 tests/test_roi_cross_lattice.py
 a7c41debc132957219cb7a9187a4cb7efe1d3317 tests/test_roi_template.py
 ecb57644cec348b3ef52d811332dd9c353fcd920 tests/test_rsem_ingest.py
 99687acf0a8aae0d2c88f7fca293cfad2e31c7b5 tests/test_snr.py
@@ -159,7 +159,7 @@ cf69282154d0e937931153a9614a3644e57ba772 tests/test_ui_f7_19_wiring.py
 41586da4c6352be593849acd6438cdba108c79ae tests/test_ui_f7_23_buttons.py
 5bf585e3ceee37bade3e2a8bade82ead5aebdae6 tests/test_ui_f7_24_layout.py
 deb86a50afc1b3e40d17a03a7f8964d1b44ac5c4 tests/test_ui_f7_9_feedback.py
-1776edd8599f4a194934a3cfc2e757f6d60c290e tests/test_ui_f8_cross.py
+9a85b969b913fe0510288108ae59e89febac4932 tests/test_ui_f8_cross.py
 7fe333dfccbc1eeda4bb27b902826601feeb74fa tests/test_ui_f8_ruler.py
 90ebc45e44ce408457f916c895ed1ad081a08d63 tests/test_ui_gallery.py
 1cec7ec222c571ea86bca59c8b3b47d2bfe5e2cf tests/test_ui_patch_only.py

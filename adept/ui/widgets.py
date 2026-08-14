@@ -1220,6 +1220,11 @@ class ProfilePanel(QWidget):
                 # 這幾根影像上看不到，是靠已知 pitch 推出來的。框仍然對，
                 # 但「憑什麼對」換了一個依據 —— 使用者有權知道。
                 bits.append("%d filled in" % filled)
+            blocked = len(d.get("blocked") or ())
+            if blocked:
+                # 「這一格我故意不放」跟「這一格我沒找到」在畫面上長得一模一樣。
+                # 少了這句，使用者會以為那裡定位失敗，然後去調敏感度。
+                bits.append("%d left out" % blocked)
             bits.append("confidence %.1f" % float(d.get("confidence", 0.0)))
             return " · ".join(bits)
         picked = d.get("picked")
@@ -1272,6 +1277,26 @@ class ProfilePanel(QWidget):
         for band in shaded:
             x0, x1 = to_x(int(band[0])), to_x(int(band[1]))
             p.drawRect(QRectF(x0, plot.top(), max(1.0, x1 - x0), plot.height()))
+
+        # 晶格上**故意不用**的那幾格（那裡是別的材質）。畫成斜線而不是另一種
+        # 底色：它跟選中的段是同一排上的東西，差別在「用不用」，而兩塊實心色
+        # 只說得出「這是兩種東西」。
+        blocked = self._data.get("blocked") or []
+        if blocked:
+            hatch = QColor(TOKENS["text_secondary"])
+            hatch.setAlpha(90)
+            p.setPen(QPen(hatch, 1.0))
+            for band in blocked:
+                x0, x1 = to_x(float(band[0])), to_x(float(band[1]))
+                r = QRectF(x0, plot.top(), max(1.0, x1 - x0), plot.height())
+                p.save()
+                p.setClipRect(r)
+                x = r.left() - r.height()
+                while x < r.right():
+                    p.drawLine(QPointF(x, r.bottom()),
+                               QPointF(x + r.height(), r.top()))
+                    x += 4.0
+                p.restore()
 
         # 平滑前的曲線畫在後面當對照 —— 使用者才看得出平滑吃掉了多少
         if len(raw) == n:

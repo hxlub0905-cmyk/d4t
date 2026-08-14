@@ -271,3 +271,48 @@ def test_only_the_selected_card_draws_its_boxes(qapp, cross_window):
     win.select_node(first)
     win.refresh_preview(sync=True)
     assert win.region_overlay() == mine, "切回第一張，畫的要是第一張的框"
+
+
+# --------------------------------------------------------------------------- #
+# 4. 「這一格我故意不放」要看得出來（F8 第六輪）
+# --------------------------------------------------------------------------- #
+def _cpode_ctx() -> Context:
+    """MG 的晶格上有兩格是別的材質（很暗）—— 站點的 CPODE。"""
+    rng = np.random.default_rng(0)
+    img = np.full((SIZE, SIZE), 90.0, np.float32)
+    img[np.arange(SIZE) % EPI_PITCH < 14, :] = 180.0
+    img[:, np.arange(SIZE) % MG_PITCH < 8] = 220.0
+    for site in (2, 4):
+        img[:, site * MG_PITCH:site * MG_PITCH + 8] = 30.0
+    img += rng.normal(0, 2.0, (SIZE, SIZE)).astype(np.float32)
+    ctx = Context(images={"test": img.copy(), "ref": img.copy()})
+    get_step("roi_cross")().run(ctx, {
+        "source": "ref", "place": "beside_vertical", "box_size": 5.0,
+        "inset": 3.0, "roi_out": "xing", "vertical_kinds": 3,
+        "vertical_pitch": MG_PITCH, "horizontal_pitch": EPI_PITCH})
+    return ctx
+
+
+def test_the_summary_says_how_many_spots_were_left_out(qapp):
+    """「這一格我故意不放」跟「這一格我沒找到」在畫面上長得一模一樣。
+    少了這句話，使用者會以為那裡定位失敗，然後去調敏感度 —— 而敏感度對它
+    一點作用都沒有。"""
+    rec = _cpode_ctx().meta["crossings"]["xing"]
+    assert len(rec["x"]["blocked"]) == 2, rec["x"]["blocked"]
+
+    panel = insp_mod.CrossInspector()
+    panel.set_context("cross", {"roi_out": "xing"},
+                      meta={"crossings": {"xing": rec}})
+    assert "2 left out" in panel.across.summary()
+
+
+def test_the_spots_left_out_are_drawn_on_the_curve(qapp):
+    """數字說「有兩格沒用」，但**哪兩格**只有畫出來才答得出來 ——
+    而那正是使用者要判斷「它跳過的是不是我想跳過的那兩格」的依據。"""
+    from adept.ui.widgets import ProfilePanel
+
+    data = _cpode_ctx().meta["crossings"]["xing"]["x"]
+    with_marks = _shaded_columns(ProfilePanel(), dict(data))
+    without = _shaded_columns(ProfilePanel(), dict(data, blocked=[]))
+    assert with_marks > without + 4, (
+        "被擋掉的那兩格沒有畫出來（%d vs %d 欄）" % (with_marks, without))

@@ -208,6 +208,23 @@ class RoiCrossStep(Step):
                   "stripes; between_horizontal = the same the other way round."),
         ),
         ParamSpec(
+            name="fill_rule", type="choice", default="skip",
+            section="4 · Where the box goes",
+            choices=list(algo_grid.FILL_RULES),
+            label="Where a stripe is missing",
+            help=("What to do at a spot where the pitch says a stripe should "
+                  "be but the image has none. skip = look at what is actually "
+                  "there and leave the spot out if it is a different material "
+                  "- a dark CPODE sitting where a metal gate would be gets no "
+                  "box. skip_clear = the same, and also drop the box on the "
+                  "face of the neighbouring stripe that looks at it, because "
+                  "the material next to a CPODE is not the same thing as the "
+                  "material next to a gate. fill = assume the stripe is there "
+                  "and box it anyway; use it when a spot is missing only "
+                  "because the stripe was too faint to find. Only has an "
+                  "effect when you filled in a pitch."),
+        ),
+        ParamSpec(
             name="box_size", type="float", default=5.0, min=1.0, max=1000.0,
             section="4 · Where the box goes",
             unit="px", label="Box thickness",
@@ -320,6 +337,7 @@ class RoiCrossStep(Step):
             horizontal_kinds=int(p["horizontal_kinds"]),
             vertical_width=float(p["vertical_width"]),
             horizontal_width=float(p["horizontal_width"]),
+            fill_rule=str(p["fill_rule"]),
             placement=str(p["place"]), box_size=float(p["box_size"]),
             side=str(p["side"]), gap=float(p["gap"]), inset=float(p["inset"]),
             min_confidence=float(p["min_confidence"]),
@@ -402,6 +420,9 @@ def _stripe_meta(s: "algo_grid.StripeSet") -> Dict[str, Any]:
         "pitches_used": [float(v) for v in s.pitches_used],
         "pitch_error": float(s.pitch_error),
         "filled": int(s.filled),
+        # 晶格上被擋掉的位置（那裡是別的材質）。面板要畫得出來 —— 「這一格
+        # 我故意不放」跟「這一格我沒找到」在畫面上看起來一模一樣。
+        "blocked": [[float(a), float(b)] for a, b in s.blocked],
         "width_used": float(s.width_used),
         "width_fixed": bool(s.width_fixed),
         "confidence": float(s.confidence),

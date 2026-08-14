@@ -72,11 +72,11 @@ def test_saying_how_many_kinds_there_are_picks_out_just_the_metal():
     assert s.pitch_measured == pytest.approx(MG_PITCH, abs=1.0)
 
 
-def test_the_cpode_sites_come_back_from_the_pitch():
-    """CPODE 跟 MG **共用同一個 pitch**（使用者原話）。所以把 MG 的 pitch 填
-    進去，那兩個位置就會被晶格補回來 —— 它們是同一排的一部分。"""
+def test_the_cpode_sites_come_back_when_you_ask_for_fill():
+    """CPODE 跟 MG **共用同一個 pitch**（使用者原話），所以填了 MG 的 pitch
+    之後晶格排得到那兩個位置 —— ``fill_rule="fill"`` 就是要它們。"""
     s = algo_grid.find_stripes(_mg_cpode(), axis="x", select="brightest",
-                               kinds=3, pitch=MG_PITCH)
+                               kinds=3, pitch=MG_PITCH, fill_rule="fill")
     assert len(s.selected) == 6, _centres(s.selected)
     assert s.filled == 2, "補回來的應該正好是那兩個 CPODE"
 
@@ -120,7 +120,8 @@ def test_two_kinds_is_what_it_always_did():
 # --------------------------------------------------------------------------- #
 def test_a_given_width_is_the_width_every_stripe_gets():
     s = algo_grid.find_stripes(_mg_cpode(), axis="x", select="brightest",
-                               kinds=3, pitch=MG_PITCH, width=MG_W)
+                               kinds=3, pitch=MG_PITCH, width=MG_W,
+                               fill_rule="fill")
     inside = [(a, b) for a, b in s.selected if a > 0.5 and b < SIZE - 0.5]
     assert len(inside) >= 4
     for a, b in inside:
@@ -147,7 +148,8 @@ def test_a_stripe_hanging_off_the_edge_is_cut_not_pushed_back_in():
     """只露出半根的線就是只有半根。把它推回影像裡等於捏造一個不存在的位置，
     而框正是貼著它放的。"""
     s = algo_grid.find_stripes(_mg_cpode(), axis="x", select="brightest",
-                               kinds=3, pitch=MG_PITCH, width=MG_W)
+                               kinds=3, pitch=MG_PITCH, width=MG_W,
+                               fill_rule="fill")
     first = min(s.selected)
     assert first[0] == pytest.approx(0.0, abs=0.01)
     assert (first[1] - first[0]) < MG_W, (
@@ -201,7 +203,8 @@ def _run(**over):
 
 
 def test_the_card_takes_both_new_settings():
-    ctx = _run(vertical_kinds=3, vertical_width=float(MG_W))
+    ctx = _run(vertical_kinds=3, vertical_width=float(MG_W),
+               fill_rule="fill")
     rec = ctx.meta["crossings"]["xing"]["x"]
     assert rec["width_fixed"] is True
     assert rec["width_used"] == pytest.approx(MG_W)
@@ -213,7 +216,7 @@ def test_the_boxes_hug_the_metal_edge_on_both_kinds_of_site():
     CPODE 那一格也要有框，而且**貼的距離跟 MG 那幾格一樣** —— 它是同一排的
     一部分，量到的東西才比得起來。"""
     ctx = _run(vertical_kinds=3, vertical_width=float(MG_W), gap=1.0,
-               box_size=5.0, side="end")
+               box_size=5.0, side="end", fill_rule="fill")
     boxes = ctx.roi_rects("xing", (SIZE, SIZE))
     assert boxes
 
@@ -241,3 +244,149 @@ def test_leaving_both_at_zero_changes_nothing():
              ).meta["crossings"]["xing"]
     assert a["boxes"] == b["boxes"]
     assert a["x"]["selected"] == b["x"]["selected"]
+
+
+# --------------------------------------------------------------------------- #
+# 4. 晶格上「該有一根卻沒有」怎麼辦（F8 第六輪 —— 使用者：靠近 CPODE 不要有框）
+# --------------------------------------------------------------------------- #
+def _faint_mg(level: float, seed: int = 0) -> np.ndarray:
+    """最左邊那根 MG 換成 ``level``。夠淡就抓不到，但它**還在**。"""
+    img = _mg_cpode(cpode=False, seed=seed)
+    img[:, :MG_W] = level
+    return img
+
+
+def test_a_faint_stripe_is_still_filled_in():
+    """補線本來就是為了它 —— 這根線在，只是對比不足抓不到。
+    ``skip`` 不能把這種也殺掉，不然它就只是把補線關掉而已。"""
+    s = algo_grid.find_stripes(_faint_mg(150.0), axis="x", select="brightest",
+                               pitch=MG_PITCH)          # 預設 skip
+    assert s.filled >= 1, "淡掉的那根沒有被補回來"
+    assert not s.blocked
+
+
+def test_a_spot_that_is_plainly_another_material_is_left_out():
+    """CPODE：亮度說「這裡沒有 MG」。補上去就是無中生有 —— 而框會貼著那個
+    不存在的邊界放，看起來跟其他框一模一樣。"""
+    s = algo_grid.find_stripes(_mg_cpode(), axis="x", select="brightest",
+                               kinds=3, pitch=MG_PITCH)  # 預設 skip
+    assert len(s.blocked) == 2, _centres(s.blocked)
+    got = _centres(s.blocked)
+    for site in CPODE_SITES:
+        want = site * MG_PITCH + MG_W / 2.0
+        assert min(abs(c - want) for c in got) < 1.5, got
+    # 而且不在條紋裡 —— 也就不會有框長在上面
+    for c in got:
+        assert all(abs((a + b) / 2.0 - c) > 2.0 for a, b in s.selected)
+
+
+def test_the_margin_is_what_separates_faint_from_absent():
+    """把最左邊那根 MG 換成各種灰階，看規則切在哪。
+
+    沒有邊際的話，「那一格就是背景」會變成擲硬幣 —— 灰階與背景只差雜訊，
+    補不補得回來由 seed 決定。邊際取的是**反差的比例**不是固定灰階值，
+    因為反差會隨機台漂移（跟 ``select`` 用排名同一個道理）。
+
+    背景（沒有 MG 的那幾欄）約 127，目標約 220 → 邊際 23，切在 104 附近。
+    """
+    seen = {}
+    for level in (220.0, 190.0, 150.0, 120.0, 90.0, 60.0):
+        s = algo_grid.find_stripes(_faint_mg(level), axis="x",
+                                   select="brightest", kinds=3,
+                                   pitch=MG_PITCH)
+        seen[level] = (s.filled, len(s.blocked))
+
+    # 還看得出是一根線（在背景之上或就在背景附近）→ 補回來，不擋
+    for level in (220.0, 190.0, 150.0, 120.0):
+        assert seen[level][1] == 0, "level %.0f 被擋掉了：%s" % (level, seen)
+    assert seen[190.0][0] >= 1 and seen[150.0][0] >= 1, seen
+    # 掉到背景**以下**一大截 → 有正面證據說它是別的東西
+    for level in (90.0, 60.0):
+        assert seen[level][1] == 1, "level %.0f 沒被擋：%s" % (level, seen)
+        assert seen[level][0] == 0, seen
+
+
+def test_the_material_check_cannot_save_a_broken_selection():
+    """順序很重要，而且這條順序解釋了為什麼 ``kinds`` 仍然要填。
+
+    材質檢查只審**補出來的**位置。挑組挑錯的時候根本不會有補出來的位置
+    （量到的 pitch 已經是實際的一半，晶格也就跟著錯），所以它一個字都講不出來
+    —— 下游的檢查救不了上游的錯。
+    """
+    very_dark = _faint_mg(20.0)          # 第三種材質，跟 CPODE 一樣
+    broken = algo_grid.find_stripes(very_dark, axis="x", select="brightest",
+                                    pitch=MG_PITCH)          # kinds 沒填
+    fixed = algo_grid.find_stripes(very_dark, axis="x", select="brightest",
+                                   kinds=3, pitch=MG_PITCH)
+
+    assert broken.pitch_measured == pytest.approx(MG_PITCH / 2.0, abs=1.0)
+    assert not broken.blocked, "挑組是錯的，材質檢查卻以為一切正常"
+    assert fixed.pitch_measured == pytest.approx(MG_PITCH, abs=1.0)
+    assert len(fixed.blocked) == 1
+
+
+def test_fill_is_still_available_for_when_you_know_better():
+    """使用者說「這裡就是有一根，只是這台機器照不出來」時要有地方講。"""
+    a = algo_grid.find_stripes(_mg_cpode(), axis="x", select="brightest",
+                               kinds=3, pitch=MG_PITCH, fill_rule="fill")
+    b = algo_grid.find_stripes(_mg_cpode(), axis="x", select="brightest",
+                               kinds=3, pitch=MG_PITCH, fill_rule="skip")
+    assert len(a.selected) == len(b.selected) + 2
+    assert not a.blocked
+
+
+def _boxes(**over):
+    params = {"source": "ref", "place": "beside_vertical", "box_size": 5.0,
+              "gap": 1.0, "inset": 3.0, "roi_out": "xing", "side": "both",
+              "vertical_kinds": 3, "vertical_width": float(MG_W),
+              "vertical_pitch": MG_PITCH, "horizontal_pitch": EPI_PITCH,
+              "max_boxes": 999}
+    params.update(over)
+    img = _mg_cpode()
+    ctx = Context(images={"test": img.copy(), "ref": img.copy()})
+    get_step("roi_cross")().run(ctx, params)
+    return sorted({x for x, _y, _w, _h in ctx.roi_rects("xing", (SIZE, SIZE))})
+
+
+def test_skip_clear_also_drops_the_box_facing_the_odd_one_out():
+    """使用者原話：「靠近 CPODE 的不能出現 BOX」。
+
+    ``skip`` 只保證 CPODE **那一格**沒有框；它左右兩根 MG 面向它的那一側仍然
+    有框，而那一小條 EPI 的對面不是 MG —— 「MG 旁邊的 EPI」跟「CPODE 旁邊的
+    EPI」不是同一個東西，混在同一組數字裡就分不出來了。
+    """
+    skip = _boxes(fill_rule="skip")
+    clear = _boxes(fill_rule="skip_clear")
+    assert len(clear) < len(skip), "skip_clear 沒有少掉任何框"
+
+    gone = sorted(set(skip) - set(clear))
+    assert len(gone) == 3, gone       # 第 2 格左右各一、第 5 格左邊一個
+    for x in gone:
+        near = min(abs(x - (s * MG_PITCH + MG_W / 2.0)) for s in CPODE_SITES)
+        assert near < MG_PITCH, "拿掉的框 x=%d 不在任何 CPODE 旁邊" % x
+
+
+def test_skip_clear_keeps_every_box_that_faces_a_real_stripe():
+    """只砍面向 CPODE 的那一側 —— 同一根 MG 的**另一側**照樣要有框，
+    不然這個選項就變成「CPODE 附近整根 MG 都不要」。"""
+    clear = _boxes(fill_rule="skip_clear")
+    assert clear, "全砍光了"
+    for site in (0, 1, 3, 4):
+        want = site * MG_PITCH + MG_W / 2.0
+        assert any(abs(x - want) < MG_PITCH for x in clear), (
+            "第 %d 格（真的 MG）附近一個框都沒有：%s" % (site, clear))
+
+
+def test_a_layout_with_no_odd_sites_is_untouched_by_the_rule():
+    """沒有 CPODE 的 patch，三種設定要給出一模一樣的框 ——
+    這個規則是出口，不是新行為。"""
+    def run(rule):
+        img = _mg_cpode(cpode=False)
+        ctx = Context(images={"test": img.copy(), "ref": img.copy()})
+        get_step("roi_cross")().run(ctx, {
+            "source": "ref", "place": "beside_vertical", "box_size": 5.0,
+            "roi_out": "xing", "vertical_pitch": MG_PITCH,
+            "horizontal_pitch": EPI_PITCH, "fill_rule": rule})
+        return ctx.meta["crossings"]["xing"]["boxes"]
+
+    assert run("fill") == run("skip") == run("skip_clear")

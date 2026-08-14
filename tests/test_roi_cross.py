@@ -147,9 +147,12 @@ def test_a_known_pitch_fills_in_a_stripe_the_image_lost():
     faint = _mg_epi()
     faint[:, :MG_W] = BASE          # 把最左邊那根 MG 抹掉
 
+    # **這裡要 fill_rule="fill"**：抹成背景材質之後，那一格的灰階說的是
+    # 「這裡沒有 MG」，而預設的 "skip" 就是在聽這句話（見
+    # test_roi_cross_lattice.py）。這條測的是補線機制本身，所以明講要補。
     without = algo_grid.find_stripes(faint, axis="x", select="brightest")
     with_pitch = algo_grid.find_stripes(faint, axis="x", select="brightest",
-                                        pitch=MG_PITCH)
+                                        pitch=MG_PITCH, fill_rule="fill")
     assert with_pitch.filled >= 1, "已知 pitch 卻沒有把漏掉的那根補回來"
     assert len(with_pitch.selected) > len(without.selected)
     assert with_pitch.pitch_used == pytest.approx(MG_PITCH)
@@ -291,7 +294,7 @@ def test_how_many_stripes_were_invented_is_visible():
     faint = _mg_epi()
     faint[:, :MG_W] = BASE
     ctx = Context(images={"test": faint.copy(), "ref": faint.copy()})
-    _run(ctx)
+    _run(ctx, fill_rule="fill")          # 補線機制本身；預設的 skip 見 lattice
     assert ctx.features["cross_filled"] >= 1.0
     assert ctx.features["cross_pitch_x_px"] == pytest.approx(MG_PITCH)
 
@@ -384,7 +387,8 @@ def test_an_alternating_pitch_fills_in_a_missing_stripe():
     img = _alternating(drop=2)
     without = algo_grid.find_stripes(img, axis="y", select="brightest")
     filled = algo_grid.find_stripes(img, axis="y", select="brightest",
-                                    pitch=24.0, pitch_2=36.0)
+                                    pitch=24.0, pitch_2=36.0,
+                                    fill_rule="fill")
     assert filled.filled >= 1, "抹掉的那一根沒有被補回來"
     assert len(filled.selected) > len(without.selected)
 
@@ -602,7 +606,8 @@ def test_filling_in_the_pitch_does_not_flatten_the_line_widths():
 def test_only_the_invented_stripes_borrow_the_median_width():
     """補出來的那一根沒有自己的量測值 —— 它只能用中位數，而那要講得出來。"""
     img, truth = _lines(44.0 / 1.5, jitter=1.6, seed=3, drop=2)
-    s = algo_grid.find_stripes(img, axis="x", select="brightest", pitch=29.333)
+    s = algo_grid.find_stripes(img, axis="x", select="brightest",
+                               pitch=29.333, fill_rule="fill")
     assert s.filled >= 1
     widths = [b - a for a, b in s.selected]
     assert len(set(round(w, 2) for w in widths)) > 2, \

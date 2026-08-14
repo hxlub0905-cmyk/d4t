@@ -84,6 +84,19 @@ SIDES = ("both", "start", "end")
 #: 已知 pitch 時，找到的邊界可以離晶格多遠（pitch 的比例）還算「對得上」。
 DEFAULT_PITCH_TOL = 0.25
 
+#: 晶格上「應該有一根、但影像上沒有」的位置怎麼處置。
+#:
+#: 這個選擇存在是因為那句話有**兩種**成因，而它們的正確處置相反：
+#:
+#: * 那根線太淡／被邊界切掉 —— 它其實在，補上是對的。
+#: * 那個位置根本是**另一種材質**（站點的 CPODE：MG 被挖掉換成很暗的東西，
+#:   位置與寬度都在同一個晶格上）—— 補上就是在無中生有。
+#:
+#: pitch 分不出這兩者（它只說「每隔多遠有一根」），但**亮度分得出來**：
+#: 太淡的線仍然落在背景與目標之間，換了材質的那個會跑到背景的**另一邊**。
+#: 所以判斷用的是那個位置實際的灰階，不是額外再問使用者一次。
+FILL_RULES = ("fill", "skip", "skip_clear")
+
 
 @dataclass
 class StripeSet:
@@ -113,6 +126,14 @@ class StripeSet:
     pitches_used: List[float] = field(default_factory=list)
     #: 有幾根條紋是**晶格補上的**（影像上沒抓到，靠已知 pitch 推出來）。
     filled: int = 0
+    #: 晶格上被**擋掉**的位置：那裡的灰階說它是另一種材質（例：CPODE）。
+    #: 它們不在 ``selected`` 裡，但框的產生要看得到它們 —— 「不要在它上面放框」
+    #: 與「不要放面向它的框」是兩件事，後者需要知道它在哪。
+    blocked: List[Tuple[float, float]] = field(default_factory=list)
+    #: ``blocked`` 的位置要不要連**面向它的框**一起去掉（``skip_clear``）。
+    #: 跟 ``blocked`` 分開是因為「那一格沒有條紋」本身是資訊，面板要講；
+    #: 「連隔壁的框也不要」是使用者的選擇。
+    clear_neighbours: bool = False
     #: 實際用的線寬（使用者給了就是那個值，沒給就是量到的中位數）。
     width_used: float = 0.0
     #: 線寬是使用者給的（True）還是量出來的（False）。
@@ -320,6 +341,61 @@ def _fixed_width(bands: Sequence[Tuple[float, float]], width: float,
     return out
 
 
+def _pitch_list(*pitches: float) -> List[float]:
+    """收下的 pitch 裡真的是 pitch 的那幾個（0 = 沒給，1 px 沒有意義）。"""
+    return [float(p) for p in pitches if float(p) >= 2.0]
+
+
+def _band_level(prof: Any, a: float, b: float) -> float:
+    lo, hi = _half_up(a), _half_up(b)
+    seg = np.asarray(prof)[max(0, lo):max(lo + 1, hi)]
+    return float(seg.mean()) if seg.size else 0.0
+
+
+#: 要判定「這裡是別的材質」，那個位置得比背景再**過去**多少
+#: （條紋與背景反差的比例）。見 :func:`_split_by_material`。
+MATERIAL_MARGIN = 0.25
+
+
+def _split_by_material(prof: Any, lattice: Sequence[Tuple[float, float]],
+                       found: Sequence[Tuple[float, float]],
+                       target: float, background: float, want_bright: bool,
+                       near: float
+                       ) -> Tuple[List[Tuple[float, float]], List[Tuple[float, float]]]:
+    """把晶格點分成「留下」與「擋掉」—— 依那個位置**實際的**灰階。
+
+    只審**補出來的**那幾格。影像上真的抓到的那幾根是靠亮度排名挑出來的，
+    它們依定義已經是對的材質，再審一次只會多一種誤判。
+
+    判準刻意設計成「**要有正面證據才擋**」
+    --------------------------------------
+    只有落在**背景的另一邊、而且超過一個邊際**才算換了材質。三種位置：
+
+    * 太淡而漏抓的線 —— 仍然在背景與目標之間 → **留**（補線本來就是為了它）
+    * 整根不見、那裡就是背景 —— 沒有任何證據說它是別的東西 → **留**
+    * CPODE 那種被挖掉的 —— 掉到背景**以下**一大截 → **擋**
+
+    邊際不能省。第二種（那格就是背景）沒有邊際的話就變成擲硬幣：實測把一根
+    MG 抹成背景之後，那一格的灰階與背景只差雜訊，補不補得回來由 seed 決定。
+    邊際取「條紋與背景反差」的比例而不是固定灰階值 —— 反差會隨機台漂移，
+    固定值等於把 recipe 綁在一台機器上（跟 ``select`` 用排名同一個道理）。
+    """
+    keep: List[Tuple[float, float]] = []
+    blocked: List[Tuple[float, float]] = []
+    centres = [(a + b) / 2.0 for a, b in found]
+    margin = abs(float(target) - float(background)) * MATERIAL_MARGIN
+    for a, b in lattice:
+        c = (a + b) / 2.0
+        if centres and min(abs(c - v) for v in centres) <= near:
+            keep.append((a, b))          # 影像上真的看到了，不必審
+            continue
+        lvl = _band_level(prof, a, b)
+        ok = (lvl >= background - margin) if want_bright \
+            else (lvl <= background + margin)
+        (keep if ok else blocked).append((a, b))
+    return keep, blocked
+
+
 def _fill_by_pitch(bands: Sequence[Tuple[int, int]], pitch: float, length: int,
                    tol: float = DEFAULT_PITCH_TOL, pitch_2: float = 0.0,
                    width_fixed: float = 0.0
@@ -416,7 +492,8 @@ def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
                  smooth: int = 3, min_gap: int = 4, pitch: float = 0.0,
                  pitch_2: float = 0.0,
                  pitch_tol: float = DEFAULT_PITCH_TOL,
-                 kinds: int = 0, width: float = 0.0) -> StripeSet:
+                 kinds: int = 0, width: float = 0.0,
+                 fill_rule: str = "skip") -> StripeSet:
     """找出一個方向上的條紋，並挑出要的那一組。
 
     ``select`` 在這裡而不是在外面，是因為 ``pitch`` 講的是**同一組條紋**的
@@ -443,6 +520,9 @@ def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
 
     什麼時候**不要**給：線寬本身就是要量的東西（line-width roughness，
     而它有時候正是缺陷）。這兩種用法互斥 —— 把線當尺，還是把線當待測物。
+
+    ``fill_rule``：晶格上「該有一根卻沒有」的位置怎麼辦（見 :data:`FILL_RULES`）。
+    ``"skip"``（預設）會去看那個位置實際是什麼材質，不對就不放條紋。
     """
     prof, raw = algo_profile.projection(img, axis=axis, smooth=smooth)
     out = StripeSet(axis=str(axis), profile=prof, raw=raw)
@@ -467,7 +547,8 @@ def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
         out.pitch_measured = float(np.median(np.diff(np.asarray(centres))))
     out.pitch_used = out.pitch_measured
 
-    filled, err, n_new, used, w_used = _fill_by_pitch(
+    given = _pitch_list(pitch, pitch_2)
+    filled, err, _n_new, used, w_used = _fill_by_pitch(
         picked, float(pitch), int(prof.size), pitch_tol, float(pitch_2),
         float(width))
     out.pitch_error = err
@@ -477,11 +558,28 @@ def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
     # 這是兩件事：一個講「每隔多遠有一根」，一個講「一根多寬」。
     if out.width_fixed and not used:
         filled = _fixed_width(filled, float(width), int(prof.size))
+
+    # **補出來的位置要對得起影像。** 補線是靠 pitch 推的，而 pitch 對「那裡
+    # 是什麼材質」一個字都沒說 —— 站點的 CPODE 正好落在同一個晶格上，於是
+    # 「這根線太淡沒抓到」與「這裡根本沒有線」被補成同一件事。
+    if used and str(fill_rule) in ("skip", "skip_clear"):
+        end = _RANKS.get(_SELECT_ALIASES.get(str(select), str(select)),
+                         (None, 0))[0]
+        outside = [lv for b, lv in zip(out.bands, out.levels)
+                   if b not in picked]
+        inside = [lv for b, lv in zip(out.bands, out.levels) if b in picked]
+        if end is not None and outside and inside:
+            filled, out.blocked = _split_by_material(
+                prof, filled, picked, float(np.median(inside)),
+                float(np.median(outside)), end == "hi",
+                float(min(given)) * 0.5)
+            out.clear_neighbours = str(fill_rule) == "skip_clear"
+
     if used:
-        given = [float(p) for p in (pitch, pitch_2) if float(p) >= 2.0]
         # 兩種間距交錯時，「pitch 是多少」沒有單一答案 —— 報平均（那是實際的
         # 平均間距），完整的一組留在 ``pitches_used`` 給面板與特徵用。
-        out.filled = n_new
+        # ``filled`` 在擋掉之後才數：被擋掉的那幾格不是「補上的」，是「沒補」。
+        out.filled = max(0, len(filled) - len(picked))
         out.pitches_used = given
         out.pitch_used = float(np.mean(given))
     out.selected = filled
@@ -528,8 +626,34 @@ def _spans_between(bands: Sequence[Tuple[float, float]], length: int
     return out
 
 
+def _faces_blocked(centre: float, direction: int,
+                   bands: Sequence[Tuple[float, float]],
+                   blocked: Sequence[Tuple[float, float]]) -> bool:
+    """從 ``centre`` 往 ``direction``（-1 左／上，+1 右／下）看過去，
+    最近的東西是不是一個**被擋掉的**晶格位置。
+
+    為什麼不是「離某個被擋掉的位置多近」
+    ------------------------------------
+    距離門檻要嘛跟 pitch 綁死（那就多一個要調的數字），要嘛在 pitch 變動時
+    失效。「往那個方向看，先碰到誰」不需要任何門檻，而且正好就是使用者要問的
+    那件事 —— 這個框的對面是不是那個不該量的東西。
+    """
+    def nearest(items: Sequence[Tuple[float, float]]) -> Optional[float]:
+        cand = [(a + b) / 2.0 for a, b in items
+                if ((a + b) / 2.0 - centre) * direction > 0.5]
+        return min(cand, key=lambda c: abs(c - centre)) if cand else None
+
+    bad = nearest(blocked)
+    if bad is None:
+        return False
+    kept = nearest(bands)
+    return kept is None or abs(bad - centre) < abs(kept - centre)
+
+
 def _edge_spans(bands: Sequence[Tuple[int, int]], width: float, side: str,
-                gap: float, length: int) -> List[Tuple[int, int]]:
+                gap: float, length: int,
+                blocked: Sequence[Tuple[float, float]] = ()
+                ) -> List[Tuple[int, int]]:
     """貼著每一段的兩側各切一小條（**在那一段外面** —— 那才是「另一種材質上」）。
 
     ``gap`` 是離邊界多遠才開始。它不是保險係數，是兩件事各要一點：
@@ -549,10 +673,15 @@ def _edge_spans(bands: Sequence[Tuple[int, int]], width: float, side: str,
     out: List[Tuple[int, int]] = []
     for band in bands:
         a, b = float(band[0]), float(band[1])
+        centre = (a + b) / 2.0
         wanted = []
-        if str(side) in ("both", "start"):
+        # 面向被擋掉的那一格的框不做 —— 它量到的那一小條 EPI 的對面不是 MG，
+        # 而「MG 旁邊的 EPI」跟「CPODE 旁邊的 EPI」不是同一個東西。
+        if (str(side) in ("both", "start")
+                and not _faces_blocked(centre, -1, bands, blocked)):
             wanted.append((a - g - w, a - g))
-        if str(side) in ("both", "end"):
+        if (str(side) in ("both", "end")
+                and not _faces_blocked(centre, +1, bands, blocked)):
             wanted.append((b + g, b + g + w))
         for lo, hi in wanted:
             span = _clip_span(lo, hi, length)
@@ -568,11 +697,12 @@ def _edge_spans(bands: Sequence[Tuple[int, int]], width: float, side: str,
 
 def _spans_for(placement: str, axis: str, bands: Sequence[Tuple[int, int]],
                box_size: float, side: str, gap: float, inset: float,
-               length: int) -> List[Tuple[int, int]]:
+               length: int, blocked: Sequence[Tuple[float, float]] = ()
+               ) -> List[Tuple[int, int]]:
     """這一軸貢獻哪些區間 —— 依 ``placement`` 決定它是被貼住的還是當界線的。"""
     place, ax = str(placement), str(axis)
     if place == "beside_%s" % ax:
-        return _edge_spans(bands, box_size, side, gap, length)
+        return _edge_spans(bands, box_size, side, gap, length, blocked)
     if place == "between_%s" % ax:
         return [s for s in (_clip_span(a + gap, b - gap, length)
                             for a, b in _spans_between(bands, length))
@@ -614,8 +744,10 @@ def cross_boxes(x: StripeSet, y: StripeSet,
     if not xb or not yb:
         return []
 
-    x_spans = _spans_for(placement, "vertical", xb, box_size, side, gap, inset, w)
-    y_spans = _spans_for(placement, "horizontal", yb, box_size, side, gap, inset, h)
+    x_spans = _spans_for(placement, "vertical", xb, box_size, side, gap, inset,
+                         w, x.blocked if x.clear_neighbours else ())
+    y_spans = _spans_for(placement, "horizontal", yb, box_size, side, gap,
+                         inset, h, y.blocked if y.clear_neighbours else ())
 
     boxes = [(xa, ya, xb_ - xa, yb_ - ya)
              for ya, yb_ in y_spans for xa, xb_ in x_spans
@@ -639,6 +771,7 @@ def locate_crossings(img: Any, vertical_select: str = "brightest",
                      vertical_kinds: int = 0, horizontal_kinds: int = 0,
                      vertical_width: float = 0.0,
                      horizontal_width: float = 0.0,
+                     fill_rule: str = "skip",
                      placement: str = "crossing", box_size: float = 4.0,
                      side: str = "both", gap: float = 1.0, inset: float = 0.0,
                      min_confidence: float = 5.0,
@@ -659,12 +792,12 @@ def locate_crossings(img: Any, vertical_select: str = "brightest",
                       sensitivity=vertical_sensitivity, smooth=smooth,
                       min_gap=min_gap, pitch=vertical_pitch,
                       pitch_2=vertical_pitch_2, kinds=vertical_kinds,
-                      width=vertical_width)
+                      width=vertical_width, fill_rule=fill_rule)
     ys = find_stripes(img, axis=algo_profile.AXIS_Y, select=horizontal_select,
                       sensitivity=horizontal_sensitivity, smooth=smooth,
                       min_gap=min_gap, pitch=horizontal_pitch,
                       pitch_2=horizontal_pitch_2, kinds=horizontal_kinds,
-                      width=horizontal_width)
+                      width=horizontal_width, fill_rule=fill_rule)
 
     conf = min(float(xs.confidence), float(ys.confidence))
     res = CrossResult(x=xs, y=ys, confidence=conf)
