@@ -1285,6 +1285,11 @@ class ProfilePanel(QWidget):
                 # 精修 + 對齊到你給的 pitch），但沒講出來就只是「怪」，
                 # 而「怪」的下一步通常是去亂調敏感度。
                 bits.append("snapped %.1f px" % shift)
+            if d.get("pitch_disagrees"):
+                # 最重要的一句 —— 它是「這一顆能不能信」的答案。放在
+                # confidence 前面，因為那個數字在這種失敗上反而更高。
+                bits.append("⚠ measured %.0f%% of the pitch you gave"
+                            % (float(d.get("pitch_ratio") or 0.0) * 100.0))
             note = str(d.get("pitch_note") or "")
             if note:
                 # 給了 pitch 卻沒有用 —— 這件事一定要講。使用者會以為那格
@@ -1398,7 +1403,10 @@ class ProfilePanel(QWidget):
 
         p.setPen(QPen(QColor(TOKENS["accent"]), 1.4))
         for t in (self._data.get("transitions") or []):
-            x = to_x(int(t))
+            # **不要 int()**：轉折位置是次像素的，而條紋的幾何用的就是它。
+            # 在這裡捨掉等於畫面上的線跟塗色的方塊差半格，而那半格沒有任何
+            # 解釋 —— 使用者會以為是定位歪了。
+            x = to_x(float(t))
             p.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
 
         self._paint_ruler(p, plot, to_x)

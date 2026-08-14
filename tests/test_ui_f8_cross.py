@@ -414,3 +414,17 @@ def test_a_pitch_that_was_given_but_not_used_is_called_out(qapp):
                    dict(rec, pitch_note="cannot tell which of the two "
                                         "spacings comes first"))
     assert "pitch not used" in panel.summary()
+
+
+def test_the_panel_shouts_when_the_pitch_does_not_agree(qapp):
+    """這是「這一顆能不能信」的答案，而在這種失敗上 confidence 反而更高
+    （實測 285.9 vs 正確時的 215.8）—— 所以它要排在信心值前面。"""
+    from adept.ui.widgets import ProfilePanel
+
+    rec = _run().meta["crossings"]["xing"]["x"]
+    panel = ProfilePanel()
+    panel.set_data("upright stripes",
+                   dict(rec, pitch_disagrees=True, pitch_ratio=0.5))
+    text = panel.summary()
+    assert "50% of the pitch you gave" in text
+    assert text.index("50%") < text.index("confidence")

@@ -303,7 +303,8 @@ class RoiCrossStep(Step):
     reads = ["ref"]
     writes: List[str] = []
     features_out = ["cross_count", "cross_pitch_x_px", "cross_pitch_y_px",
-                    "cross_filled", "cross_dist_px", "locate_conf", "locate_ok"]
+                    "cross_filled", "cross_dist_px", "cross_pitch_ratio_x",
+                    "cross_pitch_ratio_y", "locate_conf", "locate_ok"]
 
     # ---- 宣告（給 lint / UI）------------------------------------------------
     @classmethod
@@ -377,6 +378,8 @@ class RoiCrossStep(Step):
                 "cross_pitch_y_px": float(res.y.pitch_measured),
                 "cross_filled": 0.0,
                 "cross_dist_px": -1.0,
+                "cross_pitch_ratio_x": float(res.x.pitch_ratio),
+                "cross_pitch_ratio_y": float(res.y.pitch_ratio),
                 "locate_conf": float(res.confidence),
                 "locate_ok": 0.0,
             }))
@@ -399,6 +402,11 @@ class RoiCrossStep(Step):
             # 真的看得到。這個數字大起來時，框仍然對，但「憑什麼對」變成了
             # 那個 pitch —— 使用者有權知道自己站在哪一邊。
             "cross_filled": float(res.x.filled + res.y.filled),
+            # **量到的間距 ÷ 填進去的**。1.0 = 一致；0.5 = 挑錯組；0.75 = pitch
+            # 本身填錯（例如換了一台 pixel size 不同的機台）。0/1 的
+            # ``locate_ok`` 答不出「錯得多嚴重」，而那兩種的下一步不一樣。
+            "cross_pitch_ratio_x": float(res.x.pitch_ratio),
+            "cross_pitch_ratio_y": float(res.y.pitch_ratio),
             # 缺陷（永遠在正中心）離最近那個交會有多遠。落在交界上跟落在
             # 兩個交界中間，通常不是同一回事，所以這本身就是可以打分的數字。
             "cross_dist_px": float(dist),
@@ -414,11 +422,13 @@ def _stripe_meta(s: "algo_grid.StripeSet") -> Dict[str, Any]:
         "axis": s.axis,
         "profile": [float(v) for v in s.profile],
         "raw": [float(v) for v in s.raw],
-        # ``transitions`` 是 UI 曲線面板讀的鍵（``roi_profile`` 用同一個名字）。
-        # 兩張卡共用同一個面板，所以資料的形狀也要一樣 —— 不然那個面板就得
-        # 認得兩種 dict，而那正是「兩條平行的路」的開頭。
+        # ``edges`` 是還沒精修的整數位置（除錯用）。
         "edges": [int(e) for e in s.edges],
-        "transitions": [int(e) for e in s.edges],
+        # ``transitions`` 是曲線面板畫線用的鍵，而它畫的必須是**幾何真的用的
+        # 那一組**（精修到次像素的）。以前這裡給的是整數版，於是畫面上的線與
+        # 塗色的方塊差半格 —— 使用者的原話是「藍線跟藍框應該要 fit，會不重合
+        # 的原因是什麼」。答案的一部分就是「面板畫錯了」。
+        "transitions": [float(e) for e in (s.edges_sub or s.edges)],
         "bands": [[int(a), int(b)] for a, b in s.bands],
         "selected": [[int(a), int(b)] for a, b in s.selected],
         "pitch_measured": float(s.pitch_measured),
@@ -431,6 +441,9 @@ def _stripe_meta(s: "algo_grid.StripeSet") -> Dict[str, Any]:
         "pitch_used": float(s.pitch_used),
         "pitches_used": [float(v) for v in s.pitches_used],
         "pitch_error": float(s.pitch_error),
+        # 量到的 ÷ 填進去的。1.0 = 一致；0.5 = 典型的「挑錯組」。
+        "pitch_ratio": float(s.pitch_ratio),
+        "pitch_disagrees": bool(s.pitch_disagrees),
         "filled": int(s.filled),
         # 晶格上被擋掉的位置（那裡是別的材質）。面板要畫得出來 —— 「這一格
         # 我故意不放」跟「這一格我沒找到」在畫面上看起來一模一樣。

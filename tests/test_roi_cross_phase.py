@@ -178,3 +178,15 @@ def test_measuring_ignores_a_stripe_cut_by_the_image_edge():
     img, _ = _epi((30, 30), 0, size)        # 第一根中心在 0 → 只露一半
     s = algo_grid.find_stripes(img, axis="y", select="brightest")
     assert s.pitch_measured == pytest.approx(30.0, abs=1.0), s.pitch_measured
+
+
+def test_a_real_alternating_row_is_not_mistaken_for_a_wrong_pitch():
+    """量到的是「相鄰兩根有多遠」，而交錯的排法裡那個值就是兩個 pitch 裡**小的
+    那一個**。拿它去對平均的話，一排完全正常的 40/33 會算出 0.83，而
+    「挑錯組」的門檻在 0.80 —— 差一點就把正常的 layout 判成錯的。
+    兩邊都取 min 才是同一件事的兩個說法。"""
+    img, _ = _epi((40, 33), 9, 160)
+    s = algo_grid.find_stripes(img, axis="y", select="brightest",
+                               pitch=P1, pitch_2=P2)
+    assert s.pitch_disagrees is False, "比值 %.2f" % s.pitch_ratio
+    assert s.pitch_ratio == pytest.approx(1.0, abs=0.15)

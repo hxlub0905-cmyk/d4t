@@ -102,6 +102,32 @@ FILL_RULES = ("fill", "skip", "skip_clear")
 #: 才算真的分得出來。見 :func:`_fill_by_pitch`。
 _PHASE_MARGIN = 0.15
 
+#: **量到的**間距比**填進去的**小多少，就算是「挑錯組了」。
+#:
+#: 這是批次能不能信的那一關（F8 第六輪）。挑錯組（例如三種材質卻只分兩群）
+#: 的症狀是量到的間距剛好是實際的**一半** —— 而現有的 ``pitch_error`` 對此
+#: 一無所知，它問的是「我挑的這幾根等距嗎」，鎖在空隙上的時候那幾根也是完美
+#: 等距的。
+#:
+#: **只看小的那一邊**，而這個不對稱是有道理的：
+#:
+#: * 量到的**比較小** = 挑進了不該挑的東西（空隙、別的材質）。補線救不了 ——
+#:   晶格會鎖上一組自洽但錯的解，而且看起來完美。
+#: * 量到的**比較大** = 有幾根沒抓到。那正是補線存在的理由，補完就對了。
+#:
+#: 實測 448 顆（兩種 kinds 設定各 300 顆，扣掉量不到的）：
+#:
+#: ==========  =========  ================  ================
+#: 定位        顆數        比值範圍           落在 <0.80
+#: ==========  =========  ================  ================
+#: 正確        448        0.95 – 4.95       **0**
+#: 錯誤        134        0.50 – 0.50       **134**
+#: ==========  =========  ================  ================
+#:
+#: 兩群之間有 0.95 到 0.50 這麼寬的空檔，所以門檻設在中間；順帶也接得住
+#: 「換一台機台、pixel size 不同」那種情況（真實 18、填 24 → 0.75）。
+PITCH_AGREE_TOL = 0.20
+
 
 class _Fill(NamedTuple):
     """``_fill_by_pitch`` 的結果。
@@ -166,6 +192,13 @@ class StripeSet:
     width_fixed: bool = False
     #: 給了 pitch 卻沒有用的原因（空字串 = 用了，或者沒給）。
     pitch_note: str = ""
+    #: **量到的間距跟填進去的差太多**（見 :data:`PITCH_AGREE_TOL`）。
+    #: 這是「這一顆的定位能不能信」唯一擋得住的那一關 —— 而它跟
+    #: ``pitch_error`` 問的是**不同**的問題（那個問「我挑的這幾根等距嗎」，
+    #: 這個問「我挑對了嗎」）。
+    pitch_disagrees: bool = False
+    #: 量到的 ÷ 填進去的。1.0 = 一致；0.5 = 典型的「挑錯組」。
+    pitch_ratio: float = 0.0
     #: 晶格把條紋**搬了多遠**（找到的中心 → 它變成的格點，取最大值）。
     #: 使用者看到的「藍框跟藍線對不齊」就是這個數字 —— 它是刻意的
     #: （次像素精修 + 對齊到你給的 pitch），但沒講出來就只是「怪」。
@@ -694,6 +727,23 @@ def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
         out.pitches_used = given
         out.pitch_used = float(np.mean(given))
     out.selected = filled
+
+    # **量到的跟填進去的對不對得上。** 這一關跟上面的 pitch_error 是兩個問題：
+    # 那個問「我挑的這幾根等距嗎」（鎖在空隙上的時候答案也是「等距」），
+    # 這個問「我挑對了嗎」。沒有這一關的話，批次跑完會拿到一整批看起來正常、
+    # 而其中一部分框在錯地方的結果 —— 實測 300 顆混合批次裡 134 顆錯，
+    # 其中 68 顆的 pitch_error < 0.5。
+    if given and out.pitch_measured >= 2.0:
+        # 比的是**最小的相鄰間距**，兩邊都取 min。理由：量到的那個數字是
+        # 「相鄰兩根有多遠」，而交錯的排法裡那個值就是兩個 pitch 裡小的那一個。
+        # 拿平均去比的話，一排真正的 24/36 交錯會量到 24、對上平均 30，
+        # 比值 0.80 —— 一個完全正常的 layout 就被判定為「挑錯組」。
+        got = min([v for v in (out.pitch_measured, out.pitch_measured_2)
+                   if v >= 2.0] or [out.pitch_measured])
+        out.pitch_ratio = float(got / min(given))
+        # **只擋小的那一邊** —— 大的那一邊是「有幾根沒抓到」，而補線就是為了它。
+        out.pitch_disagrees = out.pitch_ratio < (1.0 - PITCH_AGREE_TOL)
+
     # 晶格把每一根搬了多遠 —— 使用者看到的「藍框跟藍線對不齊」就是這個。
     if used and picked:
         found = [(a + b) / 2.0 for a, b in picked]
@@ -936,6 +986,30 @@ def locate_crossings(img: Any, vertical_select: str = "brightest",
                       "need at least two so that there is a crossing"
                       % (len(xs.bands), len(ys.bands)))
         return res
+
+    # **量到的間距跟你填的對不上 = 這一顆不能信。**（F8 第六輪）
+    #
+    # 這是批次唯一擋得住「安靜的錯答案」的那一關。挑錯組的時候框仍然排得很
+    # 整齊、信心值反而更高、``pitch_error`` 是 0.00 —— 沒有任何一個既有的
+    # 數字說得出「這一顆錯了」。實測 300 顆混合批次：134 顆定位錯誤，其中
+    # 68 顆的 pitch_error < 0.5。這條檢查擋掉 134/134。
+    #
+    # 為什麼是**失敗**而不是警告：框的位置錯了，那顆的每一個數字都是別的
+    # 東西量出來的。留著它比丟掉它危險 —— 它會混進整批的統計裡。
+    for s in (xs, ys):
+        if s.pitch_disagrees:
+            way = "upright" if s.axis == algo_profile.AXIS_X else "flat"
+            res.reason = (
+                "the %s stripes measure %.1f px apart but you asked for %.1f "
+                "(%.0f%% of it). Finding them closer together than the pitch "
+                "you gave means extra things were taken as stripes, and no "
+                "amount of filling in can undo that. Either the pitch is wrong "
+                "for this image, or there is a third material on the same grid "
+                "- if so, raise 'how many kinds'."
+                % (way, s.pitch_measured,
+                   s.pitch_measured / max(s.pitch_ratio, 1e-6),
+                   s.pitch_ratio * 100.0))
+            return res
 
     boxes = cross_boxes(xs, ys, placement=placement, box_size=box_size,
                         side=side, gap=gap, inset=inset, shape=shape)

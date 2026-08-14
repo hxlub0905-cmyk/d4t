@@ -16,7 +16,7 @@ ed44cb755d91d7f3adf6018672969a6cb68932f0 adept/core/algo/curve.py
 31ed355760ee79e887ddc627c0bc970c77bdfe42 adept/core/algo/enhance.py
 9e85e8aedef61131545e67fef5e323dbb56a5d57 adept/core/algo/glv.py
 a77ccf39e51b71d68671878245eed04422b4f24e adept/core/algo/golden.py
-374ff328cae78d5dd601b804ab94d0e617971584 adept/core/algo/grid.py
+f79f97161f00415b7ac08e8261a54b1d3876a1b0 adept/core/algo/grid.py
 48cc527868f1d0336d9ed15803aaf54910347842 adept/core/algo/histmatch.py
 9e8715a433ecb84d49151964ed5aea05f8c18dc4 adept/core/algo/normalize.py
 e048c1f3680e5559d0c79d7f080629fecc161549 adept/core/algo/period.py
@@ -58,7 +58,7 @@ c08caf9bb969ead9de3dd2524baae3a786e47aeb adept/core/steps/__init__.py
 1d5b8d8a4cda39001d8af5e380244f4a0d76ee39 adept/core/steps/load.py
 630cc5d1261bb1281f308a1a9cfbb27e241d4dd2 adept/core/steps/normalize.py
 6e906a1610e0dfc2de6ecfee1773cd78652035a2 adept/core/steps/quality.py
-fab4a43fd7547a0033cb52d2260d89fbf8e732f3 adept/core/steps/roi_cross.py
+30b39fb83a1c082e2e156a9c3f42f523a9642ae2 adept/core/steps/roi_cross.py
 707bd6514e6e203cb59009819e538b927383ac9d adept/core/steps/roi_snr.py
 bcf3709d08b6695b8ff62034847221874d8488c6 adept/core/steps/roi_template.py
 c33655e28ad9322d8b1d4b456cead4afb6c9cb4d adept/core/steps/snr_map.py
@@ -79,7 +79,7 @@ d5231ab56c1b4dcf85551f1f12543413104ba94e adept/ui/studio.py
 196bb1a2cce3493bf9d49da5d8ca1fda0918ad4e adept/ui/theme.py
 1f15c3ec5920e70e72aa96db92324d25134021ba adept/ui/viewmodel.py
 d3cece8a28de021fe573697b0b12723c0e871aa8 adept/ui/welcome.py
-ce5353d70a6b49cbbc91ad6f2377e3eb2f4eefc0 adept/ui/widgets.py
+eaa0019a868d5323b8f128d3175071b01bbe54dd adept/ui/widgets.py
 db4c0723c6a28cddd4c335d5214895f57915fc7d adept/ui/workers.py
 04c5ce471195ac4e2449126ce835b22b4c880cf3 conftest.py
 ebcac66089ac8d2cbb061c18116a0e4dc4330eac docs/HANDOVER.md
@@ -87,7 +87,7 @@ d6c2f3a5a700afe9216e03fcaabf6acdbabb2709 docs/NO-GIT-SETUP.md
 b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 bff3de372166e0a7d7a8e926217507fb46d5c079 docs/plans/F7-canvas-and-taxonomy.md
-e16d4c8809a56bbc89a447c228965d62ec669cd2 docs/plans/F8-rule-based-roi.md
+2dd6660a1c4fd712637780a80841044ae76e3bf4 docs/plans/F8-rule-based-roi.md
 d4c328a15ef63b96340f19c80d9f6d3f205e22cf examples/recipes/README.md
 7dfe6f96dfd1b61ccde25d3781c4f6cfd59c1078 examples/recipes/cross_regions.json
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
@@ -135,7 +135,8 @@ f90b258ab8544e5eadc1b54b55ff558db1cc3041 tests/test_results_store.py
 16cd9995a97eb6b919044e2c72fe1bcddb954e2a tests/test_roi.py
 89fb007d43ba13010286d1f883b59cce7fc04421 tests/test_roi_cross.py
 1f2c2d4861d0d6955604dfa9b690177b7e2a63c0 tests/test_roi_cross_lattice.py
-3d71030696998a961d06c710902c7d38b3df7557 tests/test_roi_cross_phase.py
+477d2cdc57b6b6268521326712618d97575c0bf5 tests/test_roi_cross_phase.py
+73b404b73641a5b93cbf48a17111a03b7e4a1435 tests/test_roi_cross_trust.py
 a7c41debc132957219cb7a9187a4cb7efe1d3317 tests/test_roi_template.py
 ecb57644cec348b3ef52d811332dd9c353fcd920 tests/test_rsem_ingest.py
 99687acf0a8aae0d2c88f7fca293cfad2e31c7b5 tests/test_snr.py
@@ -161,7 +162,7 @@ cf69282154d0e937931153a9614a3644e57ba772 tests/test_ui_f7_19_wiring.py
 5bf585e3ceee37bade3e2a8bade82ead5aebdae6 tests/test_ui_f7_24_layout.py
 deb86a50afc1b3e40d17a03a7f8964d1b44ac5c4 tests/test_ui_f7_9_feedback.py
 7536b72440a3bcc6bea1de3f569fc2b0ba87c0d1 tests/test_ui_f8_advanced.py
-66cdb1e29fa60480716c9d250f7c820d269fab98 tests/test_ui_f8_cross.py
+72fc2c512b85565fee20c510daa0925e49fe406d tests/test_ui_f8_cross.py
 7fe333dfccbc1eeda4bb27b902826601feeb74fa tests/test_ui_f8_ruler.py
 90ebc45e44ce408457f916c895ed1ad081a08d63 tests/test_ui_gallery.py
 1cec7ec222c571ea86bca59c8b3b47d2bfe5e2cf tests/test_ui_patch_only.py
