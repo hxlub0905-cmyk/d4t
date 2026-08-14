@@ -87,7 +87,7 @@ d6c2f3a5a700afe9216e03fcaabf6acdbabb2709 docs/NO-GIT-SETUP.md
 b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 bff3de372166e0a7d7a8e926217507fb46d5c079 docs/plans/F7-canvas-and-taxonomy.md
-73f7abe61b3f154ab573a9b636b451f4508f8b0c docs/plans/F8-rule-based-roi.md
+ed87924befbd3aa49954ea2178b50cce6285ffc4 docs/plans/F8-rule-based-roi.md
 d4c328a15ef63b96340f19c80d9f6d3f205e22cf examples/recipes/README.md
 7dfe6f96dfd1b61ccde25d3781c4f6cfd59c1078 examples/recipes/cross_regions.json
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
