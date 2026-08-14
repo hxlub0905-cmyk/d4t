@@ -5,7 +5,7 @@ f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
 09937f7ecbf1c5d74e8b4e61ad85cfe1f494154a AGENTS.md
 edc01f653b51ea27026a21a9c1353e09a6e5c872 CLAUDE.md
 88886b1231bb5645c5cf159d09708baede88ffd5 README.md
-cd34ecd296b75dd7f39684174eb2d35b6d6d2453 SESSION_LOG.md
+59e933c7be616f6155d03fed49110be8af92409f SESSION_LOG.md
 650a5d7c8bc6db42eed4054174823bfcfceb7eae adept/__init__.py
 5278f0879cb3476419e46e4b71ce02d1b811ad42 adept/__main__.py
 8a51dfe499b3a9d81434c8a202f2d17c24b71c74 adept/core/__init__.py
@@ -16,7 +16,7 @@ ed44cb755d91d7f3adf6018672969a6cb68932f0 adept/core/algo/curve.py
 31ed355760ee79e887ddc627c0bc970c77bdfe42 adept/core/algo/enhance.py
 9e85e8aedef61131545e67fef5e323dbb56a5d57 adept/core/algo/glv.py
 a77ccf39e51b71d68671878245eed04422b4f24e adept/core/algo/golden.py
-0811578fab090392017e5839e3bcfe6b9420e39e adept/core/algo/grid.py
+c86221b50aff72d150ad7dea86120db7f42f429a adept/core/algo/grid.py
 48cc527868f1d0336d9ed15803aaf54910347842 adept/core/algo/histmatch.py
 9e8715a433ecb84d49151964ed5aea05f8c18dc4 adept/core/algo/normalize.py
 e048c1f3680e5559d0c79d7f080629fecc161549 adept/core/algo/period.py
@@ -58,7 +58,7 @@ c08caf9bb969ead9de3dd2524baae3a786e47aeb adept/core/steps/__init__.py
 1d5b8d8a4cda39001d8af5e380244f4a0d76ee39 adept/core/steps/load.py
 630cc5d1261bb1281f308a1a9cfbb27e241d4dd2 adept/core/steps/normalize.py
 6e906a1610e0dfc2de6ecfee1773cd78652035a2 adept/core/steps/quality.py
-905ea75ec5686e26e6b13e64b0d04593b24faa42 adept/core/steps/roi_cross.py
+f3241a83b49006719cc24b7024646507b323ec14 adept/core/steps/roi_cross.py
 707bd6514e6e203cb59009819e538b927383ac9d adept/core/steps/roi_snr.py
 bcf3709d08b6695b8ff62034847221874d8488c6 adept/core/steps/roi_template.py
 c33655e28ad9322d8b1d4b456cead4afb6c9cb4d adept/core/steps/snr_map.py
@@ -79,7 +79,7 @@ c4308e82f6a24159e112dd8021104b90ea4cdf97 adept/ui/region_check.py
 b8bd3c839068ee78cc3271696da33e79ecdc727d adept/ui/theme.py
 1f15c3ec5920e70e72aa96db92324d25134021ba adept/ui/viewmodel.py
 d3cece8a28de021fe573697b0b12723c0e871aa8 adept/ui/welcome.py
-e69a027134473085c6d5064885454b9b9263d2ee adept/ui/widgets.py
+f3f8c605947ac499c4da639bd9ec7661bb42ca92 adept/ui/widgets.py
 db4c0723c6a28cddd4c335d5214895f57915fc7d adept/ui/workers.py
 04c5ce471195ac4e2449126ce835b22b4c880cf3 conftest.py
 ebcac66089ac8d2cbb061c18116a0e4dc4330eac docs/HANDOVER.md
@@ -87,7 +87,7 @@ d6c2f3a5a700afe9216e03fcaabf6acdbabb2709 docs/NO-GIT-SETUP.md
 b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 bff3de372166e0a7d7a8e926217507fb46d5c079 docs/plans/F7-canvas-and-taxonomy.md
-7f7c6b6c76544a0bc5c59dab3b7d59fb11886731 docs/plans/F8-rule-based-roi.md
+e16d4c8809a56bbc89a447c228965d62ec669cd2 docs/plans/F8-rule-based-roi.md
 d4c328a15ef63b96340f19c80d9f6d3f205e22cf examples/recipes/README.md
 7dfe6f96dfd1b61ccde25d3781c4f6cfd59c1078 examples/recipes/cross_regions.json
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
@@ -134,6 +134,7 @@ a9c5ff3484614e2603acbe90c98394f22f5eae2c tests/test_recipe.py
 f90b258ab8544e5eadc1b54b55ff558db1cc3041 tests/test_results_store.py
 16cd9995a97eb6b919044e2c72fe1bcddb954e2a tests/test_roi.py
 88eda6a5b1b05326b19635e5c2d5299232608e6e tests/test_roi_cross.py
+509980dc95b0d4f1f5314432ff94545b37e52a89 tests/test_roi_cross_lattice.py
 a7c41debc132957219cb7a9187a4cb7efe1d3317 tests/test_roi_template.py
 ecb57644cec348b3ef52d811332dd9c353fcd920 tests/test_rsem_ingest.py
 99687acf0a8aae0d2c88f7fca293cfad2e31c7b5 tests/test_snr.py
@@ -158,7 +159,7 @@ cf69282154d0e937931153a9614a3644e57ba772 tests/test_ui_f7_19_wiring.py
 41586da4c6352be593849acd6438cdba108c79ae tests/test_ui_f7_23_buttons.py
 5bf585e3ceee37bade3e2a8bade82ead5aebdae6 tests/test_ui_f7_24_layout.py
 deb86a50afc1b3e40d17a03a7f8964d1b44ac5c4 tests/test_ui_f7_9_feedback.py
-f3107538efd6bde5f13433918282deda5c418eff tests/test_ui_f8_cross.py
+1776edd8599f4a194934a3cfc2e757f6d60c290e tests/test_ui_f8_cross.py
 7fe333dfccbc1eeda4bb27b902826601feeb74fa tests/test_ui_f8_ruler.py
 90ebc45e44ce408457f916c895ed1ad081a08d63 tests/test_ui_gallery.py
 1cec7ec222c571ea86bca59c8b3b47d2bfe5e2cf tests/test_ui_patch_only.py

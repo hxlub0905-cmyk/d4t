@@ -1209,6 +1209,12 @@ class ProfilePanel(QWidget):
             pitch = float(d.get("pitch_used") or 0.0)
             if pitch > 0:
                 bits.append("pitch %.1f px" % pitch)
+            if d.get("width_fixed"):
+                # 只有**給定**的線寬才講。量到的線寬畫面上已經看得到（就是塗
+                # 起來的那幾段有多寬），而給定的那個是使用者填進去的假設 ——
+                # 假設要看得到才驗得了。
+                bits.append("width %.1f px (given)"
+                            % float(d.get("width_used") or 0.0))
             filled = int(d.get("filled") or 0)
             if filled:
                 # 這幾根影像上看不到，是靠已知 pitch 推出來的。框仍然對，

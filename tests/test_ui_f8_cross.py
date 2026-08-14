@@ -154,6 +154,21 @@ def test_the_curve_panel_shades_every_selected_stripe(qapp):
         % (many - none, one - none, none))
 
 
+def test_the_panel_says_when_the_line_width_was_given_not_measured(qapp):
+    """給定的線寬是使用者填進去的**假設**，而假設要看得到才驗得了 ——
+    量到的線寬畫面上本來就看得到（塗起來的那幾段有多寬），給定的那個看不到。"""
+    from adept.ui.widgets import ProfilePanel
+
+    ctx = _run()
+    data = dict(ctx.meta["crossings"]["xing"]["x"])
+    given, measured = ProfilePanel(), ProfilePanel()
+    given.set_data("upright stripes", dict(data, width_fixed=True,
+                                           width_used=8.0))
+    measured.set_data("upright stripes", dict(data, width_fixed=False))
+    assert "width 8.0 px (given)" in given.summary()
+    assert "given" not in measured.summary()
+
+
 def _shaded_columns(panel, data) -> int:
     """面板中間那一列上，有幾欄不是純底色（= 被塗到的寬度）。"""
     from PySide6.QtGui import QColor, QImage

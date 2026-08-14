@@ -99,6 +99,33 @@ class RoiCrossStep(Step):
                   "for the layer under it."),
         ),
         ParamSpec(
+            name="vertical_kinds", type="int", default=0, min=0, max=6,
+            section="2 · The up-and-down stripes",
+            label="How many kinds of upright stripe",
+            help=("How many different materials run up and down in this image. "
+                  "Leave 0 unless the rank above picks up too much. 0 means "
+                  "the card assumes just the one kind of stripe plus the space "
+                  "between them. Raise it when another material sits on the "
+                  "same grid - for example a dark CPODE where a metal gate "
+                  "would otherwise be makes it 3 (the gate, the space, the "
+                  "CPODE). Getting this wrong is quiet: with two assumed, the "
+                  "brightest group takes in the spaces as well, so the card "
+                  "finds twice as many stripes at half the pitch."),
+        ),
+        ParamSpec(
+            name="vertical_width", type="float", default=0.0, min=0.0,
+            section="2 · The up-and-down stripes",
+            max=10000.0, unit="px", label="Upright stripe width",
+            help=("How wide each up-and-down stripe is, in pixels. Leave 0 to "
+                  "use the width measured on this image. Filling it in (you "
+                  "know it from the layout) means the card only has to find "
+                  "the middle of each stripe, and puts the boxes the same "
+                  "distance from the drawn edge on every patch - the edge "
+                  "sensitivity then decides whether a stripe is found at all, "
+                  "not where the box lands. Leave it 0 when the width of the "
+                  "stripe is the thing you are measuring."),
+        ),
+        ParamSpec(
             name="vertical_pitch", type="float", default=0.0, min=0.0,
             section="2 · The up-and-down stripes",
             max=10000.0, unit="px", label="Upright stripe pitch",
@@ -133,6 +160,19 @@ class RoiCrossStep(Step):
             choices=list(algo_grid.SELECT_RULES),
             label="Take the left-to-right stripes that are",
             help="Same as above, for the stripes that run left to right.",
+        ),
+        ParamSpec(
+            name="horizontal_kinds", type="int", default=0, min=0, max=6,
+            section="3 · The left-to-right stripes",
+            label="How many kinds of flat stripe",
+            help="Same as above, for the stripes that run left to right.",
+        ),
+        ParamSpec(
+            name="horizontal_width", type="float", default=0.0, min=0.0,
+            section="3 · The left-to-right stripes",
+            max=10000.0, unit="px", label="Flat stripe width",
+            help=("How wide each left-to-right stripe is, in pixels. Leave 0 "
+                  "to use the width measured on this image."),
         ),
         ParamSpec(
             name="horizontal_pitch", type="float", default=0.0, min=0.0,
@@ -276,6 +316,10 @@ class RoiCrossStep(Step):
             vertical_pitch_2=float(p["vertical_pitch_2"]),
             horizontal_pitch=float(p["horizontal_pitch"]),
             horizontal_pitch_2=float(p["horizontal_pitch_2"]),
+            vertical_kinds=int(p["vertical_kinds"]),
+            horizontal_kinds=int(p["horizontal_kinds"]),
+            vertical_width=float(p["vertical_width"]),
+            horizontal_width=float(p["horizontal_width"]),
             placement=str(p["place"]), box_size=float(p["box_size"]),
             side=str(p["side"]), gap=float(p["gap"]), inset=float(p["inset"]),
             min_confidence=float(p["min_confidence"]),
@@ -358,5 +402,7 @@ def _stripe_meta(s: "algo_grid.StripeSet") -> Dict[str, Any]:
         "pitches_used": [float(v) for v in s.pitches_used],
         "pitch_error": float(s.pitch_error),
         "filled": int(s.filled),
+        "width_used": float(s.width_used),
+        "width_fixed": bool(s.width_fixed),
         "confidence": float(s.confidence),
     }
