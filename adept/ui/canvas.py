@@ -1077,7 +1077,10 @@ class PipelineCanvas(QGraphicsView):
         super().leaveEvent(e)
 
     def mouseMoveEvent(self, e) -> None:       # noqa: D102
-        self._sync_hover_node(e.pos())
+        # ``QMouseEvent.pos()`` 在 Qt6 是 deprecated（CI 的警告）——
+        # 跟 dropEvent 同一套寫法。
+        self._sync_hover_node(e.position().toPoint()
+                              if hasattr(e, "position") else e.pos())
         if self._link_from is not None and self._link_line is not None:
             a = self._link_from.out_port(getattr(self, "_link_port", 0))
             b = self.mapToScene(e.pos())
