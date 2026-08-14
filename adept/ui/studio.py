@@ -78,6 +78,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -130,6 +131,20 @@ from .widgets import (
     apply_button_cursors,
     small_button,
 )
+
+
+class _CanvasColumn(QWidget):
+    """中欄：畫布吃滿整格，設定抽屜浮在右緣（F8-UI）。
+
+    只有一件事要自己做：尺寸一變就告訴 Studio 重擺抽屜 —— 抽屜是浮在上面的
+    （不進 layout），layout 不會替它跟著調。
+    """
+
+    resized = Signal()
+
+    def resizeEvent(self, e) -> None:          # noqa: D102 - Qt hook
+        super().resizeEvent(e)
+        self.resized.emit()
 
 
 class _GlyphToolButton(_GlyphMixin, QToolButton):
@@ -827,7 +842,11 @@ class StudioWindow(QMainWindow):
         self.library = LibraryPanel(self)
         self.library.panel_toggled.connect(self._on_library_panel_toggled)
 
-        # 中：流程畫布 + （參數表單 / 分數編輯）
+        # 中：流程畫布 +（參數表單 / 分數編輯）的**抽屜**（F8-UI）。
+        # F7-22 的上下切分收起來時畫布拿整欄，但攤開時畫布被砍掉四成高度 ——
+        # 而使用者攤開參數正是「一邊調一邊看畫布/預覽」的時候。改成 n8n 式：
+        # 設定浮在畫布右緣（overlay），畫布**永遠**是整欄大小，只是右邊被
+        # 蓋住一塊 —— 平移一下就看得到，比整欄變矮好。
         self.pipeline = PipelineCanvas(self)
         self.param_form = ParamForm(self)
         self.score_pane = self._build_score_pane()
@@ -835,15 +854,33 @@ class StudioWindow(QMainWindow):
         self.stack.addWidget(self.param_form)     # index 0
         self.stack.addWidget(self.score_pane)     # index 1
 
-        middle = QSplitter(Qt.Vertical, self)
-        middle.addWidget(self.pipeline)
-        middle.addWidget(self.stack)
-        middle.setStretchFactor(0, 3)
-        middle.setStretchFactor(1, 2)
-        self.middle_splitter = middle
-        # 設定面板**預設收起來**（F7-22）：畫布是這個畫面的主體，而參數表以前
-        # 常駐佔掉這一欄的四成高度。雙擊一張卡才攤開 —— 那是 n8n 的動作，
-        # 而且「我要編這張卡」本來就是一個明確的意圖，不是選取的副作用。
+        middle = _CanvasColumn(self)
+        mlay = QVBoxLayout(middle)
+        mlay.setContentsMargins(0, 0, 0, 0)
+        mlay.setSpacing(0)
+        mlay.addWidget(self.pipeline)
+
+        self.param_drawer = QFrame(middle)
+        self.param_drawer.setObjectName("paramDrawer")
+        dlay = QVBoxLayout(self.param_drawer)
+        dlay.setContentsMargins(16, 8, 16, 8)
+        dlay.setSpacing(8)
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.addStretch(1)
+        self.btn_close_params = small_button(
+            "×", "Close the settings drawer", self.param_drawer)
+        self.btn_close_params.clicked.connect(lambda: self.set_params_open(False))
+        head.addWidget(self.btn_close_params)
+        dlay.addLayout(head)
+        dlay.addWidget(self.stack, 1)
+        self.param_drawer.hide()
+        middle.resized.connect(self._place_param_drawer)
+
+        self.canvas_column = middle
+        # 設定面板**預設收起來**（F7-22）：畫布是這個畫面的主體。雙擊一張卡
+        # 才攤開 —— 那是 n8n 的動作，「我要編這張卡」是明確的意圖，
+        # 不是選取的副作用。
         self._params_open = False
 
         # 右：單顆預覽（F7-5：Gallery 與直方圖搬到 Results 視窗，
@@ -865,9 +902,6 @@ class StudioWindow(QMainWindow):
         root.setStretchFactor(1, 2)
         root.setStretchFactor(2, 4)
         root.setSizes(list(COLUMN_SIZES))
-        # 開窗就是收起來的狀態（畫布拿整欄）。放在版面建好之後，
-        # 因為 setSizes 要有實際尺寸才算得出來。
-        middle.setSizes([1, 0])
         self.top_splitter = root
         self.root_splitter = root
         self.setCentralWidget(root)
@@ -875,8 +909,8 @@ class StudioWindow(QMainWindow):
     def _build_score_pane(self) -> QWidget:
         pane = QWidget(self)
         lay = QVBoxLayout(pane)
-        lay.setContentsMargins(2, 2, 8, 2)
-        lay.setSpacing(4)
+        lay.setContentsMargins(0, 0, 8, 0)
+        lay.setSpacing(8)
 
         title = QLabel("Score / Bin decision", pane)
         title.setObjectName("paramTitle")
@@ -936,11 +970,13 @@ class StudioWindow(QMainWindow):
     def _build_preview_pane(self) -> QWidget:
         pane = QWidget(self)
         lay = QVBoxLayout(pane)
-        lay.setContentsMargins(2, 2, 2, 2)
-        lay.setSpacing(4)
+        # 間距走 8px 節奏（F8-UI）：這一欄以前是 2/4/6px 各處自己挑，
+        # 排在一起就是「差一點對齊」—— 比完全沒對齊更讓人覺得亂。
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(8)
 
         nav = QHBoxLayout()
-        nav.setSpacing(6)
+        nav.setSpacing(8)
         self.btn_prev = IconButton("prev", "Previous defect", pane, kind="icon")
         self.btn_next = IconButton("next", "Next defect", pane, kind="icon")
         self.defect_combo = QComboBox(pane)
@@ -960,7 +996,7 @@ class StudioWindow(QMainWindow):
         lay.addLayout(nav)
 
         srow = QHBoxLayout()
-        srow.setSpacing(6)
+        srow.setSpacing(8)
         lbl_stream = QLabel("Image stream", pane)
         lbl_stream.setObjectName("paramLabel")
         self.stream_combo = QComboBox(pane)
@@ -1002,7 +1038,7 @@ class StudioWindow(QMainWindow):
         images = QWidget(pane)
         irow = QHBoxLayout(images)
         irow.setContentsMargins(0, 0, 0, 0)
-        irow.setSpacing(4)
+        irow.setSpacing(8)
         irow.addWidget(self.image_view, 1)
         irow.addWidget(self.image_view_b, 1)
 
@@ -1100,7 +1136,7 @@ class StudioWindow(QMainWindow):
         lay.addWidget(self.bottom_stack, 2)
 
         vrow = QHBoxLayout()
-        vrow.setSpacing(6)
+        vrow.setSpacing(8)
         self.verdict = VerdictChip(pane)
         vrow.addWidget(QLabel("Verdict", pane))
         vrow.addWidget(self.verdict)
@@ -1761,16 +1797,27 @@ class StudioWindow(QMainWindow):
         return bool(self._params_open)
 
     def set_params_open(self, on: bool) -> bool:
-        """攤開／收起設定面板。收起來時畫布拿到整欄高度。"""
+        """攤開／收起設定抽屜。畫布永遠是整欄大小（抽屜浮在右緣）。"""
         on = bool(on)
         self._params_open = on
-        total = sum(self.middle_splitter.sizes()) or self.middle_splitter.height()
+        self.param_drawer.setVisible(on)
         if on:
-            keep = max(180, int(total * 0.42))
-            self.middle_splitter.setSizes([max(0, total - keep), keep])
-        else:
-            self.middle_splitter.setSizes([total, 0])
+            self._place_param_drawer()
+            self.param_drawer.raise_()
         return on
+
+    def _place_param_drawer(self) -> None:
+        """把抽屜貼齊中欄右緣、吃滿高度。
+
+        寬度：夠放一張參數表（320px 起跳），但最多吃掉中欄的七成 ——
+        剩下的三成畫布要看得到「我正在編哪張卡」（選中光暈就在那裡）。
+        """
+        if not self._params_open:
+            return
+        col = self.canvas_column
+        w = max(320, min(int(col.width() * 0.7), 420))
+        w = min(w, max(0, col.width() - 8))
+        self.param_drawer.setGeometry(col.width() - w, 0, w, col.height())
 
     # ==================================================================== #
     # 主題（F7-2）

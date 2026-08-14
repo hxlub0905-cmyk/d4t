@@ -1616,7 +1616,7 @@ class ParamForm(QWidget):
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(4)
+        outer.setSpacing(8)          # 8px 節奏（F8-UI）
 
         self._title = QLabel("")
         self._title.setObjectName("paramTitle")

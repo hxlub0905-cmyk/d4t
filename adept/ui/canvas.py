@@ -127,14 +127,25 @@ def layout_columns(node_ids: Sequence[str],
         per_depth[depth[n]] = per_depth.get(depth[n], 0) + 1
     band_h = max(per_depth.values(), default=1)
 
-    rows: Dict[int, int] = {}
+    # 同欄內的列序用 **barycenter**（上游都排在第幾列，我就往那個平均靠）。
+    # 以前照 node_order 排：上游在第 0 列、下游被排到第 2 列，線就斜跨整欄，
+    # 而三條斜線交叉起來「亂」的觀感比任何配色問題都大。跟上游對齊之後，
+    # 大部分的線接近水平 —— 交叉不是被畫得更好看，是**根本不發生**。
+    # 平手（沒有上游、或平均相同）退回原順序，既有測試鎖的就是這個順序。
+    rows_of: Dict[str, int] = {}
     out: Dict[str, Tuple[int, int]] = {}
-    for n in sorted(ids, key=lambda x: (depth[x], idx[x])):
-        d = depth[n]
+    for d in sorted(set(depth.values())):
+        members = [n for n in ids if depth[n] == d]
+
+        def _bary(n: str) -> float:
+            prs = [rows_of[p] for p in preds[n] if p in rows_of]
+            return (sum(prs) / float(len(prs))) if prs else float(idx[n])
+
+        members.sort(key=lambda n: (_bary(n), idx[n]))
         band, col = divmod(d, WRAP)
-        r = rows.get(d, 0)
-        rows[d] = r + 1
-        out[n] = (col, band * band_h + r)
+        for r, n in enumerate(members):
+            rows_of[n] = r
+            out[n] = (col, band * band_h + r)
     return out
 
 
@@ -162,6 +173,10 @@ class _NodeItem(QGraphicsItem):
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        # hover 回饋的狀態（誰在 hover 由 **view** 判斷，不是這裡收事件 ——
+        # 卡片一收 hover，事件就不再穿過它，壓在線中點上的卡會把 × 悶死；
+        # 見 shape() 的說明與 test_ui_canvas_cut_button）。
+        self._hover = False
         tip = "%s — %s" % (self.node_id, info.get("label", ""))
         if info.get("problem"):
             # 標記說「有問題」，滑鼠停上去說「是什麼問題」。標記本身放不下一句話，
@@ -175,10 +190,11 @@ class _NodeItem(QGraphicsItem):
 
         埠標籤（"test" / "ref"）畫在節點右緣之外 —— 之前 boundingRect 只算到
         ``NODE_W + _PORT_R``，Qt 就只重繪那個範圍，標籤的舊位置沒被清掉。
+        選中的光暈（3px 寬、畫在卡片邊緣之外）也算 —— 上下各要多留 4px。
         """
-        return QRectF(-_PORT_R - 1, -1,
+        return QRectF(-_PORT_R - 1, -4,
                       NODE_W + 2 * _PORT_R + _PORT_LABEL_W,
-                      NODE_H + 5)
+                      NODE_H + 9)
 
     def shape(self) -> QPainterPath:
         """**點得到的範圍不是畫得到的範圍。**
@@ -274,17 +290,36 @@ class _NodeItem(QGraphicsItem):
 
         # 投影：讓節點浮在網格之上。用畫的而不是 QGraphicsDropShadowEffect ——
         # effect 會強迫 Qt 額外開一層離屏 buffer，為了 2px 的陰影不值得。
-        shadow = QColor(0, 0, 0, 46 if enabled else 22)
+        # hover / 選中時深一階：跟按鈕的 hover 同一個語言 ——「這個東西回應你」。
+        lifted = (self._hover or selected) and enabled
+        shadow = QColor(0, 0, 0, (64 if lifted else 46) if enabled else 22)
         p.setPen(Qt.NoPen)
         p.setBrush(shadow)
-        p.drawRoundedRect(body.translated(1.5, 2.5), 7, 7)
+        p.drawRoundedRect(body.translated(1.5, 2.5 if not lifted else 3.0), 7, 7)
 
         gid = str(self.info.get("group", "") or "enhance")
         tile_col = QColor(theme.group_hex(gid) if enabled else TOKENS["seg_disabled"])
 
-        border = QColor(TOKENS["accent"] if selected else TOKENS["border_default"])
+        if selected:
+            # 選中的光暈：一圈 3px 的半透明 accent，畫在邊框**外面**。
+            # 只加粗邊框的話，在一整排 1px 灰框的卡片裡要找「哪張是 2px 藍框」
+            # 得一張一張看 —— 光暈讓選中的那張在餘光裡就跳出來。
+            halo = QColor(TOKENS["accent"])
+            halo.setAlpha(56)
+            p.setPen(QPen(halo, 6.0))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(body, 7, 7)
+
+        if selected:
+            border = QColor(TOKENS["accent"])
+        elif self._hover and enabled:
+            border = QColor(TOKENS["accent"])
+            border.setAlpha(150)
+        else:
+            border = QColor(TOKENS["border_default"])
         # 停用的節點畫虛線框（n8n 的慣例）—— 不是消失，是「還在，但這次不跑」。
-        pen = QPen(border, 2.0 if selected else 1.0)
+        pen = QPen(border, 2.0 if selected else (1.4 if self._hover and enabled
+                                                 else 1.0))
         if not enabled:
             pen.setStyle(Qt.DashLine)
         p.setPen(pen)
@@ -409,6 +444,12 @@ class _NodeItem(QGraphicsItem):
                    Qt.AlignCenter, "!")
 
     # -- 互動 ---------------------------------------------------------------
+    def set_hovered(self, hovered: bool) -> None:
+        """view 判斷出來的 hover 狀態（見 __init__ 的說明）。"""
+        if bool(hovered) != self._hover:
+            self._hover = bool(hovered)
+            self.update()
+
     def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
         hit = (self.out_port_at(e.pos())
                if e.button() == Qt.LeftButton else None)
@@ -545,7 +586,10 @@ class _EdgeItem(QGraphicsItem):
         dx = b.x() - a.x()
         p = QPainterPath(a)
         if dx >= 2 * self.BACK_REACH:
-            h = max(40.0, dx * 0.5)
+            # 水平推力的下限是 COL_GAP 的 2/3：推力太小（以前是 40，縮放 70%
+            # 之後只剩 28px）曲線就退化成斜的直線，n8n 那種「從埠水平流出、
+            # 水平流入」的秩序感整個不見 —— 看起來像線亂穿，其實是切線不夠平。
+            h = max(COL_GAP * 0.67, dx * 0.5)
             p.cubicTo(a + QPointF(h, 0), b - QPointF(h, 0), b)
             return p
         h = self.BACK_REACH
@@ -678,6 +722,9 @@ class PipelineCanvas(QGraphicsView):
         self._link_from: Optional[_NodeItem] = None
         self._link_port = 0
         self._link_line = None
+        #: 現在游標壓著哪張卡（hover 回饋）。由這裡追而不是讓卡片自己收
+        #: hover 事件 —— 卡片一收，事件就穿不過去，線上的 × 會被悶死。
+        self._hover_node: Optional[_NodeItem] = None
         self._build_zoom_bar()
 
     # ---- 縮放控制（F7-14）--------------------------------------------------
@@ -748,6 +795,7 @@ class PipelineCanvas(QGraphicsView):
                   edges: Sequence[Tuple[str, str]] = ()) -> None:
         """重建整張畫布。``nodes`` 依執行順序，``edges`` 是顯式連線。"""
         self._scene.clear()
+        self._hover_node = None            # 舊的圖元剛被 clear() 銷毀
         self._items, self._edges = {}, []
         self._order = [str(n.get("node_id", "")) for n in nodes]
         self._pairs = [(str(a), str(b)) for a, b in (edges or ())]
@@ -992,7 +1040,28 @@ class PipelineCanvas(QGraphicsView):
                                  self.stream_of(src, int(port)))
 
     # ---- Qt hooks ---------------------------------------------------------
+    def _sync_hover_node(self, view_pos) -> None:
+        """讓游標下最上面那張卡亮起 hover 邊框。"""
+        top = None
+        for item in self.items(view_pos):
+            if isinstance(item, _NodeItem):
+                top = item
+                break
+        if top is not self._hover_node:
+            if self._hover_node is not None:
+                self._hover_node.set_hovered(False)
+            self._hover_node = top
+            if top is not None:
+                top.set_hovered(True)
+
+    def leaveEvent(self, e) -> None:           # noqa: D102
+        if self._hover_node is not None:
+            self._hover_node.set_hovered(False)
+            self._hover_node = None
+        super().leaveEvent(e)
+
     def mouseMoveEvent(self, e) -> None:       # noqa: D102
+        self._sync_hover_node(e.pos())
         if self._link_from is not None and self._link_line is not None:
             a = self._link_from.out_port(getattr(self, "_link_port", 0))
             b = self.mapToScene(e.pos())
