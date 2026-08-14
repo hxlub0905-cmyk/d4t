@@ -282,6 +282,15 @@ def test_an_edge_that_runs_backwards_stays_near_its_two_ends(window, qapp):
     """
     assert window.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
     qapp.processEvents()
+    # 隱含順序的虛線 2026-08-14 退役 —— 換行那條線現在要自己拉（顯式），
+    # 這條測試鎖的是**形狀**，線是誰畫的不重要。
+    from adept.ui import canvas as canvas_mod
+
+    order = window.model.node_order
+    wrap_at = canvas_mod.WRAP
+    assert len(order) > wrap_at, "前提：這份 recipe 要長到會換行"
+    window.model.add_edge(order[wrap_at - 1], order[wrap_at])
+    qapp.processEvents()
 
     view = window.pipeline
     backwards = []
@@ -306,21 +315,30 @@ def test_an_edge_that_runs_backwards_stays_near_its_two_ends(window, qapp):
 # --------------------------------------------------------------------------- #
 # 7. 第二輪：從實際畫面看出來的兩件
 # --------------------------------------------------------------------------- #
-def test_the_fit_floor_keeps_the_card_subtitles_readable(window, qapp):
-    """自動 fit 縮到 52%，卡片的**副標**就變成一團灰。
+def test_the_fit_floor_matches_each_canvas_role(window, qapp):
+    """fit 下限依角色分兩種（D 案，2026-08-14）。
 
-    副標是「這張卡吃什麼吐什麼」（``norm_ref · ref test → ref``），也就是畫布
-    上最需要讀的東西。把同一張圖畫在 52 / 60 / 70 / 80 / 100% 逐級看過：標題到
-    60% 還在，副標要到 70% 才回來。**讀不出來的全景不算全景。**
+    F7-24 量出「副標要到 70% 才讀得出來」—— 那個結論沒有變，變的是**誰
+    負責讓人讀**：主視窗的畫布是中上的一條概覽（細節住在下方設定區與彈出
+    視窗），「全部看得完」贏過「副標讀得出」，下限放寬到 0.5；彈出視窗
+    就是拿來讀的，維持 0.7。使用者回報的「有些卡片後方的埠不見了」，
+    一半就是 0.7 的下限讓四欄的 pipeline 塞不進概覽條。
     """
     view = window.pipeline
-    assert view.MIN_FIT_SCALE >= 0.7, \
-        "fit 的下限是 %.2f —— 那個倍率下副標讀不出來" % view.MIN_FIT_SCALE
+    assert view.MIN_FIT_SCALE == 0.5, \
+        "主畫布（概覽）的下限該是 0.5，實得 %.2f" % view.MIN_FIT_SCALE
+    assert type(view).MIN_FIT_SCALE >= 0.7, \
+        "類別預設（彈出視窗用）要留在 0.7 —— 那是「讀得出副標」的量測值"
 
     assert window.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
     qapp.processEvents()
-    assert view.zoom_percent() >= 70, \
+    assert view.zoom_percent() >= 50, \
         "開這份 recipe 之後停在 %d%%" % view.zoom_percent()
+
+    window.open_canvas_window()
+    assert window._popout_view.MIN_FIT_SCALE >= 0.7
+    window._canvas_popout.close()
+    qapp.processEvents()
 
 
 def test_run_trial_and_its_arrow_read_as_one_control(window, qapp):

@@ -23,6 +23,7 @@ from . import align          # align
 from . import arith          # subtract / invert
 from . import snr_map        # snr_map
 from . import roi_cross      # roi_cross
+from . import roi_mask       # roi_mask（區域 → 0/255 mask 影像流，F8c）
 from . import roi_template   # roi_template
 from . import cd             # cd_measure
 from . import roi_snr        # roi_snr
@@ -32,6 +33,6 @@ from . import golden         # cell_period / golden_cell
 
 __all__ = [
     "load", "normalize", "denoise", "tone", "flatten", "align", "arith",
-    "roi_cross", "roi_template", "snr_map", "cd", "roi_snr", "quality", "glv_stats",
-    "golden",
+    "roi_cross", "roi_mask", "roi_template", "snr_map", "cd", "roi_snr",
+    "quality", "glv_stats", "golden",
 ]

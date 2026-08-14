@@ -459,8 +459,14 @@ def test_the_shipped_example_recipes_have_no_combination_errors(qapp):
 
 def test_a_broken_combination_refuses_to_run_instead_of_failing_every_defect(window):
     """引擎的契約是「單顆出錯不殺整批」，所以接錯的卡片以前會**跑完整批而且
-    每一顆都失敗**：進度條走完、結果是空的、原因埋在每顆的錯誤訊息裡。"""
-    node_id = window.model.add_step("subtract")      # 預設吃 ref_aligned
+    每一顆都失敗**：進度條走完、結果是空的、原因埋在每顆的錯誤訊息裡。
+
+    （subtract 的預設 2026-08-14 起是 ``ref`` —— patch 本來就對齊，加了就
+    跑得動。要製造「指到沒人產的流」得自己指過去，情境跟以前一樣真實：
+    使用者把 b 改成打錯的名字。）
+    """
+    node_id = window.model.add_step("subtract")
+    window.model.set_param(node_id, "b", "ref_aligned")   # 沒有 Align 在上游
     assert window.run_trial(6, workers=1, sync=True) is False
     assert "Cannot run" in window.status_text()
     assert "ref_aligned" in window.status_text()
@@ -471,12 +477,14 @@ def test_a_broken_combination_refuses_to_run_instead_of_failing_every_defect(win
 
 
 def test_adding_a_card_says_what_is_still_missing_and_who_provides_it(window):
-    """卡片庫上那個 ``needs ref_aligned`` 的灰字 badge 對不會寫 code 的人沒有
-    動作可做 —— 他不知道 ref_aligned 是誰產的。"""
-    window.library.add_requested.emit("subtract")
+    """卡片庫上那個 ``needs …`` 的灰字 badge 對不會寫 code 的人沒有動作可做
+    —— 他不知道那條流是誰產的。（改用 SNR map 觸發：它預設吃 ``diff``，
+    Load 之後直接加一定缺；subtract 的預設已改成 patch 加了就能跑。）"""
+    window.selected_node = None        # 沒選卡（否則會接在選取卡後、指到它的流）
+    window.library.add_requested.emit("snr_map")
     msg = window.status_text()
-    assert "ref_aligned" in msg
-    assert "Align" in msg, "要講出哪一張卡會產出這條流"
+    assert "diff" in msg
+    assert "Compare two streams" in msg, "要講出哪一張卡會產出這條流"
     assert "test" in msg and "ref" in msg, "也要講現在有哪些流可以改指"
 
 

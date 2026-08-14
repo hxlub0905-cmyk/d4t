@@ -79,7 +79,7 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC)
 #: 一個放不下、也編輯不了的值配一個文字框，等於邀請使用者去改它。
 #: UI 認得這個型別：它給的是「建一個」的按鈕加一行摘要，欄位本身唯讀。
 PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
-               "image_keys", "curve", "template")
+               "image_keys", "curve", "template", "multi_choice")
 
 
 class ParamError(ValueError):
@@ -171,8 +171,9 @@ class ParamSpec:
         if not str(self.help).strip():
             raise ParamError(f"parameter '{self.name}': help (a plain-language "
                              f"description) must not be empty")
-        if self.type == "choice" and not self.choices:
-            raise ParamError(f"parameter '{self.name}': type 'choice' requires choices")
+        if self.type in ("choice", "multi_choice") and not self.choices:
+            raise ParamError(f"parameter '{self.name}': type '{self.type}' "
+                             f"requires choices")
 
     def validate(self, value: Any) -> Any:
         """coerce + 檢查範圍；失敗拋 ParamError（訊息含參數名）。"""
@@ -188,10 +189,13 @@ class ParamSpec:
                     v = bool(value)
             elif self.type in ("str", "image_key", "template"):
                 v = str(value)
-            elif self.type == "image_keys":
+            elif self.type in ("image_keys", "multi_choice"):
                 # 正規化：去空白、去空項、去重複但保留順序。
                 # 手打的 "ref, ref ,, test" 與 UI 勾出來的 "ref,test" 等價，
                 # 存進 recipe 的字串才不會因為輸入方式不同而長得不一樣。
+                # multi_choice 刻意**不**強制值落在 choices 裡：清單是「常用的
+                # 那幾個」，手寫 recipe 的自由值（例 glv_q37）照樣合法，
+                # 認不認得由卡片的 run() 用它自己的話說。
                 seen: List[str] = []
                 for tok in str(value).split(","):
                     tok = tok.strip()

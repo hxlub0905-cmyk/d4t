@@ -634,7 +634,8 @@ def test_library_badges_unmet_prerequisites_but_still_allows_adding(qapp):
 
     panel.set_available_streams(["test", "ref"])
     assert panel.entry("snr_map").badge_text() == "needs diff"
-    assert panel.entry("subtract").badge_text() == "needs ref_aligned"
+    # subtract 2026-08-14 起預設吃 ref（patch 本來就對齊）—— 不再有假前置
+    assert panel.entry("subtract").badge_text() == ""
     assert panel.entry("denoise").badge_text() == ""      # 只讀 test，滿足了
 
     got = []

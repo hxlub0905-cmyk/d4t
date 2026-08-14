@@ -13,7 +13,7 @@
 | | |
 |---|---|
 | **輸入** | KLARF + multi-page patch TIFF（EBI）｜KLARF + per-defect 影像（Review SEM）｜純資料夾 |
-| **組裝** | 19 張步驟卡片，三段式：影像（把圖變乾淨）→ 算法（量出數字）→ ADC 判定（算分分 bin） |
+| **組裝** | 17 張步驟卡片、n8n 式節點畫布（拉線、拖卡、雙視窗）；使用者視角六階段：Input → Enhance → Region → Compare → Measure → ADC |
 | **輸出** | 無損寫回 KLARF（class / bin / DSIZE）｜Top-N 新 KLARF｜CSV / Excel 報表｜feature vector（ML 備料） |
 | **介面** | PySide6 Studio 視覺化編輯器 ＋ CLI（可排程、可腳本化） |
 
@@ -21,7 +21,7 @@
 接手開發請先讀 **[`docs/HANDOVER.md`](docs/HANDOVER.md)**（由來、決策理由、來源專案脈絡、
 哪些已驗證哪些還是假設）與 [`CLAUDE.md`](CLAUDE.md)（操作手冊）。
 
-## 目前進度：M0–M6 全部完成 ✅（v1 功能齊備）
+## 目前進度：M0–M7 完成 ✅（v1 功能齊備 + UI/UX 大改版）；F8 進行中
 
 M0：六個既有專案（KLIP / GLAS / MMH / PEAR / cell-period-estimator / Perspective-Combination）
 的可重用演算法已 vendoring 進 `adept/core`，全部通過合成影像單元測試、零 Qt 依賴。
@@ -60,6 +60,18 @@ Studio 首次開啟有導覽，按一下「用範例資料試一次」就會自�
 跑完一批，直接看到有分數的直方圖與 Gallery；範例 recipe 庫有 5 份，
 每一份示範一種不同的作法（見 `examples/recipes/README.md`）。
 
+M7 / F7：**UI/UX 大改版**（使用者試用回饋累計九輪）。UI 全英文、中性平面主題
+（亮/暗雙色盤）、**n8n 式節點畫布**取代直線清單 —— 卡片是節點、影像流是線、
+從輸出埠拉線接卡、線上 hover 出「斷開」×、右鍵拖曳平移、手動佈局保留
+（「排整齊」才整批重排）。版面是「D 案」：畫布佔中欄上側一條（它會 zoom、
+可**彈出成獨立視窗**全尺寸編輯，兩個視窗即時互通），設定拿大頭、右欄影像/儀表。
+每張卡有自己的右下角儀表（before/after 直方圖、整批分布、對位散佈…），
+選卡片時預覽影像直接疊上它定義或引用的**區域框**。
+
+F8：**純規則 ROI 定位**（`roi_cross`：兩組條紋的交會處自動放框、一鍵從整批量
+pitch）與 **ROI mask 影像流**（`roi_mask` + Normalize 的 Use only：正規化的
+範圍只從指定 pattern 量、套用整張圖）。資料模型見下一節。
+
 ```bash
 # 開 Studio：
 python -m adept gui
@@ -76,15 +88,72 @@ python -m adept export <run_id> --db /tmp/runs.db --mode annotate \
     --klarf-out out.001 --csv feat.csv --excel report.xlsx   # 寫回 KLARF + 報表
 ```
 
+## 資料模型：兩個通道（影像流 vs 具名區域）
+
+每顆 defect 跑 pipeline 時，所有卡片共用一個 **Context**，裡面有三層資料：
+
+| 層 | 裝什麼 | 例子 | 特性 |
+|---|---|---|---|
+| **影像流 images** | 真正的像素陣列 | `test`、`ref`、`diff`、`mask` | 綁尺寸（H×W）、佔記憶體 |
+| **具名區域 rois** | 名字 → 一串框 | `cross` = 64 個框，每框 (x,y,w,h) 用 **0–1 比例** | 不綁尺寸、帶**結構**（幾個框、各在哪、邊界在哪） |
+| **特徵 features** | 名字 → 數字 | `roi_snr_abs = 5.2` | 進 score 表達式、寫回 KLARF |
+
+```
+影像流通道（像素）   Load ──→ Denoise ──→ Compare ──→ 'diff' ─────────┐
+                                                                     ├─→ 量測卡 ──→ 特徵 ──→ score / bin
+區域通道（哪裡）     Profile ／ GC Template ／ GDS(未來)               │    source='diff'（流）
+                        └──→ 具名區域 'cross'（64 個框，0–1 座標）─────┘    roi='cross'（名字）
+                                └─→ Mask from regions ──→ 'mask' 流 ──→ Normalize 的 Use only（影像段）
+```
+
+**規則一句話：量測卡吃區域「名字」，影像卡吃 mask「影像流」。**
+
+- **量測卡**（glv_stats / ROI SNR / CD）要的是「哪裡」的**結構**：幾個框、
+  框的邊界、框外一圈背景（ROI SNR 的背景取樣）、哪一框最靠中心。一張 0/255
+  的 mask 圖把 64 個框壓扁成一坨像素，這些結構全部丟失 —— 所以量測卡的
+  `roi` 欄填**名字**，引擎在量測當下才把名字換成「這顆 patch 上的那群像素」。
+- **影像卡**（目前只有 Normalize 的 Use only）只需要「哪些像素參與統計」——
+  那正是 mask 影像流的全部內容。`roi_mask` 卡把具名區域畫成 0/255 的流，
+  在畫布上是一條看得見的線。
+- 兩條路都從同一個 `Context.rois` 衍生 —— 一個來源、兩種視圖，不會分家。
+
+**為什麼存「名字 + 正規化座標」，不是存 mask 圖：**
+
+1. **patch 是以 defect 為中心裁的，晶格相位逐顆不同。** 存死的 mask 圖只對
+   裁下那一瞬間的那一顆有效。所以 recipe 存的是「**怎麼找**」（規則／模板），
+   定位卡**每顆 patch 重新定位**、每顆重寫這顆自己的框。
+2. **尺寸無關。** 框存 (0.10, 0.20, 0.35, 0.60) 這種比例：128² 的 EBI patch
+   落在 (13,26,45,77)px，之後 512² 的新 source 自動落在 (51,102,179,307)px ——
+   **同一份 recipe 直接用**。
+
+**ROI 定位的三種方法，同一個出口（契約）：**
+
+| 定位法 | 怎麼找 | 需要什麼 |
+|---|---|---|
+| **Profile**（`roi_cross`，現有） | 純規則：投影找條紋 → 交會處放框，每顆 patch 自己算 | 不用外部資料 |
+| **Golden Cell Template**（`roi_template`，現有） | 建模板時凍一個完整 cell 進 recipe；每顆用 NCC 對回相位、把標好的框搬過來 | 一張原大圖（建模板用一次） |
+| **GDS**（未來） | 設計座標 → 多邊形 → 框 | .oas 檔 + 對位 + nm/px |
+
+三者的出口**完全相同：吐具名區域**。所以新定位法加進來，下游的量測卡、
+mask 卡、overlay、region check 一行都不用改。
+
+**新 image source 進來時要動什麼（checklist）：**
+
+1. Load 層：讓新格式讀進來變成具名影像流（尺寸不同沒關係）。
+2. 定位層：挑一個在那種影像上找得到的定位法 → 吐具名區域。
+3. 下游：**零改動**。量測照名字、mask 照流。
+
 ```
 adept/
 ├── ui/                  # PySide6 Studio（唯一允許 Qt 的地方）
 │   ├── viewmodel.py     #   RecipeModel（Qt-free 編輯模型）+ 直方圖/門檻計算
-│   ├── theme.py         #   GLAS 暖色主題 token + 三段分色
-│   ├── widgets.py       #   ImageView / ParamForm / LibraryPanel / PipelinePanel
-│   │                    #   / HistogramWidget / FeatureTable / VerdictChip
+│   ├── canvas.py        #   n8n 式節點畫布（拉線/拖卡/右鍵平移/彈出視窗）
+│   ├── theme.py         #   中性平面主題 token（亮/暗雙色盤）+ 六階段分色
+│   ├── widgets.py       #   ImageView / ParamForm / LibraryPanel / Gallery 等元件
+│   ├── inspectors.py    #   每張卡自己的右下角儀表（依 Step.key 註冊）
+│   ├── results.py       #   Results 視窗（直方圖 + Gallery + 輸出）
 │   ├── workers.py       #   載入 / 預覽（請求合併）/ 試跑 背景執行緒
-│   ├── studio.py        #   StudioWindow 四區塊組裝
+│   ├── studio.py        #   StudioWindow 組裝（D 案版面：畫布/設定/預覽）
 │   └── app.py           #   進入點（python -m adept gui）
 ├── core/
 │   ├── ingest/          # KLARF 無損引擎(KLIP) + TIFF page 索引 + Dataset 自動判別
@@ -106,10 +175,10 @@ adept/
 │   │   ├── quality.py       #   focus/品質三指標                     (MMH)
 │   │   └── subpixel.py      #   次像素邊緣定位（CD 用）              (MMH)
 │   └── calibration.py   # nm/px 校正 profile 管理                    (MMH)
-├── tests/               # 合成影像單元測試 + 零 Qt / py3.9 語法守門
-├── docs/plans/          # 開發計畫（F0 = master plan）
-├── (fab_probe/)         # 廠內格式探測腳本 —— 尚未建立，見 CLAUDE.md §8
-└── tools/               # (M1+) 合成資料產生器、CLI
+├── tests/               # 1200+ 條合成影像測試 + 零 Qt / py3.9 / 無廠內資料守門
+├── docs/plans/          # 開發計畫（F0 = master plan；每個 milestone 一份）
+├── fab_probe/           # 廠內格式探測腳本（stdlib-only、輸出遮蔽識別碼）
+└── tools/               # 合成資料產生器、離線安裝三件套、FILELIST/bundle 工具
 ```
 
 ## 廠內格式驗證
@@ -140,7 +209,8 @@ python fab_probe\probe_stats.py C:\path\to\file.tif
 python -m venv .venv && .venv\Scripts\activate     # Windows
 pip install -r requirements.txt   # 含 PySide6（Studio 用）
 pip install pytest
-QT_QPA_PLATFORM=offscreen pytest -q   # 全部測試（~6s，不需真實資料；Windows 免設 QT_QPA_PLATFORM）
+QT_QPA_PLATFORM=offscreen pytest -q   # 全套 ~30s（家用機；不需真實資料；Windows 免設 QT_QPA_PLATFORM）
+# 開發迴圈只跑改到的測試檔（pytest -q tests/test_xxx.py），全套留到 commit 前
 ```
 
 ## Vendoring 慣例
@@ -163,7 +233,8 @@ QT_QPA_PLATFORM=offscreen pytest -q   # 全部測試（~6s，不需真實資料�
 ## Roadmap
 
 M0 抽庫 ✅ → M1 引擎 ✅ → M2 批次 ✅ → M3 Studio UI ✅ → M4 雙輸入+Golden Cell ✅ →
-M5 Gallery+Export ✅ → M6 推廣包 ✅。詳見 master plan。
+M5 Gallery+Export ✅ → M6 推廣包 ✅ → M7/F7 UI/UX 大改版 ✅ → F8 純規則 ROI（進行中）。
+詳見 master plan 與 `SESSION_LOG.md`（每輪的決策與理由）。
 
 ## 已知修正紀錄（開發過程中抓到的坑）
 

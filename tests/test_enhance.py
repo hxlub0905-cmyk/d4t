@@ -287,11 +287,15 @@ def test_ratio_never_produces_infinities():
 
 
 def test_subtract_keeps_its_original_behaviour_by_default():
-    """既有 recipe 一份都不能被改變行為。"""
+    """既有 recipe 一份都不能被改變行為。
+
+    2026-08-14 起 subtract 的預設 b 是 ``ref``（patch 本來就對齊）——
+    新卡走新預設；**舊檔案**（省略 b 的）由 recipe 載入遷移補回
+    ``ref_aligned``，行為不變（見 test_recipe 的遷移測試）。"""
     a = np.full((8, 8), 60.0, np.float32)
     b = np.full((8, 8), 100.0, np.float32)
-    ctx = Context(images={"test": a, "ref_aligned": b})
-    _run("subtract", ctx)                       # 全預設
+    ctx = Context(images={"test": a, "ref": b})
+    _run("subtract", ctx)                       # 全預設（新：b=ref）
     assert float(ctx.images["diff"].mean()) == pytest.approx(40.0)   # absolute
 
 

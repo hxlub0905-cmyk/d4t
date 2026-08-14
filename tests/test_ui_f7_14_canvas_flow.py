@@ -140,8 +140,9 @@ def test_zoom_is_clamped_at_both_ends(window):
 def test_the_zoom_controls_are_on_screen_and_say_the_current_zoom(window):
     view = window.pipeline
     window.show()
-    # 四顆縮放 + 一顆「排整齊」（F7-22 加的；都只動「怎麼看」，不動 recipe）
-    assert len(view._zoom_buttons) == 5
+    # 四顆縮放 + 「排整齊」（F7-22）+ 「彈出視窗」（F8-UI D 案）——
+    # 都只動「怎麼看」，不動 recipe，所以同一排。
+    assert len(view._zoom_buttons) == 6
     assert view._zoom_bar.isVisibleTo(view)
     view.zoom_by(1.25)
     assert view._zoom_label.text() == "%d%%" % view.zoom_percent()

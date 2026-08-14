@@ -573,15 +573,18 @@ variation。」順帶回報「Use」按鈕被切邊（只看得到一半的數�
 * ~~**線寬不能覆寫。**~~ 第五輪做掉了（`vertical_width` / `horizontal_width`）。
 * **量測尺量不到 nm。** 它報的是像素，因為 `nm_per_px` 沒有來源（§8）。
   接上 `core/calibration.py` 之後這裡可以同時報兩個單位。
-* **ROI mask 影像流 + 只用 mask 內像素的正規化（排隊中，2026-08-14 使用者
-  核准的 (c)）。** 一張 `ROI → mask` 卡吐 0/1 影像流（畫布上是一條看得見的
-  線；多 ROI 相加 = 聯集），Normalize 加一格 `Use only`（`image_key`）——
-  統計只從 mask 內算，套用仍是整張圖。動機：跨 patch 比 EPI 的 GLV 時，
-  **MG 佔多少面積隨 crop 而變**（64px 的 patch 一根 MG 進出畫面就是 12%），
-  任何吃整張圖統計的 Enhance 卡都把這個變異灌進 EPI 的數字裡。界線：mask 給
-  **影像段**用，量測段照樣引用 ROI 名字 —— 兩條平行的路會腐爛（F7-17 的教訓）。
-  驗收要量：crop 讓 MG 面積 ±12% 變動時，「只用 EPI 正規化」的 `glv_mean`
-  分散度有沒有比「整張圖」收斂；沒有就回報不硬做。
+* ~~**ROI mask 影像流 + 只用 mask 內像素的正規化**~~ **第六輪做掉了
+  （2026-08-14）**：`roi_mask` 卡（具名區域 → 0/255 影像流；多名字 = 聯集；
+  `regions` 留空是 `not-configured`，畫布掛警示）+ Normalize 的 `Use only`
+  （`use_within`，percentile / glv_band 才出現）—— 範圍只從 mask 內量、
+  **套用仍是整張圖**。驗收照原話量（`tests/test_roi_mask.py` 最後一支）：
+  「一根 MG 進出畫面」時，「只用 EPI」的 EPI 亮度分散度收斂到整張圖版本的
+  一半以下。實驗設計時學到一課：整張圖的 percentile 最痛的不是 MG 12% ↔ 24%
+  的變動（p98 兩邊都落在 MG 上，反而穩），是面積**跨過百分位門檻**的那一下
+  （0% ↔ 12% 之間 p98 從 EPI 的頂翻成 MG 的 230，同一片 EPI 的輸出從 ~130
+  掉到 ~20）—— 而那正是條紋在 crop 邊緣進進出出的樣子。界線守住：mask 給
+  **影像段**用，量測卡照樣引用 ROI 名字。mask 尺寸對不上時 StepError 指名
+  去改 `Size like`；全 0 的 mask 退回整張圖並 `ctx.warn`（不安靜）。
 * **跨站點要重填一次 px。** 見 §6f 最後一段 —— 現在只會擋，不會換算。
 * **CPODE 的格子分不出來。** 補回來的那兩格跟 MG 那幾格在輸出上長得一樣
   （同一個 ROI 名字、同一批框）。要分開打分的話得讓 `filled` 的那幾格帶自己的

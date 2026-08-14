@@ -403,3 +403,23 @@ def test_an_unparseable_version_does_not_crash():
 
     for weird in ("beta", "v2-rc1", "…", None):
         version_skew(weird)                  # 不丟例外就好
+
+
+def test_an_old_subtract_without_b_still_uses_the_aligned_ref():
+    """subtract 的預設 b 於 2026-08-14 改成 ref。省略 b 的檔案是照舊預設
+    （ref_aligned）蓋的 —— 載入遷移要把它寫回去，否則一份「align →
+    subtract」的舊 recipe 會**安靜地跳過對位**，分數整批變掉。"""
+    from adept.core.pipeline.recipe import Recipe
+
+    d = {"recipe_id": "old", "version": 1,
+         "routes": {"ebi_patch": ["load", "al", "sub"]},
+         "nodes": {"load": {"step": "load_patch", "params": {}},
+                   "al": {"step": "align", "params": {}},
+                   "sub": {"step": "subtract", "params": {"op": "subtract"}}},
+         "score": {"expr": "1", "threshold": 0.0,
+                   "bins": {"below": 0, "above": 1}}}
+    rec = Recipe.from_json_dict(d)
+    assert rec.nodes["sub"].params["b"] == "ref_aligned"
+    # 有寫 b 的檔案（新版 Studio 一律寫滿）原樣保留
+    d["nodes"]["sub"]["params"]["b"] = "ref"
+    assert Recipe.from_json_dict(d).nodes["sub"].params["b"] == "ref"

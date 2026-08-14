@@ -86,7 +86,7 @@ _CUT_R = 8.0
 
 #: 連線的 z 值。節點是 0，所以線平常畫在卡片**底下**（n8n 也是這樣，
 #: 卡片才是主角）；滑鼠移上來的那一條抬到卡片之上 —— 見 ``hoverEnterEvent``。
-_Z_EDGE, _Z_EDGE_IMPLICIT, _Z_EDGE_HOVER = -1.0, -2.0, 1.0
+_Z_EDGE, _Z_EDGE_HOVER = -1.0, 1.0
 
 #: 還沒拉線時，一列最多排幾張卡（見 :func:`layout_columns`）。
 WRAP = 4
@@ -127,14 +127,25 @@ def layout_columns(node_ids: Sequence[str],
         per_depth[depth[n]] = per_depth.get(depth[n], 0) + 1
     band_h = max(per_depth.values(), default=1)
 
-    rows: Dict[int, int] = {}
+    # 同欄內的列序用 **barycenter**（上游都排在第幾列，我就往那個平均靠）。
+    # 以前照 node_order 排：上游在第 0 列、下游被排到第 2 列，線就斜跨整欄，
+    # 而三條斜線交叉起來「亂」的觀感比任何配色問題都大。跟上游對齊之後，
+    # 大部分的線接近水平 —— 交叉不是被畫得更好看，是**根本不發生**。
+    # 平手（沒有上游、或平均相同）退回原順序，既有測試鎖的就是這個順序。
+    rows_of: Dict[str, int] = {}
     out: Dict[str, Tuple[int, int]] = {}
-    for n in sorted(ids, key=lambda x: (depth[x], idx[x])):
-        d = depth[n]
+    for d in sorted(set(depth.values())):
+        members = [n for n in ids if depth[n] == d]
+
+        def _bary(n: str) -> float:
+            prs = [rows_of[p] for p in preds[n] if p in rows_of]
+            return (sum(prs) / float(len(prs))) if prs else float(idx[n])
+
+        members.sort(key=lambda n: (_bary(n), idx[n]))
         band, col = divmod(d, WRAP)
-        r = rows.get(d, 0)
-        rows[d] = r + 1
-        out[n] = (col, band * band_h + r)
+        for r, n in enumerate(members):
+            rows_of[n] = r
+            out[n] = (col, band * band_h + r)
     return out
 
 
@@ -162,6 +173,10 @@ class _NodeItem(QGraphicsItem):
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        # hover 回饋的狀態（誰在 hover 由 **view** 判斷，不是這裡收事件 ——
+        # 卡片一收 hover，事件就不再穿過它，壓在線中點上的卡會把 × 悶死；
+        # 見 shape() 的說明與 test_ui_canvas_cut_button）。
+        self._hover = False
         tip = "%s — %s" % (self.node_id, info.get("label", ""))
         if info.get("problem"):
             # 標記說「有問題」，滑鼠停上去說「是什麼問題」。標記本身放不下一句話，
@@ -175,10 +190,11 @@ class _NodeItem(QGraphicsItem):
 
         埠標籤（"test" / "ref"）畫在節點右緣之外 —— 之前 boundingRect 只算到
         ``NODE_W + _PORT_R``，Qt 就只重繪那個範圍，標籤的舊位置沒被清掉。
+        選中的光暈（3px 寬、畫在卡片邊緣之外）也算 —— 上下各要多留 4px。
         """
-        return QRectF(-_PORT_R - 1, -1,
+        return QRectF(-_PORT_R - 1, -4,
                       NODE_W + 2 * _PORT_R + _PORT_LABEL_W,
-                      NODE_H + 5)
+                      NODE_H + 9)
 
     def shape(self) -> QPainterPath:
         """**點得到的範圍不是畫得到的範圍。**
@@ -274,17 +290,36 @@ class _NodeItem(QGraphicsItem):
 
         # 投影：讓節點浮在網格之上。用畫的而不是 QGraphicsDropShadowEffect ——
         # effect 會強迫 Qt 額外開一層離屏 buffer，為了 2px 的陰影不值得。
-        shadow = QColor(0, 0, 0, 46 if enabled else 22)
+        # hover / 選中時深一階：跟按鈕的 hover 同一個語言 ——「這個東西回應你」。
+        lifted = (self._hover or selected) and enabled
+        shadow = QColor(0, 0, 0, (64 if lifted else 46) if enabled else 22)
         p.setPen(Qt.NoPen)
         p.setBrush(shadow)
-        p.drawRoundedRect(body.translated(1.5, 2.5), 7, 7)
+        p.drawRoundedRect(body.translated(1.5, 2.5 if not lifted else 3.0), 7, 7)
 
         gid = str(self.info.get("group", "") or "enhance")
         tile_col = QColor(theme.group_hex(gid) if enabled else TOKENS["seg_disabled"])
 
-        border = QColor(TOKENS["accent"] if selected else TOKENS["border_default"])
+        if selected:
+            # 選中的光暈：一圈 3px 的半透明 accent，畫在邊框**外面**。
+            # 只加粗邊框的話，在一整排 1px 灰框的卡片裡要找「哪張是 2px 藍框」
+            # 得一張一張看 —— 光暈讓選中的那張在餘光裡就跳出來。
+            halo = QColor(TOKENS["accent"])
+            halo.setAlpha(56)
+            p.setPen(QPen(halo, 6.0))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(body, 7, 7)
+
+        if selected:
+            border = QColor(TOKENS["accent"])
+        elif self._hover and enabled:
+            border = QColor(TOKENS["accent"])
+            border.setAlpha(150)
+        else:
+            border = QColor(TOKENS["border_default"])
         # 停用的節點畫虛線框（n8n 的慣例）—— 不是消失，是「還在，但這次不跑」。
-        pen = QPen(border, 2.0 if selected else 1.0)
+        pen = QPen(border, 2.0 if selected else (1.4 if self._hover and enabled
+                                                 else 1.0))
         if not enabled:
             pen.setStyle(Qt.DashLine)
         p.setPen(pen)
@@ -409,6 +444,12 @@ class _NodeItem(QGraphicsItem):
                    Qt.AlignCenter, "!")
 
     # -- 互動 ---------------------------------------------------------------
+    def set_hovered(self, hovered: bool) -> None:
+        """view 判斷出來的 hover 狀態（見 __init__ 的說明）。"""
+        if bool(hovered) != self._hover:
+            self._hover = bool(hovered)
+            self.update()
+
     def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
         hit = (self.out_port_at(e.pos())
                if e.button() == Qt.LeftButton else None)
@@ -434,54 +475,50 @@ class _NodeItem(QGraphicsItem):
             self.canvas.refresh_edges()
         return super().itemChange(change, value)
 
-    def contextMenuEvent(self, e) -> None:      # noqa: D102 - Qt hook
+    def show_context_menu(self, screen_pos) -> None:
+        """這張卡的右鍵選單。
+
+        入口有兩個：Qt 原生的 contextMenuEvent（鍵盤選單鍵等），以及
+        view 的「右鍵原地放開」（右鍵拖曳被平移接管之後，選單改由那裡開）。
+        """
         menu = QMenu()
         act_toggle = menu.addAction(
             "Skip this step" if self.info.get("enabled", True) else "Enable this step")
         act_remove = menu.addAction("Remove")
-        chosen = menu.exec(e.screenPos())
+        chosen = menu.exec(screen_pos)
         if chosen is act_toggle:
             self.canvas.node_toggled.emit(
                 self.node_id, not bool(self.info.get("enabled", True)))
         elif chosen is act_remove:
             self.canvas.remove_requested.emit(self.node_id)
+
+    def contextMenuEvent(self, e) -> None:      # noqa: D102 - Qt hook
+        self.show_context_menu(e.screenPos())
         e.accept()
 
 
 class _EdgeItem(QGraphicsItem):
     """一條連線（三次貝茲，左→右）。點它可選取，``Delete`` 移除。
 
-    ``implicit=True`` 是 **route 的隱含順序**（F7-10），畫成虛線、不可選取。
-    引擎的依賴是「route 相鄰對 ∪ 顯式 edges」——
-    也就是說**畫布上沒有線，不代表沒有連接**。以前只畫顯式 edges，於是載入
-    一份沒拉過線的 recipe 看到的是「九張互不相干的卡」，但它其實是照順序跑的。
-    使用者只會得到兩種結論，兩種都是錯的：以為要自己連起來才會跑，
-    或以為沒連線的卡不會執行。
-
-    不可選取（也就刪不掉）是刻意的：隱含順序來自卡片的排列，
-    刪掉它在語意上等於「把這張卡從流程裡拿掉」，那是另一個動作。
+    歷史：F7-10 起這裡還有第二種線 —— route 隱含順序的金色虛線
+    （``implicit=True``）。**2026-08-14 使用者退掉了它**：「會混淆」。
+    引擎的依賴仍然是「route 相鄰對 ∪ 顯式 edges」（那沒有變，變的只有
+    畫不畫），排版也仍然吃隱含順序（``set_nodes`` 的 ``self._implicit``）。
+    F7-10 擔心的「沒有線以為互不相干」由現在的預設行為緩解：從卡片庫加卡
+    （``add_card_after``）與拖放都會建**顯式**連線，新做的 recipe 天生有線。
     """
 
     def __init__(self, src: _NodeItem, dst: _NodeItem, canvas: "PipelineCanvas",
-                 port: int = 0, implicit: bool = False):
+                 port: int = 0):
         super().__init__()
         self.src, self.dst, self.canvas, self.port = src, dst, canvas, int(port)
-        self.implicit = bool(implicit)
         self._hover = False
-        self.setFlag(QGraphicsItem.ItemIsSelectable, not self.implicit)
-        self.setZValue(_Z_EDGE_IMPLICIT if self.implicit else _Z_EDGE)
-        if not self.implicit:
-            # 滑鼠移上來要出現「斷開」的 ×（F7-22）。隱含的虛線沒有這回事：
-            # 它刪不掉（那條線來自卡片的排列順序，不是使用者拉的）。
-            self.setAcceptHoverEvents(True)
-        if self.implicit:
-            self.setToolTip(
-                "%s runs before %s because of the order of the cards.\n"
-                "Drag from a port to make the connection explicit."
-                % (src.node_id, dst.node_id))
-        else:
-            self.setToolTip("%s → %s  (click the × to disconnect)"
-                            % (src.node_id, dst.node_id))
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setZValue(_Z_EDGE)
+        # 滑鼠移上來要出現「斷開」的 ×（F7-22）。
+        self.setAcceptHoverEvents(True)
+        self.setToolTip("%s → %s  (click the × to disconnect)"
+                        % (src.node_id, dst.node_id))
 
     # ---- 斷開鈕（F7-22）---------------------------------------------------
     #: 斷開鈕的命中半徑。畫出來的圓是 ``_CUT_R``，多給 2px 是因為使用者瞄的是
@@ -513,7 +550,7 @@ class _EdgeItem(QGraphicsItem):
         super().hoverLeaveEvent(e)
 
     def mousePressEvent(self, e) -> None:       # noqa: D102 - Qt hook
-        if (not self.implicit and self._hover
+        if (self._hover
                 and e.button() == Qt.LeftButton and self.cut_hit(e.pos())):
             self.canvas.edge_removed.emit(self.src.node_id, self.dst.node_id)
             e.accept()
@@ -545,7 +582,10 @@ class _EdgeItem(QGraphicsItem):
         dx = b.x() - a.x()
         p = QPainterPath(a)
         if dx >= 2 * self.BACK_REACH:
-            h = max(40.0, dx * 0.5)
+            # 水平推力的下限是 COL_GAP 的 2/3：推力太小（以前是 40，縮放 70%
+            # 之後只剩 28px）曲線就退化成斜的直線，n8n 那種「從埠水平流出、
+            # 水平流入」的秩序感整個不見 —— 看起來像線亂穿，其實是切線不夠平。
+            h = max(COL_GAP * 0.67, dx * 0.5)
             p.cubicTo(a + QPointF(h, 0), b - QPointF(h, 0), b)
             return p
         h = self.BACK_REACH
@@ -576,10 +616,9 @@ class _EdgeItem(QGraphicsItem):
         """
         st = QPainterPathStroker(QPen(Qt.black, 10.0))
         path = st.createStroke(self.path())
-        if not self.implicit:
-            disc = QPainterPath()
-            disc.addEllipse(self.cut_center(), self.CUT_GRAB, self.CUT_GRAB)
-            path = path.united(disc)
+        disc = QPainterPath()
+        disc.addEllipse(self.cut_center(), self.CUT_GRAB, self.CUT_GRAB)
+        path = path.united(disc)
         return path
 
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
@@ -587,16 +626,7 @@ class _EdgeItem(QGraphicsItem):
         col = QColor(TOKENS["canvas_edge_active"] if self.isSelected()
                      else TOKENS["canvas_edge"])
         path = self.path()
-        if self.implicit:
-            # **自己的顏色**，不是實線色調淡（F7-18）。同色淡一點只說得出
-            # 「比較不重要」；這兩種線在語意上是不同的東西 —— 一條是使用者拉的
-            # （刪得掉、表達意圖），一條是卡片排列帶來的順序（刪不掉，想讓它
-            # 變成真的連線就自己拉一條）。虛線講的是「這裡可以拉」，那需要
-            # 一眼認得出來，而深淺在縮放與換主題之後就不一定分得出來了。
-            col = QColor(TOKENS["canvas_edge_implicit"])
-            p.setPen(QPen(col, 1.4, Qt.DashLine))
-        else:
-            p.setPen(QPen(col, 2.2 if self.isSelected() else 1.6))
+        p.setPen(QPen(col, 2.2 if self.isSelected() else 1.6))
         p.setBrush(Qt.NoBrush)
         p.drawPath(path)
 
@@ -605,7 +635,7 @@ class _EdgeItem(QGraphicsItem):
         # 選起來按 Delete 本來就做得到，但**畫面上沒有任何東西講出這件事** ——
         # 接錯一條線的人會卡在那裡。刪除的入口要長在被刪的東西上面。
         # 箭頭跟 × 二選一：兩個都畫在中點會疊成一團。
-        if self._hover and not self.implicit:
+        if self._hover:
             c = self.cut_center()
             p.setPen(Qt.NoPen)
             p.setBrush(QBrush(QColor(TOKENS["danger_text"])))
@@ -656,11 +686,22 @@ class PipelineCanvas(QGraphicsView):
     edge_removed = Signal(str, str)
     #: 從卡片庫拖一張卡丟到畫布上：``(step_key, 場景 x, 場景 y)``（F7-22）。
     card_dropped = Signal(str, float, float)
+    #: 「在自己的視窗打開畫布」（F8-UI D 案）。畫布在主視窗只佔中上一塊
+    #: （它會 zoom，不需要常駐大面積），要看全貌就彈出去。
+    popout_requested = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, popout_button: bool = True):
         super().__init__(parent)
+        #: 彈出視窗裡的那份畫布把這顆鈕關掉 —— 從彈出視窗再彈一個視窗，
+        #: 沒有那種需求，只有無限套娃。
+        self._popout_button = bool(popout_button)
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
+        # 節點 hover（_sync_hover_node）與線上的 × 都吃「沒按鍵也送 move」。
+        # QGraphicsView 建構時本來就會把 viewport 的 mouseTracking 打開
+        # （item hover 靠它），這行是把**依賴講明**：哪天換了 viewport 或
+        # base style 把它關掉，hover 會安靜地只剩拖曳時有效。
+        self.viewport().setMouseTracking(True)
         self.setRenderHint(QPainter.Antialiasing, True)
         self.setDragMode(QGraphicsView.RubberBandDrag)
         self.setAcceptDrops(True)                 # 卡片庫拖進來（F7-22）
@@ -678,6 +719,12 @@ class PipelineCanvas(QGraphicsView):
         self._link_from: Optional[_NodeItem] = None
         self._link_port = 0
         self._link_line = None
+        #: 現在游標壓著哪張卡（hover 回饋）。由這裡追而不是讓卡片自己收
+        #: hover 事件 —— 卡片一收，事件就穿不過去，線上的 × 會被悶死。
+        self._hover_node: Optional[_NodeItem] = None
+        #: 右鍵平移的狀態（None = 沒在平移）。
+        self._pan_last = None
+        self._pan_moved = False
         self._build_zoom_bar()
 
     # ---- 縮放控制（F7-14）--------------------------------------------------
@@ -702,13 +749,18 @@ class PipelineCanvas(QGraphicsView):
         # ``1:1`` 留成文字（數字與冒號是 ASCII，哪台機器都畫得出來）；其餘四顆
         # 改成自繪圖示 —— ``⤢`` 與 ``⌗`` 在 Windows 的 Segoe UI 根本沒有
         # （F7-23 第四輪，見 widgets.draw_glyph_icon）。
-        specs = (("zoom_out", "Zoom out", lambda: self.zoom_by(1 / 1.25)),
+        specs = [("zoom_out", "Zoom out", lambda: self.zoom_by(1 / 1.25)),
                  ("zoom_in", "Zoom in", lambda: self.zoom_by(1.25)),
                  ("fit", "Fit the whole pipeline in view", self.fit),
                  (None, "Back to 100%", self.reset_zoom),
                  # 排整齊跟縮放是同一類東西（都只動「怎麼看」，不動 recipe），
                  # 所以放同一排，而不是放到會改檔案的工具列上。
-                 ("tidy", "Tidy up — put the cards back on the grid", self.tidy))
+                 ("tidy", "Tidy up — put the cards back on the grid", self.tidy)]
+        if self._popout_button:
+            # 「彈出視窗」也是「怎麼看」的一種 —— 主視窗的畫布只佔中上一塊
+            # （D 案），要看全貌就到自己的視窗看。
+            specs.append(("popout", "Open the pipeline in its own window",
+                          self.popout_requested.emit))
         self._zoom_buttons = []
         for icon, tip, slot in specs:
             # 這一排浮在畫布上，所以要 ``kind="icon"``（自己的底）。
@@ -744,40 +796,71 @@ class PipelineCanvas(QGraphicsView):
         self._consume_pending_fit()
 
     # ---- 對外（與 PipelinePanel 對齊）--------------------------------------
+    def forget_positions(self) -> None:
+        """下一次 ``set_nodes`` 不要沿用現在的節點位置（換了一份 recipe 時用）。
+
+        位置平常是**保留**的（見 set_nodes）—— 但那是「同一份 recipe 一直在
+        編」的前提。換檔案之後，上一份剛好同名的節點（load_patch 幾乎每份都
+        有）不該繼承拖過的位置。
+        """
+        self._keep_positions = False
+
     def set_nodes(self, nodes: Sequence[Dict[str, Any]],
                   edges: Sequence[Tuple[str, str]] = ()) -> None:
-        """重建整張畫布。``nodes`` 依執行順序，``edges`` 是顯式連線。"""
+        """重建整張畫布。``nodes`` 依執行順序，``edges`` 是顯式連線。
+
+        **既有節點的位置保留**（2026-08-14 使用者要求）：重建發生在每一次
+        model 變動（改參數、開彈出視窗…），以前每次都重跑自動排版 ——
+        使用者剛拖好的佈局在改一個參數之後就被「自動整理」掉。現在只有
+        **新**節點拿排版位置；要整批排回去，按「排整齊」（tidy）。
+        """
+        prev = ({nid: item.pos() for nid, item in self._items.items()}
+                if getattr(self, "_keep_positions", True) else {})
+        self._keep_positions = True
         self._scene.clear()
+        self._hover_node = None            # 舊的圖元剛被 clear() 銷毀
         self._items, self._edges = {}, []
         self._order = [str(n.get("node_id", "")) for n in nodes]
         self._pairs = [(str(a), str(b)) for a, b in (edges or ())]
 
-        # route 的相鄰對也是**真的依賴**（engine 的 execution_order 是
-        # 「route 相鄰對 ∪ edges」），所以排版與繪製都要把它算進去。
+        # route 的相鄰對是**真的依賴**（engine 的 execution_order 是
+        # 「route 相鄰對 ∪ edges」），**排版**照樣把它算進去 —— 但 2026-08-14
+        # 起不再畫成金色虛線（使用者：「會混淆」）。畫布上只畫使用者拉的線；
+        # 順序上的依賴由卡片的排列（左→右、上→下）表達。
         self._implicit = [pair for pair in zip(self._order, self._order[1:])
                           if pair not in set(self._pairs)]
 
         pos = layout_columns(self._order, self._pairs + self._implicit)
         for info in nodes:
             item = _NodeItem(info, self)
-            col, row = pos.get(item.node_id, (0, 0))
-            item.setPos(col * (NODE_W + COL_GAP), row * (NODE_H + ROW_GAP))
+            if item.node_id in prev:
+                item.setPos(prev[item.node_id])
+            else:
+                col, row = pos.get(item.node_id, (0, 0))
+                item.setPos(col * (NODE_W + COL_GAP), row * (NODE_H + ROW_GAP))
             self._scene.addItem(item)
             self._items[item.node_id] = item
 
-        for pairs, implicit in ((self._pairs, False), (self._implicit, True)):
-            for a, b in pairs:
-                if a not in self._items or b not in self._items:
-                    continue
-                src, dst = self._items[a], self._items[b]
-                for port in self._ports_between(src, dst):
-                    edge = _EdgeItem(src, dst, self, port, implicit=implicit)
-                    self._scene.addItem(edge)
-                    self._edges.append(edge)
+        for a, b in self._pairs:
+            if a not in self._items or b not in self._items:
+                continue
+            src, dst = self._items[a], self._items[b]
+            for port in self._ports_between(src, dst):
+                edge = _EdgeItem(src, dst, self, port)
+                self._scene.addItem(edge)
+                self._edges.append(edge)
 
         self.set_selected(self._selected)
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self._scene.setSceneRect(rect)
+
+    def copy_positions_from(self, other: "PipelineCanvas") -> None:
+        """把另一份畫布的節點位置搬過來（彈出視窗開啟時跟主視窗一致）。"""
+        for nid, item in other._items.items():
+            mine = self._items.get(nid)
+            if mine is not None:
+                mine.setPos(item.pos())
+        self.refresh_edges()
 
     def node_item(self, node_id: str):
         """畫布上那個節點（測試與外部檢查用；沒有回 ``None``）。"""
@@ -843,6 +926,11 @@ class PipelineCanvas(QGraphicsView):
     #:
     #: 所以下限是 0.7。代價是很長的 pipeline 會超出畫面、要捲 —— 那是划算的：
     #: **讀不出來的全景不算全景**，而想看整體形狀的人本來就會再按一次縮小。
+    #:
+    #: D 案（2026-08-14）之後這是**類別預設**，不再是唯一的答案：主視窗的
+    #: 畫布變成中上的一條**概覽**（副標的細節住在下方設定區與彈出視窗），
+    #: 「全部看得完」比「副標讀得出」重要 —— Studio 把主畫布的這個值調成
+    #: 0.5（見 _build_body），彈出視窗維持 0.7（它就是拿來讀的）。
     MIN_FIT_SCALE = 0.7
 
     def fit(self) -> None:
@@ -953,6 +1041,11 @@ class PipelineCanvas(QGraphicsView):
         for e in self._edges:
             e.prepareGeometryChange()
             e.update()
+        # 卡片拖到 sceneRect 外面，那一塊是**捲不到的** —— 埠與標籤就這樣
+        # 「不見」（使用者回報的）。所以 sceneRect 跟著拖曳長大（只長不縮：
+        # 拖曳中一直重算縮小的話畫面會跳；縮回來由 set_nodes / tidy 做）。
+        grown = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
+        self._scene.setSceneRect(self._scene.sceneRect().united(grown))
 
     # ---- 拉線 -------------------------------------------------------------
     def begin_link(self, src: _NodeItem, port: int = 0) -> None:
@@ -992,10 +1085,57 @@ class PipelineCanvas(QGraphicsView):
                                  self.stream_of(src, int(port)))
 
     # ---- Qt hooks ---------------------------------------------------------
+    def _sync_hover_node(self, view_pos) -> None:
+        """讓游標下最上面那張卡亮起 hover 邊框。"""
+        top = None
+        for item in self.items(view_pos):
+            if isinstance(item, _NodeItem):
+                top = item
+                break
+        if top is not self._hover_node:
+            if self._hover_node is not None:
+                self._hover_node.set_hovered(False)
+            self._hover_node = top
+            if top is not None:
+                top.set_hovered(True)
+
+    def leaveEvent(self, e) -> None:           # noqa: D102
+        if self._hover_node is not None:
+            self._hover_node.set_hovered(False)
+            self._hover_node = None
+        super().leaveEvent(e)
+
+    @staticmethod
+    def _view_pos(e):
+        # ``QMouseEvent.pos()`` 在 Qt6 是 deprecated（CI 的警告）。
+        return e.position().toPoint() if hasattr(e, "position") else e.pos()
+
+    def mousePressEvent(self, e) -> None:      # noqa: D102
+        # 右鍵按住拖曳 = 平移畫布（使用者要求）。原地放開仍然要出得來
+        # 節點的右鍵選單 —— 那條路移到 mouseReleaseEvent。
+        if e.button() == Qt.RightButton:
+            self._pan_last = self._view_pos(e)
+            self._pan_moved = False
+            e.accept()
+            return
+        super().mousePressEvent(e)
+
     def mouseMoveEvent(self, e) -> None:       # noqa: D102
+        if self._pan_last is not None and (e.buttons() & Qt.RightButton):
+            pos = self._view_pos(e)
+            d = pos - self._pan_last
+            if d.manhattanLength() > 2:
+                self._pan_moved = True
+            self._pan_last = pos
+            h, v = self.horizontalScrollBar(), self.verticalScrollBar()
+            h.setValue(h.value() - d.x())
+            v.setValue(v.value() - d.y())
+            e.accept()
+            return
+        self._sync_hover_node(self._view_pos(e))
         if self._link_from is not None and self._link_line is not None:
             a = self._link_from.out_port(getattr(self, "_link_port", 0))
-            b = self.mapToScene(e.pos())
+            b = self.mapToScene(self._view_pos(e))
             dx = max(40.0, abs(b.x() - a.x()) * 0.5)
             path = QPainterPath(a)
             path.cubicTo(a + QPointF(dx, 0), b - QPointF(dx, 0), b)
@@ -1005,11 +1145,29 @@ class PipelineCanvas(QGraphicsView):
         super().mouseMoveEvent(e)
 
     def mouseReleaseEvent(self, e) -> None:    # noqa: D102
+        if e.button() == Qt.RightButton and self._pan_last is not None:
+            moved, self._pan_moved = self._pan_moved, False
+            self._pan_last = None
+            if not moved:
+                # 原地放開 = 右鍵選單（拖了就是平移，不出選單）。
+                for item in self.items(self._view_pos(e)):
+                    if isinstance(item, _NodeItem):
+                        gp = (e.globalPosition().toPoint()
+                              if hasattr(e, "globalPosition") else e.globalPos())
+                        item.show_context_menu(gp)
+                        break
+            e.accept()
+            return
         if self._link_from is not None:
-            self._drop_link(self.mapToScene(e.pos()))
+            self._drop_link(self.mapToScene(self._view_pos(e)))
             e.accept()
             return
         super().mouseReleaseEvent(e)
+
+    def contextMenuEvent(self, e) -> None:     # noqa: D102
+        # 右鍵被平移接管。不吞掉的話，Linux 在**按下的瞬間**就彈選單，
+        # 平移永遠拖不起來；選單改在「原地放開」時開（見 mouseReleaseEvent）。
+        e.accept()
 
     def keyPressEvent(self, e) -> None:        # noqa: D102
         if e.key() in (Qt.Key_Delete, Qt.Key_Backspace):

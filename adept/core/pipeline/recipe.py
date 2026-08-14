@@ -390,6 +390,15 @@ class Recipe:
         _migrate_merged_cards(nodes)
         # 最後把改過名的**參數值**換掉（F8：兩層的 dark/bright → 排名）。
         _migrate_renamed_values(nodes)
+        # subtract 的預設 b 於 2026-08-14 從 ref_aligned 改成 ref（patch 本來
+        # 就對齊）。檔案裡**沒寫** b 的 subtract 是照舊預設蓋的 —— Studio 存檔
+        # 一律把參數寫滿，省略只會出現在改版前的檔案（或手寫檔）。不補的話，
+        # 一份「align → subtract」的舊 recipe 會安靜地跳過對位，分數整批變掉
+        # —— dual-route e2e 當場從 22/24 掉到 18/24。既有 recipe 一份都不能
+        # 被改變行為：載入時把舊預設寫回去。
+        for node in nodes.values():
+            if node.step == "subtract" and "b" not in node.params:
+                node.params["b"] = "ref_aligned"
 
         return cls(
             recipe_id=str(d["recipe_id"]),

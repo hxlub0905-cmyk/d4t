@@ -28,19 +28,25 @@ class SubtractStep(Step):
     label = "Compare two streams"
     category = CATEGORY_IMAGE
     group = GROUP_COMPARE
-    help = ("Combine two image streams into one - normally test minus the "
-            "aligned ref, which is what makes defects stand out. The result "
-            "stream is float32.")
+    help = ("Combine two image streams into one - normally test minus ref, "
+            "which is what makes defects stand out. The result stream is "
+            "float32.")
     requires_ref = True
     params = [
         ParamSpec(name="a", type="image_key", default="test",
                   label="First stream",
                   help="The image being judged (usually test)."),
-        ParamSpec(name="b", type="image_key", default="ref_aligned",
+        # 預設 ``ref`` 而不是 ``ref_aligned``（2026-08-14 使用者指正）：
+        # patch 是機台以 defect 為中心裁切的，**本來就對齊**，「一定要先
+        # Align」是這個預設造出來的假前置。Align 留給之後非 patch 的輸入、
+        # 或站點真的量到殘餘位移時用 —— 那時候把這一格改指 ref_aligned。
+        ParamSpec(name="b", type="image_key", default="ref",
                   label="Second stream",
-                  help=("What to compare it against (usually the aligned "
-                        "ref_aligned - add an Align card to produce that "
-                        "stream, or point this at ref to skip alignment).")),
+                  help=("What to compare it against (usually ref - patches "
+                        "already arrive centred on the defect, so no "
+                        "alignment step is needed). If your images do need "
+                        "registration first, add an Align card and point "
+                        "this at ref_aligned.")),
         # op 是 F7-10 加的。差分之外的四種組合以前得靠外部工具做，但它們跟
         # 相減是同一個問題的不同答案（「這兩張哪裡不一樣」），所以是同一張卡的
         # 一個下拉 —— 不是四張新卡片。
@@ -63,13 +69,13 @@ class SubtractStep(Step):
                   label="Write result to",
                   help="Name of the image stream the result is written to (float32)."),
     ]
-    reads = ["test", "ref_aligned"]
+    reads = ["test", "ref"]
     writes = ["diff"]
     features_out: List[str] = []
 
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
-        return [params.get("a", "test"), params.get("b", "ref_aligned")]
+        return [params.get("a", "test"), params.get("b", "ref")]
 
     @classmethod
     def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:

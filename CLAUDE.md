@@ -54,6 +54,37 @@ Input → Enhance → Region → Compare → Measure → ADC
 UI 三段分色（影像=藍 `#6f93b5`／算法=橙 `#c06a1d`／判定=紫 `#8a6fb5`）。
 這個分類不是裝飾 —— 它同時是 `Step.category`、快取切點、recipe 驗證順序的依據。
 
+## 2.5 資料模型：兩個通道（影像流 vs 具名區域）
+
+Context 有三層資料：**影像流 images**（名字 → 像素陣列，綁尺寸）、
+**具名區域 rois**（名字 → 一串框，**0–1 正規化座標**，帶結構：幾個框、各在哪）、
+**特徵 features**（名字 → 數字）。
+
+```
+影像流通道（像素）  Load ─→ Enhance ─→ Compare ─→ 'diff' ──────┐
+                                                              ├─→ 量測卡 ─→ 特徵 ─→ score
+區域通道（哪裡）    roi_cross / roi_template / GDS(未來)        │   source='diff'（流）
+                      └─→ 具名區域 'cross' ────────────────────┘   roi='cross'（名字）
+                            └─→ roi_mask ─→ 'mask' 流 ─→ Normalize 的 use_within（影像段）
+```
+
+**規則一句話：量測卡吃區域「名字」，影像卡吃 mask「影像流」。**
+量測卡要「哪裡」的**結構**（框數、邊界、框外背景圈、哪框靠中心）——
+0/255 的 mask 圖把結構壓扁丟光，所以量測卡的 `roi` 填名字、引擎量測當下
+才換成像素。影像卡（Normalize 的 `use_within`）只要「哪些像素參與統計」，
+那正是 mask 流的全部內容。兩條路同源（`Context.rois`），不會分家 ——
+**不要**幫量測卡加 mask 流輸入、也**不要**讓區域卡直接吐 mask，
+兩條平行的路會腐爛（F7-17 的教訓，F8c 落地時明確重申過）。
+
+為什麼存「名字 + 正規化座標」不存 mask 圖：(1) patch 以 defect 為中心裁切、
+晶格相位逐顆不同 —— recipe 存「怎麼找」，定位卡**每顆重新定位**；
+(2) 比例座標讓同一份 recipe 在 128² 與 512² 上都對（F7-4 的坑）。
+
+定位法契約：`roi_cross`（純規則）、`roi_template`（Golden Cell）、GDS（未來）
+—— **出口相同：吐具名區域**（`resolve_regions_out`），下游零改動。
+新 image source 進來的 checklist：Load 層吐具名流 → 挑一個定位法吐具名區域 →
+下游（量測/mask/overlay/region check）不用動。
+
 ---
 
 ## 3. 目錄結構
@@ -193,6 +224,9 @@ python -m venv .venv && .venv\Scripts\activate      # Windows
 pip install -r requirements.txt && pip install pytest
 
 QT_QPA_PLATFORM=offscreen pytest -q                # 全部測試（Windows 不用設 QT_QPA_PLATFORM）
+# 開發迴圈**只跑改到的測試檔**（pytest -q tests/test_xxx.py）——
+# 全套在家用機 ~30s，但在雲端 session 的容器上要好幾分鐘（UI + 批次測試吃 CPU）。
+# 全套留到 commit 前跑一次就好。
 python tools/make_sample.py /tmp/lot --n 100       # 產合成資料
 python -m adept gui                                # 開 Studio
 python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 \
@@ -248,7 +282,7 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 | **`drawPolygon` 傳散的 `QPointF`**（F7-17） | 整個行程 **segfault**（不是丟例外，所以看不到任何訊息，只有 exit 139） | PySide6 會綁到別的 overload。要傳 `QPolygonF([...])`。自繪面板加任何多邊形時注意 |
 | **暗色盤裡的佔位字串**（F7-17 已清） | `accent_border` 的值是 `"#2f4straight"`，靠 70 行後的一句覆寫救著 | Qt 對無效色字串是**靜靜畫成黑色**，不會報錯。色盤裡不要留「稍後修正」的值；`tests/` 有一條掃描所有 token 是否為合法 hex |
 | **`_update_action_states` 會蓋掉 tooltip**（F7-16 已修） | 把快捷鍵寫進工具列 tooltip，第一次 refresh 之後就不見了 | 那幾顆的 tooltip 每次 refresh 都會依前置條件重寫（「還沒有東西可以存」）。所以不能「建構時附加一次」，要讓**設 tooltip 的那個動作自己補上快捷鍵**（`_set_tip`）。`test_ui_f7_16_safety_net.py` 會 refresh 一次再驗 |
-| **Qt 的 Enter/Leave 在父子之間會打架**（F7-15 已修） | 滑鼠從參數列的空白處移進**那一列自己的**輸入框，說明就閃一下（收起來又立刻攤開） | Qt 先送 `Leave` 給父元件、再送 `Enter` 給子元件。照字面處理必閃。`leaveEvent` 改成直接問**游標還在不在自己的矩形裡**（`rect().contains(mapFromGlobal(QCursor.pos()))`），不要相信事件的字面意思 |
+| **Qt 的 Enter/Leave 在父子之間會打架**（F7-15 已修） | 滑鼠從參數列的空白處移進**那一列自己的**輸入框，說明就閃一下（收起來又立刻攤開） | Qt 先送 `Leave` 給父元件、再送 `Enter` 給子元件。照字面處理必閃。`leaveEvent` 改成直接問**游標還在不在自己的矩形裡**（`rect().contains(mapFromGlobal(QCursor.pos()))`），不要相信事件的字面意思。（2026-08-14 起參數列的 hover 攤開整個拿掉了 —— 修好之後它還是「跟著滑鼠閃」，使用者實測嫌亂；說明搬進 tooltip。教訓本身仍適用於其他 hover 元件） |
 | **`:focus` 被 id / attribute 選擇器安靜蓋掉**（F7-23 已修） | Tab 到「Run trial」「Stop」或任何一顆工具列按鈕，畫面上零回饋 —— 而 QSS 裡明明有 `QPushButton:focus` | QSS 照 CSS2 特異性：`QPushButton#primary`（id）贏過 `QPushButton:focus`，`[variant="…"]` 同分但寫在後面也贏，於是那條總括規則只對「沒有 objectName 也沒有 variant」的按鈕生效；工具列更單純 —— 從頭到尾沒有 `QToolButton:focus`。**每一種變體都要有自己的一條 `:focus`**。另外 **Qt 的 `outline` 對按鈕不生效**（收下屬性但什麼都不畫，加不加 `outline-offset` 都一樣），框只能用 border 畫在裡面 —— 那就會吃掉 1px，必須從自己的 padding 還回去，否則 Tab 過去文字會跳一格。`tests/test_ui_f7_23_buttons.py` 對八種按鈕逐一量畫素，並用 `contentsRect()` 鎖住「文字不准移動」|
 | **`contentsRect()` 的原點永遠是 (0, 0)**（F7-23 第四輪） | 想把圖示畫進 QSS 撐開的那塊 padding 裡，用 `contentsRect()` 定位會畫錯地方 | QSS 樣式下 contentsRect 的**尺寸**確實扣掉了 padding（所以拿它比對「文字區有沒有移動」是對的），但**原點沒有跟著移** —— 它不是一個可以拿來定位的框。要畫在 padding 裡就用 `rect()` |
 | **小圖示不能照大圖示的比例縮**（F7-23 第四輪） | 自繪圖示在 22px 下好看，放到按鈕上的 15px 就糊成一團 | 三個實例：`undo` 的弧用 `size/9` 的線變成實心月牙（改 `size/11`）；`fit` 的四個角括號用 0.26 長度兩臂幾乎接起來變成矩形（改 0.17）；`tidy` 的 2×2 描邊方格線比空隙還粗（改實心）。**加新圖示時用實際尺寸（≤15px）看過再收工** —— `tests/test_ui_f7_23_buttons.py` 只擋得住「畫出來是空的」|
@@ -313,6 +347,7 @@ warning 指名它 —— 那正是要看到的（它以前恆為 0，那份分�
 
 | Milestone | 狀態 | 內容 |
 |---|---|---|
+| F8 | 🔨 | **純規則 ROI 定位 + mask 通道 + UI 第二波**（詳見 `SESSION_LOG.md` 逐輪紀錄與 `docs/plans/F8-rule-based-roi.md`）。已完成：`roi_cross`（條紋交會處放框、一鍵整批量 pitch）、`roi_mask` + Normalize `use_within`（見 §2.5）、參數說明搬 tooltip、D 案版面（畫布佔中上、設定拿大頭、**畫布彈出視窗**兩窗互通）、右鍵平移、手動佈局保留（tidy 才重排）、route 虛線退役（排版仍吃隱含順序）、量測卡預覽疊區域框、`multi_choice` 參數型別（glv_stats 統計量用勾的）、subtract 預設 `b=ref`（patch 天生對齊；舊檔載入遷移補 `ref_aligned` —— **改預設值必附遷移**） |
 | M0 抽庫 | ✅ | 從 KLIP/GLAS/MMH/PEAR/CPE/Fusi³ vendoring 演算法資產 |
 | M1 引擎 | ✅ | Context/Step/Recipe DAG/表達式/14 張卡/合成資料/CLI |
 | M2 批次 | ✅ | ProcessPool + 影像段快取 + SQLite 歷史 + rescore |

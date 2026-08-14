@@ -827,8 +827,19 @@ class StudioWindow(QMainWindow):
         self.library = LibraryPanel(self)
         self.library.panel_toggled.connect(self._on_library_panel_toggled)
 
-        # 中：流程畫布 + （參數表單 / 分數編輯）
+        # 中：流程畫布（上）+ 參數表單／分數編輯（下）。
+        #
+        # 版面史，因為它繞了一圈（F7-22 → F8-UI 抽屜 → 現在）：F7-22 讓參數
+        # 預設收起、雙擊才攤開（畫布是主體）；F8-UI 第一輪改成畫布右緣的
+        # 抽屜 —— 使用者當天就退了它：「pipeline 往右長，抽屜也吃右邊，兩個
+        # 在搶同一個方向」。他拍板的形狀（D 案）是：**畫布會 zoom、又有
+        # 彈出視窗，所以平面上只需要中上一塊**；大空間還給設定與影像。
+        # 所以：上下切回來、比例反過來（畫布 2 / 設定 3）、設定**預設攤開**，
+        # 「看全貌」由 zoom bar 的彈出視窗鈕承接（open_canvas_window）。
         self.pipeline = PipelineCanvas(self)
+        # 主畫布是概覽條（D 案）：fit 的「全部看得完」贏過「副標讀得出」。
+        # 讀細節的地方是下方設定區與彈出視窗（那份維持類別預設 0.7）。
+        self.pipeline.MIN_FIT_SCALE = 0.5
         self.param_form = ParamForm(self)
         self.score_pane = self._build_score_pane()
         self.stack = QStackedWidget(self)
@@ -838,13 +849,16 @@ class StudioWindow(QMainWindow):
         middle = QSplitter(Qt.Vertical, self)
         middle.addWidget(self.pipeline)
         middle.addWidget(self.stack)
-        middle.setStretchFactor(0, 3)
-        middle.setStretchFactor(1, 2)
-        self.middle_splitter = middle
-        # 設定面板**預設收起來**（F7-22）：畫布是這個畫面的主體，而參數表以前
-        # 常駐佔掉這一欄的四成高度。雙擊一張卡才攤開 —— 那是 n8n 的動作，
-        # 而且「我要編這張卡」本來就是一個明確的意圖，不是選取的副作用。
-        self._params_open = False
+        middle.setStretchFactor(0, 2)
+        middle.setStretchFactor(1, 3)
+        self.canvas_column = middle
+        self._params_open = True
+        # 比例在 showEvent 才真的套 —— setSizes 要有實際高度才算得出來
+        #（isVisible 之前那些數字沒有意義，CLAUDE.md §7 的老坑）。
+        self._layout_ratio_applied = False
+        #: 畫布的彈出視窗（沒開著是 None）。
+        self._canvas_popout: Optional[Any] = None
+        self._popout_view: Optional[PipelineCanvas] = None
 
         # 右：單顆預覽（F7-5：Gallery 與直方圖搬到 Results 視窗，
         #     主視窗只留「編流程 + 看單顆」，影像因此拿得到整欄高度）
@@ -865,9 +879,6 @@ class StudioWindow(QMainWindow):
         root.setStretchFactor(1, 2)
         root.setStretchFactor(2, 4)
         root.setSizes(list(COLUMN_SIZES))
-        # 開窗就是收起來的狀態（畫布拿整欄）。放在版面建好之後，
-        # 因為 setSizes 要有實際尺寸才算得出來。
-        middle.setSizes([1, 0])
         self.top_splitter = root
         self.root_splitter = root
         self.setCentralWidget(root)
@@ -875,8 +886,8 @@ class StudioWindow(QMainWindow):
     def _build_score_pane(self) -> QWidget:
         pane = QWidget(self)
         lay = QVBoxLayout(pane)
-        lay.setContentsMargins(2, 2, 8, 2)
-        lay.setSpacing(4)
+        lay.setContentsMargins(0, 0, 8, 0)
+        lay.setSpacing(8)
 
         title = QLabel("Score / Bin decision", pane)
         title.setObjectName("paramTitle")
@@ -936,11 +947,13 @@ class StudioWindow(QMainWindow):
     def _build_preview_pane(self) -> QWidget:
         pane = QWidget(self)
         lay = QVBoxLayout(pane)
-        lay.setContentsMargins(2, 2, 2, 2)
-        lay.setSpacing(4)
+        # 間距走 8px 節奏（F8-UI）：這一欄以前是 2/4/6px 各處自己挑，
+        # 排在一起就是「差一點對齊」—— 比完全沒對齊更讓人覺得亂。
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(8)
 
         nav = QHBoxLayout()
-        nav.setSpacing(6)
+        nav.setSpacing(8)
         self.btn_prev = IconButton("prev", "Previous defect", pane, kind="icon")
         self.btn_next = IconButton("next", "Next defect", pane, kind="icon")
         self.defect_combo = QComboBox(pane)
@@ -960,7 +973,7 @@ class StudioWindow(QMainWindow):
         lay.addLayout(nav)
 
         srow = QHBoxLayout()
-        srow.setSpacing(6)
+        srow.setSpacing(8)
         lbl_stream = QLabel("Image stream", pane)
         lbl_stream.setObjectName("paramLabel")
         self.stream_combo = QComboBox(pane)
@@ -1002,7 +1015,7 @@ class StudioWindow(QMainWindow):
         images = QWidget(pane)
         irow = QHBoxLayout(images)
         irow.setContentsMargins(0, 0, 0, 0)
-        irow.setSpacing(4)
+        irow.setSpacing(8)
         irow.addWidget(self.image_view, 1)
         irow.addWidget(self.image_view_b, 1)
 
@@ -1100,7 +1113,7 @@ class StudioWindow(QMainWindow):
         lay.addWidget(self.bottom_stack, 2)
 
         vrow = QHBoxLayout()
-        vrow.setSpacing(6)
+        vrow.setSpacing(8)
         self.verdict = VerdictChip(pane)
         vrow.addWidget(QLabel("Verdict", pane))
         vrow.addWidget(self.verdict)
@@ -1112,18 +1125,27 @@ class StudioWindow(QMainWindow):
     # ==================================================================== #
     # 訊號接線
     # ==================================================================== #
+    def _wire_canvas(self, view: PipelineCanvas) -> None:
+        """把一份畫布接上同一批 handler。
+
+        主視窗的畫布與彈出視窗的畫布走**完全相同**的接線 —— 差一條，
+        兩個視窗的行為就分家（在這邊拉得動的線在那邊拉不動），而且沒有
+        訊息會講出差在哪。"""
+        view.node_selected.connect(self.select_node)
+        view.node_activated.connect(self._on_node_activated)
+        view.card_dropped.connect(self._on_card_dropped)
+        view.node_toggled.connect(self._on_node_toggled)
+        view.move_requested.connect(self._on_move_requested)
+        view.remove_requested.connect(self._on_remove_requested)
+        view.score_clicked.connect(self.show_score_page)
+        view.edge_added.connect(self._on_edge_added)
+        view.edge_removed.connect(self._on_edge_removed)
+        view.popout_requested.connect(self.open_canvas_window)
+
     def _wire_widgets(self) -> None:
         self.library.add_requested.connect(self._on_add_requested)
 
-        self.pipeline.node_selected.connect(self.select_node)
-        self.pipeline.node_activated.connect(self._on_node_activated)
-        self.pipeline.card_dropped.connect(self._on_card_dropped)
-        self.pipeline.node_toggled.connect(self._on_node_toggled)
-        self.pipeline.move_requested.connect(self._on_move_requested)
-        self.pipeline.remove_requested.connect(self._on_remove_requested)
-        self.pipeline.score_clicked.connect(self.show_score_page)
-        self.pipeline.edge_added.connect(self._on_edge_added)
-        self.pipeline.edge_removed.connect(self._on_edge_removed)
+        self._wire_canvas(self.pipeline)
 
         self.param_form.param_edited.connect(self._on_param_edited)
 
@@ -1440,11 +1462,12 @@ class StudioWindow(QMainWindow):
                 "problem": problems.get(nid, ("", ""))[0],
                 "problem_level": problems.get(nid, ("", "error"))[1],
             })
-        self.pipeline.set_nodes(nodes, self.model.edges)
         if self.selected_node not in self.model.nodes:
             self.selected_node = None
-        self.pipeline.set_selected(self.selected_node)
-        self.pipeline.set_score_summary(self.model.expr, self.model.threshold)
+        for view in self._canvases():
+            view.set_nodes(nodes, self.model.edges)
+            view.set_selected(self.selected_node)
+            view.set_score_summary(self.model.expr, self.model.threshold)
 
     def _sync_score_widgets(self) -> None:
         self._syncing = True
@@ -1499,6 +1522,7 @@ class StudioWindow(QMainWindow):
         except (KeyError, ParamError) as e:
             self._status("Could not add card: %s" % e, "error")
             return
+        self._autofill_roi_mask(node_id)
         self._status("Added “%s”%s" % (node_id, self._unmet_needs(node_id)))
         self.select_node(node_id)
 
@@ -1526,10 +1550,42 @@ class StudioWindow(QMainWindow):
             # 顯式連線：使用者的動作是「接在這張後面」，那條線就該是實線。
             # （route 相鄰本來就會產生一條虛線，但它表達的是順序，不是這個意圖。）
             self.model.add_edge(nid, new_id)
+            self._autofill_roi_mask(new_id)
         self._status("Added “%s” after “%s”%s%s"
                      % (new_id, nid, note, self._unmet_needs(new_id)))
         self.select_node(new_id)
         return new_id
+
+    def _autofill_roi_mask(self, node_id: Optional[str]) -> None:
+        """剛加進來的 Mask from regions 卡，把上游定義過的區域名自動填進去。
+
+        使用者的直覺是「Profile / Template 應該直接吐 mask」—— 名字要他自己
+        打一次，是這張卡與上游之間**看得到卻要用手搬**的一段。量測卡的
+        ``output_prefix`` 走過同一條路（挑了區域自動填名），這裡照做：
+        上游有哪些具名區域就全部填上（多名字本來就是聯集），不合意再刪。
+        只在**空的**時候填 —— 使用者打過的字不覆蓋。
+        """
+        node = self.model.nodes.get(str(node_id or ""))
+        if node is None or node.step != "roi_mask":
+            return
+        if str(node.params.get("regions", "") or "").strip():
+            return
+        names: List[str] = []
+        for nid in self.model.node_order:
+            if nid == node.id:
+                break
+            n = self.model.nodes.get(nid)
+            if n is None or not n.enabled:
+                continue
+            try:
+                outs = get_step(n.step).resolve_regions_out(n.params)
+            except Exception:              # noqa: BLE001 — 顯示用，壞了就跳過
+                outs = []
+            for r in outs:
+                if r and r not in names:
+                    names.append(str(r))
+        if names:
+            self.model.set_param(node.id, "regions", ", ".join(names))
 
     # ---- 「這張卡做在哪一條流上」（F7-18）----------------------------------
     #: 主要影像流的參數名（依優先順序）。Enhance 卡一律叫 ``target`` 或
@@ -1631,10 +1687,11 @@ class StudioWindow(QMainWindow):
     def _unmet_needs(self, node_id: str) -> str:
         """剛加的卡少了什麼上游 —— 講成一句可以照做的話（回傳含前導空白）。
 
-        以前只有卡片庫上一個 ``needs ref_aligned`` 的灰字 badge。對不會寫 code
-        的人那句話沒有動作可做：他不知道 ``ref_aligned`` 是誰產的，也不知道
-        「不然還可以怎麼辦」。最常踩到的就是 Subtract —— 它預設吃對位過的
-        ``ref_aligned``，所以 Load 之後直接放 Subtract 一定缺一張上游。
+        以前只有卡片庫上一個 ``needs diff`` 之類的灰字 badge。對不會寫 code
+        的人那句話沒有動作可做：他不知道那條流是誰產的，也不知道「不然還可以
+        怎麼辦」。例：Load 之後直接放 SNR map，它預設吃 ``diff``，一定缺
+        一張上游的 Compare。（Subtract 以前也是常客 —— 它曾預設吃
+        ``ref_aligned``；2026-08-14 起改吃 ``ref``，patch 本來就對齊。）
         """
         node = self.model.nodes.get(str(node_id))
         if node is None:
@@ -1719,7 +1776,8 @@ class StudioWindow(QMainWindow):
         # 換卡片＝上一段連續調整結束（見 viewmodel 的 coalescing）。不切的話，
         # 「調 A 卡的 gamma → 換到 B 卡 → 再調回 A 卡的 gamma」會被併成一步。
         self.model.end_coalescing()
-        self.pipeline.set_selected(node_id)
+        for view in self._canvases():
+            view.set_selected(node_id)
         try:
             describe = get_step(node.step).describe()
         except KeyError:
@@ -1761,16 +1819,76 @@ class StudioWindow(QMainWindow):
         return bool(self._params_open)
 
     def set_params_open(self, on: bool) -> bool:
-        """攤開／收起設定面板。收起來時畫布拿到整欄高度。"""
+        """攤開／收起設定區（中欄的下半）。預設是攤開的（D 案）——
+        畫布會 zoom，平面上只需要中上一塊；收起來是給「現在只想看流程」的人。"""
         on = bool(on)
         self._params_open = on
-        total = sum(self.middle_splitter.sizes()) or self.middle_splitter.height()
+        total = sum(self.canvas_column.sizes()) or self.canvas_column.height()
         if on:
-            keep = max(180, int(total * 0.42))
-            self.middle_splitter.setSizes([max(0, total - keep), keep])
+            keep = max(240, int(total * 0.6))
+            self.canvas_column.setSizes([max(0, total - keep), keep])
         else:
-            self.middle_splitter.setSizes([total, 0])
+            self.canvas_column.setSizes([total, 0])
         return on
+
+    # ---- 畫布的彈出視窗（F8-UI D 案）--------------------------------------
+    def open_canvas_window(self) -> None:
+        """把 pipeline 開在自己的視窗（全尺寸）。
+
+        主視窗的畫布只佔中上一塊 —— 要看全貌不是把主視窗的版面搶回來，
+        是到自己的視窗看。第二個視窗是**另一份 PipelineCanvas 接同一個
+        model**：所有訊號走同一批 handler，所以在彈出視窗拉線、拖卡、
+        選取，主視窗全部跟著動（反之亦然）。
+        """
+        from PySide6.QtWidgets import QDialog
+
+        if self._canvas_popout is not None:
+            self._canvas_popout.raise_()
+            self._canvas_popout.activateWindow()
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Pipeline — full view")
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(0, 0, 0, 0)
+        view = PipelineCanvas(dlg, popout_button=False)
+        lay.addWidget(view)
+        self._wire_canvas(view)
+        dlg.resize(1100, 700)
+        dlg.finished.connect(self._on_canvas_popout_closed)
+        self._canvas_popout, self._popout_view = dlg, view
+        # 畫布已經在別的視窗全尺寸攤開了，主視窗那一份就把位子讓出來 ——
+        # 設定往上補滿整欄（使用者要的 flexible）。關窗時還原原本的比例。
+        self._pre_popout_sizes = list(self.canvas_column.sizes())
+        total = sum(self._pre_popout_sizes) or self.canvas_column.height()
+        self.canvas_column.setSizes([0, total])
+        self._refresh_pipeline()          # 把現在的節點畫進新視窗
+        # 開窗那一刻跟主視窗長得一樣（含使用者拖過的位置）——
+        # 「彈出去被自動整理」正是使用者退掉的行為。
+        view.copy_positions_from(self.pipeline)
+        dlg.show()
+        view.fit_later()
+
+    def _on_canvas_popout_closed(self, *_a) -> None:
+        self._canvas_popout = None
+        self._popout_view = None
+        # 還原彈出前的版面。當時的比例就是使用者自己調的 —— 還原成那個，
+        # 不是還原成預設值。
+        saved = getattr(self, "_pre_popout_sizes", None)
+        if saved and sum(saved):
+            self.canvas_column.setSizes(saved)
+        else:
+            self.set_params_open(self._params_open)
+
+    def canvas_popout_open(self) -> bool:
+        """彈出視窗現在開著嗎（**明確狀態**，不問 widget）。"""
+        return self._canvas_popout is not None
+
+    def _canvases(self) -> List[PipelineCanvas]:
+        """現在活著的每一份畫布（主視窗的 + 彈出視窗的）。"""
+        views = [self.pipeline]
+        if self._popout_view is not None:
+            views.append(self._popout_view)
+        return views
 
     # ==================================================================== #
     # 主題（F7-2）
@@ -2087,7 +2205,9 @@ class StudioWindow(QMainWindow):
         self.model.add_listener(self._on_model_changed)
         self.selected_node = None
         self._user_stream = None
-        self.pipeline.set_selected(None)
+        for view in self._canvases():
+            view.set_selected(None)
+            view.forget_positions()   # 換了一份 recipe，別繼承上一份拖過的位置
         self.param_form.set_step(None, {}, [])
         self.stack.setCurrentWidget(self.param_form)
         self._refresh_all()
@@ -2670,26 +2790,43 @@ class StudioWindow(QMainWindow):
         self._refresh_region_overlay()
 
     def region_overlay(self) -> List[Tuple[float, float, float, float]]:
-        """**選著的那張卡**這一顆定出來的框（正規化座標，可能有好幾個）。
+        """**選著的那張卡**牽涉到的框（正規化座標，可能有好幾個）。
 
-        只畫選著那張卡自己宣告的區域（``resolve_regions_out``），不是 context
-        裡所有的框：一份 recipe 常常有好幾張 Region 卡，全部畫出來會變成一團
-        分不清誰是誰的線，而使用者現在在調的就是手上那一張。
+        兩種來源，同一個畫法：
+        - 這張卡**定義**的區域（``resolve_regions_out``，F7-11 起）——
+          調 Region 卡時看框跟著參數動；
+        - 這張卡**引用**的區域（``resolve_regions_in``，2026-08-14 使用者
+          要求）—— 選 Gray-level stats / Mask from regions 時，畫面直接回答
+          「我到底在量哪裡」。以前量測卡選起來預覽上什麼都沒有，roi 填錯
+          只能用數字猜。
+
+        仍然只畫**選著那張卡**的，不是 context 裡所有的框：一份 recipe 常常
+        有好幾張 Region 卡，全部畫出來分不清誰是誰。
         """
         node = self.model.nodes.get(self.selected_node or "")
         ctx = getattr(getattr(self, "_last_result", None), "context", None)
         if node is None or ctx is None:
             return []
         try:
-            names = list(get_step(node.step).resolve_regions_out(node.params))
+            step_cls = get_step(node.step)
+            produced = list(step_cls.resolve_regions_out(node.params))
+            consumed = list(step_cls.resolve_regions_in(node.params))
         except Exception:                  # noqa: BLE001 — 顯示用，不能擋畫面
             return []
-        out: List[Tuple[float, float, float, float]] = []
-        for name in names:
+        names: List[str] = []
+        for name in produced:
             # ``_center`` 是同一組框裡的一個，畫兩次只會變成粗一點的線。
             # 它的角色由 focus 表達（見下面），不是多畫一個框。
-            if name.endswith("_center"):
+            # （**引用**的不套這條 —— 量測卡明確指著 ``cross_center`` 時，
+            #   那個框就是它在量的地方，當然要畫。）
+            if name.endswith("_center") or name in names:
                 continue
+            names.append(name)
+        for name in consumed:
+            if name and name not in names:
+                names.append(name)
+        out: List[Tuple[float, float, float, float]] = []
+        for name in names:
             out.extend(tuple(float(v) for v in r)
                        for r in ctx.roi_norm_rects(name))
         return out
@@ -3180,6 +3317,15 @@ class StudioWindow(QMainWindow):
         if answer == "discard":
             return True
         return bool(self._on_save_recipe())
+
+    def showEvent(self, event) -> None:       # noqa: D102 - Qt hook
+        super().showEvent(event)
+        # 中欄的畫布/設定比例第一次 show 才套 —— setSizes 要有實際高度才
+        # 算得出來（見 _build_body 的說明）。只做一次：之後的比例是使用者
+        # 自己拖的，重新 show（從最小化回來）不可以把它蓋掉。
+        if not self._layout_ratio_applied:
+            self._layout_ratio_applied = True
+            self.set_params_open(self._params_open)
 
     def closeEvent(self, event) -> None:      # noqa: D102 - Qt hook
         if not self.confirm_close():

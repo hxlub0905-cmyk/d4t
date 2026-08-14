@@ -4,6 +4,173 @@
 
 ---
 
+## 第六輪：金色虛線退役、手動佈局不被自動整理（2026-08-14）
+
+- **route 隱含順序的金色虛線整套移除**（使用者：「會混淆」）。F7-10 畫它的
+  理由（「沒有線以為互不相干」）由現在的預設行為緩解 —— 從卡片庫加卡與
+  拖放都建**顯式**連線。退掉的只有「畫」：引擎依賴（route ∪ edges）與
+  排版（分欄）都照舊吃隱含順序。`_EdgeItem` 的 implicit 分支、
+  `canvas_edge_implicit` token、相關測試（f7_10 整檔改寫、f7_18 §3）
+  一併清掉 —— 死機制不留半套。
+- **節點位置保留**（使用者：「不要幫我自動整理」）：`set_nodes` 之前每次
+  model 變動都重跑自動排版，拖好的佈局改個參數就沒了。現在既有節點
+  保位置、只有新節點拿排版位；彈出視窗開啟時沿用主視窗的位置
+  （`copy_positions_from`）；換一份 recipe 才重排（`forget_positions`）。
+  「排整齊」仍是明確的整批重排入口。
+- **CI 抓到 subtract 預設值改變了舊 recipe 的行為**（dual-route e2e 從
+  22/24 掉到 18/24 —— 省略 `b` 的舊檔在新預設下**安靜地跳過 align**）。
+  照 `_migrate_also_apply` 的先例加載入遷移：檔案裡沒寫 `b` 的 subtract
+  補回舊預設 `ref_aligned`（Studio 存檔一律寫滿參數，省略只會是舊檔）。
+  兩份省略的 recipe JSON 也補明確值。**教訓：改預設值 = 改所有省略它的
+  檔案的行為，遷移不是可選項。**
+
+驗收：f8_ui_polish +2（位置保留）、test_recipe +1（遷移）、
+f7_10/f7_18/f7_19/f7_24 改鎖新行為。
+
+---
+
+## 第五輪：右鍵平移、消失的埠、假的 Align 前置、量測卡的框與勾選（2026-08-14）
+
+使用者實測 D 案版面後的一批回饋（5 項）＋一條假想 flow 的檢視。
+
+- **右鍵拖曳平移畫布**（使用者要求）。右鍵被平移接管後，選單改在
+  「原地放開」時開（`show_context_menu` 抽出來共用）；view 的
+  `contextMenuEvent` 要吞掉，否則 Linux 在按下的瞬間就彈選單，永遠拖不起來。
+- **「有些卡片後方的埠不見了」查出兩個因**：(1) fit 的 0.7 下限讓四欄
+  pipeline 塞不進概覽條 —— D 案反轉了前提（主畫布是概覽、細節在設定區與
+  彈出視窗），主畫布下限放寬到 0.5、彈出視窗維持 0.7（F7-24 的量測結論
+  沒變，變的是誰負責讓人讀）；(2) 卡片拖出 sceneRect 之外那塊**捲不到**
+  —— sceneRect 現在跟著拖曳長大（只長不縮，縮回由 set_nodes/tidy 做）。
+- **subtract 預設 `b` 從 `ref_aligned` 改 `ref`**（使用者指正：patch 本來
+  就對齊，「一定要先 Align」是預設值造出來的假前置）。Align 留給未來
+  非 patch 輸入或站點量到殘餘位移時用。連動改了 badge 測試與
+  `_unmet_needs` 的例子（改用 snr_map 缺 diff 觸發）。
+- **量測卡的 metrics 用勾的不是用打的**：新參數型別 `multi_choice`
+  （`MultiChoicePicker`，一列三格的勾選網格）。刻意**不**強制值落在
+  choices 裡 —— 手寫 recipe 的 `glv_q37` 照樣合法、照樣列出來勾著。
+  目前只有 `glv_stats.metrics` 用它。
+- **量測卡也畫框**：`region_overlay()` 除了選著那張卡**定義**的區域
+  （F7-11），現在也畫它**引用**的（`resolve_regions_in`）—— 選
+  Gray-level stats / Mask from regions 時，預覽直接回答「我在量哪裡」。
+  `_center` 只在「定義」那邊跳過；明確引用它的量測卡當然要畫。
+
+驗收集中在 `tests/test_ui_f8_ui_polish.py`（+6 條）。
+
+## D 案：畫布佔中上、設定拿大頭、看全貌用彈出視窗（2026-08-14 第三輪）
+
+**右緣抽屜活了半天就被退掉了** —— 使用者的理由一句話就成立：「n8n 的節點
+是向右拉的，右側又出現垂直抽屜，垂直空間反而沒辦法運用。」他拍板的形狀
+（他叫它 D 案）：**畫布會 zoom、又有彈出視窗，平面上只需要中上一塊**；
+大空間還給設定與影像。左（卡片庫）與右（預覽）不動。
+
+### 改了什麼
+
+- **中欄回到上下切，但比例反過來**：畫布 2 / 設定 3，設定**預設攤開**
+  （F7-22 的「雙擊才攤開」退役 —— 雙擊仍可把收起的設定重新攤開）。
+  比例在第一次 showEvent 才套（setSizes 要有實際高度，老坑）。
+- **畫布 zoom bar 加「彈出視窗」鈕**（新自繪 glyph `popout`）：把 pipeline
+  開在自己的視窗全尺寸看。第二個視窗是**另一份 PipelineCanvas 接同一個
+  model** —— 訊號走同一批 handler（`_wire_canvas`），所以兩邊拉線、拖卡、
+  選取全部互通，不是截圖。彈出視窗裡的那份把彈出鈕關掉（套娃）。
+- **彈出時主視窗的設定自動補滿**（使用者追加的：「讓 UI 很 flexible」）：
+  畫布已經在別的視窗全尺寸攤開，主視窗那份就把位子讓出來；關窗還原
+  **彈出前**的比例（那是使用者自己調的，不是預設值）。
+- **`roi_mask` 自動填區域名**（使用者的第二個問題：「不是應該從 Profile
+  或 Template 輸出 mask 嗎」）：名字要他重打一次，是這張卡與上游之間
+  看得到卻要用手搬的一段。現在加卡時上游定義過的區域名自動填進
+  `regions`（只填空的，不蓋使用者打過的字）—— 跟量測卡 `output_prefix`
+  的自動填名同一條路。
+- 抽屜的程式（`_CanvasColumn`、`paramDrawer` QSS、關閉鈕）全部拆掉。
+- （第四輪追加）卡片改名 **Mask from regions**（原「Region → mask」——
+  箭頭跟其他卡的命名語言不合），`Size like` 改成 `Same size as`。
+  **key `roi_mask` 不動**：那是 recipe JSON 的鍵，改了舊檔就開不起來。
+
+### 驗收
+
+`tests/test_ui_f8_ui_polish.py` 的 3-3 段整段改寫（版面 + 彈出視窗 +
+自動填名，9 條）；`test_ui_f7_19_wiring.py` §6 改鎖「預設攤開」。
+
+## 畫布 n8n 化第二批（F8-UI）＋ F8c ROI mask（2026-08-14）
+
+同一天的第二個 session。使用者核准了四項 UI 改善（3-1～3-4），
+接著把 F8 §7 排隊中的 (c) 做掉。
+
+### F8-UI：四項（驗收 `tests/test_ui_f8_ui_polish.py`，7 條）
+
+- **3-1 線要像 n8n**：兩件事。前行線的水平推力下限 40 → `COL_GAP*0.67`
+  （推力太小時三次貝茲**退化成斜的直線**，縮放 70% 後更明顯）；
+  `layout_columns` 同欄列序改 **barycenter**（跟上游的列對齊）——
+  大部分的線因此接近水平，交叉不是被畫得更好看，是**根本不發生**。
+- **3-2 卡片要回應**：hover 邊框亮一階＋選中加一圈 3px 半透明 accent 光暈。
+  踩到一個現成的地雷：卡片 `setAcceptHoverEvents(True)` 會讓 hover 事件
+  **不再穿過卡片**，壓在線中點上的卡把「斷開」的 × 悶死
+  （`test_ui_canvas_cut_button` 當場紅掉）。改成 **view 層**在
+  `mouseMoveEvent` 裡判斷誰在 hover（`_sync_hover_node`），卡片仍然不收
+  hover 事件。光暈畫在卡片邊緣之外 → `boundingRect` 跟著加寬（殘影守則）。
+- **3-3 設定變成畫布右緣的抽屜（overlay）**：F7-22 的上下切分攤開時把畫布
+  砍掉四成高度，而攤開參數正是「一邊調一邊看」的時候。現在畫布**永遠**
+  整欄大小，抽屜浮在右緣（寬 320–420px、吃滿高度、有關閉鈕）。
+  `middle_splitter` 改名 `canvas_column`（它不再是 splitter，名字不能說謊）。
+- **3-4 間距 8px 節奏**：右欄與參數區的 2/4/6px 雜項統一成 8 ——
+  「差一點對齊」比沒對齊更亂。
+
+### F8c：`roi_mask` 卡 + Normalize 的 `Use only`
+
+動機（計畫書 §7 原文）：跨 patch 比 EPI 的 GLV 時 **MG 佔多少面積隨 crop
+而變**，任何吃整張圖統計的卡都把這個變異灌進 EPI 的數字。
+
+- 新卡 `roi_mask`（`steps/roi_mask.py`，CATEGORY_IMAGE / GROUP_REGION）：
+  具名區域 → 0/255 mask 影像流，多名字 = 聯集。`regions` 留空是
+  `not-configured`（F7-13 那條路），指到沒人定義的名字走 `unknown-region`。
+- Normalize 加 `use_within`（label **Use only**，percentile / glv_band 才
+  出現）：範圍只從 mask 內的像素量，**套用仍是整張圖**。mask 尺寸不合 →
+  StepError 指名去改 `Size like`；全 0 mask → 退回整張圖 + `ctx.warn`。
+- **界線**：mask 給影像段用；量測卡照樣引用 ROI 名字（兩條平行的路會腐爛，
+  F7-17 的教訓）。
+
+驗收（`tests/test_roi_mask.py`，10 條）照計畫書原話量，實驗設計時學到的
+一課記在計畫書 §7：整張圖 percentile 最痛的不是 MG 面積 12% ↔ 24% 的變動
+（p98 兩邊都落在 MG 上，反而穩），是面積**跨過百分位門檻**的那一下 ——
+「一根 MG 進出畫面」，p98 從 EPI 的頂翻成 MG 的 230。只用 EPI 之後
+分散度收斂到一半以下（實測 ~1/20）。
+
+### 順帶
+
+早上的 tooltip 化（見下一段）在這輪繼續：卡片層級說明也收成一行。
+測試在雲端容器跑全套要 20 分鐘以上（家用機 ~30s）——
+CLAUDE.md §6 已加「開發迴圈只跑改到的測試檔」。
+
+## 參數說明搬進 tooltip —— 列面上只留「非讀不可」的字（2026-08-14）
+
+使用者的原話：「描述功能的文字太多，而且移過去會顯示、移走又消失，如果我是
+user 我會覺得很亂 —— 建議把這些描述文字拿掉，讓下方精簡一點。」
+
+這推翻的是 F7-15 的「一行、hover 攤開」。那一輪修掉了 Enter/Leave 打架的閃爍
+（CLAUDE.md §7），但修好之後它**還是**跟著滑鼠此起彼落 —— 滑鼠掃過整張表，
+每一列輪流長高又縮回去。技術上沒有 bug，體感上就是亂。F7-15 當時拒絕
+tooltip 的理由（「使用者要隨手看得到」）讓位給使用者自己的判斷。
+
+### 改了什麼（全部在 `ui/widgets.py`，引擎零改動）
+
+- **`_ParamRow`**：常駐/hover 攤開的說明整個拿掉（`WA_Hover`、eventFilter、
+  enter/leaveEvent、`set_active` 一併刪除）。說明全文設成**整列**的 tooltip
+  （名稱、空白處、editor 都感應）。列面上只剩兩種會出現的字，出現就整段攤開：
+  - 紅色錯誤（`show_error`）—— 驗證擋下來的原因，非讀不可；
+  - 「這一格現在不生效」的調淡註記（`set_dimmed`，例：畫了曲線之後的 gamma）。
+  新增 `hint_visible()` 供測試問明確狀態。
+- **卡片層級的說明**（ParamForm 頂端那一段）同一個決定：收成一行
+  （`_HintLabel` 的 elide，不讓 Qt 硬切字中間）、全文住 tooltip。
+- 錯誤與註記的優先序：錯誤 > 註記 > 什麼都不畫（`_dim_note` 追明確狀態）。
+
+### 驗收
+
+`tests/test_ui_f7_15_reading_load.py` 第 1 節改鎖新行為（hint 預設隱藏、
+tooltip 有全文、錯誤出現整段且清掉就收乾淨、列高一行）。其餘 API
+（`hint_text()`、`show_error()`）不變，`test_ui_widgets.py` 原樣通過。
+
+之後要 release 的話，說明的出口是 SOP／圖解文件，不是畫面 —— 使用者已經
+講了方向。tooltip 是過渡期的保底。
+
 ## F8：純規則的 ROI 定位 —— 兩組條紋的交會處（2026-08-13）
 
 使用者試用 `Locate region by profile` 之後說「我沒辦法做 ROI 定位」。他有兩招，

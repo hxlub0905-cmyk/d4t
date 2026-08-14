@@ -59,7 +59,7 @@ def window(qapp, lot):
 def test_main_window_keeps_only_the_editing_surface(window):
     root = window.root_splitter
     assert [root.widget(i) for i in range(root.count())] == [
-        window.library, window.middle_splitter, window.preview_pane]
+        window.library, window.canvas_column, window.preview_pane]
     assert window.histogram.parent() is not window
     assert window.gallery.parent() is not window
 
