@@ -29,6 +29,9 @@
   `regions`（只填空的，不蓋使用者打過的字）—— 跟量測卡 `output_prefix`
   的自動填名同一條路。
 - 抽屜的程式（`_CanvasColumn`、`paramDrawer` QSS、關閉鈕）全部拆掉。
+- （第四輪追加）卡片改名 **Mask from regions**（原「Region → mask」——
+  箭頭跟其他卡的命名語言不合），`Size like` 改成 `Same size as`。
+  **key `roi_mask` 不動**：那是 recipe JSON 的鍵，改了舊檔就開不起來。
 
 ### 驗收
 

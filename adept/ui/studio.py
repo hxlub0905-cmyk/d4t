@@ -1554,7 +1554,7 @@ class StudioWindow(QMainWindow):
         return new_id
 
     def _autofill_roi_mask(self, node_id: Optional[str]) -> None:
-        """剛加進來的 Region → mask 卡，把上游定義過的區域名自動填進去。
+        """剛加進來的 Mask from regions 卡，把上游定義過的區域名自動填進去。
 
         使用者的直覺是「Profile / Template 應該直接吐 mask」—— 名字要他自己
         打一次，是這張卡與上游之間**看得到卻要用手搬**的一段。量測卡的

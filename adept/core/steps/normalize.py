@@ -130,7 +130,7 @@ class NormalizeStep(MultiStreamStep):
                   label="Use only",
                   show_when=("method", ("percentile", "glv_band")),
                   help=("Leave empty to measure the range from every pixel. "
-                        "Name a mask stream (from a Region-to-mask card) and "
+                        "Name a mask stream (from a Mask-from-regions card) and "
                         "the range is measured only from pixels inside the "
                         "mask - the stretch is still applied to the whole "
                         "image. Use it when how much of each pattern is in "
@@ -237,7 +237,7 @@ class NormalizeStep(MultiStreamStep):
                     self.key,
                     f"the mask '{within}' is {mask.shape[1]}x{mask.shape[0]} "
                     f"but the image is {src.shape[1]}x{src.shape[0]} - point "
-                    f"the Region-to-mask card's 'Size like' at the same "
+                    f"the Mask-from-regions card's 'Same size as' at the same "
                     f"stream this card processes.")
             sel = np.asarray(src)[np.asarray(mask) > 0]
             if sel.size == 0:

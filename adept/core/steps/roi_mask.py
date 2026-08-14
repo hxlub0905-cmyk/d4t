@@ -38,8 +38,8 @@ __all__ = ["RoiMaskStep"]
 class RoiMaskStep(Step):
     """具名區域 → 0/255 mask 影像流（多名字取聯集）。"""
 
-    key = "roi_mask"
-    label = "Region → mask"
+    key = "roi_mask"                # recipe JSON 的鍵 —— **不改**（改了舊檔就開不起來）
+    label = "Mask from regions"
     category = CATEGORY_IMAGE
     group = GROUP_REGION
     help = ("Turn named regions into a mask image stream (255 inside, 0 "
@@ -54,7 +54,7 @@ class RoiMaskStep(Step):
                   "the mask.")),
         ParamSpec(
             name="source", type="image_key", default="test",
-            label="Size like",
+            label="Same size as",
             help=("The mask is drawn at this stream's size. Pick the stream "
                   "the mask will be used on.")),
         ParamSpec(

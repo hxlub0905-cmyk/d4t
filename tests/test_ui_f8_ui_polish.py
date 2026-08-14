@@ -225,7 +225,7 @@ def test_the_canvas_pops_out_into_its_own_window(window, qapp):
 
 def test_a_new_mask_card_inherits_the_regions_defined_upstream(window, qapp):
     """使用者的直覺：「Profile / Template 應該直接吐 mask」。名字不該要他
-    重打一次 —— 加一張 Region → mask，上游（例：Profile，key=roi_cross）
+    重打一次 —— 加一張 Mask from regions，上游（例：Profile，key=roi_cross）
     定義過的區域名自動填進去。"""
     window.show()
     qapp.processEvents()

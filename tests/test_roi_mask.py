@@ -52,7 +52,7 @@ def test_the_card_declares_its_contract():
 
 
 def test_cleared_source_and_out_fields_run_exactly_as_declared():
-    """``Size like`` / ``Write mask to`` 是可編輯的下拉，清空是清得出來的。
+    """``Same size as`` / ``Write mask to`` 是可編輯的下拉，清空是清得出來的。
 
     清空之後 lint 與畫布講的是 test → mask（resolve_* 的預設），執行就必須
     也是 test → mask —— 兩邊各自演化的話，下游 Normalize 會找不到它明明
@@ -145,7 +145,7 @@ def test_a_mask_of_the_wrong_size_is_a_step_error():
                           "epi_mask": np.zeros((64, 64), np.uint8)})
     with pytest.raises(StepError) as err:
         _run_normalize(ctx, use_within="epi_mask")
-    assert "Size like" in str(err.value), "訊息要指得出路在哪"
+    assert "Same size as" in str(err.value), "訊息要指得出路在哪"
 
 
 def test_an_all_zero_mask_falls_back_to_the_whole_image_and_says_so():
