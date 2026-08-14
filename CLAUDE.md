@@ -54,6 +54,37 @@ Input → Enhance → Region → Compare → Measure → ADC
 UI 三段分色（影像=藍 `#6f93b5`／算法=橙 `#c06a1d`／判定=紫 `#8a6fb5`）。
 這個分類不是裝飾 —— 它同時是 `Step.category`、快取切點、recipe 驗證順序的依據。
 
+## 2.5 資料模型：兩個通道（影像流 vs 具名區域）
+
+Context 有三層資料：**影像流 images**（名字 → 像素陣列，綁尺寸）、
+**具名區域 rois**（名字 → 一串框，**0–1 正規化座標**，帶結構：幾個框、各在哪）、
+**特徵 features**（名字 → 數字）。
+
+```
+影像流通道（像素）  Load ─→ Enhance ─→ Compare ─→ 'diff' ──────┐
+                                                              ├─→ 量測卡 ─→ 特徵 ─→ score
+區域通道（哪裡）    roi_cross / roi_template / GDS(未來)        │   source='diff'（流）
+                      └─→ 具名區域 'cross' ────────────────────┘   roi='cross'（名字）
+                            └─→ roi_mask ─→ 'mask' 流 ─→ Normalize 的 use_within（影像段）
+```
+
+**規則一句話：量測卡吃區域「名字」，影像卡吃 mask「影像流」。**
+量測卡要「哪裡」的**結構**（框數、邊界、框外背景圈、哪框靠中心）——
+0/255 的 mask 圖把結構壓扁丟光，所以量測卡的 `roi` 填名字、引擎量測當下
+才換成像素。影像卡（Normalize 的 `use_within`）只要「哪些像素參與統計」，
+那正是 mask 流的全部內容。兩條路同源（`Context.rois`），不會分家 ——
+**不要**幫量測卡加 mask 流輸入、也**不要**讓區域卡直接吐 mask，
+兩條平行的路會腐爛（F7-17 的教訓，F8c 落地時明確重申過）。
+
+為什麼存「名字 + 正規化座標」不存 mask 圖：(1) patch 以 defect 為中心裁切、
+晶格相位逐顆不同 —— recipe 存「怎麼找」，定位卡**每顆重新定位**；
+(2) 比例座標讓同一份 recipe 在 128² 與 512² 上都對（F7-4 的坑）。
+
+定位法契約：`roi_cross`（純規則）、`roi_template`（Golden Cell）、GDS（未來）
+—— **出口相同：吐具名區域**（`resolve_regions_out`），下游零改動。
+新 image source 進來的 checklist：Load 層吐具名流 → 挑一個定位法吐具名區域 →
+下游（量測/mask/overlay/region check）不用動。
+
 ---
 
 ## 3. 目錄結構
@@ -316,6 +347,7 @@ warning 指名它 —— 那正是要看到的（它以前恆為 0，那份分�
 
 | Milestone | 狀態 | 內容 |
 |---|---|---|
+| F8 | 🔨 | **純規則 ROI 定位 + mask 通道 + UI 第二波**（詳見 `SESSION_LOG.md` 逐輪紀錄與 `docs/plans/F8-rule-based-roi.md`）。已完成：`roi_cross`（條紋交會處放框、一鍵整批量 pitch）、`roi_mask` + Normalize `use_within`（見 §2.5）、參數說明搬 tooltip、D 案版面（畫布佔中上、設定拿大頭、**畫布彈出視窗**兩窗互通）、右鍵平移、手動佈局保留（tidy 才重排）、route 虛線退役（排版仍吃隱含順序）、量測卡預覽疊區域框、`multi_choice` 參數型別（glv_stats 統計量用勾的）、subtract 預設 `b=ref`（patch 天生對齊；舊檔載入遷移補 `ref_aligned` —— **改預設值必附遷移**） |
 | M0 抽庫 | ✅ | 從 KLIP/GLAS/MMH/PEAR/CPE/Fusi³ vendoring 演算法資產 |
 | M1 引擎 | ✅ | Context/Step/Recipe DAG/表達式/14 張卡/合成資料/CLI |
 | M2 批次 | ✅ | ProcessPool + 影像段快取 + SQLite 歷史 + rescore |
