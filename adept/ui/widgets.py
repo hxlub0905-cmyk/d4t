@@ -1290,6 +1290,11 @@ class ProfilePanel(QWidget):
                 # confidence 前面，因為那個數字在這種失敗上反而更高。
                 bits.append("⚠ measured %.0f%% of the pitch you gave"
                             % (float(d.get("pitch_ratio") or 0.0) * 100.0))
+            trust = str(d.get("trust_note") or "")
+            if trust:
+                # 最重要的一句：這個方向的定位不能信，而且**為什麼**。
+                # 它排在最前面 —— 後面那些數字在這種失敗上全都看起來正常。
+                bits = [bits[0], "⚠ " + trust]
             note = str(d.get("pitch_note") or "")
             if note:
                 # 給了 pitch 卻沒有用 —— 這件事一定要講。使用者會以為那格

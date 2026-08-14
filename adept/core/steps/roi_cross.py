@@ -443,6 +443,9 @@ def _stripe_meta(s: "algo_grid.StripeSet") -> Dict[str, Any]:
         "pitch_error": float(s.pitch_error),
         # 量到的 ÷ 填進去的。1.0 = 一致；0.5 = 典型的「挑錯組」。
         "pitch_ratio": float(s.pitch_ratio),
+        # 有多少比例的線明顯對不上晶格，以及**為什麼這個方向不能信**。
+        "misfit": float(s.misfit),
+        "trust_note": str(s.trust_note),
         "pitch_disagrees": bool(s.pitch_disagrees),
         "filled": int(s.filled),
         # 晶格上被擋掉的位置（那裡是別的材質）。面板要畫得出來 —— 「這一格

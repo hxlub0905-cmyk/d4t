@@ -190,3 +190,72 @@ def test_a_real_alternating_row_is_not_mistaken_for_a_wrong_pitch():
                                pitch=P1, pitch_2=P2)
     assert s.pitch_disagrees is False, "比值 %.2f" % s.pitch_ratio
     assert s.pitch_ratio == pytest.approx(1.0, abs=0.15)
+
+
+# --------------------------------------------------------------------------- #
+# 4. 一個 pitch 描述不了交錯的排（使用者：「下一張又會歪一點」）
+# --------------------------------------------------------------------------- #
+def _crops(size: int = 128):
+    return [(o, oy) for o in [(40, 33), (33, 40)] for oy in range(0, 40, 4)]
+
+
+def test_one_pitch_for_an_alternating_row_is_refused():
+    """最難自己發現的一種。單一 pitch 的晶格套在「寬、窄、寬、窄」上，一半的
+    線對得上、另一半差半個差距 —— 而 ``pitch_error`` 取中位數，剛好落在中間，
+    過得了容差。實測 40/33 的 EPI 只填 40：誤差中位 6.50 px、最大 7.51，
+    20 種 crop **一次都沒被擋下來**。
+    """
+    caught = 0
+    for order, oy in _crops():
+        img, _ = _epi(order, oy, 128)
+        s = algo_grid.find_stripes(img, axis="y", select="brightest", pitch=P1)
+        caught += bool(s.trust_note)
+    assert caught >= 19, "20 種 crop 只擋下 %d 種" % caught
+
+
+def test_filling_in_the_average_is_refused_too():
+    """「歪一點」講的多半是這一種：填兩者的平均，誤差 3–4 px。
+    那比只填一個小，但它一樣是逐顆不同的系統性偏差。"""
+    caught = 0
+    for order, oy in _crops():
+        img, _ = _epi(order, oy, 128)
+        s = algo_grid.find_stripes(img, axis="y", select="brightest",
+                                   pitch=(P1 + P2) / 2.0)
+        caught += bool(s.trust_note)
+    assert caught >= 18, "20 種 crop 只擋下 %d 種" % caught
+
+
+def test_it_says_the_two_spacings_when_it_can_measure_them():
+    """使用者原話：「我不知道怎麼設定」。答案本來就在這條曲線上 ——
+    講出來比只說「這個 pitch 不對」有用得多。"""
+    img, _ = _epi((40, 33), 9, 160)
+    s = algo_grid.find_stripes(img, axis="y", select="brightest", pitch=P1)
+    assert "alternating" in s.trust_note
+    assert "40" in s.trust_note and "33" in s.trust_note
+    assert "every other one" in s.trust_note, "沒有講出要填哪一格"
+
+
+def test_both_pitches_filled_in_is_accepted():
+    """擋掉錯的不能連對的一起擋。"""
+    for order, oy in _crops():
+        img, _ = _epi(order, oy, 128)
+        s = algo_grid.find_stripes(img, axis="y", select="brightest",
+                                   pitch=P1, pitch_2=P2)
+        assert not s.trust_note, "%s %s → %s" % (order, oy, s.trust_note)
+
+
+def test_a_normal_row_is_not_refused_for_one_odd_stripe():
+    """一根被缺陷撐大的線不該讓整份 recipe 失效 —— 這條檢查問的是
+    「是不是**一半**都歪了」，不是「有沒有一根歪」。"""
+    img, _ = _epi((30, 30), 5, 160)
+    img[60:78, :] = 180.0                      # 一根特別胖
+    s = algo_grid.find_stripes(img, axis="y", select="brightest", pitch=30.0)
+    assert not s.trust_note, s.trust_note
+    assert s.misfit <= algo_grid.MISFIT_FRAC
+
+
+def test_a_pitch_that_does_not_divide_evenly_is_not_refused():
+    """29.333（1.5 nm/px 配 44 nm）是站點真實的數字 —— 它不能被當成「對不上」。"""
+    img, _ = _epi((29, 29), 3, 160)
+    s = algo_grid.find_stripes(img, axis="y", select="brightest", pitch=29.333)
+    assert not s.trust_note, s.trust_note

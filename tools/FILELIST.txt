@@ -16,7 +16,7 @@ ed44cb755d91d7f3adf6018672969a6cb68932f0 adept/core/algo/curve.py
 31ed355760ee79e887ddc627c0bc970c77bdfe42 adept/core/algo/enhance.py
 9e85e8aedef61131545e67fef5e323dbb56a5d57 adept/core/algo/glv.py
 a77ccf39e51b71d68671878245eed04422b4f24e adept/core/algo/golden.py
-f79f97161f00415b7ac08e8261a54b1d3876a1b0 adept/core/algo/grid.py
+de35ee981c1ba136e49370c72db4390ccece2a5e adept/core/algo/grid.py
 48cc527868f1d0336d9ed15803aaf54910347842 adept/core/algo/histmatch.py
 9e8715a433ecb84d49151964ed5aea05f8c18dc4 adept/core/algo/normalize.py
 e048c1f3680e5559d0c79d7f080629fecc161549 adept/core/algo/period.py
@@ -58,7 +58,7 @@ c08caf9bb969ead9de3dd2524baae3a786e47aeb adept/core/steps/__init__.py
 1d5b8d8a4cda39001d8af5e380244f4a0d76ee39 adept/core/steps/load.py
 630cc5d1261bb1281f308a1a9cfbb27e241d4dd2 adept/core/steps/normalize.py
 6e906a1610e0dfc2de6ecfee1773cd78652035a2 adept/core/steps/quality.py
-30b39fb83a1c082e2e156a9c3f42f523a9642ae2 adept/core/steps/roi_cross.py
+2defb0d109193d4c7ebf19d9424ccebafe2cea77 adept/core/steps/roi_cross.py
 707bd6514e6e203cb59009819e538b927383ac9d adept/core/steps/roi_snr.py
 bcf3709d08b6695b8ff62034847221874d8488c6 adept/core/steps/roi_template.py
 c33655e28ad9322d8b1d4b456cead4afb6c9cb4d adept/core/steps/snr_map.py
@@ -79,7 +79,7 @@ d5231ab56c1b4dcf85551f1f12543413104ba94e adept/ui/studio.py
 196bb1a2cce3493bf9d49da5d8ca1fda0918ad4e adept/ui/theme.py
 1f15c3ec5920e70e72aa96db92324d25134021ba adept/ui/viewmodel.py
 d3cece8a28de021fe573697b0b12723c0e871aa8 adept/ui/welcome.py
-eaa0019a868d5323b8f128d3175071b01bbe54dd adept/ui/widgets.py
+fafcd1ebfad3a5f6d29ee6fa522861931853136b adept/ui/widgets.py
 db4c0723c6a28cddd4c335d5214895f57915fc7d adept/ui/workers.py
 04c5ce471195ac4e2449126ce835b22b4c880cf3 conftest.py
 ebcac66089ac8d2cbb061c18116a0e4dc4330eac docs/HANDOVER.md
@@ -135,7 +135,7 @@ f90b258ab8544e5eadc1b54b55ff558db1cc3041 tests/test_results_store.py
 16cd9995a97eb6b919044e2c72fe1bcddb954e2a tests/test_roi.py
 89fb007d43ba13010286d1f883b59cce7fc04421 tests/test_roi_cross.py
 1f2c2d4861d0d6955604dfa9b690177b7e2a63c0 tests/test_roi_cross_lattice.py
-477d2cdc57b6b6268521326712618d97575c0bf5 tests/test_roi_cross_phase.py
+6cf3b8f8b609435492244c25f7fc2e541311812a tests/test_roi_cross_phase.py
 73b404b73641a5b93cbf48a17111a03b7e4a1435 tests/test_roi_cross_trust.py
 a7c41debc132957219cb7a9187a4cb7efe1d3317 tests/test_roi_template.py
 ecb57644cec348b3ef52d811332dd9c353fcd920 tests/test_rsem_ingest.py

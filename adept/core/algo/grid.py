@@ -128,6 +128,16 @@ _PHASE_MARGIN = 0.15
 #: 「換一台機台、pixel size 不同」那種情況（真實 18、填 24 → 0.75）。
 PITCH_AGREE_TOL = 0.20
 
+#: 一根線離晶格多遠（pitch 的比例）算「明顯對不上」。見 ``_Fill.misfit``。
+#: 0.15 太寬 —— 交錯 40/33 填成平均值 36.5 的時候殘差是 3–4 px（0.10 個
+#: pitch），而那正是使用者說的「歪一點」。
+MISFIT_TOL = 0.08
+
+#: 有多少比例的線對不上，就算「這個 pitch 描述不了這一排」。
+#: 一根被缺陷撐大的線不該讓整份 recipe 失效（五根裡的一根 = 0.20），
+#: 但一半都歪了就是晶格本身錯了。
+MISFIT_FRAC = 0.25
+
 
 class _Fill(NamedTuple):
     """``_fill_by_pitch`` 的結果。
@@ -145,6 +155,10 @@ class _Fill(NamedTuple):
     #: 為什麼沒用（空字串 = 用了，或者根本沒給 pitch）。**要講出來**：
     #: 「我分不出來」是一個有用的答案，「我猜一個」不是。
     note: str
+    #: 有多少比例的線**明顯**對不上這個晶格（0 = 全部貼合）。
+    #: 跟 ``error`` 是兩個問題：那個是中位數（一根歪掉不該讓 recipe 失效），
+    #: 這個是「是不是**一半**都歪了」—— 而中位數對後者是瞎的。
+    misfit: float
 
 
 @dataclass
@@ -199,6 +213,12 @@ class StripeSet:
     pitch_disagrees: bool = False
     #: 量到的 ÷ 填進去的。1.0 = 一致；0.5 = 典型的「挑錯組」。
     pitch_ratio: float = 0.0
+    #: 有多少比例的線**明顯**對不上晶格（見 ``_Fill.misfit``）。
+    misfit: float = 0.0
+    #: **這個方向的定位不能信**，以及為什麼（空字串 = 可以信）。
+    #: 一個欄位而不是好幾個布林：上層只要問一次，而且訊息跟判斷長在一起 ——
+    #: 分開的話，加一種檢查就要記得同時去改 ``locate_crossings`` 那串 if。
+    trust_note: str = ""
     #: 晶格把條紋**搬了多遠**（找到的中心 → 它變成的格點，取最大值）。
     #: 使用者看到的「藍框跟藍線對不齊」就是這個數字 —— 它是刻意的
     #: （次像素精修 + 對齊到你給的 pitch），但沒講出來就只是「怪」。
@@ -434,14 +454,22 @@ def measure_pitches(centres: Sequence[float]) -> Tuple[float, float]:
 
     even = [d for i, d in enumerate(diffs) if i % 2 == 0]
     odd = [d for i, d in enumerate(diffs) if i % 2 == 1]
-    if len(even) >= 2 and len(odd) >= 2:
+    if len(diffs) >= 3 and even and odd:
         a, b = float(np.median(even)), float(np.median(odd))
         # 兩組**各自**還要是齊的。少了這一關，一排等距的線中間缺一根就會被
         # 當成交錯：間距 [24, 24, 48, 24] 的奇偶兩組是 [24, 48] 與 [24, 24]，
         # 中位數 36 與 24 差得夠開 —— 但 [24, 48] 自己根本不成一組。
         even_ok = (max(even) - min(even)) <= max(a, 1e-6) * 0.15
         odd_ok = (max(odd) - min(odd)) <= max(b, 1e-6) * 0.15
-        if even_ok and odd_ok and abs(a - b) > max(a, b) * 0.15:
+        # 而且兩者不能是**整數倍**。缺一根的時候奇偶兩組會是 24 與 48，
+        # 各自都很齊、差得也夠開 —— 但那是「中間少了一根」不是「一寬一窄」。
+        # 交錯的兩個 pitch 是設計出來的兩個尺寸（40 / 33 = 1.21），
+        # 不會剛好差整數倍。
+        hi, lo = max(a, b), min(a, b)
+        mult = hi / max(lo, 1e-6)
+        looks_like_a_gap = abs(mult - round(mult)) < 0.10 and round(mult) >= 2
+        if (even_ok and odd_ok and not looks_like_a_gap
+                and abs(a - b) > max(a, b) * 0.15):
             return a, b
 
     # 缺了幾根的情況：最小的那個間距當單位，其餘除以最接近的整數倍。
@@ -528,11 +556,11 @@ def _fill_by_pitch(bands: Sequence[Tuple[int, int]], pitch: float, length: int,
     pitches = [float(p) for p in (pitch, pitch_2) if float(p) >= 2.0]
     fixed = float(width_fixed) if float(width_fixed) > 0 else 0.0
     if not got or length <= 0:
-        return _Fill(got, -1.0, 0, False, fixed, "")
+        return _Fill(got, -1.0, 0, False, fixed, "", 0.0)
     measured = float(np.median([b - a for a, b in got]))
     width = fixed or measured
     if not pitches:
-        return _Fill(got, -1.0, 0, False, width, "")
+        return _Fill(got, -1.0, 0, False, width, "", 0.0)
 
     centres = [(a + b) / 2.0 for a, b in got]
     # 被影像邊界切到的那幾根**量到的中心是偏的**（只露出一半），所以凡是拿
@@ -559,7 +587,7 @@ def _fill_by_pitch(bands: Sequence[Tuple[int, int]], pitch: float, length: int,
         # 讓整份 recipe 失效），所以下面的 err 沒有跟著改。
         scored.append((float(np.mean(d)), float(np.median(d)), phase, cand))
     if not scored:
-        return _Fill(got, -1.0, 0, False, width, "")
+        return _Fill(got, -1.0, 0, False, width, "", 0.0)
     scored.sort(key=lambda t: t[0])
     best_rank, best_err, _phase, best = scored[0]
 
@@ -579,15 +607,16 @@ def _fill_by_pitch(bands: Sequence[Tuple[int, int]], pitch: float, length: int,
         if len(inside) < 2:
             return _Fill(got, -1.0, 0, False, width,
                          "two spacings need at least two whole stripes to tell "
-                         "them apart, and this patch has %d" % len(inside))
+                         "them apart, and this patch has %d" % len(inside),
+                         0.0)
         if len(scored) > 1 and (scored[1][0] - best_rank) < spread * _PHASE_MARGIN:
             return _Fill(got, -1.0, 0, False, width,
                          "cannot tell which of the two spacings comes first "
-                         "(they fit equally well here)")
+                         "(they fit equally well here)", 0.0)
 
     lat, err = best, best_err
     if err > min(pitches) * float(tol):
-        return _Fill(got, err, 0, False, width, "")
+        return _Fill(got, err, 0, False, width, "", 0.0)
 
     # **相位用整排一起定，不要只靠錨點那一根。** 錨點自己也是量出來的，它的誤差
     # 會原封不動地平移整個晶格；而每一根的量測誤差彼此獨立，取中位數就洗掉了。
@@ -623,7 +652,15 @@ def _fill_by_pitch(bands: Sequence[Tuple[int, int]], pitch: float, length: int,
         hi = min(float(length), c + w / 2.0)
         if hi - lo >= 1.0:
             out.append((lo, hi))
-    return _Fill(out, err, max(0, len(out) - len(got)), True, width, "")
+    # **有多少比例的線明顯對不上。** ``err`` 是中位數，而中位數對「一半都歪了」
+    # 是瞎的 —— 單一 pitch 的晶格套在「寬、窄、寬、窄」上正好就是那樣：一半
+    # 貼合、一半差半個差距，中位數落在中間、過得了容差。
+    ref = inside or centres
+    misfit = (sum(1 for c in ref
+                  if min(abs(c - v) for v in lat) > min(pitches) * MISFIT_TOL)
+              / float(len(ref))) if ref else 0.0
+    return _Fill(out, err, max(0, len(out) - len(got)), True, width, "",
+                 float(misfit))
 
 
 def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
@@ -694,6 +731,7 @@ def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
     fit = _fill_by_pitch(picked, float(pitch), int(prof.size), pitch_tol,
                          float(pitch_2), float(width))
     filled, err, used = list(fit.bands), fit.error, fit.used
+    out.misfit = fit.misfit
     out.pitch_error = err
     out.pitch_note = fit.note
     out.width_used = fit.width
@@ -743,6 +781,52 @@ def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
         out.pitch_ratio = float(got / min(given))
         # **只擋小的那一邊** —— 大的那一邊是「有幾根沒抓到」，而補線就是為了它。
         out.pitch_disagrees = out.pitch_ratio < (1.0 - PITCH_AGREE_TOL)
+        if out.pitch_disagrees:
+            # 這個診斷比下面那個**更具體**（它指得到「第三種材質」），所以先講。
+            out.trust_note = (
+                "measure %.1f px apart but you asked for %.1f (%.0f%% of it). "
+                "Finding them closer together than the pitch you gave means "
+                "extra things were taken as stripes, and no amount of filling "
+                "in can undo that. Either the pitch is wrong for this image, "
+                "or there is a third material on the same grid - if so, raise "
+                "'how many kinds'."
+                % (out.pitch_measured,
+                   out.pitch_measured / max(out.pitch_ratio, 1e-6),
+                   out.pitch_ratio * 100.0))
+
+    # **這個 pitch 描述不了這一排。**（F8 第六輪，使用者：「y 方向設定好這張
+    # 後，下一張又會歪一點」）
+    #
+    # 最難自己發現的一種。單一 pitch 的晶格套在「寬、窄、寬、窄」上，有一半的
+    # 線對得上、另一半差半個差距 —— 而 pitch_error 取的是**中位數**，剛好落在
+    # 中間，過得了容差。實測 40/33 的 EPI（128px、20 種 crop）：
+    #
+    #     只填 40      → 誤差中位 6.50 px、最大 7.51，**一次都沒被擋下來**
+    #     只填 36.5    → 誤差 3–4 px（這就是「歪一點」），也沒被擋
+    #     兩個都填     → 0.50 px
+    #
+    # 而且它逐顆不同（相位隨 crop 變），所以症狀正是「這張調好了，下一張又歪」。
+    # 用「有多少比例的線明顯對不上」來判，中位數看不到的東西它看得到：
+    # 上面兩種各擋下 20/20 與 19/20，而正常的排（含一根被缺陷撐大的、含
+    # 除不盡的 29.333）是 0.00。
+    if used and out.misfit > MISFIT_FRAC and not out.trust_note:
+        if out.pitch_measured_2 >= 2.0:
+            # 量得出那兩個值就直接講 —— 使用者說「我不知道怎麼設定」，
+            # 而答案本來就在這條曲線上。
+            out.trust_note = (
+                "sit at two alternating spacings, about %.1f and %.1f px, and "
+                "a single pitch cannot describe that: half of them end up half "
+                "a step off, and which half depends on where this patch was "
+                "cut. Put the second value in the '...and every other one is' "
+                "box." % (out.pitch_measured, out.pitch_measured_2))
+        else:
+            out.trust_note = (
+                "do not sit on the pitch you gave - %.0f%% of them are off it. "
+                "The spacing here is not one steady value. If it alternates "
+                "between two, fill the second one into the '...and every other "
+                "one is' box; the button on this curve fills in what it "
+                "measures." % (out.misfit * 100.0))
+
 
     # 晶格把每一根搬了多遠 —— 使用者看到的「藍框跟藍線對不齊」就是這個。
     if used and picked:
@@ -997,18 +1081,9 @@ def locate_crossings(img: Any, vertical_select: str = "brightest",
     # 為什麼是**失敗**而不是警告：框的位置錯了，那顆的每一個數字都是別的
     # 東西量出來的。留著它比丟掉它危險 —— 它會混進整批的統計裡。
     for s in (xs, ys):
-        if s.pitch_disagrees:
+        if s.trust_note:
             way = "upright" if s.axis == algo_profile.AXIS_X else "flat"
-            res.reason = (
-                "the %s stripes measure %.1f px apart but you asked for %.1f "
-                "(%.0f%% of it). Finding them closer together than the pitch "
-                "you gave means extra things were taken as stripes, and no "
-                "amount of filling in can undo that. Either the pitch is wrong "
-                "for this image, or there is a third material on the same grid "
-                "- if so, raise 'how many kinds'."
-                % (way, s.pitch_measured,
-                   s.pitch_measured / max(s.pitch_ratio, 1e-6),
-                   s.pitch_ratio * 100.0))
+            res.reason = "the %s stripes %s" % (way, s.trust_note)
             return res
 
     boxes = cross_boxes(xs, ys, placement=placement, box_size=box_size,
