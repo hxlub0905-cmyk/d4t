@@ -173,9 +173,6 @@ def require_image(ctx: Context, step_key: str, key: str) -> np.ndarray:
 def roi_rect_or_none(ctx, step_key: str, image, roi_name):
     """把 ``roi`` 參數解成像素矩形 ``(x, y, w, h)``；空字串 = 整張影像。
 
-    ``'blob'`` 是保留名：優先找同名 ROI（``blob_segment`` 會寫），
-    找不到才退回 ``meta['blobs']`` 的主 blob —— 這樣舊 recipe 與新 Region 段
-    可以並存，而且 ``blob_segment`` 之後也還是同一個名字。
     找不到任何東西時回 ``None``（呼叫端決定要警告還是當成整張圖）。
     """
     import numpy as _np
@@ -186,26 +183,25 @@ def roi_rect_or_none(ctx, step_key: str, image, roi_name):
         # 整張影像 —— 需要知道尺寸
         return None if shape is None else (0, 0, int(shape[1]), int(shape[0]))
     if name in ctx.roi_names():
+        # 多框區域（F8）拿不到「一個矩形」。**不要偷偷回第一個** —— 那會給出
+        # 一組看起來正常、實際上只描述了其中一塊的數字。要幾何的卡（量 CD、
+        # 量框本身）本來就該指名單一的框，而每張多框卡都會另外給一個
+        # ``<name>_center``（離 patch 中心最近的那一塊，也就是缺陷所在的那塊）。
+        if ctx.roi_count(name) > 1:
+            raise StepError(
+                step_key,
+                "region '%s' is %d separate boxes, and this card needs a "
+                "single one. Point it at '%s_center' (the box nearest the "
+                "middle of the patch, which is where the defect is), or use a "
+                "card that can measure across several boxes."
+                % (name, ctx.roi_count(name), name))
         # 具名 ROI 存的是正規化座標，一樣需要尺寸才展得開
         return None if shape is None else ctx.roi_rect(name, shape)
-    if name == "blob":
-        # blob 的矩形已經是像素座標，**不需要影像**（影像流可能已被下游覆寫掉）
-        blobs = ctx.meta.get("blobs") or []
-        if blobs:
-            b = blobs[0]        # 主 blob = SNR 最強者（segment 已降冪排序）
-            return (int(b["x"]), int(b["y"]), int(b["w"]), int(b["h"]))
-        # 退回整張圖是刻意的（Blob 卡跑了但這顆沒找到東西是正常的），但
-        # **一定要說出來**：不講的話使用者拿到的是一組看起來很正常、實際上
-        # 量的是整張圖的數字，而那是最難發現的一種錯。
-        ctx.warn(f"[{step_key}] no blob was found on this defect, so region "
-                 f"'blob' falls back to the whole image; the numbers from this "
-                 f"card describe the whole patch, not a defect.")
-        return None
     # 具名 ROI 打錯字要講清楚，不要安靜地量整張圖
     raise StepError(step_key,
-                    "region '%s' is not defined; available: %s. Add a Define "
-                    "region card upstream, or leave roi empty for the whole "
-                    "image." % (name, ctx.roi_names()))
+                    "region '%s' is not defined; available: %s. Add an ROI "
+                    "card upstream, or leave roi empty for the whole image."
+                    % (name, ctx.roi_names()))
 
 
 def crop_to_roi(ctx, step_key: str, image, roi_name):
@@ -215,6 +211,31 @@ def crop_to_roi(ctx, step_key: str, image, roi_name):
         return image
     x, y, w, h = rect
     return image[y:y + h, x:x + w]
+
+
+def roi_pixels(ctx, step_key: str, image, roi_name) -> np.ndarray:
+    """區域裡的**像素本身**（一維），多框就把每一塊接起來（F8）。
+
+    統計量（平均、標準差、百分位）只需要「有哪些像素」，不需要它們排成什麼
+    形狀 —— 所以分散的 N 個框對這類卡而言就是一個像素母體。這也讓
+    「這一組交界整體長什麼樣」問得出來，而那正是多框區域存在的理由。
+
+    單框與整張圖走同一條路（N=1），所以呼叫端不必先問「這個區域有幾塊」。
+    """
+    name = str(roi_name or "").strip()
+    arr = np.asarray(image)
+    if name and name in ctx.roi_names() and ctx.roi_count(name) > 1:
+        shape = arr.shape[:2]
+        parts = [arr[y:y + h, x:x + w].reshape(-1)
+                 for x, y, w, h in ctx.roi_rects(name, shape)
+                 if w > 0 and h > 0]
+        parts = [p for p in parts if p.size]
+        if not parts:
+            raise StepError(step_key,
+                            "region '%s' has boxes but none of them covers any "
+                            "pixel of this image." % name)
+        return np.concatenate(parts)
+    return np.asarray(crop_to_roi(ctx, step_key, image, name)).reshape(-1)
 
 
 def ensure_gray(arr: np.ndarray) -> np.ndarray:

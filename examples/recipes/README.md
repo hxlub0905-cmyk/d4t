@@ -49,6 +49,13 @@
 - **`cd_gate`** —— 分數不一定要是無單位的「可疑度」，**也可以是有物理單位的量**。
   分數 = 缺陷寬高（像素），門檻 = 規格。另外示範 `blob_segment` 可以直接切
   `diff`，不一定要先做 SNR 地圖。
+- **`cross_regions`** —— **純規則的 ROI 定位**：不用 GDS、也不用 Golden Cell
+  模板，只看 patch 自己。兩個方向各投影一次找出兩組條紋（直的、橫的），
+  交會處就是要量的地方 —— 一張 patch 上通常有好幾處，所以
+  `roi_cross` 吐的是**一組**框（而 `xing_center` 是缺陷所在的那一塊）。
+  也示範了**定位只做一次、兩張圖共用**：框在 ref 上找（那裡沒有缺陷來干擾），
+  test 與 ref 量同一組框，所以兩者的差只來自缺陷。
+  練習資料：`python tools/make_sample.py <dir> --pattern lines`。
 
 ---
 

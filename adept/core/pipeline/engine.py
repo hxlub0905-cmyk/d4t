@@ -302,8 +302,15 @@ def _restore_context(item: Any, kind: str, defect_id: str,
         ctx.features[str(name)] = float(val)
     for k, v in dict(snap.get("meta") or {}).items():
         ctx.meta[str(k)] = v  # 快照不含 ``_`` 開頭 key，不會蓋掉剛種的
+    # **一個名字可能有好幾個框**（F8 的交會定位）。逐一 ``set_roi`` 是錯的 ——
+    # 它會先刪掉同名的，所以 17 個框還原完只剩最後一個：冷跑量 17 塊、熱跑量
+    # 1 塊，而兩邊都跑得完、都有數字。這正是 F7-9 那條「第一次跑對、第二次跑
+    # 錯」，只是這次不是整組不見而是**只剩一個**，更難發現。
+    grouped: Dict[str, List[Any]] = {}
     for name, rect in (snap.get("rois") or []):
-        ctx.set_roi(str(name), rect)
+        grouped.setdefault(str(name), []).append(rect)
+    for name, rects in grouped.items():
+        ctx.set_roi_boxes(name, rects)
     labels = snap.get("labels")
     if labels is not None:
         ctx.labels = labels

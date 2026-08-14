@@ -30,6 +30,7 @@ from PySide6.QtGui import (
     QColor,
     QDrag,
     QFont,
+    QFontMetricsF,
     QImage,
     QPainter,
     QPainterPath,
@@ -462,6 +463,11 @@ class ImageView(QWidget):
         self._panning = False
         self._pan_start = QPointF()
         self._pan_offset = QPointF()
+        #: 疊在影像上的 ROI 框（正規化座標）。見 :meth:`set_overlay`。
+        self._overlay: List[Tuple[float, float, float, float]] = []
+        self._overlay_focus = -1
+        #: 量測尺按著時的那一條帶（axis, 起, 迄；影像像素）。見 :meth:`set_measure`。
+        self._measure: Optional[Tuple[str, float, float]] = None
 
     # -- public API --------------------------------------------------------
     def set_image(self, arr: Optional[np.ndarray]) -> None:
@@ -557,6 +563,117 @@ class ImageView(QWidget):
         self.zoom_by(1 / 1.25)
 
     # -- transforms --------------------------------------------------------
+    def set_overlay(self, rects: Optional[Sequence[Sequence[float]]],
+                    focus: int = -1) -> None:
+        """把 ROI 框疊在影像上（**正規化**座標 ``(nx, ny, nw, nh)``）。
+
+        為什麼要疊在這裡而不是只有「跨顆檢視」那個視窗
+        ----------------------------------------------
+        定位卡的參數是**一邊拖一邊看**決定的（F7-8 那條：「先想好一個數字再
+        輸入」那個順序是反的）。框只出現在另一個要按鈕、要跑完一批才看得到的
+        視窗裡，等於把這件事變成「改一次、跑一次、再回來看」——
+        而敏感度這種參數要試十幾次。
+
+        座標用正規化的，所以縮放平移都跟著影像走，換一顆 patch 尺寸也不用重算。
+        ``focus`` 是要特別標出來的那一個（交會定位的 ``_center``：缺陷所在的
+        那一塊），畫成實線＋角標，其餘畫細線 —— 一堆一模一樣的框看不出哪個是
+        「這一顆」的。
+        """
+        self._overlay = [tuple(float(v) for v in r) for r in (rects or [])
+                         if r is not None and len(tuple(r)) == 4]
+        self._overlay_focus = int(focus)
+        self.update()
+
+    def overlay_count(self) -> int:
+        """現在疊了幾個框（測試與狀態列讀這個，不去讀畫素）。"""
+        return len(self._overlay)
+
+    def set_measure(self, axis: str, start: float, end: float) -> None:
+        """曲線面板上的量測尺按著時，在影像上標出**同一段**（F8 量測尺）。
+
+        為什麼影像上也要標
+        ------------------
+        曲線面板上的一段只是「第 40 到第 74 個取樣點」。使用者要判斷的是
+        「我量到的是不是兩根 MG 的距離」—— 那個問題只有看影像答得出來。
+        少了這條同步標記，量測尺量到的東西就得靠腦補對回圖上。
+
+        座標是**影像像素**（投影曲線一個取樣點 = 一個像素列／行，所以兩者
+        就是同一個索引）。``axis`` 為 ``"x"`` 時標的是兩條垂直線之間，
+        ``"y"`` 是兩條水平線之間。
+        """
+        axis = str(axis or "")
+        if axis not in ("x", "y"):
+            self.clear_measure()
+            return
+        a, b = float(start), float(end)
+        self._measure = (axis, min(a, b), max(a, b))
+        self.update()
+
+    def clear_measure(self) -> None:
+        """放開量測尺 —— 標記跟著消失（它是「現在正在量」的回饋，不是註記）。"""
+        if self._measure is not None:
+            self._measure = None
+            self.update()
+
+    def measure_span(self) -> Optional[Tuple[str, float, float]]:
+        """現在標著的那一段（沒有就 None）。測試與狀態列讀這個。"""
+        return self._measure
+
+    def _paint_overlay(self, p: QPainter) -> None:
+        if self._pixmap is None or not self._overlay:
+            return
+        iw, ih = self._pixmap.width(), self._pixmap.height()
+        s = self._scale or 1.0
+        accent = QColor(TOKENS["accent"])
+        # 框在小 patch 上會很細，所以線寬不隨縮放變薄（**框是給人看的標記，
+        # 不是影像內容**）；但也不要粗到把 5px 的框整個蓋掉。
+        thin = QPen(accent, 1.0)
+        thin.setCosmetic(True)
+        thick = QPen(QColor(TOKENS["danger_text"]), 1.8)
+        thick.setCosmetic(True)
+        p.setBrush(Qt.NoBrush)
+        for i, (nx, ny, nw, nh) in enumerate(self._overlay):
+            r = QRectF(self._offset.x() + nx * iw * s,
+                       self._offset.y() + ny * ih * s,
+                       max(1.0, nw * iw * s), max(1.0, nh * ih * s))
+            p.setPen(thick if i == self._overlay_focus else thin)
+            p.drawRect(r)
+
+    def _paint_measure(self, p: QPainter) -> None:
+        """量測尺按著時的那一條帶：兩條綠線 + 中間一層很淡的綠。
+
+        畫在 ROI 框**之後**，因為它是「使用者手上正在做的事」—— 被框壓住的話
+        就得先找它在哪。顏色跟框刻意不同色相（框是 accent，尺是綠）：兩者同時
+        在畫面上，而「哪一條是我剛剛拉的」不能只靠深淺分辨。
+        """
+        if self._pixmap is None or self._measure is None:
+            return
+        axis, a, b = self._measure
+        iw, ih = self._pixmap.width(), self._pixmap.height()
+        s = self._scale or 1.0
+        if axis == "x":
+            band = QRectF(self._offset.x() + a * s, self._offset.y(),
+                          max(1.0, (b - a) * s), ih * s)
+        else:
+            band = QRectF(self._offset.x(), self._offset.y() + a * s,
+                          iw * s, max(1.0, (b - a) * s))
+        green = QColor(TOKENS["success"])
+        fill = QColor(green)
+        fill.setAlpha(48)
+        p.setPen(Qt.NoPen)
+        p.setBrush(fill)
+        p.drawRect(band)
+        pen = QPen(green, 1.6)
+        pen.setCosmetic(True)          # 縮到很小時線不能跟著消失
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        if axis == "x":
+            for x in (band.left(), band.right()):
+                p.drawLine(QPointF(x, band.top()), QPointF(x, band.bottom()))
+        else:
+            for y in (band.top(), band.bottom()):
+                p.drawLine(QPointF(band.left(), y), QPointF(band.right(), y))
+
     def _to_image(self, p: QPointF) -> QPointF:
         s = self._scale or 1.0
         return QPointF((p.x() - self._offset.x()) / s,
@@ -583,6 +700,9 @@ class ImageView(QWidget):
                         self._pixmap.width() * self._scale,
                         self._pixmap.height() * self._scale)
         p.drawPixmap(target, self._pixmap, QRectF(self._pixmap.rect()))
+        p.setRenderHint(QPainter.SmoothPixmapTransform, False)
+        self._paint_overlay(p)
+        self._paint_measure(p)
         p.end()
 
     # -- interaction -------------------------------------------------------
@@ -943,32 +1063,253 @@ class ProfilePanel(QWidget):
     而那種 bug 幾乎不可能靠肉眼發現。
     """
 
-    _EMPTY = "(select a Locate region by profile card to see its curve)"
+    #: 量測尺按著時，這一段量到哪裡（axis, 起, 迄；單位是**影像像素**）。
+    #: 上面那張影像靠它同步標出同一段 —— 見 :meth:`ImageView.set_measure`。
+    measure_changed = Signal(str, float, float)
+    #: 放開了。標記要跟著消失，它是「現在正在量」的回饋不是註記。
+    measure_ended = Signal()
+    #: 「把量到的間距填進參數格」（axis, pitch, 第二個 pitch）。
+    #: 使用者原話：「有辦法自動 measure 填入左側數值嗎」。曲線本來就知道答案，
+    #: 而要他看著面板上的數字再手動打一次，是在製造一個可以打錯的機會。
+    pitch_requested = Signal(str, float, float)
+
+    _EMPTY = "(select a Profile card to see its curve)"
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._data: Dict[str, Any] = {}
         self._name = ""
+        self._ruler: Optional[Tuple[float, float]] = None
         self.setMinimumHeight(96)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setToolTip("Gray level projected along the scan direction. "
-                        "Vertical lines are the boundaries that were found; "
-                        "the shaded section is the region this card produces.")
+        self.setToolTip(
+            "Gray level projected along the scan direction.\n\n"
+            "The thin upright lines are the edges found in this image. The "
+            "shaded blocks are the stripes the card will actually use - which "
+            "is not the same thing: the edges are refined to sub-pixel, and if "
+            "you filled in a pitch the stripes are then snapped onto that "
+            "regular grid. So the blocks can sit a pixel or two off the lines, "
+            "and the summary says how far.\n\n"
+            "The dashed line marked 'defect' is the middle of the patch, which "
+            "is where the tool put the defect - a marker, not a setting.\n\n"
+            "Press and drag across the curve to measure: the green band shows "
+            "the same stretch on the image above, and the readout gives the "
+            "distance in pixels - and the pitch, if you dragged across more "
+            "than one stripe. Let go to clear it.")
+
+        # 「量給我填」。浮在面板上（同 kind="icon" 那幾顆的理由：這裡沒有卡片
+        # 當底色）。只有在**它會改變什麼**的時候才出現 —— 見 _sync_button。
+        # ⚠ shape 一定要 "wide"：square 的 QSS 是 max-width 22px，文字按鈕
+        # 放進去只剩「Use 4…」—— 使用者回報「只看得到一半的數字」就是它。
+        self._fill_btn = small_button("", shape="wide", kind="icon",
+                                      parent=self)
+        self._fill_btn.setVisible(False)
+        self._fill_btn.clicked.connect(self._request_pitch)
 
     # -- public ------------------------------------------------------------
     def set_data(self, name: str, data: Optional[Dict[str, Any]]) -> None:
         self._name = str(name or "")
         self._data = dict(data or {})
+        self._sync_button()
+        self._end_ruler()
+        self.setCursor(Qt.CrossCursor if self.has_data() else Qt.ArrowCursor)
         self.update()
 
     def has_data(self) -> bool:
         return bool(self._data.get("profile"))
+
+    # -- 「量給我填」 ------------------------------------------------------
+    def measured_pitches(self) -> Tuple[float, float]:
+        """這條曲線量到的間距（第二個是 0 代表不交錯）。"""
+        return (float(self._data.get("pitch_measured") or 0.0),
+                float(self._data.get("pitch_measured_2") or 0.0))
+
+    def fill_button_text(self) -> str:
+        """按鈕上的字（空字串 = 這時候不該有按鈕）。"""
+        a, b = self.measured_pitches()
+        if a < 2.0:
+            return ""
+        used = [float(v) for v in (self._data.get("pitches_used") or [])]
+        want = [round(v, 1) for v in ((a, b) if b >= 2.0 else (a,))]
+        if [round(v, 1) for v in used] == want:
+            return ""            # 已經是這個值了 —— 按了什麼都不會變
+        return ("Use %s px" % " / ".join("%.1f" % v for v in want))
+
+    def _request_pitch(self) -> None:
+        a, b = self.measured_pitches()
+        if a >= 2.0:
+            self.pitch_requested.emit(self.axis(), a, b if b >= 2.0 else 0.0)
+
+    def _sync_button(self) -> None:
+        text = self.fill_button_text()
+        self._fill_btn.setText(text)
+        self._fill_btn.setVisible(bool(text))
+        self._fill_btn.setToolTip(
+            "Put the spacing measured on this curve into the pitch box for "
+            "this direction. Use it when you do not know the pitch from the "
+            "layout - once it is filled in, the card can check what it finds, "
+            "fill in stripes that were too faint, and lock on from a single "
+            "stripe." if text else "")
+        if text:
+            self._fill_btn.adjustSize()
+            self._place_button()
+
+    def _place_button(self) -> None:
+        b = self._fill_btn
+        b.move(max(2, self.width() - b.width() - 10), 4)
+
+    def resizeEvent(self, e) -> None:      # noqa: D102 - Qt hook
+        super().resizeEvent(e)
+        self._place_button()
+
+    # -- ruler (F8) --------------------------------------------------------
+    def axis(self) -> str:
+        """這條曲線是哪一軸的投影（``"x"`` 直的條紋／``"y"`` 橫的）。"""
+        return str(self._data.get("axis") or "")
+
+    def ruler_span(self) -> Optional[Tuple[float, float]]:
+        """量測尺現在夾住的那一段（起 ≤ 迄，影像像素）；沒在量就 None。"""
+        if self._ruler is None:
+            return None
+        a, b = self._ruler
+        return (min(a, b), max(a, b))
+
+    def ruler_text(self) -> str:
+        """量測尺的讀數。
+
+        為什麼不只講「幾個像素」
+        ----------------------
+        使用者拉這一把的目的多半是**問出 pitch**（他不知道 pitch 是多少，
+        所以才要量）。而「量一個週期」是所有量法裡最不準的一種 —— 兩端各差
+        一個像素，pitch 就差兩個。橫跨好幾根條紋再除以根數，誤差就被根數除掉。
+        所以只要這一段裡有兩根以上抓到的條紋，就順便把 pitch 算給他。
+        """
+        span = self.ruler_span()
+        if span is None:
+            return ""
+        a, b = span
+        bits = ["%.1f px" % (b - a)]
+        mids = self._centers_in(a, b)
+        if len(mids) >= 2:
+            bits.append("%d stripes" % len(mids))
+            bits.append("pitch %.1f px" % ((mids[-1] - mids[0]) / (len(mids) - 1)))
+        return " · ".join(bits)
+
+    def _centers_in(self, a: float, b: float) -> List[float]:
+        """這一段裡有幾根條紋的**中心**（用中心不用邊，邊有升有降會多算一倍）。"""
+        bands = self._data.get("selected") or self._data.get("bands") or []
+        out = []
+        for band in bands:
+            try:
+                mid = (float(band[0]) + float(band[1])) / 2.0
+            except (TypeError, IndexError, ValueError):
+                continue
+            if a <= mid <= b:
+                out.append(mid)
+        return sorted(out)
+
+    def _plot_rect(self) -> QRectF:
+        """曲線畫在哪一塊。
+
+        **繪製與命中判定共用這一個** —— 兩邊各自算一次的話，量測尺會跟曲線
+        差幾個像素，而那種偏差肉眼看不出來卻會讓讀數一直是錯的。
+        """
+        return QRectF(self.rect()).adjusted(6, 6, -6, -6).adjusted(4, 16, -4, -4)
+
+    def _index_at(self, x: float) -> float:
+        """widget 的 x 座標 → 曲線上的取樣點（= 影像像素）。"""
+        n = len(self._data.get("profile") or [])
+        plot = self._plot_rect()
+        if n < 2 or plot.width() <= 0:
+            return 0.0
+        t = (float(x) - plot.left()) / plot.width()
+        return max(0.0, min(float(n - 1), t * (n - 1)))
+
+    def _end_ruler(self) -> None:
+        if self._ruler is not None:
+            self._ruler = None
+            self.measure_ended.emit()
+            self.update()
+
+    def _emit_ruler(self) -> None:
+        span = self.ruler_span()
+        if span is not None:
+            self.measure_changed.emit(self.axis(), span[0], span[1])
+
+    def mousePressEvent(self, e) -> None:          # noqa: D102 - Qt hook
+        if e.button() != Qt.LeftButton or not self.has_data():
+            return
+        i = self._index_at(e.position().x())
+        self._ruler = (i, i)
+        self._emit_ruler()
+        self.update()
+        e.accept()
+
+    def mouseMoveEvent(self, e) -> None:           # noqa: D102 - Qt hook
+        if self._ruler is None:
+            return
+        self._ruler = (self._ruler[0], self._index_at(e.position().x()))
+        self._emit_ruler()
+        self.update()
+        e.accept()
+
+    def mouseReleaseEvent(self, e) -> None:        # noqa: D102 - Qt hook
+        if e.button() != Qt.LeftButton or self._ruler is None:
+            return
+        self._end_ruler()
+        e.accept()
 
     def summary(self) -> str:
         """一行文字摘要（測試與狀態列都用這個，不用去讀畫素）。"""
         if not self.has_data():
             return ""
         d = self._data
+        if d.get("selected"):
+            # 交會定位：講的是「這個方向抓到幾根條紋、間距多少」——
+            # 而不是「挑了哪一段」，因為它一整排都要。
+            bits = ["%s · %d stripes" % (self._name, len(d["selected"]))]
+            pitch = float(d.get("pitch_used") or 0.0)
+            if pitch > 0:
+                bits.append("pitch %.1f px" % pitch)
+            if d.get("width_fixed"):
+                # 只有**給定**的線寬才講。量到的線寬畫面上已經看得到（就是塗
+                # 起來的那幾段有多寬），而給定的那個是使用者填進去的假設 ——
+                # 假設要看得到才驗得了。
+                bits.append("width %.1f px (given)"
+                            % float(d.get("width_used") or 0.0))
+            filled = int(d.get("filled") or 0)
+            if filled:
+                # 這幾根影像上看不到，是靠已知 pitch 推出來的。框仍然對，
+                # 但「憑什麼對」換了一個依據 —— 使用者有權知道。
+                bits.append("%d filled in" % filled)
+            shift = float(d.get("snap_shift") or 0.0)
+            if shift >= 0.5:
+                # 使用者原話：「藍框跟線有時候會 shift」。它是刻意的（次像素
+                # 精修 + 對齊到你給的 pitch），但沒講出來就只是「怪」，
+                # 而「怪」的下一步通常是去亂調敏感度。
+                bits.append("snapped %.1f px" % shift)
+            if d.get("pitch_disagrees"):
+                # 最重要的一句 —— 它是「這一顆能不能信」的答案。放在
+                # confidence 前面，因為那個數字在這種失敗上反而更高。
+                bits.append("⚠ measured %.0f%% of the pitch you gave"
+                            % (float(d.get("pitch_ratio") or 0.0) * 100.0))
+            trust = str(d.get("trust_note") or "")
+            if trust:
+                # 最重要的一句：這個方向的定位不能信，而且**為什麼**。
+                # 它排在最前面 —— 後面那些數字在這種失敗上全都看起來正常。
+                bits = [bits[0], "⚠ " + trust]
+            note = str(d.get("pitch_note") or "")
+            if note:
+                # 給了 pitch 卻沒有用 —— 這件事一定要講。使用者會以為那格
+                # 生效了，然後拿一份其實是「照影像自己量」的結果去跑整批。
+                bits.append("pitch not used: %s" % note)
+            blocked = len(d.get("blocked") or ())
+            if blocked:
+                # 「這一格我故意不放」跟「這一格我沒找到」在畫面上長得一模一樣。
+                # 少了這句，使用者會以為那裡定位失敗，然後去調敏感度。
+                bits.append("%d left out" % blocked)
+            bits.append("confidence %.1f" % float(d.get("confidence", 0.0)))
+            return " · ".join(bits)
         picked = d.get("picked")
         where = ("none" if not picked
                  else "%d-%d px" % (int(picked[0]), int(picked[1])))
@@ -998,7 +1339,7 @@ class ProfilePanel(QWidget):
         lo = min(min(prof), min(raw) if raw else min(prof))
         hi = max(max(prof), max(raw) if raw else max(prof))
         span = max(hi - lo, 1e-6)
-        plot = rect.adjusted(4, 16, -4, -4)
+        plot = self._plot_rect()
 
         def to_x(i: float) -> float:
             return plot.left() + plot.width() * (float(i) / max(1, n - 1))
@@ -1006,13 +1347,39 @@ class ProfilePanel(QWidget):
         def to_y(v: float) -> float:
             return plot.bottom() - plot.height() * ((v - lo) / span)
 
-        # 選中的那一段：先畫底色，曲線才會壓在上面
-        picked = self._data.get("picked")
-        if picked:
-            x0, x1 = to_x(int(picked[0])), to_x(int(picked[1]))
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor(TOKENS["accent_bg"]))
+        # 選中的段：先畫底色，曲線才會壓在上面。
+        # ``picked`` 是一段（投影定位），``selected`` 是**好幾段**（交會定位
+        # 的那一組條紋）—— 兩者都畫得出來，因為只畫其中一段的話，面板就會
+        # 少講「這張卡其實用到了這一整排」。
+        shaded = self._data.get("selected")
+        if not shaded:
+            one = self._data.get("picked")
+            shaded = [one] if one else []
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(TOKENS["accent_bg"]))
+        for band in shaded:
+            x0, x1 = to_x(int(band[0])), to_x(int(band[1]))
             p.drawRect(QRectF(x0, plot.top(), max(1.0, x1 - x0), plot.height()))
+
+        # 晶格上**故意不用**的那幾格（那裡是別的材質）。畫成斜線而不是另一種
+        # 底色：它跟選中的段是同一排上的東西，差別在「用不用」，而兩塊實心色
+        # 只說得出「這是兩種東西」。
+        blocked = self._data.get("blocked") or []
+        if blocked:
+            hatch = QColor(TOKENS["text_secondary"])
+            hatch.setAlpha(90)
+            p.setPen(QPen(hatch, 1.0))
+            for band in blocked:
+                x0, x1 = to_x(float(band[0])), to_x(float(band[1]))
+                r = QRectF(x0, plot.top(), max(1.0, x1 - x0), plot.height())
+                p.save()
+                p.setClipRect(r)
+                x = r.left() - r.height()
+                while x < r.right():
+                    p.drawLine(QPointF(x, r.bottom()),
+                               QPointF(x + r.height(), r.top()))
+                    x += 4.0
+                p.restore()
 
         # 平滑前的曲線畫在後面當對照 —— 使用者才看得出平滑吃掉了多少
         if len(raw) == n:
@@ -1029,15 +1396,28 @@ class ProfilePanel(QWidget):
             path.lineTo(QPointF(to_x(i), to_y(prof[i])))
         p.drawPath(path)
 
-        # 中心線 = 缺陷的位置（patch 是以缺陷為中心裁的）
+        # 中心線 = 缺陷的位置（patch 是以缺陷為中心裁的）。
+        # **標上字**：它是一條參考線不是一個控制項，而使用者問過「這條線我是
+        # 可以做操作的嗎」—— 一條沒有說明的虛線看起來就像可以拖的東西。
         p.setPen(QPen(QColor(TOKENS["text_secondary"]), 1.0, Qt.DashLine))
         cx = to_x((n - 1) / 2.0)
         p.drawLine(QPointF(cx, plot.top()), QPointF(cx, plot.bottom()))
+        f = p.font()
+        f.setPointSizeF(max(6.0, f.pointSizeF() - 2.0))
+        p.setFont(f)
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        p.drawText(QRectF(cx + 3, plot.bottom() - 12, 64, 11),
+                   Qt.AlignLeft | Qt.AlignVCenter, "defect")
 
         p.setPen(QPen(QColor(TOKENS["accent"]), 1.4))
         for t in (self._data.get("transitions") or []):
-            x = to_x(int(t))
+            # **不要 int()**：轉折位置是次像素的，而條紋的幾何用的就是它。
+            # 在這裡捨掉等於畫面上的線跟塗色的方塊差半格，而那半格沒有任何
+            # 解釋 —— 使用者會以為是定位歪了。
+            x = to_x(float(t))
             p.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
+
+        self._paint_ruler(p, plot, to_x)
 
         p.setPen(QColor(TOKENS["text_secondary"]))
         f = p.font()
@@ -1046,6 +1426,43 @@ class ProfilePanel(QWidget):
         p.drawText(QRectF(rect.left() + 6, rect.top() + 2, rect.width() - 12, 14),
                    Qt.AlignVCenter | Qt.AlignLeft, self.summary())
         p.end()
+
+    def _paint_ruler(self, p: QPainter, plot: QRectF, to_x) -> None:
+        """量測尺：兩條綠線、中間一層淡綠、加上讀數。
+
+        綠色是刻意跟畫面上其他東西**換一個色相**的：曲線是墨色、轉折線是
+        accent、選中的段是 accent 的淡底 —— 量測尺再從那一家挑一個色階的話，
+        「哪一條是我剛剛拉的」就只剩深淺可分，而深淺會被主題與縮放吃掉。
+        """
+        rul = self.ruler_span()
+        if rul is None:
+            return
+        x0, x1 = to_x(rul[0]), to_x(rul[1])
+        green = QColor(TOKENS["success"])
+        if x1 - x0 >= 1.0:
+            fill = QColor(green)
+            fill.setAlpha(40)
+            p.setPen(Qt.NoPen)
+            p.setBrush(fill)
+            p.drawRect(QRectF(x0, plot.top(), x1 - x0, plot.height()))
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(green, 1.4))
+        for x in (x0, x1):
+            p.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
+
+        text = self.ruler_text()
+        if not text:
+            return
+        f = p.font()
+        f.setPointSizeF(max(7.0, f.pointSizeF() - 1.0))
+        p.setFont(f)
+        w = QFontMetricsF(f).horizontalAdvance(text) + 8.0
+        # 讀數貼著自己量的那一段（不要放到面板角落 —— 兩條曲線各有一把尺，
+        # 放在固定位置的話讀數就得先對回是哪一把）；但不准跑出畫面外。
+        left = min(max(plot.left(), min(x0, x1) + 3.0), plot.right() - w)
+        p.setPen(green)
+        p.drawText(QRectF(left, plot.top() + 1, w, 12),
+                   Qt.AlignLeft | Qt.AlignVCenter, text)
 
 
 class StreamPicker(QWidget):
@@ -1219,10 +1636,20 @@ class ParamForm(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._rows: Dict[str, _ParamRow] = {}
+        #: 小標題：``section 名 -> [QLabel]`` 與 ``參數名 -> section 名``。
+        #: 整組都被 ``show_when`` 藏起來時，標題也要跟著不見 —— 一個底下什麼
+        #: 都沒有的標題比沒有標題更讓人以為畫面壞了。
+        self._sections: Dict[str, List[QWidget]] = {}
+        self._section_of: Dict[str, str] = {}
+        #: 標了 ``advanced`` 的那幾列（預設收起來）。
+        self._advanced: set = set()
         #: 目前這張卡每個參數的值 —— ``show_when`` 要靠它判斷哪幾列該在。
         self._values: Dict[str, Any] = {}
         self._describe: Optional[Dict[str, Any]] = None
         self._building = False
+        #: 進階參數收起來了嗎（**追明確狀態**，不問 widget —— CLAUDE.md §7）。
+        #: 換一張卡就收回去：上一張卡展開過不代表這一張也要。
+        self._advanced_open = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -1247,6 +1674,14 @@ class ParamForm(QWidget):
         self._placeholder.setObjectName("placeholder")
         self._placeholder.setWordWrap(True)
         self._form.addWidget(self._placeholder)
+        # 「還有幾格」的入口。放在**進階那幾列的上面**（插在它們之前），
+        # 這樣按下去展開的東西就在按鈕底下 —— 不必回頭找。
+        self._advanced_btn = QPushButton("", self._host)
+        self._advanced_btn.setObjectName("advancedToggle")
+        self._advanced_btn.setCursor(Qt.PointingHandCursor)
+        self._advanced_btn.setVisible(False)
+        self._advanced_btn.clicked.connect(self.toggle_advanced)
+        self._form.addWidget(self._advanced_btn)
         self._form.addStretch(1)
         self._scroll.setWidget(self._host)
         outer.addWidget(self._scroll, 1)
@@ -1278,8 +1713,21 @@ class ParamForm(QWidget):
             self._step_help.setVisible(bool(describe.get("help")))
             self._placeholder.setVisible(False)
             self._values = {}
+            self._advanced = set()
+            self._advanced_open = False
+            section = None
             for spec in describe.get("params", []):
                 name = str(spec.get("name", ""))
+                # 小標題：換組的時候插一行（F8 第三輪）。參數清單的**順序**就是
+                # 分組，所以卡片作者不必額外宣告什麼 —— 把同一組的排在一起就好。
+                want = str(spec.get("section", "") or "")
+                if want != section:
+                    section = want
+                    if want:
+                        head = QLabel(want, self._host)
+                        head.setObjectName("paramSection")
+                        self._form.insertWidget(self._form.count() - 1, head)
+                        self._sections.setdefault(want, []).append(head)
                 value = current_params.get(name, spec.get("default"))
                 self._values[name] = value
                 editor = self._make_editor(spec, value, streams)
@@ -1287,6 +1735,10 @@ class ParamForm(QWidget):
                 row = _ParamRow(spec, editor, self._host)
                 self._form.insertWidget(self._form.count() - 1, row)
                 self._rows[name] = row
+                if want:
+                    self._section_of[name] = want
+                if bool(spec.get("advanced")):
+                    self._advanced.add(name)
         finally:
             self._building = False
         self._sync_visible_rows()
@@ -1316,8 +1768,53 @@ class ParamForm(QWidget):
     def step_key(self) -> Optional[str]:
         return None if not self._describe else str(self._describe.get("key"))
 
+    def advanced_open(self) -> bool:
+        """進階那幾列現在攤開了嗎（**明確狀態**，不問 widget）。"""
+        return bool(self._advanced_open)
+
+    def advanced_names(self) -> List[str]:
+        """這張卡有哪幾列是進階的。"""
+        return [n for n in self._rows if n in self._advanced]
+
+    def toggle_advanced(self) -> None:
+        self.set_advanced_open(not self._advanced_open)
+
+    def set_advanced_open(self, open_: bool) -> None:
+        self._advanced_open = bool(open_)
+        self._sync_visible_rows()
+
+    def section_names(self) -> List[str]:
+        """這張卡分了哪幾組小標題（依出現順序）。"""
+        return list(self._sections)
+
+    def section_visible(self, name: str) -> bool:
+        """某一組的標題現在看不看得到（**追明確狀態**，不問 ``isVisible()`` ——
+        視窗還沒 show 之前那個恆為 False，見 CLAUDE.md §7）。"""
+        heads = self._sections.get(str(name)) or []
+        return bool(heads) and all(not h.isHidden() for h in heads)
+
     def param_names(self) -> List[str]:
         return list(self._rows)
+
+    def row_visible(self, name: str) -> bool:
+        """那一列現在看不看得到（**明確狀態**，不問 ``isVisible()``）。"""
+        row = self._rows.get(str(name))
+        return bool(row is not None and not row.isHidden())
+
+    def values(self) -> Dict[str, Any]:
+        """目前表單上每一格的值（收起來的那幾格照樣在 —— 這是顯示規則）。"""
+        return dict(self._values)
+
+    def advanced_button_text(self) -> str:
+        return str(self._advanced_btn.text())
+
+    def advanced_button_visible(self) -> bool:
+        return bool(self._advanced_names_now())
+
+    def _advanced_names_now(self) -> List[str]:
+        """按下去會出現的那幾格 —— 被 ``show_when`` 排除的不算。"""
+        return [n for n in self._rows
+                if n in self._advanced and self._shown_by_rules(n)]
 
     def editor(self, name: str) -> Optional[QWidget]:
         row = self._rows.get(name)
@@ -1359,6 +1856,13 @@ class ParamForm(QWidget):
             row.setParent(None)
             row.deleteLater()
         self._rows = {}
+        for heads in self._sections.values():
+            for head in heads:
+                self._form.removeWidget(head)
+                head.setParent(None)
+                head.deleteLater()
+        self._sections, self._section_of = {}, {}
+        self._advanced = set()
 
     def _emit(self, name: str, value: Any) -> None:
         if self._building:
@@ -1378,10 +1882,42 @@ class ParamForm(QWidget):
         """
         for name, row in self._rows.items():
             spec = row.spec.get("show_when")
-            if not spec:
-                continue
-            ctrl, values = str(spec[0]), [str(v) for v in spec[1]]
-            row.setVisible(str(self._values.get(ctrl, "")) in values)
+            shown = True
+            if spec:
+                ctrl, values = str(spec[0]), [str(v) for v in spec[1]]
+                shown = str(self._values.get(ctrl, "")) in values
+            # 兩個規則是 **and**：進階的那一列被 show_when 排除掉的時候，
+            # 展開進階也不該把它變出來（那一列在這個方法下根本不算數）。
+            if name in self._advanced and not self._advanced_open:
+                shown = False
+            row.setVisible(shown)
+
+        n = len(self._advanced_names_now())
+        self._advanced_btn.setVisible(n > 0)
+        # 講**幾格**，不要只講「進階」：使用者要判斷的是「我漏看了什麼」，
+        # 而一個沒有數字的標籤答不出那個問題。
+        self._advanced_btn.setText(
+            "Hide %d more settings" % n if self._advanced_open
+            else "Show %d more settings" % n)
+
+        # 整組都藏起來時標題也要不見 —— 一個底下什麼都沒有的標題，
+        # 比沒有標題更讓人以為畫面壞了。
+        alive = {}
+        for name, row in self._rows.items():
+            sec = self._section_of.get(name)
+            if sec:
+                alive[sec] = alive.get(sec, False) or row.isVisibleTo(self)
+        for sec, heads in self._sections.items():
+            for head in heads:
+                head.setVisible(alive.get(sec, True))
+
+    def _shown_by_rules(self, name: str) -> bool:
+        """撇開「進階收起來了」這件事，這一列本身算不算數（``show_when``）。"""
+        row = self._rows.get(name)
+        spec = None if row is None else row.spec.get("show_when")
+        if not spec:
+            return row is not None
+        return str(self._values.get(str(spec[0]), "")) in [str(v) for v in spec[1]]
 
     def _make_editor(self, spec: Dict[str, Any], value: Any,
                      streams: Sequence[str]) -> QWidget:
@@ -2078,7 +2614,7 @@ class LibraryPanel(QWidget):
     GROUPS = (
         ("input", "Input", "Load this defect's images"),
         ("enhance", "Enhance", "Image in, image out"),
-        ("region", "Region", "Decide where to look"),
+        ("region", "ROI", "Decide where to look"),
         ("compare", "Compare", "Two images in, difference out"),
         ("measure", "Measure", "Image + region in, numbers out"),
         ("adc", "ADC", "Numbers in, score and bin out"),

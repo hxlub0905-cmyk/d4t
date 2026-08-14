@@ -20,7 +20,7 @@ from ..pipeline.step import (
     CATEGORY_ALGO, ParamSpec, Step, StepError, register_step, GROUP_MEASURE,
 )
 from ._util import (
-    crop_to_roi, output_prefix_spec, parse_key_list, prefix_features,
+    output_prefix_spec, parse_key_list, prefix_features, roi_pixels,
     prefix_names, require_image,
 )
 
@@ -94,7 +94,10 @@ class GlvStatsStep(Step):
         if not mids:
             raise StepError(self.key, "metrics is empty; list at least one statistic (e.g. glv_mean).")
 
-        patch = np.asarray(crop_to_roi(ctx, self.key, img, p["roi"]))
+        # ``roi_pixels`` 而不是 ``crop_to_roi``：統計量只要「有哪些像素」，
+        # 所以分散的多個框（F8 的交會處）也答得出來 —— 那正是
+        # 「這一組交界整體長什麼樣」這個問題。單框走同一條路。
+        patch = roi_pixels(ctx, self.key, img, p["roi"])
 
         feats: Dict[str, float] = {}
         for mid in mids:

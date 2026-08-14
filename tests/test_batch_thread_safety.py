@@ -21,7 +21,7 @@ from adept.core.ingest.dataset import load_dataset  # noqa: E402
 from adept.core.pipeline import Recipe, run_batch  # noqa: E402
 from adept.core.pipeline.batch import _pool_context  # noqa: E402
 
-RECIPE = REPO / "examples" / "recipes" / "die_to_die_basic.json"
+RECIPE = REPO / "tests" / "fixtures" / "recipes" / "die_to_die_basic.json"
 
 
 def test_pool_context_main_thread_prefers_fork_when_available():

@@ -1101,25 +1101,40 @@ def test_the_two_machine_setup_is_written_down():
 
 
 @needs_git
-def test_the_compressed_bundle_fits_in_one_file_and_round_trips(tmp_path):
+def test_the_compressed_bundle_is_split_only_when_it_has_to_be(tmp_path):
     """使用者問的正是這個：不能一包嗎。
 
     可以 —— 但要用 lzma。整包 base64 之後 gzip 是 991 KB、lzma 是 701 KB，而
     **GitHub 不顯示超過 1 MB 的檔案**，所以那 290 KB 的差距就是「一次複製」與
-    「六次複製」的差別。這條測試同時鎖住「塞得進去」與「解出來一樣」。
-    """
-    text = make_text_bundle.build("b.py", REPO, compress=True)
-    kb = len(text.encode("utf-8")) / 1024
-    assert kb < 900, "壓縮版 %.0f KB —— GitHub 可能就不顯示了" % kb
-    ast.parse(text, filename="compressed")           # 仍然是合法的 Python
+    「六次複製」的差別。
 
-    path = tmp_path / "b.py"
-    _write(path, text)
+    2026-08-14：那句「一定塞得進一個檔案」過期了 —— repo 長到 908 KB。所以
+    現在的規矩不是「一定是一個」，而是**每一個都塞得下**，而且不會為了保險
+    多切一批（每多一批，那台只能用剪貼簿的機器就多一次複製）。
+    """
+    groups = make_text_bundle._fit(
+        make_text_bundle.collect(REPO), True,
+        make_text_bundle.LIMIT_KB * 1024)
+    texts = [make_text_bundle.build("b.py", items=g, part=i,
+                                    n_parts=len(groups), compress=True)
+             for i, g in enumerate(groups, 1)]
+    sizes = [len(t.encode("utf-8")) / 1024 for t in texts]
+    assert max(sizes) < make_text_bundle.LIMIT_KB, sizes
+    for t in texts:
+        ast.parse(t, filename="compressed")          # 仍然是合法的 Python
+
+    if len(groups) > 1:
+        # 最後一批不能是零頭 —— 併得回去就該併（見 _merge_tail）。
+        assert min(sizes) > make_text_bundle.LIMIT_KB * 0.25, sizes
+
     dest = tmp_path / "out"
-    r = subprocess.run([sys.executable, str(path), "--dest", str(dest)],
-                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                       timeout=300)
-    assert r.returncode == 0, r.stdout.decode("utf-8", "replace")
+    for i, t in enumerate(texts, 1):
+        path = tmp_path / ("b%d.py" % i)
+        _write(path, t)
+        r = subprocess.run([sys.executable, str(path), "--dest", str(dest)],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           timeout=300)
+        assert r.returncode == 0, r.stdout.decode("utf-8", "replace")
     for rel in make_filelist.tracked_files(REPO) + ["tools/FILELIST.txt"]:
         src = pathlib.Path(REPO) / rel
         assert (dest / rel).read_bytes() == src.read_bytes(), rel

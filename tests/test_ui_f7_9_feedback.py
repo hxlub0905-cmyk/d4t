@@ -29,8 +29,9 @@ from adept.core.pipeline import (          # noqa: E402 — Qt-free，可以直�
 )
 import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 
+FIXTURE_RECIPES = Path(__file__).resolve().parent / "fixtures" / "recipes"
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples" / "recipes"
-EXAMPLE = EXAMPLES / "die_to_die_basic.json"
+EXAMPLE = FIXTURE_RECIPES / "die_to_die_basic.json"
 
 
 def _import_qt(g):
@@ -370,17 +371,31 @@ def _recipe(seq):
 def test_a_measure_card_that_needs_a_region_nobody_defines_is_caught(qapp):
     """以前這件事只有兩種下場，兩種都不好。
 
-    名字打錯 → 每顆 defect 跑到一半 StepError；名字剛好是保留字 ``blob`` 而
-    上游沒有 Blob 卡 → **安靜地改量整張圖**，跑得完、有數字、而且是錯的。
+    名字打錯 → 每顆 defect 跑到一半 StepError；而且以前有一個保留字 ``blob``，
+    上游沒有那張卡時會**安靜地改量整張圖** —— 跑得完、有數字、而且是錯的。
+    （那個保留字隨著 ROI 收斂成 Profile / Template / GDS 一起拿掉了。）
     """
-    codes = [i.code for i in validate(
-        _recipe(["load_patch", "align", "subtract", "cd_measure"]),
-        kind="ebi_patch") if i.level == "error"]
+    nodes = {
+        "load": RecipeNode("load", "load_patch", {}),
+        "glv": RecipeNode("glv", "glv_stats", {"roi": "nobody_defines_this"}),
+    }
+    recipe = Recipe(recipe_id="r", routes={"ebi_patch": ["load", "glv"]},
+                    nodes=nodes,
+                    score=ScoreSpec(expr="1", threshold=0.5,
+                                    bins={"below": 0, "above": 1}))
+    codes = [i.code for i in validate(recipe, kind="ebi_patch")
+             if i.level == "error"]
     assert "unknown-region" in codes
 
-    # 補上 Blob 卡（它定義 'blob'）之後就乾淨了
-    ok = validate(_recipe(["load_patch", "align", "subtract", "snr_map",
-                           "blob_segment", "cd_measure"]), kind="ebi_patch")
+    # 補上一張 ROI 卡（Profile 定義 'nobody_defines_this'）之後就乾淨了
+    nodes["roi"] = RecipeNode("roi", "roi_cross",
+                              {"roi_out": "nobody_defines_this"})
+    ok = validate(Recipe(recipe_id="r",
+                         routes={"ebi_patch": ["load", "roi", "glv"]},
+                         nodes=nodes,
+                         score=ScoreSpec(expr="1", threshold=0.5,
+                                         bins={"below": 0, "above": 1})),
+                  kind="ebi_patch")
     assert [i.code for i in ok if i.level == "error"] == []
 
 
@@ -393,9 +408,13 @@ def test_measuring_two_regions_warns_instead_of_silently_losing_one(qapp):
     """
     nodes = {
         "load": RecipeNode("load", "load_patch", {}),
-        "roiA": RecipeNode("roiA", "roi_define", {"name": "center"}),
-        "roiB": RecipeNode("roiB", "roi_define",
-                           {"name": "wide", "size": 90.0, "size_unit": "percent"}),
+        # 兩張 ROI 卡各給自己的 output_prefix —— 不然它們**自己**的特徵就先撞
+        # 起來了，而這條測的是下面那兩張量測卡的撞名。
+        "roiA": RecipeNode("roiA", "roi_cross",
+                           {"roi_out": "center", "output_prefix": "a"}),
+        "roiB": RecipeNode("roiB", "roi_cross",
+                           {"roi_out": "wide", "place": "crossing",
+                            "output_prefix": "b"}),
         "glvA": RecipeNode("glvA", "glv_stats",
                            {"roi": "center", "metrics": "glv_mean"}),
         "glvB": RecipeNode("glvB", "glv_stats",
@@ -473,9 +492,8 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
     PREREQ = {
         "subtract": ["align"],
         "snr_map": ["align", "subtract"],
-        "blob_segment": ["align", "subtract", "snr_map"],
-        "cd_measure": ["align", "subtract", "snr_map", "blob_segment"],
-        "roi_snr": ["align", "subtract", "snr_map", "blob_segment"],
+        "cd_measure": ["align", "subtract", "snr_map"],
+        "roi_snr": ["align", "subtract", "snr_map"],
     }
     keys = [d["key"] for d in visible_steps([s.describe() for s in list_steps()])]
     dead_ends = {}

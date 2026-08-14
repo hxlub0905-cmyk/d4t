@@ -2,7 +2,7 @@
   "recipe_id": "dual_route_basic",
   "version": 1,
   "author": "HX",
-  "description": "雙路線範本：EBI patch 用機台附的 ref；RSEM 單張沒有 ref → Golden Cell 自己疊一張當基準。兩路共用同一段算法與判定，只有影像尺寸相關的幾何參數不同。",
+  "description": "測試用的最小 recipe（不是給使用者看的範例）。ROI 卡在 F8 第五輪收斂成 Profile / Template / GDS，所以這裡量的是整張圖 —— 這幾條 e2e 測的是**引擎跑不跑得完、分數算不算得出來**，不是某一張 ROI 卡的行為。",
   "routes": {
     "ebi_patch": [
       "load",
@@ -12,9 +12,7 @@
       "sub",
       "dn",
       "snr",
-      "blob",
       "cd",
-      "glv_patch_roi",
       "glv_patch"
     ],
     "rsem": [
@@ -26,9 +24,7 @@
       "sub",
       "dn",
       "snr",
-      "blob",
       "cd",
-      "glv_rsem_roi",
       "glv_rsem"
     ]
   },
@@ -85,28 +81,9 @@
       },
       "enabled": true
     },
-    "blob": {
-      "step": "blob_segment",
-      "params": {
-        "min_area": 6,
-        "snr_threshold": 200
-      },
-      "enabled": true
-    },
     "cd": {
       "step": "cd_measure",
       "params": {},
-      "enabled": true
-    },
-    "glv_patch_roi": {
-      "step": "roi_define",
-      "params": {
-        "name": "glv_patch_roi",
-        "shape": "center",
-        "size": 64.0,
-        "size_unit": "px",
-        "source": "diff"
-      },
       "enabled": true
     },
     "glv_patch": {
@@ -114,7 +91,7 @@
       "params": {
         "source": "diff",
         "metrics": "glv_max,glv_median,glv_std",
-        "roi": "glv_patch_roi"
+        "roi": ""
       },
       "enabled": true
     },
@@ -127,23 +104,12 @@
       },
       "enabled": true
     },
-    "glv_rsem_roi": {
-      "step": "roi_define",
-      "params": {
-        "name": "glv_rsem_roi",
-        "shape": "center",
-        "size": 128.0,
-        "size_unit": "px",
-        "source": "diff"
-      },
-      "enabled": true
-    },
     "glv_rsem": {
       "step": "glv_stats",
       "params": {
         "source": "diff",
         "metrics": "glv_max,glv_median,glv_std",
-        "roi": "glv_rsem_roi"
+        "roi": ""
       },
       "enabled": true
     }

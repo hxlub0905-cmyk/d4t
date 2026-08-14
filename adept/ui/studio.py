@@ -68,7 +68,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
@@ -136,7 +136,8 @@ class _GlyphToolButton(_GlyphMixin, QToolButton):
     """工具列上會自己畫圖示的 QToolButton（``_tool_button(icon=…)`` 用）。"""
 
 from .workers import (
-    DatasetLoadWorker, PreviewWorker, RegionCheckWorker, TrialWorker,
+    CalibrateWorker, DatasetLoadWorker, PreviewWorker, RegionCheckWorker,
+    TrialWorker,
     _ThreadedWorker,
 )
 
@@ -174,7 +175,7 @@ _SCORE_LIBRARY_ENTRY = {
 
 #: 「載入範本」讀的檔案（repo 內的 die-to-die 範例）。
 TEMPLATE_RECIPE = Path(__file__).resolve().parents[2] / "examples" / "recipes" \
-    / "die_to_die_basic.json"
+    / "cross_regions.json"
 
 #: 試跑用的影像段快取位置（跨次試跑重用，第二次調參會明顯變快）。
 DEFAULT_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".adept", "cache")
@@ -436,6 +437,11 @@ class StudioWindow(QMainWindow):
         self.trial_worker = TrialWorker(self)
         self.thumb_worker = ThumbWorker(self)
         self.region_check_worker = RegionCheckWorker(self)
+        self.calibrate_worker = CalibrateWorker(self)
+        self.calibrate_worker.ready.connect(self._on_calibrated)
+        self.calibrate_worker.failed.connect(
+            lambda msg: self._status("Measuring across the lot failed: %s"
+                                     % msg, "error"))
 
         # ---- 去抖動計時器 --------------------------------------------------
         self._preview_timer = QTimer(self)
@@ -2213,7 +2219,7 @@ class StudioWindow(QMainWindow):
                             "   score %.4g" % score if score is not None else ""))
 
     #: 會產生投影曲線的卡片 key（面板只在編輯它的時候出現）。
-    PROFILE_STEP = "roi_profile"
+    PROFILE_STEP = "roi_cross"
 
     # ==================================================================== #
     # 區域跨顆檢視（F7-11）
@@ -2300,6 +2306,8 @@ class StudioWindow(QMainWindow):
         current = type(self._inspector) if self._inspector is not None else None
         if cls is not current:
             if self._inspector is not None:
+                # 面板被拆掉就不會再有「放開」——影像上的綠帶會永遠留著。
+                self._on_measure_ended()
                 self.inspector_slot.removeWidget(self._inspector)
                 self._inspector.setParent(None)
                 self._inspector.deleteLater()
@@ -2307,12 +2315,136 @@ class StudioWindow(QMainWindow):
             if cls is not None:
                 self._inspector = cls(self.inspector_host)
                 self.inspector_slot.addWidget(self._inspector)
+                self._connect_inspector(self._inspector)
             self.btn_tab_card.setText(str(getattr(cls, "title", "Card"))
                                       if cls is not None else "Card")
         # **每次都要同步頁面**，不能因為「儀表類別沒變」就跳過：兩張都沒有儀表
         # 的卡片連續選下去時，類別確實沒變（都是 None），但畫面若停在儀表那一頁
         # 就是一片空白 —— 而那比原本的特徵表還糟。
         self.show_bottom_page(0 if cls is not None else 1)
+
+    def _connect_inspector(self, insp: Any) -> None:
+        """儀表能發的選配訊號在這裡接起來。
+
+        用 ``getattr`` 探而不是 ``isinstance``：加一個會量測的儀表時，這裡不必
+        跟著改（F7-17 那條「加新卡不必動 UI」的延伸）。
+        """
+        sig = getattr(insp, "measure_changed", None)
+        if sig is not None:
+            sig.connect(self._on_measure)
+        sig = getattr(insp, "measure_ended", None)
+        if sig is not None:
+            sig.connect(self._on_measure_ended)
+        sig = getattr(insp, "param_requested", None)
+        if sig is not None:
+            sig.connect(self._on_param_requested)
+        sig = getattr(insp, "calibrate_requested", None)
+        if sig is not None:
+            sig.connect(self._on_calibrate_requested)
+
+    #: 一鍵校正最多量幾顆。統計上 50 顆已經把單張雜訊除到 1/7，再多只是等待。
+    CALIBRATE_LIMIT = 60
+
+    def _on_calibrate_requested(self) -> None:
+        """一鍵校正（F8 第七輪）：整批量 pitch/線寬，量完填回這張卡。
+
+        跟「量測尺」「Use」是同一件事的三個尺度：拖一把尺（手動、單段）、
+        按 Use（自動、單張）、按這顆（自動、整批）。批次的價值在統計 ——
+        pitch 是設計常數，每張量的都是同一個數字，中位數把單張的雜訊除掉；
+        小 patch 看不出「間距交錯」，一批看得出。
+        """
+        nid = self.selected_node
+        node = self.model.nodes.get(nid or "")
+        if node is None or node.step != self.PROFILE_STEP:
+            return
+        items = self._items()
+        if not items:
+            self._status("Load a KLARF first - measuring across the lot "
+                         "needs the lot.", "error")
+            return
+        if not self.calibrate_worker.start(
+                self.model.to_recipe(), items[:self.CALIBRATE_LIMIT],
+                self.model.kind, nid, dict(node.params)):
+            self._status("Still measuring - please wait.")
+            return
+        self._status("Measuring stripe pitch and width on %d defects…"
+                     % min(len(items), self.CALIBRATE_LIMIT))
+
+    def _on_calibrated(self, result: Any) -> None:
+        """量完了：能填的填進卡片（走 set_param，可復原），不能填的講原因。"""
+        nid = self.selected_node
+        node = self.model.nodes.get(nid or "")
+        if node is None or node.step != self.PROFILE_STEP:
+            return                        # 量的過程中使用者換卡了 —— 別亂寫
+        res = dict(result or {})
+        filled, refused = [], []
+        for axis, side, word in (("x", "vertical", "upright"),
+                                 ("y", "horizontal", "flat")):
+            cal = res.get(axis)
+            if cal is None:
+                continue
+            if cal.note:
+                refused.append("%s: %s" % (word, cal.note))
+                continue
+            self.model.set_param(nid, "%s_pitch" % side, round(cal.pitch, 3))
+            self.model.set_param(nid, "%s_pitch_2" % side,
+                                 round(cal.pitch_2, 3))
+            bits = ("pitch %.1f / %.1f px" % (cal.pitch, cal.pitch_2)
+                    if cal.pitch_2 >= 2.0 else "pitch %.1f px" % cal.pitch)
+            if cal.width >= 1.0:
+                self.model.set_param(nid, "%s_width" % side,
+                                     round(cal.width, 3))
+                bits += ", width %.1f px" % cal.width
+            filled.append("%s %s (%d defects, %.0f%% agree)"
+                          % (word, bits, cal.n_used, cal.agree * 100.0))
+        node = self.model.nodes.get(nid)
+        self.param_form.set_step(
+            get_step(node.step).describe(), node.params,
+            self.model.available_streams(before_node=nid))
+        if refused:
+            # 拒絕的那一半是**主角**：它講的是「這批 patch 自己不同意」，
+            # 而那正是 kinds 沒設對的樣子。填了的也要一起講 —— 只報壞消息
+            # 的話，使用者會以為整件事失敗了，然後把填好的那一半也改掉。
+            msg = "Not filled in - %s" % " · ".join(refused)
+            if filled:
+                msg = "Filled %s. %s" % (" · ".join(filled), msg)
+            self._status(msg, "error")
+        elif filled:
+            self._status("Measured across the lot: %s." % " · ".join(filled))
+        else:
+            self._status("Nothing to measure - no defects had stripes.",
+                         "error")
+
+    def _on_param_requested(self, name: str, value: Any) -> None:
+        """儀表說「這一格該是這個值」（目前只有「量給我填」用到）。
+
+        走的是跟使用者自己動參數表**同一條路**（``set_param`` → 復原堆疊 →
+        重跑預覽），所以它可以被 Ctrl+Z 撤銷 —— 一個會改 recipe 而撤不掉的
+        按鈕，比沒有那顆按鈕糟。
+        """
+        nid = self.selected_node
+        if not nid or nid not in self.model.nodes:
+            return
+        self._on_param_edited(str(name), value)
+        # 參數表要跟著顯示新值 —— 不然畫面上那一格還是舊的，而使用者按了鈕。
+        node = self.model.nodes.get(nid)
+        if node is not None:
+            self.param_form.set_step(
+                get_step(node.step).describe(), node.params,
+                self.model.available_streams(before_node=nid))
+
+    def _on_measure(self, axis: str, start: float, end: float) -> None:
+        """曲線面板上按著量測尺 → 影像上標出同一段（F8）。
+
+        兩張圖都標：並排比對開著的時候，使用者量的是「這個位置」而不是
+        「左邊那張的這個位置」。
+        """
+        for view in (self.image_view, self.image_view_b):
+            view.set_measure(axis, start, end)
+
+    def _on_measure_ended(self) -> None:
+        for view in (self.image_view, self.image_view_b):
+            view.clear_measure()
 
     def _refresh_inspector(self, result: Any = None) -> None:
         """把三種來源餵給儀表：這張卡的參數、這一顆的結果、整批的結果。"""
@@ -2535,6 +2667,53 @@ class StudioWindow(QMainWindow):
         if self.compare_check.isChecked():
             self.image_view_b.set_image(
                 self._preview_images.get(self.stream_combo_b.currentText()))
+        self._refresh_region_overlay()
+
+    def region_overlay(self) -> List[Tuple[float, float, float, float]]:
+        """**選著的那張卡**這一顆定出來的框（正規化座標，可能有好幾個）。
+
+        只畫選著那張卡自己宣告的區域（``resolve_regions_out``），不是 context
+        裡所有的框：一份 recipe 常常有好幾張 Region 卡，全部畫出來會變成一團
+        分不清誰是誰的線，而使用者現在在調的就是手上那一張。
+        """
+        node = self.model.nodes.get(self.selected_node or "")
+        ctx = getattr(getattr(self, "_last_result", None), "context", None)
+        if node is None or ctx is None:
+            return []
+        try:
+            names = list(get_step(node.step).resolve_regions_out(node.params))
+        except Exception:                  # noqa: BLE001 — 顯示用，不能擋畫面
+            return []
+        out: List[Tuple[float, float, float, float]] = []
+        for name in names:
+            # ``_center`` 是同一組框裡的一個，畫兩次只會變成粗一點的線。
+            # 它的角色由 focus 表達（見下面），不是多畫一個框。
+            if name.endswith("_center"):
+                continue
+            out.extend(tuple(float(v) for v in r)
+                       for r in ctx.roi_norm_rects(name))
+        return out
+
+    def _refresh_region_overlay(self) -> None:
+        """把框疊到預覽影像上。**每次預覽算完都會走這裡**，所以拖參數的時候
+        框是跟著動的 —— 那正是這種參數唯一調得動的方式（F7-8）。"""
+        boxes = self.region_overlay()
+        focus = self._focus_box_index(boxes)
+        for view in (self.image_view, self.image_view_b):
+            view.set_overlay(boxes, focus)
+
+    def _focus_box_index(self, boxes: Sequence[Sequence[float]]) -> int:
+        """哪一個框要畫成醒目的那一個 —— 離影像正中心最近的那個。
+
+        缺陷永遠在 patch 正中心（裁切方式保證的），所以那一塊就是「**這一顆**
+        發生了什麼」的所在。一堆一模一樣的框裡看不出哪個是它。
+        """
+        best, best_d = -1, None
+        for i, (nx, ny, nw, nh) in enumerate(boxes):
+            d = (nx + nw / 2.0 - 0.5) ** 2 + (ny + nh / 2.0 - 0.5) ** 2
+            if best_d is None or d < best_d:
+                best, best_d = i, d
+        return best
 
     def _on_stream_changed(self, text: str) -> None:
         if self._syncing:

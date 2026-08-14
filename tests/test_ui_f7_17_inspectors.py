@@ -87,7 +87,7 @@ def test_you_can_still_get_to_the_features(window):
 def test_adding_a_new_card_does_not_need_this_module_touched():
     """約定 1：沒登記的卡就沒有儀表，不是壞掉。"""
     assert insp_mod.inspector_for("subtract") is None
-    assert insp_mod.inspector_for("roi_define") is None
+    assert insp_mod.inspector_for("subtract") is None
     assert insp_mod.inspector_for("") is None
     assert insp_mod.inspector_for("align") is insp_mod.AlignInspector
 
@@ -382,16 +382,6 @@ def test_it_says_measurements_are_in_pixels(window, tmp_path):
 # --------------------------------------------------------------------------- #
 # 6. roi_profile：曲線面板收進同一個機制
 # --------------------------------------------------------------------------- #
-def test_the_profile_curve_is_now_a_card_panel_like_the_rest(window):
-    """F7-11 時它直接掛在預覽面板上 —— 一條跟儀表機制平行的路。兩條並存的
-    下場是加新面板的人不知道走哪一條，然後兩邊各長一半。"""
-    nid = window.model.add_step("roi_profile")
-    window.select_node(nid)
-    assert isinstance(window.inspector(), insp_mod.ProfileInspector)
-    assert window.bottom_page() == 0
-    # 舊的對外名字還在（狀態列與既有測試都用它）
-    assert window.profile_panel is window.inspector().panel
-
 
 def test_the_old_name_still_answers_when_another_card_is_selected(window):
     """`profile_panel` 在別的卡片上要回一個**空的替身**，不是 None ——

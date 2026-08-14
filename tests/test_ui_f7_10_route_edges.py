@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
-EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "recipes" \
+EXAMPLE = Path(__file__).resolve().parent / "fixtures" / "recipes" \
     / "die_to_die_basic.json"
 
 

@@ -45,6 +45,7 @@ from adept.core.ingest import dataset, klarf_core, tiff_index  # noqa: E402
 # 圖案／缺陷合成的共用零件（與 make_sample_rsem.py 共用，數值行為完全相同）
 from _synth import (  # noqa: E402
     NUISANCE_TYPE, REAL_TYPES,
+    line_grid as _line_grid,
     pattern as _pattern,
     plant_anomaly as _plant_anomaly,
     rounded_square_tile as _rounded_square_tile,
@@ -100,8 +101,14 @@ def _make_klarf_text(n: int, rows) -> str:
 
 def generate(out_dir, n: int = 24, real_frac: float = 0.5, size: int = 128,
              pitch: int = 16, noise: float = 6.0, seed: int = 7,
-             shift_max: int = 0) -> Dict[str, str]:
-    """產生合成 lot 並自我驗證 ingest 層讀得回來。回傳輸出檔路徑 dict。"""
+             shift_max: int = 0, pattern: str = "cells") -> Dict[str, str]:
+    """產生合成 lot 並自我驗證 ingest 層讀得回來。回傳輸出檔路徑 dict。
+
+    ``pattern="cells"``（預設）是圓角方塊晶格 —— 兩軸同週期。
+    ``pattern="lines"`` 是**直線壓在橫線上**、兩軸週期不同（F8 的交會定位要
+    練的就是這種 layout）。預設那條路的數值行為一個位元組都沒有變 ——
+    ``tests/test_make_sample.py`` 有「同 seed → TIFF 位元組完全相同」的鎖。
+    """
     if n < 1:
         raise ValueError(f"n 至少要 1（收到 {n}）")
     if not (0.0 <= real_frac <= 1.0):
@@ -135,8 +142,18 @@ def generate(out_dir, n: int = 24, real_frac: float = 0.5, size: int = 128,
         oy = int(rng.integers(0, pitch))
         dx = int(rng.integers(-shift_max, shift_max + 1))
         dy = int(rng.integers(-shift_max, shift_max + 1))
-        test_f = _pattern(size, pitch, ox, oy, tile)
-        ref_f = _pattern(size, pitch, ox - dx, oy - dy, tile)
+        if str(pattern) == "lines":
+            # 兩軸不同週期：直線 pitch = ``pitch``，橫線 pitch = 1.4 倍。
+            # 刻意取一個不整除的比例 —— 整除的話兩組條紋每個週期都在同一個
+            # 地方交會，那是最好認的情況，練不到什麼。
+            yp = max(3, int(round(pitch * 1.4)))
+            test_f = _line_grid(size, pitch, max(1, pitch // 3), yp,
+                                max(1, int(yp * 0.42)), ox, oy)
+            ref_f = _line_grid(size, pitch, max(1, pitch // 3), yp,
+                               max(1, int(yp * 0.42)), ox - dx, oy - dy)
+        else:
+            test_f = _pattern(size, pitch, ox, oy, tile)
+            ref_f = _pattern(size, pitch, ox - dx, oy - dy, tile)
 
         is_real = i in real_idx
         if is_real:
@@ -214,10 +231,15 @@ def main(argv=None) -> int:
     ap.add_argument("--seed", type=int, default=7, help="隨機種子（同 seed 產出相同位元組）")
     ap.add_argument("--shift-max", type=int, default=0,
                     help="ref 相對 test 的最大平移（像素，預設 3）")
+    ap.add_argument("--pattern", choices=("cells", "lines"), default="cells",
+                    help=("圖案：cells = 圓角方塊晶格（兩軸同週期，預設）；"
+                          "lines = 直線壓在橫線上、兩軸週期不同"
+                          "（練 Locate regions where patterns cross）"))
     args = ap.parse_args(argv)
     paths = generate(args.out_dir, n=args.n, real_frac=args.real_frac,
                      size=args.size, pitch=args.pitch, noise=args.noise,
-                     seed=args.seed, shift_max=args.shift_max)
+                     seed=args.seed, shift_max=args.shift_max,
+                     pattern=args.pattern)
     print("Generated synthetic lot:")
     for k in ("klarf", "tiff", "ground_truth"):
         print(f"  {k:12s} {paths[k]}")

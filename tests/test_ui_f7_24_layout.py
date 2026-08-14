@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
 EXAMPLE_RECIPE = (Path(__file__).resolve().parent.parent
-                  / "examples" / "recipes" / "die_to_die_basic.json")
+                  / "tests" / "fixtures" / "recipes" / "die_to_die_basic.json")
 
 
 def _import_qt(g):

@@ -60,6 +60,33 @@ def regions_of_node(node: Any) -> List[str]:
         return []
 
 
+def collect_source_images(recipe: Any, items: Sequence[Any], kind: str,
+                          node_id: str, source: str,
+                          limit: int = MAX_CHECK) -> List[Any]:
+    """對每一顆跑到 ``node_id`` 為止，取出那張卡要讀的 ``source`` 影像。
+
+    一鍵校正（F8 第七輪）用的：量 pitch 要量在**卡片實際看的那條流**上 ——
+    上游若有 Denoise/Normalize，量原始檔就量錯了對象。跑 pipeline 的方式跟
+    :func:`check_regions` 完全相同，所以「量到的」與「跑起來的」一定一致。
+
+    **永不 raise**：單顆出錯就少一張（校正是統計，缺幾張沒關係；
+    但如果整批都掛，回傳空清單，聚合那一層會講出來）。
+    """
+    out: List[Any] = []
+    for item in list(items)[:int(limit)]:
+        try:
+            res = run_defect(recipe, item, kind, keep_context=True,
+                             upto_node=node_id)
+        except Exception:                    # noqa: BLE001 — 單顆爆不殺整批
+            continue
+        ctx = getattr(res, "context", None)
+        images = dict(getattr(ctx, "images", {}) or {}) if ctx is not None else {}
+        img = images.get(str(source))
+        if img is not None:
+            out.append(np.asarray(img))
+    return out
+
+
 def check_regions(recipe: Any, items: Sequence[Any], kind: str, node_id: str,
                   regions: Sequence[str], thumb_size: int = 120,
                   source: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -112,9 +139,12 @@ def check_regions(recipe: Any, items: Sequence[Any], kind: str, node_id: str,
         for name in wanted:
             if name not in names:
                 continue
-            nx, ny, nw, nh = ctx.require_roi(name).norm_rect
-            entry["boxes"].append((name, (
-                x0 + nx * tw, y0 + ny * th, max(1.0, nw * tw), max(1.0, nh * th))))
+            # **每一塊都要畫。** 一個名字底下可以有好幾個框（F8 的交會定位），
+            # 只畫第一個的話畫面會說謊：使用者看到一個框、實際上量的是八個。
+            for nx, ny, nw, nh in ctx.roi_norm_rects(name):
+                entry["boxes"].append((name, (
+                    x0 + nx * tw, y0 + ny * th,
+                    max(1.0, nw * tw), max(1.0, nh * th))))
 
         # ``locate_ok`` 是投影定位卡吐的旗標；沒有這個特徵的 Region 卡
         # （例如手畫的框）一律當成定位成功 —— 它本來就不需要定位。

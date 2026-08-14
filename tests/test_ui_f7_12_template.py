@@ -160,7 +160,7 @@ def test_the_button_only_shows_for_the_card_that_needs_a_template(window):
     window.select_node(nid)
     assert window.template_build_available() is True
 
-    other = window.model.add_step("roi_profile")
+    other = window.model.add_step("roi_cross")
     window.select_node(other)
     assert window.template_build_available() is False
     assert window.open_template_dialog() is None

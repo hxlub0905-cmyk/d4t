@@ -331,6 +331,61 @@ def build(out_name: str = "ADEPT_bundle.py", root: str = "",
     return "\n".join(parts) + "\n"
 
 
+#: 一個檔案最多幾 KB。**GitHub 不顯示超過 1 MB 的檔案**，而公司機唯一的
+#: 取得方式是「在 GitHub 上看到、按複製鈕」。留一成餘裕給下一次成長。
+LIMIT_KB = 900
+
+
+def _content_bytes(items: List[Tuple[str, bytes]]) -> int:
+    return sum(len(d) for _r, d in items)
+
+
+def _fit(items: List[Tuple[str, bytes]], compress: bool, limit: int
+         ) -> List[List[Tuple[str, bytes]]]:
+    """切到**每一批真的塞得下**為止。
+
+    為什麼是量出來不是算出來：壓縮率跟內容有關（這個 repo 大量重複的
+    docstring 壓得特別好），任何事先估的比例都會在某一次改動之後失準 ——
+    而失準的症狀是「打包成功，但那個檔案在公司機上點不開」。
+
+    2026-08-14 記：壓縮版一度被當成「一定塞得進一個檔案」，那個假設在
+    repo 長到 908 KB 的那天過期了。
+    """
+    limit = max(1, int(limit))
+    total = _content_bytes(items)
+    groups = [list(items)]
+    for _ in range(32):
+        sizes = [len(build("x.py", items=g, part=i, n_parts=len(groups),
+                           total_files=len(items), compress=compress)
+                     .encode("utf-8")) for i, g in enumerate(groups, 1)]
+        if max(sizes) <= limit:
+            return groups
+        nxt = _slice(items, max(1, total // (len(groups) + 1) + 1))
+        if len(nxt) <= len(groups):
+            return groups                 # 切不下去了（單一檔案就超過上限）
+        groups = _merge_tail(nxt, compress, limit, len(items))
+    return groups
+
+
+def _merge_tail(groups: List[List[Tuple[str, bytes]]], compress: bool,
+                limit: int, total_files: int) -> List[List[Tuple[str, bytes]]]:
+    """把尾巴上塞得下的批併回去。
+
+    貪心切割會留下一個很小的尾批（實測 492 / 480 / **29** KB）——「還要再複製
+    一次」對那台只能用剪貼簿的機器是實打實的成本，而那 29 KB 明明併得進去。
+    """
+    out = [list(g) for g in groups]
+    while len(out) > 1:
+        merged = out[:-2] + [out[-2] + out[-1]]
+        sizes = [len(build("x.py", items=g, part=i, n_parts=len(merged),
+                           total_files=total_files, compress=compress)
+                     .encode("utf-8")) for i, g in enumerate(merged, 1)]
+        if max(sizes) > limit:
+            break
+        out = merged
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Pack the repo into one plain-text self-extracting .py")
@@ -347,11 +402,13 @@ def main(argv=None) -> int:
                           "400 是安全值。"))
     a = ap.parse_args(argv)
 
-    if a.compress and a.split:
-        print("--compress 已經塞得進一個檔案了，不要再 --split。")
-        return 2
     items = collect()
-    groups = _slice(items, a.split * 1024) if a.split else [items]
+    if a.compress and not a.split:
+        # **壓縮版也會長大。** 它一度是 701 KB，2026-08-14 到了 908 KB。
+        # 所以不再假設「壓縮就一定塞得進一個檔案」：量出來，塞不下就分批。
+        groups = _fit(items, True, LIMIT_KB * 1024)
+    else:
+        groups = _slice(items, a.split * 1024) if a.split else [items]
     out_dir = os.path.dirname(os.path.abspath(a.out))
     if out_dir and not os.path.isdir(out_dir):
         os.makedirs(out_dir, exist_ok=True)

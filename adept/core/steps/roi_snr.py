@@ -38,10 +38,9 @@ class RoiSnrStep(Step):
         ParamSpec(name="source", type="image_key", default="diff",
                   help=("Image stream to measure on (usually diff; leave diff "
                         "unsigned to keep bright/dark direction visible).")),
-        ParamSpec(name="roi", type="str", default="blob",
-                  help=("Which region to measure in — the name given by a "
-                        "Define region card, or 'blob' for the main blob found "
-                        "by Blob segment. Leave empty for the whole image.")),
+        ParamSpec(name="roi", type="str", default="",
+                  help=("Which region to measure in — the name given by an ROI "
+                        "card upstream. Leave empty for the whole image.")),
         ParamSpec(name="background_margin", type="int", default=20, min=1, max=200,
                   help=("Background sampling width in pixels: the ring outside the "
                         "ROI used for background statistics.")),

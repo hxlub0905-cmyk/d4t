@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-EXAMPLE_RECIPE = REPO / "examples" / "recipes" / "die_to_die_basic.json"
+EXAMPLE_RECIPE = REPO / "tests" / "fixtures" / "recipes" / "die_to_die_basic.json"
 
 sys.path.insert(0, str(REPO / "tools"))
 from make_sample import generate  # noqa: E402
@@ -91,7 +91,7 @@ def test_window_constructs_with_library_cards(window):
     assert window.library.entry("snr_map") is not None
     assert window.library.entry("load_patch") is not None
     assert window.library.section_titles() == [
-        "Input", "Enhance", "Region", "Compare", "Measure", "ADC"]
+        "Input", "Enhance", "ROI", "Compare", "Measure", "ADC"]
 
     # 空狀態：畫布上只有起手的 Input 卡（F7-9），而且它已經被選起來 ——
     # 一開窗右欄就有東西可以動，不是一句「請先挑一張卡」。

@@ -404,3 +404,62 @@ class RegionCheckWorker(_ThreadedWorker):
 
     def _job_finished(self) -> None:
         self.busy.emit(False)
+
+
+class CalibrateWorker(_ThreadedWorker):
+    """一鍵校正（F8 第七輪）：整批量出兩個方向的 pitch 與線寬。
+
+    背景執行緒的理由跟 :class:`RegionCheckWorker` 一模一樣 —— 每顆都要跑一次
+    pipeline 到那張卡為止，N 顆就是 N 次。
+
+    訊號：``ready(dict)``（``{"x": AxisCalibration, "y": …}``）、
+    ``busy(bool)``、``failed(str)``。
+    """
+
+    ready = Signal(object)
+    busy = Signal(bool)
+    failed = Signal(str)
+
+    def start(self, recipe: Recipe, items: Any, kind: str, node_id: str,
+              params: Any) -> bool:
+        if self.is_running():
+            return False
+        args = (recipe, list(items), str(kind), str(node_id), dict(params))
+
+        def job() -> None:
+            try:
+                out = CalibrateWorker.run_sync(*args)
+            except Exception as e:          # noqa: BLE001 — 合約外的意外
+                self.failed.emit(f"{type(e).__name__}: {e}")
+            else:
+                self.ready.emit(out)
+
+        self.busy.emit(True)
+        self._start_job(job)
+        return True
+
+    @staticmethod
+    def run_sync(recipe: Recipe, items: Any, kind: str, node_id: str,
+                 params: Any) -> Dict[str, Any]:
+        """同步版（測試用）。量測用**這張卡目前的**挑組設定（select / kinds /
+        sensitivity / smooth），但不給 pitch —— 校正量的正是那個。"""
+        from adept.core.algo.grid import calibrate_axis
+
+        from .region_check import collect_source_images
+        p = dict(params or {})
+        images = collect_source_images(recipe, list(items), str(kind),
+                                       str(node_id),
+                                       str(p.get("source", "ref")))
+        out: Dict[str, Any] = {"n_images": len(images)}
+        for axis, side in (("x", "vertical"), ("y", "horizontal")):
+            out[axis] = calibrate_axis(
+                images, axis,
+                select=str(p.get("%s_select" % side, "brightest")),
+                kinds=int(p.get("%s_kinds" % side, 0) or 0),
+                sensitivity=float(p.get("%s_sensitivity" % side, 0.35)),
+                smooth=int(p.get("smooth", 3) or 3),
+                min_confidence=float(p.get("min_confidence", 5.0)))
+        return out
+
+    def _job_finished(self) -> None:
+        self.busy.emit(False)

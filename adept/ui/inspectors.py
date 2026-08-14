@@ -36,7 +36,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
@@ -44,7 +44,7 @@ from .theme import TOKENS
 
 __all__ = ["Inspector", "AlignInspector", "EnhanceInspector",
            "MeasureInspector", "InputInspector",
-           "ProfileInspector", "TemplateInspector",
+           "CrossInspector", "TemplateInspector",
            "INSPECTORS", "inspector_for"]
 
 
@@ -519,46 +519,117 @@ class EnhanceInspector(Inspector):
                    Qt.AlignLeft | Qt.AlignVCenter, "after")
 
 
-class ProfileInspector(Inspector):
-    """`roi_profile`：投影曲線 + 找到的轉折 + 選中的那一段。
+class CrossInspector(Inspector):
+    """`roi_cross`：兩個方向各一條曲線，加上一行「這一顆到底拿到了什麼」。
 
-    這一塊是 F7-11 就做好的（``widgets.ProfilePanel``），只是當時直接掛在預覽
-    面板上 —— 也就是一條**跟儀表機制平行的路**。兩條路並存的下場是：加新面板的
-    人不知道該走哪一條，然後兩邊各長一半。所以把它收進來，畫的還是同一個元件。
+    為什麼要兩條曲線
+    ----------------
+    交會處是兩組條紋**共同**定義的，所以失敗也有兩種，而且處置完全不同：
+    直的那組沒抓到、還是橫的那組沒抓到。只給一條曲線（或只給一個信心值）的話，
+    使用者只知道「失敗了」，卻不知道該去調哪一半 —— 而這張卡有兩組
+    sensitivity / pitch。
 
-    「敏感度要調多少」對不會寫 code 的人是沒有答案的問題，除非他看得到曲線、
-    看得到目前抓到幾條線、看得到線落在哪 —— 沒有這個面板，那張卡就只是另一個
-    要盲填的數字。
+    畫的資料來自引擎那一次計算（``ctx.meta["crossings"]``），UI 不自己再算。
     """
 
-    title = "Profile"
+    title = "Crossings"
+
+    #: 量測尺（F8）：轉發兩條曲線各自的訊號，讓主視窗在影像上標同一段。
+    #: 這裡不做判斷，只轉發 —— 儀表不該知道影像檢視器存不存在。
+    measure_changed = Signal(str, float, float)
+    measure_ended = Signal()
+    #: 「把量到的間距填進參數格」→ 主視窗做 ``model.set_param``。
+    #: 儀表不碰模型（它連 recipe 長什麼樣都不知道），只說出請求。
+    param_requested = Signal(str, object)
+    #: 「用**整批** patch 量一次，把結果填進參數」（F8 第七輪的一鍵校正）。
+    #: 儀表發不動這件事 —— 它沒有 dataset 也沒有 recipe，只有主視窗有。
+    calibrate_requested = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        from .widgets import ProfilePanel
+        from .widgets import ProfilePanel, small_button
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        self.panel = ProfilePanel(self)
-        # 原本掛在預覽面板上時它是**固定高**（那裡的高度是搶來的）。搬進儀表
-        # 之後那一格本來就是給它的，不撐開的話曲線只佔下半截、上面一片空白。
-        self.panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        lay.addWidget(self.panel)
+        lay.setSpacing(4)
+
+        # 一鍵校正。放在兩條曲線的上面：它做的事是「把這兩條曲線在整批上
+        # 各量一次」，而按鈕要貼著它講的東西。
+        self.calibrate_btn = small_button(
+            "Measure pitch && width from this lot", shape="wide",
+            tip=("Measure the stripe spacing and width on every loaded "
+                 "defect and fill the answers into this card. One patch "
+                 "measures with a little noise and a small patch often "
+                 "cannot even tell that the spacing alternates - the whole "
+                 "lot can. Uses the card's current material settings "
+                 "(which stripes, how many kinds), so set those first."),
+            parent=self)
+        self.calibrate_btn.clicked.connect(self.calibrate_requested)
+        head = QVBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.addWidget(self.calibrate_btn, 0, Qt.AlignLeft)
+        lay.addLayout(head)
+
+        self.across = ProfilePanel(self)
+        self.down = ProfilePanel(self)
+        for panel in (self.across, self.down):
+            panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            panel.measure_changed.connect(self.measure_changed)
+            panel.measure_ended.connect(self.measure_ended)
+            panel.pitch_requested.connect(self._on_pitch_requested)
+            lay.addWidget(panel)
+
+    def _on_pitch_requested(self, axis: str, pitch: float,
+                            pitch_2: float) -> None:
+        """曲線的軸 → 這張卡的參數名。
+
+        ``axis="x"`` 是沿 X 走的曲線，找到的是**直的**條紋 → ``vertical_*``。
+        這一步每次都要在腦裡轉一次，所以它只寫在這裡一個地方。
+        """
+        side = "vertical" if str(axis) == "x" else "horizontal"
+        self.param_requested.emit("%s_pitch" % side, float(pitch))
+        # 第二格一定要跟著送 —— 只送第一格的話，上一次留下來的交錯值會跟
+        # 新量到的單一 pitch 湊成一組沒有人量過的組合。
+        self.param_requested.emit("%s_pitch_2" % side, float(pitch_2))
 
     def region(self) -> str:
         return str(self.params.get("roi_out") or "")
 
+    def record(self) -> Dict[str, Any]:
+        crossings = dict(self.meta.get("crossings") or {})
+        name = self.region()
+        return dict(crossings.get(name) or (
+            list(crossings.values())[0] if len(crossings) == 1 else {}))
+
     def set_context(self, *a, **kw) -> None:   # noqa: D102
         super().set_context(*a, **kw)
-        profiles = dict(self.meta.get("profiles") or {})
-        name = self.region()
-        self.panel.set_data(name, profiles.get(name))
+        rec = self.record()
+        self.across.set_data("upright stripes", rec.get("x"))
+        self.down.set_data("flat stripes", rec.get("y"))
 
     def has_data(self) -> bool:
-        return bool(self.panel.has_data())
+        return bool(self.record())
+
+    def empty_reason(self) -> str:
+        return "Run a trial to see the two curves this card locks onto."
 
     def summary(self) -> str:
-        return self.panel.summary()
+        rec = self.record()
+        if not rec:
+            return ""
+        if not rec.get("ok"):
+            # 失敗的時候 reason 就是全部的資訊 —— 它已經講了是哪個方向。
+            return "not located — %s" % (rec.get("reason") or "unknown")
+        bits = ["%d boxes" % len(rec.get("boxes") or [])]
+        for tag, key in (("upright", "x"), ("flat", "y")):
+            s = dict(rec.get(key) or {})
+            bits.append("%s pitch %.1f px" % (tag, float(s.get("pitch_used", 0.0))))
+        filled = sum(int((rec.get(k) or {}).get("filled", 0)) for k in ("x", "y"))
+        if filled:
+            bits.append("%d stripe(s) filled in from the pitch you gave" % filled)
+        if rec.get("reason"):
+            bits.append(str(rec["reason"]))
+        return " · ".join(bits)
 
     def paintEvent(self, _e) -> None:          # noqa: D102 - 內容由子元件畫
         pass
@@ -978,7 +1049,7 @@ class InputInspector(Inspector):
 #: 少的那五個不是被拿掉，是變成 ``normalize`` / ``tone`` 的一個下拉選項。
 INSPECTORS: Dict[str, type] = {
     "load_patch": InputInspector,
-    "roi_profile": ProfileInspector,
+    "roi_cross": CrossInspector,
     "roi_template": TemplateInspector,
     "align": AlignInspector,
     "tone": EnhanceInspector,
@@ -990,7 +1061,6 @@ INSPECTORS: Dict[str, type] = {
     "focus_quality": MeasureInspector,
     "roi_snr": MeasureInspector,
     "cell_period": MeasureInspector,
-    "blob_segment": MeasureInspector,
 }
 
 
