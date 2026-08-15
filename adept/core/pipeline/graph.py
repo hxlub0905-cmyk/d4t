@@ -48,7 +48,8 @@ from .recipe import Recipe, execution_order
 from .step import Step
 
 __all__ = ["Packet", "Wire", "Graph", "compile_recipe", "run_graph",
-           "DEFAULT_IN", "DEFAULT_OUT"]
+           "stream_ports", "optional_ports", "parse_stream_names",
+           "KIND_PACKET", "KIND_STREAM", "DEFAULT_IN", "DEFAULT_OUT"]
 
 #: 卡片沒有宣告埠時用的預設埠名。
 DEFAULT_IN = "in"
@@ -235,8 +236,17 @@ def stream_ports(step_cls: Optional[Type[Step]], params: Dict[str, Any],
         return (DEFAULT_IN,), (DEFAULT_OUT,)
 
     specs = list(getattr(step_cls, "params", ()) or ())
+    # **用不到的參數不該有埠。**（2026-08-15 修）
+    #
+    # ``show_when`` 已經在參數表上把「這個方法用不到」的那幾列藏起來了，但埠的
+    # 推導一開始沒看它 —— 於是 Normalize 選 percentile 的時候，畫布上還是長出
+    # 一顆 ``reference`` 埠，而且真的接了一條線。那條線**完全不影響結果**。
+    # 那是 §7「help 裡寫『這個方法用不到』是一句道歉不是設計」的同一個病，
+    # 只是搬到了畫布上。
     ins = tuple(p.name for p in specs
-                if p.type in ("image_key", "image_keys") and p.name != OUT_PARAM)
+                if p.type in ("image_key", "image_keys")
+                and p.name != OUT_PARAM
+                and p.visible_for(params))
     if not ins:
         ins = _ports(step_cls, "inputs", DEFAULT_IN)
 
@@ -255,6 +265,30 @@ def stream_ports(step_cls: Optional[Type[Step]], params: Dict[str, Any],
     if not outs:
         outs = _ports(step_cls, "outputs", DEFAULT_OUT)
     return ins, outs
+
+
+
+def optional_ports(step_cls: Optional[Type[Step]],
+                   params: Dict[str, Any]) -> Tuple[str, ...]:
+    """哪幾個輸入埠是**選用**的（畫布可以在沒接線時收起來）。
+
+    判準沿用卡片自己已經有的兩個旗標，不發明新的：``advanced``（「這一格填
+    預設值就跑得出正確答案」），或者預設值是空字串（``range_from`` /
+    ``use_within`` 那種「不填就是不做」的）。
+
+    為什麼要分級：``normalize`` 有 4 個輸入埠、``subtract`` 2 個、``align``
+    2 個 —— 全部常駐在節點旁邊的話，會跟資料流搶畫面（F7-8 那條「常駐在節點
+    旁邊的裝飾」的教訓）。非接不可的永遠顯示，其餘接了才長出來。
+    """
+    out = []
+    for spec in (getattr(step_cls, "params", ()) or ()):
+        if spec.type not in ("image_key", "image_keys") or spec.name == OUT_PARAM:
+            continue
+        if not spec.visible_for(params):
+            continue
+        if spec.advanced or not str(spec.default or "").strip():
+            out.append(spec.name)
+    return tuple(out)
 
 
 def _has_stream_inputs(step_cls: Optional[Type[Step]]) -> bool:

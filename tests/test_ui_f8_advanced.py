@@ -65,9 +65,12 @@ def test_the_advanced_rows_start_hidden(form):
 
 def test_the_rows_that_matter_are_still_there(form):
     """把「非答不可的」也收起來的話，這個功能就變成把卡片藏起來。"""
-    for name in ("source", "vertical_pitch", "vertical_width", "place",
+    for name in ("vertical_pitch", "vertical_width", "place",
                  "vertical_kinds", "roi_out", "gap", "fill_rule"):
         assert form.row_visible(name) is True, "%s 被收起來了" % name
+    # `source`（要看哪一條流）**已經不在表單裡** —— F9 Phase 3c 起那是畫布上
+    # 一條線的落腳處，不是一列參數。它不見不是被「進階」收起來的。
+    assert "source" not in form.param_names()
 
 
 def test_the_button_says_how_many_are_hidden(form):

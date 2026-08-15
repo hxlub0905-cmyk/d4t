@@ -43,7 +43,7 @@ f277b6b3e5e65ce8027da01648a0d42d44a64905 adept/core/pipeline/batch.py
 8a8f906147c0b06defc52096716ecfd917b0b94e adept/core/pipeline/curve.py
 1546f5a4c41cdce95e4a4ba47674224fa2245c11 adept/core/pipeline/engine.py
 6c3c9c1cc1e6d1ee5d121f9994968f4f780e3cc5 adept/core/pipeline/expression.py
-bb198931a79f2fbb8f05b8ae6e8abe80a4c20f90 adept/core/pipeline/graph.py
+c3e275d262860de920a43e467dd8c772255c538e adept/core/pipeline/graph.py
 f7e687f5588e57793ff5c289317554378d063fb1 adept/core/pipeline/recipe.py
 ff15b2c1e10dd3b5fce8714f04aa4f5f6fb097bc adept/core/pipeline/step.py
 550a8eda94166b5a1c24986426a905c785580b56 adept/core/steps/__init__.py
@@ -81,7 +81,7 @@ b996d921ba547e70d5c78251f70f3b56d3e27ef0 adept/ui/region_check.py
 c3bcfa463151f46f3d816375ada62109fd313403 adept/ui/theme.py
 1f15c3ec5920e70e72aa96db92324d25134021ba adept/ui/viewmodel.py
 d3cece8a28de021fe573697b0b12723c0e871aa8 adept/ui/welcome.py
-aa3f807d12749c843ec84f0800fbd60aa41adc89 adept/ui/widgets.py
+c78f9b58f2b6d7faece8badf4e232a789e8740c5 adept/ui/widgets.py
 669770bafa48f033c7d1e9fda77f342b3369070e adept/ui/workers.py
 04c5ce471195ac4e2449126ce835b22b4c880cf3 conftest.py
 ebcac66089ac8d2cbb061c18116a0e4dc4330eac docs/HANDOVER.md
@@ -90,7 +90,7 @@ b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 bff3de372166e0a7d7a8e926217507fb46d5c079 docs/plans/F7-canvas-and-taxonomy.md
 0845d2bad30945b501dd97a8b7ff965c4dc7a39b docs/plans/F8-rule-based-roi.md
-8d648d331d15e39f5b72f0ca8a202ab506da102f docs/plans/F9-graph-as-program.md
+79b4902200441e83cb000eeb2cb22c1a674aec2f docs/plans/F9-graph-as-program.md
 815878c0a316356f562d2c5a43f0de356605ea61 examples/recipes/README.md
 44398da2ee7c4dc4b6262484fc76fe1deb416b3a examples/recipes/cross_regions.json
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
@@ -166,7 +166,7 @@ c725a177010cd15bea305498f8541460b34d131b tests/test_ui_f7_18_streams_as_nodes.py
 41586da4c6352be593849acd6438cdba108c79ae tests/test_ui_f7_23_buttons.py
 490414841e894c9ff6cc94cc935fd17c1efad221 tests/test_ui_f7_24_layout.py
 85b0e4fcd1a066a79fcdb9494f0f1c09fcbf2698 tests/test_ui_f7_9_feedback.py
-7536b72440a3bcc6bea1de3f569fc2b0ba87c0d1 tests/test_ui_f8_advanced.py
+b80b38537b5410e605dc23e220d5c38fa95d92e6 tests/test_ui_f8_advanced.py
 c5d53e6848c0727aabd062344957f78c8cfcaa1c tests/test_ui_f8_calibrate.py
 72fc2c512b85565fee20c510daa0925e49fe406d tests/test_ui_f8_cross.py
 7fe333dfccbc1eeda4bb27b902826601feeb74fa tests/test_ui_f8_ruler.py
@@ -177,7 +177,7 @@ c5d53e6848c0727aabd062344957f78c8cfcaa1c tests/test_ui_f8_calibrate.py
 b33374b590ea9f5d64a90354ffaa6b8a0d1016a2 tests/test_ui_studio_m5.py
 bdd4e6d9bfb08a05aa08b1488d4fdd8c9934d4dd tests/test_ui_studio_smoke.py
 a4aaff8ae63f0ad7a122fecefe4813602469704a tests/test_ui_welcome.py
-f48f4c84abdb9fe71899122cd142d0824980b169 tests/test_ui_widgets.py
+0c63e20013295850a616cc63befee32542031544 tests/test_ui_widgets.py
 bb964880172b6da89aa3a8506d84157a68cd453c tests/test_ui_workers.py
 ffdebe9d79e6fa0d018dd51987f3c5b8bc99fa19 tests/test_viewmodel.py
 7c08c30d0accd084c2ca9ddc8374e0b2c4b2fcc1 tools/_synth.py

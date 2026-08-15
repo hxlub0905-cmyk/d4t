@@ -1655,6 +1655,11 @@ class TemplateField(QWidget):
                 "below." % (w, h, len(self._value) / 1024.0))
 
 
+#: 這幾種參數的值**由畫布上的線決定**，所以參數表不顯示它們（F9 Phase 3c）。
+#: 值仍然存在 recipe JSON 裡 —— 它是那條線的落腳處，不是給人填的欄位。
+_WIRED_PARAM_TYPES = ("image_key", "image_keys")
+
+
 class ParamForm(QWidget):
     """由 ``Step.describe()`` 的 ParamSpec dict 自動長出來的參數表單。
 
@@ -1758,6 +1763,16 @@ class ParamForm(QWidget):
             section = None
             for spec in describe.get("params", []):
                 name = str(spec.get("name", ""))
+                if str(spec.get("type", "")) in _WIRED_PARAM_TYPES:
+                    # **接線的事在畫布上做，不在這裡。**（F9 Phase 3c）
+                    #
+                    # 這幾列以前是下拉選單／勾選框，於是同一件事有兩個地方可以
+                    # 改：畫布上拉的線，和這裡選的流。兩者不一致的時候沒有人
+                    # 看得出來，而**線贏** —— 使用者改了下拉卻沒有反應。
+                    #
+                    # 現在埠名就是影像流名（`graph.stream_ports`），要換一條流
+                    # 就把線改接到別顆埠。這一列因此沒有存在的理由。
+                    continue
                 # 小標題：換組的時候插一行（F8 第三輪）。參數清單的**順序**就是
                 # 分組，所以卡片作者不必額外宣告什麼 —— 把同一組的排在一起就好。
                 want = str(spec.get("section", "") or "")

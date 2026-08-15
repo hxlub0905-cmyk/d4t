@@ -308,8 +308,12 @@ def test_param_form_int_and_image_key_from_snr_map(qapp):
     streams = ["test", "ref", "diff", "ref_aligned"]
     form.set_step(desc, {"window": 31}, streams)
 
-    # 每個 ParamSpec 都要有一列
-    assert form.param_names() == [p["name"] for p in desc["params"]]
+    # 每個 ParamSpec 都要有一列 —— **除了接線用的那幾種**（F9 Phase 3c：
+    # `source` / `out` 這種「哪一條流」的欄位在畫布上拉線決定，不在表單裡選）
+    wired = ("image_key", "image_keys")
+    assert form.param_names() == [p["name"] for p in desc["params"]
+                                  if p["type"] not in wired]
+    assert "source" not in form.param_names()
     # 建表本身不可以噴 param_edited
     assert edits == []
 
@@ -328,16 +332,14 @@ def test_param_form_int_and_image_key_from_snr_map(qapp):
     assert edits[-1] == ("clip_sigma", pytest.approx(4.5))
     assert isinstance(edits[-1][1], float)
 
-    # image_key -> 可編輯下拉，內容 = 呼叫端給的影像流
-    source = form.editor("source")
-    assert isinstance(source, QComboBox) and source.isEditable()
-    assert [source.itemText(i) for i in range(source.count())] == streams
-    assert source.currentText() == "diff"
-    source.setCurrentText("ref_aligned")
-    assert edits[-1] == ("source", "ref_aligned")
+    # image_key **沒有編輯器** —— 那條流由畫布上的線決定（F9 Phase 3c）
+    assert form.editor("source") is None
+    assert form.editor("out") is None
 
-    # 每一列都看得見白話 help（推廣鐵則）
+    # 每一列都看得見白話 help（推廣鐵則）—— 接線那幾種不在表單裡就不算
     for spec in desc["params"]:
+        if spec["type"] in wired:
+            continue
         assert form.hint_text(spec["name"]) == spec["help"]
         assert spec["help"]
 
@@ -959,14 +961,17 @@ def test_rows_appear_and_disappear_with_the_method(qapp):
 
     assert form._rows["p_low"].isVisibleTo(form) is True
     assert form._rows["tiles"].isVisibleTo(form) is False
-    assert form._rows["reference"].isVisibleTo(form) is False
 
     form._emit("method", "local")
     assert form._rows["p_low"].isVisibleTo(form) is False
     assert form._rows["tiles"].isVisibleTo(form) is True
 
+    # `reference`（method=match 才用得到的那條流）**根本不在表單裡** ——
+    # 它是畫布上一條線的落腳處。show_when 對它仍然有效，只是作用在**埠**上
+    # （見 graph.stream_ports / tests/test_graph.py）。
+    assert "reference" not in form._rows
     form._emit("method", "match")
-    assert form._rows["reference"].isVisibleTo(form) is True
     assert form._rows["tiles"].isVisibleTo(form) is False
-    # streams / method 本身沒有 show_when，永遠在
-    assert form._rows["streams"].isVisibleTo(form) is True
+    # streams 也是接線用的，同樣不在表單裡；method 本身永遠在
+    assert "streams" not in form._rows
+    assert form._rows["method"].isVisibleTo(form) is True
