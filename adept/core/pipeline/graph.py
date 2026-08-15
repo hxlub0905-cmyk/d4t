@@ -116,13 +116,33 @@ def _copy_meta(meta: Dict[str, Any]) -> Dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # 圖
 # --------------------------------------------------------------------------- #
+#: 線有兩種，因為「狀態往哪走」跟「這張卡動哪一條流」是兩件不同的事。
+KIND_PACKET = "packet"
+KIND_STREAM = "stream"
+
+
 @dataclass(frozen=True)
 class Wire:
-    """一條線：``src`` 的 ``src_port`` → ``dst`` 的 ``dst_port``。"""
+    """一條線：``src`` 的 ``src_port`` → ``dst`` 的 ``dst_port``。
+
+    ``kind`` 兩種（F9 Phase 3b）：
+
+    * ``packet`` —— **狀態的去向**。這一顆 defect 目前的整包（影像們、區域們、
+      特徵們）沿著它走。分岔時要複製；剪掉它，下游就真的收不到東西。
+    * ``stream`` —— **「這張卡動哪一條流」**。它把來源埠的名字（``test`` /
+      ``ref`` / ``diff``…）綁進下游卡的那個參數，**不搬狀態**。
+
+    為什麼要分：``ref`` 這條流可能同時被 Normalize、一張 Region 卡、一張量測
+    卡讀到。那是三條 ``stream`` 線（畫布上看得見「這三張都在動 ref」），
+    但**不是三條分岔** —— 它們的特徵仍然要累積到同一包裡，最後才判定得出來。
+    把它們當成分岔的話，每張卡各拿一份複本，量出來的數字散在三個地方，
+    而分數式子只看得到其中一份。
+    """
     src: str
     src_port: str
     dst: str
     dst_port: str
+    kind: str = KIND_PACKET
 
 
 @dataclass
@@ -137,6 +157,15 @@ class Graph:
     order: List[str]                                  # 執行順序（拓撲）
     nodes: Dict[str, Any]                             # id -> RecipeNode
     wires: List[Wire] = field(default_factory=list)
+    #: ``節點 id -> (輸入埠, 輸出埠)``，**編譯時算一次**。
+    #:
+    #: 為什麼不讓執行期自己再算一次：``load_patch`` 的輸出流跟資料型別有關
+    #: （``rsem`` 是 single+test、``ebi_patch`` 是 test+ref），而執行期看不到
+    #: ``kind``。兩邊各算一次的下場是編譯期接的是 ``load.single``、執行期吐的
+    #: 是 ``load.test`` —— 對不上，於是下游**整條鏈安靜地不執行**，跑得完、
+    #: 沒有錯誤訊息、只有 load 一張卡跑過。踩過一次，別再讓它有機會不一致。
+    ports: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...]]] = field(
+        default_factory=dict)
 
     def __post_init__(self) -> None:
         self.reindex()
@@ -146,8 +175,9 @@ class Graph:
         fan: Dict[Tuple[str, str], int] = {}
         for w in self.wires:
             inc.setdefault(w.dst, []).append(w)
-            key = (w.src, w.src_port)
-            fan[key] = fan.get(key, 0) + 1
+            if w.kind == KIND_PACKET:          # 只有搬狀態的線才算扇出
+                key = (w.src, w.src_port)
+                fan[key] = fan.get(key, 0) + 1
         self._incoming = inc
         self._fanout = fan
 
@@ -166,6 +196,72 @@ class Graph:
 def _ports(step_cls: Optional[Type[Step]], attr: str, default: str) -> Tuple[str, ...]:
     got = getattr(step_cls, attr, None) if step_cls is not None else None
     return tuple(got) if got else (default,)
+
+
+# --------------------------------------------------------------------------- #
+# 埠名就是影像流名（F9 Phase 3b）
+# --------------------------------------------------------------------------- #
+#: 「輸出流叫什麼」的參數名。有這個參數的卡片，它的輸出埠就叫那個名字。
+OUT_PARAM = "out"
+
+
+def stream_ports(step_cls: Optional[Type[Step]], params: Dict[str, Any],
+                 kind: str = "", first: bool = False
+                 ) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    """一張卡的（輸入埠, 輸出埠）—— **從卡片自己的宣告推出來，不用逐張改**。
+
+    規則兩條：
+
+    * **輸入埠 = 每一個「選影像流」的參數**（型別 ``image_key`` /
+      ``image_keys``，``out`` 除外）。所以埠名就是那個參數的角色名：
+      ``source`` / ``a`` / ``b`` / ``moving`` / ``fixed`` / ``reference`` /
+      ``range_from`` / ``use_within`` / ``streams``。使用者看到的是
+      「這張卡要接兩條線：a 和 b」，而不是「這張卡有兩個下拉選單」。
+    * **輸出埠 = 這張卡寫出來的影像流名**（``out`` 參數指定，或
+      ``resolve_writes()``）。所以 Load 的輸出埠就是 ``test`` 與 ``ref``，
+      從 ``ref`` 那顆埠拉出去的每一條線都代表「這條線帶的是 ref」。
+
+    為什麼這件事重要（使用者 2026-08-15 的兩條原則）
+    ------------------------------------------------
+    1. 「卡片內可以選 image source」要拿掉 —— **改成只能從節點拉**，免得
+       畫布上接的是一條線、卡片裡選的是另一條流，兩者不一致而且沒人看得出來。
+    2. 同一顆輸出埠要**拉得出好幾條線**：Load 的 ``ref`` 可以同時餵
+       Normalize 與一張 Region 卡。埠名帶著流名，這件事才說得清楚。
+
+    沒有宣告任何流參數的卡（例如判定卡）就退回 ``Step.inputs`` /
+    ``Step.outputs`` 的預設。
+    """
+    if step_cls is None:
+        return (DEFAULT_IN,), (DEFAULT_OUT,)
+
+    specs = list(getattr(step_cls, "params", ()) or ())
+    ins = tuple(p.name for p in specs
+                if p.type in ("image_key", "image_keys") and p.name != OUT_PARAM)
+    if not ins:
+        ins = _ports(step_cls, "inputs", DEFAULT_IN)
+
+    outs: Tuple[str, ...] = ()
+    if any(p.name == OUT_PARAM for p in specs):
+        name = str(params.get(OUT_PARAM, "") or "").strip()
+        if name:
+            outs = (name,)
+    if not outs:
+        try:
+            written = (step_cls.resolve_writes_for_kind(params, kind) if first
+                       else step_cls.resolve_writes(params))
+        except Exception:                      # noqa: BLE001 — 壞參數不該擋住編譯
+            written = list(getattr(step_cls, "writes", ()) or ())
+        outs = tuple(dict.fromkeys(str(w) for w in written if str(w).strip()))
+    if not outs:
+        outs = _ports(step_cls, "outputs", DEFAULT_OUT)
+    return ins, outs
+
+
+def _has_stream_inputs(step_cls: Optional[Type[Step]]) -> bool:
+    """這張卡有沒有「選影像流」的參數（= 它的輸入埠是不是流）。"""
+    return any(p.type in ("image_key", "image_keys") and p.name != OUT_PARAM
+               for p in (getattr(step_cls, "params", ()) or ()))
+
 
 
 def _fingerprint(recipe: Recipe, kind: str) -> tuple:
@@ -204,18 +300,19 @@ def compile_recipe(recipe: Recipe, kind: str,
 
 def _compile_recipe(recipe: Recipe, kind: str,
                     registry: Optional[Dict[str, Type[Step]]] = None) -> Graph:
-    """把一份 ``Recipe`` 編成圖。
+    """把一份 ``Recipe`` 編成圖 —— **線由影像流的名字解析出來**。
 
-    **舊檔案不能改變行為**，所以線是這樣長出來的：
+    每個節點的每一個輸入埠（= 一個「選影像流」的參數）都問同一個問題：
+    **這條流是上游哪一張卡吐的？** 往回找最後一個輸出埠叫這個名字的節點，
+    接一條線過去。
 
-    * 先拿 ``execution_order()``（route 相鄰對 ∪ 顯式 edges 的拓撲排序）——
-      跟以前完全一樣的順序；
-    * 停用的節點拿掉，**前後接起來**（以前是跑到它就 ``continue``，效果一樣）；
-    * 剩下的相鄰節點串成一條線；
-    * 顯式 ``edges`` 也加進去。
+    這同時是**遷移**與**新語意**，而且兩者剛好一致：舊模型的執行方式就是
+    「拿名字去全域字典撈」，所以「照名字接線」產生的圖跟以前的行為逐位元組
+    相同 —— 差別只在於那個查找現在**看得見**（是畫布上一條線），而且之後
+    使用者改的是線，不是下拉選單。
 
-    ⚠ 一個輸入埠被好幾條線餵到時，取**執行順序上最晚**的那一條。舊模型裡
-    下游看到的是「累積到目前為止」的全域狀態，取最晚的那個來源才對得起來。
+    顯式的四段式 ``edges``（``[src, src_port, dst, dst_port]``）**贏過**推導 ——
+    使用者在畫布上拉的線就是他說了算，條件分流的 match / else 靠它。
     """
     if registry is None:
         from .step import REGISTRY
@@ -225,65 +322,99 @@ def _compile_recipe(recipe: Recipe, kind: str,
              if recipe.nodes.get(nid) is not None and recipe.nodes[nid].enabled]
     pos = {nid: i for i, nid in enumerate(order)}
 
-    # 每個節點的主要輸入埠 / 輸出埠（Phase 2 的卡片都是單進單出）
-    def in_port(nid: str) -> str:
+    # ---- 每個節點的埠與乾淨參數 ----
+    ports: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...]]] = {}
+    clean: Dict[str, Dict[str, Any]] = {}
+    for i, nid in enumerate(order):
         node = recipe.nodes[nid]
-        return _ports(registry.get(node.step), "inputs", DEFAULT_IN)[0]
+        step_cls = registry.get(node.step)
+        try:
+            p = step_cls.validate_params(node.params) if step_cls else dict(node.params)
+        except Exception:                      # noqa: BLE001 — 壞參數不擋編譯
+            p = dict(node.params)
+        clean[nid] = p
+        ports[nid] = stream_ports(step_cls, p, kind=kind, first=(i == 0))
 
-    def out_port(nid: str) -> str:
-        node = recipe.nodes[nid]
-        return _ports(registry.get(node.step), "outputs", DEFAULT_OUT)[0]
+    #: 影像流名 -> 最後吐出它的節點（邊走邊更新 = 自然的「往回找最近的」）
+    producer: Dict[str, str] = {}
+    #: (dst, dst_port) -> (src, src_port)
+    packet_in: Dict[Tuple[str, str], Tuple[str, str]] = {}
+    stream_in: Dict[Tuple[str, str], List[Tuple[str, str]]] = {}
 
-    #: (dst, dst_port) -> src  —— 同一個埠留最晚的來源
-    chosen: Dict[Tuple[str, str], Tuple[str, str]] = {}
+    for i, nid in enumerate(order):
+        ins, outs = ports[nid]
+        p = clean[nid]
 
-    def offer(src: str, dst: str) -> None:
-        if src not in pos or dst not in pos or pos[src] >= pos[dst]:
-            return
-        key = (dst, in_port(dst))
-        prev = chosen.get(key)
-        if prev is None or pos[prev[0]] < pos[src]:
-            chosen[key] = (src, out_port(src))
+        # ---- stream 線：這張卡動哪一條流（不搬狀態）----
+        for port in ins:
+            if port == DEFAULT_IN:
+                continue                       # 那是 packet 埠，不是流參數
+            for stream in parse_stream_names(p.get(port)):
+                src = producer.get(stream)
+                if src is not None and pos[src] < pos[nid]:
+                    stream_in.setdefault((nid, port), []).append((src, stream))
 
-    for a, b in zip(order, order[1:]):
-        offer(a, b)
+        # ---- packet 線：狀態沿著執行順序走（就是舊模型的那條鏈）----
+        if i > 0:
+            prev = order[i - 1]
+            prev_outs = ports[prev][1]
+            if prev_outs:
+                packet_in[(nid, DEFAULT_IN)] = (prev, prev_outs[0])
 
-    #: 顯式的線。四段式 ``[src, src_port, dst, dst_port]`` **講明了埠**，
-    #: 所以它不走 ``offer()`` 的「同一個埠取最晚來源」規則 —— 使用者指名要接
-    #: 哪個埠，就是那個埠（條件分流的 match / else 靠這個才存得起來）。
+        for out in outs:
+            producer[out] = nid
+
+    # 顯式的線贏過推導出來的（四段式講明了埠）
     explicit: List[Wire] = []
     for e in recipe.edges:
         e = list(e)
         if len(e) == 4:
             src, sp, dst, dp = (str(x) for x in e)
             if src in pos and dst in pos and pos[src] < pos[dst]:
-                explicit.append(Wire(src, sp, dst, dp))
-                chosen.pop((dst, dp), None)     # 明講的贏過推出來的
-        elif len(e) == 2:
-            offer(str(e[0]), str(e[1]))
+                explicit.append(Wire(src, sp, dst, dp, KIND_PACKET))
+                packet_in.pop((dst, dp), None)
+                stream_in.pop((dst, dp), None)
 
-    wires = [Wire(src, src_port, dst, dst_port)
-             for (dst, dst_port), (src, src_port) in chosen.items()]
+    wires = [Wire(src, sp, dst, dp, KIND_PACKET)
+             for (dst, dp), (src, sp) in packet_in.items()]
+    wires += [Wire(src, sp, dst, dp, KIND_STREAM)
+              for (dst, dp), srcs in stream_in.items() for src, sp in srcs]
     wires.extend(explicit)
-    wires.sort(key=lambda w: (pos[w.dst], pos[w.src]))
-    return Graph(order=order, nodes=dict(recipe.nodes), wires=wires)
+    wires.sort(key=lambda w: (pos[w.dst], w.kind, pos[w.src], w.dst_port))
+    return Graph(order=order, nodes=dict(recipe.nodes), wires=wires,
+                 ports=ports)
+
+
+def parse_stream_names(value: Any) -> List[str]:
+    """一個流參數的值 → 流名清單（``image_keys`` 是逗號分隔的一串）。"""
+    out: List[str] = []
+    for tok in str(value or "").split(","):
+        tok = tok.strip()
+        if tok and tok not in out:
+            out.append(tok)
+    return out
 
 
 # --------------------------------------------------------------------------- #
 # 執行
 # --------------------------------------------------------------------------- #
-def _emit(ret: Any, fallback: Context, out_default: str) -> Dict[str, Context]:
+def _emit(ret: Any, fallback: Context,
+          out_ports: Sequence[str]) -> Dict[str, Context]:
     """卡片的回傳值正規化成 ``{輸出埠名: Context}``。
 
-    既有卡片回一個 ``Context``（或什麼都不回，就地改 ctx）→ 全部當成主要
-    輸出埠。新式卡片回 ``{埠名: Context}`` → 原樣用，**沒放進去的埠就是
-    這次不吐**，那正是條件分流的表達方式。
+    既有卡片回一個 ``Context``（或什麼都不回，就地改 ctx）→ **每一個輸出埠
+    都吐同一包**。這不是浪費：一張卡可能吐好幾條影像流（Load 吐 test 與
+    ref），而埠只是**標籤** —— 下游從 ``ref`` 那顆埠拉線，拿到的是同一包，
+    埠名告訴它「你要動的是 ref」。
+
+    新式卡片回 ``{埠名: Context}`` → 原樣用，**沒放進去的埠就是這次不吐**，
+    那正是條件分流的表達方式。
     """
     if isinstance(ret, dict):
         return {str(k): v for k, v in ret.items() if isinstance(v, Context)}
-    if isinstance(ret, Context):
-        return {out_default: ret}
-    return {out_default: fallback}
+    ctx = ret if isinstance(ret, Context) else fallback
+    ports = tuple(out_ports) or (DEFAULT_OUT,)
+    return {port: ctx for port in ports}
 
 
 @dataclass
@@ -339,33 +470,52 @@ def run_graph(graph: Graph, seed: Packet, *,
         if node is None:                       # 理論上編譯期就濾掉了
             continue
         step_cls = registry.get(node.step)
-        in_ports = _ports(step_cls, "inputs", DEFAULT_IN)
-        out_default = _ports(step_cls, "outputs", DEFAULT_OUT)[0]
+        in_ports, out_ports = graph.ports.get(
+            nid, ((DEFAULT_IN,), (DEFAULT_OUT,)))
 
         wires_in = graph.incoming(nid)
+
+        # ---- stream 線：把「這張卡動哪一條流」綁進參數 ----
+        #
+        # **參數不再是使用者選的，是線決定的**（使用者 2026-08-15 的原則 1）。
+        # 同一個埠接了好幾條線 = 這張卡同時做那幾條流（``image_keys``）。
+        bound: Dict[str, str] = {}
+        for w in wires_in:
+            if w.kind != KIND_STREAM:
+                continue
+            prev = bound.get(w.dst_port)
+            bound[w.dst_port] = (prev + "," + w.src_port) if prev else w.src_port
+
+        # ---- packet 線：狀態從哪裡來 ----
         ins: Dict[str, Packet] = {}
         starved = False
-        for port in in_ports:
-            feeding = [w for w in wires_in if w.dst_port == port
+        # **狀態一律從 ``in`` 埠進來。** 卡片宣告的那些流參數（source / a / b …）
+        # 是「動哪一條流」的埠，不搬狀態。只有完全不吃影像流的卡（判定卡、
+        # 之後的合流卡）才用它自己宣告的輸入埠當狀態入口。
+        packet_ports = ([DEFAULT_IN] if _has_stream_inputs(step_cls)
+                        else list(in_ports))
+        for port in packet_ports:
+            feeding = [w for w in wires_in
+                       if w.kind == KIND_PACKET and w.dst_port == port
                        and (w.src, w.src_port) in outbox]
             if not feeding:
-                # 沒接線 → 卡片自己會抱怨缺哪條流；
-                # 接了線但上游沒吐 → 整段安靜跳過。兩者的差別在這裡分開。
-                if any(w.dst_port == port for w in wires_in):
-                    starved = True
+                if any(w.kind == KIND_PACKET and w.dst_port == port
+                       for w in wires_in):
+                    starved = True             # 接了線但上游沒吐 -> 整段跳過
                     break
                 continue
-            w = feeding[-1]                    # 同一個埠多個來源：取最晚的
+            w = feeding[-1]
             ins[port] = take(outbox, (w.src, w.src_port), graph, taken)
 
-        if in_ports[0] not in ins and first_in_segment:
-            ins[in_ports[0]] = seed            # 圖的頭 / 快取續跑的接點
+        head = packet_ports[0]
+        if head not in ins and first_in_segment:
+            ins[head] = seed                   # 圖的頭 / 快取續跑的接點
             starved = False
         elif starved:
             continue
         first_in_segment = False
 
-        primary = ins.get(in_ports[0])
+        primary = ins.get(head)
         if primary is None:                    # 沒接線又不是頭 —— 讓卡片說話
             primary = Packet(Context())
 
@@ -381,7 +531,9 @@ def run_graph(graph: Graph, seed: Packet, *,
                     node.step,
                     "unknown step '%s'; registered: %s"
                     % (node.step, sorted(registry)))
-            params = step_cls.validate_params(node.params)
+            raw = dict(node.params)
+            raw.update(bound)                  # 線說了算，參數只是它的落腳處
+            params = step_cls.validate_params(raw)
             ret = step_cls().run(ctx, params)
         except Exception as e:                  # noqa: BLE001 — 收成結果，不外洩
             ms = (time.perf_counter() - t0) * 1000.0
@@ -390,7 +542,7 @@ def run_graph(graph: Graph, seed: Packet, *,
             return outbox, runs, "[%s] %s" % (nid, e), last
         ms = (time.perf_counter() - t0) * 1000.0
 
-        produced = _emit(ret, ctx, out_default)
+        produced = _emit(ret, ctx, out_ports)
         added = {k: v for k, v in ctx.features.items()
                  if k not in feats_before or feats_before[k] != v}
         runs.append(NodeRun(nid, node.step, True, ms, None, added,

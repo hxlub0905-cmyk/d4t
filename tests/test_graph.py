@@ -23,7 +23,10 @@ from adept.core.pipeline import (
     register_step,
     run_defect,
 )
-from adept.core.pipeline.graph import Packet, Wire, compile_recipe, run_graph
+from adept.core.pipeline.graph import (
+    KIND_STREAM, Packet, Wire, compile_recipe, run_graph,
+)
+from adept.core.pipeline.step import ParamSpec
 
 _KEYS = ["t_g_load", "t_g_gain", "t_g_peak", "t_g_route"]
 
@@ -38,12 +41,14 @@ def cards():
         key = "t_g_load"
         label = "測試載入"
         category = CATEGORY_IMAGE
-        help = "測試用：造一張 test 影像"
-        writes = ["test"]
+        help = "測試用：造 test 與 ref 兩張影像（像真的 load_patch）"
+        writes = ["test", "ref"]
 
         def run(self, ctx: Context, params) -> Context:
             item = ctx.meta["_defect_item"]
             ctx.set_image("test", np.full((4, 4), float(item.level), np.float32))
+            ctx.set_image("ref", np.full((4, 4), float(item.level) * 0.6,
+                                         np.float32))
             return ctx
 
     @register_step
@@ -52,11 +57,15 @@ def cards():
         label = "測試放大"
         category = CATEGORY_IMAGE
         help = "測試用：把 test 乘上 gain"
+        params = [ParamSpec(name="streams", type="image_keys", default="test",
+                            help="要處理哪幾條流。")]
         reads = writes = ["test"]
 
         def run(self, ctx: Context, params) -> Context:
-            # **產生新陣列，不就地改寫**（F9 §4.1 對卡片作者的規矩）
-            ctx.set_image("test", ctx.require_image("test") * 2.0)
+            for name in str(params["streams"]).split(","):
+                name = name.strip()
+                # **產生新陣列，不就地改寫**（F9 §4.1 對卡片作者的規矩）
+                ctx.set_image(name, ctx.require_image(name) * 2.0)
             ctx.warn("gain ran")
             return ctx
 
@@ -65,12 +74,15 @@ def cards():
         key = "t_g_peak"
         label = "測試量測"
         category = CATEGORY_ALGO
-        help = "測試用：量 test 的最大值"
+        help = "測試用：量某一條流的最大值"
+        params = [ParamSpec(name="source", type="image_key", default="test",
+                            help="要量哪一條流。")]
         reads = ["test"]
         features_out = ["peak"]
 
         def run(self, ctx: Context, params) -> Context:
-            ctx.add_feature("peak", float(ctx.require_image("test").max()))
+            ctx.add_feature(
+                "peak", float(ctx.require_image(params["source"]).max()))
             return ctx
 
     @register_step
@@ -116,7 +128,14 @@ def test_a_linear_recipe_compiles_into_a_real_chain_of_wires(cards):
     })
     assert rec.edges == []                      # 檔案裡一條線都沒有
     graph = compile_recipe(rec, "ebi_patch")
-    assert [(w.src, w.dst) for w in graph.wires] == [("l", "g"), ("g", "m")]
+    backbone = [(w.src, w.src_port, w.dst) for w in graph.wires
+                if w.kind != KIND_STREAM]
+    assert backbone == [("l", "test", "g"), ("g", "test", "m")]
+    # 另外還有 stream 線：「這張卡動哪一條流」—— 它不搬狀態，所以不算分岔
+    streams = [(w.src, w.src_port, w.dst, w.dst_port) for w in graph.wires
+               if w.kind == KIND_STREAM]
+    assert streams == [("l", "test", "g", "streams"),
+                       ("g", "test", "m", "source")]
 
 
 def test_cutting_a_wire_really_disconnects_the_downstream_card(cards):
@@ -160,7 +179,7 @@ def test_a_fork_gives_each_branch_its_own_copy(cards):
     })
     graph = compile_recipe(rec, "ebi_patch")
     # 手工把它接成分岔：load 同時餵 gain 與 peak
-    graph.wires = [Wire("l", "out", "g", "in"), Wire("l", "out", "m", "in")]
+    graph.wires = [Wire("l", "test", "g", "in"), Wire("l", "test", "m", "in")]
 
     ctx = Context()
     ctx.meta["_defect_item"] = _item(level=10.0)
@@ -170,7 +189,7 @@ def test_a_fork_gives_each_branch_its_own_copy(cards):
     by_id = {r.node_id: r for r in runs}
     # gain 那條變成 20，但 peak 量的是**原圖** 10
     assert by_id["m"].features_added == {"peak": 10.0}
-    assert float(outbox[("g", "out")].ctx.images["test"].max()) == 20.0
+    assert float(outbox[("g", "test")].ctx.images["test"].max()) == 20.0
     assert float(outbox[("m", "out")].ctx.images["test"].max()) == 10.0
 
 
@@ -183,13 +202,13 @@ def test_a_fork_does_not_leak_warnings_between_branches(cards):
         "m": RecipeNode("m", "t_g_peak", {}),
     })
     graph = compile_recipe(rec, "ebi_patch")
-    graph.wires = [Wire("l", "out", "g", "in"), Wire("l", "out", "m", "in")]
+    graph.wires = [Wire("l", "test", "g", "in"), Wire("l", "test", "m", "in")]
 
     ctx = Context()
     ctx.meta["_defect_item"] = _item()
     outbox, _runs, err, _last = run_graph(graph, Packet(ctx))
     assert err is None
-    assert outbox[("g", "out")].ctx.meta.get("warnings") == ["gain ran"]
+    assert outbox[("g", "test")].ctx.meta.get("warnings") == ["gain ran"]
     assert outbox[("m", "out")].ctx.meta.get("warnings") is None
 
 
@@ -228,7 +247,7 @@ def test_a_router_runs_only_the_branch_it_picked(cards):
         "b": RecipeNode("b", "t_g_peak", {}),      # else 那一邊
     }
     graph = compile_recipe(_recipe(["l", "r", "a", "b"], nodes), "ebi_patch")
-    graph.wires = [Wire("l", "out", "r", "in"),
+    graph.wires = [Wire("l", "test", "r", "in"),
                    Wire("r", "match", "a", "in"),
                    Wire("r", "else", "b", "in")]
 
@@ -264,7 +283,8 @@ def test_a_disabled_node_is_bypassed_not_left_dangling(cards):
         "m": RecipeNode("m", "t_g_peak", {}),
     })
     graph = compile_recipe(rec, "ebi_patch")
-    assert [(w.src, w.dst) for w in graph.wires] == [("l", "m")]
+    backbone = [(w.src, w.dst) for w in graph.wires if w.kind != KIND_STREAM]
+    assert backbone == [("l", "m")]
 
     r = run_defect(rec, _item(level=7.0), "ebi_patch")
     assert r.ok and r.score == 7.0             # 沒被放大
@@ -308,7 +328,7 @@ def test_two_branches_can_use_different_thresholds(cards):
     }
     graph = compile_recipe(
         _recipe(["l", "r", "ma", "da", "mb", "db"], nodes), "ebi_patch")
-    graph.wires = [Wire("l", "out", "r", "in"),
+    graph.wires = [Wire("l", "test", "r", "in"),
                    Wire("r", "match", "ma", "in"),
                    Wire("ma", "out", "da", "in"),
                    Wire("r", "else", "mb", "in"),
@@ -410,3 +430,87 @@ def test_an_edge_with_a_silly_shape_is_rejected_at_load_time(cards):
     with pytest.raises(RecipeError) as ei:
         Recipe.from_json_dict(d)
     assert "from_port" in str(ei.value)
+
+
+# --------------------------------------------------------------------------- #
+# 6. 流由線決定（使用者 2026-08-15 的兩條原則，F9 Phase 3b）
+# --------------------------------------------------------------------------- #
+def test_the_wire_decides_which_stream_a_card_works_on(cards):
+    """**原則 1：卡片裡不再選 image source，改成從節點拉。**
+
+    同一張卡、同一份參數，只把線從 `test` 埠改接到 `ref` 埠 —— 它就改動 ref。
+    參數只是那條線的落腳處，不是使用者要去挑的東西。
+    """
+    rec = _recipe(["l", "g", "m"], {
+        "l": RecipeNode("l", "t_g_load", {}),
+        "g": RecipeNode("g", "t_g_gain", {}),      # streams 用預設值 "test"
+        "m": RecipeNode("m", "t_g_peak", {}),
+    })
+    graph = compile_recipe(rec, "ebi_patch")
+
+    def _seed():
+        c = Context()
+        c.meta["_defect_item"] = _item(level=10.0)   # test=10, ref=6
+        return Packet(c)
+
+    outbox, _r, err, _l = run_graph(graph, _seed())
+    assert err is None
+    got = outbox[("g", "test")].ctx
+    assert float(got.images["test"].max()) == 20.0   # 動的是 test
+    assert float(got.images["ref"].max()) == 6.0     # ref 沒被動到
+
+    # **只改線**（參數一個字都沒動）：g 的 streams 埠改接到 load 的 ref
+    graph.wires = [w for w in graph.wires
+                   if not (w.dst == "g" and w.dst_port == "streams")] + [
+        Wire("l", "ref", "g", "streams", KIND_STREAM)]
+    outbox2, _r2, err2, _l2 = run_graph(graph, _seed())
+    assert err2 is None, err2
+    got2 = outbox2[("g", "test")].ctx
+    assert float(got2.images["ref"].max()) == 12.0   # 現在動的是 ref
+    assert float(got2.images["test"].max()) == 10.0  # test 沒被動到
+
+
+def test_one_output_port_can_feed_several_cards(cards):
+    """**原則 2：同一顆輸出埠拉得出好幾條線。**
+
+    Load 的 `ref` 同時餵一張處理卡與一張量測卡 —— 兩張都在動 ref，而且
+    **特徵仍然累積到同一包**（stream 線不搬狀態，所以那不是分岔）。
+    """
+    rec = _recipe(["l", "g", "m"], {
+        "l": RecipeNode("l", "t_g_load", {}),
+        "g": RecipeNode("g", "t_g_gain", {"streams": "ref"}),
+        "m": RecipeNode("m", "t_g_peak", {"source": "ref"}),
+    })
+    graph = compile_recipe(rec, "ebi_patch")
+    from_ref = [(w.dst, w.dst_port) for w in graph.wires
+                if w.kind == KIND_STREAM and w.src_port == "ref"]
+    assert ("g", "streams") in from_ref, from_ref
+
+    c = Context()
+    c.meta["_defect_item"] = _item(level=10.0)      # test=10, ref=6
+    _o, _runs, err, last = run_graph(graph, Packet(c))
+    assert err is None, err
+    # g 放大 ref（6 -> 12），m 量的是**放大後**的 ref，而且兩者在同一包裡
+    assert last.ctx.features["peak"] == 12.0
+    # 累積的證據：上游那張卡留下的東西跟量測結果在**同一包**裡
+    assert last.ctx.meta.get("warnings") == ["gain ran"]
+
+
+def test_stream_wires_are_not_forks(cards):
+    """三張卡讀同一條流 = 三條 stream 線，**不是三岔**。
+
+    這一條是踩過的坑：一開始把「照名字接線」做成 packet 線，於是一條流被
+    三張卡讀就變成三個複本，量出來的數字散在三包裡，而分數式子只看得到一份。
+    """
+    rec = _recipe(["l", "g", "m"], {
+        "l": RecipeNode("l", "t_g_load", {}),
+        "g": RecipeNode("g", "t_g_gain", {}),
+        "m": RecipeNode("m", "t_g_peak", {}),
+    })
+    graph = compile_recipe(rec, "ebi_patch")
+    # 每個節點最多只有一條 packet 線進來（backbone 是一條鏈）
+    for nid in graph.order:
+        n_packet = sum(1 for w in graph.incoming(nid) if w.kind != KIND_STREAM)
+        assert n_packet <= 1, (nid, graph.incoming(nid))
+    # 而 stream 線不計入扇出（扇出 > 1 才複製）
+    assert graph.fanout("l", "test") == 1
