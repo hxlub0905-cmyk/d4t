@@ -17,3 +17,15 @@ include = ["adept*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `slow` 標在「開 Qt 視窗」與「跑整批 defect / 開子行程」的測試檔上。
+#
+# 為什麼需要它：全套在雲端容器上要十幾分鐘（見 CLAUDE.md §6 的表），而開發
+# 迴圈裡真正想問的是「我剛剛改的東西有沒有壞」。`-m "not slow"` 給的是一個
+# 一分鐘內回得來的答案。
+#
+# ⚠ 它篩掉的是**慢**，不是**不重要**：CI 不加這個參數，`-m "not slow"` 綠了
+# 也不等於可以 commit（見 CLAUDE.md §6）。標記由 tests/conftest.py 自動套用，
+# 不必在每個函式上寫 @pytest.mark.slow。
+markers = [
+    "slow: 開 Qt 視窗或跑整批 defect 的測試（`-m \"not slow\"` 可略過）",
+]

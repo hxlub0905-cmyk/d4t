@@ -7,7 +7,7 @@
 - ``labels``   整數 ROI label map（0=背景, 1..N；GLAS 契約 gray[labels==k]）。
 - ``features`` 扁平特徵區 —— **score 表達式的唯一變數空間**。
   任何卡塞進來的數字（CD、SNR、GLV、focus…）一視同仁。
-- ``meta``     診斷與雜項（nm_per_px、對位 dx/dy、fallback_reason、blob 清單…）。
+- ``meta``     診斷與雜項（nm_per_px、對位 dx/dy、fallback_reason、定位結果…）。
 
 慣例：
 - Step 對同名影像流做 in-place 覆寫（linear 鏈的預設行為）；要保留舊圖就寫新 key。

@@ -220,8 +220,8 @@ THUMB_CHANNEL_PRIORITY = ("test", "single")
 
 _FEATURE_PLACEHOLDER = "Insert feature ▾"
 _SCORE_HELP = ("The score is an expression whose variables are the feature names "
-               "produced by the pipeline above (e.g. snr_max, blob_area, "
-               "glv_max). score >= threshold -> bin 1, otherwise bin 0. "
+               "produced by the pipeline above (e.g. snr_max, area_px, "
+               "glv_mean). score >= threshold -> bin 1, otherwise bin 0. "
                "You can use + - * / ( ) and sqrt / abs / min / max.")
 
 
@@ -1077,7 +1077,7 @@ class StudioWindow(QMainWindow):
 
         # 右下角那一塊：**選哪張卡就換成那張卡的儀表**（F7-17）。
         # 原本固定是一張「特徵 / 數值」表 —— 問題不是它佔位子，是那些數字沒有
-        # 辦法判讀（`blob_dist_center 11.170` 是大還是小？），而且使用者在問的
+        # 辦法判讀（`roi_snr_abs 11.170` 是大還是小？），而且使用者在問的
         # 問題**每張卡都不一樣**。特徵表仍然留著，用切換列回去。
         self.feature_table = FeatureTable(pane)
         self.feature_table.setMinimumHeight(120)

@@ -11,8 +11,15 @@
 
 1. ``tools/FILELIST.txt`` —— 全部檔案的 git blob SHA。公司機用它判斷
    「哪幾個檔案要重新複製」（`tools/check_files.py`）。
-2. ``bundle/ADEPT_bundle.py`` —— 整個 repo 壓成一個 711 KB 的純文字 `.py`，
+2. ``bundle/ADEPT_bundle.py`` —— 整個 repo 壓成**一個**純文字 `.py`，
    在 GitHub 上按複製鈕就能整包搬進公司機（見 `AGENTS.md` §2）。
+
+   **永遠是一個檔案，不看大小。** 這裡刻意不呼叫 ``make_text_bundle._fit()``
+   （那支會在超過 ``LIMIT_KB`` 時自動分批）—— 分批的前提是「GitHub 不顯示
+   超過 1 MB 的檔案所以送不進去」，而 2026-08-15 確認整份文字複製得走。
+   自動分批的代價是使用者某天更新完要複製兩批，而且檔名從 ``ADEPT_bundle.py``
+   變成 ``ADEPT_bundle_part1of2.py``，AGENTS.md 與 CLAUDE.md 全部對不上。
+   要分批請明講 ``make_text_bundle.py --split``。
 
 **先清單再打包**：包裡面含著那份清單，順序反了就會把舊清單封進新包裡，
 而那個包解出來之後 `check_files.py` 會報一堆不存在的差異。

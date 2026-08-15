@@ -1101,43 +1101,52 @@ def test_the_two_machine_setup_is_written_down():
 
 
 @needs_git
-def test_the_compressed_bundle_is_split_only_when_it_has_to_be(tmp_path):
-    """使用者問的正是這個：不能一包嗎。
+def test_the_compressed_bundle_is_always_exactly_one_file(tmp_path):
+    """使用者問的正是這個：不能一包嗎。可以，而且**永遠是一包**。
 
-    可以 —— 但要用 lzma。整包 base64 之後 gzip 是 991 KB、lzma 是 701 KB，而
-    **GitHub 不顯示超過 1 MB 的檔案**，所以那 290 KB 的差距就是「一次複製」與
-    「六次複製」的差別。
+    2026-08-15 之前這裡的規矩是「量出來，超過 ``LIMIT_KB`` 就自動分批」，
+    前提是「GitHub 不顯示超過 1 MB 的檔案所以送不進去」。那個前提不成立 ——
+    整份文字複製得走，不依賴 GitHub 把它渲染成網頁。
 
-    2026-08-14：那句「一定塞得進一個檔案」過期了 —— repo 長到 908 KB。所以
-    現在的規矩不是「一定是一個」，而是**每一個都塞得下**，而且不會為了保險
-    多切一批（每多一批，那台只能用剪貼簿的機器就多一次複製）。
+    為什麼要有一條測試釘住「一個」：自動分批的症狀不是壞掉，是**使用者某天
+    更新完發現要複製兩次**，而且檔名從 ``ADEPT_bundle.py`` 變成
+    ``ADEPT_bundle_part1of2.py``，AGENTS.md 與 CLAUDE.md 全部對不上。
+    那種退化沒有人會在 code review 時看出來，因為每一行都「更安全」。
     """
-    groups = make_text_bundle._fit(
-        make_text_bundle.collect(REPO), True,
-        make_text_bundle.LIMIT_KB * 1024)
-    texts = [make_text_bundle.build("b.py", items=g, part=i,
-                                    n_parts=len(groups), compress=True)
-             for i, g in enumerate(groups, 1)]
-    sizes = [len(t.encode("utf-8")) / 1024 for t in texts]
-    assert max(sizes) < make_text_bundle.LIMIT_KB, sizes
-    for t in texts:
-        ast.parse(t, filename="compressed")          # 仍然是合法的 Python
+    out = tmp_path / "ADEPT_bundle.py"
+    assert make_text_bundle.main(["--compress", "--out", str(out)]) == 0
+    produced = sorted(p.name for p in tmp_path.glob("*.py"))
+    assert produced == ["ADEPT_bundle.py"], (
+        "壓縮版應該永遠是一個檔案，卻產出了 %s" % produced)
 
-    if len(groups) > 1:
-        # 最後一批不能是零頭 —— 併得回去就該併（見 _merge_tail）。
-        assert min(sizes) > make_text_bundle.LIMIT_KB * 0.25, sizes
+    text = out.read_text(encoding="utf-8")
+    ast.parse(text, filename="compressed")            # 仍然是合法的 Python
 
     dest = tmp_path / "out"
-    for i, t in enumerate(texts, 1):
-        path = tmp_path / ("b%d.py" % i)
-        _write(path, t)
-        r = subprocess.run([sys.executable, str(path), "--dest", str(dest)],
-                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                           timeout=300)
-        assert r.returncode == 0, r.stdout.decode("utf-8", "replace")
+    r = subprocess.run([sys.executable, str(out), "--dest", str(dest)],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       timeout=300)
+    assert r.returncode == 0, r.stdout.decode("utf-8", "replace")
     for rel in make_filelist.tracked_files(REPO) + ["tools/FILELIST.txt"]:
         src = pathlib.Path(REPO) / rel
         assert (dest / rel).read_bytes() == src.read_bytes(), rel
+
+
+@needs_git
+def test_asking_for_parts_still_produces_parts_that_fit(tmp_path):
+    """``--split`` 是明講的，那條路要繼續正確。
+
+    分批不再是預設，但機制留著 —— 「想在跑之前逐字讀過每個檔案」的時候
+    需要純文字的批（壓縮版是 base64，讀不了）。
+    """
+    out = tmp_path / "ADEPT.py"
+    assert make_text_bundle.main(["--split", "400", "--out", str(out)]) == 0
+    parts = sorted(tmp_path.glob("ADEPT_part*of*.py"))
+    assert len(parts) > 1, "整個 repo 早就超過一批的量了"
+    for p in parts:
+        kb = len(p.read_bytes()) / 1024
+        assert kb < make_text_bundle.LIMIT_KB, "%s 是 %.0f KB" % (p.name, kb)
+        ast.parse(p.read_text(encoding="utf-8"), filename=p.name)
 
 
 @needs_git

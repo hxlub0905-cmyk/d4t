@@ -7,9 +7,16 @@ Gallery、CLI 的批次出圖、報表的插圖都能共用同一支渲染函式
 :func:`render_overlay` 產出 RGB uint8 面板：
 
 - 底圖取 ``images["test"]``（EBI patch）或 ``images["single"]``（rSEM）；
-- 主 blob 的 bounding box 畫**紅框**；
+- 呼叫端給了 ``box=(x, y, w, h)`` 就畫一個**紅框**；
 - 左上角可疊一行標籤（score / bin …），底下鋪半透明深色條方便閱讀；
 - ``images`` 裡有 ``"diff"`` 時輸出 **[test | diff] 並排**（寬度剛好兩倍）。
+
+★ 框從哪裡來（2026-08-15 改）★
+  這裡以前會自己去 ``ctx.meta["blobs"]`` 或 ``blob_x/blob_y/blob_w/blob_h``
+  特徵裡挑「主 blob」。``blob_segment`` 卡在 F8 第五輪被拿掉之後，那兩個來源
+  **再也沒有人產出**，於是那段程式碼永遠回 None —— 而 Export 精靈上仍然寫著
+  「the main blob boxed in red」。跑得完、有輸出、而且承諾沒有兌現。
+  現在框只有一個來源：**呼叫端明講**。要畫什麼由知道的人決定，這裡不猜。
 
 ★ 字型限制 ★
   cv2 內建的 Hershey 字型**沒有中日韓字元**。標籤裡的非 ASCII 字元會被
@@ -29,10 +36,9 @@ import numpy as np
 
 from .klarf_out import ExportError
 
-__all__ = ["render_overlay", "write_png", "to_display_rgb",
-           "primary_blob_box", "BOX_COLOR"]
+__all__ = ["render_overlay", "write_png", "to_display_rgb", "BOX_COLOR"]
 
-#: 主 blob 外框的顏色（RGB）。
+#: 外框的顏色（RGB）。
 BOX_COLOR = (255, 32, 32)
 #: 標籤文字顏色（RGB）與底條顏色。
 TEXT_COLOR = (255, 255, 255)
@@ -83,64 +89,27 @@ def to_display_rgb(arr: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(a)
 
 
-def _blob_box(b: Any) -> Optional[Tuple[int, int, int, int]]:
-    """blob（dict 或 DefectROI）→ (x, y, w, h)。"""
+def _as_box(b: Any) -> Optional[Tuple[int, int, int, int]]:
+    """``(x, y, w, h)``（四個數的序列，或有 ``x/y/w/h`` 的物件）→ 整數 tuple。
+
+    看不懂就回 None，不要猜 —— 畫錯位置的框比沒有框糟得多。
+    """
     if b is None:
         return None
     if isinstance(b, dict):
         if not all(k in b for k in ("x", "y", "w", "h")):
             return None
         vals = (b["x"], b["y"], b["w"], b["h"])
-    elif hasattr(b, "bbox"):
-        vals = tuple(b.bbox)
-    elif all(hasattr(b, k) for k in ("x", "y", "w", "h")):
-        vals = (b.x, b.y, b.w, b.h)
     elif isinstance(b, (tuple, list)) and len(b) >= 4:
         vals = tuple(b[:4])
+    elif all(hasattr(b, k) for k in ("x", "y", "w", "h")):
+        vals = (b.x, b.y, b.w, b.h)
     else:
         return None
     try:
         return (int(vals[0]), int(vals[1]), int(vals[2]), int(vals[3]))
     except (TypeError, ValueError):
         return None
-
-
-def _blob_rank(b: Any) -> float:
-    """主 blob 的挑選依據：SNR 最強者；沒有 SNR 就用面積。"""
-    if isinstance(b, dict):
-        v = b.get("snr_value", b.get("area", 0.0))
-    else:
-        v = getattr(b, "snr_value", getattr(b, "area", 0.0))
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def primary_blob_box(blobs: Optional[Sequence[Any]] = None,
-                     features: Optional[Dict[str, Any]] = None
-                     ) -> Optional[Tuple[int, int, int, int]]:
-    """挑出「主 blob」的框：blobs 裡 SNR 最強的那塊；
-
-    blobs 是空的時候，退而求其次看 features 有沒有
-    ``blob_x`` / ``blob_y`` / ``blob_w`` / ``blob_h``。都沒有回 None。
-    """
-    best = None
-    best_rank = None
-    for b in (blobs or ()):
-        box = _blob_box(b)
-        if box is None:
-            continue
-        rank = _blob_rank(b)
-        if best_rank is None or rank > best_rank:
-            best, best_rank = box, rank
-    if best is not None:
-        return best
-    f = features or {}
-    if all(k in f for k in ("blob_x", "blob_y", "blob_w", "blob_h")):
-        return _blob_box({k[5:]: f[k] for k in
-                          ("blob_x", "blob_y", "blob_w", "blob_h")})
-    return None
 
 
 def _pick_base(images: Dict[str, Any]) -> Tuple[str, np.ndarray]:
@@ -191,7 +160,6 @@ def _draw_label(panel: np.ndarray, label: str) -> None:
 # ---------------------------------------------------------------------------
 def render_overlay(images: Dict[str, Any],
                    features: Optional[Dict[str, Any]] = None, *,
-                   blobs: Optional[Sequence[Any]] = None,
                    box: Optional[Sequence[int]] = None,
                    label: Optional[str] = None,
                    base_key: Optional[str] = None,
@@ -206,14 +174,11 @@ def render_overlay(images: Dict[str, Any],
         ``aligned`` → ``ref`` → ``diff`` 的順序挑第一個找得到的；
         ``base_key`` 可以指定。
     features
-        該顆的特徵 dict。兩個用途：(1) ``box`` 與 ``blobs`` 都沒給時，
-        若含 ``blob_x/blob_y/blob_w/blob_h`` 就用它畫框；(2) ``label``
-        沒給但含 ``score`` 時自動組出 ``score=…`` 標籤。
-    blobs
-        ``ctx.meta["blobs"]``（dict 清單）或 ``DefectROI`` 清單；
-        取 SNR 最強的那塊畫紅框。
+        該顆的特徵 dict。用途只有一個：``label`` 沒給但含 ``score`` 時
+        自動組出 ``score=…`` 標籤。
     box
-        直接指定 ``(x, y, w, h)``，優先於 ``blobs`` / ``features``。
+        要圈起來的 ``(x, y, w, h)``（像素座標）。**不給就不畫框** ——
+        這裡不會自己去猜哪裡是缺陷（見模組 docstring）。
     label
         左上角文字（非 ASCII 會顯示成 ``?``，見模組 docstring）。
     montage
@@ -239,7 +204,7 @@ def render_overlay(images: Dict[str, Any],
     left = to_display_rgb(base)
     h, w = left.shape[:2]
 
-    the_box = _blob_box(box) if box is not None else primary_blob_box(blobs, features)
+    the_box = _as_box(box)
     if the_box is not None:
         _draw_box(left, the_box)
 

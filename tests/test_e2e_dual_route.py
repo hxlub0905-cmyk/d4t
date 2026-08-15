@@ -5,7 +5,7 @@
 - Review SEM（KLARF + 每顆一張圖，沒有 ref）走 rsem route，
   由 Golden Cell 卡自己疊一張參考圖出來
 
-兩條 route 共用同一段算法與判定（相減 → 去噪 → SNR → blob → CD → GLV → 同一條
+兩條 route 共用同一段算法與判定（相減 → 去噪 → SNR → 區域 → CD → GLV → 同一條
 分數表達式、同一個門檻），只有影像尺寸相關的幾何參數不同。
 """
 from __future__ import annotations

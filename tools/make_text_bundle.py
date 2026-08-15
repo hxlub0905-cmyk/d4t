@@ -331,8 +331,17 @@ def build(out_name: str = "ADEPT_bundle.py", root: str = "",
     return "\n".join(parts) + "\n"
 
 
-#: 一個檔案最多幾 KB。**GitHub 不顯示超過 1 MB 的檔案**，而公司機唯一的
-#: 取得方式是「在 GitHub 上看到、按複製鈕」。留一成餘裕給下一次成長。
+#: 要求分批（``--split``）時，一個檔案最多幾 KB。
+#:
+#: ⚠ **這個值不再套用在壓縮版的單檔包上**（2026-08-15 使用者決定）。
+#: 舊的假設是「GitHub 不顯示超過 1 MB 的檔案，所以包一定要壓在 1 MB 以內」——
+#: 但實際的取得方式是**整份文字複製得走**，並不依賴 GitHub 把檔案渲染出來。
+#: 為了一個不存在的限制去自動分批，換來的是使用者要複製兩次，而那是實打實的
+#: 成本（見 ``_merge_tail`` 為了省下一次複製做了什麼）。
+#:
+#: 所以現在：``--compress`` 不帶 ``--split`` = **永遠一個檔案**，不管多大。
+#: 真的需要分批的時候（例如某天通道換了、或者要人眼讀得懂的純文字版）
+#: 才明講 ``--split``，這個值是那時候的安全上限。
 LIMIT_KB = 900
 
 
@@ -392,23 +401,24 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default="ADEPT_bundle.py",
                     help="輸出檔名（分批時會變成 ..._part1of6.py）")
     ap.add_argument("--compress", action="store_true",
-                    help=("壓縮成**一個**檔案（lzma + base64，約 700 KB）。"
-                          "一次複製就搬完，代價是內容不再是可以直接讀的文字 ——"
-                          "解包程式本身仍然是可讀的 Python，而且 --list 可以先看"
-                          "它會寫哪些檔案。"))
+                    help=("壓縮成**一個**檔案（lzma + base64）。一次複製就搬完，"
+                          "代價是內容不再是可以直接讀的文字 —— 解包程式本身仍然是"
+                          "可讀的 Python，而且 --list 可以先看它會寫哪些檔案。"
+                          "不帶 --split 就永遠是一個檔案，不會因為變大而自己分批。"))
     ap.add_argument("--split", type=int, default=0, metavar="KB",
-                    help=("每批最多幾 KB（0 = 不分批）。**GitHub 不顯示超過 1 MB "
-                          "的檔案**，而剪貼簿是唯一的通道時就必須分批，"
-                          "400 是安全值。"))
+                    help=("每批最多幾 KB（0 = 不分批，預設）。只有在真的需要"
+                          "分批複製的時候才給 —— 平常整份複製得走，多切一批"
+                          "就是多複製一次。"))
     a = ap.parse_args(argv)
 
     items = collect()
-    if a.compress and not a.split:
-        # **壓縮版也會長大。** 它一度是 701 KB，2026-08-14 到了 908 KB。
-        # 所以不再假設「壓縮就一定塞得進一個檔案」：量出來，塞不下就分批。
-        groups = _fit(items, True, LIMIT_KB * 1024)
-    else:
-        groups = _slice(items, a.split * 1024) if a.split else [items]
+    # **不分批是預設，而且不會被大小推翻。**
+    #
+    # 這裡曾經是「壓縮版量出來塞不下 900 KB 就自動分批」，前提是「GitHub 不顯示
+    # 超過 1 MB 的檔案，所以送不進去」。2026-08-15 確認那個前提不成立：整份文字
+    # 複製得走。自動分批因此只剩缺點 —— 使用者某天更新完發現要複製兩次，而且
+    # 檔名從 ADEPT_bundle.py 變成 ADEPT_bundle_part1of2.py，文件全部對不上。
+    groups = _slice(items, a.split * 1024) if a.split else [items]
     out_dir = os.path.dirname(os.path.abspath(a.out))
     if out_dir and not os.path.isdir(out_dir):
         os.makedirs(out_dir, exist_ok=True)

@@ -423,3 +423,26 @@ def test_an_old_subtract_without_b_still_uses_the_aligned_ref():
     # 有寫 b 的檔案（新版 Studio 一律寫滿）原樣保留
     d["nodes"]["sub"]["params"]["b"] = "ref"
     assert Recipe.from_json_dict(d).nodes["sub"].params["b"] == "ref"
+
+
+def test_a_recipe_round_trip_does_not_pick_up_the_old_subtract_default():
+    """遷移只能對**檔案**做，不能對 round-trip 做。
+
+    ``run_batch`` 把 recipe 序列化送進 worker、worker 再反序列化回來。這一道
+    遷移以前的判準是「這個 dict 缺了 b」，於是那趟 round-trip 也被當成一份
+    舊檔案：同一份 recipe 在 ``workers=1`` 是 ``b="ref"``（卡片預設）、在
+    ``workers=4`` 變成 ``b="ref_aligned"`` —— 換一個 ``--workers`` 就換一組
+    分數，而且兩邊都跑得完、都有數字。
+    """
+    from adept.core.pipeline.recipe import Recipe, RecipeNode, ScoreSpec
+
+    r = Recipe(recipe_id="in-memory",
+               routes={"ebi_patch": ["load", "sub"]},
+               nodes={"load": RecipeNode("load", "load_patch", {}),
+                      "sub": RecipeNode("sub", "subtract", {"a": "test"})},
+               score=ScoreSpec("1", 0.0, {"below": 0, "above": 1}))
+    assert "b" not in r.nodes["sub"].params
+
+    worker_side = Recipe.from_json_dict(r.to_json_dict())
+    assert "b" not in worker_side.nodes["sub"].params, (
+        "round-trip 補了 b —— 平行批次會跟循序批次算出不一樣的分數")

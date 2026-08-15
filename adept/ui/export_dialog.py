@@ -148,11 +148,11 @@ def _safe_name(text: Any) -> str:
 
 
 def _overlay_images(item: Any, recipe: Any, kind: str
-                    ) -> Tuple[Dict[str, Any], Dict[str, Any], Any]:
-    """一顆 defect 的疊圖素材 ``(images, features, blobs)``。
+                    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """一顆 defect 的疊圖素材 ``(images, features)``。
 
     有 recipe 就跑一次 :func:`~adept.core.pipeline.run_defect`（``keep_context``），
-    這樣 diff / blobs 都在，疊圖才是「機器看到的東西」；跑不出影像（或沒有
+    這樣 ``diff`` 也在，疊圖才是「機器看到的東西」；跑不出影像（或沒有
     recipe）就退回直接讀原始 channel（test → single → 第一個有的）。
     """
     from adept.core.pipeline import run_defect     # 延後匯入：對話框開啟才需要
@@ -162,8 +162,7 @@ def _overlay_images(item: Any, recipe: Any, kind: str
         ctx = getattr(r, "context", None)
         images = dict(getattr(ctx, "images", {}) or {}) if ctx is not None else {}
         if images:
-            blobs = (ctx.meta or {}).get("blobs") if ctx is not None else None
-            return images, dict(getattr(r, "features", {}) or {}), blobs
+            return images, dict(getattr(r, "features", {}) or {})
 
     channels = list(getattr(item, "images", {}) or {})
     images = {}
@@ -172,7 +171,7 @@ def _overlay_images(item: Any, recipe: Any, kind: str
             images[ch] = item.load(ch)
         except Exception:            # noqa: BLE001 — 單顆讀不出來不該殺掉整批
             continue
-    return images, {}, None
+    return images, {}
 
 
 def _overlay_label(result: Dict[str, Any]) -> str:
@@ -286,13 +285,13 @@ def run_export_job(spec: Dict[str, Any],
             tick("Overlay %d / %d (#%s)" % (i, len(rows), did))
             item = items.get(did)
             try:
-                images, feats, blobs = _overlay_images(item, recipe, kind)
+                images, feats = _overlay_images(item, recipe, kind)
                 if not images:
                     n_fail += 1
                     continue
                 merged = dict(feats)
                 merged.update(r.get("features") or {})
-                panel = render_overlay(images, merged, blobs=blobs,
+                panel = render_overlay(images, merged,
                                        label=_overlay_label(r))
                 write_png(panel, os.path.join(
                     out_dir, "%s%s.png" % (OVERLAY_PREFIX, _safe_name(did))))
@@ -754,7 +753,7 @@ class ExportDialog(QDialog):
         lay = QVBoxLayout(box)
         lay.setSpacing(6)
 
-        self.chk_overlay = QCheckBox("Write overlay PNGs (the main blob boxed in red)", box)
+        self.chk_overlay = QCheckBox("Write overlay PNGs (image and diff side by side, score on top)", box)
         self.chk_overlay.toggled.connect(self._on_any_output_toggled)
         lay.addWidget(self.chk_overlay)
 
@@ -773,7 +772,7 @@ class ExportDialog(QDialog):
             self._pick_overlay_dir)
         lay.addLayout(orow)
 
-        hint = QLabel("Overlays re-run the pipeline to obtain diff and blob; without a recipe only the raw image is drawn.",
+        hint = QLabel("Overlays re-run the pipeline to obtain the diff image; without a recipe only the raw image is drawn.",
                       box)
         hint.setObjectName("paramHint")
         hint.setWordWrap(True)

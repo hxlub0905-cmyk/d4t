@@ -155,7 +155,7 @@ def test_fit_then_reset_is_a_way_back(window):
     """fit 之後字會變小，這時候要有一顆「回到 100%」—— 不然使用者只能滾回來，
     而滾回來要滾幾下沒有人知道。"""
     view = window.pipeline
-    for key in ("align", "subtract", "snr_map", "blob_segment"):
+    for _key in ("align", "subtract", "snr_map", "roi_cross"):
         view.fit()
     view.fit()
     view.reset_zoom()

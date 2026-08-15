@@ -43,16 +43,16 @@ CATEGORY_ADC = "adc"
 #: =============  =========================  ==============================
 #: input          （固定頭節點）              load_patch
 #: enhance        影像 → 影像                normalize / gamma / denoise
-#: region         找出「要看哪裡」            snr_map / blob_segment / roi_define
+#: region         找出「要看哪裡」            snr_map / roi_cross / roi_template
 #: compare        影像＋影像 → 影像           align / subtract
 #: measure        影像＋區域 → 數字           glv_stats / cd_measure
 #: adc            數字 → score → bin         （固定尾節點）
 #: =============  =========================  ==============================
 #:
 #: **型別規則是預設的裁決方式，但不是唯一的。** ``snr_map`` 是影像進影像出，
-#: 照型別會落在 enhance —— 但它的**唯一**消費者是 ``blob_segment``
-#: （每一份範例 recipe 都是 snr → blob），而且它必須跑在 Compare 之後，
-#: 放在讀起來排第二的 Enhance 裡永遠用不到。所以規則補一條：
+#: 照型別會落在 enhance —— 但它是為了「哪裡最可疑」而存在的，而且必須跑在
+#: Compare 之後（它吃 diff），放在讀起來排第二的 Enhance 裡永遠用不到。
+#: 所以規則補一條：
 #: **一張卡如果只為了餵另一段而存在，就跟著那一段走。**
 GROUP_INPUT = "input"
 GROUP_ENHANCE = "enhance"
@@ -306,10 +306,11 @@ class Step(ABC):
     # ---- 具名區域（F7-9）---------------------------------------------------
     #: 影像流有 reads/writes 可以在 validate 裡模擬，**具名 ROI 以前沒有**。
     #: 於是「量測卡指到一個沒人定義的區域」只有兩種下場：名字打錯 → 每顆
-    #: defect 執行到一半才 StepError；名字剛好是保留字 ``blob`` 而上游又沒有
-    #: Blob 卡 → **安靜地改量整張圖**，跑得完、有數字、而且是錯的。
-    #: 後者是最糟的一種：使用者看不出哪裡不對。所以區域也宣告成契約，
-    #: 跟影像流走同一條檢查路徑（``recipe.validate`` 的 unknown-region）。
+    #: defect 執行到一半才 StepError；或者更糟 —— **安靜地改量整張圖**，
+    #: 跑得完、有數字、而且是錯的（當時 ``cd_measure`` 的 roi 預設值是
+    #: ``blob``，少了上游的卡就會這樣）。後者使用者看不出哪裡不對，
+    #: 所以區域也宣告成契約，跟影像流走同一條檢查路徑
+    #: （``recipe.validate`` 的 unknown-region）。
     @classmethod
     def resolve_regions_out(cls, params: Dict[str, Any]) -> List[str]:
         """這張卡會定義哪些具名區域。"""

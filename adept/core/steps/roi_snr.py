@@ -1,7 +1,7 @@
 # ADEPT step-card library — authored 2026-07-28 (M1).
 """roi_snr — ROI SNR 量測卡。
 
-在指定影像流上對一個 ROI（最大 blob 的 bbox，或影像中央固定方框）量
+在指定影像流上對一個具名區域（ROI 卡定出來的框；留空 = 整張影像）量
 訊噪比與相關統計。roi_snr_signed 沿用 e-beam 正負號慣例：比背景暗的
 缺陷是負值。
 """
@@ -44,7 +44,7 @@ class RoiSnrStep(Step):
         ParamSpec(name="background_margin", type="int", default=20, min=1, max=200,
                   help=("Background sampling width in pixels: the ring outside the "
                         "ROI used for background statistics.")),
-        output_prefix_spec("blob"),
+        output_prefix_spec("defect"),
     ]
     reads = ["diff"]
     writes: List[str] = []
@@ -61,7 +61,7 @@ class RoiSnrStep(Step):
 
     @classmethod
     def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
-        name = str(params.get("roi", "blob") or "").strip()
+        name = str(params.get("roi", "") or "").strip()
         return [name] if name else []
 
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
@@ -70,9 +70,10 @@ class RoiSnrStep(Step):
 
         rect = roi_rect_or_none(ctx, self.key, img, p["roi"])
         if rect is None:
-            ctx.warn(f"[{self.key}] no blob found (run Blob segment first, or "
-                     f"point roi at a Define region card); all ROI SNR "
-                     f"features recorded as 0.")
+            ctx.warn(f"[{self.key}] there is no image to measure on, so the "
+                     f"region could not be turned into pixels; all ROI SNR "
+                     f"features recorded as 0. Check that the load card "
+                     f"upstream ran.")
             ctx.add_features(prefix_features(p["output_prefix"], _ZERO))
             return ctx
 

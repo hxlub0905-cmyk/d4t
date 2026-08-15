@@ -13,7 +13,7 @@ Recipe JSON 形狀（見 docs/plans/F0-master-plan.md §3.4）：
       "nodes": {"align": {"step": "align", "params": {"method": "phase"},
                           "enabled": true}},
       "edges": [["subtract","snr"]],
-      "score": {"expr": "snr_max * sqrt(blob_area)", "threshold": 3.0,
+      "score": {"expr": "snr_max * sqrt(area_px)", "threshold": 3.0,
                 "bins": {"below": 0, "above": 1}}
     }
 
@@ -246,6 +246,24 @@ _RENAMED_VALUES: Dict[Tuple[str, str], Dict[str, str]] = {
 }
 
 
+def _predates_subtract_b_default(app_version: Any) -> bool:
+    """這份 JSON 是「``subtract`` 改預設值之前」存的嗎（見 ``from_json_dict``）。
+
+    判準是 **``app_version`` 這一欄在不在**，不是版本號大小 —— 版本號現在還是
+    ``0.1.0.dev0``，比不出 8/14 之前或之後。而「有沒有這一欄」剛好夠用：
+
+    * 真正的舊檔案（手寫的、或這一欄出現之前存的）**沒有**這一欄 → 要補。
+    * 這一欄出現之後由 Studio 存的檔案，參數一律寫滿，``b`` 本來就在裡面
+      → 補不補都一樣。
+    * ``to_json_dict()`` **一定**會寫這一欄，所以任何 round-trip 回來的
+      dict（``run_batch`` 送進 worker 的那份）都不會被誤認成舊檔案 ——
+      那正是這個判準要擋的那件事。
+
+    型別上收 ``Any``：這個值是從 JSON 來的，別人手改過什麼都有可能。
+    """
+    return not str(app_version or "").strip()
+
+
 def _migrate_renamed_values(nodes: Dict[str, "RecipeNode"]) -> None:
     """把改過名的參數**值**換成新的（就地改寫 nodes）。"""
     for nid, node in list(nodes.items()):
@@ -396,9 +414,28 @@ class Recipe:
         # 一份「align → subtract」的舊 recipe 會安靜地跳過對位，分數整批變掉
         # —— dual-route e2e 當場從 22/24 掉到 18/24。既有 recipe 一份都不能
         # 被改變行為：載入時把舊預設寫回去。
-        for node in nodes.values():
-            if node.step == "subtract" and "b" not in node.params:
-                node.params["b"] = "ref_aligned"
+        #
+        # ⚠ **只對「改版之前存的檔案」做。**（2026-08-15 修）
+        #
+        # 這一道以前是無條件的，判準是「這個 dict 缺了 b」。那跟「這是一份舊
+        # 檔案」只在**檔案**這條路上等價 —— 而 ``from_json_dict`` 還有第二個
+        # 呼叫者：``batch.run_batch`` 把 recipe 序列化送進 worker，worker 再
+        # 反序列化回來。於是一份程式化建立、``subtract`` 沒寫 ``b`` 的 recipe：
+        #
+        #     workers <= 1（同進程）  → b = "ref"（卡片預設）
+        #     workers >= 2（子進程）  → b = "ref_aligned"（被這一道補的）
+        #
+        # 同一份 recipe、同一批資料，換一個 ``--workers`` 就換一組分數，而且
+        # 兩邊都跑得完、都有數字。``run_batch`` 在 ``n <= 1`` 時也走循序路徑，
+        # 所以連「跑一顆」與「跑兩顆」都會不一樣。
+        #
+        # ``app_version`` 正好是真正的判準：**新版寫出來的檔案一定有這一欄**
+        # （``to_json_dict`` 固定填現在這一版），所以「沒有這一欄」就是
+        # 「改版之前存的」。round-trip 回來的 dict 帶著版本，不再被誤認成舊檔。
+        if _predates_subtract_b_default(d.get("app_version", "")):
+            for node in nodes.values():
+                if node.step == "subtract" and "b" not in node.params:
+                    node.params["b"] = "ref_aligned"
 
         return cls(
             recipe_id=str(d["recipe_id"]),
@@ -654,8 +691,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                            f"'ref' (currently provided: {sorted(avail)})"))
             # 具名區域走跟影像流一樣的檢查（F7-9）。沒有這一段的話，
             # 「量測卡指到沒人定義的區域」在跑之前是看不出來的 ——
-            # 名字打錯要等執行期 StepError，而預設的 'blob' 少了上游的
-            # Blob 卡更慘：它會安靜地退回量整張圖，跑得完、有數字、且是錯的。
+            # 名字打錯要等執行期 StepError，而更慘的是安靜地退回量整張圖 ——
+            # 跑得完、有數字、且是錯的。
             missing_roi = [x for x in step_cls.resolve_regions_in(p)
                            if x not in regions]
             if missing_roi:

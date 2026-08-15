@@ -18,7 +18,7 @@ Context 快照（images + features + meta 子集）存成 npz，之後同一顆�
 **快照必須涵蓋 Context 的每一個欄位。**（F7-9 修）v1 只存了
 images/features/meta，漏了 ``rois`` 與 ``labels``。checkpoint 是執行順序上的
 **位置**（最後一張影像段卡的下一格），不是「所有影像段的卡」—— 所以放在中間
-的 Region 卡（``roi_define`` / ``blob_segment``，都是 algo）會落在快取段裡。
+的 Region 卡（``roi_cross`` / ``roi_template``，都是 algo）會落在快取段裡。
 於是：第一次跑（miss）正常，**第二次跑（hit）ROI 不見了**，量測卡報
 「region 'main' is not defined」。第一次對、第二次錯是最難查的一種 bug，
 所以 ``FORMAT_VERSION`` 存進 payload，版本對不上一律當 miss 重算 ——

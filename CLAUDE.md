@@ -124,7 +124,7 @@ adept/
 │   ├── export_dialog.py     #   輸出精靈（寫回前一定先預覽變更）
 │   ├── workers.py           #   載入/預覽(請求合併)/試跑 背景執行緒
 │   └── studio.py app.py     #   主視窗 + 進入點
-├── tests/                   # 520+ 個測試，全部用合成資料，~30s 跑完
+├── tests/                   # 1200+ 個測試，全部用合成資料（見 §6 的「測試要跑多久」）
 ├── tools/                   # make_sample(_rsem).py 合成資料；離線安裝三件套：
 │                            #   fetch_wheels.py（有網路的機器抓）→ install_offline.py
 │                            #   （air-gapped 機器裝）→ doctor.py（環境自檢）
@@ -144,6 +144,11 @@ adept/
    不能讓它跑到演算法裡炸。
 5. **檔案寫入一律 atomic**（`.tmp` + `os.replace`）。
 6. **KLARF 寫回必須無損**：沒被改到的 byte 要與原檔逐位元組相同（`klarf_core` 的 span-splice）。
+   6.5 **`adept/ui/` 底下的字一律英文**（`tests/test_ui_english_only.py` 鎖住）。
+   **CLI（`adept/__main__.py`）刻意是中文，這不是漏掉的。** 兩者的讀者不同：
+   Studio 要給廠內的製程/設備工程師用（推廣鐵則），而 CLI 是開發與除錯的入口，
+   讀者就是維護這個專案的人。要改成英文請先改掉這一條，不要因為「看起來不一致」
+   就順手統一 —— 那會讓 Studio 的英文變成一個沒有理由的慣例。
 7. **單顆 defect 出錯不得殺掉整批**（`run_defect` 從不 raise，回 `ok=False`）。
 8. **repo 裡不得有未遮蔽的廠內識別碼**（Lot／Wafer／機台／device／recipe 名稱／
    廠區代號／缺陷分類名稱）。測試 fixture 也一樣 —— 它們斷言的是**結構**，
@@ -223,15 +228,51 @@ param 相依 I/O（例如輸出流名稱由參數決定）覆寫 `resolve_reads/
 python -m venv .venv && .venv\Scripts\activate      # Windows
 pip install -r requirements.txt && pip install pytest
 
-QT_QPA_PLATFORM=offscreen pytest -q                # 全部測試（Windows 不用設 QT_QPA_PLATFORM）
-# 開發迴圈**只跑改到的測試檔**（pytest -q tests/test_xxx.py）——
-# 全套在家用機 ~30s，但在雲端 session 的容器上要好幾分鐘（UI + 批次測試吃 CPU）。
-# 全套留到 commit 前跑一次就好。
+QT_QPA_PLATFORM=offscreen pytest -q tests/test_xxx.py   # ← 平常就跑這個
 python tools/make_sample.py /tmp/lot --n 100       # 產合成資料
 python -m adept gui                                # 開 Studio
-python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 \
+python -m adept run examples/recipes/cross_regions.json /tmp/lot/LOT_SYN.001 \
     --workers 4 --cache /tmp/cache --db /tmp/runs.db --csv features.csv
 ```
+
+### 測試要跑多久（**規則，不是建議**）
+
+| 情況 | 指令 | 實測 |
+|---|---|---|
+| 開發迴圈 | `pytest -q tests/test_<改到的>.py` | 秒級 |
+| 沒把握改到什麼 | `python tools/run_tests.py --fast` | **~47 秒** |
+| commit 前 | `python tools/run_tests.py` | **~2.5 分鐘** |
+| CI | `pytest -q`（`.github/workflows/ci.yml`，三個 Python 版本） | 十幾分鐘 |
+
+> **絕對不要在雲端 session 裡跑 `pytest -q` 全套。** 實測（2026-08-15，同一台
+> 容器、同一套測試）：
+>
+> | 跑法 | 時間 |
+> |---|---|
+> | `pytest -q`（一個行程跑完全部） | **> 11 分鐘** |
+> | 每個檔案各自一個行程（`tools/run_tests.py`） | **148 秒** |
+> | 只算 25 支 UI 測試檔，一個行程 | **> 10 分鐘** |
+> | 同樣那 25 支，各自一個行程 | **101 秒** |
+>
+> 差距在 Qt：一個行程裡，前面每一支 UI 測試建立的 `QWidget` 都還掛在同一個
+> `QApplication` 底下（Qt 物件不會因為測試結束就消失），所以後面每開一個視窗
+> 都要跟愈來愈多的殘留物一起做版面計算 —— 時間是**超線性**的。行程結束就全部
+> 歸零，所以分開跑不只是平行，是把那個累積整個拿掉。
+>
+> 以前這裡寫「全套 ~30s，雲端要好幾分鐘，commit 前跑一次就好」。那個建議在
+> 雲端 session 裡的實際後果是**一次十一分鐘、期間什麼都推不動**，而且它是
+> 每一輪都會再發生一次的成本。
+
+`tools/run_tests.py` 是 stdlib-only 的單檔（跟 `tools/` 其他腳本同一條規矩），
+會印出最慢的幾個檔案，紅了就把那個檔案的完整輸出貼出來。
+
+`pytest -q -m "not slow"` 也可以（marker 由 `tests/conftest.py` **依檔名自動
+套用**，新增 UI 測試檔不必記得標）。但它仍然是一個行程，所以只在你確定不會
+碰到 UI 時才比較快 —— 一般情況直接用 `run_tests.py --fast`。
+
+⚠ `slow` 篩掉的是**慢**，不是**不重要**。CI 跑不加參數的全套，因為
+「在同一個行程裡跑也要能過」本身是一條性質（測試之間不該互相汙染）。
+`--fast` 綠了不等於可以 commit。
 
 **每次改完之後**（**在家用機上** —— 公司機不能執行 git 操作）要重產公司機拿得到
 的那兩樣東西。順序是 `git add` 之後才跑，因為它們讀的是 `git ls-files`：
@@ -264,7 +305,7 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 | **OpenCV IPP 非決定性** | 同張圖算兩次差 ~1e-8，快取結果對不起來 | `batch.pin_cv2_deterministic()` 關 IPP（每個 worker 都呼叫） |
 | **Fusi³ ecc 對位正負號** | ecc backend 位移與其他四個相反 | 已於 `algo/align.py` 修正並鎖測試 |
 | **MMH 次像素 batch 版偏移** | batch 版比 scalar 版低約 1.5 px | 刻意保留原行為，檔頭有記錄；要用精確值請用 scalar 版 |
-| **中心框幾何與影像尺寸綁死**（F7-4 已修） | 同一組 `glv_stats` 參數在 128² patch 上準、在 256² RSEM 上漏抓（缺陷散佈超出框） | **幾何已從量測卡搬到 Region 卡**（`roi_define`），量測卡只引用 ROI 名字。`size_unit="percent"` 的框會隨影像尺寸縮放，同一份 recipe 換 patch 尺寸不會失效。迴歸測試 `tests/test_region.py::test_percent_sizing_survives_a_patch_size_change` |
+| **中心框幾何與影像尺寸綁死**（F7-4 已修） | 同一組 `glv_stats` 參數在 128² patch 上準、在 256² RSEM 上漏抓（缺陷散佈超出框） | **幾何已從量測卡搬到 Region 卡**，量測卡只引用 ROI 名字。ROI 一律存 0–1 比例座標，所以同一份 recipe 換 patch 尺寸不會失效。（當時的 `roi_define` 卡已於 F8 第五輪隨 ROI 收斂被拿掉，現在的 Region 卡是 `roi_cross` / `roi_template`；比例座標這條性質沒有變，迴歸測試在 `tests/test_roi_cross.py` 與 `tests/test_roi.py`）|
 | **pytest 收集期 import Qt** | `test_no_qt_after_import` 失敗 | UI 測試一律 **lazy import**（在 fixture 內 import 並注入 globals） |
 | **`QGraphicsItem` 拖曳留殘影**（F7-8 已修） | 拖動節點時埠標籤（"test"/"ref"）的舊位置沒被清掉 | `boundingRect()` **必須涵蓋所有畫得出去的東西**。埠標籤畫在節點右緣之外，之前只算到 `NODE_W + _PORT_R`，Qt 就只重繪那個範圍 |
 | **在節點外面畫東西**（F7-8／F7-9／F7-14 同一條） | 拖動節點留殘影 | `boundingRect()` 必須涵蓋**所有畫得出去的東西** —— 埠標籤（F7-8）、埠圓點（F7-9）、輸出埠的 `+`（F7-14）都在節點右緣之外。加任何畫在卡片外的裝飾時，先把 `boundingRect` 加寬，`tests/test_ui_f7_14_canvas_flow.py` 會斷言 `+` 的中心在 `boundingRect` 裡 |
@@ -272,7 +313,7 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 | **`test_no_qt_after_import` 跟檔名字母序有關**（F7-9 已修） | 新增一支 UI 測試檔就讓它失敗，而且失敗訊息指不到真正的原因 | 它以前在測試行程裡看 `sys.modules`，所以任何排在 `test_no_qt.py` **之前**的 UI 測試檔跑過 fixture 之後就會誤報。改成在乾淨的子行程裡 import core 再問 —— 那本來就是這條測試唯一想問的事 |
 | **快取只存了 Context 的一部分**（F7-9 已修） | 同一份 recipe **第一次跑對、第二次跑錯**（`region 'main' is not defined`） | checkpoint 是執行順序上的**位置**（最後一張影像段卡的下一格），不是「所有影像段的卡」，所以夾在中間的 Region 卡（algo）會落在快取段裡。v1 快照只存 images/features/meta，`ctx.rois` 命中時整個不見。快照現在涵蓋 `rois` 與 `labels`，並帶 `FORMAT_VERSION`（版本不合一律當 miss，舊快取目錄不會餵回殘缺快照）。迴歸測試 `tests/test_batch_cache.py::test_named_rois_survive_a_cache_hit` |
 | **特徵是扁平的全域命名空間**（F7-11 已解） | 兩張同型別的量測卡（例：量兩個 ROI 的 `glv_stats`）都寫 `glv_mean`，後面那張**安靜地蓋掉**前面那張，分數表達式指不到前面那個值 | 量測卡有 `output_prefix`（Studio 挑了區域會自動填成區域名），撞名時 `validate()` 仍會出 `feature-collision` warning、Studio 跑完在狀態列講出來 |
-| **量測卡指到沒人定義的 ROI**（F7-9 已修） | `cd_measure` 預設 `roi="blob"`，少了上游 Blob 卡時**安靜地改量整張圖** —— 跑得完、有數字、而且是錯的 | 具名區域現在跟影像流走同一條檢查：`Step.resolve_regions_in/out()` + `validate()` 的 `unknown-region`；`blob` 退回整張圖時會 `ctx.warn`。Studio 也在試跑前先跑 lint（以前完全沒跑，於是接錯的卡片會「跑完 200 顆、每顆都失敗」） |
+| **量測卡指到沒人定義的 ROI**（F7-9 已修） | `cd_measure` 當時預設 `roi="blob"`，少了上游 Blob 卡時**安靜地改量整張圖** —— 跑得完、有數字、而且是錯的 | 具名區域現在跟影像流走同一條檢查：`Step.resolve_regions_in/out()` + `validate()` 的 `unknown-region`；退回整張圖時會 `ctx.warn`。（量測卡的 `roi` 預設值已改成空字串 = 明確地「量整張圖」，不再預設指向一個要靠別張卡產生的名字）Studio 也在試跑前先跑 lint（以前完全沒跑，於是接錯的卡片會「跑完 200 顆、每顆都失敗」） |
 | **色調曲線用自然三次樣條** | 使用者把中間點往上拉，影像出現一圈**不存在的暗環** | 樣條會 overshoot。`algo/curve.py` 用保單調三次 Hermite（Fritsch–Carlson）。這是演算法自己造出來的假缺陷 —— 對判 defect 的工具是最糟的一種 bug。`tests/test_curve.py` 用四條最容易凹出去的曲線鎖住 |
 | **每讀一張圖就重開整個 TIFF**（2026-07-31 已修） | 「換下一顆 defect」明顯卡頓，而整條 pipeline 明明只要 9 ms | `read_page` 以前每次都 `with tifffile.TiffFile(path)` 開一次檔，而且用 `len(tf.pages)` 檢查範圍 —— **那一行會強迫走完整條 IFD 鏈**。4000 頁的 TIFF 每張圖 16 ms，而圖本身只有 16 KB。改成快取開好的 handle（版本鍵 = `(pid, mtime, size)`），換一顆 32 ms → 0.4 ms。同理 `load_dataset` 只要「幾頁」卻呼叫會解析所有 tag 的 `read_tiff_pages`，改用 `count_pages` 後 117 ms → 19 ms |
 | **fork 出來的子行程共用檔案偏移量**（同上一輪一起處理） | 批次某幾顆拿到別頁的影像 —— 不丟例外、不變慢，只是錯 | fork 複製的 fd **共用同一個 offset**，四個 worker 各自 seek+read 會互相把位置移掉。所以 TIFF handle 的快取鍵含 `os.getpid()`：子行程一進來就發現「這不是我的」而重開。`tests/test_tiff_index.py` 真的 fork 一個子行程去驗 |
@@ -300,6 +341,9 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 | **兩個節點之間只拉得動一條線**（F7-18 已修） | 先從 test 拉、再從 ref 拉，第二條只得到一句 `already connected` 然後什麼都沒發生 —— 使用者的結論是「這張卡不准我碰 ref」 | `edge_added` 帶第三個參數（**這條線從哪個輸出埠出發**），Studio 據此把下游卡的主要輸入指到那條流。同一對節點再拉一條要當成「我改變主意了」處理 |
 | **常駐在節點旁邊的裝飾**（F7-18 已清） | 每個輸出埠一顆「+」，十張卡的 pipeline 就有十幾顆加號跟資料流搶畫面 | 入口收回卡片庫；「+」做對的事（接上線、接在對的流上）改由「選著一張卡時從卡片庫加」承接（`add_card_after`）。加完**選取新卡**，連按三張才會長成一條鏈而不是倒過來 |
 | **虛線只是實線淡一點** | 「這條是我拉的」與「這條是排列順序帶來的」看起來只差深淺，而深淺會被縮放與主題影響 | 不同語意給不同**色相**（`canvas_edge_implicit`）。測試要鎖兩層：token 的色相差得出來，而且 `paint()` 真的去讀了它（畫進 pixmap 比主色相）|
+| **拿掉一張卡，週邊會留下承諾**（2026-08-15 清完） | `blob_segment` 在 F8 第五輪被拿掉，但 Export 精靈上還寫著「the main blob boxed in red」—— 而 `ctx.meta["blobs"]` 與 `blob_*` 特徵**再也沒有人產出**，所以那個紅框永遠畫不出來。使用者勾了、等疊圖跑完、拿到一疊沒有框的圖，畫面上沒有任何東西說明為什麼 | 刪一張卡要**沿著它的產出往下游走一遍**：誰讀 `meta` 的那個 key、誰讀那組特徵、哪句 UI 文案在描述它、哪個參數的預設值指向它（`cd_measure` 的 `roi="blob"`）、哪個 algo 模組只為它而存在（`algo/blob.py`）。死掉的**程式碼**沒人會發現，死掉的**承諾**使用者天天看得到。現在框只有一個來源：呼叫端明講 `box=`，`render_overlay` 不猜 |
+| **docstring 後面接 `%` 就不再是 docstring**（2026-08-15 踩到） | 想在說明裡插一個常數值，寫成 `"""…%s…""" % (X,)` —— 結果 `func.__doc__` **變成 None**，而且不會有任何錯誤 | 那是一個字串**運算式**，不是字串常值，所以 Python 不把它當 docstring 收。症狀完全是間接的（這次是 `test_ui_english_only` 把它當成「會顯示給使用者的字串」才抓到）。要插值就把數字寫進文字裡，或在函式外面組 `__doc__` |
+| **遷移的判準要是「這是舊檔案」，不是「這個欄位缺了」**（2026-08-15 已修） | 同一份 recipe、同一批資料，`--workers 1` 與 `--workers 4` 算出**不一樣的分數**，兩邊都跑得完、都有數字 | `from_json_dict` 補 `subtract.b` 的條件是「params 裡沒有 b」。但 `run_batch` 會把 recipe 序列化送進 worker 再反序列化 —— 那趟 round-trip 也符合這個條件，於是子進程拿到的參數跟主進程不一樣（`n <= 1` 走循序路徑，所以連「跑一顆」跟「跑兩顆」都不同）。判準改成 **`app_version` 這一欄在不在**：`to_json_dict()` 一定會寫它，所以 round-trip 回來的 dict 不會被誤認成舊檔案。**任何 `from_json_dict` 裡的遷移都要先問一次「round-trip 會不會踩到我」**（`tests/test_recipe.py::test_a_recipe_round_trip_does_not_pick_up_the_old_subtract_default`）|
 
 ---
 
@@ -349,12 +393,12 @@ warning 指名它 —— 那正是要看到的（它以前恆為 0，那份分�
 |---|---|---|
 | F8 | 🔨 | **純規則 ROI 定位 + mask 通道 + UI 第二波**（詳見 `SESSION_LOG.md` 逐輪紀錄與 `docs/plans/F8-rule-based-roi.md`）。已完成：`roi_cross`（條紋交會處放框、一鍵整批量 pitch）、`roi_mask` + Normalize `use_within`（見 §2.5）、參數說明搬 tooltip、D 案版面（畫布佔中上、設定拿大頭、**畫布彈出視窗**兩窗互通）、右鍵平移、手動佈局保留（tidy 才重排）、route 虛線退役（排版仍吃隱含順序）、量測卡預覽疊區域框、`multi_choice` 參數型別（glv_stats 統計量用勾的）、subtract 預設 `b=ref`（patch 天生對齊；舊檔載入遷移補 `ref_aligned` —— **改預設值必附遷移**） |
 | M0 抽庫 | ✅ | 從 KLIP/GLAS/MMH/PEAR/CPE/Fusi³ vendoring 演算法資產 |
-| M1 引擎 | ✅ | Context/Step/Recipe DAG/表達式/14 張卡/合成資料/CLI |
+| M1 引擎 | ✅ | Context/Step/Recipe DAG/表達式/卡片庫/合成資料/CLI（卡片數會變，看 `python -m adept steps`）|
 | M2 批次 | ✅ | ProcessPool + 影像段快取 + SQLite 歷史 + rescore |
 | M3 Studio | ✅ | PySide6 四區塊視覺化編輯器 |
-| M4 雙輸入 | ✅ | RSEM 單張 ingest、輸入型別分流、Golden Cell + Cell 週期估測卡（`period.choose_origin` 相位搜尋已補完）。驗收達成：`examples/recipes/dual_route_basic.json` 同時吃 EBI patch 與 RSEM，跨 3 seeds × 2 種輸入共 144 顆合成 defect，正確率 95.1% |
+| M4 雙輸入 | ✅ | RSEM 單張 ingest、輸入型別分流、Golden Cell + Cell 週期估測卡（`period.choose_origin` 相位搜尋已補完）。驗收達成：一份 recipe 同時吃 EBI patch 與 RSEM，跨 3 seeds × 2 種輸入共 144 顆合成 defect，正確率 95.1%（當時的 `dual_route_basic.json` 已隨 F8 第五輪的範例改版移除，雙 route 的迴歸測試留在 `tests/test_e2e_dual_route.py`）|
 | M5 Gallery+Export | ✅ | Gallery（虛擬捲動、排序、直方圖點 bar 篩選）；KLARF 三種寫回模式（就地無損／另存含 ADCSCORE+ADCCLASS／Top-N）+ 寫回前預覽變更；CSV/Excel 報表（含抓漏率/誤殺率）；overlay；`fab_probe/` 三支探測腳本；CLI `adept export` |
-| M6 推廣包 | ✅ | 離線安裝三件套（`tools/fetch_wheels.py` / `install_offline.py` / `doctor.py`，全 stdlib-only）、首啟導覽 + 範例 recipe 庫對話框、5 份範例 recipe。快速參考卡 PDF 暫緩（移到 backlog） |
+| M6 推廣包 | ✅ | 離線安裝三件套（`tools/fetch_wheels.py` / `install_offline.py` / `doctor.py`，全 stdlib-only）、首啟導覽 + 範例 recipe 庫對話框、範例 recipe（**目前只有 `cross_regions.json` 一份** —— 舊的五份都依賴 F8 第五輪被拿掉的卡，使用者決定「等 APP 完成再給範例」）。快速參考卡 PDF 暫緩（移到 backlog） |
 | M7 UI/UX | ✅ | A 組防呆 + **UI 全英文**（`tests/test_ui_english_only.py` 鎖住）。F7 全數完成：patch-only 收斂（`ui/scope.py`）、中性色/平面主題 + 暗色、卡片依流程階段分組 + 搜尋 + 前置條件 badge、**Region 段（具名 ROI）**、Results 視窗、**節點畫布**。計畫書 `docs/plans/F7-canvas-and-taxonomy.md` |
 | F7-24 | ✅ | **版面把空間給對的東西**（來自一張跑起來的截圖）：**開 recipe 自動 fit**（`fit_later()` 等畫布真的有尺寸才算；`fit` 加上限 1.0 —— `fitInView` 會把兩張卡的 pipeline 放大成三倍）、**兩個下拉框不再吃掉整列**（以前各佔八百多 px 去裝「1」與「diff」，而 `ebi_patch · defect 1 / 24` 被擠掉）、**刪掉死掉的 `PipelinePanel`**（F7-6 的畫布取代了它，但每一輪主題工作都還要繞過它）、**工具列不再是七顆一樣的白鈕**（亮色 `toolbar` 以前與 `bg_surface` **同為 `#ffffff`**；五顆文字鈕各配一個自繪圖示；`Export…` 拿 accent 外框 —— 整條工具列只有兩顆有顏色，而它們正好是要按的那兩顆）。**`Spread` 面板補上軸與圖例**（刻度畫在每一排自己身上 —— 每排單位不同，不能共用一句「0 → 255」；圖例畫一次，並明講右邊那欄是**這一顆**的值）、**往回走的線不再橫掃畫布**（換行那條線以前控制點水平推 `|Δx|*0.5`，一條線甩七百多 px；改成水平只推固定的 46px、量交給垂直方向）。**第二輪（對著自己截的圖再看一次）**：**fit 的下限從 0.45 改成量出來的 0.7**（十張卡落在 52%，卡片副標是一團灰；52/60/70/80/100% 逐級看過，副標要到 70% 才回來）、**塞不下時靠開頭對齊不置中**（`fitInView` 置中會把第一張跟最後一張同時切掉，而 pipeline 是從左往右讀的 —— 這條是前一項造出來的問題，**一輪改動要再截一次圖**）、**`Run trial` 與 `▾` 包成分段控制項**（1px 縫 + 內側直角）。驗收 `tests/test_ui_f7_24_layout.py`（13 條）。計畫書 §28、§29 |
 | F7-23 | ✅ | **按鈕要說得出自己現在是什麼狀態**（試用回饋第九輪）。第一輪**只動 `theme.py`**、呼叫端零改動：**八種按鈕全部補上焦點框**（以前只有「沒有 objectName 也沒有 variant」的那一種有 —— 見 §7 新增的兩列；新 token `focus_ring_inverse`，因為框要跟按鈕自己的底對比）、**disabled 的 primary 留住 accent 淡底**（以前跟一般鈕同一片灰，於是沒載資料時「該按哪一顆」沒有答案）、**圓角收成 `radius_sm/md/pill` 三個 token**（原本六個值散在 QSS 各處）、刪掉**寫了兩次的 `QToolBar::separator`**（贏的是沒有註解的那一份）。`Run trial ▾` 的下拉區量下來 QSS 做不到（見 §7），移到第二輪。**第二輪**：小按鈕的**六種尺寸收成一種**（`widgets.small_button()` 只說形狀 `square`/`wide`，邊長由 `control_sm` 決定；`kind="icon"` 給浮在畫布／影像上的那幾顆一個自己的底）、**垂直節奏統一**（重要性只用水平 padding 表達 —— 以前 primary 高 2px，空白狀態下兩顆並排的鈕對不齊）、**游標從「每個人自己記得」變成規則**（`apply_button_cursors()` 掃一次；以前一半的按鈕滑過去沒有變手指）、**`Run trial ▾` 拆成兩顆真的按鈕**。驗收 `tests/test_ui_f7_23_buttons.py`（13 條；對第一輪前 7 紅、對第二輪前 5 紅），含一條靜態掃描擋 `setFixedSize` 長回按鈕上。**第三輪**：**三個元件不再自己組色盤**（`_Chip` / `StageButton` / `LibraryItem`+`libBadge` 搬進 QSS —— 以前換膚要靠有人記得逐顆重套，而帶 badge 的卡片庫列那條路沒被走到，會留在上一個主題的灰色；真正每個實例不同的階段色仍留在 widget）、**`pressed` 真的跳一階**（新 token `pressed_bg`；以前與 hover 只差 ΔL*≈3.5）、**最小的按鈕不再有最大的反應**（`#cardButton:hover` 從動三件事收成兩件）、**`QPushButton` 補上 `:checked`**。順帶抓到 `radius_pill` 的 `999px` 在 Qt 是**方角**（見 §7）。**第四輪**：**按鈕上的字元圖示改自繪**（`widgets.draw_glyph_icon()` 14 個 + `IconButton`；`⤢`(U+2922)、`⌗`(U+2317)、`↶↷`(U+21B6/B7) 在廠內的 Windows 上 Segoe UI 根本沒有，退字型會讓同一排按鈕每顆字大小與 baseline 都不同，最壞是豆腐框 —— 而開發機看不到）。圖示顏色取 `palette()` 的 `ButtonText`（Qt 從 QSS 的 `color` 解析），換膚與變灰自動跟著；**主題鈕的實心半邊會隨目前主題翻面**，以前兩個主題長得一樣。刻意**不**碰 `−↑↓×` —— 那幾個 Segoe UI 有，一起畫掉只是多改動。計畫書 §27。|
@@ -416,14 +460,14 @@ CLI 不受影響：`python -m adept run` 照樣跑得動 rsem recipe。
 
 | 情況 | 用什麼 |
 |---|---|
-| 第一次搬整包 | `bundle/ADEPT_part1of6.py` … `part6of6.py`，每一批貼進去跑一次（分批是因為 **GitHub 不顯示超過 1 MB 的檔案**）|
+| 第一次搬整包 | `bundle/ADEPT_bundle.py` **一個檔案**，貼進去跑一次（不分批，理由見 `AGENTS.md` §2 那段引言）|
 | 之後更新 | 複製 `tools/FILELIST.txt`（12 KB）→ `python tools/check_files.py` → 它列出要重新複製哪幾個 |
 | 只想跑格式探測 | 直接複製 `fab_probe/probe_*.py`（stdlib-only 單檔，**不需要整個 repo**）|
 
 網路哪天通了還有 `tools/get_code.py` / `.ps1`（逐檔抓）。其餘對應設計：
 
 - 整個 repo **只有純文字檔**（`.py`/`.md`/`.json`/`.toml`/`.txt`/`.yml` + 一份 `.klarf`），
-  所以 GitHub「Download ZIP」下載得下來（那份 zip 不含 `.git`；170 個檔案、約 830 KB）。
+  所以 GitHub「Download ZIP」下載得下來（那份 zip 不含 `.git`；190 幾個檔案、約 1 MB）。
   **不要把 `.git` 打包給使用者** —— 二進位 pack 物件 + `hooks/*.sample` 腳本會觸發 DLP。
 - **「純文字」是必要條件，不是充分條件。** DLP 也掃**內容**，而最容易破功的地方是
   測試 fixture：一份真實的 KLARF 帶著 Lot／Wafer／機台／device／**recipe 名稱**
@@ -460,4 +504,4 @@ CLI 不受影響：`python -m adept run` 照樣跑得動 rsem recipe。
 | **MMH** | recipe 架構原型、批次引擎模式、次像素邊緣定位、品質指標、KLARF 寫回 |
 | **PEAR** | GLV 統計 metric bank、Tukey 離群、η²/Cohen's d、CJK-safe 影像載入 |
 | **cell-period-estimator** | 週期估測、Golden Cell 堆疊、ghosting 分數 |
-| **Perspective-Combination (Fusi³)** | 正規化、直方圖匹配、5-backend 對位、SNR map、blob 分割、MultiROISet |
+| **Perspective-Combination (Fusi³)** | 正規化、直方圖匹配、5-backend 對位、SNR map、MultiROISet（blob 分割也是從這裡來的，已於 2026-08-15 移除，見 §7）|

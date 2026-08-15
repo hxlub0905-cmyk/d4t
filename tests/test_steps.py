@@ -304,7 +304,7 @@ def test_cd_measure_reports_pixels_only():
     run_step("cd_measure", ctx, roi="spot")
     assert ctx.features["cd_x_px"] == 10.0
     assert ctx.features["cd_y_px"] == 20.0
-    assert ctx.features["area_px"] == 200.0            # blob 的真實像素面積
+    assert ctx.features["area_px"] == 200.0            # 框的面積 (10 x 20)
     assert not [k for k in ctx.features if k.endswith(("_nm", "_nm2"))]
     assert not [w for w in ctx.meta.get("warnings", []) if "nm_per_px" in w]
 
@@ -315,7 +315,7 @@ def test_cd_measure_reports_pixels_only():
 
 
 def test_cd_measure_can_target_a_named_region():
-    """F7-4：CD 也可以量使用者畫的框，不再只能吃 meta['blobs']。"""
+    """F7-4：CD 量的是**具名區域**的框（幾何從量測卡搬到 Region 卡）。"""
     img = np.zeros((64, 64), np.float32)
     ctx = Context(images={"diff": img})
     _centre_roi(ctx, "mid", 20, key="diff")
@@ -466,3 +466,42 @@ def test_tone_cards_keep_float_streams_float_and_only_touch_their_own():
     ctx2 = Context(images={"test": f.copy()})
     with pytest.raises(StepError):
         run_step("tone", ctx2, streams="nope")
+
+
+# --------------------------------------------------------------------------- #
+# to_uint8 的那個猜測（2026-08-15）
+# --------------------------------------------------------------------------- #
+def test_to_uint8_scales_normalised_floats_and_leaves_0_255_alone():
+    """自動判斷的兩個正常情形。"""
+    from adept.core.steps._util import to_uint8
+
+    unit = np.array([[0.0, 0.5, 1.0]], dtype=np.float32)
+    assert to_uint8(unit).tolist() == [[0, 127, 255]]
+
+    wide = np.array([[0.0, 128.0, 255.0]], dtype=np.float32)
+    assert to_uint8(wide).tolist() == [[0, 128, 255]]
+
+    u8 = np.array([[0, 7, 255]], dtype=np.uint8)
+    assert to_uint8(u8) is u8                    # uint8 原樣，不做任何拉伸
+
+
+def test_to_uint8_cannot_tell_a_very_dark_0_255_image_from_a_normalised_one():
+    """**這個猜測有一個分不出來的情形，而它的症狀是安靜的。**
+
+    一條殘差很乾淨的 ``diff``（0–255 的浮點，最大值 1.2）跟一張真正的 [0, 1]
+    影像在陣列上完全一樣，所以自動判斷會把前者 ×255 —— 雜訊放大兩百倍，
+    輸出還是一張看起來「對比不錯」的圖。
+
+    這條測試不是在說那個行為是對的，是在**釘住它就是這樣**，並且證明
+    ``assume_01`` 這個逃生口真的關得掉。知道答案的呼叫端請用它。
+    """
+    from adept.core.steps._util import to_uint8
+
+    dark = np.array([[0.0, 0.6, 1.2]], dtype=np.float32)
+    assert to_uint8(dark).max() == 255           # 猜成 [0, 1] 了
+    assert to_uint8(dark, assume_01=False).tolist() == [[0, 0, 1]]
+    assert to_uint8(dark, assume_01=True).max() == 255
+
+    # 反過來也要關得掉：明講是 0–255 的話，[0, 1] 的圖就該幾乎全黑
+    unit = np.array([[0.0, 0.5, 1.0]], dtype=np.float32)
+    assert to_uint8(unit, assume_01=False).max() == 1

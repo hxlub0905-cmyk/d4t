@@ -44,8 +44,8 @@ ParamSpec 生成（每格都有白話說明、範圍防呆、錯誤即時紅字�
 M4：**雙輸入** —— Review SEM 單張影像（KLARF + 每顆一張圖）與 EBI patch（test/ref 配對）
 都能吃，ingest 自動判別型別、recipe 自動走對應 route。沒有 ref 影像時由新的
 **Golden Cell 卡**把圖上重複的 cell 疊成一張乾淨參考圖（含晶格相位自動搜尋）。
-驗收：`examples/recipes/dual_route_basic.json` 一份 recipe、一個門檻，跨 3 seeds ×
-2 種輸入共 144 顆合成 defect，分類正確率 95.1%。
+驗收：一份 recipe、一個門檻，跨 3 seeds × 2 種輸入共 144 顆合成 defect，
+分類正確率 95.1%（迴歸測試 `tests/test_e2e_dual_route.py`）。
 
 M5：**Gallery + 輸出**。Gallery 把整批 defect 以縮圖網格攤開（虛擬捲動，10k 顆不卡），
 可按分數或任一特徵排序，**點直方圖的長條就篩出那個分數區間的 defect** —— 調參迴圈
@@ -57,8 +57,8 @@ Excel 報表（給 ground truth 就算抓漏率、誤殺率、混淆矩陣）與
 M6：**推廣包**。離線安裝三件套（`fetch_wheels` → `install_offline` → `doctor`，
 全部 stdlib-only，因為它們得在套件裝好之前就能跑）讓 pip 連不出去的廠內機器也裝得起來；
 Studio 首次開啟有導覽，按一下「用範例資料試一次」就會自己產生合成資料、載入範本、
-跑完一批，直接看到有分數的直方圖與 Gallery；範例 recipe 庫有 5 份，
-每一份示範一種不同的作法（見 `examples/recipes/README.md`）。
+跑完一批，直接看到有分數的直方圖與 Gallery；範例 recipe 庫見
+`examples/recipes/README.md`（目前一份：`cross_regions.json`）。
 
 M7 / F7：**UI/UX 大改版**（使用者試用回饋累計九輪）。UI 全英文、中性平面主題
 （亮/暗雙色盤）、**n8n 式節點畫布**取代直線清單 —— 卡片是節點、影像流是線、
@@ -79,8 +79,8 @@ python -m adept gui
 # CLI 試玩（不需真實資料）：
 python tools/make_sample.py /tmp/lot --n 100         # 產合成 KLARF + patch TIFF
 python -m adept steps                              # 看所有卡片
-python -m adept validate examples/recipes/die_to_die_basic.json
-python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 \
+python -m adept validate examples/recipes/cross_regions.json
+python -m adept run examples/recipes/cross_regions.json /tmp/lot/LOT_SYN.001 \
     --workers 4 --cache /tmp/cache --db /tmp/runs.db --csv features.csv
 python -m adept runs --db /tmp/runs.db             # 批次歷史
 python -m adept rescore <run_id> --db /tmp/runs.db --threshold 60 --save   # 秒級調門檻
@@ -166,7 +166,6 @@ adept/
 │   │   ├── histmatch.py     #   直方圖匹配 exact/linear/percentile  (Fusi³)
 │   │   ├── align.py         #   5-backend 對位 + robust + template  (Fusi³/GLAS)
 │   │   ├── snr.py           #   canonical SNR + ROI SNR + SNR map   (Fusi³/PEAR)
-│   │   ├── blob.py          #   defect blob 分割 + 幾何特徵          (Fusi³)
 │   │   ├── roi.py           #   正規化座標 MultiROISet               (Fusi³)
 │   │   ├── glv.py           #   GLV 統計 metric bank                 (PEAR)
 │   │   ├── stats.py         #   Tukey 離群 / Cohen's d / η²          (PEAR)

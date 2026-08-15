@@ -9,7 +9,7 @@
 """
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -205,7 +205,7 @@ def roi_rect_or_none(ctx, step_key: str, image, roi_name):
 
 
 def crop_to_roi(ctx, step_key: str, image, roi_name):
-    """依 ``roi`` 參數裁出要量測的像素（找不到 blob 時退回整張圖）。"""
+    """依 ``roi`` 參數裁出要量測的像素（``roi`` 留空 = 整張圖）。"""
     rect = roi_rect_or_none(ctx, step_key, image, roi_name)
     if rect is None:
         return image
@@ -248,22 +248,45 @@ def ensure_gray(arr: np.ndarray) -> np.ndarray:
     return a
 
 
-def to_uint8(arr: np.ndarray) -> np.ndarray:
+#: 自動判斷「這是不是 [0, 1] 的浮點影像」時，最大值容許到多少。
+#: 1.0 是定義上的上限，留一點餘裕給插值/濾波造成的 overshoot。
+_LOOKS_LIKE_01_MAX = 1.5
+
+
+def to_uint8(arr: np.ndarray, assume_01: Optional[bool] = None) -> np.ndarray:
     """任何灰階陣列 → uint8 0–255。
 
     - uint8 原樣回傳。
     - 浮點且值域看起來是 [0, 1] → ×255。
     - 其他（float 0–255、uint16 已是 0–255 值域…）→ clip 到 0–255 後轉型。
+
+    ⚠ **自動判斷有一個分不出來的情形，呼叫端知道的話請明講。**
+
+    判準是「最大值 ≤ ``_LOOKS_LIKE_01_MAX``（1.5）且沒有負值」。這對真正的
+    [0, 1] 影像是對的，但**一張幾乎全黑的 0–255 浮點圖長得一模一樣** ——
+    例如一條殘差本來就很乾淨的 ``diff``，最大值 1.2。那時候 ×255 會把雜訊
+    放大兩百倍，而輸出仍然是一張看起來「對比不錯」的圖：跑得完、有數字、
+    而且是錯的。
+
+    這件事**沒有辦法只看陣列就判斷**（兩種輸入的內容完全相同），所以：
+
+    ``assume_01=None``（預設）
+        自動判斷。輸入來源不明時只能這樣，而且大多數時候是對的。
+    ``assume_01=True`` / ``False``
+        呼叫端明講，不要猜。**知道答案的時候請用這個** ——
+        例如剛從 8-bit TIFF 讀進來的圖一定是 ``False``。
     """
     a = np.asarray(arr)
     if a.dtype == np.uint8:
         return a
     f = a.astype(np.float32)
-    if f.size > 0:
-        fmax = float(f.max())
-        fmin = float(f.min())
-        if 0.0 <= fmin and fmax <= 1.5:
-            f = f * 255.0
+    if assume_01 is None:
+        scale = bool(f.size) and 0.0 <= float(f.min()) \
+            and float(f.max()) <= _LOOKS_LIKE_01_MAX
+    else:
+        scale = bool(assume_01)
+    if scale:
+        f = f * 255.0
     return np.clip(f, 0, 255).astype(np.uint8)
 
 

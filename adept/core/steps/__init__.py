@@ -6,10 +6,13 @@
 ``adept.core.pipeline.step.REGISTRY`` / ``list_steps()`` 取卡。
 
 已註冊的 key（影像段 → 算法段）：
-  load_patch, normalize, tone, denoise,
-  align, subtract, invert, golden_cell,
-  snr_map, blob_segment, cd_measure, roi_snr, focus_quality, glv_stats,
-  cell_period
+  load_patch, normalize, tone, denoise, flatten,
+  align, subtract, golden_cell, cell_period,
+  snr_map, roi_cross, roi_mask, roi_template,
+  cd_measure, roi_snr, focus_quality, glv_stats
+
+這份清單是給人讀的，會過期。真正的來源是 ``REGISTRY``：
+``python -m adept steps`` 列的是實際註冊到的那些。
 """
 from __future__ import annotations
 
@@ -20,7 +23,7 @@ from . import denoise        # denoise
 from . import tone           # tone（亮度/對比/gamma/曲線/反相）
 from . import flatten        # flatten
 from . import align          # align
-from . import arith          # subtract / invert
+from . import arith          # subtract
 from . import snr_map        # snr_map
 from . import roi_cross      # roi_cross
 from . import roi_mask       # roi_mask（區域 → 0/255 mask 影像流，F8c）

@@ -79,12 +79,11 @@ def test_rgb_input_passes_through():
 # ---------------------------------------------------------------------------
 # 紅框
 # ---------------------------------------------------------------------------
-def test_blob_box_changes_pixels_at_the_bbox_edge():
-    """框畫在 blob 的邊界上：邊界像素變紅、框內遠離邊界的像素不動。"""
+def test_the_box_changes_pixels_at_its_edge():
+    """框畫在指定的邊界上：邊界像素變紅、框內遠離邊界的像素不動。"""
     base = {"test": flat(100)}
     plain = overlay.render_overlay(base, {})
-    blobs = [{"x": 16, "y": 16, "w": 20, "h": 20, "snr_value": 9.0, "area": 40}]
-    boxed = overlay.render_overlay(base, {}, blobs=blobs)
+    boxed = overlay.render_overlay(base, {}, box=(16, 16, 20, 20))
 
     assert boxed.shape == plain.shape
     assert not np.array_equal(plain, boxed)
@@ -98,31 +97,20 @@ def test_blob_box_changes_pixels_at_the_bbox_edge():
     assert tuple(int(v) for v in boxed[50, 50]) == (100, 100, 100)
 
 
-def test_explicit_box_overrides_blobs():
-    blobs = [{"x": 0, "y": 0, "w": 4, "h": 4, "snr_value": 9.0}]
-    out = overlay.render_overlay({"test": flat()}, {}, blobs=blobs,
-                                 box=(30, 30, 10, 10))
-    assert tuple(int(v) for v in out[30, 35]) == overlay.BOX_COLOR
-    assert tuple(int(v) for v in out[0, 2]) != overlay.BOX_COLOR
+def test_a_box_can_be_given_as_a_dict_or_an_object():
+    """呼叫端手上的「框」不一定是 tuple —— 但格式看不懂就該回 None，不要猜。"""
+    class _Box:
+        x, y, w, h = 30, 30, 10, 10
 
+    for spec in ((30, 30, 10, 10), [30, 30, 10, 10],
+                 {"x": 30, "y": 30, "w": 10, "h": 10}, _Box()):
+        out = overlay.render_overlay({"test": flat()}, {}, box=spec)
+        assert tuple(int(v) for v in out[30, 35]) == overlay.BOX_COLOR, spec
 
-def test_primary_blob_is_the_strongest_snr():
-    blobs = [
-        {"x": 4, "y": 4, "w": 6, "h": 6, "snr_value": 1.0},
-        {"x": 30, "y": 30, "w": 8, "h": 8, "snr_value": 9.0},
-        {"x": 50, "y": 50, "w": 6, "h": 6, "snr_value": 3.0},
-    ]
-    assert overlay.primary_blob_box(blobs) == (30, 30, 8, 8)
-    out = overlay.render_overlay({"test": flat()}, {}, blobs=blobs)
-    assert tuple(int(v) for v in out[30, 34]) == overlay.BOX_COLOR
-    assert tuple(int(v) for v in out[4, 6]) != overlay.BOX_COLOR
-
-
-def test_box_from_features_when_no_blobs():
-    feats = {"blob_x": 20, "blob_y": 20, "blob_w": 10, "blob_h": 10}
-    assert overlay.primary_blob_box(None, feats) == (20, 20, 10, 10)
-    out = overlay.render_overlay({"test": flat()}, feats)
-    assert tuple(int(v) for v in out[20, 25]) == overlay.BOX_COLOR
+    plain = overlay.render_overlay({"test": flat()}, {})
+    for junk in ({"x": 1}, "30,30,10,10", ("a", "b", "c", "d"), 7):
+        assert np.array_equal(
+            overlay.render_overlay({"test": flat()}, {}, box=junk), plain), junk
 
 
 def test_box_outside_image_is_clipped_not_crashing():
@@ -131,17 +119,19 @@ def test_box_outside_image_is_clipped_not_crashing():
     assert tuple(int(v) for v in out[63, 63]) == overlay.BOX_COLOR
 
 
-def test_no_blobs_means_no_box():
+def test_no_box_means_no_box():
+    """**不給框就不畫框，而且不去猜。**
+
+    這裡以前會自己去 ``blobs`` / ``blob_x…`` 找一個框。那兩個來源隨著
+    ``blob_segment`` 卡在 F8 第五輪被拿掉而永遠是空的，於是那段程式碼只剩
+    「Export 精靈上寫著會畫紅框、實際上不會」這一個效果。
+    """
     plain = overlay.render_overlay({"test": flat()}, {})
     assert np.array_equal(plain, np.dstack([flat()] * 3))
-
-
-def test_defect_roi_dataclass_is_accepted():
-    from adept.core.algo.blob import DefectROI
-    roi = DefectROI(x=10, y=12, w=8, h=6, cx=14.0, cy=15.0, area=48,
-                    mean_signal=1.0, snr_value=5.0, aspect_ratio=1.3,
-                    dist_to_center=2.0)
-    assert overlay.primary_blob_box([roi]) == (10, 12, 8, 6)
+    # 特徵裡有長得像框的東西也不算數 —— 框只有一個來源：呼叫端明講。
+    feats = {"blob_x": 20, "blob_y": 20, "blob_w": 10, "blob_h": 10}
+    assert np.array_equal(
+        overlay.render_overlay({"test": flat()}, feats), plain)
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +237,7 @@ def test_write_png_accepts_gray_array(tmp_path):
 # 與 pipeline 的實際串接
 # ---------------------------------------------------------------------------
 def test_renders_from_a_real_context_images_dict():
-    """直接吃 Context.images + meta["blobs"] 的形狀（UI 就是這樣叫的）。"""
+    """直接吃 ``Context.images`` + ``Context.features`` 的形狀（UI 就是這樣叫的）。"""
     from adept.core.pipeline.context import Context
 
     rng = np.random.RandomState(0)
@@ -256,11 +246,8 @@ def test_renders_from_a_real_context_images_dict():
     ctx.set_image("ref", rng.randint(0, 255, (H, W)).astype(np.uint8))
     ctx.set_image("diff", (ctx.images["test"].astype(np.float32)
                            - ctx.images["ref"].astype(np.float32)))
-    ctx.add_feature("blob_snr", 4.2)
-    ctx.meta["blobs"] = [{"x": 8, "y": 8, "w": 12, "h": 12, "area": 100,
-                          "snr_value": 7.5}]
+    ctx.add_feature("roi_snr_abs", 4.2)
 
-    out = overlay.render_overlay(ctx.images, ctx.features,
-                                 blobs=ctx.meta["blobs"], label="bin=1")
+    out = overlay.render_overlay(ctx.images, ctx.features, label="bin=1")
     assert out.shape == (H, 2 * W, 3)
     assert out.dtype == np.uint8
