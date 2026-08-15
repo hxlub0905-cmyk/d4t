@@ -2905,8 +2905,14 @@ class StudioWindow(QMainWindow):
             msg = "%s  ⚠ %s: %s%s" % (msg, warns[0].title, warns[0].detail, more)
         self._status(msg)
         # F7-5：結果一到就把 Results 視窗帶出來 —— 使用者按 Run 想看的就是這個
+        # 「跑完了、沒失敗、但沒有結論」要講出來 —— 它算在 ok 裡（沒有錯），
+        # 但只說 ok 的話這一批看起來就是全部跑完了，而下面那個分數範圍其實
+        # 只涵蓋其中一部分（F9 Phase 3d）。
+        n_no_verdict = sum(1 for r in results
+                           if r.get("ok") and r.get("score") is None)
         self.results.set_summary(
-            summarize_run(len(results), ok, elapsed, self.trial_scores))
+            summarize_run(len(results), ok, elapsed, self.trial_scores,
+                          n_no_verdict))
         self.results.set_export_enabled(bool(results))
         self.results.status(msg)
         if results:

@@ -721,8 +721,14 @@ def caption_of(item: Dict[str, Any]) -> str:
         parts.append("FAILED")
         return " · ".join(parts)
     b = item.get("bin")
-    parts.append("bin %d" % int(b) if b is not None else "bin —")
     s = item.get("score")
+    if b is None and s is None:
+        # 跑完了、沒失敗、但**沒有人做決定**（F9 Phase 3d）。以前這裡寫的是
+        # 「bin —」然後什麼都不說 —— 一個破折號看起來像「還沒算好」，而不是
+        # 「這條分支上沒有判定卡」。兩件事要修的地方完全不同。
+        parts.append("no verdict")
+        return " · ".join(parts)
+    parts.append("bin %d" % int(b) if b is not None else "bin —")
     if s is not None:
         parts.append(_fmt_score(s))
     return " · ".join(parts)

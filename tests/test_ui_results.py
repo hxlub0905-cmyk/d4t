@@ -110,6 +110,15 @@ def test_summary_line_reports_counts_and_score_span():
     assert "score" not in results_mod.summarize_run(2, 2, 0.1, [])
 
 
+def test_the_summary_says_how_many_defects_got_no_verdict():
+    """「沒有結論」算在 ok 裡（它確實沒有失敗），但只說 ok 會讓這一批看起來
+    全部跑完了 —— 而下面那個分數範圍其實只涵蓋其中一部分（F9 Phase 3d）。"""
+    text = results_mod.summarize_run(10, 10, 1.0, [3.0, 7.5], n_no_verdict=8)
+    assert "10 ok" in text and "8 with no verdict" in text
+    # 沒有這種顆數的時候不要多一句話出來
+    assert "no verdict" not in results_mod.summarize_run(10, 10, 1.0, [3.0])
+
+
 def test_export_button_in_results_reaches_the_studio_dialog(window):
     window.run_trial(8, workers=1, sync=True)
     seen = []

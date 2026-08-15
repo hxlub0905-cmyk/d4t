@@ -140,11 +140,19 @@ class ResultsWindow(QMainWindow):
 
 
 def summarize_run(n_total: int, n_ok: int, elapsed: float,
-                  scores: Sequence[Any] = ()) -> str:
-    """Results 工具列那一行文字（Studio 與測試共用，避免兩邊寫法漂移）。"""
+                  scores: Sequence[Any] = (), n_no_verdict: int = 0) -> str:
+    """Results 工具列那一行文字（Studio 與測試共用，避免兩邊寫法漂移）。
+
+    ``n_no_verdict`` = **跑得好好的、但沒有任何一張判定卡給結論**的顆數
+    （F9 Phase 3d）。它們算在 ``n_ok`` 裡 —— 那沒有錯，它們確實沒有失敗 ——
+    但如果只說 ok，這一整批就是「看起來全部跑完了」，而下面那個分數範圍
+    其實只涵蓋其中一部分。**沒有結論不是失敗，但它也不是有結論。**
+    """
     n_fail = int(n_total) - int(n_ok)
     text = "%d defects · %d ok · %d failed · %.1f s" % (
         int(n_total), int(n_ok), n_fail, float(elapsed))
+    if int(n_no_verdict) > 0:
+        text += " · %d with no verdict" % int(n_no_verdict)
     vals = [float(s) for s in (scores or ()) if s is not None]
     if vals:
         text += "   score %.4g – %.4g" % (min(vals), max(vals))

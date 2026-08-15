@@ -27,6 +27,34 @@ class ContextError(RuntimeError):
     """步驟向 Context 要不存在的資源時拋出（訊息需列出現有 keys）。"""
 
 
+def freeze(arr: "np.ndarray") -> "np.ndarray":
+    """把一條影像流標成唯讀，並回傳它本身（F9 Phase 3d）。
+
+    為什麼影像流一進 Context 就凍起來
+    ---------------------------------
+    圖執行器在分岔的時候是 **copy-on-fork**，而複製**不含像素**（見
+    ``graph.Packet.fork``：`images=dict(src.images)` 只複製那本字典）。
+    兩條分支因此指著**同一塊記憶體** —— 一張卡若就地改寫（`arr += 1`、
+    `arr[mask] = 0`、`cv2.xxx(..., dst=arr)`），另一條分支拿到的是被改過的圖，
+    而且**不會有任何錯誤訊息**：跑得完、有數字、而且是錯的。
+
+    計畫書 §5b.1 把這件事記成「不可變性從型別保證降級成慣例」，並要求在
+    Phase 3 用型別或掃描重新鎖上。numpy 的 ``writeable`` 旗標就是那個鎖，
+    而且它比掃描原始碼準（`cv2` 的 `dst=` 參數掃不出來）：就地改寫會當場丟
+    ``ValueError: assignment destination is read-only``，指著犯規的那一行。
+
+    **這不擋任何合法的寫法。** 卡片本來就是「算出一張新的、set_image 回去」，
+    要就地改也只要先 ``.copy()``（那份新的是可寫的，直到它自己被 set 進來）。
+
+    非 ndarray 或凍不起來的東西**原樣回傳** —— 這是一道護欄，不是驗證。
+    """
+    try:
+        arr.flags.writeable = False
+    except (AttributeError, ValueError):        # noqa: BLE001 — 護欄不擋路
+        pass
+    return arr
+
+
 @dataclass
 class Context:
     images: Dict[str, np.ndarray] = field(default_factory=dict)
@@ -61,7 +89,7 @@ class Context:
         if self.track_changes and key in self.images:
             # 覆寫既有的流 = 有人在改它。記下改之前與改之後的樣子。
             self._record_change(key, self.images[key], arr)
-        self.images[key] = arr
+        self.images[key] = freeze(arr)
 
     #: 記錄用的直方圖分幾格。夠看出「壓平了」「削掉了」，又不會讓 meta 變肥。
     HIST_BINS = 48

@@ -187,6 +187,11 @@ class MyCardStep(Step):
 `steps/__init__.py` import 它即完成註冊 —— **UI 與引擎零修改**，卡片庫自動出現。
 param 相依 I/O（例如輸出流名稱由參數決定）覆寫 `resolve_reads/resolve_writes/resolve_features`。
 
+> **不准就地改寫接進來的影像流**（F9 Phase 3d）。`ctx.images` 裡的陣列是
+> **唯讀**的 —— 分岔的兩條分支共用同一塊記憶體，就地改一個另一邊就髒了。
+> 算一張新的 `set_image` 回去（本來就該這樣寫），要改也先 `.copy()`。
+> 犯規會當場丟 `ValueError`，不會等到有人接了一條分支才發現。
+
 > **一張卡是一次處理，寫出去的正好等於接進來的**（F7-19／F7-20）。Enhance 卡
 > 繼承 `MultiStreamStep`（`steps/_util.py`）：吃 `streams`（一串影像流）、
 > 只實作 `build_op` 回一個 `img -> img`，迴圈交給基底。接 test 也接 ref，
@@ -347,6 +352,7 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 | **虛線只是實線淡一點** | 「這條是我拉的」與「這條是排列順序帶來的」看起來只差深淺，而深淺會被縮放與主題影響 | 不同語意給不同**色相**（`canvas_edge_implicit`）。測試要鎖兩層：token 的色相差得出來，而且 `paint()` 真的去讀了它（畫進 pixmap 比主色相）|
 | **拿掉一張卡，週邊會留下承諾**（2026-08-15 清完） | `blob_segment` 在 F8 第五輪被拿掉，但 Export 精靈上還寫著「the main blob boxed in red」—— 而 `ctx.meta["blobs"]` 與 `blob_*` 特徵**再也沒有人產出**，所以那個紅框永遠畫不出來。使用者勾了、等疊圖跑完、拿到一疊沒有框的圖，畫面上沒有任何東西說明為什麼 | 刪一張卡要**沿著它的產出往下游走一遍**：誰讀 `meta` 的那個 key、誰讀那組特徵、哪句 UI 文案在描述它、哪個參數的預設值指向它（`cd_measure` 的 `roi="blob"`）、哪個 algo 模組只為它而存在（`algo/blob.py`）。死掉的**程式碼**沒人會發現，死掉的**承諾**使用者天天看得到。現在框只有一個來源：呼叫端明講 `box=`，`render_overlay` 不猜 |
 | **docstring 後面接 `%` 就不再是 docstring**（2026-08-15 踩到） | 想在說明裡插一個常數值，寫成 `"""…%s…""" % (X,)` —— 結果 `func.__doc__` **變成 None**，而且不會有任何錯誤 | 那是一個字串**運算式**，不是字串常值，所以 Python 不把它當 docstring 收。症狀完全是間接的（這次是 `test_ui_english_only` 把它當成「會顯示給使用者的字串」才抓到）。要插值就把數字寫進文字裡，或在函式外面組 `__doc__` |
+| **分岔的兩條分支共用像素**（F9 Phase 3d 已鎖） | 一張卡就地改寫影像流（`arr += 1`、`arr[mask] = 0`、`cv2.xxx(..., dst=arr)`），另一條分支拿到的是**被改過的圖** —— 跑得完、有數字、而且是錯的，沒有任何錯誤訊息 | `Packet.fork()` 的複製**不含像素**（只複製那本字典）。`Context.set_image` 現在一律把陣列標成唯讀（`context.freeze`），就地改寫當場丟 `ValueError` 指著犯規的那一行。**選擇在 set_image 凍而不是在 fork 凍** —— 只在分岔時凍的話，規則只在有分支的圖上成立，而卡片是在沒有分支的時候寫出來的。這不擋任何合法寫法：要就地改先 `.copy()`。掃原始碼做不到這件事（`dst=` 掃不出來）。`tests/test_f9_no_inplace_writes.py` 掃整個 registry，並先證明自己抓得到 |
 | **`upto_node` 指到一張停用的卡時停不下來**（2026-08-15 已修） | Studio 點卡看中間輸出，回一句「算式裡的變數找不到」—— 那句話跟他按的那顆鈕沒有任何關係 | `run_defect(upto_node=…)` 以前只靠 `run_graph` 去**認節點 id**，而編譯過的圖裡沒有停用節點 —— 認不到就一路跑到底。以前看不出來，因為判定還不是卡片、route 尾巴後面沒有東西；判定變成卡片之後那張卡會照跑。改成用**索引**切段（`order.index(upto_node) + 1`），停用與否都對 |
 | **registry 是 `import` 的副作用填起來的**（2026-08-15 踩到） | 一支測試檔單獨跑會紅、跟別的檔一起跑就綠，訊息是 `unknown step 'adc'` | 卡片註冊發生在 `import adept.core.steps` 的那一刻。只 import `adept.core.pipeline` 的測試檔，registry 裡就只有它自己註冊的假卡片 —— 而先跑過的別支測試會**順便**把真卡片庫載進來，於是結果跟**檔名字母序**有關。要用真卡片的測試檔請明講 `import adept.core.steps  # noqa: F401`（跟 `test_no_qt_after_import` 那條是同一類的病）|
 | **拿掉一個欄位，要走完它的每一條下游**（F9 Phase 3d） | `Recipe.score` 拿掉之後，還有七個地方在讀它：lint 的三個 code、`store.rescore`、Studio 的整頁分數編輯器 + 卡片庫裡一個假卡片 `__score__`、畫布角落的摘要、範本庫對話框 | 跟「拿掉一張卡，週邊會留下承諾」是同一條。順帶一個**不能一起拿掉**的：`store` 的資料庫裡存的是 recipe **歷史快照**，沒有辦法遷移 —— `rescore` 必須同時讀得懂舊的 `score` 區塊與新的 `adc` 節點 |
@@ -398,7 +404,7 @@ warning 指名它 —— 那正是要看到的（它以前恆為 0，那份分�
 
 | Milestone | 狀態 | 內容 |
 |---|---|---|
-| **F9** | 🔨 | **圖就是程式**（Phase 3d 第一批完成，2026-08-15）：線是**真的資料通道**（`core/pipeline/graph.py`；線上流一顆 defect 的整包狀態，分岔才複製）。**線分兩種**：`packet`（狀態的去向）與 `stream`（這張卡動哪一條流，不搬狀態）—— 一條流被三張卡讀是三條 stream 線，**不是三岔**。**埠名就是影像流名**，卡片裡選流的下拉退場。**畫布畫的是編譯出來的圖**（不再只是使用者手拉的那幾條）。**判定不再是 `Recipe.score` 那個固定欄位，是畫布上的一張卡**（`steps/adc.py`，已從 `scope.HIDDEN_STEPS` 放出來）：一張圖可放好幾張、每條分支的門檻各自調、沒有一張跑到 = **沒有結論**（score/bin 留 None，不給 0 分）。舊檔案的 `score` 區塊載入時遷移成 route 尾端一張 `adc` 卡（`recipe._migrate_score_block`）。新參數型別 `expr`（算式框 +「Insert feature ▾」，列上游真的量得出來的名字）。驗收：同一份範例 recipe 改寫前後 60 顆 CSV **逐格相同**、77 檔全綠。計畫書 `docs/plans/F9-graph-as-program.md`。⚠ §5d.6 反過來一條使用者決定（route 順序現在**要**畫成線，因為它已經是程式本身而不是裝飾）—— 別再退掉它。**還沒做**：Input 變卡片、`routes` 退場、卡片鎖住「不就地改寫」|
+| **F9** | 🔨 | **圖就是程式**（Phase 3d 兩批完成，2026-08-15）：線是**真的資料通道**（`core/pipeline/graph.py`；線上流一顆 defect 的整包狀態，分岔才複製）。**線分兩種**：`packet`（狀態的去向）與 `stream`（這張卡動哪一條流，不搬狀態）—— 一條流被三張卡讀是三條 stream 線，**不是三岔**。**埠名就是影像流名**，卡片裡選流的下拉退場。**畫布畫的是編譯出來的圖**（不再只是使用者手拉的那幾條）。**判定不再是 `Recipe.score` 那個固定欄位，是畫布上的一張卡**（`steps/adc.py`，已從 `scope.HIDDEN_STEPS` 放出來）：一張圖可放好幾張、每條分支的門檻各自調、沒有一張跑到 = **沒有結論**（score/bin 留 None，不給 0 分）。舊檔案的 `score` 區塊載入時遷移成 route 尾端一張 `adc` 卡（`recipe._migrate_score_block`）。新參數型別 `expr`（算式框 +「Insert feature ▾」，列上游真的量得出來的名字）。驗收：同一份範例 recipe 改寫前後 60 顆 CSV **逐格相同**、77 檔全綠。計畫書 `docs/plans/F9-graph-as-program.md`。⚠ §5d.6 反過來一條使用者決定（route 順序現在**要**畫成線，因為它已經是程式本身而不是裝飾）—— 別再退掉它。**「不就地改寫像素」從慣例變成鎖**（`Context.set_image` 一律 freeze；18 張卡一行都沒改就全綠）。「沒有結論」在畫面上看得見了（Results 那行多一句 `N with no verdict`、Gallery 寫 `no verdict` 而不是一個破折號）。**還沒做**：Input 變卡片、`routes` 退場|
 | F8 | 🔨 | **純規則 ROI 定位 + mask 通道 + UI 第二波**（詳見 `SESSION_LOG.md` 逐輪紀錄與 `docs/plans/F8-rule-based-roi.md`）。已完成：`roi_cross`（條紋交會處放框、一鍵整批量 pitch）、`roi_mask` + Normalize `use_within`（見 §2.5）、參數說明搬 tooltip、D 案版面（畫布佔中上、設定拿大頭、**畫布彈出視窗**兩窗互通）、右鍵平移、手動佈局保留（tidy 才重排）、route 虛線退役（排版仍吃隱含順序）、量測卡預覽疊區域框、`multi_choice` 參數型別（glv_stats 統計量用勾的）、subtract 預設 `b=ref`（patch 天生對齊；舊檔載入遷移補 `ref_aligned` —— **改預設值必附遷移**） |
 | M0 抽庫 | ✅ | 從 KLIP/GLAS/MMH/PEAR/CPE/Fusi³ vendoring 演算法資產 |
 | M1 引擎 | ✅ | Context/Step/Recipe DAG/表達式/卡片庫/合成資料/CLI（卡片數會變，看 `python -m adept steps`）|

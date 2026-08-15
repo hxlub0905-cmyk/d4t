@@ -3,9 +3,9 @@
 f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
 c92e9dc494a8a56102bfac38bb7fd13bd46d8864 AGENTS.md
-641ed2c75458bbb5a65a6e74bdadce8154768d33 CLAUDE.md
+a0fad12e5cdb39a344cf95ceb73017000af02680 CLAUDE.md
 10d1d3ebf518620d2858fcf3f53b4d65f9b3dfad README.md
-d48ff6295aab8964a8bb9c50b9180afeef663476 SESSION_LOG.md
+4458ab3e6ed82cad1ab6f16136450e5ea8693e8c SESSION_LOG.md
 650a5d7c8bc6db42eed4054174823bfcfceb7eae adept/__init__.py
 5278f0879cb3476419e46e4b71ce02d1b811ad42 adept/__main__.py
 8a51dfe499b3a9d81434c8a202f2d17c24b71c74 adept/core/__init__.py
@@ -39,7 +39,7 @@ ddb8939ebee5ba56237cce56d0c53397695982bb adept/core/ingest/imageio.py
 6331041d4a541c64f122c890ef843408e58163db adept/core/pipeline/__init__.py
 f277b6b3e5e65ce8027da01648a0d42d44a64905 adept/core/pipeline/batch.py
 73227c483c36dba007633bf3b509a577f2764297 adept/core/pipeline/cache.py
-1282dcc52b92b42b0849ef128dfda49c79157209 adept/core/pipeline/context.py
+6a41ab712c04d80324a5ea7adf0fecf88ce5a021 adept/core/pipeline/context.py
 8a8f906147c0b06defc52096716ecfd917b0b94e adept/core/pipeline/curve.py
 e323198a0d93103ba39d1b03afd059394a031959 adept/core/pipeline/engine.py
 6c3c9c1cc1e6d1ee5d121f9994968f4f780e3cc5 adept/core/pipeline/expression.py
@@ -71,12 +71,12 @@ e69de29bb2d1d6434b8b29ae775ad8c2e48c5391 adept/ui/__init__.py
 1ce158e532ca3e12af81e66ee60dfc77e8d8b081 adept/ui/app.py
 ff890a8d2268347cbb69784e37f9359c495e0a53 adept/ui/canvas.py
 5cdd60903de8f141f9d6f6cd9ee95b7c0579f971 adept/ui/export_dialog.py
-88d93814bbb34f0756ea935fc9113eccba61cfb4 adept/ui/gallery.py
+beeb4b261b0ab0592d13f374610cd98f527b7401 adept/ui/gallery.py
 f090df3c4548afb4571d512820eba2becd11de5f adept/ui/inspectors.py
 b996d921ba547e70d5c78251f70f3b56d3e27ef0 adept/ui/region_check.py
-043a9240742914759667fd4bb01beafd0241ed17 adept/ui/results.py
+e1b1330c1557687685063d8bb936a64db4106b9f adept/ui/results.py
 a15ebe3b29b92b3dd70d999f07e0e9be6a44fb31 adept/ui/scope.py
-e8a67473a3af4cd72437edad90facfeae97a992b adept/ui/studio.py
+40e103a435432efbd0f1e28e45b0e5235d2908b3 adept/ui/studio.py
 5d647c32055d4a73128c92853c0425729fdac6b9 adept/ui/template_dialog.py
 bf6bbb2d35650bfb1638acb3a6ad6319fed935b0 adept/ui/theme.py
 71d4bf087c20549bef59448f416f1871c8f2c425 adept/ui/viewmodel.py
@@ -90,7 +90,7 @@ b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 bff3de372166e0a7d7a8e926217507fb46d5c079 docs/plans/F7-canvas-and-taxonomy.md
 0845d2bad30945b501dd97a8b7ff965c4dc7a39b docs/plans/F8-rule-based-roi.md
-8db9c9d8ec0abb46a4774e0650bd3fd585333b15 docs/plans/F9-graph-as-program.md
+2fc75e35f50978e3ddf8e4a293815d6e07902e2d docs/plans/F9-graph-as-program.md
 815878c0a316356f562d2c5a43f0de356605ea61 examples/recipes/README.md
 05d9910b12b12ed985539d4ca547d6f56a6b9a37 examples/recipes/cross_regions.json
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
@@ -119,6 +119,7 @@ ec53b9545e7a314039cdda7c60cc0d123e4701e2 tests/test_export_klarf.py
 fbabf20c7735e77b9e7f83a16b950a2831feaeda tests/test_export_report.py
 4d9e62f4a9bd01ec28eec1e63e0c395716ad463c tests/test_expression.py
 de1ad1b5c85e4039fd53cfb9d94f0891e0603b74 tests/test_f9_decide_card.py
+6ec9fe730cbe227b8a89ec5c1e8c7548e5b0aa50 tests/test_f9_no_inplace_writes.py
 4017d96f4145ba179d8e186b7f0e02b6e47ed8ef tests/test_fab_probe.py
 862f012efa32c2e2162dd591bb2896cab70145c9 tests/test_glv.py
 2dc56d1e49cf61a990c7e0f9441f3ca99082380c tests/test_golden_step.py
@@ -173,9 +174,9 @@ c5d53e6848c0727aabd062344957f78c8cfcaa1c tests/test_ui_f8_calibrate.py
 7fe333dfccbc1eeda4bb27b902826601feeb74fa tests/test_ui_f8_ruler.py
 4f61350220c0f98e74c47dd4dded8e62021da63c tests/test_ui_f8_ui_polish.py
 35b09b07e271b36526021ddc7c37f9f4a5d3140e tests/test_ui_f9_decide_card.py
-90ebc45e44ce408457f916c895ed1ad081a08d63 tests/test_ui_gallery.py
+31f90f124ae8678731a6f7ca78c501df210dac51 tests/test_ui_gallery.py
 1cec7ec222c571ea86bca59c8b3b47d2bfe5e2cf tests/test_ui_patch_only.py
-fccadcfd95a2861c5025440c26a8c748c7621b5b tests/test_ui_results.py
+3b1b42b87460361c3d055b9121648b3bd792d235 tests/test_ui_results.py
 e2fb2a1f4ff1f8332d20eca573a83f0fc68f9c86 tests/test_ui_studio_m5.py
 8639a219a9bc8d6f151d266254f71c37e7554fc6 tests/test_ui_studio_smoke.py
 11c3e793019144d345bc3e76e27ed0c63af824ed tests/test_ui_welcome.py

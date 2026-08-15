@@ -429,6 +429,21 @@ def test_bin_colour_bar_and_caption_carry_the_bin_number(qapp):
     assert "FAILED" in p.caption_of("D003")
 
 
+def test_a_defect_with_no_verdict_says_so_instead_of_showing_a_dash(qapp):
+    """「跑完了但沒有人做決定」跟「還沒算好」是兩件事，要修的地方也不同。
+
+    以前這裡寫的是 ``bin —`` 然後什麼都不說 —— 一個破折號讀起來像後者
+    （F9 Phase 3d：判定變成卡片之後，「這條分支上沒有判定卡」是個真的狀態）。
+    """
+    items = _items(2)
+    items[1]["ok"] = True
+    items[1]["bin"] = None
+    items[1]["score"] = None
+    p = _panel(qapp, items)
+    cap = p.caption_of("D001")
+    assert "no verdict" in cap and "FAILED" not in cap
+
+
 # --------------------------------------------------------------------------- #
 # 8. QPixmap LRU 快取有上限
 # --------------------------------------------------------------------------- #
