@@ -3,7 +3,7 @@
 f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
 c92e9dc494a8a56102bfac38bb7fd13bd46d8864 AGENTS.md
-c15a3142384f63cb351ac51f6276bf8ad4b62a28 CLAUDE.md
+e40a769829cc42975c3a5577b3959dece5cac3fb CLAUDE.md
 10d1d3ebf518620d2858fcf3f53b4d65f9b3dfad README.md
 592cf8420684a55ba948dcef3548644302fe6a86 SESSION_LOG.md
 650a5d7c8bc6db42eed4054174823bfcfceb7eae adept/__init__.py
@@ -88,6 +88,7 @@ b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 bff3de372166e0a7d7a8e926217507fb46d5c079 docs/plans/F7-canvas-and-taxonomy.md
 0845d2bad30945b501dd97a8b7ff965c4dc7a39b docs/plans/F8-rule-based-roi.md
+004868a3d89149efb2fc2bbf737d1f0e4a075cb3 docs/plans/F9-graph-as-program.md
 815878c0a316356f562d2c5a43f0de356605ea61 examples/recipes/README.md
 44398da2ee7c4dc4b6262484fc76fe1deb416b3a examples/recipes/cross_regions.json
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
