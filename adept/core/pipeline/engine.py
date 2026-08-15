@@ -78,57 +78,50 @@ def _finish(defect_id: str, ctx: Context, traces: List[StepTrace],
 def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
                ctx: Context, traces: List[StepTrace],
                registry: Dict[str, Type[Step]],
-               upto_node: Optional[str]) -> Tuple[Context, Optional[str]]:
+               upto_node: Optional[str],
+               kind: str = "") -> Tuple[Context, Optional[str]]:
     """執行 ``order[start:stop]`` 的節點；trace 逐一 append。
 
-    回傳 ``(ctx, error)``：error 為 None 表成功（或在 upto_node 停下）；
-    否則為 "[node_id] 訊息" 字串（呼叫端包成失敗結果）。
+    **F9 Phase 2 起這裡只是一層薄殼。** 真正的執行在
+    :func:`.graph.run_graph` —— 資料沿著線走，不再是所有卡共用一個全域
+    ``Context``。這一層負責的是把圖執行器的輸出翻成既有的
+    ``(ctx, error)`` 與 ``StepTrace``，讓 ``run_defect`` 的對外契約一個字
+    都不用改（Studio、批次、快取、報表全都吃這個形狀）。
+
+    ``order`` 仍然由呼叫端算好傳進來，因為快取要用「第幾格」切段。
     """
-    for nid in order[start:stop]:
-        node = recipe.nodes.get(nid)
-        if node is None:
-            traces.append(StepTrace(
-                node_id=nid, step_key="?", ok=False, ms=0.0,
-                error=f"step '{nid}' is not in recipe.nodes", features_added={},
-                images_after=sorted(ctx.images)))
-            return ctx, f"[{nid}] step '{nid}' is not in recipe.nodes"
-        if not node.enabled:
-            if nid == upto_node:
-                break  # 目標節點被停用：停在它這裡、不執行它
-            continue
+    from .graph import Packet, compile_recipe, run_graph
 
-        t0 = time.perf_counter()
-        feats_before = dict(ctx.features)
-        try:
-            step_cls = registry.get(node.step)
-            if step_cls is None:
-                raise StepError(
-                    node.step,
-                    f"unknown step '{node.step}'; registered: {sorted(registry)}")
-            params = step_cls.validate_params(node.params)
-            ret = step_cls().run(ctx, params)
-            if isinstance(ret, Context):
-                ctx = ret
-        except Exception as e:  # StepError / ContextError / ParamError / 其他
-            ms = (time.perf_counter() - t0) * 1000.0
-            traces.append(StepTrace(
-                node_id=nid, step_key=node.step, ok=False, ms=ms,
-                error=str(e), features_added={},
-                images_after=sorted(ctx.images)))
-            return ctx, f"[{nid}] {e}"
+    try:
+        graph = compile_recipe(recipe, kind, registry=registry)
+    except Exception as e:                     # noqa: BLE001 — 收成結果不外洩
+        return ctx, f"[recipe] {e}"
 
-        ms = (time.perf_counter() - t0) * 1000.0
-        added = {
-            k: v for k, v in ctx.features.items()
-            if k not in feats_before or feats_before[k] != v
-        }
+    # 呼叫端給的 order 含停用節點，compile 過的沒有 —— 用節點 id 對齊切點。
+    lo = _segment_index(graph.order, order, start)
+    hi = _segment_index(graph.order, order, stop)
+
+    outbox, runs, err, last = run_graph(
+        graph, Packet(ctx), registry=registry, start=lo, stop=hi,
+        upto_node=upto_node, track_changes=ctx.track_changes)
+
+    for r in runs:
         traces.append(StepTrace(
-            node_id=nid, step_key=node.step, ok=True, ms=ms,
-            error=None, features_added=added,
-            images_after=sorted(ctx.images)))
-        if nid == upto_node:
-            break
-    return ctx, None
+            node_id=r.node_id, step_key=r.step_key, ok=r.ok, ms=r.ms,
+            error=r.error, features_added=r.features_added,
+            images_after=r.images_after))
+    out = last.ctx if last is not None else ctx
+    return out, err
+
+
+def _segment_index(compiled: List[str], order: List[str], idx: int) -> int:
+    """把「呼叫端那份 order 的第 idx 格」換算成編譯後那份 order 的位置。
+
+    兩份清單的差別只有停用節點（編譯時就拿掉了），所以用**節點 id** 對齊：
+    切點之前有幾個節點還活著，就是新的切點。
+    """
+    alive = set(compiled)
+    return sum(1 for nid in order[:idx] if nid in alive)
 
 
 def _eval_score(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
@@ -184,7 +177,7 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
             f"of route '{kind}'")
 
     ctx, err = _run_nodes(recipe, order, 0, len(order), ctx, traces,
-                          registry, upto_node)
+                          registry, upto_node, kind=kind)
     if err is not None:
         return _finish(defect_id, ctx, traces, keep_context, False, err)
 
@@ -366,7 +359,7 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
         # miss：跑影像段（order[:ckpt]），成功才寫快取
         ctx = _seed_context(item, kind, defect_id)
         ctx, err = _run_nodes(recipe, order, 0, ckpt, ctx, traces,
-                              registry, None)
+                              registry, None, kind=kind)
         if err is not None:
             return _finish(defect_id, ctx, traces, keep_context, False, err)
         if key is not None:
@@ -379,7 +372,7 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
 
     # 續跑算法段 + ADC 判定
     ctx, err = _run_nodes(recipe, order, ckpt, len(order), ctx, traces,
-                          registry, None)
+                          registry, None, kind=kind)
     if err is not None:
         return _finish(defect_id, ctx, traces, keep_context, False, err)
     try:

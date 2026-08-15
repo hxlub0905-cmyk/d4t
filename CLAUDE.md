@@ -391,7 +391,7 @@ warning 指名它 —— 那正是要看到的（它以前恆為 0，那份分�
 
 | Milestone | 狀態 | 內容 |
 |---|---|---|
-| **F9** | 📋 | **圖就是程式**（大方向已定，2026-08-15）：畫布上的線改成**真的資料通道**，線上流的是「一顆 defect 的整包狀態」（Packet）。輸入、判定（ADC）、依 KLARF 欄位分流全部變成節點 —— `Recipe` 的 `routes` 與 `score` 兩個固定欄位會被取代掉。**契約已定、原型已驗證**（分流／分岔隔離／多判定尾節點六個性質全過），引擎尚未動工。計畫書與可執行原型：`docs/plans/F9-graph-as-program.md`。⚠ 動工前先讀它的 §3.1 —— F7-18 那條「一張卡一條流」的不變量在新模型下**已改寫** |
+| **F9** | 🔨 | **圖就是程式**（Phase 2 完成，2026-08-15）：畫布上的線是**真的資料通道**了 —— 線上流的是「一顆 defect 的整包狀態」（`Packet`），資料不再走全域 `ctx`。新引擎在 `core/pipeline/graph.py`，`engine._run_nodes` 只是薄殼；**17 張卡一行都沒改**（`Packet` 包著 `Context`，分岔才複製）。驗收：舊引擎 vs 新引擎同一批 60 顆**逐項相同**，效能 8.40 → 7.89 ms/顆。新性質鎖在 `tests/test_graph.py`（剪掉線下游就收不到、分岔隔離、條件分流）。剩下：Input/ADC 變節點（`routes` 與 `score` 退場）、卡片搬家、畫布 —— 見 `docs/plans/F9-graph-as-program.md`。⚠ §5b.1 記了一條**與原契約的偏離**：不可變性目前是慣例不是型別 |
 | F8 | 🔨 | **純規則 ROI 定位 + mask 通道 + UI 第二波**（詳見 `SESSION_LOG.md` 逐輪紀錄與 `docs/plans/F8-rule-based-roi.md`）。已完成：`roi_cross`（條紋交會處放框、一鍵整批量 pitch）、`roi_mask` + Normalize `use_within`（見 §2.5）、參數說明搬 tooltip、D 案版面（畫布佔中上、設定拿大頭、**畫布彈出視窗**兩窗互通）、右鍵平移、手動佈局保留（tidy 才重排）、route 虛線退役（排版仍吃隱含順序）、量測卡預覽疊區域框、`multi_choice` 參數型別（glv_stats 統計量用勾的）、subtract 預設 `b=ref`（patch 天生對齊；舊檔載入遷移補 `ref_aligned` —— **改預設值必附遷移**） |
 | M0 抽庫 | ✅ | 從 KLIP/GLAS/MMH/PEAR/CPE/Fusi³ vendoring 演算法資產 |
 | M1 引擎 | ✅ | Context/Step/Recipe DAG/表達式/卡片庫/合成資料/CLI（卡片數會變，看 `python -m adept steps`）|
