@@ -391,7 +391,7 @@ warning 指名它 —— 那正是要看到的（它以前恆為 0，那份分�
 
 | Milestone | 狀態 | 內容 |
 |---|---|---|
-| **F9** | 🔨 | **圖就是程式**（Phase 3b 完成，2026-08-15）：**線決定卡片動哪一條流** —— 埠名就是影像流名（Load 的輸出埠叫 `test`/`ref`），從哪顆埠拉線就動哪一條流，卡片裡的下拉選單退場（引擎已經是線說了算，UI 那一半是 Phase 3c）。**線有兩種**：`packet`（狀態的去向，分岔要複製）與 `stream`（這張卡動哪一條流，不搬狀態）—— 一條流被三張卡讀是三條 stream 線，**不是三岔**（做錯過一次，特徵會散在三包裡）。判定也是卡片（`steps/adc.py`）：一張圖可放好幾張、沒有一張跑到 = 沒有結論（不給 0 分）。驗收：與 F9 動工前同一批 60 顆**逐項相同**、7.66 → 7.82 ms/顆、77 檔全綠。計畫書 `docs/plans/F9-graph-as-program.md`。⚠ 目前流的下拉選單與線**兩個地方都能改而線贏**，那是暫時的（§5d.5）；`adc` 仍在 `scope.HIDDEN_STEPS` |
+| **F9** | 🔨 | **圖就是程式**（Phase 3c 完成，2026-08-15）：線是**真的資料通道**（`core/pipeline/graph.py`；線上流一顆 defect 的整包狀態，分岔才複製）。**線分兩種**：`packet`（狀態的去向）與 `stream`（這張卡動哪一條流，不搬狀態）—— 一條流被三張卡讀是三條 stream 線，**不是三岔**。**埠名就是影像流名**，卡片裡選流的下拉退場。判定是卡片（`steps/adc.py`）：可放好幾張、沒有一張跑到 = 沒有結論（不給 0 分）。**畫布畫的是編譯出來的圖**（不再只是使用者手拉的那幾條）；輸入埠依角色分、名字只有選到才標、stream 線只在選到時出現（都是看著截圖決定的）。驗收：與 F9 動工前 60 顆逐項相同、7.66 → 7.82 ms/顆、77 檔全綠。計畫書 `docs/plans/F9-graph-as-program.md`。⚠ §5d.6 反過來一條使用者決定（route 順序現在**要**畫成線，因為它已經是程式本身而不是裝飾）—— 別再退掉它；`adc` 仍在 `scope.HIDDEN_STEPS` 等 Phase 3d |
 | F8 | 🔨 | **純規則 ROI 定位 + mask 通道 + UI 第二波**（詳見 `SESSION_LOG.md` 逐輪紀錄與 `docs/plans/F8-rule-based-roi.md`）。已完成：`roi_cross`（條紋交會處放框、一鍵整批量 pitch）、`roi_mask` + Normalize `use_within`（見 §2.5）、參數說明搬 tooltip、D 案版面（畫布佔中上、設定拿大頭、**畫布彈出視窗**兩窗互通）、右鍵平移、手動佈局保留（tidy 才重排）、route 虛線退役（排版仍吃隱含順序）、量測卡預覽疊區域框、`multi_choice` 參數型別（glv_stats 統計量用勾的）、subtract 預設 `b=ref`（patch 天生對齊；舊檔載入遷移補 `ref_aligned` —— **改預設值必附遷移**） |
 | M0 抽庫 | ✅ | 從 KLIP/GLAS/MMH/PEAR/CPE/Fusi³ vendoring 演算法資產 |
 | M1 引擎 | ✅ | Context/Step/Recipe DAG/表達式/卡片庫/合成資料/CLI（卡片數會變，看 `python -m adept steps`）|

@@ -1464,10 +1464,38 @@ class StudioWindow(QMainWindow):
             })
         if self.selected_node not in self.model.nodes:
             self.selected_node = None
+        wires, ports = self._compiled_wiring()
+        for info in nodes:
+            got = ports.get(info["node_id"])
+            if got:
+                info["in_ports"], info["out_ports"] = list(got[0]), list(got[1])
         for view in self._canvases():
-            view.set_nodes(nodes, self.model.edges)
+            view.set_nodes(nodes, wires)
             view.set_selected(self.selected_node)
             view.set_score_summary(self.model.expr, self.model.threshold)
+
+    def _compiled_wiring(self):
+        """畫布要畫的線 —— **引擎編出來的那張圖**，不是使用者手拉的那幾條。
+
+        以前畫布畫的是 ``RecipeModel.edges``（只有使用者親手拉過的線），所以
+        一份 recipe 可能一條線都沒有而它跑得完全正確 —— 那正是 F9 §2 開頭那個
+        「``edges`` 是 ``[]``」的另一面：**畫面上看不到的接線，其實一直都在**。
+
+        現在改成問引擎：``compile_recipe`` 會把「哪條流是誰吐的」解析成真的線
+        （見 `graph._compile_recipe`），連同每個節點的埠一起回來。畫布因此
+        畫得出全部的接線，而不是其中被人手動拉過的那一小部分。
+
+        編不出來（recipe 還沒接完、卡片認不得…）就退回舊的那幾條 —— 畫布
+        永遠有東西畫，不會因為 lint 還沒過就整片空白。
+        """
+        try:
+            from adept.core.pipeline.graph import compile_recipe
+            graph = compile_recipe(self.model.to_recipe(), self.model.kind)
+        except Exception:      # noqa: BLE001 — 畫布不該因為 recipe 半成品而炸
+            return list(self.model.edges), {}
+        wires = [(w.src, w.src_port, w.dst, w.dst_port, w.kind)
+                 for w in graph.wires]
+        return wires, dict(graph.ports)
 
     def _sync_score_widgets(self) -> None:
         self._syncing = True

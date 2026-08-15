@@ -282,12 +282,24 @@ def test_adding_from_the_library_follows_the_selected_card(window):
 #    （F7-18 給了虛線自己的色相；使用者實測後整條退掉 ——「會混淆」。
 #      這裡改鎖「真的沒畫」，孤兒 token 也一併移除。）
 # --------------------------------------------------------------------------- #
-def test_route_order_draws_no_dashed_lines(window, qapp):
+def test_route_order_is_drawn_as_the_real_backbone_now(window, qapp):
+    """**這條的前提在 F9 Phase 3c 反過來了，而且是刻意的。**
+
+    2026-08-14 使用者退掉了 route 順序的金色虛線（「會混淆」）—— 那時候那些線
+    是**裝飾**：它們說「這兩張卡有先後」，卻跟真正的連線搶畫面。
+
+    現在它們不是裝飾了。資料就是沿著那條鏈流的（`graph._compile_recipe` 的
+    backbone），所以畫出來才是誠實的 —— 不畫的話就回到 F9 §2 那個「edges 是
+    []、畫面上一條線都沒有、而它跑得完全正確」。
+
+    ⚠ 不要因為「使用者退過虛線」就把這條再退一次：退掉的是**沒有意義的線**，
+    現在畫的是**程式本身**。真正要防的是畫面變毛球，那件事由「stream 線只在
+    選到那張卡時才出現」處理（見 canvas._rebuild_edges）。
+    """
     assert window.load_recipe_path(str(EXAMPLE / "die_to_die_basic.json"),
                                    sync=True) is True
-    assert window.pipeline._edges == [], "route 順序不該畫成任何線"
-    # 親手拉一條 → 唯一的線是實線
-    window._on_edge_added("load", "sub", "test")
-    assert len(window.pipeline._edges) >= 1
+    kinds = window.pipeline.edge_kinds()
+    assert kinds, "主幹要畫出來"
+    assert all(k == "packet" for k in kinds), "沒選卡的時候不該有 stream 線"
     assert "canvas_edge_implicit" not in theme_mod.TOKENS, \
         "虛線退役了，色票不要留孤兒 token"

@@ -57,11 +57,18 @@ def _edges(canvas):
     return list(canvas._edges)
 
 
-def test_route_order_is_not_painted_as_lines(window):
-    """範例 recipe 一條線都沒拉 → 畫布上**零條線**（虛線退役），
-    但排版仍照順序分欄 —— 卡片的排列本身就是順序。"""
+def test_route_order_is_painted_as_the_backbone(window):
+    """**F9 Phase 3c 起前提反過來了。**
+
+    2026-08-14 退掉的是 route 順序的金色**虛線** —— 那時候它只說「這兩張卡有
+    先後」，是裝飾。現在資料就是沿著那條鏈流的（`graph._compile_recipe` 的
+    backbone），所以它是**程式本身**，不畫的話畫布就又在說謊了。
+
+    排版仍照順序分欄 —— 卡片的排列本身也還是順序。
+    """
     assert window.model.edges == [], "前提：這份 recipe 沒有顯式 edges"
-    assert window.pipeline._edges == [], "route 順序不該畫成任何線"
+    assert window.pipeline._edges, "主幹要畫出來（route 順序就是資料的路徑）"
+    assert all(k == "packet" for k in window.pipeline.edge_kinds())
     # 排版仍照隱含順序：不是全部疊在第 0 欄
     xs = {round(window.pipeline.card(nid).pos().x())
           for nid in window.pipeline.node_ids()}
@@ -78,12 +85,18 @@ def test_drawing_the_link_yourself_makes_a_solid_line(window):
     assert pairs.count((a, b)) >= 1
 
 
-def test_edge_pairs_still_reports_only_the_users_own_links(window):
-    """存檔寫的是使用者拉的線。route 順序不進 edges（也不再畫）。"""
-    assert window.pipeline.edge_pairs() == window.model.edges == []
-    window.pipeline.link_to(window.model.node_order[0],
-                            window.model.node_order[2])
-    assert window.pipeline.edge_pairs() == window.model.edges
+def test_only_the_users_own_links_are_saved(window):
+    """**存檔寫的仍然只有使用者拉的線。**
+
+    畫布畫的是編譯出來的整張圖（含推導出來的主幹），但 `model.edges` ——
+    也就是存進 recipe JSON 的那一份 —— 只收使用者親手拉的。推導出來的東西
+    不該被寫死進檔案：卡片順序一改，那些線就該跟著重算。
+    """
+    assert window.model.edges == []
+    a, c = window.model.node_order[0], window.model.node_order[2]
+    window.pipeline.link_to(a, c)
+    assert window.model.edges == [(a, c)]
+    assert (a, c) in window.pipeline.edge_pairs()
 
 
 def test_a_long_chain_wraps_instead_of_running_off_the_screen(window):

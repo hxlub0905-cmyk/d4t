@@ -185,6 +185,10 @@ _LIGHT: Dict[str, Any] = {
     "canvas_grid": "#ced4de",
     "canvas_edge": "#9aa3ae",
     "canvas_edge_active": "#3574d6",
+    #: **這張卡動哪一條流**的線（F9 Phase 3c）。它跟主幹講的是兩件事，
+    #: 所以給不同**色相**而不是同色淡一點 —— §7 記過：深淺會被縮放與主題
+    #: 影響，「這條是資料」與「這條是註記」不能只差深淺。
+    "canvas_edge_stream": "#6f9e8f",
     # -- typography ----------------------------------------------------------
     "font_stack": ("'Segoe UI','PingFang TC','Microsoft JhengHei',"
                    "'Helvetica Neue',Arial,sans-serif"),
@@ -308,6 +312,7 @@ _DARK: Dict[str, Any] = dict(_LIGHT, **{
     "canvas_grid": "#2f3540",
     "canvas_edge": "#5c6474",
     "canvas_edge_active": "#4b8bf5",
+    "canvas_edge_stream": "#5f8f7f",
 })
 
 #: 兩組色盤，鍵名完全一致（測試會逐鍵比對）。

@@ -112,19 +112,24 @@ def test_a_link_that_would_loop_is_refused_at_draw_time(window):
 def test_both_ports_can_land_on_the_same_node_and_each_gets_its_own_line(window):
     """patch 天生成對：Input 吐 test 與 ref，Subtract 兩張都吃。
 
-    所以 **Input → Subtract 要畫兩條線**（不是一條沒說明白的線），而且把第二個
-    埠也拖到同一個節點上是很正常的操作 —— 那時候不可以回一句看起來像失敗的
-    「Cannot connect」。
+    **F9 Phase 3c 起這件事的表達方式變了。** 以前是「Input → Subtract 畫兩條
+    線」（靠兩端共用哪些流推出來的）；現在 Subtract 有兩個**具名的輸入埠**
+    ``a`` / ``b``，各自被一條 stream 線接到「誰吐 test」與「誰吐 ref」。
+
+    差別不只是畫法：以前兩條線都落在同一個點上，使用者無從知道哪一條是被減
+    的那張；現在埠有名字，選到那張卡就看得到 ``a`` 與 ``b``。
     """
     load, sub = window.pipeline.card("load"), window.pipeline.card("sub")
     assert load.out_names() == ["test", "ref"]
-    assert sub.in_names() == ["test", "ref"]
+    assert sub.in_port_names() == ["a", "b"]
+
+    window.select_node("sub")
+    landed = {(e.dst_port, e.src_port) for e in window.pipeline._edges
+              if e.kind == "stream" and e.dst.node_id == "sub"}
+    assert landed == {("a", "test"), ("b", "ref")}, landed
 
     window.pipeline.link_to("load", "sub")
     assert window.model.edges == [("load", "sub")], "model 仍然是一條依賴"
-    assert window.pipeline._ports_between(load, sub) == [0, 1]
-    assert len([e for e in window.pipeline._edges
-                if e.pair() == ("load", "sub")]) == 2, "兩條共用的流 = 兩條線"
     assert "Connected" in window.status_text()
 
     # 第二個埠拖到同一個節點：不是錯誤，訊息要講清楚兩條線本來就都在了
@@ -171,7 +176,11 @@ def test_edges_reorder_execution_and_survive_a_save_load_round_trip(window, tmp_
 
     assert window.load_recipe_path(str(out), sync=True) is True
     assert window.model.edges == edges
-    assert window.pipeline.edge_pairs() == edges
+    # 畫布現在畫的是**引擎編出來的整張圖**（F9 Phase 3c），所以除了使用者
+    # 拉的那兩條之外還有推導出來的主幹 —— 但使用者拉的那兩條一定在裡面。
+    drawn = window.pipeline.edge_pairs()
+    for pair in edges:
+        assert pair in drawn, (pair, drawn)
 
 
 # --------------------------------------------------------------------------- #

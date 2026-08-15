@@ -192,8 +192,11 @@ class _NodeItem(QGraphicsItem):
         ``NODE_W + _PORT_R``，Qt 就只重繪那個範圍，標籤的舊位置沒被清掉。
         選中的光暈（3px 寬、畫在卡片邊緣之外）也算 —— 上下各要多留 4px。
         """
-        return QRectF(-_PORT_R - 1, -4,
-                      NODE_W + 2 * _PORT_R + _PORT_LABEL_W,
+        # 左邊也可能有埠標籤（``a`` / ``b``…，F9 Phase 3c）—— 跟右邊的埠標籤
+        # 同一條規矩：**畫得出去的東西都要在 boundingRect 裡**，否則拖動節點
+        # 會留下擦不掉的殘影（§7 那三條都是同一個因）。
+        return QRectF(-_PORT_R - 1 - _PORT_LABEL_W, -4,
+                      NODE_W + 2 * _PORT_R + 2 * _PORT_LABEL_W,
                       NODE_H + 9)
 
     def shape(self) -> QPainterPath:
@@ -233,6 +236,33 @@ class _NodeItem(QGraphicsItem):
     def in_port_local() -> QPointF:
         return QPointF(0.0, NODE_H / 2.0)
 
+    def in_port_names(self) -> List[str]:
+        """這個節點有哪些**輸入埠**（角色名：``a`` / ``b`` / ``source``…）。
+
+        來自引擎編譯出來的埠（``graph.stream_ports``），Studio 一併送進來。
+        以前只畫一顆埠，所以 ``subtract`` 的 a 與 b 在畫布上分不出來 ——
+        兩條線都接在同一個點上，使用者無從知道哪條是被減的那張。
+        """
+        names = [str(x) for x in (self.info.get("in_ports") or [])]
+        return names[:_MAX_PORTS] or [""]
+
+    def in_anchors_local(self) -> List[QPointF]:
+        """每個輸入埠在**本地座標**的位置（由上而下均分節點左緣）。"""
+        n = len(self.in_port_names())
+        if n <= 1:
+            return [self.in_port_local()]
+        step = NODE_H / (n + 1)
+        return [QPointF(0.0, step * (i + 1)) for i in range(n)]
+
+    def in_anchors(self) -> List[QPointF]:
+        base = self.scenePos()
+        return [base + p for p in self.in_anchors_local()]
+
+    def in_anchor_for(self, port: str) -> QPointF:
+        names = self.in_port_names()
+        idx = names.index(port) if port in names else 0
+        return self.in_anchors()[idx]
+
     def in_names(self) -> List[str]:
         """這個節點讀哪些影像流（用來決定上游的線該接哪個埠）。"""
         return [str(r) for r in (self.info.get("reads") or [])]
@@ -267,6 +297,11 @@ class _NodeItem(QGraphicsItem):
         """每個輸出埠在**場景座標**的位置（連線用）。"""
         base = self.scenePos()
         return [base + p for p in self.out_anchors_local()]
+
+    def out_anchor_for(self, port: str) -> QPointF:
+        names = self.out_names()
+        idx = names.index(port) if port in names else 0
+        return self.out_anchors()[idx]
 
     def out_port(self, index: int = 0) -> QPointF:
         anchors = self.out_anchors()
@@ -372,7 +407,27 @@ class _NodeItem(QGraphicsItem):
         # 輸入是空心圈、輸出是實心點：一眼看得出線該從哪邊拉到哪邊。
         p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
         p.setBrush(QBrush(QColor(TOKENS["bg_surface"])))
-        p.drawEllipse(self.in_port_local(), _PORT_R, _PORT_R)
+        ins = self.in_port_names()
+        # **輸入埠的名字只有選到這張卡的時候才標。**
+        #
+        # 常駐的話它會跟上游那張卡的輸出標籤疊在一起 —— 實際截圖看到的是
+        # 「ge_from_」「e_within」這種被截掉一半又互相壓著的字（`range_from`
+        # 與 `use_within`）。兩張卡之間只有 COL_GAP 的空隙，左右各一組標籤
+        # 本來就塞不下。
+        #
+        # 埠的**圓點**照樣永遠畫：使用者一眼看得出「這張卡要接三條線」，
+        # 至於哪一顆是哪一個，看那張卡的時候再說。
+        label_ports = self.isSelected() and len(ins) > 1
+        for name, anchor in zip(ins, self.in_anchors_local()):
+            p.drawEllipse(anchor, _PORT_R, _PORT_R)
+            if not name or not label_ports:
+                continue
+            p.setPen(QColor(TOKENS["text_secondary"]))
+            p.drawText(QRectF(anchor.x() - _PORT_LABEL_W + 2, anchor.y() - 7,
+                              _PORT_LABEL_W - 8, 14),
+                       Qt.AlignVCenter | Qt.AlignRight, name)
+            p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
+            p.setBrush(QBrush(QColor(TOKENS["bg_surface"])))
 
         outs = self.out_names()
         p.setBrush(QBrush(QColor(TOKENS["canvas_edge"])))
@@ -497,6 +552,22 @@ class _NodeItem(QGraphicsItem):
         e.accept()
 
 
+
+def _wire_spec(e) -> Tuple[str, str, str, str, str]:
+    """把一條線正規化成 ``(src, src_port, dst, dst_port, kind)``。
+
+    畫布同時要收兩種來源：使用者手拉的 ``(src, dst)``（``RecipeModel.edges``），
+    以及引擎編出來的完整線。兩者都要畫得出來，所以在入口就統一形狀 ——
+    而不是讓 ``set_nodes`` 裡到處 ``len(e) == 2`` 分支。
+    """
+    e = tuple(e)
+    if len(e) >= 5:
+        return (str(e[0]), str(e[1]), str(e[2]), str(e[3]), str(e[4]))
+    if len(e) == 4:
+        return (str(e[0]), str(e[1]), str(e[2]), str(e[3]), "packet")
+    return (str(e[0]), "", str(e[1]), "", "packet")
+
+
 class _EdgeItem(QGraphicsItem):
     """一條連線（三次貝茲，左→右）。點它可選取，``Delete`` 移除。
 
@@ -509,16 +580,26 @@ class _EdgeItem(QGraphicsItem):
     """
 
     def __init__(self, src: _NodeItem, dst: _NodeItem, canvas: "PipelineCanvas",
-                 port: int = 0):
+                 port: int = 0, src_port: str = "", dst_port: str = "",
+                 kind: str = "packet"):
         super().__init__()
         self.src, self.dst, self.canvas, self.port = src, dst, canvas, int(port)
+        #: 埠名（F9 Phase 3c）。有名字就依名字接錨點，沒有就退回 index。
+        self.src_port, self.dst_port = str(src_port), str(dst_port)
+        #: ``packet`` = 狀態的去向（主幹）；``stream`` = 這張卡動哪一條流（註記）。
+        self.kind = str(kind or "packet")
         self._hover = False
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setZValue(_Z_EDGE)
         # 滑鼠移上來要出現「斷開」的 ×（F7-22）。
         self.setAcceptHoverEvents(True)
-        self.setToolTip("%s → %s  (click the × to disconnect)"
-                        % (src.node_id, dst.node_id))
+        if self.kind == "stream":
+            self.setToolTip(
+                "%s works on the %s stream (from %s)"
+                % (dst.node_id, self.src_port or "?", src.node_id))
+        else:
+            self.setToolTip("%s → %s  (click the × to disconnect)"
+                            % (src.node_id, dst.node_id))
 
     # ---- 斷開鈕（F7-22）---------------------------------------------------
     #: 斷開鈕的命中半徑。畫出來的圓是 ``_CUT_R``，多給 2px 是因為使用者瞄的是
@@ -578,7 +659,10 @@ class _EdgeItem(QGraphicsItem):
         往回走改成：水平只推一個固定的小距離，剩下的量交給**垂直**方向。
         線因此收在兩列之間的帶子裡，兩端各只超出 ``BACK_REACH``。
         """
-        a, b = self.src.out_port(self.port), self.dst.in_port()
+        a = (self.src.out_anchor_for(self.src_port) if self.src_port
+             else self.src.out_port(self.port))
+        b = (self.dst.in_anchor_for(self.dst_port) if self.dst_port
+             else self.dst.in_port())
         dx = b.x() - a.x()
         p = QPainterPath(a)
         if dx >= 2 * self.BACK_REACH:
@@ -623,10 +707,16 @@ class _EdgeItem(QGraphicsItem):
 
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         p.setRenderHint(QPainter.Antialiasing, True)
-        col = QColor(TOKENS["canvas_edge_active"] if self.isSelected()
-                     else TOKENS["canvas_edge"])
+        stream = self.kind == "stream"
+        # **兩種線給不同色相，不是同色淡一點。**（§7「虛線只是實線淡一點」）
+        # 主幹（packet）是這顆 defect 的狀態往哪走 —— 畫面上最該看見的東西。
+        # stream 線只是註記「這張卡動哪一條流」，該退到背景：細一點、另一個
+        # 色相，而且不畫箭頭（它沒有方向感可言，東西不從它走）。
+        base = TOKENS["canvas_edge_stream"] if stream else TOKENS["canvas_edge"]
+        col = QColor(TOKENS["canvas_edge_active"] if self.isSelected() else base)
         path = self.path()
-        p.setPen(QPen(col, 2.2 if self.isSelected() else 1.6))
+        width = (1.0 if stream else 1.6)
+        p.setPen(QPen(col, 2.2 if self.isSelected() else width))
         p.setBrush(Qt.NoBrush)
         p.drawPath(path)
 
@@ -648,6 +738,11 @@ class _EdgeItem(QGraphicsItem):
 
         # 中點的方向箭頭。畫布可以縮放、平移、節點也可以拖，光看一條曲線不一定
         # 分得出資料往哪一邊流 —— 這是「這是一張流程圖」的最基本線索。
+        #
+        # **stream 線不畫箭頭**：東西不從它走（它只是把埠名綁進參數），
+        # 給它一個箭頭等於說謊，而且會跟主幹搶「這是資料流」的視覺份量。
+        if stream:
+            return
         mid = path.pointAtPercent(0.5)
         ang = path.angleAtPercent(0.5)
         p.save()
@@ -821,7 +916,12 @@ class PipelineCanvas(QGraphicsView):
         self._hover_node = None            # 舊的圖元剛被 clear() 銷毀
         self._items, self._edges = {}, []
         self._order = [str(n.get("node_id", "")) for n in nodes]
-        self._pairs = [(str(a), str(b)) for a, b in (edges or ())]
+        # 一條線兩種寫法（F9 Phase 3c）：
+        #   ``(src, dst)``                          舊式，埠靠推導
+        #   ``(src, src_port, dst, dst_port, kind)`` 引擎編出來的，埠是講明的
+        self._wires = [_wire_spec(e) for e in (edges or ())]
+        self._pairs = [(w[0], w[2]) for w in self._wires
+                       if w[4] != "stream"]
 
         # route 的相鄰對是**真的依賴**（engine 的 execution_order 是
         # 「route 相鄰對 ∪ edges」），**排版**照樣把它算進去 —— 但 2026-08-14
@@ -841,18 +941,51 @@ class PipelineCanvas(QGraphicsView):
             self._scene.addItem(item)
             self._items[item.node_id] = item
 
-        for a, b in self._pairs:
+        self._rebuild_edges()
+
+        self.set_selected(self._selected)
+        rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
+        self._scene.setSceneRect(rect)
+
+
+    def _rebuild_edges(self) -> None:
+        """依 ``self._wires`` 重畫所有連線（選取變了也要重來，見 set_selected）。"""
+        for edge in getattr(self, "_edges", []):
+            if edge.scene() is self._scene:
+                self._scene.removeItem(edge)
+        self._edges = []
+        for spec in self._wires:
+            a, b = spec[0], spec[2]
             if a not in self._items or b not in self._items:
                 continue
+            if spec[4] == "stream" and b != self._selected:
+                # **stream 線只在選到那張卡的時候才畫。**
+                #
+                # 一份九張卡的 recipe 會編出 11 條 stream 線 + 8 條主幹 = 19 條。
+                # 全部常駐的話畫布就是一團毛球，而使用者 2026-08-14 才因為
+                # 「會混淆」退掉過一種常駐的線（route 的金色虛線）。
+                #
+                # 主幹（狀態往哪走）是**程式本身**，永遠要看得見；
+                # 「這張卡動哪一條流」是**那張卡的細節**，看那張卡的時候才需要。
+                continue
             src, dst = self._items[a], self._items[b]
+            if spec[1] or spec[3]:
+                # 引擎編出來的線：埠是講明的（F9 Phase 3c）
+                edge = _EdgeItem(src, dst, self, 0, spec[1], spec[3], spec[4])
+                self._scene.addItem(edge)
+                self._edges.append(edge)
+                continue
+            # 只有兩個 id 的舊式線 -> 沿用「兩端共用哪些流」的推導
             for port in self._ports_between(src, dst):
                 edge = _EdgeItem(src, dst, self, port)
                 self._scene.addItem(edge)
                 self._edges.append(edge)
 
-        self.set_selected(self._selected)
-        rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
-        self._scene.setSceneRect(rect)
+
+    def edge_kinds(self) -> List[str]:
+        """畫布上每一條線是哪一種（測試用）。"""
+        return [getattr(e, "kind", "packet") for e in self._edges]
+
 
     def copy_positions_from(self, other: "PipelineCanvas") -> None:
         """把另一份畫布的節點位置搬過來（彈出視窗開啟時跟主視窗一致）。"""
@@ -889,7 +1022,11 @@ class PipelineCanvas(QGraphicsView):
         return list(self._pairs)
 
     def set_selected(self, node_id: Optional[str]) -> None:
+        was = getattr(self, "_selected", None)
         self._selected = None if node_id is None else str(node_id)
+        if was != self._selected and getattr(self, "_wires", None):
+            # 換選取要重畫 stream 線（它們只跟著選到的那張卡出現）
+            self._rebuild_edges()
         for nid, item in self._items.items():
             item.setSelected(nid == self._selected)
             item.update()

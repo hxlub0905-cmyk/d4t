@@ -398,16 +398,30 @@ def _compile_recipe(recipe: Recipe, kind: str,
         for out in outs:
             producer[out] = nid
 
-    # 顯式的線贏過推導出來的（四段式講明了埠）
+    # 顯式的線贏過推導出來的 —— **使用者在畫布上拉的就是他說了算**。
+    #
+    # 兩段式 ``[src, dst]``（畫布上拉一條線存出來的那種）也要算數。漏掉它的
+    # 話，使用者拉的線會被推導出來的主幹蓋掉：畫面上他接了 load → norm，
+    # 實際跑的卻是 load → norm_ref → norm，而且看不出來 —— 正好是 F9 要修的
+    # 那件事，而不是可以順手忽略的細節。
     explicit: List[Wire] = []
     for e in recipe.edges:
         e = list(e)
         if len(e) == 4:
             src, sp, dst, dp = (str(x) for x in e)
-            if src in pos and dst in pos and pos[src] < pos[dst]:
-                explicit.append(Wire(src, sp, dst, dp, KIND_PACKET))
-                packet_in.pop((dst, dp), None)
-                stream_in.pop((dst, dp), None)
+        elif len(e) == 2:
+            src, dst = str(e[0]), str(e[1])
+            if src not in pos or dst not in pos:
+                continue
+            sp = (ports[src][1] or (DEFAULT_OUT,))[0]
+            dp = (DEFAULT_IN if _has_stream_inputs(registry.get(
+                recipe.nodes[dst].step)) else (ports[dst][0] or (DEFAULT_IN,))[0])
+        else:
+            continue
+        if src in pos and dst in pos and pos[src] < pos[dst]:
+            explicit.append(Wire(src, sp, dst, dp, KIND_PACKET))
+            packet_in.pop((dst, dp), None)
+            stream_in.pop((dst, dp), None)
 
     wires = [Wire(src, sp, dst, dp, KIND_PACKET)
              for (dst, dp), (src, sp) in packet_in.items()]
