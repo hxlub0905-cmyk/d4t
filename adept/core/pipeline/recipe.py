@@ -36,7 +36,7 @@ from .step import ParamError, Step, REGISTRY
 
 __all__ = [
     "RecipeError", "RecipeNode", "ScoreSpec", "Recipe",
-    "Issue", "execution_order", "validate",
+    "Issue", "execution_order", "validate", "edge_pair",
 ]
 
 
@@ -393,12 +393,19 @@ class Recipe:
 
         routes = {str(k): [str(x) for x in v] for k, v in dict(d["routes"]).items()}
 
+        # 一條線有兩種寫法（F9 Phase 3a 起）：
+        #   ["a", "b"]                          兩端的預設埠（既有檔案都是這種）
+        #   ["a", "match", "b", "in"]           **講明從哪個埠出去、進哪個埠**
+        # 後者是條件分流存得起來的前提：一張卡有 match / else 兩個出口，
+        # 只寫 ["r", "x"] 說不出這條線是從哪一個出去的。
         edges: List[List[str]] = []
         for e in (d.get("edges") or []):
             e = list(e)
-            if len(e) != 2:
-                raise RecipeError(f"an edge must be [from, to] — two step ids; got: {e}")
-            edges.append([str(e[0]), str(e[1])])
+            if len(e) not in (2, 4):
+                raise RecipeError(
+                    "an edge must be [from, to] or [from, from_port, to, to_port]; "
+                    "got: %r" % (e,))
+            edges.append([str(x) for x in e])
 
         # 舊 recipe（F7-18 之前）的 also_apply / anchor：展開成一張卡一條流。
         # 做在這裡而不是各張卡的 validate_params 裡，因為它會**增加節點**——
@@ -468,6 +475,22 @@ class Recipe:
 # ---------------------------------------------------------------------------
 # 執行順序（Kahn 拓撲排序，平手依 route 位置 → deterministic）
 # ---------------------------------------------------------------------------
+
+def edge_pair(e: Any) -> Optional[Tuple[str, str]]:
+    """一條線的 ``(來源節點, 目的節點)``，兩種寫法都認得。
+
+    ``["a", "b"]`` → ``("a", "b")``；
+    ``["a", "match", "b", "in"]`` → ``("a", "b")``（埠名在這裡不重要 ——
+    要排執行順序只需要知道誰在誰前面）。看不懂的形狀回 ``None``。
+    """
+    e = list(e or ())
+    if len(e) == 2:
+        return (str(e[0]), str(e[1]))
+    if len(e) == 4:
+        return (str(e[0]), str(e[2]))
+    return None
+
+
 def execution_order(recipe: Recipe, kind: str) -> List[str]:
     """回傳 ``kind`` 這條 route 的節點執行順序。
 
@@ -488,8 +511,9 @@ def execution_order(recipe: Recipe, kind: str) -> List[str]:
     for a, b in zip(route, route[1:]):
         pair_edges.add((a, b))
     for e in recipe.edges:
-        if len(e) == 2 and e[0] in node_set and e[1] in node_set:
-            pair_edges.add((e[0], e[1]))  # 自迴圈也收進來 → Kahn 會偵測為循環
+        pair = edge_pair(e)               # 兩種寫法都收（見 from_json_dict）
+        if pair is not None and pair[0] in node_set and pair[1] in node_set:
+            pair_edges.add(pair)          # 自迴圈也收進來 → Kahn 會偵測為循環
 
     indeg = {n: 0 for n in route}
     adj: Dict[str, List[str]] = {n: [] for n in route}

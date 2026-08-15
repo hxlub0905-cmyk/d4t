@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 from .context import Context
 from .expression import parse_expression
 from .recipe import Recipe, RecipeError, execution_order
-from .step import CATEGORY_IMAGE, REGISTRY, Step, StepError
+from .step import CATEGORY_ADC, CATEGORY_IMAGE, REGISTRY, Step, StepError
 
 __all__ = ["StepTrace", "DefectResult", "run_defect", "run_defect_cached",
            "run_dataset", "image_segment_signature", "result_to_json_dict"]
@@ -79,7 +79,9 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
                ctx: Context, traces: List[StepTrace],
                registry: Dict[str, Type[Step]],
                upto_node: Optional[str],
-               kind: str = "") -> Tuple[Context, Optional[str]]:
+               kind: str = "",
+               verdicts_out: Optional[List[Any]] = None,
+               inbox: Optional[Dict[Any, Any]] = None) -> Tuple[Context, Optional[str]]:
     """執行 ``order[start:stop]`` 的節點；trace 逐一 append。
 
     **F9 Phase 2 起這裡只是一層薄殼。** 真正的執行在
@@ -103,7 +105,8 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
 
     outbox, runs, err, last = run_graph(
         graph, Packet(ctx), registry=registry, start=lo, stop=hi,
-        upto_node=upto_node, track_changes=ctx.track_changes)
+        upto_node=upto_node, track_changes=ctx.track_changes,
+        inbox=inbox)
 
     for r in runs:
         traces.append(StepTrace(
@@ -111,6 +114,9 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
             error=r.error, features_added=r.features_added,
             images_after=r.images_after))
     out = last.ctx if last is not None else ctx
+    if verdicts_out is not None:
+        got = _collect_verdicts(graph, outbox, registry)
+        verdicts_out.append(got)
     return out, err
 
 
@@ -125,7 +131,13 @@ def _segment_index(compiled: List[str], order: List[str], idx: int) -> int:
 
 
 def _eval_score(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
-    """ADC 判定：score = expr(features) → bin。失敗會 raise（呼叫端攔截）。"""
+    """ADC 判定：score = expr(features) → bin。失敗會 raise（呼叫端攔截）。
+
+    ⚠ **這是舊路徑。** F9 Phase 3a 起判定是畫布上的一張卡（``steps/adc.py``）；
+    圖上有判定卡的時候走 :func:`_collect_verdicts`，這裡不會被呼叫到。
+    留著是因為 ``Recipe.score`` 這個固定欄位還在（既有的檔案、Studio 的分數頁、
+    ``store.rescore`` 都還吃它）—— 它會在 Phase 3b 隨 ``routes`` 一起退場。
+    """
     expr = parse_expression(recipe.score.expr)
     score = expr.eval(ctx.features)
     ctx.features["score"] = score
@@ -134,6 +146,47 @@ def _eval_score(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
     else:
         b = int(recipe.score.bins["above"])
     return score, b
+
+
+#: 判定卡沒有任何一張跑到時，記在 warnings 裡的那句話。
+NO_VERDICT_NOTE = (
+    "no decision was made for this defect: the branch it took has no Decide "
+    "card on it. The score is left empty on purpose - a 0 here would sort and "
+    "report like a real answer.")
+
+
+def _collect_verdicts(graph: Any, outbox: Dict[Any, Any],
+                      registry: Dict[str, Type[Step]]
+                      ) -> Optional[List[Dict[str, Any]]]:
+    """圖上的判定卡各給了什麼結論。
+
+    從 **outbox**（每個節點自己吐出來的那一包）收，不是從最後那一包收 ——
+    有分岔的時候判定卡的那一包不一定是執行順序上的最後一個，讀最後那包會
+    拿到別條分支的結論。
+
+    回 ``None`` = 這份 recipe **沒有判定卡** → 呼叫端走舊的 ``recipe.score``。
+    回 ``[]``   = 有判定卡但**一張都沒跑到**（分流走到一條沒有判定的分支）
+    —— 那是「沒有結論」，不是 0 分。
+    """
+    from ..steps.adc import VERDICT_KEY
+
+    out: List[Dict[str, Any]] = []
+    found_any = False
+    for nid in graph.order:
+        node = graph.nodes.get(nid)
+        step_cls = registry.get(node.step) if node is not None else None
+        if getattr(step_cls, "category", "") != CATEGORY_ADC:
+            continue
+        found_any = True
+        for port in getattr(step_cls, "outputs", ()) or ():
+            pk = outbox.get((nid, port))
+            if pk is None:
+                continue
+            v = dict(pk.ctx.meta.get(VERDICT_KEY) or {})
+            if v:
+                v["node"] = nid
+                out.append(v)
+    return out if found_any else None
 
 
 def run_defect(recipe: Recipe, item: Any, kind: str, *,
@@ -176,21 +229,56 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
             f"upto_node '{upto_node}' is not in the execution order {order} "
             f"of route '{kind}'")
 
+    verdicts_box: List[Any] = []
     ctx, err = _run_nodes(recipe, order, 0, len(order), ctx, traces,
-                          registry, upto_node, kind=kind)
+                          registry, upto_node, kind=kind,
+                          verdicts_out=verdicts_box)
     if err is not None:
         return _finish(defect_id, ctx, traces, keep_context, False, err)
 
     if upto_node is not None:
         return _finish(defect_id, ctx, traces, keep_context, True, None)
 
-    # ---- ADC 判定：score → bin ----
-    try:
-        score, b = _eval_score(recipe, ctx)
-    except Exception as e:
-        return _finish(defect_id, ctx, traces, keep_context, False, f"[score] {e}")
-    return _finish(defect_id, ctx, traces, keep_context, True, None,
-                   score=score, bin_=b)
+    return _judge(recipe, ctx, traces, keep_context, defect_id,
+                  verdicts_box[0] if verdicts_box else None)
+
+
+def _judge(recipe: Recipe, ctx: Context, traces: List[StepTrace],
+           keep_context: bool, defect_id: str,
+           verdicts: Optional[List[Dict[str, Any]]]) -> DefectResult:
+    """把判定收成結果。三種情況，三種不同的下場。
+
+    * ``verdicts is None`` —— 圖上沒有判定卡 → 走舊的 ``recipe.score``
+      （Phase 3b 之前既有的每一份 recipe 都走這條）。
+    * 剛好一張判定卡跑到 → 就用它。
+    * **一張都沒跑到** → 這顆**沒有結論**：score/bin 留 None 並講出來。
+      給 0 分是最糟的處理（0 會排序、會進報表、看起來像「很乾淨」）。
+    * **兩張以上跑到** → 這是 recipe 接錯了（兩條判定同時生效），
+      當成失敗講清楚，不要偷偷挑一個。
+    """
+    if verdicts is None:
+        try:
+            score, b = _eval_score(recipe, ctx)
+        except Exception as e:
+            return _finish(defect_id, ctx, traces, keep_context, False,
+                           f"[score] {e}")
+        return _finish(defect_id, ctx, traces, keep_context, True, None,
+                       score=score, bin_=b)
+
+    if len(verdicts) == 1:
+        v = verdicts[0]
+        return _finish(defect_id, ctx, traces, keep_context, True, None,
+                       score=float(v["score"]), bin_=int(v["bin"]))
+
+    if not verdicts:
+        ctx.warn(NO_VERDICT_NOTE)
+        return _finish(defect_id, ctx, traces, keep_context, True, None)
+
+    who = ", ".join(str(v.get("node", "?")) for v in verdicts)
+    return _finish(defect_id, ctx, traces, keep_context, False,
+                   "[adc] %d Decide cards both made a decision for this defect "
+                   "(%s). Exactly one branch should end in a Decide card - "
+                   "check the wiring." % (len(verdicts), who))
 
 
 # ---------------------------------------------------------------------------
@@ -371,16 +459,13 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
                 pass  # 快取寫入失敗 → 不影響本次結果
 
     # 續跑算法段 + ADC 判定
+    verdicts_box: List[Any] = []
     ctx, err = _run_nodes(recipe, order, ckpt, len(order), ctx, traces,
-                          registry, None, kind=kind)
+                          registry, None, kind=kind, verdicts_out=verdicts_box)
     if err is not None:
         return _finish(defect_id, ctx, traces, keep_context, False, err)
-    try:
-        score, b = _eval_score(recipe, ctx)
-    except Exception as e:
-        return _finish(defect_id, ctx, traces, keep_context, False, f"[score] {e}")
-    return _finish(defect_id, ctx, traces, keep_context, True, None,
-                   score=score, bin_=b)
+    return _judge(recipe, ctx, traces, keep_context, defect_id,
+                  verdicts_box[0] if verdicts_box else None)
 
 
 def run_dataset(recipe: Recipe, dataset: Any, *,

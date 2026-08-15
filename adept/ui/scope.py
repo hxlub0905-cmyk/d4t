@@ -42,8 +42,14 @@ SUPPORTED_KINDS: Sequence[str] = ("ebi_patch",)
 #:   patch 兩兩對應本來就有 ref，這張卡沒有用武之地。
 #: * ``cell_period`` —— 唯一用途是餵 ``golden_cell``。
 #:
-#: 兩張卡仍然註冊在 registry 裡：舊 recipe 載得進來、CLI 跑得動、測試照跑。
-HIDDEN_STEPS: Sequence[str] = ("golden_cell", "cell_period")
+#: * ``adc`` —— **暫時**收起來（F9 Phase 3a）。判定已經是一張卡、引擎也支援
+#:   一張圖放好幾張，但 Studio 的分數頁（``Recipe.score`` 那個固定欄位）還在。
+#:   兩者同時出現在畫面上，使用者會看到兩個地方都能設門檻而不知道哪個算數。
+#:   **Phase 3b 把 ``score`` 欄位拿掉的同一輪要把這個字串刪掉** ——
+#:   不然就會變成「做好了但沒有人打開」。CLI 與既有 recipe 不受影響。
+#:
+#: 這幾張卡仍然註冊在 registry 裡：舊 recipe 載得進來、CLI 跑得動、測試照跑。
+HIDDEN_STEPS: Sequence[str] = ("golden_cell", "cell_period", "adc")
 
 #: 沒有資料集時 ``RecipeModel`` 用的 route 名稱。
 DEFAULT_KIND: str = SUPPORTED_KINDS[0]

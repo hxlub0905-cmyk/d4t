@@ -9,7 +9,8 @@
   load_patch, normalize, tone, denoise, flatten,
   align, subtract, golden_cell, cell_period,
   snr_map, roi_cross, roi_mask, roi_template,
-  cd_measure, roi_snr, focus_quality, glv_stats
+  cd_measure, roi_snr, focus_quality, glv_stats,
+  adc
 
 這份清單是給人讀的，會過期。真正的來源是 ``REGISTRY``：
 ``python -m adept steps`` 列的是實際註冊到的那些。
@@ -33,9 +34,10 @@ from . import roi_snr        # roi_snr
 from . import quality        # focus_quality
 from . import glv_stats      # glv_stats
 from . import golden         # cell_period / golden_cell
+from . import adc            # adc（判定；F9 Phase 3a 起判定是一張卡）
 
 __all__ = [
     "load", "normalize", "denoise", "tone", "flatten", "align", "arith",
     "roi_cross", "roi_mask", "roi_template", "snr_map", "cd", "roi_snr",
-    "quality", "glv_stats", "golden",
+    "quality", "glv_stats", "golden", "adc",
 ]

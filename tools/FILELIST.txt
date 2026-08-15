@@ -3,7 +3,7 @@
 f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
 c92e9dc494a8a56102bfac38bb7fd13bd46d8864 AGENTS.md
-e278d05dcda6eca5f9358441fdc13353fbb526ec CLAUDE.md
+8c6bcc299dd03fca27a1e346e2521b9fff12e346 CLAUDE.md
 10d1d3ebf518620d2858fcf3f53b4d65f9b3dfad README.md
 592cf8420684a55ba948dcef3548644302fe6a86 SESSION_LOG.md
 650a5d7c8bc6db42eed4054174823bfcfceb7eae adept/__init__.py
@@ -41,13 +41,14 @@ f277b6b3e5e65ce8027da01648a0d42d44a64905 adept/core/pipeline/batch.py
 73227c483c36dba007633bf3b509a577f2764297 adept/core/pipeline/cache.py
 1282dcc52b92b42b0849ef128dfda49c79157209 adept/core/pipeline/context.py
 8a8f906147c0b06defc52096716ecfd917b0b94e adept/core/pipeline/curve.py
-aecc66e56e40a86ee84b25028aeb62459cf66b04 adept/core/pipeline/engine.py
+1546f5a4c41cdce95e4a4ba47674224fa2245c11 adept/core/pipeline/engine.py
 6c3c9c1cc1e6d1ee5d121f9994968f4f780e3cc5 adept/core/pipeline/expression.py
-0304348c241d726a9431d0f2aa66baaab4b582b7 adept/core/pipeline/graph.py
-0f01cb68bfb24c25eed3b48adeb0145583a41113 adept/core/pipeline/recipe.py
-d70c49f81062c9f3eacd3fd703f6e07e50e18fd5 adept/core/pipeline/step.py
-aec515534439b912d18c063c106314587c200a41 adept/core/steps/__init__.py
+ee23c7122e4dc9beffe5083bc43609872ac6f3e0 adept/core/pipeline/graph.py
+f7e687f5588e57793ff5c289317554378d063fb1 adept/core/pipeline/recipe.py
+ff15b2c1e10dd3b5fce8714f04aa4f5f6fb097bc adept/core/pipeline/step.py
+550a8eda94166b5a1c24986426a905c785580b56 adept/core/steps/__init__.py
 41b2b4e6e4a2b0aebf1d56b6bc12d6ef9adc0de2 adept/core/steps/_util.py
+4ebae031e2e4908fd3b4760decea731c7acfe5ec adept/core/steps/adc.py
 55a5a0bcc01184359f6a4f5bf5aca5c6c99c37d9 adept/core/steps/align.py
 479b9aea626127085a46d45ea123ebbd4ccdb672 adept/core/steps/arith.py
 006eababeb59502e25f78faef0b5fd3b47155778 adept/core/steps/cd.py
@@ -74,7 +75,7 @@ e69de29bb2d1d6434b8b29ae775ad8c2e48c5391 adept/ui/__init__.py
 f090df3c4548afb4571d512820eba2becd11de5f adept/ui/inspectors.py
 b996d921ba547e70d5c78251f70f3b56d3e27ef0 adept/ui/region_check.py
 043a9240742914759667fd4bb01beafd0241ed17 adept/ui/results.py
-3291d88808ce6ac13388b852978fe9a28f54f016 adept/ui/scope.py
+2f7ad83fcf6d52ebff8a29b7b892e2fd34ff1e4d adept/ui/scope.py
 3a58db157fb4314af40c2c92f5c3d8ba53be7c96 adept/ui/studio.py
 5d647c32055d4a73128c92853c0425729fdac6b9 adept/ui/template_dialog.py
 c3bcfa463151f46f3d816375ada62109fd313403 adept/ui/theme.py
@@ -89,7 +90,7 @@ b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 bff3de372166e0a7d7a8e926217507fb46d5c079 docs/plans/F7-canvas-and-taxonomy.md
 0845d2bad30945b501dd97a8b7ff965c4dc7a39b docs/plans/F8-rule-based-roi.md
-7f3fd020f728f5aa1a0c60cc162fd926dbd88849 docs/plans/F9-graph-as-program.md
+a7e904a277c3daeba15b6b1732294b6d83051fe9 docs/plans/F9-graph-as-program.md
 815878c0a316356f562d2c5a43f0de356605ea61 examples/recipes/README.md
 44398da2ee7c4dc4b6262484fc76fe1deb416b3a examples/recipes/cross_regions.json
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
@@ -120,7 +121,7 @@ fbabf20c7735e77b9e7f83a16b950a2831feaeda tests/test_export_report.py
 4017d96f4145ba179d8e186b7f0e02b6e47ed8ef tests/test_fab_probe.py
 862f012efa32c2e2162dd591bb2896cab70145c9 tests/test_glv.py
 2dc56d1e49cf61a990c7e0f9441f3ca99082380c tests/test_golden_step.py
-7df46c3e4d218e8a6005a67c5f1cb10e83e26488 tests/test_graph.py
+fb5e66a377ea9135304eb1cc85252032384b9abe tests/test_graph.py
 591460dd7f2ed13dad5ba5aa3337884312e1bfc2 tests/test_histmatch.py
 f99c2421fe691efb20e27f690a066aa2024a325e tests/test_klarf_core.py
 beebe8e22628acc8dff09406c184b3a0ecae0b91 tests/test_klarf_variant_d.py

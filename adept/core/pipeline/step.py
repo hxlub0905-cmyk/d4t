@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, ClassVar, Dict, List, Optional, Type
+from typing import Any, ClassVar, Dict, List, Optional, Tuple, Type
 
 from .context import Context
 from .curve import CurveError, format_curve, parse_curve
@@ -254,6 +254,23 @@ class Step(ABC):
     writes: ClassVar[List[str]] = []
     features_out: ClassVar[List[str]] = []
     requires_ref: ClassVar[bool] = False  # True → rsem 單張資料流不可用（除非上游造出 ref）
+
+    # ---- 埠（F9 Phase 2 起）------------------------------------------------
+    #: 這張卡在畫布上有哪些**輸入埠**與**輸出埠**（見 :mod:`.graph`）。
+    #:
+    #: 絕大多數卡片是「一條線進、一條線出」，所以預設就是這樣，既有卡片一張
+    #: 都不用宣告。要用到圖的新能力時才覆寫：
+    #:
+    #: * **條件分流** —— ``outputs = ("match", "else")``，``run()`` 改回傳
+    #:   ``{埠名: Context}``，**只放這次要吐的那個埠**；沒被吐到的那一邊，
+    #:   下游整段安靜不執行。
+    #: * **合流** —— ``inputs = ("a", "b")``，兩條線都到齊才會跑。
+    #: * **判定（尾節點）** —— 見 ``steps/adc.py``。
+    #:
+    #: ⚠ 埠名是**畫布上的接點**，跟 ``image_key`` 參數是兩件事：埠決定「哪一包
+    #: 狀態流到哪裡」，參數決定「這張卡動那一包裡面的哪一條影像流」。
+    inputs: ClassVar[Tuple[str, ...]] = ("in",)
+    outputs: ClassVar[Tuple[str, ...]] = ("out",)
 
     # ---- 參數 -------------------------------------------------------------
     @classmethod

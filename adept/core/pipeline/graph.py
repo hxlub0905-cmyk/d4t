@@ -247,12 +247,24 @@ def _compile_recipe(recipe: Recipe, kind: str,
 
     for a, b in zip(order, order[1:]):
         offer(a, b)
+
+    #: 顯式的線。四段式 ``[src, src_port, dst, dst_port]`` **講明了埠**，
+    #: 所以它不走 ``offer()`` 的「同一個埠取最晚來源」規則 —— 使用者指名要接
+    #: 哪個埠，就是那個埠（條件分流的 match / else 靠這個才存得起來）。
+    explicit: List[Wire] = []
     for e in recipe.edges:
-        if len(e) == 2:
+        e = list(e)
+        if len(e) == 4:
+            src, sp, dst, dp = (str(x) for x in e)
+            if src in pos and dst in pos and pos[src] < pos[dst]:
+                explicit.append(Wire(src, sp, dst, dp))
+                chosen.pop((dst, dp), None)     # 明講的贏過推出來的
+        elif len(e) == 2:
             offer(str(e[0]), str(e[1]))
 
     wires = [Wire(src, src_port, dst, dst_port)
              for (dst, dst_port), (src, src_port) in chosen.items()]
+    wires.extend(explicit)
     wires.sort(key=lambda w: (pos[w.dst], pos[w.src]))
     return Graph(order=order, nodes=dict(recipe.nodes), wires=wires)
 

@@ -268,3 +268,145 @@ def test_a_disabled_node_is_bypassed_not_left_dangling(cards):
 
     r = run_defect(rec, _item(level=7.0), "ebi_patch")
     assert r.ok and r.score == 7.0             # 沒被放大
+
+
+# --------------------------------------------------------------------------- #
+# 5. 判定是圖上的卡片（F9 Phase 3a）
+# --------------------------------------------------------------------------- #
+def _adc(node_id, expr, threshold, label=""):
+    return RecipeNode(node_id, "adc", {"expr": expr, "threshold": threshold,
+                                       "bin_below": 0, "bin_above": 1,
+                                       "label": label})
+
+
+def test_a_decide_card_replaces_the_score_field(cards):
+    """圖上有判定卡的時候，分數由那張卡決定，不再看 recipe.score。"""
+    rec = _recipe(["l", "m", "d"], {
+        "l": RecipeNode("l", "t_g_load", {}),
+        "m": RecipeNode("m", "t_g_peak", {}),
+        "d": _adc("d", "peak", 5.0),
+    }, expr="9999")                             # 舊欄位故意給一個很離譜的值
+    r = run_defect(rec, _item(level=7.0), "ebi_patch")
+    assert r.ok and r.score == 7.0 and r.bin == 1     # 用的是卡片，不是 9999
+    r2 = run_defect(rec, _item(level=3.0), "ebi_patch")
+    assert r2.ok and r2.score == 3.0 and r2.bin == 0
+
+
+def test_two_branches_can_use_different_thresholds(cards):
+    """**一份 recipe 兩套標準** —— 這是判定變成卡片的理由。
+
+    分流之後兩條分支各有自己的判定卡，門檻不一樣：同一個 level=7 的 defect，
+    走 A 是 bin 1（門檻 5）、走 B 是 bin 0（門檻 100）。
+    """
+    nodes = {
+        "l": RecipeNode("l", "t_g_load", {}),
+        "r": RecipeNode("r", "t_g_route", {}),
+        "ma": RecipeNode("ma", "t_g_peak", {}),
+        "da": _adc("da", "peak", 5.0, label="A"),
+        "mb": RecipeNode("mb", "t_g_peak", {}),
+        "db": _adc("db", "peak", 100.0, label="B"),
+    }
+    graph = compile_recipe(
+        _recipe(["l", "r", "ma", "da", "mb", "db"], nodes), "ebi_patch")
+    graph.wires = [Wire("l", "out", "r", "in"),
+                   Wire("r", "match", "ma", "in"),
+                   Wire("ma", "out", "da", "in"),
+                   Wire("r", "else", "mb", "in"),
+                   Wire("mb", "out", "db", "in")]
+
+    from adept.core.pipeline.engine import _collect_verdicts
+    from adept.core.pipeline.step import REGISTRY as REG
+
+    for klass, expect_bin, by in ((1, 1, "A"), (2, 0, "B")):
+        ctx = Context()
+        ctx.meta["_defect_item"] = _item(level=7.0, klass=klass)
+        outbox, _runs, err, _l = run_graph(graph, Packet(ctx))
+        assert err is None, err
+        got = _collect_verdicts(graph, outbox, REG)
+        assert len(got) == 1, got               # 只有一張判定卡跑到
+        assert got[0]["bin"] == expect_bin and got[0]["by"] == by
+
+
+def test_no_decision_is_recorded_as_no_decision_not_as_zero(cards):
+    """分流走到一條**沒有判定卡**的分支 → 沒有結論，不是 0 分。
+
+    0 是個看起來很像答案的答案：它會被排序、寫進報表、看起來像「很乾淨」。
+    （跟 cd_x_nm 恆為 0 那個坑同一類，見 CLAUDE.md §8。）
+    """
+    rec = _recipe(["l", "r", "m", "d", "b"], {
+        "l": RecipeNode("l", "t_g_load", {}),
+        "r": RecipeNode("r", "t_g_route", {}),
+        "m": RecipeNode("m", "t_g_peak", {}),
+        "d": _adc("d", "peak", 5.0),
+        "b": RecipeNode("b", "t_g_gain", {}),   # else 這條沒有判定卡
+    }, edges=[["r", "match", "m", "in"],
+              ["m", "out", "d", "in"],
+              ["r", "else", "b", "in"]])
+
+    hit = run_defect(rec, _item(level=7.0, klass=1), "ebi_patch")
+    miss = run_defect(rec, _item(level=7.0, klass=2), "ebi_patch",
+                      keep_context=True)
+
+    assert hit.ok and hit.score == 7.0 and hit.bin == 1
+    # 沒有結論的那一顆：跑完了、沒有錯，但**沒有分數**，而且說得出為什麼
+    assert miss.ok and miss.score is None and miss.bin is None
+    assert any("no decision" in w for w in miss.context.meta.get("warnings", []))
+
+
+def test_two_decisions_firing_at_once_is_an_error_not_a_coin_flip(cards):
+    """兩張判定卡同時生效 = recipe 接錯了。不要偷偷挑一個。"""
+    rec = _recipe(["l", "m", "d1", "d2"], {
+        "l": RecipeNode("l", "t_g_load", {}),
+        "m": RecipeNode("m", "t_g_peak", {}),
+        "d1": _adc("d1", "peak", 5.0, label="A"),
+        "d2": _adc("d2", "peak", 100.0, label="B"),
+    }, edges=[["m", "out", "d1", "in"], ["m", "out", "d2", "in"]])
+    r = run_defect(rec, _item(level=7.0), "ebi_patch")
+    assert not r.ok and "both made a decision" in r.error, r.error
+
+
+def test_a_decide_card_with_no_expression_says_so_before_you_run_it(cards):
+    """空的分數式子是合法的 str —— 但那張卡跑起來每一顆都失敗。
+    `configuration_issues` 要在 lint 階段就講（F7-13 的機制）。"""
+    from adept.core.pipeline import validate
+    rec = _recipe(["l", "m", "d"], {
+        "l": RecipeNode("l", "t_g_load", {}),
+        "m": RecipeNode("m", "t_g_peak", {}),
+        "d": RecipeNode("d", "adc", {}),        # expr 沒填
+    })
+    codes = [i.code for i in validate(rec, kind="ebi_patch")]
+    assert "not-configured" in codes, codes
+
+
+def test_a_branching_recipe_survives_a_save_and_load(cards):
+    """**分支 recipe 要存得起來。** 四段式的線 `[src, src_port, dst, dst_port]`
+    就是為此存在的 —— 只寫 `["r", "m"]` 說不出這條線是從 match 還是 else 出去的。
+    """
+    rec = _recipe(["l", "r", "m", "d", "b"], {
+        "l": RecipeNode("l", "t_g_load", {}),
+        "r": RecipeNode("r", "t_g_route", {}),
+        "m": RecipeNode("m", "t_g_peak", {}),
+        "d": _adc("d", "peak", 5.0),
+        "b": RecipeNode("b", "t_g_gain", {}),
+    }, edges=[["r", "match", "m", "in"],
+              ["m", "out", "d", "in"],
+              ["r", "else", "b", "in"]])
+
+    again = Recipe.from_json_dict(rec.to_json_dict())
+    assert again.edges == rec.edges
+    graph = compile_recipe(again, "ebi_patch")
+    assert Wire("r", "match", "m", "in") in graph.wires
+    assert Wire("r", "else", "b", "in") in graph.wires
+    # 兩顆走不同分支，結果跟存檔前一樣
+    assert run_defect(again, _item(level=7.0, klass=1), "ebi_patch").bin == 1
+    assert run_defect(again, _item(level=7.0, klass=2), "ebi_patch").score is None
+
+
+def test_an_edge_with_a_silly_shape_is_rejected_at_load_time(cards):
+    """三個元素的線是打錯了 —— 講清楚，不要猜使用者的意思。"""
+    from adept.core.pipeline import RecipeError
+    d = _recipe(["l"], {"l": RecipeNode("l", "t_g_load", {})}).to_json_dict()
+    d["edges"] = [["a", "b", "c"]]
+    with pytest.raises(RecipeError) as ei:
+        Recipe.from_json_dict(d)
+    assert "from_port" in str(ei.value)
