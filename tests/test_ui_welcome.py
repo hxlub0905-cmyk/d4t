@@ -210,7 +210,12 @@ def test_library_shows_description_routes_steps_and_expr_from_json(qapp):
             assert info["recipe_id"] == raw["recipe_id"]
             assert info["description"] == raw["description"]
             assert info["description"].strip(), "%s 沒有 description" % info["file"]
-            assert info["routes"] == list(raw["routes"])
+            # 「這份檔案吃什麼資料」現在由 Input 卡說（F9 Phase 3d）——
+            # 以前是 JSON 裡 routes 那個欄位的鍵。
+            heads = [n["step"] for n in raw["nodes"].values()
+                     if n["step"].startswith("load_")]
+            assert heads, "%s 沒有 Input 卡" % info["file"]
+            assert info["routes"], "%s 問不出吃什麼資料" % info["file"]
             assert info["n_steps"] == len(raw["nodes"])
             # 分數住在判定卡的參數裡（F9 Phase 3d），不再是 recipe 的一個區塊
             adc = [dict(n["params"]) for n in raw["nodes"].values()
@@ -219,10 +224,10 @@ def test_library_shows_description_routes_steps_and_expr_from_json(qapp):
             assert info["expr"] == adc[0]["expr"]
             assert info["threshold"] == pytest.approx(adc[0]["threshold"])
 
-            # 清單那一列要看得到 recipe 名稱與 route
+            # 清單那一列要看得到 recipe 名稱與吃什麼資料
             text = dlg.item_text(i)
             assert raw["recipe_id"] in text
-            for route in raw["routes"]:
+            for route in info["routes"]:
                 assert route in text
 
             # 右邊細節要看得到說明與分數式
@@ -230,7 +235,7 @@ def test_library_shows_description_routes_steps_and_expr_from_json(qapp):
             detail = dlg.detail.text()
             assert raw["description"] in detail
             assert adc[0]["expr"] in detail
-            for route in raw["routes"]:
+            for route in info["routes"]:
                 assert route in detail
     finally:
         dlg.close()
@@ -405,9 +410,9 @@ def test_demo_reports_failure_instead_of_raising(window, tmp_path, monkeypatch):
 def test_generated_demo_lot_matches_the_builtin_template_route(demo_lot):
     """範例資料一定要走得通內建範本的 route，不然那顆鈕會給人第一印象是壞的。"""
     from adept.core.ingest.dataset import load_dataset
-    from adept.core.pipeline import Recipe
+    from adept.core.pipeline import Recipe, accepted_kinds
 
     paths = studio_mod.generate_demo_lot(str(demo_lot), n=6)
     ds = load_dataset(paths["klarf"])
     recipe = Recipe.load(str(studio_mod.TEMPLATE_RECIPE))
-    assert ds.kind in recipe.routes
+    assert ds.kind in accepted_kinds(recipe)

@@ -156,7 +156,12 @@ def test_load_patch_mirrors_single_to_test(ds):
 
 def test_load_patch_declared_writes_for_rsem():
     cls = REGISTRY["load_patch"]
-    assert cls.resolve_writes_for_kind({"channels": "auto"}, "rsem") == ["single", "test"]
+    # F9 Phase 3d：一種資料型別一張 Input 卡，所以「吐什麼」不必再問 kind ——
+    # 單張資料流由 ``load_single`` 這張卡負責，而它自己就答得出來。
+    from adept.core.pipeline import get_step
+    single = get_step("load_single")
+    assert single.accepts_kinds == ("rsem", "folder")
+    assert single.resolve_writes({"channels": "auto"}) == ["single", "test"]
 
 
 # ------------------------------------------------------------ 5. Golden Cell 路線

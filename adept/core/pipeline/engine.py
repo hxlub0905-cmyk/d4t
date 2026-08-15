@@ -208,7 +208,7 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
     traces: List[StepTrace] = []
 
     try:
-        order = execution_order(recipe, kind)
+        order = execution_order(recipe, kind, registry)
     except RecipeError as e:
         return _finish(defect_id, ctx, traces, keep_context, False, str(e))
 
@@ -292,7 +292,7 @@ def image_segment_signature(recipe: Recipe, kind: str,
     """
     if registry is None:
         registry = REGISTRY
-    order = execution_order(recipe, kind)
+    order = execution_order(recipe, kind, registry)
 
     ckpt = 0
     for i, nid in enumerate(order):
@@ -424,7 +424,7 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
     except Exception:
         snap = None  # 快取層出包 → 當作 miss
 
-    order = execution_order(recipe, kind)  # signature 已驗證過，不會再 raise
+    order = execution_order(recipe, kind, registry)  # signature 已驗證過，不會再 raise
     traces: List[StepTrace] = []
     ctx: Optional[Context] = None
 

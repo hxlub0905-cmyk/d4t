@@ -1,9 +1,9 @@
 # F9 — 圖就是程式（線變成真的資料通道）
 
-**狀態：Phase 1–3c 完成、3d 兩批完成（2026-08-15）。線是真的資料通道、
-判定是畫布上的一張卡（`Recipe.score` 那個固定欄位已退場）、畫布畫的是編譯出來
-的圖、「不就地改寫像素」從慣例變成擋得住的鎖。剩下：輸入變卡片、`routes` 退場
-（Phase 3d 其餘）。**
+**狀態：Phase 1–3d 完成（2026-08-15）。線是真的資料通道、判定與輸入都是畫布
+上的卡（`Recipe.score` 與 `Recipe.routes` 兩個固定欄位都已退場）、畫布畫的是
+編譯出來的圖、「不就地改寫像素」從慣例變成擋得住的鎖。
+下一步是 Phase 4：畫布變成真的編輯器。**
 
 ---
 
@@ -519,6 +519,85 @@ numpy 的 `writeable` 旗標就是那個鎖，而且它比原始碼掃描準：`
 
 ---
 
+## 5g. Phase 3d 第三批：輸入變卡片、`routes` 退場（2026-08-15）
+
+「這條 pipeline 吃什麼資料」以前寫在 `Recipe.routes` 的**鍵**上 —— 一個使用者
+從來沒看過的地方，而它同時決定三件事：跑哪幾張卡、Input 卡的埠長什麼樣、
+Studio 能不能開這份檔案。現在它是**畫布上第一張卡的身分**。
+
+### 5g.1 一種資料型別一張 Input 卡
+
+`load_patch` 以前一張卡吃所有型別，靠 `channels="auto"` 在**執行期**看資料
+才決定寫出哪幾條流。拆成 `load_patch`（ebi_patch）與 `load_single`
+（rsem / folder）之後，兩個代價一起消失：
+
+* **`Step.resolve_writes_for_kind(params, kind)` 整個拿掉了。** 那是為了「首卡
+  吐什麼要看 dataset kind」而存在的特例，它把 kind 一路傳進埠的計算裡 ——
+  於是埠算了兩次，而編譯期知道 kind、執行期不知道（§5d.3 那個坑：線接到
+  `load.single`、執行期卻吐在 `load.test` 上，整條下游安靜地不跑）。
+  現在 `stream_ports(step_cls, params)` 不再有 `kind` / `first` 兩個參數。
+* **使用者看得出這份 recipe 是給什麼資料用的** —— 圖上第一張卡的名字就是答案。
+
+新的類別屬性 `Step.accepts_kinds`：空的 = 普通的卡；非空 = 一條 pipeline 的
+起點。這是 Input 卡跟其他卡**唯一**的差別。
+
+### 5g.2 `routes` → `order` + 分段
+
+`Recipe` 現在是 `nodes` + `order`（一份清單）+ `edges`。`order` 從每一張
+Input 卡切成一段（`pipeline_segments`），`kind` 對到哪一段就跑哪一段
+（`route_for_kind`）。
+
+**為什麼 `order` 是一份顯式的清單，而不是靠 `nodes` 這個 dict 的順序**：
+JSON 物件的鍵順序不是規格保證的東西，把執行順序賭在它上面，換一個 parser
+就換一種行為。
+
+`sorted(recipe.routes)` 這個問句換成 `accepted_kinds(recipe)` —— 同一個問題，
+答案改由畫布上看得到的那幾張卡回答。
+
+### 5g.3 舊檔案：共用的節點會被拆開
+
+`_migrate_routes` 做兩件事：把每條 route 的第一張卡換成對的 Input 變體，
+以及**把多條 route 共用的節點複製成一段一份**（`<原id>__<kind>`，該段內的
+edges 一起改名）。
+
+`dual_route_basic` 的 11 個節點有 8 個同時屬於兩條 route —— 改一個就改了兩邊。
+那從來不是使用者要的（跟判定卡「每條分支一張」是同一個理由，見 §5e.1）。
+拆開之後行為完全不變，變的是它們現在改得動而不互相干擾。
+
+### 5g.4 `ui/scope.py` 不再需要一份手寫名單（§6.3 已解）
+
+「Studio 只吃 ebi_patch」以前是靠 `SUPPORTED_KINDS` 過濾 route **加上**一份
+手寫的 `HIDDEN_STEPS`，於是「打開 RSEM」要記得同時改兩個地方。現在
+`visible_steps()` 直接問卡片自己的 `accepts_kinds` —— 一張只吃 RSEM 的
+Input 卡在只支援 patch 的 build 裡不會出現在卡片庫，而 `SUPPORTED_KINDS`
+加一個字串就會回來（`test_f9_input_cards.py` 兩邊都鎖）。
+
+### 5g.5 順帶：`execution_order` 現在要 registry
+
+它得問卡片「你是不是 Input、你吃什麼」，所以多一個 `registry` 參數
+（預設全域 registry）。引擎、圖編譯、`validate` 都把自己手上那份傳下去 ——
+用假卡片的測試檔如果忘了傳，症狀會是「這份 recipe 沒有 Input 卡」。
+
+### 5g.6 驗收
+
+* 同一批 60 顆，`examples/recipes/cross_regions.json`（已改寫成新格式）
+  與前一批 **CSV 逐格相同**（0 個差異）。
+* 雙輸入 e2e（`test_e2e_dual_route`）全綠：同一份舊格式 fixture 遷移之後，
+  patch 與 RSEM 兩批照樣跑得完、分數照樣算得出來。
+* `python tools/run_tests.py`：**80 個檔案全綠、143 秒**。
+
+### 5g.7 Phase 3d 到此結束，剩下的是 Phase 4
+
+`routes` / `score` 都退場了，判定與輸入都是卡片，像素不准就地改寫。
+剩下的都是**畫布變成真的編輯器**（Phase 4）：埠型別擋不合法連線、
+刪線＝真的斷開、分岔／合流畫得出來。
+
+其中「刪線＝真的斷開」現在才真的做得到 —— 以前執行順序有一半藏在 `routes`
+的相鄰對裡，畫布上那個「×」剪掉的只是 `model.edges`，剪一條由順序推出來的線
+**什麼都不會發生**。順序現在就是線本身。
+
+---
+
 ## 6. 還沒解決的（Phase 3c 要面對）
 
 ### 6.1 快取切點在 DAG 上不成立
@@ -530,17 +609,17 @@ numpy 的 `writeable` 旗標就是那個鎖，而且它比原始碼掃描準：`
 更通用（分支各自命中）、而且「改算法段參數不重算影像段」自動成立。代價是要決定
 存哪些節點的 Packet（全部存會爆記憶體）—— 這一題留到 Phase 2 量過再定。
 
-### 6.2 舊 recipe 遷移 —— `score` 那一半已解（見 §5e）
+### 6.2 舊 recipe 遷移 —— ✅ 已解（`score` 見 §5e、`routes` 見 §5g）
 
-`routes` → Input 節點 + 一條線一條線接起來（**還沒做**）；
-`score` → ADC 節點（✅ `recipe._migrate_score_block`）。機械式，但
+`routes` → `order` + Input 卡（`recipe._migrate_routes`）；
+`score` → ADC 節點（`recipe._migrate_score_block`）。機械式，但
 **驗收必須是「同一份 recipe、同一批資料，遷移前後逐顆分數相同」**（沿用 F7-18
 的作法，不要靠讀程式碼驗證）。
 
-### 6.3 `ui/scope.py` 綁 dataset kind
+### 6.3 `ui/scope.py` 綁 dataset kind —— ✅ 已解（見 §5g.4）
 
-「Studio 只吃 ebi_patch」是靠 `SUPPORTED_KINDS` 過濾 route 做的。輸入變成卡片
-之後那個機制要重新想 —— 大概會變成「卡片庫裡只列這幾張 Input 卡」。
+猜對了：現在就是「卡片庫裡只列這幾張 Input 卡」，而且是問卡片自己的
+`accepts_kinds`，不必再維護一份手寫名單。
 
 ### 6.4 判定為 0 個時要說什麼 —— ✅ 已解（見 §5c.2 與 §5f.3）
 
@@ -558,7 +637,7 @@ score/bin 留 `None` 並在 warnings 講出來；Results 的那一行多一句
 | **3a** ✅ | ADC 變卡片（引擎支援多判定 / 沒有判定）；線存得下埠 | 低（舊路徑保留） |
 | **3b** ✅ | 流由線決定（埠名 = 流名；線分 packet / stream 兩種）。**16 張卡沒動。** | 已通過逐顆驗收 |
 | **3c** ✅ | UI 那一半：流的下拉退場、埠依角色分、畫布畫編譯出來的圖、兩種線不同色相 | 已看過截圖 |
-| **3d** 🔨 | `score` 退場 + `scope.py` 解除隱藏 `adc` ✅（§5e）；「不就地改寫」變成鎖 ✅（§5f）；**還沒做**：Input 變卡片、`routes` 退場 | 中 |
+| **3d** ✅ | `score` 退場 + `scope.py` 解除隱藏 `adc`（§5e）；「不就地改寫」變成鎖（§5f）；Input 變卡片 + `routes` 退場（§5g） | 已通過逐顆驗收 |
 | **4** | 畫布變成真的編輯器：埠型別擋不合法連線、**刪線=真的斷開**、分岔/合流畫得出來 | 中 |
 | **5+** | 開始長功能卡：`CLASSNUMBER` 分流、跨顆統計、ML、更多量測 | 低（純加法） |
 

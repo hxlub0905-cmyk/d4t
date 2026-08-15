@@ -23,7 +23,9 @@ from make_sample_rsem import generate as gen_rsem    # noqa: E402
 
 import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 from adept.core.ingest.dataset import load_dataset   # noqa: E402
-from adept.core.pipeline import Recipe, run_dataset, validate  # noqa: E402
+from adept.core.pipeline import (
+    Recipe, accepted_kinds, route_for_kind, run_dataset, validate,
+)  # noqa: E402
 
 RECIPE = REPO / "tests" / "fixtures" / "recipes" / "dual_route_basic.json"
 
@@ -43,23 +45,36 @@ def rsem_lot(tmp_path_factory):
     return gen_rsem(str(tmp_path_factory.mktemp("rsem")), n=24, seed=11)
 
 
-def test_recipe_has_both_routes_and_validates(recipe):
-    assert set(recipe.routes) == {"ebi_patch", "rsem"}
+def test_recipe_takes_both_input_types_and_validates(recipe):
+    # ``load_single`` 同時吃 rsem 與 folder（一顆一張圖，來源不同而已），
+    # 所以這裡問的是「兩種都吃得下」，不是「剛好只吃這兩種」。
+    assert {"ebi_patch", "rsem"} <= set(accepted_kinds(recipe))
     for kind in ("ebi_patch", "rsem"):
         errs = [i for i in validate(recipe, kind=kind) if i.level == "error"]
         assert not errs, (kind, errs)
 
 
-def test_routes_share_the_algo_and_adc_tail(recipe):
-    """兩條 route 只在「ref 從哪來」與影像尺寸幾何上不同，算法段必須共用同一批節點。"""
-    ebi, rsem = recipe.routes["ebi_patch"], recipe.routes["rsem"]
-    shared = set(ebi) & set(rsem)
-    for node_id in ("align", "sub", "dn", "snr", "cd"):
-        assert node_id in shared, f"{node_id} 應由兩條 route 共用"
+def test_each_input_type_gets_its_own_chain(recipe):
+    """兩條 pipeline，各自一份節點 —— **共用結束了**（F9 Phase 3d）。
+
+    這份 fixture 是舊格式（``routes``），兩條 route 有 8 個共用節點。載入時
+    ``_migrate_routes`` 把共用的那幾個複製成一段一份，因為共用的那一張會讓
+    「改 rsem 的門檻」順手改掉 patch 的 —— 跟判定卡「每條分支一張」是同一個
+    理由。行為不變（下面那支 e2e 是證明），變的是它們現在改得動而不互相干擾。
+    """
+    ebi = route_for_kind(recipe, "ebi_patch")
+    rsem = route_for_kind(recipe, "rsem")
+    assert not (set(ebi) & set(rsem)), "兩條 pipeline 不該再共用節點"
+
+    # 起手卡各自是對的那一張 Input 卡
+    assert recipe.nodes[ebi[0]].step == "load_patch"
+    assert recipe.nodes[rsem[0]].step == "load_single"
+
     # rsem 多一張 Golden Cell 卡（自己造 ref）；ebi 沒有
-    assert "golden" in rsem and "golden" not in ebi
-    assert recipe.nodes["golden"].step == "golden_cell"
-    assert recipe.nodes["golden"].params["out"] == "ref"
+    golden = [nid for nid in rsem if recipe.nodes[nid].step == "golden_cell"]
+    assert golden and not [nid for nid in ebi
+                           if recipe.nodes[nid].step == "golden_cell"]
+    assert recipe.nodes[golden[0]].params["out"] == "ref"
 
 
 def test_ingest_dispatches_by_input_type(ebi_lot, rsem_lot):

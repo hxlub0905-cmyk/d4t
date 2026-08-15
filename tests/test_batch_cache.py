@@ -95,8 +95,8 @@ def make_recipe(snr_threshold: float = 200.0, search_radius: int = 8) -> Recipe:
     }
     return Recipe(
         recipe_id="m2_batch_cache_test",
-        routes={KIND: ["load", "norm_ref", "norm", "align", "sub", "dn",
-                       "snr", "cd", "glv", "decide"]},
+        order=["load", "norm_ref", "norm", "align", "sub", "dn",
+                       "snr", "cd", "glv", "decide"],
         nodes=dict(nodes, decide=RecipeNode("decide", "adc", {
             "expr": "glv_max + (glv_max - glv_q99)", "threshold": 50.0,
             "bin_below": 0, "bin_above": 1, "label": ""})),
@@ -338,7 +338,7 @@ def _roi_then_image_recipe() -> Recipe:
                           {"source": "test", "roi": "main"}),
     }
     return Recipe(recipe_id="roi_in_cached_segment",
-                  routes={KIND: ["load", "roi", "dn", "glv", "decide"]},
+                  order=["load", "roi", "dn", "glv", "decide"],
                   nodes=dict(nodes, decide=RecipeNode("decide", "adc", {
                       "expr": "glv_mean", "threshold": 0.0,
                       "bin_below": 0, "bin_above": 1, "label": ""})))

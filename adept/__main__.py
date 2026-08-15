@@ -60,15 +60,15 @@ def _print_issues(issues) -> bool:
 
 def _cmd_validate(args: argparse.Namespace) -> int:
     import adept.core.steps  # noqa: F401
-    from adept.core.pipeline import validate
+    from adept.core.pipeline import accepted_kinds, validate
 
     recipe = _load_recipe(args.recipe)
     if recipe is None:
         return 2
-    kinds = [args.kind] if args.kind else sorted(recipe.routes)
+    kinds = [args.kind] if args.kind else accepted_kinds(recipe)
     bad = False
     for kind in kinds:
-        print(f"\n-- route: {kind} --")
+        print(f"\n-- 輸入型別：{kind} --")
         bad = _print_issues(validate(recipe, kind=kind)) or bad
     return 1 if bad else 0
 
@@ -78,7 +78,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     import adept.core.steps  # noqa: F401
     from adept.core.ingest.dataset import load_dataset
-    from adept.core.pipeline import run_batch, validate
+    from adept.core.pipeline import accepted_kinds, run_batch, validate
 
     recipe = _load_recipe(args.recipe)
     if recipe is None:
@@ -88,8 +88,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
     print(f"資料集：kind={ds.kind}，{len(ds.items)} 顆 defect")
     for w in ds.warnings:
         print(f"  △ {w}")
-    if ds.kind not in recipe.routes:
-        print(f"[錯誤] recipe 沒有 '{ds.kind}' 的 route（有：{sorted(recipe.routes)}）", file=sys.stderr)
+    accepts = accepted_kinds(recipe)
+    if ds.kind not in accepts:
+        print(f"[錯誤] 這份 recipe 的 Input 卡吃不下 '{ds.kind}'（吃得下："
+              f"{accepts or '沒有 Input 卡'}）", file=sys.stderr)
         return 2
 
     print(f"\nRecipe 健檢（{ds.kind}）：")

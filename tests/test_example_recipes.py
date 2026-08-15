@@ -34,7 +34,9 @@ from make_sample_rsem import generate as gen_rsem    # noqa: E402
 
 import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 from adept.core.ingest.dataset import load_dataset   # noqa: E402
-from adept.core.pipeline import Recipe, run_dataset, validate  # noqa: E402
+from adept.core.pipeline import (  # noqa: E402
+    Recipe, accepted_kinds, pipeline_segments, run_dataset, validate,
+)
 
 #: 每批合成資料的 defect 數（跑五份 recipe × 兩種輸入，數量要克制）。
 N_DEFECTS = 6
@@ -105,26 +107,26 @@ def test_recipe_loads_and_is_self_consistent(path):
     for nid, n in decide.items():
         assert str(n.params.get("expr", "")).strip(), (
             "節點 '%s' 的 expr 是空的" % nid)
-    assert recipe.routes, "至少要有一條 route"
-    for kind, route in recipe.routes.items():
-        assert route, "route '%s' 是空的" % kind
-        assert set(route) & set(decide), (
-            "route '%s' 走不到任何一張 Decide 卡" % kind)
-        for nid in route:
-            assert nid in recipe.nodes, (
-                "route '%s' 引用了不存在的節點 '%s'" % (kind, nid))
-    # 每個定義出來的節點都要真的被某條 route 用到（沒人用 = 誤導讀者）
-    used = {nid for route in recipe.routes.values() for nid in route}
+    # 一份 recipe 至少要有一條 pipeline，而 pipeline 是「從一張 Input 卡開始
+    # 的一段」（F9 Phase 3d：``routes`` 那個欄位退場，kind 由 Input 卡自己說）。
+    segments = pipeline_segments(recipe)
+    assert segments, "至少要有一張 Input 卡"
+    for seg in segments:
+        assert set(seg) & set(decide), "這一段走不到任何一張 Decide 卡：%s" % seg
+        for nid in seg:
+            assert nid in recipe.nodes, "order 引用了不存在的節點 '%s'" % nid
+    # 每個定義出來的節點都要真的屬於某一段（沒人用 = 誤導讀者）
+    used = {nid for seg in segments for nid in seg}
     assert used == set(recipe.nodes), (
-        "有節點沒被任何 route 使用：%s" % sorted(set(recipe.nodes) - used))
-    # JSON 原檔的 routes 順序 = 執行順序，別被 dict 化吃掉
-    assert list(raw["routes"]) == list(recipe.routes)
+        "有節點不屬於任何一條 pipeline：%s" % sorted(set(recipe.nodes) - used))
+    # JSON 原檔的 order 順序 = 執行順序，別被 dict 化吃掉
+    assert [str(x) for x in raw["order"]] == list(recipe.order)
 
 
 @pytest.mark.parametrize("path", RECIPE_FILES, ids=RECIPE_IDS)
 def test_recipe_validates_with_zero_errors_on_every_route(path):
     recipe = Recipe.load(str(path))
-    for kind in recipe.routes:
+    for kind in accepted_kinds(recipe):
         issues = validate(recipe, kind=kind)
         errors = [i for i in issues if i.level == "error"]
         assert not errors, "%s route '%s' 有 %d 個 error：%s" % (
@@ -140,7 +142,7 @@ def test_recipe_actually_runs_and_scores_every_defect(path, lots):
     """每條 route 都要在對應的合成資料上跑完，且**每一顆**都有有限的分數。"""
     recipe = Recipe.load(str(path))
     ran = 0
-    for kind in recipe.routes:
+    for kind in accepted_kinds(recipe):
         ds = lots.get(kind)
         if ds is None:                       # 未來若出現第三種輸入型別
             pytest.skip("沒有 '%s' 型別的合成資料可以測" % kind)
@@ -168,9 +170,10 @@ def test_recipe_actually_runs_and_scores_every_defect(path, lots):
 
 
 def test_every_route_kind_is_a_known_dataset_kind():
-    """route 名稱必須對得上 ingest 層真的會產出的 dataset kind。"""
+    """Input 卡吃的型別必須對得上 ingest 層真的會產出的 dataset kind。"""
     known = {"ebi_patch", "rsem", "folder"}
     for path in RECIPE_FILES:
         recipe = Recipe.load(str(path))
-        unknown = set(recipe.routes) - known
-        assert not unknown, "%s 有不認識的 route：%s" % (path.name, sorted(unknown))
+        unknown = set(accepted_kinds(recipe)) - known
+        assert not unknown, "%s 的 Input 卡吃不認識的型別：%s" % (
+            path.name, sorted(unknown))

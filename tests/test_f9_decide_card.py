@@ -40,8 +40,7 @@ def _legacy_dict(routes=None):
 
 def test_an_old_score_block_becomes_a_decide_card_at_the_end():
     rec = Recipe.from_json_dict(_legacy_dict())
-    route = rec.routes["ebi_patch"]
-    assert route[-1] == "decide", route
+    assert rec.order[-1] == "decide", rec.order
     p = rec.nodes["decide"].params
     assert rec.nodes["decide"].step == "adc"
     assert p["expr"] == "glv_max * 2"
@@ -52,11 +51,15 @@ def test_an_old_score_block_becomes_a_decide_card_at_the_end():
 
 def test_each_route_gets_its_own_decide_card():
     """共用一張的話，「改 rsem 的門檻」會順手改掉 patch 的。"""
+    from adept.core.pipeline import pipeline_segments
+
     rec = Recipe.from_json_dict(_legacy_dict(
         {"ebi_patch": ["load"], "rsem": ["load"]}))
-    tails = {k: v[-1] for k, v in rec.routes.items()}
-    assert len(set(tails.values())) == 2, tails
-    for nid in tails.values():
+    segs = pipeline_segments(rec)
+    assert len(segs) == 2, segs
+    tails = [seg[-1] for seg in segs]
+    assert len(set(tails)) == 2, tails
+    for nid in tails:
         assert rec.nodes[nid].step == "adc"
 
 
@@ -75,7 +78,7 @@ def test_a_round_trip_does_not_grow_a_second_decide_card():
     rec = Recipe.from_json_dict(_legacy_dict())
     again = Recipe.from_json_dict(rec.to_json_dict())
     assert sorted(again.nodes) == sorted(rec.nodes)
-    assert again.routes == rec.routes
+    assert again.order == rec.order
 
 
 # --------------------------------------------------------------------------- #
@@ -86,7 +89,7 @@ def test_a_recipe_with_no_decide_card_is_linted_and_scores_nothing(tmp_path):
 
     from adept.core.pipeline.engine import NO_DECIDE_CARD_NOTE, run_defect
 
-    rec = Recipe(recipe_id="silent", routes={"ebi_patch": ["load"]},
+    rec = Recipe(recipe_id="silent", order=["load"],
                  nodes={"load": RecipeNode("load", "load_patch", {})})
 
     codes = [i.code for i in validate(rec, kind="ebi_patch")]

@@ -4,6 +4,51 @@
 
 ---
 
+## F9 Phase 3d 第三批：輸入變卡片、`routes` 退場（2026-08-15）
+
+**「這條 pipeline 吃什麼資料」以前寫在 `Recipe.routes` 的鍵上** —— 一個使用者
+從來沒看過的地方，而它同時決定三件事：跑哪幾張卡、Input 卡的埠長什麼樣、
+Studio 能不能開這份檔案。現在它是**畫布上第一張卡的身分**。
+
+**一種資料型別一張 Input 卡**：`load_patch`（EBI patch，test + ref）與
+`load_single`（RSEM / 資料夾，一顆一張圖）。新的類別屬性
+`Step.accepts_kinds` 是 Input 卡跟其他卡唯一的差別。
+
+這順手殺掉一個特例：`Step.resolve_writes_for_kind(params, kind)` 整個拿掉了。
+它存在的理由是「首卡吐什麼要看 dataset kind」，而它把 kind 一路傳進埠的計算裡
+—— 於是**埠算了兩次**，編譯期知道 kind、執行期不知道。那正是 Phase 3b 踩到的
+坑（線接到 `load.single`、執行期卻吐在 `load.test` 上，整條下游安靜地不跑）。
+現在每張 Input 卡吐什麼是寫死的，`stream_ports` 不再吃 `kind` / `first`。
+
+**recipe 現在是 `nodes` + `order` + `edges`。** `order` 從每一張 Input 卡切成
+一段，kind 對到哪一段就跑哪一段。為什麼 `order` 是一份**顯式的清單**而不是靠
+`nodes` 那個 dict 的順序：JSON 物件的鍵順序不是規格保證的東西，把執行順序賭在
+它上面，換一個 parser 就換一種行為。
+
+**舊檔案兩件事一起遷移**：每條 route 的第一張卡換成對的 Input 變體，
+以及**把多條 route 共用的節點複製成一段一份**。`dual_route_basic` 的 11 個節點
+有 8 個同時屬於兩條 route —— 改一個就改了兩邊，那從來不是使用者要的（跟判定卡
+「每條分支一張」是同一個理由）。拆開之後行為完全不變（e2e 全綠），
+變的是它們現在改得動而不互相干擾。
+
+**`ui/scope.py` 不再需要一份手寫名單**（計畫書 §6.3 欠的）。`visible_steps()`
+直接問卡片自己的 `accepts_kinds`，`SUPPORTED_KINDS` 加一個字串 RSEM 就整條
+回來。以前「打開 RSEM」要記得同時改 `SUPPORTED_KINDS` 與 `HIDDEN_STEPS`。
+
+順帶一個 API 變動：`execution_order` 現在要 `registry`（它得問卡片「你是不是
+Input、你吃什麼」）。用假卡片的測試檔忘了傳的話，症狀是「這份 recipe 沒有
+Input 卡」—— 幾支測試因此補上 `accepts_kinds` 與 `registry=REG`。
+
+**驗收**：60 顆 CSV 與前一批**逐格相同**（0 個差異）；雙輸入 e2e 全綠；
+`tools/run_tests.py` **80 個檔案全綠、143 秒**。計畫書 §5g。
+
+**Phase 3d 到此結束。** 剩下的都是 Phase 4（畫布變成真的編輯器）。其中
+「刪線＝真的斷開」現在才真的做得到 —— 以前執行順序有一半藏在 `routes` 的
+相鄰對裡，畫布上那個「×」剪掉的只是 `model.edges`，剪一條由順序推出來的線
+**什麼都不會發生**。順序現在就是線本身。
+
+---
+
 ## F9 Phase 3d 第二批：把「不就地改寫」從慣例變成鎖（2026-08-15）
 
 計畫書 §5b.1 從 Phase 2 起就欠著一條：圖執行器在分岔的時候是 copy-on-fork，

@@ -124,7 +124,7 @@ def test_load_dataset_and_recipe(window, synlot):
     assert "8" in window.defect_label.text()
 
     recipe = Recipe.load(str(EXAMPLE_RECIPE))
-    assert window.model.node_order == recipe.routes["ebi_patch"]
+    assert window.model.node_order == recipe.order
     assert len(window.pipeline.node_ids()) == len(window.model.node_order)
     assert window.pipeline.node_ids() == window.model.node_order
     assert window.model.kind == "ebi_patch"
@@ -327,7 +327,7 @@ def test_save_recipe_round_trip(window, synlot, tmp_path):
     json.loads(out.read_text(encoding="utf-8"))     # 是合法 JSON
 
     loaded = Recipe.load(str(out))
-    assert loaded.routes[window.model.kind] == window.model.node_order
+    assert loaded.order == window.model.node_order
     decide = window.model.decide_nodes()[0]
     assert loaded.nodes[decide].params["expr"] \
         == window.model.nodes[decide].params["expr"]

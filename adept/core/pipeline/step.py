@@ -260,6 +260,16 @@ class Step(ABC):
     features_out: ClassVar[List[str]] = []
     requires_ref: ClassVar[bool] = False  # True → rsem 單張資料流不可用（除非上游造出 ref）
 
+    #: **這是一張 Input 卡嗎**，如果是，它吃哪幾種 ``dataset.kind``（F9 Phase 3d）。
+    #:
+    #: 空的 = 普通的卡（絕大多數）。非空 = 這張卡是一條 pipeline 的**起點**：
+    #: 引擎拿資料集的 kind 來這裡對，決定從哪一張卡開始跑
+    #: （見 :func:`recipe.execution_order`）。
+    #:
+    #: 這取代了以前 ``Recipe.routes`` 的鍵。差別是**它在畫布上** —— 以前
+    #: 「這份 recipe 吃什麼資料」寫在一個使用者從來沒看過的 JSON 欄位裡。
+    accepts_kinds: ClassVar[Tuple[str, ...]] = ()
+
     # ---- 埠（F9 Phase 2 起）------------------------------------------------
     #: 這張卡在畫布上有哪些**輸入埠**與**輸出埠**（見 :mod:`.graph`）。
     #:
@@ -300,15 +310,6 @@ class Step(ABC):
     @classmethod
     def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:
         return list(cls.writes)
-
-    @classmethod
-    def resolve_writes_for_kind(cls, params: Dict[str, Any], kind: str) -> List[str]:
-        """資料型別相依的 writes 宣告（validate 對 route 首卡使用）。
-
-        預設同 ``resolve_writes``；像 load 卡這種「寫什麼取決於資料型別」的卡
-        覆寫此方法（例：ebi_patch → test+ref，rsem → single+test）。
-        """
-        return cls.resolve_writes(params)
 
     @classmethod
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
@@ -389,6 +390,8 @@ class Step(ABC):
             "group": cls.resolve_group(),
             "help": cls.help,
             "requires_ref": cls.requires_ref,
+            #: 非空 = 這是一張 Input 卡（一條 pipeline 的起點）。
+            "accepts_kinds": list(cls.accepts_kinds),
             "params": [
                 {
                     "name": p.name, "type": p.type, "default": p.default,

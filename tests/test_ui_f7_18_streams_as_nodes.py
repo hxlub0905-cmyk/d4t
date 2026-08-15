@@ -167,7 +167,7 @@ def test_old_recipes_with_also_apply_still_load_and_mean_the_same_thing(tmp_path
     path.write_text(json.dumps(raw), encoding="utf-8")
 
     rec = Recipe.load(path)
-    route = rec.routes["ebi_patch"]
+    route = rec.order
     # 尾巴那張 ``decide`` 是舊檔案的 ``score`` 區塊遷移來的（F9 Phase 3d）
     assert route == ["load", "norm_ref", "norm", "dn", "dn_ref", "decide"]
 
@@ -185,7 +185,7 @@ def test_old_recipes_with_also_apply_still_load_and_mean_the_same_thing(tmp_path
     out = tmp_path / "again.json"
     rec.save(out)
     assert "also_apply" not in out.read_text(encoding="utf-8")
-    assert Recipe.load(out).routes["ebi_patch"] == route
+    assert Recipe.load(out).order == route
 
 
 def test_the_shipped_examples_are_already_in_the_new_shape():

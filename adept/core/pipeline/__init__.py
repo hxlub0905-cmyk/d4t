@@ -25,7 +25,10 @@ from .recipe import (
     Recipe,
     RecipeError,
     RecipeNode,
+    accepted_kinds,
     execution_order,
+    pipeline_segments,
+    route_for_kind,
     validate,
 )
 from .engine import (
@@ -48,7 +51,8 @@ __all__ = [
     "register_step", "get_step", "list_steps", "REGISTRY",
     "CATEGORY_IMAGE", "CATEGORY_ALGO", "CATEGORY_ADC",
     # recipe
-    "Recipe", "RecipeNode", "Issue",
+    "Recipe", "RecipeNode", "Issue", "accepted_kinds",
+    "pipeline_segments", "route_for_kind",
     "validate", "execution_order", "RecipeError",
     # expression
     "parse_expression", "Expression", "ExpressionError",

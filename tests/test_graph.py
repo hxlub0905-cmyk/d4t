@@ -46,6 +46,7 @@ def cards():
         label = "測試載入"
         category = CATEGORY_IMAGE
         help = "測試用：造 test 與 ref 兩張影像（像真的 load_patch）"
+        accepts_kinds = ("ebi_patch",)       # 這是 Input 卡（F9 Phase 3d）
         writes = ["test", "ref"]
 
         def run(self, ctx: Context, params) -> Context:
@@ -122,7 +123,7 @@ def _adc(node_id, expr, threshold, label=""):
 
 def _recipe(node_ids, nodes, edges=None):
     return Recipe(
-        recipe_id="g", routes={"ebi_patch": list(node_ids)}, nodes=nodes,
+        recipe_id="g", order=list(node_ids), nodes=nodes,
         edges=edges or [])
 
 

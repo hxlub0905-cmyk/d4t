@@ -363,7 +363,7 @@ def _recipe(seq):
         nodes[nid] = RecipeNode(id=nid, step=key,
                                 params=get_step(key).validate_params({}))
         order.append(nid)
-    return Recipe(recipe_id="combo", routes={"ebi_patch": order}, nodes=nodes,
+    return Recipe(recipe_id="combo", order=order, nodes=nodes,
 )
 
 
@@ -378,7 +378,7 @@ def test_a_measure_card_that_needs_a_region_nobody_defines_is_caught(qapp):
         "load": RecipeNode("load", "load_patch", {}),
         "glv": RecipeNode("glv", "glv_stats", {"roi": "nobody_defines_this"}),
     }
-    recipe = Recipe(recipe_id="r", routes={"ebi_patch": ["load", "glv"]},
+    recipe = Recipe(recipe_id="r", order=["load", "glv"],
                     nodes=nodes,
 )
     codes = [i.code for i in validate(recipe, kind="ebi_patch")
@@ -389,7 +389,7 @@ def test_a_measure_card_that_needs_a_region_nobody_defines_is_caught(qapp):
     nodes["roi"] = RecipeNode("roi", "roi_cross",
                               {"roi_out": "nobody_defines_this"})
     ok = validate(Recipe(recipe_id="r",
-                         routes={"ebi_patch": ["load", "roi", "glv"]},
+                         order=["load", "roi", "glv"],
                          nodes=nodes,
 ),
                   kind="ebi_patch")
@@ -419,7 +419,7 @@ def test_measuring_two_regions_warns_instead_of_silently_losing_one(qapp):
     }
     recipe = Recipe(
         recipe_id="two_roi",
-        routes={"ebi_patch": ["load", "roiA", "roiB", "glvA", "glvB"]},
+        order=["load", "roiA", "roiB", "glvA", "glvB"],
         nodes=nodes)
     issues = validate(recipe, kind="ebi_patch")
     collisions = [i for i in issues if i.code == "feature-collision"]

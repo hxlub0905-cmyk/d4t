@@ -34,6 +34,11 @@ __all__ = [
 
 #: Studio 目前接受的資料集型別（``dataset.kind``）。
 #: 加回 ``"rsem"`` 就會讓 RSEM 整條路線重新出現在 GUI 上。
+#:
+#: F9 Phase 3d 起這一條同時管**卡片庫裡看得到哪幾張 Input 卡** ——
+#: Input 卡自己宣告 ``accepts_kinds``，吃不到的那幾張就不該出現在庫裡
+#: （見 :func:`visible_steps`）。以前那是靠一份手寫的 ``HIDDEN_STEPS`` 名單，
+#: 於是「打開 RSEM」要記得同時改兩個地方。
 SUPPORTED_KINDS: Sequence[str] = ("ebi_patch",)
 
 #: 只有在不支援的型別下才有意義、因此暫時不列進卡片庫的 step key。
@@ -59,18 +64,34 @@ def is_supported_kind(kind: Any) -> bool:
 
 
 def visible_steps(steps: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """過掉卡片庫不該顯示的卡（吃 ``Step.describe()`` 的 dict 清單）。"""
-    return [d for d in (steps or [])
-            if str(d.get("key", "")) not in HIDDEN_STEPS]
+    """過掉卡片庫不該顯示的卡（吃 ``Step.describe()`` 的 dict 清單）。
+
+    兩道：手寫的 :data:`HIDDEN_STEPS`，以及 **Input 卡自己說吃什麼** ——
+    一張只吃 RSEM 的 Input 卡出現在只支援 patch 的 build 裡，使用者拉得出來、
+    接得完，然後跑起來每一顆都失敗。
+    """
+    out: List[Dict[str, Any]] = []
+    for d in (steps or []):
+        if str(d.get("key", "")) in HIDDEN_STEPS:
+            continue
+        kinds = [str(k) for k in (d.get("accepts_kinds") or ())]
+        if kinds and not any(is_supported_kind(k) for k in kinds):
+            continue
+        out.append(d)
+    return out
 
 
 def recipe_is_supported(info: Dict[str, Any]) -> bool:
     """範本庫要不要列出這份 recipe。
 
-    判準是「**它至少有一條看得懂的 route**」，不是「它只有看得懂的 route」——
-    ``dual_route_basic.json`` 同時定義 ebi_patch 與 rsem，載進來之後
-    ``RecipeModel.from_recipe`` 會挑 ``sorted(routes)[0]``（= ebi_patch），
-    完全跑得動，沒有理由把它藏起來。只有純 rsem 的才會被濾掉。
+    判準是「**它至少有一條看得懂的 pipeline**」，不是「它只有看得懂的」——
+    一份同時定義 patch 與 RSEM 兩條的檔案載進來之後，``RecipeModel.from_recipe``
+    會挑吃得下的那一條，完全跑得動，沒有理由把它藏起來。只有純 RSEM 的才會
+    被濾掉。
+
+    ``info["routes"]`` 現在裝的是**這份檔案的 Input 卡吃得下哪幾種資料**
+    （``welcome._read_recipe_info`` 依 ``accepts_kinds`` 問出來的），
+    不再是 JSON 裡那個 ``routes`` 欄位的鍵 —— F9 Phase 3d 之後沒有那個欄位了。
     """
     routes = [str(r) for r in (info or {}).get("routes") or ()]
     if not routes:

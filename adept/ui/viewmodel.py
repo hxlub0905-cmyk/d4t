@@ -13,7 +13,8 @@ from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from adept.core.pipeline import (
-    CATEGORY_ADC, ParamError, Recipe, RecipeNode, get_step, validate,
+    CATEGORY_ADC, ParamError, Recipe, RecipeNode, get_step,
+    pipeline_segments, validate,
 )
 
 
@@ -326,12 +327,9 @@ class RecipeModel:
             if not node.enabled:
                 continue
             step_cls = get_step(node.step)
-            if first:
-                ws = step_cls.resolve_writes_for_kind(node.params, self.kind)
-                first = False
-            else:
-                ws = step_cls.resolve_writes(node.params)
-            for w in ws:
+            # Input 卡拆成一種型別一張之後，每張卡吐什麼都是自己說了算 ——
+            # 不再需要「第一張卡問 kind」那條特例（F9 Phase 3d）。
+            for w in step_cls.resolve_writes(node.params):
                 if w not in streams:
                     streams.append(w)
         return streams
@@ -407,7 +405,7 @@ class RecipeModel:
     def to_recipe(self) -> Recipe:
         return Recipe(
             recipe_id=self.recipe_id,
-            routes={self.kind: list(self.node_order)},
+            order=list(self.node_order),
             edges=[list(e) for e in self.edges],
             nodes={nid: RecipeNode(id=nid, step=n.step, params=dict(n.params),
                                    enabled=n.enabled)
@@ -417,13 +415,36 @@ class RecipeModel:
 
     @classmethod
     def from_recipe(cls, recipe: Recipe, kind: Optional[str] = None) -> "RecipeModel":
-        k = kind or (sorted(recipe.routes)[0] if recipe.routes else "ebi_patch")
-        m = cls(kind=k)
+        """挑**一條** pipeline 來編（F9 Phase 3d：一份 recipe 可以有好幾條）。
+
+        ``kind`` 有值就挑吃那種資料的那一條；沒有值就挑第一條，而它的 kind
+        由那張 Input 卡自己說（以前是 ``sorted(recipe.routes)[0]`` —— 同樣是
+        「挑第一條」，但那時候 kind 寫在 JSON 的鍵上）。
+
+        ⚠ 只留下挑中的那一條。這一點跟以前一樣（``to_recipe`` 從來只寫
+        ``{self.kind: node_order}``），存檔會蓋掉其他條 —— Studio 是單一
+        pipeline 的編輯器，這件事沒有在這一輪改變。
+        """
+        segments = pipeline_segments(recipe)
+        chosen: List[str] = []
+        k = kind or ""
+        for seg in segments:
+            try:
+                head_cls = get_step(recipe.nodes[seg[0]].step)
+            except KeyError:                    # 認不得的卡片 → 沒有 kind
+                head_cls = None
+            kinds = list(getattr(head_cls, "accepts_kinds", ()) or ())
+            if kind and kind in kinds:
+                chosen, k = list(seg), kind
+                break
+            if not chosen:                      # 沒指定就挑第一條
+                chosen, k = list(seg), (k or (kinds[0] if kinds else ""))
+        m = cls(kind=k or "ebi_patch")
         m.recipe_id = recipe.recipe_id
         m.author = recipe.author
         m.description = recipe.description
         m.version = recipe.version
-        m.node_order = list(recipe.routes.get(k, []))
+        m.node_order = chosen
         in_route = set(m.node_order)
         m.edges = [(str(a), str(b)) for a, b in (recipe.edges or [])
                    if str(a) in in_route and str(b) in in_route]

@@ -99,7 +99,9 @@ from PySide6.QtWidgets import (
 )
 
 import adept.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
-from adept.core.pipeline import ParamError, Recipe, get_step, list_steps
+from adept.core.pipeline import (
+    ParamError, Recipe, accepted_kinds, get_step, list_steps,
+)
 from adept.core.pipeline.recipe import version_skew
 
 from .export_dialog import ExportDialog
@@ -1337,11 +1339,10 @@ class StudioWindow(QMainWindow):
                 label, category = step_cls.label, step_cls.category
             except KeyError:
                 label, category = node.step, ""
-            # writes 用 kind-aware 版本解析：patch 的 Input 節點因此吐
-            # ["test", "ref"]，畫布上就畫成兩個具名輸出埠（F7-7）。
+            # 輸出埠 = 這張卡寫出來的流名（F7-7）。Input 卡拆成一種型別一張
+            # 之後，這件事不必再問 dataset kind（F9 Phase 3d）。
             try:
-                writes = list(step_cls.resolve_writes_for_kind(
-                    node.params, self.model.kind))
+                writes = list(step_cls.resolve_writes(node.params))
             except Exception:              # noqa: BLE001 — 顯示用，壞了就空著
                 writes = []
             try:
@@ -1596,7 +1597,7 @@ class StudioWindow(QMainWindow):
             try:
                 step_cls = get_step(key)
                 params = step_cls.validate_params({})
-                writes = step_cls.resolve_writes_for_kind(params, self.model.kind)
+                writes = step_cls.resolve_writes(params)
             except Exception:              # noqa: BLE001 — 顯示用
                 continue
             if stream in writes and step_cls.label:
@@ -2063,7 +2064,8 @@ class StudioWindow(QMainWindow):
             return False
         kind = None
         ds_kind = str(getattr(self.dataset, "kind", "")) if self.dataset else ""
-        if ds_kind and ds_kind in recipe.routes:
+        accepts = accepted_kinds(recipe)
+        if ds_kind and ds_kind in accepts:
             kind = ds_kind
         self._apply_model(RecipeModel.from_recipe(recipe, kind=kind))
         self.recipe_path = path
@@ -2075,12 +2077,12 @@ class StudioWindow(QMainWindow):
         if skew:
             self._status(skew, "error")
         else:
-            self._status("Loaded recipe “%s” (%d steps, route %s)"
+            self._status("Loaded recipe “%s” (%d steps, input %s)"
                          % (self.model.recipe_id, n, self.model.kind))
-        if ds_kind and ds_kind not in recipe.routes:
-            self._status("Loaded recipe “%s”, but it has no '%s' route — "
-                         "preview and trial runs will fail."
-                         % (self.model.recipe_id, ds_kind))
+        if ds_kind and ds_kind not in accepts:
+            self._status("Loaded recipe “%s”, but its input card does not take "
+                         "'%s' data — preview and trial runs will fail."
+                         % (self.model.recipe_id, ds_kind), "error")
         self.refresh_preview(sync=sync, force=False)
         return True
 

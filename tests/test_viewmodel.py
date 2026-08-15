@@ -61,7 +61,7 @@ def test_roundtrip_with_example_recipe():
     m = RecipeModel.from_recipe(recipe)
     assert m.kind == "ebi_patch" and not m.dirty
     out = m.to_recipe()
-    assert out.routes["ebi_patch"] == recipe.routes["ebi_patch"]
+    assert out.order == recipe.order
     issues = m.validate()
     assert not [i for i in issues if i.level == "error"]
 

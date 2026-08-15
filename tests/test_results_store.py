@@ -129,7 +129,7 @@ def test_save_load_roundtrip_120_rows(tmp_path):
 def test_save_run_accepts_recipe_object(tmp_path):
     recipe = Recipe(
         recipe_id="t_obj",
-        routes={"ebi_patch": ["load"]},
+        order=["load"],
         nodes={"load": RecipeNode(id="load", step="load_patch", params={}),
                "d": RecipeNode(id="d", step="adc", params={
                    "expr": "snr_max", "threshold": 3.0,

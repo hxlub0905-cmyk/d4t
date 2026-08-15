@@ -47,6 +47,9 @@ def dummy_steps():
         label = "測試載入"
         category = CATEGORY_IMAGE
         help = "測試用：從 meta['_defect_item'] 假裝載入 test/ref"
+        # 這是一張 Input 卡（F9 Phase 3d）：引擎靠 accepts_kinds 決定
+        # 「這批資料要從哪一張卡開始跑」，取代了以前 routes 的鍵。
+        accepts_kinds = ("ebi_patch",)
         writes = ["test", "ref"]
 
         def run(self, ctx: Context, params) -> Context:
@@ -127,7 +130,7 @@ def make_recipe(route=("nload", "nalgo"), nodes=None, expr="snr_max * 2",
         route.append("ndecide")
     return Recipe(
         recipe_id="engine_test",
-        routes={"ebi_patch": route},
+        order=route,
         nodes=nodes,
     )
 

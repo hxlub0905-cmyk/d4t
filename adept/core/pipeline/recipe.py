@@ -44,6 +44,7 @@ from .step import CATEGORY_ADC, ParamError, Step, REGISTRY
 __all__ = [
     "RecipeError", "RecipeNode", "Recipe",
     "Issue", "execution_order", "validate", "edge_pair",
+    "pipeline_segments", "route_for_kind", "accepted_kinds",
 ]
 
 
@@ -140,6 +141,133 @@ def _migrate_score_block(nodes: Dict[str, "RecipeNode"],
             n += 1
         nodes[nid] = RecipeNode(id=nid, step="adc", params=dict(params))
         routes[k] = list(routes[k]) + [nid]
+
+
+# ---------------------------------------------------------------------------
+# 舊 recipe 相容遷移（F9 Phase 3d）：``routes`` → 一份 ``order`` + Input 卡
+# ---------------------------------------------------------------------------
+#: 舊的 ``load_patch`` 一張卡吃所有型別；現在一種型別一張卡。這張表回答
+#: 「這條 route 的第一張卡應該是哪一個變體」。
+_INPUT_FOR_KIND = {"ebi_patch": "load_patch",
+                   "rsem": "load_single",
+                   "folder": "load_single"}
+
+#: 舊檔案裡可能出現的 Input 卡 key（遷移時才需要換變體）。
+_LEGACY_INPUT_STEPS = ("load_patch", "load_single")
+
+
+def _migrate_routes(nodes: Dict[str, "RecipeNode"],
+                    routes: Dict[str, List[str]],
+                    edges: List[List[str]]) -> List[str]:
+    """``{kind: [ids]}`` → 一份 ``order``；kind 搬到第一張卡的身分上。
+
+    兩件事在這裡發生：
+
+    1. **每條 route 的第一張卡換成對的 Input 變體。** 舊的 ``load_patch``
+       一張卡吃所有型別（``channels="auto"`` 在執行期看資料才決定），
+       現在 ebi_patch 與 rsem 各有自己的卡 —— 因為「這條 pipeline 吃什麼」
+       要在畫布上看得見，而不是藏在一個 JSON 的鍵裡。
+    2. **多條 route 共用的節點會被複製成一份一條。** 舊模型裡
+       ``dual_route_basic`` 的 11 個節點有 8 個同時屬於兩條 route，改一個就改
+       了兩邊 —— 那從來不是使用者要的（跟判定卡「每條分支一張」是同一個理由）。
+       複製出來的 id 是 ``<原id>__<kind>``，該 route 內的 edges 一起改名。
+
+    回傳新的 ``order``：各 route 依序接起來（route 名排序，結果才穩定）。
+    """
+    order: List[str] = []
+    used: Set[str] = set()
+    for kind in sorted(routes):
+        route = list(routes.get(kind) or [])
+        if not route:
+            continue
+        rename: Dict[str, str] = {}
+        for nid in route:
+            node = nodes.get(nid)
+            if node is None:
+                order.append(nid)          # 壞掉的參照留著讓 lint 講
+                continue
+            if nid in used:                # 前一條 route 已經用掉這個節點
+                new_id = _fresh_id(nodes, "%s__%s" % (nid, kind))
+                nodes[new_id] = RecipeNode(id=new_id, step=node.step,
+                                           params=dict(node.params),
+                                           enabled=node.enabled)
+                rename[nid] = new_id
+                nid, node = new_id, nodes[new_id]
+            used.add(nid)
+            order.append(nid)
+        # 第一張卡換成這個 kind 的 Input 變體
+        head = nodes.get(order[len(order) - len(route)]) if route else None
+        if head is not None and head.step in _LEGACY_INPUT_STEPS:
+            head.step = _INPUT_FOR_KIND.get(kind, head.step)
+        # 這條 route 內被改名的節點，edges 也要跟著改
+        for e in edges:
+            if len(e) == 2:
+                a, b = 0, 1
+            else:
+                a, b = 0, 2
+            if e[a] in rename and e[b] in rename:
+                e[a], e[b] = rename[e[a]], rename[e[b]]
+    return order
+
+
+def accepted_kinds(recipe: "Recipe",
+                   registry: Optional[Dict[str, Type[Step]]] = None
+                   ) -> List[str]:
+    """這份 recipe 吃得下哪幾種 ``dataset.kind``（依 Input 卡問出來，排序）。
+
+    取代了以前的 ``sorted(recipe.routes)`` —— 同一個問題，但答案現在來自
+    畫布上看得到的那幾張卡，而不是一個 JSON 欄位的鍵。
+    """
+    if registry is None:
+        registry = REGISTRY
+    out: Set[str] = set()
+    for seg in pipeline_segments(recipe, registry):
+        step_cls = registry.get(recipe.nodes[seg[0]].step)
+        out.update(str(k) for k in (getattr(step_cls, "accepts_kinds", ()) or ()))
+    return sorted(out)
+
+
+def pipeline_segments(recipe: "Recipe",
+                      registry: Optional[Dict[str, Type[Step]]] = None
+                      ) -> List[List[str]]:
+    """把 ``order`` 切成一段一段 —— **每一段從一張 Input 卡開始**。
+
+    一份 recipe 可以放好幾條 pipeline（例：patch 一條、RSEM 一條）。它們在
+    ``order`` 裡是接在一起的，切點就是「下一張 Input 卡」（``accepts_kinds``
+    非空的卡）。第一張 Input 卡之前的節點沒有起點，不屬於任何一段
+    —— ``validate`` 會用 ``no-input`` 講出來。
+    """
+    if registry is None:
+        registry = REGISTRY
+    out: List[List[str]] = []
+    cur: Optional[List[str]] = None
+    for nid in recipe.order:
+        node = recipe.nodes.get(nid)
+        step_cls = registry.get(node.step) if node is not None else None
+        if getattr(step_cls, "accepts_kinds", ()):
+            cur = [nid]
+            out.append(cur)
+        elif cur is not None:
+            cur.append(nid)
+    return out
+
+
+def route_for_kind(recipe: "Recipe", kind: str,
+                   registry: Optional[Dict[str, Type[Step]]] = None
+                   ) -> List[str]:
+    """``kind`` 這種資料要跑哪一段（找不到 → :class:`RecipeError`）。"""
+    if registry is None:
+        registry = REGISTRY
+    accepted: List[str] = []
+    for seg in pipeline_segments(recipe, registry):
+        step_cls = registry.get(recipe.nodes[seg[0]].step)
+        kinds = list(getattr(step_cls, "accepts_kinds", ()) or ())
+        accepted.extend(kinds)
+        if kind in kinds:
+            return list(seg)
+    raise RecipeError(
+        "this recipe has no input card that accepts '%s' data; it accepts: %s"
+        % (kind, sorted(set(accepted)) or "nothing (there is no input card)"))
 
 
 # ---------------------------------------------------------------------------
@@ -354,7 +482,14 @@ def _migrate_merged_cards(nodes: Dict[str, "RecipeNode"]) -> None:
 class Recipe:
     """一份完整 recipe（單一 JSON 檔可互傳）。"""
     recipe_id: str
-    routes: Dict[str, List[str]]      # dataset kind → 依序的節點 id（v1 線性）
+    #: 節點的宣告順序。**一份清單，不再依 dataset kind 分開**（F9 Phase 3d）——
+    #: 它從每一張 Input 卡切成一段一段（見 :func:`pipeline_segments`），
+    #: 「這一段吃什麼資料」由那張 Input 卡的 ``accepts_kinds`` 說了算。
+    #:
+    #: 為什麼是一份**顯式的清單**而不是靠 ``nodes`` 這個 dict 的順序：
+    #: JSON 物件的鍵順序不是規格保證的東西，把執行順序賭在它上面，
+    #: 換一個 parser 就換一種行為。
+    order: List[str]
     nodes: Dict[str, RecipeNode]
     version: int = 1
     author: str = ""
@@ -381,7 +516,7 @@ class Recipe:
             "app_version": _app_version(),
             "author": self.author,
             "description": self.description,
-            "routes": {k: list(v) for k, v in self.routes.items()},
+            "order": list(self.order),
             "nodes": {
                 nid: {
                     "step": n.step,
@@ -398,7 +533,7 @@ class Recipe:
         if not isinstance(d, dict):
             raise RecipeError(f"the top level of a recipe JSON must be an object "
                               f"(dict), got {type(d).__name__}")
-        missing = [k for k in ("recipe_id", "routes", "nodes") if k not in d]
+        missing = [k for k in ("recipe_id", "nodes") if k not in d]
         if missing:
             raise RecipeError(f"recipe JSON is missing required fields: {missing}")
 
@@ -413,7 +548,16 @@ class Recipe:
                 enabled=bool(nd.get("enabled", True)),
             )
 
-        routes ={str(k): [str(x) for x in v] for k, v in dict(d["routes"]).items()}
+        # 舊檔案有 ``routes``（dataset kind → 節點清單），新檔案有 ``order``
+        # （一份清單，起點由 Input 卡自己說）。兩種都讀得進來 —— 見
+        # :func:`_migrate_routes`。
+        routes = {str(k): [str(x) for x in v]
+                  for k, v in dict(d.get("routes") or {}).items()}
+        order = [str(x) for x in (d.get("order") or [])]
+        if not routes and not order:
+            raise RecipeError(
+                "recipe JSON needs either 'order' (the step order) or the "
+                "older 'routes' field")
 
         # 一條線有兩種寫法（F9 Phase 3a 起）：
         #   ["a", "b"]                          兩端的預設埠（既有檔案都是這種）
@@ -472,9 +616,14 @@ class Recipe:
         if isinstance(sd, dict) and "expr" in sd:
             _migrate_score_block(nodes, routes, sd)
 
+        # ``routes`` 退場（F9 Phase 3d）：kind 從 JSON 的一個鍵變成畫布上第一
+        # 張卡的身分。**放在最後** —— 前面每一道遷移都還在對 routes 動手。
+        if routes:
+            order = _migrate_routes(nodes, routes, edges)
+
         return cls(
             recipe_id=str(d["recipe_id"]),
-            routes=routes,
+            order=order,
             nodes=nodes,
             app_version=str(d.get("app_version", "") or ""),
             version=int(d.get("version", 1)),
@@ -518,17 +667,17 @@ def edge_pair(e: Any) -> Optional[Tuple[str, str]]:
     return None
 
 
-def execution_order(recipe: Recipe, kind: str) -> List[str]:
-    """回傳 ``kind`` 這條 route 的節點執行順序。
+def execution_order(recipe: Recipe, kind: str,
+                    registry: Optional[Dict[str, Type[Step]]] = None
+                    ) -> List[str]:
+    """回傳 ``kind`` 這種資料的節點執行順序。
 
-    邊 = route 相鄰對（load→norm→align…）∪ 顯式 ``edges``（兩端都在該
-    route 內才算）。循環或未知 kind → :class:`RecipeError`。
+    要跑哪幾張卡 = 從**吃這種資料的那張 Input 卡**開始的那一段
+    （:func:`route_for_kind`）。邊 = 段內相鄰對（load→norm→align…）∪ 顯式
+    ``edges``（兩端都在段內才算）。循環或沒有對應的 Input 卡 →
+    :class:`RecipeError`。
     """
-    if kind not in recipe.routes:
-        raise RecipeError(
-            f"unknown input-type route '{kind}'; this recipe only defines: "
-            f"{sorted(recipe.routes)}")
-    route = list(recipe.routes[kind])
+    route = route_for_kind(recipe, kind, registry)
     if not route:
         return []
     pos = {nid: i for i, nid in enumerate(route)}
@@ -615,19 +764,40 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
         registry = REGISTRY
     issues: List[Issue] = []
 
-    # ---- 要檢查哪些 route ----
+    # ---- 要檢查哪幾條 pipeline ----
+    # 一份 recipe 可以有好幾條（每張 Input 卡起一條）。``kind`` 有值 = 只看
+    # 吃那種資料的那一條；沒有值 = 每一條都看。
+    segments = pipeline_segments(recipe, registry)
+    routes: Dict[str, List[str]] = {}
+    for seg in segments:
+        step_cls = registry.get(recipe.nodes[seg[0]].step)
+        for k in (getattr(step_cls, "accepts_kinds", ()) or ()):
+            routes.setdefault(str(k), list(seg))
     if kind is not None:
-        if kind not in recipe.routes:
+        if kind not in routes:
+            have = (str(sorted(routes)) if routes
+                    else "nothing - there is no input card on the canvas")
             issues.append(Issue(
                 code="unknown-route", level="error", node_id=None,
-                title=f"Unknown input-type route '{kind}'",
-                detail=f"this recipe only defines routes: "
-                       f"{sorted(recipe.routes)}"))
+                title=f"No input card accepts '{kind}' data",
+                detail=f"this recipe's input cards accept: {have}"))
             kinds: List[str] = []
         else:
             kinds = [kind]
     else:
-        kinds = list(recipe.routes)
+        kinds = list(routes)
+
+    # 第一張 Input 卡**之前**的節點不屬於任何一條 pipeline —— 它們不會跑，
+    # 而畫面上看起來跟其他卡一模一樣。
+    claimed = {nid for seg in segments for nid in seg}
+    orphans = [nid for nid in recipe.order if nid not in claimed]
+    if orphans:
+        issues.append(Issue(
+            code="no-input", level="error", node_id=orphans[0],
+            title="These steps are not connected to any input",
+            detail=(f"{orphans} come before the first input card, so nothing "
+                    f"ever feeds them and they never run. Put an input card "
+                    f"(the card that loads the images) at the start.")))
 
     # ---- 每個節點：step 存在？參數合法？----
     # 認不得的參數 / 認不得的卡片，最常見的原因是**這台的程式比較舊**。
@@ -661,7 +831,7 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     #: route → 這條路上有沒有踩到判定卡（見 route 迴圈末尾的 no-decision）。
     is_decided: Dict[str, bool] = {}
     for k in kinds:
-        route = recipe.routes[k]
+        route = routes[k]
         for nid in route:
             if nid not in recipe.nodes:
                 issues.append(Issue(
@@ -671,7 +841,7 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                     detail=f"nodes has no '{nid}'; defined steps: "
                            f"{sorted(recipe.nodes)}"))
         try:
-            order = execution_order(recipe, k)
+            order = execution_order(recipe, k, registry)
         except RecipeError as e:
             issues.append(Issue(
                 code="cycle", level="error", node_id=None,
@@ -700,7 +870,7 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             if first:
                 # 第一張卡（load）：reads / requires_ref 不檢查；
                 # writes 用 kind-aware 宣告（load 卡依資料型別決定會有哪些流）
-                avail |= set(step_cls.resolve_writes_for_kind(p, k))
+                avail |= set(step_cls.resolve_writes(p))
                 for f in step_cls.resolve_features(p):
                     feat_owner.setdefault(f, nid)
                 feats |= set(step_cls.resolve_features(p))

@@ -173,10 +173,15 @@ def read_recipe_info(path: Any) -> Dict[str, Any]:
     info["author"] = str(d.get("author") or "")
     info["version"] = d.get("version")
 
+    # 「這份 recipe 吃什麼資料」現在由 Input 卡說（F9 Phase 3d）——
+    # 以前是 JSON 裡 ``routes`` 那個欄位的鍵，而那個欄位已經沒有了。
+    # 舊檔案仍讀得懂（磁碟上兩種都會有一段時間）。
     routes = d.get("routes") or {}
-    if isinstance(routes, dict):
+    if isinstance(routes, dict) and routes:
         info["routes"] = [str(k) for k in routes]
         info["route_steps"] = {str(k): len(list(v or [])) for k, v in routes.items()}
+    else:
+        info["routes"], info["route_steps"] = _kinds_from_input_cards(d)
     info["n_steps"] = len(dict(d.get("nodes") or {}))
 
     # 判定是一張卡（F9 Phase 3d）。舊檔案的 ``score`` 區塊仍讀得懂 ——
@@ -193,6 +198,37 @@ def read_recipe_info(path: Any) -> Dict[str, Any]:
             info["expr"] = str(score.get("expr") or "")
             info["threshold"] = _opt_float(score.get("threshold"))
     return info
+
+
+def _kinds_from_input_cards(d: Dict[str, Any]):
+    """從 ``nodes`` 問出「哪幾張 Input 卡、各起一段多長」。
+
+    這裡**不 import 卡片庫**（這個對話框在掃磁碟上的檔案，可能包含裝不起來
+    或版本比較新的卡）—— 認得的問 registry，認不得的就跳過。
+    """
+    from adept.core.pipeline import get_step
+
+    order = [str(x) for x in (d.get("order") or [])]
+    nodes = dict(d.get("nodes") or {})
+    if not order:
+        order = [str(k) for k in nodes]
+    heads = []
+    for i, nid in enumerate(order):
+        step = str((nodes.get(nid) or {}).get("step", ""))
+        try:
+            kinds = list(getattr(get_step(step), "accepts_kinds", ()) or ())
+        except KeyError:
+            kinds = []
+        if kinds:
+            heads.append((i, kinds))
+    kinds_out, steps_out = [], {}
+    for j, (i, kinds) in enumerate(heads):
+        stop = heads[j + 1][0] if j + 1 < len(heads) else len(order)
+        for k in kinds:
+            if k not in kinds_out:
+                kinds_out.append(str(k))
+            steps_out[str(k)] = stop - i
+    return kinds_out, steps_out
 
 
 def _opt_float(value: Any) -> Optional[float]:

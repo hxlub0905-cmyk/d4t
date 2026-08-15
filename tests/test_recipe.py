@@ -30,6 +30,9 @@ class TLoadPair(Step):
     label = "測試載入（test+ref）"
     category = CATEGORY_IMAGE
     help = "測試用：寫入 test 與 ref 影像流"
+    # Input 卡（F9 Phase 3d）：``accepts_kinds`` 取代了 routes 的鍵 ——
+    # 「這條 pipeline 吃什麼資料」由起手那張卡自己說。
+    accepts_kinds = ("ebi_patch",)
     writes = ["test", "ref"]
 
     def run(self, ctx, params):
@@ -41,6 +44,7 @@ class TLoadSingle(Step):
     label = "測試載入（單張）"
     category = CATEGORY_IMAGE
     help = "測試用：只寫入 test 影像流"
+    accepts_kinds = ("rsem",)
     writes = ["test"]
 
     def run(self, ctx, params):
@@ -104,7 +108,7 @@ def decide_node(node_id="decide", expr="1", threshold=0.0):
 def make_recipe(**kw):
     base = dict(
         recipe_id="unit_test",
-        routes={"ebi_patch": ["load", "sub", "snr", "decide"]},
+        order=["load", "sub", "snr", "decide"],
         nodes={
             "load": RecipeNode("load", "t_load_pair", {}),
             "sub": RecipeNode("sub", "t_subtract", {}),
@@ -176,31 +180,31 @@ def test_save_load_atomic(tmp_path):
 # ---------------------------------------------------------------------------
 def test_execution_order_chain():
     r = make_recipe()
-    assert execution_order(r, "ebi_patch") == ["load", "sub", "snr", "decide"]
+    assert execution_order(r, "ebi_patch", REG) == ["load", "sub", "snr", "decide"]
 
 
 def test_execution_order_extra_edge_consistent():
     # 額外邊與鏈一致 → 順序不變
     r = make_recipe(edges=[["load", "snr"]])
-    assert execution_order(r, "ebi_patch") == ["load", "sub", "snr", "decide"]
+    assert execution_order(r, "ebi_patch", REG) == ["load", "sub", "snr", "decide"]
 
 
 def test_execution_order_edge_outside_route_ignored():
     # 邊的端點不在該 route 內 → 不影響
     r = make_recipe(edges=[["ghost", "snr"], ["load", "ghost"]])
-    assert execution_order(r, "ebi_patch") == ["load", "sub", "snr", "decide"]
+    assert execution_order(r, "ebi_patch", REG) == ["load", "sub", "snr", "decide"]
 
 
 def test_execution_order_cycle_raises():
     r = make_recipe(edges=[["snr", "load"]])
     with pytest.raises(RecipeError):
-        execution_order(r, "ebi_patch")
+        execution_order(r, "ebi_patch", REG)
 
 
 def test_execution_order_unknown_kind_raises():
     r = make_recipe()
     with pytest.raises(RecipeError):
-        execution_order(r, "no_such_kind")
+        execution_order(r, "no_such_kind", REG)
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +241,7 @@ def test_validate_bad_param_unknown_name():
 
 
 def test_validate_unknown_node_in_route():
-    r = make_recipe(routes={"ebi_patch": ["load", "ghost", "snr"]})
+    r = make_recipe(order=["load", "ghost", "snr"])
     r.nodes.pop("sub")
     issues = validate(r, registry=REG)
     assert "unknown-node" in codes(issues)
@@ -257,7 +261,7 @@ def test_validate_cycle():
 
 def test_validate_missing_image():
     # snr 讀 diff，但沒有 subtract 卡產 diff
-    r = make_recipe(routes={"ebi_patch": ["load", "snr"]})
+    r = make_recipe(order=["load", "snr"])
     issues = validate(r, registry=REG)
     assert "missing-image" in codes(issues)
     bad = [i for i in issues if i.code == "missing-image"][0]
@@ -267,7 +271,7 @@ def test_validate_missing_image():
 
 def test_validate_first_node_reads_unchecked():
     # 第一張啟用卡（load 卡）的 reads 不檢查（它從 dataset 拿資料）
-    r = make_recipe(routes={"ebi_patch": ["sub"]},
+    r = make_recipe(order=["sub"],
                     nodes={"sub": RecipeNode("sub", "t_subtract", {})})
     issues = validate(r, registry=REG)
     assert "missing-image" not in codes(issues)
@@ -275,7 +279,7 @@ def test_validate_first_node_reads_unchecked():
 
 def test_validate_requires_ref_on_rsem():
     r = make_recipe(
-        routes={"rsem": ["load1", "align"]},
+        order=["load1", "align"],
         nodes={
             "load1": RecipeNode("load1", "t_load_single", {}),
             "align": RecipeNode("align", "t_needs_ref", {}),
@@ -291,7 +295,7 @@ def test_validate_requires_ref_on_rsem():
 
 def test_validate_requires_ref_not_flagged_on_ebi_patch():
     r = make_recipe(
-        routes={"ebi_patch": ["load", "align"]},
+        order=["load", "align"],
         nodes={
             "load": RecipeNode("load", "t_load_pair", {}),
             "align": RecipeNode("align", "t_needs_ref", {}),
@@ -336,7 +340,7 @@ def test_a_route_with_no_decide_card_says_so():
 
     是 warning 不是 error：只想拿特徵 CSV 出去自己算的人是合法的用法。
     """
-    r = make_recipe(routes={"ebi_patch": ["load", "sub", "snr"]})
+    r = make_recipe(order=["load", "sub", "snr"])
     issues = validate(r, registry=REG)
     assert "no-decision" in codes(issues)
     assert [i for i in issues if i.code == "no-decision"][0].level == "warning"
@@ -353,12 +357,21 @@ def test_validate_disabled_node_skipped_in_simulation():
 
 
 def test_validate_collects_multiple_issues_at_once():
-    r = make_recipe(routes={"ebi_patch": ["load", "ghost", "snr", "decide"]})
-    r.nodes.pop("sub")  # noqa: E501
-    r.nodes["load"] = RecipeNode("load", "no_such_step", {})
+    r = make_recipe(order=["load", "ghost", "sub", "snr", "decide"])
+    # ``load`` 保持是一張認得的 Input 卡 —— 它壞掉的話整份 recipe 連「從哪裡
+    # 開始」都答不出來，其他問題就沒有機會被檢查到（那正是 no-input 在講的）。
+    r.nodes["sub"] = RecipeNode("sub", "no_such_step", {})
     r.nodes["decide"].params["expr"] = "1 +"
     got = set(codes(validate(r, registry=REG)))
     assert {"unknown-node", "unknown-step", "not-configured"} <= got
+
+
+def test_steps_before_the_first_input_card_are_flagged():
+    """第一張 Input 卡**之前**的卡不屬於任何一條 pipeline —— 它們不會跑，
+    而畫面上看起來跟其他卡一模一樣（F9 Phase 3d）。"""
+    r = make_recipe(order=["snr", "load", "sub", "decide"])
+    got = [i for i in validate(r, registry=REG) if i.code == "no-input"]
+    assert got and got[0].node_id == "snr"
 
 
 # --------------------------------------------------------------------------- #
@@ -371,7 +384,7 @@ def test_a_saved_recipe_records_which_build_wrote_it():
     rec = _mini_recipe() if "_mini_recipe" in globals() else None
     if rec is None:                     # 這一支測試檔的既有 helper 名稱不一定
         from adept.core.pipeline.recipe import Recipe, RecipeNode
-        rec = Recipe(recipe_id="v", routes={"ebi_patch": ["a"]},
+        rec = Recipe(recipe_id="v", order=["a"],
                      nodes={"a": RecipeNode("a", "load_patch", {})})
     assert rec.to_json_dict()["app_version"] == __version__
 
@@ -387,7 +400,7 @@ def test_an_older_build_says_the_program_is_old_not_the_file_broken():
                                             validate, version_skew)
 
     rec = Recipe(
-        recipe_id="future", routes={"ebi_patch": ["load", "x"]},
+        recipe_id="future", order=["load", "x"],
         nodes={"load": RecipeNode("load", "load_patch", {}),
                "x": RecipeNode("x", "normalize",
                                {"streams": "test", "brand_new_knob": 3})},
@@ -451,7 +464,7 @@ def test_a_recipe_round_trip_does_not_pick_up_the_old_subtract_default():
     from adept.core.pipeline.recipe import Recipe, RecipeNode
 
     r = Recipe(recipe_id="in-memory",
-               routes={"ebi_patch": ["load", "sub"]},
+               order=["load", "sub"],
                nodes={"load": RecipeNode("load", "load_patch", {}),
                       "sub": RecipeNode("sub", "subtract", {"a": "test"})})
     assert "b" not in r.nodes["sub"].params

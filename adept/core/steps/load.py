@@ -1,13 +1,25 @@
-# ADEPT step-card library — authored 2026-07-28 (M1).
-"""load_patch — 載入影像卡。
+# ADEPT step-card library — authored 2026-07-28 (M1; F9 Phase 3d 拆成兩張卡).
+"""Input 卡：把這顆 defect 的影像載進 pipeline。
 
-從 ``ctx.meta["_defect_item"]``（ingest 層的 DefectItem，由引擎放入）讀出
-這顆 defect 的各 channel 像素並寫進 ``ctx.images``。
+**一種資料型別一張卡**（F9 Phase 3d）
+--------------------------------------
+以前只有一張 ``load_patch``，它同時吃 EBI patch（test + ref 兩頁）與 RSEM
+單張，靠 ``channels="auto"`` 在**執行期**看資料長什麼樣才決定寫出哪幾條流。
+那個設計有兩個代價：
 
-writes 說明：類別層級靜態宣告 ``writes=["test"]`` 只是保守下限——實際會寫哪些
-影像流取決於 ``channels`` 參數與資料本身（ebi_patch 通常是 test+ref；rsem 單張
-會寫 single 並同時鏡射一份到 test），由 ``resolve_writes`` 在拿到參數後盡力
-解析，"auto" 模式下仍以執行期為準。
+1. **它吐什麼要等跑起來才知道。** 而畫布上的埠、lint 的「這條流誰產的」、
+   快取的簽章都得在跑之前就答得出來 —— 所以 ``Step`` 一度需要一個
+   ``resolve_writes_for_kind(params, kind)`` 的特例，把 dataset kind 一路傳到
+   埠的計算裡。埠因此算了兩次而且兩邊答案可能不一樣（計畫書 §5d.3 那個坑：
+   線接到 ``load.single``、執行期卻吐在 ``load.test`` 上，整條下游安靜地不跑）。
+2. **使用者看不出這份 recipe 是給什麼資料用的。** 那件事以前寫在 ``routes``
+   的鍵上，而 ``routes`` 不在畫布上。
+
+拆成兩張卡之後兩件事都消失：每張卡吐什麼是**寫死的**（不必問 kind），
+而「這條 pipeline 吃什麼」就是圖上第一張卡的名字 —— 看得到、選得掉、換得掉。
+
+``accepts_kinds`` 是 Input 卡跟其他卡唯一的差別：引擎靠它決定「這批資料要從
+哪一張卡開始跑」（見 ``recipe.execution_order``）。
 """
 from __future__ import annotations
 
@@ -23,46 +35,35 @@ from ._util import ensure_gray, to_uint8
 _PREFERRED_ORDER = ("test", "ref", "single")
 
 
-@register_step
-class LoadPatchStep(Step):
-    """把 DefectItem 的影像載入成 Context 影像流（一律轉成 uint8 灰階）。"""
+class _LoadStep(Step):
+    """兩張 Input 卡共用的實作（**不註冊**，卡片庫裡看不到它）。
 
-    key = "load_patch"
-    label = "Load images"
+    子類別只要說三件事：``key`` / ``label`` / ``accepts_kinds``，
+    以及 ``auto_writes`` —— ``channels="auto"`` 時**一定**會有的那幾條流。
+    """
+
     category = CATEGORY_IMAGE
     group = GROUP_INPUT
-    help = ("Load this defect's images (test/ref, or a single image) into the "
-            "pipeline, always converted to 8-bit grayscale.")
     params = [
         ParamSpec(
             name="channels", type="str", default="auto",
-            help=("Which images to load: auto = whatever is available "
-                  "(a single RSEM image is also exposed as test); or a comma "
-                  "separated list such as test,ref."),
+            help=("Which images to load: auto = the ones this input normally "
+                  "has; or a comma separated list such as test,ref."),
         ),
     ]
     reads: List[str] = []
-    writes = ["test"]            # 保守靜態宣告；實際流以執行期解析為準（見模組 docstring）
     features_out = ["n_channels"]
+
+    #: ``channels="auto"`` 會寫出哪幾條影像流（**不看資料、不看 kind**）。
+    auto_writes: List[str] = []
 
     @classmethod
     def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:
         raw = str(params.get("channels", "auto")).strip()
         if raw.lower() == "auto":
-            return list(cls.writes)     # auto：靜態下限，實際以執行期為準
-        return [tok.strip() for tok in raw.split(",") if tok.strip()] or list(cls.writes)
-
-    @classmethod
-    def resolve_writes_for_kind(cls, params: Dict[str, Any], kind: str) -> List[str]:
-        """validate 用的 kind-aware 宣告：ebi_patch → test+ref；rsem → single+test。"""
-        raw = str(params.get("channels", "auto")).strip()
-        if raw.lower() != "auto":
-            return cls.resolve_writes(params)
-        if kind == "ebi_patch":
-            return ["test", "ref"]
-        if kind == "rsem":
-            return ["single", "test"]   # single 會鏡射為 test（見 run()）
-        return list(cls.writes)
+            return list(cls.auto_writes)
+        return ([tok.strip() for tok in raw.split(",") if tok.strip()]
+                or list(cls.auto_writes))
 
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
@@ -101,8 +102,8 @@ class LoadPatchStep(Step):
             ctx.set_image(ch, arr_u8)
             loaded.append(ch)
 
-        # rsem / folder 單張資料流：把 single 同時鏡射為 test，讓下游卡片
-        # 用預設參數（source="test"）就能直接吃到影像。
+        # 單張資料流：把 single 同時鏡射為 test，讓下游卡片用預設參數
+        # （source="test"）就能直接吃到影像。
         if "single" in loaded and "test" not in ctx.images:
             ctx.set_image("test", ctx.images["single"])
             note = (f"single-image input (kind={kind}): 'single' is also "
@@ -139,3 +140,32 @@ class LoadPatchStep(Step):
 
         ctx.add_feature("n_channels", float(len(loaded)))
         return ctx
+
+
+@register_step
+class LoadPatchStep(_LoadStep):
+    """EBI patch：一顆 defect 兩頁，第一頁 test、第二頁 ref。"""
+
+    key = "load_patch"
+    label = "Load patch pair"
+    help = ("Start here for EBI patch data: load this defect's test and "
+            "reference images, always converted to 8-bit grayscale.")
+    accepts_kinds = ("ebi_patch",)
+    writes = ["test", "ref"]
+    auto_writes = ["test", "ref"]
+
+
+@register_step
+class LoadSingleStep(_LoadStep):
+    """RSEM / 資料夾：一顆 defect 一張圖，沒有天生的 ref。"""
+
+    key = "load_single"
+    label = "Load single image"
+    help = ("Start here for one image per defect (RSEM, or a folder of "
+            "images): there is no reference, so build one upstream of any "
+            "card that needs it.")
+    accepts_kinds = ("rsem", "folder")
+    #: ``single`` 會再鏡射一份成 ``test``（見 :meth:`_LoadStep.run`），所以
+    #: 下游卡片用預設參數就吃得到影像。
+    writes = ["single", "test"]
+    auto_writes = ["single", "test"]

@@ -80,7 +80,7 @@ def test_an_empty_regions_box_is_not_configured():
 
 def test_a_region_nobody_defines_is_caught_by_lint():
     rec = Recipe(
-        recipe_id="t", routes={"ebi_patch": ["load", "m"]},
+        recipe_id="t", order=["load", "m"],
         nodes={"load": RecipeNode("load", "load_patch", {}),
                "m": RecipeNode("m", "roi_mask", {"regions": "nope"})})
     codes = {i.code for i in validate(rec, registry=REGISTRY)}

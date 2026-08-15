@@ -206,8 +206,7 @@ def _ports(step_cls: Optional[Type[Step]], attr: str, default: str) -> Tuple[str
 OUT_PARAM = "out"
 
 
-def stream_ports(step_cls: Optional[Type[Step]], params: Dict[str, Any],
-                 kind: str = "", first: bool = False
+def stream_ports(step_cls: Optional[Type[Step]], params: Dict[str, Any]
                  ) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
     """一張卡的（輸入埠, 輸出埠）—— **從卡片自己的宣告推出來，不用逐張改**。
 
@@ -257,8 +256,12 @@ def stream_ports(step_cls: Optional[Type[Step]], params: Dict[str, Any],
             outs = (name,)
     if not outs:
         try:
-            written = (step_cls.resolve_writes_for_kind(params, kind) if first
-                       else step_cls.resolve_writes(params))
+            # **不必問 dataset kind**（F9 Phase 3d）：Input 卡拆成一種型別一張
+            # 之後，每張卡吐什麼是寫死的。以前這裡要對「route 的第一張卡」走另
+            # 一條 kind-aware 的路，而編譯期知道 kind、執行期不知道 —— 兩邊算
+            # 出不一樣的埠，線接到 ``load.single``、執行期卻吐在 ``load.test``
+            # 上，整條下游安靜地不跑（§5d.3 的坑）。那個分岔現在不存在了。
+            written = step_cls.resolve_writes(params)
         except Exception:                      # noqa: BLE001 — 壞參數不該擋住編譯
             written = list(getattr(step_cls, "writes", ()) or ())
         outs = tuple(dict.fromkeys(str(w) for w in written if str(w).strip()))
@@ -309,7 +312,7 @@ def _fingerprint(recipe: Recipe, kind: str) -> tuple:
             tuple(sorted((nid, n.step, bool(n.enabled))
                          for nid, n in recipe.nodes.items())),
             tuple(tuple(e) for e in recipe.edges),
-            tuple(recipe.routes.get(kind, ())))
+            tuple(recipe.order))
 
 
 def compile_recipe(recipe: Recipe, kind: str,
@@ -352,7 +355,7 @@ def _compile_recipe(recipe: Recipe, kind: str,
         from .step import REGISTRY
         registry = REGISTRY
 
-    order = [nid for nid in execution_order(recipe, kind)
+    order = [nid for nid in execution_order(recipe, kind, registry)
              if recipe.nodes.get(nid) is not None and recipe.nodes[nid].enabled]
     pos = {nid: i for i, nid in enumerate(order)}
 
@@ -367,7 +370,7 @@ def _compile_recipe(recipe: Recipe, kind: str,
         except Exception:                      # noqa: BLE001 — 壞參數不擋編譯
             p = dict(node.params)
         clean[nid] = p
-        ports[nid] = stream_ports(step_cls, p, kind=kind, first=(i == 0))
+        ports[nid] = stream_ports(step_cls, p)
 
     #: 影像流名 -> 最後吐出它的節點（邊走邊更新 = 自然的「往回找最近的」）
     producer: Dict[str, str] = {}
