@@ -102,6 +102,7 @@ import adept.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜�
 from adept.core.pipeline import (
     ParamError, Recipe, accepted_kinds, get_step, list_steps,
 )
+from adept.core.pipeline.graph import optional_ports
 from adept.core.pipeline.recipe import version_skew
 
 from .export_dialog import ExportDialog
@@ -1349,6 +1350,22 @@ class StudioWindow(QMainWindow):
                 reads = list(step_cls.resolve_reads(node.params))
             except Exception:              # noqa: BLE001
                 reads = []
+            # 「這張卡處理哪幾條流」與「它只是**借**了哪幾條的數字」是兩件事。
+            # 副標以前把兩者混在箭頭左邊，於是 `norm_ref` 印出來是
+            # `ref test → ref` —— 讀起來像「test 進去、ref 出來」，而它其實是
+            # 「正規化 ref，拉伸範圍跟 test 借」。判準沿用 `optional_ports`
+            # 已經有的那一條（預設值是空的 / advanced = 選配 = 借的）。
+            try:
+                borrowed = [str(x) for x in optional_ports(step_cls, node.params)]
+            except Exception:              # noqa: BLE001
+                borrowed = []
+            borrowed_streams = []
+            for name in borrowed:
+                for tok in str(node.params.get(name, "") or "").split(","):
+                    tok = tok.strip()
+                    if tok and tok in reads and tok not in borrowed_streams:
+                        borrowed_streams.append(tok)
+            reads = [r for r in reads if r not in borrowed_streams]
             try:
                 # Region 卡不寫影像流，它定義的是具名區域 —— 副標要講得出
                 # 「ref → cell」，否則那張卡在畫布上看起來什麼都不產出。
@@ -1362,10 +1379,14 @@ class StudioWindow(QMainWindow):
                 "category": category,
                 "enabled": bool(node.enabled),
                 # 副標那行印的是 reads → writes/regions；摘要不要再講一次
+                # 借來的流**不算「副標已經講過了」** —— 副標只講這張卡處理
+                # 什麼、產出什麼，所以 `range_from=test` 要留在下面那一行的
+                # 參數摘要裡，不然畫面上就沒有任何地方說得出那條線是幹嘛的。
                 "summary": self._node_summary(
                     node, shown=list(reads) + list(writes) + list(regions_out)),
                 "writes": writes,
                 "reads": reads,
+                "borrows": borrowed_streams,
                 "regions_out": regions_out,
                 "group": step_cls.resolve_group() if step_cls else "",
                 "problem": problems.get(nid, ("", ""))[0],
@@ -1374,10 +1395,28 @@ class StudioWindow(QMainWindow):
         if self.selected_node not in self.model.nodes:
             self.selected_node = None
         wires, ports = self._compiled_wiring()
+        wired = {(str(w[2]), str(w[3])) for w in wires if len(w) >= 4}
         for info in nodes:
             got = ports.get(info["node_id"])
             if got:
-                info["in_ports"], info["out_ports"] = list(got[0]), list(got[1])
+                nid = info["node_id"]
+                node = self.model.nodes.get(nid)
+                step_cls = None
+                try:
+                    step_cls = get_step(node.step) if node else None
+                except KeyError:
+                    step_cls = None
+                try:
+                    opt = set(optional_ports(step_cls, node.params if node else {}))
+                except Exception:          # noqa: BLE001
+                    opt = set()
+                # **沒接線的選配埠不畫。** Normalize 有 4 個輸入埠，一份典型的
+                # recipe 只用到 1–2 個 —— 其餘那幾顆常駐的空圓點跟資料流搶畫面
+                # （F7-8「常駐在節點旁邊的裝飾」那條教訓），而且使用者會問
+                # 「這一顆是要接什麼的」，答案卻是「什麼都不用接」。
+                ins = [p for p in got[0]
+                       if p not in opt or (nid, p) in wired]
+                info["in_ports"], info["out_ports"] = ins, list(got[1])
         for view in self._canvases():
             view.set_nodes(nodes, wires)
             view.set_selected(self.selected_node)

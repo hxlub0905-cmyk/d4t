@@ -462,6 +462,11 @@ class _NodeItem(QGraphicsItem):
             body = "%s → %s" % (left, right)
         else:
             body = left or right or str(self.info.get("step_key", self.node_id))
+        # **借來的流不放在箭頭左邊。** `norm_ref` 以前印的是 `ref test → ref`，
+        # 讀起來像「test 進去、ref 出來」—— 而它做的是「正規化 ref，拉伸範圍跟
+        # test 借」。箭頭只講這張卡**處理**什麼、產出什麼；借用是另一件事，
+        # 由下面那一行的參數摘要（`range_from=test`）負責講。
+        # （``borrows`` 仍然放在 info 裡：tooltip 與測試讀它。）
         step_key = str(self.info.get("step_key", ""))
         if step_key and self.node_id != step_key:
             # 同一張卡加了第二次：這時候 id 是有意義的（分數表達式指的是特徵名，
