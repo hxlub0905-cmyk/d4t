@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 from .context import Context
-from .expression import parse_expression
 from .recipe import Recipe, RecipeError, execution_order
 from .step import CATEGORY_ADC, CATEGORY_IMAGE, REGISTRY, Step, StepError
 
@@ -130,29 +129,19 @@ def _segment_index(compiled: List[str], order: List[str], idx: int) -> int:
     return sum(1 for nid in order[:idx] if nid in alive)
 
 
-def _eval_score(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
-    """ADC 判定：score = expr(features) → bin。失敗會 raise（呼叫端攔截）。
-
-    ⚠ **這是舊路徑。** F9 Phase 3a 起判定是畫布上的一張卡（``steps/adc.py``）；
-    圖上有判定卡的時候走 :func:`_collect_verdicts`，這裡不會被呼叫到。
-    留著是因為 ``Recipe.score`` 這個固定欄位還在（既有的檔案、Studio 的分數頁、
-    ``store.rescore`` 都還吃它）—— 它會在 Phase 3b 隨 ``routes`` 一起退場。
-    """
-    expr = parse_expression(recipe.score.expr)
-    score = expr.eval(ctx.features)
-    ctx.features["score"] = score
-    if score < float(recipe.score.threshold):
-        b = int(recipe.score.bins["below"])
-    else:
-        b = int(recipe.score.bins["above"])
-    return score, b
-
-
 #: 判定卡沒有任何一張跑到時，記在 warnings 裡的那句話。
 NO_VERDICT_NOTE = (
     "no decision was made for this defect: the branch it took has no Decide "
     "card on it. The score is left empty on purpose - a 0 here would sort and "
     "report like a real answer.")
+
+#: 整份 recipe 一張判定卡都沒有時，記在 warnings 裡的那句話。
+#: 跟上面那句分開，因為要修的地方不一樣：這一句是「還沒加」，
+#: 上面那句是「加了但這顆走的分支上沒有」。
+NO_DECIDE_CARD_NOTE = (
+    "this recipe has no Decide card, so it measures features but never turns "
+    "them into a score. Every defect comes out without a score or a bin; add a "
+    "Decide card at the end of the pipeline if you want a verdict.")
 
 
 def _collect_verdicts(graph: Any, outbox: Dict[Any, Any],
@@ -164,7 +153,7 @@ def _collect_verdicts(graph: Any, outbox: Dict[Any, Any],
     有分岔的時候判定卡的那一包不一定是執行順序上的最後一個，讀最後那包會
     拿到別條分支的結論。
 
-    回 ``None`` = 這份 recipe **沒有判定卡** → 呼叫端走舊的 ``recipe.score``。
+    回 ``None`` = 這份 recipe **一張判定卡都沒有** → 這顆沒有結論。
     回 ``[]``   = 有判定卡但**一張都沒跑到**（分流走到一條沒有判定的分支）
     —— 那是「沒有結論」，不是 0 分。
     """
@@ -205,8 +194,8 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
     - ``upto_node``：跑到該節點**之後**就停（Studio 點卡看中間輸出用）；
       強制 keep_context=True，score/bin 不算（None）；若該節點被停用則
       停在它前面、不執行它；不在 route 上 → ok=False（不 raise）。
-    - 步驟全過後：score = expr(features)、features["score"] = score、
-      bin = bins["below"]（score < threshold）否則 bins["above"]。
+    - 步驟全過後：判定由圖上的 ``adc`` 卡給（見 :func:`_judge`）——
+      沒有任何一張跑到就**沒有結論**（score/bin 是 None，不是 0）。
     """
     if registry is None:
         registry = REGISTRY
@@ -229,8 +218,16 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
             f"upto_node '{upto_node}' is not in the execution order {order} "
             f"of route '{kind}'")
 
+    # ``upto_node`` 要停在**那一格**，而不是「跑完再說」。用索引切段而不是只靠
+    # ``run_graph`` 認節點 id：目標卡被**停用**的時候編譯過的圖裡根本沒有它，
+    # 認不到就會一路跑到底 —— 以前看不出來，因為判定還不是卡片，route 的尾巴
+    # 後面沒有東西；判定變成卡片之後，它會照跑然後回一個莫名其妙的錯。
+    stop = len(order)
+    if upto_node is not None:
+        stop = order.index(upto_node) + 1
+
     verdicts_box: List[Any] = []
-    ctx, err = _run_nodes(recipe, order, 0, len(order), ctx, traces,
+    ctx, err = _run_nodes(recipe, order, 0, stop, ctx, traces,
                           registry, upto_node, kind=kind,
                           verdicts_out=verdicts_box)
     if err is not None:
@@ -246,32 +243,26 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
 def _judge(recipe: Recipe, ctx: Context, traces: List[StepTrace],
            keep_context: bool, defect_id: str,
            verdicts: Optional[List[Dict[str, Any]]]) -> DefectResult:
-    """把判定收成結果。三種情況，三種不同的下場。
+    """把判定收成結果。四種情況，四種不同的下場。
 
-    * ``verdicts is None`` —— 圖上沒有判定卡 → 走舊的 ``recipe.score``
-      （Phase 3b 之前既有的每一份 recipe 都走這條）。
+    * ``verdicts is None`` —— 整份 recipe **一張判定卡都沒有**。
+    * ``verdicts == []`` —— 有判定卡，但這顆走的分支上一張都沒跑到。
     * 剛好一張判定卡跑到 → 就用它。
-    * **一張都沒跑到** → 這顆**沒有結論**：score/bin 留 None 並講出來。
-      給 0 分是最糟的處理（0 會排序、會進報表、看起來像「很乾淨」）。
     * **兩張以上跑到** → 這是 recipe 接錯了（兩條判定同時生效），
       當成失敗講清楚，不要偷偷挑一個。
-    """
-    if verdicts is None:
-        try:
-            score, b = _eval_score(recipe, ctx)
-        except Exception as e:
-            return _finish(defect_id, ctx, traces, keep_context, False,
-                           f"[score] {e}")
-        return _finish(defect_id, ctx, traces, keep_context, True, None,
-                       score=score, bin_=b)
 
-    if len(verdicts) == 1:
+    前兩種都是「**沒有結論**」：score/bin 留 None 並在 warnings 裡講出來 ——
+    給 0 分是最糟的處理（0 會排序、會進報表、看起來像「很乾淨」）。
+    兩句話分開是因為要修的地方不一樣：一個是「還沒加判定卡」，
+    另一個是「加了，但這條分支上沒有」。
+    """
+    if len(verdicts or ()) == 1:
         v = verdicts[0]
         return _finish(defect_id, ctx, traces, keep_context, True, None,
                        score=float(v["score"]), bin_=int(v["bin"]))
 
     if not verdicts:
-        ctx.warn(NO_VERDICT_NOTE)
+        ctx.warn(NO_DECIDE_CARD_NOTE if verdicts is None else NO_VERDICT_NOTE)
         return _finish(defect_id, ctx, traces, keep_context, True, None)
 
     who = ", ".join(str(v.get("node", "?")) for v in verdicts)

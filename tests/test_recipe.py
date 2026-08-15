@@ -16,7 +16,6 @@ from adept.core.pipeline import (
     Recipe,
     RecipeError,
     RecipeNode,
-    ScoreSpec,
     Step,
     execution_order,
     validate,
@@ -86,20 +85,32 @@ class TNeedsRef(Step):
         return ctx
 
 
-REG = {c.key: c for c in (TLoadPair, TLoadSingle, TSubtract, TSnr, TNeedsRef)}
+# 判定卡用**真的那一張**（``steps/adc.py``）：這個檔案裡的假卡片是為了控制
+# reads/writes 才自己寫的，而判定沒有什麼好假的 —— validate 要問它的正是
+# 真卡片的 ``configuration_issues`` 與參數規格。
+from adept.core.steps.adc import AdcStep  # noqa: E402
+
+REG = {c.key: c for c in (TLoadPair, TLoadSingle, TSubtract, TSnr, TNeedsRef,
+                          AdcStep)}
+
+
+def decide_node(node_id="decide", expr="1", threshold=0.0):
+    """一張判定卡。F9 Phase 3d 起分數住在這裡，不再是 recipe 上的固定欄位。"""
+    return RecipeNode(node_id, "adc", {
+        "expr": expr, "threshold": threshold,
+        "bin_below": 0, "bin_above": 1, "label": ""})
 
 
 def make_recipe(**kw):
     base = dict(
         recipe_id="unit_test",
-        routes={"ebi_patch": ["load", "sub", "snr"]},
+        routes={"ebi_patch": ["load", "sub", "snr", "decide"]},
         nodes={
             "load": RecipeNode("load", "t_load_pair", {}),
             "sub": RecipeNode("sub", "t_subtract", {}),
             "snr": RecipeNode("snr", "t_snr", {"k": 5}),
+            "decide": decide_node(expr="snr_max * 2", threshold=3.0),
         },
-        score=ScoreSpec(expr="snr_max * 2", threshold=3.0,
-                        bins={"below": 0, "above": 1}),
         version=2,
         author="unit",
         description="單元測試 recipe",
@@ -165,19 +176,19 @@ def test_save_load_atomic(tmp_path):
 # ---------------------------------------------------------------------------
 def test_execution_order_chain():
     r = make_recipe()
-    assert execution_order(r, "ebi_patch") == ["load", "sub", "snr"]
+    assert execution_order(r, "ebi_patch") == ["load", "sub", "snr", "decide"]
 
 
 def test_execution_order_extra_edge_consistent():
     # 額外邊與鏈一致 → 順序不變
     r = make_recipe(edges=[["load", "snr"]])
-    assert execution_order(r, "ebi_patch") == ["load", "sub", "snr"]
+    assert execution_order(r, "ebi_patch") == ["load", "sub", "snr", "decide"]
 
 
 def test_execution_order_edge_outside_route_ignored():
     # 邊的端點不在該 route 內 → 不影響
     r = make_recipe(edges=[["ghost", "snr"], ["load", "ghost"]])
-    assert execution_order(r, "ebi_patch") == ["load", "sub", "snr"]
+    assert execution_order(r, "ebi_patch") == ["load", "sub", "snr", "decide"]
 
 
 def test_execution_order_cycle_raises():
@@ -257,9 +268,7 @@ def test_validate_missing_image():
 def test_validate_first_node_reads_unchecked():
     # 第一張啟用卡（load 卡）的 reads 不檢查（它從 dataset 拿資料）
     r = make_recipe(routes={"ebi_patch": ["sub"]},
-                    nodes={"sub": RecipeNode("sub", "t_subtract", {})},
-                    score=ScoreSpec(expr="1", threshold=0.0,
-                                    bins={"below": 0, "above": 1}))
+                    nodes={"sub": RecipeNode("sub", "t_subtract", {})})
     issues = validate(r, registry=REG)
     assert "missing-image" not in codes(issues)
 
@@ -271,7 +280,6 @@ def test_validate_requires_ref_on_rsem():
             "load1": RecipeNode("load1", "t_load_single", {}),
             "align": RecipeNode("align", "t_needs_ref", {}),
         },
-        score=ScoreSpec(expr="1", threshold=0.0, bins={"below": 0, "above": 1}),
     )
     issues = validate(r, kind="rsem", registry=REG)
     assert "requires-ref" in codes(issues)
@@ -288,21 +296,27 @@ def test_validate_requires_ref_not_flagged_on_ebi_patch():
             "load": RecipeNode("load", "t_load_pair", {}),
             "align": RecipeNode("align", "t_needs_ref", {}),
         },
-        score=ScoreSpec(expr="1", threshold=0.0, bins={"below": 0, "above": 1}),
     )
     assert "requires-ref" not in codes(validate(r, registry=REG))
 
 
 def test_validate_score_expr_parse_error():
-    r = make_recipe(score=ScoreSpec(expr="snr_max *", threshold=1.0,
-                                    bins={"below": 0, "above": 1}))
+    """算式寫壞了 -> ``not-configured``（判定卡自己講），不再是 ``score-expr``。
+
+    F9 Phase 3d：分數不是 recipe 上的一個欄位了，所以「算式寫壞」跟其他
+    「這張卡還沒設定完」走同一條路 —— 而且訊息指得到**是哪一張卡**。
+    """
+    r = make_recipe()
+    r.nodes["decide"].params["expr"] = "snr_max *"
     issues = validate(r, registry=REG)
-    assert "score-expr" in codes(issues)
+    assert "not-configured" in codes(issues)
+    bad = [i for i in issues if i.code == "not-configured"][0]
+    assert bad.node_id == "decide"
 
 
 def test_validate_unknown_feature_warning():
-    r = make_recipe(score=ScoreSpec(expr="snr_max * mystery_feat", threshold=1.0,
-                                    bins={"below": 0, "above": 1}))
+    r = make_recipe()
+    r.nodes["decide"].params["expr"] = "snr_max * mystery_feat"
     issues = validate(r, registry=REG)
     warn = [i for i in issues if i.code == "unknown-feature"]
     assert len(warn) == 1
@@ -312,16 +326,22 @@ def test_validate_unknown_feature_warning():
 
 def test_validate_score_var_allowed():
     # "score" 本身永遠是合法變數（bin 條件常用）
-    r = make_recipe(score=ScoreSpec(expr="snr_max + score * 0", threshold=1.0,
-                                    bins={"below": 0, "above": 1}))
+    r = make_recipe()
+    r.nodes["decide"].params["expr"] = "snr_max + score * 0"
     assert "unknown-feature" not in codes(validate(r, registry=REG))
 
 
-def test_validate_bad_bins():
-    r = make_recipe(score=ScoreSpec(expr="snr_max", threshold=1.0,
-                                    bins={"below": 0}))
+def test_a_route_with_no_decide_card_says_so():
+    """量完就結束的 route 跑得完，但**每一顆都沒有分數** —— 那要講出來。
+
+    是 warning 不是 error：只想拿特徵 CSV 出去自己算的人是合法的用法。
+    """
+    r = make_recipe(routes={"ebi_patch": ["load", "sub", "snr"]})
     issues = validate(r, registry=REG)
-    assert "bad-bins" in codes(issues)
+    assert "no-decision" in codes(issues)
+    assert [i for i in issues if i.code == "no-decision"][0].level == "warning"
+    # 接上判定卡就不再抱怨
+    assert "no-decision" not in codes(validate(make_recipe(), registry=REG))
 
 
 def test_validate_disabled_node_skipped_in_simulation():
@@ -333,14 +353,12 @@ def test_validate_disabled_node_skipped_in_simulation():
 
 
 def test_validate_collects_multiple_issues_at_once():
-    r = make_recipe(
-        routes={"ebi_patch": ["load", "ghost", "snr"]},
-        score=ScoreSpec(expr="1 +", threshold=1.0, bins={}),
-    )
-    r.nodes.pop("sub")
+    r = make_recipe(routes={"ebi_patch": ["load", "ghost", "snr", "decide"]})
+    r.nodes.pop("sub")  # noqa: E501
     r.nodes["load"] = RecipeNode("load", "no_such_step", {})
+    r.nodes["decide"].params["expr"] = "1 +"
     got = set(codes(validate(r, registry=REG)))
-    assert {"unknown-node", "unknown-step", "score-expr", "bad-bins"} <= got
+    assert {"unknown-node", "unknown-step", "not-configured"} <= got
 
 
 # --------------------------------------------------------------------------- #
@@ -352,11 +370,9 @@ def test_a_saved_recipe_records_which_build_wrote_it():
 
     rec = _mini_recipe() if "_mini_recipe" in globals() else None
     if rec is None:                     # 這一支測試檔的既有 helper 名稱不一定
-        from adept.core.pipeline.recipe import Recipe, RecipeNode, ScoreSpec
+        from adept.core.pipeline.recipe import Recipe, RecipeNode
         rec = Recipe(recipe_id="v", routes={"ebi_patch": ["a"]},
-                     nodes={"a": RecipeNode("a", "load_patch", {})},
-                     score=ScoreSpec(expr="1", threshold=0.0,
-                                     bins={"below": 0, "above": 1}))
+                     nodes={"a": RecipeNode("a", "load_patch", {})})
     assert rec.to_json_dict()["app_version"] == __version__
 
 
@@ -367,7 +383,7 @@ def test_an_older_build_says_the_program_is_old_not_the_file_broken():
     在舊版上打開，訊息若只有 ``unknown parameters: ['…']``，使用者的結論是
     「這份檔案壞了」—— 於是他會去重做一份 recipe，而該做的是更新程式。
     """
-    from adept.core.pipeline.recipe import (Recipe, RecipeNode, ScoreSpec,
+    from adept.core.pipeline.recipe import (Recipe, RecipeNode,
                                             validate, version_skew)
 
     rec = Recipe(
@@ -375,8 +391,6 @@ def test_an_older_build_says_the_program_is_old_not_the_file_broken():
         nodes={"load": RecipeNode("load", "load_patch", {}),
                "x": RecipeNode("x", "normalize",
                                {"streams": "test", "brand_new_knob": 3})},
-        score=ScoreSpec(expr="1", threshold=0.0,
-                        bins={"below": 0, "above": 1}),
         app_version="99.0.0")           # 「比較新的那一版」寫的
 
     import adept.core.steps  # noqa: F401 — 這一支要用真的卡片庫
@@ -434,13 +448,12 @@ def test_a_recipe_round_trip_does_not_pick_up_the_old_subtract_default():
     ``workers=4`` 變成 ``b="ref_aligned"`` —— 換一個 ``--workers`` 就換一組
     分數，而且兩邊都跑得完、都有數字。
     """
-    from adept.core.pipeline.recipe import Recipe, RecipeNode, ScoreSpec
+    from adept.core.pipeline.recipe import Recipe, RecipeNode
 
     r = Recipe(recipe_id="in-memory",
                routes={"ebi_patch": ["load", "sub"]},
                nodes={"load": RecipeNode("load", "load_patch", {}),
-                      "sub": RecipeNode("sub", "subtract", {"a": "test"})},
-               score=ScoreSpec("1", 0.0, {"below": 0, "above": 1}))
+                      "sub": RecipeNode("sub", "subtract", {"a": "test"})})
     assert "b" not in r.nodes["sub"].params
 
     worker_side = Recipe.from_json_dict(r.to_json_dict())

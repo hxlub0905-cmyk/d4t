@@ -97,11 +97,19 @@ def test_recipe_loads_and_is_self_consistent(path):
     # description 是庫對話框唯一顯示的說明文字 —— 空的等於這份範例沒人看得懂
     assert len(recipe.description.strip()) >= 20, (
         "%s 的 description 太短：非工程師要靠它決定用不用這份" % path.name)
-    assert recipe.score.expr.strip(), "score.expr 不可以是空的"
-    assert set(recipe.score.bins) >= {"below", "above"}
+    # 判定是一張卡（F9 Phase 3d），不是 recipe 上的欄位 —— 每條 route 都要
+    # 走得到一張，而且它的算式不能是空的。沒有判定卡的範例跑得完、有特徵、
+    # 但**每一顆都沒有分數**，而那正是範例最該示範的那一步。
+    decide = {nid: n for nid, n in recipe.nodes.items() if n.step == "adc"}
+    assert decide, "範例 recipe 要有一張 Decide 卡"
+    for nid, n in decide.items():
+        assert str(n.params.get("expr", "")).strip(), (
+            "節點 '%s' 的 expr 是空的" % nid)
     assert recipe.routes, "至少要有一條 route"
     for kind, route in recipe.routes.items():
         assert route, "route '%s' 是空的" % kind
+        assert set(route) & set(decide), (
+            "route '%s' 走不到任何一張 Decide 卡" % kind)
         for nid in route:
             assert nid in recipe.nodes, (
                 "route '%s' 引用了不存在的節點 '%s'" % (kind, nid))

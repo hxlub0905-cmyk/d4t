@@ -11,6 +11,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+# 判定卡（``adc``）住在 ``adept.core.steps`` 裡，而 registry 是 **import 的副作用**
+# 填起來的。這個檔案只 import pipeline，所以不明講的話第一個用到 adc 的測試會拿到
+# 一個還沒有它的 registry —— 而症狀是「unknown step 'adc'」，指不到真正的原因。
+import adept.core.steps  # noqa: F401
+
 from adept.core.pipeline import (
     CATEGORY_ALGO,
     CATEGORY_IMAGE,
@@ -18,7 +23,6 @@ from adept.core.pipeline import (
     REGISTRY,
     Recipe,
     RecipeNode,
-    ScoreSpec,
     Step,
     register_step,
     run_defect,
@@ -109,11 +113,17 @@ def _item(defect_id="D1", level=10.0, klass=1):
                            nm_per_px=None)
 
 
-def _recipe(node_ids, nodes, expr="peak", edges=None):
+def _adc(node_id, expr, threshold, label=""):
+    """一張判定卡。F9 Phase 3d 起這是分數的**唯一**來源（``score`` 欄位退場）。"""
+    return RecipeNode(node_id, "adc", {"expr": expr, "threshold": threshold,
+                                       "bin_below": 0, "bin_above": 1,
+                                       "label": label})
+
+
+def _recipe(node_ids, nodes, edges=None):
     return Recipe(
         recipe_id="g", routes={"ebi_patch": list(node_ids)}, nodes=nodes,
-        edges=edges or [],
-        score=ScoreSpec(expr=expr, threshold=0.0, bins={"below": 0, "above": 1}))
+        edges=edges or [])
 
 
 # --------------------------------------------------------------------------- #
@@ -264,27 +274,29 @@ def test_a_router_runs_only_the_branch_it_picked(cards):
 # --------------------------------------------------------------------------- #
 def test_run_defect_still_produces_the_same_answer(cards):
     """圖執行器換進去之後，一條線性 pipeline 的分數與 trace 形狀不變。"""
-    rec = _recipe(["l", "g", "m"], {
+    rec = _recipe(["l", "g", "m", "d"], {
         "l": RecipeNode("l", "t_g_load", {}),
         "g": RecipeNode("g", "t_g_gain", {}),
         "m": RecipeNode("m", "t_g_peak", {}),
+        "d": _adc("d", "peak", 0.0),
     })
     r = run_defect(rec, _item(level=3.0), "ebi_patch", keep_context=True)
     assert r.ok and r.score == 6.0 and r.bin == 1
-    assert [t.node_id for t in r.traces] == ["l", "g", "m"]
+    assert [t.node_id for t in r.traces] == ["l", "g", "m", "d"]
     assert r.context.images["test"].max() == 6.0
 
 
 def test_a_disabled_node_is_bypassed_not_left_dangling(cards):
     """停用中間那張卡，線要**接過去**，不是讓下游斷掉。"""
-    rec = _recipe(["l", "g", "m"], {
+    rec = _recipe(["l", "g", "m", "d"], {
         "l": RecipeNode("l", "t_g_load", {}),
         "g": RecipeNode("g", "t_g_gain", {}, enabled=False),
         "m": RecipeNode("m", "t_g_peak", {}),
+        "d": _adc("d", "peak", 0.0),
     })
     graph = compile_recipe(rec, "ebi_patch")
     backbone = [(w.src, w.dst) for w in graph.wires if w.kind != KIND_STREAM]
-    assert backbone == [("l", "m")]
+    assert backbone == [("l", "m"), ("m", "d")]
 
     r = run_defect(rec, _item(level=7.0), "ebi_patch")
     assert r.ok and r.score == 7.0             # 沒被放大
@@ -293,21 +305,15 @@ def test_a_disabled_node_is_bypassed_not_left_dangling(cards):
 # --------------------------------------------------------------------------- #
 # 5. 判定是圖上的卡片（F9 Phase 3a）
 # --------------------------------------------------------------------------- #
-def _adc(node_id, expr, threshold, label=""):
-    return RecipeNode(node_id, "adc", {"expr": expr, "threshold": threshold,
-                                       "bin_below": 0, "bin_above": 1,
-                                       "label": label})
-
-
-def test_a_decide_card_replaces_the_score_field(cards):
-    """圖上有判定卡的時候，分數由那張卡決定，不再看 recipe.score。"""
+def test_the_decide_card_is_where_the_score_comes_from(cards):
+    """分數由判定卡決定 —— recipe 上已經沒有第二個地方可以設它（Phase 3d）。"""
     rec = _recipe(["l", "m", "d"], {
         "l": RecipeNode("l", "t_g_load", {}),
         "m": RecipeNode("m", "t_g_peak", {}),
         "d": _adc("d", "peak", 5.0),
-    }, expr="9999")                             # 舊欄位故意給一個很離譜的值
+    })
     r = run_defect(rec, _item(level=7.0), "ebi_patch")
-    assert r.ok and r.score == 7.0 and r.bin == 1     # 用的是卡片，不是 9999
+    assert r.ok and r.score == 7.0 and r.bin == 1
     r2 = run_defect(rec, _item(level=3.0), "ebi_patch")
     assert r2.ok and r2.score == 3.0 and r2.bin == 0
 

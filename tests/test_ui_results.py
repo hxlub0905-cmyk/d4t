@@ -125,19 +125,19 @@ def test_threshold_drag_is_still_the_pure_rescore_path(window):
     """拖曳中只重算 bin 數（不寫 model、不重跑影像），放開才 commit。"""
     window.run_trial(8, workers=1, sync=True)
     window._on_threshold_committed(40.0)
-    before = window.model.threshold
+    before = window.model.decision_threshold()
 
     window._on_threshold_changed(77.25)
-    assert window.model.threshold == pytest.approx(before), \
+    assert window.model.decision_threshold() == pytest.approx(before), \
         "拖曳中絕對不可以動到 model —— 那會觸發重跑"
     live = window.histogram.bin_summary_text()
     assert live == "   ".join(
         "bin %s=%s" % (k, v)
         for k, v in sorted(vm_mod.rebin(window.trial_scores, 77.25,
-                                        window.model.bins).items()))
+                                        window.model.decision_bins()).items()))
 
     window._on_threshold_committed(55.0)
-    assert window.model.threshold == pytest.approx(55.0)
+    assert window.model.decision_threshold() == pytest.approx(55.0)
 
 
 def test_bar_click_filters_the_gallery_in_the_same_window(window):

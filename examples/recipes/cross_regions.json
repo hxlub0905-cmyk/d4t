@@ -13,7 +13,8 @@
       "sub",
       "glv_cross",
       "glv_cross_ref",
-      "glv_here"
+      "glv_here",
+      "decide"
     ]
   },
   "nodes": {
@@ -107,15 +108,18 @@
         "output_prefix": "here"
       },
       "enabled": true
+    },
+    "decide": {
+      "step": "adc",
+      "params": {
+        "expr": "locate_ok * max(here_glv_max, xing_glv_max)",
+        "threshold": 40.0,
+        "bin_below": 0,
+        "bin_above": 1,
+        "label": "cross defect"
+      },
+      "enabled": true
     }
   },
-  "edges": [],
-  "score": {
-    "expr": "locate_ok * max(here_glv_max, xing_glv_max)",
-    "threshold": 40.0,
-    "bins": {
-      "below": 0,
-      "above": 1
-    }
-  }
+  "edges": []
 }

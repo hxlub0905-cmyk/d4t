@@ -57,26 +57,31 @@ class AdcStep(Step):
 
     params = [
         ParamSpec(
-            name="expr", type="str", default="",
+            name="expr", type="expr", default="",
             label="Score",
             help=("An expression built from the feature names produced "
                   "upstream, for example  snr_max * 2 - glv_std . You can use "
                   "+ - * / ( ) and sqrt / abs / min / max / log / exp.")),
         ParamSpec(
             name="threshold", type="float", default=0.0,
+            label="Threshold",
             help="Score at or above this goes in the 'above' bin."),
         ParamSpec(
+            name="label", type="str", default="",
+            label="Name this decision",
+            help=("Optional name for this decision, so a recipe with several "
+                  "of them can say which one decided this defect.")),
+        # 這兩格**幾乎沒有人會改**（0 / 1 對絕大多數站點就是對的），而它們有
+        # 上下界所以會各自配到一支滑桿 —— 一支 0–999 的滑桿拿來挑 bin 編號既
+        # 沒有用又是整張表上最搶眼的東西。真正要調的是上面那兩格。
+        ParamSpec(
             name="bin_below", type="int", default=0, min=0, max=999,
-            label="Bin when below",
+            label="Bin when below", advanced=True,
             help="Which bin number to write when the score is below the threshold."),
         ParamSpec(
             name="bin_above", type="int", default=1, min=0, max=999,
-            label="Bin when at or above",
+            label="Bin when at or above", advanced=True,
             help="Which bin number to write when the score reaches the threshold."),
-        ParamSpec(
-            name="label", type="str", default="",
-            help=("Optional name for this decision, so a recipe with several "
-                  "of them can say which one decided this defect.")),
     ]
     reads: List[str] = []
     writes: List[str] = []
@@ -87,8 +92,9 @@ class AdcStep(Step):
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
         expr = str(params.get("expr", "") or "").strip()
         if not expr:
-            return ["This card has no score expression yet - type one in the "
-                    "Score box, using the feature names measured upstream."]
+            return ["This card has no score expression yet. Type one in the "
+                    "Score box, or pick the names measured upstream from the "
+                    "Insert feature ▾ list next to it."]
         try:
             parse_expression(expr)
         except ExpressionError as e:

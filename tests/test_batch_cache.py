@@ -21,7 +21,6 @@ from adept.core.ingest.dataset import load_dataset  # noqa: E402
 from adept.core.pipeline import (  # noqa: E402
     Recipe,
     RecipeNode,
-    ScoreSpec,
     StageCache,
     image_segment_signature,
     result_to_json_dict,
@@ -97,10 +96,10 @@ def make_recipe(snr_threshold: float = 200.0, search_radius: int = 8) -> Recipe:
     return Recipe(
         recipe_id="m2_batch_cache_test",
         routes={KIND: ["load", "norm_ref", "norm", "align", "sub", "dn",
-                       "snr", "cd", "glv"]},
-        nodes=nodes,
-        score=ScoreSpec(expr="glv_max + (glv_max - glv_q99)", threshold=50.0,
-                        bins={"below": 0, "above": 1}),
+                       "snr", "cd", "glv", "decide"]},
+        nodes=dict(nodes, decide=RecipeNode("decide", "adc", {
+            "expr": "glv_max + (glv_max - glv_q99)", "threshold": 50.0,
+            "bin_below": 0, "bin_above": 1, "label": ""})),
     )
 
 
@@ -339,9 +338,10 @@ def _roi_then_image_recipe() -> Recipe:
                           {"source": "test", "roi": "main"}),
     }
     return Recipe(recipe_id="roi_in_cached_segment",
-                  routes={KIND: ["load", "roi", "dn", "glv"]}, nodes=nodes,
-                  score=ScoreSpec(expr="glv_mean", threshold=0.0,
-                                  bins={"below": 0, "above": 1}))
+                  routes={KIND: ["load", "roi", "dn", "glv", "decide"]},
+                  nodes=dict(nodes, decide=RecipeNode("decide", "adc", {
+                      "expr": "glv_mean", "threshold": 0.0,
+                      "bin_below": 0, "bin_above": 1, "label": ""})))
 
 
 def test_named_rois_survive_a_cache_hit(ds, tmp_path):

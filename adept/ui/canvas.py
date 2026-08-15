@@ -771,7 +771,6 @@ class PipelineCanvas(QGraphicsView):
     node_toggled = Signal(str, bool)
     move_requested = Signal(str, int)          # 相容用，畫布不發
     remove_requested = Signal(str)
-    score_clicked = Signal()
     #: ``(來源節點, 目標節點, 這條線帶的影像流名)``。第三個參數是 F7-18 加的：
     #: 使用者從 ``ref`` 那個埠拉一條線到某張卡，講的就是「這張卡做在 ref 上」。
     #: 沒有它的話，畫布只能表達「先後順序」，而「對哪一張圖做」還是得回到
@@ -810,7 +809,6 @@ class PipelineCanvas(QGraphicsView):
         self._pairs: List[Tuple[str, str]] = []      # 使用者拉的線
         self._implicit: List[Tuple[str, str]] = []   # route 順序帶來的依賴
         self._selected: Optional[str] = None
-        self._score_summary = ""
         self._link_from: Optional[_NodeItem] = None
         self._link_port = 0
         self._link_line = None
@@ -1041,16 +1039,6 @@ class PipelineCanvas(QGraphicsView):
     def card(self, node_id: str) -> Optional["_NodeItem"]:
         """取某個節點的圖元（highlight / 測試用；對應舊的 ``card()``）。"""
         return self._items.get(str(node_id))
-
-    def set_score_summary(self, expr: str, threshold: Any) -> None:
-        self._score_summary = "score = %s   threshold %s" % (expr, threshold)
-
-    def score_summary(self) -> str:
-        return self._score_summary
-
-    def score_summary_text(self) -> str:
-        """與舊 ``PipelinePanel.score_summary_text()`` 同名同義。"""
-        return self._score_summary
 
     #: ``fit()`` 最多縮到多小。還沒拉線的 recipe 會排成一條很長的橫列，
     #: 硬要全部塞進畫面會把節點縮成看不出字的小方塊 —— 那時候寧可留捲軸。

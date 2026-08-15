@@ -25,7 +25,6 @@ from .recipe import (
     Recipe,
     RecipeError,
     RecipeNode,
-    ScoreSpec,
     execution_order,
     validate,
 )
@@ -49,7 +48,7 @@ __all__ = [
     "register_step", "get_step", "list_steps", "REGISTRY",
     "CATEGORY_IMAGE", "CATEGORY_ALGO", "CATEGORY_ADC",
     # recipe
-    "Recipe", "RecipeNode", "ScoreSpec", "Issue",
+    "Recipe", "RecipeNode", "Issue",
     "validate", "execution_order", "RecipeError",
     # expression
     "parse_expression", "Expression", "ExpressionError",

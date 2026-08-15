@@ -212,8 +212,12 @@ def test_library_shows_description_routes_steps_and_expr_from_json(qapp):
             assert info["description"].strip(), "%s 沒有 description" % info["file"]
             assert info["routes"] == list(raw["routes"])
             assert info["n_steps"] == len(raw["nodes"])
-            assert info["expr"] == raw["score"]["expr"]
-            assert info["threshold"] == pytest.approx(raw["score"]["threshold"])
+            # 分數住在判定卡的參數裡（F9 Phase 3d），不再是 recipe 的一個區塊
+            adc = [dict(n["params"]) for n in raw["nodes"].values()
+                   if n["step"] == "adc"]
+            assert adc, "%s 沒有判定卡" % info["file"]
+            assert info["expr"] == adc[0]["expr"]
+            assert info["threshold"] == pytest.approx(adc[0]["threshold"])
 
             # 清單那一列要看得到 recipe 名稱與 route
             text = dlg.item_text(i)
@@ -225,7 +229,7 @@ def test_library_shows_description_routes_steps_and_expr_from_json(qapp):
             assert dlg.select(i) is True
             detail = dlg.detail.text()
             assert raw["description"] in detail
-            assert raw["score"]["expr"] in detail
+            assert adc[0]["expr"] in detail
             for route in raw["routes"]:
                 assert route in detail
     finally:

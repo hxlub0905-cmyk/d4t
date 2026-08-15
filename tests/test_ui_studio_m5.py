@@ -281,7 +281,7 @@ def test_real_click_on_bar_does_not_move_the_threshold(ran, qapp):
     qapp.processEvents()
     window.gallery.clear_filter()
 
-    before = window.model.threshold
+    before = window.model.decision_threshold()
     hist.set_threshold(before)
     committed = []
     hist.threshold_committed.connect(committed.append)
@@ -299,7 +299,7 @@ def test_real_click_on_bar_does_not_move_the_threshold(ran, qapp):
 
     assert committed == [], "點長條不該 commit 門檻"
     assert hist.threshold() == pytest.approx(before)
-    assert window.model.threshold == pytest.approx(before)
+    assert window.model.decision_threshold() == pytest.approx(before)
     assert window.results_visible() is True
     assert "Filtered to score" in window.status_text()
 
@@ -332,7 +332,7 @@ def test_real_drag_still_commits_the_threshold(ran, qapp):
 
     assert bars == [], "拖曳不該被當成點長條"
     assert len(committed) == 1
-    assert window.model.threshold == pytest.approx(committed[0])
+    assert window.model.decision_threshold() == pytest.approx(committed[0])
     assert window.results_visible() == before_visible   # 拖門檻不改變視窗狀態
 
 

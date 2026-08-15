@@ -11,11 +11,18 @@ Recipe JSON 形狀（見 docs/plans/F0-master-plan.md §3.4）：
       "routes": {"ebi_patch": ["load","align","subtract","snr"],
                  "rsem":      ["load","golden","subtract","snr"]},
       "nodes": {"align": {"step": "align", "params": {"method": "phase"},
-                          "enabled": true}},
-      "edges": [["subtract","snr"]],
-      "score": {"expr": "snr_max * sqrt(area_px)", "threshold": 3.0,
-                "bins": {"below": 0, "above": 1}}
+                          "enabled": true},
+                "decide": {"step": "adc",
+                           "params": {"expr": "snr_max * sqrt(area_px)",
+                                      "threshold": 3.0}}},
+      "edges": [["subtract","snr"]]
     }
+
+**判定沒有自己的欄位** —— 它是一張卡（``steps/adc.py``），跟其他卡一樣站在
+route 上。F9 Phase 3d 之前這裡有一個固定的 ``"score"`` 區塊，一份 recipe 只能有
+一套標準、而且它不在畫布上；現在一份 recipe 想放幾張判定卡就放幾張（每條分支
+一張，門檻各自調）。**舊檔案的 ``score`` 區塊仍讀得進來**，載入時遷移成每條
+route 尾端的一張 ``adc`` 卡（見 :func:`_migrate_score_block`）。
 
 - v1 每條 route 是線性鏈；``edges`` 是額外的 DAG 邊（v2 自由畫布備用）。
   執行順序 = route 相鄰對邊 ∪ edges（限制在該 route 內）的 Kahn 拓撲排序，
@@ -32,10 +39,10 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
 from .expression import ExpressionError, parse_expression
-from .step import ParamError, Step, REGISTRY
+from .step import CATEGORY_ADC, ParamError, Step, REGISTRY
 
 __all__ = [
-    "RecipeError", "RecipeNode", "ScoreSpec", "Recipe",
+    "RecipeError", "RecipeNode", "Recipe",
     "Issue", "execution_order", "validate", "edge_pair",
 ]
 
@@ -96,12 +103,43 @@ class RecipeNode:
     enabled: bool = True
 
 
-@dataclass
-class ScoreSpec:
-    """ADC 判定段：score 表達式 + 門檻 + bin 對應（{"below": 0, "above": 1}）。"""
-    expr: str
-    threshold: float
-    bins: Dict[str, int]
+# ---------------------------------------------------------------------------
+# 舊 recipe 相容遷移（F9 Phase 3d）：``score`` 固定欄位 → 一張判定卡
+# ---------------------------------------------------------------------------
+#: 遷移出來的判定卡叫什麼（撞名時後面接 route 名）。
+_MIGRATED_ADC_ID = "decide"
+
+
+def _migrate_score_block(nodes: Dict[str, "RecipeNode"],
+                         routes: Dict[str, List[str]],
+                         sd: Dict[str, Any]) -> None:
+    """舊檔案的 ``score`` 區塊 → 每條 route 尾端一張 ``adc`` 卡。
+
+    為什麼是**每條 route 一張**而不是共用一張：``score`` 那個欄位本來就是
+    「這份 recipe 的唯一標準」，共用一張確實等價 —— 但遷移完的圖是使用者接下來
+    要**編**的東西，而共用的那一張會讓「改 rsem 的門檻」順手改掉 patch 的。
+    一條分支一張是這一輪整件事的重點，遷移就照那個形狀給。
+
+    判準是「這個 dict 有沒有 ``score`` 這個鍵」—— ``to_json_dict()`` 已經不寫它，
+    所以 round-trip 回來的 dict 不會再被遷移一次（那個坑見 CLAUDE.md §7 的
+    ``subtract.b`` 那一列）。
+    """
+    params = {
+        "expr": str(sd.get("expr", "") or ""),
+        "threshold": float(sd.get("threshold", 0.0) or 0.0),
+        "bin_below": int(dict(sd.get("bins") or {}).get("below", 0)),
+        "bin_above": int(dict(sd.get("bins") or {}).get("above", 1)),
+        "label": "",
+    }
+    for k in sorted(routes):
+        nid = _MIGRATED_ADC_ID
+        n = 1
+        while nid in nodes:
+            nid = "%s_%s" % (_MIGRATED_ADC_ID, k) if n == 1 else \
+                  "%s_%s%d" % (_MIGRATED_ADC_ID, k, n)
+            n += 1
+        nodes[nid] = RecipeNode(id=nid, step="adc", params=dict(params))
+        routes[k] = list(routes[k]) + [nid]
 
 
 # ---------------------------------------------------------------------------
@@ -318,7 +356,6 @@ class Recipe:
     recipe_id: str
     routes: Dict[str, List[str]]      # dataset kind → 依序的節點 id（v1 線性）
     nodes: Dict[str, RecipeNode]
-    score: ScoreSpec
     version: int = 1
     author: str = ""
     description: str = ""
@@ -354,11 +391,6 @@ class Recipe:
                 for nid, n in self.nodes.items()
             },
             "edges": [list(e) for e in self.edges],
-            "score": {
-                "expr": self.score.expr,
-                "threshold": float(self.score.threshold),
-                "bins": dict(self.score.bins),
-            },
         }
 
     @classmethod
@@ -366,7 +398,7 @@ class Recipe:
         if not isinstance(d, dict):
             raise RecipeError(f"the top level of a recipe JSON must be an object "
                               f"(dict), got {type(d).__name__}")
-        missing = [k for k in ("recipe_id", "routes", "nodes", "score") if k not in d]
+        missing = [k for k in ("recipe_id", "routes", "nodes") if k not in d]
         if missing:
             raise RecipeError(f"recipe JSON is missing required fields: {missing}")
 
@@ -381,17 +413,7 @@ class Recipe:
                 enabled=bool(nd.get("enabled", True)),
             )
 
-        sd = d["score"]
-        if not isinstance(sd, dict) or "expr" not in sd:
-            raise RecipeError(
-                "the score block must be an object containing 'expr'")
-        score = ScoreSpec(
-            expr=str(sd["expr"]),
-            threshold=float(sd.get("threshold", 0.0)),
-            bins={str(k): int(v) for k, v in dict(sd.get("bins") or {}).items()},
-        )
-
-        routes = {str(k): [str(x) for x in v] for k, v in dict(d["routes"]).items()}
+        routes ={str(k): [str(x) for x in v] for k, v in dict(d["routes"]).items()}
 
         # 一條線有兩種寫法（F9 Phase 3a 起）：
         #   ["a", "b"]                          兩端的預設埠（既有檔案都是這種）
@@ -444,11 +466,16 @@ class Recipe:
                 if node.step == "subtract" and "b" not in node.params:
                     node.params["b"] = "ref_aligned"
 
+        # 判定從固定欄位變成一張卡（F9 Phase 3d）。**放在所有遷移的最後**：
+        # 前面幾道會增刪節點與改 route，而這一道要接在 route 的尾巴上。
+        sd = d.get("score")
+        if isinstance(sd, dict) and "expr" in sd:
+            _migrate_score_block(nodes, routes, sd)
+
         return cls(
             recipe_id=str(d["recipe_id"]),
             routes=routes,
             nodes=nodes,
-            score=score,
             app_version=str(d.get("app_version", "") or ""),
             version=int(d.get("version", 1)),
             author=str(d.get("author", "")),
@@ -581,23 +608,12 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
 
     檢查項（code）：unknown-step / bad-param / not-configured / unknown-node /
     unknown-route / cycle / missing-image / unknown-region / requires-ref /
-    score-expr / unknown-feature（warning）/ feature-collision（warning）/
-    bad-bins。
+    no-decision（warning）/ unknown-feature（warning）/
+    feature-collision（warning）。
     """
     if registry is None:
         registry = REGISTRY
     issues: List[Issue] = []
-
-    # ---- bins 必須含 below / above ----
-    bins = recipe.score.bins or {}
-    for key in ("below", "above"):
-        if key not in bins:
-            issues.append(Issue(
-                code="bad-bins", level="error", node_id=None,
-                title="Incomplete bin settings",
-                detail=f"score.bins has no '{key}' (both below and above bin "
-                       f"values are required); it currently has: "
-                       f"{sorted(bins)}"))
 
     # ---- 要檢查哪些 route ----
     if kind is not None:
@@ -641,16 +657,9 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                 code="not-configured", level="error", node_id=nid,
                 title=f"{step_cls.label} is not set up yet", detail=str(msg)))
 
-    # ---- score 表達式解析 ----
-    expr = None
-    try:
-        expr = parse_expression(recipe.score.expr)
-    except ExpressionError as e:
-        issues.append(Issue(
-            code="score-expr", level="error", node_id=None,
-            title="Score expression failed to parse", detail=str(e)))
-
     # ---- 每條 route：unknown-node / cycle / reads 模擬 / requires_ref ----
+    #: route → 這條路上有沒有踩到判定卡（見 route 迴圈末尾的 no-decision）。
+    is_decided: Dict[str, bool] = {}
     for k in kinds:
         route = recipe.routes[k]
         for nid in route:
@@ -729,6 +738,28 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                            f"upstream, or clear the roi parameter to measure "
                            f"the whole image."))
 
+            # 判定卡的分數式子只能用**它上游**產出的特徵（F9 Phase 3d）。
+            # 這一段以前是整份 recipe 一次檢查（那時候分數是固定欄位，只有一
+            # 個），現在每張判定卡各自檢查、而且是拿**走到這裡為止**累積的特徵
+            # 比 —— 一張排在量測前面的判定卡，答案本來就不該算得出來。
+            if getattr(step_cls, "category", "") == CATEGORY_ADC:
+                if not is_decided.get(k):
+                    is_decided[k] = True
+                try:
+                    dexpr = parse_expression(str(p.get("expr", "") or ""))
+                except ExpressionError:
+                    dexpr = None      # 已由 not-configured 講過，不重複講
+                if dexpr is not None:
+                    unknown = sorted(dexpr.variables - feats)
+                    if unknown:
+                        issues.append(Issue(
+                            code="unknown-feature", level="warning", node_id=nid,
+                            title="Score expression uses unknown features",
+                            detail=f"route '{k}': the variables {unknown} are "
+                                   f"not among the features produced upstream "
+                                   f"of this card ({sorted(feats)}), so the "
+                                   f"score may not be computable at run time"))
+
             # 特徵撞名：後面的卡會安靜地蓋掉前面的（Context.add_feature 允許
             # 覆寫，只在 meta 留紀錄）。最典型的踩法是「量兩個 ROI」——
             # 兩張 glv_stats 都寫 glv_mean，跑完只剩後面那張的值，而分數表達式
@@ -752,15 +783,16 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             feats |= set(step_cls.resolve_features(p))
             regions |= set(step_cls.resolve_regions_out(p))
 
-        # score 變數 ⊆ 此 route 會產出的特徵 ∪ {"score"}（僅警告）
-        if expr is not None:
-            unknown = sorted(expr.variables - feats)
-            if unknown:
-                issues.append(Issue(
-                    code="unknown-feature", level="warning", node_id=None,
-                    title="Score expression uses unknown features",
-                    detail=f"route '{k}': the variables {unknown} are not among "
-                           f"the features this route produces ({sorted(feats)}), "
-                           f"so the score may not be computable at run time"))
+        # 整條 route 走完都沒有一張判定卡 → 這批跑得完，但**每一顆都沒有結論**
+        # （score/bin 留 None，見 ``engine._judge``）。是 warning 不是 error：
+        # 只想看特徵、拿 CSV 出去自己算的人是合法的用法。
+        if not is_decided.get(k):
+            issues.append(Issue(
+                code="no-decision", level="warning", node_id=None,
+                title=f"route '{k}' never reaches a Decide card",
+                detail=f"route '{k}' measures features but nothing turns them "
+                       f"into a score, so every defect will come out without a "
+                       f"score or a bin. Add a Decide card at the end of the "
+                       f"branch if you want a verdict."))
 
     return issues

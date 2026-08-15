@@ -179,14 +179,27 @@ def read_recipe_info(path: Any) -> Dict[str, Any]:
         info["route_steps"] = {str(k): len(list(v or [])) for k, v in routes.items()}
     info["n_steps"] = len(dict(d.get("nodes") or {}))
 
-    score = d.get("score") or {}
-    if isinstance(score, dict):
-        info["expr"] = str(score.get("expr") or "")
-        try:
-            info["threshold"] = float(score.get("threshold"))
-        except (TypeError, ValueError):
-            info["threshold"] = None
+    # 判定是一張卡（F9 Phase 3d）。舊檔案的 ``score`` 區塊仍讀得懂 ——
+    # 這個對話框列的是**磁碟上的檔案**，而使用者手上會有兩種都在的一段時間。
+    decide = [dict(nd.get("params") or {})
+              for nd in (d.get("nodes") or {}).values()
+              if isinstance(nd, dict) and str(nd.get("step", "")) == "adc"]
+    if decide:
+        info["expr"] = str(decide[0].get("expr") or "")
+        info["threshold"] = _opt_float(decide[0].get("threshold"))
+    else:
+        score = d.get("score") or {}
+        if isinstance(score, dict):
+            info["expr"] = str(score.get("expr") or "")
+            info["threshold"] = _opt_float(score.get("threshold"))
     return info
+
+
+def _opt_float(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def quick_reference_pdf(directory: Any = None) -> Optional[Path]:

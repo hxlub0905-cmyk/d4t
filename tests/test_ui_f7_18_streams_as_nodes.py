@@ -168,7 +168,8 @@ def test_old_recipes_with_also_apply_still_load_and_mean_the_same_thing(tmp_path
 
     rec = Recipe.load(path)
     route = rec.routes["ebi_patch"]
-    assert route == ["load", "norm_ref", "norm", "dn", "dn_ref"]
+    # 尾巴那張 ``decide`` 是舊檔案的 ``score`` 區塊遷移來的（F9 Phase 3d）
+    assert route == ["load", "norm_ref", "norm", "dn", "dn_ref", "decide"]
 
     # anchor=source：借範圍的那張要排在**前面**，此時 test 還沒被拉伸過 ——
     # 反過來的話 ref 借到的是「已經拉成 0–255」的範圍，數字就不一樣了。

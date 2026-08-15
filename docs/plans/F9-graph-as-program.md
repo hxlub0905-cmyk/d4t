@@ -1,7 +1,8 @@
 # F9 — 圖就是程式（線變成真的資料通道）
 
-**狀態：Phase 1–3c 完成（2026-08-15）。線是真的資料通道、判定是卡片、
-畫布畫的是編譯出來的圖。剩下：輸入變卡片、`routes`/`score` 退場（Phase 3d）。**
+**狀態：Phase 1–3c 完成、3d 第一批完成（2026-08-15）。線是真的資料通道、
+判定是畫布上的一張卡（`Recipe.score` 那個固定欄位已退場）、畫布畫的是編譯出來
+的圖。剩下：輸入變卡片、`routes` 退場（Phase 3d 其餘）。**
 
 ---
 
@@ -395,32 +396,76 @@ recipe 可能一條線都沒有而它跑得完全正確 —— 那正是 §2 開
 手拉的兩段式線**整個丟掉**了 —— 畫面上他接了 `load → norm`、實際跑的卻是
 `load → norm_ref → norm`。正好是 F9 要修的那件事，而我自己犯了。
 
-### 5d.7 還沒做：拿掉舊格式
+## 5e. Phase 3d 第一批：分數不再是 recipe 上的欄位（2026-08-15）
 
-畫布**已經**把輸出埠依流名畫出來了（`_NodeItem.out_names()` 讀 `writes`，
-所以 Load 上看得到 `test` / `ref` 兩顆埠）。缺的是另外三件：
+判定卡在 Phase 3a 就做好了，但一直**收在 `scope.HIDDEN_STEPS` 裡沒有出場** ——
+因為 `Recipe.score` 那個固定欄位還在，兩個都露出來的話畫面上有兩個地方能設
+門檻而使用者不知道哪個算數。這一批就是把那個欄位拿掉，同一輪把卡片放出來。
 
-* **輸入埠只畫一顆**（`in_port_local()`），沒有依角色分成 `a` / `b` /
-  `source` / `streams`
-* **畫布畫的是 `RecipeModel.edges`（使用者手拉的），不是編譯出來的圖** ——
-  所以自動接好的那些線在畫面上還看不到（這正是 §2 那個「`edges` 是 `[]`
-  但跑得對」的另一面）
-* **兩種線還沒有視覺差別**。`packet` 要是最粗最明顯的主幹，`stream` 是註記
-  該退到背景 —— 而且**不能只差深淺**（§7：不同語意要給不同色相）
+### 5e.1 拿掉一個欄位，要走完它的每一條下游
 
-這一批要動 `canvas.py` + `studio.py` + `viewmodel.py`，是 Phase 3c 剩下的
-主要工作量。
+`score` 不只是 `Recipe` 上的一個 dataclass 欄位。沿著它往下游走一遍，
+它同時是：
 
-### 5d.7 還沒做：拿掉舊格式
+| 在哪 | 是什麼 | 現在變成 |
+|---|---|---|
+| `recipe.py` | `ScoreSpec` 欄位 + JSON 的 `"score"` 區塊 | 沒有了；舊檔案載入時遷移成 route 尾端一張 `adc` 卡 |
+| `recipe.validate()` | `score-expr` / `bad-bins` / 全域的 `unknown-feature` | 判定卡自己的 `not-configured`；`unknown-feature` 改成**逐張卡**、拿它上游累積的特徵比 |
+| `engine._eval_score()` | 舊判定路徑 | 刪掉；`_judge` 只看判定卡 |
+| `store.rescore()` | 讀 recipe JSON 的 `score` 區塊 | 讀 `adc` 節點的參數；**舊 run 的 `score` 區塊仍讀得懂**（資料庫裡是歷史快照，沒辦法遷移）|
+| `viewmodel.RecipeModel` | `expr` / `threshold` / `bins` 三個欄位 | `decide_nodes()` / `decision_threshold()` / `set_decision_threshold()` —— 值住在卡片參數裡 |
+| `studio.py` | 一整頁「Score / Bin」+ 卡片庫裡一個假卡片 `__score__` | 都沒有了；判定卡走**跟其他卡完全一樣**的那張參數表 |
+| `canvas.py` | `score_clicked` / `set_score_summary()` | 都沒有了；判定在畫布上是一顆節點 |
+| `welcome.py` | 範本庫顯示 `score.expr` | 讀 `adc` 節點；舊檔案的 `score` 區塊仍讀得懂 |
 
-引擎已經是「線說了算」，但 **Studio 上那些流的下拉選單還在**。使用者現在
-兩個地方都能改，而**線贏**。這是暫時的不一致，Phase 3c 要做：
+**這張表本身就是這一輪的教訓**（跟 §7 的「拿掉一張卡，週邊會留下承諾」同一
+條）：死掉的程式碼沒人會發現，死掉的**承諾**使用者天天看得到。
 
-* 參數表把 `image_key` / `image_keys` 那幾列**藏起來**（它們是線的落腳處，
-  不是給人填的）
-* 畫布上每個輸出埠標出流名、每個輸入埠標出角色名
-* `stream` 線與 `packet` 線要**看得出是兩種**（粗細或色相，別只差深淺 ——
-  見 §7 的「虛線只是實線淡一點」）
+### 5e.2 新增一個參數型別：`expr`
+
+判定卡的分數式子如果只是一格 `str`，就等於要使用者憑記憶打出上游卡自己取的
+變數名（`snr_max` / `glv_q99` / `cd_x_px`…）。最常見的下場不是「打不出來」而是
+**打錯一個字**：lint 只出一句 warning、整批照樣跑得完，而每一顆都沒有分數。
+
+所以 `ParamSpec` 多一個型別 `expr`（值仍是 str，recipe JSON 沒有變），UI 給它
+一行輸入框 + 一顆「Insert feature ▾」，列的是**這張卡上游真的量得出來的**那幾個
+名字。這跟 `image_keys` 給勾選框、`min/max` 給滑桿是同一個道理 ——
+**能列出來的東西就不要讓人用打的。**
+
+順帶：`RecipeModel.available_features()` 多一個 `before_node=`。判定卡自己吐的
+`score` 不該出現在它自己的變數清單裡（那會讓人以為 `score = score * 2` 是合法的
+寫法）。
+
+### 5e.3 兩個順手抓到的坑
+
+**`upto_node` 指到一張停用的卡時停不下來。** Studio 點某張卡看中間輸出走的是
+`run_defect(upto_node=…)`，而它以前只靠 `run_graph` 去認節點 id ——
+編譯過的圖裡沒有停用節點，認不到就一路跑到底。以前看不出來，因為判定還不是
+卡片，route 尾巴後面沒有東西；判定變成卡片之後它會照跑，然後回一個
+「算式裡的變數找不到」這種指不到原因的錯。改成用**索引**切段
+（`order.index(upto_node) + 1`），停用與否都對。
+
+**registry 是 import 的副作用填起來的。** 卡片註冊發生在 `import
+adept.core.steps` 的時候，而 `test_graph.py` / `test_engine.py` 只 import
+`adept.core.pipeline` —— 於是第一個用到 `adc` 的測試拿到一個還沒有它的
+registry，錯誤訊息是 `unknown step 'adc'`，指不到真正的原因。兩個檔案都補上
+明確的 `import adept.core.steps  # noqa: F401`。
+
+### 5e.4 驗收
+
+* 同一批 60 顆合成 defect，`examples/recipes/cross_regions.json`
+  **改寫前（`7132b89` 的舊格式）與改寫後逐格相同** —— CSV 全欄位 0 個差異。
+* `python tools/run_tests.py`：**77 個檔案全綠，137 秒**。
+* 舊格式仍載得進來：`tests/fixtures/recipes/*.json` 三份**刻意留成舊格式**，
+  它們現在是遷移的迴歸測試（`test_ui_f7_18` 直接斷言遷移後的 route 尾巴多了
+  一張 `decide`）。
+
+### 5e.5 Phase 3d 還沒做的
+
+* **Input 變卡片**（依資料型別分張），`routes` 欄位退場
+* **卡片用型別或掃描測試鎖住「不就地改寫像素陣列」**（§5b.1 的那個降級）
+* `ui/scope.py` 綁 dataset kind 的機制要重想（見 §6.3）
+* 「沒有結論」的 UI 那一半：Gallery 與輸出精靈要分得出「沒有結論」與「分數很低」
 
 ---
 
@@ -435,9 +480,10 @@ recipe 可能一條線都沒有而它跑得完全正確 —— 那正是 §2 開
 更通用（分支各自命中）、而且「改算法段參數不重算影像段」自動成立。代價是要決定
 存哪些節點的 Packet（全部存會爆記憶體）—— 這一題留到 Phase 2 量過再定。
 
-### 6.2 舊 recipe 遷移
+### 6.2 舊 recipe 遷移 —— `score` 那一半已解（見 §5e）
 
-`routes` → Input 節點 + 一條線一條線接起來；`score` → ADC 節點。機械式，但
+`routes` → Input 節點 + 一條線一條線接起來（**還沒做**）；
+`score` → ADC 節點（✅ `recipe._migrate_score_block`）。機械式，但
 **驗收必須是「同一份 recipe、同一批資料，遷移前後逐顆分數相同」**（沿用 F7-18
 的作法，不要靠讀程式碼驗證）。
 
@@ -462,7 +508,7 @@ score/bin 留 `None` 並在 warnings 講出來。**剩下 UI 那一半**：Galle
 | **3a** ✅ | ADC 變卡片（引擎支援多判定 / 沒有判定）；線存得下埠 | 低（舊路徑保留） |
 | **3b** ✅ | 流由線決定（埠名 = 流名；線分 packet / stream 兩種）。**16 張卡沒動。** | 已通過逐顆驗收 |
 | **3c** ✅ | UI 那一半：流的下拉退場、埠依角色分、畫布畫編譯出來的圖、兩種線不同色相 | 已看過截圖 |
-| **3d** | Input 變卡片；`routes` / `score` 退場；`scope.py` 解除隱藏 `adc`；卡片用型別鎖住「不就地改寫」 | 中 |
+| **3d** 🔨 | `score` 退場 + `scope.py` 解除隱藏 `adc` ✅（§5e）；**還沒做**：Input 變卡片、`routes` 退場、卡片用型別鎖住「不就地改寫」 | 中 |
 | **4** | 畫布變成真的編輯器：埠型別擋不合法連線、**刪線=真的斷開**、分岔/合流畫得出來 | 中 |
 | **5+** | 開始長功能卡：`CLASSNUMBER` 分流、跨顆統計、ML、更多量測 | 低（純加法） |
 

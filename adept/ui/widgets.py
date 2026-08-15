@@ -66,6 +66,11 @@ from PySide6.QtWidgets import (
 from . import theme
 from .theme import TOKENS
 
+#: ``ExprField`` 的「Insert feature ▾」最寬幾 px。算式那一格才是主角 ——
+#: 下拉不吃 stretch，不然它會在寬螢幕上長成一個裝著幾個特徵名的巨大空框
+#: （跟 F7-24 那兩個吃掉整列的下拉是同一件事）。
+FEATURE_COMBO_MAX = 150
+
 __all__ = [
     "ImageView",
     "ParamForm",
@@ -74,6 +79,7 @@ __all__ = [
     "FeatureTable",
     "VerdictChip",
     "TemplateField",
+    "ExprField",
     "to_uint8",
     "small_button",
     "apply_button_cursors",
@@ -1442,6 +1448,73 @@ class ProfilePanel(QWidget):
                    Qt.AlignLeft | Qt.AlignVCenter, text)
 
 
+class ExprField(QWidget):
+    """``expr`` 參數的編輯器：一行算式 + 「Insert feature ▾」（F9 Phase 3d）。
+
+    為什麼算式要配一顆下拉
+    ----------------------
+    判定卡的變數名是**上游的卡自己取的**（``snr_max`` / ``glv_q99`` /
+    ``cd_x_px`` …），一份 recipe 有哪幾個要看它接了哪幾張量測卡。要使用者
+    憑記憶打出來，最常見的下場不是「打不出來」而是**打錯一個字**：lint 只出
+    一句 warning、整批照樣跑得完，而每一顆都沒有分數。
+
+    這顆下拉就是把「這張卡上游真的量得出來的名字」列出來 —— 跟
+    :class:`StreamPicker` 是同一個道理（見它的 docstring）。
+    """
+
+    changed = Signal(str)
+
+    #: 下拉的第一項（選它不插入任何東西）。
+    PLACEHOLDER = "Insert feature ▾"
+
+    def __init__(self, value: str = "", features: Optional[Sequence[str]] = None,
+                 parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        self._edit = QLineEdit(self)
+        self._edit.setPlaceholderText("e.g. snr_max * 2 - glv_std")
+        self._edit.setText("" if value is None else str(value))
+        self._edit.textChanged.connect(lambda t: self.changed.emit(str(t)))
+        lay.addWidget(self._edit, 1)
+        self._combo = QComboBox(self)
+        self._combo.setToolTip(
+            "Insert one of the feature names measured upstream at the cursor")
+        self._combo.setMaximumWidth(FEATURE_COMBO_MAX)
+        self._combo.activated.connect(self._on_pick)
+        lay.addWidget(self._combo)
+        self.set_features(features or [])
+
+    def set_features(self, names: Sequence[str]) -> None:
+        self._combo.clear()
+        self._combo.addItem(self.PLACEHOLDER)
+        for n in names:
+            self._combo.addItem(str(n))
+        self._combo.setCurrentIndex(0)
+        # 一個空的下拉只是一顆按不出東西的鈕 —— 沒有特徵就別佔那格。
+        self._combo.setEnabled(bool(names))
+
+    def feature_names(self) -> List[str]:
+        return [self._combo.itemText(i) for i in range(1, self._combo.count())]
+
+    def text(self) -> str:
+        return str(self._edit.text())
+
+    def set_text(self, value: str) -> None:
+        self._edit.setText("" if value is None else str(value))
+
+    def _on_pick(self, index: int) -> None:
+        token = self._combo.itemText(int(index)) if int(index) > 0 else ""
+        self._combo.setCurrentIndex(0)
+        if not token:
+            return
+        text = self._edit.text()
+        pos = max(0, min(self._edit.cursorPosition(), len(text)))
+        self._edit.setText(text[:pos] + token + text[pos:])
+        self._edit.setCursorPosition(pos + len(token))
+
+
 class StreamPicker(QWidget):
     """``image_keys`` 參數的編輯器：上游每一條影像流一個勾選框（F7-9）。
 
@@ -1734,10 +1807,16 @@ class ParamForm(QWidget):
     # -- public API --------------------------------------------------------
     def set_step(self, describe: Optional[Dict[str, Any]],
                  current_params: Optional[Dict[str, Any]] = None,
-                 stream_choices: Optional[Sequence[str]] = None) -> None:
-        """重建表單。``describe=None`` -> 顯示提示語（未選節點）。"""
+                 stream_choices: Optional[Sequence[str]] = None,
+                 feature_choices: Optional[Sequence[str]] = None) -> None:
+        """重建表單。``describe=None`` -> 顯示提示語（未選節點）。
+
+        ``feature_choices`` = 這張卡**上游量得出來的特徵名**，給 ``expr``
+        那一列的「Insert feature ▾」用（判定卡）。
+        """
         current_params = dict(current_params or {})
         streams = [str(s) for s in (stream_choices or [])]
+        self._features = [str(f) for f in (feature_choices or [])]
         self._describe = describe
         self._building = True
         try:
@@ -2025,6 +2104,12 @@ class ParamForm(QWidget):
             w.set_text("" if value is None else str(value))
             w.curve_changed.connect(lambda t, n=name: self._emit(n, str(t)))
             w.curve_changed.connect(lambda _t: self._sync_curve_override())
+            return w
+
+        if ptype == "expr":
+            w = ExprField("" if value is None else str(value),
+                          getattr(self, "_features", []))
+            w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 
         if ptype == "image_keys":

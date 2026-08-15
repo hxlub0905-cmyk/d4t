@@ -12,6 +12,11 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+# 判定卡（``adc``）住在 ``adept.core.steps``，而 registry 是 import 的副作用填的。
+# 不明講的話，這個檔案裡的假卡片是唯一註冊過的東西，用到 adc 的測試會拿到
+# 「unknown step 'adc'」—— 一句指不到真正原因的錯誤訊息。
+import adept.core.steps  # noqa: F401
+
 from adept.core.pipeline import (
     CATEGORY_ALGO,
     CATEGORY_IMAGE,
@@ -19,7 +24,6 @@ from adept.core.pipeline import (
     REGISTRY,
     Recipe,
     RecipeNode,
-    ScoreSpec,
     Step,
     StepError,
     register_step,
@@ -100,8 +104,15 @@ def make_item(defect_id="d1", **kw):
     return SimpleNamespace(defect_id=defect_id, nm_per_px=1.8, **kw)
 
 
+def decide_node(node_id="ndecide", expr="snr_max * 2", threshold=3.0):
+    """一張判定卡（F9 Phase 3d：分數不再是 recipe 上的固定欄位）。"""
+    return RecipeNode(node_id, "adc", {
+        "expr": expr, "threshold": threshold,
+        "bin_below": 0, "bin_above": 1, "label": ""})
+
+
 def make_recipe(route=("nload", "nalgo"), nodes=None, expr="snr_max * 2",
-                threshold=3.0):
+                threshold=3.0, decide=True):
     if nodes is None:
         nodes = {
             "nload": RecipeNode("nload", "t_eng_load", {}),
@@ -109,12 +120,15 @@ def make_recipe(route=("nload", "nalgo"), nodes=None, expr="snr_max * 2",
             "nfail": RecipeNode("nfail", "t_eng_fail", {}),
             "nnan": RecipeNode("nnan", "t_eng_nan", {}),
         }
+    nodes = dict(nodes)
+    route = list(route)
+    if decide:
+        nodes["ndecide"] = decide_node(expr=expr, threshold=threshold)
+        route.append("ndecide")
     return Recipe(
         recipe_id="engine_test",
-        routes={"ebi_patch": list(route)},
+        routes={"ebi_patch": route},
         nodes=nodes,
-        score=ScoreSpec(expr=expr, threshold=threshold,
-                        bins={"below": 0, "above": 1}),
     )
 
 
@@ -151,13 +165,14 @@ def test_meta_seeded(dummy_steps):
 
 def test_traces_recorded(dummy_steps):
     r = run_defect(make_recipe(), make_item(), "ebi_patch")
-    assert [t.node_id for t in r.traces] == ["nload", "nalgo"]
-    assert [t.step_key for t in r.traces] == ["t_eng_load", "t_eng_algo"]
+    assert [t.node_id for t in r.traces] == ["nload", "nalgo", "ndecide"]
+    assert [t.step_key for t in r.traces] == ["t_eng_load", "t_eng_algo", "adc"]
     assert all(t.ok for t in r.traces)
     assert all(t.error is None for t in r.traces)
     assert all(isinstance(t.ms, float) and t.ms >= 0.0 for t in r.traces)
     assert r.traces[0].features_added == {}
     assert r.traces[1].features_added == {"snr_max": 5.0, "area": 4.0}
+    assert r.traces[2].features_added == {"score": 10.0}
     assert r.traces[0].images_after == ["ref", "test"]
     assert r.traces[1].images_after == ["ref", "test"]
 
@@ -198,7 +213,8 @@ def test_score_eval_error_missing_feature(dummy_steps):
     rec = make_recipe(route=("nload",), expr="snr_max * 2")  # 沒人產 snr_max
     r = run_defect(rec, make_item(), "ebi_patch")
     assert r.ok is False
-    assert r.error.startswith("[score]")
+    # 訊息現在指得出**是哪一張判定卡**（F9 Phase 3d：分數不再是全域欄位）
+    assert r.error.startswith("[ndecide]")
     assert "snr_max" in r.error
 
 
@@ -269,7 +285,7 @@ def test_disabled_node_skipped(dummy_steps):
     r = run_defect(rec, make_item(), "ebi_patch")
     assert r.ok is True
     assert r.score == 10.0
-    assert [t.node_id for t in r.traces] == ["nload", "nalgo"]
+    assert [t.node_id for t in r.traces] == ["nload", "nalgo", "ndecide"]
 
 
 # ---------------------------------------------------------------------------

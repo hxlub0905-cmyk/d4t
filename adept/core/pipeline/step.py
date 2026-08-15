@@ -78,8 +78,13 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC)
 #: 型別上仍是 str，但那個字串有六千多個字元，而且**沒有人能用打的**。
 #: 一個放不下、也編輯不了的值配一個文字框，等於邀請使用者去改它。
 #: UI 認得這個型別：它給的是「建一個」的按鈕加一行摘要，欄位本身唯讀。
+#: ``expr``（F9 Phase 3d）是「值是一句用特徵名寫的算式」——型別上仍是 str，
+#: 但 UI 認得它：文字框旁邊多一顆「Insert feature ▾」，把**這張卡上游真的
+#: 量得出來的**特徵名列出來讓人點。判定卡是這個工具最後那一步，而它的變數名
+#: （``snr_max``、``glv_q99``…）沒有人記得住 —— 要靠打字的話，最常見的下場是
+#: 打錯一個字、lint 出一句 warning，然後整批跑出來沒有分數。
 PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
-               "image_keys", "curve", "template", "multi_choice")
+               "image_keys", "curve", "template", "multi_choice", "expr")
 
 
 class ParamError(ValueError):
@@ -187,7 +192,7 @@ class ParamSpec:
                     v = value.strip().lower() in ("1", "true", "yes", "on")
                 else:
                     v = bool(value)
-            elif self.type in ("str", "image_key", "template"):
+            elif self.type in ("str", "image_key", "template", "expr"):
                 v = str(value)
             elif self.type in ("image_keys", "multi_choice"):
                 # 正規化：去空白、去空項、去重複但保留順序。

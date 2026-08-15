@@ -156,23 +156,6 @@ REGION_THUMB = 120
 DEFECT_COMBO_MAX = 220
 STREAM_COMBO_MAX = 180
 
-#: 卡片庫「ADC 判定」段固定顯示的 Score / Bin 項目。它不是 registry 裡的
-#: step（每條 pipeline 天生就有一張 ScoreSpec），但三段式的心智模型要完整 ——
-#: 使用者要能在庫裡看到「影像 → 算法 → ADC 判定」三段都有東西。點它 = 去編輯分數。
-_SCORE_LIBRARY_KEY = "__score__"
-_SCORE_LIBRARY_ENTRY = {
-    "key": _SCORE_LIBRARY_KEY,
-    "label": "Score / Bin",
-    "category": "adc",
-    "group": "adc",
-    "help": "Combine the measured features into a score and split into bins by a threshold — every pipeline has exactly one; click to edit it.",
-    "requires_ref": False,
-    "params": [],
-    "reads": [],
-    "writes": [],
-    "features_out": ["score"],
-}
-
 #: 「載入範本」讀的檔案（repo 內的 die-to-die 範例）。
 TEMPLATE_RECIPE = Path(__file__).resolve().parents[2] / "examples" / "recipes" \
     / "cross_regions.json"
@@ -217,13 +200,6 @@ TAB_GALLERY = 1
 
 #: Gallery 縮圖要用哪個 channel（依序找第一個有的；都沒有就用第一個 channel）。
 THUMB_CHANNEL_PRIORITY = ("test", "single")
-
-_FEATURE_PLACEHOLDER = "Insert feature ▾"
-_SCORE_HELP = ("The score is an expression whose variables are the feature names "
-               "produced by the pipeline above (e.g. snr_max, area_px, "
-               "glv_mean). score >= threshold -> bin 1, otherwise bin 0. "
-               "You can use + - * / ( ) and sqrt / abs / min / max.")
-
 
 def _fmt(value: Any) -> str:
     """參數摘要用的短字串（float 去掉多餘的 0）。"""
@@ -465,8 +441,7 @@ class StudioWindow(QMainWindow):
 
         # F7-1：卡片庫只列目前輸入型別用得到的卡（見 adept/ui/scope.py）
         self.library.set_steps(
-            visible_steps([s.describe() for s in list_steps()])
-            + [_SCORE_LIBRARY_ENTRY])
+            visible_steps([s.describe() for s in list_steps()]))
         self._refresh_all()
         self.pipeline.fit_later()
         if self.model.node_order:
@@ -841,10 +816,13 @@ class StudioWindow(QMainWindow):
         # 讀細節的地方是下方設定區與彈出視窗（那份維持類別預設 0.7）。
         self.pipeline.MIN_FIT_SCALE = 0.5
         self.param_form = ParamForm(self)
-        self.score_pane = self._build_score_pane()
+        # 以前這裡是一個兩頁的 stack：參數表 + 一頁「Score / Bin」。
+        # 判定變成卡片之後那一頁沒有內容可放了 —— 分數式子與門檻就是判定卡
+        # 自己的兩個參數，走跟其他卡完全一樣的那張表（F9 Phase 3d）。
+        # QStackedWidget 留著是因為外面的版面（splitter、比例、彈出視窗）
+        # 都接在它身上，而且之後要再插頁面時不必再改一次結構。
         self.stack = QStackedWidget(self)
         self.stack.addWidget(self.param_form)     # index 0
-        self.stack.addWidget(self.score_pane)     # index 1
 
         middle = QSplitter(Qt.Vertical, self)
         middle.addWidget(self.pipeline)
@@ -882,67 +860,6 @@ class StudioWindow(QMainWindow):
         self.top_splitter = root
         self.root_splitter = root
         self.setCentralWidget(root)
-
-    def _build_score_pane(self) -> QWidget:
-        pane = QWidget(self)
-        lay = QVBoxLayout(pane)
-        lay.setContentsMargins(0, 0, 8, 0)
-        lay.setSpacing(8)
-
-        title = QLabel("Score / Bin decision", pane)
-        title.setObjectName("paramTitle")
-        lay.addWidget(title)
-
-        head = QLabel("The last step of the pipeline: turn features into one score, then split into bins by a threshold.", pane)
-        head.setObjectName("paramStepHelp")
-        head.setWordWrap(True)
-        lay.addWidget(head)
-
-        row1 = QHBoxLayout()
-        row1.setSpacing(8)
-        lbl_expr = QLabel("Score expression", pane)
-        lbl_expr.setObjectName("paramLabel")
-        lbl_expr.setMinimumWidth(104)
-        self.expr_edit = QLineEdit(pane)
-        self.expr_edit.setPlaceholderText("e.g. glv_max + (glv_max - glv_q99)")
-        self.expr_edit.setToolTip("Write an expression over feature names — the result is this defect's score")
-        row1.addWidget(lbl_expr)
-        row1.addWidget(self.expr_edit, 1)
-        lay.addLayout(row1)
-
-        row2 = QHBoxLayout()
-        row2.setSpacing(8)
-        lbl_ins = QLabel("Insert feature", pane)
-        lbl_ins.setObjectName("paramLabel")
-        lbl_ins.setMinimumWidth(104)
-        self.feature_combo = QComboBox(pane)
-        self.feature_combo.setToolTip("Pick a feature name to insert at the cursor in the expression")
-        row2.addWidget(lbl_ins)
-        row2.addWidget(self.feature_combo, 1)
-        lay.addLayout(row2)
-
-        row3 = QHBoxLayout()
-        row3.setSpacing(8)
-        lbl_thr = QLabel("Decision threshold", pane)
-        lbl_thr.setObjectName("paramLabel")
-        lbl_thr.setMinimumWidth(104)
-        self.threshold_spin = QDoubleSpinBox(pane)
-        self.threshold_spin.setDecimals(3)
-        self.threshold_spin.setRange(-1e9, 1e9)
-        self.threshold_spin.setSingleStep(0.5)
-        self.threshold_spin.setToolTip("score >= threshold -> bin 1 (the ones you want), otherwise bin 0")
-        row3.addWidget(lbl_thr)
-        row3.addWidget(self.threshold_spin, 1)
-        lay.addLayout(row3)
-
-        hint = QLabel(_SCORE_HELP, pane)
-        hint.setObjectName("paramHint")
-        hint.setWordWrap(True)
-        lay.addWidget(hint)
-        self.score_hint = hint
-
-        lay.addStretch(1)
-        return pane
 
     def _build_preview_pane(self) -> QWidget:
         pane = QWidget(self)
@@ -1137,7 +1054,6 @@ class StudioWindow(QMainWindow):
         view.node_toggled.connect(self._on_node_toggled)
         view.move_requested.connect(self._on_move_requested)
         view.remove_requested.connect(self._on_remove_requested)
-        view.score_clicked.connect(self.show_score_page)
         view.edge_added.connect(self._on_edge_added)
         view.edge_removed.connect(self._on_edge_removed)
         view.popout_requested.connect(self.open_canvas_window)
@@ -1149,9 +1065,6 @@ class StudioWindow(QMainWindow):
 
         self.param_form.param_edited.connect(self._on_param_edited)
 
-        self.expr_edit.textEdited.connect(self._on_expr_edited)
-        self.feature_combo.activated.connect(self._on_feature_chosen)
-        self.threshold_spin.valueChanged.connect(self._on_threshold_spin)
 
         self.btn_prev.clicked.connect(lambda: self.step_defect(-1))
         self.btn_next.clicked.connect(lambda: self.step_defect(+1))
@@ -1241,9 +1154,7 @@ class StudioWindow(QMainWindow):
     def _on_model_changed(self) -> None:
         """model 任何變動的統一入口（listener）。"""
         self._refresh_pipeline()
-        self._sync_score_widgets()
-        self.histogram.set_threshold(self.model.threshold)
-        self._refresh_bin_summary(self.model.threshold)
+        self._sync_decision_widgets()
         self._update_action_states()
         self._refresh_library_badges()
         self._refresh_region_button()
@@ -1251,10 +1162,7 @@ class StudioWindow(QMainWindow):
 
     def _refresh_all(self) -> None:
         self._refresh_pipeline()
-        self._sync_score_widgets()
-        self._refresh_feature_combo()
-        self.histogram.set_threshold(self.model.threshold)
-        self._refresh_bin_summary(self.model.threshold)
+        self._sync_decision_widgets()
         self._update_action_states()
         self._refresh_library_badges()
 
@@ -1472,7 +1380,6 @@ class StudioWindow(QMainWindow):
         for view in self._canvases():
             view.set_nodes(nodes, wires)
             view.set_selected(self.selected_node)
-            view.set_score_summary(self.model.expr, self.model.threshold)
 
     def _compiled_wiring(self):
         """畫布要畫的線 —— **引擎編出來的那張圖**，不是使用者手拉的那幾條。
@@ -1497,45 +1404,29 @@ class StudioWindow(QMainWindow):
                  for w in graph.wires]
         return wires, dict(graph.ports)
 
-    def _sync_score_widgets(self) -> None:
-        self._syncing = True
-        try:
-            if self.expr_edit.text() != self.model.expr:
-                self.expr_edit.setText(self.model.expr)
-            if float(self.threshold_spin.value()) != float(self.model.threshold):
-                self.threshold_spin.setValue(float(self.model.threshold))
-        finally:
-            self._syncing = False
-        self.pipeline.set_score_summary(self.model.expr, self.model.threshold)
+    def _sync_decision_widgets(self) -> None:
+        """直方圖那條門檻線 —— 現在它讀的是**判定卡的參數**（F9 Phase 3d）。
 
-    def _refresh_feature_combo(self) -> None:
-        self._syncing = True
-        try:
-            self.feature_combo.clear()
-            self.feature_combo.addItem(_FEATURE_PLACEHOLDER)
-            for name in self.model.available_features():
-                self.feature_combo.addItem(name)
-            self.feature_combo.setCurrentIndex(0)
-        finally:
-            self._syncing = False
+        沒有唯一答案時（一張判定卡都沒有，或有好幾張）畫**不畫**那條線。
+        以前 model 上恆有一個 ``threshold`` 欄位，所以線一定畫得出來；現在
+        「還沒有人做決定」是一個真的狀態，畫一條 0 的線會看起來像個真門檻。
+        """
+        thr = self.model.decision_threshold()
+        self.histogram.set_threshold(thr)
+        self._refresh_bin_summary(thr)
 
-    def _refresh_bin_summary(self, threshold: float) -> None:
-        if not self.trial_scores:
+    def _refresh_bin_summary(self, threshold: Optional[float]) -> None:
+        if not self.trial_scores or threshold is None:
             self.histogram.set_bin_summary(None)
             return
         self.histogram.set_bin_summary(
-            rebin(self.trial_scores, float(threshold), self.model.bins))
+            rebin(self.trial_scores, float(threshold),
+                  self.model.decision_bins()))
 
     # ==================================================================== #
     # 卡片庫 / 流程
     # ==================================================================== #
     def _on_add_requested(self, step_key: str) -> None:
-        if str(step_key) == _SCORE_LIBRARY_KEY:
-            # 「Score / Bin」不是可增刪的卡片 —— 每條 pipeline 固定有一張，
-            # 點它就是去編輯分數表達式與門檻（三段式的最後一段）。
-            self.show_score_page()
-            self._status("Editing the score / threshold")
-            return
         # 選著一張卡的時候，新的卡接在它後面、做在**它那條流**上（F7-18）。
         # 埠上的「+」被拿掉了（永遠掛在那裡太吵，使用者要的是從旁邊的卡片庫加），
         # 但它做對的那兩件事要留著：接上線，而且接在對的那條流上。
@@ -1811,7 +1702,10 @@ class StudioWindow(QMainWindow):
         except KeyError:
             describe = None
         streams = self.model.available_streams(before_node=node_id)
-        self.param_form.set_step(describe, node.params, streams)
+        # 判定卡的算式要挑特徵名 —— 給的是**這張卡上游**量得出來的那幾個
+        # （不含它自己吐的 score）。其他卡拿不到 expr 型別的參數，多傳無害。
+        feats = self.model.available_features(before_node=node_id)
+        self.param_form.set_step(describe, node.params, streams, feats)
         self.stack.setCurrentWidget(self.param_form)
         self._refresh_region_button()
         self._install_inspector(node.step)     # 右下角換成這張卡的儀表（F7-17）
@@ -1945,21 +1839,13 @@ class StudioWindow(QMainWindow):
     def _repaint_for_theme(self) -> None:
         """把在建構式裡吃過 token 的元件重建/重畫一次。"""
         self.library.set_steps(
-            visible_steps([s.describe() for s in list_steps()])
-            + [_SCORE_LIBRARY_ENTRY])
+            visible_steps([s.describe() for s in list_steps()]))
         self.library.refresh_colors()
         self._refresh_pipeline()
         self.gallery.refresh_styles()
         for w in (self.histogram, self.image_view, self.verdict,
                   self.feature_table, self.library, self.pipeline, self.gallery):
             w.update()
-
-    def show_score_page(self) -> None:
-        """切到分數編輯頁（順便刷新特徵下拉）。"""
-        self._refresh_feature_combo()
-        self._sync_score_widgets()
-        self.stack.setCurrentWidget(self.score_pane)
-        self.set_params_open(True)   # 分數面板本來就是「我要編」
 
     def show_param_page(self) -> None:
         self.stack.setCurrentWidget(self.param_form)
@@ -2013,47 +1899,11 @@ class StudioWindow(QMainWindow):
             return                       # 區域名不能當變數名 -> 安靜跳過
         self.param_form.set_step(
             get_step(node.step).describe(), node.params,
-            self.model.available_streams(before_node=node_id))
+            self.model.available_streams(before_node=node_id),
+            self.model.available_features(before_node=node_id))
         self._status("Results from this card will be named “%s_…” so they do "
                      "not collide with another card measuring a different "
                      "region." % wanted)
-
-    # ==================================================================== #
-    # 分數編輯
-    # ==================================================================== #
-    def _on_expr_edited(self, text: str) -> None:
-        if self._syncing:
-            return
-        self.model.set_expr(str(text))
-
-    def _on_feature_chosen(self, index: int) -> None:
-        """「插入特徵 ▾」：把特徵名插到表達式的游標位置。"""
-        if self._syncing or int(index) <= 0:
-            return
-        token = self.feature_combo.itemText(int(index))
-        self._syncing = True
-        try:
-            self.feature_combo.setCurrentIndex(0)
-        finally:
-            self._syncing = False
-        if not token:
-            return
-        text = self.expr_edit.text()
-        pos = self.expr_edit.cursorPosition()
-        pos = max(0, min(pos, len(text)))
-        new_text = text[:pos] + token + text[pos:]
-        self._syncing = True
-        try:
-            self.expr_edit.setText(new_text)
-            self.expr_edit.setCursorPosition(pos + len(token))
-        finally:
-            self._syncing = False
-        self.model.set_expr(new_text)
-
-    def _on_threshold_spin(self, value: float) -> None:
-        if self._syncing:
-            return
-        self.model.set_threshold(float(value))
 
     # ---- 直方圖門檻線 -----------------------------------------------------
     def _on_threshold_changed(self, value: float) -> None:
@@ -2062,8 +1912,15 @@ class StudioWindow(QMainWindow):
         self._status("Threshold %.3g (applied when you release the mouse)" % float(value))
 
     def _on_threshold_committed(self, value: float) -> None:
-        """放開滑鼠：這時才寫回 model（會觸發刷新與預覽）。"""
-        self.model.set_threshold(float(value))
+        """放開滑鼠：這時才寫回**判定卡**（會觸發刷新與預覽）。"""
+        ids = self.model.decide_nodes()
+        if len(ids) != 1:
+            self._status(
+                "Drag the threshold on the Decide card instead: this pipeline "
+                "has %d of them, so there is no single line to move."
+                % len(ids), "error")
+            return
+        self.model.set_decision_threshold(float(value))
         self._status("Threshold set to %.3g" % float(value))
 
     # ==================================================================== #
@@ -2416,7 +2273,8 @@ class StudioWindow(QMainWindow):
         node = self.model.nodes[node_id]
         self.param_form.set_step(
             get_step(node.step).describe(), node.params,
-            self.model.available_streams(before_node=node_id))
+            self.model.available_streams(before_node=node_id),
+            self.model.available_features(before_node=node_id))
         self._status("Template stored in this recipe — it repeats along %s. "
                      "Now mark the region on the cell with the Region "
                      "left/top/width/height sliders." % axis)
@@ -3023,8 +2881,7 @@ class StudioWindow(QMainWindow):
                              if r.get("ok") and r.get("score") is not None]
         edges, counts = histogram(self.trial_scores)
         self.histogram.set_data(edges, counts)
-        self.histogram.set_threshold(self.model.threshold)
-        self._refresh_bin_summary(self.model.threshold)
+        self._sync_decision_widgets()
         self._populate_gallery(results)
         self._refresh_inspector(self._last_result)   # 儀表吃的是整批（F7-17）
         self._update_action_states()

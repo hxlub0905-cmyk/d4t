@@ -285,6 +285,57 @@ class RunStore:
 # ---------------------------------------------------------------------------
 # rescore：改表達式/門檻不重跑影像
 # ---------------------------------------------------------------------------
+def _decision_spec(rdict: Dict[str, Any], run_id: str
+                   ) -> Tuple[Dict[str, Any], Any]:
+    """從存下來的 recipe JSON 找出「判定是怎麼下的」，並回一個寫回去的函式。
+
+    兩種形狀都要吃得下，因為 **資料庫裡的 recipe_json 是歷史快照，沒辦法遷移**：
+
+    * **判定卡**（F9 Phase 3d 起）—— ``nodes`` 裡 ``step == "adc"`` 的那一張。
+    * **``score`` 區塊**（舊 run）—— 那時候判定是 recipe 上的一個固定欄位。
+
+    多於一張判定卡就講清楚不要猜：rescore 只換一組數字，而「換哪一張的」
+    在有兩條分支的圖上沒有預設答案。
+    """
+    nodes = dict(rdict.get("nodes") or {})
+    adc_ids = sorted(nid for nid, nd in nodes.items()
+                     if str((nd or {}).get("step", "")) == "adc")
+    if len(adc_ids) > 1:
+        raise ValueError(
+            "the recipe of run '{}' has {} Decide cards ({}); rescore changes "
+            "one set of numbers and cannot tell which branch you mean"
+            .format(run_id, len(adc_ids), ", ".join(adc_ids)))
+
+    if adc_ids:
+        p = dict(nodes[adc_ids[0]].get("params") or {})
+        spec = {
+            "expr": str(p.get("expr", "") or ""),
+            "threshold": float(p.get("threshold", 0.0) or 0.0),
+            "bins": {"below": int(p.get("bin_below", 0)),
+                     "above": int(p.get("bin_above", 1))},
+        }
+
+        def write_back(updated: Dict[str, Any]) -> None:
+            b = dict(updated.get("bins") or {})
+            p.update({
+                "expr": str(updated.get("expr", "")),
+                "threshold": float(updated.get("threshold", 0.0)),
+                "bin_below": int(b.get("below", 0)),
+                "bin_above": int(b.get("above", 1)),
+            })
+            nodes[adc_ids[0]]["params"] = p
+            rdict["nodes"] = nodes
+
+        return spec, write_back
+
+    spec = dict(rdict.get("score") or {})
+
+    def write_back_legacy(updated: Dict[str, Any]) -> None:
+        rdict["score"] = updated
+
+    return spec, write_back_legacy
+
+
 def rescore(store: RunStore, run_id: str, *,
             expr: Optional[str] = None,
             threshold: Optional[float] = None,
@@ -316,18 +367,18 @@ def rescore(store: RunStore, run_id: str, *,
         rdict: Dict[str, Any] = json.loads(run["recipe_json"]) or {}
     except (ValueError, TypeError):
         rdict = {}
-    spec = dict(rdict.get("score") or {})
+    spec, write_back = _decision_spec(rdict, run_id)
     if expr is not None:
         spec["expr"] = str(expr)
     if threshold is not None:
         spec["threshold"] = float(threshold)
     if bins is not None:
         spec["bins"] = {str(k): int(v) for k, v in bins.items()}
-    if "expr" not in spec:
+    if not str(spec.get("expr", "") or ""):
         raise ValueError(
-            "the recipe of run '{}' has no score.expr; rescore needs an expression via expr="
-            .format(run_id))
-    rdict["score"] = spec
+            "the recipe of run '{}' has no Decide card with a score expression;"
+            " rescore needs an expression via expr=".format(run_id))
+    write_back(spec)
 
     expression = parse_expression(str(spec["expr"]))  # 語法錯誤 → 直接 raise（recipe 寫錯要讓人看到）
     thr = float(spec.get("threshold", 0.0))

@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
 from adept.core.pipeline import (          # noqa: E402 — Qt-free，可以直接 import
-    Recipe, RecipeNode, ScoreSpec, get_step, list_steps, validate,
+    Recipe, RecipeNode, get_step, list_steps, validate,
 )
 import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 
@@ -364,8 +364,7 @@ def _recipe(seq):
                                 params=get_step(key).validate_params({}))
         order.append(nid)
     return Recipe(recipe_id="combo", routes={"ebi_patch": order}, nodes=nodes,
-                  score=ScoreSpec(expr="0", threshold=0.0,
-                                  bins={"below": 0, "above": 1}))
+)
 
 
 def test_a_measure_card_that_needs_a_region_nobody_defines_is_caught(qapp):
@@ -381,8 +380,7 @@ def test_a_measure_card_that_needs_a_region_nobody_defines_is_caught(qapp):
     }
     recipe = Recipe(recipe_id="r", routes={"ebi_patch": ["load", "glv"]},
                     nodes=nodes,
-                    score=ScoreSpec(expr="1", threshold=0.5,
-                                    bins={"below": 0, "above": 1}))
+)
     codes = [i.code for i in validate(recipe, kind="ebi_patch")
              if i.level == "error"]
     assert "unknown-region" in codes
@@ -393,8 +391,7 @@ def test_a_measure_card_that_needs_a_region_nobody_defines_is_caught(qapp):
     ok = validate(Recipe(recipe_id="r",
                          routes={"ebi_patch": ["load", "roi", "glv"]},
                          nodes=nodes,
-                         score=ScoreSpec(expr="1", threshold=0.5,
-                                         bins={"below": 0, "above": 1})),
+),
                   kind="ebi_patch")
     assert [i.code for i in ok if i.level == "error"] == []
 
@@ -423,8 +420,7 @@ def test_measuring_two_regions_warns_instead_of_silently_losing_one(qapp):
     recipe = Recipe(
         recipe_id="two_roi",
         routes={"ebi_patch": ["load", "roiA", "roiB", "glvA", "glvB"]},
-        nodes=nodes, score=ScoreSpec(expr="glv_mean", threshold=0.0,
-                                     bins={"below": 0, "above": 1}))
+        nodes=nodes)
     issues = validate(recipe, kind="ebi_patch")
     collisions = [i for i in issues if i.code == "feature-collision"]
     assert len(collisions) == 1
@@ -522,8 +518,10 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
         if rest:
             dead_ends[key] = [(i.code, i.detail) for i in rest]
     assert not dead_ends, "這些卡片沒有可行的組合：%s" % sorted(dead_ends)
+    # 這個 repo 的 UI 用兩個記號標「這是一個控制項」：按鈕帶 ``…``（會開對話
+    # 框）、下拉帶 ``▾``。訊息裡出現其中一個，才代表它真的指得到畫面上的東西。
     for key, details in needs_setup.items():
         for detail in details:
-            assert "…" in detail or "..." in detail, (
+            assert any(m in detail for m in ("…", "...", "▾")), (
                 "%s 說它還沒設定完，但沒有指向任何一個按得下去的東西：%s"
                 % (key, detail))

@@ -14,7 +14,7 @@ import time
 
 import pytest
 
-from adept.core.pipeline import Recipe, RecipeNode, ScoreSpec
+from adept.core.pipeline import Recipe, RecipeNode
 from adept.core.store import RunStore, rescore
 
 
@@ -130,14 +130,17 @@ def test_save_run_accepts_recipe_object(tmp_path):
     recipe = Recipe(
         recipe_id="t_obj",
         routes={"ebi_patch": ["load"]},
-        nodes={"load": RecipeNode(id="load", step="load_patch", params={})},
-        score=ScoreSpec(expr="snr_max", threshold=3.0, bins={"below": 0, "above": 1}),
+        nodes={"load": RecipeNode(id="load", step="load_patch", params={}),
+               "d": RecipeNode(id="d", step="adc", params={
+                   "expr": "snr_max", "threshold": 3.0,
+                   "bin_below": 0, "bin_above": 1, "label": ""})},
     )
     with RunStore(str(tmp_path / "runs.db")) as store:
         run_id = store.save_run(recipe, _make_results(3))
         run = store.get_run(run_id)
         assert run["recipe_id"] == "t_obj"
-        assert json.loads(run["recipe_json"])["score"]["threshold"] == 3.0
+        stored = json.loads(run["recipe_json"])
+        assert stored["nodes"]["d"]["params"]["threshold"] == 3.0
 
 
 def test_list_runs_newest_first_without_recipe_json(tmp_path):

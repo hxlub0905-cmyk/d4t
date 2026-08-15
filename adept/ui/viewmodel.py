@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from adept.core.pipeline import (
-    ParamError, Recipe, RecipeNode, ScoreSpec, get_step, validate,
+    CATEGORY_ADC, ParamError, Recipe, RecipeNode, get_step, validate,
 )
 
 
@@ -33,9 +33,6 @@ class RecipeModel:
         #: 引擎那邊 ``execution_order`` 本來就是「route 相鄰對 ∪ edges」，
         #: 所以把 route 寫成拓撲順序與 edges 併存，語意一致且向後相容。
         self.edges: List[Tuple[str, str]] = []
-        self.expr = "0"
-        self.threshold = 0.0
-        self.bins = {"below": 0, "above": 1}
         self.dirty = False
         self._listeners: List[Callable[[], None]] = []
         #: 復原堆疊（F7-16）。整個編輯狀態的快照，不是「反向操作」——
@@ -96,8 +93,6 @@ class RecipeModel:
             "nodes": {nid: (n.step, dict(n.params), bool(n.enabled))
                       for nid, n in self.nodes.items()},
             "edges": [tuple(e) for e in self.edges],
-            "expr": self.expr, "threshold": self.threshold,
-            "bins": dict(self.bins),
         }
 
     def restore(self, snap: Dict[str, Any]) -> None:
@@ -112,9 +107,6 @@ class RecipeModel:
                                       enabled=enabled)
                       for nid, (step, params, enabled) in snap["nodes"].items()}
         self.edges = [tuple(e) for e in snap["edges"]]
-        self.expr = snap["expr"]
-        self.threshold = snap["threshold"]
-        self.bins = dict(snap["bins"])
 
     @contextmanager
     def compound(self, name: str = "compound"):
@@ -251,28 +243,67 @@ class RecipeModel:
             node.params = clean
             self._changed()
 
-    # ---- score ------------------------------------------------------------
-    def set_expr(self, expr: str) -> None:
-        if expr != self.expr:
-            self._push_undo("expr")
-            self.expr = expr
-            self._changed()
+    # ---- 判定（就是圖上的 adc 卡，不再是 model 上的三個欄位）----------------
+    def decide_nodes(self) -> List[str]:
+        """圖上的判定卡有哪些（執行順序）。"""
+        out: List[str] = []
+        for nid in self.node_order:
+            node = self.nodes.get(nid)
+            if node is None:
+                continue
+            try:
+                if get_step(node.step).category == CATEGORY_ADC:
+                    out.append(nid)
+            except Exception:                    # noqa: BLE001 — 未知卡片
+                continue
+        return out
 
-    def set_threshold(self, thr: float) -> None:
-        thr = float(thr)
-        if thr != self.threshold:
-            self._push_undo("threshold")
-            self.threshold = thr
-            self._changed()
+    def decision_threshold(self) -> Optional[float]:
+        """直方圖上那條線該畫在哪。
+
+        回 ``None`` = **沒有唯一答案**：一張判定卡都沒有，或有好幾張而使用者
+        還沒挑（呼叫端傳 ``node_id`` 指名）。畫一條 0 的線比不畫更糟 ——
+        它看起來像個真的門檻。
+        """
+        ids = self.decide_nodes()
+        if len(ids) != 1:
+            return None
+        return float(self.nodes[ids[0]].params.get("threshold", 0.0) or 0.0)
+
+    def decision_bins(self, node_id: Optional[str] = None) -> Dict[str, int]:
+        """``{"below": n, "above": m}``；沒有判定卡就回出廠值。"""
+        nid = node_id or (self.decide_nodes() or [None])[0]
+        if nid is None or nid not in self.nodes:
+            return {"below": 0, "above": 1}
+        p = self.nodes[nid].params
+        return {"below": int(p.get("bin_below", 0)),
+                "above": int(p.get("bin_above", 1))}
+
+    def set_decision_threshold(self, thr: float,
+                               node_id: Optional[str] = None) -> None:
+        """把門檻寫回判定卡的參數（走 :meth:`set_param`，復原/髒旗標照舊）。"""
+        nid = node_id or (self.decide_nodes() or [None])[0]
+        if nid is None:
+            return
+        self.set_param(nid, "threshold", float(thr))
 
     # ---- 查詢（給 UI 下拉）--------------------------------------------------
     def category_of(self, node_id: str) -> str:
         return get_step(self.nodes[node_id].step).category
 
-    def available_features(self, upto_node: Optional[str] = None) -> List[str]:
-        """route（到 upto_node 為止，含）會產出的特徵名，供表達式下拉。"""
+    def available_features(self, upto_node: Optional[str] = None,
+                           before_node: Optional[str] = None) -> List[str]:
+        """route 會產出的特徵名，供算式下拉。
+
+        ``upto_node`` = 到那張卡為止（**含**它自己）；
+        ``before_node`` = 到那張卡為止（**不含**它自己）—— 判定卡問的是這個：
+        它自己吐的 ``score`` 出現在自己的變數清單裡只會讓人以為那是可以用的。
+        """
+        stop_before = str(before_node) if before_node else None
         feats: List[str] = []
         for nid in self.node_order:
+            if stop_before is not None and nid == stop_before:
+                break
             node = self.nodes[nid]
             if not node.enabled:
                 continue
@@ -381,8 +412,6 @@ class RecipeModel:
             nodes={nid: RecipeNode(id=nid, step=n.step, params=dict(n.params),
                                    enabled=n.enabled)
                    for nid, n in self.nodes.items()},
-            score=ScoreSpec(expr=self.expr, threshold=self.threshold,
-                            bins=dict(self.bins)),
             version=self.version, author=self.author, description=self.description,
         )
 
@@ -401,9 +430,6 @@ class RecipeModel:
         m.nodes = {nid: RecipeNode(id=nid, step=n.step, params=dict(n.params),
                                    enabled=n.enabled)
                    for nid, n in recipe.nodes.items() if nid in set(m.node_order)}
-        m.expr = recipe.score.expr
-        m.threshold = float(recipe.score.threshold)
-        m.bins = dict(recipe.score.bins)
         m.dirty = False
         m.clear_history()
         return m

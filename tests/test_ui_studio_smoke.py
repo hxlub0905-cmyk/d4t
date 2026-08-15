@@ -132,9 +132,10 @@ def test_load_dataset_and_recipe(window, synlot):
     # 標題帶 recipe id，狀態列有講人話
     assert "die_to_die_basic" in window.windowTitle()
     assert window.status_text()
-    # Score/Bin 尾卡摘要跟著 model 走
-    summary = window.pipeline.score_summary_text()
-    assert recipe.score.expr in summary and "50" in summary
+    # 判定是畫布上的一張卡（F9 Phase 3d）—— 以前它是畫布角落的一行摘要，
+    # 而摘要是那個「固定欄位」在畫布上唯一的影子。現在它有節點、有埠、有線。
+    decide = [nid for nid, n in window.model.nodes.items() if n.step == "adc"]
+    assert decide and set(decide) <= set(window.pipeline.node_ids())
     # 節點摘要 = 非預設參數的 k=v（最多 3 個）—— F7-6 起節點是自繪圖元
     assert "window=15" in window.pipeline.card("snr").info["summary"]
 
@@ -261,9 +262,11 @@ def test_mouse_only_pipeline_build(qapp):
         win.pipeline.remove_requested.emit("load_patch")
         assert win.model.node_order == ["normalize"]
 
-        # 點 Score 尾卡 → 換到分數編輯頁
-        win.pipeline.score_clicked.emit()
-        assert win.stack.currentWidget() is win.score_pane
+        # 判定卡從卡片庫加進來，跟其他卡走**完全一樣**的那條路（F9 Phase 3d）——
+        # 以前它是畫布角落一塊點得開的固定區域，配一個自己的編輯頁。
+        win.library.add_requested.emit("adc")
+        assert "adc" in [n.step for n in win.model.nodes.values()]
+        assert win.stack.currentWidget() is win.param_form
     finally:
         win.close()
 
@@ -291,22 +294,25 @@ def test_threshold_live_preview_vs_commit(window, synlot):
         window.run_trial(8, workers=1, sync=True)
 
     window._on_threshold_committed(42.5)
-    assert window.model.threshold == pytest.approx(42.5)
-    assert window.model.to_recipe().score.threshold == pytest.approx(42.5)
-    assert window.threshold_spin.value() == pytest.approx(42.5)
+    # 門檻住在判定卡的參數裡（F9 Phase 3d）—— 以前它是 model 上的一個欄位，
+    # 而且畫面上有兩個地方可以改（分數頁的 spinbox 與直方圖）。
+    decide = window.model.decide_nodes()[0]
+    assert window.model.decision_threshold() == pytest.approx(42.5)
+    assert window.model.to_recipe().nodes[decide].params["threshold"] \
+        == pytest.approx(42.5)
 
     # 拖曳中（changed）只重算 bin 摘要，絕對不能動 model
-    before = window.model.threshold
+    before = window.model.decision_threshold()
     window._on_threshold_changed(77.25)
-    assert window.model.threshold == pytest.approx(before)
+    assert window.model.decision_threshold() == pytest.approx(before)
     live = window.histogram.bin_summary_text()
     assert live == "   ".join(
         "bin %s=%s" % (k, v)
         for k, v in sorted(vm_mod.rebin(window.trial_scores, 77.25,
-                                        window.model.bins).items()))
+                                        window.model.decision_bins()).items()))
 
     window._on_threshold_committed(50.0)
-    assert window.model.threshold == pytest.approx(50.0)
+    assert window.model.decision_threshold() == pytest.approx(50.0)
 
 
 # --------------------------------------------------------------------------- #
@@ -322,8 +328,11 @@ def test_save_recipe_round_trip(window, synlot, tmp_path):
 
     loaded = Recipe.load(str(out))
     assert loaded.routes[window.model.kind] == window.model.node_order
-    assert loaded.score.expr == window.model.expr
-    assert loaded.score.threshold == pytest.approx(window.model.threshold)
+    decide = window.model.decide_nodes()[0]
+    assert loaded.nodes[decide].params["expr"] \
+        == window.model.nodes[decide].params["expr"]
+    assert loaded.nodes[decide].params["threshold"] \
+        == pytest.approx(window.model.decision_threshold())
     assert sorted(loaded.nodes) == sorted(window.model.nodes)
     assert loaded.nodes["snr"].params["window"] == \
         window.model.nodes["snr"].params["window"]

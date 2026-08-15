@@ -62,11 +62,14 @@ def test_roundtrip_with_example_recipe():
     assert m.kind == "ebi_patch" and not m.dirty
     out = m.to_recipe()
     assert out.routes["ebi_patch"] == recipe.routes["ebi_patch"]
-    assert out.score.expr == recipe.score.expr
     issues = m.validate()
     assert not [i for i in issues if i.level == "error"]
-    m.set_threshold(60.0)
-    assert m.dirty and m.to_recipe().score.threshold == 60.0
+
+    # 門檻住在判定卡的參數裡（F9 Phase 3d），不再是 model 上的一個欄位。
+    assert len(m.decide_nodes()) == 1
+    m.set_decision_threshold(60.0)
+    assert m.dirty and m.decision_threshold() == 60.0
+    assert m.to_recipe().nodes[m.decide_nodes()[0]].params["threshold"] == 60.0
 
 
 def test_histogram_and_rebin():

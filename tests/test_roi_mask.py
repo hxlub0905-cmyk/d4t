@@ -14,7 +14,7 @@ import pytest
 
 import adept.core.steps  # noqa: F401 — 註冊卡片
 from adept.core.pipeline.context import Context
-from adept.core.pipeline.recipe import Recipe, RecipeNode, ScoreSpec, validate
+from adept.core.pipeline.recipe import Recipe, RecipeNode, validate
 from adept.core.pipeline.step import REGISTRY, StepError, get_step
 
 H = W = 128
@@ -82,8 +82,7 @@ def test_a_region_nobody_defines_is_caught_by_lint():
     rec = Recipe(
         recipe_id="t", routes={"ebi_patch": ["load", "m"]},
         nodes={"load": RecipeNode("load", "load_patch", {}),
-               "m": RecipeNode("m", "roi_mask", {"regions": "nope"})},
-        score=ScoreSpec(expr="1", threshold=0.0, bins={"below": 0, "above": 1}))
+               "m": RecipeNode("m", "roi_mask", {"regions": "nope"})})
     codes = {i.code for i in validate(rec, registry=REGISTRY)}
     assert "unknown-region" in codes
 
