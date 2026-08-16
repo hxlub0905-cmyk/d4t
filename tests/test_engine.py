@@ -305,3 +305,111 @@ def test_result_to_json_dict_failure(dummy_steps):
     assert d["ok"] is False
     assert d["score"] is None and d["bin"] is None
     assert "boom" in d["error"]
+
+
+# ---------------------------------------------------------------------------
+# F9-2：卡片只看得到自己宣告的輸入
+# ---------------------------------------------------------------------------
+def test_a_card_cannot_see_a_stream_it_did_not_declare():
+    """偷讀一條沒宣告的流 → 當場拿到帶說明的錯誤，而不是安靜地讀到。
+
+    這是 F9-2 真正改掉的東西。以前是一個 ``ctx`` 從頭傳到尾，所以每張卡都
+    看得到「到目前為止的所有流」——「偷讀」根本不會有症狀：**畫布上不會有那條
+    線，使用者於是看不出兩張卡有關係**，而改了上游那張，下游的數字會跟著變。
+
+    這條測試如果被拿掉或改成寬鬆的，F9-5 的分支就會**安靜地錯**：兩條支線
+    互相看得到對方的流。
+    """
+    keys = ["t_f9_load", "t_f9_peeker"]
+    for k in keys:
+        REGISTRY.pop(k, None)
+
+    @register_step
+    class TF9Load(Step):
+        key = "t_f9_load"
+        label = "測試載入"
+        category = CATEGORY_IMAGE
+        help = "測試用：寫 test 與 secret 兩條流"
+        writes = ["test", "secret"]
+
+        def run(self, ctx: Context, params) -> Context:
+            ctx.set_image("test", np.zeros((4, 4), np.float32))
+            ctx.set_image("secret", np.ones((4, 4), np.float32))
+            return ctx
+
+    @register_step
+    class TF9Peeker(Step):
+        key = "t_f9_peeker"
+        label = "偷看的卡"
+        category = CATEGORY_ALGO
+        help = "測試用：宣告只讀 test，實際去讀 secret"
+        reads = ["test"]                       # ← 宣告
+        features_out = ["peeked"]
+
+        def run(self, ctx: Context, params) -> Context:
+            ctx.add_feature("peeked", float(ctx.require_image("secret").mean()))
+            return ctx                          # ← 實際（沒宣告）
+
+    try:
+        rec = make_recipe(
+            route=("nload", "npeek"),
+            nodes={"nload": RecipeNode("nload", "t_f9_load", {}),
+                   "npeek": RecipeNode("npeek", "t_f9_peeker", {})},
+            expr="0")
+        r = run_defect(rec, make_item(), "ebi_patch")
+
+        assert r.ok is False, "偷讀沒宣告的流應該當場失敗"
+        assert "secret" in r.error
+        # 訊息要講得出「這張卡看得到的是什麼」——而那份清單只有它宣告的 test
+        assert "'test'" in r.error and "secret'" in r.error
+        assert "peeked" not in (r.features or {}), "失敗的卡不該留下特徵"
+    finally:
+        for k in keys:
+            REGISTRY.pop(k, None)
+
+
+def test_a_card_still_sees_every_stream_it_did_declare():
+    """反面：宣告了的照樣拿得到 —— 隔離不是把卡片餓死。"""
+    keys = ["t_f9_load2", "t_f9_honest"]
+    for k in keys:
+        REGISTRY.pop(k, None)
+
+    @register_step
+    class TF9Load2(Step):
+        key = "t_f9_load2"
+        label = "測試載入"
+        category = CATEGORY_IMAGE
+        help = "測試用：寫 test 與 ref"
+        writes = ["test", "ref"]
+
+        def run(self, ctx: Context, params) -> Context:
+            ctx.set_image("test", np.zeros((4, 4), np.float32))
+            ctx.set_image("ref", np.full((4, 4), 3.0, np.float32))
+            return ctx
+
+    @register_step
+    class TF9Honest(Step):
+        key = "t_f9_honest"
+        label = "老實的卡"
+        category = CATEGORY_ALGO
+        help = "測試用：宣告讀 test 與 ref，也真的只讀這兩條"
+        reads = ["test", "ref"]
+        features_out = ["both"]
+
+        def run(self, ctx: Context, params) -> Context:
+            ctx.add_feature("both", float(ctx.require_image("test").mean()
+                                          + ctx.require_image("ref").mean()))
+            return ctx
+
+    try:
+        rec = make_recipe(
+            route=("nload", "nhonest"),
+            nodes={"nload": RecipeNode("nload", "t_f9_load2", {}),
+                   "nhonest": RecipeNode("nhonest", "t_f9_honest", {})},
+            expr="both")
+        r = run_defect(rec, make_item(), "ebi_patch")
+        assert r.ok is True, r.error
+        assert r.features["both"] == 3.0
+    finally:
+        for k in keys:
+            REGISTRY.pop(k, None)

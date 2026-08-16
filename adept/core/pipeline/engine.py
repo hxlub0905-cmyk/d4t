@@ -75,6 +75,37 @@ def _finish(defect_id: str, ctx: Context, traces: List[StepTrace],
         traces=traces, context=(ctx if keep_context else None))
 
 
+def _local_view(master: Context, visible: Dict[str, Any]) -> Context:
+    """給一張卡看的 ``Context``：**只有它宣告要讀的那幾條影像流**。
+
+    F9-2（2026-08-16）。以前是一個 ``ctx`` 從頭傳到尾，所以每張卡都看得到
+    「到目前為止的所有流」—— 那正是分支做不到的原因，也是「卡片偷讀一條沒宣告
+    的流」不會被發現的原因（畫布上不會有那條線，使用者於是看不出兩張卡有關係）。
+
+    **只有 ``images`` 是這張卡自己的**；``rois`` / ``labels`` / ``features`` /
+    ``meta`` 仍然共用同一份（F9-3 才處理 feature 的歸屬）。dict 是直接共用參考，
+    所以卡片往 features/meta 寫的東西會直接落到 master 上；``rois`` / ``labels``
+    是**可能被整個換掉**的欄位（``set_roi`` 會 rebind），所以跑完要抄回去。
+    """
+    return Context(images=dict(visible), rois=master.rois, labels=master.labels,
+                   features=master.features, meta=master.meta,
+                   track_changes=master.track_changes)
+
+
+def _visible_streams(master: Context, step_cls: Type[Step],
+                     params: Dict[str, Any]) -> Dict[str, Any]:
+    """這張卡宣告要讀的流裡，**目前真的存在**的那些。
+
+    宣告了但不存在的不補 —— 卡片自己去 ``require_image`` 會拿到帶說明的
+    ``ContextError``，而那句話正好是使用者需要的（「這條流不存在，現有的是…」）。
+    """
+    out: Dict[str, Any] = {}
+    for name in step_cls.resolve_reads(params):
+        if name in master.images:
+            out[name] = master.images[name]
+    return out
+
+
 def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
                ctx: Context, traces: List[StepTrace],
                registry: Dict[str, Type[Step]],
@@ -106,9 +137,20 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
                     node.step,
                     f"unknown step '{node.step}'; registered: {sorted(registry)}")
             params = step_cls.validate_params(node.params)
-            ret = step_cls().run(ctx, params)
+            # F9-2：卡片看到的是**照它宣告的入口組出來的** Context，不是全域表。
+            local = _local_view(ctx, _visible_streams(ctx, step_cls, params))
+            ret = step_cls().run(local, params)
             if isinstance(ret, Context):
-                ctx = ret
+                local = ret
+            # 產出收回主表。目前仍然是「名字 → 最後一個寫它的人」（跟 F9 之前
+            # 完全一樣），所以快取、預覽、trace、黃金值全部不動。
+            # F9-5 之後這裡會改成收成 (node_id, out_name)。
+            for name, arr in local.images.items():
+                ctx.images[name] = arr
+            # rois / labels 是可能被整個換掉的欄位，抄回去（features/meta 共用
+            # 同一個 dict，卡片寫進去的已經在 master 上了）。
+            ctx.rois = local.rois
+            ctx.labels = local.labels
         except Exception as e:  # StepError / ContextError / ParamError / 其他
             ms = (time.perf_counter() - t0) * 1000.0
             traces.append(StepTrace(
