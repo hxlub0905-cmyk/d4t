@@ -125,6 +125,23 @@ def _cmd_run(args: argparse.Namespace) -> int:
         for r in ok:
             bins[r.get("bin")] = bins.get(r.get("bin"), 0) + 1
         print("bin 分佈：" + " · ".join(f"bin {b}={c}" for b, c in sorted(bins.items())))
+    gt_path, gt = _find_ground_truth(getattr(args, "ground_truth", None),
+                                     str(args.klarf))
+    if gt:
+        from adept.core.export import summarize
+
+        g = (summarize(payload, ground_truth=gt).get("ground_truth") or {})
+        print(f"\n對照 ground truth（{gt_path}）：")
+        if g.get("n_evaluated"):
+            print(f"  正確率 {g.get('accuracy', 0):.1%}　"
+                  f"抓漏率 {g.get('miss_rate', 0):.1%}"
+                  f"（漏抓 {g.get('fn', 0)} 顆真缺陷）　"
+                  f"誤殺率 {g.get('false_alarm_rate', 0):.1%}"
+                  f"（誤判 {g.get('fp', 0)} 顆假點）")
+        else:
+            print("  這一批沒有一顆對得上 ground truth 裡的 defect id —— "
+                  "是不是對到別的 lot 了？")
+
     for r in fail[:5]:
         print(f"  ✗ {r.get('defect_id')}: {r.get('error')}")
 
@@ -297,6 +314,36 @@ def _cmd_gui(_args: argparse.Namespace) -> int:
     return gui_main([])
 
 
+def _find_ground_truth(arg, klarf_path: str):
+    """``(用了哪個檔, 內容)``；沒有就 ``("", None)``。
+
+    ``--ground-truth`` 沒給時**自動找 KLARF 旁邊的 ``ground_truth.json``** ——
+    ``tools/make_sample.py`` 就是寫在那裡，而開發迴圈裡「跑一次看準不準」是最
+    常做的事，每次都要多打一個路徑是白費力氣。
+
+    自動找到的一定會**把路徑印出來**：猜對了要讓人看得見猜的是什麼，
+    猜錯了（例如 lot 資料夾裡剛好有一個別的 ground_truth.json）才有機會發現。
+    ``--ground-truth none`` 關掉自動尋找。
+    """
+    import os
+
+    text = str(arg or "").strip()
+    if text.lower() in ("none", "off", "no"):
+        return "", None
+    if text:
+        with open(text, encoding="utf-8") as f:
+            return text, json.load(f)
+    for folder in (os.path.dirname(os.path.abspath(str(klarf_path))),):
+        guess = os.path.join(folder, "ground_truth.json")
+        if os.path.isfile(guess):
+            try:
+                with open(guess, encoding="utf-8") as f:
+                    return guess, json.load(f)
+            except Exception:              # noqa: BLE001 — 找不到就算了
+                return "", None
+    return "", None
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         prog="adept",
@@ -323,6 +370,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_run.add_argument("--cache", default=None, help="影像段快取資料夾（改算法段參數重跑會大幅加速）")
     p_run.add_argument("--db", default=None, help="存入批次歷史 SQLite（例：~/.adept/runs.db）")
     p_run.add_argument("--notes", default=None, help="批次備註")
+    p_run.add_argument(
+        "--ground-truth", default=None, metavar="JSON",
+        help=("ground_truth.json（有的話跑完直接印正確率/抓漏率/誤殺率）。"
+              "不給的話會自動找 KLARF 旁邊的 ground_truth.json；"
+              "用 --ground-truth none 可以關掉。"))
     p_run.set_defaults(func=_cmd_run)
 
     p_runs = sub.add_parser("runs", help="列出批次歷史")

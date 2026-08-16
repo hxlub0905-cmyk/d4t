@@ -300,10 +300,13 @@ def test_threshold_live_preview_vs_commit(window, synlot):
     window._on_threshold_changed(77.25)
     assert window.model.threshold == pytest.approx(before)
     live = window.histogram.bin_summary_text()
-    assert live == "   ".join(
+    # 前綴比對而不是整句相等：合成資料旁邊就有 ground_truth.json，於是同一行
+    # 後面還會接一段正確率（Phase 1）。這一條要驗的是**bin 數跟著門檻走**，
+    # 不是那一行長什麼樣子 —— 整句相等會讓它每加一個讀數就紅一次。
+    assert live.startswith("   ".join(
         "bin %s=%s" % (k, v)
         for k, v in sorted(vm_mod.rebin(window.trial_scores, 77.25,
-                                        window.model.bins).items()))
+                                        window.model.bins).items())))
 
     window._on_threshold_committed(50.0)
     assert window.model.threshold == pytest.approx(50.0)

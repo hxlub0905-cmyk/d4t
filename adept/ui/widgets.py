@@ -3066,13 +3066,21 @@ class HistogramWidget(QWidget):
     def threshold(self) -> Optional[float]:
         return self._threshold
 
-    def set_bin_summary(self, bins: Optional[Dict[int, int]]) -> None:
-        """``{0: 812, 1: 96}`` -> 「bin 0=812   bin 1=96」。"""
-        if not bins:
-            self._bin_text = ""
-        else:
-            self._bin_text = "   ".join(
-                "bin %s=%s" % (k, bins[k]) for k in sorted(bins))
+    def set_bin_summary(self, bins: Optional[Dict[int, int]],
+                        extra: str = "") -> None:
+        """``{0: 812, 1: 96}`` -> 「bin 0=812   bin 1=96」。
+
+        ``extra`` 接在後面（Phase 1：有 ground truth 時的正確率／抓漏／誤殺）。
+        它跟 bin 數同一行，因為使用者是**同時**在看這兩件事：拖門檻線的時候，
+        「幾顆進了哪一邊」與「這樣判準不準」要一起變，分成兩處就得來回看。
+        """
+        parts = []
+        if bins:
+            parts.append("   ".join("bin %s=%s" % (k, bins[k])
+                                    for k in sorted(bins)))
+        if str(extra or "").strip():
+            parts.append(str(extra).strip())
+        self._bin_text = "      ".join(parts)
         self.update()
 
     def bin_summary_text(self) -> str:

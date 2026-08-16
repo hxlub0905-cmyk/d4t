@@ -470,6 +470,41 @@ def histogram(scores: Sequence[float], n_bins: int = 24,
     return edges, counts
 
 
+def accuracy_at(results: Sequence[Dict[str, Any]], threshold: float,
+                bins: Optional[Dict[str, int]] = None,
+                ground_truth: Optional[Dict[Any, Any]] = None
+                ) -> Optional[Dict[str, Any]]:
+    """這個門檻下的正確率／抓漏率／誤殺率；沒有 ground truth 回 ``None``。
+
+    為什麼要有這個函式（Phase 1）
+    ----------------------------
+    調參迴圈裡使用者拖著門檻線看直方圖，但直方圖只講得出「分佈」——
+    **講不出「這樣調是變好還變壞」**。而「分類準確度」正是這個工具的 KPI。
+    沒有它，「engine 用好了」是一個不可驗證的命題：改完一張卡只知道測試沒紅，
+    不知道判得更準還是更差。
+
+    重算走 :func:`~adept.core.export.summarize`（跟 CLI／Excel 報表同一份邏輯，
+    不另外寫一份會漂移的），只是先把 bin 按新門檻換掉 —— **不重跑任何影像**，
+    所以拖門檻線是即時的。
+    """
+    if not ground_truth or not results:
+        return None
+    from adept.core.export import summarize
+
+    bins = bins or {"below": 0, "above": 1}
+    rebinned = []
+    for r in results:
+        s_ = r.get("score")
+        if s_ is None or (isinstance(s_, float)
+                          and (math.isnan(s_) or math.isinf(s_))):
+            b = None
+        else:
+            b = bins["below"] if float(s_) < threshold else bins["above"]
+        rebinned.append({"defect_id": r.get("defect_id"), "ok": r.get("ok", True),
+                         "bin": b, "score": s_})
+    return summarize(rebinned, ground_truth=ground_truth).get("ground_truth")
+
+
 def rebin(scores: Sequence[Optional[float]], threshold: float,
           bins: Optional[Dict[str, int]] = None) -> Dict[int, int]:
     """依門檻重算 bin 計數（拖門檻線時即時呼叫；不觸碰影像）。"""

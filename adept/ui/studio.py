@@ -64,6 +64,7 @@ tests/test_ui_studio_m5.py）：
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -114,7 +115,7 @@ from .scope import (
     is_supported_kind, recipe_is_supported, unsupported_kind_message,
     visible_steps,
 )
-from .viewmodel import RecipeModel, histogram, rebin
+from .viewmodel import RecipeModel, accuracy_at, histogram, rebin
 from .theme import DEFAULT_THEME, THEMES, apply_theme, current_theme
 from .welcome import (
     RecipeLibraryDialog, WelcomeDialog, save_theme, welcome_disabled,
@@ -418,6 +419,9 @@ class StudioWindow(QMainWindow):
         self.defect_index: int = 0
         self.selected_node: Optional[str] = None
         self.recipe_path: Optional[str] = None
+        #: 這批資料的 ground truth（``{defect_id: {"is_real": bool}}``）。
+        #: 載資料集時自動找 KLARF 旁邊的 ``ground_truth.json``；沒有就 None。
+        self.ground_truth: Optional[Dict[Any, Any]] = None
         #: ``_point_at_stream`` 剛剛把線綁到哪個參數（F9-5b 的 ``dst_in``）。
         #: 它是那個函式的第二個回傳值，用屬性傳是為了不動既有呼叫端的形狀。
         self._bound_param: str = ""
@@ -1524,7 +1528,47 @@ class StudioWindow(QMainWindow):
             self.histogram.set_bin_summary(None)
             return
         self.histogram.set_bin_summary(
-            rebin(self.trial_scores, float(threshold), self.model.bins))
+            rebin(self.trial_scores, float(threshold), self.model.bins),
+            extra=self._accuracy_text(float(threshold)))
+
+    def _accuracy_text(self, threshold: float) -> str:
+        """有 ground truth 時，這個門檻下的正確率／抓漏／誤殺（一行字）。
+
+        沒有 ground truth 就回空字串 —— **不要放一行「N/A」**：那會佔掉版面
+        而且每次都在提醒使用者少了一個他可能根本沒有的東西。
+        """
+        g = accuracy_at(self.trial_results, threshold, self.model.bins,
+                        self.ground_truth)
+        if not g or not g.get("n_evaluated"):
+            return ""
+        return ("正確率 %.0f%%  漏抓 %d  誤殺 %d"
+                % (100.0 * float(g.get("accuracy") or 0.0),
+                   int(g.get("fn") or 0), int(g.get("fp") or 0)))
+
+    def _load_ground_truth_beside(self, klarf_path: Any) -> str:
+        """找 KLARF 旁邊的 ``ground_truth.json``；回傳用了哪個檔（沒有回 ""）。
+
+        自動找是因為開發／驗證迴圈裡「跑一次看準不準」是最常做的事，而
+        ``tools/make_sample.py`` 就是把它寫在那裡。找到一定在狀態列講出來 ——
+        猜對了要讓人看得見猜的是什麼，猜錯了才有機會發現。
+        """
+        self.ground_truth = None
+        try:
+            folder = os.path.dirname(os.path.abspath(str(klarf_path)))
+            guess = os.path.join(folder, "ground_truth.json")
+            if not os.path.isfile(guess):
+                return ""
+            with open(guess, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and data:
+                self.ground_truth = data
+                return guess
+        # 只吞「檔案的問題」（不存在、讀不動、不是 JSON）。以前這裡是 bare
+        # ``except Exception``，於是 ``json`` 忘了 import 也只是安靜地當成
+        # 「這份資料沒有答案卷」—— 找不到跟寫錯了長得一模一樣。
+        except (OSError, ValueError, UnicodeDecodeError):
+            self.ground_truth = None
+        return ""
 
     # ==================================================================== #
     # 卡片庫 / 流程
@@ -2153,8 +2197,19 @@ class StudioWindow(QMainWindow):
         warn = list(getattr(dataset, "warnings", []) or [])
         msg = "Loaded %d defects (input type %s)" % (
             len(items), getattr(dataset, "kind", "?"))
+        # 換一份資料集就換一份答案卷 —— 上一份的 ground truth 留著的話，
+        # 狀態列會拿 A 的答案去對 B 的結果，而那個數字看起來完全正常。
+        gt = self._load_ground_truth_beside(
+            getattr(getattr(dataset, "klarf", None), "source_path", "") or "")
+        # 撿到哪一份答案卷要**留在畫面上**，不能只在狀態列講一次 —— 載完就接著
+        # 算預覽，那句話幾毫秒後就被蓋掉了。直方圖旁邊的正確率是它唯一的用處，
+        # 所以把「拿什麼對的」掛在同一個東西的 tooltip 上。
+        self.histogram.setToolTip(
+            "Accuracy is measured against %s" % gt if gt else "")
         if warn:
             msg += "   ! %s" % warn[0]
+        if gt:
+            msg += "   (ground truth: %s)" % os.path.basename(gt)
         self._status(msg)
         if items:
             self.refresh_preview(force=False)
