@@ -1,16 +1,18 @@
-# F9-8：快取看得見線、停用的卡沿線讓路 — authored 2026-08-16.
-"""分支之下，兩個「跑得完、有數字、而且是錯的」的路徑。
+# F9-8／F9-10：快取看得見線、快照存得下身分、停用的卡沿線讓路 — 2026-08-16.
+"""分支之下，三個「跑得完、有數字、而且是錯的」的路徑。
 
-兩個 bug 同一個病根：F9 把影像流的身分改成 ``(節點, 埠)`` 了，但**快取的簽章**
-與**停用節點的退路**這兩處仍然用「全域名字」在想事情。
+同一個病根：F9 把影像流的身分改成 ``(節點, 埠)`` 了，但**快取的簽章**、
+**快取的內容**與**停用節點的退路**這三處仍然用「全域名字」在想事情。
 
-1. **改一條線不會讓快取失效。** 簽章只算 node + params，而在畫布上把線從 A
-   改接到 B 可以完全不動任何參數（兩邊都叫 ``ref``）。使用者的體感是
+1. **改一條線不會讓快取失效**（F9-8）。簽章只算 node + params，而在畫布上把線
+   從 A 改接到 B 可以完全不動任何參數（兩邊都叫 ``ref``）。使用者的體感是
    「我改了接線、重跑、數字沒動」—— 而他會以為是自己改錯了。
-2. **停用分支中間那張卡，下游會去吃另一支的資料。** 被停用的節點沒有產出，
-   而以前查不到就退回「最後一個寫這個名字的人」＝ 隔壁那一支。
+2. **同一份分支 recipe 跑第二次，數字會變**（F9-10）。快照存的是 ``images``
+   ＝「名字 → 最後一個寫它的人」，分支之後同一個名字有好幾張圖。
+3. **停用分支中間那張卡，下游會去吃另一支的資料**（F9-8）。被停用的節點沒有
+   產出，而以前查不到就退回「最後一個寫這個名字的人」＝ 隔壁那一支。
 
-兩條都用「一支 ×3、一支 ×5」的假卡片驗 —— 乘法讓「這一支到底吃到誰的輸出」
+全部用「一支 ×3、一支 ×5」的假卡片驗 —— 乘法讓「這一支到底吃到誰的輸出」
 一眼看得出來。
 """
 from __future__ import annotations
@@ -173,6 +175,65 @@ def test_a_line_after_the_checkpoint_does_not_invalidate_the_image_cache(cards):
                 + [Edge("x5", "m3", src_out="ref", dst_in="source")])
     assert (image_segment_signature(a, "ebi_patch")[0]
             == image_segment_signature(b, "ebi_patch")[0])
+
+
+# --------------------------------------------------------------------------- #
+# 1b. 分支 + 快取：冷跑要等於熱跑（F9-10）
+# --------------------------------------------------------------------------- #
+def test_a_branching_recipe_gives_the_same_numbers_hot_and_cold(cards, tmp_path):
+    """**同一份 recipe 跑第二次，數字不可以變。**
+
+    快照以前只存 ``images``（名字 → 最後一個寫它的人）。分支之後同一個名字有
+    好幾張圖，快照只留得下最後那張，於是熱跑時指向快取段內某個節點的線查不到，
+    退回最後寫者 ＝ 隔壁那一支：``m3_mean`` 冷跑 3.0、熱跑 5.0，兩邊都跑得完。
+    """
+    r = _recipe(_ROUTE, _branch(), _BRANCH_EDGES)
+    cache = StageCache(str(tmp_path))
+    cold = run_defect_cached(r, _Item(), "ebi_patch", cache, "tok").features
+    warm = run_defect_cached(r, _Item(), "ebi_patch", cache, "tok").features
+
+    assert cold["m3_mean"] == 3.0 and cold["mean"] == 5.0
+    assert warm == cold, "同一份 recipe 跑第二次算出不一樣的數字"
+
+
+def test_a_stream_the_cache_did_not_keep_is_a_miss_not_a_guess(cards, tmp_path):
+    """**「缺了就重算」那條防線。**
+
+    快照只存「當時有人要的那幾張」，而「誰要」是由 checkpoint **之後**的線決定
+    的 —— 那些線刻意不進簽章（不然改一下量測卡的接線就要整段重算影像）。
+    所以會出現「快取有效、但這次要的那張沒存」：那時候**一定要當 miss 重算**，
+    退回 ``ctx.images`` 就是安靜地拿到隔壁那一支。
+    """
+    a = _recipe(_ROUTE, _branch(), _BRANCH_EDGES)
+    # 只把 m5 的線從 x5 改接到 x3 —— 那是算法段的線，簽章一個字都不會變
+    b = _recipe(_ROUTE, _branch(),
+                [e for e in _BRANCH_EDGES if e.dst != "m5"]
+                + [Edge("x3", "m5", src_out="ref", dst_in="source")])
+    assert (image_segment_signature(a, "ebi_patch")[0]
+            == image_segment_signature(b, "ebi_patch")[0]),         "這條測試的前提是「簽章一樣」—— 不然它驗不到那條防線"
+
+    cache = StageCache(str(tmp_path))
+    assert run_defect_cached(a, _Item(), "ebi_patch", cache,
+                             "tok").features["mean"] == 5.0
+    assert run_defect_cached(b, _Item(), "ebi_patch", cache,
+                             "tok").features["mean"] == 3.0,         "拿了快取裡沒有的那張圖去頂替 —— 應該當 miss 重算"
+
+
+def test_an_unported_recipe_stores_nothing_extra(cards, tmp_path):
+    """既有（沒有埠的）recipe **一張都不必多存** —— 快取大小完全沒變。
+
+    推出來的來源就是「最後一個寫這個名字的人」，那正好等於快照裡的 `images`。
+    只有真的在畫布上拉了線的地方才付這個代價。
+    """
+    from adept.core.pipeline.engine import _streams_needed_across_checkpoint
+    from adept.core.pipeline.recipe import execution_order
+
+    r = _recipe(_ROUTE, _branch(),
+                [Edge("load", "x3"), Edge("x3", "x5"), Edge("x5", "m3")])
+    order = execution_order(r, "ebi_patch")
+    _sig, ckpt = image_segment_signature(r, "ebi_patch")
+    assert _streams_needed_across_checkpoint(
+        r, order, ckpt, REGISTRY, "ebi_patch") == set()
 
 
 # --------------------------------------------------------------------------- #

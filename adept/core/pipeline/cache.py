@@ -64,7 +64,13 @@ class StageCache:
     #: 特徵，F9-3）。**欄位名稱沒變，但少了它熱跑會算出跟冷跑不一樣的東西** ——
     #: 舊快照沒有這份帳，於是被蓋掉的特徵不會被救回來，熱跑比冷跑少一個特徵。
     #: 這正是「版本要 +1」要擋的情況：舊快取目錄不會安靜地餵回不完整的快照。
-    FORMAT_VERSION = 3
+    #:
+    #: 4（F9-10，2026-08-16）：多了 ``produced`` —— 「哪個節點的哪顆埠產出了
+    #: 這張圖」。F9 之後影像流的身分是 ``(節點, 埠)``，而快照以前只存
+    #: ``images``（名字 → **最後一個**寫它的人）。分支之後同一個名字有好幾張
+    #: 圖，快照只留得下最後那張，於是熱跑時指向快取段內某個節點的線查不到，
+    #: 退回最後寫者＝**隔壁那一支**：冷跑 3.0、熱跑 5.0，兩邊都跑得完。
+    FORMAT_VERSION = 4
 
     def __init__(self, dir: str) -> None:
         self.dir = str(dir)
@@ -90,8 +96,12 @@ class StageCache:
 
     # ---- get / put ---------------------------------------------------------
     def get(self, key: str) -> Optional[Dict[str, Any]]:
-        """回 ``{"images", "features", "meta", "rois", "labels"}``
-        或 None（不存在 / 壞檔 / 舊格式；壞檔會盡力刪掉）。"""
+        """回 ``{"images", "features", "meta", "rois", "labels", "produced"}``
+        或 None（不存在 / 壞檔 / 舊格式；壞檔會盡力刪掉）。
+
+        ``produced`` 是 ``{(節點, 埠): 陣列}`` —— 只存**跨過 checkpoint 被用到
+        的那幾張**（見 :func:`~.engine._streams_needed_across_checkpoint`）。
+        """
         path = self._path(key)
         if not os.path.isfile(path):
             self.misses += 1
@@ -111,6 +121,9 @@ class StageCache:
                 rois = [(str(r[0]), tuple(float(v) for v in r[1:5]))
                         for r in (payload.get("rois") or [])]
                 labels = z["__labels__"] if "__labels__" in z.files else None
+                produced = {}
+                for i, (nid, port) in enumerate(payload.get("produced") or []):
+                    produced[(str(nid), str(port))] = z["prod__%d" % i]
         except Exception:
             try:
                 os.remove(path)  # 壞檔：盡力清掉，下次直接 miss
@@ -120,12 +133,17 @@ class StageCache:
             return None
         self.hits += 1
         return {"images": images, "features": features, "meta": meta,
-                "rois": rois, "labels": labels}
+                "rois": rois, "labels": labels, "produced": produced}
 
     def put(self, key: str, images: Dict[str, np.ndarray],
             features: Dict[str, float], meta: Dict[str, Any],
-            rois: Any = None, labels: Any = None) -> None:
+            rois: Any = None, labels: Any = None,
+            produced: Any = None) -> None:
         """寫入一筆快照（atomic：先 ``.tmp`` 再 ``os.replace``）。
+
+        ``produced``：``{(節點, 埠): 陣列}``。**只給跨過 checkpoint 會被用到的
+        那幾張** —— 全存的話快取檔會按中間影像的張數倍增，而絕大多數中間結果
+        沒有人在快取段之後還要用。
 
         失敗會 raise（磁碟滿、唯讀…）—— 呼叫端（run_defect_cached）自行
         try/except 退回無快取路徑。
@@ -147,7 +165,16 @@ class StageCache:
             "dtypes": {n: str(a.dtype) for n, a in imgs.items()},
             "shapes": {n: list(a.shape) for n, a in imgs.items()},
         }
+        # 先照 key 排序再取值 —— 不要把陣列放進排序的 tuple 裡（key 不會重複，
+        # 所以實際上比不到陣列，但那種寫法一旦重複就會拿 ndarray 去比大小）。
+        prod_src = {(str(k[0]), str(k[1])): v
+                    for k, v in dict(produced or {}).items()}
+        prod_keys = sorted(prod_src)
+        payload["produced"] = [[nid, port] for nid, port in prod_keys]
+
         arrays: Dict[str, np.ndarray] = {"img__" + n: a for n, a in imgs.items()}
+        for i, k in enumerate(prod_keys):
+            arrays["prod__%d" % i] = np.asarray(prod_src[k])
         if labels is not None:
             arrays["__labels__"] = np.asarray(labels)
         arrays["__payload__"] = np.array(

@@ -16,7 +16,7 @@ import json
 import math
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 
 from .context import Context
 from .expression import parse_expression
@@ -594,6 +594,50 @@ def _roi_snapshot(ctx: Context) -> List[Any]:
     return out
 
 
+def _streams_needed_across_checkpoint(
+        recipe: Recipe, order: List[str], ckpt: int,
+        registry: Dict[str, Type[Step]], kind: str) -> Set[Tuple[str, str]]:
+    """checkpoint **之後**的卡片，明講要吃 checkpoint **之前**哪幾個
+    ``(節點, 埠)`` 的輸出（F9-10）。
+
+    這就是「快照要多存哪幾張圖」的清單。為什麼不是全存：一條五張卡的影像段，
+    每張卡都會留下自己的輸出，全存等於快取檔按張數倍增 —— 而絕大多數中間結果
+    在 checkpoint 之後根本沒有人要。
+
+    ⚠ **這份清單會隨 checkpoint 之後的線改變，而那些線刻意不在簽章裡**
+    （不然改一下量測卡的接線就要整段重算影像）。所以「照這份清單存」一定要配
+    :func:`run_defect_cached` 裡那條防線：熱跑時要的不在快照裡就**當 miss
+    重算**，不可以退回 ``ctx.images``（那是「最後一個寫這個名字的人」，在分支
+    上就是隔壁那一支）。少了那條防線，這個做法會製造一個新的安靜錯誤。
+    """
+    before = set(order[:ckpt])
+    bind = _bindings(recipe, order, registry, kind)
+    # **只算明講的線。** 推出來的（``_implicit_bindings``）本來就是「執行順序上
+    # 最後一個寫這個名字的人」，那正好等於快照裡的 ``images`` —— 退回去拿到的
+    # 是同一張圖。所以既有的（沒有埠的）recipe 一張都不必多存，快取大小完全
+    # 沒變；只有真的在畫布上拉了線的地方才付這個代價。
+    explicit = set(_explicit_bindings(recipe, registry))
+    need: Set[Tuple[str, str]] = set()
+    for nid in order[ckpt:]:
+        node = recipe.nodes.get(nid)
+        if node is None or not node.enabled:
+            continue
+        step_cls = registry.get(node.step)
+        if step_cls is None:
+            continue
+        try:
+            params = step_cls.validate_params(node.params)
+        except Exception:              # noqa: BLE001 — 壞參數交給 validate 報
+            continue
+        for name in step_cls.resolve_reads(params):
+            if (nid, name) not in explicit:
+                continue
+            src = bind.get((nid, name))
+            if src is not None and src[0] in before:
+                need.add(src)
+    return need
+
+
 def _restore_context(item: Any, kind: str, defect_id: str,
                      snap: Dict[str, Any]) -> Context:
     """由快取快照重建 Context。
@@ -622,6 +666,12 @@ def _restore_context(item: Any, kind: str, defect_id: str,
     labels = snap.get("labels")
     if labels is not None:
         ctx.labels = labels
+    # F9-10：把「哪個節點的哪顆埠產出了這張圖」也接回去。少了它，指向快取段內
+    # 某個節點的線在熱跑時查不到，會退回「最後一個寫這個名字的人」＝隔壁那支。
+    prod = dict(snap.get("produced") or {})
+    if prod:
+        setattr(ctx, "_produced", {(str(k[0]), str(k[1])): v
+                                   for k, v in prod.items()})
     return ctx
 
 
@@ -664,6 +714,22 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
     traces: List[StepTrace] = []
     ctx: Optional[Context] = None
 
+    # 這次要用到快取段裡哪幾個 (節點, 埠)（F9-10）。
+    try:
+        need = _streams_needed_across_checkpoint(recipe, order, ckpt,
+                                                 registry, kind)
+    except Exception:                  # noqa: BLE001 — 算不出來就別用快取
+        need = None
+
+    if snap is not None and need is not None:
+        # **缺了就重算**：快照只存了「當時有人要的那幾張」，而「誰要」是由
+        # checkpoint 之後的線決定的 —— 那些線改了簽章不會變（刻意的，見
+        # image_segment_signature），於是會出現「快取有效、但這次要的那張沒存」。
+        # 退回 ctx.images 的話就是安靜地拿到隔壁那一支的圖，所以這裡當 miss。
+        have = set(dict(snap.get("produced") or {}))
+        if not need.issubset(have):
+            snap = None
+
     if snap is not None:
         try:
             ctx = _restore_context(item, kind, defect_id, snap)
@@ -679,9 +745,12 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
             return _finish(defect_id, ctx, traces, keep_context, False, err)
         if key is not None:
             try:
+                produced = dict(getattr(ctx, "_produced", None) or {})
                 cache.put(key, dict(ctx.images), dict(ctx.features),
                           _meta_snapshot(ctx.meta),
-                          rois=_roi_snapshot(ctx), labels=ctx.labels)
+                          rois=_roi_snapshot(ctx), labels=ctx.labels,
+                          produced={k: produced[k] for k in (need or ())
+                                    if k in produced})
             except Exception:
                 pass  # 快取寫入失敗 → 不影響本次結果
 
