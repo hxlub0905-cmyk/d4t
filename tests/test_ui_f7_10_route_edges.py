@@ -85,18 +85,37 @@ def test_drawing_the_link_yourself_makes_a_solid_line(window):
     assert pairs.count((a, b)) >= 1
 
 
-def test_only_the_users_own_links_are_saved(window):
-    """**存檔寫的仍然只有使用者拉的線。**
+def test_drawing_the_first_wire_writes_the_whole_backbone_down(window):
+    """⚠ **這一條在 F9 Phase 4a 反過來了，而且是刻意的。**
 
-    畫布畫的是編譯出來的整張圖（含推導出來的主幹），但 `model.edges` ——
-    也就是存進 recipe JSON 的那一份 —— 只收使用者親手拉的。推導出來的東西
-    不該被寫死進檔案：卡片順序一改，那些線就該跟著重算。
+    以前這裡寫的是「存檔只寫使用者親手拉的線，推導出來的主幹不該被寫死 ——
+    卡片順序一改那些線就該重算」。那個理由在當時成立，但它有一個沒被看見的
+    後果：**推導出來的線不是資料，所以剪不掉**。使用者在畫布上按那顆「×」，
+    狀態列說「Disconnected」，而圖一點都沒變、線還畫在原地 —— 這個工具最糟的
+    一種行為（說做了卻沒做）。
+
+    現在的規矩：一份 recipe 只要有一條顯式的線，引擎就**不再推導主幹**
+    （``graph._compile_recipe`` 的 ``backbone_is_explicit``）。所以拉第一條線
+    的當下要把整條主幹一起寫下來 —— 不然其餘的卡會在那一瞬間全部變成沒人接的
+    孤兒，而使用者只是拉了一條線。
+
+    「順序一改線要重算」那個好處換成了「線就是順序」：排版與執行順序都從
+    edges 拓撲排序出來，不再有第二套真理。
     """
     assert window.model.edges == []
     a, c = window.model.node_order[0], window.model.node_order[2]
     window.pipeline.link_to(a, c)
-    assert window.model.edges == [(a, c)]
+
+    assert (a, c) in window.model.edges, "使用者拉的那一條一定要在"
+    chain = list(zip(window.model.node_order, window.model.node_order[1:]))
+    have = set(window.model.edges)
+    # 主幹整條寫下來了（除了會跟新線衝突而被拓撲排序重排的部分）
+    assert len(have) >= len(chain) - 1, (have, chain)
     assert (a, c) in window.pipeline.edge_pairs()
+
+    # 而且現在剪得掉 —— 這正是把主幹寫下來換到的東西
+    assert window.model.remove_edge(a, c) is True
+    assert (a, c) not in window.model.edges
 
 
 def test_a_long_chain_wraps_instead_of_running_off_the_screen(window):

@@ -1695,6 +1695,20 @@ class StudioWindow(QMainWindow):
         你碰 ref。
         """
         src, dst, stream = str(src), str(dst), str(stream or "")
+        # **Input 卡是一條 pipeline 的起點，沒有東西餵得了它**（F9 Phase 4a）。
+        # 以前這條線拉得起來、存得下去、然後什麼都不會發生 —— 畫面上多一條
+        # 指向起點的線，而那是一句假話。
+        node = self.model.nodes.get(dst)
+        try:
+            accepts = getattr(get_step(node.step), "accepts_kinds", ()) if node else ()
+        except KeyError:
+            accepts = ()
+        if accepts:
+            self._status(
+                "Cannot connect %s → %s — “%s” is an input card: it is where a "
+                "pipeline starts, so nothing feeds into it." % (src, dst, dst),
+                "error")
+            return
         if self.model.has_edge(src, dst):
             # 同一對節點再拉一條 —— 對 image_keys 的卡這是「這條也接上」，
             # 所以要真的多一條線出來，不是回一句 already connected。
@@ -1714,6 +1728,11 @@ class StudioWindow(QMainWindow):
     def _on_edge_removed(self, src: str, dst: str) -> None:
         if self.model.remove_edge(str(src), str(dst)):
             self._status("Disconnected %s → %s" % (src, dst))
+        else:
+            # 剪不掉也要講。以前這裡什麼都不說，而畫布上那條線還在 ——
+            # 使用者按了、沒反應、也沒有任何一句話告訴他為什麼。
+            self._status("Could not disconnect %s → %s — that wire is not "
+                         "one this pipeline draws." % (src, dst), "error")
 
     def _on_remove_requested(self, node_id: str) -> None:
         node_id = str(node_id)

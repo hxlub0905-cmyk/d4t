@@ -201,10 +201,19 @@ class RecipeModel:
         node_id = self._new_id(step_key)
         params = step_cls.validate_params({})  # 全預設
         self.nodes[node_id] = RecipeNode(id=node_id, step=step_key, params=params)
+        prev = self.node_order[-1] if self.node_order else None
         if at is None:
             self.node_order.append(node_id)
         else:
-            self.node_order.insert(max(0, min(at, len(self.node_order))), node_id)
+            at = max(0, min(at, len(self.node_order)))
+            prev = self.node_order[at - 1] if at > 0 else None
+            self.node_order.insert(at, node_id)
+        # **接在前一張後面**（F9 Phase 4a）。以前這裡只把 id 放進順序裡，
+        # 主幹是推導出來的 —— 而主幹一旦被寫下來（剪過線之後），沒有線的新卡
+        # 就會**收不到任何東西**：跑得完、有錯誤訊息，但錯誤訊息講的是
+        # 「找不到影像流 test」，指不到真正的原因（沒人接它）。
+        if prev is not None and self.edges:
+            self.edges.append((prev, node_id))
         self._changed()
         return node_id
 
@@ -380,16 +389,51 @@ class RecipeModel:
         if order is None:
             return False                     # 循環 —— 擋在這裡，不讓它進 model
         self._push_undo()
-        self.edges.append((src, dst))
+        # **拉第一條線的時候要把主幹一起寫下來**（F9 Phase 4a）。引擎的規矩是
+        # 「這份 recipe 一旦有顯式的線，就不再推導主幹」—— 只寫新拉的那一條的
+        # 話，其餘八張卡會在使用者拉了一條線的瞬間全部變成沒人接的孤兒
+        # （lint 會擋下試跑，而他只是拉了一條線）。
+        self.materialise_backbone()
+        if (src, dst) not in self.edges:
+            self.edges.append((src, dst))
         self.node_order = order
         self._changed()
         return True
 
+    def materialise_backbone(self) -> bool:
+        """把「由順序推出來的主幹」寫成真的 ``edges``（回傳有沒有動到東西）。
+
+        為什麼需要這一步（F9 Phase 4a）
+        ------------------------------
+        主幹以前是**推導**出來的：``node_order`` 相鄰的兩張卡就自動接在一起。
+        於是使用者在畫布上按那顆「×」剪一條主幹線，狀態列說「Disconnected」，
+        而圖一點都沒變、線還畫在原地 —— 那是這個工具最糟的一種行為
+        （**說做了卻沒做**）。
+
+        剪之前先把整條主幹寫下來，剪掉的那一條才有地方「不在」。寫下來之後
+        引擎就不再推導（見 ``graph._compile_recipe`` 的 ``backbone_is_explicit``）。
+        """
+        have = {(str(a), str(b)) for a, b in self.edges}
+        added = [(a, b) for a, b in zip(self.node_order, self.node_order[1:])
+                 if (a, b) not in have]
+        if not added:
+            return False
+        self.edges.extend(added)
+        return True
+
     def remove_edge(self, src: str, dst: str) -> bool:
         pair = (str(src), str(dst))
-        if pair not in self.edges:
+        # 「推導出來的主幹」**只在這份 recipe 一條線都還沒寫下來的時候存在**
+        # （同 ``graph._compile_recipe`` 的 ``backbone_is_explicit``）。寫下來
+        # 之後不在 ``edges`` 裡就是真的沒接 —— 這時候再剪它要回 False，
+        # 不然剛剪掉的那條線會被 materialise 又補回來，而狀態列說「剪掉了」。
+        implicit = (not self.edges
+                    and pair in set(zip(self.node_order, self.node_order[1:])))
+        if pair not in self.edges and not implicit:
             return False
         self._push_undo()
+        if implicit:
+            self.materialise_backbone()
         self.edges.remove(pair)
         order = self._topological_order(self.edges)
         if order is not None:

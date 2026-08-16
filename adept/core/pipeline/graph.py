@@ -372,6 +372,9 @@ def _compile_recipe(recipe: Recipe, kind: str,
         clean[nid] = p
         ports[nid] = stream_ports(step_cls, p)
 
+    #: 這份 recipe 有沒有把主幹寫下來（兩段式的 ``edges``）。有的話就不推導。
+    backbone_is_explicit = any(len(list(e)) == 2 for e in recipe.edges)
+
     #: 影像流名 -> 最後吐出它的節點（邊走邊更新 = 自然的「往回找最近的」）
     producer: Dict[str, str] = {}
     #: (dst, dst_port) -> (src, src_port)
@@ -392,7 +395,16 @@ def _compile_recipe(recipe: Recipe, kind: str,
                     stream_in.setdefault((nid, port), []).append((src, stream))
 
         # ---- packet 線：狀態沿著執行順序走（就是舊模型的那條鏈）----
-        if i > 0:
+        #
+        # **只有在這份 recipe 一條顯式主幹線都沒有的時候才推導**（Phase 4a）。
+        # 有的話就是「這張圖已經把主幹寫下來了」，推導必須整個關掉 —— 不然
+        # 使用者剪掉一條線，推導又把它補回來：畫布上那顆「×」按下去狀態列說
+        # 「Disconnected」，而圖一點都沒變、線還畫在原地。那是這個工具最糟的
+        # 一種行為（說做了卻沒做）。
+        #
+        # 判準只看**兩段式**的 ``edges``。四段式（`[src, port, dst, port]`）是
+        # 條件分流在講「從哪個出口走」，它跟「主幹在哪」是兩件事。
+        if i > 0 and not backbone_is_explicit:
             prev = order[i - 1]
             prev_outs = ports[prev][1]
             if prev_outs:

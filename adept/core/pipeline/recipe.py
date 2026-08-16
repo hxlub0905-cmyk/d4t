@@ -756,9 +756,9 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     """lint 式驗證：收集**所有**問題後一次回傳（不會 raise）。
 
     檢查項（code）：unknown-step / bad-param / not-configured / unknown-node /
-    unknown-route / cycle / missing-image / unknown-region / requires-ref /
-    no-decision（warning）/ unknown-feature（warning）/
-    feature-collision（warning）。
+    unknown-route / no-input / no-upstream / cycle / missing-image /
+    unknown-region / requires-ref / no-decision（warning）/
+    unknown-feature（warning）/ feature-collision（warning）。
     """
     if registry is None:
         registry = REGISTRY
@@ -830,8 +830,30 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     # ---- 每條 route：unknown-node / cycle / reads 模擬 / requires_ref ----
     #: route → 這條路上有沒有踩到判定卡（見 route 迴圈末尾的 no-decision）。
     is_decided: Dict[str, bool] = {}
+    #: 主幹寫下來之後（畫布上剪過線），沒有人接的卡就真的收不到東西。
+    #: 判準跟 ``graph._compile_recipe`` 的 ``backbone_is_explicit`` 同一條。
+    backbone_is_explicit = any(len(list(e)) == 2 for e in recipe.edges)
+    fed: Set[str] = set()
+    for e in recipe.edges:
+        pair = edge_pair(e)
+        if pair is not None:
+            fed.add(pair[1])
+
     for k in kinds:
         route = routes[k]
+        if backbone_is_explicit:
+            # 第一張（Input 卡）本來就沒有上游，其餘每一張都得有人接。
+            for nid in route[1:]:
+                node = recipe.nodes.get(nid)
+                if node is None or not node.enabled or nid in fed:
+                    continue
+                issues.append(Issue(
+                    code="no-upstream", level="error", node_id=nid,
+                    title=f"Nothing is connected to '{nid}'",
+                    detail=(f"route '{k}': no wire reaches this card, so it "
+                            f"receives no images and will fail on every "
+                            f"defect. Drag a wire into it from the card that "
+                            f"should feed it.")))
         for nid in route:
             if nid not in recipe.nodes:
                 issues.append(Issue(

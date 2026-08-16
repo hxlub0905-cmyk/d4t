@@ -101,11 +101,19 @@ def test_a_link_that_would_loop_is_refused_at_draw_time(window):
     window.pipeline.link_to("norm", "sub")
     before = list(window.model.edges)
 
-    window.pipeline.link_to("sub", "load")        # 會成環
+    # 往回接到中間那張卡 —— 純粹的環，兩端都不是 Input 卡
+    window.pipeline.link_to("sub", "norm")
     assert window.model.edges == before, "成環的線不可以落進 model"
     assert "loop" in window.status_text()
 
-    # 而且流程仍然跑得動 —— 沒有被那次嘗試弄壞
+    # 接回**起點**也擋，但它有更準的一句話可以說（F9 Phase 4a）：
+    # 「load 是 Input 卡，pipeline 從它開始，沒有東西餵得了它」——
+    # 比「這樣會繞回去」更指得出該怎麼辦。
+    window.pipeline.link_to("sub", "load")
+    assert window.model.edges == before
+    assert "input card" in window.status_text()
+
+    # 而且流程仍然跑得動 —— 沒有被那兩次嘗試弄壞
     assert window.run_trial(6, workers=1, sync=True) is True
 
 
@@ -129,18 +137,21 @@ def test_both_ports_can_land_on_the_same_node_and_each_gets_its_own_line(window)
     assert landed == {("a", "test"), ("b", "ref")}, landed
 
     window.pipeline.link_to("load", "sub")
-    assert window.model.edges == [("load", "sub")], "model 仍然是一條依賴"
+    # 拉第一條線會把整條主幹一起寫下來（F9 Phase 4a）—— 不然引擎關掉推導之後
+    # 其餘的卡會在這一刻全部變成沒人接的孤兒。使用者拉的那一條在裡面就對了。
+    assert ("load", "sub") in window.model.edges
     assert "Connected" in window.status_text()
 
     # 第二個埠拖到同一個節點：不是錯誤，訊息要講清楚兩條線本來就都在了
+    n_edges = len(window.model.edges)
     window.pipeline.link_to("load", "sub")
-    assert window.model.edges == [("load", "sub")]
+    assert len(window.model.edges) == n_edges
     assert "already connected" in window.status_text()
     assert "Cannot" not in window.status_text()
 
-    # 而「會成環」仍然是另一句話，不可以跟上面混為一談
+    # 而「拒絕」仍然是另一句話，不可以跟上面混為一談
     window.pipeline.link_to("sub", "load")
-    assert "loop" in window.status_text()
+    assert "input card" in window.status_text()
 
 
 def test_duplicate_and_self_links_are_ignored(window):
