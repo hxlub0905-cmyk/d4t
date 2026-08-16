@@ -363,7 +363,14 @@ def _meta_snapshot(meta: Dict[str, Any]) -> Dict[str, Any]:
     """meta 的可快取子集：去掉私有 key（``_`` 開頭，引擎每次重新種入）、
     去掉 JSON 序列化不了的值（例如 ndarray、物件）。
     涵蓋 warnings / notes / nm_per_px / align_dx / align_dy /
-    feature_overwrites … 等後段卡片可能讀到的一般值。"""
+    feature_overwrites … 等後段卡片可能讀到的一般值。
+
+    ⚠ **``feature_owner``（F9-3）一定要在裡面。** checkpoint 之前的節點在熱跑時
+    根本沒有執行，所以「誰產出了哪個特徵」這份帳只能從快照回來 —— 掉了的話熱跑
+    不知道 ``glv_max`` 本來是誰的，於是不會救被蓋掉的那份：**冷跑多一個特徵、
+    熱跑少一個，兩邊都跑得完**。它現在是靠上面那條「非私有且 JSON-safe 就留」
+    通過的（不是特例），改這個函式成白名單之前先看
+    ``tests/test_batch_cache.py::test_feature_ownership_survives_a_cache_hit``。"""
     out: Dict[str, Any] = {}
     for k, v in meta.items():
         if str(k).startswith("_"):

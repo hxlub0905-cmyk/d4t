@@ -39,10 +39,10 @@ ddb8939ebee5ba56237cce56d0c53397695982bb adept/core/ingest/imageio.py
 110cbfafd227f6d4557b4e2e02853f38c9b5bf77 adept/core/ingest/tiff_index.py
 03146deb543fddc5cc836c039652a15f5492935d adept/core/pipeline/__init__.py
 f277b6b3e5e65ce8027da01648a0d42d44a64905 adept/core/pipeline/batch.py
-73f0fec00bdfb78cbd32387e4d890b196e5ce1fb adept/core/pipeline/cache.py
+8714c4e2d5eaa95269b0297796f386af4277838f adept/core/pipeline/cache.py
 bc5822860c73a424460de963c0a7ef1b940bd71e adept/core/pipeline/context.py
 8a8f906147c0b06defc52096716ecfd917b0b94e adept/core/pipeline/curve.py
-67739fb762bdcc660de8664c929938b41c9acbb3 adept/core/pipeline/engine.py
+630ae0279ceff01983cd04efd709a33d66271841 adept/core/pipeline/engine.py
 6c3c9c1cc1e6d1ee5d121f9994968f4f780e3cc5 adept/core/pipeline/expression.py
 d75107b3516e8016df0af6ecefc23b38cc985213 adept/core/pipeline/recipe.py
 09625b4045e18764c168ae9ed1d24efcc1817991 adept/core/pipeline/step.py
@@ -92,7 +92,7 @@ b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 66b7478efc1ff7fb18f2311732254ba5aa0973d8 docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
-6f14cb3589f4d419165e920c373253e81b1df20b docs/plans/F9-dag-streams.md
+f9ce516c19060ab9e063aad2635073ee661b97e3 docs/plans/F9-dag-streams.md
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
 fdf5dba17526e86ea0990c7853ef652874082324 fab_probe/probe_klarf.py
 3046145d1bef806353a4b0d63fd81b33347fb8c8 fab_probe/probe_stats.py
@@ -107,7 +107,7 @@ a01791d84f040089fcd840472a637f9ca5c6baca tests/fixtures/recipes/die_to_die_basic
 1b348ab1a35304bfdbac4c98e7734d1904b25776 tests/fixtures/recipes/dual_route_basic.json
 745560662f263dc8a471f910d8b4640c647dd68d tests/fixtures/sample_real.klarf
 fc105693a52e53f5b37b6c009a1456b9acd8e80f tests/test_align.py
-fe0468af31cdbeb4b7b94442ede9cab0ccef0a3b tests/test_batch_cache.py
+91ba6cdbedcf52b654b6a955c8d7ebb29264391d tests/test_batch_cache.py
 c3c815b143149244f93625a14f84421268d0dd0a tests/test_batch_thread_safety.py
 796aa532ef08b9736a38a00d6232d5d0b5f318e6 tests/test_blob.py
 fce64e2110a74db0e23c9aeda3eec7d2282af53a tests/test_calibration.py
