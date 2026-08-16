@@ -80,6 +80,11 @@ def _click_scene(view, scene_pos):
             (QEvent.MouseButtonRelease, Qt.LeftButton, Qt.NoButton)):
         QApplication.sendEvent(
             vp, QMouseEvent(etype, pt, glob, button, buttons, Qt.NoModifier))
+    # **斷開是排到下一輪事件迴圈才發的**（2026-08-16）。同步發的話，接收端會
+    # ``scene.clear()`` 把正在處理這個事件的那條線自己刪掉 —— 整個行程 segfault
+    # （使用者原話：「按 X 還會閃退」）。所以點完要讓事件迴圈跑一輪，
+    # 就跟真的使用者按完會發生的事一樣。見 test_ui_f9_cut_does_not_crash.py。
+    QApplication.processEvents()
 
 
 def _wired_pair(window, step_key="denoise"):

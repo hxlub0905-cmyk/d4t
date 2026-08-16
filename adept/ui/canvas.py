@@ -33,10 +33,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QFontMetricsF,
     QPainter,
     QPainterPath,
     QPainterPathStroker,
@@ -573,6 +574,44 @@ def _wire_spec(e) -> Tuple[str, str, str, str, str]:
     return (str(e[0]), "", str(e[1]), "", "packet")
 
 
+class _LegendSwatch(QWidget):
+    """圖例的一格：一小段線 + 一句話（線的樣子跟畫布上**同一份**畫法）。"""
+
+    def __init__(self, kind: str, text: str, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.kind = str(kind)
+        self.text = str(text)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+    def sizeHint(self) -> QSize:
+        fm = QFontMetricsF(self.font())
+        return QSize(int(30 + fm.horizontalAdvance(self.text)), 16)
+
+    def paintEvent(self, _e) -> None:            # noqa: D102 - Qt hook
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        stream = self.kind == "stream"
+        col = QColor(TOKENS["canvas_edge_stream"] if stream
+                     else TOKENS["canvas_edge"])
+        y = self.height() / 2.0
+        pen = QPen(col, 1.0 if stream else 1.6)
+        if stream:
+            pen.setDashPattern([4.0, 3.0])       # 跟 _EdgeItem.paint 同一組
+        p.setPen(pen)
+        p.drawLine(QPointF(1.0, y), QPointF(21.0, y))
+        if not stream:                            # 主幹有箭頭，圖例也要有
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(col))
+            head = QPainterPath(QPointF(23.0, y))
+            head.lineTo(QPointF(17.0, y - 3.4))
+            head.lineTo(QPointF(17.0, y + 3.4))
+            head.closeSubpath()
+            p.drawPath(head)
+        p.setPen(QPen(QColor(TOKENS["text_hint"])))
+        p.drawText(QRectF(28.0, 0.0, self.width() - 28.0, self.height()),
+                   Qt.AlignVCenter | Qt.AlignLeft, self.text)
+
+
 class _EdgeItem(QGraphicsItem):
     """一條連線（三次貝茲，左→右）。點它可選取，``Delete`` 移除。
 
@@ -638,7 +677,21 @@ class _EdgeItem(QGraphicsItem):
     def mousePressEvent(self, e) -> None:       # noqa: D102 - Qt hook
         if (self._hover
                 and e.button() == Qt.LeftButton and self.cut_hit(e.pos())):
-            self.canvas.edge_removed.emit(self.src.node_id, self.dst.node_id)
+            # **不可以在這裡同步發訊號 —— 會整個行程掛掉。**
+            #
+            # 接收端（``studio._on_edge_removed``）會改 model，model 通知
+            # listener，listener 呼叫 ``set_nodes()``，而它第一件事就是
+            # ``scene.clear()`` —— 把**正在處理這個滑鼠事件的這條線自己**刪掉。
+            # 事件處理函式回去的時候 Qt 去碰一個已經釋放的 C++ 物件，於是
+            # segfault（畫面上就是「按 X 閃退」，沒有任何錯誤訊息）。
+            #
+            # 以前不會發生，是因為剪一條推導出來的線會被擋掉、什麼都不做，
+            # 所以沒有重建。F9 Phase 4a 讓剪線變成真的之後才炸出來。
+            #
+            # 排到下一輪事件迴圈：那時候這個處理函式已經回去了，刪得掉。
+            src, dst = self.src.node_id, self.dst.node_id
+            canvas = self.canvas
+            QTimer.singleShot(0, lambda: canvas.edge_removed.emit(src, dst))
             e.accept()
             return
         super().mousePressEvent(e)
@@ -721,9 +774,34 @@ class _EdgeItem(QGraphicsItem):
         col = QColor(TOKENS["canvas_edge_active"] if self.isSelected() else base)
         path = self.path()
         width = (1.0 if stream else 1.6)
-        p.setPen(QPen(col, 2.2 if self.isSelected() else width))
+        pen = QPen(col, 2.2 if self.isSelected() else width)
+        if stream:
+            # **虛線**。色相本來就不同（§7），但使用者實測還是問「黑線跟綠線
+            # 差別是什麼」—— 顏色說得出「這兩條不一樣」，說不出「哪一條才是
+            # 資料走的路」。虛線是流程圖裡「這不是主要路徑」的通用寫法，
+            # 加上線上標的流名，一眼就分得出來。
+            pen.setDashPattern([4.0, 3.0])
+        p.setPen(pen)
         p.setBrush(Qt.NoBrush)
         p.drawPath(path)
+
+        # stream 線在線上標出**流名**（test / ref / diff）。這條線講的就是
+        # 「這張卡動哪一條流」，而那個答案就是它的來源埠名 —— 不寫出來的話
+        # 使用者得先認出是從哪顆埠出發的才推得回來。
+        if stream and self.src_port and not self._hover:
+            mid = path.pointAtPercent(0.5)
+            f = p.font()
+            f.setPointSizeF(max(6.5, f.pointSizeF() - 2.0))
+            p.setFont(f)
+            fm = QFontMetricsF(f)
+            text = str(self.src_port)
+            tw = fm.horizontalAdvance(text) + 6.0
+            box = QRectF(mid.x() - tw / 2.0, mid.y() - 7.0, tw, 13.0)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(QColor(TOKENS["bg_surface"])))
+            p.drawRoundedRect(box, 3.0, 3.0)
+            p.setPen(QPen(col))
+            p.drawText(box, Qt.AlignCenter, text)
 
         # 滑鼠在線上 → 中點換成一顆「斷開」的 ×（F7-22）。
         #
@@ -873,7 +951,29 @@ class PipelineCanvas(QGraphicsView):
         lay.addWidget(self._zoom_label)
         bar.adjustSize()
         self._zoom_bar = bar
+        self._build_legend()
         self._place_zoom_bar()
+
+    def _build_legend(self) -> None:
+        """兩種線各是什麼意思 —— **畫一次**。
+
+        使用者實測的第一句話是「黑線跟綠線差別是什麼？」。兩種線有不同色相、
+        不同粗細、一個有箭頭一個沒有 —— 那些差異說得出「這兩條不一樣」，
+        說不出**哪一條才是資料走的路**。差異要有名字才有意義。
+
+        （F7-8 的教訓是「別在每個節點旁邊放常駐裝飾」，這一條不衝突：
+        圖例畫一次，不是每條線各一份 —— 同 F7-24 給 Spread 面板補圖例。）
+        """
+        box = QWidget(self)
+        box.setObjectName("canvasZoom")
+        lay = QHBoxLayout(box)
+        lay.setContentsMargins(8, 3, 8, 3)
+        lay.setSpacing(10)
+        for key, text in (("packet", "data flows this way"),
+                          ("stream", "which stream this card works on")):
+            lay.addWidget(_LegendSwatch(key, text, box))
+        box.adjustSize()
+        self._legend = box
 
     def _place_zoom_bar(self) -> None:
         bar = getattr(self, "_zoom_bar", None)
@@ -882,6 +982,17 @@ class PipelineCanvas(QGraphicsView):
         bar.adjustSize()
         bar.move(8, max(0, self.viewport().height() - bar.height() - 8))
         bar.raise_()
+        legend = getattr(self, "_legend", None)
+        if legend is not None:
+            legend.adjustSize()
+            legend.move(8, max(0, bar.y() - legend.height() - 6))
+            legend.raise_()
+
+    def legend_labels(self) -> List[str]:
+        """圖例上寫了哪幾句（測試用）。"""
+        box = getattr(self, "_legend", None)
+        return [] if box is None else [
+            w.text for w in box.findChildren(_LegendSwatch)]
 
     def _sync_zoom_label(self) -> None:
         label = getattr(self, "_zoom_label", None)
