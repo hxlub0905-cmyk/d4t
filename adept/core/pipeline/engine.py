@@ -101,6 +101,22 @@ def qualified_feature_name(node_id: str, name: str) -> str:
     return "%s_%s" % (node_id, name)
 
 
+def _produced_feature_names(step_cls: Type[Step], params: Dict[str, Any],
+                            ctx: Context, added: Dict[str, Any]) -> List[str]:
+    """這張卡這一輪「產出了哪些特徵」——**看宣告，不看值有沒有變**。
+
+    用 ``added``（值的差異）判斷是不夠的：後面那張卡如果剛好算出**一樣的值**，
+    差異是空的，於是「誰擁有這個特徵」不會更新、被蓋掉的也不會被救。那會讓
+    行為**跟數值巧合有關** —— 同一份 recipe 在某些 defect 上多一個特徵欄位、
+    某些上沒有，而那是最難解釋的一種不一致。
+    """
+    names = [f for f in step_cls.resolve_features(params) if f in ctx.features]
+    for k in added:                      # 沒宣告卻寫了的（防禦性；I3 擋著）
+        if k not in names:
+            names.append(k)
+    return names
+
+
 def _rescue_overwritten_features(ctx: Context, nid: str,
                                  before: Dict[str, Any],
                                  added: Dict[str, Any],
@@ -158,10 +174,104 @@ def _visible_streams(master: Context, step_cls: Type[Step],
     return out
 
 
+# ---------------------------------------------------------------------------
+# F9-5a：影像流的身分 = (哪個節點, 哪個輸出埠)
+# ---------------------------------------------------------------------------
+def _param_types(step_cls: Type[Step]) -> Dict[str, str]:
+    return {str(p["name"]): str(p["type"]) for p in step_cls.describe()["params"]}
+
+
+def _explicit_bindings(recipe: Recipe, registry: Dict[str, Type[Step]]
+                       ) -> Dict[Tuple[str, str], Tuple[str, str]]:
+    """``recipe.edges`` 裡**兩個埠都填了**的那些線 → ``(節點, 流名) → (來源節點, 來源埠)``。
+
+    邊記的是「落在下游的哪個**參數**」（``dst_in``），但卡片是用**流名**去
+    ``require_image`` 的，所以要把參數換算成流名：
+
+    * ``image_key``（``subtract`` 的 ``b``）→ 流名就是 ``params["b"]`` 的值；
+    * ``image_keys``（Enhance 卡的 ``streams``，一串）→ 一個參數會有好幾條線，
+      每條線自己帶著它給的是哪一條（``src_out``）。
+
+    埠沒填的線不進來（目前 UI 拉出來的線就是這種）—— 它們仍然只表達先後順序，
+    資料從哪來由 :func:`_implicit_bindings` 照「最後一個寫它的人」推。
+    """
+    out: Dict[Tuple[str, str], Tuple[str, str]] = {}
+    for e in recipe.edges:
+        if not (e.src_out and e.dst_in):
+            continue
+        node = recipe.nodes.get(e.dst)
+        step_cls = registry.get(node.step) if node is not None else None
+        if step_cls is None:
+            continue
+        try:
+            params = step_cls.validate_params(node.params)
+        except Exception:              # noqa: BLE001 — 壞參數交給 validate 報
+            continue
+        ptype = _param_types(step_cls).get(e.dst_in, "")
+        if ptype == "image_keys":
+            local_name = e.src_out
+        elif ptype == "image_key":
+            local_name = str(params.get(e.dst_in, "") or "")
+        else:
+            continue                   # 那個參數不是影像流，這條線不是資料流
+        if local_name:
+            out[(e.dst, local_name)] = (e.src, e.src_out)
+    return out
+
+
+def _implicit_bindings(recipe: Recipe, order: List[str],
+                       registry: Dict[str, Type[Step]], kind: str
+                       ) -> Dict[Tuple[str, str], Tuple[str, str]]:
+    """沒有明講的線 → 照「**執行順序上最後一個寫這條流的人**」推。
+
+    那正是 F9 之前的語意（一個全域名字表，後寫的蓋掉先寫的），所以**推出來的
+    結果跟舊行為逐位元組相同** —— 這是 F9-5a 敢動資料流的唯一理由。
+
+    UI 還沒開始產帶埠的線（F9-5b），所以現在每一條資料流都走這裡。
+    """
+    out: Dict[Tuple[str, str], Tuple[str, str]] = {}
+    last_writer: Dict[str, str] = {}
+    first = True
+    for nid in order:
+        node = recipe.nodes.get(nid)
+        if node is None or not node.enabled:
+            continue
+        step_cls = registry.get(node.step)
+        if step_cls is None:
+            continue
+        try:
+            params = step_cls.validate_params(node.params)
+        except Exception:              # noqa: BLE001
+            continue
+        for name in step_cls.resolve_reads(params):
+            if name in last_writer:
+                out[(nid, name)] = (last_writer[name], name)
+        writes = (step_cls.resolve_writes_for_kind(params, kind) if first
+                  else step_cls.resolve_writes(params))
+        first = False
+        for w in writes:
+            last_writer[w] = nid
+    return out
+
+
+def _bindings(recipe: Recipe, order: List[str],
+              registry: Dict[str, Type[Step]], kind: str
+              ) -> Dict[Tuple[str, str], Tuple[str, str]]:
+    """這條 route 上每個「節點要的流」各自從哪個 ``(節點, 埠)`` 來。
+
+    明講的線**蓋過**推出來的 —— 使用者在畫布上拉的那條，永遠贏過「剛好排在
+    前面的那張卡」。
+    """
+    out = _implicit_bindings(recipe, order, registry, kind)
+    out.update(_explicit_bindings(recipe, registry))
+    return out
+
+
 def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
                ctx: Context, traces: List[StepTrace],
                registry: Dict[str, Type[Step]],
-               upto_node: Optional[str]) -> Tuple[Context, Optional[str]]:
+               upto_node: Optional[str],
+               kind: str = "") -> Tuple[Context, Optional[str]]:
     """執行 ``order[start:stop]`` 的節點；trace 逐一 append。
 
     回傳 ``(ctx, error)``：error 為 None 表成功（或在 upto_node 停下）；
@@ -170,6 +280,16 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
     # F9-3：誰產出了哪個特徵（D1）。從 meta 撿既有的，這樣**快取續跑**接得上
     # —— 冷跑前半段的歸屬不會因為後半段是從快照續跑而消失。
     owner: Dict[str, str] = dict(ctx.meta.get(FEATURE_OWNER_KEY) or {})
+
+    # F9-5a：每個「節點要的流」從哪個 (節點, 埠) 來。明講的線蓋過推出來的。
+    bind = _bindings(recipe, order, registry, kind or str(
+        ctx.meta.get("_dataset_kind") or ""))
+    # (節點, 輸出埠) → 陣列。**這才是資料真正的身分**；``ctx.images`` 仍然維持
+    # 「名字 → 最後一個寫它的人」那份視圖，給快取／預覽／trace 用（不變）。
+    produced: Dict[Tuple[str, str], Any] = dict(
+        getattr(ctx, "_produced", None) or {})
+    for name, arr in ctx.images.items():
+        produced.setdefault(("", name), arr)   # 快取續跑：快照來的流沒有產地
 
     for nid in order[start:stop]:
         node = recipe.nodes.get(nid)
@@ -193,14 +313,26 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
                     node.step,
                     f"unknown step '{node.step}'; registered: {sorted(registry)}")
             params = step_cls.validate_params(node.params)
-            # F9-2：卡片看到的是**照它宣告的入口組出來的** Context，不是全域表。
-            local = _local_view(ctx, _visible_streams(ctx, step_cls, params))
+            # F9-2/F9-5a：卡片看到的是**照它的入線組出來的** Context。
+            visible: Dict[str, Any] = {}
+            for name in step_cls.resolve_reads(params):
+                src = bind.get((nid, name))
+                if src is not None and src in produced:
+                    visible[name] = produced[src]
+                elif ("", name) in produced:
+                    visible[name] = produced[("", name)]   # 快照來的
+                elif name in ctx.images:
+                    visible[name] = ctx.images[name]
+            local = _local_view(ctx, visible)
             ret = step_cls().run(local, params)
             if isinstance(ret, Context):
                 local = ret
-            # 產出收回主表。目前仍然是「名字 → 最後一個寫它的人」（跟 F9 之前
-            # 完全一樣），所以快取、預覽、trace、黃金值全部不動。
-            # F9-5 之後這裡會改成收成 (node_id, out_name)。
+            # 產出**綁節點身分**（F9-5a）：同一條 ref 分岔成兩支時，兩支各自
+            # 是 (denoise_a, "ref") 與 (denoise_b, "ref")，不會互相蓋掉。
+            for name, arr in local.images.items():
+                produced[(nid, name)] = arr
+            # 同時維持「名字 → 最後一個寫它的人」那份視圖：快取快照、單顆預覽的
+            # 影像流下拉、trace 的 images_after 都吃它，全部不變。
             for name, arr in local.images.items():
                 ctx.images[name] = arr
             # rois / labels 是可能被整個換掉的欄位，抄回去（features/meta 共用
@@ -220,7 +352,12 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
             k: v for k, v in ctx.features.items()
             if k not in feats_before or feats_before[k] != v
         }
-        _rescue_overwritten_features(ctx, nid, feats_before, added, owner)
+        _rescue_overwritten_features(
+            ctx, nid, feats_before,
+            {k: ctx.features[k] for k in
+             _produced_feature_names(step_cls, params, ctx, added)},
+            owner)
+        setattr(ctx, "_produced", produced)
         traces.append(StepTrace(
             node_id=nid, step_key=node.step, ok=True, ms=ms,
             error=None, features_added=added,
@@ -283,7 +420,7 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
             f"of route '{kind}'")
 
     ctx, err = _run_nodes(recipe, order, 0, len(order), ctx, traces,
-                          registry, upto_node)
+                          registry, upto_node, kind)
     if err is not None:
         return _finish(defect_id, ctx, traces, keep_context, False, err)
 
@@ -472,7 +609,7 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
         # miss：跑影像段（order[:ckpt]），成功才寫快取
         ctx = _seed_context(item, kind, defect_id)
         ctx, err = _run_nodes(recipe, order, 0, ckpt, ctx, traces,
-                              registry, None)
+                              registry, None, kind)
         if err is not None:
             return _finish(defect_id, ctx, traces, keep_context, False, err)
         if key is not None:
@@ -485,7 +622,7 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
 
     # 續跑算法段 + ADC 判定
     ctx, err = _run_nodes(recipe, order, ckpt, len(order), ctx, traces,
-                          registry, None)
+                          registry, None, kind)
     if err is not None:
         return _finish(defect_id, ctx, traces, keep_context, False, err)
     try:
