@@ -725,10 +725,11 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                         code="feature-collision", level="warning", node_id=nid,
                         title=f"step '{nid}' overwrites the feature '{f}'",
                         detail=f"route '{k}': '{f}' is already produced by "
-                               f"'{owner}'; the later value wins and the earlier "
-                               f"one cannot be referenced from the score "
-                               f"expression at all. Give one of the two cards a "
-                               f"different output name if you need both."))
+                               f"'{owner}'; the later value wins, so '{f}' in "
+                               f"the score expression means this card's value. "
+                               f"The earlier one is still available as "
+                               f"'{owner}_{f}'. Give one of the two cards a "
+                               f"different output name if that is clearer."))
                 else:
                     feat_owner.setdefault(f, nid)
 

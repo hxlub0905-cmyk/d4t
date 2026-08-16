@@ -75,6 +75,58 @@ def _finish(defect_id: str, ctx: Context, traces: List[StepTrace],
         traces=traces, context=(ctx if keep_context else None))
 
 
+#: ``ctx.meta`` 裡放「每個特徵是哪張卡產出的」的鍵。
+#:
+#: 放在 meta 而不是 :class:`DefectResult` 的新欄位，是為了**不動序列化** ——
+#: `store/results.py` 的資料表、CSV 的欄位、KLARF 寫回全部吃的是扁平的
+#: ``features`` dict，加一個欄位就得動 schema，而 F9-3 的驗收條件是
+#: 「沒有撞名時輸出逐位元組相同」。
+FEATURE_OWNER_KEY = "feature_owner"
+
+
+def qualified_feature_name(node_id: str, name: str) -> str:
+    """被蓋掉的特徵改用這個名字保存：``<產出它的節點>_<原名>``。
+
+    D1（使用者 2026-08-16 同意）：**特徵掛在產出它的節點上**。節點只有一個，
+    所以「這個數字從哪來」永遠答得出來 —— 包括那些不屬於任何一條影像流的
+    （``n_channels`` 是這顆 defect 的、``align_dx`` 是兩條流之間的關係、
+    ``cross_*`` 是具名區域的）。
+
+    D2：**沒撞名就用原名**，撞名才加前綴。所以使用者平常看到的名字跟以前
+    一模一樣，不必學新語法（寫 score 的是不會寫 code 的工程師）。
+
+    F9-5 之後線會有自己的身分，那時前綴可以換成線名（``ref_soft_glv_max``
+    比 ``glv_stats2_glv_max`` 好讀）。現在線還沒有身分，節點有。
+    """
+    return "%s_%s" % (node_id, name)
+
+
+def _rescue_overwritten_features(ctx: Context, nid: str,
+                                 before: Dict[str, Any],
+                                 added: Dict[str, Any],
+                                 owner: Dict[str, str]) -> None:
+    """這張卡蓋掉了誰的特徵，就把被蓋掉的那份用**帶節點名的名字**留下來。
+
+    **既有語意一個字都沒改**：``glv_max`` 仍然是「最後一張卡寫的那個值」，
+    score 表達式、CSV、KLARF 寫回全部照舊。改的只有一件事 —— 以前被蓋掉的
+    那個值**完全消失、指都指不到**（`validate` 的 feature-collision 警告就是
+    在講這件事），現在它還在，叫 ``<前一張卡的節點名>_<原名>``。
+
+    為什麼是「救回舊的」而不是「把新的改名」：後者會讓 ``glv_max`` 突然不存在，
+    一份跑得好好的 recipe 的 score 表達式當場失效。救回舊的是**純粹加東西**，
+    沒有任何既有的東西被拿走。
+    """
+    for name in added:
+        prev_owner = owner.get(name)
+        if name in before and prev_owner is not None and prev_owner != nid:
+            rescued = qualified_feature_name(prev_owner, name)
+            if rescued not in ctx.features:
+                ctx.features[rescued] = before[name]
+            ctx.meta.setdefault(FEATURE_OWNER_KEY, {})[rescued] = prev_owner
+        owner[name] = nid
+        ctx.meta.setdefault(FEATURE_OWNER_KEY, {})[name] = nid
+
+
 def _local_view(master: Context, visible: Dict[str, Any]) -> Context:
     """給一張卡看的 ``Context``：**只有它宣告要讀的那幾條影像流**。
 
@@ -115,6 +167,10 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
     回傳 ``(ctx, error)``：error 為 None 表成功（或在 upto_node 停下）；
     否則為 "[node_id] 訊息" 字串（呼叫端包成失敗結果）。
     """
+    # F9-3：誰產出了哪個特徵（D1）。從 meta 撿既有的，這樣**快取續跑**接得上
+    # —— 冷跑前半段的歸屬不會因為後半段是從快照續跑而消失。
+    owner: Dict[str, str] = dict(ctx.meta.get(FEATURE_OWNER_KEY) or {})
+
     for nid in order[start:stop]:
         node = recipe.nodes.get(nid)
         if node is None:
@@ -164,6 +220,7 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
             k: v for k, v in ctx.features.items()
             if k not in feats_before or feats_before[k] != v
         }
+        _rescue_overwritten_features(ctx, nid, feats_before, added, owner)
         traces.append(StepTrace(
             node_id=nid, step_key=node.step, ok=True, ms=ms,
             error=None, features_added=added,

@@ -42,9 +42,9 @@ f277b6b3e5e65ce8027da01648a0d42d44a64905 adept/core/pipeline/batch.py
 73f0fec00bdfb78cbd32387e4d890b196e5ce1fb adept/core/pipeline/cache.py
 bc5822860c73a424460de963c0a7ef1b940bd71e adept/core/pipeline/context.py
 8a8f906147c0b06defc52096716ecfd917b0b94e adept/core/pipeline/curve.py
-93df364d37a9ad12adae8acb5babc4e0fb7a3e50 adept/core/pipeline/engine.py
+67739fb762bdcc660de8664c929938b41c9acbb3 adept/core/pipeline/engine.py
 6c3c9c1cc1e6d1ee5d121f9994968f4f780e3cc5 adept/core/pipeline/expression.py
-c9adc6e25ee737f94be7eb3d86cbc3e5f61cb6b1 adept/core/pipeline/recipe.py
+d75107b3516e8016df0af6ecefc23b38cc985213 adept/core/pipeline/recipe.py
 09625b4045e18764c168ae9ed1d24efcc1817991 adept/core/pipeline/step.py
 596cea13ec15f5ec7517c955111d58804910bee8 adept/core/steps/__init__.py
 59e1698c9ba21910c98b1cbb39b336bf19a2af2d adept/core/steps/_util.py
@@ -92,7 +92,7 @@ b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 66b7478efc1ff7fb18f2311732254ba5aa0973d8 docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
-20176b75bfd15f875b7e01288bf8aa32d9e2bc0e docs/plans/F9-dag-streams.md
+6f14cb3589f4d419165e920c373253e81b1df20b docs/plans/F9-dag-streams.md
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
 fdf5dba17526e86ea0990c7853ef652874082324 fab_probe/probe_klarf.py
 3046145d1bef806353a4b0d63fd81b33347fb8c8 fab_probe/probe_stats.py
@@ -116,7 +116,7 @@ ffd38060865543399c1801c0bec9eb4bf4a02c13 tests/test_card_invariants.py
 1be97f704f93ae3ebc989a569b9e04cd1de639aa tests/test_dataset.py
 12117b77d0e25f264919ff4ed1d341b5809a2d94 tests/test_e2e_die_to_die.py
 423cecd1e424c6b04cae217740ee7691aa8839e2 tests/test_e2e_dual_route.py
-bc4dc00d152cb4d1d2b0e8e9a6e3962bd025105a tests/test_engine.py
+66a019f6eee1bec64775c19e1c02aa2e83bec4f8 tests/test_engine.py
 c102f180db8665925d3208c90db05311506441ed tests/test_enhance.py
 ec53b9545e7a314039cdda7c60cc0d123e4701e2 tests/test_export_klarf.py
 be9903e176600cc8d742d46b8b89c1aa1039ac2a tests/test_export_overlay.py
