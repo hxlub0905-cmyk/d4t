@@ -90,7 +90,7 @@ def test_adding_after_a_card_puts_it_after_that_card(window):
     middle = window.add_card_after(src, "denoise", "test")
     order = window.model.node_order
     assert order.index(src) < order.index(middle) < order.index(last)
-    assert (src, middle) in window.model.edges, "使用者的動作是「接」，線要是實線"
+    assert (src, middle) in window.model.edge_pairs(), "使用者的動作是「接」，線要是實線"
 
 
 # --------------------------------------------------------------------------- #

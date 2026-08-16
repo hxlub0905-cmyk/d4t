@@ -379,7 +379,7 @@ def test_route_order_has_no_lines_at_all(window):
     src = window.model.node_order[0]
     nid = window.add_card_after(src, "denoise")
     pairs = {e.pair() for e in window.pipeline._edges}
-    assert pairs == set(window.model.edges), \
+    assert pairs == set(window.model.edge_pairs()), \
         "畫布上的線要恰好等於使用者拉的 edges"
 
 

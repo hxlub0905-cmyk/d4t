@@ -90,7 +90,7 @@ def test_selecting_a_node_on_the_canvas_drives_the_param_form(window):
 # --------------------------------------------------------------------------- #
 def test_linking_two_nodes_records_an_edge(window):
     window.pipeline.link_to("load", "norm")
-    assert ("load", "norm") in window.model.edges
+    assert ("load", "norm") in window.model.edge_pairs()
     assert ("load", "norm") in window.pipeline.edge_pairs()
     assert "Connected" in window.status_text()
 
@@ -99,10 +99,10 @@ def test_a_link_that_would_loop_is_refused_at_draw_time(window):
     """**循環擋在拉線的當下**，不是等到執行時才爆。"""
     window.pipeline.link_to("load", "norm")
     window.pipeline.link_to("norm", "sub")
-    before = list(window.model.edges)
+    before = list(window.model.edge_pairs())
 
     window.pipeline.link_to("sub", "load")        # 會成環
-    assert window.model.edges == before, "成環的線不可以落進 model"
+    assert window.model.edge_pairs() == before, "成環的線不可以落進 model"
     assert "loop" in window.status_text()
 
     # 而且流程仍然跑得動 —— 沒有被那次嘗試弄壞
@@ -121,7 +121,7 @@ def test_both_ports_can_land_on_the_same_node_and_each_gets_its_own_line(window)
     assert sub.in_names() == ["test", "ref"]
 
     window.pipeline.link_to("load", "sub")
-    assert window.model.edges == [("load", "sub")], "model 仍然是一條依賴"
+    assert window.model.edge_pairs() == [("load", "sub")], "model 仍然是一條依賴"
     assert window.pipeline._ports_between(load, sub) == [0, 1]
     assert len([e for e in window.pipeline._edges
                 if e.pair() == ("load", "sub")]) == 2, "兩條共用的流 = 兩條線"
@@ -129,7 +129,7 @@ def test_both_ports_can_land_on_the_same_node_and_each_gets_its_own_line(window)
 
     # 第二個埠拖到同一個節點：不是錯誤，訊息要講清楚兩條線本來就都在了
     window.pipeline.link_to("load", "sub")
-    assert window.model.edges == [("load", "sub")]
+    assert window.model.edge_pairs() == [("load", "sub")]
     assert "already connected" in window.status_text()
     assert "Cannot" not in window.status_text()
 
@@ -140,17 +140,17 @@ def test_both_ports_can_land_on_the_same_node_and_each_gets_its_own_line(window)
 
 def test_duplicate_and_self_links_are_ignored(window):
     window.pipeline.link_to("load", "norm")
-    n = len(window.model.edges)
+    n = len(window.model.edge_pairs())
     window.pipeline.link_to("load", "norm")         # 重複
     window.pipeline.link_to("load", "load")         # 自迴圈
-    assert len(window.model.edges) == n
+    assert len(window.model.edge_pairs()) == n
 
 
 def test_removing_an_edge_puts_it_back(window):
     window.pipeline.link_to("load", "norm")
-    assert ("load", "norm") in window.model.edges
+    assert ("load", "norm") in window.model.edge_pairs()
     window.pipeline.edge_removed.emit("load", "norm")
-    assert ("load", "norm") not in window.model.edges
+    assert ("load", "norm") not in window.model.edge_pairs()
     assert "Disconnected" in window.status_text()
 
 
@@ -160,7 +160,7 @@ def test_edges_reorder_execution_and_survive_a_save_load_round_trip(window, tmp_
 
     window.pipeline.link_to("load", "norm")
     window.pipeline.link_to("norm", "sub")
-    edges = list(window.model.edges)
+    edges = list(window.model.edge_pairs())
     order = list(window.model.node_order)
     assert order.index("load") < order.index("norm") < order.index("sub")
 
@@ -176,7 +176,7 @@ def test_edges_reorder_execution_and_survive_a_save_load_round_trip(window, tmp_
     assert [(e.src, e.dst) for e in loaded.edges] == edges
 
     assert window.load_recipe_path(str(out), sync=True) is True
-    assert window.model.edges == edges
+    assert window.model.edge_pairs() == edges
     assert window.pipeline.edge_pairs() == edges
 
 

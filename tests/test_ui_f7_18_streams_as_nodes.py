@@ -243,7 +243,7 @@ def test_a_line_that_would_loop_leaves_no_trace(window):
     src = window.model.node_order[0]
     first = window.add_card_after(src, "denoise", "test")
     second = window.add_card_after(first, "tone", "ref")   # 它的輸出埠是 ref
-    assert (first, second) in window.model.edges
+    assert (first, second) in window.model.edge_pairs()
 
     window.pipeline.link_to(second, first, port=0)   # 反過來拉：會成環
     assert window.model.has_edge(second, first) is False
@@ -274,7 +274,7 @@ def test_adding_from_the_library_follows_the_selected_card(window):
     assert window.model.nodes[nid].params["streams"] == "ref"
     order = window.model.node_order
     assert order.index(on_ref) < order.index(nid)
-    assert (on_ref, nid) in window.model.edges
+    assert (on_ref, nid) in window.model.edge_pairs()
 
 
 # --------------------------------------------------------------------------- #

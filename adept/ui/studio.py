@@ -418,6 +418,9 @@ class StudioWindow(QMainWindow):
         self.defect_index: int = 0
         self.selected_node: Optional[str] = None
         self.recipe_path: Optional[str] = None
+        #: ``_point_at_stream`` 剛剛把線綁到哪個參數（F9-5b 的 ``dst_in``）。
+        #: 它是那個函式的第二個回傳值，用屬性傳是為了不動既有呼叫端的形狀。
+        self._bound_param: str = ""
 
         self._preview_images: Dict[str, Any] = {}
         self._last_result: Optional[Any] = None
@@ -1477,7 +1480,7 @@ class StudioWindow(QMainWindow):
         if self.selected_node not in self.model.nodes:
             self.selected_node = None
         for view in self._canvases():
-            view.set_nodes(nodes, self.model.edges)
+            view.set_nodes(nodes, self.model.edge_pairs())
             view.set_selected(self.selected_node)
             view.set_score_summary(self.model.expr, self.model.threshold)
 
@@ -1660,6 +1663,12 @@ class StudioWindow(QMainWindow):
             spec = specs.get(name)
             if spec is None or spec.type not in ("image_key", "image_keys"):
                 continue
+            # 這就是這張卡吃影像流的那個參數 = 這條線的 ``dst_in``（F9-5b）。
+            # **要在這裡記，不能等到真的改了值才記** —— 參數的預設值本來就等於
+            # 那條流時，下面會提早 return（沒有東西要改），但線還是接在這個
+            # 參數上。漏掉的話那條線在引擎眼裡就是「沒指定」，於是退回用
+            # 「執行順序上最後一個寫它的人」推 —— 分支當場失效。
+            self._bound_param = name
             current = str(node.params.get(name, "") or "")
             if spec.type == "image_keys" and accumulate:
                 keys = [k.strip() for k in current.split(",") if k.strip()]
@@ -1675,6 +1684,9 @@ class StudioWindow(QMainWindow):
                 self.model.set_param(str(node_id), name, value)
             except ParamError:                 # pragma: no cover — 值就是流名
                 return ""
+            # F9-5b：把「這條線落在哪個參數」寫回邊上。引擎靠它決定資料從哪來
+            # （而不是靠「執行順序上最後一個寫這條流的人」），分支才成立。
+            self._bound_param = name
             if joined and "," in value:
                 return (" — “%s” now works on %s (same settings for both)"
                         % (node_id, " and ".join(value.split(","))))
@@ -1751,15 +1763,23 @@ class StudioWindow(QMainWindow):
         if self.model.has_edge(src, dst):
             # 同一對節點再拉一條 —— 對 image_keys 的卡這是「這條也接上」，
             # 所以要真的多一條線出來，不是回一句 already connected。
+            self._bound_param = ""
             note = self._point_at_stream(dst, stream, accumulate=True)
+            self.model.set_edge_ports(src, dst, src_out=stream,
+                                      dst_in=self._bound_param)
             self._status(note.lstrip(" —").strip() if note else
                          "%s → %s is already connected on %s."
                          % (src, dst, stream or "that stream"))
         elif self.model.add_edge(src, dst):
             # 影像流在**線真的接起來之後**才改。會成環的那條線沒有落地，
             # 它不該留下任何痕跡 —— 尤其不是「那張卡安靜地改成做 ref 了」。
-            self._status("Connected %s → %s%s"
-                         % (src, dst, self._point_at_stream(dst, stream)))
+            self._bound_param = ""
+            note = self._point_at_stream(dst, stream)
+            # F9-5b：埠補在邊上（``src_out`` = 從哪顆埠拉的、``dst_in`` = 落在
+            # 哪個參數）。順序不能顛倒 —— ``dst_in`` 是上一行才知道的。
+            self.model.set_edge_ports(src, dst, src_out=stream,
+                                      dst_in=self._bound_param)
+            self._status("Connected %s → %s%s" % (src, dst, note))
         else:
             self._status("Cannot connect %s → %s — that would make the "
                          "pipeline loop back on itself." % (src, dst), "error")

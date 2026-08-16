@@ -60,7 +60,7 @@ def _edges(canvas):
 def test_route_order_is_not_painted_as_lines(window):
     """範例 recipe 一條線都沒拉 → 畫布上**零條線**（虛線退役），
     但排版仍照順序分欄 —— 卡片的排列本身就是順序。"""
-    assert window.model.edges == [], "前提：這份 recipe 沒有顯式 edges"
+    assert window.model.edge_pairs() == [], "前提：這份 recipe 沒有顯式 edges"
     assert window.pipeline._edges == [], "route 順序不該畫成任何線"
     # 排版仍照隱含順序：不是全部疊在第 0 欄
     xs = {round(window.pipeline.card(nid).pos().x())
@@ -73,17 +73,36 @@ def test_drawing_the_link_yourself_makes_a_solid_line(window):
     a, b = window.model.node_order[0], window.model.node_order[1]
     window.pipeline.link_to(a, b)
 
-    assert (a, b) in window.model.edges
+    assert (a, b) in window.model.edge_pairs()
     pairs = [e.pair() for e in window.pipeline._edges]
     assert pairs.count((a, b)) >= 1
 
 
 def test_edge_pairs_still_reports_only_the_users_own_links(window):
-    """存檔寫的是使用者拉的線。route 順序不進 edges（也不再畫）。"""
-    assert window.pipeline.edge_pairs() == window.model.edges == []
+    """畫布畫的線 = 使用者拉的線。route 順序不進 edges（也不再畫）。
+
+    畫布只認得「哪兩張卡之間有線」；埠（F9-5b 起帶在 ``Edge`` 上）是引擎的事，
+    所以兩邊要比的是 ``model.edge_pairs()``。
+    """
+    assert window.pipeline.edge_pairs() == window.model.edge_pairs() == []
     window.pipeline.link_to(window.model.node_order[0],
                             window.model.node_order[2])
-    assert window.pipeline.edge_pairs() == window.model.edges
+    assert window.pipeline.edge_pairs() == window.model.edge_pairs()
+
+
+def test_a_link_drawn_on_the_canvas_records_which_ports_it_joins(window):
+    """F9-5b：畫布上拉的線要把**埠**寫進 model —— 那是分支成立的條件。
+
+    ``src_out`` = 從哪顆輸出埠拉的、``dst_in`` = 落在下游卡的哪個參數。
+    兩個都填了，引擎才會照這條線送資料（而不是退回「執行順序上最後一個寫這條
+    流的人」）。漏掉任何一個，畫布上看起來有線、跑起來卻還是串聯。
+    """
+    src, dst = window.model.node_order[0], window.model.node_order[2]
+    window.pipeline.link_to(src, dst)
+    edge = [e for e in window.model.edges if e.src == src and e.dst == dst]
+    assert edge, "線沒進 model"
+    assert edge[0].src_out, "沒記下這條線從哪顆輸出埠拉的"
+    assert edge[0].dst_in, "沒記下這條線落在下游的哪個參數"
 
 
 def test_a_long_chain_wraps_instead_of_running_off_the_screen(window):

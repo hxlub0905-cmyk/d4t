@@ -32,7 +32,9 @@ class RecipeModel:
         #: 但有 edges 時它由拓撲排序算出來，不再是「使用者加卡片的順序」。
         #: 引擎那邊 ``execution_order`` 本來就是「route 相鄰對 ∪ edges」，
         #: 所以把 route 寫成拓撲順序與 edges 併存，語意一致且向後相容。
-        self.edges: List[Tuple[str, str]] = []
+        #: 畫布上的線。F9-5b 起存的是 core 的 :class:`~adept.core.pipeline.Edge`
+        #: （帶埠），不再是一對節點 —— 埠決定**資料從哪來**，而不只是先後順序。
+        self.edges: List[Edge] = []
         self.expr = "0"
         self.threshold = 0.0
         self.bins = {"below": 0, "above": 1}
@@ -95,7 +97,8 @@ class RecipeModel:
             "node_order": list(self.node_order),
             "nodes": {nid: (n.step, dict(n.params), bool(n.enabled))
                       for nid, n in self.nodes.items()},
-            "edges": [tuple(e) for e in self.edges],
+            "edges": [Edge(e.src, e.dst, e.src_out, e.dst_in)
+                      for e in self.edges],
             "expr": self.expr, "threshold": self.threshold,
             "bins": dict(self.bins),
         }
@@ -111,7 +114,7 @@ class RecipeModel:
         self.nodes = {nid: RecipeNode(id=nid, step=step, params=dict(params),
                                       enabled=enabled)
                       for nid, (step, params, enabled) in snap["nodes"].items()}
-        self.edges = [tuple(e) for e in snap["edges"]]
+        self.edges = list(snap["edges"])
         self.expr = snap["expr"]
         self.threshold = snap["threshold"]
         self.bins = dict(snap["bins"])
@@ -315,7 +318,7 @@ class RecipeModel:
         rank = {nid: i for i, nid in enumerate(self.node_order)}
         indeg = {nid: 0 for nid in self.nodes}
         succ: Dict[str, List[str]] = {nid: [] for nid in self.nodes}
-        for a, b in edges:
+        for a, b in ((e.src, e.dst) for e in edges):
             if a in indeg and b in indeg:
                 succ[a].append(b)
                 indeg[b] += 1
@@ -338,46 +341,76 @@ class RecipeModel:
         給 UI 分辨「拉不起來（會成環）」與「本來就連著了」用 —— 對使用者來說
         那是兩件完全不同的事，混成同一句話會讓成功的操作看起來像失敗。
         """
-        return (str(src), str(dst)) in self.edges
+        return any(e.src == str(src) and e.dst == str(dst) for e in self.edges)
 
-    def add_edge(self, src: str, dst: str) -> bool:
-        """連一條線。會造成循環（或自迴圈／重複）就**不做事並回 False**。"""
+    def add_edge(self, src: str, dst: str, src_out: str = "",
+                 dst_in: str = "") -> bool:
+        """連一條線。會造成循環（或自迴圈／重複）就**不做事並回 False**。
+
+        ``src_out`` / ``dst_in`` 是埠（F9-5b）：從哪顆輸出埠拉的、落在下游卡的
+        哪個參數。填了的話引擎就照這條線送資料（而不是照「執行順序上最後一個
+        寫這條流的人」推）—— 那是分支成立的條件。
+        """
         src, dst = str(src), str(dst)
         if src == dst or src not in self.nodes or dst not in self.nodes:
             return False
-        if (src, dst) in self.edges:
+        if self.has_edge(src, dst):
             return False
-        order = self._topological_order(self.edges + [(src, dst)])
+        new = Edge(src=src, dst=dst, src_out=str(src_out or ""),
+                   dst_in=str(dst_in or ""))
+        order = self._topological_order(self.edges + [new])
         if order is None:
             return False                     # 循環 —— 擋在這裡，不讓它進 model
         self._push_undo()
-        self.edges.append((src, dst))
+        self.edges.append(new)
         self.node_order = order
         self._changed()
         return True
 
+    def set_edge_ports(self, src: str, dst: str, src_out: str = "",
+                       dst_in: str = "") -> bool:
+        """補上（或改掉）一條既有線的埠。
+
+        分成兩步是因為 Studio 的順序是「先確定線接得起來（不成環），**再**去改
+        下游卡的參數」—— 而 ``dst_in`` 是那一步才知道的（要看那張卡的哪個參數
+        吃影像流）。線沒接起來就不該留下任何痕跡。
+        """
+        src, dst = str(src), str(dst)
+        for i, e in enumerate(self.edges):
+            if e.src == src and e.dst == dst:
+                self.edges[i] = Edge(src=src, dst=dst,
+                                     src_out=str(src_out or e.src_out),
+                                     dst_in=str(dst_in or e.dst_in))
+                return True
+        return False
+
     def remove_edge(self, src: str, dst: str) -> bool:
-        pair = (str(src), str(dst))
-        if pair not in self.edges:
+        src, dst = str(src), str(dst)
+        keep = [e for e in self.edges if not (e.src == src and e.dst == dst)]
+        if len(keep) == len(self.edges):
             return False
         self._push_undo()
-        self.edges.remove(pair)
+        self.edges = keep
         order = self._topological_order(self.edges)
         if order is not None:
             self.node_order = order
         self._changed()
         return True
 
-    def edges_of(self, node_id: str) -> List[Tuple[str, str]]:
+    def edges_of(self, node_id: str) -> List[Edge]:
         nid = str(node_id)
-        return [e for e in self.edges if nid in e]
+        return [e for e in self.edges if nid in (e.src, e.dst)]
+
+    def edge_pairs(self) -> List[Tuple[str, str]]:
+        """畫布只需要「哪兩張卡之間有線」—— 埠是引擎的事。"""
+        return [(e.src, e.dst) for e in self.edges]
 
     # ---- Recipe 互轉 -------------------------------------------------------
     def to_recipe(self) -> Recipe:
         return Recipe(
             recipe_id=self.recipe_id,
             routes={self.kind: list(self.node_order)},
-            edges=[Edge(src=a, dst=b) for a, b in self.edges],
+            edges=list(self.edges),
             nodes={nid: RecipeNode(id=nid, step=n.step, params=dict(n.params),
                                    enabled=n.enabled)
                    for nid, n in self.nodes.items()},
@@ -398,7 +431,7 @@ class RecipeModel:
         in_route = set(m.node_order)
         # F9-1：core 的邊帶埠了（``Edge``），UI 這一層還是「一對節點」——
         # 埠要到 F9-5 才由畫布產生。轉換只在這個邊界做，UI 內部不必知道。
-        m.edges = [(e.src, e.dst) for e in (recipe.edges or [])
+        m.edges = [e for e in (recipe.edges or [])
                    if e.src in in_route and e.dst in in_route]
         m.nodes = {nid: RecipeNode(id=nid, step=n.step, params=dict(n.params),
                                    enabled=n.enabled)
