@@ -399,7 +399,15 @@ class _NodeItem(QGraphicsItem):
         是使用者需要知道的事。
         """
         reads = [r for r in (self.info.get("reads") or []) if r]
-        outs = [w for w in (self.info.get("writes") or []) if w]
+        # 副標印的是**這張卡真的產出什麼**（``produces``），不是所有輸出埠
+        # —— F9-6 起 ``writes`` 還含著「原樣送出的輸入」，全印出來的話
+        # 每張卡的副標都會變成「test ref → test ref diff」那種一長串。
+        # 用「有沒有這個 key」判斷，**不能用 or** —— 區域卡的 ``produces`` 是
+        # 空的（它產出的是具名區域不是影像流），``x or y`` 會因此掉回 ``writes``，
+        # 而 F9-6 之後那裡面裝的是「原樣送出的輸入」，副標就變成「diff → diff」。
+        _p = (self.info["produces"] if "produces" in self.info
+              else self.info.get("writes") or [])
+        outs = [w for w in (_p or []) if w]
         regions = [r for r in (self.info.get("regions_out") or []) if r]
         right = " ".join(str(x) for x in (outs or regions))
         left = " ".join(str(r) for r in reads)

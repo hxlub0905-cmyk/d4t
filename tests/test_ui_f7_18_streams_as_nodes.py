@@ -291,3 +291,58 @@ def test_route_order_draws_no_dashed_lines(window, qapp):
     assert len(window.pipeline._edges) >= 1
     assert "canvas_edge_implicit" not in theme_mod.TOKENS, \
         "虛線退役了，色票不要留孤兒 token"
+
+
+# ---------------------------------------------------------------------------
+# F9-6：同進同出 + 來源只在畫布上決定
+# ---------------------------------------------------------------------------
+def test_a_measure_card_still_has_an_output_port(window):
+    """量測卡的 ``writes`` 是空的 —— 以前它在畫布上**沒有任何輸出埠**，
+    線到那裡就斷了，後面接不下去也分不了支。
+
+    F9-6：**接進來的每一條流，卡片後面也要接得出去**。引擎那邊本來就成立
+    （跑一張卡的 local Context 是用它的輸入種出來的，跑完整份收成產出），
+    這裡是把它畫出來。「不需要就不要連它」—— 多出來的埠不接線就沒有作用。
+    """
+    nid = window.model.add_step("glv_stats")
+    window._refresh_all()
+    card = window.pipeline.card(nid)
+    assert card is not None
+    outs = card.out_names()
+    assert outs, "量測卡在畫布上沒有輸出埠 —— 鏈到這裡就斷了"
+    from adept.core.pipeline import get_step
+    reads = list(get_step("glv_stats").resolve_reads(window.model.nodes[nid].params))
+    for r in reads:
+        assert r in outs, "接進來的 %s 沒有原樣送出去（同進同出）" % r
+
+
+def test_a_card_that_makes_a_new_stream_also_passes_its_inputs_through(window):
+    """會產生新流的卡（subtract → diff）：輸出埠 = 新流 **＋** 原本接進來的。
+
+    使用者的原話：「這樣才會更 flexible，如果我不需其它後端接口，不要連他就好」。
+    """
+    nid = window.model.add_step("subtract")
+    window._refresh_all()
+    outs = window.pipeline.card(nid).out_names()
+    assert "diff" in outs, "自己產的新流不見了"
+    for r in ("test", "ref"):
+        assert r in outs, "%s 沒有原樣送出去" % r
+    assert outs.index("diff") < outs.index("test"), \
+        "自己產的要排在前面（原樣送出的是附加的，不該搶第一顆埠）"
+
+
+def test_the_source_cannot_be_changed_from_the_card_settings(window):
+    """來源**只在畫布上決定**；設定區只顯示，不給改（使用者定調）。
+
+    以前同一件事有兩個入口 —— 拉線會改它、設定區的下拉也會改它 —— 而兩邊很容易
+    對不起來。這條測試同時鎖住「不能改」與「看得到」：唯讀不等於藏起來。
+    """
+    from PySide6.QtWidgets import QLineEdit
+
+    nid = window.model.add_step("denoise")
+    window.select_node(nid)
+    editor = window.param_form.editor("streams")
+    assert isinstance(editor, QLineEdit), "來源欄位還是可編輯的控制項"
+    assert editor.isReadOnly() is True
+    assert editor.text(), "看不到現在接的是哪一條 —— 唯讀不等於藏起來"
+    assert editor.toolTip().strip(), "要講得出去哪裡改（推廣鐵則）"

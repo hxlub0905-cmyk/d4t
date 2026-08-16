@@ -328,13 +328,19 @@ def test_param_form_int_and_image_key_from_snr_map(qapp):
     assert edits[-1] == ("clip_sigma", pytest.approx(4.5))
     assert isinstance(edits[-1][1], float)
 
-    # image_key -> 可編輯下拉，內容 = 呼叫端給的影像流
+    # image_key -> **唯讀顯示**（F9-6：來源只在畫布上決定）。
+    #
+    # 以前這裡是可編輯的下拉，於是同一件事有兩個入口 —— 拉線會改它、下拉也會
+    # 改它 —— 而兩邊很容易對不起來（使用者的原話是「他會很亂連」）。現在這一格
+    # 只顯示現在接的是什麼，改要回畫布上拉線。
     source = form.editor("source")
-    assert isinstance(source, QComboBox) and source.isEditable()
-    assert [source.itemText(i) for i in range(source.count())] == streams
-    assert source.currentText() == "diff"
-    source.setCurrentText("ref_aligned")
-    assert edits[-1] == ("source", "ref_aligned")
+    assert isinstance(source, QLineEdit)
+    assert source.isReadOnly() is True, "來源不該在參數表單裡改得動"
+    assert source.text() == "diff", "要看得到現在接的是哪一條"
+    assert source.toolTip().strip(), "唯讀就要講得出去哪裡改（推廣鐵則）"
+    n_before = len(edits)
+    source.setText("ref_aligned")          # 程式硬設也不該當成使用者編輯
+    assert len(edits) == n_before, "唯讀欄位不可以發出參數變更"
 
     # 每一列都看得見白話 help（推廣鐵則）
     for spec in desc["params"]:

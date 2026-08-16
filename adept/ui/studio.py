@@ -1461,6 +1461,16 @@ class StudioWindow(QMainWindow):
                 regions_out = list(step_cls.resolve_regions_out(node.params))
             except Exception:              # noqa: BLE001
                 regions_out = []
+            # F9-6：**同進同出** —— 接進來的每一條流，卡片後面也要接得出去，
+            # 否則鏈到量測卡就斷了（那五張卡的 ``writes`` 是空的，畫布上根本
+            # 沒有輸出埠）。順序是「自己產的新流」在前、「原樣送出的」在後。
+            #
+            # 引擎那邊本來就成立：跑一張卡的 local Context 是用它的輸入種出來
+            # 的，跑完整份收成 ``produced[(節點, 名字)]``，所以輸入本來就在裡面
+            # 送得出去（見 engine 的 ``_run_nodes``）。這裡只是把它畫出來。
+            #
+            # 「不需要就不要連它」—— 多出來的埠不接線就不會有任何作用。
+            outs = list(writes) + [r for r in reads if r not in writes]
             nodes.append({
                 "node_id": nid,
                 "step_key": node.step,
@@ -1470,7 +1480,10 @@ class StudioWindow(QMainWindow):
                 # 副標那行印的是 reads → writes/regions；摘要不要再講一次
                 "summary": self._node_summary(
                     node, shown=list(reads) + list(writes) + list(regions_out)),
-                "writes": writes,
+                # 畫布的輸出埠吃這個（含原樣送出的輸入）；副標仍然只印
+                # 「這張卡真的產出什麼」，不然每張卡的副標都會變成一長串。
+                "writes": outs,
+                "produces": writes,
                 "reads": reads,
                 "regions_out": regions_out,
                 "group": step_cls.resolve_group() if step_cls else "",

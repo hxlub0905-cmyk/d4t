@@ -2013,9 +2013,11 @@ class ParamForm(QWidget):
             return w
 
         if ptype == "image_keys":
-            w = StreamPicker(streams, "" if value is None else str(value))
-            w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
-            return w
+            # F9-6：**來源只在畫布上決定**（使用者定調）。以前這裡是一排勾選框，
+            # 於是同一件事有兩個入口 —— 拉線會改它、勾選框也會改它 —— 而畫布上
+            # 那條線與這裡的勾選很容易對不起來（使用者的原話是「他會很亂連」）。
+            # 現在這一格只**顯示**目前接進來的是哪幾條，改要回畫布上拉線。
+            return _wiring_display("" if value is None else str(value))
 
         if ptype == "multi_choice":
             w = MultiChoicePicker([str(c) for c in (spec.get("choices") or [])],
@@ -2031,16 +2033,8 @@ class ParamForm(QWidget):
             return w
 
         if ptype == "image_key":
-            w = QComboBox()
-            w.setEditable(True)          # 可挑上游影像流，也可自己打新流名
-            items = list(dict.fromkeys([str(s) for s in streams]))
-            text = str(value)
-            if text and text not in items:
-                items.append(text)
-            w.addItems(items)
-            w.setCurrentText(text)
-            w.currentTextChanged.connect(lambda t, n=name: self._emit(n, str(t)))
-            return w
+            # 同上（F9-6）：來源是接線的結果，不是這裡填的。
+            return _wiring_display("" if value is None else str(value))
 
         w = QLineEdit()
         w.setText("" if value is None else str(value))
@@ -2051,6 +2045,26 @@ class ParamForm(QWidget):
 # --------------------------------------------------------------------------- #
 # 2b. CurveEditor —— 自己拉的色調曲線（F7-8）
 # --------------------------------------------------------------------------- #
+def _wiring_display(text: str) -> QWidget:
+    """「這條流從哪來」的**唯讀**顯示（F9-6）。
+
+    為什麼是唯讀：來源改成**只在畫布上決定**。以前參數表單也能改，於是同一件事
+    有兩個入口，而兩邊很容易對不起來 —— 使用者的原話是「他會很亂連」。
+
+    唯讀不等於藏起來：這一格仍然要**看得到現在接的是什麼**，否則使用者得回畫布
+    上一條一條線去數。空的時候講出「還沒接」而不是留白 —— 留白讀起來像壞掉。
+    """
+    w = QLineEdit()
+    w.setText(str(text) if str(text).strip() else "")
+    w.setPlaceholderText("not wired yet — drag a line on the canvas")
+    w.setReadOnly(True)
+    w.setToolTip("Set by the lines on the canvas. Drag from an output port to "
+                 "change what this card works on.")
+    w.setObjectName("wiringDisplay")
+    w.setCursor(Qt.ArrowCursor)
+    return w
+
+
 class CurveEditor(QWidget):
     """可拖曳的色調曲線編輯器。橫軸 = 輸入灰階，縱軸 = 輸出灰階，兩軸都 0–1。
 
