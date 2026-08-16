@@ -254,17 +254,61 @@ def _implicit_bindings(recipe: Recipe, order: List[str],
     return out
 
 
+def _follow_disabled(recipe: Recipe,
+                     bind: Dict[Tuple[str, str], Optional[Tuple[str, str]]],
+                     src: Tuple[str, str]) -> Optional[Tuple[str, str]]:
+    """線指到一張**被停用**的卡時，沿著它自己的入線再往上找（F9-8）。
+
+    為什麼要走這一段
+    ----------------
+    停用只是「這次不跑」，不是「這條線不存在」。但被停用的節點沒有產出，
+    於是 ``produced[(它, 埠)]`` 是空的 —— 而以前空的就退回 ``ctx.images``
+    ＝「最後一個寫這個名字的人」，在分支上那是**隔壁那一支**。
+    實測：停用 ×3 那一支的卡，它下游的量測卡量到的是 ×5 那一支的值。
+
+    往上找到的是「這條線上第一個還開著的產出者」，那正是使用者的意思：
+    把中間一張卡關掉 = 資料直接從它的上游流過來。
+
+    找不到（整條線的上游都關著，或那個名字本來就不是傳遞下去的）→ 回 ``None``
+    ＝ **這條流在這條線上沒有東西**。呼叫端據此讓卡片看不到它，於是它會拿到
+    一句「缺這條影像流」的錯誤 —— 而不是安靜地吃到別支的圖。
+    """
+    seen = set()
+    cur: Optional[Tuple[str, str]] = src
+    while cur is not None:
+        node = recipe.nodes.get(cur[0])
+        if node is None:
+            return None
+        if node.enabled:
+            return cur
+        if cur in seen:                       # 理論上不會（DAG），但別無限迴圈
+            return None
+        seen.add(cur)
+        cur = bind.get(cur)
+    return None
+
+
 def _bindings(recipe: Recipe, order: List[str],
               registry: Dict[str, Type[Step]], kind: str
-              ) -> Dict[Tuple[str, str], Tuple[str, str]]:
+              ) -> Dict[Tuple[str, str], Optional[Tuple[str, str]]]:
     """這條 route 上每個「節點要的流」各自從哪個 ``(節點, 埠)`` 來。
 
     明講的線**蓋過**推出來的 —— 使用者在畫布上拉的那條，永遠贏過「剛好排在
     前面的那張卡」。
+
+    值可能是 ``None``：線指到的那張卡被停用了，而沿著它往上也找不到還開著的
+    產出者（見 :func:`_follow_disabled`）。那代表**這條線上沒有這條流**。
     """
-    out = _implicit_bindings(recipe, order, registry, kind)
-    out.update(_explicit_bindings(recipe, registry))
-    return out
+    merged: Dict[Tuple[str, str], Optional[Tuple[str, str]]] = dict(
+        _implicit_bindings(recipe, order, registry, kind))
+    explicit = _explicit_bindings(recipe, registry)
+    merged.update(explicit)
+    # 停用的節點只在**明講的線**上要處理：``_implicit_bindings`` 本來就跳過
+    # 停用節點（它算的是「最後一個**跑過**的寫者」），推出來的結果不會指到
+    # 關著的卡。
+    for key in explicit:
+        merged[key] = _follow_disabled(recipe, merged, merged[key])
+    return merged
 
 
 def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
@@ -316,6 +360,12 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
             # F9-2/F9-5a：卡片看到的是**照它的入線組出來的** Context。
             visible: Dict[str, Any] = {}
             for name in step_cls.resolve_reads(params):
+                if bind.get((nid, name), False) is None:
+                    # 明講的線指到一張停用的卡，而沿線往上也沒有還開著的產出者
+                    # （F9-8）。**這條線上沒有這條流** —— 讓卡片看不到它，
+                    # 於是它會說「缺這條影像流」。以前這裡會退回「最後一個寫
+                    # 這個名字的人」，在分支上那是隔壁那一支的圖。
+                    continue
                 src = bind.get((nid, name))
                 if src is not None and src in produced:
                     visible[name] = produced[src]
@@ -447,9 +497,16 @@ def image_segment_signature(recipe: Recipe, kind: str,
     checkpoint 索引 = 執行順序中「最後一個 enabled 且 category==image 的節點」
     的下一個位置；沒有影像段節點 → 0（快取沒意義）。
     簽章 = checkpoint 前所有 enabled 節點的
-    ``[(node_id, step_key, sorted-param-items), ...]`` + kind 的穩定 JSON 字串
-    （params 先過 ``validate_params`` 正規化：帶預設值、coerce 型別，
-    讓「寫不寫預設值」不影響簽章）。deterministic。
+    ``[(node_id, step_key, sorted-param-items), ...]`` + **落在這一段裡的線**
+    + kind 的穩定 JSON 字串（params 先過 ``validate_params`` 正規化：帶預設值、
+    coerce 型別，讓「寫不寫預設值」不影響簽章）。deterministic。
+
+    ⚠ **線一定要在裡面（F9-8）。** F9 之後「資料從哪來」是線決定的，而在畫布上
+    把一條線從 A 改接到 B **可以完全不動任何參數**（兩邊都叫 ``ref``）。線不進
+    簽章的話那次改動算出來的簽章跟改之前一模一樣 —— 快取直接回舊影像，使用者
+    看到的是「我改了接線，重跑，數字沒動」，而他會以為是自己改錯了。
+    實測過：把 ``x5`` 的輸入從 ``load`` 改接到 ``x3``，正確答案 15.0，
+    帶著舊快取跑出來是 5.0。
 
     注意：未知 route / 循環會 raise :class:`RecipeError`
     （:func:`run_defect_cached` 會攔截並退回 :func:`run_defect`）。
@@ -482,7 +539,15 @@ def image_segment_signature(recipe: Recipe, kind: str,
         items = sorted((str(k), v) for k, v in params.items())
         sig_nodes.append([nid, node.step, [list(kv) for kv in items]])
 
-    sig = json.dumps({"kind": kind, "nodes": sig_nodes},
+    # 影像段裡的線（F9-8）。只收 ``dst`` 落在這一段的 —— checkpoint 之後的線
+    # 不影響快取住的那份影像，收進來只會讓「改了算法段」也整段重算。
+    in_segment = {nid for nid in order[:ckpt]
+                  if (recipe.nodes.get(nid) is not None
+                      and recipe.nodes[nid].enabled)}
+    sig_edges = sorted([e.src, e.src_out, e.dst, e.dst_in]
+                       for e in recipe.edges if e.dst in in_segment)
+
+    sig = json.dumps({"kind": kind, "nodes": sig_nodes, "edges": sig_edges},
                      ensure_ascii=False, sort_keys=True, default=str,
                      separators=(",", ":"))
     return sig, ckpt
