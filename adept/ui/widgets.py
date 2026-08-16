@@ -1684,7 +1684,7 @@ class ParamForm(QWidget):
         self._values: Dict[str, Any] = {}
         self._describe: Optional[Dict[str, Any]] = None
         self._building = False
-        #: 進階參數收起來了嗎（**追明確狀態**，不問 widget —— CLAUDE.md §7）。
+        #: 進階參數收起來了嗎（**追明確狀態**，不問 widget —— docs/PITFALLS.md）。
         #: 換一張卡就收回去：上一張卡展開過不代表這一張也要。
         self._advanced_open = False
 
@@ -1829,7 +1829,7 @@ class ParamForm(QWidget):
 
     def section_visible(self, name: str) -> bool:
         """某一組的標題現在看不看得到（**追明確狀態**，不問 ``isVisible()`` ——
-        視窗還沒 show 之前那個恆為 False，見 CLAUDE.md §7）。"""
+        視窗還沒 show 之前那個恆為 False，見 docs/PITFALLS.md）。"""
         heads = self._sections.get(str(name)) or []
         return bool(heads) and all(not h.isHidden() for h in heads)
 

@@ -82,7 +82,7 @@ SKIP_WELCOME_KEY = "welcome/skip"
 #: 主題偏好（F7-2）。與導覽旗標共用同一組 QSettings。
 THEME_KEY = "ui/theme"
 
-#: 三段式的一句話說明（和 CLAUDE.md §2 的心智模型逐字對應）。
+#: 三段式的一句話說明（和 docs/ARCHITECTURE.md 的心智模型逐字對應）。
 _SEG_LINES = (
     ("image", "Make images clean and comparable"),
     ("algo", "Measure numbers from images (quantified evidence)"),

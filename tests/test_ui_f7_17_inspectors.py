@@ -343,7 +343,7 @@ def test_a_value_outside_the_batch_range_does_not_draw_off_the_chart(qapp):
 # 5. Input：哪一頁變成哪一條流
 # --------------------------------------------------------------------------- #
 def test_the_page_to_stream_mapping_is_on_screen(window, tmp_path):
-    """這是全專案第一條待廠內驗證的假設（CLAUDE.md §8）。錯了的話 diff 會整個
+    """這是全專案第一條待廠內驗證的假設（docs/FAB-VALIDATION.md）。錯了的話 diff 會整個
     反號，而畫面上完全看不出來 —— 兩張圖本來就長得很像。"""
     from make_sample import generate
 

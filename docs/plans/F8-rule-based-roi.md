@@ -69,7 +69,7 @@ def _band_rect(band, length, axis):
 3. **會跟 `roi_template` 重疊**（使用者自己指出來的）。Golden Cell 的本質就是
    「拿一個完整 cell 對回相位」，跟週期＋相位是同一件事的兩種做法。
 
-`period.py` 仍然不刪（CLAUDE.md §11 的警告照舊）—— 只是這件事不歸它做。
+`period.py` 仍然不刪（CLAUDE.md §5 的警告照舊）—— 只是這件事不歸它做。
 
 ---
 
@@ -101,7 +101,7 @@ Y 投影 → 一組橫的條紋 ─┘
 這一顆真的長的樣子。衝突時相信影像，把證據留給上層講出來。
 
 ⚠ **pitch 一律是像素。** GDS 給的是 nm，而 `nm_per_px` 在 KLARF 裡沒有來源
-（CLAUDE.md §8）—— 收 nm 的話它會變成第二個恆為 0 的 `cd_x_nm`。
+（docs/FAB-VALIDATION.md）—— 收 nm 的話它會變成第二個恆為 0 的 `cd_x_nm`。
 
 ### `adept/core/steps/roi_cross.py`
 

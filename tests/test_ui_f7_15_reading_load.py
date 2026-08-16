@@ -119,7 +119,7 @@ def test_the_empty_panel_offers_what_you_can_actually_do(window):
     也不能再提它。鈕本身還在（只是隱形），光看 ``.text()`` 看不出差別。
 
     問的是 ``isHidden()`` 不是 ``isVisible()``：視窗還沒 ``show()`` 的時候
-    **每一個 widget 的 ``isVisible()`` 都是 False**（CLAUDE.md §7 那一列），
+    **每一個 widget 的 ``isVisible()`` 都是 False**（docs/PITFALLS.md 那一列），
     拿它問「這顆藏起來了嗎」在建構期永遠答「是」。``isHidden()`` 問的是
     「有沒有被明確藏起來」，那正是這裡要知道的事。
     """

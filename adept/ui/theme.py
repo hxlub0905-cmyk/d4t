@@ -387,7 +387,7 @@ def group_hex(group: str) -> str:
     相鄰的兩階段永遠不同色系，所以在直式 rail 上由上而下掃過去分得開。
 
     ``seg_hex`` 沒有被取代 —— 需要講「這是哪一段」的地方（首啟導覽的三段說明、
-    直方圖、Score/Bin 尾卡）仍然用它。兩個軸各有各的用途，見 CLAUDE.md §2。
+    直方圖、Score/Bin 尾卡）仍然用它。兩個軸各有各的用途，見 docs/ARCHITECTURE.md。
     """
     return TOKENS[_STAGE_TOKENS.get(str(group), "stage_enhance")]
 
@@ -769,7 +769,7 @@ QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabl
  * `border: 0` here used to hide the arrow completely: styling this subcontrol
  * hands it to the stylesheet, and a styled drop-down draws no arrow unless the
  * rule also supplies a `down-arrow` image — which this repo cannot ship,
- * because it is text-only (see CLAUDE.md §9.5). Leaving the border unset keeps
+ * because it is text-only (see docs/FAB-VALIDATION.md). Leaving the border unset keeps
  * the subcontrol on the base style, which paints the arrow itself.
  *
  * The visible consequence was that "Match on" (three fixed streams) and "Name

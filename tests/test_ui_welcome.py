@@ -357,7 +357,7 @@ def test_the_sample_entries_are_hidden_while_there_are_no_recipes(window):
     所以「壞了沒有」從程式碼看不出來 —— 壞的是使用者按了之後撞牆。
 
     問 ``isHidden()`` 而不是 ``isVisible()``：視窗還沒 ``show()`` 之前
-    所有 widget 的 ``isVisible()`` 都是 False（CLAUDE.md §7），那樣問的話
+    所有 widget 的 ``isVisible()`` 都是 False（docs/PITFALLS.md），那樣問的話
     這條測試會**永遠是綠的**，包括開關打開的時候。
     """
     from adept.ui import scope

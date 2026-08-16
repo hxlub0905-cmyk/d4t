@@ -164,8 +164,12 @@ def test_edges_reorder_execution_and_survive_a_save_load_round_trip(window, tmp_
     order = list(window.model.node_order)
     assert order.index("load") < order.index("norm") < order.index("sub")
 
+    # 存檔功能還沒支援，所以自己寫一份 JSON 出去再載回來 ——
+    # 這條測的是「連線活得過一次序列化」，不是存檔對話框。
+    import json as _json
     out = tmp_path / "wired.json"
-    assert window.save_recipe_path(str(out)) is True
+    out.write_text(_json.dumps(window.model.to_recipe().to_json_dict(),
+                               ensure_ascii=False), encoding="utf-8")
     loaded = Recipe.load(str(out))
     assert [tuple(e) for e in loaded.edges] == edges
 

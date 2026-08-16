@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import heapq
 import json
-import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
@@ -382,6 +381,22 @@ class Recipe:
                 raise RecipeError(f"an edge must be [from, to] — two step ids; got: {e}")
             edges.append([str(e[0]), str(e[1])])
 
+        # ── 遷移的鐵則：**只能靠「舊東西在不在」判斷，不能靠「新東西不在」** ──
+        #
+        # 下面三道都是看舊 key／舊值存不存在才動手，所以一份全新的 recipe 永遠
+        # 不會被它們碰到。曾經有第四道不是這樣寫的（2026-08-14，subtract 的預設
+        # 從 ref_aligned 改成 ref，於是「檔案裡沒寫 b」就補回 ref_aligned），
+        # 而「檔案很舊、靠舊預設」跟「recipe 很新、靠新預設」這兩件事**從缺一個
+        # key 是分不出來的**。後果是 :meth:`to_json_dict` → :meth:`from_json_dict`
+        # 不再是 identity —— 而 ``run_batch`` 正是用這一對把 recipe 送進 worker
+        # 行程的，所以同一份 recipe ``workers=1`` 算 test-ref、``workers=2`` 算
+        # test-ref_aligned，兩邊都跑得完、都有數字、而且不一樣
+        # （實測 glv_max 50 vs 43）。已於 2026-08-16 移除，迴歸測試見
+        # ``tests/test_recipe.py::test_a_json_round_trip_changes_nothing``。
+        #
+        # 要改一個參數的預設值又要保住舊檔行為，就把新舊差異寫成**看得見的東西**
+        # （改參數名、加一個值、寫 app_version），不要靠「沒寫」這個訊號。
+        #
         # 舊 recipe（F7-18 之前）的 also_apply / anchor：展開成一張卡一條流。
         # 做在這裡而不是各張卡的 validate_params 裡，因為它會**增加節點**——
         # 那是 recipe 層級的事，一張卡看不到自己以外的東西。
@@ -390,16 +405,6 @@ class Recipe:
         _migrate_merged_cards(nodes)
         # 最後把改過名的**參數值**換掉（F8：兩層的 dark/bright → 排名）。
         _migrate_renamed_values(nodes)
-        # subtract 的預設 b 於 2026-08-14 從 ref_aligned 改成 ref（patch 本來
-        # 就對齊）。檔案裡**沒寫** b 的 subtract 是照舊預設蓋的 —— Studio 存檔
-        # 一律把參數寫滿，省略只會出現在改版前的檔案（或手寫檔）。不補的話，
-        # 一份「align → subtract」的舊 recipe 會安靜地跳過對位，分數整批變掉
-        # —— dual-route e2e 當場從 22/24 掉到 18/24。既有 recipe 一份都不能
-        # 被改變行為：載入時把舊預設寫回去。
-        for node in nodes.values():
-            if node.step == "subtract" and "b" not in node.params:
-                node.params["b"] = "ref_aligned"
-
         return cls(
             recipe_id=str(d["recipe_id"]),
             routes=routes,
@@ -411,15 +416,6 @@ class Recipe:
             description=str(d.get("description", "")),
             edges=edges,
         )
-
-    def save(self, path: Any) -> None:
-        """寫入 JSON 檔（utf-8、indent=2、atomic ``.tmp`` + ``os.replace``）。"""
-        path = str(path)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self.to_json_dict(), f, ensure_ascii=False, indent=2)
-            f.write("\n")
-        os.replace(tmp, path)
 
     @classmethod
     def load(cls, path: Any) -> "Recipe":

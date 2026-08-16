@@ -15,6 +15,79 @@
 
 ---
 
+## 存檔 recipe 退場、一個會算錯數字的遷移、文件收成一主題一個家（2026-08-16 第二輪）
+
+### 找到一個真的 bug：一份 recipe 存檔前後會算出不同的答案
+
+上一輪把 `test_batch_cache` 那兩條紅的歸給「容器裡的套件版本」。**那個判斷是錯的，
+它是真的 bug**，逐段追出來的：
+
+- 同一個行程裡跑五次 → 完全一致（不是浮點雜訊）。
+- parent 行程 vs subprocess → **每一顆都不同**，`glv_max 50 vs 43`、`score 81 vs 64`。
+- 逐張卡比影像流雜湊 → `load` / `norm_ref` / `norm` / `align` 全部逐位元組相同，
+  **分歧從 `subtract` 開始**。而 `subtract` 是純 numpy 的 `a - b`，不可能不決定性。
+
+矛盾的解答在 `from_json_dict`：有一道 2026-08-14 的遷移看到 subtract 沒寫 `b`
+就補上 `ref_aligned`。於是記憶體裡的 recipe 比 `test - ref`（卡片的新預設），
+**繞過 JSON 的那份比 `test - ref_aligned`**。而 `run_batch` 正是用
+`to_json_dict → from_json_dict` 把 recipe 送進 worker 的 —— 所以
+`workers=1` 與 `workers=2` 算出不同的分數，兩邊都跑得完、都有數字。
+
+**根因是判斷依據，不是那一行**：這個 repo 有四道遷移，另外三道都看「**舊 key／舊值
+在不在**」，新 recipe 永遠碰不到。只有這一道看「**新 key 不在**」，而「舊檔案靠舊
+預設」跟「新 recipe 靠新預設」從缺一個 key 是分不出來的。
+
+已移除該遷移（兩份 fixture 都明寫 `b`，行為零改變），並把規則寫成**鐵則 9**、
+在 `from_json_dict` 留一段註解、加兩條迴歸測試
+（`test_a_json_round_trip_changes_nothing`、`test_reading_a_recipe_never_invents_a_parameter`）。
+`test_batch_cache` 13 條全綠。
+
+### 使用者定調：存檔 recipe 的功能先拿掉
+
+「先把整個 engine 用好，再來支援」。所以：Studio 沒有 `Save Recipe…`、沒有 Ctrl+S、
+`StudioWindow.save_recipe_path` / `_on_save_recipe` 移除，**`Recipe.save()` 也移除**
+（移除後只剩兩支測試在用它）。**讀取全部留著** —— CLI `run` 照跑、fixture 照用。
+
+連帶要想的是**關窗提示**（F7-16 的四張安全網之一）：它以前有三個答案，預設是「存檔」。
+存檔沒了，那顆鈕就變成做不到自己承諾的東西。現在只剩「丟掉 / 先別關」，**預設改成
+先別關**，而且話講得更白：關掉之後沒有任何辦法把這份 pipeline 找回來。
+
+測試那邊有三支是「照樣綠、但測錯東西」（第三次遇到這個樣式了）：
+`load_template()` 現在回 False 而沒人檢查回傳值、`Ctrl+S` 的 tooltip 測試改用
+`Ctrl+O`、存檔往返改成測 `model → recipe → JSON → recipe` 的 identity（那正是
+`run_batch` 走的路，比存檔往返更該被鎖住）。
+
+### 文件：一個主題一個家
+
+使用者要求「以後接手的 agent 不要花太多 token 讀，也不要漂移」。關鍵觀察是
+**`CLAUDE.md` 會被讀進每一個 session** —— 它 60 KB，等於每開一次新 session 就付
+一次那個 token。所以：
+
+| 搬去哪 | 內容 |
+|---|---|
+| `docs/ARCHITECTURE.md` | 心智模型（三段式）、資料模型（兩個通道）、目錄結構 |
+| `docs/PITFALLS.md` | 30+ 條坑表（10 KB，只增不減） |
+| `docs/ROADMAP.md` | 進度 + **Phase 1–4 計畫**（以前這張表在四個地方各一份） |
+| `docs/FAB-VALIDATION.md` | 待驗證假設 + 受限機器部署 |
+
+`CLAUDE.md` **60 KB → 12.7 KB**（-79%），只留「不知道就會做錯」的東西：鐵則、
+加卡片、開發流程、範圍開關，最上面加一張**路由表**（哪個主題住在哪、什麼時候該去讀）。
+README 19 KB → 4.4 KB，也變成門面 + 路由。
+
+順手把 15 處指向 `CLAUDE.md §7 / §2 / §8 / §9.5` 的程式碼註解改指新家 ——
+那些正是「搬了文件卻沒跟上」的下一個漂移來源。所有 md 的內部連結掃過，0 個壞掉。
+
+### 1 MB 不是牆（使用者更正）
+
+超過之後還有 raw 連結可以打開複製。所以 `release.py` 的水位警告從「快撞牆了 /
+通道斷掉」降級成單純報大小，`--check` 不再因為大小回非零；`AGENTS.md` §2 與
+`docs/history/README.md` 的理由也一起改成「哪一種複製法還能用」而不是「搬不搬得進去」。
+
+### 測試
+
+核心 826 passed；UI 受影響的 6 個檔案逐一跑過全綠。**UI 測試不要用一個行程跑整套**
+這件事寫進 `CLAUDE.md` 與 README 了（容器裡實測跑不完，一個檔案一個檔案跑各 1–10 秒）。
+
 ## 專案整理：文件對齊現況、搬運餘裕、封存、範例入口收起來（2026-08-16）
 
 使用者要求「先讀完整個專案再整理」。盤點出四類問題，四類都做了。

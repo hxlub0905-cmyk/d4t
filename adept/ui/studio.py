@@ -47,7 +47,7 @@ tests/test_ui_studio_m5.py）：
 :meth:`StudioWindow.load_dataset_path` / :meth:`~StudioWindow.load_recipe_path` /
 :meth:`~StudioWindow.load_template` / :meth:`~StudioWindow.select_node` /
 :meth:`~StudioWindow.set_defect_index` / :meth:`~StudioWindow.refresh_preview` /
-:meth:`~StudioWindow.run_trial` / :meth:`~StudioWindow.save_recipe_path` /
+:meth:`~StudioWindow.run_trial` /
 :meth:`~StudioWindow.show_gallery` / :meth:`~StudioWindow.show_preview` /
 :meth:`~StudioWindow.request_thumbs` / :meth:`~StudioWindow.open_export_dialog` /
 :meth:`~StudioWindow.show_welcome` / :meth:`~StudioWindow.open_recipe_library` /
@@ -531,9 +531,6 @@ class StudioWindow(QMainWindow):
         self.btn_open_recipe = self._tool_button(
             "Open Recipe…", "Load a recipe JSON", self._on_open_recipe,
             icon="document")
-        self.btn_save_recipe = self._tool_button(
-            "Save Recipe…", "Save the current pipeline as a recipe JSON",
-            self._on_save_recipe, icon="save")
         self.btn_examples = self._tool_button(
             "Templates…",
             "Open the template library — every entry is a complete, runnable "
@@ -567,8 +564,7 @@ class StudioWindow(QMainWindow):
             self.toggle_theme, icon="theme")
 
         # 一段 = 一種事情；段與段之間一條分隔線。
-        for group in ((self.btn_open_klarf, self.btn_open_recipe,
-                       self.btn_save_recipe),
+        for group in ((self.btn_open_klarf, self.btn_open_recipe),
                       (self.btn_examples, self.btn_export),
                       (self.btn_undo, self.btn_redo)):
             for b in group:
@@ -616,7 +612,7 @@ class StudioWindow(QMainWindow):
         #
         # 補樣式補不起來：只要給 ``::menu-button`` 一個盒子（背景、邊框、圓角
         # **任一**），Qt 就把繪製整個交給 stylesheet，而 stylesheet 沒有
-        # ``image`` 就不畫箭頭 —— 這個 repo 是純文字的（CLAUDE.md §9.5）塞不了
+        # ``image`` 就不畫箭頭 —— 這個 repo 是純文字的（docs/FAB-VALIDATION.md）塞不了
         # 圖檔。實測只有 ``width`` 是安全的。同一條坑 F7-13 在
         # ``QComboBox::drop-down`` 上踩過，這次量到 ``::menu-button`` 上。
         #
@@ -654,7 +650,7 @@ class StudioWindow(QMainWindow):
     #: 不自己發明 —— 使用者的肌肉記憶是從別的軟體帶過來的，這裡不該重學。
     SHORTCUTS = (
         ("Ctrl+O", "open_klarf"), ("Ctrl+Shift+O", "open_recipe"),
-        ("Ctrl+S", "save_recipe"), ("Ctrl+R", "run"),
+        ("Ctrl+R", "run"),
         ("Ctrl+Z", "undo"), ("Ctrl+Shift+Z", "redo"), ("Ctrl+Y", "redo"),
         ("Ctrl+0", "zoom_reset"), ("Ctrl++", "zoom_in"), ("Ctrl+=", "zoom_in"),
         ("Ctrl+-", "zoom_out"), ("Ctrl+Shift+F", "zoom_fit"),
@@ -666,7 +662,6 @@ class StudioWindow(QMainWindow):
         handlers = {
             "open_klarf": self._on_open_klarf,
             "open_recipe": self._on_open_recipe,
-            "save_recipe": self._on_save_recipe,
             "run": self._on_trial_clicked,
             "undo": self.undo,
             "redo": self.redo,
@@ -693,7 +688,6 @@ class StudioWindow(QMainWindow):
         self._tip_keys = {
             id(self.btn_open_klarf): "Ctrl+O",
             id(self.btn_open_recipe): "Ctrl+Shift+O",
-            id(self.btn_save_recipe): "Ctrl+S",
             id(self.btn_trial): "Ctrl+R",
             id(self.btn_empty_open): "Ctrl+O",
             # F7-22：這兩顆這一輪才長出來，快捷鍵 F7-16 就有了。
@@ -701,7 +695,7 @@ class StudioWindow(QMainWindow):
             id(self.btn_redo): "Ctrl+Shift+Z",
         }
         for w in (self.btn_open_klarf, self.btn_open_recipe,
-                  self.btn_save_recipe, self.btn_trial, self.btn_empty_open,
+                  self.btn_trial, self.btn_empty_open,
                   self.btn_undo, self.btn_redo):
             self._set_tip(w, w.toolTip())
 
@@ -866,7 +860,7 @@ class StudioWindow(QMainWindow):
         self.canvas_column = middle
         self._params_open = True
         # 比例在 showEvent 才真的套 —— setSizes 要有實際高度才算得出來
-        #（isVisible 之前那些數字沒有意義，CLAUDE.md §7 的老坑）。
+        #（isVisible 之前那些數字沒有意義，docs/PITFALLS.md 的老坑）。
         self._layout_ratio_applied = False
         #: 畫布的彈出視窗（沒開著是 None）。
         self._canvas_popout: Optional[Any] = None
@@ -1365,11 +1359,6 @@ class StudioWindow(QMainWindow):
                       "Redo the change you just undid" if self.model.can_redo()
                       else "Nothing to redo.")
 
-        self.btn_save_recipe.setEnabled(has_steps)
-        self._set_tip(self.btn_save_recipe,
-                      "Save the current pipeline as a recipe JSON" if has_steps
-                      else "Nothing to save yet — the pipeline is empty.")
-
         has_results = bool(self.trial_results)
         self.btn_export.setEnabled(has_results)
         self.btn_export.setToolTip(
@@ -1837,7 +1826,7 @@ class StudioWindow(QMainWindow):
         """設定面板現在攤開著嗎。
 
         追**明確狀態**而不是問 widget：`isVisible()` 在視窗 show 之前恆為
-        False，那個坑這個 repo 踩過（見 CLAUDE.md §7）。
+        False，那個坑這個 repo 踩過（見 docs/PITFALLS.md）。
         """
         return bool(self._params_open)
 
@@ -2250,23 +2239,6 @@ class StudioWindow(QMainWindow):
             return False
         return self.load_recipe_path(str(path))
 
-    def save_recipe_path(self, path: Any) -> bool:
-        """把目前 model 存成 recipe JSON。"""
-        path = str(path)
-        if not self.model.node_order:
-            self._status("The pipeline is empty — nothing to save.")
-            return False
-        try:
-            self.model.to_recipe().save(path)
-        except Exception as e:          # noqa: BLE001 — UI 邊界
-            self._status("Could not save: %s: %s" % (type(e).__name__, e), "error")
-            return False
-        self.recipe_path = path
-        self.model.dirty = False
-        self.model.end_coalescing()      # 存檔＝一段編輯結束（見 viewmodel）
-        self._status("Saved: %s" % path)
-        return True
-
     # ==================================================================== #
     # 預覽
     # ==================================================================== #
@@ -2421,7 +2393,7 @@ class StudioWindow(QMainWindow):
         """現在按得下「跨顆檢視」嗎。
 
         用明確狀態而不是 ``btn.isVisible()`` —— 視窗還沒 show 之前後者恆為
-        False（CLAUDE.md §7 的老坑）。
+        False（docs/PITFALLS.md 的老坑）。
         """
         return bool(self.selected_regions()) and bool(self._items())
 
@@ -3296,16 +3268,6 @@ class StudioWindow(QMainWindow):
             return
         self.load_recipe_path(path)
 
-    def _on_save_recipe(self) -> bool:
-        """回傳「真的存下去了嗎」—— 關窗前的確認要靠這個答案（F7-16）：
-        使用者在存檔對話框按取消，意思是「先別關」，不是「丟掉」。"""
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Recipe", self.recipe_path or "recipe.json",
-            "Recipe JSON (*.json);;All files (*)")
-        if not path:
-            return False
-        return bool(self.save_recipe_path(path))
-
     # ==================================================================== #
     # 關窗
     # ==================================================================== #
@@ -3314,40 +3276,42 @@ class StudioWindow(QMainWindow):
     PROMPT_ON_CLOSE = True
 
     def unsaved_changes(self) -> bool:
-        """有沒有還沒存的編輯（明確狀態，不要去猜）。"""
+        """有沒有還沒被保存的編輯（明確狀態，不要去猜）。
+
+        名字沿用 F7-16。存檔功能拿掉之後它的意思更強了：**沒有任何辦法保住
+        這份 pipeline**，關掉就是真的沒了。
+        """
         return bool(self.model.dirty)
 
     def _ask_unsaved(self) -> str:
-        """問使用者要不要存。回 ``"save"`` / ``"discard"`` / ``"cancel"``。
+        """問使用者確定不確定。回 ``"discard"`` / ``"cancel"``。
 
-        單獨一個方法是為了測試接得住 —— 測試要驗的是「三個答案各自會怎樣」，
+        以前有三個答案（存 / 丟掉 / 取消）。存檔功能還沒支援（engine 先做完
+        再回來），所以「存」那個選項會是一顆做不到自己承諾的鈕 —— 拿掉。
+        剩下的兩個仍然要問：**現在關掉是不可逆的**。
+
+        單獨一個方法是為了測試接得住 —— 要驗的是「答案各自會怎樣」，
         不是「QMessageBox 長什麼樣」。
         """
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Warning)
-        box.setWindowTitle("Unsaved changes")
-        box.setText("This recipe has changes you have not saved.")
+        box.setWindowTitle("Close without keeping this pipeline?")
+        box.setText("Closing now discards the pipeline you just built.")
         box.setInformativeText(
-            "A recipe is the whole point of the tuning you just did — closing "
-            "now throws it away.")
-        box.setStandardButtons(QMessageBox.Save | QMessageBox.Discard
-                               | QMessageBox.Cancel)
-        box.setDefaultButton(QMessageBox.Save)
+            "Saving a recipe to a file is not supported yet, so there is no "
+            "way to get this back — write down the settings you care about "
+            "before you close.")
+        box.setStandardButtons(QMessageBox.Discard | QMessageBox.Cancel)
+        box.setDefaultButton(QMessageBox.Cancel)
         answer = box.exec()
-        return {QMessageBox.Save: "save",
-                QMessageBox.Discard: "discard"}.get(answer, "cancel")
+        return "discard" if answer == QMessageBox.Discard else "cancel"
 
     def confirm_close(self) -> bool:
-        """可以關了嗎。存檔失敗（或使用者在存檔對話框按取消）**不算可以關**——
-        那是「我改變主意了」，不是「丟掉吧」。"""
+        """可以關了嗎。預設答案是 **Cancel**（「先別關」）—— 關掉之後沒有任何
+        辦法把這份 pipeline 找回來。"""
         if not (self.PROMPT_ON_CLOSE and self.unsaved_changes()):
             return True
-        answer = self._ask_unsaved()
-        if answer == "cancel":
-            return False
-        if answer == "discard":
-            return True
-        return bool(self._on_save_recipe())
+        return self._ask_unsaved() == "discard"
 
     def showEvent(self, event) -> None:       # noqa: D102 - Qt hook
         super().showEvent(event)

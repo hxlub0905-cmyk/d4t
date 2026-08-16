@@ -135,7 +135,7 @@ vendoring 過來的。那六個專案在使用者的桌面上（`Desktop\hxlub09
 - 唯一一份**真實來源的 KLARF**（`tests/fixtures/sample_real.klarf`，來自 GLAS）能正確解析、
   lint 乾淨、無損還原。
 
-### 還是假設的（CLAUDE.md §8 有完整版）
+### 還是假設的（docs/FAB-VALIDATION.md 有完整版）
 
 真實資料不能出廠，所以原本有三件事從頭到尾沒有用真實資料驗證過。
 **2026-07-30 使用者結掉了前兩條**，剩一條：

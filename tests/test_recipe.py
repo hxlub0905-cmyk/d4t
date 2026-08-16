@@ -147,17 +147,49 @@ def test_json_missing_required_field():
         Recipe.from_json_dict({"recipe_id": "x"})
 
 
-def test_save_load_atomic(tmp_path):
+def test_load_reads_utf8_json(tmp_path):
+    """從磁碟讀一份 recipe（``Recipe.save`` 已移除 —— 存檔功能還沒支援）。"""
     r = make_recipe()
     p = tmp_path / "recipe.json"
-    r.save(p)
-    assert p.exists()
-    assert not (tmp_path / "recipe.json.tmp").exists()   # atomic：tmp 已 replace
+    p.write_text(json.dumps(r.to_json_dict(), ensure_ascii=False, indent=2),
+                 encoding="utf-8")
     r2 = Recipe.load(p)
     assert r2 == r
-    # utf-8 中文 description 不會壞
-    raw = p.read_text(encoding="utf-8")
-    assert "單元測試" in raw
+    assert "單元測試" in p.read_text(encoding="utf-8")   # utf-8 中文不會壞
+
+
+def test_a_json_round_trip_changes_nothing():
+    """``to_json_dict`` → ``from_json_dict`` 必須是 identity。
+
+    這不是「序列化好棒棒」那種形式測試 —— **``run_batch`` 就是用這一對把
+    recipe 送進 worker 行程的**。它一旦不是 identity，同一份 recipe 在
+    ``workers=1`` 與 ``workers=2`` 下就會算出不同的答案，而兩邊都跑得完、
+    都有數字。
+
+    真的發生過（2026-08-14 到 2026-08-16）：有一道遷移看到 subtract 沒寫 ``b``
+    就補上 ``ref_aligned``，於是記憶體裡的 recipe 比 ``test - ref``、
+    繞過 JSON 的那份比 ``test - ref_aligned``，glv_max 50 vs 43。
+    遷移只能靠「舊東西在不在」判斷，不能靠「新東西不在」——
+    後者分不出「舊檔案」與「新 recipe 用新預設」。
+    """
+    r = make_recipe()
+    again = Recipe.from_json_dict(json.loads(json.dumps(r.to_json_dict())))
+    assert again == r
+    for nid, node in r.nodes.items():
+        assert again.nodes[nid].params == node.params, nid
+
+
+def test_a_subtract_without_an_explicit_b_keeps_the_card_default():
+    """省略參數 = 用卡片當下的預設，讀檔不可以幫它填一個別的值。"""
+    d = {
+        "recipe_id": "omit",
+        "routes": {"ebi_patch": ["load", "sub"]},
+        "nodes": {"load": {"step": "load_patch", "params": {}},
+                  "sub": {"step": "subtract", "params": {}}},
+        "score": {"expr": "1", "threshold": 0.0},
+    }
+    r = Recipe.from_json_dict(d)
+    assert r.nodes["sub"].params == {}, "讀檔不該無中生有塞參數進去"
 
 
 # ---------------------------------------------------------------------------
@@ -405,10 +437,22 @@ def test_an_unparseable_version_does_not_crash():
         version_skew(weird)                  # 不丟例外就好
 
 
-def test_an_old_subtract_without_b_still_uses_the_aligned_ref():
-    """subtract 的預設 b 於 2026-08-14 改成 ref。省略 b 的檔案是照舊預設
-    （ref_aligned）蓋的 —— 載入遷移要把它寫回去，否則一份「align →
-    subtract」的舊 recipe 會**安靜地跳過對位**，分數整批變掉。"""
+def test_reading_a_recipe_never_invents_a_parameter():
+    """讀檔**不可以**幫任何一張卡填一個檔案裡沒有的參數值。
+
+    這條測試取代 ``test_an_old_subtract_without_b_still_uses_the_aligned_ref``
+    （2026-08-14 → 2026-08-16）。那道遷移的用意是保住舊檔行為：subtract 的預設
+    從 ``ref_aligned`` 改成 ``ref``，所以「檔案裡沒寫 b」就補回 ``ref_aligned``。
+
+    用意對，判斷依據錯 —— 它靠的是**新 key 缺席**，而「舊檔案靠舊預設」跟
+    「新 recipe 靠新預設」從缺一個 key 分不出來。實際後果：
+    ``to_json_dict`` → ``from_json_dict`` 不再是 identity，而 ``run_batch``
+    正是用這一對把 recipe 送進 worker，於是 ``workers=1`` 與 ``workers=2``
+    算出不同的分數（glv_max 50 vs 43），兩邊都跑得完、都有數字。
+
+    見 ``test_a_json_round_trip_changes_nothing`` 與 ``from_json_dict`` 裡的
+    「遷移的鐵則」那段註解。
+    """
     from adept.core.pipeline.recipe import Recipe
 
     d = {"recipe_id": "old", "version": 1,
@@ -419,7 +463,8 @@ def test_an_old_subtract_without_b_still_uses_the_aligned_ref():
          "score": {"expr": "1", "threshold": 0.0,
                    "bins": {"below": 0, "above": 1}}}
     rec = Recipe.from_json_dict(d)
-    assert rec.nodes["sub"].params["b"] == "ref_aligned"
-    # 有寫 b 的檔案（新版 Studio 一律寫滿）原樣保留
+    assert rec.nodes["sub"].params == {"op": "subtract"}, \
+        "檔案裡只寫了 op，讀完就該只有 op"
+    # 有寫 b 的檔案原樣保留
     d["nodes"]["sub"]["params"]["b"] = "ref"
     assert Recipe.from_json_dict(d).nodes["sub"].params["b"] == "ref"

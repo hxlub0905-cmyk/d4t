@@ -180,11 +180,11 @@ def test_old_recipes_with_also_apply_still_load_and_mean_the_same_thing(tmp_path
     assert rec.nodes["dn_ref"].params["streams"] == "ref"
     assert rec.nodes["dn"].params["streams"] == "test"
 
-    # 存回去就是新格式（再讀一次不會又長出節點）
-    out = tmp_path / "again.json"
-    rec.save(out)
-    assert "also_apply" not in out.read_text(encoding="utf-8")
-    assert Recipe.load(out).routes["ebi_patch"] == route
+    # 轉成 JSON 就是新格式（再讀一次不會又長出節點）
+    import json as _json
+    text = _json.dumps(rec.to_json_dict(), ensure_ascii=False)
+    assert "also_apply" not in text
+    assert Recipe.from_json_dict(_json.loads(text)).routes["ebi_patch"] == route
 
 
 def test_the_shipped_examples_are_already_in_the_new_shape():
