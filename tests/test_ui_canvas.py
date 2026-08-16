@@ -112,24 +112,33 @@ def test_a_link_that_would_loop_is_refused_at_draw_time(window):
 def test_both_ports_can_land_on_the_same_node_and_each_gets_its_own_line(window):
     """patch 天生成對：Input 吐 test 與 ref，Subtract 兩張都吃。
 
-    所以 **Input → Subtract 要畫兩條線**（不是一條沒說明白的線），而且把第二個
-    埠也拖到同一個節點上是很正常的操作 —— 那時候不可以回一句看起來像失敗的
-    「Cannot connect」。
+    把第二個埠也拖到同一個節點上是很正常的操作 —— 那時候不可以回一句看起來
+    像失敗的「Cannot connect」。
+
+    **F9-9 起「拉幾條就是幾條」**：一次 ``link_to`` = 一條線。以前畫布是從
+    「兩端共用哪幾條流」**推**出兩條線的，推出來的猜不出使用者其實只接了
+    其中一條 —— 而引擎照線送資料，於是畫面上的線比實際接的多。
     """
     load, sub = window.pipeline.card("load"), window.pipeline.card("sub")
     assert load.out_names() == ["test", "ref"]
     assert sub.in_names() == ["test", "ref"]
 
-    window.pipeline.link_to("load", "sub")
+    window.pipeline.link_to("load", "sub", port=0)
     assert window.model.edge_pairs() == [("load", "sub")], "model 仍然是一條依賴"
-    assert window.pipeline._ports_between(load, sub) == [0, 1]
     assert len([e for e in window.pipeline._edges
-                if e.pair() == ("load", "sub")]) == 2, "兩條共用的流 = 兩條線"
+                if e.pair() == ("load", "sub")]) == 1, "拉一條就是一條"
+
+    window.pipeline.link_to("load", "sub", port=1)      # 第二顆埠
+    assert len([e for e in window.pipeline._edges
+                if e.pair() == ("load", "sub")]) == 2, "兩條並排的線"
+    assert len(window.model.edges) == 2, "model 也要記得兩條（F9-9）"
+    assert {e.src_out for e in window.model.edges} == {"test", "ref"}
     assert "Connected" in window.status_text()
 
-    # 第二個埠拖到同一個節點：不是錯誤，訊息要講清楚兩條線本來就都在了
-    window.pipeline.link_to("load", "sub")
+    # 同一顆埠再拖一次：不是錯誤，訊息要講清楚那條線本來就在了
+    window.pipeline.link_to("load", "sub", port=0)
     assert window.model.edge_pairs() == [("load", "sub")]
+    assert len(window.model.edges) == 2
     assert "already connected" in window.status_text()
     assert "Cannot" not in window.status_text()
 
@@ -141,7 +150,7 @@ def test_both_ports_can_land_on_the_same_node_and_each_gets_its_own_line(window)
 def test_duplicate_and_self_links_are_ignored(window):
     window.pipeline.link_to("load", "norm")
     n = len(window.model.edge_pairs())
-    window.pipeline.link_to("load", "norm")         # 重複
+    window.pipeline.link_to("load", "norm")         # 重複（同一顆埠）
     window.pipeline.link_to("load", "load")         # 自迴圈
     assert len(window.model.edge_pairs()) == n
 
@@ -149,7 +158,7 @@ def test_duplicate_and_self_links_are_ignored(window):
 def test_removing_an_edge_puts_it_back(window):
     window.pipeline.link_to("load", "norm")
     assert ("load", "norm") in window.model.edge_pairs()
-    window.pipeline.edge_removed.emit("load", "norm")
+    window.pipeline.edge_removed.emit("load", "norm", "")
     assert ("load", "norm") not in window.model.edge_pairs()
     assert "Disconnected" in window.status_text()
 

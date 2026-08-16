@@ -560,13 +560,19 @@ class _EdgeItem(QGraphicsItem):
     def mousePressEvent(self, e) -> None:       # noqa: D102 - Qt hook
         if (self._hover
                 and e.button() == Qt.LeftButton and self.cut_hit(e.pos())):
-            self.canvas.edge_removed.emit(self.src.node_id, self.dst.node_id)
+            self.canvas.edge_removed.emit(self.src.node_id, self.dst.node_id,
+                                          self.out_name())
             e.accept()
             return
         super().mousePressEvent(e)
 
     def pair(self) -> Tuple[str, str]:
         return (self.src.node_id, self.dst.node_id)
+
+    def out_name(self) -> str:
+        """這條線從來源的哪一顆輸出埠出發（埠索引換算成流名）。"""
+        outs = self.src.out_names()
+        return str(outs[self.port]) if 0 <= self.port < len(outs) else ""
 
     #: 往回走的線，控制點往外推多遠（固定值，**不隨距離長大**）。
     BACK_REACH = 46.0
@@ -691,7 +697,9 @@ class PipelineCanvas(QGraphicsView):
     #: 控制列上的下拉去設 —— 那正是使用者說「變很複雜」的東西。
     #: 來源節點只有一個沒有名字的輸出埠時是空字串。
     edge_added = Signal(str, str, str)
-    edge_removed = Signal(str, str)
+    #: ``(來源, 目的, 來源埠)`` —— 埠是剪刀剪的**那一條**（F9-9：兩張卡之間
+    #: 可以有兩條並排的線，剪一條跟剪兩條是完全不同的事）。
+    edge_removed = Signal(str, str, str)
     #: 從卡片庫拖一張卡丟到畫布上：``(step_key, 場景 x, 場景 y)``（F7-22）。
     card_dropped = Signal(str, float, float)
     #: 「在自己的視窗打開畫布」（F8-UI D 案）。畫布在主視窗只佔中上一塊
@@ -829,7 +837,18 @@ class PipelineCanvas(QGraphicsView):
         self._hover_node = None            # 舊的圖元剛被 clear() 銷毀
         self._items, self._edges = {}, []
         self._order = [str(n.get("node_id", "")) for n in nodes]
-        self._pairs = [(str(a), str(b)) for a, b in (edges or ())]
+        # ``edges`` 收兩種形狀：``(來源, 目的)`` 與 ``(來源, 目的, 來源埠)``。
+        # 帶埠的那種是 F9-9 —— 一對節點之間可以有好幾條線，每條各自從哪顆埠
+        # 出發要由 model 講，不能再從「兩端共用哪幾條流」推（推出來的猜不出
+        # 使用者只接了其中一條）。
+        self._lines: List[Tuple[str, str, str]] = []
+        for row in (edges or ()):
+            row = tuple(str(x) for x in row)
+            self._lines.append((row[0], row[1], row[2] if len(row) > 2 else ""))
+        self._pairs = []
+        for a, b, _o in self._lines:
+            if (a, b) not in self._pairs:
+                self._pairs.append((a, b))
 
         # route 的相鄰對是**真的依賴**（engine 的 execution_order 是
         # 「route 相鄰對 ∪ edges」），**排版**照樣把它算進去 —— 但 2026-08-14
@@ -853,7 +872,18 @@ class PipelineCanvas(QGraphicsView):
             if a not in self._items or b not in self._items:
                 continue
             src, dst = self._items[a], self._items[b]
-            for port in self._ports_between(src, dst):
+            outs = src.out_names()
+            named = [o for (x, y, o) in self._lines if (x, y) == (a, b) and o]
+            if named:
+                # 明講的線：一條就是一條，畫在它自己那顆埠上。
+                ports = []
+                for name in named:
+                    port = outs.index(name) if name in outs else 0
+                    if port not in ports:
+                        ports.append(port)
+            else:
+                ports = self._ports_between(src, dst)
+            for port in ports:
                 edge = _EdgeItem(src, dst, self, port)
                 self._scene.addItem(edge)
                 self._edges.append(edge)
@@ -1182,7 +1212,7 @@ class PipelineCanvas(QGraphicsView):
             for item in list(self._scene.selectedItems()):
                 if isinstance(item, _EdgeItem):
                     a, b = item.pair()
-                    self.edge_removed.emit(a, b)
+                    self.edge_removed.emit(a, b, item.out_name())
                 elif isinstance(item, _NodeItem):
                     self.remove_requested.emit(item.node_id)
             e.accept()

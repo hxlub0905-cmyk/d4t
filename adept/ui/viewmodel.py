@@ -343,18 +343,39 @@ class RecipeModel:
         """
         return any(e.src == str(src) and e.dst == str(dst) for e in self.edges)
 
+    def has_line(self, src: str, dst: str, src_out: str = "",
+                 dst_in: str = "") -> bool:
+        """**這一條**線（含兩端的埠）已經在了嗎。
+
+        跟 :meth:`has_edge` 的差別就是 F9-9 那件事：兩張卡之間可以有好幾條線，
+        所以「已經連著了」要問到埠，不能只問到節點。
+        """
+        src, dst = str(src), str(dst)
+        return any(e.src == src and e.dst == dst
+                   and e.src_out == str(src_out or "")
+                   and e.dst_in == str(dst_in or "") for e in self.edges)
+
     def add_edge(self, src: str, dst: str, src_out: str = "",
                  dst_in: str = "") -> bool:
-        """連一條線。會造成循環（或自迴圈／重複）就**不做事並回 False**。
+        """連一條線。會造成循環（或自迴圈／整條一模一樣）就**不做事並回 False**。
 
         ``src_out`` / ``dst_in`` 是埠（F9-5b）：從哪顆輸出埠拉的、落在下游卡的
         哪個參數。填了的話引擎就照這條線送資料（而不是照「執行順序上最後一個
         寫這條流的人」推）—— 那是分支成立的條件。
+
+        **一對節點之間可以有好幾條線**（F9-9，使用者定調：「餵圖是節點跟節點間
+        在處理的，卡片只負責把餵進來的 source 處理完丟出去，所以可以多連一、
+        也可以一連多」）。以前這裡看到同一對節點就回 False，於是從 Load 先拉
+        ``test`` 再拉 ``ref`` 時第二條只能去**覆寫**第一條的埠 —— 參數上兩條流
+        都在，但只有一條線帶得出它從哪來，另一條退回「執行順序上最後一個寫它
+        的人」猜。線性時猜的跟真的一樣，分支時猜錯。
+
+        所以「重複」的判準是**整條線**（兩個節點 + 兩個埠），不是兩個節點。
         """
         src, dst = str(src), str(dst)
         if src == dst or src not in self.nodes or dst not in self.nodes:
             return False
-        if self.has_edge(src, dst):
+        if self.has_line(src, dst, src_out, dst_in):
             return False
         new = Edge(src=src, dst=dst, src_out=str(src_out or ""),
                    dst_in=str(dst_in or ""))
@@ -369,24 +390,43 @@ class RecipeModel:
 
     def set_edge_ports(self, src: str, dst: str, src_out: str = "",
                        dst_in: str = "") -> bool:
-        """補上（或改掉）一條既有線的埠。
+        """補上一條**還沒有埠**的線的埠。
 
         分成兩步是因為 Studio 的順序是「先確定線接得起來（不成環），**再**去改
         下游卡的參數」—— 而 ``dst_in`` 是那一步才知道的（要看那張卡的哪個參數
         吃影像流）。線沒接起來就不該留下任何痕跡。
+
+        F9-9 起優先挑**埠是空的**那一條：一對節點之間可以有好幾條線，補埠只該
+        補到剛加的那條沒有埠的上面，不可以去改已經有埠的鄰居。
         """
         src, dst = str(src), str(dst)
-        for i, e in enumerate(self.edges):
-            if e.src == src and e.dst == dst:
-                self.edges[i] = Edge(src=src, dst=dst,
-                                     src_out=str(src_out or e.src_out),
-                                     dst_in=str(dst_in or e.dst_in))
-                return True
-        return False
+        idx = [i for i, e in enumerate(self.edges)
+               if e.src == src and e.dst == dst]
+        if not idx:
+            return False
+        blank = [i for i in idx if not self.edges[i].src_out
+                 and not self.edges[i].dst_in]
+        i = blank[0] if blank else idx[0]
+        e = self.edges[i]
+        self.edges[i] = Edge(src=src, dst=dst,
+                             src_out=str(src_out or e.src_out),
+                             dst_in=str(dst_in or e.dst_in))
+        return True
 
-    def remove_edge(self, src: str, dst: str) -> bool:
+    def remove_edge(self, src: str, dst: str,
+                    src_out: Optional[str] = None) -> bool:
+        """拿掉線。``src_out=None`` = 這兩張卡之間**全部**；給了就只拿那一條。
+
+        剪刀（線上的 ×）給的是 ``src_out``（F9-9）—— 兩張卡之間可能有兩條並排
+        的線，剪掉「使用者瞄的那一條」跟剪掉「兩條」是完全不同的事。
+        """
         src, dst = str(src), str(dst)
-        keep = [e for e in self.edges if not (e.src == src and e.dst == dst)]
+
+        def hit(e: Edge) -> bool:
+            return (e.src == src and e.dst == dst
+                    and (src_out is None or e.src_out == str(src_out)))
+
+        keep = [e for e in self.edges if not hit(e)]
         if len(keep) == len(self.edges):
             return False
         self._push_undo()
@@ -402,8 +442,20 @@ class RecipeModel:
         return [e for e in self.edges if nid in (e.src, e.dst)]
 
     def edge_pairs(self) -> List[Tuple[str, str]]:
-        """畫布只需要「哪兩張卡之間有線」—— 埠是引擎的事。"""
-        return [(e.src, e.dst) for e in self.edges]
+        """哪兩張卡之間有線（**去重**：一對節點之間可能有好幾條）。"""
+        out: List[Tuple[str, str]] = []
+        for e in self.edges:
+            if (e.src, e.dst) not in out:
+                out.append((e.src, e.dst))
+        return out
+
+    def edge_lines(self) -> List[Tuple[str, str, str]]:
+        """畫布要畫的每一條線：``(來源, 目的, 從哪顆輸出埠)``。
+
+        埠沒填的線回空字串 —— 畫布看到空字串就退回舊的推導（兩端共用哪幾條流
+        就畫幾條），既有 recipe 的畫面因此一個畫素都沒變。
+        """
+        return [(e.src, e.dst, e.src_out) for e in self.edges]
 
     # ---- Recipe 互轉 -------------------------------------------------------
     def to_recipe(self) -> Recipe:

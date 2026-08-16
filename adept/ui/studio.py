@@ -1497,7 +1497,7 @@ class StudioWindow(QMainWindow):
         if self.selected_node not in self.model.nodes:
             self.selected_node = None
         for view in self._canvases():
-            view.set_nodes(nodes, self.model.edge_pairs())
+            view.set_nodes(nodes, self.model.edge_lines())
             view.set_selected(self.selected_node)
             view.set_score_summary(self.model.expr, self.model.threshold)
 
@@ -1863,39 +1863,94 @@ class StudioWindow(QMainWindow):
             self._connect(src, dst, stream)
 
     def _connect(self, src: str, dst: str, stream: str) -> None:
-        if self.model.has_edge(src, dst):
-            # 同一對節點再拉一條 —— 對 image_keys 的卡這是「這條也接上」，
-            # 所以要真的多一條線出來，不是回一句 already connected。
-            self._bound_param = ""
-            note = self._point_at_stream(dst, stream, accumulate=True)
-            self.model.set_edge_ports(src, dst, src_out=stream,
-                                      dst_in=self._bound_param)
-            self._status(note.lstrip(" —").strip() if note else
-                         "%s → %s is already connected on %s."
+        # 這條線會落在下游卡的哪個參數上（F9-9：**先算出來**，才有辦法把埠跟
+        # 線一起加進去）。以前是「先加一條沒有埠的線，再回頭補埠」，而補埠只
+        # 找得到一對節點之間的第一條 —— 兩條並排的線就補錯了。
+        param = self._param_for_stream(dst)
+        accumulate = self.model.has_edge(src, dst)
+        if self.model.has_line(src, dst, stream, param):
+            self._status("%s → %s is already connected on %s."
                          % (src, dst, stream or "that stream"))
-        elif self.model.add_edge(src, dst):
-            # 影像流在**線真的接起來之後**才改。會成環的那條線沒有落地，
-            # 它不該留下任何痕跡 —— 尤其不是「那張卡安靜地改成做 ref 了」。
-            self._bound_param = ""
-            note = self._point_at_stream(dst, stream)
-            # F9-5b：埠補在邊上（``src_out`` = 從哪顆埠拉的、``dst_in`` = 落在
-            # 哪個參數）。順序不能顛倒 —— ``dst_in`` 是上一行才知道的。
-            self.model.set_edge_ports(src, dst, src_out=stream,
-                                      dst_in=self._bound_param)
-            # **一個輸入埠只能有一條線**：新的這條贏，舊的那條拿掉（F9-7）。
-            # 留著兩條的話引擎只會照其中一條送資料（``recipe.validate`` 會報
-            # ambiguous-input），而畫面上看不出是哪一條 —— 使用者剛拉的那一條
-            # 有可能根本不算數。
-            dropped = self._drop_conflicting_edges(src, dst, stream,
-                                                   self._bound_param)
-            self._status("Connected %s → %s%s%s" % (src, dst, note, dropped))
-        else:
+            return
+        if not self.model.add_edge(src, dst, src_out=stream, dst_in=param):
             self._status("Cannot connect %s → %s — that would make the "
                          "pipeline loop back on itself." % (src, dst), "error")
+            return
+        # 影像流在**線真的接起來之後**才改。會成環的那條線沒有落地，
+        # 它不該留下任何痕跡 —— 尤其不是「那張卡安靜地改成做 ref 了」。
+        # 同一對節點的第二條線是「這條也接上」（累加），不是「改接別的」。
+        note = self._point_at_stream(dst, stream, accumulate=accumulate)
+        # **一個輸入埠只能有一條線**：新的這條贏，舊的那條拿掉（F9-7）。
+        # 留著兩條的話引擎只會照其中一條送資料（``recipe.validate`` 會報
+        # ambiguous-input），而畫面上看不出是哪一條 —— 使用者剛拉的那一條
+        # 有可能根本不算數。**同一個輸入**指的是同一個參數上的同一條流名，
+        # 所以一條給 test、一條給 ref 不算搶（F9-9 的「多連一」）。
+        dropped = self._drop_conflicting_edges(src, dst, stream, param)
+        self._status("Connected %s → %s%s%s" % (src, dst, note, dropped))
 
-    def _on_edge_removed(self, src: str, dst: str) -> None:
-        if self.model.remove_edge(str(src), str(dst)):
-            self._status("Disconnected %s → %s" % (src, dst))
+    def _param_for_stream(self, node_id: str) -> str:
+        """``node_id`` 這張卡吃影像流的那個參數名（沒有就回空字串）。"""
+        node = self.model.nodes.get(str(node_id))
+        if node is None:
+            return ""
+        try:
+            specs = {p.name: p for p in get_step(node.step).params}
+        except KeyError:                       # pragma: no cover
+            return ""
+        for name in self._PRIMARY_PARAMS:
+            spec = specs.get(name)
+            if spec is not None and spec.type in ("image_key", "image_keys"):
+                return name
+        return ""
+
+    def _on_edge_removed(self, src: str, dst: str, stream: str = "") -> None:
+        """剪掉一條線。``stream`` 是剪刀瞄的那一條（F9-9）。
+
+        兩張卡之間可以有兩條並排的線，所以**剪一條**跟剪掉整個依賴是兩件事。
+        瞄不到特定那條（舊格式的線沒有埠）就退回拿掉整對。
+        """
+        src, dst, stream = str(src), str(dst), str(stream or "")
+        with self.model.compound("disconnect"):
+            one = stream and self.model.remove_edge(src, dst, src_out=stream)
+            if one:
+                note = self._unpoint_stream(dst, stream)
+                self._status("Disconnected %s → %s on %s%s"
+                             % (src, dst, stream, note))
+            elif self.model.remove_edge(src, dst):
+                self._status("Disconnected %s → %s" % (src, dst))
+
+    def _unpoint_stream(self, node_id: str, stream: str) -> str:
+        """線剪掉了 → 那條流也要從下游卡的參數裡拿掉（回一句給狀態列的話）。
+
+        不拿掉的話畫布會**反過來說謊**：畫面上那條線沒了，卡片卻還在處理它
+        （`streams=test,ref` 一個字都沒變）。這是 F9-7「接線時參數跟著改」的
+        另一半。
+
+        **最後一條不拿掉**：`MultiStreamStep.stream_list` 對空字串是
+        ``keys or ["test"]`` —— 清成空的話那張卡會安靜地跑回 test，
+        比留著更難解釋。留著等於「這張卡還在做這條流，只是沒有線指定來源」，
+        跟任何一張還沒接線的卡是同一個狀態。
+        """
+        node = self.model.nodes.get(str(node_id))
+        param = self._param_for_stream(node_id)
+        if node is None or not param:
+            return ""
+        try:
+            spec = {p.name: p for p in get_step(node.step).params}[param]
+        except KeyError:                       # pragma: no cover
+            return ""
+        if spec.type != "image_keys":
+            return ""                          # 單一角色的輸入：值就留著
+        keys = [k.strip() for k in str(node.params.get(param, "") or "").split(",")
+                if k.strip()]
+        if stream not in keys or len(keys) <= 1:
+            return ""
+        keys.remove(stream)
+        try:
+            self.model.set_param(str(node_id), param, ",".join(keys))
+        except ParamError:                     # pragma: no cover — 值就是流名
+            return ""
+        return " — “%s” now works on %s" % (node_id, " and ".join(keys))
 
     def _on_remove_requested(self, node_id: str) -> None:
         node_id = str(node_id)
