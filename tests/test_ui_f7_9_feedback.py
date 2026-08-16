@@ -30,7 +30,11 @@ from adept.core.pipeline import (          # noqa: E402 — Qt-free，可以直�
 import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 
 FIXTURE_RECIPES = Path(__file__).resolve().parent / "fixtures" / "recipes"
-EXAMPLES = Path(__file__).resolve().parent.parent / "examples" / "recipes"
+#: repo 裡**現在**還在出貨的 recipe 全部住在這裡。
+#:
+#: 以前指的是 ``examples/recipes/``（教學範例）。那個目錄 2026-08-16 移除了，
+#: 而 ``glob`` 對不存在的資料夾**回空清單、不丟例外** —— 下面那條測試會因此
+#: 「檢查了 0 份 recipe」然後綠燈通過。指到 fixtures 才有東西可檢查。
 EXAMPLE = FIXTURE_RECIPES / "die_to_die_basic.json"
 
 
@@ -446,10 +450,18 @@ def test_a_warning_does_not_block_the_run_but_is_reported_afterwards(window):
     assert "overwrites the feature" in window.status_text()
 
 
-def test_the_shipped_example_recipes_have_no_combination_errors(qapp):
-    """範例 recipe 是使用者的起點，它們自己必須全部過 lint。"""
+def test_every_recipe_that_ships_in_the_repo_passes_lint(qapp):
+    """repo 裡出貨的 recipe 自己必須全部過 lint。
+
+    以前掃的是 ``examples/recipes/``（教學範例，使用者的起點）。那些 2026-08-16
+    全部拿掉了，現在 repo 裡的 recipe 只剩 ``tests/fixtures/recipes/`` ——
+    它們是 e2e 的地基，接錯了的話一整批 e2e 會用「跑得完但每顆都失敗」的方式
+    壞掉。所以這條測試改了對象，要擋的事沒變。
+    """
+    paths = sorted(FIXTURE_RECIPES.glob("*.json"))
+    assert paths, "%s 是空的 —— 這條測試會變成什麼都沒檢查" % FIXTURE_RECIPES
     bad = {}
-    for path in sorted(EXAMPLES.glob("*.json")):
+    for path in paths:
         recipe = Recipe.load(str(path))
         errs = [i for i in validate(recipe) if i.level == "error"]
         if errs:

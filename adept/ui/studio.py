@@ -109,6 +109,7 @@ from .gallery import make_thumb
 from .region_check import MAX_CHECK, RegionCheckWindow, regions_of_node
 from .template_dialog import TemplateDialog
 from .results import ResultsWindow, summarize_run
+from . import scope
 from .scope import (
     is_supported_kind, recipe_is_supported, unsupported_kind_message,
     visible_steps,
@@ -173,7 +174,13 @@ _SCORE_LIBRARY_ENTRY = {
     "features_out": ["score"],
 }
 
-#: 「載入範本」讀的檔案（repo 內的 die-to-die 範例）。
+#: 「載入範本」讀的檔案。
+#:
+#: ``examples/`` 2026-08-16 整個移除（使用者：「範例 recipe 都先全部拿掉」），
+#: 所以這個檔案**現在不存在** —— :meth:`StudioWindow.load_template` 會在狀態列
+#: 說「Built-in template not found」並回 ``False``，不會炸。路徑刻意留著：
+#: 範例庫回來的那一天，把 JSON 放回這個位置、
+#: 把 :data:`adept.ui.scope.SHOW_SAMPLE_ENTRIES` 改成 ``True`` 就整組回來。
 TEMPLATE_RECIPE = Path(__file__).resolve().parents[2] / "examples" / "recipes" \
     / "cross_regions.json"
 
@@ -532,6 +539,11 @@ class StudioWindow(QMainWindow):
             "Open the template library — every entry is a complete, runnable "
             "pipeline. Start here rather than from an empty pipeline.",
             self.open_recipe_library, icon="templates")
+        # 範本庫目前是空的（``examples/`` 已移除），所以這顆鈕按下去只會開一個
+        # 空對話框 —— 對不會寫 code 的目標使用者，那比沒有這顆鈕更糟。
+        # **建出來再藏**，不是不建：版面量測、``_update_action_states``、既有測試
+        # 都還指得到它，回復只要改 ``scope.SHOW_SAMPLE_ENTRIES``。
+        self.btn_examples.setVisible(bool(scope.SHOW_SAMPLE_ENTRIES))
         self.btn_export = self._tool_button(
             "Export…",
             "Write these results back to KLARF, or produce reports and overlays",
@@ -1029,11 +1041,19 @@ class StudioWindow(QMainWindow):
         title.setObjectName("paramTitle")
         title.setAlignment(Qt.AlignCenter)
         estack.addWidget(title)
+        # 這句話要跟旁邊實際看得到的鈕一致 —— 範例資料那顆收起來的時候還講
+        # 「or try the tool with generated sample data」，使用者會去找一顆不在
+        # 畫面上的鈕。
         why = QLabel("Open a KLARF to see your patches here, or try the tool "
-                     "with generated sample data first.", self.empty_state)
+                     "with generated sample data first."
+                     if scope.SHOW_SAMPLE_ENTRIES else
+                     "Open a KLARF to see your patches here.", self.empty_state)
         why.setObjectName("paramHint")
         why.setAlignment(Qt.AlignCenter)
         why.setWordWrap(True)
+        # 留一個名字：這句話必須跟旁邊看得到的鈕一致，而那是測得出來的
+        # （`test_nothing_on_screen_points_at_a_button_that_is_not_there`）。
+        self.empty_state_hint = why
         estack.addWidget(why)
         brow = QHBoxLayout()
         brow.addStretch(1)
@@ -1043,6 +1063,9 @@ class StudioWindow(QMainWindow):
         self.btn_empty_sample = QPushButton("Try it with sample data",
                                             self.empty_state)
         self.btn_empty_sample.setProperty("variant", "secondary")
+        # 見 btn_examples：demo 會產出資料卻載不到 pipeline（範本庫已移除），
+        # 所以整個入口先收起來。同一個開關管兩顆。
+        self.btn_empty_sample.setVisible(bool(scope.SHOW_SAMPLE_ENTRIES))
         brow.addWidget(self.btn_empty_sample)
         brow.addStretch(1)
         estack.addLayout(brow)
@@ -3185,17 +3208,25 @@ class StudioWindow(QMainWindow):
         dlg.raise_()
         return dlg
 
-    def open_recipe_library(self) -> Optional[Any]:
-        """開範例 recipe 庫；選了哪份就直接載進流程面板。"""
+    def open_recipe_library(self, directory: Optional[Any] = None) -> Optional[Any]:
+        """開範例 recipe 庫；選了哪份就直接載進流程面板。
+
+        ``directory`` 只給測試用（正式路徑一律走 ``welcome.RECIPES_DIR``）——
+        `examples/` 移除之後，「照資料夾內容列出來」這件事需要一個真的有東西的
+        資料夾才測得到，而那個資料夾不該是 repo 的一部分。
+        """
         dlg = self.library_dialog
+        if dlg is not None and directory is not None:
+            dlg.close()
+            dlg = self.library_dialog = None
         if dlg is None:
-            dlg = RecipeLibraryDialog(parent=self)
+            dlg = RecipeLibraryDialog(directory=directory, parent=self)
             dlg.recipe_chosen.connect(self._on_recipe_chosen)
             self.library_dialog = dlg
         else:
             dlg.reload()
         if dlg.count() == 0:
-            self._status("No templates found (examples/recipes/ is empty).")
+            self._status("No templates found — the sample recipe library is empty.")
         dlg.show()
         dlg.raise_()
         return dlg

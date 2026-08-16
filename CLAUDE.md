@@ -124,14 +124,20 @@ adept/
 │   ├── export_dialog.py     #   輸出精靈（寫回前一定先預覽變更）
 │   ├── workers.py           #   載入/預覽(請求合併)/試跑 背景執行緒
 │   └── studio.py app.py     #   主視窗 + 進入點
-├── tests/                   # 520+ 個測試，全部用合成資料，~30s 跑完
+├── tests/                   # 1250+ 個測試，全部用合成資料
+│   └── fixtures/recipes/    #   e2e 用的最小 recipe（**測試用，不是教學範例**）
 ├── tools/                   # make_sample(_rsem).py 合成資料；離線安裝三件套：
 │                            #   fetch_wheels.py（有網路的機器抓）→ install_offline.py
 │                            #   （air-gapped 機器裝）→ doctor.py（環境自檢）
-├── examples/recipes/        # 範例 recipe（也是 UI「載入範本」的來源）
 ├── fab_probe/               # 廠內格式探測腳本（stdlib-only、純文字輸出），見 §8
-└── docs/plans/              # F0 = master plan；每個 milestone 一份
+├── docs/plans/              # 進行中的開發計畫（F0 = master plan、F8）
+└── docs/history/            # 封存：按月的 SESSION_LOG、做完的計畫書（**不進搬運包**）
 ```
+
+> **`examples/` 不見了不是漏掉的。** 2026-08-16 使用者定調「範例 recipe 都先全部
+> 拿掉」，整個目錄移除；連帶「用範例資料試一次」與「Templates…」兩個入口
+> 也收起來了（`ui/scope.py` 的 `SHOW_SAMPLE_ENTRIES`）。要放回去：JSON 丟回
+> `examples/recipes/`、常數改 `True`。加卡片時**不必**再同步維護五份範例。
 
 ---
 
@@ -225,11 +231,12 @@ pip install -r requirements.txt && pip install pytest
 
 QT_QPA_PLATFORM=offscreen pytest -q                # 全部測試（Windows 不用設 QT_QPA_PLATFORM）
 # 開發迴圈**只跑改到的測試檔**（pytest -q tests/test_xxx.py）——
-# 全套在家用機 ~30s，但在雲端 session 的容器上要好幾分鐘（UI + 批次測試吃 CPU）。
-# 全套留到 commit 前跑一次就好。
+# 核心（不含 UI）在家用機約 30s，但在雲端 session 的容器上全套要好幾分鐘
+# （UI + 批次測試吃 CPU）。全套留到 commit 前跑一次就好。
 python tools/make_sample.py /tmp/lot --n 100       # 產合成資料
 python -m adept gui                                # 開 Studio
-python -m adept run examples/recipes/die_to_die_basic.json /tmp/lot/LOT_SYN.001 \
+# recipe 在 Studio 裡組好存檔（repo 裡沒有現成的範例，見上面的目錄樹）
+python -m adept run my_recipe.json /tmp/lot/LOT_SYN.001 \
     --workers 4 --cache /tmp/cache --db /tmp/runs.db --csv features.csv
 ```
 
@@ -253,6 +260,12 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 ```
 
 新功能請開 `docs/plans/F<n>-<name>.md`（沿用 GLAS/MMH 慣例），完成後更新 `SESSION_LOG.md`。
+
+`SESSION_LOG.md` **只放最近的**（目前是 2026-08 起），更早的按月封存在
+`docs/history/`；做完而且不再改的計畫書也搬過去。理由不是整理癖 —— 那兩種檔案
+只增不減，而它們跟著整包被複製進公司機，搬運包離 GitHub 的 1 MB 上限只剩不到
+一成。封存目錄不進包（`tools/make_filelist.py` 的 `EXCLUDE_DIRS`），
+細節見 `docs/history/README.md`。
 
 ---
 
@@ -288,7 +301,7 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 | **小圖示不能照大圖示的比例縮**（F7-23 第四輪） | 自繪圖示在 22px 下好看，放到按鈕上的 15px 就糊成一團 | 三個實例：`undo` 的弧用 `size/9` 的線變成實心月牙（改 `size/11`）；`fit` 的四個角括號用 0.26 長度兩臂幾乎接起來變成矩形（改 0.17）；`tidy` 的 2×2 描邊方格線比空隙還粗（改實心）。**加新圖示時用實際尺寸（≤15px）看過再收工** —— `tests/test_ui_f7_23_buttons.py` 只擋得住「畫出來是空的」|
 | **Qt 不會把超出範圍的 `border-radius` 夾回去**（F7-23 第三輪抓到） | 一個叫 `radius_pill` 的 token 畫出來是**方角**，而且不報錯 | CSS 的慣用寫法是 `border-radius: 999px`（讓瀏覽器自己夾到半高）。**Qt 不夾，它直接放棄圓角畫矩形** —— 實測 999px 的左緣輪廓與 0px 逐列相同。所以圓角值必須**已經在範圍內**（chip 高 22px → 11px），而且 chip 的高度改了要跟著改。`tests/test_ui_f7_23_buttons.py::test_the_pill_token_is_actually_round` 量左緣輪廓鎖住它 |
 | **搬進 QSS 的 `[property]` 不會自己重畫**（F7-23 第三輪） | `setProperty("active", True)` 之後畫面完全沒反應，也沒有錯誤 | Qt 只是存下那個值，選擇器要等下一次 polish 才重算。用 `widgets.restyle(w)`（`unpolish` + `polish` + `update`）。把 per-widget stylesheet 換成 property 選擇器時這是最容易漏的一步 |
-| **`::menu-button` 只要給它一個盒子，箭頭就消失**（F7-23 量出來） | 想幫 `Run trial ▾` 的下拉區補一塊底色把兩個動作分開，補完箭頭不見了 | 跟下一列的 `QComboBox::drop-down` 是同一件事：**背景／邊框／圓角任一**都會讓 Qt 把該 subcontrol 的繪製整個交給 stylesheet，而 stylesheet 沒有 `image` 就什麼都不畫 —— 這個 repo 是純文字的（§9.5）塞不了圖。實測只有 `width` 是安全的。所以這件事不是 QSS 的問題是**結構**的問題：要控制外觀就別用 `MenuButtonPopup`，拆成兩顆真的按鈕。逐項量測表在 `docs/plans/F7-canvas-and-taxonomy.md` §27.5 |
+| **`::menu-button` 只要給它一個盒子，箭頭就消失**（F7-23 量出來） | 想幫 `Run trial ▾` 的下拉區補一塊底色把兩個動作分開，補完箭頭不見了 | 跟下一列的 `QComboBox::drop-down` 是同一件事：**背景／邊框／圓角任一**都會讓 Qt 把該 subcontrol 的繪製整個交給 stylesheet，而 stylesheet 沒有 `image` 就什麼都不畫 —— 這個 repo 是純文字的（§9.5）塞不了圖。實測只有 `width` 是安全的。所以這件事不是 QSS 的問題是**結構**的問題：要控制外觀就別用 `MenuButtonPopup`，拆成兩顆真的按鈕。逐項量測表在 `docs/history/plans/F7-canvas-and-taxonomy.md` §27.5 |
 | **QSS 把 subcontrol 的箭頭畫成 0 個畫素**（F7-13 已修） | 下拉選單跟自由文字框**長得一模一樣**，使用者無從得知哪個點得開（`Match on` vs `Name this region`） | `QComboBox::drop-down { border: 0 }` —— styled 的 subcontrol 要**自己提供 `down-arrow` 圖檔**，否則 Qt 什麼都不畫，而這個 repo 是純文字的（§9.5）塞不了圖。拿掉 `border: 0` 讓它留在 base style 上。`tests/test_ui_controls_readable.py` 用畫素數量鎖住（箭頭區 0 → 20，而 QLineEdit 恆為 0） |
 | **參數合法 ≠ 設定完成**（F7-13 已修） | 空模板是完全合法的 str，lint 沒話說 —— 但那張卡跑起來**每一顆**都失敗，而使用者是跑完 200 顆才知道 | `Step.configuration_issues(params)`：卡片自己講缺什麼、用**這張卡的話**講（要去按哪顆鈕），變成 lint error `not-configured`，畫布上那張卡右上角掛警示標記。加這種卡時記得：`test_every_visible_card_can_be_wired_up_without_a_dead_end` 會要求訊息**指得出路在哪** |
 | **模板比對：分數本身會騙人**（F7-12） | 全白／純雜訊的 patch 對任何模板都能拿到 NCC 0.44（門檻 0.3 → 過關），於是「碰巧」被當成「對得準」，框放到隨機的位置 | **沒有任何分數門檻分得出這兩者**（分數重疊）。要問的是另一個問題：**這張 patch 自己有沒有東西可比**（`min_structure`，實測無結構約 1、有結構 20 以上）。另外 margin 必須**先把比對曲面折回一個週期**再取次高峰，否則相鄰週期的次高峰讓 margin 恆為 0 —— 週期性把自己打敗了 |
@@ -352,10 +365,10 @@ warning 指名它 —— 那正是要看到的（它以前恆為 0，那份分�
 | M1 引擎 | ✅ | Context/Step/Recipe DAG/表達式/14 張卡/合成資料/CLI |
 | M2 批次 | ✅ | ProcessPool + 影像段快取 + SQLite 歷史 + rescore |
 | M3 Studio | ✅ | PySide6 四區塊視覺化編輯器 |
-| M4 雙輸入 | ✅ | RSEM 單張 ingest、輸入型別分流、Golden Cell + Cell 週期估測卡（`period.choose_origin` 相位搜尋已補完）。驗收達成：`examples/recipes/dual_route_basic.json` 同時吃 EBI patch 與 RSEM，跨 3 seeds × 2 種輸入共 144 顆合成 defect，正確率 95.1% |
+| M4 雙輸入 | ✅ | RSEM 單張 ingest、輸入型別分流、Golden Cell + Cell 週期估測卡（`period.choose_origin` 相位搜尋已補完）。驗收達成：一份 recipe 同時吃 EBI patch 與 RSEM，跨 3 seeds × 2 種輸入共 144 顆合成 defect，正確率 95.1%（那份 `dual_route_basic.json` 現在留在 `tests/fixtures/recipes/`）|
 | M5 Gallery+Export | ✅ | Gallery（虛擬捲動、排序、直方圖點 bar 篩選）；KLARF 三種寫回模式（就地無損／另存含 ADCSCORE+ADCCLASS／Top-N）+ 寫回前預覽變更；CSV/Excel 報表（含抓漏率/誤殺率）；overlay；`fab_probe/` 三支探測腳本；CLI `adept export` |
-| M6 推廣包 | ✅ | 離線安裝三件套（`tools/fetch_wheels.py` / `install_offline.py` / `doctor.py`，全 stdlib-only）、首啟導覽 + 範例 recipe 庫對話框、5 份範例 recipe。快速參考卡 PDF 暫緩（移到 backlog） |
-| M7 UI/UX | ✅ | A 組防呆 + **UI 全英文**（`tests/test_ui_english_only.py` 鎖住）。F7 全數完成：patch-only 收斂（`ui/scope.py`）、中性色/平面主題 + 暗色、卡片依流程階段分組 + 搜尋 + 前置條件 badge、**Region 段（具名 ROI）**、Results 視窗、**節點畫布**。計畫書 `docs/plans/F7-canvas-and-taxonomy.md` |
+| M6 推廣包 | ✅ | 離線安裝三件套（`tools/fetch_wheels.py` / `install_offline.py` / `doctor.py`，全 stdlib-only）、首啟導覽 + 範本庫對話框。**5 份範例 recipe 已於 2026-08-16 全部移除**，連帶收起「用範例資料試一次」與「Templates…」兩個入口（`ui/scope.py`）。快速參考卡 PDF 暫緩（移到 backlog） |
+| M7 UI/UX | ✅ | A 組防呆 + **UI 全英文**（`tests/test_ui_english_only.py` 鎖住）。F7 全數完成：patch-only 收斂（`ui/scope.py`）、中性色/平面主題 + 暗色、卡片依流程階段分組 + 搜尋 + 前置條件 badge、**Region 段（具名 ROI）**、Results 視窗、**節點畫布**。計畫書 `docs/history/plans/F7-canvas-and-taxonomy.md` |
 | F7-24 | ✅ | **版面把空間給對的東西**（來自一張跑起來的截圖）：**開 recipe 自動 fit**（`fit_later()` 等畫布真的有尺寸才算；`fit` 加上限 1.0 —— `fitInView` 會把兩張卡的 pipeline 放大成三倍）、**兩個下拉框不再吃掉整列**（以前各佔八百多 px 去裝「1」與「diff」，而 `ebi_patch · defect 1 / 24` 被擠掉）、**刪掉死掉的 `PipelinePanel`**（F7-6 的畫布取代了它，但每一輪主題工作都還要繞過它）、**工具列不再是七顆一樣的白鈕**（亮色 `toolbar` 以前與 `bg_surface` **同為 `#ffffff`**；五顆文字鈕各配一個自繪圖示；`Export…` 拿 accent 外框 —— 整條工具列只有兩顆有顏色，而它們正好是要按的那兩顆）。**`Spread` 面板補上軸與圖例**（刻度畫在每一排自己身上 —— 每排單位不同，不能共用一句「0 → 255」；圖例畫一次，並明講右邊那欄是**這一顆**的值）、**往回走的線不再橫掃畫布**（換行那條線以前控制點水平推 `|Δx|*0.5`，一條線甩七百多 px；改成水平只推固定的 46px、量交給垂直方向）。**第二輪（對著自己截的圖再看一次）**：**fit 的下限從 0.45 改成量出來的 0.7**（十張卡落在 52%，卡片副標是一團灰；52/60/70/80/100% 逐級看過，副標要到 70% 才回來）、**塞不下時靠開頭對齊不置中**（`fitInView` 置中會把第一張跟最後一張同時切掉，而 pipeline 是從左往右讀的 —— 這條是前一項造出來的問題，**一輪改動要再截一次圖**）、**`Run trial` 與 `▾` 包成分段控制項**（1px 縫 + 內側直角）。驗收 `tests/test_ui_f7_24_layout.py`（13 條）。計畫書 §28、§29 |
 | F7-23 | ✅ | **按鈕要說得出自己現在是什麼狀態**（試用回饋第九輪）。第一輪**只動 `theme.py`**、呼叫端零改動：**八種按鈕全部補上焦點框**（以前只有「沒有 objectName 也沒有 variant」的那一種有 —— 見 §7 新增的兩列；新 token `focus_ring_inverse`，因為框要跟按鈕自己的底對比）、**disabled 的 primary 留住 accent 淡底**（以前跟一般鈕同一片灰，於是沒載資料時「該按哪一顆」沒有答案）、**圓角收成 `radius_sm/md/pill` 三個 token**（原本六個值散在 QSS 各處）、刪掉**寫了兩次的 `QToolBar::separator`**（贏的是沒有註解的那一份）。`Run trial ▾` 的下拉區量下來 QSS 做不到（見 §7），移到第二輪。**第二輪**：小按鈕的**六種尺寸收成一種**（`widgets.small_button()` 只說形狀 `square`/`wide`，邊長由 `control_sm` 決定；`kind="icon"` 給浮在畫布／影像上的那幾顆一個自己的底）、**垂直節奏統一**（重要性只用水平 padding 表達 —— 以前 primary 高 2px，空白狀態下兩顆並排的鈕對不齊）、**游標從「每個人自己記得」變成規則**（`apply_button_cursors()` 掃一次；以前一半的按鈕滑過去沒有變手指）、**`Run trial ▾` 拆成兩顆真的按鈕**。驗收 `tests/test_ui_f7_23_buttons.py`（13 條；對第一輪前 7 紅、對第二輪前 5 紅），含一條靜態掃描擋 `setFixedSize` 長回按鈕上。**第三輪**：**三個元件不再自己組色盤**（`_Chip` / `StageButton` / `LibraryItem`+`libBadge` 搬進 QSS —— 以前換膚要靠有人記得逐顆重套，而帶 badge 的卡片庫列那條路沒被走到，會留在上一個主題的灰色；真正每個實例不同的階段色仍留在 widget）、**`pressed` 真的跳一階**（新 token `pressed_bg`；以前與 hover 只差 ΔL*≈3.5）、**最小的按鈕不再有最大的反應**（`#cardButton:hover` 從動三件事收成兩件）、**`QPushButton` 補上 `:checked`**。順帶抓到 `radius_pill` 的 `999px` 在 Qt 是**方角**（見 §7）。**第四輪**：**按鈕上的字元圖示改自繪**（`widgets.draw_glyph_icon()` 14 個 + `IconButton`；`⤢`(U+2922)、`⌗`(U+2317)、`↶↷`(U+21B6/B7) 在廠內的 Windows 上 Segoe UI 根本沒有，退字型會讓同一排按鈕每顆字大小與 baseline 都不同，最壞是豆腐框 —— 而開發機看不到）。圖示顏色取 `palette()` 的 `ButtonText`（Qt 從 QSS 的 `color` 解析），換膚與變灰自動跟著；**主題鈕的實心半邊會隨目前主題翻面**，以前兩個主題長得一樣。刻意**不**碰 `−↑↓×` —— 那幾個 Segoe UI 有，一起畫掉只是多改動。計畫書 §27。|
 | F7-22 | ✅ | **畫布再往 n8n 靠一步**：**參數表預設收起、雙擊卡片才攤開**（畫布因此拿到整欄；`params_open()` 追明確狀態）、**線上 hover 出現斷開 ×**（虛線不給 —— 它刪不掉）、**「排整齊」按鈕**（放縮放鈕旁邊：兩者都只動「怎麼看」）、**卡片庫可以拖到畫布**（自訂 MIME，不是純文字）。計畫書 §26 |
@@ -384,23 +397,29 @@ v2 backlog：快速參考卡 PDF、自由 DAG 畫布、ground-truth 標注 + 混
 ## 11. 產品範圍開關（F7-1）
 
 **Studio 目前只吃 EBI patch。** RSEM 的能力（ingest、Golden Cell、週期估測、
-範例 recipe、測試）**完全沒有被刪**，只是從 GUI 上收起來。
+測試）**完全沒有被刪**，只是從 GUI 上收起來。
 
-要打開，改 `adept/ui/scope.py` 一個常數：
+`adept/ui/scope.py` 是這類「暫時不給看」的**唯一**去處，目前三個開關：
 
 ```python
-SUPPORTED_KINDS = ("ebi_patch",)            # 加 "rsem" 就整條路線回來
+SUPPORTED_KINDS = ("ebi_patch",)                # 加 "rsem" 就整條路線回來
 HIDDEN_STEPS = ("golden_cell", "cell_period")   # 清空就出現在卡片庫
+SHOW_SAMPLE_ENTRIES = False                     # 範例入口（見下）
 ```
 
+`SHOW_SAMPLE_ENTRIES`（2026-08-16）管兩個入口：導覽與空白狀態上的
+**「用範例資料試一次」**、工具列的 **「Templates…」**。範例 recipe 全部拿掉之後
+它們都是死路（庫是空的、demo 產得出資料卻載不到 pipeline），而**按了撞牆的鈕
+比沒有那顆鈕更糟**（推廣鐵則）。`run_demo` / `RecipeLibraryDialog` 一行都沒動。
+
 `tests/test_ui_patch_only.py` 同時鎖住兩邊：GUI 真的收斂了，而且
-**打開開關就回得來**（那支測試會 monkeypatch 這兩個常數再驗一次）。
+**打開開關就回得來**（那支測試會 monkeypatch 這幾個常數再驗一次）。
 
 > ⚠ **`adept/core/algo/period.py` 不要刪。** 它現在只被 Golden Cell 用到，
 > 看起來像是可以跟 RSEM 一起砍掉的東西 —— 但 `estimate_period` /
 > `choose_origin` 的相位搜尋是之後做 **pattern-frame ROI** 的唯一工具
 > （patch 是以 defect 為中心裁切的，晶格相位逐顆不同；
-> 見 `docs/plans/F7-canvas-and-taxonomy.md` §4）。
+> 見 `docs/history/plans/F7-canvas-and-taxonomy.md` §4）。
 
 CLI 不受影響：`python -m adept run` 照樣跑得動 rsem recipe。
 

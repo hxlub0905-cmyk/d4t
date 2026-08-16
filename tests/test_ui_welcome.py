@@ -31,7 +31,15 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-RECIPES_DIR = REPO / "examples" / "recipes"
+
+#: 範例 recipe 庫 2026-08-16 整個移除了（使用者：「範例 recipe 都先全部拿掉」），
+#: 所以 ``examples/recipes/`` **不存在**。
+#:
+#: 這一支測的東西沒有跟著消失：``RecipeLibraryDialog`` 的契約是「清單完全由
+#: 資料夾內容決定，沒有任何檔名寫死」—— 那件事**用暫存資料夾測得更準**
+#: （以前是拿 repo 裡剛好有的那幾份來測，庫換內容測試就要跟著改）。
+#: 所以下面的 ``library_dir`` fixture 自己造一個庫。
+FIXTURE_RECIPES = REPO / "tests" / "fixtures" / "recipes"
 
 
 def _load_qt() -> None:
@@ -70,6 +78,23 @@ def clean_settings(qapp):
 def demo_lot(tmp_path_factory):
     """給 ``run_demo`` 用的輸出資料夾（不碰使用者家目錄的 ~/.adept）。"""
     return tmp_path_factory.mktemp("demo_lot")
+
+
+@pytest.fixture(scope="module")
+def library_dir(tmp_path_factory):
+    """一個**自己造的**範例 recipe 庫。
+
+    repo 裡已經沒有範例 recipe 了，而這一段要測的是對話框「照資料夾內容
+    列出來」的行為 —— 那正好不需要 repo 提供任何東西。內容用 e2e 的 fixture
+    recipe，因為它們是真的驗得過、跑得動的 recipe。
+    """
+    d = tmp_path_factory.mktemp("recipe_library")
+    for name in ("die_to_die_basic.json", "dual_route_basic.json"):
+        raw = json.loads((FIXTURE_RECIPES / name).read_text(encoding="utf-8"))
+        raw["description"] = "Fixture recipe used to exercise the library dialog."
+        (d / name).write_text(json.dumps(raw, ensure_ascii=False),
+                              encoding="utf-8")
+    return d
 
 
 def _catch(signal):
@@ -178,22 +203,22 @@ def test_quick_reference_finds_a_pdf_and_prefers_the_named_one(tmp_path, qapp):
 # --------------------------------------------------------------------------- #
 # RecipeLibraryDialog：內容全部從 JSON 讀
 # --------------------------------------------------------------------------- #
-def test_library_lists_every_supported_recipe_file(qapp):
+def test_library_lists_every_supported_recipe_file(qapp, library_dir):
     """清單完全由資料夾內容決定（沒有任何檔名寫死）。
 
     F7-1 起會再過一層 :func:`adept.ui.scope.recipe_is_supported`：純 rsem 的
     範本在 patch-only 期間不列出來。原本的重點沒變 —— 列出來的東西與順序
-    仍然只由 ``examples/recipes/`` 決定。
+    仍然只由**那個資料夾**決定。
     """
     from adept.ui.scope import recipe_is_supported
 
-    files = sorted(RECIPES_DIR.glob("*.json"))
-    assert files, "examples/recipes/ 是空的"
+    files = sorted(library_dir.glob("*.json"))
+    assert files, "測試自己造的庫是空的"
     expected = [p.name for p in files
                 if recipe_is_supported(welcome_mod.read_recipe_info(p))]
     assert expected, "至少要有一份目前 build 跑得動的範本"
 
-    dlg = welcome_mod.RecipeLibraryDialog()
+    dlg = welcome_mod.RecipeLibraryDialog(directory=library_dir)
     try:
         assert dlg.count() == len(expected)
         assert [Path(e["path"]).name for e in dlg.entries()] == expected
@@ -201,9 +226,26 @@ def test_library_lists_every_supported_recipe_file(qapp):
         dlg.close()
 
 
-def test_library_shows_description_routes_steps_and_expr_from_json(qapp):
-    """對話框上的每一個字都要來自 JSON —— 沒有任何一份 recipe 被寫死。"""
+def test_the_shipped_library_is_empty_but_the_dialog_still_opens(qapp):
+    """範例 recipe 全部拿掉之後，庫是空的 —— 而空的不等於壞的。
+
+    這個對話框在 Studio 上的入口已經收起來了（``scope.SHOW_SAMPLE_ENTRIES``），
+    但它仍然開得起來、仍然說得出為什麼是空的。範例回來的那一天，
+    這條測試就是「放回去真的會被看到」的另一半證據。
+    """
     dlg = welcome_mod.RecipeLibraryDialog()
+    try:
+        assert dlg.count() == 0
+        assert dlg.load_selected() is None
+        assert dlg.btn_load.isEnabled() is False
+        assert "No recipe JSON" in dlg.detail.text()
+    finally:
+        dlg.close()
+
+
+def test_library_shows_description_routes_steps_and_expr_from_json(qapp, library_dir):
+    """對話框上的每一個字都要來自 JSON —— 沒有任何一份 recipe 被寫死。"""
+    dlg = welcome_mod.RecipeLibraryDialog(directory=library_dir)
     try:
         for i, info in enumerate(dlg.entries()):
             raw = json.loads(Path(info["path"]).read_text(encoding="utf-8"))
@@ -232,8 +274,8 @@ def test_library_shows_description_routes_steps_and_expr_from_json(qapp):
         dlg.close()
 
 
-def test_library_emits_recipe_chosen_with_the_right_path(qapp):
-    dlg = welcome_mod.RecipeLibraryDialog()
+def test_library_emits_recipe_chosen_with_the_right_path(qapp, library_dir):
+    dlg = welcome_mod.RecipeLibraryDialog(directory=library_dir)
     try:
         seen = _catch(dlg.recipe_chosen)
         target = len(dlg.entries()) - 1
@@ -247,7 +289,8 @@ def test_library_emits_recipe_chosen_with_the_right_path(qapp):
 
 
 def test_library_reads_a_custom_directory_and_survives_broken_json(tmp_path, qapp):
-    good = json.loads((RECIPES_DIR / "cross_regions.json").read_text(encoding="utf-8"))
+    good = json.loads(
+        (FIXTURE_RECIPES / "die_to_die_basic.json").read_text(encoding="utf-8"))
     (tmp_path / "a_good.json").write_text(json.dumps(good), encoding="utf-8")
     (tmp_path / "b_broken.json").write_text("{ this is not json", encoding="utf-8")
     dlg = welcome_mod.RecipeLibraryDialog(directory=tmp_path)
@@ -304,6 +347,73 @@ def test_toolbar_has_help_and_examples_entries(window):
         assert b.toolTip().strip()
 
 
+# --------------------------------------------------------------------------- #
+# 範例入口收起來了（scope.SHOW_SAMPLE_ENTRIES）——「收起來」不是「刪掉」
+# --------------------------------------------------------------------------- #
+def test_the_sample_entries_are_hidden_while_there_are_no_recipes(window):
+    """範例 recipe 全部拿掉之後，兩個入口都不該出現在畫面上。
+
+    為什麼需要這條：那兩顆鈕**按下去仍然會做事**（訊號還在、方法還在），
+    所以「壞了沒有」從程式碼看不出來 —— 壞的是使用者按了之後撞牆。
+
+    問 ``isHidden()`` 而不是 ``isVisible()``：視窗還沒 ``show()`` 之前
+    所有 widget 的 ``isVisible()`` 都是 False（CLAUDE.md §7），那樣問的話
+    這條測試會**永遠是綠的**，包括開關打開的時候。
+    """
+    from adept.ui import scope
+
+    assert scope.SHOW_SAMPLE_ENTRIES is False, "這條測試描述的是收起來的狀態"
+    assert window.btn_examples.isHidden() is True, \
+        "範本庫是空的，Templates… 不該出現"
+    assert window.btn_empty_sample.isHidden() is True, \
+        "沒有範本可載，「用範例資料試一次」不該出現"
+
+    dlg = window.show_welcome(force=True)
+    try:
+        assert dlg.btn_demo.isHidden() is True
+        assert dlg.btn_library.isHidden() is True
+        assert dlg.btn_open.isHidden() is False, "唯一剩下的路不能也被藏起來"
+        # 藏起來的不算 —— 畫面上看得到的主要動作要正好一顆
+        primaries = [b for b in (dlg.btn_demo, dlg.btn_open, dlg.btn_library)
+                     if not b.isHidden() and b.objectName() == "primary"]
+        assert len(primaries) == 1 and primaries[0] is dlg.btn_open
+    finally:
+        dlg.close()
+
+
+def test_nothing_on_screen_points_at_a_button_that_is_not_there(window):
+    """文案要跟看得到的鈕一致。
+
+    這是這一輪最容易漏的地方：鈕藏起來了，但旁邊那兩句話還在推薦它 ——
+    「or try the tool with generated sample data」與「按左邊那顆，一分鐘就
+    看得到分數」。使用者於是去找一顆不在畫面上的鈕，那比沒有提示更糟。
+    """
+    hint = window.empty_state_hint.text()
+    assert "sample data" not in hint, "空白狀態還在推薦一顆看不到的鈕：%r" % hint
+    assert "KLARF" in hint, "至少要講得出唯一那條路"
+
+    dlg = window.show_welcome(force=True)
+    try:
+        footer = dlg.footer_hint.text()
+        assert "in about a minute" not in footer, \
+            "導覽底下還在承諾一顆看不到的鈕會給的結果：%r" % footer
+        assert footer.strip()
+    finally:
+        dlg.close()
+
+
+def test_the_machinery_is_only_hidden_not_deleted(window):
+    """入口收起來，能力留著 —— 跟 patch-only 那組開關同一套辦法。"""
+    assert callable(window.run_demo)
+    assert callable(window.load_template)
+    assert callable(studio_mod.generate_demo_lot)
+    lib = window.open_recipe_library()
+    try:
+        assert lib is not None
+    finally:
+        lib.close()
+
+
 def test_show_welcome_respects_and_overrides_the_flag(window):
     welcome_mod.set_welcome_disabled(True)
     assert window.show_welcome() is None, "勾了「不再顯示」就不該自己跳出來"
@@ -314,29 +424,36 @@ def test_show_welcome_respects_and_overrides_the_flag(window):
 
 
 def test_welcome_library_button_opens_the_library_from_studio(window):
+    """接線還在（庫是空的，所以只驗「開得起來」而不是「列得出東西」）。"""
     dlg = window.show_welcome(force=True)
     assert dlg is not None
     dlg.btn_library.click()
     lib = window.library_dialog
     try:
-        assert lib is not None and lib.count() > 0
+        assert lib is not None
     finally:
         if lib is not None:
             lib.close()
         dlg.close()
 
 
-def test_library_choice_loads_the_recipe_into_the_model(window):
-    lib = window.open_recipe_library()
+def test_library_choice_loads_the_recipe_into_the_model(window, library_dir):
+    """從庫裡選一份 → 真的變成流程面板上的 pipeline。
+
+    庫的來源改成測試自己造的資料夾（repo 裡已經沒有範例 recipe）——
+    這條測的是**選了之後有沒有載進去**，跟庫裡剛好放什麼無關。
+    """
+    lib = window.open_recipe_library(directory=library_dir)
     try:
         names = [e["recipe_id"] for e in lib.entries()]
-        idx = names.index("cross_regions")
+        assert names, "測試自己造的庫是空的"
+        idx = names.index("die_to_die_basic")
         assert lib.select(idx) is True
         path = lib.load_selected()
         assert path is not None
     finally:
         lib.close()
-    assert window.model.recipe_id == "cross_regions"
+    assert window.model.recipe_id == "die_to_die_basic"
     assert window.model.node_order, "載入 recipe 之後流程不該是空的"
 
 
@@ -358,24 +475,30 @@ def test_welcome_demo_button_is_wired_to_studio_run_demo(window, monkeypatch):
         dlg.close()
 
 
-def test_demo_runs_end_to_end_and_populates_the_window(window, demo_lot):
-    """「用範例資料試一次」：跑完必須有資料集、有流程、有分數分佈、有 Gallery。"""
-    # 同步跑（不進 event loop）並指定輸出位置，免得測試去寫使用者家目錄的
-    # ~/.adept/demo_lot。
-    assert window.run_demo(out_dir=str(demo_lot), n=6, sync=True) is True
+def test_demo_stops_at_the_missing_template_and_says_so(window, demo_lot):
+    """範本拿掉之後，``run_demo`` 走到「載入範本」那一步就停 —— 而且講得出原因。
 
-    assert window.dataset is not None
+    這條測試以前斷言的是「跑完有資料集、有流程、有直方圖、有 Gallery」。
+    那個結果現在做不到了（沒有 recipe 可載），所以斷言換成**現在真正發生的事**：
+
+    1. 資料還是產得出來、載得進來（那一段沒有壞）；
+    2. 停在載範本，回 ``False``；
+    3. 狀態列講得出是「找不到範本」，不是丟一個 traceback 或安靜地什麼都不做。
+
+    這條路目前**從 GUI 上按不到**（入口收起來了）。留著它是因為範例 recipe
+    回來的那一天，它會立刻告訴我們整條路通不通。
+    """
+    before = list(window.model.node_order)   # 這個 window 是 module-scope 共用的
+    assert window.run_demo(out_dir=str(demo_lot), n=6, sync=True) is False
+
+    assert window.dataset is not None, "產資料與載入那一段不該受影響"
     assert len(window.dataset.items) == 6
-    assert window.model.recipe_id == "cross_regions"
-    assert len(window.trial_results) == 6
-    assert all(r.get("ok") for r in window.trial_results)
-    assert len(window.trial_scores) == 6
-    assert window.histogram.has_data() is True, "直方圖沒有資料"
-    assert window.histogram.bin_summary_text().strip()
-    assert window.gallery.displayed_count() == 6
-    assert window.results_visible() is True
-    assert window.btn_export.isEnabled() is True
-    assert "Sample run finished" in window.status_text()
+    assert list(window.model.node_order) == before, \
+        "沒有範本可載就不該動到使用者手上的流程"
+    status = window.status_text()
+    assert "template not found" in status.lower(), status
+    assert studio_mod.TEMPLATE_RECIPE.name in status, \
+        "要講得出找不到的是哪一個檔案"
 
 
 def test_demo_lot_generation_is_reused_not_regenerated(demo_lot):
@@ -398,12 +521,17 @@ def test_demo_reports_failure_instead_of_raising(window, tmp_path, monkeypatch):
     assert "磁碟滿了" in window.status_text()
 
 
-def test_generated_demo_lot_matches_the_builtin_template_route(demo_lot):
-    """範例資料一定要走得通內建範本的 route，不然那顆鈕會給人第一印象是壞的。"""
+def test_generated_demo_lot_is_a_kind_this_build_supports(demo_lot):
+    """範例資料產出來的型別，這個 build 要吃得下。
+
+    以前是拿它跟內建範本的 route 比對；範本沒有了，但這條要擋的事沒變 ——
+    產出來的資料如果是 Studio 收不下的型別，那顆鈕會給人第一印象是壞的。
+    所以改成直接問 ``scope``（範本回來時，route 那一半由
+    ``test_demo_stops_at_the_missing_template_and_says_so`` 接手）。
+    """
     from adept.core.ingest.dataset import load_dataset
-    from adept.core.pipeline import Recipe
+    from adept.ui.scope import is_supported_kind
 
     paths = studio_mod.generate_demo_lot(str(demo_lot), n=6)
     ds = load_dataset(paths["klarf"])
-    recipe = Recipe.load(str(studio_mod.TEMPLATE_RECIPE))
-    assert ds.kind in recipe.routes
+    assert is_supported_kind(ds.kind), ds.kind

@@ -15,7 +15,8 @@
     3. 從**目前這個資料夾**能不能 import 到 adept —— 最常見的錯是「跑錯資料夾」
     4. PySide6 能不能真的開一個 QApplication（用子行程做，避免整支 doctor 被拖死）
     5. 目前資料夾與快取資料夾 ~/.adept 有沒有寫入權限
-    6. 端到端試跑：產一份迷你合成 lot，用範例 recipe 跑一顆 defect（約 10 秒）
+    6. 端到端試跑：產一份迷你合成 lot，用**內建的**最小 pipeline 跑一顆 defect
+       （約 10 秒；不讀 repo 裡任何 recipe 檔，見 ``_SMOKE_RECIPE``）
 
 離開碼：必要項目全過 = 0，否則 = 1。最後一行永遠是一句白話結論。
 
@@ -53,7 +54,6 @@ _MARKS = {OK: "✓", WARN: "△", BAD: "✗"}
 _MARKS_ASCII = {OK: "[OK]", WARN: "[!!]", BAD: "[XX]"}
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EXAMPLE_RECIPE = os.path.join(REPO_ROOT, "examples", "recipes", "die_to_die_basic.json")
 
 SMOKE_TIMEOUT_S = 180.0
 QT_TIMEOUT_S = 90.0
@@ -135,10 +135,37 @@ except BaseException as exc:
 sys.stdout.write("ADEPT_DOCTOR_JSON:" + json.dumps(out) + "\n")
 """
 
+#: 端到端試跑用的 pipeline —— **doctor 自己帶著，不讀 repo 裡任何 recipe 檔**。
+#:
+#: 以前這裡讀 ``examples/recipes/die_to_die_basic.json``。那份檔案 2026-08-14
+#: 被刪掉之後，doctor 對每一台機器都說「找不到範例 recipe → 原始碼解壓不完整，
+#: 請重新解壓一次」—— 一個**錯的診斷**，而 doctor 存在的唯一理由就是在裝不起來
+#: 的機器上給出對的診斷。第一次裝的人會照著重解壓一次，然後看到同一句話。
+#:
+#: 所以它不再依賴任何外部檔案：這四張卡（載入 → 相減 → 量 → 給分）就是
+#: 「引擎從頭到尾跑得完」的最小證據，而那正是這一項要回答的問題。
+_SMOKE_RECIPE = {
+    "recipe_id": "doctor_smoke",
+    "version": 2,
+    "description": "doctor 內建的最小 pipeline（不是給使用者看的範例）。",
+    "routes": {"ebi_patch": ["load", "sub", "glv"]},
+    "nodes": {
+        "load": {"step": "load_patch", "params": {}, "enabled": True},
+        "sub": {"step": "subtract", "params": {"b": "ref"}, "enabled": True},
+        "glv": {"step": "glv_stats",
+                "params": {"source": "diff", "metrics": "glv_max,glv_mean",
+                           "roi": ""},
+                "enabled": True},
+    },
+    "edges": [],
+    "score": {"expr": "glv_max", "threshold": 50.0,
+              "bins": {"below": 0, "above": 1}},
+}
+
 _SMOKE_CHILD = r"""
 import json, os, shutil, sys, tempfile
 root = sys.argv[1]
-recipe_path = sys.argv[2]
+recipe_json = sys.argv[2]
 sys.path.insert(0, root)
 sys.path.insert(1, os.path.join(root, "tools"))
 out = {"ok": False, "error": None, "score": None, "kind": None, "n_features": 0}
@@ -153,7 +180,7 @@ try:
     info = make_sample.generate(os.path.join(work, "lot"), n=2, seed=7)
     ds = load_dataset(info["klarf"])
     out["kind"] = ds.kind
-    recipe = Recipe.load(recipe_path)
+    recipe = Recipe.from_json_dict(json.loads(recipe_json))
     res = run_defect(recipe, ds.items[0], ds.kind)
     out["ok"] = bool(res.ok) and res.score is not None
     out["error"] = res.error
@@ -333,12 +360,10 @@ def check_smoke(rep: Report, skip: bool = False, reason: str = "") -> None:
         rep.add(WARN, "端到端試跑", "略過（%s）" % (reason or "使用者指定"), essential=False,
                 hint="上面的問題修好後，再跑一次 python tools\\doctor.py 就會做這項。")
         return
-    if not os.path.isfile(EXAMPLE_RECIPE):
-        rep.add(WARN, "端到端試跑", "找不到範例 recipe %s" % EXAMPLE_RECIPE, essential=False,
-                hint="原始碼解壓不完整，請重新解壓一次 GitHub 的 zip。")
-        return
     t0 = time.time()
-    data, raw = _run_child(_SMOKE_CHILD, [REPO_ROOT, EXAMPLE_RECIPE], SMOKE_TIMEOUT_S)
+    data, raw = _run_child(_SMOKE_CHILD,
+                           [REPO_ROOT, json.dumps(_SMOKE_RECIPE)],
+                           SMOKE_TIMEOUT_S)
     dt = time.time() - t0
     if data is None:
         rep.add(BAD, "端到端試跑", "試跑子行程沒有正常結束（%.1f 秒）" % dt,
@@ -347,7 +372,7 @@ def check_smoke(rep: Report, skip: bool = False, reason: str = "") -> None:
                 extra=raw)
         return
     if data.get("ok"):
-        rep.add(OK, "端到端試跑", "合成 lot → 範例 recipe → score=%.3f，%d 個特徵（%.1f 秒）"
+        rep.add(OK, "端到端試跑", "合成 lot → 內建 pipeline → score=%.3f，%d 個特徵（%.1f 秒）"
                 % (float(data.get("score") or 0.0), int(data.get("n_features") or 0), dt))
     else:
         rep.add(BAD, "端到端試跑", "跑得動但結果不對：%s" % (data.get("error") or "沒有算出 score"),

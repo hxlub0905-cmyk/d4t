@@ -11,8 +11,10 @@
 
 1. ``tools/FILELIST.txt`` —— 全部檔案的 git blob SHA。公司機用它判斷
    「哪幾個檔案要重新複製」（`tools/check_files.py`）。
-2. ``bundle/ADEPT_bundle.py`` —— 整個 repo 壓成一個 711 KB 的純文字 `.py`，
+2. ``bundle/ADEPT_bundle.py`` —— 整個 repo 壓成一個純文字 `.py`，
    在 GitHub 上按複製鈕就能整包搬進公司機（見 `AGENTS.md` §2）。
+   **它必須小於 1 MB**，否則公司機在網頁上點不開；每次產完都會報目前的水位
+   （見 :func:`bundle_size_report`）。
 
 **先清單再打包**：包裡面含著那份清單，順序反了就會把舊清單封進新包裡，
 而那個包解出來之後 `check_files.py` 會報一堆不存在的差異。
@@ -40,6 +42,42 @@ import make_filelist                      # noqa: E402  （tools/ 裡的同伴�
 import make_text_bundle                   # noqa: E402
 
 BUNDLE = os.path.join("bundle", "ADEPT_bundle.py")
+
+#: GitHub 網頁**不顯示**超過 1 MB 的檔案。
+#:
+#: 這不是一個效能數字，是一堵牆：公司機下載不了東西，唯一的傳輸通道是「在
+#: GitHub 上打開檔案、按右上角的複製鈕」（`AGENTS.md` §2）。包一旦超過這條線，
+#: 那台機器上就**點不開來複製** —— 而這個包存在的唯一理由就是繞過這件事。
+BUNDLE_LIMIT_BYTES = 1024 * 1024
+
+#: 開始出聲的水位（85%）。
+#:
+#: 為什麼要提早喊：破線**沒有任何症狀**。測試不會紅、release.py 不會錯、
+#: 家用機上一切正常 —— 症狀只會出現在公司機的瀏覽器裡，而那時候人已經站在
+#: 機台旁邊了。2026-08-16 實測 962 KB（94%），只剩 ~60 KB 餘裕；壓縮比約
+#: 3.2:1，換算成純文字大約再加 200 KB 就會撞牆。
+BUNDLE_WARN_RATIO = 0.85
+
+
+def bundle_size_report(nbytes: int) -> Tuple[str, str]:
+    """包的大小 → ``(等級, 要印的話)``；等級是 ``ok`` / ``warn`` / ``over``。
+
+    切開成純函式是為了測得到 —— 產一個 1 MB 的包只為了驗這段訊息太貴。
+    """
+    pct = 100.0 * nbytes / BUNDLE_LIMIT_BYTES
+    size = "%.0f KB（GitHub 1 MB 上限的 %.0f%%）" % (nbytes / 1024.0, pct)
+    if nbytes > BUNDLE_LIMIT_BYTES:
+        return "over", (
+            "✗ %s —— **超過上限了**。公司機在 GitHub 網頁上點不開這個檔案，\n"
+            "    也就複製不走，整條搬運通道斷掉（AGENTS.md §2）。\n"
+            "    先把不需要進包的大檔搬進 docs/history/（那個目錄不打包），\n"
+            "    或用 make_text_bundle.py --split 分批。" % size)
+    if nbytes > BUNDLE_LIMIT_BYTES * BUNDLE_WARN_RATIO:
+        return "warn", (
+            "⚠ %s —— 快撞牆了。破線之後**在家用機上沒有任何症狀**，\n"
+            "    只有公司機的瀏覽器會打不開。現在就該把長期只增不減的文件\n"
+            "    （SESSION_LOG、做完的計畫書）搬進 docs/history/。" % size)
+    return "ok", "  %s" % size
 
 
 def repo_root() -> str:
@@ -157,8 +195,9 @@ def write(root: str = "") -> None:
         f.write(text)
     os.replace(tmp, bundle)
     n = len(make_text_bundle.collect(root))
-    print("%s：%d 個檔案、%.0f KB"
-          % (BUNDLE, n, len(text.encode("utf-8")) / 1024))
+    nbytes = len(text.encode("utf-8"))
+    print("%s：%d 個檔案、%.0f KB" % (BUNDLE, n, nbytes / 1024))
+    print(bundle_size_report(nbytes)[1])
 
 
 def main(argv=None) -> int:
@@ -200,7 +239,11 @@ def main(argv=None) -> int:
             print("  跑：git add -A && python tools/release.py && git add -A")
             return 1
         print("✓ tools/FILELIST.txt 與 %s 都是最新的。" % BUNDLE)
-        return 0
+        # 大小是**跟過期無關**的另一條線：包可以既是最新的、又大到送不進去。
+        bundle_path = os.path.join(root, BUNDLE.replace("/", os.sep))
+        level, msg = bundle_size_report(os.path.getsize(bundle_path))
+        print(msg)
+        return 1 if level == "over" else 0
 
     write(root)
     print("")

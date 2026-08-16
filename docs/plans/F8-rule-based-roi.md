@@ -173,6 +173,12 @@ Y 投影 → 一組橫的條紋 ─┘
 `python tools/make_sample.py <dir> --pattern lines`（新增的合成 layout：
 兩軸不同週期的線陣列，比例刻意取 1.4 這種不整除的值）。
 
+> ⚠ **2026-08-16：那份 recipe 沒有了。** 使用者定調「範例 recipe 都先全部拿掉」，
+> `examples/` 整個移除（連帶收起 Studio 上的兩個範例入口，見 `ui/scope.py` 的
+> `SHOW_SAMPLE_ENTRIES`）。`roi_cross` 的行為由 `tests/test_roi_cross*.py`
+> 那五支守著，不依賴任何範例檔；要重現上面那條路徑的話，在 Studio 裡把
+> Profile 卡接起來自己存一份。
+
 ---
 
 ## 6b. 第二輪（試用回饋，同日）

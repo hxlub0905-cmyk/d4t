@@ -10,10 +10,15 @@ ADEPT 的存在意義是讓**不會寫 code 的製程／設備工程師**把一�
 
 所以它不是一面文字牆，而是三顆「按下去真的會發生事情」的按鈕：
 
-1. **用範例資料試一次** —— 產一批合成資料 → 載入 → 載入 die-to-die 範本 →
-   試跑，最後畫面上是有分數分佈的直方圖與一整牆縮圖。**全產品最重要的一顆鈕。**
+1. **用範例資料試一次** —— 產一批合成資料 → 載入 → 載入範本 → 試跑，最後畫面上
+   是有分數分佈的直方圖與一整牆縮圖。**全產品最重要的一顆鈕。**
 2. **開啟我自己的 KLARF** —— 關掉自己，交給 Studio 的「開啟 KLARF…」。
 3. **看範例 recipe** —— 打開 :class:`RecipeLibraryDialog`（範例 recipe 庫）。
+
+⚠ **2026-08-16 起，第 1 與第 3 顆是隱藏的**（``scope.SHOW_SAMPLE_ENTRIES``）：
+使用者決定把範例 recipe 全部拿掉，``examples/`` 已移除，那兩顆按下去都是死路。
+程式碼原封不動留著 —— 範例庫回來的那一天，改一個常數就整組回來。
+上面那句「全產品最重要的一顆鈕」仍然成立，只是它現在沒有東西可載。
 
 **對話框不自己驅動 app**：三顆鈕都只 emit 訊號，真正的動作由
 :class:`~adept.ui.studio.StudioWindow` 執行。這樣對話框可以單獨測，
@@ -47,7 +52,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .scope import recipe_is_supported
+from .scope import SHOW_SAMPLE_ENTRIES, recipe_is_supported
 from .theme import SEG_LABELS, TOKENS, seg_hex
 from .widgets import apply_button_cursors
 
@@ -92,8 +97,16 @@ _INTRO = (
     "pipeline works it out."
 )
 
-_FOOTER_HINT = ("First time here? Press the button on the left — you will be looking "
-                "at scored results in about a minute.")
+#: 導覽底下那句提示。**它必須描述畫面上真的看得到的鈕** —— 範例資料那顆收起來
+#: 之後（見 ``scope.SHOW_SAMPLE_ENTRIES``），「按左邊那顆，一分鐘就看得到分數」
+#: 指的會是「開啟我自己的 KLARF」，而那顆給不出那個結果。
+_FOOTER_HINT = (
+    "First time here? Press the button on the left — you will be looking "
+    "at scored results in about a minute."
+    if SHOW_SAMPLE_ENTRIES else
+    "Open a KLARF to start; then build the pipeline card by card from the "
+    "library on the left of Studio."
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -332,11 +345,22 @@ class WelcomeDialog(QDialog):
         for b in (self.btn_demo, self.btn_open, self.btn_library):
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             row.addWidget(b, 1)
+        # 範例 recipe 庫移除之後（``examples/`` 已不存在），這兩顆都是死路：
+        # 範本庫開起來是空的，demo 產得出資料卻載不到 pipeline。導覽是**第一次
+        # 用的人看到的第一個畫面**，上面不能有按了撞牆的鈕。
+        # 收起來的是入口不是能力 —— ``click_demo`` / ``click_library`` 與訊號
+        # 一行都沒動，測試照樣直接呼叫得到；開關在 ``scope.SHOW_SAMPLE_ENTRIES``。
+        if not SHOW_SAMPLE_ENTRIES:
+            self.btn_demo.setVisible(False)
+            self.btn_library.setVisible(False)
+            # 只剩一顆鈕的時候，它就是主要動作。
+            self.btn_open.setObjectName("primary")
         root.addLayout(row)
 
         hint = QLabel(_FOOTER_HINT, self)
         hint.setObjectName("paramHint")
         hint.setWordWrap(True)
+        self.footer_hint = hint          # 這句話要跟看得到的鈕一致（有測試）
         root.addWidget(hint)
 
         root.addWidget(self._separator())

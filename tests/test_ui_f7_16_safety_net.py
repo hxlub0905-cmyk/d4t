@@ -16,6 +16,15 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
+#: 「先載一份真的 pipeline 進來」用的 recipe。
+#:
+#: 以前這幾條測試呼叫的是 ``window.load_template()``。範例 recipe 2026-08-16
+#: 全部拿掉之後那支會找不到檔案、回 ``False`` —— 而**這些測試仍然會過**，
+#: 因為它們沒有檢查回傳值，而 ``run_trial`` 用空流程也跑得完。
+#: 那是最糟的一種綠燈：中止鈕的行為在「有東西可跑」的前提下才有意義。
+FIXTURE_RECIPE = (Path(__file__).resolve().parent
+                  / "fixtures" / "recipes" / "die_to_die_basic.json")
+
 
 def _import_qt(g):
     from PySide6.QtGui import QKeySequence
@@ -261,7 +270,7 @@ def test_stop_only_shows_while_something_is_running(window, tmp_path):
     assert window.stop_available() is False
     out = generate(str(tmp_path / "lot"), n=6, seed=1)
     window.load_dataset_path(out["klarf"], sync=True)
-    window.load_template()
+    assert window.load_recipe_path(str(FIXTURE_RECIPE), sync=True) is True
     assert window.run_trial(n=6, sync=True) is True
     assert window.stop_available() is False, "同步跑完之後不該還留著中止鈕"
     assert window.stop_run() is False
@@ -274,7 +283,7 @@ def test_the_stop_button_is_there_while_a_real_run_is_in_flight(window, tmp_path
 
     out = generate(str(tmp_path / "lot3"), n=40, seed=5)
     window.load_dataset_path(out["klarf"], sync=True)
-    window.load_template()
+    assert window.load_recipe_path(str(FIXTURE_RECIPE), sync=True) is True
     assert window.run_trial(n=40, sync=False) is True
     try:
         assert window.stop_available() is True
@@ -292,7 +301,7 @@ def test_stopping_keeps_what_already_finished(window, tmp_path):
 
     out = generate(str(tmp_path / "lot2"), n=8, seed=2)
     window.load_dataset_path(out["klarf"], sync=True)
-    window.load_template()
+    assert window.load_recipe_path(str(FIXTURE_RECIPE), sync=True) is True
     window._trial_t0 = 0.0
     # 直接模擬「跑到一半被按停」：worker 中止後仍會把部分結果送出來
     window.trial_worker.abort()

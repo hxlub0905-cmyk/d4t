@@ -50,6 +50,14 @@ from typing import List, Optional, Tuple
 #: 同時解決了兩個問題：整個檔案仍然是合法的 Python，而分隔行不會被誤認。
 BUNDLE_DIR = "bundle"
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import make_filelist                       # noqa: E402  （tools/ 裡的同伴）
+
+#: 不進包的目錄 —— **跟 FILELIST 用同一份定義**（`make_filelist.EXCLUDE_DIRS`）。
+#: 兩邊分家的下場是：清單說有這個檔案、包裡沒有，於是公司機解完包之後
+#: `check_files.py` 永遠報「還缺幾個」而那幾個永遠補不進來。
+EXCLUDE_DIRS = make_filelist.EXCLUDE_DIRS
+
 SENTINEL = "# ==== ADEPT-BUNDLE-DATA ==== 以下是資料，不要編輯 ===="
 
 #: 解包程式（放在產出檔案的最前面）。它自己也是這份 bundle 的一部分，
@@ -245,9 +253,10 @@ def collect(root: str = "") -> List[Tuple[str, bytes]]:
                          stdout=subprocess.PIPE).stdout.decode("utf-8")
     items = []
     for rel in sorted(p for p in out.split("\n") if p.strip()):
-        if rel.startswith(BUNDLE_DIR + "/"):
-            # 產出物自己不進包裡 —— 不然每打一次包，repo 就多一份上一次的包，
-            # 而且是指數成長。
+        if any(rel.startswith(d + "/") for d in EXCLUDE_DIRS):
+            # `bundle/`：產出物自己不進包裡 —— 不然每打一次包，repo 就多一份
+            # 上一次的包，而且是指數成長。
+            # `docs/history/`：封存的開發史，公司機用不到而且只增不減。
             continue
         with open(os.path.join(root, rel.replace("/", os.sep)), "rb") as f:
             data = f.read()

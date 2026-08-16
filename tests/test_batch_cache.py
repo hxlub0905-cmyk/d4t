@@ -76,7 +76,7 @@ def ds(synlot):
 
 
 def make_recipe(snr_threshold: float = 200.0, search_radius: int = 8) -> Recipe:
-    """die-to-die 節點組（同 examples/recipes/die_to_die_basic.json）。"""
+    """die-to-die 節點組（同 tests/fixtures/recipes/die_to_die_basic.json）。"""
     nodes = {
         "load": RecipeNode("load", "load_patch", {}),
         # 一張卡一條流（F7-18）：ref 先做（借 test 還沒被拉伸的範圍），test 再做。

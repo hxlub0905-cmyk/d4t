@@ -110,10 +110,31 @@ def test_rows_are_one_line_tall_without_hints(window, qapp):
 # --------------------------------------------------------------------------- #
 # 2. 沒有資料時，最大的那一塊要說得出下一步
 # --------------------------------------------------------------------------- #
-def test_the_empty_panel_offers_the_two_things_you_can_do(window):
+def test_the_empty_panel_offers_what_you_can_actually_do(window):
+    """沒有資料時，最大的那一塊要說得出下一步 —— **而且只說得出真的做得到的**。
+
+    這條以前叫「the two things you can do」，第二件是「用範例資料試一次」。
+    範例 recipe 2026-08-16 全部拿掉之後那顆鈕收起來了
+    （``scope.SHOW_SAMPLE_ENTRIES``），所以現在只剩一條路 —— 而畫面上那句話
+    也不能再提它。鈕本身還在（只是隱形），光看 ``.text()`` 看不出差別。
+
+    問的是 ``isHidden()`` 不是 ``isVisible()``：視窗還沒 ``show()`` 的時候
+    **每一個 widget 的 ``isVisible()`` 都是 False**（CLAUDE.md §7 那一列），
+    拿它問「這顆藏起來了嗎」在建構期永遠答「是」。``isHidden()`` 問的是
+    「有沒有被明確藏起來」，那正是這裡要知道的事。
+    """
+    from adept.ui import scope
+
     assert window.image_stack.currentIndex() == 0
     assert window.btn_empty_open.text() == "Open KLARF…"
-    assert "sample data" in window.btn_empty_sample.text()
+    assert window.btn_empty_open.isHidden() is False
+
+    if scope.SHOW_SAMPLE_ENTRIES:
+        assert "sample data" in window.btn_empty_sample.text()
+        assert window.btn_empty_sample.isHidden() is False
+    else:
+        assert window.btn_empty_sample.isHidden() is True
+        assert "sample data" not in window.empty_state_hint.text()
 
 
 def test_the_images_come_back_once_data_is_loaded(window, tmp_path):
