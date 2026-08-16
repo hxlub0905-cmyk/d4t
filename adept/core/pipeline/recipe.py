@@ -756,7 +756,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     """lint 式驗證：收集**所有**問題後一次回傳（不會 raise）。
 
     檢查項（code）：unknown-step / bad-param / not-configured / unknown-node /
-    unknown-route / no-input / no-upstream / cycle / missing-image /
+    unknown-route / no-input / no-upstream / merge-into-one-port / cycle /
+    missing-image /
     unknown-region / requires-ref / no-decision（warning）/
     unknown-feature（warning）/ feature-collision（warning）。
     """
@@ -838,6 +839,32 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
         pair = edge_pair(e)
         if pair is not None:
             fed.add(pair[1])
+
+    # 兩條線接到同一個入口 = **只有一條算數**，另一條那半邊的特徵整批不見。
+    # 實測：l→a、l→b、a→end、b→end 這個合流跑得完、有數字，而 a 那條分支量出來
+    # 的 feat_a **完全不在結果裡** —— 沒有錯誤訊息，分數式子指到它才會爆。
+    # 真正的「合流卡」要能表達的話，它會宣告兩個**不同名**的輸入埠（a / b），
+    # 所以這一條擋不到它。
+    into: Dict[Tuple[str, str], List[str]] = {}
+    for e in recipe.edges:
+        e = list(e)
+        if len(e) == 4:
+            key = (str(e[2]), str(e[3]))
+        elif len(e) == 2:
+            key = (str(e[1]), "")          # 兩段式一律落在預設的狀態入口
+        else:
+            continue
+        into.setdefault(key, []).append(str(e[0]))
+    for (dst, port), srcs in sorted(into.items()):
+        if len(srcs) < 2 or dst not in recipe.nodes:
+            continue
+        issues.append(Issue(
+            code="merge-into-one-port", level="error", node_id=dst,
+            title=f"Two wires arrive at the same input of '{dst}'",
+            detail=(f"{sorted(srcs)} all feed the same input, but only one of "
+                    f"them is used - everything the other branch measured is "
+                    f"dropped, with no error at run time. Keep one wire, or "
+                    f"put the two branches into different cards.")))
 
     for k in kinds:
         route = routes[k]

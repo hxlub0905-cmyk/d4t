@@ -1567,6 +1567,40 @@ class StudioWindow(QMainWindow):
             return ""
         return str(writes[0]) if writes else ""
 
+    def _replace_feed(self, src: str, dst: str) -> str:
+        """``dst`` 已經有人餵的話把那一條拿掉（回傳被換掉的來源，沒有就空字串）。
+
+        狀態入口只能有一條線 —— 見 :meth:`_on_edge_added` 的說明。
+        """
+        src, dst = str(src), str(dst)
+        self.model.materialise_backbone()
+        old = [a for a, b in self.model.edges if b == dst and a != src]
+        if not old:
+            return ""
+        for a in old:
+            self.model.remove_edge(a, dst)
+        return ", ".join(old)
+
+    def _real_stream(self, src: str, stream: str) -> str:
+        """``src`` 這張卡真的吐得出 ``stream`` 這條影像流嗎（不是就回空字串）。
+
+        Region 卡（``roi_cross``）不寫任何影像流，所以它的輸出埠是那個佔位的
+        ``out``。從那顆埠拉一條線到量測卡上，以前會把量測卡的 ``source`` 設成
+        ``"out"`` —— 一條**沒有人產出**的流。狀態列還說「now works on out」，
+        而那份 recipe 跑起來每一顆都失敗（`image stream 'out' does not exist`）。
+
+        線本身是有意義的（「先定位、再量」是真的先後關係），錯的只有「順手把
+        那張卡改成做 out」。所以這裡只擋改參數那一半。
+        """
+        node = self.model.nodes.get(str(src))
+        if node is None or not stream:
+            return ""
+        try:
+            writes = list(get_step(node.step).resolve_writes(node.params))
+        except Exception:                      # noqa: BLE001 — 認不得就不猜
+            return ""
+        return str(stream) if str(stream) in writes else ""
+
     def _point_at_stream(self, node_id: str, stream: str,
                          accumulate: bool = False) -> str:
         """把 ``node_id`` 的輸入接上 ``stream``（回一句給狀態列的話）。
@@ -1695,6 +1729,23 @@ class StudioWindow(QMainWindow):
         你碰 ref。
         """
         src, dst, stream = str(src), str(dst), str(stream or "")
+        # **只有上游真的吐得出來的流才拿去改下游的參數**（F9 Phase 4b）。
+        # Region 卡的輸出埠是那個佔位的 ``out``，不是一條影像流 —— 見
+        # :meth:`_real_stream`。線本身照接（先後關係是真的），只是不改參數。
+        wrong = bool(stream) and not self._real_stream(src, stream)
+        if wrong:
+            stream = ""
+
+        # **狀態入口只能有一條線 —— 第二條是「我改變主意了」，不是合流。**
+        #
+        # 兩條線接到同一個入口的話，引擎只會用其中一條，另一條那半邊量出來的
+        # 東西整批不見（跑得完、有數字、而且是錯的；lint 的
+        # ``merge-into-one-port`` 講的就是這件事）。所以這裡當場把舊的那條換掉
+        # —— 沿用 F7-18 那條「同一對節點再拉一條要當成『我改變主意了』處理」。
+        # 換掉的那條要講出來，不然畫面上會有一條線無聲無息地消失。
+        # **換掉這件事要等線真的接起來之後才做** —— 會成環（或接進 Input 卡）
+        # 的那條線沒有落地，它不該留下任何痕跡，尤其不是「原本那條被剪掉了」。
+        replaced = ""
         # **Input 卡是一條 pipeline 的起點，沒有東西餵得了它**（F9 Phase 4a）。
         # 以前這條線拉得起來、存得下去、然後什麼都不會發生 —— 畫面上多一條
         # 指向起點的線，而那是一句假話。
@@ -1714,13 +1765,20 @@ class StudioWindow(QMainWindow):
             # 所以要真的多一條線出來，不是回一句 already connected。
             note = self._point_at_stream(dst, stream, accumulate=True)
             self._status(note.lstrip(" —").strip() if note else
-                         "%s → %s is already connected on %s."
-                         % (src, dst, stream or "that stream"))
+                         "%s → %s is already connected." % (src, dst))
         elif self.model.add_edge(src, dst):
             # 影像流在**線真的接起來之後**才改。會成環的那條線沒有落地，
             # 它不該留下任何痕跡 —— 尤其不是「那張卡安靜地改成做 ref 了」。
-            self._status("Connected %s → %s%s"
-                         % (src, dst, self._point_at_stream(dst, stream)))
+            replaced = self._replace_feed(src, dst)
+            note = self._point_at_stream(dst, stream)
+            if replaced:
+                note = "%s (it no longer comes from “%s”)" % (note, replaced)
+            if wrong:
+                # 講清楚接起來了、但那張卡看的還是原來那條流 —— 不然使用者會
+                # 以為他已經把它改成做別的東西了。
+                note = (" — “%s” produces no image stream, so “%s” still works "
+                        "on the same one as before." % (src, dst))
+            self._status("Connected %s → %s%s" % (src, dst, note))
         else:
             self._status("Cannot connect %s → %s — that would make the "
                          "pipeline loop back on itself." % (src, dst), "error")

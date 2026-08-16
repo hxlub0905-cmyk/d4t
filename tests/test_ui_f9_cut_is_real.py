@@ -107,12 +107,33 @@ def test_drawing_one_wire_does_not_orphan_everything_else(window):
     全部變成孤兒，而使用者只是拉了一條線。"""
     before = set(_backbone(window))
     window._on_edge_added("load", "sub", "test")
-
     after = set(_backbone(window))
-    assert before <= after, sorted(before - after)
+
+    # 只有「sub 原本從誰來」那一條該變（見下一支測試）；其餘一條都不能掉
+    gone = {e for e in before - after if e[1] != "sub"}
+    assert not gone, sorted(gone)
+    assert ("load", "sub") in after
     errs = [i for i in window.model.validate()
             if i.level == "error" and i.code == "no-upstream"]
     assert not errs, [(i.node_id, i.detail) for i in errs]
+
+
+def test_a_second_wire_into_one_input_replaces_the_first(window):
+    """狀態入口只能有一條線 —— 第二條是「我改變主意了」，不是合流。
+
+    兩條都留著的話引擎只用其中一條，另一條那半邊量出來的東西整批不見：
+    跑得完、有數字、而且是錯的。所以拉的當下就換掉，而且**要講出換掉了誰** ——
+    不然畫面上會有一條線無聲無息地消失。
+    """
+    assert ("cross", "sub") in _backbone(window)
+    window._on_edge_added("load", "sub", "test")
+
+    fed = [a for a, b in _backbone(window) if b == "sub"]
+    assert fed == ["load"], fed
+    assert "no longer comes from" in window.status_text()
+    # 而且不會留下「兩條線接到同一個入口」那個 lint
+    assert not [i for i in window.model.validate()
+                if i.code == "merge-into-one-port"]
 
 
 # --------------------------------------------------------------------------- #
