@@ -83,9 +83,14 @@ def _click_scene(view, scene_pos):
 
 
 def _wired_pair(window, step_key="denoise"):
-    """接一張卡出來，回 ``(上游 id, 下游 id, 那條實線)``。"""
+    """接一張卡出來，回 ``(上游 id, 下游 id, 那條實線)``。
+
+    F9-7 起加卡**不會自己接線**（線都留給使用者拉），所以這裡要自己拉一條 ——
+    這一支要驗的是「線上的 × 按不按得到」，得先有一條線。
+    """
     src = window.model.node_order[0]
     nid = window.add_card_after(src, step_key)
+    window._on_edge_added(src, nid, "test")
     assert window.model.has_edge(src, nid) is True
     edge = next(e for e in window.pipeline._edges
                 if e.pair() == (src, nid))

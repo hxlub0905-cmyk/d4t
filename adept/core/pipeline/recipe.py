@@ -565,8 +565,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
 
     檢查項（code）：unknown-step / bad-param / not-configured / unknown-node /
     unknown-route / cycle / missing-image / unknown-region / requires-ref /
-    score-expr / unknown-feature（warning）/ feature-collision（warning）/
-    bad-bins。
+    ambiguous-input / score-expr / unknown-feature（warning）/
+    feature-collision（warning）/ bad-bins。
     """
     if registry is None:
         registry = REGISTRY
@@ -624,6 +624,42 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             issues.append(Issue(
                 code="not-configured", level="error", node_id=nid,
                 title=f"{step_cls.label} is not set up yet", detail=str(msg)))
+
+    # ---- 一個輸入埠只能有一條線（F9-7）----
+    # 引擎查資料從哪來的 key 是 ``(下游節點, 流名)``，所以兩條線落在同一個 key
+    # 上時只有一條算數 —— 而**贏的是 ``edges`` 裡排在後面的那條**，那個順序在
+    # 畫布上完全看不出來。跑得完、有數字、而且其中一條使用者畫的線是裝飾。
+    # 典型踩法：舊版 Studio 加卡時會自動接一條線，使用者接著自己拉一條進同一
+    # 張卡，於是同一個輸入有兩個來源。
+    seen_inputs: Dict[Tuple[str, str], str] = {}
+    for e in recipe.edges:
+        if not (e.src_out and e.dst_in):
+            continue                            # 沒填埠的線只表達先後順序
+        node = recipe.nodes.get(e.dst)
+        step_cls = registry.get(node.step) if node is not None else None
+        if step_cls is None:
+            continue
+        ptype = {str(p["name"]): str(p["type"])
+                 for p in step_cls.describe()["params"]}.get(e.dst_in, "")
+        if ptype == "image_keys":
+            local = e.src_out
+        elif ptype == "image_key":
+            local = str(clean_params.get(e.dst, {}).get(e.dst_in, "") or "")
+        else:
+            continue
+        if not local:
+            continue
+        prev = seen_inputs.get((e.dst, local))
+        if prev is not None and prev != e.src:
+            issues.append(Issue(
+                code="ambiguous-input", level="error", node_id=e.dst,
+                title=f"step '{e.dst}' has two lines into the same input",
+                detail=(f"both '{prev}' and '{e.src}' feed '{local}' into "
+                        f"'{e.dst}'. Only one of them is used (the later one "
+                        f"wins), so the other line does nothing. Delete the "
+                        f"line you do not want.")))
+        else:
+            seen_inputs[(e.dst, local)] = e.src
 
     # ---- score 表達式解析 ----
     expr = None

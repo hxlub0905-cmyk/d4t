@@ -209,7 +209,8 @@ def test_dragging_from_the_ref_port_wires_ref_into_the_card(window):
     ``test_ui_f7_19_wiring.py``。
     """
     src = window.model.node_order[0]
-    nid = window.add_card_after(src, "denoise", "test")
+    nid = window.add_card_after(src, "denoise")
+    window._on_edge_added(src, nid, "test")
     assert window.model.nodes[nid].params["streams"] == "test"
 
     # 從 Input 的第二個輸出埠（ref）拉一條線過去
@@ -228,7 +229,8 @@ def test_a_second_line_between_the_same_two_cards_is_not_refused(window):
     變的是那個反應是什麼：F7-18 是取代，F7-19 起是累加（兩條都做）。
     """
     src = window.model.node_order[0]
-    nid = window.add_card_after(src, "tone", "test")
+    nid = window.add_card_after(src, "tone")
+    window._on_edge_added(src, nid, "test")
     window.pipeline.link_to(src, nid, port=0)
     assert window.model.has_edge(src, nid) is True
 
@@ -241,8 +243,10 @@ def test_a_line_that_would_loop_leaves_no_trace(window):
     """會成環的那條線沒有落地 —— 它不該留下任何痕跡，尤其不是「那張卡安靜地
     改成做 ref 了」。"""
     src = window.model.node_order[0]
-    first = window.add_card_after(src, "denoise", "test")
-    second = window.add_card_after(first, "tone", "ref")   # 它的輸出埠是 ref
+    first = window.add_card_after(src, "denoise")
+    window._on_edge_added(src, first, "test")
+    second = window.add_card_after(first, "tone")   # 它的輸出埠是 ref
+    window._on_edge_added(first, second, "ref")
     assert (first, second) in window.model.edge_pairs()
 
     window.pipeline.link_to(second, first, port=0)   # 反過來拉：會成環
@@ -255,26 +259,37 @@ def test_a_line_that_would_loop_leaves_no_trace(window):
 def test_wiring_a_card_with_no_stream_parameter_changes_nothing(window):
     """Compare 卡有自己的 a / b 兩個輸入，連線不該亂改它們。"""
     src = window.model.node_order[0]
-    a = window.add_card_after(src, "align", "test")
+    a = window.add_card_after(src, "align")
+    window._on_edge_added(src, a, "test")
     sub = window.add_card_after(a, "subtract")
     before = dict(window.model.nodes[sub].params)
     window.pipeline.link_to(src, sub, port=1)
     assert window.model.nodes[sub].params == before
 
 
-def test_adding_from_the_library_follows_the_selected_card(window):
-    """「+」拿掉之後，卡片庫要接得下它的工作：接在選著的那張後面、同一條流。"""
+def test_adding_from_the_library_lands_after_the_selected_card(window):
+    """卡片庫加的卡排在選著的那張後面，**但線不會自己出現**（F9-7）。
+
+    F7-18 時這裡連流也一起跟著（「接在做 ref 的卡後面就也做 ref」）。
+    2026-08-16 使用者退掉了那件事 —— 自動接的線與他自己拉的線會落在同一個
+    輸入埠，而只有一條算數。現在流是**拉線**決定的，加卡只決定順序。
+    """
     src = window.model.node_order[0]
-    on_ref = window.add_card_after(src, "denoise", "ref")
+    on_ref = window.add_card_after(src, "denoise")
+    window._on_edge_added(src, on_ref, "ref")
     window.select_node(on_ref)
 
     window._on_add_requested("tone")
     nid = window.selected_node
     assert nid != on_ref
-    assert window.model.nodes[nid].params["streams"] == "ref"
     order = window.model.node_order
     assert order.index(on_ref) < order.index(nid)
-    assert (on_ref, nid) in window.model.edge_pairs()
+    assert (on_ref, nid) not in window.model.edge_pairs(), \
+        "加卡自己接了一條線 —— 線要留給使用者拉"
+
+    # 拉過去之後才做在 ref 上，而且輸出埠也跟著是 ref（同進同出）
+    window._on_edge_added(on_ref, nid, "ref")
+    assert window.model.nodes[nid].params["streams"] == "ref"
 
 
 # --------------------------------------------------------------------------- #

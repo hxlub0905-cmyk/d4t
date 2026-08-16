@@ -1541,7 +1541,7 @@ class StudioWindow(QMainWindow):
                         self.ground_truth)
         if not g or not g.get("n_evaluated"):
             return ""
-        return ("正確率 %.0f%%  漏抓 %d  誤殺 %d"
+        return ("accuracy %.0f%%  missed %d  false alarms %d"
                 % (100.0 * float(g.get("accuracy") or 0.0),
                    int(g.get("fn") or 0), int(g.get("fp") or 0)))
 
@@ -1580,14 +1580,12 @@ class StudioWindow(QMainWindow):
             self.show_score_page()
             self._status("Editing the score / threshold")
             return
-        # 選著一張卡的時候，新的卡接在它後面、做在**它那條流**上（F7-18）。
-        # 埠上的「+」被拿掉了（永遠掛在那裡太吵，使用者要的是從旁邊的卡片庫加），
-        # 但它做對的那兩件事要留著：接上線，而且接在對的那條流上。
-        # 加完就選取新卡 —— 所以連按三張卡片會長成一條鏈，順序就是按下去的順序。
+        # 選著一張卡的時候，新的卡排在它後面 —— 但**線不會自己出現**
+        # （2026-08-16，使用者：「新增卡 不要自己接線（線都給 user 接）」）。
+        # 加完就選取新卡 —— 所以連按三張卡片會長成一排，順序就是按下去的順序。
         after = self.selected_node if self.selected_node in self.model.nodes else None
         if after is not None:
-            self.add_card_after(after, str(step_key),
-                                self._primary_stream_of(after))
+            self.add_card_after(after, str(step_key))
             return
         try:
             node_id = self.model.add_step(str(step_key))
@@ -1598,33 +1596,35 @@ class StudioWindow(QMainWindow):
         self._status("Added “%s”%s" % (node_id, self._unmet_needs(node_id)))
         self.select_node(node_id)
 
-    def add_card_after(self, node_id: str, step_key: str,
-                       stream: str = "") -> Optional[str]:
-        """把 ``step_key`` 接在 ``node_id`` 後面（順序 + 一條顯式連線）。
+    def add_card_after(self, node_id: str, step_key: str) -> Optional[str]:
+        """把 ``step_key`` 排在 ``node_id`` 後面。**不接線**。
 
-        ``stream`` 是新卡要做在哪一條影像流上。**這件事必須傳下去**：接在一張
-        做 ref 的卡後面，結果新卡預設做在 test 上，使用者就得回控制列改參數 ——
-        而那正是他說「變很複雜」的東西。
+        為什麼不接（2026-08-16 使用者定調：「新增卡 不要自己接線，線都給 user 接」）
+        ------------------------------------------------------------------------
+        以前這裡會順手做兩件事：接一條 ``node_id → 新卡`` 的實線，並且把新卡的
+        來源改成前一張卡那條流。立意是「少按一次」，但它製造的是一種**看不見的
+        第二個作者** —— 使用者接著自己拉一條線過來，畫面上就有兩條線進同一個
+        輸入埠，而其中一條他從來沒畫過。兩條線落在同一個參數上時只有一條算數
+        （見 ``_conflicting_edges``），於是「我明明接了 Denoise，怎麼跑出來像沒接」。
+
+        線由使用者拉，這件事就沒有第二個作者。**順序**仍然照放（新卡排在選取
+        那張後面）—— 那是「我要在這之後做這件事」，跟資料從哪來是兩回事。
         """
         nid = str(node_id)
         if nid not in self.model.nodes:
             return None
         at = self.model.node_order.index(nid) + 1
-        # 使用者做的是**一個**動作（加一張卡），所以復原也該是一步 —— 底下是
-        # add_step + set_param + add_edge 三個 model 動作（F7-22）。
+        # 使用者做的是**一個**動作（加一張卡），所以復原也該是一步（F7-22）。
         with self.model.compound("add-card"):
             try:
                 new_id = self.model.add_step(str(step_key), at=at)
             except (KeyError, ParamError) as e:
                 self._status("Could not add card: %s" % e, "error")
                 return None
-            note = self._point_at_stream(new_id, str(stream)) if stream else ""
-            # 顯式連線：使用者的動作是「接在這張後面」，那條線就該是實線。
-            # （route 相鄰本來就會產生一條虛線，但它表達的是順序，不是這個意圖。）
-            self.model.add_edge(nid, new_id)
             self._autofill_roi_mask(new_id)
-        self._status("Added “%s” after “%s”%s%s"
-                     % (new_id, nid, note, self._unmet_needs(new_id)))
+        self._status("Added “%s” after “%s” — drag a line into it to say which "
+                     "image stream it works on.%s"
+                     % (new_id, nid, self._unmet_needs(new_id)))
         self.select_node(new_id)
         return new_id
 
@@ -1794,6 +1794,43 @@ class StudioWindow(QMainWindow):
         return (" — but it still needs the image stream %s, or point it at one "
                 "of: %s." % (", ".join(bits), ", ".join(sorted(have)) or "(none)"))
 
+    def _drop_conflicting_edges(self, src: str, dst: str, stream: str,
+                                param: str) -> str:
+        """拿掉「跟這條新線搶同一個輸入」的舊線；回一句給狀態列的話。
+
+        什麼叫搶同一個輸入
+        ------------------
+        引擎是用 ``(下游節點, 流名)`` 去查資料從哪來的（``_explicit_bindings``），
+        所以同一個 key 只能有一個來源。兩條線落在同一個 key 上時，**dict 後寫
+        的贏** —— 也就是「``recipe.edges`` 裡排在後面的那條」，而那個順序在畫布
+        上完全看不出來。
+
+        - ``image_key``（``subtract`` 的 ``a``／量測卡的 ``source``）：一個參數
+          就是一個角色，同一個參數上的舊線一律讓位。
+        - ``image_keys``（Enhance 卡的 ``streams``，可以同時做好幾條）：只有
+          **同一條流名**才算搶 —— 一條給 test、一條給 ref 是兩個 key，本來就
+          該並存。
+        """
+        node = self.model.nodes.get(str(dst))
+        if node is None or not param:
+            return ""
+        try:
+            spec = {p.name: p for p in get_step(node.step).params}.get(param)
+        except KeyError:                       # pragma: no cover
+            return ""
+        if spec is None:
+            return ""
+        losers = [e for e in list(self.model.edges)
+                  if e.dst == str(dst) and e.src != str(src)
+                  and e.dst_in == param
+                  and (spec.type == "image_key" or e.src_out == str(stream))]
+        for e in losers:
+            self.model.remove_edge(e.src, e.dst)
+        if not losers:
+            return ""
+        return (" (replacing the line from %s)"
+                % ", ".join(sorted({e.src for e in losers})))
+
     def _on_node_toggled(self, node_id: str, enabled: bool) -> None:
         self.model.set_enabled(str(node_id), bool(enabled))
 
@@ -1815,8 +1852,17 @@ class StudioWindow(QMainWindow):
         是很正常的操作（「我改變主意了，這張卡要做在 ref 上」），而以前它只會
         得到一句「already connected」然後什麼都沒發生 —— 看起來就像畫布不准
         你碰 ref。
+
+        **拉一條線 = 一步復原**（F9-7）。在 model 上它其實是三、四個動作
+        （add_edge → set_param → set_edge_ports →（有時）拿掉搶同一個輸入的
+        舊線），各記一步的話按一次 Ctrl+Z 會停在「線還在但埠沒了」這種中間
+        狀態 —— 使用者從來沒有做出過那個畫面。
         """
         src, dst, stream = str(src), str(dst), str(stream or "")
+        with self.model.compound("connect"):
+            self._connect(src, dst, stream)
+
+    def _connect(self, src: str, dst: str, stream: str) -> None:
         if self.model.has_edge(src, dst):
             # 同一對節點再拉一條 —— 對 image_keys 的卡這是「這條也接上」，
             # 所以要真的多一條線出來，不是回一句 already connected。
@@ -1836,7 +1882,13 @@ class StudioWindow(QMainWindow):
             # 哪個參數）。順序不能顛倒 —— ``dst_in`` 是上一行才知道的。
             self.model.set_edge_ports(src, dst, src_out=stream,
                                       dst_in=self._bound_param)
-            self._status("Connected %s → %s%s" % (src, dst, note))
+            # **一個輸入埠只能有一條線**：新的這條贏，舊的那條拿掉（F9-7）。
+            # 留著兩條的話引擎只會照其中一條送資料（``recipe.validate`` 會報
+            # ambiguous-input），而畫面上看不出是哪一條 —— 使用者剛拉的那一條
+            # 有可能根本不算數。
+            dropped = self._drop_conflicting_edges(src, dst, stream,
+                                                   self._bound_param)
+            self._status("Connected %s → %s%s%s" % (src, dst, note, dropped))
         else:
             self._status("Cannot connect %s → %s — that would make the "
                          "pipeline loop back on itself." % (src, dst), "error")

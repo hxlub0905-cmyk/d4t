@@ -312,8 +312,10 @@ def test_each_image_source_gets_its_own_card(window):
     兩條各自的處理鏈。
     """
     src = window.model.node_order[0]
-    on_test = window.add_card_after(src, "normalize", "test")
-    on_ref = window.add_card_after(src, "normalize", "ref")
+    on_test = window.add_card_after(src, "normalize")
+    window._on_edge_added(src, on_test, "test")
+    on_ref = window.add_card_after(src, "normalize")
+    window._on_edge_added(src, on_ref, "ref")
     assert window.model.nodes[on_test].params["streams"] == "test"
     assert window.model.nodes[on_ref].params["streams"] == "ref"
     for nid in (on_test, on_ref):

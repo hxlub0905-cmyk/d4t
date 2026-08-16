@@ -131,10 +131,12 @@ def test_threshold_drag_is_still_the_pure_rescore_path(window):
     assert window.model.threshold == pytest.approx(before), \
         "拖曳中絕對不可以動到 model —— 那會觸發重跑"
     live = window.histogram.bin_summary_text()
-    assert live == "   ".join(
+    # 前綴比對：合成資料旁邊有 ground_truth.json，同一行後面還會接一段準確率
+    # （Phase 1）。這一條要驗的是 bin 數跟著門檻走，不是那一行長什麼樣子。
+    assert live.startswith("   ".join(
         "bin %s=%s" % (k, v)
         for k, v in sorted(vm_mod.rebin(window.trial_scores, 77.25,
-                                        window.model.bins).items()))
+                                        window.model.bins).items())))
 
     window._on_threshold_committed(55.0)
     assert window.model.threshold == pytest.approx(55.0)

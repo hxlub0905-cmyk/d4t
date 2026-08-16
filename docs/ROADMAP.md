@@ -32,6 +32,8 @@
 |---|---|---|
 | recipe JSON round-trip 必須是 identity | ✅ 2026-08-16 | 一道遷移靠「參數缺席」判斷，害 `workers=1` 與 `workers=2` 算出不同分數（glv_max 50 vs 43）。已移除並鎖上迴歸測試 `test_a_json_round_trip_changes_nothing` |
 | 遷移的鐵則寫進程式碼 | ✅ 2026-08-16 | 只能靠「舊東西在不在」判斷，不能靠「新東西不在」。見 `recipe.py::from_json_dict` 的註解 |
+| 準確率接進調參迴圈 | ✅ 2026-08-16 | CLI `run --ground-truth` 印正確率／抓漏／誤殺；Studio 載資料時自動撿 KLARF 旁邊的 `ground_truth.json`，拖門檻即時重算（只重分 bin，不重跑影像）|
+| 畫布上的線只有一個作者 | ✅ 2026-08-16 | 加卡不再自動接線；同一個輸入埠上兩條線由 UI 換線 + lint `ambiguous-input` 擋住（F9-7）|
 | KLARF 變體（廠內假設 #3） | ⬜ | 唯一還沒結案的廠內假設，見 [`FAB-VALIDATION.md`](FAB-VALIDATION.md) |
 | 卡片的數值行為逐張過一次 | ⬜ | 每張卡「參數推到極端會怎樣」目前靠 `validate_params` 擋範圍，但沒有系統性地驗過輸出 |
 
@@ -41,7 +43,7 @@ engine 收斂之後才有意義（現在做等於對著會變的東西寫說明�
 
 | 項目 | 說明 |
 |---|---|
-| ground truth 標注 + 混淆矩陣 | 報表已經算得出抓漏率／誤殺率，但要人另外餵一份 CSV。而「分類準確度」是這個工具的 KPI —— 現在沒有量化它的介面 |
+| ground truth **標注介面** | 讀答案卷與即時準確率已經在（Phase 1），缺的是**在 Studio 裡標**：現在還是要人另外準備一份 JSON／CSV |
 | 存檔 recipe 做回來 | 連同版本與相容策略一起想（見上面「現在的定位」） |
 | 範例 recipe 庫 | 使用者的原話是「等 APP 完成再給範例」。回來時把 `SHOW_SAMPLE_ENTRIES` 打開 |
 | 使用者手冊 | 目前所有文件都是寫給開發者的。目標使用者是不寫 code 的製程／設備工程師 |
