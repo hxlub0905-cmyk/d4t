@@ -22,6 +22,7 @@ from .step import (
 from .expression import Expression, ExpressionError, parse_expression
 from .recipe import (
     Issue,
+    Edge,
     Recipe,
     RecipeError,
     RecipeNode,
@@ -49,7 +50,7 @@ __all__ = [
     "register_step", "get_step", "list_steps", "REGISTRY",
     "CATEGORY_IMAGE", "CATEGORY_ALGO", "CATEGORY_ADC",
     # recipe
-    "Recipe", "RecipeNode", "ScoreSpec", "Issue",
+    "Edge", "Recipe", "RecipeNode", "ScoreSpec", "Issue",
     "validate", "execution_order", "RecipeError",
     # expression
     "parse_expression", "Expression", "ExpressionError",

@@ -10,6 +10,7 @@ import json
 import pytest
 
 from adept.core.pipeline import (
+    Edge,
     CATEGORY_ALGO,
     CATEGORY_IMAGE,
     ParamSpec,
@@ -117,7 +118,7 @@ def codes(issues):
 # JSON serde
 # ---------------------------------------------------------------------------
 def test_json_round_trip_dict():
-    r = make_recipe(edges=[["load", "snr"]])
+    r = make_recipe(edges=[Edge("load", "snr")])
     d = r.to_json_dict()
     r2 = Recipe.from_json_dict(d)
     assert r2 == r
@@ -193,6 +194,63 @@ def test_a_subtract_without_an_explicit_b_keeps_the_card_default():
 
 
 # ---------------------------------------------------------------------------
+# Edge —— 線帶埠（F9-1）
+# ---------------------------------------------------------------------------
+def test_an_old_two_item_edge_still_loads():
+    """F9 之前的 ``[src, dst]`` 要讀得進來，埠留空 = 還沒指定。
+
+    判斷依據是「**長度就是 2**」—— 舊東西**在**，不是新東西不在（鐵則 9）。
+    """
+    d = {
+        "recipe_id": "old_edges",
+        "routes": {"ebi_patch": ["load", "sub", "snr"]},
+        "nodes": {"load": {"step": "t_load_pair"}, "sub": {"step": "t_subtract"},
+                  "snr": {"step": "t_snr"}},
+        "edges": [["load", "snr"]],
+        "score": {"expr": "1", "threshold": 0.5, "bins": {"below": 0, "above": 1}},
+    }
+    r = Recipe.from_json_dict(d)
+    assert r.edges == [Edge(src="load", dst="snr", src_out="", dst_in="")]
+    # 讀進來之後寫出去就是新格式，而**執行順序沒有變**
+    assert r.to_json_dict()["edges"] == [["load", "", "snr", ""]]
+    assert execution_order(r, "ebi_patch") == ["load", "sub", "snr"]
+
+
+def test_an_edge_with_ports_round_trips():
+    r = make_recipe(edges=[Edge("load", "sub", src_out="ref", dst_in="b")])
+    d = r.to_json_dict()
+    assert d["edges"] == [["load", "ref", "sub", "b"]]
+    assert Recipe.from_json_dict(d) == r
+    assert Recipe.from_json_dict(d).to_json_dict() == d
+
+
+def test_an_edge_of_the_wrong_shape_is_refused_loudly():
+    """三個欄位的邊沒有意義 —— 與其猜，不如當場講出格式。"""
+    for bad in ([["a"]], [["a", "b", "c"]], [["a", "b", "c", "d", "e"]]):
+        d = {
+            "recipe_id": "bad_edge",
+            "routes": {"ebi_patch": ["load"]},
+            "nodes": {"load": {"step": "t_load_pair"}},
+            "edges": bad,
+            "score": {"expr": "1", "threshold": 0.5, "bins": {"below": 0, "above": 1}},
+        }
+        with pytest.raises(RecipeError):
+            Recipe.from_json_dict(d)
+
+
+def test_ports_do_not_change_the_execution_order_yet():
+    """F9-1 換的是**形狀**不是語意：埠填了什麼都不影響誰先跑。
+
+    這條是 F9-1 的驗收條件本身 —— 這一段如果動到執行順序，
+    ``tools/freeze_golden.py --check`` 就會整批不同，而那才是真正的災難
+    （跑得動、但答案悄悄變了）。埠要到 F9-2 才開始有作用。
+    """
+    plain = make_recipe(edges=[Edge("load", "snr")])
+    ported = make_recipe(edges=[Edge("load", "snr", src_out="ref", dst_in="b")])
+    assert execution_order(plain, "ebi_patch") == execution_order(ported, "ebi_patch")
+
+
+# ---------------------------------------------------------------------------
 # execution_order
 # ---------------------------------------------------------------------------
 def test_execution_order_chain():
@@ -202,18 +260,18 @@ def test_execution_order_chain():
 
 def test_execution_order_extra_edge_consistent():
     # 額外邊與鏈一致 → 順序不變
-    r = make_recipe(edges=[["load", "snr"]])
+    r = make_recipe(edges=[Edge("load", "snr")])
     assert execution_order(r, "ebi_patch") == ["load", "sub", "snr"]
 
 
 def test_execution_order_edge_outside_route_ignored():
     # 邊的端點不在該 route 內 → 不影響
-    r = make_recipe(edges=[["ghost", "snr"], ["load", "ghost"]])
+    r = make_recipe(edges=[Edge("ghost", "snr"), Edge("load", "ghost")])
     assert execution_order(r, "ebi_patch") == ["load", "sub", "snr"]
 
 
 def test_execution_order_cycle_raises():
-    r = make_recipe(edges=[["snr", "load"]])
+    r = make_recipe(edges=[Edge("snr", "load")])
     with pytest.raises(RecipeError):
         execution_order(r, "ebi_patch")
 
@@ -271,7 +329,7 @@ def test_validate_unknown_route_kind():
 
 
 def test_validate_cycle():
-    r = make_recipe(edges=[["snr", "load"]])
+    r = make_recipe(edges=[Edge("snr", "load")])
     issues = validate(r, registry=REG)
     assert "cycle" in codes(issues)
 

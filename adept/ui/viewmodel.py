@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from adept.core.pipeline import (
-    ParamError, Recipe, RecipeNode, ScoreSpec, get_step, validate,
+    Edge, ParamError, Recipe, RecipeNode, ScoreSpec, get_step, validate,
 )
 
 
@@ -377,7 +377,7 @@ class RecipeModel:
         return Recipe(
             recipe_id=self.recipe_id,
             routes={self.kind: list(self.node_order)},
-            edges=[list(e) for e in self.edges],
+            edges=[Edge(src=a, dst=b) for a, b in self.edges],
             nodes={nid: RecipeNode(id=nid, step=n.step, params=dict(n.params),
                                    enabled=n.enabled)
                    for nid, n in self.nodes.items()},
@@ -396,8 +396,10 @@ class RecipeModel:
         m.version = recipe.version
         m.node_order = list(recipe.routes.get(k, []))
         in_route = set(m.node_order)
-        m.edges = [(str(a), str(b)) for a, b in (recipe.edges or [])
-                   if str(a) in in_route and str(b) in in_route]
+        # F9-1：core 的邊帶埠了（``Edge``），UI 這一層還是「一對節點」——
+        # 埠要到 F9-5 才由畫布產生。轉換只在這個邊界做，UI 內部不必知道。
+        m.edges = [(e.src, e.dst) for e in (recipe.edges or [])
+                   if e.src in in_route and e.dst in in_route]
         m.nodes = {nid: RecipeNode(id=nid, step=n.step, params=dict(n.params),
                                    enabled=n.enabled)
                    for nid, n in recipe.nodes.items() if nid in set(m.node_order)}

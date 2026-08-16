@@ -171,7 +171,9 @@ def test_edges_reorder_execution_and_survive_a_save_load_round_trip(window, tmp_
     out.write_text(_json.dumps(window.model.to_recipe().to_json_dict(),
                                ensure_ascii=False), encoding="utf-8")
     loaded = Recipe.load(str(out))
-    assert [tuple(e) for e in loaded.edges] == edges
+    # F9-1：core 的邊是 ``Edge``（帶埠），UI 這一層還是「一對節點」——
+    # 轉換只在 viewmodel 的邊界做。這裡比的是**線接到哪兩張卡**。
+    assert [(e.src, e.dst) for e in loaded.edges] == edges
 
     assert window.load_recipe_path(str(out), sync=True) is True
     assert window.model.edges == edges

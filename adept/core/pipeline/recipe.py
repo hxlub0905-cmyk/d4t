@@ -12,14 +12,17 @@ Recipe JSON 形狀（見 docs/plans/F0-master-plan.md §3.4）：
                  "rsem":      ["load","golden","subtract","snr"]},
       "nodes": {"align": {"step": "align", "params": {"method": "phase"},
                           "enabled": true}},
-      "edges": [["subtract","snr"]],
+      "edges": [["subtract", "diff", "snr", "source"]],
       "score": {"expr": "snr_max * sqrt(blob_area)", "threshold": 3.0,
                 "bins": {"below": 0, "above": 1}}
     }
 
-- v1 每條 route 是線性鏈；``edges`` 是額外的 DAG 邊（v2 自由畫布備用）。
+- 每條 route 是線性鏈；``edges`` 是畫布上的線。
   執行順序 = route 相鄰對邊 ∪ edges（限制在該 route 內）的 Kahn 拓撲排序，
   平手時依 route 位置決定（deterministic）。
+- **邊帶埠**（F9-1，2026-08-16）：``[來源, 來源的輸出埠, 下游, 下游的輸入參數]``。
+  舊的兩欄位格式 ``["subtract","snr"]`` 照讀，埠留空。**執行順序目前不看埠** ——
+  F9-1 換的是資料形狀不是語意，見 ``docs/plans/F9-dag-streams.md``。
 - 驗證走 lint 模式（KLIP ``Issue`` 結構）：一次列出**所有**問題，
   不是碰到第一個就停。
 """
@@ -34,7 +37,7 @@ from .expression import ExpressionError, parse_expression
 from .step import ParamError, Step, REGISTRY
 
 __all__ = [
-    "RecipeError", "RecipeNode", "ScoreSpec", "Recipe",
+    "RecipeError", "RecipeNode", "ScoreSpec", "Edge", "Recipe",
     "Issue", "execution_order", "validate",
 ]
 
@@ -101,6 +104,54 @@ class ScoreSpec:
     expr: str
     threshold: float
     bins: Dict[str, int]
+
+
+@dataclass(frozen=True)
+class Edge:
+    """畫布上的一條線：**來源節點的哪個輸出埠 → 下游節點的哪個輸入參數**。
+
+    F9-1（2026-08-16）把邊從 ``[src, dst]`` 換成帶埠的四個欄位。為什麼要這樣，
+    見 ``docs/plans/F9-dag-streams.md``：影像流的身分要從「全域的名字」變成
+    「哪個節點的哪個輸出」，同一條 ``ref`` 才分得出兩條互不干擾的支線。
+
+    **``dst_in`` 綁的是參數名不是流名**（``"b"`` / ``"streams"``，不是
+    ``"ref"``）。因為流名之後只是**顯示用的標籤** —— 使用者把 ``ref_2`` 改叫
+    ``ref_soft``，接線不該因此斷掉。
+
+    兩個埠都可以是空字串 = **還沒指定**。F9-1 只換形狀不換語意，所以舊檔案
+    遷移進來的邊、以及目前 UI 拉出來的線，埠都是空的；執行順序完全不看它們
+    （見 :func:`execution_order`）。F9-2 才開始用埠來組每個節點的輸入。
+
+    欄位順序（``src, dst, src_out, dst_in``）**刻意跟 JSON 的順序不同**：
+    JSON 寫成 ``[src, src_out, dst, dst_in]``（讀起來是「load 的 test →
+    denoise 的 streams」），但建構式維持 ``Edge(src, dst)`` 這個直覺的形狀，
+    免得少寫兩個參數就變成 ``src_out=dst``。
+    """
+    src: str
+    dst: str
+    src_out: str = ""
+    dst_in: str = ""
+
+    def to_json(self) -> List[str]:
+        """``[src, src_out, dst, dst_in]`` —— 讀起來是「誰的哪個出口 → 誰的哪個入口」。"""
+        return [self.src, self.src_out, self.dst, self.dst_in]
+
+    @classmethod
+    def from_json(cls, raw: Any) -> "Edge":
+        """吃新格式（4 個）或**舊格式（2 個）**。
+
+        舊格式的判斷依據是「**長度就是 2**」—— 那是舊東西**在**，不是新東西
+        不在（鐵則 9）。所以一份新 recipe 永遠不會被誤判成舊的。
+        """
+        e = list(raw)
+        if len(e) == 2:
+            return cls(src=str(e[0]), dst=str(e[1]))
+        if len(e) == 4:
+            return cls(src=str(e[0]), src_out=str(e[1]),
+                       dst=str(e[2]), dst_in=str(e[3]))
+        raise RecipeError(
+            "an edge must be [from, to] or [from, from_port, to, to_param] — "
+            "got %d item(s): %r" % (len(e), e))
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +354,7 @@ class Recipe:
     version: int = 1
     author: str = ""
     description: str = ""
-    edges: List[List[str]] = field(default_factory=list)  # 額外 DAG 邊
+    edges: List[Edge] = field(default_factory=list)   # 畫布上的線（見 Edge）
     #: **哪一版的 ADEPT 存的**（存檔時自動填；舊檔案沒有這欄，是空字串）。
     #:
     #: 為什麼需要：開發在家用機、執行在公司機，而公司機是用複製檔案更新的
@@ -334,7 +385,7 @@ class Recipe:
                 }
                 for nid, n in self.nodes.items()
             },
-            "edges": [list(e) for e in self.edges],
+            "edges": [e.to_json() for e in self.edges],
             "score": {
                 "expr": self.score.expr,
                 "threshold": float(self.score.threshold),
@@ -374,12 +425,7 @@ class Recipe:
 
         routes = {str(k): [str(x) for x in v] for k, v in dict(d["routes"]).items()}
 
-        edges: List[List[str]] = []
-        for e in (d.get("edges") or []):
-            e = list(e)
-            if len(e) != 2:
-                raise RecipeError(f"an edge must be [from, to] — two step ids; got: {e}")
-            edges.append([str(e[0]), str(e[1])])
+        edges: List[Edge] = [Edge.from_json(e) for e in (d.get("edges") or [])]
 
         # ── 遷移的鐵則：**只能靠「舊東西在不在」判斷，不能靠「新東西不在」** ──
         #
@@ -447,8 +493,11 @@ def execution_order(recipe: Recipe, kind: str) -> List[str]:
     for a, b in zip(route, route[1:]):
         pair_edges.add((a, b))
     for e in recipe.edges:
-        if len(e) == 2 and e[0] in node_set and e[1] in node_set:
-            pair_edges.add((e[0], e[1]))  # 自迴圈也收進來 → Kahn 會偵測為循環
+        # **只看 src/dst，不看埠。** F9-1 換的是資料形狀不是語意：執行順序必須
+        # 跟換之前逐項相同（黃金值 `tools/freeze_golden.py` 對著這件事）。
+        # 埠要到 F9-2 組每個節點的輸入時才有作用。
+        if e.src in node_set and e.dst in node_set:
+            pair_edges.add((e.src, e.dst))  # 自迴圈也收進來 → Kahn 會偵測為循環
 
     indeg = {n: 0 for n in route}
     adj: Dict[str, List[str]] = {n: [] for n in route}
