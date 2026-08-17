@@ -180,11 +180,16 @@ class MultiStreamStep(Step):
 
         **一條流時逐字是 `clip_frac`**、多條流時加流名前綴 —— 跟量測卡同一條
         規則（F10-3），所以使用者只要學一次。
+
+        兩條以上再多兩個**不帶前綴**的：那一對流處理完之後還有多像
+        （:data:`PAIR_FEATURES`）。它們講的是「這兩條之間」，不是「其中某一條」，
+        所以掛在流名下面會是錯的。
         """
         keys = cls.stream_list(params)
         base = cls.stream_features(params)
         if len(keys) > 1:
-            return [n for k in keys for n in prefix_names(k, base)]
+            out = [n for k in keys for n in prefix_names(k, base)]
+            return out + list(PAIR_FEATURES)
         return base
 
     def run(self, ctx: Context, params: Dict[str, object]) -> Context:
@@ -208,11 +213,65 @@ class MultiStreamStep(Step):
                     "clipped back. Those pixels all became 0 or 255, so whatever "
                     "was in them is gone - try a gentler setting."
                     % (self.key, 100.0 * frac, key))
+        if multi:
+            ctx.add_features(pair_similarity(ctx.images.get(keys[0]),
+                                             ctx.images.get(keys[1])))
         return ctx
 
 
 #: 「這張卡把多少比例的像素壓回值域」的特徵名（F11 Enhance-1）。
 CLIP_FRAC = "clip_frac"
+
+#: 兩條流處理完之後**還有多像**（F11 Enhance-UI-B）。
+#:
+#: - ``pair_level_delta``：兩條流的背景相差幾個灰階（0 = 一樣亮）。
+#: - ``pair_spread_ratio``：誰的起伏比較大，比幾倍（1 = 一樣）。
+#:
+#: 為什麼需要它們：**可比性是 `subtract` 的前提**，而「不可比」在畫面上長得像
+#: 「兩張圖本來就不一樣」—— 一張比較亮的 ref 減出來的 diff 整片偏移，而那看起來
+#: 就像一個大面積的缺陷。面板已經並排畫兩條流的直方圖，但沒有一個數字說它們有多
+#: 像，於是判斷全靠目視兩張分布的形狀。
+#:
+#: **不帶流名前綴**：它們講的是「這兩條之間」，掛在其中一條的名字下面會是錯的。
+PAIR_FEATURES = ("pair_level_delta", "pair_spread_ratio")
+
+#: 算 pair 統計時最多看幾個像素（超過就等間隔取樣）。
+#:
+#: 為什麼要取樣：這是一個**診斷**，而它要對 2000×2000 的 RSEM 影像也便宜到可以
+#: 每顆都算。中位數是 O(n log n)，一對影像四次中位數在大圖上就是幾十毫秒 ——
+#: 乘上一萬顆是真的錢。等間隔取樣對「整體亮多少、起伏多大」幾乎沒有影響
+#: （而且是決定性的，同一張圖永遠取到同一批像素）。
+PAIR_SAMPLE_MAX = 65536
+
+
+def pair_similarity(a, b) -> Dict[str, float]:
+    """兩條流處理完之後還有多像（見 :data:`PAIR_FEATURES`）。
+
+    用中位數與 MAD（`algo.enhance.robust_level_spread`）而不是平均與標準差 ——
+    理由跟 ``normalize`` 的 ``zscore`` 一樣：要量的東西就是缺陷本身，而缺陷會把
+    平均與標準差帶著跑，於是「這兩張有多像」會隨缺陷大小浮動。
+
+    兩張圖**尺寸不必一樣**（patch 對 RSEM 就是不一樣）：量的是各自的整體統計，
+    不是逐像素比對。
+    """
+    from ..algo.enhance import robust_level_spread     # 迴避 import 迴圈
+
+    def sampled(arr):
+        f = np.asarray(arr).reshape(-1)
+        if f.size > PAIR_SAMPLE_MAX:
+            f = f[::int(np.ceil(f.size / float(PAIR_SAMPLE_MAX)))]
+        return f
+
+    if a is None or b is None or np.asarray(a).size == 0 or np.asarray(b).size == 0:
+        return {}
+    la, sa = robust_level_spread(sampled(a))
+    lb, sb = robust_level_spread(sampled(b))
+    lo, hi = sorted((abs(sa), abs(sb)))
+    # 兩邊都平的話「差幾倍」沒有意義，回 1（一樣）而不是 inf —— inf 會一路活到
+    # 某個分數表達式才變成 nan。
+    ratio = (hi / lo) if lo > 1e-6 else 1.0
+    return {PAIR_FEATURES[0]: abs(float(la - lb)),
+            PAIR_FEATURES[1]: float(ratio)}
 
 
 def clip_to_range(img: np.ndarray, lo: float = 0.0, hi: float = 255.0):

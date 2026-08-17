@@ -3066,16 +3066,19 @@ class StudioWindow(QMainWindow):
     def _refresh_inspector(self, result: Any = None) -> None:
         """把三種來源餵給儀表：這張卡的參數、這一顆的結果、整批的結果。"""
         insp = self._inspector
+        # meta 在 **context** 上，不在 result 上（result 只帶 features/score/bin）。
+        ctx = getattr(result, "context", None) if result is not None else None
+        meta = dict(getattr(ctx, "meta", {}) or {})
         if insp is None:
             self.inspector_summary.setText("")
+            # 沒有儀表的卡也可能有曲線欄位 —— 那個背景跟儀表是兩件事，
+            # 不要因為前者不在就跳過後者。
+            self._refresh_curve_backdrop(meta)
             return
         node = self.model.nodes.get(self.selected_node or "")
         one: Dict[str, Any] = {}
         if result is not None:
             one = {"features": dict(getattr(result, "features", {}) or {})}
-        # meta 在 **context** 上，不在 result 上（result 只帶 features/score/bin）。
-        ctx = getattr(result, "context", None) if result is not None else None
-        meta = dict(getattr(ctx, "meta", {}) or {})
         # 「這張卡產出哪些特徵」要問卡片庫（含 output_prefix）—— 儀表只負責畫。
         feats: List[str] = []
         if node is not None:
@@ -3094,6 +3097,32 @@ class StudioWindow(QMainWindow):
                          feature_names=feats,
                          shown_streams=[s for s in shown if s])
         self.inspector_summary.setText(insp.summary())
+        self._refresh_curve_backdrop(meta)
+
+    def _refresh_curve_backdrop(self, meta: Dict[str, Any]) -> None:
+        """曲線欄位後面墊上「這張卡吃進來的那條流」的灰階分布（F11 UI-C）。
+
+        用的是引擎那份 ``stream_change[流]['before']`` —— 跟 Enhance 儀表左邊那條
+        細線同一組數字。UI 不自己再壓一次直方圖：畫面上的分布跟真的跑出來的
+        不一樣，比沒有那個背景更糟。
+
+        ``before`` 是「這張卡動它之前」的樣子，而曲線的橫軸就是輸入灰階 ——
+        兩者講的是同一件事，所以不必另外算一份。
+        """
+        node = self.model.nodes.get(self.selected_node or "")
+        if node is None:
+            self.param_form.set_histogram([])
+            return
+        changes = dict((meta or {}).get("stream_change") or {})
+        # 這張卡處理的第一條流（曲線是逐像素的，兩條流吃的是同一條曲線）。
+        keys = [k.strip() for k in
+                str(node.params.get("streams") or "").split(",") if k.strip()]
+        for key in keys:
+            rec = changes.get(key)
+            if rec and rec.get("before"):
+                self.param_form.set_histogram(list(rec["before"]))
+                return
+        self.param_form.set_histogram([])
 
     def _refresh_region_button(self) -> None:
         regions = self.selected_regions()

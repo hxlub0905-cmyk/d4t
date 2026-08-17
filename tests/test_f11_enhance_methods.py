@@ -20,7 +20,7 @@ from adept.core.algo import enhance as algo_enhance
 from adept.core.pipeline.context import Context
 from adept.core.pipeline.step import get_step
 import adept.core.steps  # noqa: F401 - 註冊卡片
-from adept.core.steps._util import CLIP_FRAC
+from adept.core.steps._util import CLIP_FRAC, PAIR_FEATURES
 
 
 def _ctx(**images) -> Context:
@@ -150,17 +150,20 @@ def test_it_reports_how_many_it_replaced():
 
 
 def test_the_number_is_declared_only_for_this_method():
-    """另外四種方法動的是每一個畫素，「換掉的比例」恆等於 1 —— 一個永遠是 1 的
-    欄位只會佔 CSV 的寬度。"""
+    """兩種方法問的是不同的問題，所以各報自己那一個。
+
+    「換掉的比例」對平滑法恆等於 1（它動的是每一個畫素），「磨掉幾個 σ」對只換
+    三顆畫素的方法趨近於 0 —— 一個永遠是同一個值的欄位只會佔 CSV 的寬度。
+    """
     cls = get_step("denoise")
     assert cls.resolve_features({"streams": "test", "method": "hot_pixels"}) == [
         CLIP_FRAC, "hot_px_frac"]
     assert cls.resolve_features({"streams": "test", "method": "median"}) == [
-        CLIP_FRAC]
-    # 多流時前綴規則跟其他數字一樣（F10-3）
+        CLIP_FRAC, "removed_over_noise"]
+    # 多流時前綴規則跟其他數字一樣（F10-3），而 pair 那兩個不帶前綴
     assert cls.resolve_features({"streams": "test,ref", "method": "hot_pixels"}) == [
         "test_" + CLIP_FRAC, "test_hot_px_frac",
-        "ref_" + CLIP_FRAC, "ref_hot_px_frac"]
+        "ref_" + CLIP_FRAC, "ref_hot_px_frac"] + list(PAIR_FEATURES)
 
 
 def test_replacing_a_lot_of_pixels_says_so():

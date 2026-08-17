@@ -49,6 +49,13 @@ def _denoise_one(step_key: str, img: np.ndarray, method: str, ksize: int,
 #: 「換掉了多少比例的畫素」的特徵名（只有 ``hot_pixels`` 會吐）。
 HOT_FRAC = "hot_px_frac"
 
+#: 「磨掉的東西有多大，以這張圖自己的雜訊 σ 為單位」（四種平滑法會吐）。
+#:
+#: ≈1 表示磨掉的量級就是雜訊（正是想要的）；≫1 表示連結構一起磨掉了。
+#: 這是 ``strength`` 那個旋鈕唯一的問題（「我有沒有把訊號一起磨掉」）的答案，
+#: 而在這之前它在畫面上完全沒有蹤跡 —— 使用者只能來回切 before/after 用眼睛看。
+REMOVED_OVER_NOISE = "removed_over_noise"
+
 
 @register_step
 class DenoiseStep(MultiStreamStep):
@@ -109,15 +116,17 @@ class DenoiseStep(MultiStreamStep):
 
     @classmethod
     def stream_features(cls, params: Dict[str, Any]) -> List[str]:
-        """只有 ``hot_pixels`` 多報一個數字。
+        """兩種方法各報一個自己的數字。
 
-        為什麼不是永遠都報：另外四種方法動的是**每一個**畫素，「換掉的比例」
-        對它們恆等於 1，一個永遠是 1 的欄位只會佔 CSV 的寬度。
+        `hot_pixels` 報「換掉幾顆」，另外四種報「磨掉的東西有幾個 σ」——
+        兩個問題不一樣，所以不硬湊成一個欄位：「換掉的比例」對平滑法恆等於 1
+        （它動的是每一個畫素），而「磨掉幾個 σ」對只換三顆畫素的方法趨近於 0。
+        一個永遠是同一個值的欄位只會佔 CSV 的寬度。
         """
         base = super().stream_features(params)
         if str(params.get("method", "median")) == "hot_pixels":
             return base + [HOT_FRAC]
-        return base
+        return base + [REMOVED_OVER_NOISE]
 
     def build_op(self, ctx: Context, p: Dict[str, Any]):
         ksize = int(p["ksize"])
@@ -130,29 +139,56 @@ class DenoiseStep(MultiStreamStep):
         return lambda img: _denoise_one(self.key, img, method, ksize, strength,
                                         threshold)
 
+    #: 磨掉的量超過幾個 σ 就講一句話。
+    #:
+    #: 為什麼是 2：雜訊本身的 RMS 就是 1 個 σ，而一個把雜訊完全磨平的濾波器
+    #: 拿掉的正好是那麼多。實測 median ksize=3 在 σ=6 的圖上大約 0.9、
+    #: bilateral strength=1 大約 0.6；要到 2 以上得是「連圖樣邊緣一起磨掉」。
+    SMOOTH_WARN_SIGMA = 2.0
+
     def after_stream(self, ctx: Context, key: str, before, after,
                      p: Dict[str, Any]):
-        """``hot_pixels`` 換掉了多少（F11 Enhance-2）。
+        """這一條流上「動了多少」（F11 Enhance-2／UI-E）。
 
-        比對前後兩張圖就有了，**不必把演算法再跑一次** —— 這張卡沒有動到的畫素
-        逐位元組不變，那正是它跟其他四種方法的差別，所以這個數字是精確的。
+        兩種方法問的是不同的問題，所以報的是不同的數字：
 
-        它是使用者調 ``threshold`` 時唯一看得到的回饋：門檻調低到開始吃真的缺陷
-        時，影像上看不出來（少了幾顆亮點），但這個數字會跳。
+        - ``hot_pixels`` → **換掉幾顆**（`hot_px_frac`）。這張卡沒有動到的畫素
+          逐位元組不變，那正是它跟其他四種的差別，所以這個數字是精確的。
+          它是調 ``threshold`` 時唯一看得到的回饋：門檻低到開始吃真的缺陷時，
+          影像上看不出來（少了幾顆亮點），但這個數字會跳。
+        - 四種平滑法 → **磨掉的東西有幾個 σ**（`removed_over_noise`）。
+          ≈1 表示磨掉的量級就是雜訊；≫1 表示連結構一起磨掉了。那正是
+          ``strength`` 那個旋鈕唯一的問題。
+
+        兩者都只是比對前後兩張圖，**不必把演算法再跑一次**。
         """
-        if str(p.get("method", "median")) != "hot_pixels":
-            return None
-        a, b = np.asarray(before), np.asarray(after)
+        a = np.asarray(before, dtype=np.float32)
+        b = np.asarray(after, dtype=np.float32)
         if a.shape != b.shape or a.size == 0:
-            return {HOT_FRAC: 0.0}
-        frac = float(np.count_nonzero(a != b)) / float(a.size)
-        if frac > self.HOT_WARN_FRAC:
+            return None
+        if str(p.get("method", "median")) == "hot_pixels":
+            frac = float(np.count_nonzero(
+                np.asarray(before) != np.asarray(after))) / float(a.size)
+            if frac > self.HOT_WARN_FRAC:
+                ctx.warn(
+                    "[%s] replaced %.2f%% of '%s' as hot/dead pixels. Isolated "
+                    "damage is a handful of pixels, so this is probably eating "
+                    "real structure - raise 'How far off counts as damage'."
+                    % (self.key, 100.0 * frac, key))
+            return {HOT_FRAC: frac}
+        # σ 是 note_stream 在**處理之前**量的（處理後的圖已經沒有那個雜訊了，
+        # 拿它當分母會讓比值無限膨脹）。
+        sigma = float((ctx.meta.get("noise_sigma") or {}).get(str(key), 0.0))
+        removed = float(np.sqrt(np.mean((a - b) ** 2)))
+        ratio = removed / sigma if sigma > 1e-6 else 0.0
+        if ratio > self.SMOOTH_WARN_SIGMA:
             ctx.warn(
-                "[%s] replaced %.2f%% of '%s' as hot/dead pixels. Isolated "
-                "damage is a handful of pixels, so this is probably eating "
-                "real structure - raise 'How far off counts as damage'."
-                % (self.key, 100.0 * frac, key))
-        return {HOT_FRAC: frac}
+                "[%s] what this card removed from '%s' is %.1fx this image's "
+                "own noise level, so it is taking structure out as well as "
+                "noise - use a smaller filter size, a gentler strength, or "
+                "bilateral/nlm which keep edges."
+                % (self.key, key, ratio))
+        return {REMOVED_OVER_NOISE: ratio}
 
     def note_stream(self, ctx: Context, key: str, img, p: Dict[str, Any]) -> None:
         """**把量到的雜訊 σ 講出來**（F11 Enhance-1）。

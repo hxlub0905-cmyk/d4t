@@ -18,7 +18,7 @@ from adept.core.algo import histmatch as algo_histmatch
 from adept.core.pipeline.context import Context
 from adept.core.pipeline.step import StepError, get_step
 import adept.core.steps  # noqa: F401 - 註冊卡片
-from adept.core.steps._util import CLIP_FRAC, clip_to_range
+from adept.core.steps._util import CLIP_FRAC, PAIR_FEATURES, clip_to_range
 
 
 def _ctx(**images) -> Context:
@@ -105,15 +105,20 @@ def test_a_card_that_stays_in_range_reports_zero():
 
 
 def test_the_clip_fraction_is_declared_and_prefixed_per_stream():
-    """宣告要跟真的吐出來的名字一致 —— 一條流時逐字 ``clip_frac``（F10-3 規則）。"""
-    cls = get_step("denoise")
+    """宣告要跟真的吐出來的名字一致 —— 一條流時逐字 ``clip_frac``（F10-3 規則）。
+
+    ``tone`` 只吐 `clip_frac`，所以它是這條規則最乾淨的樣本（`denoise` 另外還會
+    報自己的診斷數字，見 `test_f11_enhance_methods.py`）。
+    """
+    cls = get_step("tone")
     assert cls.resolve_features({"streams": "test"}) == [CLIP_FRAC]
     assert cls.resolve_features({"streams": "test,ref"}) == [
-        "test_" + CLIP_FRAC, "ref_" + CLIP_FRAC]
+        "test_" + CLIP_FRAC, "ref_" + CLIP_FRAC] + list(PAIR_FEATURES)
 
     ctx = _ctx(test=_ramp(), ref=_ramp())
-    out = cls().run(ctx, {"streams": "test,ref", "method": "median", "ksize": 3})
-    assert set(out.features) == {"test_" + CLIP_FRAC, "ref_" + CLIP_FRAC}
+    out = cls().run(ctx, {"streams": "test,ref", "brightness": 1.0})
+    assert set(out.features) == {"test_" + CLIP_FRAC, "ref_" + CLIP_FRAC,
+                                 *PAIR_FEATURES}
 
 
 def test_pushing_a_lot_of_pixels_out_of_range_says_so():

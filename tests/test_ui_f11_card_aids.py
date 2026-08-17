@@ -172,6 +172,98 @@ def test_the_view_takes_the_size_in_image_pixels(qapp):
 
 
 # --------------------------------------------------------------------------- #
+# C. 曲線後面墊這張圖的直方圖
+# --------------------------------------------------------------------------- #
+def test_the_curve_editor_takes_a_histogram_to_sit_behind_it(qapp):
+    """曲線的橫軸是輸入灰階，而使用者不知道哪一段**真的有畫素**。"""
+    ed = widgets_mod.CurveEditor()
+    ed.resize(200, 160)
+    assert ed.histogram() == []
+    ed.set_histogram([0, 3, 9, 4, 0])
+    assert ed.histogram() == [0.0, 3.0, 9.0, 4.0, 0.0]
+    ed.set_histogram(None)               # 沒有東西可墊 = 只畫格線，不是爆掉
+    assert ed.histogram() == []
+
+
+def test_it_survives_a_degenerate_histogram(qapp):
+    """全 0（例如一張全黑的圖）不能變成除以 0。"""
+    from PySide6.QtGui import QPixmap
+
+    ed = widgets_mod.CurveEditor()
+    ed.resize(200, 160)
+    for hist in ([0, 0, 0], [], [5]):
+        ed.set_histogram(hist)
+        ed.render(QPixmap(200, 160))     # 畫得出來就算過
+
+
+def test_the_enlarged_canvas_gets_the_same_backdrop(qapp):
+    """「做細活」正是最需要知道哪一段有畫素的時候。"""
+    field = widgets_mod.CurveField()
+    field.set_histogram([1, 2, 3])
+    dlg = field.open_dialog()
+    try:
+        assert dlg.editor.histogram() == [1.0, 2.0, 3.0]
+    finally:
+        dlg.close()
+
+
+def test_the_form_passes_it_to_the_curve_row_only(qapp):
+    """`set_histogram` 是**資料的事實**，不是這張卡的參數 —— 同 set_image_count
+    的形狀，所以放在表單上而不是塞進 set_step 的簽章。"""
+    from adept.core.pipeline import get_step
+    import adept.core.steps  # noqa: F401
+
+    form = widgets_mod.ParamForm()
+    form.set_step(get_step("tone").describe(), {}, ["test"])
+    form.set_histogram([2, 4, 8])
+    assert form.histogram() == [2.0, 4.0, 8.0]
+    row = form._rows["curve"]
+    assert row.editor.histogram() == [2.0, 4.0, 8.0]
+
+
+def test_the_backdrop_comes_from_the_engine_record_not_from_the_ui(window,
+                                                                  tmp_path):
+    """整條路：預覽 → ``ctx.meta['stream_change'][流]['before']`` → 曲線後面。
+
+    用引擎那份（跟儀表左邊那條細線同一組數字），UI 不自己再壓一次直方圖 ——
+    畫面上的分布跟真的跑出來的不一樣，比沒有那個背景更糟。
+    """
+    from make_sample import generate
+
+    out = generate(str(tmp_path / "lotC"), n=4, seed=51)
+    window.load_dataset_path(out["klarf"], sync=True)
+    src = window.model.node_order[0]
+    t = wire_up(window.model, window.add_card_after(src, "tone"))
+    window._on_edge_added(src, t, "test")
+    window.select_node(t)
+    assert window.refresh_preview(sync=True) is True
+
+    hist = window.param_form.histogram()
+    assert hist and sum(hist) > 0, "曲線後面沒有東西可墊"
+    insp = window.inspector()
+    assert hist == [float(v) for v in insp.record("test")["before"]]
+
+
+def test_switching_to_a_card_without_a_curve_clears_it(window, tmp_path):
+    from make_sample import generate
+
+    out = generate(str(tmp_path / "lotC2"), n=4, seed=52)
+    window.load_dataset_path(out["klarf"], sync=True)
+    src = window.model.node_order[0]
+    t = wire_up(window.model, window.add_card_after(src, "tone"))
+    window._on_edge_added(src, t, "test")
+    d = wire_up(window.model, window.add_card_after(t, "denoise"))
+    window._on_edge_added(t, d, "test")
+
+    window.select_node(t)
+    assert window.refresh_preview(sync=True) is True
+    assert window.param_form.histogram()
+    window.select_node(d)
+    assert window.refresh_preview(sync=True) is True
+    assert "curve" not in window.param_form._rows
+
+
+# --------------------------------------------------------------------------- #
 # H. 整批的削平走勢
 # --------------------------------------------------------------------------- #
 def _batch(vals, name="clip_frac"):

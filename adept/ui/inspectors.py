@@ -40,8 +40,8 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
-from ..core.steps._util import CLIP_FRAC
-from ..core.steps.denoise import HOT_FRAC
+from ..core.steps._util import CLIP_FRAC, PAIR_FEATURES
+from ..core.steps.denoise import HOT_FRAC, REMOVED_OVER_NOISE
 from .theme import TOKENS
 
 __all__ = ["Inspector", "AlignInspector", "EnhanceInspector",
@@ -421,6 +421,38 @@ class EnhanceInspector(Inspector):
             return None
         return None if (math.isnan(v) or math.isinf(v)) else v
 
+    def removed_over_noise(self, key: Optional[str] = None) -> Optional[float]:
+        """磨掉的東西有幾個 σ（`denoise` 的平滑法，F11 Enhance-UI-E）。
+
+        ≈1 = 磨掉的量級就是雜訊（想要的）；≫1 = 連結構一起磨掉了。這是
+        ``strength`` / ``ksize`` 那兩個旋鈕唯一的問題，而**兩種結果在單顆畫面上
+        都「看起來乾淨了」** —— 那正是它需要一個數字的理由。
+        """
+        return self.stream_feature(key, REMOVED_OVER_NOISE)
+
+    #: 兩條流差多少就算「還不能比」。**經驗值，不是定理** —— 面板同時把實際數字
+    #: 印出來，使用者自己看得到它離這條線多遠。
+    #: 5 個灰階的整片偏移在 diff 上是看得見的一塊；起伏差 1.5 倍表示同一個門檻
+    #: 在兩張圖上抓到的東西不一樣多。
+    PAIR_LEVEL_OK = 5.0
+    PAIR_RATIO_OK = 1.5
+
+    def pair(self) -> Optional[Tuple[float, float]]:
+        """這張卡處理的前兩條流**還有多像**（F11 Enhance-UI-B）。
+
+        回 ``(背景差幾個灰階, 起伏差幾倍)``，只有一條流時回 None。
+        可比性是 `subtract` 的前提，而「不可比」在畫面上長得像「兩張圖本來就不
+        一樣」—— 一張比較亮的 ref 減出來的 diff 整片偏移，看起來就像一個大面積
+        的缺陷。
+        """
+        if len(self.streams()) < 2:
+            return None
+        delta = self.this_value(PAIR_FEATURES[0])
+        ratio = self.this_value(PAIR_FEATURES[1])
+        if delta is None or ratio is None:
+            return None
+        return (delta, ratio)
+
     def batch_pushed_out(self, key: Optional[str] = None) -> List[float]:
         """**整批**每一顆被壓回值域的比例（F11 Enhance-UI-H）。
 
@@ -459,6 +491,9 @@ class EnhanceInspector(Inspector):
             if hot is not None:
                 extra.append("%.2f%% replaced as hot/dead pixels"
                              % (hot * 100.0))
+            rem = self.removed_over_noise(key)
+            if rem is not None:
+                extra.append("removed %.1f× the noise" % rem)
             out = self.pushed_out(key)
             if out is not None and out >= 0.0005:
                 extra.append("%.1f%% computed outside 0–255 and clipped back"
@@ -474,6 +509,15 @@ class EnhanceInspector(Inspector):
                      "ends of the scale — those pixels no longer differ from "
                      "each other, and every measure card downstream reads "
                      "them as identical." % (max(alo, ahi) * 100.0))
+        pair = self.pair()
+        if pair is not None:
+            keys = self.streams()
+            delta, ratio = pair
+            text += ("  ·  “%s” vs “%s” now: %.1f gray levels apart, spread "
+                     "%.2f×" % (keys[0], keys[1], delta, ratio))
+            if delta > self.PAIR_LEVEL_OK or ratio > self.PAIR_RATIO_OK:
+                text += (" — still not comparable, so the difference image "
+                         "will show that gap as if it were a defect")
         over, total = self.batch_over_limit(panes[0] if panes else None)
         if over:
             # **這一句講的是別的顆**，所以它要講「幾顆之中的幾顆」而不是一個比例

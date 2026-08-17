@@ -27,6 +27,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import numpy as np
 from PySide6.QtCore import QMimeData, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
+    QBrush,
     QColor,
     QDrag,
     QFont,
@@ -1883,6 +1884,8 @@ class ParamForm(QWidget):
         #: 編輯器用得到它 —— 但它是「資料的事實」而不是「這張卡的參數」，
         #: 所以放在表單上（一份資料一次）而不是塞進 `set_step` 的簽章。
         self._image_count = 0
+        #: 這張卡吃進來的那條流的灰階分布（墊在曲線後面，見 `set_histogram`）。
+        self._hist: List[float] = []
         #: 小標題：``section 名 -> [QLabel]`` 與 ``參數名 -> section 名``。
         #: 整組都被 ``show_when`` 藏起來時，標題也要跟著不見 —— 一個底下什麼
         #: 都沒有的標題比沒有標題更讓人以為畫面壞了。
@@ -1950,6 +1953,24 @@ class ParamForm(QWidget):
         for row in self._rows.values():
             if isinstance(row.editor, ChannelMapField):
                 row.editor.set_min_rows(n)
+
+    def set_histogram(self, counts: Optional[Sequence[float]]) -> None:
+        """這張卡吃進來的那條流長什麼樣（F11 Enhance-UI-C）。
+
+        只有曲線欄位用得到它。跟 :meth:`set_image_count` 同一個形狀：這是
+        **資料的事實**而不是這張卡的參數，所以放在表單上，不塞進 `set_step`
+        的簽章（那會讓每一個呼叫端都得知道有這回事）。
+
+        重建表單時會被清掉，所以上層在 `set_step` 之後要再餵一次 —— 那是
+        Studio 的 `_refresh_curve_backdrop`。
+        """
+        self._hist = list(counts or [])
+        for row in self._rows.values():
+            if isinstance(row.editor, CurveField):
+                row.editor.set_histogram(self._hist)
+
+    def histogram(self) -> List[float]:
+        return list(self._hist)
 
     def set_step(self, describe: Optional[Dict[str, Any]],
                  current_params: Optional[Dict[str, Any]] = None,
@@ -2332,6 +2353,8 @@ class CurveEditor(QWidget):
         self._points: List[Tuple[float, float]] = list(parse_curve(IDENTITY))
         self._drag: Optional[int] = None
         self._compact = bool(compact)
+        #: 墊在曲線後面的直方圖（引擎算的那一份，見 :meth:`set_histogram`）。
+        self._hist: List[float] = []
         self.setMinimumSize(QSize(150, 130 if compact else 300))
         if not compact:
             self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -2372,6 +2395,30 @@ class CurveEditor(QWidget):
         from ..core.pipeline.curve import is_identity
         return is_identity(self._points)
 
+    def set_histogram(self, counts: Optional[Sequence[float]]) -> None:
+        """把**這張圖進來時**的灰階分布墊在曲線後面（F11 Enhance-UI-C）。
+
+        為什麼要墊
+        ----------
+        曲線的橫軸是「輸入灰階」，而使用者不知道哪一段灰階**真的有畫素**。
+        於是常見的兩種白工：在一個空的區間上把線拉得很陡（畫面完全沒變化），
+        或者反過來，把所有畫素都在的那一小段壓平（一動就整片糊掉）。
+        Photoshop 的 Curves 就是這個形狀，所以對「不會寫 code 但會修圖」的
+        使用者是零學習成本。
+
+        資料是**引擎算的那一份**（``ctx.meta['stream_change'][流]['before']``），
+        UI 不自己再壓一次直方圖 —— 不然畫面上的分布跟真的跑出來的有機會不一樣。
+        ``None`` / 空 = 沒有東西可墊（還沒跑過預覽），那就只畫格線。
+        """
+        vals = [float(v) for v in (counts or [])
+                if float(v) == float(v) and float(v) >= 0.0]
+        self._hist = vals
+        self.update()
+
+    def histogram(self) -> List[float]:
+        """現在墊著的那一份（測試讀這個，不去讀畫素）。"""
+        return list(self._hist)
+
     # -- 座標轉換 ----------------------------------------------------------
     def _plot_rect(self) -> QRectF:
         return QRectF(self.rect()).adjusted(self._PAD, self._PAD,
@@ -2395,6 +2442,31 @@ class CurveEditor(QWidget):
         return None
 
     # -- painting ----------------------------------------------------------
+    def _paint_histogram(self, p: QPainter, plot: QRectF) -> None:
+        """墊在曲線後面的分布：很淡的實心柱，高度用平方根。
+
+        平方根跟 Enhance 儀表用的是同一個理由：兩端的削平會堆出極高的柱子，
+        線性刻度下其餘的分布會被壓成一條貼著底的線 —— 而那正是要看的形狀。
+        """
+        vals = self._hist
+        if not vals:
+            return
+        top = max(vals)
+        if top <= 0:
+            return
+        h = [math.sqrt(v / top) for v in vals]
+        bw = plot.width() / float(len(h))
+        col = QColor(TOKENS["text_disabled"])
+        col.setAlpha(70)               # 背景就是背景：看得到形狀，不搶曲線
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(col))
+        for i, v in enumerate(h):
+            bar = v * plot.height()
+            if bar <= 0.0:
+                continue
+            p.drawRect(QRectF(plot.left() + i * bw, plot.bottom() - bar,
+                              max(1.0, bw), bar))
+
     def paintEvent(self, _e) -> None:      # noqa: D102 - Qt hook
         from ..core.algo.curve import curve_lut
 
@@ -2406,6 +2478,9 @@ class CurveEditor(QWidget):
         p.drawRoundedRect(r, 5, 5)
 
         plot = self._plot_rect()
+        # 直方圖先畫 —— 它是**背景**。畫在曲線之後的話它會蓋住曲線，
+        # 而曲線才是使用者在操作的東西。
+        self._paint_histogram(p, plot)
         grid = QColor(TOKENS["border_default"])
         grid.setAlpha(120)
         p.setPen(QPen(grid, 1))
@@ -2541,8 +2616,21 @@ class CurveField(QWidget):
     def is_identity(self) -> bool:
         return self.editor.is_identity()
 
+    def set_histogram(self, counts: Optional[Sequence[float]]) -> None:
+        """把這張圖的灰階分布墊在曲線後面（見 `CurveEditor.set_histogram`）。"""
+        self._hist = list(counts or [])
+        self.editor.set_histogram(counts)
+        dlg = getattr(self, "_dialog", None)
+        if dlg is not None and dlg.isVisible():
+            dlg.editor.set_histogram(counts)
+
+    def histogram(self) -> List[float]:
+        return self.editor.histogram()
+
     def open_dialog(self) -> "CurveDialog":
         dlg = CurveDialog(self.editor.text(), self)
+        # 放大的那一張也要墊 —— 「做細活」正是最需要知道哪一段有畫素的時候。
+        dlg.editor.set_histogram(getattr(self, "_hist", []))
         dlg.curve_changed.connect(self._adopt)
         dlg.show()
         self._dialog = dlg          # 保住參照，不然 show() 之後會被 GC

@@ -14,6 +14,7 @@
         "n_channels": "2",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "0.98108933088728056",
         "score": "30",
         "snr_max": "0.69822758436203003"
       },
@@ -34,6 +35,7 @@
         "n_channels": "2",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "0.97978760691199474",
         "score": "36",
         "snr_max": "0.78240501880645752"
       },
@@ -54,6 +56,7 @@
         "n_channels": "2",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "0.96480492126341799",
         "score": "36",
         "snr_max": "0.62047308683395386"
       },
@@ -74,6 +77,7 @@
         "n_channels": "2",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "0.99088031992233738",
         "score": "190",
         "snr_max": "0.66209119558334351"
       },
@@ -94,6 +98,7 @@
         "n_channels": "2",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "0.99434068403558273",
         "score": "165",
         "snr_max": "0.78553545475006104"
       },
@@ -114,6 +119,7 @@
         "n_channels": "2",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "0.99474292375996776",
         "score": "29",
         "snr_max": "0.58358645439147949"
       },
@@ -134,6 +140,7 @@
         "n_channels": "2",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "0.97423388151121471",
         "score": "204",
         "snr_max": "0.73182451725006104"
       },
@@ -154,6 +161,7 @@
         "n_channels": "2",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "0.97694392192024959",
         "score": "258",
         "snr_max": "0.7108757495880127"
       },

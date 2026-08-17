@@ -17,6 +17,7 @@
         "n_channels": "2",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "1.0124664452641592",
         "score": "3.7370514396374443",
         "snr_max": "0.86060190200805664"
       },
@@ -40,6 +41,7 @@
         "n_channels": "2",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "1.0651019005839975",
         "score": "5.1293342431823605",
         "snr_max": "1.5145659446716309"
       },
@@ -63,6 +65,7 @@
         "n_channels": "2",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "1.4210087743174253",
         "score": "4.3736963949140772",
         "snr_max": "0.86384660005569458"
       },
@@ -86,6 +89,7 @@
         "n_channels": "2",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "1.6824962451857959",
         "score": "13.636864954344027",
         "snr_max": "1.1691317558288574"
       },
@@ -109,6 +113,7 @@
         "n_channels": "2",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "1.0804820216200819",
         "score": "11.90060164617153",
         "snr_max": "1.3479002714157104"
       },
@@ -132,6 +137,7 @@
         "n_channels": "2",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "1.0880295098449866",
         "score": "5.3141250895923422",
         "snr_max": "0.95501536130905151"
       },
@@ -155,6 +161,7 @@
         "n_channels": "2",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "1.2450578810371677",
         "score": "17.293268049311937",
         "snr_max": "1.0235391855239868"
       },
@@ -178,6 +185,7 @@
         "n_channels": "2",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "1.6599315407784681",
         "score": "23.854263010387733",
         "snr_max": "0.92843335866928101"
       },

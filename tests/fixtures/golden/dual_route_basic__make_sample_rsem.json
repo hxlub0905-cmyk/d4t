@@ -20,6 +20,7 @@
         "n_channels": "1",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "1.0142167151205295",
         "score": "30.53057264309529",
         "snr_max": "1.2316300868988037"
       },
@@ -46,6 +47,7 @@
         "n_channels": "1",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "1.0125728958402518",
         "score": "5.342829175428049",
         "snr_max": "1.4831533432006836"
       },
@@ -72,6 +74,7 @@
         "n_channels": "1",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "1.0166346263837982",
         "score": "3.3642057502145852",
         "snr_max": "1.4900976419448853"
       },
@@ -98,6 +101,7 @@
         "n_channels": "1",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "1.0073083185982292",
         "score": "4.5158414599801588",
         "snr_max": "1.233805775642395"
       },
@@ -124,6 +128,7 @@
         "n_channels": "1",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "1.005140152073529",
         "score": "5.5682084268288241",
         "snr_max": "1.4770476818084717"
       },
@@ -150,6 +155,7 @@
         "n_channels": "1",
         "norm_clip_frac": "0",
         "norm_ref_clip_frac": "0",
+        "removed_over_noise": "1.0039710101039057",
         "score": "5.7743510451738143",
         "snr_max": "3.4210331439971924"
       },

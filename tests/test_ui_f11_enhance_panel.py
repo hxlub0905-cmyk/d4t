@@ -172,6 +172,64 @@ def test_the_other_denoise_methods_do_not_print_that_line(qapp):
 
 
 # --------------------------------------------------------------------------- #
+# 2c. 磨掉的是雜訊還是訊號（F11 Enhance-UI-E）
+# --------------------------------------------------------------------------- #
+def test_it_prints_how_much_the_filter_removed_in_units_of_noise(qapp):
+    """≈1 = 磨掉的就是雜訊；≫1 = 連結構一起磨掉了。**兩種在單顆畫面上都
+    「看起來乾淨了」**，那正是它需要一個數字的理由。"""
+    insp = insp_mod.EnhanceInspector()
+    insp.set_context("denoise", params={"streams": "test", "method": "median"},
+                     meta=_change(),
+                     result=_result({"removed_over_noise": 0.93}))
+    assert insp.removed_over_noise() == pytest.approx(0.93)
+    assert "removed 0.9× the noise" in insp.summary()
+
+
+def test_hot_pixels_prints_the_other_number(qapp):
+    """兩種方法問的是不同的問題，所以面板上也是兩句不同的話。"""
+    insp = insp_mod.EnhanceInspector()
+    insp.set_context("denoise", params={"streams": "test",
+                                        "method": "hot_pixels"},
+                     meta=_change(), result=_result({"hot_px_frac": 0.001}))
+    assert insp.removed_over_noise() is None
+    assert "the noise" not in insp.summary()
+
+
+# --------------------------------------------------------------------------- #
+# 2d. 兩條流還有多像（F11 Enhance-UI-B）
+# --------------------------------------------------------------------------- #
+def test_it_says_whether_the_two_streams_are_comparable_now(qapp):
+    """面板本來並排畫兩條直方圖，但**沒有一個數字說它們有多像**。"""
+    insp = insp_mod.EnhanceInspector()
+    meta = _change(("test", "ref"))
+    insp.set_context("normalize", params={"streams": "test,ref"}, meta=meta,
+                     result=_result({"pair_level_delta": 0.8,
+                                     "pair_spread_ratio": 1.04}))
+    assert insp.pair() == (0.8, 1.04)
+    text = insp.summary()
+    assert "“test” vs “ref” now: 0.8 gray levels apart, spread 1.04×" in text
+    assert "not comparable" not in text
+
+
+def test_a_gap_that_will_look_like_a_defect_is_called_out(qapp):
+    insp = insp_mod.EnhanceInspector()
+    meta = _change(("test", "ref"))
+    insp.set_context("normalize", params={"streams": "test,ref"}, meta=meta,
+                     result=_result({"pair_level_delta": 42.0,
+                                     "pair_spread_ratio": 2.9}))
+    text = insp.summary()
+    assert "still not comparable" in text and "as if it were a defect" in text
+
+
+def test_one_stream_has_no_pair_to_talk_about(qapp):
+    insp = insp_mod.EnhanceInspector()
+    insp.set_context("normalize", params={"streams": "test"}, meta=_change(),
+                     result=_result({"clip_frac": 0.0}))
+    assert insp.pair() is None
+    assert "vs" not in insp.summary()
+
+
+# --------------------------------------------------------------------------- #
 # 3. 整條路：引擎 → meta / features → 面板
 # --------------------------------------------------------------------------- #
 def test_the_whole_way_through_from_a_real_preview(window, tmp_path):
