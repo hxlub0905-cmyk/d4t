@@ -288,13 +288,46 @@ for nid in order:
 | UI 測試（34 個檔案逐檔跑）| 全綠 |
 | 黃金值 `freeze_golden.py --check` | 三組 22 顆**逐項相同** |
 
-#### 3.1.7 於是 Input 段的卡片群長這樣（提案）
+#### 3.1.7 Input 段的卡片群：**一種 source 一張卡**
 
-| 卡 | 吃什麼 | 吐什麼 | 狀態 |
+使用者定調（2026-08-17）：
+
+> 你不一定要把它全部塞到 load image 這張 card 裡，我更想像的是像其他 card 一樣分類
+> （**應該說 source 不一樣本來就要分**）。同理 GDS 相關的 png 理所當然也可以是一張 card。
+>
+> 簡單來說目前 ADEPT 可以支援 patch + 對應 KLARF，我需要他也能支援
+> **RSEM image + KLARF，或單純圖片**。
+
+| 卡 | 一顆給什麼 | 吐的流 | 狀態 |
 |---|---|---|---|
-| `load_patch`（Load images）| dataset 的頁 | 依 `channel_map` 命名的流（預設沿用現行行為）| 有，要加 `channel_map` |
-| `load_sidecar`（暫名）| 與 defect 一一對應的外部檔案（GLAS 的 `_label.png` / `_gray.png`）| 一條具名流（例 `layout_label`）| 新，接頭 D |
-| 之後 | 一顆一個多頁 TIFF／一顆一個資料夾／CSV 清單 | 同上 | 接頭 B、A |
+| `load_patch`（EBI patch）| 主資料集的那幾頁 | 依 `channel_map` 命名（預設沿用現行行為）| 有，要加 `channel_map` |
+| `load_rsem`（RSEM 大圖）| 一張大圖（**有 KLARF 或沒有都要能吃**）| `rsem` | 新 |
+| `load_layout`（GLAS 的匯出）| label map ＋ 合成 gray | `layout_label`、`layout_gray`（**兩顆輸出埠**）| 新 |
+
+一種 source 一張卡的三個好處，剛好對上既有的三條規矩：
+
+- **卡片自己的參數只講自己的事**（RSEM 的配對規則不會出現在 patch 卡上）；
+- **畫布看得到有幾個來源**（一個來源一個節點，F9 的「線只有一個作者」）；
+- **`Step.is_source()` 已經支援任意張數**（Input-0 就是為了這個）。
+
+##### ⚠ 那「檔案在哪」寫在哪裡？—— **recipe 宣告插槽，資料層綁路徑**
+
+這是 Input-3 真正的設計題，而它有一個一眼看不出來的陷阱：把 RSEM 的**路徑**寫進
+`load_rsem` 卡的參數，recipe 就綁死一批資料 —— 換一個 lot 要改 recipe，
+而 recipe 是「站點差異」的家，不是「這一批資料在哪」的家（最高指導原則）。
+KLARF 本身從來沒有寫在 recipe 裡，就是這個道理。
+
+所以：
+
+```
+recipe（可攜）        load_rsem 卡說：我要一個叫 "rsem" 的來源，配對規則 = 檔名
+資料層（每批不同）    Studio 的載入對話框／CLI 的 --rsem <路徑> 把插槽綁到真的檔案
+lint                 「這份 recipe 需要一個 rsem 來源，你還沒有指定」← 跑之前就講
+```
+
+卡片的參數因此是**插槽名 + 配對規則 + 流名**，不是路徑。這也讓同一份 recipe
+在「有 RSEM」與「沒有 RSEM」的兩批資料上有明確的行為差異（後者 lint 就擋下來），
+而不是安靜地少一條流。
 
 `channel_map` 的三個設計點：
 
@@ -393,7 +426,23 @@ manifest JSON（`label_map`）、alignment CSV／JSON。契約已經寫好在
 | `Context` 允不允許兩條**不同尺寸**的流共存 | ✅ 可以（`set_image` 不綁尺寸）。所以 128² 的 patch 與 512² 的 RSEM 可以同時在一顆裡 |
 | `subtract` 對尺寸不符的處置 | ✅ 擋下來並講清楚：`'patch' and 'rsem' differ in size ((128,128) vs (512,512)); cannot subtract.` |
 | **`align` 對尺寸不符的處置** | ❌ **警告 + 零位移**。五個 backend（phase／ncc／ecc／hybrid／template）**全部要求同尺寸**。實測：把大圖裡 (300, 200) 那一塊裁出來當 patch，五個 backend 全部回 `dx=0, dy=0, score=0` —— 有一句警告，但那三個數字照樣流進分數。**對「小圖對大圖」這個用途，align 等於功能不存在** |
-| 正確的工具在不在 | ✅ **已經在 repo 裡**：`algo/template.py::match_patch` —— `roi_template` 就是用它「把小 patch 滑進大模板」（F7-12）。所以要做的是**一張新卡**，不是新演算法 |
+| 正確的工具在不在 | ⚠ **一半**。見下面「template backend 為什麼還不夠」|
+
+##### 「align 裡的 template matching 應該就可以吧？」—— 讀了程式碼之後：**primitive 對了，座標數學不對**
+
+使用者問得對，`cv2.matchTemplate` 就是這件事的工具。但 repo 裡現成的兩支
+**都不是為「小圖進大圖」寫的**：
+
+| 現成的 | 它實際做什麼 | 為什麼還不夠 |
+|---|---|---|
+| `align` 的 `template` backend（`algo/align.py::_calculate_alignment_template`）| 確實是 `cv2.matchTemplate(TM_CCOEFF_NORMED)` | template 取的是 **base 的中心裁切**（留 `search_radius` 的邊），而 `best_dx = peak_x - sr` 把結果面當成「**以零位移為中心**」—— 那個數學只在**兩張同尺寸**時成立。而且卡片的 `search_radius` 上限 64 px，patch↔RSEM 的 offset 可能上百 |
+| `algo/template.py::match_patch`（`roi_template` 用的）| 是「把小圖滑進大模板」沒錯 | 它是為**週期性** layout 寫的：把 cell 平鋪成 canvas、再把相關面**摺回一個週期**（同相位取最大）。非週期的 RSEM 大圖用它，信心值會是錯的 |
+
+所以要補的是**同一個 primitive 的第三種座標數學**：
+template = **整張小圖**（可選去掉邊緣幾 px 的 scan artifact）、搜尋**整張大圖**、
+peak = 小圖左上角在大圖裡的**絕對位置**（不是相對位移），
+**搜尋範圍不受 `search_radius` 限制**。工作量是一個 algo 函式（約 30 行）+ 一張卡
+—— 比「寫新演算法」小得多，但**不是「已經可以」**。
 
 ##### 提案：新卡「Locate in a larger image」（Compare 段）
 
@@ -439,6 +488,24 @@ manifest JSON（`label_map`）、alignment CSV／JSON。契約已經寫好在
   這件事要在 UI 上先講，不是等使用者按了 Export 才發現。
 - 讀單頁一律走 `tiff_index.read_page`（`tifffile`），**不要**走 `cv2.imdecode`。
 
+##### GDS 的 source 放 Input 還是放 ROI 段？—— **載入放 Input，解讀放 ROI**
+
+使用者問的。我的答案與四個理由：
+
+| 理由 | 說明 |
+|---|---|
+| **GLAS 給的是兩個檔，用途不同段** | `_label.png` 是**區域**（ROI 段要）、`_gray.png` 是**影像流**（Compare 段當合成 ref）。放進 ROI 卡的話，gray 那一半就沒有家 —— 而它們是同一個來源的兩個輸出，一張 Input 卡兩顆輸出埠正好 |
+| **快取簽章** | 影像段快取是照「`DefectItem` 帶著哪些來源」算簽章的。ROI 卡自己讀檔的話，**換了 mask 目錄簽章看不見** → 回舊影像（鐵則 9，F9 踩過兩次）|
+| **同一條流會有第二個消費者** | overlay 要畫 label、以後「gray 當 ref」也要它。讀檔藏在 ROI 卡裡，第二個用途就得再讀一次檔（於是有兩份配對規則，其中一份會長歪）|
+| **畫布不能說謊** | 一個來源在畫布上要有一個節點、一條線。ROI 卡裡偷偷冒出資料，就是 F10 修掉的那個形狀 |
+
+**但使用者體驗上「GDS 的事在一個地方」這個訴求是對的**，所以不靠合併卡片來達成：
+ROI 卡的**右下角儀表**（`ui/inspectors.py` 依 `Step.key` 註冊）顯示 label 上色預覽、
+對到幾個區域、對位分數。設定在 Input、**看**在 ROI —— 兩邊都在使用者眼前。
+
+（反面論點也記著：如果哪天 GDS 那條路變成「一張卡從頭到尾自己搞定」，
+那就是這個決定要重看的時候。判準是「有沒有第二個消費者」。）
+
 ##### Input-3 — 第二個資料來源，逐顆配對（**一個機制、三個用途**）
 
 RSEM 大圖、GLAS 的 `_label.png`、GLAS 的 `_gray.png` 是**同一件事**：
@@ -472,8 +539,8 @@ RSEM 大圖、GLAS 的 `_label.png`、GLAS 的 `_gray.png` 是**同一件事**�
 | ✅ Input-0 | 多入口（`Step.is_source`）| 其餘全部踩在它上面。**完成 2026-08-17** |
 | Input-1 | `channel_map`：頁 → 流的命名（含頁數不符擋下來）| Input-2 的分組要用它的通道數；而且它是「五通道能不能被正確命名」本身 |
 | Input-2 | `tiff_stack`：大 TIFF 沒有 KLARF | 使用者的多通道資料就是這個形式；順帶修掉「15 頁 TIFF 安靜變成一顆」|
-| Input-3 | 第二個資料來源逐顆配對（RSEM／GLAS sidecar 共用一個機制）| patch ↔ RSEM 的前提 |
-| Compare-1 | 新卡「Locate in a larger image」＋ 修 `align` 尺寸不符 | 對位本身。Input-3 進來之後才有兩條流可以對 |
+| Input-3 | **插槽機制** + `load_rsem` / `load_layout` 兩張卡（一種 source 一張卡，§3.1.7）| patch ↔ RSEM 的前提；RSEM 與 GLAS 共用同一個機制 |
+| Compare-1 | 新卡「Locate in a larger image」（matchTemplate 的第三種座標數學，§3.1.9）＋ 修 `align` 尺寸不符要報錯 | 對位本身。Input-3 進來之後才有兩條流可以對 |
 | 防呆 | 非 8-bit 就講一句話；一批之內尺寸忽然變了就講一句話 | 兩個都是幾行的事，但擋掉的是「安靜地算出垃圾」|
 
 ### 3.2 Enhance
