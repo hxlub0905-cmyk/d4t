@@ -5,7 +5,7 @@ f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
 593e295af2c1273f76a872412ea5f585d15895a3 AGENTS.md
 d0bb806984bf219aa80264f12c5a91f7138ff333 CLAUDE.md
 87c3cb2a07ed7a97b98ec30aa139b3dd2f03ff19 README.md
-bae7fb12a23ad0244ece4c92bb563fdb585cf7b2 SESSION_LOG.md
+3e274626223835e9d08d5a970497ed2988e65f05 SESSION_LOG.md
 650a5d7c8bc6db42eed4054174823bfcfceb7eae adept/__init__.py
 c36c6343079bd506222906f26059cecf6d25ad7f adept/__main__.py
 8a51dfe499b3a9d81434c8a202f2d17c24b71c74 adept/core/__init__.py
@@ -84,14 +84,15 @@ cc1e82ef72207fda70c03fa6646a0c1581eac9b2 adept/ui/widgets.py
 669770bafa48f033c7d1e9fda77f342b3369070e adept/ui/workers.py
 04c5ce471195ac4e2449126ce835b22b4c880cf3 conftest.py
 7e5d6f7d159a437c1b57f738021f6f92517f5308 docs/ARCHITECTURE.md
-91f9753c60a1ab3ae57cfe246ebeef065d6c563a docs/FAB-VALIDATION.md
+57b5bfe58946c44dc1d109019d093d656ba27a58 docs/FAB-VALIDATION.md
 8e18ac4032d5bd9c46723d63055092017d603841 docs/HANDOVER.md
 b258ee9ccb0e12fcdf10e2dcab584fddabe10918 docs/NO-GIT-SETUP.md
 b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
-4558b59646f8ef6c8aa80c4368ad7895166944c9 docs/ROADMAP.md
+04103ba1c9dcd0fc5d4876a84002bd5f1cf27c84 docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
+d292fe55a97b7b830210c69ac2706af22fca7b71 docs/plans/F11-phase2-features.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
 fdf5dba17526e86ea0990c7853ef652874082324 fab_probe/probe_klarf.py

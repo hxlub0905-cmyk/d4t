@@ -74,14 +74,20 @@
 對著還會長的東西寫說明書、做範例，寫完就得重寫。而範例 recipe 現在**刻意
 一份都沒有**（使用者：「現在還沒有打算給人用，就我自己測試」）。
 
+計畫書：[`plans/F11-phase2-features.md`](plans/F11-phase2-features.md)（含現況稽核、
+排序理由、每一項的規格草案與待定調的三題）。
+
+**演算法一律重寫、不照抄 vendored 的**（使用者 2026-08-17：「我基本會想要優化改良」）。
+範圍見計畫書 §2.1 —— 確認之前不動任何演算法檔案。
+
 | 項目 | 說明 |
 |---|---|
-| GDS ROI 定位 | ROI 的第三條路，出口契約已經留好（見 [`ARCHITECTURE.md`](ARCHITECTURE.md)），下游零改動 |
-| Region Stats / FFT 卡 | v1 移出的（MMH 有現成資產）|
-| ML Classify 卡 | 吃已經匯得出來的 feature vector CSV |
-| PCA Ref | Fusi³ 的 PCA fusion |
-| BSE/SE 多通道融合 | Fusi³ 的 quadrant 融合 |
-| `snr_map` 多來源 | F10-3 只做了「只吐數字」的量測卡；會產生新流的卡要先決定「一條流一張輸出圖」怎麼命名（見 [`plans/F10-canvas-tells-the-truth.md`](plans/F10-canvas-tells-the-truth.md) §6）|
+| mask 進來（原 GDS ROI 定位） | **ADEPT 不解析 layout**（2026-08-17 定調）：GDS/OASIS 留在上游 [GLAS](https://github.com/hxlub0905-cmyk/GLAS)，ADEPT 只吃它產出的 mask image、與 defect 一一對應（樣本之後提供）。出口契約已經留好（見 [`ARCHITECTURE.md`](ARCHITECTURE.md)），下游零改動 |
+| `snr_map` 多來源 + 產流卡的命名契約 | F10-3 只做了「只吐數字」的量測卡；會產生新流的卡要先決定「一條流一張輸出圖」怎麼命名（見 [`plans/F10-canvas-tells-the-truth.md`](plans/F10-canvas-tells-the-truth.md) §6）。**PCA Ref、BSE/SE 融合、會吐圖的 Region Stats 都踩在這條規則上** |
+| Blob 分割 + 離群旗標（**新發現的缺口**）| 演算法在（`algo/blob.py`、`algo/stats.py`）卻**沒有卡片**，而 `cd_measure` 的警告叫使用者「run Blob segment first」、`overlay` 的主 blob 紅框兩條路都沒有生產者。詳見計畫書 §1.1 |
+| Region Stats / FFT 卡 | v1 移出的。FFT 那一半可以接 `algo/period.py` 既有的 rFFT |
+| 多通道（BSE + 4×SE 同 TIFF）→ PCA Ref / 融合 | 頁數機制已支援任意頁，但**頁的名字只能在 ingest 層決定，recipe 摸不到**（現在叫 `test, ref, img3…`）。前提是廠內事實，見計畫書 §6.1 |
+| ML Classify 卡 | **Phase 2 後半**（2026-08-17 定調）。吃已經匯得出來的 feature vector CSV；相依策略到時候再定 |
 
 ## Phase 3 —— 讓人用得起來（原 Phase 2）
 

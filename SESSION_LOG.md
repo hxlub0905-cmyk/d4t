@@ -9,9 +9,47 @@
 | 2026-08 起 | 這個檔案（下面） |
 | 2026-07 | [`docs/history/2026-07.md`](docs/history/2026-07.md) —— M0–M7、F7-9…F7-24 前半、兩台機器與搬運通道的成形 |
 
-封存不是整理癖：這個檔案**只增不減**，而它跟著整包被複製進公司機，
-而搬運包離 GitHub 的 1 MB 顯示上限只剩不到一成（見 `AGENTS.md` §2）。
-封存目錄不進包，所以寫下去的東西不會再吃掉搬運的餘裕。
+封存不是整理癖：這個檔案**只增不減**，而它跟著整包被複製進公司機。
+包的大小**不是限制**（2026-08-17 使用者確認直接複製 raw，見 `AGENTS.md` §2）——
+封存現在是為了 diff 乾淨與公司機用不到的東西不佔體積，不再是為了那道 1 MB 的線。
+
+---
+
+## Phase 2 開工：計畫書 F11 + 三項現況稽核（2026-08-17 第三輪）
+
+Phase 1 收斂之後開 Phase 2 的計畫。這一輪**沒有動任何程式碼** ——
+只讀 code、寫計畫書（[`docs/plans/F11-phase2-features.md`](docs/plans/F11-phase2-features.md)）、
+順手修兩處會害人做錯事的文件漂移。
+
+### 讀出來的三件事（ROADMAP 上那一行寫的跟實際起點不一樣）
+
+- **有演算法、沒有卡片，而且是看得見的。** `algo/blob.py` 與 `algo/stats.py`
+  沒有任何卡片在用，於是三個引用懸空：`cd_measure` 的警告叫使用者
+  「run Blob segment first」（那張卡不存在）、它讀的 `ctx.meta["blobs"]` 沒有
+  生產者、`overlay` 的「主 blob 紅框」兩條退路都沒有生產者。
+  **F10 那個形狀的親戚：文字（與輸出功能）說得出來的東西，引擎做不到。**
+- **多通道的機制在，但 recipe 摸不到命名。** `_channel_name` 支援任意頁數，
+  可是 `channel_order` 只有測試傳過 —— 一顆五頁的 defect 現在會載成
+  `test, ref, img3, img4, img5`，而 recipe 與 Studio 沒有任何地方改得動。
+- **GDS 這一項的起點整個變了**（見下）。
+
+### 使用者定調
+
+| 題 | 答 |
+|---|---|
+| 演算法 | **不照抄 vendored 的，要重寫／優化改良**。範圍（只動沒卡片在用的那兩個，還是連 18 張卡在用的一起）等確認 —— 後者會讓黃金值全部改變，要重新定錨 |
+| GDS ROI | **ADEPT 不解析 layout。** GDS/OASIS 留在上游 GLAS，ADEPT 只吃它產的 mask image、與 defect 一一對應（樣本之後提供）。整項從「vendoring 125 KB 的 OASIS streamer」變成「定一個 mask 進來的契約」，而且**可以用合成資料驗證** |
+| ML Classify | Phase 2 後半 |
+| 多通道 | 使用者反問「是指一張 TIFF 含多張圖（1 BSE + 4 SE，同時收）嗎」→ 是。實際頁數與順序回問使用者（計畫書 §6.1）|
+
+### 值得記下來的
+
+- **出口契約留對了，上游換掉也不用改下游。** GDS 從「自己解析」變成「吃 GLAS 的
+  mask」，而 `ARCHITECTURE.md` 的定位法契約（吐具名區域）一個字都不用改 ——
+  量測卡、`roi_mask`、overlay、region check 全部零改動。
+- **文件漂移抓到一處是會害人的**：`FAB-VALIDATION.md` 還叫公司機複製
+  `bundle/ADEPT_part1of6.py … part6of6.py`，而那些檔案早就不存在（現在是單檔）。
+  照著做的人會什麼都搬不進去。順手連 `SESSION_LOG` 開頭那句 1 MB 一起修。
 
 ---
 
