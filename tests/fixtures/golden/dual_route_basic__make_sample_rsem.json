@@ -1,0 +1,147 @@
+{
+  "defects": {
+    "1": {
+      "bin": 1,
+      "error": null,
+      "features": {
+        "align_dx": "0.036144370866139752",
+        "align_dy": "-0.01348431295230057",
+        "align_score": "73.362181866541505",
+        "area_px": "65536",
+        "cd_x_px": "256",
+        "cd_y_px": "256",
+        "glv_max": "84",
+        "glv_median": "6",
+        "glv_std": "2.0548161481222746",
+        "golden_ghost": "99.999994367185522",
+        "golden_px": "24",
+        "golden_py": "24",
+        "n_channels": "1",
+        "score": "30.53057264309529",
+        "snr_max": "1.2316300868988037"
+      },
+      "ok": true,
+      "score": "30.53057264309529"
+    },
+    "2": {
+      "bin": 1,
+      "error": null,
+      "features": {
+        "align_dx": "-0.035384063913966202",
+        "align_dy": "-0.028356046002613766",
+        "align_score": "76.083539831452072",
+        "area_px": "65536",
+        "cd_x_px": "256",
+        "cd_y_px": "256",
+        "glv_max": "15",
+        "glv_median": "5",
+        "glv_std": "1.3716675513397514",
+        "golden_ghost": "99.9999984084494",
+        "golden_px": "24",
+        "golden_py": "24",
+        "n_channels": "1",
+        "score": "5.342829175428049",
+        "snr_max": "1.4831533432006836"
+      },
+      "ok": true,
+      "score": "5.342829175428049"
+    },
+    "3": {
+      "bin": 0,
+      "error": null,
+      "features": {
+        "align_dx": "-0.0041586603916243803",
+        "align_dy": "-0.021143229123396168",
+        "align_score": "77.055162843316793",
+        "area_px": "65536",
+        "cd_x_px": "256",
+        "cd_y_px": "256",
+        "glv_max": "11",
+        "glv_median": "5",
+        "glv_std": "1.2834818811594062",
+        "golden_ghost": "99.999999970648858",
+        "golden_px": "24",
+        "golden_py": "24",
+        "n_channels": "1",
+        "score": "3.3642057502145852",
+        "snr_max": "1.4900976419448853"
+      },
+      "ok": true,
+      "score": "3.3642057502145852"
+    },
+    "4": {
+      "bin": 1,
+      "error": null,
+      "features": {
+        "align_dx": "-0.015688431417487436",
+        "align_dy": "-0.038914197859298838",
+        "align_score": "76.3386613689363",
+        "area_px": "65536",
+        "cd_x_px": "256",
+        "cd_y_px": "256",
+        "glv_max": "13",
+        "glv_median": "5",
+        "glv_std": "1.2715413773704867",
+        "golden_ghost": "99.999999906393327",
+        "golden_px": "24",
+        "golden_py": "24",
+        "n_channels": "1",
+        "score": "4.5158414599801588",
+        "snr_max": "1.233805775642395"
+      },
+      "ok": true,
+      "score": "4.5158414599801588"
+    },
+    "5": {
+      "bin": 1,
+      "error": null,
+      "features": {
+        "align_dx": "-0.011449718261985709",
+        "align_dy": "-0.013090629344020499",
+        "align_score": "76.357255287002772",
+        "area_px": "65536",
+        "cd_x_px": "256",
+        "cd_y_px": "256",
+        "glv_max": "15",
+        "glv_median": "5",
+        "glv_std": "1.2959097852404109",
+        "golden_ghost": "99.999999991959839",
+        "golden_px": "24",
+        "golden_py": "24",
+        "n_channels": "1",
+        "score": "5.5682084268288241",
+        "snr_max": "1.4770476818084717"
+      },
+      "ok": true,
+      "score": "5.5682084268288241"
+    },
+    "6": {
+      "bin": 1,
+      "error": null,
+      "features": {
+        "align_dx": "-0.022711471386628546",
+        "align_dy": "0.01594624241550946",
+        "align_score": "75.447088591754436",
+        "area_px": "65536",
+        "cd_x_px": "256",
+        "cd_y_px": "256",
+        "glv_max": "16",
+        "glv_median": "5",
+        "glv_std": "1.4049759728746953",
+        "golden_ghost": "99.999999483333298",
+        "golden_px": "24",
+        "golden_py": "24",
+        "n_channels": "1",
+        "score": "5.7743510451738143",
+        "snr_max": "3.4210331439971924"
+      },
+      "ok": true,
+      "score": "5.7743510451738143"
+    }
+  },
+  "generator": "make_sample_rsem",
+  "kind": "rsem",
+  "n": 6,
+  "recipe": "dual_route_basic.json",
+  "seed": 11
+}

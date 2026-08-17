@@ -16,6 +16,15 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
+#: 「先載一份真的 pipeline 進來」用的 recipe。
+#:
+#: 以前這幾條測試呼叫的是 ``window.load_template()``。範例 recipe 2026-08-16
+#: 全部拿掉之後那支會找不到檔案、回 ``False`` —— 而**這些測試仍然會過**，
+#: 因為它們沒有檢查回傳值，而 ``run_trial`` 用空流程也跑得完。
+#: 那是最糟的一種綠燈：中止鈕的行為在「有東西可跑」的前提下才有意義。
+FIXTURE_RECIPE = (Path(__file__).resolve().parent
+                  / "fixtures" / "recipes" / "die_to_die_basic.json")
+
 
 def _import_qt(g):
     from PySide6.QtGui import QKeySequence
@@ -130,12 +139,11 @@ def test_the_history_does_not_grow_without_bound():
     assert len(m._undo) == m.UNDO_DEPTH
 
 
-def test_loading_a_recipe_starts_a_new_history(window, tmp_path):
+def test_loading_a_recipe_starts_a_new_history(window):
     """載進來的檔案在那之前發生的事，不屬於這一份 recipe。"""
     window.model.add_step("align")
-    path = tmp_path / "r.json"
-    assert window.save_recipe_path(str(path)) is True
-    assert window.load_recipe_path(str(path)) is True
+    assert window.model.can_undo() is True
+    assert window.load_recipe_path(str(FIXTURE_RECIPE), sync=True) is True
     assert window.model.can_undo() is False
 
 
@@ -153,7 +161,7 @@ def test_studio_says_so_when_there_is_nothing_to_undo(window):
 # --------------------------------------------------------------------------- #
 def test_the_usual_keys_all_exist(window):
     keys = {sc.key().toString() for sc in window._shortcuts}
-    for want in ("Ctrl+O", "Ctrl+S", "Ctrl+R", "Ctrl+Z", "Ctrl+0"):
+    for want in ("Ctrl+O", "Ctrl+R", "Ctrl+Z", "Ctrl+0"):
         assert QKeySequence(want).toString() in keys, want
 
 
@@ -169,12 +177,16 @@ def test_ctrl_z_is_wired_to_undo(window):
 
 def test_the_shortcut_is_written_where_it_will_be_found(window):
     """按鍵存在還不夠 —— 要發現得到。而且 ``_update_action_states`` 每次
-    refresh 都會重寫這幾顆的 tooltip，設一次的話第一次 refresh 就沒了。"""
-    assert "Ctrl+S" in window.btn_save_recipe.toolTip()
+    refresh 都會重寫這幾顆的 tooltip，設一次的話第一次 refresh 就沒了。
+
+    （以前拿 ``Ctrl+S`` / Save Recipe 當例子。存檔功能還沒支援，改用
+    ``Ctrl+O`` —— 它同樣走 ``_set_tip``，而且 refresh 也會重寫它。）
+    """
+    assert "Ctrl+O" in window.btn_open_klarf.toolTip()
     assert "Ctrl+R" in window.btn_trial.toolTip()
     window.model.add_step("align")
     window._refresh_all()
-    assert "Ctrl+S" in window.btn_save_recipe.toolTip(), "refresh 之後不見了"
+    assert "Ctrl+O" in window.btn_open_klarf.toolTip(), "refresh 之後不見了"
 
 
 def test_ctrl_f_opens_the_card_search(window):
@@ -211,28 +223,21 @@ def test_the_three_answers_do_what_they_say(window, answer, expected):
         window.PROMPT_ON_CLOSE = False
 
 
-def test_cancelling_the_save_dialog_means_do_not_close(window):
-    """在存檔對話框按取消，意思是「我改變主意了」，不是「丟掉吧」。"""
+def test_the_prompt_no_longer_offers_a_save_it_cannot_do(window):
+    """存檔功能還沒支援，所以關窗提示只剩「丟掉 / 先別關」兩個答案。
+
+    以前有第三個「存檔」。留著它會是一顆做不到自己承諾的鈕 —— 而且預設答案
+    是它，使用者按 Enter 就會撞牆。現在預設答案是 **Cancel**（先別關），
+    因為關掉之後真的沒有任何辦法把這份 pipeline 找回來。
+    """
+    assert not hasattr(window, "_on_save_recipe")
+    assert not hasattr(window, "save_recipe_path")
     window.model.add_step("align")
-    window._ask_unsaved = lambda: "save"
-    window._on_save_recipe = lambda: False       # 使用者在存檔對話框按了取消
+    window._ask_unsaved = lambda: "save"     # 舊答案，現在不該有任何效果
     window.PROMPT_ON_CLOSE = True
     try:
-        assert window.confirm_close() is False
-    finally:
-        window.PROMPT_ON_CLOSE = False
-
-
-def test_saving_from_the_prompt_lets_it_close(window, tmp_path):
-    window.model.add_step("align")
-    window._ask_unsaved = lambda: "save"
-    window._on_save_recipe = lambda: window.save_recipe_path(
-        str(tmp_path / "saved.json"))
-    window.PROMPT_ON_CLOSE = True
-    try:
-        assert window.confirm_close() is True
-        assert (tmp_path / "saved.json").exists()
-        assert window.unsaved_changes() is False
+        assert window.confirm_close() is False, \
+            "只有 discard 算「可以關」——認不得的答案一律當成先別關"
     finally:
         window.PROMPT_ON_CLOSE = False
 
@@ -261,7 +266,7 @@ def test_stop_only_shows_while_something_is_running(window, tmp_path):
     assert window.stop_available() is False
     out = generate(str(tmp_path / "lot"), n=6, seed=1)
     window.load_dataset_path(out["klarf"], sync=True)
-    window.load_template()
+    assert window.load_recipe_path(str(FIXTURE_RECIPE), sync=True) is True
     assert window.run_trial(n=6, sync=True) is True
     assert window.stop_available() is False, "同步跑完之後不該還留著中止鈕"
     assert window.stop_run() is False
@@ -274,7 +279,7 @@ def test_the_stop_button_is_there_while_a_real_run_is_in_flight(window, tmp_path
 
     out = generate(str(tmp_path / "lot3"), n=40, seed=5)
     window.load_dataset_path(out["klarf"], sync=True)
-    window.load_template()
+    assert window.load_recipe_path(str(FIXTURE_RECIPE), sync=True) is True
     assert window.run_trial(n=40, sync=False) is True
     try:
         assert window.stop_available() is True
@@ -292,7 +297,7 @@ def test_stopping_keeps_what_already_finished(window, tmp_path):
 
     out = generate(str(tmp_path / "lot2"), n=8, seed=2)
     window.load_dataset_path(out["klarf"], sync=True)
-    window.load_template()
+    assert window.load_recipe_path(str(FIXTURE_RECIPE), sync=True) is True
     window._trial_t0 = 0.0
     # 直接模擬「跑到一半被按停」：worker 中止後仍會把部分結果送出來
     window.trial_worker.abort()

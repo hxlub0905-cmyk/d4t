@@ -71,15 +71,21 @@ def test_the_ports_themselves_still_start_a_connection(window):
 # --------------------------------------------------------------------------- #
 # 3. 接在哪一張後面、做在哪一條流上
 # --------------------------------------------------------------------------- #
-def test_the_new_card_works_on_the_stream_it_was_added_for(window):
-    """接在一張做 ref 的卡後面，結果新卡做在 test 上，使用者就得回控制列改參數
-    —— 而那正是他說「變很複雜」的東西。"""
+def test_the_card_works_on_the_stream_the_line_came_from(window):
+    """新卡做在哪一條流上，由**使用者拉的那條線**決定（F9-7）。
+
+    F7-14 時是加卡順手決定的（``add_card_after(..., "ref")``）；2026-08-16
+    使用者退掉了那件事 —— 「新增卡 不要自己接線」。線是唯一的作者，所以這一條
+    改成問「從 ref 那顆埠拉過來，這張卡是不是就做在 ref 上」。
+    """
     src = window.model.node_order[0]
-    nid = window.add_card_after(src, "denoise", "ref")
+    nid = window.add_card_after(src, "denoise")
+    window._on_edge_added(src, nid, "ref")
     assert window.model.nodes[nid].params["streams"] == "ref"
     assert "ref" in window.status_text()
 
-    other = window.add_card_after(src, "denoise", "test")
+    other = window.add_card_after(src, "denoise")
+    window._on_edge_added(src, other, "test")
     assert window.model.nodes[other].params["streams"] == "test"
 
 
@@ -87,10 +93,11 @@ def test_adding_after_a_card_puts_it_after_that_card(window):
     """接在中間，不是接在最後面 —— 使用者指的是「這一張的後面」。"""
     src = window.model.node_order[0]
     last = window.add_card_after(src, "align")
-    middle = window.add_card_after(src, "denoise", "test")
+    middle = window.add_card_after(src, "denoise")
     order = window.model.node_order
     assert order.index(src) < order.index(middle) < order.index(last)
-    assert (src, middle) in window.model.edges, "使用者的動作是「接」，線要是實線"
+    # F9-7：**線不會自己出現**。順序是順序，資料從哪來是使用者拉的線。
+    assert (src, middle) not in window.model.edge_pairs()
 
 
 # --------------------------------------------------------------------------- #
@@ -100,19 +107,20 @@ def test_the_subtitle_says_what_the_card_does_not_its_id(window):
     """副標以前印的是 node_id（`roi_template`）—— 那是 recipe JSON 的鍵，
     而卡片名字就在它上面一行，所以那一行等於沒有資訊。"""
     src = window.model.node_order[0]
-    a = window.add_card_after(src, "align", "test")
+    a = window.add_card_after(src, "align")
     assert window.pipeline.card(a).subtitle() == "test ref → ref_aligned"
 
     b = window.add_card_after(a, "subtract")
-    c = window.add_card_after(b, "roi_template", "diff")
+    c = window.add_card_after(b, "roi_template")
+    window._on_edge_added(b, c, "diff")        # 來源由線決定（F9-7）
     # Region 卡不寫影像流，它定義的是具名區域 —— 副標仍然要講得出它產出什麼
     assert window.pipeline.card(c).subtitle() == "diff → cell"
 
 
 def test_a_repeated_card_shows_which_one_it_is(window):
     src = window.model.node_order[0]
-    window.add_card_after(src, "denoise", "test")
-    second = window.add_card_after(src, "denoise", "ref")
+    window.add_card_after(src, "denoise")
+    second = window.add_card_after(src, "denoise")
     assert window.pipeline.card(second).subtitle().startswith("denoise2 · ")
 
 

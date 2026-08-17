@@ -10,6 +10,7 @@ import json
 import pytest
 
 from adept.core.pipeline import (
+    Edge,
     CATEGORY_ALGO,
     CATEGORY_IMAGE,
     ParamSpec,
@@ -117,7 +118,7 @@ def codes(issues):
 # JSON serde
 # ---------------------------------------------------------------------------
 def test_json_round_trip_dict():
-    r = make_recipe(edges=[["load", "snr"]])
+    r = make_recipe(edges=[Edge("load", "snr")])
     d = r.to_json_dict()
     r2 = Recipe.from_json_dict(d)
     assert r2 == r
@@ -147,17 +148,106 @@ def test_json_missing_required_field():
         Recipe.from_json_dict({"recipe_id": "x"})
 
 
-def test_save_load_atomic(tmp_path):
+def test_load_reads_utf8_json(tmp_path):
+    """從磁碟讀一份 recipe（``Recipe.save`` 已移除 —— 存檔功能還沒支援）。"""
     r = make_recipe()
     p = tmp_path / "recipe.json"
-    r.save(p)
-    assert p.exists()
-    assert not (tmp_path / "recipe.json.tmp").exists()   # atomic：tmp 已 replace
+    p.write_text(json.dumps(r.to_json_dict(), ensure_ascii=False, indent=2),
+                 encoding="utf-8")
     r2 = Recipe.load(p)
     assert r2 == r
-    # utf-8 中文 description 不會壞
-    raw = p.read_text(encoding="utf-8")
-    assert "單元測試" in raw
+    assert "單元測試" in p.read_text(encoding="utf-8")   # utf-8 中文不會壞
+
+
+def test_a_json_round_trip_changes_nothing():
+    """``to_json_dict`` → ``from_json_dict`` 必須是 identity。
+
+    這不是「序列化好棒棒」那種形式測試 —— **``run_batch`` 就是用這一對把
+    recipe 送進 worker 行程的**。它一旦不是 identity，同一份 recipe 在
+    ``workers=1`` 與 ``workers=2`` 下就會算出不同的答案，而兩邊都跑得完、
+    都有數字。
+
+    真的發生過（2026-08-14 到 2026-08-16）：有一道遷移看到 subtract 沒寫 ``b``
+    就補上 ``ref_aligned``，於是記憶體裡的 recipe 比 ``test - ref``、
+    繞過 JSON 的那份比 ``test - ref_aligned``，glv_max 50 vs 43。
+    遷移只能靠「舊東西在不在」判斷，不能靠「新東西不在」——
+    後者分不出「舊檔案」與「新 recipe 用新預設」。
+    """
+    r = make_recipe()
+    again = Recipe.from_json_dict(json.loads(json.dumps(r.to_json_dict())))
+    assert again == r
+    for nid, node in r.nodes.items():
+        assert again.nodes[nid].params == node.params, nid
+
+
+def test_a_subtract_without_an_explicit_b_keeps_the_card_default():
+    """省略參數 = 用卡片當下的預設，讀檔不可以幫它填一個別的值。"""
+    d = {
+        "recipe_id": "omit",
+        "routes": {"ebi_patch": ["load", "sub"]},
+        "nodes": {"load": {"step": "load_patch", "params": {}},
+                  "sub": {"step": "subtract", "params": {}}},
+        "score": {"expr": "1", "threshold": 0.0},
+    }
+    r = Recipe.from_json_dict(d)
+    assert r.nodes["sub"].params == {}, "讀檔不該無中生有塞參數進去"
+
+
+# ---------------------------------------------------------------------------
+# Edge —— 線帶埠（F9-1）
+# ---------------------------------------------------------------------------
+def test_an_old_two_item_edge_still_loads():
+    """F9 之前的 ``[src, dst]`` 要讀得進來，埠留空 = 還沒指定。
+
+    判斷依據是「**長度就是 2**」—— 舊東西**在**，不是新東西不在（鐵則 9）。
+    """
+    d = {
+        "recipe_id": "old_edges",
+        "routes": {"ebi_patch": ["load", "sub", "snr"]},
+        "nodes": {"load": {"step": "t_load_pair"}, "sub": {"step": "t_subtract"},
+                  "snr": {"step": "t_snr"}},
+        "edges": [["load", "snr"]],
+        "score": {"expr": "1", "threshold": 0.5, "bins": {"below": 0, "above": 1}},
+    }
+    r = Recipe.from_json_dict(d)
+    assert r.edges == [Edge(src="load", dst="snr", src_out="", dst_in="")]
+    # 讀進來之後寫出去就是新格式，而**執行順序沒有變**
+    assert r.to_json_dict()["edges"] == [["load", "", "snr", ""]]
+    assert execution_order(r, "ebi_patch") == ["load", "sub", "snr"]
+
+
+def test_an_edge_with_ports_round_trips():
+    r = make_recipe(edges=[Edge("load", "sub", src_out="ref", dst_in="b")])
+    d = r.to_json_dict()
+    assert d["edges"] == [["load", "ref", "sub", "b"]]
+    assert Recipe.from_json_dict(d) == r
+    assert Recipe.from_json_dict(d).to_json_dict() == d
+
+
+def test_an_edge_of_the_wrong_shape_is_refused_loudly():
+    """三個欄位的邊沒有意義 —— 與其猜，不如當場講出格式。"""
+    for bad in ([["a"]], [["a", "b", "c"]], [["a", "b", "c", "d", "e"]]):
+        d = {
+            "recipe_id": "bad_edge",
+            "routes": {"ebi_patch": ["load"]},
+            "nodes": {"load": {"step": "t_load_pair"}},
+            "edges": bad,
+            "score": {"expr": "1", "threshold": 0.5, "bins": {"below": 0, "above": 1}},
+        }
+        with pytest.raises(RecipeError):
+            Recipe.from_json_dict(d)
+
+
+def test_ports_do_not_change_the_execution_order_yet():
+    """F9-1 換的是**形狀**不是語意：埠填了什麼都不影響誰先跑。
+
+    這條是 F9-1 的驗收條件本身 —— 這一段如果動到執行順序，
+    ``tools/freeze_golden.py --check`` 就會整批不同，而那才是真正的災難
+    （跑得動、但答案悄悄變了）。埠要到 F9-2 才開始有作用。
+    """
+    plain = make_recipe(edges=[Edge("load", "snr")])
+    ported = make_recipe(edges=[Edge("load", "snr", src_out="ref", dst_in="b")])
+    assert execution_order(plain, "ebi_patch") == execution_order(ported, "ebi_patch")
 
 
 # ---------------------------------------------------------------------------
@@ -170,18 +260,18 @@ def test_execution_order_chain():
 
 def test_execution_order_extra_edge_consistent():
     # 額外邊與鏈一致 → 順序不變
-    r = make_recipe(edges=[["load", "snr"]])
+    r = make_recipe(edges=[Edge("load", "snr")])
     assert execution_order(r, "ebi_patch") == ["load", "sub", "snr"]
 
 
 def test_execution_order_edge_outside_route_ignored():
     # 邊的端點不在該 route 內 → 不影響
-    r = make_recipe(edges=[["ghost", "snr"], ["load", "ghost"]])
+    r = make_recipe(edges=[Edge("ghost", "snr"), Edge("load", "ghost")])
     assert execution_order(r, "ebi_patch") == ["load", "sub", "snr"]
 
 
 def test_execution_order_cycle_raises():
-    r = make_recipe(edges=[["snr", "load"]])
+    r = make_recipe(edges=[Edge("snr", "load")])
     with pytest.raises(RecipeError):
         execution_order(r, "ebi_patch")
 
@@ -239,7 +329,7 @@ def test_validate_unknown_route_kind():
 
 
 def test_validate_cycle():
-    r = make_recipe(edges=[["snr", "load"]])
+    r = make_recipe(edges=[Edge("snr", "load")])
     issues = validate(r, registry=REG)
     assert "cycle" in codes(issues)
 
@@ -405,10 +495,22 @@ def test_an_unparseable_version_does_not_crash():
         version_skew(weird)                  # 不丟例外就好
 
 
-def test_an_old_subtract_without_b_still_uses_the_aligned_ref():
-    """subtract 的預設 b 於 2026-08-14 改成 ref。省略 b 的檔案是照舊預設
-    （ref_aligned）蓋的 —— 載入遷移要把它寫回去，否則一份「align →
-    subtract」的舊 recipe 會**安靜地跳過對位**，分數整批變掉。"""
+def test_reading_a_recipe_never_invents_a_parameter():
+    """讀檔**不可以**幫任何一張卡填一個檔案裡沒有的參數值。
+
+    這條測試取代 ``test_an_old_subtract_without_b_still_uses_the_aligned_ref``
+    （2026-08-14 → 2026-08-16）。那道遷移的用意是保住舊檔行為：subtract 的預設
+    從 ``ref_aligned`` 改成 ``ref``，所以「檔案裡沒寫 b」就補回 ``ref_aligned``。
+
+    用意對，判斷依據錯 —— 它靠的是**新 key 缺席**，而「舊檔案靠舊預設」跟
+    「新 recipe 靠新預設」從缺一個 key 分不出來。實際後果：
+    ``to_json_dict`` → ``from_json_dict`` 不再是 identity，而 ``run_batch``
+    正是用這一對把 recipe 送進 worker，於是 ``workers=1`` 與 ``workers=2``
+    算出不同的分數（glv_max 50 vs 43），兩邊都跑得完、都有數字。
+
+    見 ``test_a_json_round_trip_changes_nothing`` 與 ``from_json_dict`` 裡的
+    「遷移的鐵則」那段註解。
+    """
     from adept.core.pipeline.recipe import Recipe
 
     d = {"recipe_id": "old", "version": 1,
@@ -419,7 +521,8 @@ def test_an_old_subtract_without_b_still_uses_the_aligned_ref():
          "score": {"expr": "1", "threshold": 0.0,
                    "bins": {"below": 0, "above": 1}}}
     rec = Recipe.from_json_dict(d)
-    assert rec.nodes["sub"].params["b"] == "ref_aligned"
-    # 有寫 b 的檔案（新版 Studio 一律寫滿）原樣保留
+    assert rec.nodes["sub"].params == {"op": "subtract"}, \
+        "檔案裡只寫了 op，讀完就該只有 op"
+    # 有寫 b 的檔案原樣保留
     d["nodes"]["sub"]["params"]["b"] = "ref"
     assert Recipe.from_json_dict(d).nodes["sub"].params["b"] == "ref"

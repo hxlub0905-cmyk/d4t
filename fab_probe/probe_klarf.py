@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """ADEPT 廠內探測腳本 #1：KLARF 結構探測（單檔、純標準函式庫）。
 
-用途：在廠內真實 KLARF 上確認 CLAUDE.md §8 的兩個假設 ——
+用途：在廠內真實 KLARF 上確認 docs/FAB-VALIDATION.md 的兩個假設 ——
   假設 #3「KLARF 影像佈局變體」（本腳本最重要的輸出）
   假設 #2「nm_per_px 從哪來」（欄位名獵捕）
 

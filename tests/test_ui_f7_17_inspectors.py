@@ -59,7 +59,8 @@ def _batch(points, extra=None):
 # --------------------------------------------------------------------------- #
 def test_selecting_a_card_swaps_in_its_own_panel(window):
     src = window.model.node_order[0]
-    a = window.add_card_after(src, "align", "test")
+    a = window.add_card_after(src, "align")
+    window._on_edge_added(src, a, "test")
     assert isinstance(window.inspector(), insp_mod.AlignInspector)
     assert window.bottom_page() == 0
     assert window.btn_tab_card.text() == "Alignment"
@@ -68,7 +69,8 @@ def test_selecting_a_card_swaps_in_its_own_panel(window):
 def test_a_card_without_a_panel_falls_back_to_the_feature_table(window):
     """沒註冊儀表的卡**不能**變成一片空白 —— 那比原本的特徵表還糟。"""
     src = window.model.node_order[0]
-    a = window.add_card_after(src, "align", "test")
+    a = window.add_card_after(src, "align")
+    window._on_edge_added(src, a, "test")
     window.add_card_after(a, "subtract")        # subtract 還沒有自己的儀表
     assert window.inspector() is None
     assert window.bottom_page() == 1
@@ -77,7 +79,8 @@ def test_a_card_without_a_panel_falls_back_to_the_feature_table(window):
 
 def test_you_can_still_get_to_the_features(window):
     src = window.model.node_order[0]
-    window.add_card_after(src, "align", "test")
+    _nid = window.add_card_after(src, "align")
+    window._on_edge_added(src, _nid, "test")
     window.show_bottom_page(1)
     assert window.bottom_page() == 1
     window.show_bottom_page(0)
@@ -177,7 +180,8 @@ def test_it_reads_the_engine_numbers_not_its_own(window, tmp_path):
     out = generate(str(tmp_path / "lot"), n=8, seed=17)
     window.load_dataset_path(out["klarf"], sync=True)
     src = window.model.node_order[0]
-    a = window.add_card_after(src, "align", "test")
+    a = window.add_card_after(src, "align")
+    window._on_edge_added(src, a, "test")
     window.model.set_param(a, "search_radius", 6)
     assert window.run_trial(n=8, sync=True) is True
     window.select_node(a)
@@ -275,7 +279,8 @@ def test_the_studio_preview_turns_recording_on(window, tmp_path):
     out = generate(str(tmp_path / "lotE"), n=4, seed=23)
     window.load_dataset_path(out["klarf"], sync=True)
     src = window.model.node_order[0]
-    b = window.add_card_after(src, "tone", "test")
+    b = window.add_card_after(src, "tone")
+    window._on_edge_added(src, b, "test")
     window.model.set_param(b, "contrast", 4.0)
     window.select_node(b)
     assert window.refresh_preview(sync=True) is True
@@ -343,7 +348,7 @@ def test_a_value_outside_the_batch_range_does_not_draw_off_the_chart(qapp):
 # 5. Input：哪一頁變成哪一條流
 # --------------------------------------------------------------------------- #
 def test_the_page_to_stream_mapping_is_on_screen(window, tmp_path):
-    """這是全專案第一條待廠內驗證的假設（CLAUDE.md §8）。錯了的話 diff 會整個
+    """這是全專案第一條待廠內驗證的假設（docs/FAB-VALIDATION.md）。錯了的話 diff 會整個
     反號，而畫面上完全看不出來 —— 兩張圖本來就長得很像。"""
     from make_sample import generate
 

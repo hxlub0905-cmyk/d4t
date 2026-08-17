@@ -48,24 +48,36 @@
 這條通道有兩個硬限制，設計必須繞開：
 
 1. **GitHub 不顯示超過 1 MB 的檔案。** 太大的檔案在那台機器上根本點不開來複製，
-   而整個 repo 是 2.3 MB 的純文字。「打包成功但送不進去」是最糟的一種「做完了」。
+   而整個 repo 是 3 MB 的純文字。「打包成功但送不進去」是最糟的一種「做完了」。
    兩種解法並存，因為它們的取捨不同：
-   - `ADEPT_bundle.py`：**lzma + base64 壓成 735 KB**，一次複製就搬完。
-     （gzip 壓完是 991 KB —— 太貼近上限，所以是 lzma。）代價是內容變成不可讀的
+   - `ADEPT_bundle.py`：**lzma + base64 壓成一個檔案**，一次複製就搬完。
+     （同樣的內容 gzip 壓完會超過 1 MB —— 所以是 lzma。）代價是內容變成不可讀的
      base64；但**解包程式本身仍然是可讀的 Python**，而且 `--list` 可以在寫任何
      檔案之前先列出它要寫什麼。
-   - `--split 400` 產的純文字六批：每批 < 420 KB、**記事本打開就讀得到每個
-     檔案**。要在跑之前逐字看過內容的時候才產（它每次更新會動到 2.4 MB，
+   - `--split 400` 產的純文字數批：每批 < 420 KB、**記事本打開就讀得到每個
+     檔案**。要在跑之前逐字看過內容的時候才產（它每次更新會動到 3 MB，
      所以不固定放在 repo 裡）。
-2. **一次複製一個檔案。** 178 個檔案不可能一個一個貼，所以要有整包的形式；
+2. **一次複製一個檔案。** 190 幾個檔案不可能一個一個貼，所以要有整包的形式；
    但更新的時候也不該重跑整套搬運，所以要有「只有這幾個變了」的機制。
+
+> **1 MB 不是硬牆 —— 超過還有 raw**（2026-08-16 使用者確認）。GitHub 的**檔案
+> 瀏覽頁**不顯示超過 1 MB 的檔案（那顆複製鈕跟著消失），但
+> `https://raw.githubusercontent.com/<owner>/ADEPT/main/bundle/ADEPT_bundle.py`
+> 在瀏覽器打得開，全選複製一樣搬得走。所以這個數字是**「哪一種複製法還能用」
+> 的分界**，不是「搬不搬得進去」。
+>
+> `release.py` 每次產完會報一句目前大小（純提醒，不擋任何事）。
+> 想留在「按複製鈕」那條比較好操作的路上，就把**只增不減而且公司機用不到**的
+> 文件搬進 `docs/history/`（那個目錄不進包，見 `docs/history/README.md`）——
+> 2026-08-16 這樣做之後從 962 KB 回到 892 KB。真的塞不下才 `--split` 分批。
+> 注意 `make_text_bundle.py` 自己的門檻是 `LIMIT_KB = 900`，比 1 MB 保守。
 
 ### 三條路，用在不同的時機
 
 | 情況 | 用什麼 | 成本 |
 |---|---|---|
 | **第一次搬整包** | `bundle/ADEPT_bundle.py`（壓縮成一個檔案）| **1 次複製** |
-| 同上，但想先讀過內容 | 在家用機跑 `make_text_bundle.py --split 400` 產純文字六批 | 6 次複製 |
+| 同上，但想先讀過內容 | 在家用機跑 `make_text_bundle.py --split 400` 產純文字數批 | 每批一次複製 |
 | **之後更新** | 複製 `tools/FILELIST.txt`（12 KB）→ `python tools/check_files.py` → 它列出要重新複製哪幾個 | 1 次小複製 + 幾次針對性複製 |
 | **只想跑格式探測** | 直接複製 `fab_probe/probe_*.py`（各 24–46 KB，stdlib-only 單檔，**不需要整個 repo**） | 1–3 次複製 |
 
@@ -149,7 +161,8 @@ git add -A && python tools/release.py && git add -A
 一行做完兩件事，**順序不能顛倒**（包裡面含著那份清單）：
 
 1. `tools/FILELIST.txt` —— 公司機用它判斷「哪幾個檔案要重新複製」
-2. `bundle/ADEPT_bundle.py` —— 整包壓成一個 738 KB 的 `.py`，按複製鈕就搬得走
+2. `bundle/ADEPT_bundle.py` —— 整包壓成一個 `.py`（2026-08-16 是 888 KB），
+   按複製鈕就搬得走。產完會報一行水位，見上面 §2 的警告
 
 `git add` 要在前面：兩者都是從 `git ls-files` 產的，**還沒 add 的新檔案會安靜地
 不在裡面** —— 公司機上就少一個檔案。`release.py` 會擋下這種情況並叫你先 add。
@@ -157,8 +170,8 @@ git add -A && python tools/release.py && git add -A
 **有測試守著**（`test_the_transfer_files_are_up_to_date`）：忘了跑會紅，
 而錯誤訊息就是上面那一行。過期不會有任何症狀，所以不能靠記得。
 
-純文字六批版（`--split 400`，記事本讀得懂）**不再固定產出** —— 它每次更新會動到
-2.4 MB，diff 全是噪音。需要逐字審內容的時候再產：
+純文字分批版（`--split 400`，記事本讀得懂）**不再固定產出** —— 它每次更新會動到
+3 MB，diff 全是噪音。需要逐字審內容的時候再產：
 
 ```bash
 python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
@@ -176,6 +189,7 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 | `make_filelist.py` / `make_text_bundle.py` | **家用機** | ✅ 要 | `release.py` 底下的兩支，通常不直接叫 |
 | `fetch_wheels.py` | **家用機** | ❌ | 抓 Windows wheels，帶 `wheels\` 過去 |
 | `make_mgepi_real.py` / `validate_mgepi.py` | **家用機** | ❌ | 擬真 BSE 合成 lot（MG×EPI×spacer）＋可分性驗證（要 numpy/cv2）|
+| `freeze_golden.py` | **家用機** | ❌ | 把現在算出來的 feature 表凍成黃金值（重構的安全網，見 `docs/history/plans/F9-dag-streams.md`）|
 | `check_files.py` | **公司機** | ❌ | 哪幾個檔案跟 GitHub 上不一樣（要先複製 `FILELIST.txt`）|
 | `install_offline.py` | **公司機** | ❌ | 用 `wheels\` 裝相依套件 |
 | `doctor.py` | **公司機** | ❌ | 環境自檢 |

@@ -40,7 +40,7 @@ Cell 模板（要一張原大圖）。第三招 —— 只看 patch 自己 —�
 patch 上是決定性的差別。
 
 ⚠ **pitch 一律是像素。** GDS 給的是 nm，而 ``nm_per_px`` 在 KLARF 裡沒有來源
-（見 CLAUDE.md §8：單位一律 pixel、換算搬到輸出那一刻）。這裡收 nm 的話，
+（見 docs/FAB-VALIDATION.md：單位一律 pixel、換算搬到輸出那一刻）。這裡收 nm 的話，
 它會變成第二個恆為 0 的 ``cd_x_nm``。
 """
 from __future__ import annotations

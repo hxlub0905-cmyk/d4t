@@ -24,7 +24,7 @@
 
 ### 0a. 第一次搬整包：一個檔案（推薦）
 
-`bundle/ADEPT_bundle.py` —— **735 KB，一次複製就搬完整個 repo**。
+`bundle/ADEPT_bundle.py` —— **一次複製就搬完整個 repo**（2026-08-16 是 888 KB）。
 
 1. 在瀏覽器打開 `https://github.com/hxlub0905-cmyk/ADEPT/blob/main/bundle/ADEPT_bundle.py`
 2. 按檔案右上角的**複製鈕**
@@ -45,13 +45,13 @@
 > 順帶建議把副檔名顯示打開：檔案總管 → 檢視 → 顯示 → 副檔名。
 
 它用 `lzma` + base64 壓過（stdlib，不需要裝東西）。為什麼是 lzma 而不是 gzip：
-gzip 壓完 base64 是 991 KB，太貼近 GitHub 那個 1 MB 的顯示上限；lzma 是 735 KB。
+同樣的內容 gzip 壓完會超過 GitHub 那個 1 MB 的顯示上限，lzma 才塞得下。
 
 **代價**：內容是 base64，記事本打開看不懂。**解包程式本身仍然是可讀的 Python**
 （檔案最前面約 90 行），而 `--list` 讓你在它寫任何檔案之前就看得到清單。
 想逐字讀過全部內容的話用下面那個純文字版。
 
-### 0a-2. 同一件事的純文字版：六批（要先在家用機產）
+### 0a-2. 同一件事的純文字版：分批（要先在家用機產）
 
 想在跑之前**逐字讀過內容**的話，在家用機上跑：
 
@@ -59,11 +59,11 @@ gzip 壓完 base64 是 991 KB，太貼近 GitHub 那個 1 MB 的顯示上限；l
 python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 ```
 
-會得到 `ADEPT_part1of6.py` … `part6of6.py`：**沒有壓縮、沒有 base64**，
+會得到 `ADEPT_part1ofN.py` … `partNofN.py`：**沒有壓縮、沒有 base64**，
 每個檔案的內容一行一行原樣躺在裡面（每行前面加一個 `#`，所以整份仍是合法的
-Python），記事本打開往下捲就看得到。代價是 6 次複製。
+Python），記事本打開往下捲就看得到。代價是一批一次複製（目前約 8 批）。
 
-（這個版本**不固定放在 repo 裡** —— 它每次更新會動到 2.4 MB，
+（這個版本**不固定放在 repo 裡** —— 它每次更新會動到 3 MB，
 diff 全是噪音。需要的時候再產。）
 
 對每一批做同一件事：
@@ -71,13 +71,13 @@ diff 全是噪音。需要的時候再產。）
 1. 在瀏覽器打開那一批的檔案
 2. 按檔案右上角的**複製鈕**（從已經載入的網頁複製，不會再連別的主機）
 3. 貼進記事本，存成同名的 `.py`
-4. `python ADEPT_part1of6.py`
+4. `python ADEPT_part1ofN.py`
 
 **順序不重要，重複執行也沒關係。** 每一批解完會告訴你整個 repo 還缺幾個檔案，
 全部到齊之後才會印「下一步」。
 
-為什麼純文字版要分六批：**GitHub 不顯示超過 1 MB 的檔案**，而純文字整包是
-2.4 MB —— 在那台機器上根本點不開來複製。每一批 < 420 KB。
+為什麼純文字版要分批：**GitHub 不顯示超過 1 MB 的檔案**，而純文字整包是
+3 MB —— 在那台機器上根本點不開來複製。每一批 < 420 KB。
 
 兩種版本的每個檔案都帶 **git blob SHA-1**，貼歪或被截斷會**當場講出來**，
 而且一個檔案都不會落地。
@@ -108,7 +108,7 @@ stdlib-only、單檔，複製過去直接跑。輸出是純文字且預設遮蔽
 **Download ZIP** → 解壓到任意資料夾。
 
 解壓後會得到 `ADEPT-main\`，裡面就是完整程式碼。
-GitHub 產生的 zip **不含 `.git` 資料夾**，所以裡面 174 個檔案全部是純文字，約 850 KB。
+GitHub 產生的 zip **不含 `.git` 資料夾**，所以裡面 190 幾個檔案全部是純文字，約 1 MB。
 
 ### 如果 Download ZIP 被公司擋掉
 
@@ -241,12 +241,13 @@ Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/hxlub0905-cmyk/ADEPT/m
 `.ps1` 也要 proxy 通得過才行。能過的只剩「一個純文字檔」。
 
 `tools/make_text_bundle.py` 在**有網路的機器上**把整個 repo 打成一個
-`ADEPT_bundle.py` —— **沒有任何壓縮格式、沒有 base64**，每個檔案的內容原封不動
-一行一行躺在裡面（每行前面加一個 `#`，所以整個檔案仍然是合法的 Python）。
-你可以用記事本打開它往下捲，看得到每一個檔案。
+`ADEPT_bundle.py`。預設會用 lzma + base64 壓（不然塞不進 GitHub 的 1 MB 顯示
+上限），**解包程式本身仍然是可讀的 Python**，`--list` 可以在寫任何檔案之前
+先列出它要寫什麼。想要每個檔案都逐字讀得到的話用 `--split 400`（見 §0a-2）——
+那個版本沒有壓縮也沒有 base64，記事本往下捲就看得到每一個檔案。
 
 ```
-python tools/make_text_bundle.py        # 產 ADEPT_bundle.py（約 2.4 MB 純文字）
+python tools/make_text_bundle.py        # 產 ADEPT_bundle.py（壓縮；太大會自動分批）
 ```
 
 把那個檔案帶到公司機（下載、郵件、隨身碟 —— 它就是一個 .py 檔），然後：
@@ -337,13 +338,18 @@ python tools\make_sample.py C:\temp\lot --n 100
 python -m adept gui
 ```
 
-在 Studio 裡：**開啟 KLARF** 選剛才的 `LOT_SYN.001` → **載入範本（die-to-die）**
-→ **試跑** → 拖下方的門檻線看 bin 數變化。
+在 Studio 裡：**開啟 KLARF** 選剛才的 `LOT_SYN.001` → 從左邊的卡片庫把流程組起來
+→ **試跑** → 拖下方的門檻線看 bin 數變化 → **存 Recipe**。
+
+> 這裡以前寫的是「載入範本（die-to-die）」。範例 recipe 已於 2026-08-16 全部
+> 移除，那個入口跟著收起來了 —— 現在第一條 pipeline 是自己從卡片庫組的。
 
 ## 6. 命令列批次
 
+用上一步存出來的 recipe：
+
 ```
-python -m adept run examples\recipes\die_to_die_basic.json C:\temp\lot\LOT_SYN.001 ^
+python -m adept run my_recipe.json C:\temp\lot\LOT_SYN.001 ^
     --workers 4 --cache C:\temp\cache --csv features.csv
 ```
 
@@ -352,8 +358,8 @@ python -m adept run examples\recipes\die_to_die_basic.json C:\temp\lot\LOT_SYN.0
 ## 沒有 git 的情況下，怎麼保存你的修改
 
 你的 recipe 存成單一 JSON 檔（Studio 裡「存 Recipe」），那才是你的心血結晶 ——
-程式碼可以隨時重新下載，recipe 不行。建議把 `examples\recipes\` 底下的檔案
-另外備份一份到你自己的資料夾。
+程式碼可以隨時重新下載，recipe 不行。**存到 repo 資料夾外面自己的地方**，
+並且記得備份：repo 底下的東西會被下一次搬運整包覆蓋掉。
 
 如果改了程式碼（例如加了新的步驟卡片），把改動的 `.py` 檔另外複製一份留底；
 之後在有 git 的機器上再合併回 repo。

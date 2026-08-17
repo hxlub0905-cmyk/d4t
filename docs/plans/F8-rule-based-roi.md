@@ -69,7 +69,7 @@ def _band_rect(band, length, axis):
 3. **會跟 `roi_template` 重疊**（使用者自己指出來的）。Golden Cell 的本質就是
    「拿一個完整 cell 對回相位」，跟週期＋相位是同一件事的兩種做法。
 
-`period.py` 仍然不刪（CLAUDE.md §11 的警告照舊）—— 只是這件事不歸它做。
+`period.py` 仍然不刪（CLAUDE.md §5 的警告照舊）—— 只是這件事不歸它做。
 
 ---
 
@@ -101,7 +101,7 @@ Y 投影 → 一組橫的條紋 ─┘
 這一顆真的長的樣子。衝突時相信影像，把證據留給上層講出來。
 
 ⚠ **pitch 一律是像素。** GDS 給的是 nm，而 `nm_per_px` 在 KLARF 裡沒有來源
-（CLAUDE.md §8）—— 收 nm 的話它會變成第二個恆為 0 的 `cd_x_nm`。
+（docs/FAB-VALIDATION.md）—— 收 nm 的話它會變成第二個恆為 0 的 `cd_x_nm`。
 
 ### `adept/core/steps/roi_cross.py`
 
@@ -172,6 +172,12 @@ Y 投影 → 一組橫的條紋 ─┘
 跑得動的證據：`examples/recipes/cross_regions.json` +
 `python tools/make_sample.py <dir> --pattern lines`（新增的合成 layout：
 兩軸不同週期的線陣列，比例刻意取 1.4 這種不整除的值）。
+
+> ⚠ **2026-08-16：那份 recipe 沒有了。** 使用者定調「範例 recipe 都先全部拿掉」，
+> `examples/` 整個移除（連帶收起 Studio 上的兩個範例入口，見 `ui/scope.py` 的
+> `SHOW_SAMPLE_ENTRIES`）。`roi_cross` 的行為由 `tests/test_roi_cross*.py`
+> 那五支守著，不依賴任何範例檔；要重現上面那條路徑的話，在 Studio 裡把
+> Profile 卡接起來自己存一份。
 
 ---
 

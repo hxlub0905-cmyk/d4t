@@ -12,10 +12,12 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from adept.core.pipeline import engine as engine_mod
 from adept.core.pipeline import (
     CATEGORY_ALGO,
     CATEGORY_IMAGE,
     Context,
+    ParamSpec,
     REGISTRY,
     Recipe,
     RecipeNode,
@@ -305,3 +307,230 @@ def test_result_to_json_dict_failure(dummy_steps):
     assert d["ok"] is False
     assert d["score"] is None and d["bin"] is None
     assert "boom" in d["error"]
+
+
+# ---------------------------------------------------------------------------
+# F9-2：卡片只看得到自己宣告的輸入
+# ---------------------------------------------------------------------------
+def test_a_card_cannot_see_a_stream_it_did_not_declare():
+    """偷讀一條沒宣告的流 → 當場拿到帶說明的錯誤，而不是安靜地讀到。
+
+    這是 F9-2 真正改掉的東西。以前是一個 ``ctx`` 從頭傳到尾，所以每張卡都
+    看得到「到目前為止的所有流」——「偷讀」根本不會有症狀：**畫布上不會有那條
+    線，使用者於是看不出兩張卡有關係**，而改了上游那張，下游的數字會跟著變。
+
+    這條測試如果被拿掉或改成寬鬆的，F9-5 的分支就會**安靜地錯**：兩條支線
+    互相看得到對方的流。
+    """
+    keys = ["t_f9_load", "t_f9_peeker"]
+    for k in keys:
+        REGISTRY.pop(k, None)
+
+    @register_step
+    class TF9Load(Step):
+        key = "t_f9_load"
+        label = "測試載入"
+        category = CATEGORY_IMAGE
+        help = "測試用：寫 test 與 secret 兩條流"
+        writes = ["test", "secret"]
+
+        def run(self, ctx: Context, params) -> Context:
+            ctx.set_image("test", np.zeros((4, 4), np.float32))
+            ctx.set_image("secret", np.ones((4, 4), np.float32))
+            return ctx
+
+    @register_step
+    class TF9Peeker(Step):
+        key = "t_f9_peeker"
+        label = "偷看的卡"
+        category = CATEGORY_ALGO
+        help = "測試用：宣告只讀 test，實際去讀 secret"
+        reads = ["test"]                       # ← 宣告
+        features_out = ["peeked"]
+
+        def run(self, ctx: Context, params) -> Context:
+            ctx.add_feature("peeked", float(ctx.require_image("secret").mean()))
+            return ctx                          # ← 實際（沒宣告）
+
+    try:
+        rec = make_recipe(
+            route=("nload", "npeek"),
+            nodes={"nload": RecipeNode("nload", "t_f9_load", {}),
+                   "npeek": RecipeNode("npeek", "t_f9_peeker", {})},
+            expr="0")
+        r = run_defect(rec, make_item(), "ebi_patch")
+
+        assert r.ok is False, "偷讀沒宣告的流應該當場失敗"
+        assert "secret" in r.error
+        # 訊息要講得出「這張卡看得到的是什麼」——而那份清單只有它宣告的 test
+        assert "'test'" in r.error and "secret'" in r.error
+        assert "peeked" not in (r.features or {}), "失敗的卡不該留下特徵"
+    finally:
+        for k in keys:
+            REGISTRY.pop(k, None)
+
+
+def test_a_card_still_sees_every_stream_it_did_declare():
+    """反面：宣告了的照樣拿得到 —— 隔離不是把卡片餓死。"""
+    keys = ["t_f9_load2", "t_f9_honest"]
+    for k in keys:
+        REGISTRY.pop(k, None)
+
+    @register_step
+    class TF9Load2(Step):
+        key = "t_f9_load2"
+        label = "測試載入"
+        category = CATEGORY_IMAGE
+        help = "測試用：寫 test 與 ref"
+        writes = ["test", "ref"]
+
+        def run(self, ctx: Context, params) -> Context:
+            ctx.set_image("test", np.zeros((4, 4), np.float32))
+            ctx.set_image("ref", np.full((4, 4), 3.0, np.float32))
+            return ctx
+
+    @register_step
+    class TF9Honest(Step):
+        key = "t_f9_honest"
+        label = "老實的卡"
+        category = CATEGORY_ALGO
+        help = "測試用：宣告讀 test 與 ref，也真的只讀這兩條"
+        reads = ["test", "ref"]
+        features_out = ["both"]
+
+        def run(self, ctx: Context, params) -> Context:
+            ctx.add_feature("both", float(ctx.require_image("test").mean()
+                                          + ctx.require_image("ref").mean()))
+            return ctx
+
+    try:
+        rec = make_recipe(
+            route=("nload", "nhonest"),
+            nodes={"nload": RecipeNode("nload", "t_f9_load2", {}),
+                   "nhonest": RecipeNode("nhonest", "t_f9_honest", {})},
+            expr="both")
+        r = run_defect(rec, make_item(), "ebi_patch")
+        assert r.ok is True, r.error
+        assert r.features["both"] == 3.0
+    finally:
+        for k in keys:
+            REGISTRY.pop(k, None)
+
+
+# ---------------------------------------------------------------------------
+# F9-3：特徵掛在產出它的節點上；被蓋掉的救得回來
+# ---------------------------------------------------------------------------
+def _two_measure_recipe():
+    """兩張同型別的量測卡都產 ``glv_max`` —— 撞名的最小情境。"""
+    return make_recipe(
+        route=("nload", "m1", "m2"),
+        nodes={"nload": RecipeNode("nload", "t_f93_load", {}),
+               "m1": RecipeNode("m1", "t_f93_measure", {"value": 10.0}),
+               "m2": RecipeNode("m2", "t_f93_measure", {"value": 20.0})},
+        expr="glv_max")
+
+
+def _register_f93():
+    keys = ["t_f93_load", "t_f93_measure"]
+    for k in keys:
+        REGISTRY.pop(k, None)
+
+    @register_step
+    class TF93Load(Step):
+        key = "t_f93_load"
+        label = "測試載入"
+        category = CATEGORY_IMAGE
+        help = "測試用"
+        writes = ["test"]
+
+        def run(self, ctx: Context, params) -> Context:
+            ctx.set_image("test", np.zeros((4, 4), np.float32))
+            return ctx
+
+    @register_step
+    class TF93Measure(Step):
+        key = "t_f93_measure"
+        label = "測試量測"
+        category = CATEGORY_ALGO
+        help = "測試用：吐一個指定值的 glv_max"
+        reads = ["test"]
+        features_out = ["glv_max"]
+        params = [ParamSpec("value", "float", 1.0, "要吐的值")]
+
+        def run(self, ctx: Context, params) -> Context:
+            ctx.add_feature("glv_max", float(params["value"]))
+            return ctx
+
+    return keys
+
+
+def test_the_last_card_still_wins_so_nothing_existing_changes():
+    """撞名時 ``glv_max`` 仍然是**最後一張卡**寫的值 —— 跟 F9 之前一模一樣。
+
+    這條是 F9-3 的安全帶：救回舊值不可以順便改掉既有語意，否則一份跑得好好的
+    recipe 的 score 表達式會突然指到別的數字（而且不會有任何錯誤訊息）。
+    """
+    keys = _register_f93()
+    try:
+        r = run_defect(_two_measure_recipe(), make_item(), "ebi_patch")
+        assert r.ok is True, r.error
+        assert r.features["glv_max"] == 20.0, "最後一張卡的值要贏"
+        assert r.score == 20.0
+    finally:
+        for k in keys:
+            REGISTRY.pop(k, None)
+
+
+def test_the_overwritten_feature_is_still_reachable():
+    """被蓋掉的那份留下來，叫 ``<產出它的節點>_<原名>``。
+
+    以前它**完全消失、指都指不到**（`validate` 的 feature-collision 警告就是
+    在講這件事）。現在它還在，而且名字說得出它從哪來。
+    """
+    keys = _register_f93()
+    try:
+        r = run_defect(_two_measure_recipe(), make_item(), "ebi_patch")
+        assert r.features["m1_glv_max"] == 10.0, \
+            "被 m2 蓋掉的那份不見了：%s" % sorted(r.features)
+        assert r.features["glv_max"] == 20.0
+    finally:
+        for k in keys:
+            REGISTRY.pop(k, None)
+
+
+def test_no_collision_means_no_extra_columns():
+    """**沒有撞名就一個字都不變** —— 不撞名的 recipe 不該多出任何欄位。
+
+    這是 F9-3 的驗收條件本身：CSV／KLARF／rescore 的輸出在沒撞名時逐位元組相同。
+    """
+    keys = _register_f93()
+    try:
+        rec = make_recipe(
+            route=("nload", "m1"),
+            nodes={"nload": RecipeNode("nload", "t_f93_load", {}),
+                   "m1": RecipeNode("m1", "t_f93_measure", {"value": 7.0})},
+            expr="glv_max")
+        r = run_defect(rec, make_item(), "ebi_patch")
+        assert sorted(r.features) == ["glv_max", "score"], sorted(r.features)
+    finally:
+        for k in keys:
+            REGISTRY.pop(k, None)
+
+
+def test_every_feature_says_which_card_made_it():
+    """D1：每個特徵都答得出「我是哪張卡產出的」。
+
+    包括那些**不屬於任何一條影像流**的（`n_channels` 是這顆 defect 的、
+    `align_dx` 是兩條流之間的關係、`cross_*` 是具名區域的）—— 它們掛在節點上，
+    所以三類都有明確的家，沒有例外。
+    """
+    keys = _register_f93()
+    try:
+        r = run_defect(_two_measure_recipe(), make_item(), "ebi_patch",
+                       keep_context=True)
+        owner = r.context.meta[engine_mod.FEATURE_OWNER_KEY]
+        assert owner["glv_max"] == "m2"
+        assert owner["m1_glv_max"] == "m1"
+    finally:
+        for k in keys:
+            REGISTRY.pop(k, None)

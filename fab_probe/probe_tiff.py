@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """ADEPT 廠內探測腳本 #2：TIFF/BigTIFF 結構探測（單檔、純標準函式庫、不解碼像素）。
 
-用途：在廠內真實 patch TIFF 上確認 CLAUDE.md §8 的假設 ——
+用途：在廠內真實 patch TIFF 上確認 docs/FAB-VALIDATION.md 的假設 ——
   假設 #1「每顆 defect 第 1 張 = test、第 2 張 = ref」（--with-klarf 交叉比對；本腳本最重要的輸出）
   假設 #2「nm_per_px 從哪來」（ImageDescription / Software / Resolution 標籤）
 

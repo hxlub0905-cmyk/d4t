@@ -157,7 +157,7 @@ def test_a_selected_card_paints_differently_from_a_plain_one(window, qapp):
     diff = sum(1 for x in range(240) for y in range(80)
                if plain.pixelColor(x, y) != selected.pixelColor(x, y))
     assert diff > 300, "選中前後只差 %d 個畫素 —— 光暈沒畫出來" % diff
-    # 光暈畫在卡片邊緣之外，boundingRect 必須跟著蓋到（殘影守則，CLAUDE.md §7）
+    # 光暈畫在卡片邊緣之外，boundingRect 必須跟著蓋到（殘影守則，docs/PITFALLS.md）
     br = item.boundingRect()
     assert br.top() <= -3.0 and br.bottom() >= canvas_mod.NODE_H + 3.0
 

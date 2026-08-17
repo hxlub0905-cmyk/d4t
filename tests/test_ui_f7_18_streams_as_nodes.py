@@ -180,11 +180,11 @@ def test_old_recipes_with_also_apply_still_load_and_mean_the_same_thing(tmp_path
     assert rec.nodes["dn_ref"].params["streams"] == "ref"
     assert rec.nodes["dn"].params["streams"] == "test"
 
-    # 存回去就是新格式（再讀一次不會又長出節點）
-    out = tmp_path / "again.json"
-    rec.save(out)
-    assert "also_apply" not in out.read_text(encoding="utf-8")
-    assert Recipe.load(out).routes["ebi_patch"] == route
+    # 轉成 JSON 就是新格式（再讀一次不會又長出節點）
+    import json as _json
+    text = _json.dumps(rec.to_json_dict(), ensure_ascii=False)
+    assert "also_apply" not in text
+    assert Recipe.from_json_dict(_json.loads(text)).routes["ebi_patch"] == route
 
 
 def test_the_shipped_examples_are_already_in_the_new_shape():
@@ -209,7 +209,8 @@ def test_dragging_from_the_ref_port_wires_ref_into_the_card(window):
     ``test_ui_f7_19_wiring.py``。
     """
     src = window.model.node_order[0]
-    nid = window.add_card_after(src, "denoise", "test")
+    nid = window.add_card_after(src, "denoise")
+    window._on_edge_added(src, nid, "test")
     assert window.model.nodes[nid].params["streams"] == "test"
 
     # 從 Input 的第二個輸出埠（ref）拉一條線過去
@@ -228,7 +229,8 @@ def test_a_second_line_between_the_same_two_cards_is_not_refused(window):
     變的是那個反應是什麼：F7-18 是取代，F7-19 起是累加（兩條都做）。
     """
     src = window.model.node_order[0]
-    nid = window.add_card_after(src, "tone", "test")
+    nid = window.add_card_after(src, "tone")
+    window._on_edge_added(src, nid, "test")
     window.pipeline.link_to(src, nid, port=0)
     assert window.model.has_edge(src, nid) is True
 
@@ -241,9 +243,11 @@ def test_a_line_that_would_loop_leaves_no_trace(window):
     """會成環的那條線沒有落地 —— 它不該留下任何痕跡，尤其不是「那張卡安靜地
     改成做 ref 了」。"""
     src = window.model.node_order[0]
-    first = window.add_card_after(src, "denoise", "test")
-    second = window.add_card_after(first, "tone", "ref")   # 它的輸出埠是 ref
-    assert (first, second) in window.model.edges
+    first = window.add_card_after(src, "denoise")
+    window._on_edge_added(src, first, "test")
+    second = window.add_card_after(first, "tone")   # 它的輸出埠是 ref
+    window._on_edge_added(first, second, "ref")
+    assert (first, second) in window.model.edge_pairs()
 
     window.pipeline.link_to(second, first, port=0)   # 反過來拉：會成環
     assert window.model.has_edge(second, first) is False
@@ -255,26 +259,37 @@ def test_a_line_that_would_loop_leaves_no_trace(window):
 def test_wiring_a_card_with_no_stream_parameter_changes_nothing(window):
     """Compare 卡有自己的 a / b 兩個輸入，連線不該亂改它們。"""
     src = window.model.node_order[0]
-    a = window.add_card_after(src, "align", "test")
+    a = window.add_card_after(src, "align")
+    window._on_edge_added(src, a, "test")
     sub = window.add_card_after(a, "subtract")
     before = dict(window.model.nodes[sub].params)
     window.pipeline.link_to(src, sub, port=1)
     assert window.model.nodes[sub].params == before
 
 
-def test_adding_from_the_library_follows_the_selected_card(window):
-    """「+」拿掉之後，卡片庫要接得下它的工作：接在選著的那張後面、同一條流。"""
+def test_adding_from_the_library_lands_after_the_selected_card(window):
+    """卡片庫加的卡排在選著的那張後面，**但線不會自己出現**（F9-7）。
+
+    F7-18 時這裡連流也一起跟著（「接在做 ref 的卡後面就也做 ref」）。
+    2026-08-16 使用者退掉了那件事 —— 自動接的線與他自己拉的線會落在同一個
+    輸入埠，而只有一條算數。現在流是**拉線**決定的，加卡只決定順序。
+    """
     src = window.model.node_order[0]
-    on_ref = window.add_card_after(src, "denoise", "ref")
+    on_ref = window.add_card_after(src, "denoise")
+    window._on_edge_added(src, on_ref, "ref")
     window.select_node(on_ref)
 
     window._on_add_requested("tone")
     nid = window.selected_node
     assert nid != on_ref
-    assert window.model.nodes[nid].params["streams"] == "ref"
     order = window.model.node_order
     assert order.index(on_ref) < order.index(nid)
-    assert (on_ref, nid) in window.model.edges
+    assert (on_ref, nid) not in window.model.edge_pairs(), \
+        "加卡自己接了一條線 —— 線要留給使用者拉"
+
+    # 拉過去之後才做在 ref 上，而且輸出埠也跟著是 ref（同進同出）
+    window._on_edge_added(on_ref, nid, "ref")
+    assert window.model.nodes[nid].params["streams"] == "ref"
 
 
 # --------------------------------------------------------------------------- #
@@ -291,3 +306,58 @@ def test_route_order_draws_no_dashed_lines(window, qapp):
     assert len(window.pipeline._edges) >= 1
     assert "canvas_edge_implicit" not in theme_mod.TOKENS, \
         "虛線退役了，色票不要留孤兒 token"
+
+
+# ---------------------------------------------------------------------------
+# F9-6：同進同出 + 來源只在畫布上決定
+# ---------------------------------------------------------------------------
+def test_a_measure_card_still_has_an_output_port(window):
+    """量測卡的 ``writes`` 是空的 —— 以前它在畫布上**沒有任何輸出埠**，
+    線到那裡就斷了，後面接不下去也分不了支。
+
+    F9-6：**接進來的每一條流，卡片後面也要接得出去**。引擎那邊本來就成立
+    （跑一張卡的 local Context 是用它的輸入種出來的，跑完整份收成產出），
+    這裡是把它畫出來。「不需要就不要連它」—— 多出來的埠不接線就沒有作用。
+    """
+    nid = window.model.add_step("glv_stats")
+    window._refresh_all()
+    card = window.pipeline.card(nid)
+    assert card is not None
+    outs = card.out_names()
+    assert outs, "量測卡在畫布上沒有輸出埠 —— 鏈到這裡就斷了"
+    from adept.core.pipeline import get_step
+    reads = list(get_step("glv_stats").resolve_reads(window.model.nodes[nid].params))
+    for r in reads:
+        assert r in outs, "接進來的 %s 沒有原樣送出去（同進同出）" % r
+
+
+def test_a_card_that_makes_a_new_stream_also_passes_its_inputs_through(window):
+    """會產生新流的卡（subtract → diff）：輸出埠 = 新流 **＋** 原本接進來的。
+
+    使用者的原話：「這樣才會更 flexible，如果我不需其它後端接口，不要連他就好」。
+    """
+    nid = window.model.add_step("subtract")
+    window._refresh_all()
+    outs = window.pipeline.card(nid).out_names()
+    assert "diff" in outs, "自己產的新流不見了"
+    for r in ("test", "ref"):
+        assert r in outs, "%s 沒有原樣送出去" % r
+    assert outs.index("diff") < outs.index("test"), \
+        "自己產的要排在前面（原樣送出的是附加的，不該搶第一顆埠）"
+
+
+def test_the_source_cannot_be_changed_from_the_card_settings(window):
+    """來源**只在畫布上決定**；設定區只顯示，不給改（使用者定調）。
+
+    以前同一件事有兩個入口 —— 拉線會改它、設定區的下拉也會改它 —— 而兩邊很容易
+    對不起來。這條測試同時鎖住「不能改」與「看得到」：唯讀不等於藏起來。
+    """
+    from PySide6.QtWidgets import QLineEdit
+
+    nid = window.model.add_step("denoise")
+    window.select_node(nid)
+    editor = window.param_form.editor("streams")
+    assert isinstance(editor, QLineEdit), "來源欄位還是可編輯的控制項"
+    assert editor.isReadOnly() is True
+    assert editor.text(), "看不到現在接的是哪一條 —— 唯讀不等於藏起來"
+    assert editor.toolTip().strip(), "要講得出去哪裡改（推廣鐵則）"

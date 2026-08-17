@@ -12,14 +12,17 @@ Recipe JSON 形狀（見 docs/plans/F0-master-plan.md §3.4）：
                  "rsem":      ["load","golden","subtract","snr"]},
       "nodes": {"align": {"step": "align", "params": {"method": "phase"},
                           "enabled": true}},
-      "edges": [["subtract","snr"]],
+      "edges": [["subtract", "diff", "snr", "source"]],
       "score": {"expr": "snr_max * sqrt(blob_area)", "threshold": 3.0,
                 "bins": {"below": 0, "above": 1}}
     }
 
-- v1 每條 route 是線性鏈；``edges`` 是額外的 DAG 邊（v2 自由畫布備用）。
+- 每條 route 是線性鏈；``edges`` 是畫布上的線。
   執行順序 = route 相鄰對邊 ∪ edges（限制在該 route 內）的 Kahn 拓撲排序，
   平手時依 route 位置決定（deterministic）。
+- **邊帶埠**（F9-1，2026-08-16）：``[來源, 來源的輸出埠, 下游, 下游的輸入參數]``。
+  舊的兩欄位格式 ``["subtract","snr"]`` 照讀，埠留空。**執行順序目前不看埠** ——
+  F9-1 換的是資料形狀不是語意，見 ``docs/plans/F9-dag-streams.md``。
 - 驗證走 lint 模式（KLIP ``Issue`` 結構）：一次列出**所有**問題，
   不是碰到第一個就停。
 """
@@ -27,7 +30,6 @@ from __future__ import annotations
 
 import heapq
 import json
-import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
@@ -35,7 +37,7 @@ from .expression import ExpressionError, parse_expression
 from .step import ParamError, Step, REGISTRY
 
 __all__ = [
-    "RecipeError", "RecipeNode", "ScoreSpec", "Recipe",
+    "RecipeError", "RecipeNode", "ScoreSpec", "Edge", "Recipe",
     "Issue", "execution_order", "validate",
 ]
 
@@ -102,6 +104,54 @@ class ScoreSpec:
     expr: str
     threshold: float
     bins: Dict[str, int]
+
+
+@dataclass(frozen=True)
+class Edge:
+    """畫布上的一條線：**來源節點的哪個輸出埠 → 下游節點的哪個輸入參數**。
+
+    F9-1（2026-08-16）把邊從 ``[src, dst]`` 換成帶埠的四個欄位。為什麼要這樣，
+    見 ``docs/plans/F9-dag-streams.md``：影像流的身分要從「全域的名字」變成
+    「哪個節點的哪個輸出」，同一條 ``ref`` 才分得出兩條互不干擾的支線。
+
+    **``dst_in`` 綁的是參數名不是流名**（``"b"`` / ``"streams"``，不是
+    ``"ref"``）。因為流名之後只是**顯示用的標籤** —— 使用者把 ``ref_2`` 改叫
+    ``ref_soft``，接線不該因此斷掉。
+
+    兩個埠都可以是空字串 = **還沒指定**。F9-1 只換形狀不換語意，所以舊檔案
+    遷移進來的邊、以及目前 UI 拉出來的線，埠都是空的；執行順序完全不看它們
+    （見 :func:`execution_order`）。F9-2 才開始用埠來組每個節點的輸入。
+
+    欄位順序（``src, dst, src_out, dst_in``）**刻意跟 JSON 的順序不同**：
+    JSON 寫成 ``[src, src_out, dst, dst_in]``（讀起來是「load 的 test →
+    denoise 的 streams」），但建構式維持 ``Edge(src, dst)`` 這個直覺的形狀，
+    免得少寫兩個參數就變成 ``src_out=dst``。
+    """
+    src: str
+    dst: str
+    src_out: str = ""
+    dst_in: str = ""
+
+    def to_json(self) -> List[str]:
+        """``[src, src_out, dst, dst_in]`` —— 讀起來是「誰的哪個出口 → 誰的哪個入口」。"""
+        return [self.src, self.src_out, self.dst, self.dst_in]
+
+    @classmethod
+    def from_json(cls, raw: Any) -> "Edge":
+        """吃新格式（4 個）或**舊格式（2 個）**。
+
+        舊格式的判斷依據是「**長度就是 2**」—— 那是舊東西**在**，不是新東西
+        不在（鐵則 9）。所以一份新 recipe 永遠不會被誤判成舊的。
+        """
+        e = list(raw)
+        if len(e) == 2:
+            return cls(src=str(e[0]), dst=str(e[1]))
+        if len(e) == 4:
+            return cls(src=str(e[0]), src_out=str(e[1]),
+                       dst=str(e[2]), dst_in=str(e[3]))
+        raise RecipeError(
+            "an edge must be [from, to] or [from, from_port, to, to_param] — "
+            "got %d item(s): %r" % (len(e), e))
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +354,7 @@ class Recipe:
     version: int = 1
     author: str = ""
     description: str = ""
-    edges: List[List[str]] = field(default_factory=list)  # 額外 DAG 邊
+    edges: List[Edge] = field(default_factory=list)   # 畫布上的線（見 Edge）
     #: **哪一版的 ADEPT 存的**（存檔時自動填；舊檔案沒有這欄，是空字串）。
     #:
     #: 為什麼需要：開發在家用機、執行在公司機，而公司機是用複製檔案更新的
@@ -335,7 +385,7 @@ class Recipe:
                 }
                 for nid, n in self.nodes.items()
             },
-            "edges": [list(e) for e in self.edges],
+            "edges": [e.to_json() for e in self.edges],
             "score": {
                 "expr": self.score.expr,
                 "threshold": float(self.score.threshold),
@@ -375,13 +425,24 @@ class Recipe:
 
         routes = {str(k): [str(x) for x in v] for k, v in dict(d["routes"]).items()}
 
-        edges: List[List[str]] = []
-        for e in (d.get("edges") or []):
-            e = list(e)
-            if len(e) != 2:
-                raise RecipeError(f"an edge must be [from, to] — two step ids; got: {e}")
-            edges.append([str(e[0]), str(e[1])])
+        edges: List[Edge] = [Edge.from_json(e) for e in (d.get("edges") or [])]
 
+        # ── 遷移的鐵則：**只能靠「舊東西在不在」判斷，不能靠「新東西不在」** ──
+        #
+        # 下面三道都是看舊 key／舊值存不存在才動手，所以一份全新的 recipe 永遠
+        # 不會被它們碰到。曾經有第四道不是這樣寫的（2026-08-14，subtract 的預設
+        # 從 ref_aligned 改成 ref，於是「檔案裡沒寫 b」就補回 ref_aligned），
+        # 而「檔案很舊、靠舊預設」跟「recipe 很新、靠新預設」這兩件事**從缺一個
+        # key 是分不出來的**。後果是 :meth:`to_json_dict` → :meth:`from_json_dict`
+        # 不再是 identity —— 而 ``run_batch`` 正是用這一對把 recipe 送進 worker
+        # 行程的，所以同一份 recipe ``workers=1`` 算 test-ref、``workers=2`` 算
+        # test-ref_aligned，兩邊都跑得完、都有數字、而且不一樣
+        # （實測 glv_max 50 vs 43）。已於 2026-08-16 移除，迴歸測試見
+        # ``tests/test_recipe.py::test_a_json_round_trip_changes_nothing``。
+        #
+        # 要改一個參數的預設值又要保住舊檔行為，就把新舊差異寫成**看得見的東西**
+        # （改參數名、加一個值、寫 app_version），不要靠「沒寫」這個訊號。
+        #
         # 舊 recipe（F7-18 之前）的 also_apply / anchor：展開成一張卡一條流。
         # 做在這裡而不是各張卡的 validate_params 裡，因為它會**增加節點**——
         # 那是 recipe 層級的事，一張卡看不到自己以外的東西。
@@ -390,16 +451,6 @@ class Recipe:
         _migrate_merged_cards(nodes)
         # 最後把改過名的**參數值**換掉（F8：兩層的 dark/bright → 排名）。
         _migrate_renamed_values(nodes)
-        # subtract 的預設 b 於 2026-08-14 從 ref_aligned 改成 ref（patch 本來
-        # 就對齊）。檔案裡**沒寫** b 的 subtract 是照舊預設蓋的 —— Studio 存檔
-        # 一律把參數寫滿，省略只會出現在改版前的檔案（或手寫檔）。不補的話，
-        # 一份「align → subtract」的舊 recipe 會安靜地跳過對位，分數整批變掉
-        # —— dual-route e2e 當場從 22/24 掉到 18/24。既有 recipe 一份都不能
-        # 被改變行為：載入時把舊預設寫回去。
-        for node in nodes.values():
-            if node.step == "subtract" and "b" not in node.params:
-                node.params["b"] = "ref_aligned"
-
         return cls(
             recipe_id=str(d["recipe_id"]),
             routes=routes,
@@ -411,15 +462,6 @@ class Recipe:
             description=str(d.get("description", "")),
             edges=edges,
         )
-
-    def save(self, path: Any) -> None:
-        """寫入 JSON 檔（utf-8、indent=2、atomic ``.tmp`` + ``os.replace``）。"""
-        path = str(path)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self.to_json_dict(), f, ensure_ascii=False, indent=2)
-            f.write("\n")
-        os.replace(tmp, path)
 
     @classmethod
     def load(cls, path: Any) -> "Recipe":
@@ -451,8 +493,11 @@ def execution_order(recipe: Recipe, kind: str) -> List[str]:
     for a, b in zip(route, route[1:]):
         pair_edges.add((a, b))
     for e in recipe.edges:
-        if len(e) == 2 and e[0] in node_set and e[1] in node_set:
-            pair_edges.add((e[0], e[1]))  # 自迴圈也收進來 → Kahn 會偵測為循環
+        # **只看 src/dst，不看埠。** F9-1 換的是資料形狀不是語意：執行順序必須
+        # 跟換之前逐項相同（黃金值 `tools/freeze_golden.py` 對著這件事）。
+        # 埠要到 F9-2 組每個節點的輸入時才有作用。
+        if e.src in node_set and e.dst in node_set:
+            pair_edges.add((e.src, e.dst))  # 自迴圈也收進來 → Kahn 會偵測為循環
 
     indeg = {n: 0 for n in route}
     adj: Dict[str, List[str]] = {n: [] for n in route}
@@ -520,8 +565,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
 
     檢查項（code）：unknown-step / bad-param / not-configured / unknown-node /
     unknown-route / cycle / missing-image / unknown-region / requires-ref /
-    score-expr / unknown-feature（warning）/ feature-collision（warning）/
-    bad-bins。
+    ambiguous-input / score-expr / unknown-feature（warning）/
+    feature-collision（warning）/ bad-bins。
     """
     if registry is None:
         registry = REGISTRY
@@ -579,6 +624,42 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             issues.append(Issue(
                 code="not-configured", level="error", node_id=nid,
                 title=f"{step_cls.label} is not set up yet", detail=str(msg)))
+
+    # ---- 一個輸入埠只能有一條線（F9-7）----
+    # 引擎查資料從哪來的 key 是 ``(下游節點, 流名)``，所以兩條線落在同一個 key
+    # 上時只有一條算數 —— 而**贏的是 ``edges`` 裡排在後面的那條**，那個順序在
+    # 畫布上完全看不出來。跑得完、有數字、而且其中一條使用者畫的線是裝飾。
+    # 典型踩法：舊版 Studio 加卡時會自動接一條線，使用者接著自己拉一條進同一
+    # 張卡，於是同一個輸入有兩個來源。
+    seen_inputs: Dict[Tuple[str, str], str] = {}
+    for e in recipe.edges:
+        if not (e.src_out and e.dst_in):
+            continue                            # 沒填埠的線只表達先後順序
+        node = recipe.nodes.get(e.dst)
+        step_cls = registry.get(node.step) if node is not None else None
+        if step_cls is None:
+            continue
+        ptype = {str(p["name"]): str(p["type"])
+                 for p in step_cls.describe()["params"]}.get(e.dst_in, "")
+        if ptype == "image_keys":
+            local = e.src_out
+        elif ptype == "image_key":
+            local = str(clean_params.get(e.dst, {}).get(e.dst_in, "") or "")
+        else:
+            continue
+        if not local:
+            continue
+        prev = seen_inputs.get((e.dst, local))
+        if prev is not None and prev != e.src:
+            issues.append(Issue(
+                code="ambiguous-input", level="error", node_id=e.dst,
+                title=f"step '{e.dst}' has two lines into the same input",
+                detail=(f"both '{prev}' and '{e.src}' feed '{local}' into "
+                        f"'{e.dst}'. Only one of them is used (the later one "
+                        f"wins), so the other line does nothing. Delete the "
+                        f"line you do not want.")))
+        else:
+            seen_inputs[(e.dst, local)] = e.src
 
     # ---- score 表達式解析 ----
     expr = None
@@ -680,10 +761,11 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                         code="feature-collision", level="warning", node_id=nid,
                         title=f"step '{nid}' overwrites the feature '{f}'",
                         detail=f"route '{k}': '{f}' is already produced by "
-                               f"'{owner}'; the later value wins and the earlier "
-                               f"one cannot be referenced from the score "
-                               f"expression at all. Give one of the two cards a "
-                               f"different output name if you need both."))
+                               f"'{owner}'; the later value wins, so '{f}' in "
+                               f"the score expression means this card's value. "
+                               f"The earlier one is still available as "
+                               f"'{owner}_{f}'. Give one of the two cards a "
+                               f"different output name if that is clearer."))
                 else:
                     feat_owner.setdefault(f, nid)
 

@@ -90,7 +90,7 @@ def test_selecting_a_node_on_the_canvas_drives_the_param_form(window):
 # --------------------------------------------------------------------------- #
 def test_linking_two_nodes_records_an_edge(window):
     window.pipeline.link_to("load", "norm")
-    assert ("load", "norm") in window.model.edges
+    assert ("load", "norm") in window.model.edge_pairs()
     assert ("load", "norm") in window.pipeline.edge_pairs()
     assert "Connected" in window.status_text()
 
@@ -99,10 +99,10 @@ def test_a_link_that_would_loop_is_refused_at_draw_time(window):
     """**循環擋在拉線的當下**，不是等到執行時才爆。"""
     window.pipeline.link_to("load", "norm")
     window.pipeline.link_to("norm", "sub")
-    before = list(window.model.edges)
+    before = list(window.model.edge_pairs())
 
     window.pipeline.link_to("sub", "load")        # 會成環
-    assert window.model.edges == before, "成環的線不可以落進 model"
+    assert window.model.edge_pairs() == before, "成環的線不可以落進 model"
     assert "loop" in window.status_text()
 
     # 而且流程仍然跑得動 —— 沒有被那次嘗試弄壞
@@ -112,24 +112,33 @@ def test_a_link_that_would_loop_is_refused_at_draw_time(window):
 def test_both_ports_can_land_on_the_same_node_and_each_gets_its_own_line(window):
     """patch 天生成對：Input 吐 test 與 ref，Subtract 兩張都吃。
 
-    所以 **Input → Subtract 要畫兩條線**（不是一條沒說明白的線），而且把第二個
-    埠也拖到同一個節點上是很正常的操作 —— 那時候不可以回一句看起來像失敗的
-    「Cannot connect」。
+    把第二個埠也拖到同一個節點上是很正常的操作 —— 那時候不可以回一句看起來
+    像失敗的「Cannot connect」。
+
+    **F9-9 起「拉幾條就是幾條」**：一次 ``link_to`` = 一條線。以前畫布是從
+    「兩端共用哪幾條流」**推**出兩條線的，推出來的猜不出使用者其實只接了
+    其中一條 —— 而引擎照線送資料，於是畫面上的線比實際接的多。
     """
     load, sub = window.pipeline.card("load"), window.pipeline.card("sub")
     assert load.out_names() == ["test", "ref"]
     assert sub.in_names() == ["test", "ref"]
 
-    window.pipeline.link_to("load", "sub")
-    assert window.model.edges == [("load", "sub")], "model 仍然是一條依賴"
-    assert window.pipeline._ports_between(load, sub) == [0, 1]
+    window.pipeline.link_to("load", "sub", port=0)
+    assert window.model.edge_pairs() == [("load", "sub")], "model 仍然是一條依賴"
     assert len([e for e in window.pipeline._edges
-                if e.pair() == ("load", "sub")]) == 2, "兩條共用的流 = 兩條線"
+                if e.pair() == ("load", "sub")]) == 1, "拉一條就是一條"
+
+    window.pipeline.link_to("load", "sub", port=1)      # 第二顆埠
+    assert len([e for e in window.pipeline._edges
+                if e.pair() == ("load", "sub")]) == 2, "兩條並排的線"
+    assert len(window.model.edges) == 2, "model 也要記得兩條（F9-9）"
+    assert {e.src_out for e in window.model.edges} == {"test", "ref"}
     assert "Connected" in window.status_text()
 
-    # 第二個埠拖到同一個節點：不是錯誤，訊息要講清楚兩條線本來就都在了
-    window.pipeline.link_to("load", "sub")
-    assert window.model.edges == [("load", "sub")]
+    # 同一顆埠再拖一次：不是錯誤，訊息要講清楚那條線本來就在了
+    window.pipeline.link_to("load", "sub", port=0)
+    assert window.model.edge_pairs() == [("load", "sub")]
+    assert len(window.model.edges) == 2
     assert "already connected" in window.status_text()
     assert "Cannot" not in window.status_text()
 
@@ -140,17 +149,17 @@ def test_both_ports_can_land_on_the_same_node_and_each_gets_its_own_line(window)
 
 def test_duplicate_and_self_links_are_ignored(window):
     window.pipeline.link_to("load", "norm")
-    n = len(window.model.edges)
-    window.pipeline.link_to("load", "norm")         # 重複
+    n = len(window.model.edge_pairs())
+    window.pipeline.link_to("load", "norm")         # 重複（同一顆埠）
     window.pipeline.link_to("load", "load")         # 自迴圈
-    assert len(window.model.edges) == n
+    assert len(window.model.edge_pairs()) == n
 
 
 def test_removing_an_edge_puts_it_back(window):
     window.pipeline.link_to("load", "norm")
-    assert ("load", "norm") in window.model.edges
-    window.pipeline.edge_removed.emit("load", "norm")
-    assert ("load", "norm") not in window.model.edges
+    assert ("load", "norm") in window.model.edge_pairs()
+    window.pipeline.edge_removed.emit("load", "norm", "")
+    assert ("load", "norm") not in window.model.edge_pairs()
     assert "Disconnected" in window.status_text()
 
 
@@ -160,17 +169,23 @@ def test_edges_reorder_execution_and_survive_a_save_load_round_trip(window, tmp_
 
     window.pipeline.link_to("load", "norm")
     window.pipeline.link_to("norm", "sub")
-    edges = list(window.model.edges)
+    edges = list(window.model.edge_pairs())
     order = list(window.model.node_order)
     assert order.index("load") < order.index("norm") < order.index("sub")
 
+    # 存檔功能還沒支援，所以自己寫一份 JSON 出去再載回來 ——
+    # 這條測的是「連線活得過一次序列化」，不是存檔對話框。
+    import json as _json
     out = tmp_path / "wired.json"
-    assert window.save_recipe_path(str(out)) is True
+    out.write_text(_json.dumps(window.model.to_recipe().to_json_dict(),
+                               ensure_ascii=False), encoding="utf-8")
     loaded = Recipe.load(str(out))
-    assert [tuple(e) for e in loaded.edges] == edges
+    # F9-1：core 的邊是 ``Edge``（帶埠），UI 這一層還是「一對節點」——
+    # 轉換只在 viewmodel 的邊界做。這裡比的是**線接到哪兩張卡**。
+    assert [(e.src, e.dst) for e in loaded.edges] == edges
 
     assert window.load_recipe_path(str(out), sync=True) is True
-    assert window.model.edges == edges
+    assert window.model.edge_pairs() == edges
     assert window.pipeline.edge_pairs() == edges
 
 

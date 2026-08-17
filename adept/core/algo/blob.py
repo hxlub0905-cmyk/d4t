@@ -11,7 +11,19 @@
 #   - DefectROI gains a `bbox` property returning (x, y, w, h).
 #   - Algorithm behavior otherwise unchanged.
 # ---------------------------------------------------------------------------
-"""Defect segmentation from a local SNR map (connected-component labeling)."""
+"""Defect segmentation from a local SNR map (connected-component labeling).
+
+⚠ **目前沒有任何步驟卡片用到這個模組** —— 別把它當成死碼刪掉。
+
+``blob_segment`` 那張卡在 39b9fea（F8 第五輪，ROI 收斂成 Profile / Template /
+GDS 三條路）被拿掉了，理由是「它框的是缺陷本身，不是圖案上的位置」——
+被拿掉的是**卡片**，不是演算法。連通元件分割 + 幾何特徵（面積、離報點位置多遠）
+是 v2 backlog 上「單張影像沒有 ref 也沒有週期」那條保底路線的材料，
+而且 ``tests/test_blob.py`` 還在跑它。
+
+跟 ``algo/period.py`` 同一類（見 ``ui/scope.py``）：看起來像是可以跟著卡片一起
+砍掉的東西，其實不是。
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass

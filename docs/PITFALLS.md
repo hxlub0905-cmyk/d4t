@@ -1,0 +1,61 @@
+# 已知的坑（踩過，別再踩）
+
+**這一份只增不減，所以它自己一個檔案。** 從 `CLAUDE.md` §7 搬出來
+（2026-08-16）—— 那份是每個 session 都會被讀進去的，而這張表已經 10 KB
+而且還在長，放在那裡等於每次開新 session 都付一次它的 token。
+
+要用的時候再讀：**動到 Qt 繪圖、快取、批次平行、KLARF 寫回、recipe 遷移
+之前，先在這裡搜一下關鍵字。**
+
+新增一列的規則：**症狀寫在「症狀」欄，不要寫「某某函式有 bug」** ——
+會再踩到的人是從症狀找過來的，他還不知道是哪個函式。
+
+| 坑 | 症狀 | 解法 |
+|---|---|---|
+| **fork 死鎖** | GUI 按「試跑」永遠不回、progress 一格不動 | `batch._pool_context()`：主執行緒 fork、非主執行緒 spawn。改動這裡務必跑 `tests/test_batch_thread_safety.py` |
+| **OpenCV IPP 非決定性** | 同張圖算兩次差 ~1e-8，快取結果對不起來 | `batch.pin_cv2_deterministic()` 關 IPP（每個 worker 都呼叫） |
+| **Fusi³ ecc 對位正負號** | ecc backend 位移與其他四個相反 | 已於 `algo/align.py` 修正並鎖測試 |
+| **MMH 次像素 batch 版偏移** | batch 版比 scalar 版低約 1.5 px | 刻意保留原行為，檔頭有記錄；要用精確值請用 scalar 版 |
+| **中心框幾何與影像尺寸綁死**（F7-4 已修） | 同一組 `glv_stats` 參數在 128² patch 上準、在 256² RSEM 上漏抓（缺陷散佈超出框） | **幾何已從量測卡搬到 Region 卡**（`roi_define`），量測卡只引用 ROI 名字。`size_unit="percent"` 的框會隨影像尺寸縮放，同一份 recipe 換 patch 尺寸不會失效。迴歸測試 `tests/test_region.py::test_percent_sizing_survives_a_patch_size_change` |
+| **pytest 收集期 import Qt** | `test_no_qt_after_import` 失敗 | UI 測試一律 **lazy import**（在 fixture 內 import 並注入 globals） |
+| **`QGraphicsItem` 拖曳留殘影**（F7-8 已修） | 拖動節點時埠標籤（"test"/"ref"）的舊位置沒被清掉 | `boundingRect()` **必須涵蓋所有畫得出去的東西**。埠標籤畫在節點右緣之外，之前只算到 `NODE_W + _PORT_R`，Qt 就只重繪那個範圍 |
+| **在節點外面畫東西**（F7-8／F7-9／F7-14 同一條） | 拖動節點留殘影 | `boundingRect()` 必須涵蓋**所有畫得出去的東西** —— 埠標籤（F7-8）、埠圓點（F7-9）、輸出埠的 `+`（F7-14）都在節點右緣之外。加任何畫在卡片外的裝飾時，先把 `boundingRect` 加寬，`tests/test_ui_f7_14_canvas_flow.py` 會斷言 `+` 的中心在 `boundingRect` 裡 |
+| **`paint()` 用場景座標**（F7-9 已修） | 殘影**又**出現；而且「新增的節點只有左邊有圓框，右邊沒有」 | 兩個症狀同一個因：`paint()` 拿 `out_anchors()`（**場景**座標）去畫本地座標的東西。節點在原點看起來正常（第一欄的 Input 剛好在那）；一離開原點就畫到「兩倍位移」的位置。現在分成 `out_anchors_local()`（繪製／命中）與 `out_anchors()`（連線）。F7-8 只放大了 `boundingRect`，那是對症狀動刀 —— 真正的不變量是**畫的座標系＝宣告的座標系**，`tests/test_ui_f7_9_feedback.py` 直接鎖它 |
+| **`test_no_qt_after_import` 跟檔名字母序有關**（F7-9 已修） | 新增一支 UI 測試檔就讓它失敗，而且失敗訊息指不到真正的原因 | 它以前在測試行程裡看 `sys.modules`，所以任何排在 `test_no_qt.py` **之前**的 UI 測試檔跑過 fixture 之後就會誤報。改成在乾淨的子行程裡 import core 再問 —— 那本來就是這條測試唯一想問的事 |
+| **快取只存了 Context 的一部分**（F7-9 已修） | 同一份 recipe **第一次跑對、第二次跑錯**（`region 'main' is not defined`） | checkpoint 是執行順序上的**位置**（最後一張影像段卡的下一格），不是「所有影像段的卡」，所以夾在中間的 Region 卡（algo）會落在快取段裡。v1 快照只存 images/features/meta，`ctx.rois` 命中時整個不見。快照現在涵蓋 `rois` 與 `labels`，並帶 `FORMAT_VERSION`（版本不合一律當 miss，舊快取目錄不會餵回殘缺快照）。迴歸測試 `tests/test_batch_cache.py::test_named_rois_survive_a_cache_hit` |
+| **特徵是扁平的全域命名空間**（F7-11 已解） | 兩張同型別的量測卡（例：量兩個 ROI 的 `glv_stats`）都寫 `glv_mean`，後面那張**安靜地蓋掉**前面那張，分數表達式指不到前面那個值 | 量測卡有 `output_prefix`（Studio 挑了區域會自動填成區域名），撞名時 `validate()` 仍會出 `feature-collision` warning、Studio 跑完在狀態列講出來 |
+| **量測卡指到沒人定義的 ROI**（F7-9 已修） | `cd_measure` 預設 `roi="blob"`，少了上游 Blob 卡時**安靜地改量整張圖** —— 跑得完、有數字、而且是錯的 | 具名區域現在跟影像流走同一條檢查：`Step.resolve_regions_in/out()` + `validate()` 的 `unknown-region`；`blob` 退回整張圖時會 `ctx.warn`。Studio 也在試跑前先跑 lint（以前完全沒跑，於是接錯的卡片會「跑完 200 顆、每顆都失敗」） |
+| **色調曲線用自然三次樣條** | 使用者把中間點往上拉，影像出現一圈**不存在的暗環** | 樣條會 overshoot。`algo/curve.py` 用保單調三次 Hermite（Fritsch–Carlson）。這是演算法自己造出來的假缺陷 —— 對判 defect 的工具是最糟的一種 bug。`tests/test_curve.py` 用四條最容易凹出去的曲線鎖住 |
+| **每讀一張圖就重開整個 TIFF**（2026-07-31 已修） | 「換下一顆 defect」明顯卡頓，而整條 pipeline 明明只要 9 ms | `read_page` 以前每次都 `with tifffile.TiffFile(path)` 開一次檔，而且用 `len(tf.pages)` 檢查範圍 —— **那一行會強迫走完整條 IFD 鏈**。4000 頁的 TIFF 每張圖 16 ms，而圖本身只有 16 KB。改成快取開好的 handle（版本鍵 = `(pid, mtime, size)`），換一顆 32 ms → 0.4 ms。同理 `load_dataset` 只要「幾頁」卻呼叫會解析所有 tag 的 `read_tiff_pages`，改用 `count_pages` 後 117 ms → 19 ms |
+| **fork 出來的子行程共用檔案偏移量**（同上一輪一起處理） | 批次某幾顆拿到別頁的影像 —— 不丟例外、不變慢，只是錯 | fork 複製的 fd **共用同一個 offset**，四個 worker 各自 seek+read 會互相把位置移掉。所以 TIFF handle 的快取鍵含 `os.getpid()`：子行程一進來就發現「這不是我的」而重開。`tests/test_tiff_index.py` 真的 fork 一個子行程去驗 |
+| **快取住的 TIFF handle 被兩個執行緒共用**（2026-07-31 已修） | 預覽**偶爾**失敗、訊息是 tifffile 的 `suspicious number of tags 13111`；單獨跑那條測試 6 次過 5 次 | 一個 `TiffFile` 底下就是一個 fd，讀一頁像素是「seek 過去、讀下來」。Studio 點一張卡會排一次背景預覽，同步預覽又跑一次，兩個執行緒交錯 seek 就把對方的位置移掉 —— tifffile 把像素當 IFD 解析。`read_page` 現在**全程持有 RLock**（拿 handle 到 `asarray()` 回來）。另外開檔時就 `len(tf.pages)` 把頁面清單建好：tifffile 的 lazy 解析依賴「檔案位置停在上一頁結尾」，而 `asarray()` 會移動它，所以**同一個 handle 讀完第 0 頁再要第 1 頁必失敗**。跟 fork 那條是同一件事的兩半 —— 子行程共用偏移量、執行緒共用 handle |
+| **兩台機器版本不同步時，訊息會誤導**（2026-07-31 已修） | 新版存的 recipe 在舊版打開，只說 `unknown parameters: ['…']` —— 使用者的結論是「這份檔案壞了」，於是去重做一份 recipe，而該做的是更新程式 | recipe 存檔時寫 `app_version`；`recipe.version_skew()` 判斷「這份檔案比這個程式新」，並把那句話接在 `bad-param` / `unknown-step` 的訊息後面，載入的當下也在狀態列講一次。**公司機是用複製檔案更新的（`AGENTS.md`），所以版本不同步是常態不是意外** |
+| **`isVisible()` 在 show 之前恆為 False** | 「這個面板收起來了嗎」在建構期永遠答錯 | 一律追明確狀態（`LibraryPanel.panel_open()`、`StudioWindow.compare_enabled()`、`_progress_on`），不要問 widget |
+| **`drawPolygon` 傳散的 `QPointF`**（F7-17） | 整個行程 **segfault**（不是丟例外，所以看不到任何訊息，只有 exit 139） | PySide6 會綁到別的 overload。要傳 `QPolygonF([...])`。自繪面板加任何多邊形時注意 |
+| **暗色盤裡的佔位字串**（F7-17 已清） | `accent_border` 的值是 `"#2f4straight"`，靠 70 行後的一句覆寫救著 | Qt 對無效色字串是**靜靜畫成黑色**，不會報錯。色盤裡不要留「稍後修正」的值；`tests/` 有一條掃描所有 token 是否為合法 hex |
+| **`_update_action_states` 會蓋掉 tooltip**（F7-16 已修） | 把快捷鍵寫進工具列 tooltip，第一次 refresh 之後就不見了 | 那幾顆的 tooltip 每次 refresh 都會依前置條件重寫（「還沒有東西可以存」）。所以不能「建構時附加一次」，要讓**設 tooltip 的那個動作自己補上快捷鍵**（`_set_tip`）。`test_ui_f7_16_safety_net.py` 會 refresh 一次再驗 |
+| **Qt 的 Enter/Leave 在父子之間會打架**（F7-15 已修） | 滑鼠從參數列的空白處移進**那一列自己的**輸入框，說明就閃一下（收起來又立刻攤開） | Qt 先送 `Leave` 給父元件、再送 `Enter` 給子元件。照字面處理必閃。`leaveEvent` 改成直接問**游標還在不在自己的矩形裡**（`rect().contains(mapFromGlobal(QCursor.pos()))`），不要相信事件的字面意思。（2026-08-14 起參數列的 hover 攤開整個拿掉了 —— 修好之後它還是「跟著滑鼠閃」，使用者實測嫌亂；說明搬進 tooltip。教訓本身仍適用於其他 hover 元件） |
+| **`:focus` 被 id / attribute 選擇器安靜蓋掉**（F7-23 已修） | Tab 到「Run trial」「Stop」或任何一顆工具列按鈕，畫面上零回饋 —— 而 QSS 裡明明有 `QPushButton:focus` | QSS 照 CSS2 特異性：`QPushButton#primary`（id）贏過 `QPushButton:focus`，`[variant="…"]` 同分但寫在後面也贏，於是那條總括規則只對「沒有 objectName 也沒有 variant」的按鈕生效；工具列更單純 —— 從頭到尾沒有 `QToolButton:focus`。**每一種變體都要有自己的一條 `:focus`**。另外 **Qt 的 `outline` 對按鈕不生效**（收下屬性但什麼都不畫，加不加 `outline-offset` 都一樣），框只能用 border 畫在裡面 —— 那就會吃掉 1px，必須從自己的 padding 還回去，否則 Tab 過去文字會跳一格。`tests/test_ui_f7_23_buttons.py` 對八種按鈕逐一量畫素，並用 `contentsRect()` 鎖住「文字不准移動」|
+| **`contentsRect()` 的原點永遠是 (0, 0)**（F7-23 第四輪） | 想把圖示畫進 QSS 撐開的那塊 padding 裡，用 `contentsRect()` 定位會畫錯地方 | QSS 樣式下 contentsRect 的**尺寸**確實扣掉了 padding（所以拿它比對「文字區有沒有移動」是對的），但**原點沒有跟著移** —— 它不是一個可以拿來定位的框。要畫在 padding 裡就用 `rect()` |
+| **小圖示不能照大圖示的比例縮**（F7-23 第四輪） | 自繪圖示在 22px 下好看，放到按鈕上的 15px 就糊成一團 | 三個實例：`undo` 的弧用 `size/9` 的線變成實心月牙（改 `size/11`）；`fit` 的四個角括號用 0.26 長度兩臂幾乎接起來變成矩形（改 0.17）；`tidy` 的 2×2 描邊方格線比空隙還粗（改實心）。**加新圖示時用實際尺寸（≤15px）看過再收工** —— `tests/test_ui_f7_23_buttons.py` 只擋得住「畫出來是空的」|
+| **Qt 不會把超出範圍的 `border-radius` 夾回去**（F7-23 第三輪抓到） | 一個叫 `radius_pill` 的 token 畫出來是**方角**，而且不報錯 | CSS 的慣用寫法是 `border-radius: 999px`（讓瀏覽器自己夾到半高）。**Qt 不夾，它直接放棄圓角畫矩形** —— 實測 999px 的左緣輪廓與 0px 逐列相同。所以圓角值必須**已經在範圍內**（chip 高 22px → 11px），而且 chip 的高度改了要跟著改。`tests/test_ui_f7_23_buttons.py::test_the_pill_token_is_actually_round` 量左緣輪廓鎖住它 |
+| **搬進 QSS 的 `[property]` 不會自己重畫**（F7-23 第三輪） | `setProperty("active", True)` 之後畫面完全沒反應，也沒有錯誤 | Qt 只是存下那個值，選擇器要等下一次 polish 才重算。用 `widgets.restyle(w)`（`unpolish` + `polish` + `update`）。把 per-widget stylesheet 換成 property 選擇器時這是最容易漏的一步 |
+| **`::menu-button` 只要給它一個盒子，箭頭就消失**（F7-23 量出來） | 想幫 `Run trial ▾` 的下拉區補一塊底色把兩個動作分開，補完箭頭不見了 | 跟下一列的 `QComboBox::drop-down` 是同一件事：**背景／邊框／圓角任一**都會讓 Qt 把該 subcontrol 的繪製整個交給 stylesheet，而 stylesheet 沒有 `image` 就什麼都不畫 —— 這個 repo 是純文字的（§9.5）塞不了圖。實測只有 `width` 是安全的。所以這件事不是 QSS 的問題是**結構**的問題：要控制外觀就別用 `MenuButtonPopup`，拆成兩顆真的按鈕。逐項量測表在 `docs/history/plans/F7-canvas-and-taxonomy.md` §27.5 |
+| **QSS 把 subcontrol 的箭頭畫成 0 個畫素**（F7-13 已修） | 下拉選單跟自由文字框**長得一模一樣**，使用者無從得知哪個點得開（`Match on` vs `Name this region`） | `QComboBox::drop-down { border: 0 }` —— styled 的 subcontrol 要**自己提供 `down-arrow` 圖檔**，否則 Qt 什麼都不畫，而這個 repo 是純文字的（§9.5）塞不了圖。拿掉 `border: 0` 讓它留在 base style 上。`tests/test_ui_controls_readable.py` 用畫素數量鎖住（箭頭區 0 → 20，而 QLineEdit 恆為 0） |
+| **參數合法 ≠ 設定完成**（F7-13 已修） | 空模板是完全合法的 str，lint 沒話說 —— 但那張卡跑起來**每一顆**都失敗，而使用者是跑完 200 顆才知道 | `Step.configuration_issues(params)`：卡片自己講缺什麼、用**這張卡的話**講（要去按哪顆鈕），變成 lint error `not-configured`，畫布上那張卡右上角掛警示標記。加這種卡時記得：`test_every_visible_card_can_be_wired_up_without_a_dead_end` 會要求訊息**指得出路在哪** |
+| **模板比對：分數本身會騙人**（F7-12） | 全白／純雜訊的 patch 對任何模板都能拿到 NCC 0.44（門檻 0.3 → 過關），於是「碰巧」被當成「對得準」，框放到隨機的位置 | **沒有任何分數門檻分得出這兩者**（分數重疊）。要問的是另一個問題：**這張 patch 自己有沒有東西可比**（`min_structure`，實測無結構約 1、有結構 20 以上）。另外 margin 必須**先把比對曲面折回一個週期**再取次高峰，否則相鄰週期的次高峰讓 margin 恆為 0 —— 週期性把自己打敗了 |
+| **Golden Cell 的原點會飄**（F7-12） | 同一份 recipe、不同時間建的模板指到不同的地方，而且畫面上完全看不出來 | cell 的第 0 欄預設是大圖上的**任意切點**，換張圖就換了 —— 而使用者是在 cell 上標框的。`algo/template.py::anchor_cell()` 旋轉到**最強的上升邊**在第 0 欄；用最大正梯度而不是 `abs`，否則一個週期的兩個相反邊界會競爭，錨點在兩者之間跳 |
+| **`estimate_period` 在純雜訊上會回一個看似合理的週期**（F7-12） | 噪音圖疊出一個沒有意義的模板，然後安靜地拿去對每一顆 | 週期信心門檻 `MIN_PERIOD_CONFIDENCE = 40`（實測噪音 20.3）。「說我做不到」比「給一個沒有意義的答案」好得多。順帶：一維 layout（垂直條紋，只有 X 有週期）以前會被整個放棄 —— 那是最常見的情況，現在兩軸各自判斷，不重複的那軸取整個影像高度／寬度 |
+| **KLARF variant D 誤判**（M5 修正） | 真實 1.8 檔（ImageList 欄不在最後、且無 IMAGECOUNT 欄）被 `lint()` 判定每一列都違法，Export 精靈跳紅字 | `row_len_ok` 改用 `effective_row_len()`：把 `Images N { … }` 子區塊折算成一欄。**注意 `image_layout()` 對這個變體仍回 None，而 export 的插欄位置正好因此落在最後 —— 那是對的，別「順手修好」它**。迴歸測試 `tests/test_klarf_variant_d.py` |
+| **一張卡偷偷寫了第二條流**（F7-18 已改） | 畫布上那張 Denoise 畫在 test 那條鏈上，它其實同時改了 ref；而「要不要一起做」藏在控制列的 `also_apply` 勾選框裡，於是 test 是主角、ref 是附帶 | **一張卡一條流**：`resolve_writes` 只回主流。要對 ref 做就再放一張卡接到 ref。需要借另一條流的資訊時給它自己的 `image_key` 參數（`percentile_norm.range_from`），那條線在畫布上看得見。舊 recipe 的 `also_apply` 由 `recipe._migrate_also_apply` 展開成多張卡。**F7-19/F7-20 起改用另一個手段達成同一個不變量**：一張卡吃 N 條流，但每一條都有埠、都有線（見 §5 的框與計畫書 §23.1）—— 不變量是「畫布不能說謊」，不是「一張卡一條流」|
+| **拆卡片時的順序陷阱**（F7-18） | `anchor="source"` 拆成兩張卡之後，如果 test 那張先跑，ref 借到的是「已經拉成 0–255」的範圍 —— 數字不一樣，而兩張輸出都是看起來正常的圖 | 借範圍的那幾張要排在**前面**。這類遷移不要讀程式碼驗證：跑同一份 recipe 100 顆，比 `min/median/max` 與 bin 數量是否逐項相同（`tests/test_ui_f7_18_streams_as_nodes.py`）|
+| **兩個節點之間只拉得動一條線**（F7-18 已修） | 先從 test 拉、再從 ref 拉，第二條只得到一句 `already connected` 然後什麼都沒發生 —— 使用者的結論是「這張卡不准我碰 ref」 | `edge_added` 帶第三個參數（**這條線從哪個輸出埠出發**），Studio 據此把下游卡的主要輸入指到那條流。同一對節點再拉一條要當成「我改變主意了」處理 |
+| **常駐在節點旁邊的裝飾**（F7-18 已清） | 每個輸出埠一顆「+」，十張卡的 pipeline 就有十幾顆加號跟資料流搶畫面 | 入口收回卡片庫；「+」做對的事（接上線、接在對的流上）改由「選著一張卡時從卡片庫加」承接（`add_card_after`）。加完**選取新卡**，連按三張才會長成一條鏈而不是倒過來 |
+| **虛線只是實線淡一點** | 「這條是我拉的」與「這條是排列順序帶來的」看起來只差深淺，而深淺會被縮放與主題影響 | 不同語意給不同**色相**（`canvas_edge_implicit`）。測試要鎖兩層：token 的色相差得出來，而且 `paint()` 真的去讀了它（畫進 pixmap 比主色相）|
+| **改回去了，測試卻沒跟著變**（F9-2 踩到） | 為了驗「這條測試真的抓得到東西」，把一個改動暫時退回去 → 測試如預期變紅；**再把它改回來，測試還是紅的**。程式碼用 `grep` 看過是對的，於是開始懷疑測試、懷疑 fixture 順序、懷疑 registry 殘留 —— 全都不是 | **先 `find . -name __pycache__ -type d -exec rm -rf {} +` 再下任何結論。** 用 `cp` 之類的方式還原檔案時，Python 的 bytecode 快取有機會沒有失效，於是跑的還是上一版。這種狀況最花時間的地方在於**症狀指向錯的方向**（看起來像測試有問題，其實是根本沒跑到新的程式碼）。驗證重構的標準動作：清快取 → 重跑 → 再判斷 |
+| **把「要不要記錄」跟「值有沒有變」綁在一起**（F9 踩了兩次） | ①F9-3 的特徵歸屬用「值有沒有變」判斷 → 後面那張卡剛好算出**一樣的值**時，擁有權不更新、被蓋掉的也不救，於是**同一份 recipe 在某些 defect 上多一個特徵欄位、某些上沒有**。②F9-5b 的線只在「參數真的被改了」時才記下 `dst_in` → 參數預設值本來就等於那條流時埠是空的，**分支當場失效而畫面上完全正常** | **記錄要看「宣告」不看「值」。** 卡片宣告它產出 `glv_max`，那它跑完就擁有 `glv_max`，跟算出來的值一不一樣無關；線接在那個參數上，那它的 `dst_in` 就是那個參數，跟要不要改值無關。判準：**問「這件事實成立嗎」，不要問「有東西變了嗎」** —— 後者會讓行為跟數值巧合有關，而那是最難解釋的一種不一致 |
+| **同一個輸入埠上兩條線**（F9-7 已擋） | 畫布上兩條線進同一張卡，跑出來像其中一條不存在 —— 跑得完、有數字、而且是錯的 | 引擎查來源的 key 是 `(下游節點, 流名)`，兩條線落在同一個 key 上時**`dict` 後寫的贏**＝ `edges` 裡排在後面的那條，而那個順序在畫布上看不出來。UI 現在讓舊線讓位（`_drop_conflicting_edges`），`recipe.validate` 出 `ambiguous-input` error。**病根是自動接線** —— 加卡時順手接的那條使用者從來沒畫過，於是畫布上有第二個作者。任何「幫使用者接一條線」的便利功能都要先想清楚這件事 |
+| **快取的簽章看不見線**（F9-8 已修） | 在畫布上把線從 A 改接到 B、重跑，**數字沒動** —— 使用者會以為是自己改錯了 | `image_segment_signature` 以前只算 node + params，而改接線**可以完全不動任何參數**（兩條流都叫 `ref`）→ 簽章相同 → 快取直接回舊影像。現在影像段裡的線（`dst` 落在 checkpoint 之前的）也進簽章。**加任何「會影響影像段結果」的東西時都要問一次：它進簽章了嗎** |
+| **停用的卡讓下游去吃隔壁那一支**（F9-8 已修） | 把分支中間一張卡停用，下游量到的是**另一支**的值 —— 跑得完、有數字、而且是錯的 | 停用的節點沒有產出，而查不到就退回 `ctx.images`＝「最後一個寫這個名字的人」。分支上那是隔壁支線。現在沿著那條線自己的入線往上找第一個還開著的產出者（`_follow_disabled`）；找不到就讓卡片**看不到**這條流（報「缺影像流」），不是安靜地給它別人的圖 |
+| **一對節點之間只存得下一條線**（F9-9 已修） | 從同一張卡先拉 `test` 再拉 `ref`，參數上兩條流都在，但只有一條線帶得出來源 —— 線性時看不出來，分支時另一條會安靜地吃到別支的圖 | `Edge` 的「重複」判準從**兩個節點**改成**整條線**（兩個節點 + 兩個埠）。畫布改成照 `model.edge_lines()` 畫，不再從「兩端共用哪幾條流」推 —— 推出來的猜不出使用者只接了其中一條。剪刀要帶著自己那條的流名，不然剪一條會剪掉兩條 |
+| **分支 + 影像段快取：冷跑 ≠ 熱跑**（未修，見 `docs/history/plans/F9-dag-streams.md` §14） | 同一份分支 recipe 跑第二次，某些特徵的值變了 | 快照存的是 `ctx.images`（名字 → 最後一個寫它的人），`produced[(節點, 埠)]` 沒進去。熱跑時指向快取段內某個節點的線查不到，退回最後寫者 = 另一支。**只在分支時發作**，線性 recipe 不受影響 |

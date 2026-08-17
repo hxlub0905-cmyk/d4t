@@ -300,32 +300,35 @@ def test_threshold_live_preview_vs_commit(window, synlot):
     window._on_threshold_changed(77.25)
     assert window.model.threshold == pytest.approx(before)
     live = window.histogram.bin_summary_text()
-    assert live == "   ".join(
+    # 前綴比對而不是整句相等：合成資料旁邊就有 ground_truth.json，於是同一行
+    # 後面還會接一段正確率（Phase 1）。這一條要驗的是**bin 數跟著門檻走**，
+    # 不是那一行長什麼樣子 —— 整句相等會讓它每加一個讀數就紅一次。
+    assert live.startswith("   ".join(
         "bin %s=%s" % (k, v)
         for k, v in sorted(vm_mod.rebin(window.trial_scores, 77.25,
-                                        window.model.bins).items()))
+                                        window.model.bins).items())))
 
     window._on_threshold_committed(50.0)
     assert window.model.threshold == pytest.approx(50.0)
 
 
 # --------------------------------------------------------------------------- #
-# 8. 存檔往返
+# 8. 編輯中的 model 轉得成 recipe
 # --------------------------------------------------------------------------- #
-def test_save_recipe_round_trip(window, synlot, tmp_path):
+def test_the_model_converts_to_a_runnable_recipe(window, synlot):
+    """以前這裡測的是「存檔往返」。存檔功能還沒支援（engine 先做完再回來），
+    但底下那件事沒消失、而且更重要了：**畫面上的 model 要轉得成引擎吃得下的
+    recipe** —— ``run_trial`` 與 ``run_batch`` 走的正是這條路。"""
     _loaded(window, synlot)
-    out = tmp_path / "x.json"
-
-    assert window.save_recipe_path(str(out)) is True
-    assert out.is_file()
-    json.loads(out.read_text(encoding="utf-8"))     # 是合法 JSON
-
-    loaded = Recipe.load(str(out))
-    assert loaded.routes[window.model.kind] == window.model.node_order
-    assert loaded.score.expr == window.model.expr
-    assert loaded.score.threshold == pytest.approx(window.model.threshold)
-    assert sorted(loaded.nodes) == sorted(window.model.nodes)
-    assert loaded.nodes["snr"].params["window"] == \
+    rec = window.model.to_recipe()
+    assert rec.routes[window.model.kind] == window.model.node_order
+    assert rec.score.expr == window.model.expr
+    # 而且轉成 JSON 再讀回來要一模一樣（run_batch 就是這樣送進 worker 的）
+    again = Recipe.from_json_dict(json.loads(json.dumps(rec.to_json_dict())))
+    assert again == rec
+    assert again.score.threshold == pytest.approx(window.model.threshold)
+    assert sorted(again.nodes) == sorted(window.model.nodes)
+    assert again.nodes["snr"].params["window"] == \
         window.model.nodes["snr"].params["window"]
 
 
@@ -353,17 +356,14 @@ def test_actions_are_disabled_until_their_preconditions_hold(qapp, synlot):
         for w in (win.btn_trial, win.btn_export):
             assert w.toolTip().strip(), "變灰的按鈕一定要說明原因"
 
-        # 移掉起手卡 → 流程真的空了，理由要換一句，而且存不了
+        # 移掉起手卡 → 流程真的空了，理由要換一句
         win.pipeline.remove_requested.emit("load_patch")
-        assert win.btn_save_recipe.isEnabled() is False
-        assert win.btn_save_recipe.toolTip().strip()
         assert "add at least one card" in win.btn_trial.toolTip()
 
         # 只有資料集 → 還是不能跑（流程是空的），但理由要換一句
         assert win.load_dataset_path(synlot["klarf"], sync=True) is True
         assert win.btn_trial.isEnabled() is False
         assert "pipeline is empty" in win.btn_trial.toolTip()
-        assert win.btn_save_recipe.isEnabled() is False
 
         # 資料集 + 流程 → 可以跑；但還沒有結果，所以還不能輸出
         assert win.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
@@ -371,7 +371,6 @@ def test_actions_are_disabled_until_their_preconditions_hold(qapp, synlot):
         assert win.btn_trial_more.isEnabled() is True
         assert win.act_run_all.isEnabled() is True
         assert win.spin_trial_n.isEnabled() is True
-        assert win.btn_save_recipe.isEnabled() is True
         assert win.btn_export.isEnabled() is False
         assert "No results yet" in win.btn_export.toolTip()
 

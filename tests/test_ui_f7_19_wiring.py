@@ -180,7 +180,8 @@ def test_compare_defaults_to_test_on_the_left_and_ref_on_the_right(window, tmp_p
     out = generate(str(tmp_path / "lotC"), n=4, seed=11)
     window.load_dataset_path(out["klarf"], sync=True)
     src = window.model.node_order[0]
-    nid = window.add_card_after(src, "normalize", "ref")   # 一張做 ref 的卡
+    nid = window.add_card_after(src, "normalize")   # 一張做 ref 的卡
+    window._on_edge_added(src, nid, "ref")
     window.select_node(nid)
     window.refresh_preview(sync=True)
 
@@ -199,7 +200,8 @@ def test_compare_shows_one_histogram_per_image(window, tmp_path):
     window.load_dataset_path(out["klarf"], sync=True)
     src = window.model.node_order[0]
     nid = window.add_card_after(src, "normalize")
-    window.pipeline.link_to(src, nid, port=1)          # 兩條流都接上
+    window.pipeline.link_to(src, nid, port=0)          # 兩條流都接上（F9-7：
+    window.pipeline.link_to(src, nid, port=1)          # 線一條一條自己拉）
     window.select_node(nid)
     window.refresh_preview(sync=True)
 
@@ -268,6 +270,7 @@ def test_the_node_does_not_say_the_same_thing_twice(window):
     """
     src = window.model.node_order[0]
     nid = window.add_card_after(src, "normalize")
+    window.pipeline.link_to(src, nid, port=0)      # F9-7：線都是自己拉的
     window.pipeline.link_to(src, nid, port=1)
     assert window.model.nodes[nid].params["streams"] == "test,ref"
 
@@ -285,7 +288,8 @@ def test_the_node_does_not_say_the_same_thing_twice(window):
 def test_a_stream_the_subtitle_does_not_mention_is_still_shown(window):
     """借範圍的那條流不在 reads→writes 那一行裡，所以它要留在摘要中。"""
     src = window.model.node_order[0]
-    nid = window.add_card_after(src, "normalize", "ref")
+    nid = window.add_card_after(src, "normalize")
+    window._on_edge_added(src, nid, "ref")
     window.model.set_param(nid, "range_from", "test")
     summary = window._node_summary(window.model.nodes[nid], shown=["ref"])
     assert "range_from" in summary
@@ -362,6 +366,7 @@ def test_a_line_can_be_cut_where_it_is(window):
     """
     src = window.model.node_order[0]
     nid = window.add_card_after(src, "denoise")
+    window._on_edge_added(src, nid, "test")        # F9-7：線由使用者拉
     assert window.model.has_edge(src, nid) is True
 
     edge = next(e for e in window.pipeline._edges
@@ -379,7 +384,7 @@ def test_route_order_has_no_lines_at_all(window):
     src = window.model.node_order[0]
     nid = window.add_card_after(src, "denoise")
     pairs = {e.pair() for e in window.pipeline._edges}
-    assert pairs == set(window.model.edges), \
+    assert pairs == set(window.model.edge_pairs()), \
         "畫布上的線要恰好等於使用者拉的 edges"
 
 
@@ -485,9 +490,12 @@ def test_undo_has_a_button_not_only_a_shortcut(window):
 def test_adding_one_card_is_one_undo(window):
     """使用者做的是**一個**動作，所以復原也該是一步。
 
-    加一張卡在 model 上其實是三個動作（add_step → set_param 指影像流 →
-    add_edge）。各記一步的話，按一次 Ctrl+Z 會看到**卡還在但線不見了** ——
-    那比不能復原更糟，因為畫面上出現了他從來沒有做出來過的東西。
+    加一張卡在 model 上不只一個動作（add_step，加上 Mask 卡的自動填名）。
+    各記一步的話，按一次 Ctrl+Z 會看到**卡還在但設定變了** —— 那比不能復原
+    更糟，因為畫面上出現了他從來沒有做出來過的東西。
+
+    F9-7 之後加卡不再接線，所以「拉線」是**另一個**動作、另一步復原 ——
+    這一條也一起鎖住那個分界：復原一次退掉線，再一次才退掉卡。
 
     這件事以前沒人發現，是因為工具列上根本沒有復原鈕（只有快捷鍵）。
     """
@@ -495,9 +503,16 @@ def test_adding_one_card_is_one_undo(window):
     before = list(window.model.node_order)
     before_edges = list(window.model.edges)
 
-    window.add_card_after(src, "denoise", "ref")
+    nid = window.add_card_after(src, "denoise")
     assert len(window.model.node_order) == len(before) + 1
+    assert list(window.model.edges) == before_edges, "加卡不該產生線（F9-7）"
 
-    assert window.undo() is True
-    assert window.model.node_order == before, "一次就要回到原狀"
+    window._on_edge_added(src, nid, "ref")
+    assert list(window.model.edges) != before_edges
+
+    assert window.undo() is True                  # 退掉線
     assert list(window.model.edges) == before_edges
+    assert window.model.node_order != before, "一步退掉了兩個動作"
+
+    assert window.undo() is True                  # 再退掉卡
+    assert window.model.node_order == before, "一次就要回到原狀"
