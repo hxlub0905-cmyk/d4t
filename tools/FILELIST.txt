@@ -92,7 +92,7 @@ c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
 5a968374b05f525613fdc37189418e4d4ee14618 docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
-3b8747d133ff8f4681eca5a3be9145cf882e40ed docs/plans/F11-phase2-features.md
+932d2220144c2f541947e6057b0a917eb0ad4cdc docs/plans/F11-phase2-features.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
 fdf5dba17526e86ea0990c7853ef652874082324 fab_probe/probe_klarf.py
