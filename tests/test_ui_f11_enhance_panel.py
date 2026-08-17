@@ -140,6 +140,38 @@ def test_the_two_numbers_are_not_the_same_number(qapp):
 
 
 # --------------------------------------------------------------------------- #
+# 2b. 換掉了幾顆壞點（F11 Enhance-2）
+# --------------------------------------------------------------------------- #
+def test_it_prints_how_many_pixels_were_replaced_as_damage(qapp):
+    """調 threshold 時這是唯一看得到的回饋 —— 影像上只是少了幾顆亮點。"""
+    insp = insp_mod.EnhanceInspector()
+    insp.set_context("denoise", params={"streams": "test",
+                                        "method": "hot_pixels"},
+                     meta=_change(), result=_result({"hot_px_frac": 0.0013}))
+    assert insp.replaced() == pytest.approx(0.0013)
+    assert "0.13% replaced as hot/dead pixels" in insp.summary()
+
+
+def test_zero_replaced_is_still_worth_printing(qapp):
+    """0 在這裡**是**訊息（「這張卡什麼都沒做，門檻可能太高」），
+    跟 clip_frac 的 0 不一樣（那個是「一切正常」）。"""
+    insp = insp_mod.EnhanceInspector()
+    insp.set_context("denoise", params={"streams": "test",
+                                        "method": "hot_pixels"},
+                     meta=_change(), result=_result({"hot_px_frac": 0.0}))
+    assert "0.00% replaced" in insp.summary()
+
+
+def test_the_other_denoise_methods_do_not_print_that_line(qapp):
+    """median 動的是每一個畫素 —— 「換掉的比例」對它恆等於 1，印出來沒有意義。"""
+    insp = insp_mod.EnhanceInspector()
+    insp.set_context("denoise", params={"streams": "test", "method": "median"},
+                     meta=_change(), result=_result({"clip_frac": 0.0}))
+    assert insp.replaced() is None
+    assert "replaced" not in insp.summary()
+
+
+# --------------------------------------------------------------------------- #
 # 3. 整條路：引擎 → meta / features → 面板
 # --------------------------------------------------------------------------- #
 def test_the_whole_way_through_from_a_real_preview(window, tmp_path):

@@ -41,6 +41,7 @@ from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
 from ..core.steps._util import CLIP_FRAC
+from ..core.steps.denoise import HOT_FRAC
 from .theme import TOKENS
 
 __all__ = ["Inspector", "AlignInspector", "EnhanceInspector",
@@ -368,6 +369,17 @@ class EnhanceInspector(Inspector):
         hi = float(rec.get("clipped_high", 0.0)) - float(rec.get("was_clipped_high", 0.0))
         return (max(0.0, lo), max(0.0, hi))
 
+    def stream_feature(self, key: Optional[str], name: str) -> Optional[float]:
+        """這一條流的某個診斷特徵值（**兩條以上才有流名前綴**，F10-3）。
+
+        前綴規則在引擎那邊（`MultiStreamStep.run`）與這裡各寫了一次，而寫錯的
+        那一半是安靜的（面板就只是不印那一行）—— 所以有一支測試從真實預覽走完
+        整條路，不是只餵假資料。
+        """
+        k = key or self.stream()
+        multi = len(self.streams()) > 1
+        return self.this_value(("%s_%s" % (k, name)) if multi else name)
+
     def pushed_out(self, key: Optional[str] = None) -> Optional[float]:
         """引擎量到的「算出來超出 0–255、被壓回來」的比例（F11 Enhance-1）。
 
@@ -382,9 +394,15 @@ class EnhanceInspector(Inspector):
         數字來自引擎（``clip_frac`` 特徵，`MultiStreamStep.run` 寫的），UI 不自己
         再量一次。多流時特徵名帶流名前綴 —— 跟量測卡同一條規則（F10-3）。
         """
-        k = key or self.stream()
-        multi = len(self.streams()) > 1
-        return self.this_value(("%s_%s" % (k, CLIP_FRAC)) if multi else CLIP_FRAC)
+        return self.stream_feature(key, CLIP_FRAC)
+
+    def replaced(self, key: Optional[str] = None) -> Optional[float]:
+        """``denoise`` 的 hot_pixels 換掉了多少比例（F11 Enhance-2）。
+
+        **這是使用者調 `threshold` 時唯一看得到的回饋**：門檻壓低到開始吃真的缺陷
+        時，影像上看不出來（少了幾顆亮點而已），但這個數字會跳。
+        """
+        return self.stream_feature(key, HOT_FRAC)
 
     def sigma(self, key: Optional[str] = None) -> Optional[float]:
         """這一條流的雜訊 σ（只有 Denoise 卡量，F11 Enhance-1）。
@@ -416,6 +434,10 @@ class EnhanceInspector(Inspector):
             sig = self.sigma(key)
             if sig is not None:
                 extra.append("noise σ ≈ %.1f" % sig)
+            hot = self.replaced(key)
+            if hot is not None:
+                extra.append("%.2f%% replaced as hot/dead pixels"
+                             % (hot * 100.0))
             out = self.pushed_out(key)
             if out is not None and out >= 0.0005:
                 extra.append("%.1f%% computed outside 0–255 and clipped back"

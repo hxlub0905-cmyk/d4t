@@ -142,6 +142,21 @@ class MultiStreamStep(Step):
         （`img -> img`），把診斷混進去會讓四張卡各自長出一份。
         """
 
+    def after_stream(self, ctx: Context, key: str, before: np.ndarray,
+                     after: np.ndarray, params: Dict[str, object]):
+        """處理**之後**，這一條流要多報哪些特徵（回 ``None`` = 不報）。
+
+        跟 :meth:`note_stream` 對稱，差別是它拿得到「處理前」與「處理後」兩張圖
+        —— 所以「這張卡動了多少」這類診斷是**免費**的（比對兩張圖，不必把演算法
+        再跑一次）。前綴由 :meth:`run` 統一套（多流才加流名，同 F10-3 的規則），
+        卡片自己不要處理命名。
+
+        報出來的名字**必須**出現在 :meth:`stream_features` 的宣告裡 ——
+        `test_card_invariants` 會擋（宣告 ≠ 真的吐出來的話，分數表達式裡就有一個
+        指不到的變數名，而那要等使用者寫完表達式才發現）。
+        """
+        return None
+
     #: 超過這個比例的像素被壓回值域就講一句話（F11 Enhance-1）。
     #:
     #: 為什麼是固定值而不是一個參數：這不是一個「效果」旋鈕，是一句診斷。
@@ -151,6 +166,15 @@ class MultiStreamStep(Step):
     CLIP_WARN_FRAC = 0.01
 
     @classmethod
+    def stream_features(cls, params: Dict[str, object]) -> List[str]:
+        """**一條流**會吐出哪些特徵的基本名（不含流名前綴）。
+
+        子類要在某些設定下多報一個數字時覆寫這個，不要覆寫
+        :meth:`resolve_features` —— 前綴規則只該寫一次。
+        """
+        return list(cls.features_out) + [CLIP_FRAC]
+
+    @classmethod
     def resolve_features(cls, params: Dict[str, object]) -> List[str]:
         """這張卡吐的診斷特徵（F11 Enhance-1）。
 
@@ -158,7 +182,7 @@ class MultiStreamStep(Step):
         規則（F10-3），所以使用者只要學一次。
         """
         keys = cls.stream_list(params)
-        base = list(cls.features_out) + [CLIP_FRAC]
+        base = cls.stream_features(params)
         if len(keys) > 1:
             return [n for k in keys for n in prefix_names(k, base)]
         return base
@@ -175,8 +199,9 @@ class MultiStreamStep(Step):
             self.note_stream(ctx, key, img, p)
             out, frac = clip_to_range(op(img))
             ctx.set_image(key, out)
-            ctx.add_features(prefix_features(key if multi else "",
-                                             {CLIP_FRAC: frac}))
+            feats = {CLIP_FRAC: frac}
+            feats.update(self.after_stream(ctx, key, img, out, p) or {})
+            ctx.add_features(prefix_features(key if multi else "", feats))
             if frac > self.CLIP_WARN_FRAC:
                 ctx.warn(
                     "[%s] %.1f%% of '%s' was pushed outside 0-255 and had to be "

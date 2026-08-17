@@ -31,7 +31,8 @@ import numpy as np
 
 __all__ = [
     "clahe", "remove_background", "remove_stripes", "morph_residual",
-    "bilateral", "nlm", "noise_sigma",
+    "bilateral", "nlm", "noise_sigma", "median_blur_f32", "fix_isolated",
+    "robust_level_spread", "BG_ESTIMATORS",
 ]
 
 
@@ -76,6 +77,36 @@ def noise_sigma(img: Any) -> float:
     return float(max(sigma, 1e-3))
 
 
+def robust_level_spread(values: Any):
+    """回 ``(背景在哪, 抖多少)`` = ``(中位數, 1.4826 × MAD)``。
+
+    為什麼不用平均與標準差（F11 Enhance-2）
+    --------------------------------------
+    因為**要量的東西就是缺陷本身**。一顆比背景亮 60 GLV、佔 16 個畫素的缺陷，
+    在 64×64 的 patch 上讓標準差從 5.0 變成 6.2 —— 也就是「這張圖有多抖」這個
+    量測值有 24% 是缺陷貢獻的，而缺陷越大貢獻越多。用它去正規化的話，
+    **兩顆大小不同的缺陷會被套上不同的縮放**，那正是正規化要消除的東西。
+
+    中位數與 MAD 對「少於一半的畫素長得不一樣」完全免疫，所以量到的是背景本身。
+    這跟 ``remove_stripes`` 用逐列中位數而不是平均是同一個理由。
+
+    ``1.4826`` 是把 MAD 換算成常態分布標準差的係數（一致性因子），所以回傳值的
+    單位跟 σ 一樣 —— 呼叫端不必知道裡面用的是哪一種估計法。
+
+    MAD 為 0（超過一半的畫素完全相同，例如二值 mask 或一大片飽和）時退回標準差
+    —— 那時候「一半以上一樣」是真的，但圖上仍然有變異，回 0 會讓呼叫端除以 0。
+    """
+    f = np.asarray(values, dtype=np.float32).reshape(-1)
+    f = f[np.isfinite(f)]
+    if f.size == 0:
+        return 0.0, 0.0
+    med = float(np.median(f))
+    spread = 1.4826 * float(np.median(np.abs(f - med)))
+    if spread <= 1e-6:
+        spread = float(np.std(f))
+    return med, spread
+
+
 def clahe(img: Any, clip_limit: float = 2.0, tiles: int = 8) -> np.ndarray:
     """CLAHE（限制對比的自適應直方圖等化）。回傳 float32（值域 0–255）。
 
@@ -102,26 +133,104 @@ def clahe(img: Any, clip_limit: float = 2.0, tiles: int = 8) -> np.ndarray:
     return op.apply(u8).astype(np.float32)
 
 
-def remove_background(img: Any, size: int = 31,
-                      keep_level: bool = True) -> np.ndarray:
-    """大尺度背景移除：``img - blur(img)``（+ 原本的平均值）。
+def median_blur_f32(img: Any, size: int = 31) -> np.ndarray:
+    """中位數濾波，**任何核心大小都吃得下**（cv2 的 float 路只支援 3 / 5）。
 
-    ``size`` 是背景估計的模糊核心。**它必須明顯大於缺陷** ——
+    大核心走 uint8：把影像線性映到 0–255、``cv2.medianBlur``、再映回來。
+    代價是**背景估計**量化到動態範圍的 1/255；殘差仍然是用原始的浮點值減出來的，
+    所以訊號本身沒有被量化。這個代價換到的是 O(1) 的大核心中位數
+    （Huang 的直方圖法），不然 31×31 的中位數在 float 上是跑不動的。
+    """
+    f = _as_f32(img)
+    if f.ndim != 2 or f.size == 0:
+        return f.copy()
+    k = _odd(size)
+    if k <= 5:
+        return cv2.medianBlur(f, k)
+    lo = float(np.nanmin(f))
+    hi = float(np.nanmax(f))
+    if not np.isfinite(lo) or not np.isfinite(hi) or (hi - lo) < 1e-9:
+        return f.copy()                        # 全平的圖，中位數就是它自己
+    span = hi - lo
+    u8 = np.clip(np.rint((f - lo) / span * 255.0), 0, 255).astype(np.uint8)
+    bg = cv2.medianBlur(u8, k).astype(np.float32)
+    return (bg / 255.0) * span + lo
+
+
+#: ``remove_background`` 支援的背景估計法。
+BG_ESTIMATORS = ("gaussian", "median")
+
+
+def remove_background(img: Any, size: int = 31, keep_level: bool = True,
+                      estimator: str = "gaussian") -> np.ndarray:
+    """大尺度背景移除：``img - 背景估計``（+ 原本的平均值）。
+
+    ``size`` 是背景估計的核心。**它必須明顯大於缺陷** ——
     核心太小的話，缺陷自己會被算進背景裡然後被減掉（訊號消失）。
     經驗值：抓 patch 邊長的 1/4 ~ 1/2。
 
     ``keep_level=True`` 會把原影像的平均值加回去，讓輸出仍然落在原本的
     亮度區間 —— 不然後面每一張看灰階絕對值的卡（glv_stats、門檻）都要重調。
+
+    兩種估計法，差別是**缺陷有多容易被算進背景裡**（F11 Enhance-2）
+    -----------------------------------------------------------------
+    ``gaussian``（原本唯一的一種）是加權平均，所以缺陷**一定**有一部分被算進
+    背景：一顆比背景亮 60 GLV 的缺陷，在它自己的位置上把背景估計抬高，減完之後
+    振幅就少了那一塊。核心開得夠大可以緩解，但緩解不掉 —— 平均值沒有辦法忽略
+    離群值。
+
+    ``median`` 可以。中位數只看排序中間那一個，所以只要缺陷佔核心面積的**不到
+    一半**，它對背景估計的影響是零 —— 缺陷的振幅完整留在殘差裡。代價是它比較貴，
+    而且背景本身有平滑梯度時會有輕微的階梯（中位數是離散的）。
+
+    背景**不平滑**（圖樣邊緣、不規則亮塊）的時候兩種都不對，那是 top-hat 的場合
+    —— 見 :func:`morph_residual`（卡片上的 bright_spots / dark_spots）。
     """
     f = _as_f32(img)
     if f.size == 0:
         return f.copy()
     k = _odd(size)
-    bg = cv2.GaussianBlur(f, (k, k), 0, borderType=cv2.BORDER_REPLICATE)
+    if str(estimator) == "median":
+        bg = median_blur_f32(f, k)
+    else:
+        bg = cv2.GaussianBlur(f, (k, k), 0, borderType=cv2.BORDER_REPLICATE)
     out = f - bg
     if keep_level and f.size:
         out = out + float(np.nanmean(f))
     return out.astype(np.float32)
+
+
+def fix_isolated(img: Any, size: int = 3, threshold: float = 4.0):
+    """換掉**孤立的**過亮／過暗畫素（hot / dead pixel），其餘一個都不動。
+
+    回傳 ``(輸出, 換掉的比例)``。
+
+    為什麼這不是「再一種去雜訊」（F11 Enhance-2）
+    --------------------------------------------
+    median / gaussian 會把**整張圖**磨過一遍：只有幾顆壞點的時候那是拿大砲打
+    蚊子，而被磨掉的邊緣正是下一段要拿來量 CD 的東西。這一個只動「跟鄰居差得
+    離譜」的那幾顆 —— 其餘畫素逐位元組不變。
+
+    判準是**以這張圖自己的雜訊 σ 為單位**（同 ``bilateral`` / ``nlm`` 的
+    ``strength``）：``|img - 鄰居中位數| > threshold × σ``。所以 4.0 在安靜的
+    lot 與吵的 lot 上是同一件事 —— 那正是常數門檻做不到的。
+
+    σ 本身會被壞點稍微抬高（拉普拉斯遮罩對單點的響應很大），所以真的壞點很多時
+    這個判準會偏保守。那是刻意的方向：寧可漏換，不要去動真的缺陷。
+    """
+    f = _as_f32(img)
+    if f.ndim != 2 or f.size == 0:
+        return f.copy(), 0.0
+    med = median_blur_f32(f, _odd(size))
+    sigma = noise_sigma(f)
+    # 1 GLV 的地板：合成的無雜訊影像 σ ≈ 0，沒有地板的話門檻會變成 0 而整張圖
+    # 都算「跟鄰居不一樣」。
+    limit = max(1.0, float(threshold) * sigma)
+    bad = np.abs(f - med) > limit
+    if not np.any(bad):
+        return f.copy(), 0.0
+    out = np.where(bad, med, f).astype(np.float32)
+    return out, float(np.count_nonzero(bad)) / float(f.size)
 
 
 def remove_stripes(img: Any, axis: int = 0, strength: float = 1.0) -> np.ndarray:

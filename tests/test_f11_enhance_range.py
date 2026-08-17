@@ -282,6 +282,10 @@ def test_an_all_zero_mask_falls_back_to_the_whole_image():
 
 
 def test_use_within_shows_up_for_match_in_the_form():
-    """``show_when`` 是使用者看得到的那一半：三個方法用得到就要三個都列。"""
+    """``show_when`` 是使用者看得到的那一半：用得到的方法要全部列進去。
+
+    `local`（CLAHE）是唯一用不到的 —— 它根本不量一組全域統計。
+    """
     spec = [s for s in get_step("normalize").params if s.name == "use_within"][0]
-    assert spec.show_when == ("method", ("percentile", "glv_band", "match"))
+    assert spec.visible_for({"method": "match"}) is True
+    assert spec.visible_for({"method": "local"}) is False

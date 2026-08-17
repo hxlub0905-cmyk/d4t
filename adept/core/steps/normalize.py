@@ -62,7 +62,10 @@ from ._util import MultiStreamStep, require_image, streams_spec, to_uint8
 __all__ = ["NormalizeStep"]
 
 #: 方法值 → 畫面上的字（``choice`` 目前只吃字串清單，所以說明寫在 help 裡）。
-METHODS = ("percentile", "glv_band", "match", "local")
+METHODS = ("percentile", "zscore", "glv_band", "match", "local")
+
+#: ``zscore`` 與 ``percentile`` / ``glv_band`` 共用「先量再套」那條路。
+_MEASURED = ("percentile", "zscore", "glv_band")
 
 
 def _norm_to_u8(img: np.ndarray, lo: float, hi: float) -> np.ndarray:
@@ -71,11 +74,11 @@ def _norm_to_u8(img: np.ndarray, lo: float, hi: float) -> np.ndarray:
 
 
 _RANGE_FROM_HELP = (
-    "Leave empty and each stream's stretch range is measured on itself. Name "
-    "another stream to measure the range there and use it for every stream "
-    "this card processes - that is what keeps test and ref comparable. The "
-    "range is read before this card changes anything, so it is always the "
-    "original image.")
+    "Leave empty and each stream measures itself. Name another stream to "
+    "measure there instead - the stretch range, or the average and spread - "
+    "and use those numbers for every stream this card processes; that is what "
+    "keeps test and ref comparable. They are read before this card changes "
+    "anything, so it is always the original image.")
 
 
 @register_step
@@ -95,7 +98,10 @@ class NormalizeStep(MultiStreamStep):
             name="method", type="choice", default="percentile", choices=list(METHODS),
             label="How to rescale",
             help=("percentile = stretch the P-low to P-high range of the whole "
-                  "image to 0-255 (the usual choice); glv_band = measure the "
+                  "image to 0-255 (the usual choice); zscore = put the average "
+                  "brightness and the spread on fixed values, so one gray "
+                  "level always means the same number of noise levels; "
+                  "glv_band = measure the "
                   "range using only pixels inside a chosen gray band, which "
                   "locks onto one particular pattern; match = do not decide a "
                   "range at all, just make this stream's brightness "
@@ -112,6 +118,28 @@ class NormalizeStep(MultiStreamStep):
                   label="High percentile", show_when=("method", ("percentile",)),
                   help=("Upper percentile (50-100): pixels above it are clipped "
                         "to 255.")),
+        # ---- zscore -------------------------------------------------------
+        ParamSpec(name="target_level", type="int", default=128, min=0, max=255,
+                  label="Put the background at",
+                  show_when=("method", ("zscore",)),
+                  help=("Where the background of every image ends up (gray "
+                        "levels). 128 is the middle of the scale, which leaves "
+                        "the most room on both sides for defects that are "
+                        "brighter and darker than the background.")),
+        ParamSpec(name="target_spread", type="float", default=32.0,
+                  min=1.0, max=96.0,
+                  label="Put one noise level at",
+                  show_when=("method", ("zscore",)),
+                  help=("How many gray levels one noise level of this image "
+                        "becomes. With 32, a pixel sitting 2 noise levels "
+                        "above the background is always 64 gray levels "
+                        "brighter - on every image and every lot, which is "
+                        "what lets a fixed threshold downstream mean "
+                        "something. Raise it for more visible contrast, but "
+                        "above about 60 the bright and dark tails start "
+                        "hitting the ends of the scale and flattening. Both "
+                        "numbers are measured with medians, so a big defect in "
+                        "the crop cannot move the scale.")),
         # ---- glv_band -----------------------------------------------------
         ParamSpec(name="glv_low", type="int", default=0, min=0, max=255,
                   label="Gray band from", show_when=("method", ("glv_band",)),
@@ -124,11 +152,11 @@ class NormalizeStep(MultiStreamStep):
         # ---- 兩種「量範圍」的方法共用 ---------------------------------------
         ParamSpec(name="range_from", type="image_key", direction="in", default="",
                   label="Borrow range from",
-                  show_when=("method", ("percentile", "glv_band")),
+                  show_when=("method", _MEASURED),
                   help=_RANGE_FROM_HELP),
         ParamSpec(name="use_within", type="image_key", direction="in", default="",
                   label="Use only",
-                  show_when=("method", ("percentile", "glv_band", "match")),
+                  show_when=("method", _MEASURED + ("match",)),
                   help=("Leave empty to measure from every pixel. Name a mask "
                         "stream (from a Mask-from-regions card) and only the "
                         "pixels inside the mask are measured - the result is "
@@ -172,7 +200,7 @@ class NormalizeStep(MultiStreamStep):
     @classmethod
     def extra_reads(cls, params: Dict[str, Any]) -> List[str]:
         method = str(params.get("method", "percentile"))
-        if method in ("percentile", "glv_band"):
+        if method in _MEASURED:
             return [str(params.get("range_from", "") or "").strip(),
                     str(params.get("use_within", "") or "").strip()]
         if method == "match":
@@ -198,6 +226,8 @@ class NormalizeStep(MultiStreamStep):
             return self._range_op(ctx, p, glv=False)
         if method == "glv_band":
             return self._range_op(ctx, p, glv=True)
+        if method == "zscore":
+            return self._zscore_op(ctx, p)
         if method == "match":
             ref = to_uint8(require_image(ctx, self.key, p["reference"]))
             fn = algo_histmatch.MATCH_FN[p["match_method"]]
@@ -219,6 +249,79 @@ class NormalizeStep(MultiStreamStep):
         clip, tiles = float(p["clip_limit"]), int(p["tiles"])
         return lambda img: algo_enhance.clahe(img, clip, tiles)
 
+    def _measure_from(self, ctx: Context, p: Dict[str, Any]):
+        """「先量再套」三個方法共用的兩件事：**量哪一張**、**量哪些畫素**。
+
+        回傳 ``(basis, pixels_for)``：``basis`` 是 ``range_from`` 指的那張圖
+        （沒填就是 None＝每條流量自己），``pixels_for(src)`` 是把 ``use_within``
+        的 mask 套上去之後、真正拿來量的那群畫素。
+
+        兩件事都在**迴圈之前**發生（`build_op` 只呼叫一次），所以量到的一定是
+        這張卡還沒改過的原始值 —— F7-18 那個「借範圍的卡要排在前面」的陷阱
+        就是這樣消失的。
+        """
+        borrow = str(p.get("range_from", "") or "").strip()
+        basis = (require_image(ctx, self.key, borrow) if borrow else None)
+        within = str(p.get("use_within", "") or "").strip()
+        mask = (require_image(ctx, self.key, within) if within else None)
+
+        def pixels_for(src: np.ndarray) -> np.ndarray:
+            """量用的那群畫素（套用永遠是整張 ``img``，不在這裡）。"""
+            if mask is None:
+                return src
+            if mask.shape[:2] != np.asarray(src).shape[:2]:
+                raise StepError(
+                    self.key,
+                    f"the mask '{within}' is {mask.shape[1]}x{mask.shape[0]} "
+                    f"but the image is {src.shape[1]}x{src.shape[0]} - point "
+                    f"the Mask-from-regions card's 'Same size as' at the same "
+                    f"stream this card processes.")
+            sel = np.asarray(src)[np.asarray(mask) > 0]
+            if sel.size == 0:
+                # 全 0 的 mask（區域落在影像外）：退回整張圖，但要講 ——
+                # 安靜地退回去，使用者會以為「只用 EPI」一直在生效。
+                ctx.warn(f"normalize: mask '{within}' selects no pixels; "
+                         f"measuring from the whole image instead.")
+                return src
+            return sel
+
+        return basis, pixels_for
+
+    def _zscore_op(self, ctx: Context, p: Dict[str, Any]):
+        """把平均與標準差搬到固定值（F11 Enhance-2）。
+
+        跟 ``percentile`` 差在**用什麼定錨**：percentile 釘的是兩個端點
+        （P2→0、P98→255），所以輸出的一個灰階代表多少「實際的變異」逐張都不同；
+        zscore 釘的是背景的位置與**一個 σ 的寬度**，所以輸出上「偏離背景 2 個 σ」
+        永遠是同樣的灰階差 —— 那正是讓下游一個固定門檻跨批有意義的條件。
+
+        **量的方式是中位數與 MAD，不是平均與標準差**（見
+        ``algo/enhance.py::robust_level_spread``）：要量的東西就是缺陷本身，
+        而平均／標準差會被缺陷帶著跑 —— 那會讓兩顆大小不同的缺陷被套上不同的
+        縮放，正是正規化要消除的東西。要平均／標準差版本的話，這張卡的 ``match``
+        ＋ ``linear`` 就是（它對齊的是另一條流的 mean/std）。
+
+        代價：亮暗尾巴會撞到 0 / 255 而被削平（``target_spread`` 開太大時尤其），
+        而那件事由基底的 ``clip_frac`` 講出來。
+        """
+        level = float(p["target_level"])
+        spread = float(p["target_spread"])
+        basis, pixels_for = self._measure_from(ctx, p)
+
+        def op(img: np.ndarray) -> np.ndarray:
+            src = img if basis is None else basis
+            centre, sigma = algo_enhance.robust_level_spread(pixels_for(src))
+            gain = spread / sigma if sigma > 1e-6 else 1.0
+            # sigma 是 0 的話（完全平的圖）就只搬位置、不縮放：除以 0 會吐 inf，
+            # 而 inf 會一路活到某個量測卡才變成 nan。
+            #
+            # **這裡刻意不 clip**：壓回 0–255 是基底的事（F11 Enhance-1），
+            # 而它會順便把「被壓掉多少」算成 clip_frac。自己先 clip 掉的話那個
+            # 數字永遠是 0 —— 削平的代價就又變回「只有直方圖看得到」。
+            return (np.asarray(img, dtype=np.float32) - centre) * gain + level
+
+        return op
+
     def _range_op(self, ctx: Context, p: Dict[str, Any], *, glv: bool):
         """percentile / glv_band 共用：先決定基準影像，再回傳逐張的拉伸函式。
 
@@ -231,6 +334,9 @@ class NormalizeStep(MultiStreamStep):
         12%），整張圖的 percentile 因此逐顆漂 —— 同一片 EPI，隔壁多一根 MG，
         正規化完就變一個值。mask 讓「拿來定範圍的那群像素」跨 patch 是同一種
         圖案。
+
+        兩件事都由 :meth:`_measure_from` 提供，跟 ``zscore`` 共用同一份 ——
+        「量哪一張、量哪些畫素」的規則寫兩次就會有兩種意思。
         """
         if glv:
             if p["glv_low"] > p["glv_high"]:
@@ -241,30 +347,7 @@ class NormalizeStep(MultiStreamStep):
             raise StepError(self.key, f"the low percentile ({p['p_low']}) must be "
                             f"smaller than the high percentile ({p['p_high']}).")
 
-        borrow = str(p.get("range_from", "") or "").strip()
-        basis = (require_image(ctx, self.key, borrow) if borrow else None)
-        within = str(p.get("use_within", "") or "").strip()
-        mask = (require_image(ctx, self.key, within) if within else None)
-
-        def pixels_for_range(src: np.ndarray) -> np.ndarray:
-            """量範圍用的那群像素（套用永遠是整張 ``img``，不在這裡）。"""
-            if mask is None:
-                return src
-            if mask.shape[:2] != src.shape[:2]:
-                raise StepError(
-                    self.key,
-                    f"the mask '{within}' is {mask.shape[1]}x{mask.shape[0]} "
-                    f"but the image is {src.shape[1]}x{src.shape[0]} - point "
-                    f"the Mask-from-regions card's 'Same size as' at the same "
-                    f"stream this card processes.")
-            sel = np.asarray(src)[np.asarray(mask) > 0]
-            if sel.size == 0:
-                # 全 0 的 mask（區域落在影像外）：退回整張圖，但要講 ——
-                # 安靜地退回去，使用者會以為「只用 EPI」一直在生效。
-                ctx.warn(f"normalize: mask '{within}' selects no pixels; "
-                         f"measuring the range from the whole image instead.")
-                return src
-            return sel
+        basis, pixels_for_range = self._measure_from(ctx, p)
 
         def op(img: np.ndarray) -> np.ndarray:
             src = img if basis is None else basis
