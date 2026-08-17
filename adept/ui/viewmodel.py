@@ -367,7 +367,6 @@ class RecipeModel:
     def available_streams(self, before_node: Optional[str] = None) -> List[str]:
         """到 before_node（不含）為止累積的影像流名，供 image_key 參數下拉。"""
         streams: List[str] = []
-        first = True
         for nid in self.node_order:
             if nid == before_node:
                 break
@@ -375,11 +374,9 @@ class RecipeModel:
             if not node.enabled:
                 continue
             step_cls = get_step(node.step)
-            if first:
-                ws = step_cls.resolve_writes_for_kind(node.params, self.kind)
-                first = False
-            else:
-                ws = step_cls.resolve_writes(node.params)
+            # kind-aware 是卡片自己的宣告，不是位置的事（F11 Input-0）——
+            # 兩張入口卡的時候，第二張也要算得出它真的會產出哪幾條流。
+            ws = step_cls.resolve_writes_for_kind(node.params, self.kind)
             for w in ws:
                 if w not in streams:
                     streams.append(w)

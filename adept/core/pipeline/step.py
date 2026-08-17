@@ -386,6 +386,40 @@ class Step(ABC):
         return [p for p in cls.params if p.is_output()]
 
     @classmethod
+    def is_source(cls) -> bool:
+        """這張卡是**入口**嗎 —— 沒有輸入埠就是（F11 Input-0）。
+
+        為什麼要這個判斷
+        ----------------
+        以前「入口」的定義是**位置**：``route`` 上第一張啟用的卡。那是線性
+        route 時代的寫法（F9 之前畫布還沒有線），而它同時出現在三個地方
+        （``recipe.validate``、``engine._implicit_bindings``、
+        ``viewmodel.available_streams``）都寫成 ``first = True`` 這個旗標。
+
+        位置定義的後果是**一份 recipe 只能有一個 image source**：第二張入口卡
+        拿不到 kind-aware 的 writes 宣告（``load_patch`` 在 ``channels="auto"``
+        下只保守宣告 ``["test"]``），於是它真的會產出的那幾條流在 validate 眼裡
+        不存在，下游冒出一片**假的** ``missing-image``。
+
+        現在改成看**事實**：入口就是**不吃任何影像流的卡**，跟它排在第幾個無關。
+        所以「patch 的頁 + GLAS 的 sidecar」這種兩個入口的 recipe 才成立，
+        而且刪掉第一張卡不會讓整條 route 的檢查換一套語意。
+
+        判準是兩個**宣告**的聯集，不是一個：
+
+        - 沒有輸入埠（``direction="in"`` 的 ``image_key(s)`` 參數，F10 起必填）；
+        - **而且**沒有靜態 ``reads``。第二條不是多餘的 —— 一張卡可以宣告
+          ``reads = ["diff"]`` 卻沒有讓使用者挑來源的參數（測試裡的假卡就是
+          這樣，早期的卡片風格也是）。只看埠的話那種卡會被當成入口，於是
+          ``missing-image`` 整條檢查安靜地失效。
+
+        看**宣告**而不看**值**（``resolve_reads(params)``）也是刻意的，理由跟
+        F10 那條一樣：值是會被清空的（剛加進畫布的卡輸入本來就是空的），
+        用值判斷的話一張還沒接線的卡會變成「入口」而躲過 ``not-connected``。
+        """
+        return not cls.input_specs() and not cls.reads
+
+    @classmethod
     def missing_inputs(cls, params: Dict[str, Any]) -> List[str]:
         """哪些**必要**的輸入還沒有來源（回參數名，空 list = 接齊了）。
 

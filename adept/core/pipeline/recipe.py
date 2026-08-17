@@ -559,6 +559,37 @@ def _clean_params_for(step_cls: Type[Step], raw: Dict[str, Any],
             return {}
 
 
+def _feature_collisions(step_cls, p: Dict[str, Any], nid: str, k: str,
+                        feat_owner: Dict[str, str]) -> List["Issue"]:
+    """這張卡寫的特徵有沒有蓋掉別張卡的（就地更新 ``feat_owner``）。
+
+    後面的卡會**安靜地**蓋掉前面的（``Context.add_feature`` 允許覆寫，只在 meta
+    留紀錄）。最典型的踩法是「量兩個 ROI」—— 兩張 glv_stats 都寫 glv_mean，
+    跑完只剩後面那張的值，而分數表達式完全沒有辦法指到前面那一個。
+    這是**警告**不是 error：同名覆寫有時是刻意的（例如重跑一次 normalize），
+    但它必須看得見。
+
+    抽成函式是因為 F11 Input-0 之後**入口卡也要跑這一段** —— 兩張 load 卡都寫
+    `n_channels`。同一段判斷抄兩份的話，總有一份會長歪（這個 repo 記過三次）。
+    """
+    out: List[Issue] = []
+    for f in step_cls.resolve_features(p):
+        owner = feat_owner.get(f)
+        if owner is not None and owner != nid:
+            out.append(Issue(
+                code="feature-collision", level="warning", node_id=nid,
+                title=f"step '{nid}' overwrites the feature '{f}'",
+                detail=f"route '{k}': '{f}' is already produced by "
+                       f"'{owner}'; the later value wins, so '{f}' in "
+                       f"the score expression means this card's value. "
+                       f"The earlier one is still available as "
+                       f"'{owner}_{f}'. Give one of the two cards a "
+                       f"different output name if that is clearer."))
+        else:
+            feat_owner.setdefault(f, nid)
+    return out
+
+
 def validate(recipe: Recipe, kind: Optional[str] = None,
              registry: Optional[Dict[str, Type[Step]]] = None) -> List[Issue]:
     """lint 式驗證：收集**所有**問題後一次回傳（不會 raise）。
@@ -699,7 +730,6 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
         #: 所以兩張同型別的量測卡（例如量兩個 ROI 的 glv_stats）會寫同一組名字，
         #: 後面那張安靜地蓋掉前面那張 —— 跑得完、有數字、少一半。
         feat_owner: Dict[str, str] = {}
-        first = True
         for nid in order:
             node = recipe.nodes.get(nid)
             if node is None or not node.enabled:
@@ -708,15 +738,18 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             if step_cls is None:
                 continue  # 已記 unknown-step
             p = clean_params.get(nid, {})
-            if first:
-                # 第一張卡（load）：reads / requires_ref 不檢查；
-                # writes 用 kind-aware 宣告（load 卡依資料型別決定會有哪些流）
+            if step_cls.is_source():
+                # **入口卡**（沒有輸入埠 —— 見 Step.is_source）：reads /
+                # requires_ref 不檢查，因為它的資料不是從別張卡來的。
+                # 一份 recipe 可以有好幾張，每一張都拿 kind-aware 的 writes
+                # 宣告（load 卡依資料型別決定會有哪些流）。
                 avail |= set(step_cls.resolve_writes_for_kind(p, k))
-                for f in step_cls.resolve_features(p):
-                    feat_owner.setdefault(f, nid)
+                # **撞名檢查對入口卡也要跑**（F11 Input-0）。以前這一段沒有它，
+                # 因為「入口」只有一張所以撞不起來 —— 現在兩張 load 卡都寫
+                # n_channels，後面那張會安靜地蓋掉前面那張。
+                issues.extend(_feature_collisions(step_cls, p, nid, k, feat_owner))
                 feats |= set(step_cls.resolve_features(p))
                 regions |= set(step_cls.resolve_regions_out(p))
-                first = False
                 continue
             # **還沒接上來源**（F10）。這一條要排在 missing-image 前面，
             # 而且擋掉後面所有以「這張卡會產出什麼」為前提的檢查 ——
@@ -767,25 +800,7 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                            f"upstream, or clear the roi parameter to measure "
                            f"the whole image."))
 
-            # 特徵撞名：後面的卡會安靜地蓋掉前面的（Context.add_feature 允許
-            # 覆寫，只在 meta 留紀錄）。最典型的踩法是「量兩個 ROI」——
-            # 兩張 glv_stats 都寫 glv_mean，跑完只剩後面那張的值，而分數表達式
-            # 完全沒有辦法指到前面那一個。這是**警告**不是 error：同名覆寫有時
-            # 是刻意的（例如重跑一次 normalize），但它必須看得見。
-            for f in step_cls.resolve_features(p):
-                owner = feat_owner.get(f)
-                if owner is not None and owner != nid:
-                    issues.append(Issue(
-                        code="feature-collision", level="warning", node_id=nid,
-                        title=f"step '{nid}' overwrites the feature '{f}'",
-                        detail=f"route '{k}': '{f}' is already produced by "
-                               f"'{owner}'; the later value wins, so '{f}' in "
-                               f"the score expression means this card's value. "
-                               f"The earlier one is still available as "
-                               f"'{owner}_{f}'. Give one of the two cards a "
-                               f"different output name if that is clearer."))
-                else:
-                    feat_owner.setdefault(f, nid)
+            issues.extend(_feature_collisions(step_cls, p, nid, k, feat_owner))
 
             avail |= set(step_cls.resolve_writes(p))
             feats |= set(step_cls.resolve_features(p))

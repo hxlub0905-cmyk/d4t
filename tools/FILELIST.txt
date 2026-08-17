@@ -40,10 +40,10 @@ f277b6b3e5e65ce8027da01648a0d42d44a64905 adept/core/pipeline/batch.py
 d6a6e8374dba3679cc6c28dd534ece76923f6ce2 adept/core/pipeline/cache.py
 bc5822860c73a424460de963c0a7ef1b940bd71e adept/core/pipeline/context.py
 8a8f906147c0b06defc52096716ecfd917b0b94e adept/core/pipeline/curve.py
-e919d51e8cbdff2471a0eed499b9acd13ff3996e adept/core/pipeline/engine.py
+fc722ec0cd455df588db69706af5f94d18708030 adept/core/pipeline/engine.py
 6c3c9c1cc1e6d1ee5d121f9994968f4f780e3cc5 adept/core/pipeline/expression.py
-773991462dc799abd942907d762883e9f9e2f99f adept/core/pipeline/recipe.py
-cc9ca222befb19f043233e064747f2bf42f0a6cb adept/core/pipeline/step.py
+8a3a13ea16f2de569c197c609842402d28229931 adept/core/pipeline/recipe.py
+5dbe70501330ce1131b0353b999bed70de136630 adept/core/pipeline/step.py
 596cea13ec15f5ec7517c955111d58804910bee8 adept/core/steps/__init__.py
 9aea7076cb74cb7c975e76c75997010c0f18bd3a adept/core/steps/_util.py
 68eceaa2cadaffb76b71c8dfc2e2984d9f4bbf5e adept/core/steps/align.py
@@ -76,7 +76,7 @@ a13161cca57fecb7a1366a4e0585bedc5e1828ac adept/ui/scope.py
 50784e0bccaacb544acea9ee809eb91c1152e8be adept/ui/studio.py
 5d647c32055d4a73128c92853c0425729fdac6b9 adept/ui/template_dialog.py
 acb3224f56416ae87cc1c3ae349800bdab91cb05 adept/ui/theme.py
-edc8b2643ac0f1d089b8c7a719271e49ae2dfae1 adept/ui/viewmodel.py
+555bcaaa4ce078658bd2a4b729192749b7b97d74 adept/ui/viewmodel.py
 b2dd691199dbc50b01b02de407b321aada8e6a3a adept/ui/welcome.py
 cc1e82ef72207fda70c03fa6646a0c1581eac9b2 adept/ui/widgets.py
 669770bafa48f033c7d1e9fda77f342b3369070e adept/ui/workers.py
@@ -91,7 +91,7 @@ c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
 9ce686eed574348d7a2f5fa8848adcbf0c623366 docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
-675dbe62ad2a52766202a1cf790a64d4af0be0d4 docs/plans/F11-phase2-features.md
+861c9db6e656adb31adc04f032aae1df9170e34f docs/plans/F11-phase2-features.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
 fdf5dba17526e86ea0990c7853ef652874082324 fab_probe/probe_klarf.py
@@ -122,6 +122,7 @@ ec53b9545e7a314039cdda7c60cc0d123e4701e2 tests/test_export_klarf.py
 9ce55e3523551e7d531e64d40629aad67e7d8869 tests/test_export_overlay.py
 fbabf20c7735e77b9e7f83a16b950a2831feaeda tests/test_export_report.py
 4d9e62f4a9bd01ec28eec1e63e0c395716ad463c tests/test_expression.py
+0175e2f18814f34028e69a88bed500d618fd6fc0 tests/test_f11_multi_input.py
 8103c2019dc9ae3e7336c52905e6117dc518727e tests/test_f9_8_cache_and_disabled.py
 4017d96f4145ba179d8e186b7f0e02b6e47ed8ef tests/test_fab_probe.py
 862f012efa32c2e2162dd591bb2896cab70145c9 tests/test_glv.py
@@ -138,7 +139,7 @@ a64d82b7bdd755d0ed912fa5a68f134730a5d960 tests/test_offline_tools.py
 e027a9047fa771cca97915c533a7f90198c0fb18 tests/test_period_golden.py
 482763f96a3f9e39f90a7e6cbd97c6716b29db63 tests/test_phase_origin.py
 8c4b2aba1d0893acc999c5acb331fd00839518d9 tests/test_quality.py
-7a364920bc7ad4c0d9d4dcef348e271fcafda11f tests/test_recipe.py
+42551a8dc948ce41a2880e2b9eb9b2ef39c901bf tests/test_recipe.py
 f90b258ab8544e5eadc1b54b55ff558db1cc3041 tests/test_results_store.py
 16cd9995a97eb6b919044e2c72fe1bcddb954e2a tests/test_roi.py
 89fb007d43ba13010286d1f883b59cce7fc04421 tests/test_roi_cross.py
