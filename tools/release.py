@@ -12,9 +12,9 @@
 1. ``tools/FILELIST.txt`` —— 全部檔案的 git blob SHA。公司機用它判斷
    「哪幾個檔案要重新複製」（`tools/check_files.py`）。
 2. ``bundle/ADEPT_bundle.py`` —— 整個 repo 壓成一個純文字 `.py`，
-   在 GitHub 上按複製鈕就能整包搬進公司機（見 `AGENTS.md` §2）。
+   在 GitHub 上複製 raw 就能整包搬進公司機（見 `AGENTS.md` §2）。
    每次產完會報一句目前的大小（見 :func:`bundle_size_report`）——
-   超過 1 MB 的話 GitHub 的檔案頁不顯示它，要改用 raw 連結複製。
+   那是**資訊**，不是門檻：raw 那條路跟檔案多大無關。
 
 **先清單再打包**：包裡面含著那份清單，順序反了就會把舊清單封進新包裡，
 而那個包解出來之後 `check_files.py` 會報一堆不存在的差異。
@@ -43,35 +43,27 @@ import make_text_bundle                   # noqa: E402
 
 BUNDLE = os.path.join("bundle", "ADEPT_bundle.py")
 
-#: GitHub 的**檔案瀏覽頁**不顯示超過 1 MB 的檔案（那顆「複製」鈕跟著消失）。
+#: GitHub 的**檔案瀏覽頁**在 1 MB 以上不顯示內容（那顆「複製」鈕跟著消失）。
 #:
-#: ⚠ 這**不是一堵牆**（2026-08-16 使用者確認）：超過之後還有 raw 連結
-#: （`raw.githubusercontent.com/.../bundle/ADEPT_bundle.py`），在瀏覽器打開
-#: 一樣全選複製得走。所以這個數字是「哪一種複製法還能用」的分界，
-#: 不是「搬不搬得進去」。
+#: ⚠ **這不是限制**（2026-08-17 使用者確認）：他搬運時**直接複製 raw**
+#: （`raw.githubusercontent.com/.../bundle/ADEPT_bundle.py`），那條路跟檔案
+#: 多大無關。所以這個數字留在這裡只是為了**講得出現在多大**，
+#: 不是一個要閃避的門檻 —— 不要為了它去刪文件或分批。
 BUNDLE_LIMIT_BYTES = 1024 * 1024
-
-#: 開始報一句話的水位（85%）。純提醒，不擋任何事。
-BUNDLE_WARN_RATIO = 0.85
 
 
 def bundle_size_report(nbytes: int) -> Tuple[str, str]:
-    """包的大小 → ``(等級, 要印的話)``；等級是 ``ok`` / ``warn`` / ``over``。
+    """包的大小 → ``(等級, 要印的話)``；等級恆為 ``ok``（這裡不擋任何事）。
 
     切開成純函式是為了測得到 —— 產一個 1 MB 的包只為了驗這段訊息太貴。
+
+    以前這裡分 ok / warn / over 三級，85% 就開始喊。那是「1 MB 是硬牆」年代
+    的產物；使用者改用 raw 複製之後，喊了也沒有人需要做任何事，而**一句沒有
+    對應動作的警告只會訓練人忽略警告**。現在它只報事實。
     """
     pct = 100.0 * nbytes / BUNDLE_LIMIT_BYTES
-    size = "%.0f KB（GitHub 檔案頁 1 MB 門檻的 %.0f%%）" % (nbytes / 1024.0, pct)
-    if nbytes > BUNDLE_LIMIT_BYTES:
-        return "over", (
-            "△ %s —— 超過了。GitHub 的**檔案瀏覽頁**不再顯示它（複製鈕也沒了），\n"
-            "    但**還搬得走**：改用 raw 連結在瀏覽器打開再全選複製\n"
-            "    （AGENTS.md §2）。想回到「按複製鈕」那條路的話，把只增不減的\n"
-            "    文件搬進 docs/history/（不打包），或 --split 分批。" % size)
-    if nbytes > BUNDLE_LIMIT_BYTES * BUNDLE_WARN_RATIO:
-        return "warn", (
-            "△ %s —— 接近檔案頁的門檻。超過也還有 raw 那條路，\n"
-            "    只是「按複製鈕」會變成「開 raw 再全選」。" % size)
+    size = ("%.0f KB（GitHub 檔案頁的顯示上限是 1 MB，佔 %.0f%%；"
+            "搬運走 raw，不受這個數字影響）" % (nbytes / 1024.0, pct))
     return "ok", "  %s" % size
 
 

@@ -2,7 +2,7 @@
 # 由 tools/make_filelist.py 產生；tests/test_offline_tools.py 會擋住它腐爛。
 f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
-01122f71bbe15ed22ba897e605c73b7facfb9422 AGENTS.md
+593e295af2c1273f76a872412ea5f585d15895a3 AGENTS.md
 d0bb806984bf219aa80264f12c5a91f7138ff333 CLAUDE.md
 87c3cb2a07ed7a97b98ec30aa139b3dd2f03ff19 README.md
 bae7fb12a23ad0244ece4c92bb563fdb585cf7b2 SESSION_LOG.md
@@ -86,7 +86,7 @@ cc1e82ef72207fda70c03fa6646a0c1581eac9b2 adept/ui/widgets.py
 7e5d6f7d159a437c1b57f738021f6f92517f5308 docs/ARCHITECTURE.md
 91f9753c60a1ab3ae57cfe246ebeef065d6c563a docs/FAB-VALIDATION.md
 8e18ac4032d5bd9c46723d63055092017d603841 docs/HANDOVER.md
-0e1a3a5c99edf83914e8364958f9dd9a26056d34 docs/NO-GIT-SETUP.md
+b258ee9ccb0e12fcdf10e2dcab584fddabe10918 docs/NO-GIT-SETUP.md
 b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
 4558b59646f8ef6c8aa80c4368ad7895166944c9 docs/ROADMAP.md
@@ -203,5 +203,5 @@ db5f715f456a86b9eefa80787af4ca71f04fd967 tools/make_mgepi_real.py
 df3dd3f0d16f3e9308b7312e166fbae93e85ca8e tools/make_sample.py
 cd11d6aba3d087b6d30ea50e385fd44f3586f865 tools/make_sample_rsem.py
 c2884d15b45cbd85f6489850887ff0a86fbf1a5f tools/make_text_bundle.py
-39ee7ab01ae1cf8605533fa4e09b3a9b408bcaa4 tools/release.py
+c1b19adfabb7d5fd1ae307273fc63688d4c2b674 tools/release.py
 6d276574bedda9adca3b59fe0f7a1f21d1302c39 tools/validate_mgepi.py
