@@ -62,6 +62,16 @@ class RecipeModel:
     #: 試用回饋（F7-9）原話：「一開始預設畫布上就應該有 load image 這個節點」。
     STARTER_STEP = "load_patch"
 
+    #: **一顆一張影像**的資料型別 → 起手卡要換成 `load_single`（F11 Input-4）。
+    #: 一種 source 一張卡，所以「哪一張卡是起手卡」也跟著資料走 —— 給單張資料
+    #: 放一張 `load_patch`，畫布上會冒出兩顆埠而資料只有一張圖。
+    SINGLE_IMAGE_STARTERS = {"rsem": "load_single", "folder": "load_single"}
+
+    @classmethod
+    def starter_step_for(cls, kind: str) -> str:
+        """這種資料的起手卡是哪一張。"""
+        return cls.SINGLE_IMAGE_STARTERS.get(str(kind or ""), cls.STARTER_STEP)
+
     @classmethod
     def starter(cls, kind: str = "ebi_patch") -> "RecipeModel":
         """開新檔用的模型：畫布上已經放好 Input 卡，而且不算「改過」。
@@ -71,7 +81,7 @@ class RecipeModel:
         """
         m = cls(kind=kind)
         try:
-            m.add_step(cls.STARTER_STEP)
+            m.add_step(cls.starter_step_for(kind))
         except KeyError:                 # pragma: no cover — 卡片庫壞了才會發生
             pass
         m.dirty = False

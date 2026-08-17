@@ -2512,6 +2512,18 @@ class StudioWindow(QMainWindow):
         ds_kind = str(getattr(dataset, "kind", self.model.kind))
         if ds_kind != self.model.kind:
             if not self.model.dirty or not self.model.node_order:
+                # 還沒動過 → 連起手卡一起換成這種資料該用的那一張（F11 Input-4）：
+                # 單張影像的資料放 `load_patch` 的話，畫布上會有兩顆埠而資料只有
+                # 一張圖 —— 那正是使用者回報的「畫布跟實際對不起來」。
+                want = RecipeModel.starter_step_for(ds_kind)
+                only_starter = (len(self.model.node_order) == 1
+                                and not self.model.edges)
+                if only_starter and not self.model.dirty:
+                    nid = self.model.node_order[0]
+                    if self.model.nodes[nid].step != want:
+                        self.model = RecipeModel.starter(ds_kind)
+                        self.model.add_listener(self._on_model_changed)
+                        self.selected_node = None
                 self.model.kind = ds_kind
                 self.model.dirty = False      # 換 route 不算「使用者改過」
                 # ⚠ **換 kind 必須重畫**。`model.kind` 是直接設的屬性，不會通知

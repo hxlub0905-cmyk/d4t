@@ -197,6 +197,12 @@ git add -A && python tools/release.py && git add -A
 
 **Studio 吃四種輸入（2026-08-17，F11 Input-3）**，一種 source 一個入口：
 
+**一種 source 一張卡**（F11 Input-4，使用者定調）：Input 段有兩張載入卡 ——
+`load_patch`「Load images」（一顆好幾張，`channel_map` 命名）與 `load_single`
+「Load one image」（一顆一張，`out` 命名）。**兩張都不看資料型別**，宣告只看
+使用者看得到的值 —— 一張卡服務四種 source 的時候，畫布會說謊（那時候「這張卡吐
+哪幾條流」有三個不同的答案，而畫布拿到的是錯的那一個）。
+
 | kind | 什麼樣的資料 | 入口 |
 |---|---|---|
 | `ebi_patch` | KLARF + patch TIFF（每顆連續幾頁）| `Open KLARF…` |

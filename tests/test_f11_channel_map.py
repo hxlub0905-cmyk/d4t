@@ -90,12 +90,18 @@ def test_the_declared_streams_follow_the_map():
     assert LOAD.resolve_writes_for_kind(p, "ebi_patch") == ["se1", "bse", "se2"]
 
 
-def test_without_a_map_the_declarations_are_exactly_what_they_were():
-    """沒填就是舊行為（黃金值不動的前提）。"""
+def test_the_declaration_never_depends_on_the_dataset_kind():
+    """**宣告只看使用者看得到的值**（F11 Input-4）。
+
+    這一條以前斷言的是相反的事：沒填對照表時 `resolve_writes_for_kind` 會依資料
+    型別給 `["test","ref"]`（patch）或 `["single","test"]`（rsem）。那個「一張卡對
+    不同資料型別宣告不同東西」的機制，就是使用者回報的「畫布跟實際對不起來」的
+    來源 —— 拆成兩張卡之後它整個消失了。
+    """
     p = LOAD.validate_params({})
-    assert LOAD.resolve_writes(p) == ["test"]
-    assert LOAD.resolve_writes_for_kind(p, "ebi_patch") == ["test", "ref"]
-    assert LOAD.resolve_writes_for_kind(p, "rsem") == ["single", "test"]
+    assert LOAD.resolve_writes(p) == ["test", "ref"]      # ＝ 預設對照表的名字
+    for kind in ("ebi_patch", "rsem", "folder", "tiff_stack", "whatever"):
+        assert LOAD.resolve_writes_for_kind(p, kind) == ["test", "ref"], kind
 
 
 # ---------------------------------------------------------------------------
@@ -141,11 +147,19 @@ def test_the_bse_page_gets_the_bse_name():
     assert "ref" not in ctx.images
 
 
-def test_without_a_map_the_second_image_is_still_called_ref():
-    """沒填對照表 → 逐字沿用舊行為（這是「不需要遷移」的驗收）。"""
+def test_the_default_map_is_the_old_patch_convention():
+    """預設對照表 = `1:test, 2:ref` —— EBI patch 的老規矩，所以黃金值不動。
+
+    五張圖的資料用預設值只會載到前兩張**並講一句**（第 3–5 張沒有名字）。
+    以前是安靜地多載三條 `img3`/`img4`/`img5` —— 那三條在畫布上有埠、
+    在特徵表裡有前綴，而使用者從來沒有替它們取名字。
+    """
     ctx = _run({})
-    assert sorted(ctx.images) == ["img3", "img4", "img5", "ref", "test"]
-    assert ctx.images["ref"].mean() == 20.0
+    assert sorted(ctx.images) == ["ref", "test"]
+    assert ctx.images["test"].mean() == 10.0 and ctx.images["ref"].mean() == 20.0
+    warns = " ".join(ctx.meta.get("warnings", []))
+    assert "has 5 images but only 2 are named" in warns
+    assert "img3" in warns
 
 
 def test_declaring_more_images_than_the_data_has_is_refused():

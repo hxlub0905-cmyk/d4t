@@ -632,7 +632,7 @@ RSEM 大圖、GLAS 的 `_label.png`、GLAS 的 `_gray.png` 是**同一件事**�
 - 檔案 I/O 只在 ingest 層（§3.1.3：配對規則只有一份、**快取簽章看得見**、
   畫布上是一條真的流）。
 
-#### 3.1.13 **Input 卡要按 source 拆開**（使用者回報，2026-08-17）
+#### 3.1.13 **Input 卡按 source 拆開**（Input-4，✅ 完成 2026-08-17）
 
 > 我還是傾向不同資料流（IMAGE SOURCE）卡片要拆分不要放在一起耶，這樣放在一起
 > 反而變得很複雜。例如我現在 load 一張 RSEM image 他就是單張的～但其後的 NODE
@@ -677,8 +677,31 @@ RSEM 大圖、GLAS 的 `_label.png`、GLAS 的 `_gray.png` 是**同一件事**�
 `load_single` 的 writes 只看 `out`。兩張卡都不再需要知道 kind ——
 **宣告從「隱形的資料型別」變成「使用者看得到的值」**，那正是畫布不說謊的條件。
 
-要一併決定的三件事（見下面 §3.1.11）：鏡射拿掉之後 `load_single` 的 `out` 預設叫
-什麼、舊 recipe 的遷移、以及「一顆五張但沒填 map」的新行為。
+##### 做完之後
+
+| | |
+|---|---|
+| `load_patch`「Load images」| `channel_map` 預設 **`1:test, 2:ref`**（原本是空字串）→ 宣告永遠等於**使用者看得到的那張表**，不再問資料型別 |
+| `load_single`「Load one image」（新）| 一個 `out` 參數（預設 `single`）、一顆埠。多張資料**擋下來並講出該用哪張卡**，不偷偷拿第一張 |
+| `resolve_writes_for_kind` | **沒有人覆寫它了**，而且有一條對整個 registry 跑的測試守著（下次有人想用「這個 kind 給這幾條」解問題時會叫）|
+| 鏡射 | 拿掉（`single` 不再偷偷變成 `test`）|
+| 起手卡 | 跟著資料走：`rsem`/`folder` → `load_single`（`RecipeModel.starter_step_for`）|
+| 舊 recipe | `_migrate_split_load_cards`：單張影像那條 route 上的 `load_patch` → `load_single`（`out="test"`，＝原本鏡射的結果）|
+
+**遷移踩到一個真的坑**：**兩條 route 可以共用同一個節點**，而 v1 的雙輸入 recipe
+正是那樣寫的（`dual_route_basic.json` 的 ebi_patch 與 rsem 共用八個節點，包含那張
+load 卡）。就地換掉共用的那一張會把另一條 route 弄壞 —— 第一版這樣寫，**黃金值當場
+抓到**（patch 那 8 顆全部 `ok=False`：「這張卡只載一張圖，但這顆有 2 張」）。
+所以共用的情況要**多開一個節點**給單張那條 route 用。
+
+**第二個坑**：`resolve_writes` 拿到的是**原始 `node.params`**（recipe JSON 省略預設值
+是合法的），所以「沒有這個鍵」要回到卡片預設、「有鍵但空字串」才是「使用者把每一列
+都清掉了」。第一版混成一件事 → 畫布上的 Input 卡一顆埠都不剩（兩支 UI 測試抓到）。
+
+驗收 `tests/test_f11_split_load_cards.py`（10 條）＋ 既有測試改寫（`test_steps.py`、
+`test_rsem_ingest.py`、`test_f11_channel_map.py`、`test_recipe.py` 各有一兩條斷言的是
+舊行為）。**黃金值三組 22 顆逐項相同**（`load_single` 保留 `n_channels` 就是為了這個
+—— 一個常數特徵的資訊量是零，但「同一份資料換一張卡就少一欄」的代價不是零）。
 
 #### 3.1.11 還沒定的
 

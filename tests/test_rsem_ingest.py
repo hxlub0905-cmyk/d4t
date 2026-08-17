@@ -5,7 +5,8 @@ KLARF 列尾用 `Images 1 { "檔名" … }` 指到那個檔。這裡驗證：
   1. KLARF 解得開、`load_dataset` 判成 rsem、每顆只有 single channel；
   2. 像素形狀／dtype、ground truth key 與 defect id 對得起來；
   3. 同 seed → 位元組完全相同（KLARF 與影像）；
-  4. `load_patch` 卡會把 single 鏡射成 test（下游卡片才吃得到）；
+  4. 單張影像走 `load_single` 卡，它吐**一條**具名流（F11 Input-4 起；
+     在那之前是 `load_patch` 把 single **鏡射**成 test，而那讓畫布上多一顆假的埠）；
   5. Golden Cell 路線（cell_period → golden_cell）在這份資料上跑得通
      —— 這是 M4「同一份 recipe 吃 EBI patch 與 RSEM」的驗收前提；
   6. `--real-frac 0` 的 lot 真的沒有種缺陷。
@@ -140,23 +141,28 @@ def test_same_seed_identical_bytes(tmp_path):
     assert _read(c["images"][0]) != _read(a["images"][0])   # 不同 seed → 不同資料
 
 
-# ------------------------------------------------------------ 4. load_patch 的 rsem 鏡射
+# ------------------------------------------------------------ 4. 單張影像的 Input 卡
 
-def test_load_patch_mirrors_single_to_test(ds):
+def test_load_single_gives_one_stream(ds):
+    """一顆一張 → **一條流**（F11 Input-4）。
+
+    這兩條測試以前斷言的是 `load_patch` 會把 `single` 鏡射一份到 `test`。
+    那個鏡射拿掉了：使用者回報「load 一張 RSEM image 他就是單張的，但其後的
+    NODE 節點會有 TEST 跟 REF —— 畫布跟實際對不起來」。
+    """
     it = ds.items[0]
     ctx = Context(meta={"_defect_item": it, "_dataset_kind": ds.kind})
-    run_step("load_patch", ctx)
-    # 卡片會把 single 同步一份到 test，下游卡片用預設 source="test" 就吃得到
-    assert "single" in ctx.images and "test" in ctx.images
-    assert np.array_equal(ctx.images["single"], ctx.images["test"])
-    assert "ref" not in ctx.images
-    assert ctx.features["n_channels"] == 1.0          # 只載入 single，鏡射不計數
-    assert any("single" in note for note in ctx.meta.get("notes", []))
+    run_step("load_single", ctx, out="test")
+    assert set(ctx.images) == {"test"}                # 一條，不是兩條
+    assert ctx.features["n_channels"] == 1.0
 
 
-def test_load_patch_declared_writes_for_rsem():
-    cls = REGISTRY["load_patch"]
-    assert cls.resolve_writes_for_kind({"channels": "auto"}, "rsem") == ["single", "test"]
+def test_the_declared_stream_is_the_name_the_user_gave():
+    cls = REGISTRY["load_single"]
+    assert cls.resolve_writes({"out": "test"}) == ["test"]
+    # 而且它不再隨資料型別改變（那是「畫布會說謊」的來源）
+    for kind in ("rsem", "folder", "ebi_patch"):
+        assert cls.resolve_writes_for_kind({"out": "test"}, kind) == ["test"]
 
 
 # ------------------------------------------------------------ 5. Golden Cell 路線
@@ -167,13 +173,13 @@ def test_golden_cell_route_on_real_defect(ds, truth):
     it = real[0]
 
     ctx = Context(meta={"_defect_item": it, "_dataset_kind": ds.kind})
-    run_step("load_patch", ctx)
+    run_step("load_single", ctx, out="test")
     run_step("cell_period", ctx)
     assert abs(ctx.features["cell_px"] - PITCH) <= 2
     assert abs(ctx.features["cell_py"] - PITCH) <= 2
 
     run_step("golden_cell", ctx)
-    single = ctx.images["single"]
+    single = ctx.images["test"]
     ref = ctx.images["ref"]
     assert ref.shape == single.shape
     assert ref.dtype == single.dtype
@@ -195,10 +201,10 @@ def test_real_frac_zero_has_no_planted_defect(tmp_path):
     ds0 = dataset.load_dataset(paths["klarf"])
     for it in ds0.items:
         ctx = Context(meta={"_defect_item": it, "_dataset_kind": ds0.kind})
-        run_step("load_patch", ctx)
+        run_step("load_single", ctx, out="test")
         run_step("cell_period", ctx)
         run_step("golden_cell", ctx)
-        residual = np.abs(ctx.images["single"].astype(np.float64)
+        residual = np.abs(ctx.images["test"].astype(np.float64)
                           - ctx.images["ref"].astype(np.float64))
         assert residual.max() < RESIDUAL_THRESHOLD, \
             f"defect {it.defect_id} 不該有缺陷，殘差峰值卻是 {residual.max():.1f}"

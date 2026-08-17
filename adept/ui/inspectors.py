@@ -1049,6 +1049,8 @@ class InputInspector(Inspector):
 #: 少的那五個不是被拿掉，是變成 ``normalize`` / ``tone`` 的一個下拉選項。
 INSPECTORS: Dict[str, type] = {
     "load_patch": InputInspector,
+    # 同一個面板：它讀的是 meta["input"]，兩張 Input 卡都會寫（F11 Input-4）。
+    "load_single": InputInspector,
     "roi_cross": CrossInspector,
     "roi_template": TemplateInspector,
     "align": AlignInspector,

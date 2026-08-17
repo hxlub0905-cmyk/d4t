@@ -313,6 +313,63 @@ def _migrate_renamed_values(nodes: Dict[str, "RecipeNode"]) -> None:
                                     enabled=node.enabled)
 
 
+#: 單張影像的 route（一顆一張圖）—— 這幾條上的 `load_patch` 要換成 `load_single`。
+_SINGLE_IMAGE_KINDS = ("rsem", "folder")
+
+
+def _migrate_split_load_cards(nodes: Dict[str, "RecipeNode"],
+                              routes: Dict[str, List[str]]) -> None:
+    """單張影像那條 route 上的 ``load_patch`` → ``load_single``（F11 Input-4）。
+
+    為什麼需要這一道
+    ----------------
+    Input 卡拆成兩張之前，``load_patch`` 服務四種資料型別，而它對單張資料的做法是
+    「載 ``single`` 並**順手鏡射一份到 `test`**」。舊 recipe 的 rsem route 就是靠
+    那個鏡射活著的（`golden_cell` 讀 `test`）。拆卡之後鏡射沒了，所以這裡把它換成
+    ``load_single`` 並把輸出名設成 ``test`` —— **行為逐項相同**（下游本來就只用
+    `test`；沒有人用過那條多出來的 `single`），黃金值因此不動。
+
+    判準是「**舊東西在不在**」（鐵則 9）：這條 route 的 kind 是單張影像的那幾種，
+    而它上面有一張 ``load_patch``。不是靠「新東西不在」—— 那分不出「舊檔案」與
+    「新 recipe 剛好沒填」。
+
+    ⚠ **兩條 route 可以共用同一個節點**，而 v1 的雙輸入 recipe 正是那樣寫的
+    （``dual_route_basic.json`` 的 ebi_patch 與 rsem 共用九個節點裡的八個，
+    包含那張 load 卡）。就地換掉共用的那一張會**把另一條 route 弄壞** ——
+    第一版這樣寫，黃金值當場抓到（patch 那 8 顆全部 ok=False：「這張卡只載一張圖，
+    但這顆有 2 張」）。所以共用的情況要**多開一個節點**給單張那條 route 用，
+    而不是改掉大家的那一張。
+    """
+    single = [k for k in routes if str(k) in _SINGLE_IMAGE_KINDS]
+    if not single:
+        return
+    shared_with_others = set()
+    for kind, order in routes.items():
+        if str(kind) not in _SINGLE_IMAGE_KINDS:
+            shared_with_others.update(order)
+
+    for kind in single:
+        order = routes[kind]
+        for i, nid in enumerate(list(order)):
+            node = nodes.get(nid)
+            if node is None or node.step != "load_patch":
+                continue
+            if nid in shared_with_others:
+                # 共用 → 這條 route 換成自己的一張新卡（別條 route 不受影響）
+                new_id = nid + "_single"
+                n = 2
+                while new_id in nodes:
+                    new_id, n = "%s_single%d" % (nid, n), n + 1
+                nodes[new_id] = RecipeNode(id=new_id, step="load_single",
+                                           params={"out": "test"},
+                                           enabled=node.enabled)
+                order[i] = new_id
+            else:
+                nodes[nid] = RecipeNode(id=node.id, step="load_single",
+                                        params={"out": "test"},
+                                        enabled=node.enabled)
+
+
 def _migrate_merged_cards(nodes: Dict[str, "RecipeNode"]) -> None:
     """把 F7-20 之前的卡片名與參數名換成合併後的（就地改寫 nodes）。
 
@@ -451,6 +508,8 @@ class Recipe:
         _migrate_merged_cards(nodes)
         # 最後把改過名的**參數值**換掉（F8：兩層的 dark/bright → 排名）。
         _migrate_renamed_values(nodes)
+        # Input 卡按 source 拆成兩張之後，單張影像那條 route 要換卡（F11 Input-4）。
+        _migrate_split_load_cards(nodes, routes)
         return cls(
             recipe_id=str(d["recipe_id"]),
             routes=routes,

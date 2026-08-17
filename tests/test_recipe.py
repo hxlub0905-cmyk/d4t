@@ -455,7 +455,8 @@ def test_is_source_looks_at_declarations_not_at_position_or_values():
     from adept.core.pipeline.step import REGISTRY
     import adept.core.steps            # noqa: F401  (註冊全部卡片)
     sources = sorted(k for k, c in REGISTRY.items() if c.is_source())
-    assert sources == ["load_patch"], sources
+    # 兩張 Input 卡（F11 Input-4：一種 source 一張卡）——其餘的卡都吃影像流。
+    assert sources == ["load_patch", "load_single"], sources
 
 
 def test_validate_requires_ref_on_rsem():
