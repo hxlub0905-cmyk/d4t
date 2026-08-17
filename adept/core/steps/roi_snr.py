@@ -15,8 +15,7 @@ from ..pipeline.step import (
     CATEGORY_ALGO, ParamSpec, Step, register_step, GROUP_MEASURE,
 )
 from ._util import (
-    output_prefix_spec, prefix_features, prefix_names, require_image,
-    roi_rect_or_none,
+    MultiSourceStep, output_prefix_spec, roi_rect_or_none,
 )
 
 _ZERO = {"roi_snr_signed": 0.0, "roi_snr_abs": 0.0, "roi_contrast": 0.0,
@@ -24,7 +23,7 @@ _ZERO = {"roi_snr_signed": 0.0, "roi_snr_abs": 0.0, "roi_contrast": 0.0,
 
 
 @register_step
-class RoiSnrStep(Step):
+class RoiSnrStep(MultiSourceStep):
     """ROI SNR：缺陷區對周邊背景的訊噪比與對比統計。"""
 
     key = "roi_snr"
@@ -35,7 +34,7 @@ class RoiSnrStep(Step):
             "surrounding background (signed — dark defects are negative), "
             "plus contrast and edge sharpness.")
     params = [
-        ParamSpec(name="source", type="image_key", direction="in", default="diff",
+        ParamSpec(name="source", type="image_keys", direction="in", default="diff",
                   help=("Image stream to measure on (usually diff; leave diff "
                         "unsigned to keep bright/dark direction visible).")),
         ParamSpec(name="roi", type="str", default="",
@@ -52,42 +51,28 @@ class RoiSnrStep(Step):
                     "roi_edge_sharpness", "roi_dvi"]
 
     @classmethod
-    def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
-        return [params.get("source", "diff")]
-
-    @classmethod
-    def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
-        return prefix_names(params.get("output_prefix", ""), cls.features_out)
-
-    @classmethod
     def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
         name = str(params.get("roi", "blob") or "").strip()
         return [name] if name else []
 
-    def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
-        p = self.validate_params(params)
-        img = require_image(ctx, self.key, p["source"])
-
+    def measure(self, ctx: Context, img, p: Dict[str, Any]):
         rect = roi_rect_or_none(ctx, self.key, img, p["roi"])
         if rect is None:
             ctx.warn(f"[{self.key}] no blob found (run Blob segment first, or "
                      f"point roi at a Define region card); all ROI SNR "
                      f"features recorded as 0.")
-            ctx.add_features(prefix_features(p["output_prefix"], _ZERO))
-            return ctx
+            return dict(_ZERO)
 
         res = algo_snr.roi_snr(img, rect, background_margin=int(p["background_margin"]))
         if res is None:
             ctx.warn(f"[{self.key}] ROI {rect} is outside the image or invalid; "
                      f"all ROI SNR features recorded as 0.")
-            ctx.add_features(prefix_features(p["output_prefix"], _ZERO))
-            return ctx
+            return dict(_ZERO)
 
-        ctx.add_features(prefix_features(p["output_prefix"], {
+        return {
             "roi_snr_signed": res.snr_signed,
             "roi_snr_abs": res.snr_abs,
             "roi_contrast": res.contrast,
             "roi_edge_sharpness": res.edge_sharpness,
             "roi_dvi": res.dvi,
-        }))
-        return ctx
+        }

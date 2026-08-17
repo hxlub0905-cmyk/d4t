@@ -1934,7 +1934,15 @@ class StudioWindow(QMainWindow):
         # 那在「一張卡只有一個輸入在用」的年代猜得中，但 ``subtract`` 的
         # a / b 兩顆輸入永遠只挑得到同一個，於是畫布上接哪一顆都一樣。
         param = dst_in or self._param_for_stream(dst)
-        accumulate = self.model.has_edge(src, dst)
+        # **這一格上已經有線了嗎** —— 有就是累加（多連一），沒有就是設定它。
+        #
+        # 以前的判準是「這一對節點之間已經有線了嗎」，那在 F10 之前是對的：
+        # 卡片的輸入帶著規格預設值（``streams="test"``），第一條線的意思是
+        # 「改成這個」而不是「再加一個」。現在新卡的輸入本來就是空的，那個理由
+        # 不成立了 —— 而舊判準還會漏掉「兩條線來自**不同**上游卡」這種多連一，
+        # 那正是量測卡最常見的接法（一條 diff、一條 test）。
+        accumulate = any(e.dst == dst and e.dst_in == param
+                         for e in self.model.edges)
         if self.model.has_line(src, dst, stream, param):
             self._status("%s → %s is already connected on %s."
                          % (src, dst, stream or "that stream"))

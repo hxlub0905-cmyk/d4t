@@ -207,3 +207,74 @@ def test_every_image_parameter_says_whether_it_is_an_input(window):
             else:
                 assert spec.direction == "", \
                     "%s.%s 不是影像流參數卻宣告了方向" % (cls.key, spec.name)
+
+
+# --------------------------------------------------------------------------- #
+# 3. 量測卡也可以多連一（F10-3）
+# --------------------------------------------------------------------------- #
+def test_a_measure_card_takes_more_than_one_source(window):
+    """兩條線接進同一張量測卡，兩條都算 —— 第二條不再把第一條踢掉。
+
+    使用者定調（F9-9 的原話，F10 補上量測卡這一半）：「餵圖是節點跟節點間在
+    處理的，卡片只負責把餵進來的 source 處理完丟出去，所以可以多連一，也可以
+    一連多。」以前量測卡的 ``source`` 是單一角色，第二條線的意思是「改接
+    別的」—— 想同時量 test 與 diff 就得放兩張卡，而那兩張卡的其他設定還得逐格
+    對齊，對不齊的時候畫面上看不出來。
+    """
+    src = window.model.node_order[0]
+    sub = window.add_card_after(src, "subtract")
+    window._on_edge_added(src, sub, "test", "a")
+    window._on_edge_added(src, sub, "ref", "b")
+    glv = window.add_card_after(sub, "glv_stats")
+
+    window._on_edge_added(sub, glv, "diff", "source")
+    assert window.model.nodes[glv].params["source"] == "diff"
+
+    window._on_edge_added(src, glv, "test", "source")
+    assert window.model.nodes[glv].params["source"] == "diff,test", \
+        "第二條線把第一條蓋掉了"
+    assert len([e for e in window.model.edges if e.dst == glv]) == 2
+    assert [i.code for i in window.model.validate() if i.node_id == glv] == []
+
+
+def test_two_sources_get_the_stream_name_in_front_of_every_number(window):
+    """接兩條就自動加流名前綴；**只接一條時名字跟以前逐字相同**。
+
+    後半句是這個改動敢動既有 recipe 的唯一理由：分數表達式不必改寫，
+    黃金值一個數字都不動（`tests/test_e2e_*` 與 freeze_golden 對著這件事）。
+    """
+    glv = get_step("glv_stats")
+    one = glv.validate_params({"source": "diff", "metrics": "glv_max"})
+    assert glv.resolve_features(one) == ["glv_max"]
+
+    two = glv.validate_params({"source": "diff,test", "metrics": "glv_max"})
+    assert glv.resolve_features(two) == ["diff_glv_max", "test_glv_max"]
+
+    # 使用者自己填的 output_prefix 疊在流名後面，而且只有一個底線
+    named = glv.validate_params({"source": "diff,test", "metrics": "glv_max",
+                                 "output_prefix": "center"})
+    assert glv.resolve_features(named) == ["diff_center_glv_max",
+                                           "test_center_glv_max"]
+
+
+def test_every_measure_card_can_take_more_than_one_source(window):
+    """多連一是**量測卡這一類**的性質，不是某一張卡的功能。
+
+    逐張列舉的話，加第 18 張量測卡的那天它會安靜地留在單一來源上 ——
+    而症狀是「別張卡可以接兩條，這張不行」，使用者只會覺得工具壞了。
+    """
+    from adept.core.steps._util import MultiSourceStep
+
+    for cls in list_steps():
+        # 「量測卡」＝**只吐數字、不吐影像**的那一類。``snr_map`` 掛在 Measure
+        # 這一組是因為它只為了餵 blob 而存在（見 step.py 的分組規則），但它
+        # 產出的是一張圖 —— 多連一對它的意思是「一條流一張輸出圖」，那是另一
+        # 個題目（要先決定輸出流怎麼命名），不在這一輪。
+        if (cls.resolve_group() != "measure" or cls.key in HIDDEN_STEPS
+                or cls.writes or not cls.features_out):
+            continue
+        assert issubclass(cls, MultiSourceStep), \
+            "%s 是量測卡，但接不了第二條來源" % cls.key
+        spec = next(sp for sp in cls.input_specs() if sp.name == cls.SOURCE)
+        assert spec.type == "image_keys", \
+            "%s.%s 還是單一來源的型別" % (cls.key, spec.name)
