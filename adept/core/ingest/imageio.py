@@ -23,8 +23,19 @@ import numpy as np
 # --------------------------------------------------------------------------- #
 # Image IO (CJK-path safe)
 # --------------------------------------------------------------------------- #
-def load_gray(path: str) -> np.ndarray:
-    """Load an image as 8-bit single-channel grayscale (CJK-path safe)."""
+def load_raw(path: str) -> np.ndarray:
+    """Load an image as single-channel grayscale **keeping its dtype** (F11).
+
+    為什麼要有這一支（而不是都走 :func:`load_gray`）
+    ------------------------------------------------
+    ``load_gray`` 對非 8-bit 的輸入會做 **per-image MINMAX 拉伸**（vendored 自
+    PEAR 的行為）。那對「拿一張圖來看」是對的，對**量測**是錯的：每張圖各自
+    拉伸之後，兩張圖之間就不再可比 —— 而 ``test − ref`` 的整個前提就是可比。
+    實測過：把同一張圖的亮度砍半再載入，平均值一模一樣（127.5 vs 127.5）。
+
+    所以 pipeline 的資料一律走這一支（``DefectItem.load``），位元深度的處置由
+    上層決定並**講出來**，不在讀檔的時候偷偷決定。
+    """
     data = np.fromfile(path, dtype=np.uint8)
     if data.size == 0:
         raise IOError(f"could not read file: {path}")
@@ -36,6 +47,17 @@ def load_gray(path: str) -> np.ndarray:
             img = cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
         else:
             img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    return img
+
+
+def load_gray(path: str) -> np.ndarray:
+    """Load an image as 8-bit single-channel grayscale (CJK-path safe).
+
+    ⚠ 非 8-bit 的輸入會被 **per-image MINMAX** 拉成 0–255 —— 那是「給人看」
+    的轉換，**兩張圖之間不再可比**。要量測的資料請走 :func:`load_raw`
+    （``DefectItem.load`` 就是）。
+    """
+    img = load_raw(path)
     if img.dtype != np.uint8:
         img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
     return img

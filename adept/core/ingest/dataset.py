@@ -45,6 +45,43 @@ from .klarf_core import KlarfDoc
 _IMAGE_EXTS = {".png", ".tif", ".tiff", ".jpg", ".jpeg", ".bmp"}
 
 
+class DataError(ValueError):
+    """資料本身不是 ADEPT 處理得了的形狀（訊息是白話的，會顯示給使用者）。"""
+
+
+def require_8bit(arr: np.ndarray, where: str) -> np.ndarray:
+    """8-bit 就原樣回傳，否則**擋下來並講清楚**（F11）。
+
+    為什麼是擋下來而不是「幫忙轉一下」
+    ----------------------------------
+    整條 pipeline 是 8-bit 的（``to_uint8`` / ``normalize`` / 直方圖…），而在這
+    之前兩條載入路徑都會**安靜地**毀掉非 8-bit 的資料，實測過：
+
+    * TIFF 頁 → ``to_uint8`` 把 0–4095 clip 到 0–255 → **93.8% 的像素飽和成 255**；
+    * 影像檔 → ``load_gray`` 每張圖各自 MINMAX 拉伸 → 亮度砍半的圖載進來平均值
+      **一模一樣**（兩張圖之間不再可比，而那是 ``test − ref`` 的前提）。
+
+    而「自動降位」也不是安全的選項：12-in-16 與滿量程 16-bit 在檔案裡長得一樣，
+    要除以 16 還是 256 **猜不出來**，猜錯就是全黑或飽和。所以這裡的處置是
+    **講出看到了什麼**，然後停下來 —— 跟 ``channel_map`` 對不上時同一個原則：
+    不准安靜地硬套。使用者的資料確認是 8-bit（2026-08-17），所以這是保險，
+    不是常態路徑；真的遇到 16-bit 那天，轉換規則要**討論**過才加。
+
+    引擎會把它包成這一顆 defect 的失敗（``ok=False``），不會殺掉整批（鐵則 7）。
+    """
+    a = np.asarray(arr)
+    if a.dtype == np.uint8:
+        return a
+    hi = float(a.max()) if a.size else 0.0
+    raise DataError(
+        "%s is %s (values up to %g), and ADEPT works on 8-bit images. "
+        "Converting it automatically is not safe - 12-bit-in-16 and full "
+        "16-bit look identical in the file, so the scale factor would be a "
+        "guess (getting it wrong saturates or blacks out the whole image). "
+        "Export the data as 8-bit, or ask for a conversion setting."
+        % (where, a.dtype, hi))
+
+
 @dataclass
 class ImageRef:
     """一張影像的來源：多頁 TIFF 的某一頁（page 給 0-based 索引），
@@ -70,15 +107,23 @@ class DefectItem:
 
     def load(self, channel: str) -> np.ndarray:
         """讀出該 channel 的像素：TIFF 頁走 tiff_index.read_page，
-        獨立影像檔走 imageio.load_gray（CJK 路徑安全）。"""
+        獨立影像檔走 imageio.load_raw（CJK 路徑安全，**保留 dtype**）。
+
+        **8-bit 以外的資料會在這裡被擋下來**（F11）。理由見
+        :func:`require_8bit` —— 兩條路以前都會安靜地毀掉數字。
+        """
         if channel not in self.images:
             raise KeyError(
                 f"defect {self.defect_id} has no channel {channel!r} "
                 f"(available: {sorted(self.images)})")
         ref = self.images[channel]
         if ref.page is not None:
-            return tiff_index.read_page(ref.path, ref.page)
-        return imageio.load_gray(ref.path)
+            arr = tiff_index.read_page(ref.path, ref.page)
+        else:
+            arr = imageio.load_raw(ref.path)
+        return require_8bit(arr, "%s of defect %s (%s)"
+                            % (channel, self.defect_id,
+                               os.path.basename(str(ref.path))))
 
 
 @dataclass
@@ -149,6 +194,22 @@ def _base_item(doc: KlarfDoc, row_idx: int, row: List[str],
     )
 
 
+def _bit_depth_warning(path: str) -> Optional[str]:
+    """這個 TIFF 不是 8-bit 的話，回一句話（載入時就講，不必等跑到某一顆）。
+
+    位元深度在 IFD 的 tag 裡，所以這個檢查**不解碼像素**（`tiff_index.bit_depths`）。
+    真正的守門在 :func:`require_8bit`；這裡只是把它提前到使用者按下 Open 的那一刻。
+    """
+    depths = [d for d in tiff_index.bit_depths(path) if d]
+    if depths and any(d != 8 for d in depths):
+        return ("%s is %s-bit; ADEPT works on 8-bit images and will refuse "
+                "these pixels (converting them automatically would be a "
+                "guess). Export the data as 8-bit."
+                % (os.path.basename(str(path)),
+                   "/".join(str(d) for d in depths)))
+    return None
+
+
 def load_dataset(klarf_path, tiff_path=None,
                  channel_order: Tuple[str, ...] = ("test", "ref")) -> Dataset:
     """載入 KLARF（可帶 patch TIFF）成 Dataset。偵測邏輯見模組 docstring。
@@ -178,6 +239,9 @@ def load_dataset(klarf_path, tiff_path=None,
             warnings.append(f"Could not index TIFF {tiff}: {e}")
             tiff = None
         else:
+            note = _bit_depth_warning(tiff)
+            if note:
+                warnings.append(note)
             imap = doc.defect_image_map(npages)
             if imap["mode"] is None:
                 warnings.extend(imap["notes"])
@@ -276,6 +340,10 @@ def load_tiff_stack(path, per_defect: int = 1,
             "%s has %d pages, which is not a multiple of %d: the last %d "
             "page(s) are not loaded (they would not make a complete defect)."
             % (os.path.basename(p), npages, n, left))
+
+    note = _bit_depth_warning(p)
+    if note:
+        warnings.append(note)
 
     stem = os.path.splitext(os.path.basename(p))[0]
     items: List[DefectItem] = []

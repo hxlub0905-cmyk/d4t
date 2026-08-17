@@ -2522,6 +2522,11 @@ class StudioWindow(QMainWindow):
                     "%s data; open a recipe for %s, or start a new pipeline."
                     % (self.model.kind, ds_kind, ds_kind)))
 
+        # `channel_map` 的表格要照「這批資料一顆有幾張圖」排列數（F11）。
+        # 那是資料的事實，所以在這裡講一次，不是每次選卡片時重新猜。
+        self.param_form.set_image_count(
+            len(getattr(items[0], "images", {}) or {}) if items else 0)
+
         self._update_defect_label()
         self._update_action_states()
         self._progress_done()

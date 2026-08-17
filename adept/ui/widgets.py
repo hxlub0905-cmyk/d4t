@@ -1615,10 +1615,15 @@ class ChannelMapField(QWidget):
     #: 這裡只是**顯示**用的 placeholder，真正的命名規則仍然只有 ingest 那一份。
     _DEFAULTS = ("test", "ref")
 
-    def __init__(self, value: str = "", parent: Optional[QWidget] = None):
+    def __init__(self, value: str = "", parent: Optional[QWidget] = None,
+                 min_rows: int = 0):
         super().__init__(parent)
         self._edits: List[QLineEdit] = []
         self._emitting = False
+        #: 這批資料**一顆有幾張圖**（0 = 還不知道）。列數至少排到這個數 ——
+        #: 使用者要回答「哪一張是 BSE」的時候，唯一需要的事實就是「有幾張」，
+        #: 而那個數字在資料載進來的那一刻就知道了（F11 Input-1 的尾巴）。
+        self._min_rows = max(0, int(min_rows))
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -1660,7 +1665,8 @@ class ChannelMapField(QWidget):
                     pairs[int(left.strip())] = right.strip()
                 except ValueError:          # 壞值由 core 的 parse 負責報錯
                     continue
-        rows = max(len(self._DEFAULTS), max(pairs) if pairs else 0)
+        rows = max(len(self._DEFAULTS), max(pairs) if pairs else 0,
+                   self._min_rows)
         self._emitting = True
         try:
             while len(self._edits) < rows:
@@ -1672,6 +1678,11 @@ class ChannelMapField(QWidget):
 
     def row_count(self) -> int:
         return len(self._edits)
+
+    def set_min_rows(self, n: int) -> None:
+        """這批資料一顆有幾張圖 —— 列數至少排到這麼多（不動已經填的名字）。"""
+        self._min_rows = max(0, int(n))
+        self.set_text(self.text())
 
     # -- 內部 ----------------------------------------------------------------
     def _default_name(self, index: int) -> str:
@@ -1794,6 +1805,10 @@ class ParamForm(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._rows: Dict[str, _ParamRow] = {}
+        #: 目前這批資料**一顆有幾張圖**（0 = 沒有資料）。只有 `channel_map` 的
+        #: 編輯器用得到它 —— 但它是「資料的事實」而不是「這張卡的參數」，
+        #: 所以放在表單上（一份資料一次）而不是塞進 `set_step` 的簽章。
+        self._image_count = 0
         #: 小標題：``section 名 -> [QLabel]`` 與 ``參數名 -> section 名``。
         #: 整組都被 ``show_when`` 藏起來時，標題也要跟著不見 —— 一個底下什麼
         #: 都沒有的標題比沒有標題更讓人以為畫面壞了。
@@ -1848,6 +1863,20 @@ class ParamForm(QWidget):
         self.set_step(None, {}, [])
 
     # -- public API --------------------------------------------------------
+    def set_image_count(self, n: int) -> None:
+        """告訴表單「這批資料一顆有幾張圖」（F11）。
+
+        `channel_map` 的表格會照它排列數 —— 使用者打開那一格時，第一個要知道的
+        事實就是「有幾張」，而那個數字在資料載進來的那一刻就知道了。
+        """
+        n = max(0, int(n))
+        if n == self._image_count:
+            return
+        self._image_count = n
+        for row in self._rows.values():
+            if isinstance(row.editor, ChannelMapField):
+                row.editor.set_min_rows(n)
+
     def set_step(self, describe: Optional[Dict[str, Any]],
                  current_params: Optional[Dict[str, Any]] = None,
                  stream_choices: Optional[Sequence[str]] = None) -> None:
@@ -2147,7 +2176,8 @@ class ParamForm(QWidget):
             return w
 
         if ptype == "channel_map":
-            w = ChannelMapField("" if value is None else str(value))
+            w = ChannelMapField("" if value is None else str(value),
+                                min_rows=self._image_count)
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 

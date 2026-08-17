@@ -143,3 +143,75 @@ def test_the_recipe_names_the_pages_that_the_data_layer_grouped(stack):
         assert sorted(out.images) == ["bse", "se1", "se2", "se3", "se4"]
         # 每一顆的 bse 都是**自己的第 2 張**（第 k 組的第 2 頁）
         assert out.images["bse"].mean() == float((k * 5 + 2) * 10)
+
+
+# ---------------------------------------------------------------------------
+# 位元深度的防呆（F11 Input 的尾巴）
+# ---------------------------------------------------------------------------
+def test_a_16_bit_stack_says_so_at_load_time(tmp_path):
+    """位元深度在 IFD 的 tag 裡 → **不解碼像素**就答得出來，所以載入時就講。"""
+    path = tmp_path / "deep.tif"
+    with tifffile.TiffWriter(str(path)) as tw:
+        for _ in range(4):
+            tw.write((np.linspace(0, 4095, 256).reshape(16, 16)).astype(np.uint16),
+                     photometric="minisblack")
+    assert dataset.tiff_index.bit_depths(str(path)) == [16]
+    ds = dataset.load_tiff_stack(str(path), per_defect=2)
+    assert len(ds.items) == 2            # 分組照做（那件事跟位元深度無關）
+    assert any("16-bit" in w for w in ds.warnings), ds.warnings
+    assert any("8-bit" in w for w in ds.warnings)
+
+
+def test_16_bit_pixels_are_refused_not_silently_saturated(tmp_path):
+    """以前這裡是 **93.8% 的像素飽和成 255**，而且一句話都沒有。
+
+    自動降位也不安全：12-in-16 與滿量程 16-bit 在檔案裡長得一樣，除以 16 還是
+    256 猜不出來。所以擋下來並講出看到了什麼 —— 跟 channel_map 對不上時同一個
+    原則：不准安靜地硬套。
+    """
+    path = tmp_path / "deep.tif"
+    with tifffile.TiffWriter(str(path)) as tw:
+        tw.write((np.linspace(0, 4095, 256).reshape(16, 16)).astype(np.uint16),
+                 photometric="minisblack")
+    item = dataset.load_tiff_stack(str(path), per_defect=1).items[0]
+    with pytest.raises(dataset.DataError) as e:
+        item.load("test")
+    msg = str(e.value)
+    assert "uint16" in msg and "4095" in msg          # 講出看到了什麼
+    assert "8-bit" in msg and "guess" in msg          # 講出為什麼不自動轉
+
+
+def test_a_single_defect_failing_does_not_kill_the_batch(tmp_path):
+    """鐵則 7：引擎把它包成這一顆的失敗，不是整批爆掉。"""
+    path = tmp_path / "deep.tif"
+    with tifffile.TiffWriter(str(path)) as tw:
+        tw.write((np.linspace(0, 4095, 256).reshape(16, 16)).astype(np.uint16),
+                 photometric="minisblack")
+    from adept.core.pipeline import Recipe, RecipeNode, ScoreSpec, run_defect
+    ds = dataset.load_tiff_stack(str(path), per_defect=1)
+    rec = Recipe(
+        recipe_id="deep", routes={"tiff_stack": ["load"]},
+        nodes={"load": RecipeNode("load", "load_patch", {})},
+        score=ScoreSpec(expr="n_channels", threshold=1.0,
+                        bins={"below": 0, "above": 1}))
+    res = run_defect(rec, ds.items[0], "tiff_stack")
+    assert res.ok is False                      # 這一顆失敗
+    assert "8-bit" in (res.error or "")         # 而且訊息傳得出來
+
+
+def test_an_image_file_route_keeps_its_dtype_so_the_guard_can_see_it(tmp_path):
+    """`folder` / `rsem` 那條路以前**先被 MINMAX 拉伸**才交出來 —— 於是
+
+    (a) 兩張圖之間不再可比（`test − ref` 的前提沒了）、
+    (b) 防呆看不到原本的 dtype。改走 `imageio.load_raw` 之後兩件事都解了。
+    """
+    from adept.core.ingest import imageio
+    deep = (np.linspace(0, 4095, 256).reshape(16, 16)).astype(np.uint16)
+    tifffile.imwrite(str(tmp_path / "d1.tif"), deep)
+    assert imageio.load_raw(str(tmp_path / "d1.tif")).dtype == np.uint16
+    # load_gray 仍然給「看得到的東西」（模板對話框那種用途）
+    assert imageio.load_gray(str(tmp_path / "d1.tif")).dtype == np.uint8
+
+    item = dataset.load_folder(str(tmp_path)).items[0]
+    with pytest.raises(dataset.DataError):
+        item.load("single")

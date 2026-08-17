@@ -110,3 +110,11 @@ def test_a_missing_file_is_refused_without_touching_the_current_dataset(win, sta
     assert win.load_stack_path(str(stack.parent / "nope.tif"), 5,
                                sync=True) is False
     assert win.dataset is before
+
+
+def test_the_channel_map_table_gets_its_rows_from_the_data(win, stack):
+    """載一份「一顆五張」的資料 → 命名表格一開就有五列（F11 Input-1 的尾巴）。"""
+    win.load_stack_path(str(stack), 5, sync=True)
+    win.select_node(win.model.node_order[0])
+    ed = win.param_form.editor("channel_map")
+    assert ed is not None and ed.row_count() == 5
