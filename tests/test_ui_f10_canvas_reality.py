@@ -388,3 +388,72 @@ def test_deleting_a_card_leaves_its_downstream_without_a_source(window):
         "上游被刪了，下游還指著它產的那條流"
     assert [i.code for i in window.model.validate() if i.node_id == glv] \
         == ["not-connected"]
+
+
+# --------------------------------------------------------------------------- #
+# 6. 改輸出流的名字 = 沿著線把下游帶著走（F10-6）
+# --------------------------------------------------------------------------- #
+def test_renaming_an_output_carries_the_downstream_with_it(window):
+    """`write result to` 改成 GGG，下游要跟著指到 GGG —— 線不可以斷。
+
+    稽核抓到的（不是使用者回報的）：改名之後下游的 `source` 還寫著 `diff`、
+    線上的 `src_out` 也還是 `diff`，於是使用者只是幫一條流取個好記的名字，
+    整條 pipeline 就 `missing-image` 了 —— 而畫布上**線還在**（線是照節點畫
+    的），所以他看不出發生了什麼事。
+
+    名字是**顯示用的標籤**，線才是「誰接誰」的事實。改名只該換標籤。
+    """
+    src = window.model.node_order[0]
+    sub = window.add_card_after(src, "subtract")
+    window._on_edge_added(src, sub, "test", "a")
+    window._on_edge_added(src, sub, "ref", "b")
+    glv = window.add_card_after(sub, "glv_stats")
+    window._on_edge_added(sub, glv, "diff", "source")
+
+    window.model.set_param(sub, "out", "GGG")
+
+    assert window.model.nodes[glv].params["source"] == "GGG"
+    assert [e.src_out for e in window.model.edges if e.dst == glv] == ["GGG"]
+    assert [i.code for i in window.model.validate()] == [], \
+        "改個名字就把 pipeline 弄斷了"
+    window._refresh_pipeline()
+    assert "GGG" in window.pipeline.node_item(sub).out_names()
+
+
+def test_renaming_an_output_is_one_undo_step(window):
+    """改名動到好幾張卡，但那是**一個**動作 —— Ctrl+Z 要一次全部回來。
+
+    分成好幾步的話，按一次 Ctrl+Z 會停在「上游叫 GGG、下游還指著 diff」——
+    一個使用者從來沒有做出來過的中間狀態。
+    """
+    src = window.model.node_order[0]
+    sub = window.add_card_after(src, "subtract")
+    window._on_edge_added(src, sub, "test", "a")
+    window._on_edge_added(src, sub, "ref", "b")
+    glv = window.add_card_after(sub, "glv_stats")
+    window._on_edge_added(sub, glv, "diff", "source")
+    before = window.model.snapshot()
+
+    window.model.set_param(sub, "out", "GGG")
+    assert window.model.undo() is True
+    assert window.model.nodes[glv].params["source"] == "diff"
+    assert window.model.nodes[sub].params["out"] == "diff"
+    assert window.model.snapshot() == before
+
+    window.model.redo()
+    assert window.model.nodes[glv].params["source"] == "GGG"
+
+
+def test_renaming_a_stream_on_a_multi_source_card_only_touches_that_one(window):
+    """下游接了兩條流時，改名只換掉被改的那一條。"""
+    src = window.model.node_order[0]
+    sub = window.add_card_after(src, "subtract")
+    window._on_edge_added(src, sub, "test", "a")
+    window._on_edge_added(src, sub, "ref", "b")
+    glv = window.add_card_after(sub, "glv_stats")
+    window._on_edge_added(sub, glv, "diff", "source")
+    window._on_edge_added(src, glv, "test", "source")
+    assert window.model.nodes[glv].params["source"] == "diff,test"
+
+    window.model.set_param(sub, "out", "GGG")
+    assert window.model.nodes[glv].params["source"] == "GGG,test"

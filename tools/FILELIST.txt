@@ -78,7 +78,7 @@ a13161cca57fecb7a1366a4e0585bedc5e1828ac adept/ui/scope.py
 50784e0bccaacb544acea9ee809eb91c1152e8be adept/ui/studio.py
 5d647c32055d4a73128c92853c0425729fdac6b9 adept/ui/template_dialog.py
 acb3224f56416ae87cc1c3ae349800bdab91cb05 adept/ui/theme.py
-d45c650a3cba7bf6d570fdf61c119c4423a1234f adept/ui/viewmodel.py
+edc8b2643ac0f1d089b8c7a719271e49ae2dfae1 adept/ui/viewmodel.py
 b2dd691199dbc50b01b02de407b321aada8e6a3a adept/ui/welcome.py
 3c1241d319b0072aced6aab264572494d62fc775 adept/ui/widgets.py
 669770bafa48f033c7d1e9fda77f342b3369070e adept/ui/workers.py
@@ -91,7 +91,7 @@ b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
 56f5c25fa0017fc6ee166015df108233c7d1feb1 docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
-ecf3b4fc612f0905ac3f100606ae2712d42a11ca docs/plans/F10-canvas-tells-the-truth.md
+bac726cead87a941a5de28260bddef6534ce1a3b docs/plans/F10-canvas-tells-the-truth.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
 fdf5dba17526e86ea0990c7853ef652874082324 fab_probe/probe_klarf.py
@@ -160,7 +160,7 @@ c3409ef81a76735280e2ad9f0492a5c95cff5afe tests/test_ui_canvas_cut_button.py
 cc81eb2c47f6a7568e5ef0aefe4ac8a01ce3cd22 tests/test_ui_controls_readable.py
 46c837b6f362d0493860e0cc4e657fecfabeea2d tests/test_ui_english_only.py
 7819d5136d0fadf4b62bb69f6e50b757b8a9b3a8 tests/test_ui_export_dialog.py
-d48c9fece0313274ad0e20210b3cf6bc38952f3b tests/test_ui_f10_canvas_reality.py
+611ba957515aef74760cfaf23aed6022b2ddbcfb tests/test_ui_f10_canvas_reality.py
 b9589defe4cf0484085bea8a081ec36ae6bc23ee tests/test_ui_f7_10_route_edges.py
 bb7c944f11136a3a379068a91536d32244cb9fab tests/test_ui_f7_11_roi.py
 f7129aac0f1ca11aeaa191fa3c49088f21aa859a tests/test_ui_f7_12_template.py

@@ -276,10 +276,60 @@ class RecipeModel:
         trial = dict(node.params)
         trial[name] = value
         clean = step_cls.validate_params(trial)   # 整組重驗（含相依預設）
-        if clean != node.params:
-            self._push_undo("param:%s:%s" % (node_id, name))
-            node.params = clean
-            self._changed()
+        if clean == node.params:
+            return
+        spec = next((sp for sp in step_cls.params if sp.name == name), None)
+        old_name = str(node.params.get(name, "") or "")
+        new_name = str(clean.get(name, "") or "")
+        # ⚠ **不要**用 ``compound`` 包住這一段。``compound`` 會讓 ``_push_undo``
+        # 走「一整段只推一次」那條路，於是繞過 ``coalesce`` —— 拖一次滑桿發的
+        # 幾十次 set_param 會各記一步，按 Ctrl+Z 只退回一個畫素
+        # （`test_one_ctrl_z_undoes_a_whole_slider_drag` 抓到的）。
+        # 這裡本來就只推一次，改名連帶動到的東西都在那一次之後。
+        self._push_undo("param:%s:%s" % (node_id, name))
+        node.params = clean
+        # **改輸出流的名字 = 沿著線把下游一起帶走**（F10-6）。
+        #
+        # `write result to` 改成 GGG 之後，下游那張卡的 `source` 還寫著 `diff`、
+        # 線上的 `src_out` 也還是 `diff` —— 於是使用者只是幫一條流取個好記的
+        # 名字，整條 pipeline 就斷了（lint 報 missing-image）。而他從畫布上看到
+        # 的是「線還在」，因為線是照節點畫的。
+        #
+        # 名字是**顯示用的標籤**，線才是接線的事實（見 `Edge.dst_in` 的說明）。
+        # 所以改名不該動到「誰接誰」，只該讓兩端的標籤跟著換。
+        if spec is not None and spec.is_output() and old_name and new_name:
+            self._rename_stream(node_id, old_name, new_name)
+        self._changed()
+
+    def _rename_stream(self, node_id: str, old: str, new: str) -> None:
+        """某張卡的輸出流改名 → 從它出發的線與下游的來源參數一起改。"""
+        for i, e in enumerate(list(self.edges)):
+            if e.src != str(node_id) or e.src_out != old:
+                continue
+            self.edges[i] = Edge(src=e.src, dst=e.dst, src_out=new,
+                                 dst_in=e.dst_in)
+            dst = self.nodes.get(e.dst)
+            if dst is None or not e.dst_in:
+                continue
+            try:
+                dst_spec = {sp.name: sp for sp in
+                            get_step(dst.step).params}[e.dst_in]
+            except KeyError:                   # pragma: no cover
+                continue
+            cur = str(dst.params.get(e.dst_in, "") or "")
+            if dst_spec.type == "image_keys":
+                keys = [new if k.strip() == old else k.strip()
+                        for k in cur.split(",") if k.strip()]
+                value = ",".join(keys)
+            elif cur == old:
+                value = new
+            else:
+                continue
+            try:
+                dst.params = get_step(dst.step).validate_params(
+                    dict(dst.params, **{e.dst_in: value}))
+            except ParamError:                 # pragma: no cover — 值就是流名
+                continue
 
     # ---- score ------------------------------------------------------------
     def set_expr(self, expr: str) -> None:
