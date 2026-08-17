@@ -130,16 +130,102 @@ class MultiStreamStep(Step):
         """這一條流要不要跳過（預設都不跳）。"""
         return False
 
+    def note_stream(self, ctx: Context, key: str, img: np.ndarray,
+                    params: Dict[str, object]) -> None:
+        """處理**之前**，這一條流有什麼值得記進 ``ctx.meta`` 的（預設不記）。
+
+        存在的理由：``build_op`` 在迴圈之前只呼叫一次，所以它看不到「哪一條流、
+        長什麼樣」。而右下角的儀表要回答的問題常常是**逐流**的（例如 Denoise 的
+        「這張圖的雜訊 σ 是多少」——`strength` 的單位就是那個 σ）。
+
+        用 hook 而不是「讓 op 多收一個參數」：op 是使用者程式碼裡最短的那一段
+        （`img -> img`），把診斷混進去會讓四張卡各自長出一份。
+        """
+
+    #: 超過這個比例的像素被壓回值域就講一句話（F11 Enhance-1）。
+    #:
+    #: 為什麼是固定值而不是一個參數：這不是一個「效果」旋鈕，是一句診斷。
+    #: 給它一個參數的話，第一件事就是有人把它調高來讓警告消失 —— 而警告要講的
+    #: 事情（這張卡把資訊推到範圍外了）不會因此消失。1% 是「不像雜訊、也還沒
+    #: 嚴重到毀掉整張圖」的量。
+    CLIP_WARN_FRAC = 0.01
+
+    @classmethod
+    def resolve_features(cls, params: Dict[str, object]) -> List[str]:
+        """這張卡吐的診斷特徵（F11 Enhance-1）。
+
+        **一條流時逐字是 `clip_frac`**、多條流時加流名前綴 —— 跟量測卡同一條
+        規則（F10-3），所以使用者只要學一次。
+        """
+        keys = cls.stream_list(params)
+        base = list(cls.features_out) + [CLIP_FRAC]
+        if len(keys) > 1:
+            return [n for k in keys for n in prefix_names(k, base)]
+        return base
+
     def run(self, ctx: Context, params: Dict[str, object]) -> Context:
         p = self.validate_params(params)
         keys = self.stream_list(p)
         op = self.build_op(ctx, p)
+        multi = len(keys) > 1
         for key in keys:
             if self.skip_stream(key, p):
                 continue
             img = require_image(ctx, self.key, key)
-            ctx.set_image(key, op(img))
+            self.note_stream(ctx, key, img, p)
+            out, frac = clip_to_range(op(img))
+            ctx.set_image(key, out)
+            ctx.add_features(prefix_features(key if multi else "",
+                                             {CLIP_FRAC: frac}))
+            if frac > self.CLIP_WARN_FRAC:
+                ctx.warn(
+                    "[%s] %.1f%% of '%s' was pushed outside 0-255 and had to be "
+                    "clipped back. Those pixels all became 0 or 255, so whatever "
+                    "was in them is gone - try a gentler setting."
+                    % (self.key, 100.0 * frac, key))
         return ctx
+
+
+#: 「這張卡把多少比例的像素壓回值域」的特徵名（F11 Enhance-1）。
+CLIP_FRAC = "clip_frac"
+
+
+def clip_to_range(img: np.ndarray, lo: float = 0.0, hi: float = 255.0):
+    """把影像壓回 ``[lo, hi]``，並回報**壓了多少比例**。
+
+    為什麼值域要是一個契約（實測出來的問題）
+    ----------------------------------------
+    Enhance 段四張卡的輸出實測值域::
+
+        Normalize (percentile) → uint8    0.00 … 255.00   ✓
+        Adjust tone            → uint8   40.00 … 255.00   ✓
+        Denoise                → uint8    0.00 … 255.00   ✓
+        Remove bg (background) → float32 116.36 … 250.09
+        Remove bg (stripes_h)  → float32 125.50 … 261.50  ← 超過 255
+        Normalize (local)      → float32   8.00 … 255.00
+
+    越界的 261.5 會活到**後面某個** ``to_uint8`` 才被 clip —— 也就是資訊在使用者
+    看不見的地方飽和。而 ``keep_level`` 的說明還寫著「讓影像留在原本的灰階區間，
+    下游的門檻才還是同一個意思」：那句話在這個修正之前是假的。
+
+    **不做 rescale，只做 clip**：rescale 會改動每一個像素的值，那就違背了
+    「留在原本的灰階區間」這個承諾（下游的門檻會全部失效）。clip 只動界外的
+    那些，而「動了多少」由 :data:`CLIP_FRAC` 講出來。
+
+    dtype 刻意**不強制統一**：三張卡回 uint8、兩個方法回 float32，而值域一致
+    之後那個差別對量測沒有影響（float 少一次量化，鏈起來反而更準）。強制統一會
+    讓既有 recipe 的數字整批位移，換到的只有「看起來整齊」。
+    """
+    a = np.asarray(img)
+    if a.size == 0:
+        return a, 0.0
+    out_of_range = np.count_nonzero((a < lo) | (a > hi))
+    if not out_of_range:
+        return a, 0.0
+    clipped = np.clip(a, lo, hi)
+    if a.dtype != clipped.dtype:            # np.clip 可能升型（uint8 + float 界限）
+        clipped = clipped.astype(a.dtype)
+    return clipped, float(out_of_range) / float(a.size)
 
 
 def output_prefix_spec(example: str = "center") -> ParamSpec:

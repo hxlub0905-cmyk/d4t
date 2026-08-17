@@ -128,13 +128,14 @@ class NormalizeStep(MultiStreamStep):
                   help=_RANGE_FROM_HELP),
         ParamSpec(name="use_within", type="image_key", direction="in", default="",
                   label="Use only",
-                  show_when=("method", ("percentile", "glv_band")),
-                  help=("Leave empty to measure the range from every pixel. "
-                        "Name a mask stream (from a Mask-from-regions card) and "
-                        "the range is measured only from pixels inside the "
-                        "mask - the stretch is still applied to the whole "
-                        "image. Use it when how much of each pattern is in "
-                        "the crop changes from patch to patch.")),
+                  show_when=("method", ("percentile", "glv_band", "match")),
+                  help=("Leave empty to measure from every pixel. Name a mask "
+                        "stream (from a Mask-from-regions card) and only the "
+                        "pixels inside the mask are measured - the result is "
+                        "still applied to the whole image. Use it when how much "
+                        "of each pattern is in the crop changes from patch to "
+                        "patch. (With Match to another stream, the brightness "
+                        "statistics are taken inside the mask on both images.)")),
         # ---- match --------------------------------------------------------
         ParamSpec(name="reference", type="image_key", direction="in", default="ref",
                   label="Match it to", show_when=("method", ("match",)),
@@ -175,7 +176,10 @@ class NormalizeStep(MultiStreamStep):
             return [str(params.get("range_from", "") or "").strip(),
                     str(params.get("use_within", "") or "").strip()]
         if method == "match":
-            return [str(params.get("reference", "ref"))]
+            # mask 也是一條**接進來的線**（F11 Enhance-1）：宣告漏了它，
+            # 畫布上就不會有那條線，而使用者看不出這兩張卡有關係。
+            return [str(params.get("reference", "ref")),
+                    str(params.get("use_within", "") or "").strip()]
         return []
 
     @classmethod
@@ -197,7 +201,21 @@ class NormalizeStep(MultiStreamStep):
         if method == "match":
             ref = to_uint8(require_image(ctx, self.key, p["reference"]))
             fn = algo_histmatch.MATCH_FN[p["match_method"]]
-            return lambda img: fn(to_uint8(img), ref)
+            within = str(p.get("use_within", "") or "").strip()
+            if not within:
+                return lambda img: fn(to_uint8(img), ref)
+            # 只用 mask 內的像素量亮度統計，**套用仍是整張圖**（見
+            # `algo/histmatch.py::_masked`：不然 mask 邊界會出現一道人工階梯）。
+            mask = require_image(ctx, self.key, within)
+            if mask.shape[:2] != ref.shape[:2]:
+                raise StepError(
+                    self.key,
+                    "the mask '%s' is %dx%d but '%s' is %dx%d - point the "
+                    "Mask-from-regions card's 'Same size as' at the same "
+                    "stream this card processes."
+                    % (within, mask.shape[1], mask.shape[0],
+                       p["reference"], ref.shape[1], ref.shape[0]))
+            return lambda img: fn(to_uint8(img), ref, mask=mask)
         clip, tiles = float(p["clip_limit"]), int(p["tiles"])
         return lambda img: algo_enhance.clahe(img, clip, tiles)
 

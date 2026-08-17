@@ -745,8 +745,184 @@ RSEM Image。」
 
 | | |
 |---|---|
-| 現在有什麼 | `normalize`（4 method）、`tone`（亮度/對比/gamma/曲線/反相）、`denoise`、`flatten`（去背景/條紋/top-hat）。F7-20 已從 9 張收成 4 張 |
-| 缺什麼 | 四張卡本身要逐張過一次（功能／UI／設定放哪）。**融合卡（PCA Ref、BSE·SE quadrant）⏸ 擱置**（2026-08-17：多通道暫時不做，見 §3.1.14）|
+| 現在有什麼 | `normalize`（4 method）、`tone`（亮度/對比/gamma/曲線/反相）、`denoise`（4 method）、`flatten`（5 method）。F7-20 已從 9 張收成 4 張 |
+| 缺什麼 | 見 §3.2.1 的逐張稽核。**融合卡（PCA Ref、BSE·SE quadrant）⏸ 擱置**（2026-08-17：多通道暫時不做，見 §3.1.14）|
+
+#### 3.2.1 四張卡逐張稽核（讀 code＋實際跑出來量的）
+
+四張卡都是 `MultiStreamStep`：**接幾條流進來就處理幾條，每條流一個埠，每條吃同
+一組設定**（F7-19）。所以「畫布上有幾條線」與「這張卡動了幾條流」永遠相等 ——
+這一段的稽核不必再問那件事，改問**它對每一條流做的那件事誠實嗎**。
+
+```
+        Enhance 段現在的形狀（四張卡，一律 N 條進 → 同樣的 N 條出）
+
+   test ──┐                              ┌── test'      每一條流：
+          ├─▶ ┌──────────────────┐ ──────┤              · 讀進來
+   ref  ──┘   │  一張 Enhance 卡  │       └── ref'       · 套同一組設定
+              │  method + 幾個旋鈕 │                     · 寫回同一條流
+              └──────────────────┘
+                       │
+                       └─▶ 想讓兩條流吃**不同**設定 = 放兩張卡（那才是它們
+                           該長得不一樣的時候）
+```
+
+| 卡 | 它真的在做什麼 | 稽核出來的問題 |
+|---|---|---|
+| `normalize` | percentile / glv_band / match / local(CLAHE)，把灰階重新映射到可比 | ① `use_within`（只用 mask 內的畫素量）**三個方法有、`match` 沒有** —— 而 `match` 是最需要它的那一個（面積浮動直接歪掉亮度對齊）|
+| `tone` | 亮度／對比／gamma／曲線／反相，手動調 | ② 削平（把畫素壓到 0/255）**只在直方圖上看得到**，沒有數字、沒有一句話 |
+| `denoise` | median / gaussian / bilateral / nlm | ③ `strength` 的單位是**這張圖自己的雜訊 σ**，而那個 σ 只活在演算法內部 —— 使用者在調一個以他看不到的數字為單位的旋鈕 |
+| `flatten` | background / stripes_h / stripes_v / bright_spots / dark_spots | ④ **輸出沒有值域契約**。實測 `stripes_h` → 261.5、`background`+`keep_level` → 250.09 |
+
+##### ④ 的實測（這是這一批的起點，不是推論）
+
+拿同一張 patch 餵四張卡，量輸出的 dtype 與值域：
+
+```
+   Normalize (percentile) → uint8     0.00 … 255.00   ✓
+   Adjust tone            → uint8    40.00 … 255.00   ✓
+   Denoise                → uint8     0.00 … 255.00   ✓
+   Remove bg (background) → float32 116.36 … 250.09
+   Remove bg (stripes_h)  → float32 125.50 … 261.50   ← 超過 255
+   Normalize (local)      → float32   8.00 … 255.00
+```
+
+261.5 會一路活到**後面某個** `to_uint8` 才被壓掉 —— 也就是資訊在使用者看不見的
+地方飽和。而 `keep_level` 的 help 還寫著「讓影像留在原本的灰階區間，下游的門檻
+才還是同一個意思」：**那句話在這個修正之前是假的**。
+
+#### 3.2.2 第一批：把契約補上（✅ 完成 2026-08-17）
+
+使用者定調：先做這四項（①②③④），**不做**銳化／unsharp（見 §3.2.4）。
+
+##### 1) 值域變成明講的契約
+
+```
+      一張 Enhance 卡的輸出                MultiStreamStep.run（基底，四張卡共用）
+   ┌────────────────────────┐
+   │ build_op 算出來的畫素   │  0 ─────────────────────── 255
+   │  … 258.3  261.5  -3.1  │      ├──────────────────────┤   ↑ 界外
+   └────────────────────────┘      │                      │
+                │                  ▼                      ▼
+                └──▶ clip_to_range ── 壓回 0/255 ──▶ 寫進影像流
+                            │
+                            └──▶ clip_frac = 界外畫素 / 總畫素
+                                     │
+                                     ├─ 是一個**特徵**（進 CSV、進 DB、可以拿來 gate）
+                                     └─ > 1% 就 ctx.warn 一句可以照做的話
+```
+
+兩個刻意的決定：
+
+- **只 clip，不 rescale。** rescale 會動到每一個畫素，那就違背了「留在原本的灰階
+  區間」這個承諾（下游所有門檻會一起失效）。clip 只動界外那些，而「動了多少」由
+  `clip_frac` 講出來。
+- **dtype 不強制統一**（三張回 uint8、兩個方法回 float32）。值域一致之後那個差別
+  對量測沒有影響（float 少一次量化，鏈起來反而更準）。強制統一會讓既有 recipe 的
+  數字整批位移，換到的只有「看起來整齊」。
+
+##### 2) 削平：`clip_frac` 只補**看不見**的那一半（界線畫在哪裡）
+
+原本的計畫是「削平計數從『圖上看得到』升級成數字」。做的時候發現**這是兩件事**，
+而合成一個數字會壞掉：
+
+| | 是什麼 | 看得見嗎 | 誰報 |
+|---|---|---|---|
+| `clipped_low/high`（`stream_change`）| 輸出裡有多少畫素**坐在** 0 / 255（原圖本來就有的黑也算）| 看得見（直方圖兩端染色的柱子）| 儀表面板，預覽時 |
+| `clip_frac`（新）| 這張卡**算出了 0–255 以外的值** | **看不見**（存進流之前就被壓掉了）| 引擎，永遠 |
+
+合成一個「新增被釘在端點的比例」試過，不行：`bright_spots` / `dark_spots`
+（top-hat）的輸出本來就有一大片剛好等於 0 的畫素 —— 那是這張卡的**用途**，不是
+失敗。合成之後它每跑一次就喊一次狼來了，而 1% 那個門檻的整個意義就是不喊。
+
+所以 `tone` 把六成畫素壓到 255 時 `clip_frac` **是 0，而那是對的** ——
+它在卡片內部（`apply_brightness_contrast` 的 `np.clip`）就夾回去了，而那種削平在
+直方圖上一眼可見。`tests/test_f11_enhance_range.py::
+test_clip_frac_is_about_values_computed_out_of_range_not_flattening` 把這條界線釘住。
+
+⚠ **留下來的洞**：`clipped_low/high` 只在 `ctx.track_changes` 開著時記（預覽開、
+批次關 —— 一萬顆每次 `set_image` 算兩個直方圖是白花的力氣）。所以「批次跑完之後
+從 CSV 看得出哪些顆被 tone 削平了」目前**做不到**。要補的話是一個「新增釘在端點」
+的特徵加上一個「這張卡本來就會產生端點值嗎」的旗標（top-hat 那類卡自己宣告），
+不是把 `track_changes` 打開。
+
+##### 3) σ 露出來
+
+```
+   right-bottom 儀表（Before / after 面板）
+
+   ┌─ “test” 直方圖 ──────────────┐ ┌─ “ref” 直方圖 ───────────────┐
+   │ ▁▂▃▅▇▅▃▂▁   細線 = before     │ │ ▁▂▃▅▇▅▃▂▁                    │
+   │ ░▒▓█▓▒░     實心 = after      │ │ ░▒▓█▓▒░                      │
+   │ 0 black      gray level  255  │ │ 0 black      gray level  255 │
+   └───────────────────────────────┘ └──────────────────────────────┘
+   “test” 0.3% at black, 0.1% at white (noise σ ≈ 6.1)  ·  “ref” … (noise σ ≈ 0.5)
+                                       ↑                              ↑
+                            只有 Denoise 卡印這一段        逐流各一個（印錯一條比不印更糟）
+```
+
+- σ 存在 **`ctx.meta["noise_sigma"][流名]`，不是特徵**：σ 是**這張圖的性質**，不是
+  這張卡算出來的結果（同一張圖不管接不接 Denoise，σ 都一樣）。當成特徵的話，
+  「有沒有這個數字」會取決於使用者有沒有放這張卡 —— 那不是一個可以拿來當 gate 的
+  東西。要 gate 請用 Measure 段的 `focus_quality`。
+- 機制是 `MultiStreamStep` 上一個新的 hook `note_stream(ctx, key, img, params)`：
+  `build_op` 在迴圈**之前**只呼叫一次，所以它看不到「哪一條流、長什麼樣」，而儀表
+  要回答的問題常常是逐流的。用 hook 而不是「讓 op 多收一個參數」—— op 是最短的
+  那一段（`img -> img`），把診斷混進去會讓四張卡各自長出一份。
+
+##### 4) `match` 也吃 `use_within`
+
+```
+   量在 mask 內、套用在整張圖（跟 percentile / glv_band 同一條規則）
+
+   test ─────────────────┬────────────────────────────▶ 整張圖套同一個映射
+                         │                                        ▲
+   mask ─▶ 只留這群畫素 ─┤  量 mean/std（或 CDF、P2/P98）─────────┘
+                         │
+   ref  ─▶ 只留這群畫素 ─┘   ← ref 也用同一個 mask（不然兩邊量的不是同一種圖案）
+
+   為什麼：64px 的 patch 裡一根 Metal Gate 進出畫面就是 12% 的面積差。拿整張圖的
+   統計去對齊亮度，同一片 EPI 只因為隔壁多了一根 MG，對齊完就變一個值。
+
+   為什麼套用不跟著 mask：mask 外的畫素要走同一個映射，否則影像會在 mask 邊界上
+   出現一道人工的階梯 —— 而那道階梯會被下游當成邊緣訊號。
+```
+
+- `algo/histmatch.py` 三個 method 都加了選填的 `mask=`（vendored 檔頭已註明）。
+  `mask=None` 與 vendor 進來的那份**逐位元組相同**，測試釘住。
+- `use_within` 的 `show_when` 從三個方法變四個；`extra_reads` 在 `match` 時要
+  **同時**宣告 `reference` 與 `use_within` —— 漏了後者，畫布上就沒有那條線，
+  而使用者看不出這兩張卡有關係（F9）。
+- mask 尺寸不符 → 白話 `StepError`，講得出下一步（去改 Mask-from-regions 的
+  “Same size as”）。
+
+##### 做完之後
+
+| 檢查 | 結果 |
+|---|---|
+| 核心測試 | 1100 passed（`test_offline_tools` 的 FILELIST/bundle 過期是預期的，跑 `release.py` 收掉）|
+| 新測試 | `tests/test_f11_enhance_range.py`（21）＋ `tests/test_ui_f11_enhance_panel.py`（8，含一支從真實預覽走完整條路的）|
+| 黃金值 | 三組 22 顆**逐項相同**。特徵多了三個（`clip_frac`、`norm_clip_frac`、`norm_ref_clip_frac`），**沒有任何既有數字移動** → 重凍一次 |
+| 卡片不變量 | `test_card_invariants` 全過（`resolve_features` 的宣告 = 真的吐出來的名字）|
+
+#### 3.2.3 第二批（提案，等定調）
+
+| # | 做什麼 | 為什麼 |
+|---|---|---|
+| ⑤ | `flatten/background` 換得掉背景估計法（現在只有 Gaussian）：加 median / 形態學 opening | Gaussian 的核心問題是**它會把缺陷本身吃進背景**（缺陷比核小的時候尤其），於是減完之後缺陷連帶被削掉一部分。median / opening 對亮點不敏感 —— 這是同一張卡的一個下拉，不是新卡 |
+| ⑥ | `denoise` 加「孤立壞點」法（hot / dead pixel）| median 會把整張圖磨過一遍；只有幾顆壞點時那是拿大砲打蚊子，而磨掉的邊緣是要用來量 CD 的 |
+| ⑦ | `normalize` 加 `zscore` | 「兩張圖比得起來」的最直接寫法（減 mean 除 std），而它現在得靠 percentile 繞 |
+
+#### 3.2.4 明確不做的
+
+- **銳化 / unsharp mask。** 它讓影像**看起來**更清楚，同時把邊緣位置推走 ——
+  而下一段就是拿邊緣量 CD。一張讓數字變壞、讓畫面變好的卡，在這個工具裡是陷阱。
+
+#### 3.2.5 第三批：lint（提案）
+
+- 「test 正規化了、ref 沒有」→ 兩張圖不再可比，而畫面上兩張圖都好看。
+- 明顯顛倒的卡序（例：正規化排在手動調色之後 —— 正規化會把剛調的東西拉回去，
+  這件事 `tone.py` 的 docstring 已經寫了，但沒有人檢查）。
 
 **要討論的**
 

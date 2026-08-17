@@ -84,4 +84,19 @@ class DenoiseStep(MultiStreamStep):
             raise StepError(self.key, f"ksize must be odd (got {ksize}); an even kernel has no "
                         f"centre pixel — use {ksize - 1} or {ksize + 1}.")
         strength, method = float(p["strength"]), str(p["method"])
+
         return lambda img: _denoise_one(self.key, img, method, ksize, strength)
+
+    def note_stream(self, ctx: Context, key: str, img, p: Dict[str, Any]) -> None:
+        """**把量到的雜訊 σ 講出來**（F11 Enhance-1）。
+
+        `strength` 的單位就是這個 σ（「濾掉幾個 σ 的擾動」，見
+        `algo/enhance.py::noise_sigma`），而在這之前它只活在演算法內部 ——
+        使用者在調一個「以某個他看不到的數字為單位」的旋鈕。
+
+        存在 ``meta`` 而不是特徵：σ 是**這張圖的性質**，不是這張卡算出來的結果
+        （同一張圖不管接不接 Denoise，σ 都一樣）。要拿它當 gate 的話，
+        Measure 段的 `focus_quality` 才是那個特徵該長出來的地方。
+        """
+        ctx.meta.setdefault("noise_sigma", {})[str(key)] = float(
+            algo_enhance.noise_sigma(img))

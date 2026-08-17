@@ -40,6 +40,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
+from ..core.steps._util import CLIP_FRAC
 from .theme import TOKENS
 
 __all__ = ["Inspector", "AlignInspector", "EnhanceInspector",
@@ -367,6 +368,38 @@ class EnhanceInspector(Inspector):
         hi = float(rec.get("clipped_high", 0.0)) - float(rec.get("was_clipped_high", 0.0))
         return (max(0.0, lo), max(0.0, hi))
 
+    def pushed_out(self, key: Optional[str] = None) -> Optional[float]:
+        """引擎量到的「算出來超出 0–255、被壓回來」的比例（F11 Enhance-1）。
+
+        **跟 :meth:`clipped` 是兩件事**，所以講法也不一樣：
+
+        - ``clipped``：輸出裡有多少畫素**坐在** 0 或 255。原圖本來就有的黑也算
+          進來，而且直方圖上看得到（兩端那根染色的柱子）。
+        - ``pushed_out``：這張卡**算出了值域以外的值**（實測 ``stripes_h`` 會
+          到 261.5）。那些資訊在存進影像流之前就被壓掉了，所以直方圖上**看不到**
+          —— 兩端的柱子只長高一點點，看起來跟原本就有的黑沒兩樣。
+
+        數字來自引擎（``clip_frac`` 特徵，`MultiStreamStep.run` 寫的），UI 不自己
+        再量一次。多流時特徵名帶流名前綴 —— 跟量測卡同一條規則（F10-3）。
+        """
+        k = key or self.stream()
+        multi = len(self.streams()) > 1
+        return self.this_value(("%s_%s" % (k, CLIP_FRAC)) if multi else CLIP_FRAC)
+
+    def sigma(self, key: Optional[str] = None) -> Optional[float]:
+        """這一條流的雜訊 σ（只有 Denoise 卡量，F11 Enhance-1）。
+
+        為什麼要露出來：``strength`` 的單位就是它（「濾掉幾個 σ 的擾動」），
+        而在這之前使用者是在調一個「以某個他看不到的數字為單位」的旋鈕。
+        來自 ``ctx.meta['noise_sigma']``（`denoise.note_stream` 寫的）。
+        """
+        table = self.meta.get("noise_sigma") or {}
+        try:
+            v = float(table[str(key or self.stream())])
+        except (KeyError, TypeError, ValueError):
+            return None
+        return None if (math.isnan(v) or math.isinf(v)) else v
+
     def summary(self) -> str:
         if not self.has_data():
             return ""
@@ -377,6 +410,18 @@ class EnhanceInspector(Inspector):
             lo, hi = self.clipped(key)
             bits.append("“%s” %.1f%% at black, %.1f%% at white"
                         % (key, lo * 100.0, hi * 100.0))
+            # 直方圖看不到的兩個數字，就寫在它旁邊（σ 是旋鈕的單位；
+            # pushed_out 是「這張卡把資訊推到值域外」而那在圖上看不出來）。
+            extra = []
+            sig = self.sigma(key)
+            if sig is not None:
+                extra.append("noise σ ≈ %.1f" % sig)
+            out = self.pushed_out(key)
+            if out is not None and out >= 0.0005:
+                extra.append("%.1f%% computed outside 0–255 and clipped back"
+                             % (out * 100.0))
+            if extra:
+                bits[-1] += " (%s)" % ", ".join(extra)
             alo, ahi = self.added_clipping(key)
             worst = max(worst, alo, ahi)
         text = " · ".join(bits)
