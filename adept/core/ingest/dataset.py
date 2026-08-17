@@ -216,6 +216,80 @@ def load_dataset(klarf_path, tiff_path=None,
     return Dataset(kind="rsem", klarf=doc, items=items, warnings=warnings)
 
 
+def load_tiff_stack(path, per_defect: int = 1,
+                    channel_order: Tuple[str, ...] = ("test", "ref")) -> Dataset:
+    """一個**多頁 TIFF、沒有 KLARF** → ``Dataset(kind="tiff_stack")``（F11 Input-2）。
+
+    為什麼要有這一條路
+    ------------------
+    使用者的多通道資料就是這個形式（「在大 TIFF 內，但這種大 tiff 不會伴隨
+    klarf」）。而在這之前它**進不來，而且是安靜地進不來**：丟進
+    :func:`load_folder` 的話，一個 15 頁的 TIFF 會變成**一顆** defect ——
+    因為 ``imageio.load_gray`` 走 ``cv2.imdecode``，多頁 TIFF 只解得到第 0 頁。
+
+    分組的規則
+    ----------
+    每 ``per_defect`` 張連續的頁算一顆（``per_defect=1`` 就是「每頁一顆」）。
+    頁的名字照 ``channel_order``（第 1 張 ``test``、第 2 張 ``ref``、之後
+    ``img3``…）—— **那只是預設名**，要叫 ``bse`` / ``se1`` 由 recipe 裡的
+    ``channel_map`` 決定（F11 Input-1）。分組是**資料層**的事、命名是 recipe
+    的事，兩件事刻意分開：同一批資料的「一顆幾張」不會因為換一份 recipe 而改變。
+
+    對不齊的尾巴**不吞掉**
+    ----------------------
+    頁數不是 ``per_defect`` 的整數倍時，完整的那幾組照做，剩下的幾頁
+    **不進任何一顆**，並在 ``warnings`` 裡講出剩幾頁 —— 安靜地把它們塞進最後
+    一顆（或無聲丟掉）的話，那幾頁的數字會出現在錯的 defect 上。
+
+    沒有 KLARF 的後果
+    -----------------
+    沒有座標、沒有 die、**不能寫回 KLARF**（輸出只有 CSV／報表）。
+    ``Dataset.klarf`` 是 ``None``，UI 與 export 都是照它判斷的。
+    """
+    p = str(path)
+    warnings: List[str] = []
+    n = int(per_defect)
+    if n < 1:
+        return Dataset(kind="tiff_stack", klarf=None, items=[],
+                       warnings=["Images per defect must be at least 1 (got %d)." % n])
+    if not os.path.isfile(p):
+        return Dataset(kind="tiff_stack", klarf=None, items=[],
+                       warnings=["Not a file: %s" % p])
+    try:
+        npages = int(tiff_index.n_pages(p))
+    except (OSError, ValueError) as e:
+        return Dataset(kind="tiff_stack", klarf=None, items=[],
+                       warnings=["Could not index TIFF %s: %s" % (p, e)])
+    if npages < 1:
+        return Dataset(kind="tiff_stack", klarf=None, items=[],
+                       warnings=["%s has no pages." % p])
+
+    groups = npages // n
+    left = npages - groups * n
+    if groups == 0:
+        return Dataset(kind="tiff_stack", klarf=None, items=[], warnings=[
+            "%s has %d page(s) but each defect needs %d - not even one "
+            "complete defect. Check the images-per-defect setting."
+            % (os.path.basename(p), npages, n)])
+    if left:
+        warnings.append(
+            "%s has %d pages, which is not a multiple of %d: the last %d "
+            "page(s) are not loaded (they would not make a complete defect)."
+            % (os.path.basename(p), npages, n, left))
+
+    stem = os.path.splitext(os.path.basename(p))[0]
+    items: List[DefectItem] = []
+    for k in range(groups):
+        item = DefectItem(defect_id="%s_%d" % (stem, k + 1), die=None,
+                          xrel_nm=None, yrel_nm=None, klarf_row=k)
+        for j in range(n):
+            ch = _channel_name(j, tuple(channel_order))
+            item.images[ch] = ImageRef(path=p, page=k * n + j, channel=ch)
+        items.append(item)
+    return Dataset(kind="tiff_stack", klarf=None, items=items,
+                   warnings=warnings)
+
+
 def load_folder(folder) -> Dataset:
     """掃描資料夾（不遞迴）成 Dataset(kind="folder")。
     無座標資訊（GLAS load_folder 模式）：每個影像檔一個 DefectItem，
@@ -226,15 +300,33 @@ def load_folder(folder) -> Dataset:
     if not os.path.isdir(d):
         return Dataset(kind="folder", klarf=None, items=[],
                        warnings=[f"Not a directory: {d}"])
+    multipage: List[str] = []
     for name in sorted(os.listdir(d)):
         path = os.path.join(d, name)
         stem, ext = os.path.splitext(name)
         if os.path.isfile(path) and ext.lower() in _IMAGE_EXTS:
+            if ext.lower() in (".tif", ".tiff"):
+                # 這條路是「一個檔案一顆、一顆一張圖」，所以多頁 TIFF **只讀得到
+                # 第 0 頁**（``imageio.load_gray`` 走 ``cv2.imdecode``）。
+                # 以前那件事完全沒有聲音：一個 15 頁的檔案安靜地變成一顆 defect。
+                # 現在講出來，並指向那種資料真正的入口（``load_tiff_stack``）。
+                try:
+                    if int(tiff_index.n_pages(path)) > 1:
+                        multipage.append(name)
+                except (OSError, ValueError):
+                    pass        # 讀不出頁數不是這條路要解的問題
             items.append(DefectItem(
                 defect_id=stem, die=None, xrel_nm=None, yrel_nm=None,
                 images={"single": ImageRef(path=path, page=None,
                                            channel="single")},
             ))
+    if multipage:
+        warnings.append(
+            "%d file(s) have more than one page, and only the first page is "
+            "used here (%s). Open such a file as an image stack instead - "
+            "then every page group becomes a defect."
+            % (len(multipage), ", ".join(multipage[:3])
+               + ("…" if len(multipage) > 3 else "")))
     if not items:
         warnings.append(f"No image files found in folder: {d}")
     return Dataset(kind="folder", klarf=None, items=items, warnings=warnings)

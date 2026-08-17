@@ -80,6 +80,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -112,8 +113,8 @@ from .template_dialog import TemplateDialog
 from .results import ResultsWindow, summarize_run
 from . import scope
 from .scope import (
-    is_supported_kind, recipe_is_supported, unsupported_kind_message,
-    visible_steps,
+    is_supported_kind, no_klarf_message, recipe_is_supported,
+    unsupported_kind_message, visible_steps,
 )
 from .viewmodel import RecipeModel, accuracy_at, histogram, rebin
 from .theme import DEFAULT_THEME, THEMES, apply_theme, current_theme
@@ -535,6 +536,16 @@ class StudioWindow(QMainWindow):
         self.btn_open_klarf = self._tool_button(
             "Open KLARF…", "Load a KLARF (the patch TIFF can be picked separately)",
             self._on_open_klarf, icon="folder")
+        # 一種 source 一個入口（F11 Input-2）。刻意**不**塞進上面那顆：這條路
+        # 吃的東西不同（一個多頁 TIFF + 「一顆幾張」），而且它產出的資料集沒有
+        # KLARF —— 寫不回 KLARF。把兩件事併成一顆鈕，使用者按下去之前分不出
+        # 自己要的是哪一種。
+        self.btn_open_stack = self._tool_button(
+            "Open stack…",
+            "Load a multi-page TIFF that has no KLARF: every N pages become "
+            "one defect (N = the images per defect you enter). No KLARF means "
+            "no coordinates and no write-back — CSV and Excel reports still work.",
+            self._on_open_stack, icon="stack")
         self.btn_open_recipe = self._tool_button(
             "Open Recipe…", "Load a recipe JSON", self._on_open_recipe,
             icon="document")
@@ -571,7 +582,8 @@ class StudioWindow(QMainWindow):
             self.toggle_theme, icon="theme")
 
         # 一段 = 一種事情；段與段之間一條分隔線。
-        for group in ((self.btn_open_klarf, self.btn_open_recipe),
+        for group in ((self.btn_open_klarf, self.btn_open_stack,
+                       self.btn_open_recipe),
                       (self.btn_examples, self.btn_export),
                       (self.btn_undo, self.btn_redo)):
             for b in group:
@@ -2393,6 +2405,36 @@ class StudioWindow(QMainWindow):
         self._status("Loading: %s" % os.path.basename(path))
         return True
 
+    def load_stack_path(self, path: Any, per_defect: int = 1,
+                        sync: bool = False) -> bool:
+        """載入一個**多頁 TIFF、沒有 KLARF**（F11 Input-2）。
+
+        ``per_defect`` 是「一顆 defect 幾張圖」—— 那是**資料的屬性**（機台怎麼收
+        的），所以在這裡問，不放進 recipe。recipe 只負責**命名**那幾張
+        （`load_patch` 的 `channel_map`）。分組與命名分開，同一批資料的「一顆幾張」
+        才不會因為換一份 recipe 而改變。
+        """
+        path = str(path)
+        n = max(1, int(per_defect))
+        if not os.path.isfile(path):
+            self._status("File not found: %s" % path)
+            return False
+        if sync:
+            try:
+                ds = DatasetLoadWorker.run_sync_stack(path, n)
+            except Exception as e:      # noqa: BLE001 — UI 邊界，一律回報
+                self._status("Could not load image stack: %s: %s"
+                             % (type(e).__name__, e), "error")
+                return False
+            return self._on_dataset_loaded(ds)
+        if not self.dataset_worker.start_stack(path, n):
+            self._status("A dataset is already loading — please wait.")
+            return False
+        self._progress_busy("Loading %s…" % os.path.basename(path))
+        self._status("Loading: %s (%d image(s) per defect)"
+                     % (os.path.basename(path), n))
+        return True
+
     def _on_dataset_loaded(self, dataset: Any) -> bool:
         # F7-1：型別要到載完才知道，所以擋在這裡而不是 load_dataset_path。
         # 擋下來時**不動既有狀態** —— 使用者手上原本那份資料集還在，
@@ -2447,6 +2489,10 @@ class StudioWindow(QMainWindow):
         # 所以把「拿什麼對的」掛在同一個東西的 tooltip 上。
         self.histogram.setToolTip(
             "Accuracy is measured against %s" % gt if gt else "")
+        # 沒有 KLARF 就寫不回 KLARF（F11 Input-2）。講在**載入的當下**，因為
+        # Export 精靈把那個選項變灰是使用者跑完一整批之後才看得到的事。
+        if getattr(dataset, "klarf", None) is None:
+            warn.append(no_klarf_message(getattr(dataset, "kind", "")))
         if warn:
             msg += "   ! %s" % warn[0]
         if gt:
@@ -2476,9 +2522,18 @@ class StudioWindow(QMainWindow):
             self.defect_label.setText("(no dataset loaded)")
             return
         i = max(0, min(int(self.defect_index), len(items) - 1))
+        # 「沒有 KLARF」要**常駐**，不能只在狀態列講一次（F11 Input-2）——
+        # 載完就接著算預覽，狀態列那句話幾毫秒後就被 "Computing preview…" 蓋掉。
+        # 同一個教訓在 ground truth 那一輪就學過了（見 `_on_dataset_loaded`）。
+        # 掛在資料集標籤上：它就在使用者眼前，而且它講的正是「你現在手上是什麼資料」。
+        no_klarf = getattr(self.dataset, "klarf", None) is None
         self.defect_label.setText(
-            "%s · defect %d / %d" % (getattr(self.dataset, "kind", "?"),
-                                     i + 1, len(items)))
+            "%s · defect %d / %d%s" % (getattr(self.dataset, "kind", "?"),
+                                       i + 1, len(items),
+                                       " · no KLARF" if no_klarf else ""))
+        self.defect_label.setToolTip(
+            no_klarf_message(getattr(self.dataset, "kind", ""))
+            if no_klarf else "")
 
     def set_defect_index(self, index: int) -> bool:
         """跳到第 ``index`` 顆 defect（超出範圍會夾住）。"""
@@ -3589,6 +3644,31 @@ class StudioWindow(QMainWindow):
         if not path:
             return
         self.load_dataset_path(path)
+
+    def _on_open_stack(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open image stack", "",
+            "Multi-page TIFF (*.tif *.tiff);;All files (*)")
+        if not path:
+            return
+        # 「一顆幾張」問一次就好，而且**預設值要是這個檔案自己的頁數線索**：
+        # 問這一格的時候使用者手上唯一的事實是「這個檔案有幾頁」，所以先講出來。
+        pages = 0
+        try:
+            from adept.core.ingest import tiff_index
+            pages = int(tiff_index.n_pages(path))
+        except Exception:                       # noqa: BLE001 — 只是拿來寫提示
+            pages = 0
+        prompt = ("How many images make up one defect?\n\n"
+                  "%s\nEvery N consecutive pages become one defect; enter 1 if "
+                  "each page is its own defect. Name them afterwards on the "
+                  "Load images card." % ("This file has %d page(s)." % pages
+                                         if pages else ""))
+        n, ok = QInputDialog.getInt(self, "Images per defect", prompt, 1, 1,
+                                    max(1, pages) if pages else 999)
+        if not ok:
+            return
+        self.load_stack_path(path, n)
 
     def _on_open_recipe(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

@@ -113,8 +113,8 @@ def small_button(text: str, tip: str = "", parent: Optional[QWidget] = None,
 GLYPH_ICONS = (
     "undo", "redo", "theme", "prev", "next", "play", "chevron_down",
     "zoom_in", "zoom_out", "fit", "tidy", "up", "down", "close",
-    # 工具列那五顆（F7-24）
-    "folder", "document", "save", "templates", "export",
+    # 工具列那五顆（F7-24）＋ 多頁 TIFF 的入口（F11 Input-2）
+    "folder", "document", "save", "templates", "export", "stack",
     # 畫布彈出視窗（F8-UI D 案）
     "popout",
 )
@@ -255,6 +255,13 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         p.drawLine(QPointF(m, h * 0.30), QPointF(w * 0.44, h * 0.30))
         p.drawLine(QPointF(w * 0.44, h * 0.30), QPointF(w * 0.54, h * 0.42))
         p.drawRect(QRectF(m, h * 0.42, w - 2 * m, h * 0.42))
+    elif n == "stack":
+        # 三張疊起來的紙 —— 「一個檔案裡有好幾張圖」（F11 Input-2）。
+        # 跟 ``folder`` 對比得出來：folder 是容器，stack 是**同一個東西的好幾層**。
+        step = h * 0.16
+        side = w - 2 * m - step * 2
+        for i in (2, 1, 0):
+            p.drawRect(QRectF(m + step * i, m + step * (2 - i), side, side))
     elif n == "document":
         fold = w * 0.26
         p.drawLine(QPointF(m + w * 0.06, m), QPointF(w - m - fold, m))

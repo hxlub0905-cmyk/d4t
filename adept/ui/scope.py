@@ -34,7 +34,12 @@ __all__ = [
 
 #: Studio 目前接受的資料集型別（``dataset.kind``）。
 #: 加回 ``"rsem"`` 就會讓 RSEM 整條路線重新出現在 GUI 上。
-SUPPORTED_KINDS: Sequence[str] = ("ebi_patch",)
+#:
+#: ``tiff_stack``（F11 Input-2）是「一個多頁 TIFF、沒有 KLARF」——
+#: 使用者的多通道資料就是這個形式。它**沒有座標也不能寫回 KLARF**，
+#: 而那件事在載入的時候就要講（見 ``StudioWindow._on_dataset_loaded``），
+#: 不是等使用者按了 Export 才發現。
+SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack")
 
 #: 只有在不支援的型別下才有意義、因此暫時不列進卡片庫的 step key。
 #:
@@ -91,7 +96,19 @@ def recipe_is_supported(info: Dict[str, Any]) -> bool:
 
 def unsupported_kind_message(kind: Any) -> str:
     """載到不支援的資料集時，狀態列要說的話（白話 + 講得出替代路徑）。"""
-    return ("This build of ADEPT Studio only supports EBI patch input "
-            "(test + reference pairs); the dataset you opened is “%s”. "
-            "The command line can still run it: python -m adept run "
-            "<recipe> <klarf>." % (kind or "unknown"))
+    return ("This build of ADEPT Studio supports EBI patch input "
+            "(test + reference pairs) and multi-page image stacks; the dataset "
+            "you opened is “%s”. The command line can still run it: "
+            "python -m adept run <recipe> <klarf>." % (kind or "unknown"))
+
+
+def no_klarf_message(kind: Any) -> str:
+    """資料集沒有 KLARF 時，載入當下就要講的那一句（F11 Input-2）。
+
+    為什麼要在**載入**時講：沒有 KLARF 就沒有 defect 清單、沒有座標，
+    **寫不回 KLARF**。Export 精靈本來就會把那個選項變灰（它看 ``dataset.klarf``），
+    但那是使用者跑完一整批、打開輸出精靈才會看到的事 —— 太晚了。
+    """
+    return ("no KLARF with this data (%s), so the ADC verdict cannot be "
+            "written back to a KLARF - CSV and Excel reports still work."
+            % (kind or "image stack"))

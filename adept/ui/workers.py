@@ -34,7 +34,7 @@ from typing import Any, Callable, Dict, List, Optional
 from PySide6.QtCore import QObject, QThread, Signal
 
 import adept.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
-from adept.core.ingest.dataset import Dataset, load_dataset
+from adept.core.ingest.dataset import Dataset, load_dataset, load_tiff_stack
 from adept.core.pipeline import Recipe, run_batch, run_defect
 from adept.core.pipeline.engine import DefectResult
 
@@ -189,6 +189,32 @@ class DatasetLoadWorker(_ThreadedWorker):
     def run_sync(path: str, tiff: Optional[str] = None) -> Dataset:
         """同步載入（不開執行緒）；失敗直接 raise，給測試 / headless 用。"""
         return load_dataset(str(path), None if tiff is None else str(tiff))
+
+    # ---- 多頁 TIFF、沒有 KLARF（F11 Input-2）------------------------------
+    #
+    # 刻意是**另一個進入點**而不是在 start() 裡多一個模式：這條路吃的參數不同
+    # （「一顆幾張」而不是「patch TIFF 在哪」），而且它產出的 Dataset 沒有 KLARF。
+    # 一種 source 一個入口 —— 使用者定調「source 不一樣本來就要分」。
+    def start_stack(self, path: str, per_defect: int = 1) -> bool:
+        if self.is_running():
+            return False
+        path_s, n = str(path), int(per_defect)
+
+        def job() -> None:
+            try:
+                ds = load_tiff_stack(path_s, n)
+            except Exception as e:                      # noqa: BLE001 — 一律回報
+                self.failed.emit(f"{type(e).__name__}: {e}")
+            else:
+                self.loaded.emit(ds)
+
+        self._start_job(job)
+        return True
+
+    @staticmethod
+    def run_sync_stack(path: str, per_defect: int = 1) -> Dataset:
+        """同步載入一疊多頁 TIFF；給測試 / headless 用。"""
+        return load_tiff_stack(str(path), int(per_defect))
 
 
 # ---------------------------------------------------------------------------

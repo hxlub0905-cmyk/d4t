@@ -31,7 +31,7 @@ feac449979828c3ee6861b614fd47566e67b9e8f adept/core/export/klarf_out.py
 eeb80b55a38476ef2f80a5e10538a50bc935aa1b adept/core/export/overlay.py
 2befd3e81601f75aada73c3dc59e2c962f1e64d1 adept/core/export/report.py
 cf4a1ad803592ee09a5fc9c205da267f7de1a3f9 adept/core/ingest/__init__.py
-2126c98189eb14c0f3e1bde4e1a2b92f6732f43a adept/core/ingest/dataset.py
+5683186512ac065f1579399f6abd31195296e607 adept/core/ingest/dataset.py
 ddb8939ebee5ba56237cce56d0c53397695982bb adept/core/ingest/imageio.py
 7c83441689fc980b2a4d7e3f46375653ae305054 adept/core/ingest/klarf_core.py
 110cbfafd227f6d4557b4e2e02853f38c9b5bf77 adept/core/ingest/tiff_index.py
@@ -73,14 +73,14 @@ e69de29bb2d1d6434b8b29ae775ad8c2e48c5391 adept/ui/__init__.py
 a845fbb49ee1fc254569eec97735ea2ab064473f adept/ui/inspectors.py
 b996d921ba547e70d5c78251f70f3b56d3e27ef0 adept/ui/region_check.py
 043a9240742914759667fd4bb01beafd0241ed17 adept/ui/results.py
-a13161cca57fecb7a1366a4e0585bedc5e1828ac adept/ui/scope.py
-50784e0bccaacb544acea9ee809eb91c1152e8be adept/ui/studio.py
+50edaac97d4128a95e08c2d155157c7aa1c39dde adept/ui/scope.py
+d4a11dcbefc1b39d6fc75d44fb406c60d9668081 adept/ui/studio.py
 5d647c32055d4a73128c92853c0425729fdac6b9 adept/ui/template_dialog.py
 acb3224f56416ae87cc1c3ae349800bdab91cb05 adept/ui/theme.py
 555bcaaa4ce078658bd2a4b729192749b7b97d74 adept/ui/viewmodel.py
 b2dd691199dbc50b01b02de407b321aada8e6a3a adept/ui/welcome.py
-efdb2696dee901e7fb5f1ed8330d308bb185458c adept/ui/widgets.py
-669770bafa48f033c7d1e9fda77f342b3369070e adept/ui/workers.py
+842dfa9fa97fc9c386e9e47e5add78ec62b68c87 adept/ui/widgets.py
+3abe55095a5f3882a0a3bcd4daaf6c5a54dd3dad adept/ui/workers.py
 04c5ce471195ac4e2449126ce835b22b4c880cf3 conftest.py
 7e5d6f7d159a437c1b57f738021f6f92517f5308 docs/ARCHITECTURE.md
 250114bc2277c2aff52b86e33c4b59d9b7d79e16 docs/FAB-VALIDATION.md
@@ -92,7 +92,7 @@ c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
 9ce686eed574348d7a2f5fa8848adcbf0c623366 docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
-a5aa5202a71a3d2e5a2f3b8e18241f48b085f9b5 docs/plans/F11-phase2-features.md
+e3362f2c681f8a706cce5482e30d450d1b633790 docs/plans/F11-phase2-features.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
 fdf5dba17526e86ea0990c7853ef652874082324 fab_probe/probe_klarf.py
@@ -125,6 +125,7 @@ fbabf20c7735e77b9e7f83a16b950a2831feaeda tests/test_export_report.py
 4d9e62f4a9bd01ec28eec1e63e0c395716ad463c tests/test_expression.py
 fc6ca0b7b9c3fd49b741df2a7d454ff100b8440b tests/test_f11_channel_map.py
 0175e2f18814f34028e69a88bed500d618fd6fc0 tests/test_f11_multi_input.py
+3e6171b12e592d8fc2e5bf7d28dc63f864717fe1 tests/test_f11_tiff_stack.py
 8103c2019dc9ae3e7336c52905e6117dc518727e tests/test_f9_8_cache_and_disabled.py
 4017d96f4145ba179d8e186b7f0e02b6e47ed8ef tests/test_fab_probe.py
 862f012efa32c2e2162dd591bb2896cab70145c9 tests/test_glv.py
@@ -163,6 +164,7 @@ cc81eb2c47f6a7568e5ef0aefe4ac8a01ce3cd22 tests/test_ui_controls_readable.py
 7819d5136d0fadf4b62bb69f6e50b757b8a9b3a8 tests/test_ui_export_dialog.py
 19e4f1bde0343dbf53110292b31665319c7d2448 tests/test_ui_f10_canvas_reality.py
 21132331c6b3ef22afef5ff24a92ad303b0991cd tests/test_ui_f11_channel_map.py
+3d6ea48bce6c4ef6d62604a8f7865830d4c8b0e7 tests/test_ui_f11_tiff_stack.py
 b9589defe4cf0484085bea8a081ec36ae6bc23ee tests/test_ui_f7_10_route_edges.py
 bb7c944f11136a3a379068a91536d32244cb9fab tests/test_ui_f7_11_roi.py
 f7129aac0f1ca11aeaa191fa3c49088f21aa859a tests/test_ui_f7_12_template.py

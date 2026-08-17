@@ -500,7 +500,39 @@ parse／format／錯誤類別，正規化成「依頁碼排序、`", "` 分隔�
 資料載進來之後其實知道「每顆幾張」（`load_patch` 的 F7-17 面板就印著），
 把那個數字接到編輯器上就能預先排好列數 —— 那要把資料層的資訊接進 `ParamForm`。
 
-##### Input-2 — 大 TIFF 沒有 KLARF（新的 `kind`，暫名 `tiff_stack`）
+##### Input-2 — 大 TIFF 沒有 KLARF（`kind="tiff_stack"`）**✅ 完成 2026-08-17**
+
+做出來的東西：`dataset.load_tiff_stack(path, per_defect)`、Studio 工具列的
+**`Open stack…`**（自己的入口 + 自己的 `stack` 自繪圖示 —— 併進 `Open KLARF…`
+的話使用者按下去之前分不出自己要的是哪一種）、`scope.SUPPORTED_KINDS` 加
+`tiff_stack`。
+
+**分組（資料層）與命名（recipe）刻意分開**：`per_defect` 在載入時問（那是機台
+怎麼收的），名字由 `channel_map` 決定（Input-1）。分不開的話，同一批資料的
+「一顆幾張」會因為換一份 recipe 而改變。
+
+順帶修掉 `load_folder` 的謊：多頁 TIFF 在那條路上**只讀得到第 0 頁**
+（`cv2.imdecode`），而以前一句話都沒有 —— 一個 15 頁的檔案安靜地變成一顆 defect。
+行為刻意不變（那條路的定義就是「一個檔案一顆」），改的是**它會講出來**並指向
+`Open stack…`。
+
+**「沒有 KLARF」講在哪裡：狀態列不夠。** 第一版寫在載入訊息裡，測試當場紅 ——
+載完就接著算預覽，那句話幾毫秒後被 `Computing preview…` 蓋掉。**同一個教訓
+ground truth 那一輪學過**（`_on_dataset_loaded` 的註解就寫著）。改成掛在**資料集
+標籤**上：`tiff_stack · defect 1 / 3 · no KLARF`，tooltip 講完整句（寫不回 KLARF、
+CSV／Excel 還在）。常駐、在眼前，而且它講的正是「你現在手上是什麼資料」。
+
+對不齊的尾巴**不吞掉**：15 頁 ÷ 4 → 3 顆 + 剩 3 頁，剩下的不進任何一顆並在
+`warnings` 講出剩幾頁（安靜塞進最後一顆的話，那幾頁的數字會出現在錯的 defect 上）。
+
+驗收 `tests/test_f11_tiff_stack.py`（11 條，含「第三顆拿的是第 11–15 頁」與
+**Input-1＋Input-2 合起來**的那條：五張一顆 + BSE 在第 2 張）＋
+`tests/test_ui_f11_tiff_stack.py`（6 條）。核心 1061 passed／UI 36 檔全綠／
+黃金值逐項相同。
+
+---
+
+##### Input-2 的原始規格（保留）
 
 **現況實測**：一個 15 頁的 TIFF 丟進 `load_folder` → **1 顆 defect，而且只讀得到
 第 0 頁**（`imageio.load_gray` 走 `cv2.imdecode`，多頁 TIFF 只解第一頁）。
@@ -565,7 +597,7 @@ RSEM 大圖、GLAS 的 `_label.png`、GLAS 的 `_gray.png` 是**同一件事**�
 |---|---|---|
 | ✅ Input-0 | 多入口（`Step.is_source`）| 其餘全部踩在它上面。**完成 2026-08-17** |
 | ✅ Input-1 | `channel_map`：頁 → 流的命名（含頁數不符擋下來）| **完成 2026-08-17** |
-| Input-2 | `tiff_stack`：大 TIFF 沒有 KLARF | 使用者的多通道資料就是這個形式；順帶修掉「15 頁 TIFF 安靜變成一顆」|
+| ✅ Input-2 | `tiff_stack`：大 TIFF 沒有 KLARF | **完成 2026-08-17**（順帶修掉「15 頁 TIFF 安靜變成一顆」）|
 | Input-3 | **插槽機制** + `load_rsem` / `load_layout` 兩張卡（一種 source 一張卡，§3.1.7）| patch ↔ RSEM 的前提；RSEM 與 GLAS 共用同一個機制 |
 | Compare-1 | 新卡「Locate in a larger image」（matchTemplate 的第三種座標數學，§3.1.9）＋ 修 `align` 尺寸不符要報錯 | 對位本身。Input-3 進來之後才有兩條流可以對 |
 | 防呆 | 非 8-bit 就講一句話；一批之內尺寸忽然變了就講一句話 | 兩個都是幾行的事，但擋掉的是「安靜地算出垃圾」|
