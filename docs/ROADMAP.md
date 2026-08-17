@@ -54,29 +54,46 @@
 線、分支冷熱不一致、停用外洩隔壁支線、一對節點只存得下一條線、同一個輸入兩條
 線），全部有迴歸測試，全部驗過「把 bug 放回去會紅」。
 
-**接下來是 Phase 2。**
+### F10 —— 畫布要符合現實（2026-08-17，Phase 1 的最後一段）
 
-## Phase 2 —— 讓人用得起來
+使用者在畫布上實際操作之後，**七項**依序修完（前五項回報、後兩項稽核抓到）：
+埠點到的是自己那一顆、剛加的卡前後都是空的、量測卡多連一、剪線＝拿掉來源、
+刪卡＝連同線一起刪、改輸出名下游跟著走、`write result to` 打得進去。
 
-engine 收斂之後才有意義（現在做等於對著會變的東西寫說明書）。
+真正換來的是一句可驗證的話：**畫布上看得到的，就是引擎真的會做的。**
+驗收 `tests/test_ui_f10_canvas_reality.py`（20 條，全部對 registry 裡每一張卡
+自動套用）＋ 兩支稽核腳本（11 項不變量）。詳見
+[`plans/F10-canvas-tells-the-truth.md`](plans/F10-canvas-tells-the-truth.md)。
 
-| 項目 | 說明 |
-|---|---|
-| ground truth **標注介面** | 讀答案卷與即時準確率已經在（Phase 1），缺的是**在 Studio 裡標**：現在還是要人另外準備一份 JSON／CSV |
-| 存檔 recipe 做回來 | 連同版本與相容策略一起想（見上面「現在的定位」） |
-| 範例 recipe 庫 | 使用者的原話是「等 APP 完成再給範例」。回來時把 `SHOW_SAMPLE_ENTRIES` 打開 |
-| 使用者手冊 | 目前所有文件都是寫給開發者的。目標使用者是不寫 code 的製程／設備工程師 |
-| 快速參考卡 PDF | M6 欠著的 |
+**Phase 1 到此收斂。接下來是 Phase 2（功能補完 —— 與原 Phase 3 對調）。**
 
-## Phase 3 —— 功能補完
+## Phase 2 —— 功能補完（**2026-08-17 與原 Phase 3 對調**）
+
+使用者定調：「**我想優先做好內部的每個功能。**」原本排在這裡的產品化
+（手冊、範例庫、標注介面）往後挪一格 —— 理由跟 Phase 1 先做的理由是同一個：
+對著還會長的東西寫說明書、做範例，寫完就得重寫。而範例 recipe 現在**刻意
+一份都沒有**（使用者：「現在還沒有打算給人用，就我自己測試」）。
 
 | 項目 | 說明 |
 |---|---|
 | GDS ROI 定位 | ROI 的第三條路，出口契約已經留好（見 [`ARCHITECTURE.md`](ARCHITECTURE.md)），下游零改動 |
-| Region Stats / FFT 卡 | v1 移出的 |
+| Region Stats / FFT 卡 | v1 移出的（MMH 有現成資產）|
 | ML Classify 卡 | 吃已經匯得出來的 feature vector CSV |
-| PCA Ref | |
-| BSE/SE 多通道融合 | |
+| PCA Ref | Fusi³ 的 PCA fusion |
+| BSE/SE 多通道融合 | Fusi³ 的 quadrant 融合 |
+| `snr_map` 多來源 | F10-3 只做了「只吐數字」的量測卡；會產生新流的卡要先決定「一條流一張輸出圖」怎麼命名（見 [`plans/F10-canvas-tells-the-truth.md`](plans/F10-canvas-tells-the-truth.md) §6）|
+
+## Phase 3 —— 讓人用得起來（原 Phase 2）
+
+engine 與功能收斂之後才有意義。
+
+| 項目 | 說明 |
+|---|---|
+| ground truth **標注介面** | 讀答案卷與即時準確率已經在（Phase 1），缺的是**在 Studio 裡標**：現在還是要人另外準備一份 JSON／CSV |
+| 存檔 recipe 做回來 | 連同版本與相容策略一起想 |
+| 範例 recipe 庫 | 使用者的原話是「等 APP 完成再給範例」。回來時把 `SHOW_SAMPLE_ENTRIES` 打開 |
+| 使用者手冊 | 目前所有文件都是寫給開發者的。目標使用者是不寫 code 的製程／設備工程師 |
+| 快速參考卡 PDF | M6 欠著的 |
 
 ## Phase 4 —— 規模
 

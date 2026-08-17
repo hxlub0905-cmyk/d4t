@@ -5,7 +5,7 @@ f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
 01122f71bbe15ed22ba897e605c73b7facfb9422 AGENTS.md
 d0bb806984bf219aa80264f12c5a91f7138ff333 CLAUDE.md
 87c3cb2a07ed7a97b98ec30aa139b3dd2f03ff19 README.md
-b2fb65c30748880cfab8345c28e8afe156cf5b20 SESSION_LOG.md
+bae7fb12a23ad0244ece4c92bb563fdb585cf7b2 SESSION_LOG.md
 650a5d7c8bc6db42eed4054174823bfcfceb7eae adept/__init__.py
 c36c6343079bd506222906f26059cecf6d25ad7f adept/__main__.py
 8a51dfe499b3a9d81434c8a202f2d17c24b71c74 adept/core/__init__.py
@@ -89,7 +89,7 @@ cc1e82ef72207fda70c03fa6646a0c1581eac9b2 adept/ui/widgets.py
 0e1a3a5c99edf83914e8364958f9dd9a26056d34 docs/NO-GIT-SETUP.md
 b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
-56f5c25fa0017fc6ee166015df108233c7d1feb1 docs/ROADMAP.md
+4558b59646f8ef6c8aa80c4368ad7895166944c9 docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
