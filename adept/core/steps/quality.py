@@ -25,7 +25,7 @@ class FocusQualityStep(Step):
     help = ("Measure image sharpness with three metrics — higher is sharper. "
             "Useful for screening out defocused images.")
     params = [
-        ParamSpec(name="source", type="image_key", default="test",
+        ParamSpec(name="source", type="image_key", direction="in", default="test",
                   help="Image stream to measure sharpness on."),
         output_prefix_spec("test"),
     ]

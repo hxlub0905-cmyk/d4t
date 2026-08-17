@@ -29,7 +29,7 @@ class SnrMapStep(Step):
             "stands out at each position (SNR), and report the peak as "
             "snr_max.")
     params = [
-        ParamSpec(name="source", type="image_key", default="diff",
+        ParamSpec(name="source", type="image_key", direction="in", default="diff",
                   help=("Input difference image stream (usually the diff "
                         "produced by subtract).")),
         ParamSpec(name="window", type="int", default=31, min=5, max=201,
@@ -44,7 +44,7 @@ class SnrMapStep(Step):
         ParamSpec(name="exclude_border", type="int", default=16, min=0, max=100,
                   help=("Border exclusion width in pixels: edge statistics are "
                         "unreliable, so they are zeroed to avoid false peaks.")),
-        ParamSpec(name="out", type="image_key", default="snr_map",
+        ParamSpec(name="out", type="image_key", direction="out", default="snr_map",
                   help="Name of the image stream the SNR map is written to (float32, 0-1)."),
     ]
     reads = ["diff"]

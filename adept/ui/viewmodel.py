@@ -209,7 +209,15 @@ class RecipeModel:
         step_cls = get_step(step_key)          # 未知 key 會 raise KeyError
         self._push_undo()
         node_id = self._new_id(step_key)
-        params = step_cls.validate_params({})  # 全預設
+        # **剛加進來的卡前後都是空的**（F10，使用者定調 2026-08-17）：
+        # 全預設之後把每一格輸入清掉。畫布上沒有線，這張卡就沒有來源 ——
+        # 而在這之前，一張新卡帶著 ``source="diff"`` 這種預設值進來，畫布照著
+        # 畫出一個 `diff` 輸入埠、引擎照著去全域名字表拿圖，於是「還沒接線」
+        # 跟「接好了」跑出來的數字**一模一樣**（實測逐項相同）。
+        #
+        # 清的是**這一張卡的值**，不是卡片的 ``default`` —— 後者是規格的預設
+        # 值，手寫 recipe 省略那一格時仍然要有東西可用。
+        params = step_cls.validate_params(step_cls.cleared_inputs())
         self.nodes[node_id] = RecipeNode(id=node_id, step=step_key, params=params)
         if at is None:
             self.node_order.append(node_id)
@@ -449,13 +457,17 @@ class RecipeModel:
                 out.append((e.src, e.dst))
         return out
 
-    def edge_lines(self) -> List[Tuple[str, str, str]]:
-        """畫布要畫的每一條線：``(來源, 目的, 從哪顆輸出埠)``。
+    def edge_lines(self) -> List[Tuple[str, str, str, str]]:
+        """畫布要畫的每一條線：``(來源, 目的, 從哪顆輸出埠, 進哪個輸入參數)``。
 
         埠沒填的線回空字串 —— 畫布看到空字串就退回舊的推導（兩端共用哪幾條流
         就畫幾條），既有 recipe 的畫面因此一個畫素都沒變。
+
+        第四欄是 F10 加的：兩條線接進同一張卡的**不同**輸入（``subtract`` 的
+        a 與 b）時，畫布要知道各自進哪一顆埠，否則兩條線疊在同一個點上 ——
+        而那正是使用者要在畫布上讀到的東西。
         """
-        return [(e.src, e.dst, e.src_out) for e in self.edges]
+        return [(e.src, e.dst, e.src_out, e.dst_in) for e in self.edges]
 
     # ---- Recipe 互轉 -------------------------------------------------------
     def to_recipe(self) -> Recipe:

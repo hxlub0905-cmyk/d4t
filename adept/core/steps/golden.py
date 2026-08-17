@@ -46,7 +46,7 @@ class CellPeriodStep(Step):
             "pixels) for the Golden Cell card, and report how trustworthy that "
             "period is.")
     params = [
-        ParamSpec(name="source", type="image_key", default="test",
+        ParamSpec(name="source", type="image_key", direction="in", default="test",
                   help="Image stream to measure the period on (usually test)."),
         ParamSpec(name="min_period", type="int", default=0, min=0, max=_MAX_PERIOD,
                   unit="px",
@@ -126,9 +126,9 @@ class GoldenCellStep(Step):
             "Review SEM frame, for instance).")
     requires_ref = False          # 這張卡是「製造 ref」的人，自己不需要 ref
     params = [
-        ParamSpec(name="source", type="image_key", default="test",
+        ParamSpec(name="source", type="image_key", direction="in", default="test",
                   help="Image stream whose cells are stacked (usually test)."),
-        ParamSpec(name="out", type="image_key", default="ref",
+        ParamSpec(name="out", type="image_key", direction="out", default="ref",
                   help=("Name of the image stream the synthetic reference goes "
                         "to. Leave it at 'ref' and the align/subtract cards "
                         "downstream need no changes at all.")),

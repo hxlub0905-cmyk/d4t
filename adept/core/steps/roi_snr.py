@@ -35,7 +35,7 @@ class RoiSnrStep(Step):
             "surrounding background (signed — dark defects are negative), "
             "plus contrast and edge sharpness.")
     params = [
-        ParamSpec(name="source", type="image_key", default="diff",
+        ParamSpec(name="source", type="image_key", direction="in", default="diff",
                   help=("Image stream to measure on (usually diff; leave diff "
                         "unsigned to keep bright/dark direction visible).")),
         ParamSpec(name="roi", type="str", default="",

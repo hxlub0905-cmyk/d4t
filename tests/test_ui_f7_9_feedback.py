@@ -279,6 +279,7 @@ def test_image_keys_values_are_normalised(qapp):
     from adept.core.pipeline.step import ParamSpec
 
     spec = ParamSpec(name="streams", type="image_keys", default="",
+                     direction="in",
                      help="which streams")
     assert spec.validate(" ref , ref ,,test ") == "ref,test"
     assert spec.validate("") == ""
@@ -479,7 +480,12 @@ def test_a_broken_combination_refuses_to_run_instead_of_failing_every_defect(win
     跑得動。要製造「指到沒人產的流」得自己指過去，情境跟以前一樣真實：
     使用者把 b 改成打錯的名字。）
     """
+    src = window.model.node_order[0]
     node_id = window.model.add_step("subtract")
+    # F10：先把兩條線接上（新卡前後都是空的），這一題問的是**接好之後**指到
+    # 一條沒人產的流會怎樣 —— 那跟「還沒接線」是兩個不同的錯。
+    window._on_edge_added(src, node_id, "test", "a")
+    window._on_edge_added(src, node_id, "ref", "b")
     window.model.set_param(node_id, "b", "ref_aligned")   # 沒有 Align 在上游
     assert window.run_trial(6, workers=1, sync=True) is False
     assert "Cannot run" in window.status_text()

@@ -718,6 +718,24 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                 regions |= set(step_cls.resolve_regions_out(p))
                 first = False
                 continue
+            # **還沒接上來源**（F10）。這一條要排在 missing-image 前面，
+            # 而且擋掉後面所有以「這張卡會產出什麼」為前提的檢查 ——
+            # 一張沒有來源的卡什麼都不產出，拿它去比對下游只會生出一串
+            # 指不到重點的錯誤（真正該講的只有一句：這張卡還沒有接上東西）。
+            not_connected = step_cls.missing_inputs(p)
+            if not_connected:
+                labels = {s.name: (s.label or s.name) for s in step_cls.params}
+                issues.append(Issue(
+                    code="not-connected", level="error", node_id=nid,
+                    title=f"step '{nid}' has no input yet",
+                    detail=("route '%s': %s — drag a line from the card that "
+                            "produces the image into this one. Available "
+                            "upstream: %s"
+                            % (k, ", ".join("“%s” is empty" % labels[n]
+                                            for n in not_connected),
+                               ", ".join(sorted(avail)) or "(nothing yet)")))
+                )
+                continue
             missing = [x for x in step_cls.resolve_reads(p) if x not in avail]
             if missing:
                 issues.append(Issue(

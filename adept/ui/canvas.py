@@ -202,7 +202,11 @@ class _NodeItem(QGraphicsItem):
         所以**不再往右加**（多出來的空白會讓相鄰的節點互相吃到點擊，
         那是 F7-14 拿掉常駐「+」時就量過的事）。
         """
+        # 兩個以上的輸入才會在左邊標名字（見 paint）—— 標了就要涵蓋那塊字，
+        # 不然拖動節點會在原處留下擦不掉的殘影（這個坑踩過三次）。
         left = -_PORT_GRAB - 1.0
+        if len(self.in_specs()) >= 2:
+            left -= _PORT_LABEL_W
         right = NODE_W + max(_PORT_GRAB, _PORT_R + _PORT_LABEL_W) + 1.0
         return QRectF(left, -_PORT_GRAB - 1.0,
                       right - left, NODE_H + 2.0 * (_PORT_GRAB + 1.0))
@@ -246,20 +250,79 @@ class _NodeItem(QGraphicsItem):
         p = QPainterPath()
         p.setFillRule(Qt.WindingFill)
         p.addRoundedRect(QRectF(0.0, -1.0, NODE_W, NODE_H + 2.0), 7, 7)
-        for anchor in [self.in_port_local()] + self.out_anchors_local():
+        for anchor in self.in_anchors_local() + self.out_anchors_local():
             p.addEllipse(anchor, _PORT_GRAB, _PORT_GRAB)
         return p
 
-    def in_port(self) -> QPointF:
-        return self.scenePos() + self.in_port_local()
+    # -- 輸入埠（F10：**一個輸入參數一顆埠**）--------------------------------
+    #
+    # 以前左邊只有一顆埠，因為在 F10 之前「線落在哪個參數上」是**猜**的
+    # （Studio 的 ``_PRIMARY_PARAMS`` 依 streams → target → source 的順序挑第一
+    # 個）。猜得中是因為當時每張卡只有一個輸入在用；``subtract`` 的
+    # ``a`` / ``b`` 兩個輸入從來就沒有分別接過 —— 它們靠參數預設值（test / ref）
+    # 自己填好，畫布上那條線其實什麼都沒說。
+    #
+    # 「兩條線接進同一張卡的**不同**輸入」是使用者要的多連一，而那件事要成立，
+    # 左邊就得有兩顆分得開的埠。
+    def in_specs(self) -> List[Dict[str, Any]]:
+        """這張卡的輸入格：``[{"name","label","stream"}, …]``（由 Studio 給）。"""
+        return [dict(d) for d in (self.info.get("inputs") or [])]
 
-    @staticmethod
-    def in_port_local() -> QPointF:
-        return QPointF(0.0, NODE_H / 2.0)
+    def in_anchors_local(self) -> List[QPointF]:
+        """每個輸入埠在本地座標的位置（由上而下均分節點左緣）。"""
+        n = len(self.in_specs())
+        if n == 0:
+            return [QPointF(0.0, NODE_H / 2.0)]   # 沒有輸入的卡（Input）仍畫一顆
+        if n == 1:
+            return [QPointF(0.0, NODE_H / 2.0)]
+        step = NODE_H / (n + 1)
+        return [QPointF(0.0, step * (i + 1)) for i in range(n)]
+
+    def in_anchors(self) -> List[QPointF]:
+        base = self.scenePos()
+        return [base + p for p in self.in_anchors_local()]
+
+    def in_port(self, index: int = 0) -> QPointF:
+        anchors = self.in_anchors()
+        return anchors[max(0, min(int(index), len(anchors) - 1))]
+
+    def in_port_local(self) -> QPointF:
+        return self.in_anchors_local()[0]
+
+    def in_port_at(self, pos: QPointF):
+        """本地座標 ``pos`` 最靠近哪一個輸入埠（沒有夠近的回 ``None``）。
+
+        跟 :meth:`out_port_at` 同一個判準（取最近的、要落在抓取圈裡）——
+        這兩件事只能有一套算法，分成兩份遲早會對不起來。
+        """
+        best, best_d2 = None, None
+        for i, local in enumerate(self.in_anchors_local()):
+            d = pos - local
+            d2 = d.x() * d.x() + d.y() * d.y()
+            if d2 <= _PORT_GRAB ** 2 and (best_d2 is None or d2 < best_d2):
+                best, best_d2 = i, d2
+        return best
+
+    def in_param_at(self, pos: QPointF) -> str:
+        """``pos`` 落在哪一個輸入**參數**上（``a`` / ``b`` / ``streams``…）。
+
+        放開滑鼠的地方不一定準準地在埠上 —— 使用者多半是往卡片上一丟。
+        所以命中不到埠時退回**最近的那一個**，而不是讓這一下什麼都不做
+        （「線拉過去了卻沒接上」是最讓人以為工具壞掉的一種回應）。
+        """
+        specs = self.in_specs()
+        if not specs:
+            return ""
+        idx = self.in_port_at(pos)
+        if idx is None:
+            anchors = self.in_anchors_local()
+            idx = min(range(len(anchors)),
+                      key=lambda i: (pos - anchors[i]).y() ** 2)
+        return str(specs[min(idx, len(specs) - 1)].get("name", ""))
 
     def in_names(self) -> List[str]:
         """這個節點讀哪些影像流（用來決定上游的線該接哪個埠）。"""
-        return [str(r) for r in (self.info.get("reads") or [])]
+        return [str(r) for r in (self.info.get("reads") or []) if r]
 
     def out_names(self) -> List[str]:
         """這個節點吐出的影像流名稱（決定畫幾個輸出埠）。
@@ -267,9 +330,14 @@ class _NodeItem(QGraphicsItem):
         來自 ``Step.describe()`` 的 ``writes``。對 patch 的 Input 節點來說
         那是 ``["test", "ref"]`` —— 畫布上就看得到「一張 defect、一張 reference」，
         而不是一個什麼都不說的單一輸出。
+
+        還沒接上來源的卡回**空的**（F10）—— 一顆什麼都還沒算出來的輸出埠是
+        接得出去的，而接出去的那條線會讓下游指著一條沒有人產出的流。
+        以前這裡的 ``or [""]`` 保證每張卡至少有一顆埠，所以「前後都是空的」
+        這件事在畫布上表達不出來。
         """
         names = [str(w) for w in (self.info.get("writes") or [])]
-        return names[:_MAX_PORTS] or [""]
+        return names[:_MAX_PORTS]
 
     def out_anchors_local(self) -> List[QPointF]:
         """每個輸出埠在**本地座標**的位置（由上而下均分節點右緣）。
@@ -280,9 +348,14 @@ class _NodeItem(QGraphicsItem):
         （它剛好在原點），後面每一張卡的右側圓點都畫到卡外面去，看起來就是
         **「新增的節點只有前面有圓框、後面沒有」**；拖動 Input 時埠標籤
         （test/ref）也會離開 ``boundingRect``，留下擦不掉的殘影。
+
+        沒有輸出流就**一顆埠都沒有**（F10）—— 拉不出線，因為真的沒有東西
+        可以拉。
         """
         n = len(self.out_names())
-        if n <= 1:
+        if n == 0:
+            return []
+        if n == 1:
             return [QPointF(NODE_W, NODE_H / 2.0)]
         step = NODE_H / (n + 1)
         return [QPointF(NODE_W, step * (i + 1)) for i in range(n)]
@@ -294,6 +367,11 @@ class _NodeItem(QGraphicsItem):
 
     def out_port(self, index: int = 0) -> QPointF:
         anchors = self.out_anchors()
+        if not anchors:
+            # 這張卡現在沒有輸出埠（還沒接上來源）。已經存在的線仍然要畫得
+            # 出來 —— 畫在右緣中點，看起來就是「線從這張卡出來、但這張卡上
+            # 沒有埠」。那正是實情，不要為了好看假裝有一顆埠。
+            return self.scenePos() + QPointF(NODE_W, NODE_H / 2.0)
         return anchors[max(0, min(int(index), len(anchors) - 1))]
 
     def out_port_at(self, pos: QPointF):
@@ -413,7 +491,27 @@ class _NodeItem(QGraphicsItem):
         # 輸入是空心圈、輸出是實心點：一眼看得出線該從哪邊拉到哪邊。
         p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
         p.setBrush(QBrush(QColor(TOKENS["bg_surface"])))
-        p.drawEllipse(self.in_port_local(), _PORT_R, _PORT_R)
+        ins = self.in_specs()
+        in_anchors = self.in_anchors_local()
+        for i, anchor in enumerate(in_anchors):
+            p.drawEllipse(anchor, _PORT_R, _PORT_R)
+            if len(ins) < 2 or i >= len(ins):
+                continue
+            # 兩個以上的輸入才標名字：一顆埠的時候「這條線接到哪」沒有歧義，
+            # 標了只是多一個字；兩顆以上不標的話，使用者要去猜上面那顆是
+            # `First stream` 還是 `Second stream` —— 而猜錯了畫面上完全看不
+            # 出來（兩張圖相減，a 與 b 反過來就是整張圖的正負號反過來）。
+            spec = ins[i]
+            text = str(spec.get("stream") or spec.get("label") or "")
+            if not text:
+                continue
+            p.setPen(QColor(TOKENS["text_secondary"]))
+            p.drawText(
+                QRectF(anchor.x() - _PORT_LABEL_W - 4, anchor.y() - 7,
+                       _PORT_LABEL_W, 14),
+                Qt.AlignVCenter | Qt.AlignRight, text)
+            p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
+            p.setBrush(QBrush(QColor(TOKENS["bg_surface"])))
 
         outs = self.out_names()
         p.setBrush(QBrush(QColor(TOKENS["canvas_edge"])))
@@ -558,9 +656,13 @@ class _EdgeItem(QGraphicsItem):
     """
 
     def __init__(self, src: _NodeItem, dst: _NodeItem, canvas: "PipelineCanvas",
-                 port: int = 0):
+                 port: int = 0, dst_port: int = 0):
         super().__init__()
         self.src, self.dst, self.canvas, self.port = src, dst, canvas, int(port)
+        #: 進的是下游的第幾顆輸入埠（F10）。兩條線接進同一張卡的不同輸入時，
+        #: 它們在畫布上必須落在**不同**的點 —— 疊在一起的話，「這張卡的 a 跟
+        #: b 各自接了什麼」在畫面上就消失了。
+        self.dst_port = int(dst_port)
         self._hover = False
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setZValue(_Z_EDGE)
@@ -633,7 +735,7 @@ class _EdgeItem(QGraphicsItem):
         往回走改成：水平只推一個固定的小距離，剩下的量交給**垂直**方向。
         線因此收在兩列之間的帶子裡，兩端各只超出 ``BACK_REACH``。
         """
-        a, b = self.src.out_port(self.port), self.dst.in_port()
+        a, b = self.src.out_port(self.port), self.dst.in_port(self.dst_port)
         dx = b.x() - a.x()
         p = QPainterPath(a)
         if dx >= 2 * self.BACK_REACH:
@@ -737,7 +839,11 @@ class PipelineCanvas(QGraphicsView):
     #: 沒有它的話，畫布只能表達「先後順序」，而「對哪一張圖做」還是得回到
     #: 控制列上的下拉去設 —— 那正是使用者說「變很複雜」的東西。
     #: 來源節點只有一個沒有名字的輸出埠時是空字串。
-    edge_added = Signal(str, str, str)
+    #: ``(來源, 目的, 來源的輸出埠, 目的的輸入參數)``。第四個是 F10 加的：
+    #: 以前「線落在哪個參數上」是 Studio 用固定順序**猜**的（streams → target
+    #: → source），於是 ``subtract`` 的 ``a`` / ``b`` 根本分不開 —— 兩顆輸入，
+    #: 一條線，猜中的那個永遠是同一個。現在由**使用者放開滑鼠的位置**決定。
+    edge_added = Signal(str, str, str, str)
     #: ``(來源, 目的, 來源埠)`` —— 埠是剪刀剪的**那一條**（F9-9：兩張卡之間
     #: 可以有兩條並排的線，剪一條跟剪兩條是完全不同的事）。
     edge_removed = Signal(str, str, str)
@@ -882,12 +988,17 @@ class PipelineCanvas(QGraphicsView):
         # 帶埠的那種是 F9-9 —— 一對節點之間可以有好幾條線，每條各自從哪顆埠
         # 出發要由 model 講，不能再從「兩端共用哪幾條流」推（推出來的猜不出
         # 使用者只接了其中一條）。
-        self._lines: List[Tuple[str, str, str]] = []
+        # 一條線是 ``(來源, 目的, 來源埠, 目的的輸入參數)``。第四欄是 F10 加的
+        # —— 沒有它，兩條接進同一張卡不同輸入的線會疊在同一個點上，而「a 接了
+        # 什麼、b 接了什麼」正是使用者要在畫布上讀到的東西。
+        self._lines: List[Tuple[str, str, str, str]] = []
         for row in (edges or ()):
             row = tuple(str(x) for x in row)
-            self._lines.append((row[0], row[1], row[2] if len(row) > 2 else ""))
+            self._lines.append((row[0], row[1],
+                                row[2] if len(row) > 2 else "",
+                                row[3] if len(row) > 3 else ""))
         self._pairs = []
-        for a, b, _o in self._lines:
+        for a, b, _o, _i in self._lines:
             if (a, b) not in self._pairs:
                 self._pairs.append((a, b))
 
@@ -914,18 +1025,21 @@ class PipelineCanvas(QGraphicsView):
                 continue
             src, dst = self._items[a], self._items[b]
             outs = src.out_names()
-            named = [o for (x, y, o) in self._lines if (x, y) == (a, b) and o]
+            in_names = [str(d.get("name", "")) for d in dst.in_specs()]
+            named = [(o, i) for (x, y, o, i) in self._lines
+                     if (x, y) == (a, b) and o]
             if named:
-                # 明講的線：一條就是一條，畫在它自己那顆埠上。
+                # 明講的線：一條就是一條，兩端各畫在**它自己那顆埠**上。
                 ports = []
-                for name in named:
+                for name, dst_in in named:
                     port = outs.index(name) if name in outs else 0
-                    if port not in ports:
-                        ports.append(port)
+                    dp = in_names.index(dst_in) if dst_in in in_names else 0
+                    if (port, dp) not in ports:
+                        ports.append((port, dp))
             else:
-                ports = self._ports_between(src, dst)
-            for port in ports:
-                edge = _EdgeItem(src, dst, self, port)
+                ports = [(port, 0) for port in self._ports_between(src, dst)]
+            for port, dst_port in ports:
+                edge = _EdgeItem(src, dst, self, port, dst_port)
                 self._scene.addItem(edge)
                 self._edges.append(edge)
 
@@ -1144,8 +1258,9 @@ class PipelineCanvas(QGraphicsView):
             return
         for item in self._scene.items(scene_pos):
             if isinstance(item, _NodeItem) and item is not src:
-                self.edge_added.emit(src.node_id, item.node_id,
-                                     self.stream_of(src, port))
+                self.edge_added.emit(
+                    src.node_id, item.node_id, self.stream_of(src, port),
+                    item.in_param_at(item.mapFromScene(scene_pos)))
                 return
 
     @staticmethod
@@ -1156,12 +1271,21 @@ class PipelineCanvas(QGraphicsView):
             return str(names[port] or "")
         return ""
 
-    def link_to(self, src_id: str, dst_id: str, port: int = 0) -> None:
-        """程式化拉一條線（測試用；等同使用者從第 ``port`` 個輸出埠拖過去）。"""
+    def link_to(self, src_id: str, dst_id: str, port: int = 0,
+                dst_port: int = 0) -> None:
+        """程式化拉一條線（測試用；等同使用者從第 ``port`` 個輸出埠拖過去）。
+
+        ``dst_port`` 是落在下游的第幾顆**輸入**埠（F10）——
+        ``subtract`` 的 a 與 b 是兩顆不同的埠，接哪一顆是使用者的決定。
+        """
         src = self._items.get(str(src_id))
-        if src is not None and str(dst_id) in self._items:
-            self.edge_added.emit(str(src_id), str(dst_id),
-                                 self.stream_of(src, int(port)))
+        dst = self._items.get(str(dst_id))
+        if src is not None and dst is not None:
+            specs = dst.in_specs()
+            i = max(0, min(int(dst_port), len(specs) - 1)) if specs else 0
+            self.edge_added.emit(
+                str(src_id), str(dst_id), self.stream_of(src, int(port)),
+                str(specs[i].get("name", "")) if specs else "")
 
     # ---- Qt hooks ---------------------------------------------------------
     def _sync_hover_node(self, view_pos) -> None:

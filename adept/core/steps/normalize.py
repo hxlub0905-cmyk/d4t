@@ -122,11 +122,11 @@ class NormalizeStep(MultiStreamStep):
                   help=("Upper edge of the gray band (0-255); must be greater "
                         "than or equal to the lower edge.")),
         # ---- 兩種「量範圍」的方法共用 ---------------------------------------
-        ParamSpec(name="range_from", type="image_key", default="",
+        ParamSpec(name="range_from", type="image_key", direction="in", default="",
                   label="Borrow range from",
                   show_when=("method", ("percentile", "glv_band")),
                   help=_RANGE_FROM_HELP),
-        ParamSpec(name="use_within", type="image_key", default="",
+        ParamSpec(name="use_within", type="image_key", direction="in", default="",
                   label="Use only",
                   show_when=("method", ("percentile", "glv_band")),
                   help=("Leave empty to measure the range from every pixel. "
@@ -136,7 +136,7 @@ class NormalizeStep(MultiStreamStep):
                         "image. Use it when how much of each pattern is in "
                         "the crop changes from patch to patch.")),
         # ---- match --------------------------------------------------------
-        ParamSpec(name="reference", type="image_key", default="ref",
+        ParamSpec(name="reference", type="image_key", direction="in", default="ref",
                   label="Match it to", show_when=("method", ("match",)),
                   help=("Brightness reference stream (never modified). If this "
                         "stream is also in the list above it is left alone - "

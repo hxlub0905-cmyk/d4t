@@ -145,6 +145,20 @@ class ParamSpec:
     #: ``show_when`` 解的是「這一列現在算不算數」，這個解的是「這一列在回答
     #: 哪個問題」，兩者不能互相取代。
     section: str = ""
+    #: 這個影像流參數是**接進來的**還是**吐出去的**（F10）。
+    #: ``image_key`` / ``image_keys`` 的參數**必填**，其他型別留空。
+    #:
+    #: 為什麼要一個欄位：``subtract`` 的 ``a`` / ``b``（吃進來的兩條流）與
+    #: ``out``（吐出去的那條）**型別一模一樣**，所以在這個欄位出現之前，
+    #: 沒有任何人分得出「這一格是一個輸入埠」還是「這一格是輸出流的名字」。
+    #: 分不出來的後果是畫布只能猜，而它猜錯的方式是**畫出一顆還沒有來源的
+    #: 輸出埠** —— 使用者剛加一張卡，後面就憑空長出一條 ``diff``。
+    #:
+    #: 用**必填**而不是推導（例如「值有出現在 resolve_reads 裡就算輸入」），
+    #: 理由跟 F9 那兩次踩到的一樣：推導看的是**值**，而值是會被清空的
+    #: （新卡的輸入本來就該是空的）—— 一清空就推不回來了。宣告看的是**事實**，
+    #: 跟值無關。沒宣告的卡直接註冊失敗，所以之後加的每一張卡都躲不掉。
+    direction: str = ""
     #: 這一列預設收起來，按「Show advanced settings」才出現（F8 第六輪）。
     #:
     #: 跟 ``section`` 的差別是**軸不一樣**：``section`` 講「這一列在回答哪個
@@ -174,6 +188,37 @@ class ParamSpec:
         if self.type in ("choice", "multi_choice") and not self.choices:
             raise ParamError(f"parameter '{self.name}': type '{self.type}' "
                              f"requires choices")
+        if self.type in ("image_key", "image_keys"):
+            if self.direction not in ("in", "out"):
+                raise ParamError(
+                    f"parameter '{self.name}': an image-stream parameter must "
+                    f"say whether it is an input or an output "
+                    f"(direction='in' or direction='out')")
+        elif self.direction:
+            raise ParamError(
+                f"parameter '{self.name}': direction only applies to "
+                f"image_key / image_keys parameters")
+
+    # -- 輸入／輸出（F10）----------------------------------------------------
+    def is_input(self) -> bool:
+        return self.direction == "in"
+
+    def is_output(self) -> bool:
+        return self.direction == "out"
+
+    def required_input(self, params: Optional[Dict[str, Any]] = None) -> bool:
+        """這一格**非有來源不可**嗎（在這組參數下）。
+
+        判準是 ``default``：預設值指得出一條流的（``source="diff"``）是這張卡
+        的主要輸入，沒有它就跑不起來；預設是空字串的（``normalize`` 的
+        ``range_from`` / ``use_within``）本來就是「要用再接」的選配。
+
+        ``show_when`` 藏起來的那幾格不算 —— ``normalize`` 的 ``reference``
+        只有選了 *Match to another stream* 才用得到，方法是 percentile 的時候
+        要求它有來源，等於憑空多一個接不完的埠。
+        """
+        return (self.is_input() and bool(str(self.default or "").strip())
+                and self.visible_for(params))
 
     def validate(self, value: Any) -> Any:
         """coerce + 檢查範圍；失敗拋 ParamError（訊息含參數名）。"""
@@ -303,6 +348,48 @@ class Step(ABC):
         """
         return bool(cls.requires_ref)
 
+    # ---- 輸入／輸出的埠（F10）----------------------------------------------
+    #
+    # 「一張卡剛被 new add 時，前後應該都是空的乾淨的；連上 source，後面
+    # source 才會出來」（使用者定調 2026-08-17）。這三個 classmethod 是那句話
+    # 在程式碼裡的形狀 —— 畫布、lint、引擎全部問它們，所以**不會有第二套說法**。
+    @classmethod
+    def input_specs(cls) -> List[ParamSpec]:
+        """吃影像流的那幾格（畫布上的輸入埠）。"""
+        return [p for p in cls.params if p.is_input()]
+
+    @classmethod
+    def output_specs(cls) -> List[ParamSpec]:
+        """輸出流名字的那幾格（``out`` 這種；改了它畫布上的埠就跟著改名）。"""
+        return [p for p in cls.params if p.is_output()]
+
+    @classmethod
+    def missing_inputs(cls, params: Dict[str, Any]) -> List[str]:
+        """哪些**必要**的輸入還沒有來源（回參數名，空 list = 接齊了）。
+
+        「沒有來源」就是那一格是空字串。它不是「使用者填錯了」，是
+        **這張卡還沒有被接上任何東西** —— 所以它不該有輸出、不該進 lint 的
+        其他檢查、更不該安靜地退回「最後一個寫這個名字的人」去拿圖。
+        """
+        params = dict(params or {})
+        return [p.name for p in cls.params
+                if p.required_input(params)
+                and not str(params.get(p.name, p.default) or "").strip()]
+
+    @classmethod
+    def cleared_inputs(cls, params: Optional[Dict[str, Any]] = None
+                       ) -> Dict[str, Any]:
+        """把所有輸入清成空字串的參數 —— **剛加進畫布的卡拿到的就是這個**。
+
+        卡片的 ``default``（``source="diff"``）仍然留著，因為那是**規格的預設
+        值**，手寫 recipe 省略它時要有東西可用。清掉的是**這一張卡在畫布上的
+        值**：畫布上沒有線，那這張卡就沒有來源，兩邊必須是同一句話。
+        """
+        out = dict(params or {})
+        for spec in cls.input_specs():
+            out[spec.name] = ""
+        return out
+
     # ---- 具名區域（F7-9）---------------------------------------------------
     #: 影像流有 reads/writes 可以在 validate 裡模擬，**具名 ROI 以前沒有**。
     #: 於是「量測卡指到一個沒人定義的區域」只有兩種下場：名字打錯 → 每顆
@@ -378,6 +465,7 @@ class Step(ABC):
                                   else [p.show_when[0], list(p.show_when[1])]),
                     "section": p.section,
                     "advanced": p.advanced,
+                    "direction": p.direction,
                 }
                 for p in cls.params
             ],

@@ -55,7 +55,7 @@ class GlvStatsStep(Step):
             "percentiles…) inside a region, and write each one out as a "
             "feature.")
     params = [
-        ParamSpec(name="source", type="image_key", default="test",
+        ParamSpec(name="source", type="image_key", direction="in", default="test",
                   help="Image stream to compute statistics on."),
         ParamSpec(name="roi", type="str", default="",
                   help=("Which region to measure in — the name given by a "

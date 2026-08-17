@@ -132,13 +132,16 @@ def test_a_role_port_is_still_replaced_not_accumulated(window):
     nid = window.add_card_after(src, "subtract")
     before = dict(window.model.nodes[nid].params)
 
-    window.pipeline.link_to(src, nid, port=0)
-    window.pipeline.link_to(src, nid, port=1)
+    # 兩條線都往**同一顆**輸入埠（a）拉：第二條的意思是「我改接別的」。
+    window.pipeline.link_to(src, nid, port=0, dst_port=0)
+    window.pipeline.link_to(src, nid, port=1, dst_port=0)
     after = window.model.nodes[nid].params
     for key in ("a", "b"):
         assert "," not in str(after[key]), key
-    # subtract 沒有主流參數，連線不該亂改它的 a / b
-    assert after == before
+    # a 換成了後拉的那條，b 完全沒被碰到（角色埠是取代，不是累加）
+    assert after["a"] == "ref"
+    assert after["b"] == before["b"]
+    assert len([e for e in window.model.edges if e.dst == nid]) == 1
 
 
 # --------------------------------------------------------------------------- #

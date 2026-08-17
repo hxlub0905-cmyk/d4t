@@ -15,6 +15,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from conftest import wire_up  # noqa: E402  —— F10：加完卡要接線
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
@@ -58,7 +60,7 @@ def lines_lot(tmp_path_factory):
 def win(qapp, lines_lot):
     w = studio_mod.StudioWindow(show_welcome_on_start=False)
     w.load_dataset_path(lines_lot["klarf"], sync=True)
-    nid = w.model.add_step("roi_cross")
+    nid = wire_up(w.model, w.model.add_step("roi_cross"))
     w.model.set_param(nid, "roi_out", "xing")
     w.select_node(nid)
     yield w
@@ -134,7 +136,7 @@ def test_switching_card_mid_measure_does_not_write_into_the_wrong_card(
     """量整批要幾秒，量完的時候使用者可能已經選了別張卡。"""
     from adept.core.algo.grid import AxisCalibration
 
-    other = win.model.add_step("align")
+    other = wire_up(win.model, win.model.add_step("align"))
     win.select_node(other)
     win._on_calibrated({
         "x": AxisCalibration(18.0, 0.0, 6.0, 8, 8, 1.0, ""),

@@ -53,12 +53,12 @@ class RoiMaskStep(Step):
                   "names are combined: a pixel inside any of them is inside "
                   "the mask.")),
         ParamSpec(
-            name="source", type="image_key", default="test",
+            name="source", type="image_key", direction="in", default="test",
             label="Same size as",
             help=("The mask is drawn at this stream's size. Pick the stream "
                   "the mask will be used on.")),
         ParamSpec(
-            name="out", type="image_key", default="mask",
+            name="out", type="image_key", direction="out", default="mask",
             label="Write mask to",
             help=("Name of the image stream the mask is written to. Point a "
                   "Normalize card's 'Use only' at this name.")),

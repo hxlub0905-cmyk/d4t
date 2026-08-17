@@ -169,6 +169,9 @@ def test_a_card_that_cannot_run_is_marked_on_the_canvas(window):
     """lint 早就知道模板是空的 —— 但那個知識以前只在按下 Run trial 的那一刻
     出現一次，卡片在畫布上看起來永遠是好的。"""
     nid = window.model.add_step("roi_template")
+    # F10：先接上來源，這一題才問得到「模板還沒建」——「還沒接線」是另一個錯，
+    # 而兩個一起出現時，先修哪一個由使用者決定，不是由這條測試決定。
+    window.model.set_param(nid, "source", "ref")
     window.select_node(nid)
 
     codes = [i.code for i in window.model.validate() if i.node_id == nid]

@@ -70,7 +70,7 @@ STREAMS_HELP = (
 
 def streams_spec(default: str = "test") -> ParamSpec:
     """多流 Enhance 卡共用的 ``streams`` 參數。"""
-    return ParamSpec(name="streams", type="image_keys", default=default,
+    return ParamSpec(name="streams", type="image_keys", direction="in", default=default,
                      label="Image streams", help=STREAMS_HELP)
 
 
@@ -99,8 +99,16 @@ class MultiStreamStep(Step):
 
     @classmethod
     def stream_list(cls, params: Dict[str, object]) -> List[str]:
-        keys = parse_key_list(params.get("streams", "test"))
-        return keys or ["test"]
+        """接進來的那幾條流。**空的就是空的**（F10）。
+
+        以前這裡是 ``keys or ["test"]`` —— 一張沒有接線的卡會安靜地跑回
+        ``test``。那個 ``or`` 是「畫布說謊」的一個源頭：畫面上沒有線、參數是
+        空的，而它照樣量得出數字，於是使用者沒有任何線索知道自己漏接了。
+
+        現在空的就是沒有來源：畫布不畫輸出埠、lint 報 ``not-connected``、
+        引擎在跑之前就擋下來並講一句可以照做的話。
+        """
+        return parse_key_list(params.get("streams", "test"))
 
     @classmethod
     def resolve_writes(cls, params: Dict[str, object]) -> List[str]:

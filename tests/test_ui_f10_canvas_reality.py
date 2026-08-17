@@ -29,7 +29,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QPointF                  # noqa: E402
 from PySide6.QtWidgets import QApplication          # noqa: E402
 
-from adept.core.pipeline import list_steps          # noqa: E402
+from adept.core.pipeline import get_step, list_steps  # noqa: E402
 from adept.ui import canvas as canvas_mod           # noqa: E402
 from adept.ui import studio as studio_mod           # noqa: E402
 from adept.ui import theme as theme_mod             # noqa: E402
@@ -107,3 +107,103 @@ def test_the_hit_area_is_the_grab_area(window):
                       QPointF(0, r), QPointF(0, -r)):
                 assert shape.contains(anchor + d), (
                     "%s：埠的抓取圈有一段不在命中區裡" % key)
+
+
+# --------------------------------------------------------------------------- #
+# 2. 剛加進來的卡，前後都是空的
+# --------------------------------------------------------------------------- #
+def test_a_new_card_has_no_source_and_no_output(window):
+    """**每一張**卡加進畫布時都不帶來源，因此也不吐任何流。
+
+    以前每張卡都帶著自己的預設來源（``source="diff"``、``streams="test"``），
+    於是畫布上一加卡就前後各長出一顆埠 —— 而那些流沒有任何一條線指向它們。
+    最糟的是它**跑得動**：引擎查不到線就退回「執行順序上最後一個寫這個名字
+    的人」，所以「還沒接線」與「接好了」算出來的數字一模一樣（實測逐項相同）。
+    """
+    for key, item in _every_card(window):
+        node = window.model.nodes[item.node_id]
+        step = get_step(node.step)
+        if not step.input_specs():
+            continue                       # Input 卡本來就沒有來源
+        empty = {s.name: node.params.get(s.name) for s in step.input_specs()}
+        assert not any(empty.values()), "%s 一加進來就帶著來源 %s" % (key, empty)
+        assert item.out_names() == [], (
+            "%s 還沒接線就長出輸出埠 %s" % (key, item.out_names()))
+        assert item.out_anchors_local() == [], "%s 拉得出線（但它什麼都還沒算）" % key
+
+
+def test_the_output_appears_only_when_every_input_is_connected(window):
+    """`Compare to stream` 要兩條流才算得出 diff —— 接一條的時候後面不該有東西。
+
+    使用者的原話：「在還沒有把給定 image source 來源填上時，後方的 Node 節點
+    diff 也不該出現（只有在設定內 first stream 跟 second stream 都填上時，
+    diff 才會出現）」。
+    """
+    src = window.model.node_order[0]
+    sub = window.add_card_after(src, "subtract")
+    card = window.pipeline.node_item(sub)
+    assert card.out_names() == []
+
+    window._on_edge_added(src, sub, "test", "a")
+    assert window.pipeline.node_item(sub).out_names() == [], \
+        "只接了一條就長出 diff —— 那條 diff 還算不出來"
+
+    window._on_edge_added(src, sub, "ref", "b")
+    assert "diff" in window.pipeline.node_item(sub).out_names()
+
+
+def test_the_output_port_carries_the_name_the_user_gave_it(window):
+    """輸出流改名，畫布上那顆埠要跟著改名（使用者要求）。
+
+    ``write result to`` 是 recipe 裡真正的流名，也是下游要指的那個字。
+    畫布上還印著 ``diff`` 的話，使用者就得自己在腦裡做一次翻譯 ——
+    而「兩張卡都叫 diff」正是他想用改名解掉的問題。
+    """
+    src = window.model.node_order[0]
+    sub = window.add_card_after(src, "subtract")
+    window._on_edge_added(src, sub, "test", "a")
+    window._on_edge_added(src, sub, "ref", "b")
+
+    window.model.set_param(sub, "out", "GGG")
+    window._refresh_pipeline()
+    outs = window.pipeline.node_item(sub).out_names()
+    assert "GGG" in outs and "diff" not in outs, outs
+
+
+def test_an_unconnected_card_is_refused_before_it_can_produce_numbers(window):
+    """沒有來源的卡**不准安靜地跑**：lint 擋、畫布掛警示、引擎也不放行。
+
+    三層都要有，因為它們各自回答不同的時機：lint 是「按 Run trial 之前」、
+    畫布是「現在看著它的時候」、引擎是「別的路徑（CLI、舊檔）繞進來的時候」。
+    """
+    src = window.model.node_order[0]
+    nid = window.add_card_after(src, "glv_stats")
+
+    codes = [i.code for i in window.model.validate() if i.node_id == nid]
+    assert "not-connected" in codes
+    assert window.pipeline.node_item(nid).problem(), "畫布上沒有任何標記"
+
+    # 引擎那一層：直接問卡片，不必真的跑一批
+    node = window.model.nodes[nid]
+    assert get_step(node.step).missing_inputs(node.params) == ["source"]
+
+    # 接上線之後三層一起變乾淨
+    window._on_edge_added(src, nid, "test", "source")
+    assert [i.code for i in window.model.validate() if i.node_id == nid] == []
+
+
+def test_every_image_parameter_says_whether_it_is_an_input(window):
+    """``image_key`` / ``image_keys`` 一律要宣告方向 —— 沒宣告的卡註冊不進來。
+
+    這條測試存在的理由是**下一張卡**：畫布靠 ``direction`` 決定要畫幾顆輸入埠、
+    輸出埠要不要等來源接齊。用推的（「值有出現在 reads 裡就算輸入」）會在來源
+    被清空的那一刻失效，而那正是新卡的常態。
+    """
+    for cls in list_steps():
+        for spec in cls.params:
+            if spec.type in ("image_key", "image_keys"):
+                assert spec.direction in ("in", "out"), \
+                    "%s.%s 沒說自己是輸入還是輸出" % (cls.key, spec.name)
+            else:
+                assert spec.direction == "", \
+                    "%s.%s 不是影像流參數卻宣告了方向" % (cls.key, spec.name)

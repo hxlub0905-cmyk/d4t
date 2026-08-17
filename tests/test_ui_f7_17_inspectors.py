@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import wire_up  # noqa: E402  —— F10：加完卡要接線
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
@@ -60,7 +62,11 @@ def _batch(points, extra=None):
 def test_selecting_a_card_swaps_in_its_own_panel(window):
     src = window.model.node_order[0]
     a = window.add_card_after(src, "align")
-    window._on_edge_added(src, a, "test")
+    # F10：Align 有**兩格**輸入（要對的那張、對齊到哪張），所以要拉兩條線 ——
+    # 那正是使用者現在在畫布上做的事（以前一條都不用拉也照跑，因為兩格都有
+    # 預設值）。
+    window._on_edge_added(src, a, "ref", "moving")
+    window._on_edge_added(src, a, "test", "fixed")
     assert isinstance(window.inspector(), insp_mod.AlignInspector)
     assert window.bottom_page() == 0
     assert window.btn_tab_card.text() == "Alignment"
@@ -70,7 +76,11 @@ def test_a_card_without_a_panel_falls_back_to_the_feature_table(window):
     """沒註冊儀表的卡**不能**變成一片空白 —— 那比原本的特徵表還糟。"""
     src = window.model.node_order[0]
     a = window.add_card_after(src, "align")
-    window._on_edge_added(src, a, "test")
+    # F10：Align 有**兩格**輸入（要對的那張、對齊到哪張），所以要拉兩條線 ——
+    # 那正是使用者現在在畫布上做的事（以前一條都不用拉也照跑，因為兩格都有
+    # 預設值）。
+    window._on_edge_added(src, a, "ref", "moving")
+    window._on_edge_added(src, a, "test", "fixed")
     window.add_card_after(a, "subtract")        # subtract 還沒有自己的儀表
     assert window.inspector() is None
     assert window.bottom_page() == 1
@@ -181,7 +191,11 @@ def test_it_reads_the_engine_numbers_not_its_own(window, tmp_path):
     window.load_dataset_path(out["klarf"], sync=True)
     src = window.model.node_order[0]
     a = window.add_card_after(src, "align")
-    window._on_edge_added(src, a, "test")
+    # F10：Align 有**兩格**輸入（要對的那張、對齊到哪張），所以要拉兩條線 ——
+    # 那正是使用者現在在畫布上做的事（以前一條都不用拉也照跑，因為兩格都有
+    # 預設值）。
+    window._on_edge_added(src, a, "ref", "moving")
+    window._on_edge_added(src, a, "test", "fixed")
     window.model.set_param(a, "search_radius", 6)
     assert window.run_trial(n=8, sync=True) is True
     window.select_node(a)
@@ -477,7 +491,7 @@ def test_it_reads_the_engine_verdict_end_to_end(window, tmp_path):
 
     out = generate(str(tmp_path / "lotT"), n=4, seed=61)
     window.load_dataset_path(out["klarf"], sync=True)
-    nid = window.model.add_step("roi_template")
+    nid = wire_up(window.model, window.model.add_step("roi_template"))
     window.select_node(nid)
 
     img = np.zeros((240, 320), np.float32)

@@ -33,14 +33,14 @@ class SubtractStep(Step):
             "float32.")
     requires_ref = True
     params = [
-        ParamSpec(name="a", type="image_key", default="test",
+        ParamSpec(name="a", type="image_key", direction="in", default="test",
                   label="First stream",
                   help="The image being judged (usually test)."),
         # 預設 ``ref`` 而不是 ``ref_aligned``（2026-08-14 使用者指正）：
         # patch 是機台以 defect 為中心裁切的，**本來就對齊**，「一定要先
         # Align」是這個預設造出來的假前置。Align 留給之後非 patch 的輸入、
         # 或站點真的量到殘餘位移時用 —— 那時候把這一格改指 ref_aligned。
-        ParamSpec(name="b", type="image_key", default="ref",
+        ParamSpec(name="b", type="image_key", direction="in", default="ref",
                   label="Second stream",
                   help=("What to compare it against (usually ref - patches "
                         "already arrive centred on the defect, so no "
@@ -65,7 +65,7 @@ class SubtractStep(Step):
                   help=("True = absolute value (bright and dark defects both become "
                         "positive signal); False = keep the sign so bright and dark "
                         "defects stay distinguishable. Only used by subtract.")),
-        ParamSpec(name="out", type="image_key", default="diff",
+        ParamSpec(name="out", type="image_key", direction="out", default="diff",
                   label="Write result to",
                   help="Name of the image stream the result is written to (float32)."),
     ]

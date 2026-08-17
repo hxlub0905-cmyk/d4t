@@ -56,7 +56,7 @@ class RoiTemplateStep(Step):
             "patch - even when the patch is smaller than one cell.")
     params = [
         ParamSpec(
-            name="source", type="image_key", default="ref",
+            name="source", type="image_key", direction="in", default="ref",
             label="Match on",
             help=("Which image stream to match against the template. Use ref: "
                   "it has no defect on it, so nothing is interfering with the "

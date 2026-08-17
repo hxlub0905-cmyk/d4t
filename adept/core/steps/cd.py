@@ -53,7 +53,7 @@ class CdMeasureStep(Step):
             "pixels. Currently a bounding-box estimate. Convert to nm at "
             "export time, where you enter the nm per pixel yourself.")
     params = [
-        ParamSpec(name="source", type="image_key", default="diff",
+        ParamSpec(name="source", type="image_key", direction="in", default="diff",
                   help="Image stream sampled when refining edges (usually diff)."),
         ParamSpec(name="roi", type="str", default="",
                   help=("Which region to measure — the name given by an ROI "

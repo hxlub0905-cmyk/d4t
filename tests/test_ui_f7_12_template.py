@@ -14,6 +14,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from conftest import wire_up  # noqa: E402  —— F10：加完卡要接線
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
@@ -156,11 +158,11 @@ def test_the_cell_view_paints_with_and_without_a_template(qapp):
 # 2. 接回 Studio
 # --------------------------------------------------------------------------- #
 def test_the_button_only_shows_for_the_card_that_needs_a_template(window):
-    nid = window.model.add_step("roi_template")
+    nid = wire_up(window.model, window.model.add_step("roi_template"))
     window.select_node(nid)
     assert window.template_build_available() is True
 
-    other = window.model.add_step("roi_cross")
+    other = wire_up(window.model, window.model.add_step("roi_cross"))
     window.select_node(other)
     assert window.template_build_available() is False
     assert window.open_template_dialog() is None
@@ -170,7 +172,7 @@ def test_the_button_only_shows_for_the_card_that_needs_a_template(window):
 def test_accepting_the_dialog_stores_the_template_in_the_recipe(window):
     """存進 recipe 的是**模板本身**，不是大圖的路徑 ——
     recipe 要能寄給別人，存路徑的話圖被換掉之後結果會安靜地變。"""
-    nid = window.model.add_step("roi_template")
+    nid = wire_up(window.model, window.model.add_step("roi_template"))
     window.select_node(nid)
     dlg = window.open_template_dialog()
     assert dlg is not None
@@ -185,7 +187,7 @@ def test_accepting_the_dialog_stores_the_template_in_the_recipe(window):
 
 def test_the_stored_template_actually_locates_the_regions(window):
     """存完之後真的跑一顆，區域要落在有結構的地方而不是退回整張圖。"""
-    nid = window.model.add_step("roi_template")
+    nid = wire_up(window.model, window.model.add_step("roi_template"))
     window.model.set_param(nid, "roi_out", "epi")
     window.select_node(nid)
     dlg = window.open_template_dialog()
@@ -208,7 +210,7 @@ def test_the_stored_template_actually_locates_the_regions(window):
 
 def test_a_card_with_no_template_refuses_to_run_and_says_where_to_go(window):
     """跑之前的 lint 會擋下來，訊息要指向那顆按鈕，不是丟一個空參數給人猜。"""
-    nid = window.model.add_step("roi_template")
+    nid = wire_up(window.model, window.model.add_step("roi_template"))
     window.select_node(nid)
     assert window.refresh_preview(sync=True) is True
     assert "Build template" in window.status_text()
@@ -216,7 +218,7 @@ def test_a_card_with_no_template_refuses_to_run_and_says_where_to_go(window):
 
 def test_the_region_check_view_works_for_the_template_card_too(window):
     """跨顆檢視對**任何**會定義區域的卡片都成立 —— 模板卡也不例外。"""
-    nid = window.model.add_step("roi_template")
+    nid = wire_up(window.model, window.model.add_step("roi_template"))
     window.model.set_param(nid, "roi_out", "epi")
     window.select_node(nid)
     dlg = window.open_template_dialog()

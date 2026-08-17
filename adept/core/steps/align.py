@@ -29,9 +29,9 @@ class AlignStep(Step):
             "alignment, so the later subtraction is not full of false signal.")
     requires_ref = True
     params = [
-        ParamSpec(name="moving", type="image_key", default="ref",
+        ParamSpec(name="moving", type="image_key", direction="in", default="ref",
                   help="Image stream to be moved into alignment (usually ref)."),
-        ParamSpec(name="fixed", type="image_key", default="test",
+        ParamSpec(name="fixed", type="image_key", direction="in", default="test",
                   help="Reference stream that stays put (usually test)."),
         ParamSpec(name="method", type="choice", default="phase",
                   choices=["phase", "hybrid", "ncc", "ecc", "template"],
@@ -42,7 +42,7 @@ class AlignStep(Step):
                   help=("Search radius in pixels: the largest shift you expect. "
                         "Too small and it will not find the shift, too large "
                         "and it gets slow.")),
-        ParamSpec(name="out", type="image_key", default="ref_aligned",
+        ParamSpec(name="out", type="image_key", direction="out", default="ref_aligned",
                   help="Name of the image stream the aligned result is written to."),
     ]
     reads = ["test", "ref"]

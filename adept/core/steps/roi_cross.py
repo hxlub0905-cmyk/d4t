@@ -64,7 +64,7 @@ class RoiCrossStep(Step):
             "usually has several crossings, and you get a box on each of them.")
     params = [
         ParamSpec(
-            name="source", type="image_key", default="ref",
+            name="source", type="image_key", direction="in", default="ref",
             section="1 · Which image",
             label="Find the pattern in",
             help=("Which image stream to look for the pattern in. Use ref: it "
