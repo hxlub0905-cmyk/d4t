@@ -42,8 +42,40 @@ Phase 1 收斂之後開 Phase 2 的計畫。這一輪**沒有動任何程式碼*
 | ML Classify | Phase 2 後半 |
 | 多通道 | 使用者反問「是指一張 TIFF 含多張圖（1 BSE + 4 SE，同時收）嗎」→ 是。實際頁數與順序回問使用者（計畫書 §6.1）|
 
+### 第二輪：讀 GLAS repo、計畫書改成「逐段議程」
+
+使用者補了三件事：**多通道是 1 BSE + 4 SE、BSE 固定在 TIFF 第 2 頁**；
+**GLAS 的預期產出直接去讀它的 repo**（上游應該要小改一點，而「那邊要怎麼描述」
+由我寫）；以及最重要的一句 ——
+
+> 整體 Phase 2 開發週期應該會拉很長。我自己主要看法是就**從左側功能一步一步往下
+> 開發**（從 Input 開始到 Enhance 接著 ROI 一路往下到 ADC），每張卡的預期功能與
+> UI 介面與核心設定（要放在哪裡、UIUX 要怎麼放 Card Setting）都需要跟你討論過。
+
+所以計畫書從「六個項目的待辦清單」改寫成**六段的議程**：每張卡要回答四題
+（做什麼／吃吐什麼／參數怎麼分組／要不要自己的儀表），並把既有的
+`section`/`advanced`/`show_when`/滑桿/`label`/`direction` 那幾個機制列成
+「設定要放哪」的對照表 —— 那些是既有卡片一路踩出來的，不要重新發明。
+
+**讀 GLAS 讀到的**（`docs/GLAS-INTERFACE.md`，§4 可以直接複製給那邊）：
+
+- GLAS **已經在產** ADEPT 要的東西：`<id>_label.png`（uint8 整數 label map、
+  0=背景 1..N、不 blur）、`<id>_gray.png`（模擬 GLV 灰階，可以當合成 ref）、
+  manifest 的 `label_map`（label id → layer 名，正是具名區域的名字來源）、
+  alignment CSV/JSON（`mmh-gds-alignment-v1`）。
+- **join key 兩邊同源**：GLAS 的 `image_id` 與 ADEPT 的 `defect_id` **都是 KLARF 的
+  `DEFECTID`**（`sem_loader.py::load_klarf` vs `dataset.py`）。一一對應不必發明新 id。
+- **上游必要的一改**：GLAS 的 `SemImage` 沒有 page 欄位、讀圖是 `cv2.imread`
+  （只讀第 0 頁），而 EBI patch 是「一個多頁 TIFF 裝一整批 defect」——
+  不改的話**每顆 defect 都對到同一張圖**。ADEPT 的
+  `klarf_core.defect_image_map` + `tiff_index` 已經做完這件事，可以直接搬。
+
 ### 值得記下來的
 
+- **ADC 段一張卡都沒有，而且只分得出兩類。** `GROUP_ADC` 沒有任何 Step 用它、
+  畫布上那張 Score 是 UI 造的假節點（`__score__`）、`ScoreSpec.bins` 被 `validate`
+  強制只有 `below`/`above`。一個 ADC 工具的本業是分好幾類，而那件事現在連資料結構
+  都還沒有 —— 它剛好排在「一路往下」的最後一站，所以要先知道它不是一張卡的工作量。
 - **出口契約留對了，上游換掉也不用改下游。** GDS 從「自己解析」變成「吃 GLAS 的
   mask」，而 `ARCHITECTURE.md` 的定位法契約（吐具名區域）一個字都不用改 ——
   量測卡、`roi_mask`、overlay、region check 全部零改動。

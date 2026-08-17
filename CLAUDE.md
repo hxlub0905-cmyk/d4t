@@ -22,6 +22,7 @@
 | **進度與 phase 計畫** | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 想知道「接下來做什麼」 |
 | **為什麼長成這樣**：需求訪談結論、六個來源專案的脈絡 | [`docs/HANDOVER.md`](docs/HANDOVER.md) | 第一次接手；想改一個「看起來多餘」的設計之前 |
 | 廠內待驗證的假設、受限機器的部署 | [`docs/FAB-VALIDATION.md`](docs/FAB-VALIDATION.md) | 要動 KLARF／單位／搬運時 |
+| **上游 GLAS 的介面**（label map／合成 gray／alignment；ADEPT 不解析 layout）| [`docs/GLAS-INTERFACE.md`](docs/GLAS-INTERFACE.md) | 要動 ROI 第三條路、或要請 GLAS 改東西時 |
 | 逐輪的決策與理由 | [`SESSION_LOG.md`](SESSION_LOG.md)（近期）＋ [`docs/history/`](docs/history/) | 查「這個決定當初為什麼這樣下」|
 
 **加一份新文件之前先問：這個主題已經有家了嗎。** 有的話寫進那一份。
