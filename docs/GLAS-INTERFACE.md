@@ -42,13 +42,19 @@ ADEPT 的 ROI 定位法有一個**共同出口**：吐**具名區域**（`resolv
 所以第三條路接上去之後，量測卡、`roi_mask`、overlay、region check **一行都不用改**
 （見 [`ARCHITECTURE.md`](ARCHITECTURE.md) 的定位法契約）。
 
-新卡（暫名 `roi_from_mask`）做的事：
+**分兩層**（2026-08-17 定調 —— Input 段是輸入來源的核心，所以**檔案 I/O 只在那裡**）：
 
 ```
-<DEFECTID>_label.png ──┐
-manifest 的 label_map ─┴─→ 每個 label id 一個具名區域（名字取 layer 名）
-                            座標一律正規化（0–1），因為 patch 尺寸會變
+ingest 層（配對 + 讀檔）      <DEFECTID>_label.png → 影像流 layout_label
+  └ 同一條路也載 gray            <DEFECTID>_gray.png  → 影像流 layout_gray
+       └ Region 卡（暫名 roi_from_mask）吃 layout_label 那條流
+            + manifest 的 label_map → 每個 label id 一個具名區域
+              （名字取 layer 名；座標一律正規化 0–1，因為 patch 尺寸會變）
 ```
+
+為什麼配對規則要在 ingest 層而不是卡片裡：影像段快取的簽章與 `ProcessPool` 的
+worker 都是照「`DefectItem` 帶著哪些影像來源」在算的。卡片自己偷偷讀檔的話，
+**換了 mask 目錄而快取簽章看不見** —— 那就是 ADEPT 鐵則 9 擋的那類安靜錯誤。
 
 三個已經定了的原則（不必再討論）：
 

@@ -131,23 +131,103 @@ manifest 的 `label_map`（label id → layer 名）與 alignment CSV/JSON；
 每一段的表格：**現在有什麼** → **缺什麼** → **要討論的**。
 討論完的結論寫回對應的那一列（連同日期）。
 
-### 3.1 Input
+### 3.1 Input —— **這一段是「輸入端的核心」，不是一張載入卡**
 
-| | |
-|---|---|
-| 現在有什麼 | `load_patch`（Load images）一張。參數只有 `channels` |
-| 缺什麼 | ① 頁→流的**命名**摸不到（§1.3）；② 5 頁資料（BSE 第 2 頁）沒有預設；③ GLAS 的 `<id>_gray.png` 當 `ref` 流的入口（見 [`../GLAS-INTERFACE.md`](../GLAS-INTERFACE.md) §5）；④ RSEM 那條路被 `ui/scope.py` 收起來（能力沒刪）|
+使用者定調（2026-08-17）：
 
-**要討論的（Input-1：頁怎麼命名）**
+> 關於多通道，我反而想在 Input 段做。目前 Input 只支援 patch，但實際
+> **Input 段就是整個輸入 image source 的核心**對吧，所以她要能**支援各種的資料形式**。
+> （**五頁的資料不會有 ref**。）
 
-- 參數長什麼樣？傾向：`channel_map` 一格「第幾頁 → 叫什麼」的對照
-  （UI 上是一個小表格，不是一行逗號字串 —— 五頁的時候逗號字串數不清位置）。
-- 流的名字用什麼字？`bse` / `se_ul` / `se_ur` / `se_ll` / `se_lr`？
-  還是不預設方位（使用者說 SE 順序無所謂）→ `se1..se4`？
-  **這些名字會出現在畫布上、也會變成特徵名的前綴**，所以要一次定對。
-- 舊的兩頁資料（test/ref）**不能被動到**：改預設值必附遷移，而且黃金值要逐項相同。
-- ⚠ 「BSE 在第 2 頁」是**廠內事實**，`docs/FAB-VALIDATION.md` 的假設 #1 只確認過
-  兩頁的情形 —— 五頁那條要不要寫成第四個假設 + 一支探測腳本（§7.2）。
+所以這一段的題目不是「`load_patch` 加一個參數」，而是**要支援哪些輸入端接頭**。
+
+#### 3.1.1 現在真的支援什麼（`ingest/dataset.py`）
+
+三種 `kind`，偵測是自動的：
+
+| kind | 怎麼認出來 | 一顆長什麼樣 |
+|---|---|---|
+| `ebi_patch` | 找得到 patch TIFF **且** KLARF 的 `IMAGECOUNT`/`IMAGELIST` 對得出 page | 多頁 TIFF 的**連續幾頁**，依序命名 `channel_order[j]`（預設 test, ref，多的接 `img3`…）|
+| `rsem` | KLARF 的 defect 列帶**每顆一個檔名** | `{"single": 一個影像檔}`，路徑相對 KLARF 資料夾解析 |
+| `folder` | 沒有 KLARF，掃一個資料夾（不遞迴）| 每個影像檔一顆，`defect_id` = 檔名主幹，無座標 |
+
+**已經吃得下、只是沒人餵過的事**：一顆五頁**引擎層已經支援** ——
+`defect_image_map` 的頁數是從**每顆的 `IMAGECOUNT`** 來的，不是寫死 2。
+所以五頁資料進來會得到五個 `ImageRef`，缺的只有兩件事：**名字**（§1.3）與
+**「沒有 ref」的下游後果**（§3.1.4）。
+
+`ui/scope.py` 目前只開 `ebi_patch`（`SUPPORTED_KINDS`）—— rsem 那條路能力沒刪，
+只是 GUI 收起來。
+
+#### 3.1.2 接頭有四個獨立的軸（不要把它們混成一個下拉）
+
+會出現「各種資料形式」是因為這四件事**各自獨立**，四個軸的組合才是一種形式：
+
+| 軸 | 現在有的 | 可能要加的 |
+|---|---|---|
+| **A. defect 清單從哪來** | KLARF 1.2／1.8；資料夾（無清單）| CSV／Excel 清單（沒有 KLARF 的機台）；其他家 inspector 的格式 |
+| **B. 影像怎麼裝** | 一個大 TIFF 裝一整批（每顆佔連續幾頁）；一顆一個檔案 | **一顆一個多頁 TIFF**（N 頁 = N 通道）；**一顆一個資料夾**（每通道一個檔）|
+| **C. 一顆的通道語意** | test + ref；single | **N 個 detector 通道、沒有 ref**（1 BSE + 4 SE）|
+| **D. sidecar（同一顆的附加檔）** | 無 | GLAS 的 `<id>_label.png`／`<id>_gray.png`；ground truth；per-defect 對位 offset |
+
+#### 3.1.3 提案：**sidecar 走 Input 段的接頭，不是 Region 卡自己讀檔**
+
+這是我讀完 GLAS 契約之後想改的一件事（原本 §3.3 打算讓 mask 卡自己吃一個目錄）。
+
+理由是使用者那句話的直接推論 —— **Input 段是輸入來源的核心，那檔案 I/O 就該只在
+那裡發生**。三個具體的好處：
+
+- **配對規則只有一份。** `<DEFECTID>_label.png` 怎麼對到那一顆，只在 ingest 層寫
+  一次；Region 段的卡只吃「一條流」，不知道也不必知道檔案在哪。
+- **快取與平行是對的。** 影像段快取的簽章與 `ProcessPool` 的 worker 都是照
+  「`DefectItem` 帶著哪些 `ImageRef`」在算的。卡片自己偷偷讀檔的話，
+  換了 mask 目錄而簽章看不見 —— 那正是 F9 那六個「跑得完、有數字、而且是錯的」
+  的形狀（鐵則 9）。
+- **畫布不會說謊。** sidecar 進來就是一條有名字的流（例如 `layout_label`、
+  `layout_gray`），使用者在畫布上看得到它、可以拉線；Region 卡吃那條流吐具名區域。
+
+所以分工變成：
+
+```
+ingest（檔案 I/O、配對）→ 流：test / bse / se1..4 / layout_label / layout_gray
+   └─ load_patch（Input 卡）把它們攤成 ctx.images
+        └─ Region 卡吃 layout_label 那條流 → 具名區域（不碰檔案）
+```
+
+#### 3.1.4 「五頁沒有 ref」的連鎖後果（**這一項比命名重要**）
+
+現在整條 pipeline 的預設路線是 `test − ref = diff`，而
+**沒有 ref 的資料會把下游一路撞到底**：
+
+- `recipe.validate` 的 **`requires-ref`** 會報錯（`subtract`、`align`、部分卡片）；
+  現在那條訊息只講 rsem 單張的情形。
+- `load_patch` 有一段「`single` 鏡射成 `test`」的特例（讓下游用預設參數就吃得到圖）
+  —— 五通道進來時，「哪一條算 `test`」要有答案，而它**不該再是一個寫死的特例**。
+- Compare 段要比什麼？三個候選，都不是白做的：
+  **① Golden Cell**（已經有，需要 layout 有週期）、
+  **② GLAS 的合成 `gray`**（die-to-database，見 [`../GLAS-INTERFACE.md`](../GLAS-INTERFACE.md) §5）、
+  **③ 通道之間互比**（BSE vs SE：不同 detector 對同一個結構的反應不同 ——
+  這是 Fusi³ 融合那條路真正的用途，不只是「多一張圖」）。
+- 好消息：**blob 分割那條保底路線**（單張、沒有 ref、沒有週期，§7.1）
+  正好是為這種資料準備的，所以它的優先度比原本高。
+
+#### 3.1.5 要你定的（討論題）
+
+1. **通道的名字。** `bse` + `se1..se4`（不預設方位，因為你說 SE 順序無所謂）？
+   還是要方位名？**這些名字會出現在畫布的線上，也會變成特徵名的前綴**
+   （`bse_glv_max`），改名等於改 recipe，所以一次定對。
+2. **命名在哪一層設定？** 三個位置差很多：
+   (a) **開檔時**（Studio 的載入對話框：認出五頁就問一次「哪一頁是什麼」）——
+   資料的屬性放在資料那一層，同一批 lot 只答一次；
+   (b) **recipe 裡**（`load_patch` 一個 `channel_map` 參數）——
+   跟著 recipe 走，換 lot 不必重答，但同一份 recipe 換一台機台就錯；
+   (c) 兩層都要（recipe 帶預設、載入時可覆寫）。
+   **我的傾向是 (a) 為主**：頁的順序是**機台/收訊設定**的屬性，不是判定邏輯的一部分。
+3. **接頭的優先順序。** §3.1.2 那張表要先做哪幾格？我的排法：
+   **C（多通道無 ref）→ D（GLAS sidecar）→ B（一顆一個多頁 TIFF／一顆一個資料夾）
+   → A（CSV 清單）**。理由：C 是你手上就有的資料形式、D 是上游已經在產的東西，
+   而 A 的觸發條件（沒有 KLARF 的機台）現在還沒發生。
+4. **五頁的順序要不要寫成「待驗證假設 #4」+ 一支探測**（§7.2）。
 
 ### 3.2 Enhance
 
@@ -174,8 +254,10 @@ manifest 的 `label_map`（label id → layer 名）與 alignment CSV/JSON；
 
 **要討論的（Region-1：`roi_from_mask`）**
 
-- 參數：mask 目錄／配對方式（檔名＝`DEFECTID`）／要不要只取某幾個 label／
-  尺寸不符怎麼辦（拒絕 or 縮放 + 警告）。
+- ⚠ **檔案 I/O 不在這張卡**（§3.1.3 的提案）：mask 由 **Input 段的 sidecar 接頭**
+  載成一條流（例如 `layout_label`），這張卡吃**流**、吐具名區域。
+  所以它的參數裡**沒有目錄、沒有配對規則**，只有「吃哪一條流、label 怎麼變成名字」。
+- 參數：要不要只取某幾個 label／尺寸不符怎麼辦（拒絕 or 縮放 + 警告）。
 - 區域的名字從 manifest 的 `label_map` 來（layer 名），使用者不用手打 ——
   但名字要能當變數用（`pattern` 擋空白與減號）。
 - 右下角儀表：label 上色預覽 + 「這一顆對到了幾個區域、對位分數多少」。
@@ -188,10 +270,12 @@ manifest 的 `label_map`（label id → layer 名）與 alignment CSV/JSON；
 | | |
 |---|---|
 | 現在有什麼 | `align`（5 backend）、`subtract`（Compare two streams）、`golden_cell` |
-| 缺什麼 | ① GLAS 的 `gray` 當 ref（die-to-database）；② 對位可以**吃 GLAS 已經算好的 offset**（省一次對位，而且那是對 layout 對的，比對 ref 準）|
+| 缺什麼 | ① **沒有 ref 的資料要跟什麼比**（§3.1.4 的三個候選）；② GLAS 的 `gray` 當 ref（die-to-database）；③ 對位可以**吃 GLAS 已經算好的 offset**（省一次對位，而且那是對 layout 對的，比對 ref 準）|
 
 **要討論的**
 
+- **五頁資料的 Compare 路線**（§3.1.4）：Golden Cell／GLAS 合成 gray／通道互比
+  —— 這一題的答案會決定 Enhance 段那兩張融合卡到底是「多一張圖」還是「產生 ref」。
 - `align` 要不要多一個 method：「從 GLAS 的 alignment CSV 讀 offset」。
 - 合成的 `gray` 與真 SEM 的灰階分佈不同 → 前面要接 `normalize` 的 `match`，
   這件事要寫進 help 還是做成卡片的前置檢查（`configuration_issues()` → lint）。
@@ -288,20 +372,52 @@ Phase 1 立起來的安全網**全部自動套用到新卡**：
 
 ## 7. 待使用者定調
 
-### 7.1 「演算法請幫我移除」的範圍 —— A 還是 B
+### 7.1 演算法移除 —— **A，已執行（2026-08-17）**
 
-- **A（我的讀法）**：移除**沒有卡片在用的** `algo/blob.py`、`algo/stats.py`
-  （連 re-export 與 `tests/test_blob.py`、`tests/test_stats.py`），兩張卡的演算法
-  **重新寫**、不照抄。
-- **B（更大）**：連 18 張卡正在用的一起重寫（`glv`/`snr`/`align`/`normalize`/
-  `enhance`/`grid`/`template`/`period`/`subpixel`/`histmatch`/`profile`/`quality`/
-  `curve`/`roi`）。代價要先知道：**黃金值三組 22 顆會全部改變**，Phase 1 剛立起來的
-  「跟改動前逐項相同」那個驗收基準就沒有了，凡是斷言數值的測試都要重新定錨。
-  做得到，但那是一輪自己的工作，不是 Phase 2 的副作用。
+使用者定調 **A**：「移除 blob 跟 stat 跟相關測試就好。」做掉的：
 
-**確認之前不動任何演算法檔案。** 兩個模組的 docstring 都寫著「別把它當死碼刪掉」
-（blob.py 還解釋了卡片被拿掉但演算法留著的理由）—— 移除時那段理由要搬進這一份，
-**留著的理由本身是資產**。
+```
+adept/core/algo/blob.py      （155 行，vendored from Fusi³）
+adept/core/algo/stats.py     （85 行，vendored from PEAR）
+tests/test_blob.py  tests/test_stats.py
+adept/core/algo/__init__.py 的兩行 re-export
+```
+
+`tests/test_export_overlay.py` 有一條 import 過 `DefectROI`，改成一個**最小替身** ——
+它要驗的本來就是 `overlay` 吃 dict **也**吃有 `x/y/w/h` 屬性的物件（duck typing），
+不是那個 dataclass 長什麼樣。之後重寫的 Blob 卡若吐 dataclass，那條就是它接得上
+overlay 的保證。
+
+驗證：核心測試 **1010 passed / 34 skipped**（只有 FILELIST／bundle 那三條因為檔案
+變動而紅，重跑 `release.py` 後綠）。
+
+#### 被移除的東西的**規格**（留著的理由本身是資產，所以搬到這裡）
+
+重寫的時候這幾條是**需求**，不是實作參考：
+
+- **blob 分割**（原 `segment_defects`）：吃一張 SNR map（uint8 或 float [0,1]）
+  → 門檻 → 連通元件 → 每塊回 `x/y/w/h`、`cx/cy`（重心）、`area`（真實像素數，
+  不是 bbox 面積）、`mean_signal`、`snr_value`、`aspect_ratio`、
+  **`dist_to_center`（離影像中心多遠 —— patch 是以報點為中心裁的，所以這一項
+  等於「離報點多遠」）**。
+- 那張卡在 F8 第五輪（ROI 收斂成三條路）被拿掉的理由是
+  **「它框的是缺陷本身，不是圖案上的位置」** —— 所以它**不屬於 Region 段**，
+  它是 Measure 段的卡（見 §3.5）。
+- 它也是 v2 backlog 上「**單張影像、沒有 ref 也沒有週期**」那條保底路線的材料
+  —— 而那條路線現在有了具體的資料（五頁 BSE+SE **沒有 ref**，見 §3.1），
+  所以它的優先度比原本高。
+- **離群**（原 `group_outliers`）：Tukey IQR，`[Q1 − k·IQR, Q3 + k·IQR]` 之外算離群，
+  **組內**比較（k 預設 1.5）。連帶兩個評估用的量：`cohens_d`（兩組平均差的標準化）、
+  `attribute_separability`（η²，一個量有多少變異是組別解釋的）——
+  後兩個是「這個特徵分得開嗎」的量化，跟 ground-truth 準確率是互補的東西。
+
+#### 還留著的懸空引用（等 Blob 卡回來才解得掉）
+
+`cd_measure` 與 `roi_snr` 的警告仍然寫「run Blob segment first」，
+`ctx.meta["blobs"]` 與 `overlay` 的主 blob 紅框仍然沒有生產者。
+**刻意不動**：那三處指向的是**接下來要做的那張卡**，把字改掉只是把缺口藏起來。
+engine 對區域名 `blob` 的保留字處理（`recipe.validate` 的 `unknown-region`）也留著
+—— 它現在會在跑之前就說「你指到一個沒人定義的區域」，那正是對的行為。
 
 ### 7.2 五頁資料要不要寫成「待驗證假設 #4」+ 一支探測
 

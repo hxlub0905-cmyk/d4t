@@ -136,12 +136,21 @@ def test_no_blobs_means_no_box():
     assert np.array_equal(plain, np.dstack([flat()] * 3))
 
 
-def test_defect_roi_dataclass_is_accepted():
-    from adept.core.algo.blob import DefectROI
-    roi = DefectROI(x=10, y=12, w=8, h=6, cx=14.0, cy=15.0, area=48,
-                    mean_signal=1.0, snr_value=5.0, aspect_ratio=1.3,
-                    dist_to_center=2.0)
-    assert overlay.primary_blob_box([roi]) == (10, 12, 8, 6)
+def test_an_object_with_xywh_attributes_is_accepted():
+    """overlay 吃 dict **也**吃有 x/y/w/h 屬性的物件（`_blob_box` 兩條路）。
+
+    這條以前是 import `algo.blob.DefectROI` 來驗的。那個模組已於 2026-08-17
+    移除（Phase 2 要重寫 blob 分割，見 `docs/plans/F11-phase2-features.md`
+    §7.1），所以這裡改用一個最小的替身 —— **要驗的本來就是 overlay 的
+    duck typing，不是那個 dataclass 長什麼樣**。之後重寫的 Blob 卡如果吐
+    dataclass 而不是 dict，這條就是它接得上 overlay 的保證。
+    """
+    class _Blob:
+        x, y, w, h = 10, 12, 8, 6
+        snr_value = 5.0
+        area = 48
+
+    assert overlay.primary_blob_box([_Blob()]) == (10, 12, 8, 6)
 
 
 # ---------------------------------------------------------------------------
