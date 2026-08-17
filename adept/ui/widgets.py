@@ -500,6 +500,9 @@ class ImageView(QWidget):
         self._overlay_focus = -1
         #: 量測尺按著時的那一條帶（axis, 起, 迄；影像像素）。見 :meth:`set_measure`。
         self._measure: Optional[Tuple[str, float, float]] = None
+        #: 選取的卡片上那個「以像素為單位」的參數有多大（大小, 標籤）。
+        #: 見 :meth:`set_kernel_hint`。
+        self._kernel: Optional[Tuple[float, str]] = None
 
     # -- public API --------------------------------------------------------
     def set_image(self, arr: Optional[np.ndarray]) -> None:
@@ -651,6 +654,42 @@ class ImageView(QWidget):
         """現在標著的那一段（沒有就 None）。測試與狀態列讀這個。"""
         return self._measure
 
+    def set_kernel_hint(self, size_px: float, label: str = "") -> None:
+        """把「這個核心有多大」畫在影像上（F11 Enhance-UI-A）。
+
+        為什麼這一格要有
+        ----------------
+        ``flatten`` 的 *Scale to remove* 與 ``denoise`` 的 *Filter size* 的
+        help 裡唯一的規則是**跟缺陷比**：前者要「明顯大於」，後者（hot_pixels）
+        要「貼著」。而畫面上原本沒有任何尺度參考 —— 使用者只能猜像素數，
+        或者去數影像的邊長。
+
+        這跟 F7-8「把 min/max 填好，滑桿是免費的」是同一條：**使用者是一邊看
+        影像一邊決定值的**，所以那個參考就該在影像上，不是在 help 裡。
+
+        畫在**影像正中央**：patch 是以缺陷為中心裁的（`ARCHITECTURE.md`），
+        所以正中央就是要比大小的那個東西。大張的 RSEM 影像上中央不是缺陷，
+        但要比的是「這個框 vs 畫面上的結構」，位置不影響那個判斷。
+
+        方框而不是圓：高斯／中位數的鄰域就是方的。形態學那幾個是橢圓，但**範圍**
+        一樣 —— 而使用者要判斷的是範圍。
+        """
+        n = float(size_px)
+        if not np.isfinite(n) or n <= 0:
+            self.clear_kernel_hint()
+            return
+        self._kernel = (n, str(label or ""))
+        self.update()
+
+    def clear_kernel_hint(self) -> None:
+        if self._kernel is not None:
+            self._kernel = None
+            self.update()
+
+    def kernel_hint(self) -> Optional[Tuple[float, str]]:
+        """現在畫著的核心大小（沒有就 None）。測試讀這個，不去讀畫素。"""
+        return self._kernel
+
     def _paint_overlay(self, p: QPainter) -> None:
         if self._pixmap is None or not self._overlay:
             return
@@ -706,6 +745,40 @@ class ImageView(QWidget):
             for y in (band.top(), band.bottom()):
                 p.drawLine(QPointF(band.left(), y), QPointF(band.right(), y))
 
+    def _paint_kernel(self, p: QPainter) -> None:
+        """核心大小的方框：虛線 + 一個寫著幾像素的標籤。
+
+        虛線是刻意的：ROI 框（實線 accent）與量測尺（實線綠）都是「資料上的東西」，
+        這一個是**尺規**。三者可能同時在畫面上，而使用者要分得出哪一個是他剛剛
+        拖出來的。
+        """
+        if self._pixmap is None or self._kernel is None:
+            return
+        n, label = self._kernel
+        s = self._scale or 1.0
+        iw, ih = self._pixmap.width(), self._pixmap.height()
+        side = n * s
+        cx = self._offset.x() + iw * s / 2.0
+        cy = self._offset.y() + ih * s / 2.0
+        box = QRectF(cx - side / 2.0, cy - side / 2.0, side, side)
+        col = QColor(TOKENS["min_accent"])
+        pen = QPen(col, 1.4, Qt.DashLine)
+        pen.setCosmetic(True)          # 縮很小的時候線不能跟著消失
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(box)
+        if not label:
+            return
+        # 標籤貼在框的上緣外側；框比畫布還大時（核心開到比影像大）就貼回畫布內，
+        # 不然那個數字會被裁掉 —— 而「核心比整張圖還大」正是最需要看到它的時候。
+        tw, th = 74.0, 14.0
+        ty = box.top() - th - 2.0
+        if ty < 2.0:
+            ty = min(self.height() - th - 2.0, box.top() + 2.0)
+        p.setPen(col)
+        p.drawText(QRectF(box.center().x() - tw / 2.0, ty, tw, th),
+                   Qt.AlignCenter, label)
+
     def _to_image(self, p: QPointF) -> QPointF:
         s = self._scale or 1.0
         return QPointF((p.x() - self._offset.x()) / s,
@@ -735,6 +808,7 @@ class ImageView(QWidget):
         p.setRenderHint(QPainter.SmoothPixmapTransform, False)
         self._paint_overlay(p)
         self._paint_measure(p)
+        self._paint_kernel(p)
         p.end()
 
     # -- interaction -------------------------------------------------------

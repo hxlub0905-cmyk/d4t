@@ -181,6 +181,18 @@ class ParamSpec:
     #: 的那一天是唯一的出路，而那一天使用者最需要它們就在手邊。收起來不是
     #: 貶低它們，是承認「第一次打開這張卡的人不該從這裡開始」。
     advanced: bool = False
+    #: 這個值是**影像上的一段長度（像素）**，而且畫成一個以缺陷為中心的方框會
+    #: 幫助使用者決定它（F11 Enhance-UI-A）。UI 會把那個方框疊在預覽影像上，
+    #: 拖滑桿時跟著變。
+    #:
+    #: 為什麼要一個**明講的旗標**而不是「``unit=="px"`` 就畫」：``unit="px"`` 的
+    #: 參數裡有一半不是鄰域範圍（``roi_cross`` 的條紋間距、框線粗細、離邊界的
+    #: 留白）。拿一個方框去表示「條紋間距」會讓畫面說謊 —— 那跟 F9/F10 那條
+    #: 「畫布不能說謊」是同一件事，只是換到影像上。
+    #:
+    #: 判準：這個數字是不是一個**鄰域的邊長**（濾波核、結構元素、搜尋窗）。
+    #: 是就填，其他長度不要填。
+    extent: bool = False
 
     def visible_for(self, params: Optional[Dict[str, Any]]) -> bool:
         """在這組參數下，這一列該不該顯示（沒有 ``show_when`` 就永遠顯示）。"""
@@ -528,6 +540,7 @@ class Step(ABC):
                     "section": p.section,
                     "advanced": p.advanced,
                     "direction": p.direction,
+                    "extent": p.extent,
                 }
                 for p in cls.params
             ],

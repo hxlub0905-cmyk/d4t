@@ -369,6 +369,11 @@ class EnhanceInspector(Inspector):
         hi = float(rec.get("clipped_high", 0.0)) - float(rec.get("was_clipped_high", 0.0))
         return (max(0.0, lo), max(0.0, hi))
 
+    def stream_feature_name(self, key: Optional[str], name: str) -> str:
+        """這一條流的某個診斷特徵**叫什麼**（多流才有前綴，F10-3）。"""
+        k = key or self.stream()
+        return ("%s_%s" % (k, name)) if len(self.streams()) > 1 else name
+
     def stream_feature(self, key: Optional[str], name: str) -> Optional[float]:
         """這一條流的某個診斷特徵值（**兩條以上才有流名前綴**，F10-3）。
 
@@ -376,9 +381,7 @@ class EnhanceInspector(Inspector):
         那一半是安靜的（面板就只是不印那一行）—— 所以有一支測試從真實預覽走完
         整條路，不是只餵假資料。
         """
-        k = key or self.stream()
-        multi = len(self.streams()) > 1
-        return self.this_value(("%s_%s" % (k, name)) if multi else name)
+        return self.this_value(self.stream_feature_name(key, name))
 
     def pushed_out(self, key: Optional[str] = None) -> Optional[float]:
         """引擎量到的「算出來超出 0–255、被壓回來」的比例（F11 Enhance-1）。
@@ -418,6 +421,24 @@ class EnhanceInspector(Inspector):
             return None
         return None if (math.isnan(v) or math.isinf(v)) else v
 
+    def batch_pushed_out(self, key: Optional[str] = None) -> List[float]:
+        """**整批**每一顆被壓回值域的比例（F11 Enhance-UI-H）。
+
+        為什麼一定要有整批的那一版
+        --------------------------
+        這是 `AlignInspector` 教過的那一課：Enhance 的失敗是**「某幾顆」**的事。
+        調參數的人看的是第 1 顆，而出問題的是第 57 顆 —— 單顆的數字永遠只回答
+        那一顆，不管它多準。
+
+        資料來自 ``trial_results``（引擎跑出來的整批），所以不必再跑一次。
+        """
+        return self.feature_values(self.stream_feature_name(key, CLIP_FRAC))
+
+    def batch_over_limit(self, key: Optional[str] = None) -> Tuple[int, int]:
+        """整批裡**有幾顆**壓掉超過 1%（回 ``(超過的, 總共)``）。"""
+        vals = self.batch_pushed_out(key)
+        return (sum(1 for v in vals if v > self.WARN_CLIP), len(vals))
+
     def summary(self) -> str:
         if not self.has_data():
             return ""
@@ -453,18 +474,82 @@ class EnhanceInspector(Inspector):
                      "ends of the scale — those pixels no longer differ from "
                      "each other, and every measure card downstream reads "
                      "them as identical." % (max(alo, ahi) * 100.0))
+        over, total = self.batch_over_limit(panes[0] if panes else None)
+        if over:
+            # **這一句講的是別的顆**，所以它要講「幾顆之中的幾顆」而不是一個比例
+            # —— 使用者接下來要做的事是去看那幾顆。
+            text += ("  ⚠ %d of the %d defects in the last trial lost more "
+                     "than 1%% this way — the one on screen is not the worst "
+                     "case." % (over, total))
         return text
+
+    #: 整批那條走勢圖的高度（含標籤）。面板只有 ~200px，所以它必須很薄 ——
+    #: 它回答的是一個是非題（「有沒有別的顆更糟」），不是一張要細看的圖。
+    _STRIP_H = 22.0
 
     def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
         panes = self.panes()
         if not panes:
             return
+        # 整批的走勢圖佔底下一條，**只有真的有整批資料時才佔位子**（跑過一次
+        # trial 之前它是空的，而一條空的軸線只是雜訊）。
+        body = rect
+        strip = None
+        if self.batch_pushed_out(panes[0]):
+            body = QRectF(rect.left(), rect.top(), rect.width(),
+                          max(40.0, rect.height() - self._STRIP_H))
+            strip = QRectF(rect.left(), body.bottom(), rect.width(),
+                           self._STRIP_H)
         # 並排比對打開時畫兩張 —— 左右的順序跟畫面上兩張圖一樣。
         gap = 14.0
-        w = (rect.width() - gap * (len(panes) - 1)) / float(len(panes))
+        w = (body.width() - gap * (len(panes) - 1)) / float(len(panes))
         for i, key in enumerate(panes):
-            box = QRectF(rect.left() + i * (w + gap), rect.top(), w, rect.height())
+            box = QRectF(body.left() + i * (w + gap), body.top(), w, body.height())
             self._paint_one(p, box, key, with_axis_title=(i == 0))
+        if strip is not None:
+            self._paint_batch_strip(p, strip, panes[0])
+
+    def _paint_batch_strip(self, p: QPainter, rect: QRectF, key: str) -> None:
+        """整批的 ``clip_frac``：一顆一根，超過 1% 的那幾根染警示色。
+
+        為什麼是逐顆一根、而不是一個分布直方圖
+        --------------------------------------
+        使用者接下來要做的事是**去看那幾顆**，所以橫軸要是「第幾顆」——
+        分布圖答得出「有幾顆很糟」，但答不出「是哪幾顆」。
+        """
+        vals = self.batch_pushed_out(key)
+        if not vals:
+            return
+        label = "clip across %d defects" % len(vals)
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        p.drawText(QRectF(rect.left(), rect.top(), rect.width(), 12),
+                   Qt.AlignLeft | Qt.AlignVCenter, label)
+        over = sum(1 for v in vals if v > self.WARN_CLIP)
+        if over:
+            p.setPen(QColor(TOKENS["danger_text"]))
+            p.drawText(QRectF(rect.left(), rect.top(), rect.width(), 12),
+                       Qt.AlignRight | Qt.AlignVCenter,
+                       "%d over 1%%" % over)
+        plot = QRectF(rect.left(), rect.top() + 12, rect.width(),
+                      max(4.0, rect.height() - 13))
+        # 刻度固定從 0 起、上界是 max 與 1% 的較大者 —— 全部都很小的時候不要把
+        # 0.01% 放大成滿格（那看起來像是出了事）。
+        top = max(max(vals), self.WARN_CLIP)
+        bw = plot.width() / float(len(vals))
+        p.setPen(QPen(QColor(TOKENS["border_default"]), 1.0))
+        p.drawLine(QPointF(plot.left(), plot.bottom()),
+                   QPointF(plot.right(), plot.bottom()))
+        p.setPen(Qt.NoPen)
+        warn = QColor(TOKENS["danger_text"])
+        ok = QColor(TOKENS["accent"])
+        ok.setAlpha(150)
+        for i, v in enumerate(vals):
+            h = (v / top) * plot.height() if top > 0 else 0.0
+            if v <= 0.0:
+                continue
+            p.setBrush(QBrush(warn if v > self.WARN_CLIP else ok))
+            p.drawRect(QRectF(plot.left() + i * bw, plot.bottom() - h,
+                              max(1.0, bw - 0.5), max(1.0, h)))
 
     def _paint_one(self, p: QPainter, rect: QRectF, key: str,
                    with_axis_title: bool) -> None:

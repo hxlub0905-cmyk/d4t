@@ -2136,8 +2136,53 @@ class StudioWindow(QMainWindow):
         self._refresh_region_button()
         self._install_inspector(node.step)     # 右下角換成這張卡的儀表（F7-17）
         self._refresh_inspector(self._last_result)
+        self._refresh_kernel_hint()            # 核心大小畫在影像上（F11 UI-A）
         self._schedule_preview()
         return True
+
+    # ---- 核心大小畫在影像上（F11 Enhance-UI-A）-----------------------------
+    def _kernel_extent(self) -> Tuple[Optional[float], str]:
+        """選取的卡片上那個「鄰域邊長」參數現在是多少（沒有就 ``(None, "")``）。
+
+        只認 ``ParamSpec.extent``（明講的旗標），不認 ``unit == "px"`` ——
+        後者有一半不是鄰域範圍（條紋間距、框線粗細、離邊界的留白），拿一個方框
+        去表示那些會讓**影像**說謊，而那跟畫布說謊是同一件事。
+
+        被 ``show_when`` 藏起來的不算：使用者看不到那一列的時候，畫面上不該有
+        一個跟著它變的方框。
+        """
+        node = self.model.nodes.get(self.selected_node or "")
+        if node is None:
+            return None, ""
+        try:
+            specs = get_step(node.step).params
+        except KeyError:
+            return None, ""
+        for spec in specs:
+            if not getattr(spec, "extent", False):
+                continue
+            if not spec.visible_for(node.params):
+                continue
+            try:
+                n = float(node.params.get(spec.name, spec.default))
+            except (TypeError, ValueError):
+                continue
+            # 1 = 不濾波（`denoise` 的 ksize=1 就是原樣回傳），畫一個 1px 的框
+            # 只會變成畫面正中央一個看不懂的點。
+            if n <= 1.0:
+                return None, ""
+            return n, "%d px" % int(round(n))
+        return None, ""
+
+    def _refresh_kernel_hint(self) -> None:
+        """兩張預覽圖都畫 —— 並排比對時使用者比的是「這個框 vs 畫面上的結構」，
+        而那個判斷在左右兩邊都要做。"""
+        px, label = self._kernel_extent()
+        for view in (self.image_view, self.image_view_b):
+            if px is None:
+                view.clear_kernel_hint()
+            else:
+                view.set_kernel_hint(px, label)
 
     # ---- 設定面板：預設收起，雙擊卡片才攤開（F7-22）------------------------
     def _on_node_activated(self, node_id: str) -> None:
@@ -2301,6 +2346,9 @@ class StudioWindow(QMainWindow):
         else:
             self.param_form.clear_errors()
             self._autofill_output_prefix(node_id, str(name), value)
+            # 拖滑桿的時候框要跟著變 —— 那正是這個輔助的全部意義（F7-8：
+            # 使用者是一邊看影像一邊決定值的）。
+            self._refresh_kernel_hint()
 
     #: 挑了區域就順手把輸出名填成區域的名字（F7-11）。
     _PREFIX_SOURCE = "roi"

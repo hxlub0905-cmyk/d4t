@@ -76,7 +76,7 @@ class DenoiseStep(MultiStreamStep):
                         "nlm = the same idea but gentler on repeating "
                         "patterns, and much slower.")),
         ParamSpec(name="ksize", type="int", default=3, min=1, max=15,
-                  label="Filter size",
+                  label="Filter size", unit="px", extent=True,
                   help=("Filter kernel size (odd, 1-15; 1 = no filtering, "
                         "larger is smoother). With hot_pixels this is how far "
                         "out the neighbours are taken from; 3 is right for "

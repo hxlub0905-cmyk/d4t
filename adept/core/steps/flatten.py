@@ -60,7 +60,7 @@ class FlattenStep(MultiStreamStep):
         ),
         ParamSpec(
             name="size", type="int", default=31, min=3, max=999, unit="px",
-            label="Scale to remove",
+            label="Scale to remove", extent=True,
             show_when=("method", ("background", "bright_spots", "dark_spots")),
             help=("How large the artifact is, in pixels. It must be clearly "
                   "BIGGER than your defects - anything smaller than this "
