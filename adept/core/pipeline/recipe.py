@@ -34,7 +34,9 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
 from .expression import ExpressionError, parse_expression
-from .step import ParamError, Step, REGISTRY
+from .step import (
+    GROUP_COMPARE, GROUP_ENHANCE, ParamError, Step, REGISTRY,
+)
 
 __all__ = [
     "RecipeError", "RecipeNode", "ScoreSpec", "Edge", "Recipe",
@@ -619,7 +621,7 @@ def _clean_params_for(step_cls: Type[Step], raw: Dict[str, Any],
 
 
 def _feature_collisions(step_cls, p: Dict[str, Any], nid: str, k: str,
-                        feat_owner: Dict[str, str]) -> List["Issue"]:
+                        feat_owner: Dict[str, Any]) -> List["Issue"]:
     """這張卡寫的特徵有沒有蓋掉別張卡的（就地更新 ``feat_owner``）。
 
     後面的卡會**安靜地**蓋掉前面的（``Context.add_feature`` 允許覆寫，只在 meta
@@ -632,8 +634,17 @@ def _feature_collisions(step_cls, p: Dict[str, Any], nid: str, k: str,
     `n_channels`。同一段判斷抄兩份的話，總有一份會長歪（這個 repo 記過三次）。
     """
     out: List[Issue] = []
+    diag = set(step_cls.diagnostic_features(p))
     for f in step_cls.resolve_features(p):
-        owner = feat_owner.get(f)
+        prev = feat_owner.get(f)
+        owner, owner_diag = (prev if isinstance(prev, tuple) else (prev, False))
+        # **兩邊都是診斷數字就不講**（F11 Enhance-3）：`clip_frac` 是每一張
+        # Enhance 卡都會產出的，所以兩張 Enhance 卡必然撞名 —— 在每一份正常的
+        # recipe 上都出現的警告會被學會忽略，而真的那一條也一起被忽略。
+        # 值沒有丟（engine 救成 `<節點名>_clip_frac`），跳掉的只是那句話。
+        if owner is not None and owner != nid and f in diag and owner_diag:
+            feat_owner[f] = (nid, True)
+            continue
         if owner is not None and owner != nid:
             out.append(Issue(
                 code="feature-collision", level="warning", node_id=nid,
@@ -645,8 +656,130 @@ def _feature_collisions(step_cls, p: Dict[str, Any], nid: str, k: str,
                        f"'{owner}_{f}'. Give one of the two cards a "
                        f"different output name if that is clearer."))
         else:
-            feat_owner.setdefault(f, nid)
+            feat_owner.setdefault(f, (nid, f in diag))
     return out
+
+
+# --------------------------------------------------------------------------- #
+# 兩支「跑得完、有數字、而且是錯的」的 lint（F11 Enhance-3）
+# --------------------------------------------------------------------------- #
+def _treatment_sig(step_cls, p: Dict[str, Any]):
+    """這張卡對一條流做的處理的「指紋」（**不含接線**）。
+
+    影像流參數（`image_key` / `image_keys`）刻意不算進去：一張接 test、一張接 ref
+    的兩張 Normalize，差別就只在那裡，而「兩條流有沒有受到同樣的處理」問的正是
+    **設定**是否相同。把接線算進去的話，兩張卡永遠不相等，這支 lint 就永遠在叫。
+    """
+    skip = {s.name for s in step_cls.params
+            if s.type in ("image_key", "image_keys")}
+    return (step_cls.key,
+            tuple(sorted((str(k), str(v)) for k, v in p.items()
+                         if k not in skip)))
+
+
+def _late_normalize(step_cls, p: Dict[str, Any], nid: str, k: str,
+                    history: Dict[str, List[Any]]) -> List[Issue]:
+    """自動正規化排在手動調色**之後**（F11 Enhance-3）。
+
+    `tone.py` 的 docstring 早就寫了這條：「手動那張通常放在正規化之後，
+    否則正規化會把你剛調的東西再拉回去」——但**沒有任何人檢查它**，
+    而它的後果是「畫面上看起來調了、實際上被拉回去了」：跑得完、有數字、
+    而且使用者的那一步完全沒有作用。
+
+    只認這一組（`tone` → `normalize`），不去猜其他順序：一支會誤報的 lint
+    比沒有 lint 更糟（使用者學會忽略它之後，真的那一條也被忽略了）。
+    """
+    if step_cls.key != "normalize":
+        return []
+    out: List[Issue] = []
+    for key in step_cls.stream_list(p) if hasattr(step_cls, "stream_list") else []:
+        earlier = [c for c in history.get(key, []) if c[0] == "tone"]
+        if not earlier:
+            continue
+        out.append(Issue(
+            code="card-order", level="warning", node_id=nid,
+            title=f"step '{nid}' undoes the manual tone adjustment before it",
+            detail=(f"route '{k}': '{key}' goes through Adjust tone and then "
+                    f"through this Normalize, which measures the image again "
+                    f"and stretches it - so the brightness / gamma set by hand "
+                    f"upstream is pulled back and has no effect on what gets "
+                    f"measured. Put the manual card after the automatic one.")))
+        break               # 一張卡一條訊息就夠（每條流各講一次是噪音）
+    return out
+
+
+def _uneven_treatment(step_cls, p: Dict[str, Any], nid: str, k: str,
+                      history: Dict[str, List[Any]],
+                      from_input: Set[str], registry) -> List[Issue]:
+    """兩條要互相比較的流受到**不同的**處理（F11 Enhance-3）。
+
+    最典型：test 接了 Normalize，ref 沒接。兩張圖各自都好看，但它們已經不在同一個
+    灰階尺度上 —— 而 `subtract` 減出來的整片偏移看起來就是一個大面積的缺陷。
+    F7-19 之後正確的寫法是**一張卡接兩條流**（同一組設定），所以這句話要講得出
+    那條路。
+
+    只在**兩條流都直接來自輸入**時才檢查：`diff` 這種中途產生的流跟 `test` 比
+    「處理歷史」沒有意義（它們的來歷本來就不同）。
+    """
+    if step_cls.resolve_group() != GROUP_COMPARE:
+        return []
+    keys, seen = [], set()
+    for spec in step_cls.input_specs():
+        v = str(p.get(spec.name, "") or "").strip()
+        if v and v in from_input and v not in seen:
+            seen.add(v)
+            keys.append(v)
+    if len(keys) < 2:
+        return []
+    a, b = keys[0], keys[1]
+    ha, hb = history.get(a, []), history.get(b, [])
+    if ha == hb:
+        return []
+    return [Issue(
+        code="uneven-treatment", level="warning", node_id=nid,
+        title=f"step '{nid}' compares two images that were not treated alike",
+        detail=(f"route '{k}': {_how_they_differ(a, ha, b, hb, registry)}. "
+                f"The two images are on different gray scales now, so this "
+                f"card reports that difference as if it were a defect. Point "
+                f"ONE Enhance card at both streams (a card can process several "
+                f"streams with the same settings) instead of one card per "
+                f"stream."))]
+
+
+def _how_they_differ(a: str, ha: List[Any], b: str, hb: List[Any],
+                     registry) -> str:
+    """兩條流的處理歷史**差在哪裡**，一句白話。
+
+    分兩種情況，因為它們的下一步完全不同：卡片不一樣是「漏了一張」，
+    設定不一樣是「兩張卡調歪了」。以前這兩種擠在同一句話裡，於是「同樣的卡、
+    不同的參數」會印成「'test' 經過 Normalize，而 'ref' 經過 Normalize」——
+    一句自我矛盾的話（實際的兩張卡差在 p_low 是 2 還是 10）。
+    """
+    def label_of(key: str) -> str:
+        cls = registry.get(key)
+        return getattr(cls, "label", key) if cls else key
+
+    la = [label_of(key) for key, _ in ha]
+    lb = [label_of(key) for key, _ in hb]
+    if la != lb:
+        return ("'%s' went through %s, but '%s' went through %s"
+                % (a, ", ".join(la) or "nothing", b, ", ".join(lb) or "nothing"))
+
+    # 同樣的卡、同樣的順序 —— 那就是某一張的設定不一樣。指出第一張與差哪幾格。
+    for (key, sa), (_kb, sb) in zip(ha, hb):
+        if sa == sb:
+            continue
+        da, db = dict(sa), dict(sb)
+        cls = registry.get(key)
+        names = {s.name: (s.label or s.name) for s in getattr(cls, "params", [])}
+        diff = sorted(n for n in set(da) | set(db) if da.get(n) != db.get(n))
+        bits = ", ".join("%s is %s for '%s' but %s for '%s'"
+                         % (names.get(n, n), da.get(n, "(unset)"), a,
+                            db.get(n, "(unset)"), b)
+                         for n in diff[:3])
+        return ("both '%s' and '%s' went through %s, but with different "
+                "settings (%s)" % (a, b, label_of(key), bits))
+    return ("'%s' and '%s' were treated differently upstream" % (a, b))
 
 
 def validate(recipe: Recipe, kind: Optional[str] = None,
@@ -656,7 +789,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     檢查項（code）：unknown-step / bad-param / not-configured / unknown-node /
     unknown-route / cycle / missing-image / unknown-region / requires-ref /
     ambiguous-input / score-expr / unknown-feature（warning）/
-    feature-collision（warning）/ bad-bins。
+    feature-collision（warning）/ bad-bins /
+    uneven-treatment（warning）/ card-order（warning）。
     """
     if registry is None:
         registry = REGISTRY
@@ -785,10 +919,17 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
         avail: Set[str] = set()
         feats: Set[str] = {"score"}
         regions: Set[str] = set()
-        #: feature 名 -> 第一個產出它的節點。特徵是**扁平的全域命名空間**，
-        #: 所以兩張同型別的量測卡（例如量兩個 ROI 的 glv_stats）會寫同一組名字，
-        #: 後面那張安靜地蓋掉前面那張 —— 跑得完、有數字、少一半。
-        feat_owner: Dict[str, str] = {}
+        #: feature 名 -> (第一個產出它的節點, 那是不是一個診斷數字)。
+        #: 特徵是**扁平的全域命名空間**，所以兩張同型別的量測卡（例如量兩個 ROI
+        #: 的 glv_stats）會寫同一組名字，後面那張安靜地蓋掉前面那張 ——
+        #: 跑得完、有數字、少一半。診斷數字那一半見 `Step.diagnostic_features`。
+        feat_owner: Dict[str, Any] = {}
+        #: 每一條流被哪幾張 Enhance 卡動過（照順序）。兩支 lint 都讀它 ——
+        #: 「兩條流受到一樣的處理嗎」與「自動的排在手動的後面嗎」問的都是這段歷史。
+        history: Dict[str, List[Any]] = {}
+        #: 直接來自輸入卡的那幾條流。`diff` 這種中途產生的流不算 ——
+        #: 拿它跟 `test` 比「處理歷史」沒有意義（來歷本來就不同）。
+        from_input: Set[str] = set()
         for nid in order:
             node = recipe.nodes.get(nid)
             if node is None or not node.enabled:
@@ -803,6 +944,7 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                 # 一份 recipe 可以有好幾張，每一張都拿 kind-aware 的 writes
                 # 宣告（load 卡依資料型別決定會有哪些流）。
                 avail |= set(step_cls.resolve_writes_for_kind(p, k))
+                from_input |= set(step_cls.resolve_writes_for_kind(p, k))
                 # **撞名檢查對入口卡也要跑**（F11 Input-0）。以前這一段沒有它，
                 # 因為「入口」只有一張所以撞不起來 —— 現在兩張 load 卡都寫
                 # n_channels，後面那張會安靜地蓋掉前面那張。
@@ -860,6 +1002,14 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                            f"the whole image."))
 
             issues.extend(_feature_collisions(step_cls, p, nid, k, feat_owner))
+            # 順序那一支看的是**這張卡之前**的歷史，所以要排在記錄之前。
+            issues.extend(_late_normalize(step_cls, p, nid, k, history))
+            issues.extend(_uneven_treatment(step_cls, p, nid, k, history,
+                                            from_input, registry))
+            if step_cls.resolve_group() == GROUP_ENHANCE:
+                sig = _treatment_sig(step_cls, p)
+                for key in step_cls.resolve_writes(p):
+                    history.setdefault(key, []).append(sig)
 
             avail |= set(step_cls.resolve_writes(p))
             feats |= set(step_cls.resolve_features(p))

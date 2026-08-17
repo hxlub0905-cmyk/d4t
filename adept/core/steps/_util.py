@@ -192,6 +192,20 @@ class MultiStreamStep(Step):
             return out + list(PAIR_FEATURES)
         return base
 
+    @classmethod
+    def diagnostic_features(cls, params: Dict[str, object]) -> List[str]:
+        """Enhance 卡吐的每一個數字都是診斷（見 `Step.diagnostic_features`）。
+
+        這幾張卡不量缺陷 —— 它們把圖弄乾淨，然後報告自己做了多少
+        （壓回值域多少、磨掉幾個 σ、兩條流還有多像）。`features_out` 目前四張卡
+        都是空的；哪天有子類在那裡宣告了真正的量測值，它就**不算**診斷。
+        """
+        keys = cls.stream_list(params)
+        measured = list(cls.features_out)
+        if len(keys) > 1:
+            measured = [n for k in keys for n in prefix_names(k, measured)]
+        return [f for f in cls.resolve_features(params) if f not in measured]
+
     def run(self, ctx: Context, params: Dict[str, object]) -> Context:
         p = self.validate_params(params)
         keys = self.stream_list(p)

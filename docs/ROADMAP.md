@@ -93,7 +93,7 @@ UI 介面、設定放哪都要先討論過**才動手。所以計畫書是**議�
 | 段 | 缺什麼 |
 |---|---|
 | **Input** | ✅ **收斂 2026-08-17**（Input-0…4）：多入口（`Step.is_source`）、`channel_map`（這一顆的第幾張叫什麼）、`tiff_stack`（大 TIFF 沒有 KLARF）、四種輸入的入口做齊、**Input 卡按 source 拆成兩張**（`load_patch` / `load_single` —— 兩張都不看資料型別，畫布因此不說謊）。**範圍：patch + RSEM**（多通道擱置）|
-| **Enhance** | 四張卡（normalize／tone／denoise／flatten）本身要逐張過一次。**融合卡（PCA Ref、BSE·SE quadrant）擱置** —— 使用者 2026-08-17：「我決定我暫時不做 multi channel，暫時 focus 在 patch 跟 RSEM Image」|
+| **Enhance** | ✅ **收斂 2026-08-17**（Enhance-1…3）：**值域變成明講的契約**（實測 `stripes_h` 吐 261.5，會活到後面某個 `to_uint8` 才被壓掉）＋ `clip_frac`；三個新方法（`flatten` 的 median 背景估計、`denoise` 的 `hot_pixels`、`normalize` 的耐離群 `zscore`），**一張新卡都沒開**；五個面板輔助（核心大小畫在影像上、削平的整批走勢、曲線墊直方圖、磨掉幾個 σ、兩條流還有多像）；兩支 lint（`uneven-treatment` / `card-order`）。**融合卡（PCA Ref、BSE·SE quadrant）擱置** —— 使用者 2026-08-17：「我決定我暫時不做 multi channel，暫時 focus 在 patch 跟 RSEM Image」|
 | **Region** | 第三條路：吃 GLAS 的 label map。出口契約已經留好（見 [`ARCHITECTURE.md`](ARCHITECTURE.md)），下游零改動 |
 | **Compare**（下一個大件）| **patch ↔ RSEM 對位**（使用者要多入口的原因）：`align` 的五個 backend 全部要求同尺寸，小圖對大圖會回 `dx=0 dy=0` —— 要補 matchTemplate 的第三種座標數學 + 一張新卡，並修 `align` 尺寸不符要報錯。另有 GLAS 的合成 gray 當 ref、吃 GLAS 算好的 offset。**配對機制也在這一段**（使用者：「配對是之後的事」）|
 | **Measure** | **Blob 分割**（演算法在卻沒有卡片，而 `cd_measure` 的警告叫使用者「run Blob segment first」、overlay 的主 blob 紅框兩條路都沒有生產者）、離群旗標（跨顆）、Region Stats / FFT、`snr_map` 多來源 |

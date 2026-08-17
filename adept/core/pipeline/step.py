@@ -378,6 +378,22 @@ class Step(ABC):
         return list(cls.features_out)
 
     @classmethod
+    def diagnostic_features(cls, params: Dict[str, Any]) -> List[str]:
+        """這些特徵在講「**這張卡自己做了什麼**」，不是在量缺陷（F11 Enhance-3）。
+
+        為什麼要分這一類：`validate` 的 `feature-collision` 警告是為了抓
+        「兩張量測卡安靜地蓋掉彼此的量測值」。而 Enhance 卡的診斷數字
+        （`clip_frac` 之類）是**每一張都會產出**的 —— 一份有兩張 Enhance 卡的
+        recipe 因此必然撞名，於是那個警告在每一份正常的 recipe 上都會出現。
+        而使用者學會忽略一條警告之後，真的那一條也一起被忽略了（推廣鐵則）。
+
+        撞名的**資訊沒有丟**：engine 的 `_rescue_overwritten_features` 會把前一張
+        的值留成 ``<節點名>_clip_frac``（黃金值裡的 `norm_clip_frac` 就是它）。
+        所以這裡跳過的只是那句話，不是那個值。
+        """
+        return []
+
+    @classmethod
     def resolve_requires_ref(cls, params: Dict[str, Any]) -> bool:
         """在這組參數下，這張卡是不是真的需要一條 ``ref``（F7-20）。
 

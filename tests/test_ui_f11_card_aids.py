@@ -172,6 +172,65 @@ def test_the_view_takes_the_size_in_image_pixels(qapp):
 
 
 # --------------------------------------------------------------------------- #
+# 兩支新 lint 在畫布上看得見（F11 Enhance-3）
+# --------------------------------------------------------------------------- #
+def test_the_uneven_treatment_warning_lands_on_the_card(window, tmp_path):
+    """**「在按下 Run 之前就講得出來」是這支 lint 存在的理由**，所以它必須出現在
+    畫布上，不是只在跑完之後的訊息裡。
+
+    機制是既有的（`_node_problems` 把每一則 lint 標到它的節點上，F7-13），
+    所以這兩支新 lint 一行 UI 程式碼都不用改 —— 這一支就是在確認那件事。
+    """
+    from make_sample import generate
+
+    out = generate(str(tmp_path / "lotL"), n=4, seed=61)
+    window.load_dataset_path(out["klarf"], sync=True)
+    src = window.model.node_order[0]
+    n1 = wire_up(window.model, window.add_card_after(src, "normalize"))
+    window._on_edge_added(src, n1, "test")
+    sub = window.add_card_after(n1, "subtract")
+    window.model.set_param(sub, "out", "diff")
+    window._on_edge_added(n1, sub, "test", "a")
+    window._on_edge_added(src, sub, "ref", "b")
+
+    problems = window._node_problems()
+    assert sub in problems, problems
+    detail, level = problems[sub]
+    assert level == "warning"
+    assert "not treated alike" in detail or "went through" in detail
+
+
+def test_the_card_order_warning_lands_on_the_normalize_card(window, tmp_path):
+    from make_sample import generate
+
+    out = generate(str(tmp_path / "lotL2"), n=4, seed=62)
+    window.load_dataset_path(out["klarf"], sync=True)
+    src = window.model.node_order[0]
+    t = wire_up(window.model, window.add_card_after(src, "tone"))
+    window._on_edge_added(src, t, "test")
+    n = wire_up(window.model, window.add_card_after(t, "normalize"))
+    window._on_edge_added(t, n, "test")
+
+    problems = window._node_problems()
+    assert n in problems, problems
+    assert "no effect on what gets measured" in problems[n][0]
+
+
+def test_a_warning_does_not_stop_the_run(window, tmp_path):
+    """兩支都是 warning：recipe 照樣跑得完，而「刻意只處理一條」偶爾是對的。"""
+    from make_sample import generate
+
+    out = generate(str(tmp_path / "lotL3"), n=4, seed=63)
+    window.load_dataset_path(out["klarf"], sync=True)
+    src = window.model.node_order[0]
+    t = wire_up(window.model, window.add_card_after(src, "tone"))
+    window._on_edge_added(src, t, "test")
+    n = wire_up(window.model, window.add_card_after(t, "normalize"))
+    window._on_edge_added(t, n, "test")
+    assert window.run_trial(n=4, sync=True) is True
+
+
+# --------------------------------------------------------------------------- #
 # C. 曲線後面墊這張圖的直方圖
 # --------------------------------------------------------------------------- #
 def test_the_curve_editor_takes_a_histogram_to_sit_behind_it(qapp):
