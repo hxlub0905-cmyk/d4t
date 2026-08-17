@@ -227,10 +227,29 @@ class RecipeModel:
         return node_id
 
     def remove(self, node_id: str) -> None:
+        """拿掉一張卡 —— **連同碰到它的每一條線**（F10-5）。
+
+        以前只刪節點，線留在 ``edges`` 裡指著一個不存在的節點。平常看不出來
+        （畫布只畫兩端都還在的線、``execution_order`` 也會過濾掉），直到
+        **新卡拿到同一個自動編號**：``_new_id`` 看到 ``roi_cross`` 沒人用就
+        再發一次，那條殘留的線於是接到了一張使用者從來沒有接過的新卡。
+
+        使用者回報的原話：「刪掉 Profile 這整個 Card 後，再 add new card
+        profile，DAG 畫布上線還會殘留。」而且那條線是**假的** —— 新卡的來源
+        參數是空的，畫布與設定當場互相矛盾。
+
+        改名為「殘留」不足以形容：那條線會被存進 recipe、會進快取簽章、也會
+        被引擎當成明講的來源。所以它必須在刪卡的同一步就消失。
+        """
         if node_id in self.nodes:
             self._push_undo()
             del self.nodes[node_id]
             self.node_order = [n for n in self.node_order if n != node_id]
+            self.edges = [e for e in self.edges
+                          if e.src != node_id and e.dst != node_id]
+            order = self._topological_order(self.edges)
+            if order is not None:
+                self.node_order = order
             self._changed()
 
     def move(self, node_id: str, delta: int) -> None:

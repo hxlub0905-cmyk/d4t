@@ -2082,7 +2082,13 @@ class StudioWindow(QMainWindow):
 
     def _on_remove_requested(self, node_id: str) -> None:
         node_id = str(node_id)
-        self.model.remove(node_id)
+        # 刪掉一張卡 = 把它餵出去的每一條線都剪掉（F10-5）。下游那幾格要跟著
+        # 空出來，否則它們指著一條再也沒有人產出的流 —— 跟按 × 剪掉是同一件事，
+        # 所以走同一條路（`_unpoint_stream`），不要在這裡另寫一份。
+        with self.model.compound("remove-card"):
+            for e in [e for e in self.model.edges if e.src == node_id]:
+                self._unpoint_stream(e.dst, e.src_out, e.dst_in)
+            self.model.remove(node_id)
         if self.selected_node == node_id:
             self.selected_node = None
             self.param_form.set_step(None, {}, [])

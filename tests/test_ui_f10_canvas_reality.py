@@ -332,3 +332,59 @@ def test_wiring_and_cutting_are_exact_opposites_for_every_card(window):
         assert window.model.nodes[nid].params == before, \
             "%s：接上再剪掉之後參數跟原本不一樣" % cls.key
         assert not [e for e in window.model.edges if e.dst == nid]
+
+
+# --------------------------------------------------------------------------- #
+# 5. 刪掉卡片 = 連同它的線一起刪（F10-5）
+# --------------------------------------------------------------------------- #
+def test_deleting_a_card_takes_its_lines_with_it(window):
+    """刪掉一張卡，碰到它的線要一起消失 —— 包含 model 裡那一份。
+
+    使用者回報：「刪掉 Profile 這整個 Card 後，再 add new card profile，
+    DAG 畫布上**線還會殘留**。」
+
+    病根不是畫布沒重畫，是 ``RecipeModel.remove`` 只刪節點、不刪線。那條線
+    留在 ``edges`` 裡指著一個不存在的節點（畫布不畫兩端不齊的線，所以看不
+    出來），直到**新卡拿到同一個自動編號** —— ``_new_id`` 看到 `roi_cross`
+    沒人用就再發一次，殘留的線於是接到一張使用者從來沒接過的新卡。
+
+    而且那條線是假的：新卡的來源參數是空的，畫布與設定當場互相矛盾。
+    """
+    src = window.model.node_order[0]
+    dn = window.add_card_after(src, "denoise")
+    window._on_edge_added(src, dn, "ref", "streams")
+    pr = window.add_card_after(dn, "roi_cross")
+    window._on_edge_added(dn, pr, "ref", "source")
+    assert len(window.model.edges) == 2
+
+    window._on_remove_requested(pr)
+    assert [(e.src, e.dst) for e in window.model.edges] == [(src, dn)], \
+        "刪掉的卡還留著一條線在 model 裡"
+
+    # 再加一張同型別的卡 —— 它會拿到同一個 node id，而線不可以跟著回來
+    again = window.add_card_after(dn, "roi_cross")
+    assert again == pr, "這條測試的前提是 node id 會被重複使用"
+    assert not [e for e in window.model.edges if e.dst == again]
+    assert not [e for e in window.pipeline._edges if e.pair()[1] == again], \
+        "畫布上那條線殘留了"
+    assert window.model.nodes[again].params["source"] == ""
+
+
+def test_deleting_a_card_leaves_its_downstream_without_a_source(window):
+    """被刪掉那張卡餵出去的下游，來源要跟著空掉（跟按 × 剪線同一條路）。
+
+    不清的話下游指著一條**再也沒有人產出**的流：畫布上沒有線、參數卻還寫著
+    `ref`，而那正是 F10 一路在拔的那種「看起來成立、跑起來不是那回事」。
+    """
+    src = window.model.node_order[0]
+    dn = window.add_card_after(src, "denoise")
+    window._on_edge_added(src, dn, "ref", "streams")
+    glv = window.add_card_after(dn, "glv_stats")
+    window._on_edge_added(dn, glv, "ref", "source")
+    assert window.model.nodes[glv].params["source"] == "ref"
+
+    window._on_remove_requested(dn)
+    assert window.model.nodes[glv].params["source"] == "", \
+        "上游被刪了，下游還指著它產的那條流"
+    assert [i.code for i in window.model.validate() if i.node_id == glv] \
+        == ["not-connected"]
