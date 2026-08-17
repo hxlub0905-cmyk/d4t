@@ -38,12 +38,13 @@ ddb8939ebee5ba56237cce56d0c53397695982bb adept/core/ingest/imageio.py
 03146deb543fddc5cc836c039652a15f5492935d adept/core/pipeline/__init__.py
 f277b6b3e5e65ce8027da01648a0d42d44a64905 adept/core/pipeline/batch.py
 d6a6e8374dba3679cc6c28dd534ece76923f6ce2 adept/core/pipeline/cache.py
+8d96fd361dcb6e1b81e34bf3ce9f355de654eaec adept/core/pipeline/channels.py
 bc5822860c73a424460de963c0a7ef1b940bd71e adept/core/pipeline/context.py
 8a8f906147c0b06defc52096716ecfd917b0b94e adept/core/pipeline/curve.py
 fc722ec0cd455df588db69706af5f94d18708030 adept/core/pipeline/engine.py
 6c3c9c1cc1e6d1ee5d121f9994968f4f780e3cc5 adept/core/pipeline/expression.py
 8a3a13ea16f2de569c197c609842402d28229931 adept/core/pipeline/recipe.py
-5dbe70501330ce1131b0353b999bed70de136630 adept/core/pipeline/step.py
+3ef49ab3720e238f19474b138f985339d66127b4 adept/core/pipeline/step.py
 596cea13ec15f5ec7517c955111d58804910bee8 adept/core/steps/__init__.py
 9aea7076cb74cb7c975e76c75997010c0f18bd3a adept/core/steps/_util.py
 68eceaa2cadaffb76b71c8dfc2e2984d9f4bbf5e adept/core/steps/align.py
@@ -53,7 +54,7 @@ aff2d033bbb51e2190ad437ec0f9de6b25d27ebc adept/core/steps/cd.py
 11a0293512fced2b087c5555a199ac9c0f072d0a adept/core/steps/flatten.py
 06a885905eb093a6f35156f8360a3dfc97d1b808 adept/core/steps/glv_stats.py
 d02cb591d0b21677ec92b2982a123662ff15ac77 adept/core/steps/golden.py
-1d5b8d8a4cda39001d8af5e380244f4a0d76ee39 adept/core/steps/load.py
+51d668fef5cc7886e8864cc1f61ecf56421465b8 adept/core/steps/load.py
 c25757c1fb453a9a924f54800fc2e4c984f97765 adept/core/steps/normalize.py
 9faa96d8ac9fea3ad43bb25e2de578dd5c6fc965 adept/core/steps/quality.py
 1e590f649e543ec189887d8bceb083c3f8aa4bd4 adept/core/steps/roi_cross.py
@@ -78,7 +79,7 @@ a13161cca57fecb7a1366a4e0585bedc5e1828ac adept/ui/scope.py
 acb3224f56416ae87cc1c3ae349800bdab91cb05 adept/ui/theme.py
 555bcaaa4ce078658bd2a4b729192749b7b97d74 adept/ui/viewmodel.py
 b2dd691199dbc50b01b02de407b321aada8e6a3a adept/ui/welcome.py
-cc1e82ef72207fda70c03fa6646a0c1581eac9b2 adept/ui/widgets.py
+efdb2696dee901e7fb5f1ed8330d308bb185458c adept/ui/widgets.py
 669770bafa48f033c7d1e9fda77f342b3369070e adept/ui/workers.py
 04c5ce471195ac4e2449126ce835b22b4c880cf3 conftest.py
 7e5d6f7d159a437c1b57f738021f6f92517f5308 docs/ARCHITECTURE.md
@@ -91,7 +92,7 @@ c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
 9ce686eed574348d7a2f5fa8848adcbf0c623366 docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
-435ab323e8aaef8ff1d93b0a008f99e56984f189 docs/plans/F11-phase2-features.md
+a5aa5202a71a3d2e5a2f3b8e18241f48b085f9b5 docs/plans/F11-phase2-features.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
 fdf5dba17526e86ea0990c7853ef652874082324 fab_probe/probe_klarf.py
@@ -122,6 +123,7 @@ ec53b9545e7a314039cdda7c60cc0d123e4701e2 tests/test_export_klarf.py
 9ce55e3523551e7d531e64d40629aad67e7d8869 tests/test_export_overlay.py
 fbabf20c7735e77b9e7f83a16b950a2831feaeda tests/test_export_report.py
 4d9e62f4a9bd01ec28eec1e63e0c395716ad463c tests/test_expression.py
+fc6ca0b7b9c3fd49b741df2a7d454ff100b8440b tests/test_f11_channel_map.py
 0175e2f18814f34028e69a88bed500d618fd6fc0 tests/test_f11_multi_input.py
 8103c2019dc9ae3e7336c52905e6117dc518727e tests/test_f9_8_cache_and_disabled.py
 4017d96f4145ba179d8e186b7f0e02b6e47ed8ef tests/test_fab_probe.py
@@ -160,6 +162,7 @@ cc81eb2c47f6a7568e5ef0aefe4ac8a01ce3cd22 tests/test_ui_controls_readable.py
 46c837b6f362d0493860e0cc4e657fecfabeea2d tests/test_ui_english_only.py
 7819d5136d0fadf4b62bb69f6e50b757b8a9b3a8 tests/test_ui_export_dialog.py
 19e4f1bde0343dbf53110292b31665319c7d2448 tests/test_ui_f10_canvas_reality.py
+21132331c6b3ef22afef5ff24a92ad303b0991cd tests/test_ui_f11_channel_map.py
 b9589defe4cf0484085bea8a081ec36ae6bc23ee tests/test_ui_f7_10_route_edges.py
 bb7c944f11136a3a379068a91536d32244cb9fab tests/test_ui_f7_11_roi.py
 f7129aac0f1ca11aeaa191fa3c49088f21aa859a tests/test_ui_f7_12_template.py

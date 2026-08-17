@@ -1576,6 +1576,109 @@ class MultiChoicePicker(QWidget):
             self.changed.emit(self.text())
 
 
+class ChannelMapField(QWidget):
+    """``channel_map`` 參數的編輯器：一張「第幾張圖 → 叫什麼」的小表（F11 Input-1）。
+
+    為什麼不是文字框
+    ----------------
+    值長這樣：``1:se1, 2:bse, 3:se2, 4:se3, 5:se4``。五列以上的時候，一行逗號
+    字串**數不清位置** —— 而「哪一張是 BSE」正是這個參數唯一要回答的問題
+    （使用者的資料是 1 BSE + 4 SE，BSE 固定在第 2 張）。數錯一格的後果不是
+    語法錯誤，是 BSE 的數字被寫在 SE 的名字上：跑得完、有數字、而且是錯的。
+
+    所以排成一列一張圖：**左邊是位置（程式寫的，不能打錯）、右邊是名字**。
+    空著的那一列就是「這一張不命名」，而 placeholder 就寫出它不命名時會叫什麼
+    （``test`` / ``ref`` / ``img3``…）—— 那是現行行為，使用者看得到自己在改什麼。
+    """
+
+    changed = Signal(str)
+
+    #: 沒有命名時 ingest 會給的名字（``ingest/dataset.py::_channel_name``）。
+    #: 這裡只是**顯示**用的 placeholder，真正的命名規則仍然只有 ingest 那一份。
+    _DEFAULTS = ("test", "ref")
+
+    def __init__(self, value: str = "", parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._edits: List[QLineEdit] = []
+        self._emitting = False
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(4)
+
+        self._grid = QGridLayout()
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setHorizontalSpacing(8)
+        self._grid.setVerticalSpacing(2)
+        outer.addLayout(self._grid)
+
+        self._add_btn = QPushButton("Add another image", self)
+        self._add_btn.setProperty("variant", "secondary")
+        self._add_btn.setToolTip(
+            "Add a row for one more image. A defect with five images "
+            "(one BSE plus four SE, say) needs five rows.")
+        self._add_btn.clicked.connect(lambda: self._add_row(emit=True))
+        outer.addWidget(self._add_btn, 0, Qt.AlignLeft)
+
+        self.set_text(value)
+
+    # -- 值 ------------------------------------------------------------------
+    def text(self) -> str:
+        """目前的值。**空白的列直接跳過** —— 那一張就是「不命名」。"""
+        out = []
+        for i, edit in enumerate(self._edits):
+            name = edit.text().strip()
+            if name:
+                out.append("%d:%s" % (i + 1, name))
+        return ", ".join(out)
+
+    def set_text(self, value: str) -> None:
+        pairs = {}
+        for chunk in str(value or "").replace(";", ",").split(","):
+            item = chunk.strip()
+            if ":" in item:
+                left, right = item.split(":", 1)
+                try:
+                    pairs[int(left.strip())] = right.strip()
+                except ValueError:          # 壞值由 core 的 parse 負責報錯
+                    continue
+        rows = max(len(self._DEFAULTS), max(pairs) if pairs else 0)
+        self._emitting = True
+        try:
+            while len(self._edits) < rows:
+                self._add_row(emit=False)
+            for i, edit in enumerate(self._edits):
+                edit.setText(pairs.get(i + 1, ""))
+        finally:
+            self._emitting = False
+
+    def row_count(self) -> int:
+        return len(self._edits)
+
+    # -- 內部 ----------------------------------------------------------------
+    def _default_name(self, index: int) -> str:
+        if index < len(self._DEFAULTS):
+            return self._DEFAULTS[index]
+        return "img%d" % (index + 1)
+
+    def _add_row(self, emit: bool = True) -> None:
+        i = len(self._edits)
+        label = QLabel("Image %d" % (i + 1), self)
+        label.setObjectName("paramHint")
+        edit = QLineEdit(self)
+        edit.setPlaceholderText(self._default_name(i))
+        edit.textChanged.connect(self._on_edited)
+        self._grid.addWidget(label, i, 0)
+        self._grid.addWidget(edit, i, 1)
+        self._edits.append(edit)
+        if emit and not self._emitting:
+            self._on_edited("")
+
+    def _on_edited(self, _text: str) -> None:
+        if not self._emitting:
+            self.changed.emit(self.text())
+
+
 class TemplateField(QWidget):
     """``template`` 參數的編輯器：一顆「建一個」的按鈕 + 一行摘要（F7-13）。
 
@@ -2022,6 +2125,11 @@ class ParamForm(QWidget):
         if ptype == "multi_choice":
             w = MultiChoicePicker([str(c) for c in (spec.get("choices") or [])],
                                   "" if value is None else str(value))
+            w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
+            return w
+
+        if ptype == "channel_map":
+            w = ChannelMapField("" if value is None else str(value))
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 

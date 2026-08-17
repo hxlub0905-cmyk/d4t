@@ -469,9 +469,36 @@ peak = 小圖左上角在大圖裡的**絕對位置**（不是相對位移），
 順序照定調的 C → D → B → A，但**B 的一半提前**：多通道的資料是「大 TIFF 沒有 KLARF」，
 所以 `tiff_stack` 是 C 能不能進來的前提。
 
-##### Input-1 — `channel_map`（頁 → 流的命名）
+##### Input-1 — `channel_map`（頁 → 流的命名）**✅ 完成 2026-08-17**
 
-見 §3.1.7 的三個設計點（預設值＝現行行為、UI 是小表格、**頁數不符要擋下來**）。
+三個設計點全部照做：
+
+1. **預設值＝現行行為**（空字串 = 照 ingest 給的名字）→ **不需要遷移**，
+   黃金值三組 22 顆逐項相同。
+2. **UI 是一張小表**（`widgets.ChannelMapField`）：一列一張圖，
+   **左邊的位置是程式寫的（打不錯）、右邊的名字才是使用者打的**；空著的那一列
+   就是「這一張不命名」，而 placeholder 寫出它不命名時會叫什麼（`test`/`ref`/`img3`…）
+   —— 使用者看得到自己在改什麼。新的 `ParamSpec.type="channel_map"`。
+3. **宣告與資料不符就擋下來**：宣告了第 5 張而這顆只有 2 張 → `StepError`，
+   訊息講得出「去哪裡改」（`Fix “Name the images”…`）。**不准照順序硬套**。
+   反過來（資料比命名的多）→ 載入命名的那幾張 + `ctx.warn` 講出**哪幾張**沒載入
+   （中間跳號也看得見）。
+
+值的格式與規則在新模組 `pipeline/channels.py`（照 `curve` 那條路：自己的
+parse／format／錯誤類別，正規化成「依頁碼排序、`", "` 分隔」——
+**round-trip 必須是 identity**，不然 `workers=1` 與 `workers=2` 會算出不同分數）。
+
+改名只改「流叫什麼」，讀圖仍然走 ingest 自己的 key（`src_of` 這一層）——
+第一版漏了它，`item.load("bse")` 當場 KeyError，測試抓到。
+
+驗收：`tests/test_f11_channel_map.py`（21 條，含**真的 KLARF + 真的 10 頁 TIFF、
+兩顆各五張**的端到端：第二顆的五張是絕對頁號 6–10，而它的 `bse` 仍然是**自己的
+第 2 張**）＋ `tests/test_ui_f11_channel_map.py`（7 條）。
+核心 1046 passed／UI 35 檔全綠／黃金值逐項相同。
+
+**還沒做（下一輪順手）**：表格的列數目前要按「Add another image」自己加。
+資料載進來之後其實知道「每顆幾張」（`load_patch` 的 F7-17 面板就印著），
+把那個數字接到編輯器上就能預先排好列數 —— 那要把資料層的資訊接進 `ParamForm`。
 
 ##### Input-2 — 大 TIFF 沒有 KLARF（新的 `kind`，暫名 `tiff_stack`）
 
@@ -537,7 +564,7 @@ RSEM 大圖、GLAS 的 `_label.png`、GLAS 的 `_gray.png` 是**同一件事**�
 | # | 做什麼 | 為什麼排這裡 |
 |---|---|---|
 | ✅ Input-0 | 多入口（`Step.is_source`）| 其餘全部踩在它上面。**完成 2026-08-17** |
-| Input-1 | `channel_map`：頁 → 流的命名（含頁數不符擋下來）| Input-2 的分組要用它的通道數；而且它是「五通道能不能被正確命名」本身 |
+| ✅ Input-1 | `channel_map`：頁 → 流的命名（含頁數不符擋下來）| **完成 2026-08-17** |
 | Input-2 | `tiff_stack`：大 TIFF 沒有 KLARF | 使用者的多通道資料就是這個形式；順帶修掉「15 頁 TIFF 安靜變成一顆」|
 | Input-3 | **插槽機制** + `load_rsem` / `load_layout` 兩張卡（一種 source 一張卡，§3.1.7）| patch ↔ RSEM 的前提；RSEM 與 GLAS 共用同一個機制 |
 | Compare-1 | 新卡「Locate in a larger image」（matchTemplate 的第三種座標數學，§3.1.9）＋ 修 `align` 尺寸不符要報錯 | 對位本身。Input-3 進來之後才有兩條流可以對 |

@@ -13,6 +13,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from ..pipeline.channels import (
+    highest_image_number, mapped_names, parse_channel_map,
+)
 from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_INPUT,
@@ -21,6 +24,20 @@ from ._util import ensure_gray, to_uint8
 
 # "auto" 模式下 channel 的優先順序（其餘 channel 依名稱排序附加在後）
 _PREFERRED_ORDER = ("test", "ref", "single")
+
+
+def _in_defect_order(images: Dict[str, Any]) -> List[str]:
+    """這一顆的影像**依「第幾張」排序**的 ingest channel 名。
+
+    多頁 TIFF 的每一張都帶 ``page``（0-based 絕對頁號），同一顆的幾張是連續的，
+    所以照 page 排就是「這一顆的第 1、2、3… 張」。沒有 page 的（每顆一個檔案的
+    資料集）就照 ingest 放進 dict 的順序 —— 那也是它給的順序。
+    """
+    keys = list(images)
+    pages = [getattr(images[k], "page", None) for k in keys]
+    if keys and all(p is not None for p in pages):
+        return [k for _p, k in sorted(zip(pages, keys), key=lambda t: t[0])]
+    return keys
 
 
 @register_step
@@ -35,6 +52,15 @@ class LoadPatchStep(Step):
             "pipeline, always converted to 8-bit grayscale.")
     params = [
         ParamSpec(
+            name="channel_map", type="channel_map", default="",
+            label="Name the images",
+            help=("Name this defect's images by position: 1 is the first "
+                  "image, 2 the second, and so on (for example "
+                  "'1:se1, 2:bse, 3:se2'). Leave empty to use the default "
+                  "names (test, ref, img3...). The names become the streams "
+                  "on the canvas and the prefix on this image's features."),
+        ),
+        ParamSpec(
             name="channels", type="str", default="auto",
             help=("Which images to load: auto = whatever is available "
                   "(a single RSEM image is also exposed as test); or a comma "
@@ -47,17 +73,28 @@ class LoadPatchStep(Step):
 
     @classmethod
     def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:
+        mapped = mapped_names(parse_channel_map(params.get("channel_map", "")))
         raw = str(params.get("channels", "auto")).strip()
         if raw.lower() == "auto":
-            return list(cls.writes)     # auto：靜態下限，實際以執行期為準
-        return [tok.strip() for tok in raw.split(",") if tok.strip()] or list(cls.writes)
+            # 有對照表就用它的名字 —— 那是使用者**自己命名**的結果，比
+            # 「靜態下限」精確得多，畫布也才畫得出正確數量、正確名字的輸出埠。
+            return mapped or list(cls.writes)
+        wanted = [tok.strip() for tok in raw.split(",") if tok.strip()]
+        return wanted or mapped or list(cls.writes)
 
     @classmethod
     def resolve_writes_for_kind(cls, params: Dict[str, Any], kind: str) -> List[str]:
-        """validate 用的 kind-aware 宣告：ebi_patch → test+ref；rsem → single+test。"""
+        """validate 用的 kind-aware 宣告：ebi_patch → test+ref；rsem → single+test。
+
+        **對照表優先於資料型別的預設**：使用者填了名字，那些就是這張卡會產出的流
+        （F11 Input-1）。沒填才回到「這個 kind 通常有哪幾條」。
+        """
+        mapped = mapped_names(parse_channel_map(params.get("channel_map", "")))
         raw = str(params.get("channels", "auto")).strip()
         if raw.lower() != "auto":
             return cls.resolve_writes(params)
+        if mapped:
+            return mapped
         if kind == "ebi_patch":
             return ["test", "ref"]
         if kind == "rsem":
@@ -74,6 +111,38 @@ class LoadPatchStep(Step):
         images = getattr(item, "images", None)
         if not images:
             raise StepError(self.key, f"defect {getattr(item, 'defect_id', '?')} has no images to load.")
+
+        # ---- 通道對照表（F11 Input-1）：第幾張 → 叫什麼 ----------------------
+        #
+        # 對照表在 **recipe** 裡（使用者定調），所以同一份 recipe 拿到頁序不同的
+        # 資料時**必須擋下來**：宣告了第 5 張的名字而這顆只有 2 張，照順序硬套的
+        # 後果是「BSE 的數字寫在 SE 的名字上」—— 跑得完、有數字、而且是錯的。
+        pairs = parse_channel_map(p.get("channel_map", ""))
+        order = _in_defect_order(images)
+        #: 流名 → **ingest 給的 channel 名**。改名只改「流叫什麼」，讀圖仍然要
+        #: 用資料自己的 key（`item.load()` 只認得它自己那一份）。
+        src_of = {k: k for k in order}
+        if pairs:
+            need = highest_image_number(pairs)
+            if need > len(order):
+                raise StepError(
+                    self.key,
+                    "the image names say there are at least %d images per "
+                    "defect, but defect %s has %d (%s). Fix “Name the images” "
+                    "or open the data this recipe was written for."
+                    % (need, getattr(item, "defect_id", "?"), len(order),
+                       ", ".join(order)))
+            src_of = {name: order[page - 1] for page, name in pairs}
+            unnamed = [k for k in order if k not in set(src_of.values())]
+            if unnamed:
+                # 沒被命名的那幾張**不載入**，但要講一句 —— 資料比 recipe 命名的
+                # 多是使用者該知道的事（少講的話他會以為每一張都算進去了）。
+                # 講的是「哪幾張」而不只是「幾張」：中間跳號也要看得見。
+                ctx.warn("[%s] defect %s has %d images but only %d are named; "
+                         "the rest (%s) are not loaded."
+                         % (self.key, getattr(item, "defect_id", "?"),
+                            len(order), len(src_of), ", ".join(unnamed)))
+            images = {name: images[src] for name, src in src_of.items()}
 
         raw = str(p["channels"]).strip()
         if raw.lower() == "auto":
@@ -94,7 +163,7 @@ class LoadPatchStep(Step):
                     f"defect {getattr(item, 'defect_id', '?')} has no channel "
                     f"'{ch}' (available: {sorted(images)}).")
             try:
-                arr = item.load(ch)
+                arr = item.load(src_of.get(ch, ch))
             except Exception as e:  # 檔案毀損 / 頁碼超界等
                 raise StepError(self.key, f"could not read channel '{ch}': {e}") from e
             arr_u8 = to_uint8(ensure_gray(arr))
