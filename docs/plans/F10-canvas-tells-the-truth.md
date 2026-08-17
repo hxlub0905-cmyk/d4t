@@ -210,11 +210,33 @@ F10-2 就做到了。但**下游沒有跟著走**：改名之後下游那張卡�
 `test_one_ctrl_z_undoes_a_whole_slider_drag` 當場抓到。這一段本來就只推一次
 undo，不需要 compound。
 
+### F10-7：`write result to` 打得進去（而且名字要能當變數用）
+
+使用者回報：「Write result to 沒辦法改名（不給輸入）。」
+
+病根是 F9-6 那條「**來源只在畫布上決定**」的規則按**型別**套：參數表單看到
+`image_key` 就給唯讀顯示。而輸出名（`out`）的型別一模一樣 —— 那時候還沒有
+`direction`，所以只能連輸出一起鎖住。現在分得出來了：唯讀只套在
+`direction="in"` 的那幾格。
+
+順帶補上一條驗證：**輸出流的名字必須能當變數名**（`STREAM_NAME_PATTERN`）。
+理由不是潔癖 —— 流名會變成特徵的前綴（一張量測卡接兩條流就吐 `diff_glv_max` /
+`test_glv_max`），而特徵名是分數表達式的變數名。取成 `my stream` 的話那個特徵
+永遠指不到，而使用者要到寫分數的時候才發現，那時候他已經不記得問題出在三張卡
+以前的一個命名。空的也擋：一張會產生新流的卡沒有名字，下游就沒有東西可接。
+
+修這一項時掃到同一個暗門的第三個實例：`roi_mask` 的 `resolve_reads` /
+`run()` 都寫著「空／空白 → 退回 test」（`MultiStreamStep` 的 `keys or
+["test"]` 是第一個、`_unpoint_stream` 的保留條款是第二個）。三個都是同一個
+形狀：**宣告出來的東西比使用者接的多，而畫布是照宣告畫的**。所以這一輪把它
+變成一條對整個 registry 跑的不變量
+（`test_a_cleared_input_is_never_reported_as_a_stream`）。
+
 ---
 
 ## 5. 驗收
 
-`tests/test_ui_f10_canvas_reality.py`（17 條），**每一條都對 registry 裡的
+`tests/test_ui_f10_canvas_reality.py`（20 條），**每一條都對 registry 裡的
 每一張卡自動套用** —— 之後加第 18 張卡的人不必記得回來補。
 
 既有測試有 **27 條踩到舊契約**，逐條更新成「使用者現在真的會做的事」：加完卡

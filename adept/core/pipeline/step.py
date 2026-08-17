@@ -81,6 +81,15 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC)
 PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
                "image_keys", "curve", "template", "multi_choice")
 
+#: 輸出流的名字可以用哪些字（F10-7）。
+#:
+#: 這不是潔癖：流名會變成**特徵的前綴**（一張量測卡接兩條流就吐
+#: ``diff_glv_max`` / ``test_glv_max``），而特徵名是**分數表達式的變數名**。
+#: 取成 ``my stream`` 的話，那個特徵在表達式裡永遠指不到 —— 而使用者要到寫
+#: 分數的時候才會發現，那時候他已經不記得問題出在三張卡以前的一個命名。
+#: 所以擋在打字的當下（鐵則 4：壞值不准跑到演算法裡）。
+STREAM_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
+
 
 class ParamError(ValueError):
     """參數不合法（含參數名與原因，UI 直接顯示）。"""
@@ -269,6 +278,19 @@ class ParamSpec:
                 f"parameter '{self.name}': '{value}' cannot be converted "
                 f"to {self.type}"
             ) from None
+        if self.is_output() and isinstance(v, str):
+            # 輸出流的名字是使用者自己取的（`write result to`），所以它是少數
+            # 「打錯了要當場說」的欄位 —— 空的沒有意義，怪字元會讓下游的特徵
+            # 名指不到（見 STREAM_NAME_PATTERN）。
+            if not v.strip():
+                raise ParamError(
+                    f"parameter '{self.name}': the result stream needs a name "
+                    f"(this is what the next card connects to)")
+            if not re.match(STREAM_NAME_PATTERN, v.strip()):
+                raise ParamError(
+                    f"parameter '{self.name}': '{v}' cannot be used as a "
+                    f"stream name - use letters, digits and underscores only, "
+                    f"and do not start with a digit")
         if self.pattern and isinstance(v, str) and not re.match(self.pattern, v):
             raise ParamError(
                 "parameter '%s': '%s' is not allowed here%s"

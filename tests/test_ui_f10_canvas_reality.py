@@ -457,3 +457,69 @@ def test_renaming_a_stream_on_a_multi_source_card_only_touches_that_one(window):
 
     window.model.set_param(sub, "out", "GGG")
     assert window.model.nodes[glv].params["source"] == "GGG,test"
+
+
+# --------------------------------------------------------------------------- #
+# 7. 輸出流的名字是使用者的（F10-7）
+# --------------------------------------------------------------------------- #
+def test_the_result_stream_name_is_editable_but_the_sources_are_not(window):
+    """`write result to` 要打得進去；`a` / `b` 這種**來源**維持唯讀。
+
+    使用者回報：「Write result to 沒辦法改名（不給輸入）。」病根是 F9-6 那條
+    「來源只在畫布上決定」的規則按**型別**（image_key）套，而輸出名的型別
+    一模一樣 —— 那時候還沒有 `direction`，只能連輸出一起鎖住。
+    """
+    from PySide6.QtWidgets import QLineEdit
+
+    src = window.model.node_order[0]
+    sub = window.add_card_after(src, "subtract")
+    window._on_edge_added(src, sub, "test", "a")
+    window._on_edge_added(src, sub, "ref", "b")
+    window.select_node(sub)
+
+    for name in ("a", "b"):
+        ed = window.param_form.editor(name)
+        assert isinstance(ed, QLineEdit) and ed.isReadOnly(), \
+            "%s 是來源，應該只在畫布上決定" % name
+    out = window.param_form.editor("out")
+    assert isinstance(out, QLineEdit) and not out.isReadOnly(), \
+        "輸出流的名字是使用者自己取的，不該唯讀"
+
+    out.setText("GGG")
+    assert window.model.nodes[sub].params["out"] == "GGG"
+
+
+def test_a_result_stream_name_has_to_be_usable_as_a_variable(window):
+    """流名會變成特徵前綴（`diff_glv_max`），而特徵名是分數表達式的變數名。
+
+    所以空的／有空白／數字開頭的名字要擋在打字的當下 —— 不擋的話，使用者要
+    到寫分數的時候才發現指不到，而那時候他已經不記得問題出在三張卡以前。
+    """
+    from adept.core.pipeline import ParamError
+
+    cls = get_step("subtract")
+    for bad in ("", "   ", "my stream", "2diff", "GG-G"):
+        with pytest.raises(ParamError):
+            cls.validate_params({"out": bad})
+    for good in ("GGG", "my_stream", "_x2"):
+        assert cls.validate_params({"out": good})["out"] == good
+
+
+def test_a_cleared_input_is_never_reported_as_a_stream(window):
+    """**每一張**卡：輸入清空之後，`resolve_reads` 不准回報任何流。
+
+    這是「空的就偷偷退回預設」那個暗門的通用版本 —— `MultiStreamStep` 有過
+    （`keys or ["test"]`）、`roi_mask` 有過（`or "test"`），兩次都是同一個
+    形狀：宣告出來的東西比使用者接的多，而畫布是照宣告畫的。
+
+    對 registry 跑，因為下一張卡最容易在這裡重犯：寫 `params.get("source",
+    "test")` 是很自然的一行，而它在**值是空字串**的時候不會退回預設 ——
+    退回預設的是那些多寫了 `or "test"` 的。
+    """
+    for cls in list_steps():
+        if not cls.input_specs():
+            continue
+        cleared = cls.cleared_inputs(cls.validate_params({}))
+        reads = [r for r in cls.resolve_reads(cleared) if str(r).strip()]
+        assert reads == [], \
+            "%s：輸入都清空了，卻還宣告讀 %s" % (cls.key, reads)
