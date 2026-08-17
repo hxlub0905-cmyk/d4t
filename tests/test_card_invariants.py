@@ -17,8 +17,10 @@ subtract 的遷移（2026-08-16）                ``workers=1`` 與 ``workers=2`
 而不是「演算法算錯」。所以這裡問的是整台引擎的規矩，並且**自動套用到 registry
 裡的每一張卡** —— 加第 18 張卡的人不必記得來補，它自己會被納管。
 
-這一檔目前鎖兩條：
+這一檔目前鎖六條：
 
+* **I1 同一份輸入跑兩次，答案要一樣。** 抓的是演算法自己的非決定性（OpenCV 的
+  IPP 路徑、未固定的隨機初值、吃到 dict/set 迭代順序的實作）。
 * **I2 換個行程跑，答案要一樣。** 批次是用 ProcessPool 跑的，主程式把 recipe
   序列化成 JSON 送進 worker。那趟來回一旦不是 identity，``workers=1`` 與
   ``workers=4`` 就會算出不同的分數 —— 兩邊都跑得完、都有數字。
@@ -28,12 +30,19 @@ subtract 的遷移（2026-08-16）                ``workers=1`` 與 ``workers=2`
   ``resolve_reads`` / ``resolve_writes`` 畫的。``run()`` 偷讀一條沒宣告的流，
   **畫布就在說謊** —— 畫面上兩張卡沒有連線，改了上面那張下面的數字卻會變。
 
-還沒做的（同一個機制，之後補）：I1 同輸入跑兩次相同、I4 快取重放＝全程重算、
-I5 參數推到上下界不炸、I6 換影像尺寸照跑。見 ``docs/ROADMAP.md`` Phase 1。
+* **I4 快取重放 = 全程重算。** 快取是效能設施，唯一被允許改變的是速度。
+  這個 repo 在這件事上踩過三次，每次的症狀都是「第一次跑對、第二次跑錯」。
+* **I5 參數推到上下界不炸，也不吐 NaN。** ``min``/``max`` 是卡片自己宣告的
+  「使用者拖得到的範圍」（鐵則 4），所以這條問的是**那個範圍宣告得對嗎**。
+* **I6 換一個 patch 尺寸照樣跑得動。** F7-4 那個坑的性質版。
+
+每一條都用「把對應的 bug 放回去」驗過會紅（見各自的 docstring）。
+進度見 ``docs/ROADMAP.md`` Phase 1。
 """
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -89,7 +98,8 @@ def _defaults(key: str) -> dict:
     return REGISTRY[key].validate_params({})
 
 
-def recipe_for(key: str, sparse: bool = False) -> Recipe:
+def recipe_for(key: str, sparse: bool = False,
+               trailing_image: bool = False) -> Recipe:
     """``load_patch`` →（需要的話 ``subtract``）→ 這張卡。
 
     前置是**從卡片自己宣告的 reads 推出來的**，不是寫死的表 —— 卡片改了讀哪
@@ -123,6 +133,22 @@ def recipe_for(key: str, sparse: bool = False) -> Recipe:
     if key not in nodes:
         nodes[key] = RecipeNode(key, key, params)
         route.append(key)
+
+    if trailing_image and "tail" not in nodes:
+        # 最後補一張影像卡，把 checkpoint 推到被測那張卡的**後面**（I4 要的）。
+        # 它讀 test、寫 test，跟被測的卡不會互相干擾。
+        nodes["tail"] = RecipeNode("tail", "denoise", node_params("denoise"))
+        route.append("tail")
+        # 這張卡定義了具名區域的話，再補一張**量它**的卡放在 checkpoint 之後
+        # —— 那正是 2026 年那個真 bug 的形狀（Region 卡落在快取段裡、量測卡在
+        # 段外）。沒有這個消費者的話，rois 存不存進快照根本沒人看得出來。
+        regions = list(REGISTRY[key].resolve_regions_out(_defaults(key)))
+        if regions and "probe" not in nodes:
+            probe = dict(_defaults("glv_stats"))
+            probe["roi"] = regions[0]
+            probe["output_prefix"] = "probe"
+            nodes["probe"] = RecipeNode("probe", "glv_stats", probe)
+            route.append("probe")
 
     return Recipe(
         recipe_id="invariant_%s" % key,
@@ -389,3 +415,234 @@ def test_the_declaration_check_is_not_vacuous(dataset):
         if rec.reads:
             checked += 1
     assert checked >= 12, "只有 %d 張卡真的讀了影像流，這組測試沒測到什麼" % checked
+
+
+# --------------------------------------------------------------------------- #
+# I1：同一份輸入跑兩次，答案要一樣
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("key", CARDS)
+def test_a_card_gives_the_same_answer_twice(key, dataset):
+    """同一張卡、同一顆 defect，連跑兩次必須逐位元組相同。
+
+    I2 問的是「換個行程一不一樣」（recipe 的 JSON 來回），這條問的是**演算法
+    自己**穩不穩。兩者會被同一個症狀吸引過去（「分數跟昨天不一樣」），但根因
+    完全不同 —— 這條抓的是 OpenCV 的 IPP 路徑、未固定的隨機初值、以及吃到
+    dict／set 迭代順序的實作。
+
+    這個 repo 已經為此付過一次代價：``batch.pin_cv2_deterministic()`` 就是因為
+    「同張圖算兩次差 ~1e-8，快取結果對不起來」才存在的。那個保護目前只有批次
+    路徑呼叫得到，這條測試讓**每一張卡**都被問一次。
+    """
+    if key in NEEDS_MORE_SETUP:
+        pytest.skip("%s：%s" % (key, NEEDS_MORE_SETUP[key]))
+
+    from adept.core.pipeline.batch import pin_cv2_deterministic
+    pin_cv2_deterministic()
+
+    recipe = recipe_for(key)
+    a = run_defect(recipe, dataset.items[0], dataset.kind)
+    b = run_defect(recipe, dataset.items[0], dataset.kind)
+
+    assert bool(a.ok) == bool(b.ok), (a.error, b.error)
+    assert a.score == b.score, key
+    assert dict(a.features or {}) == dict(b.features or {}), \
+        "%s 跑兩次算出不同的數字（比 == 而不是 approx —— 這裡要的是逐位元組）" % key
+
+
+# --------------------------------------------------------------------------- #
+# I4：快取重放 = 全程重算
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("key", CARDS)
+def test_a_card_replays_from_cache_exactly(key, dataset, lot, tmp_path):
+    """全程重算、冷跑（寫快取）、熱跑（讀快取）三者必須完全相同。
+
+    快取是**效能**設施，所以它唯一被允許改變的是速度。這個 repo 在這件事上
+    踩過三次，每一次的症狀都是「第一次跑對、第二次跑錯」：
+
+    * 快照漏了 ``ctx.rois`` → 熱跑時區域整組不見；
+    * ``set_roi`` 逐一還原 → 17 個框只剩 1 個（跑得完、有數字、少 16 塊）；
+    * 快照漏了 ``feature_owner`` → 熱跑少一個被救回來的特徵。
+
+    三次都是「快照少存了 Context 的某個欄位」。這條把它變成**每張卡都問一次**
+    的性質，所以下一次有人往 Context 加欄位時，忘了同步快照就會紅。
+
+    **關鍵在最後補一張影像卡**（``recipe_for(..., trailing_image=True)``）：
+    checkpoint 是「執行順序上最後一張影像卡的下一格」，所以不補的話被測的那張
+    卡會落在 checkpoint **之後** —— 它產出的東西根本不必經過快照，這條就變成
+    「把同一條路跑了三次」。補了之後它落在快取段裡，rois／features／影像全部
+    都得從快照活著回來。第一版就是漏了這件事：把「快照不存 rois」那個真的
+    bug 放回去，測試照樣全綠。
+    """
+    if key in NEEDS_MORE_SETUP:
+        pytest.skip("%s：%s" % (key, NEEDS_MORE_SETUP[key]))
+
+    from adept.core.pipeline.batch import pin_cv2_deterministic
+    from adept.core.pipeline.cache import StageCache
+    from adept.core.pipeline.engine import run_defect_cached
+    pin_cv2_deterministic()
+
+    recipe = recipe_for(key, trailing_image=True)
+    item = dataset.items[0]
+    plain = run_defect(recipe, item, dataset.kind)
+
+    cache = StageCache(str(tmp_path / ("cache_%s" % key)))
+    cold = run_defect_cached(recipe, item, dataset.kind, cache, "tok")
+    warm = run_defect_cached(recipe, item, dataset.kind, cache, "tok")
+
+    for label, other in (("冷跑", cold), ("熱跑", warm)):
+        assert bool(plain.ok) == bool(other.ok), (key, label, plain.error,
+                                                  other.error)
+        assert plain.score == other.score, "%s 的 %s 分數不一樣" % (key, label)
+        assert dict(plain.features or {}) == dict(other.features or {}), \
+            "%s：%s 跟全程重算算出不一樣的特徵" % (key, label)
+
+
+def test_the_cache_replay_check_actually_uses_the_cache(dataset, lot, tmp_path):
+    """上面那條必須真的**命中過快取** —— 否則它只是把同一條路跑了三次。
+
+    影像段 checkpoint 是「執行順序上最後一張影像卡的下一格」，所以一張
+    algo 卡的 recipe 才會有非零的 checkpoint。這裡直接問快取的 hit 計數。
+    """
+    from adept.core.pipeline.cache import StageCache
+    from adept.core.pipeline.engine import run_defect_cached
+
+    hits = 0
+    for key in CARDS:
+        if key in NEEDS_MORE_SETUP:
+            continue
+        rec = recipe_for(key, trailing_image=True)
+        cache = StageCache(str(tmp_path / ("hit_%s" % key)))
+        run_defect_cached(rec, dataset.items[0], dataset.kind, cache, "tok")
+        run_defect_cached(rec, dataset.items[0], dataset.kind, cache, "tok")
+        hits += cache.stats_counters()["hits"] if hasattr(
+            cache, "stats_counters") else cache.hits
+    assert hits >= 8, "只有 %d 次快取命中 —— I4 幾乎沒有走到熱跑那條路" % hits
+
+
+# --------------------------------------------------------------------------- #
+# I5：參數推到上下界不炸，而且不吐出 NaN
+# --------------------------------------------------------------------------- #
+def _extreme_param_cases(key: str):
+    """這張卡的每個有界數值參數 → ``(參數名, 值)`` 的極端組合。
+
+    一次只推**一個**參數（其餘留預設）：全部一起推的話，紅了也不知道是誰造成
+    的，而使用者實際上也是一次拖一支滑桿。
+    """
+    for spec in REGISTRY[key].params:
+        if spec.type not in ("int", "float"):
+            continue
+        for bound in (spec.min, spec.max):
+            if bound is None:
+                continue
+            value = int(bound) if spec.type == "int" else float(bound)
+            yield spec.name, value
+
+
+def _extreme_ids(case):
+    return "%s=%s" % case
+
+
+EXTREME_CASES = sorted(
+    (key, name, value)
+    for key in CARDS if key not in NEEDS_MORE_SETUP
+    for name, value in _extreme_param_cases(key))
+
+
+@pytest.mark.parametrize("key,name,value", EXTREME_CASES,
+                         ids=["%s.%s=%s" % c for c in EXTREME_CASES])
+def test_a_parameter_at_its_limit_does_not_produce_nonsense(key, name, value,
+                                                            dataset):
+    """把一個參數推到它宣告的上界／下界，這張卡必須：
+
+    1. **不丟出未攔截的例外**（引擎會收成 ``ok=False``，但訊息要讀得懂）；
+    2. **不產出 NaN／Inf 的特徵**。
+
+    第 2 點才是這條真正在守的東西。NaN 不是「壞掉」而是**安靜地錯**：
+    score 表達式對 nan/inf 的規則是「一律歸 0.0」（`expression.py` 的 SAFE
+    語意，那是刻意的 —— 一顆 defect 不該因為除以零就殺掉整批）。於是一個
+    NaN 特徵的下場是 **score 變成 0.0 → 判進 ``below``（＝ nuisance）**：
+    那顆真缺陷被安靜地漏掉了，而畫面上它跟一顆真的很乾淨的 defect 一模一樣。
+
+    所以擋 NaN 的地方必須是**卡片**：SAFE 的表達式救得了「整批不要死」，
+    救不了「這個數字是錯的」。
+
+    ``min``/``max`` 是卡片自己宣告的「使用者拖得到的範圍」（鐵則 4），
+    所以這條問的正是：**那個範圍宣告得對嗎**。
+    """
+    from adept.core.pipeline.batch import pin_cv2_deterministic
+    pin_cv2_deterministic()
+
+    params = dict(_defaults(key))
+    params[name] = value
+    recipe = recipe_for(key)
+    recipe.nodes[key].params = params
+
+    res = run_defect(recipe, dataset.items[0], dataset.kind)
+    if not res.ok:
+        # 擋下來是可以的 —— 但要講得出人話（推廣鐵則），不能是 traceback
+        # 的殘骸或空字串。
+        assert res.error and len(str(res.error)) > 10, \
+            "%s 的 %s=%s 失敗了，但訊息是 %r" % (key, name, value, res.error)
+        return
+    assert res.score is not None and math.isfinite(float(res.score)), \
+        "%s 的 %s=%s 算出非有限的分數 %r" % (key, name, value, res.score)
+    bad = [k for k, v in (res.features or {}).items()
+           if not math.isfinite(float(v))]
+    assert not bad, (
+        "%s 的 %s=%s 產出了 NaN／Inf 的特徵 %s —— score 會跟著變 NaN，"
+        "而 NaN < threshold 是 False，那顆 defect 會安靜地被判成真缺陷"
+        % (key, name, value, bad))
+
+
+def test_the_extreme_parameter_check_is_not_vacuous():
+    """真的有參數被推到界線 —— 卡片全都沒宣告 min/max 的話這組會空轉。"""
+    assert len(EXTREME_CASES) >= 30, len(EXTREME_CASES)
+    assert len({key for key, _n, _v in EXTREME_CASES}) >= 8
+
+
+# --------------------------------------------------------------------------- #
+# I6：換一個影像尺寸，同一份 recipe 照樣跑得動
+# --------------------------------------------------------------------------- #
+@pytest.fixture(scope="module")
+def big_dataset(tmp_path_factory):
+    """跟 :func:`lot` 同樣的 lot，但 patch 大一倍。"""
+    from make_sample import generate
+    out = tmp_path_factory.mktemp("invariants_lot_256")
+    lot = generate(str(out), n=2, seed=7, size=256)
+    ds = load_dataset(lot["klarf"])
+    assert ds.kind == KIND
+    return ds
+
+
+@pytest.mark.parametrize("key", CARDS)
+def test_a_card_survives_a_different_patch_size(key, dataset, big_dataset):
+    """同一份 recipe 換一個 patch 尺寸（128 → 256）必須照樣跑得動。
+
+    這是 F7-4 那個坑的性質版：``glv_stats`` 的中心框以前是**畫素**寫死的，
+    於是同一組參數在 128² 上準、在 256² 上漏抓 —— 而兩邊都跑得完、都有數字。
+    幾何後來搬到 Region 卡並支援 ``percent``，這條讓每一張卡都被問一次。
+
+    只問「跑不跑得動 + 數字是有限的」，**不問數字一不一樣** —— 影像變了數字
+    本來就會變，那是對的。
+    """
+    if key in NEEDS_MORE_SETUP:
+        pytest.skip("%s：%s" % (key, NEEDS_MORE_SETUP[key]))
+
+    from adept.core.pipeline.batch import pin_cv2_deterministic
+    pin_cv2_deterministic()
+
+    recipe = recipe_for(key)
+    small = run_defect(recipe, dataset.items[0], dataset.kind)
+    big = run_defect(recipe, big_dataset.items[0], big_dataset.kind)
+
+    assert bool(big.ok) == bool(small.ok), (
+        "%s 在 128² 上 ok=%s，換成 256² 變成 ok=%s：%s"
+        % (key, small.ok, big.ok, big.error))
+    if not big.ok:
+        return
+    assert set(big.features or {}) == set(small.features or {}), \
+        "%s 換個尺寸就產出了不同的**特徵名**（%s）" % (
+            key, sorted(set(big.features or {}) ^ set(small.features or {})))
+    bad = [k for k, v in (big.features or {}).items()
+           if not math.isfinite(float(v))]
+    assert not bad, "%s 在 256² 上產出 NaN／Inf 的特徵 %s" % (key, bad)
