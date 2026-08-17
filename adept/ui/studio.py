@@ -1475,8 +1475,36 @@ class StudioWindow(QMainWindow):
             #
             # 「不需要就不要連它」—— 多出來的埠不接線就不會有任何作用。
             outs = list(writes) + [r for r in reads if r not in writes]
+            # **還沒接上來源的卡，後面不長東西**（F10，使用者定調 2026-08-17：
+            # 「一張卡片剛被 new add 時，前後應該都是空的乾淨的，連上 source，
+            # 後面 source 才會出來」）。
+            #
+            # 這不只是畫面乾淨的問題：`Compare to stream` 一加進來就在後面掛一顆
+            # ``diff``，那顆埠**接得出去**，於是下游那張卡指著一條根本還沒有人
+            # 算出來的流。畫布因此變成一份「看起來成立、跑起來不是那回事」的圖。
+            #
+            # 沒有來源 → 沒有輸出、沒有輸入標籤、也沒有具名區域。三件事同一個
+            # 理由：它們都是「這張卡跑完會有什麼」，而它現在跑不起來。
+            reads = [r for r in reads if r]
+            missing = list(step_cls.missing_inputs(node.params)) if step_cls else []
+            if missing:
+                writes, outs, regions_out = [], [], []
+            # 每一格輸入在畫布上都是一顆埠（F10）。``show_when`` 藏起來的不算
+            # —— 那一格現在不成立，畫一顆接不上任何意義的埠只會讓人問「這是
+            # 什麼」。標籤用 ParamSpec 的 label（`First stream`），不是參數名。
+            inputs = []
+            if step_cls is not None:
+                for spec in step_cls.input_specs():
+                    if not spec.visible_for(node.params):
+                        continue
+                    inputs.append({
+                        "name": spec.name,
+                        "label": spec.label or spec.name,
+                        "stream": str(node.params.get(spec.name, "") or ""),
+                    })
             nodes.append({
                 "node_id": nid,
+                "inputs": inputs,
                 "step_key": node.step,
                 "label": label,
                 "category": category,
@@ -1681,7 +1709,7 @@ class StudioWindow(QMainWindow):
         return str(writes[0]) if writes else ""
 
     def _point_at_stream(self, node_id: str, stream: str,
-                         accumulate: bool = False) -> str:
+                         accumulate: bool = False, param: str = "") -> str:
         """把 ``node_id`` 的輸入接上 ``stream``（回一句給狀態列的話）。
 
         這是「用節點表達要對哪一張圖做」的實作點：使用者從 ``ref`` 那顆輸出埠
@@ -1716,7 +1744,10 @@ class StudioWindow(QMainWindow):
             specs = {p.name: p for p in get_step(node.step).params}
         except KeyError:                       # pragma: no cover
             return ""
-        for name in self._PRIMARY_PARAMS:
+        # F10：落點由呼叫端給（使用者放開滑鼠的那一格）。沒給才自己挑。
+        names = [param] if param else [
+            sp.name for sp in get_step(node.step).input_specs()]
+        for name in names:
             spec = specs.get(name)
             if spec is None or spec.type not in ("image_key", "image_keys"):
                 continue
@@ -1780,6 +1811,19 @@ class StudioWindow(QMainWindow):
         try:
             step_cls = get_step(node.step)
             needs = list(step_cls.resolve_reads(node.params))
+            # F10：剛加進來的卡**沒有來源**，所以 ``resolve_reads`` 是空的 ——
+            # 照字面走的話這裡會說「什麼都不缺」，而它其實什麼都還沒接。
+            #
+            # 那一句話不能只講「這一格是空的」：對不寫 code 的使用者，「還缺
+            # diff」跟「先加一張 Compare two streams」才是**做得下去**的話。
+            # 卡片的 ``default`` 正好就是「這張卡本來預期吃哪一條流」，拿它來
+            # 講那句話 —— 值被清掉了，但宣告還在。
+            for name in step_cls.missing_inputs(node.params):
+                spec = next((sp for sp in step_cls.params if sp.name == name),
+                            None)
+                want = str(getattr(spec, "default", "") or "")
+                if want and want not in needs:
+                    needs.append(want)
         except KeyError:
             return ""
         # 「上游有哪些流」有兩個來源，兩個都要算（F9-11）：
@@ -1830,12 +1874,19 @@ class StudioWindow(QMainWindow):
             return ""
         if spec is None:
             return ""
+        # 「不是剛拉的這一條」而不是「來源不同的那些」（F10 修）：從**同一張卡**
+        # 先拉 test 再拉 ref 到同一顆角色埠時，來源相同 —— 舊的判準把它放過去，
+        # 於是參數換成了 ref、而畫布上兩條線都還在，同一個輸入埠上有兩條線。
+        # 那正是 F9-7 擋下來的東西（引擎只認其中一條，而畫面上看不出是哪條）。
+        # F10 之前這個洞碰不到，因為 a / b 這種角色埠上根本不會有線。
         losers = [e for e in list(self.model.edges)
-                  if e.dst == str(dst) and e.src != str(src)
-                  and e.dst_in == param
+                  if e.dst == str(dst) and e.dst_in == param
+                  and not (e.src == str(src) and e.src_out == str(stream))
                   and (spec.type == "image_key" or e.src_out == str(stream))]
         for e in losers:
-            self.model.remove_edge(e.src, e.dst)
+            # 帶著流名剪 —— 兩張卡之間可以有好幾條並排的線（F9-9），
+            # 不指名的話會把隔壁那條一起剪掉。
+            self.model.remove_edge(e.src, e.dst, src_out=e.src_out or None)
         if not losers:
             return ""
         return (" (replacing the line from %s)"
@@ -1848,7 +1899,8 @@ class StudioWindow(QMainWindow):
         self.model.move(str(node_id), int(delta))
 
     # ---- 畫布連線（F7-6；F7-18 起帶著影像流）-------------------------------
-    def _on_edge_added(self, src: str, dst: str, stream: str = "") -> None:
+    def _on_edge_added(self, src: str, dst: str, stream: str = "",
+                       dst_in: str = "") -> None:
         """拉一條線。會造成循環時 model 回 False —— 那條線就不會出現。
 
         擋在這裡（而不是等執行時報錯）是刻意的：使用者看到的是「這條線拉不
@@ -1870,14 +1922,27 @@ class StudioWindow(QMainWindow):
         """
         src, dst, stream = str(src), str(dst), str(stream or "")
         with self.model.compound("connect"):
-            self._connect(src, dst, stream)
+            self._connect(src, dst, stream, str(dst_in or ""))
 
-    def _connect(self, src: str, dst: str, stream: str) -> None:
+    def _connect(self, src: str, dst: str, stream: str,
+                 dst_in: str = "") -> None:
         # 這條線會落在下游卡的哪個參數上（F9-9：**先算出來**，才有辦法把埠跟
         # 線一起加進去）。以前是「先加一條沒有埠的線，再回頭補埠」，而補埠只
         # 找得到一對節點之間的第一條 —— 兩條並排的線就補錯了。
-        param = self._param_for_stream(dst)
-        accumulate = self.model.has_edge(src, dst)
+        # 這條線落在哪個輸入參數上：**使用者放開滑鼠的地方說了算**（F10）。
+        # 以前是 Studio 依 streams → target → source 的固定順序挑第一個 ——
+        # 那在「一張卡只有一個輸入在用」的年代猜得中，但 ``subtract`` 的
+        # a / b 兩顆輸入永遠只挑得到同一個，於是畫布上接哪一顆都一樣。
+        param = dst_in or self._param_for_stream(dst)
+        # **這一格上已經有線了嗎** —— 有就是累加（多連一），沒有就是設定它。
+        #
+        # 以前的判準是「這一對節點之間已經有線了嗎」，那在 F10 之前是對的：
+        # 卡片的輸入帶著規格預設值（``streams="test"``），第一條線的意思是
+        # 「改成這個」而不是「再加一個」。現在新卡的輸入本來就是空的，那個理由
+        # 不成立了 —— 而舊判準還會漏掉「兩條線來自**不同**上游卡」這種多連一，
+        # 那正是量測卡最常見的接法（一條 diff、一條 test）。
+        accumulate = any(e.dst == dst and e.dst_in == param
+                         for e in self.model.edges)
         if self.model.has_line(src, dst, stream, param):
             self._status("%s → %s is already connected on %s."
                          % (src, dst, stream or "that stream"))
@@ -1889,7 +1954,8 @@ class StudioWindow(QMainWindow):
         # 影像流在**線真的接起來之後**才改。會成環的那條線沒有落地，
         # 它不該留下任何痕跡 —— 尤其不是「那張卡安靜地改成做 ref 了」。
         # 同一對節點的第二條線是「這條也接上」（累加），不是「改接別的」。
-        note = self._point_at_stream(dst, stream, accumulate=accumulate)
+        note = self._point_at_stream(dst, stream, accumulate=accumulate,
+                                     param=param)
         # **一個輸入埠只能有一條線**：新的這條贏，舊的那條拿掉（F9-7）。
         # 留著兩條的話引擎只會照其中一條送資料（``recipe.validate`` 會報
         # ambiguous-input），而畫面上看不出是哪一條 —— 使用者剛拉的那一條
@@ -1899,72 +1965,130 @@ class StudioWindow(QMainWindow):
         self._status("Connected %s → %s%s%s" % (src, dst, note, dropped))
 
     def _param_for_stream(self, node_id: str) -> str:
-        """``node_id`` 這張卡吃影像流的那個參數名（沒有就回空字串）。"""
+        """線沒有指定落點時，這條線該接哪一格輸入（沒有輸入回空字串）。
+
+        F10 起**正常路徑不會走到這裡** —— 使用者放開滑鼠的位置就是落點。
+        這是給程式化拉線（測試、之後可能的自動排版）用的退路，判準是
+        「第一個**還空著**的輸入」：接第二條線時它自然落到還沒接的那一格，
+        而不是又去蓋掉第一格。
+
+        以前這裡是一張寫死的名單（``streams`` → ``target`` → ``source``），
+        於是 ``subtract`` 的 ``a`` / ``b`` 永遠只挑得到 —— 兩顆輸入的卡在畫布上
+        根本分不開。名單也不會自己認得之後加的卡。
+        """
         node = self.model.nodes.get(str(node_id))
         if node is None:
             return ""
         try:
-            specs = {p.name: p for p in get_step(node.step).params}
+            specs = [sp for sp in get_step(node.step).input_specs()
+                     if sp.visible_for(node.params)]
         except KeyError:                       # pragma: no cover
             return ""
-        for name in self._PRIMARY_PARAMS:
-            spec = specs.get(name)
-            if spec is not None and spec.type in ("image_key", "image_keys"):
-                return name
-        return ""
+        if not specs:
+            return ""
+        for spec in specs:
+            if not str(node.params.get(spec.name, "") or "").strip():
+                return spec.name
+        return specs[0].name
 
-    def _on_edge_removed(self, src: str, dst: str, stream: str = "") -> None:
-        """剪掉一條線。``stream`` 是剪刀瞄的那一條（F9-9）。
+    def _on_edge_removed(self, src: str, dst: str, stream: str = "",
+                         dst_in: str = "") -> None:
+        """剪掉一條線。``stream`` 是剪刀瞄的那一條（F9-9），``dst_in`` 是它
+        進到下游的哪一格（F10）。
 
         兩張卡之間可以有兩條並排的線，所以**剪一條**跟剪掉整個依賴是兩件事。
         瞄不到特定那條（舊格式的線沒有埠）就退回拿掉整對。
+
+        **剪掉線就是拿掉來源**（F10）：線是唯一的來源，所以那一格要跟著空掉。
+        不空的話畫布會反過來說謊 —— 畫面上線沒了，卡片卻還指著那條流，而且
+        照樣跑得出數字。使用者回報的原話是「把線按 X 清掉，後方卡片的 Node
+        不會跟著清掉」。
         """
         src, dst, stream = str(src), str(dst), str(stream or "")
+        dst_in = str(dst_in or "")
+        # 剪之前先問清楚這條線落在哪一格 —— 剪完就查不到了。
+        if not dst_in:
+            for e in self.model.edges:
+                if (e.src == src and e.dst == dst
+                        and (not stream or e.src_out == stream)):
+                    dst_in = e.dst_in
+                    break
         with self.model.compound("disconnect"):
-            one = stream and self.model.remove_edge(src, dst, src_out=stream)
+            one = stream and self.model.remove_edge(
+                src, dst, src_out=stream, dst_in=dst_in or None)
             if one:
-                note = self._unpoint_stream(dst, stream)
+                note = self._unpoint_stream(dst, stream, dst_in)
                 self._status("Disconnected %s → %s on %s%s"
                              % (src, dst, stream, note))
             elif self.model.remove_edge(src, dst):
-                self._status("Disconnected %s → %s" % (src, dst))
+                note = self._unpoint_stream(dst, stream, dst_in)
+                self._status("Disconnected %s → %s%s" % (src, dst, note))
 
-    def _unpoint_stream(self, node_id: str, stream: str) -> str:
+    def _unpoint_stream(self, node_id: str, stream: str,
+                        param: str = "") -> str:
         """線剪掉了 → 那條流也要從下游卡的參數裡拿掉（回一句給狀態列的話）。
 
         不拿掉的話畫布會**反過來說謊**：畫面上那條線沒了，卡片卻還在處理它
         （`streams=test,ref` 一個字都沒變）。這是 F9-7「接線時參數跟著改」的
         另一半。
 
-        **最後一條不拿掉**：`MultiStreamStep.stream_list` 對空字串是
-        ``keys or ["test"]`` —— 清成空的話那張卡會安靜地跑回 test，
-        比留著更難解釋。留著等於「這張卡還在做這條流，只是沒有線指定來源」，
-        跟任何一張還沒接線的卡是同一個狀態。
+        F10 之前這裡有兩個保留條款，現在**兩個都拿掉了**：
+
+        * 「單一角色的輸入（``image_key``）值就留著」—— 那時候那一格的值是
+          唯一的紀錄，清了就沒有東西講「這張卡本來要做什麼」。現在線才是唯一
+          的來源，值留著等於畫布上沒有線、卡片卻還指著一條流。
+        * 「最後一條不拿掉」—— 理由是 ``MultiStreamStep`` 對空字串會退回
+          ``test``。那個 ``or`` 在 F10 拿掉了，所以這個保留條款也沒有存在的
+          理由；留著反而讓「剪掉最後一條線」變成畫面與實際不一致的那一步。
+
+        剪完之後那張卡回到「還沒接線」的狀態 —— 跟剛加進來的卡一模一樣：
+        沒有輸出埠、lint 報 ``not-connected``、引擎不放行。
         """
         node = self.model.nodes.get(str(node_id))
-        param = self._param_for_stream(node_id)
-        if node is None or not param:
+        param = str(param or "")
+        if node is None:
             return ""
         try:
-            spec = {p.name: p for p in get_step(node.step).params}[param]
+            specs = {p.name: p for p in get_step(node.step).params}
         except KeyError:                       # pragma: no cover
             return ""
-        if spec.type != "image_keys":
-            return ""                          # 單一角色的輸入：值就留著
-        keys = [k.strip() for k in str(node.params.get(param, "") or "").split(",")
-                if k.strip()]
-        if stream not in keys or len(keys) <= 1:
+        spec = specs.get(param)
+        if spec is None or not spec.is_input():
             return ""
-        keys.remove(stream)
+        if spec.type == "image_keys":
+            keys = [k.strip() for k
+                    in str(node.params.get(param, "") or "").split(",")
+                    if k.strip()]
+            if stream and stream in keys:
+                keys.remove(stream)
+            elif len(keys) > 1:
+                return ""          # 指不出剪的是哪一條，寧可不動
+            else:
+                keys = []
+            value = ",".join(keys)
+        else:
+            value = ""                         # 角色埠：那條線就是它的全部來源
+        if value == str(node.params.get(param, "") or ""):
+            return ""
         try:
-            self.model.set_param(str(node_id), param, ",".join(keys))
+            self.model.set_param(str(node_id), param, value)
         except ParamError:                     # pragma: no cover — 值就是流名
             return ""
-        return " — “%s” now works on %s" % (node_id, " and ".join(keys))
+        if not value:
+            return " — “%s” has no input on “%s” now" % (
+                node_id, spec.label or param)
+        return " — “%s” now works on %s" % (node_id, " and ".join(
+            value.split(",")))
 
     def _on_remove_requested(self, node_id: str) -> None:
         node_id = str(node_id)
-        self.model.remove(node_id)
+        # 刪掉一張卡 = 把它餵出去的每一條線都剪掉（F10-5）。下游那幾格要跟著
+        # 空出來，否則它們指著一條再也沒有人產出的流 —— 跟按 × 剪掉是同一件事，
+        # 所以走同一條路（`_unpoint_stream`），不要在這裡另寫一份。
+        with self.model.compound("remove-card"):
+            for e in [e for e in self.model.edges if e.src == node_id]:
+                self._unpoint_stream(e.dst, e.src_out, e.dst_in)
+            self.model.remove(node_id)
         if self.selected_node == node_id:
             self.selected_node = None
             self.param_form.set_step(None, {}, [])

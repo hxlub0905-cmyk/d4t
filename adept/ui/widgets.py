@@ -2012,7 +2012,7 @@ class ParamForm(QWidget):
             w.curve_changed.connect(lambda _t: self._sync_curve_override())
             return w
 
-        if ptype == "image_keys":
+        if ptype == "image_keys" and spec.get("direction") != "out":
             # F9-6：**來源只在畫布上決定**（使用者定調）。以前這裡是一排勾選框，
             # 於是同一件事有兩個入口 —— 拉線會改它、勾選框也會改它 —— 而畫布上
             # 那條線與這裡的勾選很容易對不起來（使用者的原話是「他會很亂連」）。
@@ -2032,8 +2032,14 @@ class ParamForm(QWidget):
             w.build_requested.connect(lambda n=name: self.action_requested.emit(n))
             return w
 
-        if ptype == "image_key":
+        if ptype == "image_key" and spec.get("direction") != "out":
             # 同上（F9-6）：來源是接線的結果，不是這裡填的。
+            #
+            # ⚠ **只有輸入是唯讀的**（F10-7）。`write result to`（`out`）型別
+            # 一樣是 image_key，但它是這張卡**吐出去**的那條流的名字 —— 那是
+            # 使用者自己取的名字，不是接線的結果，唯讀等於「不給改」。
+            # F9-6 那時候還沒有 `direction`，所以只能連輸出一起鎖住；使用者
+            # 回報「Write result to 沒辦法改名（不給輸入）」就是這個。
             return _wiring_display("" if value is None else str(value))
 
         w = QLineEdit()

@@ -53,12 +53,12 @@ class RoiMaskStep(Step):
                   "names are combined: a pixel inside any of them is inside "
                   "the mask.")),
         ParamSpec(
-            name="source", type="image_key", default="test",
+            name="source", type="image_key", direction="in", default="test",
             label="Same size as",
             help=("The mask is drawn at this stream's size. Pick the stream "
                   "the mask will be used on.")),
         ParamSpec(
-            name="out", type="image_key", default="mask",
+            name="out", type="image_key", direction="out", default="mask",
             label="Write mask to",
             help=("Name of the image stream the mask is written to. Point a "
                   "Normalize card's 'Use only' at this name.")),
@@ -74,13 +74,19 @@ class RoiMaskStep(Step):
 
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
-        # 與 run() 的正規化**同一套**（空／空白 → 預設值）。兩邊各自演化的
-        # 下場：lint 與畫布講 test → mask，執行卻去找 '' —— 畫布在說謊。
-        return [str(params.get("source", "test") or "").strip() or "test"]
+        # **空的就是沒有來源**（F10）。以前這裡是「空／空白 → 退回 test」，
+        # 與 run() 保持同一套 —— 那讓「使用者清空了這一格」與「使用者從來沒動
+        # 過它」變成同一件事，而畫布只看得到後者。
+        name = str(params.get("source", "test") or "").strip()
+        return [name] if name else []
 
     @classmethod
     def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:
-        return [str(params.get("out", "mask") or "").strip() or "mask"]
+        # 空的名字在 F10-7 之後過不了 ``validate_params``（輸出流一定要有名字），
+        # 所以這裡**不再偷偷退回 "mask"** —— 那個退路是「宣告與值不一致」的暗門，
+        # 而畫布是照宣告畫的。手寫 JSON 塞空字串的話，lint 會用 bad-param 講。
+        name = str(params.get("out", "mask") or "").strip()
+        return [name] if name else []
 
     @classmethod
     def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
@@ -101,12 +107,12 @@ class RoiMaskStep(Step):
     # ---- 運算 -------------------------------------------------------------
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
-        # 空字串照 resolve_reads / resolve_writes 的同一套預設走。那兩個
-        # 欄位是可編輯的下拉，清空是清得出來的 —— 清空之後 lint 與畫布講的
-        # 是 test → mask，執行就**必須**也是 test → mask，否則就是「畫布在
-        # 說謊」：下游 Normalize 找不到它明明看得到的那條流。
-        source = str(p["source"] or "").strip() or "test"
-        out = str(p["out"] or "").strip() or "mask"
+        # 執行用的名字要跟 resolve_reads / resolve_writes 宣告的**逐字相同**
+        # —— 兩邊各自演化的下場是「畫布在說謊」：下游 Normalize 找不到它明明
+        # 看得到的那條流。F10 起兩邊都不再自己補預設值（空的來源會被
+        # `missing_inputs` 擋在跑之前，空的輸出名過不了 validate）。
+        source = str(p["source"] or "").strip()
+        out = str(p["out"] or "").strip()
         src = require_image(ctx, self.key, source)
         h, w = src.shape[:2]
         mask = np.zeros((h, w), dtype=np.uint8)

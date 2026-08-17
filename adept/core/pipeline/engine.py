@@ -357,6 +357,18 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
                     node.step,
                     f"unknown step '{node.step}'; registered: {sorted(registry)}")
             params = step_cls.validate_params(node.params)
+            # **沒有來源就不准跑**（F10）。這一格是空的，代表畫布上沒有任何
+            # 一條線接進來 —— 以前這種卡照樣跑得完：`MultiStreamStep` 空的
+            # ``streams`` 會退回 ``test``，量測卡的空 ``source`` 則在
+            # ``ctx.images`` 那份全域名字表裡撿「最後一個寫它的人」。
+            # 跑得完、有數字、而且跟畫布上畫的東西沒有關係。
+            not_connected = step_cls.missing_inputs(params)
+            if not_connected:
+                raise StepError(
+                    node.step,
+                    "no input connected: %s. Drag a line from the card that "
+                    "produces the image into this one."
+                    % ", ".join("'%s' is empty" % n for n in not_connected))
             # F9-2/F9-5a：卡片看到的是**照它的入線組出來的** Context。
             visible: Dict[str, Any] = {}
             for name in step_cls.resolve_reads(params):

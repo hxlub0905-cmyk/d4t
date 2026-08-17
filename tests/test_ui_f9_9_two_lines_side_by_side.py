@@ -129,18 +129,28 @@ def test_cutting_a_line_also_stops_the_card_working_on_that_stream(window):
     assert "test" in window.status_text()
 
 
-def test_cutting_the_last_line_leaves_the_card_on_that_stream(window):
-    """最後一條不清空。
+def test_cutting_the_last_line_leaves_the_card_with_no_source(window):
+    """剪掉最後一條線 → 那張卡回到「還沒接線」的狀態（F10 改）。
 
-    ``MultiStreamStep.stream_list`` 對空字串是 ``keys or ["test"]`` ——
-    清成空的那張卡會**安靜地跑回 test**，比留著更難解釋。
+    這條測試本來鎖的是相反的事（最後一條不清空），理由是
+    ``MultiStreamStep.stream_list`` 對空字串會退回 ``test`` —— 清成空的卡會
+    安靜地跑回 test，比留著更難解釋。**F10 把那個 ``or`` 拿掉了**，所以保留
+    條款也跟著沒有理由：留著的話畫布上線沒了、卡片卻還指著一條流，而且照樣
+    跑得出數字。
+
+    使用者回報的原話：「連接卡片節點後，再把線按 X 清掉 → 後方卡片的 Node
+    不會跟著清掉。」
     """
     src, nid = _load_and(window)
     window._on_edge_added(src, nid, "test")
     window._on_edge_removed(src, nid, "test")
 
     assert window.model.edges == []
-    assert window.model.nodes[nid].params["streams"] == "test"
+    assert window.model.nodes[nid].params["streams"] == ""
+    # 回到跟「剛加進來」一模一樣：沒有輸出埠、lint 擋著
+    assert window.pipeline.node_item(nid).out_names() == []
+    assert [i.code for i in window.model.validate() if i.node_id == nid] \
+        == ["not-connected"]
 
 
 # --------------------------------------------------------------------------- #

@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import wire_up  # noqa: E402  —— F10：加完卡要接線
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 EXAMPLE = Path(__file__).resolve().parent / "fixtures" / "recipes"
@@ -256,15 +258,26 @@ def test_a_line_that_would_loop_leaves_no_trace(window):
     assert window.status_level() == "error"
 
 
-def test_wiring_a_card_with_no_stream_parameter_changes_nothing(window):
-    """Compare 卡有自己的 a / b 兩個輸入，連線不該亂改它們。"""
+def test_wiring_a_card_lands_on_the_input_you_dropped_it_on(window):
+    """Compare 卡的 a / b 是**兩顆分得開的輸入埠**（F10）。
+
+    這條測試以前叫 `…_changes_nothing`，斷言「連線不該亂改 a / b」——
+    那是 F10 之前的真相：那兩格靠預設值填好，畫布上那條線其實什麼都沒說，
+    所以「接哪一顆都一樣」。使用者要的多連一正好要求相反的事：**線落在哪一格
+    由使用者決定**，兩條線接進同一張卡的不同輸入才有意義。
+    """
     src = window.model.node_order[0]
-    a = window.add_card_after(src, "align")
-    window._on_edge_added(src, a, "test")
-    sub = window.add_card_after(a, "subtract")
-    before = dict(window.model.nodes[sub].params)
-    window.pipeline.link_to(src, sub, port=1)
-    assert window.model.nodes[sub].params == before
+    sub = window.add_card_after(src, "subtract")
+    assert window.model.nodes[sub].params["a"] == ""
+    assert window.model.nodes[sub].params["b"] == ""
+
+    window.pipeline.link_to(src, sub, port=0, dst_port=0)   # test → First
+    window.pipeline.link_to(src, sub, port=1, dst_port=1)   # ref  → Second
+    assert window.model.nodes[sub].params["a"] == "test"
+    assert window.model.nodes[sub].params["b"] == "ref"
+    # 兩條線各自落在自己的埠上，畫布上不會疊在一起
+    lines = {(e.src_out, e.dst_in) for e in window.model.edges if e.dst == sub}
+    assert lines == {("test", "a"), ("ref", "b")}
 
 
 def test_adding_from_the_library_lands_after_the_selected_card(window):
@@ -319,7 +332,7 @@ def test_a_measure_card_still_has_an_output_port(window):
     （跑一張卡的 local Context 是用它的輸入種出來的，跑完整份收成產出），
     這裡是把它畫出來。「不需要就不要連它」—— 多出來的埠不接線就沒有作用。
     """
-    nid = window.model.add_step("glv_stats")
+    nid = wire_up(window.model, window.model.add_step("glv_stats"))
     window._refresh_all()
     card = window.pipeline.card(nid)
     assert card is not None
@@ -336,7 +349,7 @@ def test_a_card_that_makes_a_new_stream_also_passes_its_inputs_through(window):
 
     使用者的原話：「這樣才會更 flexible，如果我不需其它後端接口，不要連他就好」。
     """
-    nid = window.model.add_step("subtract")
+    nid = wire_up(window.model, window.model.add_step("subtract"))
     window._refresh_all()
     outs = window.pipeline.card(nid).out_names()
     assert "diff" in outs, "自己產的新流不見了"
@@ -354,7 +367,7 @@ def test_the_source_cannot_be_changed_from_the_card_settings(window):
     """
     from PySide6.QtWidgets import QLineEdit
 
-    nid = window.model.add_step("denoise")
+    nid = wire_up(window.model, window.model.add_step("denoise"))
     window.select_node(nid)
     editor = window.param_form.editor("streams")
     assert isinstance(editor, QLineEdit), "來源欄位還是可編輯的控制項"

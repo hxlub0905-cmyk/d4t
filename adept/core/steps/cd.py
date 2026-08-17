@@ -35,14 +35,14 @@ from ..pipeline.step import (
     CATEGORY_ALGO, ParamSpec, Step, register_step, GROUP_MEASURE,
 )
 from ._util import (
-    output_prefix_spec, prefix_features, prefix_names, roi_rect_or_none,
+    MultiSourceStep, output_prefix_spec, roi_rect_or_none,
 )
 
 _ZERO = {"cd_x_px": 0.0, "cd_y_px": 0.0, "area_px": 0.0}
 
 
 @register_step
-class CdMeasureStep(Step):
+class CdMeasureStep(MultiSourceStep):
     """CD 量測（M1：最大 blob 的 bbox 尺寸；可選次像素上下邊精修）。"""
 
     key = "cd_measure"
@@ -53,7 +53,7 @@ class CdMeasureStep(Step):
             "pixels. Currently a bounding-box estimate. Convert to nm at "
             "export time, where you enter the nm per pixel yourself.")
     params = [
-        ParamSpec(name="source", type="image_key", default="diff",
+        ParamSpec(name="source", type="image_keys", direction="in", default="diff",
                   help="Image stream sampled when refining edges (usually diff)."),
         ParamSpec(name="roi", type="str", default="",
                   help=("Which region to measure — the name given by an ROI "
@@ -70,23 +70,17 @@ class CdMeasureStep(Step):
     features_out = ["cd_x_px", "cd_y_px", "area_px"]
 
     @classmethod
-    def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
-        return [params.get("source", "diff")]
-
-    @classmethod
-    def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
-        return prefix_names(params.get("output_prefix", ""), cls.features_out)
-
-    @classmethod
     def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
         name = str(params.get("roi", "blob") or "").strip()
         return [name] if name else []
 
-    def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
-        p = self.validate_params(params)
-        # 尺寸來源：優先用參數指定的流，否則任何一張都可以。可能一張都沒有 ——
-        # roi="blob" 不需要影像（矩形已是像素座標），所以這裡不能提早 return。
-        shape_src = ctx.images.get(p["source"])
+    #: 影像不是必要的（見 ``_util.MultiSourceStep.REQUIRE_IMAGE``）。
+    REQUIRE_IMAGE = False
+
+    def measure(self, ctx: Context, img, p: Dict[str, Any]):
+        # 尺寸來源：優先用接進來的那條流，否則任何一張都可以。可能一張都沒有
+        # —— roi="blob" 不需要影像（矩形已是像素座標）。
+        shape_src = img
         if shape_src is None:
             shape_src = next(iter(ctx.images.values()), None)
 
@@ -95,8 +89,7 @@ class CdMeasureStep(Step):
             ctx.warn(f"[{self.key}] no blob found (run Blob segment first, or "
                      f"point roi at a Define region card); all CD features "
                      f"recorded as 0.")
-            ctx.add_features(prefix_features(p["output_prefix"], _ZERO))
-            return ctx
+            return dict(_ZERO)
 
         bx, by = float(rect[0]), float(rect[1])
         bw, bh = float(rect[2]), float(rect[3])
@@ -111,11 +104,9 @@ class CdMeasureStep(Step):
         cd_y_px = bh
 
         if p["refine"] == "subpixel":
-            img = ctx.images.get(p["source"])
             if img is None:
-                ctx.warn(f"[{self.key}] image stream '{p['source']}' does not "
-                          f"exist; cannot refine to sub-pixel, using the "
-                          f"bounding box.")
+                ctx.warn(f"[{self.key}] no image on that input; cannot refine "
+                         f"to sub-pixel, using the bounding box.")
             else:
                 try:
                     top = algo_subpixel.refine_yedge_subpixel(
@@ -138,5 +129,4 @@ class CdMeasureStep(Step):
         # 全部 pixel。要 nm 的話在 Export 精靈填 nm/px（見模組 docstring）。
         feats = {"cd_x_px": float(cd_x_px), "cd_y_px": float(cd_y_px),
                  "area_px": float(area_px)}
-        ctx.add_features(prefix_features(p["output_prefix"], feats))
-        return ctx
+        return feats

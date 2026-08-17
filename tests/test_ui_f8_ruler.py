@@ -24,6 +24,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from conftest import wire_up  # noqa: E402  —— F10：加完卡要接線
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
@@ -330,7 +332,7 @@ def test_holding_the_ruler_marks_the_preview_image(qapp, lines_lot):
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     try:
         win.load_dataset_path(lines_lot["klarf"], sync=True)
-        nid = win.model.add_step("roi_cross")
+        nid = wire_up(win.model, win.model.add_step("roi_cross"))
         win.model.set_param(nid, "roi_out", "xing")
         win.select_node(nid)
         win.refresh_preview(sync=True)
@@ -360,7 +362,7 @@ def test_leaving_the_card_clears_the_band(qapp, lines_lot):
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     try:
         win.load_dataset_path(lines_lot["klarf"], sync=True)
-        nid = win.model.add_step("roi_cross")
+        nid = wire_up(win.model, win.model.add_step("roi_cross"))
         win.select_node(nid)
         win.refresh_preview(sync=True)
         insp = win.inspector()
@@ -369,7 +371,7 @@ def test_leaving_the_card_clears_the_band(qapp, lines_lot):
         _move(insp.across, _x_of(insp.across, 90))
         assert win.image_view.measure_span() is not None
 
-        other = win.model.add_step("align")
+        other = wire_up(win.model, win.model.add_step("align"))
         win.select_node(other)
         assert win.image_view.measure_span() is None
     finally:

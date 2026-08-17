@@ -20,8 +20,7 @@ from ..pipeline.step import (
     CATEGORY_ALGO, ParamSpec, Step, StepError, register_step, GROUP_MEASURE,
 )
 from ._util import (
-    output_prefix_spec, parse_key_list, prefix_features, roi_pixels,
-    prefix_names, require_image,
+    MultiSourceStep, output_prefix_spec, parse_key_list, roi_pixels,
 )
 
 _P_ALIAS = re.compile(r"^glv_p(\d+)$")
@@ -44,7 +43,7 @@ def _canonical(mid: str) -> str:
 
 
 @register_step
-class GlvStatsStep(Step):
+class GlvStatsStep(MultiSourceStep):
     """GLV 統計：整張或中央方框的灰階統計量。"""
 
     key = "glv_stats"
@@ -55,7 +54,7 @@ class GlvStatsStep(Step):
             "percentiles…) inside a region, and write each one out as a "
             "feature.")
     params = [
-        ParamSpec(name="source", type="image_key", default="test",
+        ParamSpec(name="source", type="image_keys", direction="in", default="test",
                   help="Image stream to compute statistics on."),
         ParamSpec(name="roi", type="str", default="",
                   help=("Which region to measure in — the name given by a "
@@ -80,23 +79,16 @@ class GlvStatsStep(Step):
     features_out = ["glv_mean", "glv_std", "glv_p50"]
 
     @classmethod
-    def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
-        return [params.get("source", "test")]
-
-    @classmethod
     def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
         name = str(params.get("roi", "") or "").strip()
         return [name] if name else []
 
     @classmethod
-    def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
+    def feature_names(cls, params: Dict[str, Any]) -> List[str]:
         mids = parse_key_list(params.get("metrics", "glv_mean,glv_std,glv_p50"))
-        return prefix_names(params.get("output_prefix", ""),
-                            mids or list(cls.features_out))
+        return mids or list(cls.features_out)
 
-    def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
-        p = self.validate_params(params)
-        img = require_image(ctx, self.key, p["source"])
+    def measure(self, ctx: Context, img, p: Dict[str, Any]):
         mids = parse_key_list(p["metrics"])
         if not mids:
             raise StepError(self.key, "metrics is empty; list at least one statistic (e.g. glv_mean).")
@@ -115,5 +107,4 @@ class GlvStatsStep(Step):
                     f"unknown statistic '{mid}'; available: "
                     f"{sorted(algo_glv.GLV_STATS)} or glv_q<0-100> / glv_p<0-100>.")
             feats[mid] = algo_glv.glv_value(patch, canon)   # feature 名照使用者列的寫
-        ctx.add_features(prefix_features(p["output_prefix"], feats))
-        return ctx
+        return feats

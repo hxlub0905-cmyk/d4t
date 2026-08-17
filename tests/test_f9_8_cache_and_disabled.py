@@ -61,7 +61,8 @@ def cards():
         label = "乘一個數"
         category = CATEGORY_IMAGE          # 影像段 → 會落在 checkpoint 之前
         help = "測試用：把指定的流乘上 factor，就地寫回同一條流"
-        params = [ParamSpec("streams", "image_keys", "ref", "要處理的影像流"),
+        params = [ParamSpec("streams", "image_keys", "ref", "要處理的影像流",
+                            direction="in"),
                   ParamSpec("factor", "float", 2.0, "乘數")]
 
         @classmethod
@@ -84,7 +85,8 @@ def cards():
         category = CATEGORY_ALGO           # 算法段 → checkpoint 之後
         help = "測試用：量指定影像流的平均值"
         features_out = ["mean"]
-        params = [ParamSpec("source", "image_key", "ref", "要量哪條流")]
+        params = [ParamSpec("source", "image_key", "ref", "要量哪條流",
+                            direction="in")]
 
         @classmethod
         def resolve_reads(cls, params):

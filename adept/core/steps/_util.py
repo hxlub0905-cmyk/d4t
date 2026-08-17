@@ -70,7 +70,7 @@ STREAMS_HELP = (
 
 def streams_spec(default: str = "test") -> ParamSpec:
     """多流 Enhance 卡共用的 ``streams`` 參數。"""
-    return ParamSpec(name="streams", type="image_keys", default=default,
+    return ParamSpec(name="streams", type="image_keys", direction="in", default=default,
                      label="Image streams", help=STREAMS_HELP)
 
 
@@ -99,8 +99,16 @@ class MultiStreamStep(Step):
 
     @classmethod
     def stream_list(cls, params: Dict[str, object]) -> List[str]:
-        keys = parse_key_list(params.get("streams", "test"))
-        return keys or ["test"]
+        """接進來的那幾條流。**空的就是空的**（F10）。
+
+        以前這裡是 ``keys or ["test"]`` —— 一張沒有接線的卡會安靜地跑回
+        ``test``。那個 ``or`` 是「畫布說謊」的一個源頭：畫面上沒有線、參數是
+        空的，而它照樣量得出數字，於是使用者沒有任何線索知道自己漏接了。
+
+        現在空的就是沒有來源：畫布不畫輸出埠、lint 報 ``not-connected``、
+        引擎在跑之前就擋下來並講一句可以照做的話。
+        """
+        return parse_key_list(params.get("streams", "test"))
 
     @classmethod
     def resolve_writes(cls, params: Dict[str, object]) -> List[str]:
@@ -272,3 +280,90 @@ def parse_key_list(raw: str) -> List[str]:
     if not raw:
         return []
     return [tok.strip() for tok in str(raw).split(",") if tok.strip()]
+
+
+# --------------------------------------------------------------------------- #
+# 量測卡：一格輸入接好幾條線（F10-3）
+# --------------------------------------------------------------------------- #
+class MultiSourceStep(Step):
+    """量測卡的基底：``source`` 可以是**好幾條流**，每條各算一份特徵。
+
+    為什麼（使用者定調 2026-08-17）
+    ------------------------------
+    「餵圖是節點跟節點間在處理的，卡片只負責『餵進來的這些 source 要怎麼處理
+    並再把 result 丟出去』，所以理想上可以多連一，也可以一連多。」
+
+    量測卡以前的 ``source`` 是 ``image_key``（單一角色），於是往它拉第二條線的
+    意思是「改接別的」—— 舊線被拿掉。想同時量 test 與 diff 就得放兩張卡，而那
+    兩張卡的參數還得逐格對齊（量的統計量、ROI、門檻…），對不齊的時候畫面上
+    看不出來。
+
+    命名（使用者定調：**自動加流名前綴**）
+    ------------------------------------
+    兩條以上才加：``diff_glv_max`` / ``test_glv_max``。**只接一條時名字跟以前
+    逐字相同** —— 那是「分數表達式不必改寫」與「黃金值不動」的前提，也是這個
+    改動敢動既有 recipe 的唯一理由。
+
+    子類實作 :meth:`measure`（吃一張影像、回一組數字），迴圈與命名交給基底 ——
+    跟 Enhance 卡的 :class:`MultiStreamStep` 同一套辦法：**每張卡只寫它自己那
+    件事**，「接了幾條」不是每張卡各答一次的問題。
+    """
+
+    #: 吃影像流的那個參數名（子類要換名字的話覆寫）。
+    SOURCE = "source"
+
+    #: 這張卡**沒有影像也量得下去**嗎（``cd_measure`` 是：``roi="blob"`` 時
+    #: 矩形已經是像素座標，影像只用來做次像素精修）。設 False 的卡拿到的
+    #: ``img`` 可能是 ``None``，自己決定怎麼辦。
+    REQUIRE_IMAGE = True
+
+    @classmethod
+    def source_list(cls, params: Dict[str, object]) -> List[str]:
+        return parse_key_list(params.get(cls.SOURCE, ""))
+
+    @classmethod
+    def resolve_reads(cls, params: Dict[str, object]) -> List[str]:
+        return cls.source_list(params)
+
+    @classmethod
+    def stream_prefix(cls, params: Dict[str, object], key: str) -> str:
+        """這一條流的特徵前綴（**只接一條時是空的**）。
+
+        空的那個情況是這個設計的重點：只接一條線時，特徵名跟以前逐字相同，
+        所以既有的分數表達式不用改寫、黃金值一個數字都不動。
+        """
+        return str(key) if len(cls.source_list(params)) > 1 else ""
+
+    @classmethod
+    def full_prefix(cls, params: Dict[str, object], key: str) -> str:
+        """流名前綴 ＋ 使用者自己填的 ``output_prefix``（兩個都可能是空的）。"""
+        parts = [cls.stream_prefix(params, key),
+                 str(params.get("output_prefix", "") or "").strip()]
+        return "_".join([x for x in parts if x])
+
+    @classmethod
+    def feature_names(cls, params: Dict[str, object]) -> List[str]:
+        """這張卡**在這組參數下**會產出的特徵基本名（不含任何前綴）。"""
+        return list(cls.features_out)
+
+    @classmethod
+    def resolve_features(cls, params: Dict[str, object]) -> List[str]:
+        keys = cls.source_list(params) or [""]
+        base = cls.feature_names(params)
+        return [n for k in keys for n in prefix_names(cls.full_prefix(params, k),
+                                                      base)]
+
+    def measure(self, ctx: Context, img, params: Dict[str, object]):
+        """量一張影像，回 ``{特徵名: 值}``（回 ``None`` = 這條流沒有東西可記）。"""
+        raise NotImplementedError
+
+    def run(self, ctx: Context, params: Dict[str, object]) -> Context:
+        p = self.validate_params(params)
+        for key in self.source_list(p):
+            img = (require_image(ctx, self.key, key) if self.REQUIRE_IMAGE
+                   else ctx.images.get(key))
+            feats = self.measure(ctx, img, p)
+            if not feats:
+                continue
+            ctx.add_features(prefix_features(self.full_prefix(p, key), feats))
+        return ctx

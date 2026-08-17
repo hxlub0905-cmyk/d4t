@@ -108,9 +108,15 @@ def test_the_subtitle_says_what_the_card_does_not_its_id(window):
     而卡片名字就在它上面一行，所以那一行等於沒有資訊。"""
     src = window.model.node_order[0]
     a = window.add_card_after(src, "align")
+    # F10：副標講的是「這張卡吃什麼、吐什麼」，而還沒接線的卡兩者都還不存在
+    # —— 所以先把線拉上去，那正是使用者要看到這一行之前會做的事。
+    window._on_edge_added(src, a, "ref", "moving")
+    window._on_edge_added(src, a, "test", "fixed")
     assert window.pipeline.card(a).subtitle() == "test ref → ref_aligned"
 
     b = window.add_card_after(a, "subtract")
+    window._on_edge_added(src, b, "test", "a")
+    window._on_edge_added(a, b, "ref_aligned", "b")
     c = window.add_card_after(b, "roi_template")
     window._on_edge_added(b, c, "diff")        # 來源由線決定（F9-7）
     # Region 卡不寫影像流，它定義的是具名區域 —— 副標仍然要講得出它產出什麼

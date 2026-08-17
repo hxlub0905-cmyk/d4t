@@ -209,7 +209,15 @@ class RecipeModel:
         step_cls = get_step(step_key)          # 未知 key 會 raise KeyError
         self._push_undo()
         node_id = self._new_id(step_key)
-        params = step_cls.validate_params({})  # 全預設
+        # **剛加進來的卡前後都是空的**（F10，使用者定調 2026-08-17）：
+        # 全預設之後把每一格輸入清掉。畫布上沒有線，這張卡就沒有來源 ——
+        # 而在這之前，一張新卡帶著 ``source="diff"`` 這種預設值進來，畫布照著
+        # 畫出一個 `diff` 輸入埠、引擎照著去全域名字表拿圖，於是「還沒接線」
+        # 跟「接好了」跑出來的數字**一模一樣**（實測逐項相同）。
+        #
+        # 清的是**這一張卡的值**，不是卡片的 ``default`` —— 後者是規格的預設
+        # 值，手寫 recipe 省略那一格時仍然要有東西可用。
+        params = step_cls.validate_params(step_cls.cleared_inputs())
         self.nodes[node_id] = RecipeNode(id=node_id, step=step_key, params=params)
         if at is None:
             self.node_order.append(node_id)
@@ -219,10 +227,29 @@ class RecipeModel:
         return node_id
 
     def remove(self, node_id: str) -> None:
+        """拿掉一張卡 —— **連同碰到它的每一條線**（F10-5）。
+
+        以前只刪節點，線留在 ``edges`` 裡指著一個不存在的節點。平常看不出來
+        （畫布只畫兩端都還在的線、``execution_order`` 也會過濾掉），直到
+        **新卡拿到同一個自動編號**：``_new_id`` 看到 ``roi_cross`` 沒人用就
+        再發一次，那條殘留的線於是接到了一張使用者從來沒有接過的新卡。
+
+        使用者回報的原話：「刪掉 Profile 這整個 Card 後，再 add new card
+        profile，DAG 畫布上線還會殘留。」而且那條線是**假的** —— 新卡的來源
+        參數是空的，畫布與設定當場互相矛盾。
+
+        改名為「殘留」不足以形容：那條線會被存進 recipe、會進快取簽章、也會
+        被引擎當成明講的來源。所以它必須在刪卡的同一步就消失。
+        """
         if node_id in self.nodes:
             self._push_undo()
             del self.nodes[node_id]
             self.node_order = [n for n in self.node_order if n != node_id]
+            self.edges = [e for e in self.edges
+                          if e.src != node_id and e.dst != node_id]
+            order = self._topological_order(self.edges)
+            if order is not None:
+                self.node_order = order
             self._changed()
 
     def move(self, node_id: str, delta: int) -> None:
@@ -249,10 +276,60 @@ class RecipeModel:
         trial = dict(node.params)
         trial[name] = value
         clean = step_cls.validate_params(trial)   # 整組重驗（含相依預設）
-        if clean != node.params:
-            self._push_undo("param:%s:%s" % (node_id, name))
-            node.params = clean
-            self._changed()
+        if clean == node.params:
+            return
+        spec = next((sp for sp in step_cls.params if sp.name == name), None)
+        old_name = str(node.params.get(name, "") or "")
+        new_name = str(clean.get(name, "") or "")
+        # ⚠ **不要**用 ``compound`` 包住這一段。``compound`` 會讓 ``_push_undo``
+        # 走「一整段只推一次」那條路，於是繞過 ``coalesce`` —— 拖一次滑桿發的
+        # 幾十次 set_param 會各記一步，按 Ctrl+Z 只退回一個畫素
+        # （`test_one_ctrl_z_undoes_a_whole_slider_drag` 抓到的）。
+        # 這裡本來就只推一次，改名連帶動到的東西都在那一次之後。
+        self._push_undo("param:%s:%s" % (node_id, name))
+        node.params = clean
+        # **改輸出流的名字 = 沿著線把下游一起帶走**（F10-6）。
+        #
+        # `write result to` 改成 GGG 之後，下游那張卡的 `source` 還寫著 `diff`、
+        # 線上的 `src_out` 也還是 `diff` —— 於是使用者只是幫一條流取個好記的
+        # 名字，整條 pipeline 就斷了（lint 報 missing-image）。而他從畫布上看到
+        # 的是「線還在」，因為線是照節點畫的。
+        #
+        # 名字是**顯示用的標籤**，線才是接線的事實（見 `Edge.dst_in` 的說明）。
+        # 所以改名不該動到「誰接誰」，只該讓兩端的標籤跟著換。
+        if spec is not None and spec.is_output() and old_name and new_name:
+            self._rename_stream(node_id, old_name, new_name)
+        self._changed()
+
+    def _rename_stream(self, node_id: str, old: str, new: str) -> None:
+        """某張卡的輸出流改名 → 從它出發的線與下游的來源參數一起改。"""
+        for i, e in enumerate(list(self.edges)):
+            if e.src != str(node_id) or e.src_out != old:
+                continue
+            self.edges[i] = Edge(src=e.src, dst=e.dst, src_out=new,
+                                 dst_in=e.dst_in)
+            dst = self.nodes.get(e.dst)
+            if dst is None or not e.dst_in:
+                continue
+            try:
+                dst_spec = {sp.name: sp for sp in
+                            get_step(dst.step).params}[e.dst_in]
+            except KeyError:                   # pragma: no cover
+                continue
+            cur = str(dst.params.get(e.dst_in, "") or "")
+            if dst_spec.type == "image_keys":
+                keys = [new if k.strip() == old else k.strip()
+                        for k in cur.split(",") if k.strip()]
+                value = ",".join(keys)
+            elif cur == old:
+                value = new
+            else:
+                continue
+            try:
+                dst.params = get_step(dst.step).validate_params(
+                    dict(dst.params, **{e.dst_in: value}))
+            except ParamError:                 # pragma: no cover — 值就是流名
+                continue
 
     # ---- score ------------------------------------------------------------
     def set_expr(self, expr: str) -> None:
@@ -414,7 +491,8 @@ class RecipeModel:
         return True
 
     def remove_edge(self, src: str, dst: str,
-                    src_out: Optional[str] = None) -> bool:
+                    src_out: Optional[str] = None,
+                    dst_in: Optional[str] = None) -> bool:
         """拿掉線。``src_out=None`` = 這兩張卡之間**全部**；給了就只拿那一條。
 
         剪刀（線上的 ×）給的是 ``src_out``（F9-9）—— 兩張卡之間可能有兩條並排
@@ -424,7 +502,8 @@ class RecipeModel:
 
         def hit(e: Edge) -> bool:
             return (e.src == src and e.dst == dst
-                    and (src_out is None or e.src_out == str(src_out)))
+                    and (src_out is None or e.src_out == str(src_out))
+                    and (dst_in is None or e.dst_in == str(dst_in)))
 
         keep = [e for e in self.edges if not hit(e)]
         if len(keep) == len(self.edges):
@@ -449,13 +528,17 @@ class RecipeModel:
                 out.append((e.src, e.dst))
         return out
 
-    def edge_lines(self) -> List[Tuple[str, str, str]]:
-        """畫布要畫的每一條線：``(來源, 目的, 從哪顆輸出埠)``。
+    def edge_lines(self) -> List[Tuple[str, str, str, str]]:
+        """畫布要畫的每一條線：``(來源, 目的, 從哪顆輸出埠, 進哪個輸入參數)``。
 
         埠沒填的線回空字串 —— 畫布看到空字串就退回舊的推導（兩端共用哪幾條流
         就畫幾條），既有 recipe 的畫面因此一個畫素都沒變。
+
+        第四欄是 F10 加的：兩條線接進同一張卡的**不同**輸入（``subtract`` 的
+        a 與 b）時，畫布要知道各自進哪一顆埠，否則兩條線疊在同一個點上 ——
+        而那正是使用者要在畫布上讀到的東西。
         """
-        return [(e.src, e.dst, e.src_out) for e in self.edges]
+        return [(e.src, e.dst, e.src_out, e.dst_in) for e in self.edges]
 
     # ---- Recipe 互轉 -------------------------------------------------------
     def to_recipe(self) -> Recipe:

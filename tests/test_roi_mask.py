@@ -15,7 +15,9 @@ import pytest
 import adept.core.steps  # noqa: F401 — 註冊卡片
 from adept.core.pipeline.context import Context
 from adept.core.pipeline.recipe import Recipe, RecipeNode, ScoreSpec, validate
-from adept.core.pipeline.step import REGISTRY, StepError, get_step
+from adept.core.pipeline.step import (
+    REGISTRY, ParamError, StepError, get_step,
+)
 
 H = W = 128
 
@@ -51,21 +53,33 @@ def test_the_card_declares_its_contract():
     assert cls.resolve_regions_in(p) == ["epi", "mg"]
 
 
-def test_cleared_source_and_out_fields_run_exactly_as_declared():
-    """``Same size as`` / ``Write mask to`` 是可編輯的下拉，清空是清得出來的。
+def test_cleared_source_and_out_fields_are_not_a_silent_fallback():
+    """清空 ``Same size as`` / ``Write mask to`` 之後，**兩邊都不准自己補一個值**。
 
-    清空之後 lint 與畫布講的是 test → mask（resolve_* 的預設），執行就必須
-    也是 test → mask —— 兩邊各自演化的話，下游 Normalize 會找不到它明明
-    看得到的那條流（PR #6 review 抓到的）。
+    這條測試原本鎖的是相反的事（清空就退回宣告的預設 test → mask），理由是
+    「lint 與畫布講的跟執行必須一致」。F10 用另一個方式達成同一件事，而且更早
+    一步：**兩邊都不准有值**。
+
+    * 空的 ``source`` = 還沒接線（F10-2）—— 沒有輸出、lint 報 not-connected、
+      引擎在跑之前就擋下來，不會安靜地拿 test 去做。
+    * 空的 ``out`` 在 F10-7 之後**過不了 validate**：一張會產生新流的卡一定要
+      有名字，那個名字就是下游要接的東西（使用者自己取，見 `write result to`）。
+
+    退回預設值那條路的問題是：它讓「使用者清空了這一格」與「使用者從來沒動過
+    這一格」變成同一件事，而畫布只看得到後者。
     """
     cls = get_step("roi_mask")
-    p = {"regions": "epi", "source": "", "out": "  "}
-    assert cls.resolve_reads(p) == ["test"]
-    assert cls.resolve_writes(p) == ["mask"]
+    p = {"regions": "epi", "source": "", "out": "mask"}
+    assert cls.resolve_reads(p) == [], "空的來源不該宣告成 test"
+    assert cls.missing_inputs(p) == ["source"]
 
+    with pytest.raises(ParamError):
+        cls.validate_params({"regions": "epi", "out": "  "})
+
+    # 接上來源之後照樣跑得動，寫出去的流就是宣告的那一條
     ctx = _ctx_with_regions()
-    cls().run(ctx, dict(p))
-    assert "mask" in ctx.images, "執行寫出去的流要跟宣告的一致"
+    cls().run(ctx, {"regions": "epi", "source": "test", "out": "mask"})
+    assert "mask" in ctx.images
     assert ctx.images["mask"].shape == (H, W)
 
 

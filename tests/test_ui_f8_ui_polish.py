@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import wire_up  # noqa: E402  —— F10：加完卡要接線
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
@@ -210,7 +212,7 @@ def test_the_canvas_pops_out_into_its_own_window(window, qapp):
     assert view.selected() == nid, "選取要跨視窗同步"
 
     # 加一張卡，兩邊都要長出來
-    n2 = window.model.add_step("denoise")
+    n2 = wire_up(window.model, window.model.add_step("denoise"))
     qapp.processEvents()
     assert n2 in view.node_ids(), "model 動了，彈出視窗要跟著動"
 
@@ -223,7 +225,7 @@ def test_the_canvas_pops_out_into_its_own_window(window, qapp):
     assert abs(got[0] - before[0]) <= 2, "還原的是彈出前的比例：%s vs %s" % (got, before)
 
     # 關掉之後再動 model 不可以炸（懸空參照）
-    window.model.add_step("tone")
+    wire_up(window.model, window.model.add_step("tone"))
     qapp.processEvents()
 
 
@@ -244,7 +246,7 @@ def test_dragged_positions_survive_edits_and_popout(window, qapp):
     window.model.set_param(nid, list(window.model.nodes[nid].params)[0],
                            window.model.nodes[nid].params[
                                list(window.model.nodes[nid].params)[0]])
-    window.model.add_step("denoise")        # 觸發整張畫布重建
+    wire_up(window.model, window.model.add_step("denoise"))        # 觸發整張畫布重建
     qapp.processEvents()
     moved = window.pipeline.node_item(nid).pos()
     assert (round(moved.x()), round(moved.y())) == (333, 444), \
@@ -287,8 +289,8 @@ def test_a_measure_card_draws_the_region_it_reads(window, qapp):
     """選著量測卡時，預覽要畫出**它在量的那個區域**（使用者：「mask 蓋在
     diff 上」）。以前只有 Region 卡畫框 —— 量測卡 roi 填錯只能用數字猜。"""
     m = window.model
-    pr = m.add_step("roi_cross")
-    gs = m.add_step("glv_stats")
+    pr = wire_up(m, m.add_step("roi_cross"))
+    gs = wire_up(m, m.add_step("glv_stats"))
     m.set_param(gs, "roi", "cross")
     window.select_node(gs)
     window.refresh_preview(sync=True)
@@ -380,7 +382,7 @@ def test_a_new_mask_card_inherits_the_regions_defined_upstream(window, qapp):
     定義過的區域名自動填進去。"""
     window.show()
     qapp.processEvents()
-    with_regions = window.model.add_step("roi_cross")
+    with_regions = wire_up(window.model, window.model.add_step("roi_cross"))
     qapp.processEvents()
     window.select_node(with_regions)
     window._on_add_requested("roi_mask")

@@ -123,12 +123,15 @@ def test_both_ports_can_land_on_the_same_node_and_each_gets_its_own_line(window)
     assert load.out_names() == ["test", "ref"]
     assert sub.in_names() == ["test", "ref"]
 
-    window.pipeline.link_to("load", "sub", port=0)
+    window.pipeline.link_to("load", "sub", port=0, dst_port=0)
     assert window.model.edge_pairs() == [("load", "sub")], "model 仍然是一條依賴"
     assert len([e for e in window.pipeline._edges
                 if e.pair() == ("load", "sub")]) == 1, "拉一條就是一條"
 
-    window.pipeline.link_to("load", "sub", port=1)      # 第二顆埠
+    # 第二顆輸出埠 → 第二顆**輸入**埠（F10）。兩條都往同一格輸入拉的話，
+    # 第二條的意思是「我改接別的」，那時候並排的線只會有一條 —— 見
+    # test_ui_f7_19_wiring 的角色埠那一條。
+    window.pipeline.link_to("load", "sub", port=1, dst_port=1)
     assert len([e for e in window.pipeline._edges
                 if e.pair() == ("load", "sub")]) == 2, "兩條並排的線"
     assert len(window.model.edges) == 2, "model 也要記得兩條（F9-9）"
@@ -158,7 +161,7 @@ def test_duplicate_and_self_links_are_ignored(window):
 def test_removing_an_edge_puts_it_back(window):
     window.pipeline.link_to("load", "norm")
     assert ("load", "norm") in window.model.edge_pairs()
-    window.pipeline.edge_removed.emit("load", "norm", "")
+    window.pipeline.edge_removed.emit("load", "norm", "", "")
     assert ("load", "norm") not in window.model.edge_pairs()
     assert "Disconnected" in window.status_text()
 

@@ -15,6 +15,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from conftest import wire_up  # noqa: E402  —— F10：加完卡要接線
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
@@ -61,7 +63,7 @@ def lines_lot(tmp_path_factory):
 def cross_window(qapp, lines_lot):
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     win.load_dataset_path(lines_lot["klarf"], sync=True)
-    nid = win.model.add_step("roi_cross")
+    nid = wire_up(win.model, win.model.add_step("roi_cross"))
     win.model.set_param(nid, "roi_out", "xing")
     win.model.set_param(nid, "place", "beside_vertical")
     win.select_node(nid)
@@ -258,7 +260,7 @@ def test_only_the_selected_card_draws_its_boxes(qapp, cross_window):
     mine = list(win.region_overlay())
     assert len(mine) > 4
 
-    other = win.model.add_step("roi_cross")
+    other = wire_up(win.model, win.model.add_step("roi_cross"))
     win.model.set_param(other, "roi_out", "second")
     win.model.set_param(other, "place", "crossing")
     win.select_node(other)

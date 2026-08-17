@@ -13,6 +13,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from conftest import wire_up  # noqa: E402  —— F10：加完卡要接線
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
@@ -85,7 +87,7 @@ def window(qapp, lot):
 def test_picking_a_region_names_the_results_after_it(window):
     """「兩張卡的特徵會互相蓋掉」是一個命名空間的問題，而製程工程師沒有理由要
     懂那是什麼。但他把卡指到 `epi` 這個動作已經表達了意圖 —— 工具把話補完。"""
-    nid = window.model.add_step("glv_stats")
+    nid = wire_up(window.model, window.model.add_step("glv_stats"))
     window.select_node(nid)
     window._on_param_edited("roi", "epi")
 
@@ -98,7 +100,7 @@ def test_picking_a_region_names_the_results_after_it(window):
 
 def test_a_name_the_user_typed_is_never_overwritten(window):
     """「我明明改了它又跳回去」比沒有這個功能更糟。"""
-    nid = window.model.add_step("glv_stats")
+    nid = wire_up(window.model, window.model.add_step("glv_stats"))
     window.select_node(nid)
     window._on_param_edited("output_prefix", "mine")
     window._on_param_edited("roi", "epi")
@@ -123,12 +125,12 @@ def test_a_prefix_that_cannot_be_a_variable_name_is_refused(window):
 # --------------------------------------------------------------------------- #
 
 def test_the_panel_hides_itself_for_any_other_card(window):
-    nid = window.model.add_step("roi_cross")
+    nid = wire_up(window.model, window.model.add_step("roi_cross"))
     window.select_node(nid)
     window.refresh_preview(sync=True)
     assert window.profile_panel_visible() is True
 
-    other = window.model.add_step("glv_stats")
+    other = wire_up(window.model, window.model.add_step("glv_stats"))
     window.select_node(other)
     window.refresh_preview(sync=True)
     assert window.profile_panel_visible() is False
@@ -198,7 +200,7 @@ def mixed_lot(tmp_path_factory):
 def mixed_window(qapp, mixed_lot):
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     win.load_dataset_path(mixed_lot["klarf"], sync=True)
-    nid = win.model.add_step("roi_cross")
+    nid = wire_up(win.model, win.model.add_step("roi_cross"))
     win.model.set_param(nid, "roi_out", "epi")
     win.select_node(nid)
     yield win
@@ -292,7 +294,7 @@ def test_the_button_only_appears_for_cards_that_define_a_region(mixed_window):
     assert mixed_window.selected_regions() == ["epi", "epi_center"]
     assert mixed_window.region_check_available() is True
 
-    other = mixed_window.model.add_step("glv_stats")
+    other = wire_up(mixed_window.model, mixed_window.model.add_step("glv_stats"))
     mixed_window.select_node(other)
     assert mixed_window.selected_regions() == []
     assert mixed_window.region_check_available() is False
@@ -301,7 +303,7 @@ def test_the_button_only_appears_for_cards_that_define_a_region(mixed_window):
 def test_without_a_dataset_the_button_is_off_and_says_why(qapp):
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     try:
-        nid = win.model.add_step("roi_cross")
+        nid = wire_up(win.model, win.model.add_step("roi_cross"))
         win.select_node(nid)
         assert win.selected_regions() == ["cross", "cross_center"]
         assert win.region_check_available() is False
