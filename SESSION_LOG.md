@@ -70,8 +70,34 @@ Phase 1 收斂之後開 Phase 2 的計畫。這一輪**沒有動任何程式碼*
   不改的話**每顆 defect 都對到同一張圖**。ADEPT 的
   `klarf_core.defect_image_map` + `tiff_index` 已經做完這件事，可以直接搬。
 
+### 第三輪：Input-0 落地（多入口）＋ 兩條路都寫死 8-bit
+
+使用者定調「先做多 input 入口」，同時要討論「input 要支援什麼檔案、格式」。
+
+**Input-0（做完了）**：`first = True` 那個「入口＝route 上第一張卡」的定義從三個地方
+（`recipe.validate`、`engine._implicit_bindings`、`viewmodel.available_streams`）
+收成一個 `Step.is_source()`。判準是**沒有輸入埠、而且沒有靜態 `reads`** ——
+第一版只看埠，`test_recipe.py` 當場三條紅（早期風格的假卡片宣告 `reads` 卻沒有
+挑來源的參數，只看埠的話它們全部變成入口，`missing-image` 整條檢查安靜失效）。
+
+順帶抓到**這一改造出來的新缺口**：`feature-collision` 的檢查以前不對入口卡跑
+（入口只有一張，撞不起來），而現在兩張 `load_patch` 都寫 `n_channels`。
+
+**格式那一半：量出來的東西比預期糟。** 兩條載入路徑都寫死 8-bit 假設，而**兩條都
+不出聲**。拿一張 12-bit 的圖實測：`ebi_patch` 走 `to_uint8` → **93.8% 的像素飽和成
+255**（而那是現在唯一開放的路）；`rsem`/`folder` 走 `imageio.load_gray` → 每張圖
+各自 MINMAX 拉伸 → 亮度砍半的圖載進來平均值**一模一樣**（兩張圖之間不再可比，
+而那是 `test − ref` 的前提）。所以廠內若是 16-bit patch，現在每一個數字都是垃圾。
+`FAB-VALIDATION.md` 因此新增假設 #4（位元深度）與 #5（多於兩頁時的頁序）。
+
 ### 值得記下來的
 
+- **「入口」用位置定義，撐不到第二個入口。** 而那個定義被抄了三份 ——
+  收成一個 classmethod 的時候才發現三份的行為其實不一樣（UI 那一份沒有
+  `not-connected` 的概念）。**同一句話寫三次，就會有三種意思。**
+- **改一個「只是放寬限制」的地方，會讓別的檢查失去前提。** 多入口本身不危險，
+  危險的是 `feature-collision`「入口只有一張所以不必檢查」那個**沒寫下來的前提**。
+  放寬限制的時候要問一句：有誰是靠這個限制活的？
 - **ADC 段一張卡都沒有，而且只分得出兩類。** `GROUP_ADC` 沒有任何 Step 用它、
   畫布上那張 Score 是 UI 造的假節點（`__score__`）、`ScoreSpec.bins` 被 `validate`
   強制只有 `below`/`above`。一個 ADC 工具的本業是分好幾類，而那件事現在連資料結構
