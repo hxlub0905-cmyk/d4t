@@ -92,10 +92,10 @@ UI 介面、設定放哪都要先討論過**才動手。所以計畫書是**議�
 
 | 段 | 缺什麼 |
 |---|---|
-| **Input**（正在做）| **入口不該只有一條**：`validate` 現在把「起點」定義成 route 上的第一張卡（線性時代的殘留），所以第二個 image source 進不來 —— 要改成「沒有輸入埠的卡都是起點」。加上頁→流的**命名** recipe 摸不到（`channel_order` 只有測試傳過），而資料是 **1 BSE + 4 SE、BSE 固定第 2 頁、沒有 ref**，現在會載成 `test, ref, img3, img4, img5`（**第 2 頁的 BSE 被叫成 `ref`，`subtract` 不報錯**）|
-| **Enhance** | 融合卡（PCA Ref、BSE·SE quadrant）—— 都是「N 條流 → 一條新的流」，踩產流命名契約 |
+| **Input** | ✅ **收斂 2026-08-17**（Input-0…4）：多入口（`Step.is_source`）、`channel_map`（這一顆的第幾張叫什麼）、`tiff_stack`（大 TIFF 沒有 KLARF）、四種輸入的入口做齊、**Input 卡按 source 拆成兩張**（`load_patch` / `load_single` —— 兩張都不看資料型別，畫布因此不說謊）。**範圍：patch + RSEM**（多通道擱置）|
+| **Enhance** | 四張卡（normalize／tone／denoise／flatten）本身要逐張過一次。**融合卡（PCA Ref、BSE·SE quadrant）擱置** —— 使用者 2026-08-17：「我決定我暫時不做 multi channel，暫時 focus 在 patch 跟 RSEM Image」|
 | **Region** | 第三條路：吃 GLAS 的 label map。出口契約已經留好（見 [`ARCHITECTURE.md`](ARCHITECTURE.md)），下游零改動 |
-| **Compare** | GLAS 的合成 gray 當 ref（die-to-database）；`align` 直接吃 GLAS 算好的 offset |
+| **Compare**（下一個大件）| **patch ↔ RSEM 對位**（使用者要多入口的原因）：`align` 的五個 backend 全部要求同尺寸，小圖對大圖會回 `dx=0 dy=0` —— 要補 matchTemplate 的第三種座標數學 + 一張新卡，並修 `align` 尺寸不符要報錯。另有 GLAS 的合成 gray 當 ref、吃 GLAS 算好的 offset。**配對機制也在這一段**（使用者：「配對是之後的事」）|
 | **Measure** | **Blob 分割**（演算法在卻沒有卡片，而 `cd_measure` 的警告叫使用者「run Blob segment first」、overlay 的主 blob 紅框兩條路都沒有生產者）、離群旗標（跨顆）、Region Stats / FFT、`snr_map` 多來源 |
 | **ADC** | **一張卡都沒有，而且只分得出兩類。** score 是 recipe 上的一個欄位（`bins` 被強制只有 `below`/`above`），`__score__` 是 UI 造的假節點。多類別要先設計資料結構，不是加一張卡 —— 這是整個 app 最大的功能缺口 |
 | ML Classify | **Phase 2 後半**。吃已經匯得出來的 feature vector CSV；相依策略到時候再定 |
