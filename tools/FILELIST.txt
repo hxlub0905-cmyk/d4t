@@ -82,7 +82,7 @@ cc1e82ef72207fda70c03fa6646a0c1581eac9b2 adept/ui/widgets.py
 669770bafa48f033c7d1e9fda77f342b3369070e adept/ui/workers.py
 04c5ce471195ac4e2449126ce835b22b4c880cf3 conftest.py
 7e5d6f7d159a437c1b57f738021f6f92517f5308 docs/ARCHITECTURE.md
-57b5bfe58946c44dc1d109019d093d656ba27a58 docs/FAB-VALIDATION.md
+e6254f6ddd856bae1635c5240d6aff9d0496b350 docs/FAB-VALIDATION.md
 98ebf9d36d4b270b7f9db3efa902363755a2379a docs/GLAS-INTERFACE.md
 8e18ac4032d5bd9c46723d63055092017d603841 docs/HANDOVER.md
 b258ee9ccb0e12fcdf10e2dcab584fddabe10918 docs/NO-GIT-SETUP.md
@@ -91,7 +91,7 @@ c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
 9ce686eed574348d7a2f5fa8848adcbf0c623366 docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
-861c9db6e656adb31adc04f032aae1df9170e34f docs/plans/F11-phase2-features.md
+2a02b049cc8933d997a5a4a7b7524aaace8f4a33 docs/plans/F11-phase2-features.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
 fdf5dba17526e86ea0990c7853ef652874082324 fab_probe/probe_klarf.py
