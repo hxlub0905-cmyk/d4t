@@ -1782,7 +1782,17 @@ class StudioWindow(QMainWindow):
             needs = list(step_cls.resolve_reads(node.params))
         except KeyError:
             return ""
+        # 「上游有哪些流」有兩個來源，兩個都要算（F9-11）：
+        #
+        # 1. ``available_streams`` —— 照 route 的**線性順序**累加。這是沒有埠的
+        #    線（既有 recipe）唯一的依據。
+        # 2. **接進這張卡的線自己帶的流名。** F9 之後資料是照線走的，而線可以
+        #    從執行順序上「後面」的節點接過來（分支的兩支各自往前接）。
+        #    只看第 1 點的話，明明畫布上有線，這裡卻說「還缺 ref」——
+        #    使用者照著那句話再加一張卡，就多了一張沒有用的卡。
         have = set(self.model.available_streams(before_node=str(node_id)))
+        have |= {e.src_out for e in self.model.edges
+                 if e.dst == str(node_id) and e.src_out}
         missing = [s for s in needs if s and s not in have]
         if not missing:
             return ""

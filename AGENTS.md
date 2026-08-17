@@ -189,7 +189,7 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 | `make_filelist.py` / `make_text_bundle.py` | **家用機** | ✅ 要 | `release.py` 底下的兩支，通常不直接叫 |
 | `fetch_wheels.py` | **家用機** | ❌ | 抓 Windows wheels，帶 `wheels\` 過去 |
 | `make_mgepi_real.py` / `validate_mgepi.py` | **家用機** | ❌ | 擬真 BSE 合成 lot（MG×EPI×spacer）＋可分性驗證（要 numpy/cv2）|
-| `freeze_golden.py` | **家用機** | ❌ | 把現在算出來的 feature 表凍成黃金值（重構的安全網，見 `docs/plans/F9-dag-streams.md`）|
+| `freeze_golden.py` | **家用機** | ❌ | 把現在算出來的 feature 表凍成黃金值（重構的安全網，見 `docs/history/plans/F9-dag-streams.md`）|
 | `check_files.py` | **公司機** | ❌ | 哪幾個檔案跟 GitHub 上不一樣（要先複製 `FILELIST.txt`）|
 | `install_offline.py` | **公司機** | ❌ | 用 `wheels\` 裝相依套件 |
 | `doctor.py` | **公司機** | ❌ | 環境自檢 |

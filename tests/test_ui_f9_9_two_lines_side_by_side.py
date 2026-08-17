@@ -170,3 +170,22 @@ def test_a_second_source_on_the_same_stream_still_replaces(window):
     pairs = window.model.edge_pairs()
     assert (a, b) in pairs
     assert (src, b) not in pairs, "同一條流留了兩個來源 —— 只有一條算數"
+
+
+# --------------------------------------------------------------------------- #
+# 5. 「還缺什麼上游」也要照線看（F9-11，F9 的最後一條尾巴）
+# --------------------------------------------------------------------------- #
+def test_a_wired_card_is_not_told_it_is_missing_that_stream(window):
+    """畫布上明明有線，提示卻說「還缺這條流」—— 那句話會害人多加一張沒用的卡。
+
+    ``available_streams`` 是照 route 的**線性順序**累加的，而 F9 之後資料是照
+    線走的：線可以從執行順序上「後面」的節點接過來（分支的兩支各自往前接）。
+    所以「上游有哪些流」要把**接進這張卡的線自己帶的流名**也算進去。
+    """
+    src, nid = _load_and(window, "snr_map")      # 預設吃 diff，一定缺上游
+    assert "still needs" in window._unmet_needs(nid), \
+        "這條測試的前提是「沒接線時真的會報缺」"
+
+    window._on_edge_added(src, nid, "diff")
+    assert window._unmet_needs(nid) == "", \
+        "線就在畫布上，提示卻還在說缺這條流"
