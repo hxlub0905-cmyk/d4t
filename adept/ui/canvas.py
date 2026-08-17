@@ -704,13 +704,20 @@ class _EdgeItem(QGraphicsItem):
         if (self._hover
                 and e.button() == Qt.LeftButton and self.cut_hit(e.pos())):
             self.canvas.edge_removed.emit(self.src.node_id, self.dst.node_id,
-                                          self.out_name())
+                                          self.out_name(), self.dst_name())
             e.accept()
             return
         super().mousePressEvent(e)
 
     def pair(self) -> Tuple[str, str]:
         return (self.src.node_id, self.dst.node_id)
+
+    def dst_name(self) -> str:
+        """這條線進的是下游的哪一個輸入參數（``a`` / ``b`` / ``streams``…）。"""
+        specs = self.dst.in_specs()
+        if 0 <= self.dst_port < len(specs):
+            return str(specs[self.dst_port].get("name", ""))
+        return ""
 
     def out_name(self) -> str:
         """這條線從來源的哪一顆輸出埠出發（埠索引換算成流名）。"""
@@ -846,7 +853,9 @@ class PipelineCanvas(QGraphicsView):
     edge_added = Signal(str, str, str, str)
     #: ``(來源, 目的, 來源埠)`` —— 埠是剪刀剪的**那一條**（F9-9：兩張卡之間
     #: 可以有兩條並排的線，剪一條跟剪兩條是完全不同的事）。
-    edge_removed = Signal(str, str, str)
+    #: 第四欄是 F10 加的：兩條線可能從**同一顆輸出埠**進到同一張卡的兩個不同
+    #: 輸入（load 的 test 同時餵 a 與 b 是合法的），只靠來源埠指不出剪的是哪條。
+    edge_removed = Signal(str, str, str, str)
     #: 從卡片庫拖一張卡丟到畫布上：``(step_key, 場景 x, 場景 y)``（F7-22）。
     card_dropped = Signal(str, float, float)
     #: 「在自己的視窗打開畫布」（F8-UI D 案）。畫布在主視窗只佔中上一塊
@@ -1377,7 +1386,8 @@ class PipelineCanvas(QGraphicsView):
             for item in list(self._scene.selectedItems()):
                 if isinstance(item, _EdgeItem):
                     a, b = item.pair()
-                    self.edge_removed.emit(a, b, item.out_name())
+                    self.edge_removed.emit(a, b, item.out_name(),
+                                           item.dst_name())
                 elif isinstance(item, _NodeItem):
                     self.remove_requested.emit(item.node_id)
             e.accept()

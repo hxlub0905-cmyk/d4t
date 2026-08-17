@@ -1991,54 +1991,94 @@ class StudioWindow(QMainWindow):
                 return spec.name
         return specs[0].name
 
-    def _on_edge_removed(self, src: str, dst: str, stream: str = "") -> None:
-        """剪掉一條線。``stream`` 是剪刀瞄的那一條（F9-9）。
+    def _on_edge_removed(self, src: str, dst: str, stream: str = "",
+                         dst_in: str = "") -> None:
+        """剪掉一條線。``stream`` 是剪刀瞄的那一條（F9-9），``dst_in`` 是它
+        進到下游的哪一格（F10）。
 
         兩張卡之間可以有兩條並排的線，所以**剪一條**跟剪掉整個依賴是兩件事。
         瞄不到特定那條（舊格式的線沒有埠）就退回拿掉整對。
+
+        **剪掉線就是拿掉來源**（F10）：線是唯一的來源，所以那一格要跟著空掉。
+        不空的話畫布會反過來說謊 —— 畫面上線沒了，卡片卻還指著那條流，而且
+        照樣跑得出數字。使用者回報的原話是「把線按 X 清掉，後方卡片的 Node
+        不會跟著清掉」。
         """
         src, dst, stream = str(src), str(dst), str(stream or "")
+        dst_in = str(dst_in or "")
+        # 剪之前先問清楚這條線落在哪一格 —— 剪完就查不到了。
+        if not dst_in:
+            for e in self.model.edges:
+                if (e.src == src and e.dst == dst
+                        and (not stream or e.src_out == stream)):
+                    dst_in = e.dst_in
+                    break
         with self.model.compound("disconnect"):
-            one = stream and self.model.remove_edge(src, dst, src_out=stream)
+            one = stream and self.model.remove_edge(
+                src, dst, src_out=stream, dst_in=dst_in or None)
             if one:
-                note = self._unpoint_stream(dst, stream)
+                note = self._unpoint_stream(dst, stream, dst_in)
                 self._status("Disconnected %s → %s on %s%s"
                              % (src, dst, stream, note))
             elif self.model.remove_edge(src, dst):
-                self._status("Disconnected %s → %s" % (src, dst))
+                note = self._unpoint_stream(dst, stream, dst_in)
+                self._status("Disconnected %s → %s%s" % (src, dst, note))
 
-    def _unpoint_stream(self, node_id: str, stream: str) -> str:
+    def _unpoint_stream(self, node_id: str, stream: str,
+                        param: str = "") -> str:
         """線剪掉了 → 那條流也要從下游卡的參數裡拿掉（回一句給狀態列的話）。
 
         不拿掉的話畫布會**反過來說謊**：畫面上那條線沒了，卡片卻還在處理它
         （`streams=test,ref` 一個字都沒變）。這是 F9-7「接線時參數跟著改」的
         另一半。
 
-        **最後一條不拿掉**：`MultiStreamStep.stream_list` 對空字串是
-        ``keys or ["test"]`` —— 清成空的話那張卡會安靜地跑回 test，
-        比留著更難解釋。留著等於「這張卡還在做這條流，只是沒有線指定來源」，
-        跟任何一張還沒接線的卡是同一個狀態。
+        F10 之前這裡有兩個保留條款，現在**兩個都拿掉了**：
+
+        * 「單一角色的輸入（``image_key``）值就留著」—— 那時候那一格的值是
+          唯一的紀錄，清了就沒有東西講「這張卡本來要做什麼」。現在線才是唯一
+          的來源，值留著等於畫布上沒有線、卡片卻還指著一條流。
+        * 「最後一條不拿掉」—— 理由是 ``MultiStreamStep`` 對空字串會退回
+          ``test``。那個 ``or`` 在 F10 拿掉了，所以這個保留條款也沒有存在的
+          理由；留著反而讓「剪掉最後一條線」變成畫面與實際不一致的那一步。
+
+        剪完之後那張卡回到「還沒接線」的狀態 —— 跟剛加進來的卡一模一樣：
+        沒有輸出埠、lint 報 ``not-connected``、引擎不放行。
         """
         node = self.model.nodes.get(str(node_id))
-        param = self._param_for_stream(node_id)
-        if node is None or not param:
+        param = str(param or "")
+        if node is None:
             return ""
         try:
-            spec = {p.name: p for p in get_step(node.step).params}[param]
+            specs = {p.name: p for p in get_step(node.step).params}
         except KeyError:                       # pragma: no cover
             return ""
-        if spec.type != "image_keys":
-            return ""                          # 單一角色的輸入：值就留著
-        keys = [k.strip() for k in str(node.params.get(param, "") or "").split(",")
-                if k.strip()]
-        if stream not in keys or len(keys) <= 1:
+        spec = specs.get(param)
+        if spec is None or not spec.is_input():
             return ""
-        keys.remove(stream)
+        if spec.type == "image_keys":
+            keys = [k.strip() for k
+                    in str(node.params.get(param, "") or "").split(",")
+                    if k.strip()]
+            if stream and stream in keys:
+                keys.remove(stream)
+            elif len(keys) > 1:
+                return ""          # 指不出剪的是哪一條，寧可不動
+            else:
+                keys = []
+            value = ",".join(keys)
+        else:
+            value = ""                         # 角色埠：那條線就是它的全部來源
+        if value == str(node.params.get(param, "") or ""):
+            return ""
         try:
-            self.model.set_param(str(node_id), param, ",".join(keys))
+            self.model.set_param(str(node_id), param, value)
         except ParamError:                     # pragma: no cover — 值就是流名
             return ""
-        return " — “%s” now works on %s" % (node_id, " and ".join(keys))
+        if not value:
+            return " — “%s” has no input on “%s” now" % (
+                node_id, spec.label or param)
+        return " — “%s” now works on %s" % (node_id, " and ".join(
+            value.split(",")))
 
     def _on_remove_requested(self, node_id: str) -> None:
         node_id = str(node_id)

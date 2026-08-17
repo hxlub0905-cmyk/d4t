@@ -148,6 +148,31 @@
 - `cd_measure` 用 `REQUIRE_IMAGE = False` 保住原本的寬容（`roi="blob"` 時矩形
   已是像素座標，沒有影像也量得下去）。
 
+### F10-4：剪掉線 = 拿掉來源
+
+使用者回報：「連接卡片節點後，再把線按 X 清掉 → **後方卡片的 Node 不會跟著
+清掉**。」量出來比回報的更嚴重：兩條線都剪掉之後 `a='test' b='ref'` 一個字都
+沒變、輸出埠還在、lint 說乾淨 —— 那張卡照樣跑得出數字。
+
+三個原因疊起來，其中一個是 F10-2 自己造成的：
+
+1. `_unpoint_stream` 對 `image_key`（角色埠）**直接跳過** —— 以前那一格的值是
+   唯一的紀錄，清了就沒有東西講「這張卡本來要做什麼」。F10 之後線才是唯一的
+   來源，這個理由消失了。
+2. 「最後一條不清空」的保留條款，理由是 `MultiStreamStep` 對空字串會退回
+   `test` —— 那個 `or` 在 F10-2 拿掉了，保留條款也跟著沒有理由。
+3. 它用 `_param_for_stream()` 找參數，而那個函式在 F10-2 改成回**第一個還空著
+   的輸入** —— 剪線時要的正好相反（要那條線自己的那一格）。所以連該清哪一格
+   都找錯了。
+
+修法：`edge_removed` 帶上 `dst_in`（跟 `edge_added` 對稱），`remove_edge` 收得下
+「整條線」的四個欄位，`_unpoint_stream` 照那一格的型別清（`image_keys` 拿掉那
+一條、`image_key` 整格清空）。剪完那張卡回到跟剛加進來一模一樣的狀態。
+
+**接線與剪線必須是彼此的反向操作** —— 只做一半的話，畫布會在「剪」這個方向上
+說謊，而症狀跟接線那一半一樣難查。驗收裡有一條對整個 registry 跑的
+`test_wiring_and_cutting_are_exact_opposites_for_every_card`。
+
 ---
 
 ## 5. 驗收
@@ -161,6 +186,40 @@
 docstring 裡寫明為什麼。
 
 核心 947 綠、UI 全綠、黃金值一個數字都沒動。
+
+---
+
+## 5.5 哪些卡支援多來源（一格輸入接好幾條線）
+
+判準是**那一格輸入的型別**：`image_keys` 收得下好幾條流，`image_key` 是一個
+角色、一次一條。這張表由 `tests/test_ui_f10_canvas_reality.py` 的兩條測試守著
+（量測卡一律要是多來源；每張卡的方向宣告必填），所以它不會跟程式碼漂開。
+
+| 卡片 | 組別 | 輸入格 | 多來源 |
+|---|---|---|---|
+| `load_patch` | Input | （沒有輸入） | — |
+| `normalize` / `denoise` / `tone` / `flatten` | Enhance | `streams`（多）＋ `range_from` / `use_within` / `reference`（各單） | ✅ |
+| `subtract` | Compare | `a`（單）、`b`（單） | ❌ |
+| `align` | Compare | `moving`（單）、`fixed`（單） | ❌ |
+| `roi_cross` / `roi_template` / `roi_mask` | Region | `source`（單） | ❌ |
+| `glv_stats` / `cd_measure` / `roi_snr` / `focus_quality` | Measure | `source`（多） | ✅ |
+| `snr_map` | Measure | `source`（單） | ❌ |
+
+**為什麼有些不行 —— 三個不同的理由，不是漏掉的：**
+
+* **角色埠**（`subtract` 的 a/b、`align` 的 moving/fixed）：那兩格**不是同一件
+  事做兩次**，是「被減的」與「拿來減的」。塞兩條進 `a` 沒有意義 —— 要比較三張
+  圖就是兩張 Compare 卡。多連一在這裡的正確形式是**兩格各接一條**，那本來就
+  做得到（F10-2 起兩格是分得開的兩顆埠）。
+* **會產生新流的卡**（`snr_map`、`roi_mask`）：多來源的意思會變成「一條流一張
+  輸出圖」，而輸出流的名字只有一格（`out`）—— 要先決定 N 張圖怎麼命名，那是
+  另一個題目。
+* **Region 卡**（`roi_cross` / `roi_template`）：它們產出的是**具名區域**，
+  接兩條的意思是「同一個名字底下有兩組來自不同影像的框」，那會讓下游量測卡
+  指到一個語意不明的區域。同樣要先決定命名。
+
+真正「同一件事做好幾次」的兩類 —— Enhance（一張卡處理 N 條流）與 Measure
+（一張卡量 N 條流）—— 都已經支援。
 
 ---
 

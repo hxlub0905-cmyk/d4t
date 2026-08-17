@@ -278,3 +278,57 @@ def test_every_measure_card_can_take_more_than_one_source(window):
         spec = next(sp for sp in cls.input_specs() if sp.name == cls.SOURCE)
         assert spec.type == "image_keys", \
             "%s.%s 還是單一來源的型別" % (cls.key, spec.name)
+
+
+# --------------------------------------------------------------------------- #
+# 4. 剪掉線 = 拿掉來源（F10-4）
+# --------------------------------------------------------------------------- #
+def test_cutting_a_line_puts_the_card_back_to_having_no_input(window):
+    """按線上的 × 之後，那張卡要回到「剛加進來」的狀態。
+
+    使用者回報：「連接卡片節點後，再把線按 X 清掉 → **後方卡片的 Node 不會
+    跟著清掉**。」量出來比回報的更嚴重：兩條線都剪掉之後 `a='test' b='ref'`
+    一個字都沒變、輸出埠還在、lint 說乾淨 —— 那張卡照樣跑得出數字。
+
+    線是唯一的來源，所以剪掉線就是拿掉來源。**接線與剪線必須是彼此的反向操作**
+    —— 只做一半的話，畫布會在「剪」這個方向上說謊。
+    """
+    src = window.model.node_order[0]
+    sub = window.add_card_after(src, "subtract")
+    window._on_edge_added(src, sub, "test", "a")
+    window._on_edge_added(src, sub, "ref", "b")
+    assert "diff" in window.pipeline.node_item(sub).out_names()
+
+    window._on_edge_removed(src, sub, "ref", "b")
+    assert window.model.nodes[sub].params["b"] == "", "剪掉的那一格沒有清空"
+    assert window.model.nodes[sub].params["a"] == "test", "剪一條動到了另一格"
+    assert window.pipeline.node_item(sub).out_names() == [], \
+        "來源少了一條，diff 卻還掛在後面"
+
+    window._on_edge_removed(src, sub, "test", "a")
+    assert window.model.nodes[sub].params["a"] == ""
+    assert window.model.edges == []
+    assert [i.code for i in window.model.validate() if i.node_id == sub] \
+        == ["not-connected"]
+
+
+def test_wiring_and_cutting_are_exact_opposites_for_every_card(window):
+    """接上再剪掉，每一張卡都要回到一模一樣的參數。
+
+    對整個 registry 跑，因為這是**卡片這個東西**的性質：只要有人加一張卡而它
+    的輸入型別剛好走到沒被覆蓋的那條路，畫布就會在剪線這個方向上說謊，而症狀
+    （「數字沒跟著變」）跟接線那一半完全一樣難查。
+    """
+    src = window.model.node_order[0]
+    for cls in list_steps():
+        if cls.key in HIDDEN_STEPS or not cls.input_specs():
+            continue
+        nid = window.add_card_after(src, cls.key)
+        before = dict(window.model.nodes[nid].params)
+        spec = cls.input_specs()[0]
+        window._on_edge_added(src, nid, "test", spec.name)
+        assert window.model.nodes[nid].params[spec.name] == "test", cls.key
+        window._on_edge_removed(src, nid, "test", spec.name)
+        assert window.model.nodes[nid].params == before, \
+            "%s：接上再剪掉之後參數跟原本不一樣" % cls.key
+        assert not [e for e in window.model.edges if e.dst == nid]

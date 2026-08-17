@@ -422,7 +422,8 @@ class RecipeModel:
         return True
 
     def remove_edge(self, src: str, dst: str,
-                    src_out: Optional[str] = None) -> bool:
+                    src_out: Optional[str] = None,
+                    dst_in: Optional[str] = None) -> bool:
         """拿掉線。``src_out=None`` = 這兩張卡之間**全部**；給了就只拿那一條。
 
         剪刀（線上的 ×）給的是 ``src_out``（F9-9）—— 兩張卡之間可能有兩條並排
@@ -432,7 +433,8 @@ class RecipeModel:
 
         def hit(e: Edge) -> bool:
             return (e.src == src and e.dst == dst
-                    and (src_out is None or e.src_out == str(src_out)))
+                    and (src_out is None or e.src_out == str(src_out))
+                    and (dst_in is None or e.dst_in == str(dst_in)))
 
         keep = [e for e in self.edges if not hit(e)]
         if len(keep) == len(self.edges):

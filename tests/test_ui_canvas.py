@@ -161,7 +161,7 @@ def test_duplicate_and_self_links_are_ignored(window):
 def test_removing_an_edge_puts_it_back(window):
     window.pipeline.link_to("load", "norm")
     assert ("load", "norm") in window.model.edge_pairs()
-    window.pipeline.edge_removed.emit("load", "norm", "")
+    window.pipeline.edge_removed.emit("load", "norm", "", "")
     assert ("load", "norm") not in window.model.edge_pairs()
     assert "Disconnected" in window.status_text()
 
