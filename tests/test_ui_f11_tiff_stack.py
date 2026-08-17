@@ -62,7 +62,6 @@ def stack(tmp_path):
 def test_the_stack_kind_is_supported_now():
     assert scope.is_supported_kind("tiff_stack")
     assert scope.is_supported_kind("ebi_patch")
-    assert not scope.is_supported_kind("rsem")        # 還是收著的
 
 
 def test_there_is_a_separate_entry_for_it(win):

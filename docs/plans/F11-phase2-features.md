@@ -565,7 +565,56 @@ ROI 卡的**右下角儀表**（`ui/inspectors.py` 依 `Step.key` 註冊）顯�
 （反面論點也記著：如果哪天 GDS 那條路變成「一張卡從頭到尾自己搞定」，
 那就是這個決定要重看的時候。判準是「有沒有第二個消費者」。）
 
-##### Input-3 — 第二個資料來源，逐顆配對（**一個機制、三個用途**）
+##### Input-3 — 四種輸入都進得來 **✅ 完成 2026-08-17**
+
+使用者把 Input 段的範圍講清楚了：
+
+> **配對是之後的事吧（或者之後的功能），別忘了我們在 input 階段。**
+>
+> 簡單來說目前 ADEPT 可以支援 patch + 對應 KLARF，我需要他也能支援
+> **RSEM image + KLARF，或單純圖片**。
+
+所以 Input-3 不是「兩個來源逐顆配對」（那是 Compare 段的事，見下一節），而是
+**把四種 source 的入口做齊**。而那四種的 core 能力早就在，被 `scope.py` 收著：
+
+| kind | 入口 | 這一輪做了什麼 |
+|---|---|---|
+| `ebi_patch` | `Open KLARF…` | 本來就有 |
+| `rsem` | `Open KLARF…`（自動判別）| **打開**（`SUPPORTED_KINDS`）|
+| `tiff_stack` | `Open stack…` | Input-2 |
+| `folder` | **`Open folder…`**（新）| 打開 + 新入口 + `folder_open` 自繪圖示 |
+
+**`HIDDEN_STEPS` 清空**：`golden_cell` / `cell_period` 回到卡片庫。收著它們的理由
+是「它們存在的唯一目的是幫**單張影像**疊 ref，而 Studio 只吃兩兩成對的 patch」
+—— 單張那條路打開了，繼續收著等於把功能打開一半。
+
+##### 打開之後，兩條既有的不變量當場抓到兩個缺口
+
+1. **`cell_period` 從來沒有做過 F10-3 的多來源處理。** 它被收起來的那段時間，
+   「量測卡都接得了好幾條來源」那條不變量**跳過**它（那條測試會 skip
+   `HIDDEN_STEPS` 裡的卡）。一解除隱藏就紅了 —— 於是它改成 `MultiSourceStep`。
+   **這正是那條不變量存在的理由**：它逐張套用到 registry，所以一張卡重新可見的
+   時候不會安靜地少一半功能。
+   （`golden_cell` 讀的 `ctx.meta["cell_period"]` 改成 `setdefault` —— 接好幾條流
+   時**第一條就定案**，不讓最後一條無聲地決定 Golden Cell 的週期。）
+2. **route 型別從來沒有真的跟著資料走。** 那一行的條件是「畫布是空的」，
+   而 F7-9 之後**開窗就有一張起手卡**，所以它永遠是 False —— 在只支援一種輸入
+   的時候看不出來。四種輸入之後的症狀是：載一份 rsem 資料，pipeline 還留在
+   `ebi_patch` 那條 route 上，於是 lint 依 kind-aware 宣告以為有 `ref`，
+   而執行期才發現沒有。判準改成 **`model.dirty`**（`RecipeModel.starter()` 特意
+   把它設 False）：使用者還沒動過就跟著資料走；動過了就**不偷改他的 pipeline**，
+   而是講出「這條 pipeline 是給 X 資料的，你剛開的是 Y」。
+
+驗收：`tests/test_ui_input_kinds.py`（9 條 —— 這個檔案原本叫 `test_ui_patch_only.py`，
+鎖的是**相反**的事；F7-1 的用字是「暫時只支援 patch」而做法是收起來不刪掉，
+所以這一輪打開只改了兩個常數，**那個判斷被驗證了**）。核心 1061 passed／UI 36 檔全綠／
+黃金值逐項相同。
+
+---
+
+##### （原 Input-3 的內容）第二個資料來源，逐顆配對 —— **移到 Compare 段**
+
+使用者：「**配對是之後的事**。」下面這一段留著當那一輪的起點：
 
 RSEM 大圖、GLAS 的 `_label.png`、GLAS 的 `_gray.png` 是**同一件事**：
 「跟這一顆一一對應的另一個影像來源」。所以做成一個機制：
@@ -598,8 +647,8 @@ RSEM 大圖、GLAS 的 `_label.png`、GLAS 的 `_gray.png` 是**同一件事**�
 | ✅ Input-0 | 多入口（`Step.is_source`）| 其餘全部踩在它上面。**完成 2026-08-17** |
 | ✅ Input-1 | `channel_map`：頁 → 流的命名（含頁數不符擋下來）| **完成 2026-08-17** |
 | ✅ Input-2 | `tiff_stack`：大 TIFF 沒有 KLARF | **完成 2026-08-17**（順帶修掉「15 頁 TIFF 安靜變成一顆」）|
-| Input-3 | **插槽機制** + `load_rsem` / `load_layout` 兩張卡（一種 source 一張卡，§3.1.7）| patch ↔ RSEM 的前提；RSEM 與 GLAS 共用同一個機制 |
-| Compare-1 | 新卡「Locate in a larger image」（matchTemplate 的第三種座標數學，§3.1.9）＋ 修 `align` 尺寸不符要報錯 | 對位本身。Input-3 進來之後才有兩條流可以對 |
+| ✅ Input-3 | 四種輸入的入口做齊（`rsem` / `folder` 打開、`Open folder…`、`HIDDEN_STEPS` 清空）| **完成 2026-08-17** |
+| Compare-1 | **配對機制**（第二個來源逐顆對上）＋ 新卡「Locate in a larger image」（matchTemplate 的第三種座標數學，§3.1.9）＋ 修 `align` 尺寸不符要報錯 | 使用者：「配對是之後的事」—— 它屬於**對位**那一輪，不是 Input 段 |
 | 防呆 | 非 8-bit 就講一句話；一批之內尺寸忽然變了就講一句話 | 兩個都是幾行的事，但擋掉的是「安靜地算出垃圾」|
 
 ### 3.2 Enhance

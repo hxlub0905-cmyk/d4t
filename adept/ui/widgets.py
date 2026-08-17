@@ -113,8 +113,9 @@ def small_button(text: str, tip: str = "", parent: Optional[QWidget] = None,
 GLYPH_ICONS = (
     "undo", "redo", "theme", "prev", "next", "play", "chevron_down",
     "zoom_in", "zoom_out", "fit", "tidy", "up", "down", "close",
-    # 工具列那五顆（F7-24）＋ 多頁 TIFF 的入口（F11 Input-2）
+    # 工具列那五顆（F7-24）＋ 兩個沒有 KLARF 的入口（F11 Input-2／Input-3）
     "folder", "document", "save", "templates", "export", "stack",
+    "folder_open",
     # 畫布彈出視窗（F8-UI D 案）
     "popout",
 )
@@ -255,6 +256,16 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         p.drawLine(QPointF(m, h * 0.30), QPointF(w * 0.44, h * 0.30))
         p.drawLine(QPointF(w * 0.44, h * 0.30), QPointF(w * 0.54, h * 0.42))
         p.drawRect(QRectF(m, h * 0.42, w - 2 * m, h * 0.42))
+    elif n == "folder_open":
+        # 打開的資料夾：後片是方的、前片往外斜。跟 ``folder``（關著的）並排時
+        # 差別在**前片的斜邊** —— 三顆 Open 鈕的輪廓要各不相同（F7-24）。
+        p.drawLine(QPointF(m, h * 0.32), QPointF(w * 0.44, h * 0.32))
+        p.drawLine(QPointF(w * 0.44, h * 0.32), QPointF(w * 0.54, h * 0.44))
+        p.drawLine(QPointF(m, h * 0.32), QPointF(m, h * 0.80))
+        p.drawLine(QPointF(w * 0.54, h * 0.44), QPointF(w - m, h * 0.44))
+        # 前片：從左下往右斜出去
+        p.drawLine(QPointF(m, h * 0.80), QPointF(w - m * 0.6, h * 0.80))
+        p.drawLine(QPointF(w - m, h * 0.44), QPointF(w - m * 0.6, h * 0.80))
     elif n == "stack":
         # 三張疊起來的紙 —— 「一個檔案裡有好幾張圖」（F11 Input-2）。
         # 跟 ``folder`` 對比得出來：folder 是容器，stack 是**同一個東西的好幾層**。

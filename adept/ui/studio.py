@@ -546,6 +546,12 @@ class StudioWindow(QMainWindow):
             "one defect (N = the images per defect you enter). No KLARF means "
             "no coordinates and no write-back — CSV and Excel reports still work.",
             self._on_open_stack, icon="stack")
+        self.btn_open_folder = self._tool_button(
+            "Open folder…",
+            "Load a folder of single images (no KLARF): every image file "
+            "becomes one defect. No KLARF means no coordinates and no "
+            "write-back — CSV and Excel reports still work.",
+            self._on_open_folder, icon="folder_open")
         self.btn_open_recipe = self._tool_button(
             "Open Recipe…", "Load a recipe JSON", self._on_open_recipe,
             icon="document")
@@ -583,7 +589,7 @@ class StudioWindow(QMainWindow):
 
         # 一段 = 一種事情；段與段之間一條分隔線。
         for group in ((self.btn_open_klarf, self.btn_open_stack,
-                       self.btn_open_recipe),
+                       self.btn_open_folder, self.btn_open_recipe),
                       (self.btn_examples, self.btn_export),
                       (self.btn_undo, self.btn_redo)):
             for b in group:
@@ -2435,6 +2441,31 @@ class StudioWindow(QMainWindow):
                      % (os.path.basename(path), n))
         return True
 
+    def load_folder_path(self, folder: Any, sync: bool = False) -> bool:
+        """載入一個**資料夾的單張影像**（F11 Input-3）。
+
+        沒有 KLARF、沒有座標，每個影像檔一顆 defect。多頁 TIFF 在這條路上只讀
+        得到第一頁 —— ingest 會為此發一句警告並指向 ``Open stack…``。
+        """
+        d = str(folder)
+        if not os.path.isdir(d):
+            self._status("Not a folder: %s" % d)
+            return False
+        if sync:
+            try:
+                ds = DatasetLoadWorker.run_sync_folder(d)
+            except Exception as e:      # noqa: BLE001 — UI 邊界，一律回報
+                self._status("Could not load folder: %s: %s"
+                             % (type(e).__name__, e), "error")
+                return False
+            return self._on_dataset_loaded(ds)
+        if not self.dataset_worker.start_folder(d):
+            self._status("A dataset is already loading — please wait.")
+            return False
+        self._progress_busy("Loading %s…" % os.path.basename(d.rstrip("/\\")))
+        self._status("Loading folder: %s" % d)
+        return True
+
     def _on_dataset_loaded(self, dataset: Any) -> bool:
         # F7-1：型別要到載完才知道，所以擋在這裡而不是 load_dataset_path。
         # 擋下來時**不動既有狀態** —— 使用者手上原本那份資料集還在，
@@ -2470,14 +2501,30 @@ class StudioWindow(QMainWindow):
         finally:
             self._syncing = False
 
-        # 空流程時讓 route 型別跟著資料走（載了 recipe 之後就以 recipe 為準）
-        if not self.model.node_order:
-            self.model.kind = str(getattr(dataset, "kind", self.model.kind))
+        warn = list(getattr(dataset, "warnings", []) or [])
+
+        # route 型別跟著資料走 —— **但只在使用者還沒動過 pipeline 的時候**
+        # （F11 Input-3）。以前這裡的條件是「畫布是空的」，而 F7-9 之後開窗就有
+        # 一張起手卡，所以那個條件**永遠是 False** —— 在只支援一種輸入的時候看
+        # 不出來，四種輸入之後就會：載一份 rsem 資料，pipeline 還留在 ebi_patch
+        # 那條 route 上，於是 lint 以為有 `ref`（kind-aware 宣告）而執行期才發現
+        # 沒有。判準改成 `dirty`（`RecipeModel.starter()` 特意把它設 False）。
+        ds_kind = str(getattr(dataset, "kind", self.model.kind))
+        if ds_kind != self.model.kind:
+            if not self.model.dirty or not self.model.node_order:
+                self.model.kind = ds_kind
+                self.model.dirty = False      # 換 route 不算「使用者改過」
+            else:
+                # 使用者已經蓋了一條 pipeline，那是他的東西 —— 不要偷偷改掉它，
+                # 但要講出這個組合跑不起來。
+                warn.insert(0, (
+                    "this pipeline is written for %s data and you just opened "
+                    "%s data; open a recipe for %s, or start a new pipeline."
+                    % (self.model.kind, ds_kind, ds_kind)))
 
         self._update_defect_label()
         self._update_action_states()
         self._progress_done()
-        warn = list(getattr(dataset, "warnings", []) or [])
         msg = "Loaded %d defects (input type %s)" % (
             len(items), getattr(dataset, "kind", "?"))
         # 換一份資料集就換一份答案卷 —— 上一份的 ground truth 留著的話，
@@ -3669,6 +3716,12 @@ class StudioWindow(QMainWindow):
         if not ok:
             return
         self.load_stack_path(path, n)
+
+    def _on_open_folder(self) -> None:
+        d = QFileDialog.getExistingDirectory(self, "Open folder of images", "")
+        if not d:
+            return
+        self.load_folder_path(d)
 
     def _on_open_recipe(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

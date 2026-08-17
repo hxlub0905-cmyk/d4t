@@ -76,7 +76,7 @@ adept/
 │   │   ├── klarf_core.py    #   KLARF 1.2/1.8 無損讀寫引擎（vendored from KLIP，最重要的資產）
 │   │   ├── tiff_index.py    #   免解碼 TIFF/BigTIFF 盤點 + tifffile 讀 page
 │   │   ├── imageio.py       #   CJK-safe 影像讀寫（np.fromfile + cv2.imdecode）
-│   │   └── dataset.py       #   ebi_patch / rsem / folder 自動判別 → DefectItem
+│   │   └── dataset.py       #   ebi_patch / rsem / folder 自動判別 + tiff_stack（多頁無 KLARF）→ DefectItem
 │   ├── algo/                # 純 numpy/cv2 演算法（step 卡片包這些，不要在卡片裡重寫數學）
 │   ├── pipeline/            # 引擎
 │   │   ├── context.py       #   Context（images/features/meta）—— 步驟間的唯一介面
@@ -91,7 +91,7 @@ adept/
 │   ├── export/              # KLARF 三種寫回模式 + CSV/Excel 報表 + overlay
 │   └── calibration.py       # nm/px 校正 profile
 ├── ui/                      # PySide6 Studio（**唯一允許 Qt 的地方**）
-│   ├── scope.py             #   產品範圍開關：目前只吃 EBI patch（F7-1，見 §11）
+│   ├── scope.py             #   產品範圍開關：四種輸入（patch/rsem/stack/folder，F11 Input-3）
 │   ├── viewmodel.py         #   RecipeModel（Qt-free，可 headless 測；含 edges）
 │   ├── canvas.py            #   節點畫布（n8n 式；F7-6，純 UI，引擎零改動）
 │   ├── results.py           #   Results 視窗：直方圖 + Gallery + 輸出（F7-5）

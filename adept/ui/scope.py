@@ -1,26 +1,34 @@
 # ADEPT Studio 產品範圍開關 — authored 2026-07-28 (F7-1).
-"""Studio 目前支援哪些輸入型別、哪些卡片會出現在卡片庫。
+"""Studio 支援哪些輸入型別、哪些卡片會出現在卡片庫。
 
-**要把 RSEM 打開，就是改這個檔。** 整包 RSEM 的能力（ingest、Golden Cell、
-週期估測、範例 recipe、測試）全部原封不動留在 core 裡 —— 這裡只是把它們
-從 Studio 的畫面上收起來。
+**2026-08-17（F11 Input-3）：四種輸入全部打開了。** 使用者的話是「目前 ADEPT
+可以支援 patch + 對應 KLARF，我需要他也能支援 **RSEM image + KLARF，或單純
+圖片**」，而 Input 段的定位是「**整個輸入 image source 的核心**」。
 
-為什麼是「收起來」而不是「刪掉」
+| kind | 什麼樣的資料 | Studio 的入口 |
+|---|---|---|
+| ``ebi_patch`` | KLARF + patch TIFF（每顆連續幾頁）| ``Open KLARF…`` |
+| ``rsem`` | KLARF + 每顆一個影像檔 | ``Open KLARF…``（自動判別）|
+| ``tiff_stack`` | 一個多頁 TIFF、**沒有 KLARF** | ``Open stack…`` |
+| ``folder`` | 一個資料夾的單張影像、沒有 KLARF | ``Open folder…`` |
+
+後兩者沒有 KLARF → 沒有座標、**寫不回 KLARF**，而那件事在載入的當下就講
+（資料集標籤上常駐 ``· no KLARF``，見 :func:`no_klarf_message`）。
+
+這個檔案還是「產品範圍開關」的家
 --------------------------------
-使用者的決定是「**暫時**只支援 patch」（F7 D1）。刪掉的話：
+F7-1 用它把 Studio 收斂成 patch-only（使用者當時的話是「**暫時**只支援 patch」），
+而那一輪的做法是**收起來、不刪掉** —— 於是這一輪要打開時，改的是這裡的兩個常數，
+`ingest` / `golden_cell` / `algo/period.py` 一行都不用動。收起來的成本是零、
+回復的成本是加一個字串，那個判斷在一年後被驗證了。
 
-* 整個 M4（雙輸入 + Golden Cell）要重做；
-* ``algo/period.py`` 會跟著陪葬 —— 而它的 ``estimate_period`` /
-  ``choose_origin``（相位搜尋）**是之後做 pattern-frame ROI 的唯一工具**
-  （見 ``docs/history/plans/F7-canvas-and-taxonomy.md`` §4）。那個檔案看起來像是
-  「只有 Golden Cell 在用」，其實不是。
-
-收起來的成本是零；回復的成本是把 ``SUPPORTED_KINDS`` 加一個字串。
+⚠ ``algo/period.py`` 仍然不要刪：它的 ``estimate_period`` / ``choose_origin``
+（相位搜尋）**是之後做 pattern-frame ROI 的唯一工具**
+（見 ``docs/history/plans/F7-canvas-and-taxonomy.md`` §4），不只 Golden Cell 在用。
 
 CLI 不受影響
 ------------
-``python -m adept run`` 照樣吃得下 rsem recipe —— 這裡只管 GUI。
-臨時真的要跑 RSEM 的人不會沒有路走。
+``python -m adept run`` 一直吃得下每一種 kind —— 這裡只管 GUI。
 """
 from __future__ import annotations
 
@@ -32,23 +40,25 @@ __all__ = [
     "unsupported_kind_message",
 ]
 
-#: Studio 目前接受的資料集型別（``dataset.kind``）。
-#: 加回 ``"rsem"`` 就會讓 RSEM 整條路線重新出現在 GUI 上。
+#: Studio 接受的資料集型別（``dataset.kind``）—— 四種，見模組說明的表。
 #:
-#: ``tiff_stack``（F11 Input-2）是「一個多頁 TIFF、沒有 KLARF」——
-#: 使用者的多通道資料就是這個形式。它**沒有座標也不能寫回 KLARF**，
-#: 而那件事在載入的時候就要講（見 ``StudioWindow._on_dataset_loaded``），
-#: 不是等使用者按了 Export 才發現。
-SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack")
+#: **2026-08-17（F11 Input-3）：RSEM 與單張圖片打開了。** 使用者的話是
+#: 「目前 ADEPT 可以支援 patch + 對應 KLARF，我需要他也能支援 **RSEM image +
+#: KLARF，或單純圖片**」。四條路對應四種 source，而「一種 source 一個入口」
+#: 是使用者定的分類原則 —— 見 `StudioWindow` 工具列的三顆 Open。
+SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder")
 
-#: 只有在不支援的型別下才有意義、因此暫時不列進卡片庫的 step key。
+#: 只有在不支援的型別下才有意義、因此不列進卡片庫的 step key。
 #:
-#: * ``golden_cell`` —— 存在的唯一理由是「RSEM 單張沒有 ref，疊一張出來」。
-#:   patch 兩兩對應本來就有 ref，這張卡沒有用武之地。
-#: * ``cell_period`` —— 唯一用途是餵 ``golden_cell``。
+#: **2026-08-17（F11 Input-3）：空了。** 這裡原本收著 ``golden_cell`` 與
+#: ``cell_period``，理由是「它們存在的唯一目的是幫**單張影像**疊一張 ref 出來，
+#: 而 Studio 那時只吃兩兩成對的 patch」。現在單張那條路打開了
+#: （``rsem`` / ``folder`` / ``tiff_stack`` 都可能只有一張圖），那兩張卡就是
+#: 那條路**唯一**的 ref 來源 —— 繼續收著等於把功能打開一半。
 #:
-#: 兩張卡仍然註冊在 registry 裡：舊 recipe 載得進來、CLI 跑得動、測試照跑。
-HIDDEN_STEPS: Sequence[str] = ("golden_cell", "cell_period")
+#: 機制留著（一個 tuple、一個 `visible_steps()`）：下一次要暫時收起某張卡時，
+#: 加一個字串就好。
+HIDDEN_STEPS: Sequence[str] = ()
 
 #: 沒有資料集時 ``RecipeModel`` 用的 route 名稱。
 DEFAULT_KIND: str = SUPPORTED_KINDS[0]
@@ -96,10 +106,11 @@ def recipe_is_supported(info: Dict[str, Any]) -> bool:
 
 def unsupported_kind_message(kind: Any) -> str:
     """載到不支援的資料集時，狀態列要說的話（白話 + 講得出替代路徑）。"""
-    return ("This build of ADEPT Studio supports EBI patch input "
-            "(test + reference pairs) and multi-page image stacks; the dataset "
-            "you opened is “%s”. The command line can still run it: "
-            "python -m adept run <recipe> <klarf>." % (kind or "unknown"))
+    return ("ADEPT Studio does not know this kind of input: “%s”. It reads "
+            "KLARF datasets (patch pairs or one image per defect), multi-page "
+            "image stacks, and folders of single images. The command line can "
+            "still run it: python -m adept run <recipe> <data>."
+            % (kind or "unknown"))
 
 
 def no_klarf_message(kind: Any) -> str:

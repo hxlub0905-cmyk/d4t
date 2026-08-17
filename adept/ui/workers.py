@@ -34,7 +34,9 @@ from typing import Any, Callable, Dict, List, Optional
 from PySide6.QtCore import QObject, QThread, Signal
 
 import adept.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
-from adept.core.ingest.dataset import Dataset, load_dataset, load_tiff_stack
+from adept.core.ingest.dataset import (
+    Dataset, load_dataset, load_folder, load_tiff_stack,
+)
 from adept.core.pipeline import Recipe, run_batch, run_defect
 from adept.core.pipeline.engine import DefectResult
 
@@ -215,6 +217,28 @@ class DatasetLoadWorker(_ThreadedWorker):
     def run_sync_stack(path: str, per_defect: int = 1) -> Dataset:
         """同步載入一疊多頁 TIFF；給測試 / headless 用。"""
         return load_tiff_stack(str(path), int(per_defect))
+
+    # ---- 一個資料夾的單張影像（F11 Input-3）------------------------------
+    def start_folder(self, folder: str) -> bool:
+        if self.is_running():
+            return False
+        d = str(folder)
+
+        def job() -> None:
+            try:
+                ds = load_folder(d)
+            except Exception as e:                      # noqa: BLE001 — 一律回報
+                self.failed.emit(f"{type(e).__name__}: {e}")
+            else:
+                self.loaded.emit(ds)
+
+        self._start_job(job)
+        return True
+
+    @staticmethod
+    def run_sync_folder(folder: str) -> Dataset:
+        """同步掃一個資料夾；給測試 / headless 用。"""
+        return load_folder(str(folder))
 
 
 # ---------------------------------------------------------------------------
