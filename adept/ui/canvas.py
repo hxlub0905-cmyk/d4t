@@ -191,10 +191,21 @@ class _NodeItem(QGraphicsItem):
         埠標籤（"test" / "ref"）畫在節點右緣之外 —— 之前 boundingRect 只算到
         ``NODE_W + _PORT_R``，Qt 就只重繪那個範圍，標籤的舊位置沒被清掉。
         選中的光暈（3px 寬、畫在卡片邊緣之外）也算 —— 上下各要多留 4px。
+
+        **它同時是 ``shape()`` 的上限**：Qt 找滑鼠下的圖元時先用 boundingRect
+        粗篩，再問 shape。所以 shape 伸出去而 boundingRect 沒跟上的那一圈，
+        使用者點下去是**完全沒有反應**的 —— 以前埠的抓取圈（±15px）就有一段
+        落在這個矩形外面（上下各只留了 4px），那正是「最上面／最下面那顆埠
+        有時候點不到」的另一半。所以這裡直接以抓取半徑放寬。
+
+        左緣與上下以抓取半徑放寬；右緣本來就被埠標籤撐得比抓取圈遠，
+        所以**不再往右加**（多出來的空白會讓相鄰的節點互相吃到點擊，
+        那是 F7-14 拿掉常駐「+」時就量過的事）。
         """
-        return QRectF(-_PORT_R - 1, -4,
-                      NODE_W + 2 * _PORT_R + _PORT_LABEL_W,
-                      NODE_H + 9)
+        left = -_PORT_GRAB - 1.0
+        right = NODE_W + max(_PORT_GRAB, _PORT_R + _PORT_LABEL_W) + 1.0
+        return QRectF(left, -_PORT_GRAB - 1.0,
+                      right - left, NODE_H + 2.0 * (_PORT_GRAB + 1.0))
 
     def shape(self) -> QPainterPath:
         """**點得到的範圍不是畫得到的範圍。**
@@ -217,13 +228,26 @@ class _NodeItem(QGraphicsItem):
         看得到、按得到、然後什麼都沒發生。這是最難查的一種 —— 沒有錯誤訊息，
         而且畫面上真的有東西動（另一張卡被選起來了）。
 
-        所以命中區自己講清楚：**卡片本體 + 兩側埠的抓取半徑**，不含標籤。
+        所以命中區自己講清楚：**卡片本體 + 每一顆埠自己的抓取圈**，不含標籤。
         標籤是印出來給人讀的字，本來就不該是可以按的東西。
+
+        埠的圈要**逐顆畫進來**，不能只把本體上下各撐開 1px：
+        ``out_port_at`` 用的是以埠心為中心、半徑 ``_PORT_GRAB`` 的圓，而最上面
+        那顆埠的圓有一段在卡片上緣之外（四個埠時埠心在 y=11.2，圓一路到
+        −3.8）。命中區小於判定區的那一圈，游標明明在圈裡卻進不了
+        ``out_port_at`` —— 使用者的體感就是「這顆埠有時候點不到」。
+        **命中範圍只能有一個定義**，所以這裡照著判定區畫。
+
+        ⚠ 一定要 ``WindingFill``：``QPainterPath`` 預設是 ``OddEvenFill``，
+        而埠的圈跟卡片本體是**重疊**的兩個子路徑 —— 交集在奇偶規則下會被
+        「抵消」成洞，於是輸入埠的圓心（正好落在本體裡）反而不算命中。
+        測試抓到過：加了圈之後 ``shape().contains(in_port_local())`` 是 False。
         """
         p = QPainterPath()
-        p.addRoundedRect(
-            QRectF(-_PORT_GRAB, -1.0, NODE_W + 2 * _PORT_GRAB, NODE_H + 2.0),
-            7, 7)
+        p.setFillRule(Qt.WindingFill)
+        p.addRoundedRect(QRectF(0.0, -1.0, NODE_W, NODE_H + 2.0), 7, 7)
+        for anchor in [self.in_port_local()] + self.out_anchors_local():
+            p.addEllipse(anchor, _PORT_GRAB, _PORT_GRAB)
         return p
 
     def in_port(self) -> QPointF:
@@ -273,12 +297,29 @@ class _NodeItem(QGraphicsItem):
         return anchors[max(0, min(int(index), len(anchors) - 1))]
 
     def out_port_at(self, pos: QPointF):
-        """本地座標 ``pos`` 命中哪一個輸出埠（沒命中回 ``None``）。"""
+        """本地座標 ``pos`` 命中哪一個輸出埠（沒命中回 ``None``）。
+
+        **取最近的那一顆，不是第一顆碰到的。** 以前這裡是「由上往下找，第一個
+        落在半徑內的就算」—— 而抓取半徑（15px）比埠的間距（三個埠時 14px）還
+        大，於是**上面那顆把下面的吃掉**：`subtract` 的三個埠（diff / test /
+        ref）點在 `test` 的圓心上拉出來的是 `diff`，點在 `ref` 的圓心上拉出來
+        的是 `test`。
+
+        症狀是使用者說的「一連多的時候點不到、線拉不出來」—— 但它其實比點不到
+        更糟：**線拉得出來，只是拉到隔壁那條流**，而畫面上那條線看起來完全正常。
+        跑得完、有數字、而且是錯的。
+
+        取最近的之後，每顆埠自然拿到「到鄰居的一半」那段，最上與最下那顆對外
+        仍然有完整的 15px 可以瞄。半徑不必跟著埠數縮小（縮了只會讓每顆都更難
+        點）—— 要分的是「這一下比較靠近誰」，不是「有沒有碰到」。
+        """
+        best, best_d2 = None, None
         for i, local in enumerate(self.out_anchors_local()):
             d = pos - local
-            if (d.x() * d.x() + d.y() * d.y()) <= _PORT_GRAB ** 2:
-                return i
-        return None
+            d2 = d.x() * d.x() + d.y() * d.y()
+            if d2 <= _PORT_GRAB ** 2 and (best_d2 is None or d2 < best_d2):
+                best, best_d2 = i, d2
+        return best
 
     # -- 繪製 ---------------------------------------------------------------
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
