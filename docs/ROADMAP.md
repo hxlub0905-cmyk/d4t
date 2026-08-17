@@ -92,7 +92,7 @@ UI 介面、設定放哪都要先討論過**才動手。所以計畫書是**議�
 
 | 段 | 缺什麼 |
 |---|---|
-| **Input** | 頁→流的**命名** recipe 摸不到（`channel_order` 只有測試傳過）。而資料是 **1 BSE + 4 SE、BSE 固定第 2 頁**，現在會載成 `test, ref, img3, img4, img5` |
+| **Input**（正在做）| **入口不該只有一條**：`validate` 現在把「起點」定義成 route 上的第一張卡（線性時代的殘留），所以第二個 image source 進不來 —— 要改成「沒有輸入埠的卡都是起點」。加上頁→流的**命名** recipe 摸不到（`channel_order` 只有測試傳過），而資料是 **1 BSE + 4 SE、BSE 固定第 2 頁、沒有 ref**，現在會載成 `test, ref, img3, img4, img5`（**第 2 頁的 BSE 被叫成 `ref`，`subtract` 不報錯**）|
 | **Enhance** | 融合卡（PCA Ref、BSE·SE quadrant）—— 都是「N 條流 → 一條新的流」，踩產流命名契約 |
 | **Region** | 第三條路：吃 GLAS 的 label map。出口契約已經留好（見 [`ARCHITECTURE.md`](ARCHITECTURE.md)），下游零改動 |
 | **Compare** | GLAS 的合成 gray 當 ref（die-to-database）；`align` 直接吃 GLAS 算好的 offset |
