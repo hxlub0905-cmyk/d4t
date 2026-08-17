@@ -632,6 +632,54 @@ RSEM 大圖、GLAS 的 `_label.png`、GLAS 的 `_gray.png` 是**同一件事**�
 - 檔案 I/O 只在 ingest 層（§3.1.3：配對規則只有一份、**快取簽章看得見**、
   畫布上是一條真的流）。
 
+#### 3.1.13 **Input 卡要按 source 拆開**（使用者回報，2026-08-17）
+
+> 我還是傾向不同資料流（IMAGE SOURCE）卡片要拆分不要放在一起耶，這樣放在一起
+> 反而變得很複雜。例如我現在 load 一張 RSEM image 他就是單張的～但其後的 NODE
+> 節點會有 TEST 跟 REF？但實際上是 Single。**這樣畫布跟實際對不起來。**
+
+量出來的實情比回報的更糟 —— 同一個問題「這張卡吐哪幾條流」有**三個不同的答案**：
+
+| 誰回答 | 對 rsem 資料的答案 |
+|---|---|
+| `resolve_writes`（靜態宣告）| `["test"]` |
+| `resolve_writes_for_kind(rsem)` | `["single", "test"]`（`single` 鏡射成 `test`）|
+| **畫布上真的畫出來的** | **`["test", "ref"]`** ← 使用者看到的 |
+| 資料真的有的 | `["single"]` |
+
+**第一層（已修 2026-08-17）**：`model.kind` 是直接設的屬性，**不會通知 listener**，
+而畫布的埠是照 kind 算的 —— 少了一次重畫，載 rsem 之後畫布還留著 patch 的
+`test`/`ref`。修完之後畫布是 `single` + `test`。驗收
+`tests/test_ui_input_kinds.py::test_switching_route_repaints_the_canvas`。
+
+**第二層（要照使用者說的拆卡）**：`single` + `test` 仍然是「宣告比現實多」——
+`test` 是 `load_patch.run()` 裡一段**寫死的鏡射**（讓下游用預設參數就吃得到圖）。
+病根是**一張卡服務四種 kind，而它的宣告隨 kind 改變** —— 那就是
+`resolve_writes_for_kind` 這個機制，也是三個答案的來源。
+
+##### 提案：拆成兩張，而且 `resolve_writes_for_kind` 整個消失
+
+拆的軸是**「一顆長什麼樣」**（那正是畫布上看得到的差別），不是檔案格式
+（檔案格式已經由三個 Open 入口分掉了）：
+
+| 卡 | 一顆給什麼 | 吐什麼 | 用在 |
+|---|---|---|---|
+| `load_patch`「Load images」| 好幾張 | **`channel_map` 表格裡的名字**（預設 `1:test, 2:ref`）| `ebi_patch`、`tiff_stack` |
+| `load_single`「Load one image」（新）| 一張 | **一條**，名字由 `out` 決定（`image_key` + `direction="out"`，畫布跟著改名）| `rsem`、`folder` |
+
+為什麼是兩張而不是四張（一個 kind 一張）：`rsem` 與 `folder` 在**卡片**這一層
+一模一樣（都是「一顆一張」），做成兩張會是兩份會各自長歪的程式碼 ——
+而「同一個家族收成一張卡」是既有的規矩（F7-10）。四個 kind 的差別在**檔案怎麼
+找到**，那件事在 Input 的三個入口就分完了。
+
+為什麼 `resolve_writes_for_kind` 會消失：`load_patch` 的 writes 改成**只看
+`channel_map`**（預設值 `1:test, 2:ref` ＝ 現在 ebi_patch 的行為），
+`load_single` 的 writes 只看 `out`。兩張卡都不再需要知道 kind ——
+**宣告從「隱形的資料型別」變成「使用者看得到的值」**，那正是畫布不說謊的條件。
+
+要一併決定的三件事（見下面 §3.1.11）：鏡射拿掉之後 `load_single` 的 `out` 預設叫
+什麼、舊 recipe 的遷移、以及「一顆五張但沒填 map」的新行為。
+
 #### 3.1.11 還沒定的
 
 - **patch ↔ RSEM 的配對規則**與「對位之後要什麼」（§3.1.9 的兩題）。

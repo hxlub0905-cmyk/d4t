@@ -2514,6 +2514,12 @@ class StudioWindow(QMainWindow):
             if not self.model.dirty or not self.model.node_order:
                 self.model.kind = ds_kind
                 self.model.dirty = False      # 換 route 不算「使用者改過」
+                # ⚠ **換 kind 必須重畫**。`model.kind` 是直接設的屬性，不會通知
+                # listener，而畫布的輸出埠是照 kind 算的（`resolve_writes_for_kind`）
+                # —— 少了這一行，載一份 rsem 資料之後畫布上還是 patch 的
+                # `test` / `ref` 兩顆埠，而資料只有一條 `single`。
+                # 使用者回報的「畫布跟實際對不起來」第一層就是這個。
+                self._refresh_all()
             else:
                 # 使用者已經蓋了一條 pipeline，那是他的東西 —— 不要偷偷改掉它，
                 # 但要講出這個組合跑不起來。

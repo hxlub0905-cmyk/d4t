@@ -163,3 +163,18 @@ def test_period_module_is_not_orphaned():
         "choose_origin 的相位搜尋是 M4 補完原專案 stub 的成果，不要刪"
 
 
+
+
+def test_switching_route_repaints_the_canvas(window, rsem_lot):
+    """**換 kind 必須重畫。**
+
+    `model.kind` 是直接設的屬性、不會通知 listener，而畫布的輸出埠是照 kind 算
+    的。少了那一次重畫，載一份 rsem 資料之後畫布上還留著 patch 的 `test` / `ref`
+    兩顆埠 —— 而資料只有一條 `single`。使用者回報的「畫布跟實際對不起來」第一層
+    就是這個（第二層是 Input 卡還沒按 source 拆開，見計畫書 §3.1.13）。
+    """
+    window.load_dataset_path(rsem_lot["klarf"], sync=True)
+    nid = window.model.node_order[0]
+    ports = window.pipeline.node_item(nid).out_names()
+    assert "ref" not in ports, ports          # patch 的 ref 不該還在畫布上
+    assert "single" in ports
