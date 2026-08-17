@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import wire_up  # noqa: E402
+from conftest import first_source, wire_up  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
@@ -78,7 +78,7 @@ def test_selecting_a_card_with_a_kernel_draws_it_on_the_image(window, tmp_path):
 
     out = generate(str(tmp_path / "lotA"), n=4, seed=41)
     window.load_dataset_path(out["klarf"], sync=True)
-    src = window.model.node_order[0]
+    src = first_source(window)
     f = wire_up(window.model, window.add_card_after(src, "flatten"))
     window._on_edge_added(src, f, "test")
     window.model.set_param(f, "size", 21)
@@ -97,7 +97,7 @@ def test_dragging_the_slider_moves_the_box(window, tmp_path):
 
     out = generate(str(tmp_path / "lotA2"), n=4, seed=42)
     window.load_dataset_path(out["klarf"], sync=True)
-    src = window.model.node_order[0]
+    src = first_source(window)
     f = wire_up(window.model, window.add_card_after(src, "flatten"))
     window._on_edge_added(src, f, "test")
     window.select_node(f)
@@ -111,7 +111,7 @@ def test_a_card_without_a_kernel_clears_the_box(window, tmp_path):
 
     out = generate(str(tmp_path / "lotA3"), n=4, seed=43)
     window.load_dataset_path(out["klarf"], sync=True)
-    src = window.model.node_order[0]
+    src = first_source(window)
     f = wire_up(window.model, window.add_card_after(src, "flatten"))
     window._on_edge_added(src, f, "test")
     n = wire_up(window.model, window.add_card_after(f, "normalize"))
@@ -130,7 +130,7 @@ def test_a_hidden_row_does_not_leave_a_box_behind(window, tmp_path):
 
     out = generate(str(tmp_path / "lotA4"), n=4, seed=44)
     window.load_dataset_path(out["klarf"], sync=True)
-    src = window.model.node_order[0]
+    src = first_source(window)
     f = wire_up(window.model, window.add_card_after(src, "flatten"))
     window._on_edge_added(src, f, "test")
     window.select_node(f)
@@ -146,7 +146,7 @@ def test_no_filtering_means_no_box(window, tmp_path):
 
     out = generate(str(tmp_path / "lotA5"), n=4, seed=45)
     window.load_dataset_path(out["klarf"], sync=True)
-    src = window.model.node_order[0]
+    src = first_source(window)
     d = wire_up(window.model, window.add_card_after(src, "denoise"))
     window._on_edge_added(src, d, "test")
     window.model.set_param(d, "ksize", 1)
@@ -185,7 +185,7 @@ def test_the_uneven_treatment_warning_lands_on_the_card(window, tmp_path):
 
     out = generate(str(tmp_path / "lotL"), n=4, seed=61)
     window.load_dataset_path(out["klarf"], sync=True)
-    src = window.model.node_order[0]
+    src = first_source(window)
     n1 = wire_up(window.model, window.add_card_after(src, "normalize"))
     window._on_edge_added(src, n1, "test")
     sub = window.add_card_after(n1, "subtract")
@@ -205,7 +205,7 @@ def test_the_card_order_warning_lands_on_the_normalize_card(window, tmp_path):
 
     out = generate(str(tmp_path / "lotL2"), n=4, seed=62)
     window.load_dataset_path(out["klarf"], sync=True)
-    src = window.model.node_order[0]
+    src = first_source(window)
     t = wire_up(window.model, window.add_card_after(src, "tone"))
     window._on_edge_added(src, t, "test")
     n = wire_up(window.model, window.add_card_after(t, "normalize"))
@@ -222,7 +222,7 @@ def test_a_warning_does_not_stop_the_run(window, tmp_path):
 
     out = generate(str(tmp_path / "lotL3"), n=4, seed=63)
     window.load_dataset_path(out["klarf"], sync=True)
-    src = window.model.node_order[0]
+    src = first_source(window)
     t = wire_up(window.model, window.add_card_after(src, "tone"))
     window._on_edge_added(src, t, "test")
     n = wire_up(window.model, window.add_card_after(t, "normalize"))
@@ -291,7 +291,7 @@ def test_the_backdrop_comes_from_the_engine_record_not_from_the_ui(window,
 
     out = generate(str(tmp_path / "lotC"), n=4, seed=51)
     window.load_dataset_path(out["klarf"], sync=True)
-    src = window.model.node_order[0]
+    src = first_source(window)
     t = wire_up(window.model, window.add_card_after(src, "tone"))
     window._on_edge_added(src, t, "test")
     window.select_node(t)
@@ -308,7 +308,7 @@ def test_switching_to_a_card_without_a_curve_clears_it(window, tmp_path):
 
     out = generate(str(tmp_path / "lotC2"), n=4, seed=52)
     window.load_dataset_path(out["klarf"], sync=True)
-    src = window.model.node_order[0]
+    src = first_source(window)
     t = wire_up(window.model, window.add_card_after(src, "tone"))
     window._on_edge_added(src, t, "test")
     d = wire_up(window.model, window.add_card_after(t, "denoise"))
@@ -393,7 +393,7 @@ def test_the_whole_way_through_from_a_real_trial(window, tmp_path):
 
     out = generate(str(tmp_path / "lotH"), n=6, seed=47)
     window.load_dataset_path(out["klarf"], sync=True)
-    src = window.model.node_order[0]
+    src = first_source(window)
     f = wire_up(window.model, window.add_card_after(src, "flatten"))
     window._on_edge_added(src, f, "test")
     window.model.set_param(f, "method", "dark_spots")

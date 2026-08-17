@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import wire_up  # noqa: E402  —— F10：加完卡要接線
+from conftest import first_source, wire_up  # noqa: E402  —— F10：加完卡要接線
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
@@ -60,7 +60,7 @@ def _batch(points, extra=None):
 # 1. 機制
 # --------------------------------------------------------------------------- #
 def test_selecting_a_card_swaps_in_its_own_panel(window):
-    src = window.model.node_order[0]
+    src = first_source(window)
     a = window.add_card_after(src, "align")
     # F10：Align 有**兩格**輸入（要對的那張、對齊到哪張），所以要拉兩條線 ——
     # 那正是使用者現在在畫布上做的事（以前一條都不用拉也照跑，因為兩格都有
@@ -74,7 +74,7 @@ def test_selecting_a_card_swaps_in_its_own_panel(window):
 
 def test_a_card_without_a_panel_falls_back_to_the_feature_table(window):
     """沒註冊儀表的卡**不能**變成一片空白 —— 那比原本的特徵表還糟。"""
-    src = window.model.node_order[0]
+    src = first_source(window)
     a = window.add_card_after(src, "align")
     # F10：Align 有**兩格**輸入（要對的那張、對齊到哪張），所以要拉兩條線 ——
     # 那正是使用者現在在畫布上做的事（以前一條都不用拉也照跑，因為兩格都有
@@ -88,7 +88,7 @@ def test_a_card_without_a_panel_falls_back_to_the_feature_table(window):
 
 
 def test_you_can_still_get_to_the_features(window):
-    src = window.model.node_order[0]
+    src = first_source(window)
     _nid = window.add_card_after(src, "align")
     window._on_edge_added(src, _nid, "test")
     window.show_bottom_page(1)
@@ -189,7 +189,7 @@ def test_it_reads_the_engine_numbers_not_its_own(window, tmp_path):
 
     out = generate(str(tmp_path / "lot"), n=8, seed=17)
     window.load_dataset_path(out["klarf"], sync=True)
-    src = window.model.node_order[0]
+    src = first_source(window)
     a = window.add_card_after(src, "align")
     # F10：Align 有**兩格**輸入（要對的那張、對齊到哪張），所以要拉兩條線 ——
     # 那正是使用者現在在畫布上做的事（以前一條都不用拉也照跑，因為兩格都有
@@ -292,7 +292,7 @@ def test_the_studio_preview_turns_recording_on(window, tmp_path):
 
     out = generate(str(tmp_path / "lotE"), n=4, seed=23)
     window.load_dataset_path(out["klarf"], sync=True)
-    src = window.model.node_order[0]
+    src = first_source(window)
     b = window.add_card_after(src, "tone")
     window._on_edge_added(src, b, "test")
     window.model.set_param(b, "contrast", 4.0)
@@ -368,7 +368,7 @@ def test_the_page_to_stream_mapping_is_on_screen(window, tmp_path):
 
     out = generate(str(tmp_path / "lotF"), n=4, seed=29)
     window.load_dataset_path(out["klarf"], sync=True)
-    window.select_node(window.model.node_order[0])
+    window.select_node(first_source(window))
     assert window.refresh_preview(sync=True) is True
 
     insp = window.inspector()
@@ -391,7 +391,7 @@ def test_it_says_measurements_are_in_pixels(window, tmp_path):
 
     out = generate(str(tmp_path / "lotG"), n=2, seed=31)
     window.load_dataset_path(out["klarf"], sync=True)
-    window.select_node(window.model.node_order[0])
+    window.select_node(first_source(window))
     window.refresh_preview(sync=True)
     summary = window.inspector().summary()
     assert "pixels" in summary and "export" in summary
@@ -405,7 +405,7 @@ def test_it_says_measurements_are_in_pixels(window, tmp_path):
 def test_the_old_name_still_answers_when_another_card_is_selected(window):
     """`profile_panel` 在別的卡片上要回一個**空的替身**，不是 None ——
     呼叫端不必到處寫 if is None。"""
-    window.select_node(window.model.node_order[0])
+    window.select_node(first_source(window))
     assert window.profile_panel is not None
     assert window.profile_panel.has_data() is False
     assert window.profile_panel_visible() is False

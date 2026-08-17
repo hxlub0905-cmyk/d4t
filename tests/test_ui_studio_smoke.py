@@ -93,12 +93,15 @@ def test_window_constructs_with_library_cards(window):
     assert window.library.section_titles() == [
         "Input", "Enhance", "ROI", "Compare", "Measure", "ADC"]
 
-    # 空狀態：畫布上只有起手的 Input 卡（F7-9），而且它已經被選起來 ——
-    # 一開窗右欄就有東西可以動，不是一句「請先挑一張卡」。
-    assert window.model.node_order == ["load_patch"]
-    assert window.pipeline.node_ids() == ["load_patch"]
-    assert window.selected_node == "load_patch"
-    assert window.param_form.step_key() == "load_patch"
+    # 空狀態：**畫布是空的**（F11 Enhance-4，使用者定調：「Load image 卡片改成
+    # 預設沒有，user 可以選擇要 Load images or Load one image，add 才會出現」）。
+    # F7-9 起這裡有一張起手的 `load_patch`；Input-4 把載入卡拆成兩張之後，
+    # 預先放一張就是替使用者決定了他還沒決定的事。
+    assert window.model.node_order == []
+    assert window.pipeline.node_ids() == []
+    assert window.selected_node is None
+    # 兩張載入卡都在卡片庫裡，讓他挑
+    assert window.library.entry("load_single") is not None
     assert window.model.dirty is False, "使用者什麼都還沒做，不該被問「要存檔嗎」"
     # 預覽沒有影像、直方圖沒有資料
     assert window.image_view.has_image() is False
@@ -242,8 +245,9 @@ def test_param_edit_valid_then_invalid(window, synlot):
 def test_mouse_only_pipeline_build(qapp):
     win = studio_mod.StudioWindow()
     try:
-        # 起手的 Input 卡已經在畫布上了（F7-9），所以只要再加一張
-        assert win.model.node_order == ["load_patch"]
+        # 畫布是空的（F11 Enhance-4），所以兩張都要自己加
+        assert win.model.node_order == []
+        win.library.add_requested.emit("load_patch")
         win.library.add_requested.emit("normalize")
         assert win.model.node_order == ["load_patch", "normalize"]
         assert win.pipeline.node_ids() == ["load_patch", "normalize"]
@@ -343,8 +347,7 @@ def test_actions_are_disabled_until_their_preconditions_hold(qapp, synlot):
     """
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     try:
-        # 還沒有資料：跑不了、輸出不了（起手的 Input 卡讓「存檔」是可以的 ——
-        # 畫布上真的有一張卡，說「沒東西可存」才是騙人的）
+        # 還沒有資料、畫布也是空的（F11 Enhance-4）：跑不了、輸出不了
         assert win.btn_trial.isEnabled() is False
         # 箭頭是 F7-23 起的第二顆真按鈕，要跟主鈕同進退 —— 還打得開一個
         # 「每一項都是灰的」選單，等於讓使用者多按一次才知道不能按。
@@ -352,16 +355,22 @@ def test_actions_are_disabled_until_their_preconditions_hold(qapp, synlot):
         assert win.act_run_all.isEnabled() is False
         assert win.spin_trial_n.isEnabled() is False
         assert win.btn_export.isEnabled() is False
-        assert "No dataset" in win.btn_trial.toolTip()
+        # 兩件事都還沒做（沒有資料、畫布也是空的，F11 Enhance-4）——
+        # tooltip 要把**兩件**都講出來，不是只講其中一件。
+        assert "Load a KLARF and add at least one card" in win.btn_trial.toolTip()
         for w in (win.btn_trial, win.btn_export):
             assert w.toolTip().strip(), "變灰的按鈕一定要說明原因"
 
-        # 移掉起手卡 → 流程真的空了，理由要換一句
-        win.pipeline.remove_requested.emit("load_patch")
-        assert "add at least one card" in win.btn_trial.toolTip()
+        # 加一張卡進去 → 理由要換一句（缺的只剩資料）
+        win.library.add_requested.emit("load_patch")
+        assert "No dataset" in win.btn_trial.toolTip()
 
-        # 只有資料集 → 還是不能跑（流程是空的），但理由要換一句
+        # 載入資料 → 兩個條件都滿足了（畫布上有卡、也有資料）
         assert win.load_dataset_path(synlot["klarf"], sync=True) is True
+        assert win.btn_trial.isEnabled() is True
+
+        # 把卡片刪掉 → 流程真的空了，理由要換一句
+        win.pipeline.remove_requested.emit(win.model.node_order[0])
         assert win.btn_trial.isEnabled() is False
         assert "pipeline is empty" in win.btn_trial.toolTip()
 

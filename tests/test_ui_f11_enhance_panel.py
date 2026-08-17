@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import wire_up  # noqa: E402
+from conftest import first_source, wire_up  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
@@ -239,7 +239,7 @@ def test_the_whole_way_through_from_a_real_preview(window, tmp_path):
 
     out = generate(str(tmp_path / "lotN"), n=4, seed=31)
     window.load_dataset_path(out["klarf"], sync=True)
-    src = window.model.node_order[0]
+    src = first_source(window)
     d = wire_up(window.model, window.add_card_after(src, "denoise"))
     window._on_edge_added(src, d, "test")
     window.model.set_param(d, "method", "bilateral")

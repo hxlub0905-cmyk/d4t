@@ -24,6 +24,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import first_source  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
@@ -61,7 +63,7 @@ def window(qapp):
 # --------------------------------------------------------------------------- #
 def test_wiring_a_second_stream_adds_it_instead_of_replacing(window):
     """使用者原話的那個情境，逐字重演一次。"""
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, "normalize")
 
     window.pipeline.link_to(src, nid, port=0)          # test
@@ -78,7 +80,7 @@ def test_the_second_line_actually_appears_on_the_canvas(window):
     線的數量是從「兩端共用的影像流」推出來的（``_ports_between``），所以
     ``streams`` 一多一條，那條線就自己出現了，不必另外記。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, "normalize")
     window.pipeline.link_to(src, nid, port=0)
     a, b = window.pipeline.card(src), window.pipeline.card(nid)
@@ -92,7 +94,7 @@ def test_the_second_line_actually_appears_on_the_canvas(window):
 
 def test_wiring_the_same_stream_twice_changes_nothing(window):
     """重複拉同一條不該把它加兩次（``test,test`` 會讓那張卡做兩遍）。"""
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, "normalize")
     window.pipeline.link_to(src, nid, port=0)
     window.pipeline.link_to(src, nid, port=0)
@@ -106,7 +108,7 @@ def test_both_streams_then_get_the_same_settings(window):
     """
     from adept.core.pipeline import get_step
 
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, "normalize")
     window.pipeline.link_to(src, nid, port=0)
     window.pipeline.link_to(src, nid, port=1)
@@ -128,7 +130,7 @@ def test_a_role_port_is_still_replaced_not_accumulated(window):
     ``test,ref`` —— 一個 ``image_key`` 塞了兩個名字，那張卡執行時會找不到
     那條流，而使用者完全看不出自己做錯了什麼。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, "subtract")
     before = dict(window.model.nodes[nid].params)
 
@@ -154,7 +156,7 @@ def test_a_two_stream_card_runs(window, tmp_path):
     from adept.core.pipeline import get_step
     from adept.core.pipeline.context import Context
 
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, "normalize")
     window.pipeline.link_to(src, nid, port=0)
     window.pipeline.link_to(src, nid, port=1)
@@ -182,7 +184,7 @@ def test_compare_defaults_to_test_on_the_left_and_ref_on_the_right(window, tmp_p
 
     out = generate(str(tmp_path / "lotC"), n=4, seed=11)
     window.load_dataset_path(out["klarf"], sync=True)
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, "normalize")   # 一張做 ref 的卡
     window._on_edge_added(src, nid, "ref")
     window.select_node(nid)
@@ -201,7 +203,7 @@ def test_compare_shows_one_histogram_per_image(window, tmp_path):
 
     out = generate(str(tmp_path / "lotD"), n=4, seed=12)
     window.load_dataset_path(out["klarf"], sync=True)
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, "normalize")
     window.pipeline.link_to(src, nid, port=0)          # 兩條流都接上（F9-7：
     window.pipeline.link_to(src, nid, port=1)          # 線一條一條自己拉）
@@ -271,7 +273,7 @@ def test_the_node_does_not_say_the_same_thing_twice(window):
     第三行是拿來放「這張卡被設定成什麼」的（門檻、方法、半徑）。被一個跟上面
     那行同義的字佔掉，等於少了一行資訊。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, "normalize")
     window.pipeline.link_to(src, nid, port=0)      # F9-7：線都是自己拉的
     window.pipeline.link_to(src, nid, port=1)
@@ -290,7 +292,7 @@ def test_the_node_does_not_say_the_same_thing_twice(window):
 
 def test_a_stream_the_subtitle_does_not_mention_is_still_shown(window):
     """借範圍的那條流不在 reads→writes 那一行裡，所以它要留在摘要中。"""
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, "normalize")
     window._on_edge_added(src, nid, "ref")
     window.model.set_param(nid, "range_from", "test")
@@ -342,7 +344,7 @@ def test_the_settings_pane_is_open_by_default_and_collapsible(window):
     """
     assert window.params_open() is True, "設定預設攤開（D 案）"
 
-    src = window.model.node_order[0]
+    src = first_source(window)
     window.select_node(src)
     assert window.param_form.step_key() == "load_patch"
 
@@ -367,7 +369,7 @@ def test_a_line_can_be_cut_where_it_is(window):
     選起來按 Delete 本來就做得到，但畫面上沒有任何東西講出這件事 —— 刪除的
     入口要長在被刪的那條線上面。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, "denoise")
     window._on_edge_added(src, nid, "test")        # F9-7：線由使用者拉
     assert window.model.has_edge(src, nid) is True
@@ -384,7 +386,7 @@ def test_a_line_can_be_cut_where_it_is(window):
 def test_route_order_has_no_lines_at_all(window):
     """route 順序的金色虛線 2026-08-14 退役（使用者：「會混淆」）——
     畫布上只有使用者拉的線，每一條都有 ×。"""
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, "denoise")
     pairs = {e.pair() for e in window.pipeline._edges}
     assert pairs == set(window.model.edge_pairs()), \
@@ -393,7 +395,7 @@ def test_route_order_has_no_lines_at_all(window):
 
 def test_tidy_puts_the_cards_back_on_the_grid(window):
     """節點拖得動，拖過就亂了 —— 而以前只能自己一個個搬回去。"""
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, "denoise")
     item = window.pipeline.card(nid)
     before = item.pos()
@@ -480,7 +482,7 @@ def test_undo_has_a_button_not_only_a_shortcut(window):
     assert "Nothing to undo" in window.btn_undo.toolTip()
     assert window.btn_redo.isEnabled() is False
 
-    src = window.model.node_order[0]
+    src = first_source(window)
     window.add_card_after(src, "denoise")
     assert window.btn_undo.isEnabled() is True
     assert "Ctrl+Z" in window.btn_undo.toolTip(), "tooltip 要帶快捷鍵"
@@ -502,7 +504,7 @@ def test_adding_one_card_is_one_undo(window):
 
     這件事以前沒人發現，是因為工具列上根本沒有復原鈕（只有快捷鍵）。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     before = list(window.model.node_order)
     before_edges = list(window.model.edges)
 

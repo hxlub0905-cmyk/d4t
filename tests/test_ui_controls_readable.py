@@ -16,6 +16,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from conftest import first_source  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
@@ -168,6 +170,10 @@ def window(qapp):
 def test_a_card_that_cannot_run_is_marked_on_the_canvas(window):
     """lint 早就知道模板是空的 —— 但那個知識以前只在按下 Run trial 的那一刻
     出現一次，卡片在畫布上看起來永遠是好的。"""
+    # F11 Enhance-4：開窗是空白畫布，所以「上游有一張輸入卡」這件事現在要自己
+    # 做（以前是起手卡順便提供的）—— 少了它，這一題會問到另一個錯（沒有人產出
+    # `ref`），而那是 missing-image 不是 not-configured。
+    first_source(window)
     nid = window.model.add_step("roi_template")
     # F10：先接上來源，這一題才問得到「模板還沒建」——「還沒接線」是另一個錯，
     # 而兩個一起出現時，先修哪一個由使用者決定，不是由這條測試決定。

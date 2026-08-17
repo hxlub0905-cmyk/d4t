@@ -105,7 +105,7 @@ from adept.core.pipeline import ParamError, Recipe, get_step, list_steps
 from adept.core.pipeline.recipe import version_skew
 
 from .export_dialog import ExportDialog
-from .canvas import PipelineCanvas
+from .canvas import SUMMARY_SEP, PipelineCanvas
 from .inspectors import inspector_for
 from .gallery import make_thumb
 from .region_check import MAX_CHECK, RegionCheckWindow, regions_of_node
@@ -1391,8 +1391,20 @@ class StudioWindow(QMainWindow):
             if has_results
             else "No results yet — run a trial first.")
 
+    def _node_summary_parts(self, node: Any,
+                            shown: Optional[Sequence[str]] = None) -> List[str]:
+        """節點第三行的各項（`_node_summary` 的 list 版；畫布用這個）。
+
+        分開一個 list 版是為了讓**畫的人決定塞得下幾項**：字串版在 Studio 這邊
+        就把項數砍成 3，而節點只有 ~150px 寬，於是第三項被切在字中間
+        （使用者回報的「normalize 的節點文字會被吃掉」）。見
+        `canvas._draw_parts`。
+        """
+        text = self._node_summary(node, shown=shown)
+        return [s for s in text.split(SUMMARY_SEP) if s]
+
     def _node_summary(self, node: Any, shown: Optional[Sequence[str]] = None) -> str:
-        """最多 3 個「非預設」參數，渲染成 ``k=v`` 串起來。
+        """「非預設」參數渲染成 ``k=v`` 串起來。
 
         ``shown`` 是**副標那一行已經講過的影像流名**（``test ref → test ref``）。
         指定影像流的那些參數會被跳掉 —— 它們的值就是副標的來源，兩行講同一件事
@@ -1416,6 +1428,12 @@ class StudioWindow(QMainWindow):
         for name, value in node.params.items():
             if name in defaults and defaults[name] == value:
                 continue
+            # **空的值不要印**（F11 Enhance-4）。剛加進來的卡每一格輸入都是空的
+            # （F10：`cleared_inputs`），而空字串跟卡片的預設值不相等 —— 於是
+            # 節點上長出 ``streams=``，一個沒有任何資訊的欄位，還把真正有用的那
+            # 一項擠掉。「還沒接線」這件事畫布上已經講了（沒有線＋警示標記）。
+            if value is None or (isinstance(value, str) and not value.strip()):
+                continue
             if name in stream_params and seen:
                 # 這個參數挑的流副標已經列出來了 → 不要再講一次。
                 picked = {v.strip() for v in str(value).split(",") if v.strip()}
@@ -1425,9 +1443,12 @@ class StudioWindow(QMainWindow):
                 parts.append("%s: set" % name)
             else:
                 parts.append("%s=%s" % (name, _fmt(value)))
-            if len(parts) >= 3:
+            # 上限放寬到 4：塞得下幾項由**畫的人**決定（`canvas._draw_parts`），
+            # 而它會把放不下的收成 `+N`。這裡的上限只是別讓一張 19 個參數的卡
+            # （`roi_cross`）產出一串沒有人讀得完的字。
+            if len(parts) >= 4:
                 break
-        return " · ".join(parts)
+        return SUMMARY_SEP.join(parts)
 
     def _node_problems(self) -> Dict[str, Any]:
         """每個節點最嚴重的一則 lint 發現（畫布上的警示標記用）。
@@ -1529,6 +1550,10 @@ class StudioWindow(QMainWindow):
                 "enabled": bool(node.enabled),
                 # 副標那行印的是 reads → writes/regions；摘要不要再講一次
                 "summary": self._node_summary(
+                    node, shown=list(reads) + list(writes) + list(regions_out)),
+                # 畫布照**寬度**決定塞得下幾項（放不下的收成 `+N`），所以給它
+                # list；`summary` 那個字串留著給狀態列與測試讀。
+                "summary_parts": self._node_summary_parts(
                     node, shown=list(reads) + list(writes) + list(regions_out)),
                 # 畫布的輸出埠吃這個（含原樣送出的輸入）；副標仍然只印
                 # 「這張卡真的產出什麼」，不然每張卡的副標都會變成一長串。
@@ -2560,18 +2585,6 @@ class StudioWindow(QMainWindow):
         ds_kind = str(getattr(dataset, "kind", self.model.kind))
         if ds_kind != self.model.kind:
             if not self.model.dirty or not self.model.node_order:
-                # 還沒動過 → 連起手卡一起換成這種資料該用的那一張（F11 Input-4）：
-                # 單張影像的資料放 `load_patch` 的話，畫布上會有兩顆埠而資料只有
-                # 一張圖 —— 那正是使用者回報的「畫布跟實際對不起來」。
-                want = RecipeModel.starter_step_for(ds_kind)
-                only_starter = (len(self.model.node_order) == 1
-                                and not self.model.edges)
-                if only_starter and not self.model.dirty:
-                    nid = self.model.node_order[0]
-                    if self.model.nodes[nid].step != want:
-                        self.model = RecipeModel.starter(ds_kind)
-                        self.model.add_listener(self._on_model_changed)
-                        self.selected_node = None
                 self.model.kind = ds_kind
                 self.model.dirty = False      # 換 route 不算「使用者改過」
                 # ⚠ **換 kind 必須重畫**。`model.kind` 是直接設的屬性，不會通知
@@ -2587,6 +2600,7 @@ class StudioWindow(QMainWindow):
                     "this pipeline is written for %s data and you just opened "
                     "%s data; open a recipe for %s, or start a new pipeline."
                     % (self.model.kind, ds_kind, ds_kind)))
+        added = self._adopt_source_for(ds_kind)
 
         # `channel_map` 的表格要照「這批資料一顆有幾張圖」排列數（F11）。
         # 那是資料的事實，所以在這裡講一次，不是每次選卡片時重新猜。
@@ -2598,6 +2612,8 @@ class StudioWindow(QMainWindow):
         self._progress_done()
         msg = "Loaded %d defects (input type %s)" % (
             len(items), getattr(dataset, "kind", "?"))
+        if added:
+            msg += "   · added “%s” for it" % added
         # 換一份資料集就換一份答案卷 —— 上一份的 ground truth 留著的話，
         # 狀態列會拿 A 的答案去對 B 的結果，而那個數字看起來完全正常。
         gt = self._load_ground_truth_beside(
@@ -2619,6 +2635,41 @@ class StudioWindow(QMainWindow):
         if items:
             self.refresh_preview(force=False)
         return True
+
+    def _adopt_source_for(self, kind: str) -> str:
+        """畫布是空的 → 補上**這種資料該用的那一張**載入卡（回它的顯示名）。
+
+        為什麼開窗時不放、載資料時才放（F11 Enhance-4）
+        ----------------------------------------------
+        使用者：「一開始進去 GUI 畫面時，Load image 卡片改成預設沒有（user 可以
+        選擇要 Load images or Load one image），add 才會出現。」他要的是**開窗時
+        不要替他決定** —— 因為 Input-4 之後有兩張載入卡，而預先放一張就是替他決定
+        了他還沒決定的事（而猜錯的那一半在畫布上看起來完全正常）。
+
+        但**載入資料的那一刻，「哪一張」已經不是猜的**：`ingest` 判別出來的 kind
+        就是答案（`ebi_patch`/`tiff_stack` → Load images；`rsem`/`folder` →
+        Load one image）。那時候不放才是把一個已知的答案丟給使用者自己拼。
+        所以規則是：**空白畫布才補，而且把補了什麼講出來**（狀態列）。
+
+        只在**完全空白且沒動過**的時候補：使用者已經蓋了一條 pipeline 的話，
+        那是他的東西 —— 這一段一個字都不准動它。
+        """
+        if self.model.node_order or self.model.dirty:
+            return ""
+        want = RecipeModel.starter_step_for(str(kind or ""))
+        try:
+            nid = self.model.add_step(want)
+        except KeyError:                 # pragma: no cover — 卡片庫壞了才會發生
+            return ""
+        # 補上來的那張卡不算「使用者做過的一步」：Ctrl+Z 不該把它退掉，關窗也
+        # 不該因此問「要存檔嗎」（同 `RecipeModel.starter` 的理由）。
+        self.model.dirty = False
+        self.model.clear_history()
+        self.select_node(nid)
+        try:
+            return str(get_step(want).label)
+        except KeyError:                 # pragma: no cover
+            return want
 
     def _items(self) -> List[Any]:
         """目前資料集的 defect 清單（沒有資料集就是空的）。"""
@@ -2806,10 +2857,49 @@ class StudioWindow(QMainWindow):
         if busy:
             self._status("Computing preview…")
 
+    def _selected_trace(self, result: Any) -> Any:
+        """選取的那張卡這一次的執行紀錄（`None` = **它根本沒跑到**）。"""
+        nid = self.selected_node
+        if not nid or nid not in self.model.nodes:
+            return None
+        for tr in (getattr(result, "traces", None) or []):
+            if str(getattr(tr, "node_id", "")) == nid:
+                return tr
+        return None
+
+    def _selected_card_ran(self, result: Any) -> bool:
+        """選取的那張卡**這一次真的執行了嗎**（F11 Enhance-4）。
+
+        為什麼要問這一句
+        ----------------
+        使用者回報：「Load image 載入圖片後點選 Denoise，為何會有畫面？我前面的
+        rule 應該有說要連接線（image source）右側才會出現 patch。」他是對的，
+        而畫面上那張圖是這樣來的：預覽是**跑整條 route**（`upto_node` 只是提早
+        停），而入口卡不需要任何線就跑得起來 —— 它把 `test` / `ref` 寫進了
+        master context。Denoise 沒有輸入所以失敗，但**失敗的策略是「把已經算出
+        來的影像留在畫面上」**，於是畫面上出現的是入口卡的輸出，看起來像是
+        Denoise 的結果。
+
+        那是 F9 那條規矩在影像區的破口：**資料從哪來由線決定**。沒有線就沒有
+        資料，畫面上就不該有東西 —— 一張看起來對的圖比一片空白危險得多。
+
+        判準用 traces（引擎的執行紀錄）而不是 lint：它同時涵蓋「這張卡沒接線」
+        與「它的上游沒接線」——後者一樣不會執行，而畫面上一樣會出現入口卡的圖。
+        """
+        nid = self.selected_node
+        if not nid or nid not in self.model.nodes:
+            return True                  # 沒有選卡 = 看整條 route 的結果
+        tr = self._selected_trace(result)
+        return bool(tr is not None and getattr(tr, "ok", False))
+
     def _on_preview_ready(self, result: Any) -> None:
         self._last_result = result
         ctx = getattr(result, "context", None)
         images = dict(getattr(ctx, "images", {}) or {}) if ctx is not None else {}
+        ran = self._selected_card_ran(result)
+        if not ran:
+            # **畫面上不留別人的圖**（見 :meth:`_selected_card_ran`）。
+            images = {}
         self._preview_images = images
 
         self._populate_streams(images)
@@ -2823,8 +2913,24 @@ class StudioWindow(QMainWindow):
         self.verdict.set_verdict(getattr(result, "bin", None)
                                  if score is not None else None)
 
-        if not getattr(result, "ok", False):
-            # 失敗照樣把已經算出來的影像留在畫面上（診斷比清空有用）
+        if not ran:
+            # 兩種「沒有東西可看」要講不同的話，因為下一步不一樣：
+            #   跑起來了但失敗   → 講**那個錯誤**（它自己就帶著怎麼修）；
+            #   根本沒跑到       → 講**怎麼接線**（lint 對這件事早就有一句可以照做
+            #                      的話，用它而不是再寫一份）。
+            tr = self._selected_trace(result)
+            err = str(getattr(tr, "error", "") or "") if tr is not None else ""
+            if err:
+                self._status("Preview problem: %s" % err, "error")
+            else:
+                why = self._node_problems().get(self.selected_node or "",
+                                                ("", ""))[0]
+                self._status(why or ("“%s” did not run this time, so there is "
+                                     "nothing to show for it yet."
+                                     % self.selected_node), "error")
+        elif not getattr(result, "ok", False):
+            # 這張卡跑過了，是**後面**某張卡失敗 —— 那時候畫面上的影像有意義
+            # （診斷比清空有用），所以留著。
             self._status("Preview problem: %s"
                          % (getattr(result, "error", None) or "unknown error"))
         elif self.selected_node:

@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import first_source  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
@@ -174,7 +176,7 @@ def test_switching_route_repaints_the_canvas(window, rsem_lot):
     就是這個（第二層是 Input 卡還沒按 source 拆開，見計畫書 §3.1.13）。
     """
     window.load_dataset_path(rsem_lot["klarf"], sync=True)
-    nid = window.model.node_order[0]
+    nid = first_source(window)
     ports = window.pipeline.node_item(nid).out_names()
     assert "ref" not in ports, ports          # patch 的 ref 不該還在畫布上
     assert "single" in ports

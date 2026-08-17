@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import wire_up  # noqa: E402  —— F10：加完卡要接線
+from conftest import first_source, wire_up  # noqa: E402  —— F10：加完卡要接線
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -210,7 +210,7 @@ def test_dragging_from_the_ref_port_wires_ref_into_the_card(window):
     所以現在是**累加**：先 test 再 ref = 兩條都做。詳見
     ``test_ui_f7_19_wiring.py``。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, "denoise")
     window._on_edge_added(src, nid, "test")
     assert window.model.nodes[nid].params["streams"] == "test"
@@ -230,7 +230,7 @@ def test_a_second_line_between_the_same_two_cards_is_not_refused(window):
 
     變的是那個反應是什麼：F7-18 是取代，F7-19 起是累加（兩條都做）。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, "tone")
     window._on_edge_added(src, nid, "test")
     window.pipeline.link_to(src, nid, port=0)
@@ -244,7 +244,7 @@ def test_a_second_line_between_the_same_two_cards_is_not_refused(window):
 def test_a_line_that_would_loop_leaves_no_trace(window):
     """會成環的那條線沒有落地 —— 它不該留下任何痕跡，尤其不是「那張卡安靜地
     改成做 ref 了」。"""
-    src = window.model.node_order[0]
+    src = first_source(window)
     first = window.add_card_after(src, "denoise")
     window._on_edge_added(src, first, "test")
     second = window.add_card_after(first, "tone")   # 它的輸出埠是 ref
@@ -266,7 +266,7 @@ def test_wiring_a_card_lands_on_the_input_you_dropped_it_on(window):
     所以「接哪一顆都一樣」。使用者要的多連一正好要求相反的事：**線落在哪一格
     由使用者決定**，兩條線接進同一張卡的不同輸入才有意義。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     sub = window.add_card_after(src, "subtract")
     assert window.model.nodes[sub].params["a"] == ""
     assert window.model.nodes[sub].params["b"] == ""
@@ -287,7 +287,7 @@ def test_adding_from_the_library_lands_after_the_selected_card(window):
     2026-08-16 使用者退掉了那件事 —— 自動接的線與他自己拉的線會落在同一個
     輸入埠，而只有一條算數。現在流是**拉線**決定的，加卡只決定順序。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     on_ref = window.add_card_after(src, "denoise")
     window._on_edge_added(src, on_ref, "ref")
     window.select_node(on_ref)

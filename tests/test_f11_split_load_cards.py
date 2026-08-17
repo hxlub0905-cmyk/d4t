@@ -191,13 +191,18 @@ def test_an_omitted_map_falls_back_to_the_card_default(rsem_lot):
     assert patch.resolve_writes({"channel_map": "1:bse"}) == ["bse"]
 
 
-def test_the_starter_card_follows_the_data(rsem_lot):
-    """一種 source 一張卡 → 「哪一張是起手卡」也跟著資料走。"""
+def test_which_load_card_the_data_wants(rsem_lot):
+    """一種 source 一張卡 → 「哪一張」也跟著資料走。
+
+    F11 Enhance-4 起**開新檔是空白畫布**（使用者要自己挑），所以這個答案的用處
+    從「起手卡放哪一張」變成「載入資料時要補哪一張」
+    （`studio._adopt_source_for`）—— 但那個對照表本身一個字都沒變。
+    """
     from adept.ui.viewmodel import RecipeModel
     assert RecipeModel.starter_step_for("ebi_patch") == "load_patch"
     assert RecipeModel.starter_step_for("tiff_stack") == "load_patch"
     assert RecipeModel.starter_step_for("rsem") == "load_single"
     assert RecipeModel.starter_step_for("folder") == "load_single"
     m = RecipeModel.starter("rsem")
-    assert m.nodes[m.node_order[0]].step == "load_single"
-    assert m.dirty is False        # 起手卡不算「使用者改過」
+    assert m.node_order == [], "開新檔不預先放載入卡"
+    assert m.dirty is False

@@ -74,18 +74,27 @@ class RecipeModel:
 
     @classmethod
     def starter(cls, kind: str = "ebi_patch") -> "RecipeModel":
-        """開新檔用的模型：畫布上已經放好 Input 卡，而且不算「改過」。
+        """開新檔用的模型：**空白畫布**，而且不算「改過」。
+
+        為什麼不預先放一張 Input 卡（F11 Enhance-4，使用者定調）
+        -------------------------------------------------------
+        F7-9 起開窗就有一張 `load_patch`。那時候只有一張載入卡，所以「先幫你放
+        好」是純粹的好意；F11 Input-4 把它拆成兩張（`load_patch` 一顆好幾張 /
+        `load_single` 一顆一張）之後，預先放一張就是**替使用者決定了他還沒決定
+        的事** —— 而猜錯的那一半在畫布上看起來完全正常（兩顆埠 vs 一顆埠）。
+
+        使用者原話：「Load image 卡片改成預設沒有（user 可以選擇要 Load images
+        or Load one image），add 才會出現。」
+
+        載入資料的時候 Studio 仍然會**照資料的型別**補上那一張（見
+        `studio._adopt_source_for`）—— 那時候「哪一張」已經不是猜的，是資料說的。
 
         ``dirty`` 特意還原成 ``False`` —— 使用者什麼都還沒做，關窗時不該被問
         「要存檔嗎」。
         """
         m = cls(kind=kind)
-        try:
-            m.add_step(cls.starter_step_for(kind))
-        except KeyError:                 # pragma: no cover — 卡片庫壞了才會發生
-            pass
         m.dirty = False
-        m.clear_history()      # 起手卡不是「使用者做過的一步」，Ctrl+Z 不該退掉它
+        m.clear_history()
         return m
 
     # ---- listener ---------------------------------------------------------
