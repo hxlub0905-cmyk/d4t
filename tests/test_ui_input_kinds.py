@@ -79,15 +79,19 @@ def test_all_four_kinds_are_supported():
 
 
 def test_the_single_image_cards_are_in_the_library_now(window):
-    """`golden_cell` / `cell_period` 回來了 —— 它們是單張那條路**唯一**的 ref 來源。
+    """單張那條路要有自己的載入卡與量測卡。
 
-    收著它們的理由是「Studio 只吃兩兩成對的 patch」。那個前提沒了，繼續收著
-    就等於把功能打開一半。
+    2026-08-18：這一條原本點的是 `golden_cell` / `cell_period`（單張那條路
+    「唯一的 ref 來源」）。使用者把那兩張**刪掉**了，所以單張那條路現在**不合成
+    ref** —— 它量的是圖本身（Region 段圈出區域、`roi_compare` 拿層對層比）。
+    這一條跟著改成點那條路現在真正用得到的卡。
     """
-    for key in ("golden_cell", "cell_period", "load_patch", "subtract"):
+    for key in ("load_single", "load_patch", "subtract", "roi_compare"):
         assert window.library.entry(key) is not None, key
     # `align` 曾經在這一列上。2026-08-18 使用者把它收起來了 ——
     # 見 test_align_is_hidden_but_still_runs。
+    # `golden_cell` / `cell_period` 也曾經在這一列上 —— 見
+    # test_the_golden_cell_cards_are_gone_for_good。
 
 
 def test_an_rsem_dataset_loads_instead_of_being_refused(window, rsem_lot):
@@ -151,26 +155,41 @@ def test_align_is_hidden_but_still_runs(window):
 
 def test_the_hide_a_card_mechanism_still_works(window):
     """機制本身要留著 —— 下次要暫時藏別張卡時加一個字串就好。"""
-    steps = [{"key": "load_patch"}, {"key": "golden_cell"}]
+    steps = [{"key": "load_patch"}, {"key": "subtract"}]
     assert scope_mod.visible_steps(steps) == steps        # 這兩張都沒被藏
     import adept.ui.scope as s
     keep = s.HIDDEN_STEPS
     try:
-        s.HIDDEN_STEPS = ("golden_cell",)
+        s.HIDDEN_STEPS = ("subtract",)
         assert [d["key"] for d in s.visible_steps(steps)] == ["load_patch"]
     finally:
         s.HIDDEN_STEPS = keep
 
 
-def test_the_single_image_cards_are_registered_and_runnable():
-    """registry、參數驗證、既有 recipe 全都照舊（這一條沒有變）。"""
-    from adept.core.pipeline import get_step
+def test_the_golden_cell_cards_are_gone_for_good():
+    """`golden_cell` / `cell_period` 是**刪掉**，不是 `HIDDEN_STEPS` 收起來。
+
+    使用者定調（2026-08-18）：「Compare 內的 Golden Cell reference 功能幫我完整
+    移除（他就是 template）」、「Measure 中的 Cell period 幫我移除（不需要這
+    功能）」。
+
+    兩者的差別是測得出來的，而這一條就是在測那個差別：收起來的卡
+    （`align`）`get_step` 還拿得到、舊 recipe 還放得進去；刪掉的卡不在 registry
+    裡，舊 recipe 開起來會是一條 `unknown-step`。**這是刻意的** —— 使用者要的
+    不是「暫時看不到」。
+
+    ⚠ 被刪掉的是**卡片**，不是演算法：`algo/golden.py` 還在（Template 卡的
+    golden cell 在用），`algo/period.py` 也還在（見下一條）。
+    """
+    from adept.core.pipeline.step import REGISTRY
     import adept.core.steps  # noqa: F401
 
     for key in ("golden_cell", "cell_period"):
-        step = get_step(key)
-        assert step.key == key
-        assert step.validate_params({}), "預設參數要還驗證得過"
+        assert key not in REGISTRY, key
+    from adept.core.algo import golden, template
+    assert hasattr(golden, "stack_cells")
+    assert hasattr(template, "build_golden_cell"), \
+        "Template 卡的 golden cell 疊圖還在用 algo/golden.py"
 
 
 def test_period_module_is_not_orphaned():

@@ -1448,7 +1448,6 @@ INSPECTORS: Dict[str, type] = {
     "cd_measure": MeasureInspector,
     "focus_quality": MeasureInspector,
     "roi_snr": MeasureInspector,
-    "cell_period": MeasureInspector,
     "roi_from_mask": GdsInspector,
 }
 

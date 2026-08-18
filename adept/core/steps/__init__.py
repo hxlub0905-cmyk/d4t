@@ -6,10 +6,20 @@
 ``adept.core.pipeline.step.REGISTRY`` / ``list_steps()`` 取卡。
 
 已註冊的 key（影像段 → 算法段）：
-  load_patch, normalize, tone, denoise,
-  align, subtract, invert, golden_cell,
-  snr_map, blob_segment, cd_measure, roi_snr, focus_quality, glv_stats,
-  cell_period
+  load_patch, load_single, load_sidecar, normalize, tone, denoise, flatten,
+  align, subtract, invert,
+  roi_cross, roi_template, roi_from_mask, roi_mask,
+  snr_map, cd_measure, roi_snr, roi_compare, focus_quality, glv_stats
+
+**2026-08-18：``golden`` 那一支（``cell_period`` + ``golden_cell``）刪掉了。**
+使用者定調「Compare 內的 Golden Cell reference 功能幫我完整移除（他就是
+template）」、「Measure 中的 Cell period 幫我移除（不需要這功能）」。
+
+這一次是**刪掉**不是 `scope.HIDDEN_STEPS`（`align` 走的是後者）—— 差別在使用者
+說的是哪一句話：align 是「之後真需要我再回來」，這兩張是「完整移除」。
+`adept/core/algo/golden.py` 與 `adept/core/algo/period.py` **都留著**：
+`algo/template.py`（Template 卡的 golden cell）在用前者，而後者是之後做
+pattern-frame ROI 的唯一工具（見 CLAUDE.md §5 的 ⚠）。
 """
 from __future__ import annotations
 
@@ -32,10 +42,9 @@ from . import cd             # cd_measure
 from . import roi_snr        # roi_snr
 from . import quality        # focus_quality
 from . import glv_stats      # glv_stats
-from . import golden         # cell_period / golden_cell
 
 __all__ = [
     "load", "load_sidecar", "normalize", "denoise", "tone", "flatten", "align", "arith",
     "roi_compare", "roi_cross", "roi_from_mask", "roi_mask", "roi_template", "snr_map", "cd", "roi_snr",
-    "quality", "glv_stats", "golden",
+    "quality", "glv_stats",
 ]

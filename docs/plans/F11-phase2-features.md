@@ -738,8 +738,53 @@ RSEM Image。」
 | ✅ Input-1 | `channel_map`：頁 → 流的命名（含頁數不符擋下來）| **完成 2026-08-17** |
 | ✅ Input-2 | `tiff_stack`：大 TIFF 沒有 KLARF | **完成 2026-08-17**（順帶修掉「15 頁 TIFF 安靜變成一顆」）|
 | ✅ Input-3 | 四種輸入的入口做齊（`rsem` / `folder` 打開、`Open folder…`、`HIDDEN_STEPS` 清空）| **完成 2026-08-17** |
+| ✅ Input-4 | 一種 source 一張載入卡（`load_patch` / `load_single`）| **完成 2026-08-17** |
+| ✅ Input-5 | **入口只寫一份**（`scope.INPUT_SOURCES` / `ATTACHMENTS`）＋ 空白狀態一種 source 一列 | **完成 2026-08-18**，見 §3.1.15 |
 | Compare-1 | **配對機制**（第二個來源逐顆對上）＋ 新卡「Locate in a larger image」（matchTemplate 的第三種座標數學，§3.1.9）＋ 修 `align` 尺寸不符要報錯 | 使用者：「配對是之後的事」—— 它屬於**對位**那一輪，不是 Input 段 |
 | 防呆 | 非 8-bit 就講一句話；一批之內尺寸忽然變了就講一句話 | 兩個都是幾行的事，但擋掉的是「安靜地算出垃圾」|
+
+#### 3.1.15 Input-5：入口只寫一份（2026-08-18）
+
+使用者的兩句話：
+
+> 「1. Load layout labels 要怎麼 load，好像沒有 load 的地方，UI 左上角也有奇怪的
+>    文字 …Export」
+> 「2. Input 部分 各種 image source 資料流 是否改成個別入口比較好（但同時 UI
+>    一開始進去的地方顯示也要改）」
+
+第一句是一個 bug，而它的**種類**比它本身重要：`Open GDS export…` 那顆鈕建出來了、
+文字對、tooltip 對、`_update_action_states` 也會開關它 —— 但**沒有 `addWidget`
+到工具列上**。Qt 不會為這件事報錯：它變成主視窗一個沒有版面的子 widget，於是被
+畫在 (0, 0)，也就是工具列的左上角，疊在第一顆鈕上面。使用者看到的就是那團
+「…Export」。所有既有測試都是綠的 —— 沒有一條在問「這顆鈕在工具列上嗎」。
+新的不變量 `test_every_button_built_for_the_toolbar_is_actually_on_it` 逐顆掃
+`btn_*`，把整類擋掉（拿掉修正之後它會紅，驗過）。
+
+第二句的答案是**入口只寫一份**。在這一輪之前，同一組入口被抄在四個地方：
+工具列三顆鈕的 tooltip、空白狀態上的一句話、導覽對話框上的一顆鈕、以及 GDS 那顆
+不在畫面上的鈕。四份已經漂了 —— 工具列有三顆 Open，空白狀態（**畫面上最大的
+那一塊**）只講「Open a KLARF to see your patches here」，於是帶著一個資料夾的
+圖片進來的人在那裡找不到自己那條路。
+
+做法是 `adept/ui/scope.py` 多一張表：
+
+* `INPUT_SOURCES` —— 三個 source 入口（`klarf` / `stack` / `folder`），每個帶
+  `title` / `what`（一句白話：**這條路吃什麼樣的檔案**）/ `icon` / `has_klarf`。
+* `ATTACHMENTS` —— 掛在**已載入 lot** 上的附加檔（目前只有 GLAS 匯出）。它跟三個
+  Open 分開，因為它回答的是不同的問題，而且沒有 lot 的時候它是灰的。
+
+工具列與空白狀態都從這張表長出來。空白狀態因此變成**一種 source 一列**
+（鈕 + 一句話），底下一行講附加檔要等 lot 載進來 —— 那正是第一句話「要怎麼 load」
+的答案，而 `load_sidecar` 的 help 與它擋下來的那句話也都點名 `Open GDS export…`。
+
+**KLARF 那一條刻意仍然服務兩種 kind**（`ebi_patch` / `rsem`）。拆成兩顆鈕會變成
+要使用者回答一個檔案已經回答了的問題（`Images N { … }` 在 KLARF 裡），而答錯就是
+一個錯誤訊息。「一種 source 一個入口」要的是**使用者分得出自己要按哪一顆**，
+不是 kind 與按鈕一對一。
+
+順帶（同一輪，使用者的第 3、4 點）：`golden_cell` / `cell_period` 刪掉（§3.4.1）、
+`snr_map` 的 label 改成 **Z-map**（`key` / 影像流名 / feature 全部不動 —— 那三個
+是 recipe 的鍵）。
 
 ### 3.2 Enhance
 
@@ -2290,8 +2335,40 @@ N=50 000 約 280 ms、N=200 000 約 1 s。
 
 | | |
 |---|---|
-| 現在有什麼 | `align`（5 backend）、`subtract`（Compare two streams）、`golden_cell` |
+| 現在有什麼 | `align`（5 backend，2026-08-18 起 `HIDDEN_STEPS` 收起來）、`subtract`（Compare two streams）|
+| ~~`golden_cell`~~ | **2026-08-18 刪掉**（使用者：「Compare 內的 Golden Cell reference 功能幫我完整移除（他就是 template）」）。代價量過，見 §3.4.1 |
 | 缺什麼 | ① **沒有 ref 的資料要跟什麼比**（§3.1.4 的三個候選）；② GLAS 的 `gray` 當 ref（die-to-database）；③ 對位可以**吃 GLAS 已經算好的 offset**（省一次對位，而且那是對 layout 對的，比對 ref 準）|
+
+#### 3.4.1 `golden_cell` 刪掉的代價（量過的，不是推論）
+
+使用者的理由是「他就是 template」。**兩張卡確實共用同一段演算法**
+（`algo/golden.py` 的 `stack_cells`），而使用者在畫面上看到兩個都叫 Golden Cell
+的東西 —— 那個困惑是真的。但它們**吐出來的東西不同**：
+
+| | 吐什麼 | 答的問題 |
+|---|---|---|
+| `roi_template`（Template）| **具名區域** | 「這一塊材料在這張圖的哪裡」 |
+| ~~`golden_cell`~~ | **一條影像流（合成的 ref）** | 「這張圖**應該**長什麼樣」 |
+
+所以刪掉它之後，**單張週期性影像沒有任何辦法產生 ref**，也就沒有 `diff`。
+實測（`tests/fixtures/recipes/dual_route_basic.json` 的 rsem route、
+`make_sample_rsem` seed 11、24 顆）：
+
+| 那條 route 怎麼量 | 分類正確 |
+|---|---|
+| 舊：`golden_cell` 疊 ref → `subtract` → 量 diff | **24 / 24** |
+| 新：量 Z-map（單張唯一算得出「哪裡突出」的卡）| 12 / 24（＝猜銅板）|
+| 也試過：`roi_cross` + `roi_compare` 的區域路線 | 每個特徵 real 與 nuisance 完全重疊（最好的 `snr_max` d≈0.8）|
+
+所以那份 fixture 的 rsem 段**拿掉了準確率斷言**，並改凍一組新的黃金值 ——
+它現在守的是「同一份 recipe 吃得下第二種輸入、而且數字不會偷偷變」，不是
+「那條路分得出真假缺陷」。`tests/test_e2e_dual_route.py` 的
+`test_the_single_image_route_has_no_reference_and_says_so` 把這件事釘住：
+哪一天有人把「單張影像的 ref」補回來（GDS 那條路、或別的），那一條會紅，
+而那正是該回來重寫這份 fixture 的時候。
+
+⚠ 刪掉的是**卡片**不是演算法：`algo/golden.py`（Template 卡在用）與
+`algo/period.py`（pattern-frame ROI 的唯一工具）都留著。
 
 **要討論的**
 
@@ -2305,7 +2382,8 @@ N=50 000 約 280 ms、N=200 000 約 1 s。
 
 | | |
 |---|---|
-| 現在有什麼 | `glv_stats`、`roi_snr`、`cd_measure`、`snr_map`、`focus_quality`、`cell_period` |
+| 現在有什麼 | `glv_stats`、`roi_snr`、`cd_measure`、`snr_map`（畫面上叫 **Z-map**）、`focus_quality`、`roi_compare` |
+| ~~`cell_period`~~ | **2026-08-18 刪掉**（使用者：「Measure 中的 Cell period 幫我移除（不需要這功能）」）|
 | 缺什麼 | ① **blob 分割**（§1.2，演算法要重寫）；② **離群旗標**（跨顆統計，不是單顆）；③ Region Stats / FFT；④ `snr_map` 多來源（§4.1）|
 
 **要討論的**

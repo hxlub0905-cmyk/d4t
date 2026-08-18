@@ -116,7 +116,7 @@ GLYPH_ICONS = (
     "zoom_in", "zoom_out", "fit", "tidy", "up", "down", "close",
     # 工具列那五顆（F7-24）＋ 兩個沒有 KLARF 的入口（F11 Input-2／Input-3）
     "folder", "document", "save", "templates", "export", "stack",
-    "folder_open",
+    "folder_open", "layers",
     # 畫布彈出視窗（F8-UI D 案）
     "popout",
     # 在 Golden Cell 上標區域的四支工具（F11 Region-1 第二輪）。名字說的是
@@ -383,6 +383,18 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         side = w - 2 * m - step * 2
         for i in (2, 1, 0):
             p.drawRect(QRectF(m + step * i, m + step * (2 - i), side, side))
+    elif n == "layers":
+        # 三片**平放**的層 —— GDS 的 layout label map（F11 Region-3）。
+        #
+        # 跟 ``stack`` 要分得出來，而它們講的東西其實很近（都是「好幾層」）：
+        # ``stack`` 是三個**正面**的方框（同一張圖的好幾頁），``layers`` 是三個
+        # **側看**的菱形（疊在一起的版圖層）。差別落在輪廓的長寬比上 ——
+        # 15px 下方框是方的、菱形是扁的，一眼分得出來。
+        for i in range(3):
+            cy = m + h * 0.16 + (h - 2 * m - h * 0.32) * i / 2.0
+            p.drawPolygon(QPolygonF([
+                QPointF(w / 2, cy - h * 0.14), QPointF(w - m, cy),
+                QPointF(w / 2, cy + h * 0.14), QPointF(m, cy)]))
     elif n == "document":
         fold = w * 0.26
         p.drawLine(QPointF(m + w * 0.06, m), QPointF(w - m - fold, m))

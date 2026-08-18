@@ -24,7 +24,10 @@ F7-1 用它把 Studio 收斂成 patch-only（使用者當時的話是「**暫時
 
 ⚠ ``algo/period.py`` 仍然不要刪：它的 ``estimate_period`` / ``choose_origin``
 （相位搜尋）**是之後做 pattern-frame ROI 的唯一工具**
-（見 ``docs/history/plans/F7-canvas-and-taxonomy.md`` §4），不只 Golden Cell 在用。
+（見 ``docs/history/plans/F7-canvas-and-taxonomy.md`` §4）。2026-08-18
+Golden Cell 那兩張卡刪掉之後它在 ``adept/core`` 裡已經沒有呼叫者了 ——
+那正是它最容易被當成死碼順手刪掉的時候，所以這句話留在這裡，而
+``tests/test_ui_input_kinds.py::test_period_module_is_not_orphaned`` 是那張便利貼。
 
 CLI 不受影響
 ------------
@@ -32,10 +35,11 @@ CLI 不受影響
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, NamedTuple, Sequence, Tuple
 
 __all__ = [
     "SUPPORTED_KINDS", "HIDDEN_STEPS", "DEFAULT_KIND", "SHOW_SAMPLE_ENTRIES",
+    "INPUT_SOURCES", "ATTACHMENTS", "InputSource",
     "is_supported_kind", "visible_steps", "recipe_is_supported",
     "unsupported_kind_message",
 ]
@@ -51,10 +55,14 @@ SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder")
 #: 只有在不支援的型別下才有意義、因此不列進卡片庫的 step key。
 #:
 #: **2026-08-17（F11 Input-3）：空了。** 這裡原本收著 ``golden_cell`` 與
-#: ``cell_period``，理由是「它們存在的唯一目的是幫**單張影像**疊一張 ref 出來，
-#: 而 Studio 那時只吃兩兩成對的 patch」。現在單張那條路打開了
-#: （``rsem`` / ``folder`` / ``tiff_stack`` 都可能只有一張圖），那兩張卡就是
-#: 那條路**唯一**的 ref 來源 —— 繼續收著等於把功能打開一半。
+#: ``cell_period``。**2026-08-18 那兩張卡被刪掉了**（使用者：「Compare 內的
+#: Golden Cell reference 功能幫我完整移除（他就是 template）」、「Measure 中的
+#: Cell period 幫我移除」），所以它們也不再是這份清單的候選 —— 刪掉的卡不需要
+#: 藏，`REGISTRY` 裡根本沒有。
+#:
+#: **刪掉與收起來是兩件事，而差別看使用者說了什麼**：``align`` 是「之後真需要我
+#: 再回來」→ 收起來（引擎照認、舊 recipe 照跑）；Golden Cell 是「完整移除」→
+#: 刪掉（舊 recipe 開起來會是一條 ``unknown-step``）。
 #:
 #: 機制留著（一個 tuple、一個 `visible_steps()`）：下一次要暫時收起某張卡時，
 #: 加一個字串就好。
@@ -96,6 +104,91 @@ DEFAULT_KIND: str = SUPPORTED_KINDS[0]
 #: 一行都沒動，測試照樣直接呼叫得到。範例 recipe 庫回來的那一天，
 #: 把這個常數改成 ``True`` 就整組回來 —— 跟 ``SUPPORTED_KINDS`` 同一套辦法。
 SHOW_SAMPLE_ENTRIES: bool = False
+
+
+class InputSource(NamedTuple):
+    """一個「資料從這裡進來」的入口。
+
+    **一種 source 一個入口，而入口這件事只寫在這一張表上**（2026-08-18，
+    使用者：「Input 部分 各種 image source 資料流 是否改成個別入口比較好
+    （但同時 UI 一開始進去的地方顯示也要改）」）。
+
+    在這張表出現之前，同一組入口被抄在三個地方：工具列三顆鈕的 tooltip、
+    空白狀態上的那一句話、導覽對話框上的那顆鈕。三份會漂 —— 而且已經漂了：
+    工具列有三顆 Open，空白狀態只講 KLARF（「Open a KLARF to see your patches
+    here.」），於是**帶著一個資料夾的圖片進來的人，在最大的那一塊畫面上找不到
+    自己那條路**。第四種（GLAS 匯出）更慘：卡片庫裡有一張 `Load layout labels`，
+    而它的入口那一顆鈕根本沒被 `addWidget` 到工具列上（見
+    `test_every_button_built_for_the_toolbar_is_actually_on_it`）。
+
+    欄位：
+
+    * ``key``    —— ``StudioWindow`` 上那顆鈕與那個 handler 的名字後綴。
+    * ``kinds``  —— 這條路產得出來的 ``dataset.kind``（可能不只一種：一份 KLARF
+      是 patch 還是一顆一張，**由檔案本身決定**，不該反過來問使用者）。
+    * ``title``  —— 鈕上的字。工具列與空白狀態用同一份。
+    * ``what``   —— 一句白話：**這條路吃的是什麼樣的檔案**。
+    * ``icon``   —— 自繪圖示的名字（`widgets.GLYPH_ICONS`）。
+    * ``has_klarf`` —— 進來之後寫不寫得回 KLARF。空白狀態上直接寫出來，
+      不是等使用者跑完一整批、打開 Export 才發現。
+    """
+
+    key: str
+    kinds: Tuple[str, ...]
+    title: str
+    what: str
+    icon: str
+    has_klarf: bool
+
+
+#: Studio 的四種資料入口（順序就是畫面上的順序）。
+#:
+#: KLARF 那一條服務兩種 kind，而那**不是**「一個入口服務兩種 source」的例外：
+#: patch 與一顆一張的差別寫在 KLARF 裡（`Images N { … }`），ingest 判得出來。
+#: 拆成兩顆鈕等於要使用者回答一個檔案已經回答了的問題，而答錯就是一個錯誤訊息。
+INPUT_SOURCES: Tuple[InputSource, ...] = (
+    InputSource(
+        key="klarf", kinds=("ebi_patch", "rsem"), title="Open KLARF…",
+        what=("A KLARF and its images - either a patch TIFF with several "
+              "pages per defect, or one image file per defect. Which one it "
+              "is comes from the KLARF, you do not have to say."),
+        icon="folder", has_klarf=True),
+    InputSource(
+        key="stack", kinds=("tiff_stack",), title="Open stack…",
+        what=("One multi-page TIFF and nothing else - you say how many pages "
+              "there are per defect, and every group of that many becomes "
+              "one defect."),
+        icon="stack", has_klarf=False),
+    InputSource(
+        key="folder", kinds=("folder",), title="Open folder…",
+        what="A folder of single images: every image file becomes one defect.",
+        icon="folder_open", has_klarf=False),
+)
+
+
+class Attachment(NamedTuple):
+    """掛在**已經載好的** lot 上的附加檔（不是第五種 source）。"""
+
+    key: str
+    title: str
+    what: str
+    icon: str
+    needs: str
+
+
+#: 附加檔的入口。第一個（也目前唯一的）是 GLAS 的 GDS 匯出。
+#:
+#: 它跟上面那三個分開，因為它回答的是不同的問題：三個 Open 是「這批資料在哪」，
+#: 這一個是「這批資料**還有一份別的程式產的東西**」。合在一起的話，沒有 lot
+#: 的時候它是一顆按了沒有意義的鈕。
+ATTACHMENTS: Tuple[Attachment, ...] = (
+    Attachment(
+        key="gds", title="Open GDS export…",
+        what=("Layout labels that GLAS exported for this lot: every defect "
+              "gets a label map, and the “GDS layers” card turns each layer "
+              "into a named region."),
+        icon="layers", needs="Load the lot first."),
+)
 
 
 def is_supported_kind(kind: Any) -> bool:

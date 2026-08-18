@@ -49,9 +49,10 @@ class LoadSidecarStep(Step):
             "one image where every pixel value is a layer number (0 is "
             "background). It is not a picture of the wafer, it is a map of "
             "which layer is where, and the Region card turns it into named "
-            "regions. Attach the export folder when you open the lot; "
-            "defects the export has no label for will fail this card and say "
-            "so, and the rest of the batch carries on.")
+            "regions. There is nothing to pick on this card: open the lot "
+            "first, then attach the export folder with “Open GDS export…” on "
+            "the toolbar. Defects the export has no label for will fail this "
+            "card and say so, and the rest of the batch carries on.")
     params = [
         ParamSpec(
             name="out", type="image_key", direction="out",
@@ -84,9 +85,10 @@ class LoadSidecarStep(Step):
             raise StepError(
                 self.key,
                 "defect %s has no layout label. Either no GLAS export is "
-                "attached to this lot, or this defect has no label in it "
-                "(GLAS leaves out the ones its alignment score rejected). "
-                "The rest of the batch is unaffected."
+                "attached to this lot - attach one with “Open GDS export…” on "
+                "the toolbar - or this defect has no label in it (GLAS leaves "
+                "out the ones its alignment score rejected). The rest of the "
+                "batch is unaffected."
                 % getattr(item, "defect_id", "?"))
         try:
             arr = item.load_sidecar(SIDECAR_LABEL)

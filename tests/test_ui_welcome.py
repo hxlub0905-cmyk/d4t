@@ -390,7 +390,15 @@ def test_nothing_on_screen_points_at_a_button_that_is_not_there(window):
     """
     hint = window.empty_state_hint.text()
     assert "sample data" not in hint, "空白狀態還在推薦一顆看不到的鈕：%r" % hint
-    assert "KLARF" in hint, "至少要講得出唯一那條路"
+    # 空白狀態現在是**一種 source 一列**（F11 Input-5）—— 那句話不再自己點名
+    # 某一條路，而是介紹底下那幾列。所以這裡改成逐列對：畫面上列出來的每一顆，
+    # 都要是 `scope.INPUT_SOURCES` 上真的有的入口，而且每一條都要出現。
+    from adept.ui import scope
+
+    shown = {k: b.text() for k, b in window.empty_source_buttons.items()}
+    assert shown == {s.key: s.title for s in scope.INPUT_SOURCES}
+    for b in window.empty_source_buttons.values():
+        assert b.isHidden() is False
 
     dlg = window.show_welcome(force=True)
     try:

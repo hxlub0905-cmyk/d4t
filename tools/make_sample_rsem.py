@@ -11,7 +11,8 @@
 
 `dataset.load_dataset()` 讀這份 KLARF 會回 ``kind == "rsem"``、
 每顆 defect 只有 ``images["single"]``（沒有 ref）——
-正是 Golden Cell 卡（`cell_period` + `golden_cell`）要處理的情境。
+正是「單張影像沒有現成 ref」的情境。（2026-08-18 之前這句話指的是 Golden Cell
+兩張卡；那兩張卡已經刪掉，這份資料現在撐的是 ingest 與單張 route 的驗收。）
 
 影像內容（比 EBI patch 大、解析度高，預設 256²／cell pitch 24）：
   - 嚴格週期的圓角方格晶格，**每張圖隨機相位**（相位是裁切位移，不是重取樣，

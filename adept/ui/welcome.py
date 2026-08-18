@@ -90,22 +90,24 @@ _SEG_LINES = (
 )
 
 _INTRO = (
-    "ADEPT reads the tool's patch / Review SEM images together with their KLARF "
-    "and lets you build a pipeline out of step cards: it scores every defect, "
-    "splits them into bins by a threshold, and writes the result back to KLARF."
+    "ADEPT reads the tool's patch / Review SEM images — with a KLARF, or a "
+    "multi-page TIFF, or just a folder of images — and lets you build a "
+    "pipeline out of step cards: it scores every defect, splits them into bins "
+    "by a threshold, and writes the result back to KLARF."
     "\nNo programming needed — you decide what a real defect looks like, and the "
     "pipeline works it out."
 )
 
 #: 導覽底下那句提示。**它必須描述畫面上真的看得到的鈕** —— 範例資料那顆收起來
 #: 之後（見 ``scope.SHOW_SAMPLE_ENTRIES``），「按左邊那顆，一分鐘就看得到分數」
-#: 指的會是「開啟我自己的 KLARF」，而那顆給不出那個結果。
+#: 指的會是「開啟我自己的資料」，而那顆給不出那個結果。
 _FOOTER_HINT = (
     "First time here? Press the button on the left — you will be looking "
     "at scored results in about a minute."
     if SHOW_SAMPLE_ENTRIES else
-    "Open a KLARF to start; then build the pipeline card by card from the "
-    "library on the left of Studio."
+    "Close this window and Studio shows you the four kinds of data it reads, "
+    "one entry each; then build the pipeline card by card from the library on "
+    "the left."
 )
 
 
@@ -330,9 +332,17 @@ class WelcomeDialog(QDialog):
         self.btn_demo.setMinimumHeight(34)
         self.btn_demo.clicked.connect(self.click_demo)
 
-        self.btn_open = QPushButton("Open my own KLARF", self)
+        # 「我自己的**資料**」不是「我自己的 KLARF」（F11 Input-5）：四種輸入
+        # 裡有兩種根本沒有 KLARF，而這顆鈕是第一次開 ADEPT 的人看到的第一條路。
+        # 它仍然直接開 KLARF 那個對話框（最常見的那一種），另外三條在關掉這個
+        # 視窗之後的空白狀態上一列一個。
+        self.btn_open = QPushButton("Open my own data", self)
         self.btn_open.setCursor(Qt.PointingHandCursor)
-        self.btn_open.setToolTip("Close this window and go straight to picking a KLARF file")
+        self.btn_open.setToolTip(
+            "Close this window and go straight to picking a KLARF - the most "
+            "common case. Studio's start screen lists the other three kinds "
+            "(a multi-page TIFF, a folder of images, and a GLAS layout export "
+            "on top of a lot).")
         self.btn_open.setMinimumHeight(34)
         self.btn_open.clicked.connect(self.click_open)
 

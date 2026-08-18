@@ -2,7 +2,7 @@
   "recipe_id": "dual_route_basic",
   "version": 1,
   "author": "HX",
-  "description": "測試用的最小 recipe（不是給使用者看的範例）。ROI 卡在 F8 第五輪收斂成 Profile / Template / GDS，所以這裡量的是整張圖 —— 這幾條 e2e 測的是**引擎跑不跑得完、分數算不算得出來**，不是某一張 ROI 卡的行為。",
+  "description": "測試用的最小 recipe（不是給使用者看的範例）。ROI 卡在 F8 第五輪收斂成 Profile / Template / GDS，所以這裡量的是整張圖 —— 這幾條 e2e 測的是**引擎跑不跑得完、分數算不算得出來**，不是某一張 ROI 卡的行為。2026-08-18：`golden_cell` 刪掉之後，rsem 那條 route 不再有合成的 ref，所以它改成量 Z-map（單張影像唯一算得出「哪裡突出」的卡）。那條 route 因此**分不出真假缺陷**（實測 d≈0.8、完全重疊），它守的是「同一份 recipe 吃得下第二種輸入、而且數字不會偷偷變」。",
   "routes": {
     "ebi_patch": [
       "load",
@@ -17,14 +17,10 @@
     ],
     "rsem": [
       "load",
-      "golden",
-      "norm_ref",
       "norm",
-      "align",
-      "sub",
-      "dn",
-      "snr",
-      "cd",
+      "dn_single",
+      "snr_single",
+      "cd_single",
       "glv_rsem"
     ]
   },
@@ -97,21 +93,37 @@
       },
       "enabled": true
     },
-    "golden": {
-      "step": "golden_cell",
-      "params": {
-        "source": "test",
-        "out": "ref",
-        "method": "median"
-      },
-      "enabled": true
-    },
     "glv_rsem": {
       "step": "glv_stats",
       "params": {
-        "source": "diff",
+        "source": "snr_map",
         "metrics": "glv_max,glv_median,glv_std",
         "roi": ""
+      },
+      "enabled": true
+    },
+    "dn_single": {
+      "step": "denoise",
+      "params": {
+        "method": "median",
+        "ksize": 5,
+        "streams": "test"
+      },
+      "enabled": true
+    },
+    "snr_single": {
+      "step": "snr_map",
+      "params": {
+        "source": "test",
+        "window": 15,
+        "exclude_border": 8
+      },
+      "enabled": true
+    },
+    "cd_single": {
+      "step": "cd_measure",
+      "params": {
+        "source": "snr_map"
       },
       "enabled": true
     }

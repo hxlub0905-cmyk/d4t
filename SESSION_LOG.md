@@ -15,9 +15,86 @@
 
 ---
 
-## Phase 2：Region —— Template ＋ Profile（2026-08-18）
+## Phase 2：入口只寫一份 ＋ 刪掉 Golden Cell（2026-08-18，第九輪）
 
 ### ⏩ 交接：下一個 session 從這裡開始
+
+Region-3（GDS）四步做完之後，使用者對著 Studio 的截圖提了四件事，這一輪四件全做完。
+**還缺的那個數字沒有變**：真實 label 上每一層的 `pieces / rectangles`，
+量法 `python tools\check_glas_export.py <匯出資料夾> --samples 2`（要回公司才量得到）。
+
+### 這一輪做了什麼
+
+**1. `Open GDS export…` 那顆鈕根本沒在工具列上。**
+使用者：「Load layout labels 要怎麼 load，好像沒有 load 的地方，UI 左上角也有奇怪
+的文字 …Export」。上一輪我把那顆鈕建出來了、文字對、tooltip 對、`_update_action_states`
+也會開關它 —— 但漏了 `bar.addWidget(...)`。**Qt 不會為這件事報錯**：它變成主視窗一個
+沒有版面的子 widget，被畫在 (0, 0)，也就是工具列左上角，疊在第一顆鈕上。
+所有既有測試都綠 —— 沒有一條在問「這顆鈕在工具列上嗎」。
+
+修的是那一整類，不只那一顆：`test_every_button_built_for_the_toolbar_is_actually_on_it`
+逐顆掃視窗上的 `btn_*`，要嘛在工具列的 action 清單上、要嘛在工具列上某個容器裡。
+（拿掉修正之後它會紅，驗過。）
+
+**2. 入口只寫一份**（Input-5，計畫書 §3.1.15）。
+使用者：「Input 部分 各種 image source 資料流 是否改成個別入口比較好（但同時 UI
+一開始進去的地方顯示也要改）」。在這一輪之前，同一組入口被抄在四個地方，而四份已經
+漂了：工具列有三顆 Open，**空白狀態（畫面上最大的那一塊）只講 KLARF** ——
+帶著一個資料夾的圖片進來的人在那裡找不到自己那條路。
+
+`adept/ui/scope.py` 多一張 `INPUT_SOURCES` / `ATTACHMENTS`，工具列與空白狀態都從它
+長出來。空白狀態變成**一種 source 一列**（鈕 + 一句「這條路吃什麼樣的檔案」），
+底下一行講附加檔要等 lot 載進來 —— 那正是第 1 點「要怎麼 load」的答案。
+`load_sidecar` 的 help 與它擋下來的那句話也都點名 `Open GDS export…`，而
+`test_the_card_message_points_at_a_button_that_exists` 現在問的是**真的建出來的
+那條工具列**（第一版是 grep `studio.py` 的原始碼 —— 那正好對「字在、鈕不在」是綠的）。
+
+KLARF 那一條**刻意仍然服務 `ebi_patch` 與 `rsem` 兩種**：拆成兩顆鈕等於要使用者
+回答一個 KLARF 已經回答了的問題，而答錯就是一個錯誤訊息。
+
+**3. `golden_cell` 與 4. `cell_period` 刪掉，`SNR map` → `Z-map`。**
+使用者：「Compare 內的 Golden Cell reference 功能幫我完整移除（他就是 template）」、
+「Measure 中的 Cell period 幫我移除（不需要這功能），SNR map 幫我改名成 Z-map
+（不然兩個 SNR 會被人搞混）」。
+
+`adept/core/steps/golden.py` 整支刪掉。**這一次是刪不是 `HIDDEN_STEPS`** ——
+`align` 那一輪使用者說的是「之後真需要我再回來」，這一輪說的是「完整移除」，
+而那兩句話對應兩種不同的處置（差別現在有一條測試在鎖）。
+`snr_map` 只換 `label`：`key`、影像流名、feature（`snr_max`）全都是 **recipe 的鍵**。
+
+⚠ **代價量過了，而它比使用者想的大**（計畫書 §3.4.1）。Template 吐的是**具名區域**、
+`golden_cell` 吐的是**一條合成的 ref 影像流** —— 前者答「這塊材料在哪」，後者答
+「這張圖應該長什麼樣」。刪掉之後**單張週期性影像沒有任何辦法產生 ref**，
+於是也沒有 diff。實測（`dual_route_basic` 的 rsem route、`make_sample_rsem`
+seed 11、24 顆）：
+
+| 那條 route 怎麼量 | 分類正確 |
+|---|---|
+| 舊：疊 ref → subtract → 量 diff | **24 / 24** |
+| 新：量 Z-map | 12 / 24（＝猜銅板）|
+| 也試過：`roi_cross` + `roi_compare` | 每個特徵 real 與 nuisance 完全重疊 |
+
+所以那份 fixture 的 rsem 段拿掉了準確率斷言、改凍一組新的黃金值
+（`dual_route_basic__make_sample_rsem.json`，53 處變動全部來自這件事），
+現在守的是「同一份 recipe 吃得下第二種輸入、而且數字不會偷偷變」。
+`test_the_single_image_route_has_no_reference_and_says_so` 把它釘住：
+哪一天有人把「單張影像的 ref」補回來，那一條會紅。
+
+**要回來的話**：`git revert` 那一個 commit 就整組回來（卡片、fixture、黃金值）。
+演算法從來沒被刪 —— `algo/golden.py` 還被 Template 卡用著，`algo/period.py`
+現在在 `adept/core` 裡**一個呼叫者都沒有**（那正是它最容易被順手清掉的時候，
+所以 CLAUDE.md §5 的 ⚠ 改寫過，便利貼測試也還在）。
+
+### 驗收
+
+核心 1345 passed（3 個 `test_offline_tools` 的 manifest 過期，`release.py` 跑完就綠）、
+UI 40 個檔案一個一個跑全綠、三組黃金值 `--check` 逐項相同（rsem 那組是這一輪重凍的）。
+
+---
+
+## Phase 2：Region —— Template ＋ Profile（2026-08-18）
+
+### 那一輪結束時的位置（交接已由上面那一段接手）
 
 **現在的位置**：Phase 2 的 **Input ✅**、**Enhance ✅**、
 **Region-1（Template）✅**、**Region-2（Profile：2a 圖示、2b 點曲線選材質、

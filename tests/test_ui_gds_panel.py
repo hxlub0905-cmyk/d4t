@@ -41,15 +41,65 @@ def qapp():
 
 
 def test_the_card_message_points_at_a_button_that_exists(qapp):
-    """訊息裡那個「…」結尾的東西，工具列上要真的有。"""
+    """訊息裡那個「…」結尾的東西，工具列上要真的有。
+
+    問的是**真的建出來的那條工具列**，不是 `studio.py` 的原始碼裡有沒有那串字
+    （第一版是後者，而它有兩個洞：字搬到別的模組去就紅、以及 —— 更糟 ——
+    字在原始碼裡、鈕卻沒被 `addWidget` 上去時它是綠的。後者實際發生過）。
+    """
+    from PySide6.QtWidgets import QToolButton
+
     from adept.core.pipeline import get_step
+    from adept.ui.studio import StudioWindow
 
     says = get_step("roi_from_mask").configuration_issues({"layers": ""})[0]
     named = re.findall(r"“([^”]+…)”", says)
     assert named, "訊息沒有指向任何一個按得下去的東西：%s" % says
-    src = open("adept/ui/studio.py", encoding="utf-8").read()
-    for label in named:
-        assert '"%s"' % label in src, "工具列上沒有 %r 這顆鈕" % label
+
+    win = StudioWindow(show_welcome_on_start=False)
+    try:
+        on_bar = set()
+        for a in win.toolbar.actions():
+            w = win.toolbar.widgetForAction(a)
+            if w is None:
+                continue
+            if isinstance(w, QToolButton):
+                on_bar.add(w.text())
+            on_bar.update(c.text() for c in w.findChildren(QToolButton))
+        for label in named:
+            assert label in on_bar, "工具列上沒有 %r 這顆鈕" % label
+
+        # 使用者第九輪的第一句話：「Load layout labels 要怎麼 load，好像沒有
+        # load 的地方」。那張卡上**沒有東西可以填**（來源是 ingest 掛上去的），
+        # 所以「怎麼 load」的答案只能寫在它自己的說明與它擋下來的那句話裡 ——
+        # 而那兩處指的東西也必須真的在工具列上。
+        card = get_step("load_sidecar")
+        for text in (card.help, _no_sidecar_message(card)):
+            pointed = re.findall(r"“([^”]+…)”", text)
+            assert pointed, "這段話沒有指向任何按得下去的東西：%s" % text
+            for label in pointed:
+                assert label in on_bar, "工具列上沒有 %r 這顆鈕" % label
+
+        # 空白狀態（第一次進來看到的那一塊）也要說得出那個順序。
+        assert "Open GDS export…" in win.empty_state_attachments.text()
+    finally:
+        win.deleteLater()
+
+
+def _no_sidecar_message(card) -> str:
+    """跑一次「這顆沒有 label」那條路，把訊息拿出來。"""
+    from adept.core.pipeline.context import Context
+    from adept.core.pipeline.step import StepError
+
+    class _Item:
+        defect_id = "1"
+        sidecars = {}
+
+    try:
+        card().run(Context(meta={"_defect_item": _Item()}), {})
+    except StepError as e:
+        return str(e)
+    raise AssertionError("沒有匯出時這張卡應該擋下來")
 
 
 # --------------------------------------------------------------------------- #
@@ -172,3 +222,31 @@ def test_the_empty_state_points_at_the_button(qapp):
     w = insp.GdsInspector()
     assert not w.has_data()
     assert "Open GDS export…" in w.empty_reason()
+
+
+def test_the_attachment_entry_turns_on_once_a_lot_is_open(qapp, tmp_path):
+    """「怎麼 load」的最後一段：那顆鈕**灰著也要在畫面上**，載完 lot 就亮。
+
+    這是使用者第九輪第一句話的完整答案。它由三段組成，而三段都測得到：
+    卡片與空白狀態說得出那顆鈕的名字（上面那條）、那顆鈕真的在工具列上
+    （`test_every_button_built_for_the_toolbar_is_actually_on_it`），
+    以及**它什麼時候會亮**（這一條）。
+
+    灰著也要在，不是載了 lot 才長出來：一顆到那時候才出現的鈕，使用者在需要它
+    之前根本不知道 ADEPT 做得到這件事。
+    """
+    import sys
+
+    from adept.ui.studio import StudioWindow
+
+    sys.path.insert(0, "tools")
+    from make_sample_rsem import generate
+
+    win = StudioWindow(show_welcome_on_start=False)
+    try:
+        assert win.btn_open_gds.isEnabled() is False
+        lot = generate(str(tmp_path / "lot"), n=3, seed=5)
+        assert win.load_dataset_path(lot["klarf"], sync=True) is True
+        assert win.btn_open_gds.isEnabled() is True
+    finally:
+        win.deleteLater()

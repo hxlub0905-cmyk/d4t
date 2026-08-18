@@ -536,35 +536,29 @@ class StudioWindow(QMainWindow):
         self.toolbar = bar
         self.addToolBar(bar)
 
-        self.btn_open_klarf = self._tool_button(
-            "Open KLARF…", "Load a KLARF (the patch TIFF can be picked separately)",
-            self._on_open_klarf, icon="folder")
-        # 一種 source 一個入口（F11 Input-2）。刻意**不**塞進上面那顆：這條路
-        # 吃的東西不同（一個多頁 TIFF + 「一顆幾張」），而且它產出的資料集沒有
-        # KLARF —— 寫不回 KLARF。把兩件事併成一顆鈕，使用者按下去之前分不出
-        # 自己要的是哪一種。
-        self.btn_open_stack = self._tool_button(
-            "Open stack…",
-            "Load a multi-page TIFF that has no KLARF: every N pages become "
-            "one defect (N = the images per defect you enter). No KLARF means "
-            "no coordinates and no write-back — CSV and Excel reports still work.",
-            self._on_open_stack, icon="stack")
-        self.btn_open_folder = self._tool_button(
-            "Open folder…",
-            "Load a folder of single images (no KLARF): every image file "
-            "becomes one defect. No KLARF means no coordinates and no "
-            "write-back — CSV and Excel reports still work.",
-            self._on_open_folder, icon="folder_open")
-        # GDS 那條路的「附加檔」入口（F11 Region-3）。它**不是第五種 source**
-        # —— 資料集已經載好了，這一顆是往每一顆 defect 上再掛一個檔案。
-        # 所以它跟三顆 Open 分開、而且沒有資料集時是灰的（按下去也沒有意義）。
-        self.btn_open_gds = self._tool_button(
-            "Open GDS export…",
-            "Attach a GLAS export to the lot that is already open: every "
-            "defect gets its layout label map, and the “GDS layers” card turns "
-            "each layer into a named region. Load the lot first.",
-            self._on_open_gds, icon="stack")
-        self.btn_open_gds.setEnabled(False)
+        # **三顆 Open 與那顆附加檔，都是從 `scope` 的那一張表建出來的**
+        # （F11 Input-5）。以前它們是三段各自寫死的文字，而空白狀態上還有第四份
+        # 抄本 —— 於是打開資料夾那條路在最大的那一塊畫面上根本沒被提到。
+        # 現在入口只有一份定義，畫面上的每一處都從它長出來。
+        for src in scope.INPUT_SOURCES:
+            tip = src.what
+            if not src.has_klarf:
+                tip += ("  There is no KLARF here, and no KLARF means no "
+                        "coordinates and no write-back - CSV and Excel "
+                        "reports still work.")
+            btn = self._tool_button(src.title, tip,
+                                    getattr(self, "_on_open_%s" % src.key),
+                                    icon=src.icon)
+            setattr(self, "btn_open_%s" % src.key, btn)
+        # 附加檔的入口（F11 Region-3）。它**不是第五種 source** —— 資料集已經
+        # 載好了，這一顆是往每一顆 defect 上再掛一個檔案。所以它自成一段、而且
+        # 沒有資料集時是灰的（按下去也沒有意義）。
+        for att in scope.ATTACHMENTS:
+            btn = self._tool_button(
+                att.title, "%s  %s" % (att.what, att.needs),
+                getattr(self, "_on_open_%s" % att.key), icon=att.icon)
+            btn.setEnabled(False)
+            setattr(self, "btn_open_%s" % att.key, btn)
         self.btn_open_recipe = self._tool_button(
             "Open Recipe…", "Load a recipe JSON", self._on_open_recipe,
             icon="document")
@@ -601,8 +595,12 @@ class StudioWindow(QMainWindow):
             self.toggle_theme, icon="theme")
 
         # 一段 = 一種事情；段與段之間一條分隔線。
-        for group in ((self.btn_open_klarf, self.btn_open_stack,
-                       self.btn_open_folder, self.btn_open_recipe),
+        sources = tuple(getattr(self, "btn_open_%s" % s.key)
+                        for s in scope.INPUT_SOURCES)
+        attachments = tuple(getattr(self, "btn_open_%s" % a.key)
+                            for a in scope.ATTACHMENTS)
+        for group in (sources,
+                      attachments + (self.btn_open_recipe,),
                       (self.btn_examples, self.btn_export),
                       (self.btn_undo, self.btn_redo)):
             for b in group:
@@ -1076,10 +1074,11 @@ class StudioWindow(QMainWindow):
         # 這句話要跟旁邊實際看得到的鈕一致 —— 範例資料那顆收起來的時候還講
         # 「or try the tool with generated sample data」，使用者會去找一顆不在
         # 畫面上的鈕。
-        why = QLabel("Open a KLARF to see your patches here, or try the tool "
-                     "with generated sample data first."
-                     if scope.SHOW_SAMPLE_ENTRIES else
-                     "Open a KLARF to see your patches here.", self.empty_state)
+        why = QLabel("ADEPT reads four kinds of data. Pick the one you have."
+                     if not scope.SHOW_SAMPLE_ENTRIES else
+                     "ADEPT reads four kinds of data. Pick the one you have, "
+                     "or try the tool with generated sample data first.",
+                     self.empty_state)
         why.setObjectName("paramHint")
         why.setAlignment(Qt.AlignCenter)
         why.setWordWrap(True)
@@ -1087,11 +1086,67 @@ class StudioWindow(QMainWindow):
         # （`test_nothing_on_screen_points_at_a_button_that_is_not_there`）。
         self.empty_state_hint = why
         estack.addWidget(why)
+
+        # **每一種 source 一列，而那幾列是從 `scope.INPUT_SOURCES` 長出來的**
+        # （F11 Input-5，使用者：「各種 image source 資料流是否改成個別入口比較
+        # 好（但同時 UI 一開始進去的地方顯示也要改）」）。
+        #
+        # 以前這裡只有一顆 ``Open KLARF…``，而工具列上有三顆 —— 於是帶著一個
+        # 資料夾的圖片、或一個多頁 TIFF 進來的人，在**整個畫面最大的那一塊**上
+        # 看到的是「Open a KLARF to see your patches here」。他要嘛以為 ADEPT
+        # 讀不了他的東西，要嘛得自己去工具列上一顆一顆讀過去。
+        #
+        # 一列一句話，說的是**這條路吃什麼樣的檔案**，不是它會做什麼 ——
+        # 使用者站在這個畫面前面時，手上已經有檔案了，他要回答的問題是
+        # 「我這一堆算哪一種」。
+        self.empty_source_buttons: Dict[str, QPushButton] = {}
+        rows = QVBoxLayout()
+        rows.setSpacing(6)
+        for i, src in enumerate(scope.INPUT_SOURCES):
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            row.addStretch(1)
+            b = QPushButton(src.title, self.empty_state)
+            if i == 0:
+                b.setObjectName("primary")     # 最常見的那一條是主要動作
+            b.setMinimumWidth(140)
+            b.clicked.connect(
+                getattr(self, "_on_open_%s" % src.key))
+            self.empty_source_buttons[src.key] = b
+            row.addWidget(b)
+            what = QLabel(src.what if src.has_klarf else
+                          "%s No KLARF, so no write-back." % src.what,
+                          self.empty_state)
+            what.setObjectName("paramHint")
+            what.setWordWrap(True)
+            what.setMinimumWidth(300)
+            row.addWidget(what, 2)
+            row.addStretch(1)
+            rows.addLayout(row)
+        estack.addLayout(rows)
+
+        # 第一顆保留原本的名字：既有測試與 ``_build_shortcuts``（Ctrl+O）
+        # 都指得到它，而它做的事一個字都沒變。
+        self.btn_empty_open = self.empty_source_buttons[
+            scope.INPUT_SOURCES[0].key]
+
+        # 附加檔不是第五條路，所以它不是一顆鈕，是**一句說明它什麼時候才出現**
+        # 的話。這正是使用者問的那一句「Load layout labels 要怎麼 load，好像
+        # 沒有 load 的地方」—— 卡片在卡片庫裡看得到，而它的入口要等 lot 載進來
+        # 才亮，於是這個畫面上必須說得出那個順序。
+        att_bits = ["%s — %s %s" % (a.title, a.what, a.needs)
+                    for a in scope.ATTACHMENTS]
+        self.empty_state_attachments = QLabel(
+            "  ·  ".join(att_bits), self.empty_state)
+        self.empty_state_attachments.setObjectName("paramHint")
+        self.empty_state_attachments.setAlignment(Qt.AlignCenter)
+        self.empty_state_attachments.setWordWrap(True)
+        self.empty_state_attachments.setVisible(bool(scope.ATTACHMENTS))
+        estack.addSpacing(6)
+        estack.addWidget(self.empty_state_attachments)
+
         brow = QHBoxLayout()
         brow.addStretch(1)
-        self.btn_empty_open = QPushButton("Open KLARF…", self.empty_state)
-        self.btn_empty_open.setObjectName("primary")
-        brow.addWidget(self.btn_empty_open)
         self.btn_empty_sample = QPushButton("Try it with sample data",
                                             self.empty_state)
         self.btn_empty_sample.setProperty("variant", "secondary")
@@ -1100,6 +1155,7 @@ class StudioWindow(QMainWindow):
         self.btn_empty_sample.setVisible(bool(scope.SHOW_SAMPLE_ENTRIES))
         brow.addWidget(self.btn_empty_sample)
         brow.addStretch(1)
+        estack.addSpacing(8)
         estack.addLayout(brow)
         estack.addStretch(1)
 
@@ -1212,7 +1268,9 @@ class StudioWindow(QMainWindow):
         self.btn_next.clicked.connect(lambda: self.step_defect(+1))
         self.defect_combo.currentIndexChanged.connect(self._on_defect_combo)
         self.btn_region_check.clicked.connect(lambda: self.open_region_check())
-        self.btn_empty_open.clicked.connect(self._on_open_klarf)
+        # ``btn_empty_open`` 在 ``_build_body`` 建它的時候就接好了（那一列是
+        # 從 ``scope.INPUT_SOURCES`` 長出來的，接線跟著一起長）——
+        # 在這裡再接一次會變成按一下開兩個檔案對話框。
         self.btn_empty_sample.clicked.connect(self._on_demo_requested)
         self.param_form.action_requested.connect(self._on_param_action)
         self.stream_combo.currentTextChanged.connect(self._on_stream_changed)
