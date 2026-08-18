@@ -658,3 +658,30 @@ def test_a_card_survives_a_different_patch_size(key, dataset, big_dataset):
     bad = [k for k, v in (big.features or {}).items()
            if not math.isfinite(float(v))]
     assert not bad, "%s 在 256² 上產出 NaN／Inf 的特徵 %s" % (key, bad)
+
+
+# --------------------------------------------------------------------------- #
+# 卡片名的長度 —— 一列讀得完
+# --------------------------------------------------------------------------- #
+#: 目前最長的那一個（``Remove background / stripes``）。這不是一個猜出來的美感
+#: 數字，是**現況的天花板**：新卡片超過它，就要先看一眼卡片庫再決定。
+#:
+#: 為什麼要有這條：卡片庫是一列一張卡讀下去的，名字長到要換行、或被 ``…``
+#: 截掉，那一列就不再是一眼的事 —— 而目標使用者正是靠掃過那一列找卡的。
+#: 實際發生過（2026-08-18）：``Reference from repeating pattern`` 進了卡片庫，
+#: 使用者第一句話就是「名字太長」。收成 ``Reference from pattern`` 之後，
+#: 句型跟隔壁的 ``Mask from regions`` 一樣：**「產出 from 來源」**。
+#:
+#: 掉出去的字（那張卡的 ``repeating``）該去 ``help``：名字回答「這張卡做什麼」，
+#: 前提與細節回答「我能不能用它」，兩者不是同一個問題。
+MAX_LABEL_CHARS = 27
+
+
+@pytest.mark.parametrize("key", CARDS)
+def test_a_card_name_fits_on_one_line(key):
+    label = str(REGISTRY[key].label)
+    assert label.strip(), "%s：沒有 label" % key
+    assert len(label) <= MAX_LABEL_CHARS, (
+        "%s 的名字 %r 有 %d 個字元，超過現況的天花板 %d —— 卡片庫是一列一張卡"
+        "讀下去的。把前提／細節搬進 help，名字只留「這張卡做什麼」。"
+        % (key, label, len(label), MAX_LABEL_CHARS))

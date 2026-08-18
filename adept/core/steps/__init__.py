@@ -16,7 +16,7 @@
 * ``cell_period``（Cell period）**刪掉**了 —— 使用者：「不需要這功能」。
   週期的來源因此只剩「參數填死」與「疊圖的那張卡自己估」兩條。
 * ``golden_cell``（Golden Cell reference）先刪、同一天要回來，並且**改名**成
-  ``pattern_ref``「Reference from repeating pattern」（`steps/pattern_ref.py`）
+  ``pattern_ref``「Reference from pattern」（`steps/pattern_ref.py`）
   —— 使用者：「那可能要拿回來 不過要改名字 不然會誤會」。誤會的來源是
   Template 卡的對話框裡也在疊 golden cell。舊 recipe 由
   `recipe._migrate_renamed_cards` 接住（連分數表達式裡的 feature 名一起換）。

@@ -60,7 +60,7 @@ SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder")
 #:
 #: * ``cell_period`` —— **刪掉**（使用者：「不需要這功能」）。
 #: * ``golden_cell`` —— 先刪，同一天要回來並**改名**成 ``pattern_ref``
-#:   「Reference from repeating pattern」（使用者：「那可能要拿回來 不過要改名字
+#:   「Reference from pattern」（使用者：「那可能要拿回來 不過要改名字
 #:   不然會誤會」）。它現在正常地在 Compare 段的卡片庫裡。
 #: * ``align`` —— **收起來**（使用者：「之後真需要我再回來」）。
 #:

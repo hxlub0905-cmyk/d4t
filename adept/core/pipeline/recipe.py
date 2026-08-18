@@ -438,7 +438,7 @@ def _migrate_merged_cards(nodes: Dict[str, "RecipeNode"]) -> None:
 
 #: 只是**改了名字**的卡（key → 新 key，參數名一個都沒動）。
 #:
-#: 目前只有一筆：``golden_cell`` →「Reference from repeating pattern」
+#: 目前只有一筆：``golden_cell`` →「Reference from pattern」
 #: （2026-08-18）。改名的理由是使用者的一句話 ——「那可能要拿回來 不過要改名字
 #: 不然會誤會」：Template 卡的設定對話框裡也在疊 golden cell，畫面上兩個地方
 #: 同名，看起來像同一個功能做了兩次。

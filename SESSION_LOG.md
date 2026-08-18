@@ -26,10 +26,12 @@
 上一輪刪掉它之後我把代價量出來給使用者看（rsem route 24/24 → 12/24），
 使用者的回覆是「那可能要拿回來 不過要改名字 不然會誤會」。
 
-新名字：**Reference from repeating pattern**（`steps/pattern_ref.py`）。
-裡面沒有 golden、也沒有 cell —— 它講的是**輸出**（a reference）與**前提**
-（a repeating pattern），而那正好是使用者判斷「我這張圖能不能用這張卡」需要知道
-的全部。`test_the_name_does_not_say_golden_or_cell_anywhere_the_user_looks`
+新名字：**Reference from pattern**（`steps/pattern_ref.py`）。裡面沒有 golden、
+也沒有 cell。第一版是「Reference from **repeating** pattern」，使用者當場說
+「名字太長」—— 收成三個字，句型跟隔壁的 `Mask from regions` 一樣（「產出 from
+來源」）。「repeating」掉進 help 裡：它是**前提**不是名字，而且圖不重複時這張卡
+會直接擋下來並講原因，使用者不必靠名字知道。
+`test_the_name_does_not_say_golden_or_cell_anywhere_the_user_looks`
 逐一掃卡片名、說明、參數名、參數說明與 feature 名。
 
 改名要換的**不只是 key**：`golden_ghost` / `golden_px` / `golden_py` →

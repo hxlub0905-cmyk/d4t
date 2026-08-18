@@ -5,7 +5,7 @@ f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
 3677f25b67728f351bfe66dbf696dbd1cefab249 AGENTS.md
 4a3a3e3e6cf8cae572f26f1f55246b4a82a132c9 CLAUDE.md
 87c3cb2a07ed7a97b98ec30aa139b3dd2f03ff19 README.md
-1fdd38bea45899155184f5ef70609ebb8c78d595 SESSION_LOG.md
+9f405fe4ebef7b9eb5988a5cccfb441658396f38 SESSION_LOG.md
 650a5d7c8bc6db42eed4054174823bfcfceb7eae adept/__init__.py
 60b80dcea29bcf34402d267038256d161b70b0ed adept/__main__.py
 8a51dfe499b3a9d81434c8a202f2d17c24b71c74 adept/core/__init__.py
@@ -46,9 +46,9 @@ bc5822860c73a424460de963c0a7ef1b940bd71e adept/core/pipeline/context.py
 e23539efe8cfae76911201bb5b37e0d6dbfde404 adept/core/pipeline/curve.py
 fc722ec0cd455df588db69706af5f94d18708030 adept/core/pipeline/engine.py
 6c3c9c1cc1e6d1ee5d121f9994968f4f780e3cc5 adept/core/pipeline/expression.py
-fa6a8e8191df01d8e0dffd191bfdbde234274208 adept/core/pipeline/recipe.py
+52c778f166bfca69f9ba9bdee8a10d3fa642a9ad adept/core/pipeline/recipe.py
 614d2740cfe28d950cf84711ffa9afe9c3f66592 adept/core/pipeline/step.py
-595d998ab0b79b34167c5dc199a719a9c0beca36 adept/core/steps/__init__.py
+34b62aa19cc3c0ab1ac335797e163d4899802415 adept/core/steps/__init__.py
 cf1838fd5e0d30e8ac3ef32ffa9b5d252051ddb8 adept/core/steps/_util.py
 68eceaa2cadaffb76b71c8dfc2e2984d9f4bbf5e adept/core/steps/align.py
 bfa0e9b6bfc6a5d7299f439fd43d705eda5832b2 adept/core/steps/arith.py
@@ -59,7 +59,7 @@ aff2d033bbb51e2190ad437ec0f9de6b25d27ebc adept/core/steps/cd.py
 122497dc2fbb9e25638da95cf3cf3c35d0db1644 adept/core/steps/load.py
 f990715ea03b0097ea8ec05707dcd282f787a207 adept/core/steps/load_sidecar.py
 ec3f5caf078d2a81bcbe468c825bd51f2b9d0268 adept/core/steps/normalize.py
-3fb98439933ea29a2124514028cd9976b424bfc5 adept/core/steps/pattern_ref.py
+d40c4f9315d5d1e1341f4120a46a78f983d7ca6a adept/core/steps/pattern_ref.py
 9faa96d8ac9fea3ad43bb25e2de578dd5c6fc965 adept/core/steps/quality.py
 98be8f62f88078005c6124d12000abd8c2a2a030 adept/core/steps/roi_compare.py
 3ccf021332986f44d133b4f8c8dffbd764215174 adept/core/steps/roi_cross.py
@@ -80,7 +80,7 @@ b352768ddbf53d53f9cfdcaec2604ad3b22f6ddb adept/ui/cell_canvas.py
 a9c45a4e6a2e4e2e9ff46aac6f1caccf3212bcc2 adept/ui/inspectors.py
 56c08b0d360f922ec4c0d829c96d25426db86af4 adept/ui/region_check.py
 043a9240742914759667fd4bb01beafd0241ed17 adept/ui/results.py
-d8f5f7fc441e453832b2dc3a6f1c7331d5a9891c adept/ui/scope.py
+e2f65a8ed800ffd13dbac0f6d23cd1554f222a75 adept/ui/scope.py
 089b69341f9c7e8d6695c3948f3cdf48c3f41efc adept/ui/studio.py
 2566f2da060e65e884d86bffc10c8e1394565396 adept/ui/template_dialog.py
 06608777ade523d9c82ebdae0109a642cc6dfd55 adept/ui/theme.py
@@ -99,7 +99,7 @@ c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
 4051d93d4fa3ad3cf9ed76514f5b8ab4c96f13f7 docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
-fa2c45e3cb3535b999a274a922ba9647fef74f50 docs/plans/F11-phase2-features.md
+ae6b1e87f15f744d02f2e22785b1bc2da2d09c1a docs/plans/F11-phase2-features.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
 fdf5dba17526e86ea0990c7853ef652874082324 fab_probe/probe_klarf.py
@@ -118,14 +118,14 @@ fc105693a52e53f5b37b6c009a1456b9acd8e80f tests/test_align.py
 91ba6cdbedcf52b654b6a955c8d7ebb29264391d tests/test_batch_cache.py
 c3c815b143149244f93625a14f84421268d0dd0a tests/test_batch_thread_safety.py
 fce64e2110a74db0e23c9aeda3eec7d2282af53a tests/test_calibration.py
-b2be7a9b96bea2ffa1d3d793a7282c8167c0fe1a tests/test_card_invariants.py
+81ff2ae27c25b49853835ab7a4dcb4f1edef8288 tests/test_card_invariants.py
 0c593d232de3a3528f4f0b717ad83a48b309364d tests/test_cell_rois.py
 1543444dfa6c650afa1ace6fd029bda188bf8b21 tests/test_check_glas_export.py
 66dac80309d206fba4fb93a3c568c5977af1ec5f tests/test_curve.py
 4b555a9fe3fc98fb1489b2e3b5d1d25d58f1d952 tests/test_dag_branching.py
 1be97f704f93ae3ebc989a569b9e04cd1de639aa tests/test_dataset.py
 12117b77d0e25f264919ff4ed1d341b5809a2d94 tests/test_e2e_die_to_die.py
-6f8c226fa475db52916a2048980ce7baa46f0fae tests/test_e2e_dual_route.py
+f4e17e6a35d1c49b43c6e4cb440c5c297e624288 tests/test_e2e_dual_route.py
 66a019f6eee1bec64775c19e1c02aa2e83bec4f8 tests/test_engine.py
 25611be56a0ed9fcf1eea172623eb54b11eb5eec tests/test_enhance.py
 ec53b9545e7a314039cdda7c60cc0d123e4701e2 tests/test_export_klarf.py

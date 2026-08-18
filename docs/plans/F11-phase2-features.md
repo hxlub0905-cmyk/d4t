@@ -2360,7 +2360,7 @@ Region 段分成兩半**（找 / 用），不是把它們散到別段去。
 
 | | |
 |---|---|
-| 現在有什麼 | `subtract`（Compare two streams）、`pattern_ref`（Reference from repeating pattern）、`align`（5 backend，2026-08-18 起 `HIDDEN_STEPS` 收起來）|
+| 現在有什麼 | `subtract`（Compare two streams）、`pattern_ref`（Reference from pattern）、`align`（5 backend，2026-08-18 起 `HIDDEN_STEPS` 收起來）|
 | 缺什麼 | ① **沒有 ref 的資料要跟什麼比**（§3.1.4 的三個候選）；② GLAS 的 `gray` 當 ref（die-to-database）；③ 對位可以**吃 GLAS 已經算好的 offset**（省一次對位，而且那是對 layout 對的，比對 ref 準）|
 
 #### 3.4.1 這一段到底裝什麼（2026-08-18，使用者問「Compare 這個 你覺得要放什麼卡片比較合理？」）
@@ -2411,7 +2411,7 @@ golden cell（`algo/template.py` 用同一支 `algo/golden.py`），畫面上兩
 | 沒有：`roi_cross` + `roi_compare` 的區域路線 | 每個特徵 real 與 nuisance 完全重疊（最好的 `snr_max` d≈0.8）|
 
 **④ 使用者看了數字之後**：「那可能要拿回來 不過要改名字 不然會誤會」。於是它以
-`pattern_ref`「**Reference from repeating pattern**」回來 —— 新名字裡沒有
+`pattern_ref`「**Reference from pattern**」回來 —— 新名字裡沒有
 golden、也沒有 cell，講的是**輸出**（a reference）與**前提**（a repeating
 pattern），而那兩件事正好是使用者判斷「我這張圖能不能用這張卡」需要知道的全部。
 `tests/test_pattern_ref.py::test_the_name_does_not_say_golden_or_cell_anywhere_the_user_looks`

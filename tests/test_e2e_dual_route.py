@@ -3,7 +3,7 @@
 
 - EBI patch（KLARF + multi-page TIFF，機台附 test/ref）走 ebi_patch route
 - Review SEM（KLARF + 每顆一張圖，沒有 ref）走 rsem route，
-  由「Reference from repeating pattern」（`pattern_ref`，2026-08-18 之前叫
+  由「Reference from pattern」（`pattern_ref`，2026-08-18 之前叫
   `golden_cell`）自己疊一張參考圖出來
 
 兩條 route 共用同一段算法與判定（相減 → 去噪 → SNR → blob → CD → GLV → 同一條

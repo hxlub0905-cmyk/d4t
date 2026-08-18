@@ -18,9 +18,14 @@ Template（Region 段）   具名**區域**（框）      這塊材料在這張�
 這一張（Compare 段）    一條**影像流**          這張圖沒有缺陷時該長什麼樣
 ======================  ======================  ==============================
 
-所以新名字裡沒有 golden、也沒有 cell —— 它講的是**輸出**（a reference）與
-**前提**（a repeating pattern），而那兩件事正好是使用者要判斷「我這張圖能不能
-用這一張卡」需要知道的全部。
+所以新名字裡沒有 golden、也沒有 cell。第一版叫「Reference from repeating
+pattern」，使用者的下一句話是「名字太長」—— 於是收成三個字，句型跟隔壁的
+``Mask from regions`` 一樣：**「產出 from 來源」**。卡片庫是一列一張卡讀下去的，
+名字長到要換行，那一列就不再是一眼的事。
+
+「repeating」那個字掉進 ``help`` 裡了，不是掉了：它是**前提**（pattern 要真的
+重複），而前提屬於說明，不屬於名字 —— 何況這張卡在不重複的圖上會直接擋下來
+並講出原因，使用者不會靠名字才知道。
 
 它在做什麼
 ----------
@@ -66,7 +71,7 @@ class PatternRefStep(Step):
     """重複的 cell → 一張乾淨的參考圖（同尺寸、可直接相減）。"""
 
     key = "pattern_ref"
-    label = "Reference from repeating pattern"
+    label = "Reference from pattern"
     category = CATEGORY_IMAGE
     group = GROUP_COMPARE
     help = ("Build the reference image out of this image's own repeating "
