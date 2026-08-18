@@ -553,6 +553,16 @@ class StudioWindow(QMainWindow):
             "becomes one defect. No KLARF means no coordinates and no "
             "write-back — CSV and Excel reports still work.",
             self._on_open_folder, icon="folder_open")
+        # GDS 那條路的「附加檔」入口（F11 Region-3）。它**不是第五種 source**
+        # —— 資料集已經載好了，這一顆是往每一顆 defect 上再掛一個檔案。
+        # 所以它跟三顆 Open 分開、而且沒有資料集時是灰的（按下去也沒有意義）。
+        self.btn_open_gds = self._tool_button(
+            "Open GDS export…",
+            "Attach a GLAS export to the lot that is already open: every "
+            "defect gets its layout label map, and the “GDS layers” card turns "
+            "each layer into a named region. Load the lot first.",
+            self._on_open_gds, icon="stack")
+        self.btn_open_gds.setEnabled(False)
         self.btn_open_recipe = self._tool_button(
             "Open Recipe…", "Load a recipe JSON", self._on_open_recipe,
             icon="document")
@@ -2553,6 +2563,8 @@ class StudioWindow(QMainWindow):
             return False
 
         self.dataset = dataset
+        if hasattr(self, "btn_open_gds"):
+            self.btn_open_gds.setEnabled(dataset is not None)
         items = list(getattr(dataset, "items", []) or [])
         self.defect_index = 0
         # 試跑筆數跟著資料集走：對一份 24 顆的 lot 顯示「First 200」只會讓人困惑
@@ -3981,6 +3993,53 @@ class StudioWindow(QMainWindow):
         if not path:
             return
         self.load_dataset_path(path)
+
+    def _on_open_gds(self) -> None:
+        path = QFileDialog.getExistingDirectory(
+            self, "Attach GLAS export (the folder with the *_label.png files)")
+        if path:
+            self.attach_gds_export(path)
+
+    def attach_gds_export(self, export_dir: str) -> str:
+        """把一份 GLAS 匯出掛到目前的資料集上（F11 Region-3）。回傳狀態列那句話。
+
+        **配對在 ingest 層**（`core/ingest/glas_export.attach`），這裡只負責問
+        路徑、把結果講出來、以及把 layer 的名字**填進卡片** —— 那個對照表在
+        匯出的 manifest 裡，讓使用者自己去抄一次是在製造一個可以抄錯的機會
+        （同 F11 Input 的「量到的 pitch 自動填回參數」）。
+        """
+        from adept.core.ingest import glas_export
+
+        if not self.dataset:
+            msg = ("Load the lot first — “Open GDS export…” attaches labels to "
+                   "the defects that are already open.")
+            self._status(msg)
+            return msg
+        try:
+            rep = glas_export.attach(self.dataset, export_dir)
+            doc = glas_export.read_manifest(export_dir)
+        except glas_export.GlasExportError as e:
+            self._status(str(e))
+            return str(e)
+
+        # 名字填進**每一張** roi_from_mask 卡（還沒設定過的才填 —— 使用者改過的
+        # 名字不能被一次「重新掛載」洗掉）。
+        default = glas_export.default_layer_map(doc)
+        filled = 0
+        if default:
+            for nid, node in self.model.nodes.items():
+                if node.step == "roi_from_mask" and not str(
+                        node.params.get("layers", "") or "").strip():
+                    self.model.set_param(nid, "layers", default)
+                    filled += 1
+        msg = rep.summary()
+        if filled:
+            msg += " · filled the layer names into %d card(s)" % filled
+        for w in rep.warnings:
+            msg += " · △ %s" % w
+        self._status(msg)
+        self.refresh_preview()
+        return msg
 
     def _on_open_stack(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

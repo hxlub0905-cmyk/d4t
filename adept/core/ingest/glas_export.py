@@ -37,7 +37,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .dataset import Dataset, ImageRef
 
 __all__ = ["MANIFEST_NAME", "SIDECAR_LABEL", "AttachReport", "read_manifest",
-           "label_map", "attach"]
+           "label_map", "region_name_for", "default_layer_map", "attach"]
 
 #: manifest 的固定檔名（`gds_align_tool._write_manifest`）。
 MANIFEST_NAME = "overlay_manifest.json"
@@ -139,6 +139,56 @@ def label_map(doc: Dict[str, Any]) -> List[Tuple[int, str]]:
         except (KeyError, TypeError, ValueError):
             continue
     return sorted(out)
+
+
+def region_name_for(layer: str, taken: Any = ()) -> str:
+    """GLAS 的 layer 名 → **ADEPT 的區域名**（`L17/D0` → `L17_D0`）。
+
+    為什麼要有這一支（2026-08-18 對真實匯出實測到的）
+    ------------------------------------------------
+    真實匯出的三個 layer 名全都含有 ADEPT 區域名規則不收的字元 —— 那個名字會
+    變成特徵的前綴（`L17_D0_glv_mean`），所以它必須是一個**變數名**。
+
+    規則刻意很笨，因為它必須**每次都一樣**：不是變數字元的一律換成 `_`、
+    頭尾的 `_` 去掉、開頭是數字就補一個 `L`、空的就叫 `layer`。
+    ``taken`` 裡已經有的名字會補 `_2`、`_3`… —— 兩層撞名的話後面那層會蓋掉
+    前面那層，而畫面上只看得到一個區域。
+
+    這只是**預設值**：使用者可以在卡片上改名（`epi` 比 `L17_D0` 好用太多，
+    而寫分數表達式的是他）。跟 F11 Input 的通道命名同一個原則 ——
+    程式給預設，名字是使用者的。
+    """
+    out = "".join(ch if (ch.isalnum() and ord(ch) < 128) or ch == "_" else "_"
+                  for ch in str(layer)).strip("_")
+    while "__" in out:
+        out = out.replace("__", "_")
+    if not out:
+        out = "layer"
+    if out[0].isdigit():
+        out = "L" + out
+    used = {str(t) for t in (taken or ())}
+    if out not in used:
+        return out
+    n = 2
+    while "%s_%d" % (out, n) in used:
+        n += 1
+    return "%s_%d" % (out, n)
+
+
+def default_layer_map(doc: Dict[str, Any]) -> str:
+    """manifest 的 ``label_map`` → 卡片 ``layers`` 參數的預設值。
+
+    格式跟 ``load_patch`` 的 ``channel_map`` 一模一樣（``"1:epi, 2:mg"``）——
+    **重用而不是發明第二個** ：兩者都是「整數 → 名字」，而那一份的驗證規則
+    （整數要 ≥1、不能重複、名字要能當變數）正好就是這裡要的。
+    """
+    names: List[str] = []
+    parts: List[str] = []
+    for lid, layer in label_map(doc):
+        name = region_name_for(layer, names)
+        names.append(name)
+        parts.append("%d:%s" % (lid, name))
+    return ", ".join(parts)
 
 
 def attach(dataset: Dataset, export_dir: Any,

@@ -80,6 +80,9 @@ NEEDS_MORE_SETUP = {
     # 的 lot 沒有掛。沒掛的時候這張卡**正確的行為就是擋下來並講出兩種原因**
     # （見 steps/load_sidecar.py）。專屬驗收在 tests/test_glas_sidecar.py。
     "load_sidecar": "需要掛上 GLAS 匯出的資料集（harness 的 lot 沒有）",
+    # 它吃的是 `load_sidecar` 吐的那條流，而那張卡在這個 harness 上跑不起來
+    # （上一行）。專屬驗收在 tests/test_roi_from_mask.py。
+    "roi_from_mask": "需要 GLAS 的 label map 那條流（前一張卡在這裡跑不起來）",
 }
 
 

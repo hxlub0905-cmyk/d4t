@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import struct
 import sys
 import zlib
@@ -334,3 +335,23 @@ def test_the_card_is_an_input_card_with_no_inputs(tmp_path):
     card = get_step("load_sidecar")
     assert card.group == GROUP_INPUT
     assert card.resolve_reads({}) == []
+
+
+# --------------------------------------------------------------------------- #
+# 6. Studio 的「掛上匯出」入口（F11 Region-3 第 3 步順手做的）
+# --------------------------------------------------------------------------- #
+"""為什麼這一顆鈕必須在這一輪就有：`roi_from_mask` 的「還沒設定完」那句話
+**指向它**。訊息指向一個不存在的東西，那句話本身就是死路（推廣鐵則），而
+`tests/test_ui_f7_9_feedback.py` 有一條不變量在擋。"""
+
+
+def test_the_card_message_points_at_a_button_that_exists():
+    """訊息裡那個「…」結尾的東西，工具列上要真的有。"""
+    from adept.core.pipeline import get_step
+
+    says = get_step("roi_from_mask").configuration_issues({"layers": ""})[0]
+    named = re.findall(r"“([^”]+…)”", says)
+    assert named, "訊息沒有指向任何一個按得下去的東西：%s" % says
+    src = open("adept/ui/studio.py", encoding="utf-8").read()
+    for label in named:
+        assert '"%s"' % label in src, "工具列上沒有 %r 這顆鈕" % label
