@@ -88,6 +88,17 @@ def _cmd_run(args: argparse.Namespace) -> int:
     print(f"資料集：kind={ds.kind}，{len(ds.items)} 顆 defect")
     for w in ds.warnings:
         print(f"  △ {w}")
+    if getattr(args, "gds", ""):
+        from adept.core.ingest import glas_export
+
+        try:
+            rep = glas_export.attach(ds, args.gds)
+        except glas_export.GlasExportError as e:
+            print(f"[錯誤] --gds：{e}", file=sys.stderr)
+            return 2
+        print(f"GDS 匯出：{rep.summary()}")
+        for w in rep.warnings:
+            print(f"  △ {w}")
     if ds.kind not in recipe.routes:
         print(f"[錯誤] recipe 沒有 '{ds.kind}' 的 route（有：{sorted(recipe.routes)}）", file=sys.stderr)
         return 2
@@ -363,6 +374,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_run.add_argument("recipe")
     p_run.add_argument("klarf")
     p_run.add_argument("--tiff", default=None, help="patch TIFF 路徑（預設自動尋找）")
+    p_run.add_argument("--gds", default="",
+                       help="GLAS 匯出資料夾（`<id>_label.png` + "
+                            "overlay_manifest.json）—— 掛上去之後 "
+                            "`load_sidecar` 卡才有東西可以載")
     p_run.add_argument("--out", default=None, help="輸出 JSON 路徑")
     p_run.add_argument("--csv", default=None, help="輸出 CSV 路徑（feature vector）")
     p_run.add_argument("--limit", type=int, default=None, help="只跑前 N 顆（試跑）")

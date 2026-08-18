@@ -5,9 +5,9 @@ f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
 3677f25b67728f351bfe66dbf696dbd1cefab249 AGENTS.md
 c1e8a3ad072d11efdcbc76e5baf8fca44a3c1df9 CLAUDE.md
 87c3cb2a07ed7a97b98ec30aa139b3dd2f03ff19 README.md
-855e70f3349ed4db5bf9bbb618eeeb4728443b9d SESSION_LOG.md
+ae4166c727671c2750485f054e7938a75c197e48 SESSION_LOG.md
 650a5d7c8bc6db42eed4054174823bfcfceb7eae adept/__init__.py
-c36c6343079bd506222906f26059cecf6d25ad7f adept/__main__.py
+60b80dcea29bcf34402d267038256d161b70b0ed adept/__main__.py
 8a51dfe499b3a9d81434c8a202f2d17c24b71c74 adept/core/__init__.py
 e765cec6fb21d6bf017cd212321c39b44bab2694 adept/core/algo/__init__.py
 e86b06ccad3b3981eb4a162d0a99f968fc4fade3 adept/core/algo/align.py
@@ -31,12 +31,13 @@ feac449979828c3ee6861b614fd47566e67b9e8f adept/core/export/klarf_out.py
 eeb80b55a38476ef2f80a5e10538a50bc935aa1b adept/core/export/overlay.py
 2befd3e81601f75aada73c3dc59e2c962f1e64d1 adept/core/export/report.py
 cf4a1ad803592ee09a5fc9c205da267f7de1a3f9 adept/core/ingest/__init__.py
-d26312765d1d20f5898c06bdc4fffa806353ca26 adept/core/ingest/dataset.py
-eb269657a9bf68e680224ff26e4230b30df9e500 adept/core/ingest/imageio.py
+49de09f00b6f2dfca52338c7a0918122f7f1a0e3 adept/core/ingest/dataset.py
+a4fc03b5494f8d7ff67c40f3e0e53cbb00c47c4d adept/core/ingest/glas_export.py
+b43a35c8adba191eff3f78f643f32c47a2247027 adept/core/ingest/imageio.py
 7c83441689fc980b2a4d7e3f46375653ae305054 adept/core/ingest/klarf_core.py
 541e42dac682a0fbb254ce23a32979e2a9b62f19 adept/core/ingest/tiff_index.py
 03146deb543fddc5cc836c039652a15f5492935d adept/core/pipeline/__init__.py
-f277b6b3e5e65ce8027da01648a0d42d44a64905 adept/core/pipeline/batch.py
+4afc683911ec768f434d330f01e92b88905cacaf adept/core/pipeline/batch.py
 d6a6e8374dba3679cc6c28dd534ece76923f6ce2 adept/core/pipeline/cache.py
 398124f3c14b8c071de444f31414130991eec424 adept/core/pipeline/cellrois.py
 8d96fd361dcb6e1b81e34bf3ce9f355de654eaec adept/core/pipeline/channels.py
@@ -46,7 +47,7 @@ fc722ec0cd455df588db69706af5f94d18708030 adept/core/pipeline/engine.py
 6c3c9c1cc1e6d1ee5d121f9994968f4f780e3cc5 adept/core/pipeline/expression.py
 55fd085e29222f11f09554dc0fd9dbf32a08ce4b adept/core/pipeline/recipe.py
 06617b2282d3368ba2dcc5cb0e447e9115d7ebea adept/core/pipeline/step.py
-596cea13ec15f5ec7517c955111d58804910bee8 adept/core/steps/__init__.py
+269e99b086d54c512e4494534ab845e589af5ea1 adept/core/steps/__init__.py
 cf1838fd5e0d30e8ac3ef32ffa9b5d252051ddb8 adept/core/steps/_util.py
 68eceaa2cadaffb76b71c8dfc2e2984d9f4bbf5e adept/core/steps/align.py
 bfa0e9b6bfc6a5d7299f439fd43d705eda5832b2 adept/core/steps/arith.py
@@ -56,6 +57,7 @@ aff2d033bbb51e2190ad437ec0f9de6b25d27ebc adept/core/steps/cd.py
 06a885905eb093a6f35156f8360a3dfc97d1b808 adept/core/steps/glv_stats.py
 77c4f2ad3297bcfbbcfcb8a3f5ecce35e7fc4b82 adept/core/steps/golden.py
 122497dc2fbb9e25638da95cf3cf3c35d0db1644 adept/core/steps/load.py
+f30584a3de7e3eb4faee27ab2129067f958cc925 adept/core/steps/load_sidecar.py
 ec3f5caf078d2a81bcbe468c825bd51f2b9d0268 adept/core/steps/normalize.py
 9faa96d8ac9fea3ad43bb25e2de578dd5c6fc965 adept/core/steps/quality.py
 3ccf021332986f44d133b4f8c8dffbd764215174 adept/core/steps/roi_cross.py
@@ -91,10 +93,10 @@ cf13b359e8b0cbfa4a7ad2318daf00617cb9a9fb docs/ARCHITECTURE.md
 b258ee9ccb0e12fcdf10e2dcab584fddabe10918 docs/NO-GIT-SETUP.md
 b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
-b3ce4b076f977321b661a0ea447a4098b367f33f docs/ROADMAP.md
+0a90945f501b99946aca1a4cddbc43944a17abfd docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
-739b3d9209a22857c0b943bb3d57d2c4e382759f docs/plans/F11-phase2-features.md
+0b4315d2f559c14aad9b9f4d045bd32406c0f3fa docs/plans/F11-phase2-features.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
 fdf5dba17526e86ea0990c7853ef652874082324 fab_probe/probe_klarf.py
@@ -113,7 +115,7 @@ fc105693a52e53f5b37b6c009a1456b9acd8e80f tests/test_align.py
 91ba6cdbedcf52b654b6a955c8d7ebb29264391d tests/test_batch_cache.py
 c3c815b143149244f93625a14f84421268d0dd0a tests/test_batch_thread_safety.py
 fce64e2110a74db0e23c9aeda3eec7d2282af53a tests/test_calibration.py
-f1c048d012bd7aec54e09b2e0fc9724dcb9f45c2 tests/test_card_invariants.py
+986b29fa28af9971d7252b9dc89bb81341a4c3d9 tests/test_card_invariants.py
 0c593d232de3a3528f4f0b717ad83a48b309364d tests/test_cell_rois.py
 1543444dfa6c650afa1ace6fd029bda188bf8b21 tests/test_check_glas_export.py
 66dac80309d206fba4fb93a3c568c5977af1ec5f tests/test_curve.py
@@ -137,6 +139,7 @@ ef0102523a022bfda98e41514c14bd9b6a657d1b tests/test_f11_split_load_cards.py
 09fe015f6c43b388e1d7f442318c76910120eb21 tests/test_f11_tiff_stack.py
 8103c2019dc9ae3e7336c52905e6117dc518727e tests/test_f9_8_cache_and_disabled.py
 4017d96f4145ba179d8e186b7f0e02b6e47ed8ef tests/test_fab_probe.py
+2135d116a205748c2dda2e4b53d7d50b2ff9286e tests/test_glas_sidecar.py
 862f012efa32c2e2162dd591bb2896cab70145c9 tests/test_glv.py
 2d3e6a3c2a605574b91428a083a1ffe8a325c7e0 tests/test_golden_features.py
 2dc56d1e49cf61a990c7e0f9441f3ca99082380c tests/test_golden_step.py
@@ -152,7 +155,7 @@ a64d82b7bdd755d0ed912fa5a68f134730a5d960 tests/test_offline_tools.py
 e027a9047fa771cca97915c533a7f90198c0fb18 tests/test_period_golden.py
 482763f96a3f9e39f90a7e6cbd97c6716b29db63 tests/test_phase_origin.py
 8c4b2aba1d0893acc999c5acb331fd00839518d9 tests/test_quality.py
-0891dd1637c345a3ac31b6f162556793a2013105 tests/test_recipe.py
+6b5fdce315e54f8bb8f6e6e2694066e71f0dd280 tests/test_recipe.py
 f90b258ab8544e5eadc1b54b55ff558db1cc3041 tests/test_results_store.py
 16cd9995a97eb6b919044e2c72fe1bcddb954e2a tests/test_roi.py
 0e0cb8a5e1674389658670640cbcd5b39b2d358b tests/test_roi_cross.py

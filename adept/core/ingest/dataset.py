@@ -104,6 +104,15 @@ class DefectItem:
     nm_per_px: Optional[float] = None
     klarf_row: int = -1                     # doc.defects 的列索引；folder 模式為 -1
     tags: Dict[str, str] = field(default_factory=dict)
+    #: **同一顆的附加檔**（F11 Region-3）：別的程式產的、跟這顆對應的影像。
+    #: 目前只有一種 —— GLAS 的 ``layout_label``（GDS label map）。
+    #:
+    #: 為什麼**不放進 ``images``**：``images`` 的意思是「機台拍了幾張」，而
+    #: ``load_single`` 的契約就建立在那個計數上（一顆兩張它會拒絕載入，而且
+    #: 那個拒絕是對的 —— 見 `steps/load.py`）。把 label 混進去的話，每一顆
+    #: RSEM defect 都會突然變成「兩張」而載不進來，而錯誤訊息會說謊
+    #: （「這顆有 2 張影像」——不，它有 1 張影像跟 1 個附加檔）。
+    sidecars: Dict[str, ImageRef] = field(default_factory=dict)
 
     def load(self, channel: str) -> np.ndarray:
         """讀出該 channel 的像素：TIFF 頁走 tiff_index.read_page，
@@ -116,13 +125,36 @@ class DefectItem:
             raise KeyError(
                 f"defect {self.defect_id} has no channel {channel!r} "
                 f"(available: {sorted(self.images)})")
-        ref = self.images[channel]
+        return self._read(self.images[channel], channel)
+
+    def load_sidecar(self, name: str) -> np.ndarray:
+        """讀出一個附加檔的像素（見 :attr:`sidecars`）。
+
+        跟 :meth:`load` 只差一件事，而那件事很重要：走
+        :func:`imageio.load_exact`，**不做通道合併**。
+
+        ``load_raw`` 對三通道的輸入會 ``cvtColor(BGR2GRAY)`` —— 對 SEM 影像那是
+        對的，對 label map 是致命的：那張圖的像素值**是**層號，加權平均會把
+        1、2、3 混成一堆不存在的值，**而且不會報錯**。而 GLAS 匯出時
+        ``<id>_label.png`` 旁邊就放著三通道的 ``<id>_label_view.png``，
+        指錯一個檔名整批就落在錯的地方。通道數的判斷留給卡片去講。
+        """
+        if name not in self.sidecars:
+            raise KeyError(
+                f"defect {self.defect_id} has no sidecar {name!r} "
+                f"(available: {sorted(self.sidecars)})")
+        return self._read(self.sidecars[name], name, exact=True)
+
+    def _read(self, ref: "ImageRef", what: str,
+              exact: bool = False) -> np.ndarray:
         if ref.page is not None:
             arr = tiff_index.read_page(ref.path, ref.page)
+        elif exact:
+            arr = imageio.load_exact(ref.path)
         else:
             arr = imageio.load_raw(ref.path)
         return require_8bit(arr, "%s of defect %s (%s)"
-                            % (channel, self.defect_id,
+                            % (what, self.defect_id,
                                os.path.basename(str(ref.path))))
 
 

@@ -14,7 +14,8 @@
 from __future__ import annotations
 
 from . import _util          # 共用小工具（非卡片）
-from . import load           # load_patch
+from . import load           # load_patch / load_single
+from . import load_sidecar  # load_sidecar（GLAS 的 label map）
 from . import normalize      # normalize（percentile / glv_band / match / local）
 from . import denoise        # denoise
 from . import tone           # tone（亮度/對比/gamma/曲線/反相）
@@ -32,7 +33,7 @@ from . import glv_stats      # glv_stats
 from . import golden         # cell_period / golden_cell
 
 __all__ = [
-    "load", "normalize", "denoise", "tone", "flatten", "align", "arith",
+    "load", "load_sidecar", "normalize", "denoise", "tone", "flatten", "align", "arith",
     "roi_cross", "roi_mask", "roi_template", "snr_map", "cd", "roi_snr",
     "quality", "glv_stats", "golden",
 ]

@@ -76,6 +76,10 @@ NEEDS_MORE_SETUP = {
     # 它對多張資料的正確行為就是**擋下來**（見 steps/load.py）。專屬驗收在
     # tests/test_f11_split_load_cards.py。
     "load_single": "需要「一顆一張」的資料集（harness 餵的是 patch）",
+    # 它讀的是 GLAS 匯出掛上來的附加檔（`DefectItem.sidecars`），而這個 harness
+    # 的 lot 沒有掛。沒掛的時候這張卡**正確的行為就是擋下來並講出兩種原因**
+    # （見 steps/load_sidecar.py）。專屬驗收在 tests/test_glas_sidecar.py。
+    "load_sidecar": "需要掛上 GLAS 匯出的資料集（harness 的 lot 沒有）",
 }
 
 

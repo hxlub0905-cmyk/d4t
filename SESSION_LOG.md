@@ -39,8 +39,11 @@ pieces 跟 rectangles 差多少還不知道** —— 差很大就證實「層被
 量法：`python tools\check_glas_export.py <匯出資料夾> --samples 2`
 （v4 之後不必再給 `--klarf` / `--images`）。
 
-**第 1 步做完了**（第十一輪，`tools/make_glas_export.py`）。下一步是
-**第 2 步：ingest 掛 sidecar**（`layout_label` 那條流）＋ 載入卡宣告它。
+**第 1、2 步做完了**（`tools/make_glas_export.py`、`ingest/glas_export.py` ＋
+`steps/load_sidecar.py`）。下一步是 **第 3 步：`roi_from_mask` 卡**
+（連通元件 → 精確拆成矩形 → 具名區域）。開工前先讀計畫書 §3.3.13 的兩個決定：
+**只吐 `<name>`**（不吐 `_center` / `_others`），以及 layer 名（`L17/D0`）
+一定要有一層固定的改寫規則。`max_boxes` 的上限要多大還缺真實資料的數字。
 
 **開工前讀**：[`AGENTS.md`](AGENTS.md) → [`docs/plans/F11-phase2-features.md`](docs/plans/F11-phase2-features.md)
 **§3.3.4**（Template）、**§3.3.11**（Profile 單方向）、
@@ -57,6 +60,40 @@ pieces 跟 rectangles 差多少還不知道** —— 差很大就證實「層被
 
 **還欠的一件（不屬於 Region 段）**：那張「比較兩個區域」的卡（計畫書 §3.3.6 的
 最後一段）。它屬於 **Measure** 段，不要插隊。今天比較是發生在分數表達式裡的。
+
+---
+
+### 第十二輪：Region-3 第 2 步 —— sidecar 進 ingest（同日）
+
+`ingest/glas_export.py`（配對）＋ `DefectItem.sidecars`（住哪裡）＋
+`steps/load_sidecar.py`（載成一條流），CLI 多一個 `--gds`。
+
+**附加檔不能放進 `DefectItem.images`。** `load_single` 的契約是「一顆一張」，
+而且它在一顆有兩張時**拒絕載入**（那個拒絕是對的）。label 混進去的話，每一顆
+RSEM defect 都會突然變成兩張而載不進來 —— 而錯誤訊息會**說謊**（「這顆有 2 張
+影像」；不，它有 1 張影像跟 1 個附加檔）。
+
+**兩個實測抓到的、會安靜出錯的地方：**
+
+1. **換一份匯出，快取不會失效。** 有 KLARF 的時候 `_dataset_token_for` 只看
+   KLARF 的 stat，而換 mask 目錄不會動到 KLARF —— 同一個 lot 換一份匯出，
+   token 一模一樣，影像段快取把**上一份算出來的框**餵回來。修法是把 sidecar 的
+   路徑 + mtime + size 折進 token，而**沒有 sidecar 時回空字串**，所以既有的
+   token 逐字元不變（黃金值與既有快取不受影響）。
+2. **`load_raw` 會安靜地把三通道合成灰階。** 對 SEM 影像是對的，對 label map
+   是致命的（像素值**是**層號）。而 GLAS 匯出時 `<id>_label.png` 旁邊就放著
+   三通道的 `<id>_label_view.png`。實測同一個檔：`load_raw` 給
+   `[0, 131, 159, 182]`（id 被混掉、沒有錯誤），`load_exact` 給 `ndim 3`。
+
+   **這一條最值得記**：我原本在卡片裡寫了「`ndim != 2` 就報錯」，而那段是**死的**
+   —— 通道早在讀檔那一層就被合掉了。**寫了一個檢查不等於那個檢查會執行。**
+   新增 `imageio.load_exact()`（原樣讀），附加檔走它。
+
+掛不上的那幾顆不是錯誤（GLAS 的分數門檻本來就會擋掉一些）：那一顆會失敗、講出
+**兩種可能的原因**，整批照跑。實測 8 顆的 lot：7 成功 1 失敗。
+
+20 條新測試。Studio 的「掛上匯出」入口還沒有（CLI 有），跟第 4 步的儀表一起做。
+計畫書 §3.3.15。
 
 ---
 

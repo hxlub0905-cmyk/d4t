@@ -50,6 +50,32 @@ def load_raw(path: str) -> np.ndarray:
     return img
 
 
+def load_exact(path: str) -> np.ndarray:
+    """Load an image **exactly as stored** — no channel collapse, no stretch.
+
+    為什麼 :func:`load_raw` 不夠（F11 Region-3 第 2 步，實測抓到的）
+    ---------------------------------------------------------------
+    ``load_raw`` 對三通道的輸入會 ``cvtColor(BGR2GRAY)``。對 SEM 影像那是對的
+    （彩色的 SEM 圖轉灰階不損失什麼），但對 **label map 是致命的**：那張圖的
+    像素值**是**層號，而 BGR 加權平均會把 1、2、3 混成一堆不存在的值 ——
+    **而且不會報錯**。
+
+    真實的風險不是假設的：GLAS 匯出時 ``<id>_label.png`` 旁邊就放著
+    ``<id>_label_view.png``（同一顆的三通道上色預覽）。指錯一個檔名，整批的
+    區域就會落在錯的地方，而畫面上每一個數字看起來都很正常。
+
+    所以附加檔走這一支，**通道數的判斷留給上層**（`steps/load_sidecar.py` 會
+    把三通道當成錯誤並講出它多半是哪個檔案）—— 讀檔這一層不准替使用者決定。
+    """
+    data = np.fromfile(path, dtype=np.uint8)
+    if data.size == 0:
+        raise IOError(f"could not read file: {path}")
+    img = cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
+    if img is None:
+        raise IOError(f"could not decode image: {path}")
+    return img
+
+
 def load_gray(path: str) -> np.ndarray:
     """Load an image as 8-bit single-channel grayscale (CJK-path safe).
 
