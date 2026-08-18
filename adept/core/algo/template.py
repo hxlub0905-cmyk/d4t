@@ -53,6 +53,7 @@ margin 0.01–0.24。**structure 這一關差了一個數量級**，另外兩關
 from __future__ import annotations
 
 import base64
+import math
 import zlib
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Tuple
@@ -420,31 +421,86 @@ def _fold_to_period(surface: np.ndarray, px: int, py: int) -> np.ndarray:
     return out
 
 
-def roi_in_patch(norm_rect: Tuple[float, float, float, float],
-                 match: MatchResult, cell_shape: Tuple[int, int],
-                 patch_shape: Tuple[int, int],
-                 periodic: Tuple[bool, bool] = (True, True),
-                 ) -> Tuple[int, int, int, int]:
-    """把「標在 GC 上的框」搬到 patch 上，回傳像素矩形 ``(x, y, w, h)``。
+def roi_boxes_in_patch(norm_rect: Tuple[float, float, float, float],
+                       match: MatchResult, cell_shape: Tuple[int, int],
+                       patch_shape: Tuple[int, int],
+                       periodic: Tuple[bool, bool] = (True, True),
+                       max_boxes: int = 64,
+                       ) -> List[Tuple[int, int, int, int]]:
+    """一個標在 cell 上的框 → 這張 patch 上**每一個**落點（裁進 patch）。
 
-    一個週期在 patch 裡可能出現好幾次，所以取**離 patch 中心最近**的那一個
-    —— 缺陷永遠在 patch 正中央，使用者標的框指的是「缺陷所在的那個 cell」。
+    為什麼是「每一個」而不是「離缺陷最近的那一個」
+    ----------------------------------------------
+    使用者標的是**重複結構上的一塊**（原話：「一個 layout 是橫向 EPI 跟直向 MG
+    交錯，我要的 ROI1 是 EPI 部分扣掉 MG 交集」）。那種東西在 patch 裡有幾份就
+    該量幾份 —— 只取離缺陷最近的一份，會在「cell 比 patch 小」的時候**只量到
+    一根 EPI，其餘的靜靜漏掉**。而那正是「跑得完、有數字、而且是錯的」。
+
+    這條規則同時涵蓋兩種大小關係，所以不必請使用者選：
+
+    * **cell 比 patch 大**（模板法的常態）—— 最多一份落得進來，可能還一份都沒有
+      （框標在 cell 的另一頭）。「一份都沒有」是正常的答案，不是失敗。
+    * **cell 比 patch 小** —— 每一份都畫，統計量因此問的是「這張圖上所有的
+      EPI」而不是「剛好在中間的那一根」。
+
+    相位以外的兩件事
+    ----------------
+    * **沒有週期的那一軸沒有相位可言** —— 框在那個方向取滿整張 patch，
+      硬給一個位置等於憑空捏造資訊（同 ``roi_profile`` 的 ``_band_rect``）。
+      所以 ``locate_axis="x"`` 的時候，框的 y／h **本來就不算數**。
+    * 超過 ``max_boxes`` 時留下**離 patch 中心最近**的那些 —— 缺陷在正中央
+      （同 ``roi_cross`` 的同名參數，兩張卡對這件事的說法要一致）。
     """
     cy, cx = int(cell_shape[0]), int(cell_shape[1])
     ph, pw = int(patch_shape[0]), int(patch_shape[1])
     nx, ny, nw, nh = (float(v) for v in norm_rect)
+    cap = max(1, int(max_boxes))
 
-    def place(cell_lo: float, cell_span: float, phase: int, period: int,
-              patch_len: int) -> Tuple[int, int]:
-        span = max(1.0, cell_span * period)
-        base = cell_lo * period - float(phase)      # k = 0 的位置
+    xs = (_copies(nx, nw, int(match.phase_x), cx, pw, cap)
+          if periodic[0] else [(0, pw)])
+    ys = (_copies(ny, nh, int(match.phase_y), cy, ph, cap)
+          if periodic[1] else [(0, ph)])
+
+    out: List[Tuple[int, int, int, int]] = []
+    for y, h in ys:
+        for x, w in xs:
+            # 落在 patch 外面的部分裁掉。一份可能有一半在框外 —— 那是正常的
+            # （缺陷靠邊時本來就會這樣），但剩下的必須還有像素可以量。
+            x0, y0 = max(0, x), max(0, y)
+            x1, y1 = min(pw, x + w), min(ph, y + h)
+            if x1 > x0 and y1 > y0:
+                out.append((x0, y0, x1 - x0, y1 - y0))
+
+    cxp, cyp = pw / 2.0, ph / 2.0
+    out.sort(key=lambda b: ((b[0] + b[2] / 2.0 - cxp) ** 2
+                            + (b[1] + b[3] / 2.0 - cyp) ** 2))
+    return out[:cap]
+
+
+def _copies(lo: float, span_frac: float, phase: int, period: int,
+            patch_len: int, cap: int) -> List[Tuple[int, int]]:
+    """一個軸上，這個框在 patch 裡的每一份 ``(起點, 長度)``。
+
+    ``base`` 是第 0 份的位置：``lo`` 講的是「從這一格的百分之幾開始」，而
+    ``phase`` 是這張 patch 的第 0 格從哪裡開始 —— 兩者相減就是像素座標。
+    """
+    period = max(1, int(period))
+    span = max(1, int(round(float(span_frac) * period)))
+    base = float(lo) * period - float(phase)
+
+    # 重疊條件：``base + k*period + span > 0`` 且 ``base + k*period < patch_len``。
+    # 邊界用 floor/ceil 各放寬一格再過濾，省得跟浮點的邊界情況纏鬥。
+    k_lo = int(math.floor((-span - base) / period)) - 1
+    k_hi = int(math.ceil((patch_len - base) / period)) + 1
+    hits = []
+    for k in range(k_lo, k_hi + 1):
+        start = int(round(base + k * period))
+        if start + span > 0 and start < patch_len:
+            hits.append((start, span))
+
+    if len(hits) > cap:
+        # 細到放不下的時候留中間那些 —— 缺陷在正中央（同 ``roi_cross``）。
         centre = patch_len / 2.0
-        k = round((centre - span / 2.0 - base) / float(period))
-        lo = base + k * period
-        return int(round(lo)), int(round(span))
-
-    # 沒有週期的那一軸沒有相位可言 —— 框在那個方向取滿整張 patch，
-    # 硬給一個位置等於憑空捏造資訊（同 roi_profile 的 _band_rect）。
-    x, w = place(nx, nw, match.phase_x, cx, pw) if periodic[0] else (0, pw)
-    y, h = place(ny, nh, match.phase_y, cy, ph) if periodic[1] else (0, ph)
-    return (x, y, w, h)
+        hits.sort(key=lambda t: abs(t[0] + t[1] / 2.0 - centre))
+        hits = sorted(hits[:cap])
+    return hits

@@ -390,6 +390,19 @@ def roi_rect_or_none(ctx, step_key: str, image, roi_name):
         # 具名 ROI 存的是正規化座標，一樣需要尺寸才展得開
         return None if shape is None else ctx.roi_rect(name, shape)
     # 具名 ROI 打錯字要講清楚，不要安靜地量整張圖
+    #
+    # 但「打錯字」不是唯一的原因：模板定位的區域可能**這一顆剛好沒落上**
+    # （模板比 patch 大，這張 patch 只看得到 cell 的一部分）。那時候叫使用者
+    # 「加一張 ROI 卡」是把他送去修一個沒有壞的東西 —— 定位卡把真正的原因寫在
+    # ``meta["regions_absent"]``，這裡照它說的講。
+    absent = (ctx.meta.get("regions_absent") or {}) if hasattr(ctx, "meta") else {}
+    if name in absent:
+        raise StepError(step_key,
+                        "region '%s' is not on this defect: %s. Regions that "
+                        "only appear on some defects cannot be measured on all "
+                        "of them - use the region's '_present' feature to tell "
+                        "those defects apart."
+                        % (name, absent[name]))
     raise StepError(step_key,
                     "region '%s' is not defined; available: %s. Add an ROI "
                     "card upstream, or leave roi empty for the whole image."

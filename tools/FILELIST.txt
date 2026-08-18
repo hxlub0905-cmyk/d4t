@@ -24,7 +24,7 @@ c8a612c072ba3616d22e6f7b2ae7238bd454c835 adept/core/algo/quality.py
 a9735c3dcf54c6115467af9b4bc3f21838fe58d0 adept/core/algo/roi.py
 ac1c581984cef7d1af53288415f759fb8006172f adept/core/algo/snr.py
 04dc4d589bd054b14d86e30bb3a8e8d894128755 adept/core/algo/subpixel.py
-61ccab417e918d137718964b4a6fc9acead1c433 adept/core/algo/template.py
+c784f67dfc4960ed52417ad05e6d39e6b42402b3 adept/core/algo/template.py
 dcec5abad8375953a68b55b4ac771958207f81bb adept/core/calibration.py
 680d3068c7df905729e015573e65b51c5a96b010 adept/core/export/__init__.py
 feac449979828c3ee6861b614fd47566e67b9e8f adept/core/export/klarf_out.py
@@ -38,15 +38,16 @@ eb269657a9bf68e680224ff26e4230b30df9e500 adept/core/ingest/imageio.py
 03146deb543fddc5cc836c039652a15f5492935d adept/core/pipeline/__init__.py
 f277b6b3e5e65ce8027da01648a0d42d44a64905 adept/core/pipeline/batch.py
 d6a6e8374dba3679cc6c28dd534ece76923f6ce2 adept/core/pipeline/cache.py
+7cceaed14cb312b024c69602ab230ce2dbb4723f adept/core/pipeline/cellrois.py
 8d96fd361dcb6e1b81e34bf3ce9f355de654eaec adept/core/pipeline/channels.py
 bc5822860c73a424460de963c0a7ef1b940bd71e adept/core/pipeline/context.py
-8a8f906147c0b06defc52096716ecfd917b0b94e adept/core/pipeline/curve.py
+e23539efe8cfae76911201bb5b37e0d6dbfde404 adept/core/pipeline/curve.py
 fc722ec0cd455df588db69706af5f94d18708030 adept/core/pipeline/engine.py
 6c3c9c1cc1e6d1ee5d121f9994968f4f780e3cc5 adept/core/pipeline/expression.py
-a67c8864d79d54275827939e9078f4cc495d7d3d adept/core/pipeline/recipe.py
-de39f26189b5683573e91eb15042e5cebc0c8fd3 adept/core/pipeline/step.py
+55fd085e29222f11f09554dc0fd9dbf32a08ce4b adept/core/pipeline/recipe.py
+762bea6d1835841e0840279522cc41119522d9a0 adept/core/pipeline/step.py
 596cea13ec15f5ec7517c955111d58804910bee8 adept/core/steps/__init__.py
-7f372a9f75af9e0fa3b67ff4436a48497ed2f509 adept/core/steps/_util.py
+9dd51186fdb4bc668e76da993e72ec0ab122394e adept/core/steps/_util.py
 68eceaa2cadaffb76b71c8dfc2e2984d9f4bbf5e adept/core/steps/align.py
 bfa0e9b6bfc6a5d7299f439fd43d705eda5832b2 adept/core/steps/arith.py
 aff2d033bbb51e2190ad437ec0f9de6b25d27ebc adept/core/steps/cd.py
@@ -60,7 +61,7 @@ ec3f5caf078d2a81bcbe468c825bd51f2b9d0268 adept/core/steps/normalize.py
 1e590f649e543ec189887d8bceb083c3f8aa4bd4 adept/core/steps/roi_cross.py
 0a5ea6c0dbf15c2e32cd2475a3737b2137d1f4cf adept/core/steps/roi_mask.py
 e8269fc1744fd1bf8d3dd62eb5d96d8712962c79 adept/core/steps/roi_snr.py
-4e7dd553c01b826338266e535af08f42f4351990 adept/core/steps/roi_template.py
+929c658c788f11b8e30a6a2dd270b28502a9435d adept/core/steps/roi_template.py
 1ff626dd992689b11aa96c5c1e1ab3bbd585036c adept/core/steps/snr_map.py
 fd783eb54860de0b9462c6238eeb72aea1657222 adept/core/steps/tone.py
 0e7d37674a365b4c5292ba728f7da61b0aba6b08 adept/core/store/__init__.py
@@ -112,6 +113,7 @@ fc105693a52e53f5b37b6c009a1456b9acd8e80f tests/test_align.py
 c3c815b143149244f93625a14f84421268d0dd0a tests/test_batch_thread_safety.py
 fce64e2110a74db0e23c9aeda3eec7d2282af53a tests/test_calibration.py
 f1c048d012bd7aec54e09b2e0fc9724dcb9f45c2 tests/test_card_invariants.py
+8d7d5f1b6a4a778ea7fdcfdf65854b6a40072876 tests/test_cell_rois.py
 66dac80309d206fba4fb93a3c568c5977af1ec5f tests/test_curve.py
 4b555a9fe3fc98fb1489b2e3b5d1d25d58f1d952 tests/test_dag_branching.py
 1be97f704f93ae3ebc989a569b9e04cd1de639aa tests/test_dataset.py
@@ -156,7 +158,7 @@ f90b258ab8544e5eadc1b54b55ff558db1cc3041 tests/test_results_store.py
 6cf3b8f8b609435492244c25f7fc2e541311812a tests/test_roi_cross_phase.py
 73b404b73641a5b93cbf48a17111a03b7e4a1435 tests/test_roi_cross_trust.py
 7de409dc5d1324a6db52ddc4308f6be32838dfd9 tests/test_roi_mask.py
-a7c41debc132957219cb7a9187a4cb7efe1d3317 tests/test_roi_template.py
+42667b4287f936a798c9be8f5ac9690cd8630de1 tests/test_roi_template.py
 87d20a22f4495441d5f75bed6265c1b6602b9d45 tests/test_rsem_ingest.py
 99687acf0a8aae0d2c88f7fca293cfad2e31c7b5 tests/test_snr.py
 76e47c0530fe6369dd3afc98f74c71aa9666906f tests/test_steps.py

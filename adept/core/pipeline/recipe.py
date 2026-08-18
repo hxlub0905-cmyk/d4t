@@ -315,6 +315,38 @@ def _migrate_renamed_values(nodes: Dict[str, "RecipeNode"]) -> None:
                                     enabled=node.enabled)
 
 
+def _migrate_template_regions(nodes: Dict[str, "RecipeNode"]) -> None:
+    """``roi_template`` 的一框一區域 → ``regions`` 字串（F11 Region-1）。
+
+    舊的：``roi_out="epi"`` ＋ ``roi_x/y/w/h`` 四個數字（一張卡只框得出一個矩形）。
+    新的：``regions="epi: 0.35,0,0.2,1"``（一張卡好幾個區域，每個好幾個矩形）。
+
+    ⚠ 判準是**舊東西在不在**（``roi_out`` 有沒有出現），不是「新東西不在」
+    （鐵則 9）。後者分不出「舊檔案靠舊預設」與「新 recipe 的區域剛好還沒標」
+    —— 而 ``to_json_dict → from_json_dict`` 是 ``run_batch`` 送 recipe 進 worker
+    的路，它一旦不是 identity，``workers=1`` 與 ``workers=2`` 就會算出不同的分數。
+
+    四個座標**沒有**預設值可以靠：舊卡的預設是整格（0,0,1,1），所以缺哪一個就
+    補那一個的舊預設，結果與舊版逐位元組相同。
+    """
+    from .cellrois import format_cell_rois
+
+    old_defaults = {"roi_x": 0.0, "roi_y": 0.0, "roi_w": 1.0, "roi_h": 1.0}
+    for nid, node in list(nodes.items()):
+        if node.step != "roi_template" or "roi_out" not in node.params:
+            continue
+        params = dict(node.params)
+        name = str(params.pop("roi_out", "") or "").strip()
+        box = tuple(float(params.pop(k, d) or 0.0)
+                    for k, d in old_defaults.items())
+        for k in old_defaults:
+            params.pop(k, None)
+        if name and box[2] > 0.0 and box[3] > 0.0:
+            params["regions"] = format_cell_rois([(name, [box])])
+        nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
+                                enabled=node.enabled)
+
+
 #: 單張影像的 route（一顆一張圖）—— 這幾條上的 `load_patch` 要換成 `load_single`。
 _SINGLE_IMAGE_KINDS = ("rsem", "folder")
 
@@ -512,6 +544,8 @@ class Recipe:
         _migrate_renamed_values(nodes)
         # Input 卡按 source 拆成兩張之後，單張影像那條 route 要換卡（F11 Input-4）。
         _migrate_split_load_cards(nodes, routes)
+        # roi_template 的一框一區域 → regions 字串（F11 Region-1）。
+        _migrate_template_regions(nodes)
         return cls(
             recipe_id=str(d["recipe_id"]),
             routes=routes,

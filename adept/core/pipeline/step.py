@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Dict, List, Optional, Type
 
 from .context import Context
+from .cellrois import CellRoiError, format_cell_rois, parse_cell_rois
 from .channels import ChannelMapError, format_channel_map, parse_channel_map
 from .curve import CurveError, format_curve, parse_curve
 
@@ -81,7 +82,7 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC)
 #: UI 認得這個型別：它給的是「建一個」的按鈕加一行摘要，欄位本身唯讀。
 PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
                "image_keys", "curve", "template", "multi_choice",
-               "channel_map")
+               "channel_map", "cell_rois")
 
 #: 輸出流的名字可以用哪些字（F10-7）。
 #:
@@ -274,6 +275,10 @@ class ParamSpec:
                 # 擋在這裡而不是等 run() 才炸（鐵則 4）。順便正規化：
                 # 排序、去空白、統一小數位 —— 手打的字串與 UI 拉出來的一樣。
                 v = format_curve(parse_curve(value))
+            elif self.type == "cell_rois":
+                # 同上：擋在打字的當下，並正規化成「四位小數、去尾數零」——
+                # round-trip 要是 identity（見 cellrois.format_cell_rois）。
+                v = format_cell_rois(parse_cell_rois(value))
             elif self.type == "channel_map":
                 # 同上：擋在打字的當下，並正規化成「依頁碼排序、", " 分隔」
                 # —— round-trip 要是 identity（見 channels.format_channel_map）。
@@ -288,7 +293,7 @@ class ParamSpec:
                 raise ParamError(f"parameter '{self.name}': unknown type")
         except ParamError:
             raise
-        except (CurveError, ChannelMapError) as exc:
+        except (CurveError, ChannelMapError, CellRoiError) as exc:
             # 這兩個的訊息已經是白話的，別被下面的通用訊息蓋掉
             raise ParamError(f"parameter '{self.name}': {exc}") from None
         except (TypeError, ValueError):
