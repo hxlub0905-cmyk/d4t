@@ -2044,10 +2044,16 @@ class ParamForm(QWidget):
 
     def set_step(self, describe: Optional[Dict[str, Any]],
                  current_params: Optional[Dict[str, Any]] = None,
-                 stream_choices: Optional[Sequence[str]] = None) -> None:
-        """重建表單。``describe=None`` -> 顯示提示語（未選節點）。"""
+                 stream_choices: Optional[Sequence[str]] = None,
+                 region_choices: Optional[Sequence[str]] = None) -> None:
+        """重建表單。``describe=None`` -> 顯示提示語（未選節點）。
+
+        ``region_choices`` 是**上游定義了哪些具名區域**（F11 Region-1）。
+        跟 ``stream_choices`` 同一個理由：那些名字程式知道，就不該讓使用者用打的。
+        """
         current_params = dict(current_params or {})
         streams = [str(s) for s in (stream_choices or [])]
+        self._regions = [str(r) for r in (region_choices or [])]
         self._describe = describe
         self._building = True
         try:
@@ -2333,6 +2339,15 @@ class ParamForm(QWidget):
             # 那條線與這裡的勾選很容易對不起來（使用者的原話是「他會很亂連」）。
             # 現在這一格只**顯示**目前接進來的是哪幾條，改要回畫布上拉線。
             return _wiring_display("" if value is None else str(value))
+
+        if ptype == "region_keys":
+            # 上游定義了哪些區域，程式知道 —— 所以這裡是勾的，不是打的。
+            # 要打的字必須跟上游卡片的輸出**一字不差**，而打錯的時候 lint 要跑
+            # 一次才講（F11 §3.3.1 第 4 項）。
+            w = MultiChoicePicker(getattr(self, "_regions", []),
+                                  "" if value is None else str(value))
+            w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
+            return w
 
         if ptype == "multi_choice":
             w = MultiChoicePicker([str(c) for c in (spec.get("choices") or [])],

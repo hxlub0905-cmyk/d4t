@@ -82,7 +82,7 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC)
 #: UI 認得這個型別：它給的是「建一個」的按鈕加一行摘要，欄位本身唯讀。
 PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
                "image_keys", "curve", "template", "multi_choice",
-               "channel_map", "cell_rois")
+               "channel_map", "cell_rois", "region_keys")
 
 #: 輸出流的名字可以用哪些字（F10-7）。
 #:
@@ -258,7 +258,7 @@ class ParamSpec:
                     v = bool(value)
             elif self.type in ("str", "image_key", "template"):
                 v = str(value)
-            elif self.type in ("image_keys", "multi_choice"):
+            elif self.type in ("image_keys", "multi_choice", "region_keys"):
                 # 正規化：去空白、去空項、去重複但保留順序。
                 # 手打的 "ref, ref ,, test" 與 UI 勾出來的 "ref,test" 等價，
                 # 存進 recipe 的字串才不會因為輸入方式不同而長得不一樣。

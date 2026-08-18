@@ -2157,7 +2157,9 @@ class StudioWindow(QMainWindow):
         except KeyError:
             describe = None
         streams = self.model.available_streams(before_node=node_id)
-        self.param_form.set_step(describe, node.params, streams)
+        self.param_form.set_step(
+            describe, node.params, streams,
+            self.model.available_regions(before_node=node_id))
         self.stack.setCurrentWidget(self.param_form)
         self._refresh_region_button()
         self._install_inspector(node.step)     # 右下角換成這張卡的儀表（F7-17）
@@ -2407,7 +2409,8 @@ class StudioWindow(QMainWindow):
             return                       # 區域名不能當變數名 -> 安靜跳過
         self.param_form.set_step(
             get_step(node.step).describe(), node.params,
-            self.model.available_streams(before_node=node_id))
+            self.model.available_streams(before_node=node_id),
+            self.model.available_regions(before_node=node_id))
         self._status("Results from this card will be named “%s_…” so they do "
                      "not collide with another card measuring a different "
                      "region." % wanted)
@@ -3023,7 +3026,8 @@ class StudioWindow(QMainWindow):
         node = self.model.nodes[node_id]
         self.param_form.set_step(
             get_step(node.step).describe(), node.params,
-            self.model.available_streams(before_node=node_id))
+            self.model.available_streams(before_node=node_id),
+            self.model.available_regions(before_node=node_id))
         names = region_names(str(regions))
         self._status(
             "Template stored in this recipe — it repeats along %s. %s"
@@ -3159,7 +3163,8 @@ class StudioWindow(QMainWindow):
         node = self.model.nodes.get(nid)
         self.param_form.set_step(
             get_step(node.step).describe(), node.params,
-            self.model.available_streams(before_node=nid))
+            self.model.available_streams(before_node=nid),
+            self.model.available_regions(before_node=nid))
         if refused:
             # 拒絕的那一半是**主角**：它講的是「這批 patch 自己不同意」，
             # 而那正是 kinds 沒設對的樣子。填了的也要一起講 —— 只報壞消息
@@ -3190,7 +3195,8 @@ class StudioWindow(QMainWindow):
         if node is not None:
             self.param_form.set_step(
                 get_step(node.step).describe(), node.params,
-                self.model.available_streams(before_node=nid))
+                self.model.available_streams(before_node=nid),
+                self.model.available_regions(before_node=nid))
 
     def _on_measure(self, axis: str, start: float, end: float) -> None:
         """曲線面板上按著量測尺 → 影像上標出同一段（F8）。
