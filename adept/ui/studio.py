@@ -102,6 +102,7 @@ from PySide6.QtWidgets import (
 
 import adept.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
 from adept.core.pipeline import ParamError, Recipe, get_step, list_steps
+from adept.core.pipeline.cellrois import region_names
 from adept.core.pipeline.recipe import version_skew
 
 from .export_dialog import ExportDialog
@@ -2961,30 +2962,61 @@ class StudioWindow(QMainWindow):
         return bool(node is not None and node.step == self.TEMPLATE_STEP)
 
     def _on_param_action(self, param_name: str) -> None:
-        """某個參數說「我的值要用別的方式產生」（目前只有模板）。"""
-        if str(param_name) == "template":
+        """某個參數說「我的值要用別的方式產生」。
+
+        模板與區域是**同一個對話框**：框的座標相對於那一格 cell，所以少了 cell
+        那張圖，四個數字沒有意義（F11 Region-1）。兩個參數各有一顆按鈕，但按下去
+        去的是同一個地方。
+        """
+        if str(param_name) in ("template", "regions"):
             self.open_template_dialog()
 
     def open_template_dialog(self) -> Optional[Any]:
-        """開「從大圖建模板」對話框；接受之後把模板寫回這張卡。"""
+        """開「模板與區域」對話框；接受之後把兩者一起寫回這張卡。"""
         if not self.template_build_available():
             self._status("Select a Locate region by template card first.", "error")
             return None
         node_id = self.selected_node
+        node = self.model.nodes[node_id]
         dlg = TemplateDialog(self)
-        dlg.accepted_template.connect(
-            lambda text, axis, nid=node_id: self._apply_template(nid, text, axis))
+        # 已經有模板就**讀回來**，不要逼使用者重挑一張大圖 —— 重建會重算相位，
+        # 而相位一變，他標好的框就全部平移了（見 TemplateDialog.load_encoded）。
+        dlg.load_encoded(str(node.params.get("template", "") or ""),
+                         str(node.params.get("locate_axis", "x") or "x"))
+        dlg.set_regions_text(str(node.params.get("regions", "") or ""))
+        dlg.set_patch_size(self._preview_patch_size())
+        dlg.accepted_setup.connect(
+            lambda text, axis, regions, nid=node_id:
+            self._apply_template(nid, text, axis, regions))
+        dlg.check_across_requested.connect(self.open_region_check)
         self.template_dialog = dlg
         dlg.show()
         return dlg
 
-    def _apply_template(self, node_id: str, text: str, axis: str) -> None:
-        """把疊好的模板寫進卡片參數（連同它適用的方向）。"""
+    def _preview_patch_size(self) -> Optional[Any]:
+        """目前這一顆 patch 有多大（``(h, w)``）—— 不知道就 ``None``。
+
+        畫布拿它畫「一顆 defect 看得到多少」。**不知道就不畫**：畫一個猜出來的
+        窗比不畫更糟，使用者會照著那個窗決定哪些區域標得到。
+        """
+        res = getattr(self, "_last_result", None)
+        images = dict(getattr(res, "images", None) or {}) if res is not None else {}
+        for key in ("ref", "test"):
+            img = images.get(key)
+            if img is not None and getattr(img, "size", 0):
+                shape = img.shape[:2]
+                return (int(shape[0]), int(shape[1]))
+        return None
+
+    def _apply_template(self, node_id: str, text: str, axis: str,
+                        regions: str = "") -> None:
+        """把疊好的模板與畫好的區域一起寫進卡片參數。"""
         if node_id not in self.model.nodes:
             return
         try:
             self.model.set_param(node_id, "template", str(text))
             self.model.set_param(node_id, "locate_axis", str(axis))
+            self.model.set_param(node_id, "regions", str(regions))
         except ParamError as e:
             self._status("Could not store the template: %s" % e, "error")
             return
@@ -2992,9 +3024,13 @@ class StudioWindow(QMainWindow):
         self.param_form.set_step(
             get_step(node.step).describe(), node.params,
             self.model.available_streams(before_node=node_id))
-        self._status("Template stored in this recipe — it repeats along %s. "
-                     "Now mark the region on the cell with the Region "
-                     "left/top/width/height sliders." % axis)
+        names = region_names(str(regions))
+        self._status(
+            "Template stored in this recipe — it repeats along %s. %s"
+            % (axis,
+               ("Regions: %s. Use “Check this region across defects…” to see "
+                "whether they hold for the whole batch." % ", ".join(names))
+               if names else "No regions drawn yet — this card cannot run."))
         self._schedule_preview()
 
     def region_check_available(self) -> bool:

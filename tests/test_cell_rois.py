@@ -86,3 +86,45 @@ def test_a_box_may_straddle_the_seam():
 def test_region_names_stays_quiet_on_a_half_typed_value():
     """宣告用的那一支不准拋 —— 打到一半的時候畫布不能整個消失。"""
     assert region_names("epi: 0,0,") == []
+
+
+# --------------------------------------------------------------------------- #
+# multi add —— 一次長出一整片等距的框
+# --------------------------------------------------------------------------- #
+def test_an_array_is_evenly_spaced_between_the_two_anchors():
+    """間距是**算**出來的，不是拖出來的 —— pitch 是設計常數。"""
+    from adept.core.pipeline.cellrois import array_boxes
+
+    boxes = array_boxes((0.1, 0.5), (0.7, 0.5), 0.05, 0.4, nx=4, ny=1)
+    assert len(boxes) == 4
+    centres = [b[0] + b[2] / 2.0 for b in boxes]
+    assert centres[0] == pytest.approx(0.1)
+    assert centres[-1] == pytest.approx(0.7)
+    gaps = [b - a for a, b in zip(centres, centres[1:])]
+    assert all(g == pytest.approx(gaps[0]) for g in gaps)
+
+
+def test_an_array_of_one_sits_on_the_first_anchor():
+    """n=1 沒有「間距」可言 —— 不要除以零，也不要偷偷變成兩個。"""
+    from adept.core.pipeline.cellrois import array_boxes
+
+    boxes = array_boxes((0.3, 0.4), (0.9, 0.8), 0.2, 0.2, nx=1, ny=1)
+    assert len(boxes) == 1
+    assert boxes[0] == pytest.approx((0.2, 0.3, 0.2, 0.2))
+
+
+def test_a_two_dimensional_array_is_the_product():
+    from adept.core.pipeline.cellrois import array_boxes
+
+    boxes = array_boxes((0.1, 0.1), (0.9, 0.9), 0.1, 0.1, nx=4, ny=3)
+    assert len(boxes) == 12
+    assert len({round(b[1], 6) for b in boxes}) == 3
+
+
+def test_an_array_round_trips_through_the_recipe_string():
+    """編輯器長出來的東西要存得進 recipe（也就是要過 parse 的每一條規則）。"""
+    from adept.core.pipeline.cellrois import array_boxes
+
+    text = format_cell_rois([("epi", array_boxes(
+        (0.1, 0.5), (0.7, 0.5), 0.05, 0.4, nx=4, ny=1))])
+    assert len(parse_cell_rois(text)[0][1]) == 4

@@ -854,10 +854,19 @@ class TemplateInspector(Inspector):
               ("structure", "structure", "min_structure", 40.0))
 
     def record(self) -> Dict[str, Any]:
+        """這張卡的比對結果（三道閘門的值對每個區域都一樣，取第一個就好）。
+
+        一張卡現在可以標好幾個區域（F11 Region-1），而**比對是一張卡一次**——
+        分數、確定度、結構都是 patch 對模板的性質，跟哪個區域無關。所以這裡取
+        這張卡自己的第一個區域，不是「唯一那個」。
+        """
+        from adept.core.pipeline.cellrois import region_names
+
         templates = dict(self.meta.get("templates") or {})
-        name = str(self.params.get("roi_out") or "")
-        return dict(templates.get(name) or (
-            list(templates.values())[0] if len(templates) == 1 else {}))
+        for name in region_names(self.params.get("regions", "")):
+            if name in templates:
+                return dict(templates[name])
+        return dict(list(templates.values())[0] if len(templates) == 1 else {})
 
     def has_data(self) -> bool:
         return bool(self.record())
@@ -866,6 +875,9 @@ class TemplateInspector(Inspector):
         if not str(self.params.get("template") or "").strip():
             return ("No template yet — build one from a full-size image, then "
                     "this panel shows why each defect did or did not match.")
+        if not str(self.params.get("regions") or "").strip():
+            return ("No regions drawn on the cell yet — open “Edit template & "
+                    "regions…” and draw at least one.")
         return "Select a defect to see how well it matched the template."
 
     def gates(self) -> List[Tuple[str, float, float, bool]]:

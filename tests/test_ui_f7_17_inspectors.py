@@ -503,7 +503,7 @@ def test_it_reads_the_engine_verdict_end_to_end(window, tmp_path):
         img[:, x + 32:x + 36] = 210.0
     img += np.random.default_rng(0).normal(0, 4, img.shape).astype(np.float32)
     window._apply_template(nid, at.encode_cell(at.build_golden_cell(img).cell),
-                           "x")
+                           "x", "epi: 0.35,0,0.2,1")
     assert window.refresh_preview(sync=True) is True
 
     insp = window.inspector()

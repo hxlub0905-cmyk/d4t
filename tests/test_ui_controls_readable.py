@@ -185,10 +185,14 @@ def test_a_card_that_cannot_run_is_marked_on_the_canvas(window):
 
     item = window.pipeline.node_item(nid)
     assert item is not None
-    assert "Build template" in item.problem()
-    assert "Build template" in item.toolTip()
+    assert "Edit template & regions" in item.problem()
+    assert "Edit template & regions" in item.toolTip()
 
+    # 有模板但還沒畫框仍然跑不了 —— 而那要講成第二句話，不是同一句
     window._apply_template(nid, _a_template(), "x")
+    assert "no regions marked" in window.pipeline.node_item(nid).problem()
+
+    window._apply_template(nid, _a_template(), "x", "epi: 0.1,0,0.3,1")
     assert window.pipeline.node_item(nid).problem() == ""
     assert [i.code for i in window.model.validate() if i.node_id == nid] == []
 

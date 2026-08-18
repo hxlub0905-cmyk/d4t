@@ -48,7 +48,8 @@ from typing import List, Sequence, Tuple
 from .curve import format_number
 
 __all__ = ["CellRoiError", "Region", "Box", "parse_cell_rois",
-           "format_cell_rois", "region_names", "MAX_REGIONS", "MAX_BOXES"]
+           "format_cell_rois", "region_names", "array_boxes",
+           "MAX_REGIONS", "MAX_BOXES"]
 
 #: 一個框：``(x, y, w, h)``，相對於一個 cell（0–1）。
 Box = Tuple[float, float, float, float]
@@ -198,3 +199,39 @@ def region_names(text: object) -> List[str]:
         return [name for name, _boxes in parse_cell_rois(text)]
     except CellRoiError:
         return []
+
+
+def array_boxes(first_centre: Tuple[float, float],
+                last_centre: Tuple[float, float],
+                box_w: float, box_h: float,
+                nx: int, ny: int) -> List[Box]:
+    """一次長出一整片**等距**的框（編輯器的 multi add）。
+
+    為什麼要這個工具
+    ----------------
+    使用者要的區域是「整排 EPI」這種東西 —— 一根一根拉，第 20 根的時候間距
+    已經歪掉了，而歪掉的框在畫面上看不太出來，在數字上看得出來。等距這件事
+    是**設計常數**（pitch），所以它該由兩個端點算出來，不是拖出來。
+
+    參數的形狀照使用者定的：兩個錨點（左上那格的中心、右下那格的中心）、
+    框的大小、以及**兩個錨點之間有幾個框**（含頭尾）。所以間距 = 端點距離 ÷
+    (n − 1)，而不是另外再輸入一個 pitch —— 端點看得見、pitch 看不見。
+
+    座標全部是「相對於一格」的 0–1（跟 :func:`parse_cell_rois` 同一個單位）。
+    """
+    nx, ny = max(1, int(nx)), max(1, int(ny))
+    x1, y1 = float(first_centre[0]), float(first_centre[1])
+    x2, y2 = float(last_centre[0]), float(last_centre[1])
+    w, h = float(box_w), float(box_h)
+
+    def centres(a: float, b: float, n: int) -> List[float]:
+        if n <= 1:
+            return [a]
+        step = (b - a) / float(n - 1)
+        return [a + step * i for i in range(n)]
+
+    out: List[Box] = []
+    for cy in centres(y1, y2, ny):
+        for cx in centres(x1, x2, nx):
+            out.append((cx - w / 2.0, cy - h / 2.0, w, h))
+    return out

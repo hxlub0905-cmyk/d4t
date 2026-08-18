@@ -1807,12 +1807,13 @@ class TemplateField(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(3)
 
-        self.button = QPushButton("Build template from a full-size image…", self)
+        self.button = QPushButton("Edit template & regions…", self)
         self.button.setProperty("variant", "secondary")
         self.button.setToolTip(
-            "Measure the repeating cell from one full-size image and store it "
-            "inside this recipe. The image is only needed here — the recipe "
-            "stays a single file you can hand to someone else.")
+            "Measure the repeating cell from one full-size image, then draw "
+            "the regions on that cell. Both are stored inside this recipe — "
+            "the image is only needed here, so the recipe stays a single "
+            "file you can hand to someone else.")
         self.button.clicked.connect(self.build_requested.emit)
         lay.addWidget(self.button, 0, Qt.AlignLeft)
 
@@ -1836,8 +1837,8 @@ class TemplateField(QWidget):
             "color:%s; font-size:11px;%s"
             % (TOKENS["text_hint"] if self.has_template() else TOKENS["danger_text"],
                "" if self.has_template() else " font-weight:600;"))
-        self.button.setText("Build template from a full-size image…"
-                            if not self._value else "Rebuild template…")
+        self.button.setText("Build template & regions…" if not self._value
+                            else "Edit template & regions…")
 
     def has_template(self) -> bool:
         return bool(self._value.strip())
@@ -1858,8 +1859,77 @@ class TemplateField(QWidget):
                     "Build it again.")
         h, w = cell.shape[:2]
         return ("Stored in this recipe: one cell of %d × %d px (%.1f kB of "
-                "text). Mark the region on it with the four Region sliders "
-                "below." % (w, h, len(self._value) / 1024.0))
+                "text). The regions below are drawn on it." 
+                % (w, h, len(self._value) / 1024.0))
+
+
+class CellRoisField(QWidget):
+    """``cell_rois`` 參數的編輯器：一顆按鈕 + 現在標了什麼（F11 Region-1）。
+
+    為什麼是**唯讀**的摘要而不是文字框
+    ----------------------------------
+    同 ``image_key`` 那條（F9-6，使用者定調「他會很亂連」）：框的來源只有一個
+    —— 畫在 cell 上。給它一個文字框的話同一件事有兩個入口，而兩邊很容易對不
+    起來；更糟的是那串字的座標**相對於一格 cell**，離開那張圖就沒有意義，
+    所以打得進去的自由文字正是最容易打出「跑得完、有數字、而且是錯的」的地方。
+
+    唯讀不等於藏起來：這一格仍然要看得到現在標了哪些區域、各幾塊。
+    """
+
+    edit_requested = Signal()
+
+    _EMPTY = "No regions yet — this card cannot run until you draw one."
+
+    def __init__(self, value: str = "", parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(3)
+
+        self.button = QPushButton("Draw regions on the cell…", self)
+        self.button.setProperty("variant", "secondary")
+        self.button.setToolTip(
+            "The boxes are drawn on the repeating cell, not on a patch: they "
+            "have to hold for the whole batch, and a patch is a different crop "
+            "for every defect.")
+        self.button.clicked.connect(self.edit_requested.emit)
+        lay.addWidget(self.button, 0, Qt.AlignLeft)
+
+        self.summary = QLabel("", self)
+        self.summary.setObjectName("paramHint")
+        self.summary.setWordWrap(True)
+        lay.addWidget(self.summary)
+
+        self._value = ""
+        self.set_text(value)
+
+    def text(self) -> str:
+        return self._value
+
+    def set_text(self, value: str) -> None:
+        self._value = str(value or "")
+        self.summary.setText(self.describe())
+        self.summary.setStyleSheet(
+            "color:%s; font-size:11px;%s"
+            % (TOKENS["text_hint"] if self.has_regions() else TOKENS["danger_text"],
+               "" if self.has_regions() else " font-weight:600;"))
+
+    def has_regions(self) -> bool:
+        return bool(self._value.strip())
+
+    def describe(self) -> str:
+        """**摘要是解出來的，不是記在旁邊的** —— 記在旁邊的會跟真正的值走散。"""
+        if not self.has_regions():
+            return self._EMPTY
+        from ..core.pipeline.cellrois import CellRoiError, parse_cell_rois
+
+        try:
+            regions = parse_cell_rois(self._value)
+        except CellRoiError as e:
+            return "These regions cannot be read back: %s" % e
+        return "  ·  ".join(
+            "%s (%d rectangle%s)" % (n, len(b), "" if len(b) == 1 else "s")
+            for n, b in regions)
 
 
 class ParamForm(QWidget):
@@ -2274,6 +2344,12 @@ class ParamForm(QWidget):
             w = ChannelMapField("" if value is None else str(value),
                                 min_rows=self._image_count)
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
+            return w
+
+        if ptype == "cell_rois":
+            w = CellRoisField("" if value is None else str(value))
+            # 值不是在這裡編的（框畫在 cell 上）——按鈕只是把請求往上送。
+            w.edit_requested.connect(lambda n=name: self.action_requested.emit(n))
             return w
 
         if ptype == "template":
