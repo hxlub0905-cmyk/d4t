@@ -784,3 +784,111 @@ def test_the_two_sets_of_stripe_settings_disappear_with_the_direction():
     assert specs["horizontal_sensitivity"].show_when == ("directions",
                                                          ("both", "flat"))
     assert specs["smooth"].show_when is None      # 共用的那一顆留著
+
+
+# --------------------------------------------------------------------------- #
+# 靠邊的框不要（F11 Region 第八輪，使用者要求）—— 兩張 Region 卡共用
+# --------------------------------------------------------------------------- #
+"""使用者：「Profile 跟 Template 都幫我 gen 一個 checkbox（可勾選要不要使用的），
+功能是靠近邊界 n pixel 內的 ROI box 會被自動拿掉。」
+
+一個框壓在 patch 邊上，量到的是**半截的**那一塊：像素少、而且少掉的是同一側的
+那一半。它照樣吐得出一個看起來完全正常的灰階值，而它會混進 `<name>_others`
+那個基準裡。
+
+這一段斷言三件會出錯而且不會報錯的事：預設不能改變任何舊行為、**缺陷那一塊
+永遠留著**、以及**滿版的那一軸不算靠邊**（不然單方向的 Profile 會被清空）。
+"""
+
+
+def _edge_ctx(**params) -> Context:
+    img = _lines_only()
+    ctx = Context(images={"ref": img})
+    p = {"source": "ref", "directions": "upright", "place": "crossing",
+         "inset": 0.0, "vertical_select": "brightest"}
+    p.update(params)
+    get_step("roi_cross")().run(ctx, p)
+    return ctx
+
+
+def test_the_switch_is_off_by_default_and_changes_nothing():
+    """鐵則 9：舊 recipe 沒有這兩個鍵，行為必須逐位元組不變。"""
+    specs = {s.name: s for s in get_step("roi_cross").params}
+    assert specs["drop_edge"].default is False
+    plain = _edge_ctx()
+    same = _edge_ctx(drop_edge=False, edge_margin=64.0)
+    assert (plain.roi_norm_rects("cross")
+            == same.roi_norm_rects("cross"))
+    assert plain.features["cross_edge_dropped"] == 0.0
+
+
+def test_the_boxes_that_hang_off_the_edge_go():
+    off = _edge_ctx()
+    on = _edge_ctx(drop_edge=True, edge_margin=6.0)
+    xs_off = sorted(r[0] for r in off.roi_rects("cross", (SIZE, SIZE)))
+    xs_on = sorted(r[0] for r in on.roi_rects("cross", (SIZE, SIZE)))
+    assert xs_off[0] < 6 and xs_off[-1] > SIZE - 6 - 8    # 前提：真的有靠邊的
+    assert xs_on[0] >= 6 and xs_on[-1] + 8 <= SIZE - 6
+    assert on.features["cross_edge_dropped"] == len(xs_off) - len(xs_on)
+    assert on.features["cross_count"] == float(len(xs_on))
+
+
+def test_the_axis_the_box_spans_completely_does_not_count_as_near_the_edge():
+    """**這一條是量出來的，不是想出來的。**
+
+    單方向的 Profile 每一個框都是滿版的（y=0、高 = 整張圖）。照「碰到邊界就算
+    靠邊」的話**每一個框都會被丟掉**，只剩豁免的中心那一塊 —— 6 個變 1 個，
+    而畫面上不會有任何錯誤訊息。滿版不是「放在邊上」，是「這一軸整個都要」。
+    """
+    on = _edge_ctx(drop_edge=True, edge_margin=6.0)
+    boxes = on.roi_rects("cross", (SIZE, SIZE))
+    assert len(boxes) >= 4, "滿版的那一軸把整組清空了"
+    for _x, y, _w, h in boxes:
+        assert (y, h) == (0, SIZE)
+
+
+def test_the_box_the_defect_is_in_is_never_dropped():
+    """``_center`` 不是母體裡的一個樣本，它是**被量的那個東西**。
+
+    丟掉它的話 ``_center`` 會安靜地指到另一塊 —— 那一塊裡沒有缺陷，而下游每一個
+    數字都照樣算得出來。
+    """
+    before = _edge_ctx().roi_rect("cross_center", (SIZE, SIZE))
+    after = _edge_ctx(drop_edge=True, edge_margin=64.0).roi_rect(
+        "cross_center", (SIZE, SIZE))
+    assert before == after
+    assert _edge_ctx(drop_edge=True, edge_margin=64.0).roi_count("cross") == 1
+
+
+def test_losing_the_baseline_to_the_filter_says_so():
+    """「這張 patch 只有一份」與「其餘都被你設的距離濾掉了」處置完全相反 ——
+    前者換張圖，後者改一個數字。預設那句話會把後者說成前者。"""
+    ctx = _edge_ctx(drop_edge=True, edge_margin=64.0)
+    assert ctx.roi_count("cross_others") == 0
+    why = ctx.meta["regions_absent"]["cross_others"]
+    assert "near the edge" in why and "Closer to the edge than" in why
+
+
+def test_the_panel_sees_the_same_boxes_that_were_measured():
+    """UI 畫的就是引擎算的那一份 —— 濾掉之後 meta 也要跟著少。"""
+    ctx = _edge_ctx(drop_edge=True, edge_margin=6.0, roi_out="cross")
+    rec = ctx.meta["crossings"]["cross"]
+    assert len(rec["boxes"]) == ctx.roi_count("cross")
+    assert rec["edge_dropped"] == ctx.features["cross_edge_dropped"]
+
+
+def test_the_pixel_box_survives_the_recipe_round_trip():
+    """``to_json_dict → from_json_dict`` 一旦不是 identity，workers=1 與
+    workers=2 就會算出不同的分數（鐵則 9）。bool 走 JSON 要活著回來。"""
+    from adept.core.pipeline.recipe import Recipe
+
+    doc = {"recipe_id": "r", "routes": {"main": ["n1"]},
+           "score": {"expr": "0", "bins": []},
+           "nodes": {"n1": {"id": "n1", "step": "roi_cross",
+                            "params": {"drop_edge": True,
+                                       "edge_margin": 7.5}}}}
+    once = Recipe.from_json_dict(doc).to_json_dict()
+    back = Recipe.from_json_dict(once)
+    assert back.to_json_dict() == once
+    p = back.nodes["n1"].params
+    assert p["drop_edge"] is True and p["edge_margin"] == 7.5

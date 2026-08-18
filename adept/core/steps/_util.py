@@ -342,6 +342,84 @@ def output_prefix_spec(example: str = "center") -> ParamSpec:
     )
 
 
+#: 兩張 Region 卡共用的「靠邊的框不要」開關（F11 Region 第八輪，使用者要求）。
+#:
+#: 為什麼兩張卡要**同一組參數名**：使用者心裡這是**一件事**（「靠邊的不要」），
+#: 而它在 recipe 裡長什麼樣會被讀、被 diff、被抄。兩張卡各發明一個名字的話，
+#: 換一種定位法就要重學一次同一個概念。
+EDGE_SECTION_TEMPLATE = "5 · Name and limits"
+
+
+def drop_edge_specs(section: str) -> List[ParamSpec]:
+    """``drop_edge``（勾選）＋ ``edge_margin``（幾個 px）。
+
+    為什麼是兩格而不是「``edge_margin = 0`` 代表關掉」：使用者要的是一顆
+    **看得到的勾選框**（原話「幫我 gen 一個 checkbox（可勾選要不要使用的）」）。
+    用 0 當哨兵的話，「這張 recipe 有沒有在做這件事」要靠看一個數字是不是 0
+    來推 —— 而那個推論在畫面上不存在。
+    """
+    return [
+        ParamSpec(
+            name="drop_edge", type="bool", default=False, section=section,
+            label="Ignore boxes near the edge of the image",
+            help=("Leave out any box that comes closer to the edge of the "
+                  "image than the distance below. A box at the edge is only "
+                  "partly on the image, or sits on a stripe that is itself "
+                  "half cut off - the gray level it reports is measured over "
+                  "fewer pixels and over the wrong ones, and it still looks "
+                  "like a perfectly normal number. The box the defect is in "
+                  "is always kept (see below)."),
+        ),
+        ParamSpec(
+            name="edge_margin", type="float", default=4.0, min=0.0, max=64.0,
+            unit="px", section=section, label="Closer to the edge than",
+            show_when=("drop_edge", (True,)),
+            help=("How close to the edge of the image is too close, in "
+                  "pixels. A box is dropped when any part of it falls inside "
+                  "this band. The one box the defect is in is never dropped - "
+                  "it is not one of the samples, it is the thing being "
+                  "measured, and dropping it would quietly point "
+                  "<name>_center at a box the defect is not in."),
+        ),
+    ]
+
+
+def drop_edge_boxes(boxes, patch_shape, margin: float, keep: int = -1):
+    """丟掉靠邊的框。回傳 ``(留下的框, 丟掉幾個, keep 在新清單的位置)``。
+
+    ``boxes`` 是像素矩形 ``(x, y, w, h)``；``keep`` 是**永遠不丟**的那一個的
+    索引（缺陷所在的那一塊）。
+
+    為什麼 ``keep`` 一定要豁免
+    --------------------------
+    ``<name>_center`` 的定義是「缺陷所在的那一塊」（patch 以缺陷為中心裁切，
+    所以就是離正中心最近的那一塊）。它不是母體裡的一個樣本，它是**被量的那個
+    東西**。把它丟掉的話 ``_center`` 會安靜地指到另一塊 —— 那一塊裡沒有缺陷，
+    而下游每一個數字都會照樣算得出來。丟掉靠邊的框要修的是**基準**
+    （``<name>_others``）被半截的框汙染，不是把待測物也一起丟掉。
+
+    ⚠ **橫跨整張圖的那一軸不算「靠邊」。**（實測出來的，不是想出來的）
+    Profile 單方向時每一個框都是滿版的（``directions="upright"`` 的框 y=0、
+    h=整張高），照「碰到邊界就算」的話**每一個框都會被丟掉**，只剩豁免的中心
+    那一塊 —— 6 個框變 1 個，而畫面上不會有任何錯誤訊息。滿版不是「放在邊上」，
+    它是「這一軸整個都要」。所以某一軸上框跟影像一樣長的時候，那一軸不判定。
+    """
+    h, w = float(patch_shape[0]), float(patch_shape[1])
+    m = max(0.0, float(margin))
+    kept, dropped, new_keep = [], 0, -1
+    for i, b in enumerate(boxes):
+        x, y, bw, bh = (float(v) for v in b)
+        near = ((bw < w and (x < m or x + bw > w - m))
+                or (bh < h and (y < m or y + bh > h - m)))
+        if near and i != int(keep):
+            dropped += 1
+            continue
+        if i == int(keep):
+            new_keep = len(kept)
+        kept.append(b)
+    return kept, dropped, new_keep
+
+
 def prefix_names(prefix: str, names: List[str]) -> List[str]:
     """把前綴套到一串特徵名上（前綴為空 = 原樣回傳）。"""
     p = str(prefix or "").strip()
@@ -410,7 +488,7 @@ def roi_rect_or_none(ctx, step_key: str, image, roi_name):
 
 
 def set_region_family(ctx, step_key: str, name: str, norm_boxes,
-                      centre_index: int = 0) -> int:
+                      centre_index: int = 0, edge_dropped: int = 0) -> int:
     """一組框 → **三個**具名區域：全部、缺陷那一塊、其餘那些（F11 Region-1）。
 
     為什麼是三個
@@ -433,6 +511,11 @@ def set_region_family(ctx, step_key: str, name: str, norm_boxes,
     只有一塊的時候 ``<name>_others`` **不存在**（不是空的、也不是退回整張圖）：
     這張 patch 上就是沒有基準。記進 ``meta["regions_absent"]``，量測卡才報得出
     真正的原因。回傳「其餘」有幾塊。
+
+    ``edge_dropped`` 是「靠邊」那個開關丟掉幾塊（:func:`drop_edge_boxes`）。
+    它只影響**那句話**：基準不見的原因是「這張 patch 上只有一份」還是「其餘
+    幾份都被你設定的邊界距離濾掉了」，處置完全不同（前者換張圖、後者改一個
+    數字），而預設那句話會把後者說成前者。
     """
     boxes = [tuple(float(v) for v in b) for b in norm_boxes]
     if not boxes:
@@ -447,8 +530,12 @@ def set_region_family(ctx, step_key: str, name: str, norm_boxes,
         ctx.set_roi_boxes(rest, others)
     else:
         ctx.meta.setdefault("regions_absent", {})[rest] = (
-            "this patch only has one copy of '%s', so there is no other copy "
-            "to use as a baseline" % name)
+            ("every other copy of '%s' on this patch was left out for being "
+             "near the edge of the image (%d of them); lower “Closer to the "
+             "edge than”, or turn that setting off" % (name, edge_dropped))
+            if edge_dropped else
+            ("this patch only has one copy of '%s', so there is no other copy "
+             "to use as a baseline" % name))
     return len(others)
 
 

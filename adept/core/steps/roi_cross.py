@@ -42,8 +42,9 @@ from ..pipeline.step import (
     CATEGORY_ALGO, GROUP_REGION, ParamSpec, Step, StepError, register_step,
 )
 from ._util import (
-    FEATURE_PREFIX_PATTERN, output_prefix_spec, prefix_features, prefix_names,
-    region_family, require_image, set_region_family,
+    FEATURE_PREFIX_PATTERN, drop_edge_boxes, drop_edge_specs,
+    output_prefix_spec, prefix_features, prefix_names, region_family,
+    require_image, set_region_family,
 )
 
 _BESIDE = ("beside_vertical", "beside_horizontal")
@@ -384,13 +385,15 @@ class RoiCrossStep(Step):
                   "scores about 1; anything with structure scores 20 or more."),
             advanced=True,
         ),
+        *drop_edge_specs("5 · Name and limits"),
         _prefix_in_section(),
     ]
     reads = ["ref"]
     writes: List[str] = []
     features_out = ["cross_count", "cross_pitch_x_px", "cross_pitch_y_px",
                     "cross_filled", "cross_dist_px", "cross_pitch_ratio_x",
-                    "cross_pitch_ratio_y", "locate_conf", "locate_ok"]
+                    "cross_pitch_ratio_y", "cross_edge_dropped",
+                    "locate_conf", "locate_ok"]
 
     # ---- 宣告（給 lint / UI）------------------------------------------------
     @classmethod
@@ -492,18 +495,29 @@ class RoiCrossStep(Step):
                 "cross_dist_px": -1.0,
                 "cross_pitch_ratio_x": float(res.x.pitch_ratio),
                 "cross_pitch_ratio_y": float(res.y.pitch_ratio),
+                "cross_edge_dropped": 0.0,
                 "locate_conf": float(res.confidence),
                 "locate_ok": 0.0,
             }))
             return ctx
 
-        norm_boxes = [_norm(b, shape) for b in res.boxes]
+        # 靠邊的框丟掉 —— **在挑出中心那一塊之後**。順序反過來的話，中心會從
+        # 「缺陷所在的那一塊」變成「留下來的裡面離中心最近的那一塊」，而那兩者
+        # 在缺陷靠近 patch 邊緣時不是同一塊（見 ``_util.drop_edge_boxes``）。
+        boxes = list(res.boxes)
         centre = res.center_box
-        centre_norm = _norm(centre, shape)
-        idx = min(range(len(norm_boxes)),
-                  key=lambda k: sum((a - b) ** 2 for a, b
-                                    in zip(norm_boxes[k], centre_norm)))
-        set_region_family(ctx, self.key, name, norm_boxes, idx)
+        idx = boxes.index(centre) if centre in boxes else 0
+        dropped = 0
+        if bool(p["drop_edge"]) and float(p["edge_margin"]) > 0.0:
+            boxes, dropped, idx = drop_edge_boxes(
+                boxes, shape, float(p["edge_margin"]), idx)
+            # 畫面上的框要跟真的量下去的一致（同一條規矩，見上面那段註解）。
+            ctx.meta["crossings"][name]["boxes"] = [
+                [int(v) for v in b] for b in boxes]
+            ctx.meta["crossings"][name]["edge_dropped"] = int(dropped)
+
+        norm_boxes = [_norm(b, shape) for b in boxes]
+        set_region_family(ctx, self.key, name, norm_boxes, idx, dropped)
         if res.reason:
             ctx.warn("[%s] %s." % (self.key, res.reason))
 
@@ -511,7 +525,7 @@ class RoiCrossStep(Step):
         dist = ((centre[0] + centre[2] / 2.0 - cx) ** 2
                 + (centre[1] + centre[3] / 2.0 - cy) ** 2) ** 0.5
         ctx.add_features(prefix_features(p["output_prefix"], {
-            "cross_count": float(len(res.boxes)),
+            "cross_count": float(len(boxes)),
             "cross_pitch_x_px": float(res.x.pitch_used),
             "cross_pitch_y_px": float(res.y.pitch_used),
             # 有幾根條紋是靠已知 pitch 補上的（影像上沒抓到）。0 = 每一根都
@@ -526,6 +540,10 @@ class RoiCrossStep(Step):
             # 缺陷（永遠在正中心）離最近那個交會有多遠。落在交界上跟落在
             # 兩個交界中間，通常不是同一回事，所以這本身就是可以打分的數字。
             "cross_dist_px": float(dist),
+            # 因為靠邊被丟掉幾塊。這個開關會**安靜地改變基準的樣本數**（同一份
+            # recipe 在 wafer 中心與邊緣的 defect 上留下的框數不一樣），看得到
+            # 才知道某一顆的基準是不是只剩一塊。
+            "cross_edge_dropped": float(dropped),
             "locate_conf": float(res.confidence),
             "locate_ok": 1.0,
         }))

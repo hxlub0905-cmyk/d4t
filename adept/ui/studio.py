@@ -3497,6 +3497,19 @@ class StudioWindow(QMainWindow):
         ctx = getattr(getattr(self, "_last_result", None), "context", None)
         if node is None or ctx is None:
             return []
+        out: List[Tuple[float, float, float, float]] = []
+        for name in self._overlay_region_names(node):
+            out.extend(tuple(float(v) for v in r)
+                       for r in ctx.roi_norm_rects(name))
+        return out
+
+    @staticmethod
+    def _overlay_region_names(node) -> List[str]:
+        """要畫哪幾個區域，**依畫的順序**。
+
+        只有一份：框與框的名字必須走同一個清單，不然顏色會指到錯的區域 ——
+        而畫面上沒有任何東西透露那件事。
+        """
         try:
             step_cls = get_step(node.step)
             produced = list(step_cls.resolve_regions_out(node.params))
@@ -3515,10 +3528,22 @@ class StudioWindow(QMainWindow):
         for name in consumed:
             if name and name not in names:
                 names.append(name)
-        out: List[Tuple[float, float, float, float]] = []
-        for name in names:
-            out.extend(tuple(float(v) for v in r)
-                       for r in ctx.roi_norm_rects(name))
+        return names
+
+    def region_overlay_names(self) -> List[str]:
+        """每個框屬於哪一個具名區域（跟 :meth:`region_overlay` 等長）。
+
+        分開一支而不是讓 ``region_overlay`` 回 tuple：那一支有測試在比清單，
+        而且「框在哪」與「框叫什麼」是兩個問題 —— 疊框只需要前者也還是對的
+        （長度對不上時 `ImageView` 就整組不分色，見 `set_overlay`）。
+        """
+        node = self.model.nodes.get(self.selected_node or "")
+        ctx = getattr(getattr(self, "_last_result", None), "context", None)
+        if node is None or ctx is None:
+            return []
+        out: List[str] = []
+        for name in self._overlay_region_names(node):
+            out.extend([name] * len(ctx.roi_norm_rects(name)))
         return out
 
     def _refresh_region_overlay(self) -> None:
@@ -3526,8 +3551,9 @@ class StudioWindow(QMainWindow):
         框是跟著動的 —— 那正是這種參數唯一調得動的方式（F7-8）。"""
         boxes = self.region_overlay()
         focus = self._focus_box_index(boxes)
+        labels = self.region_overlay_names()
         for view in (self.image_view, self.image_view_b):
-            view.set_overlay(boxes, focus)
+            view.set_overlay(boxes, focus, labels)
 
     def _focus_box_index(self, boxes: Sequence[Sequence[float]]) -> int:
         """哪一個框要畫成醒目的那一個 —— 離影像正中心最近的那個。

@@ -54,16 +54,15 @@ from PySide6.QtWidgets import QWidget
 
 from adept.core.pipeline.cellrois import array_boxes, array_pitch
 
-from .theme import TOKENS
+from .theme import TOKENS, REGION_COLORS as theme_region_colors
 from .widgets import _qimage_from_uint8
 
 __all__ = ["CellCanvas", "REGION_COLORS", "region_color"]
 
-#: 區域的顏色（依清單順序輪流）。要在深色的 SEM 影像上看得見，所以都偏亮。
-#: 不用 ``accent`` 那一組：那是「選取／焦點」的語彙，而這裡的顏色講的是
-#: **哪一個區域**，兩件事混在一起使用者會以為藍色的那個是被選中的。
-REGION_COLORS = ("#5fd0a0", "#f0b429", "#7aa7ff", "#f07aa7",
-                 "#9ad14b", "#d18ef0", "#4bd1c8", "#f08a5f")
+#: 區域的顏色（依清單順序輪流）—— **定義在 `theme`**，這裡只是轉出去。
+#: 影像串流上的疊框用的是同一組（2026-08-18）：使用者在這張畫布上把 ROI1 畫成
+#: 綠色的，到了 patch 上它就要還是綠色的，不然那兩個畫面說不出自己在講同一件事。
+REGION_COLORS = theme_region_colors
 
 #: 拖曳把手的**半徑**（畫面像素）。使用者回報原本的 7 太大很醜 —— 那時候一個
 #: 把手是 14×14，在一個 20 px 寬的框上八個把手幾乎把框蓋滿。3 是「抓得到、

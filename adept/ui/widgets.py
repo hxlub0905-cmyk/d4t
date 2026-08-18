@@ -65,7 +65,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import theme
-from .theme import TOKENS
+from .theme import TOKENS, region_hex
 
 __all__ = [
     "ImageView",
@@ -704,6 +704,10 @@ class ImageView(QWidget):
         #: 疊在影像上的 ROI 框（正規化座標）。見 :meth:`set_overlay`。
         self._overlay: List[Tuple[float, float, float, float]] = []
         self._overlay_focus = -1
+        #: 每個框屬於哪一個具名區域（跟 ``_overlay`` 等長）。空字串 = 不分。
+        self._overlay_labels: List[str] = []
+        #: 區域名 -> 顏色索引，依**第一次出現**的順序。畫圖例時也走這一份。
+        self._overlay_order: List[str] = []
         #: 量測尺按著時的那一條帶（axis, 起, 迄；影像像素）。見 :meth:`set_measure`。
         self._measure: Optional[Tuple[str, float, float]] = None
         #: 選取的卡片上那個「以像素為單位」的參數有多大（大小, 標籤）。
@@ -805,7 +809,8 @@ class ImageView(QWidget):
 
     # -- transforms --------------------------------------------------------
     def set_overlay(self, rects: Optional[Sequence[Sequence[float]]],
-                    focus: int = -1) -> None:
+                    focus: int = -1,
+                    labels: Optional[Sequence[str]] = None) -> None:
         """把 ROI 框疊在影像上（**正規化**座標 ``(nx, ny, nw, nh)``）。
 
         為什麼要疊在這裡而不是只有「跨顆檢視」那個視窗
@@ -817,13 +822,52 @@ class ImageView(QWidget):
 
         座標用正規化的，所以縮放平移都跟著影像走，換一顆 patch 尺寸也不用重算。
         ``focus`` 是要特別標出來的那一個（交會定位的 ``_center``：缺陷所在的
-        那一塊），畫成實線＋角標，其餘畫細線 —— 一堆一模一樣的框看不出哪個是
+        那一塊），畫成粗線＋角標，其餘畫細線 —— 一堆一模一樣的框看不出哪個是
         「這一顆」的。
+
+        ``labels`` 是每個框屬於**哪一個具名區域**（跟 ``rects`` 等長）。
+        給了就一個區域一個顏色，並在左上角畫一份圖例（F11 Region 第八輪，
+        使用者回報「Image Stream 顯示上顏色 overlay 重疊會同個顏色（藍色）」）。
+
+        為什麼一定要分色：Region-1 之後**一張卡可以標好幾個區域**，而這裡把它們
+        全部攤平成一串框，全部畫成 accent 藍。兩個區域疊在一起的時候畫面上就只是
+        一團藍線 —— 而使用者要判斷的正是「哪一塊是 ROI1、哪一塊是 ROI2」。
+        顏色跟模板編輯器**同一組**（`theme.REGION_COLORS`）：他在對話框裡把
+        ROI1 畫成綠色的，到了 patch 上它就要還是綠色的。
+
+        角色分工：**顏色 = 哪一個區域，線寬與角標 = 哪一塊是缺陷那一塊。**
+        兩個問題各佔一個視覺維度，不要用同一個維度回答兩次（這是「焦點框以前
+        畫成紅色」被換掉的原因 —— 紅色會被讀成第三個區域）。
         """
         self._overlay = [tuple(float(v) for v in r) for r in (rects or [])
                          if r is not None and len(tuple(r)) == 4]
         self._overlay_focus = int(focus)
+        names = [str(v) for v in (labels or [])]
+        # 長度對不上就整組不分色 —— 錯位的顏色比沒有顏色糟得多（它會**指錯**
+        # 區域，而畫面上沒有任何東西透露這件事）。
+        self._overlay_labels = (names if len(names) == len(self._overlay)
+                                else [""] * len(self._overlay))
+        order: List[str] = []
+        for n in self._overlay_labels:
+            if n and n not in order:
+                order.append(n)
+        self._overlay_order = order
         self.update()
+
+    def overlay_legend(self) -> List[Tuple[str, str]]:
+        """圖例：``[(區域名, 顏色 hex), …]``，依第一次出現的順序。
+
+        測試與狀態列讀這個，不去讀畫素。
+        """
+        return [(n, region_hex(i)) for i, n in enumerate(self._overlay_order)]
+
+    def legend_visible(self) -> bool:
+        """圖例現在畫不畫得出來（測試讀這個，不去讀畫素）。
+
+        **兩個以上的區域才畫** —— 只有一個的時候那個顏色沒有在跟誰對比，
+        一行字只是擋住影像。
+        """
+        return len(self._overlay_order) >= 2
 
     def overlay_count(self) -> int:
         """現在疊了幾個框（測試與狀態列讀這個，不去讀畫素）。"""
@@ -901,20 +945,70 @@ class ImageView(QWidget):
             return
         iw, ih = self._pixmap.width(), self._pixmap.height()
         s = self._scale or 1.0
-        accent = QColor(TOKENS["accent"])
-        # 框在小 patch 上會很細，所以線寬不隨縮放變薄（**框是給人看的標記，
-        # 不是影像內容**）；但也不要粗到把 5px 的框整個蓋掉。
-        thin = QPen(accent, 1.0)
-        thin.setCosmetic(True)
-        thick = QPen(QColor(TOKENS["danger_text"]), 1.8)
-        thick.setCosmetic(True)
+        index_of = {n: i for i, n in enumerate(self._overlay_order)}
+        plain = QColor(TOKENS["accent"])
         p.setBrush(Qt.NoBrush)
         for i, (nx, ny, nw, nh) in enumerate(self._overlay):
+            name = self._overlay_labels[i] if i < len(self._overlay_labels) else ""
+            col = QColor(region_hex(index_of[name])) if name in index_of else plain
             r = QRectF(self._offset.x() + nx * iw * s,
                        self._offset.y() + ny * ih * s,
                        max(1.0, nw * iw * s), max(1.0, nh * ih * s))
-            p.setPen(thick if i == self._overlay_focus else thin)
+            focused = (i == self._overlay_focus)
+            # 框在小 patch 上會很細，所以線寬不隨縮放變薄（**框是給人看的標記，
+            # 不是影像內容**）；但也不要粗到把 5px 的框整個蓋掉。
+            pen = QPen(col, 1.9 if focused else 1.0)
+            pen.setCosmetic(True)
+            p.setPen(pen)
             p.drawRect(r)
+            if focused:
+                self._paint_focus_ticks(p, r, pen)
+        self._paint_overlay_legend(p)
+
+    def _paint_focus_ticks(self, p: QPainter, r: QRectF, pen: QPen) -> None:
+        """缺陷那一塊的四個角標。
+
+        以前這件事是用**紅色**講的。分色之後不能再那樣：紅色會被讀成「第三個
+        區域」，而它其實跟區域無關。角標是純幾何的記號，跟任何區域顏色都不衝突
+        —— 而且在框小到只剩幾個像素、線寬看不出差別的時候，它仍然看得見。
+        """
+        tick = max(3.0, min(7.0, min(r.width(), r.height()) * 0.35))
+        wide = QPen(pen)
+        wide.setWidthF(pen.widthF() + 0.9)
+        p.setPen(wide)
+        for x, dx in ((r.left(), 1.0), (r.right(), -1.0)):
+            for y, dy in ((r.top(), 1.0), (r.bottom(), -1.0)):
+                p.drawLine(QPointF(x, y), QPointF(x + dx * tick, y))
+                p.drawLine(QPointF(x, y), QPointF(x, y + dy * tick))
+        p.setPen(pen)
+
+    def _paint_overlay_legend(self, p: QPainter) -> None:
+        """左上角的圖例。**兩個以上的區域才畫** —— 只有一個的時候，那個顏色
+        沒有在跟誰對比，一行字只是擋住影像。"""
+        if not self.legend_visible():
+            return
+        legend = self.overlay_legend()
+        f = QFont(p.font())
+        f.setPointSizeF(max(7.0, f.pointSizeF() - 1.0))
+        p.setFont(f)
+        fm = QFontMetricsF(f)
+        pad, sw, gap, line = 5.0, 8.0, 5.0, fm.height() + 3.0
+        width = max(fm.horizontalAdvance(n) for n, _c in legend) + sw + gap
+        box = QRectF(6.0, 6.0, width + pad * 2, line * len(legend) + pad * 2)
+        chip = QColor(TOKENS["bg_surface"])
+        chip.setAlpha(205)
+        p.setPen(Qt.NoPen)
+        p.setBrush(chip)
+        p.drawRoundedRect(box, 3.0, 3.0)
+        for i, (name, hexcol) in enumerate(legend):
+            y = box.top() + pad + line * i
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(hexcol))
+            p.drawRect(QRectF(box.left() + pad, y + line / 2 - sw / 2, sw, sw))
+            p.setPen(QColor(TOKENS["text_primary"]))
+            p.drawText(QRectF(box.left() + pad + sw + gap, y, width, line),
+                       Qt.AlignLeft | Qt.AlignVCenter, name)
+        p.setBrush(Qt.NoBrush)
 
     def _paint_measure(self, p: QPainter) -> None:
         """量測尺按著時的那一條帶：兩條綠線 + 中間一層很淡的綠。

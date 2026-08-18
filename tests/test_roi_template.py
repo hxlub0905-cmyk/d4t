@@ -616,3 +616,98 @@ def test_certainty_is_reported_but_does_not_reject_by_default():
     strict = Context(images={"ref": patch})
     _run(strict, _params(gc, min_margin=2.0))
     assert strict.features["locate_ok"] == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# 7. 靠邊的框不要（F11 Region 第八輪）—— 跟 Profile 同一組參數、同一個語意
+# --------------------------------------------------------------------------- #
+"""使用者：「Profile 跟 Template 都幫我 gen 一個 checkbox（可勾選要不要使用的），
+功能是靠近邊界 n pixel 內的 ROI box 會被自動拿掉。」
+
+模板是**整片鋪過去**的，所以 patch 邊緣那幾份常常是半截的 —— 下面那組實測值裡，
+最右邊那一份寬度是 14 而不是 16。它照樣吐得出一個看起來正常的灰階值，
+而它會混進 ``<name>_others`` 那個基準。
+
+兩張卡的參數名刻意一樣（``drop_edge`` / ``edge_margin``，`_util.drop_edge_specs`
+是唯一的那一份）：使用者心裡這是一件事，換一種定位法不該重學一次。
+"""
+
+
+def _tiled(cells: int = 3, extra: int = 17, height: int = 60):
+    """比 cell 寬好幾倍的 patch —— 這樣一個區域才會鋪出好幾份，而且邊上有半截的。"""
+    gc = algo_template.build_golden_cell(big_image())
+    img = big_image(8)
+    x = 3 * PERIOD + 13
+    w = cells * PERIOD + extra
+    return gc, img[100:100 + height, x:x + w]
+
+
+def _tiled_ctx(**over):
+    gc, patch = _tiled()
+    ctx = Context(images={"ref": patch, "test": patch})
+    _run(ctx, _params(gc, **over))
+    return ctx, patch.shape
+
+
+def test_the_switch_is_off_by_default_and_changes_nothing():
+    """鐵則 9：舊 recipe 沒有這兩個鍵，行為必須逐位元組不變。"""
+    specs = {s.name: s for s in get_step("roi_template").params}
+    assert specs["drop_edge"].default is False
+    plain, _ = _tiled_ctx()
+    same, _ = _tiled_ctx(drop_edge=False, edge_margin=64.0)
+    assert plain.roi_norm_rects("epi") == same.roi_norm_rects("epi")
+    assert plain.features["epi_edge_dropped"] == 0.0
+
+
+def test_the_half_cut_copies_at_the_edge_go():
+    off, shape = _tiled_ctx()
+    on, _ = _tiled_ctx(drop_edge=True, edge_margin=4.0)
+    before = off.roi_rects("epi", shape)
+    after = on.roi_rects("epi", shape)
+    # 前提：沒開之前真的有半截的（最右邊那一份寬度比其他份小）
+    widths = {w for _x, _y, w, _h in before}
+    assert len(widths) > 1, "這組資料沒有半截的框，測不到東西"
+    assert len(after) < len(before)
+    assert len({w for _x, _y, w, _h in after}) == 1, "留下來的還有半截的"
+    assert on.features["epi_edge_dropped"] == len(before) - len(after)
+
+
+def test_the_full_height_axis_is_not_treated_as_near_the_edge():
+    """區域是一條滿版的帶子（y=0、高 = 整張圖）—— 那一軸不判定，
+    不然這張卡的每一個框都會被丟掉（見 `_util.drop_edge_boxes`）。"""
+    on, shape = _tiled_ctx(drop_edge=True, edge_margin=4.0)
+    boxes = on.roi_rects("epi", shape)
+    assert len(boxes) >= 2
+    for _x, y, _w, h in boxes:
+        assert (y, h) == (0, shape[0])
+
+
+def test_the_box_the_defect_is_in_is_never_dropped():
+    """一張 32px 的 patch 上只有一份，而它就貼著邊 —— 丟掉它的話這張卡對這一顆
+    等於什麼都沒產出，而 ``locate_ok`` 仍然是 1（安靜的錯）。"""
+    gc = algo_template.build_golden_cell(big_image())
+    patch = cut(big_image(8), 13)
+    ctx = Context(images={"ref": patch, "test": patch})
+    _run(ctx, _params(gc, drop_edge=True, edge_margin=64.0))
+    assert ctx.roi_count("epi") == 1
+    assert ctx.features["epi_present"] == 1.0
+    assert ctx.roi_rect("epi_center", (PATCH, PATCH))[2] > 0
+
+
+def test_losing_the_baseline_to_the_filter_says_so():
+    ctx, _ = _tiled_ctx(drop_edge=True, edge_margin=64.0)
+    assert ctx.roi_count("epi_others") == 0
+    why = ctx.meta["regions_absent"]["epi_others"]
+    assert "near the edge" in why
+
+
+def test_the_dropped_count_is_declared_per_region():
+    """多標一個區域不必動任何下游 —— 跟 ``_present`` 同一個命名規則。"""
+    feats = get_step("roi_template").resolve_features(
+        {"regions": "epi: 0,0,0.5,1 | mg: 0.5,0,0.5,1"})
+    assert "epi_edge_dropped" in feats and "mg_edge_dropped" in feats
+
+
+def test_the_panel_sees_the_same_boxes_that_were_measured():
+    ctx, _ = _tiled_ctx(drop_edge=True, edge_margin=4.0)
+    assert len(ctx.meta["templates"]["epi"]["boxes"]) == ctx.roi_count("epi")
