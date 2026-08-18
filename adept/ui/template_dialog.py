@@ -25,6 +25,19 @@ Region left/top/width/height 滑桿把區域標在 cell 上」，叫使用者去
 recipe 要能寄給別人；存路徑的話，圖被搬走、被換掉、下個月有人用了另一張大圖，
 結果會安靜地變。
 
+cell 多大由使用者決定
+---------------------
+週期是量出來的，但**使用者有時候要一個 2× 的大 cell**（他的原話）——
+例如兩根 MG 才構成他要比的那個單元。所以量出來的週期是**預設值不是結論**：
+「Cell size」那兩格填的是週期，改了按重疊就重算。``build_golden_cell`` 本來就
+吃明講的 ``px``/``py``（那時候它不做信心檢查 —— 使用者說的不是猜的）。
+
+畫面上文字要少
+--------------
+第一版把每支工具寫成一句話擺在畫面上，使用者回報「目前介面文字太多」。現在
+四支工具是四顆圖示鈕（說明退到 tooltip），矩形的數字表收進一顆按鈕後面 ——
+**那張表是校對用的，不是操作用的**，而操作的東西才該常駐。
+
 畫布上怎麼操作、為什麼在 cell 上可以拖而在 patch 上不行 —— 見 ``cell_canvas``。
 """
 from __future__ import annotations
@@ -60,9 +73,12 @@ from adept.core.pipeline.cellrois import (
     CellRoiError, MAX_REGIONS, format_cell_rois, parse_cell_rois,
 )
 
-from .cell_canvas import CellCanvas, region_color
+from .cell_canvas import (
+    TOOL_ARRAY, TOOL_CLICK, TOOL_DRAG, TOOL_PAINT, CellCanvas,
+    region_color,
+)
 from .theme import TOKENS
-from .widgets import apply_button_cursors
+from .widgets import IconButton, apply_button_cursors, restyle
 
 __all__ = ["TemplateDialog"]
 
@@ -81,12 +97,13 @@ class TemplateDialog(QDialog):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setWindowTitle("Template & regions")
-        self.resize(1000, 700)
+        self.resize(1320, 880)
         self.cell: Optional[algo_template.GoldenCell] = None
         self._source_path = ""
         self._ready = False
         self._syncing = False
         self._from_recipe = False
+        self._source: Optional[np.ndarray] = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 12, 12, 12)
@@ -94,11 +111,18 @@ class TemplateDialog(QDialog):
         outer.addWidget(self._build_source_row())
 
         split = QSplitter(Qt.Horizontal, self)
+        left = QWidget(self)
+        left_lay = QVBoxLayout(left)
+        left_lay.setContentsMargins(0, 0, 0, 0)
+        left_lay.setSpacing(6)
         self.canvas = CellCanvas(self)
         self.canvas.boxes_changed.connect(self._on_boxes_changed)
         self.canvas.selection_changed.connect(self._on_canvas_selection)
         self.canvas.array_anchors_changed.connect(self._on_anchors)
-        split.addWidget(self.canvas)
+        self.canvas.regions_changed.connect(self._refresh_regions)
+        left_lay.addWidget(self._build_tool_row())
+        left_lay.addWidget(self.canvas, 1)
+        split.addWidget(left)
         split.addWidget(self._build_side_panel())
         split.setStretchFactor(0, 3)
         split.setStretchFactor(1, 2)
@@ -115,6 +139,8 @@ class TemplateDialog(QDialog):
 
         self._set_ready(False)
         self._refresh_regions()
+        self._on_tool_params()
+        self.set_tool(TOOL_DRAG)
         apply_button_cursors(self)
 
     # ---- 版面 ---------------------------------------------------------------
@@ -125,13 +151,46 @@ class TemplateDialog(QDialog):
         lay.setSpacing(4)
 
         row = QHBoxLayout()
-        self.btn_pick = QPushButton("Rebuild from a full-size image…", box)
+        self.btn_pick = QPushButton("Rebuild from image…", box)
         self.btn_pick.setObjectName("primary")
         self.btn_pick.clicked.connect(self._on_pick)
         row.addWidget(self.btn_pick)
+
+        # cell 多大由使用者決定：量出來的週期是**預設值不是結論**
+        for label, tip in (("Cell W", "One cell is this wide, in image pixels. "
+                                      "Measured from the image, but you can "
+                                      "override it — two periods per cell is a "
+                                      "normal thing to want."),
+                           ("Cell H", "One cell is this tall, in image pixels.")):
+            lab = QLabel(label, box)
+            lab.setObjectName("paramHint")
+            lab.setToolTip(tip)
+            row.addWidget(lab)
+        self.spin_cell_w = self._spin(box, 2, 8192, 40, "Cell width in image pixels")
+        self.spin_cell_h = self._spin(box, 2, 8192, 40, "Cell height in image pixels")
+        row.insertWidget(row.count() - 1, self.spin_cell_w)
+        row.addWidget(self.spin_cell_h)
+
+        self.btn_double = QPushButton("×2", box)
+        self.btn_double.setProperty("variant", "secondary")
+        self.btn_double.setMaximumWidth(44)
+        self.btn_double.setToolTip("Double both, then re-stack — a 2× cell.")
+        self.btn_double.clicked.connect(self._on_double)
+        row.addWidget(self.btn_double)
+
+        self.btn_restack = QPushButton("Re-stack", box)
+        self.btn_restack.setProperty("variant", "secondary")
+        self.btn_restack.setToolTip(
+            "Stack the cell again at this size. The regions you already drew "
+            "keep their fractions of a cell, so a 2× cell moves them - check "
+            "them afterwards.")
+        self.btn_restack.clicked.connect(self.restack)
+        row.addWidget(self.btn_restack)
+
+        row.addStretch(1)
         self.path_label = QLabel("(no image chosen)", box)
         self.path_label.setObjectName("paramHint")
-        row.addWidget(self.path_label, 1)
+        row.addWidget(self.path_label)
         lay.addLayout(row)
 
         self.report = QLabel("", box)
@@ -139,6 +198,40 @@ class TemplateDialog(QDialog):
         self.report.setWordWrap(True)
         lay.addWidget(self.report)
         return box
+
+    def _on_double(self) -> None:
+        """兩軸各自加倍 —— 但**只加倍真的有週期的那一軸**。
+
+        一維的 layout（垂直條紋）在 Y 上沒有週期，那一軸的「一格」就是整張影像
+        的高度。把它乘二會得到一個比原圖還高的 cell，而且 ``build_golden_cell``
+        會因為「使用者明講的一律相信」把那一軸當成有週期 —— 於是 ``locate_axis``
+        從 ``x`` 變成 ``both``，定位開始在一個沒有相位的方向上搜尋。實測過
+        （240 px 高的圖疊出 480 px 高的 cell）。
+        """
+        if self.spin_cell_w.isEnabled():
+            self.spin_cell_w.setValue(min(8192, self.spin_cell_w.value() * 2))
+        if self.spin_cell_h.isEnabled():
+            self.spin_cell_h.setValue(min(8192, self.spin_cell_h.value() * 2))
+        self.restack()
+
+    def restack(self) -> bool:
+        """用現在這兩格的尺寸重新疊一次模板。
+
+        要有原圖才做得到 —— 從 recipe 讀回來的模板只有結果，沒有原料。
+        那時候講清楚要先重新選一張圖，不要讓那顆鈕按下去沒反應。
+
+        沒有週期的那一軸傳 ``None``（＝再量一次，結果仍然是「整張影像的高度」）
+        —— 見 :meth:`_on_double`。
+        """
+        if self._source is None:
+            self._say("Pick a full-size image first — re-stacking needs the "
+                      "original image, and this template was read back from "
+                      "the recipe.")
+            return False
+        gc = self.cell
+        px = self.spin_cell_w.value() if (gc is None or gc.periodic_x) else None
+        py = self.spin_cell_h.value() if (gc is None or gc.periodic_y) else None
+        return self.load_image(self._source, self._source_path, px=px, py=py)
 
     def _build_side_panel(self) -> QWidget:
         panel = QWidget(self)
@@ -148,7 +241,6 @@ class TemplateDialog(QDialog):
 
         lay.addWidget(self._build_region_group())
         lay.addWidget(self._build_box_group(), 1)
-        lay.addWidget(self._build_array_group())
         return panel
 
     def _build_region_group(self) -> QWidget:
@@ -178,77 +270,178 @@ class TemplateDialog(QDialog):
         return g
 
     def _build_box_group(self) -> QWidget:
-        g = QGroupBox("Rectangles in this region", self)
+        """這個區域現在有幾塊，以及一顆「打開數字表」的鈕。
+
+        表格本身**不常駐**（使用者：「表格部分建議不顯示，放在一個按鈕裡打開來
+        可編輯」）—— 它是校對用的，而操作是在畫布上做的。常駐的是「有幾塊」，
+        因為那是唯一需要一眼看到的狀態。
+        """
+        g = QGroupBox("Rectangles", self)
         lay = QVBoxLayout(g)
-        hint = QLabel("Drag on the cell to draw one. A region can be several "
-                      "rectangles — that is how “the EPI minus where the MG "
-                      "crosses it” is expressed.", g)
-        hint.setObjectName("paramHint")
-        hint.setWordWrap(True)
-        lay.addWidget(hint)
+        lay.setSpacing(6)
 
-        self.box_table = QTableWidget(0, 4, g)
-        self.box_table.setHorizontalHeaderLabels(["x", "y", "w", "h"])
-        self.box_table.verticalHeader().setVisible(False)
-        self.box_table.currentCellChanged.connect(self._on_table_row)
-        self.box_table.itemChanged.connect(self._on_table_edited)
-        lay.addWidget(self.box_table, 1)
-
-        self.box_units = QLabel("", g)
-        self.box_units.setObjectName("paramHint")
-        lay.addWidget(self.box_units)
+        self.box_count = QLabel("", g)
+        lay.addWidget(self.box_count)
 
         row = QHBoxLayout()
-        self.btn_del_box = QPushButton("Delete rectangle", g)
+        self.btn_table = QPushButton("Edit numbers…", g)
+        self.btn_table.setProperty("variant", "secondary")
+        self.btn_table.setToolTip(
+            "The same rectangles as numbers, in whole cell pixels — for "
+            "checking and nudging, not for drawing.")
+        self.btn_table.clicked.connect(self.open_box_table)
+        row.addWidget(self.btn_table)
+        self.btn_del_box = QPushButton("Delete selected", g)
         self.btn_del_box.setProperty("variant", "secondary")
         self.btn_del_box.clicked.connect(lambda: self.canvas.delete_selected())
         row.addWidget(self.btn_del_box)
         row.addStretch(1)
         lay.addLayout(row)
+
+        # 表格活在一個彈出視窗裡，但**只建一次** —— 每次開都重建的話，使用者
+        # 正在編的那一格會在畫布動一下之後消失。
+        self.box_table = QTableWidget(0, 4, self)
+        self.box_table.setHorizontalHeaderLabels(["x", "y", "w", "h"])
+        self.box_table.verticalHeader().setVisible(False)
+        self.box_table.currentCellChanged.connect(self._on_table_row)
+        self.box_table.itemChanged.connect(self._on_table_edited)
+        self._table_dialog: Optional[QDialog] = None
+        self.box_units = QLabel("", self)
+        self.box_units.setObjectName("paramHint")
         return g
 
-    def _build_array_group(self) -> QWidget:
-        """一次長一整片等距的框（使用者定的 multi add）。"""
-        g = QGroupBox("Multi add — a whole row or grid at once", self)
-        lay = QVBoxLayout(g)
-        hint = QLabel("Pulling twenty stripes one at a time drifts, and drift "
-                      "does not show on screen — it shows in the numbers. Here "
-                      "the spacing is worked out from the two anchors.", g)
-        hint.setObjectName("paramHint")
-        hint.setWordWrap(True)
-        lay.addWidget(hint)
+    def open_box_table(self) -> QDialog:
+        """數字表的彈出視窗（同一個 widget，開幾次都是同一份資料）。"""
+        if self._table_dialog is None:
+            d = QDialog(self)
+            d.setWindowTitle("Rectangles — whole cell pixels")
+            d.resize(360, 420)
+            lay = QVBoxLayout(d)
+            lay.addWidget(self.box_units)
+            lay.addWidget(self.box_table, 1)
+            close = QDialogButtonBox(QDialogButtonBox.Close, Qt.Horizontal, d)
+            close.rejected.connect(d.hide)
+            lay.addWidget(close)
+            self._table_dialog = d
+        self._refresh_boxes()
+        self._table_dialog.show()
+        self._table_dialog.raise_()
+        return self._table_dialog
 
-        grid = QHBoxLayout()
-        self.spin_w = self._spin(g, 1, 4096, 8, "Box W (px)")
-        self.spin_h = self._spin(g, 1, 4096, 8, "Box H (px)")
-        self.spin_nx = self._spin(g, 1, 512, 4, "Across")
-        self.spin_ny = self._spin(g, 1, 512, 1, "Down")
-        for label, spin in (("W", self.spin_w), ("H", self.spin_h),
-                            ("across", self.spin_nx), ("down", self.spin_ny)):
-            grid.addWidget(QLabel(label, g))
-            grid.addWidget(spin)
-            spin.valueChanged.connect(self._on_array_params)
-        grid.addStretch(1)
-        lay.addLayout(grid)
+    #: 四支工具：(key, 圖示, 標題, tooltip)
+    _TOOLS = (
+        (TOOL_DRAG, "roi_drag", "Drag",
+         "Drag a rectangle out on the cell. Drag an existing one to move it, "
+         "or its handles to resize."),
+        (TOOL_CLICK, "roi_click", "Click add",
+         "Click to drop one rectangle of the size below, centred where you "
+         "clicked."),
+        (TOOL_ARRAY, "roi_array", "Multi add",
+         "Click the centre of the first rectangle, then the centre of the "
+         "last one; the ones in between are spaced evenly."),
+        (TOOL_PAINT, "roi_paint", "Paint pixels",
+         "Drag to light up individual cell pixels. On release they are merged "
+         "into the fewest rectangles that cover them."),
+    )
+
+    def _build_tool_row(self) -> QWidget:
+        """四顆圖示鈕 + 框大小 + 陣列數量。**畫面上不放句子** —— 說明在 tooltip。"""
+        box = QWidget(self)
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
 
         row = QHBoxLayout()
-        self.btn_array = QPushButton("Start", g)
-        self.btn_array.setProperty("variant", "secondary")
-        self.btn_array.clicked.connect(self.toggle_array)
-        row.addWidget(self.btn_array)
-        self.btn_array_ok = QPushButton("Add them", g)
+        row.setSpacing(4)
+        self.tool_buttons = {}
+        for key, icon, title, tip in self._TOOLS:
+            b = IconButton(icon, "%s — %s" % (title, tip), box, kind="ghost")
+            b.setCheckable(True)
+            b.clicked.connect(lambda _c=False, k=key: self.set_tool(k))
+            row.addWidget(b)
+            self.tool_buttons[key] = b
+        row.addSpacing(10)
+
+        self.spin_w = self._spin(box, 1, 4096, 8, "Rectangle width, in cell pixels")
+        self.spin_h = self._spin(box, 1, 4096, 8, "Rectangle height, in cell pixels")
+        self.spin_nx = self._spin(box, 1, 512, 4, "How many across, end to end")
+        self.spin_ny = self._spin(box, 1, 512, 1, "How many down, end to end")
+        for label, spin in (("W", self.spin_w), ("H", self.spin_h),
+                            ("×", self.spin_nx), ("↓", self.spin_ny)):
+            lab = QLabel(label, box)
+            lab.setObjectName("paramHint")
+            row.addWidget(lab)
+            row.addWidget(spin)
+            spin.valueChanged.connect(self._on_tool_params)
+        row.addStretch(1)
+
+        self.btn_array_ok = QPushButton("Add them", box)
         self.btn_array_ok.setObjectName("primary")
         self.btn_array_ok.clicked.connect(self.commit_array)
         self.btn_array_ok.setEnabled(False)
         row.addWidget(self.btn_array_ok)
-        row.addStretch(1)
         lay.addLayout(row)
 
-        self.array_hint = QLabel("", g)
-        self.array_hint.setObjectName("paramHint")
-        self.array_hint.setWordWrap(True)
-        lay.addWidget(self.array_hint)
-        return g
+        self.tool_hint = QLabel("", box)
+        self.tool_hint.setObjectName("paramHint")
+        self.tool_hint.setWordWrap(True)
+        lay.addWidget(self.tool_hint)
+        return box
+
+    def set_tool(self, key: str) -> None:
+        self.canvas.set_tool(key)
+        self._refresh_tool_ui()
+
+    def toggle_array(self) -> None:
+        """（保留給既有呼叫端）在陣列工具與拖曳之間切換。"""
+        self.set_tool(TOOL_DRAG if self.canvas.tool() == TOOL_ARRAY
+                      else TOOL_ARRAY)
+
+    def commit_array(self) -> int:
+        n = self.canvas.commit_array()
+        self._refresh_tool_ui()
+        self._refresh_boxes()
+        return n
+
+    def _on_tool_params(self) -> None:
+        self.canvas.set_box_size(self.spin_w.value(), self.spin_h.value())
+        self.canvas.set_array_counts(self.spin_nx.value(), self.spin_ny.value())
+        self._refresh_tool_ui()
+
+    def _on_anchors(self, _n: int) -> None:
+        self._refresh_tool_ui()
+
+    def _refresh_tool_ui(self) -> None:
+        tool = self.canvas.tool()
+        for key, btn in self.tool_buttons.items():
+            btn.setProperty("active", "true" if key == tool else "false")
+            btn.setChecked(key == tool)
+            restyle(btn)
+        for spin in (self.spin_nx, self.spin_ny):
+            spin.setEnabled(tool == TOOL_ARRAY)
+        for spin in (self.spin_w, self.spin_h):
+            spin.setEnabled(tool in (TOOL_ARRAY, TOOL_CLICK))
+
+        anchors = self.canvas.array_anchor_count()
+        n = len(self.canvas.array_preview()) if tool == TOOL_ARRAY else 0
+        self.btn_array_ok.setEnabled(tool == TOOL_ARRAY and anchors >= 2)
+        self.btn_array_ok.setText("Add %d" % n if n else "Add them")
+        self.tool_hint.setText(self._tool_hint(tool, anchors, n))
+
+    @staticmethod
+    def _tool_hint(tool: str, anchors: int, n: int) -> str:
+        if tool == TOOL_ARRAY:
+            if anchors == 0:
+                return "Click the centre of the FIRST rectangle (top-left)."
+            if anchors == 1:
+                return ("Now click the centre of the LAST one (bottom-right). "
+                        "Esc cancels.")
+            return "%d rectangles between the two crosshairs." % n
+        if tool == TOOL_PAINT:
+            return "Drag over pixels; they merge into rectangles on release."
+        if tool == TOOL_CLICK:
+            return "Click to drop one rectangle, centred on the pointer."
+        return "Drag out a rectangle. Right-drag anywhere to pan."
 
     @staticmethod
     def _spin(parent, lo: int, hi: int, value: int, tip: str) -> QSpinBox:
@@ -292,16 +485,23 @@ class TemplateDialog(QDialog):
         return box
 
     # ---- 對外（測試也走這條，不必真的開檔案對話框）------------------------
-    def load_image(self, image: Any, name: str = "") -> bool:
-        """吃一張大圖，量週期、疊模板、把證據寫上畫面。"""
+    def load_image(self, image: Any, name: str = "",
+                   px: Optional[int] = None, py: Optional[int] = None) -> bool:
+        """吃一張大圖，量週期、疊模板、把證據寫上畫面。
+
+        ``px``/``py`` 留空 = 從影像自己量（第一次都是這樣）；填了就照使用者說的
+        疊 —— 「有時候會需要 2× 大 cell」。明講的尺寸 ``build_golden_cell`` 一律
+        相信，不做信心檢查（那是使用者說的，不是猜的）。
+        """
         arr = np.asarray(image)
         if arr.size == 0:
             self._fail("that image is empty")
             return False
 
-        gc = algo_template.build_golden_cell(arr)
+        gc = algo_template.build_golden_cell(arr, px=px, py=py)
         self.cell = gc
         self._from_recipe = False
+        self._source = arr
         self._source_path = str(name or "")
         self.path_label.setText(self._source_path or "(image)")
 
@@ -313,10 +513,32 @@ class TemplateDialog(QDialog):
         self.canvas.set_cell(gc.cell)
         self._set_ready(True)
         self.report.setText(self.summary())
+        self._sync_cell_size()
         self._refresh_units()
         if not self.canvas.regions():
             self.add_region()
+        self._refresh_tool_ui()
         return True
+
+    def _sync_cell_size(self) -> None:
+        """把量到（或使用者指定）的尺寸放回那兩格，別讓它們各說各話。"""
+        gc = self.cell
+        if gc is None or gc.cell.size == 0:
+            return
+        self._syncing = True
+        self.spin_cell_w.setValue(int(gc.cell.shape[1]))
+        self.spin_cell_h.setValue(int(gc.cell.shape[0]))
+        # 沒有週期的那一軸不給改：它的「一格」就是整張影像，那不是一個可以
+        # 挑的尺寸。鎖起來並講出原因，比讓人改了發現沒反應好。
+        for spin, ok, axis in ((self.spin_cell_w, gc.periodic_x, "across"),
+                               (self.spin_cell_h, gc.periodic_y, "down")):
+            spin.setEnabled(bool(ok))
+            spin.setToolTip("One cell is this many image pixels %s." % axis
+                            if ok else
+                            "This image has no period %s, so one cell spans "
+                            "the whole image that way — there is no size to "
+                            "choose." % axis)
+        self._syncing = False
 
     def load_encoded(self, text: str, axis: str = "x") -> bool:
         """把**已經存在 recipe 裡**的模板載回來（不必再挑一次大圖）。
@@ -338,12 +560,15 @@ class TemplateDialog(QDialog):
             periodic_x=str(axis) in ("x", "both"),
             periodic_y=str(axis) in ("y", "both"))
         self._from_recipe = True
+        self._source = None
         self._source_path = ""
         self.path_label.setText("(the template stored in this recipe)")
         self.canvas.set_cell(cell)
         self._set_ready(True)
         self.report.setText(self.summary())
+        self._sync_cell_size()
         self._refresh_units()
+        self._refresh_tool_ui()
         return True
 
     def set_regions_text(self, text: str) -> None:
@@ -407,8 +632,7 @@ class TemplateDialog(QDialog):
         """加一個區域（預設 ROI1、ROI2…），並選取它。"""
         regions = self.canvas.regions()
         if len(regions) >= MAX_REGIONS:
-            self.array_hint.setText("At most %d regions on one card."
-                                    % MAX_REGIONS)
+            self._say("At most %d regions on one card." % MAX_REGIONS)
             return ""
         taken = {n for n, _b in regions}
         new = str(name or "")
@@ -472,55 +696,6 @@ class TemplateDialog(QDialog):
         self.canvas.set_current_region(row)
         self._refresh_boxes()
 
-    # ---- 陣列工具 -----------------------------------------------------------
-    def toggle_array(self) -> None:
-        if self.canvas.array_active():
-            self.canvas.cancel_array()
-        else:
-            self.canvas.start_array(*self._array_params())
-        self._refresh_array_ui()
-
-    def commit_array(self) -> int:
-        n = self.canvas.commit_array()
-        self._refresh_array_ui()
-        self._refresh_boxes()
-        return n
-
-    def _array_params(self) -> Tuple[float, float, int, int]:
-        """把 px 的框大小換成「相對於一格」—— 使用者想的是 px，存的是比例。"""
-        h, w = self.canvas.cell_shape()
-        return (self.spin_w.value() / float(w), self.spin_h.value() / float(h),
-                self.spin_nx.value(), self.spin_ny.value())
-
-    def _on_array_params(self) -> None:
-        if self.canvas.array_active():
-            self.canvas.update_array(*self._array_params())
-        self._refresh_array_ui()
-
-    def _on_anchors(self, _n: int) -> None:
-        self._refresh_array_ui()
-
-    def _refresh_array_ui(self) -> None:
-        active = self.canvas.array_active()
-        anchors = self.canvas.array_anchor_count()
-        self.btn_array.setText("Cancel" if active else "Start")
-        self.btn_array_ok.setEnabled(active and anchors >= 2)
-        n = len(self.canvas.array_preview()) if active else 0
-        self.btn_array_ok.setText("Add %d rectangles" % n if n else "Add them")
-        if not active:
-            self.array_hint.setText("")
-        elif anchors == 0:
-            self.array_hint.setText(
-                "Click where the FIRST rectangle's centre goes (top-left).")
-        elif anchors == 1:
-            self.array_hint.setText(
-                "Now click where the LAST rectangle's centre goes "
-                "(bottom-right). Esc cancels.")
-        else:
-            self.array_hint.setText(
-                "%d rectangles, evenly spaced between the two crosshairs. "
-                "Click again to move the first anchor." % n)
-
     # ---- 框的清單 -----------------------------------------------------------
     def _on_boxes_changed(self, _region: int, _boxes: list) -> None:
         self._refresh_boxes()
@@ -545,17 +720,15 @@ class TemplateDialog(QDialog):
         ri = self.canvas.current_region()
         if not (0 <= ri < len(regions)) or not (0 <= row < len(regions[ri][1])):
             return
-        h, w = self.canvas.cell_shape()
-        scale = (w, h, w, h)
         vals = []
         for c in range(4):
             cell = self.box_table.item(row, c)
             try:
-                vals.append(float(cell.text()) / float(scale[c]))
+                vals.append(int(round(float(cell.text()))))
             except (AttributeError, ValueError):
-                self._refresh_boxes()
+                self._refresh_boxes()      # 打了不是數字的字 -> 退回去
                 return
-        self.canvas.replace_box(row, tuple(vals))
+        self.canvas.replace_box(row, self.canvas.from_px(vals))
 
     # ---- 同步 ---------------------------------------------------------------
     def _refresh_regions(self) -> None:
@@ -578,23 +751,24 @@ class TemplateDialog(QDialog):
         regions = self.canvas.regions()
         ri = self.canvas.current_region()
         boxes = regions[ri][1] if 0 <= ri < len(regions) else []
-        h, w = self.canvas.cell_shape()
-        scale = (w, h, w, h)
         self.box_table.setRowCount(len(boxes))
         for r, box in enumerate(boxes):
-            for c in range(4):
-                self.box_table.setItem(
-                    r, c, QTableWidgetItem("%.1f" % (box[c] * scale[c])))
+            for c, v in enumerate(self.canvas.to_px(box)):
+                self.box_table.setItem(r, c, QTableWidgetItem("%d" % v))
         self.box_table.setCurrentCell(self.canvas.selected_box(), 0)
         self._syncing = False
         self.btn_del_box.setEnabled(bool(boxes))
+        name = regions[ri][0] if 0 <= ri < len(regions) else "—"
+        self.box_count.setText(
+            "%s: %d rectangle%s" % (name, len(boxes),
+                                    "" if len(boxes) == 1 else "s"))
         self._refresh_units()
 
     def _refresh_units(self) -> None:
         h, w = self.canvas.cell_shape()
         self.box_units.setText(
-            "pixels of one cell (%d × %d px). Positions are fractions of a "
-            "cell in the recipe, not of the patch." % (w, h))
+            "Whole pixels of one cell (%d × %d px). In the recipe they are "
+            "stored as fractions of a cell — not of the patch." % (w, h))
 
     # ---- 內部 ---------------------------------------------------------------
     def _set_ready(self, ready: bool) -> None:
@@ -606,7 +780,8 @@ class TemplateDialog(QDialog):
         self.report.setText("Could not build a template: %s." % why)
 
     def _say(self, text: str) -> None:
-        self.array_hint.setText(text)
+        """一句話回饋（改名撞名、re-stack 沒有原圖…）—— 講在工具列下面那一行。"""
+        self.tool_hint.setText(text)
 
     def _on_pick(self) -> None:            # pragma: no cover — 需要真的開檔案總管
         path, _f = QFileDialog.getOpenFileName(

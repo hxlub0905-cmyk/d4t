@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from PySide6.QtCore import Qt
 
 from conftest import wire_up  # noqa: E402  —— F10：加完卡要接線
 
@@ -32,6 +33,36 @@ def big_image(seed: int = 0, noise: float = 4.0) -> np.ndarray:
         img[:, x + 12:x + 16] = 210.0
         img[:, x + 32:x + 36] = 210.0
     return img + rng.normal(0, noise, img.shape).astype(np.float32)
+
+
+def _press(w, pt, button=None):
+    _send(w, "mousePressEvent", pt, button or _qt().LeftButton, button or _qt().LeftButton)
+
+
+def _move(w, pt, buttons=None):
+    _send(w, "mouseMoveEvent", pt, _qt().NoButton, buttons or _qt().LeftButton)
+
+
+def _release(w, pt, button=None):
+    _send(w, "mouseReleaseEvent", pt, button or _qt().LeftButton, _qt().NoButton)
+
+
+def _qt():
+    from PySide6.QtCore import Qt as _Qt
+    return _Qt
+
+
+def _send(w, method, pt, button, buttons):
+    """直接餵一個滑鼠事件給 widget（比 QTest 好讀，也不必真的顯示視窗）。"""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    kinds = {"mousePressEvent": QEvent.MouseButtonPress,
+             "mouseMoveEvent": QEvent.MouseMove,
+             "mouseReleaseEvent": QEvent.MouseButtonRelease}
+    ev = QMouseEvent(kinds[method], QPointF(pt), QPointF(pt),
+                     button, buttons, _qt().NoModifier)
+    getattr(w, method)(ev)
 
 
 def _import_qt(g):
@@ -192,7 +223,7 @@ def test_the_multi_add_tool_grows_an_evenly_spaced_row(qapp):
     dlg.spin_nx.setValue(4)
     dlg.spin_ny.setValue(1)
 
-    dlg.toggle_array()
+    dlg.set_tool(canvas_mod.TOOL_ARRAY)
     assert dlg.canvas.array_active() is True
     assert dlg.btn_array_ok.isEnabled() is False       # 錨點還不夠
 
@@ -204,10 +235,13 @@ def test_the_multi_add_tool_grows_an_evenly_spaced_row(qapp):
 
     assert dlg.commit_array() == 4
     boxes = dlg.canvas.regions()[0][1]
-    centres = sorted(b[0] + b[2] / 2.0 for b in boxes)
+    centres = sorted(dlg.canvas.to_px(b)[0] + dlg.canvas.to_px(b)[2] / 2.0
+                     for b in boxes)
     gaps = [b - a for a, b in zip(centres, centres[1:])]
-    assert all(abs(g - gaps[0]) < 1e-9 for g in gaps)
-    assert dlg.canvas.array_active() is False
+    assert all(abs(g - gaps[0]) <= 1.0 for g in gaps), centres
+    # 加完**留在陣列工具上**（通常要標好幾排），只是錨點清掉了
+    assert dlg.canvas.array_active() is True
+    assert dlg.canvas.array_anchor_count() == 0
 
 
 def test_the_multi_add_anchor_is_the_box_centre(qapp):
@@ -219,7 +253,7 @@ def test_the_multi_add_anchor_is_the_box_centre(qapp):
     dlg.spin_h.setValue(int(h * 0.4))
     dlg.spin_nx.setValue(1)
     dlg.spin_ny.setValue(1)
-    dlg.toggle_array()
+    dlg.set_tool(canvas_mod.TOOL_ARRAY)
     dlg.canvas.place_array_anchor(0.5, 0.5)
     x, y, bw, bh = dlg.canvas.array_preview()[0]
     assert abs((x + bw / 2.0) - 0.5) < 1e-6
@@ -354,3 +388,191 @@ def test_the_region_check_view_works_for_the_template_card_too(window):
     assert window.region_check_available() is True
     assert window.open_region_check(n=6, sync=True) is True
     assert "6 defects" in window.region_window.summary_text()
+
+
+# --------------------------------------------------------------------------- #
+# 3. 試用回報七項（F11 Region-1 第二輪）
+# --------------------------------------------------------------------------- #
+def test_a_box_goes_somewhere_even_when_no_region_exists_yet(qapp):
+    """**使用者回報的第 1 個 bug。** 「按下 Add them 加不進去 region」。
+
+    從 Studio 打開一張**已經有模板、還沒有區域**的卡時，區域清單是空的 ——
+    而那時候 `add_box` / `add_boxes` 直接回 −1／0：畫出來的框跟按下 Add them
+    都**安靜地什麼都沒發生**，因為程式覺得自己沒事。
+
+    「使用者做了一個明確的動作」與「沒有容器可以裝」之間，該讓步的是後者。
+    """
+    src = tpl_mod.TemplateDialog()
+    src.load_image(big_image(), "LOT_full.tif")
+
+    dlg = tpl_mod.TemplateDialog()
+    assert dlg.load_encoded(src.encoded(), "x") is True
+    dlg.set_regions_text("")
+    assert dlg.canvas.regions() == []          # 這就是那個處境
+
+    dlg.spin_w.setValue(4)
+    dlg.spin_h.setValue(200)
+    dlg.spin_nx.setValue(4)
+    dlg.set_tool(canvas_mod.TOOL_ARRAY)
+    dlg.canvas.place_array_anchor(0.1, 0.5)
+    dlg.canvas.place_array_anchor(0.7, 0.5)
+    assert dlg.commit_array() == 4
+    assert dlg.regions_text().startswith("ROI1:")
+
+    # 拖曳新增走的是同一條路，所以它以前也一樣安靜地失敗
+    dlg2 = tpl_mod.TemplateDialog()
+    dlg2.load_encoded(src.encoded(), "x")
+    dlg2.set_regions_text("")
+    assert dlg2.canvas.add_box((0.1, 0.0, 0.2, 1.0)) >= 0
+    assert dlg2.regions_text() != ""
+
+
+def test_every_box_lands_on_whole_cell_pixels(qapp):
+    """「pixel 是整數才合理吧」—— 對，半個像素沒有東西可以量。"""
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas.add_box((0.1234, 0.0, 0.2345, 1.0))
+
+    box = dlg.canvas.regions()[0][1][0]
+    h, w = dlg.canvas.cell_shape()
+    for v, size in zip(box, (w, h, w, h)):
+        assert abs(v * size - round(v * size)) < 1e-9, box
+    # 表格也是整數
+    dlg.open_box_table()
+    assert dlg.box_table.item(0, 0).text() == "5"
+
+
+def test_a_zero_width_box_can_never_be_made(qapp):
+    """吸附之後還是不能有 0 寬的框 —— 那種框存不進 recipe。"""
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas.add_box((0.5, 0.5, 0.0001, 0.0001))
+    assert dlg.canvas.to_px(dlg.canvas.regions()[0][1][0])[2:] == (1, 1)
+
+
+def test_the_cell_size_can_be_overridden_and_doubled(qapp):
+    """「有時候會需要 2X 大 cell」—— 量出來的週期是預設值，不是結論。"""
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    assert dlg.canvas.cell_shape()[1] == PERIOD
+
+    dlg._on_double()
+    assert dlg.canvas.cell_shape()[1] == PERIOD * 2
+    # ⚠ 沒有週期的那一軸**不可以**跟著加倍：那會疊出一個比原圖還高的 cell，
+    # 而 build_golden_cell「使用者明講的一律相信」會把它當成有週期 ——
+    # locate_axis 就從 x 變成 both，開始在一個沒有相位的方向上搜尋。
+    assert dlg.canvas.cell_shape()[0] == 240
+    assert dlg.locate_axis() == "x"
+    assert dlg.spin_cell_h.isEnabled() is False
+
+
+def test_restacking_needs_the_original_image_and_says_so(qapp):
+    """從 recipe 讀回來的模板只有結果、沒有原料 —— 那顆鈕不能按下去沒反應。"""
+    src = tpl_mod.TemplateDialog()
+    src.load_image(big_image(), "LOT_full.tif")
+
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_encoded(src.encoded(), "x")
+    assert dlg.restack() is False
+    assert "Pick a full-size image first" in dlg.tool_hint.text()
+
+
+def test_the_four_tools_are_icons_and_only_one_is_active(qapp):
+    """「請改成用 icon 方式顯示（目前介面文字太多）」。"""
+    from adept.ui.widgets import IconButton
+
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    assert set(dlg.tool_buttons) == set(canvas_mod.TOOLS)
+    for key, btn in dlg.tool_buttons.items():
+        assert isinstance(btn, IconButton)
+        assert btn.text() == ""                 # 圖示鈕不放字
+        assert btn.toolTip()                    # 說明退到 tooltip
+
+    for key in canvas_mod.TOOLS:
+        dlg.set_tool(key)
+        assert dlg.canvas.tool() == key
+        on = [k for k, b in dlg.tool_buttons.items() if b.isChecked()]
+        assert on == [key]
+
+
+def test_the_click_tool_drops_one_box_centred_on_the_pointer(qapp):
+    """跟陣列工具的錨點講同一句話：按下去的那一點是**框的中心**。"""
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.set_tool(canvas_mod.TOOL_CLICK)
+    dlg.spin_w.setValue(6)
+    dlg.spin_h.setValue(120)
+
+    dlg.canvas.resize(400, 400)
+    dlg.canvas._tool_click_at = None
+    h, w = dlg.canvas.cell_shape()
+    pt = dlg.canvas.norm_to_view(0.5, 0.5)
+    _press(dlg.canvas, pt)
+
+    x, y, bw, bh = dlg.canvas.to_px(dlg.canvas.regions()[0][1][-1])
+    assert (bw, bh) == (6, 120)
+    assert abs((x + bw / 2.0) - w / 2.0) <= 0.5
+    assert abs((y + bh / 2.0) - h / 2.0) <= 0.5
+
+
+def test_painting_pixels_merges_them_into_the_fewest_rectangles(qapp):
+    """一顆一顆點出來的像素，放手時併成**逐列的矩形**（區域的模型是矩形）。"""
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.set_tool(canvas_mod.TOOL_PAINT)
+    dlg.canvas._paint = {(3, 5), (4, 5), (5, 5), (9, 5), (3, 6)}
+    dlg.canvas._commit_paint()
+
+    got = sorted(dlg.canvas.to_px(b) for b in dlg.canvas.regions()[0][1])
+    assert got == [(3, 5, 3, 1), (3, 6, 1, 1), (9, 5, 1, 1)]
+
+
+def test_right_dragging_pans_the_canvas(qapp):
+    """「template 畫布按住右鍵要能拖拉移動」。"""
+    from PySide6.QtCore import QPointF
+
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas.resize(400, 400)
+    before = dlg.canvas.norm_to_view(0.0, 0.0)
+
+    _press(dlg.canvas, QPointF(100.0, 100.0), button=Qt.RightButton)
+    _move(dlg.canvas, QPointF(150.0, 130.0), buttons=Qt.RightButton)
+    _release(dlg.canvas, QPointF(150.0, 130.0), button=Qt.RightButton)
+
+    after = dlg.canvas.norm_to_view(0.0, 0.0)
+    assert round(after.x() - before.x()) == 50
+    assert round(after.y() - before.y()) == 30
+
+
+def test_right_dragging_never_creates_a_box(qapp):
+    """平移不可以順手留下一個框 —— 那是「畫布說謊」的最短路徑。"""
+    from PySide6.QtCore import QPointF
+
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas.resize(400, 400)
+    before = len(dlg.canvas.regions()[0][1])
+    _press(dlg.canvas, QPointF(100.0, 100.0), button=Qt.RightButton)
+    _move(dlg.canvas, QPointF(180.0, 160.0), buttons=Qt.RightButton)
+    _release(dlg.canvas, QPointF(180.0, 160.0), button=Qt.RightButton)
+    assert len(dlg.canvas.regions()[0][1]) == before
+
+
+def test_the_numbers_table_lives_behind_a_button(qapp):
+    """「表格部分建議不顯示，放在一個按鈕裡打開來可編輯」。"""
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas.add_box((0.1, 0.0, 0.2, 1.0))
+
+    assert dlg.box_table.isVisible() is False
+    assert "1 rectangle" in dlg.box_count.text()
+
+    table = dlg.open_box_table()
+    assert table.isVisible() is True
+    assert dlg.box_table.rowCount() == 1
+
+    # 表格是**可編輯的**，而且改完畫布上就是那個值（同一份資料）
+    dlg.box_table.item(0, 2).setText("9")
+    assert dlg.canvas.to_px(dlg.canvas.regions()[0][1][0])[2] == 9

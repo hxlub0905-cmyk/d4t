@@ -119,6 +119,10 @@ GLYPH_ICONS = (
     "folder_open",
     # 畫布彈出視窗（F8-UI D 案）
     "popout",
+    # 在 Golden Cell 上標區域的四支工具（F11 Region-1 第二輪）。名字說的是
+    # **這支工具怎麼產生框**，四個輪廓刻意各不相同 —— 它們並排在同一列上，
+    # 分不出來的話那一列等於四顆一樣的鈕。
+    "roi_drag", "roi_click", "roi_array", "roi_paint",
 )
 
 
@@ -251,6 +255,40 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         head = (w - 2 * m) * 0.38
         p.drawLine(QPointF(ax1, ay1), QPointF(ax1 - head, ay1))
         p.drawLine(QPointF(ax1, ay1), QPointF(ax1, ay1 + head))
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+    elif n == "roi_drag":
+        # 一個虛線框 + 右下角的游標：**拉出來的**框。
+        p.setPen(QPen(QColor(color), max(1.1, size / 11.0), Qt.DashLine))
+        p.drawRect(QRectF(m, m, (w - 2 * m) * 0.72, (h - 2 * m) * 0.72))
+        p.setPen(pen)
+        tip = QPointF(m + (w - 2 * m) * 0.72, m + (h - 2 * m) * 0.72)
+        p.drawLine(tip, QPointF(tip.x() + w * 0.16, tip.y() + h * 0.16))
+    elif n == "roi_click":
+        # 一個實框 + 中心的十字：**點一下，框長在游標中心**。
+        box = QRectF(m, h * 0.24, w - 2 * m, h * 0.52)
+        p.drawRect(box)
+        c = box.center()
+        a = w * 0.13
+        p.drawLine(QPointF(c.x() - a, c.y()), QPointF(c.x() + a, c.y()))
+        p.drawLine(QPointF(c.x(), c.y() - a), QPointF(c.x(), c.y() + a))
+    elif n == "roi_array":
+        # 一排三個等距的框：**一次長一整排**。跟 ``roi_click`` 的差別就是
+        # 「一個」與「一排」，那正是兩支工具的差別。
+        side = (w - 2 * m) * 0.22
+        gap = ((w - 2 * m) - 3 * side) / 2.0
+        for i in range(3):
+            p.drawRect(QRectF(m + i * (side + gap), h * 0.28, side, h * 0.44))
+    elif n == "roi_paint":
+        # 幾格點亮的方格：**一顆一顆點像素**。用實心小方塊而不是筆刷 ——
+        # 畫出來的東西是像素，不是筆觸。
+        side = (w - 2 * m) / 3.0
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        for i, j in ((0, 1), (1, 0), (1, 1), (2, 1), (1, 2)):
+            p.drawRect(QRectF(m + i * side + side * 0.12,
+                              m + j * side + side * 0.12,
+                              side * 0.76, side * 0.76))
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
     elif n == "folder":
