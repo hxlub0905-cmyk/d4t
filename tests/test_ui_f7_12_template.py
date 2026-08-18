@@ -630,7 +630,8 @@ def test_the_cursor_tool_selects_instead_of_drawing(qapp):
     _release(dlg.canvas, b)
 
     assert len(dlg.canvas.regions()[0][1]) == before      # 沒有多出一個框
-    assert dlg.canvas.selection() == [0, 1]               # 完整落在套索裡的兩個
+    # 選取是 (區域, 框) —— 跨區域才選得到彼此（不同 region 要能對齊）
+    assert dlg.canvas.selection() == [(0, 0), (0, 1)]
 
 
 def test_ctrl_click_adds_to_the_selection(qapp):
@@ -638,11 +639,11 @@ def test_ctrl_click_adds_to_the_selection(qapp):
     dlg.load_image(big_image(), "LOT_full.tif")
     dlg.canvas.add_boxes([(0.1, 0.1, 0.2, 0.2), (0.5, 0.1, 0.2, 0.2)])
     dlg.canvas.select_box(0)
-    assert dlg.canvas.selection() == [0]
+    assert dlg.canvas.selection() == [(0, 0)]
     dlg.canvas.select_box(1, add=True)
-    assert dlg.canvas.selection() == [0, 1]
+    assert dlg.canvas.selection() == [(0, 0), (0, 1)]
     dlg.canvas.select_box(1, add=True)                    # 再點一次 = 取消選
-    assert dlg.canvas.selection() == [0]
+    assert dlg.canvas.selection() == [(0, 0)]
 
 
 def test_delete_removes_every_selected_rectangle(qapp):
@@ -935,3 +936,169 @@ def test_the_card_refuses_to_be_configured_that_way_too(qapp):
     dlg.canvas.add_box((0.6, 0.0, 0.1, 1.0))
     params["regions"] = dlg.regions_text()
     assert cls.configuration_issues(params) == []
+
+
+# --------------------------------------------------------------------------- #
+# 6. 第六輪：試用回報六項
+# --------------------------------------------------------------------------- #
+def test_multi_add_previews_the_whole_row_before_the_second_click(qapp):
+    """「只有點左上會有預覽，我希望點右下也會有預覽（中間的 box 也要）。」
+
+    放了第一個錨點之後，**游標就是暫時的第二個錨點** —— 那一整片（含中間那些）
+    要在按下去之前就看得到，不然使用者是在瞎按。
+    """
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas.resize(420, 380)
+    dlg.spin_w.setValue(3)
+    dlg.spin_h.setValue(200)
+    dlg.spin_nx.setValue(5)
+    dlg.set_tool(canvas_mod.TOOL_ARRAY)
+
+    dlg.canvas.place_array_anchor(0.1, 0.5)
+    assert len(dlg.canvas.array_preview()) == 1        # 還沒移到任何地方
+
+    _move(dlg.canvas, dlg.canvas.norm_to_view(0.8, 0.5), buttons=Qt.NoButton)
+    assert dlg.canvas.array_provisional() is True
+    boxes = dlg.canvas.array_preview()
+    assert len(boxes) == 5, "中間那幾個也要預覽"
+    xs = sorted(dlg.canvas.to_px_f(b)[0] for b in boxes)
+    gaps = [b - a for a, b in zip(xs, xs[1:])]
+    assert all(abs(g - gaps[0]) < 1e-9 for g in gaps)
+
+    # 但**還不能按下 Add** —— 那一片還沒定下來
+    dlg._refresh_tool_ui()
+    assert dlg.btn_array_ok.isEnabled() is False
+    assert "Preview" in dlg.tool_hint.text()
+
+    dlg.canvas.place_array_anchor(0.8, 0.5)
+    dlg._refresh_tool_ui()
+    assert dlg.btn_array_ok.isEnabled() is True
+
+
+def test_the_count_boxes_are_labelled_x_and_y(qapp):
+    """「顯示上 W→H→X→下箭頭（這個應該是要 Y）」。"""
+    dlg = tpl_mod.TemplateDialog()
+    row = dlg.spin_nx.parent()
+    labels = [w.text() for w in row.findChildren(type(dlg.tool_hint))
+              if w.text() in ("W", "H", "X", "Y", "×", "↓")]
+    assert labels == ["W", "H", "X", "Y"], labels
+
+
+def test_selecting_can_cross_regions_so_they_can_be_aligned(qapp):
+    """「Select 框選可以跨 Region（這樣才可以讓不同 region 對齊）。」"""
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas.resize(420, 380)
+    dlg.canvas.add_box((0.10, 0.10, 0.12, 0.20))       # ROI1
+    dlg.add_region()
+    dlg.canvas.add_box((0.40, 0.55, 0.12, 0.20))       # ROI2
+    assert len(dlg.canvas.regions()) == 2
+
+    dlg.set_tool(canvas_mod.TOOL_CURSOR)
+    a = dlg.canvas.norm_to_view(0.02, 0.02)
+    b = dlg.canvas.norm_to_view(0.95, 0.95)
+    _press(dlg.canvas, a)
+    _move(dlg.canvas, b)
+    _release(dlg.canvas, b)
+
+    assert dlg.canvas.selection() == [(0, 0), (1, 0)], "兩個區域各一個都要選到"
+
+    # 而且對得起來 —— 那正是跨區域選取的目的
+    assert dlg.align_selection("left") == 2
+    xs = [dlg.canvas.regions()[r][1][0][0] for r in (0, 1)]
+    assert abs(xs[0] - xs[1]) < 1e-9
+
+
+def test_arrow_keys_move_a_cross_region_selection_together(qapp):
+    """「可以框選 ROI 後按上下左右鍵一起移動。」"""
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas.add_box((0.10, 0.10, 0.12, 0.20))
+    dlg.add_region()
+    dlg.canvas.add_box((0.40, 0.55, 0.12, 0.20))
+    dlg.canvas.set_selection([(0, 0), (1, 0)])
+
+    before = [dlg.canvas.to_px(dlg.canvas.regions()[r][1][0]) for r in (0, 1)]
+    _key(dlg.canvas, Qt.Key_Right)
+    after = [dlg.canvas.to_px(dlg.canvas.regions()[r][1][0]) for r in (0, 1)]
+    for b, a in zip(before, after):
+        assert a[0] == b[0] + 1 and a[1] == b[1], (b, a)
+
+    assert dlg.undo() is True
+    assert [dlg.canvas.to_px(dlg.canvas.regions()[r][1][0])
+            for r in (0, 1)] == before
+
+
+def test_handles_only_show_when_exactly_one_box_is_selected(qapp):
+    """「八角的拉選框…只有在 select 點到或框到時才顯示（不然每次 multi add
+    增加當下都會全框很醜）。」
+
+    兩件事：multi add 加完**不再全選**，而且選了一整排的時候不畫把手 ——
+    一個把手拉不動二十個框，「選中了」用外框加粗就講完了。
+    """
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.spin_w.setValue(3)
+    dlg.spin_h.setValue(200)
+    dlg.spin_nx.setValue(4)
+    dlg.set_tool(canvas_mod.TOOL_ARRAY)
+    dlg.canvas.place_array_anchor(0.1, 0.5)
+    dlg.canvas.place_array_anchor(0.7, 0.5)
+    assert dlg.commit_array() == 4
+    assert dlg.canvas.selection() == [], "加完不該把每一個都選起來"
+
+    dlg.canvas.set_selection([])
+    assert dlg.canvas.handles_visible() is False
+    dlg.canvas.set_selection([(0, 0), (0, 1)])
+    assert dlg.canvas.handles_visible() is False, "多選不畫把手"
+    dlg.canvas.set_selection([(0, 0)])
+    assert dlg.canvas.handles_visible() is True, "單選要畫把手"
+
+    # 三種狀態都要畫得出來（不是只有「不會爆」——但至少那個要先成立）
+    for sel in ([], [(0, 0)], [(0, 0), (0, 1)]):
+        dlg.canvas.set_selection(sel)
+        _render(dlg.canvas)
+
+
+def test_the_wheel_zooms_towards_the_pointer(qapp):
+    """「滾輪 zoom in 是朝當前滑鼠位置，而不是畫面中間。」
+
+    「我指著的東西不要跑掉」是縮放唯一該保證的事。
+    """
+    from PySide6.QtCore import QEvent, QPoint, QPointF
+    from PySide6.QtGui import QWheelEvent
+
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas.resize(420, 380)
+    dlg.canvas.fit()
+
+    pt = QPointF(90.0, 70.0)                    # 刻意不在正中央
+    under = dlg.canvas.view_to_norm(pt)
+    ev = QWheelEvent(pt, dlg.canvas.mapToGlobal(QPoint(90, 70)),
+                     QPoint(0, 0), QPoint(0, 120), Qt.NoButton,
+                     Qt.NoModifier, Qt.NoScrollPhase, False)
+    dlg.canvas.wheelEvent(ev)
+
+    assert dlg.canvas.zoom() > 0
+    after = dlg.canvas.norm_to_view(*under)
+    assert abs(after.x() - pt.x()) < 0.5, (after.x(), pt.x())
+    assert abs(after.y() - pt.y()) < 0.5, (after.y(), pt.y())
+
+
+def _key(w, key) -> None:
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+    w.keyPressEvent(QKeyEvent(QEvent.KeyPress, key, Qt.NoModifier))
+
+
+def _render(canvas) -> None:
+    """把畫布畫一次（例外會在這裡冒出來）。"""
+    from PySide6.QtGui import QColor, QPixmap
+
+    canvas.resize(420, 380)
+    pm = QPixmap(canvas.size())
+    pm.fill(QColor("#000000"))
+    canvas.render(pm)
+    assert not pm.isNull()

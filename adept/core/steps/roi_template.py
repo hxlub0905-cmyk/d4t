@@ -27,6 +27,18 @@
 ``pipeline/cellrois.py``），而框是在 Studio 的模板編輯器上**畫**出來的
 —— 四個 0–1 的數字沒有一個地方講得清楚它們相對於什麼，一張圖講得清楚。
 
+確定度（``margin``）預設**不當門檻**
+------------------------------------
+使用者回報「certainty 還是會太小，還是拿掉？」——「拿掉」的是門檻，不是數字。
+
+* **數字要留著**：它是唯一講得出「這一顆可能落在另一份上」的東西。
+* **門檻預設 0**：週期性強的 layout 上這個數字對每一顆都小，拿它擋顆數，
+  擋掉的多半是好的。
+
+而「落在另一份上要不要緊」這個問題**已經有一個確定的答案了**：把區域整組平移
+1/k 看落不落回自己（``configuration_issues``）。落得回去就無害，落不回去卡片
+會在跑之前就講。**有了那個檢查，margin 就不必再當一道盲目的閘門。**
+
 cell 可以取成週期的 k 倍（使用者：「有時候會需要 2X 大 cell」）
 ----------------------------------------------------------------
 那時候影像其實仍然以 1× 重複，於是相關面摺回「一個 cell」之後有 k 個一模一樣的
@@ -174,13 +186,17 @@ class RoiTemplateStep(Step):
             advanced=True,
         ),
         ParamSpec(
-            name="min_margin", type="float", default=0.05, min=0.0, max=2.0,
+            name="min_margin", type="float", default=0.0, min=0.0, max=2.0,
             section="5 · When a defect cannot be located",
             label="Minimum certainty",
             help=("How much better the best position must be than the next "
-                  "best one. A patch with nothing distinctive on it matches "
-                  "every position equally well - that scores near 0 here, and "
-                  "is the signal that this defect cannot be located."),
+                  "best one. Zero (the default) means it is reported but never "
+                  "rejects a defect - on a strongly repeating layout this "
+                  "number is small for everyone, so using it as a gate throws "
+                  "away good defects. Raise it only when landing on the wrong "
+                  "copy would actually change what you measure: that is when "
+                  "the regions are NOT the same on every copy, and this card "
+                  "already tells you when that is the case."),
             advanced=True,
         ),
         ParamSpec(

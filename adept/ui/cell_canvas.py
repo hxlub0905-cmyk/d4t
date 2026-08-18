@@ -118,8 +118,12 @@ class CellCanvas(QWidget):
         #: [(name, [box, …]), …] —— 跟 ``cellrois`` 同一個形狀
         self._regions: List[Tuple[str, List[Tuple[float, float, float, float]]]] = []
         self._current = 0
-        #: 選起來的框（**可以好幾個** —— 對齊工具要的就是這個）。
-        self._selection: List[int] = []
+        #: 選起來的框，每一個是 ``(區域, 框)``（F11 Region-1 第六輪）。
+        #:
+        #: 為什麼**跨區域**：使用者要「不同 region 對齊」—— EPI 那一排跟 MG 那
+        #: 一排要切齊的時候，那兩排本來就在兩個區域裡。選取如果鎖在目前這個
+        #: 區域，對齊工具就永遠只對得起同一個區域裡的東西。
+        self._selection: List[Tuple[int, int]] = []
         self._undo: List[Any] = []
         self._zoom = 0.0            # 0 = 還沒算過（第一次 paint 時 fit）
         self._pan = QPointF(0.0, 0.0)
@@ -179,21 +183,55 @@ class CellCanvas(QWidget):
         return self._current
 
     def selected_box(self) -> int:
-        """**主要**選取的那一個（−1 = 沒有）—— 數字表跟著它捲。"""
-        return self._selection[-1] if self._selection else -1
+        """**目前區域裡**主要選取的那一個（−1 = 沒有）—— 數字表跟著它捲。"""
+        for ri, bi in reversed(self._selection):
+            if ri == self._current:
+                return bi
+        return -1
 
-    def selection(self) -> List[int]:
+    def selection(self) -> List[Tuple[int, int]]:
+        """選起來的每一個 ``(區域, 框)``。"""
         return list(self._selection)
 
-    def set_selection(self, indexes) -> None:
-        n = len(self._boxes())
-        self._selection = [i for i in dict.fromkeys(int(k) for k in indexes)
-                           if 0 <= i < n]
+    def handles_visible(self) -> bool:
+        """現在畫不畫那八個把手。
+
+        **只有選單一個框的時候才畫**（使用者：「每次 multi add 增加當下都會全框
+        很醜」）。選了一整排的時候把手也沒有意義 —— 一個把手拉不動二十個框，
+        而「選中了」用外框加粗就講完了。
+        """
+        return len(self._selection) == 1
+
+    def selection_here(self) -> List[int]:
+        """選起來的框裡，屬於**目前區域**的那幾個。"""
+        return [bi for ri, bi in self._selection if ri == self._current]
+
+    def set_selection(self, items) -> None:
+        """吃 ``(區域, 框)`` 或單純的框索引（後者當成目前區域）。"""
+        picked: List[Tuple[int, int]] = []
+        for it in items:
+            ri, bi = it if isinstance(it, (tuple, list)) else (self._current, it)
+            ri, bi = int(ri), int(bi)
+            if 0 <= ri < len(self._regions) and 0 <= bi < len(self._regions[ri][1]):
+                if (ri, bi) not in picked:
+                    picked.append((ri, bi))
+        self._selection = picked
         self.selection_changed.emit(self._current, self.selected_box())
         self.update()
 
     def select_all(self) -> None:
-        self.set_selection(range(len(self._boxes())))
+        """**每一個區域**的每一個框 —— 對齊要跨區域才用得上（見 `_selection`）。"""
+        self.set_selection([(ri, bi) for ri, (_n, boxes) in enumerate(self._regions)
+                            for bi in range(len(boxes))])
+
+    def box_at(self, ri: int, bi: int):
+        if 0 <= ri < len(self._regions) and 0 <= bi < len(self._regions[ri][1]):
+            return self._regions[ri][1][bi]
+        return None
+
+    def put_box(self, ri: int, bi: int, box) -> None:
+        if 0 <= ri < len(self._regions) and 0 <= bi < len(self._regions[ri][1]):
+            self._regions[ri][1][bi] = tuple(float(v) for v in box)
 
     def set_patch_size(self, size: Optional[Tuple[int, int]]) -> None:
         """一顆 defect 看得到多大（``(h, w)`` 像素）；``None`` = 不知道就不畫。
@@ -364,7 +402,7 @@ class CellCanvas(QWidget):
         self.ensure_region()
         self._snapshot()
         self._boxes().append(self.snap(box))
-        self.set_selection([len(self._boxes()) - 1])
+        self.set_selection([(self._current, len(self._boxes()) - 1)])
         self._commit()
         return len(self._boxes()) - 1
 
@@ -380,39 +418,42 @@ class CellCanvas(QWidget):
             return 0
         self.ensure_region()
         self._snapshot()
-        first = len(self._boxes())
         self._boxes().extend(added)
-        self.set_selection(range(first, first + len(added)))
+        # **加完不要全選**（使用者：「每次 multi add 增加當下都會全框很醜」）。
+        # 剛長出來的一整排本來就看得到，再把每一個都套上把手只是把畫面塞滿。
+        self.set_selection([])
         self._commit()
         return len(added)
 
     def delete_selected(self) -> bool:
-        """刪掉**每一個**選起來的框。"""
-        boxes = self._boxes()
-        drop = sorted((i for i in self._selection if 0 <= i < len(boxes)),
-                      reverse=True)
+        """刪掉**每一個**選起來的框（可以跨區域）。"""
+        drop = sorted(self._selection, reverse=True)
         if not drop:
             return False
         self._snapshot()
-        for i in drop:
-            boxes.pop(i)
-        self.set_selection([min(drop[-1], len(boxes) - 1)] if boxes else [])
+        for ri, bi in drop:                     # 由後往前，索引才不會被洗掉
+            if 0 <= ri < len(self._regions) and 0 <= bi < len(self._regions[ri][1]):
+                self._regions[ri][1].pop(bi)
+        self.set_selection([])
+        self.regions_changed.emit()
         self._commit()
         return True
 
-    def select_box(self, index: int, add: bool = False) -> None:
+    def select_box(self, index: int, add: bool = False,
+                   region: Optional[int] = None) -> None:
         """選一個框；``add=True`` 是 Ctrl＋點（加選／取消選）。"""
         if index < 0:
             self.set_selection([])
             return
+        key = (self._current if region is None else int(region), int(index))
         if not add:
-            self.set_selection([index])
+            self.set_selection([key])
             return
         picked = list(self._selection)
-        if index in picked:
-            picked.remove(index)
+        if key in picked:
+            picked.remove(key)
         else:
-            picked.append(index)
+            picked.append(key)
         self.set_selection(picked)
 
     def replace_box(self, index: int, box, snap: bool = True) -> None:
@@ -431,20 +472,19 @@ class CellCanvas(QWidget):
         對齊，那時候「第一個」是哪一個他自己也不知道（那會變成一個看不見的規則）。
         """
         how = str(how)
-        boxes = self._boxes()
-        picked = [i for i in self._selection if 0 <= i < len(boxes)]
+        picked = [k for k in self._selection if self.box_at(*k) is not None]
         if how not in ALIGNMENTS or len(picked) < 2:
             return 0
 
-        xs = [boxes[i] for i in picked]
+        xs = [self.box_at(*k) for k in picked]
         left = min(b[0] for b in xs)
         right = max(b[0] + b[2] for b in xs)
         top = min(b[1] for b in xs)
         bottom = max(b[1] + b[3] for b in xs)
 
         self._snapshot()
-        for i in picked:
-            x, y, w, h = boxes[i]
+        for k in picked:
+            x, y, w, h = self.box_at(*k)
             if how == "left":
                 x = left
             elif how == "right":
@@ -457,7 +497,7 @@ class CellCanvas(QWidget):
                 y = bottom - h
             elif how == "middle":
                 y = (top + bottom) / 2.0 - h / 2.0
-            boxes[i] = self.snap((x, y, w, h))
+            self.put_box(k[0], k[1], self.snap((x, y, w, h)))
         self._commit()
         return len(picked)
 
@@ -515,6 +555,10 @@ class CellCanvas(QWidget):
         if self._array is None or not self._array["anchors"]:
             return []
         a = self._array["anchors"]
+        # 只放了第一個錨點時，**游標就是暫時的第二個** —— 使用者要在按下去之前
+        # 看到整片（含中間那些），而不是只看到左上角那一個。
+        if len(a) == 1 and self._hover is not None:
+            a = [a[0], self._hover]
         first = a[0]
         last = a[1] if len(a) > 1 else a[0]
         h, w = self.cell_shape()
@@ -526,12 +570,22 @@ class CellCanvas(QWidget):
                            self._array["ny"] if len(a) > 1 else 1,
                            cell_size=(w, h))
 
+    def array_provisional(self) -> bool:
+        """第二個錨點還是**游標的位置**（還沒按下去）嗎。"""
+        return (self._array is not None
+                and len(self._array["anchors"]) == 1
+                and self._hover is not None)
+
     def array_pitch(self) -> Tuple[float, float]:
         """這一片實際用的間距（cell 像素，**可以是小數**）—— 提示列要講出來。"""
-        if self._array is None or len(self._array["anchors"]) < 2:
+        if self._array is None or not self._array["anchors"]:
             return (0.0, 0.0)
         h, w = self.cell_shape()
         a = self._array["anchors"]
+        if len(a) == 1 and self._hover is not None:
+            a = [a[0], self._hover]
+        if len(a) < 2:
+            return (0.0, 0.0)
         return array_pitch(a[0], a[1], self._array["nx"],
                            self._array["ny"], (w, h))
 
@@ -564,17 +618,24 @@ class CellCanvas(QWidget):
 
     # ---- 滑鼠 ---------------------------------------------------------------
     def _hit(self, pt: QPointF):
-        """``(box_index, 把手)``；把手是 ``""``（框身）或 ``"nw"``… 之一。"""
-        boxes = self._boxes()
-        for i in range(len(boxes) - 1, -1, -1):        # 上層的先接
-            r = self.box_rect(boxes[i])
-            if i in self._selection:
-                for name, corner in self._handles(r, _GRAB).items():
-                    if corner.contains(pt):
-                        return i, name
-            if r.contains(pt):
-                return i, ""
-        return -1, ""
+        """``((區域, 框), 把手)``；把手是 ``""``（框身）或 ``"nw"``… 之一。
+
+        **目前這個區域先接**，其他區域才接得到 —— 兩個區域的框疊在一起的時候，
+        使用者正在編的那一個要優先，否則點下去會跳到另一個區域。
+        """
+        order = ([self._current]
+                 + [i for i in range(len(self._regions)) if i != self._current])
+        for ri in order:
+            boxes = self._regions[ri][1] if ri < len(self._regions) else []
+            for bi in range(len(boxes) - 1, -1, -1):   # 上層的先接
+                r = self.box_rect(boxes[bi])
+                if (ri, bi) in self._selection and len(self._selection) == 1:
+                    for name, corner in self._handles(r, _GRAB).items():
+                        if corner.contains(pt):
+                            return (ri, bi), name
+                if r.contains(pt):
+                    return (ri, bi), ""
+        return None, ""
 
     @staticmethod
     def _handles(r: QRectF, d: float = _HANDLE) -> Dict[str, QRectF]:
@@ -589,6 +650,9 @@ class CellCanvas(QWidget):
 
     def mousePressEvent(self, e) -> None:              # noqa: D102 - Qt hook
         pt = _pos(e)
+        # 點了畫布就把鍵盤焦點抓過來 —— 不然按了側欄的鈕之後，方向鍵與
+        # Del／Ctrl+Z 全部沒反應，而畫面上看起來框明明還選著。
+        self.setFocus(Qt.MouseFocusReason)
         # 右鍵／中鍵／Shift+左鍵都是平移（使用者要的是右鍵；另外兩個留著，
         # 它們是既有的習慣，拿掉只會讓現在會用的人踩空）
         if e.button() in (Qt.RightButton, Qt.MiddleButton) or (
@@ -619,20 +683,20 @@ class CellCanvas(QWidget):
             return
 
         add = bool(e.modifiers() & Qt.ControlModifier)
-        idx, handle = self._hit(pt)
-        if idx >= 0:
-            if add or idx not in self._selection:
-                self.select_box(idx, add=add)
-            if handle or idx in self._selection:
-                # 選了好幾個的時候拖任何一個都**整組一起搬** —— 不然使用者
-                # 對齊完想微調，一拖就把選取打散了。
+        key, handle = self._hit(pt)
+        if key is not None:
+            if add or key not in self._selection:
+                self.select_box(key[1], add=add, region=key[0])
+            if handle or key in self._selection:
+                # 選了好幾個的時候拖任何一個都**整組一起搬**（跨區域也是）——
+                # 不然使用者對齊完想微調，一拖就把選取打散了。
                 self._snapshot()
-                self._drag = {"mode": handle or "move", "index": idx,
+                self._drag = {"mode": handle or "move", "key": key,
                               "from": self.view_to_norm(pt),
-                              "group": {i: tuple(self._boxes()[i])
-                                        for i in self._selection
-                                        if 0 <= i < len(self._boxes())},
-                              "box": tuple(self._boxes()[idx])}
+                              "group": {k: tuple(self.box_at(*k))
+                                        for k in self._selection
+                                        if self.box_at(*k) is not None},
+                              "box": tuple(self.box_at(*key))}
             return
 
         nx, ny = self.view_to_norm(pt)
@@ -654,6 +718,9 @@ class CellCanvas(QWidget):
         # 還沒按下去就先畫出「按下去會長出什麼」（使用者：方便對齊擺放）
         if self._tool in (TOOL_CLICK, TOOL_ARRAY):
             self._hover = self.view_to_norm(pt)
+            if self._tool == TOOL_ARRAY and self.array_anchor_count() == 1:
+                # 整片的預覽跟著游標走 —— 提示列上的數量與 pitch 也要跟著
+                self.array_anchors_changed.emit(1)
             self.update()
         if self._paint is not None and (e.buttons() & Qt.LeftButton):
             self._paint_at(pt)
@@ -679,7 +746,10 @@ class CellCanvas(QWidget):
     def _sync_lasso(self) -> None:
         """框選：**整個**落在套索裡的框才算 —— 擦到邊就選中會很難只選一個。"""
         lx, ly, lw, lh = self._drag["box"]
-        inside = [i for i, (x, y, w, h) in enumerate(self._boxes())
+        # **每一個區域**都收 —— 不同 region 對齊的前提就是選得到彼此
+        inside = [(ri, bi)
+                  for ri, (_n, boxes) in enumerate(self._regions)
+                  for bi, (x, y, w, h) in enumerate(boxes)
                   if x >= lx and y >= ly and x + w <= lx + lw and y + h <= ly + lh]
         picked = list(self._drag["base"]) if self._drag.get("add") else []
         self.set_selection(picked + inside)
@@ -690,10 +760,8 @@ class CellCanvas(QWidget):
         dx, dy = nx - d["from"][0], ny - d["from"][1]
         mode = d["mode"]
         if mode == "move":
-            boxes = self._boxes()
-            for i, (bx, by, bw, bh) in (d.get("group") or {}).items():
-                if 0 <= i < len(boxes):
-                    boxes[i] = self.snap((bx + dx, by + dy, bw, bh))
+            for k, (bx, by, bw, bh) in (d.get("group") or {}).items():
+                self.put_box(k[0], k[1], self.snap((bx + dx, by + dy, bw, bh)))
             self.update()
             return
         else:
@@ -709,10 +777,9 @@ class CellCanvas(QWidget):
                 x, w = x + w, -w
             if h < 0:
                 y, h = y + h, -h
-        boxes = self._boxes()
-        if 0 <= d["index"] < len(boxes):
-            boxes[d["index"]] = self.snap((x, y, min(1.0, w), min(1.0, h)))
-            self.update()
+        self.put_box(d["key"][0], d["key"][1],
+                     self.snap((x, y, min(1.0, w), min(1.0, h))))
+        self.update()
 
     def mouseReleaseEvent(self, e) -> None:             # noqa: D102 - Qt hook
         if self._paint is not None:
@@ -798,8 +865,17 @@ class CellCanvas(QWidget):
 
     def wheelEvent(self, e) -> None:                    # noqa: D102 - Qt hook
         delta = e.angleDelta().y()
-        if delta:
-            self.zoom_by(1.15 if delta > 0 else 1 / 1.15)
+        if not delta:
+            return
+        # **對著游標縮放**，不是對著畫面中心（使用者回報）。做法是把游標下面那
+        # 一點的 cell 座標記下來，縮放之後再用 pan 把它移回原來的螢幕位置 ——
+        # 「我指著的東西不要跑掉」是縮放唯一該保證的事。
+        pt = _pos(e)
+        before = self.view_to_norm(pt)
+        self.zoom_by(1.15 if delta > 0 else 1 / 1.15)
+        after = self.norm_to_view(*before)
+        self._pan += pt - after
+        self.update()
 
     def keyPressEvent(self, e) -> None:                 # noqa: D102 - Qt hook
         step = 1.0 / max(1, self.cell_shape()[1])       # 一格 cell 像素
@@ -819,12 +895,12 @@ class CellCanvas(QWidget):
             return
         if e.key() in keys and self._selection:
             dx, dy = keys[e.key()]
-            boxes = self._boxes()
             self._snapshot()
-            for i in self._selection:
-                if 0 <= i < len(boxes):
-                    x, y, w, h = boxes[i]
-                    boxes[i] = self.snap((x + dx, y + dy, w, h))
+            for k in self._selection:
+                box = self.box_at(*k)
+                if box is not None:
+                    x, y, w, h = box
+                    self.put_box(k[0], k[1], self.snap((x + dx, y + dy, w, h)))
             self._commit()
             return
         super().keyPressEvent(e)
@@ -900,15 +976,18 @@ class CellCanvas(QWidget):
                     for tx in span:
                         here = (tx == 0 and ty == 0)
                         r = base.translated(tx * w * z, ty * h * z)
-                        sel = (ri == self._current
-                               and bi in self._selection and here)
+                        sel = ((ri, bi) in self._selection and here)
                         p.setPen(QPen(col, 2.2 if sel else 1.4,
                                       Qt.SolidLine if here else Qt.DotLine))
                         fill = QColor(col)
                         fill.setAlpha(70 if sel else (34 if here else 14))
                         p.setBrush(fill)
                         p.drawRect(r)
-                        if sel:
+                        # 把手**只有選單一個框的時候才畫**（使用者：multi add
+                        # 加完全部都框起來很醜）。選了一整排的時候把手也沒有
+                        # 意義 —— 一個把手拉不動二十個框，而「選中了」用外框
+                        # 加粗就講完了。
+                        if sel and self.handles_visible():
                             p.setBrush(col)
                             p.setPen(QPen(QColor(255, 255, 255, 210), 0.8))
                             for hr in self._handles(r).values():

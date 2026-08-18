@@ -416,10 +416,14 @@ class TemplateDialog(QDialog):
 
         self.spin_w = self._spin(box, 1, 4096, 8, "Rectangle width, in cell pixels")
         self.spin_h = self._spin(box, 1, 4096, 8, "Rectangle height, in cell pixels")
-        self.spin_nx = self._spin(box, 1, 512, 4, "How many across, end to end")
-        self.spin_ny = self._spin(box, 1, 512, 1, "How many down, end to end")
+        self.spin_nx = self._spin(box, 1, 512, 4,
+                          "How many along X, end to end")
+        self.spin_ny = self._spin(box, 1, 512, 1,
+                          "How many along Y, end to end")
+        # W／H 是框的大小，X／Y 是**沿哪個軸長幾個**。原本第三、四格寫的是
+        # 「×」與「↓」—— 使用者把「×」讀成乘號、「↓」讀不出來是 Y。
         for label, spin in (("W", self.spin_w), ("H", self.spin_h),
-                            ("×", self.spin_nx), ("↓", self.spin_ny)):
+                            ("X", self.spin_nx), ("Y", self.spin_ny)):
             lab = QLabel(label, box)
             lab.setObjectName("paramHint")
             row.addWidget(lab)
@@ -503,6 +507,7 @@ class TemplateDialog(QDialog):
         anchors = self.canvas.array_anchor_count()
         n = len(self.canvas.array_preview()) if tool == TOOL_ARRAY else 0
         self.btn_array_ok.setEnabled(tool == TOOL_ARRAY and anchors >= 2)
+        # 游標當暫時第二錨點時 n > 0，但**還不能按**（那一片還沒定下來）
         self.btn_array_ok.setText("Add %d" % n if n else "Add them")
         self.tool_hint.setText(self._tool_hint(tool, anchors, n, picked,
                                                self.canvas.array_pitch()))
@@ -514,14 +519,23 @@ class TemplateDialog(QDialog):
             if anchors == 0:
                 return "Click the centre of the FIRST rectangle (top-left)."
             if anchors == 1:
+                if n > 1:
+                    px, py = pitch
+                    bits = ["%d rectangles" % n]
+                    if px:
+                        bits.append("pitch %s px along X" % _px_text(px))
+                    if py:
+                        bits.append("pitch %s px along Y" % _px_text(py))
+                    return ("Preview — " + " · ".join(bits)
+                            + ". Click to place the LAST one; Esc cancels.")
                 return ("Now click the centre of the LAST one (bottom-right). "
                         "Esc cancels.")
             px, py = pitch
             bits = ["%d rectangles" % n]
             if px:
-                bits.append("pitch %s px across" % _px_text(px))
+                bits.append("pitch %s px along X" % _px_text(px))
             if py:
-                bits.append("pitch %s px down" % _px_text(py))
+                bits.append("pitch %s px along Y" % _px_text(py))
             return " · ".join(bits) + " — every gap is exactly this."
         if tool == TOOL_PAINT:
             return "Drag over pixels; they merge into rectangles on release."

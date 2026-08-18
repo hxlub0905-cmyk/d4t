@@ -590,3 +590,29 @@ def test_no_run_yet_says_so_instead_of_guessing():
     assert h.verdict == "unknown"
     assert "Run a trial" in h.message
     assert h.rate == 0.0
+
+
+def test_certainty_is_reported_but_does_not_reject_by_default():
+    """使用者：「certainty 還是會太小，還是拿掉？」——**拿掉的是門檻，不是數字**。
+
+    數字要留著：它是唯一講得出「這一顆可能落在另一份上」的東西。門檻預設 0，
+    因為週期性強的 layout 上它對每一顆都小 —— 拿它擋顆數，擋掉的多半是好的。
+    而「落在另一份上要不要緊」已經有一個確定的答案了（區域平移 1/k 落不落回
+    自己），所以 margin 不必再當一道盲目的閘門。
+    """
+    cls = get_step("roi_template")
+    assert cls.validate_params({})["min_margin"] == 0.0
+
+    gc = algo_template.build_golden_cell(big_image())
+    patch = cut(big_image(15), 11)
+    ctx = Context(images={"ref": patch})
+    _run(ctx, _params(gc))
+
+    # 數字照樣吐出來（面板與整批健檢都讀它）
+    assert "match_margin" in ctx.features
+    assert ctx.features["locate_ok"] == 1.0
+
+    # 想擋還是擋得住 —— 只是要自己開
+    strict = Context(images={"ref": patch})
+    _run(strict, _params(gc, min_margin=2.0))
+    assert strict.features["locate_ok"] == 0.0
