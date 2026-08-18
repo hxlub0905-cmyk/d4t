@@ -52,6 +52,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -74,7 +75,7 @@ from adept.core.pipeline.cellrois import (
 )
 
 from .cell_canvas import (
-    TOOL_ARRAY, TOOL_CLICK, TOOL_DRAG, TOOL_PAINT, CellCanvas,
+    TOOL_ARRAY, TOOL_CLICK, TOOL_CURSOR, TOOL_DRAG, TOOL_PAINT, CellCanvas,
     region_color,
 )
 from .theme import TOKENS
@@ -118,6 +119,8 @@ class TemplateDialog(QDialog):
         self.canvas = CellCanvas(self)
         self.canvas.boxes_changed.connect(self._on_boxes_changed)
         self.canvas.selection_changed.connect(self._on_canvas_selection)
+        self.canvas.boxes_changed.connect(lambda *_a: self._refresh_tool_ui())
+        self.canvas.selection_changed.connect(lambda *_a: self._refresh_tool_ui())
         self.canvas.array_anchors_changed.connect(self._on_anchors)
         self.canvas.regions_changed.connect(self._refresh_regions)
         left_lay.addWidget(self._build_tool_row())
@@ -140,7 +143,7 @@ class TemplateDialog(QDialog):
         self._set_ready(False)
         self._refresh_regions()
         self._on_tool_params()
-        self.set_tool(TOOL_DRAG)
+        self.set_tool(TOOL_CURSOR)
         apply_button_cursors(self)
 
     # ---- 版面 ---------------------------------------------------------------
@@ -291,48 +294,52 @@ class TemplateDialog(QDialog):
             "checking and nudging, not for drawing.")
         self.btn_table.clicked.connect(self.open_box_table)
         row.addWidget(self.btn_table)
-        self.btn_del_box = QPushButton("Delete selected", g)
-        self.btn_del_box.setProperty("variant", "secondary")
-        self.btn_del_box.clicked.connect(lambda: self.canvas.delete_selected())
-        row.addWidget(self.btn_del_box)
         row.addStretch(1)
         lay.addLayout(row)
 
-        # 表格活在一個彈出視窗裡，但**只建一次** —— 每次開都重建的話，使用者
-        # 正在編的那一格會在畫布動一下之後消失。
-        self.box_table = QTableWidget(0, 4, self)
+        # 表格活在一個彈出視窗裡，而那個視窗**在這裡就建好**（隱藏著）。
+        #
+        # 為什麼不等第一次按下去才建：widget 一旦以 self 為 parent 又不在任何
+        # layout 裡，Qt 就把它畫在 (0, 0) —— 使用者回報的「視窗左上角出現
+        # 『Whole pixels of on…』字樣」就是那個。**沒有家的 widget 不是隱形的，
+        # 它是畫在左上角的。**
+        self._table_dialog = QDialog(self)
+        self._table_dialog.setWindowTitle("Rectangles — whole cell pixels")
+        self._table_dialog.resize(380, 460)
+        tlay = QVBoxLayout(self._table_dialog)
+
+        self.box_units = QLabel("", self._table_dialog)
+        self.box_units.setObjectName("paramHint")
+        self.box_units.setWordWrap(True)
+        tlay.addWidget(self.box_units)
+
+        self.box_table = QTableWidget(0, 4, self._table_dialog)
         self.box_table.setHorizontalHeaderLabels(["x", "y", "w", "h"])
         self.box_table.verticalHeader().setVisible(False)
         self.box_table.currentCellChanged.connect(self._on_table_row)
         self.box_table.itemChanged.connect(self._on_table_edited)
-        self._table_dialog: Optional[QDialog] = None
-        self.box_units = QLabel("", self)
-        self.box_units.setObjectName("paramHint")
+        tlay.addWidget(self.box_table, 1)
+
+        close = QDialogButtonBox(QDialogButtonBox.Close, Qt.Horizontal,
+                                 self._table_dialog)
+        close.rejected.connect(self._table_dialog.hide)
+        tlay.addWidget(close)
         return g
 
     def open_box_table(self) -> QDialog:
-        """數字表的彈出視窗（同一個 widget，開幾次都是同一份資料）。"""
-        if self._table_dialog is None:
-            d = QDialog(self)
-            d.setWindowTitle("Rectangles — whole cell pixels")
-            d.resize(360, 420)
-            lay = QVBoxLayout(d)
-            lay.addWidget(self.box_units)
-            lay.addWidget(self.box_table, 1)
-            close = QDialogButtonBox(QDialogButtonBox.Close, Qt.Horizontal, d)
-            close.rejected.connect(d.hide)
-            lay.addWidget(close)
-            self._table_dialog = d
+        """數字表的彈出視窗（同一份資料，開幾次都是同一個）。"""
         self._refresh_boxes()
         self._table_dialog.show()
         self._table_dialog.raise_()
         return self._table_dialog
 
-    #: 四支工具：(key, 圖示, 標題, tooltip)
+    #: 五支工具：(key, 圖示, 標題, tooltip)
     _TOOLS = (
-        (TOOL_DRAG, "roi_drag", "Drag",
-         "Drag a rectangle out on the cell. Drag an existing one to move it, "
-         "or its handles to resize."),
+        (TOOL_CURSOR, "roi_cursor", "Select",
+         "Pick rectangles: click one, Ctrl+click to add, or drag a box round "
+         "several. Drag a selected one to move the whole group."),
+        (TOOL_DRAG, "roi_drag", "Draw",
+         "Drag out a new rectangle. Its handles resize it."),
         (TOOL_CLICK, "roi_click", "Click add",
          "Click to drop one rectangle of the size below, centred where you "
          "clicked."),
@@ -344,23 +351,67 @@ class TemplateDialog(QDialog):
          "into the fewest rectangles that cover them."),
     )
 
+    #: 對齊：(how, 圖示, tooltip)。要先選兩個以上。
+    _ALIGN = (
+        ("left", "align_left", "Line their left edges up"),
+        ("center", "align_center", "Line their centres up, left to right"),
+        ("right", "align_right", "Line their right edges up"),
+        ("top", "align_top", "Line their top edges up"),
+        ("middle", "align_middle", "Line their centres up, top to bottom"),
+        ("bottom", "align_bottom", "Line their bottom edges up"),
+    )
+
+    #: 工具鈕的邊長。使用者回報第一版「蠻醜的」—— 24 px 的鈕配 14 px 的圖示，
+    #: 圖示只佔一半，看起來像沒畫完。34 讓圖示有地方可以呼吸。
+    _TOOL_BTN = 34
+
+    def _icon_button(self, parent, icon: str, tip: str, slot,
+                     checkable: bool = False) -> IconButton:
+        b = IconButton(icon, tip, parent, kind="ghost")
+        b.setCheckable(checkable)
+        # 大小由 QSS 的 ``[shape="tool"]`` 決定，不是 setFixedSize —— QSS 的
+        # ``max-width`` 會蓋過去，而那正是第一版量出來只有 26 px 的原因。
+        b.setProperty("shape", "tool")
+        b.clicked.connect(slot)
+        return b
+
     def _build_tool_row(self) -> QWidget:
-        """四顆圖示鈕 + 框大小 + 陣列數量。**畫面上不放句子** —— 說明在 tooltip。"""
+        """圖示工具列。**畫面上不放句子** —— 說明在 tooltip（使用者：文字太多）。"""
         box = QWidget(self)
         lay = QVBoxLayout(box)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
 
         row = QHBoxLayout()
-        row.setSpacing(4)
+        row.setSpacing(3)
+
         self.tool_buttons = {}
         for key, icon, title, tip in self._TOOLS:
-            b = IconButton(icon, "%s — %s" % (title, tip), box, kind="ghost")
-            b.setCheckable(True)
-            b.clicked.connect(lambda _c=False, k=key: self.set_tool(k))
+            b = self._icon_button(box, icon, "%s — %s" % (title, tip),
+                                  lambda _c=False, k=key: self.set_tool(k),
+                                  checkable=True)
             row.addWidget(b)
             self.tool_buttons[key] = b
-        row.addSpacing(10)
+        row.addWidget(_separator(box))
+
+        self.btn_undo = self._icon_button(
+            box, "undo", "Undo the last change to the rectangles (Ctrl+Z)",
+            self.undo)
+        row.addWidget(self.btn_undo)
+        self.btn_del_sel = self._icon_button(
+            box, "trash", "Delete the selected rectangles (Del)",
+            self.delete_selected)
+        row.addWidget(self.btn_del_sel)
+        row.addWidget(_separator(box))
+
+        self.align_buttons = {}
+        for how, icon, tip in self._ALIGN:
+            b = self._icon_button(
+                box, icon, "%s. Select two or more first." % tip,
+                lambda _c=False, h=how: self.align_selection(h))
+            row.addWidget(b)
+            self.align_buttons[how] = b
+        row.addWidget(_separator(box))
 
         self.spin_w = self._spin(box, 1, 4096, 8, "Rectangle width, in cell pixels")
         self.spin_h = self._spin(box, 1, 4096, 8, "Rectangle height, in cell pixels")
@@ -388,13 +439,33 @@ class TemplateDialog(QDialog):
         lay.addWidget(self.tool_hint)
         return box
 
+    # ---- 工具列的動作 -------------------------------------------------------
     def set_tool(self, key: str) -> None:
         self.canvas.set_tool(key)
         self._refresh_tool_ui()
 
+    def undo(self) -> bool:
+        ok = self.canvas.undo()
+        self._refresh_regions()
+        self._refresh_tool_ui()
+        return ok
+
+    def delete_selected(self) -> bool:
+        ok = self.canvas.delete_selected()
+        self._refresh_tool_ui()
+        return ok
+
+    def align_selection(self, how: str) -> int:
+        n = self.canvas.align_selection(how)
+        self._refresh_tool_ui()          # 先重畫，_say 才不會被它蓋掉
+        if not n:
+            self._say("Select two or more rectangles first — align moves them "
+                      "to the edges of what you selected.")
+        return n
+
     def toggle_array(self) -> None:
-        """（保留給既有呼叫端）在陣列工具與拖曳之間切換。"""
-        self.set_tool(TOOL_DRAG if self.canvas.tool() == TOOL_ARRAY
+        """（保留給既有呼叫端）在陣列工具與游標之間切換。"""
+        self.set_tool(TOOL_CURSOR if self.canvas.tool() == TOOL_ARRAY
                       else TOOL_ARRAY)
 
     def commit_array(self) -> int:
@@ -422,14 +493,20 @@ class TemplateDialog(QDialog):
         for spin in (self.spin_w, self.spin_h):
             spin.setEnabled(tool in (TOOL_ARRAY, TOOL_CLICK))
 
+        picked = len(self.canvas.selection())
+        self.btn_undo.setEnabled(self.canvas.can_undo())
+        self.btn_del_sel.setEnabled(picked > 0)
+        for b in self.align_buttons.values():
+            b.setEnabled(picked >= 2)
+
         anchors = self.canvas.array_anchor_count()
         n = len(self.canvas.array_preview()) if tool == TOOL_ARRAY else 0
         self.btn_array_ok.setEnabled(tool == TOOL_ARRAY and anchors >= 2)
         self.btn_array_ok.setText("Add %d" % n if n else "Add them")
-        self.tool_hint.setText(self._tool_hint(tool, anchors, n))
+        self.tool_hint.setText(self._tool_hint(tool, anchors, n, picked))
 
     @staticmethod
-    def _tool_hint(tool: str, anchors: int, n: int) -> str:
+    def _tool_hint(tool: str, anchors: int, n: int, picked: int = 0) -> str:
         if tool == TOOL_ARRAY:
             if anchors == 0:
                 return "Click the centre of the FIRST rectangle (top-left)."
@@ -441,6 +518,12 @@ class TemplateDialog(QDialog):
             return "Drag over pixels; they merge into rectangles on release."
         if tool == TOOL_CLICK:
             return "Click to drop one rectangle, centred on the pointer."
+        if tool == TOOL_CURSOR:
+            if picked >= 2:
+                return "%d selected — the align buttons move them to the " \
+                       "edges of the selection." % picked
+            return ("Click a rectangle, Ctrl+click to add, or drag a box round "
+                    "several. Right-drag anywhere to pan.")
         return "Drag out a rectangle. Right-drag anywhere to pan."
 
     @staticmethod
@@ -757,7 +840,6 @@ class TemplateDialog(QDialog):
                 self.box_table.setItem(r, c, QTableWidgetItem("%d" % v))
         self.box_table.setCurrentCell(self.canvas.selected_box(), 0)
         self._syncing = False
-        self.btn_del_box.setEnabled(bool(boxes))
         name = regions[ri][0] if 0 <= ri < len(regions) else "—"
         self.box_count.setText(
             "%s: %d rectangle%s" % (name, len(boxes),
@@ -813,6 +895,15 @@ class TemplateDialog(QDialog):
         self.accepted_setup.emit(self.encoded(), self.locate_axis(),
                                  self.regions_text())
         self.accept()
+
+
+def _separator(parent: QWidget) -> QWidget:
+    """工具列上的一條細分隔線 —— 把「畫」「改」「排」三組分開。"""
+    line = QFrame(parent)
+    line.setFrameShape(QFrame.VLine)
+    line.setFixedWidth(9)
+    line.setStyleSheet("color:%s;" % TOKENS["border_default"])
+    return line
 
 
 def _swatch(color: QColor):

@@ -209,6 +209,9 @@ _LIGHT: Dict[str, Any] = {
     #: F7-23 第二輪之前這是六個各自寫死的尺寸（22×22、24×22、30×22、寬 28、
     #: 寬 40、高 20）—— 同一種視覺語言，但沒有兩顆是一樣大的。
     "control_sm": "24px",
+    # 工具列的圖示鈕（F11 Region-1 第四輪）。24 px 的鈕配 14 px 的圖示，
+    # 圖示只佔一半 —— 使用者回報「蠻醜的」。34 讓圖示有地方呼吸。
+    "control_tool": "34px",
 }
 
 #: 暗色。n8n 的畫布是深中性色，不是純黑（純黑對比太硬，看久了刺眼）。
@@ -632,6 +635,10 @@ QPushButton#cardButton {
 QPushButton[shape="square"] {
     min-width: $control_sm; max-width: $control_sm;
     min-height: $control_sm; max-height: $control_sm; padding: 0px;
+}
+QPushButton[shape="tool"] {
+    min-width: $control_tool; max-width: $control_tool;
+    min-height: $control_tool; max-height: $control_tool; padding: 0px;
 }
 QPushButton[shape="wide"] {
     min-height: $control_sm; max-height: $control_sm; padding: 0px 8px;

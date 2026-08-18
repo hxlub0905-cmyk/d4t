@@ -73,8 +73,15 @@ _HANDLE = 3.0
 _GRAB = 7.0
 
 #: 四支工具（使用者定調）。``drag`` 是預設。
+TOOL_CURSOR = "cursor"
 TOOL_DRAG, TOOL_CLICK, TOOL_ARRAY, TOOL_PAINT = "drag", "click", "array", "paint"
-TOOLS = (TOOL_DRAG, TOOL_CLICK, TOOL_ARRAY, TOOL_PAINT)
+TOOLS = (TOOL_CURSOR, TOOL_DRAG, TOOL_CLICK, TOOL_ARRAY, TOOL_PAINT)
+
+#: 對齊：把選起來的框對到選取範圍的哪一邊。
+ALIGNMENTS = ("left", "center", "right", "top", "middle", "bottom")
+
+#: 復原最多記幾步。整份區域的快照很小（幾十個 tuple），記深一點不痛。
+UNDO_DEPTH = 40
 
 #: 新區域的預設名（ROI1、ROI2…）—— 使用者的原話就是這個命名。
 NAME_STEM = "ROI"
@@ -111,7 +118,9 @@ class CellCanvas(QWidget):
         #: [(name, [box, …]), …] —— 跟 ``cellrois`` 同一個形狀
         self._regions: List[Tuple[str, List[Tuple[float, float, float, float]]]] = []
         self._current = 0
-        self._selected = -1
+        #: 選起來的框（**可以好幾個** —— 對齊工具要的就是這個）。
+        self._selection: List[int] = []
+        self._undo: List[Any] = []
         self._zoom = 0.0            # 0 = 還沒算過（第一次 paint 時 fit）
         self._pan = QPointF(0.0, 0.0)
         self._tile = True
@@ -152,7 +161,7 @@ class CellCanvas(QWidget):
                          for n, boxes in regions]
         if self._current >= len(self._regions):
             self._current = max(0, len(self._regions) - 1)
-        self._selected = -1
+        self._selection = []
         self.update()
 
     def regions(self):
@@ -160,7 +169,7 @@ class CellCanvas(QWidget):
 
     def set_current_region(self, index: int) -> None:
         self._current = max(0, int(index))
-        self._selected = -1
+        self._selection = []
         self.selection_changed.emit(self._current, -1)
         self.update()
 
@@ -168,7 +177,21 @@ class CellCanvas(QWidget):
         return self._current
 
     def selected_box(self) -> int:
-        return self._selected
+        """**主要**選取的那一個（−1 = 沒有）—— 數字表跟著它捲。"""
+        return self._selection[-1] if self._selection else -1
+
+    def selection(self) -> List[int]:
+        return list(self._selection)
+
+    def set_selection(self, indexes) -> None:
+        n = len(self._boxes())
+        self._selection = [i for i in dict.fromkeys(int(k) for k in indexes)
+                           if 0 <= i < n]
+        self.selection_changed.emit(self._current, self.selected_box())
+        self.update()
+
+    def select_all(self) -> None:
+        self.set_selection(range(len(self._boxes())))
 
     def set_patch_size(self, size: Optional[Tuple[int, int]]) -> None:
         """一顆 defect 看得到多大（``(h, w)`` 像素）；``None`` = 不知道就不畫。
@@ -203,7 +226,8 @@ class CellCanvas(QWidget):
         # 亮著 —— 狀態要跟畫面一致。
         if name == TOOL_ARRAY and self._array is None:
             self.start_array()
-        self.setCursor(Qt.CrossCursor if name != TOOL_DRAG else Qt.ArrowCursor)
+        self.setCursor(Qt.ArrowCursor if name in (TOOL_CURSOR, TOOL_DRAG)
+                       else Qt.CrossCursor)
         self.tool_changed.emit(name)
         self.update()
 
@@ -326,45 +350,118 @@ class CellCanvas(QWidget):
     def add_box(self, box) -> int:
         """加一個框到目前的區域，回傳它的索引。"""
         self.ensure_region()
+        self._snapshot()
         self._boxes().append(self.snap(box))
-        self._selected = len(self._boxes()) - 1
-        self.selection_changed.emit(self._current, self._selected)
+        self.set_selection([len(self._boxes()) - 1])
         self._commit()
-        return self._selected
+        return len(self._boxes()) - 1
 
     def add_boxes(self, boxes) -> int:
-        """一次加一整片（陣列工具用）；回傳實際加了幾個。"""
-        self.ensure_region()
+        """一次加一整片（陣列／筆刷工具用）；回傳實際加了幾個。"""
         added = [self.snap(b) for b in boxes]
         if not added:
             return 0
+        self.ensure_region()
+        self._snapshot()
+        first = len(self._boxes())
         self._boxes().extend(added)
-        self._selected = len(self._boxes()) - 1
-        self.selection_changed.emit(self._current, self._selected)
+        self.set_selection(range(first, first + len(added)))
         self._commit()
         return len(added)
 
     def delete_selected(self) -> bool:
+        """刪掉**每一個**選起來的框。"""
         boxes = self._boxes()
-        if not (0 <= self._selected < len(boxes)):
+        drop = sorted((i for i in self._selection if 0 <= i < len(boxes)),
+                      reverse=True)
+        if not drop:
             return False
-        boxes.pop(self._selected)
-        self._selected = min(self._selected, len(boxes) - 1)
-        self.selection_changed.emit(self._current, self._selected)
+        self._snapshot()
+        for i in drop:
+            boxes.pop(i)
+        self.set_selection([min(drop[-1], len(boxes) - 1)] if boxes else [])
         self._commit()
         return True
 
-    def select_box(self, index: int) -> None:
-        boxes = self._boxes()
-        self._selected = index if 0 <= index < len(boxes) else -1
-        self.selection_changed.emit(self._current, self._selected)
-        self.update()
+    def select_box(self, index: int, add: bool = False) -> None:
+        """選一個框；``add=True`` 是 Ctrl＋點（加選／取消選）。"""
+        if index < 0:
+            self.set_selection([])
+            return
+        if not add:
+            self.set_selection([index])
+            return
+        picked = list(self._selection)
+        if index in picked:
+            picked.remove(index)
+        else:
+            picked.append(index)
+        self.set_selection(picked)
 
     def replace_box(self, index: int, box) -> None:
         boxes = self._boxes()
         if 0 <= index < len(boxes):
+            self._snapshot()
             boxes[index] = self.snap(box)
             self._commit()
+
+    # ---- 對齊（選起來的那幾個）---------------------------------------------
+    def align_selection(self, how: str) -> int:
+        """把選起來的框對到**選取範圍**的某一邊。回傳搬動了幾個。
+
+        基準是選取範圍的外框，不是「第一個選的那個」—— 使用者是先框一整排再按
+        對齊，那時候「第一個」是哪一個他自己也不知道（那會變成一個看不見的規則）。
+        """
+        how = str(how)
+        boxes = self._boxes()
+        picked = [i for i in self._selection if 0 <= i < len(boxes)]
+        if how not in ALIGNMENTS or len(picked) < 2:
+            return 0
+
+        xs = [boxes[i] for i in picked]
+        left = min(b[0] for b in xs)
+        right = max(b[0] + b[2] for b in xs)
+        top = min(b[1] for b in xs)
+        bottom = max(b[1] + b[3] for b in xs)
+
+        self._snapshot()
+        for i in picked:
+            x, y, w, h = boxes[i]
+            if how == "left":
+                x = left
+            elif how == "right":
+                x = right - w
+            elif how == "center":
+                x = (left + right) / 2.0 - w / 2.0
+            elif how == "top":
+                y = top
+            elif how == "bottom":
+                y = bottom - h
+            elif how == "middle":
+                y = (top + bottom) / 2.0 - h / 2.0
+            boxes[i] = self.snap((x, y, w, h))
+        self._commit()
+        return len(picked)
+
+    # ---- 復原 ---------------------------------------------------------------
+    def _snapshot(self) -> None:
+        """改動之前存一份區域的快照（整份，不是差異 —— 幾十個 tuple 而已）。"""
+        self._undo.append([(n, list(b)) for n, b in self._regions])
+        if len(self._undo) > UNDO_DEPTH:
+            self._undo.pop(0)
+
+    def can_undo(self) -> bool:
+        return bool(self._undo)
+
+    def undo(self) -> bool:
+        """退回上一步。畫錯一個框要能一鍵回去 —— 不然使用者不敢用工具。"""
+        if not self._undo:
+            return False
+        self.set_regions(self._undo.pop())
+        self.regions_changed.emit()
+        self.boxes_changed.emit(self._current, list(self._boxes()))
+        self.update()
+        return True
 
     # ---- 陣列工具（multi add）----------------------------------------------
     def set_array_counts(self, nx: int, ny: int) -> None:
@@ -440,7 +537,7 @@ class CellCanvas(QWidget):
         boxes = self._boxes()
         for i in range(len(boxes) - 1, -1, -1):        # 上層的先接
             r = self.box_rect(boxes[i])
-            if i == self._selected:
+            if i in self._selection:
                 for name, corner in self._handles(r, _GRAB).items():
                     if corner.contains(pt):
                         return i, name
@@ -490,15 +587,34 @@ class CellCanvas(QWidget):
             self.add_box((nx - bw / 2.0, ny - bh / 2.0, bw, bh))
             return
 
+        add = bool(e.modifiers() & Qt.ControlModifier)
         idx, handle = self._hit(pt)
         if idx >= 0:
-            self.select_box(idx)
-            self._drag = {"mode": handle or "move", "index": idx,
-                          "from": self.view_to_norm(pt),
-                          "box": tuple(self._boxes()[idx])}
+            if add or idx not in self._selection:
+                self.select_box(idx, add=add)
+            if handle or idx in self._selection:
+                # 選了好幾個的時候拖任何一個都**整組一起搬** —— 不然使用者
+                # 對齊完想微調，一拖就把選取打散了。
+                self._snapshot()
+                self._drag = {"mode": handle or "move", "index": idx,
+                              "from": self.view_to_norm(pt),
+                              "group": {i: tuple(self._boxes()[i])
+                                        for i in self._selection
+                                        if 0 <= i < len(self._boxes())},
+                              "box": tuple(self._boxes()[idx])}
             return
-        # 空白處拖曳 = 畫一個新框
+
         nx, ny = self.view_to_norm(pt)
+        if self._tool == TOOL_CURSOR:
+            # 游標工具在空白處拖 = **框選**，不是畫新的框
+            if not add:
+                self.set_selection([])
+            self._drag = {"mode": "lasso", "from": (nx, ny),
+                          "box": (nx, ny, 0.0, 0.0), "add": add,
+                          "base": list(self._selection)}
+            self.update()
+            return
+        # 拖曳工具：空白處拖 = 畫一個新框
         self._drag = {"mode": "new", "from": (nx, ny), "box": (nx, ny, 0.0, 0.0)}
         self.update()
 
@@ -515,13 +631,23 @@ class CellCanvas(QWidget):
             self.update()
             return
         nx, ny = self.view_to_norm(pt)
-        if mode == "new":
+        if mode in ("new", "lasso"):
             x0, y0 = self._drag["from"]
-            self._drag["box"] = self.snap((min(x0, nx), min(y0, ny),
-                                           abs(nx - x0), abs(ny - y0)))
+            rect = (min(x0, nx), min(y0, ny), abs(nx - x0), abs(ny - y0))
+            self._drag["box"] = self.snap(rect) if mode == "new" else rect
+            if mode == "lasso":
+                self._sync_lasso()
             self.update()
             return
         self._apply_drag(nx, ny)
+
+    def _sync_lasso(self) -> None:
+        """框選：**整個**落在套索裡的框才算 —— 擦到邊就選中會很難只選一個。"""
+        lx, ly, lw, lh = self._drag["box"]
+        inside = [i for i, (x, y, w, h) in enumerate(self._boxes())
+                  if x >= lx and y >= ly and x + w <= lx + lw and y + h <= ly + lh]
+        picked = list(self._drag["base"]) if self._drag.get("add") else []
+        self.set_selection(picked + inside)
 
     def _apply_drag(self, nx: float, ny: float) -> None:
         d = self._drag
@@ -529,7 +655,12 @@ class CellCanvas(QWidget):
         dx, dy = nx - d["from"][0], ny - d["from"][1]
         mode = d["mode"]
         if mode == "move":
-            x, y = x + dx, y + dy
+            boxes = self._boxes()
+            for i, (bx, by, bw, bh) in (d.get("group") or {}).items():
+                if 0 <= i < len(boxes):
+                    boxes[i] = self.snap((bx + dx, by + dy, bw, bh))
+            self.update()
+            return
         else:
             if "w" in mode:
                 x, w = x + dx, w - dx
@@ -556,8 +687,12 @@ class CellCanvas(QWidget):
             return
         d, self._drag = self._drag, None
         if d["mode"] == "pan":
-            self.setCursor(Qt.CrossCursor if self._tool != TOOL_DRAG
-                           else Qt.ArrowCursor)
+            self.setCursor(Qt.ArrowCursor
+                           if self._tool in (TOOL_CURSOR, TOOL_DRAG)
+                           else Qt.CrossCursor)
+            return
+        if d["mode"] == "lasso":
+            self.update()
             return
         if d["mode"] == "new":
             x, y, w, h = d["box"]
@@ -624,10 +759,20 @@ class CellCanvas(QWidget):
         if e.key() == Qt.Key_Escape and self._array is not None:
             self.cancel_array()
             return
-        if e.key() in keys and 0 <= self._selected < len(self._boxes()):
+        if e.key() == Qt.Key_Z and e.modifiers() & Qt.ControlModifier:
+            self.undo()
+            return
+        if e.key() == Qt.Key_A and e.modifiers() & Qt.ControlModifier:
+            self.select_all()
+            return
+        if e.key() in keys and self._selection:
             dx, dy = keys[e.key()]
-            x, y, w, h = self._boxes()[self._selected]
-            self._boxes()[self._selected] = (x + dx, y + dy, w, h)
+            boxes = self._boxes()
+            self._snapshot()
+            for i in self._selection:
+                if 0 <= i < len(boxes):
+                    x, y, w, h = boxes[i]
+                    boxes[i] = self.snap((x + dx, y + dy, w, h))
             self._commit()
             return
         super().keyPressEvent(e)
@@ -702,8 +847,8 @@ class CellCanvas(QWidget):
                     for tx in span:
                         here = (tx == 0 and ty == 0)
                         r = base.translated(tx * w * z, ty * h * z)
-                        sel = (ri == self._current and bi == self._selected
-                               and here)
+                        sel = (ri == self._current
+                               and bi in self._selection and here)
                         p.setPen(QPen(col, 2.2 if sel else 1.4,
                                       Qt.SolidLine if here else Qt.DotLine))
                         fill = QColor(col)
@@ -721,10 +866,18 @@ class CellCanvas(QWidget):
                     p.drawText(QRectF(base.left(), base.top() - 15,
                                       max(60.0, base.width()), 14),
                                Qt.AlignLeft | Qt.AlignBottom, str(name))
-        # 正在拉的那個新框
-        if self._drag is not None and self._drag.get("mode") == "new":
+        # 正在拉的那個新框／套索
+        mode = (self._drag or {}).get("mode")
+        if mode == "new":
             p.setPen(QPen(region_color(self._current), 1.4, Qt.DashLine))
             p.setBrush(Qt.NoBrush)
+            p.drawRect(self.box_rect(self._drag["box"]))
+        elif mode == "lasso":
+            col = QColor(TOKENS["accent"])
+            p.setPen(QPen(col, 1.0, Qt.DashLine))
+            fill = QColor(col)
+            fill.setAlpha(28)
+            p.setBrush(fill)
             p.drawRect(self.box_rect(self._drag["box"]))
 
     def _paint_stroke(self, p: QPainter) -> None:

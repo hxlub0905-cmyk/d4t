@@ -576,3 +576,140 @@ def test_the_numbers_table_lives_behind_a_button(qapp):
     # 表格是**可編輯的**，而且改完畫布上就是那個值（同一份資料）
     dlg.box_table.item(0, 2).setText("9")
     assert dlg.canvas.to_px(dlg.canvas.regions()[0][1][0])[2] == 9
+
+
+# --------------------------------------------------------------------------- #
+# 4. 第四輪：游標／復原／刪除／對齊，以及那個畫在左上角的標籤
+# --------------------------------------------------------------------------- #
+def test_no_widget_is_left_without_a_layout(qapp):
+    """**使用者回報的 bug**：視窗左上角出現「Whole pixels of on…」字樣。
+
+    widget 一旦以對話框為 parent 又不在任何 layout 裡，Qt 就把它畫在 (0, 0)
+    —— **沒有家的 widget 不是隱形的，它是畫在左上角的**。
+    """
+    dlg = tpl_mod.TemplateDialog()
+    lay = dlg.layout()
+    stray = [c for c in dlg.children()
+             if c.isWidgetType() and c.parent() is dlg
+             and not c.isWindow() and lay.indexOf(c) < 0]
+    assert stray == [], [type(c).__name__ for c in stray]
+    assert dlg.box_units.parent() is dlg._table_dialog
+    assert dlg.box_table.parent() is dlg._table_dialog
+
+
+def test_the_toolbar_is_icons_only_and_big_enough(qapp):
+    """「icon 功能列給我大一點漂亮一點」—— 而且一顆字都不放。"""
+    from adept.ui.widgets import IconButton
+
+    dlg = tpl_mod.TemplateDialog()
+    buttons = (list(dlg.tool_buttons.values()) + list(dlg.align_buttons.values())
+               + [dlg.btn_undo, dlg.btn_del_sel])
+    for b in buttons:
+        assert isinstance(b, IconButton)
+        assert b.text() == ""
+        assert b.toolTip()
+        assert b.width() >= 32 and b.height() >= 32
+
+
+def test_the_cursor_tool_selects_instead_of_drawing(qapp):
+    """游標工具在空白處拖是**框選**，不是畫一個新框。"""
+    from PySide6.QtCore import QPointF
+
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas.resize(420, 380)
+    dlg.canvas.add_boxes([(0.1, 0.1, 0.1, 0.2), (0.4, 0.1, 0.1, 0.2),
+                          (0.7, 0.6, 0.1, 0.2)])
+    before = len(dlg.canvas.regions()[0][1])
+
+    dlg.set_tool(canvas_mod.TOOL_CURSOR)
+    a = dlg.canvas.norm_to_view(0.02, 0.02)
+    b = dlg.canvas.norm_to_view(0.55, 0.45)
+    _press(dlg.canvas, a)
+    _move(dlg.canvas, b)
+    _release(dlg.canvas, b)
+
+    assert len(dlg.canvas.regions()[0][1]) == before      # 沒有多出一個框
+    assert dlg.canvas.selection() == [0, 1]               # 完整落在套索裡的兩個
+
+
+def test_ctrl_click_adds_to_the_selection(qapp):
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas.add_boxes([(0.1, 0.1, 0.2, 0.2), (0.5, 0.1, 0.2, 0.2)])
+    dlg.canvas.select_box(0)
+    assert dlg.canvas.selection() == [0]
+    dlg.canvas.select_box(1, add=True)
+    assert dlg.canvas.selection() == [0, 1]
+    dlg.canvas.select_box(1, add=True)                    # 再點一次 = 取消選
+    assert dlg.canvas.selection() == [0]
+
+
+def test_delete_removes_every_selected_rectangle(qapp):
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas.add_boxes([(0.1, 0.1, 0.1, 0.2), (0.4, 0.1, 0.1, 0.2),
+                          (0.7, 0.1, 0.1, 0.2)])
+    dlg.canvas.set_selection([0, 2])
+    assert dlg.delete_selected() is True
+    assert len(dlg.canvas.regions()[0][1]) == 1
+
+
+@pytest.mark.parametrize("how, index, expected", [
+    ("left", 0, 0.1), ("right", 0, 0.7), ("center", 0, 0.4),
+])
+def test_aligning_moves_them_to_the_edge_of_the_selection(qapp, how, index,
+                                                          expected):
+    """基準是**選取範圍**的外框，不是「第一個選的那個」—— 使用者是先框一整排
+    再按對齊，那時候「第一個」是哪一個他自己也不知道。"""
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    # 三個同寬的框，左緣 0.1 / 0.4 / 0.7（cell 寬 40 px -> 4 / 16 / 28 px）
+    dlg.canvas.add_boxes([(0.1, 0.1, 0.2, 0.2), (0.4, 0.3, 0.2, 0.2),
+                          (0.7, 0.5, 0.2, 0.2)])
+    dlg.canvas.select_all()
+    assert dlg.align_selection(how) == 3
+
+    xs = [b[0] for b in dlg.canvas.regions()[0][1]]
+    assert len(set(round(x, 6) for x in xs)) == 1, xs      # 三個都對齊了
+    h, w = dlg.canvas.cell_shape()
+    assert abs(xs[index] - expected) < 1.5 / w
+
+
+def test_aligning_needs_two_and_says_so(qapp):
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas.add_box((0.1, 0.1, 0.2, 0.2))
+    assert dlg.align_selection("left") == 0
+    assert "two or more" in dlg.tool_hint.text()
+
+
+def test_undo_puts_the_rectangles_back(qapp):
+    """畫錯一個框要能一鍵回去 —— 不然使用者不敢用工具。"""
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas.add_box((0.1, 0.1, 0.2, 0.2))
+    one = dlg.regions_text()
+
+    dlg.canvas.add_box((0.5, 0.1, 0.2, 0.2))
+    assert dlg.regions_text() != one
+    assert dlg.undo() is True
+    assert dlg.regions_text() == one
+
+    # 對齊、刪除、方向鍵微調也都退得回去
+    dlg.canvas.add_box((0.5, 0.3, 0.2, 0.2))
+    dlg.canvas.select_all()
+    two = dlg.regions_text()
+    dlg.align_selection("left")
+    assert dlg.regions_text() != two
+    assert dlg.undo() is True
+    assert dlg.regions_text() == two
+
+
+def test_undo_is_disabled_when_there_is_nothing_to_undo(qapp):
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas._undo.clear()
+    dlg._refresh_tool_ui()
+    assert dlg.btn_undo.isEnabled() is False
+    assert all(not b.isEnabled() for b in dlg.align_buttons.values())

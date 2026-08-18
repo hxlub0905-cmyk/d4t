@@ -122,7 +122,12 @@ GLYPH_ICONS = (
     # 在 Golden Cell 上標區域的四支工具（F11 Region-1 第二輪）。名字說的是
     # **這支工具怎麼產生框**，四個輪廓刻意各不相同 —— 它們並排在同一列上，
     # 分不出來的話那一列等於四顆一樣的鈕。
-    "roi_drag", "roi_click", "roi_array", "roi_paint",
+    "roi_drag", "roi_click", "roi_array", "roi_paint", "roi_cursor",
+    "trash",
+    # 對齊（F11 Region-1 第四輪）。六顆並排，所以**基準線的位置**就是它們唯一
+    # 的差別 —— 那條線畫粗、被對齊的方塊畫細，一眼看得出誰對到誰。
+    "align_left", "align_center", "align_right",
+    "align_top", "align_middle", "align_bottom",
 )
 
 
@@ -257,6 +262,60 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         p.drawLine(QPointF(ax1, ay1), QPointF(ax1, ay1 + head))
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
+    elif n == "roi_cursor":
+        # 一支箭頭游標：**選**已經有的框（不是畫新的）。
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        p.drawPolygon(QPolygonF([
+            QPointF(m, m), QPointF(m, h - m * 1.2),
+            QPointF(m + w * 0.24, h - m * 2.2),
+            QPointF(m + w * 0.40, h - m * 0.4),
+            QPointF(m + w * 0.56, h - m * 0.9),
+            QPointF(m + w * 0.40, h * 0.58), QPointF(w - m * 1.4, h * 0.52)]))
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+    elif n == "trash":
+        # 垃圾桶：桶身 + 蓋子 + 提把。**不用 ✕** —— 這一列上 ✕ 是「關閉」。
+        p.drawLine(QPointF(m, h * 0.30), QPointF(w - m, h * 0.30))
+        p.drawLine(QPointF(w * 0.40, h * 0.30), QPointF(w * 0.40, h * 0.18))
+        p.drawLine(QPointF(w * 0.60, h * 0.30), QPointF(w * 0.60, h * 0.18))
+        p.drawLine(QPointF(w * 0.40, h * 0.18), QPointF(w * 0.60, h * 0.18))
+        p.drawLine(QPointF(m + w * 0.10, h * 0.30),
+                   QPointF(m + w * 0.16, h - m))
+        p.drawLine(QPointF(w - m - w * 0.10, h * 0.30),
+                   QPointF(w - m - w * 0.16, h - m))
+        p.drawLine(QPointF(m + w * 0.16, h - m), QPointF(w - m - w * 0.16, h - m))
+    elif n.startswith("align_"):
+        # 一條粗的基準線 + 兩個對到它的方塊。六顆的差別只有線在哪一邊。
+        side = n[len("align_"):]
+        vertical = side in ("left", "center", "right")
+        rule = QPen(QColor(color), max(1.6, size / 7.0))
+        rule.setCapStyle(Qt.RoundCap)
+        bars = ((w * 0.62, h * 0.20), (w * 0.38, h * 0.20))    # (長, 厚)
+        if vertical:
+            lx = {"left": m, "center": w / 2.0, "right": w - m}[side]
+            p.setPen(rule)
+            p.drawLine(QPointF(lx, m * 0.7), QPointF(lx, h - m * 0.7))
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(color))
+            for i, (blen, bthk) in enumerate(bars):
+                y0 = h * (0.30 if i == 0 else 0.58)
+                x0 = {"left": lx, "center": lx - blen / 2.0,
+                      "right": lx - blen}[side]
+                p.drawRect(QRectF(x0, y0, blen, bthk))
+        else:
+            ly = {"top": m, "middle": h / 2.0, "bottom": h - m}[side]
+            p.setPen(rule)
+            p.drawLine(QPointF(m * 0.7, ly), QPointF(w - m * 0.7, ly))
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(color))
+            for i, (blen, bthk) in enumerate(bars):
+                x0 = w * (0.30 if i == 0 else 0.58)
+                y0 = {"top": ly, "middle": ly - blen / 2.0,
+                      "bottom": ly - blen}[side]
+                p.drawRect(QRectF(x0, y0, bthk, blen))
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
     elif n == "roi_drag":
         # 一個虛線框 + 右下角的游標：**拉出來的**框。
         p.setPen(QPen(QColor(color), max(1.1, size / 11.0), Qt.DashLine))
@@ -362,7 +421,12 @@ def _paint_glyph(widget: QWidget, name: str, side: str = "center") -> None:
     from PySide6.QtGui import QPalette
 
     r = widget.contentsRect()
-    size = max(9.0, min(float(min(r.width(), r.height())), 15.0))
+    # 圖示的大小跟著鈕走，但**只有大鈕才放大**（F11 Region-1 第四輪）：
+    # 24 px 的鈕維持 15 px 的圖示（既有的每一顆都是那個比例），30 px 以上的
+    # 工具鈕才放到 21 —— 使用者回報「圖示只佔一半，蠻醜的」，那是把大鈕配
+    # 小圖示的結果。門檻式而不是等比，是為了讓既有的鈕逐像素不變。
+    side_px = float(min(r.width(), r.height()))
+    size = max(9.0, min(side_px, 21.0 if side_px >= 30.0 else 15.0))
     colour = widget.palette().color(QPalette.ButtonText).name()
     p = QPainter(widget)
     if side == "left":
