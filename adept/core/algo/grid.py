@@ -47,7 +47,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, List, NamedTuple, Optional, Sequence, Tuple
+from typing import (
+    Any, Dict, List, NamedTuple, Optional, Sequence, Tuple,
+)
 
 import numpy as np
 
@@ -177,6 +179,12 @@ class StripeSet:
     bands: List[Tuple[float, float]] = field(default_factory=list)
     #: 每一段的平均亮度（跟 ``bands`` 等長）。
     levels: List[float] = field(default_factory=list)
+    #: 每一段屬於第幾群（跟 ``bands`` 等長）、現在挑中的是哪一群，以及
+    #: 每一群要填什麼 ``select`` 值。面板靠它們把「第幾亮」**畫出來**並且
+    #: 點得到（見 :func:`band_groups`）—— 那個詞本身不告訴使用者任何事。
+    groups: List[int] = field(default_factory=list)
+    group_picked: int = 0
+    group_rules: Dict[int, str] = field(default_factory=dict)
     #: **要的那一組**條紋（暗的或亮的），已套用已知 pitch 的補線。
     selected: List[Tuple[int, int]] = field(default_factory=list)
     #: 從影像上量到的週期 = **同一組條紋**的中心距中位數；量不到是 0。
@@ -259,6 +267,8 @@ class CrossResult:
 _RANKS = {"brightest": ("hi", 0), "second_brightest": ("hi", 1),
           "third_brightest": ("hi", 2), "darkest": ("lo", 0),
           "second_darkest": ("lo", 1), "third_darkest": ("lo", 2)}
+#: ``_RANKS`` 的反查（給 :func:`band_groups` 把群號翻回 rule 名）。
+_RANKS_BY_END = {v: k for k, v in _RANKS.items()}
 
 
 def level_groups(levels: Sequence[float], k: int) -> List[int]:
@@ -320,16 +330,55 @@ def select_bands(bands: Sequence[Tuple[int, int]], levels: Sequence[float],
     if rule == "all" or len(bands) < 2:
         return bands
 
+    groups, want, _rules = band_groups(bands, levels, rule, kinds)
+    picked = [b for b, g in zip(bands, groups) if g == want]
+    # 段數不夠分那麼多群的時候會挑不到 —— 退回整組比回空的好，
+    # 但上層看得到段數，所以不會把「沒得挑」誤認為「挑到了」。
+    return picked or bands
+
+
+def band_groups(bands: Sequence[Tuple[int, int]], levels: Sequence[float],
+                rule: str = "brightest", kinds: int = 0
+                ) -> Tuple[List[int], int, Dict[int, str]]:
+    """每一段屬於**第幾群**、現在挑的是哪一群、以及每一群要填什麼 rule。
+
+    :func:`select_bands` 本來就在算這個，只是算完就丟掉。公開它是為了讓面板
+    **把分群畫出來、而且點得到**（F11 Region-2b）：使用者的話是「能用圖就用
+    圖」，而「最亮的那一組是哪一組」是一個只有看圖才答得出來的問題 ——
+    下拉選單裡的 ``second_brightest`` 這個詞本身不告訴他任何事。
+
+    回 ``(每段的群號, 現在挑中的群號, {群號: 要填的 rule})``。
+    ``rules`` 讓點擊直接翻譯成參數值：點到哪一群，就填那一群的 rule。
+
+    ⚠ **分幾群取決於現在挑的是第幾亮**（``k = max(rank + 2, kinds)``），所以
+    這裡回的分群是「目前這組設定下的分群」，不是一個絕對的答案。那是實話 ——
+    面板畫的本來就該是引擎這一次真的用的東西。
+    """
+    bands, levels = list(bands), list(levels)
+    if not bands:
+        return [], 0, {}
+    rule = _SELECT_ALIASES.get(str(rule), str(rule))
+    if rule == "all" or len(bands) < 2:
+        return [0] * len(bands), 0, {0: "all"}
+
     end, rank = _RANKS.get(rule, ("hi", 0))
     # 排名要求的群數是**下限**：要挑「第三亮」至少得分四群，使用者說有三種
     # 材質也不能少分。兩者取大的那個。
     k = max(rank + 2, int(kinds or 0))
     groups = level_groups(levels, k)
     want = (max(groups) - rank) if end == "hi" else rank
-    picked = [b for b, g in zip(bands, groups) if g == want]
-    # 段數不夠分那麼多群的時候會挑不到 —— 退回整組比回空的好，
-    # 但上層看得到段數，所以不會把「沒得挑」誤認為「挑到了」。
-    return picked or bands
+
+    top = max(groups) if groups else 0
+    rules: Dict[int, str] = {}
+    for g in sorted(set(groups)):
+        from_hi, from_lo = top - g, g
+        # 由亮的那一端數比較短就用亮的名字，反之用暗的 —— 使用者說得出口的
+        # 是「最亮的」「最暗的」，不是「第五亮的」。
+        if from_hi <= from_lo and from_hi < 3:
+            rules[g] = _RANKS_BY_END[("hi", from_hi)]
+        elif from_lo < 3:
+            rules[g] = _RANKS_BY_END[("lo", from_lo)]
+    return groups, want, rules
 
 
 def refine_edges(prof: Any, edges: Sequence[int]) -> List[float]:
@@ -718,6 +767,10 @@ def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
                   for a, b in out.bands]
 
     picked = select_bands(out.bands, out.levels, select, kinds)
+    # 分群也一起留著 —— 面板要畫「哪幾根是同一種材質」，而那個規則只該有一份
+    # （`select_bands` 與這裡走的是同一支 `band_groups`）。
+    out.groups, out.group_picked, out.group_rules = band_groups(
+        out.bands, out.levels, select, kinds)
     # 量間距只用**沒有被影像邊界切到**的那幾根 —— 只露一半的線量到的中心
     # 依定義就是偏的，而這個數字是要拿去填回參數格的。
     whole = [(a + b) / 2.0 for a, b in picked

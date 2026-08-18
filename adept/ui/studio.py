@@ -3101,6 +3101,9 @@ class StudioWindow(QMainWindow):
         sig = getattr(insp, "param_requested", None)
         if sig is not None:
             sig.connect(self._on_param_requested)
+        sig = getattr(insp, "select_requested", None)
+        if sig is not None:
+            sig.connect(self._on_select_requested)
         sig = getattr(insp, "calibrate_requested", None)
         if sig is not None:
             sig.connect(self._on_calibrate_requested)
@@ -3197,6 +3200,19 @@ class StudioWindow(QMainWindow):
                 get_step(node.step).describe(), node.params,
                 self.model.available_streams(before_node=nid),
                 self.model.available_regions(before_node=nid))
+
+    def _on_select_requested(self, axis: str, rule: str) -> None:
+        """使用者在曲線上**點了一根條紋** → 那個方向改用那一種材質（F11 2b）。
+
+        走跟「量給我填」同一條路（``_on_param_requested`` → ``set_param``），
+        所以它可以 Ctrl+Z 撤銷、參數表也跟著顯示新值。
+
+        ``axis`` 是曲線的方向：``x`` 那條曲線講的是**直的**條紋
+        （``vertical_*``），別接反了 —— 接反的症狀是點左邊的圖改到右邊的參數，
+        而畫面上兩邊都會動，看起來像是「有反應」。
+        """
+        name = "vertical_select" if str(axis) == "x" else "horizontal_select"
+        self._on_param_requested(name, str(rule))
 
     def _on_measure(self, axis: str, start: float, end: float) -> None:
         """曲線面板上按著量測尺 → 影像上標出同一段（F8）。

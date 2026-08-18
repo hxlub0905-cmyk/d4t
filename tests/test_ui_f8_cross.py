@@ -430,3 +430,111 @@ def test_the_panel_shouts_when_the_pitch_does_not_agree(qapp):
     text = panel.summary()
     assert "50% of the pitch you gave" in text
     assert text.index("50%") < text.index("confidence")
+
+
+# --------------------------------------------------------------------------- #
+# F11 Region-2b：點曲線上的一根條紋 = 選那一種材質
+# --------------------------------------------------------------------------- #
+def test_the_engine_says_which_group_each_stripe_is_in(qapp):
+    """UI **不自己分群** —— 分幾群取決於現在挑第幾亮，那個規則只該有一份。"""
+    data = _cpode_ctx().meta["crossings"]["xing"]["x"]
+    assert len(data["groups"]) == len(data["bands"])
+    assert data["group_rules"], "每一群都要講得出「要填什麼」"
+    assert str(data["group_picked"]) in {str(g) for g in data["groups"]}
+
+
+def test_clicking_a_stripe_asks_for_that_material(qapp):
+    """使用者：「能用圖就用圖。」`second_brightest` 這個詞本身不告訴他任何事 ——
+    「哪一組是第二亮的」是一個只有看圖才答得出來的問題，而圖就在這裡。"""
+    from adept.ui.widgets import ProfilePanel
+
+    data = _cpode_ctx().meta["crossings"]["xing"]["x"]
+    panel = ProfilePanel()
+    panel.resize(400, 120)
+    panel.set_data("upright stripes", data)
+
+    got = []
+    panel.select_requested.connect(lambda a, r: got.append((a, r)))
+
+    # 挑一根**不是**現在選中那一群的條紋來點
+    other = next(i for i, g in enumerate(data["groups"])
+                 if g != data["group_picked"])
+    a, b = data["bands"][other]
+    _click_curve(panel, (a + b) / 2.0)
+
+    assert got, "點了沒反應"
+    axis, rule = got[0]
+    assert axis == "x"
+    assert rule == data["group_rules"][str(data["groups"][other])]
+
+
+def test_dragging_still_measures_instead_of_picking(qapp):
+    """同一個手勢兩種意思會很糟 —— **點一下 = 選材質，拖一段 = 量尺**。"""
+    from adept.ui.widgets import ProfilePanel
+
+    data = _cpode_ctx().meta["crossings"]["xing"]["x"]
+    panel = ProfilePanel()
+    panel.resize(400, 120)
+    panel.set_data("upright stripes", data)
+
+    picked, measured = [], []
+    panel.select_requested.connect(lambda a, r: picked.append(r))
+    panel.measure_changed.connect(lambda *a: measured.append(a))
+
+    _click_curve(panel, 6.0, to_index=30.0)
+    assert measured, "拖曳要量尺"
+    assert picked == [], "拖曳不該順手改參數"
+
+
+def test_clicking_between_the_stripes_does_nothing(qapp):
+    """點在沒有任何段的地方 —— **不要猜一個最近的**。"""
+    from adept.ui.widgets import ProfilePanel
+
+    panel = ProfilePanel()
+    panel.resize(400, 120)
+    panel.set_data("upright stripes", {"profile": [10.0] * 40, "raw": [10.0] * 40,
+                                       "bands": [], "groups": []})
+    got = []
+    panel.select_requested.connect(lambda a, r: got.append(r))
+    _click_curve(panel, 20.0)
+    assert got == []
+
+
+def test_the_studio_sends_it_to_the_right_axis(cross_window):
+    """``x`` 那條曲線講的是**直的**條紋。接反的症狀是點左邊改到右邊的參數 ——
+    而畫面上兩邊都會動，看起來像是「有反應」。"""
+    win = cross_window
+    nid = wire_up(win.model, win.model.add_step("roi_cross"))
+    win.select_node(nid)
+
+    win._on_select_requested("x", "darkest")
+    assert win.model.nodes[nid].params["vertical_select"] == "darkest"
+    win._on_select_requested("y", "second_brightest")
+    assert win.model.nodes[nid].params["horizontal_select"] == "second_brightest"
+    assert win.model.nodes[nid].params["vertical_select"] == "darkest"
+
+
+def _click_curve(panel, at_index: float, to_index: float = None) -> None:
+    """在曲線的第 ``at_index`` 個取樣點按下（可選拖到 ``to_index``）再放開。"""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtCore import Qt as _Qt
+
+    n = max(2, len(panel._data.get("profile") or [2]))
+    plot = panel._plot_rect()
+
+    def x_of(i):
+        return plot.left() + plot.width() * (float(i) / (n - 1))
+
+    def send(kind, x, button, buttons):
+        pt = QPointF(x, plot.center().y())
+        ev = QMouseEvent(kind, pt, pt, button, buttons, _Qt.NoModifier)
+        {QEvent.MouseButtonPress: panel.mousePressEvent,
+         QEvent.MouseMove: panel.mouseMoveEvent,
+         QEvent.MouseButtonRelease: panel.mouseReleaseEvent}[kind](ev)
+
+    send(QEvent.MouseButtonPress, x_of(at_index), _Qt.LeftButton, _Qt.LeftButton)
+    if to_index is not None:
+        send(QEvent.MouseMove, x_of(to_index), _Qt.NoButton, _Qt.LeftButton)
+        at_index = to_index
+    send(QEvent.MouseButtonRelease, x_of(at_index), _Qt.LeftButton, _Qt.NoButton)

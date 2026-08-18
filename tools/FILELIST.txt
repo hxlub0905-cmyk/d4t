@@ -15,7 +15,7 @@ ed44cb755d91d7f3adf6018672969a6cb68932f0 adept/core/algo/curve.py
 1726fcfe9d042749796e790a1ed17977402aa386 adept/core/algo/enhance.py
 9e85e8aedef61131545e67fef5e323dbb56a5d57 adept/core/algo/glv.py
 a77ccf39e51b71d68671878245eed04422b4f24e adept/core/algo/golden.py
-1bc3005db124977b5873e8bfd1a17481159f4f8a adept/core/algo/grid.py
+92090823335a56728fd142377b8070d02a69f981 adept/core/algo/grid.py
 4115712249544e2d7f7aa19744a9bed67fc38a5f adept/core/algo/histmatch.py
 9e8715a433ecb84d49151964ed5aea05f8c18dc4 adept/core/algo/normalize.py
 e048c1f3680e5559d0c79d7f080629fecc161549 adept/core/algo/period.py
@@ -58,7 +58,7 @@ aff2d033bbb51e2190ad437ec0f9de6b25d27ebc adept/core/steps/cd.py
 122497dc2fbb9e25638da95cf3cf3c35d0db1644 adept/core/steps/load.py
 ec3f5caf078d2a81bcbe468c825bd51f2b9d0268 adept/core/steps/normalize.py
 9faa96d8ac9fea3ad43bb25e2de578dd5c6fc965 adept/core/steps/quality.py
-c8453c11fd0fb9d6ed1ff0526dc3a39e5101d9cc adept/core/steps/roi_cross.py
+6ae1adb020f237626e5194f385c46556b44a015a adept/core/steps/roi_cross.py
 10eca7676b56a578aa499d27fd9666bc9dc8c03f adept/core/steps/roi_mask.py
 e8269fc1744fd1bf8d3dd62eb5d96d8712962c79 adept/core/steps/roi_snr.py
 744e62a97e1f573c167e6c4627b714d343a12858 adept/core/steps/roi_template.py
@@ -72,16 +72,16 @@ efe5b42adaea7aef95f313fb304df8ee0e0ba269 adept/ui/canvas.py
 43356663d83394cc83a2c63b52150ac59b85921d adept/ui/cell_canvas.py
 41d2bb30bd17a3f34621439faf098018779a274c adept/ui/export_dialog.py
 88d93814bbb34f0756ea935fc9113eccba61cfb4 adept/ui/gallery.py
-450a31c75eace7d286044eb9a5cdf5cd0be128bc adept/ui/inspectors.py
+51cd83dbf3e6dc0ca3936454e4239e9677457f42 adept/ui/inspectors.py
 b996d921ba547e70d5c78251f70f3b56d3e27ef0 adept/ui/region_check.py
 043a9240742914759667fd4bb01beafd0241ed17 adept/ui/results.py
 f282c5db798f305a76fb190f7265f86eb77fbd86 adept/ui/scope.py
-81a7c943927da26cb5f3538e93c5580fa6cef413 adept/ui/studio.py
+fa1ec9208e7ab93511cec70b2c70eb6b38476a6b adept/ui/studio.py
 4be3387c6d9f3656c52d49984bd2380a5f1988dd adept/ui/template_dialog.py
 9969b2dc4458d21336daa399c2c338e3f13df594 adept/ui/theme.py
 434fd16a41917d10fee0f74f72cebff897e81141 adept/ui/viewmodel.py
 b2dd691199dbc50b01b02de407b321aada8e6a3a adept/ui/welcome.py
-786b05a1cfb7e0dab1bddf6dd9594ab56fd94459 adept/ui/widgets.py
+f1d710bcfac43723f3a1e91dbbcd33e12b29d962 adept/ui/widgets.py
 1743d3721ffabddd941551acec287175ad307859 adept/ui/workers.py
 04c5ce471195ac4e2449126ce835b22b4c880cf3 conftest.py
 cf13b359e8b0cbfa4a7ad2318daf00617cb9a9fb docs/ARCHITECTURE.md
@@ -94,7 +94,7 @@ c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
 675b2c1b69653f14ba58c8e0043c477e8f80c81e docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
-d193764b338f409b1d70e466094308c7e897d3ca docs/plans/F11-phase2-features.md
+ed62cc2d0b0a0b65ea1e83076d31877df9e55fdc docs/plans/F11-phase2-features.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
 fdf5dba17526e86ea0990c7853ef652874082324 fab_probe/probe_klarf.py
@@ -190,7 +190,7 @@ cefb798938685e96991557882e02ecebd40defb1 tests/test_ui_f7_23_buttons.py
 1c277b6c4db5f65c5ea3d1947db516b248595fd2 tests/test_ui_f7_9_feedback.py
 7536b72440a3bcc6bea1de3f569fc2b0ba87c0d1 tests/test_ui_f8_advanced.py
 4a5148a2ca94601d4a717c669ddabd92e977778b tests/test_ui_f8_calibrate.py
-e4be2369e7a31340b9c9de4875f08cf70bc6be50 tests/test_ui_f8_cross.py
+850832eeb73e256a9fe3b21f34c7ee6c6bfed1ac tests/test_ui_f8_cross.py
 0085de3cbcc19a5cde7a8788d5f7f76dacb45dc7 tests/test_ui_f8_ruler.py
 d8b5e1d83146e68ff672137e95e6a58f55d6cad2 tests/test_ui_f8_ui_polish.py
 d30a27087f1558ababadbfdce9904d52903890f5 tests/test_ui_f9_7_user_draws_the_lines.py

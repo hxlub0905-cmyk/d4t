@@ -466,6 +466,13 @@ def _stripe_meta(s: "algo_grid.StripeSet") -> Dict[str, Any]:
         # 的原因是什麼」。答案的一部分就是「面板畫錯了」。
         "transitions": [float(e) for e in (s.edges_sub or s.edges)],
         "bands": [[int(a), int(b)] for a, b in s.bands],
+        # 每一段的平均亮度、它屬於第幾群、現在挑的是哪一群，以及**每一群要填
+        # 什麼 rule** —— 面板靠這四樣把「第幾亮」畫出來並且點得到（Region-2b）。
+        # UI 不自己分群：分幾群取決於現在挑第幾亮，那個規則只該有一份。
+        "levels": [float(v) for v in s.levels],
+        "groups": [int(g) for g in s.groups],
+        "group_picked": int(s.group_picked),
+        "group_rules": {str(k): v for k, v in (s.group_rules or {}).items()},
         "selected": [[int(a), int(b)] for a, b in s.selected],
         "pitch_measured": float(s.pitch_measured),
         # 量到的第二個間距（不交錯就是 0）。面板的「量給我填」讀這兩個。

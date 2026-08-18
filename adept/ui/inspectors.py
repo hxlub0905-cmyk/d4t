@@ -734,6 +734,8 @@ class CrossInspector(Inspector):
     #: 這裡不做判斷，只轉發 —— 儀表不該知道影像檢視器存不存在。
     measure_changed = Signal(str, float, float)
     measure_ended = Signal()
+    #: 「用這一種材質」（點了曲線上的一根條紋）→ 主視窗做 ``model.set_param``。
+    select_requested = Signal(str, str)
     #: 「把量到的間距填進參數格」→ 主視窗做 ``model.set_param``。
     #: 儀表不碰模型（它連 recipe 長什麼樣都不知道），只說出請求。
     param_requested = Signal(str, object)
@@ -773,6 +775,7 @@ class CrossInspector(Inspector):
             panel.measure_changed.connect(self.measure_changed)
             panel.measure_ended.connect(self.measure_ended)
             panel.pitch_requested.connect(self._on_pitch_requested)
+            panel.select_requested.connect(self.select_requested)
             lay.addWidget(panel)
 
     def _on_pitch_requested(self, axis: str, pitch: float,

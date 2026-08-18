@@ -1331,14 +1331,32 @@ class ProfilePanel(QWidget):
     #: 使用者原話：「有辦法自動 measure 填入左側數值嗎」。曲線本來就知道答案，
     #: 而要他看著面板上的數字再手動打一次，是在製造一個可以打錯的機會。
     pitch_requested = Signal(str, float, float)
+    #: 「用這一種材質」（axis, select 的值）—— 使用者**點了曲線上的一根條紋**。
+    #:
+    #: 為什麼這件事要能用點的（F11 Region-2b）：使用者的話是「能用圖就用圖」，
+    #: 而 ``second_brightest`` 這個詞本身不告訴他任何事 —— 「哪一組是第二亮的」
+    #: 是一個只有看圖才答得出來的問題，而圖就在這裡。分群由引擎給
+    #: （``algo/grid.band_groups``），面板不自己分。
+    select_requested = Signal(str, str)
 
     _EMPTY = "(select a Profile card to see its curve)"
+
+    #: 每一群的底色（依群號輪流）。用**顏色**而不是深淺：深淺會跟曲線下面的
+    #: 灰階混在一起，而這裡要講的是「這幾根是同一種東西」。
+    GROUP_COLORS = ("#3574d6", "#c2871f", "#7a68a6", "#3f9d6b", "#d05a4c")
+
+    #: 拖多少個取樣點以內算「點一下」而不是「拖了一段」。
+    CLICK_SLOP = 1.5
+
+    #: 底部那條分群色帶有多高（畫面像素）。
+    GROUP_BAR = 5.0
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._data: Dict[str, Any] = {}
         self._name = ""
         self._ruler: Optional[Tuple[float, float]] = None
+        self._pressed_at: Optional[float] = None
         self.setMinimumHeight(96)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setToolTip(
@@ -1351,6 +1369,8 @@ class ProfilePanel(QWidget):
             "and the summary says how far.\n\n"
             "The dashed line marked 'defect' is the middle of the patch, which "
             "is where the tool put the defect - a marker, not a setting.\n\n"
+            "Click a stripe to use that material — the colours are the groups "
+            "the card found, and the solid one is the group it is using now.\n\n"
             "Press and drag across the curve to measure: the green band shows "
             "the same stretch on the image above, and the readout gives the "
             "distance in pixels - and the pitch, if you dragged across more "
@@ -1454,6 +1474,31 @@ class ProfilePanel(QWidget):
             bits.append("pitch %.1f px" % ((mids[-1] - mids[0]) / (len(mids) - 1)))
         return " · ".join(bits)
 
+    def groups(self) -> List[int]:
+        """每一段屬於第幾群（引擎算的，見 ``algo/grid.band_groups``）。"""
+        return [int(g) for g in (self._data.get("groups") or [])]
+
+    def group_rules(self) -> Dict[int, str]:
+        """群號 → 要填進 ``select`` 的值。"""
+        return {int(k): str(v)
+                for k, v in (self._data.get("group_rules") or {}).items()}
+
+    def group_at(self, index: float) -> Optional[int]:
+        """曲線上第 ``index`` 個取樣點落在哪一群（不在任何段裡回 ``None``）。"""
+        bands = self._data.get("bands") or []
+        groups = self.groups()
+        if len(groups) != len(bands):
+            return None
+        for (a, b), g in zip(bands, groups):
+            if float(a) <= float(index) <= float(b):
+                return int(g)
+        return None
+
+    def rule_at(self, index: float) -> str:
+        """點在這裡的話，``select`` 要填什麼（沒有答案就空字串）。"""
+        g = self.group_at(index)
+        return self.group_rules().get(g, "") if g is not None else ""
+
     def _centers_in(self, a: float, b: float) -> List[float]:
         """這一段裡有幾根條紋的**中心**（用中心不用邊，邊有升有降會多算一倍）。"""
         bands = self._data.get("selected") or self._data.get("bands") or []
@@ -1500,6 +1545,7 @@ class ProfilePanel(QWidget):
             return
         i = self._index_at(e.position().x())
         self._ruler = (i, i)
+        self._pressed_at = i          # 放開時用來分辨「點一下」與「拖了一段」
         self._emit_ruler()
         self.update()
         e.accept()
@@ -1515,7 +1561,16 @@ class ProfilePanel(QWidget):
     def mouseReleaseEvent(self, e) -> None:        # noqa: D102 - Qt hook
         if e.button() != Qt.LeftButton or self._ruler is None:
             return
+        span = abs(self._ruler[1] - self._ruler[0])
+        at = self._pressed_at
         self._end_ruler()
+        # **點一下 = 選這一種材質；拖一段 = 量尺。** 同一個手勢兩種意思會很糟，
+        # 所以用「有沒有移動」分開 —— 那是使用者本來就分得出來的兩件事，
+        # 而尺本來就要拖過一段才有意義（0 寬的尺量不出東西）。
+        if span <= self.CLICK_SLOP and at is not None:
+            rule = self.rule_at(at)
+            if rule:
+                self.select_requested.emit(self.axis(), rule)
         e.accept()
 
     def summary(self) -> str:
@@ -1619,6 +1674,34 @@ class ProfilePanel(QWidget):
         for band in shaded:
             x0, x1 = to_x(int(band[0])), to_x(int(band[1]))
             p.drawRect(QRectF(x0, plot.top(), max(1.0, x1 - x0), plot.height()))
+
+        # **底部的一條色帶：每一群一個顏色**（F11 Region-2b）。
+        #
+        # 「哪一組是第二亮的」是一個只有看圖才答得出來的問題，而
+        # ``second_brightest`` 這個詞本身不告訴使用者任何事 —— 所以把分群畫出來。
+        # 分群是引擎算的（``algo/grid.band_groups``），面板不自己分。
+        #
+        # 為什麼是**底部一條細帶**而不是整段上色：整段上色會把「現在用的是哪
+        # 一組」那個既有的塗色淹掉（實測：塗滿之後兩者只剩 alpha 的差別），
+        # 而且畫面會變得很吵。色帶回答「有幾種、哪一種是哪一種」，塗色回答
+        # 「現在用的是哪一種」—— 兩個問題，兩個位置。
+        bands = self._data.get("bands") or []
+        groups = self.groups()
+        if len(groups) == len(bands) and bands:
+            picked_group = self._data.get("group_picked")
+            p.setPen(Qt.NoPen)
+            for band, g in zip(bands, groups):
+                on = (g == picked_group)
+                col = QColor(self.GROUP_COLORS[int(g) % len(self.GROUP_COLORS)])
+                # 沒被選中的那幾群要**很淡**：空隙那一群通常最寬，照一樣的濃度
+                # 畫會把整條色帶佔滿，而真正要看的「現在用哪一組」反而變成幾根
+                # 小點（render 出來確認過）。
+                col.setAlpha(255 if on else 70)
+                p.setBrush(col)
+                x0, x1 = to_x(float(band[0])), to_x(float(band[1]))
+                th = self.GROUP_BAR if on else self.GROUP_BAR * 0.45
+                p.drawRect(QRectF(x0, plot.bottom() - th,
+                                  max(1.0, x1 - x0), th))
 
         # 晶格上**故意不用**的那幾格（那裡是別的材質）。畫成斜線而不是另一種
         # 底色：它跟選中的段是同一排上的東西，差別在「用不用」，而兩塊實心色
