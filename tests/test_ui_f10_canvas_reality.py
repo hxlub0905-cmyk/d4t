@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import first_source  # noqa: E402
+
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
@@ -52,7 +54,7 @@ def window(qapp):
 
 def _every_card(window):
     """把卡片庫裡每一張卡都加進畫布，逐一 yield ``(key, 節點圖元)``。"""
-    first = window.model.node_order[0]
+    first = first_source(window)
     for cls in list_steps():
         if cls.key in HIDDEN_STEPS:
             continue
@@ -99,7 +101,11 @@ def test_the_hit_area_is_the_grab_area(window):
         shape, bounds = item.shape(), item.boundingRect()
         assert bounds.contains(shape.boundingRect()), (
             "%s：shape 伸出 boundingRect 之外，那一圈點不到" % key)
-        anchors = [item.in_port_local()] + item.out_anchors_local()
+        # **畫出來的埠**才要點得到。F11 Enhance-4 起入口卡沒有輸入埠
+        # （它是最初始的 source，任何線都接不上去），所以這裡問的是
+        # `in_anchors_local()`（畫幾顆就是幾顆）而不是 `in_port_local()`
+        # （那個是給連線畫圖用的幾何點，畫面上沒有它）。
+        anchors = item.in_anchors_local() + item.out_anchors_local()
         for anchor in anchors:
             assert shape.contains(anchor), "%s：埠心不在命中區裡" % key
             # 瞄埠的人常常落在圓點外圍，不是正中心
@@ -139,7 +145,7 @@ def test_the_output_appears_only_when_every_input_is_connected(window):
     diff 也不該出現（只有在設定內 first stream 跟 second stream 都填上時，
     diff 才會出現）」。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     sub = window.add_card_after(src, "subtract")
     card = window.pipeline.node_item(sub)
     assert card.out_names() == []
@@ -159,7 +165,7 @@ def test_the_output_port_carries_the_name_the_user_gave_it(window):
     畫布上還印著 ``diff`` 的話，使用者就得自己在腦裡做一次翻譯 ——
     而「兩張卡都叫 diff」正是他想用改名解掉的問題。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     sub = window.add_card_after(src, "subtract")
     window._on_edge_added(src, sub, "test", "a")
     window._on_edge_added(src, sub, "ref", "b")
@@ -176,7 +182,7 @@ def test_an_unconnected_card_is_refused_before_it_can_produce_numbers(window):
     三層都要有，因為它們各自回答不同的時機：lint 是「按 Run trial 之前」、
     畫布是「現在看著它的時候」、引擎是「別的路徑（CLI、舊檔）繞進來的時候」。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, "glv_stats")
 
     codes = [i.code for i in window.model.validate() if i.node_id == nid]
@@ -221,7 +227,7 @@ def test_a_measure_card_takes_more_than_one_source(window):
     別的」—— 想同時量 test 與 diff 就得放兩張卡，而那兩張卡的其他設定還得逐格
     對齊，對不齊的時候畫面上看不出來。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     sub = window.add_card_after(src, "subtract")
     window._on_edge_added(src, sub, "test", "a")
     window._on_edge_added(src, sub, "ref", "b")
@@ -293,7 +299,7 @@ def test_cutting_a_line_puts_the_card_back_to_having_no_input(window):
     線是唯一的來源，所以剪掉線就是拿掉來源。**接線與剪線必須是彼此的反向操作**
     —— 只做一半的話，畫布會在「剪」這個方向上說謊。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     sub = window.add_card_after(src, "subtract")
     window._on_edge_added(src, sub, "test", "a")
     window._on_edge_added(src, sub, "ref", "b")
@@ -319,7 +325,7 @@ def test_wiring_and_cutting_are_exact_opposites_for_every_card(window):
     的輸入型別剛好走到沒被覆蓋的那條路，畫布就會在剪線這個方向上說謊，而症狀
     （「數字沒跟著變」）跟接線那一半完全一樣難查。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     for cls in list_steps():
         if cls.key in HIDDEN_STEPS or not cls.input_specs():
             continue
@@ -350,7 +356,7 @@ def test_deleting_a_card_takes_its_lines_with_it(window):
 
     而且那條線是假的：新卡的來源參數是空的，畫布與設定當場互相矛盾。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     dn = window.add_card_after(src, "denoise")
     window._on_edge_added(src, dn, "ref", "streams")
     pr = window.add_card_after(dn, "roi_cross")
@@ -376,7 +382,7 @@ def test_deleting_a_card_leaves_its_downstream_without_a_source(window):
     不清的話下游指著一條**再也沒有人產出**的流：畫布上沒有線、參數卻還寫著
     `ref`，而那正是 F10 一路在拔的那種「看起來成立、跑起來不是那回事」。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     dn = window.add_card_after(src, "denoise")
     window._on_edge_added(src, dn, "ref", "streams")
     glv = window.add_card_after(dn, "glv_stats")
@@ -403,7 +409,7 @@ def test_renaming_an_output_carries_the_downstream_with_it(window):
 
     名字是**顯示用的標籤**，線才是「誰接誰」的事實。改名只該換標籤。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     sub = window.add_card_after(src, "subtract")
     window._on_edge_added(src, sub, "test", "a")
     window._on_edge_added(src, sub, "ref", "b")
@@ -426,7 +432,7 @@ def test_renaming_an_output_is_one_undo_step(window):
     分成好幾步的話，按一次 Ctrl+Z 會停在「上游叫 GGG、下游還指著 diff」——
     一個使用者從來沒有做出來過的中間狀態。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     sub = window.add_card_after(src, "subtract")
     window._on_edge_added(src, sub, "test", "a")
     window._on_edge_added(src, sub, "ref", "b")
@@ -446,7 +452,7 @@ def test_renaming_an_output_is_one_undo_step(window):
 
 def test_renaming_a_stream_on_a_multi_source_card_only_touches_that_one(window):
     """下游接了兩條流時，改名只換掉被改的那一條。"""
-    src = window.model.node_order[0]
+    src = first_source(window)
     sub = window.add_card_after(src, "subtract")
     window._on_edge_added(src, sub, "test", "a")
     window._on_edge_added(src, sub, "ref", "b")
@@ -471,7 +477,7 @@ def test_the_result_stream_name_is_editable_but_the_sources_are_not(window):
     """
     from PySide6.QtWidgets import QLineEdit
 
-    src = window.model.node_order[0]
+    src = first_source(window)
     sub = window.add_card_after(src, "subtract")
     window._on_edge_added(src, sub, "test", "a")
     window._on_edge_added(src, sub, "ref", "b")

@@ -204,6 +204,30 @@ def n_pages(path) -> int:
     return count_pages(path)
 
 
+def bit_depths(path) -> list:
+    """這個 TIFF 裡出現過的位元深度（排序、去重）—— **不解碼像素**（F11）。
+
+    ``BitsPerSample`` 就在 IFD 的 tag 裡，所以「這批資料是幾 bit」在**載入的
+    時候**就答得出來，不必等跑到某一顆才發現。彩色頁的 tag 是一串（每個 sample
+    一個值），這裡把它攤平。
+
+    讀不出來（壞檔、非 TIFF）→ 回空 list：位元深度的檢查不該讓載入失敗，
+    真正的守門在 ``dataset.require_8bit``（那裡看的是解出來的像素）。
+    """
+    out = set()
+    try:
+        pages, _info = read_tiff_pages(str(path))
+    except (OSError, ValueError, struct.error):
+        return []
+    for p in pages:
+        bits = p.get("bits")
+        if isinstance(bits, list):
+            out.update(int(b) for b in bits)
+        elif bits is not None:
+            out.add(int(bits))
+    return sorted(out)
+
+
 # --------------------------------------------------------------------------- #
 # 開著的 TIFF handle 快取
 # --------------------------------------------------------------------------- #

@@ -22,6 +22,7 @@
 | **進度與 phase 計畫** | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 想知道「接下來做什麼」 |
 | **為什麼長成這樣**：需求訪談結論、六個來源專案的脈絡 | [`docs/HANDOVER.md`](docs/HANDOVER.md) | 第一次接手；想改一個「看起來多餘」的設計之前 |
 | 廠內待驗證的假設、受限機器的部署 | [`docs/FAB-VALIDATION.md`](docs/FAB-VALIDATION.md) | 要動 KLARF／單位／搬運時 |
+| **上游 GLAS 的介面**（label map／合成 gray／alignment；ADEPT 不解析 layout）| [`docs/GLAS-INTERFACE.md`](docs/GLAS-INTERFACE.md) | 要動 ROI 第三條路、或要請 GLAS 改東西時 |
 | 逐輪的決策與理由 | [`SESSION_LOG.md`](SESSION_LOG.md)（近期）＋ [`docs/history/`](docs/history/) | 查「這個決定當初為什麼這樣下」|
 
 **加一份新文件之前先問：這個主題已經有家了嗎。** 有的話寫進那一份。
@@ -194,15 +195,30 @@ git add -A && python tools/release.py && git add -A
 
 ## 5. 產品範圍開關
 
-**Studio 目前只吃 EBI patch。** RSEM 的能力（ingest、Golden Cell、週期估測、
-測試）**完全沒有被刪**，只是從 GUI 上收起來。
+**Studio 吃四種輸入（2026-08-17，F11 Input-3）**，一種 source 一個入口：
 
-`adept/ui/scope.py` 是這類「暫時不給看」的**唯一**去處，目前三個開關：
+**一種 source 一張卡**（F11 Input-4，使用者定調）：Input 段有兩張載入卡 ——
+`load_patch`「Load images」（一顆好幾張，`channel_map` 命名）與 `load_single`
+「Load one image」（一顆一張，`out` 命名）。**兩張都不看資料型別**，宣告只看
+使用者看得到的值 —— 一張卡服務四種 source 的時候，畫布會說謊（那時候「這張卡吐
+哪幾條流」有三個不同的答案，而畫布拿到的是錯的那一個）。
+
+| kind | 什麼樣的資料 | 入口 |
+|---|---|---|
+| `ebi_patch` | KLARF + patch TIFF（每顆連續幾頁）| `Open KLARF…` |
+| `rsem` | KLARF + 每顆一個影像檔 | `Open KLARF…`（自動判別）|
+| `tiff_stack` | 一個多頁 TIFF、**沒有 KLARF** | `Open stack…`（問「一顆幾張」）|
+| `folder` | 一個資料夾的單張影像、沒有 KLARF | `Open folder…` |
+
+後兩種沒有 KLARF → 沒有座標、**寫不回 KLARF**，而那句話**常駐在資料集標籤上**
+（`tiff_stack · defect 1 / 3 · no KLARF`）—— 不是等使用者按了 Export 才發現。
+
+`adept/ui/scope.py` 仍然是這類「暫時不給看」的**唯一**去處：
 
 ```python
-SUPPORTED_KINDS = ("ebi_patch",)                # 加 "rsem" 就整條路線回來
-HIDDEN_STEPS = ("golden_cell", "cell_period")   # 清空就出現在卡片庫
-SHOW_SAMPLE_ENTRIES = False                     # 範例入口（見下）
+SUPPORTED_KINDS = ("ebi_patch", "tiff_stack", "rsem", "folder")
+HIDDEN_STEPS = ()                # 空了（原本收著 golden_cell / cell_period）
+SHOW_SAMPLE_ENTRIES = False      # 範例入口（見下）
 ```
 
 `SHOW_SAMPLE_ENTRIES`（2026-08-16）管兩個入口：導覽與空白狀態上的
@@ -210,8 +226,13 @@ SHOW_SAMPLE_ENTRIES = False                     # 範例入口（見下）
 它們都是死路（庫是空的、demo 產得出資料卻載不到 pipeline），而**按了撞牆的鈕
 比沒有那顆鈕更糟**（推廣鐵則）。`run_demo` / `RecipeLibraryDialog` 一行都沒動。
 
-`tests/test_ui_patch_only.py` 同時鎖住兩邊：GUI 真的收斂了，而且
-**打開開關就回得來**（那支測試會 monkeypatch 這幾個常數再驗一次）。
+`tests/test_ui_input_kinds.py`（原 `test_ui_patch_only.py`）鎖住四種都進得來、
+沒有 KLARF 的兩種會講出來、而**「暫時收起來」的機制還在**（`HIDDEN_STEPS` 空著
+但 `visible_steps()` 照樣管用 —— 下次要藏一張卡時加一個字串就好）。
+
+F7-1 收斂成 patch-only 時用的是「**收起來、不刪掉**」，於是這一輪打開只改了
+`scope.py` 的兩個常數，`ingest` / `golden_cell` / `algo/period.py` 一行都沒動。
+**收起來的成本是零、回復的成本是加一個字串** —— 那個判斷被驗證了。
 
 > ⚠ **`adept/core/algo/period.py` 不要刪。** 它現在只被 Golden Cell 用到，
 > 看起來像是可以跟 RSEM 一起砍掉的東西 —— 但 `estimate_period` /

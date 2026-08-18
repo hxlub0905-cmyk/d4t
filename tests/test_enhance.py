@@ -192,10 +192,11 @@ def test_only_two_new_cards_were_added_for_six_new_abilities():
     assert set(methods) == {"background", "stripes_h", "stripes_v",
                             "bright_spots", "dark_spots"}
 
-    # 邊緣保留去噪塞進既有的 Denoise，不另開卡
+    # 邊緣保留去噪塞進既有的 Denoise，不另開卡（F11 Enhance-2 的孤立壞點也是）
     denoise = {p["name"]: p for p in get_step("denoise").describe()["params"]}
     assert set(denoise["method"]["choices"]) == {"median", "gaussian",
-                                                 "bilateral", "nlm"}
+                                                 "bilateral", "nlm",
+                                                 "hot_pixels"}
 
     # 雙流運算塞進既有的 Compare 卡，不另開卡
     sub = {p["name"]: p for p in get_step("subtract").describe()["params"]}
@@ -302,11 +303,12 @@ def test_subtract_keeps_its_original_behaviour_by_default():
 # --------------------------------------------------------------------------- #
 # F7-20：正規化的四種做法收成一張卡；參數跟著方法出現／消失
 # --------------------------------------------------------------------------- #
-def test_normalize_is_one_card_with_four_methods():
+def test_normalize_is_one_card_with_every_method_in_the_family():
     """使用者原話：「他們都是正規化，放在一起讓 user 勾選用哪一種即可」。
 
-    四種方法解決的是同一個問題（把灰階重新映射好讓兩張圖比得起來），差別只在
-    拉伸範圍怎麼決定。卡片庫多三列，使用者就要多讀三段說明才知道該用哪一個。
+    每一種方法解決的都是同一個問題（把灰階重新映射好讓兩張圖比得起來），差別只在
+    拉伸範圍怎麼決定。卡片庫多一列，使用者就要多讀一段說明才知道該用哪一個 ——
+    所以 F11 Enhance-2 的 zscore 也是這張卡的一個選項，不是第五張 Enhance 卡。
     """
     from adept.core.pipeline import REGISTRY, get_step
 
@@ -317,14 +319,20 @@ def test_normalize_is_one_card_with_four_methods():
         assert gone not in REGISTRY, gone
 
     methods = {p.name: p for p in get_step("normalize").params}["method"]
-    assert methods.choices == ["percentile", "glv_band", "match", "local"]
+    assert methods.choices == ["percentile", "zscore", "glv_band", "match",
+                               "local"]
 
 
 @pytest.mark.parametrize("method,shown,hidden", [
     ("percentile", ("p_low", "p_high", "range_from"), ("glv_low", "tiles", "reference")),
+    ("zscore", ("target_level", "target_spread", "range_from", "use_within"),
+     ("p_low", "glv_low", "tiles", "reference")),
     ("glv_band", ("glv_low", "glv_high", "range_from"), ("p_low", "tiles", "reference")),
-    ("match", ("reference", "match_method"), ("p_low", "glv_low", "tiles", "range_from")),
-    ("local", ("clip_limit", "tiles"), ("p_low", "glv_low", "reference", "range_from")),
+    ("match", ("reference", "match_method", "use_within"),
+     ("p_low", "glv_low", "tiles", "range_from", "target_level")),
+    ("local", ("clip_limit", "tiles"),
+     ("p_low", "glv_low", "reference", "range_from", "use_within",
+      "target_spread")),
 ])
 def test_only_the_parameters_that_apply_are_shown(method, shown, hidden):
     """``show_when``：選了 CLAHE 的時候 ``p_low`` 根本不是這張卡的一部分。

@@ -31,6 +31,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import first_source  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
@@ -88,7 +90,7 @@ def _wired_pair(window, step_key="denoise"):
     F9-7 起加卡**不會自己接線**（線都留給使用者拉），所以這裡要自己拉一條 ——
     這一支要驗的是「線上的 × 按不按得到」，得先有一條線。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, step_key)
     window._on_edge_added(src, nid, "test")
     assert window.model.has_edge(src, nid) is True

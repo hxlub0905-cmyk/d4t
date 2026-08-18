@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import first_source  # noqa: E402
+
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
@@ -49,7 +51,7 @@ def window(qapp):
 
 
 def _load_and(win, step_key="denoise"):
-    src = win.model.node_order[0]
+    src = first_source(win)
     return src, win.add_card_after(src, step_key)
 
 

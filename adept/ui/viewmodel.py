@@ -62,20 +62,39 @@ class RecipeModel:
     #: 試用回饋（F7-9）原話：「一開始預設畫布上就應該有 load image 這個節點」。
     STARTER_STEP = "load_patch"
 
+    #: **一顆一張影像**的資料型別 → 起手卡要換成 `load_single`（F11 Input-4）。
+    #: 一種 source 一張卡，所以「哪一張卡是起手卡」也跟著資料走 —— 給單張資料
+    #: 放一張 `load_patch`，畫布上會冒出兩顆埠而資料只有一張圖。
+    SINGLE_IMAGE_STARTERS = {"rsem": "load_single", "folder": "load_single"}
+
+    @classmethod
+    def starter_step_for(cls, kind: str) -> str:
+        """這種資料的起手卡是哪一張。"""
+        return cls.SINGLE_IMAGE_STARTERS.get(str(kind or ""), cls.STARTER_STEP)
+
     @classmethod
     def starter(cls, kind: str = "ebi_patch") -> "RecipeModel":
-        """開新檔用的模型：畫布上已經放好 Input 卡，而且不算「改過」。
+        """開新檔用的模型：**空白畫布**，而且不算「改過」。
+
+        為什麼不預先放一張 Input 卡（F11 Enhance-4，使用者定調）
+        -------------------------------------------------------
+        F7-9 起開窗就有一張 `load_patch`。那時候只有一張載入卡，所以「先幫你放
+        好」是純粹的好意；F11 Input-4 把它拆成兩張（`load_patch` 一顆好幾張 /
+        `load_single` 一顆一張）之後，預先放一張就是**替使用者決定了他還沒決定
+        的事** —— 而猜錯的那一半在畫布上看起來完全正常（兩顆埠 vs 一顆埠）。
+
+        使用者原話：「Load image 卡片改成預設沒有（user 可以選擇要 Load images
+        or Load one image），add 才會出現。」
+
+        載入資料的時候 Studio 仍然會**照資料的型別**補上那一張（見
+        `studio._adopt_source_for`）—— 那時候「哪一張」已經不是猜的，是資料說的。
 
         ``dirty`` 特意還原成 ``False`` —— 使用者什麼都還沒做，關窗時不該被問
         「要存檔嗎」。
         """
         m = cls(kind=kind)
-        try:
-            m.add_step(cls.STARTER_STEP)
-        except KeyError:                 # pragma: no cover — 卡片庫壞了才會發生
-            pass
         m.dirty = False
-        m.clear_history()      # 起手卡不是「使用者做過的一步」，Ctrl+Z 不該退掉它
+        m.clear_history()
         return m
 
     # ---- listener ---------------------------------------------------------
@@ -367,7 +386,6 @@ class RecipeModel:
     def available_streams(self, before_node: Optional[str] = None) -> List[str]:
         """到 before_node（不含）為止累積的影像流名，供 image_key 參數下拉。"""
         streams: List[str] = []
-        first = True
         for nid in self.node_order:
             if nid == before_node:
                 break
@@ -375,11 +393,9 @@ class RecipeModel:
             if not node.enabled:
                 continue
             step_cls = get_step(node.step)
-            if first:
-                ws = step_cls.resolve_writes_for_kind(node.params, self.kind)
-                first = False
-            else:
-                ws = step_cls.resolve_writes(node.params)
+            # kind-aware 是卡片自己的宣告，不是位置的事（F11 Input-0）——
+            # 兩張入口卡的時候，第二張也要算得出它真的會產出哪幾條流。
+            ws = step_cls.resolve_writes_for_kind(node.params, self.kind)
             for w in ws:
                 if w not in streams:
                     streams.append(w)

@@ -58,7 +58,14 @@ def _model():
     import adept.core.steps  # noqa: F401 — 註冊卡片
     from adept.ui.viewmodel import RecipeModel
 
-    return RecipeModel.starter()
+    m = RecipeModel.starter()
+    # F11 Enhance-4：`starter()` 現在是**空白畫布**（使用者要自己挑載入卡）。
+    # 復原這幾題問的是「刪掉一張卡退得回來嗎」，所以先放一張進去 ——
+    # 而它不算「使用者做過的一步」，同起手卡當年的理由。
+    m.add_step("load_patch")
+    m.dirty = False
+    m.clear_history()
+    return m
 
 
 def test_a_fresh_recipe_has_nothing_to_undo():

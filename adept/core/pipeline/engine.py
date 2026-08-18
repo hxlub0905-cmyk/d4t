@@ -231,7 +231,6 @@ def _implicit_bindings(recipe: Recipe, order: List[str],
     """
     out: Dict[Tuple[str, str], Tuple[str, str]] = {}
     last_writer: Dict[str, str] = {}
-    first = True
     for nid in order:
         node = recipe.nodes.get(nid)
         if node is None or not node.enabled:
@@ -246,9 +245,10 @@ def _implicit_bindings(recipe: Recipe, order: List[str],
         for name in step_cls.resolve_reads(params):
             if name in last_writer:
                 out[(nid, name)] = (last_writer[name], name)
-        writes = (step_cls.resolve_writes_for_kind(params, kind) if first
-                  else step_cls.resolve_writes(params))
-        first = False
+        # kind-aware 的 writes 宣告是**卡片自己的事**，不是「排第幾個」的事
+        # （F11 Input-0）。預設實作就是 ``resolve_writes``，只有 load 卡覆寫
+        # 它 —— 所以無條件呼叫，一張卡的宣告不會因為它前面多一張卡而改變。
+        writes = step_cls.resolve_writes_for_kind(params, kind)
         for w in writes:
             last_writer[w] = nid
     return out

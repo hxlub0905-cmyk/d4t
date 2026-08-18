@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Dict, List, Optional, Type
 
 from .context import Context
+from .channels import ChannelMapError, format_channel_map, parse_channel_map
 from .curve import CurveError, format_curve, parse_curve
 
 CATEGORY_IMAGE = "image"
@@ -79,7 +80,8 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC)
 #: 一個放不下、也編輯不了的值配一個文字框，等於邀請使用者去改它。
 #: UI 認得這個型別：它給的是「建一個」的按鈕加一行摘要，欄位本身唯讀。
 PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
-               "image_keys", "curve", "template", "multi_choice")
+               "image_keys", "curve", "template", "multi_choice",
+               "channel_map")
 
 #: 輸出流的名字可以用哪些字（F10-7）。
 #:
@@ -179,6 +181,18 @@ class ParamSpec:
     #: 的那一天是唯一的出路，而那一天使用者最需要它們就在手邊。收起來不是
     #: 貶低它們，是承認「第一次打開這張卡的人不該從這裡開始」。
     advanced: bool = False
+    #: 這個值是**影像上的一段長度（像素）**，而且畫成一個以缺陷為中心的方框會
+    #: 幫助使用者決定它（F11 Enhance-UI-A）。UI 會把那個方框疊在預覽影像上，
+    #: 拖滑桿時跟著變。
+    #:
+    #: 為什麼要一個**明講的旗標**而不是「``unit=="px"`` 就畫」：``unit="px"`` 的
+    #: 參數裡有一半不是鄰域範圍（``roi_cross`` 的條紋間距、框線粗細、離邊界的
+    #: 留白）。拿一個方框去表示「條紋間距」會讓畫面說謊 —— 那跟 F9/F10 那條
+    #: 「畫布不能說謊」是同一件事，只是換到影像上。
+    #:
+    #: 判準：這個數字是不是一個**鄰域的邊長**（濾波核、結構元素、搜尋窗）。
+    #: 是就填，其他長度不要填。
+    extent: bool = False
 
     def visible_for(self, params: Optional[Dict[str, Any]]) -> bool:
         """在這組參數下，這一列該不該顯示（沒有 ``show_when`` 就永遠顯示）。"""
@@ -260,6 +274,10 @@ class ParamSpec:
                 # 擋在這裡而不是等 run() 才炸（鐵則 4）。順便正規化：
                 # 排序、去空白、統一小數位 —— 手打的字串與 UI 拉出來的一樣。
                 v = format_curve(parse_curve(value))
+            elif self.type == "channel_map":
+                # 同上：擋在打字的當下，並正規化成「依頁碼排序、", " 分隔」
+                # —— round-trip 要是 identity（見 channels.format_channel_map）。
+                v = format_channel_map(parse_channel_map(value))
             elif self.type == "choice":
                 v = str(value)
                 if v not in (self.choices or []):
@@ -270,8 +288,8 @@ class ParamSpec:
                 raise ParamError(f"parameter '{self.name}': unknown type")
         except ParamError:
             raise
-        except CurveError as exc:
-            # CurveError 的訊息已經是白話的，別被下面的通用訊息蓋掉
+        except (CurveError, ChannelMapError) as exc:
+            # 這兩個的訊息已經是白話的，別被下面的通用訊息蓋掉
             raise ParamError(f"parameter '{self.name}': {exc}") from None
         except (TypeError, ValueError):
             raise ParamError(
@@ -360,6 +378,22 @@ class Step(ABC):
         return list(cls.features_out)
 
     @classmethod
+    def diagnostic_features(cls, params: Dict[str, Any]) -> List[str]:
+        """這些特徵在講「**這張卡自己做了什麼**」，不是在量缺陷（F11 Enhance-3）。
+
+        為什麼要分這一類：`validate` 的 `feature-collision` 警告是為了抓
+        「兩張量測卡安靜地蓋掉彼此的量測值」。而 Enhance 卡的診斷數字
+        （`clip_frac` 之類）是**每一張都會產出**的 —— 一份有兩張 Enhance 卡的
+        recipe 因此必然撞名，於是那個警告在每一份正常的 recipe 上都會出現。
+        而使用者學會忽略一條警告之後，真的那一條也一起被忽略了（推廣鐵則）。
+
+        撞名的**資訊沒有丟**：engine 的 `_rescue_overwritten_features` 會把前一張
+        的值留成 ``<節點名>_clip_frac``（黃金值裡的 `norm_clip_frac` 就是它）。
+        所以這裡跳過的只是那句話，不是那個值。
+        """
+        return []
+
+    @classmethod
     def resolve_requires_ref(cls, params: Dict[str, Any]) -> bool:
         """在這組參數下，這張卡是不是真的需要一條 ``ref``（F7-20）。
 
@@ -384,6 +418,40 @@ class Step(ABC):
     def output_specs(cls) -> List[ParamSpec]:
         """輸出流名字的那幾格（``out`` 這種；改了它畫布上的埠就跟著改名）。"""
         return [p for p in cls.params if p.is_output()]
+
+    @classmethod
+    def is_source(cls) -> bool:
+        """這張卡是**入口**嗎 —— 沒有輸入埠就是（F11 Input-0）。
+
+        為什麼要這個判斷
+        ----------------
+        以前「入口」的定義是**位置**：``route`` 上第一張啟用的卡。那是線性
+        route 時代的寫法（F9 之前畫布還沒有線），而它同時出現在三個地方
+        （``recipe.validate``、``engine._implicit_bindings``、
+        ``viewmodel.available_streams``）都寫成 ``first = True`` 這個旗標。
+
+        位置定義的後果是**一份 recipe 只能有一個 image source**：第二張入口卡
+        拿不到 kind-aware 的 writes 宣告（``load_patch`` 在 ``channels="auto"``
+        下只保守宣告 ``["test"]``），於是它真的會產出的那幾條流在 validate 眼裡
+        不存在，下游冒出一片**假的** ``missing-image``。
+
+        現在改成看**事實**：入口就是**不吃任何影像流的卡**，跟它排在第幾個無關。
+        所以「patch 的頁 + GLAS 的 sidecar」這種兩個入口的 recipe 才成立，
+        而且刪掉第一張卡不會讓整條 route 的檢查換一套語意。
+
+        判準是兩個**宣告**的聯集，不是一個：
+
+        - 沒有輸入埠（``direction="in"`` 的 ``image_key(s)`` 參數，F10 起必填）；
+        - **而且**沒有靜態 ``reads``。第二條不是多餘的 —— 一張卡可以宣告
+          ``reads = ["diff"]`` 卻沒有讓使用者挑來源的參數（測試裡的假卡就是
+          這樣，早期的卡片風格也是）。只看埠的話那種卡會被當成入口，於是
+          ``missing-image`` 整條檢查安靜地失效。
+
+        看**宣告**而不看**值**（``resolve_reads(params)``）也是刻意的，理由跟
+        F10 那條一樣：值是會被清空的（剛加進畫布的卡輸入本來就是空的），
+        用值判斷的話一張還沒接線的卡會變成「入口」而躲過 ``not-connected``。
+        """
+        return not cls.input_specs() and not cls.reads
 
     @classmethod
     def missing_inputs(cls, params: Dict[str, Any]) -> List[str]:
@@ -488,6 +556,7 @@ class Step(ABC):
                     "section": p.section,
                     "advanced": p.advanced,
                     "direction": p.direction,
+                    "extent": p.extent,
                 }
                 for p in cls.params
             ],

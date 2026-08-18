@@ -162,6 +162,47 @@ def _draw_elided(p: QPainter, rect: QRectF, text: str) -> None:
     p.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft, s)
 
 
+#: 參數摘要各項之間的分隔（Studio 組字串時用的是同一個）。
+SUMMARY_SEP = " · "
+
+
+def _fit_parts(fm, width: float, parts: List[str]) -> str:
+    """把「這張卡被設定成什麼」逐項塞進 ``width``，**放不下的收成 `+N`**。
+
+    為什麼不是直接 elide 整串（使用者回報：「normalize 的節點文字會被吃掉」）
+    -----------------------------------------------------------------------
+    以前這一行是「三個非預設參數 join 起來」再交給 :func:`_draw_elided`，於是節點
+    上長出 ``streams= · p_low=1.2 · refer…`` —— 最後一項被切在字中間，而**被切掉
+    的那一項使用者根本不知道它存在**。
+
+    改成逐項塞：塞得下的完整顯示，塞不下的用一個數字承認「還有 N 項」。
+    ``+1`` 是一個看得懂的訊息（點開卡片就看得到那一項），``refer…`` 不是。
+
+    純函式（只吃 ``QFontMetricsF``）—— 所以「幾項塞得下」測得到，不必去讀畫素。
+    """
+    items = [str(x) for x in parts if str(x)]
+    kept: List[str] = []
+    for part in items:
+        trial = SUMMARY_SEP.join(kept + [part])
+        hidden_after = len(items) - len(kept) - 1
+        need = trial + ("  +%d" % hidden_after if hidden_after else "")
+        if kept and fm.horizontalAdvance(need) > width:
+            break
+        kept.append(part)
+    text = SUMMARY_SEP.join(kept)
+    hidden = len(items) - len(kept)
+    if hidden:
+        text = "%s  +%d" % (text, hidden) if text else "+%d" % hidden
+    return text
+
+
+def _draw_parts(p: QPainter, rect: QRectF, parts: List[str]) -> str:
+    """:func:`_fit_parts` 的結果畫上去（回畫出的字，狀態列與測試讀得到）。"""
+    text = _fit_parts(p.fontMetrics(), rect.width(), parts)
+    _draw_elided(p, rect, text)
+    return text
+
+
 class _NodeItem(QGraphicsItem):
     """一張節點卡（自繪；顏色全部取自 ``theme.TOKENS``）。"""
 
@@ -269,10 +310,20 @@ class _NodeItem(QGraphicsItem):
         return [dict(d) for d in (self.info.get("inputs") or [])]
 
     def in_anchors_local(self) -> List[QPointF]:
-        """每個輸入埠在本地座標的位置（由上而下均分節點左緣）。"""
+        """每個輸入埠在本地座標的位置（由上而下均分節點左緣）。
+
+        **沒有輸入的卡就沒有埠**（F11 Enhance-4，使用者定調：「因為她是最初始的
+        source，card 最前方不能有連接的白色原點」）。以前這裡回一顆「反正畫一個」
+        的埠，而那顆埠是**畫布在說謊**的一個實例：它看起來可以接線，但入口卡的
+        資料不是從別張卡來的，任何線都接不上去（`in_port_at` 現在也回 None，
+        所以連拖過去的動作都不成立）。
+
+        幾何用途（`in_port`）仍然答得出一個點 —— 那是給連線畫圖用的內部座標，
+        不是畫在畫面上的東西。
+        """
         n = len(self.in_specs())
         if n == 0:
-            return [QPointF(0.0, NODE_H / 2.0)]   # 沒有輸入的卡（Input）仍畫一顆
+            return []
         if n == 1:
             return [QPointF(0.0, NODE_H / 2.0)]
         step = NODE_H / (n + 1)
@@ -282,12 +333,19 @@ class _NodeItem(QGraphicsItem):
         base = self.scenePos()
         return [base + p for p in self.in_anchors_local()]
 
+    #: 沒有輸入的卡（Input）**不畫**埠，但幾何上仍然要答得出一個點：
+    #: 連線的貝茲曲線、`shape()`、測試都會問。左緣正中央。
+    _NO_INPUT_ANCHOR = QPointF(0.0, NODE_H / 2.0)
+
     def in_port(self, index: int = 0) -> QPointF:
         anchors = self.in_anchors()
+        if not anchors:
+            return self.scenePos() + self._NO_INPUT_ANCHOR
         return anchors[max(0, min(int(index), len(anchors) - 1))]
 
     def in_port_local(self) -> QPointF:
-        return self.in_anchors_local()[0]
+        anchors = self.in_anchors_local()
+        return anchors[0] if anchors else QPointF(self._NO_INPUT_ANCHOR)
 
     def in_port_at(self, pos: QPointF):
         """本地座標 ``pos`` 最靠近哪一個輸入埠（沒有夠近的回 ``None``）。
@@ -483,9 +541,9 @@ class _NodeItem(QGraphicsItem):
         p.setFont(f)
         p.setPen(QColor(TOKENS["text_secondary"] if enabled else TOKENS["text_disabled"]))
         _draw_elided(p, QRectF(text_x, 24, text_w, 13), self.subtitle())
-        summary = str(self.info.get("summary", ""))
-        if summary:
-            _draw_elided(p, QRectF(text_x, 36, text_w, 13), summary)
+        parts = self.summary_parts()
+        if parts:
+            _draw_parts(p, QRectF(text_x, 36, text_w, 13), parts)
 
         # 連接埠（**本地座標** —— 見 out_anchors_local 的說明）。
         # 輸入是空心圈、輸出是實心點：一眼看得出線該從哪邊拉到哪邊。
@@ -552,14 +610,33 @@ class _NodeItem(QGraphicsItem):
         left = " ".join(str(r) for r in reads)
         if left and right:
             body = "%s → %s" % (left, right)
+        elif left or right:
+            body = left or right
         else:
-            body = left or right or str(self.info.get("step_key", self.node_id))
+            # 兩邊都空 = **還沒接線**（F10：剛加的卡前後都是空的）。以前這裡印
+            # 的是 step_key（`normalize`），而那個字使用者剛剛才在卡片名字那一行
+            # 讀過一次英文版 —— 一行沒有新資訊的字。現在直接講狀態，
+            # 而下一步（拉一條線過來）由警示標記的 tooltip 講完整。
+            body = "(not connected)"
         step_key = str(self.info.get("step_key", ""))
         if step_key and self.node_id != step_key:
             # 同一張卡加了第二次：這時候 id 是有意義的（分數表達式指的是特徵名，
             # 但 lint 訊息與前綴講的是這個 id）。
             body = "%s · %s" % (self.node_id, body)
         return body
+
+    def summary_parts(self) -> List[str]:
+        """第三行的各項（``["p_low=1.2", "method=match"]``）。
+
+        Studio 給的是一個 list（`summary_parts`）；舊的 `summary` 字串留著給
+        測試與狀態列讀，這裡在缺 list 的時候從它切回來 —— 分隔字串只有一個定義
+        （:data:`SUMMARY_SEP`）。
+        """
+        parts = self.info.get("summary_parts")
+        if parts is not None:
+            return [str(x) for x in parts if str(x)]
+        text = str(self.info.get("summary", "") or "")
+        return [s for s in text.split(SUMMARY_SEP) if s]
 
     def problem(self) -> str:
         """這張卡現在有什麼問題（空字串 = 沒問題）。"""

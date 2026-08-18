@@ -22,7 +22,9 @@ from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_ALGO, CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_COMPARE, GROUP_MEASURE,
 )
-from ._util import ensure_gray, require_image, to_uint8
+from ._util import (
+    MultiSourceStep, ensure_gray, output_prefix_spec, require_image, to_uint8,
+)
 
 # 週期參數的共用上限：超過這個值的 cell 在 patch 影像上根本疊不出幾格。
 _MAX_PERIOD = 512
@@ -35,8 +37,18 @@ def _opt(value: Any) -> Optional[int]:
 
 
 @register_step
-class CellPeriodStep(Step):
-    """量出圖上重複 cell 的 X/Y 週期（像素）。"""
+class CellPeriodStep(MultiSourceStep):
+    """量出圖上重複 cell 的 X/Y 週期（像素）。
+
+    多連一（F11 Input-3）
+    --------------------
+    這張卡在 F7-1 期間被 ``scope.HIDDEN_STEPS`` 收著（它存在的唯一理由是幫**單張
+    影像**疊 ref，而那時 Studio 只吃兩兩成對的 patch）。Input-3 把單張那條路打開，
+    它也跟著回到卡片庫 —— 而「量測卡都接得了好幾條來源」那條不變量
+    （``test_ui_f10_canvas_reality.py``）**當場對它紅了**：它從來沒有做過 F10-3
+    的處理。這正是那條不變量存在的理由 —— 它逐張套用到 registry，所以一張卡
+    重新可見的時候不會安靜地少一半功能。
+    """
 
     key = "cell_period"
     label = "Cell period"
@@ -46,7 +58,7 @@ class CellPeriodStep(Step):
             "pixels) for the Golden Cell card, and report how trustworthy that "
             "period is.")
     params = [
-        ParamSpec(name="source", type="image_key", direction="in", default="test",
+        ParamSpec(name="source", type="image_keys", direction="in", default="test",
                   help="Image stream to measure the period on (usually test)."),
         ParamSpec(name="min_period", type="int", default=0, min=0, max=_MAX_PERIOD,
                   unit="px",
@@ -61,23 +73,20 @@ class CellPeriodStep(Step):
                   help=("Whether to run a +/-2 pixel refinement search, picking the "
                         "period that actually stacks sharpest. More accurate, "
                         "slightly slower.")),
+        output_prefix_spec("cell"),
     ]
     reads = ["test"]
     writes: List[str] = []
     features_out = ["cell_px", "cell_py", "cell_conf_x", "cell_conf_y"]
 
-    @classmethod
-    def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
-        return [params.get("source", "test")]
-
-    def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
-        p = self.validate_params(params)
+    def measure(self, ctx: Context, img, params: Dict[str, Any]):
+        p = params
         lo, hi = _opt(p["min_period"]), _opt(p["max_period"])
         if lo is not None and hi is not None and hi < lo:
             raise StepError(self.key,
                             f"max_period ({hi}) cannot be smaller than min_period "
                             f"({lo}); swap the two values or set them to 0 (automatic).")
-        img = to_uint8(ensure_gray(require_image(ctx, self.key, p["source"])))
+        img = to_uint8(ensure_gray(img))
 
         res = algo_period.estimate_period(img, min_period=lo, max_period=hi)
         px, py = res.px, res.py
@@ -99,14 +108,16 @@ class CellPeriodStep(Step):
             ctx.warn(f"[{self.key}] {why}, so a full cell period cannot be "
                      "measured. The Golden Cell route may not suit this layer — "
                      "consider a comparison route that has a real ref image.")
-        ctx.meta["cell_period"] = {"px": int(px or 0), "py": int(py or 0)}
-        ctx.add_features({
+        # ``golden_cell`` 讀這個 key 當「已經量好的週期」。接了好幾條流時，
+        # **第一條就定案**（後面的不覆寫）—— Golden Cell 是對某一條流疊 ref，
+        # 讓最後一條無聲地決定它的週期，會變成「畫面上看不出來的相依」。
+        ctx.meta.setdefault("cell_period", {"px": int(px or 0), "py": int(py or 0)})
+        return {
             "cell_px": float(px or 0),
             "cell_py": float(py or 0),
             "cell_conf_x": float(res.confidence_x),   # PeriodResult.confidence_x（0–100）
             "cell_conf_y": float(res.confidence_y),   # PeriodResult.confidence_y（0–100）
-        })
-        return ctx
+        }
 
 
 @register_step

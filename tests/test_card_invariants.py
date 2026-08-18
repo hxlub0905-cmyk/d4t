@@ -72,6 +72,10 @@ NEEDS_MORE_SETUP = {
     # 只有 RSEM 單張才有意義；patch 本來就有 ref。
     "golden_cell": "RSEM 專用（patch 有現成的 ref）",
     "cell_period": "只有餵 golden_cell 時有意義",
+    # 這一套 harness 餵的是 ebi_patch（一顆兩張），而這張卡承諾「一顆一張」——
+    # 它對多張資料的正確行為就是**擋下來**（見 steps/load.py）。專屬驗收在
+    # tests/test_f11_split_load_cards.py。
+    "load_single": "需要「一顆一張」的資料集（harness 餵的是 patch）",
 }
 
 

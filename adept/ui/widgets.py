@@ -27,6 +27,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import numpy as np
 from PySide6.QtCore import QMimeData, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
+    QBrush,
     QColor,
     QDrag,
     QFont,
@@ -113,8 +114,9 @@ def small_button(text: str, tip: str = "", parent: Optional[QWidget] = None,
 GLYPH_ICONS = (
     "undo", "redo", "theme", "prev", "next", "play", "chevron_down",
     "zoom_in", "zoom_out", "fit", "tidy", "up", "down", "close",
-    # 工具列那五顆（F7-24）
-    "folder", "document", "save", "templates", "export",
+    # 工具列那五顆（F7-24）＋ 兩個沒有 KLARF 的入口（F11 Input-2／Input-3）
+    "folder", "document", "save", "templates", "export", "stack",
+    "folder_open",
     # 畫布彈出視窗（F8-UI D 案）
     "popout",
 )
@@ -255,6 +257,23 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         p.drawLine(QPointF(m, h * 0.30), QPointF(w * 0.44, h * 0.30))
         p.drawLine(QPointF(w * 0.44, h * 0.30), QPointF(w * 0.54, h * 0.42))
         p.drawRect(QRectF(m, h * 0.42, w - 2 * m, h * 0.42))
+    elif n == "folder_open":
+        # 打開的資料夾：後片是方的、前片往外斜。跟 ``folder``（關著的）並排時
+        # 差別在**前片的斜邊** —— 三顆 Open 鈕的輪廓要各不相同（F7-24）。
+        p.drawLine(QPointF(m, h * 0.32), QPointF(w * 0.44, h * 0.32))
+        p.drawLine(QPointF(w * 0.44, h * 0.32), QPointF(w * 0.54, h * 0.44))
+        p.drawLine(QPointF(m, h * 0.32), QPointF(m, h * 0.80))
+        p.drawLine(QPointF(w * 0.54, h * 0.44), QPointF(w - m, h * 0.44))
+        # 前片：從左下往右斜出去
+        p.drawLine(QPointF(m, h * 0.80), QPointF(w - m * 0.6, h * 0.80))
+        p.drawLine(QPointF(w - m, h * 0.44), QPointF(w - m * 0.6, h * 0.80))
+    elif n == "stack":
+        # 三張疊起來的紙 —— 「一個檔案裡有好幾張圖」（F11 Input-2）。
+        # 跟 ``folder`` 對比得出來：folder 是容器，stack 是**同一個東西的好幾層**。
+        step = h * 0.16
+        side = w - 2 * m - step * 2
+        for i in (2, 1, 0):
+            p.drawRect(QRectF(m + step * i, m + step * (2 - i), side, side))
     elif n == "document":
         fold = w * 0.26
         p.drawLine(QPointF(m + w * 0.06, m), QPointF(w - m - fold, m))
@@ -482,6 +501,9 @@ class ImageView(QWidget):
         self._overlay_focus = -1
         #: 量測尺按著時的那一條帶（axis, 起, 迄；影像像素）。見 :meth:`set_measure`。
         self._measure: Optional[Tuple[str, float, float]] = None
+        #: 選取的卡片上那個「以像素為單位」的參數有多大（大小, 標籤）。
+        #: 見 :meth:`set_kernel_hint`。
+        self._kernel: Optional[Tuple[float, str]] = None
 
     # -- public API --------------------------------------------------------
     def set_image(self, arr: Optional[np.ndarray]) -> None:
@@ -633,6 +655,42 @@ class ImageView(QWidget):
         """現在標著的那一段（沒有就 None）。測試與狀態列讀這個。"""
         return self._measure
 
+    def set_kernel_hint(self, size_px: float, label: str = "") -> None:
+        """把「這個核心有多大」畫在影像上（F11 Enhance-UI-A）。
+
+        為什麼這一格要有
+        ----------------
+        ``flatten`` 的 *Scale to remove* 與 ``denoise`` 的 *Filter size* 的
+        help 裡唯一的規則是**跟缺陷比**：前者要「明顯大於」，後者（hot_pixels）
+        要「貼著」。而畫面上原本沒有任何尺度參考 —— 使用者只能猜像素數，
+        或者去數影像的邊長。
+
+        這跟 F7-8「把 min/max 填好，滑桿是免費的」是同一條：**使用者是一邊看
+        影像一邊決定值的**，所以那個參考就該在影像上，不是在 help 裡。
+
+        畫在**影像正中央**：patch 是以缺陷為中心裁的（`ARCHITECTURE.md`），
+        所以正中央就是要比大小的那個東西。大張的 RSEM 影像上中央不是缺陷，
+        但要比的是「這個框 vs 畫面上的結構」，位置不影響那個判斷。
+
+        方框而不是圓：高斯／中位數的鄰域就是方的。形態學那幾個是橢圓，但**範圍**
+        一樣 —— 而使用者要判斷的是範圍。
+        """
+        n = float(size_px)
+        if not np.isfinite(n) or n <= 0:
+            self.clear_kernel_hint()
+            return
+        self._kernel = (n, str(label or ""))
+        self.update()
+
+    def clear_kernel_hint(self) -> None:
+        if self._kernel is not None:
+            self._kernel = None
+            self.update()
+
+    def kernel_hint(self) -> Optional[Tuple[float, str]]:
+        """現在畫著的核心大小（沒有就 None）。測試讀這個，不去讀畫素。"""
+        return self._kernel
+
     def _paint_overlay(self, p: QPainter) -> None:
         if self._pixmap is None or not self._overlay:
             return
@@ -688,6 +746,40 @@ class ImageView(QWidget):
             for y in (band.top(), band.bottom()):
                 p.drawLine(QPointF(band.left(), y), QPointF(band.right(), y))
 
+    def _paint_kernel(self, p: QPainter) -> None:
+        """核心大小的方框：虛線 + 一個寫著幾像素的標籤。
+
+        虛線是刻意的：ROI 框（實線 accent）與量測尺（實線綠）都是「資料上的東西」，
+        這一個是**尺規**。三者可能同時在畫面上，而使用者要分得出哪一個是他剛剛
+        拖出來的。
+        """
+        if self._pixmap is None or self._kernel is None:
+            return
+        n, label = self._kernel
+        s = self._scale or 1.0
+        iw, ih = self._pixmap.width(), self._pixmap.height()
+        side = n * s
+        cx = self._offset.x() + iw * s / 2.0
+        cy = self._offset.y() + ih * s / 2.0
+        box = QRectF(cx - side / 2.0, cy - side / 2.0, side, side)
+        col = QColor(TOKENS["min_accent"])
+        pen = QPen(col, 1.4, Qt.DashLine)
+        pen.setCosmetic(True)          # 縮很小的時候線不能跟著消失
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(box)
+        if not label:
+            return
+        # 標籤貼在框的上緣外側；框比畫布還大時（核心開到比影像大）就貼回畫布內，
+        # 不然那個數字會被裁掉 —— 而「核心比整張圖還大」正是最需要看到它的時候。
+        tw, th = 74.0, 14.0
+        ty = box.top() - th - 2.0
+        if ty < 2.0:
+            ty = min(self.height() - th - 2.0, box.top() + 2.0)
+        p.setPen(col)
+        p.drawText(QRectF(box.center().x() - tw / 2.0, ty, tw, th),
+                   Qt.AlignCenter, label)
+
     def _to_image(self, p: QPointF) -> QPointF:
         s = self._scale or 1.0
         return QPointF((p.x() - self._offset.x()) / s,
@@ -717,6 +809,7 @@ class ImageView(QWidget):
         p.setRenderHint(QPainter.SmoothPixmapTransform, False)
         self._paint_overlay(p)
         self._paint_measure(p)
+        self._paint_kernel(p)
         p.end()
 
     # -- interaction -------------------------------------------------------
@@ -1576,6 +1669,120 @@ class MultiChoicePicker(QWidget):
             self.changed.emit(self.text())
 
 
+class ChannelMapField(QWidget):
+    """``channel_map`` 參數的編輯器：一張「第幾張圖 → 叫什麼」的小表（F11 Input-1）。
+
+    為什麼不是文字框
+    ----------------
+    值長這樣：``1:se1, 2:bse, 3:se2, 4:se3, 5:se4``。五列以上的時候，一行逗號
+    字串**數不清位置** —— 而「哪一張是 BSE」正是這個參數唯一要回答的問題
+    （使用者的資料是 1 BSE + 4 SE，BSE 固定在第 2 張）。數錯一格的後果不是
+    語法錯誤，是 BSE 的數字被寫在 SE 的名字上：跑得完、有數字、而且是錯的。
+
+    所以排成一列一張圖：**左邊是位置（程式寫的，不能打錯）、右邊是名字**。
+    空著的那一列就是「這一張不命名」，而 placeholder 就寫出它不命名時會叫什麼
+    （``test`` / ``ref`` / ``img3``…）—— 那是現行行為，使用者看得到自己在改什麼。
+    """
+
+    changed = Signal(str)
+
+    #: 沒有命名時 ingest 會給的名字（``ingest/dataset.py::_channel_name``）。
+    #: 這裡只是**顯示**用的 placeholder，真正的命名規則仍然只有 ingest 那一份。
+    _DEFAULTS = ("test", "ref")
+
+    def __init__(self, value: str = "", parent: Optional[QWidget] = None,
+                 min_rows: int = 0):
+        super().__init__(parent)
+        self._edits: List[QLineEdit] = []
+        self._emitting = False
+        #: 這批資料**一顆有幾張圖**（0 = 還不知道）。列數至少排到這個數 ——
+        #: 使用者要回答「哪一張是 BSE」的時候，唯一需要的事實就是「有幾張」，
+        #: 而那個數字在資料載進來的那一刻就知道了（F11 Input-1 的尾巴）。
+        self._min_rows = max(0, int(min_rows))
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(4)
+
+        self._grid = QGridLayout()
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setHorizontalSpacing(8)
+        self._grid.setVerticalSpacing(2)
+        outer.addLayout(self._grid)
+
+        self._add_btn = QPushButton("Add another image", self)
+        self._add_btn.setProperty("variant", "secondary")
+        self._add_btn.setToolTip(
+            "Add a row for one more image. A defect with five images "
+            "(one BSE plus four SE, say) needs five rows.")
+        self._add_btn.clicked.connect(lambda: self._add_row(emit=True))
+        outer.addWidget(self._add_btn, 0, Qt.AlignLeft)
+
+        self.set_text(value)
+
+    # -- 值 ------------------------------------------------------------------
+    def text(self) -> str:
+        """目前的值。**空白的列直接跳過** —— 那一張就是「不命名」。"""
+        out = []
+        for i, edit in enumerate(self._edits):
+            name = edit.text().strip()
+            if name:
+                out.append("%d:%s" % (i + 1, name))
+        return ", ".join(out)
+
+    def set_text(self, value: str) -> None:
+        pairs = {}
+        for chunk in str(value or "").replace(";", ",").split(","):
+            item = chunk.strip()
+            if ":" in item:
+                left, right = item.split(":", 1)
+                try:
+                    pairs[int(left.strip())] = right.strip()
+                except ValueError:          # 壞值由 core 的 parse 負責報錯
+                    continue
+        rows = max(len(self._DEFAULTS), max(pairs) if pairs else 0,
+                   self._min_rows)
+        self._emitting = True
+        try:
+            while len(self._edits) < rows:
+                self._add_row(emit=False)
+            for i, edit in enumerate(self._edits):
+                edit.setText(pairs.get(i + 1, ""))
+        finally:
+            self._emitting = False
+
+    def row_count(self) -> int:
+        return len(self._edits)
+
+    def set_min_rows(self, n: int) -> None:
+        """這批資料一顆有幾張圖 —— 列數至少排到這麼多（不動已經填的名字）。"""
+        self._min_rows = max(0, int(n))
+        self.set_text(self.text())
+
+    # -- 內部 ----------------------------------------------------------------
+    def _default_name(self, index: int) -> str:
+        if index < len(self._DEFAULTS):
+            return self._DEFAULTS[index]
+        return "img%d" % (index + 1)
+
+    def _add_row(self, emit: bool = True) -> None:
+        i = len(self._edits)
+        label = QLabel("Image %d" % (i + 1), self)
+        label.setObjectName("paramHint")
+        edit = QLineEdit(self)
+        edit.setPlaceholderText(self._default_name(i))
+        edit.textChanged.connect(self._on_edited)
+        self._grid.addWidget(label, i, 0)
+        self._grid.addWidget(edit, i, 1)
+        self._edits.append(edit)
+        if emit and not self._emitting:
+            self._on_edited("")
+
+    def _on_edited(self, _text: str) -> None:
+        if not self._emitting:
+            self.changed.emit(self.text())
+
+
 class TemplateField(QWidget):
     """``template`` 參數的編輯器：一顆「建一個」的按鈕 + 一行摘要（F7-13）。
 
@@ -1673,6 +1880,12 @@ class ParamForm(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._rows: Dict[str, _ParamRow] = {}
+        #: 目前這批資料**一顆有幾張圖**（0 = 沒有資料）。只有 `channel_map` 的
+        #: 編輯器用得到它 —— 但它是「資料的事實」而不是「這張卡的參數」，
+        #: 所以放在表單上（一份資料一次）而不是塞進 `set_step` 的簽章。
+        self._image_count = 0
+        #: 這張卡吃進來的那條流的灰階分布（墊在曲線後面，見 `set_histogram`）。
+        self._hist: List[float] = []
         #: 小標題：``section 名 -> [QLabel]`` 與 ``參數名 -> section 名``。
         #: 整組都被 ``show_when`` 藏起來時，標題也要跟著不見 —— 一個底下什麼
         #: 都沒有的標題比沒有標題更讓人以為畫面壞了。
@@ -1727,6 +1940,38 @@ class ParamForm(QWidget):
         self.set_step(None, {}, [])
 
     # -- public API --------------------------------------------------------
+    def set_image_count(self, n: int) -> None:
+        """告訴表單「這批資料一顆有幾張圖」（F11）。
+
+        `channel_map` 的表格會照它排列數 —— 使用者打開那一格時，第一個要知道的
+        事實就是「有幾張」，而那個數字在資料載進來的那一刻就知道了。
+        """
+        n = max(0, int(n))
+        if n == self._image_count:
+            return
+        self._image_count = n
+        for row in self._rows.values():
+            if isinstance(row.editor, ChannelMapField):
+                row.editor.set_min_rows(n)
+
+    def set_histogram(self, counts: Optional[Sequence[float]]) -> None:
+        """這張卡吃進來的那條流長什麼樣（F11 Enhance-UI-C）。
+
+        只有曲線欄位用得到它。跟 :meth:`set_image_count` 同一個形狀：這是
+        **資料的事實**而不是這張卡的參數，所以放在表單上，不塞進 `set_step`
+        的簽章（那會讓每一個呼叫端都得知道有這回事）。
+
+        重建表單時會被清掉，所以上層在 `set_step` 之後要再餵一次 —— 那是
+        Studio 的 `_refresh_curve_backdrop`。
+        """
+        self._hist = list(counts or [])
+        for row in self._rows.values():
+            if isinstance(row.editor, CurveField):
+                row.editor.set_histogram(self._hist)
+
+    def histogram(self) -> List[float]:
+        return list(self._hist)
+
     def set_step(self, describe: Optional[Dict[str, Any]],
                  current_params: Optional[Dict[str, Any]] = None,
                  stream_choices: Optional[Sequence[str]] = None) -> None:
@@ -2025,6 +2270,12 @@ class ParamForm(QWidget):
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 
+        if ptype == "channel_map":
+            w = ChannelMapField("" if value is None else str(value),
+                                min_rows=self._image_count)
+            w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
+            return w
+
         if ptype == "template":
             w = TemplateField("" if value is None else str(value))
             # 值不是在這裡編的（模板是一張影像）——按鈕只是把請求往上送，
@@ -2102,6 +2353,8 @@ class CurveEditor(QWidget):
         self._points: List[Tuple[float, float]] = list(parse_curve(IDENTITY))
         self._drag: Optional[int] = None
         self._compact = bool(compact)
+        #: 墊在曲線後面的直方圖（引擎算的那一份，見 :meth:`set_histogram`）。
+        self._hist: List[float] = []
         self.setMinimumSize(QSize(150, 130 if compact else 300))
         if not compact:
             self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -2142,6 +2395,30 @@ class CurveEditor(QWidget):
         from ..core.pipeline.curve import is_identity
         return is_identity(self._points)
 
+    def set_histogram(self, counts: Optional[Sequence[float]]) -> None:
+        """把**這張圖進來時**的灰階分布墊在曲線後面（F11 Enhance-UI-C）。
+
+        為什麼要墊
+        ----------
+        曲線的橫軸是「輸入灰階」，而使用者不知道哪一段灰階**真的有畫素**。
+        於是常見的兩種白工：在一個空的區間上把線拉得很陡（畫面完全沒變化），
+        或者反過來，把所有畫素都在的那一小段壓平（一動就整片糊掉）。
+        Photoshop 的 Curves 就是這個形狀，所以對「不會寫 code 但會修圖」的
+        使用者是零學習成本。
+
+        資料是**引擎算的那一份**（``ctx.meta['stream_change'][流]['before']``），
+        UI 不自己再壓一次直方圖 —— 不然畫面上的分布跟真的跑出來的有機會不一樣。
+        ``None`` / 空 = 沒有東西可墊（還沒跑過預覽），那就只畫格線。
+        """
+        vals = [float(v) for v in (counts or [])
+                if float(v) == float(v) and float(v) >= 0.0]
+        self._hist = vals
+        self.update()
+
+    def histogram(self) -> List[float]:
+        """現在墊著的那一份（測試讀這個，不去讀畫素）。"""
+        return list(self._hist)
+
     # -- 座標轉換 ----------------------------------------------------------
     def _plot_rect(self) -> QRectF:
         return QRectF(self.rect()).adjusted(self._PAD, self._PAD,
@@ -2165,6 +2442,31 @@ class CurveEditor(QWidget):
         return None
 
     # -- painting ----------------------------------------------------------
+    def _paint_histogram(self, p: QPainter, plot: QRectF) -> None:
+        """墊在曲線後面的分布：很淡的實心柱，高度用平方根。
+
+        平方根跟 Enhance 儀表用的是同一個理由：兩端的削平會堆出極高的柱子，
+        線性刻度下其餘的分布會被壓成一條貼著底的線 —— 而那正是要看的形狀。
+        """
+        vals = self._hist
+        if not vals:
+            return
+        top = max(vals)
+        if top <= 0:
+            return
+        h = [math.sqrt(v / top) for v in vals]
+        bw = plot.width() / float(len(h))
+        col = QColor(TOKENS["text_disabled"])
+        col.setAlpha(70)               # 背景就是背景：看得到形狀，不搶曲線
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(col))
+        for i, v in enumerate(h):
+            bar = v * plot.height()
+            if bar <= 0.0:
+                continue
+            p.drawRect(QRectF(plot.left() + i * bw, plot.bottom() - bar,
+                              max(1.0, bw), bar))
+
     def paintEvent(self, _e) -> None:      # noqa: D102 - Qt hook
         from ..core.algo.curve import curve_lut
 
@@ -2176,6 +2478,9 @@ class CurveEditor(QWidget):
         p.drawRoundedRect(r, 5, 5)
 
         plot = self._plot_rect()
+        # 直方圖先畫 —— 它是**背景**。畫在曲線之後的話它會蓋住曲線，
+        # 而曲線才是使用者在操作的東西。
+        self._paint_histogram(p, plot)
         grid = QColor(TOKENS["border_default"])
         grid.setAlpha(120)
         p.setPen(QPen(grid, 1))
@@ -2311,8 +2616,21 @@ class CurveField(QWidget):
     def is_identity(self) -> bool:
         return self.editor.is_identity()
 
+    def set_histogram(self, counts: Optional[Sequence[float]]) -> None:
+        """把這張圖的灰階分布墊在曲線後面（見 `CurveEditor.set_histogram`）。"""
+        self._hist = list(counts or [])
+        self.editor.set_histogram(counts)
+        dlg = getattr(self, "_dialog", None)
+        if dlg is not None and dlg.isVisible():
+            dlg.editor.set_histogram(counts)
+
+    def histogram(self) -> List[float]:
+        return self.editor.histogram()
+
     def open_dialog(self) -> "CurveDialog":
         dlg = CurveDialog(self.editor.text(), self)
+        # 放大的那一張也要墊 —— 「做細活」正是最需要知道哪一段有畫素的時候。
+        dlg.editor.set_histogram(getattr(self, "_hist", []))
         dlg.curve_changed.connect(self._adopt)
         dlg.show()
         self._dialog = dlg          # 保住參照，不然 show() 之後會被 GC

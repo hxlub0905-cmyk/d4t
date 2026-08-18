@@ -86,16 +86,37 @@ def test_load_patch_ebi(patch_tiff):
     assert ctx.features["n_channels"] == 2.0
 
 
-def test_load_patch_rsem_alias(patch_tiff):
+def test_load_single_gives_one_named_stream(patch_tiff):
+    """單張資料走 `load_single`，而它吐**一條**流（F11 Input-4）。
+
+    這一條以前叫 `test_load_patch_rsem_alias`，斷言的是 `load_patch` 會把
+    `single` **順手鏡射一份到 `test`**。那個鏡射拿掉了：資料只有一張圖，畫布上
+    卻有兩顆埠，正是使用者回報的「畫布跟實際對不起來」。
+    """
     path, pages = patch_tiff
     item = DefectItem(defect_id="9", die=None, xrel_nm=None, yrel_nm=None,
                       images={"single": ImageRef(path, 2, "single")})
     ctx = Context(meta={"_defect_item": item, "_dataset_kind": "rsem"})
-    run_step("load_patch", ctx)
-    assert "single" in ctx.images and "test" in ctx.images
-    assert np.array_equal(ctx.images["test"], pages[2])
-    assert ctx.features["n_channels"] == 1.0
-    assert any("single" in n for n in ctx.meta.get("notes", []))
+    run_step("load_single", ctx)
+    assert set(ctx.images) == {"single"}          # 一條，不是兩條
+    assert np.array_equal(ctx.images["single"], pages[2])
+
+    # 名字是使用者的（畫布上的埠跟著改名）
+    ctx2 = Context(meta={"_defect_item": item, "_dataset_kind": "rsem"})
+    run_step("load_single", ctx2, out="rsem_img")
+    assert set(ctx2.images) == {"rsem_img"}
+
+
+def test_load_single_refuses_data_with_several_images(patch_tiff):
+    """**不偷偷拿第一張**：這張卡承諾一顆一張，多張就是選錯卡。"""
+    path, _pages = patch_tiff
+    item = DefectItem(defect_id="1", die=None, xrel_nm=None, yrel_nm=None,
+                      images={"test": ImageRef(path, 0, "test"),
+                              "ref": ImageRef(path, 1, "ref")})
+    ctx = Context(meta={"_defect_item": item, "_dataset_kind": "ebi_patch"})
+    with pytest.raises(StepError) as e:
+        run_step("load_single", ctx)
+    assert "Load images" in str(e.value)          # 講得出該用哪一張卡
 
 
 def test_load_patch_explicit_and_errors(patch_tiff):

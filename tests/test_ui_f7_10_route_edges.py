@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import first_source  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
@@ -70,7 +72,7 @@ def test_route_order_is_not_painted_as_lines(window):
 
 def test_drawing_the_link_yourself_makes_a_solid_line(window):
     """使用者自己拉的線照樣是實線，而且只有一條。"""
-    a, b = window.model.node_order[0], window.model.node_order[1]
+    a, b = first_source(window), window.model.node_order[1]
     window.pipeline.link_to(a, b)
 
     assert (a, b) in window.model.edge_pairs()
@@ -85,7 +87,7 @@ def test_edge_pairs_still_reports_only_the_users_own_links(window):
     所以兩邊要比的是 ``model.edge_pairs()``。
     """
     assert window.pipeline.edge_pairs() == window.model.edge_pairs() == []
-    window.pipeline.link_to(window.model.node_order[0],
+    window.pipeline.link_to(first_source(window),
                             window.model.node_order[2])
     assert window.pipeline.edge_pairs() == window.model.edge_pairs()
 
@@ -97,7 +99,7 @@ def test_a_link_drawn_on_the_canvas_records_which_ports_it_joins(window):
     兩個都填了，引擎才會照這條線送資料（而不是退回「執行順序上最後一個寫這條
     流的人」）。漏掉任何一個，畫布上看起來有線、跑起來卻還是串聯。
     """
-    src, dst = window.model.node_order[0], window.model.node_order[2]
+    src, dst = first_source(window), window.model.node_order[2]
     window.pipeline.link_to(src, dst)
     edge = [e for e in window.model.edges if e.src == src and e.dst == dst]
     assert edge, "線沒進 model"

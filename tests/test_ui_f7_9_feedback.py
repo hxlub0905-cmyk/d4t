@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import first_source  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
@@ -243,18 +245,44 @@ def test_an_unwired_recipe_wraps_instead_of_running_off_the_screen(qapp):
 # --------------------------------------------------------------------------- #
 # 2b. 起手卡
 # --------------------------------------------------------------------------- #
-def test_a_new_model_starts_with_the_input_card(qapp):
+def test_a_new_model_starts_empty(qapp):
+    """F11 Enhance-4：**開窗不預先放載入卡**（使用者定調）。
+
+    F7-9 起開窗就有一張 `load_patch`，那時候只有一張載入卡所以是純粹的好意。
+    Input-4 把它拆成兩張（一顆好幾張 / 一顆一張）之後，預先放一張就是替使用者
+    決定了他還沒決定的事 —— 而猜錯的那一半在畫布上看起來完全正常（兩顆埠 vs
+    一顆埠）。
+    """
     m = vm_mod.RecipeModel.starter()
-    assert m.node_order == ["load_patch"]
-    assert m.nodes["load_patch"].step == "load_patch"
+    assert m.node_order == []
     assert m.dirty is False, "使用者還沒做任何事，不該被當成「改過」"
 
 
-def test_the_studio_opens_with_the_input_card_on_the_canvas(window):
-    assert window.pipeline.node_ids() == ["load_patch"]
-    assert window.pipeline.card("load_patch") is not None
-    # 而且它是可以拖線出來的（patch 天生成對）
+def test_the_studio_opens_with_an_empty_canvas(qapp):
+    """這一支刻意**不用 `window` fixture**（那個 fixture 會先載一份資料，而載入
+    資料本來就會補上一張載入卡）—— 問的是「剛開窗」那一刻。"""
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    try:
+        assert win.pipeline.node_ids() == []
+        assert win.selected_node is None
+    finally:
+        win.close()
+
+
+def test_opening_data_brings_in_the_card_that_data_needs(window):
+    """開窗時不猜，但**載入資料時「哪一張」已經不是猜的** —— kind 就是答案。
+
+    （`window` fixture 進來之前就載過一份 patch 資料。）
+    """
+    assert window.model.node_order == ["load_patch"]
     assert window.pipeline.card("load_patch").out_names() == ["test", "ref"]
+    # 補進來的那張卡**不算「使用者做過的一步」**：Ctrl+Z 不該退掉它，
+    # 關窗也不該因此問「要存檔嗎」。
+    assert window.model.dirty is False
+    assert window.model.can_undo() is False
+    # 而且它是選起來的 —— 右欄立刻有東西可以看（一開窗那句「請先挑一張卡」
+    # 在這個時候已經不是使用者需要的話了）。
+    assert window.selected_node == "load_patch"
 
 
 # --------------------------------------------------------------------------- #
@@ -312,7 +340,7 @@ def test_each_image_source_gets_its_own_card(window):
     以前那件事是一張卡上的一組勾選框；現在它就是**兩張卡**，而畫布上因此看得到
     兩條各自的處理鏈。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     on_test = window.add_card_after(src, "normalize")
     window._on_edge_added(src, on_test, "test")
     on_ref = window.add_card_after(src, "normalize")
@@ -480,7 +508,7 @@ def test_a_broken_combination_refuses_to_run_instead_of_failing_every_defect(win
     跑得動。要製造「指到沒人產的流」得自己指過去，情境跟以前一樣真實：
     使用者把 b 改成打錯的名字。）
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     node_id = window.model.add_step("subtract")
     # F10：先把兩條線接上（新卡前後都是空的），這一題問的是**接好之後**指到
     # 一條沒人產的流會怎樣 —— 那跟「還沒接線」是兩個不同的錯。

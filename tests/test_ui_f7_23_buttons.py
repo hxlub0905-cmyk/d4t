@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import first_source  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
@@ -415,7 +417,7 @@ def test_every_button_says_it_can_be_clicked(qapp):
     try:
         # 參數列是選到卡片才長出來的，所以先選一張，把那批也納入檢查
         if win.model.node_order:
-            win.select_node(win.model.node_order[0])
+            win.select_node(first_source(win))
         qapp.processEvents()
 
         wrong = []
@@ -774,7 +776,7 @@ def test_no_button_relies_on_a_glyph_the_fab_machine_may_not_have(qapp):
     win = _studio(qapp)
     try:
         if win.model.node_order:
-            win.select_node(win.model.node_order[0])
+            win.select_node(first_source(win))
         qapp.processEvents()
         bad = []
         for b in win.findChildren(QWidget):

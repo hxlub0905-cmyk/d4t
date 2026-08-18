@@ -60,12 +60,26 @@ class FlattenStep(MultiStreamStep):
         ),
         ParamSpec(
             name="size", type="int", default=31, min=3, max=999, unit="px",
-            label="Scale to remove",
+            label="Scale to remove", extent=True,
             show_when=("method", ("background", "bright_spots", "dark_spots")),
             help=("How large the artifact is, in pixels. It must be clearly "
                   "BIGGER than your defects - anything smaller than this "
                   "survives, anything larger is removed. A quarter to a half "
                   "of the patch width is a good starting point."),
+        ),
+        ParamSpec(
+            name="estimator", type="choice", default="gaussian",
+            choices=list(algo_enhance.BG_ESTIMATORS),
+            label="Estimate the background with",
+            show_when=("method", ("background",)),
+            help=("How the background under your defect is estimated before "
+                  "it is subtracted. gaussian = a weighted average, which is "
+                  "fast but always pulls part of the defect into the "
+                  "background, so the defect comes out weaker than it is. "
+                  "median = ignores anything covering less than half of the "
+                  "size below, so the defect keeps its full strength; it is "
+                  "slower and can leave a faint step where the background "
+                  "changes smoothly."),
         ),
         ParamSpec(
             name="strength", type="float", default=1.0, min=0.0, max=1.0,
@@ -88,10 +102,12 @@ class FlattenStep(MultiStreamStep):
         size = int(p["size"])
         strength = float(p["strength"])
         keep = bool(p["keep_level"])
+        estimator = str(p["estimator"])
 
         def fn(img: Any) -> np.ndarray:
             if method == "background":
-                return algo_enhance.remove_background(img, size, keep_level=keep)
+                return algo_enhance.remove_background(img, size, keep_level=keep,
+                                                      estimator=estimator)
             if method in ("stripes_h", "stripes_v"):
                 return algo_enhance.remove_stripes(
                     img, axis=0 if method == "stripes_h" else 1,

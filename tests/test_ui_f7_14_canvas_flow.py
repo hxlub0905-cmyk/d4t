@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import first_source  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
@@ -50,7 +52,7 @@ def window(qapp):
 def test_the_ports_carry_no_permanent_plus(window):
     """使用者的原話：「加號會永久存在」。一張畫布上每個輸出埠各掛一顆，
     等於在主體（節點與連線）旁邊常駐一排跟資料流無關的裝飾。"""
-    item = window.pipeline.card(window.model.node_order[0])
+    item = window.pipeline.card(first_source(window))
     assert item.out_names() == ["test", "ref"]
     assert not hasattr(item, "plus_anchors_local")
     assert not hasattr(item, "plus_at")
@@ -62,7 +64,7 @@ def test_the_ports_carry_no_permanent_plus(window):
 
 def test_the_ports_themselves_still_start_a_connection(window):
     """拿掉「+」不能連帶把拉線弄丟 —— 那是畫布唯一的輸入方式。"""
-    item = window.pipeline.card(window.model.node_order[0])
+    item = window.pipeline.card(first_source(window))
     for i, anchor in enumerate(item.out_anchors_local()):
         assert item.out_port_at(anchor) == i
         assert item.boundingRect().contains(anchor)
@@ -78,7 +80,7 @@ def test_the_card_works_on_the_stream_the_line_came_from(window):
     使用者退掉了那件事 —— 「新增卡 不要自己接線」。線是唯一的作者，所以這一條
     改成問「從 ref 那顆埠拉過來，這張卡是不是就做在 ref 上」。
     """
-    src = window.model.node_order[0]
+    src = first_source(window)
     nid = window.add_card_after(src, "denoise")
     window._on_edge_added(src, nid, "ref")
     assert window.model.nodes[nid].params["streams"] == "ref"
@@ -91,7 +93,7 @@ def test_the_card_works_on_the_stream_the_line_came_from(window):
 
 def test_adding_after_a_card_puts_it_after_that_card(window):
     """接在中間，不是接在最後面 —— 使用者指的是「這一張的後面」。"""
-    src = window.model.node_order[0]
+    src = first_source(window)
     last = window.add_card_after(src, "align")
     middle = window.add_card_after(src, "denoise")
     order = window.model.node_order
@@ -106,7 +108,7 @@ def test_adding_after_a_card_puts_it_after_that_card(window):
 def test_the_subtitle_says_what_the_card_does_not_its_id(window):
     """副標以前印的是 node_id（`roi_template`）—— 那是 recipe JSON 的鍵，
     而卡片名字就在它上面一行，所以那一行等於沒有資訊。"""
-    src = window.model.node_order[0]
+    src = first_source(window)
     a = window.add_card_after(src, "align")
     # F10：副標講的是「這張卡吃什麼、吐什麼」，而還沒接線的卡兩者都還不存在
     # —— 所以先把線拉上去，那正是使用者要看到這一行之前會做的事。
@@ -124,7 +126,7 @@ def test_the_subtitle_says_what_the_card_does_not_its_id(window):
 
 
 def test_a_repeated_card_shows_which_one_it_is(window):
-    src = window.model.node_order[0]
+    src = first_source(window)
     window.add_card_after(src, "denoise")
     second = window.add_card_after(src, "denoise")
     assert window.pipeline.card(second).subtitle().startswith("denoise2 · ")

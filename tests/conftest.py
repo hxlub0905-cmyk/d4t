@@ -46,3 +46,19 @@ def wire_up(model, node_id: str) -> str:
         if spec.default:
             model.set_param(str(node_id), spec.name, spec.default)
     return str(node_id)
+
+
+def first_source(window, step: str = "load_patch") -> str:
+    """畫布上那張**輸入卡**的 id（沒有就加一張）。
+
+    F11 Enhance-4 之後開窗是**空白畫布**（使用者定調：「Load image 卡片改成預設
+    沒有，add 才會出現」）—— 所以 `window.model.node_order[0]` 這個寫法在還沒
+    載入資料的測試裡會 IndexError。
+
+    這個 helper 就是使用者真的會做的那一步（從卡片庫拉一張輸入卡進來）的最短
+    寫法。載過資料的測試不必用它：`load_dataset_path` 會照資料的型別補上那一張
+    （`studio._adopt_source_for`），所以 `node_order[0]` 仍然成立。
+    """
+    if not window.model.node_order:
+        window._on_add_requested(str(step))   # 卡片庫按下去走的正是這一條
+    return window.model.node_order[0]

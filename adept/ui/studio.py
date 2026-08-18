@@ -80,6 +80,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -104,7 +105,7 @@ from adept.core.pipeline import ParamError, Recipe, get_step, list_steps
 from adept.core.pipeline.recipe import version_skew
 
 from .export_dialog import ExportDialog
-from .canvas import PipelineCanvas
+from .canvas import SUMMARY_SEP, PipelineCanvas
 from .inspectors import inspector_for
 from .gallery import make_thumb
 from .region_check import MAX_CHECK, RegionCheckWindow, regions_of_node
@@ -112,8 +113,8 @@ from .template_dialog import TemplateDialog
 from .results import ResultsWindow, summarize_run
 from . import scope
 from .scope import (
-    is_supported_kind, recipe_is_supported, unsupported_kind_message,
-    visible_steps,
+    is_supported_kind, no_klarf_message, recipe_is_supported,
+    unsupported_kind_message, visible_steps,
 )
 from .viewmodel import RecipeModel, accuracy_at, histogram, rebin
 from .theme import DEFAULT_THEME, THEMES, apply_theme, current_theme
@@ -535,6 +536,22 @@ class StudioWindow(QMainWindow):
         self.btn_open_klarf = self._tool_button(
             "Open KLARF…", "Load a KLARF (the patch TIFF can be picked separately)",
             self._on_open_klarf, icon="folder")
+        # 一種 source 一個入口（F11 Input-2）。刻意**不**塞進上面那顆：這條路
+        # 吃的東西不同（一個多頁 TIFF + 「一顆幾張」），而且它產出的資料集沒有
+        # KLARF —— 寫不回 KLARF。把兩件事併成一顆鈕，使用者按下去之前分不出
+        # 自己要的是哪一種。
+        self.btn_open_stack = self._tool_button(
+            "Open stack…",
+            "Load a multi-page TIFF that has no KLARF: every N pages become "
+            "one defect (N = the images per defect you enter). No KLARF means "
+            "no coordinates and no write-back — CSV and Excel reports still work.",
+            self._on_open_stack, icon="stack")
+        self.btn_open_folder = self._tool_button(
+            "Open folder…",
+            "Load a folder of single images (no KLARF): every image file "
+            "becomes one defect. No KLARF means no coordinates and no "
+            "write-back — CSV and Excel reports still work.",
+            self._on_open_folder, icon="folder_open")
         self.btn_open_recipe = self._tool_button(
             "Open Recipe…", "Load a recipe JSON", self._on_open_recipe,
             icon="document")
@@ -571,7 +588,8 @@ class StudioWindow(QMainWindow):
             self.toggle_theme, icon="theme")
 
         # 一段 = 一種事情；段與段之間一條分隔線。
-        for group in ((self.btn_open_klarf, self.btn_open_recipe),
+        for group in ((self.btn_open_klarf, self.btn_open_stack,
+                       self.btn_open_folder, self.btn_open_recipe),
                       (self.btn_examples, self.btn_export),
                       (self.btn_undo, self.btn_redo)):
             for b in group:
@@ -1373,8 +1391,20 @@ class StudioWindow(QMainWindow):
             if has_results
             else "No results yet — run a trial first.")
 
+    def _node_summary_parts(self, node: Any,
+                            shown: Optional[Sequence[str]] = None) -> List[str]:
+        """節點第三行的各項（`_node_summary` 的 list 版；畫布用這個）。
+
+        分開一個 list 版是為了讓**畫的人決定塞得下幾項**：字串版在 Studio 這邊
+        就把項數砍成 3，而節點只有 ~150px 寬，於是第三項被切在字中間
+        （使用者回報的「normalize 的節點文字會被吃掉」）。見
+        `canvas._draw_parts`。
+        """
+        text = self._node_summary(node, shown=shown)
+        return [s for s in text.split(SUMMARY_SEP) if s]
+
     def _node_summary(self, node: Any, shown: Optional[Sequence[str]] = None) -> str:
-        """最多 3 個「非預設」參數，渲染成 ``k=v`` 串起來。
+        """「非預設」參數渲染成 ``k=v`` 串起來。
 
         ``shown`` 是**副標那一行已經講過的影像流名**（``test ref → test ref``）。
         指定影像流的那些參數會被跳掉 —— 它們的值就是副標的來源，兩行講同一件事
@@ -1398,6 +1428,12 @@ class StudioWindow(QMainWindow):
         for name, value in node.params.items():
             if name in defaults and defaults[name] == value:
                 continue
+            # **空的值不要印**（F11 Enhance-4）。剛加進來的卡每一格輸入都是空的
+            # （F10：`cleared_inputs`），而空字串跟卡片的預設值不相等 —— 於是
+            # 節點上長出 ``streams=``，一個沒有任何資訊的欄位，還把真正有用的那
+            # 一項擠掉。「還沒接線」這件事畫布上已經講了（沒有線＋警示標記）。
+            if value is None or (isinstance(value, str) and not value.strip()):
+                continue
             if name in stream_params and seen:
                 # 這個參數挑的流副標已經列出來了 → 不要再講一次。
                 picked = {v.strip() for v in str(value).split(",") if v.strip()}
@@ -1407,9 +1443,12 @@ class StudioWindow(QMainWindow):
                 parts.append("%s: set" % name)
             else:
                 parts.append("%s=%s" % (name, _fmt(value)))
-            if len(parts) >= 3:
+            # 上限放寬到 4：塞得下幾項由**畫的人**決定（`canvas._draw_parts`），
+            # 而它會把放不下的收成 `+N`。這裡的上限只是別讓一張 19 個參數的卡
+            # （`roi_cross`）產出一串沒有人讀得完的字。
+            if len(parts) >= 4:
                 break
-        return " · ".join(parts)
+        return SUMMARY_SEP.join(parts)
 
     def _node_problems(self) -> Dict[str, Any]:
         """每個節點最嚴重的一則 lint 發現（畫布上的警示標記用）。
@@ -1511,6 +1550,10 @@ class StudioWindow(QMainWindow):
                 "enabled": bool(node.enabled),
                 # 副標那行印的是 reads → writes/regions；摘要不要再講一次
                 "summary": self._node_summary(
+                    node, shown=list(reads) + list(writes) + list(regions_out)),
+                # 畫布照**寬度**決定塞得下幾項（放不下的收成 `+N`），所以給它
+                # list；`summary` 那個字串留著給狀態列與測試讀。
+                "summary_parts": self._node_summary_parts(
                     node, shown=list(reads) + list(writes) + list(regions_out)),
                 # 畫布的輸出埠吃這個（含原樣送出的輸入）；副標仍然只印
                 # 「這張卡真的產出什麼」，不然每張卡的副標都會變成一長串。
@@ -2118,8 +2161,53 @@ class StudioWindow(QMainWindow):
         self._refresh_region_button()
         self._install_inspector(node.step)     # 右下角換成這張卡的儀表（F7-17）
         self._refresh_inspector(self._last_result)
+        self._refresh_kernel_hint()            # 核心大小畫在影像上（F11 UI-A）
         self._schedule_preview()
         return True
+
+    # ---- 核心大小畫在影像上（F11 Enhance-UI-A）-----------------------------
+    def _kernel_extent(self) -> Tuple[Optional[float], str]:
+        """選取的卡片上那個「鄰域邊長」參數現在是多少（沒有就 ``(None, "")``）。
+
+        只認 ``ParamSpec.extent``（明講的旗標），不認 ``unit == "px"`` ——
+        後者有一半不是鄰域範圍（條紋間距、框線粗細、離邊界的留白），拿一個方框
+        去表示那些會讓**影像**說謊，而那跟畫布說謊是同一件事。
+
+        被 ``show_when`` 藏起來的不算：使用者看不到那一列的時候，畫面上不該有
+        一個跟著它變的方框。
+        """
+        node = self.model.nodes.get(self.selected_node or "")
+        if node is None:
+            return None, ""
+        try:
+            specs = get_step(node.step).params
+        except KeyError:
+            return None, ""
+        for spec in specs:
+            if not getattr(spec, "extent", False):
+                continue
+            if not spec.visible_for(node.params):
+                continue
+            try:
+                n = float(node.params.get(spec.name, spec.default))
+            except (TypeError, ValueError):
+                continue
+            # 1 = 不濾波（`denoise` 的 ksize=1 就是原樣回傳），畫一個 1px 的框
+            # 只會變成畫面正中央一個看不懂的點。
+            if n <= 1.0:
+                return None, ""
+            return n, "%d px" % int(round(n))
+        return None, ""
+
+    def _refresh_kernel_hint(self) -> None:
+        """兩張預覽圖都畫 —— 並排比對時使用者比的是「這個框 vs 畫面上的結構」，
+        而那個判斷在左右兩邊都要做。"""
+        px, label = self._kernel_extent()
+        for view in (self.image_view, self.image_view_b):
+            if px is None:
+                view.clear_kernel_hint()
+            else:
+                view.set_kernel_hint(px, label)
 
     # ---- 設定面板：預設收起，雙擊卡片才攤開（F7-22）------------------------
     def _on_node_activated(self, node_id: str) -> None:
@@ -2283,6 +2371,9 @@ class StudioWindow(QMainWindow):
         else:
             self.param_form.clear_errors()
             self._autofill_output_prefix(node_id, str(name), value)
+            # 拖滑桿的時候框要跟著變 —— 那正是這個輔助的全部意義（F7-8：
+            # 使用者是一邊看影像一邊決定值的）。
+            self._refresh_kernel_hint()
 
     #: 挑了區域就順手把輸出名填成區域的名字（F7-11）。
     _PREFIX_SOURCE = "roi"
@@ -2393,6 +2484,61 @@ class StudioWindow(QMainWindow):
         self._status("Loading: %s" % os.path.basename(path))
         return True
 
+    def load_stack_path(self, path: Any, per_defect: int = 1,
+                        sync: bool = False) -> bool:
+        """載入一個**多頁 TIFF、沒有 KLARF**（F11 Input-2）。
+
+        ``per_defect`` 是「一顆 defect 幾張圖」—— 那是**資料的屬性**（機台怎麼收
+        的），所以在這裡問，不放進 recipe。recipe 只負責**命名**那幾張
+        （`load_patch` 的 `channel_map`）。分組與命名分開，同一批資料的「一顆幾張」
+        才不會因為換一份 recipe 而改變。
+        """
+        path = str(path)
+        n = max(1, int(per_defect))
+        if not os.path.isfile(path):
+            self._status("File not found: %s" % path)
+            return False
+        if sync:
+            try:
+                ds = DatasetLoadWorker.run_sync_stack(path, n)
+            except Exception as e:      # noqa: BLE001 — UI 邊界，一律回報
+                self._status("Could not load image stack: %s: %s"
+                             % (type(e).__name__, e), "error")
+                return False
+            return self._on_dataset_loaded(ds)
+        if not self.dataset_worker.start_stack(path, n):
+            self._status("A dataset is already loading — please wait.")
+            return False
+        self._progress_busy("Loading %s…" % os.path.basename(path))
+        self._status("Loading: %s (%d image(s) per defect)"
+                     % (os.path.basename(path), n))
+        return True
+
+    def load_folder_path(self, folder: Any, sync: bool = False) -> bool:
+        """載入一個**資料夾的單張影像**（F11 Input-3）。
+
+        沒有 KLARF、沒有座標，每個影像檔一顆 defect。多頁 TIFF 在這條路上只讀
+        得到第一頁 —— ingest 會為此發一句警告並指向 ``Open stack…``。
+        """
+        d = str(folder)
+        if not os.path.isdir(d):
+            self._status("Not a folder: %s" % d)
+            return False
+        if sync:
+            try:
+                ds = DatasetLoadWorker.run_sync_folder(d)
+            except Exception as e:      # noqa: BLE001 — UI 邊界，一律回報
+                self._status("Could not load folder: %s: %s"
+                             % (type(e).__name__, e), "error")
+                return False
+            return self._on_dataset_loaded(ds)
+        if not self.dataset_worker.start_folder(d):
+            self._status("A dataset is already loading — please wait.")
+            return False
+        self._progress_busy("Loading %s…" % os.path.basename(d.rstrip("/\\")))
+        self._status("Loading folder: %s" % d)
+        return True
+
     def _on_dataset_loaded(self, dataset: Any) -> bool:
         # F7-1：型別要到載完才知道，所以擋在這裡而不是 load_dataset_path。
         # 擋下來時**不動既有狀態** —— 使用者手上原本那份資料集還在，
@@ -2428,16 +2574,46 @@ class StudioWindow(QMainWindow):
         finally:
             self._syncing = False
 
-        # 空流程時讓 route 型別跟著資料走（載了 recipe 之後就以 recipe 為準）
-        if not self.model.node_order:
-            self.model.kind = str(getattr(dataset, "kind", self.model.kind))
+        warn = list(getattr(dataset, "warnings", []) or [])
+
+        # route 型別跟著資料走 —— **但只在使用者還沒動過 pipeline 的時候**
+        # （F11 Input-3）。以前這裡的條件是「畫布是空的」，而 F7-9 之後開窗就有
+        # 一張起手卡，所以那個條件**永遠是 False** —— 在只支援一種輸入的時候看
+        # 不出來，四種輸入之後就會：載一份 rsem 資料，pipeline 還留在 ebi_patch
+        # 那條 route 上，於是 lint 以為有 `ref`（kind-aware 宣告）而執行期才發現
+        # 沒有。判準改成 `dirty`（`RecipeModel.starter()` 特意把它設 False）。
+        ds_kind = str(getattr(dataset, "kind", self.model.kind))
+        if ds_kind != self.model.kind:
+            if not self.model.dirty or not self.model.node_order:
+                self.model.kind = ds_kind
+                self.model.dirty = False      # 換 route 不算「使用者改過」
+                # ⚠ **換 kind 必須重畫**。`model.kind` 是直接設的屬性，不會通知
+                # listener，而畫布的輸出埠是照 kind 算的（`resolve_writes_for_kind`）
+                # —— 少了這一行，載一份 rsem 資料之後畫布上還是 patch 的
+                # `test` / `ref` 兩顆埠，而資料只有一條 `single`。
+                # 使用者回報的「畫布跟實際對不起來」第一層就是這個。
+                self._refresh_all()
+            else:
+                # 使用者已經蓋了一條 pipeline，那是他的東西 —— 不要偷偷改掉它，
+                # 但要講出這個組合跑不起來。
+                warn.insert(0, (
+                    "this pipeline is written for %s data and you just opened "
+                    "%s data; open a recipe for %s, or start a new pipeline."
+                    % (self.model.kind, ds_kind, ds_kind)))
+        added = self._adopt_source_for(ds_kind)
+
+        # `channel_map` 的表格要照「這批資料一顆有幾張圖」排列數（F11）。
+        # 那是資料的事實，所以在這裡講一次，不是每次選卡片時重新猜。
+        self.param_form.set_image_count(
+            len(getattr(items[0], "images", {}) or {}) if items else 0)
 
         self._update_defect_label()
         self._update_action_states()
         self._progress_done()
-        warn = list(getattr(dataset, "warnings", []) or [])
         msg = "Loaded %d defects (input type %s)" % (
             len(items), getattr(dataset, "kind", "?"))
+        if added:
+            msg += "   · added “%s” for it" % added
         # 換一份資料集就換一份答案卷 —— 上一份的 ground truth 留著的話，
         # 狀態列會拿 A 的答案去對 B 的結果，而那個數字看起來完全正常。
         gt = self._load_ground_truth_beside(
@@ -2447,6 +2623,10 @@ class StudioWindow(QMainWindow):
         # 所以把「拿什麼對的」掛在同一個東西的 tooltip 上。
         self.histogram.setToolTip(
             "Accuracy is measured against %s" % gt if gt else "")
+        # 沒有 KLARF 就寫不回 KLARF（F11 Input-2）。講在**載入的當下**，因為
+        # Export 精靈把那個選項變灰是使用者跑完一整批之後才看得到的事。
+        if getattr(dataset, "klarf", None) is None:
+            warn.append(no_klarf_message(getattr(dataset, "kind", "")))
         if warn:
             msg += "   ! %s" % warn[0]
         if gt:
@@ -2455,6 +2635,41 @@ class StudioWindow(QMainWindow):
         if items:
             self.refresh_preview(force=False)
         return True
+
+    def _adopt_source_for(self, kind: str) -> str:
+        """畫布是空的 → 補上**這種資料該用的那一張**載入卡（回它的顯示名）。
+
+        為什麼開窗時不放、載資料時才放（F11 Enhance-4）
+        ----------------------------------------------
+        使用者：「一開始進去 GUI 畫面時，Load image 卡片改成預設沒有（user 可以
+        選擇要 Load images or Load one image），add 才會出現。」他要的是**開窗時
+        不要替他決定** —— 因為 Input-4 之後有兩張載入卡，而預先放一張就是替他決定
+        了他還沒決定的事（而猜錯的那一半在畫布上看起來完全正常）。
+
+        但**載入資料的那一刻，「哪一張」已經不是猜的**：`ingest` 判別出來的 kind
+        就是答案（`ebi_patch`/`tiff_stack` → Load images；`rsem`/`folder` →
+        Load one image）。那時候不放才是把一個已知的答案丟給使用者自己拼。
+        所以規則是：**空白畫布才補，而且把補了什麼講出來**（狀態列）。
+
+        只在**完全空白且沒動過**的時候補：使用者已經蓋了一條 pipeline 的話，
+        那是他的東西 —— 這一段一個字都不准動它。
+        """
+        if self.model.node_order or self.model.dirty:
+            return ""
+        want = RecipeModel.starter_step_for(str(kind or ""))
+        try:
+            nid = self.model.add_step(want)
+        except KeyError:                 # pragma: no cover — 卡片庫壞了才會發生
+            return ""
+        # 補上來的那張卡不算「使用者做過的一步」：Ctrl+Z 不該把它退掉，關窗也
+        # 不該因此問「要存檔嗎」（同 `RecipeModel.starter` 的理由）。
+        self.model.dirty = False
+        self.model.clear_history()
+        self.select_node(nid)
+        try:
+            return str(get_step(want).label)
+        except KeyError:                 # pragma: no cover
+            return want
 
     def _items(self) -> List[Any]:
         """目前資料集的 defect 清單（沒有資料集就是空的）。"""
@@ -2476,9 +2691,18 @@ class StudioWindow(QMainWindow):
             self.defect_label.setText("(no dataset loaded)")
             return
         i = max(0, min(int(self.defect_index), len(items) - 1))
+        # 「沒有 KLARF」要**常駐**，不能只在狀態列講一次（F11 Input-2）——
+        # 載完就接著算預覽，狀態列那句話幾毫秒後就被 "Computing preview…" 蓋掉。
+        # 同一個教訓在 ground truth 那一輪就學過了（見 `_on_dataset_loaded`）。
+        # 掛在資料集標籤上：它就在使用者眼前，而且它講的正是「你現在手上是什麼資料」。
+        no_klarf = getattr(self.dataset, "klarf", None) is None
         self.defect_label.setText(
-            "%s · defect %d / %d" % (getattr(self.dataset, "kind", "?"),
-                                     i + 1, len(items)))
+            "%s · defect %d / %d%s" % (getattr(self.dataset, "kind", "?"),
+                                       i + 1, len(items),
+                                       " · no KLARF" if no_klarf else ""))
+        self.defect_label.setToolTip(
+            no_klarf_message(getattr(self.dataset, "kind", ""))
+            if no_klarf else "")
 
     def set_defect_index(self, index: int) -> bool:
         """跳到第 ``index`` 顆 defect（超出範圍會夾住）。"""
@@ -2633,10 +2857,49 @@ class StudioWindow(QMainWindow):
         if busy:
             self._status("Computing preview…")
 
+    def _selected_trace(self, result: Any) -> Any:
+        """選取的那張卡這一次的執行紀錄（`None` = **它根本沒跑到**）。"""
+        nid = self.selected_node
+        if not nid or nid not in self.model.nodes:
+            return None
+        for tr in (getattr(result, "traces", None) or []):
+            if str(getattr(tr, "node_id", "")) == nid:
+                return tr
+        return None
+
+    def _selected_card_ran(self, result: Any) -> bool:
+        """選取的那張卡**這一次真的執行了嗎**（F11 Enhance-4）。
+
+        為什麼要問這一句
+        ----------------
+        使用者回報：「Load image 載入圖片後點選 Denoise，為何會有畫面？我前面的
+        rule 應該有說要連接線（image source）右側才會出現 patch。」他是對的，
+        而畫面上那張圖是這樣來的：預覽是**跑整條 route**（`upto_node` 只是提早
+        停），而入口卡不需要任何線就跑得起來 —— 它把 `test` / `ref` 寫進了
+        master context。Denoise 沒有輸入所以失敗，但**失敗的策略是「把已經算出
+        來的影像留在畫面上」**，於是畫面上出現的是入口卡的輸出，看起來像是
+        Denoise 的結果。
+
+        那是 F9 那條規矩在影像區的破口：**資料從哪來由線決定**。沒有線就沒有
+        資料，畫面上就不該有東西 —— 一張看起來對的圖比一片空白危險得多。
+
+        判準用 traces（引擎的執行紀錄）而不是 lint：它同時涵蓋「這張卡沒接線」
+        與「它的上游沒接線」——後者一樣不會執行，而畫面上一樣會出現入口卡的圖。
+        """
+        nid = self.selected_node
+        if not nid or nid not in self.model.nodes:
+            return True                  # 沒有選卡 = 看整條 route 的結果
+        tr = self._selected_trace(result)
+        return bool(tr is not None and getattr(tr, "ok", False))
+
     def _on_preview_ready(self, result: Any) -> None:
         self._last_result = result
         ctx = getattr(result, "context", None)
         images = dict(getattr(ctx, "images", {}) or {}) if ctx is not None else {}
+        ran = self._selected_card_ran(result)
+        if not ran:
+            # **畫面上不留別人的圖**（見 :meth:`_selected_card_ran`）。
+            images = {}
         self._preview_images = images
 
         self._populate_streams(images)
@@ -2650,8 +2913,24 @@ class StudioWindow(QMainWindow):
         self.verdict.set_verdict(getattr(result, "bin", None)
                                  if score is not None else None)
 
-        if not getattr(result, "ok", False):
-            # 失敗照樣把已經算出來的影像留在畫面上（診斷比清空有用）
+        if not ran:
+            # 兩種「沒有東西可看」要講不同的話，因為下一步不一樣：
+            #   跑起來了但失敗   → 講**那個錯誤**（它自己就帶著怎麼修）；
+            #   根本沒跑到       → 講**怎麼接線**（lint 對這件事早就有一句可以照做
+            #                      的話，用它而不是再寫一份）。
+            tr = self._selected_trace(result)
+            err = str(getattr(tr, "error", "") or "") if tr is not None else ""
+            if err:
+                self._status("Preview problem: %s" % err, "error")
+            else:
+                why = self._node_problems().get(self.selected_node or "",
+                                                ("", ""))[0]
+                self._status(why or ("“%s” did not run this time, so there is "
+                                     "nothing to show for it yet."
+                                     % self.selected_node), "error")
+        elif not getattr(result, "ok", False):
+            # 這張卡跑過了，是**後面**某張卡失敗 —— 那時候畫面上的影像有意義
+            # （診斷比清空有用），所以留著。
             self._status("Preview problem: %s"
                          % (getattr(result, "error", None) or "unknown error"))
         elif self.selected_node:
@@ -2893,16 +3172,19 @@ class StudioWindow(QMainWindow):
     def _refresh_inspector(self, result: Any = None) -> None:
         """把三種來源餵給儀表：這張卡的參數、這一顆的結果、整批的結果。"""
         insp = self._inspector
+        # meta 在 **context** 上，不在 result 上（result 只帶 features/score/bin）。
+        ctx = getattr(result, "context", None) if result is not None else None
+        meta = dict(getattr(ctx, "meta", {}) or {})
         if insp is None:
             self.inspector_summary.setText("")
+            # 沒有儀表的卡也可能有曲線欄位 —— 那個背景跟儀表是兩件事，
+            # 不要因為前者不在就跳過後者。
+            self._refresh_curve_backdrop(meta)
             return
         node = self.model.nodes.get(self.selected_node or "")
         one: Dict[str, Any] = {}
         if result is not None:
             one = {"features": dict(getattr(result, "features", {}) or {})}
-        # meta 在 **context** 上，不在 result 上（result 只帶 features/score/bin）。
-        ctx = getattr(result, "context", None) if result is not None else None
-        meta = dict(getattr(ctx, "meta", {}) or {})
         # 「這張卡產出哪些特徵」要問卡片庫（含 output_prefix）—— 儀表只負責畫。
         feats: List[str] = []
         if node is not None:
@@ -2921,6 +3203,32 @@ class StudioWindow(QMainWindow):
                          feature_names=feats,
                          shown_streams=[s for s in shown if s])
         self.inspector_summary.setText(insp.summary())
+        self._refresh_curve_backdrop(meta)
+
+    def _refresh_curve_backdrop(self, meta: Dict[str, Any]) -> None:
+        """曲線欄位後面墊上「這張卡吃進來的那條流」的灰階分布（F11 UI-C）。
+
+        用的是引擎那份 ``stream_change[流]['before']`` —— 跟 Enhance 儀表左邊那條
+        細線同一組數字。UI 不自己再壓一次直方圖：畫面上的分布跟真的跑出來的
+        不一樣，比沒有那個背景更糟。
+
+        ``before`` 是「這張卡動它之前」的樣子，而曲線的橫軸就是輸入灰階 ——
+        兩者講的是同一件事，所以不必另外算一份。
+        """
+        node = self.model.nodes.get(self.selected_node or "")
+        if node is None:
+            self.param_form.set_histogram([])
+            return
+        changes = dict((meta or {}).get("stream_change") or {})
+        # 這張卡處理的第一條流（曲線是逐像素的，兩條流吃的是同一條曲線）。
+        keys = [k.strip() for k in
+                str(node.params.get("streams") or "").split(",") if k.strip()]
+        for key in keys:
+            rec = changes.get(key)
+            if rec and rec.get("before"):
+                self.param_form.set_histogram(list(rec["before"]))
+                return
+        self.param_form.set_histogram([])
 
     def _refresh_region_button(self) -> None:
         regions = self.selected_regions()
@@ -3589,6 +3897,37 @@ class StudioWindow(QMainWindow):
         if not path:
             return
         self.load_dataset_path(path)
+
+    def _on_open_stack(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open image stack", "",
+            "Multi-page TIFF (*.tif *.tiff);;All files (*)")
+        if not path:
+            return
+        # 「一顆幾張」問一次就好，而且**預設值要是這個檔案自己的頁數線索**：
+        # 問這一格的時候使用者手上唯一的事實是「這個檔案有幾頁」，所以先講出來。
+        pages = 0
+        try:
+            from adept.core.ingest import tiff_index
+            pages = int(tiff_index.n_pages(path))
+        except Exception:                       # noqa: BLE001 — 只是拿來寫提示
+            pages = 0
+        prompt = ("How many images make up one defect?\n\n"
+                  "%s\nEvery N consecutive pages become one defect; enter 1 if "
+                  "each page is its own defect. Name them afterwards on the "
+                  "Load images card." % ("This file has %d page(s)." % pages
+                                         if pages else ""))
+        n, ok = QInputDialog.getInt(self, "Images per defect", prompt, 1, 1,
+                                    max(1, pages) if pages else 999)
+        if not ok:
+            return
+        self.load_stack_path(path, n)
+
+    def _on_open_folder(self) -> None:
+        d = QFileDialog.getExistingDirectory(self, "Open folder of images", "")
+        if not d:
+            return
+        self.load_folder_path(d)
 
     def _on_open_recipe(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

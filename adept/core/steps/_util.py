@@ -130,16 +130,200 @@ class MultiStreamStep(Step):
         """這一條流要不要跳過（預設都不跳）。"""
         return False
 
+    def note_stream(self, ctx: Context, key: str, img: np.ndarray,
+                    params: Dict[str, object]) -> None:
+        """處理**之前**，這一條流有什麼值得記進 ``ctx.meta`` 的（預設不記）。
+
+        存在的理由：``build_op`` 在迴圈之前只呼叫一次，所以它看不到「哪一條流、
+        長什麼樣」。而右下角的儀表要回答的問題常常是**逐流**的（例如 Denoise 的
+        「這張圖的雜訊 σ 是多少」——`strength` 的單位就是那個 σ）。
+
+        用 hook 而不是「讓 op 多收一個參數」：op 是使用者程式碼裡最短的那一段
+        （`img -> img`），把診斷混進去會讓四張卡各自長出一份。
+        """
+
+    def after_stream(self, ctx: Context, key: str, before: np.ndarray,
+                     after: np.ndarray, params: Dict[str, object]):
+        """處理**之後**，這一條流要多報哪些特徵（回 ``None`` = 不報）。
+
+        跟 :meth:`note_stream` 對稱，差別是它拿得到「處理前」與「處理後」兩張圖
+        —— 所以「這張卡動了多少」這類診斷是**免費**的（比對兩張圖，不必把演算法
+        再跑一次）。前綴由 :meth:`run` 統一套（多流才加流名，同 F10-3 的規則），
+        卡片自己不要處理命名。
+
+        報出來的名字**必須**出現在 :meth:`stream_features` 的宣告裡 ——
+        `test_card_invariants` 會擋（宣告 ≠ 真的吐出來的話，分數表達式裡就有一個
+        指不到的變數名，而那要等使用者寫完表達式才發現）。
+        """
+        return None
+
+    #: 超過這個比例的像素被壓回值域就講一句話（F11 Enhance-1）。
+    #:
+    #: 為什麼是固定值而不是一個參數：這不是一個「效果」旋鈕，是一句診斷。
+    #: 給它一個參數的話，第一件事就是有人把它調高來讓警告消失 —— 而警告要講的
+    #: 事情（這張卡把資訊推到範圍外了）不會因此消失。1% 是「不像雜訊、也還沒
+    #: 嚴重到毀掉整張圖」的量。
+    CLIP_WARN_FRAC = 0.01
+
+    @classmethod
+    def stream_features(cls, params: Dict[str, object]) -> List[str]:
+        """**一條流**會吐出哪些特徵的基本名（不含流名前綴）。
+
+        子類要在某些設定下多報一個數字時覆寫這個，不要覆寫
+        :meth:`resolve_features` —— 前綴規則只該寫一次。
+        """
+        return list(cls.features_out) + [CLIP_FRAC]
+
+    @classmethod
+    def resolve_features(cls, params: Dict[str, object]) -> List[str]:
+        """這張卡吐的診斷特徵（F11 Enhance-1）。
+
+        **一條流時逐字是 `clip_frac`**、多條流時加流名前綴 —— 跟量測卡同一條
+        規則（F10-3），所以使用者只要學一次。
+
+        兩條以上再多兩個**不帶前綴**的：那一對流處理完之後還有多像
+        （:data:`PAIR_FEATURES`）。它們講的是「這兩條之間」，不是「其中某一條」，
+        所以掛在流名下面會是錯的。
+        """
+        keys = cls.stream_list(params)
+        base = cls.stream_features(params)
+        if len(keys) > 1:
+            out = [n for k in keys for n in prefix_names(k, base)]
+            return out + list(PAIR_FEATURES)
+        return base
+
+    @classmethod
+    def diagnostic_features(cls, params: Dict[str, object]) -> List[str]:
+        """Enhance 卡吐的每一個數字都是診斷（見 `Step.diagnostic_features`）。
+
+        這幾張卡不量缺陷 —— 它們把圖弄乾淨，然後報告自己做了多少
+        （壓回值域多少、磨掉幾個 σ、兩條流還有多像）。`features_out` 目前四張卡
+        都是空的；哪天有子類在那裡宣告了真正的量測值，它就**不算**診斷。
+        """
+        keys = cls.stream_list(params)
+        measured = list(cls.features_out)
+        if len(keys) > 1:
+            measured = [n for k in keys for n in prefix_names(k, measured)]
+        return [f for f in cls.resolve_features(params) if f not in measured]
+
     def run(self, ctx: Context, params: Dict[str, object]) -> Context:
         p = self.validate_params(params)
         keys = self.stream_list(p)
         op = self.build_op(ctx, p)
+        multi = len(keys) > 1
         for key in keys:
             if self.skip_stream(key, p):
                 continue
             img = require_image(ctx, self.key, key)
-            ctx.set_image(key, op(img))
+            self.note_stream(ctx, key, img, p)
+            out, frac = clip_to_range(op(img))
+            ctx.set_image(key, out)
+            feats = {CLIP_FRAC: frac}
+            feats.update(self.after_stream(ctx, key, img, out, p) or {})
+            ctx.add_features(prefix_features(key if multi else "", feats))
+            if frac > self.CLIP_WARN_FRAC:
+                ctx.warn(
+                    "[%s] %.1f%% of '%s' was pushed outside 0-255 and had to be "
+                    "clipped back. Those pixels all became 0 or 255, so whatever "
+                    "was in them is gone - try a gentler setting."
+                    % (self.key, 100.0 * frac, key))
+        if multi:
+            ctx.add_features(pair_similarity(ctx.images.get(keys[0]),
+                                             ctx.images.get(keys[1])))
         return ctx
+
+
+#: 「這張卡把多少比例的像素壓回值域」的特徵名（F11 Enhance-1）。
+CLIP_FRAC = "clip_frac"
+
+#: 兩條流處理完之後**還有多像**（F11 Enhance-UI-B）。
+#:
+#: - ``pair_level_delta``：兩條流的背景相差幾個灰階（0 = 一樣亮）。
+#: - ``pair_spread_ratio``：誰的起伏比較大，比幾倍（1 = 一樣）。
+#:
+#: 為什麼需要它們：**可比性是 `subtract` 的前提**，而「不可比」在畫面上長得像
+#: 「兩張圖本來就不一樣」—— 一張比較亮的 ref 減出來的 diff 整片偏移，而那看起來
+#: 就像一個大面積的缺陷。面板已經並排畫兩條流的直方圖，但沒有一個數字說它們有多
+#: 像，於是判斷全靠目視兩張分布的形狀。
+#:
+#: **不帶流名前綴**：它們講的是「這兩條之間」，掛在其中一條的名字下面會是錯的。
+PAIR_FEATURES = ("pair_level_delta", "pair_spread_ratio")
+
+#: 算 pair 統計時最多看幾個像素（超過就等間隔取樣）。
+#:
+#: 為什麼要取樣：這是一個**診斷**，而它要對 2000×2000 的 RSEM 影像也便宜到可以
+#: 每顆都算。中位數是 O(n log n)，一對影像四次中位數在大圖上就是幾十毫秒 ——
+#: 乘上一萬顆是真的錢。等間隔取樣對「整體亮多少、起伏多大」幾乎沒有影響
+#: （而且是決定性的，同一張圖永遠取到同一批像素）。
+PAIR_SAMPLE_MAX = 65536
+
+
+def pair_similarity(a, b) -> Dict[str, float]:
+    """兩條流處理完之後還有多像（見 :data:`PAIR_FEATURES`）。
+
+    用中位數與 MAD（`algo.enhance.robust_level_spread`）而不是平均與標準差 ——
+    理由跟 ``normalize`` 的 ``zscore`` 一樣：要量的東西就是缺陷本身，而缺陷會把
+    平均與標準差帶著跑，於是「這兩張有多像」會隨缺陷大小浮動。
+
+    兩張圖**尺寸不必一樣**（patch 對 RSEM 就是不一樣）：量的是各自的整體統計，
+    不是逐像素比對。
+    """
+    from ..algo.enhance import robust_level_spread     # 迴避 import 迴圈
+
+    def sampled(arr):
+        f = np.asarray(arr).reshape(-1)
+        if f.size > PAIR_SAMPLE_MAX:
+            f = f[::int(np.ceil(f.size / float(PAIR_SAMPLE_MAX)))]
+        return f
+
+    if a is None or b is None or np.asarray(a).size == 0 or np.asarray(b).size == 0:
+        return {}
+    la, sa = robust_level_spread(sampled(a))
+    lb, sb = robust_level_spread(sampled(b))
+    lo, hi = sorted((abs(sa), abs(sb)))
+    # 兩邊都平的話「差幾倍」沒有意義，回 1（一樣）而不是 inf —— inf 會一路活到
+    # 某個分數表達式才變成 nan。
+    ratio = (hi / lo) if lo > 1e-6 else 1.0
+    return {PAIR_FEATURES[0]: abs(float(la - lb)),
+            PAIR_FEATURES[1]: float(ratio)}
+
+
+def clip_to_range(img: np.ndarray, lo: float = 0.0, hi: float = 255.0):
+    """把影像壓回 ``[lo, hi]``，並回報**壓了多少比例**。
+
+    為什麼值域要是一個契約（實測出來的問題）
+    ----------------------------------------
+    Enhance 段四張卡的輸出實測值域::
+
+        Normalize (percentile) → uint8    0.00 … 255.00   ✓
+        Adjust tone            → uint8   40.00 … 255.00   ✓
+        Denoise                → uint8    0.00 … 255.00   ✓
+        Remove bg (background) → float32 116.36 … 250.09
+        Remove bg (stripes_h)  → float32 125.50 … 261.50  ← 超過 255
+        Normalize (local)      → float32   8.00 … 255.00
+
+    越界的 261.5 會活到**後面某個** ``to_uint8`` 才被 clip —— 也就是資訊在使用者
+    看不見的地方飽和。而 ``keep_level`` 的說明還寫著「讓影像留在原本的灰階區間，
+    下游的門檻才還是同一個意思」：那句話在這個修正之前是假的。
+
+    **不做 rescale，只做 clip**：rescale 會改動每一個像素的值，那就違背了
+    「留在原本的灰階區間」這個承諾（下游的門檻會全部失效）。clip 只動界外的
+    那些，而「動了多少」由 :data:`CLIP_FRAC` 講出來。
+
+    dtype 刻意**不強制統一**：三張卡回 uint8、兩個方法回 float32，而值域一致
+    之後那個差別對量測沒有影響（float 少一次量化，鏈起來反而更準）。強制統一會
+    讓既有 recipe 的數字整批位移，換到的只有「看起來整齊」。
+    """
+    a = np.asarray(img)
+    if a.size == 0:
+        return a, 0.0
+    out_of_range = np.count_nonzero((a < lo) | (a > hi))
+    if not out_of_range:
+        return a, 0.0
+    clipped = np.clip(a, lo, hi)
+    if a.dtype != clipped.dtype:            # np.clip 可能升型（uint8 + float 界限）
+        clipped = clipped.astype(a.dtype)
+    return clipped, float(out_of_range) / float(a.size)
 
 
 def output_prefix_spec(example: str = "center") -> ParamSpec:

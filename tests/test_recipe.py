@@ -344,14 +344,119 @@ def test_validate_missing_image():
     assert "diff" in bad.detail
 
 
-def test_validate_first_node_reads_unchecked():
-    # 第一張啟用卡（load 卡）的 reads 不檢查（它從 dataset 拿資料）
-    r = make_recipe(routes={"ebi_patch": ["sub"]},
-                    nodes={"sub": RecipeNode("sub", "t_subtract", {})},
-                    score=ScoreSpec(expr="1", threshold=0.0,
-                                    bins={"below": 0, "above": 1}))
-    issues = validate(r, registry=REG)
-    assert "missing-image" not in codes(issues)
+def test_entry_card_reads_unchecked_but_a_consumer_is_checked_wherever_it_sits():
+    """**入口是「不吃影像流的卡」，不是「排第一個的卡」**（F11 Input-0）。
+
+    以前這一條叫 `test_validate_first_node_reads_unchecked`，斷言的是位置：
+    route 上第一張卡的 reads 不檢查。那是線性 route 時代的定義，而它讓
+    **一份 recipe 只能有一個 image source**（見 `Step.is_source` 的說明）。
+
+    改成看宣告之後，兩個方向都要成立：入口卡（沒有輸入埠也沒有 reads）的
+    reads 不檢查；而一張**會吃影像流**的卡排在第一個也照樣被檢查 ——
+    只有一張 subtract 的 recipe 真的沒有影像來源，那句話該講出來。
+    """
+    only_a_consumer = make_recipe(
+        routes={"ebi_patch": ["sub"]},
+        nodes={"sub": RecipeNode("sub", "t_subtract", {})},
+        score=ScoreSpec(expr="1", threshold=0.0, bins={"below": 0, "above": 1}))
+    assert "missing-image" in codes(validate(only_a_consumer, registry=REG))
+
+    with_an_entry = make_recipe(
+        routes={"ebi_patch": ["load", "sub"]},
+        nodes={"load": RecipeNode("load", "t_load_pair", {}),
+               "sub": RecipeNode("sub", "t_subtract", {})},
+        score=ScoreSpec(expr="1", threshold=0.0, bins={"below": 0, "above": 1}))
+    assert "missing-image" not in codes(validate(with_an_entry, registry=REG))
+
+
+# ---------------------------------------------------------------------------
+# 多個 image source 入口（F11 Input-0）
+# ---------------------------------------------------------------------------
+class TLoadSidecar(Step):
+    """第二個入口：與 defect 一一對應的外部檔案（GLAS 的 label map 那種）。"""
+    key = "t_load_sidecar"
+    label = "測試載入（sidecar）"
+    category = CATEGORY_IMAGE
+    help = "測試用：寫入 layout_label 影像流（不吃任何影像流）"
+    writes = ["layout_label"]
+
+    def run(self, ctx, params):
+        return ctx
+
+
+class TMaskConsumer(Step):
+    key = "t_mask_consumer"
+    label = "測試吃 mask"
+    category = CATEGORY_ALGO
+    help = "測試用：吃 layout_label 與 diff，量一個數字"
+    reads = ["layout_label", "diff"]
+    features_out = ["masked_mean"]
+
+    def run(self, ctx, params):
+        return ctx
+
+
+REG2 = dict(REG, t_load_sidecar=TLoadSidecar, t_mask_consumer=TMaskConsumer)
+
+
+def _two_entry_recipe(**kw):
+    """patch 的頁 + sidecar 兩個入口，會合到一張吃 mask 的量測卡。"""
+    base = dict(
+        recipe_id="two_entries",
+        routes={"ebi_patch": ["load", "mask_src", "sub", "measure"]},
+        nodes={
+            "load": RecipeNode("load", "t_load_pair", {}),
+            "mask_src": RecipeNode("mask_src", "t_load_sidecar", {}),
+            "sub": RecipeNode("sub", "t_subtract", {}),
+            "measure": RecipeNode("measure", "t_mask_consumer", {}),
+        },
+        score=ScoreSpec(expr="masked_mean", threshold=1.0,
+                        bins={"below": 0, "above": 1}),
+        version=2, author="unit", description="兩個入口", edges=[],
+    )
+    base.update(kw)
+    return Recipe(**base)
+
+
+def test_a_recipe_can_have_two_image_source_entries():
+    """兩個入口的 recipe：兩張的 writes 都算進來，lint 一句話都不說。
+
+    以前第二張入口卡會被當成普通卡：它沒有輸入埠所以躲過 not-connected，
+    但它的 writes 只拿得到非 kind-aware 的宣告 —— 於是下游那張吃
+    `layout_label` 的卡會收到一句**假的** missing-image。
+    """
+    issues = validate(_two_entry_recipe(), registry=REG2)
+    assert codes(issues) == [], [(i.code, i.title, i.detail) for i in issues]
+
+
+def test_the_second_entry_is_an_entry_even_when_it_sits_last():
+    """入口是宣告出來的事，不是位置 —— 把 sidecar 那張排到最後也一樣。
+
+    排最後只是「畫布上的順序」；它照樣不吃任何影像流，所以照樣是入口。
+    （吃它的那張卡在它前面，所以那一張會缺圖 —— 那是**順序**的問題，
+    lint 講的也正是那一句，不是「這張卡沒有來源」。）
+    """
+    r = _two_entry_recipe(
+        routes={"ebi_patch": ["load", "sub", "measure", "mask_src"]})
+    issues = validate(r, registry=REG2)
+    assert [i.code for i in issues] == ["missing-image"]
+    bad = issues[0]
+    assert bad.node_id == "measure" and "layout_label" in bad.detail
+
+
+def test_is_source_looks_at_declarations_not_at_position_or_values():
+    """`Step.is_source` 的三條判準各自被驗到（F11 Input-0）。"""
+    assert TLoadPair.is_source() and TLoadSidecar.is_source()
+    # 有 reads 但沒有輸入埠的舊風格卡 **不是**入口 —— 只看埠的話
+    # missing-image 整條檢查會安靜失效。
+    assert not TSubtract.is_source()
+    assert not TMaskConsumer.is_source()
+    # 真的卡片：只有 load_patch 是入口。
+    from adept.core.pipeline.step import REGISTRY
+    import adept.core.steps            # noqa: F401  (註冊全部卡片)
+    sources = sorted(k for k, c in REGISTRY.items() if c.is_source())
+    # 兩張 Input 卡（F11 Input-4：一種 source 一張卡）——其餘的卡都吃影像流。
+    assert sources == ["load_patch", "load_single"], sources
 
 
 def test_validate_requires_ref_on_rsem():
