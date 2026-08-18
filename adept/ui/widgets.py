@@ -135,6 +135,9 @@ GLYPH_ICONS = (
     "place_between_v", "place_between_h",
     "side_both", "side_start", "side_end",
     "fill_fill", "fill_skip", "fill_skip_clear",
+    # 「這張圖的圖案往哪個方向跑」（F11 Region-2c）—— 同一套小版圖，
+    # 亮的是**在看的那個方向**。
+    "dir_both", "dir_upright", "dir_flat",
 )
 
 
@@ -269,7 +272,7 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         p.drawLine(QPointF(ax1, ay1), QPointF(ax1, ay1 + head))
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
-    elif n.startswith(("place_", "side_", "fill_")):
+    elif n.startswith(("place_", "side_", "fill_", "dir_")):
         _draw_profile_glyph(p, n, w, h, color, pen)
     elif n == "roi_cursor":
         # 一支箭頭游標：**選**已經有的框（不是畫新的）。
@@ -463,6 +466,19 @@ def _draw_profile_glyph(p: QPainter, name: str, w: float, h: float,
             blk(0.05, 0.06, 0.95, 0.26, False)
             blk(0.05, 0.74, 0.95, 0.94, False)
             blk(0.05, 0.32, 0.95, 0.68, True)
+    elif name.startswith("dir_"):
+        # 這一組畫的是**條紋本身**（不是框）：亮的那一組就是「在看的」。
+        # 所以 `dir_both` 是兩組都亮、單向的那兩顆有一組退成淡的 ——
+        # 淡的那一組還在，因為「另一個方向我不看」跟「另一個方向不存在」
+        # 是兩件事，而使用者要挑的正是前者。
+        up = name in ("dir_both", "dir_upright")
+        flat = name in ("dir_both", "dir_flat")
+        bars = [((0.08, 0.05, 0.30, 0.95), up), ((0.70, 0.05, 0.92, 0.95), up),
+                ((0.05, 0.08, 0.95, 0.30), flat), ((0.05, 0.70, 0.95, 0.92), flat)]
+        # 淡的先畫：半透明的塊疊在實心的上面會把它糊掉一角，而那一角正好是
+        # 兩組交會的地方 —— 也就是這幾顆圖示最該乾淨的位置。
+        for rect, on in sorted(bars, key=lambda t: bool(t[1])):
+            blk(rect[0], rect[1], rect[2], rect[3], on)
     elif name.startswith("side_"):
         # 跟 place_beside_v 的差別刻意做在**高度**：這裡的塊是滿高的
         blk(0.42, 0.05, 0.58, 0.95, False)

@@ -1,20 +1,29 @@
 # ADEPT step-card library — authored 2026-08-13 (F8).
-"""roi_cross —— 兩組正交條紋的交會處 → 一組方框。純規則，不需要外部檔案。
+"""roi_cross —— 找出影像自己的條紋，在條紋上放一組框。純規則，不需要外部檔案。
 
 這張卡在解什麼問題
 ------------------
 站點原有兩招定位 ROI，兩招都要外部的東西：GDS（要 .oas）與 Golden Cell
-模板（要一張原大圖）。第三招 —— 只看 patch 自己 —— 之前只到 ``roi_profile``，
-而那張依設計只吐**一條滿版的條紋**（單軸投影對另一個方向一無所知）。
+模板（要一張原大圖）。第三招 —— 只看 patch 自己 —— 就是這一張。
 
-要框的東西通常在**兩組條紋交會的地方**（直的 Metal Gate × 橫的 EPI），
-而且一張 patch 上不只一處。演算法與取捨都寫在 ``algo/grid.py`` 的模組說明裡
-（為什麼晶格要排在條紋**中心**而不是邊界、為什麼不用週期估測、
-已知 pitch 能做什麼）。這裡只負責把它接成一張卡。
+**「一個方向還是兩個方向」是使用者回答的第一個問題**（F11 Region-2c）。
+這張卡 F8 寫的時候只做兩個方向，因為需求是那個形狀的（直的 Metal Gate ×
+橫的 EPI，要量交界落在 EPI 那一側的那幾小塊）。但那是**需求的形狀，不是
+演算法的形狀** —— 一張密集 line/space 的 patch 只有一個方向有結構，
+而使用者要的框（每一根線上一條滿版的帶子、或每一根線兩側各一條）
+這套投影本來就算得出來。原本的卡對那種圖只會回一句「no flat stripes to
+lock onto」然後退回整張圖：一件做得到的事被形狀擋住了。
+
+單方向的實作是把另一個方向換成**一根蓋滿整張圖的條紋**
+（``algo/grid.open_axis``）—— 交會的幾何一行都不用改，跟滿版帶子交會出來的
+正好就是滿版的框。少一條分支就少一種只在單軸時才會發作的 bug。
+
+其餘的演算法與取捨都寫在 ``algo/grid.py`` 的模組說明裡（為什麼晶格要排在條紋
+**中心**而不是邊界、為什麼不用週期估測、已知 pitch 能做什麼）。
 
 一個名字，好幾個框
 ------------------
-交會處的數量隨影像而異，所以這張卡寫的是**多框區域**（``set_roi_boxes``）。
+框的數量隨影像而異，所以這張卡寫的是**多框區域**（``set_roi_boxes``）。
 量統計的卡（``glv_stats``）把它當一個像素母體；要幾何的卡指
 ``<name>_center`` —— 離 patch 正中心最近的那一塊，也就是**缺陷所在的那一塊**；
 ``<name>_others`` —— 其餘那幾塊，也就是**同一張圖上同材質的基準**
@@ -38,6 +47,13 @@ from ._util import (
 )
 
 _BESIDE = ("beside_vertical", "beside_horizontal")
+
+#: ``directions`` 的三個值 —— 順序就是圖示列由左到右。
+_DIRECTIONS = ("both", "upright", "flat")
+
+#: 哪幾個 ``directions`` 值會用到直的／橫的那一組參數（``show_when``）。
+_USES_UPRIGHT = ("both", "upright")
+_USES_FLAT = ("both", "flat")
 
 #: ``place`` 的五個選項 —— 順序就是圖示列由左到右的順序，所以它跟 ``icons``
 #: 那一串必須逐項對齊（``ParamSpec`` 會擋長度不一樣）。
@@ -68,10 +84,12 @@ class RoiCrossStep(Step):
     label = "Profile"
     category = CATEGORY_ALGO
     group = GROUP_REGION
-    help = ("Find the upright stripes and the flat stripes in the image, then "
-            "put a box wherever they cross - so the boxes follow the pattern "
-            "instead of sitting at fixed spots on the screen. One patch "
-            "usually has several crossings, and you get a box on each of them.")
+    help = ("Find the stripes in the image and put a box on every one of them "
+            "- so the boxes follow the pattern instead of sitting at fixed "
+            "spots on the screen. Stripes running one way give you a box "
+            "spanning the image on each stripe; two sets of stripes crossing "
+            "each other give you a box on each crossing. Either way one patch "
+            "usually has several, and you get a box on each.")
     params = [
         ParamSpec(
             name="source", type="image_key", direction="in", default="ref",
@@ -84,6 +102,28 @@ class RoiCrossStep(Step):
                   "separately would put the boxes in different places, and "
                   "then the difference between them is no longer only the "
                   "defect."),
+        ),
+        ParamSpec(
+            name="directions", type="icon_choice", default="both",
+            choices=list(_DIRECTIONS),
+            icons=["dir_both", "dir_upright", "dir_flat"],
+            choice_help={
+                "both": "Both directions - the box goes where an up-and-down "
+                        "stripe meets a left-to-right one.",
+                "upright": "Only the up-and-down stripes. The box runs the "
+                           "full height of the image.",
+                "flat": "Only the left-to-right stripes. The box runs the "
+                        "full width of the image.",
+            },
+            section="1 · Which image",
+            label="Which way the pattern runs",
+            help=("How many directions of stripe this image has. Most images "
+                  "have stripes running one way only - pick that one and the "
+                  "box runs the whole way across the other direction. Pick "
+                  "both when two sets of stripes cross each other and you want "
+                  "the place where they meet. Picking both on an image that "
+                  "only has stripes one way finds nothing at all, because the "
+                  "card then insists on a crossing that is not there."),
         ),
         ParamSpec(
             name="smooth", type="int", default=3, min=1, max=99, unit="px",
@@ -109,6 +149,7 @@ class RoiCrossStep(Step):
                   "Use the ranks when the image has more than two materials - "
                   "for example brightest for the metal and second_brightest "
                   "for the layer under it."),
+            show_when=("directions", _USES_UPRIGHT),
         ),
         ParamSpec(
             name="vertical_kinds", type="int", default=0, min=0, max=6,
@@ -123,6 +164,7 @@ class RoiCrossStep(Step):
                   "CPODE). Getting this wrong is quiet: with two assumed, the "
                   "brightest group takes in the spaces as well, so the card "
                   "finds twice as many stripes at half the pitch."),
+            show_when=("directions", _USES_UPRIGHT),
         ),
         ParamSpec(
             name="vertical_width", type="float", default=0.0, min=0.0,
@@ -136,6 +178,7 @@ class RoiCrossStep(Step):
                   "sensitivity then decides whether a stripe is found at all, "
                   "not where the box lands. Leave it 0 when the width of the "
                   "stripe is the thing you are measuring."),
+            show_when=("directions", _USES_UPRIGHT),
         ),
         ParamSpec(
             name="vertical_pitch", type="float", default=0.0, min=0.0,
@@ -146,6 +189,7 @@ class RoiCrossStep(Step):
                   "from the layout) lets the card check what it found, fill in "
                   "stripes that were too faint or half off the edge, and lock "
                   "on from a single stripe instead of needing several."),
+            show_when=("directions", _USES_UPRIGHT),
         ),
         ParamSpec(
             name="vertical_pitch_2", type="float", default=0.0, min=0.0,
@@ -156,6 +200,7 @@ class RoiCrossStep(Step):
                   "layouts repeat as wide, narrow, wide, narrow rather than at "
                   "one steady pitch, and a single pitch cannot describe that."),
             advanced=True,
+            show_when=("directions", _USES_UPRIGHT),
         ),
         ParamSpec(
             name="vertical_sensitivity", type="float", default=0.35, min=0.0,
@@ -166,6 +211,7 @@ class RoiCrossStep(Step):
                   "Lower finds more edges. Watch the panel and drag until the "
                   "lines land where you expect."),
             advanced=True,
+            show_when=("directions", _USES_UPRIGHT),
         ),
         # ---- 橫的那組條紋 -------------------------------------------------
         ParamSpec(
@@ -174,12 +220,14 @@ class RoiCrossStep(Step):
             choices=list(algo_grid.SELECT_RULES),
             label="Take the left-to-right stripes that are",
             help="Same as above, for the stripes that run left to right.",
+            show_when=("directions", _USES_FLAT),
         ),
         ParamSpec(
             name="horizontal_kinds", type="int", default=0, min=0, max=6,
             section="3 · The left-to-right stripes",
             label="How many kinds of flat stripe",
             help="Same as above, for the stripes that run left to right.",
+            show_when=("directions", _USES_FLAT),
         ),
         ParamSpec(
             name="horizontal_width", type="float", default=0.0, min=0.0,
@@ -187,6 +235,7 @@ class RoiCrossStep(Step):
             max=10000.0, unit="px", label="Flat stripe width",
             help=("How wide each left-to-right stripe is, in pixels. Leave 0 "
                   "to use the width measured on this image."),
+            show_when=("directions", _USES_FLAT),
         ),
         ParamSpec(
             name="horizontal_pitch", type="float", default=0.0, min=0.0,
@@ -194,6 +243,7 @@ class RoiCrossStep(Step):
             max=10000.0, unit="px", label="Flat stripe pitch",
             help=("How far apart the left-to-right stripes are, in pixels. "
                   "Leave 0 to measure it from the image."),
+            show_when=("directions", _USES_FLAT),
         ),
         ParamSpec(
             name="horizontal_pitch_2", type="float", default=0.0, min=0.0,
@@ -202,6 +252,7 @@ class RoiCrossStep(Step):
             help=("Only when the spacing alternates between two values - put "
                   "the second spacing here and leave it 0 otherwise."),
             advanced=True,
+            show_when=("directions", _USES_FLAT),
         ),
         ParamSpec(
             name="horizontal_sensitivity", type="float", default=0.35, min=0.0,
@@ -209,6 +260,7 @@ class RoiCrossStep(Step):
             max=1.0, label="Flat edge sensitivity",
             help="Same as above, for the stripes that run left to right.",
             advanced=True,
+            show_when=("directions", _USES_FLAT),
         ),
         # ---- 框放哪 --------------------------------------------------------
         ParamSpec(
@@ -353,6 +405,30 @@ class RoiCrossStep(Step):
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
         return prefix_names(params.get("output_prefix", ""), cls.features_out)
 
+    @classmethod
+    def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
+        """方向與放法對不起來 —— 在跑之前就講（F11 Region-2c）。
+
+        「只看直的條紋」＋「框放在兩根**橫**條紋之間」是空集合。它不會報錯，
+        它會安靜地產出零個框、退回整張圖、把每一顆都標成 ``locate_ok = 0``
+        —— 而畫面上看起來就跟「這批圖沒有結構」一模一樣。使用者要跑完一整批
+        才會發現，而那時候他會去調敏感度，因為錯誤訊息指的是那裡。
+        """
+        want_x, want_y = algo_grid.directions_used(params.get("directions",
+                                                              "both"))
+        place = str(params.get("place", "beside_vertical"))
+        out: List[str] = []
+        for need in algo_grid.placement_needs(place):
+            if not (want_x if need == "upright" else want_y):
+                out.append(
+                    "“Put the box” is set to %s, which needs the %s stripes - "
+                    "but “Which way the pattern runs” only looks the other "
+                    "way. Change one of the two." % (place.replace("_", " "),
+                                                     "up-and-down" if need ==
+                                                     "upright" else
+                                                     "left-to-right"))
+        return out
+
     # ---- 執行 ---------------------------------------------------------------
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
@@ -381,7 +457,8 @@ class RoiCrossStep(Step):
             placement=str(p["place"]), box_size=float(p["box_size"]),
             side=str(p["side"]), gap=float(p["gap"]), inset=float(p["inset"]),
             min_confidence=float(p["min_confidence"]),
-            max_boxes=int(p["max_boxes"]))
+            max_boxes=int(p["max_boxes"]),
+            directions=str(p["directions"]))
 
         # panel 用的原始資料。**UI 畫的就是引擎算的這一份** —— UI 自己再算一次
         # 很容易變成「畫面上的框」與「真的量下去的框」不一樣，那種 bug 極難發現。
@@ -392,6 +469,9 @@ class RoiCrossStep(Step):
             "confidence": float(res.confidence),
             "ok": bool(res.ok),
             "reason": str(res.reason),
+            # 面板要分得出「這個方向找不到」與「這個方向沒在找」——
+            # 兩者的曲線都是平的，但只有前者是問題。
+            "directions": str(p["directions"]),
         }
 
         if not res.ok:

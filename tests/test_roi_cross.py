@@ -642,3 +642,145 @@ def test_one_crossing_means_there_is_no_baseline():
     assert ctx.roi_count("cross") == 1
     assert "cross_others" not in ctx.roi_names()
     assert "no other copy" in ctx.meta["regions_absent"]["cross_others"]
+
+
+# --------------------------------------------------------------------------- #
+# 一個方向（F11 Region-2c）—— 交會是特例，不是前提
+# --------------------------------------------------------------------------- #
+"""使用者的話：「profile 覺得有點太 custom for 我當初舉的例子了（實際上使用的
+機會偏少）」。他是對的，而過度貼合的位置是**可以指出來的一行**：
+`locate_crossings` 的「一軸失敗就整張失敗」。
+
+那一行是從需求（MG × EPI）抄下來的形狀，不是演算法的形狀 —— 一張只有一個
+方向有結構的 patch（密集 line/space 就是），投影本來就量得出每一根線在哪。
+擋住它的是卡片的形狀，不是能力。
+
+所以這一段斷言的是三件事：單方向真的做得到、它不會被另一個方向的空白扣分、
+以及**方向與放法對不起來時在跑之前就講**（那個組合會安靜地產出零個框）。
+"""
+
+
+def _lines_only(pitch: int = 24, width: int = 8, ox: int = 0,
+                noise: float = 2.0, seed: int = 3) -> np.ndarray:
+    """只有直條紋、橫向完全沒有結構的 patch —— 密集 line/space 就長這樣。"""
+    rng = np.random.default_rng(seed)
+    img = np.full((SIZE, SIZE), BASE, np.float32)
+    img[:, (np.arange(SIZE) + ox) % pitch < width] = MG_LV
+    return img + rng.normal(0.0, noise, img.shape).astype(np.float32)
+
+
+def _run_lines(**params) -> Context:
+    img = _lines_only(**{k: params.pop(k) for k in list(params)
+                         if k in ("pitch", "width", "ox", "noise", "seed")})
+    ctx = Context(images={"test": img.copy(), "ref": img.copy()})
+    p = {"source": "ref", "directions": "upright", "place": "crossing",
+         "inset": 0.0, "vertical_select": "brightest"}
+    p.update(params)
+    return get_step("roi_cross")().run(ctx, p)
+
+
+def test_a_patch_with_stripes_one_way_only_used_to_be_refused():
+    """回歸的錨：預設（兩個方向）對這種圖仍然、而且應該、定不出來。
+
+    這不是 bug —— 使用者要的是交會處，而這張圖沒有交會處。這一行存在是為了
+    證明下一個測試量到的是**新增的能力**，不是原本就會過的東西。
+    """
+    img = _lines_only()
+    res = algo_grid.locate_crossings(img, directions="both")
+    assert res.ok is False
+    assert "flat stripes" in res.reason
+
+
+def test_one_direction_locates_and_the_box_spans_the_whole_image():
+    ctx = _run_lines()
+    assert ctx.features["locate_ok"] == 1.0
+    boxes = ctx.roi_norm_rects("cross")
+    assert len(boxes) >= 4
+    for _x, y, _w, h in boxes:
+        assert y == pytest.approx(0.0, abs=1e-6)
+        assert h == pytest.approx(1.0, abs=1e-6)
+
+
+def test_the_boxes_land_on_the_stripes_not_between_them():
+    """滿版的框仍然要落在**要的那種材質**上 —— 這是這張卡唯一的工作。"""
+    img = _lines_only(ox=5)
+    ctx = Context(images={"ref": img})
+    get_step("roi_cross")().run(ctx, {
+        "source": "ref", "directions": "upright", "place": "crossing",
+        "inset": 0.0, "vertical_select": "brightest"})
+    for x, _y, w, _h in ctx.roi_norm_rects("cross"):
+        cols = img[:, int(round(x * SIZE)):int(round((x + w) * SIZE))]
+        assert cols.mean() > (BASE + MG_LV) / 2.0
+
+
+def test_the_direction_that_is_not_used_cannot_veto_the_defect():
+    """空白的那個方向信心是 0，而 0 < min_confidence。
+
+    拿一個沒問的問題去否決一顆算得出來的 defect，是這張卡原本的行為 ——
+    它安靜地把每一顆都標成 locate_ok = 0。
+    """
+    img = _lines_only()
+    res = algo_grid.locate_crossings(img, directions="upright",
+                                     min_confidence=5.0)
+    assert res.ok is True
+    assert res.y.confidence == 0.0        # 沒在看的那一軸真的是空的
+    assert res.confidence >= 5.0          # 但它不參與那道閘門
+
+
+def test_the_flat_direction_works_the_same_way_round():
+    img = _lines_only().T.copy()
+    res = algo_grid.locate_crossings(img, directions="flat",
+                                     placement="crossing")
+    assert res.ok is True
+    for _x, _y, w, _h in res.boxes:
+        assert w == img.shape[1]
+
+
+def test_beside_still_means_beside_when_there_is_only_one_direction():
+    ctx = _run_lines(place="beside_vertical", box_size=5.0)
+    boxes = ctx.roi_norm_rects("cross")
+    assert len(boxes) >= 8                # 一根線左右各一個
+    for _x, y, _w, h in boxes:
+        assert (y, h) == pytest.approx((0.0, 1.0), abs=1e-6)
+
+
+def test_a_placement_that_needs_the_other_direction_is_refused_before_the_run():
+    """「只看直的」＋「框放在兩根**橫**條紋之間」是空集合。
+
+    它不會報錯，它會安靜地產出零個框、退回整張圖、把每一顆都標成
+    locate_ok = 0 —— 而畫面上看起來就跟「這批圖沒有結構」一模一樣。
+    """
+    card = get_step("roi_cross")
+    says = card.configuration_issues({"directions": "upright",
+                                      "place": "between_horizontal"})
+    assert says and "left-to-right" in says[0]
+    assert card.configuration_issues({"directions": "upright",
+                                      "place": "between_vertical"}) == []
+    assert card.configuration_issues({"directions": "both",
+                                      "place": "between_horizontal"}) == []
+
+
+def test_the_run_says_the_same_thing_if_it_gets_there_anyway():
+    """CLI 不看 configuration_issues，所以那句話在引擎裡也要有一份。"""
+    res = algo_grid.locate_crossings(_lines_only(), directions="upright",
+                                     placement="beside_horizontal")
+    assert res.ok is False
+    assert "flat stripes" in res.reason and "other direction" in res.reason
+
+
+def test_an_old_recipe_keeps_looking_both_ways():
+    """鐵則 9：舊 recipe 沒有 ``directions`` 這個鍵 → 預設必須是舊行為。"""
+    spec = {s.name: s for s in get_step("roi_cross").params}["directions"]
+    assert spec.default == "both"
+    ctx = _run(_ctx())                     # 完全不提 directions
+    assert ctx.features["locate_ok"] == 1.0
+
+
+def test_the_two_sets_of_stripe_settings_disappear_with_the_direction():
+    """一個方向不看的時候，它那六格參數不該還在畫面上等人填。"""
+    specs = {s.name: s for s in get_step("roi_cross").params}
+    assert specs["vertical_pitch"].show_when == ("directions",
+                                                 ("both", "upright"))
+    assert specs["horizontal_sensitivity"].show_when == ("directions",
+                                                         ("both", "flat"))
+    assert specs["smooth"].show_when is None      # 共用的那一顆留著

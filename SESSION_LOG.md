@@ -15,15 +15,21 @@
 
 ---
 
-## Phase 2：Region-1 —— 在 Golden Cell 上畫 ROI（2026-08-18）
+## Phase 2：Region —— Template ＋ Profile（2026-08-18）
 
 ### ⏩ 交接：下一個 session 從這裡開始
 
-**現在的位置**：Phase 2 的 **Input ✅**、**Enhance ✅**、**Region-1（Template）✅**。
-下一段是 **Region-2（`roi_cross` 的 24 個參數做減法）**。
+**現在的位置**：Phase 2 的 **Input ✅**、**Enhance ✅**、
+**Region-1（Template）✅**、**Region-2（Profile：2a 圖示、2b 點曲線選材質、
+2c 單方向）✅**。下一段是 **Region-3（`roi_from_mask` / GDS）**，
+第一步是在 `tools/` 生一份合成 label map（家用機沒有 GLAS 的輸出）。
 
 **開工前讀**：[`AGENTS.md`](AGENTS.md) → [`docs/plans/F11-phase2-features.md`](docs/plans/F11-phase2-features.md)
-**§3.3.4**（這一輪做了什麼、以及尾巴還剩什麼）→ [`CLAUDE.md`](CLAUDE.md) 的鐵則十條。
+**§3.3.4**（Template）與 **§3.3.11**（Profile 最後一輪）→ [`CLAUDE.md`](CLAUDE.md) 的鐵則十條。
+
+**Region-2 的尾巴（一件）**：框的三個尺寸（`box_size` / `gap` / `inset`）還是
+數字，它們該在影像上的框邊直接拖 —— 那要動 `ImageView`（計畫書 §3.3.9 的
+「還沒做的」）。使用者沒有再提，不要主動插隊。
 
 **Region-1 的尾巴（兩件，都不大）**：
 
@@ -35,6 +41,51 @@
   這種**設定完了但每一顆都白跑**的組合。
 - **那張「比較兩個區域」的卡還沒有**（計畫書 §3.3.6 的最後一段）。它屬於
   Measure 段，不要在 Region-2 插隊做。今天比較是發生在分數表達式裡的。
+
+---
+
+### 第七輪：Profile「太 custom」—— 交會其實是特例（同日）
+
+使用者收尾 Template 之後留了一句：
+
+> 「template 部份我是沒什麼問題了，主要是 profile 覺得有點太 custom for 我當初
+>   舉的例子了⋯⋯（實際上使用的機會偏少）」
+
+他是對的，而**過度貼合的位置是一行**（`algo/grid.locate_crossings`）：
+
+```python
+# 兩軸都要有東西可比。**一軸失敗就整張失敗**
+```
+
+那是從需求（直的 MG × 橫的 EPI）抄下來的**形狀**，不是演算法的形狀。投影量的是
+「這個方向每一根線在哪」—— 一個方向就答得出來。於是一張密集 line/space 的 patch
+（只有一個方向有結構，EBI 上很常見）進到這張卡只拿得到「no flat stripes to lock
+onto」＋ 每一顆 `locate_ok = 0`。**能力在，被卡片的形狀擋住了。**
+
+**第一直覺（照 `align` 收進 `HIDDEN_STEPS`）是錯的。** `align` 收起來是因為它做
+的事本身有問題；這張卡做的事沒有錯，只是多問了一個不必問的問題。收起來會連整套
+投影定位（次像素邊界、排名挑材質、已知 pitch 補線、CPODE 的 `skip_clear`、一鍵校
+正整批）一起收掉，而那些沒有第二個家。
+
+做法：新參數 `directions`（`both`／`upright`／`flat`，圖示列）。單方向**不是**在
+`cross_boxes` 加分支，而是給沒在用的那一軸一個退化的 `StripeSet`
+（`open_axis`，`selected = [(0, length)]`）—— 幾何一行都不用改，跟滿版帶子交會出
+來的正好就是滿版的框。五種放法 × 兩軸各自可能是被貼住的或當界線的，加分支等於把
+那張表變成兩張，而只有走單軸時才會用到的那一半沒有人在看。
+
+於是 39b9fea 刪掉的 `roi_profile`（「每一根線上一條滿版的帶子」）回來了，
+而且是**同一段程式碼的一個特例**，不是第二張卡。
+
+**「沒在看 ≠ 找不到」發作了三次**，全部是同一個病 —— 平的曲線在這套 UI 裡一直
+代表「這裡沒東西」：閘門（信心 0 會否決一顆算得出來的 defect）、曲線面板（那條
+平線讀起來是「去調敏感度」，意思完全相反）、摘要（`flat pitch 0.0 px` 是一個看
+起來像量測失敗的假數字）。三個都改成只看**在用的**那幾軸。
+
+另外「只看直的」＋「框放在兩根**橫**條紋之間」是空集合，它安靜地產出零個框 ——
+`configuration_issues`（Studio）與 `placement_needs`（CLI）各一份。
+
+`directions` 預設 `both`，舊 recipe 行為逐位元組不變（鐵則 9），三組黃金值逐項
+相同。計畫書 §3.3.11。
 
 ---
 

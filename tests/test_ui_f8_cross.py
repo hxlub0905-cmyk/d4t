@@ -538,3 +538,67 @@ def _click_curve(panel, at_index: float, to_index: float = None) -> None:
         send(QEvent.MouseMove, x_of(to_index), _Qt.NoButton, _Qt.LeftButton)
         at_index = to_index
     send(QEvent.MouseButtonRelease, x_of(at_index), _Qt.LeftButton, _Qt.NoButton)
+
+
+# --------------------------------------------------------------------------- #
+# 一個方向（F11 Region-2c）—— 畫面上不能留下一條「空的曲線」
+# --------------------------------------------------------------------------- #
+def _run_one_way() -> Context:
+    """只有直條紋的圖 ＋ 只看直的方向。"""
+    img = _img(epi_width=0)
+    ctx = Context(images={"test": img.copy(), "ref": img.copy()})
+    get_step("roi_cross")().run(ctx, {
+        "source": "ref", "directions": "upright", "place": "crossing",
+        "inset": 0.0, "roi_out": "xing", "vertical_pitch": MG_PITCH})
+    return ctx
+
+
+def test_the_direction_that_is_not_used_has_no_curve_on_screen(qapp):
+    """沒在看的方向畫出來是一條**平的**曲線。
+
+    平的線在這張面板上的意思一直都是「這裡沒東西、去調敏感度」—— 完全相反的
+    意思。留著它等於給一個錯的提示，而且佔掉在看的那條曲線一半的高度。
+    """
+    ctx = _run_one_way()
+    panel = insp_mod.CrossInspector()
+    panel.set_context("cross", {"roi_out": "xing", "directions": "upright"},
+                      meta=ctx.meta)
+    assert panel.across.isVisibleTo(panel) is True
+    assert panel.down.isVisibleTo(panel) is False
+
+
+def test_both_curves_come_back_when_both_directions_are_used(qapp):
+    ctx = _run()
+    panel = insp_mod.CrossInspector()
+    panel.set_context("cross", {"roi_out": "xing"}, meta=ctx.meta)
+    assert panel.across.isVisibleTo(panel) is True
+    assert panel.down.isVisibleTo(panel) is True
+
+
+def test_the_summary_does_not_report_a_pitch_it_never_looked_for(qapp):
+    """「flat pitch 0.0 px」是一個看起來像量測失敗的**假**數字。"""
+    ctx = _run_one_way()
+    panel = insp_mod.CrossInspector()
+    panel.set_context("cross", {"roi_out": "xing", "directions": "upright"},
+                      meta=ctx.meta)
+    text = panel.summary()
+    assert "upright pitch" in text
+    assert "flat pitch" not in text
+
+
+def test_the_three_direction_icons_are_drawable_and_different(qapp):
+    """三顆並排，唯一的差別是亮的是哪一組條紋 —— 那也是選項唯一的差別。"""
+    from PySide6.QtGui import QImage, QPainter
+
+    from adept.ui.widgets import GLYPH_ICONS, draw_glyph_icon
+
+    seen = {}
+    for name in ("dir_both", "dir_upright", "dir_flat"):
+        assert name in GLYPH_ICONS
+        img = QImage(21, 21, QImage.Format_ARGB32)
+        img.fill(0)
+        p = QPainter(img)
+        draw_glyph_icon(p, name, 21.0, "#ffffff")
+        p.end()
+        seen[name] = bytes(img.constBits())
+    assert len(set(seen.values())) == 3, "三顆圖示不能長得一樣"

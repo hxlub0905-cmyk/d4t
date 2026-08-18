@@ -805,6 +805,16 @@ class CrossInspector(Inspector):
         rec = self.record()
         self.across.set_data("upright stripes", rec.get("x"))
         self.down.set_data("flat stripes", rec.get("y"))
+        # **沒在看的方向不畫。**（F11 Region-2c）那個方向的曲線是一條平的線，
+        # 而平的線在這張面板上的意思一直都是「這裡沒東西、去調敏感度」——
+        # 完全相反的意思。留著它等於給一個錯的提示，而且佔掉在看的那條
+        # 曲線一半的高度。
+        from adept.core.algo.grid import directions_used
+
+        want_x, want_y = directions_used(
+            rec.get("directions") or self.params.get("directions") or "both")
+        self.across.setVisible(bool(want_x))
+        self.down.setVisible(bool(want_y))
 
     def has_data(self) -> bool:
         return bool(self.record())
@@ -819,11 +829,18 @@ class CrossInspector(Inspector):
         if not rec.get("ok"):
             # 失敗的時候 reason 就是全部的資訊 —— 它已經講了是哪個方向。
             return "not located — %s" % (rec.get("reason") or "unknown")
+        from adept.core.algo.grid import directions_used
+
+        want = dict(zip(("x", "y"), directions_used(rec.get("directions")
+                                                    or "both")))
         bits = ["%d boxes" % len(rec.get("boxes") or [])]
         for tag, key in (("upright", "x"), ("flat", "y")):
+            if not want[key]:
+                continue          # 沒在看的方向沒有 pitch 可以報
             s = dict(rec.get(key) or {})
             bits.append("%s pitch %.1f px" % (tag, float(s.get("pitch_used", 0.0))))
-        filled = sum(int((rec.get(k) or {}).get("filled", 0)) for k in ("x", "y"))
+        filled = sum(int((rec.get(k) or {}).get("filled", 0))
+                     for k in ("x", "y") if want[k])
         if filled:
             bits.append("%d stripe(s) filled in from the pitch you gave" % filled)
         if rec.get("reason"):
