@@ -30,7 +30,8 @@ from __future__ import annotations
 
 import heapq
 import json
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
 from .expression import ExpressionError, parse_expression
@@ -435,6 +436,63 @@ def _migrate_merged_cards(nodes: Dict[str, "RecipeNode"]) -> None:
                                     enabled=node.enabled)
 
 
+#: 只是**改了名字**的卡（key → 新 key，參數名一個都沒動）。
+#:
+#: 目前只有一筆：``golden_cell`` →「Reference from repeating pattern」
+#: （2026-08-18）。改名的理由是使用者的一句話 ——「那可能要拿回來 不過要改名字
+#: 不然會誤會」：Template 卡的設定對話框裡也在疊 golden cell，畫面上兩個地方
+#: 同名，看起來像同一個功能做了兩次。
+#:
+#: 判準照鐵則 9 是「**舊東西在不在**」：node 的 step 是舊 key 就換。不看新 key
+#: 在不在 —— 那分不出「舊檔案」與「新 recipe 剛好長這樣」。
+#:
+#: ⚠ **feature 名也換了**（``golden_ghost`` / ``golden_px`` / ``golden_py`` →
+#: ``ref_sharpness`` / ``ref_px`` / ``ref_py``），而分數表達式裡可能寫著舊名字。
+#: 那一段由 :func:`_migrate_renamed_features` 處理，兩件事要一起做才完整。
+_RENAMED_CARDS = {
+    "golden_cell": "pattern_ref",
+}
+
+#: 跟著 :data:`_RENAMED_CARDS` 一起改名的 feature（舊名 → 新名）。
+_RENAMED_FEATURES = {
+    "golden_ghost": "ref_sharpness",
+    "golden_px": "ref_px",
+    "golden_py": "ref_py",
+}
+
+
+def _migrate_renamed_cards(nodes: Dict[str, "RecipeNode"]) -> None:
+    """只改了 key 的卡（參數原封不動）。"""
+    for nid, node in list(nodes.items()):
+        new_key = _RENAMED_CARDS.get(node.step)
+        if new_key is None:
+            continue
+        nodes[nid] = RecipeNode(id=node.id, step=new_key,
+                                params=dict(node.params),
+                                enabled=node.enabled)
+
+
+def _migrate_renamed_features(score: "ScoreSpec") -> "ScoreSpec":
+    """分數表達式裡的舊 feature 名換成新的。
+
+    **不換的話，舊 recipe 打開來是一條 `unknown-feature` 警告加一個算不出來的
+    分數** —— 而那個分數是這份 recipe 存在的理由。改卡片的名字卻不改它寫出來的
+    數字的名字，等於只搬了一半。
+
+    只換**整個識別字**（用邊界比對），不做子字串取代：``golden_px`` 若用
+    ``str.replace`` 去換，``my_golden_px_ratio`` 這種自訂名字會被打斷。
+    """
+    expr = str(getattr(score, "expr", "") or "")
+    if not expr:
+        return score
+    new_expr = re.sub(
+        r"\b(%s)\b" % "|".join(map(re.escape, _RENAMED_FEATURES)),
+        lambda m: _RENAMED_FEATURES[m.group(1)], expr)
+    if new_expr == expr:
+        return score
+    return replace(score, expr=new_expr)
+
+
 @dataclass
 class Recipe:
     """一份完整 recipe（單一 JSON 檔可互傳）。"""
@@ -546,6 +604,9 @@ class Recipe:
         _migrate_split_load_cards(nodes, routes)
         # roi_template 的一框一區域 → regions 字串（F11 Region-1）。
         _migrate_template_regions(nodes)
+        # 只改了名字的卡（＋分數表達式裡它寫出來的 feature 名）。
+        _migrate_renamed_cards(nodes)
+        score = _migrate_renamed_features(score)
         return cls(
             recipe_id=str(d["recipe_id"]),
             routes=routes,

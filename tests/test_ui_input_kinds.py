@@ -81,17 +81,16 @@ def test_all_four_kinds_are_supported():
 def test_the_single_image_cards_are_in_the_library_now(window):
     """單張那條路要有自己的載入卡與量測卡。
 
-    2026-08-18：這一條原本點的是 `golden_cell` / `cell_period`（單張那條路
-    「唯一的 ref 來源」）。使用者把那兩張**刪掉**了，所以單張那條路現在**不合成
-    ref** —— 它量的是圖本身（Region 段圈出區域、`roi_compare` 拿層對層比）。
-    這一條跟著改成點那條路現在真正用得到的卡。
+    2026-08-18：這一條原本點的是 `golden_cell` / `cell_period`。那兩張的下場
+    不一樣（見 `test_the_golden_cell_cards_are_gone_for_good`），所以這裡改成
+    點單張那條路現在真正用得到的四張：載入、疊 ref、相減、層對層比。
     """
-    for key in ("load_single", "load_patch", "subtract", "roi_compare"):
+    for key in ("load_single", "pattern_ref", "subtract", "roi_compare"):
         assert window.library.entry(key) is not None, key
     # `align` 曾經在這一列上。2026-08-18 使用者把它收起來了 ——
     # 見 test_align_is_hidden_but_still_runs。
     # `golden_cell` / `cell_period` 也曾經在這一列上 —— 見
-    # test_the_golden_cell_cards_are_gone_for_good。
+    # test_the_golden_cell_cards_are_gone_for_good（一張刪了、一張改了名）。
 
 
 def test_an_rsem_dataset_loads_instead_of_being_refused(window, rsem_lot):
@@ -167,25 +166,30 @@ def test_the_hide_a_card_mechanism_still_works(window):
 
 
 def test_the_golden_cell_cards_are_gone_for_good():
-    """`golden_cell` / `cell_period` 是**刪掉**，不是 `HIDDEN_STEPS` 收起來。
+    """那兩個舊 key 都不在 registry 裡了，但**理由不一樣**。
 
-    使用者定調（2026-08-18）：「Compare 內的 Golden Cell reference 功能幫我完整
-    移除（他就是 template）」、「Measure 中的 Cell period 幫我移除（不需要這
-    功能）」。
+    2026-08-18 一天之內，同一支 `steps/golden.py` 的兩張卡走了兩條不同的路：
 
-    兩者的差別是測得出來的，而這一條就是在測那個差別：收起來的卡
-    （`align`）`get_step` 還拿得到、舊 recipe 還放得進去；刪掉的卡不在 registry
-    裡，舊 recipe 開起來會是一條 `unknown-step`。**這是刻意的** —— 使用者要的
-    不是「暫時看不到」。
+    * `cell_period` —— **刪掉**（使用者：「不需要這功能」）。
+    * `golden_cell` —— 先刪，看了代價的數字之後要回來，並**改名**成
+      `pattern_ref`（使用者：「那可能要拿回來 不過要改名字 不然會誤會」）。
 
-    ⚠ 被刪掉的是**卡片**，不是演算法：`algo/golden.py` 還在（Template 卡的
-    golden cell 在用），`algo/period.py` 也還在（見下一條）。
+    這一條測的是**兩種下場都要成立**：舊 key 一個都不在 registry 裡（所以卡片庫
+    上不會有第二個 Golden Cell），而改名的那一張要真的還在、而且舊 recipe 打得開
+    （遷移在 `tests/test_pattern_ref.py`）。收起來的那一種（`align`）是第三條路
+    —— 它 `get_step` 還拿得到，見 `test_align_is_hidden_but_still_runs`。
+
+    ⚠ 演算法一層從頭到尾沒動過：`algo/golden.py`（Template 卡與 `pattern_ref`
+    都在用）、`algo/period.py`（見下一條）。
     """
     from adept.core.pipeline.step import REGISTRY
     import adept.core.steps  # noqa: F401
 
     for key in ("golden_cell", "cell_period"):
         assert key not in REGISTRY, key
+    assert "pattern_ref" in REGISTRY, "改名回來的那一張不見了"
+    assert REGISTRY["pattern_ref"].resolve_writes({}) == ["ref"]
+
     from adept.core.algo import golden, template
     assert hasattr(golden, "stack_cells")
     assert hasattr(template, "build_golden_cell"), \

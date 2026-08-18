@@ -55,14 +55,19 @@ SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder")
 #: 只有在不支援的型別下才有意義、因此不列進卡片庫的 step key。
 #:
 #: **2026-08-17（F11 Input-3）：空了。** 這裡原本收著 ``golden_cell`` 與
-#: ``cell_period``。**2026-08-18 那兩張卡被刪掉了**（使用者：「Compare 內的
-#: Golden Cell reference 功能幫我完整移除（他就是 template）」、「Measure 中的
-#: Cell period 幫我移除」），所以它們也不再是這份清單的候選 —— 刪掉的卡不需要
-#: 藏，`REGISTRY` 裡根本沒有。
+#: ``cell_period``。2026-08-18 那兩張卡的下場不一樣，而這一段就是那兩種下場的
+#: 對照：
 #:
-#: **刪掉與收起來是兩件事，而差別看使用者說了什麼**：``align`` 是「之後真需要我
-#: 再回來」→ 收起來（引擎照認、舊 recipe 照跑）；Golden Cell 是「完整移除」→
-#: 刪掉（舊 recipe 開起來會是一條 ``unknown-step``）。
+#: * ``cell_period`` —— **刪掉**（使用者：「不需要這功能」）。
+#: * ``golden_cell`` —— 先刪，同一天要回來並**改名**成 ``pattern_ref``
+#:   「Reference from repeating pattern」（使用者：「那可能要拿回來 不過要改名字
+#:   不然會誤會」）。它現在正常地在 Compare 段的卡片庫裡。
+#: * ``align`` —— **收起來**（使用者：「之後真需要我再回來」）。
+#:
+#: **三種處置，判準都是使用者說了哪一句話**，不是我覺得那張卡有沒有用。
+#: 收起來＝卡片庫看不到、引擎照認、舊 recipe 照跑；刪掉＝`REGISTRY` 裡沒有，
+#: 舊 recipe 開起來是一條 ``unknown-step``；改名＝要一道遷移（見
+#: ``recipe._migrate_renamed_cards``，連分數表達式裡的 feature 名一起換）。
 #:
 #: 機制留著（一個 tuple、一個 `visible_steps()`）：下一次要暫時收起某張卡時，
 #: 加一個字串就好。

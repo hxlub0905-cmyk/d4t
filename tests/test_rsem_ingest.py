@@ -8,9 +8,10 @@ KLARF 列尾用 `Images 1 { "檔名" … }` 指到那個檔。這裡驗證：
   4. 單張影像走 `load_single` 卡，它吐**一條**具名流（F11 Input-4 起；
      在那之前是 `load_patch` 把 single **鏡射**成 test，而那讓畫布上多一顆假的埠）；
   5. 這份合成資料**真的是週期性的、而且真的種了缺陷** —— 用 `algo/golden.py`
-     疊一張參考圖出來直接量殘差。（2026-08-18 之前這一段走的是 `cell_period`
-     → `golden_cell` 兩張卡；使用者把那兩張刪掉了，但這裡要測的從來就不是卡片，
-     是**產生器**，所以改成直接呼叫演算法。）
+     疊一張參考圖出來直接量殘差。（以前這一段走的是 `cell_period` → `golden_cell`
+     兩張卡。2026-08-18 那兩張一張刪掉、一張改名成 `pattern_ref` —— 而這裡要測的
+     從來就不是卡片，是**產生器**，所以改成直接呼叫演算法，跟卡片怎麼改都無關。
+     卡片那一層的驗收在 `tests/test_pattern_ref.py`。）
   6. `--real-frac 0` 的 lot 真的沒有種缺陷。
 """
 from __future__ import annotations
@@ -174,8 +175,9 @@ def _stacked_reference(gray):
 
     這裡**刻意直接呼叫演算法**，不透過卡片：這一節測的是
     `tools/make_sample_rsem.py` 產出的資料（它是不是真的週期性、有沒有真的種
-    缺陷），而那件事跟卡片庫裡有沒有那張卡無關。2026-08-18 `golden_cell` /
-    `cell_period` 被刪掉時，這一節不該跟著消失 —— 它守的是 fixture。
+    缺陷），而那件事跟卡片庫裡有沒有那張卡、那張卡叫什麼名字都無關。
+    2026-08-18 那兩張卡一張刪一張改名，這一節一個字都不用動 —— 那正是它該有的
+    樣子：它守的是 fixture。
     """
     from adept.core.algo import golden as algo_golden
     from adept.core.algo import period as algo_period

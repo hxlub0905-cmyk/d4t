@@ -782,7 +782,8 @@ RSEM Image。」
 一個錯誤訊息。「一種 source 一個入口」要的是**使用者分得出自己要按哪一顆**，
 不是 kind 與按鈕一對一。
 
-順帶（同一輪，使用者的第 3、4 點）：`golden_cell` / `cell_period` 刪掉（§3.4.1）、
+順帶（同一輪，使用者的第 3、4 點）：`golden_cell` / `cell_period` 刪掉，而
+`golden_cell` 當天又以 `pattern_ref` 改名回來（§3.4.2）、
 `snr_map` 的 label 改成 **Z-map**（`key` / 影像流名 / feature 全部不動 —— 那三個
 是 recipe 的鍵）。
 
@@ -2331,44 +2332,104 @@ N=50 000 約 280 ms、N=200 000 約 1 s。
 跑全部」的核心測試裡。`CLAUDE.md` §4 講的就是這件事，只是我從另一個方向撞上它。
 測試檔名在這個 repo 裡不是命名習慣，是**跑法的宣告**。
 
+#### 3.3.18 `roi_mask` 為什麼留在 Region（2026-08-18，使用者問「ROI 內的 region → mask 放在 ROI 內合理嗎？」）
+
+值得問，因為**它是 Region 段裡唯一吐影像的卡**：其他三張（Profile / Template /
+GDS layers）吐的是區域，它吐的是一條 0/255 的影像流，而唯一的消費者是 Enhance 段
+的 `normalize`（`Use only`）。照 `step.py` 那條補充規則「一張卡如果只為了餵另一段
+而存在，就跟著那一段走」，它看起來應該搬去 Enhance。
+
+**不搬，理由有兩個，而且第二個是硬的：**
+
+1. **它不是在 enhance，它是在把區域交給影像段。** Region 段的定義是「這張圖上
+   哪些地方是什麼」，而 mask 就是同一件事的另一種載體 —— 一邊是框清單（給量測段
+   引用名字），一邊是影像流（給影像段接線）。同一個東西的兩個出口，放同一段。
+2. **搬去 Enhance 的話，它會出現在任何 Region 卡之前。** 卡片庫是照
+   Input → Enhance → Region → Compare → Measure 排的，而這張卡**沒有 Region 卡
+   就完全不能用**（它的 `regions` 參數會是空的）。使用者第一次讀到它時，它講的
+   東西還不存在 —— 那比分類不純更貴。
+
+（順帶：卡片庫的順序是**讀的順序**，不是執行順序。畫布是 DAG（F9），實際跑的
+順序由線決定 —— 這一條路真的是 Region → Enhance，往回走一段，而那沒有問題。）
+
+要留意的是 Region 段現在讀起來是「三張找區域 + 一張用區域」。四張還看得懂；
+之後如果「用區域」的卡變多（例如 crop / 只保留區域內），那時候的答案是**把
+Region 段分成兩半**（找 / 用），不是把它們散到別段去。
+
 ### 3.4 Compare
 
 | | |
 |---|---|
-| 現在有什麼 | `align`（5 backend，2026-08-18 起 `HIDDEN_STEPS` 收起來）、`subtract`（Compare two streams）|
-| ~~`golden_cell`~~ | **2026-08-18 刪掉**（使用者：「Compare 內的 Golden Cell reference 功能幫我完整移除（他就是 template）」）。代價量過，見 §3.4.1 |
+| 現在有什麼 | `subtract`（Compare two streams）、`pattern_ref`（Reference from repeating pattern）、`align`（5 backend，2026-08-18 起 `HIDDEN_STEPS` 收起來）|
 | 缺什麼 | ① **沒有 ref 的資料要跟什麼比**（§3.1.4 的三個候選）；② GLAS 的 `gray` 當 ref（die-to-database）；③ 對位可以**吃 GLAS 已經算好的 offset**（省一次對位，而且那是對 layout 對的，比對 ref 準）|
 
-#### 3.4.1 `golden_cell` 刪掉的代價（量過的，不是推論）
+#### 3.4.1 這一段到底裝什麼（2026-08-18，使用者問「Compare 這個 你覺得要放什麼卡片比較合理？」）
 
-使用者的理由是「他就是 template」。**兩張卡確實共用同一段演算法**
-（`algo/golden.py` 的 `stack_cells`），而使用者在畫面上看到兩個都叫 Golden Cell
-的東西 —— 那個困惑是真的。但它們**吐出來的東西不同**：
+`step.py` 的機械規則寫的是「**影像＋影像 → 影像**」。那條規則對 `align` 與
+`subtract` 成立，但對 `pattern_ref` 不成立（它是一張圖進、一張圖出，照型別會落在
+Enhance）—— 而它顯然屬於這裡。所以這一段真正的定義不是型別，是**一件事**：
+
+> **把「這一顆該跟什麼比」變成一張差異圖。**
+
+那件事拆得出三個步驟，而這一段就該裝這三種卡：
+
+| # | 這一步在做什麼 | 現在有 | 之後可能加 |
+|---|---|---|---|
+| 1 | **第二張圖從哪來** | `pattern_ref`（從自己的重複 pattern 疊）| GLAS 合成的 `gray` 當 ref（die-to-database）；多通道之間互當 ref |
+| 2 | **讓兩張真的可比** | `align`（收起來了）| 從 GLAS 的 alignment CSV 直接讀 offset；灰階分佈匹配（現在藏在 `normalize` 的 `match` 裡）|
+| 3 | **變成一張差異圖** | `subtract` | 比值差、正規化差（`(a−b)/(a+b)`）、絕對差 |
+
+第 1 步是這一段最容易被忽略的一半，而它正是**單張影像那條路唯一的入口** ——
+沒有它，`rsem` / `folder` / `tiff_stack` 進來之後整段 Compare 都是空的。
+
+**不屬於這一段的**：`roi_compare`（Compare regions）。它的名字最像，但它吐的是
+**數字**不是影像，所以它在 Measure。這個對照剛好把兩段的界線講清楚：
+**Compare 段比的是兩張圖（出圖），Measure 段比的是兩塊區域（出數字）。**
+
+#### 3.4.2 `golden_cell` → `pattern_ref`：刪掉、量代價、要回來、改名
+
+2026-08-18 一天之內走完的一輪，四段都值得留著：
+
+**① 使用者要求完整移除**：「Compare 內的 Golden Cell reference 功能幫我完整移除
+（他就是 template）」。**那個困惑是真的** —— Template 卡的設定對話框裡也在疊
+golden cell（`algo/template.py` 用同一支 `algo/golden.py`），畫面上兩個地方同名。
+
+**② 但它們吐的東西不同**，而那才是分類的依據：
 
 | | 吐什麼 | 答的問題 |
 |---|---|---|
-| `roi_template`（Template）| **具名區域** | 「這一塊材料在這張圖的哪裡」 |
-| ~~`golden_cell`~~ | **一條影像流（合成的 ref）** | 「這張圖**應該**長什麼樣」 |
+| `roi_template`（Template）| **具名區域** | 這塊材料在這張圖的哪裡 |
+| `golden_cell` | **一條影像流（合成的 ref）** | 這張圖沒有缺陷時該長什麼樣 |
 
-所以刪掉它之後，**單張週期性影像沒有任何辦法產生 ref**，也就沒有 `diff`。
-實測（`tests/fixtures/recipes/dual_route_basic.json` 的 rsem route、
-`make_sample_rsem` seed 11、24 顆）：
+**③ 代價量過了**（`dual_route_basic` 的 rsem route、`make_sample_rsem` seed 11、
+24 顆）。刪掉之後單張週期性影像沒有任何辦法產生 ref，也就沒有 `diff`：
 
 | 那條 route 怎麼量 | 分類正確 |
 |---|---|
-| 舊：`golden_cell` 疊 ref → `subtract` → 量 diff | **24 / 24** |
-| 新：量 Z-map（單張唯一算得出「哪裡突出」的卡）| 12 / 24（＝猜銅板）|
-| 也試過：`roi_cross` + `roi_compare` 的區域路線 | 每個特徵 real 與 nuisance 完全重疊（最好的 `snr_max` d≈0.8）|
+| 有這張卡：疊 ref → subtract → 量 diff | **24 / 24** |
+| 沒有：量 Z-map（單張唯一算得出「哪裡突出」的卡）| 12 / 24（＝猜銅板）|
+| 沒有：`roi_cross` + `roi_compare` 的區域路線 | 每個特徵 real 與 nuisance 完全重疊（最好的 `snr_max` d≈0.8）|
 
-所以那份 fixture 的 rsem 段**拿掉了準確率斷言**，並改凍一組新的黃金值 ——
-它現在守的是「同一份 recipe 吃得下第二種輸入、而且數字不會偷偷變」，不是
-「那條路分得出真假缺陷」。`tests/test_e2e_dual_route.py` 的
-`test_the_single_image_route_has_no_reference_and_says_so` 把這件事釘住：
-哪一天有人把「單張影像的 ref」補回來（GDS 那條路、或別的），那一條會紅，
-而那正是該回來重寫這份 fixture 的時候。
+**④ 使用者看了數字之後**：「那可能要拿回來 不過要改名字 不然會誤會」。於是它以
+`pattern_ref`「**Reference from repeating pattern**」回來 —— 新名字裡沒有
+golden、也沒有 cell，講的是**輸出**（a reference）與**前提**（a repeating
+pattern），而那兩件事正好是使用者判斷「我這張圖能不能用這張卡」需要知道的全部。
+`tests/test_pattern_ref.py::test_the_name_does_not_say_golden_or_cell_anywhere_the_user_looks`
+逐一掃卡片名、說明、參數名、參數說明與 feature 名。
 
-⚠ 刪掉的是**卡片**不是演算法：`algo/golden.py`（Template 卡在用）與
-`algo/period.py`（pattern-frame ROI 的唯一工具）都留著。
+改名要換的**不只是 key**：`golden_ghost` / `golden_px` / `golden_py` →
+`ref_sharpness` / `ref_px` / `ref_py`，而那三個名字會被打進**分數表達式**。
+只換卡片不換 feature，舊 recipe 打開來會是一條 `unknown-feature` 警告加一個算不
+出來的分數 —— 也就是這份 recipe 存在的理由。所以 `_migrate_renamed_cards` 與
+`_migrate_renamed_features` 是一對，後者用**整個識別字**的邊界比對
+（`str.replace` 會把 `my_golden_px_ratio` 打斷）。
+
+**改名沒有動到任何數字**：重凍的黃金值 6 顆，除了那三個 feature 換名之外
+每一個值都跟刪掉之前逐項相同（對過）。
+
+順帶死掉的一張：`cell_period`。它存在的唯一目的是量一次週期寫進 meta 給這張卡
+用，使用者說「不需要這功能」，所以週期的來源現在只剩「參數填死」與「這張卡自己
+估」——少一張卡、少一條「兩張卡要照順序放」的規矩，代價是每顆多跑一次 rFFT。
 
 **要討論的**
 

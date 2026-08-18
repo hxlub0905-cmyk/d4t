@@ -13,11 +13,66 @@
 包的大小**不是限制**（2026-08-17 使用者確認直接複製 raw，見 `AGENTS.md` §2）——
 封存現在是為了 diff 乾淨與公司機用不到的東西不佔體積，不再是為了那道 1 MB 的線。
 
+## Phase 2：Golden Cell 改名回來 ＋ 兩段分類定調（2026-08-18，第十輪）
+
+### ⏩ 交接：下一個 session 從這裡開始
+
+**還缺的那個數字沒有變**：真實 label 上每一層的 `pieces / rectangles`，
+量法 `python tools\check_glas_export.py <匯出資料夾> --samples 2`（要回公司才量得到）。
+
+### 這一輪做了什麼
+
+**1. `golden_cell` 改名回來成 `pattern_ref`。**
+上一輪刪掉它之後我把代價量出來給使用者看（rsem route 24/24 → 12/24），
+使用者的回覆是「那可能要拿回來 不過要改名字 不然會誤會」。
+
+新名字：**Reference from repeating pattern**（`steps/pattern_ref.py`）。
+裡面沒有 golden、也沒有 cell —— 它講的是**輸出**（a reference）與**前提**
+（a repeating pattern），而那正好是使用者判斷「我這張圖能不能用這張卡」需要知道
+的全部。`test_the_name_does_not_say_golden_or_cell_anywhere_the_user_looks`
+逐一掃卡片名、說明、參數名、參數說明與 feature 名。
+
+改名要換的**不只是 key**：`golden_ghost` / `golden_px` / `golden_py` →
+`ref_sharpness` / `ref_px` / `ref_py`，而那三個會被打進**分數表達式**。只換卡片
+不換 feature，舊 recipe 打開來是一條 `unknown-feature` 加一個算不出來的分數 ——
+也就是那份 recipe 存在的理由。所以 `_migrate_renamed_cards` 與
+`_migrate_renamed_features` 是一對；後者用**整個識別字**的邊界比對
+（`str.replace` 會把 `my_golden_px_ratio` 打斷，測試裡有這一條）。
+
+**改名沒有動到任何數字**：黃金值 6 顆，除了那三個 feature 換名之外每一個值都跟
+刪掉之前逐項相同（程式對過）。`cell_period` 維持刪除，所以週期來源只剩「參數
+填死」與「這張卡自己估」——少一條「兩張卡要照順序放」的規矩。
+
+**2. Compare 段裝什麼，定調了**（計畫書 §3.4.1）。使用者問「Compare 這個 你覺得
+要放什麼卡片比較合理？」。`step.py` 的機械規則寫「影像＋影像 → 影像」，但那條對
+`pattern_ref` 不成立（一張進一張出），而它顯然屬於這裡 —— 所以這一段的定義不是
+型別，是一件事：**把「這一顆該跟什麼比」變成一張差異圖**，拆成三步：
+
+| # | | 現在有 |
+|---|---|---|
+| 1 | 第二張圖從哪來 | `pattern_ref` |
+| 2 | 讓兩張真的可比 | `align`（收起來了）|
+| 3 | 變成一張差異圖 | `subtract` |
+
+第 1 步是最容易被忽略的一半，而它是**單張影像那條路唯一的入口**。
+`roi_compare`（Compare regions）**不屬於這一段**：它吐數字不吐圖，所以在 Measure。
+那個對照剛好把界線講清楚 —— **Compare 比兩張圖（出圖），Measure 比兩塊區域（出數字）**。
+
+**3. `roi_mask` 留在 Region**（計畫書 §3.3.18）。使用者問「ROI 內的 region → mask
+放在 ROI 內合理嗎？」。它是 Region 段裡唯一吐影像的卡，唯一消費者在 Enhance ——
+照「跟著消費者走」那條補充規則看起來該搬。**不搬**，硬理由是第二個：卡片庫是照
+Input → Enhance → Region 排的，搬去 Enhance 它就會出現在**任何 Region 卡之前**，
+而它沒有 Region 卡完全不能用 —— 使用者第一次讀到它時，它講的東西還不存在。
+
+### 驗收
+
+核心 1373 passed、UI 40 檔逐檔全綠、三組黃金值 `--check` 逐項相同。
+
 ---
 
 ## Phase 2：入口只寫一份 ＋ 刪掉 Golden Cell（2026-08-18，第九輪）
 
-### ⏩ 交接：下一個 session 從這裡開始
+### 那一輪結束時的位置（交接已由上面那一段接手）
 
 Region-3（GDS）四步做完之後，使用者對著 Studio 的截圖提了四件事，這一輪四件全做完。
 **還缺的那個數字沒有變**：真實 label 上每一層的 `pieces / rectangles`，
