@@ -161,6 +161,67 @@ def roi_metric(image: np.ndarray, roi: ROI, mid: str) -> float:
     return glv_value(p, mid) if p is not None else 0.0
 
 
+#: 兩塊區域比出來的幾個數字（F11 Measure：Compare regions 卡）。
+#: key 就是特徵名的字尾，所以順序＝畫面上勾選的順序。
+#:
+#: **值是英文的**：它們會顯示給使用者（`tests/test_ui_english_only.py` 會擋）。
+#: 中文的說明寫在註解與 :func:`compare_pixels` 的 docstring 裡。
+COMPARE_METRICS: Dict[str, str] = {
+    "delta": "target minus reference, in gray levels",
+    "ratio": "target divided by reference",
+    "percent": "the difference as a percentage of the reference",
+    "snr": "the difference divided by how much the reference itself varies",
+    "tstat": "the same, but with the size of each region taken into account",
+}
+
+
+def compare_pixels(target: np.ndarray, reference: np.ndarray,
+                   stat: str = "glv_mean") -> Dict[str, float]:
+    """兩塊區域的像素 → 一組比較的數字。
+
+    ``stat`` 決定「拿哪一個統計量來比」（``glv_mean`` / ``glv_median`` /
+    ``glv_q90`` …，同 :func:`glv_value`）。``snr`` 與 ``tstat`` 的分母一律是
+    **像素的散布**，跟 ``stat`` 挑哪一個無關 —— 「差幾個 σ」問的是散布，
+    而中位數沒有自己的 σ。
+
+    為什麼 ``snr`` 的公式是 ``(μ_T − μ_R) / σ_R``
+    ---------------------------------------------
+    那是 e-beam 這一行**帶正負號**的 SNR 慣例，而這個 repo 已經有兩個地方在用
+    它（:func:`group_snr` 與 ``algo/snr``）。這裡不發明第三種寫法 ——
+    同一個名字在不同卡片上算出不同的東西，是最難發現的那種錯。
+
+    ``tstat`` 是它的「樣本數也算」版本：兩塊區域的像素數差很多的時候
+    （GDS 的一層可能是另一層的十倍大），``snr`` 只看參考那邊的散布，
+    而 ``tstat`` 的分母把兩邊的樣本數都算進去。兩個都給，因為它們回答的是
+    不同的問題，而使用者要選哪一個取決於他在比什麼。
+
+    分母是 0（區域太小、或整塊同一個值）時那一項是 ``nan`` —— **不是 0**：
+    0 的意思是「沒有差異」，而這裡的事實是「這個問題答不出來」。
+    """
+    t = np.asarray(target, dtype=np.float64).ravel()
+    r = np.asarray(reference, dtype=np.float64).ravel()
+    if t.size == 0 or r.size == 0:
+        return {k: float("nan") for k in COMPARE_METRICS}
+
+    tv = glv_value(t, stat)
+    rv = glv_value(r, stat)
+    out: Dict[str, float] = {"delta": float(tv - rv)}
+    out["ratio"] = float(tv / rv) if abs(rv) > 1e-12 else float("nan")
+    out["percent"] = (float((tv - rv) / rv * 100.0) if abs(rv) > 1e-12
+                      else float("nan"))
+
+    sd_r = float(r.std())
+    out["snr"] = float((tv - rv) / sd_r) if sd_r > 1e-9 else float("nan")
+
+    # Welch 的標準誤（不假設兩邊變異數相同 —— 兩塊區域的材質不同，
+    # 假設它們散布一樣沒有道理）。
+    vt, vr = float(t.var(ddof=1)) if t.size > 1 else 0.0, \
+        float(r.var(ddof=1)) if r.size > 1 else 0.0
+    se = (vt / max(1, t.size) + vr / max(1, r.size)) ** 0.5
+    out["tstat"] = float((tv - rv) / se) if se > 1e-12 else float("nan")
+    return out
+
+
 def group_snr(image: np.ndarray, rois: List[ROI],
               target_rid: Optional[int]) -> Optional[float]:
     """Within-group SNR = (mean_target - mean_reference) / std_reference.

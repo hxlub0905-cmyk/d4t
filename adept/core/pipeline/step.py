@@ -82,7 +82,8 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC)
 #: UI 認得這個型別：它給的是「建一個」的按鈕加一行摘要，欄位本身唯讀。
 PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
                "image_keys", "curve", "template", "multi_choice",
-               "channel_map", "cell_rois", "region_keys", "icon_choice")
+               "channel_map", "cell_rois", "region_key", "region_keys",
+               "icon_choice")
 
 #: 輸出流的名字可以用哪些字（F10-7）。
 #:
@@ -292,6 +293,18 @@ class ParamSpec:
                     v = bool(value)
             elif self.type in ("str", "image_key", "template"):
                 v = str(value)
+            elif self.type == "region_key":
+                # **一個**區域名（``region_keys`` 是逗號清單）。空字串合法 ——
+                # 「還沒挑」由卡片的 configuration_issues 講，不是這裡。
+                v = str(value).strip()
+                if "," in v:
+                    # 直接丟 ParamError —— 下面那個通用的 except 會把
+                    # 「為什麼壞」蓋成「converted to region_key」（鐵則 4：
+                    # 擋下來的那句話要是白話的）。
+                    raise ParamError(
+                        "parameter '%s' takes one region name, not a list "
+                        "(got %r). Use one Compare regions card per pair."
+                        % (self.name, str(value)))
             elif self.type in ("image_keys", "multi_choice", "region_keys"):
                 # 正規化：去空白、去空項、去重複但保留順序。
                 # 手打的 "ref, ref ,, test" 與 UI 勾出來的 "ref,test" 等價，

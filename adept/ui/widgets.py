@@ -2827,6 +2827,22 @@ class ParamForm(QWidget):
             # 現在這一格只**顯示**目前接進來的是哪幾條，改要回畫布上拉線。
             return _wiring_display("" if value is None else str(value))
 
+        if ptype == "region_key":
+            # **一個**區域，所以是下拉不是勾選。名字要跟上游卡片的輸出一字不差，
+            # 而打錯的時候 lint 要跑一次才講（F11 §3.3.1 第 4 項）——
+            # 所以這裡不給打字。第一項是空的：「還沒挑」是一個真實的狀態。
+            w = QComboBox()
+            names = [""] + [str(r) for r in getattr(self, "_regions", [])]
+            text = "" if value is None else str(value).strip()
+            if text and text not in names:
+                names.append(text)          # recipe 指著一個上游沒有的區域
+            w.addItems(names)
+            w.setItemText(0, "(not chosen yet)")
+            w.setCurrentIndex(names.index(text) if text in names else 0)
+            w.currentIndexChanged.connect(
+                lambda i, n=name, ns=names: self._emit(n, ns[i] if i else ""))
+            return w
+
         if ptype == "region_keys":
             # 上游定義了哪些區域，程式知道 —— 所以這裡是勾的，不是打的。
             # 要打的字必須跟上游卡片的輸出**一字不差**，而打錯的時候 lint 要跑

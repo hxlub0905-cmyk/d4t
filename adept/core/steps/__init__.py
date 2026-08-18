@@ -23,6 +23,7 @@ from . import flatten        # flatten
 from . import align          # align
 from . import arith          # subtract / invert
 from . import snr_map        # snr_map
+from . import roi_compare    # 比較兩個區域（T/R 住在這張卡上）
 from . import roi_cross      # roi_cross
 from . import roi_from_mask  # GDS label map -> 具名區域
 from . import roi_mask       # roi_mask（區域 → 0/255 mask 影像流，F8c）
@@ -35,6 +36,6 @@ from . import golden         # cell_period / golden_cell
 
 __all__ = [
     "load", "load_sidecar", "normalize", "denoise", "tone", "flatten", "align", "arith",
-    "roi_cross", "roi_from_mask", "roi_mask", "roi_template", "snr_map", "cd", "roi_snr",
+    "roi_compare", "roi_cross", "roi_from_mask", "roi_mask", "roi_template", "snr_map", "cd", "roi_snr",
     "quality", "glv_stats", "golden",
 ]

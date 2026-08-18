@@ -271,6 +271,18 @@ def test_every_measure_card_can_take_more_than_one_source(window):
     """
     from adept.core.steps._util import MultiSourceStep
 
+    #: 「多連一」講的是**同一件事做在好幾條流上**（量 test 也量 diff）。
+    #: 有一種量測卡的來源不是那個意思：它們的每一條流有**自己的角色**，
+    #: 而角色不能排成一串 —— 那時候第二條線的正解是**第二個埠**，不是清單。
+    #:
+    #: `roi_compare`（F11 Measure）：一條流是 target 的、一條是 reference 的。
+    #: 排成清單就答不出「哪一條是 target」，而使用者列的三種情況裡有一種正是
+    #: 「同一個區域、兩條不同的流」。所以它有兩個 `image_key` 埠。
+    #:
+    #: **列在這裡而不是放寬條件**：加第 18 張量測卡的那天，它仍然要做一個明確
+    #: 的決定（是多連一、還是角色不同），而不是安靜地留在單一來源上。
+    ROLE_PORTS = {"roi_compare"}
+
     for cls in list_steps():
         # 「量測卡」＝**只吐數字、不吐影像**的那一類。``snr_map`` 掛在 Measure
         # 這一組是因為它只為了餵 blob 而存在（見 step.py 的分組規則），但它
@@ -278,6 +290,16 @@ def test_every_measure_card_can_take_more_than_one_source(window):
         # 個題目（要先決定輸出流怎麼命名），不在這一輪。
         if (cls.resolve_group() != "measure" or cls.key in HIDDEN_STEPS
                 or cls.writes or not cls.features_out):
+            continue
+        if cls.key in ROLE_PORTS:
+            # 角色不同的那一類：驗的東西反過來 —— **要有兩個以上的輸入埠，
+            # 而且每一個都是單一來源**（清單型別在這裡就是那個 bug）。
+            ports = [sp for sp in cls.input_specs() if sp.type == "image_key"]
+            assert len(ports) >= 2, \
+                "%s 的來源有角色之分，那就該是兩個埠" % cls.key
+            assert not [sp for sp in cls.input_specs()
+                        if sp.type == "image_keys"], \
+                "%s 混用了清單來源與角色埠 —— 那兩種接線方式對不起來" % cls.key
             continue
         assert issubclass(cls, MultiSourceStep), \
             "%s 是量測卡，但接不了第二條來源" % cls.key

@@ -83,6 +83,10 @@ NEEDS_MORE_SETUP = {
     # 它吃的是 `load_sidecar` 吐的那條流，而那張卡在這個 harness 上跑不起來
     # （上一行）。專屬驗收在 tests/test_roi_from_mask.py。
     "roi_from_mask": "需要 GLAS 的 label map 那條流（前一張卡在這裡跑不起來）",
+    # 它比的是**兩個具名區域**，而這個 harness 只接 load_patch（沒有 Region 卡，
+    # 所以一個區域都沒有）。「沒挑區域」時它正確的行為就是擋下來並講出要填哪
+    # 兩格。專屬驗收在 tests/test_roi_compare.py。
+    "roi_compare": "需要上游先有一張 Region 卡（harness 只接 load_patch）",
 }
 
 
