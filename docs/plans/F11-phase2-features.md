@@ -1518,6 +1518,92 @@ return -1 / 0`。從 Studio 打開一張**已經有模板、還沒有區域**的
 放手時那些像素併成**逐列的矩形**（run-length），因為區域的資料模型是矩形 ——
 那正是 §3.3.2 答案 B 對 label map 講的同一套做法，這次換成手畫的來源。
 
+#### 3.3.6 Target / Reference **不住在 Region 段**（使用者定調 2026-08-18）
+
+##### 問題怎麼來的
+
+使用者問「Target ROI box（紅框）跟 Reference ROI box 兩種方法差別？怎麼定位？」
+查下去發現這個 repo 裡有**三個紅框，沒有一個是活的**：
+
+| 在哪 | 是什麼 | 現況 |
+|---|---|---|
+| `algo/roi.py` 的 `roi_type='target'`（紅）／`'reference'`（青）| vendored 自 Fusi³ | **死的** —— `set_target()` 在 `steps/`／`pipeline/`／`ui/` 一次也沒被呼叫，ADEPT 建的每個框都是預設的 `'reference'` |
+| `export/overlay.py` 的「主 blob 紅框」| 缺陷 blob 的外框 | **畫不出來** —— 讀 `ctx.meta["blobs"]`，而那個沒有生產者（Blob 卡不存在，§1.2）|
+| `<name>_center` | 離 patch 正中心最近的那一塊 | **唯一活的**，但它是**位置**不是角色 |
+
+##### 定調：Region 段只出名詞
+
+> 「以這張 card 的功能（ROI）來說我不太想要去區分 target 跟 reference，原因是
+> 會有很多種組合，要 by 情況討論……我傾向這邊 ROI 只 labeled 出區域，之後再給
+> card 標註 T 跟 R。主要是我不知道資料留在哪邊設定好會比較好。」
+
+**同意，而且理由比「情況太多」更硬：角色是「這一次比較」的屬性，不是區域的
+屬性。** 同一塊 EPI 在一個比較裡是 target、在另一個裡是 reference。角色一旦寫進
+區域，每一種比較都要複製一份區域 —— 而區域是**畫**出來的，複製一份等於請使用者
+在 cell 上重畫一次同一塊。
+
+這條線這個 repo 已經畫過兩次，理由一字不差：F7-17 的「mask 給影像段、量測段照樣
+引用名字 —— 兩條平行的路會腐爛」，以及 §3.3.2 否決 C 的「每一個吃區域的地方都要
+處理兩種形態」。把 T/R 塞進區域是第三次踩同一個坑。
+
+**所以：Region 段出名詞（有哪些區域、每一塊在哪），Measure 段出動詞（拿哪兩個
+比）。**
+
+##### 三個獨立的軸，使用者列的三種組合就都成立了
+
+| 軸 | 誰決定 | 狀態 |
+|---|---|---|
+| 哪些像素 | Region 卡（畫在 cell 上）| ✅ |
+| 哪一張圖 | **畫布上的線**（量測卡接兩條就吐 `test_epi_glv_mean` / `ref_epi_glv_mean`，`MultiSourceStep`）| ✅ |
+| 哪一份（缺陷那塊 vs 其餘）| Region 卡 —— 它有晶格、有相位、知道缺陷在正中央 | ✅ **這一輪補的** |
+
+| 使用者的情況 | target | reference |
+|---|---|---|
+| patch，跟自己兩側的 EPI 比 | `epi_center` @ test | `epi_others` @ test |
+| patch，跟 ref 那張的同一塊比 | `epi` @ test | `epi` @ ref |
+| 單張 source（沒有 ref）| `epi_center` @ single | `epi_others` @ single |
+
+##### 做了什麼（✅ 2026-08-18）
+
+`_util.set_region_family()` —— 一組框 → **三個**具名區域，兩張 Region 卡共用
+（規則只有一份）：
+
+- `<name>`         全部接起來的像素母體（**仍然包含**缺陷那一塊 —— 它的意思是
+  「這張圖上所有的 EPI」，改掉會動到黃金值）
+- `<name>_center`  缺陷所在的那一塊
+- `<name>_others`  **其餘那幾塊 = 同一張圖上同材質的基準**
+
+拿 `<name>` 當基準是**有偏的**：N 塊時缺陷佔 1/N 的像素，N=4、缺陷偏 50 GLV 的話
+基準本身就被拉走 12.5 GLV —— 跟要量的量同一個數量級。
+
+只有一份的時候 `<name>_others` **不存在**（不是空的、也不是退回整張圖）：這張
+patch 上就是沒有基準。記進 `meta["regions_absent"]`，量測卡照它講出真正的原因。
+「這一顆有沒有基準」怎麼問：`roi_cross` 用 `cross_count > 1`，`roi_template` 用
+`<name>_others_present`（兩張卡的特徵命名慣例本來就一張是卡層級、一張是區域
+層級）。
+
+⚠ **卡片不可以有叫 target/reference 的參數，也不可以在區域上標記角色。**
+`test_the_card_never_says_which_one_is_the_target` 鎖住這件事，順便鎖住
+「vendored 的 `roi_type` 是死的，不要把它救活」。
+
+##### 之後那張比較卡長什麼樣（Measure 段，**不是現在**）
+
+```
+Compare regions
+  ├ Target region     [epi_center ▾]     ← region_keys 下拉（型別已經有了）
+  ├ Reference region  [epi_others ▾]
+  └ 吃哪幾條流 = 畫布上接進來的線
+     → delta / ratio / z-score
+```
+
+T/R 住在**那張卡的參數上**：recipe 的 diff 看得懂「這一次比的是哪兩塊」；同一組
+區域可以被三張比較卡用三種方式比（那正是使用者說的「很多種組合」，而組合屬於
+消費端）；而且不動 Region 段，Region-2／Region-3 照原計畫走。
+
+**今天沒有那張卡也做得到**，只是比較發生在**分數表達式**裡
+（`test_epi_glv_mean - ref_epi_glv_mean`）。所以那張卡不是解鎖功能，是把一件
+現在藏在表達式裡的事變成看得見的一張卡。
+
 #### 3.3.3 Region-3（`roi_from_mask`）的規格 —— GDS mode，**第三階段**
 
 - ⚠ **檔案 I/O 不在這張卡**（§3.1.3 的提案）：mask 由 **Input 段的 sidecar 接頭**

@@ -291,7 +291,7 @@ def test_clicking_a_thumbnail_jumps_to_that_defect(mixed_window):
 
 
 def test_the_button_only_appears_for_cards_that_define_a_region(mixed_window):
-    assert mixed_window.selected_regions() == ["epi", "epi_center"]
+    assert mixed_window.selected_regions() == ["epi", "epi_center", "epi_others"]
     assert mixed_window.region_check_available() is True
 
     other = wire_up(mixed_window.model, mixed_window.model.add_step("glv_stats"))
@@ -305,7 +305,7 @@ def test_without_a_dataset_the_button_is_off_and_says_why(qapp):
     try:
         nid = wire_up(win.model, win.model.add_step("roi_cross"))
         win.select_node(nid)
-        assert win.selected_regions() == ["cross", "cross_center"]
+        assert win.selected_regions() == ["cross", "cross_center", "cross_others"]
         assert win.region_check_available() is False
         assert win.open_region_check(n=4, sync=True) is False
         assert "No dataset" in win.status_text()
@@ -345,7 +345,8 @@ def test_the_mask_card_offers_the_regions_defined_upstream(window):
 
     mask = wire_up(window.model, window.model.add_step("roi_mask"))
     assert window.model.available_regions(before_node=mask) == [
-        "epi", "epi_center", "mg", "mg_center"]
+        "epi", "epi_center", "epi_others",
+        "mg", "mg_center", "mg_others"]
 
     window.select_node(mask)
     editor = window.param_form.editor("regions")

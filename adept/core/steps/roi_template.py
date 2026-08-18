@@ -55,7 +55,8 @@ from ..pipeline.step import (
     CATEGORY_ALGO, GROUP_REGION, ParamSpec, Step, StepError, register_step,
 )
 from ._util import (
-    output_prefix_spec, prefix_features, prefix_names, require_image,
+    output_prefix_spec, prefix_features, prefix_names, region_family,
+    require_image, set_region_family,
 )
 
 #: ``locate_axis`` -> 哪幾軸要做定位。一維的 layout（垂直條紋）只有 X 有相位，
@@ -70,7 +71,16 @@ def _prefix_in_section() -> ParamSpec:
     return spec
 
 
-#: 每個區域固定會有的幾個數字（區域自己的 ``<name>_present`` 另外加）。
+#: 每個區域各自吐的兩個 0/1（前面會加區域名）。
+#:
+#: ``present``        —— 這一顆有沒有這個區域（模板比 patch 大，某些顆的窗
+#:                       就是沒蓋到）。
+#: ``others_present`` —— 有沒有**基準**（同一張圖上同材質的另外幾塊）。
+#:   只有一份的時候框還在、但沒有東西可以拿來比 —— 那是兩個不同的問題，
+#:   一個數字答不了（見 ``_util.set_region_family``）。
+_REGION_FEATURES = ["present", "others_present"]
+
+#: 每個區域固定會有的幾個數字（區域自己的那兩個另外加）。
 _MATCH_FEATURES = ["match_score", "match_margin", "match_structure",
                    "phase_x", "phase_y", "locate_ok"]
 
@@ -180,22 +190,21 @@ class RoiTemplateStep(Step):
 
     @classmethod
     def resolve_regions_out(cls, params: Dict[str, Any]) -> List[str]:
-        """每個區域一個名字，多框的再加一個 ``<name>_center``。
+        """每個區域三個名字：全部、缺陷那一塊、其餘那些。
 
-        ``_center`` 跟 ``roi_cross`` 是同一個約定：要**幾何**的卡（量 CD、量框
-        本身）拿不到「一個矩形」時該指名單一的框，而那一塊就是離 patch 正中心
-        最近的一塊 —— 缺陷所在的那一塊。兩張卡對這件事的說法要一致。
+        跟 ``roi_cross`` 是同一個約定（``_util.region_family`` 是唯一的那一份）
+        —— 兩張卡對這件事的說法要一致，使用者只學一次。
         """
         out: List[str] = []
         for name in region_names(params.get("regions", "")):
-            out.extend([name, "%s_center" % name])
+            out.extend(region_family(name))
         return out
 
     @classmethod
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
         names = list(_MATCH_FEATURES)
         for name in region_names(params.get("regions", "")):
-            names.append("%s_present" % name)
+            names.extend("%s_%s" % (name, f) for f in _REGION_FEATURES)
         return prefix_names(params.get("output_prefix", ""), names)
 
     @classmethod
@@ -258,9 +267,11 @@ class RoiTemplateStep(Step):
         }
 
         for name, norm_boxes in regions:
-            boxes = self._place(ctx, name, norm_boxes, match, cell.shape,
-                                (ph, pw), axes, int(p["max_boxes"]))
+            boxes, others = self._place(ctx, name, norm_boxes, match,
+                                        cell.shape, (ph, pw), axes,
+                                        int(p["max_boxes"]))
             feats["%s_present" % name] = 1.0 if boxes else 0.0
+            feats["%s_others_present" % name] = 1.0 if others else 0.0
             # panel 用（跟 roi_cross 同一個慣例）：**UI 畫的就是引擎算的這一份**。
             # UI 自己再算一次很容易變成「畫面上的框」與「真的量下去的框」不一樣，
             # 那種 bug 極難發現。
@@ -272,6 +283,7 @@ class RoiTemplateStep(Step):
                 "ok": bool(match.ok), "axis": str(p["locate_axis"]),
                 "norm": [[float(v) for v in b] for b in norm_boxes],
                 "boxes": [[int(v) for v in b] for b in boxes],
+                "others": int(others),
             }
 
         ctx.add_features(prefix_features(p["output_prefix"], feats))
@@ -282,8 +294,11 @@ class RoiTemplateStep(Step):
                norm_boxes: List[Tuple[float, float, float, float]],
                match: Any, cell_shape: Tuple[int, int],
                patch_shape: Tuple[int, int], axes: Tuple[bool, bool],
-               max_boxes: int) -> List[Tuple[int, int, int, int]]:
-        """一個區域的框搬到這張 patch 上，並寫進 ``ctx``。回傳實際放下的框。"""
+               max_boxes: int) -> Tuple[List[Tuple[int, int, int, int]], int]:
+        """一個區域的框搬到這張 patch 上，並寫進 ``ctx``。
+
+        回傳 ``(實際放下的框, 其中「其餘」有幾塊)``。
+        """
         ph, pw = patch_shape
         if not match.ok:
             # 相位定不出來就沒有「哪一格」可言 —— 退回整張圖，並把這一顆標記
@@ -294,9 +309,8 @@ class RoiTemplateStep(Step):
                 "certainty %.2f); the region falls back to the whole image and "
                 "this defect is marked locate_ok = 0."
                 % (self.key, name, match.score, match.margin))
-            ctx.set_roi(name, (0.0, 0.0, 1.0, 1.0))
-            ctx.set_roi("%s_center" % name, (0.0, 0.0, 1.0, 1.0))
-            return []
+            set_region_family(ctx, self.key, name, [(0.0, 0.0, 1.0, 1.0)])
+            return [], 0
 
         boxes: List[Tuple[int, int, int, int]] = []
         for norm in norm_boxes:
@@ -319,17 +333,18 @@ class RoiTemplateStep(Step):
                      "template is larger than the patch, so this patch only "
                      "sees part of the cell); nothing is measured in it here."
                      % (self.key, name))
-            ctx.meta.setdefault("regions_absent", {})[name] = (
-                "it is marked on a part of the cell that this patch does not "
-                "cover")
-            return []
+            for absent in (name, "%s_others" % name):
+                ctx.meta.setdefault("regions_absent", {})[absent] = (
+                    "it is marked on a part of the cell that this patch does "
+                    "not cover")
+            return [], 0
 
-        ctx.set_roi_boxes(name, [(x / pw, y / ph, w / pw, h / ph)
-                                 for x, y, w, h in boxes])
         cx, cy = pw / 2.0, ph / 2.0
-        centre = min(boxes, key=lambda b: ((b[0] + b[2] / 2.0 - cx) ** 2
-                                           + (b[1] + b[3] / 2.0 - cy) ** 2))
-        x, y, w, h = centre
-        ctx.set_roi("%s_center" % name, (x / pw, y / ph, w / pw, h / ph))
-        return boxes
+        idx = min(range(len(boxes)),
+                  key=lambda k: ((boxes[k][0] + boxes[k][2] / 2.0 - cx) ** 2
+                                 + (boxes[k][1] + boxes[k][3] / 2.0 - cy) ** 2))
+        others = set_region_family(
+            ctx, self.key, name,
+            [(x / pw, y / ph, w / pw, h / ph) for x, y, w, h in boxes], idx)
+        return boxes, others
 

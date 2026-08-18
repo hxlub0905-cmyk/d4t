@@ -459,11 +459,13 @@ def test_the_card_declares_the_regions_it_defines():
     cls = get_step("roi_template")
     params = cls.validate_params({"regions": "epi: 0,0,1,1 | mg: 0,0,0.2,1"})
     assert cls.resolve_regions_out(params) == [
-        "epi", "epi_center", "mg", "mg_center"]
+        "epi", "epi_center", "epi_others",
+        "mg", "mg_center", "mg_others"]
     feats = cls.resolve_features(cls.validate_params(
         {"regions": "epi: 0,0,1,1", "output_prefix": "t"}))
     assert "t_locate_ok" in feats
     assert "t_epi_present" in feats
+    assert "t_epi_others_present" in feats
 
 
 def test_an_old_recipe_keeps_its_single_box_region():
@@ -479,3 +481,61 @@ def test_an_old_recipe_keeps_its_single_box_region():
     params = Recipe.from_json_dict(doc).nodes["n1"].params
     assert params["regions"] == "epi: 0.35,0,0.2,1"
     assert "roi_out" not in params and "roi_x" not in params
+
+
+# --------------------------------------------------------------------------- #
+# 6. 基準（<name>_others）—— 卡片不指派 target/reference
+# --------------------------------------------------------------------------- #
+def test_a_region_also_gives_the_rest_as_a_baseline():
+    """「缺陷那一塊」跟「旁邊同材質那幾塊」要分得開。
+
+    拿 ``<name>`` 當基準是**有偏的**：N 塊的時候缺陷佔 1/N 的像素，缺陷本身把
+    基準往自己那邊拉。所以多一個 ``<name>_others``。
+    """
+    gc = algo_template.build_golden_cell(big_image())
+    # 3 格寬的 patch -> 同一個區域在圖上有好幾份
+    wide = big_image(12)[100:100 + PATCH, 3 * PERIOD:6 * PERIOD]
+    ctx = Context(images={"ref": wide})
+    _run(ctx, _params(gc))
+
+    assert ctx.features["epi_present"] == 1.0
+    assert ctx.features["epi_others_present"] == 1.0
+    assert ctx.roi_count("epi_others") == ctx.roi_count("epi") - 1
+
+    # center 不可以出現在 others 裡（那正是「基準被缺陷污染」的樣子）
+    centre = ctx.roi_rect("epi_center", wide.shape[:2])
+    rest = ctx.roi_rects("epi_others", wide.shape[:2])
+    assert centre not in rest
+
+
+def test_one_copy_means_there_is_no_baseline_and_it_says_so():
+    """只有一份的時候框還在、但**沒有東西可以拿來比** —— 兩個不同的問題。"""
+    gc = algo_template.build_golden_cell(big_image())
+    patch = cut(big_image(13), 20)          # 32 px 的 patch、40 px 的一格
+    ctx = Context(images={"ref": patch})
+    _run(ctx, _params(gc))
+
+    assert ctx.features["epi_present"] == 1.0
+    assert ctx.features["epi_others_present"] == 0.0
+    assert "epi_others" not in ctx.roi_names()
+    with pytest.raises(StepError) as e:
+        roi_pixels(ctx, "t", patch, "epi_others")
+    assert "no other copy" in str(e.value)
+
+
+def test_the_card_never_says_which_one_is_the_target():
+    """**角色是「這一次比較」的屬性，不是區域的屬性。**
+
+    同一塊 EPI 在一個比較裡是 target、在另一個裡是 reference（使用者定調）。
+    所以 Region 卡只出名詞 —— 它不可以有任何一個叫 target/reference 的參數，
+    也不可以在區域上標記角色。
+    """
+    cls = get_step("roi_template")
+    names = {p["name"] for p in cls.describe()["params"]}
+    assert not {n for n in names if "target" in n or "reference" in n}
+
+    gc = algo_template.build_golden_cell(big_image())
+    ctx = Context(images={"ref": cut(big_image(14), 7)})
+    _run(ctx, _params(gc))
+    assert all(r.roi_type == "reference" for r in ctx.rois.rois), \
+        "vendored 的 target 型別是死的，不要把它救活（F11 §3.3.6）"

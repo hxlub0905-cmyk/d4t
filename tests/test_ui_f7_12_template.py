@@ -384,7 +384,7 @@ def test_the_region_check_view_works_for_the_template_card_too(window):
     dlg.rename_region("epi")
     dlg._on_accept()
 
-    assert window.selected_regions() == ["epi", "epi_center"]
+    assert window.selected_regions() == ["epi", "epi_center", "epi_others"]
     assert window.region_check_available() is True
     assert window.open_region_check(n=6, sync=True) is True
     assert "6 defects" in window.region_window.summary_text()

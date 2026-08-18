@@ -16,7 +16,12 @@
 ------------------
 交會處的數量隨影像而異，所以這張卡寫的是**多框區域**（``set_roi_boxes``）。
 量統計的卡（``glv_stats``）把它當一個像素母體；要幾何的卡指
-``<name>_center`` —— 離 patch 正中心最近的那一塊，也就是**缺陷所在的那一塊**。
+``<name>_center`` —— 離 patch 正中心最近的那一塊，也就是**缺陷所在的那一塊**；
+``<name>_others`` —— 其餘那幾塊，也就是**同一張圖上同材質的基準**
+（為什麼要第三個名字、以及為什麼這張卡不指派 target/reference，
+見 ``_util.set_region_family``）。
+
+「這一顆有沒有基準」不必另外給一個數字：``cross_count > 1`` 就是。
 """
 from __future__ import annotations
 
@@ -29,7 +34,7 @@ from ..pipeline.step import (
 )
 from ._util import (
     FEATURE_PREFIX_PATTERN, output_prefix_spec, prefix_features, prefix_names,
-    require_image,
+    region_family, require_image, set_region_family,
 )
 
 _BESIDE = ("beside_vertical", "beside_horizontal")
@@ -272,10 +277,10 @@ class RoiCrossStep(Step):
             pattern_help=("use letters, digits and underscores only, and do "
                           "not start with a digit"),
             help=("Name for the boxes. Measure cards refer to it by this name. "
-                  "You also get <name>_center, which is the single box nearest "
-                  "the middle of the patch - that is where the defect is, and "
-                  "cards that measure shape rather than statistics need a "
-                  "single box."),
+                  "You also get <name>_center - the single box nearest the "
+                  "middle of the patch, which is where the defect is - and "
+                  "<name>_others, the rest of them, which is the baseline of "
+                  "the same material on the same image."),
         ),
         ParamSpec(
             name="max_boxes", type="int", default=64, min=1, max=4096,
@@ -313,8 +318,7 @@ class RoiCrossStep(Step):
 
     @classmethod
     def resolve_regions_out(cls, params: Dict[str, Any]) -> List[str]:
-        name = str(params.get("roi_out", "cross") or "").strip()
-        return [name, "%s_center" % name] if name else []
+        return region_family(params.get("roi_out", "cross"))
 
     @classmethod
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
@@ -370,8 +374,7 @@ class RoiCrossStep(Step):
                      % (self.key, res.reason or "could not locate the pattern",
                         name))
             whole = (0.0, 0.0, 1.0, 1.0)
-            ctx.set_roi_boxes(name, [whole])
-            ctx.set_roi("%s_center" % name, whole)
+            set_region_family(ctx, self.key, name, [whole])
             ctx.add_features(prefix_features(p["output_prefix"], {
                 "cross_count": 0.0,
                 "cross_pitch_x_px": float(res.x.pitch_measured),
@@ -385,9 +388,13 @@ class RoiCrossStep(Step):
             }))
             return ctx
 
-        ctx.set_roi_boxes(name, [_norm(b, shape) for b in res.boxes])
+        norm_boxes = [_norm(b, shape) for b in res.boxes]
         centre = res.center_box
-        ctx.set_roi("%s_center" % name, _norm(centre, shape))
+        centre_norm = _norm(centre, shape)
+        idx = min(range(len(norm_boxes)),
+                  key=lambda k: sum((a - b) ** 2 for a, b
+                                    in zip(norm_boxes[k], centre_norm)))
+        set_region_family(ctx, self.key, name, norm_boxes, idx)
         if res.reason:
             ctx.warn("[%s] %s." % (self.key, res.reason))
 

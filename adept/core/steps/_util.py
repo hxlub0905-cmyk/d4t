@@ -409,6 +409,55 @@ def roi_rect_or_none(ctx, step_key: str, image, roi_name):
                     % (name, ctx.roi_names()))
 
 
+def set_region_family(ctx, step_key: str, name: str, norm_boxes,
+                      centre_index: int = 0) -> int:
+    """一組框 → **三個**具名區域：全部、缺陷那一塊、其餘那些（F11 Region-1）。
+
+    為什麼是三個
+    ------------
+    ADC 常問的是「缺陷那一塊比旁邊同材質的暗多少」。以前只有兩個名字：
+
+    * ``<name>``        —— 全部接起來的像素母體
+    * ``<name>_center`` —— 離 patch 正中心最近的那一塊（缺陷永遠在正中央）
+
+    少的正是**基準**。拿 ``<name>`` 當基準是有偏的：N 塊的時候缺陷佔 1/N 的
+    像素，N=4、缺陷偏 50 GLV 的話基準本身就被拉走 12.5 GLV —— 跟要量的量同一個
+    數量級。所以多一個 ``<name>_others``（除了中心那塊以外的每一塊）。
+
+    ⚠ **卡片不指派 target / reference。** 角色是「這一次比較」的屬性不是區域的
+    屬性 —— 同一塊 EPI 在一個比較裡是 target、在另一個裡是 reference（使用者
+    2026-08-18：「會有很多種組合，要 by 情況討論」）。角色寫進區域的話，每一種
+    比較都要複製一份區域，而區域是**畫**出來的。所以 Region 段只出名詞，
+    「拿哪兩個比」由下游那張卡的兩個下拉決定（F11 §3.3.6）。
+
+    只有一塊的時候 ``<name>_others`` **不存在**（不是空的、也不是退回整張圖）：
+    這張 patch 上就是沒有基準。記進 ``meta["regions_absent"]``，量測卡才報得出
+    真正的原因。回傳「其餘」有幾塊。
+    """
+    boxes = [tuple(float(v) for v in b) for b in norm_boxes]
+    if not boxes:
+        return 0
+    i = max(0, min(int(centre_index), len(boxes) - 1))
+    ctx.set_roi_boxes(name, boxes)
+    ctx.set_roi("%s_center" % name, boxes[i])
+
+    others = [b for k, b in enumerate(boxes) if k != i]
+    rest = "%s_others" % name
+    if others:
+        ctx.set_roi_boxes(rest, others)
+    else:
+        ctx.meta.setdefault("regions_absent", {})[rest] = (
+            "this patch only has one copy of '%s', so there is no other copy "
+            "to use as a baseline" % name)
+    return len(others)
+
+
+def region_family(name: str):
+    """一個區域名 → 它實際定義的三個名字（宣告用；空名字回空）。"""
+    n = str(name or "").strip()
+    return [n, "%s_center" % n, "%s_others" % n] if n else []
+
+
 def crop_to_roi(ctx, step_key: str, image, roi_name):
     """依 ``roi`` 參數裁出要量測的像素（找不到 blob 時退回整張圖）。"""
     rect = roi_rect_or_none(ctx, step_key, image, roi_name)

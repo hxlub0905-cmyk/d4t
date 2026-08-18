@@ -282,11 +282,14 @@ def test_failing_to_locate_falls_back_loudly():
 
 
 def test_the_card_declares_both_regions_so_lint_can_see_them():
-    """量測卡指到沒人定義的區域是安靜出錯的老坑（§7）—— 兩個名字都要宣告
-    得出來，lint 才擋得住打錯字。"""
+    """量測卡指到沒人定義的區域是安靜出錯的老坑（§7）—— **三個**名字都要宣告
+    得出來，lint 才擋得住打錯字。
+
+    第三個 ``_others`` 是 F11 Region-1 加的基準（除了缺陷那一塊以外的每一塊）。
+    """
     step = get_step("roi_cross")
     out = step.resolve_regions_out({"roi_out": "xing"})
-    assert out == ["xing", "xing_center"]
+    assert out == ["xing", "xing_center", "xing_others"]
 
 
 def test_how_many_stripes_were_invented_is_visible():
@@ -612,3 +615,30 @@ def test_only_the_invented_stripes_borrow_the_median_width():
     widths = [b - a for a, b in s.selected]
     assert len(set(round(w, 2) for w in widths)) > 2, \
         "整排寬度不該被補線的那一根拉平：%s" % [round(w, 2) for w in widths]
+
+
+def test_the_other_crossings_are_the_baseline():
+    """「缺陷那一塊」跟「同一張圖上同材質的其餘那幾塊」要分得開（F11 Region-1）。
+
+    拿 ``<name>`` 當基準是**有偏的**：N 塊的時候缺陷佔 1/N 的像素。
+    """
+    img = _mg_epi()
+    ctx = Context(images={"test": img.copy(), "ref": img.copy()})
+    _run(ctx)
+
+    n = ctx.roi_count("cross")
+    assert n >= 2, "這張測試圖本來就該有好幾個交會處"
+    assert ctx.roi_count("cross_others") == n - 1
+    centre = ctx.roi_rect("cross_center", (SIZE, SIZE))
+    assert centre not in ctx.roi_rects("cross_others", (SIZE, SIZE))
+
+
+def test_one_crossing_means_there_is_no_baseline():
+    """只有一塊的時候 ``_others`` **不存在** —— 這張圖上就是沒有基準。"""
+    flat = np.full((SIZE, SIZE), BASE, np.float32)
+    ctx = Context(images={"test": flat.copy(), "ref": flat.copy()})
+    _run(ctx)                                   # 定位失敗 -> 只有「整張圖」一塊
+
+    assert ctx.roi_count("cross") == 1
+    assert "cross_others" not in ctx.roi_names()
+    assert "no other copy" in ctx.meta["regions_absent"]["cross_others"]

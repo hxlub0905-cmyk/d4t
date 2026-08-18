@@ -126,7 +126,7 @@ def test_the_subtitle_says_what_the_card_does_not_its_id(window):
     # Region 卡不寫影像流，它定義的是具名區域 —— 副標仍然要講得出它產出什麼
     window.model.set_param(c, "regions", "epi: 0.1,0,0.3,1")
     window.select_node(c)
-    assert window.pipeline.card(c).subtitle() == "diff → epi epi_center"
+    assert window.pipeline.card(c).subtitle() == "diff → epi epi_center epi_others"
 
 
 def test_a_repeated_card_shows_which_one_it_is(window):
