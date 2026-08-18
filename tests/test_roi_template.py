@@ -539,3 +539,54 @@ def test_the_card_never_says_which_one_is_the_target():
     _run(ctx, _params(gc))
     assert all(r.roi_type == "reference" for r in ctx.rois.rois), \
         "vendored 的 target 型別是死的，不要把它救活（F11 §3.3.6）"
+
+
+# --------------------------------------------------------------------------- #
+# 7. 模板過期健檢（檔頭承諾了、而它一直不存在的那一支）
+# --------------------------------------------------------------------------- #
+def _judge(scores, margins, structures, **over):
+    kw = dict(min_score=0.3, min_margin=0.05, min_structure=5.0)
+    kw.update(over)
+    return algo_template.judge_template(scores, margins, structures, **kw)
+
+
+def test_a_template_that_fits_says_so():
+    h = _judge([0.95] * 10, [0.40] * 10, [50.0] * 10)
+    assert h.verdict == "ok"
+    assert (h.located, h.checked) == (10, 10)
+
+
+def test_patches_with_nothing_to_match_are_not_the_templates_fault():
+    """「這批 patch 沒有結構」與「模板過期」長得一模一樣，而處置完全相反。"""
+    h = _judge([0.5] * 10, [0.10] * 10, [1.0] * 10)
+    assert h.verdict == "no-structure"
+    assert "not the template" in h.message
+    assert "No setting will change it" in h.message
+
+
+def test_structure_but_no_resemblance_means_the_template_is_stale():
+    """**這就是那個健檢要抓的東西**：有東西可比，但比出來不像。"""
+    h = _judge([0.10] * 10, [0.02] * 10, [50.0] * 10)
+    assert h.verdict == "stale"
+    assert "rebuild it" in h.message
+
+
+def test_matching_well_but_not_uniquely_is_a_threshold_problem():
+    h = _judge([0.90] * 10, [0.01] * 10, [50.0] * 10)
+    assert h.verdict == "too-tight"
+    assert "Minimum certainty" in h.message
+
+
+def test_a_few_bad_defects_do_not_condemn_the_template():
+    """一兩顆爛的是常態 —— 中位數而不是平均，成功率而不是「有沒有失敗過」。"""
+    h = _judge([0.95] * 9 + [0.05], [0.40] * 9 + [0.0], [50.0] * 9 + [0.5])
+    assert h.verdict == "ok"
+    assert h.located == 9 and h.checked == 10
+    assert h.score > 0.9                       # 那一顆爛的沒有把中位數拉走
+
+
+def test_no_run_yet_says_so_instead_of_guessing():
+    h = _judge([], [], [])
+    assert h.verdict == "unknown"
+    assert "Run a trial" in h.message
+    assert h.rate == 0.0

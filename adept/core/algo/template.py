@@ -56,7 +56,7 @@ import base64
 import math
 import zlib
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -529,6 +529,115 @@ def match_patch(cell: np.ndarray, patch: Any,
     return MatchResult(phase_x=int(fx % cx), phase_y=int(fy % cy),
                        score=float(best), margin=float(margin),
                        structure=float(structure), ok=ok)
+
+
+@dataclass
+class TemplateHealth:
+    """整批的比對結果長什麼樣，以及**這個模板還能不能用**。
+
+    為什麼需要它（``roi_template`` 的檔頭承諾了它，而它一直不存在）
+    ----------------------------------------------------------------
+    模板是**凍進 recipe** 的：同一支 inspection recipe 掃同一塊 scan area，
+    圖案一樣，所以跨 lot 共用是刻意的。但「換一批資料之後它還對不對」沒有人在
+    問 —— 而模板對不上的時候，畫面上看到的是**每一顆都定不出來**，那跟「這批
+    patch 本來就沒有結構」長得一模一樣。
+
+    兩者的處置**完全相反**：前者要重建模板，後者什麼都不用做（沒有結構的
+    patch 本來就該退回整張圖）。分不出來的使用者會一直去調門檻。
+
+    分辨的依據就是三道閘門**各自**倒在哪裡（見 :func:`judge_template`）。
+    """
+
+    checked: int = 0
+    located: int = 0
+    #: 各自沒過的顆數（一顆可能同時掛在好幾關）
+    failed_score: int = 0
+    failed_margin: int = 0
+    failed_structure: int = 0
+    #: 中位數（比平均耐得住幾顆爛的）
+    score: float = 0.0
+    margin: float = 0.0
+    structure: float = 0.0
+    #: ``ok`` / ``stale`` / ``no-structure`` / ``too-tight`` / ``unknown``
+    verdict: str = "unknown"
+    message: str = ""
+
+    @property
+    def rate(self) -> float:
+        return self.located / float(self.checked) if self.checked else 0.0
+
+
+#: 定位成功率低於這個就要說話。
+HEALTH_OK_RATE = 0.8
+
+
+def judge_template(scores: Sequence[float], margins: Sequence[float],
+                   structures: Sequence[float], min_score: float,
+                   min_margin: float, min_structure: float) -> TemplateHealth:
+    """整批的三個數字 → 「這個模板還能不能用」。
+
+    **吃的是已經算好的特徵**（``match_score`` / ``match_margin`` /
+    ``match_structure``），不再跑一次比對 —— 那些數字每一顆都吐了，再算一次
+    只會多一份會漂的答案。
+
+    判準（照「處置不同」分，不是照分數高低分）：
+
+    * 大部分**沒有結構** → ``no-structure``：這批 patch 本身沒東西可比。
+      不是模板的問題，也不是門檻的問題，退回整張圖就是對的答案。
+    * 有結構、但**比對分數低** → ``stale``：patch 不像這個模板。八成是模板
+      不是從這批資料（這一層）建的 —— 這就是那個健檢要抓的東西。
+    * 有結構、分數也夠、只是**峰不夠突出** → ``too-tight``：圖案週期性強，
+      或門檻設太緊。
+    """
+    n = min(len(scores), len(margins), len(structures))
+    if not n:
+        return TemplateHealth(message="Run a trial to check this template "
+                                      "against the batch.")
+
+    def med(v: Sequence[float]) -> float:
+        return float(np.median(np.asarray(list(v)[:n], dtype=np.float64)))
+
+    bad_s = [i for i in range(n) if structures[i] < min_structure]
+    bad_c = [i for i in range(n) if scores[i] < min_score]
+    bad_m = [i for i in range(n) if margins[i] < min_margin]
+    failed = set(bad_s) | set(bad_c) | set(bad_m)
+    located = n - len(failed)
+
+    h = TemplateHealth(
+        checked=n, located=located, failed_score=len(bad_c),
+        failed_margin=len(bad_m), failed_structure=len(bad_s),
+        score=med(scores), margin=med(margins), structure=med(structures))
+
+    if h.rate >= HEALTH_OK_RATE:
+        h.verdict = "ok"
+        h.message = ("%d of %d defects located. This template fits this batch."
+                     % (located, n))
+        return h
+
+    # 沒過的那些是**倒在哪一關**——處置完全不同，所以要分開講。
+    only_structure = [i for i in failed if i in bad_s]
+    with_structure = [i for i in failed if i not in bad_s]
+    if len(only_structure) >= len(with_structure):
+        h.verdict = "no-structure"
+        h.message = ("%d of %d defects have nothing to match (median structure "
+                     "%.1f, needs %.1f). That is the patches, not the "
+                     "template - those regions fall back to the whole image, "
+                     "which is the right answer. No setting will change it."
+                     % (len(only_structure), n, h.structure, min_structure))
+    elif len([i for i in with_structure if i in bad_c]) >= len(with_structure) / 2.0:
+        h.verdict = "stale"
+        h.message = ("%d of %d defects have structure but do not look like "
+                     "this template (median match %.2f, needs %.2f). The "
+                     "template was probably not built from this data - "
+                     "rebuild it from a full-size image of this batch."
+                     % (len(with_structure), n, h.score, min_score))
+    else:
+        h.verdict = "too-tight"
+        h.message = ("%d of %d defects match well but not uniquely (median "
+                     "certainty %.2f, needs %.2f). The pattern repeats "
+                     "strongly, or “Minimum certainty” is set too tight."
+                     % (len(with_structure), n, h.margin, min_margin))
+    return h
 
 
 def _fold_to_period(surface: np.ndarray, px: int, py: int) -> np.ndarray:

@@ -50,7 +50,12 @@ cell 比 patch 小的時候會只量到一根 EPI，其餘的靜靜漏掉。
 東西，它必須自己就是完整的。
 
 跨 lot 共用是刻意的：同一支 inspection recipe 掃同一塊 scan area，圖案是一樣的。
-換一批資料要不要重算模板，是 Studio 在設定時提供的健檢，不是每一顆的執行期行為。
+**換一批資料要不要重算模板**，是 Studio 在設定時提供的健檢，不是每一顆的執行期
+行為 —— 它住在這張卡的儀表上（`ui/inspectors.TemplateInspector.health`），
+判讀的規則在 `algo/template.judge_template`。它吃的是每一顆都已經吐出來的三個
+數字，不再跑一次比對：模板對不上的時候畫面看到的是「每一顆都定不出來」，而那跟
+「這批 patch 本來就沒有結構」長得一模一樣 —— 兩者的處置**完全相反**，所以要
+分開講。
 """
 from __future__ import annotations
 

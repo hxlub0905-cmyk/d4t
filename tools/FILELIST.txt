@@ -24,7 +24,7 @@ c8a612c072ba3616d22e6f7b2ae7238bd454c835 adept/core/algo/quality.py
 a9735c3dcf54c6115467af9b4bc3f21838fe58d0 adept/core/algo/roi.py
 ac1c581984cef7d1af53288415f759fb8006172f adept/core/algo/snr.py
 04dc4d589bd054b14d86e30bb3a8e8d894128755 adept/core/algo/subpixel.py
-4bb361c1a2ee956cc8c741edb6ae37dfb325c9aa adept/core/algo/template.py
+de3a6248b0fc90fe14fc87f9e9faf2208ba39d57 adept/core/algo/template.py
 dcec5abad8375953a68b55b4ac771958207f81bb adept/core/calibration.py
 680d3068c7df905729e015573e65b51c5a96b010 adept/core/export/__init__.py
 feac449979828c3ee6861b614fd47566e67b9e8f adept/core/export/klarf_out.py
@@ -61,7 +61,7 @@ ec3f5caf078d2a81bcbe468c825bd51f2b9d0268 adept/core/steps/normalize.py
 39a00abfe1660aeb6442763a20f32a943af7010a adept/core/steps/roi_cross.py
 10eca7676b56a578aa499d27fd9666bc9dc8c03f adept/core/steps/roi_mask.py
 e8269fc1744fd1bf8d3dd62eb5d96d8712962c79 adept/core/steps/roi_snr.py
-a5f8e0d6aa24207c8e2e5d67918decfaf03e228c adept/core/steps/roi_template.py
+744e62a97e1f573c167e6c4627b714d343a12858 adept/core/steps/roi_template.py
 1ff626dd992689b11aa96c5c1e1ab3bbd585036c adept/core/steps/snr_map.py
 fd783eb54860de0b9462c6238eeb72aea1657222 adept/core/steps/tone.py
 0e7d37674a365b4c5292ba728f7da61b0aba6b08 adept/core/store/__init__.py
@@ -72,7 +72,7 @@ efe5b42adaea7aef95f313fb304df8ee0e0ba269 adept/ui/canvas.py
 43356663d83394cc83a2c63b52150ac59b85921d adept/ui/cell_canvas.py
 41d2bb30bd17a3f34621439faf098018779a274c adept/ui/export_dialog.py
 88d93814bbb34f0756ea935fc9113eccba61cfb4 adept/ui/gallery.py
-7698365a9ce0d5185d969bb971e55b21274b93cb adept/ui/inspectors.py
+450a31c75eace7d286044eb9a5cdf5cd0be128bc adept/ui/inspectors.py
 b996d921ba547e70d5c78251f70f3b56d3e27ef0 adept/ui/region_check.py
 043a9240742914759667fd4bb01beafd0241ed17 adept/ui/results.py
 f282c5db798f305a76fb190f7265f86eb77fbd86 adept/ui/scope.py
@@ -159,7 +159,7 @@ f90b258ab8544e5eadc1b54b55ff558db1cc3041 tests/test_results_store.py
 6cf3b8f8b609435492244c25f7fc2e541311812a tests/test_roi_cross_phase.py
 73b404b73641a5b93cbf48a17111a03b7e4a1435 tests/test_roi_cross_trust.py
 7de409dc5d1324a6db52ddc4308f6be32838dfd9 tests/test_roi_mask.py
-744cca55b1b76acd97bfb50c1a60f5dbd2d68212 tests/test_roi_template.py
+1fa5512b3efd6dd5f8a71cadaf5646a2b243cf75 tests/test_roi_template.py
 87d20a22f4495441d5f75bed6265c1b6602b9d45 tests/test_rsem_ingest.py
 99687acf0a8aae0d2c88f7fca293cfad2e31c7b5 tests/test_snr.py
 76e47c0530fe6369dd3afc98f74c71aa9666906f tests/test_steps.py
@@ -182,7 +182,7 @@ dc8a3b94da78a92ccc9cea70aaaf8bbe8130138a tests/test_ui_f7_12_template.py
 81309d5e9ecdb912a9d58dddbe3e99b60f6c2b5f tests/test_ui_f7_14_canvas_flow.py
 5897ba84a0bacebd3d416aa6a9d4420d3d339b0a tests/test_ui_f7_15_reading_load.py
 004e47fe38010a966ae1a2432818b63bfe7ac352 tests/test_ui_f7_16_safety_net.py
-405d1fb0ad204136317d06a3b3a5011d128f543e tests/test_ui_f7_17_inspectors.py
+72f0bb88c83761b670c68c6c7dfa541255727db0 tests/test_ui_f7_17_inspectors.py
 20f3d8c205398d58cbb53c915ad2bfe18c81fc57 tests/test_ui_f7_18_streams_as_nodes.py
 3fd889d5c0ee8faeec3006ce129080ebfc7608d6 tests/test_ui_f7_19_wiring.py
 cefb798938685e96991557882e02ecebd40defb1 tests/test_ui_f7_23_buttons.py

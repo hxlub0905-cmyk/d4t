@@ -845,6 +845,14 @@ class TemplateInspector(Inspector):
       參數，是本來就該退回整張圖。
 
     分不出來的話，使用者會一直去調前兩個門檻，而問題其實在第三個。
+
+    整批的那一行（F11 Region-1）
+    ----------------------------
+    這一顆過不過只是一顆。``roi_template`` 的檔頭一直承諾「換一批資料要不要重算
+    模板，是 Studio 在設定時提供的健檢」—— 而那個健檢本來不存在（F10 那個形狀：
+    文字說得出來、引擎做不到）。它現在就在這裡，而且**不必再跑一次比對**：
+    每一顆都已經吐了 ``match_score`` / ``match_margin`` / ``match_structure``，
+    整批的判讀是那三串數字的函式（``algo/template.judge_template``）。
     """
 
     title = "Match"
@@ -893,15 +901,35 @@ class TemplateInspector(Inspector):
     def failing(self) -> List[str]:
         return [g[0] for g in self.gates() if not g[3]]
 
+    def health(self):
+        """整批的判讀 —— 「這個模板還能不能用」（``algo.template.judge_template``）。"""
+        from adept.core.algo.template import judge_template
+
+        def vals(name: str) -> List[float]:
+            return self.feature_values(self.prefixed(name))
+
+        return judge_template(
+            vals("match_score"), vals("match_margin"), vals("match_structure"),
+            float(self.params.get("min_score", 0.0) or 0.0),
+            float(self.params.get("min_margin", 0.0) or 0.0),
+            float(self.params.get("min_structure", 0.0) or 0.0))
+
+    def prefixed(self, name: str) -> str:
+        """特徵名加上這張卡的 ``output_prefix``（沒有就原樣）。"""
+        pre = str(self.params.get("output_prefix", "") or "").strip()
+        return "%s_%s" % (pre, name) if pre else name
+
     def summary(self) -> str:
         rec = self.record()
         if not rec:
             return ""
+        batch = self.health()
+        tail = ("  ·  %s" % batch.message) if batch.checked > 1 else ""
         if rec.get("ok"):
-            return ("matched at phase %d,%d · %s"
+            return ("matched at phase %d,%d · %s%s"
                     % (int(rec.get("phase_x", 0)), int(rec.get("phase_y", 0)),
                        " · ".join("%s %.2f" % (g[0], g[1])
-                                  for g in self.gates())))
+                                  for g in self.gates()), tail))
         bad = self.failing()
         why = {
             "structure": ("this patch has nothing to match — it sits inside "
@@ -915,7 +943,8 @@ class TemplateInspector(Inspector):
                       "template was built from this layer."),
         }
         first = bad[0] if bad else "match"
-        return "could not place the region — %s: %s" % (first, why[first])
+        return ("could not place the region — %s: %s%s"
+                % (first, why[first], tail))
 
     def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
         gates = self.gates()
@@ -950,12 +979,29 @@ class TemplateInspector(Inspector):
                        Qt.AlignRight | Qt.AlignVCenter, "%.2f" % got)
 
         rec = self.record()
+        batch = self.health()
+        foot = ("cell %d × %d px · phase %d,%d · line = the threshold"
+                % (int(rec.get("cell_w", 0)), int(rec.get("cell_h", 0)),
+                   int(rec.get("phase_x", 0)), int(rec.get("phase_y", 0))))
+        sw, sh = int(rec.get("self_w", 0)), int(rec.get("self_h", 0))
+        cw, ch = int(rec.get("cell_w", 0)), int(rec.get("cell_h", 0))
+        if sw and sh and (sw, sh) != (cw, ch):
+            foot += " · repeats every %d × %d px inside the cell" % (sw, sh)
         p.setPen(QColor(TOKENS["text_secondary"]))
         p.drawText(QRectF(rect.left(), rect.bottom() - 14, rect.width(), 14),
-                   Qt.AlignLeft | Qt.AlignVCenter,
-                   "cell %d × %d px · phase %d,%d · line = the threshold"
-                   % (int(rec.get("cell_w", 0)), int(rec.get("cell_h", 0)),
-                      int(rec.get("phase_x", 0)), int(rec.get("phase_y", 0))))
+                   Qt.AlignLeft | Qt.AlignVCenter, foot)
+
+        if batch.checked > 1:
+            # 整批的成績自己一行，而且**顏色講出處置**：模板要重建是紅的，
+            # 「這批 patch 本來就沒結構」不是錯，用一般的灰。
+            col = {"ok": TOKENS["success"], "stale": TOKENS["danger_text"],
+                   "too-tight": TOKENS["warning"]}.get(
+                       batch.verdict, TOKENS["text_secondary"])
+            p.setPen(QColor(col))
+            p.drawText(QRectF(rect.left(), rect.bottom() - 28, rect.width(), 14),
+                       Qt.AlignLeft | Qt.AlignVCenter,
+                       "%d / %d located · %s" % (batch.located, batch.checked,
+                                                 batch.verdict))
 
 
 class MeasureInspector(Inspector):

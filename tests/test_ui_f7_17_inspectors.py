@@ -512,3 +512,47 @@ def test_it_reads_the_engine_verdict_end_to_end(window, tmp_path):
     names = [g[0] for g in insp.gates()]
     assert names == ["match", "certainty", "structure"]
     assert window.inspector_summary.text() != ""
+
+
+def test_the_template_panel_judges_the_whole_batch(qapp):
+    """`roi_template` 的檔頭一直承諾「換一批資料要不要重算模板，是 Studio 在
+    設定時提供的健檢」—— 而那個健檢本來不存在（F10 那個形狀）。
+
+    它不必再跑一次比對：每一顆都已經吐了三個數字，整批的判讀是它們的函式。
+    """
+    insp = insp_mod.TemplateInspector()
+    insp.set_context(
+        "n1",
+        params={"regions": "epi: 0,0,1,1", "min_score": 0.3,
+                "min_margin": 0.05, "min_structure": 5.0},
+        meta={"templates": {"epi": {"cell_w": 40, "cell_h": 240, "ok": True,
+                                    "score": 0.95, "margin": 0.4,
+                                    "structure": 50.0, "phase_x": 3,
+                                    "phase_y": 0}}},
+        result={"features": {"match_score": 0.95, "match_margin": 0.4,
+                             "match_structure": 50.0}},
+        batch=[{"features": {"match_score": 0.1, "match_margin": 0.02,
+                             "match_structure": 50.0}} for _ in range(8)])
+
+    health = insp.health()
+    assert health.checked == 8
+    assert health.verdict == "stale"
+    assert "rebuild it" in insp.summary()
+
+
+def test_the_template_panel_uses_this_cards_prefix(qapp):
+    """兩張模板卡的時候，整批的判讀不可以去讀另一張的數字。"""
+    insp = insp_mod.TemplateInspector()
+    insp.set_context(
+        "n1",
+        params={"regions": "epi: 0,0,1,1", "output_prefix": "b",
+                "min_score": 0.3, "min_margin": 0.05, "min_structure": 5.0},
+        meta={"templates": {"epi": {"cell_w": 40, "cell_h": 240, "ok": True}}},
+        result={"features": {"b_match_score": 0.95}},
+        batch=[{"features": {"b_match_score": 0.95, "b_match_margin": 0.4,
+                             "b_match_structure": 50.0,
+                             "match_score": 0.0, "match_margin": 0.0,
+                             "match_structure": 0.0}} for _ in range(6)])
+
+    assert insp.prefixed("match_score") == "b_match_score"
+    assert insp.health().verdict == "ok"
