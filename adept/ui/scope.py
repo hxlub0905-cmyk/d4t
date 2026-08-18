@@ -58,7 +58,26 @@ SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder")
 #:
 #: 機制留著（一個 tuple、一個 `visible_steps()`）：下一次要暫時收起某張卡時，
 #: 加一個字串就好。
-HIDDEN_STEPS: Sequence[str] = ()
+#: 2026-08-18（F11 Region-1 第三輪）：**`align` 收起來了**。使用者定調
+#: 「我不喜歡 align 卡，我反而認為要拿掉這功能，之後真需要我再回來。目前座標系
+#: patch 的 test 跟 ref 一樣，有發現如果我拉 align 反而會飄掉 shift」。
+#:
+#: 那個「飄」有機制，而且是兩個（讀 `algo/align.py` 讀出來的）：
+#:
+#: 1. **量到的是雜訊 ＋ 缺陷偏移。** 真實位移接近 0 的時候，相關峰的位置由雜訊
+#:    決定；而 test 上有缺陷、ref 沒有，缺陷會把峰往自己那邊拉 —— 每一顆的缺陷
+#:    都不一樣，所以每一顆的 shift 都不一樣。
+#: 2. **只有 ref 被重採樣。** 次像素位移走 `cv2.INTER_LINEAR`（`apply_alignment`），
+#:    等於對 ref 過一次低通、test 沒有。`diff` 因此多一層跟缺陷無關的材質差 ——
+#:    正好違反 Enhance 段那條 `uneven-treatment`（「兩張圖不再可比」），只是那支
+#:    lint 管不到 align，因為它不是 Enhance 卡。
+#:
+#: **為什麼是收起來不是刪掉**：`tests/fixtures/recipes/dual_route_basic.json`
+#: 用了 align，而它撐著三組黃金值裡的兩組。刪掉 = 那份 recipe 開不起來 = 兩組
+#: 黃金值要重新定錨，而使用者說的是「之後真需要我再回來」。`HIDDEN_STEPS` 只過濾
+#: **卡片庫**：已經在用它的 recipe 照跑、CLI 照跑、黃金值一個字不動。
+#: 要回復就是把這個字串拿掉（F7-1 驗證過的那個判斷）。
+HIDDEN_STEPS: Sequence[str] = ("align",)
 
 #: 沒有資料集時 ``RecipeModel`` 用的 route 名稱。
 DEFAULT_KIND: str = SUPPORTED_KINDS[0]

@@ -11,7 +11,7 @@
 1. 四種 kind 都進得來（`ebi_patch` / `rsem` / `tiff_stack` / `folder`），
    而每一種有自己的入口；
 2. 沒有 KLARF 的那兩種**當場講**「寫不回 KLARF」；
-3. 收起來的機制還在（`HIDDEN_STEPS` 空著但 `visible_steps()` 照樣管用）——
+3. 收起來的機制還在（`HIDDEN_STEPS` 現在收著 `align`，見 §4）——
    下一次要暫時藏一張卡時，加一個字串就好；
 4. `algo/period.py` 仍然不是孤兒（那張便利貼留著）。
 """
@@ -84,8 +84,10 @@ def test_the_single_image_cards_are_in_the_library_now(window):
     收著它們的理由是「Studio 只吃兩兩成對的 patch」。那個前提沒了，繼續收著
     就等於把功能打開一半。
     """
-    for key in ("golden_cell", "cell_period", "load_patch", "align", "subtract"):
+    for key in ("golden_cell", "cell_period", "load_patch", "subtract"):
         assert window.library.entry(key) is not None, key
+    # `align` 曾經在這一列上。2026-08-18 使用者把它收起來了 ——
+    # 見 test_align_is_hidden_but_still_runs。
 
 
 def test_an_rsem_dataset_loads_instead_of_being_refused(window, rsem_lot):
@@ -131,10 +133,26 @@ def test_an_unknown_kind_is_still_refused_with_a_reason(window, patch_lot,
     assert window.dataset is before, "被擋下來時不該動到使用者手上的資料集"
 
 
+def test_align_is_hidden_but_still_runs(window):
+    """使用者 2026-08-18：「我不喜歡 align 卡……拉 align 反而會飄掉 shift」。
+
+    **收起來、不刪掉**（CLAUDE.md §5 的判斷）：卡片庫看不到它，但已經在用它的
+    recipe 照跑、CLI 照跑、黃金值一個字不動 —— 而
+    `tests/fixtures/recipes/dual_route_basic.json` 正好用了它，撐著三組黃金值裡
+    的兩組。刪掉的話那兩組要重新定錨，而使用者說的是「之後真需要我再回來」。
+    """
+    from adept.core.pipeline import get_step
+
+    assert "align" in scope_mod.HIDDEN_STEPS
+    assert window.library.entry("align") is None      # 卡片庫看不到
+    assert get_step("align") is not None              # 但引擎照樣認得
+    assert window.model.add_step("align")             # 舊 recipe 也放得進來
+
+
 def test_the_hide_a_card_mechanism_still_works(window):
-    """`HIDDEN_STEPS` 空了，但機制要留著 —— 下次要暫時藏一張卡時加一個字串就好。"""
+    """機制本身要留著 —— 下次要暫時藏別張卡時加一個字串就好。"""
     steps = [{"key": "load_patch"}, {"key": "golden_cell"}]
-    assert scope_mod.visible_steps(steps) == steps        # 現在什麼都不藏
+    assert scope_mod.visible_steps(steps) == steps        # 這兩張都沒被藏
     import adept.ui.scope as s
     keep = s.HIDDEN_STEPS
     try:
