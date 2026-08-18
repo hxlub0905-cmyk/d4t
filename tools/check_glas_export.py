@@ -751,6 +751,27 @@ def _alignment_stats(rows: List[Dict[str, object]], rep: Report,
                   "treat it as a lot constant" % len(npp))
 
 
+#: Studio 的「Open KLARF」用的副檔名（`ui/studio.py`）—— 同一份慣例。
+KLARF_EXTS = (".001", ".klarf", ".txt")
+
+
+def find_klarf(path: str) -> str:
+    """``--klarf`` 給檔案就用它，給**資料夾**就在裡面找一份。
+
+    使用者手上是一個資料夾（KLARF 跟影像放在一起），要他先去看清楚 KLARF 叫
+    什麼名字才跑得動，是一個沒有必要的步驟 —— 而每一個沒必要的步驟都是一次
+    「算了不跑」的機會（推廣鐵則）。
+    """
+    if os.path.isfile(path):
+        return path
+    if not os.path.isdir(path):
+        return path
+    hits = [os.path.join(path, n) for n in sorted(os.listdir(path))
+            if os.path.splitext(n)[1].lower() in KLARF_EXTS
+            and os.path.isfile(os.path.join(path, n))]
+    return hits[0] if hits else path
+
+
 def check_klarf_join(klarf_path: str, man: Dict[str, object], rep: Report,
                      m: Masker) -> Dict[str, str]:
     """manifest 的 ``image_id`` 對不對得上 KLARF 的 ``DEFECTID``。
@@ -769,8 +790,16 @@ def check_klarf_join(klarf_path: str, man: Dict[str, object], rep: Report,
         rep.check("SKIP", "manifest image_id == KLARF DEFECTID",
                   "run this from the ADEPT folder so it can read the KLARF")
         return {}
+    found = find_klarf(klarf_path)
+    if os.path.isdir(found):
+        rep.say("  no KLARF (%s) in that folder"
+                % "/".join(e for e in KLARF_EXTS))
+        rep.check("SKIP", "manifest image_id == KLARF DEFECTID",
+                  "point --klarf at the KLARF file itself")
+        return {}
+    rep.say("  reading    %s" % m.alias("KLARF", os.path.basename(found)))
     try:
-        doc = klarf_core.load(klarf_path)
+        doc = klarf_core.load(found)
     except Exception as exc:                              # noqa: BLE001
         rep.say("  cannot read the KLARF: %s" % exc.__class__.__name__)
         rep.check("SKIP", "manifest image_id == KLARF DEFECTID")
@@ -827,7 +856,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     "and print a masked report that is safe to copy out.")
     ap.add_argument("export_dir", help="GLAS 匯出的資料夾（裡面有 *_label.png）")
     ap.add_argument("--klarf", default="",
-                    help="那一批的 KLARF —— 驗 image_id 是不是 DEFECTID")
+                    help="那一批的 KLARF（給檔案或給**資料夾**都可以）—— "
+                         "驗 image_id 是不是 DEFECTID")
     ap.add_argument("--images", default="",
                     help="原始 SEM 影像資料夾 —— 驗 label 圖跟影像一樣大")
     ap.add_argument("--alignment", default="",

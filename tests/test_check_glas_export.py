@@ -350,3 +350,27 @@ def test_it_never_writes_anything(tmp_path):
 
 def test_a_folder_that_is_not_there_exits_cleanly(tmp_path):
     assert chk.main([str(tmp_path / "nope")]) == 2
+
+
+def test_the_klarf_argument_takes_a_folder_too(tmp_path):
+    """使用者手上是一個資料夾（KLARF 跟影像放在一起）。要他先去看清楚 KLARF
+    叫什麼名字才跑得動,是一個沒必要的步驟 —— 而每個沒必要的步驟都是一次
+    「算了不跑」的機會（推廣鐵則）。"""
+    lot = tmp_path / "lot"
+    lot.mkdir()
+    (lot / "SOMELOT.001").write_text("x", encoding="utf-8")
+    (lot / "notes.md").write_text("x", encoding="utf-8")
+    assert chk.find_klarf(str(lot)).endswith("SOMELOT.001")
+    assert chk.find_klarf(str(lot / "SOMELOT.001")).endswith("SOMELOT.001")
+    # 找不到就原樣回傳（呼叫端看得出來它還是一個資料夾，並說出可以照做的話）
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert chk.find_klarf(str(empty)) == str(empty)
+
+
+def test_a_folder_with_no_klarf_says_what_to_do(tmp_path):
+    d = _export(tmp_path)
+    empty = tmp_path / "nothing"
+    empty.mkdir()
+    _text, v = _run(d, klarf=str(empty))
+    assert v["manifest image_id == KLARF DEFECTID"] == "SKIP"
