@@ -27,9 +27,10 @@
 **開工前讀**：[`AGENTS.md`](AGENTS.md) → [`docs/plans/F11-phase2-features.md`](docs/plans/F11-phase2-features.md)
 **§3.3.4**（Template）與 **§3.3.11**（Profile 最後一輪）→ [`CLAUDE.md`](CLAUDE.md) 的鐵則十條。
 
-**Region-2 的尾巴（一件）**：框的三個尺寸（`box_size` / `gap` / `inset`）還是
-數字，它們該在影像上的框邊直接拖 —— 那要動 `ImageView`（計畫書 §3.3.9 的
-「還沒做的」）。使用者沒有再提，不要主動插隊。
+**Region-2 沒有尾巴了。** 原本記著「三個框尺寸該在影像上拖」，使用者直接否決：
+「Region2 拖框邊應該沒意義吧～ 你拖這張 其他張怎麼辦」。**通則**：可以用拖的只有
+「所有 defect 共用的那一個物件」上的東西（Template 的 GC、Region-3 的 label map）；
+Profile 的框是**逐顆的結果**，拖它等於改輸出。理由寫在計畫書 §3.3.9。
 
 **Region-1 的尾巴（兩件，都不大）**：
 
