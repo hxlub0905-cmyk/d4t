@@ -39,6 +39,11 @@ from ._util import (
 
 _BESIDE = ("beside_vertical", "beside_horizontal")
 
+#: ``place`` 的五個選項 —— 順序就是圖示列由左到右的順序，所以它跟 ``icons``
+#: 那一串必須逐項對齊（``ParamSpec`` 會擋長度不一樣）。
+_PLACE = ("crossing", "beside_vertical", "beside_horizontal",
+          "between_vertical", "between_horizontal")
+
 
 def _prefix_in_section() -> ParamSpec:
     """``output_prefix`` 是共用的那一顆，只差要掛在哪一個小標題底下。"""
@@ -150,6 +155,7 @@ class RoiCrossStep(Step):
                   "the second spacing here and leave it 0 otherwise. Some "
                   "layouts repeat as wide, narrow, wide, narrow rather than at "
                   "one steady pitch, and a single pitch cannot describe that."),
+            advanced=True,
         ),
         ParamSpec(
             name="vertical_sensitivity", type="float", default=0.35, min=0.0,
@@ -195,6 +201,7 @@ class RoiCrossStep(Step):
             max=10000.0, unit="px", label="…and every other one is",
             help=("Only when the spacing alternates between two values - put "
                   "the second spacing here and leave it 0 otherwise."),
+            advanced=True,
         ),
         ParamSpec(
             name="horizontal_sensitivity", type="float", default=0.35, min=0.0,
@@ -205,33 +212,49 @@ class RoiCrossStep(Step):
         ),
         # ---- 框放哪 --------------------------------------------------------
         ParamSpec(
-            name="place", type="choice", default="beside_vertical",
+            name="place", type="icon_choice", default="beside_vertical",
+            choices=list(_PLACE),
+            icons=["place_crossing", "place_beside_v", "place_beside_h",
+                   "place_between_v", "place_between_h"],
+            choice_help={
+                "crossing": "The whole overlap — it contains both materials.",
+                "beside_vertical": "A thin box hugging each side of an "
+                                   "up-and-down stripe, inside a left-to-right "
+                                   "one: the boundary between them, measured on "
+                                   "the other material.",
+                "beside_horizontal": "The same the other way round.",
+                "between_vertical": "The clear gap between two up-and-down "
+                                    "stripes.",
+                "between_horizontal": "The same the other way round.",
+            },
             section="4 · Where the box goes",
-            choices=list(algo_grid.PLACEMENTS), label="Put the box",
-            help=("crossing = the whole overlap, which contains both "
-                  "materials; beside_vertical = a thin box hugging the side of "
-                  "each up-and-down stripe, inside a left-to-right stripe - "
-                  "that is the boundary between the two, measured on the other "
-                  "material; beside_horizontal = the same the other way round; "
-                  "between_vertical = the clear gap between two up-and-down "
-                  "stripes; between_horizontal = the same the other way round."),
+            label="Put the box",
+            help=("Where the box sits relative to the two sets of stripes. "
+                  "The pictures show it: the faint bars are the stripes, the "
+                  "solid ones are where the box goes."),
         ),
         ParamSpec(
-            name="fill_rule", type="choice", default="skip",
+            name="fill_rule", type="icon_choice", default="skip",
+            choices=["fill", "skip", "skip_clear"],
+            icons=["fill_fill", "fill_skip", "fill_skip_clear"],
+            choice_help={
+                "fill": "Assume the stripe is there and box it anyway — for "
+                        "when a spot is missing only because the stripe was "
+                        "too faint to find.",
+                "skip": "Look at what is actually there and leave the spot out "
+                        "if it is a different material: a dark CPODE sitting "
+                        "where a metal gate would be gets no box.",
+                "skip_clear": "The same, and also drop the box on the face of "
+                              "each neighbouring stripe that looks at it — the "
+                              "material next to a CPODE is not the same thing "
+                              "as the material next to a gate.",
+            },
             section="4 · Where the box goes",
-            choices=list(algo_grid.FILL_RULES),
             label="Where a stripe is missing",
             help=("What to do at a spot where the pitch says a stripe should "
-                  "be but the image has none. skip = look at what is actually "
-                  "there and leave the spot out if it is a different material "
-                  "- a dark CPODE sitting where a metal gate would be gets no "
-                  "box. skip_clear = the same, and also drop the box on the "
-                  "face of the neighbouring stripe that looks at it, because "
-                  "the material next to a CPODE is not the same thing as the "
-                  "material next to a gate. fill = assume the stripe is there "
-                  "and box it anyway; use it when a spot is missing only "
-                  "because the stripe was too faint to find. Only has an "
-                  "effect when you filled in a pitch."),
+                  "be but the image has none. The dotted bar in each picture "
+                  "is that missing stripe. Only has an effect when you filled "
+                  "in a pitch."),
         ),
         ParamSpec(
             name="box_size", type="float", default=5.0, min=1.0, max=1000.0,
@@ -243,12 +266,18 @@ class RoiCrossStep(Step):
                   "are actually interested in."),
         ),
         ParamSpec(
-            name="side", type="choice", default="both",
+            name="side", type="icon_choice", default="both",
+            choices=["both", "start", "end"],
+            icons=["side_both", "side_start", "side_end"],
+            choice_help={
+                "both": "A box on each side of every stripe.",
+                "start": "Only the left (or upper) side.",
+                "end": "Only the right (or lower) side.",
+            },
             section="4 · Where the box goes",
-            choices=list(algo_grid.SIDES), label="Which side",
+            label="Which side",
             show_when=("place", _BESIDE),
-            help=("both = a box on each side of every stripe; start = only the "
-                  "left (or upper) side; end = only the right (or lower) side."),
+            help="Which side of the stripe the box goes on.",
         ),
         ParamSpec(
             name="gap", type="float", default=1.0, min=0.0, max=100.0,

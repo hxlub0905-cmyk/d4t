@@ -82,7 +82,7 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC)
 #: UI 認得這個型別：它給的是「建一個」的按鈕加一行摘要，欄位本身唯讀。
 PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
                "image_keys", "curve", "template", "multi_choice",
-               "channel_map", "cell_rois", "region_keys")
+               "channel_map", "cell_rois", "region_keys", "icon_choice")
 
 #: 輸出流的名字可以用哪些字（F10-7）。
 #:
@@ -126,6 +126,24 @@ class ParamSpec:
     min: Optional[float] = None
     max: Optional[float] = None
     choices: Optional[List[str]] = None
+    #: ``icon_choice`` 專用：每一個 choice 配一個圖示名（一一對應）。
+    #:
+    #: 為什麼要一個新型別而不是「choice 加一個旗標」（F11 Region-2）：
+    #: 使用者的話是「我不希望 profile 設定頁面那麼多**文字**，能用圖就用圖」。
+    #: 而 ``place`` 的五個選項是 ``crossing`` / ``beside_vertical`` /
+    #: ``between_horizontal`` … —— 那五個英文詞講的是**五個畫得出來的形狀**，
+    #: 用一排小圖就答完了，下拉選單則要求使用者先把詞翻譯成圖再選。
+    #:
+    #: **只有「不看資料就畫得出來」的選項適用。** ``vertical_select``（最亮的
+    #: 那一組是哪一組）看的是這張影像，畫不出通用的圖示 —— 那種要畫在影像上，
+    #: 不是畫在按鈕上。
+    #:
+    #: 圖示名要在 ``ui.widgets.GLYPH_ICONS`` 裡（``core`` 不 import Qt，所以那條
+    #: 檢查在 UI 那一側的測試，見 `test_card_invariants`）。
+    icons: Optional[List[str]] = None
+    #: ``icon_choice`` 專用：每一個 choice 一句 tooltip。圖示看得懂形狀，
+    #: 但「為什麼要選它」還是要有地方講 —— 只是那個地方不該佔畫面。
+    choice_help: Optional[Dict[str, str]] = None
     unit: str = ""
     label: str = ""
     #: 文字參數的合法格式（正規表達式）。填了就在 ``validate_params`` 擋下來，
@@ -209,7 +227,16 @@ class ParamSpec:
         if not str(self.help).strip():
             raise ParamError(f"parameter '{self.name}': help (a plain-language "
                              f"description) must not be empty")
-        if self.type in ("choice", "multi_choice") and not self.choices:
+        if self.type == "icon_choice":
+            if len(self.icons or []) != len(self.choices or []):
+                raise ParamError(
+                    f"parameter '{self.name}': icon_choice needs one icon per "
+                    f"choice ({len(self.choices or [])} choices, "
+                    f"{len(self.icons or [])} icons)")
+        elif self.icons:
+            raise ParamError(f"parameter '{self.name}': only icon_choice takes "
+                             f"icons")
+        if self.type in ("choice", "icon_choice", "multi_choice") and not self.choices:
             raise ParamError(f"parameter '{self.name}': type '{self.type}' "
                              f"requires choices")
         if self.type in ("image_key", "image_keys"):
@@ -283,7 +310,7 @@ class ParamSpec:
                 # 同上：擋在打字的當下，並正規化成「依頁碼排序、", " 分隔」
                 # —— round-trip 要是 identity（見 channels.format_channel_map）。
                 v = format_channel_map(parse_channel_map(value))
-            elif self.type == "choice":
+            elif self.type in ("choice", "icon_choice"):
                 v = str(value)
                 if v not in (self.choices or []):
                     raise ParamError(
@@ -552,7 +579,8 @@ class Step(ABC):
                 {
                     "name": p.name, "type": p.type, "default": p.default,
                     "help": p.help, "min": p.min, "max": p.max,
-                    "choices": p.choices, "unit": p.unit,
+                    "choices": p.choices, "icons": p.icons,
+                    "choice_help": p.choice_help, "unit": p.unit,
                     "label": p.label or p.name,
                     "pattern": p.pattern,
                     # ``("method", ("percentile",))`` → JSON-safe 的兩個 list。

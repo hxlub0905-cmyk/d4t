@@ -128,6 +128,13 @@ GLYPH_ICONS = (
     # 的差別 —— 那條線畫粗、被對齊的方塊畫細，一眼看得出誰對到誰。
     "align_left", "align_center", "align_right",
     "align_top", "align_middle", "align_bottom",
+    # Profile 卡的三個下拉改成圖示（F11 Region-2）。每一個都是**一張小小的
+    # 版圖**：兩根直條紋 × 一條橫條紋，把那個選項會放框的地方點亮。使用者的話
+    # 是「能用圖就用圖」—— 而 `beside_vertical` 這種詞講的正好就是一個形狀。
+    "place_crossing", "place_beside_v", "place_beside_h",
+    "place_between_v", "place_between_h",
+    "side_both", "side_start", "side_end",
+    "fill_fill", "fill_skip", "fill_skip_clear",
 )
 
 
@@ -262,6 +269,8 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         p.drawLine(QPointF(ax1, ay1), QPointF(ax1, ay1 + head))
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
+    elif n.startswith(("place_", "side_", "fill_")):
+        _draw_profile_glyph(p, n, w, h, color, pen)
     elif n == "roi_cursor":
         # 一支箭頭游標：**選**已經有的框（不是畫新的）。
         p.setPen(Qt.NoPen)
@@ -411,6 +420,83 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
                          % (name, ", ".join(GLYPH_ICONS)))
 
 
+def _draw_profile_glyph(p: QPainter, name: str, w: float, h: float,
+                        color: str, pen: QPen) -> None:
+    """Profile 卡那三個下拉的圖示：一張小版圖，把會放框的地方點亮。
+
+    共用的畫法：**條紋畫成淡的底**（它們是背景 —— 「哪裡有材質」），
+    **框畫成實心的亮塊**（那才是這個選項在講的東西）。十一顆並排時唯一的差別
+    就是亮塊在哪，而那正好就是這些選項唯一的差別。
+
+    ⚠ **這些圖要在 21 px 下讀得出來。** 第一版畫得很細（薄框 ``w*0.07`` ＝
+    1.5 px、兩根直條紋加一條橫帶），render 出來五個 ``place`` 幾乎一模一樣 ——
+    在這個尺寸下，「精確」跟「看得懂」是衝突的，而看得懂才是這一輪的目標。
+    所以每一塊都不小於邊長的 1/5，細節能砍就砍。
+    """
+    faint = QColor(color)
+    faint.setAlpha(58)
+    solid = QColor(color)
+
+    def blk(x0, y0, x1, y1, on):
+        p.setPen(Qt.NoPen)
+        p.setBrush(solid if on else faint)
+        p.drawRect(QRectF(x0 * w, y0 * h, (x1 - x0) * w, (y1 - y0) * h))
+
+    if name.startswith("place_"):
+        if name == "place_crossing":
+            blk(0.34, 0.05, 0.66, 0.95, False)          # 直的
+            blk(0.05, 0.34, 0.95, 0.66, False)          # 橫的
+            blk(0.34, 0.34, 0.66, 0.66, True)           # 交會處
+        elif name == "place_beside_v":
+            blk(0.40, 0.05, 0.60, 0.95, False)
+            blk(0.14, 0.30, 0.36, 0.70, True)
+            blk(0.64, 0.30, 0.86, 0.70, True)
+        elif name == "place_beside_h":
+            blk(0.05, 0.40, 0.95, 0.60, False)
+            blk(0.30, 0.14, 0.70, 0.36, True)
+            blk(0.30, 0.64, 0.70, 0.86, True)
+        elif name == "place_between_v":
+            blk(0.06, 0.05, 0.26, 0.95, False)
+            blk(0.74, 0.05, 0.94, 0.95, False)
+            blk(0.32, 0.05, 0.68, 0.95, True)
+        else:                                            # between_horizontal
+            blk(0.05, 0.06, 0.95, 0.26, False)
+            blk(0.05, 0.74, 0.95, 0.94, False)
+            blk(0.05, 0.32, 0.95, 0.68, True)
+    elif name.startswith("side_"):
+        # 跟 place_beside_v 的差別刻意做在**高度**：這裡的塊是滿高的
+        blk(0.42, 0.05, 0.58, 0.95, False)
+        if name in ("side_both", "side_start"):
+            blk(0.18, 0.05, 0.38, 0.95, True)
+        if name in ("side_both", "side_end"):
+            blk(0.62, 0.05, 0.82, 0.95, True)
+    else:
+        # 三格，中間那一根**不見了**。畫的是「哪幾格拿得到框」——
+        # 那才是這個參數真正在決定的事。
+        # 缺的那一格畫成**虛線外框**而不是淡色實心：淡色實心在 21 px 下讀起來
+        # 仍然是一根，於是 fill 與 skip 長得一樣（render 出來確認過）。
+        def ghost(x0, x1):
+            p.setPen(QPen(QColor(color), max(1.0, w / 20.0), Qt.DotLine))
+            p.setBrush(Qt.NoBrush)
+            p.drawRect(QRectF(x0 * w, 0.06 * h, (x1 - x0) * w, 0.88 * h))
+
+        if name == "fill_fill":
+            blk(0.08, 0.05, 0.30, 0.95, True)
+            blk(0.39, 0.05, 0.61, 0.95, True)           # 補上去的那一根
+            blk(0.70, 0.05, 0.92, 0.95, True)
+        elif name == "fill_skip":
+            blk(0.08, 0.05, 0.30, 0.95, True)
+            ghost(0.39, 0.61)                            # 缺的那一根：沒有框
+            blk(0.70, 0.05, 0.92, 0.95, True)
+        else:                                            # skip_clear
+            # 鄰居**朝向缺口的那半邊**也不要 —— 所以兩根都只剩外側一半
+            blk(0.08, 0.05, 0.19, 0.95, True)
+            ghost(0.39, 0.61)
+            blk(0.81, 0.05, 0.92, 0.95, True)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+
+
 def _paint_glyph(widget: QWidget, name: str, side: str = "center") -> None:
     """把 ``name`` 畫到 ``widget`` 上（給 icon 按鈕的 ``paintEvent`` 用）。
 
@@ -426,7 +512,8 @@ def _paint_glyph(widget: QWidget, name: str, side: str = "center") -> None:
     # 工具鈕才放到 21 —— 使用者回報「圖示只佔一半，蠻醜的」，那是把大鈕配
     # 小圖示的結果。門檻式而不是等比，是為了讓既有的鈕逐像素不變。
     side_px = float(min(r.width(), r.height()))
-    size = max(9.0, min(side_px, 21.0 if side_px >= 30.0 else 15.0))
+    size = (max(9.0, min(side_px, 15.0)) if side_px < 30.0
+            else max(21.0, min(side_px * 0.62, 40.0)))
     colour = widget.palette().color(QPalette.ButtonText).name()
     p = QPainter(widget)
     if side == "left":
@@ -1965,6 +2052,69 @@ class TemplateField(QWidget):
                 % (w, h, len(self._value) / 1024.0))
 
 
+class IconChoice(QWidget):
+    """``icon_choice`` 參數的編輯器：一排圖示鈕，選中的那顆亮著（F11 Region-2）。
+
+    為什麼不是下拉選單
+    ------------------
+    使用者的話：「我不希望 profile 設定頁面那麼多**文字**，能用圖就用圖。」
+    而 ``place`` 的五個值（``crossing`` / ``beside_vertical`` /
+    ``between_horizontal`` …）講的是**五個畫得出來的形狀** —— 下拉選單要求
+    使用者先把那個英文詞翻譯成一張圖，再選；一排小圖是直接把那張圖給他。
+
+    每顆鈕的**名字**退到 tooltip：說明還在，只是不佔畫面（同模板編輯器那一列
+    工具鈕的做法）。
+    """
+
+    changed = Signal(str)
+
+    def __init__(self, choices: Sequence[str], icons: Sequence[str],
+                 value: str = "", helps: Optional[Dict[str, str]] = None,
+                 parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(3)
+
+        self._buttons: Dict[str, IconButton] = {}
+        helps = dict(helps or {})
+        for name, icon in zip(list(choices), list(icons)):
+            name, icon = str(name), str(icon)
+            b = IconButton(icon, helps.get(name) or _spell(name), self,
+                           kind="ghost")
+            b.setCheckable(True)
+            b.setProperty("shape", "tool")
+            b.clicked.connect(lambda _c=False, n=name: self._pick(n))
+            row.addWidget(b)
+            self._buttons[name] = b
+        row.addStretch(1)
+
+        self._value = ""
+        self.set_text(value)
+
+    def text(self) -> str:
+        return self._value
+
+    def set_text(self, value: str) -> None:
+        v = str(value or "")
+        # 認不得的值（手寫 recipe）**不要偷偷改掉** —— 一顆都不亮，比亮錯一顆
+        # 誠實（使用者至少看得出這裡有問題）。
+        self._value = v
+        for name, b in self._buttons.items():
+            b.setChecked(name == v)
+            b.setProperty("active", "true" if name == v else "false")
+            restyle(b)
+
+    def _pick(self, name: str) -> None:
+        self.set_text(name)
+        self.changed.emit(name)
+
+
+def _spell(value: str) -> str:
+    """``beside_vertical`` → ``Beside vertical``（沒有 help 時的備援名字）。"""
+    return str(value).replace("_", " ").strip().capitalize()
+
+
 class CellRoisField(QWidget):
     """``cell_rois`` 參數的編輯器：一顆按鈕 + 現在標了什麼（F11 Region-1）。
 
@@ -2460,6 +2610,14 @@ class ParamForm(QWidget):
         if ptype == "channel_map":
             w = ChannelMapField("" if value is None else str(value),
                                 min_rows=self._image_count)
+            w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
+            return w
+
+        if ptype == "icon_choice":
+            w = IconChoice([str(c) for c in (spec.get("choices") or [])],
+                           [str(i) for i in (spec.get("icons") or [])],
+                           "" if value is None else str(value),
+                           spec.get("choice_help") or {})
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 
