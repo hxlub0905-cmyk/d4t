@@ -29,8 +29,19 @@
 照 v4 的欄位寫 manifest）。
 
 ⚠ 開工前先讀 `GLAS-INTERFACE.md` §3.4／§3.6：`max_boxes` 的 64 在這條路上會
-**安靜地砍掉 95%**（實測一層 1014 個矩形），而 layer 名（`L17/D0` 那種）
-一定要有一層固定的改寫規則。
+**安靜地砍掉 95%**（合成同尺寸同覆蓋率測出一層 1014 個矩形），而 layer 名
+（`L17/D0` 那種）一定要有一層固定的改寫規則。
+
+**還缺一個數字**（要等使用者回公司才量得到）：真實 label 上每一層的
+`pieces / rectangles`。合成的那組是「拆出來的矩形數 = 上千」，但**真實資料上
+pieces 跟 rectangles 差多少還不知道** —— 差很大就證實「層被後面畫的層切碎」
+在這批資料上真的會發生，而那會影響 `roi_from_mask` 怎麼設計。
+量法：`python tools\check_glas_export.py <匯出資料夾> --samples 2`
+（v4 之後不必再給 `--klarf` / `--images`）。
+
+**不必等那個數字就能做的**：第 1 步（`make_sample_rsem.py` 的 label sidecar
+產生器）整支都是家用機的工作，而且它決定不了設計 —— 它只是把「拿得到資料」
+這件事補上。
 
 **開工前讀**：[`AGENTS.md`](AGENTS.md) → [`docs/plans/F11-phase2-features.md`](docs/plans/F11-phase2-features.md)
 **§3.3.4**（Template）、**§3.3.11**（Profile 單方向）、

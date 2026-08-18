@@ -25,9 +25,15 @@ Region-3（GDS mode）要吃 GLAS 匯出的 ``<id>_label.png`` + manifest。使�
 所以**不需要 OpenCV 也跑得動** —— 而且那正好是要查的問題之一：label 圖到底是
 單通道 uint8 還是 palette／RGB。
 
+⚠ **廠內那份 GLAS 比 GitHub 上的新**（2026-08-18 實測）：manifest 是
+``mmh-gds-overlay-v4``，逐列帶 ``id_source`` / ``page`` / ``width_px`` /
+``height_px`` / ``nm_per_px``。也就是 `docs/GLAS-INTERFACE.md` §4 的「建議 3」
+**已經做完了** —— 有那幾格就不必猜 join key、也不必自己去比尺寸。
+這支兩種都吃：v4 用 manifest 自己的欄位，v3 退回去比實際檔案。
+
 這支檢查的每一條，都是讀 GLAS 的程式碼讀出來的
 ----------------------------------------------
-（GLAS commit bef5492；下面每一條都標了出處）
+（GLAS commit bef5492 = v3；v4 的部分是從一份真實匯出的報告看到的）
 
 * ``glas/core/overlay_export.py::export_one_image`` —— 檔名是
   ``f"{base}_label.png"``，而 ``base = _safe_name(image_id)``，
@@ -37,12 +43,21 @@ Region-3（GDS mode）要吃 GLAS 匯出的 ``<id>_label.png`` + manifest。使�
 * ``glas/core/fine_align.py::render_label_image`` —— ``lbl[m > 0] = label_id``，
   **後面的層會蓋掉前面的層**。所以某一層可能在某些影像上被蓋到一個像素都不剩，
   而 manifest 的 ``label_map`` 仍然列著它。這支會數每個 id 的像素。
-* ``gds_align_tool.py::_write_manifest`` —— ``overlay_manifest.json``，
-  schema ``mmh-gds-overlay-v3``；``label_map`` **只有匯出時有開 label 才會寫進去**。
-* 同上 —— manifest **沒有** ``width_px`` / ``height_px``
-  （`docs/GLAS-INTERFACE.md` §4「建議 3」還沒做），所以尺寸只能自己比。
-* ``gds_align_tool.py::ALIGNMENT_COLUMNS`` —— alignment 檔的**檔名是使用者選的**，
-  所以這支是靠 schema 字串去找它，不是靠檔名。
+* ``gds_align_tool.py::_write_manifest`` —— ``overlay_manifest.json``；
+  ``label_map`` **只有匯出時有開 label 才會寫進去**。而 ``overlay_manifest.csv``
+  是用**平台預設編碼**寫的（Windows 上是 cp950），JSON 那一份才安全
+  （``json.dump`` 預設 ``ensure_ascii=True``）—— 所以這支只讀 JSON。
+* ``gds_align_tool.py::ALIGNMENT_COLUMNS`` —— alignment 檔的**檔名與資料夾都是
+  使用者在另一個對話框選的**，所以這支是靠 schema 字串去找它，不是靠檔名，
+  而且它常常根本不在匯出資料夾裡（``--alignment`` 可以直接指過去）。
+
+它還會量一件**設計用**的事
+--------------------------
+把抽樣的那張 label 拆一次，印出每一層的 **pieces（連通元件）** 與
+**rectangles（精確矩形分解）**。那不是健康檢查，是 Region-3 的設計輸入：
+rectangles 是 ADEPT 真的要存幾個框（既有 Region 卡的 ``max_boxes`` 預設 64，
+在這條路上會安靜地砍掉大部分），pieces 是「一份」有幾個。兩者差很大時，
+意思是那一層正被後面畫的層切碎。
 """
 from __future__ import annotations
 
