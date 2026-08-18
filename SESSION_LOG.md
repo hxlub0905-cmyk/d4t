@@ -22,8 +22,11 @@
 **現在的位置**：Phase 2 的 **Input ✅**、**Enhance ✅**、
 **Region-1（Template）✅**、**Region-2（Profile：2a 圖示、2b 點曲線選材質、
 2c 單方向）✅**，加上跨兩張卡的「靠邊的框不要」與疊框分色（第八輪）。
-下一段是 **Region-3（`roi_from_mask` / GDS）**，
-第一步是在 `tools/` 生一份合成 label map（家用機沒有 GLAS 的輸出）。
+下一段是 **Region-3（`roi_from_mask` / GDS）**，**只做 RSEM**（單張 + KLARF；
+使用者定調，理由見計畫書 §3.3.13）。健檢腳本已經有了
+（`tools/check_glas_export.py`，第九輪），等使用者貼真實匯出的報告回來校欄位；
+不等的話，下一步是在 `tools/` 幫 `make_sample_rsem.py` 加一支 label sidecar
+產生器（**圖案要刻意非週期**）。
 
 **開工前讀**：[`AGENTS.md`](AGENTS.md) → [`docs/plans/F11-phase2-features.md`](docs/plans/F11-phase2-features.md)
 **§3.3.4**（Template）、**§3.3.11**（Profile 單方向）、
@@ -40,6 +43,40 @@
 
 **還欠的一件（不屬於 Region 段）**：那張「比較兩個區域」的卡（計畫書 §3.3.6 的
 最後一段）。它屬於 **Measure** 段，不要插隊。今天比較是發生在分數表達式裡的。
+
+---
+
+### 第九輪：GDS 開工前，先寫一支健檢（同日）
+
+Region-3 定調成**只做 RSEM**（使用者：GLAS 當初是瞄著 RSEM 大圖對的，
+patch 太小、可供對位的 layout 太少，而且 GLAS 那邊 patch 的 module 沒打通；
+GDS 的使用時機通常在**非週期性重複區域**）。那一刀砍掉的東西比看起來多 ——
+`GLAS-INTERFACE.md` §4 的「必要 1（多頁 TIFF 的 page 對應）」與「必要 2（對位用
+第幾頁）」**都不需要了**，一顆一個檔而已。
+
+真實資料在只能複製文字出來的那台機器上，所以第一步不是寫卡片，是寫
+**`tools/check_glas_export.py`** —— 把匯出資料夾檢查一遍，印出一份**預設遮蔽、
+可以直接貼出來**的報告（layer 名 → `L1`、defect id → `IMG1`、路徑不印，只留
+結構與格式）。純標準函式庫，PNG 是自己讀的（`zlib` + IHDR/IDAT），所以不裝
+OpenCV 也跑得動 —— 而那正好是要查的問題之一。
+
+**讀 GLAS 的程式碼（commit `bef5492`）讀出四件契約文件裡沒有、而且錯了不會報錯
+的事**（全部進了 `GLAS-INTERFACE.md` §3.5）：
+
+1. 檔名不是 `<DEFECTID>_label.png`，是 `<_safe_name(DEFECTID)>_label.png` ——
+   非 `[A-Za-z0-9-_.]` 換成底線。而且 `a/b` 與 `a:b` 會折到同一個檔名，
+   後匯出的**覆蓋**前一顆，manifest 兩列的 id 仍然不同。
+2. `render_label_image` 是 `lbl[m > 0] = label_id`，**後面的層蓋掉前面的層** ——
+   一層可能在某些 defect 上被吃光，名字還在 `label_map` 裡。
+3. `_label_view.png` 是 3 通道上色預覽，指錯就把 id 混掉；`_gray.png` 有 blur、
+   背景是 `bg_glv`（80）不是 0，都不能拿來切區域。
+4. `overlay_manifest.csv` 用平台預設編碼寫（Windows 上是 cp950），
+   **JSON 那一份才是安全的**（`ensure_ascii=True`）。
+
+寫測試時抓到自己的一個 bug，而它正是這支腳本存在的理由的反例：**沒有 `_raw.png`
+又沒給 `--images` 時，尺寸檢查根本沒比到，卻印 PASS。** 那份報告是之後所有設計
+決定的依據，一個假綠燈會讓整個 Region-3 蓋在錯的假設上。改成 SKIP，並鎖一條測試
+（`test_a_check_that_could_not_run_says_skip_not_pass`）。
 
 ---
 

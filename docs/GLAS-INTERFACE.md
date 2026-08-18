@@ -67,6 +67,45 @@ worker 都是照「`DefectItem` 帶著哪些影像來源」在算的。卡片自
 
 ---
 
+## 3.5 先驗，再寫程式：`tools/check_glas_export.py`（2026-08-18）
+
+真實資料在**只能複製文字出來**的那台機器上（`AGENTS.md` §2），而卡片要接對，
+猜不出來的東西全都是文字：欄位名、id 的格式、檔名慣例。猜錯的下場不是報錯，
+是整批安靜對不上。
+
+所以有一支健檢：
+
+```
+python tools/check_glas_export.py <匯出資料夾> [--klarf <KLARF>] [--images <SEM 影像資料夾>]
+```
+
+它**預設遮蔽**（layer 名 → `L1`、defect id → `IMG1`、路徑一律不印，只留結構、
+格式與計數），所以整份報告可以直接貼出來；`--reveal` 那一份不要貼。
+純標準函式庫（PNG 是自己讀的），不寫檔、不連網。
+
+### 讀 GLAS 的程式碼讀出來的四件事（commit `bef5492`）
+
+這四件都**不在**上面那張表裡，而且每一件錯了都不會報錯：
+
+1. **檔名不是 `<DEFECTID>_label.png`，是 `<_safe_name(DEFECTID)>_label.png`。**
+   `overlay_export._safe_name` 把非 `[A-Za-z0-9-_.]` 的字元換成底線。
+   所以 ADEPT 配對時必須套**同一個轉換** —— 而且兩個不同的 id（`a/b`、`a:b`）
+   會折到同一個檔名，後匯出的那顆**覆蓋**前一顆，manifest 裡兩列的 id 仍然不同。
+2. **`label_map` 裡的層在某一顆上可能一個像素都沒有。**
+   `fine_align.render_label_image` 是 `lbl[m > 0] = label_id`，**後面的層蓋掉
+   前面的層**。名字還在 manifest 裡，而那一顆的區域是空的。
+3. **`<id>_label_view.png` 是 3 通道的上色預覽**，指錯檔案的話 ADEPT 會把通道
+   平均掉，label id 被混成一堆不存在的值。`_gray.png` 也不能拿來切區域：
+   它有 Gaussian blur、背景是 `bg_glv`（預設 80）不是 0。
+4. **`overlay_manifest.csv` 是用平台預設編碼寫的**（`open(..., "w")` 沒給
+   `encoding`），非 ASCII 的 layer 名在 Windows 上會變成 cp950。
+   **JSON 那一份是安全的**（`json.dump` 預設 `ensure_ascii=True`）——
+   ADEPT 一律讀 `overlay_manifest.json`。
+
+另外兩件是既有事實的確認：`label_map` **只有匯出時勾了 label 才會寫**；
+alignment 檔的**檔名與資料夾都是使用者在另一個對話框選的**，所以它常常不在
+PNG 那個資料夾裡（健檢靠 schema 字串找它，`--alignment` 可以直接指過去）。
+
 ## 4. 要請 GLAS 改的（**這一段可以直接複製過去**）
 
 > 以下是 ADEPT（下游）對 GLAS 匯出的需求。ADEPT 不解析 layout，

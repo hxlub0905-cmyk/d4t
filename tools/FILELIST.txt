@@ -2,10 +2,10 @@
 # 由 tools/make_filelist.py 產生；tests/test_offline_tools.py 會擋住它腐爛。
 f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
-593e295af2c1273f76a872412ea5f585d15895a3 AGENTS.md
+c2b4373a2f7f50b2136d5da23a05223339e447c1 AGENTS.md
 c1e8a3ad072d11efdcbc76e5baf8fca44a3c1df9 CLAUDE.md
 87c3cb2a07ed7a97b98ec30aa139b3dd2f03ff19 README.md
-c70a690f2ace776a61fffc91d1e84cdf97c49cf2 SESSION_LOG.md
+b01feb041d1f7452482e6646ca75ae287a46f7aa SESSION_LOG.md
 650a5d7c8bc6db42eed4054174823bfcfceb7eae adept/__init__.py
 c36c6343079bd506222906f26059cecf6d25ad7f adept/__main__.py
 8a51dfe499b3a9d81434c8a202f2d17c24b71c74 adept/core/__init__.py
@@ -86,15 +86,15 @@ b2dd691199dbc50b01b02de407b321aada8e6a3a adept/ui/welcome.py
 04c5ce471195ac4e2449126ce835b22b4c880cf3 conftest.py
 cf13b359e8b0cbfa4a7ad2318daf00617cb9a9fb docs/ARCHITECTURE.md
 07a71c0e822ff481162dd4c5e409820810cd0a81 docs/FAB-VALIDATION.md
-98ebf9d36d4b270b7f9db3efa902363755a2379a docs/GLAS-INTERFACE.md
+960e3c2826e46a666ed1e3752c9b0e62724a14cd docs/GLAS-INTERFACE.md
 8e18ac4032d5bd9c46723d63055092017d603841 docs/HANDOVER.md
 b258ee9ccb0e12fcdf10e2dcab584fddabe10918 docs/NO-GIT-SETUP.md
 b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
-efa6f604190c57ef13f285a901179aa90ecd9a80 docs/ROADMAP.md
+b3ce4b076f977321b661a0ea447a4098b367f33f docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
-f36500f135d04bec4b893c89d1251daa46e23bac docs/plans/F11-phase2-features.md
+63ae384f3892c4d4dbf2f403091d03d5265e5b8c docs/plans/F11-phase2-features.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
 fdf5dba17526e86ea0990c7853ef652874082324 fab_probe/probe_klarf.py
@@ -115,6 +115,7 @@ c3c815b143149244f93625a14f84421268d0dd0a tests/test_batch_thread_safety.py
 fce64e2110a74db0e23c9aeda3eec7d2282af53a tests/test_calibration.py
 f1c048d012bd7aec54e09b2e0fc9724dcb9f45c2 tests/test_card_invariants.py
 0c593d232de3a3528f4f0b717ad83a48b309364d tests/test_cell_rois.py
+24321517ec5ed2eddfe7c5dbabf34ce9319bbb50 tests/test_check_glas_export.py
 66dac80309d206fba4fb93a3c568c5977af1ec5f tests/test_curve.py
 4b555a9fe3fc98fb1489b2e3b5d1d25d58f1d952 tests/test_dag_branching.py
 1be97f704f93ae3ebc989a569b9e04cd1de639aa tests/test_dataset.py
@@ -207,6 +208,7 @@ bb964880172b6da89aa3a8506d84157a68cd453c tests/test_ui_workers.py
 ffdebe9d79e6fa0d018dd51987f3c5b8bc99fa19 tests/test_viewmodel.py
 7c08c30d0accd084c2ca9ddc8374e0b2c4b2fcc1 tools/_synth.py
 f8c1eef367e78983dd4b33d8a4a7a485366070d6 tools/check_files.py
+eec29f966dac695d2820956f36e95424507c711f tools/check_glas_export.py
 f9d145da0b4de247f1727890baca911bf0ca59dc tools/doctor.py
 eac9fb372e5230539a81868e667bd6c850362a71 tools/fetch_wheels.py
 c152d7c40e74798e920531d787a58491edb97c17 tools/freeze_golden.py

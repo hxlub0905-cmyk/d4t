@@ -197,6 +197,7 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 | `install_offline.py` | **公司機** | ❌ | 用 `wheels\` 裝相依套件 |
 | `doctor.py` | **公司機** | ❌ | 環境自檢 |
 | `fab_probe/probe_*.py` | **公司機** | ❌ | 探測真實資料的格式（單檔，不需要整個 repo）|
+| `check_glas_export.py` | **公司機** | ❌ | 看一份 GLAS 匯出（`*_label.png` + manifest）合不合 ADEPT 的假設，**印出可以貼出來的遮蔽報告**（同 `fab_probe` 那條路；`--reveal` 那一份不要貼）|
 | `get_code.py` / `.ps1` | 公司機（**目前用不了**）| ❌ | 網路通的時候才逐檔抓 |
 
 判準很簡單：**要 git 的都在家用機。** 公司機那幾支一律 stdlib-only 且不碰 git。
@@ -207,6 +208,8 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 
 - **recipe**（Studio 存出來的 JSON）—— 小檔案，用記事本打開全選複製，貼回家用機
 - **`fab_probe` 的輸出** —— 本來就是設計成純文字可以貼出來的
+- **`check_glas_export.py` 的報告** —— 同一條路，而且**預設就遮蔽好了**
+  （layer 名變 `L1`、defect id 變 `IMG1`、路徑一律不印，只留結構與格式）
 - **CSV／報表** —— 太大就先在公司機上看，把結論帶回來就好
 
 所以「在公司機上長期改程式碼」不是這個專案支援的工作方式 ——
