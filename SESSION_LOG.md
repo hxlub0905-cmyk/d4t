@@ -39,9 +39,8 @@ pieces 跟 rectangles 差多少還不知道** —— 差很大就證實「層被
 量法：`python tools\check_glas_export.py <匯出資料夾> --samples 2`
 （v4 之後不必再給 `--klarf` / `--images`）。
 
-**不必等那個數字就能做的**：第 1 步（`make_sample_rsem.py` 的 label sidecar
-產生器）整支都是家用機的工作，而且它決定不了設計 —— 它只是把「拿得到資料」
-這件事補上。
+**第 1 步做完了**（第十一輪，`tools/make_glas_export.py`）。下一步是
+**第 2 步：ingest 掛 sidecar**（`layout_label` 那條流）＋ 載入卡宣告它。
 
 **開工前讀**：[`AGENTS.md`](AGENTS.md) → [`docs/plans/F11-phase2-features.md`](docs/plans/F11-phase2-features.md)
 **§3.3.4**（Template）、**§3.3.11**（Profile 單方向）、
@@ -58,6 +57,32 @@ pieces 跟 rectangles 差多少還不知道** —— 差很大就證實「層被
 
 **還欠的一件（不屬於 Region 段）**：那張「比較兩個區域」的卡（計畫書 §3.3.6 的
 最後一段）。它屬於 **Measure** 段，不要插隊。今天比較是發生在分數表達式裡的。
+
+---
+
+### 第十一輪：Region-3 第 1 步 —— 合成 GLAS 匯出（同日）
+
+`tools/make_glas_export.py`：**掛在既有的 RSEM lot 上**產一份 GLAS 匯出的替身
+（`<id>_label.png` + `_gray.png` + `_label_view.png` + v4 manifest + alignment）。
+
+分開一支而不是改 `make_sample_rsem.py`：那一支撐著一組黃金值，而且 **GLAS 本來
+就是獨立的程式在消費同一個 lot** —— 合成品跟真實 producer 同形狀，配對那條路
+（id 從 KLARF 來、`_safe_name`、檔名慣例）才會被真的走過。
+
+刻意做進去五個難處：非週期的 layout、每層第一塊是 **L 形**、後面的層蓋掉前面的、
+`--miss` 缺檔、`--wrong-size` 尺寸不符。layer 名也刻意長成 `L17/D0` 那個形狀 ——
+用乾淨的名字產測試資料等於把「怎麼改寫成區域名」那一題藏起來。
+
+**兩個自己踩到的**（都是「假資料太漂亮就驗不到東西」的同一個病）：
+
+1. `--eaten` 第一版是「最後一層蓋滿整張圖」→ 那顆 100% 都是同一個 id，其他層
+   **跟背景**一起沒了。它同時不再是一張像樣的 label 圖，也量不出「一層拆成幾個
+   矩形」。要吃掉的是**一層**（畫在受害層的形狀上 + 3px），不是整張圖。
+2. 壞樣本一開始排在**前面**，而開發跟健檢都是抽前幾顆看（`--samples 2`）——
+   每次看到的都是特例。現在固定排在最後：`… 好的 …, eaten, miss, wrong_size`。
+
+17 條新測試，其中最有價值的一條是整合測試：**健檢對這份合成品的判定必須正好是
+那幾條刻意壞掉的**，其餘一條都不准紅。兩支工具一起鎖，格式才不會各走各的。
 
 ---
 

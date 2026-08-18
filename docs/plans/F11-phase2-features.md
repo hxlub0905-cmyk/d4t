@@ -2087,7 +2087,7 @@ Template 要有週期、Profile 要有條紋，**GDS 就是兩者都沒有時的
 | | 做什麼 | 狀態 |
 |---|---|---|
 | 0 | 匯出健檢腳本（遮蔽報告）| ✅ 2026-08-18 |
-| 1 | `make_sample_rsem.py` 加一支 **label sidecar 產生器**：多層、一個 L 形、一個尺寸不符、一顆缺檔，圖案**刻意非週期** | |
+| 1 | **合成 GLAS 匯出** `tools/make_glas_export.py`：掛在 RSEM lot 上，多層、L 形、尺寸不符、缺檔、一層被蓋光，圖案**刻意非週期** | ✅ 2026-08-18 |
 | 2 | ingest 掛 sidecar（`layout_label`）+ 載入卡宣告那條流 | |
 | 3 | `roi_from_mask`：連通元件 → 精確拆成矩形 → 具名區域 | |
 | 4 | 儀表：label 上色預覽 + 「這一顆對到幾個區域」 | |
@@ -2097,6 +2097,47 @@ Template 要有週期、Profile 要有條紋，**GDS 就是兩者都沒有時的
 
 `layout_gray` 這一輪**不接**（使用者同意）—— 它是 die-to-database 的 `ref`，
 那是 Compare 段的題目。ingest 留位置。
+
+#### 3.3.14 第 1 步：合成 GLAS 匯出（✅ 2026-08-18）
+
+`tools/make_glas_export.py`。**掛在既有的 RSEM lot 上**，不是再寫一個 lot
+產生器：
+
+```
+python tools/make_sample_rsem.py /tmp/lot --n 12
+python tools/make_glas_export.py /tmp/lot /tmp/gds
+python tools/check_glas_export.py /tmp/gds --samples 2
+```
+
+分開一支的兩個理由：**`make_sample_rsem.py` 撐著一組黃金值**（動它就要重新
+定錨），而且 **GLAS 本來就是一支獨立的程式在消費同一個 lot** —— 合成品跟真實
+producer 同一個形狀，配對那條路（id 從 KLARF 來、`_safe_name`、檔名慣例）才會
+被真的走過。
+
+##### 刻意做進去的難處（一份「全對又規律」的假資料比沒有更糟）
+
+| 難處 | 為什麼一定要有 |
+|---|---|
+| **非週期的 layout**（亂數矩形，不是等距條紋）| GDS 的使用時機就在非週期區域。等距的測試資料會讓「偷偷假設有週期」的程式碼一路綠燈 |
+| **每層第一塊是 L 形** | 它的 bounding box 會框到別的材質 —— 「取 bbox」與「精確拆矩形」的差別只有這種形狀看得出來 |
+| **後面的層蓋掉前面的層**，`--eaten` 讓某一顆的某一層被蓋光 | 名字還在 `label_map` 裡、區域卻是空的 |
+| `--miss` 缺檔、`--wrong-size` 尺寸不符 | GLAS 被分數門檻擋掉時就長那樣；而尺寸不符是唯一會讓框整片錯位的東西 |
+| **三種 PNG 都產**（label 1 通道 / label_view 3 通道 / gray 有 blur）| `label_view` 有一半的意義是**當陷阱** —— 指錯檔案 ADEPT 會把 id 混掉而且不報錯 |
+
+##### 兩個自己踩到、值得記下來的
+
+1. **`--eaten` 第一版蓋滿整張圖** → 那一顆 100% 都是同一個 id，其他層**跟背景**
+   一起沒了。它同時不再是一張像樣的 label 圖，也量不出「一層拆成幾個矩形」。
+   要吃掉的是**一層**（畫在受害層的形狀上 + 3px），不是整張圖。
+2. **壞樣本一開始放在前面** → 而開發跟健檢都是抽前幾顆看（`--samples 2`），
+   每次看到的都是特例。現在固定排在最後，順序是 `… 好的 …, eaten, miss,
+   wrong_size`。
+
+##### 順手量到的
+
+合成的 256²、三層，一層拆出來是 **4 塊 / 18 個矩形**（L 形加上被後面的層切碎）。
+真實資料上的數字還沒量到（見 §3.3.13）—— 但 pieces 與 rectangles 會差很多這件事
+在合成資料上已經看得到了。
 
 ### 3.4 Compare
 

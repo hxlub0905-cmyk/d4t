@@ -31,6 +31,8 @@
 
 - **全部功能都要能用合成資料開發與驗證。** `tools/make_sample.py` /
   `make_sample_rsem.py` 不是玩具，它們是唯一的開發資料來源。
+  GDS（Region-3）那條路同理：`make_glas_export.py` 產的是 GLAS 匯出的替身，
+  而**驗**它的是 `check_glas_export.py`（那一支跑在公司機上）。
   新功能如果只能用真實資料驗證，那它在家用機上就無法驗證 —— 設計要繞開這件事。
 - **真實資料的假設必須「可探測」而不是「假設對了就好」。** 這就是 `fab_probe/`
   存在的理由：三支 stdlib-only 的單檔腳本，複製到公司機上跑，輸出純文字、
@@ -192,6 +194,7 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 | `make_filelist.py` / `make_text_bundle.py` | **家用機** | ✅ 要 | `release.py` 底下的兩支，通常不直接叫 |
 | `fetch_wheels.py` | **家用機** | ❌ | 抓 Windows wheels，帶 `wheels\` 過去 |
 | `make_mgepi_real.py` / `validate_mgepi.py` | **家用機** | ❌ | 擬真 BSE 合成 lot（MG×EPI×spacer）＋可分性驗證（要 numpy/cv2）|
+| `make_glas_export.py` | **家用機** | ❌ | 合成一份 **GLAS 匯出**（`<id>_label.png` + v4 manifest）掛在 RSEM lot 上 —— Region-3 在家用機唯一的資料來源（要 numpy/cv2）|
 | `freeze_golden.py` | **家用機** | ❌ | 把現在算出來的 feature 表凍成黃金值（重構的安全網，見 `docs/history/plans/F9-dag-streams.md`）|
 | `check_files.py` | **公司機** | ❌ | 哪幾個檔案跟 GitHub 上不一樣（要先複製 `FILELIST.txt`）|
 | `install_offline.py` | **公司機** | ❌ | 用 `wheels\` 裝相依套件 |

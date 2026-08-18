@@ -2,10 +2,10 @@
 # 由 tools/make_filelist.py 產生；tests/test_offline_tools.py 會擋住它腐爛。
 f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
-c2b4373a2f7f50b2136d5da23a05223339e447c1 AGENTS.md
+3677f25b67728f351bfe66dbf696dbd1cefab249 AGENTS.md
 c1e8a3ad072d11efdcbc76e5baf8fca44a3c1df9 CLAUDE.md
 87c3cb2a07ed7a97b98ec30aa139b3dd2f03ff19 README.md
-1b62ef89c7cd299d7b10e5072d41f17cdccff60d SESSION_LOG.md
+855e70f3349ed4db5bf9bbb618eeeb4728443b9d SESSION_LOG.md
 650a5d7c8bc6db42eed4054174823bfcfceb7eae adept/__init__.py
 c36c6343079bd506222906f26059cecf6d25ad7f adept/__main__.py
 8a51dfe499b3a9d81434c8a202f2d17c24b71c74 adept/core/__init__.py
@@ -94,7 +94,7 @@ c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
 b3ce4b076f977321b661a0ea447a4098b367f33f docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
-63ae384f3892c4d4dbf2f403091d03d5265e5b8c docs/plans/F11-phase2-features.md
+739b3d9209a22857c0b943bb3d57d2c4e382759f docs/plans/F11-phase2-features.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
 fdf5dba17526e86ea0990c7853ef652874082324 fab_probe/probe_klarf.py
@@ -143,6 +143,7 @@ ef0102523a022bfda98e41514c14bd9b6a657d1b tests/test_f11_split_load_cards.py
 591460dd7f2ed13dad5ba5aa3337884312e1bfc2 tests/test_histmatch.py
 f99c2421fe691efb20e27f690a066aa2024a325e tests/test_klarf_core.py
 beebe8e22628acc8dff09406c184b3a0ecae0b91 tests/test_klarf_variant_d.py
+f8fea64b403b0c7dedcf9db6082de83aa04baf2d tests/test_make_glas_export.py
 66c195b31faf49fd4341defcd22770e86e05c39a tests/test_make_sample.py
 b614d74319ead1329a9b301b5967f2d4d8b5464f tests/test_no_qt.py
 33071fd9690ad145172ab6a178471283523e3c75 tests/test_no_real_fab_data.py
@@ -216,6 +217,7 @@ d3c3fa7d8b3e0d6a3605a585a67c45d0b6aa650d tools/get_code.ps1
 4d8a556b49b3c29df3e14b975225082e4c8a948d tools/get_code.py
 ad250d60c5c5f97e757842046c23816230704ef1 tools/install_offline.py
 efee47149b17de0a66ea81064f2e4ed143620067 tools/make_filelist.py
+1afa8068d0fd2cf6d4d042f84f66fa85b0037ddd tools/make_glas_export.py
 db5f715f456a86b9eefa80787af4ca71f04fd967 tools/make_mgepi_real.py
 df3dd3f0d16f3e9308b7312e166fbae93e85ca8e tools/make_sample.py
 cd11d6aba3d087b6d30ea50e385fd44f3586f865 tools/make_sample_rsem.py
