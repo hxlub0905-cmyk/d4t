@@ -72,6 +72,7 @@ from adept.core.algo import template as algo_template
 from adept.core.ingest.imageio import load_gray
 from adept.core.pipeline.cellrois import (
     CellRoiError, MAX_REGIONS, format_cell_rois, parse_cell_rois,
+    regions_repeat_at,
 )
 
 from .cell_canvas import (
@@ -518,10 +519,10 @@ class TemplateDialog(QDialog):
             px, py = pitch
             bits = ["%d rectangles" % n]
             if px:
-                bits.append("pitch %d px across" % px)
+                bits.append("pitch %s px across" % _px_text(px))
             if py:
-                bits.append("pitch %d px down" % py)
-            return " · ".join(bits) + " — every gap is the same."
+                bits.append("pitch %s px down" % _px_text(py))
+            return " · ".join(bits) + " — every gap is exactly this."
         if tool == TOOL_PAINT:
             return "Drag over pixels; they merge into rectangles on release."
         if tool == TOOL_CLICK:
@@ -733,9 +734,16 @@ class TemplateDialog(QDialog):
         if kx <= 1 and ky <= 1:
             return []
         times = kx * ky
-        return ["this cell holds %d copies of a %d x %d px repeat, so a patch "
-                "cannot tell which copy it is on - fine if you mark the same "
-                "thing on each, not fine if they differ" % (times, sx, sy)]
+        note = ("this cell holds %d copies of a %d x %d px repeat, so a patch "
+                "cannot tell which copy it is on" % (times, sx, sy))
+        # 而「要不要緊」是可以**判定**的，不是一句要使用者自己小心的叮嚀。
+        if regions_repeat_at(self.canvas.regions(), sx / float(w), sy / float(h)):
+            return [note + " - your regions are the same on every copy, so "
+                           "either answer is right"]
+        return [note + " - ⚠ your regions are NOT the same on every copy, so "
+                       "some defects will be measured on the wrong one. Mark "
+                       "the same thing on each, or rebuild at the smaller "
+                       "cell size"]
 
     def locate_axis(self) -> str:
         gc = self.cell
@@ -828,6 +836,10 @@ class TemplateDialog(QDialog):
     # ---- 框的清單 -----------------------------------------------------------
     def _on_boxes_changed(self, _region: int, _boxes: list) -> None:
         self._refresh_boxes()
+        # 「兩份標得一不一樣」隨著每一個框改變 —— 摘要要跟著重算，
+        # 不然那句警告會停在上一個狀態（畫面不能說謊）。
+        if self.cell is not None:
+            self.report.setText(self.summary())
 
     def _on_canvas_selection(self, _region: int, index: int) -> None:
         if self._syncing:
@@ -853,11 +865,13 @@ class TemplateDialog(QDialog):
         for c in range(4):
             cell = self.box_table.item(row, c)
             try:
-                vals.append(int(round(float(cell.text()))))
+                vals.append(float(cell.text()))
             except (AttributeError, ValueError):
                 self._refresh_boxes()      # 打了不是數字的字 -> 退回去
                 return
-        self.canvas.replace_box(row, self.canvas.from_px(vals))
+        # 手打的數字**照收小數** —— 陣列排出來的位置本來就是小數，而使用者在
+        # 表格裡微調的時候不該被迫把它拉回整數。
+        self.canvas.replace_box(row, self.canvas.from_px(vals), snap=False)
 
     # ---- 同步 ---------------------------------------------------------------
     def _refresh_regions(self) -> None:
@@ -882,8 +896,8 @@ class TemplateDialog(QDialog):
         boxes = regions[ri][1] if 0 <= ri < len(regions) else []
         self.box_table.setRowCount(len(boxes))
         for r, box in enumerate(boxes):
-            for c, v in enumerate(self.canvas.to_px(box)):
-                self.box_table.setItem(r, c, QTableWidgetItem("%d" % v))
+            for c, v in enumerate(self.canvas.to_px_f(box)):
+                self.box_table.setItem(r, c, QTableWidgetItem(_px_text(v)))
         self.box_table.setCurrentCell(self.canvas.selected_box(), 0)
         self._syncing = False
         name = regions[ri][0] if 0 <= ri < len(regions) else "—"
@@ -895,8 +909,10 @@ class TemplateDialog(QDialog):
     def _refresh_units(self) -> None:
         h, w = self.canvas.cell_shape()
         self.box_units.setText(
-            "Whole pixels of one cell (%d × %d px). In the recipe they are "
-            "stored as fractions of a cell — not of the patch." % (w, h))
+            "Pixels of one cell (%d × %d px). Hand-drawn boxes land on whole "
+            "pixels; a multi-add row keeps its exact pitch, so those can be "
+            "fractional. In the recipe they are stored as fractions of a cell "
+            "— not of the patch." % (w, h))
 
     # ---- 內部 ---------------------------------------------------------------
     def _set_ready(self, ready: bool) -> None:
@@ -941,6 +957,16 @@ class TemplateDialog(QDialog):
         self.accepted_setup.emit(self.encoded(), self.locate_axis(),
                                  self.regions_text())
         self.accept()
+
+
+def _px_text(v: float) -> str:
+    """像素值 → 顯示字串：整數就不要小數點（``13``），小數留兩位（``13.5``）。
+
+    硬顯示成整數會讓一排精確等距的框看起來在 29／30 之間跳 —— 那是表格說謊，
+    不是值在跳（使用者 2026-08-18 回報的那件事）。
+    """
+    r = round(float(v), 2)
+    return "%d" % int(r) if abs(r - round(r)) < 1e-9 else ("%.2f" % r).rstrip("0")
 
 
 def _separator(parent: QWidget) -> QWidget:

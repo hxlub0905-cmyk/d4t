@@ -795,15 +795,20 @@ def test_the_dialog_says_the_cell_holds_two_copies(qapp):
     assert "cannot tell which copy" in dlg.summary()
 
 
-def test_multi_add_uses_one_pitch_for_every_gap(qapp):
+def test_multi_add_keeps_one_exact_pitch_for_every_gap(qapp):
     """使用者：「PERIOD 會不穩定，有時是 29 有時是 30，畫布顯示也對不齊。」
 
-    先算小數中心、再逐個四捨五入，間距必然在 29／30 之間跳。現在**間距先取整
-    數，再從第一個錨點排下去** —— 每一段都一樣長。
+    真正的病是**表格說謊**：位置先被逐個四捨五入到整數，於是一個 29.5 的
+    pitch 看起來像 29／30 交錯。第一版的修法（間距先取整）是錯的 —— 使用者
+    自己問回來「改成非整數會比較好嗎（patch 對 template 是對圖）」，而他是對的：
+    整數 30 對上真實的 29.5，第 9 個框會偏 4 px，在 6 px 寬的條紋上就是量到
+    隔壁去了。
+
+    所以位置保持精確，**取整發生在落到 patch 上的那一刻**。
     """
     dlg = tpl_mod.TemplateDialog()
     dlg.load_image(big_image(), "LOT_full.tif")
-    dlg.spin_w.setValue(6)
+    dlg.spin_w.setValue(3)
     dlg.spin_h.setValue(200)
     dlg.spin_nx.setValue(9)
     dlg.spin_ny.setValue(1)
@@ -812,18 +817,37 @@ def test_multi_add_uses_one_pitch_for_every_gap(qapp):
     dlg.canvas.place_array_anchor(0.05, 0.5)
     dlg.canvas.place_array_anchor(0.79, 0.5)
 
-    xs = [dlg.canvas.to_px(b)[0] for b in dlg.canvas.array_preview()]
+    xs = [dlg.canvas.to_px_f(b)[0] for b in dlg.canvas.array_preview()]
     gaps = [b - a for a, b in zip(xs, xs[1:])]
     assert len(gaps) == 8
-    assert len(set(gaps)) == 1, gaps
-    assert dlg.canvas.array_pitch()[0] == gaps[0]
-    assert "every gap is the same" in dlg.tool_hint.text()
-    assert "pitch %d px" % gaps[0] in dlg.tool_hint.text()
+    assert all(abs(g - gaps[0]) < 1e-9 for g in gaps), gaps
+    assert abs(gaps[0] - dlg.canvas.array_pitch()[0]) < 1e-9
 
-    # 真的放下去之後，表格裡的間距也一樣
+    # 提示列把那個（小數的）pitch 講出來 —— 「不穩定」就消失了
+    assert "every gap is exactly this" in dlg.tool_hint.text()
+    assert "pitch %s px" % _fmt(gaps[0]) in dlg.tool_hint.text()
+
+    # 表格顯示的也是它，不是被壓成整數的版本
     dlg.commit_array()
-    xs2 = [dlg.canvas.to_px(b)[0] for b in dlg.canvas.regions()[0][1]]
-    assert len(set(b - a for a, b in zip(xs2, xs2[1:]))) == 1
+    dlg.open_box_table()
+    shown = [float(dlg.box_table.item(r, 0).text())
+             for r in range(dlg.box_table.rowCount())]
+    assert all(abs((b - a) - gaps[0]) < 0.02 for a, b in zip(shown, shown[1:]))
+
+
+def _fmt(v: float) -> str:
+    from adept.ui.template_dialog import _px_text
+    return _px_text(v)
+
+
+def test_hand_drawn_boxes_still_land_on_whole_pixels(qapp):
+    """整數只放掉**陣列**那一支 —— 手拉的時候使用者是對著一個像素邊在瞄。"""
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas.add_box((0.1234, 0.0, 0.2345, 1.0))
+    box = dlg.canvas.regions()[0][1][0]
+    for v, size in zip(dlg.canvas.to_px_f(box), (1, 1, 1, 1)):
+        assert abs(v - round(v)) < 1e-9, box
 
 
 def test_the_next_box_is_previewed_before_you_click(qapp):
@@ -869,3 +893,45 @@ def test_the_array_preview_replaces_the_single_hover(qapp):
     assert dlg.canvas.hover_box() is not None
     dlg.canvas.place_array_anchor(0.3, 0.5)
     assert dlg.canvas.hover_box() is None
+
+
+def test_a_double_cell_with_different_halves_is_called_out(qapp):
+    """k× cell 這條路上**最後一個**會安靜出錯的地方（F11 §3.3.7 第 2 項）。
+
+    確定度已經（正確地）不再因為 k× 扣分，所以如果兩份上標的東西不一樣，
+    這一顆有一半機率量到另一份 —— 而畫面上不會有任何錯誤訊息。
+    「要不要緊」是可以**判定**的：把框整組平移 1/k，看落不落回自己。
+    """
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg._on_double()                                   # 2× cell
+    h, w = dlg.canvas.cell_shape()
+    assert w == 2 * PERIOD
+
+    # 只標左半 -> 兩份不一樣 -> 要警告
+    dlg.canvas.add_box((0.1, 0.0, 0.1, 1.0))
+    assert "NOT the same on every copy" in dlg.summary()
+
+    # 右半也標一塊一樣的 -> 歧義變成無害，警告要**收回去**
+    dlg.canvas.add_box((0.6, 0.0, 0.1, 1.0))
+    assert "the same on every copy" in dlg.summary()
+    assert "NOT the same" not in dlg.summary()
+
+
+def test_the_card_refuses_to_be_configured_that_way_too(qapp):
+    """同一件事在**跑之前**也要看得到 —— 它是設定的性質，不是每一顆的行為。"""
+    from adept.core.pipeline import get_step
+
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg._on_double()
+    dlg.canvas.add_box((0.1, 0.0, 0.1, 1.0))
+
+    cls = get_step("roi_template")
+    params = {"template": dlg.encoded(), "regions": dlg.regions_text()}
+    issues = cls.configuration_issues(params)
+    assert issues and "wrong one" in issues[0]
+
+    dlg.canvas.add_box((0.6, 0.0, 0.1, 1.0))
+    params["regions"] = dlg.regions_text()
+    assert cls.configuration_issues(params) == []

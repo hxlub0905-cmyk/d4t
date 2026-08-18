@@ -52,7 +52,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
-from adept.core.pipeline.cellrois import array_boxes, array_pitch_px
+from adept.core.pipeline.cellrois import array_boxes, array_pitch
 
 from .theme import TOKENS
 from .widgets import _qimage_from_uint8
@@ -259,13 +259,22 @@ class CellCanvas(QWidget):
         return (px / float(w), py / float(h), pw / float(w), ph / float(h))
 
     def to_px(self, box) -> Tuple[int, int, int, int]:
-        """框 → 整數 cell 像素 ``(x, y, w, h)``（表格與摘要用）。"""
+        """框 → **整數** cell 像素（摘要、對齊判斷用；小數請用 :meth:`to_px_f`）。"""
+        return tuple(int(round(v)) for v in self.to_px_f(box))
+
+    def to_px_f(self, box) -> Tuple[float, float, float, float]:
+        """框 → cell 像素，**小數照留**。
+
+        表格顯示的就是這一份：陣列工具的位置刻意是小數，硬顯示成整數的話
+        29.5 會變成一排 29／30 交錯，讀起來像「不穩定」—— 而那是表格說謊，
+        不是值在跳（使用者 2026-08-18 回報的那件事）。
+        """
         h, w = self.cell_shape()
         x, y, bw, bh = (float(v) for v in box)
-        return (int(round(x * w)), int(round(y * h)),
-                max(1, int(round(bw * w))), max(1, int(round(bh * h))))
+        return (x * w, y * h, max(1.0, bw * w), max(1.0, bh * h))
 
     def from_px(self, box) -> Tuple[float, float, float, float]:
+        """cell 像素（可以是小數）→ 相對於一格的比例。"""
         h, w = self.cell_shape()
         x, y, bw, bh = (float(v) for v in box)
         return (x / w, y / h, max(1.0, bw) / w, max(1.0, bh) / h)
@@ -359,9 +368,14 @@ class CellCanvas(QWidget):
         self._commit()
         return len(self._boxes()) - 1
 
-    def add_boxes(self, boxes) -> int:
-        """一次加一整片（陣列／筆刷工具用）；回傳實際加了幾個。"""
-        added = [self.snap(b) for b in boxes]
+    def add_boxes(self, boxes, snap: bool = True) -> int:
+        """一次加一整片（陣列／筆刷工具用）；回傳實際加了幾個。
+
+        ``snap=False`` 給陣列工具用：它算出來的位置**刻意是小數**（見
+        ``cellrois.array_boxes`` 的說明）。筆刷點的是像素，所以它照樣吸附。
+        """
+        added = [self.snap(b) if snap else tuple(float(v) for v in b)
+                 for b in boxes]
         if not added:
             return 0
         self.ensure_region()
@@ -401,11 +415,12 @@ class CellCanvas(QWidget):
             picked.append(index)
         self.set_selection(picked)
 
-    def replace_box(self, index: int, box) -> None:
+    def replace_box(self, index: int, box, snap: bool = True) -> None:
         boxes = self._boxes()
         if 0 <= index < len(boxes):
             self._snapshot()
-            boxes[index] = self.snap(box)
+            boxes[index] = (self.snap(box) if snap
+                            else tuple(float(v) for v in box))
             self._commit()
 
     # ---- 對齊（選起來的那幾個）---------------------------------------------
@@ -503,22 +518,22 @@ class CellCanvas(QWidget):
         first = a[0]
         last = a[1] if len(a) > 1 else a[0]
         h, w = self.cell_shape()
-        # **在整數像素上排**（見 cellrois.array_boxes）：先算小數中心再逐個
-        # 四捨五入，間距會在 29 與 30 之間跳 —— 每個框單獨看都對，整排看起來
-        # 是歪的（使用者實測 9 個框的回報）。
+        # 位置**不取整**（見 cellrois.array_boxes）：pitch 是設計常數，很少剛好
+        # 是整數 px，先取整會讓第 9 個框偏 4 px 而飄離結構。取整發生在落到 patch
+        # 上的那一刻（roi_boxes_in_patch），那時候才知道這一顆的相位。
         return array_boxes(first, last, self._array["w"], self._array["h"],
                            self._array["nx"] if len(a) > 1 else 1,
                            self._array["ny"] if len(a) > 1 else 1,
                            cell_size=(w, h))
 
-    def array_pitch(self) -> Tuple[int, int]:
-        """這一片實際用的間距（整數 cell 像素）—— 提示列要講出來。"""
+    def array_pitch(self) -> Tuple[float, float]:
+        """這一片實際用的間距（cell 像素，**可以是小數**）—— 提示列要講出來。"""
         if self._array is None or len(self._array["anchors"]) < 2:
-            return (0, 0)
+            return (0.0, 0.0)
         h, w = self.cell_shape()
         a = self._array["anchors"]
-        return array_pitch_px(a[0], a[1], self._array["nx"],
-                              self._array["ny"], (w, h))
+        return array_pitch(a[0], a[1], self._array["nx"],
+                           self._array["ny"], (w, h))
 
     def commit_array(self) -> int:
         """把預覽的那一片真的加進區域，**留在陣列模式**（錨點清掉）。
@@ -533,7 +548,7 @@ class CellCanvas(QWidget):
         if not boxes:
             self.update()
             return 0
-        return self.add_boxes(boxes)
+        return self.add_boxes(boxes, snap=False)
 
     def place_array_anchor(self, nx: float, ny: float) -> int:
         """放一個錨點（第三次點擊會重新從第一個開始）。回傳現在有幾個。"""

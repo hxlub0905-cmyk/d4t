@@ -59,7 +59,9 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 
 from ..algo import template as algo_template
-from ..pipeline.cellrois import CellRoiError, parse_cell_rois, region_names
+from ..pipeline.cellrois import (
+    CellRoiError, parse_cell_rois, region_names, regions_repeat_at,
+)
 from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_ALGO, GROUP_REGION, ParamSpec, Step, StepError, register_step,
@@ -233,7 +235,41 @@ class RoiTemplateStep(Step):
             out.append("This card has a template but no regions marked on it. "
                        "Select it, open “Edit template & regions…” and draw at "
                        "least one region on the cell.")
+        else:
+            out.extend(cls._ambiguous_copy_issue(params))
         return out
+
+    @classmethod
+    def _ambiguous_copy_issue(cls, params: Dict[str, Any]) -> List[str]:
+        """cell 是自己的 k 倍，而兩份上標的東西**不一樣** → 會安靜量錯。
+
+        這是 k× cell 這條路上最後一個安靜出錯的地方（F11 §3.3.7 第 2 項）：
+        一顆 patch 分不出自己落在哪一份上，而確定度已經（正確地）不再因此扣分
+        —— 所以如果兩份標得不一樣，這一顆有一半機率量到另一份的東西，
+        **而畫面上不會有任何錯誤訊息**。
+
+        它是**設定**的性質（模板 × 區域），不是每一顆的執行期行為，所以講在
+        這裡，跑之前就看得到。
+        """
+        decoded = algo_template.decode_template(str(params.get("template", "")))
+        if decoded is None:
+            return []
+        cell, (sx, sy) = decoded
+        h, w = cell.shape[:2]
+        if (sx, sy) == (w, h) or sx < 1 or sy < 1:
+            return []
+        try:
+            regions = parse_cell_rois(params.get("regions", ""))
+        except CellRoiError:
+            return []
+        if regions_repeat_at(regions, sx / float(w), sy / float(h)):
+            return []
+        return ["This cell holds %d copies of a %d x %d px repeat, and the "
+                "regions are not the same on each copy. A patch cannot tell "
+                "which copy it is on, so some defects will be measured on the "
+                "wrong one. Either mark the same thing on every copy, or "
+                "rebuild the template at the smaller cell size."
+                % ((w // sx) * (h // sy), sx, sy)]
 
     # ---- 執行 ---------------------------------------------------------------
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:

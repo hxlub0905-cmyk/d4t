@@ -128,3 +128,68 @@ def test_an_array_round_trips_through_the_recipe_string():
     text = format_cell_rois([("epi", array_boxes(
         (0.1, 0.5), (0.7, 0.5), 0.05, 0.4, nx=4, ny=1))])
     assert len(parse_cell_rois(text)[0][1]) == 4
+
+
+# --------------------------------------------------------------------------- #
+# k× cell：把框整組平移 1/k，落不落回自己
+# --------------------------------------------------------------------------- #
+def test_the_same_thing_on_every_copy_is_shift_invariant():
+    from adept.core.pipeline.cellrois import regions_repeat_at
+
+    same = parse_cell_rois("epi: 0.1,0,0.1,1; 0.6,0,0.1,1")
+    assert regions_repeat_at(same, 0.5, 0.0) is True
+
+
+def test_marking_only_one_half_is_not():
+    """兩份標得不一樣 → 這一顆有一半機率量到另一份，而畫面上不會有錯誤訊息。"""
+    from adept.core.pipeline.cellrois import regions_repeat_at
+
+    assert regions_repeat_at(parse_cell_rois("epi: 0.1,0,0.1,1"), 0.5, 0.0) is False
+
+
+def test_the_shift_wraps_round_the_seam():
+    """平移是**環狀**的 —— cell 本來就是重複的，超過一格要繞回來。"""
+    from adept.core.pipeline.cellrois import regions_repeat_at
+
+    wrap = parse_cell_rois("epi: 0.85,0,0.1,1; 0.35,0,0.1,1")
+    assert regions_repeat_at(wrap, 0.5, 0.0) is True
+
+
+def test_a_shifted_box_must_land_on_the_same_name():
+    """ROI1 平移之後落到 ROI2 的位置上不算 —— 那是兩個不同的量測。"""
+    from adept.core.pipeline.cellrois import regions_repeat_at
+
+    cross = parse_cell_rois("a: 0.1,0,0.1,1 | b: 0.6,0,0.1,1")
+    assert regions_repeat_at(cross, 0.5, 0.0) is False
+
+
+def test_no_shift_is_always_invariant():
+    """k = 1（cell 不重複）沒有平移可言，不要在那裡報一個假問題。"""
+    from adept.core.pipeline.cellrois import regions_repeat_at
+
+    assert regions_repeat_at(parse_cell_rois("epi: 0.1,0,0.1,1"), 0.0, 0.0) is True
+
+
+def test_a_two_dimensional_repeat_needs_both_axes_to_land():
+    from adept.core.pipeline.cellrois import regions_repeat_at
+
+    quad = parse_cell_rois(
+        "a: 0.1,0.1,0.1,0.1; 0.6,0.1,0.1,0.1; 0.1,0.6,0.1,0.1; 0.6,0.6,0.1,0.1")
+    assert regions_repeat_at(quad, 0.5, 0.5) is True
+    assert regions_repeat_at(parse_cell_rois("a: 0.1,0.1,0.1,0.1; 0.6,0.1,0.1,0.1"),
+                             0.5, 0.5) is False
+
+
+def test_an_exact_array_keeps_one_pitch_and_an_integer_size():
+    """位置精確、大小取整（見 array_boxes 的說明）。"""
+    from adept.core.pipeline.cellrois import array_boxes, array_pitch
+
+    cell = (320, 240)
+    boxes = array_boxes((0.05, 0.5), (0.79, 0.5), 6 / 320, 0.4, 9, 1,
+                        cell_size=cell)
+    xs = [b[0] * 320 for b in boxes]
+    gaps = [b - a for a, b in zip(xs, xs[1:])]
+    assert all(abs(g - gaps[0]) < 1e-9 for g in gaps)
+    assert abs(gaps[0] - array_pitch((0.05, 0.5), (0.79, 0.5), 9, 1, cell)[0]) < 1e-9
+    assert abs(boxes[0][2] * 320 - 6) < 1e-9          # 大小是使用者打的整數
+    assert abs(gaps[0] - round(gaps[0])) > 0.05, "這一組刻意除不盡"

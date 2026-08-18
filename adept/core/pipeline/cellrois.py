@@ -49,7 +49,7 @@ from .curve import format_number
 
 __all__ = ["CellRoiError", "Region", "Box", "parse_cell_rois",
            "format_cell_rois", "region_names", "array_boxes",
-           "array_pitch_px",
+           "array_pitch", "regions_repeat_at", "SHIFT_TOL",
            "MAX_REGIONS", "MAX_BOXES"]
 
 #: 一個框：``(x, y, w, h)``，相對於一個 cell（0–1）。
@@ -221,20 +221,28 @@ def array_boxes(first_centre: Tuple[float, float],
 
     ``cell_size``：給了就在**整數 cell 像素**上排（見下）。
 
-    間距要不要是整數（使用者 2026-08-18 回報）
-    ------------------------------------------
+    間距要不要取整（使用者 2026-08-18 回報，然後自己推翻了第一版）
+    --------------------------------------------------------------
         「MULTI ADD 像素 PERIOD 會不穩定，舉例有 9 個 BOX，PERIOD 我去看表格
          有時是 29 有時是 30，這樣會造成在畫布顯示也對不齊。」
 
-    真的：先算出小數的中心、再**逐個**四捨五入到整數像素，得到的間距就會在
-    29 與 30 之間跳（真實間距 29.5 的時候，那是「每個都最接近」的必然結果）。
-    每一個框單獨看都對，整排看起來卻是歪的。
+    第一版的處置是「間距先取整、再從第一個錨點排下去」——**那個修法是錯的**，
+    使用者當場問回來：「改成非整數會比較好嗎（主要是畫面，因為 patch 對
+    template 是對圖）」。對：
 
-    所以 ``cell_size`` 給了的時候換一條規則：**間距先取整數，再從第一個錨點
-    一路排下去** —— 每一段都一樣長。代價是最後一個框可能離第二個錨點差幾個
-    像素（9 個框、真實間距 29.5 的話差 4 px），而那個差**看得見**（預覽就在
-    畫面上，而且提示列會把用掉的 pitch 講出來），比一排對不齊的框好判斷。
-    pitch 是設計常數，它本來就該是同一個數字。
+    * 整數 30 對上真實的 29.5 → 誤差**累積**：第 9 個框偏 4 px。6 px 寬的 EPI
+      上那是量到隔壁去了。
+    * 精確 29.5 → 每一個框都在真實位置的半個像素內，只是**表格上**看起來是
+      29／30 交錯。
+
+    而真正的重點是**該在哪裡取整**：``algo/template.roi_boxes_in_patch`` 本來
+    就會在落到 patch 上的時候 ``round(x·cx − phase)``，而每一顆 patch 的相位
+    不同 —— 同一個小數座標在不同 patch 上落到不同的整數像素，**那正是對的**，
+    它追的是那一顆上結構真正的位置。編輯器先取整等於把誤差烤進去。
+
+    所以：**框的大小**照使用者打的整數像素，**位置**保持精確的小數。
+    手拉的框（drag／click／paint）仍然吸附到整數 —— 那時候使用者是對著一個
+    像素邊在瞄，整數就是他的意圖。
     """
     nx, ny = max(1, int(nx)), max(1, int(ny))
     x1, y1 = float(first_centre[0]), float(first_centre[1])
@@ -242,7 +250,10 @@ def array_boxes(first_centre: Tuple[float, float],
     w, h = float(box_w), float(box_h)
 
     if cell_size:
-        return _array_boxes_px(x1, y1, x2, y2, w, h, nx, ny, cell_size)
+        cw, ch = int(cell_size[0]), int(cell_size[1])
+        # 大小取整（使用者打的就是整數 px），位置不取整（見上）
+        w = max(1, int(round(w * cw))) / float(cw)
+        h = max(1, int(round(h * ch))) / float(ch)
 
     def centres(a: float, b: float, n: int) -> List[float]:
         if n <= 1:
@@ -257,42 +268,61 @@ def array_boxes(first_centre: Tuple[float, float],
     return out
 
 
-def _array_boxes_px(x1: float, y1: float, x2: float, y2: float,
-                    w: float, h: float, nx: int, ny: int,
-                    cell_size: Tuple[int, int]) -> List[Box]:
-    """整數 cell 像素上的等距排列（見 :func:`array_boxes` 的說明）。"""
-    cw, ch = int(cell_size[0]), int(cell_size[1])
-    bw = max(1, int(round(w * cw)))
-    bh = max(1, int(round(h * ch)))
+def array_pitch(first_centre: Tuple[float, float],
+                last_centre: Tuple[float, float],
+                nx: int, ny: int,
+                cell_size: Tuple[int, int]) -> Tuple[float, float]:
+    """:func:`array_boxes` 實際用的間距（cell 像素，**可以是小數**）。
 
-    def line(a: float, b: float, n: int, span: int, size: int) -> List[int]:
-        """回傳每個框的**左上角**（整數像素），間距處處相同。"""
-        start = int(round(a * span)) - size // 2
-        if n <= 1:
-            return [start]
-        pitch = int(round((b - a) * span / float(n - 1)))
-        return [start + pitch * i for i in range(n)]
-
-    out: List[Box] = []
-    for py in line(y1, y2, ny, ch, bh):
-        for px in line(x1, x2, nx, cw, bw):
-            out.append((px / float(cw), py / float(ch),
-                        bw / float(cw), bh / float(ch)))
-    return out
-
-
-def array_pitch_px(first_centre: Tuple[float, float],
-                   last_centre: Tuple[float, float],
-                   nx: int, ny: int,
-                   cell_size: Tuple[int, int]) -> Tuple[int, int]:
-    """:func:`array_boxes` 實際會用的間距（整數 cell 像素）—— 給提示列顯示。
-
-    使用者要看得到它：間距取整之後最後一個框會離錨點差幾個像素，而**知道用了
-    哪個 pitch** 比自己從表格反推容易得多。
+    給提示列顯示。使用者要看得到它 —— 表格上那個 29／30 交錯，其實是同一個
+    29.5；把它講出來，「不穩定」這件事就消失了（它本來就沒有不穩定）。
     """
     cw, ch = int(cell_size[0]), int(cell_size[1])
     dx = (float(last_centre[0]) - float(first_centre[0])) * cw
     dy = (float(last_centre[1]) - float(first_centre[1])) * ch
-    px = int(round(dx / float(nx - 1))) if int(nx) > 1 else 0
-    py = int(round(dy / float(ny - 1))) if int(ny) > 1 else 0
+    px = dx / float(nx - 1) if int(nx) > 1 else 0.0
+    py = dy / float(ny - 1) if int(ny) > 1 else 0.0
     return (px, py)
+
+
+#: 判斷「平移之後落回自己」時，兩個框差多少還算同一個（相對於一格）。
+#: 1/2000 格 —— 一個 300 px 的 cell 上是 0.15 px，比任何有意義的差都小。
+SHIFT_TOL = 5e-4
+
+
+def regions_repeat_at(regions: Sequence[Region], shift_x: float,
+                      shift_y: float, tol: float = SHIFT_TOL) -> bool:
+    """把**每一個**區域的每一個框平移 ``(shift_x, shift_y)``，會落回自己嗎。
+
+    為什麼要問這個（F11 §3.3.7 的第 2 項）
+    --------------------------------------
+    使用者可以把 cell 取成量到的週期的 k 倍（「有時候會需要 2X 大 cell」）。
+    那時候一顆 patch **分不出自己落在哪一份上** —— 而那件事**只有在兩份上標的
+    區域不一樣的時候才要緊**：
+
+    * 每一份都標一樣 → 兩個答案都對，歧義無害。
+    * 兩份標得不一樣 → 這一顆可能量到另一份的東西，而**畫面上不會有任何錯誤
+      訊息**。那是這條路上最後一個會安靜出錯的地方。
+
+    所以它是一個可以判定的問題，不是一句要使用者自己小心的叮嚀：把框整組平移
+    1/k，看集合是不是映射回自己。
+
+    平移是**環狀**的（超過一格就繞回來），因為 cell 本來就是重複的。
+    區域的名字也要對上 —— ROI1 平移之後落到 ROI2 的位置上不算數，那是兩個
+    不同的量測。
+    """
+    sx, sy = float(shift_x) % 1.0, float(shift_y) % 1.0
+    if sx < tol and sy < tol:
+        return True                      # 沒有平移可言（k = 1）
+
+    def key(box: Box):
+        x, y, w, h = box
+        return (round((x % 1.0) / tol), round((y % 1.0) / tol),
+                round(w / tol), round(h / tol))
+
+    for name, boxes in regions:
+        here = {key(b) for b in boxes}
+        moved = {key((b[0] + sx, b[1] + sy, b[2], b[3])) for b in boxes}
+        if here != moved:
+            return False
+    return True

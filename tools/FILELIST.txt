@@ -38,7 +38,7 @@ eb269657a9bf68e680224ff26e4230b30df9e500 adept/core/ingest/imageio.py
 03146deb543fddc5cc836c039652a15f5492935d adept/core/pipeline/__init__.py
 f277b6b3e5e65ce8027da01648a0d42d44a64905 adept/core/pipeline/batch.py
 d6a6e8374dba3679cc6c28dd534ece76923f6ce2 adept/core/pipeline/cache.py
-a3a7f286f92227cf0d22437f2cad4caada28c5e3 adept/core/pipeline/cellrois.py
+398124f3c14b8c071de444f31414130991eec424 adept/core/pipeline/cellrois.py
 8d96fd361dcb6e1b81e34bf3ce9f355de654eaec adept/core/pipeline/channels.py
 bc5822860c73a424460de963c0a7ef1b940bd71e adept/core/pipeline/context.py
 e23539efe8cfae76911201bb5b37e0d6dbfde404 adept/core/pipeline/curve.py
@@ -61,7 +61,7 @@ ec3f5caf078d2a81bcbe468c825bd51f2b9d0268 adept/core/steps/normalize.py
 39a00abfe1660aeb6442763a20f32a943af7010a adept/core/steps/roi_cross.py
 10eca7676b56a578aa499d27fd9666bc9dc8c03f adept/core/steps/roi_mask.py
 e8269fc1744fd1bf8d3dd62eb5d96d8712962c79 adept/core/steps/roi_snr.py
-cdd5ca161bea3ec683923eec353e6102f7015aff adept/core/steps/roi_template.py
+a5f8e0d6aa24207c8e2e5d67918decfaf03e228c adept/core/steps/roi_template.py
 1ff626dd992689b11aa96c5c1e1ab3bbd585036c adept/core/steps/snr_map.py
 fd783eb54860de0b9462c6238eeb72aea1657222 adept/core/steps/tone.py
 0e7d37674a365b4c5292ba728f7da61b0aba6b08 adept/core/store/__init__.py
@@ -69,7 +69,7 @@ fd783eb54860de0b9462c6238eeb72aea1657222 adept/core/steps/tone.py
 e69de29bb2d1d6434b8b29ae775ad8c2e48c5391 adept/ui/__init__.py
 1ce158e532ca3e12af81e66ee60dfc77e8d8b081 adept/ui/app.py
 efe5b42adaea7aef95f313fb304df8ee0e0ba269 adept/ui/canvas.py
-d83c7ef2f9a1e4e975566d0ddd84270d14e4626b adept/ui/cell_canvas.py
+43356663d83394cc83a2c63b52150ac59b85921d adept/ui/cell_canvas.py
 41d2bb30bd17a3f34621439faf098018779a274c adept/ui/export_dialog.py
 88d93814bbb34f0756ea935fc9113eccba61cfb4 adept/ui/gallery.py
 7698365a9ce0d5185d969bb971e55b21274b93cb adept/ui/inspectors.py
@@ -77,7 +77,7 @@ b996d921ba547e70d5c78251f70f3b56d3e27ef0 adept/ui/region_check.py
 043a9240742914759667fd4bb01beafd0241ed17 adept/ui/results.py
 f282c5db798f305a76fb190f7265f86eb77fbd86 adept/ui/scope.py
 81a7c943927da26cb5f3538e93c5580fa6cef413 adept/ui/studio.py
-ccad76a41c97d1495c84717dd3572f8a71e03bd3 adept/ui/template_dialog.py
+4be3387c6d9f3656c52d49984bd2380a5f1988dd adept/ui/template_dialog.py
 9969b2dc4458d21336daa399c2c338e3f13df594 adept/ui/theme.py
 434fd16a41917d10fee0f74f72cebff897e81141 adept/ui/viewmodel.py
 b2dd691199dbc50b01b02de407b321aada8e6a3a adept/ui/welcome.py
@@ -94,7 +94,7 @@ c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
 675b2c1b69653f14ba58c8e0043c477e8f80c81e docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
-bd892b6f53fe6912ae48ed19971062dcdd3ed3ec docs/plans/F11-phase2-features.md
+c0bbdbd72200df6fccd081034486a227fc6855e9 docs/plans/F11-phase2-features.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
 fdf5dba17526e86ea0990c7853ef652874082324 fab_probe/probe_klarf.py
@@ -114,7 +114,7 @@ fc105693a52e53f5b37b6c009a1456b9acd8e80f tests/test_align.py
 c3c815b143149244f93625a14f84421268d0dd0a tests/test_batch_thread_safety.py
 fce64e2110a74db0e23c9aeda3eec7d2282af53a tests/test_calibration.py
 f1c048d012bd7aec54e09b2e0fc9724dcb9f45c2 tests/test_card_invariants.py
-3482fa82078094cb04ccba938313a3014a54d526 tests/test_cell_rois.py
+0c593d232de3a3528f4f0b717ad83a48b309364d tests/test_cell_rois.py
 66dac80309d206fba4fb93a3c568c5977af1ec5f tests/test_curve.py
 4b555a9fe3fc98fb1489b2e3b5d1d25d58f1d952 tests/test_dag_branching.py
 1be97f704f93ae3ebc989a569b9e04cd1de639aa tests/test_dataset.py
@@ -178,7 +178,7 @@ e177e180b98272ebb8e25bf39d8d3026e4bcccb1 tests/test_ui_f11_card_aids.py
 74fc6fa1b58f4544c890567b2ee54bf2170c61b3 tests/test_ui_f11_tiff_stack.py
 9a1de6771787615780dc70653b0537ed584f4cac tests/test_ui_f7_10_route_edges.py
 6c1aafccb528f582f9f4e28fcbe7c42bee32f778 tests/test_ui_f7_11_roi.py
-007b381c61e9db7f0fa2989bf313b32d454b349c tests/test_ui_f7_12_template.py
+dc8a3b94da78a92ccc9cea70aaaf8bbe8130138a tests/test_ui_f7_12_template.py
 81309d5e9ecdb912a9d58dddbe3e99b60f6c2b5f tests/test_ui_f7_14_canvas_flow.py
 5897ba84a0bacebd3d416aa6a9d4420d3d339b0a tests/test_ui_f7_15_reading_load.py
 004e47fe38010a966ae1a2432818b63bfe7ac352 tests/test_ui_f7_16_safety_net.py
