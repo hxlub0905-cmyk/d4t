@@ -416,6 +416,8 @@ class StudioWindow(QMainWindow):
         # 「現在要幹嘛」的關卡，而答案永遠是同一個 —— 先載入影像。
         self.model = RecipeModel.starter()
         self.dataset: Optional[Any] = None
+        #: 掛上的 GLAS 匯出有哪幾層（``[(id, layer 名), …]``；沒掛就是空的）。
+        self._gds_layers: List[Any] = []
         self.trial_scores: List[float] = []
         self.trial_results: List[Dict[str, Any]] = []   # M5：Gallery / 輸出的來源
         self.defect_index: int = 0
@@ -4032,6 +4034,9 @@ class StudioWindow(QMainWindow):
                         node.params.get("layers", "") or "").strip():
                     self.model.set_param(nid, "layers", default)
                     filled += 1
+        # 表單的列數要照**這份匯出有幾層**排（`ChannelMapField` 的 labels 版）。
+        self._gds_layers = list(rep.layers)
+        self.param_form.set_label_count(len(rep.layers))
         msg = rep.summary()
         if filled:
             msg += " · filled the layer names into %d card(s)" % filled

@@ -111,7 +111,7 @@ class RoiFromMaskStep(Step):
                   "picture of the wafer."),
         ),
         ParamSpec(
-            name="layers", type="channel_map", default="",
+            name="layers", type="channel_map", default="", row_kind="labels",
             section="2 · Which layers, and what to call them",
             label="Layer number → region name",
             help=("Which layer numbers to turn into regions, and what to call "

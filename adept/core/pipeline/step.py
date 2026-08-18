@@ -212,6 +212,13 @@ class ParamSpec:
     #: 判準：這個數字是不是一個**鄰域的邊長**（濾波核、結構元素、搜尋窗）。
     #: 是就填，其他長度不要填。
     extent: bool = False
+    #: ``channel_map`` 的列**代表什麼**：``"images"``（預設，一列一張圖）或
+    #: ``"labels"``（一列一個 GDS layer id）。F11 Region-3。
+    #:
+    #: 只換三句話（左欄的字、加一列那顆鈕、提示），**資料形狀完全一樣**
+    #: —— 兩者都是「整數 → 名字，空的就是不要」。所以是一個旗標而不是第二個
+    #: widget：抄第二份出來的那份一定會漂移（這個 repo 記過三次）。
+    row_kind: str = "images"
 
     def visible_for(self, params: Optional[Dict[str, Any]]) -> bool:
         """在這組參數下，這一列該不該顯示（沒有 ``show_when`` 就永遠顯示）。"""
@@ -590,6 +597,7 @@ class Step(ABC):
                     "advanced": p.advanced,
                     "direction": p.direction,
                     "extent": p.extent,
+                    "row_kind": p.row_kind,
                 }
                 for p in cls.params
             ],

@@ -2072,11 +2072,25 @@ class ChannelMapField(QWidget):
     #: 這裡只是**顯示**用的 placeholder，真正的命名規則仍然只有 ingest 那一份。
     _DEFAULTS = ("test", "ref")
 
+    #: 一列代表什麼 —— **三句話而已，資料形狀完全一樣**（整數 → 名字，空的就是
+    #: 不要）。所以是一個旗標而不是第二個 widget：抄第二份出來的那份一定會漂移。
+    _WORDS = {
+        "images": ("Image %d", "Add another image",
+                   "Add a row for one more image. A defect with five images "
+                   "(one BSE plus four SE, say) needs five rows."),
+        "labels": ("Layer %d", "Add another layer",
+                   "Add a row for one more layout layer. The rows normally "
+                   "come from the GLAS export — use this only if a layer is "
+                   "missing from it."),
+    }
+
     def __init__(self, value: str = "", parent: Optional[QWidget] = None,
-                 min_rows: int = 0):
+                 min_rows: int = 0, row_kind: str = "images"):
         super().__init__(parent)
         self._edits: List[QLineEdit] = []
         self._emitting = False
+        self._row_kind = str(row_kind)
+        self._words = self._WORDS.get(self._row_kind, self._WORDS["images"])
         #: 這批資料**一顆有幾張圖**（0 = 還不知道）。列數至少排到這個數 ——
         #: 使用者要回答「哪一張是 BSE」的時候，唯一需要的事實就是「有幾張」，
         #: 而那個數字在資料載進來的那一刻就知道了（F11 Input-1 的尾巴）。
@@ -2092,11 +2106,9 @@ class ChannelMapField(QWidget):
         self._grid.setVerticalSpacing(2)
         outer.addLayout(self._grid)
 
-        self._add_btn = QPushButton("Add another image", self)
+        self._add_btn = QPushButton(self._words[1], self)
         self._add_btn.setProperty("variant", "secondary")
-        self._add_btn.setToolTip(
-            "Add a row for one more image. A defect with five images "
-            "(one BSE plus four SE, say) needs five rows.")
+        self._add_btn.setToolTip(self._words[2])
         self._add_btn.clicked.connect(lambda: self._add_row(emit=True))
         outer.addWidget(self._add_btn, 0, Qt.AlignLeft)
 
@@ -2122,8 +2134,8 @@ class ChannelMapField(QWidget):
                     pairs[int(left.strip())] = right.strip()
                 except ValueError:          # 壞值由 core 的 parse 負責報錯
                     continue
-        rows = max(len(self._DEFAULTS), max(pairs) if pairs else 0,
-                   self._min_rows)
+        floor = 0 if self._row_kind == "labels" else len(self._DEFAULTS)
+        rows = max(floor, max(pairs) if pairs else 0, self._min_rows)
         self._emitting = True
         try:
             while len(self._edits) < rows:
@@ -2136,6 +2148,10 @@ class ChannelMapField(QWidget):
     def row_count(self) -> int:
         return len(self._edits)
 
+    def row_kind(self) -> str:
+        """一列代表什麼（``"images"`` / ``"labels"``）。"""
+        return self._row_kind
+
     def set_min_rows(self, n: int) -> None:
         """這批資料一顆有幾張圖 —— 列數至少排到這麼多（不動已經填的名字）。"""
         self._min_rows = max(0, int(n))
@@ -2143,13 +2159,17 @@ class ChannelMapField(QWidget):
 
     # -- 內部 ----------------------------------------------------------------
     def _default_name(self, index: int) -> str:
+        if self._row_kind == "labels":
+            # 空著 = **這一層不要**（不是「用預設名」）—— 兩者差很多，
+            # 所以 placeholder 要講的是後果，不是一個假的名字。
+            return "(no region for this layer)"
         if index < len(self._DEFAULTS):
             return self._DEFAULTS[index]
         return "img%d" % (index + 1)
 
     def _add_row(self, emit: bool = True) -> None:
         i = len(self._edits)
-        label = QLabel("Image %d" % (i + 1), self)
+        label = QLabel(self._words[0] % (i + 1), self)
         label.setObjectName("paramHint")
         edit = QLineEdit(self)
         edit.setPlaceholderText(self._default_name(i))
@@ -2399,6 +2419,10 @@ class ParamForm(QWidget):
         #: 編輯器用得到它 —— 但它是「資料的事實」而不是「這張卡的參數」，
         #: 所以放在表單上（一份資料一次）而不是塞進 `set_step` 的簽章。
         self._image_count = 0
+        #: 目前掛上的 GLAS 匯出**有幾層**（0 = 沒掛）。`channel_map` 的
+        #: `row_kind="labels"` 靠它排列數 —— 使用者打開那一格時，第一個要知道
+        #: 的是「這份匯出有哪幾層」，而那在掛上去的那一刻就知道了。
+        self._label_count = 0
         #: 這張卡吃進來的那條流的灰階分布（墊在曲線後面，見 `set_histogram`）。
         self._hist: List[float] = []
         #: 小標題：``section 名 -> [QLabel]`` 與 ``參數名 -> section 名``。
@@ -2466,7 +2490,25 @@ class ParamForm(QWidget):
             return
         self._image_count = n
         for row in self._rows.values():
-            if isinstance(row.editor, ChannelMapField):
+            if isinstance(row.editor, ChannelMapField) \
+                    and row.editor.row_kind() == "images":
+                row.editor.set_min_rows(n)
+
+    def set_label_count(self, n: int) -> None:
+        """告訴表單「掛上的 GLAS 匯出有幾層」（F11 Region-3）。
+
+        跟 :meth:`set_image_count` 同一個形狀，而且**兩者不可以互相蓋掉** ——
+        一張 recipe 上可能同時有 `load_patch`（一列一張圖）與 `roi_from_mask`
+        （一列一層）兩個 `channel_map`，用同一個數字去排兩者的列數，其中一邊
+        一定是錯的。
+        """
+        n = max(0, int(n))
+        if n == self._label_count:
+            return
+        self._label_count = n
+        for row in self._rows.values():
+            if isinstance(row.editor, ChannelMapField) \
+                    and row.editor.row_kind() == "labels":
                 row.editor.set_min_rows(n)
 
     def set_histogram(self, counts: Optional[Sequence[float]]) -> None:
@@ -2801,8 +2843,12 @@ class ParamForm(QWidget):
             return w
 
         if ptype == "channel_map":
-            w = ChannelMapField("" if value is None else str(value),
-                                min_rows=self._image_count)
+            kind = str(spec.get("row_kind") or "images")
+            w = ChannelMapField(
+                "" if value is None else str(value),
+                min_rows=(self._label_count if kind == "labels"
+                          else self._image_count),
+                row_kind=kind)
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 

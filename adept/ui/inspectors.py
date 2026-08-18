@@ -37,7 +37,9 @@ import math
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
+from PySide6.QtGui import (
+    QBrush, QColor, QFont, QFontMetricsF, QPainter, QPen, QPolygonF,
+)
 from PySide6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
 from ..core.steps._util import CLIP_FRAC, PAIR_FEATURES
@@ -1321,6 +1323,116 @@ class InputInspector(Inspector):
 #: Enhance 的卡共用同一個儀表：它們做的事不同，但**要回答的問題是同一個**
 #: （我把資訊弄掉了嗎）。F7-20 把九張併成四張，所以這裡只剩四個 key ——
 #: 少的那五個不是被拿掉，是變成 ``normalize`` / ``tone`` 的一個下拉選項。
+class GdsInspector(Inspector):
+    """`roi_from_mask`：**這一顆對到了哪幾層**、各幾塊、多大。
+
+    為什麼是一張表而不是「label map 的上色預覽」
+    ------------------------------------------
+    第一版打算畫一張上色的 label（label map 的像素值是 1、2、3，在一般檢視器裡
+    **幾乎全黑** —— 那正是 GLAS 另外產一張 ``_label_view.png`` 的原因）。
+    但**形狀已經看得到了**：這張卡吐的每一層都是一個具名區域，而預覽影像上的
+    疊框本來就一個區域一個顏色、還帶圖例（2026-08-18 的疊框分色）——
+    而且是畫在**真的那張 SEM 影像**上，比另外看一張示意圖有用。
+
+    所以這裡回答的是那張圖答不出來的三件事：**哪一層根本沒落在這一顆上**
+    （框看不到 = 可能是沒有，也可能是被別的層蓋掉）、**各幾塊幾個框**
+    （切碎的程度）、以及**有沒有砍到上限**。
+
+    顏色跟疊框、模板編輯器**同一組**（`theme.REGION_COLORS`），而且順序一樣 ——
+    表上第二列的顏色就是畫面上第二個區域的顏色。
+
+    畫的是**引擎算的那一份**（`ctx.meta["gds_layers"]`），UI 不自己再拆一次 ——
+    不然「畫面上的層」與「真的量下去的層」會不一樣，而那種 bug 極難發現。
+    """
+
+    title = "GDS layers"
+
+    def record(self) -> Dict[str, Any]:
+        by_source = dict(self.meta.get("gds_layers") or {})
+        key = str(self.params.get("source") or "")
+        if key in by_source:
+            return dict(by_source[key])
+        return dict(list(by_source.values())[0] if len(by_source) == 1 else {})
+
+    def has_data(self) -> bool:
+        return bool(self.record())
+
+    def empty_reason(self) -> str:
+        return ("Run a trial to see which layers landed on this defect. No "
+                "layout labels? Use “Open GDS export…”.")
+
+    def summary(self) -> str:
+        rec = self.record()
+        if not rec:
+            return ""
+        got = [e for e in rec.get("layers") or () if e.get("boxes")]
+        bits = ["%d of %d layer(s) on this defect"
+                % (len(got), len(rec.get("layers") or ()))]
+        total = sum(int(e.get("boxes") or 0) for e in rec.get("layers") or ())
+        bits.append("%d boxes" % total)
+        if any(e.get("clipped") for e in rec.get("layers") or ()):
+            bits.append("hit the box limit — some boxes were left out")
+        # **在圖裡、但沒有名字的 id** —— 那是「匯出多了一層而 recipe 沒跟上」，
+        # 而它安靜地少一個區域。
+        named = {int(e.get("id")) for e in rec.get("layers") or ()}
+        extra = [i for i in rec.get("ids_in_image") or () if int(i) not in named]
+        if extra:
+            bits.append("layer(s) %s are in the label map but have no name"
+                        % ", ".join(str(i) for i in extra))
+        return " · ".join(bits)
+
+    def paintEvent(self, _e) -> None:          # noqa: D102 - Qt hook
+        from .theme import region_hex
+
+        rec = self.record()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.fillRect(self.rect(), QColor(TOKENS["bg_panel"]))
+        entries = list(rec.get("layers") or ())
+        if not entries:
+            p.end()
+            return
+
+        f = QFont(p.font())
+        f.setPointSizeF(max(7.5, f.pointSizeF() - 0.5))
+        p.setFont(f)
+        fm = QFontMetricsF(f)
+        line = fm.height() + 6.0
+        pad, sw = 8.0, 10.0
+        cols = ("layer", "boxes", "pieces", "area px")
+        y = 4.0
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        for i, head in enumerate(cols):
+            p.drawText(QRectF(pad + (0 if not i else 150 + (i - 1) * 62), y,
+                              150 if not i else 60, line),
+                       Qt.AlignLeft | Qt.AlignVCenter, head)
+        y += line
+        for i, e in enumerate(entries):
+            colour = QColor(region_hex(i))
+            got = int(e.get("boxes") or 0)
+            if not got:
+                colour.setAlpha(90)
+            p.setPen(Qt.NoPen)
+            p.setBrush(colour)
+            p.drawRect(QRectF(pad, y + line / 2 - sw / 2, sw, sw))
+            p.setPen(QColor(TOKENS["text_primary"] if got
+                            else TOKENS["text_disabled"]))
+            p.drawText(QRectF(pad + sw + 6, y, 132, line),
+                       Qt.AlignLeft | Qt.AlignVCenter,
+                       "%s  (id %s)" % (e.get("name"), e.get("id")))
+            for k, value in enumerate((got, int(e.get("pieces") or 0),
+                                       int(e.get("area_px") or 0))):
+                p.drawText(QRectF(150 + k * 62, y, 60, line),
+                           Qt.AlignLeft | Qt.AlignVCenter,
+                           "—" if not got else str(value))
+            if e.get("clipped"):
+                p.setPen(QColor(TOKENS["danger_text"]))
+                p.drawText(QRectF(150 + 3 * 62, y, 90, line),
+                           Qt.AlignLeft | Qt.AlignVCenter, "clipped")
+            y += line
+        p.end()
+
+
 INSPECTORS: Dict[str, type] = {
     "load_patch": InputInspector,
     # 同一個面板：它讀的是 meta["input"]，兩張 Input 卡都會寫（F11 Input-4）。
@@ -1337,6 +1449,7 @@ INSPECTORS: Dict[str, type] = {
     "focus_quality": MeasureInspector,
     "roi_snr": MeasureInspector,
     "cell_period": MeasureInspector,
+    "roi_from_mask": GdsInspector,
 }
 
 

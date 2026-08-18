@@ -40,11 +40,14 @@ pieces 跟 rectangles 差多少還不知道** —— 差很大就證實「層被
 （v4 之後不必再給 `--klarf` / `--images`）。
 
 **第 1、2 步做完了**（`tools/make_glas_export.py`、`ingest/glas_export.py` ＋
-`steps/load_sidecar.py`）。**第 3 步也做完了**（第十三輪）。剩下 **第 4 步：Studio 那一頭** ——
-掛匯出的入口**已經做了**（`Open GDS export…`），還缺 `layers` 的表格編輯器
-（**第一件事**：`ChannelMapField` 是照「一列一張圖、左欄是頁碼」設計的，
-label id 不是頁碼，列數要來自匯出的 `label_map`）、以及儀表
-（label 上色預覽 + 「這一顆對到幾個區域」）。
+`steps/load_sidecar.py`）。**第 3 步也做完了**（第十三輪）。**Region-3 四步全部做完了**（第十一～十四輪）。
+
+**下一步不在 Region 段**：那張「比較兩個區域」的卡（計畫書 §3.3.6），它屬於
+**Measure** 段。GDS 這條路特別需要它 —— 非週期的 layout 上沒有 `_others`，
+真正該比的是**層 vs 層**（EPI 對 MG）。
+
+還缺一個數字（不擋任何事）：真實 label 上每層的 `pieces / rectangles`，
+`python tools\check_glas_export.py <匯出資料夾> --samples 2`。
 
 **開工前讀**：[`AGENTS.md`](AGENTS.md) → [`docs/plans/F11-phase2-features.md`](docs/plans/F11-phase2-features.md)
 **§3.3.4**（Template）、**§3.3.11**（Profile 單方向）、
@@ -61,6 +64,32 @@ label id 不是頁碼，列數要來自匯出的 `label_map`）、以及儀表
 
 **還欠的一件（不屬於 Region 段）**：那張「比較兩個區域」的卡（計畫書 §3.3.6 的
 最後一段）。它屬於 **Measure** 段，不要插隊。今天比較是發生在分數表達式裡的。
+
+---
+
+### 第十四輪：Region-3 第 4 步 —— Studio 那一頭（同日）
+
+兩件：`layers` 的表格編輯器、`roi_from_mask` 的儀表。**Region-3 四步做完了。**
+
+**表格是一個旗標，不是第二個 widget。** `ChannelMapField` 原本照「一列一張圖、
+左欄是頁碼」設計，但 label id 跟頁碼的**資料形狀完全一樣**（整數 → 名字，空的
+就是不要），差的只有三句話 → `ParamSpec.row_kind`。三句話裡最重要的是
+**placeholder**：`load_patch` 空著是「用預設名」，這裡空著是**「這一層不要」**。
+列數也分開（`set_image_count` / `set_label_count` 互不覆蓋 —— 一張 recipe 上可能
+兩個 `channel_map` 都在）。
+
+**儀表刻意不是「label 的上色預覽」。** 第一版想畫那個（label map 幾乎全黑），
+但**形狀已經看得到了** —— 每一層都是具名區域，而預覽上的疊框第八輪就一個區域
+一個顏色、還帶圖例，而且畫在**真的那張 SEM 影像**上。所以儀表回答那張圖答不出
+來的：哪一層沒落在這一顆上、各幾塊幾個框、有沒有砍到上限，以及**在圖裡卻沒有
+名字的 id**（匯出多了一層而 recipe 沒跟上 —— 它會安靜地少一個區域）。
+
+**一個自己踩的**：這幾條 UI 測試第一版接在 `test_glas_sidecar.py` 後面，
+結果核心那一輪（不含 UI）**整個行程崩掉** —— 那一份不叫 `test_ui_*`，於是 Qt
+被拉進「一個行程跑全部」的核心測試裡。`CLAUDE.md` §4 講的就是這件事，只是我從
+另一個方向撞上它。**測試檔名在這個 repo 裡不是命名習慣，是跑法的宣告。**
+
+8 條新測試。計畫書 §3.3.17。
 
 ---
 
