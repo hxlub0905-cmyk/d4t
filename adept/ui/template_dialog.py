@@ -503,17 +503,25 @@ class TemplateDialog(QDialog):
         n = len(self.canvas.array_preview()) if tool == TOOL_ARRAY else 0
         self.btn_array_ok.setEnabled(tool == TOOL_ARRAY and anchors >= 2)
         self.btn_array_ok.setText("Add %d" % n if n else "Add them")
-        self.tool_hint.setText(self._tool_hint(tool, anchors, n, picked))
+        self.tool_hint.setText(self._tool_hint(tool, anchors, n, picked,
+                                               self.canvas.array_pitch()))
 
     @staticmethod
-    def _tool_hint(tool: str, anchors: int, n: int, picked: int = 0) -> str:
+    def _tool_hint(tool: str, anchors: int, n: int, picked: int = 0,
+                   pitch: Tuple[int, int] = (0, 0)) -> str:
         if tool == TOOL_ARRAY:
             if anchors == 0:
                 return "Click the centre of the FIRST rectangle (top-left)."
             if anchors == 1:
                 return ("Now click the centre of the LAST one (bottom-right). "
                         "Esc cancels.")
-            return "%d rectangles between the two crosshairs." % n
+            px, py = pitch
+            bits = ["%d rectangles" % n]
+            if px:
+                bits.append("pitch %d px across" % px)
+            if py:
+                bits.append("pitch %d px down" % py)
+            return " · ".join(bits) + " — every gap is the same."
         if tool == TOOL_PAINT:
             return "Drag over pixels; they merge into rectangles on release."
         if tool == TOOL_CLICK:
@@ -634,7 +642,10 @@ class TemplateDialog(QDialog):
         重建才有的證據（疊了幾格、銳利度）這條路拿不到 —— **不編造**，
         摘要照實說它是從 recipe 讀回來的。
         """
-        cell = algo_template.decode_cell(str(text or ""))
+        # `decode_template` 兩種標籤都讀（舊的 gc1 沒有自週期，`encoded()`
+        # 會在存回去的時候補上）。
+        decoded = algo_template.decode_template(str(text or ""))
+        cell = decoded[0] if decoded else None
         if cell is None or cell.size == 0:
             return False
         px, py = int(cell.shape[1]), int(cell.shape[0])
@@ -679,13 +690,15 @@ class TemplateDialog(QDialog):
         axis = {(True, False): "across", (False, True): "down",
                 (True, True): "both ways"}[gc.periodic]
         if self._from_recipe:
-            return ("cell %d x %d px · repeats %s · read back from this recipe "
-                    "- rebuild it from an image if this batch looks different"
-                    % (gc.px, gc.py, axis))
+            return " · ".join(
+                ["cell %d x %d px" % (gc.px, gc.py), "repeats %s" % axis,
+                 "read back from this recipe - rebuild it from an image if "
+                 "this batch looks different"] + self._self_repeat_note())
         bits = ["cell %d x %d px" % (gc.px, gc.py),
                 "repeats %s" % axis,
                 "stacked from %d cells" % gc.n_cells,
                 "sharpness %.0f / 100" % gc.ghosting]
+        bits.extend(self._self_repeat_note())
         if gc.ghosting < 40.0:
             bits.append("- the stack looks blurred, which usually means the "
                         "period was measured wrong; a blurred template will "
@@ -694,6 +707,35 @@ class TemplateDialog(QDialog):
             if "arbitrary" in w:
                 bits.append("- " + w)
         return " · ".join(bits)
+
+    def self_period(self) -> Tuple[int, int]:
+        """這個 cell 自己重複的單元（cell 像素）—— 存進模板字串的那一組。"""
+        gc = self.cell
+        if gc is None or gc.cell.size == 0:
+            return (0, 0)
+        return algo_template.cell_self_period(gc.cell)
+
+    def _self_repeat_note(self) -> List[str]:
+        """cell 是自己的 k 倍時講一句話 —— **不要等跑完 200 顆才發現**。
+
+        使用者可以把 cell 取成 2×（他要的）。那時候一顆 patch **分不出自己在
+        哪一份上**，而那件事只有在「兩份上標的區域不一樣」時才要緊。確定度
+        本身已經處理掉了（摺在自週期上，見 ``algo/template.match_patch``），
+        所以這裡不是警告，是一句要讓他知道的事實。
+        """
+        gc = self.cell
+        if gc is None or gc.cell.size == 0:
+            return []
+        sx, sy = self.self_period()
+        h, w = gc.cell.shape[:2]
+        kx = w // sx if sx and w % sx == 0 else 1
+        ky = h // sy if sy and h % sy == 0 else 1
+        if kx <= 1 and ky <= 1:
+            return []
+        times = kx * ky
+        return ["this cell holds %d copies of a %d x %d px repeat, so a patch "
+                "cannot tell which copy it is on - fine if you mark the same "
+                "thing on each, not fine if they differ" % (times, sx, sy)]
 
     def locate_axis(self) -> str:
         gc = self.cell
@@ -704,7 +746,11 @@ class TemplateDialog(QDialog):
 
     def encoded(self) -> str:
         gc = self.cell
-        return "" if gc is None else algo_template.encode_cell(gc.cell)
+        if gc is None:
+            return ""
+        # 自週期一起存進字串：它是模板的性質，一份模板只有一個答案，而
+        # ``run_defect`` 是逐顆呼叫的（見 algo/template.encode_cell）。
+        return algo_template.encode_cell(gc.cell, self.self_period())
 
     def is_ready(self) -> bool:
         """按得下「Use this setup」嗎（用明確狀態，不要問 widget）。"""

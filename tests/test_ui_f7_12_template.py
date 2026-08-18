@@ -320,7 +320,7 @@ def test_accepting_the_dialog_stores_the_template_in_the_recipe(window):
     dlg._on_accept()
 
     params = window.model.nodes[nid].params
-    assert params["template"].startswith("gc1:")
+    assert params["template"].startswith("gc2:")
     assert params["locate_axis"] == "x"
     assert params["regions"] == "epi: 0.35,0,0.2,1"
     assert "Template stored" in window.status_text()
@@ -713,3 +713,159 @@ def test_undo_is_disabled_when_there_is_nothing_to_undo(qapp):
     dlg._refresh_tool_ui()
     assert dlg.btn_undo.isEnabled() is False
     assert all(not b.isEnabled() for b in dlg.align_buttons.values())
+
+
+# --------------------------------------------------------------------------- #
+# 5. 第五輪：k× cell 的確定度、等距的 pitch、還沒按下去的預覽
+# --------------------------------------------------------------------------- #
+def _alt_image(seed: int = 0) -> np.ndarray:
+    """跟 big_image 一樣，但**每隔一格**的 MG 比較暗 —— 2× 才是真正的週期。"""
+    img = big_image(seed)
+    for k in range(0, 8, 2):
+        img[:, k * PERIOD:k * PERIOD + 12] -= 35.0
+    return img
+
+
+def test_a_double_cell_no_longer_kills_the_certainty(qapp):
+    """使用者：「假設我是 2x cell 大，certainty 可能會被壓很低，有解嗎？」
+
+    實測不是壓很低，是**歸零**：margin 摺在「一個 cell」上，而 2× cell 的一個
+    週期裡有兩個一模一樣的峰 → 最高 ＝ 次高 → 0.000，score 仍然 1.00。
+    現在確定度摺在**自週期**上，位置仍然摺在整個 cell 上。
+    """
+    from adept.core.algo import template as at
+
+    img = big_image()
+    got = {}
+    for label, px in (("1x", None), ("2x", 2 * PERIOD), ("3x", 3 * PERIOD)):
+        gc = at.build_golden_cell(img, px=px)
+        sp = at.cell_self_period(gc.cell)
+        assert sp[0] == PERIOD, (label, sp)      # 自週期一直都是真正的那一個
+        margins = []
+        for phase in range(0, PERIOD, 5):
+            patch = img[100:132, 3 * PERIOD + phase:3 * PERIOD + phase + 32]
+            m = at.match_patch(gc.cell, patch, periodic=gc.periodic,
+                               self_period=sp)
+            margins.append(m.margin)
+        got[label] = (min(margins), max(margins))
+
+    assert got["1x"][0] > 0.3
+    for label in ("2x", "3x"):
+        assert got[label][0] > 0.3, (label, got)
+        assert abs(got[label][0] - got["1x"][0]) < 0.05, got
+
+
+def test_a_flat_axis_is_not_a_self_period(qapp):
+    """平的那一軸對**任何**位移都相似 —— 那不是週期，是沒有結構。"""
+    from adept.core.algo import template as at
+
+    gc = at.build_golden_cell(big_image())
+    sx, sy = at.cell_self_period(gc.cell)
+    assert (sx, sy) == (PERIOD, gc.cell.shape[0])
+
+
+def test_the_template_string_carries_the_self_period(qapp):
+    """自週期是**模板的性質**（一份模板一個答案），所以存進字串、不是每顆重算。"""
+    from adept.core.algo import template as at
+
+    gc = at.build_golden_cell(big_image(), px=2 * PERIOD)
+    text = at.encode_cell(gc.cell)
+    assert text.startswith("gc2:")
+    cell, sp = at.decode_template(text)
+    assert sp == (PERIOD, gc.cell.shape[0])
+    assert np.array_equal(cell, gc.cell)
+
+    # 舊的 gc1 照讀，而且**行為與以前逐位元組相同**（自週期視同 cell 尺寸）
+    parts = text.split(":")
+    old = "gc1:%s:%s" % (parts[1], parts[3])
+    cell1, sp1 = at.decode_template(old)
+    assert np.array_equal(cell1, gc.cell)
+    assert sp1 == (gc.cell.shape[1], gc.cell.shape[0])
+
+
+def test_the_dialog_says_the_cell_holds_two_copies(qapp):
+    """**不要等跑完 200 顆才發現** —— 選了 2× cell 的當下就講。"""
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    assert "copies of" not in dlg.summary()
+
+    dlg._on_double()
+    assert dlg.self_period()[0] == PERIOD
+    assert "2 copies of a %d x" % PERIOD in dlg.summary()
+    assert "cannot tell which copy" in dlg.summary()
+
+
+def test_multi_add_uses_one_pitch_for_every_gap(qapp):
+    """使用者：「PERIOD 會不穩定，有時是 29 有時是 30，畫布顯示也對不齊。」
+
+    先算小數中心、再逐個四捨五入，間距必然在 29／30 之間跳。現在**間距先取整
+    數，再從第一個錨點排下去** —— 每一段都一樣長。
+    """
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.spin_w.setValue(6)
+    dlg.spin_h.setValue(200)
+    dlg.spin_nx.setValue(9)
+    dlg.spin_ny.setValue(1)
+    dlg.set_tool(canvas_mod.TOOL_ARRAY)
+    # 端點刻意選一個除不盡的距離（9 個框 = 8 段）
+    dlg.canvas.place_array_anchor(0.05, 0.5)
+    dlg.canvas.place_array_anchor(0.79, 0.5)
+
+    xs = [dlg.canvas.to_px(b)[0] for b in dlg.canvas.array_preview()]
+    gaps = [b - a for a, b in zip(xs, xs[1:])]
+    assert len(gaps) == 8
+    assert len(set(gaps)) == 1, gaps
+    assert dlg.canvas.array_pitch()[0] == gaps[0]
+    assert "every gap is the same" in dlg.tool_hint.text()
+    assert "pitch %d px" % gaps[0] in dlg.tool_hint.text()
+
+    # 真的放下去之後，表格裡的間距也一樣
+    dlg.commit_array()
+    xs2 = [dlg.canvas.to_px(b)[0] for b in dlg.canvas.regions()[0][1]]
+    assert len(set(b - a for a, b in zip(xs2, xs2[1:]))) == 1
+
+
+def test_the_next_box_is_previewed_before_you_click(qapp):
+    """「MULTI-ADD 在還沒點下去前也幫我有個 box 預覽（方便對齊擺放）」。"""
+    from PySide6.QtCore import QPointF
+
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas.resize(420, 380)
+    dlg.spin_w.setValue(6)
+    dlg.spin_h.setValue(120)
+
+    for tool in (canvas_mod.TOOL_ARRAY, canvas_mod.TOOL_CLICK):
+        dlg.set_tool(tool)
+        assert dlg.canvas.hover_box() is None          # 游標還沒進來
+        _move(dlg.canvas, dlg.canvas.norm_to_view(0.5, 0.5), buttons=Qt.NoButton)
+        box = dlg.canvas.hover_box()
+        assert box is not None, tool
+        x, y, w, h = dlg.canvas.to_px(box)
+        assert (w, h) == (6, 120)
+        ch, cw = dlg.canvas.cell_shape()
+        assert abs((x + w / 2.0) - cw / 2.0) <= 0.5    # 游標就是框的中心
+        assert abs((y + h / 2.0) - ch / 2.0) <= 0.5
+
+    # 游標離開畫布，預覽就要消失（畫布不能說謊）
+    dlg.canvas.leaveEvent(None)
+    assert dlg.canvas.hover_box() is None
+
+    # 拖曳／游標工具不預覽（它們按下去不會長出一個固定大小的框）
+    for tool in (canvas_mod.TOOL_DRAG, canvas_mod.TOOL_CURSOR):
+        dlg.set_tool(tool)
+        _move(dlg.canvas, dlg.canvas.norm_to_view(0.5, 0.5), buttons=Qt.NoButton)
+        assert dlg.canvas.hover_box() is None, tool
+
+
+def test_the_array_preview_replaces_the_single_hover(qapp):
+    """已經放了錨點就預覽**整片**，不要再多一個游標下的孤兒框。"""
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "LOT_full.tif")
+    dlg.canvas.resize(420, 380)
+    dlg.set_tool(canvas_mod.TOOL_ARRAY)
+    _move(dlg.canvas, dlg.canvas.norm_to_view(0.3, 0.5), buttons=Qt.NoButton)
+    assert dlg.canvas.hover_box() is not None
+    dlg.canvas.place_array_anchor(0.3, 0.5)
+    assert dlg.canvas.hover_box() is None

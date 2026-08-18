@@ -79,7 +79,20 @@ __all__ = [
 #: （公司機的 DLP 擋的是二進位壓縮檔，見 docs/HANDOVER.md §5）。
 #: 先過 zlib：SEM 的 cell 有雜訊、壓不了太多（實測約剩七成），
 #: 但一個週期本來就小，這個大小塞進 recipe JSON 完全沒問題。
-CELL_ENCODING = "gc1"
+CELL_ENCODING = "gc2"
+
+#: 「這個 cell 自己重複幾次」的判準：把 cell 捲動 1/k 之後跟自己的 NCC。
+#: 實測（合成資料）：真的自週期 0.995–0.998，其餘的除數 ≤ 0.75 —— 中間的空隙
+#: 很大，門檻放 0.9 兩邊都安全。
+SELF_PERIOD_NCC = 0.9
+
+#: 真的週期與「這一軸是平的」要分得開：捲半個週期至少要掉這麼多 NCC。
+#: 實測 0.998 vs 0.52（差 0.48）對上平軸的 ≈ 0（兩個都 ≈ 1）。
+SELF_PERIOD_MARGIN = 0.15
+
+#: 自週期最多找到 1/k 為止。使用者手動放大的 cell 是 2×、3× 這種量級 ——
+#: 往下找到 1/32 只會開始撿到雜訊。
+MAX_SELF_REPEAT = 8
 
 #: 一軸上的週期信心要多少才算數（``period.estimate_period`` 的 0–100 分）。
 #: 實測：純雜訊約 20，真的有週期的約 87 —— 門檻放中間兩邊都安全。
@@ -271,33 +284,122 @@ def build_golden_cell(image: Any, px: Optional[int] = None,
 # --------------------------------------------------------------------------- #
 # 存進 recipe（純文字）
 # --------------------------------------------------------------------------- #
-def encode_cell(cell: np.ndarray) -> str:
-    """``(h, w)`` uint8 → ``"gc1:<w>x<h>:<base64>"``（見 :data:`CELL_ENCODING`）。"""
+def _roll_ncc(cell: np.ndarray, shift: int, axis: int) -> float:
+    """把 cell 捲動 ``shift`` 之後跟自己有多像（NCC，對亮度變化免疫）。"""
+    a = cell.astype(np.float64).ravel()
+    b = np.roll(cell, shift, axis=axis).astype(np.float64).ravel()
+    a = a - a.mean()
+    b = b - b.mean()
+    den = float(np.sqrt((a * a).sum() * (b * b).sum()))
+    return float((a * b).sum() / den) if den else 0.0
+
+
+def cell_self_period(cell: Any) -> Tuple[int, int]:
+    """這個 cell **自己**重複的單元有多大 ``(sx, sy)``（不重複就回 cell 尺寸）。
+
+    為什麼需要它（使用者 2026-08-18）
+    ---------------------------------
+    使用者可以把 cell 取成量到的週期的 2×（「有時候會需要 2X 大 cell」）。那時候
+    影像其實仍然以 1× 重複，於是 :func:`match_patch` 的相關面**摺回一個 cell**
+    之後，一個週期裡有兩個一模一樣的峰 —— 最高 ＝ 次高 → ``margin`` 歸零。
+    實測：1× 的 cell margin 0.37–0.61，2× 與 3× 都是 **0.000**，而 score 仍然
+    1.00。比對是完美的，它只是**不唯一**，但預設 ``min_margin`` 會把每一顆都
+    判成定不出來。
+
+    為什麼是「驗證除數」而不是「估週期」
+    ------------------------------------
+    拿 ``period.estimate_period`` 量這個 cell 會得到**假的**答案：實測那張
+    MG/EPI 的 cell 回 20 px，因為兩條亮邊剛好間隔 20 —— 但圖案在 20 px 上並不
+    重複（中間一段是 MG、另一段是 EPI）。估週期看的是「哪個間距有起伏」，
+    而這裡要問的是**捲過去之後整張圖對不對得起來**，那是一個可以直接驗的問題。
+
+    所以只試 ``1/k``（k = 2…8，且要整除），取通過的最小單元。實測分得很開：
+    真的自週期 NCC 0.995–0.998，其餘除數 ≤ 0.75。
+
+    ⚠ **平的那一軸對任何位移都相似**，而那不是週期。一維 layout 的 Y 軸就是平的
+    （cell 高 = 整張影像），第一版因此回報「自週期 30 px」—— 一個純粹的假答案。
+    所以還要過一關：捲動**半個**候選週期必須明顯**不**像。真的週期分得開
+    （實測 0.998 vs 0.52），平的軸分不開（兩個都 ≈ 1）→ 判定沒有自週期。
+    """
+    c = np.asarray(cell)
+    if c.ndim != 2 or c.size == 0:
+        return (0, 0)
+    h, w = int(c.shape[0]), int(c.shape[1])
+    out = [w, h]
+    for axis, span in ((1, w), (0, h)):
+        for k in range(MAX_SELF_REPEAT, 1, -1):          # 先試最小的單元
+            if span % k or span // k < 2:
+                continue
+            d = span // k
+            hit = _roll_ncc(c, d, axis)
+            if hit < SELF_PERIOD_NCC:
+                continue
+            # 捲半個週期要**明顯不像** —— 不然那一軸只是平的（見 docstring）
+            if hit - _roll_ncc(c, max(1, d // 2), axis) < SELF_PERIOD_MARGIN:
+                continue
+            out[1 - axis] = d
+            break
+    return (int(out[0]), int(out[1]))
+
+
+def encode_cell(cell: np.ndarray, self_period: Optional[Tuple[int, int]] = None
+                ) -> str:
+    """``(h, w)`` uint8 → ``"gc2:<w>x<h>:<sx>x<sy>:<base64>"``。
+
+    ``sx``/``sy`` 是這個 cell **自己**重複的單元（見 :func:`cell_self_period`）。
+    存進字串而不是每一顆重算：它是模板的性質，一份模板只有一個答案，而
+    ``run_defect`` 是逐顆呼叫的。留空就當場量。
+
+    舊的 ``gc1:``（沒有自週期）照樣讀得動 —— 那時候自週期視同 cell 尺寸，
+    也就是**跟以前完全一樣的行為**（黃金值不動）。
+    """
     a = np.asarray(cell)
     if a.ndim != 2 or a.size == 0:
         return ""
     u8 = _gray_u8(a)
     h, w = u8.shape
+    sx, sy = self_period if self_period else cell_self_period(u8)
     blob = base64.b64encode(zlib.compress(u8.tobytes(), 6)).decode("ascii")
-    return "%s:%dx%d:%s" % (CELL_ENCODING, w, h, blob)
+    return "%s:%dx%d:%dx%d:%s" % (CELL_ENCODING, w, h, int(sx), int(sy), blob)
 
 
-def decode_cell(text: str) -> Optional[np.ndarray]:
-    """:func:`encode_cell` 的反向；格式不對回 ``None``（絕不 raise）。"""
+def decode_template(text: str) -> Optional[Tuple[np.ndarray, Tuple[int, int]]]:
+    """字串 → ``(cell, (sx, sy))``；格式不對回 ``None``（絕不 raise）。
+
+    讀得懂兩種標籤：``gc2`` 帶自週期，``gc1``（舊的）沒有 —— 那時候自週期視同
+    cell 尺寸，行為與以前逐位元組相同。
+    """
     s = str(text or "").strip()
     if not s:
         return None
     try:
-        tag, size, blob = s.split(":", 2)
-        if tag != CELL_ENCODING:
+        parts = s.split(":")
+        tag = parts[0]
+        if tag == "gc1" and len(parts) == 3:
+            size, self_size, blob = parts[1], None, parts[2]
+        elif tag == "gc2" and len(parts) == 4:
+            size, self_size, blob = parts[1], parts[2], parts[3]
+        else:
             return None
         w, h = (int(v) for v in size.split("x"))
         raw = zlib.decompress(base64.b64decode(blob.encode("ascii")))
         if w < 1 or h < 1 or len(raw) != w * h:
             return None
-        return np.frombuffer(raw, dtype=np.uint8).reshape(h, w).copy()
+        cell = np.frombuffer(raw, dtype=np.uint8).reshape(h, w).copy()
+        if self_size is None:
+            return cell, (w, h)
+        sx, sy = (int(v) for v in self_size.split("x"))
+        if not (1 <= sx <= w and 1 <= sy <= h):
+            return cell, (w, h)
+        return cell, (sx, sy)
     except Exception:                       # noqa: BLE001 — 壞字串一律當沒有
         return None
+
+
+def decode_cell(text: str) -> Optional[np.ndarray]:
+    """:func:`decode_template` 的方便版：只要 cell 那張圖。"""
+    got = decode_template(text)
+    return None if got is None else got[0]
 
 
 # --------------------------------------------------------------------------- #
@@ -343,7 +445,8 @@ def match_patch(cell: np.ndarray, patch: Any,
                 min_score: float = 0.3,
                 min_margin: float = 0.05,
                 min_structure: float = 5.0,
-                periodic: Tuple[bool, bool] = (True, True)) -> MatchResult:
+                periodic: Tuple[bool, bool] = (True, True),
+                self_period: Optional[Tuple[int, int]] = None) -> MatchResult:
     """把 ``patch`` 對回 ``cell`` 的相位。
 
     ``margin``（峰的突出程度）是判斷「這張定得出來嗎」的依據 ——
@@ -353,6 +456,18 @@ def match_patch(cell: np.ndarray, patch: Any,
     可言，硬要在 Y 上搜尋只會讓相關面變平、把峰的突出程度稀釋掉 ——
     也就是把「定得出來」誤判成「定不出來」。壓成一維之後，這條路剛好就退化成
     投影定位在做的事（``algo/profile.py``），兩個方法在這裡是一致的。
+
+    ``self_period``：這個 cell **自己**重複的單元（見 :func:`cell_self_period`）。
+    留空 = 視同 cell 尺寸，也就是與以前逐位元組相同的行為。
+
+    **位置與確定度摺在不同的週期上，這是刻意的**：
+
+    * **位置**（``phase_x``/``phase_y``）摺在 **cell** 上 —— 框是標在整個 cell 上
+      的，所以要知道 patch 對到 cell 的哪裡。
+    * **確定度**（``margin``）摺在**自週期**上 —— 一個 2× 的 cell 裡那兩個峰是
+      **同一個答案的複本**，不是「另一個答案」。摺在 cell 上的話最高 ＝ 次高、
+      margin 歸零（實測 1× 是 0.37–0.61，2×／3× 都是 0.000），而預設門檻會把
+      每一顆都判成定不出來。
     """
     c = np.asarray(cell)
     p = _gray_u8(patch)
@@ -386,15 +501,24 @@ def match_patch(cell: np.ndarray, patch: Any,
     folded = _fold_to_period(surface, cx, cy)
     peak_idx = int(np.argmax(folded))
     fy, fx = np.unravel_index(peak_idx, folded.shape)
-    best_folded = float(folded[fy, fx])
+
+    # 確定度摺在**自週期**上（見 docstring）。壓成一維的那一軸沒有自週期可言，
+    # 所以夾在目前的 c.shape 裡。
+    sx, sy = self_period if self_period else (cx, cy)
+    sx = max(1, min(int(sx), cx))
+    sy = max(1, min(int(sy), cy))
+    conf = folded if (sx, sy) == (cx, cy) else _fold_to_period(surface, sx, sy)
+    cidx = int(np.argmax(conf))
+    ky, kx = np.unravel_index(cidx, conf.shape)
+    best_folded = float(conf[ky, kx])
 
     # 遮掉峰的鄰域（環狀，因為相位是環狀的）再取次高
-    rest = folded.copy()
-    rx = max(2, folded.shape[1] // 16)
-    ry = max(2, folded.shape[0] // 16)
+    rest = conf.copy()
+    rx = max(2, conf.shape[1] // 16)
+    ry = max(2, conf.shape[0] // 16)
     for dy in range(-ry, ry + 1):
         for dx in range(-rx, rx + 1):
-            rest[(fy + dy) % folded.shape[0], (fx + dx) % folded.shape[1]] = -1.0
+            rest[(ky + dy) % conf.shape[0], (kx + dx) % conf.shape[1]] = -1.0
     runner = float(rest.max()) if rest.size else -1.0
     margin = best_folded - runner
 

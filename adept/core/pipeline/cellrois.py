@@ -43,12 +43,13 @@ EPI 部分扣掉 MG 交集」。**那個形狀用一個矩形表達不出來，�
 """
 from __future__ import annotations
 
-from typing import List, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from .curve import format_number
 
 __all__ = ["CellRoiError", "Region", "Box", "parse_cell_rois",
            "format_cell_rois", "region_names", "array_boxes",
+           "array_pitch_px",
            "MAX_REGIONS", "MAX_BOXES"]
 
 #: 一個框：``(x, y, w, h)``，相對於一個 cell（0–1）。
@@ -204,7 +205,8 @@ def region_names(text: object) -> List[str]:
 def array_boxes(first_centre: Tuple[float, float],
                 last_centre: Tuple[float, float],
                 box_w: float, box_h: float,
-                nx: int, ny: int) -> List[Box]:
+                nx: int, ny: int,
+                cell_size: Optional[Tuple[int, int]] = None) -> List[Box]:
     """一次長出一整片**等距**的框（編輯器的 multi add）。
 
     為什麼要這個工具
@@ -215,14 +217,32 @@ def array_boxes(first_centre: Tuple[float, float],
 
     參數的形狀照使用者定的：兩個錨點（左上那格的中心、右下那格的中心）、
     框的大小、以及**兩個錨點之間有幾個框**（含頭尾）。所以間距 = 端點距離 ÷
-    (n − 1)，而不是另外再輸入一個 pitch —— 端點看得見、pitch 看不見。
+    (n − 1)，而不是另外再輸入一個 pitch —— 端點看得見，pitch 看不見。
 
-    座標全部是「相對於一格」的 0–1（跟 :func:`parse_cell_rois` 同一個單位）。
+    ``cell_size``：給了就在**整數 cell 像素**上排（見下）。
+
+    間距要不要是整數（使用者 2026-08-18 回報）
+    ------------------------------------------
+        「MULTI ADD 像素 PERIOD 會不穩定，舉例有 9 個 BOX，PERIOD 我去看表格
+         有時是 29 有時是 30，這樣會造成在畫布顯示也對不齊。」
+
+    真的：先算出小數的中心、再**逐個**四捨五入到整數像素，得到的間距就會在
+    29 與 30 之間跳（真實間距 29.5 的時候，那是「每個都最接近」的必然結果）。
+    每一個框單獨看都對，整排看起來卻是歪的。
+
+    所以 ``cell_size`` 給了的時候換一條規則：**間距先取整數，再從第一個錨點
+    一路排下去** —— 每一段都一樣長。代價是最後一個框可能離第二個錨點差幾個
+    像素（9 個框、真實間距 29.5 的話差 4 px），而那個差**看得見**（預覽就在
+    畫面上，而且提示列會把用掉的 pitch 講出來），比一排對不齊的框好判斷。
+    pitch 是設計常數，它本來就該是同一個數字。
     """
     nx, ny = max(1, int(nx)), max(1, int(ny))
     x1, y1 = float(first_centre[0]), float(first_centre[1])
     x2, y2 = float(last_centre[0]), float(last_centre[1])
     w, h = float(box_w), float(box_h)
+
+    if cell_size:
+        return _array_boxes_px(x1, y1, x2, y2, w, h, nx, ny, cell_size)
 
     def centres(a: float, b: float, n: int) -> List[float]:
         if n <= 1:
@@ -235,3 +255,44 @@ def array_boxes(first_centre: Tuple[float, float],
         for cx in centres(x1, x2, nx):
             out.append((cx - w / 2.0, cy - h / 2.0, w, h))
     return out
+
+
+def _array_boxes_px(x1: float, y1: float, x2: float, y2: float,
+                    w: float, h: float, nx: int, ny: int,
+                    cell_size: Tuple[int, int]) -> List[Box]:
+    """整數 cell 像素上的等距排列（見 :func:`array_boxes` 的說明）。"""
+    cw, ch = int(cell_size[0]), int(cell_size[1])
+    bw = max(1, int(round(w * cw)))
+    bh = max(1, int(round(h * ch)))
+
+    def line(a: float, b: float, n: int, span: int, size: int) -> List[int]:
+        """回傳每個框的**左上角**（整數像素），間距處處相同。"""
+        start = int(round(a * span)) - size // 2
+        if n <= 1:
+            return [start]
+        pitch = int(round((b - a) * span / float(n - 1)))
+        return [start + pitch * i for i in range(n)]
+
+    out: List[Box] = []
+    for py in line(y1, y2, ny, ch, bh):
+        for px in line(x1, x2, nx, cw, bw):
+            out.append((px / float(cw), py / float(ch),
+                        bw / float(cw), bh / float(ch)))
+    return out
+
+
+def array_pitch_px(first_centre: Tuple[float, float],
+                   last_centre: Tuple[float, float],
+                   nx: int, ny: int,
+                   cell_size: Tuple[int, int]) -> Tuple[int, int]:
+    """:func:`array_boxes` 實際會用的間距（整數 cell 像素）—— 給提示列顯示。
+
+    使用者要看得到它：間距取整之後最後一個框會離錨點差幾個像素，而**知道用了
+    哪個 pitch** 比自己從表格反推容易得多。
+    """
+    cw, ch = int(cell_size[0]), int(cell_size[1])
+    dx = (float(last_centre[0]) - float(first_centre[0])) * cw
+    dy = (float(last_centre[1]) - float(first_centre[1])) * ch
+    px = int(round(dx / float(nx - 1))) if int(nx) > 1 else 0
+    py = int(round(dy / float(ny - 1))) if int(ny) > 1 else 0
+    return (px, py)

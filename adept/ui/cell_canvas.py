@@ -52,7 +52,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
-from adept.core.pipeline.cellrois import array_boxes
+from adept.core.pipeline.cellrois import array_boxes, array_pitch_px
 
 from .theme import TOKENS
 from .widgets import _qimage_from_uint8
@@ -135,6 +135,8 @@ class CellCanvas(QWidget):
         self._array_n: Tuple[int, int] = (4, 1)
         #: paint 這一筆點到的 cell 像素（放手才併成矩形）
         self._paint: Optional[set] = None
+        #: 游標現在在哪（normalized）—— click / array 工具的**下一個框**畫在這裡
+        self._hover: Optional[Tuple[float, float]] = None
 
         self.setMinimumSize(320, 260)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -216,6 +218,7 @@ class CellCanvas(QWidget):
     def set_tool(self, name: str) -> None:
         """換一支工具。離開陣列模式時把還沒確認的錨點丟掉（不要偷偷留著）。"""
         name = str(name) if str(name) in TOOLS else TOOL_DRAG
+        self._hover = None
         if name != TOOL_ARRAY and self._array is not None:
             self._array = None
             self.array_anchors_changed.emit(0)
@@ -499,10 +502,23 @@ class CellCanvas(QWidget):
         a = self._array["anchors"]
         first = a[0]
         last = a[1] if len(a) > 1 else a[0]
-        boxes = array_boxes(first, last, self._array["w"], self._array["h"],
-                            self._array["nx"] if len(a) > 1 else 1,
-                            self._array["ny"] if len(a) > 1 else 1)
-        return [self.snap(b) for b in boxes]
+        h, w = self.cell_shape()
+        # **在整數像素上排**（見 cellrois.array_boxes）：先算小數中心再逐個
+        # 四捨五入，間距會在 29 與 30 之間跳 —— 每個框單獨看都對，整排看起來
+        # 是歪的（使用者實測 9 個框的回報）。
+        return array_boxes(first, last, self._array["w"], self._array["h"],
+                           self._array["nx"] if len(a) > 1 else 1,
+                           self._array["ny"] if len(a) > 1 else 1,
+                           cell_size=(w, h))
+
+    def array_pitch(self) -> Tuple[int, int]:
+        """這一片實際用的間距（整數 cell 像素）—— 提示列要講出來。"""
+        if self._array is None or len(self._array["anchors"]) < 2:
+            return (0, 0)
+        h, w = self.cell_shape()
+        a = self._array["anchors"]
+        return array_pitch_px(a[0], a[1], self._array["nx"],
+                              self._array["ny"], (w, h))
 
     def commit_array(self) -> int:
         """把預覽的那一片真的加進區域，**留在陣列模式**（錨點清掉）。
@@ -620,6 +636,10 @@ class CellCanvas(QWidget):
 
     def mouseMoveEvent(self, e) -> None:                # noqa: D102 - Qt hook
         pt = _pos(e)
+        # 還沒按下去就先畫出「按下去會長出什麼」（使用者：方便對齊擺放）
+        if self._tool in (TOOL_CLICK, TOOL_ARRAY):
+            self._hover = self.view_to_norm(pt)
+            self.update()
         if self._paint is not None and (e.buttons() & Qt.LeftButton):
             self._paint_at(pt)
             return
@@ -744,6 +764,23 @@ class CellCanvas(QWidget):
         return (self._box_px[0] / float(w), self._box_px[1] / float(h),
                 self._array_n[0], self._array_n[1])
 
+    def leaveEvent(self, _e) -> None:                   # noqa: D102 - Qt hook
+        # 游標離開畫布，那個「下一個框」就不該還留在畫面上（畫布不能說謊）
+        if self._hover is not None:
+            self._hover = None
+            self.update()
+
+    def hover_box(self) -> Optional[Tuple[float, float, float, float]]:
+        """游標下面那個**還沒放下去**的框（沒有就 ``None``）。"""
+        if self._hover is None or self._tool not in (TOOL_CLICK, TOOL_ARRAY):
+            return None
+        if self._tool == TOOL_ARRAY and self.array_anchor_count() >= 1:
+            return None            # 已經有錨點了，預覽的是整片，不是一個
+        h, w = self.cell_shape()
+        bw, bh = self._box_px[0] / float(w), self._box_px[1] / float(h)
+        nx, ny = self._hover
+        return self.snap((nx - bw / 2.0, ny - bh / 2.0, bw, bh))
+
     def wheelEvent(self, e) -> None:                    # noqa: D102 - Qt hook
         delta = e.angleDelta().y()
         if delta:
@@ -792,6 +829,7 @@ class CellCanvas(QWidget):
         self._paint_patch_window(p)
         self._paint_boxes(p)
         self._paint_stroke(p)
+        self._paint_hover(p)
         self._paint_array(p)
         p.end()
 
@@ -897,6 +935,24 @@ class CellCanvas(QWidget):
             for ty in span:
                 for tx in span:
                     p.drawRect(base.translated(tx * w * z, ty * h * z))
+
+    def _paint_hover(self, p: QPainter) -> None:
+        """按下去會長出什麼 —— 先畫給人看，才對得準（使用者定調）。"""
+        box = self.hover_box()
+        if box is None:
+            return
+        col = region_color(self._current)
+        r = self.box_rect(box)
+        p.setPen(QPen(col, 1.2, Qt.DashLine))
+        fill = QColor(col)
+        fill.setAlpha(26)
+        p.setBrush(fill)
+        p.drawRect(r)
+        # 十字：按下去的那一點是**框的中心**，那件事在放下之前就要看得見
+        c = r.center()
+        p.setPen(QPen(col, 1.0))
+        p.drawLine(QPointF(c.x() - 7, c.y()), QPointF(c.x() + 7, c.y()))
+        p.drawLine(QPointF(c.x(), c.y() - 7), QPointF(c.x(), c.y() + 7))
 
     def _paint_array(self, p: QPainter) -> None:
         if self._array is None:

@@ -27,6 +27,16 @@
 ``pipeline/cellrois.py``），而框是在 Studio 的模板編輯器上**畫**出來的
 —— 四個 0–1 的數字沒有一個地方講得清楚它們相對於什麼，一張圖講得清楚。
 
+cell 可以取成週期的 k 倍（使用者：「有時候會需要 2X 大 cell」）
+----------------------------------------------------------------
+那時候影像其實仍然以 1× 重複，於是相關面摺回「一個 cell」之後有 k 個一模一樣的
+峰 —— 最高 ＝ 次高，``margin``（確定度）歸零，而預設門檻會把**每一顆**都判成
+定不出來。實測：1× 的 cell margin 0.37–0.61，2× 與 3× 都是 0.000。
+
+解法在 ``algo/template``：模板字串（``gc2:``）帶著**這個 cell 自己重複的單元**，
+確定度摺在那個單元上、位置仍然摺在整個 cell 上。兩者摺在不同週期是刻意的 ——
+框是標在整個 cell 上的，但那 k 個峰是同一個答案的複本。
+
 框是**整片鋪過去**的，不是只放一份
 ----------------------------------
 使用者標的是重複結構上的一塊，所以那塊在 patch 裡有幾份就量幾份
@@ -239,7 +249,8 @@ class RoiTemplateStep(Step):
                 "Studio and use “Edit template & regions…” — the regions are "
                 "drawn on the cell, they cannot be typed in by hand.")
 
-        cell = algo_template.decode_cell(str(p["template"]))
+        decoded = algo_template.decode_template(str(p["template"]))
+        cell, self_period = decoded if decoded else (None, (0, 0))
         if cell is None or cell.size == 0:
             # 沒有模板不是「跑不出好結果」，是**還沒設定完**。講清楚要去哪裡設，
             # 不要讓使用者對著一個空白參數猜。
@@ -254,7 +265,8 @@ class RoiTemplateStep(Step):
         match = algo_template.match_patch(
             cell, img, min_score=float(p["min_score"]),
             min_margin=float(p["min_margin"]),
-            min_structure=float(p["min_structure"]), periodic=axes)
+            min_structure=float(p["min_structure"]), periodic=axes,
+            self_period=self_period)
 
         shape = np.asarray(img).shape[:2]
         ph, pw = int(shape[0]), int(shape[1])
@@ -281,6 +293,7 @@ class RoiTemplateStep(Step):
                 "score": float(match.score), "margin": float(match.margin),
                 "structure": float(match.structure),
                 "ok": bool(match.ok), "axis": str(p["locate_axis"]),
+                "self_w": int(self_period[0]), "self_h": int(self_period[1]),
                 "norm": [[float(v) for v in b] for b in norm_boxes],
                 "boxes": [[int(v) for v in b] for b in boxes],
                 "others": int(others),
