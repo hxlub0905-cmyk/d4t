@@ -73,6 +73,16 @@ MANIFEST_CSV = "overlay_manifest.csv"
 #: ADEPT 需要的 manifest 欄位（`fine_align.OVERLAY_MANIFEST_COLS` 的子集）。
 NEEDED_COLS = ("image_id", "label_png", "status")
 
+#: **v4 才有的欄位**（2026-08-18 從一份真實匯出看到的，GitHub 上的 GLAS 還是
+#: v3）。它們正好就是 `GLAS-INTERFACE.md` §4 要的東西 —— 有了就不必自己猜：
+#:
+#: * ``id_source`` —— ``image_id`` 到底是 KLARF 的 DEFECTID 還是檔名 stem。
+#:   猜錯的話**整批對不上，而且是安靜的**，所以這一格比什麼都值錢。
+#: * ``width_px`` / ``height_px`` —— 不必再拿另一個檔案來比尺寸。
+#: * ``nm_per_px`` —— 逐張的（alignment CSV 那一份是全批一個值）。
+#: * ``page`` —— 多頁 TIFF 的頁碼（RSEM 是空的，那是對的）。
+V4_COLS = ("id_source", "page", "width_px", "height_px", "nm_per_px")
+
 #: alignment 檔的 schema（檔名是使用者選的，所以只能靠這個認）。
 ALIGNMENT_SCHEMA = "mmh-gds-alignment-v1"
 OVERLAY_SCHEMA_PREFIX = "mmh-gds-overlay-"
@@ -232,6 +242,19 @@ def _unfilter(raw: bytes, width: int, height: int) -> Optional[bytearray]:
     return out
 
 
+def png_pixels(path: str):
+    """解出來的像素（``bytearray``，row-major）。讀不到回 ``None``。"""
+    head = png_header(path)
+    if head is None or head["interlace"] or head["bit_depth"] != 8 \
+            or head["color_type"] not in (0, 3):
+        return None
+    try:
+        raw = zlib.decompress(_idat(path))
+    except (zlib.error, OSError):
+        return None
+    return _unfilter(raw, head["width"], head["height"])
+
+
 def png_value_counts(path: str) -> Tuple[Optional[Dict[int, int]], str]:
     """label 圖裡每一個值出現幾次。回傳 ``(counts, 讀不到的原因)``。
 
@@ -260,6 +283,84 @@ def png_value_counts(path: str) -> Tuple[Optional[Dict[int, int]], str]:
     for b in flat:
         counts[b] = counts.get(b, 0) + 1
     return counts, ""
+
+
+# --------------------------------------------------------------------------- #
+# 一層 mask -> 幾塊、幾個矩形  ——  Region-3 的設計就靠這兩個數字
+# --------------------------------------------------------------------------- #
+def _runs(flat, width: int, height: int, value: int):
+    """一層的水平 run：``[(row, x0, x1), …]``（``x1`` 不含）。"""
+    out = []
+    for y in range(height):
+        base = y * width
+        x = 0
+        while x < width:
+            if flat[base + x] == value:
+                x0 = x
+                while x < width and flat[base + x] == value:
+                    x += 1
+                out.append((y, x0, x))
+            else:
+                x += 1
+    return out
+
+
+def rect_count(runs) -> int:
+    """把 run 往下合併成**精確的**矩形分解，回傳矩形數。
+
+    合併規則：上一列有一段 ``[x0, x1)`` **完全一樣**的 run，就是同一個矩形往下
+    長一格。Manhattan 的 layout 這樣拆是**等價不是近似**（站點的區域本來就都是
+    矩形），所以這個數字就是 ADEPT 要放幾個框。
+    """
+    open_at = {}                       # (x0, x1) -> 還在往下長的矩形
+    total = 0
+    prev_row = None
+    for row, x0, x1 in runs:
+        if prev_row is not None and row != prev_row:
+            for key in [k for k, r in open_at.items() if r != prev_row]:
+                del open_at[key]
+        key = (x0, x1)
+        if key in open_at and open_at[key] == row - 1:
+            open_at[key] = row
+        else:
+            total += 1
+            open_at[key] = row
+        prev_row = row
+    return total
+
+
+def blob_count(runs) -> int:
+    """幾個**連通元件**（4-連通，以 run 為單位做 union-find）。
+
+    這個數字回答的是完全不同的問題：矩形是**切片**，連通元件才是「一份」。
+    非週期的 layout 上這兩個數字差很多，而 ADEPT 的 ``<name>_center`` /
+    ``<name>_others`` 只有在「一份」講得通的時候才有意義。
+    """
+    parent = list(range(len(runs)))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)
+
+    by_row = {}
+    for i, (row, _x0, _x1) in enumerate(runs):
+        by_row.setdefault(row, []).append(i)
+    for row in sorted(by_row):
+        above = by_row.get(row - 1, ())
+        for i in by_row[row]:
+            _r, x0, x1 = runs[i]
+            for j in above:
+                _r2, a0, a1 = runs[j]
+                if a0 < x1 and x0 < a1:
+                    union(i, j)
+    return len({find(i) for i in range(len(runs))})
 
 
 # --------------------------------------------------------------------------- #
@@ -419,9 +520,16 @@ def read_manifest(export_dir: str, rep: Report, m: Masker) -> Dict[str, object]:
     rep.check("PASS" if not missing else "FAIL",
               "the manifest has the columns ADEPT reads",
               "" if not missing else "missing: %s" % ", ".join(missing))
-    rep.check("WARN", "per-row image size (width_px / height_px)",
-              "not in this schema — GLAS-INTERFACE.md §4 “建議 3”; "
-              "this script compares the actual files instead")
+    have_v4 = [c for c in V4_COLS if c in cols]
+    if "width_px" in cols and "height_px" in cols:
+        rep.check("PASS", "per-row image size (width_px / height_px)",
+                  "this manifest has it — GLAS-INTERFACE.md §4 “建議 3” is done")
+    else:
+        rep.check("WARN", "per-row image size (width_px / height_px)",
+                  "not in this schema — GLAS-INTERFACE.md §4 “建議 3”; "
+                  "this script compares the actual files instead")
+    if have_v4:
+        rep.say("  v4 extras     %s" % ", ".join(have_v4))
 
     if rows:
         filled = {c: sum(1 for r in rows if str(r.get(c, "")).strip())
@@ -445,8 +553,25 @@ def read_manifest(export_dir: str, rep: Report, m: Masker) -> Dict[str, object]:
                                   "fine-align score threshold, which is "
                                   "normal"))
         rep.say("")
-        rep.say("  image_id looks like:  %s"
-                % Masker.shape_of(rows[0].get("image_id")))
+        rep.say("  image_id (all %d):    %s"
+                % (len(rows), _shape_summary([r.get("image_id") for r in rows])))
+        # 只看第一列會騙人：真實資料裡第一列的 id 是 1 個字元，而資料夾裡第一
+        # 個檔案的 stem 是 6 個字元 —— 兩句話都對，而擺在一起看起來像矛盾。
+        srcs = sorted({str(r.get("id_source", "")) for r in rows} - {""})
+        if srcs:
+            rep.say("  id_source            %s" % ", ".join(srcs))
+            klarf_ids = srcs == ["klarf-defectid"]
+            rep.check("PASS" if klarf_ids else "WARN",
+                      "the manifest says image_id is the KLARF DEFECTID",
+                      "" if klarf_ids else
+                      "id_source = %s — ADEPT must pair on that instead"
+                      % ", ".join(srcs))
+        for col in ("width_px", "height_px", "nm_per_px"):
+            vals = sorted({str(r.get(col, "")).strip() for r in rows} - {""})
+            if vals:
+                rep.say("  %-20s %s" % (col, ", ".join(vals[:6])
+                                        + (" …(%d distinct)" % len(vals)
+                                           if len(vals) > 6 else "")))
 
     label_map = list(doc.get("label_map") or [])
     rep.say("")
@@ -482,6 +607,31 @@ def read_manifest(export_dir: str, rep: Report, m: Masker) -> Dict[str, object]:
                   "have to rewrite them, so they must be rewritten the SAME way "
                   "every time" % len(bad))
     return {"rows": rows, "columns": cols, "label_map": label_map}
+
+
+def _shape_summary(values) -> str:
+    """一整欄字串的長相 —— 長度範圍、是不是全數字、有沒有補零／非 ASCII。"""
+    texts = [str(v) for v in values if str(v or "")]
+    if not texts:
+        return "empty"
+    lens = sorted({len(t) for t in texts})
+    bits = ["len=%d" % lens[0] if len(lens) == 1
+            else "len %d..%d (%d lengths)" % (lens[0], lens[-1], len(lens))]
+    if all(t.isdigit() for t in texts):
+        bits.append("all-digits")
+        padded = [t for t in texts if len(t) > 1 and t[0] == "0"]
+        bits.append("zero-padded" if len(padded) == len(texts)
+                    else ("some zero-padded (%d)" % len(padded) if padded
+                          else "not zero-padded"))
+    elif all(t.isalnum() for t in texts):
+        bits.append("alnum")
+    else:
+        bits.append("%d have punctuation"
+                    % sum(1 for t in texts if not t.isalnum()))
+    odd = sum(1 for t in texts if not all(ord(c) < 128 for c in t))
+    if odd:
+        bits.append("%d NON-ASCII" % odd)
+    return " · ".join(bits)
 
 
 def check_pairing(export_dir: str, man: Dict[str, object], rep: Report,
@@ -560,6 +710,10 @@ def check_label_images(export_dir: str, man: Dict[str, object], images_dir:
     # 風險是「這一顆的那一層被蓋光了」，那是逐顆發生的 —— 取聯集的話,只要
     # 有一張圖看得到那一層就會 PASS,而其餘每一顆的那個區域都是空的。
     empty_on: Dict[int, int] = {}
+    #: 第一張圖上，每一層拆出來幾塊、幾個矩形。**Region-3 的設計就靠這個** ——
+    #: 「一層的框有幾個」在另外兩張定位卡上是個位數，在這裡可能是幾百個，
+    #: 而 ``max_boxes`` 的預設值（64）會安靜地砍掉其餘的。
+    shapes_of: Dict[int, Tuple[int, int]] = {}
     decoded = 0
     unreadable: List[str] = []
 
@@ -592,18 +746,28 @@ def check_label_images(export_dir: str, man: Dict[str, object], images_dir:
                 if value and known and value not in known:
                     unknown_ids.add(value)
             rep.say("            values    %s" % "  ".join(parts))
+            if shapes_of is not None and not shapes_of:
+                flat = png_pixels(path)
+                for i in sorted(known):
+                    if counts.get(i):
+                        rs = _runs(flat, head["width"], head["height"], i)
+                        shapes_of[i] = (blob_count(rs), rect_count(rs))
             gone = sorted(i for i in known if not counts.get(i))
             for i in gone:
                 empty_on[i] = empty_on.get(i, 0) + 1
             if gone:
                 rep.say("            no pixels for id(s) %s" % gone)
 
-        other = _companion_size(export_dir, images_dir, r, klarf_files)
+        other = None
+        try:                                  # v4：manifest 自己就說得出來
+            other = (int(r["width_px"]), int(r["height_px"]))
+        except (KeyError, TypeError, ValueError):
+            other = _companion_size(export_dir, images_dir, r, klarf_files)
         if other is not None:
             size_seen += 1
             if (head["width"], head["height"]) != other:
                 size_bad += 1
-                rep.say("            SEM image is %dx%d — DIFFERENT" % other)
+                rep.say("            SEM image says %dx%d — DIFFERENT" % other)
 
     rep.check("PASS" if not channel_bad else "FAIL",
               "label PNG is single-channel 8-bit greyscale",
@@ -617,8 +781,8 @@ def check_label_images(export_dir: str, man: Dict[str, object], images_dir:
     # 這一條以前會直接綠燈）。
     if not size_seen:
         rep.check("SKIP", "label PNG is the same size as the SEM image",
-                  "nothing to compare against — this export has no *_raw.png; "
-                  "point --images at the folder holding the SEM images")
+                  "nothing to compare against — no width_px/height_px in the "
+                  "manifest and no *_raw.png; point --images at the SEM images")
     else:
         rep.check("PASS" if not size_bad else "FAIL",
                   "label PNG is the same size as the SEM image",
@@ -640,6 +804,25 @@ def check_label_images(export_dir: str, man: Dict[str, object], images_dir:
                   "empty. Raise --samples to see how often."
                   % (", ".join("id %d empty on %d image(s)" % (i, n)
                                for i, n in sorted(empty_on.items())), decoded))
+    if shapes_of:
+        rep.say("")
+        rep.say("  how one image decomposes (this is what ADEPT has to store):")
+        rep.say("    %-6s %-10s %-10s" % ("id", "pieces", "rectangles"))
+        worst = 0
+        for i in sorted(shapes_of):
+            blobs, rects = shapes_of[i]
+            worst = max(worst, rects)
+            rep.say("    %-6d %-10d %-10d" % (i, blobs, rects))
+        rep.check("PASS" if worst <= 64 else "WARN",
+                  "a layer fits under the Region cards' default box cap (64)",
+                  "" if worst <= 64 else
+                  "the biggest layer is %d rectangles. ADEPT stores a named "
+                  "region as a list of rectangles, and the existing Region "
+                  "cards cap that at 64 — a default meant for a handful of "
+                  "repeats. Here it would silently drop almost everything, so "
+                  "roi_from_mask needs its own much larger cap. Note pieces vs "
+                  "rectangles above: where they differ, the layer is being cut "
+                  "up by whichever layer is painted after it." % worst)
     if unreadable:
         rep.check("WARN", "the sampled label PNGs could all be decoded",
                   "; ".join(sorted(set(unreadable))))
@@ -791,6 +974,8 @@ def check_klarf_join(klarf_path: str, man: Dict[str, object], rep: Report,
                   "run this from the ADEPT folder so it can read the KLARF")
         return {}
     found = find_klarf(klarf_path)
+    rep.say("  looked in            %s"
+            % ("a folder" if os.path.isdir(klarf_path) else "the file you gave"))
     if os.path.isdir(found):
         rep.say("  no KLARF (%s) in that folder"
                 % "/".join(e for e in KLARF_EXTS))
@@ -802,7 +987,11 @@ def check_klarf_join(klarf_path: str, man: Dict[str, object], rep: Report,
         doc = klarf_core.load(found)
     except Exception as exc:                              # noqa: BLE001
         rep.say("  cannot read the KLARF: %s" % exc.__class__.__name__)
-        rep.check("SKIP", "manifest image_id == KLARF DEFECTID")
+        rep.check("SKIP", "manifest image_id == KLARF DEFECTID",
+                  "%s on %s — if that folder has no .001/.klarf/.txt, point "
+                  "--klarf straight at the KLARF file"
+                  % (exc.__class__.__name__,
+                     m.alias("KLARF", os.path.basename(found))))
         return {}
 
     cols = [str(c).upper() for c in doc.defect_columns]

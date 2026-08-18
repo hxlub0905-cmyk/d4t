@@ -67,6 +67,50 @@ worker 都是照「`DefectItem` 帶著哪些影像來源」在算的。卡片自
 
 ---
 
+## 3.4 **實測：manifest 已經是 v4，§4 的必要 1／建議 3 都做完了**（2026-08-18）
+
+使用者在公司機上對一份真實匯出跑了 `tools/check_glas_export.py`（399 顆）。
+結果推翻了下面 §4 的一部分 —— **GitHub 上的 GLAS 是 v3，廠內那份是 v4**：
+
+```
+schema   mmh-gds-overlay-v4
+columns  image_id, raw_png, overlay_png, fine_dx_nm, fine_dy_nm, score, status,
+         gray_png, label_png, id_source, page, width_px, height_px, nm_per_px,
+         label_view_png
+```
+
+| §4 的項目 | 實際狀態 |
+|---|---|
+| 必要 1（多頁 TIFF 的 page 對應）| **欄位在了**（`page`）。RSEM 這批是空的 —— 那是對的 |
+| 建議 3（`id_source` / `width_px` / `height_px`）| **全部做完了**，而且 `nm_per_px` 也逐張帶了 |
+
+所以 ADEPT 不必再猜也不必再自己比：**`id_source` 直接說 `image_id` 是不是 KLARF
+的 `DEFECTID`，`width_px`/`height_px` 直接說 label 圖該多大。**
+
+那一批的其他事實（全部遮蔽過）：399 顆、`status` 全 `ok`、每顆五種 PNG 都在、
+label 是 1000×1000 單通道 8-bit、3 層、`nm_per_px` 全批都是 1、
+`image_id` 是不補零的數字（長度 1–6）、檔名不需要 `_safe_name` 改寫、沒有碰撞。
+
+**唯一的 WARN 是 layer 名**：三個名字都含有 ADEPT 的區域名規則不接受的字元
+（`L17/D0` 那種形式）。所以 `roi_from_mask` 一定要有一層「layer 名 → 區域名」的
+改寫，而且**改寫規則要固定、要能查碰撞**（見 §3.6）。
+
+## 3.6 一層 mask 拆成幾個矩形 —— 這是 Region-3 的設計輸入
+
+`check_glas_export.py` 會把抽樣的那張 label 圖拆一次，印出每一層的
+**pieces（連通元件）** 與 **rectangles（精確矩形分解）**。兩個數字問的是不同的事：
+
+* **rectangles** = ADEPT 真的要存幾個框。既有的 Region 卡 `max_boxes` 預設 **64**
+  —— 那是為「重複結構的幾份」設計的。GDS 這條路一層可能是**幾百到上千個**矩形
+  （合成的 1000×1000 三層測起來 1014 / 988 / 25），64 會**安靜地砍掉大部分**。
+  所以 `roi_from_mask` 要有自己的、大得多的上限。
+* **pieces** = 「一份」有幾個。`<name>_center` / `<name>_others` 只有在「一份」
+  講得通的時候才有意義 —— 而在非週期的 layout 上通常講不通（§3.3.13 已經據此
+  決定這張卡只吐 `<name>`）。
+
+兩者差很大的時候，意思是**那一層正被後面畫的層切碎**
+（`render_label_image` 是 `lbl[m > 0] = label_id`）。
+
 ## 3.5 先驗，再寫程式：`tools/check_glas_export.py`（2026-08-18）
 
 真實資料在**只能複製文字出來**的那台機器上（`AGENTS.md` §2），而卡片要接對，
@@ -110,6 +154,12 @@ PNG 那個資料夾裡（健檢靠 schema 字串找它，`--alignment` 可以直
 
 > 以下是 ADEPT（下游）對 GLAS 匯出的需求。ADEPT 不解析 layout，
 > 只吃 `<id>_label.png` + `<id>_gray.png` + manifest；join key 是 KLARF `DEFECTID`。
+
+> ⚠ **2026-08-18 實測更新（見 §3.4）**：廠內那份 GLAS 已經是 **v4**，
+> 底下的「必要 1」與「建議 3」**都已經做掉了**（manifest 有 `page`、`id_source`、
+> `width_px`、`height_px`、逐張 `nm_per_px`）。而 Region-3 定調成 **RSEM only**
+> 之後，「必要 1」與「必要 2」本來就不再擋 ADEPT（一顆一個檔、只有一頁）。
+> 下面這幾段留著是給**未來要做 patch 那條路**的人 —— 那時候它們會回來。
 
 ### 必要 1 — 多頁 TIFF 的 page 對應（不改的話，多頁資料整批對錯）
 

@@ -23,10 +23,14 @@
 **Region-1（Template）✅**、**Region-2（Profile：2a 圖示、2b 點曲線選材質、
 2c 單方向）✅**，加上跨兩張卡的「靠邊的框不要」與疊框分色（第八輪）。
 下一段是 **Region-3（`roi_from_mask` / GDS）**，**只做 RSEM**（單張 + KLARF；
-使用者定調，理由見計畫書 §3.3.13）。健檢腳本已經有了
-（`tools/check_glas_export.py`，第九輪），等使用者貼真實匯出的報告回來校欄位；
-不等的話，下一步是在 `tools/` 幫 `make_sample_rsem.py` 加一支 label sidecar
-產生器（**圖案要刻意非週期**）。
+使用者定調，理由見計畫書 §3.3.13）。健檢跑過真實資料了（第十輪：399 顆、v4 manifest、
+0 fail），**欄位已經校準，可以直接開工**。下一步是在 `tools/` 幫
+`make_sample_rsem.py` 加一支 label sidecar 產生器（**圖案要刻意非週期**、
+照 v4 的欄位寫 manifest）。
+
+⚠ 開工前先讀 `GLAS-INTERFACE.md` §3.4／§3.6：`max_boxes` 的 64 在這條路上會
+**安靜地砍掉 95%**（實測一層 1014 個矩形），而 layer 名（`L17/D0` 那種）
+一定要有一層固定的改寫規則。
 
 **開工前讀**：[`AGENTS.md`](AGENTS.md) → [`docs/plans/F11-phase2-features.md`](docs/plans/F11-phase2-features.md)
 **§3.3.4**（Template）、**§3.3.11**（Profile 單方向）、
@@ -43,6 +47,40 @@
 
 **還欠的一件（不屬於 Region 段）**：那張「比較兩個區域」的卡（計畫書 §3.3.6 的
 最後一段）。它屬於 **Measure** 段，不要插隊。今天比較是發生在分數表達式裡的。
+
+---
+
+### 第十輪：真實匯出跑過健檢，推翻了三件事（同日）
+
+使用者在公司機上跑了一次（399 顆），報告貼回來。**三件事跟我讀 GitHub 上的
+GLAS 讀到的不一樣**，而它們全都往好的方向：
+
+1. **廠內那份 GLAS 是 `mmh-gds-overlay-v4`，不是 v3。** `GLAS-INTERFACE.md` §4
+   的「建議 3」**已經做完了** —— manifest 逐列帶 `id_source` / `width_px` /
+   `height_px` / `nm_per_px`，連「必要 1」的 `page` 欄位都在（RSEM 這批是空的，
+   那是對的）。ADEPT 不必再猜 join key、也不必自己去比尺寸。
+2. **資料很乾淨。** 399 顆全 `ok`、五種 PNG 都在、label 是 1000×1000 單通道
+   8-bit、3 層、`image_id` 是不補零的數字、檔名不需要 `_safe_name` 改寫、沒有
+   碰撞、每一層在每張圖上都有像素。我列的四個「安靜的坑」一個都沒踩到。
+3. **唯一的 WARN 是 layer 名**（`L17/D0` 那種形式，ADEPT 的區域名規則不收）。
+   所以 `roi_from_mask` 一定要有一層改寫，而且規則要固定、要能查碰撞。
+
+健檢跟著升級：讀得懂 v4 的欄位、`id_source` 直接回答 join、id 的長相改成看**整欄
+的分佈**而不是第一列（第一列的 id 是 1 個字元、資料夾裡第一個檔案的 stem 是 6 個
+字元 —— 兩句話都對，擺在一起像矛盾，我自己就被騙了一下）。
+
+**而且加了一個量測，因為那才是 Region-3 真正缺的設計輸入**：把 label 拆一次，
+印出每一層的 **pieces（連通元件）** 與 **rectangles（精確矩形分解）**。
+合成一份同尺寸同覆蓋率的來量：**1014 / 988 / 25 個矩形**。
+
+那個數字直接否決了一個預設值：既有 Region 卡的 `max_boxes` 是 **64**，
+為「重複結構的幾份」設計的 —— 用在這裡會**安靜地砍掉 95%**。`roi_from_mask`
+要有自己的上限。順帶看見另一件事：pieces 跟 rectangles 差很大的時候，
+意思是**那一層正被後面畫的層切碎**（`lbl[m > 0] = label_id`）。
+
+（KLARF 那一條 SKIP 是因為使用者跑的是我加「`--klarf` 吃資料夾」之前的版本，
+`klarf_core.load()` 拿到資料夾在 Windows 上是 `PermissionError`。不重要了 ——
+`id_source` 已經回答了那個問題。）
 
 ---
 

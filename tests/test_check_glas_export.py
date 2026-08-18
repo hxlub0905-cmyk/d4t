@@ -358,10 +358,10 @@ def test_the_klarf_argument_takes_a_folder_too(tmp_path):
     「算了不跑」的機會（推廣鐵則）。"""
     lot = tmp_path / "lot"
     lot.mkdir()
-    (lot / "SOMELOT.001").write_text("x", encoding="utf-8")
+    (lot / "LOT_SYN.001").write_text("x", encoding="utf-8")
     (lot / "notes.md").write_text("x", encoding="utf-8")
-    assert chk.find_klarf(str(lot)).endswith("SOMELOT.001")
-    assert chk.find_klarf(str(lot / "SOMELOT.001")).endswith("SOMELOT.001")
+    assert chk.find_klarf(str(lot)).endswith("LOT_SYN.001")
+    assert chk.find_klarf(str(lot / "LOT_SYN.001")).endswith("LOT_SYN.001")
     # 找不到就原樣回傳（呼叫端看得出來它還是一個資料夾，並說出可以照做的話）
     empty = tmp_path / "empty"
     empty.mkdir()
@@ -374,3 +374,63 @@ def test_a_folder_with_no_klarf_says_what_to_do(tmp_path):
     empty.mkdir()
     _text, v = _run(d, klarf=str(empty))
     assert v["manifest image_id == KLARF DEFECTID"] == "SKIP"
+
+
+# --------------------------------------------------------------------------- #
+# 6. 一層拆成幾塊、幾個矩形 —— Region-3 的設計就靠這兩個數字
+# --------------------------------------------------------------------------- #
+def _runs_of(grid, value=1):
+    flat = bytearray(v for row in grid for v in row)
+    return chk._runs(flat, len(grid[0]), len(grid), value)
+
+
+def test_a_rectangle_is_one_rectangle():
+    grid = [[0, 0, 0, 0],
+            [0, 1, 1, 0],
+            [0, 1, 1, 0],
+            [0, 0, 0, 0]]
+    assert chk.rect_count(_runs_of(grid)) == 1
+    assert chk.blob_count(_runs_of(grid)) == 1
+
+
+def test_an_L_is_two_rectangles_but_one_piece():
+    """這正是「取 bounding box」會出錯的形狀 —— 而 ``pieces`` 才是「一份」。"""
+    grid = [[1, 1, 1, 1],
+            [1, 1, 1, 1],
+            [1, 1, 0, 0],
+            [1, 1, 0, 0]]
+    assert chk.rect_count(_runs_of(grid)) == 2
+    assert chk.blob_count(_runs_of(grid)) == 1
+
+
+def test_two_separate_shapes_are_two_pieces():
+    grid = [[1, 1, 0, 1, 1],
+            [1, 1, 0, 1, 1]]
+    assert chk.blob_count(_runs_of(grid)) == 2
+    assert chk.rect_count(_runs_of(grid)) == 2
+
+
+def test_a_diagonal_staircase_is_one_piece_and_many_rectangles():
+    """非 Manhattan 的邊界會炸成一堆 1px 的矩形 —— 這個數字要看得到，
+    不然 ``max_boxes`` 會安靜地砍掉大半。"""
+    n = 6
+    grid = [[1 if x <= y else 0 for x in range(n)] for y in range(n)]
+    assert chk.blob_count(_runs_of(grid)) == 1
+    assert chk.rect_count(_runs_of(grid)) == n
+
+
+def test_a_shape_that_skips_a_row_does_not_merge_across_the_gap():
+    """中間空一列的兩塊不准被合併成一個矩形（往下長只認**相鄰**的那一列）。"""
+    grid = [[1, 1],
+            [0, 0],
+            [1, 1]]
+    assert chk.rect_count(_runs_of(grid)) == 2
+    assert chk.blob_count(_runs_of(grid)) == 2
+
+
+def test_the_decomposition_is_reported_for_a_real_sized_layer(tmp_path):
+    """報告要講得出「這一層有幾個矩形」—— 那是 Region-3 唯一的設計輸入。"""
+    d = _export(tmp_path, ids=("1",), layers=("A", "B"))
+    text, v = _run(d)
+    assert "rectangles" in text
+    assert "a layer fits under the Region cards' default box cap (64)" in v
