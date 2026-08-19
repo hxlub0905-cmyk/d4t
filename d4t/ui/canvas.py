@@ -58,8 +58,21 @@ from .widgets import CARD_MIME, IconButton, draw_group_icon, small_button
 
 __all__ = ["PipelineCanvas", "NODE_W", "NODE_H", "COL_GAP", "ROW_GAP"]
 
-#: 一個節點最多畫幾個輸出埠（再多就擠不下，退回單一埠）。
+#: 一個節點最多畫幾個**影像**輸出埠（再多就擠不下，退回單一埠）。
 _MAX_PORTS = 4
+
+#: 最多畫幾個**區域**輸出埠（F12）。跟影像的上限分開數，因為它們是兩排不同
+#: 的東西：一張 GDS 卡吐三層區域的同時，還原樣送出它吃進來的那條流。
+#: 卡片會為了容納埠**長高**（見 ``_NodeItem.height``），所以這個數字管的是
+#: 「多到某個程度就算了」，不是版面。
+_MAX_REGION_PORTS = 6
+
+#: 區域埠的半徑（畫成菱形 —— 影像埠是圓）。
+#:
+#: 為什麼要長得不一樣：這兩種埠**接不到彼此**。把一條影像線拉進區域埠，那一格
+#: 會變成一個沒有人定義的區域名 —— 跑起來是 `unknown-region`，而畫面上那條線
+#: 看起來完全正常。形狀在滑鼠靠近之前就講出這件事。
+_REGION_PORT_R = 5.5
 
 #: 埠標籤佔的寬度（畫在節點右緣之外，boundingRect 必須算進去）。
 _PORT_LABEL_W = 52.0
@@ -203,6 +216,39 @@ def _draw_parts(p: QPainter, rect: QRectF, parts: List[str]) -> str:
     return text
 
 
+def region_color() -> QColor:
+    """區域線與區域埠的顏色 —— Region 段的階段色（F12）。
+
+    用階段色而不是另外挑一個：使用者已經在卡片庫、左側 rail、卡片左邊那顆
+    圖示磚上看過這個顏色三次了，它就是「這是區域的事」的意思。
+    """
+    return QColor(theme.group_hex("region"))
+
+
+def _diamond(centre: QPointF, r: float) -> QPainterPath:
+    """以 ``centre`` 為心、半徑 ``r`` 的菱形（區域埠的形狀）。"""
+    path = QPainterPath(centre + QPointF(0.0, -r))
+    path.lineTo(centre + QPointF(r, 0.0))
+    path.lineTo(centre + QPointF(0.0, r))
+    path.lineTo(centre + QPointF(-r, 0.0))
+    path.closeSubpath()
+    return path
+
+
+def _draw_port(p: QPainter, anchor: QPointF, kind: str, filled: bool) -> None:
+    """畫一顆埠。影像是圓、區域是菱形；輸入空心、輸出實心。"""
+    if kind == "region":
+        col = region_color()
+        p.setPen(QPen(col, 1.2))
+        p.setBrush(QBrush(col if filled else QColor(TOKENS["bg_surface"])))
+        p.drawPath(_diamond(anchor, _REGION_PORT_R))
+        return
+    p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
+    p.setBrush(QBrush(QColor(TOKENS["canvas_edge"] if filled
+                             else TOKENS["bg_surface"])))
+    p.drawEllipse(anchor, _PORT_R, _PORT_R)
+
+
 class _NodeItem(QGraphicsItem):
     """一張節點卡（自繪；顏色全部取自 ``theme.TOKENS``）。"""
 
@@ -226,6 +272,23 @@ class _NodeItem(QGraphicsItem):
         self.setToolTip(tip)
 
     # -- 幾何 ---------------------------------------------------------------
+    #: 一顆埠至少要佔幾 px 才點得到（埠的直徑是 10–11）。
+    _PORT_PITCH = 13.0
+
+    def height(self) -> float:
+        """這張卡多高 —— **埠多就長高**（F12）。
+
+        ``NODE_H``（56）容得下四顆埠；區域也變成埠之後，一張吐三層的 GDS 卡
+        右邊是「一條原樣送出的流 + 三個區域」。埠均分卡高，所以在固定高度下
+        它們會擠到互相重疊 —— 而重疊的埠是**點不到**的（``out_port_at`` 取最近
+        的那一顆，兩顆疊在一起就等於其中一顆消失）。
+
+        長高而不是截斷：截掉的那幾個區域仍然是這張卡真的產出的東西，畫布上
+        看不到它們就是說謊。
+        """
+        n = max(len(self.in_specs()), len(self.out_specs()), 1)
+        return max(NODE_H, self._PORT_PITCH * n + 10.0)
+
     def boundingRect(self) -> QRectF:
         """**要涵蓋所有畫得出去的東西**，否則拖動節點會留下殘影。
 
@@ -250,7 +313,7 @@ class _NodeItem(QGraphicsItem):
             left -= _PORT_LABEL_W
         right = NODE_W + max(_PORT_GRAB, _PORT_R + _PORT_LABEL_W) + 1.0
         return QRectF(left, -_PORT_GRAB - 1.0,
-                      right - left, NODE_H + 2.0 * (_PORT_GRAB + 1.0))
+                      right - left, self.height() + 2.0 * (_PORT_GRAB + 1.0))
 
     def shape(self) -> QPainterPath:
         """**點得到的範圍不是畫得到的範圍。**
@@ -290,7 +353,7 @@ class _NodeItem(QGraphicsItem):
         """
         p = QPainterPath()
         p.setFillRule(Qt.WindingFill)
-        p.addRoundedRect(QRectF(0.0, -1.0, NODE_W, NODE_H + 2.0), 7, 7)
+        p.addRoundedRect(QRectF(0.0, -1.0, NODE_W, self.height() + 2.0), 7, 7)
         for anchor in self.in_anchors_local() + self.out_anchors_local():
             p.addEllipse(anchor, _PORT_GRAB, _PORT_GRAB)
         return p
@@ -306,8 +369,21 @@ class _NodeItem(QGraphicsItem):
     # 「兩條線接進同一張卡的**不同**輸入」是使用者要的多連一，而那件事要成立，
     # 左邊就得有兩顆分得開的埠。
     def in_specs(self) -> List[Dict[str, Any]]:
-        """這張卡的輸入格：``[{"name","label","stream"}, …]``（由 Studio 給）。"""
-        return [dict(d) for d in (self.info.get("inputs") or [])]
+        """這張卡的輸入格：``[{"name","label","stream","kind"}, …]``。
+
+        **影像的在前，區域的在後**（F12）。兩種埠住在同一個清單，因為畫布上
+        「這條線落在哪一格」只有一套算法（``in_param_at`` → ``dst_name``）——
+        分成兩份的話，兩種線的落點判斷遲早會長歪，而症狀是「線接到隔壁那一格」，
+        跑得完、有數字、而且是錯的。
+        """
+        out = [dict(d, kind=str(d.get("kind") or "image"))
+               for d in (self.info.get("inputs") or [])]
+        out += [dict(d, kind="region")
+                for d in (self.info.get("region_inputs") or [])]
+        return out
+
+    def in_kinds(self) -> List[str]:
+        return [str(d.get("kind") or "image") for d in self.in_specs()]
 
     def in_anchors_local(self) -> List[QPointF]:
         """每個輸入埠在本地座標的位置（由上而下均分節點左緣）。
@@ -324,28 +400,30 @@ class _NodeItem(QGraphicsItem):
         n = len(self.in_specs())
         if n == 0:
             return []
+        h = self.height()
         if n == 1:
-            return [QPointF(0.0, NODE_H / 2.0)]
-        step = NODE_H / (n + 1)
+            return [QPointF(0.0, h / 2.0)]
+        step = h / (n + 1)
         return [QPointF(0.0, step * (i + 1)) for i in range(n)]
 
     def in_anchors(self) -> List[QPointF]:
         base = self.scenePos()
         return [base + p for p in self.in_anchors_local()]
 
-    #: 沒有輸入的卡（Input）**不畫**埠，但幾何上仍然要答得出一個點：
-    #: 連線的貝茲曲線、`shape()`、測試都會問。左緣正中央。
-    _NO_INPUT_ANCHOR = QPointF(0.0, NODE_H / 2.0)
+    def _no_input_anchor(self) -> QPointF:
+        """沒有輸入的卡（Input）**不畫**埠，但幾何上仍然要答得出一個點：
+        連線的貝茲曲線、`shape()`、測試都會問。左緣正中央。"""
+        return QPointF(0.0, self.height() / 2.0)
 
     def in_port(self, index: int = 0) -> QPointF:
         anchors = self.in_anchors()
         if not anchors:
-            return self.scenePos() + self._NO_INPUT_ANCHOR
+            return self.scenePos() + self._no_input_anchor()
         return anchors[max(0, min(int(index), len(anchors) - 1))]
 
     def in_port_local(self) -> QPointF:
         anchors = self.in_anchors_local()
-        return anchors[0] if anchors else QPointF(self._NO_INPUT_ANCHOR)
+        return anchors[0] if anchors else self._no_input_anchor()
 
     def in_port_at(self, pos: QPointF):
         """本地座標 ``pos`` 最靠近哪一個輸入埠（沒有夠近的回 ``None``）。
@@ -394,8 +472,28 @@ class _NodeItem(QGraphicsItem):
         以前這裡的 ``or [""]`` 保證每張卡至少有一顆埠，所以「前後都是空的」
         這件事在畫布上表達不出來。
         """
-        names = [str(w) for w in (self.info.get("writes") or [])]
-        return names[:_MAX_PORTS]
+        return [str(d["name"]) for d in self.out_specs()]
+
+    def out_specs(self) -> List[Dict[str, str]]:
+        """每一顆輸出埠：``[{"name","kind"}, …]``。影像在前，區域在後（F12）。
+
+        區域也是這張卡**產出**的東西（``resolve_regions_out``），只是它流的不是
+        像素。以前畫布上它完全沒有出口，於是「這張卡定義的區域被誰用了」在畫面
+        上是看不見的 —— 那條依賴真的存在（拿掉這張卡，下游會安靜地改量整張圖）。
+        """
+        outs = [{"name": str(w), "kind": "image"}
+                for w in (self.info.get("writes") or []) if str(w)][:_MAX_PORTS]
+        outs += [{"name": str(r), "kind": "region"}
+                 for r in (self.info.get("regions_out") or [])
+                 if str(r)][:_MAX_REGION_PORTS]
+        return outs
+
+    def out_kinds(self) -> List[str]:
+        return [d["kind"] for d in self.out_specs()]
+
+    def out_kind(self, index: int) -> str:
+        kinds = self.out_kinds()
+        return kinds[index] if 0 <= index < len(kinds) else "image"
 
     def out_anchors_local(self) -> List[QPointF]:
         """每個輸出埠在**本地座標**的位置（由上而下均分節點右緣）。
@@ -413,9 +511,10 @@ class _NodeItem(QGraphicsItem):
         n = len(self.out_names())
         if n == 0:
             return []
+        h = self.height()
         if n == 1:
-            return [QPointF(NODE_W, NODE_H / 2.0)]
-        step = NODE_H / (n + 1)
+            return [QPointF(NODE_W, h / 2.0)]
+        step = h / (n + 1)
         return [QPointF(NODE_W, step * (i + 1)) for i in range(n)]
 
     def out_anchors(self) -> List[QPointF]:
@@ -429,7 +528,7 @@ class _NodeItem(QGraphicsItem):
             # 這張卡現在沒有輸出埠（還沒接上來源）。已經存在的線仍然要畫得
             # 出來 —— 畫在右緣中點，看起來就是「線從這張卡出來、但這張卡上
             # 沒有埠」。那正是實情，不要為了好看假裝有一顆埠。
-            return self.scenePos() + QPointF(NODE_W, NODE_H / 2.0)
+            return self.scenePos() + QPointF(NODE_W, self.height() / 2.0)
         return anchors[max(0, min(int(index), len(anchors) - 1))]
 
     def out_port_at(self, pos: QPointF):
@@ -461,7 +560,7 @@ class _NodeItem(QGraphicsItem):
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         enabled = bool(self.info.get("enabled", True))
         selected = self.isSelected()
-        body = QRectF(0, 0, NODE_W, NODE_H)
+        body = QRectF(0, 0, NODE_W, self.height())
 
         p.setRenderHint(QPainter.Antialiasing, True)
 
@@ -504,7 +603,8 @@ class _NodeItem(QGraphicsItem):
         p.drawRoundedRect(body, 7, 7)
 
         # 左邊的圖示磚：淡色底 + 與左側 rail 完全相同的圖形（F7-8）。
-        tile = QRectF(8, (NODE_H - _TILE) / 2.0, _TILE, _TILE)
+        tile = QRectF(8, (min(NODE_H, self.height()) - _TILE) / 2.0,
+                      _TILE, _TILE)
         wash = QColor(tile_col)
         wash.setAlpha(46 if enabled else 24)
         p.setPen(QPen(tile_col if enabled else QColor(TOKENS["border_default"]), 1.0))
@@ -547,12 +647,11 @@ class _NodeItem(QGraphicsItem):
 
         # 連接埠（**本地座標** —— 見 out_anchors_local 的說明）。
         # 輸入是空心圈、輸出是實心點：一眼看得出線該從哪邊拉到哪邊。
-        p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
-        p.setBrush(QBrush(QColor(TOKENS["bg_surface"])))
         ins = self.in_specs()
         in_anchors = self.in_anchors_local()
         for i, anchor in enumerate(in_anchors):
-            p.drawEllipse(anchor, _PORT_R, _PORT_R)
+            kind = str(ins[i].get("kind") or "image") if i < len(ins) else "image"
+            _draw_port(p, anchor, kind, filled=False)
             if len(ins) < 2 or i >= len(ins):
                 continue
             # 兩個以上的輸入才標名字：一顆埠的時候「這條線接到哪」沒有歧義，
@@ -563,27 +662,25 @@ class _NodeItem(QGraphicsItem):
             text = str(spec.get("stream") or spec.get("label") or "")
             if not text:
                 continue
-            p.setPen(QColor(TOKENS["text_secondary"]))
+            p.setPen(QColor(TOKENS["text_secondary"] if kind != "region"
+                            else region_color().name()))
             p.drawText(
                 QRectF(anchor.x() - _PORT_LABEL_W - 4, anchor.y() - 7,
                        _PORT_LABEL_W, 14),
                 Qt.AlignVCenter | Qt.AlignRight, text)
-            p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
-            p.setBrush(QBrush(QColor(TOKENS["bg_surface"])))
 
-        outs = self.out_names()
-        p.setBrush(QBrush(QColor(TOKENS["canvas_edge"])))
-        for name, anchor in zip(outs, self.out_anchors_local()):
-            p.drawEllipse(anchor, _PORT_R, _PORT_R)
+        for spec, anchor in zip(self.out_specs(), self.out_anchors_local()):
+            name, kind = spec["name"], spec["kind"]
+            _draw_port(p, anchor, kind, filled=True)
             if not name:
                 continue
-            # 每個輸出埠都標上它吐的影像流名（F7-9）。以前只有多埠才標，
-            # 於是「這張卡到底做在哪一條流上」在畫布上是看不到的 ——
-            # 而 Enhance 卡的 target / also apply 講的正是這些名字。
-            p.setPen(QColor(TOKENS["text_secondary"]))
+            # 每個輸出埠都標上它吐的名字（F7-9；F12 起也含具名區域）。以前
+            # 只有多埠才標，於是「這張卡到底做在哪一條流上」在畫布上是看不到
+            # 的 —— 而 Enhance 卡的 target / also apply 講的正是這些名字。
+            p.setPen(QColor(region_color().name() if kind == "region"
+                            else TOKENS["text_secondary"]))
             p.drawText(QRectF(anchor.x() + 4, anchor.y() - 7, _PORT_LABEL_W - 10, 14),
                        Qt.AlignVCenter | Qt.AlignLeft, name)
-            p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
 
     def subtitle(self) -> str:
         """副標：**這張卡吃什麼、吐什麼**（F7-14）。
@@ -745,8 +842,17 @@ class _EdgeItem(QGraphicsItem):
         self.setZValue(_Z_EDGE)
         # 滑鼠移上來要出現「斷開」的 ×（F7-22）。
         self.setAcceptHoverEvents(True)
-        self.setToolTip("%s → %s  (click the × to disconnect)"
-                        % (src.node_id, dst.node_id))
+        what = ("region “%s”" % self.out_name() if self.kind() == "region"
+                else "image")
+        self.setToolTip("%s → %s  (%s; click the × to disconnect)"
+                        % (src.node_id, dst.node_id, what))
+
+    def kind(self) -> str:
+        """這條線搬的是影像還是區域（F12）—— **由它出發的那顆埠決定**。
+
+        不另外存一個旗標：埠已經知道自己是哪一種，而兩份會漂。
+        """
+        return self.src.out_kind(self.port)
 
     # ---- 斷開鈕（F7-22）---------------------------------------------------
     #: 斷開鈕的命中半徑。畫出來的圓是 ``_CUT_R``，多給 2px 是因為使用者瞄的是
@@ -864,10 +970,22 @@ class _EdgeItem(QGraphicsItem):
 
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         p.setRenderHint(QPainter.Antialiasing, True)
-        col = QColor(TOKENS["canvas_edge_active"] if self.isSelected()
-                     else TOKENS["canvas_edge"])
+        region = self.kind() == "region"
+        if self.isSelected():
+            col = QColor(TOKENS["canvas_edge_active"])
+        elif region:
+            col = region_color()
+        else:
+            col = QColor(TOKENS["canvas_edge"])
         path = self.path()
-        p.setPen(QPen(col, 2.2 if self.isSelected() else 1.6))
+        # 區域線畫**虛線**：它搬的不是像素，而使用者要在餘光裡就分得出這兩種
+        # 線（它們接不到彼此）。顏色是 Region 段的階段色，跟卡片上那顆圖示磚
+        # 同一個 —— 不必再學一組新的意思。
+        pen = QPen(col, 2.2 if self.isSelected() else 1.6)
+        if region:
+            pen.setStyle(Qt.DashLine)
+            pen.setDashPattern([4.0, 3.0])
+        p.setPen(pen)
         p.setBrush(Qt.NoBrush)
         p.drawPath(path)
 
@@ -1096,13 +1214,16 @@ class PipelineCanvas(QGraphicsView):
                           if pair not in set(self._pairs)]
 
         pos = layout_columns(self._order, self._pairs + self._implicit)
-        for info in nodes:
-            item = _NodeItem(info, self)
+        fresh = [_NodeItem(info, self) for info in nodes]
+        # **列距要容得下最高的那張卡**（F12）：埠多的卡片會長高，用固定的
+        # ``NODE_H + ROW_GAP`` 排的話它會壓到下一列。
+        self._pitch = max([it.height() for it in fresh] or [NODE_H]) + ROW_GAP
+        for item in fresh:
             if item.node_id in prev:
                 item.setPos(prev[item.node_id])
             else:
                 col, row = pos.get(item.node_id, (0, 0))
-                item.setPos(col * (NODE_W + COL_GAP), row * (NODE_H + ROW_GAP))
+                item.setPos(col * (NODE_W + COL_GAP), row * self._pitch)
             self._scene.addItem(item)
             self._items[item.node_id] = item
 
@@ -1294,7 +1415,7 @@ class PipelineCanvas(QGraphicsView):
         item = self._items.get(str(node_id))
         if item is None:
             return False
-        item.setPos(float(x) - NODE_W / 2.0, float(y) - NODE_H / 2.0)
+        item.setPos(float(x) - NODE_W / 2.0, float(y) - item.height() / 2.0)
         self.refresh_edges()
         return True
 
@@ -1309,9 +1430,10 @@ class PipelineCanvas(QGraphicsView):
         也就不需要進復原堆疊。
         """
         pos = layout_columns(self._order, self._pairs + self._implicit)
+        pitch = getattr(self, "_pitch", NODE_H + ROW_GAP)
         for nid, item in self._items.items():
             col, row = pos.get(nid, (0, 0))
-            item.setPos(col * (NODE_W + COL_GAP), row * (NODE_H + ROW_GAP))
+            item.setPos(col * (NODE_W + COL_GAP), row * pitch)
         self.refresh_edges()
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self._scene.setSceneRect(rect)

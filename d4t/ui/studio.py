@@ -1492,8 +1492,11 @@ class StudioWindow(QMainWindow):
         # 於是看到的是「template=gc1:iVBORw0KGg…」，既沒有資訊也擠掉了真正
         # 有用的參數。這種參數只講「有沒有設」。
         opaque = {p.name: p.type for p in step_cls.params if p.type == "template"}
+        # F12：區域也算 —— 它的值現在印在**輸入埠的標籤**上（`roi=epi` 那一項
+        # 跟埠上的 `epi` 是同一件事），第三行再講一次只是把位子佔掉。
         stream_params = {p.name for p in step_cls.params
-                         if p.type in ("image_key", "image_keys")}
+                         if p.type in ("image_key", "image_keys",
+                                       "region_key", "region_keys")}
         seen = {str(s) for s in (shown or [])}
         parts: List[str] = []
         for name, value in node.params.items():
@@ -1603,6 +1606,7 @@ class StudioWindow(QMainWindow):
             # —— 那一格現在不成立，畫一顆接不上任何意義的埠只會讓人問「這是
             # 什麼」。標籤用 ParamSpec 的 label（`First stream`），不是參數名。
             inputs = []
+            region_inputs = []
             if step_cls is not None:
                 for spec in step_cls.input_specs():
                     if not spec.visible_for(node.params):
@@ -1612,20 +1616,35 @@ class StudioWindow(QMainWindow):
                         "label": spec.label or spec.name,
                         "stream": str(node.params.get(spec.name, "") or ""),
                     })
+                # 區域也是輸入埠（F12）—— 一張卡用到的每一個具名區域，畫布上
+                # 都要有一條線指到定義它的那張卡。以前這件事只在參數裡，於是
+                # 拿掉上游那張 Region 卡，量測卡不會報錯，它會**安靜地改量整張
+                # 圖**，而畫面上兩張卡看起來本來就互不相干。
+                for spec in step_cls.region_input_specs():
+                    if not spec.visible_for(node.params):
+                        continue
+                    region_inputs.append({
+                        "name": spec.name,
+                        "label": spec.label or spec.name,
+                        "stream": str(node.params.get(spec.name, "") or ""),
+                    })
             nodes.append({
                 "node_id": nid,
                 "inputs": inputs,
+                "region_inputs": region_inputs,
                 "step_key": node.step,
                 "label": label,
                 "category": category,
                 "enabled": bool(node.enabled),
                 # 副標那行印的是 reads → writes/regions；摘要不要再講一次
                 "summary": self._node_summary(
-                    node, shown=list(reads) + list(writes) + list(regions_out)),
+                    node, shown=(list(reads) + list(writes) + list(regions_out)
+                                 + [d["stream"] for d in region_inputs])),
                 # 畫布照**寬度**決定塞得下幾項（放不下的收成 `+N`），所以給它
                 # list；`summary` 那個字串留著給狀態列與測試讀。
                 "summary_parts": self._node_summary_parts(
-                    node, shown=list(reads) + list(writes) + list(regions_out)),
+                    node, shown=(list(reads) + list(writes) + list(regions_out)
+                                 + [d["stream"] for d in region_inputs])),
                 # 畫布的輸出埠吃這個（含原樣送出的輸入）；副標仍然只印
                 # 「這張卡真的產出什麼」，不然每張卡的副標都會變成一長串。
                 "writes": outs,
@@ -1639,7 +1658,10 @@ class StudioWindow(QMainWindow):
         if self.selected_node not in self.model.nodes:
             self.selected_node = None
         for view in self._canvases():
-            view.set_nodes(nodes, self.model.edge_lines())
+            # 影像線（存在 recipe 裡）＋ 區域線（從參數推導；F12）。畫布不分
+            # 兩份收 —— 一條線就是一條線，它是哪一種由它出發的那顆埠決定。
+            view.set_nodes(nodes, list(self.model.edge_lines())
+                           + list(self.model.region_lines()))
             view.set_selected(self.selected_node)
             view.set_score_summary(self.model.expr, self.model.threshold)
 
@@ -1773,11 +1795,15 @@ class StudioWindow(QMainWindow):
     def _autofill_new_card(self, node_id: Optional[str]) -> None:
         """剛加進來的卡，把**這個畫面上已經知道的答案**先填好。
 
-        兩張卡走這條路，理由是同一個：那個答案已經在畫面上了，讓使用者用手抄
-        一次是在製造一個可以抄錯的機會。
+        現在只有一張卡走這條路：``roi_from_mask`` —— **已經掛上來的那份 GLAS
+        匯出**的層對照表。那個答案已經在畫面上了，讓使用者用手抄一次是在製造
+        一個可以抄錯的機會，而它是一張**對照表**（層號 → 名字），不是接線。
 
-        * ``roi_mask`` —— 上游定義過的區域名（見 :meth:`_autofill_regions`）。
-        * ``roi_from_mask`` —— **已經掛上來的那份 GLAS 匯出**的層對照表。
+        ⚠ ``roi_mask`` 曾經也在這裡：加進來時把上游每一個區域名都填進
+        ``regions``。**F12 拿掉了**，因為區域現在是畫布上的線 —— 自動填等於
+        自動幫他畫了六條他沒有拉過的線，而那正是鐵則 10 擋的那件事
+        （「加卡不准順手接線：自動接的線與使用者拉的線會落在同一個輸入，
+        而只有一條算數」）。他不再需要用手抄名字：埠就在旁邊，拉過去就是了。
 
         第二個是 2026-08-18 補的，而它修掉一個順序造成的洞：填名字那段原本只在
         **掛匯出的當下**跑一次，掃的是當時已經存在的卡。但使用者的自然順序是
@@ -1789,9 +1815,7 @@ class StudioWindow(QMainWindow):
         node = self.model.nodes.get(str(node_id or ""))
         if node is None:
             return
-        if node.step == "roi_mask":
-            self._autofill_regions(node)
-        elif node.step == "roi_from_mask":
+        if node.step == "roi_from_mask":
             self._autofill_gds_layers(node)
 
     def _autofill_gds_layers(self, node: Any) -> None:
@@ -1842,34 +1866,6 @@ class StudioWindow(QMainWindow):
         rec = (getattr(ctx, "meta", None) or {}).get("layout_label") or {}
         entry = rec.get(stream) or {}
         return [int(i) for i in (entry.get("ids") or ()) if int(i) > 0]
-
-    def _autofill_regions(self, node: Any) -> None:
-        """剛加進來的 Mask from regions 卡，把上游定義過的區域名自動填進去。
-
-        使用者的直覺是「Profile / Template 應該直接吐 mask」—— 名字要他自己
-        打一次，是這張卡與上游之間**看得到卻要用手搬**的一段。量測卡的
-        ``output_prefix`` 走過同一條路（挑了區域自動填名），這裡照做：
-        上游有哪些具名區域就全部填上（多名字本來就是聯集），不合意再刪。
-        只在**空的**時候填 —— 使用者打過的字不覆蓋。
-        """
-        if str(node.params.get("regions", "") or "").strip():
-            return
-        names: List[str] = []
-        for nid in self.model.node_order:
-            if nid == node.id:
-                break
-            n = self.model.nodes.get(nid)
-            if n is None or not n.enabled:
-                continue
-            try:
-                outs = get_step(n.step).resolve_regions_out(n.params)
-            except Exception:              # noqa: BLE001 — 顯示用，壞了就跳過
-                outs = []
-            for r in outs:
-                if r and r not in names:
-                    names.append(str(r))
-        if names:
-            self.model.set_param(node.id, "regions", ", ".join(names))
 
     # ---- 「這張卡做在哪一條流上」（F7-18）----------------------------------
     #: 主要影像流的參數名（依優先順序）。Enhance 卡一律叫 ``target`` 或
@@ -2118,6 +2114,13 @@ class StudioWindow(QMainWindow):
         # 那在「一張卡只有一個輸入在用」的年代猜得中，但 ``subtract`` 的
         # a / b 兩顆輸入永遠只挑得到同一個，於是畫布上接哪一顆都一樣。
         param = dst_in or self._param_for_stream(dst)
+        # **區域線走另一條路**（F12）：它不存進 recipe.edges，因為 ``roi="epi"``
+        # 那個參數就是唯一的儲存 —— 存第二份的話兩份會漂（F9 的那六個坑有一半
+        # 是這個形狀）。這裡只把參數設好，線由 `RecipeModel.region_lines()`
+        # 從參數推回來。
+        if self._is_region_param(dst, param) or self._line_kind(src, stream) == "region":
+            self._connect_region(src, dst, stream, param)
+            return
         # **這一格上已經有線了嗎** —— 有就是累加（多連一），沒有就是設定它。
         #
         # 以前的判準是「這一對節點之間已經有線了嗎」，那在 F10 之前是對的：
@@ -2151,6 +2154,88 @@ class StudioWindow(QMainWindow):
         # 正是使用者期待畫面上出現東西的那一刻。
         self._autofill_new_card(dst)
         self._status("Connected %s → %s%s%s" % (src, dst, note, dropped))
+
+    # ---- 區域線（F12）-----------------------------------------------------
+    def _is_region_param(self, node_id: str, param: str) -> bool:
+        """``node_id`` 的 ``param`` 那一格吃的是具名區域嗎。"""
+        node = self.model.nodes.get(str(node_id))
+        if node is None or not param:
+            return False
+        try:
+            specs = get_step(node.step).region_input_specs()
+        except KeyError:                       # pragma: no cover
+            return False
+        return any(sp.name == str(param) for sp in specs)
+
+    def _line_kind(self, node_id: str, name: str) -> str:
+        """從 ``node_id`` 的哪一顆埠拉出來的 —— 影像還是區域。
+
+        判準是**那個名字是這張卡宣告的哪一種產出**，跟畫布上的埠是同一份資料
+        （`resolve_regions_out`），所以畫的跟判的不會分家。
+        """
+        node = self.model.nodes.get(str(node_id))
+        if node is None or not name:
+            return "image"
+        try:
+            outs = get_step(node.step).resolve_regions_out(node.params)
+        except Exception:                      # noqa: BLE001
+            return "image"
+        return "region" if str(name) in outs else "image"
+
+    def _connect_region(self, src: str, dst: str, name: str,
+                        param: str) -> None:
+        """把 ``dst`` 的區域那一格接上 ``src`` 定義的區域 ``name``。
+
+        三件事會被擋下來，而每一件都講得出可以照做的下一句話：
+
+        1. **型別不合**（把影像線拉進區域埠，或反過來）。放行的話那一格會變成
+           一個沒有人定義的區域名 —— 跑起來是 `unknown-region`，而畫面上那條線
+           看起來完全正常。
+        2. **來源排在下游**：那個區域在這張卡跑到的時候還不存在。
+        3. **這張卡沒有區域可接**：講出它吃的是什麼，不要靜靜地什麼都不做。
+        """
+        if not param or not self._is_region_param(dst, param):
+            self._status("“%s” has no region input — that line carries a "
+                         "region, and this card takes an image there."
+                         % dst, "error")
+            return
+        if self._line_kind(src, name) != "region":
+            self._status("“%s” is an image stream, not a region. Drag from a "
+                         "Region card's diamond port instead." % (name or "that "
+                         "port"), "error")
+            return
+        order = list(self.model.node_order)
+        if src in order and dst in order and order.index(src) >= order.index(dst):
+            self._status("“%s” is defined after “%s” runs, so it cannot be "
+                         "measured there. Move the Region card earlier."
+                         % (name, dst), "error")
+            return
+        node = self.model.nodes.get(dst)
+        spec = next((sp for sp in get_step(node.step).region_input_specs()
+                     if sp.name == param), None)
+        current = str(node.params.get(param, "") or "")
+        if spec is not None and spec.type == "region_keys":
+            keys = [k.strip() for k in current.split(",") if k.strip()]
+            if name in keys:
+                self._status("“%s” already measures %s." % (dst, name))
+                return
+            keys.append(name)
+            value = ",".join(keys)
+        else:
+            if current == name:
+                self._status("“%s” already measures %s." % (dst, name))
+                return
+            value = name
+        try:
+            self.model.set_param(dst, param, value)
+        except ParamError as e:
+            self._status(str(e), "error")
+            return
+        # 挑了區域就順手把輸出名填成區域的名字（F7-11）—— 拉線跟在設定區挑
+        # 是同一個動作，所以走同一條路。
+        self._autofill_output_prefix(dst, param, value)
+        self._status("“%s” now measures %s (defined by “%s”)."
+                     % (dst, value.replace(",", " and "), src))
 
     def _param_for_stream(self, node_id: str) -> str:
         """線沒有指定落點時，這條線該接哪一格輸入（沒有輸入回空字串）。
@@ -2194,6 +2279,14 @@ class StudioWindow(QMainWindow):
         """
         src, dst, stream = str(src), str(dst), str(stream or "")
         dst_in = str(dst_in or "")
+        # **區域線沒有 Edge 可以刪**（F12）：它是從參數推導出來的，所以剪掉它
+        # 就是把那一格空掉 —— 空掉之後 `region_lines()` 自然就不再產出這條線。
+        if self._is_region_param(dst, dst_in):
+            with self.model.compound("disconnect"):
+                note = self._unpoint_stream(dst, stream, dst_in)
+            self._status("Disconnected %s → %s on %s%s"
+                         % (src, dst, stream or "that region", note))
+            return
         # 剪之前先問清楚這條線落在哪一格 —— 剪完就查不到了。
         if not dst_in:
             for e in self.model.edges:
@@ -2243,7 +2336,7 @@ class StudioWindow(QMainWindow):
         spec = specs.get(param)
         if spec is None or not spec.is_input():
             return ""
-        if spec.type == "image_keys":
+        if spec.type in ("image_keys", "region_keys"):
             keys = [k.strip() for k
                     in str(node.params.get(param, "") or "").split(",")
                     if k.strip()]
@@ -2276,6 +2369,12 @@ class StudioWindow(QMainWindow):
         with self.model.compound("remove-card"):
             for e in [e for e in self.model.edges if e.src == node_id]:
                 self._unpoint_stream(e.dst, e.src_out, e.dst_in)
+            # 區域線同理（F12）：這張卡定義的區域，下游那幾格也要空出來。
+            # 不空的話畫面上線沒了、卡片卻還指著一個再也沒有人定義的區域 ——
+            # 而那正是這一輪要修掉的那種說謊。
+            for a, b, name, param in self.model.region_lines():
+                if a == node_id:
+                    self._unpoint_stream(b, name, param)
             self.model.remove(node_id)
         if self.selected_node == node_id:
             self.selected_node = None

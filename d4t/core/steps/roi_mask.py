@@ -47,7 +47,7 @@ class RoiMaskStep(Step):
             "that pattern instead of the whole patch.")
     params = [
         ParamSpec(
-            name="regions", type="region_keys", default="",
+            name="regions", type="region_keys", direction="in", default="",
             label="Regions",
             help=("Which regions the mask covers - the names defined by the "
                   "Region cards above. Several of them are combined: a pixel "

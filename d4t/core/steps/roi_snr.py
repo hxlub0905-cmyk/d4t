@@ -37,9 +37,11 @@ class RoiSnrStep(MultiSourceStep):
         ParamSpec(name="source", type="image_keys", direction="in", default="diff",
                   help=("Image stream to measure on (usually diff; leave diff "
                         "unsigned to keep bright/dark direction visible).")),
-        ParamSpec(name="roi", type="str", default="",
-                  help=("Which region to measure in — the name given by an ROI "
-                        "card upstream. Leave empty for the whole image.")),
+        ParamSpec(name="roi", type="region_key", direction="in", default="",
+                  label="Region",
+                  help=("Which region to measure in - drag a line from the "
+                        "Region card that defines it. No line means the "
+                        "whole image.")),
         ParamSpec(name="background_margin", type="int", default=20, min=1, max=200,
                   help=("Background sampling width in pixels: the ring outside the "
                         "ROI used for background statistics.")),

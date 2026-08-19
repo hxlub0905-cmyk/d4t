@@ -575,6 +575,67 @@ class RecipeModel:
         """
         return [(e.src, e.dst, e.src_out, e.dst_in) for e in self.edges]
 
+    # ---- 區域線（F12）-----------------------------------------------------
+    def region_producer(self, name: str,
+                        before_node: Optional[str] = None) -> str:
+        """誰定義了區域 ``name``（沒有人回空字串）。
+
+        **取上游最後一個**，跟引擎一致：``Context.set_roi`` 明文同名覆寫，所以
+        兩張卡都叫 ``epi`` 時，量測卡量到的是後面那張寫的框
+        （而那個撞名本身有 lint 在講 —— 區域的 fact 特徵會撞）。
+        """
+        name = str(name or "").strip()
+        if not name:
+            return ""
+        owner = ""
+        for nid in self.node_order:
+            if nid == before_node:
+                break
+            node = self.nodes.get(nid)
+            if node is None or not node.enabled:
+                continue
+            try:
+                outs = get_step(node.step).resolve_regions_out(node.params)
+            except Exception:              # noqa: BLE001 — 顯示用，壞了就跳過
+                continue
+            if name in outs:
+                owner = nid
+        return owner
+
+    def region_lines(self) -> List[Tuple[str, str, str, str]]:
+        """畫布要畫的**區域線**：``(定義它的卡, 用它的卡, 區域名, 落在哪一格)``。
+
+        **推導出來的，不是存起來的**（F12 的關鍵決定，理由見
+        ``docs/plans/F12-region-edges.md`` §3）：``roi="epi"`` 那個參數就是唯一
+        的儲存，這裡只是把「誰定義了 epi」查出來。所以：
+
+        * 舊 recipe 打開就有線，不必遷移；
+        * recipe JSON 的格式一個欄位都沒有變；
+        * 「用哪個區域」永遠只有一個家 —— 存第二份的話兩份會漂，而那正是 F9
+          花很大力氣拆掉的東西。
+
+        指到一個上游沒有人定義的區域時**不畫線**（那條 lint 是
+        ``unknown-region``，error 級）—— 畫一條無中生有的線比沒有線更糟。
+        """
+        out: List[Tuple[str, str, str, str]] = []
+        for nid in self.node_order:
+            node = self.nodes.get(nid)
+            if node is None:
+                continue
+            try:
+                specs = get_step(node.step).region_input_specs()
+            except Exception:              # noqa: BLE001
+                continue
+            for spec in specs:
+                if not spec.visible_for(node.params):
+                    continue
+                raw = str(node.params.get(spec.name, "") or "")
+                for name in [x.strip() for x in raw.split(",") if x.strip()]:
+                    src = self.region_producer(name, before_node=nid)
+                    if src:
+                        out.append((src, nid, name, spec.name))
+        return out
+
     # ---- Recipe 互轉 -------------------------------------------------------
     def to_recipe(self) -> Recipe:
         return Recipe(

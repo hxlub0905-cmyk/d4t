@@ -15,6 +15,69 @@
 
 ---
 
+## 區域也有線了（F12，2026-08-19，第十七輪）
+
+### ⏩ 交接：下一個 session 從這裡開始
+
+**畫布上現在有兩種線**：影像是實線 + 圓埠，**具名區域是虛線 + 菱形埠**
+（Region 段的綠色）。量測卡的 `roi` 不再是一個打得進去的文字框 —— 跟影像來源
+一樣，**來源只在畫布上決定**（F9-6 的規則套到區域上）。
+
+引擎一行都沒動、recipe JSON 格式一個欄位都沒有變、黃金值不動。
+
+### 這一輪的起點是使用者的一句話
+
+他在讀「GDS 的某個 layer 要怎麼量 GLV」時問：「線沒連上不就代表資料流沒往下
+走?」我解釋完「跑起來是對的」（順序由 route 相鄰對保證，`execution_order` 的邊
+是 **route 相鄰對 ∪ 顯式 edges**），他說：**「但我還是這樣怪怪的」**。
+
+那個怪是對的，而且它指的不是 bug：畫布上有**兩套規則**（影像拉線、區域打字），
+而它會說謊 —— 拿掉上游那張 Region 卡，量測卡不報錯，它**安靜地改量整張圖**。
+
+### 關鍵決定：區域線**推導**，不存
+
+`roi="epi"` 那個參數就是唯一的儲存，線是它的呈現（`RecipeModel.region_lines()`）。
+理由：區域名在 `ctx.rois` 裡全域唯一（`set_roi` 明文同名覆寫），所以「誰定義了
+epi」推得出來而且跟引擎逐字相同；影像流沒有這個性質（同一條 `ref` 分岔成兩支），
+那才是 F9 把身分換成 `(節點, 埠)` 的原因。存第二份的話兩份會漂 —— F9 那六個
+「跑得完、有數字、而且是錯的」有一半是這個形狀。
+
+**副作用是好的**：舊 recipe 打開就有線，不必遷移。
+
+### 動到的東西
+
+* `core/pipeline/step.py` —— `IMAGE_TYPES` / `REGION_TYPES`；`is_image_input()`
+  / `is_region_input()`；`input_specs()` 收斂成「影像輸入」，新增
+  `region_input_specs()`。區域參數**必須**宣告 `direction="in"`（註冊時擋）。
+* `steps/{glv_stats,roi_snr,cd}.py` —— `roi`：`str` → `region_key`。
+* `steps/{roi_compare,roi_mask}.py` —— 既有的區域參數補 `direction="in"`。
+* `ui/widgets.py` —— 區域那一格改成唯讀的接線顯示（原本是下拉／勾選）。
+* `ui/viewmodel.py` —— `region_producer()` / `region_lines()`。
+* `ui/studio.py` —— 區域埠、連線／剪線／刪卡走區域那條路。
+* `ui/canvas.py` —— 菱形埠、虛線、**埠多的卡片會長高**（`_NodeItem.height()`；
+  疊在一起的埠是點不到的）。
+
+### 順手拿掉的一個「幫忙」
+
+`_autofill_regions`（F8-UI：加一張 `roi_mask` 就把上游每個區域名填進去）
+**刪掉了**。區域變成線之後，那等於自動幫他畫了六條他沒有拉過的線 —— 正是鐵則
+10 擋的那件事。他不再需要抄名字：埠就在旁邊。
+
+（`_autofill_gds_layers` 留著 —— 那是一張**對照表**（層號 → 名字）不是接線。）
+
+### 測試
+
+新增 `tests/test_ui_region_edges.py`（14 條）。其中兩條是 registry-wide 的
+不變量，**下一張卡的作者不必記得回來補**：
+
+* 每一個 `region_key` / `region_keys` 都要 `direction="in"`；
+* **沒有任何一格用 `str` 指區域** —— 判準是把一個記號塞進那一格，
+  看它會不會出現在 `resolve_regions_in`（問卡片自己，不是猜名字）。
+
+改到的舊測試三處，都是「同一件事換了做法」：`test_ui_f7_11_roi`（下拉 → 唯讀）、
+`test_ui_f8_ui_polish`（自動填 → 拉一條線）、`test_ui_f10_canvas_reality`
+（`direction` 的不變量擴到區域型別）。
+
 ## 改名 ADEPT → d4t，並且有圖示了（2026-08-19，第十六輪）
 
 ### ⏩ 交接：下一個 session 從這裡開始

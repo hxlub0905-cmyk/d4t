@@ -376,10 +376,14 @@ def test_a_card_dragged_past_the_edge_stays_reachable(window, qapp):
         "sceneRect 沒有跟著長大，拖出去的卡捲不到"
 
 
-def test_a_new_mask_card_inherits_the_regions_defined_upstream(window, qapp):
+def test_a_new_mask_card_takes_its_regions_from_a_line_not_from_typing(window, qapp):
     """使用者的直覺：「Profile / Template 應該直接吐 mask」。名字不該要他
-    重打一次 —— 加一張 Mask from regions，上游（例：Profile，key=roi_cross）
-    定義過的區域名自動填進去。"""
+    重打一次 —— **而 F12 起那件事由一條線做，不是由自動填**。
+
+    F8 當時的做法是加卡時把上游每一個區域名都填進 ``regions``。區域變成畫布上
+    的埠之後，那等於**自動幫他畫了好幾條他沒有拉過的線** —— 正是鐵則 10 擋的
+    那件事。他仍然不必打字：埠就在上游那張卡的右邊，拉過去就是了。
+    """
     window.show()
     qapp.processEvents()
     with_regions = wire_up(window.model, window.model.add_step("roi_cross"))
@@ -390,13 +394,18 @@ def test_a_new_mask_card_inherits_the_regions_defined_upstream(window, qapp):
     nid = window.selected_node
     node = window.model.nodes[nid]
     assert node.step == "roi_mask"
-    filled = str(node.params.get("regions", ""))
-    assert filled, "上游有具名區域，regions 不該是空的"
+    assert str(node.params.get("regions", "")) == "", \
+        "加卡不准順手接線（鐵則 10）"
+
     from d4t.core.pipeline.step import get_step as _get
     outs = _get("roi_cross").resolve_regions_out(
         window.model.nodes[with_regions].params)
-    for name in outs:
-        assert name in filled
+    # 名字在上游那張卡的埠上（不必用抄的），拉一條線就填好了。
+    assert outs
+    item = window.pipeline.node_item(with_regions)
+    assert set(outs) <= {d["name"] for d in item.out_specs()}
+    window._on_edge_added(with_regions, nid, outs[0], "regions")
+    assert window.model.nodes[nid].params["regions"] == outs[0]
 
 
 # --------------------------------------------------------------------------- #

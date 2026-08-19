@@ -90,7 +90,7 @@ class RoiCompareStep(Step):
             help="Which image stream the target region is measured on.",
         ),
         ParamSpec(
-            name="target_region", type="region_key", default="",
+            name="target_region", type="region_key", direction="in", default="",
             section="1 · Target (the thing being judged)",
             label="Target region",
             help=("The region being judged - normally the one the defect is "
@@ -107,7 +107,7 @@ class RoiCompareStep(Step):
                   "against another region of the same image."),
         ),
         ParamSpec(
-            name="reference_region", type="region_key", default="",
+            name="reference_region", type="region_key", direction="in", default="",
             section="2 · Reference (what it is judged against)",
             label="Reference region",
             help=("What the target is judged against - the same material "

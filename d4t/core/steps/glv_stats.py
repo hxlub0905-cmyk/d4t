@@ -56,9 +56,10 @@ class GlvStatsStep(MultiSourceStep):
     params = [
         ParamSpec(name="source", type="image_keys", direction="in", default="test",
                   help="Image stream to compute statistics on."),
-        ParamSpec(name="roi", type="str", default="",
-                  help=("Which region to measure in — the name given by a "
-                        "Define region card upstream. Leave empty for the "
+        ParamSpec(name="roi", type="region_key", direction="in", default="",
+                  label="Region",
+                  help=("Which region to measure in - drag a line from the "
+                        "Region card that defines it. No line means the "
                         "whole image.")),
         # 勾選而不是用打的（2026-08-14 使用者要求）。清單是常用的那幾個；
         # 手寫 recipe 仍可以放任何 glv_q<0-100>（清單外的值會列出來並勾著）。

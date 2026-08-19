@@ -223,8 +223,8 @@ def test_an_unknown_comparison_is_refused_with_the_list():
 # --------------------------------------------------------------------------- #
 def test_a_region_key_takes_one_name_not_a_list():
     """`region_keys`（複數）是逗號清單，這個不是 —— 而錯的那句話要是白話的。"""
-    spec = ParamSpec(name="target_region", type="region_key", default="",
-                     help="x")
+    spec = ParamSpec(name="target_region", type="region_key", direction="in",
+                     default="", help="x")
     assert spec.validate("epi") == "epi"
     with pytest.raises(ParamError) as e:
         spec.validate("epi,mg")
