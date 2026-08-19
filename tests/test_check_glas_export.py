@@ -125,7 +125,7 @@ def test_no_fab_identifier_reaches_the_report(tmp_path):
 
 
 def test_the_shape_of_an_id_survives_the_masking(tmp_path):
-    """遮值不遮**格式** —— 有沒有補零、是不是純數字，決定 ADEPT 怎麼配對。"""
+    """遮值不遮**格式** —— 有沒有補零、是不是純數字，決定 d4t 怎麼配對。"""
     assert "zero-padded" in chk.Masker.shape_of("0007")
     assert "all-digits" in chk.Masker.shape_of("42")
     assert "NON-ASCII" in chk.Masker.shape_of("層1")
@@ -174,7 +174,7 @@ def test_the_size_check_really_compares_when_it_can(tmp_path):
 # 3. 每一條檢查對應 GLAS 的一個真實行為
 # --------------------------------------------------------------------------- #
 def test_a_three_channel_label_is_a_failure(tmp_path):
-    """``_label_view.png`` 是 3 通道的上色預覽。指錯檔案的話，ADEPT 會把通道
+    """``_label_view.png`` 是 3 通道的上色預覽。指錯檔案的話，d4t 會把通道
     平均掉，label id 1、2、3 被混成一堆不存在的值 —— **而它不會報錯**。"""
     d = _export(tmp_path, label_color_type=2)
     text, v = _run(d)
@@ -205,7 +205,7 @@ def test_a_clean_id_does_not_raise_the_safe_name_warning(tmp_path):
 
 
 def test_safe_name_matches_glas(tmp_path):
-    """這六行是從 GLAS 抄過來的。抄錯 = ADEPT 配對出來的檔名跟 GLAS 寫的不同。"""
+    """這六行是從 GLAS 抄過來的。抄錯 = d4t 配對出來的檔名跟 GLAS 寫的不同。"""
     assert chk.safe_name("a/b") == "a_b"
     assert chk.safe_name("A-1_2.tif") == "A-1_2.tif"
     assert chk.safe_name("") == "image"
@@ -213,14 +213,14 @@ def test_safe_name_matches_glas(tmp_path):
 
 
 def test_region_name_matches_the_engine(tmp_path):
-    """這一支跟 ``adept/core/ingest/glas_export.py`` 各有一份**同一條規則**。
+    """這一支跟 ``d4t/core/ingest/glas_export.py`` 各有一份**同一條規則**。
 
     抄一份過來是刻意的（這支要在只有一個檔案的機器上跑得動），但兩份漂掉的話
-    這份報告會對「ADEPT 會把你的層叫什麼」講錯話 —— 而使用者是靠它決定要不要
+    這份報告會對「d4t 會把你的層叫什麼」講錯話 —— 而使用者是靠它決定要不要
     在卡片上改名的。所以逐字比對，包含那幾個邊界：開頭是數字、非 ASCII、
     全是標點、以及**兩個不同的層名撞成同一個**。
     """
-    from adept.core.ingest.glas_export import region_name_for
+    from d4t.core.ingest.glas_export import region_name_for
 
     for name in ("L17/D0", "L21/D0", "M1/DRAWING", "17/D0", "L17-D0",
                  "", "__x__", "A B/C", "層/D0", "L17/D0AA", "///"):
@@ -247,8 +247,8 @@ def test_the_box_cap_is_the_one_that_actually_applies(tmp_path):
     加一句「roi_from_mask 需要自己的上限」—— 而那件事當時已經做完了。
     一條講著已完成工作的 WARN，讀起來跟一個待辦一模一樣。
     """
-    import adept.core.steps  # noqa: F401 — 觸發卡片註冊
-    from adept.core.pipeline import get_step
+    import d4t.core.steps  # noqa: F401 — 觸發卡片註冊
+    from d4t.core.pipeline import get_step
 
     spec = {p.name: p for p in get_step("roi_from_mask").params}["max_boxes"]
     assert chk.GDS_BOX_CAP == spec.default, \

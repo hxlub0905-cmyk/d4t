@@ -1,4 +1,4 @@
-# ADEPT Roadmap
+# d4t Roadmap
 
 **進度與計畫的唯一出處。** 以前這張表同時存在 README、CLAUDE.md、
 `docs/plans/F0-master-plan.md` 與 `SESSION_LOG.md` 四個地方，於是四份各自漂移。
@@ -19,7 +19,7 @@
   與「Templates…」兩個入口跟著收起來（`ui/scope.py` 的 `SHOW_SAMPLE_ENTRIES`）。
 - **存檔 recipe 的功能拿掉了**（2026-08-16）。Studio 沒有「Save Recipe…」、
   沒有 Ctrl+S，`Recipe.save()` 也移除了。**讀取仍然在** —— CLI
-  `python -m adept run <recipe> <klarf>` 照跑，`tests/fixtures/recipes/` 照用。
+  `python -m d4t run <recipe> <klarf>` 照跑，`tests/fixtures/recipes/` 照用。
   等 engine 收斂了再把存檔做回來（那時要一併決定 recipe 的版本與相容策略）。
 
 ---
@@ -85,8 +85,8 @@ UI 介面、設定放哪都要先討論過**才動手。所以計畫書是**議�
 
 - **演算法一律重寫、不照抄 vendored 的**（「我基本會想要優化改良」）。
   範圍見計畫書 §7.1 —— **確認之前不動任何演算法檔案**。
-- **ADEPT 不解析 layout**：GDS/OASIS 留在上游
-  [GLAS](https://github.com/hxlub0905-cmyk/GLAS)，ADEPT 只吃它匯出的 label map
+- **d4t 不解析 layout**：GDS/OASIS 留在上游
+  [GLAS](https://github.com/hxlub0905-cmyk/GLAS)，d4t 只吃它匯出的 label map
   （＋合成 gray、alignment offset），join key 是 KLARF `DEFECTID`。
   契約與「上游要小改什麼」全部在 [`GLAS-INTERFACE.md`](GLAS-INTERFACE.md)。
 
@@ -129,7 +129,7 @@ engine 與功能收斂之後才有意義。
 | M2 批次 | ✅ | ProcessPool + 影像段快取 + SQLite 歷史 + rescore |
 | M3 Studio | ✅ | PySide6 四區塊視覺化編輯器 |
 | M4 雙輸入 | ✅ | RSEM 單張 ingest、輸入型別分流、Golden Cell + Cell 週期估測卡（`period.choose_origin` 相位搜尋已補完）。驗收達成：一份 recipe 同時吃 EBI patch 與 RSEM，跨 3 seeds × 2 種輸入共 144 顆合成 defect，正確率 95.1%（那份 `dual_route_basic.json` 現在留在 `tests/fixtures/recipes/`）|
-| M5 Gallery+Export | ✅ | Gallery（虛擬捲動、排序、直方圖點 bar 篩選）；KLARF 三種寫回模式（就地無損／另存含 ADCSCORE+ADCCLASS／Top-N）+ 寫回前預覽變更；CSV/Excel 報表（含抓漏率/誤殺率）；overlay；`fab_probe/` 三支探測腳本；CLI `adept export` |
+| M5 Gallery+Export | ✅ | Gallery（虛擬捲動、排序、直方圖點 bar 篩選）；KLARF 三種寫回模式（就地無損／另存含 ADCSCORE+ADCCLASS／Top-N）+ 寫回前預覽變更；CSV/Excel 報表（含抓漏率/誤殺率）；overlay；`fab_probe/` 三支探測腳本；CLI `d4t export` |
 | M6 推廣包 | ✅ | 離線安裝三件套（`tools/fetch_wheels.py` / `install_offline.py` / `doctor.py`，全 stdlib-only）、首啟導覽 + 範本庫對話框。**5 份範例 recipe 已於 2026-08-16 全部移除**，連帶收起「用範例資料試一次」與「Templates…」兩個入口（`ui/scope.py`）。快速參考卡 PDF 暫緩（移到 backlog） |
 | M7 UI/UX | ✅ | A 組防呆 + **UI 全英文**（`tests/test_ui_english_only.py` 鎖住）。F7 全數完成：patch-only 收斂（`ui/scope.py`）、中性色/平面主題 + 暗色、卡片依流程階段分組 + 搜尋 + 前置條件 badge、**Region 段（具名 ROI）**、Results 視窗、**節點畫布**。計畫書 `docs/history/plans/F7-canvas-and-taxonomy.md` |
 | F7-24 | ✅ | **版面把空間給對的東西**（來自一張跑起來的截圖）：**開 recipe 自動 fit**（`fit_later()` 等畫布真的有尺寸才算；`fit` 加上限 1.0 —— `fitInView` 會把兩張卡的 pipeline 放大成三倍）、**兩個下拉框不再吃掉整列**（以前各佔八百多 px 去裝「1」與「diff」，而 `ebi_patch · defect 1 / 24` 被擠掉）、**刪掉死掉的 `PipelinePanel`**（F7-6 的畫布取代了它，但每一輪主題工作都還要繞過它）、**工具列不再是七顆一樣的白鈕**（亮色 `toolbar` 以前與 `bg_surface` **同為 `#ffffff`**；五顆文字鈕各配一個自繪圖示；`Export…` 拿 accent 外框 —— 整條工具列只有兩顆有顏色，而它們正好是要按的那兩顆）。**`Spread` 面板補上軸與圖例**（刻度畫在每一排自己身上 —— 每排單位不同，不能共用一句「0 → 255」；圖例畫一次，並明講右邊那欄是**這一顆**的值）、**往回走的線不再橫掃畫布**（換行那條線以前控制點水平推 `|Δx|*0.5`，一條線甩七百多 px；改成水平只推固定的 46px、量交給垂直方向）。**第二輪（對著自己截的圖再看一次）**：**fit 的下限從 0.45 改成量出來的 0.7**（十張卡落在 52%，卡片副標是一團灰；52/60/70/80/100% 逐級看過，副標要到 70% 才回來）、**塞不下時靠開頭對齊不置中**（`fitInView` 置中會把第一張跟最後一張同時切掉，而 pipeline 是從左往右讀的 —— 這條是前一項造出來的問題，**一輪改動要再截一次圖**）、**`Run trial` 與 `▾` 包成分段控制項**（1px 縫 + 內側直角）。驗收 `tests/test_ui_f7_24_layout.py`（13 條）。計畫書 §28、§29 |

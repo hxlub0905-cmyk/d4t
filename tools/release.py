@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ADEPT 更新搬運檔 — authored 2026-07-30.
+# d4t 更新搬運檔 — authored 2026-07-30.
 """**在家用機上**改完程式碼之後跑這一支：重產公司機拿得到的那兩樣東西。
 
     git add -A && python tools/release.py && git add -A
@@ -11,7 +11,7 @@
 
 1. ``tools/FILELIST.txt`` —— 全部檔案的 git blob SHA。公司機用它判斷
    「哪幾個檔案要重新複製」（`tools/check_files.py`）。
-2. ``bundle/ADEPT_bundle.py`` —— 整個 repo 壓成一個純文字 `.py`，
+2. ``bundle/d4t_bundle.py`` —— 整個 repo 壓成一個純文字 `.py`，
    在 GitHub 上複製 raw 就能整包搬進公司機（見 `AGENTS.md` §2）。
    每次產完會報一句目前的大小（見 :func:`bundle_size_report`）——
    那是**資訊**，不是門檻：raw 那條路跟檔案多大無關。
@@ -41,12 +41,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import make_filelist                      # noqa: E402  （tools/ 裡的同伴）
 import make_text_bundle                   # noqa: E402
 
-BUNDLE = os.path.join("bundle", "ADEPT_bundle.py")
+BUNDLE = os.path.join("bundle", "d4t_bundle.py")
 
 #: GitHub 的**檔案瀏覽頁**在 1 MB 以上不顯示內容（那顆「複製」鈕跟著消失）。
 #:
 #: ⚠ **這不是限制**（2026-08-17 使用者確認）：他搬運時**直接複製 raw**
-#: （`raw.githubusercontent.com/.../bundle/ADEPT_bundle.py`），那條路跟檔案
+#: （`raw.githubusercontent.com/.../bundle/d4t_bundle.py`），那條路跟檔案
 #: 多大無關。所以這個數字留在這裡只是為了**講得出現在多大**，
 #: 不是一個要閃避的門檻 —— 不要為了它去刪文件或分批。
 BUNDLE_LIMIT_BYTES = 1024 * 1024

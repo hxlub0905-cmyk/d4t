@@ -10,8 +10,8 @@ import csv
 
 import pytest
 
-from adept.core.export import report
-from adept.core.export.report import BASE_COLUMNS, UNBINNED_KEY
+from d4t.core.export import report
+from d4t.core.export.report import BASE_COLUMNS, UNBINNED_KEY
 
 
 # ---------------------------------------------------------------------------

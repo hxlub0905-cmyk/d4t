@@ -22,9 +22,9 @@ EXAMPLE = Path(__file__).resolve().parent / "fixtures" / "recipes" \
 def _import_qt(g):
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import canvas as canvas_mod
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
+    from d4t.ui import canvas as canvas_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
     g.update(QApplication=QApplication, canvas_mod=canvas_mod,
              studio_mod=studio_mod, theme_mod=theme_mod)
 
@@ -168,7 +168,7 @@ def test_removing_an_edge_puts_it_back(window):
 
 def test_edges_reorder_execution_and_survive_a_save_load_round_trip(window, tmp_path):
     """連線要真的影響執行順序，而且存檔再載回來還在。"""
-    from adept.core.pipeline import Recipe
+    from d4t.core.pipeline import Recipe
 
     window.pipeline.link_to("load", "norm")
     window.pipeline.link_to("norm", "sub")

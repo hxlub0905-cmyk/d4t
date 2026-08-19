@@ -23,15 +23,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from adept.core.pipeline import get_step, list_steps  # noqa: E402
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from d4t.core.pipeline import get_step, list_steps  # noqa: E402
 
 
 def _import_qt(g):
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import theme as theme_mod
-    from adept.ui import widgets as widgets_mod
+    from d4t.ui import theme as theme_mod
+    from d4t.ui import widgets as widgets_mod
     g.update(QApplication=QApplication, theme_mod=theme_mod,
              widgets_mod=widgets_mod)
 

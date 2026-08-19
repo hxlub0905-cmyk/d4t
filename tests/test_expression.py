@@ -5,7 +5,7 @@ import math
 
 import pytest
 
-from adept.core.pipeline import ExpressionError, parse_expression
+from d4t.core.pipeline import ExpressionError, parse_expression
 
 
 def ev(text, variables=None):

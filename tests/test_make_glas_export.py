@@ -114,7 +114,7 @@ def test_without_the_eaten_flag_every_layer_survives():
 
 def test_the_layer_names_are_the_awkward_shape_on_purpose():
     """用乾淨的名字產測試資料，等於把「layer 名怎麼變成區域名」那一題藏起來。"""
-    from adept.core.steps._util import FEATURE_PREFIX_PATTERN
+    from d4t.core.steps._util import FEATURE_PREFIX_PATTERN
     import re
 
     for name in gen.LAYER_NAMES:
@@ -234,12 +234,12 @@ def test_the_checker_passes_everything_except_the_deliberate_faults(export):
     assert v["label PNG is the same size as the SEM image"] == "FAIL"
     assert v["every layer in label_map has pixels on every image"] == "WARN"
     # layer 名那條也是刻意的（見上面那條測試）
-    assert v["layer names can be used as ADEPT region names"] == "WARN"
+    assert v["layer names can be used as d4t region names"] == "WARN"
     # 其餘一條都不准紅
     rest = {k: got for k, got in v.items()
             if k not in ("label PNG is the same size as the SEM image",
                          "every layer in label_map has pixels on every image",
-                         "layer names can be used as ADEPT region names")}
+                         "layer names can be used as d4t region names")}
     assert not [k for k, got in rest.items() if got == "FAIL"], \
         "不該壞的地方壞了：%s" % [k for k, got in rest.items() if got == "FAIL"]
     assert v["manifest schema is a GLAS overlay manifest"] == "PASS"

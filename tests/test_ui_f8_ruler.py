@@ -28,9 +28,9 @@ from conftest import wire_up  # noqa: E402  —— F10：加完卡要接線
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from adept.core.pipeline import get_step  # noqa: E402
-from adept.core.pipeline.context import Context  # noqa: E402
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from d4t.core.pipeline import get_step  # noqa: E402
+from d4t.core.pipeline.context import Context  # noqa: E402
 
 SIZE, MG_PITCH, EPI_PITCH = 128, 24, 34
 
@@ -44,10 +44,10 @@ def _import_qt(g):
     from PySide6.QtGui import QMouseEvent
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import inspectors as insp_mod
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
-    from adept.ui import widgets as widgets_mod
+    from d4t.ui import inspectors as insp_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
+    from d4t.ui import widgets as widgets_mod
     g.update(QApplication=QApplication, QMouseEvent=QMouseEvent, QPoint=QPoint,
              QPointF=QPointF, Qt=Qt, insp_mod=insp_mod, studio_mod=studio_mod,
              theme_mod=theme_mod, widgets_mod=widgets_mod)

@@ -25,14 +25,14 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-import adept.core.steps                                          # noqa: F401,E402
-from adept.core.ingest.dataset import DefectItem, ImageRef        # noqa: E402
-from adept.core.pipeline import Context, ParamError               # noqa: E402
-from adept.core.pipeline.channels import (                        # noqa: E402
+import d4t.core.steps                                          # noqa: F401,E402
+from d4t.core.ingest.dataset import DefectItem, ImageRef        # noqa: E402
+from d4t.core.pipeline import Context, ParamError               # noqa: E402
+from d4t.core.pipeline.channels import (                        # noqa: E402
     ChannelMapError, format_channel_map, highest_image_number, mapped_names,
     parse_channel_map,
 )
-from adept.core.pipeline.step import REGISTRY                     # noqa: E402
+from d4t.core.pipeline.step import REGISTRY                     # noqa: E402
 
 LOAD = REGISTRY["load_patch"]
 
@@ -168,7 +168,7 @@ def test_declaring_more_images_than_the_data_has_is_refused():
     這是「對照表放 recipe」的代價的解藥：同一份 recipe 拿到頁序不同的資料時，
     使用者會看到一句可以照做的話，而不是一組安靜地錯位的數字。
     """
-    from adept.core.pipeline.step import StepError
+    from d4t.core.pipeline.step import StepError
     with pytest.raises(StepError) as e:
         _run({"channel_map": "1:se1, 2:bse, 3:se2, 4:se3, 5:se4"},
              item=_FiveChannelItem(n=2))
@@ -229,7 +229,7 @@ EndOfFile;
 def five_channel_lot(tmp_path):
     """真的 ingest 走一遍：兩顆 defect × 五張圖，灰階值 = 絕對頁號 ×10。"""
     import tifffile
-    from adept.core.ingest import dataset as ds_mod
+    from d4t.core.ingest import dataset as ds_mod
 
     pages = [np.full((16, 16), 10 * (i + 1), np.uint8) for i in range(10)]
     with tifffile.TiffWriter(str(tmp_path / "LOT_SYN.tif")) as tw:

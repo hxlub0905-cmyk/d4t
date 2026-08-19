@@ -1,17 +1,17 @@
-"""M0 驗收：adept 全套件零 Qt import（原始碼掃描 + 實際 import 檢查）。"""
+"""M0 驗收：d4t 全套件零 Qt import（原始碼掃描 + 實際 import 檢查）。"""
 from __future__ import annotations
 
 import re
 import sys
 from pathlib import Path
 
-PKG = Path(__file__).resolve().parent.parent / "adept"
+PKG = Path(__file__).resolve().parent.parent / "d4t"
 CORE = PKG / "core"
 QT_PAT = re.compile(r"^\s*(import|from)\s+(PyQt\d?|PySide\d?|qtpy|Qt)\b", re.M)
 
 
 def test_no_qt_in_core_source():
-    """core 禁 Qt；adept/ui 是唯一允許 Qt 的地方（__main__ 須 lazy import）。"""
+    """core 禁 Qt；d4t/ui 是唯一允許 Qt 的地方（__main__ 須 lazy import）。"""
     offenders = []
     for py in CORE.rglob("*.py"):
         if QT_PAT.search(py.read_text(encoding="utf-8")):
@@ -36,7 +36,7 @@ def test_no_qt_after_import():
 
     code = (
         "import sys\n"
-        "import adept.core.algo, adept.core.ingest, adept.core.calibration\n"
+        "import d4t.core.algo, d4t.core.ingest, d4t.core.calibration\n"
         "qt = [m for m in sys.modules "
         "      if m.split('.')[0] in ('PyQt5','PyQt6','PySide2','PySide6')]\n"
         "print(','.join(sorted(qt)))\n"

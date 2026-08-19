@@ -23,10 +23,10 @@ import sys
 import numpy as np
 import pytest
 
-import adept.core.steps  # noqa: F401 — 註冊卡片的 side-effect
-from adept.core.ingest import dataset, klarf_core
-from adept.core.pipeline.context import Context
-from adept.core.pipeline.step import REGISTRY
+import d4t.core.steps  # noqa: F401 — 註冊卡片的 side-effect
+from d4t.core.ingest import dataset, klarf_core
+from d4t.core.pipeline.context import Context
+from d4t.core.pipeline.step import REGISTRY
 
 _TOOLS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools")
 if _TOOLS not in sys.path:
@@ -179,8 +179,8 @@ def _stacked_reference(gray):
     2026-08-18 那兩張卡一張刪一張改名，這一節一個字都不用動 —— 那正是它該有的
     樣子：它守的是 fixture。
     """
-    from adept.core.algo import golden as algo_golden
-    from adept.core.algo import period as algo_period
+    from d4t.core.algo import golden as algo_golden
+    from d4t.core.algo import period as algo_period
 
     res = algo_period.estimate_period(gray)
     px, py = int(res.px or 0), int(res.py or 0)

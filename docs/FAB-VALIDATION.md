@@ -54,7 +54,7 @@ warning 指名它 —— 那正是要看到的（它以前恆為 0，那份分�
 
 | 情況 | 用什麼 |
 |---|---|
-| 第一次搬整包 | `bundle/ADEPT_bundle.py`（單檔，lzma + base64）—— **1 次複製**就搬完。包的大小不是限制（使用者直接複製 raw；見 [`AGENTS.md`](../AGENTS.md) §2）|
+| 第一次搬整包 | `bundle/d4t_bundle.py`（單檔，lzma + base64）—— **1 次複製**就搬完。包的大小不是限制（使用者直接複製 raw；見 [`AGENTS.md`](../AGENTS.md) §2）|
 | 之後更新 | 複製 `tools/FILELIST.txt`（12 KB）→ `python tools/check_files.py` → 它列出要重新複製哪幾個 |
 | 只想跑格式探測 | 直接複製 `fab_probe/probe_*.py`（stdlib-only 單檔，**不需要整個 repo**）|
 

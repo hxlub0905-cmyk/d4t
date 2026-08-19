@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-# ADEPT mgepi lot separability check — authored 2026-08-14.
+# d4t mgepi lot separability check — authored 2026-08-14.
 """`make_mgepi_real.py` 產出 lot 的可分性驗證（也是量測邏輯的參考實作）。
 
 驗收條件（這批資料存在的理由）：
   - 整張圖 max：real 與 nuisance **重疊**（不定 ROI 就淹掉）
   - spacer ROI 內的兩個指標：real 最小值 > nuisance 最大值（零重疊）
 
-量測邏輯 —— 每一條都是被反例逼出來的，接 ADEPT pipeline 時照著對：
+量測邏輯 —— 每一條都是被反例逼出來的，接 d4t pipeline 時照著對：
 1. **先選帶、再壓剖面。** 整欄平均會把 spacer 的凹陷跟行間的 STI 混在
    一起（行間比 spacer 谷還暗，找谷會找錯地方）。先挑 EPI 列
    （row-mean > 145），只在這些列上壓欄剖面。

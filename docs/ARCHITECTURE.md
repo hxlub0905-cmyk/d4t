@@ -1,4 +1,4 @@
-# ADEPT 架構
+# d4t 架構
 
 這一份是**架構的唯一出處**：心智模型、資料模型、目錄結構。
 其他文件要講到這些，一律連過來，不要複製一份 —— 複製出來的那份會漂移
@@ -70,7 +70,7 @@ Context 有三層資料：**影像流 images**（名字 → 像素陣列，綁�
 ## 目錄結構
 
 ```
-adept/
+d4t/
 ├── core/                    # 純運算，**禁止任何 Qt import**（tests/test_no_qt.py 守門）
 │   ├── ingest/              # KLARF + 影像載入
 │   │   ├── klarf_core.py    #   KLARF 1.2/1.8 無損讀寫引擎（vendored from KLIP，最重要的資產）

@@ -24,9 +24,9 @@ EXAMPLE = Path(__file__).resolve().parent / "fixtures" / "recipes"
 def _import_qt(g):
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import canvas as canvas_mod
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
+    from d4t.ui import canvas as canvas_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
     g.update(QApplication=QApplication, canvas_mod=canvas_mod,
              studio_mod=studio_mod, theme_mod=theme_mod)
 
@@ -68,8 +68,8 @@ def test_a_card_only_writes_the_streams_that_are_wired_into_it():
     ``also_apply`` / ``anchor`` 仍然不准回來：它們是「畫布上看不到的第二條流」
     的具體形狀。
     """
-    import adept.core.steps  # noqa: F401 — 觸發卡片註冊
-    from adept.core.pipeline import get_step
+    import d4t.core.steps  # noqa: F401 — 觸發卡片註冊
+    from d4t.core.pipeline import get_step
 
     for key in ENHANCE_CARDS:
         cls = get_step(key)
@@ -95,9 +95,9 @@ def test_one_card_gives_both_streams_the_same_treatment():
     """
     import numpy as np
 
-    import adept.core.steps  # noqa: F401 — 觸發卡片註冊
-    from adept.core.pipeline import get_step
-    from adept.core.pipeline.context import Context
+    import d4t.core.steps  # noqa: F401 — 觸發卡片註冊
+    from d4t.core.pipeline import get_step
+    from d4t.core.pipeline.context import Context
 
     img = np.tile(np.linspace(0, 200, 64).astype(np.uint8), (64, 1))
     ctx = Context(images={"test": img.copy(), "ref": img.copy()})
@@ -117,9 +117,9 @@ def test_two_streams_can_still_share_one_range():
     """
     import numpy as np
 
-    import adept.core.steps  # noqa: F401 — 觸發卡片註冊
-    from adept.core.pipeline import get_step
-    from adept.core.pipeline.context import Context
+    import d4t.core.steps  # noqa: F401 — 觸發卡片註冊
+    from d4t.core.pipeline import get_step
+    from d4t.core.pipeline.context import Context
 
     row = np.linspace(0, 255, 128).astype(np.uint8)
     src = np.tile(row, (128, 1))
@@ -149,8 +149,8 @@ def test_old_recipes_with_also_apply_still_load_and_mean_the_same_thing(tmp_path
     """recipe 是拿來交接的檔案。認不得舊的字等於「工具壞了」。"""
     import json
 
-    import adept.core.steps  # noqa: F401 — 觸發卡片註冊
-    from adept.core.pipeline.recipe import Recipe
+    import d4t.core.steps  # noqa: F401 — 觸發卡片註冊
+    from d4t.core.pipeline.recipe import Recipe
 
     raw = {
         "recipe_id": "legacy", "version": 1,
@@ -338,7 +338,7 @@ def test_a_measure_card_still_has_an_output_port(window):
     assert card is not None
     outs = card.out_names()
     assert outs, "量測卡在畫布上沒有輸出埠 —— 鏈到這裡就斷了"
-    from adept.core.pipeline import get_step
+    from d4t.core.pipeline import get_step
     reads = list(get_step("glv_stats").resolve_reads(window.model.nodes[nid].params))
     for r in reads:
         assert r in outs, "接進來的 %s 沒有原樣送出去（同進同出）" % r

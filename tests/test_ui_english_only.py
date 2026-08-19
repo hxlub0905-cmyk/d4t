@@ -1,4 +1,4 @@
-# ADEPT UI-language guard — authored 2026-07-28 (M7).
+# d4t UI-language guard — authored 2026-07-28 (M7).
 """UI 一律英文：掃原始碼，禁止「會顯示在畫面上的字串」出現 CJK。
 
 為什麼要這條規則
@@ -22,9 +22,9 @@ import ast
 from pathlib import Path
 from typing import List, Tuple
 
-PKG = Path(__file__).resolve().parent.parent / "adept"
+PKG = Path(__file__).resolve().parent.parent / "d4t"
 
-#: 還沒翻完、暫時放行的檔案（相對 ``adept/`` 的 posix 路徑）。
+#: 還沒翻完、暫時放行的檔案（相對 ``d4t/`` 的 posix 路徑）。
 #:
 #: * ``__main__.py`` —— CLI 是另一個介面層，使用者這次要求的是 GUI；
 #:   要不要跟著英文化是獨立的決定，還沒問過。
@@ -98,8 +98,8 @@ def test_pending_files_are_really_still_pending():
 
 def test_step_cards_are_english():
     """卡片庫看得到的每一張卡：label / help / 每個 ParamSpec 的 help 都要是英文。"""
-    import adept.core.steps  # noqa: F401 — 觸發註冊
-    from adept.core.pipeline import list_steps
+    import d4t.core.steps  # noqa: F401 — 觸發註冊
+    from d4t.core.pipeline import list_steps
 
     bad = []
     for step in list_steps():
@@ -119,9 +119,9 @@ def test_every_card_declares_a_known_group():
     但**本 repo 內建的卡片一律要明講**——否則新加的量測卡會安靜地掉進
     Enhance，而使用者永遠找不到它。
     """
-    import adept.core.steps  # noqa: F401
-    from adept.core.pipeline import list_steps
-    from adept.core.pipeline.step import GROUP_ORDER
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import list_steps
+    from d4t.core.pipeline.step import GROUP_ORDER
 
     undeclared, unknown = [], []
     for step in list_steps():

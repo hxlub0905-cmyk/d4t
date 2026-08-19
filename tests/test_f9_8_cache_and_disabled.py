@@ -26,12 +26,12 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-from adept.core.pipeline import (                          # noqa: E402
+from d4t.core.pipeline import (                          # noqa: E402
     CATEGORY_ALGO, CATEGORY_IMAGE, Context, Edge, ParamSpec, REGISTRY, Recipe,
     RecipeNode, ScoreSpec, Step, register_step, run_defect,
 )
-from adept.core.pipeline.cache import StageCache           # noqa: E402
-from adept.core.pipeline.engine import (                   # noqa: E402
+from d4t.core.pipeline.cache import StageCache           # noqa: E402
+from d4t.core.pipeline.engine import (                   # noqa: E402
     image_segment_signature, run_defect_cached,
 )
 
@@ -227,8 +227,8 @@ def test_an_unported_recipe_stores_nothing_extra(cards, tmp_path):
     推出來的來源就是「最後一個寫這個名字的人」，那正好等於快照裡的 `images`。
     只有真的在畫布上拉了線的地方才付這個代價。
     """
-    from adept.core.pipeline.engine import _streams_needed_across_checkpoint
-    from adept.core.pipeline.recipe import execution_order
+    from d4t.core.pipeline.engine import _streams_needed_across_checkpoint
+    from d4t.core.pipeline.recipe import execution_order
 
     r = _recipe(_ROUTE, _branch(),
                 [Edge("load", "x3"), Edge("x3", "x5"), Edge("x5", "m3")])

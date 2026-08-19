@@ -29,9 +29,9 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication          # noqa: E402
 
-from adept.core.pipeline.recipe import validate     # noqa: E402
-from adept.ui import studio as studio_mod           # noqa: E402
-from adept.ui import theme as theme_mod             # noqa: E402
+from d4t.core.pipeline.recipe import validate     # noqa: E402
+from d4t.ui import studio as studio_mod           # noqa: E402
+from d4t.ui import theme as theme_mod             # noqa: E402
 
 
 @pytest.fixture(scope="module")

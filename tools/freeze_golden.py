@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ADEPT 黃金值凍結 — authored 2026-08-16 (F9-0).
+# d4t 黃金值凍結 — authored 2026-08-16 (F9-0).
 """把現在算出來的 feature 表凍成一份 JSON，給重構當安全網。
 
     python tools/freeze_golden.py            # 寫出 tests/fixtures/golden/*.json
@@ -22,7 +22,7 @@ F9（影像流綁在線上）要動的是引擎的地基。這種重構最危險
 而這份東西的用途本來就不是跨機器重現，是**同一台機器上、重構前後的比較**。
 所以：
 
-* 預設**不跑**（`tests/test_golden_features.py` 沒有 `ADEPT_GOLDEN=1` 就 skip）；
+* 預設**不跑**（`tests/test_golden_features.py` 沒有 `D4T_GOLDEN=1` 就 skip）；
 * 開始重構之前在**你自己的機器上**跑一次這支凍結；
 * 每改完一段跑 `--check`；
 * 數字真的該變的時候（例如刻意改了演算法），重新凍一次並在 commit 訊息裡說明。
@@ -73,15 +73,15 @@ def compute(recipe_file: str, gen: str, n: int, seed: int) -> dict:
 
     sys.path.insert(0, REPO_ROOT)
     sys.path.insert(0, os.path.join(REPO_ROOT, "tools"))
-    import adept.core.steps                                # noqa: F401
-    from adept.core.ingest.dataset import load_dataset
-    from adept.core.pipeline import Recipe, run_defect
-    from adept.core.pipeline.batch import pin_cv2_deterministic
+    import d4t.core.steps                                # noqa: F401
+    from d4t.core.ingest.dataset import load_dataset
+    from d4t.core.pipeline import Recipe, run_defect
+    from d4t.core.pipeline.batch import pin_cv2_deterministic
 
     generator = __import__(gen)
     pin_cv2_deterministic()          # 沒有這行，IPP 會讓同一張圖每次差 1e-8
 
-    work = tempfile.mkdtemp(prefix="adept_golden_")
+    work = tempfile.mkdtemp(prefix="d4t_golden_")
     info = generator.generate(os.path.join(work, "lot"), n=n, seed=seed)
     ds = load_dataset(info["klarf"])
     recipe = Recipe.load(os.path.join(RECIPE_DIR, recipe_file))

@@ -26,7 +26,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from adept.core.algo import grid as algo_grid  # noqa: E402
+from d4t.core.algo import grid as algo_grid  # noqa: E402
 
 SIZE = 128
 

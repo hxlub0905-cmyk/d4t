@@ -19,9 +19,9 @@ from conftest import wire_up  # noqa: E402  —— F10：加完卡要接線
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from adept.core.pipeline import get_step  # noqa: E402
-from adept.core.pipeline.context import Context  # noqa: E402
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from d4t.core.pipeline import get_step  # noqa: E402
+from d4t.core.pipeline.context import Context  # noqa: E402
 
 SIZE, MG_PITCH, EPI_PITCH = 128, 24, 34
 
@@ -34,10 +34,10 @@ if _TOOLS not in sys.path:
 def _import_qt(g):
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import inspectors as insp_mod
-    from adept.ui import region_check as rc_mod
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
+    from d4t.ui import inspectors as insp_mod
+    from d4t.ui import region_check as rc_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
     g.update(QApplication=QApplication, insp_mod=insp_mod, rc_mod=rc_mod,
              studio_mod=studio_mod, theme_mod=theme_mod)
 
@@ -142,7 +142,7 @@ def test_the_curve_panel_shades_every_selected_stripe(qapp):
 
     # 量畫素，而且跟**只塗一段**的同一個面板比 —— 比對照組不比絕對顏色，
     # 這樣換主題、換 token 都不會讓這條測試變成假警報。
-    from adept.ui.widgets import ProfilePanel
+    from d4t.ui.widgets import ProfilePanel
 
     data = dict(rec["x"])
     # 三個對照：完全不塗（只有曲線）／塗一段／塗整排。減掉「只有曲線」那一份
@@ -159,7 +159,7 @@ def test_the_curve_panel_shades_every_selected_stripe(qapp):
 def test_the_panel_says_when_the_line_width_was_given_not_measured(qapp):
     """給定的線寬是使用者填進去的**假設**，而假設要看得到才驗得了 ——
     量到的線寬畫面上本來就看得到（塗起來的那幾段有多寬），給定的那個看不到。"""
-    from adept.ui.widgets import ProfilePanel
+    from d4t.ui.widgets import ProfilePanel
 
     ctx = _run()
     data = dict(ctx.meta["crossings"]["xing"]["x"])
@@ -311,7 +311,7 @@ def test_the_summary_says_how_many_spots_were_left_out(qapp):
 def test_the_spots_left_out_are_drawn_on_the_curve(qapp):
     """數字說「有兩格沒用」，但**哪兩格**只有畫出來才答得出來 ——
     而那正是使用者要判斷「它跳過的是不是我想跳過的那兩格」的依據。"""
-    from adept.ui.widgets import ProfilePanel
+    from d4t.ui.widgets import ProfilePanel
 
     data = _cpode_ctx().meta["crossings"]["xing"]["x"]
     with_marks = _shaded_columns(ProfilePanel(), dict(data))
@@ -396,7 +396,7 @@ def test_the_summary_explains_the_gap_between_the_lines_and_the_blocks(qapp):
     """使用者原話：「藍框跟線的實際意義是什麼（我發現有時候兩者會 shift）」。
     shift 是刻意的，但沒講出來就只是「怪」—— 而「怪」的下一步通常是去亂調
     敏感度。"""
-    from adept.ui.widgets import ProfilePanel
+    from d4t.ui.widgets import ProfilePanel
 
     rec = _run().meta["crossings"]["xing"]["x"]
     moved, still = ProfilePanel(), ProfilePanel()
@@ -408,7 +408,7 @@ def test_the_summary_explains_the_gap_between_the_lines_and_the_blocks(qapp):
 
 def test_a_pitch_that_was_given_but_not_used_is_called_out(qapp):
     """使用者會以為那格生效了，然後拿一份其實是「照影像自己量」的結果去跑整批。"""
-    from adept.ui.widgets import ProfilePanel
+    from d4t.ui.widgets import ProfilePanel
 
     rec = _run().meta["crossings"]["xing"]["x"]
     panel = ProfilePanel()
@@ -421,7 +421,7 @@ def test_a_pitch_that_was_given_but_not_used_is_called_out(qapp):
 def test_the_panel_shouts_when_the_pitch_does_not_agree(qapp):
     """這是「這一顆能不能信」的答案，而在這種失敗上 confidence 反而更高
     （實測 285.9 vs 正確時的 215.8）—— 所以它要排在信心值前面。"""
-    from adept.ui.widgets import ProfilePanel
+    from d4t.ui.widgets import ProfilePanel
 
     rec = _run().meta["crossings"]["xing"]["x"]
     panel = ProfilePanel()
@@ -446,7 +446,7 @@ def test_the_engine_says_which_group_each_stripe_is_in(qapp):
 def test_clicking_a_stripe_asks_for_that_material(qapp):
     """使用者：「能用圖就用圖。」`second_brightest` 這個詞本身不告訴他任何事 ——
     「哪一組是第二亮的」是一個只有看圖才答得出來的問題，而圖就在這裡。"""
-    from adept.ui.widgets import ProfilePanel
+    from d4t.ui.widgets import ProfilePanel
 
     data = _cpode_ctx().meta["crossings"]["xing"]["x"]
     panel = ProfilePanel()
@@ -470,7 +470,7 @@ def test_clicking_a_stripe_asks_for_that_material(qapp):
 
 def test_dragging_still_measures_instead_of_picking(qapp):
     """同一個手勢兩種意思會很糟 —— **點一下 = 選材質，拖一段 = 量尺**。"""
-    from adept.ui.widgets import ProfilePanel
+    from d4t.ui.widgets import ProfilePanel
 
     data = _cpode_ctx().meta["crossings"]["xing"]["x"]
     panel = ProfilePanel()
@@ -488,7 +488,7 @@ def test_dragging_still_measures_instead_of_picking(qapp):
 
 def test_clicking_between_the_stripes_does_nothing(qapp):
     """點在沒有任何段的地方 —— **不要猜一個最近的**。"""
-    from adept.ui.widgets import ProfilePanel
+    from d4t.ui.widgets import ProfilePanel
 
     panel = ProfilePanel()
     panel.resize(400, 120)
@@ -590,7 +590,7 @@ def test_the_three_direction_icons_are_drawable_and_different(qapp):
     """三顆並排，唯一的差別是亮的是哪一組條紋 —— 那也是選項唯一的差別。"""
     from PySide6.QtGui import QImage, QPainter
 
-    from adept.ui.widgets import GLYPH_ICONS, draw_glyph_icon
+    from d4t.ui.widgets import GLYPH_ICONS, draw_glyph_icon
 
     seen = {}
     for name in ("dir_both", "dir_upright", "dir_flat"):
@@ -617,7 +617,7 @@ def test_the_three_direction_icons_are_drawable_and_different(qapp):
 
 
 def _view_with(labels, focus=-1):
-    from adept.ui.widgets import ImageView
+    from d4t.ui.widgets import ImageView
 
     v = ImageView()
     v.set_image(np.full((32, 32), 128, np.uint8))
@@ -627,7 +627,7 @@ def _view_with(labels, focus=-1):
 
 
 def test_each_region_gets_its_own_colour(qapp):
-    from adept.ui.theme import REGION_COLORS
+    from d4t.ui.theme import REGION_COLORS
 
     v = _view_with(["epi", "mg", "epi", "poly"])
     legend = v.overlay_legend()
@@ -638,8 +638,8 @@ def test_each_region_gets_its_own_colour(qapp):
 
 def test_the_colours_are_the_ones_the_template_editor_uses(qapp):
     """使用者在對話框裡認得的綠色 ROI1，到了 patch 上不能變成別的顏色。"""
-    from adept.ui.cell_canvas import region_color
-    from adept.ui.theme import region_hex
+    from d4t.ui.cell_canvas import region_color
+    from d4t.ui.theme import region_hex
 
     for i in range(4):
         assert region_color(i).name().lower() == region_hex(i).lower()
@@ -647,7 +647,7 @@ def test_the_colours_are_the_ones_the_template_editor_uses(qapp):
 
 def test_labels_that_do_not_line_up_switch_colouring_off(qapp):
     """錯位的顏色比沒有顏色糟得多 —— 它會**指錯**區域，而畫面上不會說。"""
-    from adept.ui.widgets import ImageView
+    from d4t.ui.widgets import ImageView
 
     v = ImageView()
     v.set_image(np.full((32, 32), 128, np.uint8))

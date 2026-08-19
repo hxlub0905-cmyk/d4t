@@ -25,10 +25,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 def _import_qt(g):
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import inspectors as insp_mod
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
-    from adept.ui import widgets as widgets_mod
+    from d4t.ui import inspectors as insp_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
+    from d4t.ui import widgets as widgets_mod
     g.update(QApplication=QApplication, insp_mod=insp_mod,
              studio_mod=studio_mod, theme_mod=theme_mod,
              widgets_mod=widgets_mod)
@@ -56,8 +56,8 @@ def window(qapp):
 def test_the_flag_is_declared_not_guessed_from_the_unit():
     """``unit="px"`` 的參數有一半不是鄰域範圍 —— 拿方框表示「條紋間距」會讓
     **影像**說謊，而那跟畫布說謊是同一件事（F9/F10）。"""
-    from adept.core.pipeline import get_step
-    import adept.core.steps  # noqa: F401
+    from d4t.core.pipeline import get_step
+    import d4t.core.steps  # noqa: F401
 
     def spec(key, name):
         return [s for s in get_step(key).params if s.name == name][0]
@@ -269,8 +269,8 @@ def test_the_enlarged_canvas_gets_the_same_backdrop(qapp):
 def test_the_form_passes_it_to_the_curve_row_only(qapp):
     """`set_histogram` 是**資料的事實**，不是這張卡的參數 —— 同 set_image_count
     的形狀，所以放在表單上而不是塞進 set_step 的簽章。"""
-    from adept.core.pipeline import get_step
-    import adept.core.steps  # noqa: F401
+    from d4t.core.pipeline import get_step
+    import d4t.core.steps  # noqa: F401
 
     form = widgets_mod.ParamForm()
     form.set_step(get_step("tone").describe(), {}, ["test"])

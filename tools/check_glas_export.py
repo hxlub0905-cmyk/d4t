@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ADEPT ← GLAS 匯出健檢 — authored 2026-08-18 (F11 Region-3 準備).
+# d4t ← GLAS 匯出健檢 — authored 2026-08-18 (F11 Region-3 準備).
 """看一個 GLAS 匯出資料夾，印出一份**可以安心貼出來的**報告。
 
 為什麼需要這支
@@ -11,7 +11,7 @@ Region-3（GDS mode）要吃 GLAS 匯出的 ``<id>_label.png`` + manifest。使�
 
 所以這支做兩件事：
 
-1. **把匯出資料夾檢查一遍**，對照 ADEPT 真正需要的幾件事給 PASS / FAIL；
+1. **把匯出資料夾檢查一遍**，對照 d4t 真正需要的幾件事給 PASS / FAIL；
 2. **把結果遮蔽成可以貼的文字** —— 預設不印任何廠內識別碼（lot／wafer／
    device／layer 名／路徑／DEFECTID 的值），只印**結構與格式**。
    要看真值請自己加 ``--reveal``（那份**不要**貼出來）。
@@ -39,7 +39,7 @@ Region-3（GDS mode）要吃 GLAS 匯出的 ``<id>_label.png`` + manifest。使�
   ``f"{base}_label.png"``，而 ``base = _safe_name(image_id)``，
   **`_safe_name` 會把非 ``[A-Za-z0-9-_.]`` 的字元換成底線**。所以
   「檔名就是 ``<DEFECTID>_label.png``」只在 id 本來就乾淨時成立 ——
-  ADEPT 配對時必須套同一個轉換。這支會告訴你有沒有 id 被改過。
+  d4t 配對時必須套同一個轉換。這支會告訴你有沒有 id 被改過。
 * ``glas/core/fine_align.py::render_label_image`` —— ``lbl[m > 0] = label_id``，
   **後面的層會蓋掉前面的層**。所以某一層可能在某些影像上被蓋到一個像素都不剩，
   而 manifest 的 ``label_map`` 仍然列著它。這支會數每個 id 的像素。
@@ -55,7 +55,7 @@ Region-3（GDS mode）要吃 GLAS 匯出的 ``<id>_label.png`` + manifest。使�
 --------------------------
 把抽樣的那張 label 拆一次，印出每一層的 **pieces（連通元件）** 與
 **rectangles（精確矩形分解）**。那不是健康檢查，是 Region-3 的設計輸入：
-rectangles 是 ADEPT 真的要存幾個框（比的是「GDS layers」卡自己的上限
+rectangles 是 d4t 真的要存幾個框（比的是「GDS layers」卡自己的上限
 :data:`GDS_BOX_CAP`，不是 Profile／Template 那個給幾個重複用的 64），
 pieces 是「一份」有幾個。**兩者相等 = 每一塊形狀本來就是一個矩形**；
 差很大時，意思是那一層正被後面畫的層切碎，或者它本來就不是矩形。
@@ -74,7 +74,7 @@ import sys
 import zlib
 from typing import Dict, List, Optional, Tuple
 
-# 讓 `python tools/check_glas_export.py` 從任何工作目錄都 import 得到 adept
+# 讓 `python tools/check_glas_export.py` 從任何工作目錄都 import 得到 d4t
 # （只有 --klarf 那一段需要它，而它是**函式內** lazy import —— 模組層維持
 # stdlib-only，`tests/test_offline_tools.py` 會擋）。跟 make_sample_rsem.py 同招。
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -89,7 +89,7 @@ SUFFIXES = ("_raw.png", "_overlay.png", "_gray.png", "_label.png",
 MANIFEST_JSON = "overlay_manifest.json"
 MANIFEST_CSV = "overlay_manifest.csv"
 
-#: ADEPT 需要的 manifest 欄位（`fine_align.OVERLAY_MANIFEST_COLS` 的子集）。
+#: d4t 需要的 manifest 欄位（`fine_align.OVERLAY_MANIFEST_COLS` 的子集）。
 NEEDED_COLS = ("image_id", "label_png", "status")
 
 #: **v4 才有的欄位**（2026-08-18 從一份真實匯出看到的，GitHub 上的 GLAS 還是
@@ -113,7 +113,7 @@ SAFE_KEYS = frozenset((
 ))
 
 
-#: 「GDS layers」卡（`adept/core/steps/roi_from_mask.py`）``max_boxes`` 的預設。
+#: 「GDS layers」卡（`d4t/core/steps/roi_from_mask.py`）``max_boxes`` 的預設。
 #: 這支比的是**這一個**，不是 Profile／Template 的 64 —— 見 `check_label_images`。
 GDS_BOX_CAP = 8192
 
@@ -124,7 +124,7 @@ GDS_BOX_CAP = 8192
 def safe_name(s: str) -> str:
     """``glas/core/overlay_export.py::_safe_name`` 的複本。
 
-    **抄一份過來是刻意的**：這支要能在只有 ADEPT、沒有 GLAS 的機器上跑
+    **抄一份過來是刻意的**：這支要能在只有 d4t、沒有 GLAS 的機器上跑
     （公司機兩個 repo 不一定都在）。抄的是六行純字串處理，而且上面的檔頭
     註明了出處與 commit —— 那是 `docs/HANDOVER.md` 講的 vendoring 慣例。
     """
@@ -133,7 +133,7 @@ def safe_name(s: str) -> str:
 
 
 def region_name(layer: str) -> str:
-    """``adept/core/ingest/glas_export.py::region_name_for`` 的複本（不含去重）。
+    """``d4t/core/ingest/glas_export.py::region_name_for`` 的複本（不含去重）。
 
     抄的理由跟 :func:`safe_name` 一樣：這支要在只有這一個檔案的機器上跑得動。
     **兩份不准漂** —— `tests/test_check_glas_export.py` 有一條逐字比對兩邊對同
@@ -159,7 +159,7 @@ def region_name(layer: str) -> str:
 class Masker:
     """把每一個可能是識別碼的字串換成穩定的代號，並保留它的**格式**。
 
-    格式要留是因為那正是 ADEPT 要對的東西：id 有沒有補零、是不是純數字、
+    格式要留是因為那正是 d4t 要對的東西：id 有沒有補零、是不是純數字、
     有沒有非 ASCII —— 這幾件事決定配對寫法，而它們本身不洩漏任何東西。
     """
 
@@ -203,7 +203,7 @@ class Masker:
 # --------------------------------------------------------------------------- #
 # PNG —— 純標準函式庫（不需要 OpenCV，而「它是不是單通道」正是要查的事）
 # --------------------------------------------------------------------------- #
-#: PNG colour type -> 白話。**2 / 3 / 6 就是那個安靜的坑**：ADEPT 讀進來會被
+#: PNG colour type -> 白話。**2 / 3 / 6 就是那個安靜的坑**：d4t 讀進來會被
 #: 灰階化，label id 1、2、3 被混成一堆不存在的值，而它不會報錯。
 COLOR_TYPES = {0: "grayscale", 2: "RGB", 3: "palette",
                4: "grayscale+alpha", 6: "RGBA"}
@@ -305,7 +305,7 @@ def png_value_counts(path: str) -> Tuple[Optional[Dict[int, int]], str]:
 
     只支援 **8-bit、非交錯、單通道（灰階或 palette）** —— 那正好是 GLAS 寫出來
     的形狀（`cv2.imwrite` 一個 2-D uint8 陣列）。**其他形狀不硬讀**：讀不到本身
-    就是答案（「這張圖不是 ADEPT 假設的那一種」），硬猜只會給一個錯的直方圖。
+    就是答案（「這張圖不是 d4t 假設的那一種」），硬猜只會給一個錯的直方圖。
     """
     head = png_header(path)
     if head is None:
@@ -355,7 +355,7 @@ def rect_count(runs) -> int:
 
     合併規則：上一列有一段 ``[x0, x1)`` **完全一樣**的 run，就是同一個矩形往下
     長一格。Manhattan 的 layout 這樣拆是**等價不是近似**（站點的區域本來就都是
-    矩形），所以這個數字就是 ADEPT 要放幾個框。
+    矩形），所以這個數字就是 d4t 要放幾個框。
     """
     open_at = {}                       # (x0, x1) -> 還在往下長的矩形
     total = 0
@@ -378,7 +378,7 @@ def blob_count(runs) -> int:
     """幾個**連通元件**（4-連通，以 run 為單位做 union-find）。
 
     這個數字回答的是完全不同的問題：矩形是**切片**，連通元件才是「一份」。
-    非週期的 layout 上這兩個數字差很多，而 ADEPT 的 ``<name>_center`` /
+    非週期的 layout 上這兩個數字差很多，而 d4t 的 ``<name>_center`` /
     ``<name>_others`` 只有在「一份」講得通的時候才有意義。
     """
     parent = list(range(len(runs)))
@@ -472,7 +472,7 @@ class Report:
     def render(self) -> str:
         out = list(self.lines)
         out.append("")
-        out.append("== WHAT ADEPT NEEDS " + "=" * 40)
+        out.append("== WHAT d4t NEEDS " + "=" * 40)
         for verdict, what, detail in self.checks:
             out.append("  [%-4s] %s" % (verdict, what))
             if detail:
@@ -533,7 +533,7 @@ def read_manifest(export_dir: str, rep: Report, m: Masker) -> Dict[str, object]:
     if not os.path.isfile(path):
         rep.say("  %s: NOT FOUND" % MANIFEST_JSON)
         rep.check("FAIL", "overlay_manifest.json exists",
-                  "ADEPT needs it for label id -> layer name")
+                  "d4t needs it for label id -> layer name")
         return {}
     raw = open(path, "rb").read()
     enc = "utf-8-sig" if raw[:3] == b"\xef\xbb\xbf" else "utf-8"
@@ -563,7 +563,7 @@ def read_manifest(export_dir: str, rep: Report, m: Masker) -> Dict[str, object]:
     rep.say("  rows          %d" % len(rows))
     missing = [c for c in NEEDED_COLS if c not in cols]
     rep.check("PASS" if not missing else "FAIL",
-              "the manifest has the columns ADEPT reads",
+              "the manifest has the columns d4t reads",
               "" if not missing else "missing: %s" % ", ".join(missing))
     have_v4 = [c for c in V4_COLS if c in cols]
     if "width_px" in cols and "height_px" in cols:
@@ -609,7 +609,7 @@ def read_manifest(export_dir: str, rep: Report, m: Masker) -> Dict[str, object]:
             rep.check("PASS" if klarf_ids else "WARN",
                       "the manifest says image_id is the KLARF DEFECTID",
                       "" if klarf_ids else
-                      "id_source = %s — ADEPT must pair on that instead"
+                      "id_source = %s — d4t must pair on that instead"
                       % ", ".join(srcs))
         for col in ("width_px", "height_px", "nm_per_px"):
             vals = sorted({str(r.get(col, "")).strip() for r in rows} - {""})
@@ -624,7 +624,7 @@ def read_manifest(export_dir: str, rep: Report, m: Masker) -> Dict[str, object]:
         rep.say("  label_map     MISSING")
         rep.check("FAIL", "manifest carries label_map",
                   "GLAS only writes it when “export label” was on. Without it "
-                  "ADEPT cannot turn a label id into a region name.")
+                  "d4t cannot turn a label id into a region name.")
     else:
         rep.say("  label_map     %d layer(s)" % len(label_map))
         rep.say("    %-4s %-10s %-8s %s" % ("id", "layer", "fg_glv", "name shape"))
@@ -645,22 +645,22 @@ def read_manifest(export_dir: str, rep: Report, m: Masker) -> Dict[str, object]:
         bad = [e for e in label_map
                if not str(e.get("layer", "")).replace("_", "").isalnum()]
         rep.check("PASS" if not bad else "WARN",
-                  "layer names can be used as ADEPT region names",
+                  "layer names can be used as d4t region names",
                   "" if not bad else
-                  "%d name(s) contain characters ADEPT's region-name pattern "
-                  "rejects (letters, digits and underscore only) — ADEPT will "
+                  "%d name(s) contain characters d4t's region-name pattern "
+                  "rejects (letters, digits and underscore only) — d4t will "
                   "have to rewrite them, so they must be rewritten the SAME way "
                   "every time" % len(bad))
         # 改寫之後**還是要互相分得開**。這一條是上一條的另一半，而它是實際
-        # 會咬人的那一半：撞名的時候 ADEPT 會自動補 `_2`，於是畫面上出現一個
+        # 會咬人的那一半：撞名的時候 d4t 會自動補 `_2`，於是畫面上出現一個
         # 誰也認不得的 `X_2`，而使用者不知道那是哪一層。
         rewritten = [region_name(str(e.get("layer", ""))) for e in label_map]
         dupes = sorted({n for n in rewritten if rewritten.count(n) > 1})
         rep.check("PASS" if not dupes else "WARN",
                   "layer names stay distinct after that rewrite",
                   "" if not dupes else
-                  "%d layer name(s) collapse onto the same ADEPT region name "
-                  "(%d layers → %d distinct names). ADEPT will suffix the "
+                  "%d layer name(s) collapse onto the same d4t region name "
+                  "(%d layers → %d distinct names). d4t will suffix the "
                   "later ones (_2, _3…), so one of your layers shows up under "
                   "a name nobody recognises — rename those regions on the "
                   "“GDS layers” card." % (len(dupes), len(rewritten),
@@ -728,7 +728,7 @@ def check_pairing(export_dir: str, man: Dict[str, object], rep: Report,
               "DEFECTID can be used verbatim to build the filename",
               "" if not renamed else
               "%d id(s) get rewritten by GLAS's _safe_name() (non-alphanumeric "
-              "characters become '_'), so ADEPT must apply the SAME transform "
+              "characters become '_'), so d4t must apply the SAME transform "
               "when pairing — it cannot just concatenate DEFECTID" % renamed)
     rep.check("PASS" if not mismatch else "WARN",
               "the manifest's label_png matches the <id>_label.png convention",
@@ -831,7 +831,7 @@ def check_label_images(export_dir: str, man: Dict[str, object], images_dir:
     rep.check("PASS" if not channel_bad else "FAIL",
               "label PNG is single-channel 8-bit greyscale",
               "" if not channel_bad else
-              "%d of %d sampled are not. ADEPT would grey-average the channels "
+              "%d of %d sampled are not. d4t would grey-average the channels "
               "and blend label ids into values that do not exist — silently. "
               "(Check you are not pointing at *_label_view.png, which is the "
               "colourised preview.)" % (channel_bad, len(picked)))
@@ -865,7 +865,7 @@ def check_label_images(export_dir: str, man: Dict[str, object], images_dir:
                                for i, n in sorted(empty_on.items())), decoded))
     if shapes_of:
         rep.say("")
-        rep.say("  how one image decomposes (this is what ADEPT has to store):")
+        rep.say("  how one image decomposes (this is what d4t has to store):")
         rep.say("    %-6s %-10s %-10s" % ("id", "pieces", "rectangles"))
         worst = 0
         for i in sorted(shapes_of):
@@ -1002,7 +1002,7 @@ def _alignment_stats(rows: List[Dict[str, object]], rep: Report,
         rep.check("PASS" if len(npp) == 1 else "WARN",
                   "nm_per_px is one value for the whole lot",
                   "" if len(npp) == 1 else
-                  "%d distinct values — it varies per image, so ADEPT cannot "
+                  "%d distinct values — it varies per image, so d4t cannot "
                   "treat it as a lot constant" % len(npp))
 
 
@@ -1039,11 +1039,11 @@ def check_klarf_join(klarf_path: str, man: Dict[str, object], rep: Report,
     """
     rep.head("KLARF JOIN")
     try:
-        from adept.core.ingest import klarf_core          # lazy: 工具是 stdlib-only
+        from d4t.core.ingest import klarf_core          # lazy: 工具是 stdlib-only
     except ImportError as exc:
-        rep.say("  cannot import adept (%s)" % exc.__class__.__name__)
+        rep.say("  cannot import d4t (%s)" % exc.__class__.__name__)
         rep.check("SKIP", "manifest image_id == KLARF DEFECTID",
-                  "run this from the ADEPT folder so it can read the KLARF")
+                  "run this from the d4t folder so it can read the KLARF")
         return {}
     found = find_klarf(klarf_path)
     rep.say("  looked in            %s"
@@ -1093,7 +1093,7 @@ def check_klarf_join(klarf_path: str, man: Dict[str, object], rep: Report,
               "manifest image_id == KLARF DEFECTID",
               "" if hit == len(mine) and mine else
               "%d of %d matched — if this is 0 the ids are filename stems "
-              "(GLAS's folder mode), and ADEPT must pair on the stem instead"
+              "(GLAS's folder mode), and d4t must pair on the stem instead"
               % (hit, len(mine)))
     return files
 
@@ -1102,7 +1102,7 @@ def check_klarf_join(klarf_path: str, man: Dict[str, object], rep: Report,
 # CLI
 # --------------------------------------------------------------------------- #
 BANNER = """
-GLAS export check for ADEPT Region-3 (GDS mode)
+GLAS export check for d4t Region-3 (GDS mode)
 -----------------------------------------------
 Everything below is MASKED: layer names are L1, L2 …, defect ids are IMG1,
 IMG2 …, and no path or lot/wafer/device name is printed. Only structure,
@@ -1113,7 +1113,7 @@ formats and counts. It is safe to copy this whole report as text.
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
-        description="Check a GLAS export folder against what ADEPT needs, "
+        description="Check a GLAS export folder against what d4t needs, "
                     "and print a masked report that is safe to copy out.")
     ap.add_argument("export_dir", help="GLAS 匯出的資料夾（裡面有 *_label.png）")
     ap.add_argument("--klarf", default="",

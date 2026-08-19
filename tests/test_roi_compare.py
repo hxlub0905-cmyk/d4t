@@ -26,11 +26,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from adept.core.algo import glv as algo_glv  # noqa: E402
-from adept.core.pipeline import get_step  # noqa: E402
-from adept.core.pipeline.context import Context  # noqa: E402
-from adept.core.pipeline.step import ParamError, ParamSpec, StepError  # noqa: E402
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from d4t.core.algo import glv as algo_glv  # noqa: E402
+from d4t.core.pipeline import get_step  # noqa: E402
+from d4t.core.pipeline.context import Context  # noqa: E402
+from d4t.core.pipeline.step import ParamError, ParamSpec, StepError  # noqa: E402
 
 BASE = {"target_source": "test", "target_region": "hot",
         "reference_source": "test", "reference_region": "cold",

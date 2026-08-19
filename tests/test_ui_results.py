@@ -22,10 +22,10 @@ EXAMPLE = Path(__file__).resolve().parent / "fixtures" / "recipes" \
 def _import_qt(g):
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import results as results_mod
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
-    from adept.ui import viewmodel as vm_mod
+    from d4t.ui import results as results_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
+    from d4t.ui import viewmodel as vm_mod
     g.update(QApplication=QApplication, results_mod=results_mod,
              studio_mod=studio_mod, theme_mod=theme_mod, vm_mod=vm_mod)
 

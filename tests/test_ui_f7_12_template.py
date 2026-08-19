@@ -68,10 +68,10 @@ def _send(w, method, pt, button, buttons):
 def _import_qt(g):
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import cell_canvas as canvas_mod
-    from adept.ui import studio as studio_mod
-    from adept.ui import template_dialog as tpl_mod
-    from adept.ui import theme as theme_mod
+    from d4t.ui import cell_canvas as canvas_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import template_dialog as tpl_mod
+    from d4t.ui import theme as theme_mod
     g.update(QApplication=QApplication, studio_mod=studio_mod,
              tpl_mod=tpl_mod, theme_mod=theme_mod, canvas_mod=canvas_mod)
 
@@ -157,7 +157,7 @@ def test_an_empty_image_is_refused_instead_of_crashing(qapp):
 def test_a_blurred_stack_is_called_out_not_just_scored(qapp):
     """週期估錯 -> 疊出來糊掉 -> 每一顆都對錯，而且畫面上不會有錯誤訊息。
     所以糊掉這件事要用**白話**講，不能只丟一個分數。"""
-    from adept.core.algo import template as algo_template
+    from d4t.core.algo import template as algo_template
 
     dlg = tpl_mod.TemplateDialog()
     dlg.load_image(big_image(), "ok.tif")
@@ -262,7 +262,7 @@ def test_the_multi_add_anchor_is_the_box_centre(qapp):
 
 def test_a_stored_template_is_read_back_instead_of_rebuilt(qapp):
     """回來調框不可以重算模板 —— 相位一變，標好的框就全部平移了。"""
-    from adept.core.algo import template as algo_template
+    from d4t.core.algo import template as algo_template
 
     src = tpl_mod.TemplateDialog()
     src.load_image(big_image(), "LOT_full.tif")
@@ -479,7 +479,7 @@ def test_restacking_needs_the_original_image_and_says_so(qapp):
 
 def test_the_four_tools_are_icons_and_only_one_is_active(qapp):
     """「請改成用 icon 方式顯示（目前介面文字太多）」。"""
-    from adept.ui.widgets import IconButton
+    from d4t.ui.widgets import IconButton
 
     dlg = tpl_mod.TemplateDialog()
     dlg.load_image(big_image(), "LOT_full.tif")
@@ -599,7 +599,7 @@ def test_no_widget_is_left_without_a_layout(qapp):
 
 def test_the_toolbar_is_icons_only_and_big_enough(qapp):
     """「icon 功能列給我大一點漂亮一點」—— 而且一顆字都不放。"""
-    from adept.ui.widgets import IconButton
+    from d4t.ui.widgets import IconButton
 
     dlg = tpl_mod.TemplateDialog()
     buttons = (list(dlg.tool_buttons.values()) + list(dlg.align_buttons.values())
@@ -734,7 +734,7 @@ def test_a_double_cell_no_longer_kills_the_certainty(qapp):
     週期裡有兩個一模一樣的峰 → 最高 ＝ 次高 → 0.000，score 仍然 1.00。
     現在確定度摺在**自週期**上，位置仍然摺在整個 cell 上。
     """
-    from adept.core.algo import template as at
+    from d4t.core.algo import template as at
 
     img = big_image()
     got = {}
@@ -758,7 +758,7 @@ def test_a_double_cell_no_longer_kills_the_certainty(qapp):
 
 def test_a_flat_axis_is_not_a_self_period(qapp):
     """平的那一軸對**任何**位移都相似 —— 那不是週期，是沒有結構。"""
-    from adept.core.algo import template as at
+    from d4t.core.algo import template as at
 
     gc = at.build_golden_cell(big_image())
     sx, sy = at.cell_self_period(gc.cell)
@@ -767,7 +767,7 @@ def test_a_flat_axis_is_not_a_self_period(qapp):
 
 def test_the_template_string_carries_the_self_period(qapp):
     """自週期是**模板的性質**（一份模板一個答案），所以存進字串、不是每顆重算。"""
-    from adept.core.algo import template as at
+    from d4t.core.algo import template as at
 
     gc = at.build_golden_cell(big_image(), px=2 * PERIOD)
     text = at.encode_cell(gc.cell)
@@ -837,7 +837,7 @@ def test_multi_add_keeps_one_exact_pitch_for_every_gap(qapp):
 
 
 def _fmt(v: float) -> str:
-    from adept.ui.template_dialog import _px_text
+    from d4t.ui.template_dialog import _px_text
     return _px_text(v)
 
 
@@ -921,7 +921,7 @@ def test_a_double_cell_with_different_halves_is_called_out(qapp):
 
 def test_the_card_refuses_to_be_configured_that_way_too(qapp):
     """同一件事在**跑之前**也要看得到 —— 它是設定的性質，不是每一顆的行為。"""
-    from adept.core.pipeline import get_step
+    from d4t.core.pipeline import get_step
 
     dlg = tpl_mod.TemplateDialog()
     dlg.load_image(big_image(), "LOT_full.tif")
@@ -1113,7 +1113,7 @@ def test_the_dialog_can_stack_from_the_image_on_screen(qapp):
     而且很容易挑到**別顆** —— 單張 SEM 那條路每一顆都是一個獨立的檔案，檔名
     長得一模一樣。
     """
-    from adept.ui.template_dialog import TemplateDialog
+    from d4t.ui.template_dialog import TemplateDialog
 
     dlg = TemplateDialog()
     try:

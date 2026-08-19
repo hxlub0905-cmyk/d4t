@@ -1,13 +1,13 @@
-# ADEPT M3 viewmodel 測試（Qt-free）— authored 2026-07-28.
+# d4t M3 viewmodel 測試（Qt-free）— authored 2026-07-28.
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 
-import adept.core.steps  # noqa: F401 — 註冊卡片
-from adept.core.pipeline import ParamError, Recipe
-from adept.ui.viewmodel import RecipeModel, histogram, rebin
+import d4t.core.steps  # noqa: F401 — 註冊卡片
+from d4t.core.pipeline import ParamError, Recipe
+from d4t.ui.viewmodel import RecipeModel, histogram, rebin
 
 RECIPE = Path(__file__).resolve().parent / "fixtures" / "recipes" / "die_to_die_basic.json"
 

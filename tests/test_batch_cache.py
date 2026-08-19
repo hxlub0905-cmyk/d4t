@@ -1,4 +1,4 @@
-# ADEPT M2 驗收 — authored 2026-07-28.
+# d4t M2 驗收 — authored 2026-07-28.
 """M2 驗收：平行批次（run_batch）+ 影像段快取（StageCache / run_defect_cached）。
 
 鐵則：快取/平行的結果必須與 M1 循序 run_dataset **位元級一致**
@@ -16,9 +16,9 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from make_sample import generate  # noqa: E402
 
-import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from adept.core.ingest.dataset import load_dataset  # noqa: E402
-from adept.core.pipeline import (  # noqa: E402
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from d4t.core.ingest.dataset import load_dataset  # noqa: E402
+from d4t.core.pipeline import (  # noqa: E402
     Recipe,
     RecipeNode,
     ScoreSpec,
@@ -30,8 +30,8 @@ from adept.core.pipeline import (  # noqa: E402
     run_defect,
     run_defect_cached,
 )
-from adept.core.pipeline.batch import pin_cv2_deterministic  # noqa: E402
-from adept.core.pipeline.cache import dataset_token  # noqa: E402
+from d4t.core.pipeline.batch import pin_cv2_deterministic  # noqa: E402
+from d4t.core.pipeline.cache import dataset_token  # noqa: E402
 
 N = 12
 KIND = "ebi_patch"
@@ -400,8 +400,8 @@ def test_a_multi_box_roi_survives_a_cache_hit_with_every_box():
     """
     import numpy as np
 
-    from adept.core.pipeline.context import Context
-    from adept.core.pipeline.engine import _restore_context, _roi_snapshot
+    from d4t.core.pipeline.context import Context
+    from d4t.core.pipeline.engine import _restore_context, _roi_snapshot
 
     ctx = Context(images={"test": np.zeros((32, 32), np.float32)})
     boxes = [(i / 10.0, 0.1, 0.05, 0.2) for i in range(6)]
@@ -444,9 +444,9 @@ def test_feature_ownership_survives_a_cache_hit(ds, tmp_path):
     這裡刻意讓兩張卡都吐 ``align_dx``：align 是影像段（在 checkpoint 之前），
     後面那張是算法段（在 checkpoint 之後），所以撞名一定跨越 checkpoint。
     """
-    from adept.core.pipeline.step import (CATEGORY_ALGO, REGISTRY, ParamSpec,
+    from d4t.core.pipeline.step import (CATEGORY_ALGO, REGISTRY, ParamSpec,
                                           Step, register_step)
-    from adept.core.pipeline.context import Context as Ctx
+    from d4t.core.pipeline.context import Context as Ctx
 
     key = "t_f94_shadow"
     REGISTRY.pop(key, None)

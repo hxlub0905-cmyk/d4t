@@ -1,5 +1,5 @@
 # F9 的安全網：重構前後，每一個數字都要一樣 — authored 2026-08-16 (F9-0).
-"""**預設不跑。** 要跑：``ADEPT_GOLDEN=1 pytest -q tests/test_golden_features.py``
+"""**預設不跑。** 要跑：``D4T_GOLDEN=1 pytest -q tests/test_golden_features.py``
 
 為什麼要有這一支
 ----------------
@@ -20,7 +20,7 @@ F9（影像流綁在線上）動的是引擎的地基。這種重構最危險的
 而它的用途本來就不是跨機器重現，是**同一台機器上、重構前後的比較**：
 
 1. 開始 F9 之前，在你自己的機器上 ``python tools/freeze_golden.py``；
-2. 每改完一段 ``ADEPT_GOLDEN=1 pytest -q tests/test_golden_features.py``；
+2. 每改完一段 ``D4T_GOLDEN=1 pytest -q tests/test_golden_features.py``；
 3. 數字真的該變的時候重新凍一次，並在 commit 訊息裡說明為什麼。
 
 換句話說：**它是一把尺，不是一道門。** 門是其他 885 條測試。
@@ -39,11 +39,11 @@ sys.path.insert(0, str(REPO / "tools"))
 
 import freeze_golden                                      # noqa: E402
 
-ENABLED = os.environ.get("ADEPT_GOLDEN", "").strip().lower() in ("1", "true", "yes")
+ENABLED = os.environ.get("D4T_GOLDEN", "").strip().lower() in ("1", "true", "yes")
 
 pytestmark = pytest.mark.skipif(
     not ENABLED,
-    reason="黃金值是浮點數、跨環境會漂移 —— 設 ADEPT_GOLDEN=1 才跑（見檔頭）")
+    reason="黃金值是浮點數、跨環境會漂移 —— 設 D4T_GOLDEN=1 才跑（見檔頭）")
 
 
 @pytest.mark.parametrize(

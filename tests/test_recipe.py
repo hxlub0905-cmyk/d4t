@@ -1,7 +1,7 @@
 """M1 驗收：Recipe JSON serde、execution_order、lint 式 validate。
 
 本檔的 dummy Step 不進全域 REGISTRY —— 一律以 registry= 參數顯式傳入
-validate()，避免與並行開發中的 adept/core/steps/ 相互干擾。
+validate()，避免與並行開發中的 d4t/core/steps/ 相互干擾。
 """
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from adept.core.pipeline import (
+from d4t.core.pipeline import (
     Edge,
     CATEGORY_ALGO,
     CATEGORY_IMAGE,
@@ -452,8 +452,8 @@ def test_is_source_looks_at_declarations_not_at_position_or_values():
     assert not TSubtract.is_source()
     assert not TMaskConsumer.is_source()
     # 真的卡片：只有 load_patch 是入口。
-    from adept.core.pipeline.step import REGISTRY
-    import adept.core.steps            # noqa: F401  (註冊全部卡片)
+    from d4t.core.pipeline.step import REGISTRY
+    import d4t.core.steps            # noqa: F401  (註冊全部卡片)
     sources = sorted(k for k, c in REGISTRY.items() if c.is_source())
     # 三張 Input 卡（F11 Input-4：一種 source 一張卡）——其餘的卡都吃影像流。
     # `load_sidecar`（F11 Region-3）也是 source：它的輸入不是影像流，是 ingest
@@ -545,11 +545,11 @@ def test_validate_collects_multiple_issues_at_once():
 # --------------------------------------------------------------------------- #
 def test_a_saved_recipe_records_which_build_wrote_it():
     """沒有這個欄位的話，「認不得這個參數」就沒有線索可以判斷是檔案新還是程式舊。"""
-    from adept import __version__
+    from d4t import __version__
 
     rec = _mini_recipe() if "_mini_recipe" in globals() else None
     if rec is None:                     # 這一支測試檔的既有 helper 名稱不一定
-        from adept.core.pipeline.recipe import Recipe, RecipeNode, ScoreSpec
+        from d4t.core.pipeline.recipe import Recipe, RecipeNode, ScoreSpec
         rec = Recipe(recipe_id="v", routes={"ebi_patch": ["a"]},
                      nodes={"a": RecipeNode("a", "load_patch", {})},
                      score=ScoreSpec(expr="1", threshold=0.0,
@@ -564,7 +564,7 @@ def test_an_older_build_says_the_program_is_old_not_the_file_broken():
     在舊版上打開，訊息若只有 ``unknown parameters: ['…']``，使用者的結論是
     「這份檔案壞了」—— 於是他會去重做一份 recipe，而該做的是更新程式。
     """
-    from adept.core.pipeline.recipe import (Recipe, RecipeNode, ScoreSpec,
+    from d4t.core.pipeline.recipe import (Recipe, RecipeNode, ScoreSpec,
                                             validate, version_skew)
 
     rec = Recipe(
@@ -576,27 +576,27 @@ def test_an_older_build_says_the_program_is_old_not_the_file_broken():
                         bins={"below": 0, "above": 1}),
         app_version="99.0.0")           # 「比較新的那一版」寫的
 
-    import adept.core.steps  # noqa: F401 — 這一支要用真的卡片庫
-    from adept.core.pipeline.step import REGISTRY
+    import d4t.core.steps  # noqa: F401 — 這一支要用真的卡片庫
+    from d4t.core.pipeline.step import REGISTRY
 
     detail = " ".join(i.detail for i in validate(rec, registry=REGISTRY)
                       if i.code == "bad-param")
     assert "brand_new_knob" in detail, "還是要指名是哪個參數"
-    assert "99.0.0" in detail and "update ADEPT" in detail
+    assert "99.0.0" in detail and "update d4t" in detail
 
 
 def test_an_older_file_is_not_reported_as_skew():
     """檔案比較舊是**遷移**的事，不是版本落差 —— 不要對著它喊狼來了。"""
-    from adept.core.pipeline.recipe import version_skew
+    from d4t.core.pipeline.recipe import version_skew
 
     assert version_skew("0.0.1") == ""
     assert version_skew("") == ""            # 舊檔案根本沒有這個欄位
-    assert "update ADEPT" in version_skew("99.0.0")
+    assert "update d4t" in version_skew("99.0.0")
 
 
 def test_an_unparseable_version_does_not_crash():
     """版本字串長什麼樣不歸我們管（別人手改過、或未來換了格式）。"""
-    from adept.core.pipeline.recipe import version_skew
+    from d4t.core.pipeline.recipe import version_skew
 
     for weird in ("beta", "v2-rc1", "…", None):
         version_skew(weird)                  # 不丟例外就好
@@ -618,7 +618,7 @@ def test_reading_a_recipe_never_invents_a_parameter():
     見 ``test_a_json_round_trip_changes_nothing`` 與 ``from_json_dict`` 裡的
     「遷移的鐵則」那段註解。
     """
-    from adept.core.pipeline.recipe import Recipe
+    from d4t.core.pipeline.recipe import Recipe
 
     d = {"recipe_id": "old", "version": 1,
          "routes": {"ebi_patch": ["load", "al", "sub"]},

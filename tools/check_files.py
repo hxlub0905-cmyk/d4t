@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ADEPT 檔案比對 — authored 2026-07-30.
+# d4t 檔案比對 — authored 2026-07-30.
 """比對這台機器上的程式碼跟 ``tools/FILELIST.txt``，列出**要重新複製哪幾個檔案**。
 
 為什麼需要這支

@@ -14,8 +14,8 @@ import time
 
 import pytest
 
-from adept.core.pipeline import Recipe, RecipeNode, ScoreSpec
-from adept.core.store import RunStore, rescore
+from d4t.core.pipeline import Recipe, RecipeNode, ScoreSpec
+from d4t.core.store import RunStore, rescore
 
 
 # ---------------------------------------------------------------------------

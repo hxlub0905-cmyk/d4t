@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from adept.core.ingest import klarf_core as K
+from d4t.core.ingest import klarf_core as K
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "sample_real.klarf"
 

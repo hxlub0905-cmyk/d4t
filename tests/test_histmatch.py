@@ -1,9 +1,9 @@
-"""Tests for adept.core.algo.histmatch (vendored 2026-07-27)."""
+"""Tests for d4t.core.algo.histmatch (vendored 2026-07-27)."""
 from __future__ import annotations
 
 import numpy as np
 
-from adept.core.algo.histmatch import (
+from d4t.core.algo.histmatch import (
     MATCH_FN,
     compute_histogram,
     image_stats,

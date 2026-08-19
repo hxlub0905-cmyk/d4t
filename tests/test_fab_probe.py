@@ -335,7 +335,7 @@ def test_probe_empty_file(script, tmp_path):
 
 # ------------------------------------------------- 單檔、純標準函式庫
 
-FORBIDDEN = {"numpy", "cv2", "tifffile", "adept", "PySide6", "scipy", "PIL"}
+FORBIDDEN = {"numpy", "cv2", "tifffile", "d4t", "PySide6", "scipy", "PIL"}
 
 
 @pytest.mark.parametrize("script", ALL_PROBES)

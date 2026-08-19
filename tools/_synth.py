@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ADEPT synthetic-data helpers — authored 2026-07-28 (M4-2).
+# d4t synthetic-data helpers — authored 2026-07-28 (M4-2).
 """合成影像的共用零件（`make_sample.py` 與 `make_sample_rsem.py` 共用）。
 
 這裡只放「畫圖案」與「種缺陷」這兩件純函式的事，沒有任何 IO；

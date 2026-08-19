@@ -1,4 +1,4 @@
-# ADEPT M4 端到端驗收 — authored 2026-07-28.
+# d4t M4 端到端驗收 — authored 2026-07-28.
 """M4 驗收：**同一份 recipe 吃兩種輸入**。
 
 - EBI patch（KLARF + multi-page TIFF，機台附 test/ref）走 ebi_patch route
@@ -22,9 +22,9 @@ sys.path.insert(0, str(REPO / "tools"))
 from make_sample import generate as gen_ebi          # noqa: E402
 from make_sample_rsem import generate as gen_rsem    # noqa: E402
 
-import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from adept.core.ingest.dataset import load_dataset   # noqa: E402
-from adept.core.pipeline import Recipe, run_dataset, validate  # noqa: E402
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from d4t.core.ingest.dataset import load_dataset   # noqa: E402
+from d4t.core.pipeline import Recipe, run_dataset, validate  # noqa: E402
 
 RECIPE = REPO / "tests" / "fixtures" / "recipes" / "dual_route_basic.json"
 
@@ -106,7 +106,7 @@ def test_rsem_route_builds_its_own_reference(recipe, rsem_lot):
     那張卡被刪過一次，而刪掉之後同一條 route 的分類正確率從 24/24 掉到 12/24
     （＝猜銅板）—— 那個數字就是這一條測試在守的東西。
     """
-    from adept.core.pipeline import run_defect
+    from d4t.core.pipeline import run_defect
 
     ds = load_dataset(rsem_lot["klarf"])
     res = run_defect(recipe, ds.items[0], "rsem", keep_context=True)

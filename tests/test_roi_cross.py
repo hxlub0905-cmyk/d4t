@@ -27,11 +27,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from adept.core.algo import grid as algo_grid  # noqa: E402
-from adept.core.pipeline import get_step  # noqa: E402
-from adept.core.pipeline.context import Context  # noqa: E402
-from adept.core.pipeline.step import StepError  # noqa: E402
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from d4t.core.algo import grid as algo_grid  # noqa: E402
+from d4t.core.pipeline import get_step  # noqa: E402
+from d4t.core.pipeline.context import Context  # noqa: E402
+from d4t.core.pipeline.step import StepError  # noqa: E402
 
 SIZE = 128
 MG_PITCH, MG_W = 24, 8          # 直的 Metal Gate
@@ -416,7 +416,7 @@ def test_an_old_recipe_still_loads_after_the_rank_rename():
     import json
     import tempfile
 
-    from adept.core.pipeline import Recipe
+    from d4t.core.pipeline import Recipe
 
     doc = {
         "recipe_id": "old", "version": 1,
@@ -880,7 +880,7 @@ def test_the_panel_sees_the_same_boxes_that_were_measured():
 def test_the_pixel_box_survives_the_recipe_round_trip():
     """``to_json_dict → from_json_dict`` 一旦不是 identity，workers=1 與
     workers=2 就會算出不同的分數（鐵則 9）。bool 走 JSON 要活著回來。"""
-    from adept.core.pipeline.recipe import Recipe
+    from d4t.core.pipeline.recipe import Recipe
 
     doc = {"recipe_id": "r", "routes": {"main": ["n1"]},
            "score": {"expr": "0", "bins": []},

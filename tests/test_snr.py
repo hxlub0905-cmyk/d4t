@@ -1,9 +1,9 @@
-"""Tests for adept.core.algo.snr (vendored 2026-07-27)."""
+"""Tests for d4t.core.algo.snr (vendored 2026-07-27)."""
 from __future__ import annotations
 
 import numpy as np
 
-from adept.core.algo.snr import (
+from d4t.core.algo.snr import (
     RoiSnrResult,
     SnrMapResult,
     center_gaussian_mask,

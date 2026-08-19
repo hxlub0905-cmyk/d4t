@@ -22,9 +22,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 def _import_qt(g):
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
-    from adept.ui import widgets as widgets_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
+    from d4t.ui import widgets as widgets_mod
     g.update(QApplication=QApplication, studio_mod=studio_mod,
              theme_mod=theme_mod, widgets_mod=widgets_mod)
 
@@ -123,7 +123,7 @@ def test_the_empty_panel_offers_what_you_can_actually_do(window):
     拿它問「這顆藏起來了嗎」在建構期永遠答「是」。``isHidden()`` 問的是
     「有沒有被明確藏起來」，那正是這裡要知道的事。
     """
-    from adept.ui import scope
+    from d4t.ui import scope
 
     assert window.image_stack.currentIndex() == 0
     assert window.btn_empty_open.text() == "Open KLARF…"

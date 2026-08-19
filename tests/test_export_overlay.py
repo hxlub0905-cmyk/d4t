@@ -2,15 +2,15 @@
 
 疊圖是「使用者看得懂機器在想什麼」的唯一介面，所以這裡連
 「標籤塞中文會不會炸」都要測 —— cv2 的內建字型沒有 CJK 字元，
-:mod:`adept.core.export.overlay` 會把非 ASCII 換成 ``?`` 而不是丟例外。
+:mod:`d4t.core.export.overlay` 會把非 ASCII 換成 ``?`` 而不是丟例外。
 """
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from adept.core.export import overlay
-from adept.core.export.klarf_out import ExportError
+from d4t.core.export import overlay
+from d4t.core.export.klarf_out import ExportError
 
 H = W = 64
 
@@ -257,7 +257,7 @@ def test_write_png_accepts_gray_array(tmp_path):
 # ---------------------------------------------------------------------------
 def test_renders_from_a_real_context_images_dict():
     """直接吃 Context.images + meta["blobs"] 的形狀（UI 就是這樣叫的）。"""
-    from adept.core.pipeline.context import Context
+    from d4t.core.pipeline.context import Context
 
     rng = np.random.RandomState(0)
     ctx = Context()

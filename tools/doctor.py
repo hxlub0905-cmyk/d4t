@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# ADEPT offline packaging tool #3 — authored 2026-07-28 (M6-1).
-"""ADEPT 環境自檢（doctor）：一次告訴你「這台機器能不能跑 ADEPT」。
+# d4t offline packaging tool #3 — authored 2026-07-28 (M6-1).
+"""d4t 環境自檢（doctor）：一次告訴你「這台機器能不能跑 d4t」。
 
 用法：
-    python tools/doctor.py            # 在 ADEPT 專案資料夾裡執行
+    python tools/doctor.py            # 在 d4t 專案資料夾裡執行
     python tools/doctor.py --verbose  # 連錯誤細節一起印
     python tools/doctor.py --skip-smoke   # 不跑最後的端到端試跑（省 10 秒）
 
@@ -12,9 +12,9 @@
     1. Python 版本 >= 3.9、是不是 64 位元
     2. numpy / opencv-python(cv2) / tifffile / PySide6 / openpyxl 能不能 import、版本多少
        （pytest 是選用的，缺了只給提醒）
-    3. 從**目前這個資料夾**能不能 import 到 adept —— 最常見的錯是「跑錯資料夾」
+    3. 從**目前這個資料夾**能不能 import 到 d4t —— 最常見的錯是「跑錯資料夾」
     4. PySide6 能不能真的開一個 QApplication（用子行程做，避免整支 doctor 被拖死）
-    5. 目前資料夾與快取資料夾 ~/.adept 有沒有寫入權限
+    5. 目前資料夾與快取資料夾 ~/.d4t 有沒有寫入權限
     6. 端到端試跑：產一份迷你合成 lot，用**內建的**最小 pipeline 跑一顆 defect
        （約 10 秒；不讀 repo 裡任何 recipe 檔，見 ``_SMOKE_RECIPE``）
 
@@ -36,7 +36,7 @@ import time
 from typing import List, Optional, Sequence, Tuple
 
 MIN_PYTHON = (3, 9)
-CACHE_DIR_NAME = ".adept"
+CACHE_DIR_NAME = ".d4t"
 
 # 相依套件： (pip 上的名字, import 用的名字, 是否必要)
 DEPENDENCIES: Tuple[Tuple[str, str, bool], ...] = (
@@ -57,7 +57,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SMOKE_TIMEOUT_S = 180.0
 QT_TIMEOUT_S = 90.0
-_JSON_TAG = "ADEPT_DOCTOR_JSON:"
+_JSON_TAG = "D4T_DOCTOR_JSON:"
 
 
 # ---------------------------------------------------------------- 輸出小工具
@@ -132,7 +132,7 @@ try:
     out["app_ok"] = True
 except BaseException as exc:
     out["error"] = "%s: %s" % (type(exc).__name__, exc)
-sys.stdout.write("ADEPT_DOCTOR_JSON:" + json.dumps(out) + "\n")
+sys.stdout.write("D4T_DOCTOR_JSON:" + json.dumps(out) + "\n")
 """
 
 #: 端到端試跑用的 pipeline —— **doctor 自己帶著，不讀 repo 裡任何 recipe 檔**。
@@ -172,11 +172,11 @@ out = {"ok": False, "error": None, "score": None, "kind": None, "n_features": 0}
 work = None
 try:
     import make_sample
-    import adept.core.steps  # noqa: F401  觸發卡片註冊
-    from adept.core.ingest.dataset import load_dataset
-    from adept.core.pipeline import Recipe, run_defect
+    import d4t.core.steps  # noqa: F401  觸發卡片註冊
+    from d4t.core.ingest.dataset import load_dataset
+    from d4t.core.pipeline import Recipe, run_defect
 
-    work = tempfile.mkdtemp(prefix="adept_doctor_")
+    work = tempfile.mkdtemp(prefix="d4t_doctor_")
     info = make_sample.generate(os.path.join(work, "lot"), n=2, seed=7)
     ds = load_dataset(info["klarf"])
     out["kind"] = ds.kind
@@ -191,7 +191,7 @@ except BaseException as exc:
 finally:
     if work:
         shutil.rmtree(work, ignore_errors=True)
-sys.stdout.write("ADEPT_DOCTOR_JSON:" + json.dumps(out) + "\n")
+sys.stdout.write("D4T_DOCTOR_JSON:" + json.dumps(out) + "\n")
 """
 
 
@@ -273,26 +273,26 @@ def _dist_version(pip_name: str) -> Optional[str]:
         return None
 
 
-def check_adept_importable(rep: Report) -> bool:
-    """從**目前工作資料夾**能不能 import adept —— 專治「跑錯資料夾」。"""
+def check_d4t_importable(rep: Report) -> bool:
+    """從**目前工作資料夾**能不能 import d4t —— 專治「跑錯資料夾」。"""
     cwd = os.getcwd()
-    has_dir = os.path.isdir(os.path.join(cwd, "adept"))
+    has_dir = os.path.isdir(os.path.join(cwd, "d4t"))
     if cwd not in sys.path:
         sys.path.insert(0, cwd)
     try:
-        import adept  # noqa: F401
-        where = os.path.dirname(os.path.abspath(adept.__file__ or ""))
-        rep.add(OK, "adept 套件", "可以載入（%s）" % where)
+        import d4t  # noqa: F401
+        where = os.path.dirname(os.path.abspath(d4t.__file__ or ""))
+        rep.add(OK, "d4t 套件", "可以載入（%s）" % where)
         return True
     except BaseException as exc:  # noqa: BLE001
         if has_dir:
-            hint = ("目前資料夾裡有 adept\\，但載入失敗 —— 通常是相依套件沒裝好"
-                    "（看上面的套件檢查），或 adept\\ 裡的檔案不完整（請重新解壓一次原始碼 zip）。")
+            hint = ("目前資料夾裡有 d4t\\，但載入失敗 —— 通常是相依套件沒裝好"
+                    "（看上面的套件檢查），或 d4t\\ 裡的檔案不完整（請重新解壓一次原始碼 zip）。")
         else:
-            hint = ("你跑錯資料夾了。請先 cd 到「裡面看得到 adept\\ 這個資料夾」的地方"
-                    "（解壓後通常是 ADEPT-main\\），再執行一次："
-                    "cd C:\\...\\ADEPT-main 然後 python tools\\doctor.py")
-        rep.add(BAD, "adept 套件", "在目前資料夾 %s 載入不到（%s）" % (cwd, type(exc).__name__),
+            hint = ("你跑錯資料夾了。請先 cd 到「裡面看得到 d4t\\ 這個資料夾」的地方"
+                    "（解壓後通常是 d4t-main\\），再執行一次："
+                    "cd C:\\...\\d4t-main 然後 python tools\\doctor.py")
+        rep.add(BAD, "d4t 套件", "在目前資料夾 %s 載入不到（%s）" % (cwd, type(exc).__name__),
                 hint=hint, extra="%s: %s" % (type(exc).__name__, exc))
         return False
 
@@ -317,7 +317,7 @@ def check_qt(rep: Report) -> None:
     else:
         rep.add(BAD, "Qt 圖形介面", "PySide6 %s 裝了，但開不了視窗" % ver,
                 hint="請確認有裝 VC++ Redistributable (x64)；遠端桌面/無桌面環境可先設定"
-                     " QT_QPA_PLATFORM=offscreen 只跑命令列模式（python -m adept run ...）。",
+                     " QT_QPA_PLATFORM=offscreen 只跑命令列模式（python -m d4t run ...）。",
                 extra=data.get("error") or raw)
 
 
@@ -325,7 +325,7 @@ def _probe_write(path: str) -> Optional[str]:
     """試著在 path 底下寫一個暫存檔；成功回 None，失敗回錯誤字串。"""
     try:
         os.makedirs(path, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(prefix=".adept_write_test_", dir=path)
+        fd, tmp = tempfile.mkstemp(prefix=".d4t_write_test_", dir=path)
         os.close(fd)
         os.remove(tmp)
         return None
@@ -340,18 +340,18 @@ def check_write_permissions(rep: Report) -> None:
         rep.add(OK, "寫入權限（目前資料夾）", cwd)
     else:
         rep.add(BAD, "寫入權限（目前資料夾）", "不能寫入 %s" % cwd,
-                hint="請把 ADEPT 解壓到你自己的資料夾（例如 C:\\Users\\你的帳號\\ADEPT-main），"
+                hint="請把 d4t 解壓到你自己的資料夾（例如 C:\\Users\\你的帳號\\d4t-main），"
                      "不要放在 C:\\Program Files 或唯讀的網路磁碟。",
                 extra=err)
 
     cache = os.path.join(os.path.expanduser("~"), CACHE_DIR_NAME)
     err = _probe_write(cache)
     if err is None:
-        rep.add(OK, "寫入權限（快取 ~/.adept）", cache)
+        rep.add(OK, "寫入權限（快取 ~/.d4t）", cache)
     else:
-        rep.add(BAD, "寫入權限（快取 ~/.adept）", "不能寫入 %s" % cache,
+        rep.add(BAD, "寫入權限（快取 ~/.d4t）", "不能寫入 %s" % cache,
                 hint="家目錄被鎖住時，請改用 --cache 指定一個你寫得進去的資料夾"
-                     "（例如 python -m adept run ... --cache D:\\temp\\adept_cache）。",
+                     "（例如 python -m d4t run ... --cache D:\\temp\\d4t_cache）。",
                 extra=err)
 
 
@@ -396,19 +396,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     _soften_stdout()
     ap = argparse.ArgumentParser(
         prog="doctor.py",
-        description="ADEPT 環境自檢：一次檢查 Python、相依套件、Qt、權限與端到端試跑。")
+        description="d4t 環境自檢：一次檢查 Python、相依套件、Qt、權限與端到端試跑。")
     ap.add_argument("--verbose", action="store_true", help="連錯誤細節（完整訊息）一起印出來")
     ap.add_argument("--skip-smoke", action="store_true", help="不跑最後的端到端試跑（省約 10 秒）")
     args = ap.parse_args(list(argv) if argv is not None else None)
 
-    print("ADEPT 環境自檢（doctor）")
+    print("d4t 環境自檢（doctor）")
     print("  目前資料夾：%s" % os.getcwd())
     print("  Python    ：%s" % sys.executable)
 
     rep = Report()
     check_python(rep)
     deps_ok = check_dependencies(rep, verbose=args.verbose)
-    adept_ok = check_adept_importable(rep)
+    d4t_ok = check_d4t_importable(rep)
     check_qt(rep)
     check_write_permissions(rep)
 
@@ -417,8 +417,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         skip_reason = "--skip-smoke"
     elif not deps_ok:
         skip_reason = "相依套件還沒裝齊"
-    elif not adept_ok:
-        skip_reason = "adept 套件載入不到"
+    elif not d4t_ok:
+        skip_reason = "d4t 套件載入不到"
     check_smoke(rep, skip=bool(skip_reason), reason=skip_reason)
 
     rep.render(verbose=args.verbose)
@@ -427,17 +427,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     warns = rep.warnings()
     print("")
     if fails:
-        print("結論：有 %d 項必要檢查沒過（%s），ADEPT 目前還不能跑；"
+        print("結論：有 %d 項必要檢查沒過（%s），d4t 目前還不能跑；"
               "請照上面每一行的『修正建議』處理後，再執行一次 python tools\\doctor.py。"
               % (len(fails), "、".join(r["name"] for r in fails)))
         if not args.verbose:
             print("（想看完整錯誤訊息：python tools\\doctor.py --verbose）")
         return 1
     if warns:
-        print("結論：必要項目全部通過，ADEPT 可以跑（有 %d 項非必要提醒，見上面的 △）。"
-              "下一步：python -m adept gui" % len(warns))
+        print("結論：必要項目全部通過，d4t 可以跑（有 %d 項非必要提醒，見上面的 △）。"
+              "下一步：python -m d4t gui" % len(warns))
     else:
-        print("結論：全部檢查通過，這台機器可以跑 ADEPT。下一步：python -m adept gui")
+        print("結論：全部檢查通過，這台機器可以跑 d4t。下一步：python -m d4t gui")
     return 0
 
 

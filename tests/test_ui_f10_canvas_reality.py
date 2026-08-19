@@ -31,11 +31,11 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QPointF                  # noqa: E402
 from PySide6.QtWidgets import QApplication          # noqa: E402
 
-from adept.core.pipeline import get_step, list_steps  # noqa: E402
-from adept.ui import canvas as canvas_mod           # noqa: E402
-from adept.ui import studio as studio_mod           # noqa: E402
-from adept.ui import theme as theme_mod             # noqa: E402
-from adept.ui.scope import HIDDEN_STEPS             # noqa: E402
+from d4t.core.pipeline import get_step, list_steps  # noqa: E402
+from d4t.ui import canvas as canvas_mod           # noqa: E402
+from d4t.ui import studio as studio_mod           # noqa: E402
+from d4t.ui import theme as theme_mod             # noqa: E402
+from d4t.ui.scope import HIDDEN_STEPS             # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -269,7 +269,7 @@ def test_every_measure_card_can_take_more_than_one_source(window):
     逐張列舉的話，加第 18 張量測卡的那天它會安靜地留在單一來源上 ——
     而症狀是「別張卡可以接兩條，這張不行」，使用者只會覺得工具壞了。
     """
-    from adept.core.steps._util import MultiSourceStep
+    from d4t.core.steps._util import MultiSourceStep
 
     #: 「多連一」講的是**同一件事做在好幾條流上**（量 test 也量 diff）。
     #: 有一種量測卡的來源不是那個意思：它們的每一條流有**自己的角色**，
@@ -523,7 +523,7 @@ def test_a_result_stream_name_has_to_be_usable_as_a_variable(window):
     所以空的／有空白／數字開頭的名字要擋在打字的當下 —— 不擋的話，使用者要
     到寫分數的時候才發現指不到，而那時候他已經不記得問題出在三張卡以前。
     """
-    from adept.core.pipeline import ParamError
+    from d4t.core.pipeline import ParamError
 
     cls = get_step("subtract")
     for bad in ("", "   ", "my stream", "2diff", "GG-G"):

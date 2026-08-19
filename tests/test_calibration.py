@@ -1,12 +1,12 @@
-"""Tests for adept.core.calibration (vendored from MMH)."""
+"""Tests for d4t.core.calibration (vendored from MMH)."""
 from __future__ import annotations
 
 import json
 
 import pytest
 
-import adept.core.calibration as cal
-from adept.core.calibration import CalibrationManager, CalibrationProfile
+import d4t.core.calibration as cal
+from d4t.core.calibration import CalibrationManager, CalibrationProfile
 
 
 @pytest.fixture()

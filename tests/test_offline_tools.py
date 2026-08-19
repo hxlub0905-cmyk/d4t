@@ -93,7 +93,7 @@ def test_doctor_passes_in_repo_root():
         assert pip_name in out, (pip_name, out)
         assert import_name in out or pip_name == import_name
     assert "Python 版本" in out
-    assert "adept" in out
+    assert "d4t" in out
     assert "Qt" in out
     assert "端到端試跑" in out          # smoke test 有跑到
     assert "結論" in out
@@ -110,22 +110,22 @@ def test_doctor_verbose_still_passes():
 
 
 def test_doctor_detects_wrong_folder(tmp_path):
-    """經典錯誤：在別的資料夾執行 → 必須明確說「adept 載入不到」並教他 cd。"""
+    """經典錯誤：在別的資料夾執行 → 必須明確說「d4t 載入不到」並教他 cd。"""
     try:
-        subprocess.run([sys.executable, "-c", "import adept"], cwd=str(tmp_path),
+        subprocess.run([sys.executable, "-c", "import d4t"], cwd=str(tmp_path),
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                        check=True, env={k: v for k, v in os.environ.items()
                                         if k != "PYTHONPATH"})
     except subprocess.CalledProcessError:
-        pass                            # 預期：從 tmp 資料夾 import 不到 adept
+        pass                            # 預期：從 tmp 資料夾 import 不到 d4t
     else:
-        pytest.skip("adept 已安裝到 site-packages，無法模擬『跑錯資料夾』")
+        pytest.skip("d4t 已安裝到 site-packages，無法模擬『跑錯資料夾』")
 
     rc, out = _run([DOCTOR], cwd=str(tmp_path), drop_pythonpath=True)
     assert rc == 1, out
-    assert "adept" in out
+    assert "d4t" in out
     assert "cd" in out                  # 有告訴他要 cd 到哪
-    assert "ADEPT-main" in out
+    assert "d4t-main" in out
     assert "Traceback" not in out
     assert out.strip().splitlines()[-1].startswith("（想看完整錯誤") or "結論" in out
 
@@ -521,7 +521,7 @@ def test_a_proxy_interception_page_is_caught_not_written(tmp_path, monkeypatch):
     """被擋的 proxy 常常回一頁 HTML 而且是 HTTP 200。那種東西寫進 .py 之後，
     症狀是「程式碼都在但 import 就語法錯誤」，使用者完全不會歸因到下載。"""
     real = b"print('hello')\n"
-    manifest = "%s adept/fake.py\n" % get_code.blob_sha(real)
+    manifest = "%s d4t/fake.py\n" % get_code.blob_sha(real)
 
     def fake_fetch(ref, path, cafile=""):
         if path == "tools/FILELIST.txt":
@@ -532,12 +532,12 @@ def test_a_proxy_interception_page_is_caught_not_written(tmp_path, monkeypatch):
     dest = tmp_path / "out"
     rc = get_code.main(["--dest", str(dest)])
     assert rc == 1, "SHA 不對就必須失敗"
-    assert not (dest / "adept" / "fake.py").exists(), "壞內容不可以落地"
+    assert not (dest / "d4t" / "fake.py").exists(), "壞內容不可以落地"
 
 
 def test_a_good_download_lands_and_reports_success(tmp_path, monkeypatch):
     real = b"print('hello')\n"
-    manifest = "# comment\n%s adept/fake.py\n" % get_code.blob_sha(real)
+    manifest = "# comment\n%s d4t/fake.py\n" % get_code.blob_sha(real)
 
     def fake_fetch(ref, path, cafile=""):
         return manifest.encode("utf-8") if path == "tools/FILELIST.txt" else real
@@ -545,7 +545,7 @@ def test_a_good_download_lands_and_reports_success(tmp_path, monkeypatch):
     monkeypatch.setattr(get_code, "fetch", fake_fetch)
     dest = tmp_path / "out"
     assert get_code.main(["--dest", str(dest)]) == 0
-    assert (dest / "adept" / "fake.py").read_bytes() == real
+    assert (dest / "d4t" / "fake.py").read_bytes() == real
     assert not list(dest.rglob("*.tmp")), "atomic 寫入的暫存檔要清掉（鐵則 5）"
     # 清單自己不在自己的清單裡，但抓下來那一份還是要有它 —— 少了它，那份 repo
     # 不完整而且**看不出來少了什麼**（實際跑一次才發現的）。
@@ -659,7 +659,7 @@ def test_the_proxy_actually_reaches_the_opener():
 def test_the_run_reports_which_proxy_it_will_use(tmp_path, monkeypatch, capsys):
     """「不用 proxy，直接連」這句話本身就是診斷 —— 使用者看到它才知道問題在哪。"""
     real = b"x = 1\n"
-    manifest = "%s adept/f.py\n" % get_code.blob_sha(real)
+    manifest = "%s d4t/f.py\n" % get_code.blob_sha(real)
     monkeypatch.setattr(get_code, "fetch", lambda ref, path, cafile="":
                         manifest.encode("utf-8") if path == get_code.MANIFEST
                         else real)
@@ -689,7 +689,7 @@ def test_the_pac_is_resolved_automatically_on_windows(tmp_path, monkeypatch,
     —— 叫製程工程師自己去讀那個檔案是不合理的。Windows 上 .NET 讀得懂 PAC
     （瀏覽器用的就是它），所以借 PowerShell 問一次，解出來就直接用。"""
     real = b"x = 1\n"
-    manifest = "%s adept/f.py\n" % get_code.blob_sha(real)
+    manifest = "%s d4t/f.py\n" % get_code.blob_sha(real)
     seen = {}
 
     def fake_build_opener(cafile="", proxy=""):
@@ -900,7 +900,7 @@ def test_the_text_bundle_round_trips_byte_for_byte(tmp_path):
     這條測試存在的理由是它抓過的兩個 bug（見下面兩支）—— 而那兩個 bug 都是
     「產出來的東西看起來很正常，直到收到的人去跑它」那一類。
     """
-    out = tmp_path / "ADEPT_bundle.py"
+    out = tmp_path / "d4t_bundle.py"
     _write(out, make_text_bundle.build(out.name, REPO))
     dest = tmp_path / "un"
     r = subprocess.run([sys.executable, str(out), "--dest", str(dest)],
@@ -959,7 +959,7 @@ def test_a_tampered_bundle_refuses_to_land_anything(tmp_path):
         "name": "b.py", "sentinel": make_text_bundle.SENTINEL,
         "part": 1, "n_parts": 1, "total": 1}
     good = "\n".join([header, make_text_bundle.SENTINEL, "#ENC text",
-                      "#F %s 2 adept/x.py" % sha, "#print('hi')", "#"]) + "\n"
+                      "#F %s 2 d4t/x.py" % sha, "#print('hi')", "#"]) + "\n"
     bad = good.replace("#print('hi')", "#print('tampered')")
 
     for text, expect, should_exist in ((good, 0, True), (bad, 1, False)):
@@ -970,7 +970,7 @@ def test_a_tampered_bundle_refuses_to_land_anything(tmp_path):
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                            timeout=120)
         assert r.returncode == expect, r.stdout.decode("utf-8", "replace")
-        assert (dest / "adept" / "x.py").exists() is should_exist
+        assert (dest / "d4t" / "x.py").exists() is should_exist
         if expect:
             assert "SHA" in r.stdout.decode("utf-8", "replace")
 
@@ -1183,7 +1183,7 @@ def test_a_truncated_compressed_bundle_says_so_instead_of_crashing(tmp_path):
 
 @needs_git
 def test_the_transfer_files_are_up_to_date():
-    """``tools/FILELIST.txt`` 與 ``bundle/ADEPT_bundle.py`` 是**公司機唯一拿得到
+    """``tools/FILELIST.txt`` 與 ``bundle/d4t_bundle.py`` 是**公司機唯一拿得到
     程式碼的地方**（`AGENTS.md` §2）。它們過期不會有任何症狀 —— 直到那台機器上
     少一個檔案，或者 `check_files.py` 說「一致」而那份清單是三天前的。
 
@@ -1201,10 +1201,10 @@ def test_release_refuses_to_run_with_files_that_are_not_added_yet(monkeypatch,
     """清單與包都是從 ``git ls-files`` 產的，所以**還沒 git add 的新檔案會安靜地
     不在裡面** —— 公司機上就少一個檔案。這個坑我在同一個 session 裡踩了兩次，
     所以它不能只是一句文件。"""
-    monkeypatch.setattr(release_mod, "untracked", lambda root: ["adept/new.py"])
+    monkeypatch.setattr(release_mod, "untracked", lambda root: ["d4t/new.py"])
     assert release_mod.main(["--check"]) == 2
     out = capsys.readouterr().out
-    assert "adept/new.py" in out and "git add" in out
+    assert "d4t/new.py" in out and "git add" in out
 
 
 @needs_git

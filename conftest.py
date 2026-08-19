@@ -1,13 +1,13 @@
 # pytest 根設定 — authored 2026-07-29.
-"""讓 ``pytest``（不加 ``python -m``）也找得到 ``adept`` 套件。
+"""讓 ``pytest``（不加 ``python -m``）也找得到 ``d4t`` 套件。
 
 為什麼需要這個檔
 ----------------
 ``python -m pytest`` 會把**目前工作目錄**放進 ``sys.path``，``pytest`` 不會。
-測試都是從 repo 根目錄跑的，所以兩種寫法的差別就是 ``import adept`` 成不成立：
+測試都是從 repo 根目錄跑的，所以兩種寫法的差別就是 ``import d4t`` 成不成立：
 
 ===========================  ==========================================
-``python -m pytest -q``      CWD 進 sys.path → 找得到 adept ✓
+``python -m pytest -q``      CWD 進 sys.path → 找得到 d4t ✓
 ``pytest -q``                CWD **不**進 sys.path → ModuleNotFoundError ✗
 ===========================  ==========================================
 

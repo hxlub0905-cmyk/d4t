@@ -23,10 +23,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from adept.core.algo import grid as algo_grid  # noqa: E402
-from adept.core.pipeline import get_step  # noqa: E402
-from adept.core.pipeline.context import Context  # noqa: E402
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from d4t.core.algo import grid as algo_grid  # noqa: E402
+from d4t.core.pipeline import get_step  # noqa: E402
+from d4t.core.pipeline.context import Context  # noqa: E402
 
 SIZE, MG_PITCH, MG_W, EPI_PITCH = 128, 24, 8, 34
 CPODE_SITES = (2, 5)          # 由左到右：MG MG CPODE MG MG CPODE

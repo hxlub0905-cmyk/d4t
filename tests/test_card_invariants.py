@@ -54,11 +54,11 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tools"))
 
-import adept.core.steps                                    # noqa: E402,F401
-from adept.core.ingest.dataset import load_dataset          # noqa: E402
-from adept.core.pipeline import Recipe, run_defect          # noqa: E402
-from adept.core.pipeline.recipe import RecipeNode, ScoreSpec  # noqa: E402
-from adept.core.pipeline.step import REGISTRY               # noqa: E402
+import d4t.core.steps                                    # noqa: E402,F401
+from d4t.core.ingest.dataset import load_dataset          # noqa: E402
+from d4t.core.pipeline import Recipe, run_defect          # noqa: E402
+from d4t.core.pipeline.recipe import RecipeNode, ScoreSpec  # noqa: E402
+from d4t.core.pipeline.step import REGISTRY               # noqa: E402
 
 KIND = "ebi_patch"
 
@@ -188,11 +188,11 @@ _CHILD = r'''
 import json, sys
 sys.path.insert(0, sys.argv[1])
 sys.path.insert(0, sys.argv[1] + "/tools")
-import adept.core.steps                                    # noqa
-from adept.core.pipeline.batch import pin_cv2_deterministic
+import d4t.core.steps                                    # noqa
+from d4t.core.pipeline.batch import pin_cv2_deterministic
 pin_cv2_deterministic()
-from adept.core.ingest.dataset import load_dataset
-from adept.core.pipeline import Recipe, run_defect
+from d4t.core.ingest.dataset import load_dataset
+from d4t.core.pipeline import Recipe, run_defect
 
 _root, klarf, recipe_json = sys.argv[1], sys.argv[2], sys.argv[3]
 ds = load_dataset(klarf)
@@ -245,7 +245,7 @@ def test_a_card_gives_the_same_answer_in_another_process(key, sparse, dataset, l
     if key in NEEDS_MORE_SETUP:
         pytest.skip("%s：%s" % (key, NEEDS_MORE_SETUP[key]))
 
-    from adept.core.pipeline.batch import pin_cv2_deterministic
+    from d4t.core.pipeline.batch import pin_cv2_deterministic
     pin_cv2_deterministic()          # 跟 worker 同一組 cv2 設定，才比得起來
 
     recipe = recipe_for(key, sparse=sparse)
@@ -268,7 +268,7 @@ def test_omitting_a_parameter_means_the_card_default(key, dataset, lot):
     if key in NEEDS_MORE_SETUP:
         pytest.skip("%s：%s" % (key, NEEDS_MORE_SETUP[key]))
 
-    from adept.core.pipeline.batch import pin_cv2_deterministic
+    from d4t.core.pipeline.batch import pin_cv2_deterministic
     pin_cv2_deterministic()
 
     filled = run_defect(recipe_for(key, sparse=False), dataset.items[0],
@@ -357,7 +357,7 @@ def _prepared_context(key: str, dataset):
     else:
         upto = route[-2] if len(route) > 1 else None
     if upto is None:
-        from adept.core.pipeline.context import Context
+        from d4t.core.pipeline.context import Context
         ctx = Context()
         ctx.meta["_defect_item"] = dataset.items[0]
         ctx.meta["_dataset_kind"] = dataset.kind
@@ -448,7 +448,7 @@ def test_a_card_gives_the_same_answer_twice(key, dataset):
     if key in NEEDS_MORE_SETUP:
         pytest.skip("%s：%s" % (key, NEEDS_MORE_SETUP[key]))
 
-    from adept.core.pipeline.batch import pin_cv2_deterministic
+    from d4t.core.pipeline.batch import pin_cv2_deterministic
     pin_cv2_deterministic()
 
     recipe = recipe_for(key)
@@ -488,9 +488,9 @@ def test_a_card_replays_from_cache_exactly(key, dataset, lot, tmp_path):
     if key in NEEDS_MORE_SETUP:
         pytest.skip("%s：%s" % (key, NEEDS_MORE_SETUP[key]))
 
-    from adept.core.pipeline.batch import pin_cv2_deterministic
-    from adept.core.pipeline.cache import StageCache
-    from adept.core.pipeline.engine import run_defect_cached
+    from d4t.core.pipeline.batch import pin_cv2_deterministic
+    from d4t.core.pipeline.cache import StageCache
+    from d4t.core.pipeline.engine import run_defect_cached
     pin_cv2_deterministic()
 
     recipe = recipe_for(key, trailing_image=True)
@@ -515,8 +515,8 @@ def test_the_cache_replay_check_actually_uses_the_cache(dataset, lot, tmp_path):
     影像段 checkpoint 是「執行順序上最後一張影像卡的下一格」，所以一張
     algo 卡的 recipe 才會有非零的 checkpoint。這裡直接問快取的 hit 計數。
     """
-    from adept.core.pipeline.cache import StageCache
-    from adept.core.pipeline.engine import run_defect_cached
+    from d4t.core.pipeline.cache import StageCache
+    from d4t.core.pipeline.engine import run_defect_cached
 
     hits = 0
     for key in CARDS:
@@ -581,7 +581,7 @@ def test_a_parameter_at_its_limit_does_not_produce_nonsense(key, name, value,
     ``min``/``max`` 是卡片自己宣告的「使用者拖得到的範圍」（鐵則 4），
     所以這條問的正是：**那個範圍宣告得對嗎**。
     """
-    from adept.core.pipeline.batch import pin_cv2_deterministic
+    from d4t.core.pipeline.batch import pin_cv2_deterministic
     pin_cv2_deterministic()
 
     params = dict(_defaults(key))
@@ -640,7 +640,7 @@ def test_a_card_survives_a_different_patch_size(key, dataset, big_dataset):
     if key in NEEDS_MORE_SETUP:
         pytest.skip("%s：%s" % (key, NEEDS_MORE_SETUP[key]))
 
-    from adept.core.pipeline.batch import pin_cv2_deterministic
+    from d4t.core.pipeline.batch import pin_cv2_deterministic
     pin_cv2_deterministic()
 
     recipe = recipe_for(key)
