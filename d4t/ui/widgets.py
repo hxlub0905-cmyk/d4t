@@ -2421,6 +2421,9 @@ class ParamForm(QWidget):
     #: 「這個參數的值要用別的方式產生」（目前只有 template）。表單不知道那是
     #: 什麼對話框 —— 它只負責把請求送上去，由 Studio 決定要開什麼。
     action_requested = Signal(str)
+    #: **入口卡的「資料從哪來」**（F14-1）：按下去要開檔案對話框。
+    #: 同樣地，表單不知道那是哪一種來源 —— 它送出去，Studio 決定開什麼。
+    source_requested = Signal()
 
     _EMPTY_TEXT = "(Pick a card from the library, or select a step in the pipeline)"
 
@@ -2465,6 +2468,28 @@ class ParamForm(QWidget):
         outer.addWidget(self._title)
         outer.addWidget(self._step_help)
 
+        # 「這張卡的資料從哪來」（F14-1，使用者定調：工具列那幾顆 Open
+        # 「會混淆」）。入口長在**讀那份資料的那張卡上** —— 以前它在工具列，
+        # 而畫布上那張 Load 卡完全不會說它讀的是哪個檔案：同一件事兩個地方，
+        # 而畫布是說謊的那一個。
+        self._source_row = QWidget(self)
+        self._source_row.setObjectName("sourceRow")
+        srow = QHBoxLayout(self._source_row)
+        srow.setContentsMargins(2, 0, 8, 0)
+        srow.setSpacing(8)
+        self._source_btn = QPushButton("", self._source_row)
+        self._source_btn.setObjectName("primary")
+        self._source_btn.setCursor(Qt.PointingHandCursor)
+        self._source_btn.clicked.connect(self.source_requested.emit)
+        self._source_note = QLabel("", self._source_row)
+        self._source_note.setObjectName("paramHint")
+        self._source_note.setWordWrap(True)
+        srow.addWidget(self._source_btn)
+        srow.addWidget(self._source_note, 1)
+        self._source_shown = False
+        self._source_row.setVisible(False)
+        outer.addWidget(self._source_row)
+
         self._scroll = QScrollArea(self)
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.NoFrame)
@@ -2491,6 +2516,31 @@ class ParamForm(QWidget):
         self.set_step(None, {}, [])
 
     # -- public API --------------------------------------------------------
+    def set_source_action(self, label: str = "", note: str = "",
+                          tooltip: str = "") -> None:
+        """入口卡上那一排「資料從哪來」。``label=""`` = 這張卡沒有這一排。
+
+        note 講的是**現在載的是什麼**（`LOT_SYN.001 · 12 defects`）——
+        鈕本身只說得出「可以換一份」，而使用者第一個要確認的是「我現在看的
+        是哪一份」。
+        """
+        label = str(label or "")
+        self._source_btn.setText(label)
+        self._source_btn.setToolTip(str(tooltip or ""))
+        self._source_note.setText(str(note or ""))
+        # **追明確狀態**：`isVisible()` 在視窗 show 之前恆為 False，
+        # 那個坑這個 repo 踩過（見 docs/PITFALLS.md）。
+        self._source_shown = bool(label)
+        self._source_row.setVisible(self._source_shown)
+
+    def has_source_action(self) -> bool:
+        """這張卡有沒有那一排「資料從哪來」。"""
+        return bool(getattr(self, "_source_shown", False))
+
+    def source_button(self) -> QPushButton:
+        """那顆鈕本身（訊息裡引到的名字要跟它一字不差 —— 有測試在擋）。"""
+        return self._source_btn
+
     def set_image_count(self, n: int) -> None:
         """告訴表單「這批資料一顆有幾張圖」（F11）。
 

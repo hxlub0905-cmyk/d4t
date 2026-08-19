@@ -41,11 +41,15 @@ def qapp():
 
 
 def test_the_card_message_points_at_a_button_that_exists(qapp):
-    """訊息裡那個「…」結尾的東西，工具列上要真的有。
+    """訊息裡那個「…」結尾的東西，畫面上要真的有一顆那樣的鈕。
 
-    問的是**真的建出來的那條工具列**，不是 `studio.py` 的原始碼裡有沒有那串字
+    問的是**真的建出來的元件**，不是 `studio.py` 的原始碼裡有沒有那串字
     （第一版是後者，而它有兩個洞：字搬到別的模組去就紅、以及 —— 更糟 ——
     字在原始碼裡、鈕卻沒被 `addWidget` 上去時它是綠的。後者實際發生過）。
+
+    **F14-1 起要找的地方多一個**：資料與匯出的入口從工具列搬到了讀它的那張
+    卡上（使用者：「工具列拿掉吧（會混淆）」）。所以「按得下去的東西」＝
+    工具列上的鈕 ∪ **選著那張卡的入口鈕**。
     """
     from PySide6.QtWidgets import QToolButton
 
@@ -58,27 +62,30 @@ def test_the_card_message_points_at_a_button_that_exists(qapp):
 
     win = StudioWindow(show_welcome_on_start=False)
     try:
-        on_bar = set()
+        pressable = set()
         for a in win.toolbar.actions():
             w = win.toolbar.widgetForAction(a)
             if w is None:
                 continue
             if isinstance(w, QToolButton):
-                on_bar.add(w.text())
-            on_bar.update(c.text() for c in w.findChildren(QToolButton))
+                pressable.add(w.text())
+            pressable.update(c.text() for c in w.findChildren(QToolButton))
+        # 入口卡自己那一顆（選起來才看得到，所以要真的選一次）
+        nid = win.model.add_step("load_sidecar")
+        win.select_node(nid)
+        pressable.add(win.param_form.source_button().text())
         for label in named:
-            assert label in on_bar, "工具列上沒有 %r 這顆鈕" % label
+            assert label in pressable, "畫面上沒有 %r 這顆鈕" % label
 
         # 使用者第九輪的第一句話：「Load layout labels 要怎麼 load，好像沒有
-        # load 的地方」。那張卡上**沒有東西可以填**（來源是 ingest 掛上去的），
-        # 所以「怎麼 load」的答案只能寫在它自己的說明與它擋下來的那句話裡 ——
-        # 而那兩處指的東西也必須真的在工具列上。
+        # load 的地方」。那張卡的說明與它擋下來的那句話都指著那顆鈕 ——
+        # 而 F14-1 之後那顆鈕就長在它自己身上。
         card = get_step("load_sidecar")
         for text in (card.help, _no_sidecar_message(card)):
             pointed = re.findall(r"“([^”]+…)”", text)
             assert pointed, "這段話沒有指向任何按得下去的東西：%s" % text
             for label in pointed:
-                assert label in on_bar, "工具列上沒有 %r 這顆鈕" % label
+                assert label in pressable, "畫面上沒有 %r 這顆鈕" % label
 
         # 空白狀態（第一次進來看到的那一塊）也要說得出那個順序。
         assert "Open GDS export…" in win.empty_state_attachments.text()
@@ -224,16 +231,18 @@ def test_the_empty_state_points_at_the_button(qapp):
     assert "Open GDS export…" in w.empty_reason()
 
 
-def test_the_attachment_entry_turns_on_once_a_lot_is_open(qapp, tmp_path):
-    """「怎麼 load」的最後一段：那顆鈕**灰著也要在畫面上**，載完 lot 就亮。
+def test_the_attachment_entry_says_what_is_still_missing(qapp, tmp_path):
+    """「怎麼 load」的最後一段：那顆鈕在**讀它的那張卡**上，而且它旁邊那句話
+    講得出現在缺什麼。
 
     這是使用者第九輪第一句話的完整答案。它由三段組成，而三段都測得到：
-    卡片與空白狀態說得出那顆鈕的名字（上面那條）、那顆鈕真的在工具列上
-    （`test_every_button_built_for_the_toolbar_is_actually_on_it`），
-    以及**它什麼時候會亮**（這一條）。
+    卡片與空白狀態說得出那顆鈕的名字（上面那條）、那顆鈕真的長在畫面上
+    （同上，F14-1 之後找的是卡片而不是工具列），以及**它什麼時候講什麼**
+    （這一條）。
 
-    灰著也要在，不是載了 lot 才長出來：一顆到那時候才出現的鈕，使用者在需要它
-    之前根本不知道 d4t 做得到這件事。
+    F14-1 之前它是工具列上一顆**灰著的**鈕。搬到卡片上之後「灰著」不再是對的
+    表達：那張卡本來就要選起來才看得到，而使用者選了它就是想 load ——
+    給他一顆按不下去的鈕不如給他一句「先載 lot」。
     """
     import sys
 
@@ -244,10 +253,15 @@ def test_the_attachment_entry_turns_on_once_a_lot_is_open(qapp, tmp_path):
 
     win = StudioWindow(show_welcome_on_start=False)
     try:
-        assert win.btn_open_gds.isEnabled() is False
+        nid = win.model.add_step("load_sidecar")
+        win.select_node(nid)
+        assert win.param_form.source_button().text() == "Open GDS export…"
+        assert "Load the lot first" in win.param_form._source_note.text()
+
         lot = generate(str(tmp_path / "lot"), n=3, seed=5)
         assert win.load_dataset_path(lot["klarf"], sync=True) is True
-        assert win.btn_open_gds.isEnabled() is True
+        win.select_node(nid)
+        assert "No export attached" in win.param_form._source_note.text()
     finally:
         win.deleteLater()
 

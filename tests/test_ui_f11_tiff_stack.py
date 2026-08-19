@@ -75,9 +75,13 @@ def test_there_is_a_separate_entry_for_it(win):
     """
     src = next(s for s in scope.INPUT_SOURCES if s.key == "stack")
     assert (src.title, src.short) == ("Open stack…", "Stack…")
-    assert win.btn_open_stack.text() == src.short
-    tip = win.btn_open_stack.toolTip()
-    assert "no KLARF" in tip and "per defect" in tip
+    # F14-1：入口從工具列搬到**畫面最大的那一塊**（沒有資料時的空白狀態）
+    # 與入口卡上的選單。一種 source 一列這件事沒有變。
+    btn = win.empty_source_buttons["stack"]
+    assert btn.text() == src.title
+    tip = src.what
+    assert "per defect" in tip
+    assert "no KLARF" in scope.no_klarf_message("tiff_stack")
     assert "stack" in widgets_mod.GLYPH_ICONS
 
 

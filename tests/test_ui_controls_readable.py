@@ -91,7 +91,7 @@ def test_a_toolbar_button_looks_pressable(qapp, theme_name):
     theme_mod.apply_theme(qapp, theme_name)
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     try:
-        btn = win.btn_open_klarf
+        btn = win.btn_open_recipe   # F14-1：資料那幾顆搬到卡片上了
         btn.resize(150, 30)
         from PySide6.QtGui import QColor
 

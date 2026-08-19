@@ -119,20 +119,22 @@ def test_the_toolbar_has_three_weights(window):
             "第三級是**純圖示**：一排沒有框的字讀起來是選單列（theme.py 的規矩）"
 
 
-def test_the_open_verb_is_said_once_not_four_times(window):
-    """`Open KLARF…` / `Open stack…` / `Open folder…` 三個重複的動詞，
-    佔掉的寬度比它給的資訊多。動詞提出來當小標題，鈕上只留名詞。"""
-    assert window.lbl_open_group.text() == "Open"
+def test_the_data_entries_are_not_on_the_toolbar_any_more(window):
+    """F14-1（使用者：「工具列拿掉吧（會混淆）」）—— 資料的入口搬到卡片上。
+
+    **入口沒有變少，只是搬家**：這一條同時驗兩件事，因為只驗前半的話，
+    「拿掉了」跟「弄丟了」在測試上長得一樣。
+    """
+    from PySide6.QtWidgets import QToolButton
+
+    on_bar = {w.text() for a in window.toolbar.actions()
+              if (w := window.toolbar.widgetForAction(a)) is not None
+              and isinstance(w, QToolButton)}
     for src in scope.INPUT_SOURCES:
-        btn = getattr(window, "btn_open_%s" % src.key)
-        assert btn.text() == src.short
-        assert not btn.text().lower().startswith("open"), btn.text()
-        assert src.title.startswith("Open"), "完整的那一句仍然在表上（空白狀態用）"
-
-
-def test_the_attachment_keeps_its_full_name(window):
-    """它的名字被三張卡的訊息逐字引用 —— 縮寫等於讓那些話指向一顆不存在的鈕。"""
-    assert window.btn_open_gds.text() == "Open GDS export…"
+        assert src.title not in on_bar and src.short not in on_bar, src.title
+        # 沒有資料時，畫面最大的那一塊仍然一種 source 一列
+        assert window.empty_source_buttons[src.key].text() == src.title
+    assert "Open GDS export…" not in on_bar
 
 
 # --------------------------------------------------------------------------- #

@@ -456,7 +456,8 @@ def test_the_toolbar_is_grouped_not_one_long_row(window):
     """
     actions = window.toolbar.actions()
     seps = [i for i, a in enumerate(actions) if a.isSeparator()]
-    assert len(seps) >= 3, "至少要三條分隔線（四段）"
+    # F14-1 之後是三段（開檔｜輸出｜復原）—— 資料的入口搬到卡片上了。
+    assert len(seps) >= 2, "至少要兩條分隔線（三段）"
 
     def index_of(widget):
         for i, a in enumerate(actions):
@@ -465,7 +466,7 @@ def test_the_toolbar_is_grouped_not_one_long_row(window):
         raise AssertionError("not on the toolbar: %r" % widget)
 
     # 檔案那段在最前面，試跑在最後面
-    assert index_of(window.btn_open_klarf) < seps[0]
+    assert index_of(window.btn_open_recipe) < seps[0]
     # 試跑那一段在最後面。F7-23 起它是兩顆（主體 + ▾），而 F7-24 第二輪把那
     # 兩顆包進同一個容器 —— 中間只留 1px，讓它讀起來是「一件事的兩個半邊」
     # 而不是兩顆不相干的按鈕。所以工具列上的最後一格是那個容器。

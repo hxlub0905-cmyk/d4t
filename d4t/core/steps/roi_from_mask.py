@@ -184,10 +184,11 @@ class RoiFromMaskStep(Step):
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
         """還沒填名字 ≠ 參數填錯（空字串是合法的值）。"""
         if not _layers_of(params):
-            return ["This card has no layers yet. Use “Open GDS export…” — "
-                    "attaching the export fills in the layer numbers and the "
-                    "layout's own names for them; then rename them to "
-                    "something you will recognise."]
+            return ["This card has no layers yet. Use “Open GDS export…” on "
+                    "the “Load layout labels” card — attaching the export "
+                    "fills in the layer numbers and the layout's own names "
+                    "for them; then rename them to something you will "
+                    "recognise."]
         return []
 
     # ---- 執行 ---------------------------------------------------------------
@@ -200,7 +201,8 @@ class RoiFromMaskStep(Step):
         if not layers:
             raise StepError(
                 self.key,
-                "no layers are named yet. Use “Open GDS export…” in Studio - "
+                "no layers are named yet. Use “Open GDS export…” on the "
+                "“Load layout labels” card - "
                 "attaching the export fills in the layer numbers and names "
                 "from it. On the command line, pass --gds <export folder>.")
 

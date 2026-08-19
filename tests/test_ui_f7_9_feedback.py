@@ -607,13 +607,19 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
 
     studio_src = (Path(__file__).resolve().parent.parent
                   / "d4t" / "ui" / "studio.py").read_text(encoding="utf-8")
+    # **第三種形狀：另一張卡的名字**（F14-1）。入口從工具列搬到卡片上之後，
+    # 「去哪裡做那件事」的答案是一張卡 —— 而卡名是使用者找得到的東西
+    # （卡片庫裡有、畫布上也有）。它跟前兩種一樣要驗：引的必須是**真的**
+    # 有那張卡，不然「指向一個東西」又退化成「寫一句看起來像樣的話」。
+    card_labels = {str(c.label) for c in list_steps()}
     for key, details in needs_setup.items():
         labels = {str(p.get("label") or p["name"])
                   for p in get_step(key).describe()["params"]}
         for detail in details:
             quoted = _re.findall(r"“([^”]+)”", detail)
             real = [q for q in quoted
-                    if q in labels or ('"%s"' % q) in studio_src]
+                    if q in labels or q in card_labels
+                    or ('"%s"' % q) in studio_src]
             assert ("…" in detail or "..." in detail) or real, (
                 "%s 說它還沒設定完，但沒有指向任何一個按得到／填得到的東西"
                 "（要嘛一顆 `…` 結尾的鈕，要嘛“引號”起來的欄位名）：%s"

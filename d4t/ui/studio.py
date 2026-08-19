@@ -571,38 +571,20 @@ class StudioWindow(QMainWindow):
         self.toolbar = bar
         self.addToolBar(bar)
 
-        # **三顆 Open 與那顆附加檔，都是從 `scope` 的那一張表建出來的**
-        # （F11 Input-5）。以前它們是三段各自寫死的文字，而空白狀態上還有第四份
-        # 抄本 —— 於是打開資料夾那條路在最大的那一塊畫面上根本沒被提到。
-        # 現在入口只有一份定義，畫面上的每一處都從它長出來。
-        # 三顆 source 共用一個動詞（F13-2）：以前它們是 `Open KLARF…` /
-        # `Open stack…` / `Open folder…` —— 三個「Open」佔掉的寬度比它給的資訊
-        # 多，而工具列上第一眼要讀的是**名詞**。動詞提出來當一個小標題，
-        # 三顆鈕只留名詞。空白狀態仍然用完整的 `title`（那是第一次找路的地方）。
-        lbl_open = QLabel("Open", self)
-        lbl_open.setObjectName("toolbarGroup")
-        self.lbl_open_group = lbl_open
-        for src in scope.INPUT_SOURCES:
-            tip = src.what
-            if not src.has_klarf:
-                tip += ("  There is no KLARF here, and no KLARF means no "
-                        "coordinates and no write-back - CSV and Excel "
-                        "reports still work.")
-            btn = self._tool_button(src.short or src.title, tip,
-                                    getattr(self, "_on_open_%s" % src.key),
-                                    icon=src.icon)
-            setattr(self, "btn_open_%s" % src.key, btn)
-        # 附加檔的入口（F11 Region-3）。它**不是第五種 source** —— 資料集已經
-        # 載好了，這一顆是往每一顆 defect 上再掛一個檔案。所以它自成一段、而且
-        # 沒有資料集時是灰的（按下去也沒有意義）。
-        for att in scope.ATTACHMENTS:
-            btn = self._tool_button(
-                att.short or att.title, "%s  %s" % (att.what, att.needs),
-                getattr(self, "_on_open_%s" % att.key), icon=att.icon)
-            btn.setEnabled(False)
-            setattr(self, "btn_open_%s" % att.key, btn)
+        # **資料的入口不在工具列上**（F14-1，2026-08-19 使用者定調：
+        # 「工具列拿掉吧（會混淆）」）。
+        #
+        # 它現在長在**讀那份資料的那張卡上**（`ParamForm.set_source_action`）。
+        # 理由跟這幾輪一直在講的是同一條：以前檔案在工具列上選，而畫布上那張
+        # Load 卡完全不會說它讀的是哪個檔案 —— 同一件事兩個地方，而畫布是說謊
+        # 的那一個。之後一份 recipe 要掛好幾個 source 的時候，入口也已經在對的
+        # 地方了。
+        #
+        # **入口沒有變少，只是搬家**：畫面最大的那一塊（沒有資料時的空白狀態）
+        # 仍然一種 source 一列（`empty_source_buttons`，從同一張 `INPUT_SOURCES`
+        # 長出來），而那是第一次進來的人真的會看的地方。
         self.btn_open_recipe = self._tool_button(
-            "Recipe…", "Load a recipe JSON", self._on_open_recipe,
+            "Open recipe…", "Load a recipe JSON", self._on_open_recipe,
             icon="document")
         self.btn_examples = self._tool_button(
             "Templates…",
@@ -644,16 +626,7 @@ class StudioWindow(QMainWindow):
         self.btn_theme.setProperty("variant", "ghost")
 
         # 一段 = 一種事情；段與段之間一條分隔線。
-        sources = tuple(getattr(self, "btn_open_%s" % s.key)
-                        for s in scope.INPUT_SOURCES)
-        attachments = tuple(getattr(self, "btn_open_%s" % a.key)
-                            for a in scope.ATTACHMENTS)
-        # 「Open」那一段涵蓋**四顆**：三種資料 + recipe。它們回答的是同一個
-        # 問題（「從哪裡把東西讀進來」），所以共用一個動詞。GDS 匯出自成一段，
-        # 因為它問的是別的事（往**已經載好的** lot 上再掛一個檔案）。
-        bar.addWidget(lbl_open)
-        for group in (sources + (self.btn_open_recipe,),
-                      attachments,
+        for group in ((self.btn_open_recipe,),
                       (self.btn_examples, self.btn_export),
                       (self.btn_undo, self.btn_redo)):
             for b in group:
@@ -775,16 +748,17 @@ class StudioWindow(QMainWindow):
         # 這幾顆的 tooltip（「還沒有東西可以存」之類的原因），設一次的話第一次
         # refresh 就被蓋掉了。所以改成**設 tooltip 的那個動作自己會補上快捷鍵**。
         self._tip_keys = {
-            id(self.btn_open_klarf): "Ctrl+O",
             id(self.btn_open_recipe): "Ctrl+Shift+O",
             id(self.btn_trial): "Ctrl+R",
+            # F14-1：`Ctrl+O` 的鈕搬到空白狀態與入口卡上了（工具列那幾顆
+            # 拿掉了），而快捷鍵一個字都沒變 —— 它要在**還看得到的**那顆鈕上
+            # 講出來，不然它就只活在原始碼裡。
             id(self.btn_empty_open): "Ctrl+O",
             # F7-22：這兩顆這一輪才長出來，快捷鍵 F7-16 就有了。
             id(self.btn_undo): "Ctrl+Z",
             id(self.btn_redo): "Ctrl+Shift+Z",
         }
-        for w in (self.btn_open_klarf, self.btn_open_recipe,
-                  self.btn_trial, self.btn_empty_open,
+        for w in (self.btn_open_recipe, self.btn_trial, self.btn_empty_open,
                   self.btn_undo, self.btn_redo):
             self._set_tip(w, w.toolTip())
 
@@ -1339,6 +1313,7 @@ class StudioWindow(QMainWindow):
         # 在這裡再接一次會變成按一下開兩個檔案對話框。
         self.btn_empty_sample.clicked.connect(self._on_demo_requested)
         self.param_form.action_requested.connect(self._on_param_action)
+        self.param_form.source_requested.connect(self._on_source_requested)
         self.stream_combo.currentTextChanged.connect(self._on_stream_changed)
         self.stream_combo_b.currentTextChanged.connect(self._on_stream_b_changed)
         self.compare_check.toggled.connect(self.set_compare)
@@ -1528,6 +1503,27 @@ class StudioWindow(QMainWindow):
             if has_results
             else "No results yet — run a trial first.")
 
+    def _card_summary_parts(self, node: Any, reads, writes, regions_out,
+                            region_inputs) -> List[str]:
+        """畫布上第三行的各項。**入口卡的第一項是它讀的那份資料**（F14-1）。
+
+        以前那張卡上完全看不出讀的是哪個檔案 —— 檔案在工具列上選，而畫布上
+        那張 Load 卡只說得出「load · test ref」。入口搬到卡片上之後，
+        畫布也要跟著說得出來，否則搬家只搬了一半。
+        """
+        parts = self._node_summary_parts(
+            node, shown=(list(reads) + list(writes) + list(regions_out)
+                         + [d["stream"] for d in region_inputs]))
+        try:
+            is_source = get_step(node.step).is_source()
+        except KeyError:                       # pragma: no cover
+            is_source = False
+        if is_source and node.step not in self._ATTACHMENT_CARDS:
+            name = str(getattr(self, "dataset_name", "") or "")
+            if name:
+                parts.insert(0, name)
+        return parts
+
     def _node_summary_parts(self, node: Any,
                             shown: Optional[Sequence[str]] = None) -> List[str]:
         """節點第三行的各項（`_node_summary` 的 list 版；畫布用這個）。
@@ -1712,9 +1708,9 @@ class StudioWindow(QMainWindow):
                                  + [d["stream"] for d in region_inputs])),
                 # 畫布照**寬度**決定塞得下幾項（放不下的收成 `+N`），所以給它
                 # list；`summary` 那個字串留著給狀態列與測試讀。
-                "summary_parts": self._node_summary_parts(
-                    node, shown=(list(reads) + list(writes) + list(regions_out)
-                                 + [d["stream"] for d in region_inputs])),
+                "summary_parts": self._card_summary_parts(node, reads, writes,
+                                                          regions_out,
+                                                          region_inputs),
                 # 畫布的輸出埠吃這個（含原樣送出的輸入）；副標仍然只印
                 # 「這張卡真的產出什麼」，不然每張卡的副標都會變成一長串。
                 "writes": outs,
@@ -2482,6 +2478,7 @@ class StudioWindow(QMainWindow):
         self.param_form.set_step(
             describe, node.params, streams,
             self.model.available_regions(before_node=node_id))
+        self._sync_source_action(node)
         self.stack.setCurrentWidget(self.param_form)
         self._sync_params_pane()
         self._refresh_region_button()
@@ -2490,6 +2487,88 @@ class StudioWindow(QMainWindow):
         self._refresh_kernel_hint()            # 核心大小畫在影像上（F11 UI-A）
         self._schedule_preview()
         return True
+
+    # ---- 入口卡的「資料從哪來」（F14-1）------------------------------------
+    #: 附加檔那張卡（`load_sidecar`）→ 它要開哪一個 `scope.ATTACHMENTS`。
+    _ATTACHMENT_CARDS = {"load_sidecar": "gds"}
+
+    #: 資料那幾張卡（`load_patch` / `load_single`）的鈕上寫什麼。
+    #: **它不是某一種 source 的名字** —— 一份 KLARF 是 patch 還是一顆一張由檔案
+    #: 決定，所以這顆鈕開的是一張選單（`scope.INPUT_SOURCES` 那三條路）。
+    DATA_SOURCE_LABEL = "Open data…"
+
+    def _source_action_for(self, node: Any) -> Tuple[str, str, str]:
+        """這張卡的「資料從哪來」那一排：``(鈕上的字, 現況, tooltip)``。
+
+        不是入口卡就回三個空字串（`ParamForm` 看到空的就不顯示那一排）。
+        判準是 `Step.is_source()`（**沒有影像輸入的卡**）—— 不是一張寫死的
+        名單，所以下一張入口卡不必記得回來註冊。
+        """
+        try:
+            step_cls = get_step(node.step)
+        except KeyError:                       # pragma: no cover
+            return "", "", ""
+        att_key = self._ATTACHMENT_CARDS.get(node.step)
+        if att_key:
+            att = next((a for a in scope.ATTACHMENTS if a.key == att_key), None)
+            if att is None:                    # pragma: no cover — 表被改過
+                return "", "", ""
+            if self.dataset is None:
+                note = att.needs
+            else:
+                n = sum(1 for it in getattr(self.dataset, "items", [])
+                        if getattr(it, "sidecars", None))
+                note = ("%d of %d defects have a label map"
+                        % (n, len(self.dataset.items)) if n
+                        else "No export attached to this lot yet")
+            return att.title, note, "%s  %s" % (att.what, att.needs)
+        if not step_cls.is_source():
+            return "", "", ""
+        return (self.DATA_SOURCE_LABEL, self._dataset_note(),
+                "Choose the images this pipeline runs on")
+
+    def _dataset_note(self) -> str:
+        """現在載的是哪一份（鈕只說得出「可以換一份」）。"""
+        ds = self.dataset
+        if ds is None:
+            return "No data loaded yet"
+        name = str(getattr(self, "dataset_name", "") or "")
+        no_klarf = getattr(ds, "klarf", None) is None
+        return "%s%s · %d defects%s" % (
+            (name + " · ") if name else "", getattr(ds, "kind", "?"),
+            len(getattr(ds, "items", []) or []),
+            " · no KLARF" if no_klarf else "")
+
+    def _sync_source_action(self, node: Any) -> None:
+        self.param_form.set_source_action(*self._source_action_for(node))
+
+    def _on_source_requested(self) -> None:
+        """入口卡上那顆鈕：附加檔直接開，資料那幾張開一張選單。
+
+        **選單的每一列都是 `scope.INPUT_SOURCES` 的一列** —— 那張表仍然是入口
+        的唯一定義（F11 Input-5），這一輪只是換了它長在哪裡。
+        """
+        nid = self.selected_node
+        node = self.model.nodes.get(nid) if nid else None
+        if node is None:
+            return
+        att_key = self._ATTACHMENT_CARDS.get(node.step)
+        if att_key:
+            getattr(self, "_on_open_%s" % att_key)()
+            return
+        menu = QMenu(self)
+        for src in scope.INPUT_SOURCES:
+            act = QAction(src.title, menu)
+            tip = src.what
+            if not src.has_klarf:
+                tip += ("  There is no KLARF here, and no KLARF means no "
+                        "coordinates and no write-back - CSV and Excel "
+                        "reports still work.")
+            act.setToolTip(tip)
+            act.triggered.connect(getattr(self, "_on_open_%s" % src.key))
+            menu.addAction(act)
+        btn = self.param_form.source_button()
+        menu.exec(btn.mapToGlobal(QPoint(0, btn.height())))
 
     # ---- 核心大小畫在影像上（F11 Enhance-UI-A）-----------------------------
     def _kernel_extent(self) -> Tuple[Optional[float], str]:
@@ -2822,6 +2901,7 @@ class StudioWindow(QMainWindow):
         if not os.path.isfile(path):
             self._status("File not found: %s" % path)
             return False
+        self._pending_dataset_name = os.path.basename(path)
         if sync:
             try:
                 ds = DatasetLoadWorker.run_sync(path, tiff)
@@ -2850,6 +2930,7 @@ class StudioWindow(QMainWindow):
         if not os.path.isfile(path):
             self._status("File not found: %s" % path)
             return False
+        self._pending_dataset_name = os.path.basename(path)
         if sync:
             try:
                 ds = DatasetLoadWorker.run_sync_stack(path, n)
@@ -2876,6 +2957,7 @@ class StudioWindow(QMainWindow):
         if not os.path.isdir(d):
             self._status("Not a folder: %s" % d)
             return False
+        self._pending_dataset_name = os.path.basename(d.rstrip("/\\"))
         if sync:
             try:
                 ds = DatasetLoadWorker.run_sync_folder(d)
@@ -2901,8 +2983,9 @@ class StudioWindow(QMainWindow):
             return False
 
         self.dataset = dataset
-        if hasattr(self, "btn_open_gds"):
-            self.btn_open_gds.setEnabled(dataset is not None)
+        # 入口卡上要印出**現在載的是哪一份**（F14-1）。名字在請求的那一刻就
+        # 知道了，但要等載成功才採用 —— 開錯一個檔不會讓卡片上的名字先變。
+        self.dataset_name = str(getattr(self, "_pending_dataset_name", "") or "")
         items = list(getattr(dataset, "items", []) or [])
         self.defect_index = 0
         # 試跑筆數跟著資料集走：對一份 24 顆的 lot 顯示「First 200」只會讓人困惑
