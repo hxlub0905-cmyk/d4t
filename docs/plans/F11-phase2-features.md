@@ -2453,7 +2453,8 @@ rsem route 可以改走這一條，而「單張影像合成 ref」那個能力�
 
 | | |
 |---|---|
-| 現在有什麼 | `subtract`（Compare two streams）、`pattern_ref`（Reference from pattern）、`align`（5 backend，2026-08-18 起 `HIDDEN_STEPS` 收起來）|
+| 現在有什麼 | `subtract`（Compare two streams）。`align` 與 `pattern_ref` 都在 `HIDDEN_STEPS` 裡（引擎照認、舊 recipe 照跑）|
+| `pattern_ref` 為什麼收起來 | 它被期待的「單張影像找 ROI」**Template 已經在做**（§3.3.20）。剩下的唯一能力是「疊一張 ref 去相減」，而使用者的 RSEM 路線用不到 ref。刪過一次、代價量過（§3.4.2），所以這次是收不是刪 |
 | 缺什麼 | ① **沒有 ref 的資料要跟什麼比**（§3.1.4 的三個候選）；② GLAS 的 `gray` 當 ref（die-to-database）；③ 對位可以**吃 GLAS 已經算好的 offset**（省一次對位，而且那是對 layout 對的，比對 ref 準）|
 
 #### 3.4.1 這一段到底裝什麼（2026-08-18，使用者問「Compare 這個 你覺得要放什麼卡片比較合理？」）

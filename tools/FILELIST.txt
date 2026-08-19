@@ -3,9 +3,9 @@
 f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
 3677f25b67728f351bfe66dbf696dbd1cefab249 AGENTS.md
-4a3a3e3e6cf8cae572f26f1f55246b4a82a132c9 CLAUDE.md
+933fe4d22e078b20deb85de6c439cc155b50ddb8 CLAUDE.md
 87c3cb2a07ed7a97b98ec30aa139b3dd2f03ff19 README.md
-3e76ad9843ffd241d8d8f2a52df86c890d1f8d3f SESSION_LOG.md
+ba4076f4e0e99af6b1095d93b31b14eae5a04f87 SESSION_LOG.md
 650a5d7c8bc6db42eed4054174823bfcfceb7eae adept/__init__.py
 60b80dcea29bcf34402d267038256d161b70b0ed adept/__main__.py
 8a51dfe499b3a9d81434c8a202f2d17c24b71c74 adept/core/__init__.py
@@ -80,7 +80,7 @@ b352768ddbf53d53f9cfdcaec2604ad3b22f6ddb adept/ui/cell_canvas.py
 a9c45a4e6a2e4e2e9ff46aac6f1caccf3212bcc2 adept/ui/inspectors.py
 56c08b0d360f922ec4c0d829c96d25426db86af4 adept/ui/region_check.py
 043a9240742914759667fd4bb01beafd0241ed17 adept/ui/results.py
-e2f65a8ed800ffd13dbac0f6d23cd1554f222a75 adept/ui/scope.py
+7b4c7dbf0f3b5728520c17ee2d827ed01a2a2c4f adept/ui/scope.py
 50774198bc652e5469d6ceaf7ffa8f01a88b07a1 adept/ui/studio.py
 c59f4205518d10bb58353fbb630401175c738888 adept/ui/template_dialog.py
 06608777ade523d9c82ebdae0109a642cc6dfd55 adept/ui/theme.py
@@ -96,10 +96,10 @@ cf13b359e8b0cbfa4a7ad2318daf00617cb9a9fb docs/ARCHITECTURE.md
 b258ee9ccb0e12fcdf10e2dcab584fddabe10918 docs/NO-GIT-SETUP.md
 b44fd20e599353902ae98f1edc0a1323134d2715 docs/OFFLINE-INSTALL.md
 c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
-4051d93d4fa3ad3cf9ed76514f5b8ab4c96f13f7 docs/ROADMAP.md
+87cab75da7ebc6a677ba04dd56bb3a790bff70a2 docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
-ec2476124705eba719b6dde6cdb1427c6b8fdc43 docs/plans/F11-phase2-features.md
+1604dc5c370a62127eca4de34b5b27f9208bf4b3 docs/plans/F11-phase2-features.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
 fdf5dba17526e86ea0990c7853ef652874082324 fab_probe/probe_klarf.py
@@ -210,7 +210,7 @@ e0d054e4b8a2bfab33782abad30a0b394335badd tests/test_ui_f9_9_two_lines_side_by_si
 90ebc45e44ce408457f916c895ed1ad081a08d63 tests/test_ui_gallery.py
 37c49c1d40861f55e5fccc996191907a2255f950 tests/test_ui_gds_panel.py
 c7213491059c83d4ea3f182774342d2485fbe0d7 tests/test_ui_ground_truth.py
-4186f99492d48a415f9fb84011761b744a48efe9 tests/test_ui_input_kinds.py
+db27d57d73efeb80c02a247f39adf3fae1212044 tests/test_ui_input_kinds.py
 19fbff5ae67ca09da5b29b1428ef5e9a2583163b tests/test_ui_results.py
 b33374b590ea9f5d64a90354ffaa6b8a0d1016a2 tests/test_ui_studio_m5.py
 6202efbdee258f65f1a33d480ba2ccd0510b7c38 tests/test_ui_studio_smoke.py

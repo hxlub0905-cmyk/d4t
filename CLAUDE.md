@@ -246,6 +246,12 @@ ATTACHMENTS = (...)              # 掛在已載入 lot 上的附加檔（GLAS �
 | 「不需要這功能」（`cell_period`）| **刪掉**：`REGISTRY` 裡沒有，舊 recipe 開起來是一條 `unknown-step` | 依賴它的 fixture / 黃金值要一起處理 |
 | 「拿回來 不過要改名字」（`golden_cell` → `pattern_ref`）| **改名**：要一道遷移 | key **加上**它寫出來的 feature 名（那些會被打進分數表達式）—— 只換一半等於沒換 |
 
+同一張卡（`pattern_ref`）在同一天走完了**刪掉 → 量代價 → 要回來 → 改名 → 收起來**
+五步。最後一步的理由是它沒事做了：它被期待的「單張影像找 ROI」那件事
+**Template 已經在做**（量過，見 `docs/plans/F11-phase2-features.md` §3.3.20）。
+**這一次是收起來不是刪掉** —— 它刪過一次、代價量過（rsem route 24/24 → 12/24），
+而且 fixture 的 rsem route 正用著它。
+
 **不確定的時候先收起來**：成本是零，回復的成本是拿掉一個字串。
 
 > ⚠ **`adept/core/algo/period.py` 與 `algo/golden.py` 都不要刪。**

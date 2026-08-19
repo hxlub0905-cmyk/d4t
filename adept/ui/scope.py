@@ -90,7 +90,21 @@ SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder")
 #: 黃金值要重新定錨，而使用者說的是「之後真需要我再回來」。`HIDDEN_STEPS` 只過濾
 #: **卡片庫**：已經在用它的 recipe 照跑、CLI 照跑、黃金值一個字不動。
 #: 要回復就是把這個字串拿掉（F7-1 驗證過的那個判斷）。
-HIDDEN_STEPS: Sequence[str] = ("align",)
+#:
+#: 2026-08-18（F11 Region-5 收尾）：**`pattern_ref` 也收起來了。** 使用者的話是
+#: 「請拿掉吧」，而那句話的上文是我提的「收起來只是加一個字串」。
+#:
+#: 為什麼它沒事做了：它原本被期待成「單張影像找 ROI 的第三種方法」，但那件事
+#: **Template 已經在做**（量過：1000×1000 → 625 個框，見計畫書 §3.3.20）。
+#: 它剩下的唯一能力是「從重複結構疊一張 ref 出來去相減」，而使用者現在的 RSEM
+#: 路線是「Region 段圈區域 → Compare regions 比層／比份」，用不到 ref。
+#:
+#: **為什麼是收起來不是刪掉**：這一張刪過一次，量出代價（rsem route 24/24 →
+#: 12/24）之後又被要回來（見計畫書 §3.4.2）。而且
+#: `tests/fixtures/recipes/dual_route_basic.json` 的 rsem route 正用著它，撐著
+#: 一組黃金值 —— 刪掉 = 那份 recipe 開不起來 = 黃金值要重新定錨。
+#: `HIDDEN_STEPS` 只過濾**卡片庫**：那份 recipe 照跑、CLI 照跑、黃金值一個字不動。
+HIDDEN_STEPS: Sequence[str] = ("align", "pattern_ref")
 
 #: 沒有資料集時 ``RecipeModel`` 用的 route 名稱。
 DEFAULT_KIND: str = SUPPORTED_KINDS[0]

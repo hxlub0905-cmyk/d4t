@@ -15,9 +15,51 @@
 
 ---
 
-## Phase 2：單張大圖那條路做在 Template 裡（2026-08-18，第十四輪）
+## Phase 2：Region 段收斂（2026-08-18，第十五輪 —— 這一輪合併進 main）
 
 ### ⏩ 交接：下一個 session 從這裡開始
+
+**Region 段收斂了。** 四種找 ROI 的方法都在，而且輸出契約一致：
+
+| 卡 | 靠什麼找 | 什麼時候用 |
+|---|---|---|
+| **Profile**（`roi_cross`）| 投影曲線上的條紋 | patch 上看得到地標 |
+| **Template**（`roi_template`）| 在一個 golden cell 上畫好的區域 | 兩種都行：**patch**（cell 比它大，落一份）與**單張大圖**（cell 比它小，每一份都畫）|
+| **GDS layers**（`roi_from_mask`）| GLAS 匯出的 label map | 非週期性的版圖，而且拿得到 GDS |
+| **Mask from regions**（`roi_mask`）| 上面三張的結果 → 一條 0/255 影像流 | 要把區域交給影像段（`normalize` 的 `Use only`）|
+
+每一張對它吐的**每一個**區域都寫同一組五個：`present` / `boxes` / `area_px` /
+`clipped` / `edge_dropped`（`_util.REGION_FACTS`）。下游拿一個區域名就問得出五件
+事，不必知道是誰找的。
+
+**接下來照 `docs/ROADMAP.md` 走。** Region 段剩的尾巴只有「模板過期健檢」。
+真實 GDS 匯出的所有數字都量過了（399 顆、0 fail，見第十一輪），一個參數都不用調。
+
+### 這一輪做了什麼
+
+**`pattern_ref`（Reference from pattern）收進 `HIDDEN_STEPS`。** 使用者：「請拿掉
+吧」。它**沒事做了**，不是它壞了 —— 它被期待的「單張影像找 ROI 的第三種方法」，
+那件事上一輪量出來 **Template 已經在做**；剩下的唯一能力是「疊一張 ref 去相減」，
+而現在的 RSEM 路線是「Region 段圈區域 → Compare regions」，用不到 ref。
+
+**是收起來不是刪掉**，理由是硬的：這張卡刪過一次、代價量過（rsem route
+24/24 → 12/24）之後又被要回來；而且 `tests/fixtures/recipes/dual_route_basic.json`
+的 rsem route 正用著它、撐著一組黃金值。`HIDDEN_STEPS` 只過濾**卡片庫** ——
+那份 recipe 照跑、CLI 照跑、黃金值一個字不動，而
+`test_pattern_ref_is_hidden_but_still_runs` 逐項驗那四件事。
+
+要它回來：把 `adept/ui/scope.py` 的 `HIDDEN_STEPS` 裡那個字串拿掉。
+
+順手整理了 `CLAUDE.md` §5（那張「收起來／刪掉／改名」的表補上這一張走完五步的
+結局）、`docs/ROADMAP.md`（Region-4／Region-5 與收斂）、計畫書 §3.4 的現況表。
+
+核心 1421 passed、UI 40 檔逐檔全綠、三組黃金值逐項相同。
+
+---
+
+## Phase 2：單張大圖那條路做在 Template 裡（2026-08-18，第十四輪）
+
+### 那一輪結束時的位置（交接已由上面那一段接手）
 
 Region 段四種找 ROI 的方法現在**都到位了**，而且輸出契約一致（上一輪的
 `REGION_FACTS`）。剩下的懸而未決只有一件：**`pattern_ref`（Reference from

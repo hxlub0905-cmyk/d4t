@@ -81,11 +81,12 @@ def test_all_four_kinds_are_supported():
 def test_the_single_image_cards_are_in_the_library_now(window):
     """單張那條路要有自己的載入卡與量測卡。
 
-    2026-08-18：這一條原本點的是 `golden_cell` / `cell_period`。那兩張的下場
-    不一樣（見 `test_the_golden_cell_cards_are_gone_for_good`），所以這裡改成
-    點單張那條路現在真正用得到的四張：載入、疊 ref、相減、層對層比。
+    2026-08-18：這一條原本點的是 `golden_cell` / `cell_period`，後來改點
+    `pattern_ref`。那一張當天傍晚也收進 `HIDDEN_STEPS` 了（見
+    `test_pattern_ref_is_hidden_but_still_runs`），所以現在點的是單張那條路
+    **真正在用**的四張：載入、找區域（大圖上鋪 ROI 也是它）、比兩塊區域、相減。
     """
-    for key in ("load_single", "pattern_ref", "subtract", "roi_compare"):
+    for key in ("load_single", "roi_template", "roi_compare", "subtract"):
         assert window.library.entry(key) is not None, key
     # `align` 曾經在這一列上。2026-08-18 使用者把它收起來了 ——
     # 見 test_align_is_hidden_but_still_runs。
@@ -150,6 +151,35 @@ def test_align_is_hidden_but_still_runs(window):
     assert window.library.entry("align") is None      # 卡片庫看不到
     assert get_step("align") is not None              # 但引擎照樣認得
     assert window.model.add_step("align")             # 舊 recipe 也放得進來
+
+
+def test_pattern_ref_is_hidden_but_still_runs(window):
+    """使用者 2026-08-18：「請拿掉吧」——「收起來只是加一個字串」的那個拿掉。
+
+    **它沒事做了**，而不是它壞了：它被期待的「單張影像找 ROI 的第三種方法」，
+    那件事 **Template 已經在做**（量過：1000×1000 → 625 個框，見
+    `tests/test_roi_template_full_image.py`）。剩下的唯一能力是「疊一張 ref 去
+    相減」，而使用者現在的 RSEM 路線是「Region 段圈區域 → Compare regions」，
+    用不到 ref。
+
+    **這一次是收起來不是刪掉**，而理由是硬的：這張卡刪過一次、代價量過
+    （rsem route 24/24 → 12/24）之後又被要回來；而且
+    `tests/fixtures/recipes/dual_route_basic.json` 的 rsem route 正用著它，
+    撐著一組黃金值 —— 刪掉 = 那份 recipe 開不起來 = 黃金值要重新定錨。
+    """
+    from adept.core.pipeline import Recipe, get_step, validate
+
+    assert "pattern_ref" in scope_mod.HIDDEN_STEPS
+    assert window.library.entry("pattern_ref") is None   # 卡片庫看不到
+    assert get_step("pattern_ref") is not None           # 引擎照樣認得
+
+    # 而那份 fixture 照樣開得起來、照樣沒有錯 —— 那才是「收起來」的定義。
+    import os
+    here = os.path.dirname(os.path.abspath(__file__))
+    recipe = Recipe.load(os.path.join(here, "fixtures", "recipes",
+                                      "dual_route_basic.json"))
+    assert any(n.step == "pattern_ref" for n in recipe.nodes.values())
+    assert not [i for i in validate(recipe, kind="rsem") if i.level == "error"]
 
 
 def test_the_hide_a_card_mechanism_still_works(window):
