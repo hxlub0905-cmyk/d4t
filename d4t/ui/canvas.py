@@ -84,8 +84,21 @@ _ICON = 18.0
 _TILE = 32.0
 
 #: 節點卡尺寸與排版間距（畫布座標）。
-NODE_W, NODE_H = 190.0, 56.0
-COL_GAP, ROW_GAP = 96.0, 26.0
+#:
+#: F13-⑤（2026-08-19）把卡片放大了一號，兩個都是量出來的：
+#:
+#: * **寬 190 → 204**：標題可用的寬度是 ``NODE_W`` 減掉左邊那塊圖示磚（40）
+#:   與右邊的邊界（8）—— 190 只剩 142px，而 ``Compare two streams`` 這種
+#:   10pt 粗體剛好卡在邊上，一縮放就被切成 ``Compare two strea…``。
+#:   **只加 14 不是 20**：卡片變寬會讓整排的 `fit` 縮得更小，而那正是
+#:   F13-1 剛買回來的東西。14 讓標題有餘裕，又留得住 70% 那條線。
+#: * **高 56 → 64**：卡上有三行字（標題／副標／設定摘要），56 的時候第三行
+#:   離底只有 7px，讀起來像被壓在框裡。
+#: * **欄距 96 → 116**：埠的標籤畫在卡片**外面**，左右各 ``_PORT_LABEL_W``
+#:   （52）。96 的欄距塞不下兩個 52 —— 上游的輸出名與下游的輸入名會疊在
+#:   同一塊空白上（實測 `layout_label` 與 `single` 疊在一起）。
+NODE_W, NODE_H = 204.0, 64.0
+COL_GAP, ROW_GAP = 116.0, 26.0
 _PORT_R = 5.0
 #: 埠的**命中**半徑（比畫出來的圓點大 —— 5px 的點用滑鼠瞄很痛苦）。
 #: ``out_port_at`` 與 ``_NodeItem.shape`` 都讀它：命中範圍只能有一個定義，
@@ -189,17 +202,20 @@ def layout_columns(node_ids: Sequence[str],
     return out
 
 
-def _draw_elided(p: QPainter, rect: QRectF, text: str) -> None:
+def _draw_elided(p: QPainter, rect: QRectF, text: str,
+                 align=Qt.AlignLeft) -> None:
     """畫一行文字，太長就切成 ``像這樣…``。
 
     直接 ``drawText`` 到一個放不下的矩形，Qt 會**硬切在字的中間**，看起來像
     畫面壞掉；``參數摘要=diff · metri`` 這種殘句還會讓人以為值真的是那樣。
+    靠右對齊的更糟 —— 它從**左邊**切，於是 ``Borrow range from`` 變成
+    ``nge from``，讀起來像另一個欄位的名字（F13-⑤ 量到的）。
     """
     s = str(text)
     fm = p.fontMetrics()
     if fm.horizontalAdvance(s) > rect.width():
         s = fm.elidedText(s, Qt.ElideRight, int(rect.width()))
-    p.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft, s)
+    p.drawText(rect, Qt.AlignVCenter | align, s)
 
 
 #: 參數摘要各項之間的分隔（Studio 組字串時用的是同一個）。
@@ -661,16 +677,16 @@ class _NodeItem(QGraphicsItem):
         f.setBold(True)
         f.setPointSizeF(max(7.0, f.pointSizeF()))
         p.setFont(f)
-        _draw_elided(p, QRectF(text_x, 9, text_w, 15),
+        _draw_elided(p, QRectF(text_x, 11, text_w, 16),
                      str(self.info.get("label", self.node_id)))
         f.setBold(False)
         f.setPointSizeF(max(6.0, f.pointSizeF() - 1.0))
         p.setFont(f)
         p.setPen(QColor(TOKENS["text_secondary"] if enabled else TOKENS["text_disabled"]))
-        _draw_elided(p, QRectF(text_x, 24, text_w, 13), self.subtitle())
+        _draw_elided(p, QRectF(text_x, 28, text_w, 14), self.subtitle())
         parts = self.summary_parts()
         if parts:
-            _draw_parts(p, QRectF(text_x, 36, text_w, 13), parts)
+            _draw_parts(p, QRectF(text_x, 43, text_w, 14), parts)
 
         # 連接埠（**本地座標** —— 見 out_anchors_local 的說明）。
         # 輸入是空心圈、輸出是實心點：一眼看得出線該從哪邊拉到哪邊。
@@ -691,10 +707,12 @@ class _NodeItem(QGraphicsItem):
                 continue
             p.setPen(QColor(TOKENS["text_secondary"] if kind != "region"
                             else region_color().name()))
-            p.drawText(
-                QRectF(anchor.x() - _PORT_LABEL_W - 4, anchor.y() - 7,
-                       _PORT_LABEL_W, 14),
-                Qt.AlignVCenter | Qt.AlignRight, text)
+            # **放不下就切在後面加省略號**（F13-⑤）。以前是直接 drawText 進一個
+            # 52px 的框，Qt 對靠右對齊的字是**從左邊硬切**的 —— `Borrow range
+            # from` 於是畫成 `nge from`，讀起來像另一個欄位的名字。
+            _draw_elided(p, QRectF(anchor.x() - _PORT_LABEL_W - 4,
+                                   anchor.y() - 7, _PORT_LABEL_W, 14),
+                         text, align=Qt.AlignRight)
 
         for spec, anchor in zip(self.out_specs(), self.out_anchors_local()):
             name, kind = spec["name"], spec["kind"]
@@ -706,8 +724,10 @@ class _NodeItem(QGraphicsItem):
             # 的 —— 而 Enhance 卡的 target / also apply 講的正是這些名字。
             p.setPen(QColor(region_color().name() if kind == "region"
                             else TOKENS["text_secondary"]))
-            p.drawText(QRectF(anchor.x() + 4, anchor.y() - 7, _PORT_LABEL_W - 10, 14),
-                       Qt.AlignVCenter | Qt.AlignLeft, name)
+            # 同左邊那一側：放不下要看得出來被切了（`layout_label` 以前畫成
+            # `layout_`，讀起來像一條真的叫那個名字的流）。
+            _draw_elided(p, QRectF(anchor.x() + 4, anchor.y() - 7,
+                                   _PORT_LABEL_W - 10, 14), name)
 
     def subtitle(self) -> str:
         """副標：**這張卡吃什麼、吐什麼**（F7-14）。
@@ -886,6 +906,24 @@ class _EdgeItem(QGraphicsItem):
         """
         return self.src.out_kind(self.port)
 
+    def line_color(self) -> QColor:
+        """這條線的顏色 —— **來源那張卡的階段色，但調淡一半**（F13-⑤）。
+
+        全部畫成灰的時候，一張擠了十條線的畫布上「這條是從哪裡出來的」只能
+        用眼睛沿著線走。給它來源的階段色就答得出來了，而顏色跟卡片左邊那塊
+        圖示磚是同一個 —— 不必再學一組意思。
+
+        **調淡一半**是重點：原色會讓畫布變成一團彩虹，而線是背景不是主角
+        （它們平常畫在卡片**底下**，見 `_Z_EDGE`）。混一半灰之後，同一條線
+        仍然分得出色系，但整張圖的重量還在卡片上。
+        """
+        base = QColor(TOKENS["canvas_edge"])
+        gid = str(self.src.info.get("group", "") or "")
+        if not gid:
+            return base
+        return QColor(theme.mix_hex(theme.group_hex(gid),
+                                    TOKENS["canvas_edge"], 0.5))
+
     # ---- 斷開鈕（F7-22）---------------------------------------------------
     #: 斷開鈕的命中半徑。畫出來的圓是 ``_CUT_R``，多給 2px 是因為使用者瞄的是
     #: 圓心不是圓周 —— 但 :meth:`shape` 必須用**同一個值**，見那裡的說明。
@@ -1008,7 +1046,7 @@ class _EdgeItem(QGraphicsItem):
         elif region:
             col = region_color()
         else:
-            col = QColor(TOKENS["canvas_edge"])
+            col = self.line_color()
         path = self.path()
         # 區域線畫**虛線**：它搬的不是像素，而使用者要在餘光裡就分得出這兩種
         # 線（它們接不到彼此）。顏色是 Region 段的階段色，跟卡片上那顆圖示磚

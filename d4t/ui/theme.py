@@ -309,7 +309,9 @@ _DARK: Dict[str, Any] = dict(_LIGHT, **{
 
     "image_backdrop": "#3f4247",     # 與 light 相同 —— 見上面的說明
     "canvas_bg": "#16181d",
-    "canvas_grid": "#2f3540",
+    # F13-⑤：點陣底是**對齊的參考**，而深色主題原本量到 1.44 的對比 ——
+    # 幾乎看不見，等於沒有參考。提到 ~1.9：看得見，又不會跟連線搶。
+    "canvas_grid": "#3f4653",
     "canvas_edge": "#5c6474",
     "canvas_edge_active": "#4b8bf5",
 })

@@ -238,8 +238,21 @@ def test_an_unwired_recipe_wraps_instead_of_running_off_the_screen(qapp):
     # 閱讀順序仍然是左到右、上到下
     assert pos["n0"] == (0, 0) and pos["n3"] == (3, 0) and pos["n4"] == (0, 1)
 
-    width = canvas_mod.WRAP * (canvas_mod.NODE_W + canvas_mod.COL_GAP)
+    # 「塞得進去」算的是 n 張卡 + **(n−1)** 個欄距 —— 欄距是欄與欄之間的，
+    # 最後一欄後面沒有。（以前這裡乘的是 n 個，於是 F13-⑤ 把卡片放大一號之後
+    # 它多算了 116px 而紅掉，但畫面其實是塞得下的。）
+    cols = max(c for c, _r in pos.values()) + 1
+    width = cols * canvas_mod.NODE_W + (cols - 1) * canvas_mod.COL_GAP
     assert width < 1200, "換行之後整張圖要塞得進一般的工作區寬度"
+
+    # F13-1 之後換行點是**跟著實際寬度走**的，所以這條不變量對每一種寬度都
+    # 要成立，不只對寫死的 WRAP。
+    for view_w in (400, 700, 1000, 1400):
+        n = canvas_mod.wrap_for_width(view_w)
+        need = n * canvas_mod.NODE_W + (n - 1) * canvas_mod.COL_GAP
+        assert need <= view_w * 1.2, (
+            "%dpx 寬的畫布排了 %d 欄（要 %dpx）—— 縮完會讀不出字"
+            % (view_w, n, need))
 
 
 # --------------------------------------------------------------------------- #

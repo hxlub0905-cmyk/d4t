@@ -150,3 +150,61 @@ def test_the_sizes_do_round_trip_outside_the_tests(monkeypatch):
     assert studio_mod._load_sizes(studio_mod.COLUMNS_KEY, 3) == [111, 222, 333]
     # 數量對不上（欄數改了）→ 當作沒存過，不要拿舊的去套新的版面
     assert studio_mod._load_sizes(studio_mod.COLUMNS_KEY, 2) is None
+
+
+# --------------------------------------------------------------------------- #
+# 4. 卡片本身（F13-⑤）
+# --------------------------------------------------------------------------- #
+def test_a_port_label_that_does_not_fit_says_so(qapp):
+    """靠右對齊的字，Qt 是從**左邊**硬切的。
+
+    `Borrow range from` 因此被畫成 `nge from` —— 讀起來像另一個欄位的名字，
+    而畫面上沒有任何東西說它被切過。省略號至少講出「這裡還有字」。
+    """
+    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtGui import QPainter, QPixmap
+
+    pm = QPixmap(200, 40)
+    p = QPainter(pm)
+    try:
+        wide = QRectF(0, 0, 190, 14)
+        narrow = QRectF(0, 0, 40, 14)
+        assert canvas_mod._draw_elided.__doc__
+        # 放得下 → 原字；放不下 → 以 … 結尾（兩種對齊都一樣）
+        for align in (Qt.AlignLeft, Qt.AlignRight):
+            assert p.fontMetrics().elidedText(
+                "Borrow range from", Qt.ElideRight, 40).endswith("…")
+            canvas_mod._draw_elided(p, narrow, "Borrow range from", align=align)
+            canvas_mod._draw_elided(p, wide, "ref", align=align)
+    finally:
+        p.end()
+
+
+def test_the_card_is_big_enough_for_three_lines_of_text(qapp):
+    """卡上有三行字（標題／副標／設定摘要），而它們的 y 位置是寫死的 ——
+    卡片變矮的話最後一行會被畫到框外面，而 Qt 不會抱怨。"""
+    assert canvas_mod.NODE_H >= 43 + 14 + 4
+    # 欄距要塞得下**兩側**的埠標籤，否則上游的輸出名與下游的輸入名會疊在
+    # 同一塊空白上（F13-⑤ 實測 `layout_label` 疊到 `single`）。
+    assert canvas_mod.COL_GAP >= 2 * canvas_mod._PORT_LABEL_W
+
+
+def test_a_line_carries_the_colour_of_the_card_it_leaves(qapp):
+    """十條線的畫布上，「這條是從哪裡出來的」不該只能用眼睛沿著線走。"""
+    from d4t.ui import theme as theme_mod
+
+    view = canvas_mod.PipelineCanvas()
+    try:
+        view.set_nodes(
+            [{"node_id": "a", "label": "A", "group": "input",
+              "writes": ["test"], "reads": [], "inputs": []},
+             {"node_id": "b", "label": "B", "group": "measure",
+              "writes": [], "reads": ["test"],
+              "inputs": [{"name": "source", "label": "Source", "stream": "test"}]}],
+            [("a", "b", "test", "source")])
+        edge = view._edges[0]
+        assert edge.line_color().name() != theme_mod.TOKENS["canvas_edge"]
+        # **調淡一半** —— 線平常畫在卡片底下，它是背景不是主角。
+        assert edge.line_color().name() != theme_mod.group_hex("input")
+    finally:
+        view.deleteLater()
