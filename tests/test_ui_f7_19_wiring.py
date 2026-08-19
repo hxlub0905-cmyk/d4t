@@ -472,6 +472,36 @@ def test_the_toolbar_is_grouped_not_one_long_row(window):
     assert index_of(window.btn_help) > index_of(window.btn_undo)
 
 
+def test_every_button_built_for_the_toolbar_is_actually_on_it(window):
+    """建了一顆鈕卻忘了 ``addWidget`` —— Qt **不會報錯**。
+
+    它變成主視窗的一個沒有版面的子 widget，於是被畫在 (0, 0)：工具列的左上角，
+    疊在第一顆鈕上面。實際發生過（2026-08-18，``Open GDS export…``）：畫面上
+    是兩段文字重疊成一團，而所有既有測試都是綠的 —— 沒有一條在問「這顆鈕在
+    工具列上嗎」，只問了它存不存在、文字對不對。
+
+    所以這條逐顆掃：``_build_toolbar`` 建出來的每一顆 ``btn_*``，要嘛在工具列
+    的 action 清單上，要嘛在工具列上某個容器裡（試跑那兩顆）。
+    """
+    from PySide6.QtWidgets import QToolButton
+
+    on_bar = set()
+    for a in window.toolbar.actions():
+        w = window.toolbar.widgetForAction(a)
+        if w is None:
+            continue
+        on_bar.add(id(w))
+        for child in w.findChildren(QToolButton):
+            on_bar.add(id(child))
+
+    orphans = [name for name in dir(window)
+               if name.startswith("btn_")
+               and isinstance(getattr(window, name, None), QToolButton)
+               and id(getattr(window, name)) not in on_bar]
+    assert not orphans, (
+        "工具列上建了鈕卻沒 addWidget —— 它會疊在左上角: %s" % sorted(orphans))
+
+
 def test_undo_has_a_button_not_only_a_shortcut(window):
     """F7-16 給了 Ctrl+Z，但工具列上沒有對應的鈕。
 

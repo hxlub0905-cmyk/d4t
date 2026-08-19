@@ -65,7 +65,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import theme
-from .theme import TOKENS
+from .theme import TOKENS, region_hex
 
 __all__ = [
     "ImageView",
@@ -116,9 +116,28 @@ GLYPH_ICONS = (
     "zoom_in", "zoom_out", "fit", "tidy", "up", "down", "close",
     # 工具列那五顆（F7-24）＋ 兩個沒有 KLARF 的入口（F11 Input-2／Input-3）
     "folder", "document", "save", "templates", "export", "stack",
-    "folder_open",
+    "folder_open", "layers",
     # 畫布彈出視窗（F8-UI D 案）
     "popout",
+    # 在 Golden Cell 上標區域的四支工具（F11 Region-1 第二輪）。名字說的是
+    # **這支工具怎麼產生框**，四個輪廓刻意各不相同 —— 它們並排在同一列上，
+    # 分不出來的話那一列等於四顆一樣的鈕。
+    "roi_drag", "roi_click", "roi_array", "roi_paint", "roi_cursor",
+    "trash",
+    # 對齊（F11 Region-1 第四輪）。六顆並排，所以**基準線的位置**就是它們唯一
+    # 的差別 —— 那條線畫粗、被對齊的方塊畫細，一眼看得出誰對到誰。
+    "align_left", "align_center", "align_right",
+    "align_top", "align_middle", "align_bottom",
+    # Profile 卡的三個下拉改成圖示（F11 Region-2）。每一個都是**一張小小的
+    # 版圖**：兩根直條紋 × 一條橫條紋，把那個選項會放框的地方點亮。使用者的話
+    # 是「能用圖就用圖」—— 而 `beside_vertical` 這種詞講的正好就是一個形狀。
+    "place_crossing", "place_beside_v", "place_beside_h",
+    "place_between_v", "place_between_h",
+    "side_both", "side_start", "side_end",
+    "fill_fill", "fill_skip", "fill_skip_clear",
+    # 「這張圖的圖案往哪個方向跑」（F11 Region-2c）—— 同一套小版圖，
+    # 亮的是**在看的那個方向**。
+    "dir_both", "dir_upright", "dir_flat",
 )
 
 
@@ -253,6 +272,96 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         p.drawLine(QPointF(ax1, ay1), QPointF(ax1, ay1 + head))
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
+    elif n.startswith(("place_", "side_", "fill_", "dir_")):
+        _draw_profile_glyph(p, n, w, h, color, pen)
+    elif n == "roi_cursor":
+        # 一支箭頭游標：**選**已經有的框（不是畫新的）。
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        p.drawPolygon(QPolygonF([
+            QPointF(m, m), QPointF(m, h - m * 1.2),
+            QPointF(m + w * 0.24, h - m * 2.2),
+            QPointF(m + w * 0.40, h - m * 0.4),
+            QPointF(m + w * 0.56, h - m * 0.9),
+            QPointF(m + w * 0.40, h * 0.58), QPointF(w - m * 1.4, h * 0.52)]))
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+    elif n == "trash":
+        # 垃圾桶：桶身 + 蓋子 + 提把。**不用 ✕** —— 這一列上 ✕ 是「關閉」。
+        p.drawLine(QPointF(m, h * 0.30), QPointF(w - m, h * 0.30))
+        p.drawLine(QPointF(w * 0.40, h * 0.30), QPointF(w * 0.40, h * 0.18))
+        p.drawLine(QPointF(w * 0.60, h * 0.30), QPointF(w * 0.60, h * 0.18))
+        p.drawLine(QPointF(w * 0.40, h * 0.18), QPointF(w * 0.60, h * 0.18))
+        p.drawLine(QPointF(m + w * 0.10, h * 0.30),
+                   QPointF(m + w * 0.16, h - m))
+        p.drawLine(QPointF(w - m - w * 0.10, h * 0.30),
+                   QPointF(w - m - w * 0.16, h - m))
+        p.drawLine(QPointF(m + w * 0.16, h - m), QPointF(w - m - w * 0.16, h - m))
+    elif n.startswith("align_"):
+        # 一條粗的基準線 + 兩個對到它的方塊。六顆的差別只有線在哪一邊。
+        side = n[len("align_"):]
+        vertical = side in ("left", "center", "right")
+        rule = QPen(QColor(color), max(1.6, size / 7.0))
+        rule.setCapStyle(Qt.RoundCap)
+        bars = ((w * 0.62, h * 0.20), (w * 0.38, h * 0.20))    # (長, 厚)
+        if vertical:
+            lx = {"left": m, "center": w / 2.0, "right": w - m}[side]
+            p.setPen(rule)
+            p.drawLine(QPointF(lx, m * 0.7), QPointF(lx, h - m * 0.7))
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(color))
+            for i, (blen, bthk) in enumerate(bars):
+                y0 = h * (0.30 if i == 0 else 0.58)
+                x0 = {"left": lx, "center": lx - blen / 2.0,
+                      "right": lx - blen}[side]
+                p.drawRect(QRectF(x0, y0, blen, bthk))
+        else:
+            ly = {"top": m, "middle": h / 2.0, "bottom": h - m}[side]
+            p.setPen(rule)
+            p.drawLine(QPointF(m * 0.7, ly), QPointF(w - m * 0.7, ly))
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(color))
+            for i, (blen, bthk) in enumerate(bars):
+                x0 = w * (0.30 if i == 0 else 0.58)
+                y0 = {"top": ly, "middle": ly - blen / 2.0,
+                      "bottom": ly - blen}[side]
+                p.drawRect(QRectF(x0, y0, bthk, blen))
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+    elif n == "roi_drag":
+        # 一個虛線框 + 右下角的游標：**拉出來的**框。
+        p.setPen(QPen(QColor(color), max(1.1, size / 11.0), Qt.DashLine))
+        p.drawRect(QRectF(m, m, (w - 2 * m) * 0.72, (h - 2 * m) * 0.72))
+        p.setPen(pen)
+        tip = QPointF(m + (w - 2 * m) * 0.72, m + (h - 2 * m) * 0.72)
+        p.drawLine(tip, QPointF(tip.x() + w * 0.16, tip.y() + h * 0.16))
+    elif n == "roi_click":
+        # 一個實框 + 中心的十字：**點一下，框長在游標中心**。
+        box = QRectF(m, h * 0.24, w - 2 * m, h * 0.52)
+        p.drawRect(box)
+        c = box.center()
+        a = w * 0.13
+        p.drawLine(QPointF(c.x() - a, c.y()), QPointF(c.x() + a, c.y()))
+        p.drawLine(QPointF(c.x(), c.y() - a), QPointF(c.x(), c.y() + a))
+    elif n == "roi_array":
+        # 一排三個等距的框：**一次長一整排**。跟 ``roi_click`` 的差別就是
+        # 「一個」與「一排」，那正是兩支工具的差別。
+        side = (w - 2 * m) * 0.22
+        gap = ((w - 2 * m) - 3 * side) / 2.0
+        for i in range(3):
+            p.drawRect(QRectF(m + i * (side + gap), h * 0.28, side, h * 0.44))
+    elif n == "roi_paint":
+        # 幾格點亮的方格：**一顆一顆點像素**。用實心小方塊而不是筆刷 ——
+        # 畫出來的東西是像素，不是筆觸。
+        side = (w - 2 * m) / 3.0
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        for i, j in ((0, 1), (1, 0), (1, 1), (2, 1), (1, 2)):
+            p.drawRect(QRectF(m + i * side + side * 0.12,
+                              m + j * side + side * 0.12,
+                              side * 0.76, side * 0.76))
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
     elif n == "folder":
         p.drawLine(QPointF(m, h * 0.30), QPointF(w * 0.44, h * 0.30))
         p.drawLine(QPointF(w * 0.44, h * 0.30), QPointF(w * 0.54, h * 0.42))
@@ -274,6 +383,18 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         side = w - 2 * m - step * 2
         for i in (2, 1, 0):
             p.drawRect(QRectF(m + step * i, m + step * (2 - i), side, side))
+    elif n == "layers":
+        # 三片**平放**的層 —— GDS 的 layout label map（F11 Region-3）。
+        #
+        # 跟 ``stack`` 要分得出來，而它們講的東西其實很近（都是「好幾層」）：
+        # ``stack`` 是三個**正面**的方框（同一張圖的好幾頁），``layers`` 是三個
+        # **側看**的菱形（疊在一起的版圖層）。差別落在輪廓的長寬比上 ——
+        # 15px 下方框是方的、菱形是扁的，一眼分得出來。
+        for i in range(3):
+            cy = m + h * 0.16 + (h - 2 * m - h * 0.32) * i / 2.0
+            p.drawPolygon(QPolygonF([
+                QPointF(w / 2, cy - h * 0.14), QPointF(w - m, cy),
+                QPointF(w / 2, cy + h * 0.14), QPointF(m, cy)]))
     elif n == "document":
         fold = w * 0.26
         p.drawLine(QPointF(m + w * 0.06, m), QPointF(w - m - fold, m))
@@ -314,6 +435,96 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
                          % (name, ", ".join(GLYPH_ICONS)))
 
 
+def _draw_profile_glyph(p: QPainter, name: str, w: float, h: float,
+                        color: str, pen: QPen) -> None:
+    """Profile 卡那三個下拉的圖示：一張小版圖，把會放框的地方點亮。
+
+    共用的畫法：**條紋畫成淡的底**（它們是背景 —— 「哪裡有材質」），
+    **框畫成實心的亮塊**（那才是這個選項在講的東西）。十一顆並排時唯一的差別
+    就是亮塊在哪，而那正好就是這些選項唯一的差別。
+
+    ⚠ **這些圖要在 21 px 下讀得出來。** 第一版畫得很細（薄框 ``w*0.07`` ＝
+    1.5 px、兩根直條紋加一條橫帶），render 出來五個 ``place`` 幾乎一模一樣 ——
+    在這個尺寸下，「精確」跟「看得懂」是衝突的，而看得懂才是這一輪的目標。
+    所以每一塊都不小於邊長的 1/5，細節能砍就砍。
+    """
+    faint = QColor(color)
+    faint.setAlpha(58)
+    solid = QColor(color)
+
+    def blk(x0, y0, x1, y1, on):
+        p.setPen(Qt.NoPen)
+        p.setBrush(solid if on else faint)
+        p.drawRect(QRectF(x0 * w, y0 * h, (x1 - x0) * w, (y1 - y0) * h))
+
+    if name.startswith("place_"):
+        if name == "place_crossing":
+            blk(0.34, 0.05, 0.66, 0.95, False)          # 直的
+            blk(0.05, 0.34, 0.95, 0.66, False)          # 橫的
+            blk(0.34, 0.34, 0.66, 0.66, True)           # 交會處
+        elif name == "place_beside_v":
+            blk(0.40, 0.05, 0.60, 0.95, False)
+            blk(0.14, 0.30, 0.36, 0.70, True)
+            blk(0.64, 0.30, 0.86, 0.70, True)
+        elif name == "place_beside_h":
+            blk(0.05, 0.40, 0.95, 0.60, False)
+            blk(0.30, 0.14, 0.70, 0.36, True)
+            blk(0.30, 0.64, 0.70, 0.86, True)
+        elif name == "place_between_v":
+            blk(0.06, 0.05, 0.26, 0.95, False)
+            blk(0.74, 0.05, 0.94, 0.95, False)
+            blk(0.32, 0.05, 0.68, 0.95, True)
+        else:                                            # between_horizontal
+            blk(0.05, 0.06, 0.95, 0.26, False)
+            blk(0.05, 0.74, 0.95, 0.94, False)
+            blk(0.05, 0.32, 0.95, 0.68, True)
+    elif name.startswith("dir_"):
+        # 這一組畫的是**條紋本身**（不是框）：亮的那一組就是「在看的」。
+        # 所以 `dir_both` 是兩組都亮、單向的那兩顆有一組退成淡的 ——
+        # 淡的那一組還在，因為「另一個方向我不看」跟「另一個方向不存在」
+        # 是兩件事，而使用者要挑的正是前者。
+        up = name in ("dir_both", "dir_upright")
+        flat = name in ("dir_both", "dir_flat")
+        bars = [((0.08, 0.05, 0.30, 0.95), up), ((0.70, 0.05, 0.92, 0.95), up),
+                ((0.05, 0.08, 0.95, 0.30), flat), ((0.05, 0.70, 0.95, 0.92), flat)]
+        # 淡的先畫：半透明的塊疊在實心的上面會把它糊掉一角，而那一角正好是
+        # 兩組交會的地方 —— 也就是這幾顆圖示最該乾淨的位置。
+        for rect, on in sorted(bars, key=lambda t: bool(t[1])):
+            blk(rect[0], rect[1], rect[2], rect[3], on)
+    elif name.startswith("side_"):
+        # 跟 place_beside_v 的差別刻意做在**高度**：這裡的塊是滿高的
+        blk(0.42, 0.05, 0.58, 0.95, False)
+        if name in ("side_both", "side_start"):
+            blk(0.18, 0.05, 0.38, 0.95, True)
+        if name in ("side_both", "side_end"):
+            blk(0.62, 0.05, 0.82, 0.95, True)
+    else:
+        # 三格，中間那一根**不見了**。畫的是「哪幾格拿得到框」——
+        # 那才是這個參數真正在決定的事。
+        # 缺的那一格畫成**虛線外框**而不是淡色實心：淡色實心在 21 px 下讀起來
+        # 仍然是一根，於是 fill 與 skip 長得一樣（render 出來確認過）。
+        def ghost(x0, x1):
+            p.setPen(QPen(QColor(color), max(1.0, w / 20.0), Qt.DotLine))
+            p.setBrush(Qt.NoBrush)
+            p.drawRect(QRectF(x0 * w, 0.06 * h, (x1 - x0) * w, 0.88 * h))
+
+        if name == "fill_fill":
+            blk(0.08, 0.05, 0.30, 0.95, True)
+            blk(0.39, 0.05, 0.61, 0.95, True)           # 補上去的那一根
+            blk(0.70, 0.05, 0.92, 0.95, True)
+        elif name == "fill_skip":
+            blk(0.08, 0.05, 0.30, 0.95, True)
+            ghost(0.39, 0.61)                            # 缺的那一根：沒有框
+            blk(0.70, 0.05, 0.92, 0.95, True)
+        else:                                            # skip_clear
+            # 鄰居**朝向缺口的那半邊**也不要 —— 所以兩根都只剩外側一半
+            blk(0.08, 0.05, 0.19, 0.95, True)
+            ghost(0.39, 0.61)
+            blk(0.81, 0.05, 0.92, 0.95, True)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+
+
 def _paint_glyph(widget: QWidget, name: str, side: str = "center") -> None:
     """把 ``name`` 畫到 ``widget`` 上（給 icon 按鈕的 ``paintEvent`` 用）。
 
@@ -324,7 +535,13 @@ def _paint_glyph(widget: QWidget, name: str, side: str = "center") -> None:
     from PySide6.QtGui import QPalette
 
     r = widget.contentsRect()
-    size = max(9.0, min(float(min(r.width(), r.height())), 15.0))
+    # 圖示的大小跟著鈕走，但**只有大鈕才放大**（F11 Region-1 第四輪）：
+    # 24 px 的鈕維持 15 px 的圖示（既有的每一顆都是那個比例），30 px 以上的
+    # 工具鈕才放到 21 —— 使用者回報「圖示只佔一半，蠻醜的」，那是把大鈕配
+    # 小圖示的結果。門檻式而不是等比，是為了讓既有的鈕逐像素不變。
+    side_px = float(min(r.width(), r.height()))
+    size = (max(9.0, min(side_px, 15.0)) if side_px < 30.0
+            else max(21.0, min(side_px * 0.62, 40.0)))
     colour = widget.palette().color(QPalette.ButtonText).name()
     p = QPainter(widget)
     if side == "left":
@@ -499,6 +716,10 @@ class ImageView(QWidget):
         #: 疊在影像上的 ROI 框（正規化座標）。見 :meth:`set_overlay`。
         self._overlay: List[Tuple[float, float, float, float]] = []
         self._overlay_focus = -1
+        #: 每個框屬於哪一個具名區域（跟 ``_overlay`` 等長）。空字串 = 不分。
+        self._overlay_labels: List[str] = []
+        #: 區域名 -> 顏色索引，依**第一次出現**的順序。畫圖例時也走這一份。
+        self._overlay_order: List[str] = []
         #: 量測尺按著時的那一條帶（axis, 起, 迄；影像像素）。見 :meth:`set_measure`。
         self._measure: Optional[Tuple[str, float, float]] = None
         #: 選取的卡片上那個「以像素為單位」的參數有多大（大小, 標籤）。
@@ -600,7 +821,8 @@ class ImageView(QWidget):
 
     # -- transforms --------------------------------------------------------
     def set_overlay(self, rects: Optional[Sequence[Sequence[float]]],
-                    focus: int = -1) -> None:
+                    focus: int = -1,
+                    labels: Optional[Sequence[str]] = None) -> None:
         """把 ROI 框疊在影像上（**正規化**座標 ``(nx, ny, nw, nh)``）。
 
         為什麼要疊在這裡而不是只有「跨顆檢視」那個視窗
@@ -612,13 +834,52 @@ class ImageView(QWidget):
 
         座標用正規化的，所以縮放平移都跟著影像走，換一顆 patch 尺寸也不用重算。
         ``focus`` 是要特別標出來的那一個（交會定位的 ``_center``：缺陷所在的
-        那一塊），畫成實線＋角標，其餘畫細線 —— 一堆一模一樣的框看不出哪個是
+        那一塊），畫成粗線＋角標，其餘畫細線 —— 一堆一模一樣的框看不出哪個是
         「這一顆」的。
+
+        ``labels`` 是每個框屬於**哪一個具名區域**（跟 ``rects`` 等長）。
+        給了就一個區域一個顏色，並在左上角畫一份圖例（F11 Region 第八輪，
+        使用者回報「Image Stream 顯示上顏色 overlay 重疊會同個顏色（藍色）」）。
+
+        為什麼一定要分色：Region-1 之後**一張卡可以標好幾個區域**，而這裡把它們
+        全部攤平成一串框，全部畫成 accent 藍。兩個區域疊在一起的時候畫面上就只是
+        一團藍線 —— 而使用者要判斷的正是「哪一塊是 ROI1、哪一塊是 ROI2」。
+        顏色跟模板編輯器**同一組**（`theme.REGION_COLORS`）：他在對話框裡把
+        ROI1 畫成綠色的，到了 patch 上它就要還是綠色的。
+
+        角色分工：**顏色 = 哪一個區域，線寬與角標 = 哪一塊是缺陷那一塊。**
+        兩個問題各佔一個視覺維度，不要用同一個維度回答兩次（這是「焦點框以前
+        畫成紅色」被換掉的原因 —— 紅色會被讀成第三個區域）。
         """
         self._overlay = [tuple(float(v) for v in r) for r in (rects or [])
                          if r is not None and len(tuple(r)) == 4]
         self._overlay_focus = int(focus)
+        names = [str(v) for v in (labels or [])]
+        # 長度對不上就整組不分色 —— 錯位的顏色比沒有顏色糟得多（它會**指錯**
+        # 區域，而畫面上沒有任何東西透露這件事）。
+        self._overlay_labels = (names if len(names) == len(self._overlay)
+                                else [""] * len(self._overlay))
+        order: List[str] = []
+        for n in self._overlay_labels:
+            if n and n not in order:
+                order.append(n)
+        self._overlay_order = order
         self.update()
+
+    def overlay_legend(self) -> List[Tuple[str, str]]:
+        """圖例：``[(區域名, 顏色 hex), …]``，依第一次出現的順序。
+
+        測試與狀態列讀這個，不去讀畫素。
+        """
+        return [(n, region_hex(i)) for i, n in enumerate(self._overlay_order)]
+
+    def legend_visible(self) -> bool:
+        """圖例現在畫不畫得出來（測試讀這個，不去讀畫素）。
+
+        **兩個以上的區域才畫** —— 只有一個的時候那個顏色沒有在跟誰對比，
+        一行字只是擋住影像。
+        """
+        return len(self._overlay_order) >= 2
 
     def overlay_count(self) -> int:
         """現在疊了幾個框（測試與狀態列讀這個，不去讀畫素）。"""
@@ -696,20 +957,70 @@ class ImageView(QWidget):
             return
         iw, ih = self._pixmap.width(), self._pixmap.height()
         s = self._scale or 1.0
-        accent = QColor(TOKENS["accent"])
-        # 框在小 patch 上會很細，所以線寬不隨縮放變薄（**框是給人看的標記，
-        # 不是影像內容**）；但也不要粗到把 5px 的框整個蓋掉。
-        thin = QPen(accent, 1.0)
-        thin.setCosmetic(True)
-        thick = QPen(QColor(TOKENS["danger_text"]), 1.8)
-        thick.setCosmetic(True)
+        index_of = {n: i for i, n in enumerate(self._overlay_order)}
+        plain = QColor(TOKENS["accent"])
         p.setBrush(Qt.NoBrush)
         for i, (nx, ny, nw, nh) in enumerate(self._overlay):
+            name = self._overlay_labels[i] if i < len(self._overlay_labels) else ""
+            col = QColor(region_hex(index_of[name])) if name in index_of else plain
             r = QRectF(self._offset.x() + nx * iw * s,
                        self._offset.y() + ny * ih * s,
                        max(1.0, nw * iw * s), max(1.0, nh * ih * s))
-            p.setPen(thick if i == self._overlay_focus else thin)
+            focused = (i == self._overlay_focus)
+            # 框在小 patch 上會很細，所以線寬不隨縮放變薄（**框是給人看的標記，
+            # 不是影像內容**）；但也不要粗到把 5px 的框整個蓋掉。
+            pen = QPen(col, 1.9 if focused else 1.0)
+            pen.setCosmetic(True)
+            p.setPen(pen)
             p.drawRect(r)
+            if focused:
+                self._paint_focus_ticks(p, r, pen)
+        self._paint_overlay_legend(p)
+
+    def _paint_focus_ticks(self, p: QPainter, r: QRectF, pen: QPen) -> None:
+        """缺陷那一塊的四個角標。
+
+        以前這件事是用**紅色**講的。分色之後不能再那樣：紅色會被讀成「第三個
+        區域」，而它其實跟區域無關。角標是純幾何的記號，跟任何區域顏色都不衝突
+        —— 而且在框小到只剩幾個像素、線寬看不出差別的時候，它仍然看得見。
+        """
+        tick = max(3.0, min(7.0, min(r.width(), r.height()) * 0.35))
+        wide = QPen(pen)
+        wide.setWidthF(pen.widthF() + 0.9)
+        p.setPen(wide)
+        for x, dx in ((r.left(), 1.0), (r.right(), -1.0)):
+            for y, dy in ((r.top(), 1.0), (r.bottom(), -1.0)):
+                p.drawLine(QPointF(x, y), QPointF(x + dx * tick, y))
+                p.drawLine(QPointF(x, y), QPointF(x, y + dy * tick))
+        p.setPen(pen)
+
+    def _paint_overlay_legend(self, p: QPainter) -> None:
+        """左上角的圖例。**兩個以上的區域才畫** —— 只有一個的時候，那個顏色
+        沒有在跟誰對比，一行字只是擋住影像。"""
+        if not self.legend_visible():
+            return
+        legend = self.overlay_legend()
+        f = QFont(p.font())
+        f.setPointSizeF(max(7.0, f.pointSizeF() - 1.0))
+        p.setFont(f)
+        fm = QFontMetricsF(f)
+        pad, sw, gap, line = 5.0, 8.0, 5.0, fm.height() + 3.0
+        width = max(fm.horizontalAdvance(n) for n, _c in legend) + sw + gap
+        box = QRectF(6.0, 6.0, width + pad * 2, line * len(legend) + pad * 2)
+        chip = QColor(TOKENS["bg_surface"])
+        chip.setAlpha(205)
+        p.setPen(Qt.NoPen)
+        p.setBrush(chip)
+        p.drawRoundedRect(box, 3.0, 3.0)
+        for i, (name, hexcol) in enumerate(legend):
+            y = box.top() + pad + line * i
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(hexcol))
+            p.drawRect(QRectF(box.left() + pad, y + line / 2 - sw / 2, sw, sw))
+            p.setPen(QColor(TOKENS["text_primary"]))
+            p.drawText(QRectF(box.left() + pad + sw + gap, y, width, line),
+                       Qt.AlignLeft | Qt.AlignVCenter, name)
+        p.setBrush(Qt.NoBrush)
 
     def _paint_measure(self, p: QPainter) -> None:
         """量測尺按著時的那一條帶：兩條綠線 + 中間一層很淡的綠。
@@ -1142,14 +1453,32 @@ class ProfilePanel(QWidget):
     #: 使用者原話：「有辦法自動 measure 填入左側數值嗎」。曲線本來就知道答案，
     #: 而要他看著面板上的數字再手動打一次，是在製造一個可以打錯的機會。
     pitch_requested = Signal(str, float, float)
+    #: 「用這一種材質」（axis, select 的值）—— 使用者**點了曲線上的一根條紋**。
+    #:
+    #: 為什麼這件事要能用點的（F11 Region-2b）：使用者的話是「能用圖就用圖」，
+    #: 而 ``second_brightest`` 這個詞本身不告訴他任何事 —— 「哪一組是第二亮的」
+    #: 是一個只有看圖才答得出來的問題，而圖就在這裡。分群由引擎給
+    #: （``algo/grid.band_groups``），面板不自己分。
+    select_requested = Signal(str, str)
 
     _EMPTY = "(select a Profile card to see its curve)"
+
+    #: 每一群的底色（依群號輪流）。用**顏色**而不是深淺：深淺會跟曲線下面的
+    #: 灰階混在一起，而這裡要講的是「這幾根是同一種東西」。
+    GROUP_COLORS = ("#3574d6", "#c2871f", "#7a68a6", "#3f9d6b", "#d05a4c")
+
+    #: 拖多少個取樣點以內算「點一下」而不是「拖了一段」。
+    CLICK_SLOP = 1.5
+
+    #: 底部那條分群色帶有多高（畫面像素）。
+    GROUP_BAR = 5.0
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._data: Dict[str, Any] = {}
         self._name = ""
         self._ruler: Optional[Tuple[float, float]] = None
+        self._pressed_at: Optional[float] = None
         self.setMinimumHeight(96)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setToolTip(
@@ -1162,6 +1491,8 @@ class ProfilePanel(QWidget):
             "and the summary says how far.\n\n"
             "The dashed line marked 'defect' is the middle of the patch, which "
             "is where the tool put the defect - a marker, not a setting.\n\n"
+            "Click a stripe to use that material — the colours are the groups "
+            "the card found, and the solid one is the group it is using now.\n\n"
             "Press and drag across the curve to measure: the green band shows "
             "the same stretch on the image above, and the readout gives the "
             "distance in pixels - and the pitch, if you dragged across more "
@@ -1265,6 +1596,31 @@ class ProfilePanel(QWidget):
             bits.append("pitch %.1f px" % ((mids[-1] - mids[0]) / (len(mids) - 1)))
         return " · ".join(bits)
 
+    def groups(self) -> List[int]:
+        """每一段屬於第幾群（引擎算的，見 ``algo/grid.band_groups``）。"""
+        return [int(g) for g in (self._data.get("groups") or [])]
+
+    def group_rules(self) -> Dict[int, str]:
+        """群號 → 要填進 ``select`` 的值。"""
+        return {int(k): str(v)
+                for k, v in (self._data.get("group_rules") or {}).items()}
+
+    def group_at(self, index: float) -> Optional[int]:
+        """曲線上第 ``index`` 個取樣點落在哪一群（不在任何段裡回 ``None``）。"""
+        bands = self._data.get("bands") or []
+        groups = self.groups()
+        if len(groups) != len(bands):
+            return None
+        for (a, b), g in zip(bands, groups):
+            if float(a) <= float(index) <= float(b):
+                return int(g)
+        return None
+
+    def rule_at(self, index: float) -> str:
+        """點在這裡的話，``select`` 要填什麼（沒有答案就空字串）。"""
+        g = self.group_at(index)
+        return self.group_rules().get(g, "") if g is not None else ""
+
     def _centers_in(self, a: float, b: float) -> List[float]:
         """這一段裡有幾根條紋的**中心**（用中心不用邊，邊有升有降會多算一倍）。"""
         bands = self._data.get("selected") or self._data.get("bands") or []
@@ -1311,6 +1667,7 @@ class ProfilePanel(QWidget):
             return
         i = self._index_at(e.position().x())
         self._ruler = (i, i)
+        self._pressed_at = i          # 放開時用來分辨「點一下」與「拖了一段」
         self._emit_ruler()
         self.update()
         e.accept()
@@ -1326,7 +1683,16 @@ class ProfilePanel(QWidget):
     def mouseReleaseEvent(self, e) -> None:        # noqa: D102 - Qt hook
         if e.button() != Qt.LeftButton or self._ruler is None:
             return
+        span = abs(self._ruler[1] - self._ruler[0])
+        at = self._pressed_at
         self._end_ruler()
+        # **點一下 = 選這一種材質；拖一段 = 量尺。** 同一個手勢兩種意思會很糟，
+        # 所以用「有沒有移動」分開 —— 那是使用者本來就分得出來的兩件事，
+        # 而尺本來就要拖過一段才有意義（0 寬的尺量不出東西）。
+        if span <= self.CLICK_SLOP and at is not None:
+            rule = self.rule_at(at)
+            if rule:
+                self.select_requested.emit(self.axis(), rule)
         e.accept()
 
     def summary(self) -> str:
@@ -1430,6 +1796,34 @@ class ProfilePanel(QWidget):
         for band in shaded:
             x0, x1 = to_x(int(band[0])), to_x(int(band[1]))
             p.drawRect(QRectF(x0, plot.top(), max(1.0, x1 - x0), plot.height()))
+
+        # **底部的一條色帶：每一群一個顏色**（F11 Region-2b）。
+        #
+        # 「哪一組是第二亮的」是一個只有看圖才答得出來的問題，而
+        # ``second_brightest`` 這個詞本身不告訴使用者任何事 —— 所以把分群畫出來。
+        # 分群是引擎算的（``algo/grid.band_groups``），面板不自己分。
+        #
+        # 為什麼是**底部一條細帶**而不是整段上色：整段上色會把「現在用的是哪
+        # 一組」那個既有的塗色淹掉（實測：塗滿之後兩者只剩 alpha 的差別），
+        # 而且畫面會變得很吵。色帶回答「有幾種、哪一種是哪一種」，塗色回答
+        # 「現在用的是哪一種」—— 兩個問題，兩個位置。
+        bands = self._data.get("bands") or []
+        groups = self.groups()
+        if len(groups) == len(bands) and bands:
+            picked_group = self._data.get("group_picked")
+            p.setPen(Qt.NoPen)
+            for band, g in zip(bands, groups):
+                on = (g == picked_group)
+                col = QColor(self.GROUP_COLORS[int(g) % len(self.GROUP_COLORS)])
+                # 沒被選中的那幾群要**很淡**：空隙那一群通常最寬，照一樣的濃度
+                # 畫會把整條色帶佔滿，而真正要看的「現在用哪一組」反而變成幾根
+                # 小點（render 出來確認過）。
+                col.setAlpha(255 if on else 70)
+                p.setBrush(col)
+                x0, x1 = to_x(float(band[0])), to_x(float(band[1]))
+                th = self.GROUP_BAR if on else self.GROUP_BAR * 0.45
+                p.drawRect(QRectF(x0, plot.bottom() - th,
+                                  max(1.0, x1 - x0), th))
 
         # 晶格上**故意不用**的那幾格（那裡是別的材質）。畫成斜線而不是另一種
         # 底色：它跟選中的段是同一排上的東西，差別在「用不用」，而兩塊實心色
@@ -1690,11 +2084,25 @@ class ChannelMapField(QWidget):
     #: 這裡只是**顯示**用的 placeholder，真正的命名規則仍然只有 ingest 那一份。
     _DEFAULTS = ("test", "ref")
 
+    #: 一列代表什麼 —— **三句話而已，資料形狀完全一樣**（整數 → 名字，空的就是
+    #: 不要）。所以是一個旗標而不是第二個 widget：抄第二份出來的那份一定會漂移。
+    _WORDS = {
+        "images": ("Image %d", "Add another image",
+                   "Add a row for one more image. A defect with five images "
+                   "(one BSE plus four SE, say) needs five rows."),
+        "labels": ("Layer %d", "Add another layer",
+                   "Add a row for one more layout layer. The rows normally "
+                   "come from the GLAS export — use this only if a layer is "
+                   "missing from it."),
+    }
+
     def __init__(self, value: str = "", parent: Optional[QWidget] = None,
-                 min_rows: int = 0):
+                 min_rows: int = 0, row_kind: str = "images"):
         super().__init__(parent)
         self._edits: List[QLineEdit] = []
         self._emitting = False
+        self._row_kind = str(row_kind)
+        self._words = self._WORDS.get(self._row_kind, self._WORDS["images"])
         #: 這批資料**一顆有幾張圖**（0 = 還不知道）。列數至少排到這個數 ——
         #: 使用者要回答「哪一張是 BSE」的時候，唯一需要的事實就是「有幾張」，
         #: 而那個數字在資料載進來的那一刻就知道了（F11 Input-1 的尾巴）。
@@ -1710,11 +2118,9 @@ class ChannelMapField(QWidget):
         self._grid.setVerticalSpacing(2)
         outer.addLayout(self._grid)
 
-        self._add_btn = QPushButton("Add another image", self)
+        self._add_btn = QPushButton(self._words[1], self)
         self._add_btn.setProperty("variant", "secondary")
-        self._add_btn.setToolTip(
-            "Add a row for one more image. A defect with five images "
-            "(one BSE plus four SE, say) needs five rows.")
+        self._add_btn.setToolTip(self._words[2])
         self._add_btn.clicked.connect(lambda: self._add_row(emit=True))
         outer.addWidget(self._add_btn, 0, Qt.AlignLeft)
 
@@ -1740,8 +2146,8 @@ class ChannelMapField(QWidget):
                     pairs[int(left.strip())] = right.strip()
                 except ValueError:          # 壞值由 core 的 parse 負責報錯
                     continue
-        rows = max(len(self._DEFAULTS), max(pairs) if pairs else 0,
-                   self._min_rows)
+        floor = 0 if self._row_kind == "labels" else len(self._DEFAULTS)
+        rows = max(floor, max(pairs) if pairs else 0, self._min_rows)
         self._emitting = True
         try:
             while len(self._edits) < rows:
@@ -1754,6 +2160,10 @@ class ChannelMapField(QWidget):
     def row_count(self) -> int:
         return len(self._edits)
 
+    def row_kind(self) -> str:
+        """一列代表什麼（``"images"`` / ``"labels"``）。"""
+        return self._row_kind
+
     def set_min_rows(self, n: int) -> None:
         """這批資料一顆有幾張圖 —— 列數至少排到這麼多（不動已經填的名字）。"""
         self._min_rows = max(0, int(n))
@@ -1761,13 +2171,17 @@ class ChannelMapField(QWidget):
 
     # -- 內部 ----------------------------------------------------------------
     def _default_name(self, index: int) -> str:
+        if self._row_kind == "labels":
+            # 空著 = **這一層不要**（不是「用預設名」）—— 兩者差很多，
+            # 所以 placeholder 要講的是後果，不是一個假的名字。
+            return "(no region for this layer)"
         if index < len(self._DEFAULTS):
             return self._DEFAULTS[index]
         return "img%d" % (index + 1)
 
     def _add_row(self, emit: bool = True) -> None:
         i = len(self._edits)
-        label = QLabel("Image %d" % (i + 1), self)
+        label = QLabel(self._words[0] % (i + 1), self)
         label.setObjectName("paramHint")
         edit = QLineEdit(self)
         edit.setPlaceholderText(self._default_name(i))
@@ -1807,12 +2221,13 @@ class TemplateField(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(3)
 
-        self.button = QPushButton("Build template from a full-size image…", self)
+        self.button = QPushButton("Edit template & regions…", self)
         self.button.setProperty("variant", "secondary")
         self.button.setToolTip(
-            "Measure the repeating cell from one full-size image and store it "
-            "inside this recipe. The image is only needed here — the recipe "
-            "stays a single file you can hand to someone else.")
+            "Measure the repeating cell from one full-size image, then draw "
+            "the regions on that cell. Both are stored inside this recipe — "
+            "the image is only needed here, so the recipe stays a single "
+            "file you can hand to someone else.")
         self.button.clicked.connect(self.build_requested.emit)
         lay.addWidget(self.button, 0, Qt.AlignLeft)
 
@@ -1836,8 +2251,8 @@ class TemplateField(QWidget):
             "color:%s; font-size:11px;%s"
             % (TOKENS["text_hint"] if self.has_template() else TOKENS["danger_text"],
                "" if self.has_template() else " font-weight:600;"))
-        self.button.setText("Build template from a full-size image…"
-                            if not self._value else "Rebuild template…")
+        self.button.setText("Build template & regions…" if not self._value
+                            else "Edit template & regions…")
 
     def has_template(self) -> bool:
         return bool(self._value.strip())
@@ -1858,8 +2273,140 @@ class TemplateField(QWidget):
                     "Build it again.")
         h, w = cell.shape[:2]
         return ("Stored in this recipe: one cell of %d × %d px (%.1f kB of "
-                "text). Mark the region on it with the four Region sliders "
-                "below." % (w, h, len(self._value) / 1024.0))
+                "text). The regions below are drawn on it." 
+                % (w, h, len(self._value) / 1024.0))
+
+
+class IconChoice(QWidget):
+    """``icon_choice`` 參數的編輯器：一排圖示鈕，選中的那顆亮著（F11 Region-2）。
+
+    為什麼不是下拉選單
+    ------------------
+    使用者的話：「我不希望 profile 設定頁面那麼多**文字**，能用圖就用圖。」
+    而 ``place`` 的五個值（``crossing`` / ``beside_vertical`` /
+    ``between_horizontal`` …）講的是**五個畫得出來的形狀** —— 下拉選單要求
+    使用者先把那個英文詞翻譯成一張圖，再選；一排小圖是直接把那張圖給他。
+
+    每顆鈕的**名字**退到 tooltip：說明還在，只是不佔畫面（同模板編輯器那一列
+    工具鈕的做法）。
+    """
+
+    changed = Signal(str)
+
+    def __init__(self, choices: Sequence[str], icons: Sequence[str],
+                 value: str = "", helps: Optional[Dict[str, str]] = None,
+                 parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(3)
+
+        self._buttons: Dict[str, IconButton] = {}
+        helps = dict(helps or {})
+        for name, icon in zip(list(choices), list(icons)):
+            name, icon = str(name), str(icon)
+            b = IconButton(icon, helps.get(name) or _spell(name), self,
+                           kind="ghost")
+            b.setCheckable(True)
+            b.setProperty("shape", "tool")
+            b.clicked.connect(lambda _c=False, n=name: self._pick(n))
+            row.addWidget(b)
+            self._buttons[name] = b
+        row.addStretch(1)
+
+        self._value = ""
+        self.set_text(value)
+
+    def text(self) -> str:
+        return self._value
+
+    def set_text(self, value: str) -> None:
+        v = str(value or "")
+        # 認不得的值（手寫 recipe）**不要偷偷改掉** —— 一顆都不亮，比亮錯一顆
+        # 誠實（使用者至少看得出這裡有問題）。
+        self._value = v
+        for name, b in self._buttons.items():
+            b.setChecked(name == v)
+            b.setProperty("active", "true" if name == v else "false")
+            restyle(b)
+
+    def _pick(self, name: str) -> None:
+        self.set_text(name)
+        self.changed.emit(name)
+
+
+def _spell(value: str) -> str:
+    """``beside_vertical`` → ``Beside vertical``（沒有 help 時的備援名字）。"""
+    return str(value).replace("_", " ").strip().capitalize()
+
+
+class CellRoisField(QWidget):
+    """``cell_rois`` 參數的編輯器：一顆按鈕 + 現在標了什麼（F11 Region-1）。
+
+    為什麼是**唯讀**的摘要而不是文字框
+    ----------------------------------
+    同 ``image_key`` 那條（F9-6，使用者定調「他會很亂連」）：框的來源只有一個
+    —— 畫在 cell 上。給它一個文字框的話同一件事有兩個入口，而兩邊很容易對不
+    起來；更糟的是那串字的座標**相對於一格 cell**，離開那張圖就沒有意義，
+    所以打得進去的自由文字正是最容易打出「跑得完、有數字、而且是錯的」的地方。
+
+    唯讀不等於藏起來：這一格仍然要看得到現在標了哪些區域、各幾塊。
+    """
+
+    edit_requested = Signal()
+
+    _EMPTY = "No regions yet — this card cannot run until you draw one."
+
+    def __init__(self, value: str = "", parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(3)
+
+        self.button = QPushButton("Draw regions on the cell…", self)
+        self.button.setProperty("variant", "secondary")
+        self.button.setToolTip(
+            "The boxes are drawn on the repeating cell, not on a patch: they "
+            "have to hold for the whole batch, and a patch is a different crop "
+            "for every defect.")
+        self.button.clicked.connect(self.edit_requested.emit)
+        lay.addWidget(self.button, 0, Qt.AlignLeft)
+
+        self.summary = QLabel("", self)
+        self.summary.setObjectName("paramHint")
+        self.summary.setWordWrap(True)
+        lay.addWidget(self.summary)
+
+        self._value = ""
+        self.set_text(value)
+
+    def text(self) -> str:
+        return self._value
+
+    def set_text(self, value: str) -> None:
+        self._value = str(value or "")
+        self.summary.setText(self.describe())
+        self.summary.setStyleSheet(
+            "color:%s; font-size:11px;%s"
+            % (TOKENS["text_hint"] if self.has_regions() else TOKENS["danger_text"],
+               "" if self.has_regions() else " font-weight:600;"))
+
+    def has_regions(self) -> bool:
+        return bool(self._value.strip())
+
+    def describe(self) -> str:
+        """**摘要是解出來的，不是記在旁邊的** —— 記在旁邊的會跟真正的值走散。"""
+        if not self.has_regions():
+            return self._EMPTY
+        from ..core.pipeline.cellrois import CellRoiError, parse_cell_rois
+
+        try:
+            regions = parse_cell_rois(self._value)
+        except CellRoiError as e:
+            return "These regions cannot be read back: %s" % e
+        return "  ·  ".join(
+            "%s (%d rectangle%s)" % (n, len(b), "" if len(b) == 1 else "s")
+            for n, b in regions)
 
 
 class ParamForm(QWidget):
@@ -1884,6 +2431,10 @@ class ParamForm(QWidget):
         #: 編輯器用得到它 —— 但它是「資料的事實」而不是「這張卡的參數」，
         #: 所以放在表單上（一份資料一次）而不是塞進 `set_step` 的簽章。
         self._image_count = 0
+        #: 目前掛上的 GLAS 匯出**有幾層**（0 = 沒掛）。`channel_map` 的
+        #: `row_kind="labels"` 靠它排列數 —— 使用者打開那一格時，第一個要知道
+        #: 的是「這份匯出有哪幾層」，而那在掛上去的那一刻就知道了。
+        self._label_count = 0
         #: 這張卡吃進來的那條流的灰階分布（墊在曲線後面，見 `set_histogram`）。
         self._hist: List[float] = []
         #: 小標題：``section 名 -> [QLabel]`` 與 ``參數名 -> section 名``。
@@ -1951,7 +2502,25 @@ class ParamForm(QWidget):
             return
         self._image_count = n
         for row in self._rows.values():
-            if isinstance(row.editor, ChannelMapField):
+            if isinstance(row.editor, ChannelMapField) \
+                    and row.editor.row_kind() == "images":
+                row.editor.set_min_rows(n)
+
+    def set_label_count(self, n: int) -> None:
+        """告訴表單「掛上的 GLAS 匯出有幾層」（F11 Region-3）。
+
+        跟 :meth:`set_image_count` 同一個形狀，而且**兩者不可以互相蓋掉** ——
+        一張 recipe 上可能同時有 `load_patch`（一列一張圖）與 `roi_from_mask`
+        （一列一層）兩個 `channel_map`，用同一個數字去排兩者的列數，其中一邊
+        一定是錯的。
+        """
+        n = max(0, int(n))
+        if n == self._label_count:
+            return
+        self._label_count = n
+        for row in self._rows.values():
+            if isinstance(row.editor, ChannelMapField) \
+                    and row.editor.row_kind() == "labels":
                 row.editor.set_min_rows(n)
 
     def set_histogram(self, counts: Optional[Sequence[float]]) -> None:
@@ -1974,10 +2543,16 @@ class ParamForm(QWidget):
 
     def set_step(self, describe: Optional[Dict[str, Any]],
                  current_params: Optional[Dict[str, Any]] = None,
-                 stream_choices: Optional[Sequence[str]] = None) -> None:
-        """重建表單。``describe=None`` -> 顯示提示語（未選節點）。"""
+                 stream_choices: Optional[Sequence[str]] = None,
+                 region_choices: Optional[Sequence[str]] = None) -> None:
+        """重建表單。``describe=None`` -> 顯示提示語（未選節點）。
+
+        ``region_choices`` 是**上游定義了哪些具名區域**（F11 Region-1）。
+        跟 ``stream_choices`` 同一個理由：那些名字程式知道，就不該讓使用者用打的。
+        """
         current_params = dict(current_params or {})
         streams = [str(s) for s in (stream_choices or [])]
+        self._regions = [str(r) for r in (region_choices or [])]
         self._describe = describe
         self._building = True
         try:
@@ -2264,6 +2839,31 @@ class ParamForm(QWidget):
             # 現在這一格只**顯示**目前接進來的是哪幾條，改要回畫布上拉線。
             return _wiring_display("" if value is None else str(value))
 
+        if ptype == "region_key":
+            # **一個**區域，所以是下拉不是勾選。名字要跟上游卡片的輸出一字不差，
+            # 而打錯的時候 lint 要跑一次才講（F11 §3.3.1 第 4 項）——
+            # 所以這裡不給打字。第一項是空的：「還沒挑」是一個真實的狀態。
+            w = QComboBox()
+            names = [""] + [str(r) for r in getattr(self, "_regions", [])]
+            text = "" if value is None else str(value).strip()
+            if text and text not in names:
+                names.append(text)          # recipe 指著一個上游沒有的區域
+            w.addItems(names)
+            w.setItemText(0, "(not chosen yet)")
+            w.setCurrentIndex(names.index(text) if text in names else 0)
+            w.currentIndexChanged.connect(
+                lambda i, n=name, ns=names: self._emit(n, ns[i] if i else ""))
+            return w
+
+        if ptype == "region_keys":
+            # 上游定義了哪些區域，程式知道 —— 所以這裡是勾的，不是打的。
+            # 要打的字必須跟上游卡片的輸出**一字不差**，而打錯的時候 lint 要跑
+            # 一次才講（F11 §3.3.1 第 4 項）。
+            w = MultiChoicePicker(getattr(self, "_regions", []),
+                                  "" if value is None else str(value))
+            w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
+            return w
+
         if ptype == "multi_choice":
             w = MultiChoicePicker([str(c) for c in (spec.get("choices") or [])],
                                   "" if value is None else str(value))
@@ -2271,9 +2871,27 @@ class ParamForm(QWidget):
             return w
 
         if ptype == "channel_map":
-            w = ChannelMapField("" if value is None else str(value),
-                                min_rows=self._image_count)
+            kind = str(spec.get("row_kind") or "images")
+            w = ChannelMapField(
+                "" if value is None else str(value),
+                min_rows=(self._label_count if kind == "labels"
+                          else self._image_count),
+                row_kind=kind)
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
+            return w
+
+        if ptype == "icon_choice":
+            w = IconChoice([str(c) for c in (spec.get("choices") or [])],
+                           [str(i) for i in (spec.get("icons") or [])],
+                           "" if value is None else str(value),
+                           spec.get("choice_help") or {})
+            w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
+            return w
+
+        if ptype == "cell_rois":
+            w = CellRoisField("" if value is None else str(value))
+            # 值不是在這裡編的（框畫在 cell 上）——按鈕只是把請求往上送。
+            w.edit_requested.connect(lambda n=name: self.action_requested.emit(n))
             return w
 
         if ptype == "template":

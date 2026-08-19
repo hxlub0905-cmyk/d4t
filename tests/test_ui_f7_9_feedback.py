@@ -550,6 +550,12 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
         "snr_map": ["align", "subtract"],
         "cd_measure": ["align", "subtract", "snr_map"],
         "roi_snr": ["align", "subtract", "snr_map"],
+        # GDS 那條路的上游不是影像處理，是**另一張 Input 卡**：label map 那條流
+        # 由 `load_sidecar` 產（配對在 ingest 層做，見 F11 Region-3 第 2 步）。
+        "roi_from_mask": ["load_sidecar"],
+        # 比較卡吃的是**區域**，所以上游要有一張出得了區域的 Region 卡。
+        # `roi_cross` 是三張裡唯一不需要外部資料的（純規則）。
+        "roi_compare": ["roi_cross"],
     }
     keys = [d["key"] for d in visible_steps([s.describe() for s in list_steps()])]
     dead_ends = {}
@@ -570,8 +576,36 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
         if rest:
             dead_ends[key] = [(i.code, i.detail) for i in rest]
     assert not dead_ends, "這些卡片沒有可行的組合：%s" % sorted(dead_ends)
+
+    # 「還沒設定完」的訊息**必須指向一個使用者按得到／填得到的東西**。
+    # 那有**兩種**形狀，兩種都算數（F11 Measure 的比較卡逼出了第二種）：
+    #
+    # * 一顆**鈕**（`…` 結尾）—— 缺的是要另外匯入的東西（模板是一張影像）；
+    # * 這張卡**自己的一格**（“引號”起來的欄位名）—— 缺的只是一個要挑的值，
+    #   而那一格就在旁邊。這種卡沒有鈕可以指，只認第一種的話它剩兩條路：
+    #   湊一個不存在的鈕，或者乾脆不講。
+    #
+    # 用「或」不是「改成」：舊的那條沒有錯，只是不完整 —— 換掉它會讓
+    # `roi_mask` 那種本來講得很好的訊息突然變成違規。
+    #
+    # 而**引號那一種要驗**：引號裡的字必須真的是這張卡的欄位名，或工具列上真的
+    # 有那顆鈕。不然「指向一個東西」會退化成「寫一句看起來像樣的話」。
+    import re as _re
+
+    studio_src = (Path(__file__).resolve().parent.parent
+                  / "adept" / "ui" / "studio.py").read_text(encoding="utf-8")
     for key, details in needs_setup.items():
+        labels = {str(p.get("label") or p["name"])
+                  for p in get_step(key).describe()["params"]}
         for detail in details:
-            assert "…" in detail or "..." in detail, (
-                "%s 說它還沒設定完，但沒有指向任何一個按得下去的東西：%s"
+            quoted = _re.findall(r"“([^”]+)”", detail)
+            real = [q for q in quoted
+                    if q in labels or ('"%s"' % q) in studio_src]
+            assert ("…" in detail or "..." in detail) or real, (
+                "%s 說它還沒設定完，但沒有指向任何一個按得到／填得到的東西"
+                "（要嘛一顆 `…` 結尾的鈕，要嘛“引號”起來的欄位名）：%s"
                 % (key, detail))
+            fake = [q for q in quoted if q not in real and not q.endswith("…")]
+            assert not fake, (
+                "%s 的訊息引了一個不存在的欄位／鈕：%s（這張卡的欄位：%s）"
+                % (key, fake, sorted(labels)))

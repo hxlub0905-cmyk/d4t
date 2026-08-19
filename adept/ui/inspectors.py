@@ -37,7 +37,9 @@ import math
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
+from PySide6.QtGui import (
+    QBrush, QColor, QFont, QFontMetricsF, QPainter, QPen, QPolygonF,
+)
 from PySide6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
 from ..core.steps._util import CLIP_FRAC, PAIR_FEATURES
@@ -734,6 +736,8 @@ class CrossInspector(Inspector):
     #: 這裡不做判斷，只轉發 —— 儀表不該知道影像檢視器存不存在。
     measure_changed = Signal(str, float, float)
     measure_ended = Signal()
+    #: 「用這一種材質」（點了曲線上的一根條紋）→ 主視窗做 ``model.set_param``。
+    select_requested = Signal(str, str)
     #: 「把量到的間距填進參數格」→ 主視窗做 ``model.set_param``。
     #: 儀表不碰模型（它連 recipe 長什麼樣都不知道），只說出請求。
     param_requested = Signal(str, object)
@@ -773,6 +777,7 @@ class CrossInspector(Inspector):
             panel.measure_changed.connect(self.measure_changed)
             panel.measure_ended.connect(self.measure_ended)
             panel.pitch_requested.connect(self._on_pitch_requested)
+            panel.select_requested.connect(self.select_requested)
             lay.addWidget(panel)
 
     def _on_pitch_requested(self, axis: str, pitch: float,
@@ -802,6 +807,16 @@ class CrossInspector(Inspector):
         rec = self.record()
         self.across.set_data("upright stripes", rec.get("x"))
         self.down.set_data("flat stripes", rec.get("y"))
+        # **沒在看的方向不畫。**（F11 Region-2c）那個方向的曲線是一條平的線，
+        # 而平的線在這張面板上的意思一直都是「這裡沒東西、去調敏感度」——
+        # 完全相反的意思。留著它等於給一個錯的提示，而且佔掉在看的那條
+        # 曲線一半的高度。
+        from adept.core.algo.grid import directions_used
+
+        want_x, want_y = directions_used(
+            rec.get("directions") or self.params.get("directions") or "both")
+        self.across.setVisible(bool(want_x))
+        self.down.setVisible(bool(want_y))
 
     def has_data(self) -> bool:
         return bool(self.record())
@@ -816,11 +831,18 @@ class CrossInspector(Inspector):
         if not rec.get("ok"):
             # 失敗的時候 reason 就是全部的資訊 —— 它已經講了是哪個方向。
             return "not located — %s" % (rec.get("reason") or "unknown")
+        from adept.core.algo.grid import directions_used
+
+        want = dict(zip(("x", "y"), directions_used(rec.get("directions")
+                                                    or "both")))
         bits = ["%d boxes" % len(rec.get("boxes") or [])]
         for tag, key in (("upright", "x"), ("flat", "y")):
+            if not want[key]:
+                continue          # 沒在看的方向沒有 pitch 可以報
             s = dict(rec.get(key) or {})
             bits.append("%s pitch %.1f px" % (tag, float(s.get("pitch_used", 0.0))))
-        filled = sum(int((rec.get(k) or {}).get("filled", 0)) for k in ("x", "y"))
+        filled = sum(int((rec.get(k) or {}).get("filled", 0))
+                     for k in ("x", "y") if want[k])
         if filled:
             bits.append("%d stripe(s) filled in from the pitch you gave" % filled)
         if rec.get("reason"):
@@ -845,6 +867,14 @@ class TemplateInspector(Inspector):
       參數，是本來就該退回整張圖。
 
     分不出來的話，使用者會一直去調前兩個門檻，而問題其實在第三個。
+
+    整批的那一行（F11 Region-1）
+    ----------------------------
+    這一顆過不過只是一顆。``roi_template`` 的檔頭一直承諾「換一批資料要不要重算
+    模板，是 Studio 在設定時提供的健檢」—— 而那個健檢本來不存在（F10 那個形狀：
+    文字說得出來、引擎做不到）。它現在就在這裡，而且**不必再跑一次比對**：
+    每一顆都已經吐了 ``match_score`` / ``match_margin`` / ``match_structure``，
+    整批的判讀是那三串數字的函式（``algo/template.judge_template``）。
     """
 
     title = "Match"
@@ -854,10 +884,19 @@ class TemplateInspector(Inspector):
               ("structure", "structure", "min_structure", 40.0))
 
     def record(self) -> Dict[str, Any]:
+        """這張卡的比對結果（三道閘門的值對每個區域都一樣，取第一個就好）。
+
+        一張卡現在可以標好幾個區域（F11 Region-1），而**比對是一張卡一次**——
+        分數、確定度、結構都是 patch 對模板的性質，跟哪個區域無關。所以這裡取
+        這張卡自己的第一個區域，不是「唯一那個」。
+        """
+        from adept.core.pipeline.cellrois import region_names
+
         templates = dict(self.meta.get("templates") or {})
-        name = str(self.params.get("roi_out") or "")
-        return dict(templates.get(name) or (
-            list(templates.values())[0] if len(templates) == 1 else {}))
+        for name in region_names(self.params.get("regions", "")):
+            if name in templates:
+                return dict(templates[name])
+        return dict(list(templates.values())[0] if len(templates) == 1 else {})
 
     def has_data(self) -> bool:
         return bool(self.record())
@@ -866,6 +905,9 @@ class TemplateInspector(Inspector):
         if not str(self.params.get("template") or "").strip():
             return ("No template yet — build one from a full-size image, then "
                     "this panel shows why each defect did or did not match.")
+        if not str(self.params.get("regions") or "").strip():
+            return ("No regions drawn on the cell yet — open “Edit template & "
+                    "regions…” and draw at least one.")
         return "Select a defect to see how well it matched the template."
 
     def gates(self) -> List[Tuple[str, float, float, bool]]:
@@ -881,15 +923,35 @@ class TemplateInspector(Inspector):
     def failing(self) -> List[str]:
         return [g[0] for g in self.gates() if not g[3]]
 
+    def health(self):
+        """整批的判讀 —— 「這個模板還能不能用」（``algo.template.judge_template``）。"""
+        from adept.core.algo.template import judge_template
+
+        def vals(name: str) -> List[float]:
+            return self.feature_values(self.prefixed(name))
+
+        return judge_template(
+            vals("match_score"), vals("match_margin"), vals("match_structure"),
+            float(self.params.get("min_score", 0.0) or 0.0),
+            float(self.params.get("min_margin", 0.0) or 0.0),
+            float(self.params.get("min_structure", 0.0) or 0.0))
+
+    def prefixed(self, name: str) -> str:
+        """特徵名加上這張卡的 ``output_prefix``（沒有就原樣）。"""
+        pre = str(self.params.get("output_prefix", "") or "").strip()
+        return "%s_%s" % (pre, name) if pre else name
+
     def summary(self) -> str:
         rec = self.record()
         if not rec:
             return ""
+        batch = self.health()
+        tail = ("  ·  %s" % batch.message) if batch.checked > 1 else ""
         if rec.get("ok"):
-            return ("matched at phase %d,%d · %s"
+            return ("matched at phase %d,%d · %s%s"
                     % (int(rec.get("phase_x", 0)), int(rec.get("phase_y", 0)),
                        " · ".join("%s %.2f" % (g[0], g[1])
-                                  for g in self.gates())))
+                                  for g in self.gates()), tail))
         bad = self.failing()
         why = {
             "structure": ("this patch has nothing to match — it sits inside "
@@ -903,7 +965,8 @@ class TemplateInspector(Inspector):
                       "template was built from this layer."),
         }
         first = bad[0] if bad else "match"
-        return "could not place the region — %s: %s" % (first, why[first])
+        return ("could not place the region — %s: %s%s"
+                % (first, why[first], tail))
 
     def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
         gates = self.gates()
@@ -938,12 +1001,29 @@ class TemplateInspector(Inspector):
                        Qt.AlignRight | Qt.AlignVCenter, "%.2f" % got)
 
         rec = self.record()
+        batch = self.health()
+        foot = ("cell %d × %d px · phase %d,%d · line = the threshold"
+                % (int(rec.get("cell_w", 0)), int(rec.get("cell_h", 0)),
+                   int(rec.get("phase_x", 0)), int(rec.get("phase_y", 0))))
+        sw, sh = int(rec.get("self_w", 0)), int(rec.get("self_h", 0))
+        cw, ch = int(rec.get("cell_w", 0)), int(rec.get("cell_h", 0))
+        if sw and sh and (sw, sh) != (cw, ch):
+            foot += " · repeats every %d × %d px inside the cell" % (sw, sh)
         p.setPen(QColor(TOKENS["text_secondary"]))
         p.drawText(QRectF(rect.left(), rect.bottom() - 14, rect.width(), 14),
-                   Qt.AlignLeft | Qt.AlignVCenter,
-                   "cell %d × %d px · phase %d,%d · line = the threshold"
-                   % (int(rec.get("cell_w", 0)), int(rec.get("cell_h", 0)),
-                      int(rec.get("phase_x", 0)), int(rec.get("phase_y", 0))))
+                   Qt.AlignLeft | Qt.AlignVCenter, foot)
+
+        if batch.checked > 1:
+            # 整批的成績自己一行，而且**顏色講出處置**：模板要重建是紅的，
+            # 「這批 patch 本來就沒結構」不是錯，用一般的灰。
+            col = {"ok": TOKENS["success"], "stale": TOKENS["danger_text"],
+                   "too-tight": TOKENS["warning"]}.get(
+                       batch.verdict, TOKENS["text_secondary"])
+            p.setPen(QColor(col))
+            p.drawText(QRectF(rect.left(), rect.bottom() - 28, rect.width(), 14),
+                       Qt.AlignLeft | Qt.AlignVCenter,
+                       "%d / %d located · %s" % (batch.located, batch.checked,
+                                                 batch.verdict))
 
 
 class MeasureInspector(Inspector):
@@ -1243,6 +1323,116 @@ class InputInspector(Inspector):
 #: Enhance 的卡共用同一個儀表：它們做的事不同，但**要回答的問題是同一個**
 #: （我把資訊弄掉了嗎）。F7-20 把九張併成四張，所以這裡只剩四個 key ——
 #: 少的那五個不是被拿掉，是變成 ``normalize`` / ``tone`` 的一個下拉選項。
+class GdsInspector(Inspector):
+    """`roi_from_mask`：**這一顆對到了哪幾層**、各幾塊、多大。
+
+    為什麼是一張表而不是「label map 的上色預覽」
+    ------------------------------------------
+    第一版打算畫一張上色的 label（label map 的像素值是 1、2、3，在一般檢視器裡
+    **幾乎全黑** —— 那正是 GLAS 另外產一張 ``_label_view.png`` 的原因）。
+    但**形狀已經看得到了**：這張卡吐的每一層都是一個具名區域，而預覽影像上的
+    疊框本來就一個區域一個顏色、還帶圖例（2026-08-18 的疊框分色）——
+    而且是畫在**真的那張 SEM 影像**上，比另外看一張示意圖有用。
+
+    所以這裡回答的是那張圖答不出來的三件事：**哪一層根本沒落在這一顆上**
+    （框看不到 = 可能是沒有，也可能是被別的層蓋掉）、**各幾塊幾個框**
+    （切碎的程度）、以及**有沒有砍到上限**。
+
+    顏色跟疊框、模板編輯器**同一組**（`theme.REGION_COLORS`），而且順序一樣 ——
+    表上第二列的顏色就是畫面上第二個區域的顏色。
+
+    畫的是**引擎算的那一份**（`ctx.meta["gds_layers"]`），UI 不自己再拆一次 ——
+    不然「畫面上的層」與「真的量下去的層」會不一樣，而那種 bug 極難發現。
+    """
+
+    title = "GDS layers"
+
+    def record(self) -> Dict[str, Any]:
+        by_source = dict(self.meta.get("gds_layers") or {})
+        key = str(self.params.get("source") or "")
+        if key in by_source:
+            return dict(by_source[key])
+        return dict(list(by_source.values())[0] if len(by_source) == 1 else {})
+
+    def has_data(self) -> bool:
+        return bool(self.record())
+
+    def empty_reason(self) -> str:
+        return ("Run a trial to see which layers landed on this defect. No "
+                "layout labels? Use “Open GDS export…”.")
+
+    def summary(self) -> str:
+        rec = self.record()
+        if not rec:
+            return ""
+        got = [e for e in rec.get("layers") or () if e.get("boxes")]
+        bits = ["%d of %d layer(s) on this defect"
+                % (len(got), len(rec.get("layers") or ()))]
+        total = sum(int(e.get("boxes") or 0) for e in rec.get("layers") or ())
+        bits.append("%d boxes" % total)
+        if any(e.get("clipped") for e in rec.get("layers") or ()):
+            bits.append("hit the box limit — some boxes were left out")
+        # **在圖裡、但沒有名字的 id** —— 那是「匯出多了一層而 recipe 沒跟上」，
+        # 而它安靜地少一個區域。
+        named = {int(e.get("id")) for e in rec.get("layers") or ()}
+        extra = [i for i in rec.get("ids_in_image") or () if int(i) not in named]
+        if extra:
+            bits.append("layer(s) %s are in the label map but have no name"
+                        % ", ".join(str(i) for i in extra))
+        return " · ".join(bits)
+
+    def paintEvent(self, _e) -> None:          # noqa: D102 - Qt hook
+        from .theme import region_hex
+
+        rec = self.record()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.fillRect(self.rect(), QColor(TOKENS["bg_panel"]))
+        entries = list(rec.get("layers") or ())
+        if not entries:
+            p.end()
+            return
+
+        f = QFont(p.font())
+        f.setPointSizeF(max(7.5, f.pointSizeF() - 0.5))
+        p.setFont(f)
+        fm = QFontMetricsF(f)
+        line = fm.height() + 6.0
+        pad, sw = 8.0, 10.0
+        cols = ("layer", "boxes", "pieces", "area px")
+        y = 4.0
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        for i, head in enumerate(cols):
+            p.drawText(QRectF(pad + (0 if not i else 150 + (i - 1) * 62), y,
+                              150 if not i else 60, line),
+                       Qt.AlignLeft | Qt.AlignVCenter, head)
+        y += line
+        for i, e in enumerate(entries):
+            colour = QColor(region_hex(i))
+            got = int(e.get("boxes") or 0)
+            if not got:
+                colour.setAlpha(90)
+            p.setPen(Qt.NoPen)
+            p.setBrush(colour)
+            p.drawRect(QRectF(pad, y + line / 2 - sw / 2, sw, sw))
+            p.setPen(QColor(TOKENS["text_primary"] if got
+                            else TOKENS["text_disabled"]))
+            p.drawText(QRectF(pad + sw + 6, y, 132, line),
+                       Qt.AlignLeft | Qt.AlignVCenter,
+                       "%s  (id %s)" % (e.get("name"), e.get("id")))
+            for k, value in enumerate((got, int(e.get("pieces") or 0),
+                                       int(e.get("area_px") or 0))):
+                p.drawText(QRectF(150 + k * 62, y, 60, line),
+                           Qt.AlignLeft | Qt.AlignVCenter,
+                           "—" if not got else str(value))
+            if e.get("clipped"):
+                p.setPen(QColor(TOKENS["danger_text"]))
+                p.drawText(QRectF(150 + 3 * 62, y, 90, line),
+                           Qt.AlignLeft | Qt.AlignVCenter, "clipped")
+            y += line
+        p.end()
+
+
 INSPECTORS: Dict[str, type] = {
     "load_patch": InputInspector,
     # 同一個面板：它讀的是 meta["input"]，兩張 Input 卡都會寫（F11 Input-4）。
@@ -1258,7 +1448,7 @@ INSPECTORS: Dict[str, type] = {
     "cd_measure": MeasureInspector,
     "focus_quality": MeasureInspector,
     "roi_snr": MeasureInspector,
-    "cell_period": MeasureInspector,
+    "roi_from_mask": GdsInspector,
 }
 
 

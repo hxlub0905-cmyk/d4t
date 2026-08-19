@@ -9,7 +9,7 @@
 """
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -342,6 +342,84 @@ def output_prefix_spec(example: str = "center") -> ParamSpec:
     )
 
 
+#: 兩張 Region 卡共用的「靠邊的框不要」開關（F11 Region 第八輪，使用者要求）。
+#:
+#: 為什麼兩張卡要**同一組參數名**：使用者心裡這是**一件事**（「靠邊的不要」），
+#: 而它在 recipe 裡長什麼樣會被讀、被 diff、被抄。兩張卡各發明一個名字的話，
+#: 換一種定位法就要重學一次同一個概念。
+EDGE_SECTION_TEMPLATE = "5 · Name and limits"
+
+
+def drop_edge_specs(section: str) -> List[ParamSpec]:
+    """``drop_edge``（勾選）＋ ``edge_margin``（幾個 px）。
+
+    為什麼是兩格而不是「``edge_margin = 0`` 代表關掉」：使用者要的是一顆
+    **看得到的勾選框**（原話「幫我 gen 一個 checkbox（可勾選要不要使用的）」）。
+    用 0 當哨兵的話，「這張 recipe 有沒有在做這件事」要靠看一個數字是不是 0
+    來推 —— 而那個推論在畫面上不存在。
+    """
+    return [
+        ParamSpec(
+            name="drop_edge", type="bool", default=False, section=section,
+            label="Ignore boxes near the edge of the image",
+            help=("Leave out any box that comes closer to the edge of the "
+                  "image than the distance below. A box at the edge is only "
+                  "partly on the image, or sits on a stripe that is itself "
+                  "half cut off - the gray level it reports is measured over "
+                  "fewer pixels and over the wrong ones, and it still looks "
+                  "like a perfectly normal number. The box the defect is in "
+                  "is always kept (see below)."),
+        ),
+        ParamSpec(
+            name="edge_margin", type="float", default=4.0, min=0.0, max=64.0,
+            unit="px", section=section, label="Closer to the edge than",
+            show_when=("drop_edge", (True,)),
+            help=("How close to the edge of the image is too close, in "
+                  "pixels. A box is dropped when any part of it falls inside "
+                  "this band. The one box the defect is in is never dropped - "
+                  "it is not one of the samples, it is the thing being "
+                  "measured, and dropping it would quietly point "
+                  "<name>_center at a box the defect is not in."),
+        ),
+    ]
+
+
+def drop_edge_boxes(boxes, patch_shape, margin: float, keep: int = -1):
+    """丟掉靠邊的框。回傳 ``(留下的框, 丟掉幾個, keep 在新清單的位置)``。
+
+    ``boxes`` 是像素矩形 ``(x, y, w, h)``；``keep`` 是**永遠不丟**的那一個的
+    索引（缺陷所在的那一塊）。
+
+    為什麼 ``keep`` 一定要豁免
+    --------------------------
+    ``<name>_center`` 的定義是「缺陷所在的那一塊」（patch 以缺陷為中心裁切，
+    所以就是離正中心最近的那一塊）。它不是母體裡的一個樣本，它是**被量的那個
+    東西**。把它丟掉的話 ``_center`` 會安靜地指到另一塊 —— 那一塊裡沒有缺陷，
+    而下游每一個數字都會照樣算得出來。丟掉靠邊的框要修的是**基準**
+    （``<name>_others``）被半截的框汙染，不是把待測物也一起丟掉。
+
+    ⚠ **橫跨整張圖的那一軸不算「靠邊」。**（實測出來的，不是想出來的）
+    Profile 單方向時每一個框都是滿版的（``directions="upright"`` 的框 y=0、
+    h=整張高），照「碰到邊界就算」的話**每一個框都會被丟掉**，只剩豁免的中心
+    那一塊 —— 6 個框變 1 個，而畫面上不會有任何錯誤訊息。滿版不是「放在邊上」，
+    它是「這一軸整個都要」。所以某一軸上框跟影像一樣長的時候，那一軸不判定。
+    """
+    h, w = float(patch_shape[0]), float(patch_shape[1])
+    m = max(0.0, float(margin))
+    kept, dropped, new_keep = [], 0, -1
+    for i, b in enumerate(boxes):
+        x, y, bw, bh = (float(v) for v in b)
+        near = ((bw < w and (x < m or x + bw > w - m))
+                or (bh < h and (y < m or y + bh > h - m)))
+        if near and i != int(keep):
+            dropped += 1
+            continue
+        if i == int(keep):
+            new_keep = len(kept)
+        kept.append(b)
+    return kept, dropped, new_keep
+
+
 def prefix_names(prefix: str, names: List[str]) -> List[str]:
     """把前綴套到一串特徵名上（前綴為空 = 原樣回傳）。"""
     p = str(prefix or "").strip()
@@ -390,10 +468,157 @@ def roi_rect_or_none(ctx, step_key: str, image, roi_name):
         # 具名 ROI 存的是正規化座標，一樣需要尺寸才展得開
         return None if shape is None else ctx.roi_rect(name, shape)
     # 具名 ROI 打錯字要講清楚，不要安靜地量整張圖
+    #
+    # 但「打錯字」不是唯一的原因：模板定位的區域可能**這一顆剛好沒落上**
+    # （模板比 patch 大，這張 patch 只看得到 cell 的一部分）。那時候叫使用者
+    # 「加一張 ROI 卡」是把他送去修一個沒有壞的東西 —— 定位卡把真正的原因寫在
+    # ``meta["regions_absent"]``，這裡照它說的講。
+    absent = (ctx.meta.get("regions_absent") or {}) if hasattr(ctx, "meta") else {}
+    if name in absent:
+        raise StepError(step_key,
+                        "region '%s' is not on this defect: %s. Regions that "
+                        "only appear on some defects cannot be measured on all "
+                        "of them - use the region's '_present' feature to tell "
+                        "those defects apart."
+                        % (name, absent[name]))
     raise StepError(step_key,
                     "region '%s' is not defined; available: %s. Add an ROI "
                     "card upstream, or leave roi empty for the whole image."
                     % (name, ctx.roi_names()))
+
+
+def set_region_family(ctx, step_key: str, name: str, norm_boxes,
+                      centre_index: int = 0, edge_dropped: int = 0) -> int:
+    """一組框 → **三個**具名區域：全部、缺陷那一塊、其餘那些（F11 Region-1）。
+
+    為什麼是三個
+    ------------
+    ADC 常問的是「缺陷那一塊比旁邊同材質的暗多少」。以前只有兩個名字：
+
+    * ``<name>``        —— 全部接起來的像素母體
+    * ``<name>_center`` —— 離 patch 正中心最近的那一塊（缺陷永遠在正中央）
+
+    少的正是**基準**。拿 ``<name>`` 當基準是有偏的：N 塊的時候缺陷佔 1/N 的
+    像素，N=4、缺陷偏 50 GLV 的話基準本身就被拉走 12.5 GLV —— 跟要量的量同一個
+    數量級。所以多一個 ``<name>_others``（除了中心那塊以外的每一塊）。
+
+    ⚠ **卡片不指派 target / reference。** 角色是「這一次比較」的屬性不是區域的
+    屬性 —— 同一塊 EPI 在一個比較裡是 target、在另一個裡是 reference（使用者
+    2026-08-18：「會有很多種組合，要 by 情況討論」）。角色寫進區域的話，每一種
+    比較都要複製一份區域，而區域是**畫**出來的。所以 Region 段只出名詞，
+    「拿哪兩個比」由下游那張卡的兩個下拉決定（F11 §3.3.6）。
+
+    只有一塊的時候 ``<name>_others`` **不存在**（不是空的、也不是退回整張圖）：
+    這張 patch 上就是沒有基準。記進 ``meta["regions_absent"]``，量測卡才報得出
+    真正的原因。回傳「其餘」有幾塊。
+
+    ``edge_dropped`` 是「靠邊」那個開關丟掉幾塊（:func:`drop_edge_boxes`）。
+    它只影響**那句話**：基準不見的原因是「這張 patch 上只有一份」還是「其餘
+    幾份都被你設定的邊界距離濾掉了」，處置完全不同（前者換張圖、後者改一個
+    數字），而預設那句話會把後者說成前者。
+    """
+    boxes = [tuple(float(v) for v in b) for b in norm_boxes]
+    if not boxes:
+        return 0
+    i = max(0, min(int(centre_index), len(boxes) - 1))
+    ctx.set_roi_boxes(name, boxes)
+    ctx.set_roi("%s_center" % name, boxes[i])
+
+    others = [b for k, b in enumerate(boxes) if k != i]
+    rest = "%s_others" % name
+    if others:
+        ctx.set_roi_boxes(rest, others)
+    else:
+        ctx.meta.setdefault("regions_absent", {})[rest] = (
+            ("every other copy of '%s' on this patch was left out for being "
+             "near the edge of the image (%d of them); lower “Closer to the "
+             "edge than”, or turn that setting off" % (name, edge_dropped))
+            if edge_dropped else
+            ("this patch only has one copy of '%s', so there is no other copy "
+             "to use as a baseline" % name))
+    return len(others)
+
+
+#: **每一張「找 ROI」的卡，對它吐的每一個區域，都寫這五個數字**（F11 Region-4）。
+#:
+#: 使用者 2026-08-18：「我認為各種找／給定 ROI 的方法，理想上輸出的東西要接近
+#: ⋯⋯現在不是不能用，而是現在有點像大家資料結構不一樣。」
+#:
+#: 在這之前三張卡各寫各的：Profile **一個都沒有**（只有卡自己的 `cross_*`）、
+#: Template 三個（`present` / `others_present` / `edge_dropped`）、GDS 四個
+#: （`present` / `pieces` / `area_px` / `clipped`）。於是下游（分數表達式、
+#: `Compare regions`、報表）**得先知道這個區域是誰找的**才問得出「它有沒有落
+#: 在這一顆上」—— 那正是漏出去的地方。
+#:
+#: 五個數字對應下游真正會問的五個問題：
+#:
+#: 1. ``present``      —— 這一顆上有沒有一個**真的定位到的**它（0/1）。
+#: 2. ``boxes``        —— 幾個框。
+#: 3. ``area_px``      —— 蓋了多少像素。
+#: 4. ``clipped``      —— 有沒有被框數上限**安靜地**砍掉（0/1）。
+#: 5. ``edge_dropped`` —— 因為靠邊被丟掉幾塊。
+#:
+#: 後兩個是「有沒有東西被無聲拿掉」，而那是這一類卡最容易騙人的地方：少掉一半
+#: 框的區域仍然算得出一個很正常的灰階值。
+#:
+#: ⚠ ``present`` 與 ``boxes`` **會不一致，而那是它們合起來要講的話**：Profile 與
+#: Template 定不出位置時會退回「整張圖」當保險（`locate_ok = 0`）。那時候框在、
+#: 但它不是那個區域 —— 於是 ``present = 0`` 而 ``boxes = 1``，正好講出「有東西
+#: 可以量，但它不是你要的那個」。一個數字答不了這件事。
+REGION_FACTS = ("present", "boxes", "area_px", "clipped", "edge_dropped")
+
+
+def region_fact_names(names) -> List[str]:
+    """``["epi", "epi_center"]`` → 這些區域會寫出來的 feature 名（供 lint／UI）。"""
+    out: List[str] = []
+    for name in names or ():
+        n = str(name or "").strip()
+        if n:
+            out.extend("%s_%s" % (n, f) for f in REGION_FACTS)
+    return out
+
+
+def region_facts(ctx, names, shape, clipped: bool = False,
+                 edge_dropped: int = 0,
+                 located: Optional[bool] = None) -> Dict[str, float]:
+    """算出 :data:`REGION_FACTS`（**照 ctx 裡真的存了什麼算**，不照卡片以為的）。
+
+    前三個從 ``ctx`` 讀回來，因為那才是下游真的會量到的東西 —— 卡片自己記一份
+    「我放了幾個框」很容易跟實際存進去的不一致，而那種 bug 極難發現
+    （同 `ctx.meta` 那條「UI 畫的就是引擎算的這一份」）。
+
+    ``clipped`` / ``edge_dropped`` 講的是**這一組區域是怎麼建出來的**，所以
+    一個家族（``<n>`` / ``<n>_center`` / ``<n>_others``）三個名字拿到同一個值。
+    重複是刻意的：下游手上只有**一個**名字（使用者在 `Compare regions` 上挑的
+    那一個），它必須不必知道那是不是衍生名就問得出全部五件事。
+
+    ``located=False`` 是「框在、但那是退回整張圖的保險，不是這個區域」——
+    只有那時候 ``present`` 才會跟 ``boxes`` 對不上（見上面的 ⚠）。
+    """
+    out: Dict[str, float] = {}
+    known = ctx.roi_names()
+    for name in names or ():
+        n = str(name or "").strip()
+        if not n:
+            continue
+        count = int(ctx.roi_count(n)) if n in known else 0
+        area = 0.0
+        if count:
+            area = float(sum(int(w) * int(h)
+                             for _x, _y, w, h in ctx.roi_rects(n, shape)))
+        ok = bool(count) if located is None else (bool(count) and located)
+        out["%s_present" % n] = 1.0 if ok else 0.0
+        out["%s_boxes" % n] = float(count)
+        out["%s_area_px" % n] = area
+        out["%s_clipped" % n] = 1.0 if clipped else 0.0
+        out["%s_edge_dropped" % n] = float(edge_dropped)
+    return out
+
+
+def region_family(name: str):
+    """一個區域名 → 它實際定義的三個名字（宣告用；空名字回空）。"""
+    n = str(name or "").strip()
+    return [n, "%s_center" % n, "%s_others" % n] if n else []
 
 
 def crop_to_roi(ctx, step_key: str, image, roi_name):

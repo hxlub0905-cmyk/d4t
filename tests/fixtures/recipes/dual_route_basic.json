@@ -2,7 +2,7 @@
   "recipe_id": "dual_route_basic",
   "version": 1,
   "author": "HX",
-  "description": "測試用的最小 recipe（不是給使用者看的範例）。ROI 卡在 F8 第五輪收斂成 Profile / Template / GDS，所以這裡量的是整張圖 —— 這幾條 e2e 測的是**引擎跑不跑得完、分數算不算得出來**，不是某一張 ROI 卡的行為。",
+  "description": "測試用的最小 recipe（不是給使用者看的範例）。ROI 卡在 F8 第五輪收斂成 Profile / Template / GDS，所以這裡量的是整張圖 —— 這幾條 e2e 測的是**引擎跑不跑得完、分數算不算得出來**，不是某一張 ROI 卡的行為。rsem 那條 route 沒有 ref，靠 `pattern_ref`（2026-08-18 之前叫 `golden_cell`）從圖自己的重複 pattern 疊一張出來。",
   "routes": {
     "ebi_patch": [
       "load",
@@ -98,7 +98,7 @@
       "enabled": true
     },
     "golden": {
-      "step": "golden_cell",
+      "step": "pattern_ref",
       "params": {
         "source": "test",
         "out": "ref",

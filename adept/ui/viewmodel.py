@@ -401,6 +401,25 @@ class RecipeModel:
                     streams.append(w)
         return streams
 
+    def available_regions(self, before_node: Optional[str] = None) -> List[str]:
+        """到 before_node（不含）為止定義了哪些具名區域，供下拉用（F11 Region-1）。
+
+        跟 :meth:`available_streams` 是同一個形狀，因為問題是同一個：使用者要打
+        的字必須跟上游卡片的輸出**一字不差**，而打錯的時候 lint 要跑一次才講。
+        程式本來就知道上游定義了什麼 —— 那就不該讓他用打的（同 F9-6 的理由）。
+        """
+        regions: List[str] = []
+        for nid in self.node_order:
+            if nid == before_node:
+                break
+            node = self.nodes[nid]
+            if not node.enabled:
+                continue
+            for r in get_step(node.step).resolve_regions_out(node.params):
+                if r and r not in regions:
+                    regions.append(r)
+        return regions
+
     # ---- 連線（F7-6）------------------------------------------------------
     def _topological_order(self, edges: List[Tuple[str, str]]) -> Optional[List[str]]:
         """依 edges 的拓撲排序；有循環回 ``None``。

@@ -24,7 +24,10 @@ F7-1 用它把 Studio 收斂成 patch-only（使用者當時的話是「**暫時
 
 ⚠ ``algo/period.py`` 仍然不要刪：它的 ``estimate_period`` / ``choose_origin``
 （相位搜尋）**是之後做 pattern-frame ROI 的唯一工具**
-（見 ``docs/history/plans/F7-canvas-and-taxonomy.md`` §4），不只 Golden Cell 在用。
+（見 ``docs/history/plans/F7-canvas-and-taxonomy.md`` §4）。2026-08-18
+Golden Cell 那兩張卡刪掉之後它在 ``adept/core`` 裡已經沒有呼叫者了 ——
+那正是它最容易被當成死碼順手刪掉的時候，所以這句話留在這裡，而
+``tests/test_ui_input_kinds.py::test_period_module_is_not_orphaned`` 是那張便利貼。
 
 CLI 不受影響
 ------------
@@ -32,10 +35,11 @@ CLI 不受影響
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, NamedTuple, Sequence, Tuple
 
 __all__ = [
     "SUPPORTED_KINDS", "HIDDEN_STEPS", "DEFAULT_KIND", "SHOW_SAMPLE_ENTRIES",
+    "INPUT_SOURCES", "ATTACHMENTS", "InputSource",
     "is_supported_kind", "visible_steps", "recipe_is_supported",
     "unsupported_kind_message",
 ]
@@ -51,14 +55,56 @@ SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder")
 #: 只有在不支援的型別下才有意義、因此不列進卡片庫的 step key。
 #:
 #: **2026-08-17（F11 Input-3）：空了。** 這裡原本收著 ``golden_cell`` 與
-#: ``cell_period``，理由是「它們存在的唯一目的是幫**單張影像**疊一張 ref 出來，
-#: 而 Studio 那時只吃兩兩成對的 patch」。現在單張那條路打開了
-#: （``rsem`` / ``folder`` / ``tiff_stack`` 都可能只有一張圖），那兩張卡就是
-#: 那條路**唯一**的 ref 來源 —— 繼續收著等於把功能打開一半。
+#: ``cell_period``。2026-08-18 那兩張卡的下場不一樣，而這一段就是那兩種下場的
+#: 對照：
+#:
+#: * ``cell_period`` —— **刪掉**（使用者：「不需要這功能」）。
+#: * ``golden_cell`` —— 先刪，同一天要回來並**改名**成 ``pattern_ref``
+#:   「Reference from pattern」（使用者：「那可能要拿回來 不過要改名字
+#:   不然會誤會」）。它現在正常地在 Compare 段的卡片庫裡。
+#: * ``align`` —— **收起來**（使用者：「之後真需要我再回來」）。
+#:
+#: **三種處置，判準都是使用者說了哪一句話**，不是我覺得那張卡有沒有用。
+#: 收起來＝卡片庫看不到、引擎照認、舊 recipe 照跑；刪掉＝`REGISTRY` 裡沒有，
+#: 舊 recipe 開起來是一條 ``unknown-step``；改名＝要一道遷移（見
+#: ``recipe._migrate_renamed_cards``，連分數表達式裡的 feature 名一起換）。
 #:
 #: 機制留著（一個 tuple、一個 `visible_steps()`）：下一次要暫時收起某張卡時，
 #: 加一個字串就好。
-HIDDEN_STEPS: Sequence[str] = ()
+#: 2026-08-18（F11 Region-1 第三輪）：**`align` 收起來了**。使用者定調
+#: 「我不喜歡 align 卡，我反而認為要拿掉這功能，之後真需要我再回來。目前座標系
+#: patch 的 test 跟 ref 一樣，有發現如果我拉 align 反而會飄掉 shift」。
+#:
+#: 那個「飄」有機制，而且是兩個（讀 `algo/align.py` 讀出來的）：
+#:
+#: 1. **量到的是雜訊 ＋ 缺陷偏移。** 真實位移接近 0 的時候，相關峰的位置由雜訊
+#:    決定；而 test 上有缺陷、ref 沒有，缺陷會把峰往自己那邊拉 —— 每一顆的缺陷
+#:    都不一樣，所以每一顆的 shift 都不一樣。
+#: 2. **只有 ref 被重採樣。** 次像素位移走 `cv2.INTER_LINEAR`（`apply_alignment`），
+#:    等於對 ref 過一次低通、test 沒有。`diff` 因此多一層跟缺陷無關的材質差 ——
+#:    正好違反 Enhance 段那條 `uneven-treatment`（「兩張圖不再可比」），只是那支
+#:    lint 管不到 align，因為它不是 Enhance 卡。
+#:
+#: **為什麼是收起來不是刪掉**：`tests/fixtures/recipes/dual_route_basic.json`
+#: 用了 align，而它撐著三組黃金值裡的兩組。刪掉 = 那份 recipe 開不起來 = 兩組
+#: 黃金值要重新定錨，而使用者說的是「之後真需要我再回來」。`HIDDEN_STEPS` 只過濾
+#: **卡片庫**：已經在用它的 recipe 照跑、CLI 照跑、黃金值一個字不動。
+#: 要回復就是把這個字串拿掉（F7-1 驗證過的那個判斷）。
+#:
+#: 2026-08-18（F11 Region-5 收尾）：**`pattern_ref` 也收起來了。** 使用者的話是
+#: 「請拿掉吧」，而那句話的上文是我提的「收起來只是加一個字串」。
+#:
+#: 為什麼它沒事做了：它原本被期待成「單張影像找 ROI 的第三種方法」，但那件事
+#: **Template 已經在做**（量過：1000×1000 → 625 個框，見計畫書 §3.3.20）。
+#: 它剩下的唯一能力是「從重複結構疊一張 ref 出來去相減」，而使用者現在的 RSEM
+#: 路線是「Region 段圈區域 → Compare regions 比層／比份」，用不到 ref。
+#:
+#: **為什麼是收起來不是刪掉**：這一張刪過一次，量出代價（rsem route 24/24 →
+#: 12/24）之後又被要回來（見計畫書 §3.4.2）。而且
+#: `tests/fixtures/recipes/dual_route_basic.json` 的 rsem route 正用著它，撐著
+#: 一組黃金值 —— 刪掉 = 那份 recipe 開不起來 = 黃金值要重新定錨。
+#: `HIDDEN_STEPS` 只過濾**卡片庫**：那份 recipe 照跑、CLI 照跑、黃金值一個字不動。
+HIDDEN_STEPS: Sequence[str] = ("align", "pattern_ref")
 
 #: 沒有資料集時 ``RecipeModel`` 用的 route 名稱。
 DEFAULT_KIND: str = SUPPORTED_KINDS[0]
@@ -77,6 +123,91 @@ DEFAULT_KIND: str = SUPPORTED_KINDS[0]
 #: 一行都沒動，測試照樣直接呼叫得到。範例 recipe 庫回來的那一天，
 #: 把這個常數改成 ``True`` 就整組回來 —— 跟 ``SUPPORTED_KINDS`` 同一套辦法。
 SHOW_SAMPLE_ENTRIES: bool = False
+
+
+class InputSource(NamedTuple):
+    """一個「資料從這裡進來」的入口。
+
+    **一種 source 一個入口，而入口這件事只寫在這一張表上**（2026-08-18，
+    使用者：「Input 部分 各種 image source 資料流 是否改成個別入口比較好
+    （但同時 UI 一開始進去的地方顯示也要改）」）。
+
+    在這張表出現之前，同一組入口被抄在三個地方：工具列三顆鈕的 tooltip、
+    空白狀態上的那一句話、導覽對話框上的那顆鈕。三份會漂 —— 而且已經漂了：
+    工具列有三顆 Open，空白狀態只講 KLARF（「Open a KLARF to see your patches
+    here.」），於是**帶著一個資料夾的圖片進來的人，在最大的那一塊畫面上找不到
+    自己那條路**。第四種（GLAS 匯出）更慘：卡片庫裡有一張 `Load layout labels`，
+    而它的入口那一顆鈕根本沒被 `addWidget` 到工具列上（見
+    `test_every_button_built_for_the_toolbar_is_actually_on_it`）。
+
+    欄位：
+
+    * ``key``    —— ``StudioWindow`` 上那顆鈕與那個 handler 的名字後綴。
+    * ``kinds``  —— 這條路產得出來的 ``dataset.kind``（可能不只一種：一份 KLARF
+      是 patch 還是一顆一張，**由檔案本身決定**，不該反過來問使用者）。
+    * ``title``  —— 鈕上的字。工具列與空白狀態用同一份。
+    * ``what``   —— 一句白話：**這條路吃的是什麼樣的檔案**。
+    * ``icon``   —— 自繪圖示的名字（`widgets.GLYPH_ICONS`）。
+    * ``has_klarf`` —— 進來之後寫不寫得回 KLARF。空白狀態上直接寫出來，
+      不是等使用者跑完一整批、打開 Export 才發現。
+    """
+
+    key: str
+    kinds: Tuple[str, ...]
+    title: str
+    what: str
+    icon: str
+    has_klarf: bool
+
+
+#: Studio 的四種資料入口（順序就是畫面上的順序）。
+#:
+#: KLARF 那一條服務兩種 kind，而那**不是**「一個入口服務兩種 source」的例外：
+#: patch 與一顆一張的差別寫在 KLARF 裡（`Images N { … }`），ingest 判得出來。
+#: 拆成兩顆鈕等於要使用者回答一個檔案已經回答了的問題，而答錯就是一個錯誤訊息。
+INPUT_SOURCES: Tuple[InputSource, ...] = (
+    InputSource(
+        key="klarf", kinds=("ebi_patch", "rsem"), title="Open KLARF…",
+        what=("A KLARF and its images - either a patch TIFF with several "
+              "pages per defect, or one image file per defect. Which one it "
+              "is comes from the KLARF, you do not have to say."),
+        icon="folder", has_klarf=True),
+    InputSource(
+        key="stack", kinds=("tiff_stack",), title="Open stack…",
+        what=("One multi-page TIFF and nothing else - you say how many pages "
+              "there are per defect, and every group of that many becomes "
+              "one defect."),
+        icon="stack", has_klarf=False),
+    InputSource(
+        key="folder", kinds=("folder",), title="Open folder…",
+        what="A folder of single images: every image file becomes one defect.",
+        icon="folder_open", has_klarf=False),
+)
+
+
+class Attachment(NamedTuple):
+    """掛在**已經載好的** lot 上的附加檔（不是第五種 source）。"""
+
+    key: str
+    title: str
+    what: str
+    icon: str
+    needs: str
+
+
+#: 附加檔的入口。第一個（也目前唯一的）是 GLAS 的 GDS 匯出。
+#:
+#: 它跟上面那三個分開，因為它回答的是不同的問題：三個 Open 是「這批資料在哪」，
+#: 這一個是「這批資料**還有一份別的程式產的東西**」。合在一起的話，沒有 lot
+#: 的時候它是一顆按了沒有意義的鈕。
+ATTACHMENTS: Tuple[Attachment, ...] = (
+    Attachment(
+        key="gds", title="Open GDS export…",
+        what=("Layout labels that GLAS exported for this lot: every defect "
+              "gets a label map, and the “GDS layers” card turns each layer "
+              "into a named region."),
+        icon="layers", needs="Load the lot first."),
+)
 
 
 def is_supported_kind(kind: Any) -> bool:

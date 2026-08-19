@@ -30,7 +30,8 @@ from __future__ import annotations
 
 import heapq
 import json
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
 from .expression import ExpressionError, parse_expression
@@ -315,6 +316,38 @@ def _migrate_renamed_values(nodes: Dict[str, "RecipeNode"]) -> None:
                                     enabled=node.enabled)
 
 
+def _migrate_template_regions(nodes: Dict[str, "RecipeNode"]) -> None:
+    """``roi_template`` 的一框一區域 → ``regions`` 字串（F11 Region-1）。
+
+    舊的：``roi_out="epi"`` ＋ ``roi_x/y/w/h`` 四個數字（一張卡只框得出一個矩形）。
+    新的：``regions="epi: 0.35,0,0.2,1"``（一張卡好幾個區域，每個好幾個矩形）。
+
+    ⚠ 判準是**舊東西在不在**（``roi_out`` 有沒有出現），不是「新東西不在」
+    （鐵則 9）。後者分不出「舊檔案靠舊預設」與「新 recipe 的區域剛好還沒標」
+    —— 而 ``to_json_dict → from_json_dict`` 是 ``run_batch`` 送 recipe 進 worker
+    的路，它一旦不是 identity，``workers=1`` 與 ``workers=2`` 就會算出不同的分數。
+
+    四個座標**沒有**預設值可以靠：舊卡的預設是整格（0,0,1,1），所以缺哪一個就
+    補那一個的舊預設，結果與舊版逐位元組相同。
+    """
+    from .cellrois import format_cell_rois
+
+    old_defaults = {"roi_x": 0.0, "roi_y": 0.0, "roi_w": 1.0, "roi_h": 1.0}
+    for nid, node in list(nodes.items()):
+        if node.step != "roi_template" or "roi_out" not in node.params:
+            continue
+        params = dict(node.params)
+        name = str(params.pop("roi_out", "") or "").strip()
+        box = tuple(float(params.pop(k, d) or 0.0)
+                    for k, d in old_defaults.items())
+        for k in old_defaults:
+            params.pop(k, None)
+        if name and box[2] > 0.0 and box[3] > 0.0:
+            params["regions"] = format_cell_rois([(name, [box])])
+        nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
+                                enabled=node.enabled)
+
+
 #: 單張影像的 route（一顆一張圖）—— 這幾條上的 `load_patch` 要換成 `load_single`。
 _SINGLE_IMAGE_KINDS = ("rsem", "folder")
 
@@ -401,6 +434,63 @@ def _migrate_merged_cards(nodes: Dict[str, "RecipeNode"]) -> None:
             params["streams"] = params.pop(primary_name)
             nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
                                     enabled=node.enabled)
+
+
+#: 只是**改了名字**的卡（key → 新 key，參數名一個都沒動）。
+#:
+#: 目前只有一筆：``golden_cell`` →「Reference from pattern」
+#: （2026-08-18）。改名的理由是使用者的一句話 ——「那可能要拿回來 不過要改名字
+#: 不然會誤會」：Template 卡的設定對話框裡也在疊 golden cell，畫面上兩個地方
+#: 同名，看起來像同一個功能做了兩次。
+#:
+#: 判準照鐵則 9 是「**舊東西在不在**」：node 的 step 是舊 key 就換。不看新 key
+#: 在不在 —— 那分不出「舊檔案」與「新 recipe 剛好長這樣」。
+#:
+#: ⚠ **feature 名也換了**（``golden_ghost`` / ``golden_px`` / ``golden_py`` →
+#: ``ref_sharpness`` / ``ref_px`` / ``ref_py``），而分數表達式裡可能寫著舊名字。
+#: 那一段由 :func:`_migrate_renamed_features` 處理，兩件事要一起做才完整。
+_RENAMED_CARDS = {
+    "golden_cell": "pattern_ref",
+}
+
+#: 跟著 :data:`_RENAMED_CARDS` 一起改名的 feature（舊名 → 新名）。
+_RENAMED_FEATURES = {
+    "golden_ghost": "ref_sharpness",
+    "golden_px": "ref_px",
+    "golden_py": "ref_py",
+}
+
+
+def _migrate_renamed_cards(nodes: Dict[str, "RecipeNode"]) -> None:
+    """只改了 key 的卡（參數原封不動）。"""
+    for nid, node in list(nodes.items()):
+        new_key = _RENAMED_CARDS.get(node.step)
+        if new_key is None:
+            continue
+        nodes[nid] = RecipeNode(id=node.id, step=new_key,
+                                params=dict(node.params),
+                                enabled=node.enabled)
+
+
+def _migrate_renamed_features(score: "ScoreSpec") -> "ScoreSpec":
+    """分數表達式裡的舊 feature 名換成新的。
+
+    **不換的話，舊 recipe 打開來是一條 `unknown-feature` 警告加一個算不出來的
+    分數** —— 而那個分數是這份 recipe 存在的理由。改卡片的名字卻不改它寫出來的
+    數字的名字，等於只搬了一半。
+
+    只換**整個識別字**（用邊界比對），不做子字串取代：``golden_px`` 若用
+    ``str.replace`` 去換，``my_golden_px_ratio`` 這種自訂名字會被打斷。
+    """
+    expr = str(getattr(score, "expr", "") or "")
+    if not expr:
+        return score
+    new_expr = re.sub(
+        r"\b(%s)\b" % "|".join(map(re.escape, _RENAMED_FEATURES)),
+        lambda m: _RENAMED_FEATURES[m.group(1)], expr)
+    if new_expr == expr:
+        return score
+    return replace(score, expr=new_expr)
 
 
 @dataclass
@@ -512,6 +602,11 @@ class Recipe:
         _migrate_renamed_values(nodes)
         # Input 卡按 source 拆成兩張之後，單張影像那條 route 要換卡（F11 Input-4）。
         _migrate_split_load_cards(nodes, routes)
+        # roi_template 的一框一區域 → regions 字串（F11 Region-1）。
+        _migrate_template_regions(nodes)
+        # 只改了名字的卡（＋分數表達式裡它寫出來的 feature 名）。
+        _migrate_renamed_cards(nodes)
+        score = _migrate_renamed_features(score)
         return cls(
             recipe_id=str(d["recipe_id"]),
             routes=routes,

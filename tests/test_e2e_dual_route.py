@@ -3,7 +3,8 @@
 
 - EBI patch（KLARF + multi-page TIFF，機台附 test/ref）走 ebi_patch route
 - Review SEM（KLARF + 每顆一張圖，沒有 ref）走 rsem route，
-  由 Golden Cell 卡自己疊一張參考圖出來
+  由「Reference from pattern」（`pattern_ref`，2026-08-18 之前叫
+  `golden_cell`）自己疊一張參考圖出來
 
 兩條 route 共用同一段算法與判定（相減 → 去噪 → SNR → blob → CD → GLV → 同一條
 分數表達式、同一個門檻），只有影像尺寸相關的幾何參數不同。
@@ -56,9 +57,9 @@ def test_routes_share_the_algo_and_adc_tail(recipe):
     shared = set(ebi) & set(rsem)
     for node_id in ("align", "sub", "dn", "snr", "cd"):
         assert node_id in shared, f"{node_id} 應由兩條 route 共用"
-    # rsem 多一張 Golden Cell 卡（自己造 ref）；ebi 沒有
+    # rsem 多一張「自己造 ref」的卡；ebi 沒有
     assert "golden" in rsem and "golden" not in ebi
-    assert recipe.nodes["golden"].step == "golden_cell"
+    assert recipe.nodes["golden"].step == "pattern_ref"
     assert recipe.nodes["golden"].params["out"] == "ref"
 
 
@@ -99,15 +100,20 @@ def test_same_recipe_scores_both_input_types(request, recipe, lot_name, expect_k
 
 
 def test_rsem_route_builds_its_own_reference(recipe, rsem_lot):
-    """RSEM 沒有 ref —— Golden Cell 必須造出一張，且與原圖同尺寸可相減。"""
+    """RSEM 沒有 ref —— `pattern_ref` 必須造出一張，且與原圖同尺寸可相減。
+
+    這一條是這個 repo 裡「單張影像也判得出缺陷」的**唯一**支撐點。2026-08-18
+    那張卡被刪過一次，而刪掉之後同一條 route 的分類正確率從 24/24 掉到 12/24
+    （＝猜銅板）—— 那個數字就是這一條測試在守的東西。
+    """
     from adept.core.pipeline import run_defect
 
     ds = load_dataset(rsem_lot["klarf"])
     res = run_defect(recipe, ds.items[0], "rsem", keep_context=True)
     assert res.ok, res.error
     ctx = res.context
-    assert "ref" in ctx.images, "Golden Cell 應產生 ref 影像流"
+    assert "ref" in ctx.images, "這張卡應產生 ref 影像流"
     assert ctx.images["ref"].shape == ctx.images["test"].shape
     assert "diff" in ctx.images
-    # Golden Cell 的診斷特徵要有意義（週期被找到）
-    assert res.features["golden_px"] >= 2 and res.features["golden_py"] >= 2
+    # 診斷特徵要有意義（週期被找到）
+    assert res.features["ref_px"] >= 2 and res.features["ref_py"] >= 2

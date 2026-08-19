@@ -42,7 +42,7 @@ from adept.core.pipeline import get_step
 from adept.core.pipeline.engine import run_defect
 
 from .gallery import make_thumb, thumb_placement
-from .theme import TOKENS
+from .theme import TOKENS, region_hex
 from .widgets import _qimage_from_uint8, apply_button_cursors
 
 __all__ = ["check_regions", "regions_of_node", "RegionThumb", "RegionCheckWindow"]
@@ -208,13 +208,22 @@ class RegionThumb(QFrame):
         else:
             p.fillRect(QRectF(4, 4, s, s), QColor(TOKENS["disabled_bg"]))
 
-        # 第一個框是**使用者命名的那個區域**，其餘是它的鄰段。用實線 vs 虛線
-        # 分開 —— 三個一樣的藍框排在一起，看不出哪個是主角。
-        for i, (_name, (x, y, w, h)) in enumerate(self.entry.get("boxes") or []):
-            pen = QPen(QColor(TOKENS["accent"]), 1.8)
-            if i:
+        # **一個區域一個顏色**，跟模板編輯器與影像串流同一組（`theme`）——
+        # 一張卡可以標好幾個區域，全部畫成同一個藍色的話，三個框排在一起看不出
+        # 哪個是哪個（2026-08-18 使用者回報的正是這件事，只是在另一個畫面上）。
+        # 每個區域**第一個**框畫粗實線、其餘畫細虛線：那一維講的是「主角 vs
+        # 鄰段」，跟顏色講的「哪一個區域」是兩個問題。
+        order: List[str] = []
+        seen: set = set()
+        for name, _rect in self.entry.get("boxes") or []:
+            if name not in order:
+                order.append(name)
+        for name, (x, y, w, h) in self.entry.get("boxes") or []:
+            pen = QPen(QColor(region_hex(order.index(name))), 1.8)
+            if name in seen:
                 pen.setWidthF(1.2)
                 pen.setStyle(Qt.DashLine)
+            seen.add(name)
             p.setPen(pen)
             p.setBrush(Qt.NoBrush)
             p.drawRect(QRectF(4 + x, 4 + y, w, h))

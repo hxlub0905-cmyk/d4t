@@ -50,6 +50,7 @@ from string import Template
 from typing import Any, Dict
 
 __all__ = [
+    "REGION_COLORS", "region_hex",
     "TOKENS", "PALETTES", "THEMES", "DEFAULT_THEME", "current_theme",
     "set_theme", "SEG_LABELS", "seg_hex", "seg_color", "seg_bg",
     "group_hex", "group_color", "build_stylesheet", "apply_theme",
@@ -209,6 +210,9 @@ _LIGHT: Dict[str, Any] = {
     #: F7-23 第二輪之前這是六個各自寫死的尺寸（22×22、24×22、30×22、寬 28、
     #: 寬 40、高 20）—— 同一種視覺語言，但沒有兩顆是一樣大的。
     "control_sm": "24px",
+    # 工具列的圖示鈕（F11 Region-1 第四輪）。24 px 的鈕配 14 px 的圖示，
+    # 圖示只佔一半 —— 使用者回報「蠻醜的」。34 讓圖示有地方呼吸。
+    "control_tool": "34px",
 }
 
 #: 暗色。n8n 的畫布是深中性色，不是純黑（純黑對比太硬，看久了刺眼）。
@@ -390,6 +394,25 @@ def group_hex(group: str) -> str:
     直方圖、Score/Bin 尾卡）仍然用它。兩個軸各有各的用途，見 docs/ARCHITECTURE.md。
     """
     return TOKENS[_STAGE_TOKENS.get(str(group), "stage_enhance")]
+
+
+#: **哪一個具名區域**的顏色（依出現順序輪流）。純字串、免 Qt。
+#:
+#: 住在 theme 而不是 `cell_canvas`，是因為它有**兩個**使用者：模板編輯器的畫布
+#: （使用者在那裡把 ROI1 畫成綠色的）與影像串流上的疊框。那兩個地方顯示的是
+#: 同一件事，顏色一旦不同，使用者在對話框裡認得的綠色 ROI1 到了 patch 上會變成
+#: 另一個顏色 —— 而畫面上沒有任何東西說得出它們是同一個。
+#:
+#: 要在深色的 SEM 影像上看得見，所以都偏亮。不用 ``accent`` 那一組：那是
+#: 「選取／焦點」的語彙，而這裡的顏色講的是**哪一個區域**，兩件事混在一起
+#: 使用者會以為藍色的那個是被選中的。
+REGION_COLORS = ("#5fd0a0", "#f0b429", "#7aa7ff", "#f07aa7",
+                 "#9ad14b", "#d18ef0", "#4bd1c8", "#f08a5f")
+
+
+def region_hex(index: int) -> str:
+    """第 ``index`` 個區域的顏色 hex。"""
+    return REGION_COLORS[int(index) % len(REGION_COLORS)]
 
 
 def group_color(group: str):
@@ -632,6 +655,10 @@ QPushButton#cardButton {
 QPushButton[shape="square"] {
     min-width: $control_sm; max-width: $control_sm;
     min-height: $control_sm; max-height: $control_sm; padding: 0px;
+}
+QPushButton[shape="tool"] {
+    min-width: $control_tool; max-width: $control_tool;
+    min-height: $control_tool; max-height: $control_tool; padding: 0px;
 }
 QPushButton[shape="wide"] {
     min-height: $control_sm; max-height: $control_sm; padding: 0px 8px;

@@ -282,11 +282,14 @@ def test_failing_to_locate_falls_back_loudly():
 
 
 def test_the_card_declares_both_regions_so_lint_can_see_them():
-    """量測卡指到沒人定義的區域是安靜出錯的老坑（§7）—— 兩個名字都要宣告
-    得出來，lint 才擋得住打錯字。"""
+    """量測卡指到沒人定義的區域是安靜出錯的老坑（§7）—— **三個**名字都要宣告
+    得出來，lint 才擋得住打錯字。
+
+    第三個 ``_others`` 是 F11 Region-1 加的基準（除了缺陷那一塊以外的每一塊）。
+    """
     step = get_step("roi_cross")
     out = step.resolve_regions_out({"roi_out": "xing"})
-    assert out == ["xing", "xing_center"]
+    assert out == ["xing", "xing_center", "xing_others"]
 
 
 def test_how_many_stripes_were_invented_is_visible():
@@ -612,3 +615,280 @@ def test_only_the_invented_stripes_borrow_the_median_width():
     widths = [b - a for a, b in s.selected]
     assert len(set(round(w, 2) for w in widths)) > 2, \
         "整排寬度不該被補線的那一根拉平：%s" % [round(w, 2) for w in widths]
+
+
+def test_the_other_crossings_are_the_baseline():
+    """「缺陷那一塊」跟「同一張圖上同材質的其餘那幾塊」要分得開（F11 Region-1）。
+
+    拿 ``<name>`` 當基準是**有偏的**：N 塊的時候缺陷佔 1/N 的像素。
+    """
+    img = _mg_epi()
+    ctx = Context(images={"test": img.copy(), "ref": img.copy()})
+    _run(ctx)
+
+    n = ctx.roi_count("cross")
+    assert n >= 2, "這張測試圖本來就該有好幾個交會處"
+    assert ctx.roi_count("cross_others") == n - 1
+    centre = ctx.roi_rect("cross_center", (SIZE, SIZE))
+    assert centre not in ctx.roi_rects("cross_others", (SIZE, SIZE))
+
+
+def test_one_crossing_means_there_is_no_baseline():
+    """只有一塊的時候 ``_others`` **不存在** —— 這張圖上就是沒有基準。"""
+    flat = np.full((SIZE, SIZE), BASE, np.float32)
+    ctx = Context(images={"test": flat.copy(), "ref": flat.copy()})
+    _run(ctx)                                   # 定位失敗 -> 只有「整張圖」一塊
+
+    assert ctx.roi_count("cross") == 1
+    assert "cross_others" not in ctx.roi_names()
+    assert "no other copy" in ctx.meta["regions_absent"]["cross_others"]
+
+
+# --------------------------------------------------------------------------- #
+# 一個方向（F11 Region-2c）—— 交會是特例，不是前提
+# --------------------------------------------------------------------------- #
+"""使用者的話：「profile 覺得有點太 custom for 我當初舉的例子了（實際上使用的
+機會偏少）」。他是對的，而過度貼合的位置是**可以指出來的一行**：
+`locate_crossings` 的「一軸失敗就整張失敗」。
+
+那一行是從需求（MG × EPI）抄下來的形狀，不是演算法的形狀 —— 一張只有一個
+方向有結構的 patch（密集 line/space 就是），投影本來就量得出每一根線在哪。
+擋住它的是卡片的形狀，不是能力。
+
+所以這一段斷言的是三件事：單方向真的做得到、它不會被另一個方向的空白扣分、
+以及**方向與放法對不起來時在跑之前就講**（那個組合會安靜地產出零個框）。
+"""
+
+
+def _lines_only(pitch: int = 24, width: int = 8, ox: int = 0,
+                noise: float = 2.0, seed: int = 3) -> np.ndarray:
+    """只有直條紋、橫向完全沒有結構的 patch —— 密集 line/space 就長這樣。"""
+    rng = np.random.default_rng(seed)
+    img = np.full((SIZE, SIZE), BASE, np.float32)
+    img[:, (np.arange(SIZE) + ox) % pitch < width] = MG_LV
+    return img + rng.normal(0.0, noise, img.shape).astype(np.float32)
+
+
+def _run_lines(**params) -> Context:
+    img = _lines_only(**{k: params.pop(k) for k in list(params)
+                         if k in ("pitch", "width", "ox", "noise", "seed")})
+    ctx = Context(images={"test": img.copy(), "ref": img.copy()})
+    p = {"source": "ref", "directions": "upright", "place": "crossing",
+         "inset": 0.0, "vertical_select": "brightest"}
+    p.update(params)
+    return get_step("roi_cross")().run(ctx, p)
+
+
+def test_a_patch_with_stripes_one_way_only_used_to_be_refused():
+    """回歸的錨：預設（兩個方向）對這種圖仍然、而且應該、定不出來。
+
+    這不是 bug —— 使用者要的是交會處，而這張圖沒有交會處。這一行存在是為了
+    證明下一個測試量到的是**新增的能力**，不是原本就會過的東西。
+    """
+    img = _lines_only()
+    res = algo_grid.locate_crossings(img, directions="both")
+    assert res.ok is False
+    assert "flat stripes" in res.reason
+
+
+def test_one_direction_locates_and_the_box_spans_the_whole_image():
+    ctx = _run_lines()
+    assert ctx.features["locate_ok"] == 1.0
+    boxes = ctx.roi_norm_rects("cross")
+    assert len(boxes) >= 4
+    for _x, y, _w, h in boxes:
+        assert y == pytest.approx(0.0, abs=1e-6)
+        assert h == pytest.approx(1.0, abs=1e-6)
+
+
+def test_the_boxes_land_on_the_stripes_not_between_them():
+    """滿版的框仍然要落在**要的那種材質**上 —— 這是這張卡唯一的工作。"""
+    img = _lines_only(ox=5)
+    ctx = Context(images={"ref": img})
+    get_step("roi_cross")().run(ctx, {
+        "source": "ref", "directions": "upright", "place": "crossing",
+        "inset": 0.0, "vertical_select": "brightest"})
+    for x, _y, w, _h in ctx.roi_norm_rects("cross"):
+        cols = img[:, int(round(x * SIZE)):int(round((x + w) * SIZE))]
+        assert cols.mean() > (BASE + MG_LV) / 2.0
+
+
+def test_the_direction_that_is_not_used_cannot_veto_the_defect():
+    """空白的那個方向信心是 0，而 0 < min_confidence。
+
+    拿一個沒問的問題去否決一顆算得出來的 defect，是這張卡原本的行為 ——
+    它安靜地把每一顆都標成 locate_ok = 0。
+    """
+    img = _lines_only()
+    res = algo_grid.locate_crossings(img, directions="upright",
+                                     min_confidence=5.0)
+    assert res.ok is True
+    assert res.y.confidence == 0.0        # 沒在看的那一軸真的是空的
+    assert res.confidence >= 5.0          # 但它不參與那道閘門
+
+
+def test_the_flat_direction_works_the_same_way_round():
+    img = _lines_only().T.copy()
+    res = algo_grid.locate_crossings(img, directions="flat",
+                                     placement="crossing")
+    assert res.ok is True
+    for _x, _y, w, _h in res.boxes:
+        assert w == img.shape[1]
+
+
+def test_beside_still_means_beside_when_there_is_only_one_direction():
+    ctx = _run_lines(place="beside_vertical", box_size=5.0)
+    boxes = ctx.roi_norm_rects("cross")
+    assert len(boxes) >= 8                # 一根線左右各一個
+    for _x, y, _w, h in boxes:
+        assert (y, h) == pytest.approx((0.0, 1.0), abs=1e-6)
+
+
+def test_a_placement_that_needs_the_other_direction_is_refused_before_the_run():
+    """「只看直的」＋「框放在兩根**橫**條紋之間」是空集合。
+
+    它不會報錯，它會安靜地產出零個框、退回整張圖、把每一顆都標成
+    locate_ok = 0 —— 而畫面上看起來就跟「這批圖沒有結構」一模一樣。
+    """
+    card = get_step("roi_cross")
+    says = card.configuration_issues({"directions": "upright",
+                                      "place": "between_horizontal"})
+    assert says and "left-to-right" in says[0]
+    assert card.configuration_issues({"directions": "upright",
+                                      "place": "between_vertical"}) == []
+    assert card.configuration_issues({"directions": "both",
+                                      "place": "between_horizontal"}) == []
+
+
+def test_the_run_says_the_same_thing_if_it_gets_there_anyway():
+    """CLI 不看 configuration_issues，所以那句話在引擎裡也要有一份。"""
+    res = algo_grid.locate_crossings(_lines_only(), directions="upright",
+                                     placement="beside_horizontal")
+    assert res.ok is False
+    assert "flat stripes" in res.reason and "other direction" in res.reason
+
+
+def test_an_old_recipe_keeps_looking_both_ways():
+    """鐵則 9：舊 recipe 沒有 ``directions`` 這個鍵 → 預設必須是舊行為。"""
+    spec = {s.name: s for s in get_step("roi_cross").params}["directions"]
+    assert spec.default == "both"
+    ctx = _run(_ctx())                     # 完全不提 directions
+    assert ctx.features["locate_ok"] == 1.0
+
+
+def test_the_two_sets_of_stripe_settings_disappear_with_the_direction():
+    """一個方向不看的時候，它那六格參數不該還在畫面上等人填。"""
+    specs = {s.name: s for s in get_step("roi_cross").params}
+    assert specs["vertical_pitch"].show_when == ("directions",
+                                                 ("both", "upright"))
+    assert specs["horizontal_sensitivity"].show_when == ("directions",
+                                                         ("both", "flat"))
+    assert specs["smooth"].show_when is None      # 共用的那一顆留著
+
+
+# --------------------------------------------------------------------------- #
+# 靠邊的框不要（F11 Region 第八輪，使用者要求）—— 兩張 Region 卡共用
+# --------------------------------------------------------------------------- #
+"""使用者：「Profile 跟 Template 都幫我 gen 一個 checkbox（可勾選要不要使用的），
+功能是靠近邊界 n pixel 內的 ROI box 會被自動拿掉。」
+
+一個框壓在 patch 邊上，量到的是**半截的**那一塊：像素少、而且少掉的是同一側的
+那一半。它照樣吐得出一個看起來完全正常的灰階值，而它會混進 `<name>_others`
+那個基準裡。
+
+這一段斷言三件會出錯而且不會報錯的事：預設不能改變任何舊行為、**缺陷那一塊
+永遠留著**、以及**滿版的那一軸不算靠邊**（不然單方向的 Profile 會被清空）。
+"""
+
+
+def _edge_ctx(**params) -> Context:
+    img = _lines_only()
+    ctx = Context(images={"ref": img})
+    p = {"source": "ref", "directions": "upright", "place": "crossing",
+         "inset": 0.0, "vertical_select": "brightest"}
+    p.update(params)
+    get_step("roi_cross")().run(ctx, p)
+    return ctx
+
+
+def test_the_switch_is_off_by_default_and_changes_nothing():
+    """鐵則 9：舊 recipe 沒有這兩個鍵，行為必須逐位元組不變。"""
+    specs = {s.name: s for s in get_step("roi_cross").params}
+    assert specs["drop_edge"].default is False
+    plain = _edge_ctx()
+    same = _edge_ctx(drop_edge=False, edge_margin=64.0)
+    assert (plain.roi_norm_rects("cross")
+            == same.roi_norm_rects("cross"))
+    assert plain.features["cross_edge_dropped"] == 0.0
+
+
+def test_the_boxes_that_hang_off_the_edge_go():
+    off = _edge_ctx()
+    on = _edge_ctx(drop_edge=True, edge_margin=6.0)
+    xs_off = sorted(r[0] for r in off.roi_rects("cross", (SIZE, SIZE)))
+    xs_on = sorted(r[0] for r in on.roi_rects("cross", (SIZE, SIZE)))
+    assert xs_off[0] < 6 and xs_off[-1] > SIZE - 6 - 8    # 前提：真的有靠邊的
+    assert xs_on[0] >= 6 and xs_on[-1] + 8 <= SIZE - 6
+    assert on.features["cross_edge_dropped"] == len(xs_off) - len(xs_on)
+    assert on.features["cross_count"] == float(len(xs_on))
+
+
+def test_the_axis_the_box_spans_completely_does_not_count_as_near_the_edge():
+    """**這一條是量出來的，不是想出來的。**
+
+    單方向的 Profile 每一個框都是滿版的（y=0、高 = 整張圖）。照「碰到邊界就算
+    靠邊」的話**每一個框都會被丟掉**，只剩豁免的中心那一塊 —— 6 個變 1 個，
+    而畫面上不會有任何錯誤訊息。滿版不是「放在邊上」，是「這一軸整個都要」。
+    """
+    on = _edge_ctx(drop_edge=True, edge_margin=6.0)
+    boxes = on.roi_rects("cross", (SIZE, SIZE))
+    assert len(boxes) >= 4, "滿版的那一軸把整組清空了"
+    for _x, y, _w, h in boxes:
+        assert (y, h) == (0, SIZE)
+
+
+def test_the_box_the_defect_is_in_is_never_dropped():
+    """``_center`` 不是母體裡的一個樣本，它是**被量的那個東西**。
+
+    丟掉它的話 ``_center`` 會安靜地指到另一塊 —— 那一塊裡沒有缺陷，而下游每一個
+    數字都照樣算得出來。
+    """
+    before = _edge_ctx().roi_rect("cross_center", (SIZE, SIZE))
+    after = _edge_ctx(drop_edge=True, edge_margin=64.0).roi_rect(
+        "cross_center", (SIZE, SIZE))
+    assert before == after
+    assert _edge_ctx(drop_edge=True, edge_margin=64.0).roi_count("cross") == 1
+
+
+def test_losing_the_baseline_to_the_filter_says_so():
+    """「這張 patch 只有一份」與「其餘都被你設的距離濾掉了」處置完全相反 ——
+    前者換張圖，後者改一個數字。預設那句話會把後者說成前者。"""
+    ctx = _edge_ctx(drop_edge=True, edge_margin=64.0)
+    assert ctx.roi_count("cross_others") == 0
+    why = ctx.meta["regions_absent"]["cross_others"]
+    assert "near the edge" in why and "Closer to the edge than" in why
+
+
+def test_the_panel_sees_the_same_boxes_that_were_measured():
+    """UI 畫的就是引擎算的那一份 —— 濾掉之後 meta 也要跟著少。"""
+    ctx = _edge_ctx(drop_edge=True, edge_margin=6.0, roi_out="cross")
+    rec = ctx.meta["crossings"]["cross"]
+    assert len(rec["boxes"]) == ctx.roi_count("cross")
+    assert rec["edge_dropped"] == ctx.features["cross_edge_dropped"]
+
+
+def test_the_pixel_box_survives_the_recipe_round_trip():
+    """``to_json_dict → from_json_dict`` 一旦不是 identity，workers=1 與
+    workers=2 就會算出不同的分數（鐵則 9）。bool 走 JSON 要活著回來。"""
+    from adept.core.pipeline.recipe import Recipe
+
+    doc = {"recipe_id": "r", "routes": {"main": ["n1"]},
+           "score": {"expr": "0", "bins": []},
+           "nodes": {"n1": {"id": "n1", "step": "roi_cross",
+                            "params": {"drop_edge": True,
+                                       "edge_margin": 7.5}}}}
+    once = Recipe.from_json_dict(doc).to_json_dict()
+    back = Recipe.from_json_dict(once)
+    assert back.to_json_dict() == once
+    p = back.nodes["n1"].params
+    assert p["drop_edge"] is True and p["edge_margin"] == 7.5

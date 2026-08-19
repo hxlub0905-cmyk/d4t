@@ -100,13 +100,46 @@ def _fail_dict(item: Any, err: BaseException) -> Dict[str, Any]:
     }
 
 
+def _sidecar_token(dataset: Any) -> str:
+    """掛上去的**附加檔**（GLAS 的 label map）也要進 token。
+
+    為什麼這一段非有不可（F11 Region-3 第 2 步）
+    --------------------------------------------
+    有 KLARF 的時候，下面那條路只看 **KLARF 的 stat** —— 而換一份 GDS 匯出
+    完全不會動到 KLARF。於是「同一個 lot、換一個 mask 目錄」的 token 一模一樣，
+    影像段快取就會把**上一份匯出算出來的框**餵回來：跑得完、有數字、而且是錯的
+    （鐵則 9 講的正是這個形狀）。
+
+    一顆都沒有 sidecar 時回空字串，**token 因此逐字元不變** —— 既有的快取目錄
+    與黃金值不受影響。
+    """
+    h = hashlib.sha1()
+    seen = False
+    for item in getattr(dataset, "items", []) or []:
+        cars = getattr(item, "sidecars", None) or {}
+        for name in sorted(cars):
+            seen = True
+            ref = cars[name]
+            h.update(f"|{getattr(item, 'defect_id', '')}|{name}"
+                     f"|{ref.path}|{ref.page}".encode("utf-8"))
+            try:
+                st = os.stat(ref.path)
+                h.update(f"|{st.st_mtime_ns}|{st.st_size}".encode("utf-8"))
+            except OSError:
+                pass
+    return "|sidecars:" + h.hexdigest() if seen else ""
+
+
 def _dataset_token_for(dataset: Any) -> str:
     """由 Dataset 推 lot token：有 KLARF 就用檔案 stat（重產 lot 自動失效）；
-    folder / 無 KLARF 模式退化為各 item 影像來源（路徑+mtime+size）的 sha1。"""
+    folder / 無 KLARF 模式退化為各 item 影像來源（路徑+mtime+size）的 sha1。
+
+    兩條路後面都接 :func:`_sidecar_token` —— 見那一支的說明。
+    """
     doc = getattr(dataset, "klarf", None)
     src = getattr(doc, "source_path", None) if doc is not None else None
     if src and os.path.exists(str(src)):
-        return dataset_token(src)
+        return dataset_token(src) + _sidecar_token(dataset)
     h = hashlib.sha1()
     h.update(str(getattr(dataset, "kind", "")).encode("utf-8"))
     for item in getattr(dataset, "items", []) or []:
@@ -120,7 +153,7 @@ def _dataset_token_for(dataset: Any) -> str:
                 h.update(f"|{st.st_mtime_ns}|{st.st_size}".encode("utf-8"))
             except OSError:
                 pass
-    return "items:" + h.hexdigest()
+    return "items:" + h.hexdigest() + _sidecar_token(dataset)
 
 
 def _pool_context():

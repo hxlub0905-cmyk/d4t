@@ -7,8 +7,11 @@ KLARF 列尾用 `Images 1 { "檔名" … }` 指到那個檔。這裡驗證：
   3. 同 seed → 位元組完全相同（KLARF 與影像）；
   4. 單張影像走 `load_single` 卡，它吐**一條**具名流（F11 Input-4 起；
      在那之前是 `load_patch` 把 single **鏡射**成 test，而那讓畫布上多一顆假的埠）；
-  5. Golden Cell 路線（cell_period → golden_cell）在這份資料上跑得通
-     —— 這是 M4「同一份 recipe 吃 EBI patch 與 RSEM」的驗收前提；
+  5. 這份合成資料**真的是週期性的、而且真的種了缺陷** —— 用 `algo/golden.py`
+     疊一張參考圖出來直接量殘差。（以前這一段走的是 `cell_period` → `golden_cell`
+     兩張卡。2026-08-18 那兩張一張刪掉、一張改名成 `pattern_ref` —— 而這裡要測的
+     從來就不是卡片，是**產生器**，所以改成直接呼叫演算法，跟卡片怎麼改都無關。
+     卡片那一層的驗收在 `tests/test_pattern_ref.py`。）
   6. `--real-frac 0` 的 lot 真的沒有種缺陷。
 """
 from __future__ import annotations
@@ -165,26 +168,45 @@ def test_the_declared_stream_is_the_name_the_user_gave():
         assert cls.resolve_writes_for_kind({"out": "test"}, kind) == ["test"]
 
 
-# ------------------------------------------------------------ 5. Golden Cell 路線
+# ------------------------------------------------------------ 5. 產生器的週期與缺陷
 
-def test_golden_cell_route_on_real_defect(ds, truth):
+def _stacked_reference(gray):
+    """把週期性影像疊成一張乾淨的參考圖（`golden_cell` 卡以前做的那件事）。
+
+    這裡**刻意直接呼叫演算法**，不透過卡片：這一節測的是
+    `tools/make_sample_rsem.py` 產出的資料（它是不是真的週期性、有沒有真的種
+    缺陷），而那件事跟卡片庫裡有沒有那張卡、那張卡叫什麼名字都無關。
+    2026-08-18 那兩張卡一張刪一張改名，這一節一個字都不用動 —— 那正是它該有的
+    樣子：它守的是 fixture。
+    """
+    from adept.core.algo import golden as algo_golden
+    from adept.core.algo import period as algo_period
+
+    res = algo_period.estimate_period(gray)
+    px, py = int(res.px or 0), int(res.py or 0)
+    assert px > 1 and py > 1, "這份合成資料應該量得出週期"
+    origin = algo_period.choose_origin(gray.shape, px, py, image=gray)
+    stacked = algo_golden.stack_cells(gray, px, py, method="median",
+                                      origin=origin)
+    ox, oy = origin
+    h, w = gray.shape[:2]
+    xi = (np.arange(w) - ox) % px
+    yi = (np.arange(h) - oy) % py
+    return (px, py), stacked[np.ix_(yi, xi)]
+
+
+def test_the_generator_plants_a_defect_on_a_periodic_layout(ds, truth):
     real = [it for it in ds.items if truth[it.defect_id]["is_real"]]
     assert real, "這份 lot 應該要有 REAL 缺陷"
     it = real[0]
 
     ctx = Context(meta={"_defect_item": it, "_dataset_kind": ds.kind})
     run_step("load_single", ctx, out="test")
-    run_step("cell_period", ctx)
-    assert abs(ctx.features["cell_px"] - PITCH) <= 2
-    assert abs(ctx.features["cell_py"] - PITCH) <= 2
+    single = np.asarray(ctx.images["test"])
 
-    run_step("golden_cell", ctx)
-    single = ctx.images["test"]
-    ref = ctx.images["ref"]
+    (px, py), ref = _stacked_reference(single)
+    assert abs(px - PITCH) <= 2 and abs(py - PITCH) <= 2
     assert ref.shape == single.shape
-    assert ref.dtype == single.dtype
-    # 疊出來的參考圖要乾淨（缺陷被洗掉），而且和原圖在缺陷處差得出來
-    assert ctx.features["golden_ghost"] > 50.0
     residual = np.abs(single.astype(np.float64) - ref.astype(np.float64))
     assert residual.max() > RESIDUAL_THRESHOLD
 
@@ -202,10 +224,9 @@ def test_real_frac_zero_has_no_planted_defect(tmp_path):
     for it in ds0.items:
         ctx = Context(meta={"_defect_item": it, "_dataset_kind": ds0.kind})
         run_step("load_single", ctx, out="test")
-        run_step("cell_period", ctx)
-        run_step("golden_cell", ctx)
-        residual = np.abs(ctx.images["test"].astype(np.float64)
-                          - ctx.images["ref"].astype(np.float64))
+        single = np.asarray(ctx.images["test"])
+        residual = np.abs(single.astype(np.float64)
+                          - _stacked_reference(single)[1].astype(np.float64))
         assert residual.max() < RESIDUAL_THRESHOLD, \
             f"defect {it.defect_id} 不該有缺陷，殘差峰值卻是 {residual.max():.1f}"
 

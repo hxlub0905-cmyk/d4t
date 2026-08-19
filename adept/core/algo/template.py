@@ -53,9 +53,10 @@ margin 0.01–0.24。**structure 這一關差了一個數量級**，另外兩關
 from __future__ import annotations
 
 import base64
+import math
 import zlib
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -78,7 +79,20 @@ __all__ = [
 #: （公司機的 DLP 擋的是二進位壓縮檔，見 docs/HANDOVER.md §5）。
 #: 先過 zlib：SEM 的 cell 有雜訊、壓不了太多（實測約剩七成），
 #: 但一個週期本來就小，這個大小塞進 recipe JSON 完全沒問題。
-CELL_ENCODING = "gc1"
+CELL_ENCODING = "gc2"
+
+#: 「這個 cell 自己重複幾次」的判準：把 cell 捲動 1/k 之後跟自己的 NCC。
+#: 實測（合成資料）：真的自週期 0.995–0.998，其餘的除數 ≤ 0.75 —— 中間的空隙
+#: 很大，門檻放 0.9 兩邊都安全。
+SELF_PERIOD_NCC = 0.9
+
+#: 真的週期與「這一軸是平的」要分得開：捲半個週期至少要掉這麼多 NCC。
+#: 實測 0.998 vs 0.52（差 0.48）對上平軸的 ≈ 0（兩個都 ≈ 1）。
+SELF_PERIOD_MARGIN = 0.15
+
+#: 自週期最多找到 1/k 為止。使用者手動放大的 cell 是 2×、3× 這種量級 ——
+#: 往下找到 1/32 只會開始撿到雜訊。
+MAX_SELF_REPEAT = 8
 
 #: 一軸上的週期信心要多少才算數（``period.estimate_period`` 的 0–100 分）。
 #: 實測：純雜訊約 20，真的有週期的約 87 —— 門檻放中間兩邊都安全。
@@ -270,33 +284,122 @@ def build_golden_cell(image: Any, px: Optional[int] = None,
 # --------------------------------------------------------------------------- #
 # 存進 recipe（純文字）
 # --------------------------------------------------------------------------- #
-def encode_cell(cell: np.ndarray) -> str:
-    """``(h, w)`` uint8 → ``"gc1:<w>x<h>:<base64>"``（見 :data:`CELL_ENCODING`）。"""
+def _roll_ncc(cell: np.ndarray, shift: int, axis: int) -> float:
+    """把 cell 捲動 ``shift`` 之後跟自己有多像（NCC，對亮度變化免疫）。"""
+    a = cell.astype(np.float64).ravel()
+    b = np.roll(cell, shift, axis=axis).astype(np.float64).ravel()
+    a = a - a.mean()
+    b = b - b.mean()
+    den = float(np.sqrt((a * a).sum() * (b * b).sum()))
+    return float((a * b).sum() / den) if den else 0.0
+
+
+def cell_self_period(cell: Any) -> Tuple[int, int]:
+    """這個 cell **自己**重複的單元有多大 ``(sx, sy)``（不重複就回 cell 尺寸）。
+
+    為什麼需要它（使用者 2026-08-18）
+    ---------------------------------
+    使用者可以把 cell 取成量到的週期的 2×（「有時候會需要 2X 大 cell」）。那時候
+    影像其實仍然以 1× 重複，於是 :func:`match_patch` 的相關面**摺回一個 cell**
+    之後，一個週期裡有兩個一模一樣的峰 —— 最高 ＝ 次高 → ``margin`` 歸零。
+    實測：1× 的 cell margin 0.37–0.61，2× 與 3× 都是 **0.000**，而 score 仍然
+    1.00。比對是完美的，它只是**不唯一**，但預設 ``min_margin`` 會把每一顆都
+    判成定不出來。
+
+    為什麼是「驗證除數」而不是「估週期」
+    ------------------------------------
+    拿 ``period.estimate_period`` 量這個 cell 會得到**假的**答案：實測那張
+    MG/EPI 的 cell 回 20 px，因為兩條亮邊剛好間隔 20 —— 但圖案在 20 px 上並不
+    重複（中間一段是 MG、另一段是 EPI）。估週期看的是「哪個間距有起伏」，
+    而這裡要問的是**捲過去之後整張圖對不對得起來**，那是一個可以直接驗的問題。
+
+    所以只試 ``1/k``（k = 2…8，且要整除），取通過的最小單元。實測分得很開：
+    真的自週期 NCC 0.995–0.998，其餘除數 ≤ 0.75。
+
+    ⚠ **平的那一軸對任何位移都相似**，而那不是週期。一維 layout 的 Y 軸就是平的
+    （cell 高 = 整張影像），第一版因此回報「自週期 30 px」—— 一個純粹的假答案。
+    所以還要過一關：捲動**半個**候選週期必須明顯**不**像。真的週期分得開
+    （實測 0.998 vs 0.52），平的軸分不開（兩個都 ≈ 1）→ 判定沒有自週期。
+    """
+    c = np.asarray(cell)
+    if c.ndim != 2 or c.size == 0:
+        return (0, 0)
+    h, w = int(c.shape[0]), int(c.shape[1])
+    out = [w, h]
+    for axis, span in ((1, w), (0, h)):
+        for k in range(MAX_SELF_REPEAT, 1, -1):          # 先試最小的單元
+            if span % k or span // k < 2:
+                continue
+            d = span // k
+            hit = _roll_ncc(c, d, axis)
+            if hit < SELF_PERIOD_NCC:
+                continue
+            # 捲半個週期要**明顯不像** —— 不然那一軸只是平的（見 docstring）
+            if hit - _roll_ncc(c, max(1, d // 2), axis) < SELF_PERIOD_MARGIN:
+                continue
+            out[1 - axis] = d
+            break
+    return (int(out[0]), int(out[1]))
+
+
+def encode_cell(cell: np.ndarray, self_period: Optional[Tuple[int, int]] = None
+                ) -> str:
+    """``(h, w)`` uint8 → ``"gc2:<w>x<h>:<sx>x<sy>:<base64>"``。
+
+    ``sx``/``sy`` 是這個 cell **自己**重複的單元（見 :func:`cell_self_period`）。
+    存進字串而不是每一顆重算：它是模板的性質，一份模板只有一個答案，而
+    ``run_defect`` 是逐顆呼叫的。留空就當場量。
+
+    舊的 ``gc1:``（沒有自週期）照樣讀得動 —— 那時候自週期視同 cell 尺寸，
+    也就是**跟以前完全一樣的行為**（黃金值不動）。
+    """
     a = np.asarray(cell)
     if a.ndim != 2 or a.size == 0:
         return ""
     u8 = _gray_u8(a)
     h, w = u8.shape
+    sx, sy = self_period if self_period else cell_self_period(u8)
     blob = base64.b64encode(zlib.compress(u8.tobytes(), 6)).decode("ascii")
-    return "%s:%dx%d:%s" % (CELL_ENCODING, w, h, blob)
+    return "%s:%dx%d:%dx%d:%s" % (CELL_ENCODING, w, h, int(sx), int(sy), blob)
 
 
-def decode_cell(text: str) -> Optional[np.ndarray]:
-    """:func:`encode_cell` 的反向；格式不對回 ``None``（絕不 raise）。"""
+def decode_template(text: str) -> Optional[Tuple[np.ndarray, Tuple[int, int]]]:
+    """字串 → ``(cell, (sx, sy))``；格式不對回 ``None``（絕不 raise）。
+
+    讀得懂兩種標籤：``gc2`` 帶自週期，``gc1``（舊的）沒有 —— 那時候自週期視同
+    cell 尺寸，行為與以前逐位元組相同。
+    """
     s = str(text or "").strip()
     if not s:
         return None
     try:
-        tag, size, blob = s.split(":", 2)
-        if tag != CELL_ENCODING:
+        parts = s.split(":")
+        tag = parts[0]
+        if tag == "gc1" and len(parts) == 3:
+            size, self_size, blob = parts[1], None, parts[2]
+        elif tag == "gc2" and len(parts) == 4:
+            size, self_size, blob = parts[1], parts[2], parts[3]
+        else:
             return None
         w, h = (int(v) for v in size.split("x"))
         raw = zlib.decompress(base64.b64decode(blob.encode("ascii")))
         if w < 1 or h < 1 or len(raw) != w * h:
             return None
-        return np.frombuffer(raw, dtype=np.uint8).reshape(h, w).copy()
+        cell = np.frombuffer(raw, dtype=np.uint8).reshape(h, w).copy()
+        if self_size is None:
+            return cell, (w, h)
+        sx, sy = (int(v) for v in self_size.split("x"))
+        if not (1 <= sx <= w and 1 <= sy <= h):
+            return cell, (w, h)
+        return cell, (sx, sy)
     except Exception:                       # noqa: BLE001 — 壞字串一律當沒有
         return None
+
+
+def decode_cell(text: str) -> Optional[np.ndarray]:
+    """:func:`decode_template` 的方便版：只要 cell 那張圖。"""
+    got = decode_template(text)
+    return None if got is None else got[0]
 
 
 # --------------------------------------------------------------------------- #
@@ -342,7 +445,8 @@ def match_patch(cell: np.ndarray, patch: Any,
                 min_score: float = 0.3,
                 min_margin: float = 0.05,
                 min_structure: float = 5.0,
-                periodic: Tuple[bool, bool] = (True, True)) -> MatchResult:
+                periodic: Tuple[bool, bool] = (True, True),
+                self_period: Optional[Tuple[int, int]] = None) -> MatchResult:
     """把 ``patch`` 對回 ``cell`` 的相位。
 
     ``margin``（峰的突出程度）是判斷「這張定得出來嗎」的依據 ——
@@ -352,6 +456,18 @@ def match_patch(cell: np.ndarray, patch: Any,
     可言，硬要在 Y 上搜尋只會讓相關面變平、把峰的突出程度稀釋掉 ——
     也就是把「定得出來」誤判成「定不出來」。壓成一維之後，這條路剛好就退化成
     投影定位在做的事（``algo/profile.py``），兩個方法在這裡是一致的。
+
+    ``self_period``：這個 cell **自己**重複的單元（見 :func:`cell_self_period`）。
+    留空 = 視同 cell 尺寸，也就是與以前逐位元組相同的行為。
+
+    **位置與確定度摺在不同的週期上，這是刻意的**：
+
+    * **位置**（``phase_x``/``phase_y``）摺在 **cell** 上 —— 框是標在整個 cell 上
+      的，所以要知道 patch 對到 cell 的哪裡。
+    * **確定度**（``margin``）摺在**自週期**上 —— 一個 2× 的 cell 裡那兩個峰是
+      **同一個答案的複本**，不是「另一個答案」。摺在 cell 上的話最高 ＝ 次高、
+      margin 歸零（實測 1× 是 0.37–0.61，2×／3× 都是 0.000），而預設門檻會把
+      每一顆都判成定不出來。
     """
     c = np.asarray(cell)
     p = _gray_u8(patch)
@@ -385,15 +501,24 @@ def match_patch(cell: np.ndarray, patch: Any,
     folded = _fold_to_period(surface, cx, cy)
     peak_idx = int(np.argmax(folded))
     fy, fx = np.unravel_index(peak_idx, folded.shape)
-    best_folded = float(folded[fy, fx])
+
+    # 確定度摺在**自週期**上（見 docstring）。壓成一維的那一軸沒有自週期可言，
+    # 所以夾在目前的 c.shape 裡。
+    sx, sy = self_period if self_period else (cx, cy)
+    sx = max(1, min(int(sx), cx))
+    sy = max(1, min(int(sy), cy))
+    conf = folded if (sx, sy) == (cx, cy) else _fold_to_period(surface, sx, sy)
+    cidx = int(np.argmax(conf))
+    ky, kx = np.unravel_index(cidx, conf.shape)
+    best_folded = float(conf[ky, kx])
 
     # 遮掉峰的鄰域（環狀，因為相位是環狀的）再取次高
-    rest = folded.copy()
-    rx = max(2, folded.shape[1] // 16)
-    ry = max(2, folded.shape[0] // 16)
+    rest = conf.copy()
+    rx = max(2, conf.shape[1] // 16)
+    ry = max(2, conf.shape[0] // 16)
     for dy in range(-ry, ry + 1):
         for dx in range(-rx, rx + 1):
-            rest[(fy + dy) % folded.shape[0], (fx + dx) % folded.shape[1]] = -1.0
+            rest[(ky + dy) % conf.shape[0], (kx + dx) % conf.shape[1]] = -1.0
     runner = float(rest.max()) if rest.size else -1.0
     margin = best_folded - runner
 
@@ -404,6 +529,115 @@ def match_patch(cell: np.ndarray, patch: Any,
     return MatchResult(phase_x=int(fx % cx), phase_y=int(fy % cy),
                        score=float(best), margin=float(margin),
                        structure=float(structure), ok=ok)
+
+
+@dataclass
+class TemplateHealth:
+    """整批的比對結果長什麼樣，以及**這個模板還能不能用**。
+
+    為什麼需要它（``roi_template`` 的檔頭承諾了它，而它一直不存在）
+    ----------------------------------------------------------------
+    模板是**凍進 recipe** 的：同一支 inspection recipe 掃同一塊 scan area，
+    圖案一樣，所以跨 lot 共用是刻意的。但「換一批資料之後它還對不對」沒有人在
+    問 —— 而模板對不上的時候，畫面上看到的是**每一顆都定不出來**，那跟「這批
+    patch 本來就沒有結構」長得一模一樣。
+
+    兩者的處置**完全相反**：前者要重建模板，後者什麼都不用做（沒有結構的
+    patch 本來就該退回整張圖）。分不出來的使用者會一直去調門檻。
+
+    分辨的依據就是三道閘門**各自**倒在哪裡（見 :func:`judge_template`）。
+    """
+
+    checked: int = 0
+    located: int = 0
+    #: 各自沒過的顆數（一顆可能同時掛在好幾關）
+    failed_score: int = 0
+    failed_margin: int = 0
+    failed_structure: int = 0
+    #: 中位數（比平均耐得住幾顆爛的）
+    score: float = 0.0
+    margin: float = 0.0
+    structure: float = 0.0
+    #: ``ok`` / ``stale`` / ``no-structure`` / ``too-tight`` / ``unknown``
+    verdict: str = "unknown"
+    message: str = ""
+
+    @property
+    def rate(self) -> float:
+        return self.located / float(self.checked) if self.checked else 0.0
+
+
+#: 定位成功率低於這個就要說話。
+HEALTH_OK_RATE = 0.8
+
+
+def judge_template(scores: Sequence[float], margins: Sequence[float],
+                   structures: Sequence[float], min_score: float,
+                   min_margin: float, min_structure: float) -> TemplateHealth:
+    """整批的三個數字 → 「這個模板還能不能用」。
+
+    **吃的是已經算好的特徵**（``match_score`` / ``match_margin`` /
+    ``match_structure``），不再跑一次比對 —— 那些數字每一顆都吐了，再算一次
+    只會多一份會漂的答案。
+
+    判準（照「處置不同」分，不是照分數高低分）：
+
+    * 大部分**沒有結構** → ``no-structure``：這批 patch 本身沒東西可比。
+      不是模板的問題，也不是門檻的問題，退回整張圖就是對的答案。
+    * 有結構、但**比對分數低** → ``stale``：patch 不像這個模板。八成是模板
+      不是從這批資料（這一層）建的 —— 這就是那個健檢要抓的東西。
+    * 有結構、分數也夠、只是**峰不夠突出** → ``too-tight``：圖案週期性強，
+      或門檻設太緊。
+    """
+    n = min(len(scores), len(margins), len(structures))
+    if not n:
+        return TemplateHealth(message="Run a trial to check this template "
+                                      "against the batch.")
+
+    def med(v: Sequence[float]) -> float:
+        return float(np.median(np.asarray(list(v)[:n], dtype=np.float64)))
+
+    bad_s = [i for i in range(n) if structures[i] < min_structure]
+    bad_c = [i for i in range(n) if scores[i] < min_score]
+    bad_m = [i for i in range(n) if margins[i] < min_margin]
+    failed = set(bad_s) | set(bad_c) | set(bad_m)
+    located = n - len(failed)
+
+    h = TemplateHealth(
+        checked=n, located=located, failed_score=len(bad_c),
+        failed_margin=len(bad_m), failed_structure=len(bad_s),
+        score=med(scores), margin=med(margins), structure=med(structures))
+
+    if h.rate >= HEALTH_OK_RATE:
+        h.verdict = "ok"
+        h.message = ("%d of %d defects located. This template fits this batch."
+                     % (located, n))
+        return h
+
+    # 沒過的那些是**倒在哪一關**——處置完全不同，所以要分開講。
+    only_structure = [i for i in failed if i in bad_s]
+    with_structure = [i for i in failed if i not in bad_s]
+    if len(only_structure) >= len(with_structure):
+        h.verdict = "no-structure"
+        h.message = ("%d of %d defects have nothing to match (median structure "
+                     "%.1f, needs %.1f). That is the patches, not the "
+                     "template - those regions fall back to the whole image, "
+                     "which is the right answer. No setting will change it."
+                     % (len(only_structure), n, h.structure, min_structure))
+    elif len([i for i in with_structure if i in bad_c]) >= len(with_structure) / 2.0:
+        h.verdict = "stale"
+        h.message = ("%d of %d defects have structure but do not look like "
+                     "this template (median match %.2f, needs %.2f). The "
+                     "template was probably not built from this data - "
+                     "rebuild it from a full-size image of this batch."
+                     % (len(with_structure), n, h.score, min_score))
+    else:
+        h.verdict = "too-tight"
+        h.message = ("%d of %d defects match well but not uniquely (median "
+                     "certainty %.2f, needs %.2f). The pattern repeats "
+                     "strongly, or “Minimum certainty” is set too tight."
+                     % (len(with_structure), n, h.margin, min_margin))
+    return h
 
 
 def _fold_to_period(surface: np.ndarray, px: int, py: int) -> np.ndarray:
@@ -420,31 +654,86 @@ def _fold_to_period(surface: np.ndarray, px: int, py: int) -> np.ndarray:
     return out
 
 
-def roi_in_patch(norm_rect: Tuple[float, float, float, float],
-                 match: MatchResult, cell_shape: Tuple[int, int],
-                 patch_shape: Tuple[int, int],
-                 periodic: Tuple[bool, bool] = (True, True),
-                 ) -> Tuple[int, int, int, int]:
-    """把「標在 GC 上的框」搬到 patch 上，回傳像素矩形 ``(x, y, w, h)``。
+def roi_boxes_in_patch(norm_rect: Tuple[float, float, float, float],
+                       match: MatchResult, cell_shape: Tuple[int, int],
+                       patch_shape: Tuple[int, int],
+                       periodic: Tuple[bool, bool] = (True, True),
+                       max_boxes: int = 64,
+                       ) -> List[Tuple[int, int, int, int]]:
+    """一個標在 cell 上的框 → 這張 patch 上**每一個**落點（裁進 patch）。
 
-    一個週期在 patch 裡可能出現好幾次，所以取**離 patch 中心最近**的那一個
-    —— 缺陷永遠在 patch 正中央，使用者標的框指的是「缺陷所在的那個 cell」。
+    為什麼是「每一個」而不是「離缺陷最近的那一個」
+    ----------------------------------------------
+    使用者標的是**重複結構上的一塊**（原話：「一個 layout 是橫向 EPI 跟直向 MG
+    交錯，我要的 ROI1 是 EPI 部分扣掉 MG 交集」）。那種東西在 patch 裡有幾份就
+    該量幾份 —— 只取離缺陷最近的一份，會在「cell 比 patch 小」的時候**只量到
+    一根 EPI，其餘的靜靜漏掉**。而那正是「跑得完、有數字、而且是錯的」。
+
+    這條規則同時涵蓋兩種大小關係，所以不必請使用者選：
+
+    * **cell 比 patch 大**（模板法的常態）—— 最多一份落得進來，可能還一份都沒有
+      （框標在 cell 的另一頭）。「一份都沒有」是正常的答案，不是失敗。
+    * **cell 比 patch 小** —— 每一份都畫，統計量因此問的是「這張圖上所有的
+      EPI」而不是「剛好在中間的那一根」。
+
+    相位以外的兩件事
+    ----------------
+    * **沒有週期的那一軸沒有相位可言** —— 框在那個方向取滿整張 patch，
+      硬給一個位置等於憑空捏造資訊（同 ``roi_profile`` 的 ``_band_rect``）。
+      所以 ``locate_axis="x"`` 的時候，框的 y／h **本來就不算數**。
+    * 超過 ``max_boxes`` 時留下**離 patch 中心最近**的那些 —— 缺陷在正中央
+      （同 ``roi_cross`` 的同名參數，兩張卡對這件事的說法要一致）。
     """
     cy, cx = int(cell_shape[0]), int(cell_shape[1])
     ph, pw = int(patch_shape[0]), int(patch_shape[1])
     nx, ny, nw, nh = (float(v) for v in norm_rect)
+    cap = max(1, int(max_boxes))
 
-    def place(cell_lo: float, cell_span: float, phase: int, period: int,
-              patch_len: int) -> Tuple[int, int]:
-        span = max(1.0, cell_span * period)
-        base = cell_lo * period - float(phase)      # k = 0 的位置
+    xs = (_copies(nx, nw, int(match.phase_x), cx, pw, cap)
+          if periodic[0] else [(0, pw)])
+    ys = (_copies(ny, nh, int(match.phase_y), cy, ph, cap)
+          if periodic[1] else [(0, ph)])
+
+    out: List[Tuple[int, int, int, int]] = []
+    for y, h in ys:
+        for x, w in xs:
+            # 落在 patch 外面的部分裁掉。一份可能有一半在框外 —— 那是正常的
+            # （缺陷靠邊時本來就會這樣），但剩下的必須還有像素可以量。
+            x0, y0 = max(0, x), max(0, y)
+            x1, y1 = min(pw, x + w), min(ph, y + h)
+            if x1 > x0 and y1 > y0:
+                out.append((x0, y0, x1 - x0, y1 - y0))
+
+    cxp, cyp = pw / 2.0, ph / 2.0
+    out.sort(key=lambda b: ((b[0] + b[2] / 2.0 - cxp) ** 2
+                            + (b[1] + b[3] / 2.0 - cyp) ** 2))
+    return out[:cap]
+
+
+def _copies(lo: float, span_frac: float, phase: int, period: int,
+            patch_len: int, cap: int) -> List[Tuple[int, int]]:
+    """一個軸上，這個框在 patch 裡的每一份 ``(起點, 長度)``。
+
+    ``base`` 是第 0 份的位置：``lo`` 講的是「從這一格的百分之幾開始」，而
+    ``phase`` 是這張 patch 的第 0 格從哪裡開始 —— 兩者相減就是像素座標。
+    """
+    period = max(1, int(period))
+    span = max(1, int(round(float(span_frac) * period)))
+    base = float(lo) * period - float(phase)
+
+    # 重疊條件：``base + k*period + span > 0`` 且 ``base + k*period < patch_len``。
+    # 邊界用 floor/ceil 各放寬一格再過濾，省得跟浮點的邊界情況纏鬥。
+    k_lo = int(math.floor((-span - base) / period)) - 1
+    k_hi = int(math.ceil((patch_len - base) / period)) + 1
+    hits = []
+    for k in range(k_lo, k_hi + 1):
+        start = int(round(base + k * period))
+        if start + span > 0 and start < patch_len:
+            hits.append((start, span))
+
+    if len(hits) > cap:
+        # 細到放不下的時候留中間那些 —— 缺陷在正中央（同 ``roi_cross``）。
         centre = patch_len / 2.0
-        k = round((centre - span / 2.0 - base) / float(period))
-        lo = base + k * period
-        return int(round(lo)), int(round(span))
-
-    # 沒有週期的那一軸沒有相位可言 —— 框在那個方向取滿整張 patch，
-    # 硬給一個位置等於憑空捏造資訊（同 roi_profile 的 _band_rect）。
-    x, w = place(nx, nw, match.phase_x, cx, pw) if periodic[0] else (0, pw)
-    y, h = place(ny, nh, match.phase_y, cy, ph) if periodic[1] else (0, ph)
-    return (x, y, w, h)
+        hits.sort(key=lambda t: abs(t[0] + t[1] / 2.0 - centre))
+        hits = sorted(hits[:cap])
+    return hits

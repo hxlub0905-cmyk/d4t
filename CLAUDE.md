@@ -213,13 +213,21 @@ git add -A && python tools/release.py && git add -A
 後兩種沒有 KLARF → 沒有座標、**寫不回 KLARF**，而那句話**常駐在資料集標籤上**
 （`tiff_stack · defect 1 / 3 · no KLARF`）—— 不是等使用者按了 Export 才發現。
 
-`adept/ui/scope.py` 仍然是這類「暫時不給看」的**唯一**去處：
+`adept/ui/scope.py` 仍然是這類「暫時不給看」的**唯一**去處，
+**而「入口長什麼樣」也住在同一份**（F11 Input-5）：
 
 ```python
 SUPPORTED_KINDS = ("ebi_patch", "tiff_stack", "rsem", "folder")
-HIDDEN_STEPS = ()                # 空了（原本收著 golden_cell / cell_period）
+HIDDEN_STEPS = ("align",)        # 收起來（引擎照認、舊 recipe 照跑）
 SHOW_SAMPLE_ENTRIES = False      # 範例入口（見下）
+INPUT_SOURCES = (...)            # 三顆 Open 的字、圖示、一句白話說明
+ATTACHMENTS = (...)              # 掛在已載入 lot 上的附加檔（GLAS 匯出）
 ```
+
+**加／改一個入口＝改 `INPUT_SOURCES`，不要動 UI。** 工具列的按鈕與空白狀態
+（「一開始進去看到的那一塊」）上的每一列都是從這張表長出來的。以前它們是三份
+各自寫死的文字，於是工具列有三顆 Open、空白狀態卻只講 KLARF —— 帶著一個資料夾
+的圖片進來的人，在整個畫面最大的那一塊上找不到自己那條路。
 
 `SHOW_SAMPLE_ENTRIES`（2026-08-16）管兩個入口：導覽與空白狀態上的
 **「用範例資料試一次」**、工具列的 **「Templates…」**。範例 recipe 全部拿掉之後
@@ -227,18 +235,32 @@ SHOW_SAMPLE_ENTRIES = False      # 範例入口（見下）
 比沒有那顆鈕更糟**（推廣鐵則）。`run_demo` / `RecipeLibraryDialog` 一行都沒動。
 
 `tests/test_ui_input_kinds.py`（原 `test_ui_patch_only.py`）鎖住四種都進得來、
-沒有 KLARF 的兩種會講出來、而**「暫時收起來」的機制還在**（`HIDDEN_STEPS` 空著
-但 `visible_steps()` 照樣管用 —— 下次要藏一張卡時加一個字串就好）。
+沒有 KLARF 的兩種會講出來、而**「暫時收起來」的機制還在**。
 
-F7-1 收斂成 patch-only 時用的是「**收起來、不刪掉**」，於是這一輪打開只改了
-`scope.py` 的兩個常數，`ingest` / `golden_cell` / `algo/period.py` 一行都沒動。
-**收起來的成本是零、回復的成本是加一個字串** —— 那個判斷被驗證了。
+**收起來（`HIDDEN_STEPS`）／刪掉／改名是三件不同的事，判準都是使用者說了哪一
+句話**，不是你覺得那張卡有沒有用。2026-08-18 一天之內三種都發生過：
 
-> ⚠ **`adept/core/algo/period.py` 不要刪。** 它現在只被 Golden Cell 用到，
-> 看起來像是可以跟 RSEM 一起砍掉的東西 —— 但 `estimate_period` /
-> `choose_origin` 的相位搜尋是之後做 **pattern-frame ROI** 的唯一工具
-> （patch 是以 defect 為中心裁切的，晶格相位逐顆不同；
-> 見 `docs/history/plans/F7-canvas-and-taxonomy.md` §4）。
+| 使用者說的 | 處置 | 代價 |
+|---|---|---|
+| 「之後真需要我再回來」（`align`）| **收起來**：卡片庫看不到，`get_step` 拿得到、舊 recipe 照跑、黃金值不動 | 加一個字串 |
+| 「不需要這功能」（`cell_period`）| **刪掉**：`REGISTRY` 裡沒有，舊 recipe 開起來是一條 `unknown-step` | 依賴它的 fixture / 黃金值要一起處理 |
+| 「拿回來 不過要改名字」（`golden_cell` → `pattern_ref`）| **改名**：要一道遷移 | key **加上**它寫出來的 feature 名（那些會被打進分數表達式）—— 只換一半等於沒換 |
+
+同一張卡（`pattern_ref`）在同一天走完了**刪掉 → 量代價 → 要回來 → 改名 → 收起來**
+五步。最後一步的理由是它沒事做了：它被期待的「單張影像找 ROI」那件事
+**Template 已經在做**（量過，見 `docs/plans/F11-phase2-features.md` §3.3.20）。
+**這一次是收起來不是刪掉** —— 它刪過一次、代價量過（rsem route 24/24 → 12/24），
+而且 fixture 的 rsem route 正用著它。
+
+**不確定的時候先收起來**：成本是零，回復的成本是拿掉一個字串。
+
+> ⚠ **`adept/core/algo/period.py` 與 `algo/golden.py` 都不要刪。**
+> 兩支都還有呼叫者（`steps/pattern_ref.py`、`algo/template.py`），但 2026-08-18
+> 有一小時它們一個都沒有 —— 那正是這種模組被當成死碼順手清掉的時候。
+> `estimate_period` / `choose_origin` 的相位搜尋是之後做 **pattern-frame ROI**
+> 的唯一工具（patch 是以 defect 為中心裁切的，晶格相位逐顆不同；見
+> `docs/history/plans/F7-canvas-and-taxonomy.md` §4）。
+> 便利貼：`tests/test_ui_input_kinds.py::test_period_module_is_not_orphaned`。
 
 CLI 不受影響：`python -m adept run` 照樣跑得動 rsem recipe。
 

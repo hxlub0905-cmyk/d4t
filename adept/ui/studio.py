@@ -102,6 +102,7 @@ from PySide6.QtWidgets import (
 
 import adept.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
 from adept.core.pipeline import ParamError, Recipe, get_step, list_steps
+from adept.core.pipeline.cellrois import region_names
 from adept.core.pipeline.recipe import version_skew
 
 from .export_dialog import ExportDialog
@@ -415,6 +416,8 @@ class StudioWindow(QMainWindow):
         # 「現在要幹嘛」的關卡，而答案永遠是同一個 —— 先載入影像。
         self.model = RecipeModel.starter()
         self.dataset: Optional[Any] = None
+        #: 掛上的 GLAS 匯出有哪幾層（``[(id, layer 名), …]``；沒掛就是空的）。
+        self._gds_layers: List[Any] = []
         self.trial_scores: List[float] = []
         self.trial_results: List[Dict[str, Any]] = []   # M5：Gallery / 輸出的來源
         self.defect_index: int = 0
@@ -533,25 +536,29 @@ class StudioWindow(QMainWindow):
         self.toolbar = bar
         self.addToolBar(bar)
 
-        self.btn_open_klarf = self._tool_button(
-            "Open KLARF…", "Load a KLARF (the patch TIFF can be picked separately)",
-            self._on_open_klarf, icon="folder")
-        # 一種 source 一個入口（F11 Input-2）。刻意**不**塞進上面那顆：這條路
-        # 吃的東西不同（一個多頁 TIFF + 「一顆幾張」），而且它產出的資料集沒有
-        # KLARF —— 寫不回 KLARF。把兩件事併成一顆鈕，使用者按下去之前分不出
-        # 自己要的是哪一種。
-        self.btn_open_stack = self._tool_button(
-            "Open stack…",
-            "Load a multi-page TIFF that has no KLARF: every N pages become "
-            "one defect (N = the images per defect you enter). No KLARF means "
-            "no coordinates and no write-back — CSV and Excel reports still work.",
-            self._on_open_stack, icon="stack")
-        self.btn_open_folder = self._tool_button(
-            "Open folder…",
-            "Load a folder of single images (no KLARF): every image file "
-            "becomes one defect. No KLARF means no coordinates and no "
-            "write-back — CSV and Excel reports still work.",
-            self._on_open_folder, icon="folder_open")
+        # **三顆 Open 與那顆附加檔，都是從 `scope` 的那一張表建出來的**
+        # （F11 Input-5）。以前它們是三段各自寫死的文字，而空白狀態上還有第四份
+        # 抄本 —— 於是打開資料夾那條路在最大的那一塊畫面上根本沒被提到。
+        # 現在入口只有一份定義，畫面上的每一處都從它長出來。
+        for src in scope.INPUT_SOURCES:
+            tip = src.what
+            if not src.has_klarf:
+                tip += ("  There is no KLARF here, and no KLARF means no "
+                        "coordinates and no write-back - CSV and Excel "
+                        "reports still work.")
+            btn = self._tool_button(src.title, tip,
+                                    getattr(self, "_on_open_%s" % src.key),
+                                    icon=src.icon)
+            setattr(self, "btn_open_%s" % src.key, btn)
+        # 附加檔的入口（F11 Region-3）。它**不是第五種 source** —— 資料集已經
+        # 載好了，這一顆是往每一顆 defect 上再掛一個檔案。所以它自成一段、而且
+        # 沒有資料集時是灰的（按下去也沒有意義）。
+        for att in scope.ATTACHMENTS:
+            btn = self._tool_button(
+                att.title, "%s  %s" % (att.what, att.needs),
+                getattr(self, "_on_open_%s" % att.key), icon=att.icon)
+            btn.setEnabled(False)
+            setattr(self, "btn_open_%s" % att.key, btn)
         self.btn_open_recipe = self._tool_button(
             "Open Recipe…", "Load a recipe JSON", self._on_open_recipe,
             icon="document")
@@ -588,8 +595,12 @@ class StudioWindow(QMainWindow):
             self.toggle_theme, icon="theme")
 
         # 一段 = 一種事情；段與段之間一條分隔線。
-        for group in ((self.btn_open_klarf, self.btn_open_stack,
-                       self.btn_open_folder, self.btn_open_recipe),
+        sources = tuple(getattr(self, "btn_open_%s" % s.key)
+                        for s in scope.INPUT_SOURCES)
+        attachments = tuple(getattr(self, "btn_open_%s" % a.key)
+                            for a in scope.ATTACHMENTS)
+        for group in (sources,
+                      attachments + (self.btn_open_recipe,),
                       (self.btn_examples, self.btn_export),
                       (self.btn_undo, self.btn_redo)):
             for b in group:
@@ -1063,10 +1074,11 @@ class StudioWindow(QMainWindow):
         # 這句話要跟旁邊實際看得到的鈕一致 —— 範例資料那顆收起來的時候還講
         # 「or try the tool with generated sample data」，使用者會去找一顆不在
         # 畫面上的鈕。
-        why = QLabel("Open a KLARF to see your patches here, or try the tool "
-                     "with generated sample data first."
-                     if scope.SHOW_SAMPLE_ENTRIES else
-                     "Open a KLARF to see your patches here.", self.empty_state)
+        why = QLabel("ADEPT reads four kinds of data. Pick the one you have."
+                     if not scope.SHOW_SAMPLE_ENTRIES else
+                     "ADEPT reads four kinds of data. Pick the one you have, "
+                     "or try the tool with generated sample data first.",
+                     self.empty_state)
         why.setObjectName("paramHint")
         why.setAlignment(Qt.AlignCenter)
         why.setWordWrap(True)
@@ -1074,11 +1086,67 @@ class StudioWindow(QMainWindow):
         # （`test_nothing_on_screen_points_at_a_button_that_is_not_there`）。
         self.empty_state_hint = why
         estack.addWidget(why)
+
+        # **每一種 source 一列，而那幾列是從 `scope.INPUT_SOURCES` 長出來的**
+        # （F11 Input-5，使用者：「各種 image source 資料流是否改成個別入口比較
+        # 好（但同時 UI 一開始進去的地方顯示也要改）」）。
+        #
+        # 以前這裡只有一顆 ``Open KLARF…``，而工具列上有三顆 —— 於是帶著一個
+        # 資料夾的圖片、或一個多頁 TIFF 進來的人，在**整個畫面最大的那一塊**上
+        # 看到的是「Open a KLARF to see your patches here」。他要嘛以為 ADEPT
+        # 讀不了他的東西，要嘛得自己去工具列上一顆一顆讀過去。
+        #
+        # 一列一句話，說的是**這條路吃什麼樣的檔案**，不是它會做什麼 ——
+        # 使用者站在這個畫面前面時，手上已經有檔案了，他要回答的問題是
+        # 「我這一堆算哪一種」。
+        self.empty_source_buttons: Dict[str, QPushButton] = {}
+        rows = QVBoxLayout()
+        rows.setSpacing(6)
+        for i, src in enumerate(scope.INPUT_SOURCES):
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            row.addStretch(1)
+            b = QPushButton(src.title, self.empty_state)
+            if i == 0:
+                b.setObjectName("primary")     # 最常見的那一條是主要動作
+            b.setMinimumWidth(140)
+            b.clicked.connect(
+                getattr(self, "_on_open_%s" % src.key))
+            self.empty_source_buttons[src.key] = b
+            row.addWidget(b)
+            what = QLabel(src.what if src.has_klarf else
+                          "%s No KLARF, so no write-back." % src.what,
+                          self.empty_state)
+            what.setObjectName("paramHint")
+            what.setWordWrap(True)
+            what.setMinimumWidth(300)
+            row.addWidget(what, 2)
+            row.addStretch(1)
+            rows.addLayout(row)
+        estack.addLayout(rows)
+
+        # 第一顆保留原本的名字：既有測試與 ``_build_shortcuts``（Ctrl+O）
+        # 都指得到它，而它做的事一個字都沒變。
+        self.btn_empty_open = self.empty_source_buttons[
+            scope.INPUT_SOURCES[0].key]
+
+        # 附加檔不是第五條路，所以它不是一顆鈕，是**一句說明它什麼時候才出現**
+        # 的話。這正是使用者問的那一句「Load layout labels 要怎麼 load，好像
+        # 沒有 load 的地方」—— 卡片在卡片庫裡看得到，而它的入口要等 lot 載進來
+        # 才亮，於是這個畫面上必須說得出那個順序。
+        att_bits = ["%s — %s %s" % (a.title, a.what, a.needs)
+                    for a in scope.ATTACHMENTS]
+        self.empty_state_attachments = QLabel(
+            "  ·  ".join(att_bits), self.empty_state)
+        self.empty_state_attachments.setObjectName("paramHint")
+        self.empty_state_attachments.setAlignment(Qt.AlignCenter)
+        self.empty_state_attachments.setWordWrap(True)
+        self.empty_state_attachments.setVisible(bool(scope.ATTACHMENTS))
+        estack.addSpacing(6)
+        estack.addWidget(self.empty_state_attachments)
+
         brow = QHBoxLayout()
         brow.addStretch(1)
-        self.btn_empty_open = QPushButton("Open KLARF…", self.empty_state)
-        self.btn_empty_open.setObjectName("primary")
-        brow.addWidget(self.btn_empty_open)
         self.btn_empty_sample = QPushButton("Try it with sample data",
                                             self.empty_state)
         self.btn_empty_sample.setProperty("variant", "secondary")
@@ -1087,6 +1155,7 @@ class StudioWindow(QMainWindow):
         self.btn_empty_sample.setVisible(bool(scope.SHOW_SAMPLE_ENTRIES))
         brow.addWidget(self.btn_empty_sample)
         brow.addStretch(1)
+        estack.addSpacing(8)
         estack.addLayout(brow)
         estack.addStretch(1)
 
@@ -1199,7 +1268,9 @@ class StudioWindow(QMainWindow):
         self.btn_next.clicked.connect(lambda: self.step_defect(+1))
         self.defect_combo.currentIndexChanged.connect(self._on_defect_combo)
         self.btn_region_check.clicked.connect(lambda: self.open_region_check())
-        self.btn_empty_open.clicked.connect(self._on_open_klarf)
+        # ``btn_empty_open`` 在 ``_build_body`` 建它的時候就接好了（那一列是
+        # 從 ``scope.INPUT_SOURCES`` 長出來的，接線跟著一起長）——
+        # 在這裡再接一次會變成按一下開兩個檔案對話框。
         self.btn_empty_sample.clicked.connect(self._on_demo_requested)
         self.param_form.action_requested.connect(self._on_param_action)
         self.stream_combo.currentTextChanged.connect(self._on_stream_changed)
@@ -1663,7 +1734,7 @@ class StudioWindow(QMainWindow):
         except (KeyError, ParamError) as e:
             self._status("Could not add card: %s" % e, "error")
             return
-        self._autofill_roi_mask(node_id)
+        self._autofill_new_card(node_id)
         self._status("Added “%s”%s" % (node_id, self._unmet_needs(node_id)))
         self.select_node(node_id)
 
@@ -1692,14 +1763,87 @@ class StudioWindow(QMainWindow):
             except (KeyError, ParamError) as e:
                 self._status("Could not add card: %s" % e, "error")
                 return None
-            self._autofill_roi_mask(new_id)
+            self._autofill_new_card(new_id)
         self._status("Added “%s” after “%s” — drag a line into it to say which "
                      "image stream it works on.%s"
                      % (new_id, nid, self._unmet_needs(new_id)))
         self.select_node(new_id)
         return new_id
 
-    def _autofill_roi_mask(self, node_id: Optional[str]) -> None:
+    def _autofill_new_card(self, node_id: Optional[str]) -> None:
+        """剛加進來的卡，把**這個畫面上已經知道的答案**先填好。
+
+        兩張卡走這條路，理由是同一個：那個答案已經在畫面上了，讓使用者用手抄
+        一次是在製造一個可以抄錯的機會。
+
+        * ``roi_mask`` —— 上游定義過的區域名（見 :meth:`_autofill_regions`）。
+        * ``roi_from_mask`` —— **已經掛上來的那份 GLAS 匯出**的層對照表。
+
+        第二個是 2026-08-18 補的，而它修掉一個順序造成的洞：填名字那段原本只在
+        **掛匯出的當下**跑一次，掃的是當時已經存在的卡。但使用者的自然順序是
+        「開 KLARF → 開 GDS 匯出 → 加卡」（那顆鈕在沒有 lot 的時候是灰的，
+        空白狀態也叫他先載 lot）—— 於是後加的那張卡是空的，而它擋下來的那句話
+        寫著「Use “Open GDS export…” — attaching the export fills in the layers」。
+        使用者剛做完那件事。**一句叫人去做他已經做過的事的訊息，比沒有訊息更糟。**
+        """
+        node = self.model.nodes.get(str(node_id or ""))
+        if node is None:
+            return
+        if node.step == "roi_mask":
+            self._autofill_regions(node)
+        elif node.step == "roi_from_mask":
+            self._autofill_gds_layers(node)
+
+    def _autofill_gds_layers(self, node: Any) -> None:
+        """這張卡**永遠不該是空的** —— 空的看起來跟「線沒接上」一模一樣。
+
+        使用者 2026-08-18：「一開始 layout labels 連過去 GDS layer card 時候
+        image stream 完全不會顯示任何 overlay，要輸入 region name 才有，我希望
+        有個防呆機制讓 Layer 一開始就填好⋯⋯避免 user 以為沒連到沒 work」。
+
+        這張卡的規則是「**某一列空著 = 那一層不要**」，而那條規則是對的（要有
+        辦法排除一層）。貴的是**整張卡都空著**的那個狀態：一個區域都不吐、影像
+        上一個框都沒有，跟線沒接上長得一樣。所以只要看得到層，就先填。
+
+        名字的優先順序（好的先用）：
+
+        1. **掛上來那份匯出的 label_map** —— 真的層名（`L17/D0` → `L17_D0`）。
+        2. **這一顆 label 圖上真的出現的 id** —— `LayerA` / `LayerB`…
+           走到這裡的情況是 manifest 沒有 `label_map`（GLAS 匯出時沒勾）。
+           名字很爛，但它讓接線這件事**當場看得到結果**，而名字使用者本來就會改。
+
+        只在**空的**時候填 —— 使用者打過的字不覆蓋（重新掛一次匯出也不覆蓋）。
+        """
+        if str(node.params.get("layers", "") or "").strip():
+            return              # 使用者打過的字不覆蓋
+        from adept.core.ingest import glas_export
+
+        default = glas_export.layer_map_default(self._gds_layers)
+        count = len(self._gds_layers)
+        if not default:
+            ids = self._label_ids_for(node)
+            default = glas_export.fallback_layer_names(ids)
+            count = len(ids)
+        if default:
+            self.model.set_param(node.id, "layers", default)
+            self.param_form.set_label_count(count)
+
+    def _label_ids_for(self, node: Any) -> List[int]:
+        """這張卡接的那條流上，上一次預覽真的看到哪幾個 label id。
+
+        來源是 ``load_sidecar`` 寫的 ``ctx.meta["layout_label"][流名]["ids"]``
+        —— **畫面上的數字就是引擎算的那一份**（同儀表的慣例），這裡不自己再拆
+        一次 label 圖。
+        """
+        ctx = getattr(getattr(self, "_last_result", None), "context", None)
+        if ctx is None:
+            return []
+        stream = str(node.params.get("source", "") or "")
+        rec = (getattr(ctx, "meta", None) or {}).get("layout_label") or {}
+        entry = rec.get(stream) or {}
+        return [int(i) for i in (entry.get("ids") or ()) if int(i) > 0]
+
+    def _autofill_regions(self, node: Any) -> None:
         """剛加進來的 Mask from regions 卡，把上游定義過的區域名自動填進去。
 
         使用者的直覺是「Profile / Template 應該直接吐 mask」—— 名字要他自己
@@ -1708,9 +1852,6 @@ class StudioWindow(QMainWindow):
         上游有哪些具名區域就全部填上（多名字本來就是聯集），不合意再刪。
         只在**空的**時候填 —— 使用者打過的字不覆蓋。
         """
-        node = self.model.nodes.get(str(node_id or ""))
-        if node is None or node.step != "roi_mask":
-            return
         if str(node.params.get("regions", "") or "").strip():
             return
         names: List[str] = []
@@ -2005,6 +2146,10 @@ class StudioWindow(QMainWindow):
         # 有可能根本不算數。**同一個輸入**指的是同一個參數上的同一條流名，
         # 所以一條給 test、一條給 ref 不算搶（F9-9 的「多連一」）。
         dropped = self._drop_conflicting_edges(src, dst, stream, param)
+        # **接完線就把這張卡填到「看得到結果」為止**（F11 Region-3 第五輪）。
+        # 加卡的時候也跑過一次，但那時候還沒有線 —— 而「接上 layout labels」
+        # 正是使用者期待畫面上出現東西的那一刻。
+        self._autofill_new_card(dst)
         self._status("Connected %s → %s%s%s" % (src, dst, note, dropped))
 
     def _param_for_stream(self, node_id: str) -> str:
@@ -2156,7 +2301,9 @@ class StudioWindow(QMainWindow):
         except KeyError:
             describe = None
         streams = self.model.available_streams(before_node=node_id)
-        self.param_form.set_step(describe, node.params, streams)
+        self.param_form.set_step(
+            describe, node.params, streams,
+            self.model.available_regions(before_node=node_id))
         self.stack.setCurrentWidget(self.param_form)
         self._refresh_region_button()
         self._install_inspector(node.step)     # 右下角換成這張卡的儀表（F7-17）
@@ -2406,7 +2553,8 @@ class StudioWindow(QMainWindow):
             return                       # 區域名不能當變數名 -> 安靜跳過
         self.param_form.set_step(
             get_step(node.step).describe(), node.params,
-            self.model.available_streams(before_node=node_id))
+            self.model.available_streams(before_node=node_id),
+            self.model.available_regions(before_node=node_id))
         self._status("Results from this card will be named “%s_…” so they do "
                      "not collide with another card measuring a different "
                      "region." % wanted)
@@ -2549,6 +2697,8 @@ class StudioWindow(QMainWindow):
             return False
 
         self.dataset = dataset
+        if hasattr(self, "btn_open_gds"):
+            self.btn_open_gds.setEnabled(dataset is not None)
         items = list(getattr(dataset, "items", []) or [])
         self.defect_index = 0
         # 試跑筆數跟著資料集走：對一份 24 顆的 lot 顯示「First 200」只會讓人困惑
@@ -2961,40 +3111,111 @@ class StudioWindow(QMainWindow):
         return bool(node is not None and node.step == self.TEMPLATE_STEP)
 
     def _on_param_action(self, param_name: str) -> None:
-        """某個參數說「我的值要用別的方式產生」（目前只有模板）。"""
-        if str(param_name) == "template":
+        """某個參數說「我的值要用別的方式產生」。
+
+        模板與區域是**同一個對話框**：框的座標相對於那一格 cell，所以少了 cell
+        那張圖，四個數字沒有意義（F11 Region-1）。兩個參數各有一顆按鈕，但按下去
+        去的是同一個地方。
+        """
+        if str(param_name) in ("template", "regions"):
             self.open_template_dialog()
 
     def open_template_dialog(self) -> Optional[Any]:
-        """開「從大圖建模板」對話框；接受之後把模板寫回這張卡。"""
+        """開「模板與區域」對話框；接受之後把兩者一起寫回這張卡。"""
         if not self.template_build_available():
             self._status("Select a Locate region by template card first.", "error")
             return None
         node_id = self.selected_node
+        node = self.model.nodes[node_id]
         dlg = TemplateDialog(self)
-        dlg.accepted_template.connect(
-            lambda text, axis, nid=node_id: self._apply_template(nid, text, axis))
+        # 已經有模板就**讀回來**，不要逼使用者重挑一張大圖 —— 重建會重算相位，
+        # 而相位一變，他標好的框就全部平移了（見 TemplateDialog.load_encoded）。
+        dlg.load_encoded(str(node.params.get("template", "") or ""),
+                         str(node.params.get("locate_axis", "x") or "x"))
+        dlg.set_regions_text(str(node.params.get("regions", "") or ""))
+        # 「畫面上那一張」—— 單張 SEM 那條路要疊 cell 的圖就是它（F11 Region-5）。
+        img, why = self._template_source_image(node)
+        dlg.set_screen_image(img, why)
+        dlg.set_patch_size(self._preview_patch_size(node))
+        dlg.accepted_setup.connect(
+            lambda text, axis, regions, nid=node_id:
+            self._apply_template(nid, text, axis, regions))
+        dlg.check_across_requested.connect(self.open_region_check)
         self.template_dialog = dlg
         dlg.show()
         return dlg
 
-    def _apply_template(self, node_id: str, text: str, axis: str) -> None:
-        """把疊好的模板寫進卡片參數（連同它適用的方向）。"""
+    def _template_source_image(self, node: Any) -> Tuple[Optional[Any], str]:
+        """這張卡接的那一條流，在這一顆上長什麼樣（給對話框疊 cell 用）。
+
+        **問的是卡片自己的 `source`**，不是一組寫死的名字：單張影像那條路的流
+        可能叫 `single`、`test` 或使用者自己取的任何名字（`load_single` 的
+        `out` 是他填的），而寫死 `ref`/`test` 的話那條路永遠拿不到圖。
+        """
+        res = getattr(self, "_last_result", None)
+        images = dict(getattr(res, "images", None) or {}) if res is not None else {}
+        if not images:
+            # 這一顆跑失敗時 ``res.images`` 是空的 —— 而**「這張卡還沒接線」正是
+            # 使用者會來開這個對話框的時候**。上游已經算出來的那幾條流還在
+            # context 上，拿得到就拿。
+            ctx = getattr(res, "context", None)
+            images = dict(getattr(ctx, "images", None) or {})
+        wanted = str(node.params.get("source", "") or "")
+        for key in [k for k in (wanted, "ref", "test") if k]:
+            img = images.get(key)
+            if img is not None and getattr(img, "size", 0):
+                item = self._current_item()
+                return img, "%s · %s" % (
+                    str(getattr(item, "defect_id", "") or "defect"), key)
+        return None, ""
+
+    def _preview_patch_size(self, node: Any = None) -> Optional[Any]:
+        """目前這一顆影像有多大（``(h, w)``）—— 不知道就 ``None``。
+
+        畫布拿它畫「一顆 defect 看得到多少」。**不知道就不畫**：畫一個猜出來的
+        窗比不畫更糟，使用者會照著那個窗決定哪些區域標得到。
+
+        跟 :meth:`_template_source_image` 問同一條流 —— 兩者不一致的話，畫面上
+        那個窗畫的是一張圖、疊出來的 cell 來自另一張。
+        """
+        if node is not None:
+            img, _why = self._template_source_image(node)
+            if img is not None:
+                return (int(img.shape[0]), int(img.shape[1]))
+            return None
+        res = getattr(self, "_last_result", None)
+        images = dict(getattr(res, "images", None) or {}) if res is not None else {}
+        for key in ("ref", "test"):
+            img = images.get(key)
+            if img is not None and getattr(img, "size", 0):
+                shape = img.shape[:2]
+                return (int(shape[0]), int(shape[1]))
+        return None
+
+    def _apply_template(self, node_id: str, text: str, axis: str,
+                        regions: str = "") -> None:
+        """把疊好的模板與畫好的區域一起寫進卡片參數。"""
         if node_id not in self.model.nodes:
             return
         try:
             self.model.set_param(node_id, "template", str(text))
             self.model.set_param(node_id, "locate_axis", str(axis))
+            self.model.set_param(node_id, "regions", str(regions))
         except ParamError as e:
             self._status("Could not store the template: %s" % e, "error")
             return
         node = self.model.nodes[node_id]
         self.param_form.set_step(
             get_step(node.step).describe(), node.params,
-            self.model.available_streams(before_node=node_id))
-        self._status("Template stored in this recipe — it repeats along %s. "
-                     "Now mark the region on the cell with the Region "
-                     "left/top/width/height sliders." % axis)
+            self.model.available_streams(before_node=node_id),
+            self.model.available_regions(before_node=node_id))
+        names = region_names(str(regions))
+        self._status(
+            "Template stored in this recipe — it repeats along %s. %s"
+            % (axis,
+               ("Regions: %s. Use “Check this region across defects…” to see "
+                "whether they hold for the whole batch." % ", ".join(names))
+               if names else "No regions drawn yet — this card cannot run."))
         self._schedule_preview()
 
     def region_check_available(self) -> bool:
@@ -3061,6 +3282,9 @@ class StudioWindow(QMainWindow):
         sig = getattr(insp, "param_requested", None)
         if sig is not None:
             sig.connect(self._on_param_requested)
+        sig = getattr(insp, "select_requested", None)
+        if sig is not None:
+            sig.connect(self._on_select_requested)
         sig = getattr(insp, "calibrate_requested", None)
         if sig is not None:
             sig.connect(self._on_calibrate_requested)
@@ -3123,7 +3347,8 @@ class StudioWindow(QMainWindow):
         node = self.model.nodes.get(nid)
         self.param_form.set_step(
             get_step(node.step).describe(), node.params,
-            self.model.available_streams(before_node=nid))
+            self.model.available_streams(before_node=nid),
+            self.model.available_regions(before_node=nid))
         if refused:
             # 拒絕的那一半是**主角**：它講的是「這批 patch 自己不同意」，
             # 而那正是 kinds 沒設對的樣子。填了的也要一起講 —— 只報壞消息
@@ -3154,7 +3379,21 @@ class StudioWindow(QMainWindow):
         if node is not None:
             self.param_form.set_step(
                 get_step(node.step).describe(), node.params,
-                self.model.available_streams(before_node=nid))
+                self.model.available_streams(before_node=nid),
+                self.model.available_regions(before_node=nid))
+
+    def _on_select_requested(self, axis: str, rule: str) -> None:
+        """使用者在曲線上**點了一根條紋** → 那個方向改用那一種材質（F11 2b）。
+
+        走跟「量給我填」同一條路（``_on_param_requested`` → ``set_param``），
+        所以它可以 Ctrl+Z 撤銷、參數表也跟著顯示新值。
+
+        ``axis`` 是曲線的方向：``x`` 那條曲線講的是**直的**條紋
+        （``vertical_*``），別接反了 —— 接反的症狀是點左邊的圖改到右邊的參數，
+        而畫面上兩邊都會動，看起來像是「有反應」。
+        """
+        name = "vertical_select" if str(axis) == "x" else "horizontal_select"
+        self._on_param_requested(name, str(rule))
 
     def _on_measure(self, axis: str, start: float, end: float) -> None:
         """曲線面板上按著量測尺 → 影像上標出同一段（F8）。
@@ -3439,6 +3678,19 @@ class StudioWindow(QMainWindow):
         ctx = getattr(getattr(self, "_last_result", None), "context", None)
         if node is None or ctx is None:
             return []
+        out: List[Tuple[float, float, float, float]] = []
+        for name in self._overlay_region_names(node):
+            out.extend(tuple(float(v) for v in r)
+                       for r in ctx.roi_norm_rects(name))
+        return out
+
+    @staticmethod
+    def _overlay_region_names(node) -> List[str]:
+        """要畫哪幾個區域，**依畫的順序**。
+
+        只有一份：框與框的名字必須走同一個清單，不然顏色會指到錯的區域 ——
+        而畫面上沒有任何東西透露那件事。
+        """
         try:
             step_cls = get_step(node.step)
             produced = list(step_cls.resolve_regions_out(node.params))
@@ -3457,10 +3709,22 @@ class StudioWindow(QMainWindow):
         for name in consumed:
             if name and name not in names:
                 names.append(name)
-        out: List[Tuple[float, float, float, float]] = []
-        for name in names:
-            out.extend(tuple(float(v) for v in r)
-                       for r in ctx.roi_norm_rects(name))
+        return names
+
+    def region_overlay_names(self) -> List[str]:
+        """每個框屬於哪一個具名區域（跟 :meth:`region_overlay` 等長）。
+
+        分開一支而不是讓 ``region_overlay`` 回 tuple：那一支有測試在比清單，
+        而且「框在哪」與「框叫什麼」是兩個問題 —— 疊框只需要前者也還是對的
+        （長度對不上時 `ImageView` 就整組不分色，見 `set_overlay`）。
+        """
+        node = self.model.nodes.get(self.selected_node or "")
+        ctx = getattr(getattr(self, "_last_result", None), "context", None)
+        if node is None or ctx is None:
+            return []
+        out: List[str] = []
+        for name in self._overlay_region_names(node):
+            out.extend([name] * len(ctx.roi_norm_rects(name)))
         return out
 
     def _refresh_region_overlay(self) -> None:
@@ -3468,8 +3732,9 @@ class StudioWindow(QMainWindow):
         框是跟著動的 —— 那正是這種參數唯一調得動的方式（F7-8）。"""
         boxes = self.region_overlay()
         focus = self._focus_box_index(boxes)
+        labels = self.region_overlay_names()
         for view in (self.image_view, self.image_view_b):
-            view.set_overlay(boxes, focus)
+            view.set_overlay(boxes, focus, labels)
 
     def _focus_box_index(self, boxes: Sequence[Sequence[float]]) -> int:
         """哪一個框要畫成醒目的那一個 —— 離影像正中心最近的那個。
@@ -3897,6 +4162,56 @@ class StudioWindow(QMainWindow):
         if not path:
             return
         self.load_dataset_path(path)
+
+    def _on_open_gds(self) -> None:
+        path = QFileDialog.getExistingDirectory(
+            self, "Attach GLAS export (the folder with the *_label.png files)")
+        if path:
+            self.attach_gds_export(path)
+
+    def attach_gds_export(self, export_dir: str) -> str:
+        """把一份 GLAS 匯出掛到目前的資料集上（F11 Region-3）。回傳狀態列那句話。
+
+        **配對在 ingest 層**（`core/ingest/glas_export.attach`），這裡只負責問
+        路徑、把結果講出來、以及把 layer 的名字**填進卡片** —— 那個對照表在
+        匯出的 manifest 裡，讓使用者自己去抄一次是在製造一個可以抄錯的機會
+        （同 F11 Input 的「量到的 pitch 自動填回參數」）。
+        """
+        from adept.core.ingest import glas_export
+
+        if not self.dataset:
+            msg = ("Load the lot first — “Open GDS export…” attaches labels to "
+                   "the defects that are already open.")
+            self._status(msg)
+            return msg
+        try:
+            rep = glas_export.attach(self.dataset, export_dir)
+            doc = glas_export.read_manifest(export_dir)
+        except glas_export.GlasExportError as e:
+            self._status(str(e))
+            return str(e)
+
+        # 名字填進**每一張** roi_from_mask 卡（還沒設定過的才填 —— 使用者改過的
+        # 名字不能被一次「重新掛載」洗掉）。
+        default = glas_export.default_layer_map(doc)
+        filled = 0
+        if default:
+            for nid, node in self.model.nodes.items():
+                if node.step == "roi_from_mask" and not str(
+                        node.params.get("layers", "") or "").strip():
+                    self.model.set_param(nid, "layers", default)
+                    filled += 1
+        # 表單的列數要照**這份匯出有幾層**排（`ChannelMapField` 的 labels 版）。
+        self._gds_layers = list(rep.layers)
+        self.param_form.set_label_count(len(rep.layers))
+        msg = rep.summary()
+        if filled:
+            msg += " · filled the layer names into %d card(s)" % filled
+        for w in rep.warnings:
+            msg += " · △ %s" % w
+        self._status(msg)
+        self.refresh_preview()
+        return msg
 
     def _on_open_stack(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

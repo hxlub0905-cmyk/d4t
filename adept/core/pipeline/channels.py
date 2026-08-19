@@ -38,7 +38,7 @@ class ChannelMapError(ValueError):
     """通道對照表不合法。訊息是白話的 —— 會直接顯示在參數列下面。"""
 
 
-def parse_channel_map(text: object) -> List[Pair]:
+def parse_channel_map(text: object, noun: str = "image") -> List[Pair]:
     """``"1:test, 2:bse"`` → ``[(1, "test"), (2, "bse")]``（依頁碼排序）。
 
     每一條規則都回一句白話錯誤（鐵則 4：壞值不准跑到演算法裡）：
@@ -50,7 +50,15 @@ def parse_channel_map(text: object) -> List[Pair]:
     * 名字要能當變數名用（流名會變成特徵的前綴）。
 
     空字串（或 ``None``）→ ``[]`` ＝**照 ingest 給的名字**（現行行為）。
+
+    ``noun`` 是**這一列在講什麼東西**（``"image"`` / ``"layer"``）。同一支解析器
+    服務兩張卡：`load_patch` 的一列是一張圖，`roi_from_mask` 的一列是一層 ——
+    而錯誤訊息是使用者唯一看得到的東西。2026-08-18 使用者在 GDS 那張卡上打錯
+    一列，看到的是「image 2 has no name」，而那張卡上一張圖都沒有。
+    UI 那一頭早就分開講了（`ChannelMapField._WORDS`），只有這裡還沒有。
     """
+    noun = str(noun or "image")
+    a_noun = "%s %s" % ("an" if noun[:1].lower() in "aeiou" else "a", noun)
     # 這個 import 刻意放在函式裡：``step`` 在 module level import 這個模組
     # （``ParamSpec.validate`` 要用），module level 互相 import 會成環。
     # 規則只有一份 —— 抄第二份出來的那份會漂移（這個 repo 記過三次）。
@@ -72,23 +80,25 @@ def parse_channel_map(text: object) -> List[Pair]:
             continue
         if ":" not in item:
             raise ChannelMapError(
-                "each row looks like '<image number>:<name>' (for example "
-                "'2:bse'); '%s' has no ':'" % item)
+                "each row looks like '<%s number>:<name>' (for example "
+                "'2:bse'); '%s' has no ':'" % (noun, item))
         left, right = item.split(":", 1)
         page_text, name = left.strip(), right.strip()
         try:
             page = int(page_text)
         except (TypeError, ValueError):
             raise ChannelMapError(
-                "'%s' is not an image number - use 1 for this defect's first "
-                "image, 2 for the second, and so on" % page_text) from None
+                "'%s' is not %s number - use 1 for the first %s, "
+                "2 for the second, and so on"
+                % (page_text, a_noun, noun)) from None
         if page < 1:
             raise ChannelMapError(
-                "image numbers start at 1 (got %d) - 1 is this defect's first "
-                "image" % page)
+                "%s numbers start at 1 (got %d) - 1 is the first %s"
+                % (noun, page, noun))
         if not name:
             raise ChannelMapError(
-                "image %d has no name - every image you list needs one" % page)
+                "%s %d has no name - every %s you list needs one"
+                % (noun, page, noun))
         if not re.match(STREAM_NAME_PATTERN, name):
             raise ChannelMapError(
                 "'%s' cannot be used as a stream name - use letters, digits "
@@ -97,13 +107,14 @@ def parse_channel_map(text: object) -> List[Pair]:
                 "produces)" % name)
         if page in seen_pages:
             raise ChannelMapError(
-                "image %d is listed twice (as '%s' and '%s') - each image gets "
-                "exactly one name" % (page, seen_pages[page], name))
+                "%s %d is listed twice (as '%s' and '%s') - each %s gets "
+                "exactly one name"
+                % (noun, page, seen_pages[page], name, noun))
         if name in seen_names:
             raise ChannelMapError(
-                "'%s' is used for image %d and image %d - two images with the "
+                "'%s' is used for %s %d and %s %d - two %ss with the "
                 "same name means the second one silently replaces the first"
-                % (name, seen_names[name], page))
+                % (name, noun, seen_names[name], noun, page, noun))
         seen_pages[page] = name
         seen_names[name] = page
         pairs.append((page, name))

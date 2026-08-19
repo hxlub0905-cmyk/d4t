@@ -1,22 +1,36 @@
 # ADEPT step-card library — authored 2026-08-13 (F8).
-"""roi_cross —— 兩組正交條紋的交會處 → 一組方框。純規則，不需要外部檔案。
+"""roi_cross —— 找出影像自己的條紋，在條紋上放一組框。純規則，不需要外部檔案。
 
 這張卡在解什麼問題
 ------------------
 站點原有兩招定位 ROI，兩招都要外部的東西：GDS（要 .oas）與 Golden Cell
-模板（要一張原大圖）。第三招 —— 只看 patch 自己 —— 之前只到 ``roi_profile``，
-而那張依設計只吐**一條滿版的條紋**（單軸投影對另一個方向一無所知）。
+模板（要一張原大圖）。第三招 —— 只看 patch 自己 —— 就是這一張。
 
-要框的東西通常在**兩組條紋交會的地方**（直的 Metal Gate × 橫的 EPI），
-而且一張 patch 上不只一處。演算法與取捨都寫在 ``algo/grid.py`` 的模組說明裡
-（為什麼晶格要排在條紋**中心**而不是邊界、為什麼不用週期估測、
-已知 pitch 能做什麼）。這裡只負責把它接成一張卡。
+**「一個方向還是兩個方向」是使用者回答的第一個問題**（F11 Region-2c）。
+這張卡 F8 寫的時候只做兩個方向，因為需求是那個形狀的（直的 Metal Gate ×
+橫的 EPI，要量交界落在 EPI 那一側的那幾小塊）。但那是**需求的形狀，不是
+演算法的形狀** —— 一張密集 line/space 的 patch 只有一個方向有結構，
+而使用者要的框（每一根線上一條滿版的帶子、或每一根線兩側各一條）
+這套投影本來就算得出來。原本的卡對那種圖只會回一句「no flat stripes to
+lock onto」然後退回整張圖：一件做得到的事被形狀擋住了。
+
+單方向的實作是把另一個方向換成**一根蓋滿整張圖的條紋**
+（``algo/grid.open_axis``）—— 交會的幾何一行都不用改，跟滿版帶子交會出來的
+正好就是滿版的框。少一條分支就少一種只在單軸時才會發作的 bug。
+
+其餘的演算法與取捨都寫在 ``algo/grid.py`` 的模組說明裡（為什麼晶格要排在條紋
+**中心**而不是邊界、為什麼不用週期估測、已知 pitch 能做什麼）。
 
 一個名字，好幾個框
 ------------------
-交會處的數量隨影像而異，所以這張卡寫的是**多框區域**（``set_roi_boxes``）。
+框的數量隨影像而異，所以這張卡寫的是**多框區域**（``set_roi_boxes``）。
 量統計的卡（``glv_stats``）把它當一個像素母體；要幾何的卡指
-``<name>_center`` —— 離 patch 正中心最近的那一塊，也就是**缺陷所在的那一塊**。
+``<name>_center`` —— 離 patch 正中心最近的那一塊，也就是**缺陷所在的那一塊**；
+``<name>_others`` —— 其餘那幾塊，也就是**同一張圖上同材質的基準**
+（為什麼要第三個名字、以及為什麼這張卡不指派 target/reference，
+見 ``_util.set_region_family``）。
+
+「這一顆有沒有基準」不必另外給一個數字：``cross_count > 1`` 就是。
 """
 from __future__ import annotations
 
@@ -28,11 +42,24 @@ from ..pipeline.step import (
     CATEGORY_ALGO, GROUP_REGION, ParamSpec, Step, StepError, register_step,
 )
 from ._util import (
-    FEATURE_PREFIX_PATTERN, output_prefix_spec, prefix_features, prefix_names,
-    require_image,
+    FEATURE_PREFIX_PATTERN, drop_edge_boxes, drop_edge_specs,
+    output_prefix_spec, prefix_features, prefix_names, region_family,
+    region_fact_names, region_facts, require_image, set_region_family,
 )
 
 _BESIDE = ("beside_vertical", "beside_horizontal")
+
+#: ``directions`` 的三個值 —— 順序就是圖示列由左到右。
+_DIRECTIONS = ("both", "upright", "flat")
+
+#: 哪幾個 ``directions`` 值會用到直的／橫的那一組參數（``show_when``）。
+_USES_UPRIGHT = ("both", "upright")
+_USES_FLAT = ("both", "flat")
+
+#: ``place`` 的五個選項 —— 順序就是圖示列由左到右的順序，所以它跟 ``icons``
+#: 那一串必須逐項對齊（``ParamSpec`` 會擋長度不一樣）。
+_PLACE = ("crossing", "beside_vertical", "beside_horizontal",
+          "between_vertical", "between_horizontal")
 
 
 def _prefix_in_section() -> ParamSpec:
@@ -58,10 +85,12 @@ class RoiCrossStep(Step):
     label = "Profile"
     category = CATEGORY_ALGO
     group = GROUP_REGION
-    help = ("Find the upright stripes and the flat stripes in the image, then "
-            "put a box wherever they cross - so the boxes follow the pattern "
-            "instead of sitting at fixed spots on the screen. One patch "
-            "usually has several crossings, and you get a box on each of them.")
+    help = ("Find the stripes in the image and put a box on every one of them "
+            "- so the boxes follow the pattern instead of sitting at fixed "
+            "spots on the screen. Stripes running one way give you a box "
+            "spanning the image on each stripe; two sets of stripes crossing "
+            "each other give you a box on each crossing. Either way one patch "
+            "usually has several, and you get a box on each.")
     params = [
         ParamSpec(
             name="source", type="image_key", direction="in", default="ref",
@@ -74,6 +103,28 @@ class RoiCrossStep(Step):
                   "separately would put the boxes in different places, and "
                   "then the difference between them is no longer only the "
                   "defect."),
+        ),
+        ParamSpec(
+            name="directions", type="icon_choice", default="both",
+            choices=list(_DIRECTIONS),
+            icons=["dir_both", "dir_upright", "dir_flat"],
+            choice_help={
+                "both": "Both directions - the box goes where an up-and-down "
+                        "stripe meets a left-to-right one.",
+                "upright": "Only the up-and-down stripes. The box runs the "
+                           "full height of the image.",
+                "flat": "Only the left-to-right stripes. The box runs the "
+                        "full width of the image.",
+            },
+            section="1 · Which image",
+            label="Which way the pattern runs",
+            help=("How many directions of stripe this image has. Most images "
+                  "have stripes running one way only - pick that one and the "
+                  "box runs the whole way across the other direction. Pick "
+                  "both when two sets of stripes cross each other and you want "
+                  "the place where they meet. Picking both on an image that "
+                  "only has stripes one way finds nothing at all, because the "
+                  "card then insists on a crossing that is not there."),
         ),
         ParamSpec(
             name="smooth", type="int", default=3, min=1, max=99, unit="px",
@@ -99,6 +150,7 @@ class RoiCrossStep(Step):
                   "Use the ranks when the image has more than two materials - "
                   "for example brightest for the metal and second_brightest "
                   "for the layer under it."),
+            show_when=("directions", _USES_UPRIGHT),
         ),
         ParamSpec(
             name="vertical_kinds", type="int", default=0, min=0, max=6,
@@ -113,6 +165,7 @@ class RoiCrossStep(Step):
                   "CPODE). Getting this wrong is quiet: with two assumed, the "
                   "brightest group takes in the spaces as well, so the card "
                   "finds twice as many stripes at half the pitch."),
+            show_when=("directions", _USES_UPRIGHT),
         ),
         ParamSpec(
             name="vertical_width", type="float", default=0.0, min=0.0,
@@ -126,6 +179,7 @@ class RoiCrossStep(Step):
                   "sensitivity then decides whether a stripe is found at all, "
                   "not where the box lands. Leave it 0 when the width of the "
                   "stripe is the thing you are measuring."),
+            show_when=("directions", _USES_UPRIGHT),
         ),
         ParamSpec(
             name="vertical_pitch", type="float", default=0.0, min=0.0,
@@ -136,6 +190,7 @@ class RoiCrossStep(Step):
                   "from the layout) lets the card check what it found, fill in "
                   "stripes that were too faint or half off the edge, and lock "
                   "on from a single stripe instead of needing several."),
+            show_when=("directions", _USES_UPRIGHT),
         ),
         ParamSpec(
             name="vertical_pitch_2", type="float", default=0.0, min=0.0,
@@ -145,6 +200,8 @@ class RoiCrossStep(Step):
                   "the second spacing here and leave it 0 otherwise. Some "
                   "layouts repeat as wide, narrow, wide, narrow rather than at "
                   "one steady pitch, and a single pitch cannot describe that."),
+            advanced=True,
+            show_when=("directions", _USES_UPRIGHT),
         ),
         ParamSpec(
             name="vertical_sensitivity", type="float", default=0.35, min=0.0,
@@ -155,6 +212,7 @@ class RoiCrossStep(Step):
                   "Lower finds more edges. Watch the panel and drag until the "
                   "lines land where you expect."),
             advanced=True,
+            show_when=("directions", _USES_UPRIGHT),
         ),
         # ---- 橫的那組條紋 -------------------------------------------------
         ParamSpec(
@@ -163,12 +221,14 @@ class RoiCrossStep(Step):
             choices=list(algo_grid.SELECT_RULES),
             label="Take the left-to-right stripes that are",
             help="Same as above, for the stripes that run left to right.",
+            show_when=("directions", _USES_FLAT),
         ),
         ParamSpec(
             name="horizontal_kinds", type="int", default=0, min=0, max=6,
             section="3 · The left-to-right stripes",
             label="How many kinds of flat stripe",
             help="Same as above, for the stripes that run left to right.",
+            show_when=("directions", _USES_FLAT),
         ),
         ParamSpec(
             name="horizontal_width", type="float", default=0.0, min=0.0,
@@ -176,6 +236,7 @@ class RoiCrossStep(Step):
             max=10000.0, unit="px", label="Flat stripe width",
             help=("How wide each left-to-right stripe is, in pixels. Leave 0 "
                   "to use the width measured on this image."),
+            show_when=("directions", _USES_FLAT),
         ),
         ParamSpec(
             name="horizontal_pitch", type="float", default=0.0, min=0.0,
@@ -183,6 +244,7 @@ class RoiCrossStep(Step):
             max=10000.0, unit="px", label="Flat stripe pitch",
             help=("How far apart the left-to-right stripes are, in pixels. "
                   "Leave 0 to measure it from the image."),
+            show_when=("directions", _USES_FLAT),
         ),
         ParamSpec(
             name="horizontal_pitch_2", type="float", default=0.0, min=0.0,
@@ -190,6 +252,8 @@ class RoiCrossStep(Step):
             max=10000.0, unit="px", label="…and every other one is",
             help=("Only when the spacing alternates between two values - put "
                   "the second spacing here and leave it 0 otherwise."),
+            advanced=True,
+            show_when=("directions", _USES_FLAT),
         ),
         ParamSpec(
             name="horizontal_sensitivity", type="float", default=0.35, min=0.0,
@@ -197,36 +261,53 @@ class RoiCrossStep(Step):
             max=1.0, label="Flat edge sensitivity",
             help="Same as above, for the stripes that run left to right.",
             advanced=True,
+            show_when=("directions", _USES_FLAT),
         ),
         # ---- 框放哪 --------------------------------------------------------
         ParamSpec(
-            name="place", type="choice", default="beside_vertical",
+            name="place", type="icon_choice", default="beside_vertical",
+            choices=list(_PLACE),
+            icons=["place_crossing", "place_beside_v", "place_beside_h",
+                   "place_between_v", "place_between_h"],
+            choice_help={
+                "crossing": "The whole overlap — it contains both materials.",
+                "beside_vertical": "A thin box hugging each side of an "
+                                   "up-and-down stripe, inside a left-to-right "
+                                   "one: the boundary between them, measured on "
+                                   "the other material.",
+                "beside_horizontal": "The same the other way round.",
+                "between_vertical": "The clear gap between two up-and-down "
+                                    "stripes.",
+                "between_horizontal": "The same the other way round.",
+            },
             section="4 · Where the box goes",
-            choices=list(algo_grid.PLACEMENTS), label="Put the box",
-            help=("crossing = the whole overlap, which contains both "
-                  "materials; beside_vertical = a thin box hugging the side of "
-                  "each up-and-down stripe, inside a left-to-right stripe - "
-                  "that is the boundary between the two, measured on the other "
-                  "material; beside_horizontal = the same the other way round; "
-                  "between_vertical = the clear gap between two up-and-down "
-                  "stripes; between_horizontal = the same the other way round."),
+            label="Put the box",
+            help=("Where the box sits relative to the two sets of stripes. "
+                  "The pictures show it: the faint bars are the stripes, the "
+                  "solid ones are where the box goes."),
         ),
         ParamSpec(
-            name="fill_rule", type="choice", default="skip",
+            name="fill_rule", type="icon_choice", default="skip",
+            choices=["fill", "skip", "skip_clear"],
+            icons=["fill_fill", "fill_skip", "fill_skip_clear"],
+            choice_help={
+                "fill": "Assume the stripe is there and box it anyway — for "
+                        "when a spot is missing only because the stripe was "
+                        "too faint to find.",
+                "skip": "Look at what is actually there and leave the spot out "
+                        "if it is a different material: a dark CPODE sitting "
+                        "where a metal gate would be gets no box.",
+                "skip_clear": "The same, and also drop the box on the face of "
+                              "each neighbouring stripe that looks at it — the "
+                              "material next to a CPODE is not the same thing "
+                              "as the material next to a gate.",
+            },
             section="4 · Where the box goes",
-            choices=list(algo_grid.FILL_RULES),
             label="Where a stripe is missing",
             help=("What to do at a spot where the pitch says a stripe should "
-                  "be but the image has none. skip = look at what is actually "
-                  "there and leave the spot out if it is a different material "
-                  "- a dark CPODE sitting where a metal gate would be gets no "
-                  "box. skip_clear = the same, and also drop the box on the "
-                  "face of the neighbouring stripe that looks at it, because "
-                  "the material next to a CPODE is not the same thing as the "
-                  "material next to a gate. fill = assume the stripe is there "
-                  "and box it anyway; use it when a spot is missing only "
-                  "because the stripe was too faint to find. Only has an "
-                  "effect when you filled in a pitch."),
+                  "be but the image has none. The dotted bar in each picture "
+                  "is that missing stripe. Only has an effect when you filled "
+                  "in a pitch."),
         ),
         ParamSpec(
             name="box_size", type="float", default=5.0, min=1.0, max=1000.0,
@@ -238,12 +319,18 @@ class RoiCrossStep(Step):
                   "are actually interested in."),
         ),
         ParamSpec(
-            name="side", type="choice", default="both",
+            name="side", type="icon_choice", default="both",
+            choices=["both", "start", "end"],
+            icons=["side_both", "side_start", "side_end"],
+            choice_help={
+                "both": "A box on each side of every stripe.",
+                "start": "Only the left (or upper) side.",
+                "end": "Only the right (or lower) side.",
+            },
             section="4 · Where the box goes",
-            choices=list(algo_grid.SIDES), label="Which side",
+            label="Which side",
             show_when=("place", _BESIDE),
-            help=("both = a box on each side of every stripe; start = only the "
-                  "left (or upper) side; end = only the right (or lower) side."),
+            help="Which side of the stripe the box goes on.",
         ),
         ParamSpec(
             name="gap", type="float", default=1.0, min=0.0, max=100.0,
@@ -272,10 +359,10 @@ class RoiCrossStep(Step):
             pattern_help=("use letters, digits and underscores only, and do "
                           "not start with a digit"),
             help=("Name for the boxes. Measure cards refer to it by this name. "
-                  "You also get <name>_center, which is the single box nearest "
-                  "the middle of the patch - that is where the defect is, and "
-                  "cards that measure shape rather than statistics need a "
-                  "single box."),
+                  "You also get <name>_center - the single box nearest the "
+                  "middle of the patch, which is where the defect is - and "
+                  "<name>_others, the rest of them, which is the baseline of "
+                  "the same material on the same image."),
         ),
         ParamSpec(
             name="max_boxes", type="int", default=64, min=1, max=4096,
@@ -298,13 +385,15 @@ class RoiCrossStep(Step):
                   "scores about 1; anything with structure scores 20 or more."),
             advanced=True,
         ),
+        *drop_edge_specs("5 · Name and limits"),
         _prefix_in_section(),
     ]
     reads = ["ref"]
     writes: List[str] = []
     features_out = ["cross_count", "cross_pitch_x_px", "cross_pitch_y_px",
                     "cross_filled", "cross_dist_px", "cross_pitch_ratio_x",
-                    "cross_pitch_ratio_y", "locate_conf", "locate_ok"]
+                    "cross_pitch_ratio_y", "cross_edge_dropped",
+                    "locate_conf", "locate_ok"]
 
     # ---- 宣告（給 lint / UI）------------------------------------------------
     @classmethod
@@ -313,12 +402,42 @@ class RoiCrossStep(Step):
 
     @classmethod
     def resolve_regions_out(cls, params: Dict[str, Any]) -> List[str]:
-        name = str(params.get("roi_out", "cross") or "").strip()
-        return [name, "%s_center" % name] if name else []
+        return region_family(params.get("roi_out", "cross"))
 
     @classmethod
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
-        return prefix_names(params.get("output_prefix", ""), cls.features_out)
+        # 卡自己的診斷 ＋ **每個區域那五個**（F11 Region-4：三張 ROI 卡同一組，
+        # 見 `_util.REGION_FACTS`）。這張卡以前一個區域數字都沒有 —— 下游要問
+        # 「這一顆上到底有沒有 cross_center」只能去看 `locate_ok`，而那是**整張
+        # 卡**的旗標，不是那個區域的。
+        return prefix_names(
+            params.get("output_prefix", ""),
+            list(cls.features_out)
+            + region_fact_names(cls.resolve_regions_out(params)))
+
+    @classmethod
+    def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
+        """方向與放法對不起來 —— 在跑之前就講（F11 Region-2c）。
+
+        「只看直的條紋」＋「框放在兩根**橫**條紋之間」是空集合。它不會報錯，
+        它會安靜地產出零個框、退回整張圖、把每一顆都標成 ``locate_ok = 0``
+        —— 而畫面上看起來就跟「這批圖沒有結構」一模一樣。使用者要跑完一整批
+        才會發現，而那時候他會去調敏感度，因為錯誤訊息指的是那裡。
+        """
+        want_x, want_y = algo_grid.directions_used(params.get("directions",
+                                                              "both"))
+        place = str(params.get("place", "beside_vertical"))
+        out: List[str] = []
+        for need in algo_grid.placement_needs(place):
+            if not (want_x if need == "upright" else want_y):
+                out.append(
+                    "“Put the box” is set to %s, which needs the %s stripes - "
+                    "but “Which way the pattern runs” only looks the other "
+                    "way. Change one of the two." % (place.replace("_", " "),
+                                                     "up-and-down" if need ==
+                                                     "upright" else
+                                                     "left-to-right"))
+        return out
 
     # ---- 執行 ---------------------------------------------------------------
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
@@ -348,7 +467,8 @@ class RoiCrossStep(Step):
             placement=str(p["place"]), box_size=float(p["box_size"]),
             side=str(p["side"]), gap=float(p["gap"]), inset=float(p["inset"]),
             min_confidence=float(p["min_confidence"]),
-            max_boxes=int(p["max_boxes"]))
+            max_boxes=int(p["max_boxes"]),
+            directions=str(p["directions"]))
 
         # panel 用的原始資料。**UI 畫的就是引擎算的這一份** —— UI 自己再算一次
         # 很容易變成「畫面上的框」與「真的量下去的框」不一樣，那種 bug 極難發現。
@@ -359,6 +479,9 @@ class RoiCrossStep(Step):
             "confidence": float(res.confidence),
             "ok": bool(res.ok),
             "reason": str(res.reason),
+            # 面板要分得出「這個方向找不到」與「這個方向沒在找」——
+            # 兩者的曲線都是平的，但只有前者是問題。
+            "directions": str(p["directions"]),
         }
 
         if not res.ok:
@@ -370,9 +493,8 @@ class RoiCrossStep(Step):
                      % (self.key, res.reason or "could not locate the pattern",
                         name))
             whole = (0.0, 0.0, 1.0, 1.0)
-            ctx.set_roi_boxes(name, [whole])
-            ctx.set_roi("%s_center" % name, whole)
-            ctx.add_features(prefix_features(p["output_prefix"], {
+            set_region_family(ctx, self.key, name, [whole])
+            ctx.add_features(prefix_features(p["output_prefix"], dict({
                 "cross_count": 0.0,
                 "cross_pitch_x_px": float(res.x.pitch_measured),
                 "cross_pitch_y_px": float(res.y.pitch_measured),
@@ -380,22 +502,40 @@ class RoiCrossStep(Step):
                 "cross_dist_px": -1.0,
                 "cross_pitch_ratio_x": float(res.x.pitch_ratio),
                 "cross_pitch_ratio_y": float(res.y.pitch_ratio),
+                "cross_edge_dropped": 0.0,
                 "locate_conf": float(res.confidence),
                 "locate_ok": 0.0,
-            }))
+            }, **region_facts(ctx, self.resolve_regions_out(p), shape,
+                              # 退回整張圖 = 框在但那不是這個區域（同
+                              # Template；見 `_util.REGION_FACTS` 的 ⚠）。
+                              located=False))))
             return ctx
 
-        ctx.set_roi_boxes(name, [_norm(b, shape) for b in res.boxes])
+        # 靠邊的框丟掉 —— **在挑出中心那一塊之後**。順序反過來的話，中心會從
+        # 「缺陷所在的那一塊」變成「留下來的裡面離中心最近的那一塊」，而那兩者
+        # 在缺陷靠近 patch 邊緣時不是同一塊（見 ``_util.drop_edge_boxes``）。
+        boxes = list(res.boxes)
         centre = res.center_box
-        ctx.set_roi("%s_center" % name, _norm(centre, shape))
+        idx = boxes.index(centre) if centre in boxes else 0
+        dropped = 0
+        if bool(p["drop_edge"]) and float(p["edge_margin"]) > 0.0:
+            boxes, dropped, idx = drop_edge_boxes(
+                boxes, shape, float(p["edge_margin"]), idx)
+            # 畫面上的框要跟真的量下去的一致（同一條規矩，見上面那段註解）。
+            ctx.meta["crossings"][name]["boxes"] = [
+                [int(v) for v in b] for b in boxes]
+            ctx.meta["crossings"][name]["edge_dropped"] = int(dropped)
+
+        norm_boxes = [_norm(b, shape) for b in boxes]
+        set_region_family(ctx, self.key, name, norm_boxes, idx, dropped)
         if res.reason:
             ctx.warn("[%s] %s." % (self.key, res.reason))
 
         cx, cy = shape[1] / 2.0, shape[0] / 2.0
         dist = ((centre[0] + centre[2] / 2.0 - cx) ** 2
                 + (centre[1] + centre[3] / 2.0 - cy) ** 2) ** 0.5
-        ctx.add_features(prefix_features(p["output_prefix"], {
-            "cross_count": float(len(res.boxes)),
+        ctx.add_features(prefix_features(p["output_prefix"], dict({
+            "cross_count": float(len(boxes)),
             "cross_pitch_x_px": float(res.x.pitch_used),
             "cross_pitch_y_px": float(res.y.pitch_used),
             # 有幾根條紋是靠已知 pitch 補上的（影像上沒抓到）。0 = 每一根都
@@ -410,9 +550,14 @@ class RoiCrossStep(Step):
             # 缺陷（永遠在正中心）離最近那個交會有多遠。落在交界上跟落在
             # 兩個交界中間，通常不是同一回事，所以這本身就是可以打分的數字。
             "cross_dist_px": float(dist),
+            # 因為靠邊被丟掉幾塊。這個開關會**安靜地改變基準的樣本數**（同一份
+            # recipe 在 wafer 中心與邊緣的 defect 上留下的框數不一樣），看得到
+            # 才知道某一顆的基準是不是只剩一塊。
+            "cross_edge_dropped": float(dropped),
             "locate_conf": float(res.confidence),
             "locate_ok": 1.0,
-        }))
+        }, **region_facts(ctx, self.resolve_regions_out(p), shape,
+                          clipped=bool(res.clipped), edge_dropped=dropped))))
         return ctx
 
 
@@ -430,6 +575,13 @@ def _stripe_meta(s: "algo_grid.StripeSet") -> Dict[str, Any]:
         # 的原因是什麼」。答案的一部分就是「面板畫錯了」。
         "transitions": [float(e) for e in (s.edges_sub or s.edges)],
         "bands": [[int(a), int(b)] for a, b in s.bands],
+        # 每一段的平均亮度、它屬於第幾群、現在挑的是哪一群，以及**每一群要填
+        # 什麼 rule** —— 面板靠這四樣把「第幾亮」畫出來並且點得到（Region-2b）。
+        # UI 不自己分群：分幾群取決於現在挑第幾亮，那個規則只該有一份。
+        "levels": [float(v) for v in s.levels],
+        "groups": [int(g) for g in s.groups],
+        "group_picked": int(s.group_picked),
+        "group_rules": {str(k): v for k, v in (s.group_rules or {}).items()},
         "selected": [[int(a), int(b)] for a, b in s.selected],
         "pitch_measured": float(s.pitch_measured),
         # 量到的第二個間距（不交錯就是 0）。面板的「量給我填」讀這兩個。

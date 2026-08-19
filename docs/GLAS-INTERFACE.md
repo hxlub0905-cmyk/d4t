@@ -67,10 +67,130 @@ worker 都是照「`DefectItem` 帶著哪些影像來源」在算的。卡片自
 
 ---
 
+## 3.4 **實測：manifest 已經是 v4，§4 的必要 1／建議 3 都做完了**（2026-08-18）
+
+使用者在公司機上對一份真實匯出跑了 `tools/check_glas_export.py`（399 顆）。
+結果推翻了下面 §4 的一部分 —— **GitHub 上的 GLAS 是 v3，廠內那份是 v4**：
+
+```
+schema   mmh-gds-overlay-v4
+columns  image_id, raw_png, overlay_png, fine_dx_nm, fine_dy_nm, score, status,
+         gray_png, label_png, id_source, page, width_px, height_px, nm_per_px,
+         label_view_png
+```
+
+| §4 的項目 | 實際狀態 |
+|---|---|
+| 必要 1（多頁 TIFF 的 page 對應）| **欄位在了**（`page`）。RSEM 這批是空的 —— 那是對的 |
+| 建議 3（`id_source` / `width_px` / `height_px`）| **全部做完了**，而且 `nm_per_px` 也逐張帶了 |
+
+所以 ADEPT 不必再猜也不必再自己比：**`id_source` 直接說 `image_id` 是不是 KLARF
+的 `DEFECTID`，`width_px`/`height_px` 直接說 label 圖該多大。**
+
+那一批的其他事實（全部遮蔽過）：399 顆、`status` 全 `ok`、每顆五種 PNG 都在、
+label 是 1000×1000 單通道 8-bit、3 層、`nm_per_px` 全批都是 1、
+`image_id` 是不補零的數字（長度 1–6）、檔名不需要 `_safe_name` 改寫、沒有碰撞。
+
+**唯一的 WARN 是 layer 名**：三個名字都含有 ADEPT 的區域名規則不接受的字元
+（`L17/D0` 那種形式）。所以 `roi_from_mask` 一定要有一層「layer 名 → 區域名」的
+改寫，而且**改寫規則要固定、要能查碰撞**（見 §3.6）。
+
+## 3.6 一層 mask 拆成幾個矩形 —— 量過了（2026-08-18，真實資料）
+
+`check_glas_export.py --samples N` 會把抽樣的那張 label 圖拆一次，印出每一層的
+**pieces（連通元件）** 與 **rectangles（精確矩形分解）**。兩個數字問的是不同的事：
+
+* **rectangles** = ADEPT 真的要存幾個框。
+* **pieces** = 「一份」有幾個。`<name>_center` / `<name>_others` 只有在「一份」
+  講得通的時候才有意義 —— 而在非週期的 layout 上通常講不通（§3.3.13 已經據此
+  決定這張卡只吐 `<name>`）。
+
+### 真實那一份的數字
+
+| 層 | pieces | rectangles |
+|---|---|---|
+| 1 | 30 | 30 |
+| 2 | 100 | 100 |
+| 3 | 275 | 275 |
+
+**三層都相等，而那是一個很有用的結果**：等號的意思是**每一塊形狀本來就是一個
+軸對齊矩形** —— 沒有 L 形、沒有斜邊，也**沒有任何一層被後面畫的層切碎**
+（那正是原本擔心的事：`render_label_image` 是 `lbl[m > 0] = label_id`，後畫的層
+會蓋掉先畫的）。所以在這批資料上，精確矩形分解跟直接取 bounding box 會得到
+一模一樣的答案。
+
+分解那段程式**還是要留**：它是對的做法，而下一個站點／下一層不保證一樣乾淨
+（合成的測試資料就故意做成 1014 / 988 / 25，那條路測得到）。
+
+### 上限：275 vs 8192
+
+最大 275 個矩形，而 `roi_from_mask` 的 `max_boxes` 預設是 **8192** —— 30 倍餘裕，
+不用調。（既有的 Profile / Template 卡預設 **64**，那是為「重複結構的幾份」設計
+的；GDS 這條路走的不是那張卡，所以那個數字不適用。健檢比的就是 8192，
+`tests/test_check_glas_export.py::test_the_box_cap_is_the_one_that_actually_applies`
+逐次核對報告裡的上限跟卡片的預設值是同一個。）
+
+實測成本（1000×1000、3 層、30/100/275 個矩形，同樣形狀的合成資料）：
+`roi_from_mask` **54 ms／顆**，下游拿 275 個框量一次 `glv_stats` **5 ms**。
+399 顆單執行緒約 25 秒。
+
+### layer 名的改寫要能查碰撞
+
+三個 layer 名都需要改寫（`L17/D0` 那種形式 → `L17_D0`）。改寫規則在
+`adept/core/ingest/glas_export.py::region_name_for`，而健檢有**同一條規則的複本**
+與一條「改寫之後還分不分得開」的檢查 —— 真正會咬人的是碰撞：`17/D0` 與
+`L17-D0` 都會變成 `L17_D0`，ADEPT 會自動把後面那個改成 `L17_D0_2`，於是畫面上
+出現一個誰也認不得的名字。真實那一份 **PASS**（三個名字改寫後仍然互異）。
+
+## 3.5 先驗，再寫程式：`tools/check_glas_export.py`（2026-08-18）
+
+真實資料在**只能複製文字出來**的那台機器上（`AGENTS.md` §2），而卡片要接對，
+猜不出來的東西全都是文字：欄位名、id 的格式、檔名慣例。猜錯的下場不是報錯，
+是整批安靜對不上。
+
+所以有一支健檢：
+
+```
+python tools/check_glas_export.py <匯出資料夾> [--klarf <KLARF>] [--images <SEM 影像資料夾>]
+```
+
+它**預設遮蔽**（layer 名 → `L1`、defect id → `IMG1`、路徑一律不印，只留結構、
+格式與計數），所以整份報告可以直接貼出來；`--reveal` 那一份不要貼。
+純標準函式庫（PNG 是自己讀的），不寫檔、不連網。
+
+### 讀 GLAS 的程式碼讀出來的四件事（commit `bef5492`）
+
+這四件都**不在**上面那張表裡，而且每一件錯了都不會報錯：
+
+1. **檔名不是 `<DEFECTID>_label.png`，是 `<_safe_name(DEFECTID)>_label.png`。**
+   `overlay_export._safe_name` 把非 `[A-Za-z0-9-_.]` 的字元換成底線。
+   所以 ADEPT 配對時必須套**同一個轉換** —— 而且兩個不同的 id（`a/b`、`a:b`）
+   會折到同一個檔名，後匯出的那顆**覆蓋**前一顆，manifest 裡兩列的 id 仍然不同。
+2. **`label_map` 裡的層在某一顆上可能一個像素都沒有。**
+   `fine_align.render_label_image` 是 `lbl[m > 0] = label_id`，**後面的層蓋掉
+   前面的層**。名字還在 manifest 裡，而那一顆的區域是空的。
+3. **`<id>_label_view.png` 是 3 通道的上色預覽**，指錯檔案的話 ADEPT 會把通道
+   平均掉，label id 被混成一堆不存在的值。`_gray.png` 也不能拿來切區域：
+   它有 Gaussian blur、背景是 `bg_glv`（預設 80）不是 0。
+4. **`overlay_manifest.csv` 是用平台預設編碼寫的**（`open(..., "w")` 沒給
+   `encoding`），非 ASCII 的 layer 名在 Windows 上會變成 cp950。
+   **JSON 那一份是安全的**（`json.dump` 預設 `ensure_ascii=True`）——
+   ADEPT 一律讀 `overlay_manifest.json`。
+
+另外兩件是既有事實的確認：`label_map` **只有匯出時勾了 label 才會寫**；
+alignment 檔的**檔名與資料夾都是使用者在另一個對話框選的**，所以它常常不在
+PNG 那個資料夾裡（健檢靠 schema 字串找它，`--alignment` 可以直接指過去）。
+
 ## 4. 要請 GLAS 改的（**這一段可以直接複製過去**）
 
 > 以下是 ADEPT（下游）對 GLAS 匯出的需求。ADEPT 不解析 layout，
 > 只吃 `<id>_label.png` + `<id>_gray.png` + manifest；join key 是 KLARF `DEFECTID`。
+
+> ⚠ **2026-08-18 實測更新（見 §3.4）**：廠內那份 GLAS 已經是 **v4**，
+> 底下的「必要 1」與「建議 3」**都已經做掉了**（manifest 有 `page`、`id_source`、
+> `width_px`、`height_px`、逐張 `nm_per_px`）。而 Region-3 定調成 **RSEM only**
+> 之後，「必要 1」與「必要 2」本來就不再擋 ADEPT（一顆一個檔、只有一頁）。
+> 下面這幾段留著是給**未來要做 patch 那條路**的人 —— 那時候它們會回來。
 
 ### 必要 1 — 多頁 TIFF 的 page 對應（不改的話，多頁資料整批對錯）
 

@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import List, Sequence, Tuple
 
 __all__ = ["IDENTITY", "parse_curve", "format_curve", "is_identity",
-           "CurveError"]
+           "format_number", "CurveError"]
 
 Point = Tuple[float, float]
 
@@ -94,7 +94,7 @@ def format_curve(points: Sequence[Point]) -> str:
     """控制點 → 標準字串。四位小數 —— 再細也不是使用者拉得出來的精度。"""
     out = []
     for x, y in points:
-        out.append("%s,%s" % (_num(x), _num(y)))
+        out.append("%s,%s" % (format_number(x), format_number(y)))
     return "; ".join(out)
 
 
@@ -109,8 +109,15 @@ def is_identity(points: Sequence[Point], tol: float = 1e-6) -> bool:
     return all(abs(y - x) <= tol for x, y in pts)
 
 
-def _num(v: float) -> str:
-    """去掉沒有意義的尾數零：``0.5000`` → ``0.5``、``1.0000`` → ``1``。"""
+def format_number(v: float) -> str:
+    """0–1 的座標 → 標準字串；去掉沒有意義的尾數零。
+
+    ``0.5000`` → ``0.5``、``1.0000`` → ``1``。四位小數是**上限**不是格式 ——
+    再細也不是使用者拉得出來的精度，而尾數零只會讓 recipe 的 diff 變吵。
+
+    ``cellrois`` 也用這一支（框的座標跟曲線的控制點是同一種東西：一個 0–1 的
+    正規化座標）。抄第二份出來的那份會漂移 —— 這個 repo 記過三次。
+    """
     s = "%.4f" % float(v)
     s = s.rstrip("0").rstrip(".")
     return s or "0"

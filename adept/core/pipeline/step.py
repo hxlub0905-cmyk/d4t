@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Dict, List, Optional, Type
 
 from .context import Context
+from .cellrois import CellRoiError, format_cell_rois, parse_cell_rois
 from .channels import ChannelMapError, format_channel_map, parse_channel_map
 from .curve import CurveError, format_curve, parse_curve
 
@@ -81,7 +82,8 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC)
 #: UI 認得這個型別：它給的是「建一個」的按鈕加一行摘要，欄位本身唯讀。
 PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
                "image_keys", "curve", "template", "multi_choice",
-               "channel_map")
+               "channel_map", "cell_rois", "region_key", "region_keys",
+               "icon_choice")
 
 #: 輸出流的名字可以用哪些字（F10-7）。
 #:
@@ -125,6 +127,24 @@ class ParamSpec:
     min: Optional[float] = None
     max: Optional[float] = None
     choices: Optional[List[str]] = None
+    #: ``icon_choice`` 專用：每一個 choice 配一個圖示名（一一對應）。
+    #:
+    #: 為什麼要一個新型別而不是「choice 加一個旗標」（F11 Region-2）：
+    #: 使用者的話是「我不希望 profile 設定頁面那麼多**文字**，能用圖就用圖」。
+    #: 而 ``place`` 的五個選項是 ``crossing`` / ``beside_vertical`` /
+    #: ``between_horizontal`` … —— 那五個英文詞講的是**五個畫得出來的形狀**，
+    #: 用一排小圖就答完了，下拉選單則要求使用者先把詞翻譯成圖再選。
+    #:
+    #: **只有「不看資料就畫得出來」的選項適用。** ``vertical_select``（最亮的
+    #: 那一組是哪一組）看的是這張影像，畫不出通用的圖示 —— 那種要畫在影像上，
+    #: 不是畫在按鈕上。
+    #:
+    #: 圖示名要在 ``ui.widgets.GLYPH_ICONS`` 裡（``core`` 不 import Qt，所以那條
+    #: 檢查在 UI 那一側的測試，見 `test_card_invariants`）。
+    icons: Optional[List[str]] = None
+    #: ``icon_choice`` 專用：每一個 choice 一句 tooltip。圖示看得懂形狀，
+    #: 但「為什麼要選它」還是要有地方講 —— 只是那個地方不該佔畫面。
+    choice_help: Optional[Dict[str, str]] = None
     unit: str = ""
     label: str = ""
     #: 文字參數的合法格式（正規表達式）。填了就在 ``validate_params`` 擋下來，
@@ -193,6 +213,13 @@ class ParamSpec:
     #: 判準：這個數字是不是一個**鄰域的邊長**（濾波核、結構元素、搜尋窗）。
     #: 是就填，其他長度不要填。
     extent: bool = False
+    #: ``channel_map`` 的列**代表什麼**：``"images"``（預設，一列一張圖）或
+    #: ``"labels"``（一列一個 GDS layer id）。F11 Region-3。
+    #:
+    #: 只換三句話（左欄的字、加一列那顆鈕、提示），**資料形狀完全一樣**
+    #: —— 兩者都是「整數 → 名字，空的就是不要」。所以是一個旗標而不是第二個
+    #: widget：抄第二份出來的那份一定會漂移（這個 repo 記過三次）。
+    row_kind: str = "images"
 
     def visible_for(self, params: Optional[Dict[str, Any]]) -> bool:
         """在這組參數下，這一列該不該顯示（沒有 ``show_when`` 就永遠顯示）。"""
@@ -208,7 +235,16 @@ class ParamSpec:
         if not str(self.help).strip():
             raise ParamError(f"parameter '{self.name}': help (a plain-language "
                              f"description) must not be empty")
-        if self.type in ("choice", "multi_choice") and not self.choices:
+        if self.type == "icon_choice":
+            if len(self.icons or []) != len(self.choices or []):
+                raise ParamError(
+                    f"parameter '{self.name}': icon_choice needs one icon per "
+                    f"choice ({len(self.choices or [])} choices, "
+                    f"{len(self.icons or [])} icons)")
+        elif self.icons:
+            raise ParamError(f"parameter '{self.name}': only icon_choice takes "
+                             f"icons")
+        if self.type in ("choice", "icon_choice", "multi_choice") and not self.choices:
             raise ParamError(f"parameter '{self.name}': type '{self.type}' "
                              f"requires choices")
         if self.type in ("image_key", "image_keys"):
@@ -257,7 +293,19 @@ class ParamSpec:
                     v = bool(value)
             elif self.type in ("str", "image_key", "template"):
                 v = str(value)
-            elif self.type in ("image_keys", "multi_choice"):
+            elif self.type == "region_key":
+                # **一個**區域名（``region_keys`` 是逗號清單）。空字串合法 ——
+                # 「還沒挑」由卡片的 configuration_issues 講，不是這裡。
+                v = str(value).strip()
+                if "," in v:
+                    # 直接丟 ParamError —— 下面那個通用的 except 會把
+                    # 「為什麼壞」蓋成「converted to region_key」（鐵則 4：
+                    # 擋下來的那句話要是白話的）。
+                    raise ParamError(
+                        "parameter '%s' takes one region name, not a list "
+                        "(got %r). Use one Compare regions card per pair."
+                        % (self.name, str(value)))
+            elif self.type in ("image_keys", "multi_choice", "region_keys"):
                 # 正規化：去空白、去空項、去重複但保留順序。
                 # 手打的 "ref, ref ,, test" 與 UI 勾出來的 "ref,test" 等價，
                 # 存進 recipe 的字串才不會因為輸入方式不同而長得不一樣。
@@ -274,11 +322,15 @@ class ParamSpec:
                 # 擋在這裡而不是等 run() 才炸（鐵則 4）。順便正規化：
                 # 排序、去空白、統一小數位 —— 手打的字串與 UI 拉出來的一樣。
                 v = format_curve(parse_curve(value))
+            elif self.type == "cell_rois":
+                # 同上：擋在打字的當下，並正規化成「四位小數、去尾數零」——
+                # round-trip 要是 identity（見 cellrois.format_cell_rois）。
+                v = format_cell_rois(parse_cell_rois(value))
             elif self.type == "channel_map":
                 # 同上：擋在打字的當下，並正規化成「依頁碼排序、", " 分隔」
                 # —— round-trip 要是 identity（見 channels.format_channel_map）。
                 v = format_channel_map(parse_channel_map(value))
-            elif self.type == "choice":
+            elif self.type in ("choice", "icon_choice"):
                 v = str(value)
                 if v not in (self.choices or []):
                     raise ParamError(
@@ -288,7 +340,7 @@ class ParamSpec:
                 raise ParamError(f"parameter '{self.name}': unknown type")
         except ParamError:
             raise
-        except (CurveError, ChannelMapError) as exc:
+        except (CurveError, ChannelMapError, CellRoiError) as exc:
             # 這兩個的訊息已經是白話的，別被下面的通用訊息蓋掉
             raise ParamError(f"parameter '{self.name}': {exc}") from None
         except (TypeError, ValueError):
@@ -547,7 +599,8 @@ class Step(ABC):
                 {
                     "name": p.name, "type": p.type, "default": p.default,
                     "help": p.help, "min": p.min, "max": p.max,
-                    "choices": p.choices, "unit": p.unit,
+                    "choices": p.choices, "icons": p.icons,
+                    "choice_help": p.choice_help, "unit": p.unit,
                     "label": p.label or p.name,
                     "pattern": p.pattern,
                     # ``("method", ("percentile",))`` → JSON-safe 的兩個 list。
@@ -557,6 +610,7 @@ class Step(ABC):
                     "advanced": p.advanced,
                     "direction": p.direction,
                     "extent": p.extent,
+                    "row_kind": p.row_kind,
                 }
                 for p in cls.params
             ],

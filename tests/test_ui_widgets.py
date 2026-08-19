@@ -976,3 +976,75 @@ def test_rows_appear_and_disappear_with_the_method(qapp):
     assert form._rows["tiles"].isVisibleTo(form) is False
     # streams / method 本身沒有 show_when，永遠在
     assert form._rows["streams"].isVisibleTo(form) is True
+
+
+# --------------------------------------------------------------------------- #
+# icon_choice —— 用圖取代下拉的英文句子（F11 Region-2）
+# --------------------------------------------------------------------------- #
+def test_every_icon_a_card_declares_really_exists(qapp):
+    """`core` 不 import Qt，所以圖示名對不對只有**這一側**驗得了。
+
+    對不上的症狀是 `IconButton` 直接 `ValueError: unknown icon` —— 那張卡整個
+    打不開，而且是在使用者點下去的時候才炸。
+    """
+    import adept.core.steps  # noqa: F401 — 觸發卡片註冊
+    from adept.core.pipeline import list_steps
+    from adept.ui.widgets import GLYPH_ICONS
+
+    seen = 0
+    for step in list_steps():
+        for spec in step.describe()["params"]:
+            for icon in (spec.get("icons") or []):
+                seen += 1
+                assert icon in GLYPH_ICONS, (step.key, spec["name"], icon)
+    assert seen >= 11, "應該至少有 Profile 那三排（5+3+3）"
+
+
+def test_an_icon_choice_row_is_buttons_not_a_dropdown(qapp):
+    """使用者：「我不希望 profile 設定頁面那麼多文字，能用圖就用圖。」"""
+    from adept.core.pipeline import get_step
+    from adept.ui.widgets import IconButton, IconChoice, ParamForm
+
+    form = ParamForm()
+    form.set_step(get_step("roi_cross").describe(),
+                  {"place": "crossing"}, ["ref", "test"])
+    editor = form.editor("place")
+    assert isinstance(editor, IconChoice)
+    assert editor.text() == "crossing"
+
+    buttons = editor.findChildren(IconButton)
+    assert len(buttons) == 5                    # place 有五個選項
+    for b in buttons:
+        assert b.text() == ""                   # 一顆字都不放
+        assert b.toolTip()                      # 說明退到 tooltip
+    assert sum(1 for b in buttons if b.isChecked()) == 1
+
+
+def test_picking_an_icon_emits_the_value(qapp):
+    from adept.ui.widgets import IconChoice
+
+    got = []
+    w = IconChoice(["a", "b"], ["fit", "tidy"], "a")
+    w.changed.connect(got.append)
+    w._pick("b")
+    assert got == ["b"]
+    assert w.text() == "b"
+
+
+def test_a_value_nobody_recognises_lights_nothing(qapp):
+    """手寫 recipe 打錯字的時候，**亮錯一顆比一顆都不亮更糟**。"""
+    from adept.ui.widgets import IconButton, IconChoice
+
+    w = IconChoice(["a", "b"], ["fit", "tidy"], "zzz")
+    assert w.text() == "zzz"                    # 不偷偷改掉他的值
+    assert not any(b.isChecked() for b in w.findChildren(IconButton))
+
+
+def test_the_profile_card_lost_three_dropdowns_of_english(qapp):
+    from adept.core.pipeline import get_step
+
+    kinds = {p["name"]: p["type"]
+             for p in get_step("roi_cross").describe()["params"]}
+    assert kinds["place"] == "icon_choice"
+    assert kinds["side"] == "icon_choice"
+    assert kinds["fill_rule"] == "icon_choice"

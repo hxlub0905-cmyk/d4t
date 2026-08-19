@@ -11,7 +11,7 @@
 1. 四種 kind 都進得來（`ebi_patch` / `rsem` / `tiff_stack` / `folder`），
    而每一種有自己的入口；
 2. 沒有 KLARF 的那兩種**當場講**「寫不回 KLARF」；
-3. 收起來的機制還在（`HIDDEN_STEPS` 空著但 `visible_steps()` 照樣管用）——
+3. 收起來的機制還在（`HIDDEN_STEPS` 現在收著 `align`，見 §4）——
    下一次要暫時藏一張卡時，加一個字串就好；
 4. `algo/period.py` 仍然不是孤兒（那張便利貼留著）。
 """
@@ -79,13 +79,19 @@ def test_all_four_kinds_are_supported():
 
 
 def test_the_single_image_cards_are_in_the_library_now(window):
-    """`golden_cell` / `cell_period` 回來了 —— 它們是單張那條路**唯一**的 ref 來源。
+    """單張那條路要有自己的載入卡與量測卡。
 
-    收著它們的理由是「Studio 只吃兩兩成對的 patch」。那個前提沒了，繼續收著
-    就等於把功能打開一半。
+    2026-08-18：這一條原本點的是 `golden_cell` / `cell_period`，後來改點
+    `pattern_ref`。那一張當天傍晚也收進 `HIDDEN_STEPS` 了（見
+    `test_pattern_ref_is_hidden_but_still_runs`），所以現在點的是單張那條路
+    **真正在用**的四張：載入、找區域（大圖上鋪 ROI 也是它）、比兩塊區域、相減。
     """
-    for key in ("golden_cell", "cell_period", "load_patch", "align", "subtract"):
+    for key in ("load_single", "roi_template", "roi_compare", "subtract"):
         assert window.library.entry(key) is not None, key
+    # `align` 曾經在這一列上。2026-08-18 使用者把它收起來了 ——
+    # 見 test_align_is_hidden_but_still_runs。
+    # `golden_cell` / `cell_period` 也曾經在這一列上 —— 見
+    # test_the_golden_cell_cards_are_gone_for_good（一張刪了、一張改了名）。
 
 
 def test_an_rsem_dataset_loads_instead_of_being_refused(window, rsem_lot):
@@ -131,28 +137,93 @@ def test_an_unknown_kind_is_still_refused_with_a_reason(window, patch_lot,
     assert window.dataset is before, "被擋下來時不該動到使用者手上的資料集"
 
 
+def test_align_is_hidden_but_still_runs(window):
+    """使用者 2026-08-18：「我不喜歡 align 卡……拉 align 反而會飄掉 shift」。
+
+    **收起來、不刪掉**（CLAUDE.md §5 的判斷）：卡片庫看不到它，但已經在用它的
+    recipe 照跑、CLI 照跑、黃金值一個字不動 —— 而
+    `tests/fixtures/recipes/dual_route_basic.json` 正好用了它，撐著三組黃金值裡
+    的兩組。刪掉的話那兩組要重新定錨，而使用者說的是「之後真需要我再回來」。
+    """
+    from adept.core.pipeline import get_step
+
+    assert "align" in scope_mod.HIDDEN_STEPS
+    assert window.library.entry("align") is None      # 卡片庫看不到
+    assert get_step("align") is not None              # 但引擎照樣認得
+    assert window.model.add_step("align")             # 舊 recipe 也放得進來
+
+
+def test_pattern_ref_is_hidden_but_still_runs(window):
+    """使用者 2026-08-18：「請拿掉吧」——「收起來只是加一個字串」的那個拿掉。
+
+    **它沒事做了**，而不是它壞了：它被期待的「單張影像找 ROI 的第三種方法」，
+    那件事 **Template 已經在做**（量過：1000×1000 → 625 個框，見
+    `tests/test_roi_template_full_image.py`）。剩下的唯一能力是「疊一張 ref 去
+    相減」，而使用者現在的 RSEM 路線是「Region 段圈區域 → Compare regions」，
+    用不到 ref。
+
+    **這一次是收起來不是刪掉**，而理由是硬的：這張卡刪過一次、代價量過
+    （rsem route 24/24 → 12/24）之後又被要回來；而且
+    `tests/fixtures/recipes/dual_route_basic.json` 的 rsem route 正用著它，
+    撐著一組黃金值 —— 刪掉 = 那份 recipe 開不起來 = 黃金值要重新定錨。
+    """
+    from adept.core.pipeline import Recipe, get_step, validate
+
+    assert "pattern_ref" in scope_mod.HIDDEN_STEPS
+    assert window.library.entry("pattern_ref") is None   # 卡片庫看不到
+    assert get_step("pattern_ref") is not None           # 引擎照樣認得
+
+    # 而那份 fixture 照樣開得起來、照樣沒有錯 —— 那才是「收起來」的定義。
+    import os
+    here = os.path.dirname(os.path.abspath(__file__))
+    recipe = Recipe.load(os.path.join(here, "fixtures", "recipes",
+                                      "dual_route_basic.json"))
+    assert any(n.step == "pattern_ref" for n in recipe.nodes.values())
+    assert not [i for i in validate(recipe, kind="rsem") if i.level == "error"]
+
+
 def test_the_hide_a_card_mechanism_still_works(window):
-    """`HIDDEN_STEPS` 空了，但機制要留著 —— 下次要暫時藏一張卡時加一個字串就好。"""
-    steps = [{"key": "load_patch"}, {"key": "golden_cell"}]
-    assert scope_mod.visible_steps(steps) == steps        # 現在什麼都不藏
+    """機制本身要留著 —— 下次要暫時藏別張卡時加一個字串就好。"""
+    steps = [{"key": "load_patch"}, {"key": "subtract"}]
+    assert scope_mod.visible_steps(steps) == steps        # 這兩張都沒被藏
     import adept.ui.scope as s
     keep = s.HIDDEN_STEPS
     try:
-        s.HIDDEN_STEPS = ("golden_cell",)
+        s.HIDDEN_STEPS = ("subtract",)
         assert [d["key"] for d in s.visible_steps(steps)] == ["load_patch"]
     finally:
         s.HIDDEN_STEPS = keep
 
 
-def test_the_single_image_cards_are_registered_and_runnable():
-    """registry、參數驗證、既有 recipe 全都照舊（這一條沒有變）。"""
-    from adept.core.pipeline import get_step
+def test_the_golden_cell_cards_are_gone_for_good():
+    """那兩個舊 key 都不在 registry 裡了，但**理由不一樣**。
+
+    2026-08-18 一天之內，同一支 `steps/golden.py` 的兩張卡走了兩條不同的路：
+
+    * `cell_period` —— **刪掉**（使用者：「不需要這功能」）。
+    * `golden_cell` —— 先刪，看了代價的數字之後要回來，並**改名**成
+      `pattern_ref`（使用者：「那可能要拿回來 不過要改名字 不然會誤會」）。
+
+    這一條測的是**兩種下場都要成立**：舊 key 一個都不在 registry 裡（所以卡片庫
+    上不會有第二個 Golden Cell），而改名的那一張要真的還在、而且舊 recipe 打得開
+    （遷移在 `tests/test_pattern_ref.py`）。收起來的那一種（`align`）是第三條路
+    —— 它 `get_step` 還拿得到，見 `test_align_is_hidden_but_still_runs`。
+
+    ⚠ 演算法一層從頭到尾沒動過：`algo/golden.py`（Template 卡與 `pattern_ref`
+    都在用）、`algo/period.py`（見下一條）。
+    """
+    from adept.core.pipeline.step import REGISTRY
     import adept.core.steps  # noqa: F401
 
     for key in ("golden_cell", "cell_period"):
-        step = get_step(key)
-        assert step.key == key
-        assert step.validate_params({}), "預設參數要還驗證得過"
+        assert key not in REGISTRY, key
+    assert "pattern_ref" in REGISTRY, "改名回來的那一張不見了"
+    assert REGISTRY["pattern_ref"].resolve_writes({}) == ["ref"]
+
+    from adept.core.algo import golden, template
+    assert hasattr(golden, "stack_cells")
+    assert hasattr(template, "build_golden_cell"), \
+        "Template 卡的 golden cell 疊圖還在用 algo/golden.py"
 
 
 def test_period_module_is_not_orphaned():

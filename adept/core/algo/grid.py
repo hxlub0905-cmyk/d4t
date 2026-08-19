@@ -1,20 +1,25 @@
 # ADEPT algorithm library — authored 2026-08-13 (F8).
-"""兩組正交條紋的**交會處** → 一組方框。純規則，不需要任何外部檔案。
+"""影像自己的條紋 → 一組方框。純規則，不需要任何外部檔案。
 
 這在解什麼問題
 --------------
 站點已經有兩招可以定位 ROI，兩招都要**外部的東西**：GDS（要 .oas）與 Golden
-Cell 模板（要一張原大圖）。第三招 —— 只看 patch 自己 —— 目前只到
-``algo/profile.py``，而那個依設計只吐**一條滿版的條紋**（單軸投影對另一個
-方向一無所知，所以它拒絕猜）。
+Cell 模板（要一張原大圖）。第三招 —— 只看 patch 自己 —— 就是這裡。
 
-那個拒絕對**一次**投影是對的。它擋掉的是另一件事：**另一個方向的範圍不需要
-猜，再投影一次就量得到。** 兩組正交的條紋交叉出一個格子陣列，要框的東西就
-落在格子上 —— 而且**通常不只一個**（一張 patch 上有好幾根直線、好幾根橫線，
-交會處自然是分散的好幾塊）。
+投影量得到的是「**這個方向每一根線在哪**」。一個方向就答得出來：每一根線上
+一條滿版的帶子（那是 ``algo/profile.py`` 一直做得到的）。兩個方向的話，
+兩組正交的條紋交叉出一個格子陣列，要框的東西落在格子上 —— 而且**通常不只
+一個**（一張 patch 上有好幾根直線、好幾根橫線，交會處自然是分散的好幾塊）。
 
 用實際的話講一次（這是需求的來源）：patch 裡有直的 Metal Gate 與橫的 EPI，
 要量的是「MG 與 EPI 的交界、落在 EPI 那一側」的那幾小塊。
+
+⚠ **交會是特例，不是前提**（F11 Region-2c）。這個檔案 F8 寫的時候只做兩個
+方向，而那是**需求的形狀**：於是一張只有 line/space 的 patch（單方向，EBI 上
+很常見）會被一句「no flat stripes to lock onto」擋在門外，儘管投影完全量得出
+它的每一根線。``directions`` 讓沒在用的那個方向換成一根蓋滿整張圖的條紋
+（:func:`open_axis`）—— 幾何完全共用，交會出來的正好就是滿版的框。
+見 :data:`DIRECTIONS`。
 
 為什麼不寫死那兩種材質
 ----------------------
@@ -47,16 +52,19 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, List, NamedTuple, Optional, Sequence, Tuple
+from typing import (
+    Any, Dict, List, NamedTuple, Optional, Sequence, Tuple,
+)
 
 import numpy as np
 
 from . import profile as algo_profile
 
 __all__ = ["StripeSet", "CrossResult", "find_stripes", "select_bands",
-           "cross_boxes", "locate_crossings",
-           "SELECT_RULES", "PLACEMENTS", "SIDES", "FILL_RULES",
-           "measure_pitches", "calibrate_axis", "AxisCalibration"]
+           "cross_boxes", "locate_crossings", "open_axis", "directions_used",
+           "SELECT_RULES", "PLACEMENTS", "SIDES", "FILL_RULES", "DIRECTIONS",
+           "placement_needs", "measure_pitches", "calibrate_axis",
+           "AxisCalibration"]
 
 #: 「要哪一組條紋」。用**相對**亮度（跟這張圖上其他段比），不是絕對灰階 ——
 #: 絕對值會隨機台與曝光漂移，一份 recipe 就綁死在一台機器上。
@@ -81,6 +89,47 @@ PLACEMENTS = ("crossing",
 
 #: ``beside_*`` 時要哪一邊。``start`` = 左／上，``end`` = 右／下。
 SIDES = ("both", "start", "end")
+
+#: **要看幾個方向的條紋。**（F11 Region-2c）
+#:
+#: 這張卡原本寫死了「兩組正交條紋」—— 那是需求來源（MG × EPI）的形狀，
+#: 不是這套演算法的形狀。實際上一張 patch 常常只有**一個方向**有結構
+#: （密集的 line/space 就是），而那時候使用者要的框是「每一根線上一條滿版的
+#: 帶子」，不是「交會處」。原本的卡對這種圖只會回一句「no flat stripes to
+#: lock onto」然後退回整張圖 —— 一個做得到的事被形狀擋住了。
+#:
+#: ``upright`` / ``flat`` 的做法是給沒在用的那個方向一根**蓋滿整張圖的條紋**
+#: （:func:`open_axis`），交會的幾何完全不用改：跟滿版帶子交會出來的，
+#: 正好就是滿版的框。少一條分支就少一種只在單軸時才會發作的 bug。
+DIRECTIONS = ("both", "upright", "flat")
+
+#: ``placement`` → 它**非要有真條紋不可**的那幾個方向。
+#:
+#: ``crossing`` 兩邊都可以是滿版的（框就跟著縮成一維）；``beside_x`` /
+#: ``between_x`` 貼的、夾的都是 x 那一組，那一組不能是假的 ——
+#: 「兩根滿版條紋之間」是空集合，而它安靜地產出零個框。
+_PLACEMENT_NEEDS = {
+    "crossing": (),
+    "beside_vertical": ("upright",),
+    "beside_horizontal": ("flat",),
+    "between_vertical": ("upright",),
+    "between_horizontal": ("flat",),
+}
+
+
+def placement_needs(placement: str) -> Tuple[str, ...]:
+    """這個放法非要哪幾個方向有真條紋（給卡片的設定檢查用）。"""
+    return _PLACEMENT_NEEDS.get(str(placement), ())
+
+
+def directions_used(directions: str) -> Tuple[bool, bool]:
+    """``(要不要直的, 要不要橫的)``。看不懂的值當成 ``both``。"""
+    d = str(directions or "both")
+    if d == "upright":
+        return (True, False)
+    if d == "flat":
+        return (False, True)
+    return (True, True)
 
 #: 已知 pitch 時，找到的邊界可以離晶格多遠（pitch 的比例）還算「對得上」。
 DEFAULT_PITCH_TOL = 0.25
@@ -177,6 +226,12 @@ class StripeSet:
     bands: List[Tuple[float, float]] = field(default_factory=list)
     #: 每一段的平均亮度（跟 ``bands`` 等長）。
     levels: List[float] = field(default_factory=list)
+    #: 每一段屬於第幾群（跟 ``bands`` 等長）、現在挑中的是哪一群，以及
+    #: 每一群要填什麼 ``select`` 值。面板靠它們把「第幾亮」**畫出來**並且
+    #: 點得到（見 :func:`band_groups`）—— 那個詞本身不告訴使用者任何事。
+    groups: List[int] = field(default_factory=list)
+    group_picked: int = 0
+    group_rules: Dict[int, str] = field(default_factory=dict)
     #: **要的那一組**條紋（暗的或亮的），已套用已知 pitch 的補線。
     selected: List[Tuple[int, int]] = field(default_factory=list)
     #: 從影像上量到的週期 = **同一組條紋**的中心距中位數；量不到是 0。
@@ -245,6 +300,9 @@ class CrossResult:
     confidence: float = 0.0
     ok: bool = False
     reason: str = ""
+    #: 有沒有被 ``max_boxes`` 砍掉（``reason`` 裡也講，但那是一句話不是旗標 ——
+    #: 而「有東西被安靜拿掉」要能當成一個數字打進分數表達式）。
+    clipped: bool = False
 
     @property
     def center_box(self) -> Optional[Tuple[int, int, int, int]]:
@@ -259,6 +317,8 @@ class CrossResult:
 _RANKS = {"brightest": ("hi", 0), "second_brightest": ("hi", 1),
           "third_brightest": ("hi", 2), "darkest": ("lo", 0),
           "second_darkest": ("lo", 1), "third_darkest": ("lo", 2)}
+#: ``_RANKS`` 的反查（給 :func:`band_groups` 把群號翻回 rule 名）。
+_RANKS_BY_END = {v: k for k, v in _RANKS.items()}
 
 
 def level_groups(levels: Sequence[float], k: int) -> List[int]:
@@ -320,16 +380,55 @@ def select_bands(bands: Sequence[Tuple[int, int]], levels: Sequence[float],
     if rule == "all" or len(bands) < 2:
         return bands
 
+    groups, want, _rules = band_groups(bands, levels, rule, kinds)
+    picked = [b for b, g in zip(bands, groups) if g == want]
+    # 段數不夠分那麼多群的時候會挑不到 —— 退回整組比回空的好，
+    # 但上層看得到段數，所以不會把「沒得挑」誤認為「挑到了」。
+    return picked or bands
+
+
+def band_groups(bands: Sequence[Tuple[int, int]], levels: Sequence[float],
+                rule: str = "brightest", kinds: int = 0
+                ) -> Tuple[List[int], int, Dict[int, str]]:
+    """每一段屬於**第幾群**、現在挑的是哪一群、以及每一群要填什麼 rule。
+
+    :func:`select_bands` 本來就在算這個，只是算完就丟掉。公開它是為了讓面板
+    **把分群畫出來、而且點得到**（F11 Region-2b）：使用者的話是「能用圖就用
+    圖」，而「最亮的那一組是哪一組」是一個只有看圖才答得出來的問題 ——
+    下拉選單裡的 ``second_brightest`` 這個詞本身不告訴他任何事。
+
+    回 ``(每段的群號, 現在挑中的群號, {群號: 要填的 rule})``。
+    ``rules`` 讓點擊直接翻譯成參數值：點到哪一群，就填那一群的 rule。
+
+    ⚠ **分幾群取決於現在挑的是第幾亮**（``k = max(rank + 2, kinds)``），所以
+    這裡回的分群是「目前這組設定下的分群」，不是一個絕對的答案。那是實話 ——
+    面板畫的本來就該是引擎這一次真的用的東西。
+    """
+    bands, levels = list(bands), list(levels)
+    if not bands:
+        return [], 0, {}
+    rule = _SELECT_ALIASES.get(str(rule), str(rule))
+    if rule == "all" or len(bands) < 2:
+        return [0] * len(bands), 0, {0: "all"}
+
     end, rank = _RANKS.get(rule, ("hi", 0))
     # 排名要求的群數是**下限**：要挑「第三亮」至少得分四群，使用者說有三種
     # 材質也不能少分。兩者取大的那個。
     k = max(rank + 2, int(kinds or 0))
     groups = level_groups(levels, k)
     want = (max(groups) - rank) if end == "hi" else rank
-    picked = [b for b, g in zip(bands, groups) if g == want]
-    # 段數不夠分那麼多群的時候會挑不到 —— 退回整組比回空的好，
-    # 但上層看得到段數，所以不會把「沒得挑」誤認為「挑到了」。
-    return picked or bands
+
+    top = max(groups) if groups else 0
+    rules: Dict[int, str] = {}
+    for g in sorted(set(groups)):
+        from_hi, from_lo = top - g, g
+        # 由亮的那一端數比較短就用亮的名字，反之用暗的 —— 使用者說得出口的
+        # 是「最亮的」「最暗的」，不是「第五亮的」。
+        if from_hi <= from_lo and from_hi < 3:
+            rules[g] = _RANKS_BY_END[("hi", from_hi)]
+        elif from_lo < 3:
+            rules[g] = _RANKS_BY_END[("lo", from_lo)]
+    return groups, want, rules
 
 
 def refine_edges(prof: Any, edges: Sequence[int]) -> List[float]:
@@ -718,6 +817,10 @@ def find_stripes(img: Any, axis: str = algo_profile.AXIS_X,
                   for a, b in out.bands]
 
     picked = select_bands(out.bands, out.levels, select, kinds)
+    # 分群也一起留著 —— 面板要畫「哪幾根是同一種材質」，而那個規則只該有一份
+    # （`select_bands` 與這裡走的是同一支 `band_groups`）。
+    out.groups, out.group_picked, out.group_rules = band_groups(
+        out.bands, out.levels, select, kinds)
     # 量間距只用**沒有被影像邊界切到**的那幾根 —— 只露一半的線量到的中心
     # 依定義就是偏的，而這個數字是要拿去填回參數格的。
     whole = [(a + b) / 2.0 for a, b in picked
@@ -1165,6 +1268,30 @@ def _spans_for(placement: str, axis: str, bands: Sequence[Tuple[int, int]],
     return out
 
 
+def open_axis(axis: str, length: int) -> StripeSet:
+    """「這個方向不看」= 一根蓋滿整張圖的條紋。
+
+    為什麼用一個**退化的** ``StripeSet`` 而不是在 :func:`cross_boxes` 裡加
+    分支：交會的幾何有五種放法、兩軸各自可能是被貼住的或當界線的，加分支等於
+    把那張表變成兩張，而只有走單軸時才會用到的那一半沒有人在看。滿版條紋讓
+    單軸變成雙軸的一個**特例**，走的是同一段程式碼。
+
+    ``confidence`` 留 0：它不參與 ``min_confidence``（那一關只問有在用的方向），
+    而面板拿到 0 才畫得出「這個方向沒在看」。
+    """
+    n = max(0, int(length))
+    zeros = np.zeros(n, dtype=float)
+    out = StripeSet(axis=str(axis), profile=zeros, raw=zeros.copy())
+    if n <= 0:
+        return out
+    out.bands = [(0, n)]
+    out.levels = [0.0]
+    out.groups = [0]
+    out.selected = [(0, n)]
+    out.width_used = float(n)
+    return out
+
+
 def cross_boxes(x: StripeSet, y: StripeSet,
                 placement: str = "crossing", box_size: float = 4.0,
                 side: str = "both", gap: float = 1.0, inset: float = 0.0,
@@ -1223,49 +1350,64 @@ def locate_crossings(img: Any, vertical_select: str = "brightest",
                      placement: str = "crossing", box_size: float = 4.0,
                      side: str = "both", gap: float = 1.0, inset: float = 0.0,
                      min_confidence: float = 5.0,
-                     max_boxes: int = 64) -> CrossResult:
-    """一次做完：兩軸投影 → 條紋 → 交會 → 方框。
+                     max_boxes: int = 64,
+                     directions: str = "both") -> CrossResult:
+    """一次做完：投影 → 條紋 → 交會 → 方框。
 
     ``vertical_*`` 是**直的**條紋（由 X 投影找到），``horizontal_*`` 是橫的。
     用「直的／橫的」而不是「x 軸／y 軸」：使用者看的是畫面，而「x 投影找到的
     是垂直邊界」這件事每次都要在腦裡轉一次。
+
+    ``directions``（見 :data:`DIRECTIONS`）決定看幾個方向。只看一個方向時，
+    另一個方向換成一根滿版的條紋（:func:`open_axis`）—— 幾何一模一樣，
+    交會出來的就是滿版的框。**沒在用的那個方向不參與任何一道閘門**：
+    它的信心是 0、它沒有 pitch 可以對不上，拿它去扣分等於用一個沒問的問題
+    否決掉一顆算得出來的 defect。
 
     這是 step 卡與 UI 面板共用的**唯一**入口。兩邊必須看到同一次計算，
     不然「畫面上的框」跟「真的量下去的框」會不一樣，而那種 bug 極難發現。
     """
     a = np.asarray(img)
     shape = (int(a.shape[0]), int(a.shape[1])) if a.ndim >= 2 else (0, 0)
+    want_x, want_y = directions_used(directions)
 
-    xs = find_stripes(img, axis=algo_profile.AXIS_X, select=vertical_select,
-                      sensitivity=vertical_sensitivity, smooth=smooth,
-                      min_gap=min_gap, pitch=vertical_pitch,
-                      pitch_2=vertical_pitch_2, kinds=vertical_kinds,
-                      width=vertical_width, fill_rule=fill_rule)
-    ys = find_stripes(img, axis=algo_profile.AXIS_Y, select=horizontal_select,
-                      sensitivity=horizontal_sensitivity, smooth=smooth,
-                      min_gap=min_gap, pitch=horizontal_pitch,
-                      pitch_2=horizontal_pitch_2, kinds=horizontal_kinds,
-                      width=horizontal_width, fill_rule=fill_rule)
+    xs = (find_stripes(img, axis=algo_profile.AXIS_X, select=vertical_select,
+                       sensitivity=vertical_sensitivity, smooth=smooth,
+                       min_gap=min_gap, pitch=vertical_pitch,
+                       pitch_2=vertical_pitch_2, kinds=vertical_kinds,
+                       width=vertical_width, fill_rule=fill_rule)
+          if want_x else open_axis(algo_profile.AXIS_X, shape[1]))
+    ys = (find_stripes(img, axis=algo_profile.AXIS_Y, select=horizontal_select,
+                       sensitivity=horizontal_sensitivity, smooth=smooth,
+                       min_gap=min_gap, pitch=horizontal_pitch,
+                       pitch_2=horizontal_pitch_2, kinds=horizontal_kinds,
+                       width=horizontal_width, fill_rule=fill_rule)
+          if want_y else open_axis(algo_profile.AXIS_Y, shape[0]))
 
-    conf = min(float(xs.confidence), float(ys.confidence))
+    used = [s for s, want in ((xs, want_x), (ys, want_y)) if want]
+    conf = min(float(s.confidence) for s in used) if used else 0.0
     res = CrossResult(x=xs, y=ys, confidence=conf)
 
-    # 兩軸都要有東西可比。**一軸失敗就整張失敗** —— 交會處是兩組條紋共同定義
-    # 的，少一組的話另一組只能給滿版的條帶，那不是使用者要的框。
+    # **在用的那個（或那兩個）方向都要有東西可比。** 一組條紋定義得出滿版的
+    # 帶子、兩組定義得出交會處 —— 但要求的那一組不在就什麼都定不出來。
     if conf < float(min_confidence):
         # **講出是哪一個方向沒東西。** 「信心不足」只說得出「失敗了」，
         # 而使用者下一步要做的事（調哪一組參數、還是這種 patch 本來就沒有
         # 橫的條紋）完全取決於是哪一邊。
-        weak = ("upright stripes" if xs.confidence <= ys.confidence
-                else "flat stripes")
-        res.reason = ("no %s to lock onto (confidence %.1f across / %.1f down, "
-                      "needs %.1f)" % (weak, xs.confidence, ys.confidence,
-                                       float(min_confidence)))
+        weak = min(used, key=lambda s: float(s.confidence))
+        res.reason = ("no %s to lock onto (confidence %.1f, needs %.1f)"
+                      % ("upright stripes" if weak.axis == algo_profile.AXIS_X
+                         else "flat stripes", weak.confidence,
+                         float(min_confidence)))
         return res
-    if len(xs.bands) < 2 or len(ys.bands) < 2:
-        res.reason = ("found %d band(s) across and %d down; both directions "
-                      "need at least two so that there is a crossing"
-                      % (len(xs.bands), len(ys.bands)))
+    thin = [s for s in used if len(s.bands) < 2]
+    if thin:
+        res.reason = ("found %s; a direction you are using needs at least two "
+                      "bands so that there is something to repeat"
+                      % ", ".join(
+                          "%d band(s) %s" % (len(s.bands),
+                                             "across" if s.axis == algo_profile.AXIS_X
+                                             else "down") for s in used))
         return res
 
     # **量到的間距跟你填的對不上 = 這一顆不能信。**（F8 第六輪）
@@ -1277,11 +1419,23 @@ def locate_crossings(img: Any, vertical_select: str = "brightest",
     #
     # 為什麼是**失敗**而不是警告：框的位置錯了，那顆的每一個數字都是別的
     # 東西量出來的。留著它比丟掉它危險 —— 它會混進整批的統計裡。
-    for s in (xs, ys):
+    for s in used:
         if s.trust_note:
             way = "upright" if s.axis == algo_profile.AXIS_X else "flat"
             res.reason = "the %s stripes %s" % (way, s.trust_note)
             return res
+
+    # **放法要得起這個方向。**「兩根滿版條紋之間」是空集合，而它安靜地
+    # 產出零個框 —— 那句「produce no usable box」會把使用者送去調敏感度，
+    # 但真正該改的是上面那一排方向圖示。
+    missing = [d for d in placement_needs(placement)
+               if not (want_x if d == "upright" else want_y)]
+    if missing:
+        res.reason = ("“%s” needs the %s stripes, but this card is set to look "
+                      "at the other direction only"
+                      % (placement, "upright" if missing[0] == "upright"
+                         else "flat"))
+        return res
 
     boxes = cross_boxes(xs, ys, placement=placement, box_size=box_size,
                         side=side, gap=gap, inset=inset, shape=shape)
@@ -1293,6 +1447,7 @@ def locate_crossings(img: Any, vertical_select: str = "brightest",
     res.boxes = boxes[:limit]        # 已依離中心遠近排序 —— 砍掉的是最外圍的
     res.ok = True
     if len(boxes) > limit:
+        res.clipped = True
         res.reason = ("kept the %d box(es) nearest the centre out of %d"
                       % (limit, len(boxes)))
     return res

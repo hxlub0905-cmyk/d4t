@@ -69,13 +69,21 @@ KIND = "ebi_patch"
 NEEDS_MORE_SETUP = {
     # 模板是一張影像，要先用 template_dialog 從大圖疊出來凍進 recipe。
     "roi_template": "模板參數要外部資料（一張原大圖）",
-    # 只有 RSEM 單張才有意義；patch 本來就有 ref。
-    "golden_cell": "RSEM 專用（patch 有現成的 ref）",
-    "cell_period": "只有餵 golden_cell 時有意義",
     # 這一套 harness 餵的是 ebi_patch（一顆兩張），而這張卡承諾「一顆一張」——
     # 它對多張資料的正確行為就是**擋下來**（見 steps/load.py）。專屬驗收在
     # tests/test_f11_split_load_cards.py。
     "load_single": "需要「一顆一張」的資料集（harness 餵的是 patch）",
+    # 它讀的是 GLAS 匯出掛上來的附加檔（`DefectItem.sidecars`），而這個 harness
+    # 的 lot 沒有掛。沒掛的時候這張卡**正確的行為就是擋下來並講出兩種原因**
+    # （見 steps/load_sidecar.py）。專屬驗收在 tests/test_glas_sidecar.py。
+    "load_sidecar": "需要掛上 GLAS 匯出的資料集（harness 的 lot 沒有）",
+    # 它吃的是 `load_sidecar` 吐的那條流，而那張卡在這個 harness 上跑不起來
+    # （上一行）。專屬驗收在 tests/test_roi_from_mask.py。
+    "roi_from_mask": "需要 GLAS 的 label map 那條流（前一張卡在這裡跑不起來）",
+    # 它比的是**兩個具名區域**，而這個 harness 只接 load_patch（沒有 Region 卡，
+    # 所以一個區域都沒有）。「沒挑區域」時它正確的行為就是擋下來並講出要填哪
+    # 兩格。專屬驗收在 tests/test_roi_compare.py。
+    "roi_compare": "需要上游先有一張 Region 卡（harness 只接 load_patch）",
 }
 
 
@@ -650,3 +658,30 @@ def test_a_card_survives_a_different_patch_size(key, dataset, big_dataset):
     bad = [k for k, v in (big.features or {}).items()
            if not math.isfinite(float(v))]
     assert not bad, "%s 在 256² 上產出 NaN／Inf 的特徵 %s" % (key, bad)
+
+
+# --------------------------------------------------------------------------- #
+# 卡片名的長度 —— 一列讀得完
+# --------------------------------------------------------------------------- #
+#: 目前最長的那一個（``Remove background / stripes``）。這不是一個猜出來的美感
+#: 數字，是**現況的天花板**：新卡片超過它，就要先看一眼卡片庫再決定。
+#:
+#: 為什麼要有這條：卡片庫是一列一張卡讀下去的，名字長到要換行、或被 ``…``
+#: 截掉，那一列就不再是一眼的事 —— 而目標使用者正是靠掃過那一列找卡的。
+#: 實際發生過（2026-08-18）：``Reference from repeating pattern`` 進了卡片庫，
+#: 使用者第一句話就是「名字太長」。收成 ``Reference from pattern`` 之後，
+#: 句型跟隔壁的 ``Mask from regions`` 一樣：**「產出 from 來源」**。
+#:
+#: 掉出去的字（那張卡的 ``repeating``）該去 ``help``：名字回答「這張卡做什麼」，
+#: 前提與細節回答「我能不能用它」，兩者不是同一個問題。
+MAX_LABEL_CHARS = 27
+
+
+@pytest.mark.parametrize("key", CARDS)
+def test_a_card_name_fits_on_one_line(key):
+    label = str(REGISTRY[key].label)
+    assert label.strip(), "%s：沒有 label" % key
+    assert len(label) <= MAX_LABEL_CHARS, (
+        "%s 的名字 %r 有 %d 個字元，超過現況的天花板 %d —— 卡片庫是一列一張卡"
+        "讀下去的。把前提／細節搬進 help，名字只留「這張卡做什麼」。"
+        % (key, label, len(label), MAX_LABEL_CHARS))

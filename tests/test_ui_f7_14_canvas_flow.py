@@ -121,8 +121,12 @@ def test_the_subtitle_says_what_the_card_does_not_its_id(window):
     window._on_edge_added(a, b, "ref_aligned", "b")
     c = window.add_card_after(b, "roi_template")
     window._on_edge_added(b, c, "diff")        # 來源由線決定（F9-7）
+    # 還沒畫任何區域 -> 這張卡真的還沒產出任何東西，副標照實只講輸入
+    assert window.pipeline.card(c).subtitle() == "diff"
     # Region 卡不寫影像流，它定義的是具名區域 —— 副標仍然要講得出它產出什麼
-    assert window.pipeline.card(c).subtitle() == "diff → cell"
+    window.model.set_param(c, "regions", "epi: 0.1,0,0.3,1")
+    window.select_node(c)
+    assert window.pipeline.card(c).subtitle() == "diff → epi epi_center epi_others"
 
 
 def test_a_repeated_card_shows_which_one_it_is(window):

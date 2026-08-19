@@ -430,3 +430,255 @@ def test_the_panel_shouts_when_the_pitch_does_not_agree(qapp):
     text = panel.summary()
     assert "50% of the pitch you gave" in text
     assert text.index("50%") < text.index("confidence")
+
+
+# --------------------------------------------------------------------------- #
+# F11 Region-2b：點曲線上的一根條紋 = 選那一種材質
+# --------------------------------------------------------------------------- #
+def test_the_engine_says_which_group_each_stripe_is_in(qapp):
+    """UI **不自己分群** —— 分幾群取決於現在挑第幾亮，那個規則只該有一份。"""
+    data = _cpode_ctx().meta["crossings"]["xing"]["x"]
+    assert len(data["groups"]) == len(data["bands"])
+    assert data["group_rules"], "每一群都要講得出「要填什麼」"
+    assert str(data["group_picked"]) in {str(g) for g in data["groups"]}
+
+
+def test_clicking_a_stripe_asks_for_that_material(qapp):
+    """使用者：「能用圖就用圖。」`second_brightest` 這個詞本身不告訴他任何事 ——
+    「哪一組是第二亮的」是一個只有看圖才答得出來的問題，而圖就在這裡。"""
+    from adept.ui.widgets import ProfilePanel
+
+    data = _cpode_ctx().meta["crossings"]["xing"]["x"]
+    panel = ProfilePanel()
+    panel.resize(400, 120)
+    panel.set_data("upright stripes", data)
+
+    got = []
+    panel.select_requested.connect(lambda a, r: got.append((a, r)))
+
+    # 挑一根**不是**現在選中那一群的條紋來點
+    other = next(i for i, g in enumerate(data["groups"])
+                 if g != data["group_picked"])
+    a, b = data["bands"][other]
+    _click_curve(panel, (a + b) / 2.0)
+
+    assert got, "點了沒反應"
+    axis, rule = got[0]
+    assert axis == "x"
+    assert rule == data["group_rules"][str(data["groups"][other])]
+
+
+def test_dragging_still_measures_instead_of_picking(qapp):
+    """同一個手勢兩種意思會很糟 —— **點一下 = 選材質，拖一段 = 量尺**。"""
+    from adept.ui.widgets import ProfilePanel
+
+    data = _cpode_ctx().meta["crossings"]["xing"]["x"]
+    panel = ProfilePanel()
+    panel.resize(400, 120)
+    panel.set_data("upright stripes", data)
+
+    picked, measured = [], []
+    panel.select_requested.connect(lambda a, r: picked.append(r))
+    panel.measure_changed.connect(lambda *a: measured.append(a))
+
+    _click_curve(panel, 6.0, to_index=30.0)
+    assert measured, "拖曳要量尺"
+    assert picked == [], "拖曳不該順手改參數"
+
+
+def test_clicking_between_the_stripes_does_nothing(qapp):
+    """點在沒有任何段的地方 —— **不要猜一個最近的**。"""
+    from adept.ui.widgets import ProfilePanel
+
+    panel = ProfilePanel()
+    panel.resize(400, 120)
+    panel.set_data("upright stripes", {"profile": [10.0] * 40, "raw": [10.0] * 40,
+                                       "bands": [], "groups": []})
+    got = []
+    panel.select_requested.connect(lambda a, r: got.append(r))
+    _click_curve(panel, 20.0)
+    assert got == []
+
+
+def test_the_studio_sends_it_to_the_right_axis(cross_window):
+    """``x`` 那條曲線講的是**直的**條紋。接反的症狀是點左邊改到右邊的參數 ——
+    而畫面上兩邊都會動，看起來像是「有反應」。"""
+    win = cross_window
+    nid = wire_up(win.model, win.model.add_step("roi_cross"))
+    win.select_node(nid)
+
+    win._on_select_requested("x", "darkest")
+    assert win.model.nodes[nid].params["vertical_select"] == "darkest"
+    win._on_select_requested("y", "second_brightest")
+    assert win.model.nodes[nid].params["horizontal_select"] == "second_brightest"
+    assert win.model.nodes[nid].params["vertical_select"] == "darkest"
+
+
+def _click_curve(panel, at_index: float, to_index: float = None) -> None:
+    """在曲線的第 ``at_index`` 個取樣點按下（可選拖到 ``to_index``）再放開。"""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtCore import Qt as _Qt
+
+    n = max(2, len(panel._data.get("profile") or [2]))
+    plot = panel._plot_rect()
+
+    def x_of(i):
+        return plot.left() + plot.width() * (float(i) / (n - 1))
+
+    def send(kind, x, button, buttons):
+        pt = QPointF(x, plot.center().y())
+        ev = QMouseEvent(kind, pt, pt, button, buttons, _Qt.NoModifier)
+        {QEvent.MouseButtonPress: panel.mousePressEvent,
+         QEvent.MouseMove: panel.mouseMoveEvent,
+         QEvent.MouseButtonRelease: panel.mouseReleaseEvent}[kind](ev)
+
+    send(QEvent.MouseButtonPress, x_of(at_index), _Qt.LeftButton, _Qt.LeftButton)
+    if to_index is not None:
+        send(QEvent.MouseMove, x_of(to_index), _Qt.NoButton, _Qt.LeftButton)
+        at_index = to_index
+    send(QEvent.MouseButtonRelease, x_of(at_index), _Qt.LeftButton, _Qt.NoButton)
+
+
+# --------------------------------------------------------------------------- #
+# 一個方向（F11 Region-2c）—— 畫面上不能留下一條「空的曲線」
+# --------------------------------------------------------------------------- #
+def _run_one_way() -> Context:
+    """只有直條紋的圖 ＋ 只看直的方向。"""
+    img = _img(epi_width=0)
+    ctx = Context(images={"test": img.copy(), "ref": img.copy()})
+    get_step("roi_cross")().run(ctx, {
+        "source": "ref", "directions": "upright", "place": "crossing",
+        "inset": 0.0, "roi_out": "xing", "vertical_pitch": MG_PITCH})
+    return ctx
+
+
+def test_the_direction_that_is_not_used_has_no_curve_on_screen(qapp):
+    """沒在看的方向畫出來是一條**平的**曲線。
+
+    平的線在這張面板上的意思一直都是「這裡沒東西、去調敏感度」—— 完全相反的
+    意思。留著它等於給一個錯的提示，而且佔掉在看的那條曲線一半的高度。
+    """
+    ctx = _run_one_way()
+    panel = insp_mod.CrossInspector()
+    panel.set_context("cross", {"roi_out": "xing", "directions": "upright"},
+                      meta=ctx.meta)
+    assert panel.across.isVisibleTo(panel) is True
+    assert panel.down.isVisibleTo(panel) is False
+
+
+def test_both_curves_come_back_when_both_directions_are_used(qapp):
+    ctx = _run()
+    panel = insp_mod.CrossInspector()
+    panel.set_context("cross", {"roi_out": "xing"}, meta=ctx.meta)
+    assert panel.across.isVisibleTo(panel) is True
+    assert panel.down.isVisibleTo(panel) is True
+
+
+def test_the_summary_does_not_report_a_pitch_it_never_looked_for(qapp):
+    """「flat pitch 0.0 px」是一個看起來像量測失敗的**假**數字。"""
+    ctx = _run_one_way()
+    panel = insp_mod.CrossInspector()
+    panel.set_context("cross", {"roi_out": "xing", "directions": "upright"},
+                      meta=ctx.meta)
+    text = panel.summary()
+    assert "upright pitch" in text
+    assert "flat pitch" not in text
+
+
+def test_the_three_direction_icons_are_drawable_and_different(qapp):
+    """三顆並排，唯一的差別是亮的是哪一組條紋 —— 那也是選項唯一的差別。"""
+    from PySide6.QtGui import QImage, QPainter
+
+    from adept.ui.widgets import GLYPH_ICONS, draw_glyph_icon
+
+    seen = {}
+    for name in ("dir_both", "dir_upright", "dir_flat"):
+        assert name in GLYPH_ICONS
+        img = QImage(21, 21, QImage.Format_ARGB32)
+        img.fill(0)
+        p = QPainter(img)
+        draw_glyph_icon(p, name, 21.0, "#ffffff")
+        p.end()
+        seen[name] = bytes(img.constBits())
+    assert len(set(seen.values())) == 3, "三顆圖示不能長得一樣"
+
+
+# --------------------------------------------------------------------------- #
+# 疊框分色（F11 Region 第八輪）—— 使用者：「顏色 overlay 重疊會同個顏色（藍色）」
+# --------------------------------------------------------------------------- #
+"""Region-1 之後**一張卡可以標好幾個區域**，而 `region_overlay()` 把它們全部攤
+平成一串框、全部畫成 accent 藍。兩個區域疊在一起的時候畫面上就只是一團藍線 ——
+而使用者要判斷的正是「哪一塊是 ROI1、哪一塊是 ROI2」。
+
+顏色跟模板編輯器**同一組**（`theme.REGION_COLORS`）：他在對話框裡把 ROI1 畫成
+綠色的，到了 patch 上它就要還是綠色的。
+"""
+
+
+def _view_with(labels, focus=-1):
+    from adept.ui.widgets import ImageView
+
+    v = ImageView()
+    v.set_image(np.full((32, 32), 128, np.uint8))
+    boxes = [(0.1 * i, 0.1, 0.2, 0.2) for i in range(len(labels))]
+    v.set_overlay(boxes, focus, labels)
+    return v
+
+
+def test_each_region_gets_its_own_colour(qapp):
+    from adept.ui.theme import REGION_COLORS
+
+    v = _view_with(["epi", "mg", "epi", "poly"])
+    legend = v.overlay_legend()
+    assert [n for n, _c in legend] == ["epi", "mg", "poly"], "順序照第一次出現"
+    assert [c for _n, c in legend] == list(REGION_COLORS[:3])
+    assert len({c for _n, c in legend}) == 3
+
+
+def test_the_colours_are_the_ones_the_template_editor_uses(qapp):
+    """使用者在對話框裡認得的綠色 ROI1，到了 patch 上不能變成別的顏色。"""
+    from adept.ui.cell_canvas import region_color
+    from adept.ui.theme import region_hex
+
+    for i in range(4):
+        assert region_color(i).name().lower() == region_hex(i).lower()
+
+
+def test_labels_that_do_not_line_up_switch_colouring_off(qapp):
+    """錯位的顏色比沒有顏色糟得多 —— 它會**指錯**區域，而畫面上不會說。"""
+    from adept.ui.widgets import ImageView
+
+    v = ImageView()
+    v.set_image(np.full((32, 32), 128, np.uint8))
+    v.set_overlay([(0.1, 0.1, 0.2, 0.2), (0.5, 0.1, 0.2, 0.2)], -1, ["epi"])
+    assert v.overlay_legend() == []
+    assert v.overlay_count() == 2
+
+
+def test_one_region_gets_no_legend(qapp):
+    """只有一個區域的時候那個顏色沒有在跟誰對比，一行字只是擋住影像。"""
+    assert _view_with(["epi", "epi", "epi"]).legend_visible() is False
+    assert _view_with(["epi", "mg"]).legend_visible() is True
+    assert _view_with(["epi", "epi"]).overlay_legend() == [("epi", "#5fd0a0")]
+
+
+def test_the_names_line_up_with_the_boxes_in_the_studio(qapp, cross_window):
+    """框與名字走**同一個清單**（`_overlay_region_names`）。兩份各自算的話，
+    區域一多顏色就會指到隔壁那個 —— 而畫面上沒有任何東西透露這件事。"""
+    win = cross_window
+    nid = win.selected_node
+    win.refresh_preview(sync=True)
+
+    boxes = win.region_overlay()
+    names = win.region_overlay_names()
+    assert boxes and len(names) == len(boxes)
+    assert set(names) <= set(win._overlay_region_names(win.model.nodes[nid]))
+    assert win.image_view.overlay_count() == len(boxes)
+
+
+def test_a_card_with_two_regions_shows_two_colours_on_the_patch(qapp):
+    """這是使用者回報的那個畫面：兩個區域，以前兩個都是藍的。"""
+    v = _view_with(["epi", "mg"])
+    assert len(v.overlay_legend()) == 2
+    assert v.overlay_legend()[0][1] != v.overlay_legend()[1][1]
