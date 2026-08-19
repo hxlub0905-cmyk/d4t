@@ -105,7 +105,7 @@ f6378d9ba391a4e1e3ef7ed855c7694b6b7f50b9 docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
 0bfdfd66811505d4a7d2c50cdf3e3bb1a5135965 docs/plans/F11-phase2-features.md
 e429b04ba97f1f828bfe734fd7049cdd2fb3dc32 docs/plans/F12-region-edges.md
-448246e662278d803e95511c1cf0ae2710a06a30 docs/plans/F15-multi-source.md
+1166a306d070695736a69fead505bae60764568b docs/plans/F15-pair-sources.md
 d14ffea1f72ac011ff321f7fb0f0e075a5423e70 docs/plans/F8-rule-based-roi.md
 773d4c5652e1abd95b7bf06591a691c07c1c9fa1 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
