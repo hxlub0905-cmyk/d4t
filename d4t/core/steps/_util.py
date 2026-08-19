@@ -721,6 +721,14 @@ class MultiSourceStep(Step):
     #: 吃影像流的那個參數名（子類要換名字的話覆寫）。
     SOURCE = "source"
 
+    #: 吃**具名區域**的那個參數名（``""`` = 這張卡不吃區域）。
+    #:
+    #: 跟 ``SOURCE`` 同一套辦法（F13-⑥，2026-08-19 使用者：「我想將 ROI A 跟
+    #: ROI B 的區域線一起接到 GLV stats，但仍然一次只能接一條」）——
+    #: 「多連一」講的是**同一件事做在好幾個東西上**，那對區域跟對影像流一樣
+    #: 成立：同一組統計量、同一張圖，量在兩個不同的區域上。
+    REGION = "roi"
+
     #: 這張卡**沒有影像也量得下去**嗎（``cd_measure`` 是：``roi="blob"`` 時
     #: 矩形已經是像素座標，影像只用來做次像素精修）。設 False 的卡拿到的
     #: ``img`` 可能是 ``None``，自己決定怎麼辦。
@@ -729,6 +737,17 @@ class MultiSourceStep(Step):
     @classmethod
     def source_list(cls, params: Dict[str, object]) -> List[str]:
         return parse_key_list(params.get(cls.SOURCE, ""))
+
+    @classmethod
+    def region_list(cls, params: Dict[str, object]) -> List[str]:
+        """接了哪幾個區域。**空的回 ``[""]``** —— 那是「量整張圖」。
+
+        回空 list 的話 :meth:`run` 的迴圈會一次都不跑，而「沒挑區域」的意思
+        從來就不是「不要量」。
+        """
+        if not cls.REGION:
+            return [""]
+        return parse_key_list(params.get(cls.REGION, "")) or [""]
 
     @classmethod
     def resolve_reads(cls, params: Dict[str, object]) -> List[str]:
@@ -744,9 +763,24 @@ class MultiSourceStep(Step):
         return str(key) if len(cls.source_list(params)) > 1 else ""
 
     @classmethod
-    def full_prefix(cls, params: Dict[str, object], key: str) -> str:
-        """流名前綴 ＋ 使用者自己填的 ``output_prefix``（兩個都可能是空的）。"""
+    def region_prefix(cls, params: Dict[str, object], name: str) -> str:
+        """這一個區域的特徵前綴（**只接一個區域時是空的**）。
+
+        跟 :meth:`stream_prefix` 逐字同一個理由：只接一個時特徵名跟以前一模
+        一樣，所以既有的分數表達式不用改寫、黃金值一個數字都不動。
+        """
+        return str(name) if len(cls.region_list(params)) > 1 and name else ""
+
+    @classmethod
+    def full_prefix(cls, params: Dict[str, object], key: str,
+                    region: str = "") -> str:
+        """流名 ＋ 區域名 ＋ 使用者自己填的 ``output_prefix``（都可能是空的）。
+
+        順序是「流、區域、自己取的名字」：``diff_epi_hot_glv_mean`` 讀起來是
+        「diff 這條流、epi 這個區域、我叫它 hot 的那組數字」。
+        """
         parts = [cls.stream_prefix(params, key),
+                 cls.region_prefix(params, region),
                  str(params.get("output_prefix", "") or "").strip()]
         return "_".join([x for x in parts if x])
 
@@ -759,8 +793,12 @@ class MultiSourceStep(Step):
     def resolve_features(cls, params: Dict[str, object]) -> List[str]:
         keys = cls.source_list(params) or [""]
         base = cls.feature_names(params)
-        return [n for k in keys for n in prefix_names(cls.full_prefix(params, k),
-                                                      base)]
+        return [n for k in keys for r in cls.region_list(params)
+                for n in prefix_names(cls.full_prefix(params, k, r), base)]
+
+    @classmethod
+    def resolve_regions_in(cls, params: Dict[str, object]) -> List[str]:
+        return [r for r in cls.region_list(params) if r]
 
     def measure(self, ctx: Context, img, params: Dict[str, object]):
         """量一張影像，回 ``{特徵名: 值}``（回 ``None`` = 這條流沒有東西可記）。"""
@@ -768,11 +806,17 @@ class MultiSourceStep(Step):
 
     def run(self, ctx: Context, params: Dict[str, object]) -> Context:
         p = self.validate_params(params)
+        regions = self.region_list(p)
         for key in self.source_list(p):
             img = (require_image(ctx, self.key, key) if self.REQUIRE_IMAGE
                    else ctx.images.get(key))
-            feats = self.measure(ctx, img, p)
-            if not feats:
-                continue
-            ctx.add_features(prefix_features(self.full_prefix(p, key), feats))
+            for region in regions:
+                # 每一輪交給 `measure` 的是**一個**區域 —— 子類完全不必知道
+                # 「接了幾個」，跟它不必知道接了幾條流是同一件事。
+                one = dict(p, **{self.REGION: region}) if self.REGION else p
+                feats = self.measure(ctx, img, one)
+                if not feats:
+                    continue
+                ctx.add_features(prefix_features(
+                    self.full_prefix(p, key, region), feats))
         return ctx

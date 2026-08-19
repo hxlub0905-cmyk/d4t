@@ -126,3 +126,27 @@ card 前後一樣的輸入與輸出埠）」。對 —— 接進來的區域，�
 表達不出來 —— 而線是從那一格推導出來的，舊線在同一個動作裡就消失了。
 （`region_keys`（`roi_mask` 的 `regions`）是清單，第二條線是「這個也算」——
 跟 `image_keys` 同一條規則。）測試把兩者都鎖起來了。
+
+## 8. 第三輪（2026-08-19，使用者驗收）
+
+**「區域線仍然只能拉一條，例如我想將 ROI A 跟 ROI B 的區域線一起接到 GLV
+stats」** —— 第二輪我把「一個區域埠一條線」當成結論寫進了測試，而使用者要的是
+**多連一**：同一組統計量、同一張圖，量在兩個區域上。
+
+那件事對區域跟對影像流一樣成立（F10-3 對量測卡的 `source` 做過同一件事），
+所以規則直接沿用，一字不改：
+
+| 型別 | 第二條線的意思 | 例 |
+|---|---|---|
+| `region_keys`（一串）| **累加** | `glv_stats` / `roi_snr` / `cd_measure` 的 `roi`、`roi_mask` 的 `regions` |
+| `region_key`（單一角色）| **取代** | `roi_compare` 的 target / reference |
+
+命名也照抄 `stream_prefix` 的規矩：**只接一個時特徵名跟以前逐字相同**
+（分數表達式不必改寫、黃金值不動），兩個以上才自動帶區域名
+（`epi_glv_mean` / `mg_glv_mean`）。流與區域一起接就是相乘：
+`test_hot_glv_mean` / `ref_cold_glv_mean`。
+
+迴圈住在 `MultiSourceStep.run`（`REGION` 這個類別屬性說「哪一格是區域」），
+所以子類的 `measure` **完全不必知道接了幾個** —— 跟它不必知道接了幾條流是同
+一件事。順帶：`_autofill_output_prefix` 在接了兩個以上時不再自動命名，
+否則會變成 `epi_mg_epi_glv_mean`。

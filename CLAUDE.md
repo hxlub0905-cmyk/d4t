@@ -163,6 +163,13 @@ param 相依 I/O（例如輸出流名稱由參數決定）覆寫 `resolve_reads/
 > 那張 Region 卡，量測卡不會報錯 —— 它會**安靜地改量整張圖**。
 > 區域**產出**的名字不走參數，由 `resolve_regions_out` 宣告
 > （`<name>_center` 那種是算出來的，不是某一格填的字）。
+>
+> **單數／複數的意思跟影像流一字不差**（F13-⑥）：`region_keys`（一串）是
+> 「同一件事做在好幾個區域上」，第二條線**累加**，而每個數字會自動帶上
+> 區域名前綴（`epi_glv_mean` / `mg_glv_mean`；只接一個時名字跟以前逐字相同）；
+> `region_key`（單一角色，例 `roi_compare` 的 target / reference）第二條線是
+> **取代**。量測卡的迴圈在 `MultiSourceStep`，子類只實作 `measure` —— 它不必
+> 知道接了幾條流，也不必知道接了幾個區域。
 
 > **把 `min`/`max` 填好，滑桿是免費的**（F7-8）。ParamForm 看到有上下界的
 > `int`/`float` 就自動配一支跟數字框雙向綁定的滑桿。這不只是好看 ——

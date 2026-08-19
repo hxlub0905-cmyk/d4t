@@ -56,11 +56,13 @@ class GlvStatsStep(MultiSourceStep):
     params = [
         ParamSpec(name="source", type="image_keys", direction="in", default="test",
                   help="Image stream to compute statistics on."),
-        ParamSpec(name="roi", type="region_key", direction="in", default="",
+        ParamSpec(name="roi", type="region_keys", direction="in", default="",
                   label="Region",
-                  help=("Which region to measure in - drag a line from the "
-                        "Region card that defines it. No line means the "
-                        "whole image.")),
+                  help=("Which region(s) to measure in - drag a line from the "
+                        "Region card that defines each one. Two regions here "
+                        "means the same statistics measured in both, and every "
+                        "number gets its region's name in front of it. "
+                        "No line means the whole image.")),
         # 勾選而不是用打的（2026-08-14 使用者要求）。清單是常用的那幾個；
         # 手寫 recipe 仍可以放任何 glv_q<0-100>（清單外的值會列出來並勾著）。
         ParamSpec(name="metrics", type="multi_choice",
@@ -78,11 +80,6 @@ class GlvStatsStep(MultiSourceStep):
     reads = ["test"]
     writes: List[str] = []
     features_out = ["glv_mean", "glv_std", "glv_p50"]
-
-    @classmethod
-    def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
-        name = str(params.get("roi", "") or "").strip()
-        return [name] if name else []
 
     @classmethod
     def feature_names(cls, params: Dict[str, Any]) -> List[str]:

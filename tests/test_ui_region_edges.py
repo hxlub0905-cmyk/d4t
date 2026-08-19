@@ -182,13 +182,15 @@ def test_dragging_a_line_picks_the_region(window):
     assert window.model.nodes[glv].params["output_prefix"] == "epi"
 
 
-def test_a_second_line_replaces_the_first_on_a_single_region_port(window):
-    """一個輸入埠只能有一條線（F9-7 的規矩，區域照套）。
+def test_a_measure_card_takes_more_than_one_region(window):
+    """**多連一，區域這一半**（F13-⑥）。
 
-    使用者：「區域線一次只能連一條（例如我要連 Gray level stats，一次只能連
-    一條，重新拉會取代原來的）」。它在這裡是**結構性**的：那一格只放得下一個
-    名字，所以「留下兩條」這件事表達不出來 —— 而畫布上的線是從那一格推導出來
-    的，於是舊線在同一個動作裡就消失了。
+    使用者：「我想將 ROI A 跟 ROI B 的區域線一起接到 GLV stats，但仍然一次
+    只能接一條」。對 —— 而「多連一」講的是**同一件事做在好幾個東西上**，
+    那對區域跟對影像流一樣成立：同一組統計量、同一張圖，量在兩個區域上。
+
+    規則跟影像逐字相同（F7-19）：``region_keys``（一串）**累加**，
+    ``region_key``（單一角色）**取代**。
     """
     src = first_source(window, "load_single")
     gds = window.add_card_after(src, "roi_from_mask")
@@ -199,9 +201,36 @@ def test_a_second_line_replaces_the_first_on_a_single_region_port(window):
 
     window._on_edge_added(gds, glv, "epi", "roi")
     window._on_edge_added(gds, glv, "mg", "roi")
-    assert window.model.nodes[glv].params["roi"] == "mg"
-    lines = [ln for ln in window.model.region_lines() if ln[1] == glv]
-    assert lines == [(gds, glv, "mg", "roi")], "舊線沒有跟著消失"
+    assert window.model.nodes[glv].params["roi"] == "epi,mg"
+
+    lines = {ln for ln in window.model.region_lines() if ln[1] == glv}
+    assert lines == {(gds, glv, "epi", "roi"), (gds, glv, "mg", "roi")}, \
+        "兩個區域就要有兩條線"
+
+    # 每個數字帶自己的區域名 —— 不然兩組會互相蓋掉，而畫面上看不出來。
+    feats = get_step("glv_stats").resolve_features(window.model.nodes[glv].params)
+    assert any(f.startswith("epi_") for f in feats)
+    assert any(f.startswith("mg_") for f in feats)
+
+
+def test_a_role_region_port_is_still_replaced(window):
+    """``roi_compare`` 的 target / reference 是**角色**：數量固定、接錯就算錯。
+
+    往 target 再拉一條的意思是「改比別的」，不是「target 有兩個」。
+    """
+    src = first_source(window, "load_single")
+    gds = window.add_card_after(src, "roi_from_mask")
+    cmp_ = window.add_card_after(gds, "roi_compare")
+    window._on_edge_added(src, gds, "single", "source")
+    window.model.set_param(gds, "layers", "1:epi, 2:mg")
+    window._on_edge_added(src, cmp_, "single", "target_source")
+
+    window._on_edge_added(gds, cmp_, "epi", "target_region")
+    window._on_edge_added(gds, cmp_, "mg", "target_region")
+    assert window.model.nodes[cmp_].params["target_region"] == "mg"
+    lines = [ln for ln in window.model.region_lines()
+             if ln[1] == cmp_ and ln[3] == "target_region"]
+    assert lines == [(gds, cmp_, "mg", "target_region")], "舊線沒有跟著消失"
 
 
 def test_a_region_goes_in_one_side_and_out_the_other(window):

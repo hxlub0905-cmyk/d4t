@@ -483,17 +483,19 @@ def readable_on(fg: str, bg: str, target: float = AA_SMALL) -> str:
     return out
 
 
-def count_badge_colors(group: str) -> Tuple[str, str]:
-    """階段的「有幾張卡」小藥丸：``(底色, 字色)``，兩種主題都過得了 AA。
+def count_color(group: str) -> str:
+    """階段的「有幾張卡」那個數字的顏色 —— **階段色，推到讀得到為止**。
 
-    以前這個數字吃的是 ``$text_disabled`` —— **用錯 token**：那個 token 的
-    意思是「這東西停用了」，而它沒有停用，它是次要資訊。量出來的後果是
-    深色 2.90、**淺色 1.89**（AA 小字要 4.5）。使用者回報的是深色看不清楚，
+    以前它吃 ``$text_disabled`` —— **用錯 token**：那個 token 的意思是
+    「這東西停用了」，而它沒有停用，它是次要資訊。量出來的後果是深色 2.90、
+    **淺色 1.89**（AA 小字要 4.5）。使用者回報的是深色看不清楚，
     而更糟的其實是淺色。
+
+    2026-08-19 第二輪，使用者定調：**不要網底，單純數字的顏色即可**。
+    所以底色拿掉了，字色直接算在 rail 的底色上（淺色主題要推 1–2 格、
+    深色原樣就過 6.1–7.9）。
     """
-    base = group_hex(group)
-    bg = mix_hex(base, TOKENS["bg_panel"], 0.20)
-    return bg, readable_on(base, bg)
+    return readable_on(group_hex(group), TOKENS["bg_panel"])
 
 
 def group_color(group: str):
@@ -868,10 +870,11 @@ QFrame#stageButton { background: transparent; border: 1px solid transparent;
 QFrame#stageButton:hover { background: $hover_warm; }
 QFrame#stageButton[active="true"] { background: $accent_bg;
                                     border-color: $accent_border; }
-/* The "how many cards" pill. Its two colours are computed per stage by
- * `count_badge_colors` (F13-3) - it used to take $text_disabled, and that token
- * means "switched off", not "secondary". Measured on the old colour: 2.90 in
- * dark and 1.89 in light, against a 4.5 AA floor for small text. */
+/* The "how many cards" number. Its colour is computed per stage by
+ * `count_color` (F13-3) - it used to take $text_disabled, and that token means
+ * "switched off", not "secondary". Measured on the old colour: 2.90 in dark and
+ * 1.89 in light, against a 4.5 AA floor for small text. No background behind it
+ * (the user's call, second round): the colour alone carries the stage. */
 QLabel#stageCount { font-size: 9px; }
 
 QPushButton#galleryChip {

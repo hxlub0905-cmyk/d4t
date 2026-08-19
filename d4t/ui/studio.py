@@ -2736,6 +2736,11 @@ class StudioWindow(QMainWindow):
         wanted = str(value or "").strip()
         if not wanted:
             return
+        if "," in wanted:
+            # **接了兩個以上的區域就不要自動命名**（F13-⑥）：那時候每個數字
+            # 本來就會帶自己的區域名（`epi_glv_mean` / `mg_glv_mean`），
+            # 再加一個共同前綴只會變成 `epi_mg_epi_glv_mean`。
+            return
         try:
             self.model.set_param(node_id, "output_prefix", wanted)
         except ParamError:

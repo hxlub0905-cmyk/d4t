@@ -33,6 +33,15 @@ from d4t.ui import widgets as widgets_mod              # noqa: E402
 from d4t.ui.theme import THEMES                        # noqa: E402
 
 
+def _stage_button_style() -> str:
+    """rail 上任何一顆階段鈕的計數樣式（不必開整個主視窗）。"""
+    panel = widgets_mod.LibraryPanel()
+    try:
+        return panel.stage_buttons["input"].count.styleSheet()
+    finally:
+        panel.deleteLater()
+
+
 @pytest.fixture(scope="module")
 def qapp():
     app = QApplication.instance() or QApplication([])
@@ -61,10 +70,10 @@ def test_every_stage_count_is_readable_in_every_theme(qapp, theme_name):
     在其中一種主題下用眼睛調，另一種一定會歪。
     """
     theme_mod.apply_theme(qapp, theme_name)
+    bg = theme_mod.TOKENS["bg_panel"]
     bad = []
     for gid, _title, _sub in widgets_mod.LibraryPanel.GROUPS:
-        bg, fg = theme_mod.count_badge_colors(gid)
-        ratio = theme_mod.contrast_ratio(fg, bg)
+        ratio = theme_mod.contrast_ratio(theme_mod.count_color(gid), bg)
         if ratio < theme_mod.AA_SMALL:
             bad.append("%s %.2f" % (gid, ratio))
     assert not bad, "%s 主題下讀不到：%s" % (theme_name, bad)
@@ -85,6 +94,8 @@ def test_readable_on_keeps_the_hue_and_stops_as_soon_as_it_passes():
     r, g, b = (int(on_light.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
     assert g > r and g > b, "推完之後不是綠色了：%s" % on_light
     assert theme_mod.contrast_ratio(on_light, "#d6e1d2") >= theme_mod.AA_SMALL
+    assert "background:transparent" in _stage_button_style(), \
+        "使用者定調：數字不要網底"
     # 已經過得了的顏色原樣回傳（不要為了保險多推一格，那會讓深色主題變糊）
     assert theme_mod.readable_on("#000000", "#ffffff") == "#000000"
 

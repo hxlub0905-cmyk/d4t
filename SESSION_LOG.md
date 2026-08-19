@@ -15,6 +15,39 @@
 
 ---
 
+## 多連一（區域那一半）＋ 數字不要網底（2026-08-19，第十八輪之五）
+
+使用者驗收後的兩件事。
+
+### 「區域線仍然只能拉一條」—— 我上一輪把限制當成結論了
+
+他要的是**多連一**：ROI A 與 ROI B 一起接到同一張 Gray-level stats。那件事對
+區域跟對影像流一樣成立（F10-3 對 `source` 做過同一件事），所以規則直接沿用，
+一字不改：
+
+| 型別 | 第二條線 | 誰 |
+|---|---|---|
+| `region_keys` | **累加** | `glv_stats` / `roi_snr` / `cd_measure` 的 `roi` |
+| `region_key` | **取代** | `roi_compare` 的 target / reference（角色） |
+
+命名照抄 `stream_prefix`：**只接一個時特徵名跟以前逐字相同**（分數表達式不必
+改寫、黃金值不動），兩個以上才自動帶區域名。流 × 區域相乘：
+`test_hot_glv_mean` / `ref_cold_glv_mean`。
+
+迴圈住在 `MultiSourceStep.run`（`REGION` 類別屬性說哪一格是區域），子類的
+`measure` **完全不必知道接了幾個**。順帶關掉 `_autofill_output_prefix` 在多區域
+時的自動命名 —— 不然會變成 `epi_mg_epi_glv_mean`。
+
+**上一輪的測試改掉了**：`test_a_second_line_replaces_the_first...` 換成
+`test_a_measure_card_takes_more_than_one_region`，而「取代」那一半移到
+`roi_compare` 的角色埠上（那裡它才是對的）。
+
+### 數字不要網底
+
+使用者：「不要有網底色，單純數字的顏色即可」。`count_badge_colors` →
+`count_color`，字色直接算在 rail 的底色上（淺色推 1–2 格到 4.5–4.9，
+深色原樣 5.9–7.9）。
+
 ## 畫布收尾（F13-⑤，2026-08-19，第十八輪之四）
 
 五點裡的最後一個。四件事，全部量過：

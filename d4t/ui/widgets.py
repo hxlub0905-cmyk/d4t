@@ -3554,17 +3554,18 @@ class StageButton(QFrame):
         self.setProperty("active", "false")
 
     def _style_count(self) -> None:
-        """「有幾張卡」那顆小藥丸的顏色（F13-3）。
+        """「有幾張卡」那個數字的顏色（F13-3）。
 
-        **階段色的淡底 + 同色系的深字**，兩種主題都由 `theme.count_badge_colors`
-        算出來（它會把字推到過得了 AA 為止）。藥丸而不是一個灰數字，是因為
-        那個數字以前沒有任何東西說它是什麼 —— 一顆帶著階段色的標籤至少講出
-        「這是這一段的東西」，而顏色跟圖示、卡片、畫布是同一套語言。
+        **階段色，沒有網底**（使用者第二輪定調：「不要有網底色，單純數字的
+        顏色即可」）。顏色由 `theme.count_color` 算在 rail 的底色上 ——
+        它會把字推到過得了 AA 為止，所以淺色主題不會像以前那樣看不見。
+
+        顏色本身就講完了「這是這一段的東西」：它跟上面那個圖示、卡片庫的圓點、
+        畫布上那塊圖示磚是同一個。
         """
-        bg, fg = theme.count_badge_colors(self.group)
         self.count.setStyleSheet(
-            "background:%s; color:%s; border-radius:7px; padding:0 5px;"
-            "font-size:9px; font-weight:600;" % (bg, fg))
+            "background:transparent; color:%s; font-size:9px; font-weight:600;"
+            % theme.count_color(self.group))
 
     def set_count(self, n: int) -> None:
         self.count.setText("" if n <= 0 else str(int(n)))
