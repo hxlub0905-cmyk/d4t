@@ -9,7 +9,7 @@
 """
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -537,6 +537,82 @@ def set_region_family(ctx, step_key: str, name: str, norm_boxes,
             ("this patch only has one copy of '%s', so there is no other copy "
              "to use as a baseline" % name))
     return len(others)
+
+
+#: **每一張「找 ROI」的卡，對它吐的每一個區域，都寫這五個數字**（F11 Region-4）。
+#:
+#: 使用者 2026-08-18：「我認為各種找／給定 ROI 的方法，理想上輸出的東西要接近
+#: ⋯⋯現在不是不能用，而是現在有點像大家資料結構不一樣。」
+#:
+#: 在這之前三張卡各寫各的：Profile **一個都沒有**（只有卡自己的 `cross_*`）、
+#: Template 三個（`present` / `others_present` / `edge_dropped`）、GDS 四個
+#: （`present` / `pieces` / `area_px` / `clipped`）。於是下游（分數表達式、
+#: `Compare regions`、報表）**得先知道這個區域是誰找的**才問得出「它有沒有落
+#: 在這一顆上」—— 那正是漏出去的地方。
+#:
+#: 五個數字對應下游真正會問的五個問題：
+#:
+#: 1. ``present``      —— 這一顆上有沒有一個**真的定位到的**它（0/1）。
+#: 2. ``boxes``        —— 幾個框。
+#: 3. ``area_px``      —— 蓋了多少像素。
+#: 4. ``clipped``      —— 有沒有被框數上限**安靜地**砍掉（0/1）。
+#: 5. ``edge_dropped`` —— 因為靠邊被丟掉幾塊。
+#:
+#: 後兩個是「有沒有東西被無聲拿掉」，而那是這一類卡最容易騙人的地方：少掉一半
+#: 框的區域仍然算得出一個很正常的灰階值。
+#:
+#: ⚠ ``present`` 與 ``boxes`` **會不一致，而那是它們合起來要講的話**：Profile 與
+#: Template 定不出位置時會退回「整張圖」當保險（`locate_ok = 0`）。那時候框在、
+#: 但它不是那個區域 —— 於是 ``present = 0`` 而 ``boxes = 1``，正好講出「有東西
+#: 可以量，但它不是你要的那個」。一個數字答不了這件事。
+REGION_FACTS = ("present", "boxes", "area_px", "clipped", "edge_dropped")
+
+
+def region_fact_names(names) -> List[str]:
+    """``["epi", "epi_center"]`` → 這些區域會寫出來的 feature 名（供 lint／UI）。"""
+    out: List[str] = []
+    for name in names or ():
+        n = str(name or "").strip()
+        if n:
+            out.extend("%s_%s" % (n, f) for f in REGION_FACTS)
+    return out
+
+
+def region_facts(ctx, names, shape, clipped: bool = False,
+                 edge_dropped: int = 0,
+                 located: Optional[bool] = None) -> Dict[str, float]:
+    """算出 :data:`REGION_FACTS`（**照 ctx 裡真的存了什麼算**，不照卡片以為的）。
+
+    前三個從 ``ctx`` 讀回來，因為那才是下游真的會量到的東西 —— 卡片自己記一份
+    「我放了幾個框」很容易跟實際存進去的不一致，而那種 bug 極難發現
+    （同 `ctx.meta` 那條「UI 畫的就是引擎算的這一份」）。
+
+    ``clipped`` / ``edge_dropped`` 講的是**這一組區域是怎麼建出來的**，所以
+    一個家族（``<n>`` / ``<n>_center`` / ``<n>_others``）三個名字拿到同一個值。
+    重複是刻意的：下游手上只有**一個**名字（使用者在 `Compare regions` 上挑的
+    那一個），它必須不必知道那是不是衍生名就問得出全部五件事。
+
+    ``located=False`` 是「框在、但那是退回整張圖的保險，不是這個區域」——
+    只有那時候 ``present`` 才會跟 ``boxes`` 對不上（見上面的 ⚠）。
+    """
+    out: Dict[str, float] = {}
+    known = ctx.roi_names()
+    for name in names or ():
+        n = str(name or "").strip()
+        if not n:
+            continue
+        count = int(ctx.roi_count(n)) if n in known else 0
+        area = 0.0
+        if count:
+            area = float(sum(int(w) * int(h)
+                             for _x, _y, w, h in ctx.roi_rects(n, shape)))
+        ok = bool(count) if located is None else (bool(count) and located)
+        out["%s_present" % n] = 1.0 if ok else 0.0
+        out["%s_boxes" % n] = float(count)
+        out["%s_area_px" % n] = area
+        out["%s_clipped" % n] = 1.0 if clipped else 0.0
+        out["%s_edge_dropped" % n] = float(edge_dropped)
+    return out
 
 
 def region_family(name: str):

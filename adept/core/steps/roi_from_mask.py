@@ -66,10 +66,18 @@ from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_ALGO, GROUP_REGION, ParamSpec, Step, StepError, register_step,
 )
-from ._util import output_prefix_spec, prefix_features, prefix_names, require_image
+from ._util import (
+    output_prefix_spec, prefix_features, prefix_names, region_fact_names,
+    region_facts, require_image,
+)
 
-#: 每個區域各自的幾個數字。
-_REGION_FEATURES = ["present", "pieces", "area_px", "clipped"]
+#: 這張卡**多**寫的那一個（`_util.REGION_FACTS` 的五個之外）。
+#:
+#: ``pieces`` 是連通元件的個數，而 ``boxes`` 是矩形分解出幾個 —— 只有走 label
+#: map 這一條路的卡分得出這兩者（另外兩張卡的框本來就是一塊一個）。兩者差很大
+#: 的意思是「這一層正被後面畫的層切碎」，而那是使用者要看得到的事實
+#: （真實資料上兩者相等，見 `docs/GLAS-INTERFACE.md` §3.6）。
+_EXTRA_REGION_FEATURES = ["pieces"]
 
 #: 這張卡自己的（跟區域無關）。
 _CARD_FEATURES = ["layout_ok", "layout_layers"]
@@ -166,9 +174,10 @@ class RoiFromMaskStep(Step):
 
     @classmethod
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
-        names = list(_CARD_FEATURES)
-        for _lid, name in _layers_of(params):
-            names.extend("%s_%s" % (name, f) for f in _REGION_FEATURES)
+        regions = cls.resolve_regions_out(params)
+        names = list(_CARD_FEATURES) + region_fact_names(regions)
+        for name in regions:
+            names.extend("%s_%s" % (name, f) for f in _EXTRA_REGION_FEATURES)
         return prefix_names(params.get("output_prefix", ""), names)
 
     @classmethod
@@ -247,11 +256,11 @@ class RoiFromMaskStep(Step):
                          % (self.key, name, why))
                 ctx.meta.setdefault("regions_absent", {})[name] = why
 
-            feats["%s_present" % name] = 1.0 if rects else 0.0
+            # 五個數字，跟另外兩張 ROI 卡同一組（`_util.REGION_FACTS`）＋
+            # 這張卡多的那一個。這張卡沒有「靠邊丟掉」那個開關，所以
+            # `edge_dropped` 恆為 0 —— 那也是一個答案，而下游不必問它是誰找的。
+            feats.update(region_facts(ctx, [name], shape, clipped=clipped))
             feats["%s_pieces" % name] = float(len(set(piece_of)))
-            feats["%s_area_px" % name] = float(
-                sum(w * h for _x, _y, w, h in rects))
-            feats["%s_clipped" % name] = 1.0 if clipped else 0.0
 
         feats["layout_ok"] = 1.0 if found else 0.0
         feats["layout_layers"] = float(found)
@@ -262,8 +271,7 @@ class RoiFromMaskStep(Step):
             "shape": [int(v) for v in shape],
             "ids_in_image": sorted(present_ids),
             "layers": [{"id": lid, "name": name,
-                        "boxes": int(feats["%s_present" % name]
-                                     and ctx.roi_count(name)),
+                        "boxes": int(feats["%s_boxes" % name]),
                         "pieces": int(feats["%s_pieces" % name]),
                         "area_px": int(feats["%s_area_px" % name]),
                         "clipped": bool(feats["%s_clipped" % name])}

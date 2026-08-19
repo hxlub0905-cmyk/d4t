@@ -2356,6 +2356,79 @@ GDS layers）吐的是區域，它吐的是一條 0/255 的影像流，而唯一
 之後如果「用區域」的卡變多（例如 crop / 只保留區域內），那時候的答案是**把
 Region 段分成兩半**（找 / 用），不是把它們散到別段去。
 
+#### 3.3.19 三張 ROI 卡的輸出統一（Region-4，✅ 2026-08-18）
+
+使用者：「我認為各種找／給定 ROI 的方法，理想上輸出的東西要接近⋯⋯現在不是不能
+用，而是現在有點像大家資料結構不一樣。」
+
+**先更正一件事**：三張卡的**區域**契約本來就一致 —— 都是「吃一條影像流 → 吐具名
+區域」，一張都不吐影像。GDS 那條路看起來多一張圖，是因為 label map 是**另一個
+檔案**，要有一張 Input 卡（`Load layout labels`）去讀它；那條線在講「資料從哪來」，
+不是 GDS 的輸出。
+
+**真正不一致的是每個區域的 feature**，而那個不一致是實的：
+
+| 卡 | 原本每個區域寫出的 |
+|---|---|
+| Profile | **一個都沒有** |
+| Template | `present` / `others_present` / `edge_dropped` |
+| GDS layers | `present` / `pieces` / `area_px` / `clipped` |
+
+於是下游（分數表達式、`Compare regions`、報表）得先知道區域是誰找的，才問得出
+「它有沒有落在這一顆上」。統一成 `_util.REGION_FACTS` 的五個
+（`present` / `boxes` / `area_px` / `clipped` / `edge_dropped`），對**每一個宣告
+的區域**都寫。
+
+三個決定：
+
+1. **前三個從 `ctx` 讀回來**，不是卡片自己記一份 —— 卡片記的很容易跟實際存進去
+   的不一致，而那種 bug 極難發現。
+2. **`clipped` / `edge_dropped` 整個家族共用同一個值**。重複是刻意的：下游手上
+   只有一個名字，它必須不必知道那是不是衍生名。
+3. ⚠ **`present` 與 `boxes` 會不一致，而那是它們合起來要講的話**：定不出位置時
+   退回「整張圖」當保險 —— 框在、但那不是那個區域，所以 `present = 0`、
+   `boxes = 1`。做這一輪才發現**兩張卡原本在這件事上不一致**（Template 有這個
+   語意、Profile 沒有）。
+
+**不統一的**：卡片自己的診斷（`match_score` / `cross_pitch_x_px` / `layout_ok`）。
+那些答的是「這一次定位可不可信」，而不同方法的可信度指標本來就不一樣 ——
+硬統一會變成假的。GDS 另外多一個 `<n>_pieces`（只有走 label map 那條路分得出
+連通元件與矩形的差別）。
+
+`_center` / `_others` **只有 Profile / Template 有**，這也是刻意保留的差異：
+那兩張找的是「同一個東西的好幾份」，GDS 找的是不同的層，層跟層不是複本。
+
+驗收：`tests/test_region_facts.py`（14 條），含一條掃 registry 的 ——
+判準是「這張卡吐不吐區域」，不是一張寫死的卡片清單。
+
+#### 3.3.20 待做：`pattern_ref` → 一張 ROI 卡（使用者 2026-08-18 提）
+
+> 「Reference from pattern 其實也不是沒用，但他要改名，功能也不是 ref。
+>  我的想法是，他是用在 repeating pattern 的 SEM（單張影像圖），他鋪 ROI 的方式
+>  就是跟 template 很像，只不過他是反向把單 cell 鋪回去，不過這樣的話他應該就是
+>  要放在 ROI 內的。」
+
+現在那張卡的四個步驟是：① 量週期 → ② 找相位 → ③ 疊成一個乾淨的 cell →
+④ 鋪回原尺寸變成 ref 影像。**ROI 版本保留 ①②、丟掉 ③④**，改成把晶格的每一格
+框起來，吐 `<n>` / `<n>_center` / `<n>_others`（跟 Profile / Template 同一組）。
+
+它跟 Template 的分工是清楚的，而且**它比 Template 便宜**：
+
+| | 使用者要先做什麼 | 框出什麼 |
+|---|---|---|
+| Template | 在對話框裡疊一個 cell，並在上面標區域 | 標好的那些區域，搬到每一份上 |
+| 這一張 | **什麼都不用** | 每一份**整格** |
+
+建議名字 **`Repeats`**（key `roi_repeats`）—— ROI 段其他三張都是短名詞、講的是
+「靠什麼找」（Profile = 靠投影曲線、Template = 靠模板、GDS layers = 靠 GDS 的層），
+所以這一張是「靠重複性」。次選 `Pattern repeats`。**不要**再出現 `cell`：那正是
+上一輪跟 Template 撞名的來源。
+
+⚠ **做之前要先量一件事**：`Repeats` + `Compare regions`（中心那格 vs 其餘那些）
+在 `make_sample_rsem` 上分不分得出真假缺陷。分得出來的話，`dual_route_basic` 的
+rsem route 可以改走這一條，而「單張影像合成 ref」那個能力就可以乾淨退場；
+分不出來的話，那張 ref 卡要留著（它是那條路唯一的 24/24，見 §3.4.2）。
+
 ### 3.4 Compare
 
 | | |

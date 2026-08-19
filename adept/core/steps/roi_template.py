@@ -85,7 +85,8 @@ from ..pipeline.step import (
 )
 from ._util import (
     drop_edge_boxes, drop_edge_specs, output_prefix_spec, prefix_features,
-    prefix_names, region_family, require_image, set_region_family,
+    prefix_names, region_fact_names, region_facts, region_family,
+    require_image, set_region_family,
 )
 
 #: ``locate_axis`` -> 哪幾軸要做定位。一維的 layout（垂直條紋）只有 X 有相位，
@@ -111,7 +112,12 @@ def _prefix_in_section() -> ParamSpec:
 #:   這個數字要在，是因為那個開關**會安靜地改變基準的樣本數**：同一份 recipe
 #:   在 wafer 中心與邊緣的 defect 上留下的框數不一樣，而 `_others` 的統計本來
 #:   就跟樣本數有關。看得到才知道某一顆的基準是不是只剩一塊。
-_REGION_FEATURES = ["present", "others_present", "edge_dropped"]
+#: **2026-08-18（F11 Region-4）：這一份併進 `_util.REGION_FACTS` 了。**
+#: 三張 ROI 卡各寫各的（這裡三個、GDS 四個、Profile 一個都沒有），於是下游得先
+#: 知道區域是誰找的才問得出「它在不在這一顆上」。現在每一張都寫同一組五個 ——
+#: 而這裡原本那三個名字**一個都沒有消失**：`<n>_present` 與 `<n>_edge_dropped`
+#: 照舊，`<n>_others_present` 則是「對 `<n>_others` 這個區域寫 present」自然的
+#: 結果（家族的每一個名字都拿得到五件事）。
 
 #: 每個區域固定會有的幾個數字（區域自己的那兩個另外加）。
 _MATCH_FEATURES = ["match_score", "match_margin", "match_structure",
@@ -240,10 +246,10 @@ class RoiTemplateStep(Step):
 
     @classmethod
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
-        names = list(_MATCH_FEATURES)
-        for name in region_names(params.get("regions", "")):
-            names.extend("%s_%s" % (name, f) for f in _REGION_FEATURES)
-        return prefix_names(params.get("output_prefix", ""), names)
+        return prefix_names(
+            params.get("output_prefix", ""),
+            list(_MATCH_FEATURES)
+            + region_fact_names(cls.resolve_regions_out(params)))
 
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
@@ -342,15 +348,18 @@ class RoiTemplateStep(Step):
 
         edge = float(p["edge_margin"]) if bool(p["drop_edge"]) else 0.0
         for name, norm_boxes in regions:
-            boxes, others, dropped = self._place(
+            boxes, others, dropped, clipped = self._place(
                 ctx, name, norm_boxes, match, cell.shape, (ph, pw), axes,
                 int(p["max_boxes"]), edge)
-            feats["%s_present" % name] = 1.0 if boxes else 0.0
-            feats["%s_others_present" % name] = 1.0 if others else 0.0
+            # 五個數字，跟另外兩張 ROI 卡同一組（`_util.REGION_FACTS`）。
             # 丟掉幾個是**每個區域各自**的數字（區域的形狀不一樣，靠邊的份數
-            # 也不一樣）。跟 `_present` 同一個命名規則，所以多標一個區域不必
-            # 動任何下游。
-            feats["%s_edge_dropped" % name] = float(dropped)
+            # 也不一樣），所以要在迴圈裡一個區域一次。
+            feats.update(region_facts(
+                ctx, region_family(name), (ph, pw), clipped=clipped,
+                edge_dropped=dropped,
+                # 定不出相位時 `_place` 會退回整張圖當保險 —— 框在，但那不是
+                # 這個區域。`present = 0` 而 `boxes = 1`，見 `REGION_FACTS` 的 ⚠。
+                located=bool(boxes)))
             # panel 用（跟 roi_cross 同一個慣例）：**UI 畫的就是引擎算的這一份**。
             # UI 自己再算一次很容易變成「畫面上的框」與「真的量下去的框」不一樣，
             # 那種 bug 極難發現。
@@ -375,10 +384,11 @@ class RoiTemplateStep(Step):
                match: Any, cell_shape: Tuple[int, int],
                patch_shape: Tuple[int, int], axes: Tuple[bool, bool],
                max_boxes: int, edge_margin: float = 0.0
-               ) -> Tuple[List[Tuple[int, int, int, int]], int, int]:
+               ) -> Tuple[List[Tuple[int, int, int, int]], int, int, bool]:
         """一個區域的框搬到這張 patch 上，並寫進 ``ctx``。
 
-        回傳 ``(實際放下的框, 其中「其餘」有幾塊, 因為靠邊被丟掉幾塊)``。
+        回傳 ``(實際放下的框, 其中「其餘」有幾塊, 因為靠邊被丟掉幾塊,
+        有沒有被 max_boxes 砍到)``。
         """
         ph, pw = patch_shape
         if not match.ok:
@@ -391,7 +401,7 @@ class RoiTemplateStep(Step):
                 "this defect is marked locate_ok = 0."
                 % (self.key, name, match.score, match.margin))
             set_region_family(ctx, self.key, name, [(0.0, 0.0, 1.0, 1.0)])
-            return [], 0, 0
+            return [], 0, 0, False
 
         boxes: List[Tuple[int, int, int, int]] = []
         for norm in norm_boxes:
@@ -400,7 +410,8 @@ class RoiTemplateStep(Step):
                 max_boxes=max_boxes))
         # 一個區域的每一塊各自鋪出去之後總數才封頂 —— 留中間的那些（缺陷在
         # 正中央，同 ``roi_cross`` 的 max_boxes）。
-        if len(boxes) > max_boxes:
+        clipped = len(boxes) > max_boxes
+        if clipped:
             cx, cy = pw / 2.0, ph / 2.0
             boxes.sort(key=lambda b: ((b[0] + b[2] / 2.0 - cx) ** 2
                                       + (b[1] + b[3] / 2.0 - cy) ** 2))
@@ -418,7 +429,7 @@ class RoiTemplateStep(Step):
                 ctx.meta.setdefault("regions_absent", {})[absent] = (
                     "it is marked on a part of the cell that this patch does "
                     "not cover")
-            return [], 0, 0
+            return [], 0, 0, clipped
 
         cx, cy = pw / 2.0, ph / 2.0
         idx = min(range(len(boxes)),
@@ -435,5 +446,5 @@ class RoiTemplateStep(Step):
             ctx, self.key, name,
             [(x / pw, y / ph, w / pw, h / ph) for x, y, w, h in boxes], idx,
             dropped)
-        return boxes, others, dropped
+        return boxes, others, dropped, clipped
 

@@ -300,6 +300,9 @@ class CrossResult:
     confidence: float = 0.0
     ok: bool = False
     reason: str = ""
+    #: 有沒有被 ``max_boxes`` 砍掉（``reason`` 裡也講，但那是一句話不是旗標 ——
+    #: 而「有東西被安靜拿掉」要能當成一個數字打進分數表達式）。
+    clipped: bool = False
 
     @property
     def center_box(self) -> Optional[Tuple[int, int, int, int]]:
@@ -1444,6 +1447,7 @@ def locate_crossings(img: Any, vertical_select: str = "brightest",
     res.boxes = boxes[:limit]        # 已依離中心遠近排序 —— 砍掉的是最外圍的
     res.ok = True
     if len(boxes) > limit:
+        res.clipped = True
         res.reason = ("kept the %d box(es) nearest the centre out of %d"
                       % (limit, len(boxes)))
     return res

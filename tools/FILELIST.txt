@@ -5,7 +5,7 @@ f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
 3677f25b67728f351bfe66dbf696dbd1cefab249 AGENTS.md
 4a3a3e3e6cf8cae572f26f1f55246b4a82a132c9 CLAUDE.md
 87c3cb2a07ed7a97b98ec30aa139b3dd2f03ff19 README.md
-3cba4a7e46eb3e42618e427659d74e057159677c SESSION_LOG.md
+5c9fcd260b93a81809115768845643ca5c2754c1 SESSION_LOG.md
 650a5d7c8bc6db42eed4054174823bfcfceb7eae adept/__init__.py
 60b80dcea29bcf34402d267038256d161b70b0ed adept/__main__.py
 8a51dfe499b3a9d81434c8a202f2d17c24b71c74 adept/core/__init__.py
@@ -15,7 +15,7 @@ ed44cb755d91d7f3adf6018672969a6cb68932f0 adept/core/algo/curve.py
 1726fcfe9d042749796e790a1ed17977402aa386 adept/core/algo/enhance.py
 4e33e3e08e92cef0253d43a65d935abb3ad624bc adept/core/algo/glv.py
 a77ccf39e51b71d68671878245eed04422b4f24e adept/core/algo/golden.py
-b88158f37cf5476ca33bc19c75c39c390d797734 adept/core/algo/grid.py
+c776a7bf20af3fb4a58497f5e2c9579377146c6b adept/core/algo/grid.py
 4115712249544e2d7f7aa19744a9bed67fc38a5f adept/core/algo/histmatch.py
 e5c2e994ff59cf5f187f995bca9613df9bfcc7be adept/core/algo/mask.py
 9e8715a433ecb84d49151964ed5aea05f8c18dc4 adept/core/algo/normalize.py
@@ -49,7 +49,7 @@ e23539efe8cfae76911201bb5b37e0d6dbfde404 adept/core/pipeline/curve.py
 52c778f166bfca69f9ba9bdee8a10d3fa642a9ad adept/core/pipeline/recipe.py
 614d2740cfe28d950cf84711ffa9afe9c3f66592 adept/core/pipeline/step.py
 34b62aa19cc3c0ab1ac335797e163d4899802415 adept/core/steps/__init__.py
-cf1838fd5e0d30e8ac3ef32ffa9b5d252051ddb8 adept/core/steps/_util.py
+5d7124b88115ec1a0da9934668b51b4526896bb8 adept/core/steps/_util.py
 68eceaa2cadaffb76b71c8dfc2e2984d9f4bbf5e adept/core/steps/align.py
 bfa0e9b6bfc6a5d7299f439fd43d705eda5832b2 adept/core/steps/arith.py
 aff2d033bbb51e2190ad437ec0f9de6b25d27ebc adept/core/steps/cd.py
@@ -62,11 +62,11 @@ ec3f5caf078d2a81bcbe468c825bd51f2b9d0268 adept/core/steps/normalize.py
 d40c4f9315d5d1e1341f4120a46a78f983d7ca6a adept/core/steps/pattern_ref.py
 9faa96d8ac9fea3ad43bb25e2de578dd5c6fc965 adept/core/steps/quality.py
 98be8f62f88078005c6124d12000abd8c2a2a030 adept/core/steps/roi_compare.py
-3ccf021332986f44d133b4f8c8dffbd764215174 adept/core/steps/roi_cross.py
-f04fc6179954623b694e109280c4d6ab7029b193 adept/core/steps/roi_from_mask.py
+3439ecdefa9a0ae56ce9536a7fb93ecfe1a2d125 adept/core/steps/roi_cross.py
+120fb249bb9e3ba5a0af1d71893547bc9e327593 adept/core/steps/roi_from_mask.py
 10eca7676b56a578aa499d27fd9666bc9dc8c03f adept/core/steps/roi_mask.py
 e8269fc1744fd1bf8d3dd62eb5d96d8712962c79 adept/core/steps/roi_snr.py
-798ab1018d63bf6da8bccaedc256827d82230c95 adept/core/steps/roi_template.py
+be140d423d3b697db537b365c03027485792a5ba adept/core/steps/roi_template.py
 ad2d9b82142a4aa5b1e5465e75adf1715b2f95b2 adept/core/steps/snr_map.py
 fd783eb54860de0b9462c6238eeb72aea1657222 adept/core/steps/tone.py
 0e7d37674a365b4c5292ba728f7da61b0aba6b08 adept/core/store/__init__.py
@@ -99,7 +99,7 @@ c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
 4051d93d4fa3ad3cf9ed76514f5b8ab4c96f13f7 docs/ROADMAP.md
 98b9ecb36951205d6e3dcdecb2cc6b125620557d docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
-ae6b1e87f15f744d02f2e22785b1bc2da2d09c1a docs/plans/F11-phase2-features.md
+470c1abd26d9e659c23ef6916cf7d4ee2fe59497 docs/plans/F11-phase2-features.md
 a5ffe3b9a80b0c37d49deaae1122cf97adc68233 docs/plans/F8-rule-based-roi.md
 a3b52cd403aaaf14938b56ac365c7e596cd7c3d1 fab_probe/README.md
 fdf5dba17526e86ea0990c7853ef652874082324 fab_probe/probe_klarf.py
@@ -159,6 +159,7 @@ e027a9047fa771cca97915c533a7f90198c0fb18 tests/test_period_golden.py
 482763f96a3f9e39f90a7e6cbd97c6716b29db63 tests/test_phase_origin.py
 8c4b2aba1d0893acc999c5acb331fd00839518d9 tests/test_quality.py
 6b5fdce315e54f8bb8f6e6e2694066e71f0dd280 tests/test_recipe.py
+90efe336a073cb26fae41ce7339f3193afa59bce tests/test_region_facts.py
 f90b258ab8544e5eadc1b54b55ff558db1cc3041 tests/test_results_store.py
 16cd9995a97eb6b919044e2c72fe1bcddb954e2a tests/test_roi.py
 54830abe14c9fb4c44b48ca58644f93e2346cfeb tests/test_roi_compare.py

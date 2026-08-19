@@ -44,7 +44,7 @@ from ..pipeline.step import (
 from ._util import (
     FEATURE_PREFIX_PATTERN, drop_edge_boxes, drop_edge_specs,
     output_prefix_spec, prefix_features, prefix_names, region_family,
-    require_image, set_region_family,
+    region_fact_names, region_facts, require_image, set_region_family,
 )
 
 _BESIDE = ("beside_vertical", "beside_horizontal")
@@ -406,7 +406,14 @@ class RoiCrossStep(Step):
 
     @classmethod
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
-        return prefix_names(params.get("output_prefix", ""), cls.features_out)
+        # 卡自己的診斷 ＋ **每個區域那五個**（F11 Region-4：三張 ROI 卡同一組，
+        # 見 `_util.REGION_FACTS`）。這張卡以前一個區域數字都沒有 —— 下游要問
+        # 「這一顆上到底有沒有 cross_center」只能去看 `locate_ok`，而那是**整張
+        # 卡**的旗標，不是那個區域的。
+        return prefix_names(
+            params.get("output_prefix", ""),
+            list(cls.features_out)
+            + region_fact_names(cls.resolve_regions_out(params)))
 
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
@@ -487,7 +494,7 @@ class RoiCrossStep(Step):
                         name))
             whole = (0.0, 0.0, 1.0, 1.0)
             set_region_family(ctx, self.key, name, [whole])
-            ctx.add_features(prefix_features(p["output_prefix"], {
+            ctx.add_features(prefix_features(p["output_prefix"], dict({
                 "cross_count": 0.0,
                 "cross_pitch_x_px": float(res.x.pitch_measured),
                 "cross_pitch_y_px": float(res.y.pitch_measured),
@@ -498,7 +505,10 @@ class RoiCrossStep(Step):
                 "cross_edge_dropped": 0.0,
                 "locate_conf": float(res.confidence),
                 "locate_ok": 0.0,
-            }))
+            }, **region_facts(ctx, self.resolve_regions_out(p), shape,
+                              # 退回整張圖 = 框在但那不是這個區域（同
+                              # Template；見 `_util.REGION_FACTS` 的 ⚠）。
+                              located=False))))
             return ctx
 
         # 靠邊的框丟掉 —— **在挑出中心那一塊之後**。順序反過來的話，中心會從
@@ -524,7 +534,7 @@ class RoiCrossStep(Step):
         cx, cy = shape[1] / 2.0, shape[0] / 2.0
         dist = ((centre[0] + centre[2] / 2.0 - cx) ** 2
                 + (centre[1] + centre[3] / 2.0 - cy) ** 2) ** 0.5
-        ctx.add_features(prefix_features(p["output_prefix"], {
+        ctx.add_features(prefix_features(p["output_prefix"], dict({
             "cross_count": float(len(boxes)),
             "cross_pitch_x_px": float(res.x.pitch_used),
             "cross_pitch_y_px": float(res.y.pitch_used),
@@ -546,7 +556,8 @@ class RoiCrossStep(Step):
             "cross_edge_dropped": float(dropped),
             "locate_conf": float(res.confidence),
             "locate_ok": 1.0,
-        }))
+        }, **region_facts(ctx, self.resolve_regions_out(p), shape,
+                          clipped=bool(res.clipped), edge_dropped=dropped))))
         return ctx
 
 
