@@ -37,7 +37,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from .dataset import Dataset, ImageRef
 
 __all__ = ["MANIFEST_NAME", "SIDECAR_LABEL", "AttachReport", "read_manifest",
-           "label_map", "region_name_for", "default_layer_map", "attach"]
+           "label_map", "region_name_for", "default_layer_map",
+           "layer_map_default", "attach"]
 
 #: manifest 的固定檔名（`gds_align_tool._write_manifest`）。
 MANIFEST_NAME = "overlay_manifest.json"
@@ -175,20 +176,29 @@ def region_name_for(layer: str, taken: Any = ()) -> str:
     return "%s_%d" % (out, n)
 
 
-def default_layer_map(doc: Dict[str, Any]) -> str:
-    """manifest 的 ``label_map`` → 卡片 ``layers`` 參數的預設值。
+def layer_map_default(layers: Any) -> str:
+    """``[(id, layer 名), …]`` → 卡片 ``layers`` 參數的預設值。
 
     格式跟 ``load_patch`` 的 ``channel_map`` 一模一樣（``"1:epi, 2:mg"``）——
     **重用而不是發明第二個** ：兩者都是「整數 → 名字」，而那一份的驗證規則
     （整數要 ≥1、不能重複、名字要能當變數）正好就是這裡要的。
+
+    吃的是**已經讀出來的清單**而不是整份 manifest，因為 Studio 手上留著的正是
+    那份清單（``AttachReport.layers``）—— 讓它為了填一張卡再讀一次 JSON，就是
+    多開一條會漂的路。
     """
     names: List[str] = []
     parts: List[str] = []
-    for lid, layer in label_map(doc):
+    for lid, layer in (layers or ()):
         name = region_name_for(layer, names)
         names.append(name)
-        parts.append("%d:%s" % (lid, name))
+        parts.append("%d:%s" % (int(lid), name))
     return ", ".join(parts)
+
+
+def default_layer_map(doc: Dict[str, Any]) -> str:
+    """同上，但從整份 manifest 讀。"""
+    return layer_map_default(label_map(doc))
 
 
 def attach(dataset: Dataset, export_dir: Any,

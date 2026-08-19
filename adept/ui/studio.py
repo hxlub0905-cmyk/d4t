@@ -1734,7 +1734,7 @@ class StudioWindow(QMainWindow):
         except (KeyError, ParamError) as e:
             self._status("Could not add card: %s" % e, "error")
             return
-        self._autofill_roi_mask(node_id)
+        self._autofill_new_card(node_id)
         self._status("Added “%s”%s" % (node_id, self._unmet_needs(node_id)))
         self.select_node(node_id)
 
@@ -1763,14 +1763,51 @@ class StudioWindow(QMainWindow):
             except (KeyError, ParamError) as e:
                 self._status("Could not add card: %s" % e, "error")
                 return None
-            self._autofill_roi_mask(new_id)
+            self._autofill_new_card(new_id)
         self._status("Added “%s” after “%s” — drag a line into it to say which "
                      "image stream it works on.%s"
                      % (new_id, nid, self._unmet_needs(new_id)))
         self.select_node(new_id)
         return new_id
 
-    def _autofill_roi_mask(self, node_id: Optional[str]) -> None:
+    def _autofill_new_card(self, node_id: Optional[str]) -> None:
+        """剛加進來的卡，把**這個畫面上已經知道的答案**先填好。
+
+        兩張卡走這條路，理由是同一個：那個答案已經在畫面上了，讓使用者用手抄
+        一次是在製造一個可以抄錯的機會。
+
+        * ``roi_mask`` —— 上游定義過的區域名（見 :meth:`_autofill_regions`）。
+        * ``roi_from_mask`` —— **已經掛上來的那份 GLAS 匯出**的層對照表。
+
+        第二個是 2026-08-18 補的，而它修掉一個順序造成的洞：填名字那段原本只在
+        **掛匯出的當下**跑一次，掃的是當時已經存在的卡。但使用者的自然順序是
+        「開 KLARF → 開 GDS 匯出 → 加卡」（那顆鈕在沒有 lot 的時候是灰的，
+        空白狀態也叫他先載 lot）—— 於是後加的那張卡是空的，而它擋下來的那句話
+        寫著「Use “Open GDS export…” — attaching the export fills in the layers」。
+        使用者剛做完那件事。**一句叫人去做他已經做過的事的訊息，比沒有訊息更糟。**
+        """
+        node = self.model.nodes.get(str(node_id or ""))
+        if node is None:
+            return
+        if node.step == "roi_mask":
+            self._autofill_regions(node)
+        elif node.step == "roi_from_mask":
+            self._autofill_gds_layers(node)
+
+    def _autofill_gds_layers(self, node: Any) -> None:
+        """掛好的匯出有幾層、叫什麼 —— 直接填進這張卡（空的時候才填）。"""
+        if not self._gds_layers:
+            return
+        if str(node.params.get("layers", "") or "").strip():
+            return              # 使用者打過的字不覆蓋
+        from adept.core.ingest import glas_export
+
+        default = glas_export.layer_map_default(self._gds_layers)
+        if default:
+            self.model.set_param(node.id, "layers", default)
+            self.param_form.set_label_count(len(self._gds_layers))
+
+    def _autofill_regions(self, node: Any) -> None:
         """剛加進來的 Mask from regions 卡，把上游定義過的區域名自動填進去。
 
         使用者的直覺是「Profile / Template 應該直接吐 mask」—— 名字要他自己
@@ -1779,9 +1816,6 @@ class StudioWindow(QMainWindow):
         上游有哪些具名區域就全部填上（多名字本來就是聯集），不合意再刪。
         只在**空的**時候填 —— 使用者打過的字不覆蓋。
         """
-        node = self.model.nodes.get(str(node_id or ""))
-        if node is None or node.step != "roi_mask":
-            return
         if str(node.params.get("regions", "") or "").strip():
             return
         names: List[str] = []

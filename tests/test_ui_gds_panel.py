@@ -250,3 +250,79 @@ def test_the_attachment_entry_turns_on_once_a_lot_is_open(qapp, tmp_path):
         assert win.btn_open_gds.isEnabled() is True
     finally:
         win.deleteLater()
+
+
+def test_a_card_added_after_the_export_still_gets_its_layer_names(qapp,
+                                                                  tmp_path):
+    """填層名那一段原本只在**掛匯出的當下**跑，掃的是當時已經存在的卡。
+
+    但使用者的自然順序是「開 KLARF → 開 GDS 匯出 → 加卡」：那顆鈕在沒有 lot
+    的時候是灰的，空白狀態也叫他先載 lot。於是後加的那張卡是空的 —— 而它擋下來
+    的那句話寫著「Use “Open GDS export…” — attaching the export fills in the
+    layers」，也就是叫使用者去做他剛剛做完的事。
+
+    這一條把**兩個順序**都測掉：先加卡後掛（原本就會過）、先掛後加卡（原本是空的）。
+    """
+    import sys
+
+    from adept.ui.studio import StudioWindow
+
+    sys.path.insert(0, "tools")
+    from make_glas_export import generate as gen_export
+    from make_sample_rsem import generate as gen_lot
+
+    lot = gen_lot(str(tmp_path / "lot"), n=3, seed=4)
+    exp = gen_export(str(tmp_path / "lot"), str(tmp_path / "exp"),
+                     layers=2, seed=4)
+
+    def layers_of(order):
+        win = StudioWindow(show_welcome_on_start=False)
+        try:
+            assert win.load_dataset_path(lot["klarf"], sync=True)
+            if order == "attach-first":
+                win.attach_gds_export(str(tmp_path / "exp"))
+                nid = win.model.add_step("roi_from_mask")
+                win._autofill_new_card(nid)
+            else:
+                nid = win.model.add_step("roi_from_mask")
+                win._autofill_new_card(nid)
+                win.attach_gds_export(str(tmp_path / "exp"))
+            return str(win.model.nodes[nid].params.get("layers", ""))
+        finally:
+            win.deleteLater()
+
+    first = layers_of("attach-first")
+    second = layers_of("card-first")
+    assert first, "先掛匯出、後加卡 —— 那張卡是空的（使用者的自然順序）"
+    assert first == second, "兩個順序填出來的東西要一樣：%r vs %r" % (first,
+                                                                     second)
+    assert first.startswith("1:"), first
+    assert exp     # 產生器真的產了東西
+
+
+def test_the_users_own_names_are_never_overwritten(qapp, tmp_path):
+    """自動填只填**空的**。使用者把 `L17_D0` 改成 `epi` 之後重新掛一次匯出，
+    不可以把它洗回去 —— 寫分數表達式的是他。"""
+    import sys
+
+    from adept.ui.studio import StudioWindow
+
+    sys.path.insert(0, "tools")
+    from make_glas_export import generate as gen_export
+    from make_sample_rsem import generate as gen_lot
+
+    lot = gen_lot(str(tmp_path / "lot"), n=3, seed=6)
+    gen_export(str(tmp_path / "lot"), str(tmp_path / "exp"), layers=2, seed=6)
+
+    win = StudioWindow(show_welcome_on_start=False)
+    try:
+        win.load_dataset_path(lot["klarf"], sync=True)
+        win.attach_gds_export(str(tmp_path / "exp"))
+        nid = win.model.add_step("roi_from_mask")
+        win._autofill_new_card(nid)
+        win.model.set_param(nid, "layers", "1:epi, 2:mg")
+        win.attach_gds_export(str(tmp_path / "exp"))          # 再掛一次
+        win._autofill_new_card(nid)
+        assert win.model.nodes[nid].params["layers"] == "1:epi, 2:mg"
+    finally:
+        win.deleteLater()

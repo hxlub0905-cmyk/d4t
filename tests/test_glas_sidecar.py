@@ -335,3 +335,20 @@ def test_the_card_is_an_input_card_with_no_inputs(tmp_path):
     card = get_step("load_sidecar")
     assert card.group == GROUP_INPUT
     assert card.resolve_reads({}) == []
+
+
+def test_the_card_name_is_not_printed_twice_in_the_error():
+    """``[load_sidecar] [load_sidecar] defect 3 has no…``（2026-08-18 實際看到的）。
+
+    節點 id 與 step key 是兩回事（畫布上可以有三張 Denoise），所以錯誤訊息兩個
+    都要有 —— 但一張卡剛加進來時節點 id **就是** step key，重複的那半個字讀起來
+    像程式壞了，而它出現在使用者最需要看懂訊息的時候。
+    """
+    from adept.core.pipeline.engine import _prefixed
+    from adept.core.pipeline.step import StepError
+
+    same = _prefixed("load_sidecar", StepError("load_sidecar", "no label"))
+    assert same == "[load_sidecar] no label"
+    # 名字不同的時候**兩個都要留** —— 那正是它們存在的理由
+    other = _prefixed("labels2", StepError("load_sidecar", "no label"))
+    assert other == "[labels2] [load_sidecar] no label"

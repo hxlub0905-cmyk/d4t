@@ -212,6 +212,60 @@ def test_safe_name_matches_glas(tmp_path):
     assert chk.safe_name("層1") == "層1"          # isalnum() 是 Unicode-aware
 
 
+def test_region_name_matches_the_engine(tmp_path):
+    """這一支跟 ``adept/core/ingest/glas_export.py`` 各有一份**同一條規則**。
+
+    抄一份過來是刻意的（這支要在只有一個檔案的機器上跑得動），但兩份漂掉的話
+    這份報告會對「ADEPT 會把你的層叫什麼」講錯話 —— 而使用者是靠它決定要不要
+    在卡片上改名的。所以逐字比對，包含那幾個邊界：開頭是數字、非 ASCII、
+    全是標點、以及**兩個不同的層名撞成同一個**。
+    """
+    from adept.core.ingest.glas_export import region_name_for
+
+    for name in ("L17/D0", "L21/D0", "M1/DRAWING", "17/D0", "L17-D0",
+                 "", "__x__", "A B/C", "層/D0", "L17/D0AA", "///"):
+        assert chk.region_name(name) == region_name_for(name), name
+    # 這支**不做**去重（`_2`）—— 去重正是把撞名藏起來的那一步，而它要回答的
+    # 問題就是「會不會撞」。
+    assert chk.region_name("17/D0") == chk.region_name("L17-D0") == "L17_D0"
+
+
+def test_two_layers_that_collapse_onto_one_region_name_are_caught(tmp_path):
+    """撞名的代價是使用者看到一個 `X_2`，而他不知道那是哪一層。"""
+    d = _export(tmp_path, layers=("17/D0", "L17-D0"))
+    text, v = _run(d)
+    assert v["layer names stay distinct after that rewrite"] == "WARN"
+    assert "_2" in text
+    clean = _run(_export(tmp_path / "b", layers=("EPI", "MG")))[1]
+    assert clean["layer names stay distinct after that rewrite"] == "PASS"
+
+
+def test_the_box_cap_is_the_one_that_actually_applies(tmp_path):
+    """比的是「GDS layers」卡自己的上限，不是 Profile／Template 的 64。
+
+    第一版比 64，於是 2026-08-18 對真實匯出（最大 275 個矩形）跑出一條 WARN
+    加一句「roi_from_mask 需要自己的上限」—— 而那件事當時已經做完了。
+    一條講著已完成工作的 WARN，讀起來跟一個待辦一模一樣。
+    """
+    import adept.core.steps  # noqa: F401 — 觸發卡片註冊
+    from adept.core.pipeline import get_step
+
+    spec = {p.name: p for p in get_step("roi_from_mask").params}["max_boxes"]
+    assert chk.GDS_BOX_CAP == spec.default, \
+        "報告比的上限跟卡片的預設值不同 —— 那份報告會對使用者說錯話"
+
+    text, v = _run(_export(tmp_path), samples=1)
+    assert v["the biggest layer fits under the GDS layers card's box cap"] \
+        == "PASS"
+    assert "headroom" in text
+
+
+def test_the_report_says_what_pieces_versus_rectangles_means(tmp_path):
+    """數字本身不會講話 —— 相等的意思是「形狀本來就是矩形」，而那是設計輸入。"""
+    text = _run(_export(tmp_path), samples=1)[0]
+    assert "every shape is already a plain rectangle" in text
+
+
 def test_a_layer_that_lost_every_pixel_is_reported(tmp_path):
     """GLAS 依序畫層，**後面的蓋掉前面的**。一層可能在某些 defect 上被吃光，
     而它的名字還留在 ``label_map`` —— 那一顆的區域就是空的。"""
@@ -433,4 +487,4 @@ def test_the_decomposition_is_reported_for_a_real_sized_layer(tmp_path):
     d = _export(tmp_path, ids=("1",), layers=("A", "B"))
     text, v = _run(d)
     assert "rectangles" in text
-    assert "a layer fits under the Region cards' default box cap (64)" in v
+    assert "the biggest layer fits under the GDS layers card's box cap" in v

@@ -13,9 +13,64 @@
 包的大小**不是限制**（2026-08-17 使用者確認直接複製 raw，見 `AGENTS.md` §2）——
 封存現在是為了 diff 乾淨與公司機用不到的東西不佔體積，不再是為了那道 1 MB 的線。
 
-## Phase 2：Golden Cell 改名回來 ＋ 兩段分類定調（2026-08-18，第十輪）
+---
+
+## Phase 2：真實 GDS 匯出量完了（2026-08-18，第十一輪）
 
 ### ⏩ 交接：下一個 session 從這裡開始
+
+**Region-3 的最後一個未知數收掉了。** 使用者在公司機跑了
+`python tools\check_glas_export.py <匯出資料夾> --samples 2`，399 顆、
+**0 fail / 2 warn / 21 checks**。等了兩輪的那個數字（每一層的
+`pieces / rectangles`）是：
+
+| 層 | pieces | rectangles |
+|---|---|---|
+| 1 | 30 | 30 |
+| 2 | 100 | 100 |
+| 3 | 275 | 275 |
+
+**三層都相等，而且遠小於預期。** 意思是每一塊形狀本來就是一個軸對齊矩形 ——
+沒有 L 形、沒有斜邊，**也沒有任何一層被後面畫的層切碎**（那正是原本擔心的事，
+因為 GLAS 的 `render_label_image` 是 `lbl[m > 0] = label_id`，後畫的會蓋掉先畫的）。
+合成的測試資料是 1014 / 988 / 25，所以那條「被切碎」的路還是測得到 ——
+**分解那段程式不要拿掉**，下一個站點不保證一樣乾淨。
+
+`roi_from_mask` 因此**一個參數都不用調**：最大 275 個矩形對上 `max_boxes` 預設
+8192，30 倍餘裕。實測同形狀資料 **54 ms／顆**，下游 275 個框量一次 glv **5 ms**，
+399 顆單執行緒約 25 秒。
+
+**Region-3 可以收了。** 下一段照 `docs/ROADMAP.md` 走。
+
+### 這一輪改了什麼（都在健檢腳本上）
+
+真實報告上那兩條 WARN 有一條**已經沒有意義了**，而那正是要修的：
+
+1. **框數的門檻比錯了對象。** 它拿 Profile／Template 的 64 去比，於是印出
+   「the biggest layer is 275 … so roi_from_mask needs its own much larger cap」
+   —— 而那件事上一輪就做完了（`roi_from_mask` 的預設就是 8192）。
+   **一條講著已完成工作的 WARN，讀起來跟一個待辦一模一樣。** 改成比
+   `GDS_BOX_CAP = 8192`，並印出餘裕倍數；有一條測試核對那個常數跟卡片的預設值
+   是同一個，免得它們各走各的。
+2. **`pieces` vs `rectangles` 的意思現在寫在報告裡**，不留給讀報告的人自己推：
+   相等就說「every shape is already a plain rectangle」，不等就點名是哪幾層。
+3. **新增一條「改寫之後還分不分得開」。** 原本只檢查「layer 名需不需要改寫」
+   （真實資料三個都要），但真正會咬人的是**碰撞**：`17/D0` 與 `L17-D0` 都會變成
+   `L17_D0`，ADEPT 會把後面那個改成 `L17_D0_2`，於是畫面上出現一個誰也認不得的
+   名字。真實那一份 PASS。腳本裡的改寫規則是
+   `glas_export.region_name_for` 的複本（它要能在只有一個檔案的機器上跑），
+   所以另外有一條測試逐字比對兩份對同一批邊界名字的輸出。
+
+其他從報告讀到、不需要動程式的事實：`page` 欄位 399 顆全空（RSEM 沒有頁碼，
+ingest 本來就不讀它）、`nm_per_px` 全批都是 1、`id_source = klarf-defectid`、
+image_id 不補零且不需要 `_safe_name` 改寫、`fine_dx/dy` 在 ±200 nm 之內
+（那是 GLAS **已經套用**的位移，label PNG 是對位後產生的，ADEPT 不用管）。
+
+---
+
+## Phase 2：Golden Cell 改名回來 ＋ 兩段分類定調（2026-08-18，第十輪）
+
+### 那一輪結束時的位置（交接已由上面那一段接手）
 
 **還缺的那個數字沒有變**：真實 label 上每一層的 `pieces / rectangles`，
 量法 `python tools\check_glas_export.py <匯出資料夾> --samples 2`（要回公司才量得到）。

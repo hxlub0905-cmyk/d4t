@@ -55,9 +55,13 @@ Region-3（GDS mode）要吃 GLAS 匯出的 ``<id>_label.png`` + manifest。使�
 --------------------------
 把抽樣的那張 label 拆一次，印出每一層的 **pieces（連通元件）** 與
 **rectangles（精確矩形分解）**。那不是健康檢查，是 Region-3 的設計輸入：
-rectangles 是 ADEPT 真的要存幾個框（既有 Region 卡的 ``max_boxes`` 預設 64，
-在這條路上會安靜地砍掉大部分），pieces 是「一份」有幾個。兩者差很大時，
-意思是那一層正被後面畫的層切碎。
+rectangles 是 ADEPT 真的要存幾個框（比的是「GDS layers」卡自己的上限
+:data:`GDS_BOX_CAP`，不是 Profile／Template 那個給幾個重複用的 64），
+pieces 是「一份」有幾個。**兩者相等 = 每一塊形狀本來就是一個矩形**；
+差很大時，意思是那一層正被後面畫的層切碎，或者它本來就不是矩形。
+
+2026-08-18 對一份真實匯出（399 顆、3 層、1000x1000）實測：
+30/30、100/100、275/275 —— 三層都相等，最大 275 個矩形。
 """
 from __future__ import annotations
 
@@ -109,6 +113,11 @@ SAFE_KEYS = frozenset((
 ))
 
 
+#: 「GDS layers」卡（`adept/core/steps/roi_from_mask.py`）``max_boxes`` 的預設。
+#: 這支比的是**這一個**，不是 Profile／Template 的 64 —— 見 `check_label_images`。
+GDS_BOX_CAP = 8192
+
+
 # --------------------------------------------------------------------------- #
 # GLAS 的檔名轉換 —— 這一段必須跟 GLAS 一字不差
 # --------------------------------------------------------------------------- #
@@ -121,6 +130,27 @@ def safe_name(s: str) -> str:
     """
     out = "".join(ch if (ch.isalnum() or ch in "-_.") else "_" for ch in str(s))
     return out or "image"
+
+
+def region_name(layer: str) -> str:
+    """``adept/core/ingest/glas_export.py::region_name_for`` 的複本（不含去重）。
+
+    抄的理由跟 :func:`safe_name` 一樣：這支要在只有這一個檔案的機器上跑得動。
+    **兩份不准漂** —— `tests/test_check_glas_export.py` 有一條逐字比對兩邊對同
+    一批名字的輸出。
+
+    這裡不做去重（`_2` 那一段）：這支要回答的是「**會不會撞名**」，而去重正是
+    把撞名藏起來的那一步。
+    """
+    out = "".join(ch if (ch.isalnum() and ord(ch) < 128) or ch == "_" else "_"
+                  for ch in str(layer)).strip("_")
+    while "__" in out:
+        out = out.replace("__", "_")
+    if not out:
+        out = "layer"
+    if out[0].isdigit():
+        out = "L" + out
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -621,6 +651,20 @@ def read_manifest(export_dir: str, rep: Report, m: Masker) -> Dict[str, object]:
                   "rejects (letters, digits and underscore only) — ADEPT will "
                   "have to rewrite them, so they must be rewritten the SAME way "
                   "every time" % len(bad))
+        # 改寫之後**還是要互相分得開**。這一條是上一條的另一半，而它是實際
+        # 會咬人的那一半：撞名的時候 ADEPT 會自動補 `_2`，於是畫面上出現一個
+        # 誰也認不得的 `X_2`，而使用者不知道那是哪一層。
+        rewritten = [region_name(str(e.get("layer", ""))) for e in label_map]
+        dupes = sorted({n for n in rewritten if rewritten.count(n) > 1})
+        rep.check("PASS" if not dupes else "WARN",
+                  "layer names stay distinct after that rewrite",
+                  "" if not dupes else
+                  "%d layer name(s) collapse onto the same ADEPT region name "
+                  "(%d layers → %d distinct names). ADEPT will suffix the "
+                  "later ones (_2, _3…), so one of your layers shows up under "
+                  "a name nobody recognises — rename those regions on the "
+                  "“GDS layers” card." % (len(dupes), len(rewritten),
+                                          len(set(rewritten))))
     return {"rows": rows, "columns": cols, "label_map": label_map}
 
 
@@ -828,16 +872,29 @@ def check_label_images(export_dir: str, man: Dict[str, object], images_dir:
             blobs, rects = shapes_of[i]
             worst = max(worst, rects)
             rep.say("    %-6d %-10d %-10d" % (i, blobs, rects))
-        rep.check("PASS" if worst <= 64 else "WARN",
-                  "a layer fits under the Region cards' default box cap (64)",
-                  "" if worst <= 64 else
-                  "the biggest layer is %d rectangles. ADEPT stores a named "
-                  "region as a list of rectangles, and the existing Region "
-                  "cards cap that at 64 — a default meant for a handful of "
-                  "repeats. Here it would silently drop almost everything, so "
-                  "roi_from_mask needs its own much larger cap. Note pieces vs "
-                  "rectangles above: where they differ, the layer is being cut "
-                  "up by whichever layer is painted after it." % worst)
+        # **量的是「這條路真的會套用的那個上限」**，不是別張卡的。
+        # 第一版拿 64（Profile / Template 的預設）來比，於是 2026-08-18 對真實
+        # 匯出跑出來是一條 WARN 加一句「roi_from_mask 需要自己的上限」——
+        # 而那件事當時已經做完了（`roi_from_mask` 的預設就是 8192）。
+        # 一條講著已完成工作的 WARN，讀起來跟一個待辦一模一樣。
+        rep.check("PASS" if worst <= GDS_BOX_CAP else "WARN",
+                  "the biggest layer fits under the GDS layers card's box cap",
+                  ("biggest layer %d rectangles, cap %d (%.0fx headroom)"
+                   % (worst, GDS_BOX_CAP, GDS_BOX_CAP / max(worst, 1)))
+                  if worst <= GDS_BOX_CAP else
+                  "the biggest layer is %d rectangles and the cap is %d — the "
+                  "boxes furthest from the middle get dropped. Raise “At most "
+                  "this many boxes” on the “GDS layers” card, or raise "
+                  "“Ignore pieces smaller than”." % (worst, GDS_BOX_CAP))
+        # pieces vs rectangles 的**意思**要寫出來，不要留給讀報告的人自己推。
+        cut = [i for i in sorted(shapes_of) if shapes_of[i][1] > shapes_of[i][0]]
+        rep.say("    → %s" % (
+            "every shape is already a plain rectangle (pieces == rectangles), "
+            "so nothing here is being cut up by a later layer"
+            if not cut else
+            "layer(s) %s have more rectangles than pieces — those are being "
+            "cut up by whichever layer is painted after them, or are simply "
+            "not rectangular" % ", ".join(str(i) for i in cut)))
     if unreadable:
         rep.check("WARN", "the sampled label PNGs could all be decoded",
                   "; ".join(sorted(set(unreadable))))

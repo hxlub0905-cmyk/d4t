@@ -407,7 +407,7 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
                 node_id=nid, step_key=node.step, ok=False, ms=ms,
                 error=str(e), features_added={},
                 images_after=sorted(ctx.images)))
-            return ctx, f"[{nid}] {e}"
+            return ctx, _prefixed(nid, e)
 
         ms = (time.perf_counter() - t0) * 1000.0
         added = {
@@ -841,3 +841,17 @@ def result_to_json_dict(r: DefectResult) -> Dict[str, Any]:
             for t in r.traces
         ],
     }
+
+
+def _prefixed(nid: str, e: Exception) -> str:
+    """``[節點 id] 訊息`` —— 但**同一個名字不印兩次**。
+
+    節點 id 與 step key 是兩回事（畫布上可以有三張 Denoise），所以錯誤訊息兩個
+    都要有：`StepError` 帶 step key，這裡補節點 id。但一張卡剛加進來時節點 id
+    **就是** step key，於是使用者看到的是
+    ``[load_sidecar] [load_sidecar] defect 3 has no layout label…`` ——
+    重複的那半個字讀起來像程式壞了，而它出現在使用者最需要看懂訊息的時候。
+    """
+    text = str(e)
+    head = "[%s] " % nid
+    return text if text.startswith(head) else head + text
