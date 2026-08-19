@@ -569,6 +569,8 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
         # 比較卡吃的是**區域**，所以上游要有一張出得了區域的 Region 卡。
         # `roi_cross` 是三張裡唯一不需要外部資料的（純規則）。
         "roi_compare": ["roi_cross"],
+        # 配對卡吐的那條流（配到的那顆的圖）—— 上游一樣是**另一張 Input 卡**。
+        "align_to": ["pair_source"],
     }
     keys = [d["key"] for d in visible_steps([s.describe() for s in list_steps()])]
     dead_ends = {}
@@ -584,8 +586,15 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
         # 所以這裡不算死路，但**訊息必須指得出路在哪**，否則它就真的是死路了。
         needs = [i for i in errs if i.code == "not-configured"]
         rest = [i for i in errs if i.code != "not-configured"]
-        if needs:
-            needs_setup[key] = [i.detail for i in needs]
+        # 「還沒設定完」歸給**發出它的那張卡**，不是這一輪的主角 —— 前置鏈裡的
+        # 卡也會講這句話（`align_to` 的上游 `pair_source` 就是），而下面要拿
+        # 「引號裡的字是不是這張卡的欄位」去驗它。歸錯卡等於拿 A 的欄位表去驗
+        # B 的訊息。
+        for i in needs:
+            nid = str(i.node_id or "")
+            owner = seq[int(nid[1:])] if nid[1:].isdigit() else key
+            if i.detail not in needs_setup.setdefault(owner, []):
+                needs_setup[owner].append(i.detail)
         if rest:
             dead_ends[key] = [(i.code, i.detail) for i in rest]
     assert not dead_ends, "這些卡片沒有可行的組合：%s" % sorted(dead_ends)

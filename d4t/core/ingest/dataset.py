@@ -113,6 +113,19 @@ class DefectItem:
     #: RSEM defect 都會突然變成「兩張」而載不進來，而錯誤訊息會說謊
     #: （「這顆有 2 張影像」——不，它有 1 張影像跟 1 個附加檔）。
     sidecars: Dict[str, ImageRef] = field(default_factory=dict)
+    #: 這一顆在 ``Dataset.items`` 裡的位置（由 :class:`Dataset` 自己編號）。
+    #:
+    #: F15：`pair_source` 的 ``match="order"`` 要它 —— 「第 n 顆對第 n 顆」在
+    #: 卡片裡問不出來，因為卡片手上只有 ``DefectItem``。用 ``klarf_row`` 代替
+    #: 不行：folder / stack 模式沒有 KLARF，那個欄位是 −1。
+    index: int = -1
+    #: 這一顆的 KLARF 欄位（``{欄名大寫: 字串值}``）。**預設是空的**。
+    #:
+    #: 只有被當成**第二個 source** 掛上來的那一份會填（`ingest/pair_source.py`）
+    #: —— 它是 characterization 的關鍵：把配到那一顆的分數欄帶成 feature，
+    #: 「配到但分數低、藏在 raw data 內」才答得出來。main 那一份不填，
+    #: 因為每一顆多帶 24 個字串對誰都沒有好處。
+    fields: Dict[str, str] = field(default_factory=dict)
 
     def load(self, channel: str) -> np.ndarray:
         """讀出該 channel 的像素：TIFF 頁走 tiff_index.read_page，
@@ -164,6 +177,28 @@ class Dataset:
     klarf: Optional[KlarfDoc]
     items: List[DefectItem] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    #: **掛在這一份上的第二（第三…）份資料**（F15），``{代號: Dataset}``。
+    #:
+    #: 這一份是 main：批次的迴圈跑它、route 由它的 ``kind`` 決定、KLARF 寫回
+    #: 它。掛上來的那幾份只提供「另一張圖與它的座標」，不寫回、不進導覽。
+    #:
+    #: 為什麼掛在 Dataset 上而不是讓卡片自己讀檔：影像段快取的簽章是照
+    #: 「這份資料是什麼」算的（`batch._dataset_token_for`）。卡片偷偷讀檔的話，
+    #: 換一份第二 source 而簽章看不見 → 回舊影像（鐵則 9，F9 踩過兩次）。
+    sources: Dict[str, "Dataset"] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.renumber()
+
+    def renumber(self) -> None:
+        """把 ``items`` 的位置寫回每一顆的 :attr:`DefectItem.index`。
+
+        在這裡做（而不是每一條 ingest 路徑各自編號）是因為 ``Dataset`` 有六個
+        建構點，而漏掉任何一個的症狀是「``match="order"`` 對到第 −1 顆」——
+        跑得完、有數字、而且是錯的。
+        """
+        for i, item in enumerate(self.items or []):
+            item.index = i
 
 
 def _to_float(v) -> Optional[float]:

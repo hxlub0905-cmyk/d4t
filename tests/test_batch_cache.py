@@ -148,6 +148,31 @@ def test_serial_parallel_and_m1_agree(ds):
     assert all(d["ok"] for d in serial)
 
 
+def test_the_serial_path_pins_cv2_the_same_way_the_pool_does(ds):
+    """「語意同平行路徑」少了最後一段（F15 發現）。
+
+    worker 一進去就 `pin_cv2_deterministic()`，循序那條以前不套 —— 於是 cv2 的
+    IPP 會依 buffer 對齊選不同的 SIMD 路徑，NCC 那種卡的分數在 `workers=1` 與
+    `workers=2` 差在 1e-7。鐵則 9 講的正是這件事，而 **Studio 的試跑走的就是
+    循序那條**（一顆 → n<=1），所以那個差還會變成「畫面上的數字」與「批次的
+    數字」不一樣。
+    """
+    cv2 = pytest.importorskip("cv2")
+    cv2.setNumThreads(4)
+    try:
+        cv2.ipp.setUseIPP(True)
+    except Exception:                       # pragma: no cover — 沒編 IPP 的 build
+        pass
+
+    run_batch(make_recipe(), ds, workers=1, limit=1)
+
+    assert cv2.getNumThreads() == 1
+    try:
+        assert cv2.ipp.useIPP() is False
+    except AttributeError:                  # pragma: no cover
+        pass
+
+
 def test_run_batch_limit_and_progress(ds):
     rec = make_recipe()
     calls = []

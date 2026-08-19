@@ -22,6 +22,7 @@ import threading
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional
 
+from ..ingest import pair_source
 from .cache import StageCache, dataset_token
 from .engine import result_to_json_dict, run_defect, run_defect_cached
 from .recipe import Recipe
@@ -63,8 +64,14 @@ def pin_cv2_deterministic() -> None:
 
 def _init_worker(recipe_json: Dict[str, Any], kind: str,
                  cache_dir: Optional[str], token: str,
-                 repo_root: Optional[str] = None) -> None:
-    """ProcessPool worker 初始化（TOP-LEVEL：spawn/fork 皆可 pickle）。"""
+                 repo_root: Optional[str] = None,
+                 sources: Optional[Dict[str, Any]] = None) -> None:
+    """ProcessPool worker 初始化（TOP-LEVEL：spawn/fork 皆可 pickle）。
+
+    ``sources`` 是掛在 main 上的第二（第三…）份資料，``{代號: [DefectItem, …]}``
+    （F15）。**在 init 傳一次**，不是每顆都傳：它是一整批共用的東西，而
+    ``DefectItem`` 裝的是路徑不是像素，pickle 一次很便宜。
+    """
     if repo_root and repo_root not in sys.path:
         sys.path.insert(0, repo_root)  # spawn 模式下確保 d4t 找得到
     pin_cv2_deterministic()
@@ -73,6 +80,7 @@ def _init_worker(recipe_json: Dict[str, Any], kind: str,
     _WORKER["kind"] = str(kind)
     _WORKER["cache"] = StageCache(str(cache_dir)) if cache_dir else None
     _WORKER["token"] = str(token)
+    _WORKER["sources"] = dict(sources or {})
 
 
 def _run_one(item: Any) -> Dict[str, Any]:
@@ -80,10 +88,12 @@ def _run_one(item: Any) -> Dict[str, Any]:
     recipe: Recipe = _WORKER["recipe"]
     kind: str = _WORKER["kind"]
     cache: Optional[StageCache] = _WORKER["cache"]
+    sources = _WORKER.get("sources") or {}
     if cache is not None:
-        r = run_defect_cached(recipe, item, kind, cache, _WORKER["token"])
+        r = run_defect_cached(recipe, item, kind, cache, _WORKER["token"],
+                              sources=sources)
     else:
-        r = run_defect(recipe, item, kind)
+        r = run_defect(recipe, item, kind, sources=sources)
     return result_to_json_dict(r)
 
 
@@ -130,6 +140,45 @@ def _sidecar_token(dataset: Any) -> str:
     return "|sidecars:" + h.hexdigest() if seen else ""
 
 
+def _sources_token(dataset: Any) -> str:
+    """掛在 main 上的**第二份資料**也要進 token（F15）。
+
+    理由跟 :func:`_sidecar_token` 逐字相同：有 KLARF 的時候上面那條路只看
+    **main 的 KLARF stat**，而換一份第二 source 完全不會動到它。於是
+    「同一個 lot、換一份 RSEM」的 token 一模一樣，影像段快取會把上一份配到的
+    那張圖餵回來 —— 跑得完、有數字、而且是錯的（鐵則 9）。
+
+    **代號也要進去**：同一份資料換一個代號，`pair_source` 卡指的就是另一個東西。
+
+    一份都沒掛時回空字串，**token 因此逐字元不變** —— 既有的快取目錄與黃金值
+    不受影響。
+    """
+    srcs = getattr(dataset, "sources", None) or {}
+    if not srcs:
+        return ""
+    h = hashlib.sha1()
+    for sid in sorted(srcs):
+        h.update(("|src|%s|" % sid).encode("utf-8"))
+        sub = srcs[sid]
+        doc = getattr(sub, "klarf", None)
+        path = getattr(doc, "source_path", None) if doc is not None else None
+        if path and os.path.exists(str(path)):
+            h.update(dataset_token(str(path)).encode("utf-8"))
+            continue
+        for item in getattr(sub, "items", []) or []:
+            images = getattr(item, "images", {}) or {}
+            for ch in sorted(images):
+                ref = images[ch]
+                h.update(f"|{getattr(item, 'defect_id', '')}|{ch}"
+                         f"|{ref.path}|{ref.page}".encode("utf-8"))
+                try:
+                    st = os.stat(ref.path)
+                    h.update(f"|{st.st_mtime_ns}|{st.st_size}".encode("utf-8"))
+                except OSError:
+                    pass
+    return "+src:" + h.hexdigest()
+
+
 def _dataset_token_for(dataset: Any) -> str:
     """由 Dataset 推 lot token：有 KLARF 就用檔案 stat（重產 lot 自動失效）；
     folder / 無 KLARF 模式退化為各 item 影像來源（路徑+mtime+size）的 sha1。
@@ -139,7 +188,8 @@ def _dataset_token_for(dataset: Any) -> str:
     doc = getattr(dataset, "klarf", None)
     src = getattr(doc, "source_path", None) if doc is not None else None
     if src and os.path.exists(str(src)):
-        return dataset_token(src) + _sidecar_token(dataset)
+        return (dataset_token(src) + _sidecar_token(dataset)
+                + _sources_token(dataset))
     h = hashlib.sha1()
     h.update(str(getattr(dataset, "kind", "")).encode("utf-8"))
     for item in getattr(dataset, "items", []) or []:
@@ -153,7 +203,8 @@ def _dataset_token_for(dataset: Any) -> str:
                 h.update(f"|{st.st_mtime_ns}|{st.st_size}".encode("utf-8"))
             except OSError:
                 pass
-    return "items:" + h.hexdigest() + _sidecar_token(dataset)
+    return ("items:" + h.hexdigest() + _sidecar_token(dataset)
+            + _sources_token(dataset))
 
 
 def _pool_context():
@@ -196,6 +247,9 @@ def run_batch(recipe: Recipe, dataset: Any, *,
     n = len(items)
     kind = str(getattr(dataset, "kind", ""))
     token = _dataset_token_for(dataset) if cache_dir else ""
+    # 掛在 main 上的第二份資料（F15）。只送 items —— `Dataset` 掛著 `KlarfDoc`，
+    # 而那個東西刻意不進 worker（見模組說明）。
+    sources = pair_source.sources_for_run(dataset)
 
     if workers is None:
         workers = os.cpu_count() or 1
@@ -203,6 +257,12 @@ def run_batch(recipe: Recipe, dataset: Any, *,
 
     # ---- 循序路徑（無 pool；語意同平行路徑）----
     if workers <= 1 or n <= 1:
+        # **這裡也要 pin**（F15）。以前只有 worker 套，於是「語意相同」少了最後
+        # 一段：cv2 的 IPP 路徑會依 buffer 對齊選不同 SIMD，NCC 那種卡的分數在
+        # `workers=1` 與 `workers=2` 差在 1e-7 —— 鐵則 9 講的正是這件事。而
+        # Studio 的試跑走的就是這條路（一顆 → n<=1），所以那個差還會變成
+        # 「畫面上的數字」與「批次的數字」不一樣。
+        pin_cv2_deterministic()
         cache = StageCache(str(cache_dir)) if cache_dir else None
         out: List[Dict[str, Any]] = []
         done = 0
@@ -211,9 +271,10 @@ def run_batch(recipe: Recipe, dataset: Any, *,
                 break
             try:
                 if cache is not None:
-                    r = run_defect_cached(recipe, item, kind, cache, token)
+                    r = run_defect_cached(recipe, item, kind, cache, token,
+                                          sources=sources)
                 else:
-                    r = run_defect(recipe, item, kind)
+                    r = run_defect(recipe, item, kind, sources=sources)
                 d = result_to_json_dict(r)
             except Exception as e:  # pragma: no cover — run_defect 永不 raise 的保險
                 d = _fail_dict(item, e)
@@ -230,7 +291,8 @@ def run_batch(recipe: Recipe, dataset: Any, *,
             max_workers=workers,
             mp_context=_pool_context(),
             initializer=_init_worker,
-            initargs=(recipe_json, kind, cache_dir, token, _REPO_ROOT)) as ex:
+            initargs=(recipe_json, kind, cache_dir, token, _REPO_ROOT,
+                      sources)) as ex:
         fut_to_idx = {ex.submit(_run_one, item): i
                       for i, item in enumerate(items)}
         done = 0

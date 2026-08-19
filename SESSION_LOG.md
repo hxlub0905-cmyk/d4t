@@ -15,6 +15,66 @@
 
 ---
 
+## 配對分析：兩筆資料逐顆對起來（F15，2026-08-19，第二十輪）
+
+使用者要的場景是 **EBI to API Characterization**：RSEM 的 API 空拍（拍滿、直接
+對影像抓 defect）是 ground truth，拿它回疊 EBI 掃過的位置，答的是三個問題不是
+兩個 —— 抓到了 / **偵測到但分數太低沒被 sample（藏在 raw data 內）** / 根本沒
+偵測到。中間那一列是整件事的重點。
+
+定調的那句話是：**「我只想把它做成一個小功能 card，這張 card 會 load 自己的
+source」** —— 主流程什麼 ROI／GLV／measure 都照舊，要做配對分析才放這張卡。
+
+計畫書：[`docs/plans/F15-pair-sources.md`](docs/plans/F15-pair-sources.md)。
+A／B／C 一次做完。
+
+### 兩張卡，不是一張
+
+* **`pair_source`（Input 段）** —— 「這一顆在另一份裡是哪一顆」，把它的圖帶進
+  來。配對用 wafer 座標（`position`，容差 `tol_nm`）／`id`／`order`；
+  `carry` 把配到那一顆的 KLARF 欄位帶成 feature（`pair_ROUGHBINNUMBER`）——
+  **少了它，「偵測到但分數太低」跟「根本沒偵測到」在資料上長得一模一樣**。
+* **`align_to`（Compare 段）** —— 圖對圖。EBI 的 patch 小、RSEM 的視野大，
+  所以是「小圖在大圖裡找位置」（NCC + 拋物線次像素），裁出來的那一塊給下游量。
+  **裁在整數格上不重採樣** —— 重採樣會動到灰階，而下游量的正是灰階。
+
+兩張分開是因為**它們分得開**：只要座標配對＋帶欄位（不比圖）就只放第一張；
+兩張圖本來就對齊（同機台重掃）就只放第二張。上一版草案的兩張卡永遠只能成對
+出現，那是同一張卡被切成兩半。
+
+### 卡片不自己 `open()`
+
+第二份是 Studio／CLI 載成 `Dataset` 掛在 `Dataset.sources[代號]` 上的
+（`core/ingest/pair_source.attach`），卡片只從掛好的那一份裡挑一顆，
+**路徑不進 recipe**（同一份 recipe 才跑得動下一批）。理由是快取簽章：卡片偷偷
+讀檔的話，換一份第二 source 而簽章看不見 → 回舊影像（鐵則 9，F9 踩過兩次）。
+`_dataset_token_for` 多了一段 `+src:`，而**沒掛的時候那一段逐字元不存在** ——
+既有的快取目錄與黃金值不受影響。
+
+* Studio：`Open data…` 就在那張卡上（沿用 F14-1），代號沒打就從檔名推一個。
+* CLI：`python -m d4t run … --source 代號=第二份.001`（可以重複）。
+
+### 三個「跑得完、有數字、而且是錯的」
+
+1. **`carry` 打錯欄位名安靜地沒事** → 少一欄的 CSV 跟成功的 CSV 一模一樣。
+   現在擋下來，訊息裡有打錯的那個、真的有的那幾個、要改哪一格。
+2. **循序路徑沒有 pin cv2**（鐵則 9 的洞，F15 讓它現形）→ NCC 的分數在
+   `workers=1` 與 `workers=2` 差 1e-7，而 **Studio 的試跑走的就是循序那條**，
+   所以「畫面上的數字」跟「批次的數字」不一樣。修法：循序路徑也 pin。
+3. **配對卡是 `is_source()`，畫布本來會在它身上印 main 的檔名** ——
+   它讀的不是那一份。現在印的是掛在它代號上的第二份。
+
+### 沒做的（明講）
+
+第二份不寫回 KLARF、不進 defect 導覽、不進 Export（它只是圖與座標）；
+一張卡一份（要第三份就再放一張卡）；route 仍由 main 的 `kind` 決定；
+兩份 KLARF 的座標系對齊先不做 —— 先讓 `match_dist_nm` 把它**量出來**。
+
+驗收：`tests/test_pair_source.py`（23 條，含 `workers=1` 對 `workers=2` 與
+「跟 KLIP 的那一支不准漂」）、`tests/test_ui_f15_pair_source.py`（11 條）。
+
+---
+
 ## Input 的入口搬進卡片（F14-1，2026-08-19，第十九輪）
 
 使用者：「關於 Input 我想改成統一從卡片內 Input⋯⋯如果按照目前從 UI 上方，

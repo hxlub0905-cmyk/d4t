@@ -1433,6 +1433,57 @@ class GdsInspector(Inspector):
         p.end()
 
 
+class PairInspector(MeasureInspector):
+    """`pair_source`：**這一顆對到了第二份裡的哪一顆**，以及整批配得怎麼樣。
+
+    為什麼不是只有分布
+    ------------------
+    分布（`paired` / `match_dist_nm` 整批長什麼樣）是 `MeasureInspector` 已經在
+    畫的東西，而它正是調容差要看的圖 —— 距離擠在左邊一坨 = 容差可以收；拖出一
+    條長尾 = 那條尾巴配到的是鄰居。
+
+    但有兩件事分布答不出來，而它們正是這張卡存在的理由：
+
+    * **對到的是哪一顆**（第二份裡的 DEFECTID）—— 使用者要拿它回去翻原始資料；
+    * **帶過來的字串欄位**（`meta["pair_fields"]`）—— 那些欄位**不在特徵表裡**
+      （feature 是數字的地盤），沒有這裡的話它們哪裡都看不到。
+    """
+
+    title = "Match"
+
+    def match(self) -> Dict[str, Any]:
+        return dict(self.meta.get("pair_match") or {})
+
+    def empty_reason(self) -> str:
+        return ("Run a trial to see which defect this one pairs with. No "
+                "second lot yet? Use “Open data…” on this card.")
+
+    def summary(self) -> str:
+        rec = self.match()
+        bits: List[str] = []
+        if rec:
+            if int(rec.get("index", -1)) >= 0:
+                bits.append("paired with %s in '%s'"
+                            % (rec.get("defect_id") or "?", rec.get("source")))
+                dist = rec.get("dist_nm")
+                if dist is not None and not math.isnan(float(dist)):
+                    bits.append("%.0f nm away" % float(dist))
+            else:
+                bits.append("no match in '%s' — recorded as paired = 0"
+                            % rec.get("source"))
+        carried = dict(self.meta.get("pair_fields") or {})
+        if carried:
+            bits.append(", ".join("%s=%s" % (k, carried[k])
+                                  for k in sorted(carried)))
+        spread = super().summary()
+        if spread:
+            bits.append(spread)
+        return "  ·  ".join(bits)
+
+    def has_data(self) -> bool:
+        return bool(self.match()) or super().has_data()
+
+
 INSPECTORS: Dict[str, type] = {
     "load_patch": InputInspector,
     # 同一個面板：它讀的是 meta["input"]，兩張 Input 卡都會寫（F11 Input-4）。
@@ -1449,6 +1500,9 @@ INSPECTORS: Dict[str, type] = {
     "focus_quality": MeasureInspector,
     "roi_snr": MeasureInspector,
     "roi_from_mask": GdsInspector,
+    "pair_source": PairInspector,
+    # 對圖的分數只有**跟整批比**才讀得懂：0.62 是高是低要看其他顆長什麼樣。
+    "align_to": MeasureInspector,
 }
 
 

@@ -234,6 +234,14 @@ git add -A && python tools/release.py && git add -A
 後兩種沒有 KLARF → 沒有座標、**寫不回 KLARF**，而那句話**常駐在資料集標籤上**
 （`tiff_stack · defect 1 / 3 · no KLARF`）—— 不是等使用者按了 Export 才發現。
 
+**第二份 lot 走另一條路**（F15，2026-08-19）：`pair_source` 這張卡上的
+`Open data…` 掛的是「拿來對照的那一份」（EBI ↔ RSEM(API) characterization），
+它掛在 `Dataset.sources[代號]` 上，**不取代目前的資料集** —— main 決定批次跑幾
+顆、走哪一條 route、KLARF 寫回誰。CLI 是 `--source 代號=路徑`（可以重複）。
+**卡片不自己 `open()`**：讀檔在 ingest 層（`core/ingest/pair_source.attach`），
+路徑不進 recipe，而第二份的身分要進快取簽章 —— 否則換一份而簽章看不見就回舊
+影像（鐵則 9）。
+
 `d4t/ui/scope.py` 仍然是這類「暫時不給看」的**唯一**去處，
 **而「入口長什麼樣」也住在同一份**（F11 Input-5）：
 

@@ -55,13 +55,18 @@ class DefectResult:
 # ---------------------------------------------------------------------------
 # 可重用片段（M2 重構；run_defect 的行為與 M1 完全相同）
 # ---------------------------------------------------------------------------
-def _seed_context(item: Any, kind: str, defect_id: str) -> Context:
+def _seed_context(item: Any, kind: str, defect_id: str,
+                  sources: Optional[Dict[str, Any]] = None) -> Context:
     """建立新 Context 並種入引擎慣例的 meta key（Load 卡讀這些）。"""
     ctx = Context()
     ctx.meta["_defect_item"] = item
     ctx.meta["_dataset_kind"] = kind
     ctx.meta["_defect_id"] = defect_id
     ctx.meta["nm_per_px"] = getattr(item, "nm_per_px", None)
+    # F15：掛在 main 上的第二（第三…）份資料，``{代號: [DefectItem, …]}``。
+    # `pair_source` 卡讀它 —— **卡片不自己讀檔**，理由見
+    # `ingest/pair_source.py` 的模組說明（鐵則 9）。
+    ctx.meta["_sources"] = dict(sources or {})
     return ctx
 
 
@@ -445,6 +450,7 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
                keep_context: bool = False,
                upto_node: Optional[str] = None,
                track_changes: bool = False,
+               sources: Optional[Dict[str, Any]] = None,
                registry: Optional[Dict[str, Type[Step]]] = None) -> DefectResult:
     """對單顆 defect 執行 ``kind`` 這條 route；**永不 raise**。
 
@@ -466,7 +472,7 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
         keep_context = True  # 中間輸出就是要看 context
 
     defect_id = str(getattr(item, "defect_id", ""))
-    ctx = _seed_context(item, kind, defect_id)
+    ctx = _seed_context(item, kind, defect_id, sources)
     ctx.track_changes = bool(track_changes)
     traces: List[StepTrace] = []
 
@@ -651,7 +657,8 @@ def _streams_needed_across_checkpoint(
 
 
 def _restore_context(item: Any, kind: str, defect_id: str,
-                     snap: Dict[str, Any]) -> Context:
+                     snap: Dict[str, Any],
+                     sources: Optional[Dict[str, Any]] = None) -> Context:
     """由快取快照重建 Context。
 
     **Context 的每一個欄位都要回來**，不只 images/features/meta。checkpoint 是
@@ -659,7 +666,7 @@ def _restore_context(item: Any, kind: str, defect_id: str,
     （algo）會落在快取段裡 —— 漏掉 ``rois`` 的話會變成「第一次跑對、第二次跑
     錯」。見 :mod:`.cache` 的模組說明。
     """
-    ctx = _seed_context(item, kind, defect_id)
+    ctx = _seed_context(item, kind, defect_id, sources)
     for name, arr in dict(snap.get("images") or {}).items():
         ctx.images[str(name)] = arr
     for name, val in dict(snap.get("features") or {}).items():
@@ -690,6 +697,7 @@ def _restore_context(item: Any, kind: str, defect_id: str,
 def run_defect_cached(recipe: Recipe, item: Any, kind: str,
                       cache: Any, dataset_token: str, *,
                       keep_context: bool = False,
+                      sources: Optional[Dict[str, Any]] = None,
                       registry: Optional[Dict[str, Type[Step]]] = None
                       ) -> DefectResult:
     """帶影像段快取的單顆執行；**永不 raise**，結果與 :func:`run_defect`
@@ -707,11 +715,11 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
     try:
         sig, ckpt = image_segment_signature(recipe, kind, registry=registry)
     except Exception:
-        return run_defect(recipe, item, kind,
-                          keep_context=keep_context, registry=registry)
+        return run_defect(recipe, item, kind, keep_context=keep_context,
+                          sources=sources, registry=registry)
     if cache is None or ckpt <= 0:
-        return run_defect(recipe, item, kind,
-                          keep_context=keep_context, registry=registry)
+        return run_defect(recipe, item, kind, keep_context=keep_context,
+                          sources=sources, registry=registry)
 
     defect_id = str(getattr(item, "defect_id", ""))
     key: Optional[str] = None
@@ -744,13 +752,13 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
 
     if snap is not None:
         try:
-            ctx = _restore_context(item, kind, defect_id, snap)
+            ctx = _restore_context(item, kind, defect_id, snap, sources)
         except Exception:
             ctx = None  # 快照壞掉 → 退回重算影像段
 
     if ctx is None:
         # miss：跑影像段（order[:ckpt]），成功才寫快取
-        ctx = _seed_context(item, kind, defect_id)
+        ctx = _seed_context(item, kind, defect_id, sources)
         ctx, err = _run_nodes(recipe, order, 0, ckpt, ctx, traces,
                               registry, None, kind)
         if err is not None:

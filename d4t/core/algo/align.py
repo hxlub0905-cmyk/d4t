@@ -684,3 +684,40 @@ def template_align_nm(sem_img: np.ndarray, template_full: np.ndarray,
     # right, GDS x is right (so anchor.x decreases to shift right); image y is
     # down, GDS y is up (so anchor.y increases to shift down).
     return (-ex * nm_per_px, ey * nm_per_px, float(maxv), r)
+
+
+def locate_template(search: np.ndarray, template: np.ndarray) -> Tuple[float, float, float]:
+    """在 ``search`` 裡找 ``template`` 落在哪 —— 回 ``(x, y, score)``（次像素）。
+
+    F15-C：EBI patch（小）在 RSEM 影像（大）裡的位置。跟
+    :func:`_calculate_alignment_template` 的差別只有一個，但那一個很重要：
+    **模板比搜尋圖小很多**（128² 對 1000²），所以模板不是「中央裁一塊」，
+    整張都是模板，而峰值的位置就是答案本身，不是位移量。
+
+    ``(x, y)`` 是模板**左上角**在 ``search`` 裡的座標。``score`` 是
+    ``TM_CCOEFF_NORMED`` 的峰值（−1…1）：它對線性的亮度／對比變化免疫，
+    而那正是兩台不同機台拍同一顆時會差的東西。
+
+    模板放不進搜尋圖、或任一邊是平的（沒有訊號）→ ``(0, 0, 0.0)``。
+    平的那個判斷不可以省：常數影像的 NCC 是 0/0，OpenCV 回的是垃圾而不是錯誤。
+    """
+    if search is None or template is None:
+        return 0.0, 0.0, 0.0
+    s = np.ascontiguousarray(np.asarray(search))
+    t = np.ascontiguousarray(np.asarray(template))
+    if s.ndim != 2 or t.ndim != 2:
+        s, t = _preprocess_for_align(s), _preprocess_for_align(t)
+    sh, sw = s.shape[:2]
+    th, tw = t.shape[:2]
+    if th > sh or tw > sw or th < 2 or tw < 2:
+        return 0.0, 0.0, 0.0
+    if float(s.std()) < 1e-6 or float(t.std()) < 1e-6:
+        return 0.0, 0.0, 0.0
+    res = cv2.matchTemplate(s.astype(np.float32), t.astype(np.float32),
+                            cv2.TM_CCOEFF_NORMED)
+    _, maxv, _, maxloc = cv2.minMaxLoc(res)
+    bx, by = int(maxloc[0]), int(maxloc[1])
+    # 次像素：跟這個模組其他對位法走同一支拋物線（結果才比得起來）
+    sx = parabola_subpx(res, bx, by, 0) if 0 < bx < res.shape[1] - 1 else 0.0
+    sy = parabola_subpx(res, bx, by, 1) if 0 < by < res.shape[0] - 1 else 0.0
+    return float(bx + sx), float(by + sy), float(maxv)

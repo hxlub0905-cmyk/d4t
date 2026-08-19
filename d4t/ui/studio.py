@@ -274,6 +274,22 @@ def load_thumb(item: Any, size: int) -> Optional[Any]:
     return make_thumb(arr, int(size))
 
 
+def _source_id_from(path: Any) -> str:
+    """檔名 → 一個能當變數名的代號（F15）。
+
+    規則刻意很笨，因為它要**每次都一樣**：非變數字元換成 `_`、頭尾的 `_` 去掉、
+    開頭是數字就補一個 `s`、空的就叫 `src`。（跟 `glas_export.region_name_for`
+    同一條路 —— 那裡也是「一個給人取的名字必須先能當變數名」。）
+    """
+    import re as _re
+
+    stem = os.path.splitext(os.path.basename(str(path)))[0]
+    name = _re.sub(r"[^A-Za-z0-9_]", "_", stem).strip("_")
+    if not name:
+        return "src"
+    return name if name[0].isalpha() or name[0] == "_" else "s" + name
+
+
 def _running_under_pytest() -> bool:
     """現在是不是在跑測試（測試裡建 ``StudioWindow()`` 不准彈導覽）。"""
     return bool(os.environ.get("PYTEST_CURRENT_TEST")) or "pytest" in sys.modules
@@ -1518,11 +1534,25 @@ class StudioWindow(QMainWindow):
             is_source = get_step(node.step).is_source()
         except KeyError:                       # pragma: no cover
             is_source = False
+        # 配對卡也是 `is_source`，但它讀的**不是**目前這份 lot —— 印 main 的
+        # 檔名在它上面就是畫布說謊（F15）。它要印的是掛在它那個代號上的第二份。
+        if node.step in self._PAIR_CARDS:
+            name = self._pair_source_name(node)
+            if name:
+                parts.insert(0, name)
+            return parts
         if is_source and node.step not in self._ATTACHMENT_CARDS:
             name = str(getattr(self, "dataset_name", "") or "")
             if name:
                 parts.insert(0, name)
         return parts
+
+    def _pair_source_name(self, node: Any) -> str:
+        """配對卡掛的那第二份 lot 的檔名（還沒掛就回空字串）。"""
+        sid = str(node.params.get("source", "") or "").strip()
+        src = (getattr(self.dataset, "sources", None) or {}).get(sid) \
+            if self.dataset is not None else None
+        return str(getattr(src, "_d4t_name", "") or "") if src is not None else ""
 
     def _node_summary_parts(self, node: Any,
                             shown: Optional[Sequence[str]] = None) -> List[str]:
@@ -2492,6 +2522,11 @@ class StudioWindow(QMainWindow):
     #: 附加檔那張卡（`load_sidecar`）→ 它要開哪一個 `scope.ATTACHMENTS`。
     _ATTACHMENT_CARDS = {"load_sidecar": "gds"}
 
+    #: **自己帶一份 lot 的卡**（F15）。它跟 main 那幾張入口卡走同一顆
+    #: `Open data…`，但載進來的東西掛在 `Dataset.sources[代號]` 上，
+    #: 不取代目前的資料集。
+    _PAIR_CARDS = ("pair_source",)
+
     #: 資料那幾張卡（`load_patch` / `load_single`）的鈕上寫什麼。
     #: **它不是某一種 source 的名字** —— 一份 KLARF 是 patch 還是一顆一張由檔案
     #: 決定，所以這顆鈕開的是一張選單（`scope.INPUT_SOURCES` 那三條路）。
@@ -2522,10 +2557,26 @@ class StudioWindow(QMainWindow):
                         % (n, len(self.dataset.items)) if n
                         else "No export attached to this lot yet")
             return att.title, note, "%s  %s" % (att.what, att.needs)
+        if node.step in self._PAIR_CARDS:
+            sid = str(node.params.get("source", "") or "").strip()
+            return (self.DATA_SOURCE_LABEL, self._pair_note(sid),
+                    "Choose the second lot to pair every defect with")
         if not step_cls.is_source():
             return "", "", ""
         return (self.DATA_SOURCE_LABEL, self._dataset_note(),
                 "Choose the images this pipeline runs on")
+
+    def _pair_note(self, source_id: str) -> str:
+        """`pair_source` 那張卡旁邊那句話：**第二份**現在是什麼（F15）。"""
+        if self.dataset is None:
+            return "Load the main lot first"
+        src = (getattr(self.dataset, "sources", None) or {}).get(source_id)
+        if src is None:
+            return "No second lot yet" + (" for '%s'" % source_id if source_id else "")
+        name = str(getattr(src, "_d4t_name", "") or "")
+        return "%s%s · %s · %d defects" % (
+            (name + " · ") if name else "", source_id or "?",
+            getattr(src, "kind", "?"), len(getattr(src, "items", []) or []))
 
     def _dataset_note(self) -> str:
         """現在載的是哪一份（鈕只說得出「可以換一份」）。"""
@@ -2555,6 +2606,9 @@ class StudioWindow(QMainWindow):
         att_key = self._ATTACHMENT_CARDS.get(node.step)
         if att_key:
             getattr(self, "_on_open_%s" % att_key)()
+            return
+        if node.step in self._PAIR_CARDS:
+            self._on_open_pair_source(nid)
             return
         menu = QMenu(self)
         for src in scope.INPUT_SOURCES:
@@ -4512,6 +4566,58 @@ class StudioWindow(QMainWindow):
         if not path:
             return
         self.load_dataset_path(path)
+
+    # ---- 第二份 lot（F15）--------------------------------------------------
+    def _on_open_pair_source(self, node_id: str) -> None:
+        """`pair_source` 卡上的 `Open data…`：載一份**第二個** lot 掛上去。
+
+        **不取代目前的資料集**：main 決定批次跑幾顆、route 用哪一條、KLARF 寫回
+        誰。這一份只提供「另一張圖與它的座標」。
+        """
+        if self.dataset is None:
+            self._status("Load the main lot first — this card pairs every "
+                         "defect of the open lot with one from a second lot.")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open the second lot's KLARF", "",
+            "KLARF (*.001 *.klarf *.txt);;All files (*)")
+        if path:
+            self.attach_pair_source(node_id, path)
+
+    def attach_pair_source(self, node_id: str, klarf_path: str) -> str:
+        """載入第二份 lot 並掛到 main 上（回狀態列那句話）。
+
+        代號從卡片的 `source` 參數來；還沒取名就用檔名推一個 —— 使用者要打的字
+        程式已經知道了（同 F11 的「量到的 pitch 自動填回參數」）。
+        """
+        from d4t.core.ingest import pair_source as pair_ingest
+
+        node = self.model.nodes.get(str(node_id))
+        if node is None or self.dataset is None:
+            return ""
+        try:
+            ds = DatasetLoadWorker.run_sync(str(klarf_path), None)
+        except Exception as e:              # noqa: BLE001 — UI 邊界，一律回報
+            msg = "Could not load that lot: %s: %s" % (type(e).__name__, e)
+            self._status(msg, "error")
+            return msg
+
+        sid = str(node.params.get("source", "") or "").strip()
+        if not sid:
+            sid = _source_id_from(klarf_path)
+            self.model.set_param(str(node_id), "source", sid)
+        try:
+            rep = pair_ingest.attach(self.dataset, ds, sid)
+        except pair_ingest.PairSourceError as e:
+            self._status(str(e), "error")
+            return str(e)
+        # 卡片旁邊那句話要講得出檔名 —— 它是使用者認得的東西。
+        setattr(ds, "_d4t_name", os.path.basename(str(klarf_path)))
+        self._sync_source_action(node)
+        self._refresh_all()
+        msg = "Paired source · %s" % rep.summary()
+        self._status(msg)
+        return msg
 
     def _on_open_gds(self) -> None:
         path = QFileDialog.getExistingDirectory(

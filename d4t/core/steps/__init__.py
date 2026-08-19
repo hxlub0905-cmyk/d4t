@@ -39,6 +39,8 @@ from . import arith          # subtract / invert
 from . import snr_map        # snr_map
 from . import roi_compare    # 比較兩個區域（T/R 住在這張卡上）
 from . import roi_cross      # roi_cross
+from . import align_to       # 小圖在大圖裡的位置（F15-C）
+from . import pair_source    # 另一份資料的對應那一顆（F15）
 from . import roi_from_mask  # GDS label map -> 具名區域
 from . import roi_mask       # roi_mask（區域 → 0/255 mask 影像流，F8c）
 from . import roi_template   # roi_template
@@ -50,6 +52,6 @@ from . import pattern_ref    # pattern_ref（從重複 pattern 疊出 ref）
 
 __all__ = [
     "load", "load_sidecar", "normalize", "denoise", "tone", "flatten", "align", "arith",
-    "roi_compare", "roi_cross", "roi_from_mask", "roi_mask", "roi_template", "snr_map", "cd", "roi_snr",
+    "align_to", "pair_source", "roi_compare", "roi_cross", "roi_from_mask", "roi_mask", "roi_template", "snr_map", "cd", "roi_snr",
     "quality", "glv_stats", "pattern_ref",
 ]
