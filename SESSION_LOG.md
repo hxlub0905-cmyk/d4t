@@ -48,7 +48,7 @@
 那份 recipe 照跑、CLI 照跑、黃金值一個字不動，而
 `test_pattern_ref_is_hidden_but_still_runs` 逐項驗那四件事。
 
-要它回來：把 `adept/ui/scope.py` 的 `HIDDEN_STEPS` 裡那個字串拿掉。
+要它回來：把 `d4t/ui/scope.py` 的 `HIDDEN_STEPS` 裡那個字串拿掉。
 
 順手整理了 `CLAUDE.md` §5（那張「收起來／刪掉／改名」的表補上這一張走完五步的
 結局）、`docs/ROADMAP.md`（Region-4／Region-5 與收斂）、計畫書 §3.4 的現況表。
@@ -248,7 +248,7 @@ map 那條路的卡分得出來）。
    相等就說「every shape is already a plain rectangle」，不等就點名是哪幾層。
 3. **新增一條「改寫之後還分不分得開」。** 原本只檢查「layer 名需不需要改寫」
    （真實資料三個都要），但真正會咬人的是**碰撞**：`17/D0` 與 `L17-D0` 都會變成
-   `L17_D0`，ADEPT 會把後面那個改成 `L17_D0_2`，於是畫面上出現一個誰也認不得的
+   `L17_D0`，d4t 會把後面那個改成 `L17_D0_2`，於是畫面上出現一個誰也認不得的
    名字。真實那一份 PASS。腳本裡的改寫規則是
    `glas_export.region_name_for` 的複本（它要能在只有一個檔案的機器上跑），
    所以另外有一條測試逐字比對兩份對同一批邊界名字的輸出。
@@ -256,7 +256,7 @@ map 那條路的卡分得出來）。
 其他從報告讀到、不需要動程式的事實：`page` 欄位 399 顆全空（RSEM 沒有頁碼，
 ingest 本來就不讀它）、`nm_per_px` 全批都是 1、`id_source = klarf-defectid`、
 image_id 不補零且不需要 `_safe_name` 改寫、`fine_dx/dy` 在 ±200 nm 之內
-（那是 GLAS **已經套用**的位移，label PNG 是對位後產生的，ADEPT 不用管）。
+（那是 GLAS **已經套用**的位移，label PNG 是對位後產生的，d4t 不用管）。
 
 ---
 
@@ -346,7 +346,7 @@ Region-3（GDS）四步做完之後，使用者對著 Studio 的截圖提了四�
 漂了：工具列有三顆 Open，**空白狀態（畫面上最大的那一塊）只講 KLARF** ——
 帶著一個資料夾的圖片進來的人在那裡找不到自己那條路。
 
-`adept/ui/scope.py` 多一張 `INPUT_SOURCES` / `ATTACHMENTS`，工具列與空白狀態都從它
+`d4t/ui/scope.py` 多一張 `INPUT_SOURCES` / `ATTACHMENTS`，工具列與空白狀態都從它
 長出來。空白狀態變成**一種 source 一列**（鈕 + 一句「這條路吃什麼樣的檔案」），
 底下一行講附加檔要等 lot 載進來 —— 那正是第 1 點「要怎麼 load」的答案。
 `load_sidecar` 的 help 與它擋下來的那句話也都點名 `Open GDS export…`，而
@@ -361,7 +361,7 @@ KLARF 那一條**刻意仍然服務 `ebi_patch` 與 `rsem` 兩種**：拆成兩�
 「Measure 中的 Cell period 幫我移除（不需要這功能），SNR map 幫我改名成 Z-map
 （不然兩個 SNR 會被人搞混）」。
 
-`adept/core/steps/golden.py` 整支刪掉。**這一次是刪不是 `HIDDEN_STEPS`** ——
+`d4t/core/steps/golden.py` 整支刪掉。**這一次是刪不是 `HIDDEN_STEPS`** ——
 `align` 那一輪使用者說的是「之後真需要我再回來」，這一輪說的是「完整移除」，
 而那兩句話對應兩種不同的處置（差別現在有一條測試在鎖）。
 `snr_map` 只換 `label`：`key`、影像流名、feature（`snr_max`）全都是 **recipe 的鍵**。
@@ -386,7 +386,7 @@ seed 11、24 顆）：
 
 **要回來的話**：`git revert` 那一個 commit 就整組回來（卡片、fixture、黃金值）。
 演算法從來沒被刪 —— `algo/golden.py` 還被 Template 卡用著，`algo/period.py`
-現在在 `adept/core` 裡**一個呼叫者都沒有**（那正是它最容易被順手清掉的時候，
+現在在 `d4t/core` 裡**一個呼叫者都沒有**（那正是它最容易被順手清掉的時候，
 所以 CLAUDE.md §5 的 ⚠ 改寫過，便利貼測試也還在）。
 
 ### 驗收
@@ -613,11 +613,11 @@ GLAS 讀到的不一樣**，而它們全都往好的方向：
 1. **廠內那份 GLAS 是 `mmh-gds-overlay-v4`，不是 v3。** `GLAS-INTERFACE.md` §4
    的「建議 3」**已經做完了** —— manifest 逐列帶 `id_source` / `width_px` /
    `height_px` / `nm_per_px`，連「必要 1」的 `page` 欄位都在（RSEM 這批是空的，
-   那是對的）。ADEPT 不必再猜 join key、也不必自己去比尺寸。
+   那是對的）。d4t 不必再猜 join key、也不必自己去比尺寸。
 2. **資料很乾淨。** 399 顆全 `ok`、五種 PNG 都在、label 是 1000×1000 單通道
    8-bit、3 層、`image_id` 是不補零的數字、檔名不需要 `_safe_name` 改寫、沒有
    碰撞、每一層在每張圖上都有像素。我列的四個「安靜的坑」一個都沒踩到。
-3. **唯一的 WARN 是 layer 名**（`L17/D0` 那種形式，ADEPT 的區域名規則不收）。
+3. **唯一的 WARN 是 layer 名**（`L17/D0` 那種形式，d4t 的區域名規則不收）。
    所以 `roi_from_mask` 一定要有一層改寫，而且規則要固定、要能查碰撞。
 
 健檢跟著升級：讀得懂 v4 的欄位、`id_source` 直接回答 join、id 的長相改成看**整欄
@@ -948,7 +948,7 @@ Phase 1 收斂之後開 Phase 2 的計畫。這一輪**沒有動任何程式碼*
 | 題 | 答 |
 |---|---|
 | 演算法 | **不照抄 vendored 的，要重寫／優化改良**。範圍（只動沒卡片在用的那兩個，還是連 18 張卡在用的一起）等確認 —— 後者會讓黃金值全部改變，要重新定錨 |
-| GDS ROI | **ADEPT 不解析 layout。** GDS/OASIS 留在上游 GLAS，ADEPT 只吃它產的 mask image、與 defect 一一對應（樣本之後提供）。整項從「vendoring 125 KB 的 OASIS streamer」變成「定一個 mask 進來的契約」，而且**可以用合成資料驗證** |
+| GDS ROI | **d4t 不解析 layout。** GDS/OASIS 留在上游 GLAS，d4t 只吃它產的 mask image、與 defect 一一對應（樣本之後提供）。整項從「vendoring 125 KB 的 OASIS streamer」變成「定一個 mask 進來的契約」，而且**可以用合成資料驗證** |
 | ML Classify | Phase 2 後半 |
 | 多通道 | 使用者反問「是指一張 TIFF 含多張圖（1 BSE + 4 SE，同時收）嗎」→ 是。實際頁數與順序回問使用者（計畫書 §6.1）|
 
@@ -969,15 +969,15 @@ Phase 1 收斂之後開 Phase 2 的計畫。這一輪**沒有動任何程式碼*
 
 **讀 GLAS 讀到的**（`docs/GLAS-INTERFACE.md`，§4 可以直接複製給那邊）：
 
-- GLAS **已經在產** ADEPT 要的東西：`<id>_label.png`（uint8 整數 label map、
+- GLAS **已經在產** d4t 要的東西：`<id>_label.png`（uint8 整數 label map、
   0=背景 1..N、不 blur）、`<id>_gray.png`（模擬 GLV 灰階，可以當合成 ref）、
   manifest 的 `label_map`（label id → layer 名，正是具名區域的名字來源）、
   alignment CSV/JSON（`mmh-gds-alignment-v1`）。
-- **join key 兩邊同源**：GLAS 的 `image_id` 與 ADEPT 的 `defect_id` **都是 KLARF 的
+- **join key 兩邊同源**：GLAS 的 `image_id` 與 d4t 的 `defect_id` **都是 KLARF 的
   `DEFECTID`**（`sem_loader.py::load_klarf` vs `dataset.py`）。一一對應不必發明新 id。
 - **上游必要的一改**：GLAS 的 `SemImage` 沒有 page 欄位、讀圖是 `cv2.imread`
   （只讀第 0 頁），而 EBI patch 是「一個多頁 TIFF 裝一整批 defect」——
-  不改的話**每顆 defect 都對到同一張圖**。ADEPT 的
+  不改的話**每顆 defect 都對到同一張圖**。d4t 的
   `klarf_core.defect_image_map` + `tiff_index` 已經做完這件事，可以直接搬。
 
 ### 第三輪：Input-0 落地（多入口）＋ 兩條路都寫死 8-bit
@@ -1241,7 +1241,7 @@ patch 跟 RSEM Image。」而多通道正是 `channel_map` 與 `tiff_stack` 的�
   （進 CSV、可以拿來 gate）。放錯的代價很實際：σ 當特徵的話，「有沒有這個數字」
   取決於使用者有沒有放那張卡 —— 那不能當 gate。
 - **文件漂移抓到一處是會害人的**：`FAB-VALIDATION.md` 還叫公司機複製
-  `bundle/ADEPT_part1of6.py … part6of6.py`，而那些檔案早就不存在（現在是單檔）。
+  `bundle/d4t_part1of6.py … part6of6.py`，而那些檔案早就不存在（現在是單檔）。
   照著做的人會什麼都搬不進去。順手連 `SESSION_LOG` 開頭那句 1 MB 一起修。
 
 ---
@@ -1364,7 +1364,7 @@ defect 逐項相同**（glv_mean 6.7626 / glv_max 33.0…），而 lint 全綠�
 Studio 裡一邊拖一邊看的**。使用者拖完滑桿得跳出去跑一次 CLI 才知道剛才那一下
 是變好還是變壞，於是實際上沒有人在看準確率。
 
-- `python -m adept run --ground-truth`：跑完直接印正確率／抓漏率／誤殺率；
+- `python -m d4t run --ground-truth`：跑完直接印正確率／抓漏率／誤殺率；
   沒給就自己找 KLARF 旁邊的 `ground_truth.json`（`--ground-truth none` 關掉）。
 - Studio 載資料集時撿同一份答案卷，直方圖旁邊的 bin 摘要跟著門檻**即時**顯示
   準確率。只重算分 bin（`viewmodel.accuracy_at` → `export.summarize`，跟 CLI
@@ -1569,7 +1569,7 @@ README 19 KB → 4.4 KB，也變成門面 + 路由。
 
 最嚴重的一條**會直接害到第一次用的人**：五份教學範例 recipe 在 39b9fea 就刪了
 （它們依賴被拿掉的卡片），但 `examples/recipes/README.md` 的對照表仍完整介紹那
-五份，README 與 CLAUDE.md 的 CLI 範例也還是 `python -m adept run
+五份，README 與 CLAUDE.md 的 CLI 範例也還是 `python -m d4t run
 examples/recipes/die_to_die_basic.json …` —— **照著打會失敗**。
 
 而它不只在文件裡。`tools/doctor.py` 的端到端試跑也讀那個檔案，找不到時說的是
@@ -1579,7 +1579,7 @@ examples/recipes/die_to_die_basic.json …` —— **照著打會失敗**。
 四張卡），不讀 repo 裡任何 recipe 檔。
 
 順帶修掉的過期敘述：README 的目錄樹還是 M0 時代的（把 `tests/`、`docs/`、
-`tools/` 畫在 `adept/` 底下，而 `core/` 漏了 `pipeline/`、`steps/`、`store/`、
+`tools/` 畫在 `d4t/` 底下，而 `core/` 漏了 `pipeline/`、`steps/`、`store/`、
 `export/` 四個現在最重要的目錄）；測試數字三個版本（README「1200+」、CLAUDE.md
 「520+」、commit 訊息「726」，實際 1050+）；AGENTS.md 的檔案數與包大小。
 
@@ -1621,7 +1621,7 @@ generated sample data」與導覽底下的「按左邊那顆，一分鐘就看�
 
 ### B. 搬運包剩 6% 餘裕，而破線沒有任何症狀
 
-`bundle/ADEPT_bundle.py` 量到 **962 KB**，而 GitHub 不顯示超過 1 MB 的檔案 ——
+`bundle/d4t_bundle.py` 量到 **962 KB**，而 GitHub 不顯示超過 1 MB 的檔案 ——
 那正是這個包存在的唯一理由。家用機上看不出任何異狀：測試不會紅、`release.py`
 不會錯，症狀只會出現在公司機的瀏覽器裡，而那時候人已經站在機台旁邊了。
 
@@ -2274,7 +2274,7 @@ id 選擇器贏過 `[shape]`，留著的話 shape 會安靜地不生效（第一
 `control_sm` 24px 出來的 `sizeHint()` 是 26px。所以測試問「六種高度收成一種
 了沒有」，不去驗「等於 24」—— 把盒模型算式抄進測試只是把同一份知識放兩個地方。
 
-第二輪多五條驗收，其中一條是靜態掃描：`adept/ui` 裡不准再有 `setFixedSize` /
+第二輪多五條驗收，其中一條是靜態掃描：`d4t/ui` 裡不准再有 `setFixedSize` /
 `setFixedWidth` / `setFixedHeight` 出現在按鈕上。尺寸寫死在呼叫端就會慢慢長
 回六種。
 

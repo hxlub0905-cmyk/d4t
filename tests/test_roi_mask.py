@@ -12,10 +12,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import adept.core.steps  # noqa: F401 — 註冊卡片
-from adept.core.pipeline.context import Context
-from adept.core.pipeline.recipe import Recipe, RecipeNode, ScoreSpec, validate
-from adept.core.pipeline.step import (
+import d4t.core.steps  # noqa: F401 — 註冊卡片
+from d4t.core.pipeline.context import Context
+from d4t.core.pipeline.recipe import Recipe, RecipeNode, ScoreSpec, validate
+from d4t.core.pipeline.step import (
     REGISTRY, ParamError, StepError, get_step,
 )
 

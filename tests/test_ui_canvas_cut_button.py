@@ -41,9 +41,9 @@ def _import_qt(g):
     from PySide6.QtGui import QMouseEvent
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import canvas as canvas_mod
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
+    from d4t.ui import canvas as canvas_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
     g.update(QEvent=QEvent, QPointF=QPointF, Qt=Qt, QMouseEvent=QMouseEvent,
              QApplication=QApplication, canvas_mod=canvas_mod,
              studio_mod=studio_mod, theme_mod=theme_mod)

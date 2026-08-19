@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ADEPT 檔案清單產生器 — authored 2026-07-30.
+# d4t 檔案清單產生器 — authored 2026-07-30.
 """產生 ``tools/FILELIST.txt``：``tools/get_code.py`` 靠它知道要抓哪些檔案。
 
 在**開發機**上跑（需要 git）：
@@ -42,7 +42,7 @@ MANIFEST = "tools/FILELIST.txt"
 EXCLUDE_DIRS = ("bundle", "docs/history")
 
 HEADER = (
-    "# ADEPT 檔案清單 —— tools/get_code.py 用（每行：git blob SHA-1 + 路徑）。",
+    "# d4t 檔案清單 —— tools/get_code.py 用（每行：git blob SHA-1 + 路徑）。",
     "# 由 tools/make_filelist.py 產生；tests/test_offline_tools.py 會擋住它腐爛。",
 )
 

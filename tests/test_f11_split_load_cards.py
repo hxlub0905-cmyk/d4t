@@ -33,12 +33,12 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tools"))
 
-import adept.core.steps                                          # noqa: F401,E402
-from adept.core.ingest.dataset import load_dataset                # noqa: E402
-from adept.core.pipeline import (                                 # noqa: E402
+import d4t.core.steps                                          # noqa: F401,E402
+from d4t.core.ingest.dataset import load_dataset                # noqa: E402
+from d4t.core.pipeline import (                                 # noqa: E402
     Recipe, RecipeNode, ScoreSpec, get_step, run_defect, validate,
 )
-from adept.core.pipeline.step import REGISTRY                     # noqa: E402
+from d4t.core.pipeline.step import REGISTRY                     # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -58,7 +58,7 @@ def test_no_card_declares_different_streams_for_different_kinds():
     這是這一輪換來的不變量，而它是對整個 registry 跑的 —— 下一次有人想用
     「這個 kind 給這幾條、那個 kind 給那幾條」解決問題時，這條測試會叫。
     """
-    from adept.core.pipeline.step import Step
+    from d4t.core.pipeline.step import Step
     base = Step.resolve_writes_for_kind.__func__
     offenders = [k for k, c in REGISTRY.items()
                  if c.resolve_writes_for_kind.__func__ is not base]
@@ -198,7 +198,7 @@ def test_which_load_card_the_data_wants(rsem_lot):
     從「起手卡放哪一張」變成「載入資料時要補哪一張」
     （`studio._adopt_source_for`）—— 但那個對照表本身一個字都沒變。
     """
-    from adept.ui.viewmodel import RecipeModel
+    from d4t.ui.viewmodel import RecipeModel
     assert RecipeModel.starter_step_for("ebi_patch") == "load_patch"
     assert RecipeModel.starter_step_for("tiff_stack") == "load_patch"
     assert RecipeModel.starter_step_for("rsem") == "load_single"

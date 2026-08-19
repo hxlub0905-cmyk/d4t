@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ADEPT synthetic sample generator — authored 2026-07-28 (M1).
+# d4t synthetic sample generator — authored 2026-07-28 (M1).
 """合成 EBI patch 測試 lot 產生器。
 
 產出一個 ingest 層可以直接吃的迷你 lot：
@@ -32,7 +32,7 @@ from typing import Any, Dict
 import numpy as np
 import tifffile
 
-# 讓 `python3 tools/make_sample.py` 不裝套件也能 import adept（與同層的 _synth）
+# 讓 `python3 tools/make_sample.py` 不裝套件也能 import d4t（與同層的 _synth）
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
@@ -40,7 +40,7 @@ _TOOLS = os.path.dirname(os.path.abspath(__file__))
 if _TOOLS not in sys.path:
     sys.path.insert(0, _TOOLS)
 
-from adept.core.ingest import dataset, klarf_core, tiff_index  # noqa: E402
+from d4t.core.ingest import dataset, klarf_core, tiff_index  # noqa: E402
 
 # 圖案／缺陷合成的共用零件（與 make_sample_rsem.py 共用，數值行為完全相同）
 from _synth import (  # noqa: E402
@@ -64,7 +64,7 @@ def _make_klarf_text(n: int, rows) -> str:
     lines = [
         "FileVersion 1 2;",
         "FileTimestamp 07-28-26 00:00:00;",
-        'InspectionStationID "SYN" "SYN" "ADEPT";',
+        'InspectionStationID "SYN" "SYN" "d4t";',
         "SampleType WAFER;",
         "ResultTimestamp 07-28-26 00:00:00;",
         f'LotID "{LOT_NAME}";',
@@ -220,7 +220,7 @@ def generate(out_dir, n: int = 24, real_frac: float = 0.5, size: int = 128,
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
-        description="產生 ADEPT 合成 EBI patch lot（KLARF 1.2 + 多頁 TIFF + ground truth）。")
+        description="產生 d4t 合成 EBI patch lot（KLARF 1.2 + 多頁 TIFF + ground truth）。")
     ap.add_argument("out_dir", help="輸出資料夾（不存在會建立）")
     ap.add_argument("--n", type=int, default=24, help="defect 數量（預設 24）")
     ap.add_argument("--real-frac", type=float, default=0.5,

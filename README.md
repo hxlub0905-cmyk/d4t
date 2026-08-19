@@ -1,4 +1,4 @@
-# ADEPT — Auto Defect Evaluation Pipeline Tool
+# d4t — defect
 
 > 彈性、多步驟、**任何 Inspection 站點都適用**的 ADC（Auto Defect Classification）工具。
 >
@@ -7,7 +7,7 @@
 > 調參看整批分佈、再把結果寫回 KLARF。
 >
 > **核心理念：站點差異封裝進 recipe，不封裝進程式碼。**
-> 傳統 PADC / RADC 每個站點都要工程師重寫一份 code；ADEPT 讓不會寫 code 的人
+> 傳統 PADC / RADC 每個站點都要工程師重寫一份 code；d4t 讓不會寫 code 的人
 > 也能用滑鼠把想法組成算法，產出可量化的證據。
 
 | | |
@@ -48,17 +48,17 @@
 python -m venv .venv && .venv\Scripts\activate     # Windows
 pip install -r requirements.txt                    # 含 PySide6
 
-python -m adept gui                                # 開 Studio
+python -m d4t gui                                # 開 Studio
 
 # CLI（不需真實資料）
 python tools/make_sample.py /tmp/lot --n 100       # 產合成 KLARF + patch TIFF
-python -m adept steps                              # 看所有卡片
-python -m adept validate <recipe>.json
-python -m adept run <recipe>.json /tmp/lot/LOT_SYN.001 \
+python -m d4t steps                              # 看所有卡片
+python -m d4t validate <recipe>.json
+python -m d4t run <recipe>.json /tmp/lot/LOT_SYN.001 \
     --workers 4 --cache /tmp/cache --db /tmp/runs.db --csv features.csv
-python -m adept runs --db /tmp/runs.db             # 批次歷史
-python -m adept rescore <run_id> --db /tmp/runs.db --threshold 60 --save
-python -m adept export <run_id> --db /tmp/runs.db --mode annotate \
+python -m d4t runs --db /tmp/runs.db             # 批次歷史
+python -m d4t rescore <run_id> --db /tmp/runs.db --threshold 60 --save
+python -m d4t export <run_id> --db /tmp/runs.db --mode annotate \
     --klarf-out out.001 --csv feat.csv --excel report.xlsx
 ```
 
@@ -84,7 +84,7 @@ for f in tests/test_ui_*.py; do QT_QPA_PLATFORM=offscreen pytest -q "$f"; done
 
 - **Vendoring**：每個模組檔頭註明來源專案／檔案與改動清單；六個來源專案各給了
   什麼見 [`CLAUDE.md`](CLAUDE.md) §6。
-- **`adept/core` 禁止 Qt import**、**Python ≥ 3.9 相容** —— 兩條都有測試守門。
+- **`d4t/core` 禁止 Qt import**、**Python ≥ 3.9 相容** —— 兩條都有測試守門。
 - **ROI 座標**：正規化座標（`NamedROI`）為正典；像素矩形一律 `(x, y, w, h)`。
 - **SNR 正負號**：`snr_signed = (μ_target − μ_ref) / σ_ref`（e-beam 定義）為唯一正典
   primitive（`algo/snr.py`）；`roi_snr` 同時回報 signed 與 abs。

@@ -1,4 +1,4 @@
-"""Tests for adept.core.ingest.tiff_index (structural walker + page decode)."""
+"""Tests for d4t.core.ingest.tiff_index (structural walker + page decode)."""
 from __future__ import annotations
 
 import os
@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 import tifffile
 
-from adept.core.ingest import tiff_index
+from d4t.core.ingest import tiff_index
 
 
 def _write_multipage(path, arrays):

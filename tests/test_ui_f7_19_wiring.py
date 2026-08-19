@@ -35,9 +35,9 @@ def _import_qt(g):
 
     g["QPointF"] = QPointF
 
-    from adept.ui import canvas as canvas_mod
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
+    from d4t.ui import canvas as canvas_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
     g.update(QApplication=QApplication, canvas_mod=canvas_mod,
              studio_mod=studio_mod, theme_mod=theme_mod)
 
@@ -106,7 +106,7 @@ def test_both_streams_then_get_the_same_settings(window):
 
     這是「成對的卡各自漂移」那個安靜失敗的結構性解法（計畫書 §22.7 第一條）。
     """
-    from adept.core.pipeline import get_step
+    from d4t.core.pipeline import get_step
 
     src = first_source(window)
     nid = window.add_card_after(src, "normalize")
@@ -153,8 +153,8 @@ def test_a_two_stream_card_runs(window, tmp_path):
     """接完兩條線之後直接跑，兩條流都要真的被處理到。"""
     import numpy as np
 
-    from adept.core.pipeline import get_step
-    from adept.core.pipeline.context import Context
+    from d4t.core.pipeline import get_step
+    from d4t.core.pipeline.context import Context
 
     src = first_source(window)
     nid = window.add_card_after(src, "normalize")
@@ -229,7 +229,7 @@ def test_the_histogram_says_what_its_axes_are(qapp):
     """
     from PySide6.QtGui import QColor, QPixmap
 
-    from adept.ui import inspectors as insp_mod
+    from d4t.ui import inspectors as insp_mod
 
     insp = insp_mod.EnhanceInspector()
     insp.resize(420, 220)
@@ -311,8 +311,8 @@ def test_the_clipping_mark_sits_on_the_bar_it_is_about(qapp):
     """
     from PySide6.QtGui import QColor, QImage
 
-    from adept.ui import inspectors as insp_mod
-    from adept.ui import theme as theme_module
+    from d4t.ui import inspectors as insp_mod
+    from d4t.ui import theme as theme_module
 
     warn = QColor(theme_module.TOKENS["danger_text"]).rgb()
     insp = insp_mod.EnhanceInspector()
@@ -413,7 +413,7 @@ def test_a_card_can_be_dragged_from_the_library_onto_the_canvas(window):
     """
     from PySide6.QtCore import QMimeData
 
-    from adept.ui.widgets import CARD_MIME
+    from d4t.ui.widgets import CARD_MIME
 
     before = list(window.model.node_order)
     entry = window.library.entry("denoise")
@@ -435,7 +435,7 @@ def test_a_card_can_be_dragged_from_the_library_onto_the_canvas(window):
 
 def test_only_a_card_drag_is_accepted(window):
     """自訂 MIME 型別，不是純文字 —— 不然從別的視窗拖一段字進來也會變成新增卡片。"""
-    from adept.ui.widgets import CARD_MIME
+    from d4t.ui.widgets import CARD_MIME
 
     assert CARD_MIME.startswith("application/")
     assert window.pipeline.acceptDrops() is True

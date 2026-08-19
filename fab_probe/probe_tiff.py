@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ADEPT 廠內探測腳本 #2：TIFF/BigTIFF 結構探測（單檔、純標準函式庫、不解碼像素）。
+"""d4t 廠內探測腳本 #2：TIFF/BigTIFF 結構探測（單檔、純標準函式庫、不解碼像素）。
 
 用途：在廠內真實 patch TIFF 上確認 docs/FAB-VALIDATION.md 的假設 ——
   假設 #1「每顆 defect 第 1 張 = test、第 2 張 = ref」（--with-klarf 交叉比對；本腳本最重要的輸出）
   假設 #2「nm_per_px 從哪來」（ImageDescription / Software / Resolution 標籤）
 
-邏輯鏡射自 adept/core/ingest/tiff_index.py（read_tiff_pages / _read_values /
-TYPE_SIZE / COMPRESSION / PHOTOMETRIC / TAGS）與 adept/core/ingest/klarf_core.py
+邏輯鏡射自 d4t/core/ingest/tiff_index.py（read_tiff_pages / _read_values /
+TYPE_SIZE / COMPRESSION / PHOTOMETRIC / TAGS）與 d4t/core/ingest/klarf_core.py
 （--with-klarf 需要的最小 KLARF 解析 + defect_image_map）。本檔重寫了這些邏輯，
-不 import adept、不用第三方套件；那兩個模組改判定規則時，這裡要跟著改。
+不 import d4t、不用第三方套件；那兩個模組改判定規則時，這裡要跟著改。
 
 用法：
     python probe_tiff.py FILE.tif [--pages 8] [--with-klarf FILE.klarf] [--include-ids]
@@ -25,7 +25,7 @@ import struct
 import sys
 
 PROBE_VERSION = "1.0"
-SCHEMA = "adept.fab_probe.tiff/1"
+SCHEMA = "d4t.fab_probe.tiff/1"
 
 # ------------------------------------------------- TIFF 常數（鏡射 tiff_index）
 
@@ -51,8 +51,8 @@ TAGS = {254: "subfile", 256: "width", 257: "height", 258: "bits",
         317: "predictor", 322: "tile_w", 323: "tile_h", 324: "tile_offsets",
         325: "tile_bytes", 339: "sample_format", 65000: "vendor_65000"}
 
-# tiff_index 目前有讀的標籤（用來標示「ADEPT 目前沒在看」的欄位）
-TAGS_IN_ADEPT = {254, 256, 257, 258, 259, 262, 270, 273, 277, 279, 297,
+# tiff_index 目前有讀的標籤（用來標示「d4t 目前沒在看」的欄位）
+TAGS_IN_D4T = {254, 256, 257, 258, 259, 262, 270, 273, 277, 279, 297,
                  305, 306, 322, 323, 324, 325}
 
 
@@ -522,7 +522,7 @@ def defect_image_map(d, n_pages):
 
 def emit_header(path, include_ids):
     _out("=" * 74)
-    _out("ADEPT 廠內探測報告 #2：TIFF 結構（probe_tiff.py v%s）" % PROBE_VERSION)
+    _out("d4t 廠內探測報告 #2：TIFF 結構（probe_tiff.py v%s）" % PROBE_VERSION)
     _out("=" * 74)
     _out("")
     _out("【這份報告包含什麼】")
@@ -571,7 +571,7 @@ def emit_uniformity(pages):
              % (sig, len(idxs), head, " ..." if len(idxs) > 8 else ""))
     uniform = len(sigs) == 1
     _out("  → %s" % ("所有頁面規格完全一致（uniform）。" if uniform else
-                     "**頁面規格不一致 —— ADEPT 假設同一份 patch TIFF 各頁同尺寸，請回報。**"))
+                     "**頁面規格不一致 —— d4t 假設同一份 patch TIFF 各頁同尺寸，請回報。**"))
     _out("")
     return uniform, len(sigs)
 
@@ -724,7 +724,7 @@ def emit_klarf_crosscheck(klarf_path, pages, info, include_ids):
     _out("  檢查 B：頁數 == IMAGECOUNT 總和？%s（%d vs %d）"
          % ("是" if ok_total else "否", n_pages, total))
     if ok_pair and pattern == "pairs":
-        _out("  → 與 ADEPT 目前的假設一致：每顆 defect 兩頁（假設第 1 頁 = test、第 2 頁 = ref）。")
+        _out("  → 與 d4t 目前的假設一致：每顆 defect 兩頁（假設第 1 頁 = test、第 2 頁 = ref）。")
         _out("    注意：這只證明『成對』，**沒有證明哪一張是 test**。")
         _out("    要確認先後順序，請看第 4 段的標籤週期，或用 probe_stats.py 看奇/偶頁的亮度差異。")
     elif pattern == "single":
@@ -753,7 +753,7 @@ def emit_klarf_crosscheck(klarf_path, pages, info, include_ids):
             if x < 0 or x >= n_pages:
                 out_of_range += 1
     if out_of_range:
-        _out("  ** 有 %d 個對應頁碼落在 0..%d 之外 —— 對應規則和 ADEPT 想的不一樣，請回報。**"
+        _out("  ** 有 %d 個對應頁碼落在 0..%d 之外 —— 對應規則和 d4t 想的不一樣，請回報。**"
              % (out_of_range, n_pages - 1))
     _out("")
     return {"klarf_version": d["version"], "n_defect_rows": n_rows,
@@ -809,9 +809,9 @@ def run(path, n_first=8, with_klarf=None, include_ids=False):
     summary["has_resolution_tag"] = any("xres" in p for p in pages)
     summary["unknown_tags"] = sorted(info["unknown_tags"].keys())[:32]
     summary["tag_period"] = period
-    summary["adept_unread_tags"] = sorted(
+    summary["d4t_unread_tags"] = sorted(
         set(t for t, name in TAGS.items()
-            if t not in TAGS_IN_ADEPT and any(name in p for p in pages)))
+            if t not in TAGS_IN_D4T and any(name in p for p in pages)))
     summary["klarf_crosscheck"] = cross
     summary["ids_included"] = bool(include_ids)
     emit_json(summary)
@@ -820,7 +820,7 @@ def run(path, n_first=8, with_klarf=None, include_ids=False):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="ADEPT 廠內探測 #2：TIFF 結構（單檔、純標準函式庫、不解碼像素）")
+        description="d4t 廠內探測 #2：TIFF 結構（單檔、純標準函式庫、不解碼像素）")
     ap.add_argument("tiff", help="要探測的 TIFF 檔（例：C:\\path\\to\\lot.tif）")
     ap.add_argument("--pages", type=int, default=8,
                     help="細看前幾頁（另外自動加看中段與最後兩頁，預設 8）")

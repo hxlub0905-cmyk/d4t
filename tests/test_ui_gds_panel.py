@@ -18,15 +18,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from adept.core.pipeline import get_step  # noqa: E402
-from adept.core.pipeline.context import Context  # noqa: E402
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from d4t.core.pipeline import get_step  # noqa: E402
+from d4t.core.pipeline.context import Context  # noqa: E402
 
 @pytest.fixture(scope="module")
 def qapp():
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import theme
+    from d4t.ui import theme
     app = QApplication.instance() or QApplication([])
     theme.apply_theme(app, "dark")
     yield app
@@ -49,8 +49,8 @@ def test_the_card_message_points_at_a_button_that_exists(qapp):
     """
     from PySide6.QtWidgets import QToolButton
 
-    from adept.core.pipeline import get_step
-    from adept.ui.studio import StudioWindow
+    from d4t.core.pipeline import get_step
+    from d4t.ui.studio import StudioWindow
 
     says = get_step("roi_from_mask").configuration_issues({"layers": ""})[0]
     named = re.findall(r"“([^”]+…)”", says)
@@ -88,8 +88,8 @@ def test_the_card_message_points_at_a_button_that_exists(qapp):
 
 def _no_sidecar_message(card) -> str:
     """跑一次「這顆沒有 label」那條路，把訊息拿出來。"""
-    from adept.core.pipeline.context import Context
-    from adept.core.pipeline.step import StepError
+    from d4t.core.pipeline.context import Context
+    from d4t.core.pipeline.step import StepError
 
     class _Item:
         defect_id = "1"
@@ -115,7 +115,7 @@ def _no_sidecar_message(card) -> str:
 
 def test_the_layer_table_says_layer_not_image(qapp):
     """`L17/D0` 不是「第幾張圖」。同一個 widget、三句話不同（見 `_WORDS`）。"""
-    from adept.ui.widgets import ChannelMapField
+    from d4t.ui.widgets import ChannelMapField
 
     images = ChannelMapField("", row_kind="images")
     labels = ChannelMapField("", row_kind="labels")
@@ -126,8 +126,8 @@ def test_the_layer_table_says_layer_not_image(qapp):
 
 def test_the_two_kinds_of_row_count_do_not_overwrite_each_other(qapp):
     """一張 recipe 上兩個 `channel_map` 各排各的列數。"""
-    from adept.core.pipeline import get_step
-    from adept.ui.widgets import ChannelMapField, ParamForm
+    from d4t.core.pipeline import get_step
+    from d4t.ui.widgets import ChannelMapField, ParamForm
 
     form = ParamForm()
     form.set_step(get_step("roi_from_mask").describe(), {"layers": ""},
@@ -142,7 +142,7 @@ def test_the_two_kinds_of_row_count_do_not_overwrite_each_other(qapp):
 
 def test_an_empty_layer_row_means_no_region_not_a_default_name(qapp):
     """`load_patch` 空著 = 用預設名（test/ref）；這裡空著 = **這一層不要**。"""
-    from adept.ui.widgets import ChannelMapField
+    from d4t.ui.widgets import ChannelMapField
 
     w = ChannelMapField("", row_kind="labels")
     w.set_min_rows(2)
@@ -154,9 +154,9 @@ def test_the_inspector_is_registered_and_reads_the_engines_numbers(qapp):
     """畫的是 `ctx.meta["gds_layers"]` —— UI 不自己再拆一次 label。"""
     import numpy as np
 
-    from adept.core.pipeline import get_step
-    from adept.core.pipeline.context import Context
-    from adept.ui import inspectors as insp
+    from d4t.core.pipeline import get_step
+    from d4t.core.pipeline.context import Context
+    from d4t.ui import inspectors as insp
 
     assert insp.inspector_for("roi_from_mask") is insp.GdsInspector
 
@@ -181,9 +181,9 @@ def test_the_inspector_says_when_a_layer_has_no_name(qapp):
     """匯出多了一層而 recipe 沒跟上 —— 它會**安靜地**少一個區域。"""
     import numpy as np
 
-    from adept.core.pipeline import get_step
-    from adept.core.pipeline.context import Context
-    from adept.ui import inspectors as insp
+    from d4t.core.pipeline import get_step
+    from d4t.core.pipeline.context import Context
+    from d4t.ui import inspectors as insp
 
     lab = np.zeros((10, 10), np.uint8)
     lab[1:5, 1:5] = 1
@@ -200,9 +200,9 @@ def test_the_inspector_says_when_a_layer_has_no_name(qapp):
 def test_the_inspector_says_when_the_box_limit_bit(qapp):
     import numpy as np
 
-    from adept.core.pipeline import get_step
-    from adept.core.pipeline.context import Context
-    from adept.ui import inspectors as insp
+    from d4t.core.pipeline import get_step
+    from d4t.core.pipeline.context import Context
+    from d4t.ui import inspectors as insp
 
     n = 30
     lab = np.array([[1 if x <= y else 0 for x in range(n)] for y in range(n)],
@@ -217,7 +217,7 @@ def test_the_inspector_says_when_the_box_limit_bit(qapp):
 
 
 def test_the_empty_state_points_at_the_button(qapp):
-    from adept.ui import inspectors as insp
+    from d4t.ui import inspectors as insp
 
     w = insp.GdsInspector()
     assert not w.has_data()
@@ -233,11 +233,11 @@ def test_the_attachment_entry_turns_on_once_a_lot_is_open(qapp, tmp_path):
     以及**它什麼時候會亮**（這一條）。
 
     灰著也要在，不是載了 lot 才長出來：一顆到那時候才出現的鈕，使用者在需要它
-    之前根本不知道 ADEPT 做得到這件事。
+    之前根本不知道 d4t 做得到這件事。
     """
     import sys
 
-    from adept.ui.studio import StudioWindow
+    from d4t.ui.studio import StudioWindow
 
     sys.path.insert(0, "tools")
     from make_sample_rsem import generate
@@ -265,7 +265,7 @@ def test_a_card_added_after_the_export_still_gets_its_layer_names(qapp,
     """
     import sys
 
-    from adept.ui.studio import StudioWindow
+    from d4t.ui.studio import StudioWindow
 
     sys.path.insert(0, "tools")
     from make_glas_export import generate as gen_export
@@ -305,7 +305,7 @@ def test_the_users_own_names_are_never_overwritten(qapp, tmp_path):
     不可以把它洗回去 —— 寫分數表達式的是他。"""
     import sys
 
-    from adept.ui.studio import StudioWindow
+    from d4t.ui.studio import StudioWindow
 
     sys.path.insert(0, "tools")
     from make_glas_export import generate as gen_export
@@ -370,7 +370,7 @@ def test_connecting_the_labels_fills_the_layers_and_shows_boxes(qapp, tmp_path):
     這一條走的是沒有 `label_map` 的匯出（名字只能是 `LayerA`…），因為那是唯一
     會真的落到防呆上的情況；有 `label_map` 的走真層名，見下一條。
     """
-    from adept.ui.studio import StudioWindow
+    from d4t.ui.studio import StudioWindow
 
     lot, exp = _gds_lot(tmp_path, seed=11, label_map=False)
     win = StudioWindow(show_welcome_on_start=False)
@@ -401,7 +401,7 @@ def test_connecting_the_labels_fills_the_layers_and_shows_boxes(qapp, tmp_path):
 
 def test_the_real_layer_names_win_over_the_fallback(qapp, tmp_path):
     """`LayerA` 是防呆，不是命名建議 —— manifest 給得出真名字就用真的。"""
-    from adept.ui.studio import StudioWindow
+    from d4t.ui.studio import StudioWindow
 
     lot, exp = _gds_lot(tmp_path, seed=12, layers=2, label_map=True)
     win = StudioWindow(show_welcome_on_start=False)
@@ -423,7 +423,7 @@ def test_an_excluded_layer_stays_excluded(qapp, tmp_path):
     「某一列空著 = 那一層不要」這條規則不可以被防呆吃掉 —— 那是使用者唯一能
     排除一層的方法（`tests/test_roi_from_mask.py` 鎖著它的引擎行為）。
     """
-    from adept.ui.studio import StudioWindow
+    from d4t.ui.studio import StudioWindow
 
     lot, exp = _gds_lot(tmp_path, seed=13, label_map=False)
     win = StudioWindow(show_welcome_on_start=False)
@@ -446,7 +446,7 @@ def test_an_excluded_layer_stays_excluded(qapp, tmp_path):
 
 def test_the_fallback_names_do_not_run_out_of_letters():
     """256 層也不會撞名（Excel 的欄名）。"""
-    from adept.core.ingest.glas_export import fallback_layer_names
+    from d4t.core.ingest.glas_export import fallback_layer_names
 
     assert fallback_layer_names([3, 1, 2]) == "1:LayerA, 2:LayerB, 3:LayerC"
     assert fallback_layer_names([0]) == ""          # 0 是背景，不是一層

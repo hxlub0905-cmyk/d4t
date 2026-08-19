@@ -15,10 +15,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from adept.core.algo import enhance as algo_enhance  # noqa: E402
-from adept.core.pipeline import get_step  # noqa: E402
-from adept.core.pipeline.context import Context  # noqa: E402
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from d4t.core.algo import enhance as algo_enhance  # noqa: E402
+from d4t.core.pipeline import get_step  # noqa: E402
+from d4t.core.pipeline.context import Context  # noqa: E402
 
 DEFECT = (slice(30, 34), slice(30, 34))
 QUIET = (slice(20, 24), slice(30, 34))     # 同一欄、沒有缺陷的地方
@@ -204,7 +204,7 @@ def test_only_two_new_cards_were_added_for_six_new_abilities():
 
 
 def test_the_new_cards_are_in_the_enhance_stage_and_visible_in_the_gui():
-    from adept.ui.scope import visible_steps
+    from d4t.ui.scope import visible_steps
 
     for key in ("flatten", "normalize"):
         assert get_step(key).resolve_group() == "enhance"
@@ -245,7 +245,7 @@ def test_local_contrast_card_runs():
 
 def test_pointing_a_card_at_a_stream_that_does_not_exist_says_so():
     """指到不存在的流是**錯誤**，不是警告 —— 那張卡什麼都沒做，而使用者以為做了。"""
-    from adept.core.pipeline.step import StepError
+    from d4t.core.pipeline.step import StepError
 
     ctx = Context(images={"test": _patch()})
     with pytest.raises(StepError) as e:
@@ -310,7 +310,7 @@ def test_normalize_is_one_card_with_every_method_in_the_family():
     拉伸範圍怎麼決定。卡片庫多一列，使用者就要多讀一段說明才知道該用哪一個 ——
     所以 F11 Enhance-2 的 zscore 也是這張卡的一個選項，不是第五張 Enhance 卡。
     """
-    from adept.core.pipeline import REGISTRY, get_step
+    from d4t.core.pipeline import REGISTRY, get_step
 
     enhance = sorted(k for k, v in REGISTRY.items() if v.group == "enhance")
     assert enhance == ["denoise", "flatten", "normalize", "tone"]
@@ -340,7 +340,7 @@ def test_only_the_parameters_that_apply_are_shown(method, shown, hidden):
     以前的替代方案是在 help 裡寫「（stripe 方法用不到）」—— 那是一句道歉，
     不是一個設計，而且使用者還是得自己判斷「那它算不算數」。
     """
-    from adept.core.pipeline import get_step
+    from d4t.core.pipeline import get_step
 
     specs = {p.name: p for p in get_step("normalize").params}
     params = {"method": method}
@@ -359,7 +359,7 @@ def test_normalize_only_needs_a_ref_when_it_is_matching():
     用常數的話，rsem route 上只要放了 Normalize 就會被誤判成缺 ref ——
     而那四種方法裡只有一種真的要另一張圖。
     """
-    from adept.core.pipeline import get_step
+    from d4t.core.pipeline import get_step
 
     cls = get_step("normalize")
     assert cls.resolve_requires_ref(cls.validate_params({"method": "match"})) is True
@@ -369,8 +369,8 @@ def test_normalize_only_needs_a_ref_when_it_is_matching():
 
 def test_a_card_processes_every_stream_wired_into_it():
     """F7-19：接幾條就處理幾條，出來也是那幾條。"""
-    from adept.core.pipeline import get_step
-    from adept.core.pipeline.context import Context
+    from d4t.core.pipeline import get_step
+    from d4t.core.pipeline.context import Context
 
     ctx = Context(images={"test": _patch(), "ref": _patch(seed=5)})
     before_ref = ctx.images["ref"].copy()
@@ -384,8 +384,8 @@ def test_a_card_processes_every_stream_wired_into_it():
 
 def test_matching_leaves_the_reference_alone_even_if_it_is_listed():
     """把 reference 對齊到它自己是 no-op，但那會讓人以為它被處理過了。"""
-    from adept.core.pipeline import get_step
-    from adept.core.pipeline.context import Context
+    from d4t.core.pipeline import get_step
+    from d4t.core.pipeline.context import Context
 
     ctx = Context(images={"test": _patch(), "ref": _patch(seed=9)})
     before = ctx.images["ref"].copy()
@@ -400,10 +400,10 @@ def test_tone_applies_its_knobs_in_a_fixed_order():
     順序固定（亮度 → gamma/曲線 → 反相），因為可調的話同一組數字會有六種
     結果，而畫面上看不出來是哪一種。
     """
-    from adept.core.steps.tone import (apply_brightness_contrast, apply_gamma,
+    from d4t.core.steps.tone import (apply_brightness_contrast, apply_gamma,
                                        apply_invert)
-    from adept.core.pipeline import get_step
-    from adept.core.pipeline.context import Context
+    from d4t.core.pipeline import get_step
+    from d4t.core.pipeline.context import Context
 
     img = _patch()
     ctx = Context(images={"test": img.copy()})

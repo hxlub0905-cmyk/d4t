@@ -1,4 +1,4 @@
-# ADEPT 取得程式碼（PowerShell 版）— authored 2026-07-30.
+# d4t 取得程式碼（PowerShell 版）— authored 2026-07-30.
 #
 # 為什麼有兩個版本
 # ---------------
@@ -23,7 +23,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$Dest  = "ADEPT",
+    [string]$Dest  = "d4t",
     [string]$Ref   = "main",
     [string]$Proxy = ""
 )

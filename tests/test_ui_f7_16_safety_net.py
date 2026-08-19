@@ -30,8 +30,8 @@ def _import_qt(g):
     from PySide6.QtGui import QKeySequence
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
     g.update(QApplication=QApplication, QKeySequence=QKeySequence,
              studio_mod=studio_mod, theme_mod=theme_mod)
 
@@ -55,8 +55,8 @@ def window(qapp):
 # 1. 復原（model 層，Qt-free）
 # --------------------------------------------------------------------------- #
 def _model():
-    import adept.core.steps  # noqa: F401 — 註冊卡片
-    from adept.ui.viewmodel import RecipeModel
+    import d4t.core.steps  # noqa: F401 — 註冊卡片
+    from d4t.ui.viewmodel import RecipeModel
 
     m = RecipeModel.starter()
     # F11 Enhance-4：`starter()` 現在是**空白畫布**（使用者要自己挑載入卡）。

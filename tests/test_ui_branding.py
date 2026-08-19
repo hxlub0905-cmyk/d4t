@@ -26,8 +26,8 @@ pytest.importorskip("PySide6")
 from PySide6.QtGui import QIcon                       # noqa: E402
 from PySide6.QtWidgets import QApplication            # noqa: E402
 
-from adept.ui import theme                            # noqa: E402
-from adept.ui.branding import (ASSETS_DIR, ICON_PATH,  # noqa: E402
+from d4t.ui import theme                            # noqa: E402
+from d4t.ui.branding import (ASSETS_DIR, ICON_PATH,  # noqa: E402
                                WORDMARK_DARK_PATH, WORDMARK_PATH, app_icon)
 
 SVG_NS = "http://www.w3.org/2000/svg"
@@ -92,7 +92,7 @@ def test_app_icon_renders_at_every_size(qapp, size):
 
 def test_missing_file_gives_empty_icon_not_a_crash(qapp, monkeypatch):
     """少一個檔案不該讓 Studio 開不起來（受限機器是用複製檔案部署的）。"""
-    monkeypatch.setattr("adept.ui.branding.ICON_PATH",
+    monkeypatch.setattr("d4t.ui.branding.ICON_PATH",
                         os.path.join(ASSETS_DIR, "does-not-exist.svg"))
     assert app_icon().isNull()
 
@@ -109,5 +109,5 @@ def test_ports_carry_the_stage_colours(qapp, label, x, y, token):
     want = theme.PALETTES["dark"][token]
     assert got == want, (
         "%s：圖示上是 %s，theme.PALETTES['dark']['%s'] 是 %s —— "
-        "改了分段色就要一起改 adept/ui/assets/d4t.svg"
+        "改了分段色就要一起改 d4t/ui/assets/d4t.svg"
         % (label, got, token, want))

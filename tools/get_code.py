@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ADEPT 取得程式碼（不用 git、不用 zip）— authored 2026-07-30.
+# d4t 取得程式碼（不用 git、不用 zip）— authored 2026-07-30.
 """在「zip 下載被擋」的機器上把整包程式碼抓下來。stdlib-only、單一檔案。
 
 為什麼需要這支
@@ -16,7 +16,7 @@ DLP 對它的規則跟 ``application/zip`` 完全不同）。
 你連這個檔案也下載不了 —— 所以到 GitHub 上打開 ``tools/get_code.py``，
 按右上角的**複製鈕**，貼進一個新檔案存成 ``get_code.py``。整份是純文字。
 
-    python get_code.py                 # 抓到 .\\ADEPT\\
+    python get_code.py                 # 抓到 .\\d4t\\
     python get_code.py --dest D:\\tools  # 抓到別的地方
     python get_code.py --ref main      # 指定分支（預設 main）
     python get_code.py --ref a30a040…  # 指定 commit（要完全可重現時用這個）
@@ -165,8 +165,8 @@ def write_atomic(dest: str, rel: str, data: bytes) -> None:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Download ADEPT without git or zip.")
-    ap.add_argument("--dest", default="ADEPT", help="要放在哪個資料夾（預設 .\\ADEPT）")
+    ap = argparse.ArgumentParser(description="Download d4t without git or zip.")
+    ap.add_argument("--dest", default="d4t", help="要放在哪個資料夾（預設 .\\d4t）")
     ap.add_argument("--ref", default="main", help="分支或 tag（預設 main）")
     ap.add_argument("--cafile", default="",
                     help="公司的根憑證 .pem（TLS 被中間攔截時才需要）")

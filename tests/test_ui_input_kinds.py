@@ -34,9 +34,9 @@ def _import_qt(g):
     """把 Qt 與待測模組 import 進來（只在 fixture 裡呼叫，維持 lazy import 鐵則）。"""
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import scope as scope_mod
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
+    from d4t.ui import scope as scope_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
     g.update(QApplication=QApplication, scope_mod=scope_mod,
              studio_mod=studio_mod, theme_mod=theme_mod)
 
@@ -72,7 +72,7 @@ def window(qapp):
 # 1. 四種輸入都進得來
 # --------------------------------------------------------------------------- #
 def test_all_four_kinds_are_supported():
-    from adept.ui import scope          # Qt-free，不必等 qapp
+    from d4t.ui import scope          # Qt-free，不必等 qapp
     for kind in ("ebi_patch", "rsem", "tiff_stack", "folder"):
         assert scope.is_supported_kind(kind), kind
     assert not scope.is_supported_kind("something_else")
@@ -105,7 +105,7 @@ def test_an_rsem_dataset_loads_instead_of_being_refused(window, rsem_lot):
 
 def test_a_folder_of_images_loads(window, tmp_path):
     import numpy as np
-    from adept.core.ingest import imageio
+    from d4t.core.ingest import imageio
     for i in range(3):
         imageio.save_gray(str(tmp_path / ("d%d.png" % i)),
                           np.full((16, 16), 20 * (i + 1), np.uint8))
@@ -117,7 +117,7 @@ def test_a_folder_of_images_loads(window, tmp_path):
 def test_the_two_kinds_without_a_klarf_say_so_where_it_stays(window, tmp_path):
     """沒有 KLARF ⇒ 寫不回 KLARF，而那句話掛在資料集標籤上（常駐）。"""
     import numpy as np
-    from adept.core.ingest import imageio
+    from d4t.core.ingest import imageio
     imageio.save_gray(str(tmp_path / "d1.png"), np.full((16, 16), 30, np.uint8))
     window.load_folder_path(str(tmp_path), sync=True)
     assert "no KLARF" in window.defect_label.text()
@@ -132,7 +132,7 @@ def test_an_unknown_kind_is_still_refused_with_a_reason(window, patch_lot,
     monkeypatch.setattr(studio_mod, "is_supported_kind",
                         scope_mod.is_supported_kind)
     assert window.load_dataset_path(patch_lot["klarf"], sync=True) is False
-    assert "python -m adept run" in window.status_text(), \
+    assert "python -m d4t run" in window.status_text(), \
         "要講得出替代路徑，不能只是拒絕"
     assert window.dataset is before, "被擋下來時不該動到使用者手上的資料集"
 
@@ -145,7 +145,7 @@ def test_align_is_hidden_but_still_runs(window):
     `tests/fixtures/recipes/dual_route_basic.json` 正好用了它，撐著三組黃金值裡
     的兩組。刪掉的話那兩組要重新定錨，而使用者說的是「之後真需要我再回來」。
     """
-    from adept.core.pipeline import get_step
+    from d4t.core.pipeline import get_step
 
     assert "align" in scope_mod.HIDDEN_STEPS
     assert window.library.entry("align") is None      # 卡片庫看不到
@@ -167,7 +167,7 @@ def test_pattern_ref_is_hidden_but_still_runs(window):
     `tests/fixtures/recipes/dual_route_basic.json` 的 rsem route 正用著它，
     撐著一組黃金值 —— 刪掉 = 那份 recipe 開不起來 = 黃金值要重新定錨。
     """
-    from adept.core.pipeline import Recipe, get_step, validate
+    from d4t.core.pipeline import Recipe, get_step, validate
 
     assert "pattern_ref" in scope_mod.HIDDEN_STEPS
     assert window.library.entry("pattern_ref") is None   # 卡片庫看不到
@@ -186,7 +186,7 @@ def test_the_hide_a_card_mechanism_still_works(window):
     """機制本身要留著 —— 下次要暫時藏別張卡時加一個字串就好。"""
     steps = [{"key": "load_patch"}, {"key": "subtract"}]
     assert scope_mod.visible_steps(steps) == steps        # 這兩張都沒被藏
-    import adept.ui.scope as s
+    import d4t.ui.scope as s
     keep = s.HIDDEN_STEPS
     try:
         s.HIDDEN_STEPS = ("subtract",)
@@ -212,15 +212,15 @@ def test_the_golden_cell_cards_are_gone_for_good():
     ⚠ 演算法一層從頭到尾沒動過：`algo/golden.py`（Template 卡與 `pattern_ref`
     都在用）、`algo/period.py`（見下一條）。
     """
-    from adept.core.pipeline.step import REGISTRY
-    import adept.core.steps  # noqa: F401
+    from d4t.core.pipeline.step import REGISTRY
+    import d4t.core.steps  # noqa: F401
 
     for key in ("golden_cell", "cell_period"):
         assert key not in REGISTRY, key
     assert "pattern_ref" in REGISTRY, "改名回來的那一張不見了"
     assert REGISTRY["pattern_ref"].resolve_writes({}) == ["ref"]
 
-    from adept.core.algo import golden, template
+    from d4t.core.algo import golden, template
     assert hasattr(golden, "stack_cells")
     assert hasattr(template, "build_golden_cell"), \
         "Template 卡的 golden cell 疊圖還在用 algo/golden.py"
@@ -229,7 +229,7 @@ def test_the_golden_cell_cards_are_gone_for_good():
 def test_period_module_is_not_orphaned():
     """``algo/period.py`` 看起來只有 Golden Cell 在用，但它是之後做
     pattern-frame ROI 的唯一工具（F7 §4）—— 這條測試就是那張便利貼。"""
-    from adept.core.algo import period
+    from d4t.core.algo import period
 
     assert hasattr(period, "estimate_period")
     assert hasattr(period, "choose_origin"), \

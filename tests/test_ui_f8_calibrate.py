@@ -19,9 +19,9 @@ from conftest import wire_up  # noqa: E402  —— F10：加完卡要接線
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from adept.core.pipeline import get_step  # noqa: E402
-from adept.core.pipeline.context import Context  # noqa: E402
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from d4t.core.pipeline import get_step  # noqa: E402
+from d4t.core.pipeline.context import Context  # noqa: E402
 
 _TOOLS = str(Path(__file__).resolve().parent.parent / "tools")
 if _TOOLS not in sys.path:
@@ -31,10 +31,10 @@ if _TOOLS not in sys.path:
 def _import_qt(g):
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import inspectors as insp_mod
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
-    from adept.ui.workers import CalibrateWorker
+    from d4t.ui import inspectors as insp_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
+    from d4t.ui.workers import CalibrateWorker
     g.update(QApplication=QApplication, insp_mod=insp_mod,
              studio_mod=studio_mod, theme_mod=theme_mod,
              CalibrateWorker=CalibrateWorker)
@@ -114,7 +114,7 @@ def test_the_fill_is_undoable(qapp, win):
 
 def test_a_lot_that_disagrees_reaches_the_user_not_the_recipe(qapp, win):
     """拒絕要看得到。安靜地不填的話，使用者會以為按了沒反應然後再按一次。"""
-    from adept.core.algo.grid import AxisCalibration
+    from d4t.core.algo.grid import AxisCalibration
 
     nid = win.selected_node
     win._on_calibrated({
@@ -134,7 +134,7 @@ def test_a_lot_that_disagrees_reaches_the_user_not_the_recipe(qapp, win):
 def test_switching_card_mid_measure_does_not_write_into_the_wrong_card(
         qapp, win):
     """量整批要幾秒，量完的時候使用者可能已經選了別張卡。"""
-    from adept.core.algo.grid import AxisCalibration
+    from d4t.core.algo.grid import AxisCalibration
 
     other = wire_up(win.model, win.model.add_step("align"))
     win.select_node(other)
@@ -150,7 +150,7 @@ def test_switching_card_mid_measure_does_not_write_into_the_wrong_card(
 # --------------------------------------------------------------------------- #
 def test_it_measures_the_stream_the_card_reads(qapp, win):
     """上游有 Enhance 卡時，量原始檔就量錯了對象 —— 收集器要跑 pipeline。"""
-    from adept.ui.region_check import collect_source_images
+    from d4t.ui.region_check import collect_source_images
 
     nid = win.selected_node
     imgs = collect_source_images(win.model.to_recipe(), win._items(),
@@ -167,7 +167,7 @@ def test_the_use_button_is_wide_enough_for_its_own_text(qapp):
     只剩「Use 4…」。量的是**按鈕自己**放不放得下，不是面板剪不剪它。"""
     from PySide6.QtGui import QFontMetrics
 
-    from adept.ui.widgets import ProfilePanel
+    from d4t.ui.widgets import ProfilePanel
 
     SIZE, MG, EPI = 128, 24, 34
     rng = np.random.default_rng(0)

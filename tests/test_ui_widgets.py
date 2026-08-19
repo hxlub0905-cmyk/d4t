@@ -1,5 +1,5 @@
-# ADEPT Studio UI 元件測試 — authored 2026-07-28 (M3).
-"""``adept/ui/theme.py`` 與 ``adept/ui/widgets.py`` 的離屏（offscreen）測試。
+# d4t Studio UI 元件測試 — authored 2026-07-28 (M3).
+"""``d4t/ui/theme.py`` 與 ``d4t/ui/widgets.py`` 的離屏（offscreen）測試。
 
 執行：``QT_QPA_PLATFORM=offscreen python3 -m pytest tests/test_ui_widgets.py -q``
 
@@ -10,7 +10,7 @@ PySide6 模組。pytest 是「先蒐集全部測試檔、再開始跑」，所�
 **模組層** ``import PySide6``，蒐集階段就會把 Qt 塞進 ``sys.modules``，那個守門測試
 就會紅 —— 即使它先跑。
 
-因此：所有 Qt / ``adept.ui`` 的 import 都關在 :func:`_load_qt` 裡，由 module-scope
+因此：所有 Qt / ``d4t.ui`` 的 import 都關在 :func:`_load_qt` 裡，由 module-scope
 的 ``qapp`` fixture 呼叫，再用 ``globals().update(...)`` 注入本模組命名空間。
 每個測試都必須要求 ``qapp`` fixture，否則那些名字不存在。
 
@@ -36,9 +36,9 @@ def _load_qt() -> None:
         QSlider, QSpinBox,
     )
 
-    from adept.ui import theme as theme_mod  # noqa: F401
-    from adept.ui import widgets as widgets_mod  # noqa: F401
-    from adept.ui import viewmodel as vm_mod  # noqa: F401
+    from d4t.ui import theme as theme_mod  # noqa: F401
+    from d4t.ui import widgets as widgets_mod  # noqa: F401
+    from d4t.ui import viewmodel as vm_mod  # noqa: F401
 
     globals().update(locals())
 
@@ -58,15 +58,15 @@ def qapp():
 # --------------------------------------------------------------------------- #
 def _steps():
     """真實 registry 的 describe() dict（不是手捏的假資料）。"""
-    import adept.core.steps  # noqa: F401 — 觸發註冊
-    from adept.core.pipeline import list_steps
+    import d4t.core.steps  # noqa: F401 — 觸發註冊
+    from d4t.core.pipeline import list_steps
 
     return [s.describe() for s in list_steps()]
 
 
 def _describe(key):
-    import adept.core.steps  # noqa: F401
-    from adept.core.pipeline import get_step
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import get_step
 
     return get_step(key).describe()
 
@@ -89,7 +89,7 @@ def _rgb(hexstr):
     return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
 
 
-def test_theme_applies_and_has_adept_tokens(qapp):
+def test_theme_applies_and_has_d4t_tokens(qapp):
     assert qapp.styleSheet(), "apply_theme 應該有裝上 QSS"
     qss = theme_mod.build_stylesheet()
     # 主要動作按鈕靠 objectName "primary"
@@ -156,9 +156,9 @@ def test_every_token_the_ui_asks_for_actually_exists():
     import ast
     import pathlib
 
-    from adept.ui import theme as t
+    from d4t.ui import theme as t
 
-    ui = pathlib.Path(__file__).resolve().parent.parent / "adept" / "ui"
+    ui = pathlib.Path(__file__).resolve().parent.parent / "d4t" / "ui"
     bad = []
     for py in sorted(ui.rglob("*.py")):
         tree = ast.parse(py.read_text(encoding="utf-8"))
@@ -391,8 +391,8 @@ def test_curve_editor_is_wysiwyg_and_feeds_the_recipe(qapp):
 
     UI 自己再實作一份插值太容易了，而那會讓使用者看到的和跑出來的不一樣。
     """
-    from adept.core.algo.curve import curve_lut
-    from adept.core.steps.tone import apply_curve
+    from d4t.core.algo.curve import curve_lut
+    from d4t.core.steps.tone import apply_curve
 
     form = widgets_mod.ParamForm()
     edits = []
@@ -842,7 +842,7 @@ def test_verdict_chip(qapp):
 # 7. F7-2 換膚：切主題之後畫面上的東西不能少，也不能殘留舊色
 # --------------------------------------------------------------------------- #
 def test_studio_theme_toggle_keeps_everything_and_repaints(qapp):
-    from adept.ui import studio as studio_mod
+    from d4t.ui import studio as studio_mod
 
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     try:
@@ -957,8 +957,8 @@ def test_rows_appear_and_disappear_with_the_method(qapp):
     藏起來而不是變淡，是因為兩者講的是不同的事：變淡（``_sync_curve_override``）
     是「這一格還在，只是現在沒作用」；藏起來是「這一格根本不是這張卡的一部分」。
     """
-    import adept.core.steps  # noqa: F401 — 觸發卡片註冊
-    from adept.core.pipeline import get_step
+    import d4t.core.steps  # noqa: F401 — 觸發卡片註冊
+    from d4t.core.pipeline import get_step
 
     form = widgets_mod.ParamForm()
     form.set_step(get_step("normalize").describe(), {}, ["test", "ref"])
@@ -987,9 +987,9 @@ def test_every_icon_a_card_declares_really_exists(qapp):
     對不上的症狀是 `IconButton` 直接 `ValueError: unknown icon` —— 那張卡整個
     打不開，而且是在使用者點下去的時候才炸。
     """
-    import adept.core.steps  # noqa: F401 — 觸發卡片註冊
-    from adept.core.pipeline import list_steps
-    from adept.ui.widgets import GLYPH_ICONS
+    import d4t.core.steps  # noqa: F401 — 觸發卡片註冊
+    from d4t.core.pipeline import list_steps
+    from d4t.ui.widgets import GLYPH_ICONS
 
     seen = 0
     for step in list_steps():
@@ -1002,8 +1002,8 @@ def test_every_icon_a_card_declares_really_exists(qapp):
 
 def test_an_icon_choice_row_is_buttons_not_a_dropdown(qapp):
     """使用者：「我不希望 profile 設定頁面那麼多文字，能用圖就用圖。」"""
-    from adept.core.pipeline import get_step
-    from adept.ui.widgets import IconButton, IconChoice, ParamForm
+    from d4t.core.pipeline import get_step
+    from d4t.ui.widgets import IconButton, IconChoice, ParamForm
 
     form = ParamForm()
     form.set_step(get_step("roi_cross").describe(),
@@ -1021,7 +1021,7 @@ def test_an_icon_choice_row_is_buttons_not_a_dropdown(qapp):
 
 
 def test_picking_an_icon_emits_the_value(qapp):
-    from adept.ui.widgets import IconChoice
+    from d4t.ui.widgets import IconChoice
 
     got = []
     w = IconChoice(["a", "b"], ["fit", "tidy"], "a")
@@ -1033,7 +1033,7 @@ def test_picking_an_icon_emits_the_value(qapp):
 
 def test_a_value_nobody_recognises_lights_nothing(qapp):
     """手寫 recipe 打錯字的時候，**亮錯一顆比一顆都不亮更糟**。"""
-    from adept.ui.widgets import IconButton, IconChoice
+    from d4t.ui.widgets import IconButton, IconChoice
 
     w = IconChoice(["a", "b"], ["fit", "tidy"], "zzz")
     assert w.text() == "zzz"                    # 不偷偷改掉他的值
@@ -1041,7 +1041,7 @@ def test_a_value_nobody_recognises_lights_nothing(qapp):
 
 
 def test_the_profile_card_lost_three_dropdowns_of_english(qapp):
-    from adept.core.pipeline import get_step
+    from d4t.core.pipeline import get_step
 
     kinds = {p["name"]: p["type"]
              for p in get_step("roi_cross").describe()["params"]}

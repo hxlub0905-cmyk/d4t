@@ -6,7 +6,7 @@ dist/
 *.egg-info/
 .venv/
 
-# ADEPT runtime artefacts
+# d4t runtime artefacts
 *.db
 *.npz
 /cache/

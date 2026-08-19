@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# ADEPT offline packaging tool #2 — authored 2026-07-28 (M6-1).
-"""在**沒有網路的公司機**上，用離線 wheels 資料夾把 ADEPT 的相依套件裝起來。
+# d4t offline packaging tool #2 — authored 2026-07-28 (M6-1).
+"""在**沒有網路的公司機**上，用離線 wheels 資料夾把 d4t 的相依套件裝起來。
 
-用法（在解壓後的 ADEPT 資料夾裡執行）：
+用法（在解壓後的 d4t 資料夾裡執行）：
     python tools\\install_offline.py                       # 用 wheels\\，裝進 .venv\\
-    python tools\\install_offline.py --wheels D:\\adept_wheels
+    python tools\\install_offline.py --wheels D:\\d4t_wheels
     python tools\\install_offline.py --no-venv             # 不建虛擬環境，直接裝進現在這個 Python
     python tools\\install_offline.py --no-venv --user      # 沒有系統管理權限時
     python tools\\install_offline.py --dry-run             # 只做事前檢查、印出指令，不真的安裝
@@ -161,7 +161,7 @@ def preflight(*, wheels_dir: str, requirements: str, venv_dir: Optional[str],
     # --- 0. Python 本身 ---
     if sys.version_info[:2] < MIN_PYTHON:
         raise _fail(
-            "這台機器的 Python 是 %d.%d，ADEPT 需要 %d.%d 以上。"
+            "這台機器的 Python 是 %d.%d，d4t 需要 %d.%d 以上。"
             % (sys.version_info[0], sys.version_info[1], MIN_PYTHON[0], MIN_PYTHON[1]),
             "請改用比較新的 Python（在「開始」功能表搜尋 Python 看看有沒有裝多個版本），",
             "再用那個版本執行：C:\\Python311\\python.exe tools\\install_offline.py")
@@ -170,8 +170,8 @@ def preflight(*, wheels_dir: str, requirements: str, venv_dir: Optional[str],
     if not os.path.isfile(requirements):
         raise _fail(
             "找不到 requirements.txt：%s" % requirements,
-            "你可能不在 ADEPT 的資料夾裡。請先切換到解壓出來的資料夾（裡面看得到 adept\\ 與 tools\\）：",
-            "    cd C:\\...\\ADEPT-main",
+            "你可能不在 d4t 的資料夾裡。請先切換到解壓出來的資料夾（裡面看得到 d4t\\ 與 tools\\）：",
+            "    cd C:\\...\\d4t-main",
             "    python tools\\install_offline.py")
 
     # --- 2. wheels 資料夾存在 ---
@@ -180,8 +180,8 @@ def preflight(*, wheels_dir: str, requirements: str, venv_dir: Optional[str],
             "找不到離線套件資料夾：%s" % wheels_dir,
             "這個資料夾要在**有網路的機器**上先產生，做法：",
             "    python tools\\fetch_wheels.py --python-version %s" % running_python_tag(),
-            "然後把整個 wheels 資料夾拷貝到這台機器、放在 ADEPT 資料夾底下，再跑一次本指令。",
-            "若資料夾放在別的地方，請用 --wheels 指定，例如：--wheels D:\\adept_wheels")
+            "然後把整個 wheels 資料夾拷貝到這台機器、放在 d4t 資料夾底下，再跑一次本指令。",
+            "若資料夾放在別的地方，請用 --wheels 指定，例如：--wheels D:\\d4t_wheels")
 
     # --- 3. wheels 資料夾非空 ---
     wheels = find_wheels(wheels_dir)
@@ -256,15 +256,15 @@ def preflight(*, wheels_dir: str, requirements: str, venv_dir: Optional[str],
     if free is not None and free < need:
         raise _fail(
             "磁碟空間不夠：%s 只剩 %s，安裝大約需要 %s。" % (where, human_size(free), human_size(need)),
-            "PySide6 解開後就要幾百 MB。請清出空間，或把 ADEPT 放到空間夠的磁碟",
-            "（例如 D:\\），再用 --venv D:\\adept_venv 指定虛擬環境位置。")
+            "PySide6 解開後就要幾百 MB。請清出空間，或把 d4t 放到空間夠的磁碟",
+            "（例如 D:\\），再用 --venv D:\\d4t_venv 指定虛擬環境位置。")
 
     # --- 7. 寫入權限 ---
     target_dir = _existing_ancestor(venv_dir) if venv_dir else os.getcwd()
     if not os.access(target_dir, os.W_OK):
         raise _fail(
             "沒有寫入權限：%s" % target_dir,
-            "請把 ADEPT 解壓到你自己的資料夾（例如 C:\\Users\\你的帳號\\ADEPT-main），",
+            "請把 d4t 解壓到你自己的資料夾（例如 C:\\Users\\你的帳號\\d4t-main），",
             "不要放在 C:\\Program Files、系統磁碟根目錄或唯讀的網路磁碟。")
 
     if user and venv_dir:
@@ -324,7 +324,7 @@ def explain_pip_failure(output: str, wheels_dir: str) -> List[str]:
         tips.append("這個 Python 沒有 pip。請試 python -m ensurepip --default-pip，"
                     "或請 IT 幫忙裝一個完整的 Python。")
     if "permission" in low or "access is denied" in low:
-        tips.append("權限不足。請加 --no-venv --user，或把 ADEPT 移到你自己的資料夾再試。")
+        tips.append("權限不足。請加 --no-venv --user，或把 d4t 移到你自己的資料夾再試。")
     if "proxy" in low or "connection" in low or "timed out" in low or "ssl" in low:
         tips.append("看起來 pip 還是想連網。--no-index 已經關掉連網了，"
                     "若仍出現這種訊息，請檢查有沒有 pip.ini 設了 index-url，"
@@ -350,11 +350,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ap = argparse.ArgumentParser(
         prog="install_offline.py",
-        description="在沒有網路的機器上，用離線 wheels 資料夾安裝 ADEPT 的相依套件。",
+        description="在沒有網路的機器上，用離線 wheels 資料夾安裝 d4t 的相依套件。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="範例：\n"
                "  python tools\\install_offline.py\n"
-               "  python tools\\install_offline.py --wheels D:\\adept_wheels --venv D:\\adept_venv\n"
+               "  python tools\\install_offline.py --wheels D:\\d4t_wheels --venv D:\\d4t_venv\n"
                "  python tools\\install_offline.py --no-venv --user\n")
     ap.add_argument("--wheels", default="wheels", help="離線 wheel 資料夾（預設 wheels）")
     ap.add_argument("--venv", default=".venv", help="虛擬環境資料夾（預設 .venv）")
@@ -377,7 +377,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     venv_dir = None if args.no_venv else os.path.abspath(args.venv)
     requirements = os.path.abspath(args.requirements)
 
-    print("ADEPT 離線安裝")
+    print("d4t 離線安裝")
     print("  Python      ：%s（%s）" % (".".join(str(x) for x in sys.version_info[:3]),
                                       sys.executable))
     print("  wheels 資料夾：%s" % wheels_dir)
@@ -485,7 +485,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else:
             print("    source %s/bin/activate      ← 每次開新的終端機都要先做這一步" % rel)
             print("      （Windows 版：%s\\Scripts\\activate）" % rel)
-    print("    python -m adept gui                 ← 開圖形介面 Studio")
+    print("    python -m d4t gui                 ← 開圖形介面 Studio")
     print("    python tools\\make_sample.py C:\\temp\\lot --n 100   ← 產一份合成資料試玩")
     print("=" * 60)
     return 0 if rc == 0 else 1

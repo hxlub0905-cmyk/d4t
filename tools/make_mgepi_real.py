@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ADEPT realistic BSE synthetic lot — authored 2026-08-14 (with the user, five rounds).
+# d4t realistic BSE synthetic lot — authored 2026-08-14 (with the user, five rounds).
 """擬真 BSE MG×EPI×inner-spacer 合成 lot 產生器。
 
 `make_sample.py` 產的是「引擎吃得動」的抽象圖案；這一支產的是「看起來像
@@ -50,7 +50,7 @@ if _TOOLS not in sys.path:
 import cv2  # noqa: E402
 import tifffile  # noqa: E402
 from make_sample import _DIE_PITCH_UM, _make_klarf_text  # noqa: E402
-from adept.core.ingest import dataset, klarf_core, tiff_index  # noqa: E402
+from d4t.core.ingest import dataset, klarf_core, tiff_index  # noqa: E402
 
 S = 3                    # 超取樣倍率
 SIZE = 81                # patch 邊長（px）

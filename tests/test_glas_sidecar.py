@@ -27,13 +27,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from adept.core.ingest import glas_export  # noqa: E402
-from adept.core.ingest.dataset import Dataset, DefectItem, ImageRef  # noqa: E402
-from adept.core.pipeline import get_step  # noqa: E402
-from adept.core.pipeline.batch import _dataset_token_for  # noqa: E402
-from adept.core.pipeline.context import Context  # noqa: E402
-from adept.core.pipeline.step import StepError  # noqa: E402
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from d4t.core.ingest import glas_export  # noqa: E402
+from d4t.core.ingest.dataset import Dataset, DefectItem, ImageRef  # noqa: E402
+from d4t.core.pipeline import get_step  # noqa: E402
+from d4t.core.pipeline.batch import _dataset_token_for  # noqa: E402
+from d4t.core.pipeline.context import Context  # noqa: E402
+from d4t.core.pipeline.step import StepError  # noqa: E402
 
 
 def _png(path, rows, color_type=0):
@@ -234,7 +234,7 @@ def test_swapping_the_export_changes_the_lot_token(tmp_path):
 def test_a_lot_with_no_export_keeps_exactly_the_old_token(tmp_path):
     """沒有 sidecar 時 token 要**逐字元不變** —— 既有的快取目錄與黃金值
     不能因為多了這個機制而全部失效。"""
-    from adept.core.pipeline.cache import dataset_token
+    from d4t.core.pipeline.cache import dataset_token
 
     ds = _lot(tmp_path, ["1", "2"])
     assert _dataset_token_for(ds) == dataset_token(ds.klarf.source_path)
@@ -330,7 +330,7 @@ def test_the_panel_gets_what_it_needs_to_show_which_layers_landed(tmp_path):
 
 def test_the_card_is_an_input_card_with_no_inputs(tmp_path):
     """畫布上它是一個**來源**：沒有輸入埠，一個輸出埠。"""
-    from adept.core.pipeline.step import GROUP_INPUT
+    from d4t.core.pipeline.step import GROUP_INPUT
 
     card = get_step("load_sidecar")
     assert card.group == GROUP_INPUT
@@ -344,8 +344,8 @@ def test_the_card_name_is_not_printed_twice_in_the_error():
     都要有 —— 但一張卡剛加進來時節點 id **就是** step key，重複的那半個字讀起來
     像程式壞了，而它出現在使用者最需要看懂訊息的時候。
     """
-    from adept.core.pipeline.engine import _prefixed
-    from adept.core.pipeline.step import StepError
+    from d4t.core.pipeline.engine import _prefixed
+    from d4t.core.pipeline.step import StepError
 
     same = _prefixed("load_sidecar", StepError("load_sidecar", "no label"))
     assert same == "[load_sidecar] no label"

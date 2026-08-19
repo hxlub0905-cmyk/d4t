@@ -1,5 +1,5 @@
-# ADEPT Studio Gallery 測試 — authored 2026-07-28 (M5-2).
-"""``adept/ui/gallery.py``（縮圖網格／同屏比多顆）的離屏（offscreen）測試。
+# d4t Studio Gallery 測試 — authored 2026-07-28 (M5-2).
+"""``d4t/ui/gallery.py``（縮圖網格／同屏比多顆）的離屏（offscreen）測試。
 
 執行：``QT_QPA_PLATFORM=offscreen python3 -m pytest tests/test_ui_gallery.py -q``
 
@@ -7,10 +7,10 @@
 
 ``tests/test_no_qt.py::test_no_qt_after_import`` 會檢查 ``sys.modules`` 裡沒有任何
 PySide6 模組。pytest 是「先蒐集全部測試檔、再開始跑」，所以只要這個檔案在
-**模組層** ``import PySide6``（或 ``import adept.ui.gallery``），蒐集階段就會把 Qt
+**模組層** ``import PySide6``（或 ``import d4t.ui.gallery``），蒐集階段就會把 Qt
 塞進 ``sys.modules``，那個守門測試就會紅 —— 即使它先跑。
 
-因此：所有 Qt / ``adept.ui`` 的 import 都關在 :func:`_load_qt` 裡，由 module-scope
+因此：所有 Qt / ``d4t.ui`` 的 import 都關在 :func:`_load_qt` 裡，由 module-scope
 的 ``qapp`` fixture 呼叫，再用 ``globals().update(...)`` 注入本模組命名空間。
 每個測試都必須要求 ``qapp`` fixture，否則那些名字不存在。
 
@@ -38,8 +38,8 @@ def _load_qt() -> None:
     from PySide6.QtGui import QMouseEvent  # noqa: F401
     from PySide6.QtWidgets import QApplication, QWidget  # noqa: F401
 
-    from adept.ui import gallery as gal_mod  # noqa: F401
-    from adept.ui import theme as theme_mod  # noqa: F401
+    from d4t.ui import gallery as gal_mod  # noqa: F401
+    from d4t.ui import theme as theme_mod  # noqa: F401
 
     globals().update(locals())
 

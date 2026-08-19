@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from adept.core.pipeline.cellrois import (  # noqa: E402
+from d4t.core.pipeline.cellrois import (  # noqa: E402
     CellRoiError, format_cell_rois, parse_cell_rois, region_names,
 )
 
@@ -93,7 +93,7 @@ def test_region_names_stays_quiet_on_a_half_typed_value():
 # --------------------------------------------------------------------------- #
 def test_an_array_is_evenly_spaced_between_the_two_anchors():
     """間距是**算**出來的，不是拖出來的 —— pitch 是設計常數。"""
-    from adept.core.pipeline.cellrois import array_boxes
+    from d4t.core.pipeline.cellrois import array_boxes
 
     boxes = array_boxes((0.1, 0.5), (0.7, 0.5), 0.05, 0.4, nx=4, ny=1)
     assert len(boxes) == 4
@@ -106,7 +106,7 @@ def test_an_array_is_evenly_spaced_between_the_two_anchors():
 
 def test_an_array_of_one_sits_on_the_first_anchor():
     """n=1 沒有「間距」可言 —— 不要除以零，也不要偷偷變成兩個。"""
-    from adept.core.pipeline.cellrois import array_boxes
+    from d4t.core.pipeline.cellrois import array_boxes
 
     boxes = array_boxes((0.3, 0.4), (0.9, 0.8), 0.2, 0.2, nx=1, ny=1)
     assert len(boxes) == 1
@@ -114,7 +114,7 @@ def test_an_array_of_one_sits_on_the_first_anchor():
 
 
 def test_a_two_dimensional_array_is_the_product():
-    from adept.core.pipeline.cellrois import array_boxes
+    from d4t.core.pipeline.cellrois import array_boxes
 
     boxes = array_boxes((0.1, 0.1), (0.9, 0.9), 0.1, 0.1, nx=4, ny=3)
     assert len(boxes) == 12
@@ -123,7 +123,7 @@ def test_a_two_dimensional_array_is_the_product():
 
 def test_an_array_round_trips_through_the_recipe_string():
     """編輯器長出來的東西要存得進 recipe（也就是要過 parse 的每一條規則）。"""
-    from adept.core.pipeline.cellrois import array_boxes
+    from d4t.core.pipeline.cellrois import array_boxes
 
     text = format_cell_rois([("epi", array_boxes(
         (0.1, 0.5), (0.7, 0.5), 0.05, 0.4, nx=4, ny=1))])
@@ -134,7 +134,7 @@ def test_an_array_round_trips_through_the_recipe_string():
 # k× cell：把框整組平移 1/k，落不落回自己
 # --------------------------------------------------------------------------- #
 def test_the_same_thing_on_every_copy_is_shift_invariant():
-    from adept.core.pipeline.cellrois import regions_repeat_at
+    from d4t.core.pipeline.cellrois import regions_repeat_at
 
     same = parse_cell_rois("epi: 0.1,0,0.1,1; 0.6,0,0.1,1")
     assert regions_repeat_at(same, 0.5, 0.0) is True
@@ -142,14 +142,14 @@ def test_the_same_thing_on_every_copy_is_shift_invariant():
 
 def test_marking_only_one_half_is_not():
     """兩份標得不一樣 → 這一顆有一半機率量到另一份，而畫面上不會有錯誤訊息。"""
-    from adept.core.pipeline.cellrois import regions_repeat_at
+    from d4t.core.pipeline.cellrois import regions_repeat_at
 
     assert regions_repeat_at(parse_cell_rois("epi: 0.1,0,0.1,1"), 0.5, 0.0) is False
 
 
 def test_the_shift_wraps_round_the_seam():
     """平移是**環狀**的 —— cell 本來就是重複的，超過一格要繞回來。"""
-    from adept.core.pipeline.cellrois import regions_repeat_at
+    from d4t.core.pipeline.cellrois import regions_repeat_at
 
     wrap = parse_cell_rois("epi: 0.85,0,0.1,1; 0.35,0,0.1,1")
     assert regions_repeat_at(wrap, 0.5, 0.0) is True
@@ -157,7 +157,7 @@ def test_the_shift_wraps_round_the_seam():
 
 def test_a_shifted_box_must_land_on_the_same_name():
     """ROI1 平移之後落到 ROI2 的位置上不算 —— 那是兩個不同的量測。"""
-    from adept.core.pipeline.cellrois import regions_repeat_at
+    from d4t.core.pipeline.cellrois import regions_repeat_at
 
     cross = parse_cell_rois("a: 0.1,0,0.1,1 | b: 0.6,0,0.1,1")
     assert regions_repeat_at(cross, 0.5, 0.0) is False
@@ -165,13 +165,13 @@ def test_a_shifted_box_must_land_on_the_same_name():
 
 def test_no_shift_is_always_invariant():
     """k = 1（cell 不重複）沒有平移可言，不要在那裡報一個假問題。"""
-    from adept.core.pipeline.cellrois import regions_repeat_at
+    from d4t.core.pipeline.cellrois import regions_repeat_at
 
     assert regions_repeat_at(parse_cell_rois("epi: 0.1,0,0.1,1"), 0.0, 0.0) is True
 
 
 def test_a_two_dimensional_repeat_needs_both_axes_to_land():
-    from adept.core.pipeline.cellrois import regions_repeat_at
+    from d4t.core.pipeline.cellrois import regions_repeat_at
 
     quad = parse_cell_rois(
         "a: 0.1,0.1,0.1,0.1; 0.6,0.1,0.1,0.1; 0.1,0.6,0.1,0.1; 0.6,0.6,0.1,0.1")
@@ -182,7 +182,7 @@ def test_a_two_dimensional_repeat_needs_both_axes_to_land():
 
 def test_an_exact_array_keeps_one_pitch_and_an_integer_size():
     """位置精確、大小取整（見 array_boxes 的說明）。"""
-    from adept.core.pipeline.cellrois import array_boxes, array_pitch
+    from d4t.core.pipeline.cellrois import array_boxes, array_pitch
 
     cell = (320, 240)
     boxes = array_boxes((0.05, 0.5), (0.79, 0.5), 6 / 320, 0.4, 9, 1,

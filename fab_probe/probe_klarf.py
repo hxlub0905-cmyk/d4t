@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ADEPT 廠內探測腳本 #1：KLARF 結構探測（單檔、純標準函式庫）。
+"""d4t 廠內探測腳本 #1：KLARF 結構探測（單檔、純標準函式庫）。
 
 用途：在廠內真實 KLARF 上確認 docs/FAB-VALIDATION.md 的兩個假設 ——
   假設 #3「KLARF 影像佈局變體」（本腳本最重要的輸出）
   假設 #2「nm_per_px 從哪來」（欄位名獵捕）
 
-邏輯鏡射自 adept/core/ingest/klarf_core.py：
+邏輯鏡射自 d4t/core/ingest/klarf_core.py：
   detect_version / _parse_12 / _parse_18 / _parse_tiff_fields /
   image_col_index / _detect_images18 / _infer_image_layout /
   defect_image_entries / row_len_ok / tiff_path
-本檔「重寫」了上述邏輯的最小必要部分（不 import adept、不用第三方套件），
+本檔「重寫」了上述邏輯的最小必要部分（不 import d4t、不用第三方套件），
 所以 klarf_core 那邊改判定規則時，這裡要跟著改（兩邊都要更新）。
 
 用法：
@@ -26,7 +26,7 @@ import re
 import sys
 
 PROBE_VERSION = "1.0"
-SCHEMA = "adept.fab_probe.klarf/1"
+SCHEMA = "d4t.fab_probe.klarf/1"
 
 # ---------------------------------------------------------------- 遮蔽政策
 #
@@ -657,7 +657,7 @@ def sibling_tiff(klarf_path, tiff_file_name):
 
 def emit_header(path, meta, include_ids):
     _out("=" * 74)
-    _out("ADEPT 廠內探測報告 #1：KLARF 結構（probe_klarf.py v%s）" % PROBE_VERSION)
+    _out("d4t 廠內探測報告 #1：KLARF 結構（probe_klarf.py v%s）" % PROBE_VERSION)
     _out("=" * 74)
     _out("")
     _out("【這份報告包含什麼】")
@@ -695,7 +695,7 @@ def emit_version(version, checks, fired):
     for name, hit, note in checks:
         _out("    [%s] %-20s %s" % ("V" if hit else " ", name, note))
     if version not in ("1.2", "1.8"):
-        _out("  ** 這個版本字串 ADEPT 沒看過（只處理過 1.2 / 1.8）→ 請務必回報。**")
+        _out("  ** 這個版本字串 d4t 沒看過（只處理過 1.2 / 1.8）→ 請務必回報。**")
     _out("")
 
 
@@ -852,14 +852,14 @@ def emit_image_layout(d, tiff_name, tiff_spec, spec_how, layout, evidence,
     _out("  影像總張數        : %d（defect 列數 %d）" % (total_imgs, len(d["rows"])))
     uniq = sorted(counts.keys())
     if uniq == [2]:
-        _out("  → 每顆 defect 都是 2 張：與 ADEPT 目前的 test/ref 成對假設一致（假設 #1）。")
+        _out("  → 每顆 defect 都是 2 張：與 d4t 目前的 test/ref 成對假設一致（假設 #1）。")
         _out("    但「哪一張是 test、哪一張是 ref」要靠 probe_tiff.py 的頁面資訊確認。")
     elif uniq == [1]:
         _out("  → 每顆 defect 都是 1 張：Review SEM 型（單張，無 ref）。")
     elif uniq == [0]:
         _out("  → 沒有任何 defect 帶圖。")
     else:
-        _out("  → 張數不一致（%s）：ADEPT 的 test/ref 成對假設在這份檔上不成立，請回報。"
+        _out("  → 張數不一致（%s）：d4t 的 test/ref 成對假設在這份檔上不成立，請回報。"
              % ",".join(str(u) for u in uniq))
     _out("")
 
@@ -1087,7 +1087,7 @@ def run(path, include_ids=False, rows_limit=20):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="ADEPT 廠內探測 #1：KLARF 結構（單檔、純標準函式庫、不讀像素）")
+        description="d4t 廠內探測 #1：KLARF 結構（單檔、純標準函式庫、不讀像素）")
     ap.add_argument("klarf", help="要探測的 KLARF 檔（例：C:\\path\\to\\file.klarf）")
     ap.add_argument("--include-ids", action="store_true",
                     help="連 LotID/WaferID/DeviceID 等識別碼的值一起輸出（預設遮蔽）")

@@ -59,7 +59,7 @@
 > 超過 1 MB 就不顯示內容，那顆複製鈕也跟著消失。
 >
 > **使用者的做法是直接複製 raw**：
-> `https://raw.githubusercontent.com/<owner>/ADEPT/main/bundle/ADEPT_bundle.py`
+> `https://raw.githubusercontent.com/<owner>/ADEPT/main/bundle/d4t_bundle.py`
 > 在瀏覽器打得開，全選複製一樣搬得走 —— 跟檔案有多大無關。
 >
 > 所以 **1 MB 不再是任何設計的約束**：不必為了它把文件搬進 `docs/history/`、
@@ -69,7 +69,7 @@
 > `docs/history/` 那個目錄還是有用 —— 它讓公司機用不到的東西不佔搬運的體積、
 > 也讓 diff 乾淨 —— 只是它現在是**整理**，不是**必要**。
 
-**壓成一個檔案仍然是預設做法**（`ADEPT_bundle.py`：lzma + base64）：一次複製
+**壓成一個檔案仍然是預設做法**（`d4t_bundle.py`：lzma + base64）：一次複製
 就搬完，比「一個一個檔案點過去」快得多。代價是內容變成不可讀的 base64，
 但**解包程式本身仍然是可讀的 Python**，而且 `--list` 可以在寫任何檔案之前
 先列出它要寫什麼。
@@ -81,7 +81,7 @@
 
 | 情況 | 用什麼 | 成本 |
 |---|---|---|
-| **第一次搬整包** | `bundle/ADEPT_bundle.py`（壓縮成一個檔案）| **1 次複製** |
+| **第一次搬整包** | `bundle/d4t_bundle.py`（壓縮成一個檔案）| **1 次複製** |
 | 同上，但想先讀過內容 | 在家用機跑 `make_text_bundle.py --split 400` 產純文字數批 | 每批一次複製 |
 | **之後更新** | 複製 `tools/FILELIST.txt`（12 KB）→ `python tools/check_files.py` → 它列出要重新複製哪幾個 | 1 次小複製 + 幾次針對性複製 |
 | **只想跑格式探測** | 直接複製 `fab_probe/probe_*.py`（各 24–46 KB，stdlib-only 單檔，**不需要整個 repo**） | 1–3 次複製 |
@@ -166,7 +166,7 @@ git add -A && python tools/release.py && git add -A
 一行做完兩件事，**順序不能顛倒**（包裡面含著那份清單）：
 
 1. `tools/FILELIST.txt` —— 公司機用它判斷「哪幾個檔案要重新複製」
-2. `bundle/ADEPT_bundle.py` —— 整包壓成一個 `.py`（2026-08-16 是 888 KB），
+2. `bundle/d4t_bundle.py` —— 整包壓成一個 `.py`（2026-08-16 是 888 KB），
    按複製鈕就搬得走。產完會報一行水位，見上面 §2 的警告
 
 `git add` 要在前面：兩者都是從 `git ls-files` 產的，**還沒 add 的新檔案會安靜地
@@ -179,7 +179,7 @@ git add -A && python tools/release.py && git add -A
 3 MB，diff 全是噪音。需要逐字審內容的時候再產：
 
 ```bash
-python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
+python tools/make_text_bundle.py --out bundle/d4t.py --split 400
 ```
 
 ---
@@ -200,7 +200,7 @@ python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
 | `install_offline.py` | **公司機** | ❌ | 用 `wheels\` 裝相依套件 |
 | `doctor.py` | **公司機** | ❌ | 環境自檢 |
 | `fab_probe/probe_*.py` | **公司機** | ❌ | 探測真實資料的格式（單檔，不需要整個 repo）|
-| `check_glas_export.py` | **公司機** | ❌ | 看一份 GLAS 匯出（`*_label.png` + manifest）合不合 ADEPT 的假設，**印出可以貼出來的遮蔽報告**（同 `fab_probe` 那條路；`--reveal` 那一份不要貼）|
+| `check_glas_export.py` | **公司機** | ❌ | 看一份 GLAS 匯出（`*_label.png` + manifest）合不合 d4t 的假設，**印出可以貼出來的遮蔽報告**（同 `fab_probe` 那條路；`--reveal` 那一份不要貼）|
 | `get_code.py` / `.ps1` | 公司機（**目前用不了**）| ❌ | 網路通的時候才逐檔抓 |
 
 判準很簡單：**要 git 的都在家用機。** 公司機那幾支一律 stdlib-only 且不碰 git。

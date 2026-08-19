@@ -23,9 +23,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 def _import_qt(g):
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import inspectors as insp_mod
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
+    from d4t.ui import inspectors as insp_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
     g.update(QApplication=QApplication, insp_mod=insp_mod,
              studio_mod=studio_mod, theme_mod=theme_mod)
 
@@ -269,7 +269,7 @@ def test_it_follows_the_stream_the_card_works_on(qapp):
 
 def test_the_engine_only_records_when_asked(qapp, tmp_path):
     """批次跑一萬顆時每次 set_image 都算兩個直方圖是白花的力氣。"""
-    from adept.core.pipeline.context import Context
+    from d4t.core.pipeline.context import Context
     import numpy as np
 
     ctx = Context()
@@ -486,7 +486,7 @@ def test_it_reads_the_engine_verdict_end_to_end(window, tmp_path):
     """整條路：卡片跑完把三個數字放進 ctx.meta['templates'] → 儀表。"""
     import numpy as np
 
-    from adept.core.algo import template as at
+    from d4t.core.algo import template as at
     from make_sample import generate
 
     out = generate(str(tmp_path / "lotT"), n=4, seed=61)

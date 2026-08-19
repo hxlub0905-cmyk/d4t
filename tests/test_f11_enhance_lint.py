@@ -16,11 +16,11 @@ import json
 
 import pytest
 
-from adept.core.pipeline import get_step
-from adept.core.pipeline.recipe import (
+from d4t.core.pipeline import get_step
+from d4t.core.pipeline.recipe import (
     Edge, Recipe, RecipeNode, ScoreSpec, validate,
 )
-import adept.core.steps  # noqa: F401 - 註冊卡片
+import d4t.core.steps  # noqa: F401 - 註冊卡片
 
 
 def _recipe(nodes, edges, kind: str = "ebi_patch") -> Recipe:

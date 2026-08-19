@@ -24,7 +24,7 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-from adept.core.pipeline import (                          # noqa: E402
+from d4t.core.pipeline import (                          # noqa: E402
     CATEGORY_ALGO, CATEGORY_IMAGE, Context, Edge, ParamSpec, REGISTRY, Recipe,
     RecipeNode, ScoreSpec, Step, register_step, run_defect,
 )

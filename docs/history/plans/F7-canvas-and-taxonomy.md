@@ -119,7 +119,7 @@ pattern frame 的 ROI 可能整個落在框外。
 
 ### pattern frame ROI 要用的工具已經在 repo 裡
 
-`adept/core/algo/period.py`：
+`d4t/core/algo/period.py`：
 
 - `estimate_period(img)` → X/Y 週期 **＋ `confidence_x` / `confidence_y`**
 - `choose_origin(shape, px, py, image=)` → 晶格相位（M4 補完的相位搜尋，
@@ -176,7 +176,7 @@ Region 段成立之後，量測卡要從「自己帶一組幾何參數」改成�
 
 `Context.rois` / `Context.labels` 欄位**早就存在但從來沒有人寫過**
 （`context.py:33-34`，註解寫著「M3 起由 ROI 卡填入」—— 那張卡沒做出來）。
-`adept/core/algo/roi.py` 的 `NamedROI` / `MultiROISet`（vendoring 自 Fusi³）也是現成的。
+`d4t/core/algo/roi.py` 的 `NamedROI` / `MultiROISet`（vendoring 自 Fusi³）也是現成的。
 這次是把它們接上。
 
 **連帶要改**：5 份範例 recipe、`test_example_recipes.py`、端到端測試。
@@ -189,7 +189,7 @@ Region 段成立之後，量測卡要從「自己帶一組幾何參數」改成�
 使用者預期「這邊要花滿多時間 setup 量測工具」。若每個 metric 一張卡，
 會做出 30 張卡然後回到「太瑣碎」的原點。
 
-`adept/core/algo/glv.py` 已經有現成的 metric bank（vendoring 自 PEAR）：
+`d4t/core/algo/glv.py` 已經有現成的 metric bank（vendoring 自 PEAR）：
 
 ```
 GLV_STATS                     metric id → 顯示名
@@ -266,7 +266,7 @@ metric_label / metric_formula 給 UI 顯示名稱與公式
 所以這是**換一組 token + QSS 掃一遍**，不是重寫。段落色降級成 3px 左側色條或小圓點。
 
 > 參考點就在手邊：使用者自己的 **KLIP** 已經是這個視覺語言（平面、中性、
-> 藍色 accent、頂部 tab、密而不擠）。ADEPT 應該向 KLIP 靠齊，而不是繼續繼承 CPE 的暖色。
+> 藍色 accent、頂部 tab、密而不擠）。d4t 應該向 KLIP 靠齊，而不是繼續繼承 CPE 的暖色。
 
 ---
 
@@ -274,7 +274,7 @@ metric_label / metric_formula 給 UI 顯示名稱與公式
 
 | 階段 | 內容 | 風險 | 為什麼是這個順序 |
 |---|---|---|---|
-| **F7-1** | ✅ patch-only 收斂 —— `adept/ui/scope.py` 一個檔就是整個開關 | 低 | 先把世界變簡單 |
+| **F7-1** | ✅ patch-only 收斂 —— `d4t/ui/scope.py` 一個檔就是整個開關 | 低 | 先把世界變簡單 |
 | **F7-2** | ✅ 中性色 + 平面化 + 暗色主題（token swap，呼叫端零改動） | 低 | 早做，判斷版面才不會被暖色帶偏 |
 | **F7-3** | ✅ `Step.group` + icon 分組 + 搜尋 + 前置條件 badge | 中 | 引擎不動 |
 | **F7-4** | ✅ Region 段（具名 ROI）+ 四張量測卡遷移 + 5 份範例 recipe | 中高 | 分數分佈與重構前逐項相同 |
@@ -1648,7 +1648,7 @@ False，那個坑這個 repo 踩過（CLAUDE.md §7）。
 「Add」是**工具決定位置**（接在選著的那張後面）；拖是**使用者決定位置**。
 兩個都留著 —— n8n 兩種都有，而第一次用的人多半先看到按鈕。
 
-MIME 型別是自訂的 `application/x-adept-card`，不是純文字：純文字會讓「從別的
+MIME 型別是自訂的 `application/x-d4t-card`，不是純文字：純文字會讓「從別的
 視窗拖一段字進畫布」也變成新增卡片。接法跟按 Add 完全一樣
 （`_on_add_requested` → `add_card_after`），差別只在落點。
 
@@ -1816,7 +1816,7 @@ data（`secondary`）、整條工具列 —— 全都沒有。兩個獨立的原
 `menu.popup()` 開在自己正下方。兩顆同進退（選單裡唯一那一項擋住的時候，
 還打得開一個「每一項都是灰的」選單，等於讓使用者多按一次才知道不能按）。
 
-第二輪的驗收另外五條，其中一條是**靜態掃描**：`adept/ui` 裡不准再有
+第二輪的驗收另外五條，其中一條是**靜態掃描**：`d4t/ui` 裡不准再有
 `setFixedSize` / `setFixedWidth` / `setFixedHeight` 出現在按鈕上。
 尺寸寫死在呼叫端就會慢慢長回六種 —— 這條的成本近乎零。
 

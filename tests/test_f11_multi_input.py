@@ -29,13 +29,13 @@ sys.path.insert(0, str(REPO / "tools"))
 
 from make_sample import generate                                # noqa: E402
 
-import adept.core.steps                                         # noqa: F401,E402
-from adept.core.ingest.dataset import load_dataset              # noqa: E402
-from adept.core.pipeline import (                               # noqa: E402
+import d4t.core.steps                                         # noqa: F401,E402
+from d4t.core.ingest.dataset import load_dataset              # noqa: E402
+from d4t.core.pipeline import (                               # noqa: E402
     Edge, Recipe, RecipeNode, ScoreSpec, run_defect, validate,
 )
-from adept.core.pipeline.engine import run_defect_cached        # noqa: E402
-from adept.core.pipeline.cache import StageCache                # noqa: E402
+from d4t.core.pipeline.engine import run_defect_cached        # noqa: E402
+from d4t.core.pipeline.cache import StageCache                # noqa: E402
 
 
 @pytest.fixture(scope="module")

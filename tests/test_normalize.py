@@ -1,9 +1,9 @@
-"""Tests for adept.core.algo.normalize (vendored 2026-07-27)."""
+"""Tests for d4t.core.algo.normalize (vendored 2026-07-27)."""
 from __future__ import annotations
 
 import numpy as np
 
-from adept.core.algo.normalize import (
+from d4t.core.algo.normalize import (
     GLV_MASK_MIN_PIXELS,
     normalize_image,
     normalize_image_with_range,

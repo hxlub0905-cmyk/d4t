@@ -75,7 +75,7 @@ def _band_rect(band, length, axis):
 
 ## 4. 做了什麼
 
-### `adept/core/algo/grid.py`
+### `d4t/core/algo/grid.py`
 
 ```
 X 投影 → 一組直的條紋 ─┐
@@ -103,7 +103,7 @@ Y 投影 → 一組橫的條紋 ─┘
 ⚠ **pitch 一律是像素。** GDS 給的是 nm，而 `nm_per_px` 在 KLARF 裡沒有來源
 （docs/FAB-VALIDATION.md）—— 收 nm 的話它會變成第二個恆為 0 的 `cd_x_nm`。
 
-### `adept/core/steps/roi_cross.py`
+### `d4t/core/steps/roi_cross.py`
 
 一張卡 `Locate regions where patterns cross`，產出**兩個**區域：
 

@@ -24,12 +24,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from adept.core.algo import template as algo_template  # noqa: E402
-from adept.core.pipeline import ParamError, get_step  # noqa: E402
-from adept.core.pipeline.context import Context  # noqa: E402
-from adept.core.pipeline.step import StepError  # noqa: E402
-from adept.core.steps._util import roi_pixels  # noqa: E402
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from d4t.core.algo import template as algo_template  # noqa: E402
+from d4t.core.pipeline import ParamError, get_step  # noqa: E402
+from d4t.core.pipeline.context import Context  # noqa: E402
+from d4t.core.pipeline.step import StepError  # noqa: E402
+from d4t.core.steps._util import roi_pixels  # noqa: E402
 
 PERIOD = 40
 BIG_H = 240
@@ -66,7 +66,7 @@ def flat_patch(seed: int = 0) -> np.ndarray:
 
 def epi_regions(cell: np.ndarray, name: str = "epi") -> str:
     """``epi_band`` 的區域字串形式（卡片參數用）。"""
-    from adept.core.pipeline.cellrois import format_cell_rois
+    from d4t.core.pipeline.cellrois import format_cell_rois
     return format_cell_rois([(name, [epi_band(cell)])])
 
 
@@ -470,7 +470,7 @@ def test_the_card_declares_the_regions_it_defines():
 
 def test_an_old_recipe_keeps_its_single_box_region():
     """舊檔的 ``roi_out`` + 四個座標 → ``regions``，結果不變（鐵則 9）。"""
-    from adept.core.pipeline.recipe import Recipe
+    from d4t.core.pipeline.recipe import Recipe
 
     doc = {"recipe_id": "r", "routes": {"main": ["n1"]},
            "score": {"expr": "0", "bins": []},

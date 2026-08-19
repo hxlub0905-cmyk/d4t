@@ -1,10 +1,10 @@
-"""Tests for adept.core.algo.glv (vendored from PEAR)."""
+"""Tests for d4t.core.algo.glv (vendored from PEAR)."""
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from adept.core.algo.glv import (
+from d4t.core.algo.glv import (
     GLV_STATS,
     ROI,
     default_metrics,

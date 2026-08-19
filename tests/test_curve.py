@@ -13,12 +13,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from adept.core.algo.curve import curve_lut, eval_curve
-from adept.core.pipeline.curve import (
+from d4t.core.algo.curve import curve_lut, eval_curve
+from d4t.core.pipeline.curve import (
     IDENTITY, CurveError, format_curve, is_identity, parse_curve,
 )
-from adept.core.pipeline.step import ParamError, ParamSpec
-from adept.core.steps.tone import ToneStep, apply_curve, apply_gamma
+from d4t.core.pipeline.step import ParamError, ParamSpec
+from d4t.core.steps.tone import ToneStep, apply_curve, apply_gamma
 
 
 # --------------------------------------------------------------------------- #
@@ -107,7 +107,7 @@ def test_a_curve_can_do_what_gamma_cannot():
 # 3. 接手規則與影像行為
 # --------------------------------------------------------------------------- #
 def _ctx(dtype=np.uint8):
-    from adept.core.pipeline.context import Context
+    from d4t.core.pipeline.context import Context
     img = np.linspace(0, 255, 64 * 64).reshape(64, 64).astype(dtype)
     ctx = Context()
     ctx.set_image("test", img)

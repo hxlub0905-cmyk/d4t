@@ -3,9 +3,9 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "adept"
+name = "d4t"
 version = "0.1.0.dev0"
-description = "ADEPT: flexible multi-step ADC for semiconductor inspection (EBI patch / RSEM + KLARF)"
+description = "d4t: flexible multi-step ADC for semiconductor inspection (EBI patch / RSEM + KLARF)"
 requires-python = ">=3.9"
 dependencies = ["numpy>=1.24", "opencv-python>=4.8", "tifffile>=2023.7", "openpyxl>=3.1"]
 
@@ -13,12 +13,12 @@ dependencies = ["numpy>=1.24", "opencv-python>=4.8", "tifffile>=2023.7", "openpy
 dev = ["pytest>=7"]
 
 [tool.setuptools.packages.find]
-include = ["adept*"]
+include = ["d4t*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-# 圖示等品牌資產要跟著套件走 —— 不加這一段，pip 裝出來的 adept.ui 底下
+# 圖示等品牌資產要跟著套件走 —— 不加這一段，pip 裝出來的 d4t.ui 底下
 # 沒有 assets/，Studio 會安靜地開一個沒有圖示的視窗。
 [tool.setuptools.package-data]
-"adept.ui" = ["assets/*.svg"]
+"d4t.ui" = ["assets/*.svg"]

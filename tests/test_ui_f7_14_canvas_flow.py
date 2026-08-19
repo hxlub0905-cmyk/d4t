@@ -23,9 +23,9 @@ def _import_qt(g):
     from PySide6.QtCore import QPointF
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import canvas as canvas_mod
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
+    from d4t.ui import canvas as canvas_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
     g.update(QApplication=QApplication, QPointF=QPointF,
              canvas_mod=canvas_mod, studio_mod=studio_mod, theme_mod=theme_mod)
 

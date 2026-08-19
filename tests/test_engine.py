@@ -1,7 +1,7 @@
 """M1 驗收：單顆執行引擎（happy path、失敗隔離、upto_node、trace、JSON 匯出）。
 
 dummy Step 以 "t_" 前綴註冊進 REGISTRY，fixture teardown 一律 pop 掉，
-避免污染並行開發中的 adept/core/steps/ 卡片庫。
+避免污染並行開發中的 d4t/core/steps/ 卡片庫。
 """
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from adept.core.pipeline import engine as engine_mod
-from adept.core.pipeline import (
+from d4t.core.pipeline import engine as engine_mod
+from d4t.core.pipeline import (
     CATEGORY_ALGO,
     CATEGORY_IMAGE,
     Context,

@@ -1,4 +1,4 @@
-"""Tests for the M4-1 phase search in ``adept.core.algo.period.choose_origin``.
+"""Tests for the M4-1 phase search in ``d4t.core.algo.period.choose_origin``.
 
 ``choose_origin`` picks the lattice origin ``(ox, oy)`` — the offset at
 which cutting the image into ``px x py`` cells puts every cell in phase.
@@ -19,8 +19,8 @@ import cv2
 import numpy as np
 import pytest
 
-from adept.core.algo.golden import ghosting_score, stack_cells
-from adept.core.algo.period import choose_origin
+from d4t.core.algo.golden import ghosting_score, stack_cells
+from d4t.core.algo.period import choose_origin
 
 PITCH = 16
 

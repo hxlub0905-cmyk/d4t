@@ -28,9 +28,9 @@ def _import_qt(g):
         QApplication, QComboBox, QLineEdit, QPushButton,
     )
 
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
-    from adept.ui import widgets as widgets_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
+    from d4t.ui import widgets as widgets_mod
     g.update(QApplication=QApplication, QComboBox=QComboBox, QLineEdit=QLineEdit,
              QPushButton=QPushButton, QPixmap=QPixmap, studio_mod=studio_mod,
              theme_mod=theme_mod, widgets_mod=widgets_mod)
@@ -112,7 +112,7 @@ def test_a_toolbar_button_looks_pressable(qapp, theme_name):
 # 2. 模板參數
 # --------------------------------------------------------------------------- #
 def _a_template() -> str:
-    from adept.core.algo import template as at
+    from d4t.core.algo import template as at
 
     img = np.zeros((240, 320), np.float32)
     for k in range(8):
@@ -128,7 +128,7 @@ def _a_template() -> str:
 def test_the_template_parameter_is_not_a_text_box(qapp):
     """值有六千多個字元而且沒有人能用打的。文字框在這裡有三個後果：空的時候
     看起來只是「還沒填」、填了之後變成一片 base64、而且它可以被改。"""
-    from adept.core.pipeline.step import get_step
+    from d4t.core.pipeline.step import get_step
 
     form = widgets_mod.ParamForm()
     step = get_step("roi_template")
@@ -147,7 +147,7 @@ def test_the_template_parameter_is_not_a_text_box(qapp):
 
 def test_the_button_asks_studio_to_open_the_dialog(qapp):
     """按鈕在參數列裡，但對話框是 Studio 開的 —— 元件不知道那是什麼對話框。"""
-    from adept.core.pipeline.step import get_step
+    from d4t.core.pipeline.step import get_step
 
     form = widgets_mod.ParamForm()
     form.set_step(get_step("roi_template").describe(), {}, ["ref"])

@@ -14,13 +14,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from adept.core.pipeline.context import Context
-from adept.core.pipeline.step import get_step
-import adept.core.steps  # noqa: F401 - 註冊卡片
-from adept.core.steps._util import (
+from d4t.core.pipeline.context import Context
+from d4t.core.pipeline.step import get_step
+import d4t.core.steps  # noqa: F401 - 註冊卡片
+from d4t.core.steps._util import (
     CLIP_FRAC, PAIR_FEATURES, PAIR_SAMPLE_MAX, pair_similarity,
 )
-from adept.core.steps.denoise import REMOVED_OVER_NOISE
+from d4t.core.steps.denoise import REMOVED_OVER_NOISE
 
 
 def _ctx(**images) -> Context:

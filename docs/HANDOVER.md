@@ -1,9 +1,9 @@
-# ADEPT 交接文件
+# d4t 交接文件
 
 > **給接手的人（含新的 Claude Code session）：先讀這份，再讀 `CLAUDE.md`。**
 >
 > `CLAUDE.md` 是「怎麼動手」的操作手冊；這份是「為什麼會長成這樣」。
-> ADEPT 是在一個 Claude Cowork session 裡從零做到 v1 的，那個 session 同時讀過
+> d4t 是在一個 Claude Cowork session 裡從零做到 v1 的，那個 session 同時讀過
 > 六個既有專案的原始碼 —— **那份跨專案的脈絡不在程式碼裡，只在這份文件裡。**
 
 版本：2026-07-28 · 對應 commit `M6: offline install toolchain…` · 588 tests
@@ -34,7 +34,7 @@ patch 的叫 **PADC**、review 影像的叫 **RADC**。
 
 **站點差異封裝進 recipe，不封裝進程式碼。**
 
-傳統 PADC/RADC 每個站點一份 code；ADEPT 是一份程式 + 每個站點一份 recipe JSON。
+傳統 PADC/RADC 每個站點一份 code；d4t 是一份程式 + 每個站點一份 recipe JSON。
 recipe 是使用者用滑鼠組出來的、可存檔、可互傳給同事。
 
 第二原則：**推廣鐵則** —— 目標使用者不會寫 code。
@@ -78,27 +78,41 @@ recipe 是使用者用滑鼠組出來的、可存檔、可互傳給同事。
 
 ### 名稱由來
 
-工作代號原本是 FlexADC。M3 之後定名 **ADEPT = Auto Defect Evaluation Pipeline Tool**。
-挑選時排除了水果系（PEACH/FIG/PLUM，本來想跟 PEAR 成家族），選 ADEPT 的理由是：
-縮寫精準對應功能，而 adept（熟練、得心應手）正是要給不寫 code 同事的承諾。
+這個專案改過兩次名字，兩次的理由都在這裡 —— 之後有人問「為什麼叫 d4t」，
+答案是這一段，不要再重新推導一次。
+
+**FlexADC（工作代號）→ ADEPT（M3）→ d4t（2026-08-19）。**
+
+第一次定名 **ADEPT = Auto Defect Evaluation Pipeline Tool**：挑選時排除了水果系
+（PEACH/FIG/PLUM，本來想跟 PEAR 成家族），理由是縮寫精準對應功能，而
+*adept*（熟練、得心應手）正是要給不寫 code 同事的承諾。
+
+第二次改成 **d4t**，理由是 **P = Pipeline 已經跟現況不符**。F9 之後核心不變量是
+「資料從哪來由**線**決定」、影像流的身分是 `(節點, 埠)`、`validate` 會報
+`ambiguous-input` —— 這是 DAG 與畫布，不是一條流水線。名字裡留著 Pipeline
+會一直誤導新人。
+
+`d4t` 是 *defect* 的 **numeronym**（頭字母 + 中間字數 + 尾字母），跟
+i18n / k8s / n8n 同一套慣例；使用者要的就是「像 n8n 那樣，英文加數字」。
+照抄 n8n 的做法：**名字底下永遠釘一行全稱** —— `d4t — defect`。
 
 ---
 
 ## 3. 六個來源專案：跨專案脈絡
 
-**這一節是新 session 最缺的東西。** ADEPT 的演算法幾乎都是從使用者既有的六個專案
+**這一節是新 session 最缺的東西。** d4t 的演算法幾乎都是從使用者既有的六個專案
 vendoring 過來的。那六個專案在使用者的桌面上（`Desktop\hxlub0905-cmyk\`），
 但新的 Claude Code session 不會去讀它們。以下是當初讀過之後的判斷。
 
 ### 各專案提供了什麼
 
-| 專案 | 是什麼 | ADEPT 拿了什麼 | **刻意沒拿什麼** |
+| 專案 | 是什麼 | d4t 拿了什麼 | **刻意沒拿什麼** |
 |---|---|---|---|
 | **KLIP** | KLARF 檔案編輯器（PySide6 GUI + 純邏輯 core） | `klarf_core.py` **整檔搬**（1.2/1.8 無損讀寫、健檢 lint、defect↔TIFF page 對應、比對、API-KLARF 產生）；`klarf_tif_probe` 的免解碼 TIFF 走訪 | 3340 行的 Qt GUI。只留下裡面的 filter DSL 概念 |
 | **GLAS** | GDS/OASIS layout 與 SEM 對位工具 | `fine_align_one`、`_parabola_subpx`、`sem_loader`、ROI label map 契約（`gray[label==k]`）、DAG 拓撲排序概念（`recipe_dependency_order`）、boolean 運算式的 AST 架構 | **整套 OASIS/GDS 解析與渲染**（`oasis_streamer.py` 就 125KB、`gds_align_tool.py` 398KB）、multiprocessing pool harness |
 | **MMH** | SEM 大量量測工具 | recipe 架構原型（一般化成 Step/DAG）、批次引擎模式（ProcessPool + as_completed + per-defect try/except）、次像素邊緣定位（CD 用）、影像品質三指標、calibration profile、KLARF 寫回與 exporter 模式 | CMG 專用的 recipe（54KB）、GUI workspaces |
 | **PEAR** | Pre-EBI 屬性排序工具 | GLV 統計 metric bank、Tukey IQR 離群、Cohen's d / η²、**CJK-safe 影像讀寫**（`np.fromfile` + `imdecode`，Windows 中文路徑必備） | Qt UI、wafer map |
-| **cell-period-estimator (CPE)** | 週期陣列的 cell 週期估測 | `estimate_period`、`stack_cells`、`ghosting_score`、`refine_period`；UI 主題 token 系統（ADEPT 的配色延續自這裡） | — |
+| **cell-period-estimator (CPE)** | 週期陣列的 cell 週期估測 | `estimate_period`、`stack_cells`、`ghosting_score`、`refine_period`；UI 主題 token 系統（d4t 的配色延續自這裡） | — |
 | **Perspective-Combination (Fusi³)** | 多視角 E-beam 影像融合 | 正規化、直方圖匹配、**5-backend 對位**、SNR map、blob 分割、`MultiROISet`（正規化座標、可隨對位平移） | 557KB 的 `dialog.py` UI、PCA fusion（v1 移出）、quadrant 多通道融合（v2 backlog）|
 
 ### 在來源專案裡發現、但**尚未回報給原專案**的問題
@@ -106,11 +120,11 @@ vendoring 過來的。那六個專案在使用者的桌面上（`Desktop\hxlub09
 這幾件事值得回頭修原專案：
 
 1. **Fusi³ `ecc` 對位 backend 位移正負號與其他四個相反。**
-   `cv2.findTransformECC` 的 `WARP_INVERSE_MAP` 語意被弄反了。ADEPT 版已修正並用測試鎖住
-   五個 backend 同號（見 `adept/core/algo/align.py` 檔頭）。
-2. **CPE `choose_origin` 是 stub**（永遠回 `(0,0)`）。ADEPT 在 M4 補完了相位搜尋。
+   `cv2.findTransformECC` 的 `WARP_INVERSE_MAP` 語意被弄反了。d4t 版已修正並用測試鎖住
+   五個 backend 同號（見 `d4t/core/algo/align.py` 檔頭）。
+2. **CPE `choose_origin` 是 stub**（永遠回 `(0,0)`）。d4t 在 M4 補完了相位搜尋。
 3. **MMH 次像素 batch 版比 scalar 版低約 1.5 px 的系統性偏移。**
-   ADEPT 照「行為不變」原則保留原行為並在檔頭記錄；要精確值請用 scalar 版。
+   d4t 照「行為不變」原則保留原行為並在檔頭記錄；要精確值請用 scalar 版。
 
 ### 還沒挖、但可以挖的（v2 backlog）
 

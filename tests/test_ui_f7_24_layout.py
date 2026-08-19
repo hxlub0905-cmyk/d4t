@@ -23,9 +23,9 @@ EXAMPLE_RECIPE = (Path(__file__).resolve().parent.parent
 def _import_qt(g):
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
-    from adept.ui import widgets as widgets_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
+    from d4t.ui import widgets as widgets_mod
     g.update(QApplication=QApplication, studio_mod=studio_mod,
              theme_mod=theme_mod, widgets_mod=widgets_mod)
 
@@ -134,7 +134,7 @@ def test_the_replaced_pipeline_panel_is_gone(qapp):
 
     assert not hasattr(widgets_mod, "PipelinePanel")
 
-    ui = pathlib.Path(__file__).resolve().parent.parent / "adept" / "ui"
+    ui = pathlib.Path(__file__).resolve().parent.parent / "d4t" / "ui"
     hits = []
     for py in sorted(ui.rglob("*.py")):
         src = py.read_text(encoding="utf-8")
@@ -207,7 +207,7 @@ def _paint(widget, w=520, h=340):
 
 
 def _spread_with_data(qapp):
-    from adept.ui import inspectors as insp
+    from d4t.ui import inspectors as insp
 
     panel = insp.MeasureInspector()
     batch = [{"features": {"glv_mean": 40.0 + i, "glv_max": 200.0 + 2 * i}}
@@ -235,7 +235,7 @@ def test_the_spread_panel_says_what_its_axis_is(qapp):
     夠不夠多」，結果對著改之前的程式也通過 —— 抗鋸齒的字邊本來就會經過那個
     顏色附近。量顏色之前要先確定那個顏色只有你要找的東西會畫。
     """
-    from adept.ui import inspectors as insp
+    from d4t.ui import inspectors as insp
 
     panel = _spread_with_data(qapp)
     assert panel.has_data() is True
@@ -284,7 +284,7 @@ def test_an_edge_that_runs_backwards_stays_near_its_two_ends(window, qapp):
     qapp.processEvents()
     # 隱含順序的虛線 2026-08-14 退役 —— 換行那條線現在要自己拉（顯式），
     # 這條測試鎖的是**形狀**，線是誰畫的不重要。
-    from adept.ui import canvas as canvas_mod
+    from d4t.ui import canvas as canvas_mod
 
     order = window.model.node_order
     wrap_at = canvas_mod.WRAP

@@ -16,9 +16,9 @@ import cv2
 import numpy as np
 import pytest
 
-import adept.core.steps  # noqa: F401 — registration side-effect
-from adept.core.pipeline.context import Context
-from adept.core.pipeline.step import REGISTRY, StepError
+import d4t.core.steps  # noqa: F401 — registration side-effect
+from d4t.core.pipeline.context import Context
+from d4t.core.pipeline.step import REGISTRY, StepError
 
 PITCH = 16
 DEFECT = (slice(70, 80), slice(100, 112))   # 種進去的缺陷位置（y, x）
@@ -227,7 +227,7 @@ def test_an_old_recipe_that_says_golden_cell_still_opens():
     一條 `unknown-feature` 警告加一個算不出來的分數，而那個分數正是這份
     recipe 存在的理由。
     """
-    from adept.core.pipeline import Recipe
+    from d4t.core.pipeline import Recipe
 
     r = Recipe.from_json_dict({
         "recipe_id": "old", "version": 1,

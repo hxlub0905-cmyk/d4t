@@ -1,4 +1,4 @@
-# CLAUDE.md — ADEPT 操作手冊
+# CLAUDE.md — d4t 操作手冊
 
 給 Claude Code／開發者的**動手指南**。這一份會被讀進每一個 session，
 所以它刻意只留「不知道就會做錯」的東西；**參考資料一律放在 `docs/`，用到才讀**。
@@ -22,7 +22,7 @@
 | **進度與 phase 計畫** | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 想知道「接下來做什麼」 |
 | **為什麼長成這樣**：需求訪談結論、六個來源專案的脈絡 | [`docs/HANDOVER.md`](docs/HANDOVER.md) | 第一次接手；想改一個「看起來多餘」的設計之前 |
 | 廠內待驗證的假設、受限機器的部署 | [`docs/FAB-VALIDATION.md`](docs/FAB-VALIDATION.md) | 要動 KLARF／單位／搬運時 |
-| **上游 GLAS 的介面**（label map／合成 gray／alignment；ADEPT 不解析 layout）| [`docs/GLAS-INTERFACE.md`](docs/GLAS-INTERFACE.md) | 要動 ROI 第三條路、或要請 GLAS 改東西時 |
+| **上游 GLAS 的介面**（label map／合成 gray／alignment；d4t 不解析 layout）| [`docs/GLAS-INTERFACE.md`](docs/GLAS-INTERFACE.md) | 要動 ROI 第三條路、或要請 GLAS 改東西時 |
 | 逐輪的決策與理由 | [`SESSION_LOG.md`](SESSION_LOG.md)（近期）＋ [`docs/history/`](docs/history/) | 查「這個決定當初為什麼這樣下」|
 
 **加一份新文件之前先問：這個主題已經有家了嗎。** 有的話寫進那一份。
@@ -31,7 +31,8 @@
 
 ## 1. 這是什麼
 
-**ADEPT** = Auto Defect Evaluation Pipeline Tool。
+**d4t** = *defect* 的 numeronym（頭字母 + 中間字數 + 尾字母，跟 i18n / k8s / n8n 同一套）。
+名字底下永遠釘一行全稱：**d4t — defect**。
 半導體 E-beam Inspection 的彈性 ADC 工具：讀 patch/RSEM 影像 + KLARF，
 用「步驟卡片組 pipeline」對每顆 defect 算分、分 bin、寫回 KLARF。
 
@@ -60,7 +61,7 @@ Phase 2），使用者定調**先把引擎做對，再回頭做產品化**（見
 
 ## 2. 鐵則（違反 = 測試會擋）
 
-1. **`adept/core` 不得 import Qt**。UI 只透過 callback 與 core 互動。
+1. **`d4t/core` 不得 import Qt**。UI 只透過 callback 與 core 互動。
 2. **Python 3.9 相容語法**（廠內機器可能是舊版）。測試以 `ast.parse(feature_version=(3,9))` 掃全套件。
 3. **每個 ParamSpec 的 `help` 必填**且要是白話。`register_step` 會拒絕沒有 help 的卡片。
 4. **每個 Step 要有合理 default 與 min/max**。使用者填爆的值必須擋在 `validate_params`，
@@ -90,7 +91,7 @@ Phase 2），使用者定調**先把引擎做對，再回頭做產品化**（見
 ## 3. 加一張新卡片（最常見的工作）
 
 ```python
-# adept/core/steps/my_card.py
+# d4t/core/steps/my_card.py
 from ..pipeline.context import Context
 from ..pipeline.step import CATEGORY_ALGO, ParamSpec, Step, StepError, register_step
 
@@ -111,7 +112,7 @@ class MyCardStep(Step):
     def run(self, ctx: Context, params):
         p = self.validate_params(params)
         img = ctx.require_image(p["source"])       # 缺影像會拋帶說明的 ContextError
-        ctx.add_feature("my_metric", float(...))   # 演算法請呼叫 adept.core.algo.*
+        ctx.add_feature("my_metric", float(...))   # 演算法請呼叫 d4t.core.algo.*
         return ctx
 ```
 
@@ -165,8 +166,8 @@ pip install -r requirements.txt && pip install pytest
 
 QT_QPA_PLATFORM=offscreen pytest -q                # 全部測試（Windows 不用設）
 python tools/make_sample.py /tmp/lot --n 100       # 產合成資料
-python -m adept gui                                # 開 Studio
-python -m adept run <recipe>.json /tmp/lot/LOT_SYN.001 \
+python -m d4t gui                                # 開 Studio
+python -m d4t run <recipe>.json /tmp/lot/LOT_SYN.001 \
     --workers 4 --cache /tmp/cache --db /tmp/runs.db --csv features.csv
 ```
 
@@ -213,7 +214,7 @@ git add -A && python tools/release.py && git add -A
 後兩種沒有 KLARF → 沒有座標、**寫不回 KLARF**，而那句話**常駐在資料集標籤上**
 （`tiff_stack · defect 1 / 3 · no KLARF`）—— 不是等使用者按了 Export 才發現。
 
-`adept/ui/scope.py` 仍然是這類「暫時不給看」的**唯一**去處，
+`d4t/ui/scope.py` 仍然是這類「暫時不給看」的**唯一**去處，
 **而「入口長什麼樣」也住在同一份**（F11 Input-5）：
 
 ```python
@@ -254,7 +255,7 @@ ATTACHMENTS = (...)              # 掛在已載入 lot 上的附加檔（GLAS �
 
 **不確定的時候先收起來**：成本是零，回復的成本是拿掉一個字串。
 
-> ⚠ **`adept/core/algo/period.py` 與 `algo/golden.py` 都不要刪。**
+> ⚠ **`d4t/core/algo/period.py` 與 `algo/golden.py` 都不要刪。**
 > 兩支都還有呼叫者（`steps/pattern_ref.py`、`algo/template.py`），但 2026-08-18
 > 有一小時它們一個都沒有 —— 那正是這種模組被當成死碼順手清掉的時候。
 > `estimate_period` / `choose_origin` 的相位搜尋是之後做 **pattern-frame ROI**
@@ -262,7 +263,7 @@ ATTACHMENTS = (...)              # 掛在已載入 lot 上的附加檔（GLAS �
 > `docs/history/plans/F7-canvas-and-taxonomy.md` §4）。
 > 便利貼：`tests/test_ui_input_kinds.py::test_period_module_is_not_orphaned`。
 
-CLI 不受影響：`python -m adept run` 照樣跑得動 rsem recipe。
+CLI 不受影響：`python -m d4t run` 照樣跑得動 rsem recipe。
 
 ---
 

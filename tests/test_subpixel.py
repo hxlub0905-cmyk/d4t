@@ -1,10 +1,10 @@
-"""Tests for adept.core.algo.subpixel (vendored from MMH cmg_recipe)."""
+"""Tests for d4t.core.algo.subpixel (vendored from MMH cmg_recipe)."""
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from adept.core.algo.subpixel import (
+from d4t.core.algo.subpixel import (
     SubpixelResult,
     aggregate_values,
     compute_sample_xs,

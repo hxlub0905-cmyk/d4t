@@ -1,7 +1,7 @@
 # F11 Region-3 第 3 步：GDS label map → 具名區域。
 """這一份鎖住的是**框真的等於那一層**，不是「卡片跑得完」。
 
-ADEPT 的區域是一組軸對齊矩形，而 GLAS 給的是任意形狀的 mask。中間那個轉換有
+d4t 的區域是一組軸對齊矩形，而 GLAS 給的是任意形狀的 mask。中間那個轉換有
 兩種做法，而錯的那一種**不會報錯**：
 
 * **取 bounding box** —— 一個 L 形的 bbox 會框到別的材質，然後吐出一個看起來
@@ -26,12 +26,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from adept.core.algo import mask as algo_mask  # noqa: E402
-from adept.core.ingest import glas_export  # noqa: E402
-from adept.core.pipeline import get_step  # noqa: E402
-from adept.core.pipeline.context import Context  # noqa: E402
-from adept.core.pipeline.step import StepError  # noqa: E402
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from d4t.core.algo import mask as algo_mask  # noqa: E402
+from d4t.core.ingest import glas_export  # noqa: E402
+from d4t.core.pipeline import get_step  # noqa: E402
+from d4t.core.pipeline.context import Context  # noqa: E402
+from d4t.core.pipeline.step import StepError  # noqa: E402
 
 LAYERS = "1:epi, 2:mg"
 
@@ -279,7 +279,7 @@ def test_two_layers_that_would_collide_get_different_names():
 
 def test_the_default_layer_map_parses_as_the_card_parameter():
     """預設值要能直接餵進 `channel_map` 的驗證（整數、不重複、名字能當變數）。"""
-    from adept.core.pipeline.channels import parse_channel_map
+    from d4t.core.pipeline.channels import parse_channel_map
 
     doc = {"label_map": [{"id": 1, "layer": "L17/D0"},
                          {"id": 2, "layer": "L21/D0"}]}

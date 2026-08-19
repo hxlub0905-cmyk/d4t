@@ -35,7 +35,7 @@ def _import_qt(g):
         QApplication, QPushButton, QToolBar, QToolButton, QVBoxLayout, QWidget,
     )
 
-    from adept.ui import theme as theme_mod
+    from d4t.ui import theme as theme_mod
     g.update(Qt=Qt, QColor=QColor, QPixmap=QPixmap, QApplication=QApplication,
              QPushButton=QPushButton, QToolBar=QToolBar, QToolButton=QToolButton,
              QVBoxLayout=QVBoxLayout, QWidget=QWidget, theme_mod=theme_mod)
@@ -331,7 +331,7 @@ def test_the_toolbar_separator_is_defined_once(qapp):
 # 第二輪：尺寸與游標不該是每個呼叫端各自記得的事
 # --------------------------------------------------------------------------- #
 def _studio(qapp):
-    from adept.ui import studio as studio_mod
+    from d4t.ui import studio as studio_mod
 
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     win.show()
@@ -386,7 +386,7 @@ def test_nobody_hard_codes_a_button_size_any_more(qapp):
     import ast
     import pathlib
 
-    ui = pathlib.Path(__file__).resolve().parent.parent / "adept" / "ui"
+    ui = pathlib.Path(__file__).resolve().parent.parent / "d4t" / "ui"
     banned = {"setFixedSize", "setFixedWidth", "setFixedHeight"}
     hits = []
     for py in sorted(ui.rglob("*.py")):
@@ -604,7 +604,7 @@ def test_the_stage_button_repolishes_when_it_opens(qapp):
     這是把 per-widget stylesheet 換成 ``[active="true"]`` 時最容易漏的一步：
     ``setProperty`` 只是存一個值，而且不報錯。
     """
-    from adept.ui import widgets as widgets_mod
+    from d4t.ui import widgets as widgets_mod
 
     host = QWidget()
     lay = QVBoxLayout(host)
@@ -631,7 +631,7 @@ def test_a_library_row_follows_a_theme_switch(qapp):
     而換主題的那條路只走了 rail 上的階段鈕。於是「needs diff」那幾列會留在
     上一個主題的灰色，而畫面其他地方都變了。
     """
-    from adept.ui import widgets as widgets_mod
+    from d4t.ui import widgets as widgets_mod
 
     describe = {"key": "subtract", "label": "Subtract", "help": "test - ref",
                 "reads": ["diff"], "group": "compare"}
@@ -681,7 +681,7 @@ def test_the_widgets_stopped_writing_their_own_palette(qapp):
     """
     import pathlib
 
-    ui = pathlib.Path(__file__).resolve().parent.parent / "adept" / "ui"
+    ui = pathlib.Path(__file__).resolve().parent.parent / "d4t" / "ui"
     offenders = []
     for name, marker in (("widgets.py", "QFrame#libItem"),
                          ("widgets.py", "QFrame#stageButton"),
@@ -726,7 +726,7 @@ def test_every_icon_name_actually_draws_something(qapp):
     """
     from PySide6.QtGui import QPainter
 
-    from adept.ui import widgets as widgets_mod
+    from d4t.ui import widgets as widgets_mod
 
     blank = []
     for name in widgets_mod.GLYPH_ICONS:
@@ -796,7 +796,7 @@ def test_an_icon_button_says_what_it_is_without_a_label(qapp):
     tooltip 已經寫了那句話，直接拿來當 accessible name —— 不要為同一件事再發明
     第二份說明，那兩份遲早會不一樣。
     """
-    from adept.ui import widgets as widgets_mod
+    from d4t.ui import widgets as widgets_mod
 
     b = widgets_mod.IconButton("fit", "Fit the whole pipeline in view")
     assert b.text() == ""
@@ -819,7 +819,7 @@ def test_the_icon_follows_the_button_it_is_drawn_on(qapp):
     所以換膚與變灰完全不必通知任何人 —— 這正是第三輪那條教訓的延續：
     要嘛交給 QSS，要嘛就會有人忘記重套。
     """
-    from adept.ui import widgets as widgets_mod
+    from d4t.ui import widgets as widgets_mod
 
     host = QWidget()
     lay = QVBoxLayout(host)
@@ -845,7 +845,7 @@ def test_the_theme_button_says_which_theme_is_on(qapp):
     """
     from PySide6.QtGui import QPainter
 
-    from adept.ui import widgets as widgets_mod
+    from d4t.ui import widgets as widgets_mod
 
     def render(dark):
         pm = QPixmap(24, 24)

@@ -16,10 +16,10 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from make_sample import generate  # noqa: E402
 
-import adept.core.steps  # noqa: F401,E402
-from adept.core.ingest.dataset import load_dataset  # noqa: E402
-from adept.core.pipeline import Recipe, run_batch  # noqa: E402
-from adept.core.pipeline.batch import _pool_context  # noqa: E402
+import d4t.core.steps  # noqa: F401,E402
+from d4t.core.ingest.dataset import load_dataset  # noqa: E402
+from d4t.core.pipeline import Recipe, run_batch  # noqa: E402
+from d4t.core.pipeline.batch import _pool_context  # noqa: E402
 
 RECIPE = REPO / "tests" / "fixtures" / "recipes" / "die_to_die_basic.json"
 

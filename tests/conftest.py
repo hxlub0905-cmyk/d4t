@@ -9,7 +9,7 @@ headless 測試裡，一個 modal 對話框不會讓測試失敗 —— 它會�
 驗完再關回去。
 
 刻意**不**在這裡 import Qt：core 的測試不該因為一個 conftest 就把 PySide6 拉
-進來。等到某個 UI 測試把 `adept.ui.studio` 載進來之後，這個 fixture 才動它。
+進來。等到某個 UI 測試把 `d4t.ui.studio` 載進來之後，這個 fixture 才動它。
 （fixture 的建立順序保證得了這件事：module-scoped 的 `qapp` 比 function-scoped
 的 autouse fixture 早建立，而 `qapp` 就是 import Studio 的那一步。）
 """
@@ -22,7 +22,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _no_modal_dialogs_in_tests():
-    mod = sys.modules.get("adept.ui.studio")
+    mod = sys.modules.get("d4t.ui.studio")
     if mod is not None:
         mod.StudioWindow.PROMPT_ON_CLOSE = False
     yield
@@ -39,7 +39,7 @@ def wire_up(model, node_id: str) -> str:
     這個 helper 就是那一步的最短寫法 —— 每一格輸入接上它 ``ParamSpec`` 宣告的
     預設流，等同使用者照最直覺的方式接完。要接別條流的測試自己 ``set_param``。
     """
-    from adept.core.pipeline import get_step
+    from d4t.core.pipeline import get_step
 
     node = model.nodes[str(node_id)]
     for spec in get_step(node.step).input_specs():

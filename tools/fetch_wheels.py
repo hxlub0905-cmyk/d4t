@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# ADEPT offline packaging tool #1 — authored 2026-07-28 (M6-1).
-"""在**有網路的機器**上，把 ADEPT 需要的套件下載成離線 wheels 資料夾。
+# d4t offline packaging tool #1 — authored 2026-07-28 (M6-1).
+"""在**有網路的機器**上，把 d4t 需要的套件下載成離線 wheels 資料夾。
 
 情境：公司機的 pip 連不到外網（或整台機器沒有對外網路），
 所以要先在家用/開發機把「Windows 版的 .whl 檔」抓好，整個資料夾帶進廠。
@@ -36,7 +36,7 @@ import sys
 from typing import Dict, List, Optional, Sequence, Tuple
 
 MANIFEST_NAME = "MANIFEST.txt"
-MANIFEST_SCHEMA = "adept.wheels.manifest/1"
+MANIFEST_SCHEMA = "d4t.wheels.manifest/1"
 
 DEFAULT_PLATFORM = "win_amd64"
 DEFAULT_PYTHON_VERSION = "39"
@@ -192,9 +192,9 @@ def build_manifest_text(*, wheels: Sequence[str], dest: str, platforms: Sequence
         rows.append((fn, sha256_of(full), size))
 
     lines: List[str] = []
-    lines.append("# ADEPT 離線安裝套件清單（MANIFEST）")
+    lines.append("# d4t 離線安裝套件清單（MANIFEST）")
     lines.append("# 由 tools/fetch_wheels.py 產生；tools/install_offline.py 會讀這個檔做版本檢查。")
-    lines.append("# 這個資料夾只包含公開 PyPI 上的官方套件，沒有任何 ADEPT 自製二進位檔。")
+    lines.append("# 這個資料夾只包含公開 PyPI 上的官方套件，沒有任何 d4t 自製二進位檔。")
     lines.append("")
     lines.append("schema: %s" % MANIFEST_SCHEMA)
     lines.append("generated_utc: %s" % now)
@@ -301,11 +301,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ap = argparse.ArgumentParser(
         prog="fetch_wheels.py",
-        description="在有網路的機器上，把 ADEPT 的相依套件下載成離線 wheels 資料夾。",
+        description="在有網路的機器上，把 d4t 的相依套件下載成離線 wheels 資料夾。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="範例：\n"
                "  python tools/fetch_wheels.py --python-version 311 --include-pytest\n"
-               "  python tools/fetch_wheels.py --platform win_amd64 --dest D:\\adept_wheels\n")
+               "  python tools/fetch_wheels.py --platform win_amd64 --dest D:\\d4t_wheels\n")
     ap.add_argument("--dest", default="wheels", help="wheel 存放資料夾（預設 wheels）")
     ap.add_argument("--python-version", default=DEFAULT_PYTHON_VERSION,
                     help="公司機的 Python 版本，寫成 39 / 310 / 311（預設 39）")
@@ -328,7 +328,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if not os.path.isfile(args.requirements):
         print("[錯誤] 找不到 requirements 檔：%s" % args.requirements, file=sys.stderr)
-        print("       請在 ADEPT 專案資料夾裡執行，或用 --requirements 指定路徑。", file=sys.stderr)
+        print("       請在 d4t 專案資料夾裡執行，或用 --requirements 指定路徑。", file=sys.stderr)
         return 2
     try:
         req_names = parse_requirements(args.requirements)
@@ -347,7 +347,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                             implementation=args.implementation, abi=abi,
                             extra_packages=extra)
 
-    print("ADEPT 離線 wheels 下載")
+    print("d4t 離線 wheels 下載")
     print("  目標平台      ：%s" % ", ".join(platforms))
     print("  目標 Python   ：%s（abi %s、implementation %s）"
           % (args.python_version, abi, args.implementation))
@@ -420,7 +420,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 1
 
     print("\n結論：%d 個 wheel、共 %s，全部齊全。" % (len(wheels), _human_size(total)))
-    print("下一步：把整個 %s 資料夾連同 ADEPT 原始碼帶到公司機，然後執行" % os.path.basename(dest))
+    print("下一步：把整個 %s 資料夾連同 d4t 原始碼帶到公司機，然後執行" % os.path.basename(dest))
     print("        python tools\\install_offline.py --wheels %s" % os.path.basename(dest))
     return 0
 

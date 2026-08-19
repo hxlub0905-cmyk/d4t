@@ -2,7 +2,7 @@
 
 給**廠內工程師**與**資料攜出審核人員**看的說明。
 
-ADEPT 全程用合成資料開發（真實資料不能出廠），因此有三個假設必須拿真實檔案確認。
+d4t 全程用合成資料開發（真實資料不能出廠），因此有三個假設必須拿真實檔案確認。
 這個資料夾裡的三支腳本就是為此而生：**它們只讀檔、只印文字報告，不修改任何檔案、
 不連網路、不產生新檔**（除非你自己用 `>` 把輸出導到檔案）。
 
@@ -27,7 +27,7 @@ ADEPT 全程用合成資料開發（真實資料不能出廠），因此有三�
 ## 1. 執行前你需要知道的事
 
 * **單檔、純標準函式庫。** 每支腳本都是一個 `.py`，不需要 `pip install` 任何東西，
-  也不會 import ADEPT。有 Python 就能跑（3.6 以上；3.8 以上最保險）。
+  也不會 import d4t。有 Python 就能跑（3.6 以上；3.8 以上最保險）。
 * **不需要網路、不需要管理員權限。**
 * **只讀不寫。** 腳本不會碰你的原始檔（以唯讀模式開檔）。
 * **輸出是純文字。** 直接看得懂，也可以用 `>` 存成 `.txt` 再貼給對方。
@@ -37,7 +37,7 @@ ADEPT 全程用合成資料開發（真實資料不能出廠），因此有三�
 把 `fab_probe` 資料夾（三個 `.py` + 這份 README）複製到廠內機器，開啟「命令提示字元」：
 
 ```bat
-cd C:\adept\fab_probe
+cd C:\d4t\fab_probe
 
 REM 1) KLARF 結構（最先跑這支）
 python probe_klarf.py C:\data\LOT1234.001 > klarf_report.txt
@@ -133,7 +133,7 @@ Linux / macOS 一樣：`python3 probe_klarf.py /data/LOT1234.001 > klarf_report.
 |---|---|
 | 1 | 檔案基本資訊（大小、換行、編碼） |
 | 2 | 版本判定 1.2 / 1.8，以及**是哪一條啟發式命中的** |
-| 3 | header 欄位名清單，並標出哪些是 ADEPT 目前**沒看過**的欄位（`NEW`） |
+| 3 | header 欄位名清單，並標出哪些是 d4t 目前**沒看過**的欄位（`NEW`） |
 | 4 | defect 欄位清單（宣告型別 + 由資料推斷的型別）、列數 |
 | **5** | **影像佈局變體判定 + 證據**（假設 #3；最重要） |
 | 6 | 列長異常統計（只有數量與索引） |
@@ -176,7 +176,7 @@ Linux / macOS 一樣：`python3 probe_klarf.py /data/LOT1234.001 > klarf_report.
 
 遇到解不開的壓縮（LZW、JPEG、deflate）或 tile 排列時，**會清楚說明並跳過該頁**，
 不會中斷；那一行的說明本身就是要回報的重要資訊
-（代表廠內 TIFF 用了 ADEPT 沒預期的編碼方式）。
+（代表廠內 TIFF 用了 d4t 沒預期的編碼方式）。
 
 ---
 
@@ -211,11 +211,11 @@ Linux / macOS 一樣：`python3 probe_klarf.py /data/LOT1234.001 > klarf_report.
 
 ## 6. 給維護者的話（不是給廠內使用者）
 
-* 三支腳本**刻意不 import `adept`**，而是把 `adept/core/ingest/klarf_core.py` 與
-  `adept/core/ingest/tiff_index.py` 的判定邏輯**重寫一份**（純標準函式庫）。
+* 三支腳本**刻意不 import `d4t`**，而是把 `d4t/core/ingest/klarf_core.py` 與
+  `d4t/core/ingest/tiff_index.py` 的判定邏輯**重寫一份**（純標準函式庫）。
   這是為了讓廠內只需要複製單一檔案，代價是**兩邊要同步維護**：
   改動 `detect_version` / `image_layout` 一族 / `read_tiff_pages` 時，
   這裡也要跟著改。每支腳本的檔頭都列了它鏡射了哪些函式。
 * `tests/test_fab_probe.py` 會用 `tools/make_sample.py` 與 `tools/make_sample_rsem.py`
   產生資料，再以 subprocess 跑這三支腳本並檢查輸出（含遮蔽政策與「不得 import
-  numpy/cv2/tifffile/adept」的原始碼掃描）。
+  numpy/cv2/tifffile/d4t」的原始碼掃描）。

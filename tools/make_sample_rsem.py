@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ADEPT synthetic sample generator (Review SEM) — authored 2026-07-28 (M4-2).
+# d4t synthetic sample generator (Review SEM) — authored 2026-07-28 (M4-2).
 """合成 Review SEM（rSEM）測試 lot 產生器 —— ingest 的另一條分支。
 
 和 `make_sample.py`（EBI patch：一份多頁 TIFF，每顆 defect 兩頁 test/ref）
@@ -39,7 +39,7 @@ from typing import Any, Dict, List
 import cv2
 import numpy as np
 
-# 讓 `python3 tools/make_sample_rsem.py` 不裝套件也能 import adept（與同層的 _synth）
+# 讓 `python3 tools/make_sample_rsem.py` 不裝套件也能 import d4t（與同層的 _synth）
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
@@ -47,7 +47,7 @@ _TOOLS = os.path.dirname(os.path.abspath(__file__))
 if _TOOLS not in sys.path:
     sys.path.insert(0, _TOOLS)
 
-from adept.core.ingest import dataset, klarf_core  # noqa: E402
+from d4t.core.ingest import dataset, klarf_core  # noqa: E402
 
 # 圖案／缺陷合成的共用零件（與 make_sample.py 共用同一組數值行為）
 from _synth import (  # noqa: E402
@@ -101,7 +101,7 @@ def _make_klarf_text(rows: List[str]) -> str:
     return f"""Record FileRecord  "1.8"
 {{
   Field FileTimestamp 1 {{"{_TIMESTAMP}"}}
-  Field InspectionStationID 3 {{"SYN", "SYN", "ADEPT"}}
+  Field InspectionStationID 3 {{"SYN", "SYN", "d4t"}}
 
   Record LotRecord "{LOT_NAME}"
   {{
@@ -270,7 +270,7 @@ def generate(out_dir, n: int = 24, real_frac: float = 0.5, size: int = 256,
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
-        description="產生 ADEPT 合成 Review SEM lot（KLARF 1.8 + 每顆 defect 一張影像 + ground truth）。")
+        description="產生 d4t 合成 Review SEM lot（KLARF 1.8 + 每顆 defect 一張影像 + ground truth）。")
     ap.add_argument("out_dir", help="輸出資料夾（不存在會建立）")
     ap.add_argument("--n", type=int, default=24, help="defect 數量（預設 24）")
     ap.add_argument("--real-frac", type=float, default=0.5,

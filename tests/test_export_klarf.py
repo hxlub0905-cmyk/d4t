@@ -17,9 +17,9 @@ import sys
 
 import pytest
 
-from adept.core.export import klarf_out
-from adept.core.export.klarf_out import ExportError
-from adept.core.ingest import dataset, klarf_core
+from d4t.core.export import klarf_out
+from d4t.core.export.klarf_out import ExportError
+from d4t.core.ingest import dataset, klarf_core
 
 _TOOLS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools")
 if _TOOLS not in sys.path:

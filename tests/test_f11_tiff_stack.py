@@ -24,10 +24,10 @@ import tifffile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import adept.core.steps                                        # noqa: F401,E402
-from adept.core.ingest import dataset                           # noqa: E402
-from adept.core.pipeline import Context                         # noqa: E402
-from adept.core.pipeline.step import REGISTRY                   # noqa: E402
+import d4t.core.steps                                        # noqa: F401,E402
+from d4t.core.ingest import dataset                           # noqa: E402
+from d4t.core.pipeline import Context                         # noqa: E402
+from d4t.core.pipeline.step import REGISTRY                   # noqa: E402
 
 
 @pytest.fixture()
@@ -187,7 +187,7 @@ def test_a_single_defect_failing_does_not_kill_the_batch(tmp_path):
     with tifffile.TiffWriter(str(path)) as tw:
         tw.write((np.linspace(0, 4095, 256).reshape(16, 16)).astype(np.uint16),
                  photometric="minisblack")
-    from adept.core.pipeline import Recipe, RecipeNode, ScoreSpec, run_defect
+    from d4t.core.pipeline import Recipe, RecipeNode, ScoreSpec, run_defect
     ds = dataset.load_tiff_stack(str(path), per_defect=1)
     rec = Recipe(
         recipe_id="deep", routes={"tiff_stack": ["load"]},
@@ -206,7 +206,7 @@ def test_an_image_file_route_keeps_its_dtype_so_the_guard_can_see_it(tmp_path):
     (a) 兩張圖之間不再可比（`test − ref` 的前提沒了）、
     (b) 防呆看不到原本的 dtype。改走 `imageio.load_raw` 之後兩件事都解了。
     """
-    from adept.core.ingest import imageio
+    from d4t.core.ingest import imageio
     deep = (np.linspace(0, 4095, 256).reshape(16, 16)).astype(np.uint16)
     tifffile.imwrite(str(tmp_path / "d1.tif"), deep)
     assert imageio.load_raw(str(tmp_path / "d1.tif")).dtype == np.uint16

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ADEPT 廠內探測腳本 #3：灰階統計（單檔、純標準函式庫）。
+"""d4t 廠內探測腳本 #3：灰階統計（單檔、純標準函式庫）。
 
 *** 這是三支腳本裡唯一會「讀像素值」的一支。***
 它只輸出彙總統計（直方圖、min/max/平均/標準差、4x4 區塊平均），
@@ -12,8 +12,8 @@
   - 每頁平均亮度的漂移 → 判斷 test/ref 或前後頁是否有系統性亮度差（假設 #1 的旁證）
   - 4x4 區塊平均 → 看視野是否有大範圍不均（照明/掃描不均）
 
-TIFF 走訪邏輯鏡射自 adept/core/ingest/tiff_index.py（read_tiff_pages）；
-像素解碼在 ADEPT 是交給 tifffile，這裡為了「不裝任何套件」自己寫了
+TIFF 走訪邏輯鏡射自 d4t/core/ingest/tiff_index.py（read_tiff_pages）；
+像素解碼在 d4t 是交給 tifffile，這裡為了「不裝任何套件」自己寫了
 最小解碼器：**只支援 strip 排列、未壓縮或 PackBits、8/16-bit、單通道**。
 遇到解不開的壓縮方式會清楚說明並跳過該頁，不會中斷。
 
@@ -30,7 +30,7 @@ import struct
 import sys
 
 PROBE_VERSION = "1.0"
-SCHEMA = "adept.fab_probe.stats/1"
+SCHEMA = "d4t.fab_probe.stats/1"
 
 TYPE_SIZE = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4,
              10: 8, 11: 4, 12: 8, 13: 4, 16: 8, 17: 8, 18: 8}
@@ -352,7 +352,7 @@ def select_pages(n, k):
 
 def emit_header(path):
     _out("=" * 74)
-    _out("ADEPT 廠內探測報告 #3：灰階統計（probe_stats.py v%s）" % PROBE_VERSION)
+    _out("d4t 廠內探測報告 #3：灰階統計（probe_stats.py v%s）" % PROBE_VERSION)
     _out("=" * 74)
     _out("")
     _out("  ****************************************************************")
@@ -595,7 +595,7 @@ def run(path, n_pages=20, bins=16, max_pixels=2000000):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="ADEPT 廠內探測 #3：灰階統計（會讀像素值，只輸出彙總統計）")
+        description="d4t 廠內探測 #3：灰階統計（會讀像素值，只輸出彙總統計）")
     ap.add_argument("tiff", help="要探測的多頁 TIFF（例：C:\\path\\to\\lot.tif）")
     ap.add_argument("--pages", type=int, default=20, help="抽樣幾頁（預設 20）")
     ap.add_argument("--bins", type=int, default=16, help="直方圖格數（預設 16）")

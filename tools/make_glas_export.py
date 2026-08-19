@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ADEPT synthetic GLAS export — authored 2026-08-18 (F11 Region-3 第 1 步).
+# d4t synthetic GLAS export — authored 2026-08-18 (F11 Region-3 第 1 步).
 """合成一份 **GLAS 匯出**（`<id>_label.png` + v4 manifest），給家用機開發用。
 
 為什麼需要這支
@@ -27,7 +27,7 @@ python tools/check_glas_export.py /tmp/gds --samples 2    # 健檢應該全過
 
 刻意做進去的四件事
 ------------------
-每一件都對應一個 ADEPT 會安靜出錯的地方，所以測試資料裡一定要有：
+每一件都對應一個 d4t 會安靜出錯的地方，所以測試資料裡一定要有：
 
 1. **圖案是非週期的。** GDS 的使用時機就在非週期區域（使用者 2026-08-18），
    而只用條紋測的話，偷偷跑進去的週期假設永遠不會被抓到。這裡的形狀是亂數
@@ -61,12 +61,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
-# 讓 `python tools/make_glas_export.py` 不裝套件也能 import adept（同 make_sample_rsem）
+# 讓 `python tools/make_glas_export.py` 不裝套件也能 import d4t（同 make_sample_rsem）
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
-from adept.core.ingest import klarf_core  # noqa: E402
+from d4t.core.ingest import klarf_core  # noqa: E402
 
 #: manifest 的 schema 與欄位順序 —— 照 2026-08-18 實測的那一份（v4）。
 SCHEMA = "mmh-gds-overlay-v4"
@@ -81,7 +81,7 @@ ALIGN_COLUMNS = ["image_id", "klarf_path", "gds_path", "poi_layer",
                  "score", "nm_per_px"]
 
 #: 層的名字**刻意長成 GLAS 的形狀**（`NAME (L17/D0)` / 裸的 `L17/D0`）——
-#: 那個形狀裡的 `/` 與空白是 ADEPT 的區域名規則不收的字元，而「怎麼改寫」
+#: 那個形狀裡的 `/` 與空白是 d4t 的區域名規則不收的字元，而「怎麼改寫」
 #: 是 `roi_from_mask` 一定要處理的事。用乾淨的名字產測試資料等於把那題藏起來。
 LAYER_NAMES = ("L17/D0", "L21/D0", "L33/D0", "L44/D2", "L51/D0", "L60/D0")
 
@@ -96,7 +96,7 @@ BLUR_SIGMA = 1.0
 #: PNG 壓縮等級寫死 → 不同機器產出相同位元組（同 `make_sample_rsem`）。
 _PNG_PARAMS = [int(cv2.IMWRITE_PNG_COMPRESSION), 3]
 
-#: `label_view.png` 每層的顏色（RGB）。只是給人看的，ADEPT 不吃。
+#: `label_view.png` 每層的顏色（RGB）。只是給人看的，d4t 不吃。
 VIEW_COLORS = ((0, 200, 120), (240, 180, 40), (120, 160, 255),
                (240, 120, 170), (150, 210, 70), (200, 140, 240))
 
@@ -199,7 +199,7 @@ def colorize(label: np.ndarray, layers: int) -> np.ndarray:
     """`label_view.png`：**3 通道**的上色預覽。
 
     它存在的意義有一半是當**陷阱**：真實匯出裡它就在 label 旁邊，而指錯檔案的
-    話 ADEPT 會把通道平均掉、把 label id 混成不存在的值，**而且不會報錯**。
+    話 d4t 會把通道平均掉、把 label id 混成不存在的值，**而且不會報錯**。
     測試資料裡有它，那條路才驗得到。
     """
     view = np.zeros(label.shape + (3,), np.uint8)
@@ -304,7 +304,7 @@ def generate(lot_dir: str, out_dir: str, layers: int = 3, seed: int = 5,
         row = {c: "" for c in COLUMNS}
         row.update({
             "image_id": did,
-            # `id_source` 是 v4 才有的那一格，而它是 ADEPT 唯一不必猜 join key
+            # `id_source` 是 v4 才有的那一格，而它是 d4t 唯一不必猜 join key
             # 的來源（`GLAS-INTERFACE.md` §3.4）。
             "id_source": "klarf-defectid",
             "page": "",                      # RSEM 一顆一個檔，沒有頁
@@ -336,8 +336,8 @@ def generate(lot_dir: str, out_dir: str, layers: int = 3, seed: int = 5,
     with open(manifest, "w", encoding="utf-8", newline="\n") as f:
         json.dump(doc, f, indent=2)
         f.write("\n")
-    # CSV 那一份也產（真實匯出兩份都有）。**ADEPT 不讀它** —— GLAS 是用平台
-    # 預設編碼寫的，非 ASCII 會壞；這裡明寫 utf-8，但 ADEPT 仍然只讀 JSON。
+    # CSV 那一份也產（真實匯出兩份都有）。**d4t 不讀它** —— GLAS 是用平台
+    # 預設編碼寫的，非 ASCII 會壞；這裡明寫 utf-8，但 d4t 仍然只讀 JSON。
     with open(os.path.join(out_dir, "overlay_manifest.csv"), "w",
               encoding="utf-8", newline="") as f:
         w_ = csv.DictWriter(f, fieldnames=COLUMNS)
@@ -352,7 +352,7 @@ def generate(lot_dir: str, out_dir: str, layers: int = 3, seed: int = 5,
 
 
 def _write_alignment(out_dir: str, klarf: str, rows, label_map) -> None:
-    """alignment JSON。ADEPT **擺框不需要它**（mask 已經對位完了），
+    """alignment JSON。d4t **擺框不需要它**（mask 已經對位完了），
     但真實匯出裡有，所以合成品也要有 —— 不然那條路永遠沒被走過。"""
     poi = "; ".join(e["layer"] for e in label_map)
     out = []

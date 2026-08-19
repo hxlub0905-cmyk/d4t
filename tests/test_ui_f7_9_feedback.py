@@ -26,10 +26,10 @@ from conftest import first_source  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
-from adept.core.pipeline import (          # noqa: E402 — Qt-free，可以直接 import
+from d4t.core.pipeline import (          # noqa: E402 — Qt-free，可以直接 import
     Recipe, RecipeNode, ScoreSpec, get_step, list_steps, validate,
 )
-import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 
 FIXTURE_RECIPES = Path(__file__).resolve().parent / "fixtures" / "recipes"
 #: repo 裡**現在**還在出貨的 recipe 全部住在這裡。
@@ -43,11 +43,11 @@ EXAMPLE = FIXTURE_RECIPES / "die_to_die_basic.json"
 def _import_qt(g):
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import canvas as canvas_mod
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
-    from adept.ui import viewmodel as vm_mod
-    from adept.ui import widgets as widgets_mod
+    from d4t.ui import canvas as canvas_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
+    from d4t.ui import viewmodel as vm_mod
+    from d4t.ui import widgets as widgets_mod
     g.update(QApplication=QApplication, canvas_mod=canvas_mod,
              studio_mod=studio_mod, theme_mod=theme_mod, vm_mod=vm_mod,
              widgets_mod=widgets_mod)
@@ -304,7 +304,7 @@ def test_image_keys_values_are_normalised(qapp):
     F7-18 之後沒有卡片用它（``also_apply`` 拆成節點了），但型別與正規化規則
     仍然是 ParamSpec 的契約 —— 值的格式跟輸入方式無關這件事要繼續成立。
     """
-    from adept.core.pipeline.step import ParamSpec
+    from d4t.core.pipeline.step import ParamSpec
 
     spec = ParamSpec(name="streams", type="image_keys", default="",
                      direction="in",
@@ -542,7 +542,7 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
     這是回饋 5（「卡片操作與組合是否相互會有問題」）的機械化版本：對每張卡
     找一組前置卡，驗證整條 route 過得了 lint。找不到 = 那張卡沒有人用得起來。
     """
-    from adept.ui.scope import visible_steps
+    from d4t.ui.scope import visible_steps
 
     # 前置鏈：能滿足所有 reads / regions 的最短已知順序
     PREREQ = {
@@ -593,7 +593,7 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
     import re as _re
 
     studio_src = (Path(__file__).resolve().parent.parent
-                  / "adept" / "ui" / "studio.py").read_text(encoding="utf-8")
+                  / "d4t" / "ui" / "studio.py").read_text(encoding="utf-8")
     for key, details in needs_setup.items():
         labels = {str(p.get("label") or p["name"])
                   for p in get_step(key).describe()["params"]}

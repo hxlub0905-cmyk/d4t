@@ -29,9 +29,9 @@ EXAMPLE = Path(__file__).resolve().parent / "fixtures" / "recipes" \
 def _import_qt(g):
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import canvas as canvas_mod
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
+    from d4t.ui import canvas as canvas_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
     g.update(QApplication=QApplication, canvas_mod=canvas_mod,
              studio_mod=studio_mod, theme_mod=theme_mod)
 
@@ -307,7 +307,7 @@ def test_a_measure_card_draws_the_region_it_reads(window, qapp):
 def test_glv_metrics_are_ticked_not_typed(window, qapp):
     """統計量用勾的不是用打的（使用者要求）。清單外的手寫值（glv_q37）
     照樣列出來並勾著 —— 看不到就被靜靜刪掉是最糟的一種「幫忙」。"""
-    from adept.ui.widgets import MultiChoicePicker
+    from d4t.ui.widgets import MultiChoicePicker
 
     m = window.model
     gs = m.add_step("glv_stats")
@@ -392,7 +392,7 @@ def test_a_new_mask_card_inherits_the_regions_defined_upstream(window, qapp):
     assert node.step == "roi_mask"
     filled = str(node.params.get("regions", ""))
     assert filled, "上游有具名區域，regions 不該是空的"
-    from adept.core.pipeline.step import get_step as _get
+    from d4t.core.pipeline.step import get_step as _get
     outs = _get("roi_cross").resolve_regions_out(
         window.model.nodes[with_regions].params)
     for name in outs:

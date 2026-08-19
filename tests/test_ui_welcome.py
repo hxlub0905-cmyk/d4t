@@ -1,5 +1,5 @@
-# ADEPT 首次開啟導覽測試 — authored 2026-07-28 (M6-2).
-"""``adept/ui/welcome.py`` 與 Studio 導覽接線的離屏（offscreen）測試。
+# d4t 首次開啟導覽測試 — authored 2026-07-28 (M6-2).
+"""``d4t/ui/welcome.py`` 與 Studio 導覽接線的離屏（offscreen）測試。
 
 執行：``QT_QPA_PLATFORM=offscreen python3 -m pytest tests/test_ui_welcome.py -q``
 
@@ -7,10 +7,10 @@
 
 ``tests/test_no_qt.py::test_no_qt_after_import`` 會檢查 ``sys.modules`` 裡沒有
 任何 PySide6 模組。pytest 先蒐集全部測試檔、再開始跑，所以只要這個檔案在
-**模組層** ``import PySide6``（或 import ``adept.ui.welcome``），蒐集階段就會把
+**模組層** ``import PySide6``（或 import ``d4t.ui.welcome``），蒐集階段就會把
 Qt 塞進 ``sys.modules``，那個守門測試就會紅 —— 即使它先跑。
 
-因此：所有 Qt / ``adept.ui`` 的 import 都關在 :func:`_load_qt` 裡，由 module-scope
+因此：所有 Qt / ``d4t.ui`` 的 import 都關在 :func:`_load_qt` 裡，由 module-scope
 的 ``qapp`` fixture 呼叫，再用 ``globals().update(...)`` 注入本模組命名空間。
 每個測試都必須（直接或間接）要求 ``qapp`` fixture，否則那些名字不存在。
 
@@ -47,9 +47,9 @@ def _load_qt() -> None:
     from PySide6.QtCore import QSettings  # noqa: F401
     from PySide6.QtWidgets import QApplication  # noqa: F401
 
-    from adept.ui import studio as studio_mod  # noqa: F401
-    from adept.ui import theme as theme_mod  # noqa: F401
-    from adept.ui import welcome as welcome_mod  # noqa: F401
+    from d4t.ui import studio as studio_mod  # noqa: F401
+    from d4t.ui import theme as theme_mod  # noqa: F401
+    from d4t.ui import welcome as welcome_mod  # noqa: F401
 
     globals().update(locals())
 
@@ -76,7 +76,7 @@ def clean_settings(qapp):
 
 @pytest.fixture(scope="module")
 def demo_lot(tmp_path_factory):
-    """給 ``run_demo`` 用的輸出資料夾（不碰使用者家目錄的 ~/.adept）。"""
+    """給 ``run_demo`` 用的輸出資料夾（不碰使用者家目錄的 ~/.d4t）。"""
     return tmp_path_factory.mktemp("demo_lot")
 
 
@@ -195,9 +195,9 @@ def test_quick_reference_button_is_guarded_when_pdf_missing(qapp, tmp_path):
 
 def test_quick_reference_finds_a_pdf_and_prefers_the_named_one(tmp_path, qapp):
     (tmp_path / "aaa-other.pdf").write_bytes(b"%PDF-1.4\n")
-    (tmp_path / "adept-quick-reference.pdf").write_bytes(b"%PDF-1.4\n")
+    (tmp_path / "d4t-quick-reference.pdf").write_bytes(b"%PDF-1.4\n")
     found = welcome_mod.quick_reference_pdf(tmp_path)
-    assert found is not None and found.name == "adept-quick-reference.pdf"
+    assert found is not None and found.name == "d4t-quick-reference.pdf"
 
 
 # --------------------------------------------------------------------------- #
@@ -206,11 +206,11 @@ def test_quick_reference_finds_a_pdf_and_prefers_the_named_one(tmp_path, qapp):
 def test_library_lists_every_supported_recipe_file(qapp, library_dir):
     """清單完全由資料夾內容決定（沒有任何檔名寫死）。
 
-    F7-1 起會再過一層 :func:`adept.ui.scope.recipe_is_supported`：純 rsem 的
+    F7-1 起會再過一層 :func:`d4t.ui.scope.recipe_is_supported`：純 rsem 的
     範本在 patch-only 期間不列出來。原本的重點沒變 —— 列出來的東西與順序
     仍然只由**那個資料夾**決定。
     """
-    from adept.ui.scope import recipe_is_supported
+    from d4t.ui.scope import recipe_is_supported
 
     files = sorted(library_dir.glob("*.json"))
     assert files, "測試自己造的庫是空的"
@@ -360,7 +360,7 @@ def test_the_sample_entries_are_hidden_while_there_are_no_recipes(window):
     所有 widget 的 ``isVisible()`` 都是 False（docs/PITFALLS.md），那樣問的話
     這條測試會**永遠是綠的**，包括開關打開的時候。
     """
-    from adept.ui import scope
+    from d4t.ui import scope
 
     assert scope.SHOW_SAMPLE_ENTRIES is False, "這條測試描述的是收起來的狀態"
     assert window.btn_examples.isHidden() is True, \
@@ -393,7 +393,7 @@ def test_nothing_on_screen_points_at_a_button_that_is_not_there(window):
     # 空白狀態現在是**一種 source 一列**（F11 Input-5）—— 那句話不再自己點名
     # 某一條路，而是介紹底下那幾列。所以這裡改成逐列對：畫面上列出來的每一顆，
     # 都要是 `scope.INPUT_SOURCES` 上真的有的入口，而且每一條都要出現。
-    from adept.ui import scope
+    from d4t.ui import scope
 
     shown = {k: b.text() for k, b in window.empty_source_buttons.items()}
     assert shown == {s.key: s.title for s in scope.INPUT_SOURCES}
@@ -466,7 +466,7 @@ def test_library_choice_loads_the_recipe_into_the_model(window, library_dir):
 
 
 def test_welcome_demo_button_is_wired_to_studio_run_demo(window, monkeypatch):
-    """導覽只發訊號，動作在 Studio —— 這裡驗接線（不真的跑，也不寫 ~/.adept）。"""
+    """導覽只發訊號，動作在 Studio —— 這裡驗接線（不真的跑，也不寫 ~/.d4t）。"""
     calls = []
 
     def fake_run_demo(*args, **kwargs):
@@ -537,8 +537,8 @@ def test_generated_demo_lot_is_a_kind_this_build_supports(demo_lot):
     所以改成直接問 ``scope``（範本回來時，route 那一半由
     ``test_demo_stops_at_the_missing_template_and_says_so`` 接手）。
     """
-    from adept.core.ingest.dataset import load_dataset
-    from adept.ui.scope import is_supported_kind
+    from d4t.core.ingest.dataset import load_dataset
+    from d4t.ui.scope import is_supported_kind
 
     paths = studio_mod.generate_demo_lot(str(demo_lot), n=6)
     ds = load_dataset(paths["klarf"])

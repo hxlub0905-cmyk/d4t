@@ -1,7 +1,7 @@
 # Phase 1：把準確率接進調參迴圈 — authored 2026-08-16.
 """調門檻的時候，**準確率要跟著動**。
 
-以前 ground truth 只有 CLI 看得到（`python -m adept run --ground-truth`），
+以前 ground truth 只有 CLI 看得到（`python -m d4t run --ground-truth`），
 可是調門檻這件事是在 Studio 裡一邊拖一邊看的 —— 使用者拖完滑桿得跳出去跑一次
 CLI 才知道剛才那一下是變好還是變壞，於是實際上沒有人在看正確率。
 
@@ -31,9 +31,9 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication          # noqa: E402
 
-from adept.ui import studio as studio_mod           # noqa: E402
-from adept.ui import theme as theme_mod             # noqa: E402
-from adept.ui.viewmodel import accuracy_at          # noqa: E402
+from d4t.ui import studio as studio_mod           # noqa: E402
+from d4t.ui import theme as theme_mod             # noqa: E402
+from d4t.ui.viewmodel import accuracy_at          # noqa: E402
 
 
 @pytest.fixture(scope="module")

@@ -39,9 +39,9 @@ def _layout(shift: int = 0, seed: int = 0) -> np.ndarray:
 def _import_qt(g):
     from PySide6.QtWidgets import QApplication
 
-    from adept.ui import studio as studio_mod
-    from adept.ui import theme as theme_mod
-    from adept.ui import widgets as widgets_mod
+    from d4t.ui import studio as studio_mod
+    from d4t.ui import theme as theme_mod
+    from d4t.ui import widgets as widgets_mod
     g.update(QApplication=QApplication, studio_mod=studio_mod,
              theme_mod=theme_mod, widgets_mod=widgets_mod)
 
@@ -93,7 +93,7 @@ def test_picking_a_region_names_the_results_after_it(window):
 
     assert window.model.nodes[nid].params["output_prefix"] == "epi"
     assert "named" in window.status_text()
-    from adept.core.pipeline import get_step
+    from d4t.core.pipeline import get_step
     assert "epi_glv_mean" in get_step("glv_stats").resolve_features(
         window.model.nodes[nid].params)
 
@@ -110,7 +110,7 @@ def test_a_name_the_user_typed_is_never_overwritten(window):
 def test_a_prefix_that_cannot_be_a_variable_name_is_refused(window):
     """特徵名是分數表達式的變數名。``my region`` 那種名字在表達式裡指不到，
     所以擋在參數驗證，而不是等使用者寫完表達式才發現。"""
-    from adept.core.pipeline import ParamError, get_step
+    from d4t.core.pipeline import ParamError, get_step
 
     with pytest.raises(ParamError):
         get_step("glv_stats").validate_params({"output_prefix": "my region"})
@@ -213,7 +213,7 @@ def test_the_thumbnail_placement_matches_the_thumbnail_itself(qapp):
     兩者分開放的話，哪天改了縮圖的縮放規則而忘了改另一邊，框就會整批偏掉 ——
     而畫面上看起來只是「框好像有點歪」，不會有人聯想到是縮圖改過。
     """
-    from adept.ui.gallery import make_thumb, thumb_placement
+    from d4t.ui.gallery import make_thumb, thumb_placement
 
     for shape in ((64, 128), (128, 64), (100, 100), (7, 250)):
         img = np.full(shape, 255, np.uint8)         # 全白 -> 補的黑邊一目了然
@@ -226,7 +226,7 @@ def test_the_thumbnail_placement_matches_the_thumbnail_itself(qapp):
 
 def test_the_boxes_follow_the_structure_across_defects(mixed_window):
     """**這個視窗存在的理由**：在第 1 顆剛好的框，第 50 顆可能整個偏掉。"""
-    from adept.ui.region_check import check_regions
+    from d4t.ui.region_check import check_regions
 
     items = mixed_window._items()[:12]
     results = check_regions(mixed_window.model.to_recipe(), items,
@@ -239,7 +239,7 @@ def test_the_boxes_follow_the_structure_across_defects(mixed_window):
 
 
 def test_a_patch_with_no_structure_is_marked_not_guessed(mixed_window):
-    from adept.ui.region_check import check_regions
+    from d4t.ui.region_check import check_regions
 
     results = check_regions(mixed_window.model.to_recipe(),
                             mixed_window._items()[:12], mixed_window.model.kind,
@@ -253,7 +253,7 @@ def test_a_patch_with_no_structure_is_marked_not_guessed(mixed_window):
 
 def test_check_regions_never_raises_on_a_broken_pipeline(mixed_window):
     """跟引擎「單顆爆不殺整批」同一個契約 —— 一顆壞掉只是一格壞掉。"""
-    from adept.ui.region_check import check_regions
+    from d4t.ui.region_check import check_regions
 
     nid = mixed_window.selected_node
     mixed_window.model.set_param(nid, "source", "nope")      # 不存在的影像流
@@ -338,7 +338,7 @@ def test_the_mask_card_offers_the_regions_defined_upstream(window):
     打錯的話 lint 會抓（``unknown-region``），但那要跑一次才講，而使用者那時候
     已經在看一張沒有 mask 的圖了（F11 §3.3.1 第 4 項）。
     """
-    from adept.ui.widgets import MultiChoicePicker
+    from d4t.ui.widgets import MultiChoicePicker
 
     tpl = wire_up(window.model, window.model.add_step("roi_template"))
     window.model.set_param(tpl, "regions", "epi: 0.1,0,0.3,1 | mg: 0.5,0,0.2,1")
@@ -357,7 +357,7 @@ def test_the_mask_card_offers_the_regions_defined_upstream(window):
 
 def test_a_region_name_from_the_recipe_survives_even_if_upstream_changed(window):
     """看不到就被靜靜刪掉，是最糟的一種「幫忙」（同 MultiChoicePicker 的規則）。"""
-    from adept.ui.widgets import MultiChoicePicker
+    from d4t.ui.widgets import MultiChoicePicker
 
     mask = wire_up(window.model, window.model.add_step("roi_mask"))
     window.model.set_param(mask, "regions", "gone")

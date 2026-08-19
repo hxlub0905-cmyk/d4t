@@ -1,4 +1,4 @@
-# 在沒有 git 的機器上使用 ADEPT
+# 在沒有 git 的機器上使用 d4t
 
 適用情境：**公司機沒有 git（或 git 被擋）。** 整個 repo 只有純文字檔
 （`.py` / `.md` / `.json` / `.toml` / `.txt` / `.yml` / 一份 `.klarf`），
@@ -24,23 +24,23 @@
 
 ### 0a. 第一次搬整包：一個檔案（推薦）
 
-`bundle/ADEPT_bundle.py` —— **一次複製就搬完整個 repo**（2026-08-16 是 888 KB）。
+`bundle/d4t_bundle.py` —— **一次複製就搬完整個 repo**（2026-08-16 是 888 KB）。
 
-1. 在瀏覽器打開 `https://github.com/hxlub0905-cmyk/ADEPT/blob/main/bundle/ADEPT_bundle.py`
+1. 在瀏覽器打開 `https://github.com/hxlub0905-cmyk/ADEPT/blob/main/bundle/d4t_bundle.py`
 2. 按檔案右上角的**複製鈕**
-3. 貼進記事本，存成 `ADEPT_bundle.py`
-4. `python ADEPT_bundle.py --list`  ← 先看它會寫哪些檔案，**不寫任何東西**
-5. `python ADEPT_bundle.py`
+3. 貼進記事本，存成 `d4t_bundle.py`
+4. `python d4t_bundle.py --list`  ← 先看它會寫哪些檔案，**不寫任何東西**
+5. `python d4t_bundle.py`
 
 > ⚠ **記事本另存的時候會偷加 `.txt`。** 它的「存檔類型」預設是「文字文件
-> (\*.txt)」，所以你打 `ADEPT_bundle.py` 會被存成 `ADEPT_bundle.py.txt` ——
+> (\*.txt)」，所以你打 `d4t_bundle.py` 會被存成 `d4t_bundle.py.txt` ——
 > 而檔案總管預設**把已知副檔名藏起來**，所以看起來完全正常，只有 Python 會說
 > 「No such file or directory」。（實際踩到過。）
 >
 > 避開的方式：另存對話框裡把**存檔類型改成「所有檔案 (\*.\*)」**，
-> 或是**檔名前後加引號**：`"ADEPT_bundle.py"`。
+> 或是**檔名前後加引號**：`"d4t_bundle.py"`。
 > 已經存錯了也不用改名 —— Python 不在乎副檔名，直接
-> `python ADEPT_bundle.py.txt` 就會動。
+> `python d4t_bundle.py.txt` 就會動。
 >
 > 順帶建議把副檔名顯示打開：檔案總管 → 檢視 → 顯示 → 副檔名。
 
@@ -56,10 +56,10 @@
 想在跑之前**逐字讀過內容**的話，在家用機上跑：
 
 ```
-python tools/make_text_bundle.py --out bundle/ADEPT.py --split 400
+python tools/make_text_bundle.py --out bundle/d4t.py --split 400
 ```
 
-會得到 `ADEPT_part1ofN.py` … `partNofN.py`：**沒有壓縮、沒有 base64**，
+會得到 `d4t_part1ofN.py` … `partNofN.py`：**沒有壓縮、沒有 base64**，
 每個檔案的內容一行一行原樣躺在裡面（每行前面加一個 `#`，所以整份仍是合法的
 Python），記事本打開往下捲就看得到。代價是一批一次複製（目前約 8 批）。
 
@@ -71,7 +71,7 @@ diff 全是噪音。需要的時候再產。）
 1. 在瀏覽器打開那一批的檔案
 2. 按檔案右上角的**複製鈕**（從已經載入的網頁複製，不會再連別的主機）
 3. 貼進記事本，存成同名的 `.py`
-4. `python ADEPT_part1ofN.py`
+4. `python d4t_part1ofN.py`
 
 **順序不重要，重複執行也沒關係。** 每一批解完會告訴你整個 repo 還缺幾個檔案，
 全部到齊之後才會印「下一步」。
@@ -111,7 +111,7 @@ stdlib-only、單檔，複製過去直接跑。輸出是純文字且預設遮蔽
 到 `https://github.com/hxlub0905-cmyk/ADEPT` → 綠色 **Code** 按鈕 →
 **Download ZIP** → 解壓到任意資料夾。
 
-解壓後會得到 `ADEPT-main\`，裡面就是完整程式碼。
+解壓後會得到 `d4t-main\`，裡面就是完整程式碼。
 GitHub 產生的 zip **不含 `.git` 資料夾**，所以裡面 190 幾個檔案全部是純文字，約 1 MB。
 
 ### 如果 Download ZIP 被公司擋掉
@@ -148,7 +148,7 @@ GitHub 產生的 zip **不含 `.git` 資料夾**，所以裡面 190 幾個檔案
   4. `python get_code.py`
 
   ```
-  python get_code.py                    # 抓到 .\ADEPT\
+  python get_code.py                    # 抓到 .\d4t\
   python get_code.py --dest D:\tools    # 抓到別的地方
   python get_code.py --cafile corp.pem  # 公司有 TLS 中間攔截時
   ```
@@ -245,20 +245,20 @@ Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/hxlub0905-cmyk/ADEPT/m
 `.ps1` 也要 proxy 通得過才行。能過的只剩「一個純文字檔」。
 
 `tools/make_text_bundle.py` 在**有網路的機器上**把整個 repo 打成一個
-`ADEPT_bundle.py`。預設會用 lzma + base64 壓（不然塞不進 GitHub 的 1 MB 顯示
+`d4t_bundle.py`。預設會用 lzma + base64 壓（不然塞不進 GitHub 的 1 MB 顯示
 上限），**解包程式本身仍然是可讀的 Python**，`--list` 可以在寫任何檔案之前
 先列出它要寫什麼。想要每個檔案都逐字讀得到的話用 `--split 400`（見 §0a-2）——
 那個版本沒有壓縮也沒有 base64，記事本往下捲就看得到每一個檔案。
 
 ```
-python tools/make_text_bundle.py        # 產 ADEPT_bundle.py（壓縮；太大會自動分批）
+python tools/make_text_bundle.py        # 產 d4t_bundle.py（壓縮；太大會自動分批）
 ```
 
 把那個檔案帶到公司機（下載、郵件、隨身碟 —— 它就是一個 .py 檔），然後：
 
 ```
-python ADEPT_bundle.py                  # 解到 .\ADEPT\
-python ADEPT_bundle.py --list           # 先看裡面有什麼，不寫任何檔案
+python d4t_bundle.py                  # 解到 .\d4t\
+python d4t_bundle.py --list           # 先看裡面有什麼，不寫任何檔案
 ```
 
 每個檔案都帶 **git blob SHA-1**，解開時逐檔驗過才落地。傳輸途中被動到（編輯器
@@ -290,7 +290,7 @@ DLP 掃的是下載下來的 zip（GitHub 的 zip 不含 `.git`，所以看不�
 ## 2. 安裝相依套件
 
 ```
-cd ADEPT-main
+cd d4t-main
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
@@ -315,7 +315,7 @@ python tools/doctor.py
 ## 3. 確認能跑
 
 ```
-python -m adept steps
+python -m d4t steps
 ```
 
 會列出全部步驟卡片。看得到「影像段 IMAGE / 算法段 ALGO」就代表裝好了。
@@ -339,7 +339,7 @@ python tools\make_sample.py C:\temp\lot --n 100
 ## 5. 開圖形介面
 
 ```
-python -m adept gui
+python -m d4t gui
 ```
 
 在 Studio 裡：**開啟 KLARF** 選剛才的 `LOT_SYN.001` → 從左邊的卡片庫把流程組起來
@@ -353,7 +353,7 @@ python -m adept gui
 用上一步存出來的 recipe：
 
 ```
-python -m adept run my_recipe.json C:\temp\lot\LOT_SYN.001 ^
+python -m d4t run my_recipe.json C:\temp\lot\LOT_SYN.001 ^
     --workers 4 --cache C:\temp\cache --csv features.csv
 ```
 

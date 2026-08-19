@@ -1,9 +1,9 @@
-# ADEPT M1 端到端驗收 — authored 2026-07-28.
+# d4t M1 端到端驗收 — authored 2026-07-28.
 """M1 驗收：合成 KLARF+TIFF → die-to-die recipe → 分數把真/假 defect 分開。
 
 流程：tools/make_sample 產一份合成 lot（含 ground truth）→ ingest 自動判別
 ebi_patch → 範例 recipe 全 pipeline → 檢查分類正確率與分數分離。
-另附 CLI（python -m adept run）煙霧測試。
+另附 CLI（python -m d4t run）煙霧測試。
 """
 from __future__ import annotations
 
@@ -21,9 +21,9 @@ RECIPE = REPO / "tests" / "fixtures" / "recipes" / "die_to_die_basic.json"
 sys.path.insert(0, str(REPO / "tools"))
 from make_sample import generate  # noqa: E402
 
-import adept.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from adept.core.ingest.dataset import load_dataset  # noqa: E402
-from adept.core.pipeline import Recipe, run_dataset, validate  # noqa: E402
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from d4t.core.ingest.dataset import load_dataset  # noqa: E402
+from d4t.core.pipeline import Recipe, run_dataset, validate  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -67,7 +67,7 @@ def test_cli_run_smoke(synlot, tmp_path):
     out_json = tmp_path / "results.json"
     out_csv = tmp_path / "results.csv"
     proc = subprocess.run(
-        [sys.executable, "-m", "adept", "run", str(RECIPE), synlot["klarf"],
+        [sys.executable, "-m", "d4t", "run", str(RECIPE), synlot["klarf"],
          "--out", str(out_json), "--csv", str(out_csv), "--limit", "6"],
         cwd=str(REPO), capture_output=True, text=True, timeout=300,
     )
@@ -79,7 +79,7 @@ def test_cli_run_smoke(synlot, tmp_path):
 
 def test_cli_steps_smoke():
     proc = subprocess.run(
-        [sys.executable, "-m", "adept", "steps"],
+        [sys.executable, "-m", "d4t", "steps"],
         cwd=str(REPO), capture_output=True, text=True, timeout=120,
     )
     assert proc.returncode == 0

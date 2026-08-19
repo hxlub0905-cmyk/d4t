@@ -103,7 +103,7 @@ Phase 2 的起點跟 ROADMAP 上那幾行寫的不一樣，四件事先記下來
 
 ### 1.4 GDS 那條路變成「吃 GLAS 的匯出」，而且它已經在產了
 
-ADEPT **不解析 layout**（使用者定調）。讀完 GLAS repo 之後確認：
+d4t **不解析 layout**（使用者定調）。讀完 GLAS repo 之後確認：
 它已經在匯出 `<id>_label.png`（整數 label map）、`<id>_gray.png`（模擬 GLV 灰階）、
 manifest 的 `label_map`（label id → layer 名）與 alignment CSV/JSON；
 **join key 兩邊同源**（都是 KLARF 的 `DEFECTID`）。
@@ -120,7 +120,7 @@ manifest 的 `label_map`（label id → layer 名）與 alignment CSV/JSON；
 | 開發順序 | **從左側功能一步一步往下**（Input → Enhance → Region → Compare → Measure → ADC），**每張卡的功能／UI／設定放哪都要先討論** |
 | 週期 | **會拉很長**（新功能 + 完善舊功能）—— 所以這一份是議程，不是待辦清單 |
 | 演算法 | **不照抄 vendored 的**：「演算法請幫我移除，我要重新來，基本上不用照抄就有 vendor 的算法（我基本會想要優化改良）」。範圍見 §7.1 |
-| GDS ROI | **ADEPT 不解析 layout**，只吃上游 GLAS 的 mask（一一對應）。契約見 [`../GLAS-INTERFACE.md`](../GLAS-INTERFACE.md) |
+| GDS ROI | **d4t 不解析 layout**，只吃上游 GLAS 的 mask（一一對應）。契約見 [`../GLAS-INTERFACE.md`](../GLAS-INTERFACE.md) |
 | 多通道 | **⏸ 暫時不做**（2026-08-17 下午：「我決定我暫時不做 multi channel（多通道的），暫時 focus 在 patch 跟 RSEM Image」）。事實記著：1 BSE + 4 SE、BSE 固定第 2 頁、沒有 ref。**做出來的兩個機制不是多通道專用的**，見 §3.1.14 |
 | ML Classify | Phase 2 後半 |
 
@@ -295,7 +295,7 @@ for nid in order:
 > 你不一定要把它全部塞到 load image 這張 card 裡，我更想像的是像其他 card 一樣分類
 > （**應該說 source 不一樣本來就要分**）。同理 GDS 相關的 png 理所當然也可以是一張 card。
 >
-> 簡單來說目前 ADEPT 可以支援 patch + 對應 KLARF，我需要他也能支援
+> 簡單來說目前 d4t 可以支援 patch + 對應 KLARF，我需要他也能支援
 > **RSEM image + KLARF，或單純圖片**。
 
 | 卡 | 一顆給什麼 | 吐的流 | 狀態 |
@@ -571,7 +571,7 @@ ROI 卡的**右下角儀表**（`ui/inspectors.py` 依 `Step.key` 註冊）顯�
 
 > **配對是之後的事吧（或者之後的功能），別忘了我們在 input 階段。**
 >
-> 簡單來說目前 ADEPT 可以支援 patch + 對應 KLARF，我需要他也能支援
+> 簡單來說目前 d4t 可以支援 patch + 對應 KLARF，我需要他也能支援
 > **RSEM image + KLARF，或單純圖片**。
 
 所以 Input-3 不是「兩個來源逐顆配對」（那是 Compare 段的事，見下一節），而是
@@ -766,7 +766,7 @@ RSEM Image。」
 那一塊**）只講「Open a KLARF to see your patches here」，於是帶著一個資料夾的
 圖片進來的人在那裡找不到自己那條路。
 
-做法是 `adept/ui/scope.py` 多一張表：
+做法是 `d4t/ui/scope.py` 多一張表：
 
 * `INPUT_SOURCES` —— 三個 source 入口（`klarf` / `stack` / `folder`），每個帶
   `title` / `what`（一句白話：**這條路吃什麼樣的檔案**）/ `icon` / `has_klarf`。
@@ -1684,7 +1684,7 @@ ROI1 平移之後落到 ROI2 的位置不算，那是兩個不同的量測）。
 
 | 在哪 | 是什麼 | 現況 |
 |---|---|---|
-| `algo/roi.py` 的 `roi_type='target'`（紅）／`'reference'`（青）| vendored 自 Fusi³ | **死的** —— `set_target()` 在 `steps/`／`pipeline/`／`ui/` 一次也沒被呼叫，ADEPT 建的每個框都是預設的 `'reference'` |
+| `algo/roi.py` 的 `roi_type='target'`（紅）／`'reference'`（青）| vendored 自 Fusi³ | **死的** —— `set_target()` 在 `steps/`／`pipeline/`／`ui/` 一次也沒被呼叫，d4t 建的每個框都是預設的 `'reference'` |
 | `export/overlay.py` 的「主 blob 紅框」| 缺陷 blob 的外框 | **畫不出來** —— 讀 `ctx.meta["blobs"]`，而那個沒有生產者（Blob 卡不存在，§1.2）|
 | `<name>_center` | 離 patch 正中心最近的那一塊 | **唯一活的**，但它是**位置**不是角色 |
 
@@ -2094,7 +2094,7 @@ ROI2」。
 | 必要 2：對位要用哪一頁（1 BSE + 4 SE）| **不需要** —— 只有一頁 |
 | 建議 3：manifest 要講 id 是哪一種 | **降級** —— 有 KLARF 就是 `DEFECTID` |
 
-加上「mask 已經對位完」→ **ADEPT 這邊零對位**：這張卡沒有搜尋半徑、沒有對位
+加上「mask 已經對位完」→ **d4t 這邊零對位**：這張卡沒有搜尋半徑、沒有對位
 分數門檻，唯一的檢查是「檔案在不在、尺寸對不對」。
 
 ##### 「不需要特別標註」—— 本來就不用
@@ -2122,7 +2122,7 @@ Template 要有週期、Profile 要有條紋，**GDS 就是兩者都沒有時的
 
 真實資料在只能複製文字出來的那台機器上，而猜不出來的東西全是文字。
 所以先有 **`tools/check_glas_export.py`**（見 [`../GLAS-INTERFACE.md`](../GLAS-INTERFACE.md) §3.5）：
-預設遮蔽、可以直接貼出來的報告，19 條 PASS / FAIL 對照 ADEPT 真正需要的東西。
+預設遮蔽、可以直接貼出來的報告，19 條 PASS / FAIL 對照 d4t 真正需要的東西。
 
 它的四條核心檢查是**讀 GLAS 程式碼讀出來的**，四件都不在契約文件裡、
 而且錯了都不會報錯：`_safe_name` 改過的檔名與檔名碰撞、後面的層蓋掉前面的層、
@@ -2168,7 +2168,7 @@ producer 同一個形狀，配對那條路（id 從 KLARF 來、`_safe_name`、�
 | **每層第一塊是 L 形** | 它的 bounding box 會框到別的材質 —— 「取 bbox」與「精確拆矩形」的差別只有這種形狀看得出來 |
 | **後面的層蓋掉前面的層**，`--eaten` 讓某一顆的某一層被蓋光 | 名字還在 `label_map` 裡、區域卻是空的 |
 | `--miss` 缺檔、`--wrong-size` 尺寸不符 | GLAS 被分數門檻擋掉時就長那樣；而尺寸不符是唯一會讓框整片錯位的東西 |
-| **三種 PNG 都產**（label 1 通道 / label_view 3 通道 / gray 有 blur）| `label_view` 有一半的意義是**當陷阱** —— 指錯檔案 ADEPT 會把 id 混掉而且不報錯 |
+| **三種 PNG 都產**（label 1 通道 / label_view 3 通道 / gray 有 blur）| `label_view` 有一半的意義是**當陷阱** —— 指錯檔案 d4t 會把 id 混掉而且不報錯 |
 
 ##### 兩個自己踩到、值得記下來的
 
@@ -2679,8 +2679,8 @@ Phase 1 立起來的安全網**全部自動套用到新卡**：
 ## 6. 順手做掉的
 
 - **文件漂移（1 MB 上限）**：`docs/FAB-VALIDATION.md` 曾叫公司機複製
-  `bundle/ADEPT_part1of6.py … part6of6.py`（**那些檔案不存在**，現在是單檔
-  `ADEPT_bundle.py`）；`SESSION_LOG.md` 開頭那句「離 1 MB 只剩不到一成」。
+  `bundle/d4t_part1of6.py … part6of6.py`（**那些檔案不存在**，現在是單檔
+  `d4t_bundle.py`）；`SESSION_LOG.md` 開頭那句「離 1 MB 只剩不到一成」。
   兩處都在 2026-08-17 修掉並連回 `AGENTS.md` §2。
 
 ---
@@ -2692,10 +2692,10 @@ Phase 1 立起來的安全網**全部自動套用到新卡**：
 使用者定調 **A**：「移除 blob 跟 stat 跟相關測試就好。」做掉的：
 
 ```
-adept/core/algo/blob.py      （155 行，vendored from Fusi³）
-adept/core/algo/stats.py     （85 行，vendored from PEAR）
+d4t/core/algo/blob.py      （155 行，vendored from Fusi³）
+d4t/core/algo/stats.py     （85 行，vendored from PEAR）
 tests/test_blob.py  tests/test_stats.py
-adept/core/algo/__init__.py 的兩行 re-export
+d4t/core/algo/__init__.py 的兩行 re-export
 ```
 
 `tests/test_export_overlay.py` 有一條 import 過 `DefectROI`，改成一個**最小替身** ——

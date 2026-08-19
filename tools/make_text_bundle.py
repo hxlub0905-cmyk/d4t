@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ADEPT 單檔純文字打包 — authored 2026-07-30.
+# d4t 單檔純文字打包 — authored 2026-07-30.
 """把整個 repo 打成**一個純文字 .py 檔**，那個檔案自己解得開。
 
 什麼時候需要這個
@@ -15,14 +15,14 @@ Python 逐檔抓。這時候 `tools/get_code.py` / `.ps1` 都用不上，能過�
 
 怎麼用
 ------
-    python tools/make_text_bundle.py            # 產 ADEPT_bundle.py
+    python tools/make_text_bundle.py            # 產 d4t_bundle.py
     python tools/make_text_bundle.py --out X.py
 
-拿到 `ADEPT_bundle.py` 的人：
+拿到 `d4t_bundle.py` 的人：
 
-    python ADEPT_bundle.py                      # 解到 .\\ADEPT\\
-    python ADEPT_bundle.py --dest D:\\tools
-    python ADEPT_bundle.py --list               # 只列出裡面有什麼，不寫檔
+    python d4t_bundle.py                      # 解到 .\\d4t\\
+    python d4t_bundle.py --dest D:\\tools
+    python d4t_bundle.py --list               # 只列出裡面有什麼，不寫檔
 
 格式為什麼是「行數」而不是「位元組數」
 --------------------------------------
@@ -58,18 +58,18 @@ import make_filelist                       # noqa: E402  （tools/ 裡的同伴�
 #: `check_files.py` 永遠報「還缺幾個」而那幾個永遠補不進來。
 EXCLUDE_DIRS = make_filelist.EXCLUDE_DIRS
 
-SENTINEL = "# ==== ADEPT-BUNDLE-DATA ==== 以下是資料，不要編輯 ===="
+SENTINEL = "# ==== d4t-BUNDLE-DATA ==== 以下是資料，不要編輯 ===="
 
 #: 解包程式（放在產出檔案的最前面）。它自己也是這份 bundle 的一部分，
 #: 所以刻意寫短、只用標準函式庫、而且看得完 —— 使用者要能在跑之前先讀一遍。
 EXTRACTOR = '''#!/usr/bin/env python3
-# ADEPT 單檔純文字包（由 tools/make_text_bundle.py 產生）。
-"""整個 ADEPT repo 就在這個檔案裡，一行一行的純文字，沒有壓縮、沒有編碼。
+# d4t 單檔純文字包（由 tools/make_text_bundle.py 產生）。
+"""整個 d4t repo 就在這個檔案裡，一行一行的純文字，沒有壓縮、沒有編碼。
 
 為什麼是這種形式：公司政策擋掉 .zip 這個類別，而 proxy 也不讓 Python 逐檔抓 ——
 能過的只剩「一個純文字檔」。你可以用記事本打開它，往下捲就看得到每個檔案的內容。
 
-    python %(name)s              # 解到 .\\\\ADEPT\\\\
+    python %(name)s              # 解到 .\\\\d4t\\\\
     python %(name)s --dest D:\\\\tools
     python %(name)s --list       # 只看裡面有什麼，不寫任何檔案
 
@@ -113,8 +113,8 @@ def entries(lines):
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Unpack the ADEPT text bundle.")
-    ap.add_argument("--dest", default="ADEPT", help="解到哪個資料夾（預設 .\\\\ADEPT）")
+    ap = argparse.ArgumentParser(description="Unpack the d4t text bundle.")
+    ap.add_argument("--dest", default="d4t", help="解到哪個資料夾（預設 .\\\\d4t）")
     ap.add_argument("--list", action="store_true", help="只列出內容，不寫檔")
     a = ap.parse_args(argv)
 
@@ -314,7 +314,7 @@ def _data_lines(items: List[Tuple[str, bytes]]) -> List[str]:
     return out
 
 
-def build(out_name: str = "ADEPT_bundle.py", root: str = "",
+def build(out_name: str = "d4t_bundle.py", root: str = "",
           items: Optional[List[Tuple[str, bytes]]] = None,
           part: int = 1, n_parts: int = 1, total_files: int = 0,
           compress: bool = False) -> str:
@@ -398,7 +398,7 @@ def _merge_tail(groups: List[List[Tuple[str, bytes]]], compress: bool,
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Pack the repo into one plain-text self-extracting .py")
-    ap.add_argument("--out", default="ADEPT_bundle.py",
+    ap.add_argument("--out", default="d4t_bundle.py",
                     help="輸出檔名（分批時會變成 ..._part1of6.py）")
     ap.add_argument("--compress", action="store_true",
                     help=("壓縮成**一個**檔案（lzma + base64，約 700 KB）。"

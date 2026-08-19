@@ -16,11 +16,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from adept.core.algo import enhance as algo_enhance
-from adept.core.pipeline.context import Context
-from adept.core.pipeline.step import get_step
-import adept.core.steps  # noqa: F401 - 註冊卡片
-from adept.core.steps._util import CLIP_FRAC, PAIR_FEATURES
+from d4t.core.algo import enhance as algo_enhance
+from d4t.core.pipeline.context import Context
+from d4t.core.pipeline.step import get_step
+import d4t.core.steps  # noqa: F401 - 註冊卡片
+from d4t.core.steps._util import CLIP_FRAC, PAIR_FEATURES
 
 
 def _ctx(**images) -> Context:
