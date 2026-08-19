@@ -2290,6 +2290,16 @@ class StudioWindow(QMainWindow):
                 return
             keys.append(name)
             value = ",".join(keys)
+            # **從一個變成兩個時，把自動填的那個名字收回**（F13-⑥）。
+            # 接第一條線時 `_autofill_output_prefix` 會把輸出名填成那個區域
+            # （F7-11），而第二條線一來，每個數字本來就會帶自己的區域名 ——
+            # 兩個加起來是 `epi_epi_glv_mean`。判準是「它正好等於原本那一個
+            # 區域的名字」＝ 那正是自動填會寫的值；使用者自己打過的字不動。
+            if len(keys) == 2 and str(node.params.get("output_prefix", "")) == keys[0]:
+                try:
+                    self.model.set_param(dst, "output_prefix", "")
+                except ParamError:             # pragma: no cover
+                    pass
         else:
             if current == name:
                 self._status("“%s” already measures %s." % (dst, name))

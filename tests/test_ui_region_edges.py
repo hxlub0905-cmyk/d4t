@@ -208,9 +208,32 @@ def test_a_measure_card_takes_more_than_one_region(window):
         "兩個區域就要有兩條線"
 
     # 每個數字帶自己的區域名 —— 不然兩組會互相蓋掉，而畫面上看不出來。
-    feats = get_step("glv_stats").resolve_features(window.model.nodes[glv].params)
+    params = window.model.nodes[glv].params
+    feats = get_step("glv_stats").resolve_features(params)
     assert any(f.startswith("epi_") for f in feats)
     assert any(f.startswith("mg_") for f in feats)
+
+    # **自動填的輸出名要收回來**：接第一條線時 `_autofill_output_prefix` 把它
+    # 填成 `epi`（F7-11），而第二條線一來每個數字本來就帶區域名了 ——
+    # 留著的話是 `epi_epi_glv_mean`。
+    assert params["output_prefix"] == ""
+    assert all(not f.startswith("epi_epi") for f in feats), feats
+
+
+def test_a_name_the_user_typed_is_not_taken_back(window):
+    """只收回**自動填的那個值**（正好等於原本那一個區域的名字）。
+    使用者自己打的字被收掉，比沒有這個功能更糟。"""
+    src = first_source(window, "load_single")
+    gds = window.add_card_after(src, "roi_from_mask")
+    glv = window.add_card_after(gds, "glv_stats")
+    window._on_edge_added(src, gds, "single", "source")
+    window.model.set_param(gds, "layers", "1:epi, 2:mg")
+    window._on_edge_added(src, glv, "single", "source")
+
+    window._on_edge_added(gds, glv, "epi", "roi")
+    window.model.set_param(glv, "output_prefix", "mine")
+    window._on_edge_added(gds, glv, "mg", "roi")
+    assert window.model.nodes[glv].params["output_prefix"] == "mine"
 
 
 def test_a_role_region_port_is_still_replaced(window):
