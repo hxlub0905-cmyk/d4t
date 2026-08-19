@@ -576,6 +576,30 @@ class RecipeModel:
         return [(e.src, e.dst, e.src_out, e.dst_in) for e in self.edges]
 
     # ---- 區域線（F12）-----------------------------------------------------
+    def region_outputs(self, node_id: str) -> List[str]:
+        """這張卡右邊有哪些**區域埠**：自己定義的 ＋ **原樣送出的**。
+
+        「同進同出」（F9-6 對影像做的規則，2026-08-19 使用者要求套到區域上：
+        「區域線應該也要 follow 圖像線一樣，前進後出」）—— 接進來的區域，卡片
+        後面也接得出去，否則量測卡就是一條死路：兩張卡要量同一個區域時，第二張
+        只能回頭去接那張 Region 卡，而那條線會橫跨整張畫布。
+
+        **這是畫布的事，不是引擎的事**：`ctx.rois` 本來就是全域的，一個區域被
+        定義之後每一張後面的卡都用得到。這裡只是把那件事畫出來，
+        `resolve_regions_out`（引擎的宣告）一個字都沒有變 —— 副標印的仍然是
+        「這張卡**真的產出**什麼」（`regions_produced`）。
+        """
+        node = self.nodes.get(str(node_id))
+        if node is None:
+            return []
+        try:
+            step_cls = get_step(node.step)
+            out = [str(r) for r in step_cls.resolve_regions_out(node.params) if r]
+            passed = [str(r) for r in step_cls.resolve_regions_in(node.params) if r]
+        except Exception:                  # noqa: BLE001 — 顯示用，壞了就空著
+            return []
+        return out + [r for r in passed if r not in out]
+
     def region_producer(self, name: str,
                         before_node: Optional[str] = None) -> str:
         """誰定義了區域 ``name``（沒有人回空字串）。
@@ -583,6 +607,10 @@ class RecipeModel:
         **取上游最後一個**，跟引擎一致：``Context.set_roi`` 明文同名覆寫，所以
         兩張卡都叫 ``epi`` 時，量測卡量到的是後面那張寫的框
         （而那個撞名本身有 lint 在講 —— 區域的 fact 特徵會撞）。
+
+        「最後一個」也涵蓋**原樣送出**的卡（見 :meth:`region_outputs`）——
+        三張卡串著量同一個區域時，線是一段一段接的，不是三條都從最前面那張
+        Region 卡拉出來（那正是影像流的畫法）。
         """
         name = str(name or "").strip()
         if not name:
@@ -594,11 +622,9 @@ class RecipeModel:
             node = self.nodes.get(nid)
             if node is None or not node.enabled:
                 continue
-            try:
-                outs = get_step(node.step).resolve_regions_out(node.params)
-            except Exception:              # noqa: BLE001 — 顯示用，壞了就跳過
-                continue
-            if name in outs:
+            # **原樣送出的也算**（同進同出）：線要從使用者拉的那顆埠出發，
+            # 而他拉的是上一張卡右邊那顆，不是三張卡以前那張 Region 卡的。
+            if name in self.region_outputs(nid):
                 owner = nid
         return owner
 

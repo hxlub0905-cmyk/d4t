@@ -182,6 +182,57 @@ def test_dragging_a_line_picks_the_region(window):
     assert window.model.nodes[glv].params["output_prefix"] == "epi"
 
 
+def test_a_second_line_replaces_the_first_on_a_single_region_port(window):
+    """一個輸入埠只能有一條線（F9-7 的規矩，區域照套）。
+
+    使用者：「區域線一次只能連一條（例如我要連 Gray level stats，一次只能連
+    一條，重新拉會取代原來的）」。它在這裡是**結構性**的：那一格只放得下一個
+    名字，所以「留下兩條」這件事表達不出來 —— 而畫布上的線是從那一格推導出來
+    的，於是舊線在同一個動作裡就消失了。
+    """
+    src = first_source(window, "load_single")
+    gds = window.add_card_after(src, "roi_from_mask")
+    glv = window.add_card_after(gds, "glv_stats")
+    window._on_edge_added(src, gds, "single", "source")
+    window.model.set_param(gds, "layers", "1:epi, 2:mg")
+    window._on_edge_added(src, glv, "single", "source")
+
+    window._on_edge_added(gds, glv, "epi", "roi")
+    window._on_edge_added(gds, glv, "mg", "roi")
+    assert window.model.nodes[glv].params["roi"] == "mg"
+    lines = [ln for ln in window.model.region_lines() if ln[1] == glv]
+    assert lines == [(gds, glv, "mg", "roi")], "舊線沒有跟著消失"
+
+
+def test_a_region_goes_in_one_side_and_out_the_other(window):
+    """同進同出（使用者：「區域線應該也要 follow 圖像線一樣，前進後出」）。
+
+    量測卡接進來的區域，它後面也接得出去 —— 不然第二張要量同一個區域的卡只能
+    回頭去接那張 Region 卡，而那條線會橫跨整張畫布。
+
+    副標**不跟著變**：它印的是「這張卡真的產出什麼」，而量測卡沒有定義任何
+    區域。混在一起的話，一張 Gray-level stats 在畫布上會讀起來像 Region 卡。
+    """
+    src = first_source(window, "load_single")
+    gds = window.add_card_after(src, "roi_from_mask")
+    a = window.add_card_after(gds, "glv_stats")
+    b = window.add_card_after(a, "roi_snr")
+    window._on_edge_added(src, gds, "single", "source")
+    window.model.set_param(gds, "layers", "1:epi")
+    window._on_edge_added(src, a, "single", "source")
+    window._on_edge_added(src, b, "single", "source")
+    window._on_edge_added(gds, a, "epi", "roi")
+
+    item = window.pipeline.node_item(a)
+    assert {"name": "epi", "kind": "region"} in item.out_specs(),         "接進來的區域，後面要接得出去"
+    assert "epi" not in item.subtitle(),         "副標印的是真的產出什麼 —— 量測卡沒有定義任何區域"
+
+    # 從**那一顆**埠接下去：線一段一段接，不是每一條都從 Region 卡拉出來。
+    window._on_edge_added(a, b, "epi", "roi")
+    assert window.model.nodes[b].params["roi"] == "epi"
+    assert (a, b, "epi", "roi") in window.model.region_lines()
+
+
 def test_cutting_the_line_clears_the_field(window):
     src = first_source(window, "load_single")
     gds = window.add_card_after(src, "roi_from_mask")

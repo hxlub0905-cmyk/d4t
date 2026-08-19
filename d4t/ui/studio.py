@@ -1575,9 +1575,13 @@ class StudioWindow(QMainWindow):
             try:
                 # Region 卡不寫影像流，它定義的是具名區域 —— 副標要講得出
                 # 「ref → cell」，否則那張卡在畫布上看起來什麼都不產出。
-                regions_out = list(step_cls.resolve_regions_out(node.params))
+                regions_made = list(step_cls.resolve_regions_out(node.params))
             except Exception:              # noqa: BLE001
-                regions_out = []
+                regions_made = []
+            # 右邊的**區域埠**還含「原樣送出的」（F12 第二輪，使用者：「區域線
+            # 應該也要 follow 圖像線一樣，前進後出」）—— 跟影像的 `outs` 同一條
+            # 規則。副標仍然只印 `regions_made`（真的產出的那些）。
+            regions_out = list(self.model.region_outputs(nid))
             # F9-6：**同進同出** —— 接進來的每一條流，卡片後面也要接得出去，
             # 否則鏈到量測卡就斷了（那五張卡的 ``writes`` 是空的，畫布上根本
             # 沒有輸出埠）。順序是「自己產的新流」在前、「原樣送出的」在後。
@@ -1601,7 +1605,7 @@ class StudioWindow(QMainWindow):
             reads = [r for r in reads if r]
             missing = list(step_cls.missing_inputs(node.params)) if step_cls else []
             if missing:
-                writes, outs, regions_out = [], [], []
+                writes, outs, regions_out, regions_made = [], [], [], []
             # 每一格輸入在畫布上都是一顆埠（F10）。``show_when`` 藏起來的不算
             # —— 那一格現在不成立，畫一顆接不上任何意義的埠只會讓人問「這是
             # 什麼」。標籤用 ParamSpec 的 label（`First stream`），不是參數名。
@@ -1651,6 +1655,7 @@ class StudioWindow(QMainWindow):
                 "produces": writes,
                 "reads": reads,
                 "regions_out": regions_out,
+                "regions_produced": regions_made,
                 "group": step_cls.resolve_group() if step_cls else "",
                 "problem": problems.get(nid, ("", ""))[0],
                 "problem_level": problems.get(nid, ("", "error"))[1],
@@ -2170,17 +2175,14 @@ class StudioWindow(QMainWindow):
     def _line_kind(self, node_id: str, name: str) -> str:
         """從 ``node_id`` 的哪一顆埠拉出來的 —— 影像還是區域。
 
-        判準是**那個名字是這張卡宣告的哪一種產出**，跟畫布上的埠是同一份資料
-        （`resolve_regions_out`），所以畫的跟判的不會分家。
+        判準是**那顆埠是哪一種**，而且讀的就是畫布畫埠用的那一份
+        （`RecipeModel.region_outputs`，含原樣送出的）—— 畫的跟判的分家的話，
+        使用者會拉得到一條「看起來接上了、其實沒有」的線。
         """
-        node = self.model.nodes.get(str(node_id))
-        if node is None or not name:
+        if not name:
             return "image"
-        try:
-            outs = get_step(node.step).resolve_regions_out(node.params)
-        except Exception:                      # noqa: BLE001
-            return "image"
-        return "region" if str(name) in outs else "image"
+        return ("region" if str(name) in self.model.region_outputs(str(node_id))
+                else "image")
 
     def _connect_region(self, src: str, dst: str, name: str,
                         param: str) -> None:

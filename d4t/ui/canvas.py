@@ -702,7 +702,12 @@ class _NodeItem(QGraphicsItem):
         _p = (self.info["produces"] if "produces" in self.info
               else self.info.get("writes") or [])
         outs = [w for w in (_p or []) if w]
-        regions = [r for r in (self.info.get("regions_out") or []) if r]
+        # 同理，區域也要分「真的產出的」與「原樣送出的」（F12 第二輪）：
+        # 量測卡把接進來的 `epi` 送出去給下一張卡接，但它**沒有定義**它 ——
+        # 副標印成「single → epi」的話，那張卡看起來變成一張 Region 卡。
+        _r = (self.info["regions_produced"] if "regions_produced" in self.info
+              else self.info.get("regions_out") or [])
+        regions = [r for r in (_r or []) if r]
         right = " ".join(str(x) for x in (outs or regions))
         left = " ".join(str(r) for r in reads)
         if left and right:

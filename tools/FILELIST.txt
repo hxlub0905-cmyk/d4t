@@ -5,7 +5,7 @@ a6b298c38249d1758d17f7780df10626e05c809d .gitignore
 3574fb86206262d69eac0158b2022673c909504a AGENTS.md
 a717455dd9ef82b31e02b038991317afcb327d92 CLAUDE.md
 033d348c96f58aaa9ab1ed0b521b8cee8671654a README.md
-79b8ad5c1f2f9829870a9ee12734cd5d81806723 SESSION_LOG.md
+fa0331cd0817239ff66db2370b4aee84ed5dad85 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 beac985dd648d49dcca385f3ee16d11c030555da d4t/__main__.py
@@ -78,7 +78,7 @@ bcea66e1a82ee590f997bbf319fea696277be9f6 d4t/ui/app.py
 f8cbf586f20a72eb7dbeae1b04aaf0d47f3cbe6a d4t/ui/assets/d4t-wordmark.svg
 a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
 87bce11608d08f4302947e917b2b24d076571775 d4t/ui/branding.py
-48b584850693e453df226420b5ecfe72ea05496c d4t/ui/canvas.py
+38c7ba41ca217fd50ec54cf1963e94f4e3c46928 d4t/ui/canvas.py
 3b58b7e078d58ad84a8939734b65952a75a029f3 d4t/ui/cell_canvas.py
 40717e9ebef2a25022f2d799ce0baec5cb690ed6 d4t/ui/export_dialog.py
 511288a738743288b669fedb83036486a25fc673 d4t/ui/gallery.py
@@ -86,10 +86,10 @@ a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
 82b5a7a3319088abdb95afc1ca5f92880724b628 d4t/ui/region_check.py
 414fbe7a4515960f6e7e8202e70988e6d0b9cb9e d4t/ui/results.py
 1977126becbe35cc749eac3f74a3ecff954f5c24 d4t/ui/scope.py
-6648ed52d1f5ed5f46af3802ab6fe4b050c84e60 d4t/ui/studio.py
+089d971213f0973799d51229d6a631b35beab603 d4t/ui/studio.py
 b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 2a097a767a37542b1f2e901a2fb81bb38159f74e d4t/ui/theme.py
-4e373465298bc5cc28fa04bd4e182b7a1567ec03 d4t/ui/viewmodel.py
+dae788c6faee92106585b5af0009e1268fd93138 d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
 834578eec09f0f67483b96df8b1ff4aa388aa5c4 d4t/ui/widgets.py
 d86fc0f7abe89e193e0c234a6d9033da23823894 d4t/ui/workers.py
@@ -104,7 +104,7 @@ c754a265f1f298a47436639bf778c266f889980a docs/PITFALLS.md
 f6378d9ba391a4e1e3ef7ed855c7694b6b7f50b9 docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
 0bfdfd66811505d4a7d2c50cdf3e3bb1a5135965 docs/plans/F11-phase2-features.md
-39e4846803bd39a8bc77d25cb74d75605d31150b docs/plans/F12-region-edges.md
+931bd0b40ab1b760cba5aea7b30d3cbc5bd4205e docs/plans/F12-region-edges.md
 d14ffea1f72ac011ff321f7fb0f0e075a5423e70 docs/plans/F8-rule-based-roi.md
 773d4c5652e1abd95b7bf06591a691c07c1c9fa1 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
@@ -217,7 +217,7 @@ dffdcb2a85a96e7ddc4470c03682e91c846fa03b tests/test_ui_gallery.py
 3353902535d4fb40003e0df96253e8a99198f5de tests/test_ui_gds_panel.py
 f480eedce6d10f8e192050bdbe65d03676911df0 tests/test_ui_ground_truth.py
 cb45d0966163d98176055c86304fbeeb24f5c5f4 tests/test_ui_input_kinds.py
-ae3be910ea0db4c6f67b24e7501883cbee5b60e0 tests/test_ui_region_edges.py
+c6af9d443249b0f5f720dfe9123f6cb001682dd4 tests/test_ui_region_edges.py
 278574145b76acf5d58e01e8a04dd4b433658244 tests/test_ui_results.py
 edc871251840d314a9ffe3b438f0d4e1ede65aca tests/test_ui_studio_m5.py
 525cb84db93d810dc709eaddd02b20d137a400e5 tests/test_ui_studio_smoke.py
