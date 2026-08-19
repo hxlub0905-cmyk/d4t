@@ -4301,38 +4301,152 @@ class FeatureTable(QTableWidget):
         head.setSectionResizeMode(0, QHeaderView.Stretch)
         head.setSectionResizeMode(1, QHeaderView.ResizeToContents)
 
+    #: 一個分組（F13-1 的 ①）：``title`` 是**哪張卡產出的**、``color`` 是那張卡
+    #: 的階段色、``names`` 是這一組裡的特徵、``collapsed`` 決定一開始收不收。
+    #: 呼叫端（Studio）算好再交過來 —— 這個 widget 不去問 model 也不去問引擎。
+    _HEADER_ROLE = Qt.UserRole + 1
+
     def set_features(self, features: Optional[Dict[str, Any]],
-                     highlight: Iterable[str] = ()) -> None:
-        """填表。``highlight`` 內的特徵名會用 accent 底色標出（例：分數用到的）。"""
+                     highlight: Iterable[str] = (),
+                     sections: Optional[Sequence[Dict[str, Any]]] = None) -> None:
+        """填表。``highlight`` 內的特徵名會用 accent 底色標出（例：分數用到的）。
+
+        ``sections`` 是**分組**（F13-1 ①，2026-08-19 使用者：「feature 的顯示
+        太陽春了不易閱讀」）。一條平的 name/value 清單裡，``n_channels`` 跟
+        ``snr_max`` 長得一模一樣 —— 而它們一個是「這張卡讀了幾頁」、一個是
+        會決定 bin 的量測值。
+
+        **分組不是我發明的規則**：引擎本來就記著每個特徵是哪張卡寫的
+        （`meta["feature_owner"]`），卡片也早就宣告了哪些是診斷數字
+        （`Step.diagnostic_features`）。這裡只是把已經知道的事顯示出來。
+
+        沒給 ``sections`` 就是舊行為（一條平的清單）—— CLI、報表、既有測試
+        都還走那條路。
+        """
         features = dict(features or {})
         hi = set(highlight or ())
-        names = [k for k in features if k != self._SCORE]
+        rows: List[Tuple[str, Any]] = []          # ("head"/"row", 內容)
+        if sections:
+            seen = set()
+            for sec in sections:
+                names = [n for n in (sec.get("names") or [])
+                         if n in features and n != self._SCORE and n not in seen]
+                if not names:
+                    continue
+                seen.update(names)
+                rows.append(("head", sec))
+                rows.extend(("row", n) for n in names)
+            rest = [n for n in features
+                    if n not in seen and n != self._SCORE]
+            if rest:
+                rows.append(("head", {"title": "Other", "color": "",
+                                      "names": rest}))
+                rows.extend(("row", n) for n in rest)
+        else:
+            rows.extend(("row", n) for n in features if n != self._SCORE)
         if self._SCORE in features:
-            names.append(self._SCORE)
+            rows.append(("row", self._SCORE))
 
-        self.setRowCount(len(names))
-        for row, name in enumerate(names):
-            is_score = name == self._SCORE
-            key_item = QTableWidgetItem(str(name))
-            val_item = QTableWidgetItem(_fmt_number(features[name]))
-            val_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            if is_score:
-                font = key_item.font()
-                font.setBold(True)
-                key_item.setFont(font)
-                val_item.setFont(font)
-                key_item.setForeground(QColor(TOKENS["accent_active"]))
-                val_item.setForeground(QColor(TOKENS["accent_active"]))
-            if name in hi:
-                bg = QColor(TOKENS["accent_bg"])
-                key_item.setBackground(bg)
-                val_item.setBackground(bg)
-            self.setItem(row, 0, key_item)
-            self.setItem(row, 1, val_item)
+        self.clearSpans()
+        self.setRowCount(len(rows))
+        current: Optional[QTableWidgetItem] = None
+        collapsed = False
+        for row, (kind, payload) in enumerate(rows):
+            if kind == "head":
+                current = self._fill_header(row, payload)
+                collapsed = bool(payload.get("collapsed"))
+                self.setRowHidden(row, False)
+                continue
+            name = str(payload)
+            self._fill_row(row, name, features[name], name in hi,
+                           name == self._SCORE)
+            self.setRowHidden(row, collapsed and name != self._SCORE)
+        self._header_rows = [r for r, (k, _p) in enumerate(rows) if k == "head"]
+
+    def _fill_header(self, row: int, sec: Dict[str, Any]) -> QTableWidgetItem:
+        """一列分組標題（橫跨兩欄，點一下收合）。"""
+        title = str(sec.get("title") or "")
+        colour = str(sec.get("color") or "") or TOKENS["text_secondary"]
+        n = len([x for x in (sec.get("names") or [])])
+        item = QTableWidgetItem("%s%s  ·  %d" % (
+            "▸ " if sec.get("collapsed") else "▾ ", title, n))
+        font = item.font()
+        font.setBold(True)
+        font.setPointSizeF(max(7.0, font.pointSizeF() - 1.0))
+        item.setFont(font)
+        item.setData(self._HEADER_ROLE, True)
+        item.setForeground(QColor(theme.readable_on(
+            colour, theme.mix_hex(colour, TOKENS["bg_surface"], 0.14))))
+        item.setBackground(QColor(theme.mix_hex(
+            colour, TOKENS["bg_surface"], 0.14)))
+        self.setItem(row, 0, item)
+        self.setItem(row, 1, QTableWidgetItem(""))
+        self.item(row, 1).setBackground(QColor(theme.mix_hex(
+            colour, TOKENS["bg_surface"], 0.14)))
+        self.setSpan(row, 0, 1, 2)
+        return item
+
+    def _fill_row(self, row: int, name: str, value: Any,
+                  highlighted: bool, is_score: bool) -> None:
+        key_item = QTableWidgetItem(str(name))
+        val_item = QTableWidgetItem(_fmt_number(value))
+        val_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        if is_score:
+            font = key_item.font()
+            font.setBold(True)
+            key_item.setFont(font)
+            val_item.setFont(font)
+            key_item.setForeground(QColor(TOKENS["accent_active"]))
+            val_item.setForeground(QColor(TOKENS["accent_active"]))
+        if highlighted:
+            bg = QColor(TOKENS["accent_bg"])
+            key_item.setBackground(bg)
+            val_item.setBackground(bg)
+        self.setItem(row, 0, key_item)
+        self.setItem(row, 1, val_item)
+
+    def is_header_row(self, row: int) -> bool:
+        item = self.item(int(row), 0)
+        return bool(item is not None and item.data(self._HEADER_ROLE))
+
+    def toggle_section(self, row: int) -> None:
+        """收合／展開某一組（點標題那一列）。"""
+        if not self.is_header_row(row):
+            return
+        item = self.item(row, 0)
+        text = item.text()
+        opening = text.startswith("▸")
+        item.setText(("▾" if opening else "▸") + text[1:])
+        for r in range(row + 1, self.rowCount()):
+            if self.is_header_row(r):
+                break
+            key = self.item(r, 0)
+            if key is not None and key.text() == self._SCORE:
+                continue
+            self.setRowHidden(r, not opening)
+
+    def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
+        row = self.rowAt(int(e.position().y()) if hasattr(e, "position")
+                         else int(e.y()))
+        if row >= 0 and self.is_header_row(row):
+            self.toggle_section(row)
+            e.accept()
+            return
+        super().mousePressEvent(e)
+
+    def section_titles(self) -> List[str]:
+        """每一組的標題（測試與狀態列讀得到；不含那個 ▾ 與計數）。"""
+        out: List[str] = []
+        for r in range(self.rowCount()):
+            if self.is_header_row(r):
+                text = self.item(r, 0).text()
+                out.append(text[2:].split("  ·  ")[0])
+        return out
 
     def feature_names(self) -> List[str]:
+        """表上的**特徵**（分組標題不算 —— 它不是一個特徵）。"""
         return [self.item(r, 0).text() for r in range(self.rowCount())
-                if self.item(r, 0) is not None]
+                if self.item(r, 0) is not None and not self.is_header_row(r)]
 
     def value_text(self, name: str) -> Optional[str]:
         for r in range(self.rowCount()):

@@ -103,6 +103,9 @@ from PySide6.QtWidgets import (
 import d4t.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
 from d4t.core.pipeline import ParamError, Recipe, get_step, list_steps
 from d4t.core.pipeline.cellrois import region_names
+from d4t.core.pipeline.engine import (
+    FEATURE_OWNER_KEY, qualified_feature_name,
+)
 from d4t.core.pipeline.recipe import version_skew
 
 from .export_dialog import ExportDialog
@@ -118,6 +121,7 @@ from .scope import (
     unsupported_kind_message, visible_steps,
 )
 from .viewmodel import RecipeModel, accuracy_at, histogram, rebin
+from . import theme
 from .theme import DEFAULT_THEME, THEMES, apply_theme, current_theme
 from .welcome import (
     RecipeLibraryDialog, WelcomeDialog, app_settings, save_theme,
@@ -3243,7 +3247,8 @@ class StudioWindow(QMainWindow):
         self._refresh_inspector(result)
         highlight = self._highlight_features(result)
         self.feature_table.set_features(getattr(result, "features", {}) or {},
-                                        highlight=highlight)
+                                        highlight=highlight,
+                                        sections=self._feature_sections(result))
         score = getattr(result, "score", None)
         self.verdict.set_verdict(getattr(result, "bin", None)
                                  if score is not None else None)
@@ -3740,6 +3745,68 @@ class StudioWindow(QMainWindow):
         """面板現在開著嗎（用明確狀態，不要問 ``isVisible()``）。"""
         node = self.model.nodes.get(self.selected_node or "")
         return bool(node is not None and node.step == self.PROFILE_STEP)
+
+    def _feature_sections(self, result: Any) -> List[Dict[str, Any]]:
+        """特徵表要怎麼分組（F13-1 ①）—— **照引擎已經記下來的事分**。
+
+        兩份資料都早就在了，只是 UI 沒用：
+
+        * ``ctx.meta["feature_owner"]`` —— 每個特徵是**哪張卡**寫的（engine 在
+          救援撞名的那一段順手記的）；
+        * ``Step.diagnostic_features()`` —— 哪幾個是「這張卡自己做了什麼」
+          （`clip_frac` 那類），不是在量缺陷。
+
+        所以這裡不發明分類規則。發明一份的話它會跟引擎漂 —— 而漂掉的症狀是
+        「這個數字被歸到錯的卡底下」，畫面上完全看不出來。
+
+        順序 = **執行順序**（讀起來跟畫布一樣，由前到後），診斷那一組排最後
+        而且**預設收起來**：它每張 Enhance 卡都會產出，攤開來會把真正在量的
+        那幾個數字擠到看不見。
+        """
+        ctx = getattr(result, "context", None)
+        owner = dict(getattr(ctx, "meta", {}).get(FEATURE_OWNER_KEY, {})
+                     or {}) if ctx is not None else {}
+        features = dict(getattr(result, "features", {}) or {})
+        if not owner:
+            return []
+
+        diagnostics: List[str] = []
+        sections: List[Dict[str, Any]] = []
+        for nid in self.model.node_order:
+            node = self.model.nodes.get(nid)
+            if node is None:
+                continue
+            mine = [f for f in features if owner.get(f) == nid]
+            if not mine:
+                continue
+            try:
+                step_cls = get_step(node.step)
+                label = step_cls.label
+                colour = theme.group_hex(step_cls.resolve_group())
+                diag = set(step_cls.diagnostic_features(node.params))
+                # **救回來的那一份也是診斷數字**：兩張 Enhance 卡都寫
+                # `clip_frac`，engine 把先寫的留成 `<節點名>_clip_frac`
+                # （`qualified_feature_name`）。不算進來的話，那個值會以
+                # 「量測值」的身分排在最上面，而它量的是這張卡自己。
+                diag |= {qualified_feature_name(nid, f) for f in list(diag)}
+            except Exception:              # noqa: BLE001 — 顯示用，壞了就當一般的
+                label, colour, diag = node.step, "", set()
+            measured = [f for f in mine if f not in diag]
+            diagnostics.extend(f for f in mine if f in diag)
+            if measured:
+                sections.append({"title": label, "color": colour,
+                                 "names": measured, "node": nid})
+        # **同一張卡放兩次時才把 id 帶出來**（畫布的副標用的是同一條規則）：
+        # 兩組都叫 `Normalize` 的話，使用者分不出哪一組是哪一張卡；而每一組都
+        # 掛一個 node id 又是在每一份正常的 recipe 上加噪音。
+        seen_titles = [sec["title"] for sec in sections]
+        for sec in sections:
+            if seen_titles.count(sec["title"]) > 1:
+                sec["title"] = "%s · %s" % (sec["title"], sec["node"])
+        if diagnostics:
+            sections.append({"title": "Diagnostics", "color": "",
+                             "names": diagnostics, "collapsed": True})
+        return sections
 
     def _highlight_features(self, result: Any) -> Sequence[str]:
         """選取節點這一步新增/改值的特徵 → 在特徵表裡標色。"""
