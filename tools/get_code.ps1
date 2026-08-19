@@ -29,7 +29,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Repo     = "hxlub0905-cmyk/ADEPT"
+$Repo     = "hxlub0905-cmyk/d4t"
 $Manifest = "tools/FILELIST.txt"
 
 # Windows 8.1 / Server 2012 之後仍有機器的 .NET 預設 TLS 1.0，而 GitHub 只收

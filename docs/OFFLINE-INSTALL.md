@@ -49,7 +49,7 @@ python -c "import struct; print(struct.calcsize('P')*8, 'bit')"
 
 ## 步驟 1：拿到 d4t 原始碼
 
-到 `https://github.com/hxlub0905-cmyk/ADEPT` → 綠色 **Code** → **Download ZIP**，
+到 `https://github.com/hxlub0905-cmyk/d4t` → 綠色 **Code** → **Download ZIP**，
 解壓成 `d4t-main\`。（詳見 `docs/NO-GIT-SETUP.md`。）
 
 ## 步驟 2：下載套件到 `wheels\` 資料夾

@@ -28,7 +28,7 @@ import sys
 from typing import Dict, List, Tuple
 
 MANIFEST = os.path.join("tools", "FILELIST.txt")
-RAW = "https://github.com/hxlub0905-cmyk/ADEPT/blob/main/%s"
+RAW = "https://github.com/hxlub0905-cmyk/d4t/blob/main/%s"
 
 
 def blob_sha(data: bytes) -> str:
