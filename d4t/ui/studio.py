@@ -133,6 +133,7 @@ from .widgets import (
     VerdictChip,
     _GlyphMixin,
     apply_button_cursors,
+    column_header,
     small_button,
 )
 
@@ -570,13 +571,20 @@ class StudioWindow(QMainWindow):
         # （F11 Input-5）。以前它們是三段各自寫死的文字，而空白狀態上還有第四份
         # 抄本 —— 於是打開資料夾那條路在最大的那一塊畫面上根本沒被提到。
         # 現在入口只有一份定義，畫面上的每一處都從它長出來。
+        # 三顆 source 共用一個動詞（F13-2）：以前它們是 `Open KLARF…` /
+        # `Open stack…` / `Open folder…` —— 三個「Open」佔掉的寬度比它給的資訊
+        # 多，而工具列上第一眼要讀的是**名詞**。動詞提出來當一個小標題，
+        # 三顆鈕只留名詞。空白狀態仍然用完整的 `title`（那是第一次找路的地方）。
+        lbl_open = QLabel("Open", self)
+        lbl_open.setObjectName("toolbarGroup")
+        self.lbl_open_group = lbl_open
         for src in scope.INPUT_SOURCES:
             tip = src.what
             if not src.has_klarf:
                 tip += ("  There is no KLARF here, and no KLARF means no "
                         "coordinates and no write-back - CSV and Excel "
                         "reports still work.")
-            btn = self._tool_button(src.title, tip,
+            btn = self._tool_button(src.short or src.title, tip,
                                     getattr(self, "_on_open_%s" % src.key),
                                     icon=src.icon)
             setattr(self, "btn_open_%s" % src.key, btn)
@@ -585,12 +593,12 @@ class StudioWindow(QMainWindow):
         # 沒有資料集時是灰的（按下去也沒有意義）。
         for att in scope.ATTACHMENTS:
             btn = self._tool_button(
-                att.title, "%s  %s" % (att.what, att.needs),
+                att.short or att.title, "%s  %s" % (att.what, att.needs),
                 getattr(self, "_on_open_%s" % att.key), icon=att.icon)
             btn.setEnabled(False)
             setattr(self, "btn_open_%s" % att.key, btn)
         self.btn_open_recipe = self._tool_button(
-            "Open Recipe…", "Load a recipe JSON", self._on_open_recipe,
+            "Recipe…", "Load a recipe JSON", self._on_open_recipe,
             icon="document")
         self.btn_examples = self._tool_button(
             "Templates…",
@@ -615,6 +623,12 @@ class StudioWindow(QMainWindow):
             "", "Undo the last change", self.undo, icon="undo")
         self.btn_redo = self._tool_button(
             "", "Redo the change you just undid", self.redo, icon="redo")
+        # **第三級：純圖示、沒有框**（F13-2）。工具列上「有框的字」是按鈕、
+        # 「沒框的字」讀起來是選單列（那條規矩沒有變，見 theme.py）——
+        # 但這幾顆**沒有字**，所以那個顧慮不成立，而它們也不該跟 `Open KLARF…`
+        # 搶同一級的視覺重量：它們是隨時在旁邊的工具，不是流程上的一步。
+        for b in (self.btn_undo, self.btn_redo):
+            b.setProperty("variant", "ghost")
         self.btn_help = self._tool_button(
             "Help", "Reopen the getting-started tour (includes “Try it with "
                     "sample data”)",
@@ -623,14 +637,19 @@ class StudioWindow(QMainWindow):
         self.btn_theme = self._tool_button(
             "", "Switch between the light and dark theme",
             self.toggle_theme, icon="theme")
+        self.btn_theme.setProperty("variant", "ghost")
 
         # 一段 = 一種事情；段與段之間一條分隔線。
         sources = tuple(getattr(self, "btn_open_%s" % s.key)
                         for s in scope.INPUT_SOURCES)
         attachments = tuple(getattr(self, "btn_open_%s" % a.key)
                             for a in scope.ATTACHMENTS)
-        for group in (sources,
-                      attachments + (self.btn_open_recipe,),
+        # 「Open」那一段涵蓋**四顆**：三種資料 + recipe。它們回答的是同一個
+        # 問題（「從哪裡把東西讀進來」），所以共用一個動詞。GDS 匯出自成一段，
+        # 因為它問的是別的事（往**已經載好的** lot 上再掛一個檔案）。
+        bar.addWidget(lbl_open)
+        for group in (sources + (self.btn_open_recipe,),
+                      attachments,
                       (self.btn_examples, self.btn_export),
                       (self.btn_undo, self.btn_redo)):
             for b in group:
@@ -1031,6 +1050,11 @@ class StudioWindow(QMainWindow):
         # 排在一起就是「差一點對齊」—— 比完全沒對齊更讓人覺得亂。
         lay.setContentsMargins(8, 8, 8, 8)
         lay.setSpacing(8)
+        # 這一欄叫什麼（F13-4）—— 四個直欄以前只靠 splitter 隔開，
+        # 沒有任何東西說得出「這一欄是什麼」。它自己不帶左右內距，
+        # 靠這一欄的 8px 邊界對齊（那個節奏是 F8-UI 定的，不要為了一個
+        # 地標破壞它）。
+        lay.addWidget(column_header("Preview", pane))
 
         nav = QHBoxLayout()
         nav.setSpacing(8)

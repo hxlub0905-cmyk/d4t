@@ -145,7 +145,8 @@ class InputSource(NamedTuple):
     * ``key``    —— ``StudioWindow`` 上那顆鈕與那個 handler 的名字後綴。
     * ``kinds``  —— 這條路產得出來的 ``dataset.kind``（可能不只一種：一份 KLARF
       是 patch 還是一顆一張，**由檔案本身決定**，不該反過來問使用者）。
-    * ``title``  —— 鈕上的字。工具列與空白狀態用同一份。
+    * ``title``  —— 完整的一句（空白狀態上那一列用它）。
+    * ``short``  —— 工具列上那顆鈕的字（省略重複的動詞；空的話退回 ``title``）。
     * ``what``   —— 一句白話：**這條路吃的是什麼樣的檔案**。
     * ``icon``   —— 自繪圖示的名字（`widgets.GLYPH_ICONS`）。
     * ``has_klarf`` —— 進來之後寫不寫得回 KLARF。空白狀態上直接寫出來，
@@ -158,6 +159,10 @@ class InputSource(NamedTuple):
     what: str
     icon: str
     has_klarf: bool
+    #: 工具列上那顆鈕的字（F13-2）。**同一張表，兩種呈現**：空白狀態要講完整
+    #: 的一句（那是使用者第一次找路的地方），工具列只要一個名詞 —— 五顆
+    #: 「Open …」排在一起，重複的那個動詞佔掉的寬度比它給的資訊多。
+    short: str = ""
 
 
 #: Studio 的四種資料入口（順序就是畫面上的順序）。
@@ -168,18 +173,21 @@ class InputSource(NamedTuple):
 INPUT_SOURCES: Tuple[InputSource, ...] = (
     InputSource(
         key="klarf", kinds=("ebi_patch", "rsem"), title="Open KLARF…",
+        short="KLARF…",
         what=("A KLARF and its images - either a patch TIFF with several "
               "pages per defect, or one image file per defect. Which one it "
               "is comes from the KLARF, you do not have to say."),
         icon="folder", has_klarf=True),
     InputSource(
         key="stack", kinds=("tiff_stack",), title="Open stack…",
+        short="Stack…",
         what=("One multi-page TIFF and nothing else - you say how many pages "
               "there are per defect, and every group of that many becomes "
               "one defect."),
         icon="stack", has_klarf=False),
     InputSource(
         key="folder", kinds=("folder",), title="Open folder…",
+        short="Folder…",
         what="A folder of single images: every image file becomes one defect.",
         icon="folder_open", has_klarf=False),
 )
@@ -193,6 +201,8 @@ class Attachment(NamedTuple):
     what: str
     icon: str
     needs: str
+    #: 工具列上那顆鈕的字（同 :class:`InputSource`）。
+    short: str = ""
 
 
 #: 附加檔的入口。第一個（也目前唯一的）是 GLAS 的 GDS 匯出。
@@ -206,6 +216,9 @@ ATTACHMENTS: Tuple[Attachment, ...] = (
         what=("Layout labels that GLAS exported for this lot: every defect "
               "gets a label map, and the “GDS layers” card turns each layer "
               "into a named region."),
+        # **這一顆不縮寫**：它的名字被三張卡的訊息逐字引用（「Use “Open GDS
+        # export…”」），而那條不變量要求引號裡的字跟畫面上的鈕**一字不差**
+        # （`test_ui_f7_9_feedback`）。縮寫它等於讓那三句話指向一顆不存在的鈕。
         icon="layers", needs="Load the lot first."),
 )
 

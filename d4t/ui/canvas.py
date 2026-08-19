@@ -1125,6 +1125,29 @@ class PipelineCanvas(QGraphicsView):
         self._pan_last = None
         self._pan_moved = False
         self._build_zoom_bar()
+        self._build_header()
+
+    # ---- 這一欄叫什麼（F13-4）---------------------------------------------
+    def _build_header(self) -> None:
+        """畫布左上角的地標。
+
+        它跟 zoom bar 同一種做法（**浮在畫布上的子 widget**，不佔版面）——
+        畫布在主視窗裡是 splitter 的直接子項，包一層容器會讓
+        「``canvas_column.widget(0)`` 就是畫布」這件事不再成立，而好幾條測試與
+        彈出視窗的邏輯都靠它。一個地標不值得換掉那個形狀。
+        """
+        from .widgets import column_header
+
+        self._header = column_header("Pipeline", self)
+        self._header.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._place_header()
+
+    def _place_header(self) -> None:
+        lbl = getattr(self, "_header", None)
+        if lbl is not None:
+            lbl.adjustSize()
+            lbl.move(9, 6)
+            lbl.raise_()
 
     # ---- 縮放控制（F7-14）--------------------------------------------------
     def _build_zoom_bar(self) -> None:
@@ -1192,6 +1215,7 @@ class PipelineCanvas(QGraphicsView):
     def resizeEvent(self, e) -> None:          # noqa: D102 - Qt hook
         super().resizeEvent(e)
         self._place_zoom_bar()
+        self._place_header()
         self._consume_pending_fit()
 
     # ---- 對外（與 PipelinePanel 對齊）--------------------------------------

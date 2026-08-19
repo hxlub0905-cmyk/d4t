@@ -3547,13 +3547,29 @@ class StageButton(QFrame):
         lay.addWidget(self.label)
 
         self.count = QLabel("", self)
-        self.count.setAlignment(Qt.AlignHCenter)
+        self.count.setAlignment(Qt.AlignCenter)
         self.count.setObjectName("stageCount")
-        lay.addWidget(self.count)
+        lay.addWidget(self.count, 0, Qt.AlignHCenter)
+        self._style_count()
         self.setProperty("active", "false")
+
+    def _style_count(self) -> None:
+        """「有幾張卡」那顆小藥丸的顏色（F13-3）。
+
+        **階段色的淡底 + 同色系的深字**，兩種主題都由 `theme.count_badge_colors`
+        算出來（它會把字推到過得了 AA 為止）。藥丸而不是一個灰數字，是因為
+        那個數字以前沒有任何東西說它是什麼 —— 一顆帶著階段色的標籤至少講出
+        「這是這一段的東西」，而顏色跟圖示、卡片、畫布是同一套語言。
+        """
+        bg, fg = theme.count_badge_colors(self.group)
+        self.count.setStyleSheet(
+            "background:%s; color:%s; border-radius:7px; padding:0 5px;"
+            "font-size:9px; font-weight:600;" % (bg, fg))
 
     def set_count(self, n: int) -> None:
         self.count.setText("" if n <= 0 else str(int(n)))
+        # 空的時候不要留一塊有底色的小方塊。
+        self.count.setVisible(n > 0)
 
     def set_active(self, active: bool) -> None:
         self._active = bool(active)
@@ -3568,11 +3584,27 @@ class StageButton(QFrame):
         # 圓角、hover、選中都在 QSS 裡了。
         self._colour = colour
         self.icon.set_color(colour)
+        self._style_count()          # 藥丸的兩個顏色也是算出來的（F13-3）
 
     def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
         if e.button() == Qt.LeftButton:
             self.clicked.emit(self.group)
         super().mousePressEvent(e)
+
+
+def column_header(title: str, parent: Optional[QWidget] = None) -> QLabel:
+    """一欄工作區的小標題（F13-4）。
+
+    主視窗有四個直欄，而以前它們之間只有一條 splitter —— **沒有任何東西說
+    「這一欄是什麼」**。使用者要靠內容反推自己在看哪一塊，而那件事在他還不熟
+    的時候正是最貴的。
+
+    刻意做得很輕（10px、大寫、字距拉開、`text_hint`）：它是一個**地標**不是
+    一個標題列，佔的高度要小到不值得為它讓出畫面。
+    """
+    lbl = QLabel(str(title).upper(), parent)
+    lbl.setObjectName("columnHeader")
+    return lbl
 
 
 class LibraryPanel(QWidget):
@@ -3673,6 +3705,15 @@ class LibraryPanel(QWidget):
         panel_lay.setContentsMargins(0, 0, 0, 0)
         panel_lay.setSpacing(0)
 
+        # 地標自己不帶內距 —— 這裡用跟搜尋框同一組邊界（左 6 / 右 8），
+        # 兩者才會對齊在同一條線上。
+        head_wrap = QWidget(self.panel)
+        hw = QHBoxLayout(head_wrap)
+        hw.setContentsMargins(8, 6, 8, 0)
+        self.header = column_header("Library", head_wrap)
+        hw.addWidget(self.header)
+        panel_lay.addWidget(head_wrap)
+
         self.search = QLineEdit(self)
         self.search.setPlaceholderText("Search cards…")
         self.search.setClearButtonEnabled(True)
@@ -3680,7 +3721,7 @@ class LibraryPanel(QWidget):
         self.search.textChanged.connect(self._on_search)
         wrap = QWidget(self.panel)
         wl = QHBoxLayout(wrap)
-        wl.setContentsMargins(6, 6, 8, 4)
+        wl.setContentsMargins(6, 2, 8, 4)
         wl.addWidget(self.search)
         panel_lay.addWidget(wrap)
 
