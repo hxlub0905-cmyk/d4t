@@ -5,7 +5,7 @@ f4af4f7ec449d150841dedb1f4d746658c4e0486 .gitignore
 3677f25b67728f351bfe66dbf696dbd1cefab249 AGENTS.md
 4a3a3e3e6cf8cae572f26f1f55246b4a82a132c9 CLAUDE.md
 87c3cb2a07ed7a97b98ec30aa139b3dd2f03ff19 README.md
-f0a9a67d73d6add8a48205679e2b6dda09ca410e SESSION_LOG.md
+3cba4a7e46eb3e42618e427659d74e057159677c SESSION_LOG.md
 650a5d7c8bc6db42eed4054174823bfcfceb7eae adept/__init__.py
 60b80dcea29bcf34402d267038256d161b70b0ed adept/__main__.py
 8a51dfe499b3a9d81434c8a202f2d17c24b71c74 adept/core/__init__.py
@@ -33,7 +33,7 @@ eeb80b55a38476ef2f80a5e10538a50bc935aa1b adept/core/export/overlay.py
 2befd3e81601f75aada73c3dc59e2c962f1e64d1 adept/core/export/report.py
 cf4a1ad803592ee09a5fc9c205da267f7de1a3f9 adept/core/ingest/__init__.py
 49de09f00b6f2dfca52338c7a0918122f7f1a0e3 adept/core/ingest/dataset.py
-666db8df4c900e67ae38e68bed282e59a6fe10da adept/core/ingest/glas_export.py
+92aa0d2b537825f42062c6193d9484060faae917 adept/core/ingest/glas_export.py
 b43a35c8adba191eff3f78f643f32c47a2247027 adept/core/ingest/imageio.py
 7c83441689fc980b2a4d7e3f46375653ae305054 adept/core/ingest/klarf_core.py
 541e42dac682a0fbb254ce23a32979e2a9b62f19 adept/core/ingest/tiff_index.py
@@ -41,7 +41,7 @@ b43a35c8adba191eff3f78f643f32c47a2247027 adept/core/ingest/imageio.py
 4afc683911ec768f434d330f01e92b88905cacaf adept/core/pipeline/batch.py
 d6a6e8374dba3679cc6c28dd534ece76923f6ce2 adept/core/pipeline/cache.py
 398124f3c14b8c071de444f31414130991eec424 adept/core/pipeline/cellrois.py
-8d96fd361dcb6e1b81e34bf3ce9f355de654eaec adept/core/pipeline/channels.py
+35b9613a356abb899e23e5791ee9cdd872209cc1 adept/core/pipeline/channels.py
 bc5822860c73a424460de963c0a7ef1b940bd71e adept/core/pipeline/context.py
 e23539efe8cfae76911201bb5b37e0d6dbfde404 adept/core/pipeline/curve.py
 15fe31d06496c7dc3f7957104c0cb1ce4e17272a adept/core/pipeline/engine.py
@@ -63,7 +63,7 @@ d40c4f9315d5d1e1341f4120a46a78f983d7ca6a adept/core/steps/pattern_ref.py
 9faa96d8ac9fea3ad43bb25e2de578dd5c6fc965 adept/core/steps/quality.py
 98be8f62f88078005c6124d12000abd8c2a2a030 adept/core/steps/roi_compare.py
 3ccf021332986f44d133b4f8c8dffbd764215174 adept/core/steps/roi_cross.py
-532b1c30ce73160b77d36a3c8a20f047f1bf24b3 adept/core/steps/roi_from_mask.py
+f04fc6179954623b694e109280c4d6ab7029b193 adept/core/steps/roi_from_mask.py
 10eca7676b56a578aa499d27fd9666bc9dc8c03f adept/core/steps/roi_mask.py
 e8269fc1744fd1bf8d3dd62eb5d96d8712962c79 adept/core/steps/roi_snr.py
 798ab1018d63bf6da8bccaedc256827d82230c95 adept/core/steps/roi_template.py
@@ -81,7 +81,7 @@ a9c45a4e6a2e4e2e9ff46aac6f1caccf3212bcc2 adept/ui/inspectors.py
 56c08b0d360f922ec4c0d829c96d25426db86af4 adept/ui/region_check.py
 043a9240742914759667fd4bb01beafd0241ed17 adept/ui/results.py
 e2f65a8ed800ffd13dbac0f6d23cd1554f222a75 adept/ui/scope.py
-9f2b1f616dbb6b41cd280828b4e6ece3f298abf7 adept/ui/studio.py
+7e5821ae22d8196aca4d8eb34520ddea11668630 adept/ui/studio.py
 2566f2da060e65e884d86bffc10c8e1394565396 adept/ui/template_dialog.py
 06608777ade523d9c82ebdae0109a642cc6dfd55 adept/ui/theme.py
 434fd16a41917d10fee0f74f72cebff897e81141 adept/ui/viewmodel.py
@@ -206,7 +206,7 @@ d8b5e1d83146e68ff672137e95e6a58f55d6cad2 tests/test_ui_f8_ui_polish.py
 d30a27087f1558ababadbfdce9904d52903890f5 tests/test_ui_f9_7_user_draws_the_lines.py
 e0d054e4b8a2bfab33782abad30a0b394335badd tests/test_ui_f9_9_two_lines_side_by_side.py
 90ebc45e44ce408457f916c895ed1ad081a08d63 tests/test_ui_gallery.py
-12418aea5923e540d42dc566d8afd62dde5835e6 tests/test_ui_gds_panel.py
+37c49c1d40861f55e5fccc996191907a2255f950 tests/test_ui_gds_panel.py
 c7213491059c83d4ea3f182774342d2485fbe0d7 tests/test_ui_ground_truth.py
 4186f99492d48a415f9fb84011761b744a48efe9 tests/test_ui_input_kinds.py
 19fbff5ae67ca09da5b29b1428ef5e9a2583163b tests/test_ui_results.py

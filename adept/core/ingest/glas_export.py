@@ -38,7 +38,7 @@ from .dataset import Dataset, ImageRef
 
 __all__ = ["MANIFEST_NAME", "SIDECAR_LABEL", "AttachReport", "read_manifest",
            "label_map", "region_name_for", "default_layer_map",
-           "layer_map_default", "attach"]
+           "layer_map_default", "fallback_layer_names", "attach"]
 
 #: manifest 的固定檔名（`gds_align_tool._write_manifest`）。
 MANIFEST_NAME = "overlay_manifest.json"
@@ -194,6 +194,50 @@ def layer_map_default(layers: Any) -> str:
         names.append(name)
         parts.append("%d:%s" % (int(lid), name))
     return ", ".join(parts)
+
+
+def fallback_layer_names(ids: Any) -> str:
+    """label id 的清單 → ``"1:LayerA, 2:LayerB, …"``。
+
+    **這是防呆，不是命名建議**（2026-08-18，使用者：「我希望有個防呆機制讓
+    Layer 一開始就填好（可以先預設填名字 LayerA/LayerB/LayerC 這樣以此類推）
+    這樣才會一開始就有顯示（避免 user 以為沒連到沒 work）」）。
+
+    為什麼「空著」是一個很貴的預設值
+    --------------------------------
+    這張卡的規則是「**某一列空著 = 那一層不要**」（跟 `load_patch` 不同，那裡
+    空著是「用預設名」）。那條規則本身是對的 —— 使用者要有辦法排除一層。
+    問題出在**整張卡都空著**的時候：它一個區域都不吐，於是影像上一個框都沒有，
+    而那跟「線沒接上」「這張卡壞了」在畫面上長得**一模一樣**。使用者剛把線接
+    過去，看到的是什麼都沒發生。
+
+    所以「整張卡是空的」要有一個看得見的預設。它不必是好名字（`LayerA` 顯然
+    不是），它只要讓**接線這件事當場看得到結果**；名字使用者本來就會改
+    （`epi` / `mg` 比 `L17_D0` 好用太多，而寫分數表達式的是他）。
+
+    manifest 有 ``label_map`` 的時候不會走到這裡 —— 那邊的名字是真的層名，
+    一定比 `LayerA` 好（見 :func:`layer_map_default`）。
+
+
+    字母跟著 **id** 走（id 1 → ``LayerA``、id 3 → ``LayerC``），不是跟著順序 ——
+    這一顆上剛好沒有第 2 層的話，字母不該整排往前遞補：`3:LayerB` 讀起來像在
+    講第二層，而換一顆有第 2 層的 defect 又會變成 `3:LayerC`。
+    """
+    parts = []
+    for lid in sorted({int(i) for i in (ids or ()) if int(i) > 0}):
+        parts.append("%d:Layer%s" % (lid, _letters(lid - 1)))
+    return ", ".join(parts)
+
+
+def _letters(n: int) -> str:
+    """0 → ``A``、25 → ``Z``、26 → ``AA``（Excel 的欄名，256 層也不會撞）。"""
+    out = ""
+    n = int(n)
+    while True:
+        out = chr(ord("A") + n % 26) + out
+        n = n // 26 - 1
+        if n < 0:
+            return out
 
 
 def default_layer_map(doc: Dict[str, Any]) -> str:

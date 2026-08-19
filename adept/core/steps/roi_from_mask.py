@@ -82,7 +82,7 @@ LIMIT_MAX_BOXES = 65536
 def _layers_of(params: Dict[str, Any]) -> List[Tuple[int, str]]:
     """``layers`` 參數 → ``[(label id, 區域名), …]``。打到一半不准拋。"""
     try:
-        return parse_channel_map(params.get("layers", ""))
+        return parse_channel_map(params.get("layers", ""), noun="layer")
     except ChannelMapError:
         return []
 
@@ -185,7 +185,7 @@ class RoiFromMaskStep(Step):
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
         try:
-            layers = parse_channel_map(p["layers"])
+            layers = parse_channel_map(p["layers"], noun="layer")
         except ChannelMapError as e:
             raise StepError(self.key, str(e)) from None
         if not layers:

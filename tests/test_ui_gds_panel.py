@@ -326,3 +326,132 @@ def test_the_users_own_names_are_never_overwritten(qapp, tmp_path):
         assert win.model.nodes[nid].params["layers"] == "1:epi, 2:mg"
     finally:
         win.deleteLater()
+
+
+# --------------------------------------------------------------------------- #
+# 8. 防呆：這張卡永遠不該是空的（F11 Region-3 第五輪）
+# --------------------------------------------------------------------------- #
+"""使用者實際跑真實資料之後的第一句話：
+
+> 「一開始 layout labels 連過去 GDS layer card 時候，image stream 完全不會顯示
+>   任何 overlay，要輸入 region name 才有，我希望有個防呆機制讓 Layer 一開始就
+>   填好（可以先預設填名字 LayerA/LayerB/LayerC 這樣以此類推）這樣才會一開始就
+>   有顯示（避免 user 以為沒連到沒 work）」
+
+規則本身沒問題（**某一列空著 = 那一層不要**，使用者要有辦法排除一層）。貴的是
+**整張卡都空著**那個狀態：一個區域都不吐、影像上一個框都沒有 —— 而那跟「線沒
+接上」「這張卡壞了」在畫面上長得一模一樣。
+"""
+
+
+def _gds_lot(tmp_path, seed, layers=3, label_map=True):
+    import json
+    import sys
+
+    sys.path.insert(0, "tools")
+    from make_glas_export import generate as gen_export
+    from make_sample_rsem import generate as gen_lot
+
+    lot = gen_lot(str(tmp_path / "lot"), n=3, seed=seed)
+    exp = tmp_path / "exp"
+    gen_export(str(tmp_path / "lot"), str(exp), layers=layers, seed=seed)
+    if not label_map:
+        # GLAS 匯出時沒勾「export ROI label map」就長這樣。
+        f = exp / "overlay_manifest.json"
+        doc = json.loads(f.read_text(encoding="utf-8"))
+        doc.pop("label_map", None)
+        f.write_text(json.dumps(doc), encoding="utf-8")
+    return lot, str(exp)
+
+
+def test_connecting_the_labels_fills_the_layers_and_shows_boxes(qapp, tmp_path):
+    """**接上線的那一刻**畫面上就要有框 —— 那正是使用者期待有反應的時刻。
+
+    這一條走的是沒有 `label_map` 的匯出（名字只能是 `LayerA`…），因為那是唯一
+    會真的落到防呆上的情況；有 `label_map` 的走真層名，見下一條。
+    """
+    from adept.ui.studio import StudioWindow
+
+    lot, exp = _gds_lot(tmp_path, seed=11, label_map=False)
+    win = StudioWindow(show_welcome_on_start=False)
+    try:
+        assert win.load_dataset_path(lot["klarf"], sync=True)
+        win.attach_gds_export(exp)
+        sid = win.model.add_step("load_sidecar")
+        win.select_node(sid)
+        win.refresh_preview(sync=True)
+        gid = win.model.add_step("roi_from_mask")
+        win.select_node(gid)
+        win._autofill_new_card(gid)
+
+        win._connect(sid, gid, "layout_label", dst_in="source")
+        got = win.model.nodes[gid].params["layers"]
+        # 字母跟著 **id** 走：這一顆上剛好沒有某一層時，字母不該整排往前遞補。
+        assert got and all(
+            row.split(":")[1] == "Layer" + "ABCDEFG"[int(row.split(":")[0]) - 1]
+            for row in got.split(", ")), got
+
+        win.refresh_preview(sync=True)
+        shown = set(win.region_overlay_names())
+        assert shown == {r.split(":")[1] for r in got.split(", ")}, shown
+        assert shown, "接上線之後畫面上一個框都沒有 —— 那跟沒接上長得一樣"
+    finally:
+        win.deleteLater()
+
+
+def test_the_real_layer_names_win_over_the_fallback(qapp, tmp_path):
+    """`LayerA` 是防呆，不是命名建議 —— manifest 給得出真名字就用真的。"""
+    from adept.ui.studio import StudioWindow
+
+    lot, exp = _gds_lot(tmp_path, seed=12, layers=2, label_map=True)
+    win = StudioWindow(show_welcome_on_start=False)
+    try:
+        win.load_dataset_path(lot["klarf"], sync=True)
+        win.attach_gds_export(exp)
+        gid = win.model.add_step("roi_from_mask")
+        win._autofill_new_card(gid)
+        got = win.model.nodes[gid].params["layers"]
+        assert "Layer" not in got, got      # 不可以退回防呆的名字
+        assert got.startswith("1:L"), got   # `L17/D0` → `L17_D0`
+    finally:
+        win.deleteLater()
+
+
+def test_an_excluded_layer_stays_excluded(qapp, tmp_path):
+    """防呆只填**整張卡都空著**的時候。
+
+    「某一列空著 = 那一層不要」這條規則不可以被防呆吃掉 —— 那是使用者唯一能
+    排除一層的方法（`tests/test_roi_from_mask.py` 鎖著它的引擎行為）。
+    """
+    from adept.ui.studio import StudioWindow
+
+    lot, exp = _gds_lot(tmp_path, seed=13, label_map=False)
+    win = StudioWindow(show_welcome_on_start=False)
+    try:
+        win.load_dataset_path(lot["klarf"], sync=True)
+        win.attach_gds_export(exp)
+        sid = win.model.add_step("load_sidecar")
+        win.select_node(sid)
+        win.refresh_preview(sync=True)
+        gid = win.model.add_step("roi_from_mask")
+        # 「不要第 2 層」在這張表上的寫法是**那個 id 不出現**
+        # （`ChannelMapField` 的空列不會被寫出來，見
+        #  test_an_empty_layer_row_means_no_region_not_a_default_name）。
+        win.model.set_param(gid, "layers", "1:epi, 3:mg")
+        win._connect(sid, gid, "layout_label", dst_in="source")
+        assert win.model.nodes[gid].params["layers"] == "1:epi, 3:mg"
+    finally:
+        win.deleteLater()
+
+
+def test_the_fallback_names_do_not_run_out_of_letters():
+    """256 層也不會撞名（Excel 的欄名）。"""
+    from adept.core.ingest.glas_export import fallback_layer_names
+
+    assert fallback_layer_names([3, 1, 2]) == "1:LayerA, 2:LayerB, 3:LayerC"
+    assert fallback_layer_names([0]) == ""          # 0 是背景，不是一層
+    # 字母跟著 id 走：少了第 2 層，第 3 層仍然是 LayerC（不遞補）
+    assert fallback_layer_names([1, 3]) == "1:LayerA, 3:LayerC"
+    many = fallback_layer_names(range(1, 60)).split(", ")
+    assert many[25].endswith("LayerZ") and many[26].endswith("LayerAA")
+    assert len({n.split(":")[1] for n in many}) == len(many)

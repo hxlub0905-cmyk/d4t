@@ -1795,17 +1795,53 @@ class StudioWindow(QMainWindow):
             self._autofill_gds_layers(node)
 
     def _autofill_gds_layers(self, node: Any) -> None:
-        """掛好的匯出有幾層、叫什麼 —— 直接填進這張卡（空的時候才填）。"""
-        if not self._gds_layers:
-            return
+        """這張卡**永遠不該是空的** —— 空的看起來跟「線沒接上」一模一樣。
+
+        使用者 2026-08-18：「一開始 layout labels 連過去 GDS layer card 時候
+        image stream 完全不會顯示任何 overlay，要輸入 region name 才有，我希望
+        有個防呆機制讓 Layer 一開始就填好⋯⋯避免 user 以為沒連到沒 work」。
+
+        這張卡的規則是「**某一列空著 = 那一層不要**」，而那條規則是對的（要有
+        辦法排除一層）。貴的是**整張卡都空著**的那個狀態：一個區域都不吐、影像
+        上一個框都沒有，跟線沒接上長得一樣。所以只要看得到層，就先填。
+
+        名字的優先順序（好的先用）：
+
+        1. **掛上來那份匯出的 label_map** —— 真的層名（`L17/D0` → `L17_D0`）。
+        2. **這一顆 label 圖上真的出現的 id** —— `LayerA` / `LayerB`…
+           走到這裡的情況是 manifest 沒有 `label_map`（GLAS 匯出時沒勾）。
+           名字很爛，但它讓接線這件事**當場看得到結果**，而名字使用者本來就會改。
+
+        只在**空的**時候填 —— 使用者打過的字不覆蓋（重新掛一次匯出也不覆蓋）。
+        """
         if str(node.params.get("layers", "") or "").strip():
             return              # 使用者打過的字不覆蓋
         from adept.core.ingest import glas_export
 
         default = glas_export.layer_map_default(self._gds_layers)
+        count = len(self._gds_layers)
+        if not default:
+            ids = self._label_ids_for(node)
+            default = glas_export.fallback_layer_names(ids)
+            count = len(ids)
         if default:
             self.model.set_param(node.id, "layers", default)
-            self.param_form.set_label_count(len(self._gds_layers))
+            self.param_form.set_label_count(count)
+
+    def _label_ids_for(self, node: Any) -> List[int]:
+        """這張卡接的那條流上，上一次預覽真的看到哪幾個 label id。
+
+        來源是 ``load_sidecar`` 寫的 ``ctx.meta["layout_label"][流名]["ids"]``
+        —— **畫面上的數字就是引擎算的那一份**（同儀表的慣例），這裡不自己再拆
+        一次 label 圖。
+        """
+        ctx = getattr(getattr(self, "_last_result", None), "context", None)
+        if ctx is None:
+            return []
+        stream = str(node.params.get("source", "") or "")
+        rec = (getattr(ctx, "meta", None) or {}).get("layout_label") or {}
+        entry = rec.get(stream) or {}
+        return [int(i) for i in (entry.get("ids") or ()) if int(i) > 0]
 
     def _autofill_regions(self, node: Any) -> None:
         """剛加進來的 Mask from regions 卡，把上游定義過的區域名自動填進去。
@@ -2110,6 +2146,10 @@ class StudioWindow(QMainWindow):
         # 有可能根本不算數。**同一個輸入**指的是同一個參數上的同一條流名，
         # 所以一條給 test、一條給 ref 不算搶（F9-9 的「多連一」）。
         dropped = self._drop_conflicting_edges(src, dst, stream, param)
+        # **接完線就把這張卡填到「看得到結果」為止**（F11 Region-3 第五輪）。
+        # 加卡的時候也跑過一次，但那時候還沒有線 —— 而「接上 layout labels」
+        # 正是使用者期待畫面上出現東西的那一刻。
+        self._autofill_new_card(dst)
         self._status("Connected %s → %s%s%s" % (src, dst, note, dropped))
 
     def _param_for_stream(self, node_id: str) -> str:
