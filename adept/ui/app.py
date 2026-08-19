@@ -13,6 +13,7 @@ from typing import List, Optional, Sequence
 from PySide6.QtWidgets import QApplication
 
 from . import theme
+from .branding import app_icon
 from .studio import StudioWindow
 from .welcome import saved_theme
 
@@ -28,6 +29,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     app = QApplication.instance()
     if app is None:
         app = QApplication(args)
+    # 設在 app 上而不是每個視窗上 —— 所有 top-level 視窗（Studio、Results、
+    # 各種對話框）都會跟著繼承，之後開新視窗不必記得補一行。
+    app.setWindowIcon(app_icon())
     theme.apply_theme(app, saved_theme(theme.DEFAULT_THEME))
 
     win = StudioWindow()

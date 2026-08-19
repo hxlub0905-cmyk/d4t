@@ -17,3 +17,8 @@ include = ["adept*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# 圖示等品牌資產要跟著套件走 —— 不加這一段，pip 裝出來的 adept.ui 底下
+# 沒有 assets/，Studio 會安靜地開一個沒有圖示的視窗。
+[tool.setuptools.package-data]
+"adept.ui" = ["assets/*.svg"]

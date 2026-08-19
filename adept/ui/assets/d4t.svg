@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="d4t">
+  <title>d4t</title>
+  <!-- 這個 4 是用接線畫的：兩個開口是進來的影像流，橫豎交會的那一點是算法，
+       往下走出去的是判定。四顆點的顏色**逐字取自** adept/ui/theme.py 的
+       dark palette（磚是深色的，所以用 dark 那一組）：
+         seg_image #6f9fc8 / seg_algo #d1994f / seg_adc #9e8bc8
+       改了那三個就要改這裡 —— tests/test_ui_branding.py 會擋。 -->
+  <rect width="64" height="64" rx="14.7" fill="#1c212c"/>
+  <g fill="none" stroke="#e3e6ec" stroke-width="6.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M41 13 L15 38 L52 38"/>
+    <path d="M41 13 L41 52"/>
+  </g>
+  <circle cx="41" cy="13" r="4.6" fill="#6f9fc8"/>
+  <circle cx="15" cy="38" r="4.6" fill="#6f9fc8"/>
+  <circle cx="41" cy="38" r="5.4" fill="#d1994f"/>
+  <circle cx="41" cy="52" r="4.6" fill="#9e8bc8"/>
+</svg>
