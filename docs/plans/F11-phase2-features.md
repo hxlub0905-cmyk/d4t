@@ -2401,7 +2401,27 @@ Region 段分成兩半**（找 / 用），不是把它們散到別段去。
 驗收：`tests/test_region_facts.py`（14 條），含一條掃 registry 的 ——
 判準是「這張卡吐不吐區域」，不是一張寫死的卡片清單。
 
-#### 3.3.20 待做：`pattern_ref` → 一張 ROI 卡（使用者 2026-08-18 提）
+#### 3.3.20 「單張大圖鋪 ROI」＝ Template（✅ 2026-08-18，Region-5）
+
+使用者原本要一張新卡，接著說「你要直接做在 template 裡也可以，但要想想怎麼設計」。
+**量過之後答案是不必新卡**：1000×1000 合成 SEM → 625 個框、相位正確、match 1.00、
+61 ms。`roi_boxes_in_patch` 早就明講它同時涵蓋 cell 比圖大／比圖小兩種關係。
+
+差別完全在「接哪一條流」（F9），不需要模式參數：
+
+| 接什麼 | cell 與圖的大小 | 框出什麼 |
+|---|---|---|
+| 一張 patch | cell 通常比 patch 大 | 這一顆看得到的那一份（可能沒有）|
+| 一張大 SEM | cell 比圖小很多 | 每一份都畫（幾百到幾千）|
+
+修掉三個擋路的：`max_boxes` 64 → 8192（同 `roi_from_mask`，實測不封頂 83 ms）；
+`<name>_clipped` 在 Template 上**恆為 0**（`roi_boxes_in_patch` 自己就截，所以
+`len(boxes) > max_boxes` 永遠 False —— 正是這旗標要擋的那件事本身）；
+對話框多一顆 `Use the image on screen`（疊 cell 的圖就是正在看的那一顆）。
+
+驗收 `tests/test_roi_template_full_image.py`（7 條）。
+
+#### 3.3.21 舊提案（已被 §3.3.20 取代）：`pattern_ref` → 一張 ROI 卡
 
 > 「Reference from pattern 其實也不是沒用，但他要改名，功能也不是 ref。
 >  我的想法是，他是用在 repeating pattern 的 SEM（單張影像圖），他鋪 ROI 的方式

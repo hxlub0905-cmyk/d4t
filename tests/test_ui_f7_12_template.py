@@ -1102,3 +1102,68 @@ def _render(canvas) -> None:
     pm.fill(QColor("#000000"))
     canvas.render(pm)
     assert not pm.isNull()
+
+
+# --------------------------------------------------------------------------- #
+# 單張大圖那條路：疊 cell 的圖就是畫面上那一張（F11 Region-5，2026-08-18）
+# --------------------------------------------------------------------------- #
+def test_the_dialog_can_stack_from_the_image_on_screen(qapp):
+    """逼使用者去磁碟上找回同一個檔案，是把他做完的事再做一次。
+
+    而且很容易挑到**別顆** —— 單張 SEM 那條路每一顆都是一個獨立的檔案，檔名
+    長得一模一樣。
+    """
+    from adept.ui.template_dialog import TemplateDialog
+
+    dlg = TemplateDialog()
+    try:
+        # 沒有圖的時候那顆鈕**不出現**（不是變灰）：它指的東西根本不存在。
+        assert dlg.btn_screen.isHidden() is True
+        assert dlg.set_screen_image(None) is False
+
+        assert dlg.set_screen_image(big_image(), "1 · single") is True
+        assert dlg.btn_screen.isHidden() is False
+        assert "1 · single" in dlg.btn_screen.text()
+
+        # **只是準備好，不會自己疊** —— 重疊會重算相位，而相位一變，使用者
+        # 標好的框就全部平移了（同 load_encoded 的理由）。
+        assert dlg.cell is None
+        assert dlg._on_use_screen() is True
+        assert dlg.cell is not None and dlg.cell.cell.size > 0
+    finally:
+        dlg.deleteLater()
+
+
+def test_studio_hands_the_dialog_the_stream_the_card_actually_reads(window):
+    """問的是卡片自己的 `source`，不是一組寫死的名字。
+
+    單張影像那條路的流可能叫 `single`、`test`，或使用者自己取的任何名字
+    （`load_single` 的 `out` 是他填的）—— 寫死 `ref`/`test` 的話那條路永遠拿不到
+    圖，而那顆「用畫面上那一張」的鈕就永遠不出現。
+
+    另外一半同樣重要：**這張卡還沒接線的時候正是使用者會來開這個對話框的時候**，
+    而那一顆的預覽是失敗的（`res.images` 空的）。上游已經算出來的流還在
+    context 上，要拿得到。
+    """
+    class _Ctx:
+        images = {"single": big_image(), "ref": big_image(1)}
+
+    class _Res:
+        images = {}                     # 跑失敗 → 空的
+        context = _Ctx()
+
+    window._last_result = _Res()
+    nid = window.model.add_step("roi_template")
+    node = window.model.nodes[nid]
+
+    # 卡片指到 `single` → 拿到 `single`（不是 ref）
+    window.model.set_param(nid, "source", "single")
+    img, why = window._template_source_image(node)
+    assert img is not None and "single" in why
+    assert img is _Ctx.images["single"]
+    assert window._preview_patch_size(node) == img.shape[:2]
+
+    # 沒指到任何東西 → 退回 ref/test（patch 那條路的既有行為）
+    window.model.set_param(nid, "source", "")
+    img2, why2 = window._template_source_image(window.model.nodes[nid])
+    assert img2 is _Ctx.images["ref"] and "ref" in why2

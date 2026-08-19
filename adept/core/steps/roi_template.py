@@ -13,6 +13,35 @@
 模板長什麼樣、為什麼原點要錨在地標上、信心值為什麼看的是「峰有多突出」而不是
 分數本身 —— 全部寫在 ``algo/template.py`` 的模組說明裡。
 
+**同一張卡也是「單張大圖」那條路**（F11 Region-5，2026-08-18）
+---------------------------------------------------------------
+使用者原本以為那要另一張卡：「他是用在 repeating pattern 的 SEM（單張影像圖），
+他鋪 ROI 的方式就是跟 template 很像，只不過他是反向把單 cell 鋪回去。」
+
+**量過了：這張卡已經在做那件事。** 1000×1000 的合成 SEM、cell 40×40、兩軸都
+重複，餵進去得到 **625 個框、相位正確、match 1.00、61 ms**。理由在
+``algo/template.roi_boxes_in_patch``：它明講自己同時涵蓋兩種大小關係 ——
+cell 比圖大（模板法的常態，最多落一份）與 **cell 比圖小（每一份都畫）**。
+
+所以兩種用法**不是兩張卡，也不是一個下拉**，差別完全在「你把哪一條流接進去」
+（F9：資料從哪來由線決定）：
+
+============  ==========================  ====================================
+接什麼        cell 與圖的大小關係          框出什麼
+============  ==========================  ====================================
+一張 patch    cell 通常比 patch 大         這一顆看得到的那一份（可能沒有）
+一張大 SEM    cell 比圖小很多              每一份都畫（幾百到幾千個）
+============  ==========================  ====================================
+
+唯一真的擋路的是 ``max_boxes``：預設 64 會把 625 份**安靜地**留 64 份。所以它
+改成 8192（跟 `roi_from_mask` 同一組數字 —— 兩張會吐幾千個框的 ROI 卡用同一個
+上限，少一個要解釋的數字），而被砍到的時候 ``<name>_clipped`` 會講。實測不封頂
+的成本：4 px pitch 的 1000×1000（62500 個框）也只要 83 ms。
+
+配套的是**對話框**：疊 cell 的那張大圖，在這條路上就是使用者正在看的那一顆
+（`TemplateDialog.set_screen_image`）。逼他去磁碟上找回同一個檔案，是把他已經
+做完的事再做一次，而且很容易挑到別顆。
+
 一張卡標**好幾個區域**，一個區域**好幾個矩形**（F11 Region-1）
 --------------------------------------------------------------
 以前是四個手打的數字（``roi_x/y/w/h``）加一個名字，也就是一張卡只框得出一個
@@ -132,18 +161,23 @@ class RoiTemplateStep(Step):
     label = "Template"
     category = CATEGORY_ALGO
     group = GROUP_REGION
-    help = ("Match each patch against one repeating cell of the layout, so "
-            "regions marked once on that cell land in the right place on every "
-            "patch - even when the patch is smaller than one cell.")
+    help = ("Mark the regions once on one repeating cell of the layout, and "
+            "this card puts them in the right place on every image. It works "
+            "both ways round: on a small patch, where one cell is bigger than "
+            "the patch and you get the one copy this defect can see; and on a "
+            "full-size SEM image, where the cell is much smaller and every "
+            "copy across the image gets marked.")
     params = [
         ParamSpec(
             name="source", type="image_key", direction="in", default="ref",
             section="1 · Which image",
             label="Match on",
-            help=("Which image stream to match against the template. Use ref: "
-                  "it has no defect on it, so nothing is interfering with the "
-                  "match, and the pair is already aligned so the answer applies "
-                  "to test as well."),
+            help=("Which image stream the cell is matched against. With a "
+                  "test/ref pair, use ref: it has no defect on it, so nothing "
+                  "interferes with the match, and the pair is already aligned "
+                  "so the answer applies to test as well. With a single "
+                  "full-size image there is only one stream, and the regions "
+                  "are repeated across the whole of it."),
         ),
         ParamSpec(
             name="template", type="template", default="",
@@ -178,12 +212,13 @@ class RoiTemplateStep(Step):
         ),
         _prefix_in_section(),
         ParamSpec(
-            name="max_boxes", type="int", default=64, min=1, max=4096,
+            name="max_boxes", type="int", default=8192, min=1, max=65536,
             section="4 · Name and limits",
             label="At most this many boxes per region",
-            help=("A guard for patterns that repeat very finely: one region can "
-                  "land many times on one patch. The boxes nearest the middle "
-                  "are kept, because that is where the defect is."),
+            help=("A guard for patterns that repeat very finely: one region "
+                  "can land thousands of times on a full-size image. The "
+                  "boxes nearest the middle are kept, because that is where "
+                  "the defect is, and <name>_clipped tells you it happened."),
             advanced=True,
         ),
         *drop_edge_specs("4 · Name and limits"),
@@ -403,11 +438,19 @@ class RoiTemplateStep(Step):
             set_region_family(ctx, self.key, name, [(0.0, 0.0, 1.0, 1.0)])
             return [], 0, 0, False
 
+        # **多要一個**（`max_boxes + 1`）。`roi_boxes_in_patch` 自己就會把清單
+        # 截到你給的長度，所以照 `max_boxes` 去要的話，回來的永遠正好是
+        # `max_boxes` 個 —— 下面那個 `len(boxes) > max_boxes` 於是**永遠是 False**，
+        # 而 `<name>_clipped` 就成了一個恆為 0 的旗標。
+        # （2026-08-18 寫「大圖也走這張卡」的測試時抓到的：100 份被留成 25 份，
+        #  而卡片說沒有被砍。那正是這個旗標存在要擋的那件事本身。）
+        # 多要一個就分得出「剛好等於上限」與「其實還有更多」，而清單是照離中心
+        # 遠近排序的，所以截掉的仍然是最外圍那些。
         boxes: List[Tuple[int, int, int, int]] = []
         for norm in norm_boxes:
             boxes.extend(algo_template.roi_boxes_in_patch(
                 norm, match, cell_shape, patch_shape, periodic=axes,
-                max_boxes=max_boxes))
+                max_boxes=max_boxes + 1))
         # 一個區域的每一塊各自鋪出去之後總數才封頂 —— 留中間的那些（缺陷在
         # 正中央，同 ``roi_cross`` 的 max_boxes）。
         clipped = len(boxes) > max_boxes

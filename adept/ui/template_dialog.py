@@ -106,6 +106,9 @@ class TemplateDialog(QDialog):
         self._syncing = False
         self._from_recipe = False
         self._source: Optional[np.ndarray] = None
+        #: 「畫面上那一張」（Studio 給的）—— 沒有的時候那顆鈕不出現。
+        self._screen_image: Optional[np.ndarray] = None
+        self._screen_name = ""
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 12, 12, 12)
@@ -155,6 +158,21 @@ class TemplateDialog(QDialog):
         lay.setSpacing(4)
 
         row = QHBoxLayout()
+        # **畫面上那一張優先**（F11 Region-5）。單張 SEM 那條路要疊 cell 的圖，
+        # 就是使用者現在正在看的那一張 —— 逼他去磁碟上找回同一個檔案，是一段
+        # 他已經做完的事再做一次，而且很容易挑到別顆。
+        #
+        # 沒有資料集的時候這顆不出現（不是變灰）：它指的東西根本不存在。
+        self.btn_screen = QPushButton("Use the image on screen", box)
+        self.btn_screen.setObjectName("primary")
+        self.btn_screen.setToolTip(
+            "Stack the cell from the defect image you are looking at. This is "
+            "the usual way for a single full-size SEM image, where the cell "
+            "and the image come from the same place.")
+        self.btn_screen.clicked.connect(self._on_use_screen)
+        self.btn_screen.setVisible(False)
+        row.addWidget(self.btn_screen)
+
         self.btn_pick = QPushButton("Rebuild from image…", box)
         self.btn_pick.setObjectName("primary")
         self.btn_pick.clicked.connect(self._on_pick)
@@ -591,6 +609,31 @@ class TemplateDialog(QDialog):
         return box
 
     # ---- 對外（測試也走這條，不必真的開檔案對話框）------------------------
+    def set_screen_image(self, image: Any, name: str = "") -> bool:
+        """Studio 把「現在畫面上那一張」交給對話框（沒有就別呼叫）。
+
+        只是**準備好**，不會自己疊 —— 已經有模板的時候重疊會重算相位，而相位
+        一變，使用者標好的框就全部平移了（同 :meth:`load_encoded` 的理由）。
+        按不按那一顆鈕是他的決定。
+        """
+        arr = None if image is None else np.asarray(image)
+        if arr is None or arr.size == 0:
+            self._screen_image = None
+            self.btn_screen.setVisible(False)
+            return False
+        self._screen_image = arr
+        self._screen_name = str(name or "")
+        self.btn_screen.setText("Use the image on screen (%s)"
+                                % (self._screen_name or "current defect"))
+        self.btn_screen.setVisible(True)
+        return True
+
+    def _on_use_screen(self) -> bool:
+        img = getattr(self, "_screen_image", None)
+        if img is None:
+            return False
+        return self.load_image(img, self._screen_name or "(image on screen)")
+
     def load_image(self, image: Any, name: str = "",
                    px: Optional[int] = None, py: Optional[int] = None) -> bool:
         """吃一張大圖，量週期、疊模板、把證據寫上畫面。

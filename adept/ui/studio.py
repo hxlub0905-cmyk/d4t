@@ -3133,7 +3133,10 @@ class StudioWindow(QMainWindow):
         dlg.load_encoded(str(node.params.get("template", "") or ""),
                          str(node.params.get("locate_axis", "x") or "x"))
         dlg.set_regions_text(str(node.params.get("regions", "") or ""))
-        dlg.set_patch_size(self._preview_patch_size())
+        # 「畫面上那一張」—— 單張 SEM 那條路要疊 cell 的圖就是它（F11 Region-5）。
+        img, why = self._template_source_image(node)
+        dlg.set_screen_image(img, why)
+        dlg.set_patch_size(self._preview_patch_size(node))
         dlg.accepted_setup.connect(
             lambda text, axis, regions, nid=node_id:
             self._apply_template(nid, text, axis, regions))
@@ -3142,12 +3145,44 @@ class StudioWindow(QMainWindow):
         dlg.show()
         return dlg
 
-    def _preview_patch_size(self) -> Optional[Any]:
-        """目前這一顆 patch 有多大（``(h, w)``）—— 不知道就 ``None``。
+    def _template_source_image(self, node: Any) -> Tuple[Optional[Any], str]:
+        """這張卡接的那一條流，在這一顆上長什麼樣（給對話框疊 cell 用）。
+
+        **問的是卡片自己的 `source`**，不是一組寫死的名字：單張影像那條路的流
+        可能叫 `single`、`test` 或使用者自己取的任何名字（`load_single` 的
+        `out` 是他填的），而寫死 `ref`/`test` 的話那條路永遠拿不到圖。
+        """
+        res = getattr(self, "_last_result", None)
+        images = dict(getattr(res, "images", None) or {}) if res is not None else {}
+        if not images:
+            # 這一顆跑失敗時 ``res.images`` 是空的 —— 而**「這張卡還沒接線」正是
+            # 使用者會來開這個對話框的時候**。上游已經算出來的那幾條流還在
+            # context 上，拿得到就拿。
+            ctx = getattr(res, "context", None)
+            images = dict(getattr(ctx, "images", None) or {})
+        wanted = str(node.params.get("source", "") or "")
+        for key in [k for k in (wanted, "ref", "test") if k]:
+            img = images.get(key)
+            if img is not None and getattr(img, "size", 0):
+                item = self._current_item()
+                return img, "%s · %s" % (
+                    str(getattr(item, "defect_id", "") or "defect"), key)
+        return None, ""
+
+    def _preview_patch_size(self, node: Any = None) -> Optional[Any]:
+        """目前這一顆影像有多大（``(h, w)``）—— 不知道就 ``None``。
 
         畫布拿它畫「一顆 defect 看得到多少」。**不知道就不畫**：畫一個猜出來的
         窗比不畫更糟，使用者會照著那個窗決定哪些區域標得到。
+
+        跟 :meth:`_template_source_image` 問同一條流 —— 兩者不一致的話，畫面上
+        那個窗畫的是一張圖、疊出來的 cell 來自另一張。
         """
+        if node is not None:
+            img, _why = self._template_source_image(node)
+            if img is not None:
+                return (int(img.shape[0]), int(img.shape[1]))
+            return None
         res = getattr(self, "_last_result", None)
         images = dict(getattr(res, "images", None) or {}) if res is not None else {}
         for key in ("ref", "test"):
