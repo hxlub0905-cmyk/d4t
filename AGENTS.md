@@ -59,7 +59,7 @@
 > 超過 1 MB 就不顯示內容，那顆複製鈕也跟著消失。
 >
 > **使用者的做法是直接複製 raw**：
-> `https://raw.githubusercontent.com/<owner>/ADEPT/main/bundle/d4t_bundle.py`
+> `https://raw.githubusercontent.com/<owner>/d4t/main/bundle/d4t_bundle.py`
 > 在瀏覽器打得開，全選複製一樣搬得走 —— 跟檔案有多大無關。
 >
 > 所以 **1 MB 不再是任何設計的約束**：不必為了它把文件搬進 `docs/history/`、

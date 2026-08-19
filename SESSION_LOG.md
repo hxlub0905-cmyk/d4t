@@ -27,11 +27,11 @@
 
 **三件跟名字有關、之後會踩到的事：**
 
-1. **GitHub 上的 repo 還叫 `ADEPT`。** `tools/get_code.py`、`get_code.ps1`、
-   `check_files.py` 裡的 `hxlub0905-cmyk/ADEPT` 是**故意保留**的 ——
-   那是沒有 git 的那台機器唯一拿得到程式碼的網址，跟著改就斷了。
-   哪天 GitHub 上真的改名了，要改的就是那三個字串（GitHub 會轉址，所以
-   不改也還能動，但別讓它一直靠轉址活著）。
+1. **GitHub 上的 repo 也改名了**（`hxlub0905-cmyk/d4t`，2026-08-19 同日）。
+   `tools/get_code.py`、`get_code.ps1`、`check_files.py` 裡的 slug 已經跟上 ——
+   那是沒有 git 的那台機器**唯一**拿得到程式碼的網址，所以改 repo 名稱的時候
+   這三個字串一定要一起改。GitHub 雖然會從舊名轉址，但只要有人新建一個叫
+   `ADEPT` 的 repo，轉址就會失效，不要讓搬運通道靠轉址活著。
 2. **快取／設定目錄變成 `~/.d4t`。** 舊的 `~/.adept` 不會自動搬，裡面只有主題
    偏好與影像快取，重建成本是零，所以沒寫遷移。使用者第一次開會回到預設主題。
 3. **環境變數大寫慣例保留**：`D4T_GOLDEN`、`D4T_DOCTOR_JSON`。

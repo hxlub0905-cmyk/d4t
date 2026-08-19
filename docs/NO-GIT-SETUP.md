@@ -26,7 +26,7 @@
 
 `bundle/d4t_bundle.py` —— **一次複製就搬完整個 repo**（2026-08-16 是 888 KB）。
 
-1. 在瀏覽器打開 `https://github.com/hxlub0905-cmyk/ADEPT/blob/main/bundle/d4t_bundle.py`
+1. 在瀏覽器打開 `https://github.com/hxlub0905-cmyk/d4t/blob/main/bundle/d4t_bundle.py`
 2. 按檔案右上角的**複製鈕**
 3. 貼進記事本，存成 `d4t_bundle.py`
 4. `python d4t_bundle.py --list`  ← 先看它會寫哪些檔案，**不寫任何東西**
@@ -108,7 +108,7 @@ stdlib-only、單檔，複製過去直接跑。輸出是純文字且預設遮蔽
 
 ## 1. 取得程式碼（下載通得過的時候）
 
-到 `https://github.com/hxlub0905-cmyk/ADEPT` → 綠色 **Code** 按鈕 →
+到 `https://github.com/hxlub0905-cmyk/d4t` → 綠色 **Code** 按鈕 →
 **Download ZIP** → 解壓到任意資料夾。
 
 解壓後會得到 `d4t-main\`，裡面就是完整程式碼。
@@ -120,7 +120,7 @@ GitHub 產生的 zip **不含 `.git` 資料夾**，所以裡面 190 幾個檔案
 
 | 先做這個測試 | 結果 | 那就是 |
 |---|---|---|
-| 直接開 `https://codeload.github.com/hxlub0905-cmyk/ADEPT/zip/refs/heads/main` | 這個網址被擋，但 `github.com` 的網頁看得到 | **主機層的封鎖**（最常見，已實際遇到）。看下面「主機層封鎖」那一段 |
+| 直接開 `https://codeload.github.com/hxlub0905-cmyk/d4t/zip/refs/heads/main` | 這個網址被擋，但 `github.com` 的網頁看得到 | **主機層的封鎖**（最常見，已實際遇到）。看下面「主機層封鎖」那一段 |
 | 隨便下載另一個無關的公開 repo 的 zip | 也被擋 | **政策層面禁止 .zip 這個類別**，跟哪個 repo 無關。走下面的替代路徑 |
 | 上面兩個都正常，只有這個 repo 的 zip 被擋 | — | **DLP 掃到了內容**。看 §「DLP 掃內容」那一段 |
 
@@ -142,7 +142,7 @@ GitHub 產生的 zip **不含 `.git` 資料夾**，所以裡面 190 幾個檔案
   完全不同），而且**不需要 git、不需要任何套件**。
 
   怎麼拿到那支腳本（你連它也下載不了）：
-  1. 在瀏覽器開 `https://github.com/hxlub0905-cmyk/ADEPT/blob/main/tools/get_code.py`
+  1. 在瀏覽器開 `https://github.com/hxlub0905-cmyk/d4t/blob/main/tools/get_code.py`
   2. 按檔案右上角的**複製鈕**（那是從已經載入的網頁複製，不會再連別的主機）
   3. 貼進記事本，存成 `get_code.py`
   4. `python get_code.py`
@@ -232,7 +232,7 @@ powershell -ExecutionPolicy Bypass -File .\get_code.ps1
 一行決定要不要走這條路（PowerShell 拿得到就代表值得）：
 
 ```powershell
-Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/hxlub0905-cmyk/ADEPT/main/tools/FILELIST.txt' -UseBasicParsing -OutFile t.txt
+Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/hxlub0905-cmyk/d4t/main/tools/FILELIST.txt' -UseBasicParsing -OutFile t.txt
 ```
 
 - 三台主機都被擋的話，剩下的路是**在有網路的機器上取得，用你搬 `wheels\` 的

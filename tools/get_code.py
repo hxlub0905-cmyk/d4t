@@ -53,7 +53,7 @@ import sys
 import urllib.error
 import urllib.request
 
-REPO = "hxlub0905-cmyk/ADEPT"
+REPO = "hxlub0905-cmyk/d4t"
 RAW = "https://raw.githubusercontent.com/%s/%s/%s"
 MANIFEST = "tools/FILELIST.txt"
 TIMEOUT = 30
