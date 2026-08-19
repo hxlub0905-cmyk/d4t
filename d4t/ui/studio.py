@@ -120,7 +120,8 @@ from .scope import (
 from .viewmodel import RecipeModel, accuracy_at, histogram, rebin
 from .theme import DEFAULT_THEME, THEMES, apply_theme, current_theme
 from .welcome import (
-    RecipeLibraryDialog, WelcomeDialog, save_theme, welcome_disabled,
+    RecipeLibraryDialog, WelcomeDialog, app_settings, save_theme,
+    welcome_disabled,
 )
 from .widgets import (
     FeatureTable,
@@ -271,6 +272,35 @@ def load_thumb(item: Any, size: int) -> Optional[Any]:
 def _running_under_pytest() -> bool:
     """現在是不是在跑測試（測試裡建 ``StudioWindow()`` 不准彈導覽）。"""
     return bool(os.environ.get("PYTEST_CURRENT_TEST")) or "pytest" in sys.modules
+
+
+#: 欄寬與中欄比例的 QSettings 鍵（F13-1）。跟主題、導覽旗標同一組設定。
+COLUMNS_KEY = "ui/columns"
+CANVAS_SPLIT_KEY = "ui/canvas_split"
+
+
+def _save_sizes(key: str, sizes: Sequence[int]) -> None:
+    """把一組分隔線位置寫進 QSettings（寫不進去就算了，不准擋關窗）。"""
+    try:
+        app_settings().setValue(key, ",".join(str(int(v)) for v in sizes))
+    except Exception:                   # noqa: BLE001
+        pass
+
+
+def _load_sizes(key: str, count: int) -> Optional[List[int]]:
+    """讀回一組分隔線位置；**沒有、格式怪、或正在跑測試 → ``None``**。
+
+    測試裡不還原是刻意的：還原了之後，某一次手動跑 GUI 拖過的分隔線會從
+    QSettings 漏進下一次的測試，而版面斷言就開始看人品。
+    """
+    if _running_under_pytest():
+        return None
+    try:
+        raw = str(app_settings().value(key, "") or "")
+        out = [int(x) for x in raw.split(",") if x.strip()]
+    except Exception:                   # noqa: BLE001
+        return None
+    return out if len(out) == count and sum(out) > 0 else None
 
 
 def _welcome_on_start_default() -> bool:
@@ -894,7 +924,13 @@ class StudioWindow(QMainWindow):
         middle.setStretchFactor(0, 2)
         middle.setStretchFactor(1, 3)
         self.canvas_column = middle
-        self._params_open = True
+        # **開窗時沒有選任何卡片，所以設定區是收起來的**（F13-1）。
+        # 以前它一律攤開，於是畫面最大的一塊（中欄下半，1600×1000 上量到
+        # 551px 高）裝的是一行灰字「(Pick a card from the library…)」——
+        # 一塊叫人去別的地方點東西的空白，而它同時把畫布壓到 50% 縮放，
+        # 卡片的副標（「這張卡吃什麼吐什麼」）當場讀不出來。
+        # 現在高度跟著「有沒有東西可以設定」走，見 :meth:`_sync_params_pane`。
+        self._params_open = False
         # 比例在 showEvent 才真的套 —— setSizes 要有實際高度才算得出來
         #（isVisible 之前那些數字沒有意義，docs/PITFALLS.md 的老坑）。
         self._layout_ratio_applied = False
@@ -920,7 +956,9 @@ class StudioWindow(QMainWindow):
         root.setStretchFactor(0, 0)
         root.setStretchFactor(1, 2)
         root.setStretchFactor(2, 4)
-        root.setSizes(list(COLUMN_SIZES))
+        # 上一次關窗時的欄寬（F13-1）—— 拖過的分隔線在下一次開窗還在。
+        # 沒存過（或在跑測試）就用出廠值。
+        root.setSizes(_load_sizes(COLUMNS_KEY, 3) or list(COLUMN_SIZES))
         self.top_splitter = root
         self.root_splitter = root
         self.setCentralWidget(root)
@@ -1662,6 +1700,7 @@ class StudioWindow(QMainWindow):
             })
         if self.selected_node not in self.model.nodes:
             self.selected_node = None
+        self._sync_params_pane()
         for view in self._canvases():
             # 影像線（存在 recipe 裡）＋ 區域線（從參數推導；F12）。畫布不分
             # 兩份收 —— 一條線就是一條線，它是哪一種由它出發的那顆埠決定。
@@ -2406,6 +2445,7 @@ class StudioWindow(QMainWindow):
             describe, node.params, streams,
             self.model.available_regions(before_node=node_id))
         self.stack.setCurrentWidget(self.param_form)
+        self._sync_params_pane()
         self._refresh_region_button()
         self._install_inspector(node.step)     # 右下角換成這張卡的儀表（F7-17）
         self._refresh_inspector(self._last_result)
@@ -2457,7 +2497,27 @@ class StudioWindow(QMainWindow):
             else:
                 view.set_kernel_hint(px, label)
 
-    # ---- 設定面板：預設收起，雙擊卡片才攤開（F7-22）------------------------
+    # ---- 設定面板：跟著「有沒有東西可以設定」走（F13-1）--------------------
+    def _sync_params_pane(self) -> None:
+        """選了卡片就攤開，沒選就收起來 —— 把那塊空白還給畫布。
+
+        **只在狀態真的翻面時動**（`set_params_open` 會重算高度）：使用者自己拖
+        過的分隔線不可以被下一次 `_refresh_pipeline` 洗掉，而那件事每改一個參數
+        就會發生一次。
+
+        兩個例外：
+        * 分數面板是「我要編」，本來就該開著（`show_score_page` 自己開）；
+        * 畫布彈出去的時候中欄整欄都給設定（`open_canvas_window` 決定），
+          這裡不要跟它搶。
+        """
+        if self.canvas_popout_open():
+            return
+        if self.stack.currentWidget() is not self.param_form:
+            return
+        want = self.selected_node is not None
+        if want != self._params_open:
+            self.set_params_open(want)
+
     def _on_node_activated(self, node_id: str) -> None:
         """雙擊一張卡：選它 + 把設定攤開。"""
         if self.select_node(str(node_id)):
@@ -4405,12 +4465,22 @@ class StudioWindow(QMainWindow):
         if not self._layout_ratio_applied:
             self._layout_ratio_applied = True
             self.set_params_open(self._params_open)
+            # 上一次的中欄比例只在**設定區攤開時**還原 —— 收起來的時候
+            # 那組數字講的是「畫布拿整欄」，套上去等於把剛決定的事推翻。
+            saved = _load_sizes(CANVAS_SPLIT_KEY, 2) if self._params_open else None
+            if saved:
+                self.canvas_column.setSizes(saved)
 
     def closeEvent(self, event) -> None:      # noqa: D102 - Qt hook
         if not self.confirm_close():
             event.ignore()
             return
         self._preview_timer.stop()
+        _save_sizes(COLUMNS_KEY, self.root_splitter.sizes())
+        if self._params_open:
+            # 收起來時存進去的是「0 高的設定區」—— 下次開窗照著還原，
+            # 使用者會看到一個他從來沒有調成那樣的版面。
+            _save_sizes(CANVAS_SPLIT_KEY, self.canvas_column.sizes())
         for dlg in (self.welcome_dialog, self.library_dialog, self.results):
             try:
                 if dlg is not None:

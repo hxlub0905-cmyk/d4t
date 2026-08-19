@@ -105,8 +105,34 @@ _Z_EDGE, _Z_EDGE_HOVER = -1.0, 1.0
 WRAP = 4
 
 
+def wrap_for_width(width: float) -> int:
+    """這麼寬的畫布，一列排得下幾張卡（F13-1）。
+
+    ``WRAP`` 以前是寫死的 4，而那等於**要求畫布有 1050px 寬**
+    （4 × (NODE_W + COL_GAP)）。主視窗的中欄實測只有 551px，於是 ``fit()``
+    把整排縮到 50% —— 而卡片的副標（「這張卡吃什麼吐什麼」）要到 70% 才讀得
+    回來（見 :data:`PipelineCanvas.MIN_FIT_SCALE` 的說明）。
+
+    一份讀不出字的全景不算全景。所以換行點跟著**實際有多寬**走：窄就早一點
+    換行、排得高一點，換來每一張卡都讀得到字。上限仍然是 ``WRAP`` ——
+    再寬也不要排成一條要橫著掃的長列。
+    """
+    # 兩件事要算對：
+    #
+    # 1. **最後一欄不需要 COL_GAP**（欄距是欄與欄「之間」的），所以 n 張卡佔
+    #    ``n * NODE_W + (n - 1) * COL_GAP``。少算這一格的話 551px 會被算成
+    #    「只排得下 1 張」，而它實際上排得下 2 張（190 + 96 + 190 = 476）。
+    # 2. **不必排到 100% 才算數。** `fit()` 會縮，而副標要到 70% 才糊 ——
+    #    所以這裡容許縮到 ~87%（× 1.15），把那一格餘裕拿去多排一欄。
+    #    埠的標籤畫在卡片外面，那點溢出也吃在這個餘裕裡。
+    usable = max(1.0, float(width)) * 1.15
+    fits = int((usable + COL_GAP) // (NODE_W + COL_GAP))
+    return max(1, min(WRAP, fits))
+
+
 def layout_columns(node_ids: Sequence[str],
-                   edges: Sequence[Tuple[str, str]]) -> Dict[str, Tuple[int, int]]:
+                   edges: Sequence[Tuple[str, str]],
+                   wrap: Optional[int] = None) -> Dict[str, Tuple[int, int]]:
     """自動排版：``node_id -> (欄, 列)``。
 
     欄 = 拓撲深度（最長前置路徑長度），列 = 同欄內依 ``node_ids`` 的原順序。
@@ -119,6 +145,7 @@ def layout_columns(node_ids: Sequence[str],
     換行之後同樣九張卡是 3×3，每一張都讀得到字。閱讀順序仍然是左到右、
     上到下 —— 跟文字一樣，不需要額外學。
     """
+    wrap = WRAP if wrap is None else max(1, int(wrap))
     ids = [str(n) for n in node_ids]
     idx = {n: i for i, n in enumerate(ids)}
     preds: Dict[str, List[str]] = {n: [] for n in ids}
@@ -127,13 +154,13 @@ def layout_columns(node_ids: Sequence[str],
             preds[b].append(a)
 
     if not any(preds[n] for n in ids):
-        return {n: (i % WRAP, i // WRAP) for i, n in enumerate(ids)}
+        return {n: (i % wrap, i // wrap) for i, n in enumerate(ids)}
 
     depth: Dict[str, int] = {}
     for n in ids:                       # ids 已是拓撲順序，一遍就夠
         depth[n] = max((depth.get(p, 0) + 1 for p in preds[n]), default=0)
 
-    # 一「帶」= 換行之前的 WRAP 個深度。帶高取「最擠的那個深度有幾個節點」，
+    # 一「帶」= 換行之前的 ``wrap`` 個深度。帶高取「最擠的那個深度有幾個節點」，
     # 這樣換行之後上下兩帶不會疊在一起。
     per_depth: Dict[int, int] = {}
     for n in ids:
@@ -155,7 +182,7 @@ def layout_columns(node_ids: Sequence[str],
             return (sum(prs) / float(len(prs))) if prs else float(idx[n])
 
         members.sort(key=lambda n: (_bary(n), idx[n]))
-        band, col = divmod(d, WRAP)
+        band, col = divmod(d, wrap)
         for r, n in enumerate(members):
             rows_of[n] = r
             out[n] = (col, band * band_h + r)
@@ -1218,7 +1245,9 @@ class PipelineCanvas(QGraphicsView):
         self._implicit = [pair for pair in zip(self._order, self._order[1:])
                           if pair not in set(self._pairs)]
 
-        pos = layout_columns(self._order, self._pairs + self._implicit)
+        self._laid_wrap = self.wrap()
+        pos = layout_columns(self._order, self._pairs + self._implicit,
+                             self._laid_wrap)
         fresh = [_NodeItem(info, self) for info in nodes]
         # **列距要容得下最高的那張卡**（F12）：埠多的卡片會長高，用固定的
         # ``NODE_H + ROW_GAP`` 排的話它會壓到下一列。
@@ -1265,6 +1294,10 @@ class PipelineCanvas(QGraphicsView):
             mine = self._items.get(nid)
             if mine is not None:
                 mine.setPos(item.pos())
+        # **抄過來的位置不准被重排掉**（F13-1）：彈出視窗比主視窗寬，換行點
+        # 因此不同，而第一次拿到真寬度時的那一次 `tidy()` 會把剛抄好的位置
+        # 洗掉。``None`` = 「這份畫布的位置不是排出來的」。
+        self._laid_wrap = None
         self.refresh_edges()
 
     def node_item(self, node_id: str):
@@ -1286,6 +1319,21 @@ class PipelineCanvas(QGraphicsView):
         wanted = set(dst.in_names())
         ports = [i for i, name in enumerate(outs) if name in wanted]
         return ports or [0]
+
+    def wrap(self) -> int:
+        """這一份畫布一列排得下幾張卡（F13-1）。
+
+        **問的是 viewport 不是 window**：捲軸與邊框都吃寬度，而少算的那幾 px
+        正好是「多排一張卡」與「不多排」的分界。
+
+        **還沒 show 過的畫布回 :data:`WRAP`**（既有行為），真正的排版在
+        `fit_later` 那一輪重來。判準是「連一張卡都放不下」——一張卡連同它左右
+        的埠標籤要 ``NODE_W + 2 * _PORT_LABEL_W``，比這還窄的不是一塊排版用的
+        版面，是一個還沒被 layout 過的 widget（實測未 show 過是 89px）。
+        把它當真的話，整份 recipe 會被排成一直條。
+        """
+        w = float(self.viewport().width())
+        return WRAP if w < NODE_W + 2.0 * _PORT_LABEL_W else wrap_for_width(w)
 
     def node_ids(self) -> List[str]:
         return list(self._order)
@@ -1384,6 +1432,15 @@ class PipelineCanvas(QGraphicsView):
     def _consume_pending_fit(self) -> None:
         if getattr(self, "_fit_pending", False) and self.viewport().width() > 80:
             self._fit_pending = False
+            # **第一次拿到真的寬度**：排版當時用的換行點是猜的（畫布還沒 show，
+            # viewport 是一個預設值），現在才知道一列真的排得下幾張。不重排的話
+            # 一份剛開的 recipe 會照著「假設有 1050px」排好，然後被 `fit` 縮到
+            # 讀不出字 —— 那正是 F13-1 要修的那個畫面。
+            #
+            # **只在這一刻**：`fit_later` 是「整份換掉／剛開窗」才呼叫的，
+            # 所以使用者自己拖好的佈局不會被重排（那條規矩是 2026-08-14 定的）。
+            if getattr(self, "_laid_wrap", None) not in (None, self.wrap()):
+                self.tidy()
             self.fit()
 
     def showEvent(self, e) -> None:            # noqa: D102 - Qt hook
@@ -1434,7 +1491,9 @@ class PipelineCanvas(QGraphicsView):
         位置不寫進 recipe（見模組 docstring），所以這個動作不會讓檔案變髒，
         也就不需要進復原堆疊。
         """
-        pos = layout_columns(self._order, self._pairs + self._implicit)
+        self._laid_wrap = self.wrap()
+        pos = layout_columns(self._order, self._pairs + self._implicit,
+                             self._laid_wrap)
         pitch = getattr(self, "_pitch", NODE_H + ROW_GAP)
         for nid, item in self._items.items():
             col, row = pos.get(nid, (0, 0))

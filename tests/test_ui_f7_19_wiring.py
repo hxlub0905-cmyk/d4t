@@ -337,15 +337,20 @@ def test_the_clipping_mark_sits_on_the_bar_it_is_about(qapp):
 # --------------------------------------------------------------------------- #
 # 6. n8n 化第二批（F7-22）：畫布拿整欄、線上的 ×、排整齊
 # --------------------------------------------------------------------------- #
-def test_the_settings_pane_is_open_by_default_and_collapsible(window):
-    """D 案（2026-08-14 使用者拍板）：畫布會 zoom、又有彈出視窗，平面上
-    只需要中上一塊 —— 設定**預設攤開**、拿大頭。F7-22 的「雙擊才攤開」
-    因此退役：雙擊仍然可以把收起來的設定重新攤開，但那不再是唯一入口。
+def test_the_settings_pane_follows_whether_there_is_anything_to_set(window):
+    """D 案（2026-08-14 使用者拍板）：畫布會 zoom、又有彈出視窗，平面上只需要
+    中上一塊 —— 設定攤開、拿大頭。**F13-1 補上另一半**：沒選卡片的時候那一塊
+    裝的是一行「請去別的地方點一個東西」的灰字，而它同時把畫布壓到讀不出副標
+    的縮放。所以高度跟著「有沒有東西可以設定」走。
+
+    F7-22 的「雙擊才攤開」仍然退役：雙擊可以把收起來的設定重新攤開，
+    但那不是唯一入口。
     """
-    assert window.params_open() is True, "設定預設攤開（D 案）"
+    assert window.params_open() is False, "沒選卡片 → 那一塊還給畫布"
 
     src = first_source(window)
     window.select_node(src)
+    assert window.params_open() is True, "選了卡片就攤開"
     assert window.param_form.step_key() == "load_patch"
 
     window.set_params_open(False)          # 「現在只想看流程」

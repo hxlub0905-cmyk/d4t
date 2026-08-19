@@ -73,7 +73,9 @@ def test_forward_edges_leave_and_enter_horizontally(window, qapp):
     qapp.processEvents()
     # 虛線退役後畫布只畫顯式線 —— 自己拉一條跨列的前行線來驗形狀。
     order = window.model.node_order
-    window.model.add_edge(order[0], order[canvas_mod.WRAP + 1])
+    # 跨列的線 = 深度差剛好越過換行點，而換行點跟著畫布寬度走（F13-1）——
+    # 寫死 `canvas_mod.WRAP` 的話，窄畫布上這條線根本不跨列，測不到形狀。
+    window.model.add_edge(order[0], order[window.pipeline.wrap() + 1])
     qapp.processEvents()
     checked = 0
     for edge in window.pipeline._edges:
@@ -178,7 +180,16 @@ def test_the_canvas_is_the_top_block_and_settings_get_the_rest(window, qapp):
     col = window.canvas_column
     assert col.widget(0) is window.pipeline, "畫布要在中欄的上面"
     assert col.widget(1) is window.stack, "設定在下面"
-    assert window.params_open() is True, "設定預設攤開（D 案）"
+
+    # **F13-1：設定區的高度跟著「有沒有東西可以設定」走。**
+    # 沒選卡片時它裝的是一行「請去別的地方點一個東西」的灰字，而它同時把畫布
+    # 壓到讀不出副標的縮放 —— 那塊空白現在還給畫布。
+    assert window.params_open() is False, "沒選卡片時設定區要收起來"
+    assert col.sizes()[1] == 0
+
+    # 選了卡片就攤開，而且**設定拿大頭**（D 案原本的比例，那一半沒有變）。
+    window.select_node(window.model.node_order[0])
+    assert window.params_open() is True
     top, bottom = col.sizes()
     assert bottom > top, "設定要拿大頭（畫布 2 / 設定 3）：%s" % col.sizes()
 
@@ -340,7 +351,11 @@ def test_right_drag_pans_the_canvas(window, qapp):
     view = window.pipeline
     view.zoom_by(2.0)                      # 放大到一定捲得動
     qapp.processEvents()
-    h0 = view.horizontalScrollBar().value()
+    bar = view.horizontalScrollBar()
+    # **兩邊都要有得捲**：停在頂到底的那一端時，往那個方向拖會被夾住，
+    # 於是「沒有平移」與「捲不動了」在斷言上長得一樣。
+    bar.setValue((bar.minimum() + bar.maximum()) // 2)
+    h0 = bar.value()
 
     view.mousePressEvent(_mouse_event(
         QEvent.MouseButtonPress, QPoint(200, 80),
