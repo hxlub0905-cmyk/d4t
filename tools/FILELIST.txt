@@ -2,10 +2,10 @@
 # 由 tools/make_filelist.py 產生；tests/test_offline_tools.py 會擋住它腐爛。
 f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 a6b298c38249d1758d17f7780df10626e05c809d .gitignore
-46ad7705532c20df2247a964433506502b6eeba0 AGENTS.md
+dc5d3e24d36ca139df3d9ccac1034075e7698f6e AGENTS.md
 6283e3e2be6a7d7ee9a60f539aa3a8c9ad9b734c CLAUDE.md
 033d348c96f58aaa9ab1ed0b521b8cee8671654a README.md
-61c651c66cbf532fc6baa26f453409fb09c5b23a SESSION_LOG.md
+b0f80c77d1ce86848a1f244be8fc253a359a4a45 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 52efd634d79139d1a7597e3efcc17767369059d3 d4t/__main__.py
@@ -109,7 +109,7 @@ f6378d9ba391a4e1e3ef7ed855c7694b6b7f50b9 docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
 0bfdfd66811505d4a7d2c50cdf3e3bb1a5135965 docs/plans/F11-phase2-features.md
 e429b04ba97f1f828bfe734fd7049cdd2fb3dc32 docs/plans/F12-region-edges.md
-472ee26552bc3cefa7a98d28b383e69fdc08097f docs/plans/F15-pair-sources.md
+6c5311d817cf2efc13c6c3df2d536fdb0dd7fbbb docs/plans/F15-pair-sources.md
 d14ffea1f72ac011ff321f7fb0f0e075a5423e70 docs/plans/F8-rule-based-roi.md
 773d4c5652e1abd95b7bf06591a691c07c1c9fa1 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
@@ -164,6 +164,7 @@ db020b9f0a27ed36b68f4f53d5781df357c8df72 tests/test_make_glas_export.py
 33071fd9690ad145172ab6a178471283523e3c75 tests/test_no_real_fab_data.py
 3103276cac06035f1a18a7d18cb90bdafd7d2f26 tests/test_normalize.py
 53d340deee7fea3c33865c561172a3bc8b570b4a tests/test_offline_tools.py
+760493e6e43124ec37e48463773e51291e595c9c tests/test_pair_probe.py
 342afa983abf91cec2b2b54f548fb6161a6c809b tests/test_pair_source.py
 aacc024726f55dbe671c3c8d6b7eb849c47cc43a tests/test_pattern_ref.py
 34f1bcdbffc5c85f790e98e5bd1c4b1f10fe795f tests/test_period_golden.py
@@ -252,5 +253,6 @@ b159ce23c3439363318caa27d22d64e4c56a964e tools/make_glas_export.py
 1c8beca2aedba32c10013ef19d83e96f1f475bd6 tools/make_sample.py
 cc79855184d36617d3df0e9e191d3492a726ca60 tools/make_sample_rsem.py
 bfffe92e9ec5d6b5cfb8f8be26380b514edd0442 tools/make_text_bundle.py
+13369f5354394908b95229877c3fca01a22edeb3 tools/pair_probe.py
 f4c33ded4be55525d92aafca7c45cceaed6df7f8 tools/release.py
 f4ee3956c51bf63e22c90eaa2401229f3281028e tools/validate_mgepi.py

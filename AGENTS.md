@@ -200,6 +200,7 @@ python tools/make_text_bundle.py --out bundle/d4t.py --split 400
 | `install_offline.py` | **公司機** | ❌ | 用 `wheels\` 裝相依套件 |
 | `doctor.py` | **公司機** | ❌ | 環境自檢 |
 | `fab_probe/probe_*.py` | **公司機** | ❌ | 探測真實資料的格式（單檔，不需要整個 repo）|
+| `pair_probe.py` | **公司機** | ❌ | 拿**真的兩份 lot** 跑一次配對＋對圖，印出分布與**建議值**（容差、nm/px、stage offset、搜尋框）—— F15 那條鏈猜不出來的四個數字全在這一張表上，輸出預設遮蔽可以貼 |
 | `load_probe.py` | **公司機** | ❌ | 量一份真實 lot 的**載入時間花在哪一段**（KLARF／IFD 走訪／對應／讀一顆），輸出預設遮蔽可以貼；`--copy` 回答「慢的是網路碟還是我們的程式」 |
 | `check_glas_export.py` | **公司機** | ❌ | 看一份 GLAS 匯出（`*_label.png` + manifest）合不合 d4t 的假設，**印出可以貼出來的遮蔽報告**（同 `fab_probe` 那條路；`--reveal` 那一份不要貼）|
 | `get_code.py` / `.ps1` | 公司機（**目前用不了**）| ❌ | 網路通的時候才逐檔抓 |
