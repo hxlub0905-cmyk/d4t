@@ -23,6 +23,14 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 
+#: ``meta`` 裡放「每個特徵是哪張卡產出的」的鍵。
+#:
+#: 放在 meta 而不是 :class:`~d4t.core.pipeline.engine.DefectResult` 的新欄位，
+#: 是為了**不動序列化** —— `store/results.py` 的資料表、CSV 的欄位、KLARF 寫回
+#: 全部吃的是扁平的 ``features`` dict。
+FEATURE_OWNER_KEY = "feature_owner"
+
+
 class ContextError(RuntimeError):
     """步驟向 Context 要不存在的資源時拋出（訊息需列出現有 keys）。"""
 
@@ -34,6 +42,15 @@ class Context:
     labels: Optional[np.ndarray] = None
     features: Dict[str, float] = field(default_factory=dict)
     meta: Dict[str, Any] = field(default_factory=dict)
+    #: 現在正在跑的是哪一張卡（引擎每跑一張之前設好；F17-②）。
+    #:
+    #: **特徵的擁有者是在寫進來的當下記下的，不是事後推的。** 以前引擎是比對
+    #: 每張卡跑前跑後的 ``features`` dict 差異，再回推「這張卡產出了什麼」——
+    #: 而那份差異在「後面那張卡剛好算出一樣的值」時是空的（F9-3 踩過，見
+    #: `docs/PITFALLS.md` 的「把『要不要記錄』跟『值有沒有變』綁在一起」）。
+    #: 寫入當下就記，那個巧合就不存在了。
+    current_node: str = ""
+
     #: 記錄「這一步把某條影像流改成什麼樣」（F7-17，**預設關閉**）。
     #:
     #: Enhance 卡是就地改寫同一條流的（``test → test``），所以跑完之後「之前
@@ -202,11 +219,18 @@ class Context:
 
     # ---- features ---------------------------------------------------------
     def add_feature(self, name: str, value: Any) -> None:
-        """寫入一個特徵值（強制轉 float；NaN/inf 允許，由表達式層做安全處理）。"""
+        """寫入一個特徵值（強制轉 float；NaN/inf 允許，由表達式層做安全處理）。
+
+        **順便記下擁有者**（F17-②）：``current_node`` 是引擎在跑這張卡之前設好
+        的，所以「這個數字是誰算的」是**寫入當下的事實**，不是事後從 dict 的
+        差異回推出來的。
+        """
         v = float(value)
         if name in self.features:
             self.meta.setdefault("feature_overwrites", []).append(name)
         self.features[name] = v
+        if self.current_node:
+            self.meta.setdefault(FEATURE_OWNER_KEY, {})[name] = self.current_node
 
     def add_features(self, mapping: Dict[str, Any]) -> None:
         for k, v in mapping.items():

@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 
-from .context import Context
+from .context import FEATURE_OWNER_KEY, Context
 from .expression import parse_expression
 from .recipe import Recipe, RecipeError, execution_order
 from .step import REGISTRY, Step, StepError
@@ -82,28 +82,104 @@ def _finish(defect_id: str, ctx: Context, traces: List[StepTrace],
 
 #: ``ctx.meta`` 裡放「每個特徵是哪張卡產出的」的鍵。
 #:
-#: 放在 meta 而不是 :class:`DefectResult` 的新欄位，是為了**不動序列化** ——
-#: `store/results.py` 的資料表、CSV 的欄位、KLARF 寫回全部吃的是扁平的
-#: ``features`` dict，加一個欄位就得動 schema，而 F9-3 的驗收條件是
-#: 「沒有撞名時輸出逐位元組相同」。
-FEATURE_OWNER_KEY = "feature_owner"
+#: F17-② 起**定義搬到 `context.py`** —— 記錄的時機也跟著搬了：
+#: `Context.add_feature` 在寫進來的當下就記，不再由引擎事後比對 dict 差異。
+#: 這裡保留這個名字，因為它是公開的（`store` / UI / 測試都用它）。
 
 
 def qualified_feature_name(node_id: str, name: str) -> str:
-    """被蓋掉的特徵改用這個名字保存：``<產出它的節點>_<原名>``。
+    """被蓋掉的特徵改用這個名字保存：``<前綴>_<原名>``。
 
-    D1（使用者 2026-08-16 同意）：**特徵掛在產出它的節點上**。節點只有一個，
-    所以「這個數字從哪來」永遠答得出來 —— 包括那些不屬於任何一條影像流的
-    （``n_channels`` 是這顆 defect 的、``align_dx`` 是兩條流之間的關係、
-    ``cross_*`` 是具名區域的）。
+    D1（使用者 2026-08-16 同意）：**特徵掛在產出它的東西上**，所以「這個數字
+    從哪來」永遠答得出來 —— 包括那些不屬於任何一條影像流的（``n_channels`` 是
+    這顆 defect 的、``align_dx`` 是兩條流之間的關係、``cross_*`` 是具名區域的）。
 
     D2：**沒撞名就用原名**，撞名才加前綴。所以使用者平常看到的名字跟以前
     一模一樣，不必學新語法（寫 score 的是不會寫 code 的工程師）。
 
-    F9-5 之後線會有自己的身分，那時前綴可以換成線名（``ref_soft_glv_max``
-    比 ``glv_stats2_glv_max`` 好讀）。現在線還沒有身分，節點有。
+    ``node_id`` 是**退路**：呼叫端算得出流名時請用 :func:`feature_prefix`
+    的結果（見那一支的說明）。
     """
     return "%s_%s" % (node_id, name)
+
+
+def feature_prefix(node_id: str, step_cls: Optional[Type[Step]],
+                   params: Optional[Dict[str, Any]] = None) -> str:
+    """撞名時這張卡的特徵要加什麼前綴 —— **優先用它讀的那條流的名字**。
+
+    為什麼不是節點 id（F17-②，2026-08-20）
+    ---------------------------------------
+    同一件事在 d4t 裡有兩種做法，而它們以前給出兩種名字：
+
+    ==========================================  ==========================
+    做法                                        撞名時的名字
+    ==========================================  ==========================
+    一張 Gray level 卡，test 與 ref 兩條線都接    ``test_glv_mean``（看得懂）
+    兩張 Gray level 卡，一張接 test 一張接 ref    ``glv_A_glv_mean``（節點 id）
+    ==========================================  ==========================
+
+    資料一樣、數字一樣，**只因為使用者是用一張卡還是兩張卡做的**，一種看得懂
+    一種看不懂。上面那一種是 `MultiSourceStep` 的規則（使用者 2026-08-17 定調
+    的「自動加流名前綴」），這裡把下面那一種補齊成同一套。
+
+    `engine.py` 的舊註解本來就寫著這件事：「F9-5 之後線會有自己的身分，那時
+    前綴可以換成線名（``ref_soft_glv_max`` 比 ``glv_stats2_glv_max`` 好讀）」。
+
+    先問「寫哪一條」，再問「讀哪一條」
+    ----------------------------------
+    Enhance 卡可以**讀兩條、寫一條**：`normalize` 的 ``range_from`` 讓它借另一
+    條流的範圍，所以 ``streams="ref", range_from="test"`` 那張卡讀 ref 也讀
+    test，但它處理的是 ref。它的 ``clip_frac`` 講的是「ref 被削掉多少」——
+    所以前綴要是 ``ref``，不是「它看過的那兩條」。
+    量測卡則相反（``writes`` 是空的，它不產影像），那時候看它讀哪一條。
+
+    退回節點 id 的情況（**一定要有退路**）：兩邊都不是剛好一條時 —— 不吃影像
+    的卡（`feature_math`）、一張卡吃好幾條流時（那時候流名前綴已經由
+    `MultiSourceStep` 加在特徵名裡了），以及算不出宣告時。
+    """
+    if step_cls is None:
+        return node_id
+    try:
+        p = step_cls.validate_params(dict(params or {}))
+    except Exception:              # noqa: BLE001 — 壞參數在執行時才該爆
+        p = dict(params or {})
+    for resolve in (step_cls.resolve_writes, step_cls.resolve_reads):
+        try:
+            names = [str(x) for x in resolve(p) if str(x).strip()]
+        except Exception:          # noqa: BLE001
+            return node_id
+        if len(names) == 1:
+            return names[0]
+    return node_id
+
+
+def feature_prefixes(node_ids: List[str], recipe: Recipe,
+                     registry: Dict[str, Type[Step]]) -> Dict[str, str]:
+    """整份 recipe 的前綴表 —— **前綴撞在一起的一律退回節點 id**。
+
+    為什麼要整份一起算（分支測試抓到的，F17-②）
+    ---------------------------------------------
+    **流名不足以分辨分支。** 同一條 ``ref`` 分岔成兩支之後，兩支上的流**都叫
+    ``ref``**（它們的身分是 ``(節點, 埠)``，不是名字 —— 鐵則 9）。所以兩支各自
+    量出來的 ``mean`` 如果都叫 ``ref_mean``，那個名字比原本的 ``m3_mean``
+    **更不清楚**：它連是哪一支都說不出來。
+
+    一張一張獨立算前綴看不到這件事，所以這裡整份算完再去重：**兩個以上的節點
+    算出同一個前綴時，那幾個全部退回自己的節點 id**（醜，但講得出是誰）。
+    只有一個節點用那個流名時才留下流名 —— 那時候它確實比節點 id 好讀。
+    """
+    raw: Dict[str, str] = {}
+    for nid in node_ids:
+        node = recipe.nodes.get(nid)
+        if node is None:
+            continue
+        raw[nid] = feature_prefix(nid, registry.get(node.step),
+                                  dict(node.params))
+    seen: Dict[str, int] = {}
+    for pfx in raw.values():
+        seen[pfx] = seen.get(pfx, 0) + 1
+    return {nid: (pfx if seen.get(pfx, 0) == 1 else nid)
+            for nid, pfx in raw.items()}
 
 
 def _produced_feature_names(step_cls: Type[Step], params: Dict[str, Any],
@@ -125,7 +201,9 @@ def _produced_feature_names(step_cls: Type[Step], params: Dict[str, Any],
 def _rescue_overwritten_features(ctx: Context, nid: str,
                                  before: Dict[str, Any],
                                  added: Dict[str, Any],
-                                 owner: Dict[str, str]) -> None:
+                                 owner: Dict[str, str],
+                                 prefix_of: Optional[Callable[[str], str]] = None
+                                 ) -> None:
     """這張卡蓋掉了誰的特徵，就把被蓋掉的那份用**帶節點名的名字**留下來。
 
     **既有語意一個字都沒改**：``glv_max`` 仍然是「最後一張卡寫的那個值」，
@@ -140,7 +218,14 @@ def _rescue_overwritten_features(ctx: Context, nid: str,
     for name in added:
         prev_owner = owner.get(name)
         if name in before and prev_owner is not None and prev_owner != nid:
-            rescued = qualified_feature_name(prev_owner, name)
+            # 前綴優先用「那張卡讀的那條流」（F17-②）—— `test_glv_mean` 比
+            # `glv_A_glv_mean` 說得出話。兩張卡讀**同一條流**又寫同一個特徵時
+            # 流名前綴會自己撞名，那時退回節點 id：**寧可醜也不要蓋掉別人的
+            # 值**（被蓋掉的那份是這支函式存在的唯一理由）。
+            pfx = prefix_of(prev_owner) if prefix_of else prev_owner
+            rescued = qualified_feature_name(pfx, name)
+            if rescued in ctx.features and rescued not in before:
+                rescued = qualified_feature_name(prev_owner, name)
             if rescued not in ctx.features:
                 ctx.features[rescued] = before[name]
             ctx.meta.setdefault(FEATURE_OWNER_KEY, {})[rescued] = prev_owner
@@ -162,7 +247,8 @@ def _local_view(master: Context, visible: Dict[str, Any]) -> Context:
     """
     return Context(images=dict(visible), rois=master.rois, labels=master.labels,
                    features=master.features, meta=master.meta,
-                   track_changes=master.track_changes)
+                   track_changes=master.track_changes,
+                   current_node=master.current_node)
 
 
 def _visible_streams(master: Context, step_cls: Type[Step],
@@ -340,6 +426,17 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
     for name, arr in ctx.images.items():
         produced.setdefault(("", name), arr)   # 快取續跑：快照來的流沒有產地
 
+    # 撞名時「被蓋掉的那份」要叫什麼（F17-②）。**算給任何一個節點用**，
+    # 不只是這一段裡的 —— 被蓋掉的那張卡有可能在 checkpoint 之前（快取續跑時
+    # 它根本沒有執行），而 `owner` 是從快照撿回來的。
+    # 整份 route 一起算（**不是一張一張獨立算**）—— 前綴撞在一起的要退回節點
+    # id，見 `feature_prefixes` 的說明。用 `order` 而不是 `order[start:stop]`：
+    # 被蓋掉的那張卡有可能在 checkpoint 之前（快取續跑時它根本沒有執行）。
+    _pfx = feature_prefixes(list(order), recipe, registry)
+
+    def prefix_of(node_id: str) -> str:
+        return _pfx.get(node_id, node_id)
+
     for nid in order[start:stop]:
         node = recipe.nodes.get(nid)
         if node is None:
@@ -355,6 +452,8 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
 
         t0 = time.perf_counter()
         feats_before = dict(ctx.features)
+        # 現在跑的是這一張 —— `Context.add_feature` 讀它來記擁有者（F17-②）。
+        ctx.current_node = nid
         try:
             step_cls = registry.get(node.step)
             if step_cls is None:
@@ -429,7 +528,7 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
             ctx, nid, feats_before,
             {k: ctx.features[k] for k in
              _produced_feature_names(step_cls, params, ctx, added)},
-            owner)
+            owner, prefix_of)
         setattr(ctx, "_produced", produced)
         traces.append(StepTrace(
             node_id=nid, step_key=node.step, ok=True, ms=ms,
@@ -437,6 +536,8 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
             images_after=sorted(ctx.images)))
         if nid == upto_node:
             break
+    # 跑完了 —— 之後再有人往 ctx 寫特徵，那不是任何一張卡做的。
+    ctx.current_node = ""
     return ctx, None
 
 

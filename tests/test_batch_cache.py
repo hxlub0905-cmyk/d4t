@@ -469,7 +469,7 @@ class _FakeItem:
 def test_feature_ownership_survives_a_cache_hit(ds, tmp_path):
     """撞名**跨越 checkpoint** 時，冷跑與熱跑要算出一模一樣的東西。
 
-    F9-3 讓被蓋掉的特徵留下來（``<前一張卡的節點名>_<原名>``），而那件事靠的是
+    F9-3 讓被蓋掉的特徵留下來（F17-② 起前綴是**那條流的名字**），而那件事靠的是
     「誰產出了哪個特徵」這份帳。checkpoint 之前的節點在熱跑時**根本沒有執行**
     —— 帳如果沒跟著快照走，熱跑就不知道 ``glv_max`` 本來是誰的，於是**不會**
     救、少一個特徵。
@@ -518,7 +518,9 @@ def test_feature_ownership_survives_a_cache_hit(ds, tmp_path):
         # 遮蔽有效：align_dx 是後面那張卡的值
         assert cold.features["align_dx"] == 99.0
         # 被蓋掉的那份救得回來，而且**熱跑也要有**
-        assert "align_align_dx" in cold.features, sorted(cold.features)
+        # 前綴是 align 卡寫出來的那條流（``ref_aligned``），不是節點 id
+        # （F17-②）。節點 id 是 `align`，所以以前這個名字叫 `align_align_dx`。
+        assert "ref_aligned_align_dx" in cold.features, sorted(cold.features)
         _assert_same_features(cold.features, warm.features)
         assert cold.score == warm.score and cold.bin == warm.bin
     finally:

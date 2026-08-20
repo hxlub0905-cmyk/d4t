@@ -83,11 +83,18 @@ def test_the_diagnostics_are_the_ones_the_card_declared(ran):
     diag = next(s for s in sections if s["title"] == "Diagnostics")
     assert diag["collapsed"] is True, "它每張 Enhance 卡都會產出，攤開會擠掉量測值"
 
+    # 救回來那一份的前綴**跟引擎用同一支**（F17-②）—— 測試自己組一份的話，
+    # 引擎改了規則它就會漂，而症狀是這條測試紅得莫名其妙。
+    from d4t.core.pipeline.engine import feature_prefixes
+    from d4t.core.pipeline.step import REGISTRY
+
+    prefixes = feature_prefixes(list(ran.model.node_order),
+                                ran.model.to_recipe(), REGISTRY)
     declared = set()
     for nid, node in ran.model.nodes.items():
         for f in get_step(node.step).diagnostic_features(node.params):
             declared.add(f)
-            declared.add("%s_%s" % (nid, f))
+            declared.add("%s_%s" % (prefixes.get(nid, nid), f))
     for name in diag["names"]:
         assert name in declared, name
 

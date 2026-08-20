@@ -523,6 +523,73 @@ def _migrate_renamed_features(score: "ScoreSpec") -> "ScoreSpec":
     return replace(score, expr=new_expr)
 
 
+def _rescued_name_renames(nodes: Dict[str, "RecipeNode"],
+                          registry: Optional[Dict[str, Any]] = None
+                          ) -> Dict[str, str]:
+    """撞名時「被蓋掉那份」的舊名字 → 新名字（F17-②）。
+
+    以前的前綴是**節點 id**（``norm_clip_frac``），現在是那條流的名字
+    （``test_clip_frac``）。舊 recipe 的表達式如果指著舊名字，不換的話它會變成
+    一條 `unknown-feature`，而分數算不出來 —— 同 :func:`_migrate_renamed_features`
+    的理由。
+
+    **判準是「舊東西在不在」**（鐵則 9）：只有當
+    ``<節點 id>_<這張卡真的會產出的特徵名>`` 這個形狀成立、而且那張卡的新前綴
+    跟節點 id 不同，才算數。少了最後那個條件會把使用者自己取的名字
+    （`output_prefix` 剛好叫 `norm` 的那種）也改掉。
+    """
+    from .engine import feature_prefixes        # 延後匯入：避免 import 迴圈
+
+    if registry is None:
+        from .step import REGISTRY as registry  # type: ignore[no-redef]
+    # **跟執行時同一支** —— 兩邊各算一次的話，遷移換出來的名字有機會跟引擎
+    # 真的產出的名字不一樣，而那比不遷移更糟（表達式指到一個永遠不存在的數字）。
+    holder = type("_R", (), {"nodes": nodes})()
+    prefixes = feature_prefixes(list(nodes or {}), holder, registry)
+    out: Dict[str, str] = {}
+    for nid, node in (nodes or {}).items():
+        step_cls = registry.get(node.step)
+        if step_cls is None:
+            continue
+        try:
+            p = step_cls.validate_params(dict(node.params))
+        except Exception:              # noqa: BLE001
+            p = dict(node.params)
+        prefix = prefixes.get(nid, nid)
+        if prefix == nid:
+            continue                   # 名字沒變，沒得遷移
+        try:
+            feats = list(step_cls.resolve_features(p))
+        except Exception:              # noqa: BLE001
+            continue
+        for f in feats:
+            out["%s_%s" % (nid, f)] = "%s_%s" % (prefix, f)
+    return out
+
+
+def _migrate_rescued_feature_names(nodes: Dict[str, "RecipeNode"],
+                                   score: "ScoreSpec") -> "ScoreSpec":
+    """把舊的「節點 id 前綴」名字換成流名前綴 —— 分數表達式與 Algo 卡的算式。
+
+    跟 :func:`_migrate_renamed_features` 一樣**只換整個識別字**（邊界比對），
+    不做子字串取代。
+    """
+    renames = _rescued_name_renames(nodes)
+    if not renames:
+        return score
+    pattern = re.compile(r"\b(%s)\b" % "|".join(map(re.escape, renames)))
+
+    def swap(text: str) -> str:
+        return pattern.sub(lambda m: renames[m.group(1)], str(text or ""))
+
+    for node in nodes.values():
+        if node.step == "feature_math" and node.params.get("expr"):
+            node.params["expr"] = swap(node.params["expr"])
+    expr = str(getattr(score, "expr", "") or "")
+    new_expr = swap(expr)
+    return score if new_expr == expr else replace(score, expr=new_expr)
+
+
 @dataclass
 class Recipe:
     """一份完整 recipe（單一 JSON 檔可互傳）。"""
@@ -639,6 +706,10 @@ class Recipe:
         # 兩張 GLV 卡收成一張的兩個 method（F16）。
         _migrate_roi_compare_into_glv_stats(nodes)
         score = _migrate_renamed_features(score)
+        # 撞名時「被蓋掉那份」的前綴：節點 id → 流名（F17-②）。
+        # **一定要排在最後** —— 它問的是「這張卡讀／寫哪一條流」，而上面那幾道
+        # 遷移會換卡、拆卡、改參數，都會改變那個答案。
+        score = _migrate_rescued_feature_names(nodes, score)
         return cls(
             recipe_id=str(d["recipe_id"]),
             routes=routes,

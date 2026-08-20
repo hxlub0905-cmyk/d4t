@@ -108,8 +108,9 @@ import d4t.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
 from d4t.core.pipeline import ParamError, Recipe, get_step, list_steps
 from d4t.core.pipeline.cellrois import region_names
 from d4t.core.pipeline.engine import (
-    FEATURE_OWNER_KEY, qualified_feature_name,
+    FEATURE_OWNER_KEY, feature_prefixes, qualified_feature_name,
 )
+from d4t.core.pipeline.step import REGISTRY
 from d4t.core.pipeline.recipe import version_skew
 
 from .canvas import SUMMARY_SEP, PipelineCanvas
@@ -3985,6 +3986,16 @@ class StudioWindow(QMainWindow):
 
         diagnostics: List[str] = []
         sections: List[Dict[str, Any]] = []
+        # 救回來的那份叫什麼，**跟引擎用同一支**（F17-②）。以前這裡自己用
+        # `qualified_feature_name(nid, f)` 組（節點 id 前綴），而引擎改成流名
+        # 前綴之後兩邊就對不上了 —— 症狀是那個值以「量測值」的身分排到最上面，
+        # 而它量的是那張卡自己。兩份說法必然有一份會漂（CLAUDE.md §0）。
+        try:
+            recipe = self.model.to_recipe()
+            prefixes = feature_prefixes(list(self.model.node_order), recipe,
+                                        REGISTRY)
+        except Exception:              # noqa: BLE001 — 顯示用，壞了就退回節點 id
+            prefixes = {}
         for nid in self.model.node_order:
             node = self.model.nodes.get(nid)
             if node is None:
@@ -3998,10 +4009,11 @@ class StudioWindow(QMainWindow):
                 colour = theme.group_hex(step_cls.resolve_group())
                 diag = set(step_cls.diagnostic_features(node.params))
                 # **救回來的那一份也是診斷數字**：兩張 Enhance 卡都寫
-                # `clip_frac`，engine 把先寫的留成 `<節點名>_clip_frac`
-                # （`qualified_feature_name`）。不算進來的話，那個值會以
+                # `clip_frac`，engine 把先寫的留成 `<那條流>_clip_frac`
+                # （`qualified_feature_name` + `feature_prefixes`）。不算進來的話，那個值會以
                 # 「量測值」的身分排在最上面，而它量的是這張卡自己。
-                diag |= {qualified_feature_name(nid, f) for f in list(diag)}
+                pfx = prefixes.get(nid, nid)
+                diag |= {qualified_feature_name(pfx, f) for f in list(diag)}
             except Exception:              # noqa: BLE001 — 顯示用，壞了就當一般的
                 label, colour, diag = node.step, "", set()
             measured = [f for f in mine if f not in diag]
