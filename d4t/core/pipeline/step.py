@@ -111,12 +111,14 @@ PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
 #: * ``sources``          —— 現在掛了哪幾份第二 source（代號）
 #: * ``source_images``    —— 那一份的一顆 defect 有哪幾張圖
 #: * ``source_columns``   —— 那一份的 KLARF 有哪些欄
+#: * ``main_columns``     —— **主資料集**的 KLARF 有哪些欄（F16 的 ``carry``）
 #:
 #: 清單列在 core 而不是 UI，理由跟 `ParamSpec.direction` 一樣：卡片作者打錯
 #: 一個鍵的話，那一格會安靜地退化成文字框（看起來只是「這個功能沒做」）。
 #: 列在這裡就變成註冊時就擋下來。**UI 認不認得是另一回事**：認不得的鍵一樣
 #: 退化成文字框，那是相容行為，不是錯誤。
-RUNTIME_CHOICES = ("sources", "source_images", "source_columns")
+RUNTIME_CHOICES = ("sources", "source_images", "source_columns",
+                   "main_columns")
 
 #: 值是**影像流名**的型別（畫布上的圓埠 + 實線）。
 IMAGE_TYPES = ("image_key", "image_keys")

@@ -370,6 +370,43 @@ def nm_per_px_spec() -> ParamSpec:
     )
 
 
+# --------------------------------------------------------------------------- #
+# KLARF 的欄位帶成 feature（F16）
+# --------------------------------------------------------------------------- #
+#: 讀資料那幾張卡共用的 ``carry``。
+#:
+#: 使用者 2026-08-20 對 ADC 的定調是「利用 feature 內數值資料**跟原始 klarf 帶的
+#: 資訊**去做分類」，而在此之前 main 那一份的 KLARF 欄位**進不了 pipeline**
+#: （`DefectItem.fields` 只有掛上來的第二份會填）。
+#:
+#: 做法跟 F15 的 `pair_source.carry` 逐字同一套 —— 那不是巧合，是同一件事：
+#: **一份 KLARF 有幾十欄，而其中絕大多數沒有人要**。全帶的話幾十萬顆 × 24 欄
+#: 字串是幾百 MB，而且要 pickle 進每一個 worker。所以規則是「點名的才帶」，
+#: 兩邊一樣，使用者只要學一次。
+#:
+#: 型別是 ``multi_choice`` 而不是 ``choice``：`choice` 會擋掉不在清單裡的值，
+#: 而 recipe 是在資料載進來**之前**讀的 —— 每一份存了欄名的 recipe 都會在開檔
+#: 那一刻爆掉（F15-2 踩過，見 `ParamSpec.choices_from`）。
+CARRY_HELP = (
+    "KLARF columns to bring into the pipeline as numbers you can use later "
+    "(ROUGHBINNUMBER, CLASSNUMBER, …). Each one arrives under its own name, "
+    "so the score expression and the report can both refer to it. Columns "
+    "that are not numbers are kept for the report but are not usable in the "
+    "score. Tick nothing and nothing is carried - which is what every recipe "
+    "did before this box existed.")
+
+
+def carry_spec() -> ParamSpec:
+    """讀資料那幾張卡共用的 ``carry``（見 :data:`CARRY_HELP`）。"""
+    return ParamSpec(
+        name="carry", type="multi_choice", default="",
+        label="Carry these columns",
+        choices_from="main_columns",
+        advanced=True,
+        help=CARRY_HELP,
+    )
+
+
 #: 兩張 Region 卡共用的「靠邊的框不要」開關（F11 Region 第八輪，使用者要求）。
 #:
 #: 為什麼兩張卡要**同一組參數名**：使用者心裡這是**一件事**（「靠邊的不要」），

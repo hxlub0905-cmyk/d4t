@@ -2862,6 +2862,7 @@ class StudioWindow(QMainWindow):
             self.param_form.clear_errors()
             self._autofill_output_prefix(node_id, str(name), value)
             self._after_pair_param(node_id, str(name))
+            self._after_carry_param(node_id, str(name))
             # 拖滑桿的時候框要跟著變 —— 那正是這個輔助的全部意義（F7-8：
             # 使用者是一邊看影像一邊決定值的）。
             self._refresh_kernel_hint()
@@ -3065,6 +3066,11 @@ class StudioWindow(QMainWindow):
             return False
 
         self.dataset = dataset
+        # Load 卡的 `carry` 點名的 KLARF 欄位要跟著這一份重填（F16）——
+        # 換一份資料 = 那幾欄的值全變了。忘了填的下場是**上一份的欄位值**
+        # 留在這一份的每一顆上，跑得完、有數字、而且是別人的。
+        self._carry_filled = None
+        self._carry_main_columns()
         # 入口卡上要印出**現在載的是哪一份**（F14-1）。名字在請求的那一刻就
         # 知道了，但要等載成功才採用 —— 開錯一個檔不會讓卡片上的名字先變。
         self.dataset_name = str(getattr(self, "_pending_dataset_name", "") or "")
@@ -4722,6 +4728,10 @@ class StudioWindow(QMainWindow):
 
         sources = dict(getattr(self.dataset, "sources", None) or {})
         out: Dict[str, List[str]] = {"sources": sorted(sources)}
+        # Load 卡的 `carry`（F16）問的是**主資料集**有哪些欄 —— 跟指著誰無關，
+        # 所以它在下面那個 early return 之前。
+        out["main_columns"] = (pair_ingest.columns_of(self.dataset)
+                               if self.dataset is not None else [])
         src = sources.get(str(node.params.get("source", "") or "").strip())
         if src is None:
             return out
@@ -4746,6 +4756,49 @@ class StudioWindow(QMainWindow):
         if self.dataset is None:
             return {}
         return pair_ingest.sources_for_run(self.dataset)
+
+
+    def _after_carry_param(self, node_id: str, name: str) -> None:
+        """Load 卡改了 `carry` 之後要重填（F16）。
+
+        跟 `_after_pair_param` 是同一件事的另一半：那一支管掛上來的第二份，
+        這一支管主資料集。分開兩支是因為它們問的是**兩份不同的 KLARF**。
+        """
+        node = self.model.nodes.get(str(node_id))
+        if node is None or node.step not in ("load_patch", "load_single"):
+            return
+        if name != "carry":
+            return
+        self._carry_main_columns()
+
+    def _carry_main_columns(self) -> None:
+        """把 Load 卡點名的 KLARF 欄位填進主資料集的每一顆。
+
+        **答案只有一份**：`steps.load.columns_for_main`（`carry` 的意思住在
+        卡片）。CLI 走的是同一支 —— 兩個入口，不是兩份規則。
+
+        沒有人勾 → 一欄都不填，所以既有的 recipe 一個位元組都沒多帶。
+        要一個這份 KLARF 沒有的欄 → **在勾的當下就講**（同 F15-2：等跑起來
+        才講的話，那句話會一顆一顆出現，而且列的是「你要的」不是「它有的」）。
+        """
+        from d4t.core.ingest.dataset import (
+            columns_of, fill_fields, missing_columns_of,
+        )
+        from d4t.core.steps.load import columns_for_main
+
+        if self.dataset is None:
+            return
+        want = columns_for_main(self.model.nodes.values())
+        if getattr(self, "_carry_filled", None) == tuple(want):
+            return                          # 沒變 —— 不用走一遍幾十萬顆
+        absent = missing_columns_of(self.dataset, want)
+        fill_fields(self.dataset, want)
+        self._carry_filled = tuple(want)
+        if absent:
+            self._status(
+                "This lot has no KLARF column called %s. It has: %s."
+                % (", ".join(absent), ", ".join(columns_of(self.dataset))),
+                "error")
 
     def _sync_pair_fields(self, source_id: str) -> None:
         """`carry` 改了 → 把那幾欄補進掛著的那一份（F15-2）。

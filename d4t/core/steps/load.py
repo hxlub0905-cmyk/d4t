@@ -40,7 +40,9 @@ from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_INPUT,
 )
-from ._util import ensure_gray, nm_per_px_spec, to_uint8
+from ._util import (
+    carry_spec, ensure_gray, nm_per_px_spec, parse_key_list, to_uint8,
+)
 
 # "auto" 模式下 channel 的優先順序（其餘 channel 依名稱排序附加在後）
 _PREFERRED_ORDER = ("test", "ref", "single")
@@ -97,6 +99,7 @@ class LoadPatchStep(Step):
                   "some."),
         ),
         nm_per_px_spec(),
+        carry_spec(),
     ]
     reads: List[str] = []
     writes = ["test", "ref"]     # ＝ DEFAULT_CHANNEL_MAP 的名字（靜態備援）
@@ -122,6 +125,17 @@ class LoadPatchStep(Step):
             return mapped
         wanted = [tok.strip() for tok in raw.split(",") if tok.strip()]
         return [w for w in wanted if not mapped or w in mapped] or mapped
+
+    @classmethod
+    def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
+        """``n_channels`` ＋ ``carry`` 點名的那幾欄（F16）。
+
+        **宣告要跟著參數走**，不然那幾欄在 `available_features` 的下拉裡不存在
+        —— 使用者就得用打的，而打錯只會得到一條 `unknown-feature` 警告。
+        非數字的欄位仍然宣告：卡片手上沒有 KLARF，分不出哪一欄是數字，而
+        「宣告」的意思是「可能會碰到的」（同 `MultiSourceStep` 的 nm 那一份）。
+        """
+        return ["n_channels"] + _carry_names(params)
 
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
@@ -202,6 +216,7 @@ class LoadPatchStep(Step):
         _apply_nm_per_px(ctx, p, loaded)
         _write_input_panel(ctx, item, kind, loaded, images)
         ctx.add_feature("n_channels", float(len(loaded)))
+        _carry_features(ctx, item, p, self.key)
         return ctx
 
 
@@ -230,6 +245,7 @@ class LoadSingleStep(Step):
                   "features."),
         ),
         nm_per_px_spec(),
+        carry_spec(),
     ]
     reads: List[str] = []
     writes = ["single"]
@@ -242,6 +258,17 @@ class LoadSingleStep(Step):
     def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:
         name = str(params.get("out", "single") or "").strip()
         return [name] if name else []
+
+    @classmethod
+    def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
+        """``n_channels`` ＋ ``carry`` 點名的那幾欄（F16）。
+
+        **宣告要跟著參數走**，不然那幾欄在 `available_features` 的下拉裡不存在
+        —— 使用者就得用打的，而打錯只會得到一條 `unknown-feature` 警告。
+        非數字的欄位仍然宣告：卡片手上沒有 KLARF，分不出哪一欄是數字，而
+        「宣告」的意思是「可能會碰到的」（同 `MultiSourceStep` 的 nm 那一份）。
+        """
+        return ["n_channels"] + _carry_names(params)
 
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
@@ -276,7 +303,76 @@ class LoadSingleStep(Step):
         _apply_nm_per_px(ctx, p, [name])
         _write_input_panel(ctx, item, kind, [name], {name: images[order[0]]})
         ctx.add_feature("n_channels", 1.0)
+        _carry_features(ctx, item, p, self.key)
         return ctx
+
+
+def _carry_names(params: Dict[str, Any]) -> List[str]:
+    """這張卡要把哪幾個 KLARF 欄位帶成 feature（大寫）。"""
+    return [c.upper() for c in parse_key_list(params.get("carry", ""))]
+
+
+def columns_for_main(nodes: Any) -> List[str]:
+    """**每一張** Load 卡的 ``carry`` 聯集（大寫，保留出現順序）。
+
+    掛主資料集的時候只複製這幾欄（`ingest.dataset.fill_fields` 的 ``columns``）
+    —— 一份 raw data 是幾十萬顆，×24 欄字串是幾百 MB，而那幾欄還要 pickle 進
+    每一個 worker。跟 F15 的 `pair_source.columns_for_source` 是同一件事的
+    另一半，所以刻意長得一模一樣。
+
+    **這件事只寫在這裡**：`carry` 的意思是這張卡的事，抄第二份出去的那一份
+    會漂（`ROADMAP` / UI / CLI 各一份的話，「哪幾欄要帶」就有三個答案）。
+    """
+    # **dict 也吃得下**：`recipe.nodes` 是 ``{id: RecipeNode}``，而直接迭代它
+    # 拿到的是 **id 字串** —— `getattr(str, "step")` 是空的，於是這支安靜地回
+    # 空清單、一欄都不帶，而症狀出現在很後面（每一顆都說「這份 KLARF 沒有那個
+    # 欄位」，因為根本沒填）。實測踩到，所以在這裡收掉而不是要求每個呼叫端記得
+    # 加 `.values()`。
+    if hasattr(nodes, "values"):
+        nodes = list(nodes.values())
+    out: List[str] = []
+    for node in (nodes or ()):
+        step = str(getattr(node, "step", "") or "")
+        if step not in ("load_patch", "load_single"):
+            continue
+        params = dict(getattr(node, "params", None) or {})
+        for col in _carry_names(params):
+            if col not in out:
+                out.append(col)
+    return out
+
+
+def _carry_features(ctx: Context, item: Any, params: Dict[str, Any],
+                    step_key: str) -> None:
+    """把 ``carry`` 點名的欄位寫成 feature（數字），非數字的留給報表。
+
+    命名**就是欄名本身**（``ROUGHBINNUMBER``），不加前綴：那是使用者在 KLARF
+    裡看到的字，而 KLARF 的欄名本來就是合法的變數名，打進分數表達式不用翻譯。
+    （`pair_source` 加 ``pair_`` 是因為它帶的是**另一份**的同名欄 —— 不加的話
+    兩份的同一欄會撞在一起。）
+    """
+    want = _carry_names(params)
+    if not want:
+        return
+    fields = dict(getattr(item, "fields", None) or {})
+    missing = [c for c in want if c not in fields]
+    if missing:
+        # **打錯一個欄名不可以安靜地沒事**：少一欄的 CSV 跟成功的 CSV 長得
+        # 一模一樣，而使用者要到寫分數表達式時才發現那個變數指不到。
+        raise StepError(
+            step_key,
+            "this lot has no KLARF column called %s. What it does have: %s. "
+            "Fix “Carry these columns”."
+            % (", ".join(missing), ", ".join(sorted(fields)) or "(nothing)"))
+    for col in want:
+        raw = str(fields.get(col, ""))
+        try:
+            ctx.add_feature(col, float(raw))
+        except (TypeError, ValueError):
+            # 帶不動的欄位（DEFECTID 那種字串）留在 meta 給報表 —— feature 是
+            # **數字**的地盤，塞一個字串進去會讓分數表達式炸在一個跟它無關的
+            # 地方。同 `pair_source` 的處置，不發明第二種。
+            ctx.meta.setdefault("klarf_fields", {})[col] = raw
 
 
 def _apply_nm_per_px(ctx: Context, p: Dict[str, Any],

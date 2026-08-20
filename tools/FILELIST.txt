@@ -8,7 +8,7 @@ b20e9b7f31aa8195e297b4a124b69252cd4c56cf README.md
 060db76131ca215469f1f8e31d4433f311f17add SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
-52efd634d79139d1a7597e3efcc17767369059d3 d4t/__main__.py
+968eaa7b2b3402d389201dbb95a92458bf658125 d4t/__main__.py
 e75a08b69155620720f17d638c3b8e14489091f3 d4t/core/__init__.py
 e765cec6fb21d6bf017cd212321c39b44bab2694 d4t/core/algo/__init__.py
 9f95cc3f4f930324566729bd82462d38777841d2 d4t/core/algo/align.py
@@ -34,11 +34,11 @@ fb38e1ca7b0449c782255320c14358bfc90956a5 d4t/core/export/__init__.py
 e3561c00d5079e65d518a4578ccafaca5992f2ef d4t/core/export/overlay.py
 937ebc7352f4705d20adac4deeb407ff2577d53e d4t/core/export/report.py
 4599be07de9d76b7a008bdc400e22cfaa0c7acd2 d4t/core/ingest/__init__.py
-fe4aeda1f9005090c436c6af3abf40b2b4ad6d97 d4t/core/ingest/dataset.py
+987ec64e2830c1e9e7ee535c3aa91e020f5bd0be d4t/core/ingest/dataset.py
 8e73de19c7ae0e640d64a03465ef96248f7ae28c d4t/core/ingest/glas_export.py
 42948c7ff7901d48434530d524790904d1466be4 d4t/core/ingest/imageio.py
 21df6b8ef47ac269ff885f27e5b12dfb78567e3e d4t/core/ingest/klarf_core.py
-55fa95cd3a8dcc878bd0150eaaa68d304cc3800f d4t/core/ingest/pair_source.py
+8853dcc140c1f95a6221e4205e318f8b0db6c68c d4t/core/ingest/pair_source.py
 44c4730891305a9d9ddecc14c48b8b67c9c4289e d4t/core/ingest/tiff_index.py
 bd009f4274c250a9b22da34fac75bef67dc46c6e d4t/core/pipeline/__init__.py
 7d97f61d977da02cb81ff17d157507f19eaff961 d4t/core/pipeline/batch.py
@@ -50,9 +50,9 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 0a0b20e4ea5be09e6852b019829f25585c02a641 d4t/core/pipeline/engine.py
 f1cbd776b47948629028c3f204e3dfb811a5ae2b d4t/core/pipeline/expression.py
 35edc0ff763e7edb9acd95a0d347c66f31c7ce88 d4t/core/pipeline/recipe.py
-b024aaf5e423333ef74ea4ac39fe2f774c2e9eed d4t/core/pipeline/step.py
+9549c11d1b46ddfdb3b052e2317a9360b2dd6ce2 d4t/core/pipeline/step.py
 48bc597c9d1533f3b460a3a649c075ffdfcb26cb d4t/core/steps/__init__.py
-b75ed91879ebb4da31cbb2cb98bc8f5f9cdfcade d4t/core/steps/_util.py
+83542ab9f61ac7132944c9619ec8730041606d33 d4t/core/steps/_util.py
 c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
 cf162d9e699b12b6e4cd5d6d9706484b19eda598 d4t/core/steps/align_to.py
 adcb0785c8ec4e0518ffa59c08e8705786e14ca1 d4t/core/steps/arith.py
@@ -61,7 +61,7 @@ d908fe6e0daf98a16f6fbc1115cefdd5641f5f57 d4t/core/steps/cd.py
 93588a88b65e8b98525d7344246251b13f9da31b d4t/core/steps/feature_math.py
 00f877fe38f316bc2a74cb2659a2e5ac63b7055c d4t/core/steps/flatten.py
 8f0da895edf1d8e4c4c346efe3bdaf5f88470e62 d4t/core/steps/glv_stats.py
-32a8c9edcc4ec5d8c3142b091d8af4be0b3000cc d4t/core/steps/load.py
+c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
 0299cafc4d75895f8b322be5433f7fb3e37455d3 d4t/core/steps/pair_source.py
@@ -89,7 +89,7 @@ a0d89574ae18115a2978a1cd3b6a986a73ee5671 d4t/ui/inspectors.py
 68e6ac894866da63ca055b9082523ffb89656702 d4t/ui/region_check.py
 414fbe7a4515960f6e7e8202e70988e6d0b9cb9e d4t/ui/results.py
 e3248e389f47ff9a0f8b911de3f2ef58c4bf9208 d4t/ui/scope.py
-4d43e9fffbb8ce3eb5f5a12c1655e866767010b4 d4t/ui/studio.py
+ee94d6a783c9b837b43822cf42afcc175c4ac512 d4t/ui/studio.py
 b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 b24576feb08cf1517b18a0d0a04f302fcb9ea840 d4t/ui/theme.py
 d5c19e3d7a2e3b2db902b079e9a01a8ab9061373 d4t/ui/viewmodel.py
@@ -125,6 +125,7 @@ eefb2fdead2954e5d50b0315a19c582e629d7849 tests/test_batch_cache.py
 1c3e6a27a18cad905fb862e5cb8180716b5f7735 tests/test_batch_thread_safety.py
 299ce9e0acf6811de39e6e92bf43664954cbd3ad tests/test_calibration.py
 ccfb755f8a0ea51eed73afe079074403d05df3bd tests/test_card_invariants.py
+eec62f1d38fdcefcf2f311cc74ac3b7cbb7e1530 tests/test_carry_klarf_columns.py
 16180dcebe118863c983b720586e849f0a78bc8a tests/test_cell_rois.py
 2f5f82b156ff84e43430ad8f9fa8b4411c3cfd3b tests/test_check_glas_export.py
 0ec94054d227c9161d8ccbf0d0fbb5614a7abeb7 tests/test_curve.py
