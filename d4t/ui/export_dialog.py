@@ -81,6 +81,7 @@ from d4t.core.export import (
     ExportError,
     apply_writeback,
     feature_keys,
+    pick_overlay_results,
     plan_writeback,
     render_overlay,
     write_csv,
@@ -197,23 +198,6 @@ def _overlay_label(result: Dict[str, Any]) -> str:
     if b is not None:
         parts.append("bin=%d" % int(b))
     return "  ".join(parts)
-
-
-def pick_overlay_results(results: Sequence[Dict[str, Any]], limit: int
-                         ) -> List[Dict[str, Any]]:
-    """依分數由高到低取前 ``limit`` 顆（沒有分數的排最後）。"""
-    rows = [r for r in (results or []) if r.get("ok", True)] or list(results or [])
-
-    def key(r: Dict[str, Any]) -> Tuple[int, float]:
-        s = r.get("score")
-        try:
-            return (0, -float(s))
-        except (TypeError, ValueError):
-            return (1, 0.0)
-
-    rows = sorted(rows, key=key)
-    n = max(0, int(limit))
-    return rows[:n] if n else rows
 
 
 def run_export_job(spec: Dict[str, Any],

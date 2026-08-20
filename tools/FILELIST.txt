@@ -29,9 +29,9 @@ c1049c4ae6c2505db6e37b7edeaf364e1244b026 d4t/core/algo/quality.py
 762a02a7c3b5074e463581343bb53e1e835a200d d4t/core/algo/subpixel.py
 82791f0e16286d803ddba7220ac56aec5548f6d4 d4t/core/algo/template.py
 5f93cfe3c9daa7b50b5efa3dd329c847e5c26c91 d4t/core/calibration.py
-fb38e1ca7b0449c782255320c14358bfc90956a5 d4t/core/export/__init__.py
+69bc3d5f448e8f966001988b3656d2a7c00ec239 d4t/core/export/__init__.py
 0d5226c13b7cb16f9666dbd3cab7af3ceae67c94 d4t/core/export/klarf_out.py
-e3561c00d5079e65d518a4578ccafaca5992f2ef d4t/core/export/overlay.py
+7196da42d125eadbd73b47e54776858ad6d31195 d4t/core/export/overlay.py
 937ebc7352f4705d20adac4deeb407ff2577d53e d4t/core/export/report.py
 4599be07de9d76b7a008bdc400e22cfaa0c7acd2 d4t/core/ingest/__init__.py
 987ec64e2830c1e9e7ee535c3aa91e020f5bd0be d4t/core/ingest/dataset.py
@@ -64,7 +64,7 @@ d908fe6e0daf98a16f6fbc1115cefdd5641f5f57 d4t/core/steps/cd.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
-315cd022c62773eb2820a6555ae0b2c891861d03 d4t/core/steps/output.py
+2233663030e5f9bc5895a277545eaea69bd771fc d4t/core/steps/output.py
 0299cafc4d75895f8b322be5433f7fb3e37455d3 d4t/core/steps/pair_source.py
 e59ece7469f23031e8d1b7b3a9448727a32a808e d4t/core/steps/quality.py
 138d30b4da28014ef002b01ee7f9c82b90e4fbf2 d4t/core/steps/roi_cross.py
@@ -84,7 +84,7 @@ a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
 87bce11608d08f4302947e917b2b24d076571775 d4t/ui/branding.py
 c6fdb6478ea20491cdae53551465776c4927de29 d4t/ui/canvas.py
 3b58b7e078d58ad84a8939734b65952a75a029f3 d4t/ui/cell_canvas.py
-b1b2bc9205d117d387880cb477c9decfd42c57b6 d4t/ui/export_dialog.py
+2b0f88f8233c94dc4d73efaf82fd0b474ca1d6ec d4t/ui/export_dialog.py
 511288a738743288b669fedb83036486a25fc673 d4t/ui/gallery.py
 a0d89574ae18115a2978a1cd3b6a986a73ee5671 d4t/ui/inspectors.py
 68e6ac894866da63ca055b9082523ffb89656702 d4t/ui/region_check.py
@@ -123,7 +123,7 @@ a01791d84f040089fcd840472a637f9ca5c6baca tests/fixtures/recipes/die_to_die_basic
 745560662f263dc8a471f910d8b4640c647dd68d tests/fixtures/sample_real.klarf
 4282f3b4b954d939d2bb6bb33bcd78757108ba4a tests/test_align.py
 eefb2fdead2954e5d50b0315a19c582e629d7849 tests/test_batch_cache.py
-90b47523a9addfb94d2976980f9ec279f81b79c7 tests/test_batch_steps.py
+5e7e708f8cfeed514ff0b8571ed8d2cf10093394 tests/test_batch_steps.py
 1c3e6a27a18cad905fb862e5cb8180716b5f7735 tests/test_batch_thread_safety.py
 299ce9e0acf6811de39e6e92bf43664954cbd3ad tests/test_calibration.py
 d41622480a4639ef26d0de44d6e8bb966abc0192 tests/test_card_invariants.py

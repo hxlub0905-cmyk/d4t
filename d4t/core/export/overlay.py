@@ -30,7 +30,7 @@ import numpy as np
 from .klarf_out import ExportError
 
 __all__ = ["render_overlay", "write_png", "to_display_rgb",
-           "primary_blob_box", "BOX_COLOR"]
+           "primary_blob_box", "pick_overlay_results", "BOX_COLOR"]
 
 #: 主 blob 外框的顏色（RGB）。
 BOX_COLOR = (255, 32, 32)
@@ -141,6 +141,33 @@ def primary_blob_box(blobs: Optional[Sequence[Any]] = None,
         return _blob_box({k[5:]: f[k] for k in
                           ("blob_x", "blob_y", "blob_w", "blob_h")})
     return None
+
+
+
+def pick_overlay_results(results: Sequence[Dict[str, Any]], limit: int
+                         ) -> List[Dict[str, Any]]:
+    """依分數由高到低取前 ``limit`` 顆（沒有分數的排最後）。
+
+    **住在這裡而不是 UI**（F16 Stage 5c 搬過來的）：它問的是「這一批裡最值得
+    看的是哪幾顆」——跟畫面無關，而 `output_image` 跟 Export 精靈要的是同一個
+    答案。以前它在 `ui/export_dialog.py` 裡，於是那張卡照 `rows` 的順序取前 N
+    —— **檔案順序上的前 N 顆幾乎一定不是使用者想看的那幾顆**，而畫面上看不出
+    差別（都是 N 張 PNG）。
+
+    ``limit`` 是 0（或負的）＝ 全部，不截斷。
+    """
+    rows = [r for r in (results or []) if r.get("ok", True)] or list(results or [])
+
+    def key(r: Dict[str, Any]) -> Tuple[int, float]:
+        s = r.get("score")
+        try:
+            return (0, -float(s))
+        except (TypeError, ValueError):
+            return (1, 0.0)
+
+    rows = sorted(rows, key=key)
+    n = max(0, int(limit))
+    return rows[:n] if n else rows
 
 
 def _pick_base(images: Dict[str, Any]) -> Tuple[str, np.ndarray]:

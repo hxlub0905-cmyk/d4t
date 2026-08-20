@@ -336,6 +336,71 @@ def test_write_klarf_says_so_when_there_is_no_klarf(tmp_path):
     assert "no KLARF" in bctx.errors["kl"]
 
 
+@pytest.mark.parametrize("mode, extra", [
+    ("annotate", {}),
+    ("inplace", {}),
+    ("inplace", {"class_col": "CLASSNUMBER"}),
+    ("topn", {"top_n": 3}),
+    ("topn", {"top_n": 0, "min_score": 1.0}),
+], ids=["annotate", "inplace-untouched", "inplace-class", "topn-count",
+        "topn-threshold"])
+def test_every_klarf_mode_actually_writes(dataset, tmp_path, mode, extra):
+    """**每一種模式都要真的寫得出來。**
+
+    F16 Stage 5b 只測了 annotate，於是 `topn` 送錯了關鍵字（卡片送 `top_n`，
+    引擎要的是 `n`，它落進 `**annot_opts`）—— **每一次 topn 寫回都失敗**，
+    而沒有人知道。這一條是那個 bug 的形狀：不是「少測一種模式」，是
+    「一張有 method 的卡只測了一個 method」。
+
+    所以這裡逐一跑過每一種設定，而且**檔案要真的出現**（errors 是空的還不夠：
+    一張卡可以什麼都沒做卻不報錯）。
+    """
+    out = tmp_path / ("%s.001" % mode)
+    params = {"mode": mode, "path": str(out)}
+    params.update(extra)
+    recipe = _out_recipe("kl", "output_klarf", params)
+    rows = run_batch(recipe, dataset, workers=1)
+    bctx = run_batch_steps(recipe, dataset, rows)
+    assert not bctx.errors, bctx.errors
+    assert out.exists() and out.stat().st_size > 0
+    # 寫回是不可逆的，所以「改了幾列」永遠要講出來
+    assert any("row(s) changed" in w for w in bctx.warnings), bctx.warnings
+
+
+def test_inplace_with_nothing_named_leaves_the_file_identical(dataset, tmp_path,
+                                                              lot):
+    """`inplace` **一格都不填 → 輸出檔與原檔逐位元組相同**（`apply_writeback`
+    的契約）。那正是使用者第一次按下去時該發生的事 —— 一個「什麼都沒指定」的
+    寫回不該偷偷動到任何東西。"""
+    out = tmp_path / "same.001"
+    recipe = _out_recipe("kl", "output_klarf",
+                         {"mode": "inplace", "path": str(out)})
+    rows = run_batch(recipe, dataset, workers=1)
+    bctx = run_batch_steps(recipe, dataset, rows)
+    assert not bctx.errors, bctx.errors
+    assert out.read_bytes() == Path(lot["klarf"]).read_bytes()
+
+
+def test_the_images_card_picks_the_highest_scoring_ones(dataset, tmp_path):
+    """`limit` 取的是**分數最高的那幾顆**，不是檔案順序上的前幾顆。
+
+    兩者都會產出 N 張 PNG，所以畫面上看不出差別 —— 而檔案順序上的前 N 顆
+    幾乎一定不是使用者想看的那幾顆。第一版就是那樣寫的。
+    """
+    from d4t.core.export.overlay import pick_overlay_results
+
+    folder = tmp_path / "pngs"
+    recipe = _out_recipe("img", "output_image",
+                         {"folder": str(folder), "limit": 2})
+    rows = run_batch(recipe, dataset, workers=1)
+    run_batch_steps(recipe, dataset, rows)
+    want = {str(r["defect_id"]) for r in pick_overlay_results(rows, 2)}
+    got = {p.stem for p in folder.glob("*.png")}
+    assert got == want, (sorted(got), sorted(want))
+    # 而且截斷了要講出來（少幾張的資料夾跟完整的長得一模一樣）
+    assert len(rows) > 2
+
+
 def test_write_klarf_annotates_without_touching_the_original(dataset, tmp_path,
                                                              lot):
     """`annotate` 的承諾是「原檔不動」—— 那是使用者敢按下去的唯一理由。"""

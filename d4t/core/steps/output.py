@@ -239,11 +239,71 @@ class OutputKlarfStep(_OutputStep):
                   "exist yet are created. For “in place” this is the file "
                   "that gets edited, so point it at the original."),
         ),
+        # ---- mode = topn ---------------------------------------------------
         ParamSpec(
-            name="top_n", type="int", default=100, min=1, max=1000000,
+            name="top_n", type="int", default=100, min=0, max=1000000,
             show_when=("mode", ("topn",)),
             label="How many to keep",
-            help="How many of the highest scoring defects to write out.",
+            help=("How many of the highest scoring defects to write out. Set "
+                  "it to 0 to use the score threshold below instead."),
+        ),
+        ParamSpec(
+            name="min_score", type="float", default=0.0, min=-1e9, max=1e9,
+            show_when=("mode", ("topn",)),
+            label="…or keep everything scoring at least",
+            help=("Used only when “How many to keep” is 0: keep every defect "
+                  "whose score is this or higher, however many that turns out "
+                  "to be."),
+        ),
+        ParamSpec(
+            name="renumber", type="bool", default=True,
+            show_when=("mode", ("topn",)),
+            label="Renumber the defects 1, 2, 3…",
+            help=("On: the defects in the new file are numbered from 1. Off: "
+                  "they keep the ids they had in the original, so you can "
+                  "still match them up."),
+        ),
+        ParamSpec(
+            name="include_annotations", type="bool", default=True,
+            show_when=("mode", ("topn",)),
+            label="Also add the score and class columns",
+            help=("On: the new file also gets the ADCSCORE and ADCCLASS "
+                  "columns, the same as the annotate mode writes."),
+        ),
+        # ---- mode = inplace --------------------------------------------------
+        # 這四格是「寫進**既有**的欄位」—— inplace 的全部意義。一格都不填的話
+        # 輸出檔與原檔**逐位元組相同**（`apply_writeback` 的契約），而那正是
+        # 使用者第一次按下去時該發生的事。
+        ParamSpec(
+            name="class_col", type="str", default="",
+            show_when=("mode", ("inplace",)),
+            label="Write the class into",
+            help=("Name of an existing column to write the bin number into "
+                  "(CLASSNUMBER is the usual one). Leave it empty to not "
+                  "touch it. The column has to be there already - in place "
+                  "never adds columns."),
+        ),
+        ParamSpec(
+            name="bin_col", type="str", default="",
+            show_when=("mode", ("inplace",)),
+            label="…and also into",
+            help=("A second existing column for the same bin number "
+                  "(ROUGHBINNUMBER or FINEBINNUMBER). Leave it empty to not "
+                  "touch it."),
+        ),
+        ParamSpec(
+            name="size_col", type="str", default="",
+            show_when=("mode", ("inplace",)),
+            label="Write the size into",
+            help=("Name of an existing column to write a measured size into "
+                  "(DSIZE is the usual one). Leave it empty to not touch it."),
+        ),
+        ParamSpec(
+            name="size_feature", type="str", default="cd_x_px",
+            advanced=True, show_when=("mode", ("inplace",)),
+            label="…using this number",
+            help=("Which measured number goes into the size column. Only used "
+                  "when a size column is named above."),
         ),
         ParamSpec(
             name="size_scale", type="float", default=1.0, min=0.0, max=1e6,
@@ -274,9 +334,25 @@ class OutputKlarfStep(_OutputStep):
         opts: Dict[str, Any] = {}
         mode = str(p["mode"])
         if mode == "topn":
-            opts["top_n"] = int(p["top_n"])
+            # ⚠ 引擎那一邊的關鍵字是 **`n`**（`_build_topn`），不是 `top_n`。
+            # 參數名維持 `top_n`（recipe 的鍵，而且 `n` 對使用者不是一句話），
+            # 在這裡轉一次。第一版直接送 `top_n` —— 它落進 `**annot_opts`，
+            # 於是 **每一次 topn 寫回都失敗**，而測試只覆蓋了 annotate。
+            opts["n"] = int(p["top_n"])
+            opts["min_score"] = float(p["min_score"])
+            opts["renumber"] = bool(p["renumber"])
+            opts["include_annotations"] = bool(p["include_annotations"])
         elif mode == "inplace":
             opts["size_scale"] = float(p["size_scale"])
+            opts["size_feature"] = str(p["size_feature"]).strip() or "cd_x_px"
+            # **空字串 = 不要碰那一欄**，所以空的不能送進去 —— 送了的話
+            # `apply_writeback` 會去找一個叫 "" 的欄位然後報「沒有這個欄位」。
+            for name, key in (("class_col", "class_col"),
+                              ("bin_col", "bin_col"),
+                              ("size_col", "size_col")):
+                value = str(p[name]).strip()
+                if value:
+                    opts[key] = value
         try:
             plan = klarf_out.apply_writeback(doc, bctx.rows, str(p["mode"]),
                                              path, **opts)
@@ -343,13 +419,16 @@ class OutputImageStep(_OutputStep):
         by_id = {str(getattr(it, "defect_id", "")): it for it in items}
         sources = dict(getattr(bctx.dataset, "sources", None) or {})
         limit = int(p["limit"])
+        # **依分數由高到低取前 N**（`overlay.pick_overlay_results`，跟 Export
+        # 精靈同一支）。照 `rows` 的順序取的話拿到的是**檔案順序**上的前 N 顆
+        # —— 那幾乎一定不是使用者想看的那幾顆，而畫面上看不出差別（都是 N 張
+        # PNG）。第一版就是那樣寫的。
+        chosen = overlay.pick_overlay_results(bctx.rows, limit)
         # **一顆一顆重跑 pipeline** 才拿得到影像（結果表裡只有數字）。那正是
         # Export 精靈今天做的事，所以這裡不是新的成本，只是換了一個地方。
         wrote = 0
         skipped = 0
-        for row in bctx.rows:
-            if wrote >= limit:
-                break
+        for row in chosen:
             item = by_id.get(str(row.get("defect_id", "")))
             if item is None:
                 skipped += 1
@@ -378,9 +457,10 @@ class OutputImageStep(_OutputStep):
             # **講出來**：少幾張 PNG 的資料夾跟完整的資料夾長得一模一樣。
             bctx.warn("Images: wrote %d, skipped %d (no image, or the "
                       "pipeline did not run for them)." % (wrote, skipped))
-        if wrote >= limit and len(bctx.rows) > limit:
-            bctx.warn("Images: stopped at %d of %d defects (the “At most this "
-                      "many” setting)." % (limit, len(bctx.rows)))
+        if len(bctx.rows) > len(chosen):
+            bctx.warn("Images: the %d highest scoring of %d defects (the “At "
+                      "most this many” setting)."
+                      % (len(chosen), len(bctx.rows)))
 
 
 #: HTML 報表的樣式。**inline，而且只有純文字** —— 這個 repo 是純文字的
