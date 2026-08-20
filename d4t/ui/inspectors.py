@@ -34,6 +34,7 @@
 from __future__ import annotations
 
 import math
+import traceback
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
@@ -142,13 +143,35 @@ class Inspector(QWidget):
         p.drawText(rect, Qt.AlignCenter | Qt.TextWordWrap, self.empty_reason())
 
     def paintEvent(self, _e) -> None:      # noqa: D102 - Qt hook
+        """**畫不出來不得毀掉整個畫面**（2026-08-20）——鐵則 7 的 UI 版。
+
+        Qt 的 ``paintEvent`` 一丟例外就留下一個沒收尾的 painter
+        （``QBackingStore::endPaint() called with active painter``），而接下來
+        每一次重繪都會再失敗一次 —— 使用者看到的是**別的地方**壞掉：實際發生
+        的那次是「配對卡的圖載不出來」，而真正的錯在儀表的一行除法。
+
+        所以：例外照樣印到終端機（不要藏），但畫面上只變成這個面板的一行字，
+        而且 painter 一定收尾。
+        """
         p = QPainter(self)
-        rect = self._frame(p)
-        if not self.has_data():
-            self._say_empty(p, rect)
-        else:
-            self.paint_body(p, rect)
-        p.end()
+        try:
+            rect = self._frame(p)
+            if not self.has_data():
+                self._say_empty(p, rect)
+            else:
+                self.paint_body(p, rect)
+        except Exception:                  # noqa: BLE001 — 見 docstring
+            traceback.print_exc()
+            try:
+                p.setPen(QColor(TOKENS["danger_text"]))
+                p.drawText(QRectF(self.rect()).adjusted(10, 10, -10, -10),
+                           Qt.AlignCenter | Qt.TextWordWrap,
+                           "This panel could not be drawn (see the terminal). "
+                           "Everything else still works.")
+            except Exception:              # noqa: BLE001 — 連錯誤都畫不出來
+                pass
+        finally:
+            p.end()
 
     def paint_body(self, p: QPainter, rect: QRectF) -> None:
         """子類畫這裡（``rect`` 已經扣掉外框與留白）。"""
@@ -1105,6 +1128,13 @@ class MeasureInspector(Inspector):
 
     def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
         names = self.rows()
+        if not names:
+            # 子類可能因為**別的理由**說「有資料」（`PairInspector` 手上有配對
+            # 資訊，但整批的數字要跑一批才有）。那時候這裡一列都畫不出來，而
+            # 底下那一行除法會是 ZeroDivisionError —— 2026-08-20 使用者遇到的
+            # 就是它，而症狀是「圖載不出來」。
+            self._say_empty(p, rect)
+            return
         # 圖例畫一次就好（每一排都畫是噪音），而且**放得下才畫** ——
         # 面板可以被拖到很矮，那時候長條本身比圖例重要。
         body = rect
@@ -1455,6 +1485,12 @@ class PairInspector(MeasureInspector):
         return dict(self.meta.get("pair_match") or {})
 
     def empty_reason(self) -> str:
+        # **配到了**跟**還沒配到**是兩句不同的話。這一格在只跑過一顆（預覽）的
+        # 時候是常態：配對資訊有了，整批的分布還沒有。
+        if self.match():
+            return ("Paired — run a trial to see how the match distance and "
+                    "the score are spread across the batch. One value on its "
+                    "own cannot tell you whether the tolerance is right.")
         return ("Run a trial to see which defect this one pairs with. No "
                 "second lot yet? Use “Open data…” on this card.")
 

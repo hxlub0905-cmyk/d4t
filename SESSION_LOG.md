@@ -15,6 +15,32 @@
 
 ---
 
+## 儀表畫不出來，症狀出現在別的地方（2026-08-20，第二十七輪）
+
+使用者：「現在是 Pair with another source 的圖就載不出來」，終端機一直丟
+`ZeroDivisionError: float division by zero` 指著 `inspectors.py` 的
+`row_h = body.height() / float(len(names))`。
+
+**壞的地方跟看到的地方不一樣**：`PairInspector` 手上有配對資訊（所以說「有資
+料」），但整批的數字要跑一批才有 —— 於是 `MeasureInspector.paint_body` 拿到
+0 列，那一行是除以零。而 Qt 的 `paintEvent` 一丟例外就留下一個沒收尾的 painter
+（`QBackingStore::endPaint() called with active painter`），接著每一次重繪都
+再失敗一次，於是使用者看到的是**影像區**壞掉。
+
+而「只跑過一顆（預覽）」在這張卡上是**常態**，不是邊角 —— 切一顆 defect 就會走
+到那裡。
+
+兩層修法：
+
+1. **`Inspector.paintEvent` 不准把例外往外丟** —— 鐵則 7 的 UI 版：一個面板畫
+   不出來，只准變成那個面板的一行字。例外照樣 `traceback.print_exc()`（不要藏），
+   painter 一定收尾。
+2. `MeasureInspector.paint_body` 沒有任何一列就畫「空的理由」而不是除以零；
+   而 `PairInspector` 的那句話要分得出**配到了**（「跑一批才看得到分布」）與
+   **還沒配到**（「用這張卡上的 Open data…」）——兩句不同的話。
+
+---
+
 ## 第二份只送進了一半的路（2026-08-20，第二十六輪）
 
 使用者：「Pair with another source，我載入 image（RSEM 的 GT，23 顆），不會有圖
