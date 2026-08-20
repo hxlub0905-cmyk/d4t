@@ -251,3 +251,100 @@ def test_two_threads_reading_the_same_file_do_not_corrupt_each_other(tmp_path):
     tiff_index.close_cached_tiffs()
     assert not errors, errors[:3]
     assert not wrong, "讀到別頁的像素：%r" % wrong[:3]
+
+
+# --------------------------------------------------------------------------- #
+# 「幾萬顆會直接不載入」（2026-08-20 使用者回報）
+# --------------------------------------------------------------------------- #
+def _tiny_multipage(path, n, loop=False):
+    """N 頁的最小 TIFF（每頁 1×1、8-bit）。
+
+    用手寫的而不是 tifffile：這裡要驗的是**IFD 鏈有多長**，而 11 萬頁真的影像
+    是 GB 級的檔案。1×1 的頁讓同一條鏈只要 10 MB。``loop=True`` 讓最後一頁的
+    next-IFD 指回第一頁 —— 那才是「壞檔」該長的樣子。
+    """
+    import struct
+
+    tags = [(256, 3, 1), (257, 3, 1), (258, 3, 1), (259, 3, 1), (262, 3, 1),
+            (273, 4, 1), (278, 3, 1), (279, 4, 1)]
+    ifd_size = 2 + 12 * len(tags) + 4
+    data_start, ifd_start = 8, 8 + n
+    with open(str(path), "wb") as f:
+        f.write(b"II" + struct.pack("<HI", 42, ifd_start))
+        f.write(b"\x80" * n)
+        for i in range(n):
+            here = ifd_start + i * ifd_size
+            if i < n - 1:
+                nxt = here + ifd_size
+            else:
+                nxt = ifd_start if loop else 0
+            vals = {256: 1, 257: 1, 258: 8, 259: 1, 262: 1,
+                    273: data_start + i, 278: 1, 279: 1}
+            out = struct.pack("<H", len(tags))
+            for tag, vtype, count in tags:
+                v = vals[tag]
+                raw = (struct.pack("<H", v) + b"\0\0" if vtype == 3
+                       else struct.pack("<I", v))
+                out += struct.pack("<HHI", tag, vtype, count) + raw
+            f.write(out + struct.pack("<I", nxt))
+    return str(path)
+
+
+def test_a_lot_with_more_than_a_hundred_thousand_pages_still_loads(tmp_path):
+    """5 萬顆 defect × 一顆 2 張 = 10 萬頁 —— 舊的上限就畫在那裡。
+
+    而它失敗的方式最糟：`load_dataset` 接住那個例外之後**把 kind 退成 rsem、
+    每一顆 0 張圖**，於是「載得進來、有 defect、就是沒有影像」，
+    而唯一的線索是一句「你的 TIFF 壞了」（它沒壞）。
+    """
+    p = _tiny_multipage(tmp_path / "many.tif", 110_000)
+    assert tiff_index.n_pages(p) == 110_000
+    assert tiff_index.bit_depths(p) == [8]
+
+
+def test_too_many_pages_and_a_damaged_file_do_not_say_the_same_thing(tmp_path,
+                                                                    monkeypatch):
+    """「太多頁」是這個檔太大，「繞回自己」才是壞檔。
+
+    共用一句話的代價是實際發生過的那一次：一份好好的大 lot 被說成壞檔，
+    而使用者照那句話去查檔案，查不出任何東西。
+    """
+    monkeypatch.setattr(tiff_index, "MAX_PAGES", 20)
+
+    ok = _tiny_multipage(tmp_path / "ok.tif", 20)
+    assert tiff_index.n_pages(ok) == 20                  # 剛好在界線上
+
+    too_many = _tiny_multipage(tmp_path / "big.tif", 40)
+    with pytest.raises(ValueError) as e:
+        tiff_index.n_pages(too_many)
+    assert "more than 20 pages" in str(e.value)
+    assert "damage" not in str(e.value) and "loop" not in str(e.value)
+
+    looped = _tiny_multipage(tmp_path / "loop.tif", 4, loop=True)
+    with pytest.raises(ValueError) as e:
+        tiff_index.n_pages(looped)
+    assert "loops back" in str(e.value) and "damaged" in str(e.value)
+
+
+def test_the_bit_depth_check_only_looks_at_the_first_few_pages(tmp_path,
+                                                               monkeypatch):
+    """位元深度是**提前警告**，不是守門 —— 守門在每一顆的 `require_8bit`。
+
+    為了那個假設走完整份檔案，在 4 萬頁上實測是 1.0 秒（整個 `load_dataset`
+    才 1.56 秒），而在網路碟上是把整份檔案的 IFD 連同每個 tag 的 out-of-line
+    值都拉一遍。
+    """
+    seen = {}
+    real = tiff_index.read_tiff_pages
+
+    def spy(path, max_pages=None):
+        seen["max_pages"] = max_pages
+        return real(path, max_pages=max_pages)
+
+    monkeypatch.setattr(tiff_index, "read_tiff_pages", spy)
+    p = _tiny_multipage(tmp_path / "many.tif", 500)
+    assert tiff_index.bit_depths(p) == [8]
+    assert seen["max_pages"] == tiff_index.BIT_DEPTH_SAMPLE_PAGES
+
+    pages, info = tiff_index.read_tiff_pages(p, max_pages=3)
+    assert len(pages) == 3 and info["n_pages"] == 3      # 讀到的頁數，不是檔案的

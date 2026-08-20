@@ -126,8 +126,7 @@ def count_pages(path) -> int:
         seen = set()
         n = 0
         while next_ifd:
-            if next_ifd in seen or n > 100000:
-                raise ValueError("IFD chain loops — corrupt TIFF.")
+            _guard_chain(next_ifd, seen, n, path)
             seen.add(next_ifd)
             f.seek(next_ifd)
             n_entries = struct.unpack(en + ('Q' if big else 'H'),
@@ -139,11 +138,46 @@ def count_pages(path) -> int:
         return n
 
 
-def read_tiff_pages(path):
+#: IFD 鏈最多走幾頁。**這是「這個檔大得不合理」的界線，不是「壞掉」的界線。**
+#:
+#: 以前是 10 萬，而且超過就報「IFD chain loops — corrupt TIFF」——
+#: 一份 5 萬顆 defect、一顆 2 張圖的 lot 剛好落在那條線上，於是使用者拿到的是
+#: 「你的 TIFF 壞了」（它沒壞），而 `load_dataset` 接住那個例外之後
+#: **把 kind 退成 rsem、每一顆 0 張圖**：載得進來、有 defect、就是沒有影像。
+#: 那是 2026-08-20 使用者回報的「幾萬顆會超級無敵久或直接不載入」的第二半。
+#:
+#: 100 萬頁 = 25 萬顆 defect × 4 張，比任何真的 lot 都大一個級距；而 `seen`
+#: 那個集合在這個上限下最多也才幾十 MB。
+MAX_PAGES = 1_000_000
+
+
+def _guard_chain(next_ifd: int, seen: set, n_done: int, path) -> None:
+    """走下一個 IFD 之前的兩道檢查 —— **而且兩句話不一樣**。
+
+    「繞回自己」是真的壞檔；「太多頁」是這個檔太大。以前兩者共用一句
+    「corrupt TIFF」，於是一份好好的大 lot 被說成壞檔。
+    """
+    if next_ifd in seen:
+        raise ValueError(
+            "This TIFF's page chain loops back on itself, so the file is "
+            "damaged (page %d points at somewhere already visited): %s"
+            % (n_done + 1, path))
+    if n_done >= MAX_PAGES:
+        raise ValueError(
+            "This TIFF has more than %d pages, which is past what d4t walks "
+            "in one go: %s" % (MAX_PAGES, path))
+
+
+def read_tiff_pages(path, max_pages=None):
     """回傳 (pages, info)。pages = [dict,...]（每頁一筆），info = 檔案層資訊。
 
     要**完整的每頁資訊**（`fab_probe` 的報告、健檢）才用這支；只要頁數請用
     :func:`count_pages`，它便宜一個數量級。
+
+    ``max_pages`` = 只讀前幾頁就停（``info["n_pages"]`` 因此是**讀到的頁數**，
+    不是檔案的頁數）。給「只想看看這個檔長什麼樣」的呼叫者用 —— 這支會把
+    每一頁的每一個 tag 都讀出來，而讀 tag 常常要為了 out-of-line 的值再 seek
+    一次，在網路碟上那是一頁好幾次來回。
     """
     pages = []
     with open(path, 'rb') as f:
@@ -151,8 +185,9 @@ def read_tiff_pages(path):
 
         seen = set()
         while next_ifd:
-            if next_ifd in seen or len(pages) > 100000:
-                raise ValueError("IFD chain loops — corrupt TIFF.")
+            if max_pages is not None and len(pages) >= int(max_pages):
+                break                       # 只要前幾頁（見 docstring）
+            _guard_chain(next_ifd, seen, len(pages), path)
             seen.add(next_ifd)
             f.seek(next_ifd)
             n = struct.unpack(en + ('Q' if big else 'H'),
@@ -204,19 +239,33 @@ def n_pages(path) -> int:
     return count_pages(path)
 
 
-def bit_depths(path) -> list:
+#: `bit_depths` 預設看幾頁。**一份 lot 的 TIFF 是同一台機台一次寫出來的**，
+#: 位元深度不會第 3 萬頁才變 —— 而為了那個假設走完整份檔案，在 4 萬頁的合成
+#: 資料上實測要 1.0 秒（整個 `load_dataset` 才 1.56 秒），在網路碟上是把整份
+#: 檔案的 IFD 連同每個 tag 的 out-of-line 值都拉一遍。
+#:
+#: 這個檢查本來就只是**提前警告**（把 `require_8bit` 的守門提前到按下 Open 的
+#: 那一刻）。真正的守門在每一顆的 `require_8bit`，那裡看的是解出來的像素 ——
+#: 所以「看前幾頁」漏掉的那種檔案，仍然會在跑到它的時候被擋下來。
+BIT_DEPTH_SAMPLE_PAGES = 8
+
+
+def bit_depths(path, max_pages=BIT_DEPTH_SAMPLE_PAGES) -> list:
     """這個 TIFF 裡出現過的位元深度（排序、去重）—— **不解碼像素**（F11）。
 
     ``BitsPerSample`` 就在 IFD 的 tag 裡，所以「這批資料是幾 bit」在**載入的
     時候**就答得出來，不必等跑到某一顆才發現。彩色頁的 tag 是一串（每個 sample
     一個值），這裡把它攤平。
 
+    **只看前 ``max_pages`` 頁**（``None`` = 全部）——理由見
+    :data:`BIT_DEPTH_SAMPLE_PAGES`。
+
     讀不出來（壞檔、非 TIFF）→ 回空 list：位元深度的檢查不該讓載入失敗，
     真正的守門在 ``dataset.require_8bit``（那裡看的是解出來的像素）。
     """
     out = set()
     try:
-        pages, _info = read_tiff_pages(str(path))
+        pages, _info = read_tiff_pages(str(path), max_pages=max_pages)
     except (OSError, ValueError, struct.error):
         return []
     for p in pages:
