@@ -240,3 +240,113 @@ def test_nothing_configured_yet_points_at_the_field(tmp_path):
     assert not card.configuration_issues({"path": str(tmp_path / "x.csv")})
     # **不存在的資料夾不算設定錯**：write_csv 會自己建它（精靈走同一支）
     assert not card.configuration_issues({"path": str(tmp_path / "new" / "x.csv")})
+
+
+# --------------------------------------------------------------------------- #
+# 6. F16 Stage 5b：Output 段的另外四張
+# --------------------------------------------------------------------------- #
+def _out_recipe(node_id, step, params):
+    return Recipe(
+        recipe_id="out", routes={KIND: ["load", "glv", node_id]},
+        nodes={
+            "load": RecipeNode("load", "load_patch", {}),
+            "glv": RecipeNode("glv", "glv_stats",
+                              {"source": "test", "metrics": "glv_max"}),
+            node_id: RecipeNode(node_id, step, params),
+        },
+        score=ScoreSpec(expr="glv_max", threshold=1.0,
+                        bins={"below": 0, "above": 1}))
+
+
+def test_the_whole_output_section_is_end_points():
+    """使用者：「他就是個 end point」—— 自動套用到這一段的每一張卡。"""
+    section = [c for c in REGISTRY.values() if c.resolve_group() == "output"]
+    assert len(section) >= 5, [c.key for c in section]
+    for cls in section:
+        params = {p.name: p.default for p in cls.params}
+        assert cls.is_batch, "%s 不是 is_batch —— Output 段的卡都是" % cls.key
+        assert cls.resolve_writes(params) == [] , cls.key
+        assert cls.resolve_features(params) == [], cls.key
+        assert cls.resolve_reads(params) == [], cls.key
+        # 每一張都要在沒填路徑時講得出要填哪一格
+        says = cls.configuration_issues(params)
+        assert says and "Write to" in says[0], (cls.key, says)
+
+
+def test_write_images_is_a_batch_card_even_though_it_is_per_defect(dataset,
+                                                                   tmp_path):
+    """它看起來是逐顆的 —— 但做成普通 Step 的話它會在 `run_defect` 裡跑，
+    而那條路**每切換一顆 defect 就走一次**：使用者瀏覽 defect 時會一直寫
+    PNG 出來。所以它也是整批跑完之後跑一次。"""
+    folder = tmp_path / "pngs"
+    recipe = _out_recipe("img", "output_image", {"folder": str(folder)})
+    # 單顆跑：什麼都不該寫
+    run_defect(recipe, dataset.items[0], KIND)
+    assert not folder.exists()
+    # 整批之後：一顆一張
+    rows = run_batch(recipe, dataset, workers=1)
+    bctx = run_batch_steps(recipe, dataset, rows)
+    assert not bctx.errors, bctx.errors
+    pngs = sorted(folder.glob("*.png"))
+    assert len(pngs) == len(rows), [p.name for p in pngs]
+
+
+def test_write_html_is_self_contained(dataset, tmp_path):
+    """報表要能單獨寄給別人 —— 一個外部 .css 在轉寄的那一刻就不見了。"""
+    path = tmp_path / "r.html"
+    recipe = _out_recipe("html", "output_html", {"path": str(path)})
+    rows = run_batch(recipe, dataset, workers=1)
+    bctx = run_batch_steps(recipe, dataset, rows)
+    assert not bctx.errors, bctx.errors
+    text = path.read_text(encoding="utf-8")
+    assert "<style>" in text and "link" not in text.lower().split("<body")[0]
+    assert "glv_max" in text
+    # 一顆一列 + 表頭
+    assert text.count("<tr") == len(rows) + 1
+
+
+def test_write_html_shows_the_defects_that_did_not_run(tmp_path, dataset):
+    """少了的話，「這批有幾顆沒跑起來」在報表上看不出來。"""
+    path = tmp_path / "r.html"
+    rows = [{"defect_id": "1", "ok": True, "error": "", "score": 2.0,
+             "bin": 1, "features": {"glv_max": 9.0}},
+            {"defect_id": "2", "ok": False, "error": "boom", "score": None,
+             "bin": None, "features": {}}]
+    bctx = run_batch_steps(
+        _out_recipe("html", "output_html", {"path": str(path)}), dataset, rows)
+    assert not bctx.errors, bctx.errors
+    text = path.read_text(encoding="utf-8")
+    assert "did not run" in text and "boom" in text
+    assert "(none)=1" in text
+
+
+def test_write_klarf_says_so_when_there_is_no_klarf(tmp_path):
+    """folder / tiff_stack 沒有 KLARF —— 那件事在載入的當下就講過了，
+    這裡不要假裝是別的問題。"""
+    class _NoKlarf:
+        """一份沒有 KLARF 的資料集（folder / tiff_stack 就是這樣）。"""
+        kind = KIND          # route 用 fixture 那一條，這條測的不是 route
+        klarf = None
+        items = []
+
+    recipe = _out_recipe("kl", "output_klarf",
+                         {"path": str(tmp_path / "x.001")})
+    bctx = run_batch_steps(recipe, _NoKlarf(), [], kind=KIND)
+    assert "kl" in bctx.errors
+    assert "no KLARF" in bctx.errors["kl"]
+
+
+def test_write_klarf_annotates_without_touching_the_original(dataset, tmp_path,
+                                                             lot):
+    """`annotate` 的承諾是「原檔不動」—— 那是使用者敢按下去的唯一理由。"""
+    original = Path(lot["klarf"]).read_bytes()
+    out = tmp_path / "annotated.001"
+    recipe = _out_recipe("kl", "output_klarf",
+                         {"mode": "annotate", "path": str(out)})
+    rows = run_batch(recipe, dataset, workers=1)
+    bctx = run_batch_steps(recipe, dataset, rows)
+    assert not bctx.errors, bctx.errors
+    assert out.exists()
+    assert Path(lot["klarf"]).read_bytes() == original, "原檔被動到了"
+    # 寫回是不可逆的，所以「改了幾列」要講出來
+    assert any("row(s) changed" in w for w in bctx.warnings), bctx.warnings

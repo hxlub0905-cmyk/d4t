@@ -41,7 +41,7 @@ e3561c00d5079e65d518a4578ccafaca5992f2ef d4t/core/export/overlay.py
 8853dcc140c1f95a6221e4205e318f8b0db6c68c d4t/core/ingest/pair_source.py
 44c4730891305a9d9ddecc14c48b8b67c9c4289e d4t/core/ingest/tiff_index.py
 0b45dd2361e6535490db158a715ad6273f825ea7 d4t/core/pipeline/__init__.py
-42dc7da322aac00cdfd66b9aeeb2ea8abd886000 d4t/core/pipeline/batch.py
+aeae32eb1a395bfdc8a63de761f729e115775e89 d4t/core/pipeline/batch.py
 3698713c994f58366c00d703c16182e16259b4a6 d4t/core/pipeline/cache.py
 ec7bdb58e7da611ac74f16b53e218f9a65476bdc d4t/core/pipeline/cellrois.py
 204e9f613715f6e9af467b79f5368b7e7a45556b d4t/core/pipeline/channels.py
@@ -51,7 +51,7 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 f1cbd776b47948629028c3f204e3dfb811a5ae2b d4t/core/pipeline/expression.py
 35edc0ff763e7edb9acd95a0d347c66f31c7ce88 d4t/core/pipeline/recipe.py
 693632b8b969908df718148527b7f1cec88d130c d4t/core/pipeline/step.py
-6304bdf2284ba4788f426ead1ad9dd109689480e d4t/core/steps/__init__.py
+afcd1284d3abd421d5d3ffcffaf596f78f50c6e3 d4t/core/steps/__init__.py
 83542ab9f61ac7132944c9619ec8730041606d33 d4t/core/steps/_util.py
 c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
 cf162d9e699b12b6e4cd5d6d9706484b19eda598 d4t/core/steps/align_to.py
@@ -64,7 +64,7 @@ d908fe6e0daf98a16f6fbc1115cefdd5641f5f57 d4t/core/steps/cd.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
-48d9bf263def268b9d29a1ee7271f4150d08a667 d4t/core/steps/output_csv.py
+315cd022c62773eb2820a6555ae0b2c891861d03 d4t/core/steps/output.py
 0299cafc4d75895f8b322be5433f7fb3e37455d3 d4t/core/steps/pair_source.py
 e59ece7469f23031e8d1b7b3a9448727a32a808e d4t/core/steps/quality.py
 138d30b4da28014ef002b01ee7f9c82b90e4fbf2 d4t/core/steps/roi_cross.py
@@ -104,7 +104,7 @@ ffb40bc7e7d8fbac0d7c9402064fe639d1a41740 docs/GLAS-INTERFACE.md
 160ffb5f501ade00ca2bf417133ef49c3d2e09b1 docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
 8c244ca943e3c7a6209f6e0f47b9ed632c71d608 docs/PITFALLS.md
-1250b1ea13bff1c8148f3a285a4521d8304f3d12 docs/ROADMAP.md
+2dba9086ebd79a0d66bedb24b3ca6bf7d6d24cd9 docs/ROADMAP.md
 f6378d9ba391a4e1e3ef7ed855c7694b6b7f50b9 docs/plans/F0-master-plan.md
 d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 c4f06765ad918545511da042eb8d2b63df19795f docs/plans/F15-pair-sources.md
@@ -123,7 +123,7 @@ a01791d84f040089fcd840472a637f9ca5c6baca tests/fixtures/recipes/die_to_die_basic
 745560662f263dc8a471f910d8b4640c647dd68d tests/fixtures/sample_real.klarf
 4282f3b4b954d939d2bb6bb33bcd78757108ba4a tests/test_align.py
 eefb2fdead2954e5d50b0315a19c582e629d7849 tests/test_batch_cache.py
-e0c829c1e1c1904bbb3954344d62fb70ad125bdd tests/test_batch_steps.py
+90b47523a9addfb94d2976980f9ec279f81b79c7 tests/test_batch_steps.py
 1c3e6a27a18cad905fb862e5cb8180716b5f7735 tests/test_batch_thread_safety.py
 299ce9e0acf6811de39e6e92bf43664954cbd3ad tests/test_calibration.py
 d41622480a4639ef26d0de44d6e8bb966abc0192 tests/test_card_invariants.py

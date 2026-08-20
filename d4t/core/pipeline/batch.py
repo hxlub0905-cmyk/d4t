@@ -345,9 +345,13 @@ def run_batch_steps(recipe: Recipe, dataset: Any,
     bctx = BatchContext(rows=list(rows), dataset=dataset, recipe=recipe, kind=k)
     try:
         order = execution_order(recipe, k)
-    except Exception:
-        # route 有問題的話 `validate` / `run_defect` 早就講過了 —— 這裡不再
-        # 講第二次（同一件事兩個訊息，使用者會以為是兩個問題）。
+    except Exception as e:
+        # route 有問題的話 `run_defect` 已經一顆一顆講過了，所以這裡不再報
+        # 一次 error（同一件事兩個訊息，使用者會以為是兩個問題）。但也**不能
+        # 完全不出聲**：`rows` 是空的時候（整批一顆都沒跑）就沒有人講過，
+        # 而症狀會是「按了跑，什麼檔案都沒出現」。
+        bctx.warn("No output was written: this recipe has no route for '%s' "
+                  "(%s)." % (k, e))
         return bctx
     for nid in order:
         node = recipe.nodes.get(nid)
