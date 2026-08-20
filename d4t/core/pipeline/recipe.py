@@ -664,8 +664,36 @@ class Recipe:
 def execution_order(recipe: Recipe, kind: str) -> List[str]:
     """回傳 ``kind`` 這條 route 的節點執行順序。
 
-    邊 = route 相鄰對（load→norm→align…）∪ 顯式 ``edges``（兩端都在該
-    route 內才算）。循環或未知 kind → :class:`RecipeError`。
+    **邊只有一種來源：使用者拉的線**（``recipe.edges``，兩端都在該 route 內才
+    算）。``route`` 的排列只當平手時的次序 —— 它是排版，不是語意。
+    循環或未知 kind → :class:`RecipeError`。
+
+    順序只有一個家（F17-①，2026-08-20）
+    -----------------------------------
+    在此之前這裡多做一件事：**把 route 上相鄰的每一對也當成一條邊** ——
+
+    .. code-block:: python
+
+        for a, b in zip(route, route[1:]):     # 沒有人拉過的線
+            pair_edges.add((a, b))
+
+    那串隱含邊構成一條走遍全部節點的鏈，所以執行順序**恆等於 route 順序**，
+    而 route 順序在畫布上就是卡片的左右位置：**兩張沒有任何線相連的卡，誰先跑
+    由使用者把它拖到哪裡決定**。鐵則 9 說「資料從哪來由線決定，而畫布上每一條
+    線都是使用者拉的」是真的，但**執行順序的邊有一半不是線** —— UI 照純 DAG
+    畫，引擎不照純 DAG 跑。那個落差正是「特徵沒有線」「Output 卡沒有埠」
+    這一類問題的根（見 `docs/ARCHITECTURE.md`）。
+
+    **拿掉它不會改變任何一份跑得起來的 recipe 的順序**，這是可以證明的：
+
+    1. 隱含邊是一條 Hamiltonian path，所以舊的拓撲排序**唯一**，就是 route 順序；
+    2. 一份今天跑得起來的 recipe，它的線必然都往前走（往回會跟隱含邊組成
+       cycle，今天就開不起來）；
+    3. 所有邊都往前 ⇒ Kahn 每一步的「位置最小的可執行節點」正好是 route 上的
+       下一個 ⇒ 新的順序也是 route 順序。
+
+    唯一的行為差異：**線與 route 順序矛盾**的 recipe 今天是 cycle 錯誤，
+    之後會照線跑。那是改善（見 `docs/PITFALLS.md`）。
     """
     if kind not in recipe.routes:
         raise RecipeError(
@@ -678,8 +706,6 @@ def execution_order(recipe: Recipe, kind: str) -> List[str]:
     node_set = set(route)
 
     pair_edges: Set[tuple] = set()
-    for a, b in zip(route, route[1:]):
-        pair_edges.add((a, b))
     for e in recipe.edges:
         # **只看 src/dst，不看埠。** F9-1 換的是資料形狀不是語意：執行順序必須
         # 跟換之前逐項相同（黃金值 `tools/freeze_golden.py` 對著這件事）。
