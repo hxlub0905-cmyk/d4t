@@ -369,19 +369,40 @@ class RecipeModel:
         return get_step(self.nodes[node_id].step).category
 
     def available_features(self, upto_node: Optional[str] = None) -> List[str]:
-        """route（到 upto_node 為止，含）會產出的特徵名，供表達式下拉。"""
+        """route（到 upto_node 為止，含）會產出的特徵名，供表達式下拉。
+
+        **沒有人填 nm/px 就不列 nm 的那一份**（2026-08-20）。量測卡一律宣告
+        `cd_x_nm` 那一組（它看不到 Load 卡上填了什麼），但下拉是使用者**會去
+        點**的東西 —— 點了一個永遠不會出現的名字，recipe 就會在跑起來的時候
+        每一顆都失敗。這裡看得到每一張卡，所以這句話在這裡回答。
+        """
         feats: List[str] = []
+        known = self.nm_per_px_is_known()
         for nid in self.node_order:
             node = self.nodes[nid]
             if not node.enabled:
                 continue
             step_cls = get_step(node.step)
             for f in step_cls.resolve_features(node.params):
+                if not known and (f.endswith("_nm") or f.endswith("_nm2")):
+                    continue
                 if f not in feats:
                     feats.append(f)
             if nid == upto_node:
                 break
         return feats
+
+    def nm_per_px_is_known(self) -> bool:
+        """有沒有任何一張卡填了 nm/px（`_util.nm_per_px_spec`）。"""
+        for node in self.nodes.values():
+            if not node.enabled:
+                continue
+            try:
+                if float(node.params.get("nm_per_px", 0) or 0) > 0:
+                    return True
+            except (TypeError, ValueError):
+                continue
+        return False
 
     def available_streams(self, before_node: Optional[str] = None) -> List[str]:
         """到 before_node（不含）為止累積的影像流名，供 image_key 參數下拉。"""

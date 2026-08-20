@@ -313,13 +313,13 @@ def _cd_ctx(nm_per_px=None):
     return ctx
 
 
-def test_cd_measure_reports_pixels_only():
-    """量測一律 pixel —— nm 換算是輸出那一刻由使用者填的（2026-07-30）。
+def test_cd_measure_reports_pixels_when_nobody_says_how_big_a_pixel_is():
+    """**沒填 nm/px 就一個 `_nm` 都不要有**（2026-07-30 的決定，仍然成立）。
 
-    以前這張卡在沒有 ``nm_per_px`` 時吐三個 0（``cd_x_nm`` / ``cd_y_nm`` /
-    ``area_nm2``）並記一條警告，而 ``nm_per_px`` **從來沒有來源**，所以那三個
-    0 是每一顆的常態 —— 它們進得了分數表達式、也寫得進 DSIZE 欄。這條測試鎖
-    住那三個名字不再出現，以及 pixel 面積有被吐出來（以前只在算 nm 時用到）。
+    以前這張卡在沒有 ``nm_per_px`` 時照樣吐三個 0（``cd_x_nm`` / ``cd_y_nm`` /
+    ``area_nm2``），而 ``nm_per_px`` 那時候**沒有來源**，所以那三個 0 是每一顆
+    的常態 —— 它們進得了分數表達式、也寫得進 DSIZE 欄。0 是個看起來很像答案
+    的答案。
     """
     ctx = _cd_ctx()
     run_step("cd_measure", ctx, roi="spot")
@@ -329,10 +329,27 @@ def test_cd_measure_reports_pixels_only():
     assert not [k for k in ctx.features if k.endswith(("_nm", "_nm2"))]
     assert not [w for w in ctx.meta.get("warnings", []) if "nm_per_px" in w]
 
-    # 有 nm_per_px 也一樣：這張卡不換算，那件事已經不在它的職責裡。
-    ctx2 = _cd_ctx(nm_per_px=2.5)
-    run_step("cd_measure", ctx2, roi="spot")
-    assert sorted(ctx2.features) == ["area_px", "cd_x_px", "cd_y_px"]
+
+def test_a_pixel_size_adds_the_nm_numbers_beside_the_pixel_ones():
+    """2026-08-20：那個來源出現了 —— 使用者在 Load 卡上填的那一格。
+
+    所以上一條測試的理由（「沒有來源，所以每一顆都是 0」）沒有被推翻，是被
+    **補完**了。而補的方式是**多一組**不是換掉：同一個特徵名在不同資料上是
+    不同單位的話，``score = cd_x > 50`` 這一行會在填了 nm/px 之後意思整個改變
+    —— recipe 沒改、資料沒改、bin 卻不一樣，而 CSV 上看不出來。
+    """
+    ctx = _cd_ctx(nm_per_px=2.5)
+    run_step("cd_measure", ctx, roi="spot")
+    # pixel 那一份**一個字都沒變**
+    assert ctx.features["cd_x_px"] == 10.0
+    assert ctx.features["cd_y_px"] == 20.0
+    assert ctx.features["area_px"] == 200.0
+    # nm 那一份：長度乘一次，**面積乘平方**
+    assert ctx.features["cd_x_nm"] == 25.0
+    assert ctx.features["cd_y_nm"] == 50.0
+    assert ctx.features["area_nm2"] == 200.0 * 2.5 * 2.5
+    assert sorted(ctx.features) == ["area_nm2", "area_px", "cd_x_nm", "cd_x_px",
+                                    "cd_y_nm", "cd_y_px"]
 
 
 def test_cd_measure_can_target_a_named_region():

@@ -31,7 +31,7 @@ Studio 的三個 Open 入口就分完了。
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ..pipeline.channels import (
     highest_image_number, mapped_names, parse_channel_map,
@@ -40,7 +40,7 @@ from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_INPUT,
 )
-from ._util import ensure_gray, to_uint8
+from ._util import ensure_gray, nm_per_px_spec, to_uint8
 
 # "auto" 模式下 channel 的優先順序（其餘 channel 依名稱排序附加在後）
 _PREFERRED_ORDER = ("test", "ref", "single")
@@ -96,6 +96,7 @@ class LoadPatchStep(Step):
                   "comma separated list such as test,ref when you only want "
                   "some."),
         ),
+        nm_per_px_spec(),
     ]
     reads: List[str] = []
     writes = ["test", "ref"]     # ＝ DEFAULT_CHANNEL_MAP 的名字（靜態備援）
@@ -198,6 +199,7 @@ class LoadPatchStep(Step):
         # 一個實例：資料只有一張圖，畫布上卻有兩顆埠。單張資料現在走
         # :class:`LoadSingleStep`，它吐**一條**流、名字由使用者決定。
 
+        _apply_nm_per_px(ctx, p, loaded)
         _write_input_panel(ctx, item, kind, loaded, images)
         ctx.add_feature("n_channels", float(len(loaded)))
         return ctx
@@ -227,6 +229,7 @@ class LoadSingleStep(Step):
                   "next card connects to, and the prefix on this image's "
                   "features."),
         ),
+        nm_per_px_spec(),
     ]
     reads: List[str] = []
     writes = ["single"]
@@ -270,9 +273,31 @@ class LoadSingleStep(Step):
         except Exception as e:      # 檔案毀損 / 位元深度不對等
             raise StepError(self.key, "could not read the image: %s" % e) from e
         ctx.set_image(name, to_uint8(ensure_gray(arr)))
+        _apply_nm_per_px(ctx, p, [name])
         _write_input_panel(ctx, item, kind, [name], {name: images[order[0]]})
         ctx.add_feature("n_channels", 1.0)
         return ctx
+
+
+def _apply_nm_per_px(ctx: Context, p: Dict[str, Any],
+                     streams: Optional[List[str]] = None) -> None:
+    """卡片上填的 nm/px **覆蓋**資料自己帶的那個（2026-08-20）。
+
+    引擎會先把 ``item.nm_per_px`` 種進 ``meta``（目前 KLARF 裡沒有來源，所以
+    永遠是 ``None``）。使用者在這張卡上填的是他從機台設定抄來的數字 ——
+    有人負責的那一個 —— 所以它說了算。填 0（預設）＝ 不知道，
+    那就維持 ``None``，下游一律留在 pixel。
+    """
+    try:
+        value = float(p.get("nm_per_px", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        value = 0.0
+    if value > 0:
+        ctx.meta["nm_per_px"] = value
+        # 這張卡吐的每一條流也各自登記一份 —— 一份 pipeline 可以同時吃兩份
+        # 資料（F15），而兩台機台的像素大小不一樣（見 `Context.stream_nm_per_px`）。
+        for name in (streams or []):
+            ctx.set_stream_nm_per_px(name, value)
 
 
 def _write_input_panel(ctx: Context, item: Any, kind: Any,

@@ -38,7 +38,7 @@ from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_IMAGE, GROUP_INPUT, ParamSpec, Step, StepError, register_step,
 )
-from ._util import parse_key_list
+from ._util import nm_per_px_spec, parse_key_list
 
 #: 配對方式。``position`` 是主力，另外兩個是「先把管線打通」與「兩邊本來就有
 #: 共同 id」的路。
@@ -146,6 +146,7 @@ class PairSourceStep(Step):
             name="out", type="image_key", direction="out", default="paired",
             label="Name this image",
             help="Name of the image stream this card produces."),
+        nm_per_px_spec(),
     ]
     reads: List[str] = []
     writes = ["paired"]
@@ -281,8 +282,11 @@ class PairSourceStep(Step):
                 "the rest of the batch is unaffected."
                 % (sid, float(p["tol_nm"])))
 
-        ctx.set_image(str(p["out"]).strip() or "paired",
-                      self._image_of(hit, p["channel"]))
+        out_key = str(p["out"]).strip() or "paired"
+        ctx.set_image(out_key, self._image_of(hit, p["channel"]))
+        # **第二份的像素大小掛在它自己那條流上**（2026-08-20）：兩台機台不一樣，
+        # 而那正是 `align_to` 要縮放才對得起來的原因。
+        ctx.set_stream_nm_per_px(out_key, p.get("nm_per_px"))
         # 其餘候選的圖留給 `align_to` 挑（座標給候選、NCC 選最像的）。
         # 讀不出來的候選就跳過 —— 少一個候選不值得殺掉這一顆。
         rest = []

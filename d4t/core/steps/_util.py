@@ -9,7 +9,7 @@
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 import cv2
 import numpy as np
@@ -342,6 +342,34 @@ def output_prefix_spec(example: str = "center") -> ParamSpec:
     )
 
 
+#: **一格 nm/px 長在把那份資料讀進來的那張卡上**（2026-08-20，使用者要求）。
+#:
+#: 使用者：「在 load image 那邊 source（各種 source），可以輸入 nm/pixel
+#: （也可以不輸入）」。它跟 `tiff_stack` 的「一顆幾張」是同一類東西 ——
+#: **資料的屬性**，只有把那份資料讀進來的那張卡問得出來。第二份 lot 因此也有
+#: 一格（長在 `pair_source` 上），規則才是一句話而不是兩句。
+#:
+#: 2026-07-30 曾經拿掉 `cd_x_nm` 那一組，理由是「nm/px 沒有來源，所以每一顆都
+#: 是 0，而 0 是個看起來很像答案的答案」。這一格正是那個來源 —— 所以那次的
+#: 結論沒有被推翻，是被**補完**了。
+NM_PER_PX_UNSET = 0.0
+
+
+def nm_per_px_spec() -> ParamSpec:
+    """讀資料那幾張卡共用的 ``nm_per_px``（見 :data:`NM_PER_PX_UNSET`）。"""
+    return ParamSpec(
+        name="nm_per_px", type="float", default=NM_PER_PX_UNSET,
+        min=0.0, max=1e6, unit="nm/px",
+        label="Pixel size",
+        advanced=True,
+        help=("How many nanometres one pixel is, from the tool's settings. "
+              "Fill it in and every length this pipeline measures also comes "
+              "out in nanometres (cd_x_px gets a cd_x_nm beside it). Leave it "
+              "at 0 if you do not know it - everything stays in pixels, which "
+              "is what it has always been."),
+    )
+
+
 #: 兩張 Region 卡共用的「靠邊的框不要」開關（F11 Region 第八輪，使用者要求）。
 #:
 #: 為什麼兩張卡要**同一組參數名**：使用者心裡這是**一件事**（「靠邊的不要」），
@@ -430,6 +458,77 @@ def prefix_features(prefix: str, feats: Dict[str, float]) -> Dict[str, float]:
     """把前綴套到一組特徵值上（前綴為空 = 原樣回傳）。"""
     p = str(prefix or "").strip()
     return {f"{p}_{k}": v for k, v in feats.items()} if p else dict(feats)
+
+
+#: 名字結尾是 ``_px`` 但**意思是面積**的那幾個 —— 換算要平方（nm²）。
+#:
+#: 為什麼要列出來而不是看名字：``area_px`` 的結尾跟 ``cd_x_px`` 一模一樣，
+#: 而它們差一個次方。照結尾一律乘一次的話，面積會安靜地少乘一次 ——
+#: 跑得完、有數字、而且是錯的。改名成 ``area_px2`` 也能解，但那會動到既有的
+#: recipe 與黃金值，代價比一行表大得多。
+AREA_FEATURES = ("area_px",)
+
+
+def nm_twins(feats: Dict[str, float],
+             nm_per_px: Optional[float]) -> Dict[str, float]:
+    """量出來的 pixel 數字**多配一份 nm 的**（2026-08-20）。回沒有前綴的那一份。
+
+    規則只有兩條：``*_px`` → ``*_nm``（×s）、:data:`AREA_FEATURES` → ``*_nm2``
+    （×s²）。``nm_per_px`` 沒填（None／0）就一個都不配。
+
+    **為什麼是「多一組」而不是「換單位」**（使用者原本的提案是後者）：
+    同一個特徵名在不同資料上是不同單位的話，`score = cd_x > 50` 這一行會在
+    填了 nm/px 之後意思整個改變 —— recipe 沒改、資料沒改、bin 卻不一樣，
+    而 CSV 上看不出來。名字帶著單位就永遠不必回頭查「那份資料當初填了沒」，
+    舊 recipe 也一個字都不用改。
+    """
+    try:
+        scale = float(nm_per_px or 0.0)
+    except (TypeError, ValueError):
+        return {}
+    if scale <= 0:
+        return {}
+    out: Dict[str, float] = {}
+    for name, value in (feats or {}).items():
+        if value is None:
+            continue
+        if name in AREA_FEATURES:
+            out[name[:-3] + "_nm2"] = float(value) * scale * scale
+        elif name.endswith("_px"):
+            out[name[:-3] + "_nm"] = float(value) * scale
+    return out
+
+
+def nm_twin_names(names: Sequence[str]) -> List[str]:
+    """:func:`nm_twins` 會配出哪幾個名字（宣告用；跟值無關）。"""
+    out: List[str] = []
+    for name in names or ():
+        if name in AREA_FEATURES:
+            out.append(name[:-3] + "_nm2")
+        elif str(name).endswith("_px"):
+            out.append(name[:-3] + "_nm")
+    return out
+
+
+def resize_to(img: np.ndarray, shape) -> np.ndarray:
+    """把影像縮放到 ``(高, 寬)``。**只給比對用的那一份**（2026-08-20）。
+
+    縮小用 ``INTER_AREA``、放大用 ``INTER_LINEAR`` —— 兩者都是 OpenCV 對那個
+    方向的建議做法（縮小時 AREA 是唯一不會 aliasing 的）。
+
+    ⚠ **量測用的影像不要經過這裡**：重採樣會動到灰階，而下游量的正是灰階
+    （`align_to` 只縮放拿去做 NCC 的那一份，裁出來的那一塊原封不動）。
+    """
+    import cv2
+
+    h, w = int(shape[0]), int(shape[1])
+    src = np.asarray(img)
+    if src.shape[0] == h and src.shape[1] == w:
+        return src
+    shrinking = h * w < src.shape[0] * src.shape[1]
+    return cv2.resize(src, (w, h),
+                      interpolation=cv2.INTER_AREA if shrinking
+                      else cv2.INTER_LINEAR)
 
 
 def require_image(ctx: Context, step_key: str, key: str) -> np.ndarray:
@@ -792,7 +891,12 @@ class MultiSourceStep(Step):
     @classmethod
     def resolve_features(cls, params: Dict[str, object]) -> List[str]:
         keys = cls.source_list(params) or [""]
+        # nm 的那一份**一律宣告**（`nm_twins` 只在 nm/px 填了的時候才產出）。
+        # 宣告是「可能會碰到的」，而這張卡看不到 Load 卡上填了什麼 —— 那個數字
+        # 是整份 recipe 的事。畫面上要不要列它由 `RecipeModel.available_features`
+        # 決定（那裡看得到每一張卡）。
         base = cls.feature_names(params)
+        base = base + nm_twin_names(base)
         return [n for k in keys for r in cls.region_list(params)
                 for n in prefix_names(cls.full_prefix(params, k, r), base)]
 
@@ -817,6 +921,8 @@ class MultiSourceStep(Step):
                 feats = self.measure(ctx, img, one)
                 if not feats:
                     continue
+                # 量出來的是 pixel；nm/px 填了就**多配一份 nm 的**（不是換掉）。
+                feats = dict(feats, **nm_twins(feats, ctx.nm_per_px))
                 ctx.add_features(prefix_features(
                     self.full_prefix(p, key, region), feats))
         return ctx

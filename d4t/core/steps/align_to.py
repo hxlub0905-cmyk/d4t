@@ -33,7 +33,7 @@ from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_IMAGE, GROUP_COMPARE, ParamSpec, Step, StepError, register_step,
 )
-from ._util import ensure_gray, require_image
+from ._util import ensure_gray, require_image, resize_to
 
 
 @register_step
@@ -62,15 +62,27 @@ class AlignToStep(Step):
                   help=("How alike the two have to be before the match counts. "
                         "Below this the card stops and says so, and the rest "
                         "of the batch carries on.")),
+        ParamSpec(name="scale", type="float", default=0.0, min=0.0, max=100.0,
+                  label="Size ratio",
+                  advanced=True,
+                  help=("How much bigger one pixel of the small image is than "
+                        "one pixel of the big one. Leave it at 0 and the card "
+                        "works it out from the pixel size you put on the two "
+                        "cards that read the data. Put a number in to override "
+                        "that. Two tools rarely have the same pixel size, and "
+                        "matching does not work at all if the ratio is more "
+                        "than a few percent out.")),
         ParamSpec(name="out", type="image_key", direction="out",
                   default="aligned", label="Name this image",
-                  help=("The piece cut out of the big image. It is the same "
-                        "size as the small one, so every card downstream works "
-                        "on it unchanged.")),
+                  help=("The piece cut out of the big image, at the big "
+                        "image's pixel size. Nothing is resampled on the way "
+                        "out - resampling changes grey levels, and grey levels "
+                        "are what the cards downstream measure.")),
     ]
     reads = ["test", "paired"]
     writes = ["aligned"]
-    features_out = ["ncc_score", "align_ok", "align_dx_px", "align_dy_px"]
+    features_out = ["ncc_score", "align_ok", "align_dx_px", "align_dy_px",
+                    "align_scale"]
 
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
@@ -96,10 +108,39 @@ class AlignToStep(Step):
         extra = list(ctx.meta.get("pair_candidates") or [])
         return [search] + [np.asarray(a) for a in extra]
 
+    def _scale_for(self, ctx: Context, p: Dict[str, Any]) -> float:
+        """小圖要縮放幾倍才跟大圖同一個尺度（2026-08-20）。
+
+        ``scale > 0`` = 使用者自己填的，說了算。``0`` = 自動：拿兩條流各自的
+        nm/px 相除（`Context.stream_nm_per_px`，由讀資料的那張卡填）。
+        兩邊有一邊不知道就是 1.0（＝「當作一樣」），而**算出來的值會變成一個
+        特徵**（``align_scale``）—— 這個數字影響每一顆的結果，不可以只活在
+        某個人的腦子裡。
+        """
+        given = float(p.get("scale", 0.0) or 0.0)
+        if given > 0:
+            return given
+        t = ctx.stream_nm_per_px(str(p["template"]))
+        s = ctx.stream_nm_per_px(str(p["search"]))
+        if not t or not s or s <= 0:
+            return 1.0
+        return float(t) / float(s)
+
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
         tmpl = ensure_gray(require_image(ctx, self.key, str(p["template"])))
         search = ensure_gray(require_image(ctx, self.key, str(p["search"])))
+
+        # ---- 尺度：兩台機台的像素大小不一樣，NCC 本身不含縮放 ---------------
+        scale = self._scale_for(ctx, p)
+        ctx.add_feature("align_scale", float(scale))
+        if abs(scale - 1.0) > 1e-6:
+            # **只有拿去比對的那一份被重採樣**，裁出來的那一塊沒有（見 `out`）。
+            th0, tw0 = tmpl.shape[:2]
+            new_w = max(1, int(round(tw0 * scale)))
+            new_h = max(1, int(round(th0 * scale)))
+            tmpl = resize_to(tmpl, (new_h, new_w))
+
         th, tw = tmpl.shape[:2]
         sh, sw = search.shape[:2]
         if th > sh or tw > sw:
@@ -140,6 +181,10 @@ class AlignToStep(Step):
         # 對齊而重採樣**：重採樣會動到灰階，而下游量的正是灰階。
         x0 = int(max(0, min(round(x), picked.shape[1] - tw)))
         y0 = int(max(0, min(round(y), picked.shape[0] - th)))
-        ctx.set_image(str(p["out"]).strip() or "aligned",
-                      np.ascontiguousarray(picked[y0:y0 + th, x0:x0 + tw]))
+        out_key = str(p["out"]).strip() or "aligned"
+        ctx.set_image(out_key, np.ascontiguousarray(picked[y0:y0 + th,
+                                                          x0:x0 + tw]))
+        # 裁出來的那一塊是**大圖的像素**，所以它帶的是大圖的 nm/px ——
+        # 下游在它身上量 CD 的時候，`_nm` 那一份才會是對的。
+        ctx.set_stream_nm_per_px(out_key, ctx.stream_nm_per_px(str(p["search"])))
         return ctx

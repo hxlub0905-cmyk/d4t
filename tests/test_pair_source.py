@@ -489,3 +489,79 @@ def test_a_recipe_with_a_pair_card_survives_the_round_trip():
     again = Recipe.from_json_dict(rec.to_json_dict())
     assert again.to_json_dict() == rec.to_json_dict()
     assert again.nodes["pair"].params["source"] == "gt"
+
+
+# --------------------------------------------------------------------------- #
+# 7. 像素大小：兩台機台不一樣，NCC 本身不含縮放
+# --------------------------------------------------------------------------- #
+def test_the_two_sides_can_have_different_pixel_sizes():
+    """使用者：「像素尺寸不同，可以預設一樣，或給 user 輸入」。
+
+    不處理的話它不是「差一點」而是**整個對不上**：同一塊區域、1.5 倍的像素
+    大小差，NCC 分數從 0.93 掉到 0.03。而掉下去的那一顆看起來就像「配錯了」
+    —— 那是最難查的一種錯，因為每一顆都一樣。
+    """
+    import cv2
+
+    big = _noise(300, 300, 3)                       # 大圖：1.0 nm/px
+    same = big[90:154, 40:104].copy()               # 同一塊，64×64
+    finer = cv2.resize(same, (96, 96))              # 拍得更細 → 64/96 nm/px
+
+    def run(**extra):
+        ctx = Context(images={"test": finer, "paired": big})
+        ctx.set_stream_nm_per_px("test", 64 / 96.0)
+        ctx.set_stream_nm_per_px("paired", 1.0)
+        params = {"template": "test", "search": "paired", "min_score": 0.0,
+                  "out": "aligned"}
+        params.update(extra)
+        get_step("align_to")().run(ctx, params)
+        return ctx
+
+    auto = run()
+    assert auto.features["align_scale"] == pytest.approx(64 / 96.0, abs=1e-6)
+    assert auto.features["ncc_score"] > 0.9
+    assert auto.features["align_dx_px"] == pytest.approx(40, abs=1)
+    assert auto.features["align_dy_px"] == pytest.approx(90, abs=1)
+    # 裁出來的是**大圖的像素**，所以它帶的是大圖的 nm/px
+    assert auto.images["aligned"].shape == (64, 64)
+    assert auto.stream_nm_per_px("aligned") == 1.0
+
+    # 使用者自己填的說了算
+    manual = run(scale=0.6667)
+    assert manual.features["align_scale"] == pytest.approx(0.6667)
+    assert manual.features["ncc_score"] > 0.9
+
+    # 不處理尺度的話 —— 這就是「整個對不上」長什麼樣
+    blind = Context(images={"test": finer, "paired": big})
+    get_step("align_to")().run(blind, {"template": "test", "search": "paired",
+                                       "min_score": -1.0, "out": "aligned"})
+    assert blind.features["align_scale"] == 1.0      # 兩邊都不知道 → 當作一樣
+    assert blind.features["ncc_score"] < 0.2
+
+
+def test_the_second_lot_carries_its_own_pixel_size():
+    """一格 nm/px 長在**把那份資料讀進來的那張卡**上 —— 第二份也是。
+
+    規則要是一句話而不是兩句：主 lot 的那一格在 Load 卡上，第二份的在這張卡
+    上，而兩者都是「這份資料的一個像素是幾奈米」。`align_to` 因此不必知道誰
+    是誰 —— 它問的是**那條流**（`Context.stream_nm_per_px`）。
+    """
+    class _Hit:
+        """有影像的第二份那一顆（`DefectItem` 要真的檔案，這裡只要像素）。"""
+
+        defect_id = "ebi"
+        die, xrel_nm, yrel_nm, index = (1, 1), 100.0, 0.0, 0
+        fields = {}
+        images = {"single": object()}
+
+        def load(self, _name):
+            return np.zeros((8, 8), np.uint8)
+
+    ctx = _ctx(_item("gt1", 0, 0), {"ebi": [_Hit()]})
+    _run(ctx, nm_per_px=3.0)
+    assert ctx.stream_nm_per_px("paired") == 3.0
+
+    # 沒填就是不知道 —— 不要編一個數字出來
+    ctx2 = _ctx(_item("gt1", 0, 0), {"ebi": [_Hit()]})
+    _run(ctx2)
+    assert ctx2.stream_nm_per_px("paired") is None
