@@ -32,9 +32,17 @@ from d4t.core.pipeline import get_step  # noqa: E402
 from d4t.core.pipeline.context import Context  # noqa: E402
 from d4t.core.pipeline.step import ParamError, ParamSpec, StepError  # noqa: E402
 
-BASE = {"target_source": "test", "target_region": "hot",
+#: F16：這張卡併進了 `glv_stats`（label `Gray level`），成為它的
+#: ``method="compare"``。參數逐格相同，只有 ``metrics`` 改叫
+#: ``compare_metrics`` —— 兩種 method 的可選值完全不同，共用一格的話切換
+#: method 會留下一組對方不認得的值。舊 recipe 由
+#: `recipe._migrate_roi_compare_into_glv_stats` 接住（見
+#: `test_an_old_roi_compare_recipe_still_opens`）。
+BASE = {"method": "compare",
+        "target_source": "test", "target_region": "hot",
         "reference_source": "test", "reference_region": "cold",
-        "stat": "glv_mean", "metrics": "delta,snr,tstat,ratio,percent",
+        "stat": "glv_mean",
+        "compare_metrics": "delta,snr,tstat,ratio,percent",
         "output_prefix": ""}
 
 
@@ -54,7 +62,7 @@ def _ctx(hot_glv=140.0, cold_glv=100.0, spread=4.0, seed=0, shape=(40, 40)):
 def _run(ctx, **over):
     p = dict(BASE)
     p.update(over)
-    get_step("roi_compare")().run(ctx, p)
+    get_step("glv_stats")().run(ctx, p)
     return ctx
 
 
@@ -83,7 +91,7 @@ def test_the_same_region_on_two_streams():
 
 def test_it_declares_both_streams_and_both_regions():
     """畫布上要有**兩個**輸入埠，lint 要看得到兩個區域。"""
-    card = get_step("roi_compare")
+    card = get_step("glv_stats")
     p = dict(BASE, reference_source="ref")
     assert card.resolve_reads(p) == ["test", "ref"]
     assert card.resolve_regions_in(p) == ["hot", "cold"]
@@ -93,12 +101,12 @@ def test_it_declares_both_streams_and_both_regions():
 
 def test_the_declared_features_are_what_it_writes():
     ctx = _run(_ctx())
-    declared = set(get_step("roi_compare").resolve_features(BASE))
+    declared = set(get_step("glv_stats").resolve_features(BASE))
     assert set(ctx.features) == declared
 
 
 def test_the_prefix_applies():
-    ctx = _run(_ctx(), output_prefix="epi_vs_mg", metrics="delta")
+    ctx = _run(_ctx(), output_prefix="epi_vs_mg", compare_metrics="delta")
     assert list(ctx.features) == ["epi_vs_mg_delta"]
 
 
@@ -108,23 +116,23 @@ def test_the_prefix_applies():
 def test_comparing_a_region_with_itself_is_caught_before_the_run():
     """每個數字恆為 0，而那些 0 **不會因為任何缺陷而改變** ——
     跑得完、有數字、而且那些數字什麼都沒說。"""
-    says = get_step("roi_compare").configuration_issues(
+    says = get_step("glv_stats").configuration_issues(
         dict(BASE, reference_region="hot"))
     assert says and "zero no matter what" in says[0]
 
 
 def test_the_same_region_on_two_different_streams_is_fine():
     """那正是情況 2 —— 不可以連它一起擋掉。"""
-    assert get_step("roi_compare").configuration_issues(
+    assert get_step("glv_stats").configuration_issues(
         dict(BASE, reference_region="hot", reference_source="ref")) == []
 
 
 def test_nothing_picked_yet_points_at_the_two_fields():
     """訊息要指向**填得到的東西**（`test_ui_f7_9_feedback` 的不變量）。"""
-    says = get_step("roi_compare").configuration_issues(
+    says = get_step("glv_stats").configuration_issues(
         dict(BASE, target_region="", reference_region=""))
     assert says
-    labels = {p.label for p in get_step("roi_compare").params}
+    labels = {p.label for p in get_step("glv_stats").params}
     assert "“Target region”" in says[0] and "“Reference region”" in says[0]
     assert {"Target region", "Reference region"} <= labels
 
@@ -205,16 +213,16 @@ def test_the_statistic_being_compared_is_the_users_choice():
     img = np.asarray(ctx.images["test"]).copy()
     img[0, :3] = 255.0                      # 三顆亮點在 hot 那半邊
     ctx.set_image("test", img)
-    mean = _run(ctx, stat="glv_mean", metrics="delta").features["delta"]
+    mean = _run(ctx, stat="glv_mean", compare_metrics="delta").features["delta"]
     ctx2 = _ctx(hot_glv=100.0, cold_glv=100.0, spread=0.0)
     ctx2.set_image("test", img)
-    median = _run(ctx2, stat="glv_median", metrics="delta").features["delta"]
+    median = _run(ctx2, stat="glv_median", compare_metrics="delta").features["delta"]
     assert mean > 0.1 and median == pytest.approx(0.0)
 
 
 def test_an_unknown_comparison_is_refused_with_the_list():
     with pytest.raises(StepError) as e:
-        _run(_ctx(), metrics="delta,bogus")
+        _run(_ctx(), compare_metrics="delta,bogus")
     assert "bogus" in str(e.value) and "snr" in str(e.value)
 
 
@@ -229,11 +237,13 @@ def test_a_region_key_takes_one_name_not_a_list():
     with pytest.raises(ParamError) as e:
         spec.validate("epi,mg")
     assert "one region name, not a list" in str(e.value)
-    assert "one Compare regions card per pair" in str(e.value)
+    # 卡片名從 registry 拿 —— 這條測的是「訊息講得出該用哪張卡」，
+    # 不是那張卡現在叫什麼（F16 改成了 Gray level）。
+    assert "one %s card per pair" % get_step("glv_stats").label in str(e.value)
 
 
 def test_the_card_uses_the_singular_type_for_both_regions():
-    kinds = {p.name: p.type for p in get_step("roi_compare").params}
+    kinds = {p.name: p.type for p in get_step("glv_stats").params}
     assert kinds["target_region"] == "region_key"
     assert kinds["reference_region"] == "region_key"
 
@@ -285,3 +295,95 @@ def test_streams_and_regions_multiply():
     get_step("glv_stats")().run(ctx, p)
     assert set(ctx.features) == {"test_hot_glv_mean", "test_cold_glv_mean",
                                  "ref_hot_glv_mean", "ref_cold_glv_mean"}
+
+
+# --------------------------------------------------------------------------- #
+# 8. F16：兩張卡收成一張（`glv_stats` 的兩個 method）
+# --------------------------------------------------------------------------- #
+def test_an_old_roi_compare_recipe_still_opens(tmp_path):
+    """舊 recipe 裡的 `roi_compare` 節點要變成 `glv_stats` + method=compare，
+    **而且特徵名逐字不變** —— 那些名字會被打進分數表達式。
+    """
+    import json
+    from d4t.core.pipeline import Recipe
+
+    doc = {
+        "recipe_id": "old", "version": 1,
+        "routes": {"ebi_patch": ["load", "cmp"]},
+        "nodes": {
+            "load": {"step": "load_patch", "params": {}, "enabled": True},
+            "cmp": {"step": "roi_compare", "enabled": True, "params": {
+                "target_source": "test", "target_region": "epi",
+                "reference_source": "ref", "reference_region": "epi",
+                "stat": "glv_median", "metrics": "delta,ratio",
+                "output_prefix": "epi_vs_mg"}},
+        },
+        "edges": [],
+        "score": {"expr": "epi_vs_mg_delta", "threshold": 1.0,
+                  "bins": {"below": 0, "above": 1}},
+    }
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+
+    r = Recipe.load(str(path))
+    node = r.nodes["cmp"]
+    assert node.step == "glv_stats"
+    assert node.params["method"] == "compare"
+    # `metrics` 換名字（兩種 method 的可選值互斥，共用一格會留下對方不認得的值）
+    assert node.params["compare_metrics"] == "delta,ratio"
+    assert "metrics" not in node.params
+    # 其他參數原封不動，而特徵名因此逐字相同 —— 分數表達式不用改寫。
+    assert node.params["stat"] == "glv_median"
+    assert set(get_step("glv_stats").resolve_features(node.params)) == {
+        "epi_vs_mg_delta", "epi_vs_mg_ratio"}
+
+
+def test_the_migration_keys_on_the_old_thing_being_there_not_the_new_one():
+    """鐵則 9：判準是「`step` 就是 roi_compare」，不是「`method` 沒填」。
+
+    靠「新東西不在」的話，一份**新**的 recipe（method 用預設的 stats、所以
+    JSON 裡根本沒有 `method` 這個鍵）會被誤判成舊檔而被改成 compare ——
+    而 `to_json_dict → from_json_dict` 一旦不是 identity，`workers=1` 與
+    `workers=2` 就會算出不同的分數。那真的發生過（見 docs/PITFALLS.md）。
+    """
+    from d4t.core.pipeline.recipe import (
+        RecipeNode, _migrate_roi_compare_into_glv_stats,
+    )
+
+    nodes = {"a": RecipeNode(id="a", step="glv_stats", params={}),
+             "b": RecipeNode(id="b", step="glv_stats",
+                             params={"metrics": "glv_mean"})}
+    _migrate_roi_compare_into_glv_stats(nodes)
+    for nid in ("a", "b"):
+        assert "method" not in nodes[nid].params, \
+            "沒有 method 的 glv_stats 是新 recipe 用預設值，不是舊檔"
+    assert nodes["b"].params["metrics"] == "glv_mean"
+
+
+def test_stats_mode_still_measures_absolute_gray_levels():
+    """合併之後 `stats` 那一半要原封不動 —— 它是這張卡唯一答得出
+    「這塊 EPI 的平均灰階是多少」的那一半，而 compare 從不輸出絕對值。"""
+    ctx = _ctx(hot_glv=140.0, cold_glv=100.0)
+    get_step("glv_stats")().run(ctx, {
+        "method": "stats", "source": "test", "roi": "hot",
+        "metrics": "glv_mean,glv_std", "output_prefix": ""})
+    assert ctx.features["glv_mean"] == pytest.approx(140.0, abs=1.0)
+    assert "delta" not in ctx.features
+
+
+def test_putting_the_metrics_in_the_wrong_box_is_caught():
+    """兩格清單互斥，所以「填錯格」認得出來 —— 而它本來是安靜的：
+    `compare` 只讀 `compare_metrics`，把 `delta,snr` 打進 Statistics 的人
+    會拿到一張跑得完、吐著預設值、完全不理他的卡。"""
+    card = get_step("glv_stats")
+    says = card.configuration_issues(dict(BASE, metrics="delta,snr"))
+    assert says and "Report" in says[0] and "Statistics" in says[0]
+
+    says = card.configuration_issues(
+        {"method": "stats", "compare_metrics": "glv_mean"})
+    assert says and "Statistics" in says[0]
+
+    # 正常的兩種設定都沒話說
+    assert not card.configuration_issues(BASE)
+    assert not card.configuration_issues(
+        {"method": "stats", "metrics": "glv_mean", "roi": ""})

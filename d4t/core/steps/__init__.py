@@ -9,7 +9,7 @@
   load_patch, load_single, load_sidecar, normalize, tone, denoise, flatten,
   align, subtract, align_to, pair_source,
   roi_cross, roi_template, roi_from_mask, roi_mask,
-  snr_map, cd_measure, roi_snr, roi_compare, focus_quality, glv_stats
+  snr_map, cd_measure, roi_snr, focus_quality, glv_stats
 
 **2026-08-20（F16）：``pattern_ref`` 刪掉了。** 使用者：「Compare 中
 pattern_ref 這項功能完全沒用，請直接拿掉」。
@@ -46,7 +46,6 @@ from . import flatten        # flatten
 from . import align          # align
 from . import arith          # subtract / invert
 from . import snr_map        # snr_map
-from . import roi_compare    # 比較兩個區域（T/R 住在這張卡上）
 from . import roi_cross      # roi_cross
 from . import align_to       # 小圖在大圖裡的位置（F15-C）
 from . import pair_source    # 另一份資料的對應那一顆（F15）
@@ -60,6 +59,6 @@ from . import glv_stats      # glv_stats
 
 __all__ = [
     "load", "load_sidecar", "normalize", "denoise", "tone", "flatten", "align", "arith",
-    "align_to", "pair_source", "roi_compare", "roi_cross", "roi_from_mask", "roi_mask", "roi_template", "snr_map", "cd", "roi_snr",
+    "align_to", "pair_source", "roi_cross", "roi_from_mask", "roi_mask", "roi_template", "snr_map", "cd", "roi_snr",
     "quality", "glv_stats",
 ]

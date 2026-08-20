@@ -161,7 +161,7 @@ def roi_metric(image: np.ndarray, roi: ROI, mid: str) -> float:
     return glv_value(p, mid) if p is not None else 0.0
 
 
-#: 兩塊區域比出來的幾個數字（F11 Measure：Compare regions 卡）。
+#: 兩塊區域比出來的幾個數字（Gray level 卡的 ``method="compare"``）。
 #: key 就是特徵名的字尾，所以順序＝畫面上勾選的順序。
 #:
 #: **值是英文的**：它們會顯示給使用者（`tests/test_ui_english_only.py` 會擋）。

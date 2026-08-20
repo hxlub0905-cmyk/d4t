@@ -82,11 +82,12 @@ def test_the_single_image_cards_are_in_the_library_now(window):
     """單張那條路要有自己的載入卡與量測卡。
 
     2026-08-18：這一條原本點的是 `golden_cell` / `cell_period`，後來改點
-    `pattern_ref`。那一張當天傍晚也收進 `HIDDEN_STEPS` 了（見
-    `test_pattern_ref_is_hidden_but_still_runs`），所以現在點的是單張那條路
-    **真正在用**的四張：載入、找區域（大圖上鋪 ROI 也是它）、比兩塊區域、相減。
+    `pattern_ref` —— 而那一張 2026-08-20 刪掉了（見
+    `test_pattern_ref_is_gone_and_nothing_quietly_replaced_it`）。現在點的是
+    單張那條路**真正在用**的四張：載入、找區域（大圖上鋪 ROI 也是它）、
+    Gray level（`method="compare"` 就是以前的 Compare regions）、相減。
     """
-    for key in ("load_single", "roi_template", "roi_compare", "subtract"):
+    for key in ("load_single", "roi_template", "glv_stats", "subtract"):
         assert window.library.entry(key) is not None, key
     # `align` 曾經在這一列上。2026-08-18 使用者把它收起來了 ——
     # 見 test_align_is_hidden_but_still_runs。

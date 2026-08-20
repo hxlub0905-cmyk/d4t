@@ -472,6 +472,36 @@ def _migrate_renamed_cards(nodes: Dict[str, "RecipeNode"]) -> None:
                                 enabled=node.enabled)
 
 
+def _migrate_roi_compare_into_glv_stats(nodes: Dict[str, "RecipeNode"]) -> None:
+    """``roi_compare`` → ``glv_stats`` + ``method="compare"``（F16）。
+
+    使用者 2026-08-20：「Gray level Stats 跟 Compare regions 應該是做同樣的事
+    （量 GLV 相關）吧，留其中一個就好」。它們其實不是同一件事（一個吐絕對值、
+    一個吐差異），所以是**收成一張卡的兩個 method**，不是刪掉一張。
+
+    留 ``glv_stats`` 這個 key 而不是 ``roi_compare``，理由是黃金值：兩份
+    fixture recipe 與 ``tests/fixtures/golden/`` 都指著它。
+
+    判準是「**舊東西在不在**」（鐵則 9）：這個節點的 step 就是 ``roi_compare``。
+    不是靠「``method`` 這個新參數不在」—— 那分不出「舊檔案」與「新 recipe 剛好
+    用預設的 stats」，而 ``to_json_dict → from_json_dict`` 一旦不是 identity，
+    ``workers=1`` 與 ``workers=2`` 就會算出不同的分數（那真的發生過）。
+
+    只有 ``metrics`` 要換名字：兩種 method 的可選值完全不同（``delta``/``snr``
+    對上 ``glv_mean``/``glv_std``），共用一格的話，切換 method 會留下一組對方
+    不認得的值 —— 而它跑起來是一條看不懂的錯誤訊息。
+    """
+    for nid, node in list(nodes.items()):
+        if node.step != "roi_compare":
+            continue
+        params = dict(node.params)
+        if "metrics" in params:
+            params["compare_metrics"] = params.pop("metrics")
+        params["method"] = "compare"
+        nodes[nid] = RecipeNode(id=node.id, step="glv_stats", params=params,
+                                enabled=node.enabled)
+
+
 def _migrate_renamed_features(score: "ScoreSpec") -> "ScoreSpec":
     """分數表達式裡的舊 feature 名換成新的。
 
@@ -606,6 +636,8 @@ class Recipe:
         _migrate_template_regions(nodes)
         # 只改了名字的卡（＋分數表達式裡它寫出來的 feature 名）。
         _migrate_renamed_cards(nodes)
+        # 兩張 GLV 卡收成一張的兩個 method（F16）。
+        _migrate_roi_compare_into_glv_stats(nodes)
         score = _migrate_renamed_features(score)
         return cls(
             recipe_id=str(d["recipe_id"]),

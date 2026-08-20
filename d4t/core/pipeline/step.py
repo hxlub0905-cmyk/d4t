@@ -392,7 +392,7 @@ class ParamSpec:
                     # 擋下來的那句話要是白話的）。
                     raise ParamError(
                         "parameter '%s' takes one region name, not a list "
-                        "(got %r). Use one Compare regions card per pair."
+                        "(got %r). Use one Gray level card per pair."
                         % (self.name, str(value)))
             elif self.type in ("image_keys", "multi_choice", "region_keys"):
                 # 正規化：去空白、去空項、去重複但保留順序。

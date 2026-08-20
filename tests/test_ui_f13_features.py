@@ -104,7 +104,7 @@ def test_a_rescued_feature_is_still_a_diagnostic(ran):
 
 
 def test_two_cards_with_the_same_name_get_their_id(qapp, lot):
-    """兩組都叫 `Gray-level stats` 的話，使用者分不出哪一組是哪一張卡。
+    """兩組都叫 `Gray level` 的話，使用者分不出哪一組是哪一張卡。
 
     只有**重複的時候**才帶 id —— 每一組都掛一個 node id 是在每一份正常的
     recipe 上加噪音（畫布的副標用的是同一條規則）。
@@ -123,7 +123,7 @@ def test_two_cards_with_the_same_name_get_their_id(qapp, lot):
         win.refresh_preview(sync=True)
 
         titles = [s["title"] for s in win._feature_sections(win._last_result)]
-        dupes = [t for t in titles if t.startswith("Gray-level stats")]
+        dupes = [t for t in titles if t.startswith(get_step("glv_stats").label)]
         assert len(dupes) >= 2 and len(set(dupes)) == len(dupes), titles
         assert all(" · " in t for t in dupes), dupes
     finally:

@@ -646,7 +646,7 @@ def set_region_family(ctx, step_key: str, name: str, norm_boxes,
 #: 在這之前三張卡各寫各的：Profile **一個都沒有**（只有卡自己的 `cross_*`）、
 #: Template 三個（`present` / `others_present` / `edge_dropped`）、GDS 四個
 #: （`present` / `pieces` / `area_px` / `clipped`）。於是下游（分數表達式、
-#: `Compare regions`、報表）**得先知道這個區域是誰找的**才問得出「它有沒有落
+#: `Gray level` 的 compare、報表）**得先知道這個區域是誰找的**才問得出「它有沒有落
 #: 在這一顆上」—— 那正是漏出去的地方。
 #:
 #: 五個數字對應下游真正會問的五個問題：
@@ -688,7 +688,7 @@ def region_facts(ctx, names, shape, clipped: bool = False,
 
     ``clipped`` / ``edge_dropped`` 講的是**這一組區域是怎麼建出來的**，所以
     一個家族（``<n>`` / ``<n>_center`` / ``<n>_others``）三個名字拿到同一個值。
-    重複是刻意的：下游手上只有**一個**名字（使用者在 `Compare regions` 上挑的
+    重複是刻意的：下游手上只有**一個**名字（使用者在 `Gray level` 上挑的
     那一個），它必須不必知道那是不是衍生名就問得出全部五件事。
 
     ``located=False`` 是「框在、但那是退回整張圖的保險，不是這個區域」——
