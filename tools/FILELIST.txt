@@ -5,10 +5,10 @@ a6b298c38249d1758d17f7780df10626e05c809d .gitignore
 3574fb86206262d69eac0158b2022673c909504a AGENTS.md
 6283e3e2be6a7d7ee9a60f539aa3a8c9ad9b734c CLAUDE.md
 033d348c96f58aaa9ab1ed0b521b8cee8671654a README.md
-597812ea7d2adf542862b4ed99f3317d8594e9eb SESSION_LOG.md
+0eb0687a4f877bf1abef1c025af6d134bf3d40a5 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
-ac3d3144194e2eb8b3601b0b69ac496984876851 d4t/__main__.py
+52efd634d79139d1a7597e3efcc17767369059d3 d4t/__main__.py
 e75a08b69155620720f17d638c3b8e14489091f3 d4t/core/__init__.py
 e765cec6fb21d6bf017cd212321c39b44bab2694 d4t/core/algo/__init__.py
 42f08c6c94ea2f5081a7bb81c6603772fc1027cd d4t/core/algo/align.py
@@ -38,7 +38,7 @@ e3561c00d5079e65d518a4578ccafaca5992f2ef d4t/core/export/overlay.py
 8e73de19c7ae0e640d64a03465ef96248f7ae28c d4t/core/ingest/glas_export.py
 42948c7ff7901d48434530d524790904d1466be4 d4t/core/ingest/imageio.py
 21df6b8ef47ac269ff885f27e5b12dfb78567e3e d4t/core/ingest/klarf_core.py
-d9e28fbd0bd3671fe9a1bbb932e0d59446e6090c d4t/core/ingest/pair_source.py
+55fa95cd3a8dcc878bd0150eaaa68d304cc3800f d4t/core/ingest/pair_source.py
 0266bf215d553bd6e32fe17e849218f60ec0ee4b d4t/core/ingest/tiff_index.py
 bd009f4274c250a9b22da34fac75bef67dc46c6e d4t/core/pipeline/__init__.py
 7d97f61d977da02cb81ff17d157507f19eaff961 d4t/core/pipeline/batch.py
@@ -50,7 +50,7 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 0a0b20e4ea5be09e6852b019829f25585c02a641 d4t/core/pipeline/engine.py
 f1cbd776b47948629028c3f204e3dfb811a5ae2b d4t/core/pipeline/expression.py
 24ecb775e42de3e60a2e404def137e69a295b1c4 d4t/core/pipeline/recipe.py
-79c408479ad3f5f582815ba4e1226ac1558a0897 d4t/core/pipeline/step.py
+e50545dfc0c4f5463995c0fd98a35575cd627651 d4t/core/pipeline/step.py
 c7fce308cb65bd93b83bb75f1cc16a1536cbff59 d4t/core/steps/__init__.py
 e46ad0ddbc738ce19f60a77bc68bb69b01b14c7a d4t/core/steps/_util.py
 c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
@@ -63,7 +63,7 @@ ca230a24348c9287b1efb50e8c6a421b7cf1f838 d4t/core/steps/glv_stats.py
 f53fd9ebede60cba0aa4bc4e2afacb884d0d1064 d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
-28e9aa359fe89247305db647bd9fbea9613e3493 d4t/core/steps/pair_source.py
+0c55627c945f964894327a734f7a8b26fef8c03a d4t/core/steps/pair_source.py
 806882979edad710fe15e9f0f302bb1dbd94ae48 d4t/core/steps/pattern_ref.py
 e59ece7469f23031e8d1b7b3a9448727a32a808e d4t/core/steps/quality.py
 ebabe483adfbe338bdb8dadc89a925c652052b32 d4t/core/steps/roi_compare.py
@@ -90,12 +90,12 @@ f8cfc512fde3fa62144f437b70e39a0afa9e5ba4 d4t/ui/inspectors.py
 82b5a7a3319088abdb95afc1ca5f92880724b628 d4t/ui/region_check.py
 414fbe7a4515960f6e7e8202e70988e6d0b9cb9e d4t/ui/results.py
 08493eb408a35267003e948f979b51f3819bd75b d4t/ui/scope.py
-4469c922d38af1a0ea226a68c6c462a777ae3373 d4t/ui/studio.py
+18ccac6c41efc662a46a5ceb2fcea5d02183fb93 d4t/ui/studio.py
 b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 ee3f3a5a8697104ae7af180a1cdc8ef296e6b0aa d4t/ui/theme.py
 dae788c6faee92106585b5af0009e1268fd93138 d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
-e7352216e26dc6d32d2ac63a22ee02187f5539ac d4t/ui/widgets.py
+8c29e235a9a69cfdef4bd08f076bfacbaba33b80 d4t/ui/widgets.py
 d86fc0f7abe89e193e0c234a6d9033da23823894 d4t/ui/workers.py
 a39965ab140712057cfeac391359d7bb382fbe71 docs/ARCHITECTURE.md
 a6957e5abca216ae5fb6b99ba1b10b5c4e6685d9 docs/FAB-VALIDATION.md
@@ -109,7 +109,7 @@ f6378d9ba391a4e1e3ef7ed855c7694b6b7f50b9 docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
 0bfdfd66811505d4a7d2c50cdf3e3bb1a5135965 docs/plans/F11-phase2-features.md
 e429b04ba97f1f828bfe734fd7049cdd2fb3dc32 docs/plans/F12-region-edges.md
-b11a0f85b76fa166e8ed98760e3374a0a1dc6f12 docs/plans/F15-pair-sources.md
+e30650f168c07a35f95a55db736fce2570fb130b docs/plans/F15-pair-sources.md
 d14ffea1f72ac011ff321f7fb0f0e075a5423e70 docs/plans/F8-rule-based-roi.md
 773d4c5652e1abd95b7bf06591a691c07c1c9fa1 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
@@ -164,7 +164,7 @@ db020b9f0a27ed36b68f4f53d5781df357c8df72 tests/test_make_glas_export.py
 33071fd9690ad145172ab6a178471283523e3c75 tests/test_no_real_fab_data.py
 3103276cac06035f1a18a7d18cb90bdafd7d2f26 tests/test_normalize.py
 53d340deee7fea3c33865c561172a3bc8b570b4a tests/test_offline_tools.py
-22a7e7f2eb5200c3b1722ac1f95b421340d7af3c tests/test_pair_source.py
+dc543a966c4ae49a4cdd18afaf2cdc0a4c3a42ea tests/test_pair_source.py
 aacc024726f55dbe671c3c8d6b7eb849c47cc43a tests/test_pattern_ref.py
 34f1bcdbffc5c85f790e98e5bd1c4b1f10fe795f tests/test_period_golden.py
 37fe3291f5eb15938ef1e8097b3a955e106be9f4 tests/test_phase_origin.py
@@ -204,7 +204,7 @@ e980d85ab915ed7f9c163c584ea242b06000c1fc tests/test_ui_f13_chrome.py
 1aab387de028c18d99a6872cf829b8e62f271f41 tests/test_ui_f13_features.py
 fcd1e48c4e17fa1ec6699b9ef3efc16298adedf8 tests/test_ui_f13_layout.py
 1a71270eeb961ea4b067dfc8fa028b0a229421fd tests/test_ui_f14_input_on_the_card.py
-a5ef8c23c270743da4f7b2d88282e787372fb0b8 tests/test_ui_f15_pair_source.py
+9e7397febf5cf4f3bc5b0bf6b44d0807c4813d84 tests/test_ui_f15_pair_source.py
 96614052cb62c64c136380faaa466cdba0a4d759 tests/test_ui_f7_10_route_edges.py
 4d87458fc35b2e4aeb1c2274a6023cf46aac2364 tests/test_ui_f7_11_roi.py
 b3bcc7956841e98b5cd4ad05bfddefbe1da58fcf tests/test_ui_f7_12_template.py

@@ -2019,7 +2019,7 @@ class MultiChoicePicker(QWidget):
     _PER_ROW = 3
 
     def __init__(self, choices: Sequence[str], value: str = "",
-                 parent: Optional[QWidget] = None):
+                 parent: Optional[QWidget] = None, empty_hint: str = ""):
         super().__init__(parent)
         self._boxes: List[QCheckBox] = []
         self._emitting = False
@@ -2041,6 +2041,14 @@ class MultiChoicePicker(QWidget):
             box.toggled.connect(self._on_toggled)
             grid.addWidget(box, i // self._PER_ROW, i % self._PER_ROW)
             self._boxes.append(box)
+        # **一個都沒有的時候要講話**（F15-2）。選項是執行期來的（那一份 KLARF
+        # 有哪些欄），所以「還沒掛第二份」是一個正常狀態 —— 而它畫出來是一塊
+        # 空白，讀起來像壞掉。
+        if not self._boxes and empty_hint:
+            hint = QLabel(str(empty_hint), self)
+            hint.setEnabled(False)
+            hint.setWordWrap(True)
+            grid.addWidget(hint, 0, 0, 1, self._PER_ROW)
 
     def text(self) -> str:
         """目前的值（逗號分隔，順序同勾選框）。"""
@@ -2052,6 +2060,39 @@ class MultiChoicePicker(QWidget):
         try:
             for box in self._boxes:
                 box.setChecked(box.text() in picked)
+        finally:
+            self._emitting = False
+
+    def set_choices(self, choices: Sequence[str],
+                    value: Optional[str] = None) -> None:
+        """換一批選項（F15-2）。``value=None`` = 保留目前勾的。
+
+        為什麼是「換內容」而不是「重建整張表單」：使用者剛在隔壁那一格打字，
+        整張重建會把游標搶走。
+        """
+        keep = self.text() if value is None else str(value)
+        grid = self.layout()
+        while grid.count():
+            item = grid.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+        self._boxes = []
+        picked = [t.strip() for t in keep.split(",") if t.strip()]
+        names: List[str] = []
+        for name in list(choices) + picked:
+            name = str(name)
+            if name and name not in names:
+                names.append(name)
+        self._emitting = True
+        try:
+            for i, name in enumerate(names):
+                box = QCheckBox(name, self)
+                box.setChecked(name in picked)
+                box.toggled.connect(self._on_toggled)
+                grid.addWidget(box, i // self._PER_ROW, i % self._PER_ROW)
+                self._boxes.append(box)
         finally:
             self._emitting = False
 
@@ -2449,6 +2490,10 @@ class ParamForm(QWidget):
         self._advanced: set = set()
         #: 目前這張卡每個參數的值 —— ``show_when`` 要靠它判斷哪幾列該在。
         self._values: Dict[str, Any] = {}
+        #: 執行期才知道的選單（F15-2）：``{RUNTIME_CHOICES 的鍵: [選項]}``。
+        self._dynamic: Dict[str, List[str]] = {}
+        #: 上游定義了哪些具名區域（F11 Region-1）。
+        self._regions: List[str] = []
         self._describe: Optional[Dict[str, Any]] = None
         self._building = False
         #: 進階參數收起來了嗎（**追明確狀態**，不問 widget —— docs/PITFALLS.md）。
@@ -2594,15 +2639,25 @@ class ParamForm(QWidget):
     def set_step(self, describe: Optional[Dict[str, Any]],
                  current_params: Optional[Dict[str, Any]] = None,
                  stream_choices: Optional[Sequence[str]] = None,
-                 region_choices: Optional[Sequence[str]] = None) -> None:
+                 region_choices: Optional[Sequence[str]] = None,
+                 dynamic_choices: Optional[Dict[str, Sequence[str]]] = None
+                 ) -> None:
         """重建表單。``describe=None`` -> 顯示提示語（未選節點）。
 
         ``region_choices`` 是**上游定義了哪些具名區域**（F11 Region-1）。
         跟 ``stream_choices`` 同一個理由：那些名字程式知道，就不該讓使用者用打的。
+
+        ``dynamic_choices`` 是**執行期才知道的選單**（F15-2），
+        ``{RUNTIME_CHOICES 的鍵: [選項]}`` —— 現在掛了哪幾份第二 source、
+        那一份的一顆有哪幾張圖、那一份的 KLARF 有哪些欄。同一個理由的第三次：
+        程式知道的名字不該讓使用者用打的。Studio 是唯一知道答案的人，所以答案
+        從這裡傳進來，而不是讓元件自己去問（`widgets` 不認得 `Dataset`）。
         """
         current_params = dict(current_params or {})
         streams = [str(s) for s in (stream_choices or [])]
         self._regions = [str(r) for r in (region_choices or [])]
+        self._dynamic = {str(k): [str(v) for v in (vals or [])]
+                         for k, vals in dict(dynamic_choices or {}).items()}
         self._describe = describe
         self._building = True
         try:
@@ -2821,6 +2876,38 @@ class ParamForm(QWidget):
             for head in heads:
                 head.setVisible(alive.get(sec, True))
 
+    def set_dynamic_choices(self,
+                            dynamic: Optional[Dict[str, Sequence[str]]]) -> None:
+        """換一批執行期選單（F15-2），**不重建表單**。
+
+        重建會把游標搶走 —— 而這件事最常發生的時機正是「使用者剛在
+        “Source name” 那一格打字」。所以這裡只換那幾格的**內容**，而且
+        **跳過現在有游標的那一格**（它的內容就是使用者正在打的字）。
+        """
+        self._dynamic = {str(k): [str(v) for v in (vals or [])]
+                         for k, vals in dict(dynamic or {}).items()}
+        for name, row in self._rows.items():
+            choices = self._runtime_choices(row.spec)
+            if choices is None:
+                continue
+            w = row.editor
+            if w is None or w.hasFocus():
+                continue
+            if isinstance(w, MultiChoicePicker):
+                w.set_choices(choices)
+            elif isinstance(w, QComboBox):
+                line = w.lineEdit()
+                if line is not None and line.hasFocus():
+                    continue
+                text = w.currentText()
+                w.blockSignals(True)
+                try:
+                    w.clear()
+                    w.addItems(choices)
+                    w.setCurrentText(text)
+                finally:
+                    w.blockSignals(False)
+
     def _shown_by_rules(self, name: str) -> bool:
         """撇開「進階收起來了」這件事，這一列本身算不算數（``show_when``）。"""
         row = self._rows.get(name)
@@ -2829,12 +2916,46 @@ class ParamForm(QWidget):
             return row is not None
         return str(self._values.get(str(spec[0]), "")) in [str(v) for v in spec[1]]
 
+    #: `choices_from` 的鍵 → 空清單時那一格要說的話。**空清單是正常狀態**
+    #: （還沒掛第二份），而它畫出來是一塊空白 —— 留白讀起來像壞掉。
+    _EMPTY_HINTS = {
+        "sources": "No second lot open yet — use the button above.",
+        "source_images": "Open the second lot to see its images.",
+        "source_columns": "Open the second lot to see its KLARF columns.",
+    }
+
+    def _runtime_choices(self, spec: Dict[str, Any]) -> Optional[List[str]]:
+        """這一格的選項是**執行期來的**嗎（F15-2）。不是就回 None。
+
+        認得旗標但拿不到清單（Studio 還沒實作那一個鍵）→ 回**空 list**，
+        不是 None：那一格仍然是選單，只是現在是空的 —— 而空的會講出為什麼。
+        """
+        key = str(spec.get("choices_from", "") or "")
+        if not key:
+            return None
+        return list(self._dynamic.get(key, ()))
+
     def _make_editor(self, spec: Dict[str, Any], value: Any,
                      streams: Sequence[str]) -> QWidget:
         name = str(spec.get("name", ""))
         ptype = str(spec.get("type", "str"))
         unit = str(spec.get("unit", "") or "")
         lo, hi = spec.get("min"), spec.get("max")
+        runtime = self._runtime_choices(spec)
+
+        if runtime is not None and ptype == "str":
+            # **可編輯的**下拉（F15-2）：清單是現在載了什麼，但值仍然可以是一個
+            # 還沒載進來的名字 —— recipe 是在資料掛上來**之前**讀進來的，鎖死
+            # 選單等於「開一份寫好的 recipe 會把那一格清空」。
+            w = QComboBox()
+            w.setEditable(True)
+            w.addItems(runtime)
+            w.setCurrentText("" if value is None else str(value))
+            hint = self._EMPTY_HINTS.get(str(spec.get("choices_from") or ""), "")
+            if not runtime and hint and w.lineEdit() is not None:
+                w.lineEdit().setPlaceholderText(hint)
+            w.currentTextChanged.connect(lambda t, n=name: self._emit(n, str(t)))
+            return w
 
         if ptype == "int":
             w = QSpinBox()
@@ -2902,8 +3023,12 @@ class ParamForm(QWidget):
             return _wiring_display("" if value is None else str(value))
 
         if ptype == "multi_choice":
-            w = MultiChoicePicker([str(c) for c in (spec.get("choices") or [])],
-                                  "" if value is None else str(value))
+            choices = (runtime if runtime is not None
+                       else [str(c) for c in (spec.get("choices") or [])])
+            w = MultiChoicePicker(
+                choices, "" if value is None else str(value),
+                empty_hint=self._EMPTY_HINTS.get(
+                    str(spec.get("choices_from") or ""), ""))
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 

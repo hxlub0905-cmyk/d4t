@@ -111,7 +111,7 @@ def test_attaching_names_the_source_and_says_what_it_is(window, lots):
     nid = _pair_node(window)
     assert window.param_form._source_note.text().startswith("No second lot")
 
-    msg = window.attach_pair_source(nid, lots["gt"]["klarf"])
+    msg = window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
     assert "Paired source" in msg
 
     # 代號使用者沒打 → 從檔名推一個（而它要能當變數名）
@@ -135,7 +135,7 @@ def test_the_card_on_the_canvas_shows_its_own_lot_not_the_main_one(window, lots)
     """這張卡是 `is_source()`，所以什麼都不做的話它會印 main 的檔名。"""
     window.load_dataset_path(lots["main"]["klarf"], sync=True)
     nid = _pair_node(window)
-    window.attach_pair_source(nid, lots["gt"]["klarf"])
+    window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
     parts = window.pipeline.node_item(nid).summary_parts()
     assert Path(lots["gt"]["klarf"]).name in parts, parts
     assert Path(lots["main"]["klarf"]).name not in parts, parts
@@ -147,7 +147,7 @@ def test_a_bad_path_is_reported_not_raised(window, lots, tmp_path):
     nid = _pair_node(window)
     bad = tmp_path / "not-a-klarf.001"
     bad.write_text("hello", encoding="utf-8")
-    msg = window.attach_pair_source(nid, str(bad))
+    msg = window.attach_pair_source(nid, str(bad), sync=True)
     assert msg and "Could not load" in msg or "no defect" in msg.lower()
     assert not window.dataset.sources
 
@@ -214,3 +214,187 @@ def test_the_align_card_has_the_spread_panel(qapp):
     from d4t.ui.inspectors import MeasureInspector, inspector_for
 
     assert inspector_for("align_to") is MeasureInspector
+
+
+# --------------------------------------------------------------------------- #
+# 5. 背景載入：raw data 是幾十萬顆，UI 不可以停住（F15-2 第 1 步）
+# --------------------------------------------------------------------------- #
+def _pump(qapp, done, timeout_s=20.0):
+    """轉 event loop 直到 ``done()`` 為真（或逾時）。"""
+    import time
+
+    t0 = time.time()
+    while not done() and time.time() - t0 < timeout_s:
+        qapp.processEvents()
+    return done()
+
+
+def test_the_second_lot_loads_in_the_background(qapp, window, lots):
+    """第一版是同步的，於是開一份 raw data 時整個 Studio 沒有反應好一陣子。
+
+    main 那一份**早就**在背景載了（`dataset_worker`），第二份沒有跟上 ——
+    同一件事兩種做法，而慢的那一種是使用者會遇到的那一種。
+    """
+    window.load_dataset_path(lots["main"]["klarf"], sync=True)
+    nid = _pair_node(window)
+
+    msg = window.attach_pair_source(nid, lots["gt"]["klarf"])   # 沒有 sync=True
+    # **立刻**回來（還沒載完），而且講得出正在做什麼
+    assert "Loading" in msg and Path(lots["gt"]["klarf"]).name in msg
+    assert window._pending_pair is not None
+    assert not window.dataset.sources                # 還沒掛上
+
+    assert _pump(qapp, lambda: bool(window.dataset.sources)), "背景載入沒有完成"
+    sid = window.model.nodes[nid].params["source"]
+    assert sid in window.dataset.sources
+    assert window._pending_pair is None
+
+
+def test_a_broken_file_in_the_background_is_reported_not_swallowed(qapp, window,
+                                                                   lots, tmp_path):
+    window.load_dataset_path(lots["main"]["klarf"], sync=True)
+    nid = _pair_node(window)
+    bad = tmp_path / "not-a-klarf.001"
+    bad.write_text("hello", encoding="utf-8")
+    said = []
+    window.pair_worker.failed.connect(lambda m: said.append(m))
+
+    window.attach_pair_source(nid, str(bad))
+    assert _pump(qapp, lambda: bool(said) or window._pending_pair is None)
+    assert not window.dataset.sources
+
+
+# --------------------------------------------------------------------------- #
+# 6. 只複製要用的那幾欄
+# --------------------------------------------------------------------------- #
+def test_only_the_carried_columns_are_copied(window, lots):
+    """raw data ×24 欄字串是幾百 MB，而其中 22 欄從來沒有人 carry。"""
+    window.load_dataset_path(lots["main"]["klarf"], sync=True)
+    nid = _pair_node(window)
+    window.model.set_param(nid, "carry", "CLASSNUMBER")
+    window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
+
+    sid = window.model.nodes[nid].params["source"]
+    fields = window.dataset.sources[sid].items[0].fields
+    assert set(fields) == {"CLASSNUMBER"}
+
+
+def test_ticking_a_column_afterwards_refills_it(window, lots):
+    """之後才勾起來的那一欄不在 `fields` 裡的話，卡片會說「這一份沒有這個
+    欄位」—— 而那句話是錯的：欄位在，只是沒複製。"""
+    window.load_dataset_path(lots["main"]["klarf"], sync=True)
+    nid = _pair_node(window)
+    window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
+    sid = window.model.nodes[nid].params["source"]
+    assert window.dataset.sources[sid].items[0].fields == {}
+
+    window.select_node(nid)
+    window.param_form.param_edited.emit("carry", "DEFECTID,CLASSNUMBER")
+    fields = window.dataset.sources[sid].items[0].fields
+    assert set(fields) == {"DEFECTID", "CLASSNUMBER"}
+
+
+def test_two_cards_on_the_same_source_both_get_their_columns(window, lots):
+    """`fields` 是掛在**那一份**上的一份，照其中一張卡填的話另一張會少欄位。"""
+    window.load_dataset_path(lots["main"]["klarf"], sync=True)
+    a = _pair_node(window)
+    window.model.set_param(a, "carry", "DEFECTID")
+    window.attach_pair_source(a, lots["gt"]["klarf"], sync=True)
+    sid = window.model.nodes[a].params["source"]
+
+    b = window.model.add_step("pair_source")
+    window.model.set_param(b, "source", sid)
+    window.select_node(b)
+    window.param_form.param_edited.emit("carry", "CLASSNUMBER")
+
+    fields = window.dataset.sources[sid].items[0].fields
+    assert set(fields) == {"DEFECTID", "CLASSNUMBER"}
+
+
+# --------------------------------------------------------------------------- #
+# 7. 三格用選的（F15-2 第 2 步）
+# --------------------------------------------------------------------------- #
+def test_the_three_fields_are_pickers_not_free_text(window, lots):
+    """使用者：「太不方便，要自己填（希望可以自動帶出來用選的）」。"""
+    from PySide6.QtWidgets import QComboBox
+    from d4t.ui.widgets import MultiChoicePicker
+
+    window.load_dataset_path(lots["main"]["klarf"], sync=True)
+    nid = _pair_node(window)
+    window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
+    window.select_node(nid)
+
+    sid = window.model.nodes[nid].params["source"]
+    src = window.param_form._rows["source"].editor
+    assert isinstance(src, QComboBox)
+    assert [src.itemText(i) for i in range(src.count())] == [sid]
+
+    img = window.param_form._rows["channel"].editor
+    assert isinstance(img, QComboBox)
+    assert [img.itemText(i) for i in range(img.count())] == ["ref", "test"]
+
+    carry = window.param_form._rows["carry"].editor
+    assert isinstance(carry, MultiChoicePicker)
+    assert "CLASSNUMBER" in carry.choice_names()
+    assert "IMAGELIST" in carry.choice_names()
+
+
+def test_the_source_field_still_takes_a_name_that_is_not_loaded(window):
+    """recipe 是在資料掛上來**之前**讀進來的。鎖死選單 = 開一份寫好的 recipe
+    會把那一格清空。"""
+    from PySide6.QtWidgets import QComboBox
+
+    nid = _pair_node(window)
+    window.model.set_param(nid, "source", "not_loaded_yet")
+    window.select_node(nid)
+    src = window.param_form._rows["source"].editor
+    assert isinstance(src, QComboBox) and src.isEditable()
+    assert src.currentText() == "not_loaded_yet"
+
+
+def test_pointing_at_a_source_that_is_not_attached_shows_nothing(window, lots):
+    """拿「唯一掛著的那一份」去頂替是不行的 —— 那一格印的欄位就是另一份的。"""
+    window.load_dataset_path(lots["main"]["klarf"], sync=True)
+    nid = _pair_node(window)
+    window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
+    window.model.set_param(nid, "source", "somewhere_else")
+    window.select_node(nid)
+    assert window.param_form._rows["carry"].editor.choice_names() == []
+
+
+def test_a_half_typed_name_survives_the_lists_changing(window, lots):
+    """換選單**不重建表單**，所以打到一半的字還在。"""
+    window.load_dataset_path(lots["main"]["klarf"], sync=True)
+    nid = _pair_node(window)
+    window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
+    window.select_node(nid)
+
+    src = window.param_form._rows["source"].editor
+    src.setEditText("half_typed")
+    window.param_form.set_dynamic_choices({"sources": ["a", "b"]})
+    assert src.currentText() == "half_typed"
+
+
+def test_the_field_you_are_typing_in_is_left_alone(window, lots):
+    """有游標的那一格**整格跳過**。
+
+    只保住文字不夠：``clear() + addItems()`` 會把游標推到字尾，所以在名字
+    中間補一個字的時候，下一個字元會跑到最後面去。這件事最常發生的時機正是
+    「使用者剛在 Source name 那一格打字」（那一格一改，另外兩格的清單就變）。
+
+    offscreen 平台不會真的給 focus，所以這裡直接把那格的 ``hasFocus`` 換掉 ——
+    要驗的是 `set_dynamic_choices` 的取捨，不是 Qt 的 focus 管理。
+    """
+    window.load_dataset_path(lots["main"]["klarf"], sync=True)
+    nid = _pair_node(window)
+    window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
+    window.select_node(nid)
+
+    src = window.param_form._rows["source"].editor
+    before = [src.itemText(i) for i in range(src.count())]
+    src.hasFocus = lambda: True
+    window.param_form.set_dynamic_choices({"sources": ["a", "b"]})
+    assert [src.itemText(i) for i in range(src.count())] == before
+
+    # 沒有游標的那一格照常跟上
+    assert window.param_form._rows["carry"].editor.choice_names() == []

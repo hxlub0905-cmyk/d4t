@@ -49,6 +49,33 @@ def _carry_names(params: Dict[str, Any]) -> List[str]:
     return [c.upper() for c in parse_key_list(params.get("carry", ""))]
 
 
+def columns_for_source(nodes: Any, source_id: str) -> List[str]:
+    """指著 ``source_id`` 的每一張配對卡，`carry` 的聯集（大寫）。
+
+    掛第二份的時候只複製這幾欄（`ingest/pair_source.fill_fields` 的 ``columns``）
+    —— raw data 是幾十萬顆，×24 欄字串是幾百 MB，而那幾欄還要 pickle 進 worker。
+
+    **聯集**而不是「某一張卡的」：同一份第二 source 可以被兩張卡指著（兩種配對
+    方式各一張），照其中一張填的話另一張會少欄位。
+
+    ``nodes`` 吃的是「有 ``.step`` 與 ``.params`` 的東西」的可迭代物 ——
+    `Recipe.nodes.values()`（CLI）與 `RecipeModel.nodes.values()`（Studio）
+    都是。**這件事只寫在這裡**：`carry` 的意思是這張卡的事，抄第二份出去的
+    那一份會漂。
+    """
+    want: List[str] = []
+    for node in nodes:
+        if str(getattr(node, "step", "")) != PairSourceStep.key:
+            continue
+        params = dict(getattr(node, "params", None) or {})
+        if str(params.get("source", "") or "").strip() != str(source_id):
+            continue
+        for col in _carry_names(params):
+            if col not in want:
+                want.append(col)
+    return want
+
+
 @register_step
 class PairSourceStep(Step):
     """另一份資料的對應那一顆 → 一條影像流。"""
@@ -69,12 +96,14 @@ class PairSourceStep(Step):
         ParamSpec(
             name="source", type="str", default="",
             label="Source name",
+            choices_from="sources",
             pattern=r"^([A-Za-z_][A-Za-z0-9_]*)?$",
             pattern_help=("use letters, digits and underscores only, and do "
                           "not start with a digit"),
-            help=("Which of the loaded lots to pair with - the name you gave "
-                  "it when you opened it on this card. The path is not stored "
-                  "in the recipe, so the same recipe runs on the next lot.")),
+            help=("Which of the loaded lots to pair with - pick one you have "
+                  "opened with the button on this card. The path is not "
+                  "stored in the recipe, so the same recipe runs on the next "
+                  "lot.")),
         ParamSpec(
             name="match", type="choice", default="position", choices=list(MATCHES),
             label="Match by",
@@ -99,17 +128,20 @@ class PairSourceStep(Step):
                   "looks like this defect. Coordinates are approximate on both "
                   "sides - the nearest one is not always the right one.")),
         ParamSpec(
-            name="carry", type="str", default="",
+            name="carry", type="multi_choice", default="",
             label="Carry these columns",
-            help=("KLARF column names from the matched defect to bring over as "
-                  "features, comma separated (for example DEFECTID, "
-                  "ROUGHBINNUMBER). This is what makes \"it was detected but "
-                  "scored too low\" answerable.")),
+            choices_from="source_columns",
+            help=("KLARF columns from the matched defect to bring over as "
+                  "features (for example DEFECTID, ROUGHBINNUMBER). The list "
+                  "is what that lot actually has. This is what makes \"it was "
+                  "detected but scored too low\" answerable.")),
         ParamSpec(
             name="channel", type="str", default="",
             label="Which image",
-            help=("Which of the matched defect's images to bring in. Leave "
-                  "empty for its first one.")),
+            choices_from="source_images",
+            help=("Which of the matched defect's images to bring in - it has "
+                  "one name per image the tool took (a lot with one image per "
+                  "defect has just one). Leave empty for its first one.")),
         ParamSpec(
             name="out", type="image_key", direction="out", default="paired",
             label="Name this image",
@@ -230,13 +262,16 @@ class PairSourceStep(Step):
         # 的 CSV 長得一模一樣。擋在這裡＝這幾顆 ok=False 而整批照跑（鐵則 7）。
         missing = [c for c in _carry_names(p) if hit is not None and c not in fields]
         if missing:
+            # **列的是「帶過來的是哪幾欄」，不是「那一份有哪幾欄」**：卡片手上
+            # 只有複製過去的那幾欄（第二份的 KlarfDoc 刻意不進 worker）。
+            # 「那一份有哪些欄」由掛的那一刻回答 —— 那時候 doc 還在手上，
+            # 而使用者正看著那張卡（`ingest/pair_source.missing_columns`）。
             raise StepError(
                 self.key,
-                "'%s' has no KLARF column %s. Its columns are: %s. Fix “Carry "
-                "these columns” - nothing is carried over until you do."
+                "nothing carried over from '%s' for %s. What did come over: "
+                "%s. Fix “Carry these columns” - that lot has no such column."
                 % (sid, ", ".join(missing),
-                   ", ".join(sorted(fields)) or "(none - that lot has no "
-                                                "defect table)"))
+                   ", ".join(sorted(fields)) or "(nothing)"))
 
         if hit is None:
             raise StepError(

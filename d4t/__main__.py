@@ -108,11 +108,24 @@ def _cmd_run(args: argparse.Namespace) -> int:
             return 2
         from d4t.core.ingest import pair_source as pair_ingest
 
+        from d4t.core.steps.pair_source import columns_for_source
+
+        want = columns_for_source(recipe.nodes.values(), sid)
         try:
             second = load_dataset(path)
-            rep = pair_ingest.attach(ds, second, sid)
+            # 只複製 recipe 真的要 carry 的那幾欄（幾十萬顆 ×24 欄是幾百 MB，
+            # 而那幾欄還要 pickle 進每個 worker）。
+            rep = pair_ingest.attach(ds, second, sid, columns=want)
         except Exception as e:              # noqa: BLE001 — CLI 邊界，一律回報
             print("[錯誤] --source %s：%s" % (spec, e), file=sys.stderr)
+            return 2
+        # **打錯一個欄名要在這裡就停**，不是讓每一顆都失敗一次：整批跑完才發現
+        # 「那一欄根本不存在」是最貴的一種發現方式，而這裡手上還有 KlarfDoc。
+        missing = pair_ingest.missing_columns(second, want)
+        if missing:
+            print("[錯誤] --source %s：這一份沒有 %s 這幾欄（它有：%s）"
+                  % (sid, ", ".join(missing),
+                     ", ".join(pair_ingest.columns_of(second))), file=sys.stderr)
             return 2
         print("第二份 source：%s" % rep.summary())
         for w in second.warnings:

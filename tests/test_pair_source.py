@@ -159,6 +159,11 @@ def test_a_column_that_does_not_exist_is_said_out_loud():
     這張卡的存在理由就是把那幾欄帶過來（「偵測到但分數太低」只有靠它答得出
     來），而少了一欄的 CSV 跟成功的 CSV 長得一模一樣 —— 跑得完、有數字、
     而且是錯的。擋在這裡＝這幾顆 ok=False 而整批照跑（鐵則 7）。
+
+    ⚠ 這是**第二道**。第一道在掛上來的那一刻（`missing_columns`）——
+    那時候 KlarfDoc 還在手上，所以答得出「那它有哪些欄」；卡片手上只有複製
+    過去的那幾欄（第二份的 doc 刻意不進 worker），所以它只講得出「帶過來的
+    是哪幾欄」。兩句話都要，而且**都不可以假裝自己是另一句**。
     """
     hit = _item("ebi", 100, 0, fields={"ROUGHBINNUMBER": "12"})
     ctx = _ctx(_item("gt1", 0, 0), {"ebi": [hit]})
@@ -166,8 +171,78 @@ def test_a_column_that_does_not_exist_is_said_out_loud():
         _run(ctx, carry="ROUHGBINNUMBER")      # 打錯字
     msg = str(e.value)
     assert "ROUHGBINNUMBER" in msg              # 錯的那一個要講出來
-    assert "ROUGHBINNUMBER" in msg              # 對的那一個也要（它就在旁邊）
+    assert "ROUGHBINNUMBER" in msg              # 帶過來的是哪幾欄
     assert "Carry these columns" in msg         # 要改哪一格
+
+
+def test_only_the_columns_asked_for_are_copied():
+    """raw data 是幾十萬顆，×24 欄字串是幾百 MB —— 而那幾欄還要 pickle 進
+    worker。`columns=None`（CLI／測試的路）才是全帶。"""
+    class _Doc:
+        defect_columns = ["DEFECTID", "XREL", "ROUGHBINNUMBER"]
+        defects = [["11", "0", "7"], ["12", "0", "9"]]
+
+    def lot():
+        ds = Dataset(kind="ebi_patch", klarf=_Doc(),
+                     items=[_item("a", 0, 0), _item("b", 0, 0)])
+        ds.items[0].klarf_row = 0
+        ds.items[1].klarf_row = 1
+        return ds
+
+    all_ds = lot()
+    assert pair_ingest.fill_fields(all_ds) == 3
+    assert set(all_ds.items[0].fields) == {"DEFECTID", "XREL", "ROUGHBINNUMBER"}
+
+    some = lot()
+    assert pair_ingest.fill_fields(some, ["roughbinnumber"]) == 1
+    assert some.items[1].fields == {"ROUGHBINNUMBER": "9"}
+
+
+def test_refilling_replaces_instead_of_adding_up():
+    """少填一欄的時候舊的那一份還留著的話，「這一欄現在還在不在」就有兩個
+    答案 —— 而卡片信的是 `fields`。"""
+    class _Doc:
+        defect_columns = ["DEFECTID", "ROUGHBINNUMBER"]
+        defects = [["11", "7"]]
+
+    second = Dataset(kind="ebi_patch", klarf=_Doc(), items=[_item("a", 0, 0)])
+    second.items[0].klarf_row = 0
+    main = _lot([("gt", 0, 0)])
+    pair_ingest.attach(main, second, "ebi", columns=["DEFECTID"])
+    assert set(second.items[0].fields) == {"DEFECTID"}
+
+    pair_ingest.refill_fields(main, "ebi", ["ROUGHBINNUMBER"])
+    assert set(second.items[0].fields) == {"ROUGHBINNUMBER"}
+
+
+def test_the_lot_says_which_columns_it_has_while_the_doc_is_still_in_hand():
+    """打錯字的人要看的是「那一份有哪些欄」，而只有掛的那一刻答得出來。"""
+    class _Doc:
+        defect_columns = ["DEFECTID", "ROUGHBINNUMBER"]
+        defects = [["11", "7"]]
+
+    ds = Dataset(kind="ebi_patch", klarf=_Doc(), items=[_item("a", 0, 0)])
+    assert pair_ingest.columns_of(ds) == ["DEFECTID", "ROUGHBINNUMBER"]
+    assert pair_ingest.missing_columns(ds, ["defectid", "ROUHGBIN"]) == ["ROUHGBIN"]
+    # 沒有 KLARF 的那種資料**不是**「每一欄都缺」——它是「carry 在這裡沒有
+    # 東西可帶」，而那句話不該長成一串假的缺欄清單。
+    assert pair_ingest.missing_columns(_lot([("x", 0, 0)]), ["ANY"]) == []
+
+
+def test_the_columns_come_from_the_cards_that_point_at_that_source():
+    """同一份第二 source 可以被兩張卡指著，照其中一張填的話另一張會少欄位。"""
+    from d4t.core.steps.pair_source import columns_for_source
+
+    class _N:
+        def __init__(self, step, params):
+            self.step, self.params = step, params
+
+    nodes = [_N("pair_source", {"source": "gt", "carry": "defectid, Class"}),
+             _N("pair_source", {"source": "gt", "carry": "DEFECTID"}),
+             _N("pair_source", {"source": "other", "carry": "SIZE"}),
+             _N("glv_stats", {})]
+    assert columns_for_source(nodes, "gt") == ["DEFECTID", "CLASS"]
+    assert columns_for_source(nodes, "nobody") == []
 
 
 def test_the_declared_features_include_the_carried_ones():

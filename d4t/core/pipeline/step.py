@@ -85,6 +85,20 @@ PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
                "channel_map", "cell_rois", "region_key", "region_keys",
                "icon_choice")
 
+#: ``ParamSpec.choices_from`` 認得的鍵：**執行期才知道的選單**（F15-2）。
+#:
+#: 每一個鍵是「一句 UI 去問得到答案的問題」，而答案跟著現在載了什麼資料變：
+#:
+#: * ``sources``          —— 現在掛了哪幾份第二 source（代號）
+#: * ``source_images``    —— 那一份的一顆 defect 有哪幾張圖
+#: * ``source_columns``   —— 那一份的 KLARF 有哪些欄
+#:
+#: 清單列在 core 而不是 UI，理由跟 `ParamSpec.direction` 一樣：卡片作者打錯
+#: 一個鍵的話，那一格會安靜地退化成文字框（看起來只是「這個功能沒做」）。
+#: 列在這裡就變成註冊時就擋下來。**UI 認不認得是另一回事**：認不得的鍵一樣
+#: 退化成文字框，那是相容行為，不是錯誤。
+RUNTIME_CHOICES = ("sources", "source_images", "source_columns")
+
 #: 值是**影像流名**的型別（畫布上的圓埠 + 實線）。
 IMAGE_TYPES = ("image_key", "image_keys")
 
@@ -230,6 +244,19 @@ class ParamSpec:
     #: —— 兩者都是「整數 → 名字，空的就是不要」。所以是一個旗標而不是第二個
     #: widget：抄第二份出來的那份一定會漂移（這個 repo 記過三次）。
     row_kind: str = "images"
+    #: 這一格的選項是**執行期才知道的**（F15-2）：值不是卡片列得出來的一張表，
+    #: 而是「現在載了哪幾份第二 source」「那一份的一顆有哪幾張圖」「那一份的
+    #: KLARF 有哪些欄」。填一個 :data:`RUNTIME_CHOICES` 裡的鍵，UI 就去問
+    #: Studio 要清單。
+    #:
+    #: 為什麼**不是** ``type="choice"``：`choice` 的 ``validate`` 會把不在清單裡
+    #: 的值擋下來，而 recipe 是**在資料掛上來之前**就讀進來的 —— 那時候一份都還
+    #: 沒掛，於是每一份存了 source 名字的 recipe 都會在開檔的那一刻爆掉。
+    #: 所以型別維持 ``str`` / ``multi_choice``（兩者都不強制值落在清單裡），
+    #: 這個欄位只影響**打字還是用選的**。
+    #:
+    #: 認不得的鍵（例如 UI 還沒實作那一種）→ 就是一個普通的文字框，不會壞。
+    choices_from: str = ""
 
     def visible_for(self, params: Optional[Dict[str, Any]]) -> bool:
         """在這組參數下，這一列該不該顯示（沒有 ``show_when`` 就永遠顯示）。"""
@@ -254,9 +281,22 @@ class ParamSpec:
         elif self.icons:
             raise ParamError(f"parameter '{self.name}': only icon_choice takes "
                              f"icons")
-        if self.type in ("choice", "icon_choice", "multi_choice") and not self.choices:
+        if (self.type in ("choice", "icon_choice", "multi_choice")
+                and not self.choices and not self.choices_from):
             raise ParamError(f"parameter '{self.name}': type '{self.type}' "
-                             f"requires choices")
+                             f"requires choices (or choices_from)")
+        if self.choices_from:
+            if self.choices_from not in RUNTIME_CHOICES:
+                raise ParamError(
+                    f"parameter '{self.name}': choices_from="
+                    f"'{self.choices_from}' is not one of {RUNTIME_CHOICES}")
+            if self.type not in ("str", "multi_choice"):
+                # `choice` / `icon_choice` 的 validate 會擋掉不在清單裡的值，
+                # 而執行期的清單在讀 recipe 的當下是空的 —— 見 choices_from。
+                raise ParamError(
+                    f"parameter '{self.name}': choices_from only applies to "
+                    f"'str' and 'multi_choice' parameters (this one is "
+                    f"'{self.type}')")
         if self.type in IMAGE_TYPES:
             if self.direction not in ("in", "out"):
                 raise ParamError(
@@ -651,6 +691,7 @@ class Step(ABC):
                     "direction": p.direction,
                     "extent": p.extent,
                     "row_kind": p.row_kind,
+                    "choices_from": p.choices_from,
                 }
                 for p in cls.params
             ],

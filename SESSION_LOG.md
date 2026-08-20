@@ -15,6 +15,55 @@
 
 ---
 
+## 配對卡拿真實資料用了一次（F15-2，2026-08-19，第二十一輪）
+
+使用者回報六件事，這一輪做**前兩件**（其餘排進 `docs/plans/F15-pair-sources.md`
+§12）：「用 Pair 開 EBI raw data 應用程式會無法回應一陣子」與「卡片太不方便，
+要自己填（希望可以自動帶出來用選的）」。
+
+### 第二份也走背景執行緒
+
+同一件事有兩種做法，而慢的那一種是使用者會遇到的那一種：main 早就在背景載了
+（`dataset_worker` + 進度條），第二份走的卻是 `run_sync` —— 直接卡住 UI 執行緒。
+現在第二份有**自己的** `pair_worker`（跟 main 是兩件可以同時發生的事），
+`attach_pair_source(..., sync=True)` 留給測試與 headless。
+
+### 只複製 `carry` 要的那幾欄
+
+`fill_fields` 本來每一顆的每一欄都複製。raw data 幾十萬顆 ×24 欄字串是幾百 MB，
+而其中 22 欄從來沒有人 `carry` —— 而且那幾欄還要 pickle 進每一個 worker。
+要哪幾欄由 `steps/pair_source.columns_for_source(nodes, sid)` 回答（指著那個代號
+的每一張卡的 `carry` **聯集**），`carry` 改了就 `refill_fields`。
+
+⚠ 這裡冒出一個新的說謊點：卡片跑起來時手上只有複製過去的那幾欄，所以它那句
+「Its columns are: …」會把「你要的那幾欄」講成「那一份有的那幾欄」。拆成兩句，
+各自只講自己答得出來的 —— **掛上來的當下**（doc 還在手上）講「這一份有的是
+A, B, C」，卡片跑起來只講「帶過來的是哪幾欄」。CLI 也改成 attach 完就擋，
+整批跑完才發現「那一欄根本不存在」是最貴的一種發現方式。
+
+### 三格用選的：`ParamSpec.choices_from`
+
+`Source name` / `Which image` / `Carry these columns` 的答案程式都知道，只是
+**執行期才知道**（掛了哪幾份、那一份有哪幾張圖、有哪些欄）。所以不是
+`ParamSpec.choices`（卡片列得出來的表），而是新的 `choices_from` ——
+填一個 `RUNTIME_CHOICES` 的鍵，UI 去問 Studio。這是
+`stream_choices` / `region_choices` 的第三次：**程式知道的名字不該讓使用者用打的。**
+
+* **不是 `type="choice"`**：`choice` 會擋掉不在清單裡的值，而 recipe 是在資料
+  掛上來**之前**讀進來的 —— 每一份存了 source 名字的 recipe 都會在開檔那一刻
+  爆掉。型別維持 `str` / `multi_choice`，`choices_from` 只影響「打字還是用選的」。
+* **換清單不重建表單**（`set_dynamic_choices`）：重建會搶走游標，而那件事最常
+  發生的時機正是「使用者剛在 Source name 那一格打字」。有游標的那一格整格跳過
+  —— 只保住文字不夠，`clear()+addItems()` 會把游標推到字尾。
+* **空清單要講話**：「還沒掛第二份」是正常狀態，畫出來卻是一塊空白。
+* **指著沒掛上來的代號 → 兩格都空的**，不拿「唯一掛著的那一份」頂替：
+  那一格印的欄位就會是另一份的，而畫面說謊比空白糟。
+
+驗收：`tests/test_pair_source.py`（27）、`tests/test_ui_f15_pair_source.py`（21，
+含背景載入真的有轉 event loop、以及「打到一半的字不會被吃掉」）。
+
+---
+
 ## 配對分析：兩筆資料逐顆對起來（F15，2026-08-19，第二十輪）
 
 使用者要的場景是 **EBI to API Characterization**：RSEM 的 API 空拍（拍滿、直接
