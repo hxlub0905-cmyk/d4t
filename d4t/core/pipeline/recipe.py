@@ -1128,6 +1128,21 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                            f"upstream, or clear the roi parameter to measure "
                            f"the whole image."))
 
+            # 吃**特徵**的卡（F16，Algo 段）：指到一個沒人算出來的數字，在跑
+            # 之前就講。沒有這一段的話它要等**每一顆 defect 都失敗**才看得出來
+            # —— 跟具名區域當初的處境一字不差（F7-9 的 unknown-region）。
+            missing_feat = [x for x in step_cls.resolve_features_in(p)
+                            if x not in feats]
+            if missing_feat:
+                issues.append(Issue(
+                    code="unknown-feature-input", level="error", node_id=nid,
+                    title=f"step '{nid}' uses a number nobody produces",
+                    detail=f"route '{k}': it reads {missing_feat}, but no card "
+                           f"before it in this route writes those out "
+                           f"(available here: {sorted(feats) or 'none'}). "
+                           f"Check the spelling, or move this card after the "
+                           f"card that measures it."))
+
             issues.extend(_feature_collisions(step_cls, p, nid, k, feat_owner))
             # 順序那一支看的是**這張卡之前**的歷史，所以要排在記錄之前。
             issues.extend(_late_normalize(step_cls, p, nid, k, history))

@@ -601,8 +601,18 @@ class Step(ABC):
         看**宣告**而不看**值**（``resolve_reads(params)``）也是刻意的，理由跟
         F10 那條一樣：值是會被清空的（剛加進畫布的卡輸入本來就是空的），
         用值判斷的話一張還沒接線的卡會變成「入口」而躲過 ``not-connected``。
+
+        **第三條是 F16 加的：入口要真的產出影像流。**
+        F16 之前「不吃影像」與「是入口」是同一件事，因為每一張不吃影像的卡都是
+        load 卡。Algo 段（`feature_math`：吃數字、吐數字、一張圖都不碰）讓那個
+        巧合不成立了 —— 而被當成入口的後果是**整條 lint 對它靜音**：
+        ``validate`` 對入口卡會 ``continue``，於是「這張卡指到一個沒人算出來的
+        數字」那條 error 根本走不到（實測就是這樣：一條 issue 都沒有）。
+        Output 段（什麼都不吐）之後也會落在同一條規則上。
+
+        判準仍然是事實而不是標籤：**入口 = 沒有輸入、而且憑空生出影像流**。
         """
-        return not cls.input_specs() and not cls.reads
+        return bool(cls.writes) and not cls.input_specs() and not cls.reads
 
     @classmethod
     def missing_inputs(cls, params: Dict[str, Any]) -> List[str]:
@@ -646,6 +656,27 @@ class Step(ABC):
     @classmethod
     def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
         """這張卡需要哪些具名區域（空字串 = 整張影像，不算需求）。"""
+        return []
+
+    # ---- 吃**特徵**的卡（F16，Algo 段）------------------------------------
+    #: 影像流有 ``resolve_reads``、具名區域有 ``resolve_regions_in``，而
+    #: **特徵一直沒有對應的宣告** —— 因為在 F16 之前，唯一吃特徵的東西是
+    #: recipe 上那個 ``score`` 欄位，而它由 ``validate`` 特別處理。
+    #:
+    #: Algo 段（「拿這些 feature 去做更 custom 的處理」）讓「吃特徵的卡」變成
+    #: 一整類，所以那件事要有自己的宣告 —— 不然「這張卡指到一個沒人算出來的
+    #: 數字」要等**每一顆 defect 都失敗**才看得出來，而那正是這個 repo 對
+    #: 具名區域做過一次的事（F7-9 的 unknown-region）。
+    #:
+    #: ⚠ **這個宣告目前在畫布上沒有對應的線。** 特徵是扁平的全域命名空間
+    #: （見 docs/ARCHITECTURE.md），而 d4t 從來沒有「特徵從哪一張卡來」的埠 ——
+    #: 分數表達式也是這樣。所以 Algo 卡的相依性靠的是 route 上的先後順序，
+    #: 而 ``validate`` 的 ``unknown-feature-input`` 是目前唯一擋得住它的東西。
+    #: 要讓它變成畫布上的一條線，得先決定第三種埠長什麼樣（見 ROADMAP 的
+    #: 「跨顆那一層」——那一段有同一個問題）。
+    @classmethod
+    def resolve_features_in(cls, params: Dict[str, Any]) -> List[str]:
+        """這張卡會讀哪些**已經算出來的特徵**（Algo 段用）。"""
         return []
 
     # ---- 「還沒設定完」（F7-13）--------------------------------------------

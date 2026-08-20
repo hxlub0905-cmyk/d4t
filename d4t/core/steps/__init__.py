@@ -9,7 +9,8 @@
   load_patch, load_single, load_sidecar, normalize, tone, denoise, flatten,
   align, subtract, align_to, pair_source,
   roi_cross, roi_template, roi_from_mask, roi_mask,
-  snr_map, cd_measure, roi_snr, focus_quality, glv_stats
+  snr_map, cd_measure, roi_snr, focus_quality, glv_stats,
+  feature_math
 
 **2026-08-20（F16）：``pattern_ref`` 刪掉了。** 使用者：「Compare 中
 pattern_ref 這項功能完全沒用，請直接拿掉」。
@@ -55,10 +56,11 @@ from . import roi_template   # roi_template
 from . import cd             # cd_measure
 from . import roi_snr        # roi_snr
 from . import quality        # focus_quality
-from . import glv_stats      # glv_stats
+from . import glv_stats      # glv_stats（Gray level：stats / compare）
+from . import feature_math   # feature_math（Algo 段：數字 → 數字）
 
 __all__ = [
     "load", "load_sidecar", "normalize", "denoise", "tone", "flatten", "align", "arith",
     "align_to", "pair_source", "roi_cross", "roi_from_mask", "roi_mask", "roi_template", "snr_map", "cd", "roi_snr",
-    "quality", "glv_stats",
+    "quality", "glv_stats", "feature_math",
 ]
