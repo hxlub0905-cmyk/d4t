@@ -23,13 +23,13 @@ Output 段是什麼（使用者 2026-08-20 定調）
 ``output_image``  每顆一張疊圖 PNG                            `export/overlay`
 ===============  ==========================================  =================
 
-**四張都是 ``is_batch``，包含 ``output_image``。**
+**四張的尺度都是「整批一次」（``scale = SCALE_LOT``），包含 ``output_image``。**
 前三張顯然是（一批一個檔案）。第四張看起來是逐顆的 —— 但它如果做成普通 Step，
 它就會在 ``run_defect`` 裡跑，而那條路**每切換一顆 defect 就走一次**：使用者
 瀏覽 defect 的時候會一直寫 PNG 出來。所以它也是整批跑完之後跑一次，一顆一顆
 重跑 pipeline 取影像（那正是 Export 精靈今天做的事）。
 
-規則因此是一句話：**Output 段的卡都是 ``is_batch``。**
+規則因此是一句話：**Output 段的卡都是整批一次。**
 
 ⚠ **試跑不會寫**（使用者定調）
 ------------------------------
@@ -51,7 +51,8 @@ from ..export import klarf_out, overlay
 from ..export import report as export_report
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_BATCH, GROUP_OUTPUT, ParamSpec, Step, StepError, register_step,
+    CATEGORY_BATCH, GROUP_OUTPUT, SCALE_LOT, ParamSpec, Step, StepError,
+    register_step,
 )
 
 
@@ -70,7 +71,10 @@ class _OutputStep(Step):
     # 快取邊界改成從宣告推導之後，這一格可以講實話了。
     category = CATEGORY_BATCH
     group = GROUP_OUTPUT
-    is_batch = True
+    # **整批一次**（F17-④）。`is_batch` 現在是這一格推導出來的 ——
+    # 直接寫 `is_batch = True` 仍然認得（舊卡片、外掛），但新的卡片
+    # 請宣告尺度：布林答不出「還有第三種嗎」。
+    scale = SCALE_LOT
     reads: List[str] = []
     writes: List[str] = []
     features_out: List[str] = []
@@ -109,7 +113,7 @@ class _OutputStep(Step):
         # 一個完全正常的路徑會被說成設定錯誤。第一版真的這樣寫了，測試抓到。
 
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
-        """**不會被呼叫**：``is_batch`` 的卡由 `run_batch_steps` 跑。
+        """**不會被呼叫**：整批一次的卡由 `run_batch_steps` 跑。
 
         留一句明白的話而不是 ``pass``：哪天有人在別的地方照普通 Step 的樣子叫
         它，症狀會是「檔案沒寫出來」而不是一個講得清楚的錯誤。

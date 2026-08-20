@@ -39,6 +39,31 @@ Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output
 上下順序與階段顏色），所以「Compare 排在 Measure 後面」不代表 `diff` 會晚一步
 產生：那件事由線保證。
 
+### 執行順序只有一個家：線（F17-①，2026-08-20）
+
+⚠ **上面那句話在 2026-08-20 之前只對了一半，值得記住它錯在哪。** 舊的
+`execution_order` 除了 `edges` 之外，還把 **route 上相鄰的每一對也當成一條邊**：
+
+```python
+for a, b in zip(route, route[1:]):     # 沒有人拉過的線
+    pair_edges.add((a, b))
+```
+
+那串隱含邊構成一條走遍全部節點的鏈，所以執行順序**恆等於 route 順序** ——
+而 route 順序在畫布上就是卡片的左右位置。也就是說：**兩張沒有任何線相連的卡，
+誰先跑由使用者把它拖到哪裡決定**，而畫面上完全看不出來。
+
+d4t 因此不是純 DAG 引擎，是「**有序清單 ＋ 補充的線**」：UI 照純 DAG 畫，引擎不
+照純 DAG 跑。那個落差是好幾件事的共同根源 —— 特徵靠 route 順序（「後面的贏」）、
+Output 卡靠 route 位置、`_late_normalize` / `_uneven_treatment` 的 history 也靠它。
+
+現在邊**只**來自 `recipe.edges`，route 的排列退成 Kahn 的平手依據（排版，不是
+語意）。拿掉隱含邊**不改變任何一份跑得起來的 recipe 的順序**（證明見
+`execution_order` 的 docstring），唯一的行為差異是：一條「往回走」的線以前是
+cycle 錯誤，現在照線跑。
+
+`routes` 因此退化成「**這條 route 有哪些卡**」＋ 一個穩定的排序依據。
+
 ⚠ 順序有**兩份**（`step.py` 的 `GROUP_ORDER` 與 `ui/widgets.py` 的
 `LibraryPanel.GROUPS`，後者多帶標題與副標），`tests/test_ui_f16_stages.py`
 把它們綁在一起。

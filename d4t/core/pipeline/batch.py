@@ -25,7 +25,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 from ..ingest import pair_source
 from .cache import StageCache, dataset_token
 from .context import BatchContext
-from .step import REGISTRY
+from .step import REGISTRY, SCALE_LOT
 from .engine import result_to_json_dict, run_defect, run_defect_cached
 from .recipe import Recipe, execution_order
 
@@ -323,7 +323,7 @@ def run_batch_steps(recipe: Recipe, dataset: Any,
                     rows: Sequence[Dict[str, Any]],
                     kind: Optional[str] = None,
                     registry: Optional[Dict[str, Any]] = None) -> BatchContext:
-    """整批跑完之後，把 ``is_batch`` 的卡各跑一次。
+    """整批跑完之後，把**整批一次**（``scale == SCALE_LOT``）的卡各跑一次。
 
     **這一支跟 :func:`run_batch` 是分開的兩件事，而那是刻意的。**
     使用者定調（2026-08-20）：「**試跑不寫，只有整批才寫**」—— Studio 的
@@ -358,7 +358,7 @@ def run_batch_steps(recipe: Recipe, dataset: Any,
         if node is None or not node.enabled:
             continue
         step_cls = reg.get(node.step)
-        if step_cls is None or not step_cls.is_batch:
+        if step_cls is None or step_cls.scale != SCALE_LOT:
             continue
         try:
             params = step_cls.validate_params(node.params)

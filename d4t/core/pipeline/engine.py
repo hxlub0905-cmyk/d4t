@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 from .context import FEATURE_OWNER_KEY, Context
 from .expression import parse_expression
 from .recipe import Recipe, RecipeError, execution_order
-from .step import REGISTRY, Step, StepError
+from .step import REGISTRY, SCALE_LOT, Step, StepError
 
 __all__ = ["StepTrace", "DefectResult", "run_defect", "run_defect_cached",
            "run_dataset", "image_segment_signature", "result_to_json_dict"]
@@ -460,7 +460,7 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
                 raise StepError(
                     node.step,
                     f"unknown step '{node.step}'; registered: {sorted(registry)}")
-            if step_cls.is_batch:
+            if step_cls.scale == SCALE_LOT:
                 # **跨顆卡不在這裡跑**（F16）：它看的是整批的結果表，而這裡
                 # 手上只有一顆。`batch.run_batch_steps` 在所有結果收齊之後跑
                 # 它一次。跳過而不是報錯 —— 一份含 Output 卡的 recipe 在單顆

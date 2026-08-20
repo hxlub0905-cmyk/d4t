@@ -35,6 +35,20 @@ from .curve import CurveError, format_curve, parse_curve
 CATEGORY_IMAGE = "image"
 CATEGORY_ALGO = "algo"
 CATEGORY_ADC = "adc"
+#: 一張卡跑的**尺度**（F17-④）：一顆一次，還是整批一次。
+#:
+#: 以前這件事是一個布林 ``is_batch``，而布林答不出「還有第三種嗎」。宣告成尺度
+#: 之後，「一顆」與「整批」是**同一個模型的兩層**：兩層都是同一份 recipe 的
+#: DAG，都用同一支 `execution_order` 排序，差別只在餵進去的是一顆 defect 還是
+#: 整批的結果表。
+#:
+#: ⚠ **「試跑不寫」不能因為統一而消失**（使用者 2026-08-20 定調）。統一的是
+#: **宣告**，不是**入口**：`run_batch` 只跑、`run_batch_steps` 才寫，而試跑那
+#: 條路根本不叫後者。旗標遲早有人忘記關，兩支函式不會。
+SCALE_DEFECT = "defect"
+SCALE_LOT = "lot"
+_SCALES = (SCALE_DEFECT, SCALE_LOT)
+
 #: 整批那一層（F17-③）：跑完全部 defect 之後才跑一次的卡（Output 段那五張）。
 #: 它們以前借用 ``CATEGORY_ADC`` —— 不是因為它們在做 ADC，而是因為那個值剛好
 #: 讓它們落在快取 checkpoint 之後。現在那件事由宣告推導，這個值可以講實話了。
@@ -726,7 +740,33 @@ class Step(ABC):
     #: 格，而跨顆那一層整個在 checkpoint 之後 —— 它看的是結果表，不是像素。
     #: （鐵則 9 問的是「會影響影像段結果的東西進簽章了嗎」，這裡的答案是「它
     #: 影響不到影像段」。寫在這裡是因為那個問題以後一定會再被問一次。）
+    #:
+    #: F17-④ 起這是 :attr:`scale` 推導出來的（``scale == SCALE_LOT``），
+    #: **不要直接指定它** —— 直接寫 ``is_batch = True`` 仍然認得（舊卡片、外掛），
+    #: `__init_subclass__` 會把 ``scale`` 補成 ``SCALE_LOT``。
     is_batch: ClassVar[bool] = False
+
+    #: 這張卡跑的尺度：``SCALE_DEFECT``（一顆一次）或 ``SCALE_LOT``（整批一次）。
+    scale: ClassVar[str] = SCALE_DEFECT
+
+    def __init_subclass__(cls, **kw: Any) -> None:
+        """讓 ``scale`` 與 ``is_batch`` 永遠是同一句話。
+
+        **兩個方向都要**（鐵則 9 的形狀 —— 判準是「舊東西在不在」）：
+
+        * 新卡片宣告 ``scale = SCALE_LOT`` → ``is_batch`` 跟著變 True；
+        * 舊卡片（或外掛）宣告 ``is_batch = True`` 而沒有 ``scale`` →
+          ``scale`` 補成 ``SCALE_LOT``。
+
+        只做前者的話，一張還沒遷移的卡會宣告 is_batch 卻被引擎當成逐顆的 ——
+        而它的 `run()` 是一句「這張卡不該這樣跑」，於是**每一顆都失敗**。
+        """
+        super().__init_subclass__(**kw)
+        own = cls.__dict__
+        if "scale" in own:
+            cls.is_batch = str(own["scale"]) == SCALE_LOT
+        elif own.get("is_batch"):
+            cls.scale = SCALE_LOT
 
     def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
         """整批跑完之後跑一次（``is_batch`` 的卡實作這個，不是 :meth:`run`）。
@@ -770,6 +810,7 @@ class Step(ABC):
             "key": cls.key,
             "label": cls.label,
             "category": cls.category,
+            "scale": cls.scale,
             "group": cls.resolve_group(),
             "help": cls.help,
             "requires_ref": cls.requires_ref,
@@ -809,6 +850,9 @@ def register_step(cls: Type[Step]) -> Type[Step]:
     """類別裝飾器：把卡片註冊進全域 registry（key 重複 = 程式錯誤，立刻爆）。"""
     if not cls.key:
         raise ValueError(f"{cls.__name__}: key must not be empty")
+    if cls.scale not in _SCALES:
+        raise ValueError(f"{cls.__name__}: scale must be one of {_SCALES}, "
+                         f"got '{cls.scale}'")
     if cls.category not in _CATEGORIES:
         raise ValueError(f"{cls.__name__}: category must be one of {_CATEGORIES}, "
                          f"got '{cls.category}'")

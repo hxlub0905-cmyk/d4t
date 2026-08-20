@@ -17,9 +17,11 @@ Recipe JSON 形狀（見 docs/plans/F0-master-plan.md §3.4）：
                 "bins": {"below": 0, "above": 1}}
     }
 
-- 每條 route 是線性鏈；``edges`` 是畫布上的線。
-  執行順序 = route 相鄰對邊 ∪ edges（限制在該 route 內）的 Kahn 拓撲排序，
-  平手時依 route 位置決定（deterministic）。
+- ``routes`` 說的是「這條 route 有哪些卡」，``edges`` 是畫布上的線。
+  **執行順序只看線**（F17-①）：edges（限制在該 route 內）的 Kahn 拓撲排序，
+  平手時依 route 位置決定（deterministic）。route 的排列是**排版**不是語意 ——
+  以前它的相鄰對也算成邊，於是「兩張沒有線相連的卡誰先跑」由使用者把卡片拖到
+  哪裡決定，而畫面上看不出來（見 :func:`execution_order`）。
 - **邊帶埠**（F9-1，2026-08-16）：``[來源, 來源的輸出埠, 下游, 下游的輸入參數]``。
   舊的兩欄位格式 ``["subtract","snr"]`` 照讀，埠留空。**執行順序目前不看埠** ——
   F9-1 換的是資料形狀不是語意，見 ``docs/plans/F9-dag-streams.md``。
@@ -36,7 +38,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
 from .expression import ExpressionError, parse_expression
 from .step import (
-    GROUP_COMPARE, GROUP_ENHANCE, ParamError, Step, REGISTRY,
+    GROUP_COMPARE, GROUP_ENHANCE, SCALE_LOT, ParamError, Step, REGISTRY,
 )
 
 __all__ = [
@@ -1239,6 +1241,29 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                            f"(available here: {sorted(feats) or 'none'}). "
                            f"Check the spelling, or move this card after the "
                            f"card that measures it."))
+
+            # **整批一次的卡是 end point**（F17-④）。使用者 2026-08-20 定調
+            # Output 段「他就是個 end point」，而在此之前那件事只是「這幾張卡
+            # 的 resolve_writes 剛好是空的」—— 一份手寫的 recipe 照樣可以從它
+            # 拉一條線出去，而那條線**永遠不會有資料**：整批那一層是在所有結果
+            # 收齊之後才跑的，它下游的逐顆卡早就跑完了。
+            #
+            # 症狀是「畫布上有一條線，但下游那張卡什麼都沒收到」——
+            # 跑得完、有數字、而且跟畫布上畫的東西沒有關係。
+            if step_cls.scale == SCALE_LOT:
+                downstream = sorted({e.dst for e in recipe.edges
+                                     if e.src == nid and e.dst in set(order)})
+                if downstream:
+                    issues.append(Issue(
+                        code="batch-card-has-downstream", level="error",
+                        node_id=nid,
+                        title=f"step '{nid}' runs once for the whole lot, so "
+                              f"nothing can come after it",
+                        detail=f"route '{k}': {downstream} take input from "
+                               f"'{nid}', but that card only runs once every "
+                               f"defect has already been through the pipeline "
+                               f"— those cards would never receive anything. "
+                               f"Remove the connection."))
 
             issues.extend(_feature_collisions(step_cls, p, nid, k, feat_owner))
             # 順序那一支看的是**這張卡之前**的歷史，所以要排在記錄之前。
