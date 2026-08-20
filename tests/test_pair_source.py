@@ -278,8 +278,11 @@ def _noise(h, w, seed=0):
 def test_the_small_image_is_found_inside_the_big_one():
     big = _noise(300, 300, 1)
     ctx = Context(images={"test": big[90:154, 40:104].copy(), "paired": big})
+    # `search_within=0` = 整張圖。這一條驗的是「找得到」，而那一塊刻意放在角落
+    # —— 只在中間找的那條規矩有自己的驗收（見下面）。
     get_step("align_to")().run(ctx, {"template": "test", "search": "paired",
-                                     "min_score": 0.3, "out": "aligned"})
+                                     "min_score": 0.3, "out": "aligned",
+                                     "search_within": 0.0})
     assert ctx.features["ncc_score"] > 0.99
     assert ctx.features["align_dx_px"] == pytest.approx(40, abs=1)
     assert ctx.features["align_dy_px"] == pytest.approx(90, abs=1)
@@ -308,7 +311,8 @@ def test_the_candidates_are_ranked_by_ncc_not_by_distance():
     ctx = Context(images={"test": patch, "paired": wrong})
     ctx.meta["pair_candidates"] = [right]          # 座標第二近的才是對的
     get_step("align_to")().run(ctx, {"template": "test", "search": "paired",
-                                     "min_score": 0.3, "out": "aligned"})
+                                     "min_score": 0.3, "out": "aligned",
+                                     "search_within": 0.0})
     assert ctx.meta["align_to"]["candidate"] == 1, "應該挑第二個候選"
     assert ctx.features["ncc_score"] > 0.99
     assert np.array_equal(ctx.images["aligned"], patch)
@@ -512,7 +516,7 @@ def test_the_two_sides_can_have_different_pixel_sizes():
         ctx.set_stream_nm_per_px("test", 64 / 96.0)
         ctx.set_stream_nm_per_px("paired", 1.0)
         params = {"template": "test", "search": "paired", "min_score": 0.0,
-                  "out": "aligned"}
+                  "out": "aligned", "search_within": 0.0}
         params.update(extra)
         get_step("align_to")().run(ctx, params)
         return ctx
@@ -565,3 +569,85 @@ def test_the_second_lot_carries_its_own_pixel_size():
     ctx2 = _ctx(_item("gt1", 0, 0), {"ebi": [_Hit()]})
     _run(ctx2)
     assert ctx2.stream_nm_per_px("paired") is None
+
+
+# --------------------------------------------------------------------------- #
+# 8. 只在該找的地方找（使用者：「可以抓 FOV ~15% 左右」）
+# --------------------------------------------------------------------------- #
+def _fov(size=400, seed=5):
+    return _noise(size, size, seed)
+
+
+def _cut(img, cx, cy, side=64):
+    return img[cy - side // 2:cy + side // 2, cx - side // 2:cx + side // 2].copy()
+
+
+def _align(big, tmpl, **extra):
+    ctx = Context(images={"test": tmpl, "paired": big})
+    p = {"template": "test", "search": "paired", "min_score": 0.3,
+         "out": "aligned"}
+    p.update(extra)
+    try:
+        get_step("align_to")().run(ctx, p)
+        return ctx, None
+    except StepError as e:
+        return ctx, str(e)
+
+
+def test_the_search_stays_near_the_middle_because_the_stage_went_there():
+    """機台是先移到那一顆的座標才拍的，所以 defect 就在中間 —— 差的只有 stage
+    沒對準的那一點。
+
+    只找那一塊有兩個好處，而**第二個才是重點**：快，以及**不會對到影像另一端
+    那個長得一模一樣的結構上**。
+    """
+    big = _fov()
+    near = _cut(big, 200 + 30, 200 - 20)        # 偏 30 px = FOV 的 7.5%
+    ctx, err = _align(big, near)
+    assert err is None and ctx.features["ncc_score"] > 0.99
+    # 偏離預期位置多少 —— 這一顆的 stage offset
+    assert ctx.features["align_off_x_px"] == pytest.approx(30, abs=1)
+    assert ctx.features["align_off_y_px"] == pytest.approx(-20, abs=1)
+
+
+def test_a_match_outside_the_window_is_said_out_loud_not_swallowed():
+    """框把對的那一塊排除掉的時候，錯誤訊息要**講出框的存在** ——
+    不然使用者看到的是「這兩張不像」，而那句話是錯的。"""
+    big = _fov()
+    far = _cut(big, 200 + 150, 200)             # 偏 150 px = FOV 的 37%
+    ctx, err = _align(big, far)
+    assert err is not None
+    assert "15" in err and "search all of it" in err
+    assert ctx.features["align_ok"] == 0.0
+
+    ctx2, err2 = _align(big, far, search_within=0.0)     # 關掉就找得到
+    assert err2 is None and ctx2.features["ncc_score"] > 0.99
+
+
+def test_a_systematic_stage_offset_can_be_measured_and_put_back():
+    """stage offset 是**系統性**的，所以量一次就可以全批共用。
+
+    整批的 `align_off_x_px` 取中位數 → 填進 `expect_dx_px` → 框就可以縮小，
+    而縮小的框正是「不會對到隔壁」的保證。
+    """
+    big = _fov()
+    far = _cut(big, 200 + 150, 200)
+    ctx, err = _align(big, far, expect_dx_px=150.0, search_within=5.0)
+    assert err is None and ctx.features["ncc_score"] > 0.99
+    # 填對了之後，這一顆就「沒有偏離預期」
+    assert ctx.features["align_off_x_px"] == pytest.approx(0, abs=1)
+
+
+def test_a_repeating_pattern_shows_up_as_a_peak_ratio_near_one():
+    """陣列區裡同一個模板在好幾個地方都拿到一樣高的分數，而**峰值本身完全看不
+    出這件事**。第一名與第二名的比才看得出來。"""
+    rng = np.random.default_rng(11)
+    tile = np.tile(rng.integers(0, 255, (20, 20)).astype(np.uint8), (20, 20))
+    ctx, err = _align(tile, tile[190:210, 190:210].copy(), search_within=0.0)
+    assert err is None
+    assert ctx.features["ncc_score"] > 0.99          # 分數滿分
+    assert ctx.features["align_peak_ratio"] > 0.95   # 而且完全不可信
+
+    plain = _fov(seed=9)
+    ctx2, err2 = _align(plain, _cut(plain, 200, 200), search_within=0.0)
+    assert ctx2.features["align_peak_ratio"] < 0.5   # 這種才是真的對到

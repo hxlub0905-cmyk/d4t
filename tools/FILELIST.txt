@@ -5,13 +5,13 @@ a6b298c38249d1758d17f7780df10626e05c809d .gitignore
 46ad7705532c20df2247a964433506502b6eeba0 AGENTS.md
 6283e3e2be6a7d7ee9a60f539aa3a8c9ad9b734c CLAUDE.md
 033d348c96f58aaa9ab1ed0b521b8cee8671654a README.md
-b2f3e204951645359a841c13d14b260d081398ee SESSION_LOG.md
+61c651c66cbf532fc6baa26f453409fb09c5b23a SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 52efd634d79139d1a7597e3efcc17767369059d3 d4t/__main__.py
 e75a08b69155620720f17d638c3b8e14489091f3 d4t/core/__init__.py
 e765cec6fb21d6bf017cd212321c39b44bab2694 d4t/core/algo/__init__.py
-42f08c6c94ea2f5081a7bb81c6603772fc1027cd d4t/core/algo/align.py
+9f95cc3f4f930324566729bd82462d38777841d2 d4t/core/algo/align.py
 ee35d3a74a03161fd795cb83d72d5aca0622273a d4t/core/algo/curve.py
 d2f7e50ff4920fefc608e7d83117c771276104b7 d4t/core/algo/enhance.py
 d33ca6388c50311b285e3c80725b5380a11bbc50 d4t/core/algo/glv.py
@@ -54,7 +54,7 @@ e50545dfc0c4f5463995c0fd98a35575cd627651 d4t/core/pipeline/step.py
 c7fce308cb65bd93b83bb75f1cc16a1536cbff59 d4t/core/steps/__init__.py
 4ecf168e9455169898866841a7ef20aa585602a4 d4t/core/steps/_util.py
 c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
-e11439458d3bc07d530fe0afe825271813f75eea d4t/core/steps/align_to.py
+54ff11fc5b57df81dbe76178bf0ff31a587e6385 d4t/core/steps/align_to.py
 ea06dabb0aad270c90a12fb5d7acfd913290d6b5 d4t/core/steps/arith.py
 b4cfb34d85c618b5b957c383c51d429968e2be9f d4t/core/steps/cd.py
 39bbc384b66e024f67200a76598d4f6f255e5100 d4t/core/steps/denoise.py
@@ -109,7 +109,7 @@ f6378d9ba391a4e1e3ef7ed855c7694b6b7f50b9 docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
 0bfdfd66811505d4a7d2c50cdf3e3bb1a5135965 docs/plans/F11-phase2-features.md
 e429b04ba97f1f828bfe734fd7049cdd2fb3dc32 docs/plans/F12-region-edges.md
-6b148370ba9307d65836a827811a7fb5b999d912 docs/plans/F15-pair-sources.md
+472ee26552bc3cefa7a98d28b383e69fdc08097f docs/plans/F15-pair-sources.md
 d14ffea1f72ac011ff321f7fb0f0e075a5423e70 docs/plans/F8-rule-based-roi.md
 773d4c5652e1abd95b7bf06591a691c07c1c9fa1 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
@@ -164,7 +164,7 @@ db020b9f0a27ed36b68f4f53d5781df357c8df72 tests/test_make_glas_export.py
 33071fd9690ad145172ab6a178471283523e3c75 tests/test_no_real_fab_data.py
 3103276cac06035f1a18a7d18cb90bdafd7d2f26 tests/test_normalize.py
 53d340deee7fea3c33865c561172a3bc8b570b4a tests/test_offline_tools.py
-8140569afa60909647a77bf31997e5de3a567da1 tests/test_pair_source.py
+342afa983abf91cec2b2b54f548fb6161a6c809b tests/test_pair_source.py
 aacc024726f55dbe671c3c8d6b7eb849c47cc43a tests/test_pattern_ref.py
 34f1bcdbffc5c85f790e98e5bd1c4b1f10fe795f tests/test_period_golden.py
 37fe3291f5eb15938ef1e8097b3a955e106be9f4 tests/test_phase_origin.py
