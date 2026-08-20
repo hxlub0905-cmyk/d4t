@@ -88,7 +88,36 @@ id 字串**，於是 `columns_for_main` 回空清單、一欄都不填，而症�
 **只有 Stage 1 動了一次**（rsem route 重做），Stage 2–4 三組逐項相同 ——
 合併、開新段、加 `carry` 都沒有動到任何既有的數字，那是每一步的定義。
 
-### Stage 5 停在設計問題上（見下一段）
+**Stage 5 —— 跨顆那一層 ＋ Output 段五張卡。** 使用者定了三件事：**試跑不寫、
+只有整批才寫**、**路徑存在卡片上**、**先做引擎，畫布那一半下一輪**。
+
+機制：`Step.is_batch` ＋ `BatchContext` ＋ `pipeline.run_batch_steps`。
+三條規矩各有測試：跨顆卡不在 `run_defect` 裡跑（而且**跳過不是報錯** —— 一份含
+Output 卡的 recipe 在單顆預覽上要跑得完，那是調參數的畫面）、一張跨顆卡出錯不
+影響其他卡（鐵則 7 的跨顆版）、**試跑不寫**。
+
+最後那一條的做法值得記住：它**不是一個旗標，是兩支函式**。`run_batch` 只跑，
+`run_batch_steps` 才寫，而試跑那條路根本不叫後者。旗標遲早有人忘記關，而症狀是
+不可逆的覆寫（拖一下門檻就覆寫一次 KLARF）。有一條掃原始碼的測試守著 `d4t/ui`
+底下沒人叫它。
+
+五張卡：`output_csv` / `output_report`（Excel）/ `output_klarf`（三種寫回模式）/
+`output_html`（自帶樣式，可以直接寄出去）/ `output_image`（每顆一張疊圖）。
+**五張都是 `is_batch`，包含 `output_image`** —— 它看起來是逐顆的，但做成普通
+Step 的話它會在 `run_defect` 裡跑，而那條路每切換一顆 defect 就走一次。
+
+實測 CLI（六顆的合成 lot）：五個產出都出現，KLARF 走 annotate **原檔一個位元組
+都沒動**，新檔多了 ADCSCORE / ADCCLASS 兩欄。
+
+### ⏸ Export 精靈還在，而那是順序問題不是漏掉
+
+使用者要「Output 為真相，現有的 export 精靈請拿掉」。**但 Studio 目前只有試跑
+那條路**（`run_batch(limit=N)`），沒有「跑完整批」—— 而使用者同一輪定調了試跑
+不寫。所以現在拿掉精靈的話，**Studio 會完全輸不出任何東西**。
+
+順序是：先有 Studio 的整批入口（連同把 `WriteBackPlan` 的乾跑搬進
+`output_klarf` 的 inspector —— M5 那條「寫回前一定先預覽」不能因為精靈消失就
+消失），再拿掉精靈。見 `docs/ROADMAP.md`。
 
 
 ---
