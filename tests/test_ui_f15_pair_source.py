@@ -472,3 +472,55 @@ def test_every_path_that_runs_a_defect_passes_the_second_lot():
     assert not missing, (
         "這幾個地方跑了一顆 defect 但沒有把第二份 lot 送進去 —— "
         "有配對卡的 pipeline 在那裡會變成「沒有圖」：%s" % missing)
+
+
+def test_the_image_shows_up_as_soon_as_the_second_lot_is_attached(qapp, window,
+                                                                  lots):
+    """按完 `Open data…` **畫面要有反應**。
+
+    以前掛完只重整了畫布與 lint，預覽沒有重跑 —— 於是影像流的下拉裡沒有
+    `paired`，要再去點一張卡才會出現。而「按了鈕、畫面沒事發生」讀起來就是
+    「載不進來」，那正是使用者連續兩次回報的那句話。
+    """
+    def names():
+        return [window.stream_combo.itemText(i)
+                for i in range(window.stream_combo.count())]
+
+    window.load_dataset_path(lots["main"]["klarf"], sync=True)
+    _pump(qapp, lambda: "test" in names())
+    assert "paired" not in names()
+
+    nid = _pair_node(window)                     # 使用者按鈕之前一定先點了卡
+    window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
+
+    assert _pump(qapp, lambda: "paired" in names()), names()
+    # 而且畫面直接跳到那張卡吐的那條流 —— 不用自己去下拉裡找
+    assert window.stream_combo.currentText() == "paired"
+
+
+def test_the_aligned_image_needs_the_align_card_selected(qapp, window, lots):
+    """預覽**只跑到選中的那張卡為止** —— 那是刻意的（點哪張卡就看哪張卡）。
+
+    所以停在 `Pair` 上是看不到 `aligned` 的，那不是壞掉。這一條把那件事釘住，
+    因為它看起來很像「對圖沒有作用」。
+    """
+    def names():
+        return [window.stream_combo.itemText(i)
+                for i in range(window.stream_combo.count())]
+
+    window.load_dataset_path(lots["main"]["klarf"], sync=True)
+    load = window.model.node_order[0]
+    pair = window.model.add_step("pair_source")
+    align = window.model.add_step("align_to")
+    window.select_node(pair)
+    window.attach_pair_source(pair, lots["gt"]["klarf"], sync=True)
+    window._connect(load, align, "test", dst_in="template")
+    window._connect(pair, align, "paired", dst_in="search")
+
+    window.select_node(pair)
+    assert _pump(qapp, lambda: "paired" in names())
+    assert "aligned" not in names()              # 停在 Pair 上：還沒跑到那裡
+
+    window.select_node(align)
+    assert _pump(qapp, lambda: "aligned" in names()), names()
+    assert window.stream_combo.currentText() == "aligned"

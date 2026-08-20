@@ -4694,6 +4694,11 @@ class StudioWindow(QMainWindow):
         if self.selected_node == str(node_id):
             self.param_form.set_dynamic_choices(self._dynamic_choices_for(node))
         self._refresh_all()
+        # **掛上第二份 = 這條 pipeline 的產出變了**，所以預覽要重跑一次
+        # （2026-08-20）。以前不重跑，於是使用者按完 `Open data…` 什麼事都沒
+        # 發生：影像流的下拉裡沒有 `paired`，要再去點一張卡才會出現 ——
+        # 而「按了鈕、畫面沒反應」讀起來就是「載不進來」。
+        self._schedule_preview()
         msg = "Paired source · %s" % rep.summary()
         self._status(msg)
         return msg

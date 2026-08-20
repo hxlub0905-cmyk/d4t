@@ -15,6 +15,24 @@
 
 ---
 
+## 按了鈕、畫面沒事發生（2026-08-20，第二十八輪）
+
+使用者：「Pair with another source 將 klarf+圖片 load 進去時 → 右側 image stream
+會有 image 嗎？」
+
+實測之後：**掛完之後預覽沒有重跑**，所以影像流的下拉裡沒有 `paired`，要再去點
+一張卡才會出現。而「按了鈕、畫面沒事發生」讀起來就是「載不進來」—— 那正是前面
+連續兩次回報的那句話的第三種形狀。
+
+掛上第二份 = **這條 pipeline 的產出變了**，所以 `_on_pair_source_loaded` 現在
+會 `_schedule_preview()`。（載主資料集、改參數都會，就這一條漏了。）
+
+順帶釘住一件**看起來很像壞掉、其實是刻意的**事：預覽只跑到**選中的那張卡**為止，
+所以停在 `Pair` 上是看不到 `aligned` 的 —— 要點到 `Align` 那張卡。
+`tests/test_ui_f15_pair_source.py::test_the_aligned_image_needs_the_align_card_selected`
+
+---
+
 ## 儀表畫不出來，症狀出現在別的地方（2026-08-20，第二十七輪）
 
 使用者：「現在是 Pair with another source 的圖就載不出來」，終端機一直丟
