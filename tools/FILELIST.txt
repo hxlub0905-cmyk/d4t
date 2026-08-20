@@ -5,7 +5,7 @@ a6b298c38249d1758d17f7780df10626e05c809d .gitignore
 dc5d3e24d36ca139df3d9ccac1034075e7698f6e AGENTS.md
 6283e3e2be6a7d7ee9a60f539aa3a8c9ad9b734c CLAUDE.md
 033d348c96f58aaa9ab1ed0b521b8cee8671654a README.md
-2e7add90ed36cc4f9c3c1dbd56d65f5bfcc983c3 SESSION_LOG.md
+372902503f6e8567fcb1628f5664226df6acb5d3 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 52efd634d79139d1a7597e3efcc17767369059d3 d4t/__main__.py
@@ -104,12 +104,12 @@ ffb40bc7e7d8fbac0d7c9402064fe639d1a41740 docs/GLAS-INTERFACE.md
 160ffb5f501ade00ca2bf417133ef49c3d2e09b1 docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
 0e792d0576f3113f70b7de5164351c512d8ed6bd docs/PITFALLS.md
-687fe2369fe5d722aea42379e9580ac9ac5459f4 docs/ROADMAP.md
+921979e2eca742ea4a21bc70f8aac459ed29c688 docs/ROADMAP.md
 f6378d9ba391a4e1e3ef7ed855c7694b6b7f50b9 docs/plans/F0-master-plan.md
 42e3859abc6531ad8d42375a2394a0ff3e49984d docs/plans/F10-canvas-tells-the-truth.md
 0bfdfd66811505d4a7d2c50cdf3e3bb1a5135965 docs/plans/F11-phase2-features.md
 e429b04ba97f1f828bfe734fd7049cdd2fb3dc32 docs/plans/F12-region-edges.md
-6c5311d817cf2efc13c6c3df2d536fdb0dd7fbbb docs/plans/F15-pair-sources.md
+c4f06765ad918545511da042eb8d2b63df19795f docs/plans/F15-pair-sources.md
 d14ffea1f72ac011ff321f7fb0f0e075a5423e70 docs/plans/F8-rule-based-roi.md
 773d4c5652e1abd95b7bf06591a691c07c1c9fa1 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
