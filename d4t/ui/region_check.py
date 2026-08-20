@@ -62,7 +62,8 @@ def regions_of_node(node: Any) -> List[str]:
 
 def collect_source_images(recipe: Any, items: Sequence[Any], kind: str,
                           node_id: str, source: str,
-                          limit: int = MAX_CHECK) -> List[Any]:
+                          limit: int = MAX_CHECK,
+                          sources: Optional[Dict[str, Any]] = None) -> List[Any]:
     """對每一顆跑到 ``node_id`` 為止，取出那張卡要讀的 ``source`` 影像。
 
     一鍵校正（F8 第七輪）用的：量 pitch 要量在**卡片實際看的那條流**上 ——
@@ -76,7 +77,7 @@ def collect_source_images(recipe: Any, items: Sequence[Any], kind: str,
     for item in list(items)[:int(limit)]:
         try:
             res = run_defect(recipe, item, kind, keep_context=True,
-                             upto_node=node_id)
+                             upto_node=node_id, sources=dict(sources or {}))
         except Exception:                    # noqa: BLE001 — 單顆爆不殺整批
             continue
         ctx = getattr(res, "context", None)
@@ -89,7 +90,9 @@ def collect_source_images(recipe: Any, items: Sequence[Any], kind: str,
 
 def check_regions(recipe: Any, items: Sequence[Any], kind: str, node_id: str,
                   regions: Sequence[str], thumb_size: int = 120,
-                  source: Optional[str] = None) -> List[Dict[str, Any]]:
+                  source: Optional[str] = None,
+                  sources: Optional[Dict[str, Any]] = None
+                  ) -> List[Dict[str, Any]]:
     """對每一顆跑到 ``node_id`` 為止，取出縮圖與該節點定義的區域框。
 
     回傳每顆一個 dict：``defect_id`` / ``thumb``（uint8 方形縮圖）/
@@ -108,7 +111,7 @@ def check_regions(recipe: Any, items: Sequence[Any], kind: str, node_id: str,
                                  "boxes": [], "located": True, "error": None}
         try:
             res = run_defect(recipe, item, kind, keep_context=True,
-                             upto_node=node_id)
+                             upto_node=node_id, sources=dict(sources or {}))
         except Exception as e:              # noqa: BLE001 — 合約外的意外
             entry["error"] = "%s: %s" % (type(e).__name__, e)
             out.append(entry)

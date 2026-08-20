@@ -147,7 +147,15 @@ def _safe_name(text: Any) -> str:
     return "".join(out) or "unknown"
 
 
-def _overlay_images(item: Any, recipe: Any, kind: str
+def _sources_of(dataset: Any) -> Dict[str, Any]:
+    """掛在這份資料上的第二（第三…）份，整理成引擎吃的形狀（F15）。"""
+    from d4t.core.ingest import pair_source
+
+    return pair_source.sources_for_run(dataset) if dataset is not None else {}
+
+
+def _overlay_images(item: Any, recipe: Any, kind: str,
+                    sources: Optional[Dict[str, Any]] = None
                     ) -> Tuple[Dict[str, Any], Dict[str, Any], Any]:
     """一顆 defect 的疊圖素材 ``(images, features, blobs)``。
 
@@ -158,7 +166,8 @@ def _overlay_images(item: Any, recipe: Any, kind: str
     from d4t.core.pipeline import run_defect     # 延後匯入：對話框開啟才需要
 
     if recipe is not None and item is not None:
-        r = run_defect(recipe, item, str(kind), keep_context=True)
+        r = run_defect(recipe, item, str(kind), keep_context=True,
+                       sources=dict(sources or {}))
         ctx = getattr(r, "context", None)
         images = dict(getattr(ctx, "images", {}) or {}) if ctx is not None else {}
         if images:
@@ -281,12 +290,14 @@ def run_export_job(spec: Dict[str, Any],
         recipe = ov.get("recipe")
         kind = str(ov.get("kind") or "")
         total = max(1, len(steps) - 1 + len(rows))
+        sources = dict(ov.get("sources") or {})
         for i, r in enumerate(rows, 1):
             did = str(r.get("defect_id", ""))
             tick("Overlay %d / %d (#%s)" % (i, len(rows), did))
             item = items.get(did)
             try:
-                images, feats, blobs = _overlay_images(item, recipe, kind)
+                images, feats, blobs = _overlay_images(item, recipe, kind,
+                                                       sources)
                 if not images:
                     n_fail += 1
                     continue
@@ -1028,6 +1039,10 @@ class ExportDialog(QDialog):
                 "items": items,
                 "recipe": self.recipe,
                 "kind": str(getattr(self.dataset, "kind", "")),
+                # 掛在 main 上的第二份（F15）—— 疊圖是**跑一次 pipeline** 畫的，
+                # 所以它跟預覽、跟批次一樣需要那一份，不然有配對卡的 recipe
+                # 會在這裡失敗，而失敗的樣子是「疊圖退回原始影像」。
+                "sources": _sources_of(self.dataset),
             }
         return spec
 

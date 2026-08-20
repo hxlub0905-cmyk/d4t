@@ -279,9 +279,16 @@ class PreviewWorker(_ThreadedWorker):
 
     # ---- 對外 -------------------------------------------------------------
     def request(self, recipe: Recipe, item: Any, kind: str,
-                upto_node: Optional[str] = None) -> None:
-        """要求算一筆預覽；忙碌中則覆蓋掉先前的待跑請求（舊的直接丟）。"""
-        job = (recipe, item, str(kind), upto_node)
+                upto_node: Optional[str] = None,
+                sources: Optional[Dict[str, Any]] = None) -> None:
+        """要求算一筆預覽；忙碌中則覆蓋掉先前的待跑請求（舊的直接丟）。
+
+        ``sources`` 是掛在 main 上的第二（第三…）份資料（F15）。
+        **不傳的話 `pair_source` 那張卡會說「沒有這一份」**，而使用者看到的是
+        「沒有圖」—— 2026-08-20 真的發生過：`run_batch` 那條路傳了，
+        單顆預覽這條路沒有，於是同一份 pipeline「試跑」有圖、切換 defect 沒圖。
+        """
+        job = (recipe, item, str(kind), upto_node, dict(sources or {}))
         if self.is_running():
             self._pending = job            # 覆蓋 = 丟掉更舊的請求
             return
@@ -289,12 +296,14 @@ class PreviewWorker(_ThreadedWorker):
 
     @staticmethod
     def run_sync(recipe: Recipe, item: Any, kind: str,
-                 upto_node: Optional[str] = None) -> DefectResult:
+                 upto_node: Optional[str] = None,
+                 sources: Optional[Dict[str, Any]] = None) -> DefectResult:
         """同步跑一筆預覽（不開執行緒）；``keep_context=True`` 以便看中間影像。"""
         # ``track_changes``：預覽是單顆，記下「每張卡把影像流改成什麼樣」
         # 的成本可以忽略，而 Enhance 的儀表就是靠這份資料（F7-17）。
         return run_defect(recipe, item, str(kind), keep_context=True,
-                          upto_node=upto_node, track_changes=True)
+                          upto_node=upto_node, track_changes=True,
+                          sources=dict(sources or {}))
 
     def has_pending(self) -> bool:
         """是否還有待跑的請求（測試 / statusbar 用）。"""
@@ -302,12 +311,13 @@ class PreviewWorker(_ThreadedWorker):
 
     # ---- 內部 -------------------------------------------------------------
     def _launch(self, job: tuple) -> None:
-        recipe, item, kind, upto = job
+        recipe, item, kind, upto, sources = job
 
         def work() -> None:
             try:
                 r = run_defect(recipe, item, kind, keep_context=True,
-                               upto_node=upto, track_changes=True)
+                               upto_node=upto, track_changes=True,
+                               sources=sources)
             except Exception as e:          # noqa: BLE001 — 合約外的意外
                 self.failed.emit(f"{type(e).__name__}: {e}")
             else:
@@ -419,7 +429,8 @@ class RegionCheckWorker(_ThreadedWorker):
 
     def start(self, recipe: Recipe, items: Any, kind: str, node_id: str,
               regions: Any, thumb_size: int = 120,
-              source: Optional[str] = None) -> bool:
+              source: Optional[str] = None,
+              sources: Optional[Dict[str, Any]] = None) -> bool:
         """開背景執行緒檢查；已有工作在跑時回傳 False（不排隊）。
 
         不排隊是刻意的：這個動作是使用者明確按下去的，重複按第二次的意思是
@@ -428,7 +439,7 @@ class RegionCheckWorker(_ThreadedWorker):
         if self.is_running():
             return False
         args = (recipe, list(items), str(kind), str(node_id),
-                list(regions), int(thumb_size), source)
+                list(regions), int(thumb_size), source, dict(sources or {}))
 
         def job() -> None:
             from .region_check import check_regions
@@ -446,11 +457,14 @@ class RegionCheckWorker(_ThreadedWorker):
     @staticmethod
     def run_sync(recipe: Recipe, items: Any, kind: str, node_id: str,
                  regions: Any, thumb_size: int = 120,
-                 source: Optional[str] = None) -> List[Dict[str, Any]]:
+                 source: Optional[str] = None,
+                 sources: Optional[Dict[str, Any]] = None
+                 ) -> List[Dict[str, Any]]:
         """同步版（測試用）。"""
         from .region_check import check_regions
         return check_regions(recipe, list(items), str(kind), str(node_id),
-                             list(regions), int(thumb_size), source)
+                             list(regions), int(thumb_size), source,
+                             dict(sources or {}))
 
     def _job_finished(self) -> None:
         self.busy.emit(False)
@@ -471,10 +485,12 @@ class CalibrateWorker(_ThreadedWorker):
     failed = Signal(str)
 
     def start(self, recipe: Recipe, items: Any, kind: str, node_id: str,
-              params: Any) -> bool:
+              params: Any,
+              sources: Optional[Dict[str, Any]] = None) -> bool:
         if self.is_running():
             return False
-        args = (recipe, list(items), str(kind), str(node_id), dict(params))
+        args = (recipe, list(items), str(kind), str(node_id), dict(params),
+                dict(sources or {}))
 
         def job() -> None:
             try:
@@ -490,7 +506,8 @@ class CalibrateWorker(_ThreadedWorker):
 
     @staticmethod
     def run_sync(recipe: Recipe, items: Any, kind: str, node_id: str,
-                 params: Any) -> Dict[str, Any]:
+                 params: Any,
+                 sources: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """同步版（測試用）。量測用**這張卡目前的**挑組設定（select / kinds /
         sensitivity / smooth），但不給 pitch —— 校正量的正是那個。"""
         from d4t.core.algo.grid import calibrate_axis
@@ -499,7 +516,8 @@ class CalibrateWorker(_ThreadedWorker):
         p = dict(params or {})
         images = collect_source_images(recipe, list(items), str(kind),
                                        str(node_id),
-                                       str(p.get("source", "ref")))
+                                       str(p.get("source", "ref")),
+                                       sources=dict(sources or {}))
         out: Dict[str, Any] = {"n_images": len(images)}
         for axis, side in (("x", "vertical"), ("y", "horizontal")):
             out[axis] = calibrate_axis(

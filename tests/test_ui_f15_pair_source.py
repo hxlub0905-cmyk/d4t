@@ -398,3 +398,77 @@ def test_the_field_you_are_typing_in_is_left_alone(window, lots):
 
     # 沒有游標的那一格照常跟上
     assert window.param_form._rows["carry"].editor.choice_names() == []
+
+
+# --------------------------------------------------------------------------- #
+# 8. 第二份要走進**每一條**跑 pipeline 的路（2026-08-20 使用者回報）
+# --------------------------------------------------------------------------- #
+def test_the_preview_sees_the_second_lot(window, lots):
+    """使用者：「載入 image（RSEM 的 GT）不會有圖，拉過去 Align 也沒有圖」。
+
+    原因不是圖檔格式 —— 是 `run_batch` 那條路傳了 `sources`，而**單顆預覽那條
+    沒有**。於是同一份 pipeline「試跑」有圖、切換 defect 沒圖，而使用者看到的
+    是「載進來就是沒有圖」，那句話怎麼查都查不到真正的原因上。
+    """
+    from d4t.ui.workers import PreviewWorker
+
+    window.load_dataset_path(lots["main"]["klarf"], sync=True)
+    load = window.model.node_order[0]
+    pair = window.model.add_step("pair_source")
+    align = window.model.add_step("align_to")
+    window.attach_pair_source(pair, lots["gt"]["klarf"], sync=True)
+    window._connect(load, align, "test", dst_in="template")
+    window._connect(pair, align, "paired", dst_in="search")
+
+    r = PreviewWorker.run_sync(window.model.to_recipe(), window.dataset.items[0],
+                               window.model.kind,
+                               sources=window.sources_for_run())
+    assert r.ok, r.error
+    assert "paired" in r.context.images and "aligned" in r.context.images
+
+    # 沒帶的話就是使用者遇到的那個症狀 —— 這一行是為了證明上面那一行不是
+    # 湊巧成立的。
+    blind = PreviewWorker.run_sync(window.model.to_recipe(),
+                                   window.dataset.items[0], window.model.kind)
+    assert not blind.ok and "no lot is loaded" in str(blind.error)
+
+
+def test_the_answer_to_which_second_lots_lives_in_one_place(window, lots):
+    """`sources_for_run()` 是那個答案的**唯一**去處。"""
+    assert window.sources_for_run() == {}          # 還沒載資料
+    window.load_dataset_path(lots["main"]["klarf"], sync=True)
+    assert window.sources_for_run() == {}          # 載了 main，還沒掛第二份
+
+    pair = window.model.add_step("pair_source")
+    window.attach_pair_source(pair, lots["gt"]["klarf"], sync=True)
+    sid = window.model.nodes[pair].params["source"]
+    got = window.sources_for_run()
+    assert list(got) == [sid] and len(got[sid]) == 5
+    # 送進去的是 items，不是整個 Dataset（KlarfDoc 刻意不進 worker）
+    assert not hasattr(got[sid], "klarf")
+
+
+def test_every_path_that_runs_a_defect_passes_the_second_lot():
+    """便利貼：**下一條單顆的路也躲不掉**。
+
+    這個 bug 的形狀是「傳了四條路裡的三條」，而漏掉的那一條要跑起來才看得見。
+    所以這裡直接掃原始碼：`d4t/ui` 底下每一個 `run_defect(...)` 呼叫都要帶
+    `sources=`。掃字串是刻意的 —— 它擋得住「新加一條路而忘了傳」。
+    """
+    import ast
+
+    ui = Path(__file__).resolve().parent.parent / "d4t" / "ui"
+    missing = []
+    for path in sorted(ui.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if name != "run_defect":
+                continue
+            if not any(kw.arg == "sources" for kw in node.keywords):
+                missing.append("%s:%d" % (path.name, node.lineno))
+    assert not missing, (
+        "這幾個地方跑了一顆 defect 但沒有把第二份 lot 送進去 —— "
+        "有配對卡的 pipeline 在那裡會變成「沒有圖」：%s" % missing)

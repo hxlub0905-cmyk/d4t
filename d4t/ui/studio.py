@@ -3346,14 +3346,17 @@ class StudioWindow(QMainWindow):
         if sync:
             try:
                 result = PreviewWorker.run_sync(recipe, item, self.model.kind,
-                                                upto_node=upto)
+                                                upto_node=upto,
+                                                sources=self.sources_for_run())
             except Exception as e:      # noqa: BLE001 — UI 邊界
                 self._status("Preview failed: %s: %s" % (type(e).__name__, e), "error")
                 return False
             self._on_preview_ready(result)
             return True
         self._async_epoch = self._preview_epoch
-        self.preview_worker.request(recipe, item, self.model.kind, upto_node=upto)
+        self.preview_worker.request(recipe, item, self.model.kind,
+                                    upto_node=upto,
+                                    sources=self.sources_for_run())
         return True
 
     def _on_async_preview_ready(self, result: Any) -> None:
@@ -3681,7 +3684,8 @@ class StudioWindow(QMainWindow):
             return
         if not self.calibrate_worker.start(
                 self.model.to_recipe(), items[:self.CALIBRATE_LIMIT],
-                self.model.kind, nid, dict(node.params)):
+                self.model.kind, nid, dict(node.params),
+                sources=self.sources_for_run()):
             self._status("Still measuring - please wait.")
             return
         self._status("Measuring stripe pitch and width on %d defects…"
@@ -3872,7 +3876,8 @@ class StudioWindow(QMainWindow):
         node = self.model.nodes[self.selected_node]
         source = str(node.params.get("source", "") or "") or None
         args = (self.model.to_recipe(), items[:limit], self.model.kind,
-                self.selected_node, regions, REGION_THUMB, source)
+                self.selected_node, regions, REGION_THUMB, source,
+                self.sources_for_run())
 
         if self.region_window is None:
             self.region_window = RegionCheckWindow(self)
@@ -4720,6 +4725,22 @@ class StudioWindow(QMainWindow):
             if items else []
         out["source_columns"] = pair_ingest.columns_of(src)
         return out
+
+    def sources_for_run(self) -> Dict[str, Any]:
+        """掛在目前這份資料上的第二（第三…）份 —— **每一條跑 pipeline 的路都要**。
+
+        2026-08-20 踩過：`run_batch` 那條路傳了，**單顆預覽那條沒有**。
+        於是同一份 pipeline「試跑」有圖、切換 defect 沒圖，而使用者看到的是
+        「載入 RSEM 之後不會有圖」——那句話怎麼查都查不到 PNG 上面去。
+
+        所以這個答案只有一份，而且每一條路都問它：預覽、區域檢查、一鍵校正、
+        疊圖輸出、批次。
+        """
+        from d4t.core.ingest import pair_source as pair_ingest
+
+        if self.dataset is None:
+            return {}
+        return pair_ingest.sources_for_run(self.dataset)
 
     def _sync_pair_fields(self, source_id: str) -> None:
         """`carry` 改了 → 把那幾欄補進掛著的那一份（F15-2）。

@@ -15,6 +15,31 @@
 
 ---
 
+## 第二份只送進了一半的路（2026-08-20，第二十六輪）
+
+使用者：「Pair with another source，我載入 image（RSEM 的 GT，23 顆），不會有圖
+（是不是因為我用的是 PNG 檔案）　拉過去 Align to stream 也沒有圖」。
+
+**不是 PNG**（`.png/.tif/.tiff/.jpg/.jpeg/.bmp` 都吃）。是 F15-A 的我漏了一半：
+`run_batch` 那條路把 `sources` 送進 worker 了，**單顆預覽那條沒有**。於是
+`pair_source` 說「no lot is loaded as 'X'」，而症狀是「沒有圖」——
+同一份 pipeline **按「試跑」有圖、切換 defect 沒圖**。
+
+那個形狀是這個 repo 記過好幾次的那一種：**同一件事有兩條路，而只有一條被想到**。
+單顆的路其實有四條，我當時只想到 0 條：
+
+* `PreviewWorker`（切換 defect／改參數）
+* `RegionCheckWorker`（區域檢查）
+* `CalibrateWorker`（一鍵校正）
+* Export 的疊圖（它是跑一次 pipeline 畫出來的）
+
+修法：答案只有一份 —— `StudioWindow.sources_for_run()` —— 而每一條路都問它。
+便利貼是一條**掃原始碼**的測試：`d4t/ui` 底下每一個 `run_defect(...)` 呼叫都要
+帶 `sources=`，漏掉的那一條會被指名。掃字串是刻意的，它擋得住「新加一條路而忘
+了傳」——而這個 bug 的形狀正是那個。
+
+---
+
 ## 怎麼驗證：tools/pair_probe.py（2026-08-20，第二十五輪）
 
 使用者：「我該怎麼驗證呢」。
