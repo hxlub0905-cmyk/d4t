@@ -5,7 +5,7 @@
 色調映射，使用者的問題只有一個「把這張圖調得看得清楚」）。
 
 注意：subtract 產出的 diff 流是 **float32**（可能含負值，取決於 absolute），
-下游卡（snr_map / blob_segment / roi_snr…）都吃得下 float32。
+下游卡（snr_map / roi_snr / glv_stats…）都吃得下 float32。
 """
 from __future__ import annotations
 
@@ -25,7 +25,10 @@ class SubtractStep(Step):
     """影像相減：out = a - b（float32；absolute=True 時取絕對值）。"""
 
     key = "subtract"
-    label = "Compare two streams"
+    #: ``key`` 仍然是 ``subtract`` —— 那是 recipe 的鍵，改了舊檔就開不起來。
+    #: 給人看的名字改了（F16，使用者定調）：這張卡的五個 ``op`` 只有一個是
+    #: 相減，叫它「Compare two streams」會讓另外四個看起來不屬於這裡。
+    label = "Image Combination"
     category = CATEGORY_IMAGE
     group = GROUP_COMPARE
     help = ("Combine two image streams into one - normally test minus ref, "

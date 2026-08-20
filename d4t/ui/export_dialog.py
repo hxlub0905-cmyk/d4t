@@ -765,7 +765,7 @@ class ExportDialog(QDialog):
         lay = QVBoxLayout(box)
         lay.setSpacing(6)
 
-        self.chk_overlay = QCheckBox("Write overlay PNGs (the main blob boxed in red)", box)
+        self.chk_overlay = QCheckBox("Write overlay PNGs", box)
         self.chk_overlay.toggled.connect(self._on_any_output_toggled)
         lay.addWidget(self.chk_overlay)
 
@@ -784,7 +784,7 @@ class ExportDialog(QDialog):
             self._pick_overlay_dir)
         lay.addLayout(orow)
 
-        hint = QLabel("Overlays re-run the pipeline to obtain diff and blob; without a recipe only the raw image is drawn.",
+        hint = QLabel("Overlays re-run the pipeline to obtain diff; without a recipe only the raw image is drawn.",
                       box)
         hint.setObjectName("paramHint")
         hint.setWordWrap(True)

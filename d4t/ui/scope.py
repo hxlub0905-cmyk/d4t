@@ -61,7 +61,8 @@ SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder")
 #: * ``cell_period`` —— **刪掉**（使用者：「不需要這功能」）。
 #: * ``golden_cell`` —— 先刪，同一天要回來並**改名**成 ``pattern_ref``
 #:   「Reference from pattern」（使用者：「那可能要拿回來 不過要改名字
-#:   不然會誤會」）。它現在正常地在 Compare 段的卡片庫裡。
+#:   不然會誤會」），當晚收起來，**2026-08-20（F16）刪掉**（使用者：
+#:   「完全沒用，請直接拿掉」）。同一張卡走完了四種下場。
 #: * ``align`` —— **收起來**（使用者：「之後真需要我再回來」）。
 #:
 #: **三種處置，判準都是使用者說了哪一句話**，不是我覺得那張卡有沒有用。
@@ -91,20 +92,18 @@ SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder")
 #: **卡片庫**：已經在用它的 recipe 照跑、CLI 照跑、黃金值一個字不動。
 #: 要回復就是把這個字串拿掉（F7-1 驗證過的那個判斷）。
 #:
-#: 2026-08-18（F11 Region-5 收尾）：**`pattern_ref` 也收起來了。** 使用者的話是
-#: 「請拿掉吧」，而那句話的上文是我提的「收起來只是加一個字串」。
+#: 2026-08-18（F11 Region-5 收尾）：`pattern_ref` 先收起來 ——
+#: **2026-08-20（F16）刪掉了**（使用者：「Compare 中 pattern_ref 這項功能完全
+#: 沒用，請直接拿掉」）。所以它已經不在這個 tuple 裡。
 #:
-#: 為什麼它沒事做了：它原本被期待成「單張影像找 ROI 的第三種方法」，但那件事
-#: **Template 已經在做**（量過：1000×1000 → 625 個框，見計畫書 §3.3.20）。
-#: 它剩下的唯一能力是「從重複結構疊一張 ref 出來去相減」，而使用者現在的 RSEM
-#: 路線是「Region 段圈區域 → Compare regions 比層／比份」，用不到 ref。
+#: 那一輪把「收起來」與「刪掉」的**價差**真的付了一次，值得留著當參考：
+#: 收起來的時候，代價是一個字串；刪掉的時候，`dual_route_basic.json` 的 rsem
+#: route 必須重做（它靠那張卡造 ref 才有 diff 可量），一組黃金值重新定錨，
+#: 而那條 route 的 24/24 **變成每一顆都判 bin 0**（實測 seed 11/3/21 皆 12/24，
+#: 而那 12 正好是沒有缺陷的那 12 顆）。詳見 `tests/test_e2e_dual_route.py`。
 #:
-#: **為什麼是收起來不是刪掉**：這一張刪過一次，量出代價（rsem route 24/24 →
-#: 12/24）之後又被要回來（見計畫書 §3.4.2）。而且
-#: `tests/fixtures/recipes/dual_route_basic.json` 的 rsem route 正用著它，撐著
-#: 一組黃金值 —— 刪掉 = 那份 recipe 開不起來 = 黃金值要重新定錨。
-#: `HIDDEN_STEPS` 只過濾**卡片庫**：那份 recipe 照跑、CLI 照跑、黃金值一個字不動。
-HIDDEN_STEPS: Sequence[str] = ("align", "pattern_ref")
+#: 所以「不確定的時候先收起來」那句話沒有被推翻 —— 這一次是使用者確定了。
+HIDDEN_STEPS: Sequence[str] = ("align",)
 
 #: 沒有資料集時 ``RecipeModel`` 用的 route 名稱。
 DEFAULT_KIND: str = SUPPORTED_KINDS[0]

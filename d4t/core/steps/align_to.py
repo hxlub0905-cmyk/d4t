@@ -41,14 +41,18 @@ class AlignToStep(Step):
     """小圖當模板在大圖裡找位置，裁一塊同尺寸的出來。"""
 
     key = "align_to"
-    label = "Align to another stream"
+    #: ``key`` 不動（recipe 的鍵）。名字是使用者取的（F16）：**H2H = head to
+    #: head**。三個字母在卡片庫裡看不出它做什麼，所以 ``help`` 的**第一句**要
+    #: 把全稱與這張卡做的事一起講完 —— 那一句同時是節點副標與 tooltip 的開頭，
+    #: 是使用者唯一會讀到的地方。
+    label = "H2H"
     category = CATEGORY_IMAGE
     group = GROUP_COMPARE
-    help = ("Find where the small image sits inside the big one and cut out a "
-            "piece the same size, so the two can be compared at all. The match "
-            "score comes out as a feature - when the two are not the same "
-            "defect it drops, which is how a wrong pairing shows up instead of "
-            "quietly producing numbers.")
+    help = ("Head to head: find where this small image sits inside a bigger "
+            "one and cut out a piece the same size, so the two can be compared "
+            "at all. The match score comes out as a feature - when the two are "
+            "not the same defect it drops, which is how a wrong pairing shows "
+            "up instead of quietly producing numbers.")
     params = [
         ParamSpec(name="template", type="image_key", direction="in",
                   default="test", label="Small image",

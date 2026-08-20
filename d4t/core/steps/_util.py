@@ -721,7 +721,7 @@ def region_family(name: str):
 
 
 def crop_to_roi(ctx, step_key: str, image, roi_name):
-    """依 ``roi`` 參數裁出要量測的像素（找不到 blob 時退回整張圖）。"""
+    """依 ``roi`` 參數裁出要量測的像素（找不到那個區域時退回整張圖）。"""
     rect = roi_rect_or_none(ctx, step_key, image, roi_name)
     if rect is None:
         return image
@@ -828,8 +828,8 @@ class MultiSourceStep(Step):
     #: 成立：同一組統計量、同一張圖，量在兩個不同的區域上。
     REGION = "roi"
 
-    #: 這張卡**沒有影像也量得下去**嗎（``cd_measure`` 是：``roi="blob"`` 時
-    #: 矩形已經是像素座標，影像只用來做次像素精修）。設 False 的卡拿到的
+    #: 這張卡**沒有影像也量得下去**嗎（``cd_measure`` 是：區域的矩形已經是
+    #: 像素座標，影像只用來做次像素精修）。設 False 的卡拿到的
     #: ``img`` 可能是 ``None``，自己決定怎麼辦。
     REQUIRE_IMAGE = True
 

@@ -24,12 +24,29 @@
 （快取切點、驗證順序）。**使用者看到的**分組是另一個軸 `Step.group`：
 
 ```
-Input → Enhance → Region → Compare → Measure → ADC
+Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output
 ```
+
+（F16，2026-08-20 使用者定稿。`ROI` 的內部 id 仍是 `region` —— 顯示名與 id 是
+兩件事。）
 
 因為 category 描述的是「這張卡吐什麼型別」，不是「使用者想解決什麼問題」。
 兩個軸各有各的用途，不要合併。新卡片放哪一組：看它吃什麼、吐什麼
 （規則寫在 `pipeline/step.py` 的 `GROUP_*` 常數旁邊）。
+
+**這個順序不決定執行順序。** 執行是 `recipe.execution_order()` 的 DAG 拓撲排序
+—— 線怎麼拉就怎麼跑。`GROUP_ORDER` 排的是**卡片庫的分區順序**（連帶 rail 的
+上下順序與階段顏色），所以「Compare 排在 Measure 後面」不代表 `diff` 會晚一步
+產生：那件事由線保證。
+
+⚠ 順序有**兩份**（`step.py` 的 `GROUP_ORDER` 與 `ui/widgets.py` 的
+`LibraryPanel.GROUPS`，後者多帶標題與副標），`tests/test_ui_f16_stages.py`
+把它們綁在一起。
+
+兩段的界線各有一條自動套用到 registry 的測試：
+**Algo 段的卡不吃影像流**（`resolve_reads()` 恆為空 —— 使用者：「measure 是量出
+數值來，Algo 是拿這些 feature 去做更 custom 的處理」）、
+**Output 段的卡是 end point**（`resolve_writes()` 與 `resolve_features()` 都是空的）。
 
 UI 三段分色（影像=藍 `#6f93b5`／算法=橙 `#c06a1d`／判定=紫 `#8a6fb5`）。
 這個分類不是裝飾 —— 它同時是 `Step.category`、快取切點、recipe 驗證順序的依據。

@@ -2,11 +2,16 @@
 """cd_measure — CD 量測卡（M1 簡化版）。
 
 ★ M1 簡化說明 ★
-v1 的 CD 定義是「最大 blob 的 bounding box 寬 / 高」：
+CD 的定義是「接進來的那個區域的 bounding box 寬 / 高」：
   cd_x_px = bbox 寬、cd_y_px = bbox 高。
-這是缺陷尺寸的粗估，不是產線 CD-SEM 等級的線寬量測（真正的
-edge-pair / 多取樣線寬量測留待後續 milestone）。refine="subpixel"
+這是缺陷尺寸的粗估，不是產線 CD-SEM 等級的線寬量測。refine="subpixel"
 時只精修 bbox 的上下邊（Y 方向）成次像素，X 方向仍是 bbox 寬。
+
+★ 這張卡之後會重做（F16，2026-08-20）★
+使用者定調「CD Measurement 部分我們之後獨立一個 session 來重新討論與設計」，
+所以這一輪只把它的**名字**（`CD`）與**訊息**修對，演算法一行都沒動。
+同一輪也確定**不做 blob 分割** —— 以前這裡的說明與警告都假設上游有一張
+「Blob segment」卡，而那張卡從來沒有存在過。
 
 ★ 單位：一律 pixel（2026-07-30 決定）★
 這張卡只吐 px。以前它會在 ``meta["nm_per_px"]`` 存在時同步吐
@@ -43,14 +48,15 @@ _ZERO = {"cd_x_px": 0.0, "cd_y_px": 0.0, "area_px": 0.0}
 
 @register_step
 class CdMeasureStep(MultiSourceStep):
-    """CD 量測（M1：最大 blob 的 bbox 尺寸；可選次像素上下邊精修）。"""
+    """CD 量測（M1：接進來那個區域的 bbox 尺寸；可選次像素上下邊精修）。"""
 
     key = "cd_measure"
-    label = "CD measure"
+    #: ``key`` 不動（recipe 的鍵）。短名是使用者要的（F16）。
+    label = "CD"
     category = CATEGORY_ALGO
     group = GROUP_MEASURE
-    help = ("Measure the width, height and area of the main defect blob, in "
-            "pixels. Currently a bounding-box estimate. Convert to nm at "
+    help = ("Measure the width, height and area of the region you point it at, "
+            "in pixels. Currently a bounding-box estimate. Convert to nm at "
             "export time, where you enter the nm per pixel yourself.")
     params = [
         ParamSpec(name="source", type="image_keys", direction="in", default="diff",
@@ -67,7 +73,7 @@ class CdMeasureStep(MultiSourceStep):
                   help=("none = use the bounding box as is; subpixel = refine the "
                         "top and bottom edges to sub-pixel precision (falls back "
                         "to the bounding box on failure).")),
-        output_prefix_spec("blob"),
+        output_prefix_spec("defect"),
     ]
     reads = ["diff"]
     writes: List[str] = []
@@ -77,27 +83,29 @@ class CdMeasureStep(MultiSourceStep):
     REQUIRE_IMAGE = False
 
     def measure(self, ctx: Context, img, p: Dict[str, Any]):
-        # 尺寸來源：優先用接進來的那條流，否則任何一張都可以。可能一張都沒有
-        # —— roi="blob" 不需要影像（矩形已是像素座標）。
+        # 尺寸來源：優先用接進來的那條流，否則任何一張都可以。
         shape_src = img
         if shape_src is None:
             shape_src = next(iter(ctx.images.values()), None)
 
         rect = roi_rect_or_none(ctx, self.key, shape_src, p["roi"])
         if rect is None:
-            ctx.warn(f"[{self.key}] no blob found (run Blob segment first, or "
-                     f"point roi at a Define region card); all CD features "
-                     f"recorded as 0.")
+            # ⚠ 這句話以前寫「run Blob segment first」，而那張卡**從來沒有存在
+            # 過**（F16 使用者定調不做）。叫使用者去按一個不存在的東西，比不講
+            # 更糟 —— 所以只留還走得通的那一條路。
+            ctx.warn(f"[{self.key}] no region to measure: drag a line from a "
+                     f"Region card into “Region”, or leave it empty to measure "
+                     f"the whole image; all CD features recorded as 0.")
             return dict(_ZERO)
 
         bx, by = float(rect[0]), float(rect[1])
         bw, bh = float(rect[2]), float(rect[3])
         cx = bx + bw / 2.0
 
-        # 面積：blob 有真實的像素面積（不是 bbox 面積），使用者畫的框則是 w*h。
-        blobs = ctx.meta.get("blobs") or []
-        area_px = (float(blobs[0].get("area", bw * bh))
-                   if (blobs and str(p["roi"]).strip() == "blob") else bw * bh)
+        # 面積 = 框的面積。以前這裡還有一條「如果 roi 叫 blob 就改讀
+        # ctx.meta["blobs"] 的真實像素面積」—— 那份 meta **沒有任何生產者**
+        # （F16 清掉），所以那條路每一次都走不到，而它讓人以為有東西在寫它。
+        area_px = bw * bh
 
         cd_x_px = bw
         cd_y_px = bh

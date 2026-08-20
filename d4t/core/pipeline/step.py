@@ -45,28 +45,47 @@ CATEGORY_ADC = "adc"
 #: =============  =========================  ==============================
 #: input          （固定頭節點）              load_patch
 #: enhance        影像 → 影像                normalize / gamma / denoise
-#: region         找出「要看哪裡」            snr_map / blob_segment / roi_define
-#: compare        影像＋影像 → 影像           align / subtract
+#: region         找出「要看哪裡」            roi_cross / roi_template
 #: measure        影像＋區域 → 數字           glv_stats / cd_measure
+#: algo           **數字 → 數字**（不碰影像）  feature_math
+#: compare        影像＋影像 → 影像           align / subtract
 #: adc            數字 → score → bin         （固定尾節點）
+#: output         （固定尾節點，什麼都不吐）   output_csv / output_klarf
 #: =============  =========================  ==============================
 #:
 #: **型別規則是預設的裁決方式，但不是唯一的。** ``snr_map`` 是影像進影像出，
-#: 照型別會落在 enhance —— 但它的**唯一**消費者是 ``blob_segment``
-#: （每一份範例 recipe 都是 snr → blob），而且它必須跑在 Compare 之後，
-#: 放在讀起來排第二的 Enhance 裡永遠用不到。所以規則補一條：
+#: 照型別會落在 enhance —— 但它答的是「哪裡突出」，而且它必須跑在 Compare
+#: 之後，放在讀起來排第二的 Enhance 裡永遠用不到。所以規則補一條：
 #: **一張卡如果只為了餵另一段而存在，就跟著那一段走。**
 GROUP_INPUT = "input"
 GROUP_ENHANCE = "enhance"
 GROUP_REGION = "region"
 GROUP_COMPARE = "compare"
 GROUP_MEASURE = "measure"
+#: ⚠ 字串跟 :data:`CATEGORY_ALGO` 一模一樣，**但它們是兩個不同的軸**
+#: （見這一段開頭）：``CATEGORY_ALGO`` 說的是「這張卡吐數字」——
+#: 每一張量測卡都是 ``CATEGORY_ALGO``，而它們的 ``group`` 是 ``measure``。
+#: ``GROUP_ALGO`` 說的是「這張卡**只**吃數字、不碰影像」（F16，使用者定調：
+#: 「measure 是量出數值來，Algo 是拿這些 feature 去做更 custom 的處理」）。
+#: 那條界線有測試守著：Algo 段的卡 ``resolve_reads()`` 恆為空。
+GROUP_ALGO = "algo"
 GROUP_ADC = "adc"
+#: 這一段的卡是 **end point**：不吐影像流、不吐特徵，只把東西寫出去。
+#: 同樣有測試守著（``resolve_writes()`` 與 ``resolve_features()`` 都是空的）。
+GROUP_OUTPUT = "output"
 
 #: 卡片庫的顯示順序（讀起來是一句話：
-#: Input → Enhance → Region → Compare → Measure → ADC）。
-GROUP_ORDER = (GROUP_INPUT, GROUP_ENHANCE, GROUP_REGION,
-               GROUP_COMPARE, GROUP_MEASURE, GROUP_ADC)
+#: Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output）。
+#:
+#: **這個順序不決定執行順序。** 執行是 :func:`recipe.execution_order` 的 DAG
+#: 拓撲排序 —— 線怎麼拉就怎麼跑。這裡排的是**卡片庫的分區順序**（連帶 rail 的
+#: 上下順序與階段顏色），所以「Compare 排在 Measure 後面」不代表 ``diff`` 會
+#: 晚一步產生：那件事由線保證。
+#:
+#: ⚠ 這份順序在 UI 有第二份：``ui/widgets.py`` 的 ``LibraryPanel.GROUPS``
+#: （它多帶標題與副標）。兩份要一致，``tests/test_ui_f16_stages.py`` 鎖著。
+GROUP_ORDER = (GROUP_INPUT, GROUP_ENHANCE, GROUP_REGION, GROUP_MEASURE,
+               GROUP_ALGO, GROUP_COMPARE, GROUP_ADC, GROUP_OUTPUT)
 _GROUPS = GROUP_ORDER
 _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC)
 
@@ -615,8 +634,8 @@ class Step(ABC):
     # ---- 具名區域（F7-9）---------------------------------------------------
     #: 影像流有 reads/writes 可以在 validate 裡模擬，**具名 ROI 以前沒有**。
     #: 於是「量測卡指到一個沒人定義的區域」只有兩種下場：名字打錯 → 每顆
-    #: defect 執行到一半才 StepError；名字剛好是保留字 ``blob`` 而上游又沒有
-    #: Blob 卡 → **安靜地改量整張圖**，跑得完、有數字、而且是錯的。
+    #: defect 執行到一半才 StepError；上游那張 Region 卡被拿掉 →
+    #: **安靜地改量整張圖**，跑得完、有數字、而且是錯的。
     #: 後者是最糟的一種：使用者看不出哪裡不對。所以區域也宣告成契約，
     #: 跟影像流走同一條檢查路徑（``recipe.validate`` 的 unknown-region）。
     @classmethod

@@ -77,7 +77,7 @@
 計畫書：[`plans/F11-phase2-features.md`](plans/F11-phase2-features.md)。
 
 **做法是「逐段逐卡」**（使用者 2026-08-17）：從左側卡片庫的順序一步一步往下
-（Input → Enhance → Region → Compare → Measure → ADC），**每張卡的預期功能、
+（F16 起是 Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output），**每張卡的預期功能、
 UI 介面、設定放哪都要先討論過**才動手。所以計畫書是**議程**不是待辦清單，
 而這個 phase 的**週期會拉很長**（新功能 + 完善舊功能）。
 
@@ -94,26 +94,53 @@ UI 介面、設定放哪都要先討論過**才動手。所以計畫書是**議�
 |---|---|
 | **Input** | ✅ **收斂 2026-08-17**（Input-0…4）：多入口（`Step.is_source`）、`channel_map`（這一顆的第幾張叫什麼）、`tiff_stack`（大 TIFF 沒有 KLARF）、四種輸入的入口做齊、**Input 卡按 source 拆成兩張**（`load_patch` / `load_single` —— 兩張都不看資料型別，畫布因此不說謊）。**範圍：patch + RSEM**（多通道擱置）|
 | **Enhance** | ✅ **收斂 2026-08-17**（Enhance-1…3）：**值域變成明講的契約**（實測 `stripes_h` 吐 261.5，會活到後面某個 `to_uint8` 才被壓掉）＋ `clip_frac`；三個新方法（`flatten` 的 median 背景估計、`denoise` 的 `hot_pixels`、`normalize` 的耐離群 `zscore`），**一張新卡都沒開**；五個面板輔助（核心大小畫在影像上、削平的整批走勢、曲線墊直方圖、磨掉幾個 σ、兩條流還有多像）；兩支 lint（`uneven-treatment` / `card-order`）。**融合卡（PCA Ref、BSE·SE quadrant）擱置** —— 使用者 2026-08-17：「我決定我暫時不做 multi channel，暫時 focus 在 patch 跟 RSEM Image」|
-| **Region** | **分三個階段，對應三種 mode（使用者定調 2026-08-17，照難度爬）**：**Region-1 Template ✅ 2026-08-18**（`roi_template` 改成「一張卡好幾個區域、一個區域好幾個矩形」，框在 Golden Cell 上**畫**出來 —— 含 multi add 一次長一整排等距的框；框映到 patch 時整片鋪過去，不再只取離缺陷最近的那一份。尾巴：模板過期健檢還沒做）→ **Region-2 Profile ✅ 2026-08-18**（`roi_cross`：三個下拉改圖示、點曲線就是挑材質，以及**單方向** —— 原本寫死「兩組正交條紋」是需求的形狀不是演算法的形狀，新的 `directions` 讓一張只有 line/space 的 patch 也定得出位置，做法是給沒在用的那一軸一根滿版的條紋，交會的幾何一行都不用改。**「三個框尺寸改成在影像上拖」使用者否決了** —— 那些框是逐顆的結果，拖它等於改輸出；可以用拖的只有所有 defect 共用的那一個物件）→ **兩張卡共用的兩件小事 ✅ 2026-08-18**（`drop_edge`／`edge_margin`：靠邊 n px 內的框自動拿掉 —— 壓在 patch 邊上的框量到的是半截的那一塊，而它照樣吐得出看起來正常的數字；**滿版的那一軸不算靠邊**、**缺陷那一塊永遠留著**。以及**疊框一個區域一個顏色**，跟模板編輯器同一組 —— 一張卡好幾個區域之後，全部畫成藍色就分不出哪塊是 ROI1）→ **Region-3 GDS**（**只做 RSEM**：單張 + KLARF，使用者定調 2026-08-18 —— GLAS 是瞄著 RSEM 大圖對的，patch 太小且 GLAS 那邊沒打通；那一刀讓「給 GLAS 的兩件必要需求」都不需要了。**匯出健檢 ✅**：`tools/check_glas_export.py` 印出可以貼出來的遮蔽報告，四條核心檢查是讀 GLAS 程式碼讀出來的。**第 1／2 步 ✅ 2026-08-18**：`tools/make_glas_export.py`（家用機的合成匯出）＋ `ingest/glas_export.py` 配對 ＋ `load_sidecar` 卡（附加檔住 `DefectItem.sidecars`，不進 `images` —— 混進去 `load_single` 會因為「一顆兩張」而全部載不進來）。順手修掉兩個安靜的錯：換匯出快取不失效、`load_raw` 會把三通道 label 合成灰階把 id 混掉。**第 3／4 步 ✅ 2026-08-18**：`roi_from_mask`（精確拆矩形 —— L 形的 bbox 會框到別的材質；`max_boxes` 預設 8192 是量出來的，真實一層是幾十到約五千個矩形，既有的 64 會安靜砍掉 95%）＋ Studio（`Open GDS export…`、`layers` 的表格、儀表）。新卡 `roi_from_mask` 吃 GLAS 的 label map；每個 layer 切成一堆小矩形 —— 站點的區域本來就都是矩形，所以那是等價不是近似）。出口契約已經留好（見 [`ARCHITECTURE.md`](ARCHITECTURE.md)），下游零改動）→ **Region-4 輸出統一 ✅ 2026-08-18**（三張找 ROI 的卡對**每一個區域**寫同一組五個數字 `present`／`boxes`／`area_px`／`clipped`／`edge_dropped`，使用者：「現在有點像大家資料結構不一樣」。前三個從 ctx 讀回來、不是卡片自己記一份；`clipped`／`edge_dropped` 整個家族共用；`present` 與 `boxes` 刻意會不一致 —— 退回整張圖那個保險是「有東西可以量，但它不是你要的那個」）→ **Region-5 單張大圖 ✅ 2026-08-18**（使用者要第四種「用重複結構鋪 ROI」的卡，**量過之後不必新卡**：Template 餵一張 1000×1000 就得到 625 個框、相位正確、61 ms，差別只在接哪一條流。修掉三個擋路的：`max_boxes` 64 → 8192（同 `roi_from_mask`）、`<name>_clipped` 在 Template 上原本恆為 0、對話框多一顆 `Use the image on screen`。`pattern_ref` 因此沒事做了，收進 `HIDDEN_STEPS`）。**Region 段到此收斂 —— 四種找 ROI 的方法都在，輸出契約一致。** |
-| **Compare**（下一個大件）| **patch ↔ RSEM 對位**（使用者要多入口的原因）：`align` 的五個 backend 全部要求同尺寸，小圖對大圖會回 `dx=0 dy=0` —— 要補 matchTemplate 的第三種座標數學 + 一張新卡，並修 `align` 尺寸不符要報錯。另有 GLAS 的合成 gray 當 ref、吃 GLAS 算好的 offset。**配對機制也在這一段**（使用者：「配對是之後的事」）。⚠ **F15 已經把「配對」這一小塊的引擎做完了（2026-08-19/20），但停在那裡** —— 見下面「F15 停在哪裡」|
-| **Measure** | **Blob 分割**（演算法在卻沒有卡片，而 `cd_measure` 的警告叫使用者「run Blob segment first」、overlay 的主 blob 紅框兩條路都沒有生產者）、離群旗標（跨顆）、Region Stats / FFT、`snr_map` 多來源 |（**`roi_compare` ✅ 2026-08-18**：拿哪兩塊比 —— target/reference 住在這張卡的參數上，不是區域的屬性；兩個輸入埠所以「同一區域、兩條流」也說得完；`snr` 沿用既有的帶正負號慣例不發明第三種）
+| **Region** | **分三個階段，對應三種 mode（使用者定調 2026-08-17，照難度爬）**：**Region-1 Template ✅ 2026-08-18**（`roi_template` 改成「一張卡好幾個區域、一個區域好幾個矩形」，框在 Golden Cell 上**畫**出來 —— 含 multi add 一次長一整排等距的框；框映到 patch 時整片鋪過去，不再只取離缺陷最近的那一份。尾巴：模板過期健檢還沒做）→ **Region-2 Profile ✅ 2026-08-18**（`roi_cross`：三個下拉改圖示、點曲線就是挑材質，以及**單方向** —— 原本寫死「兩組正交條紋」是需求的形狀不是演算法的形狀，新的 `directions` 讓一張只有 line/space 的 patch 也定得出位置，做法是給沒在用的那一軸一根滿版的條紋，交會的幾何一行都不用改。**「三個框尺寸改成在影像上拖」使用者否決了** —— 那些框是逐顆的結果，拖它等於改輸出；可以用拖的只有所有 defect 共用的那一個物件）→ **兩張卡共用的兩件小事 ✅ 2026-08-18**（`drop_edge`／`edge_margin`：靠邊 n px 內的框自動拿掉 —— 壓在 patch 邊上的框量到的是半截的那一塊，而它照樣吐得出看起來正常的數字；**滿版的那一軸不算靠邊**、**缺陷那一塊永遠留著**。以及**疊框一個區域一個顏色**，跟模板編輯器同一組 —— 一張卡好幾個區域之後，全部畫成藍色就分不出哪塊是 ROI1）→ **Region-3 GDS**（**只做 RSEM**：單張 + KLARF，使用者定調 2026-08-18 —— GLAS 是瞄著 RSEM 大圖對的，patch 太小且 GLAS 那邊沒打通；那一刀讓「給 GLAS 的兩件必要需求」都不需要了。**匯出健檢 ✅**：`tools/check_glas_export.py` 印出可以貼出來的遮蔽報告，四條核心檢查是讀 GLAS 程式碼讀出來的。**第 1／2 步 ✅ 2026-08-18**：`tools/make_glas_export.py`（家用機的合成匯出）＋ `ingest/glas_export.py` 配對 ＋ `load_sidecar` 卡（附加檔住 `DefectItem.sidecars`，不進 `images` —— 混進去 `load_single` 會因為「一顆兩張」而全部載不進來）。順手修掉兩個安靜的錯：換匯出快取不失效、`load_raw` 會把三通道 label 合成灰階把 id 混掉。**第 3／4 步 ✅ 2026-08-18**：`roi_from_mask`（精確拆矩形 —— L 形的 bbox 會框到別的材質；`max_boxes` 預設 8192 是量出來的，真實一層是幾十到約五千個矩形，既有的 64 會安靜砍掉 95%）＋ Studio（`Open GDS export…`、`layers` 的表格、儀表）。新卡 `roi_from_mask` 吃 GLAS 的 label map；每個 layer 切成一堆小矩形 —— 站點的區域本來就都是矩形，所以那是等價不是近似）。出口契約已經留好（見 [`ARCHITECTURE.md`](ARCHITECTURE.md)），下游零改動）→ **Region-4 輸出統一 ✅ 2026-08-18**（三張找 ROI 的卡對**每一個區域**寫同一組五個數字 `present`／`boxes`／`area_px`／`clipped`／`edge_dropped`，使用者：「現在有點像大家資料結構不一樣」。前三個從 ctx 讀回來、不是卡片自己記一份；`clipped`／`edge_dropped` 整個家族共用；`present` 與 `boxes` 刻意會不一致 —— 退回整張圖那個保險是「有東西可以量，但它不是你要的那個」）→ **Region-5 單張大圖 ✅ 2026-08-18**（使用者要第四種「用重複結構鋪 ROI」的卡，**量過之後不必新卡**：Template 餵一張 1000×1000 就得到 625 個框、相位正確、61 ms，差別只在接哪一條流。修掉三個擋路的：`max_boxes` 64 → 8192（同 `roi_from_mask`）、`<name>_clipped` 在 Template 上原本恆為 0、對話框多一顆 `Use the image on screen`。`pattern_ref` 因此沒事做了，先收進 `HIDDEN_STEPS`、2026-08-20 刪掉）。**Region 段到此收斂 —— 四種找 ROI 的方法都在，輸出契約一致。** |
+| **Compare** | **它不缺卡，缺的是既有那幾張長 method**（2026-08-20 讀 code 讀出來的）：`Image Combination`（原 `Compare two streams`）加 `abs` / normalized `(a−b)/(a+b)`；`align`（在 `HIDDEN_STEPS`）加一個吃 GLAS 算好 offset 的 method。小圖對大圖那張已經有了（`H2H`，原 `Align to other stream`，F15）。**ROADMAP 以前寫的「GLAS 合成 gray 當 ref」不需要新卡** —— gray 由 `load_sidecar` 在 Input 載進來，Compare 只負責對位＋相減。⚠ **`pattern_ref` 已於 F16 刪除**（使用者：「完全沒用」），所以單張影像那條路現在**造不出 ref**。⚠ **F15 的配對引擎做完了但停在那裡** —— 見下面「F15 停在哪裡」|
+| **Measure** | ~~Blob 分割~~ **不做**（使用者 2026-08-20：「不需要 也不要再出現」；CD Measurement 之後獨立一個 session 重新討論與設計）。F16 順手把兩句指向那張不存在的卡的警告改掉了。剩下：離群旗標（跨顆 —— 要那一層）、Region Stats / FFT、`snr_map` 多來源。**兩張 GLV 卡合併成一張 `Gray level`**（下拉切「量一塊」／「比兩塊」），`CD measure`→`CD`、`ROI SNR`→`SNR` |（**`roi_compare` ✅ 2026-08-18**：拿哪兩塊比 —— target/reference 住在這張卡的參數上，不是區域的屬性；兩個輸入埠所以「同一區域、兩條流」也說得完；`snr` 沿用既有的帶正負號慣例不發明第三種）
 | **ADC** | **一張卡都沒有，而且只分得出兩類。** score 是 recipe 上的一個欄位（`bins` 被強制只有 `below`/`above`），`__score__` 是 UI 造的假節點。多類別要先設計資料結構，不是加一張卡 —— 這是整個 app 最大的功能缺口 |
 | ML Classify | **Phase 2 後半**。吃已經匯得出來的 feature vector CSV；相依策略到時候再定 |
 
-### 畫布上少了兩段（使用者 2026-08-20 第一次講完整）
+### 畫布的八段（F16，使用者 2026-08-20 定稿）
 
-> Input · Enhance · ROI · Compare · Measure · **Algo** · ADC · **Output**
-> 然後再加給幾個 **for Custom 的設計**（幫助工程師）
+```
+Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output
+```
 
-目前的 `GROUP_ORDER` 是 `Input → Enhance → Region → Compare → Measure → ADC`，
-所以少的是：
+**段落本身 ✅ 2026-08-20**：`GROUP_ORDER` 重排並加了 `algo` / `output` 兩段，
+`LibraryPanel.GROUPS` 對齊（`tests/test_ui_f16_stages.py` 把兩份綁在一起），
+階段色從 6 個擴到 8 個。
 
-* **Algo** —— 現在 `algo` 是卡片的 *category*（image / algo / adc），不是畫布上
-  的一段。要變成一段的話，「它跟 Measure 差在哪」要先講得出來。
-* **Output** —— 現在 Export 是一個**精靈**，不在畫布上。它一旦變成一段，
-  「這份 recipe 會吐出什麼」就跟其他段一樣看得見、存得進 recipe。
-* **Custom 這一層** —— F15（配對分析）是第一個，但它現在跟主段落混在同一個
-  卡片庫裡。這一層還沒有形狀：它是一個 group？一個標籤？還是卡片庫的第二區？
+**這個順序不決定執行順序** —— 執行是 DAG 拓撲排序，線怎麼拉就怎麼跑；
+`GROUP_ORDER` 排的是卡片庫的分區順序。所以「Compare 排在 Measure 後面」不代表
+`diff` 會晚一步產生。
+
+兩段的界線各有一條自動套用到 registry 的測試：
+
+* **Algo** —— 使用者：「measure 是量出數值來，但 **Algo 是拿這些 feature 內去做
+  更 custom 的處理**」。寫成不變量：**Algo 段的卡 `resolve_reads()` 恆為空**
+  （不吃影像流）。第一張卡是 `feature_math`。
+* **Output** —— 使用者：「**他就是個 end point**」，而且「可以產出多種 style
+  （分 card）：Report / CSV / KLARF / HTML，要單純 output image 也可」。
+  寫成不變量：**`resolve_writes()` 與 `resolve_features()` 都是空的**。
+  ⚠ **Output 為真相，現有的 Export 精靈要拿掉**（使用者定調）—— 但順序綁死：
+  Output 卡要先做到能取代精靈、逐格驗過，才刪，否則中間 app 輸不出任何東西。
+  ⚠ 這一段還卡在一個引擎缺口上：**跨顆那一層**（見下）。
+* **Custom 這一層** —— **先不做**（使用者 2026-08-20：「先把大部分功能完成
+  需要我們再來研究」）。
+
+### 引擎缺口：跨顆那一層（batch-level step）
+
+`run_defect` 一顆一顆跑、從不 raise（鐵則 7），所以任何「要看過整批才算得出來」
+的東西現在都沒有地方放。**四個需求卡在同一件事上**：
+
+| 需求 | 為什麼是跨顆 |
+|---|---|
+| Output 的 CSV / KLARF / Report / HTML | 一批一個檔案（`output image` 是例外，逐顆）|
+| 離群旗標（Tukey IQR、z-score）| 門檻由整批的分布決定 |
+| F15 欠的那份點對點 report | 一顆一列的表 ＋ 整批的分布 |
+| `H2H` 的 `expect_dx_px` 建議值 | 整批取中位數（現在只能靠 `tools/pair_probe.py` 在外面算）|
+
+先做機制，四個都便宜；不做機制，四個各自發明一套。
 
 ### F15 停在哪裡（2026-08-20）
 

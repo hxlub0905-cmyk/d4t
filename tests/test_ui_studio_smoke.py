@@ -90,8 +90,10 @@ def test_window_constructs_with_library_cards(window):
     # 卡片庫用的是真實 registry，不是手捏假資料
     assert window.library.entry("snr_map") is not None
     assert window.library.entry("load_patch") is not None
+    # 同 tests/test_ui_widgets.py：順序的出處是 LibraryPanel.GROUPS，不要再抄一份。
+    from d4t.ui.widgets import LibraryPanel
     assert window.library.section_titles() == [
-        "Input", "Enhance", "ROI", "Compare", "Measure", "ADC"]
+        t for _gid, t, _sub in LibraryPanel.GROUPS]
 
     # 空狀態：**畫布是空的**（F11 Enhance-4，使用者定調：「Load image 卡片改成
     # 預設沒有，user 可以選擇要 Load images or Load one image，add 才會出現」）。

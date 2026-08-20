@@ -13,7 +13,7 @@ Recipe JSON 形狀（見 docs/plans/F0-master-plan.md §3.4）：
       "nodes": {"align": {"step": "align", "params": {"method": "phase"},
                           "enabled": true}},
       "edges": [["subtract", "diff", "snr", "source"]],
-      "score": {"expr": "snr_max * sqrt(blob_area)", "threshold": 3.0,
+      "score": {"expr": "snr_max * sqrt(area_px)", "threshold": 3.0,
                 "bins": {"below": 0, "above": 1}}
     }
 
@@ -1082,8 +1082,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                            f"'ref' (currently provided: {sorted(avail)})"))
             # 具名區域走跟影像流一樣的檢查（F7-9）。沒有這一段的話，
             # 「量測卡指到沒人定義的區域」在跑之前是看不出來的 ——
-            # 名字打錯要等執行期 StepError，而預設的 'blob' 少了上游的
-            # Blob 卡更慘：它會安靜地退回量整張圖，跑得完、有數字、且是錯的。
+            # 名字打錯要等執行期 StepError，而上游那張 Region 卡被拿掉更慘：
+            # 它會安靜地退回量整張圖，跑得完、有數字、且是錯的。
             missing_roi = [x for x in step_cls.resolve_regions_in(p)
                            if x not in regions]
             if missing_roi:

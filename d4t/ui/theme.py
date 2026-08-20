@@ -138,6 +138,14 @@ _LIGHT: Dict[str, Any] = {
     "stage_compare": "#b0507f",
     "stage_measure": "#bf7030",
     "stage_adc": "#8a5fbf",
+    # F16 的兩段。**它們刻意比前六個淡**（彩度 26 / 12 對上 31–58）：
+    # 六個色相已經把圓周分掉了，硬塞兩個一樣濃的進去，最近的一對會掉到
+    # ΔE 25 的線上。而這兩段本來就跟前六段**不同類** —— Algo 一張影像都不碰、
+    # Output 什麼都不往 pipeline 裡吐 —— 所以「安靜一點」是講得出理由的，
+    # 不是將就。兩個都跟 ``danger`` / ``disabled`` 保持距離（撞到的話，
+    # 「這一段」會讀成「壞掉」或「不能用」）。
+    "stage_algo": "#76643a",
+    "stage_output": "#8c7989",
     "seg_disabled": "#c2c7ce",
     "seg_disabled_bg": "#f0f1f3",
     # -- 判定 chip（good / bad / neutral）------------------------------------
@@ -278,6 +286,9 @@ _DARK: Dict[str, Any] = dict(_LIGHT, **{
     "stage_compare": "#dd7fac",
     "stage_measure": "#e0a05c",
     "stage_adc": "#b48fe0",
+    # 同亮色盤那兩列：同色相、依暗色盤的明度重算（理由見亮色盤的註解）。
+    "stage_algo": "#a9997b",
+    "stage_output": "#ccb1c8",
     "seg_disabled": "#4a505c",
     "seg_disabled_bg": "#22252b",
 
@@ -372,9 +383,11 @@ _STAGE_TOKENS = {
     "input": "stage_input",
     "enhance": "stage_enhance",
     "region": "stage_region",
-    "compare": "stage_compare",
     "measure": "stage_measure",
+    "algo": "stage_algo",
+    "compare": "stage_compare",
     "adc": "stage_adc",
+    "output": "stage_output",
 }
 
 
