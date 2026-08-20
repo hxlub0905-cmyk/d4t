@@ -55,9 +55,13 @@ class CdMeasureStep(MultiSourceStep):
     params = [
         ParamSpec(name="source", type="image_keys", direction="in", default="diff",
                   help="Image stream sampled when refining edges (usually diff)."),
-        ParamSpec(name="roi", type="str", default="",
-                  help=("Which region to measure — the name given by an ROI "
-                        "card upstream. Leave empty for the whole image.")),
+        ParamSpec(name="roi", type="region_keys", direction="in", default="",
+                  label="Region",
+                  help=("Which region(s) to measure in - drag a line from the "
+                        "Region card that defines each one. Two regions here "
+                        "means the same statistics measured in both, and every "
+                        "number gets its region's name in front of it. "
+                        "No line means the whole image.")),
         ParamSpec(name="refine", type="choice", default="none",
                   choices=["none", "subpixel"],
                   help=("none = use the bounding box as is; subpixel = refine the "
@@ -68,11 +72,6 @@ class CdMeasureStep(MultiSourceStep):
     reads = ["diff"]
     writes: List[str] = []
     features_out = ["cd_x_px", "cd_y_px", "area_px"]
-
-    @classmethod
-    def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
-        name = str(params.get("roi", "blob") or "").strip()
-        return [name] if name else []
 
     #: 影像不是必要的（見 ``_util.MultiSourceStep.REQUIRE_IMAGE``）。
     REQUIRE_IMAGE = False

@@ -2019,7 +2019,7 @@ class MultiChoicePicker(QWidget):
     _PER_ROW = 3
 
     def __init__(self, choices: Sequence[str], value: str = "",
-                 parent: Optional[QWidget] = None):
+                 parent: Optional[QWidget] = None, empty_hint: str = ""):
         super().__init__(parent)
         self._boxes: List[QCheckBox] = []
         self._emitting = False
@@ -2041,6 +2041,14 @@ class MultiChoicePicker(QWidget):
             box.toggled.connect(self._on_toggled)
             grid.addWidget(box, i // self._PER_ROW, i % self._PER_ROW)
             self._boxes.append(box)
+        # **一個都沒有的時候要講話**（F15-2）。選項是執行期來的（那一份 KLARF
+        # 有哪些欄），所以「還沒掛第二份」是一個正常狀態 —— 而它畫出來是一塊
+        # 空白，讀起來像壞掉。
+        if not self._boxes and empty_hint:
+            hint = QLabel(str(empty_hint), self)
+            hint.setEnabled(False)
+            hint.setWordWrap(True)
+            grid.addWidget(hint, 0, 0, 1, self._PER_ROW)
 
     def text(self) -> str:
         """目前的值（逗號分隔，順序同勾選框）。"""
@@ -2052,6 +2060,39 @@ class MultiChoicePicker(QWidget):
         try:
             for box in self._boxes:
                 box.setChecked(box.text() in picked)
+        finally:
+            self._emitting = False
+
+    def set_choices(self, choices: Sequence[str],
+                    value: Optional[str] = None) -> None:
+        """換一批選項（F15-2）。``value=None`` = 保留目前勾的。
+
+        為什麼是「換內容」而不是「重建整張表單」：使用者剛在隔壁那一格打字，
+        整張重建會把游標搶走。
+        """
+        keep = self.text() if value is None else str(value)
+        grid = self.layout()
+        while grid.count():
+            item = grid.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+        self._boxes = []
+        picked = [t.strip() for t in keep.split(",") if t.strip()]
+        names: List[str] = []
+        for name in list(choices) + picked:
+            name = str(name)
+            if name and name not in names:
+                names.append(name)
+        self._emitting = True
+        try:
+            for i, name in enumerate(names):
+                box = QCheckBox(name, self)
+                box.setChecked(name in picked)
+                box.toggled.connect(self._on_toggled)
+                grid.addWidget(box, i // self._PER_ROW, i % self._PER_ROW)
+                self._boxes.append(box)
         finally:
             self._emitting = False
 
@@ -2421,6 +2462,9 @@ class ParamForm(QWidget):
     #: 「這個參數的值要用別的方式產生」（目前只有 template）。表單不知道那是
     #: 什麼對話框 —— 它只負責把請求送上去，由 Studio 決定要開什麼。
     action_requested = Signal(str)
+    #: **入口卡的「資料從哪來」**（F14-1）：按下去要開檔案對話框。
+    #: 同樣地，表單不知道那是哪一種來源 —— 它送出去，Studio 決定開什麼。
+    source_requested = Signal()
 
     _EMPTY_TEXT = "(Pick a card from the library, or select a step in the pipeline)"
 
@@ -2446,6 +2490,10 @@ class ParamForm(QWidget):
         self._advanced: set = set()
         #: 目前這張卡每個參數的值 —— ``show_when`` 要靠它判斷哪幾列該在。
         self._values: Dict[str, Any] = {}
+        #: 執行期才知道的選單（F15-2）：``{RUNTIME_CHOICES 的鍵: [選項]}``。
+        self._dynamic: Dict[str, List[str]] = {}
+        #: 上游定義了哪些具名區域（F11 Region-1）。
+        self._regions: List[str] = []
         self._describe: Optional[Dict[str, Any]] = None
         self._building = False
         #: 進階參數收起來了嗎（**追明確狀態**，不問 widget —— docs/PITFALLS.md）。
@@ -2464,6 +2512,28 @@ class ParamForm(QWidget):
         self._step_help.setObjectName("paramStepHelp")
         outer.addWidget(self._title)
         outer.addWidget(self._step_help)
+
+        # 「這張卡的資料從哪來」（F14-1，使用者定調：工具列那幾顆 Open
+        # 「會混淆」）。入口長在**讀那份資料的那張卡上** —— 以前它在工具列，
+        # 而畫布上那張 Load 卡完全不會說它讀的是哪個檔案：同一件事兩個地方，
+        # 而畫布是說謊的那一個。
+        self._source_row = QWidget(self)
+        self._source_row.setObjectName("sourceRow")
+        srow = QHBoxLayout(self._source_row)
+        srow.setContentsMargins(2, 0, 8, 0)
+        srow.setSpacing(8)
+        self._source_btn = QPushButton("", self._source_row)
+        self._source_btn.setObjectName("primary")
+        self._source_btn.setCursor(Qt.PointingHandCursor)
+        self._source_btn.clicked.connect(self.source_requested.emit)
+        self._source_note = QLabel("", self._source_row)
+        self._source_note.setObjectName("paramHint")
+        self._source_note.setWordWrap(True)
+        srow.addWidget(self._source_btn)
+        srow.addWidget(self._source_note, 1)
+        self._source_shown = False
+        self._source_row.setVisible(False)
+        outer.addWidget(self._source_row)
 
         self._scroll = QScrollArea(self)
         self._scroll.setWidgetResizable(True)
@@ -2491,6 +2561,31 @@ class ParamForm(QWidget):
         self.set_step(None, {}, [])
 
     # -- public API --------------------------------------------------------
+    def set_source_action(self, label: str = "", note: str = "",
+                          tooltip: str = "") -> None:
+        """入口卡上那一排「資料從哪來」。``label=""`` = 這張卡沒有這一排。
+
+        note 講的是**現在載的是什麼**（`LOT_SYN.001 · 12 defects`）——
+        鈕本身只說得出「可以換一份」，而使用者第一個要確認的是「我現在看的
+        是哪一份」。
+        """
+        label = str(label or "")
+        self._source_btn.setText(label)
+        self._source_btn.setToolTip(str(tooltip or ""))
+        self._source_note.setText(str(note or ""))
+        # **追明確狀態**：`isVisible()` 在視窗 show 之前恆為 False，
+        # 那個坑這個 repo 踩過（見 docs/PITFALLS.md）。
+        self._source_shown = bool(label)
+        self._source_row.setVisible(self._source_shown)
+
+    def has_source_action(self) -> bool:
+        """這張卡有沒有那一排「資料從哪來」。"""
+        return bool(getattr(self, "_source_shown", False))
+
+    def source_button(self) -> QPushButton:
+        """那顆鈕本身（訊息裡引到的名字要跟它一字不差 —— 有測試在擋）。"""
+        return self._source_btn
+
     def set_image_count(self, n: int) -> None:
         """告訴表單「這批資料一顆有幾張圖」（F11）。
 
@@ -2544,15 +2639,25 @@ class ParamForm(QWidget):
     def set_step(self, describe: Optional[Dict[str, Any]],
                  current_params: Optional[Dict[str, Any]] = None,
                  stream_choices: Optional[Sequence[str]] = None,
-                 region_choices: Optional[Sequence[str]] = None) -> None:
+                 region_choices: Optional[Sequence[str]] = None,
+                 dynamic_choices: Optional[Dict[str, Sequence[str]]] = None
+                 ) -> None:
         """重建表單。``describe=None`` -> 顯示提示語（未選節點）。
 
         ``region_choices`` 是**上游定義了哪些具名區域**（F11 Region-1）。
         跟 ``stream_choices`` 同一個理由：那些名字程式知道，就不該讓使用者用打的。
+
+        ``dynamic_choices`` 是**執行期才知道的選單**（F15-2），
+        ``{RUNTIME_CHOICES 的鍵: [選項]}`` —— 現在掛了哪幾份第二 source、
+        那一份的一顆有哪幾張圖、那一份的 KLARF 有哪些欄。同一個理由的第三次：
+        程式知道的名字不該讓使用者用打的。Studio 是唯一知道答案的人，所以答案
+        從這裡傳進來，而不是讓元件自己去問（`widgets` 不認得 `Dataset`）。
         """
         current_params = dict(current_params or {})
         streams = [str(s) for s in (stream_choices or [])]
         self._regions = [str(r) for r in (region_choices or [])]
+        self._dynamic = {str(k): [str(v) for v in (vals or [])]
+                         for k, vals in dict(dynamic_choices or {}).items()}
         self._describe = describe
         self._building = True
         try:
@@ -2771,6 +2876,38 @@ class ParamForm(QWidget):
             for head in heads:
                 head.setVisible(alive.get(sec, True))
 
+    def set_dynamic_choices(self,
+                            dynamic: Optional[Dict[str, Sequence[str]]]) -> None:
+        """換一批執行期選單（F15-2），**不重建表單**。
+
+        重建會把游標搶走 —— 而這件事最常發生的時機正是「使用者剛在
+        “Source name” 那一格打字」。所以這裡只換那幾格的**內容**，而且
+        **跳過現在有游標的那一格**（它的內容就是使用者正在打的字）。
+        """
+        self._dynamic = {str(k): [str(v) for v in (vals or [])]
+                         for k, vals in dict(dynamic or {}).items()}
+        for name, row in self._rows.items():
+            choices = self._runtime_choices(row.spec)
+            if choices is None:
+                continue
+            w = row.editor
+            if w is None or w.hasFocus():
+                continue
+            if isinstance(w, MultiChoicePicker):
+                w.set_choices(choices)
+            elif isinstance(w, QComboBox):
+                line = w.lineEdit()
+                if line is not None and line.hasFocus():
+                    continue
+                text = w.currentText()
+                w.blockSignals(True)
+                try:
+                    w.clear()
+                    w.addItems(choices)
+                    w.setCurrentText(text)
+                finally:
+                    w.blockSignals(False)
+
     def _shown_by_rules(self, name: str) -> bool:
         """撇開「進階收起來了」這件事，這一列本身算不算數（``show_when``）。"""
         row = self._rows.get(name)
@@ -2779,12 +2916,46 @@ class ParamForm(QWidget):
             return row is not None
         return str(self._values.get(str(spec[0]), "")) in [str(v) for v in spec[1]]
 
+    #: `choices_from` 的鍵 → 空清單時那一格要說的話。**空清單是正常狀態**
+    #: （還沒掛第二份），而它畫出來是一塊空白 —— 留白讀起來像壞掉。
+    _EMPTY_HINTS = {
+        "sources": "No second lot open yet — use the button above.",
+        "source_images": "Open the second lot to see its images.",
+        "source_columns": "Open the second lot to see its KLARF columns.",
+    }
+
+    def _runtime_choices(self, spec: Dict[str, Any]) -> Optional[List[str]]:
+        """這一格的選項是**執行期來的**嗎（F15-2）。不是就回 None。
+
+        認得旗標但拿不到清單（Studio 還沒實作那一個鍵）→ 回**空 list**，
+        不是 None：那一格仍然是選單，只是現在是空的 —— 而空的會講出為什麼。
+        """
+        key = str(spec.get("choices_from", "") or "")
+        if not key:
+            return None
+        return list(self._dynamic.get(key, ()))
+
     def _make_editor(self, spec: Dict[str, Any], value: Any,
                      streams: Sequence[str]) -> QWidget:
         name = str(spec.get("name", ""))
         ptype = str(spec.get("type", "str"))
         unit = str(spec.get("unit", "") or "")
         lo, hi = spec.get("min"), spec.get("max")
+        runtime = self._runtime_choices(spec)
+
+        if runtime is not None and ptype == "str":
+            # **可編輯的**下拉（F15-2）：清單是現在載了什麼，但值仍然可以是一個
+            # 還沒載進來的名字 —— recipe 是在資料掛上來**之前**讀進來的，鎖死
+            # 選單等於「開一份寫好的 recipe 會把那一格清空」。
+            w = QComboBox()
+            w.setEditable(True)
+            w.addItems(runtime)
+            w.setCurrentText("" if value is None else str(value))
+            hint = self._EMPTY_HINTS.get(str(spec.get("choices_from") or ""), "")
+            if not runtime and hint and w.lineEdit() is not None:
+                w.lineEdit().setPlaceholderText(hint)
+            w.currentTextChanged.connect(lambda t, n=name: self._emit(n, str(t)))
+            return w
 
         if ptype == "int":
             w = QSpinBox()
@@ -2839,34 +3010,25 @@ class ParamForm(QWidget):
             # 現在這一格只**顯示**目前接進來的是哪幾條，改要回畫布上拉線。
             return _wiring_display("" if value is None else str(value))
 
-        if ptype == "region_key":
-            # **一個**區域，所以是下拉不是勾選。名字要跟上游卡片的輸出一字不差，
-            # 而打錯的時候 lint 要跑一次才講（F11 §3.3.1 第 4 項）——
-            # 所以這裡不給打字。第一項是空的：「還沒挑」是一個真實的狀態。
-            w = QComboBox()
-            names = [""] + [str(r) for r in getattr(self, "_regions", [])]
-            text = "" if value is None else str(value).strip()
-            if text and text not in names:
-                names.append(text)          # recipe 指著一個上游沒有的區域
-            w.addItems(names)
-            w.setItemText(0, "(not chosen yet)")
-            w.setCurrentIndex(names.index(text) if text in names else 0)
-            w.currentIndexChanged.connect(
-                lambda i, n=name, ns=names: self._emit(n, ns[i] if i else ""))
-            return w
-
-        if ptype == "region_keys":
-            # 上游定義了哪些區域，程式知道 —— 所以這裡是勾的，不是打的。
-            # 要打的字必須跟上游卡片的輸出**一字不差**，而打錯的時候 lint 要跑
-            # 一次才講（F11 §3.3.1 第 4 項）。
-            w = MultiChoicePicker(getattr(self, "_regions", []),
-                                  "" if value is None else str(value))
-            w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
-            return w
+        if ptype in ("region_key", "region_keys"):
+            # F12：**區域的來源也只在畫布上決定**，跟影像流一模一樣。
+            #
+            # 以前這裡是下拉／勾選框（F11 Region-1）—— 那已經解掉「打錯字要跑
+            # 一次 lint 才知道」的問題，但它留下第二個入口：畫布上沒有任何線
+            # 表示這張卡用了上游的區域，而拿掉那張 Region 卡，量測卡會**安靜地
+            # 改量整張圖**。使用者的話是「但我還是這樣怪怪的」。
+            #
+            # 現在區域在畫布上是一顆菱形埠 + 一條虛線，這一格只顯示接的是什麼。
+            # 理由與 F9-6 對 image_keys 做的事逐字相同（「他會很亂連」）。
+            return _wiring_display("" if value is None else str(value))
 
         if ptype == "multi_choice":
-            w = MultiChoicePicker([str(c) for c in (spec.get("choices") or [])],
-                                  "" if value is None else str(value))
+            choices = (runtime if runtime is not None
+                       else [str(c) for c in (spec.get("choices") or [])])
+            w = MultiChoicePicker(
+                choices, "" if value is None else str(value),
+                empty_hint=self._EMPTY_HINTS.get(
+                    str(spec.get("choices_from") or ""), ""))
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 
@@ -3560,13 +3722,30 @@ class StageButton(QFrame):
         lay.addWidget(self.label)
 
         self.count = QLabel("", self)
-        self.count.setAlignment(Qt.AlignHCenter)
+        self.count.setAlignment(Qt.AlignCenter)
         self.count.setObjectName("stageCount")
-        lay.addWidget(self.count)
+        lay.addWidget(self.count, 0, Qt.AlignHCenter)
+        self._style_count()
         self.setProperty("active", "false")
+
+    def _style_count(self) -> None:
+        """「有幾張卡」那個數字的顏色（F13-3）。
+
+        **階段色，沒有網底**（使用者第二輪定調：「不要有網底色，單純數字的
+        顏色即可」）。顏色由 `theme.count_color` 算在 rail 的底色上 ——
+        它會把字推到過得了 AA 為止，所以淺色主題不會像以前那樣看不見。
+
+        顏色本身就講完了「這是這一段的東西」：它跟上面那個圖示、卡片庫的圓點、
+        畫布上那塊圖示磚是同一個。
+        """
+        self.count.setStyleSheet(
+            "background:transparent; color:%s; font-size:9px; font-weight:600;"
+            % theme.count_color(self.group))
 
     def set_count(self, n: int) -> None:
         self.count.setText("" if n <= 0 else str(int(n)))
+        # 空的時候不要留一塊有底色的小方塊。
+        self.count.setVisible(n > 0)
 
     def set_active(self, active: bool) -> None:
         self._active = bool(active)
@@ -3581,11 +3760,27 @@ class StageButton(QFrame):
         # 圓角、hover、選中都在 QSS 裡了。
         self._colour = colour
         self.icon.set_color(colour)
+        self._style_count()          # 藥丸的兩個顏色也是算出來的（F13-3）
 
     def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
         if e.button() == Qt.LeftButton:
             self.clicked.emit(self.group)
         super().mousePressEvent(e)
+
+
+def column_header(title: str, parent: Optional[QWidget] = None) -> QLabel:
+    """一欄工作區的小標題（F13-4）。
+
+    主視窗有四個直欄，而以前它們之間只有一條 splitter —— **沒有任何東西說
+    「這一欄是什麼」**。使用者要靠內容反推自己在看哪一塊，而那件事在他還不熟
+    的時候正是最貴的。
+
+    刻意做得很輕（10px、大寫、字距拉開、`text_hint`）：它是一個**地標**不是
+    一個標題列，佔的高度要小到不值得為它讓出畫面。
+    """
+    lbl = QLabel(str(title).upper(), parent)
+    lbl.setObjectName("columnHeader")
+    return lbl
 
 
 class LibraryPanel(QWidget):
@@ -3686,6 +3881,15 @@ class LibraryPanel(QWidget):
         panel_lay.setContentsMargins(0, 0, 0, 0)
         panel_lay.setSpacing(0)
 
+        # 地標自己不帶內距 —— 這裡用跟搜尋框同一組邊界（左 6 / 右 8），
+        # 兩者才會對齊在同一條線上。
+        head_wrap = QWidget(self.panel)
+        hw = QHBoxLayout(head_wrap)
+        hw.setContentsMargins(8, 6, 8, 0)
+        self.header = column_header("Library", head_wrap)
+        hw.addWidget(self.header)
+        panel_lay.addWidget(head_wrap)
+
         self.search = QLineEdit(self)
         self.search.setPlaceholderText("Search cards…")
         self.search.setClearButtonEnabled(True)
@@ -3693,7 +3897,7 @@ class LibraryPanel(QWidget):
         self.search.textChanged.connect(self._on_search)
         wrap = QWidget(self.panel)
         wl = QHBoxLayout(wrap)
-        wl.setContentsMargins(6, 6, 8, 4)
+        wl.setContentsMargins(6, 2, 8, 4)
         wl.addWidget(self.search)
         panel_lay.addWidget(wrap)
 
@@ -4273,38 +4477,152 @@ class FeatureTable(QTableWidget):
         head.setSectionResizeMode(0, QHeaderView.Stretch)
         head.setSectionResizeMode(1, QHeaderView.ResizeToContents)
 
+    #: 一個分組（F13-1 的 ①）：``title`` 是**哪張卡產出的**、``color`` 是那張卡
+    #: 的階段色、``names`` 是這一組裡的特徵、``collapsed`` 決定一開始收不收。
+    #: 呼叫端（Studio）算好再交過來 —— 這個 widget 不去問 model 也不去問引擎。
+    _HEADER_ROLE = Qt.UserRole + 1
+
     def set_features(self, features: Optional[Dict[str, Any]],
-                     highlight: Iterable[str] = ()) -> None:
-        """填表。``highlight`` 內的特徵名會用 accent 底色標出（例：分數用到的）。"""
+                     highlight: Iterable[str] = (),
+                     sections: Optional[Sequence[Dict[str, Any]]] = None) -> None:
+        """填表。``highlight`` 內的特徵名會用 accent 底色標出（例：分數用到的）。
+
+        ``sections`` 是**分組**（F13-1 ①，2026-08-19 使用者：「feature 的顯示
+        太陽春了不易閱讀」）。一條平的 name/value 清單裡，``n_channels`` 跟
+        ``snr_max`` 長得一模一樣 —— 而它們一個是「這張卡讀了幾頁」、一個是
+        會決定 bin 的量測值。
+
+        **分組不是我發明的規則**：引擎本來就記著每個特徵是哪張卡寫的
+        （`meta["feature_owner"]`），卡片也早就宣告了哪些是診斷數字
+        （`Step.diagnostic_features`）。這裡只是把已經知道的事顯示出來。
+
+        沒給 ``sections`` 就是舊行為（一條平的清單）—— CLI、報表、既有測試
+        都還走那條路。
+        """
         features = dict(features or {})
         hi = set(highlight or ())
-        names = [k for k in features if k != self._SCORE]
+        rows: List[Tuple[str, Any]] = []          # ("head"/"row", 內容)
+        if sections:
+            seen = set()
+            for sec in sections:
+                names = [n for n in (sec.get("names") or [])
+                         if n in features and n != self._SCORE and n not in seen]
+                if not names:
+                    continue
+                seen.update(names)
+                rows.append(("head", sec))
+                rows.extend(("row", n) for n in names)
+            rest = [n for n in features
+                    if n not in seen and n != self._SCORE]
+            if rest:
+                rows.append(("head", {"title": "Other", "color": "",
+                                      "names": rest}))
+                rows.extend(("row", n) for n in rest)
+        else:
+            rows.extend(("row", n) for n in features if n != self._SCORE)
         if self._SCORE in features:
-            names.append(self._SCORE)
+            rows.append(("row", self._SCORE))
 
-        self.setRowCount(len(names))
-        for row, name in enumerate(names):
-            is_score = name == self._SCORE
-            key_item = QTableWidgetItem(str(name))
-            val_item = QTableWidgetItem(_fmt_number(features[name]))
-            val_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            if is_score:
-                font = key_item.font()
-                font.setBold(True)
-                key_item.setFont(font)
-                val_item.setFont(font)
-                key_item.setForeground(QColor(TOKENS["accent_active"]))
-                val_item.setForeground(QColor(TOKENS["accent_active"]))
-            if name in hi:
-                bg = QColor(TOKENS["accent_bg"])
-                key_item.setBackground(bg)
-                val_item.setBackground(bg)
-            self.setItem(row, 0, key_item)
-            self.setItem(row, 1, val_item)
+        self.clearSpans()
+        self.setRowCount(len(rows))
+        current: Optional[QTableWidgetItem] = None
+        collapsed = False
+        for row, (kind, payload) in enumerate(rows):
+            if kind == "head":
+                current = self._fill_header(row, payload)
+                collapsed = bool(payload.get("collapsed"))
+                self.setRowHidden(row, False)
+                continue
+            name = str(payload)
+            self._fill_row(row, name, features[name], name in hi,
+                           name == self._SCORE)
+            self.setRowHidden(row, collapsed and name != self._SCORE)
+        self._header_rows = [r for r, (k, _p) in enumerate(rows) if k == "head"]
+
+    def _fill_header(self, row: int, sec: Dict[str, Any]) -> QTableWidgetItem:
+        """一列分組標題（橫跨兩欄，點一下收合）。"""
+        title = str(sec.get("title") or "")
+        colour = str(sec.get("color") or "") or TOKENS["text_secondary"]
+        n = len([x for x in (sec.get("names") or [])])
+        item = QTableWidgetItem("%s%s  ·  %d" % (
+            "▸ " if sec.get("collapsed") else "▾ ", title, n))
+        font = item.font()
+        font.setBold(True)
+        font.setPointSizeF(max(7.0, font.pointSizeF() - 1.0))
+        item.setFont(font)
+        item.setData(self._HEADER_ROLE, True)
+        item.setForeground(QColor(theme.readable_on(
+            colour, theme.mix_hex(colour, TOKENS["bg_surface"], 0.14))))
+        item.setBackground(QColor(theme.mix_hex(
+            colour, TOKENS["bg_surface"], 0.14)))
+        self.setItem(row, 0, item)
+        self.setItem(row, 1, QTableWidgetItem(""))
+        self.item(row, 1).setBackground(QColor(theme.mix_hex(
+            colour, TOKENS["bg_surface"], 0.14)))
+        self.setSpan(row, 0, 1, 2)
+        return item
+
+    def _fill_row(self, row: int, name: str, value: Any,
+                  highlighted: bool, is_score: bool) -> None:
+        key_item = QTableWidgetItem(str(name))
+        val_item = QTableWidgetItem(_fmt_number(value))
+        val_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        if is_score:
+            font = key_item.font()
+            font.setBold(True)
+            key_item.setFont(font)
+            val_item.setFont(font)
+            key_item.setForeground(QColor(TOKENS["accent_active"]))
+            val_item.setForeground(QColor(TOKENS["accent_active"]))
+        if highlighted:
+            bg = QColor(TOKENS["accent_bg"])
+            key_item.setBackground(bg)
+            val_item.setBackground(bg)
+        self.setItem(row, 0, key_item)
+        self.setItem(row, 1, val_item)
+
+    def is_header_row(self, row: int) -> bool:
+        item = self.item(int(row), 0)
+        return bool(item is not None and item.data(self._HEADER_ROLE))
+
+    def toggle_section(self, row: int) -> None:
+        """收合／展開某一組（點標題那一列）。"""
+        if not self.is_header_row(row):
+            return
+        item = self.item(row, 0)
+        text = item.text()
+        opening = text.startswith("▸")
+        item.setText(("▾" if opening else "▸") + text[1:])
+        for r in range(row + 1, self.rowCount()):
+            if self.is_header_row(r):
+                break
+            key = self.item(r, 0)
+            if key is not None and key.text() == self._SCORE:
+                continue
+            self.setRowHidden(r, not opening)
+
+    def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
+        row = self.rowAt(int(e.position().y()) if hasattr(e, "position")
+                         else int(e.y()))
+        if row >= 0 and self.is_header_row(row):
+            self.toggle_section(row)
+            e.accept()
+            return
+        super().mousePressEvent(e)
+
+    def section_titles(self) -> List[str]:
+        """每一組的標題（測試與狀態列讀得到；不含那個 ▾ 與計數）。"""
+        out: List[str] = []
+        for r in range(self.rowCount()):
+            if self.is_header_row(r):
+                text = self.item(r, 0).text()
+                out.append(text[2:].split("  ·  ")[0])
+        return out
 
     def feature_names(self) -> List[str]:
+        """表上的**特徵**（分組標題不算 —— 它不是一個特徵）。"""
         return [self.item(r, 0).text() for r in range(self.rowCount())
-                if self.item(r, 0) is not None]
+                if self.item(r, 0) is not None and not self.is_header_row(r)]
 
     def value_text(self, name: str) -> Optional[str]:
         for r in range(self.rowCount()):

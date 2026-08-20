@@ -12,6 +12,11 @@
 
 | 坑 | 症狀 | 解法 |
 |---|---|---|
+| **儀表畫不出來，症狀出現在別的地方** | 「配對卡的**圖**載不出來」，終端機一直丟 `ZeroDivisionError` 指著 `inspectors.py` | Qt 的 `paintEvent` 一丟例外就留下一個沒收尾的 painter（`QBackingStore::endPaint() called with active painter`），接著每一次重繪都再失敗 —— 所以壞的地方跟看到的地方不一樣。兩層修法：`Inspector.paintEvent` **不准把例外往外丟**（印到終端機、面板上變一行字、painter 一定收尾，鐵則 7 的 UI 版）；`MeasureInspector.paint_body` 沒有任何一列時不要除以零（子類可能因為別的理由說「有資料」）|
+| **第二份 lot 只送進了一半的路** | 載了第二份，「試跑」有圖，但**切換 defect 就沒圖** —— 而使用者的描述會是「載進來就是沒有圖」（然後往圖檔格式的方向查）| `run_batch` 傳了 `sources`，單顆預覽那條路沒有，於是 `pair_source` 說「no lot is loaded as 'X'」。答案只有一份：`StudioWindow.sources_for_run()`，而**每一條跑 pipeline 的路都要問它**（預覽／區域檢查／一鍵校正／疊圖輸出／批次）。便利貼：`test_ui_f15_pair_source.py::test_every_path_that_runs_a_defect_passes_the_second_lot` 會掃 `d4t/ui` 底下每一個 `run_defect(...)` 有沒有帶 `sources=` |
+| **TIFF 頁數的硬上限** | 幾萬顆的 lot「載得進來、有 defect、就是沒有影像」，而唯一的線索是一句「你的 TIFF 壞了」（它沒壞）| `tiff_index` 的 IFD 走訪以前在 10 萬頁報 `IFD chain loops — corrupt TIFF`，而 5 萬顆 ×2 張剛好在那條線上；`load_dataset` 接住那個例外之後把 kind 退成 `rsem`、每一顆 0 張圖。現在上限是 `tiff_index.MAX_PAGES`（100 萬），而且「太多頁」與「繞回自己」**是兩句不同的話** |
+| **為了幾 bit 走完整份 TIFF** | 載入慢，而且在網路碟上慢到像當掉 | `bit_depths` 以前把每一頁的每一個 tag 都讀出來（4 萬頁實測 1.0 秒，整個 `load_dataset` 才 1.56 秒）。它只是**提前警告**，守門在每一顆的 `require_8bit` —— 所以只看前 `BIT_DEPTH_SAMPLE_PAGES` 頁。量哪一段慢用 `tools/load_probe.py` |
+| **開檔就走完整條 IFD 鏈** | 網路碟上的 lot 開一次要一百多秒，而且是在看到第一張圖之前 | `len(tf.pages)`（為了修「讀過像素之後解析下一頁會從錯的位置開始」）與 `load_dataset` 的 `n_pages` 各走一趟。現在是 `tiff_index._PageIndex`：**用到第幾頁才走到第幾頁**，每次讀都自己 seek 到那一頁的 IFD（所以不再依賴檔案位置）；`load_dataset` 根本不問頁數（`defect_image_map(None)` 的base 結論一模一樣）。使用者實測 30962 頁 106 秒 → 開檔 4 秒 |
 | **fork 死鎖** | GUI 按「試跑」永遠不回、progress 一格不動 | `batch._pool_context()`：主執行緒 fork、非主執行緒 spawn。改動這裡務必跑 `tests/test_batch_thread_safety.py` |
 | **OpenCV IPP 非決定性** | 同張圖算兩次差 ~1e-8，快取結果對不起來 | `batch.pin_cv2_deterministic()` 關 IPP（每個 worker 都呼叫） |
 | **Fusi³ ecc 對位正負號** | ecc backend 位移與其他四個相反 | 已於 `algo/align.py` 修正並鎖測試 |

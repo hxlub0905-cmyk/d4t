@@ -120,30 +120,92 @@ def count_pages(path) -> int:
     """
     with open(path, 'rb') as f:
         en, big, next_ifd = _open_header(f)
-        esize = 20 if big else 12
-        n_off = 8 if big else 4
-        count_size = 8 if big else 2
         seen = set()
         n = 0
         while next_ifd:
-            if next_ifd in seen or n > 100000:
-                raise ValueError("IFD chain loops — corrupt TIFF.")
+            _guard_chain(next_ifd, seen, n, path)
             seen.add(next_ifd)
-            f.seek(next_ifd)
-            n_entries = struct.unpack(en + ('Q' if big else 'H'),
-                                      f.read(count_size))[0]
+            next_ifd = _ifd_step(f, next_ifd, en, big)
             n += 1
-            f.seek(next_ifd + count_size + esize * n_entries)
-            next_ifd = struct.unpack(en + ('Q' if big else 'I'),
-                                     f.read(n_off))[0]
         return n
 
 
-def read_tiff_pages(path):
+#: 走一個 IFD 的時候一次讀多少 bytes。
+#:
+#: 一個 IFD 是 ``2 + 12×tag數 + 4``；廠內那份 KLARF 的 TIFF 有 73 個 tag =
+#: 882 bytes，所以 2 KB 幾乎一定一次讀完 → **一頁一次來回**。以前是兩次
+#: （先讀 entry 數、再 seek 過去讀下一個位址），而在網路碟上「來回次數」
+#: 就是全部的成本：實測 30962 頁走完要 106 秒，同一個檔複製到本機只要 0.25 秒。
+_IFD_CHUNK = 2048
+
+
+def _ifd_step(f, offset, en, big):
+    """走一個 IFD，回傳**下一個** IFD 的位址（0 = 這是最後一頁）。
+
+    不解析任何 tag —— 只要 entry 數（才知道要跳多遠）與鏈上的下一個位址。
+    先讀一整塊（見 :data:`_IFD_CHUNK`）：多數 IFD 一次就讀完了，
+    只有 tag 特別多的才要補第二次。
+    """
+    esize = 20 if big else 12
+    n_off = 8 if big else 4
+    count_size = 8 if big else 2
+    f.seek(offset)
+    chunk = f.read(_IFD_CHUNK)
+    if len(chunk) < count_size:
+        raise ValueError("TIFF page directory at %d is truncated." % offset)
+    n_entries = struct.unpack(en + ('Q' if big else 'H'),
+                              chunk[:count_size])[0]
+    end = count_size + esize * n_entries
+    if end + n_off <= len(chunk):
+        return struct.unpack(en + ('Q' if big else 'I'),
+                             chunk[end:end + n_off])[0]
+    f.seek(offset + end)                       # tag 多到一塊裝不下
+    tail = f.read(n_off)
+    if len(tail) < n_off:
+        raise ValueError("TIFF page directory at %d is truncated." % offset)
+    return struct.unpack(en + ('Q' if big else 'I'), tail)[0]
+
+
+#: IFD 鏈最多走幾頁。**這是「這個檔大得不合理」的界線，不是「壞掉」的界線。**
+#:
+#: 以前是 10 萬，而且超過就報「IFD chain loops — corrupt TIFF」——
+#: 一份 5 萬顆 defect、一顆 2 張圖的 lot 剛好落在那條線上，於是使用者拿到的是
+#: 「你的 TIFF 壞了」（它沒壞），而 `load_dataset` 接住那個例外之後
+#: **把 kind 退成 rsem、每一顆 0 張圖**：載得進來、有 defect、就是沒有影像。
+#: 那是 2026-08-20 使用者回報的「幾萬顆會超級無敵久或直接不載入」的第二半。
+#:
+#: 100 萬頁 = 25 萬顆 defect × 4 張，比任何真的 lot 都大一個級距；而 `seen`
+#: 那個集合在這個上限下最多也才幾十 MB。
+MAX_PAGES = 1_000_000
+
+
+def _guard_chain(next_ifd: int, seen: set, n_done: int, path) -> None:
+    """走下一個 IFD 之前的兩道檢查 —— **而且兩句話不一樣**。
+
+    「繞回自己」是真的壞檔；「太多頁」是這個檔太大。以前兩者共用一句
+    「corrupt TIFF」，於是一份好好的大 lot 被說成壞檔。
+    """
+    if next_ifd in seen:
+        raise ValueError(
+            "This TIFF's page chain loops back on itself, so the file is "
+            "damaged (page %d points at somewhere already visited): %s"
+            % (n_done + 1, path))
+    if n_done >= MAX_PAGES:
+        raise ValueError(
+            "This TIFF has more than %d pages, which is past what d4t walks "
+            "in one go: %s" % (MAX_PAGES, path))
+
+
+def read_tiff_pages(path, max_pages=None):
     """回傳 (pages, info)。pages = [dict,...]（每頁一筆），info = 檔案層資訊。
 
     要**完整的每頁資訊**（`fab_probe` 的報告、健檢）才用這支；只要頁數請用
     :func:`count_pages`，它便宜一個數量級。
+
+    ``max_pages`` = 只讀前幾頁就停（``info["n_pages"]`` 因此是**讀到的頁數**，
+    不是檔案的頁數）。給「只想看看這個檔長什麼樣」的呼叫者用 —— 這支會把
+    每一頁的每一個 tag 都讀出來，而讀 tag 常常要為了 out-of-line 的值再 seek
+    一次，在網路碟上那是一頁好幾次來回。
     """
     pages = []
     with open(path, 'rb') as f:
@@ -151,8 +213,9 @@ def read_tiff_pages(path):
 
         seen = set()
         while next_ifd:
-            if next_ifd in seen or len(pages) > 100000:
-                raise ValueError("IFD chain loops — corrupt TIFF.")
+            if max_pages is not None and len(pages) >= int(max_pages):
+                break                       # 只要前幾頁（見 docstring）
+            _guard_chain(next_ifd, seen, len(pages), path)
             seen.add(next_ifd)
             f.seek(next_ifd)
             n = struct.unpack(en + ('Q' if big else 'H'),
@@ -204,19 +267,33 @@ def n_pages(path) -> int:
     return count_pages(path)
 
 
-def bit_depths(path) -> list:
+#: `bit_depths` 預設看幾頁。**一份 lot 的 TIFF 是同一台機台一次寫出來的**，
+#: 位元深度不會第 3 萬頁才變 —— 而為了那個假設走完整份檔案，在 4 萬頁的合成
+#: 資料上實測要 1.0 秒（整個 `load_dataset` 才 1.56 秒），在網路碟上是把整份
+#: 檔案的 IFD 連同每個 tag 的 out-of-line 值都拉一遍。
+#:
+#: 這個檢查本來就只是**提前警告**（把 `require_8bit` 的守門提前到按下 Open 的
+#: 那一刻）。真正的守門在每一顆的 `require_8bit`，那裡看的是解出來的像素 ——
+#: 所以「看前幾頁」漏掉的那種檔案，仍然會在跑到它的時候被擋下來。
+BIT_DEPTH_SAMPLE_PAGES = 8
+
+
+def bit_depths(path, max_pages=BIT_DEPTH_SAMPLE_PAGES) -> list:
     """這個 TIFF 裡出現過的位元深度（排序、去重）—— **不解碼像素**（F11）。
 
     ``BitsPerSample`` 就在 IFD 的 tag 裡，所以「這批資料是幾 bit」在**載入的
     時候**就答得出來，不必等跑到某一顆才發現。彩色頁的 tag 是一串（每個 sample
     一個值），這裡把它攤平。
 
+    **只看前 ``max_pages`` 頁**（``None`` = 全部）——理由見
+    :data:`BIT_DEPTH_SAMPLE_PAGES`。
+
     讀不出來（壞檔、非 TIFF）→ 回空 list：位元深度的檢查不該讓載入失敗，
     真正的守門在 ``dataset.require_8bit``（那裡看的是解出來的像素）。
     """
     out = set()
     try:
-        pages, _info = read_tiff_pages(str(path))
+        pages, _info = read_tiff_pages(str(path), max_pages=max_pages)
     except (OSError, ValueError, struct.error):
         return []
     for p in pages:
@@ -252,6 +329,63 @@ def _stat_key(path):
     return (os.getpid(), st.st_mtime_ns, st.st_size)
 
 
+class _PageIndex:
+    """一個 TIFF 的 IFD 位置表 —— **用到第幾頁才走到第幾頁**（2026-08-20）。
+
+    為什麼不是一次走完
+    ------------------
+    以前開檔的當下就 ``len(tf.pages)``，逼 tifffile 把整條 IFD 鏈走完一次
+    （見下面 :func:`_tiff_handle_locked` 的說明：那是為了修「讀過像素之後
+    再解析下一頁會從錯的位置開始」）。在本機那是幾百毫秒，在**網路碟**上是
+    使用者實測的 **106 秒**（30962 頁）—— 而那 106 秒是在他還沒看到任何一張
+    圖之前付的。
+
+    但那一趟本來就不必付：Studio 一次看一顆，一顆兩張圖 = 兩個 IFD。
+    走到第幾頁記到第幾頁，逐顆瀏覽就是逐頁往前 —— **只有真的跑整批才會走完
+    整條鏈，而跑整批本來就要把每一頁的像素都讀過一遍**（那才是 592 MB 的來源）。
+
+    「讀過像素之後位置跑掉」怎麼解：**每次讀都自己 seek 到那一頁的 IFD**
+    （位置就在這張表裡），所以不再依賴檔案位置的連續性。那也是不用 tifffile
+    走完整條鏈的原因。
+    """
+
+    def __init__(self, en, big, first_ifd, path):
+        self._en, self._big = en, bool(big)
+        self._next = int(first_ifd)
+        self._path = str(path)
+        self.offsets = []
+        self._seen = set()
+
+    @property
+    def complete(self):
+        return self._next == 0
+
+    def _step(self, fh):
+        """再往前走一頁；走完了回 False。"""
+        if self._next == 0:
+            return False
+        off = self._next
+        _guard_chain(off, self._seen, len(self.offsets), self._path)
+        self._seen.add(off)
+        self._next = _ifd_step(fh, off, self._en, self._big)
+        self.offsets.append(off)
+        return True
+
+    def offset_of(self, index, fh):
+        """第 ``index`` 頁的 IFD 位置（不夠就往前走）。超出範圍回 ``None``。"""
+        if index < 0:
+            return None
+        while len(self.offsets) <= index and self._step(fh):
+            pass
+        return self.offsets[index] if index < len(self.offsets) else None
+
+    def count(self, fh):
+        """總頁數 —— **會把鏈走完**，所以只在真的要那個數字時問。"""
+        while self._step(fh):
+            pass
+        return len(self.offsets)
+
+
 def _tiff_handle_locked(path):
     """拿一個開好的 ``tifffile.TiffFile``（同一個檔就重複使用）。
 
@@ -277,7 +411,7 @@ def _tiff_handle_locked(path):
         hit = _OPEN.get(path)
         if hit is not None and hit[1] == key:
             _OPEN.move_to_end(path)
-            return hit[0]
+            return hit[0], hit[2]
         if hit is not None:               # 檔案變了：關掉舊的
             try:
                 hit[0].close()
@@ -294,26 +428,32 @@ def _tiff_handle_locked(path):
         # ``suspicious number of tags 8827`` 之類的訊息。
         #
         # 以前每次讀都重開檔，所以碰不到；快取住 handle 之後它每次換 defect 都
-        # 會發生（實測第二張圖必失敗）。``len()`` 逼它把清單一次走完，之後的索引
-        # 就只是查表，不再依賴檔案位置。
+        # 會發生（實測第二張圖必失敗）。當時的解法是 ``len(tf.pages)`` —— 逼
+        # tifffile 把清單一次走完，之後的索引就只是查表。
         #
-        # 這一趟 IFD 走訪本來就要付（原本是**每讀一張圖付一次**）；現在是
-        # 每開一次檔付一次。4000 頁的檔案：第一次 35 ms，之後每張 0.4 ms。
-        len(tf.pages)
-        _OPEN[path] = (tf, key)
+        # **2026-08-20 換掉了那個解法。** 走完整條鏈在網路碟上是 106 秒
+        # （使用者實測，30962 頁），而且那是在他看到第一張圖之前付的。
+        # 現在改成：自己維護一張**用到哪裡才走到哪裡**的 IFD 位置表
+        # （:class:`_PageIndex`），每次讀都先 seek 到那一頁的 IFD ——
+        # 位置的連續性從此不影響任何東西，而該走的頁數等於真的讀到的頁數。
+        fh = tf.filehandle
+        fh.seek(0)
+        en, big, first = _open_header(fh)
+        index = _PageIndex(en, big, first, path)
+        _OPEN[path] = (tf, key, index)
         while len(_OPEN) > _OPEN_MAX:
-            _old, (old_tf, _k) = _OPEN.popitem(last=False)
+            _old, (old_tf, _k, _i) = _OPEN.popitem(last=False)
             try:
                 old_tf.close()
             except Exception:             # noqa: BLE001
                 pass
-        return tf
+        return tf, index
 
 
 def close_cached_tiffs() -> None:
     """關掉所有快取的 TIFF handle（換 lot、關視窗、測試收尾時呼叫）。"""
     with _OPEN_LOCK:
-        for tf, _key in _OPEN.values():
+        for tf, _key, _index in _OPEN.values():
             try:
                 tf.close()
             except Exception:             # noqa: BLE001
@@ -339,12 +479,17 @@ def read_page(path, page_index):
 
     序列化的代價可以忽略：一次讀 0.4 ms，而預覽本來就有請求合併。
     """
+    import tifffile  # lazy: 同 _tiff_handle_locked
+
     with _OPEN_LOCK:
-        tf = _tiff_handle_locked(path)
-        # 頁面清單在開檔時就建好了（見 :func:`_tiff_handle_locked`），所以問總數
-        # 不用再走一次 IFD —— 範圍檢查是免費的，訊息也講得出「總共幾頁」。
-        n = len(tf.pages)
-        if page_index < 0 or page_index >= n:
+        tf, index = _tiff_handle_locked(path)
+        fh = tf.filehandle
+        off = index.offset_of(int(page_index), fh)
+        if off is None:
+            # **只有真的超出範圍才走完整條鏈**（為了講得出「總共幾頁」）。
+            n = index.count(fh)
             raise IndexError(
                 f"TIFF page {page_index} out of range (0..{n - 1})")
-        return tf.pages[page_index].asarray()
+        # 自己 seek 到那一頁的 IFD，所以「上一次讀像素把位置移到哪」不重要。
+        fh.seek(off)
+        return tifffile.TiffPage(tf, index=int(page_index)).asarray()

@@ -369,19 +369,40 @@ class RecipeModel:
         return get_step(self.nodes[node_id].step).category
 
     def available_features(self, upto_node: Optional[str] = None) -> List[str]:
-        """route（到 upto_node 為止，含）會產出的特徵名，供表達式下拉。"""
+        """route（到 upto_node 為止，含）會產出的特徵名，供表達式下拉。
+
+        **沒有人填 nm/px 就不列 nm 的那一份**（2026-08-20）。量測卡一律宣告
+        `cd_x_nm` 那一組（它看不到 Load 卡上填了什麼），但下拉是使用者**會去
+        點**的東西 —— 點了一個永遠不會出現的名字，recipe 就會在跑起來的時候
+        每一顆都失敗。這裡看得到每一張卡，所以這句話在這裡回答。
+        """
         feats: List[str] = []
+        known = self.nm_per_px_is_known()
         for nid in self.node_order:
             node = self.nodes[nid]
             if not node.enabled:
                 continue
             step_cls = get_step(node.step)
             for f in step_cls.resolve_features(node.params):
+                if not known and (f.endswith("_nm") or f.endswith("_nm2")):
+                    continue
                 if f not in feats:
                     feats.append(f)
             if nid == upto_node:
                 break
         return feats
+
+    def nm_per_px_is_known(self) -> bool:
+        """有沒有任何一張卡填了 nm/px（`_util.nm_per_px_spec`）。"""
+        for node in self.nodes.values():
+            if not node.enabled:
+                continue
+            try:
+                if float(node.params.get("nm_per_px", 0) or 0) > 0:
+                    return True
+            except (TypeError, ValueError):
+                continue
+        return False
 
     def available_streams(self, before_node: Optional[str] = None) -> List[str]:
         """到 before_node（不含）為止累積的影像流名，供 image_key 參數下拉。"""
@@ -574,6 +595,93 @@ class RecipeModel:
         而那正是使用者要在畫布上讀到的東西。
         """
         return [(e.src, e.dst, e.src_out, e.dst_in) for e in self.edges]
+
+    # ---- 區域線（F12）-----------------------------------------------------
+    def region_outputs(self, node_id: str) -> List[str]:
+        """這張卡右邊有哪些**區域埠**：自己定義的 ＋ **原樣送出的**。
+
+        「同進同出」（F9-6 對影像做的規則，2026-08-19 使用者要求套到區域上：
+        「區域線應該也要 follow 圖像線一樣，前進後出」）—— 接進來的區域，卡片
+        後面也接得出去，否則量測卡就是一條死路：兩張卡要量同一個區域時，第二張
+        只能回頭去接那張 Region 卡，而那條線會橫跨整張畫布。
+
+        **這是畫布的事，不是引擎的事**：`ctx.rois` 本來就是全域的，一個區域被
+        定義之後每一張後面的卡都用得到。這裡只是把那件事畫出來，
+        `resolve_regions_out`（引擎的宣告）一個字都沒有變 —— 副標印的仍然是
+        「這張卡**真的產出**什麼」（`regions_produced`）。
+        """
+        node = self.nodes.get(str(node_id))
+        if node is None:
+            return []
+        try:
+            step_cls = get_step(node.step)
+            out = [str(r) for r in step_cls.resolve_regions_out(node.params) if r]
+            passed = [str(r) for r in step_cls.resolve_regions_in(node.params) if r]
+        except Exception:                  # noqa: BLE001 — 顯示用，壞了就空著
+            return []
+        return out + [r for r in passed if r not in out]
+
+    def region_producer(self, name: str,
+                        before_node: Optional[str] = None) -> str:
+        """誰定義了區域 ``name``（沒有人回空字串）。
+
+        **取上游最後一個**，跟引擎一致：``Context.set_roi`` 明文同名覆寫，所以
+        兩張卡都叫 ``epi`` 時，量測卡量到的是後面那張寫的框
+        （而那個撞名本身有 lint 在講 —— 區域的 fact 特徵會撞）。
+
+        「最後一個」也涵蓋**原樣送出**的卡（見 :meth:`region_outputs`）——
+        三張卡串著量同一個區域時，線是一段一段接的，不是三條都從最前面那張
+        Region 卡拉出來（那正是影像流的畫法）。
+        """
+        name = str(name or "").strip()
+        if not name:
+            return ""
+        owner = ""
+        for nid in self.node_order:
+            if nid == before_node:
+                break
+            node = self.nodes.get(nid)
+            if node is None or not node.enabled:
+                continue
+            # **原樣送出的也算**（同進同出）：線要從使用者拉的那顆埠出發，
+            # 而他拉的是上一張卡右邊那顆，不是三張卡以前那張 Region 卡的。
+            if name in self.region_outputs(nid):
+                owner = nid
+        return owner
+
+    def region_lines(self) -> List[Tuple[str, str, str, str]]:
+        """畫布要畫的**區域線**：``(定義它的卡, 用它的卡, 區域名, 落在哪一格)``。
+
+        **推導出來的，不是存起來的**（F12 的關鍵決定，理由見
+        ``docs/history/plans/F12-region-edges.md`` §3）：``roi="epi"`` 那個參數就是唯一
+        的儲存，這裡只是把「誰定義了 epi」查出來。所以：
+
+        * 舊 recipe 打開就有線，不必遷移；
+        * recipe JSON 的格式一個欄位都沒有變；
+        * 「用哪個區域」永遠只有一個家 —— 存第二份的話兩份會漂，而那正是 F9
+          花很大力氣拆掉的東西。
+
+        指到一個上游沒有人定義的區域時**不畫線**（那條 lint 是
+        ``unknown-region``，error 級）—— 畫一條無中生有的線比沒有線更糟。
+        """
+        out: List[Tuple[str, str, str, str]] = []
+        for nid in self.node_order:
+            node = self.nodes.get(nid)
+            if node is None:
+                continue
+            try:
+                specs = get_step(node.step).region_input_specs()
+            except Exception:              # noqa: BLE001
+                continue
+            for spec in specs:
+                if not spec.visible_for(node.params):
+                    continue
+                raw = str(node.params.get(spec.name, "") or "")
+                for name in [x.strip() for x in raw.split(",") if x.strip()]:
+                    src = self.region_producer(name, before_node=nid)
+                    if src:
+                        out.append((src, nid, name, spec.name))
+        return out
 
     # ---- Recipe 互轉 -------------------------------------------------------
     def to_recipe(self) -> Recipe:

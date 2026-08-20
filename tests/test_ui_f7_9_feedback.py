@@ -238,8 +238,21 @@ def test_an_unwired_recipe_wraps_instead_of_running_off_the_screen(qapp):
     # 閱讀順序仍然是左到右、上到下
     assert pos["n0"] == (0, 0) and pos["n3"] == (3, 0) and pos["n4"] == (0, 1)
 
-    width = canvas_mod.WRAP * (canvas_mod.NODE_W + canvas_mod.COL_GAP)
+    # 「塞得進去」算的是 n 張卡 + **(n−1)** 個欄距 —— 欄距是欄與欄之間的，
+    # 最後一欄後面沒有。（以前這裡乘的是 n 個，於是 F13-⑤ 把卡片放大一號之後
+    # 它多算了 116px 而紅掉，但畫面其實是塞得下的。）
+    cols = max(c for c, _r in pos.values()) + 1
+    width = cols * canvas_mod.NODE_W + (cols - 1) * canvas_mod.COL_GAP
     assert width < 1200, "換行之後整張圖要塞得進一般的工作區寬度"
+
+    # F13-1 之後換行點是**跟著實際寬度走**的，所以這條不變量對每一種寬度都
+    # 要成立，不只對寫死的 WRAP。
+    for view_w in (400, 700, 1000, 1400):
+        n = canvas_mod.wrap_for_width(view_w)
+        need = n * canvas_mod.NODE_W + (n - 1) * canvas_mod.COL_GAP
+        assert need <= view_w * 1.2, (
+            "%dpx 寬的畫布排了 %d 欄（要 %dpx）—— 縮完會讀不出字"
+            % (view_w, n, need))
 
 
 # --------------------------------------------------------------------------- #
@@ -556,6 +569,8 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
         # 比較卡吃的是**區域**，所以上游要有一張出得了區域的 Region 卡。
         # `roi_cross` 是三張裡唯一不需要外部資料的（純規則）。
         "roi_compare": ["roi_cross"],
+        # 配對卡吐的那條流（配到的那顆的圖）—— 上游一樣是**另一張 Input 卡**。
+        "align_to": ["pair_source"],
     }
     keys = [d["key"] for d in visible_steps([s.describe() for s in list_steps()])]
     dead_ends = {}
@@ -571,8 +586,15 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
         # 所以這裡不算死路，但**訊息必須指得出路在哪**，否則它就真的是死路了。
         needs = [i for i in errs if i.code == "not-configured"]
         rest = [i for i in errs if i.code != "not-configured"]
-        if needs:
-            needs_setup[key] = [i.detail for i in needs]
+        # 「還沒設定完」歸給**發出它的那張卡**，不是這一輪的主角 —— 前置鏈裡的
+        # 卡也會講這句話（`align_to` 的上游 `pair_source` 就是），而下面要拿
+        # 「引號裡的字是不是這張卡的欄位」去驗它。歸錯卡等於拿 A 的欄位表去驗
+        # B 的訊息。
+        for i in needs:
+            nid = str(i.node_id or "")
+            owner = seq[int(nid[1:])] if nid[1:].isdigit() else key
+            if i.detail not in needs_setup.setdefault(owner, []):
+                needs_setup[owner].append(i.detail)
         if rest:
             dead_ends[key] = [(i.code, i.detail) for i in rest]
     assert not dead_ends, "這些卡片沒有可行的組合：%s" % sorted(dead_ends)
@@ -594,13 +616,19 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
 
     studio_src = (Path(__file__).resolve().parent.parent
                   / "d4t" / "ui" / "studio.py").read_text(encoding="utf-8")
+    # **第三種形狀：另一張卡的名字**（F14-1）。入口從工具列搬到卡片上之後，
+    # 「去哪裡做那件事」的答案是一張卡 —— 而卡名是使用者找得到的東西
+    # （卡片庫裡有、畫布上也有）。它跟前兩種一樣要驗：引的必須是**真的**
+    # 有那張卡，不然「指向一個東西」又退化成「寫一句看起來像樣的話」。
+    card_labels = {str(c.label) for c in list_steps()}
     for key, details in needs_setup.items():
         labels = {str(p.get("label") or p["name"])
                   for p in get_step(key).describe()["params"]}
         for detail in details:
             quoted = _re.findall(r"“([^”]+)”", detail)
             real = [q for q in quoted
-                    if q in labels or ('"%s"' % q) in studio_src]
+                    if q in labels or q in card_labels
+                    or ('"%s"' % q) in studio_src]
             assert ("…" in detail or "..." in detail) or real, (
                 "%s 說它還沒設定完，但沒有指向任何一個按得到／填得到的東西"
                 "（要嘛一顆 `…` 結尾的鈕，要嘛“引號”起來的欄位名）：%s"

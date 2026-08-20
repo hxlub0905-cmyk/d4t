@@ -84,6 +84,13 @@ NEEDS_MORE_SETUP = {
     # 所以一個區域都沒有）。「沒挑區域」時它正確的行為就是擋下來並講出要填哪
     # 兩格。專屬驗收在 tests/test_roi_compare.py。
     "roi_compare": "需要上游先有一張 Region 卡（harness 只接 load_patch）",
+    # 它要的是**第二份 lot**（`Dataset.sources`），而這個 harness 只載了一份。
+    # 沒掛的時候它正確的行為就是擋下來並講出「用這張卡上的 Open data…」。
+    # 專屬驗收在 tests/test_pair_source.py。
+    "pair_source": "需要掛上第二份 lot（harness 只載了一份）",
+    # 它吃的是 `pair_source` 吐的那條流（配到的那顆的圖），而那張卡在這個
+    # harness 上跑不起來（上一行）。專屬驗收在 tests/test_pair_source.py。
+    "align_to": "需要配對卡吐出來的那條流（前一張卡在這裡跑不起來）",
 }
 
 

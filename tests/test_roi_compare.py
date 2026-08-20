@@ -223,8 +223,8 @@ def test_an_unknown_comparison_is_refused_with_the_list():
 # --------------------------------------------------------------------------- #
 def test_a_region_key_takes_one_name_not_a_list():
     """`region_keys`（複數）是逗號清單，這個不是 —— 而錯的那句話要是白話的。"""
-    spec = ParamSpec(name="target_region", type="region_key", default="",
-                     help="x")
+    spec = ParamSpec(name="target_region", type="region_key", direction="in",
+                     default="", help="x")
     assert spec.validate("epi") == "epi"
     with pytest.raises(ParamError) as e:
         spec.validate("epi,mg")
@@ -247,3 +247,41 @@ def test_the_panel_sees_the_same_numbers():
     assert rec["values"]["delta"] == ctx.features["delta"]
     assert rec["target_px"] == 40 * 20 and rec["reference_px"] == 40 * 20
     assert rec["stat"] == "glv_mean"
+
+
+# --------------------------------------------------------------------------- #
+# 7. 多連一：一張量測卡可以量好幾個區域（F13-⑥）
+# --------------------------------------------------------------------------- #
+def test_one_card_measures_several_regions():
+    """使用者：「我想將 ROI A 跟 ROI B 的區域線一起接到 GLV stats」。
+
+    同一組統計量、同一張圖，量在兩個區域上 —— 而每個數字帶自己的區域名，
+    不然兩組會互相蓋掉（`Context.add_feature` 允許覆寫），而畫面上看不出來。
+    """
+    ctx = _ctx()
+    p = {"source": "test", "roi": "hot,cold", "metrics": "glv_mean",
+         "output_prefix": ""}
+    get_step("glv_stats")().run(ctx, p)
+    assert ctx.features["hot_glv_mean"] > ctx.features["cold_glv_mean"]
+    assert set(ctx.features) == set(get_step("glv_stats").resolve_features(p))
+
+
+def test_one_region_keeps_the_old_names():
+    """只接一個時特徵名跟以前**逐字相同** —— 那是「分數表達式不必改寫」與
+    「黃金值不動」的前提，跟影像流那一半同一個理由（`stream_prefix`）。"""
+    ctx = _ctx()
+    p = {"source": "test", "roi": "hot", "metrics": "glv_mean",
+         "output_prefix": ""}
+    get_step("glv_stats")().run(ctx, p)
+    assert list(ctx.features) == ["glv_mean"]
+
+
+def test_streams_and_regions_multiply():
+    """兩條流 × 兩個區域 = 四組數字，而每一組的名字都指得出它是誰。"""
+    ctx = _ctx()
+    ctx.set_image("ref", np.asarray(ctx.images["test"]) * 0.5)
+    p = {"source": "test,ref", "roi": "hot,cold", "metrics": "glv_mean",
+         "output_prefix": ""}
+    get_step("glv_stats")().run(ctx, p)
+    assert set(ctx.features) == {"test_hot_glv_mean", "test_cold_glv_mean",
+                                 "ref_hot_glv_mean", "ref_cold_glv_mean"}

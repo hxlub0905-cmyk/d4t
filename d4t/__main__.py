@@ -99,6 +99,38 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(f"GDS 匯出：{rep.summary()}")
         for w in rep.warnings:
             print(f"  △ {w}")
+    for spec in (getattr(args, "source", None) or []):
+        sid, _, path = str(spec).partition("=")
+        sid, path = sid.strip(), path.strip()
+        if not sid or not path:
+            print("[錯誤] --source 要寫成 `代號=路徑`（收到：%s）" % spec,
+                  file=sys.stderr)
+            return 2
+        from d4t.core.ingest import pair_source as pair_ingest
+
+        from d4t.core.steps.pair_source import columns_for_source
+
+        want = columns_for_source(recipe.nodes.values(), sid)
+        try:
+            second = load_dataset(path)
+            # 只複製 recipe 真的要 carry 的那幾欄（幾十萬顆 ×24 欄是幾百 MB，
+            # 而那幾欄還要 pickle 進每個 worker）。
+            rep = pair_ingest.attach(ds, second, sid, columns=want)
+        except Exception as e:              # noqa: BLE001 — CLI 邊界，一律回報
+            print("[錯誤] --source %s：%s" % (spec, e), file=sys.stderr)
+            return 2
+        # **打錯一個欄名要在這裡就停**，不是讓每一顆都失敗一次：整批跑完才發現
+        # 「那一欄根本不存在」是最貴的一種發現方式，而這裡手上還有 KlarfDoc。
+        missing = pair_ingest.missing_columns(second, want)
+        if missing:
+            print("[錯誤] --source %s：這一份沒有 %s 這幾欄（它有：%s）"
+                  % (sid, ", ".join(missing),
+                     ", ".join(pair_ingest.columns_of(second))), file=sys.stderr)
+            return 2
+        print("第二份 source：%s" % rep.summary())
+        for w in second.warnings:
+            print("  △ %s" % w)
+
     if ds.kind not in recipe.routes:
         print(f"[錯誤] recipe 沒有 '{ds.kind}' 的 route（有：{sorted(recipe.routes)}）", file=sys.stderr)
         return 2
@@ -378,6 +410,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                        help="GLAS 匯出資料夾（`<id>_label.png` + "
                             "overlay_manifest.json）—— 掛上去之後 "
                             "`load_sidecar` 卡才有東西可以載")
+    p_run.add_argument("--source", action="append", default=[],
+                       metavar="代號=KLARF路徑",
+                       help="第二份 lot（F15）：`pair_source` 卡靠代號指它。"
+                            "可以重複給。路徑不進 recipe —— 換一批資料重跑時"
+                            "在這裡換")
     p_run.add_argument("--out", default=None, help="輸出 JSON 路徑")
     p_run.add_argument("--csv", default=None, help="輸出 CSV 路徑（feature vector）")
     p_run.add_argument("--limit", type=int, default=None, help="只跑前 N 顆（試跑）")

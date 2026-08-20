@@ -217,6 +217,29 @@ class Context:
     def nm_per_px(self) -> Optional[float]:
         return self.meta.get("nm_per_px")
 
+    def stream_nm_per_px(self, key: str) -> Optional[float]:
+        """**這一條流**的 nm/px（2026-08-20）。不知道就回 None。
+
+        為什麼不是一個全域數字：一份 pipeline 可以同時吃兩份資料（F15 的第二
+        份 lot），而兩台機台的像素大小不一樣 —— 那正是 `align_to` 要縮放才對得
+        起來的原因。所以數字掛在**流**上，由把那條流吐出來的那張卡填。
+
+        沒有登記過就退回全域那個（`meta["nm_per_px"]`，主 lot 的 Load 卡填的）
+        —— 只有一份資料的時候兩者本來就一樣。
+        """
+        table = self.meta.get("stream_nm_per_px") or {}
+        value = table.get(str(key))
+        return self.nm_per_px if value is None else float(value)
+
+    def set_stream_nm_per_px(self, key: str, value: Optional[float]) -> None:
+        """登記某一條流的 nm/px（0／None = 不知道，不登記）。"""
+        try:
+            v = float(value or 0.0)
+        except (TypeError, ValueError):
+            return
+        if v > 0:
+            self.meta.setdefault("stream_nm_per_px", {})[str(key)] = v
+
     def warn(self, msg: str) -> None:
         self.meta.setdefault("warnings", []).append(str(msg))
 

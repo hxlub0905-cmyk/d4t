@@ -187,13 +187,15 @@ def test_the_shortcut_is_written_where_it_will_be_found(window):
     refresh 都會重寫這幾顆的 tooltip，設一次的話第一次 refresh 就沒了。
 
     （以前拿 ``Ctrl+S`` / Save Recipe 當例子。存檔功能還沒支援，改用
-    ``Ctrl+O`` —— 它同樣走 ``_set_tip``，而且 refresh 也會重寫它。）
+    ``Ctrl+O`` —— 它同樣走 ``_set_tip``，而且 refresh 也會重寫它。
+    F14-1 之後 ``Ctrl+O`` 那顆鈕在**空白狀態**上：工具列那幾顆資料入口拿掉了，
+    而快捷鍵要在**還看得到的**那顆鈕上講出來，不然它就只活在原始碼裡。）
     """
-    assert "Ctrl+O" in window.btn_open_klarf.toolTip()
+    assert "Ctrl+O" in window.btn_empty_open.toolTip()
     assert "Ctrl+R" in window.btn_trial.toolTip()
     window.model.add_step("align")
     window._refresh_all()
-    assert "Ctrl+O" in window.btn_open_klarf.toolTip(), "refresh 之後不見了"
+    assert "Ctrl+O" in window.btn_empty_open.toolTip(), "refresh 之後不見了"
 
 
 def test_ctrl_f_opens_the_card_search(window):

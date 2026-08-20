@@ -86,6 +86,12 @@ Phase 2），使用者定調**先把引擎做對，再回頭做產品化**（見
     這一段踩過六個「跑得完、有數字、而且是錯的」，全部記在 `docs/PITFALLS.md`
     與 `docs/history/plans/F9-dag-streams.md`。
 
+    **具名區域也一樣（F12，2026-08-19）**：一張卡用到的每一個區域，畫布上都要
+    有一條線指到定義它的那張卡（虛線 + 菱形埠）。它跟影像線差一件事 ——
+    **區域線不存進 `recipe.edges`，是從參數推導出來的**（`roi="epi"` 就是唯一
+    的儲存，區域名全域唯一所以來源推得出來）。存第二份的話兩份會漂，而那正是
+    上面那六個坑的形狀。見 `docs/history/plans/F12-region-edges.md`。
+
 ---
 
 ## 3. 加一張新卡片（最常見的工作）
@@ -150,6 +156,20 @@ param 相依 I/O（例如輸出流名稱由參數決定）覆寫 `resolve_reads/
 > 「他會很亂連」）。來源只在畫布上拉線決定，設定區只顯示現在接的是什麼。
 > 所以卡片吃影像流的參數請務必用這兩個型別 —— 用 `str` 的話它會變成一個
 > 打得進去、但畫布上沒有對應線條的自由文字框。
+>
+> **吃具名區域的參數同理，用 `region_key` / `region_keys` 並宣告
+> `direction="in"`**（F12，2026-08-19）。區域在畫布上是**菱形埠 + 一條虛線**，
+> 那一格一樣唯讀。用 `str` 的下場更糟：畫面上兩張卡看起來互不相干，而拿掉上游
+> 那張 Region 卡，量測卡不會報錯 —— 它會**安靜地改量整張圖**。
+> 區域**產出**的名字不走參數，由 `resolve_regions_out` 宣告
+> （`<name>_center` 那種是算出來的，不是某一格填的字）。
+>
+> **單數／複數的意思跟影像流一字不差**（F13-⑥）：`region_keys`（一串）是
+> 「同一件事做在好幾個區域上」，第二條線**累加**，而每個數字會自動帶上
+> 區域名前綴（`epi_glv_mean` / `mg_glv_mean`；只接一個時名字跟以前逐字相同）；
+> `region_key`（單一角色，例 `roi_compare` 的 target / reference）第二條線是
+> **取代**。量測卡的迴圈在 `MultiSourceStep`，子類只實作 `measure` —— 它不必
+> 知道接了幾條流，也不必知道接了幾個區域。
 
 > **把 `min`/`max` 填好，滑桿是免費的**（F7-8）。ParamForm 看到有上下界的
 > `int`/`float` 就自動配一支跟數字框雙向綁定的滑桿。這不只是好看 ——
@@ -213,6 +233,20 @@ git add -A && python tools/release.py && git add -A
 
 後兩種沒有 KLARF → 沒有座標、**寫不回 KLARF**，而那句話**常駐在資料集標籤上**
 （`tiff_stack · defect 1 / 3 · no KLARF`）—— 不是等使用者按了 Export 才發現。
+
+**第二份 lot 走另一條路**（F15，2026-08-19）—— ⏸ **這一段停在原地，不要接著做**
+（使用者 2026-08-20：「太快了」）。引擎那一半做完且有測試，缺的是「對得對不對」
+的證據與那份點對點 report，而它要等 Compare 段做完才有形狀。詳見
+[`docs/plans/F15-pair-sources.md`](docs/plans/F15-pair-sources.md) §16 與
+[`docs/ROADMAP.md`](docs/ROADMAP.md)。以下是它現在的樣子：
+
+`pair_source` 這張卡上的
+`Open data…` 掛的是「拿來對照的那一份」（EBI ↔ RSEM(API) characterization），
+它掛在 `Dataset.sources[代號]` 上，**不取代目前的資料集** —— main 決定批次跑幾
+顆、走哪一條 route、KLARF 寫回誰。CLI 是 `--source 代號=路徑`（可以重複）。
+**卡片不自己 `open()`**：讀檔在 ingest 層（`core/ingest/pair_source.attach`），
+路徑不進 recipe，而第二份的身分要進快取簽章 —— 否則換一份而簽章看不見就回舊
+影像（鐵則 9）。
 
 `d4t/ui/scope.py` 仍然是這類「暫時不給看」的**唯一**去處，
 **而「入口長什麼樣」也住在同一份**（F11 Input-5）：

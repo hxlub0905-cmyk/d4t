@@ -204,15 +204,22 @@ def test_every_image_parameter_says_whether_it_is_an_input(window):
     這條測試存在的理由是**下一張卡**：畫布靠 ``direction`` 決定要畫幾顆輸入埠、
     輸出埠要不要等來源接齊。用推的（「值有出現在 reads 裡就算輸入」）會在來源
     被清空的那一刻失效，而那正是新卡的常態。
+
+    F12 起 ``region_key`` / ``region_keys`` 也在這條規則裡（區域也是埠）。
     """
     for cls in list_steps():
         for spec in cls.params:
             if spec.type in ("image_key", "image_keys"):
                 assert spec.direction in ("in", "out"), \
                     "%s.%s 沒說自己是輸入還是輸出" % (cls.key, spec.name)
+            elif spec.type in ("region_key", "region_keys"):
+                # F12：區域也是埠，而它**只有** in —— 產出的區域由
+                # `resolve_regions_out` 宣告，不是某一格填的字。
+                assert spec.direction == "in", \
+                    "%s.%s 是區域參數，方向只能是 in" % (cls.key, spec.name)
             else:
                 assert spec.direction == "", \
-                    "%s.%s 不是影像流參數卻宣告了方向" % (cls.key, spec.name)
+                    "%s.%s 不是影像／區域參數卻宣告了方向" % (cls.key, spec.name)
 
 
 # --------------------------------------------------------------------------- #

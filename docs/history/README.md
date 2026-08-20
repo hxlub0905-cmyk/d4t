@@ -5,8 +5,13 @@
 
 | 檔案 | 是什麼 |
 |---|---|
+| [`2026-08.md`](2026-08.md) | 2026 年 8 月**前半**的 `SESSION_LOG`（08-07 ～ 08-18，第十五輪以前）。切點是**上一次合併進 main 的那一輪**，不是月份 |
 | [`2026-07.md`](2026-07.md) | 2026 年 7 月的 `SESSION_LOG`（M0–M7、F7-9…F7-18、兩台機器與搬運通道的成形） |
 | [`plans/F7-canvas-and-taxonomy.md`](plans/F7-canvas-and-taxonomy.md) | F7 全系列的計畫書（F7-1…F7-24，✅ 全數完成）。CLAUDE.md 的坑表大量引用它的 §，那些引用仍然有效 |
+| [`plans/F8-rule-based-roi.md`](plans/F8-rule-based-roi.md) | 純規則的 ROI 定位（兩組條紋的交會處）✅ |
+| [`plans/F9-dag-streams.md`](plans/F9-dag-streams.md) | 影像流變成 DAG 上的線 ✅ —— CLAUDE.md 鐵則 10 引用它 |
+| [`plans/F10-canvas-tells-the-truth.md`](plans/F10-canvas-tells-the-truth.md) | 畫布要符合現實（剛加的卡前後都是空的、埠點得到、多連一）✅ |
+| [`plans/F12-region-edges.md`](plans/F12-region-edges.md) | 具名區域也有線了（虛線＋菱形埠，**線從參數推導、不存第二份**）✅ |
 
 ## 為什麼要有這個目錄
 

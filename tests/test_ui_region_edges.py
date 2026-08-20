@@ -1,0 +1,400 @@
+# F12：區域也有線 — authored 2026-08-19.
+"""**一張卡用到的每一個具名區域，畫布上都要有一條線指到定義它的那張卡。**
+
+起點是使用者讀完 GDS → GLV 的接法之後說的那句話：「但我還是這樣怪怪的」。
+怪的地方不是 bug —— 那條路跑起來是對的（順序由 route 相鄰對保證，見
+``execution_order``）—— 而是**畫布上有兩套規則**：影像要拉線，區域用打字。
+
+而它會說謊：拿掉上游那張 Region 卡，量測卡不會報錯，它會**安靜地改量整張圖**。
+
+這一份鎖住四件事：
+
+1. 區域參數一律是 ``region_key`` / ``region_keys`` + ``direction="in"``，
+   而且設定區那一格**唯讀**（來源只在畫布上決定，同 F9-6）。
+2. 區域線是從**參數推導**出來的，不進 ``recipe.edges`` —— recipe JSON 的格式
+   一個欄位都沒有變，舊檔打開就有線。
+3. 拉線 = 設那一格；剪線 = 清那一格；刪掉定義它的卡 = 下游那一格也空掉。
+4. 型別不合與「來源排在下游」都擋得住，而且講得出可以照做的下一句話。
+"""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+from conftest import first_source, wire_up  # noqa: E402
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+
+pytest.importorskip("PySide6")
+
+from PySide6.QtWidgets import QApplication, QLineEdit   # noqa: E402
+
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from d4t.core.pipeline import get_step, list_steps      # noqa: E402
+from d4t.core.pipeline.recipe import Recipe             # noqa: E402
+from d4t.core.pipeline.step import REGION_TYPES         # noqa: E402
+from d4t.ui import canvas as canvas_mod                 # noqa: E402
+from d4t.ui import studio as studio_mod                 # noqa: E402
+from d4t.ui import theme as theme_mod                   # noqa: E402
+from d4t.ui.viewmodel import RecipeModel                # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    app = QApplication.instance() or QApplication([])
+    theme_mod.apply_theme(app)
+    yield app
+
+
+@pytest.fixture
+def window(qapp):
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    yield win
+    win.close()
+
+
+def _gds_route(model: RecipeModel):
+    """``load_single → load_sidecar → roi_from_mask → glv_stats``（GDS 那條路）。
+
+    這正是 `docs/GLAS-INTERFACE.md` 講的接法，也是使用者問「某個 layer 的 GLV
+    要怎麼設定」時得到的那張圖。
+    """
+    img = model.add_step("load_single")
+    lbl = model.add_step("load_sidecar")
+    gds = model.add_step("roi_from_mask")
+    glv = model.add_step("glv_stats")
+    model.set_param(gds, "source", "layout_label")
+    model.set_param(gds, "layers", "1:epi")
+    model.set_param(glv, "source", "single")
+    return img, lbl, gds, glv
+
+
+# --------------------------------------------------------------------------- #
+# 1. 區域是埠，而那一格是唯讀的
+# --------------------------------------------------------------------------- #
+def test_every_region_parameter_is_an_input_port():
+    """整個 registry 一起驗 —— 第 18 張卡的作者不必記得回來補。"""
+    for cls in list_steps():
+        for spec in cls.params:
+            if spec.type in REGION_TYPES:
+                assert spec.direction == "in", \
+                    "%s.%s 是區域參數，方向只能是 in" % (cls.key, spec.name)
+
+
+def test_no_card_takes_a_region_name_as_free_text():
+    """``roi`` 曾經是 ``str`` —— 打錯字要跑一次 lint 才知道，而畫布上什麼都沒有。
+
+    判準不是名字也不是逐張列舉，是**問卡片自己**：把一個記號塞進某一格，
+    如果它出現在 ``resolve_regions_in``（＝「這張卡要用上游的哪個區域」），
+    那一格就是在指一個區域，型別必須是 ``region_key`` / ``region_keys``。
+
+    這樣寫的理由是**下一張卡**：欄位叫 `my_roi` 或 `baseline` 都一樣抓得到，
+    而「這一格指的是不是區域」永遠只有卡片自己知道。
+    """
+    mark = "zz_sentinel_zz"
+    bad = []
+    for cls in list_steps():
+        try:
+            base = cls.validate_params({})
+        except Exception:                      # noqa: BLE001 — 壞卡另有測試
+            continue
+        for spec in cls.params:
+            if spec.type in REGION_TYPES:
+                continue                       # 已經是對的型別
+            if spec.type != "str":
+                continue                       # 塞不進一個名字的格子不必問
+            try:
+                names = cls.resolve_regions_in(dict(base, **{spec.name: mark}))
+            except Exception:                  # noqa: BLE001
+                continue
+            if mark in names:
+                bad.append("%s.%s (%s)" % (cls.key, spec.name, spec.type))
+    assert not bad, "區域名不可以用打的：" + ", ".join(bad)
+
+
+def test_the_region_field_is_read_only_in_the_panel(window):
+    """來源只在畫布上決定（同 F9-6 對影像做的事）。"""
+    src = first_source(window, "load_single")
+    glv = window.add_card_after(src, "glv_stats")
+    window._on_edge_added(src, glv, "single", "source")
+    window.select_node(glv)
+    editor = window.param_form.editor("roi")
+    assert isinstance(editor, QLineEdit) and editor.isReadOnly()
+
+
+# --------------------------------------------------------------------------- #
+# 2. 線是推導出來的，不進 recipe
+# --------------------------------------------------------------------------- #
+def test_the_line_is_derived_from_the_parameter():
+    model = RecipeModel(kind="rsem")
+    _img, _lbl, gds, glv = _gds_route(model)
+    assert model.region_lines() == []
+
+    model.set_param(glv, "roi", "epi")
+    assert model.region_lines() == [(gds, glv, "epi", "roi")]
+    # **不進 recipe.edges** —— 值只有一個家，兩份會漂（F9 的教訓）。
+    assert model.edge_lines() == []
+
+
+def test_an_old_recipe_gets_its_lines_without_any_migration(tmp_path):
+    """``roi="epi"`` 的舊檔打開就有線 —— 檔案格式一個欄位都沒有變。"""
+    model = RecipeModel(kind="rsem")
+    _img, _lbl, gds, glv = _gds_route(model)
+    model.set_param(glv, "roi", "epi")
+
+    path = tmp_path / "r.json"
+    path.write_text(json.dumps(model.to_recipe().to_json_dict()),
+                    encoding="utf-8")
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    assert doc["edges"] == [], "區域線不該被存進 edges"
+
+    again = RecipeModel.from_recipe(Recipe.from_json_dict(doc), kind="rsem")
+    assert again.region_lines() == [(gds, glv, "epi", "roi")]
+
+
+def test_a_region_nobody_defines_draws_no_line():
+    """畫一條無中生有的線比沒有線更糟（壞在哪由 ``unknown-region`` 講）。"""
+    model = RecipeModel(kind="rsem")
+    _img, _lbl, _gds, glv = _gds_route(model)
+    model.set_param(glv, "roi", "nope")
+    assert model.region_lines() == []
+    assert "unknown-region" in [i.code for i in model.validate()]
+
+
+# --------------------------------------------------------------------------- #
+# 3. 拉線、剪線、刪卡
+# --------------------------------------------------------------------------- #
+def test_dragging_a_line_picks_the_region(window):
+    src = first_source(window, "load_single")
+    gds = window.add_card_after(src, "roi_from_mask")
+    glv = window.add_card_after(gds, "glv_stats")
+    window._on_edge_added(src, gds, "single", "source")
+    window.model.set_param(gds, "layers", "1:epi")
+    window._on_edge_added(src, glv, "single", "source")
+
+    window._on_edge_added(gds, glv, "epi", "roi")
+    assert window.model.nodes[glv].params["roi"] == "epi"
+    # 挑了區域就順手把輸出名填成區域名（F7-11）—— 拉線走的是同一條路。
+    assert window.model.nodes[glv].params["output_prefix"] == "epi"
+
+
+def test_a_measure_card_takes_more_than_one_region(window):
+    """**多連一，區域這一半**（F13-⑥）。
+
+    使用者：「我想將 ROI A 跟 ROI B 的區域線一起接到 GLV stats，但仍然一次
+    只能接一條」。對 —— 而「多連一」講的是**同一件事做在好幾個東西上**，
+    那對區域跟對影像流一樣成立：同一組統計量、同一張圖，量在兩個區域上。
+
+    規則跟影像逐字相同（F7-19）：``region_keys``（一串）**累加**，
+    ``region_key``（單一角色）**取代**。
+    """
+    src = first_source(window, "load_single")
+    gds = window.add_card_after(src, "roi_from_mask")
+    glv = window.add_card_after(gds, "glv_stats")
+    window._on_edge_added(src, gds, "single", "source")
+    window.model.set_param(gds, "layers", "1:epi, 2:mg")
+    window._on_edge_added(src, glv, "single", "source")
+
+    window._on_edge_added(gds, glv, "epi", "roi")
+    window._on_edge_added(gds, glv, "mg", "roi")
+    assert window.model.nodes[glv].params["roi"] == "epi,mg"
+
+    lines = {ln for ln in window.model.region_lines() if ln[1] == glv}
+    assert lines == {(gds, glv, "epi", "roi"), (gds, glv, "mg", "roi")}, \
+        "兩個區域就要有兩條線"
+
+    # 每個數字帶自己的區域名 —— 不然兩組會互相蓋掉，而畫面上看不出來。
+    params = window.model.nodes[glv].params
+    feats = get_step("glv_stats").resolve_features(params)
+    assert any(f.startswith("epi_") for f in feats)
+    assert any(f.startswith("mg_") for f in feats)
+
+    # **自動填的輸出名要收回來**：接第一條線時 `_autofill_output_prefix` 把它
+    # 填成 `epi`（F7-11），而第二條線一來每個數字本來就帶區域名了 ——
+    # 留著的話是 `epi_epi_glv_mean`。
+    assert params["output_prefix"] == ""
+    assert all(not f.startswith("epi_epi") for f in feats), feats
+
+
+def test_a_name_the_user_typed_is_not_taken_back(window):
+    """只收回**自動填的那個值**（正好等於原本那一個區域的名字）。
+    使用者自己打的字被收掉，比沒有這個功能更糟。"""
+    src = first_source(window, "load_single")
+    gds = window.add_card_after(src, "roi_from_mask")
+    glv = window.add_card_after(gds, "glv_stats")
+    window._on_edge_added(src, gds, "single", "source")
+    window.model.set_param(gds, "layers", "1:epi, 2:mg")
+    window._on_edge_added(src, glv, "single", "source")
+
+    window._on_edge_added(gds, glv, "epi", "roi")
+    window.model.set_param(glv, "output_prefix", "mine")
+    window._on_edge_added(gds, glv, "mg", "roi")
+    assert window.model.nodes[glv].params["output_prefix"] == "mine"
+
+
+def test_a_role_region_port_is_still_replaced(window):
+    """``roi_compare`` 的 target / reference 是**角色**：數量固定、接錯就算錯。
+
+    往 target 再拉一條的意思是「改比別的」，不是「target 有兩個」。
+    """
+    src = first_source(window, "load_single")
+    gds = window.add_card_after(src, "roi_from_mask")
+    cmp_ = window.add_card_after(gds, "roi_compare")
+    window._on_edge_added(src, gds, "single", "source")
+    window.model.set_param(gds, "layers", "1:epi, 2:mg")
+    window._on_edge_added(src, cmp_, "single", "target_source")
+
+    window._on_edge_added(gds, cmp_, "epi", "target_region")
+    window._on_edge_added(gds, cmp_, "mg", "target_region")
+    assert window.model.nodes[cmp_].params["target_region"] == "mg"
+    lines = [ln for ln in window.model.region_lines()
+             if ln[1] == cmp_ and ln[3] == "target_region"]
+    assert lines == [(gds, cmp_, "mg", "target_region")], "舊線沒有跟著消失"
+
+
+def test_a_region_goes_in_one_side_and_out_the_other(window):
+    """同進同出（使用者：「區域線應該也要 follow 圖像線一樣，前進後出」）。
+
+    量測卡接進來的區域，它後面也接得出去 —— 不然第二張要量同一個區域的卡只能
+    回頭去接那張 Region 卡，而那條線會橫跨整張畫布。
+
+    副標**不跟著變**：它印的是「這張卡真的產出什麼」，而量測卡沒有定義任何
+    區域。混在一起的話，一張 Gray-level stats 在畫布上會讀起來像 Region 卡。
+    """
+    src = first_source(window, "load_single")
+    gds = window.add_card_after(src, "roi_from_mask")
+    a = window.add_card_after(gds, "glv_stats")
+    b = window.add_card_after(a, "roi_snr")
+    window._on_edge_added(src, gds, "single", "source")
+    window.model.set_param(gds, "layers", "1:epi")
+    window._on_edge_added(src, a, "single", "source")
+    window._on_edge_added(src, b, "single", "source")
+    window._on_edge_added(gds, a, "epi", "roi")
+
+    item = window.pipeline.node_item(a)
+    assert {"name": "epi", "kind": "region"} in item.out_specs(),         "接進來的區域，後面要接得出去"
+    assert "epi" not in item.subtitle(),         "副標印的是真的產出什麼 —— 量測卡沒有定義任何區域"
+
+    # 從**那一顆**埠接下去：線一段一段接，不是每一條都從 Region 卡拉出來。
+    window._on_edge_added(a, b, "epi", "roi")
+    assert window.model.nodes[b].params["roi"] == "epi"
+    assert (a, b, "epi", "roi") in window.model.region_lines()
+
+
+def test_cutting_the_line_clears_the_field(window):
+    src = first_source(window, "load_single")
+    gds = window.add_card_after(src, "roi_from_mask")
+    glv = window.add_card_after(gds, "glv_stats")
+    window._on_edge_added(src, gds, "single", "source")
+    window.model.set_param(gds, "layers", "1:epi")
+    window._on_edge_added(src, glv, "single", "source")
+    window._on_edge_added(gds, glv, "epi", "roi")
+
+    window._on_edge_removed(gds, glv, "epi", "roi")
+    assert window.model.nodes[glv].params["roi"] == ""
+    assert window.model.region_lines() == []
+
+
+def test_removing_the_region_card_empties_the_field(window):
+    """畫面上線沒了、卡片卻還指著一個再也沒有人定義的區域 —— 那是同一種說謊。"""
+    src = first_source(window, "load_single")
+    gds = window.add_card_after(src, "roi_from_mask")
+    glv = window.add_card_after(gds, "glv_stats")
+    window._on_edge_added(src, gds, "single", "source")
+    window.model.set_param(gds, "layers", "1:epi")
+    window._on_edge_added(src, glv, "single", "source")
+    window._on_edge_added(gds, glv, "epi", "roi")
+
+    window._on_remove_requested(gds)
+    assert window.model.nodes[glv].params["roi"] == ""
+
+
+def test_several_regions_accumulate_on_a_region_keys_field(window):
+    """``roi_mask`` 吃一串區域 —— 第二條線是「這個也算」，不是「改成這個」。"""
+    src = first_source(window, "load_single")
+    tpl = window.add_card_after(src, "roi_template")
+    window._on_edge_added(src, tpl, "single", "source")
+    window.model.set_param(tpl, "regions", "epi: 0.1,0,0.3,1 | mg: 0.5,0,0.2,1")
+    mask = window.add_card_after(tpl, "roi_mask")
+    window._on_edge_added(src, mask, "single", "source")
+    # 加進來的卡**不帶區域**：自動填等於自動畫了六條他沒拉過的線（鐵則 10）。
+    assert window.model.nodes[mask].params["regions"] == ""
+
+    window._on_edge_added(tpl, mask, "epi", "regions")
+    window._on_edge_added(tpl, mask, "mg", "regions")
+    assert window.model.nodes[mask].params["regions"] == "epi,mg"
+
+    window._on_edge_removed(tpl, mask, "epi", "regions")
+    assert window.model.nodes[mask].params["regions"] == "mg"
+
+
+# --------------------------------------------------------------------------- #
+# 4. 接不到的東西要擋，而且講得出下一句話
+# --------------------------------------------------------------------------- #
+def test_an_image_line_cannot_land_on_a_region_port(window):
+    """放行的話那一格會變成一個沒有人定義的區域名 —— 跑起來是 `unknown-region`，
+    而畫面上那條線看起來完全正常。"""
+    src = first_source(window, "load_single")
+    glv = window.add_card_after(src, "glv_stats")
+    window._on_edge_added(src, glv, "single", "source")
+
+    window._on_edge_added(src, glv, "single", "roi")
+    assert window.model.nodes[glv].params["roi"] == ""
+    assert "region" in window.status_text().lower()
+
+
+def test_a_region_defined_later_cannot_be_measured_earlier(window):
+    """那個區域在這張卡跑到的時候還不存在。"""
+    src = first_source(window, "load_single")
+    glv = window.add_card_after(src, "glv_stats")
+    window._on_edge_added(src, glv, "single", "source")
+    gds = window.add_card_after(glv, "roi_from_mask")
+    window._on_edge_added(src, gds, "single", "source")
+    window.model.set_param(gds, "layers", "1:epi")
+
+    window._on_edge_added(gds, glv, "epi", "roi")
+    assert window.model.nodes[glv].params["roi"] == ""
+    assert "defined after" in window.status_text()
+
+
+# --------------------------------------------------------------------------- #
+# 5. 畫布真的畫得出來
+# --------------------------------------------------------------------------- #
+def test_the_canvas_draws_the_region_line_as_a_region_line(window):
+    src = first_source(window, "load_single")
+    gds = window.add_card_after(src, "roi_from_mask")
+    glv = window.add_card_after(gds, "glv_stats")
+    window._on_edge_added(src, gds, "single", "source")
+    window.model.set_param(gds, "layers", "1:epi")
+    window._on_edge_added(src, glv, "single", "source")
+    window._on_edge_added(gds, glv, "epi", "roi")
+
+    item = window.pipeline.node_item(gds)
+    assert {"name": "epi", "kind": "region"} in item.out_specs()
+    consumer = window.pipeline.node_item(glv)
+    assert "region" in consumer.in_kinds()
+
+    kinds = [e.kind() for e in window.pipeline._edges
+             if e.pair() == (gds, glv)]
+    assert kinds == ["region"], "GDS → 量測卡那一條要是區域線"
+
+
+def test_ports_never_pile_up_on_a_card_with_many_regions(window):
+    """埠多就長高 —— 疊在一起的埠是**點不到**的（取最近的那一顆）。"""
+    src = first_source(window, "load_single")
+    gds = window.add_card_after(src, "roi_from_mask")
+    window._on_edge_added(src, gds, "single", "source")
+    window.model.set_param(gds, "layers", "1:a, 2:b, 3:c, 4:d, 5:e")
+    window._refresh_pipeline()
+
+    item = window.pipeline.node_item(gds)
+    anchors = item.out_anchors_local()
+    assert len(anchors) == 6, [d["name"] for d in item.out_specs()]
+    gaps = [anchors[i + 1].y() - anchors[i].y() for i in range(len(anchors) - 1)]
+    assert min(gaps) >= 2 * canvas_mod._PORT_R, gaps
+    for i, anchor in enumerate(anchors):
+        assert item.out_port_at(anchor) == i, "第 %d 顆埠點到的是別人" % i

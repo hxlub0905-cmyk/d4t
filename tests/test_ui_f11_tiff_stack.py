@@ -67,10 +67,21 @@ def test_the_stack_kind_is_supported_now():
 
 
 def test_there_is_a_separate_entry_for_it(win):
-    """`Open stack…` 是自己的一顆鈕，而且圖示跟 `Open KLARF…` 不同。"""
-    assert win.btn_open_stack.text() == "Open stack…"
-    tip = win.btn_open_stack.toolTip()
-    assert "no KLARF" in tip and "per defect" in tip
+    """一顆自己的鈕，而且圖示跟 KLARF 那顆不同。
+
+    F13-2 起工具列上的字是 `InputSource.short`（`Stack…`）——三顆鈕共用前面
+    那個 `Open` 小標題，重複的動詞不必印三次。完整的一句（`Open stack…`）
+    仍然在表上，空白狀態用的是它。
+    """
+    src = next(s for s in scope.INPUT_SOURCES if s.key == "stack")
+    assert (src.title, src.short) == ("Open stack…", "Stack…")
+    # F14-1：入口從工具列搬到**畫面最大的那一塊**（沒有資料時的空白狀態）
+    # 與入口卡上的選單。一種 source 一列這件事沒有變。
+    btn = win.empty_source_buttons["stack"]
+    assert btn.text() == src.title
+    tip = src.what
+    assert "per defect" in tip
+    assert "no KLARF" in scope.no_klarf_message("tiff_stack")
     assert "stack" in widgets_mod.GLYPH_ICONS
 
 

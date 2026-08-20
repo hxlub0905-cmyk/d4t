@@ -556,3 +556,55 @@ def test_the_template_panel_uses_this_cards_prefix(qapp):
 
     assert insp.prefixed("match_score") == "b_match_score"
     assert insp.health().verdict == "ok"
+
+
+# --------------------------------------------------------------------------- #
+# 畫不出來不得毀掉整個畫面（2026-08-20 使用者回報）
+# --------------------------------------------------------------------------- #
+def test_a_panel_with_a_match_but_no_batch_still_paints(qapp):
+    """使用者：「Pair with another source 的圖載不出來」，終端機一直丟
+    `ZeroDivisionError: float division by zero`。
+
+    真正的錯在**儀表**：`PairInspector` 手上有配對資訊（所以說「有資料」），
+    但整批的數字要跑一批才有 —— 於是 `MeasureInspector.paint_body` 拿到 0 列，
+    而那一行 `body.height() / len(names)` 是除以零。
+
+    Qt 的 `paintEvent` 一丟例外就留下一個沒收尾的 painter，接下來每一次重繪
+    都再失敗一次 —— 所以症狀出現在**別的地方**（影像區），而那正是最難查的
+    那種。只跑過一顆（預覽）在這張卡上是**常態**，不是邊角。
+    """
+    from d4t.ui.inspectors import PairInspector
+
+    ins = PairInspector()
+    ins.resize(320, 160)
+    ins.set_context("n1", params={"source": "gt"},
+                    result={"features": {"paired": 1.0}},
+                    batch=[],                    # ← 只跑過一顆
+                    meta={"pair_match": {"source": "gt", "defect_id": "8801",
+                                         "index": 3, "dist_nm": 132.0,
+                                         "candidates": 1}},
+                    feature_names=["paired", "match_dist_nm"])
+    assert ins.has_data() and ins.rows() == []
+    ins.grab()                                   # 以前在這裡爆
+    # 而且那一格要講對話：**配到了**跟**還沒配到**是兩句不同的話
+    assert "Paired" in ins.empty_reason()
+    ins2 = PairInspector()
+    ins2.set_context("n1", params={"source": "gt"})
+    assert "Paired" not in ins2.empty_reason()
+
+
+def test_a_panel_that_throws_does_not_take_the_window_with_it(qapp):
+    """鐵則 7 的 UI 版：一個面板畫不出來，只准變成那個面板的一行字。"""
+    from d4t.ui.inspectors import Inspector
+
+    class _Broken(Inspector):
+        def has_data(self):
+            return True
+
+        def paint_body(self, p, rect):
+            raise RuntimeError("boom")
+
+    w = _Broken()
+    w.resize(200, 100)
+    w.grab()                                     # 不准往外丟
+    w.grab()                                     # 第二次照樣畫得動（painter 有收尾）

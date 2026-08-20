@@ -113,6 +113,19 @@ class DefectItem:
     #: RSEM defect 都會突然變成「兩張」而載不進來，而錯誤訊息會說謊
     #: （「這顆有 2 張影像」——不，它有 1 張影像跟 1 個附加檔）。
     sidecars: Dict[str, ImageRef] = field(default_factory=dict)
+    #: 這一顆在 ``Dataset.items`` 裡的位置（由 :class:`Dataset` 自己編號）。
+    #:
+    #: F15：`pair_source` 的 ``match="order"`` 要它 —— 「第 n 顆對第 n 顆」在
+    #: 卡片裡問不出來，因為卡片手上只有 ``DefectItem``。用 ``klarf_row`` 代替
+    #: 不行：folder / stack 模式沒有 KLARF，那個欄位是 −1。
+    index: int = -1
+    #: 這一顆的 KLARF 欄位（``{欄名大寫: 字串值}``）。**預設是空的**。
+    #:
+    #: 只有被當成**第二個 source** 掛上來的那一份會填（`ingest/pair_source.py`）
+    #: —— 它是 characterization 的關鍵：把配到那一顆的分數欄帶成 feature，
+    #: 「配到但分數低、藏在 raw data 內」才答得出來。main 那一份不填，
+    #: 因為每一顆多帶 24 個字串對誰都沒有好處。
+    fields: Dict[str, str] = field(default_factory=dict)
 
     def load(self, channel: str) -> np.ndarray:
         """讀出該 channel 的像素：TIFF 頁走 tiff_index.read_page，
@@ -164,6 +177,28 @@ class Dataset:
     klarf: Optional[KlarfDoc]
     items: List[DefectItem] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    #: **掛在這一份上的第二（第三…）份資料**（F15），``{代號: Dataset}``。
+    #:
+    #: 這一份是 main：批次的迴圈跑它、route 由它的 ``kind`` 決定、KLARF 寫回
+    #: 它。掛上來的那幾份只提供「另一張圖與它的座標」，不寫回、不進導覽。
+    #:
+    #: 為什麼掛在 Dataset 上而不是讓卡片自己讀檔：影像段快取的簽章是照
+    #: 「這份資料是什麼」算的（`batch._dataset_token_for`）。卡片偷偷讀檔的話，
+    #: 換一份第二 source 而簽章看不見 → 回舊影像（鐵則 9，F9 踩過兩次）。
+    sources: Dict[str, "Dataset"] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.renumber()
+
+    def renumber(self) -> None:
+        """把 ``items`` 的位置寫回每一顆的 :attr:`DefectItem.index`。
+
+        在這裡做（而不是每一條 ingest 路徑各自編號）是因為 ``Dataset`` 有六個
+        建構點，而漏掉任何一個的症狀是「``match="order"`` 對到第 −1 顆」——
+        跑得完、有數字、而且是錯的。
+        """
+        for i, item in enumerate(self.items or []):
+            item.index = i
 
 
 def _to_float(v) -> Optional[float]:
@@ -266,15 +301,25 @@ def load_dataset(klarf_path, tiff_path=None,
     imap = None
     if tiff is not None:
         try:
-            npages = tiff_index.n_pages(tiff)
+            note = _bit_depth_warning(tiff)
         except (OSError, ValueError) as e:
             warnings.append(f"Could not index TIFF {tiff}: {e}")
             tiff = None
         else:
-            note = _bit_depth_warning(tiff)
             if note:
                 warnings.append(note)
-            imap = doc.defect_image_map(npages)
+            # **不問頁數**（2026-08-20）。問一次頁數＝把整條 IFD 鏈走完，而使用
+            # 者實測那在網路碟上是 106 秒（30962 頁）—— 載入的 115 秒裡有 106 秒
+            # 是這一行。
+            #
+            # 而它換到的東西比想像中少：``defect_image_map`` 拿頁數只做兩件事，
+            # 一是決定 IMAGELIST 是 0-based 還是 1-based，二是「ids 裝不裝得進
+            # 這個檔」。第一件**給不給頁數的結論一模一樣**（兩條路都是
+            # ``base = 0 if lo == 0 else 1``，見 `klarf_core.defect_image_map`）；
+            # 第二件現在由 `tiff_index.read_page` 在真的讀到那一頁時回答，而且
+            # 那句話更明確（「第 N 頁超出範圍，這個檔有 M 頁」）——比安靜地改用
+            # sequential 對映**更難忽略**。
+            imap = doc.defect_image_map(None)
             if imap["mode"] is None:
                 warnings.extend(imap["notes"])
                 imap = None

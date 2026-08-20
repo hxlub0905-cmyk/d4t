@@ -333,12 +333,13 @@ def test_every_cell_paints(qapp, mixed_window):
 # F11 Region-1：區域名是**選**的，不是打的
 # --------------------------------------------------------------------------- #
 def test_the_mask_card_offers_the_regions_defined_upstream(window):
-    """要打的字必須跟上游卡片的輸出一字不差 —— 而那些名字程式本來就知道。
+    """上游定義了哪些區域，程式本來就知道 —— 使用者不必（也不能）用打的。
 
-    打錯的話 lint 會抓（``unknown-region``），但那要跑一次才講，而使用者那時候
-    已經在看一張沒有 mask 的圖了（F11 §3.3.1 第 4 項）。
+    F11 Region-1 時這一格是勾選框；**F12 起它是畫布上的一條線**，這一格只顯示
+    接的是什麼（同 F9-6 對影像來源做的事）。兩版要守的是同一件事：要打的字必須
+    跟上游卡片的輸出一字不差，而打錯的時候 lint 要跑一次才講。
     """
-    from d4t.ui.widgets import MultiChoicePicker
+    from PySide6.QtWidgets import QLineEdit
 
     tpl = wire_up(window.model, window.model.add_step("roi_template"))
     window.model.set_param(tpl, "regions", "epi: 0.1,0,0.3,1 | mg: 0.5,0,0.2,1")
@@ -350,19 +351,30 @@ def test_the_mask_card_offers_the_regions_defined_upstream(window):
 
     window.select_node(mask)
     editor = window.param_form.editor("regions")
-    assert isinstance(editor, MultiChoicePicker)
-    editor.set_text("epi,mg")
-    assert editor.text() == "epi,mg"
+    assert isinstance(editor, QLineEdit) and editor.isReadOnly(), \
+        "區域的來源只在畫布上決定（F12）"
+
+    # 拉一條線過去 = 挑了那個區域，而那件事在參數上留下的字一模一樣。
+    window._on_edge_added(tpl, mask, "epi", "regions")
+    window._on_edge_added(tpl, mask, "mg", "regions")
+    assert window.model.nodes[mask].params["regions"] == "epi,mg"
+    assert (tpl, mask, "epi", "regions") in window.model.region_lines()
 
 
 def test_a_region_name_from_the_recipe_survives_even_if_upstream_changed(window):
-    """看不到就被靜靜刪掉，是最糟的一種「幫忙」（同 MultiChoicePicker 的規則）。"""
-    from d4t.ui.widgets import MultiChoicePicker
+    """看不到就被靜靜刪掉，是最糟的一種「幫忙」。
+
+    recipe 指著一個上游沒有人定義的區域時，那個字要**留在畫面上**（lint 會用
+    ``unknown-region`` 講出它壞在哪）。畫布上沒有那條線 —— 因為真的沒有人
+    定義它，而畫一條無中生有的線比沒有線更糟。
+    """
+    from PySide6.QtWidgets import QLineEdit
 
     mask = wire_up(window.model, window.model.add_step("roi_mask"))
     window.model.set_param(mask, "regions", "gone")
     window.select_node(mask)
 
     editor = window.param_form.editor("regions")
-    assert isinstance(editor, MultiChoicePicker)
+    assert isinstance(editor, QLineEdit) and editor.isReadOnly()
     assert editor.text() == "gone"
+    assert [ln for ln in window.model.region_lines() if ln[1] == mask] == []

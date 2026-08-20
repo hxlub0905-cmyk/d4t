@@ -43,12 +43,17 @@ Context 有三層資料：**影像流 images**（名字 → 像素陣列，綁�
 ```
 影像流通道（像素）  Load ─→ Enhance ─→ Compare ─→ 'diff' ──────┐
                                                               ├─→ 量測卡 ─→ 特徵 ─→ score
-區域通道（哪裡）    roi_cross / roi_template / GDS(未來)        │   source='diff'（流）
-                      └─→ 具名區域 'cross' ────────────────────┘   roi='cross'（名字）
+區域通道（哪裡）    roi_cross / roi_template / roi_from_mask      │   source='diff'（流）
+                      └╌→ 具名區域 'cross' ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┘   roi='cross'（名字，
+                          （畫布上是虛線）                            畫布上有線）
                             └─→ roi_mask ─→ 'mask' 流 ─→ Normalize 的 use_within（影像段）
 ```
 
 **規則一句話：量測卡吃區域「名字」，影像卡吃 mask「影像流」。**
+（**F12，2026-08-19**：那個「名字」在畫布上是**一條虛線 + 菱形埠** ——
+參數仍然只存名字，線是從它推導出來的，不進 `recipe.edges`。
+沒有線的話畫布會說謊：拿掉上游那張 Region 卡，量測卡不報錯，
+它會安靜地改量整張圖。見 `docs/history/plans/F12-region-edges.md`。）
 量測卡要「哪裡」的**結構**（框數、邊界、框外背景圈、哪框靠中心）——
 0/255 的 mask 圖把結構壓扁丟光，所以量測卡的 `roi` 填名字、引擎量測當下
 才換成像素。影像卡（Normalize 的 `use_within`）只要「哪些像素參與統計」，
@@ -60,7 +65,7 @@ Context 有三層資料：**影像流 images**（名字 → 像素陣列，綁�
 晶格相位逐顆不同 —— recipe 存「怎麼找」，定位卡**每顆重新定位**；
 (2) 比例座標讓同一份 recipe 在 128² 與 512² 上都對（F7-4 的坑）。
 
-定位法契約：`roi_cross`（純規則）、`roi_template`（Golden Cell）、GDS（未來）
+定位法契約：`roi_cross`（純規則）、`roi_template`（Golden Cell）、`roi_from_mask`（GDS）
 —— **出口相同：吐具名區域**（`resolve_regions_out`），下游零改動。
 新 image source 進來的 checklist：Load 層吐具名流 → 挑一個定位法吐具名區域 →
 下游（量測/mask/overlay/region check）不用動。

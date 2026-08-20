@@ -458,7 +458,9 @@ def test_is_source_looks_at_declarations_not_at_position_or_values():
     # 三張 Input 卡（F11 Input-4：一種 source 一張卡）——其餘的卡都吃影像流。
     # `load_sidecar`（F11 Region-3）也是 source：它的輸入不是影像流，是 ingest
     # 掛在 `DefectItem.sidecars` 上的附加檔，所以畫布上它沒有輸入埠。
-    assert sources == ["load_patch", "load_sidecar", "load_single"], sources
+    # `pair_source`（F15）同理：它的輸入是**另一份掛上來的 lot**，不是流。
+    assert sources == ["load_patch", "load_sidecar", "load_single",
+                       "pair_source"], sources
 
 
 def test_validate_requires_ref_on_rsem():

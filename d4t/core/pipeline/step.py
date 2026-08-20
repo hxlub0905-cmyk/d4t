@@ -85,6 +85,30 @@ PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
                "channel_map", "cell_rois", "region_key", "region_keys",
                "icon_choice")
 
+#: ``ParamSpec.choices_from`` 認得的鍵：**執行期才知道的選單**（F15-2）。
+#:
+#: 每一個鍵是「一句 UI 去問得到答案的問題」，而答案跟著現在載了什麼資料變：
+#:
+#: * ``sources``          —— 現在掛了哪幾份第二 source（代號）
+#: * ``source_images``    —— 那一份的一顆 defect 有哪幾張圖
+#: * ``source_columns``   —— 那一份的 KLARF 有哪些欄
+#:
+#: 清單列在 core 而不是 UI，理由跟 `ParamSpec.direction` 一樣：卡片作者打錯
+#: 一個鍵的話，那一格會安靜地退化成文字框（看起來只是「這個功能沒做」）。
+#: 列在這裡就變成註冊時就擋下來。**UI 認不認得是另一回事**：認不得的鍵一樣
+#: 退化成文字框，那是相容行為，不是錯誤。
+RUNTIME_CHOICES = ("sources", "source_images", "source_columns")
+
+#: 值是**影像流名**的型別（畫布上的圓埠 + 實線）。
+IMAGE_TYPES = ("image_key", "image_keys")
+
+#: 值是**具名區域名**的型別（畫布上的菱形埠 + 虛線；F12）。
+#:
+#: 兩組分開列，因為畫布上它們是**兩種接不到彼此的東西**：把一條影像線拉進
+#: 區域埠，那一格會變成一個沒有人定義的區域名 —— 跑起來是 `unknown-region`，
+#: 而畫面上那條線看起來完全正常。
+REGION_TYPES = ("region_key", "region_keys")
+
 #: 輸出流的名字可以用哪些字（F10-7）。
 #:
 #: 這不是潔癖：流名會變成**特徵的前綴**（一張量測卡接兩條流就吐
@@ -220,6 +244,19 @@ class ParamSpec:
     #: —— 兩者都是「整數 → 名字，空的就是不要」。所以是一個旗標而不是第二個
     #: widget：抄第二份出來的那份一定會漂移（這個 repo 記過三次）。
     row_kind: str = "images"
+    #: 這一格的選項是**執行期才知道的**（F15-2）：值不是卡片列得出來的一張表，
+    #: 而是「現在載了哪幾份第二 source」「那一份的一顆有哪幾張圖」「那一份的
+    #: KLARF 有哪些欄」。填一個 :data:`RUNTIME_CHOICES` 裡的鍵，UI 就去問
+    #: Studio 要清單。
+    #:
+    #: 為什麼**不是** ``type="choice"``：`choice` 的 ``validate`` 會把不在清單裡
+    #: 的值擋下來，而 recipe 是**在資料掛上來之前**就讀進來的 —— 那時候一份都還
+    #: 沒掛，於是每一份存了 source 名字的 recipe 都會在開檔的那一刻爆掉。
+    #: 所以型別維持 ``str`` / ``multi_choice``（兩者都不強制值落在清單裡），
+    #: 這個欄位只影響**打字還是用選的**。
+    #:
+    #: 認不得的鍵（例如 UI 還沒實作那一種）→ 就是一個普通的文字框，不會壞。
+    choices_from: str = ""
 
     def visible_for(self, params: Optional[Dict[str, Any]]) -> bool:
         """在這組參數下，這一列該不該顯示（沒有 ``show_when`` 就永遠顯示）。"""
@@ -244,26 +281,56 @@ class ParamSpec:
         elif self.icons:
             raise ParamError(f"parameter '{self.name}': only icon_choice takes "
                              f"icons")
-        if self.type in ("choice", "icon_choice", "multi_choice") and not self.choices:
+        if (self.type in ("choice", "icon_choice", "multi_choice")
+                and not self.choices and not self.choices_from):
             raise ParamError(f"parameter '{self.name}': type '{self.type}' "
-                             f"requires choices")
-        if self.type in ("image_key", "image_keys"):
+                             f"requires choices (or choices_from)")
+        if self.choices_from:
+            if self.choices_from not in RUNTIME_CHOICES:
+                raise ParamError(
+                    f"parameter '{self.name}': choices_from="
+                    f"'{self.choices_from}' is not one of {RUNTIME_CHOICES}")
+            if self.type not in ("str", "multi_choice"):
+                # `choice` / `icon_choice` 的 validate 會擋掉不在清單裡的值，
+                # 而執行期的清單在讀 recipe 的當下是空的 —— 見 choices_from。
+                raise ParamError(
+                    f"parameter '{self.name}': choices_from only applies to "
+                    f"'str' and 'multi_choice' parameters (this one is "
+                    f"'{self.type}')")
+        if self.type in IMAGE_TYPES:
             if self.direction not in ("in", "out"):
                 raise ParamError(
                     f"parameter '{self.name}': an image-stream parameter must "
                     f"say whether it is an input or an output "
                     f"(direction='in' or direction='out')")
+        elif self.type in REGION_TYPES:
+            # 區域參數**只有** in（F12）：沒有任何一張卡是用參數把區域「吐出去」
+            # 的 —— 產出的區域一律由 ``resolve_regions_out`` 宣告，因為它們的
+            # 名字常常是算出來的（``<name>_center``）而不是某一格填的字。
+            if self.direction != "in":
+                raise ParamError(
+                    f"parameter '{self.name}': a region parameter is always an "
+                    f"input (direction='in') - it says which upstream region "
+                    f"this card works on, and the canvas draws that as a line")
         elif self.direction:
             raise ParamError(
                 f"parameter '{self.name}': direction only applies to "
-                f"image_key / image_keys parameters")
+                f"image / region parameters")
 
-    # -- 輸入／輸出（F10）----------------------------------------------------
+    # -- 輸入／輸出（F10；區域是 F12）---------------------------------------
     def is_input(self) -> bool:
         return self.direction == "in"
 
     def is_output(self) -> bool:
         return self.direction == "out"
+
+    def is_image_input(self) -> bool:
+        """吃**影像流**的輸入格（畫布上的圓埠、實線）。"""
+        return self.direction == "in" and self.type in IMAGE_TYPES
+
+    def is_region_input(self) -> bool:
+        """吃**具名區域**的輸入格（畫布上的菱形埠、虛線；F12）。"""
+        return self.direction == "in" and self.type in REGION_TYPES
 
     def required_input(self, params: Optional[Dict[str, Any]] = None) -> bool:
         """這一格**非有來源不可**嗎（在這組參數下）。
@@ -276,7 +343,10 @@ class ParamSpec:
         只有選了 *Match to another stream* 才用得到，方法是 percentile 的時候
         要求它有來源，等於憑空多一個接不完的埠。
         """
-        return (self.is_input() and bool(str(self.default or "").strip())
+        # **只問影像**：區域的輸入一律是選配（沒接就是量整張圖），而
+        # ``missing_inputs`` 的下游語意是「這張卡還跑不起來，所以它後面不長
+        # 東西」—— 沒挑區域的量測卡跑得起來。
+        return (self.is_image_input() and bool(str(self.default or "").strip())
                 and self.visible_for(params))
 
     def validate(self, value: Any) -> Any:
@@ -463,8 +533,18 @@ class Step(ABC):
     # 在程式碼裡的形狀 —— 畫布、lint、引擎全部問它們，所以**不會有第二套說法**。
     @classmethod
     def input_specs(cls) -> List[ParamSpec]:
-        """吃影像流的那幾格（畫布上的輸入埠）。"""
-        return [p for p in cls.params if p.is_input()]
+        """吃**影像流**的那幾格（畫布上的圓埠）。
+
+        F12 起這裡明講「影像」—— 區域也變成輸入埠了，而呼叫這一支的每一個地方
+        （``missing_inputs`` / ``cleared_inputs`` / ``is_source`` / 畫布拉線的
+        落點）問的都是影像。區域的那幾格見 :meth:`region_input_specs`。
+        """
+        return [p for p in cls.params if p.is_image_input()]
+
+    @classmethod
+    def region_input_specs(cls) -> List[ParamSpec]:
+        """吃**具名區域**的那幾格（畫布上的菱形埠；F12）。"""
+        return [p for p in cls.params if p.is_region_input()]
 
     @classmethod
     def output_specs(cls) -> List[ParamSpec]:
@@ -611,6 +691,7 @@ class Step(ABC):
                     "direction": p.direction,
                     "extent": p.extent,
                     "row_kind": p.row_kind,
+                    "choices_from": p.choices_from,
                 }
                 for p in cls.params
             ],

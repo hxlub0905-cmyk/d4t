@@ -5,7 +5,10 @@ import numpy as np
 import pytest
 import tifffile
 
+from pathlib import Path
+
 from d4t.core.ingest import dataset, imageio
+from d4t.core.ingest.dataset import load_dataset
 
 # ---------------------------------------------------------------- synthetic KLARFs
 
@@ -238,3 +241,75 @@ def test_load_folder_not_a_dir(tmp_path):
     assert ds.kind == "folder"
     assert ds.items == []
     assert ds.warnings
+
+
+def test_opening_a_lot_does_not_walk_the_whole_tiff(tmp_path, monkeypatch):
+    """開檔的 115 秒裡有 106 秒是「數這個 TIFF 有幾頁」（使用者實測，網路碟）。
+
+    而它換到的東西比想像中少：`defect_image_map` 拿頁數只做兩件事 —— 決定
+    IMAGELIST 是 0-based 還是 1-based（**給不給頁數的結論一模一樣**），以及
+    「ids 裝不裝得進這個檔」（現在由 `read_page` 在真的讀到那一頁時回答，
+    而且那句話更明確）。
+    """
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    from make_sample import generate
+    from d4t.core.ingest import tiff_index
+
+    paths = generate(str(tmp_path / "lot"), n=6, seed=5)
+
+    walked = []
+    real = tiff_index.n_pages
+    monkeypatch.setattr(tiff_index, "n_pages",
+                        lambda p: (walked.append(str(p)), real(p))[1])
+
+    ds = load_dataset(paths["klarf"])
+    assert walked == [], "開檔不該走完整條 IFD 鏈"
+    # 而且該對到的還是對到了
+    assert ds.kind == "ebi_patch" and len(ds.items) == 6
+    assert sorted(ds.items[0].images) == ["ref", "test"]
+    assert ds.items[0].load("test").shape == ds.items[0].load("ref").shape
+
+
+def test_the_pixel_size_on_the_load_card_reaches_the_measurements(tmp_path):
+    """使用者：「在 load image 那邊 source 可以輸入 nm/pixel（也可以不輸入）」。
+
+    它跟 `tiff_stack` 的「一顆幾張」是同一類東西 —— **資料的屬性**，只有把那
+    份資料讀進來的那張卡問得出來。填了之後每一條它吐的流都帶著那個數字
+    （兩份資料的 pipeline 才分得清誰是誰），而量測卡多配一份 nm 的數字。
+    """
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    import d4t.core.steps  # noqa: F401
+    from make_sample import generate
+    from d4t.core.pipeline import Recipe, RecipeNode, ScoreSpec, run_defect
+
+    paths = generate(str(tmp_path / "lot"), n=3, seed=11)
+    ds = load_dataset(paths["klarf"])
+
+    def features(nm_per_px):
+        nodes = {
+            "load": RecipeNode("load", "load_patch", {"nm_per_px": nm_per_px}),
+            "sub": RecipeNode("sub", "subtract", {}),
+            "cd": RecipeNode("cd", "cd_measure", {"roi": ""}),
+        }
+        rec = Recipe(recipe_id="nm", routes={"ebi_patch": list(nodes)},
+                     nodes=nodes,
+                     score=ScoreSpec(expr="0", threshold=0.0,
+                                     bins={"below": 0, "above": 1}))
+        r = run_defect(rec, ds.items[0], ds.kind, keep_context=True)
+        assert r.ok, r.error
+        return r.features, r.context
+
+    off, _ctx = features(0.0)
+    assert not [k for k in off if k.endswith(("_nm", "_nm2"))]
+
+    on, ctx = features(2.0)
+    assert on["cd_x_px"] == off["cd_x_px"]              # pixel 那一份沒變
+    assert on["cd_x_nm"] == off["cd_x_px"] * 2.0
+    assert on["area_nm2"] == off["area_px"] * 4.0       # 面積乘平方
+    # 每一條這張卡吐的流都登記得到（`align_to` 問的是流，不是全域）
+    assert ctx.stream_nm_per_px("test") == 2.0
+    assert ctx.stream_nm_per_px("ref") == 2.0

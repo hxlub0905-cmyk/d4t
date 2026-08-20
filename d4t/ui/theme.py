@@ -47,7 +47,7 @@ Qt-QSS 限制備忘：QSS 沒有 ``text-transform`` / ``letter-spacing``；區�
 from __future__ import annotations
 
 from string import Template
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 __all__ = [
     "REGION_COLORS", "region_hex",
@@ -309,7 +309,9 @@ _DARK: Dict[str, Any] = dict(_LIGHT, **{
 
     "image_backdrop": "#3f4247",     # 與 light 相同 —— 見上面的說明
     "canvas_bg": "#16181d",
-    "canvas_grid": "#2f3540",
+    # F13-⑤：點陣底是**對齊的參考**，而深色主題原本量到 1.44 的對比 ——
+    # 幾乎看不見，等於沒有參考。提到 ~1.9：看得見，又不會跟連線搶。
+    "canvas_grid": "#3f4653",
     "canvas_edge": "#5c6474",
     "canvas_edge_active": "#4b8bf5",
 })
@@ -413,6 +415,87 @@ REGION_COLORS = ("#5fd0a0", "#f0b429", "#7aa7ff", "#f07aa7",
 def region_hex(index: int) -> str:
     """第 ``index`` 個區域的顏色 hex。"""
     return REGION_COLORS[int(index) % len(REGION_COLORS)]
+
+
+# --------------------------------------------------------------------------- #
+# 對比度（F13-3）—— 顏色要**算**得出來讀不讀得到，不是用眼睛猜
+# --------------------------------------------------------------------------- #
+#: WCAG 2.1 對小字（< 18pt）的 AA 門檻。
+AA_SMALL = 4.5
+
+
+def _rgb(hex_colour: str) -> Tuple[int, int, int]:
+    h = str(hex_colour).lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))     # type: ignore[return-value]
+
+
+def _hex(rgb) -> str:
+    return "#%02x%02x%02x" % tuple(max(0, min(255, int(round(c)))) for c in rgb)
+
+
+def relative_luminance(hex_colour: str) -> float:
+    """WCAG 的相對亮度（0 = 黑、1 = 白）。純函式、免 Qt。"""
+    def _lin(c: float) -> float:
+        c = c / 255.0
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (_lin(c) for c in _rgb(hex_colour))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast_ratio(a: str, b: str) -> float:
+    """兩個顏色的對比度（1 = 一模一樣、21 = 黑白）。"""
+    la, lb = relative_luminance(a), relative_luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def mix_hex(fg: str, bg: str, alpha: float) -> str:
+    """``fg`` 以 ``alpha`` 疊在 ``bg`` 上的結果（不透明的 hex）。
+
+    用算的而不是給 widget 一個半透明色：半透明在 QSS 裡會連帶影響子元件的
+    合成順序，而我們要的只是「一塊淡色的底」。
+    """
+    f, b = _rgb(fg), _rgb(bg)
+    a = max(0.0, min(1.0, float(alpha)))
+    return _hex([f[i] * a + b[i] * (1.0 - a) for i in range(3)])
+
+
+def readable_on(fg: str, bg: str, target: float = AA_SMALL) -> str:
+    """把 ``fg`` 往「離底色更遠」的方向推，直到對比度過得了 ``target``。
+
+    為什麼要有這一支（F13-3）
+    ------------------------
+    階段色是為了**在 rail 上一眼分得開**挑的，不是為了當小字。實測：
+    淺色主題的六個階段色放在它們自己的淡底上只有 2.8–3.5，全部過不了 AA
+    的 4.5 —— 而深色那六個原樣就 4.6–5.6。也就是說「同一個規則兩種主題」
+    只有**算**得出來，用眼睛在其中一種主題下調，另一種一定會歪。
+
+    推的方向由**底色**決定（亮底往黑推、暗底往白推），所以色相留得住 ——
+    `#5f8f3f`（Region 綠）推完是 `#476b2f`，還是同一個綠。
+    """
+    toward = "#000000" if relative_luminance(bg) > 0.35 else "#ffffff"
+    out = str(fg)
+    for i in range(21):
+        if contrast_ratio(out, bg) >= target:
+            return out
+        out = mix_hex(fg, toward, 1.0 - 0.05 * (i + 1))
+    return out
+
+
+def count_color(group: str) -> str:
+    """階段的「有幾張卡」那個數字的顏色 —— **階段色，推到讀得到為止**。
+
+    以前它吃 ``$text_disabled`` —— **用錯 token**：那個 token 的意思是
+    「這東西停用了」，而它沒有停用，它是次要資訊。量出來的後果是深色 2.90、
+    **淺色 1.89**（AA 小字要 4.5）。使用者回報的是深色看不清楚，
+    而更糟的其實是淺色。
+
+    2026-08-19 第二輪，使用者定調：**不要網底，單純數字的顏色即可**。
+    所以底色拿掉了，字色直接算在 rail 的底色上（淺色主題要推 1–2 格、
+    深色原樣就過 6.1–7.9）。
+    """
+    return readable_on(group_hex(group), TOKENS["bg_panel"])
 
 
 def group_color(group: str):
@@ -521,6 +604,33 @@ QToolBar QToolButton[variant="secondary"]:focus {
 QToolBar QToolButton[variant="secondary"]:disabled {
     background: $disabled_bg; color: $disabled_text; border: 1px solid $border_default;
 }
+/* Tier three (F13-3/F13-2): icon-only tools that are always around but are not
+ * a step in the flow - undo, redo, theme. No border until you point at them.
+ * The "borderless text reads as a menu bar" rule above still stands: these
+ * carry no text, so there is no row of words to be mistaken for one. */
+QToolBar QToolButton[variant="ghost"] {
+    background: transparent; border: 1px solid transparent;
+}
+QToolBar QToolButton[variant="ghost"]:hover {
+    background: $hover_warm; border-color: $border_default;
+}
+QToolBar QToolButton[variant="ghost"]:pressed { background: $pressed_bg; }
+QToolBar QToolButton[variant="ghost"]:disabled { color: $text_disabled; }
+/* One landmark per column (F13-4). Deliberately faint and short: it says which
+ * workspace you are looking at, it is not a title bar competing for the eye. */
+QLabel#columnHeader {
+    color: $text_hint; font-size: 10px; font-weight: 700;
+    letter-spacing: 1px;
+    padding: 0 0 2px 0;
+    background: transparent;
+}
+
+/* The verb the three source buttons share, lifted out in front of them. */
+QLabel#toolbarGroup {
+    color: $text_hint; font-size: 10px; font-weight: 600;
+    padding: 0 6px 0 2px; text-transform: uppercase;
+}
+
 /* Run trial and its ▾ are one control with two halves, so the corners that
  * face each other are square and the 1px between them shows the bar through.
  * Sitting apart with the toolbar's usual 6px gap, they read as two unrelated
@@ -760,7 +870,12 @@ QFrame#stageButton { background: transparent; border: 1px solid transparent;
 QFrame#stageButton:hover { background: $hover_warm; }
 QFrame#stageButton[active="true"] { background: $accent_bg;
                                     border-color: $accent_border; }
-QLabel#stageCount { font-size: 9px; color: $text_disabled; }
+/* The "how many cards" number. Its colour is computed per stage by
+ * `count_color` (F13-3) - it used to take $text_disabled, and that token means
+ * "switched off", not "secondary". Measured on the old colour: 2.90 in dark and
+ * 1.89 in light, against a 4.5 AA floor for small text. No background behind it
+ * (the user's call, second round): the colour alone carries the stage. */
+QLabel#stageCount { font-size: 9px; }
 
 QPushButton#galleryChip {
     background: $accent_bg; color: $accent_active;

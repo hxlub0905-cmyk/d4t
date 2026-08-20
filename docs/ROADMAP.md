@@ -63,7 +63,7 @@
 真正換來的是一句可驗證的話：**畫布上看得到的，就是引擎真的會做的。**
 驗收 `tests/test_ui_f10_canvas_reality.py`（20 條，全部對 registry 裡每一張卡
 自動套用）＋ 兩支稽核腳本（11 項不變量）。詳見
-[`plans/F10-canvas-tells-the-truth.md`](plans/F10-canvas-tells-the-truth.md)。
+[`history/plans/F10-canvas-tells-the-truth.md`](history/plans/F10-canvas-tells-the-truth.md)。
 
 **Phase 1 到此收斂。接下來是 Phase 2（功能補完 —— 與原 Phase 3 對調）。**
 
@@ -95,10 +95,42 @@ UI 介面、設定放哪都要先討論過**才動手。所以計畫書是**議�
 | **Input** | ✅ **收斂 2026-08-17**（Input-0…4）：多入口（`Step.is_source`）、`channel_map`（這一顆的第幾張叫什麼）、`tiff_stack`（大 TIFF 沒有 KLARF）、四種輸入的入口做齊、**Input 卡按 source 拆成兩張**（`load_patch` / `load_single` —— 兩張都不看資料型別，畫布因此不說謊）。**範圍：patch + RSEM**（多通道擱置）|
 | **Enhance** | ✅ **收斂 2026-08-17**（Enhance-1…3）：**值域變成明講的契約**（實測 `stripes_h` 吐 261.5，會活到後面某個 `to_uint8` 才被壓掉）＋ `clip_frac`；三個新方法（`flatten` 的 median 背景估計、`denoise` 的 `hot_pixels`、`normalize` 的耐離群 `zscore`），**一張新卡都沒開**；五個面板輔助（核心大小畫在影像上、削平的整批走勢、曲線墊直方圖、磨掉幾個 σ、兩條流還有多像）；兩支 lint（`uneven-treatment` / `card-order`）。**融合卡（PCA Ref、BSE·SE quadrant）擱置** —— 使用者 2026-08-17：「我決定我暫時不做 multi channel，暫時 focus 在 patch 跟 RSEM Image」|
 | **Region** | **分三個階段，對應三種 mode（使用者定調 2026-08-17，照難度爬）**：**Region-1 Template ✅ 2026-08-18**（`roi_template` 改成「一張卡好幾個區域、一個區域好幾個矩形」，框在 Golden Cell 上**畫**出來 —— 含 multi add 一次長一整排等距的框；框映到 patch 時整片鋪過去，不再只取離缺陷最近的那一份。尾巴：模板過期健檢還沒做）→ **Region-2 Profile ✅ 2026-08-18**（`roi_cross`：三個下拉改圖示、點曲線就是挑材質，以及**單方向** —— 原本寫死「兩組正交條紋」是需求的形狀不是演算法的形狀，新的 `directions` 讓一張只有 line/space 的 patch 也定得出位置，做法是給沒在用的那一軸一根滿版的條紋，交會的幾何一行都不用改。**「三個框尺寸改成在影像上拖」使用者否決了** —— 那些框是逐顆的結果，拖它等於改輸出；可以用拖的只有所有 defect 共用的那一個物件）→ **兩張卡共用的兩件小事 ✅ 2026-08-18**（`drop_edge`／`edge_margin`：靠邊 n px 內的框自動拿掉 —— 壓在 patch 邊上的框量到的是半截的那一塊，而它照樣吐得出看起來正常的數字；**滿版的那一軸不算靠邊**、**缺陷那一塊永遠留著**。以及**疊框一個區域一個顏色**，跟模板編輯器同一組 —— 一張卡好幾個區域之後，全部畫成藍色就分不出哪塊是 ROI1）→ **Region-3 GDS**（**只做 RSEM**：單張 + KLARF，使用者定調 2026-08-18 —— GLAS 是瞄著 RSEM 大圖對的，patch 太小且 GLAS 那邊沒打通；那一刀讓「給 GLAS 的兩件必要需求」都不需要了。**匯出健檢 ✅**：`tools/check_glas_export.py` 印出可以貼出來的遮蔽報告，四條核心檢查是讀 GLAS 程式碼讀出來的。**第 1／2 步 ✅ 2026-08-18**：`tools/make_glas_export.py`（家用機的合成匯出）＋ `ingest/glas_export.py` 配對 ＋ `load_sidecar` 卡（附加檔住 `DefectItem.sidecars`，不進 `images` —— 混進去 `load_single` 會因為「一顆兩張」而全部載不進來）。順手修掉兩個安靜的錯：換匯出快取不失效、`load_raw` 會把三通道 label 合成灰階把 id 混掉。**第 3／4 步 ✅ 2026-08-18**：`roi_from_mask`（精確拆矩形 —— L 形的 bbox 會框到別的材質；`max_boxes` 預設 8192 是量出來的，真實一層是幾十到約五千個矩形，既有的 64 會安靜砍掉 95%）＋ Studio（`Open GDS export…`、`layers` 的表格、儀表）。新卡 `roi_from_mask` 吃 GLAS 的 label map；每個 layer 切成一堆小矩形 —— 站點的區域本來就都是矩形，所以那是等價不是近似）。出口契約已經留好（見 [`ARCHITECTURE.md`](ARCHITECTURE.md)），下游零改動）→ **Region-4 輸出統一 ✅ 2026-08-18**（三張找 ROI 的卡對**每一個區域**寫同一組五個數字 `present`／`boxes`／`area_px`／`clipped`／`edge_dropped`，使用者：「現在有點像大家資料結構不一樣」。前三個從 ctx 讀回來、不是卡片自己記一份；`clipped`／`edge_dropped` 整個家族共用；`present` 與 `boxes` 刻意會不一致 —— 退回整張圖那個保險是「有東西可以量，但它不是你要的那個」）→ **Region-5 單張大圖 ✅ 2026-08-18**（使用者要第四種「用重複結構鋪 ROI」的卡，**量過之後不必新卡**：Template 餵一張 1000×1000 就得到 625 個框、相位正確、61 ms，差別只在接哪一條流。修掉三個擋路的：`max_boxes` 64 → 8192（同 `roi_from_mask`）、`<name>_clipped` 在 Template 上原本恆為 0、對話框多一顆 `Use the image on screen`。`pattern_ref` 因此沒事做了，收進 `HIDDEN_STEPS`）。**Region 段到此收斂 —— 四種找 ROI 的方法都在，輸出契約一致。** |
-| **Compare**（下一個大件）| **patch ↔ RSEM 對位**（使用者要多入口的原因）：`align` 的五個 backend 全部要求同尺寸，小圖對大圖會回 `dx=0 dy=0` —— 要補 matchTemplate 的第三種座標數學 + 一張新卡，並修 `align` 尺寸不符要報錯。另有 GLAS 的合成 gray 當 ref、吃 GLAS 算好的 offset。**配對機制也在這一段**（使用者：「配對是之後的事」）|
+| **Compare**（下一個大件）| **patch ↔ RSEM 對位**（使用者要多入口的原因）：`align` 的五個 backend 全部要求同尺寸，小圖對大圖會回 `dx=0 dy=0` —— 要補 matchTemplate 的第三種座標數學 + 一張新卡，並修 `align` 尺寸不符要報錯。另有 GLAS 的合成 gray 當 ref、吃 GLAS 算好的 offset。**配對機制也在這一段**（使用者：「配對是之後的事」）。⚠ **F15 已經把「配對」這一小塊的引擎做完了（2026-08-19/20），但停在那裡** —— 見下面「F15 停在哪裡」|
 | **Measure** | **Blob 分割**（演算法在卻沒有卡片，而 `cd_measure` 的警告叫使用者「run Blob segment first」、overlay 的主 blob 紅框兩條路都沒有生產者）、離群旗標（跨顆）、Region Stats / FFT、`snr_map` 多來源 |（**`roi_compare` ✅ 2026-08-18**：拿哪兩塊比 —— target/reference 住在這張卡的參數上，不是區域的屬性；兩個輸入埠所以「同一區域、兩條流」也說得完；`snr` 沿用既有的帶正負號慣例不發明第三種）
 | **ADC** | **一張卡都沒有，而且只分得出兩類。** score 是 recipe 上的一個欄位（`bins` 被強制只有 `below`/`above`），`__score__` 是 UI 造的假節點。多類別要先設計資料結構，不是加一張卡 —— 這是整個 app 最大的功能缺口 |
 | ML Classify | **Phase 2 後半**。吃已經匯得出來的 feature vector CSV；相依策略到時候再定 |
+
+### 畫布上少了兩段（使用者 2026-08-20 第一次講完整）
+
+> Input · Enhance · ROI · Compare · Measure · **Algo** · ADC · **Output**
+> 然後再加給幾個 **for Custom 的設計**（幫助工程師）
+
+目前的 `GROUP_ORDER` 是 `Input → Enhance → Region → Compare → Measure → ADC`，
+所以少的是：
+
+* **Algo** —— 現在 `algo` 是卡片的 *category*（image / algo / adc），不是畫布上
+  的一段。要變成一段的話，「它跟 Measure 差在哪」要先講得出來。
+* **Output** —— 現在 Export 是一個**精靈**，不在畫布上。它一旦變成一段，
+  「這份 recipe 會吐出什麼」就跟其他段一樣看得見、存得進 recipe。
+* **Custom 這一層** —— F15（配對分析）是第一個，但它現在跟主段落混在同一個
+  卡片庫裡。這一層還沒有形狀：它是一個 group？一個標籤？還是卡片庫的第二區？
+
+### F15 停在哪裡（2026-08-20）
+
+使用者叫停：「**我看不出來有沒有對好、對到，有沒有把 data 整理好（一一對應）**
+…現有的功能只是告訴我有對到（**但是不是不知道**）…我覺得現在做這邊**太快了**」。
+
+**引擎那一半是對的而且有測試**（配對、對圖、尺度自動、搜尋框、stage offset、
+`peak_ratio`、`tools/pair_probe.py`）。**缺的是產品化那一半**：
+
+1. **證據**：現在吐的每一個數字都在說「有對到」，沒有一個在說「對得對不對」。
+2. **那份 report**：使用者要的是「**點對點、包含圖的 report**」—— 一顆一列、
+   左右兩張圖、加上那幾個數字，一眼掃過去就看得出哪幾顆可疑。
+   （`pair_probe` 的分布是給**調參數**的人看的，不是給**檢查這批對不對**的人
+   看的 —— 兩件事。）
+
+**不刪、不收起來、停在原地**，等 Compare 段做完再回來接 —— 那時候「一一對應
+看不看得出來」會跟 Compare 段其他卡的答案長成同一個形狀。
 
 ## Phase 3 —— 讓人用得起來（原 Phase 2）
 
@@ -123,7 +155,7 @@ engine 與功能收斂之後才有意義。
 
 | Milestone | 狀態 | 內容 |
 |---|---|---|
-| F8 | 🔨 | **純規則 ROI 定位 + mask 通道 + UI 第二波**（詳見 `SESSION_LOG.md` 逐輪紀錄與 `docs/plans/F8-rule-based-roi.md`）。已完成：`roi_cross`（條紋交會處放框、一鍵整批量 pitch）、`roi_mask` + Normalize `use_within`（見 §2.5）、參數說明搬 tooltip、D 案版面（畫布佔中上、設定拿大頭、**畫布彈出視窗**兩窗互通）、右鍵平移、手動佈局保留（tidy 才重排）、route 虛線退役（排版仍吃隱含順序）、量測卡預覽疊區域框、`multi_choice` 參數型別（glv_stats 統計量用勾的）、subtract 預設 `b=ref`（patch 天生對齊；舊檔載入遷移補 `ref_aligned` —— **改預設值必附遷移**） |
+| F8 | 🔨 | **純規則 ROI 定位 + mask 通道 + UI 第二波**（詳見 `SESSION_LOG.md` 逐輪紀錄與 `docs/history/plans/F8-rule-based-roi.md`）。已完成：`roi_cross`（條紋交會處放框、一鍵整批量 pitch）、`roi_mask` + Normalize `use_within`（見 §2.5）、參數說明搬 tooltip、D 案版面（畫布佔中上、設定拿大頭、**畫布彈出視窗**兩窗互通）、右鍵平移、手動佈局保留（tidy 才重排）、route 虛線退役（排版仍吃隱含順序）、量測卡預覽疊區域框、`multi_choice` 參數型別（glv_stats 統計量用勾的）、subtract 預設 `b=ref`（patch 天生對齊；舊檔載入遷移補 `ref_aligned` —— **改預設值必附遷移**） |
 | M0 抽庫 | ✅ | 從 KLIP/GLAS/MMH/PEAR/CPE/Fusi³ vendoring 演算法資產 |
 | M1 引擎 | ✅ | Context/Step/Recipe DAG/表達式/14 張卡/合成資料/CLI |
 | M2 批次 | ✅ | ProcessPool + 影像段快取 + SQLite 歷史 + rescore |
