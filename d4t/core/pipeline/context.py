@@ -293,3 +293,66 @@ def _clipped(arr: "np.ndarray", low: bool) -> float:
         return 0.0
     hit = (a <= 0.5) if low else (a >= 254.5)
     return float(np.count_nonzero(hit)) / float(a.size)
+
+
+# --------------------------------------------------------------------------- #
+# 跨顆那一層（F16）
+# --------------------------------------------------------------------------- #
+@dataclass
+class BatchContext:
+    """一張**跨顆卡**看得到的東西：整批跑完之後的結果表。
+
+    為什麼需要一個新的 Context
+    --------------------------
+    :class:`Context` 是**一顆** defect 的（images / rois / features），而
+    ``run_defect`` 一顆一顆跑、從不 raise（鐵則 7）。所以任何「要看過整批才算
+    得出來」的東西現在都沒有地方放，而那不是一個需求，是四個：
+
+    * Output 的 CSV / KLARF / Report / HTML（一批一個檔案）
+    * 離群旗標（Tukey IQR、z-score —— 門檻由整批的分布決定）
+    * F15 欠的那份點對點 report（一顆一列的表 ＋ 整批的分布）
+    * ``H2H`` 的 ``expect_dx_px`` 建議值（整批取中位數）
+
+    先做機制，四個都便宜；不做機制，四個各自發明一套。
+
+    欄位
+    ----
+    ``rows``
+        每一顆的結果 dict（``result_to_json_dict`` 的產物：``defect_id`` /
+        ``ok`` / ``error`` / ``score`` / ``bin`` / ``features``）。**這就是
+        報表與寫回吃的東西**，所以跨顆卡拿到的跟 `core/export/` 要的一模一樣。
+    ``dataset``
+        原始資料集。``output_klarf`` 要它的 ``.klarf``（KlarfDoc）——
+        那份東西刻意不進 worker，而跨顆那一層跑在主行程，所以拿得到。
+    ``outputs``
+        寫出去的檔案路徑（給 UI 與 CLI 報告「這一次產出了什麼」）。
+    ``errors``
+        ``{節點 id: 訊息}`` —— **鐵則 7 的跨顆版**：一張跨顆卡出錯只記在這裡，
+        其他卡照跑，而整批的結果仍然拿得到。
+    """
+
+    rows: List[Dict[str, Any]] = field(default_factory=list)
+    dataset: Any = None
+    recipe: Any = None
+    kind: str = ""
+    outputs: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    errors: Dict[str, str] = field(default_factory=dict)
+
+    def add_output(self, path: Any) -> None:
+        """記下一個寫出去的檔案（同一個路徑只記一次）。"""
+        s = str(path)
+        if s and s not in self.outputs:
+            self.outputs.append(s)
+
+    def warn(self, msg: str) -> None:
+        self.warnings.append(str(msg))
+
+    @property
+    def ok_rows(self) -> List[Dict[str, Any]]:
+        """只有跑成功的那幾顆。
+
+        失敗的那幾顆**留在 ``rows`` 裡**（報表要看得到它們失敗了，那是
+        `write_csv` 的 ``error`` 欄），所以這是一個**選配**的視角，不是預設。
+        """
+        return [r for r in self.rows if r.get("ok")]

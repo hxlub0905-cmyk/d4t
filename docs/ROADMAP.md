@@ -142,6 +142,32 @@ Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output
 
 先做機制，四個都便宜；不做機制，四個各自發明一套。
 
+**機制 ✅ 2026-08-20**（`Step.is_batch` ＋ `pipeline.run_batch_steps` ＋
+`BatchContext`），第一張消費者是 `output_csv`（產的 CSV 與 Export 精靈**逐位元組
+相同**，那是之後拿掉精靈的前提）。三條規矩：
+
+* **跨顆卡不在 `run_defect` 裡跑**，而且**跳過不是報錯** —— 一份含 Output 卡的
+  recipe 在單顆預覽上仍然要跑得完（那是調參數的畫面）。
+* **一張跨顆卡出錯不影響其他卡**（鐵則 7 的跨顆版），訊息進 `bctx.errors`。
+* **試跑不寫**（使用者定調）—— 而那不是一個旗標，是**兩支函式**：試跑那條路
+  根本不叫 `run_batch_steps`。旗標遲早有人忘記關，而症狀是不可逆的覆寫。
+
+### Output 段還欠什麼（下一輪）
+
+1. **另外四張卡**：`output_klarf` / `output_report`（Excel）/ `output_html` /
+   `output_image`（最後那張是這一段裡唯一**逐顆**的，不是 `is_batch`）。
+2. **Studio 的「跑整批並寫出」入口。** ⚠ 這是拿掉 Export 精靈的**前提**：
+   Studio 目前**只有試跑那條路**（`run_batch(limit=N)`），沒有「跑完整批」。
+   而使用者定調了「試跑不寫」——所以現在拿掉精靈的話，Studio 會完全輸不出
+   任何東西。順序是：先有那個入口，再拿掉精靈。
+3. **`output_klarf` 的寫回前預覽。** 機制本來就在 core
+   （`klarf_out.WriteBackPlan` / `apply_writeback` 的乾跑），精靈只是叫它並把
+   「寫出」鈕鎖住。搬進那張卡的 inspector 面板（F7-17 的機制）之後，它比精靈
+   **更早**出現：選到那張卡就看得到。
+4. **畫布那一半**（使用者 2026-08-20：「先做引擎，畫布那一半下一輪」）：
+   跨顆卡吃的是「整批的 feature 表」，而 d4t 沒有那種埠 —— 跟 Algo 段的
+   `feature_math` 是同一個題目（第三種埠）。目前兩者都靠 route 順序。
+
 ### F15 停在哪裡（2026-08-20）
 
 使用者叫停：「**我看不出來有沒有對好、對到，有沒有把 data 整理好（一一對應）**

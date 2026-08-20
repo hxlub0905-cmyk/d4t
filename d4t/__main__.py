@@ -215,6 +215,24 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     + [feats.get(k) for k in feat_keys]
                 )
         print(f"→ CSV：{args.csv}")
+
+    # ---- Output 段：跨顆那一層（F16）------------------------------------
+    # **這裡才叫，試跑那條路不叫**（使用者定調：「試跑不寫，只有整批才寫」）。
+    # 做成另一支要自己叫的函式而不是 run_batch 的一個旗標，就是為了讓那件事
+    # 是結構上的 —— 旗標遲早有人忘記關，而症狀是不可逆的覆寫。
+    from d4t.core.pipeline import run_batch_steps
+
+    bctx = run_batch_steps(recipe, ds, payload)
+    for w in bctx.warnings:
+        print(f"  △ {w}")
+    for path in bctx.outputs:
+        print(f"→ {path}")
+    if bctx.errors:
+        # **一張跨顆卡出錯不影響其他卡**（鐵則 7 的跨顆版），但要講出來 ——
+        # 而且回非 0：批次跑完了，可是使用者要的東西沒有全部寫出來。
+        for nid, msg in bctx.errors.items():
+            print(f"[錯誤] 輸出卡 '{nid}'：{msg}", file=sys.stderr)
+        return 1
     return 0
 
 

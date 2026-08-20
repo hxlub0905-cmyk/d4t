@@ -183,7 +183,14 @@ def recipe_for(key: str, sparse: bool = False,
     )
 
 
-CARDS = sorted(REGISTRY)
+#: 這六條不變量問的都是「**一顆** defect 跑起來會怎樣」，所以跨顆卡不在裡面
+#: —— 它們根本沒有 `run(ctx, params)`（F16：`Step.is_batch`）。
+#:
+#: **用類別的性質篩，不是逐張列名字**：列名字的話，第二張跨顆卡加進來的那天
+#: 它會撞上一個看不懂的錯誤（「這張卡跑起來就丟 StepError」），而正確的答案是
+#: 「它本來就不該用這種方式跑」。跨顆卡自己的驗收在 tests/test_batch_steps.py。
+CARDS = sorted(k for k, c in REGISTRY.items() if not c.is_batch)
+BATCH_CARDS = sorted(k for k, c in REGISTRY.items() if c.is_batch)
 
 #: 參數寫滿 vs 省略 —— 兩種都要跑，見 :func:`recipe_for` 的說明。
 PARAM_STYLES = [False, True]

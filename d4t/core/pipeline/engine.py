@@ -361,6 +361,12 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
                 raise StepError(
                     node.step,
                     f"unknown step '{node.step}'; registered: {sorted(registry)}")
+            if step_cls.is_batch:
+                # **跨顆卡不在這裡跑**（F16）：它看的是整批的結果表，而這裡
+                # 手上只有一顆。`batch.run_batch_steps` 在所有結果收齊之後跑
+                # 它一次。跳過而不是報錯 —— 一份含 Output 卡的 recipe 在單顆
+                # 預覽上仍然要跑得完（那是使用者調參數的畫面）。
+                continue
             params = step_cls.validate_params(node.params)
             # **沒有來源就不准跑**（F10）。這一格是空的，代表畫布上沒有任何
             # 一條線接進來 —— 以前這種卡照樣跑得完：`MultiStreamStep` 空的

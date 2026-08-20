@@ -140,6 +140,12 @@ REGION_TYPES = ("region_key", "region_keys")
 STREAM_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
 
 
+
+def cls_name(obj: Any) -> str:
+    """給錯誤訊息用的卡片名（有 ``key`` 就用它，那是使用者看得到的字）。"""
+    return str(getattr(obj, "key", None) or type(obj).__name__)
+
+
 class ParamError(ValueError):
     """參數不合法（含參數名與原因，UI 直接顯示）。"""
 
@@ -693,6 +699,33 @@ class Step(ABC):
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
         """這張卡還缺哪些設定才跑得起來（空 list = 沒問題）。"""
         return []
+
+    # ---- 跨顆那一層（F16）--------------------------------------------------
+    #: 這張卡是**整批跑完之後跑一次**的嗎（而不是一顆一顆）。
+    #:
+    #: ``run_defect`` 一顆一顆跑、從不 raise（鐵則 7），所以「要看過整批才算得
+    #: 出來」的東西沒有地方放：Output 的 CSV／KLARF（一批一個檔案）、離群旗標
+    #: （門檻由整批的分布決定）、F15 欠的那份點對點 report。
+    #:
+    #: ``is_batch`` 的卡**不實作** :meth:`run`（它拿不到「一顆」），改實作
+    #: :meth:`run_batch`。引擎的分工：``run_defect`` 跳過它們，
+    #: :func:`batch.run_batch_steps` 在所有結果收齊之後跑它們一次。
+    #:
+    #: ⚠ **不進影像段快取的簽章**：快取是逐顆的、切點在最後一張影像段卡的下一
+    #: 格，而跨顆那一層整個在 checkpoint 之後 —— 它看的是結果表，不是像素。
+    #: （鐵則 9 問的是「會影響影像段結果的東西進簽章了嗎」，這裡的答案是「它
+    #: 影響不到影像段」。寫在這裡是因為那個問題以後一定會再被問一次。）
+    is_batch: ClassVar[bool] = False
+
+    def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
+        """整批跑完之後跑一次（``is_batch`` 的卡實作這個，不是 :meth:`run`）。
+
+        ``bctx`` 是 :class:`~d4t.core.pipeline.context.BatchContext`。
+        失敗請 raise StepError —— :func:`batch.run_batch_steps` 會接住並記進
+        ``bctx.errors``，其他卡照跑（鐵則 7 的跨顆版）。
+        """
+        raise NotImplementedError(
+            "%s declares is_batch but does not implement run_batch()" % cls_name(self))
 
     # ---- 執行 -------------------------------------------------------------
     @abstractmethod
