@@ -122,9 +122,9 @@ Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output
 * **Output** —— 使用者：「**他就是個 end point**」，而且「可以產出多種 style
   （分 card）：Report / CSV / KLARF / HTML，要單純 output image 也可」。
   寫成不變量：**`resolve_writes()` 與 `resolve_features()` 都是空的**。
-  ⚠ **Output 為真相，現有的 Export 精靈要拿掉**（使用者定調）—— 但順序綁死：
-  Output 卡要先做到能取代精靈、逐格驗過，才刪，否則中間 app 輸不出任何東西。
-  ⚠ 這一段還卡在一個引擎缺口上：**跨顆那一層**（見下）。
+  ✅ **Output 為真相，Export 精靈已於 2026-08-20 拿掉**（使用者定調）。
+  順序是綁死的，而且真的照著走：先讓 Output 卡做到能取代精靈、**逐位元組驗過**
+  （`tests/test_export_parity.py`），再刪 —— 否則中間 app 輸不出任何東西。
 * **Custom 這一層** —— **先不做**（使用者 2026-08-20：「先把大部分功能完成
   需要我們再來研究」）。
 
@@ -159,19 +159,46 @@ Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output
 一顆 defect 就走一次（瀏覽 defect 時會一直寫 PNG）。所以它也是整批之後跑一次，
 一顆一顆重跑 pipeline 取影像 —— 那正是 Export 精靈今天做的事。
 
+### Stage 5c ✅ 2026-08-20：Studio 的整批入口，然後刪掉精靈
+
+1. **Studio 的「跑整批並寫出」入口** ✅ —— `StudioWindow.run_all()`。
+   在此之前「Run all defects」跟「Run trial」是**同一支函式、同一條路**，
+   差別只有 `limit`；現在它們真的不一樣：
+   * **Run all 寫、Run trial 不寫**，而且旗標**跟著那一次執行走**
+     （`_write_outputs_this_run`），不是讀當下的 UI —— 按了之後可以馬上去改
+     別的東西。
+   * **中途按停止 → 不寫，而且講出來**（部分結果寫進 KLARF 是不可逆的錯；
+     安靜地不寫跟安靜地寫一樣糟）。
+   * 寫檔走背景執行緒（`workers.OutputWorker`）—— `output_image` 會一顆一顆
+     重跑 pipeline，在 GUI 執行緒做會僵住幾十秒。
+   * 工具列那一格從「Export…」變成「**Run all & write**」（同一個位子、同一件
+     事），前提改成跟 Run trial 一樣（有資料、流程跑得動）——它自己就是那一次跑。
+2. **`output_klarf` 的寫回前預覽** ✅ —— `WriteBackInspector`（F7-17 的機制）。
+   精靈的做法是把「寫出」鈕鎖住直到按過預覽；乾跑（`plan_writeback`）一個
+   位元組都不寫，所以它不需要那顆鈕：選到那張卡就看得到會改幾列、寫去哪、
+   原檔動不動 —— 比精靈**更早**。
+   ＋ **只在 `inplace` 時跳確認**（使用者定調）。判準是「**會不會動到原檔**」
+   不是「是不是 KLARF」：`annotate` / `topn` 寫的都是新檔，每次都問的話那個
+   確認很快就變成閉著眼睛按掉的東西 —— 而它要擋的正是 `inplace` 那一種。
+   停用的卡不跳（不會跑的東西跳確認就是騙人）。
+3. **逐位元組的許可證** ✅ —— `tests/test_export_parity.py`：同一批結果，兩條路
+   各產一次，CSV / KLARF（annotate、topn 兩種、inplace）/ 疊圖 PNG **逐位元組
+   相同**，Excel 逐格相同（`.xlsx` 是 zip，檔頭有時間戳，比位元組會變成一條
+   每次都紅的測試）。**不綠就不刪** —— 而它抓到了兩件精靈有、卡片沒有的事：
+   疊圖左上角的 `score=` / `bin=`（`overlay_label`）與檔名的消毒
+   （`overlay_filename`）。兩支都搬進了 `core/export/overlay.py`。
+4. **刪掉** ✅ —— `d4t/ui/export_dialog.py`（1213 行）、工具列的 `Export…`、
+   `results.export_requested` 接線、`open_export_dialog`、
+   `tests/test_ui_export_dialog.py`。**`core/export/` 一行都沒刪**：
+   `klarf_out` / `report` / `overlay` 是 Output 卡的引擎。
+   CLI 的 `d4t export` 子命令**保留**（使用者定調「下一輪再看」）—— 它不是精靈：
+   它跑的是「已經跑完的結果重新匯出」（從 SQLite 歷史），跟 Output 卡不完全重疊。
 ### Output 段還欠什麼（下一輪）
 
-1. **Studio 的「跑整批並寫出」入口。** ⚠ 這是拿掉 Export 精靈的**前提**：
-   Studio 目前**只有試跑那條路**（`run_batch(limit=N)`），沒有「跑完整批」。
-   而使用者定調了「試跑不寫」——所以現在拿掉精靈的話，Studio 會完全輸不出
-   任何東西。順序是：先有那個入口，再拿掉精靈。
-2. **`output_klarf` 的寫回前預覽。** 機制本來就在 core
-   （`klarf_out.WriteBackPlan` / `apply_writeback` 的乾跑），精靈只是叫它並把
-   「寫出」鈕鎖住。搬進那張卡的 inspector 面板（F7-17 的機制）之後，它比精靈
-   **更早**出現：選到那張卡就看得到。
-3. **畫布那一半**（使用者 2026-08-20：「先做引擎，畫布那一半下一輪」）：
-   跨顆卡吃的是「整批的 feature 表」，而 d4t 沒有那種埠 —— 跟 Algo 段的
-   `feature_math` 是同一個題目（第三種埠）。目前兩者都靠 route 順序。
+**畫布那一半**（使用者 2026-08-20：「先做引擎，畫布那一半下一輪」）：跨顆卡吃的
+是「整批的 feature 表」，而 d4t 沒有那種埠 —— 跟 Algo 段的 `feature_math` 是同一
+個題目（第三種埠）。目前兩者都靠 route 順序，所以**畫布上看不出它們吃什麼**，
+而那正是鐵則 9 說的那件事的形狀（資料從哪來由線決定）。
 
 ### F15 停在哪裡（2026-08-20）
 

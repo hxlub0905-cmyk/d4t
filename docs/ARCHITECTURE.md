@@ -116,15 +116,14 @@ d4t/
 │   ├── scope.py             #   產品範圍開關：四種輸入（patch/rsem/stack/folder，F11 Input-3）
 │   ├── viewmodel.py         #   RecipeModel（Qt-free，可 headless 測；含 edges）
 │   ├── canvas.py            #   節點畫布（n8n 式；F7-6，純 UI，引擎零改動）
-│   ├── results.py           #   Results 視窗：直方圖 + Gallery + 輸出（F7-5）
+│   ├── results.py           #   Results 視窗：直方圖 + Gallery + 整批入口（F7-5）
 │   ├── region_check.py      #   區域跨顆檢視：框畫在 N 顆縮圖上（F7-11）
 │   ├── template_dialog.py   #   從大圖疊 Golden Cell 模板（F7-12；模板存進 recipe）
 │   ├── inspectors.py        #   每張卡自己的儀表（F7-17；依 Step.key 註冊）
 │   ├── theme.py widgets.py  #   主題 token + 資料驅動元件 + 自繪圖示
 │   ├── gallery.py           #   同屏比多顆（虛擬捲動，撐 10k+）
 │   ├── welcome.py           #   首啟導覽 + 範例 recipe 庫對話框
-│   ├── export_dialog.py     #   輸出精靈（寫回前一定先預覽變更）
-│   ├── workers.py           #   載入/預覽(請求合併)/試跑 背景執行緒
+│   ├── workers.py           #   載入/預覽(請求合併)/試跑/寫出 背景執行緒
 │   └── studio.py app.py     #   主視窗 + 進入點
 ├── tests/                   # 1250+ 個測試，全部用合成資料
 │   └── fixtures/recipes/    #   e2e 用的最小 recipe（**測試用，不是教學範例**）

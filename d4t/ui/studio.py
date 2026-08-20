@@ -30,8 +30,12 @@
    → :class:`ThumbWorker`（背景執行緒讀檔 + :func:`~d4t.ui.gallery.make_thumb`）
    → ``ready(dict)`` → ``set_thumbs``。**解碼絕不在 GUI 執行緒**，而且忙碌時
    新的請求會合併進待跑集合（``request`` 只累積、不排隊、不阻塞）。
-5. **輸出流**（M5）：工具列「輸出…」→ :class:`~d4t.ui.export_dialog.ExportDialog`
-   （試跑/全跑有結果才會亮）。
+5. **輸出流**（M5 → F16 Stage 5c 改寫）：工具列「Run all & write」→
+   :meth:`StudioWindow.run_all` → 跑完整批之後把 **Output 段的卡**跑一次
+   （:class:`~d4t.ui.workers.OutputWorker`）。**Output 卡是真相**（使用者
+   2026-08-20 定調），輸出精靈已經拿掉 —— 寫去哪、寫什麼，全部在畫布上的
+   那張卡上，而不是一個跑完才打開的對話框裡。
+   ⚠ **試跑不寫**：那不是一個旗標，是兩支函式（見 `core/pipeline/batch.py`）。
 
 調參迴圈的兩半（M5 的重點）
 ---------------------------
@@ -49,7 +53,7 @@ tests/test_ui_studio_m5.py）：
 :meth:`~StudioWindow.set_defect_index` / :meth:`~StudioWindow.refresh_preview` /
 :meth:`~StudioWindow.run_trial` /
 :meth:`~StudioWindow.show_gallery` / :meth:`~StudioWindow.show_preview` /
-:meth:`~StudioWindow.request_thumbs` / :meth:`~StudioWindow.open_export_dialog` /
+:meth:`~StudioWindow.request_thumbs` / :meth:`~StudioWindow.run_all` /
 :meth:`~StudioWindow.show_welcome` / :meth:`~StudioWindow.open_recipe_library` /
 :meth:`~StudioWindow.run_demo`。
 每個進入點都自我保護：沒有資料集 / 流程是空的 → 狀態列提示，不丟例外。
@@ -108,7 +112,6 @@ from d4t.core.pipeline.engine import (
 )
 from d4t.core.pipeline.recipe import version_skew
 
-from .export_dialog import ExportDialog
 from .canvas import SUMMARY_SEP, PipelineCanvas
 from .inspectors import inspector_for
 from .gallery import make_thumb
@@ -146,8 +149,8 @@ class _GlyphToolButton(_GlyphMixin, QToolButton):
     """工具列上會自己畫圖示的 QToolButton（``_tool_button(icon=…)`` 用）。"""
 
 from .workers import (
-    CalibrateWorker, DatasetLoadWorker, PreviewWorker, RegionCheckWorker,
-    TrialWorker,
+    CalibrateWorker, DatasetLoadWorker, OutputWorker, PreviewWorker,
+    RegionCheckWorker, TrialWorker,
     _ThreadedWorker,
 )
 
@@ -511,6 +514,12 @@ class StudioWindow(QMainWindow):
         self._pair_filled: Dict[str, Tuple[str, ...]] = {}
         self.preview_worker = PreviewWorker(self)
         self.trial_worker = TrialWorker(self)
+        # Output 段的卡（F16 Stage 5c）。**只有 `run_all()` 叫得到它** ——
+        # 使用者定調「試跑不寫」，而那件事是結構上的：試跑那條路沒有這一支。
+        self.output_worker = OutputWorker(self)
+        #: 這一次執行要不要寫出輸出。**跟著那一次執行走**，不是讀當下的 UI
+        #: 狀態 —— 使用者按了 Run all 之後可以馬上去改別的東西。
+        self._write_outputs_this_run = False
         self.thumb_worker = ThumbWorker(self)
         self.region_check_worker = RegionCheckWorker(self)
         self.calibrate_worker = CalibrateWorker(self)
@@ -619,15 +628,20 @@ class StudioWindow(QMainWindow):
         # **建出來再藏**，不是不建：版面量測、``_update_action_states``、既有測試
         # 都還指得到它，回復只要改 ``scope.SHOW_SAMPLE_ENTRIES``。
         self.btn_examples.setVisible(bool(scope.SHOW_SAMPLE_ENTRIES))
-        self.btn_export = self._tool_button(
-            "Export…",
-            "Write these results back to KLARF, or produce reports and overlays",
-            self.open_export_dialog, icon="export")
-        # Export 是這條流程的**終點**，也是「跑完之後要做的那件事」—— 它跟旁邊
+        self.btn_run_all = self._tool_button(
+            "Run all & write",
+            "Run every defect, then write whatever the Output cards say",
+            self.run_all, icon="export")
+        # 這是這條流程的**終點**，也是「跑完之後要做的那件事」—— 它跟旁邊
         # 那幾顆檔案操作不同級。所以給它 accent 的外框（不是填滿，填滿的是
         # Run trial）。這不是裝飾：工具列上唯一有顏色的兩顆，正好是使用者
         # 真正要按的那兩顆。
-        self.btn_export.setProperty("variant", "secondary")
+        #
+        # 以前這一格是「Export…」，開一個跑完才打得開的輸出精靈。精靈拿掉之後
+        # （F16 Stage 5c）這一格改成整批入口 —— **同一個位子、同一件事**：
+        # 「把結果寫出去」。差別是寫什麼、寫去哪現在看得見（畫布上的 Output
+        # 卡），而不是藏在對話框裡。
+        self.btn_run_all.setProperty("variant", "secondary")
         self.btn_undo = self._tool_button(
             "", "Undo the last change", self.undo, icon="undo")
         self.btn_redo = self._tool_button(
@@ -650,7 +664,7 @@ class StudioWindow(QMainWindow):
 
         # 一段 = 一種事情；段與段之間一條分隔線。
         for group in ((self.btn_open_recipe,),
-                      (self.btn_examples, self.btn_export),
+                      (self.btn_examples, self.btn_run_all),
                       (self.btn_undo, self.btn_redo)):
             for b in group:
                 bar.addWidget(b)
@@ -967,7 +981,7 @@ class StudioWindow(QMainWindow):
         self.results = ResultsWindow(self)
         self.histogram = self.results.histogram
         self.gallery = self.results.gallery
-        self.results.export_requested.connect(self.open_export_dialog)
+        self.results.run_all_requested.connect(self.run_all)
 
         root = QSplitter(Qt.Horizontal, self)
         root.addWidget(self.library)
@@ -1375,6 +1389,8 @@ class StudioWindow(QMainWindow):
 
         self.trial_worker.progress.connect(self._on_trial_progress)
         self.trial_worker.done.connect(self._on_trial_done_async)
+        self.output_worker.done.connect(self._on_outputs_done)
+        self.output_worker.failed.connect(self._on_outputs_failed)
         self.trial_worker.failed.connect(
             lambda msg: (self._progress_done(),
                          self._status("Trial run failed: %s" % msg, "error")))
@@ -1522,12 +1538,13 @@ class StudioWindow(QMainWindow):
                       "Redo the change you just undid" if self.model.can_redo()
                       else "Nothing to redo.")
 
-        has_results = bool(self.trial_results)
-        self.btn_export.setEnabled(has_results)
-        self.btn_export.setToolTip(
-            "Write these results back to KLARF, or produce reports and overlays"
-            if has_results
-            else "No results yet — run a trial first.")
+        # 「Run all & write」跟 Run trial 是**同一個前提**（有資料、流程跑得動）
+        # —— 它不需要先有結果。以前這一格是輸出精靈，那時候「先跑一次才會亮」
+        # 是對的；現在它自己就是那一次跑。
+        self.btn_run_all.setEnabled(can_run)
+        self._set_tip(self.btn_run_all,
+                      run_why or "Run all %d defects, then write whatever the "
+                                 "Output cards say" % n_items)
 
     def _card_summary_parts(self, node: Any, reads, writes, regions_out,
                             region_inputs) -> List[str]:
@@ -3816,6 +3833,11 @@ class StudioWindow(QMainWindow):
         shown = [self.stream_combo.currentText()]
         if self._compare_on:
             shown.append(self.stream_combo_b.currentText())
+        # 寫回的儀表要**真的乾跑一次**才講得出「會改幾列」，而那需要 KlarfDoc。
+        # 儀表不自己去讀檔（它連檔名都不該知道）—— 由這裡遞過去。
+        # 沒有 KLARF 的兩種輸入這一格就是 None，面板會退回估算並標明。
+        meta = dict(meta or {})
+        meta["_klarf_doc"] = getattr(self.dataset, "klarf", None)
         insp.set_context(self.selected_node or "",
                          params=dict(node.params) if node else {},
                          result=one, batch=self.trial_results, meta=meta,
@@ -4254,8 +4276,15 @@ class StudioWindow(QMainWindow):
     # 試跑
     # ==================================================================== #
     def run_trial(self, n: int, workers: Optional[int] = 1,
-                  sync: bool = False, cache_dir: Optional[Any] = None) -> bool:
-        """跑前 ``n`` 顆並更新直方圖。``sync=True`` 走同步路徑（測試用）。"""
+                  sync: bool = False, cache_dir: Optional[Any] = None,
+                  write_outputs: bool = False) -> bool:
+        """跑前 ``n`` 顆並更新直方圖。``sync=True`` 走同步路徑（測試用）。
+
+        ``write_outputs``（F16 Stage 5c）：跑完之後要不要讓 Output 段的卡
+        **真的寫出檔案**。**預設 False 是刻意的** —— 使用者定調「試跑不寫，
+        只有整批才寫」，而新加一條跑 pipeline 的路時它預設不寫。
+        只有 :meth:`run_all` 傳 True。
+        """
         items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
         if not items:
             self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
@@ -4283,6 +4312,12 @@ class StudioWindow(QMainWindow):
         limit = max(1, min(int(n), len(items)))
         recipe = self.model.to_recipe()
         cdir = None if cache_dir is None else str(cache_dir)
+        # **跟著這一次執行走**，不是讀當下的 UI 狀態：使用者按了 Run all 之後
+        # 可以馬上去改別的東西，而這一批的結果仍然是「他叫我整批跑」的那一批。
+        self._write_outputs_this_run = bool(write_outputs)
+        # 同步那條路（headless 測試 / CLI 式呼叫）沒有 event loop 在轉，
+        # 背景 worker 的訊號投遞不到 —— 寫檔那一段要跟著走同步版。
+        self._write_outputs_sync = bool(sync)
 
         if sync:
             t0 = time.time()
@@ -4311,12 +4346,135 @@ class StudioWindow(QMainWindow):
                        cache_dir=DEFAULT_CACHE_DIR)
 
     def _on_full_clicked(self) -> None:
+        self.run_all()
+
+    def run_all(self, sync: bool = False) -> bool:
+        """跑**整批**，而且讓 Output 段的卡真的寫出檔案（F16 Stage 5c）。
+
+        跟 :meth:`run_trial` 的差別**不只是 `limit`**（在此之前它們是同一支
+        函式、同一條路）。整批是「我要結果了」，試跑是「我在調參數」——
+        而後者每拖一下門檻就覆寫一次 KLARF 是不可逆的。
+
+        ⚠ **中途按停止的那一批不寫**（見 :meth:`_apply_trial_results`）：
+        那是部分結果。
+        """
         items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
         if not items:
             self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
+            return False
+        # KLARF 的 `inplace` 會**動到原檔**，那是這個 app 唯一不可逆的動作。
+        if not self._confirm_irreversible_writes():
+            return False
+        return self.run_trial(len(items), workers=TRIAL_WORKERS,
+                              cache_dir=DEFAULT_CACHE_DIR, sync=sync,
+                              write_outputs=True)
+
+
+    # ---- Output 段：把結果寫出去（F16 Stage 5c）---------------------------
+    def _write_outputs(self, results: Sequence[Dict[str, Any]]) -> bool:
+        """跑 Output 段的卡（背景執行緒）。回 False = 沒開起來。
+
+        **只有 `run_all()` 走得到這裡**（使用者定調：試跑不寫）。
+        """
+        recipe = self.model.to_recipe()
+        self._status("Writing outputs…")
+        if getattr(self, "_write_outputs_sync", False):
+            # 同步那條路沒有 event loop，訊號投遞不到 —— 直接跑並自己收尾，
+            # 走的是**同一支** `run_batch_steps`（不是第二套邏輯）。
+            try:
+                bctx = OutputWorker.run_sync(recipe, self.dataset, list(results))
+            except Exception as e:      # noqa: BLE001 — UI 邊界
+                self._on_outputs_failed("%s: %s" % (type(e).__name__, e))
+                return False
+            self._on_outputs_done(bctx)
+            return True
+        if not self.output_worker.start(recipe, self.dataset, list(results)):
+            self._status("Still writing the last run's outputs — please wait.")
+            return False
+        return True
+
+    def _on_outputs_done(self, bctx: Any) -> None:
+        """寫完了：**三種東西是三句不同的話**（見 `BatchContext`）。"""
+        outputs = list(getattr(bctx, "outputs", None) or [])
+        warnings = list(getattr(bctx, "warnings", None) or [])
+        errors = dict(getattr(bctx, "errors", None) or {})
+
+        if not outputs and not errors and not warnings:
+            # 一張 Output 卡都沒有 —— 那不是錯，只是這份 recipe 沒有出口。
+            self._status("Run finished. This recipe has no Output card, so "
+                         "nothing was written — add one to save the results.")
             return
-        self.run_trial(len(items), workers=TRIAL_WORKERS,
-                       cache_dir=DEFAULT_CACHE_DIR)
+
+        bits = []
+        if outputs:
+            # **列出路徑**：使用者要去那裡找檔案。
+            bits.append("Wrote %s" % ", ".join(outputs))
+        for w in warnings:
+            bits.append(str(w))
+        if errors:
+            # 其他卡照樣寫出去了（鐵則 7 的跨顆版），但失敗的要指名。
+            first = sorted(errors.items())[0]
+            more = ("  (and %d more)" % (len(errors) - 1)) if len(errors) > 1 else ""
+            bits.append("Output card “%s” failed: %s%s" % (first[0], first[1], more))
+        self._status("  ·  ".join(bits), "error" if errors else None)
+
+    def _on_outputs_failed(self, msg: str) -> None:
+        self._status("Writing outputs failed: %s" % msg, "error")
+
+    def _confirm_irreversible_writes(self) -> bool:
+        """有**啟用**的 KLARF `inplace` 卡就先問一次（F16 Stage 5c）。
+
+        M5 那條「寫回前一定先預覽變更」是硬性關卡，而它不能因為 Export 精靈
+        消失就消失。承接方式是這裡加上 `output_klarf` 的儀表（選到那張卡就
+        看得到乾跑的計畫書）。
+
+        **判準是「會不會動到原檔」不是「是不是 KLARF」**：`annotate` 與 `topn`
+        寫的都是新檔，每次都要多按一下的話，那個確認很快就會變成閉著眼睛按掉
+        的東西 —— 而它要擋的正是 `inplace` 那一種。
+
+        ⚠ **只看啟用的節點**：停用的那張卡不會跑，跳確認就是騙人。
+        """
+        targets = []
+        for nid in self.model.node_order:
+            node = self.model.nodes.get(nid)
+            if node is None or not getattr(node, "enabled", True):
+                continue
+            if node.step != "output_klarf":
+                continue
+            if str(node.params.get("mode", "annotate")).strip() != "inplace":
+                continue
+            targets.append(str(node.params.get("path", "") or "(no path yet)"))
+        if not targets:
+            return True
+
+        plan_text = self._writeback_plan_text()
+        body = ("“In place” edits the KLARF file itself — this cannot be "
+                "undone.\n\nFile(s): %s" % "\n".join(targets))
+        if plan_text:
+            body = "%s\n\n%s" % (body, plan_text)
+        answer = QMessageBox.warning(
+            self, "Write into the original KLARF?", body,
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+        return answer == QMessageBox.Yes
+
+    def _writeback_plan_text(self) -> str:
+        """乾跑一次寫回，回一句「會改幾列」。跑不出來就回空字串。
+
+        **乾跑不寫任何東西**（`plan_writeback`），所以在確認之前跑它是安全的。
+        """
+        try:
+            from d4t.core.export.klarf_out import plan_writeback
+
+            doc = getattr(self.dataset, "klarf", None)
+            rows = list(self.trial_results or [])
+            if doc is None or not rows:
+                return ""
+            plan = plan_writeback(doc, rows, "inplace")
+            return ("Based on the last run: %d of %d row(s) would change."
+                    % (int(getattr(plan, "n_rows_changed", 0)),
+                       int(getattr(plan, "n_rows_out", 0))))
+        except Exception:       # noqa: BLE001 — 這只是一句提示，不准擋路
+            return ""
 
     def _on_trial_progress(self, done: int, total: int) -> None:
         self._progress_set(int(done), int(total), "%v / %m defects")
@@ -4358,11 +4516,23 @@ class StudioWindow(QMainWindow):
                     % (len(warns) - 1, "" if len(warns) == 2 else "s")
                     if len(warns) > 1 else "")
             msg = "%s  ⚠ %s: %s%s" % (msg, warns[0].title, warns[0].detail, more)
+
+        # ---- Output 段（F16 Stage 5c）--------------------------------------
+        # 這一批要不要寫，看的是**開跑時**設的旗標（`run_all` 才是 True）。
+        write = bool(getattr(self, "_write_outputs_this_run", False))
+        self._write_outputs_this_run = False        # 一次就是一次
+        if write and stopped:
+            # 被停掉的是**部分結果** —— 寫進 KLARF 是不可逆的錯。
+            # **而且要講出來**：安靜地不寫跟安靜地寫一樣糟。
+            msg = "%s  ·  Stopped, so nothing was written." % msg
+            write = False
         self._status(msg)
+        if write and results:
+            self._write_outputs(results)
         # F7-5：結果一到就把 Results 視窗帶出來 —— 使用者按 Run 想看的就是這個
         self.results.set_summary(
             summarize_run(len(results), ok, elapsed, self.trial_scores))
-        self.results.set_export_enabled(bool(results))
+        self.results.set_run_all_enabled(bool(results))
         self.results.status(msg)
         if results:
             self.results.present()
@@ -4477,30 +4647,6 @@ class StudioWindow(QMainWindow):
         self.show_gallery()
         self._status("Filtered to score %.3g–%.3g (%d defects)"
                      % (rng[0], rng[1], self.gallery.displayed_count()))
-
-    # ==================================================================== #
-    # 輸出（M5）
-    # ==================================================================== #
-    def open_export_dialog(self) -> Optional[Any]:
-        """開輸出精靈；沒有結果就只在狀態列提示（不開空對話框）。"""
-        if not self.trial_results:
-            self._status("No results to export yet — run a trial first.", "error")
-            return None
-        dlg = ExportDialog(
-            self.trial_results,
-            doc=getattr(self.dataset, "klarf", None),
-            dataset=self.dataset,
-            recipe=self.model.to_recipe() if self.model.node_order else None,
-            parent=self)
-        dlg.exported.connect(self._on_exported)
-        self.export_dialog = dlg
-        dlg.show()
-        return dlg
-
-    def _on_exported(self, summary: Any) -> None:
-        outputs = list((summary or {}).get("outputs") or [])
-        self._status("Export finished: %s"
-                     % (", ".join(outputs) if outputs else "(no files)"))
 
     # ==================================================================== #
     # 首次開啟導覽 + 範例 recipe 庫（M6）
@@ -5006,7 +5152,7 @@ class StudioWindow(QMainWindow):
                 pass
         for worker in (self.preview_worker, self.trial_worker,
                        self.dataset_worker, self.pair_worker,
-                       self.thumb_worker):
+                       self.thumb_worker, self.output_worker):
             try:
                 worker.stop()
             except Exception:              # noqa: BLE001 — 關窗不准擋路

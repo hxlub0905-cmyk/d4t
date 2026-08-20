@@ -27,8 +27,11 @@
 - **pipeline 全程用 pixel。** `cd_measure` 吐 `cd_x_px` / `cd_y_px` / `area_px`
   （`area_px` 是新的 —— 以前只在算 nm 的時候用到，沒有吐出來）。
   卡片裡不做單位換算，**任何 `*_nm` 特徵都不該再出現**。
-- **換算只發生在輸出。** Export 精靈的 DSIZE 那一列多一格 `× scale`
-  （`klarf_out` 的 `size_scale`，CLI 是 `--size-scale`），預設 `1` = 原樣寫 pixel。
+- **換算只發生在輸出。** `Write KLARF` 那張卡（`output_klarf`，inplace 模式）
+  上有一格「nm per pixel for sizes」（`klarf_out` 的 `size_scale`，CLI 是
+  `--size-scale`），預設 `1` = 原樣寫 pixel。
+  （2026-08-20 前這一格在 Export 精靈上，精靈已隨 F16 拿掉 —— 同一個引擎、
+  同一個預設值，只是換到畫布上的卡片。）
   要寫 nm 就把 nm/px 填進去 —— **那個數字只有站點自己知道**，所以它是一格輸入，
   不是一個猜出來的欄位。計畫書會把換算寫進 plan.notes，因為「這一欄是什麼單位」
   不能只存在按下去那個人的腦子裡（鐵則：寫回前一定先預覽變更）。

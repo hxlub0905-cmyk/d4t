@@ -30,7 +30,13 @@ import numpy as np
 from .klarf_out import ExportError
 
 __all__ = ["render_overlay", "write_png", "to_display_rgb",
-           "primary_blob_box", "pick_overlay_results", "BOX_COLOR"]
+           "primary_blob_box", "pick_overlay_results", "overlay_label",
+           "overlay_filename", "OVERLAY_PREFIX", "BOX_COLOR"]
+
+#: 疊圖 PNG 的檔名前綴。**留著**是因為使用者常常把疊圖寫進一個已經有東西的
+#: 資料夾裡 —— 前綴讓「這批是這一次跑出來的」一眼看得出來，也讓刪掉它們是
+#: 一個 glob 而不是逐個檔案挑。
+OVERLAY_PREFIX = "overlay_"
 
 #: 主 blob 外框的顏色（RGB）。
 BOX_COLOR = (255, 32, 32)
@@ -142,6 +148,43 @@ def primary_blob_box(blobs: Optional[Sequence[Any]] = None,
                           ("blob_x", "blob_y", "blob_w", "blob_h")})
     return None
 
+
+
+def overlay_filename(defect_id: Any) -> str:
+    """defect id → 疊圖的檔名（``overlay_<id>.png``）。
+
+    **會把不能當檔名的字換成底線**：RSEM 那條路的 id 是從檔名來的，而
+    `output_image` 第一版直接把它拼進路徑 —— 一顆 id 裡有 ``/`` 或 ``:``
+    的 defect 會讓那張卡整個失敗，而症狀是「少了幾張 PNG」（鐵則 7 把例外
+    吃掉了）。跟 :func:`overlay_label` 一樣是從 Export 精靈搬過來的。
+    """
+    safe = "".join(ch if (ch.isalnum() or ch in "-_") else "_"
+                   for ch in str(defect_id)) or "unknown"
+    return "%s%s.png" % (OVERLAY_PREFIX, safe)
+
+
+def overlay_label(result: Dict[str, Any]) -> str:
+    """疊圖左上角那一行：``#3  score=4.210  bin=1``。
+
+    **住在這裡而不是 UI**（F16 Stage 5c 搬過來的，同 :func:`pick_overlay_results`）：
+    它問的是「這張圖上要寫哪一行字」——跟畫面無關，而 `output_image` 跟 Export
+    精靈要的是同一行。以前它在 `ui/export_dialog.py` 裡，於是那張卡只寫得出
+    defect id：**一疊 PNG 上少了分數與 bin，看起來跟完整的一模一樣**，
+    而那正是使用者拿它們來挑門檻的理由。
+
+    cv2 的內建字型沒有 CJK，所以這裡刻意只用 ASCII。
+    """
+    parts = ["#%s" % result.get("defect_id", "?")]
+    s = result.get("score")
+    if s is not None:
+        try:
+            parts.append("score=%.3f" % float(s))
+        except (TypeError, ValueError):
+            pass
+    b = result.get("bin")
+    if b is not None:
+        parts.append("bin=%d" % int(b))
+    return "  ".join(parts)
 
 
 def pick_overlay_results(results: Sequence[Dict[str, Any]], limit: int

@@ -81,7 +81,7 @@ def test_results_window_is_not_shown_until_there_is_something_to_show(qapp, lot)
     try:
         assert win.results_visible() is False
         assert win.results.summary_text() == "No results yet."
-        assert win.results.btn_export.isEnabled() is False
+        assert win.results.btn_run_all.isEnabled() is False
     finally:
         win.close()
 
@@ -95,7 +95,7 @@ def test_running_populates_and_presents_the_results_window(window):
     assert window.results_visible() is True, "按 Run 想看的就是這個"
     assert window.histogram.has_data() is True
     assert window.gallery.displayed_count() == 8
-    assert window.results.btn_export.isEnabled() is True
+    assert window.results.btn_run_all.isEnabled() is True
 
     summary = window.results.summary_text()
     assert "8 defects" in summary and "8 ok" in summary and "0 failed" in summary
@@ -110,12 +110,17 @@ def test_summary_line_reports_counts_and_score_span():
     assert "score" not in results_mod.summarize_run(2, 2, 0.1, [])
 
 
-def test_export_button_in_results_reaches_the_studio_dialog(window):
+def test_the_write_button_in_results_reaches_the_studio(window):
+    """試跑看起來對了之後的**下一步**：整批跑一次並照 Output 卡寫出去。
+
+    F16 Stage 5c 之前這顆鈕開的是輸出精靈。精靈拿掉之後它接的是同一件事的
+    另一半 —— 而「寫什麼、寫去哪」現在在畫布上看得見。
+    """
     window.run_trial(8, workers=1, sync=True)
     seen = []
-    window.results.export_requested.connect(lambda: seen.append(True))
-    window.results.btn_export.click()
-    assert seen, "Results 視窗的輸出鈕要接回 Studio 的輸出精靈"
+    window.results.run_all_requested.connect(lambda: seen.append(True))
+    window.results.btn_run_all.click()
+    assert seen, "Results 視窗那顆鈕要接回 Studio 的整批入口"
 
 
 # --------------------------------------------------------------------------- #

@@ -197,21 +197,51 @@ def test_run_batch_alone_never_writes_anything(dataset, tmp_path):
 
 
 def test_the_studio_trial_path_does_not_call_the_batch_steps():
-    """掃原始碼：`d4t/ui` 底下**不該有人**叫 `run_batch_steps`（目前）。
+    """掃原始碼：`d4t/ui` 底下**只有 `workers.py`** 叫得到 `run_batch_steps`。
 
     掃字串是刻意的，跟 `test_ui_f15_pair_source` 掃 `sources=` 同一招：
     它擋得住「哪天有人順手在試跑那條路上加了它」——而那個改動的症狀是
     使用者拖一下門檻就覆寫一次輸出檔，沒有任何錯誤訊息。
 
-    ⚠ Studio 之後會有自己的「跑整批並寫出」入口（見 docs/ROADMAP.md）。
-    那一天這條測試要改成「只有那一個入口叫得到」，不是刪掉它。
+    Stage 5c 之後 Studio 有了自己的整批入口（`StudioWindow.run_all()`），
+    而它是**透過 `workers.OutputWorker`** 叫的 —— 所以這條測試從
+    「沒有人叫得到」收成「只有那一個入口叫得到」，守的東西一字不差。
+    `studio.py` 只准在註解裡提到它。
     """
+    allowed = {"workers.py"}
     ui = REPO / "d4t" / "ui"
-    hits = [p.name for p in ui.glob("*.py")
-            if "run_batch_steps" in p.read_text(encoding="utf-8")]
-    assert hits == [], (
+    hits = []
+    for path in sorted(ui.glob("*.py")):
+        # 去掉註解再掃 —— `studio.py` 裡那一句是說明，不是呼叫。
+        code = "\n".join(line.split("#", 1)[0]
+                          for line in path.read_text(encoding="utf-8").splitlines())
+        if "run_batch_steps" in code:
+            hits.append(path.name)
+    assert set(hits) <= allowed, (
         "d4t/ui 底下叫了 run_batch_steps：%s。試跑不該寫出檔案 —— "
-        "如果這是刻意的（Studio 的整批入口），請改這條測試並說明。" % hits)
+        "整批那條路請走 workers.OutputWorker，"
+        "如果真的要多一個入口請改這條測試並說明。" % sorted(set(hits) - allowed))
+    assert "workers.py" in hits, (
+        "workers.py 不再叫 run_batch_steps —— Studio 的整批入口是不是搬家了？"
+        "搬去哪就把 allowed 改成哪一份，不要把這條測試刪掉。")
+
+
+def test_only_the_output_worker_calls_it_inside_workers():
+    """再往內一層：`workers.py` 裡叫它的**只有 `OutputWorker`**。
+
+    `TrialWorker` 跟它住在同一個檔案，而「試跑不寫」正是這一輪的定調 ——
+    檔案層級的名單擋不住「有人在 TrialWorker 的 job 裡多加一行」。
+    """
+    import ast
+
+    src = (REPO / "d4t" / "ui" / "workers.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    owners = set()
+    for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
+        for node in ast.walk(cls):
+            if isinstance(node, ast.Name) and node.id == "run_batch_steps":
+                owners.add(cls.name)
+    assert owners == {"OutputWorker"}, owners
 
 
 # --------------------------------------------------------------------------- #
@@ -387,15 +417,17 @@ def test_the_images_card_picks_the_highest_scoring_ones(dataset, tmp_path):
     兩者都會產出 N 張 PNG，所以畫面上看不出差別 —— 而檔案順序上的前 N 顆
     幾乎一定不是使用者想看的那幾顆。第一版就是那樣寫的。
     """
-    from d4t.core.export.overlay import pick_overlay_results
+    from d4t.core.export.overlay import overlay_filename, pick_overlay_results
 
     folder = tmp_path / "pngs"
     recipe = _out_recipe("img", "output_image",
                          {"folder": str(folder), "limit": 2})
     rows = run_batch(recipe, dataset, workers=1)
     run_batch_steps(recipe, dataset, rows)
-    want = {str(r["defect_id"]) for r in pick_overlay_results(rows, 2)}
-    got = {p.stem for p in folder.glob("*.png")}
+    # 檔名是 `overlay_<id>.png`（`overlay_filename`，跟 Export 精靈同一支）——
+    # 前綴讓「這批是這一次跑出來的」在一個已經有東西的資料夾裡看得出來。
+    want = {overlay_filename(r["defect_id"]) for r in pick_overlay_results(rows, 2)}
+    got = {p.name for p in folder.glob("*.png")}
     assert got == want, (sorted(got), sorted(want))
     # 而且截斷了要講出來（少幾張的資料夾跟完整的長得一模一樣）
     assert len(rows) > 2

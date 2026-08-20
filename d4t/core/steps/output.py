@@ -444,11 +444,12 @@ class OutputImageStep(_OutputStep):
                     continue
                 panel = overlay.render_overlay(
                     images, dict(getattr(r, "features", {}) or {}),
-                    label=str(row.get("defect_id", "")),
+                    label=overlay.overlay_label(row),
                     montage=bool(p["montage"]))
                 overlay.write_png(
                     panel,
-                    os.path.join(folder, "%s.png" % row.get("defect_id", "x")))
+                    os.path.join(folder, overlay.overlay_filename(
+                        row.get("defect_id", "x"))))
                 wrote += 1
             except Exception:       # noqa: BLE001 — 一顆畫不出來不該殺掉整批
                 skipped += 1

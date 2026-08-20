@@ -30,7 +30,8 @@ from .klarf_out import (
     plan_writeback,
 )
 from .overlay import (
-    pick_overlay_results, primary_blob_box, render_overlay, to_display_rgb,
+    OVERLAY_PREFIX, overlay_filename, overlay_label, pick_overlay_results, primary_blob_box, render_overlay,
+    to_display_rgb,
     write_png,
 )
 from .report import feature_keys, summarize, write_csv, write_excel
@@ -39,5 +40,6 @@ __all__ = [
     "ExportError", "WriteBackPlan", "MODES", "plan_writeback", "apply_writeback",
     "summarize", "write_csv", "write_excel", "feature_keys",
     "render_overlay", "write_png", "to_display_rgb", "primary_blob_box",
-    "pick_overlay_results",
+    "pick_overlay_results", "overlay_label", "overlay_filename",
+    "OVERLAY_PREFIX",
 ]

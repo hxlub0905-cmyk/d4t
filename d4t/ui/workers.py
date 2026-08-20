@@ -1,5 +1,5 @@
 # d4t Studio 背景工作層 — authored 2026-07-28 (M3).
-"""Studio 的三個背景工作：載資料集、單顆預覽、試跑批次。
+"""Studio 的背景工作：載資料集、單顆預覽、試跑批次、寫出輸出。
 
 設計原則
 --------
@@ -37,11 +37,13 @@ import d4t.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
 from d4t.core.ingest.dataset import (
     Dataset, load_dataset, load_folder, load_tiff_stack,
 )
-from d4t.core.pipeline import Recipe, run_batch, run_defect
+from d4t.core.pipeline import (
+    Recipe, run_batch, run_batch_steps, run_defect,
+)
 from d4t.core.pipeline.engine import DefectResult
 
 __all__ = ["DatasetLoadWorker", "PreviewWorker", "TrialWorker",
-           "RegionCheckWorker"]
+           "RegionCheckWorker", "OutputWorker"]
 
 #: ``stop()`` 等背景執行緒收工的預設上限（毫秒）。
 DEFAULT_JOIN_MS = 15000
@@ -531,3 +533,53 @@ class CalibrateWorker(_ThreadedWorker):
 
     def _job_finished(self) -> None:
         self.busy.emit(False)
+
+
+# ---------------------------------------------------------------------------
+# 5) 寫出輸出（F16 Stage 5c）
+# ---------------------------------------------------------------------------
+class OutputWorker(_ThreadedWorker):
+    """在背景跑 :func:`d4t.core.pipeline.run_batch_steps`（Output 段的卡）。
+
+    訊號：``done(BatchContext)``、``failed(str)``。
+
+    為什麼要開背景執行緒
+    --------------------
+    `output_image` **一顆一顆重跑 pipeline** 才拿得到影像（結果表裡只有數字），
+    而那正是 Export 精靈今天做的事 —— 幾百顆就是幾十秒。在 GUI 執行緒做的話
+    整個視窗會僵住，跟 :class:`RegionCheckWorker` 的理由一字不差。
+
+    ⚠ **只有「跑整批」那條路叫得到它**（使用者定調：試跑不寫）。
+    `StudioWindow.run_all()` 是唯一的呼叫端，而
+    `tests/test_batch_steps.py::test_the_studio_trial_path_does_not_call_the_batch_steps`
+    掃原始碼守著那件事 —— 試跑那條路加上它的症狀是「拖一下門檻就覆寫一次
+    輸出檔」，而且沒有任何錯誤訊息。
+    """
+
+    done = Signal(object)
+    failed = Signal(str)
+
+    def start(self, recipe: Recipe, dataset: Any,
+              rows: List[Dict[str, Any]]) -> bool:
+        """開背景執行緒把 Output 段的卡跑一次；已有工作在跑時回傳 False。"""
+        if self.is_running():
+            return False
+        payload = list(rows or [])
+
+        def job() -> None:
+            try:
+                bctx = run_batch_steps(recipe, dataset, payload)
+            except Exception as e:      # noqa: BLE001 — 整個機制爆掉才會走到這
+                # 單張卡失敗是 `bctx.errors`（鐵則 7 的跨顆版），不會走到這裡。
+                self.failed.emit(f"{type(e).__name__}: {e}")
+            else:
+                self.done.emit(bctx)
+
+        self._start_job(job)
+        return True
+
+    @staticmethod
+    def run_sync(recipe: Recipe, dataset: Any,
+                 rows: List[Dict[str, Any]]) -> Any:
+        """同步版（不開執行緒），給 headless 測試用。"""
+        return run_batch_steps(recipe, dataset, list(rows or []))

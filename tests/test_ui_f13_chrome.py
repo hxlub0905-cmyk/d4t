@@ -106,7 +106,7 @@ def test_readable_on_keeps_the_hue_and_stops_as_soon_as_it_passes():
 def test_the_toolbar_has_three_weights(window):
     tiers = {
         "primary": [window.btn_trial, window.btn_trial_more],
-        "secondary": [window.btn_export],
+        "secondary": [window.btn_run_all],
         "ghost": [window.btn_undo, window.btn_redo, window.btn_theme],
     }
     for b in tiers["primary"]:
