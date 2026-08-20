@@ -6,7 +6,7 @@
 
 | 期間 | 在哪 |
 |---|---|
-| **2026-08-19 起**（第十六輪～）| 這個檔案（下面）—— 改名 d4t、F12 區域線、F13 UI、F14 入口搬進卡片、F15 配對分析 |
+| **2026-08-19 起**（第十六輪～）| 這個檔案（下面）—— 改名 d4t、F12 區域線、F13 UI、F14 入口搬進卡片、F15 配對分析、F16 畫布的八段 |
 | 2026-08-07 ～ 08-18（第十五輪以前）| [`docs/history/2026-08.md`](docs/history/2026-08.md) —— F8 純規則 ROI、畫布 n8n 化、Phase 1 收斂、F10、Phase 2 的 Input／Enhance／Region 三段 |
 | 2026-07 | [`docs/history/2026-07.md`](docs/history/2026-07.md) —— M0–M7、F7-9…F7-24 前半、兩台機器與搬運通道的成形 |
 
@@ -16,6 +16,80 @@
 封存不是整理癖：這個檔案**只增不減**，而它跟著整包被複製進公司機。
 包的大小**不是限制**（2026-08-17 使用者確認直接複製 raw，見 `AGENTS.md` §2）——
 封存現在是為了 diff 乾淨與公司機用不到的東西不佔體積，不再是為了那道 1 MB 的線。
+
+---
+
+## F16：畫布的八段（2026-08-20，第三十輪）
+
+使用者一次講完了八件事，而它們合起來是同一件：**把畫布的形狀變成他心裡的形狀**。
+
+```
+Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output
+```
+
+### 先更正我上一輪講錯的一句話
+
+我說「Measure 排在 Compare 前面跟 diff 要先產生是衝突的」。使用者：「不太懂為
+何會衝突? 我畫布上的線，也不一定要有 Measure 對吧 (硬限制在哪?)」——**他是對
+的**。追下去：`GROUP_ORDER` 只影響卡片庫分區順序、rail 上下順序、階段顏色；
+執行是 `recipe.execution_order()` 的 DAG 拓撲排序，畫布排版吃的是
+`layout_columns(self._order)`＝節點順序。`core` 裡只有兩處讀 `resolve_group()`
+（`uneven-treatment` 只對 Compare 卡發動、`card-order` 只記 Enhance 卡的歷史），
+兩處都跟**位置**無關。我把「排版順序」跟「資料流順序」混成一件事了。
+
+### 這一輪做完的四段
+
+**Stage 1 —— 段落、改名、刪卡、清 blob。** 加了 `GROUP_ALGO` / `GROUP_OUTPUT`
+並重排；階段色 6 → 8（新那兩個刻意比較淡：六個色相已經把圓周分掉了，硬塞兩個
+一樣濃的進去，最近的一對會掉到 ΔE 25 的線上）。四張卡改名（`CD` / `SNR` /
+`H2H` / `Image Combination`）—— 只動 `label`，`key` 與 feature 名一個字都沒改。
+
+**刪掉 `pattern_ref` 的代價這一次真的付了。** rsem route 靠它造 ref 才有 diff
+可量（24/24）。拿掉之後那條 route 重做成「直接量單張影像」，實測 seed 11/3/21
+三次都是 **12/24，而且是因為它把每一顆都判成 bin 0**（那 24 顆裡正好 12 顆沒有
+缺陷）—— 分數尺度從 5–30 掉到 2.5，而門檻是 4.2。所以 e2e 的 rsem 斷言從準確率
+改成「跑得完、算得出分數」，並在 docstring 寫明那個證據為什麼沒了。
+
+順帶：`docs/PITFALLS.md` 最後一列寫著「分支+快取：冷跑≠熱跑（**未修**）」，
+而它在 F9-10 就修好了。**一列說「未修」的已修坑，會讓人去追一個不存在的鬼。**
+
+**Stage 2 —— 兩張 GLV 卡收成一張 `Gray level`。** 使用者說它們「應該是做同樣
+的事」；讀完之後**不是** —— `stats` 吐絕對值、`compare` 吐差異，而 compare 的
+`stat` 從不輸出那個絕對值。所以是收成一個下拉，不是刪掉一張。
+唯一特別的地方是**兩種 method 的接線方式不同**（清單 vs 角色埠），埠因此隨
+method 變形；`ROLE_PORTS` 那條不變量改成「在**這組參數下**是哪一類」，兩邊都驗。
+
+**Stage 3 —— Algo 段第一張卡 `feature_math`，而它逼出兩個引擎缺口。**
+① 吃「特徵」的卡一直沒有宣告（影像有 `resolve_reads`、區域有
+`resolve_regions_in`）→ 新增 `resolve_features_in` ＋ lint `unknown-feature-input`。
+② `is_source()` 把它當成入口卡 —— 判準是「沒有輸入埠、也沒有靜態 reads」，而在
+F16 之前每一張符合的卡都是 load 卡，所以那個巧合一直成立。被當成入口的後果是
+**整條 lint 對它靜音**（validate 對入口卡會 `continue`），於是①那條 error 根本
+走不到。判準加第三條：**入口 = 沒有輸入、而且憑空生出影像流**。
+
+⚠ **明講沒解決的**：畫布上沒有線指進 Algo 卡。特徵是扁平的全域命名空間，
+d4t 從來沒有「這個數字是哪張卡算的」這種埠（分數表達式也是這樣），所以相依性
+靠 route 順序。要變成一條線得先決定**第三種埠**長什麼樣 —— 那跟「跨顆那一層」
+是同一個題目。
+
+**Stage 4 —— main lot 的 KLARF 欄位帶成 feature。** ADC 的前置（使用者：
+「利用 feature 內數值資料跟原始 klarf 帶的資訊去做分類」）。做法沿用 F15 的
+`carry`：只帶點名的那幾欄、打錯欄名擋在跑之前、非數字的欄位進 meta 不進
+features。`columns_of` / `fill_fields` 搬回 `ingest/dataset.py`（它們問的是一份
+Dataset 的事，跟配不配對無關），`pair_source` 仍然 re-export。
+
+踩到一個安靜的 bug：`recipe.nodes` 是 `{id: RecipeNode}`，**直接迭代它拿到的是
+id 字串**，於是 `columns_for_main` 回空清單、一欄都不填，而症狀是「這份 KLARF
+沒有那個欄位」（那句話是錯的 —— 欄位在，只是沒複製）。只有 CLI 那條路踩得到，
+所以補了兩條 subprocess 的端到端測試。
+
+### 黃金值
+
+**只有 Stage 1 動了一次**（rsem route 重做），Stage 2–4 三組逐項相同 ——
+合併、開新段、加 `carry` 都沒有動到任何既有的數字，那是每一步的定義。
+
+### Stage 5 停在設計問題上（見下一段）
+
 
 ---
 
