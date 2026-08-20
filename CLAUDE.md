@@ -90,7 +90,7 @@ Phase 2），使用者定調**先把引擎做對，再回頭做產品化**（見
     有一條線指到定義它的那張卡（虛線 + 菱形埠）。它跟影像線差一件事 ——
     **區域線不存進 `recipe.edges`，是從參數推導出來的**（`roi="epi"` 就是唯一
     的儲存，區域名全域唯一所以來源推得出來）。存第二份的話兩份會漂，而那正是
-    上面那六個坑的形狀。見 `docs/plans/F12-region-edges.md`。
+    上面那六個坑的形狀。見 `docs/history/plans/F12-region-edges.md`。
 
 ---
 
@@ -234,7 +234,13 @@ git add -A && python tools/release.py && git add -A
 後兩種沒有 KLARF → 沒有座標、**寫不回 KLARF**，而那句話**常駐在資料集標籤上**
 （`tiff_stack · defect 1 / 3 · no KLARF`）—— 不是等使用者按了 Export 才發現。
 
-**第二份 lot 走另一條路**（F15，2026-08-19）：`pair_source` 這張卡上的
+**第二份 lot 走另一條路**（F15，2026-08-19）—— ⏸ **這一段停在原地，不要接著做**
+（使用者 2026-08-20：「太快了」）。引擎那一半做完且有測試，缺的是「對得對不對」
+的證據與那份點對點 report，而它要等 Compare 段做完才有形狀。詳見
+[`docs/plans/F15-pair-sources.md`](docs/plans/F15-pair-sources.md) §16 與
+[`docs/ROADMAP.md`](docs/ROADMAP.md)。以下是它現在的樣子：
+
+`pair_source` 這張卡上的
 `Open data…` 掛的是「拿來對照的那一份」（EBI ↔ RSEM(API) characterization），
 它掛在 `Dataset.sources[代號]` 上，**不取代目前的資料集** —— main 決定批次跑幾
 顆、走哪一條 route、KLARF 寫回誰。CLI 是 `--source 代號=路徑`（可以重複）。

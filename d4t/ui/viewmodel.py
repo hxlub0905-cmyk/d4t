@@ -653,7 +653,7 @@ class RecipeModel:
         """畫布要畫的**區域線**：``(定義它的卡, 用它的卡, 區域名, 落在哪一格)``。
 
         **推導出來的，不是存起來的**（F12 的關鍵決定，理由見
-        ``docs/plans/F12-region-edges.md`` §3）：``roi="epi"`` 那個參數就是唯一
+        ``docs/history/plans/F12-region-edges.md`` §3）：``roi="epi"`` 那個參數就是唯一
         的儲存，這裡只是把「誰定義了 epi」查出來。所以：
 
         * 舊 recipe 打開就有線，不必遷移；
