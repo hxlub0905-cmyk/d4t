@@ -14,6 +14,7 @@
 |---|---|---|
 | **TIFF 頁數的硬上限** | 幾萬顆的 lot「載得進來、有 defect、就是沒有影像」，而唯一的線索是一句「你的 TIFF 壞了」（它沒壞）| `tiff_index` 的 IFD 走訪以前在 10 萬頁報 `IFD chain loops — corrupt TIFF`，而 5 萬顆 ×2 張剛好在那條線上；`load_dataset` 接住那個例外之後把 kind 退成 `rsem`、每一顆 0 張圖。現在上限是 `tiff_index.MAX_PAGES`（100 萬），而且「太多頁」與「繞回自己」**是兩句不同的話** |
 | **為了幾 bit 走完整份 TIFF** | 載入慢，而且在網路碟上慢到像當掉 | `bit_depths` 以前把每一頁的每一個 tag 都讀出來（4 萬頁實測 1.0 秒，整個 `load_dataset` 才 1.56 秒）。它只是**提前警告**，守門在每一顆的 `require_8bit` —— 所以只看前 `BIT_DEPTH_SAMPLE_PAGES` 頁。量哪一段慢用 `tools/load_probe.py` |
+| **開檔就走完整條 IFD 鏈** | 網路碟上的 lot 開一次要一百多秒，而且是在看到第一張圖之前 | `len(tf.pages)`（為了修「讀過像素之後解析下一頁會從錯的位置開始」）與 `load_dataset` 的 `n_pages` 各走一趟。現在是 `tiff_index._PageIndex`：**用到第幾頁才走到第幾頁**，每次讀都自己 seek 到那一頁的 IFD（所以不再依賴檔案位置）；`load_dataset` 根本不問頁數（`defect_image_map(None)` 的base 結論一模一樣）。使用者實測 30962 頁 106 秒 → 開檔 4 秒 |
 | **fork 死鎖** | GUI 按「試跑」永遠不回、progress 一格不動 | `batch._pool_context()`：主執行緒 fork、非主執行緒 spawn。改動這裡務必跑 `tests/test_batch_thread_safety.py` |
 | **OpenCV IPP 非決定性** | 同張圖算兩次差 ~1e-8，快取結果對不起來 | `batch.pin_cv2_deterministic()` 關 IPP（每個 worker 都呼叫） |
 | **Fusi³ ecc 對位正負號** | ecc backend 位移與其他四個相反 | 已於 `algo/align.py` 修正並鎖測試 |

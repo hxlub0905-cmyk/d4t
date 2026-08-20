@@ -5,7 +5,10 @@ import numpy as np
 import pytest
 import tifffile
 
+from pathlib import Path
+
 from d4t.core.ingest import dataset, imageio
+from d4t.core.ingest.dataset import load_dataset
 
 # ---------------------------------------------------------------- synthetic KLARFs
 
@@ -238,3 +241,32 @@ def test_load_folder_not_a_dir(tmp_path):
     assert ds.kind == "folder"
     assert ds.items == []
     assert ds.warnings
+
+
+def test_opening_a_lot_does_not_walk_the_whole_tiff(tmp_path, monkeypatch):
+    """開檔的 115 秒裡有 106 秒是「數這個 TIFF 有幾頁」（使用者實測，網路碟）。
+
+    而它換到的東西比想像中少：`defect_image_map` 拿頁數只做兩件事 —— 決定
+    IMAGELIST 是 0-based 還是 1-based（**給不給頁數的結論一模一樣**），以及
+    「ids 裝不裝得進這個檔」（現在由 `read_page` 在真的讀到那一頁時回答，
+    而且那句話更明確）。
+    """
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    from make_sample import generate
+    from d4t.core.ingest import tiff_index
+
+    paths = generate(str(tmp_path / "lot"), n=6, seed=5)
+
+    walked = []
+    real = tiff_index.n_pages
+    monkeypatch.setattr(tiff_index, "n_pages",
+                        lambda p: (walked.append(str(p)), real(p))[1])
+
+    ds = load_dataset(paths["klarf"])
+    assert walked == [], "開檔不該走完整條 IFD 鏈"
+    # 而且該對到的還是對到了
+    assert ds.kind == "ebi_patch" and len(ds.items) == 6
+    assert sorted(ds.items[0].images) == ["ref", "test"]
+    assert ds.items[0].load("test").shape == ds.items[0].load("ref").shape

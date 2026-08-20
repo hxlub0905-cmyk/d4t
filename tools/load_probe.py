@@ -122,9 +122,12 @@ def probe(klarf_path, tiff_path=None, reveal=False, copy=False):
         return "\n".join(out)
 
     say("TIFF    : %s  (%s)" % (_mask(tif, reveal), _size(tif)))
-    npages = t.run("tiff_index.n_pages", lambda: tiff_index.n_pages(tif))
+    # **載入已經不做這件事了**（2026-08-20）。留在報告裡是因為它是「這台機器
+    # 走完整條 IFD 鏈要多久」的量尺 —— 跑整批仍然會逐頁走過去。
+    npages = t.run("數頁數（載入不做，量尺用）",
+                   lambda: tiff_index.n_pages(tif))
     say("          %s 頁" % npages)
-    depths = t.run("tiff_index.bit_depths", lambda: tiff_index.bit_depths(tif))
+    depths = t.run("bit_depths（前幾頁）", lambda: tiff_index.bit_depths(tif))
     say("          位元深度（前幾頁）：%s" % depths)
     head = t.run("read_tiff_pages(前 2 頁)",
                  lambda: tiff_index.read_tiff_pages(tif, max_pages=2)[0])
@@ -166,7 +169,7 @@ def probe(klarf_path, tiff_path=None, reveal=False, copy=False):
         try:
             local = os.path.join(tmp, "local" + os.path.splitext(tif)[1])
             t.run("複製到本機", lambda: shutil.copyfile(tif, local))
-            t.run("n_pages（本機那份）", lambda: tiff_index.n_pages(local))
+            t.run("數頁數（本機那份）", lambda: tiff_index.n_pages(local))
             t.run("bit_depths（本機那份）", lambda: tiff_index.bit_depths(local))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -179,6 +182,9 @@ def probe(klarf_path, tiff_path=None, reveal=False, copy=False):
         "解法是把索引快取起來／先複製到本機。")
     say("  · 「讀一顆的影像」很慢 → 那不是載入的問題，是每一顆都會付一次的成本"
         "（批次會放大 N 倍）。")
+    say("  · 「數頁數」很慢但「load_dataset」很快 → 那是正常的：載入已經不數頁數了"
+        "（2026-08-20）。那個數字是「走完整條 IFD 鏈」的量尺 —— 跑整批仍然會"
+        "逐頁走過去，只是跟讀像素混在一起攤掉。")
     return "\n".join(out)
 
 

@@ -301,15 +301,25 @@ def load_dataset(klarf_path, tiff_path=None,
     imap = None
     if tiff is not None:
         try:
-            npages = tiff_index.n_pages(tiff)
+            note = _bit_depth_warning(tiff)
         except (OSError, ValueError) as e:
             warnings.append(f"Could not index TIFF {tiff}: {e}")
             tiff = None
         else:
-            note = _bit_depth_warning(tiff)
             if note:
                 warnings.append(note)
-            imap = doc.defect_image_map(npages)
+            # **不問頁數**（2026-08-20）。問一次頁數＝把整條 IFD 鏈走完，而使用
+            # 者實測那在網路碟上是 106 秒（30962 頁）—— 載入的 115 秒裡有 106 秒
+            # 是這一行。
+            #
+            # 而它換到的東西比想像中少：``defect_image_map`` 拿頁數只做兩件事，
+            # 一是決定 IMAGELIST 是 0-based 還是 1-based，二是「ids 裝不裝得進
+            # 這個檔」。第一件**給不給頁數的結論一模一樣**（兩條路都是
+            # ``base = 0 if lo == 0 else 1``，見 `klarf_core.defect_image_map`）；
+            # 第二件現在由 `tiff_index.read_page` 在真的讀到那一頁時回答，而且
+            # 那句話更明確（「第 N 頁超出範圍，這個檔有 M 頁」）——比安靜地改用
+            # sequential 對映**更難忽略**。
+            imap = doc.defect_image_map(None)
             if imap["mode"] is None:
                 warnings.extend(imap["notes"])
                 imap = None
