@@ -51,7 +51,7 @@ from ..export import klarf_out, overlay
 from ..export import report as export_report
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ADC, GROUP_OUTPUT, ParamSpec, Step, StepError, register_step,
+    CATEGORY_BATCH, GROUP_OUTPUT, ParamSpec, Step, StepError, register_step,
 )
 
 
@@ -65,7 +65,10 @@ class _OutputStep(Step):
     症狀是「這張卡下面居然接得上東西」。
     """
 
-    category = CATEGORY_ADC
+    # **整批那一層**（F17-③）。以前這裡填 CATEGORY_ADC —— 不是因為這幾張卡
+    # 在做 ADC，而是因為那個值剛好讓它們落在快取 checkpoint 之後。
+    # 快取邊界改成從宣告推導之後，這一格可以講實話了。
+    category = CATEGORY_BATCH
     group = GROUP_OUTPUT
     is_batch = True
     reads: List[str] = []

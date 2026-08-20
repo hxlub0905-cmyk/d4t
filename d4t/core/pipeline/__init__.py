@@ -8,6 +8,7 @@ from __future__ import annotations
 from .context import Context, ContextError, BatchContext
 from .step import (
     CATEGORY_ADC,
+    CATEGORY_BATCH,
     CATEGORY_ALGO,
     CATEGORY_IMAGE,
     ParamError,
@@ -48,7 +49,7 @@ __all__ = [
     # step
     "Step", "ParamSpec", "ParamError", "StepError",
     "register_step", "get_step", "list_steps", "REGISTRY",
-    "CATEGORY_IMAGE", "CATEGORY_ALGO", "CATEGORY_ADC",
+    "CATEGORY_IMAGE", "CATEGORY_ALGO", "CATEGORY_ADC", "CATEGORY_BATCH",
     # recipe
     "Edge", "Recipe", "RecipeNode", "ScoreSpec", "Issue",
     "validate", "execution_order", "RecipeError",

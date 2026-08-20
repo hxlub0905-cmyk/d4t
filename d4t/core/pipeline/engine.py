@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 from .context import Context
 from .expression import parse_expression
 from .recipe import Recipe, RecipeError, execution_order
-from .step import CATEGORY_IMAGE, REGISTRY, Step, StepError
+from .step import REGISTRY, Step, StepError
 
 __all__ = ["StepTrace", "DefectResult", "run_defect", "run_defect_cached",
            "run_dataset", "image_segment_signature", "result_to_json_dict"]
@@ -513,13 +513,51 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
 # ---------------------------------------------------------------------------
 # M2：影像段 checkpoint（signature）與快取續跑
 # ---------------------------------------------------------------------------
+def _writes_an_image(step_cls: Optional[Type[Step]],
+                     params: Dict[str, Any]) -> bool:
+    """這張卡會不會寫出影像流 —— **快取邊界的唯一判準**（F17-③）。
+
+    看 ``resolve_writes``（param 相依的宣告）而不是 ``category``（手填的標籤），
+    理由見 :func:`image_segment_signature` 的說明。宣告算不出來時回 False：
+    checkpoint 只會**往前**，而往前的後果是少快取一段（慢），往後的後果是
+    **拿到不該快取的東西**（錯）。
+
+    ⚠ **一定要先 ``validate_params``**（第一版漏了，測試當場抓到）。
+    recipe 裡的節點只存使用者填過的鍵，沒填的靠 ParamSpec 的預設值 —— 而
+    ``resolve_writes`` 拿到一份缺鍵的 dict 時會回空，於是一張正常的 Enhance
+    卡被判成「不吐影像」，checkpoint 整個往前縮到只剩 Load。症狀是**改接線
+    重跑數字沒動**（那條線落在快取段之外，簽章看不見它）——
+    正是 F9-8 修過的那一個坑。
+    """
+    if step_cls is None:
+        return False
+    try:
+        p = step_cls.validate_params(dict(params or {}))
+    except Exception:              # noqa: BLE001 — 壞參數在執行時才該爆
+        p = dict(params or {})
+    try:
+        return bool(step_cls.resolve_writes(p))
+    except Exception:              # noqa: BLE001
+        return False
+
+
 def image_segment_signature(recipe: Recipe, kind: str,
                             registry: Optional[Dict[str, Type[Step]]] = None
                             ) -> Tuple[str, int]:
     """算出 ``kind`` route 的影像段簽章與 checkpoint 索引。
 
-    checkpoint 索引 = 執行順序中「最後一個 enabled 且 category==image 的節點」
+    checkpoint 索引 = 執行順序中「最後一個 enabled 且**會寫出影像流**的節點」
     的下一個位置；沒有影像段節點 → 0（快取沒意義）。
+
+    ⚠ **判準是宣告，不是標籤**（F17-③，2026-08-20）。以前這裡問的是
+    ``category == CATEGORY_IMAGE`` —— 一個手填的欄位，而它同時還管 validate 的
+    分段與部分 UI。用它決定快取邊界的後果是 **category 被當成定位手段**：
+    五張 Output 卡的 category 曾經是 ``CATEGORY_ADC``，而它們跟 ADC 毫無關係,
+    填那個值只是為了落在 checkpoint 之後。
+    現在直接問這張卡「你會不會寫出影像流」（``resolve_writes``）——
+    那正是「快取住的是什麼」的定義，而且它是卡片本來就要宣告的東西。
+    26 張卡裡兩種判準只有 ``snr_map`` 不一致（它 category 是 algo 但吐影像），
+    而那一張本來就該在影像段裡：它產出的圖現在也快取得到了。
     簽章 = checkpoint 前所有 enabled 節點的
     ``[(node_id, step_key, sorted-param-items), ...]`` + **落在這一段裡的線**
     + kind 的穩定 JSON 字串（params 先過 ``validate_params`` 正規化：帶預設值、
@@ -544,8 +582,7 @@ def image_segment_signature(recipe: Recipe, kind: str,
         node = recipe.nodes.get(nid)
         if node is None or not node.enabled:
             continue
-        step_cls = registry.get(node.step)
-        if step_cls is not None and step_cls.category == CATEGORY_IMAGE:
+        if _writes_an_image(registry.get(node.step), node.params):
             ckpt = i + 1
 
     sig_nodes: List[List[Any]] = []

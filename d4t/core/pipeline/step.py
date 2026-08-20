@@ -8,10 +8,17 @@
 
 新算法 = 新 class + ``@register_step``，UI 與引擎零修改。
 
-分類（三段式，見 master plan §5）：
+分類（見 master plan §5）—— **這張卡吐什麼型別**：
 - ``CATEGORY_IMAGE``  影像段（把圖變乾淨；寫 images）
 - ``CATEGORY_ALGO``   算法段（從圖量出數字；寫 features）
-- ``CATEGORY_ADC``    判定段（score / bin / 輸出）
+- ``CATEGORY_ADC``    判定段（score / bin）
+- ``CATEGORY_BATCH``  整批那一層（跑完全部才跑一次；F17-③）
+
+⚠ **``category`` 不再決定快取邊界**（F17-③，2026-08-20）。以前 checkpoint 問的
+是 ``category == CATEGORY_IMAGE``，於是它被當成**定位手段**用：五張 Output 卡
+的 category 曾經是 ``CATEGORY_ADC``，而它們跟 ADC 毫無關係 —— 填那個值只是為了
+落在 checkpoint 之後。現在快取邊界由 ``resolve_writes``（會不會吐影像流）推導
+（`engine._writes_an_image`），category 只剩它字面上的意思。
 """
 from __future__ import annotations
 
@@ -28,6 +35,10 @@ from .curve import CurveError, format_curve, parse_curve
 CATEGORY_IMAGE = "image"
 CATEGORY_ALGO = "algo"
 CATEGORY_ADC = "adc"
+#: 整批那一層（F17-③）：跑完全部 defect 之後才跑一次的卡（Output 段那五張）。
+#: 它們以前借用 ``CATEGORY_ADC`` —— 不是因為它們在做 ADC，而是因為那個值剛好
+#: 讓它們落在快取 checkpoint 之後。現在那件事由宣告推導，這個值可以講實話了。
+CATEGORY_BATCH = "batch"
 
 # --------------------------------------------------------------------------- #
 # 流程階段（F7-3）—— 卡片庫的分組依據
@@ -87,7 +98,7 @@ GROUP_OUTPUT = "output"
 GROUP_ORDER = (GROUP_INPUT, GROUP_ENHANCE, GROUP_REGION, GROUP_MEASURE,
                GROUP_ALGO, GROUP_COMPARE, GROUP_ADC, GROUP_OUTPUT)
 _GROUPS = GROUP_ORDER
-_CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC)
+_CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC, CATEGORY_BATCH)
 
 #: ``curve`` 是一個「值是控制點字串」的參數（見 ``pipeline/curve.py``）——
 #: 跟 ``image_key`` 一樣，型別上就是 str，但 UI 認得它、會給專用編輯器。
@@ -748,6 +759,8 @@ class Step(ABC):
             return GROUP_MEASURE
         if cls.category == CATEGORY_ADC:
             return GROUP_ADC
+        if cls.category == CATEGORY_BATCH:
+            return GROUP_OUTPUT
         return GROUP_ENHANCE
 
     @classmethod
