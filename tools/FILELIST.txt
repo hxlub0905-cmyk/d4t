@@ -60,7 +60,7 @@ d908fe6e0daf98a16f6fbc1115cefdd5641f5f57 d4t/core/steps/cd.py
 39bbc384b66e024f67200a76598d4f6f255e5100 d4t/core/steps/denoise.py
 93588a88b65e8b98525d7344246251b13f9da31b d4t/core/steps/feature_math.py
 00f877fe38f316bc2a74cb2659a2e5ac63b7055c d4t/core/steps/flatten.py
-ec10de7703f5934f69dcf4e18d02bef9a9a2dc68 d4t/core/steps/glv_stats.py
+c42ac8d47ceacad14c39ec9600d7377c6435a532 d4t/core/steps/glv_stats.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py

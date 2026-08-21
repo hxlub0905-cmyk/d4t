@@ -75,10 +75,13 @@ feature 名稱「照使用者列的寫」（別名不改名），數值一致。
 
 compare 算什麼（`algo/glv.compare_pixels`）
 -------------------------------------------
-`delta` / `ratio` / `percent` / `snr` / `tstat`。``snr`` 的公式是
-``(μ_T − μ_R) / σ_R`` —— 那是 e-beam 帶正負號的 SNR 慣例，而這個 repo 已經有
-兩個地方在用它（`algo.glv.group_snr`、`algo/snr`）。**不發明第三種寫法**：
-同一個名字在不同卡片上算出不同的東西，是最難發現的那種錯。
+**`snr` 的分母是框與框之間，而且不帶正負號**
+（``|stat_T − stat_R| / std(參照那一塊每一格的 stat)``）—— 使用者定調
+2026-08-21：「SNR 的定義全線幫我改成是 by box（by pixel 會太小），然後 SNR
+不會有負值，有負代表亮暗差異而已。」方向是 ``delta`` 的事，而 ``delta`` 照樣
+帶正負；參照那一塊少於兩格時，``snr`` / ``tstat`` **不寫**（`_too_thin` 那張表的第三欄）。
+公式只住在 `algo/glv.compare_pixels` 一份 —— 同一個名字在不同卡片上算出不同
+的東西，是最難發現的那種錯。
 
 """
 from __future__ import annotations
