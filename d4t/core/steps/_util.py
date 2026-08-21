@@ -976,6 +976,15 @@ class MultiSourceStep(Step):
     CURRENT_STREAM = "_stream"
     CURRENT_PREFIX = "_prefix"
 
+    #: 這一輪是**第幾個**區域（``region_list`` 裡的位置）。
+    #:
+    #: 為什麼非得由基底給：迴圈把 :data:`REGION` 換成了**當前那一個**區域名，
+    #: 所以子類再也數不出「這是第幾個」—— 它拿到的 ``roi`` 永遠只有一個值。
+    #: 而那個順序有用途：**顏色**。區域框、面板、影像上的標記都照它挑
+    #: `theme.REGION_COLORS`，各自從自己那邊數的話，"top,bot" 在一邊是 0/1、
+    #: 在另一邊（照名字排序）是 1/0，而顏色指錯區域比沒有顏色糟得多。
+    CURRENT_REGION_INDEX = "_region_index"
+
     def measure(self, ctx: Context, img, params: Dict[str, object]):
         """量一張影像，回 ``{特徵名: 值}``（回 ``None`` = 這條流沒有東西可記）。"""
         raise NotImplementedError
@@ -992,6 +1001,7 @@ class MultiSourceStep(Step):
                 one = dict(p, **{self.REGION: region}) if self.REGION else dict(p)
                 one[self.CURRENT_STREAM] = key
                 one[self.CURRENT_PREFIX] = self.full_prefix(p, key, region)
+                one[self.CURRENT_REGION_INDEX] = regions.index(region)
                 feats = self.measure(ctx, img, one)
                 if not feats:
                     continue

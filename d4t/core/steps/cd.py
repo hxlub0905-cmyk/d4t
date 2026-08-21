@@ -369,6 +369,20 @@ class CdMeasureStep(MultiSourceStep):
     #: ``ctx.meta`` 上放掃描線幾何的鍵（面板與影像疊圖都讀它）。
     META_KEY = "cd"
 
+    @classmethod
+    def _region_index(cls, p: Dict[str, Any]) -> int:
+        """這一輪量的是第幾個區域 —— **顏色的唯一出處**。
+
+        值由基底的迴圈給（`MultiSourceStep.CURRENT_REGION_INDEX`）：這裡拿到的
+        ``roi`` 已經被換成當前那**一個**區域，自己數不出來。而區域框走的是
+        `resolve_regions_in`，跟 `region_list` 同一個順序 —— 所以同一個區域在
+        框、在標記、在面板上是同一個顏色。
+        """
+        try:
+            return max(0, int(p.get(cls.CURRENT_REGION_INDEX, 0) or 0))
+        except (TypeError, ValueError):
+            return 0
+
     # ---- 影像上的標記（見 Step.overlay_marks）------------------------------ #
     @classmethod
     def overlay_marks(cls, ctx: Any, params: Dict[str, Any]) -> Any:
@@ -380,11 +394,15 @@ class CdMeasureStep(MultiSourceStep):
         notes = (getattr(ctx, "meta", None) or {}).get(cls.META_KEY) or {}
         lines: List[Any] = []
         points: List[Any] = []
+        labels: List[str] = []
         focus = -1
         for prefix in sorted(notes):
             note = notes[prefix] or {}
+            name = str(note.get("region") or "")
+            before = len(lines)
             if str(note.get("shape")) == SHAPE_BLOB:
                 focus = cls._blob_marks(note, lines, points, focus)
+                labels.extend([name] * (len(lines) - before))
                 continue
             segs = list(note.get("scan_lines") or [])
             edges = list(note.get("edges") or [])
@@ -396,7 +414,8 @@ class CdMeasureStep(MultiSourceStep):
                     focus = len(lines)
                 lines.append([tuple(pt) for pt in segs[i]])
                 points.append([tuple(pt) for pt in edges[i]])
-        return lines, points, focus
+            labels.extend([name] * (len(lines) - before))
+        return lines, points, focus, labels
 
     @staticmethod
     def _blob_marks(note: Dict[str, Any], lines: List[Any], points: List[Any],
@@ -584,6 +603,7 @@ class CdMeasureStep(MultiSourceStep):
         prefix = str(p.get(self.CURRENT_PREFIX, "") or "")
         ctx.meta.setdefault(self.META_KEY, {})[prefix] = {
             "shape": SHAPE_BLOB,
+            "region_index": self._region_index(p),
             "criterion": "threshold",
             "region": str(p.get("roi") or ""),
             "stream": str(p.get(self.CURRENT_STREAM, "") or ""),
@@ -702,6 +722,7 @@ class CdMeasureStep(MultiSourceStep):
             marks.append([point(ln.a, ln.offset), point(ln.b, ln.offset)])
         prefix = str(p.get(self.CURRENT_PREFIX, "") or "")
         note: Dict[str, Any] = {
+            "region_index": self._region_index(p),
             "axis": res.axis, "criterion": str(p["criterion"]),
             "target": res.target, "target_used": used,
             "region": str(p.get("roi") or ""),

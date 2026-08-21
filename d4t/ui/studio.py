@@ -4315,7 +4315,7 @@ class StudioWindow(QMainWindow):
         self._refresh_measure_marks()
 
     def measure_marks(self):
-        """選著那張卡要畫的量測標記 ``(lines, points, focus)``（F19）。
+        """選著那張卡要畫的量測標記 ``(lines, points, focus, labels)``（F19）。
 
         資料由**卡片自己**交出來（`Step.overlay_marks`）—— meta 的形狀是那張卡
         的事。這裡只問「現在選著的是誰」，所以整個 Measure 段共用同一條路。
@@ -4327,18 +4327,19 @@ class StudioWindow(QMainWindow):
         node = self.model.nodes.get(self.selected_node or "")
         ctx = getattr(getattr(self, "_last_result", None), "context", None)
         if node is None or ctx is None:
-            return [], [], -1
+            return [], [], -1, []
         try:
-            lines, points, focus = get_step(node.step).overlay_marks(
+            lines, points, focus, labels = get_step(node.step).overlay_marks(
                 ctx, node.params)
         except Exception:                  # noqa: BLE001 — 顯示用，不能擋畫面
-            return [], [], -1
-        return list(lines or []), list(points or []), int(focus)
+            return [], [], -1, []
+        return (list(lines or []), list(points or []), int(focus),
+                [str(v) for v in (labels or [])])
 
     def _refresh_measure_marks(self) -> None:
-        lines, points, focus = self.measure_marks()
+        lines, points, focus, labels = self.measure_marks()
         for view in (self.image_view, self.image_view_b):
-            view.set_marks(lines, points, focus)
+            view.set_marks(lines, points, focus, labels)
 
     def _focus_box_index(self, boxes: Sequence[Sequence[float]]) -> int:
         """哪一個框要畫成醒目的那一個 —— 離影像正中心最近的那個。

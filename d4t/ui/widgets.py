@@ -1212,6 +1212,8 @@ class ImageView(QWidget):
         self._marks: List[Any] = []
         self._mark_points: List[Any] = []
         self._mark_focus = -1
+        #: 每一條標記屬於哪一個具名區域（跟 ``_marks`` 等長；空字串 = 不分色）。
+        self._mark_labels: List[str] = []
         #: 量測尺按著時的那一條帶（axis, 起, 迄；影像像素）。見 :meth:`set_measure`。
         self._measure: Optional[Tuple[str, float, float]] = None
         #: 選取的卡片上那個「以像素為單位」的參數有多大（大小, 標籤）。
@@ -1360,7 +1362,8 @@ class ImageView(QWidget):
 
     def set_marks(self, lines: Optional[Sequence[Any]] = None,
                   points: Optional[Sequence[Any]] = None,
-                  focus: int = -1) -> None:
+                  focus: int = -1,
+                  labels: Optional[Sequence[str]] = None) -> None:
         """把**量測標記**疊在影像上（正規化座標）。
 
         ``lines`` 是 ``[[(x0, y0), (x1, y1)], …]``，``points[i]`` 是第 i 條線段
@@ -1375,6 +1378,11 @@ class ImageView(QWidget):
         資料由**卡片自己**交出來（`Step.overlay_marks`）：meta 的形狀是那張卡的
         事，UI 只負責畫。所以下一張量測卡不必再發明一套。
 
+        ``labels`` 是每一條標記屬於**哪一個具名區域**，而顏色**沿用框那一組的
+        順序**（:meth:`set_overlay` 已經排好的 ``_overlay_order``）—— 各自從
+        自己那邊數的話，同一塊區域的框是綠的、量它的那些線卻是橘的，而畫面上
+        沒有任何東西說得出它們是同一塊。沒給 labels 就整組畫 accent。
+
         兩條保險跟 :meth:`set_overlay` 一字不差：座標正規化（縮放平移、換一顆
         patch 都跟著走），而**長度對不上就整組不畫** —— 錯位的標記會指向錯的
         地方，而畫面上沒有任何東西透露那件事。
@@ -1383,13 +1391,28 @@ class ImageView(QWidget):
                 for a, b in (lines or []) if a is not None and b is not None]
         pts = [[(float(x), float(y)) for x, y in (grp or [])]
                for grp in (points or [])]
+        names = [str(v) for v in (labels or [])]
         self._marks = segs
         self._mark_points = pts if len(pts) == len(segs) else []
+        self._mark_labels = (names if len(names) == len(segs)
+                             else [""] * len(segs))
+        for n in self._mark_labels:
+            if n and n not in self._overlay_order:
+                self._overlay_order.append(n)
         self._mark_focus = int(focus)
         self.update()
 
     def clear_marks(self) -> None:
-        self.set_marks([], [], -1)
+        self.set_marks([], [], -1, [])
+
+    def mark_legend(self) -> List[Tuple[str, str]]:
+        """標記用到的 ``[(區域名, 顏色 hex), …]``。測試與狀態列讀這個。"""
+        index_of = {n: i for i, n in enumerate(self._overlay_order)}
+        out: List[Tuple[str, str]] = []
+        for n in self._mark_labels:
+            if n and n in index_of and n not in [k for k, _c in out]:
+                out.append((n, region_hex(index_of[n])))
+        return out
 
     def mark_count(self) -> int:
         """畫了幾條量測線。測試與狀態列讀這個，不去讀畫素。"""
@@ -1566,19 +1589,32 @@ class ImageView(QWidget):
         def at(pt) -> QPointF:
             return QPointF(ox + pt[0] * iw * s_, oy + pt[1] * ih * s_)
 
-        base = QColor(TOKENS["accent"])
-        faint = QColor(base)
-        faint.setAlpha(70)
+        index_of = {n: i for i, n in enumerate(self._overlay_order)}
+        plain = QColor(TOKENS["accent"])
+
+        def colour_of(i: int) -> QColor:
+            name = (self._mark_labels[i] if i < len(self._mark_labels) else "")
+            return (QColor(region_hex(index_of[name])) if name in index_of
+                    else plain)
+
         for i, (a, b) in enumerate(self._marks):
             focused = (i == self._mark_focus)
-            pen = QPen(base if focused else faint, 1.6 if focused else 1.0)
+            col = colour_of(i)
+            if not focused:
+                col = QColor(col)
+                col.setAlpha(70)
+            pen = QPen(col, 1.6 if focused else 1.0)
             pen.setCosmetic(True)
             p.setPen(pen)
             p.drawLine(at(a), at(b))
         p.setPen(Qt.NoPen)
         for i, grp in enumerate(self._mark_points):
             focused = (i == self._mark_focus)
-            p.setBrush(QBrush(base if focused else faint))
+            col = colour_of(i)
+            if not focused:
+                col = QColor(col)
+                col.setAlpha(70)
+            p.setBrush(QBrush(col))
             r = 2.6 if focused else 1.5
             for pt in grp:
                 p.drawEllipse(at(pt), r, r)

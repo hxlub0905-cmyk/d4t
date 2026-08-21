@@ -43,7 +43,8 @@ def measured(rows=40, **params):
 def test_the_card_hands_over_its_own_marks():
     """meta 的形狀是**那張卡的事** —— UI 不去猜它長什麼樣。"""
     ctx, p = measured()
-    lines, points, focus = get_step("cd_measure").overlay_marks(ctx, p)
+    lines, points, focus, labels = get_step("cd_measure").overlay_marks(
+        ctx, p)
     assert len(lines) == len(points) > 0
     assert 0 <= focus < len(lines)
     for (x0, y0), (x1, y1) in lines:                 # 正規化座標
@@ -57,7 +58,8 @@ def test_marks_are_thinned_but_the_represented_line_survives():
     """128 條疊在一張 128 px 的 patch 上是一片實心的網 —— 但代表那一條非留不可
     （面板上那張剖面圖畫的就是它，兩邊對不起來使用者就找不到）。"""
     ctx, p = measured(rows=120)
-    lines, _points, focus = get_step("cd_measure").overlay_marks(ctx, p)
+    lines, _points, focus, _labels = get_step(
+        "cd_measure").overlay_marks(ctx, p)
     assert len(lines) == MAX_DRAWN_LINES
     assert focus >= 0
 
@@ -66,8 +68,9 @@ def test_every_card_answers_the_marks_question():
     """預設什麼都不畫，所以既有的卡一張都不用動。"""
     ctx = Context(images={"test": np.zeros((8, 8), np.float32)})
     for key, cls in REGISTRY.items():
-        lines, points, focus = cls.overlay_marks(ctx, {})
+        lines, points, focus, labels = cls.overlay_marks(ctx, {})
         assert list(lines) == [] and list(points) == [] and focus == -1, key
+        assert list(labels) == [], key
 
 
 def test_image_view_draws_marks_and_guards_against_mismatch(qapp):
@@ -236,7 +239,8 @@ def measured_blob(img=None, **params):
 def test_the_outline_and_the_chord_become_marks():
     """**沒有新的 UI 原語** —— 一圈輪廓是一串線段，最長的弦是第 N+1 條。"""
     ctx, p = measured_blob()
-    lines, points, focus = get_step("cd_measure").overlay_marks(ctx, p)
+    lines, points, focus, labels = get_step("cd_measure").overlay_marks(
+        ctx, p)
     assert len(lines) == len(points) > 3
     assert focus == len(lines) - 1                 # 弦畫成醒目的那一條
     assert len(points[focus]) == 2
@@ -249,7 +253,8 @@ def test_the_outline_and_the_chord_become_marks():
 def test_nothing_measured_means_no_marks_at_all():
     """「框還在但標記沒了」= 這一顆量不出來，而那是最有用的一個狀態。"""
     ctx, p = measured_blob(canvas(64))
-    lines, points, focus = get_step("cd_measure").overlay_marks(ctx, p)
+    lines, points, focus, labels = get_step("cd_measure").overlay_marks(
+        ctx, p)
     assert lines == [] and points == [] and focus == -1
 
 
@@ -440,3 +445,77 @@ def test_the_profile_zooms_to_the_pair_it_measured(qapp):
 def test_a_profile_with_no_pair_falls_back_to_the_whole_line(qapp):
     insp = make_panel(qapp, *measured())
     assert insp._profile_window({}, 64) == (0, 63)
+
+
+# --------------------------------------------------------------------------- #
+# 顏色：一個具名區域一個顏色，而且到處都是同一個
+# --------------------------------------------------------------------------- #
+def test_the_panel_uses_the_region_palette_not_a_flat_accent(qapp):
+    """**同一塊區域在哪裡都是同一個顏色。**
+
+    這條規矩是 `GlvInspector._colour` 立下的（疊框、模板編輯器、GLV 面板共用
+    `theme.REGION_COLORS`）。CD 一開始整張畫 accent 藍 —— 於是同一塊區域在
+    GLV 面板上是綠的、在 CD 面板上是藍的、影像上的框又是綠的。
+    """
+    from d4t.ui.theme import region_hex
+
+    ctx, p = measured()
+    insp = make_panel(qapp, ctx, p)
+    assert insp.colour() == region_hex(0)
+
+    # 第二個區域拿第二個顏色 —— 而索引是**卡片**給的，不是面板自己數的
+    insp.meta = {"cd": {"b": dict(insp.note(), region_index=1)}}
+    assert insp.colour() == region_hex(1)
+
+
+def test_the_card_says_which_region_each_note_is(qapp):
+    """索引由卡片寫進 meta：兩邊各數各的話，"top,bot" 在一邊是 0/1、在另一邊
+    （照名字排序）是 1/0，而顏色指錯區域比沒有顏色糟得多。"""
+    cls = REGISTRY["cd_measure"]
+    p = cls.validate_params({"roi": "top,bot"})
+    ctx = Context(images={"test": line_block(rows=64, width=12.0,
+                                             blur=1.2).astype(np.float32)})
+    ctx.set_roi("top", (0.0, 4 / 64.0, 1.0, 12 / 64.0))
+    ctx.set_roi("bot", (0.0, 40 / 64.0, 1.0, 12 / 64.0))
+    notes = cls().run(ctx, p).meta["cd"]
+    # 參數寫的順序是 top,bot —— 而區域框也是照那個順序上色的
+    assert notes["top"]["region_index"] == 0
+    assert notes["bot"]["region_index"] == 1
+
+
+def test_marks_on_the_image_carry_their_region_colour(qapp):
+    """兩塊區域的掃描線要分得出來，而且**跟它們自己的框同一個顏色**。"""
+    from d4t.ui.theme import region_hex
+    from d4t.ui.widgets import ImageView
+
+    cls = REGISTRY["cd_measure"]
+    p = cls.validate_params({"roi": "top,bot"})
+    ctx = Context(images={"test": line_block(rows=64, width=12.0,
+                                             blur=1.2).astype(np.float32)})
+    ctx.set_roi("top", (0.0, 4 / 64.0, 1.0, 12 / 64.0))
+    ctx.set_roi("bot", (0.0, 40 / 64.0, 1.0, 12 / 64.0))
+    out = cls().run(ctx, p)
+    lines, points, focus, labels = cls.overlay_marks(out, p)
+    assert len(labels) == len(lines)
+    assert set(labels) == {"top", "bot"}
+
+    view = ImageView()
+    view.set_image(np.zeros((64, 64), np.uint8))
+    # 框先上色（studio 就是這個順序），標記沿用它排好的順序
+    view.set_overlay([(0.0, 0.06, 1.0, 0.19), (0.0, 0.62, 1.0, 0.19)],
+                     -1, ["top", "bot"])
+    view.set_marks(lines, points, focus, labels)
+    assert dict(view.mark_legend()) == {"top": region_hex(0),
+                                        "bot": region_hex(1)}
+    assert dict(view.overlay_legend()) == dict(view.mark_legend())
+
+
+def test_marks_without_labels_still_draw(qapp):
+    """沒有具名區域（量整張圖）就整組畫 accent —— 不是不畫。"""
+    from d4t.ui.widgets import ImageView
+
+    view = ImageView()
+    view.set_image(np.zeros((64, 64), np.uint8))
+    view.set_marks([[(0.0, 0.2), (1.0, 0.2)]], [[(0.3, 0.2), (0.7, 0.2)]], 0)
+    assert view.mark_count() == 1
+    assert view.mark_legend() == []

@@ -302,7 +302,7 @@ def test_meta_is_written_even_when_nothing_was_measured():
 def test_the_outline_becomes_marks_with_the_chord_focused():
     """**不需要任何新的 UI 原語** —— 一圈輪廓是一串線段，弦是第 N+1 條。"""
     out, p = run_blob(disc(d=20.0))
-    lines, points, focus = REGISTRY[CARD].overlay_marks(out, p)
+    lines, points, focus, _labels = REGISTRY[CARD].overlay_marks(out, p)
     assert len(lines) == len(points) > 3
     assert focus == len(lines) - 1                 # 弦畫成醒目的那一條
     assert len(points[focus]) == 2                 # 兩端各一個點

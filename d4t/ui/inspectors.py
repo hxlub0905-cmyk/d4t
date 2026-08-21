@@ -1843,6 +1843,22 @@ class CdInspector(Inspector):
         note = self.note()
         return "CD" if note is None else "CD · %s" % self.where()
 
+    def colour(self) -> str:
+        """這一份要畫成什麼顏色 —— **跟影像上那個區域的框同一個**。
+
+        既有的規矩（`GlvInspector._colour` 立下的）：一個具名區域一個顏色，
+        而疊框、模板編輯器、GLV 面板三個地方用同一組 `theme.REGION_COLORS`。
+        CD 一開始整張畫 accent 藍，於是**同一塊區域在 GLV 面板上是綠的、在
+        CD 面板上是藍的、而影像上的框又是綠的** —— 三個地方講同一件事，畫面上
+        卻看不出它們有關係。
+
+        索引由卡片給（``note["region_index"]``），不是這裡從自己那邊數的 ——
+        兩邊各數各的話，"top,bot" 在一邊是 0/1、在另一邊（照名字排序）是 1/0，
+        而**顏色指錯區域比沒有顏色糟得多**。
+        """
+        note = self.note() or {}
+        return region_hex(int(note.get("region_index", 0) or 0))
+
     def is_blob(self) -> bool:
         """這一顆走的是無方向那一支嗎（F19 第二批）。"""
         note = self.note() or {}
@@ -1983,7 +1999,7 @@ class CdInspector(Inspector):
             pen = QPen(QColor(TOKENS["text_disabled"]), 1.0, Qt.DashLine)
             p.setPen(pen)
             p.drawLine(QPointF(body.left(), y), QPointF(body.right(), y))
-        p.setPen(QPen(QColor(TOKENS["accent"]), 1.4))
+        p.setPen(QPen(QColor(self.colour()), 1.4))
         p.setBrush(Qt.NoBrush)
         p.drawPolyline(QPolygonF([at(i, values[i])
                                   for i in range(int(x0), int(x1) + 1)]))
@@ -1993,12 +2009,12 @@ class CdInspector(Inspector):
             return
         a, b = float(a), float(b)
         # 兩個交點：一條到底的點線 + 實心圓（「邊被判在這裡」）
-        p.setPen(QPen(QColor(TOKENS["accent_active"]), 1.0, Qt.DotLine))
+        p.setPen(QPen(QColor(self.colour()), 1.0, Qt.DotLine))
         for x in (a, b):
             vx = at(x, hi).x()
             p.drawLine(QPointF(vx, body.top()), QPointF(vx, body.bottom()))
         p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(QColor(TOKENS["accent"])))
+        p.setBrush(QBrush(QColor(self.colour())))
         for x in (a, b):
             centre = (level if level is not None
                       else values[max(0, min(n - 1, int(round(x))))])
@@ -2069,7 +2085,7 @@ class CdInspector(Inspector):
         # ±σ 墊成一條淡帶：**沒有它，一條很齊的線跟一條很糙的線長得一樣**
         # （橫軸是自動縮放的，3 px 的散布也會撐滿整格）。
         if sd > 0:
-            band = QColor(TOKENS["accent"])
+            band = QColor(self.colour())
             band.setAlpha(38)
             p.setPen(Qt.NoPen)
             p.setBrush(QBrush(band))
@@ -2081,7 +2097,7 @@ class CdInspector(Inspector):
         p.setPen(QPen(QColor(TOKENS["text_disabled"]), 1.0, Qt.DashLine))
         p.drawLine(QPointF(at(med, 0).x(), plot.top()),
                    QPointF(at(med, 0).x(), plot.bottom()))
-        p.setPen(QPen(QColor(TOKENS["accent"]), 1.2))
+        p.setPen(QPen(QColor(self.colour()), 1.2))
         p.setBrush(Qt.NoBrush)
         p.drawPolyline(QPolygonF([at(v, i) for i, v in enumerate(widths)]))
         p.setPen(QColor(TOKENS["text_secondary"]))
@@ -2111,7 +2127,7 @@ class CdInspector(Inspector):
         heights = [math.log1p(c) for c in counts]
         peak = max(heights) or 1.0
         bw = body.width() / float(len(counts))
-        faint = QColor(TOKENS["accent"])
+        faint = QColor(self.colour())
         faint.setAlpha(110)
         p.setPen(Qt.NoPen)
         p.setBrush(QBrush(faint))
@@ -2131,7 +2147,7 @@ class CdInspector(Inspector):
             x = at(note[key])
             p.drawLine(QPointF(x, body.top()), QPointF(x, body.bottom()))
         if note.get("level") is not None:
-            p.setPen(QPen(QColor(TOKENS["accent_active"]), 1.6))
+            p.setPen(QPen(QColor(self.colour()), 1.6))
             x = at(note["level"])
             p.drawLine(QPointF(x, body.top()), QPointF(x, body.bottom()))
         # ⚠ 這裡**不要**再印一次面積。第一版把 ``area %d px`` 右對齊在這一格的
@@ -2167,15 +2183,15 @@ class CdInspector(Inspector):
         def at(pt) -> QPointF:
             return QPointF(ox + pt[0] * scale, oy + pt[1] * scale)
 
-        fill = QColor(TOKENS["accent"])
+        fill = QColor(self.colour())
         fill.setAlpha(60)
-        p.setPen(QPen(QColor(TOKENS["accent"]), 1.3))
+        p.setPen(QPen(QColor(self.colour()), 1.3))
         p.setBrush(QBrush(fill))
         p.drawPolygon(QPolygonF([at(pt) for pt in pts]))
         p.setBrush(Qt.NoBrush)
         chord = [(float(x), float(y)) for x, y in (note.get("chord") or [])]
         if len(chord) == 2:
-            p.setPen(QPen(QColor(TOKENS["accent_active"]), 1.6))
+            p.setPen(QPen(QColor(self.colour()), 1.6))
             p.drawLine(at(chord[0]), at(chord[1]))
 
     def _paint_batch(self, p: QPainter, rect: QRectF, note: Dict[str, Any],
@@ -2206,7 +2222,7 @@ class CdInspector(Inspector):
         peak = max(bins) or 1
         bw = plot.width() / 20.0
         p.setPen(Qt.NoPen)
-        faint = QColor(TOKENS["accent"])
+        faint = QColor(self.colour())
         faint.setAlpha(110)
         p.setBrush(QBrush(faint))
         for i, c in enumerate(bins):
