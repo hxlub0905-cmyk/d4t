@@ -30,8 +30,11 @@ class RecipeModel:
         self.nodes: Dict[str, RecipeNode] = {}
         #: 顯式的節點連線（F7-6 畫布）。``node_order`` 仍然是執行順序，
         #: 但有 edges 時它由拓撲排序算出來，不再是「使用者加卡片的順序」。
-        #: 引擎那邊 ``execution_order`` 本來就是「route 相鄰對 ∪ edges」，
-        #: 所以把 route 寫成拓撲順序與 edges 併存，語意一致且向後相容。
+        #: ``execution_order`` 的邊**只**來自 ``edges``（F17-①）；route 的排列
+        #: 是 Kahn 的平手依據 —— 所以「把 route 寫成拓撲順序」仍然是對的，
+        #: 而且沒有線的卡片照排列跑，畫面與執行一致。
+        #: （這裡以前寫的是「引擎本來就是 route 相鄰對 ∪ edges」，F17-① 之後
+        #: 那句話不成立了。）
         #: 畫布上的線。F9-5b 起存的是 core 的 :class:`~d4t.core.pipeline.Edge`
         #: （帶埠），不再是一對節點 —— 埠決定**資料從哪來**，而不只是先後順序。
         self.edges: List[Edge] = []

@@ -24,12 +24,54 @@
 （快取切點、驗證順序）。**使用者看到的**分組是另一個軸 `Step.group`：
 
 ```
-Input → Enhance → Region → Compare → Measure → ADC
+Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output
 ```
+
+（F16，2026-08-20 使用者定稿。`ROI` 的內部 id 仍是 `region` —— 顯示名與 id 是
+兩件事。）
 
 因為 category 描述的是「這張卡吐什麼型別」，不是「使用者想解決什麼問題」。
 兩個軸各有各的用途，不要合併。新卡片放哪一組：看它吃什麼、吐什麼
 （規則寫在 `pipeline/step.py` 的 `GROUP_*` 常數旁邊）。
+
+**這個順序不決定執行順序。** 執行是 `recipe.execution_order()` 的 DAG 拓撲排序
+—— 線怎麼拉就怎麼跑。`GROUP_ORDER` 排的是**卡片庫的分區順序**（連帶 rail 的
+上下順序與階段顏色），所以「Compare 排在 Measure 後面」不代表 `diff` 會晚一步
+產生：那件事由線保證。
+
+### 執行順序只有一個家：線（F17-①，2026-08-20）
+
+⚠ **上面那句話在 2026-08-20 之前只對了一半，值得記住它錯在哪。** 舊的
+`execution_order` 除了 `edges` 之外，還把 **route 上相鄰的每一對也當成一條邊**：
+
+```python
+for a, b in zip(route, route[1:]):     # 沒有人拉過的線
+    pair_edges.add((a, b))
+```
+
+那串隱含邊構成一條走遍全部節點的鏈，所以執行順序**恆等於 route 順序** ——
+而 route 順序在畫布上就是卡片的左右位置。也就是說：**兩張沒有任何線相連的卡，
+誰先跑由使用者把它拖到哪裡決定**，而畫面上完全看不出來。
+
+d4t 因此不是純 DAG 引擎，是「**有序清單 ＋ 補充的線**」：UI 照純 DAG 畫，引擎不
+照純 DAG 跑。那個落差是好幾件事的共同根源 —— 特徵靠 route 順序（「後面的贏」）、
+Output 卡靠 route 位置、`_late_normalize` / `_uneven_treatment` 的 history 也靠它。
+
+現在邊**只**來自 `recipe.edges`，route 的排列退成 Kahn 的平手依據（排版，不是
+語意）。拿掉隱含邊**不改變任何一份跑得起來的 recipe 的順序**（證明見
+`execution_order` 的 docstring），唯一的行為差異是：一條「往回走」的線以前是
+cycle 錯誤，現在照線跑。
+
+`routes` 因此退化成「**這條 route 有哪些卡**」＋ 一個穩定的排序依據。
+
+⚠ 順序有**兩份**（`step.py` 的 `GROUP_ORDER` 與 `ui/widgets.py` 的
+`LibraryPanel.GROUPS`，後者多帶標題與副標），`tests/test_ui_f16_stages.py`
+把它們綁在一起。
+
+兩段的界線各有一條自動套用到 registry 的測試：
+**Algo 段的卡不吃影像流**（`resolve_reads()` 恆為空 —— 使用者：「measure 是量出
+數值來，Algo 是拿這些 feature 去做更 custom 的處理」）、
+**Output 段的卡是 end point**（`resolve_writes()` 與 `resolve_features()` 都是空的）。
 
 UI 三段分色（影像=藍 `#6f93b5`／算法=橙 `#c06a1d`／判定=紫 `#8a6fb5`）。
 這個分類不是裝飾 —— 它同時是 `Step.category`、快取切點、recipe 驗證順序的依據。
@@ -99,15 +141,14 @@ d4t/
 │   ├── scope.py             #   產品範圍開關：四種輸入（patch/rsem/stack/folder，F11 Input-3）
 │   ├── viewmodel.py         #   RecipeModel（Qt-free，可 headless 測；含 edges）
 │   ├── canvas.py            #   節點畫布（n8n 式；F7-6，純 UI，引擎零改動）
-│   ├── results.py           #   Results 視窗：直方圖 + Gallery + 輸出（F7-5）
+│   ├── results.py           #   Results 視窗：直方圖 + Gallery + 整批入口（F7-5）
 │   ├── region_check.py      #   區域跨顆檢視：框畫在 N 顆縮圖上（F7-11）
 │   ├── template_dialog.py   #   從大圖疊 Golden Cell 模板（F7-12；模板存進 recipe）
 │   ├── inspectors.py        #   每張卡自己的儀表（F7-17；依 Step.key 註冊）
 │   ├── theme.py widgets.py  #   主題 token + 資料驅動元件 + 自繪圖示
 │   ├── gallery.py           #   同屏比多顆（虛擬捲動，撐 10k+）
 │   ├── welcome.py           #   首啟導覽 + 範例 recipe 庫對話框
-│   ├── export_dialog.py     #   輸出精靈（寫回前一定先預覽變更）
-│   ├── workers.py           #   載入/預覽(請求合併)/試跑 背景執行緒
+│   ├── workers.py           #   載入/預覽(請求合併)/試跑/寫出 背景執行緒
 │   └── studio.py app.py     #   主視窗 + 進入點
 ├── tests/                   # 1250+ 個測試，全部用合成資料
 │   └── fixtures/recipes/    #   e2e 用的最小 recipe（**測試用，不是教學範例**）

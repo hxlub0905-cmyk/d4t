@@ -278,20 +278,29 @@ ATTACHMENTS = (...)              # 掛在已載入 lot 上的附加檔（GLAS �
 | 使用者說的 | 處置 | 代價 |
 |---|---|---|
 | 「之後真需要我再回來」（`align`）| **收起來**：卡片庫看不到，`get_step` 拿得到、舊 recipe 照跑、黃金值不動 | 加一個字串 |
-| 「不需要這功能」（`cell_period`）| **刪掉**：`REGISTRY` 裡沒有，舊 recipe 開起來是一條 `unknown-step` | 依賴它的 fixture / 黃金值要一起處理 |
+| 「不需要這功能」（`cell_period`）／「完全沒用」（`pattern_ref`）| **刪掉**：`REGISTRY` 裡沒有，舊 recipe 開起來是一條 `unknown-step` | 依賴它的 fixture / 黃金值要一起處理 |
 | 「拿回來 不過要改名字」（`golden_cell` → `pattern_ref`）| **改名**：要一道遷移 | key **加上**它寫出來的 feature 名（那些會被打進分數表達式）—— 只換一半等於沒換 |
+| 「名字剪短一點」（`CD measure` → `CD`）| **只改 `label`** | 零：`key` 是 recipe 的鍵、feature 名是表達式的變數名，兩者都不准動 |
 
-同一張卡（`pattern_ref`）在同一天走完了**刪掉 → 量代價 → 要回來 → 改名 → 收起來**
-五步。最後一步的理由是它沒事做了：它被期待的「單張影像找 ROI」那件事
-**Template 已經在做**（量過，見 `docs/plans/F11-phase2-features.md` §3.3.20）。
-**這一次是收起來不是刪掉** —— 它刪過一次、代價量過（rsem route 24/24 → 12/24），
-而且 fixture 的 rsem route 正用著它。
+同一張卡（`pattern_ref`）走完了**刪掉 → 量代價 → 要回來 → 改名 → 收起來 →
+刪掉**六步，最後一步是 2026-08-20（F16，使用者：「完全沒用，請直接拿掉」）。
 
-**不確定的時候先收起來**：成本是零，回復的成本是拿掉一個字串。
+**而這一次代價真的付了**，值得記住價差長什麼樣：
+
+| | 收起來（2026-08-18） | 刪掉（2026-08-20） |
+|---|---|---|
+| 動到什麼 | 一個字串 | 卡片、測試、fixture 的 rsem route、一組黃金值 |
+| rsem route 的準確率 | 24/24（照跑）| **每一顆都判 bin 0**（seed 11/3/21 皆 12/24，而那 12 顆正好是沒有缺陷的那些）|
+| 那條 route 還證明什麼 | 「單張影像也判得出缺陷」 | 只剩「跑得完、算得出分數」|
+
+**不確定的時候先收起來**：成本是零，回復的成本是拿掉一個字串。使用者確定之後
+再刪 —— 上面那張表就是「確定」值多少錢。
 
 > ⚠ **`d4t/core/algo/period.py` 與 `algo/golden.py` 都不要刪。**
-> 兩支都還有呼叫者（`steps/pattern_ref.py`、`algo/template.py`），但 2026-08-18
-> 有一小時它們一個都沒有 —— 那正是這種模組被當成死碼順手清掉的時候。
+> `pattern_ref` 走了之後**呼叫者只剩 `algo/template.py` 一個**（疊 Golden Cell
+> 模板要 `stack_cells` 與 `estimate_period` / `choose_origin`）。2026-08-18
+> 有一小時它們一個呼叫者都沒有 —— 那正是這種模組被當成死碼順手清掉的時候，
+> 而「只剩一個」離那個狀態只有一步。
 > `estimate_period` / `choose_origin` 的相位搜尋是之後做 **pattern-frame ROI**
 > 的唯一工具（patch 是以 defect 為中心裁切的，晶格相位逐顆不同；見
 > `docs/history/plans/F7-canvas-and-taxonomy.md` §4）。

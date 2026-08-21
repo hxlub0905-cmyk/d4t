@@ -75,7 +75,7 @@ def ds(synlot):
     return d
 
 
-def make_recipe(snr_threshold: float = 200.0, search_radius: int = 8) -> Recipe:
+def make_recipe(cd_prefix: str = "", search_radius: int = 8) -> Recipe:
     """die-to-die 節點組（同 tests/fixtures/recipes/die_to_die_basic.json）。"""
     nodes = {
         "load": RecipeNode("load", "load_patch", {}),
@@ -89,7 +89,12 @@ def make_recipe(snr_threshold: float = 200.0, search_radius: int = 8) -> Recipe:
         "dn": RecipeNode("dn", "denoise",
                          {"streams": "diff", "method": "median", "ksize": 3}),
         "snr": RecipeNode("snr", "snr_map", {"window": 15, "exclude_border": 8}),
-        "cd": RecipeNode("cd", "cd_measure", {"source": "diff"}),
+        # `cd_prefix` 落在**算法段**（checkpoint 之後）—— 改它不該讓影像段
+        # 重算。以前這個位置是一個叫 `snr_threshold` 的參數，而它**沒有被任何
+        # 節點用到**：兩份 recipe 其實一模一樣，於是「簽章不變」是拿一份 recipe
+        # 跟自己比，一條什麼都沒證明的測試（F17-③ 發現）。
+        "cd": RecipeNode("cd", "cd_measure",
+                         {"source": "diff", "output_prefix": cd_prefix}),
         "glv": RecipeNode("glv", "glv_stats",
                           {"source": "diff",
                            "metrics": "glv_max,glv_q99,glv_mean"}),
@@ -212,12 +217,18 @@ def test_cache_miss_then_hit_bit_identical(ds, synlot, tmp_path):
 # 3. 改「算法段」參數：簽章不變 → 全 hit，結果與 fresh full run 一致
 # ---------------------------------------------------------------------------
 def test_algo_param_change_keeps_cache(ds, synlot, tmp_path):
-    rec_a = make_recipe(snr_threshold=200.0)
-    rec_b = make_recipe(snr_threshold=180.0)
+    rec_a = make_recipe(cd_prefix="")
+    rec_b = make_recipe(cd_prefix="cd2")
+    assert rec_a.nodes["cd"].params != rec_b.nodes["cd"].params, \
+        "這條測試的前提是「算法段的參數真的變了」"
     sig_a, ck_a = image_segment_signature(rec_a, KIND)
     sig_b, ck_b = image_segment_signature(rec_b, KIND)
     assert sig_a == sig_b
-    assert ck_a == ck_b == 6      # load, norm_ref, norm, align, sub, dn 之後
+    # load, norm_ref, norm, align, sub, dn, **snr** 之後（F17-③）。
+    # checkpoint 現在問的是「這張卡會不會寫出影像流」而不是它的 `category`
+    # 標籤 —— 而 `snr_map` 是 `algo` 卻真的吐一條 `snr_map` 影像流。它因此
+    # 落進影像段，那張圖從此也快取得到（以前每一顆都重算）。
+    assert ck_a == ck_b == 7
 
     token = dataset_token(synlot["klarf"])
     cache = StageCache(str(tmp_path / "cache"))
@@ -458,7 +469,7 @@ class _FakeItem:
 def test_feature_ownership_survives_a_cache_hit(ds, tmp_path):
     """撞名**跨越 checkpoint** 時，冷跑與熱跑要算出一模一樣的東西。
 
-    F9-3 讓被蓋掉的特徵留下來（``<前一張卡的節點名>_<原名>``），而那件事靠的是
+    F9-3 讓被蓋掉的特徵留下來（F17-② 起前綴是**那條流的名字**），而那件事靠的是
     「誰產出了哪個特徵」這份帳。checkpoint 之前的節點在熱跑時**根本沒有執行**
     —— 帳如果沒跟著快照走，熱跑就不知道 ``glv_max`` 本來是誰的，於是**不會**
     救、少一個特徵。
@@ -507,8 +518,37 @@ def test_feature_ownership_survives_a_cache_hit(ds, tmp_path):
         # 遮蔽有效：align_dx 是後面那張卡的值
         assert cold.features["align_dx"] == 99.0
         # 被蓋掉的那份救得回來，而且**熱跑也要有**
-        assert "align_align_dx" in cold.features, sorted(cold.features)
+        # 前綴是 align 卡寫出來的那條流（``ref_aligned``），不是節點 id
+        # （F17-②）。節點 id 是 `align`，所以以前這個名字叫 `align_align_dx`。
+        assert "ref_aligned_align_dx" in cold.features, sorted(cold.features)
         _assert_same_features(cold.features, warm.features)
         assert cold.score == warm.score and cold.bin == warm.bin
     finally:
         REGISTRY.pop(key, None)
+
+
+# ---------------------------------------------------------------------------
+# F17-③：checkpoint 移到 snr_map 之後，冷跑仍然 == 熱跑
+# ---------------------------------------------------------------------------
+def test_the_moved_checkpoint_gives_the_same_numbers_hot_and_cold(ds, synlot,
+                                                                  tmp_path):
+    """`snr_map` 進了影像段 —— 它的輸出從此走快取，而那是這一項唯一的風險面。
+
+    快取住的東西多一條流，就多一次「熱跑拿到的跟冷跑不一樣」的機會
+    （F9-10 的那個坑就是這個形狀：快照少存了一份東西，只在分支時發作）。
+    所以這裡直接比：同一份 recipe，冷跑一次、帶著快取再跑一次，
+    **每一顆的每一個數字都要逐項相同**。
+    """
+    rec = make_recipe()
+    token = dataset_token(synlot["klarf"])
+    cold = [run_defect(rec, it, KIND) for it in ds.items]
+
+    cache = StageCache(str(tmp_path / "cache"))
+    for it in ds.items:                       # 先跑一次把快取寫滿
+        run_defect_cached(rec, it, KIND, cache, token)
+    assert cache.misses == N and cache.hits == 0
+
+    hot = [run_defect_cached(rec, it, KIND, cache, token) for it in ds.items]
+    assert cache.hits == N, "第二輪應該全 hit"
+    for a, b in zip(cold, hot):
+        _assert_same_result(a, b)

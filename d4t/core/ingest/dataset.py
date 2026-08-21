@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -475,3 +475,88 @@ def load_folder(folder) -> Dataset:
     if not items:
         warnings.append(f"No image files found in folder: {d}")
     return Dataset(kind="folder", klarf=None, items=items, warnings=warnings)
+
+
+# --------------------------------------------------------------------------- #
+# KLARF 欄位 → DefectItem.fields（F15 給第二份用，F16 起 main 也用）
+# --------------------------------------------------------------------------- #
+#: 這兩支**住在這裡**而不是 `ingest/pair_source.py`：它們問的是「一份 Dataset
+#: 的 KLARF 有哪些欄、把哪幾欄複製進每一顆」——跟配不配對無關。F15 先在配對那
+#: 一支寫出來，F16 讓 main 也要用，於是它們搬回自己的家（`pair_source` 仍然
+#: re-export，呼叫端一個字都不用改 —— 那是搬家，不是複製一份）。
+
+def columns_of(dataset: Any) -> List[str]:
+    """這一份 KLARF 有哪些欄（大寫）。沒有 KLARF 就是空的。
+
+    UI 拿它當 `carry` 那一格的選單 —— **欄名程式知道，就不該讓使用者用打的**
+    （同 `ParamForm` 的 `stream_choices` / `region_choices`）。
+    """
+    doc = getattr(dataset, "klarf", None)
+    if doc is None:
+        return []
+    return [str(c).upper() for c in (getattr(doc, "defect_columns", None) or [])]
+
+
+def fill_fields(dataset: Dataset,
+                columns: Optional[Sequence[str]] = None) -> int:
+    """把每一顆的 KLARF 欄位填進 ``DefectItem.fields``（回填了幾欄）。
+
+    **兩份都會做，而且都只帶被點名的那幾欄。** F15 只有掛上來的第二份會填
+    （`carry` 要讀的是配到那一顆的分數欄）；F16 起 main 那一份也填 —— 使用者要
+    「利用 feature 內數值資料**跟原始 klarf 帶的資訊**去做分類」，而那些欄在此
+    之前進不了 pipeline。規則兩邊一樣：**沒被點名的欄一欄都不帶**（見下面
+    ``columns``），所以預設什麼都不填的 recipe 一個位元組都沒多帶。
+
+    ``columns`` 是**只要這幾欄**（大小寫不拘）；``None`` = 全部。
+    為什麼要這個參數：raw data 的 lot 是幾十萬顆，×24 欄字串是幾百 MB 的複製，
+    而其中 22 欄從來沒有人 `carry`。這幾欄要進 worker（items 會被 pickle
+    過去），所以它同時是記憶體與 pickle 的成本。``None`` = 全帶，那是 CLI 與
+    測試的路；UI 與 recipe 走的一律是「只帶點名的那幾欄」。
+
+    沒有 KLARF（folder / stack）→ 一欄都沒有，回 0。那不是錯誤，只是
+    `carry` 在這種資料上沒有東西可帶。
+    """
+    doc = getattr(dataset, "klarf", None)
+    if doc is None:
+        return 0
+    cols = columns_of(dataset)
+    if not cols:
+        return 0
+    want = None if columns is None else {str(c).strip().upper()
+                                         for c in columns if str(c).strip()}
+    keep = [(i, c) for i, c in enumerate(cols) if want is None or c in want]
+    rows = list(getattr(doc, "defects", None) or [])
+    for item in dataset.items:
+        r = int(getattr(item, "klarf_row", -1))
+        if not (0 <= r < len(rows)):
+            item.fields = {}
+            continue
+        row = rows[r]
+        # **每次都整個換掉**，不是更新 —— 少填一欄的時候舊的那一份還留著的話，
+        # 「這一欄現在還在不在」就有兩個答案（而卡片信的是 `fields`）。
+        item.fields = {c: (str(row[i]) if i < len(row) else "")
+                       for i, c in keep}
+    return len(keep)
+
+
+def missing_columns_of(dataset: Any,
+                       columns: Optional[Sequence[str]]) -> List[str]:
+    """``columns`` 裡**這一份根本沒有**的那幾欄（大寫，保留順序）。
+
+    為什麼在這裡問而不是等卡片跑：這裡手上有 KlarfDoc，所以答得出「那它有哪些
+    欄」——而卡片手上只有複製過去的那幾欄（`fill_fields` 的 ``columns``），
+    它列出來的清單會是「你要的那幾欄」，不是「這一份有的那幾欄」。
+    打錯一個欄名的時候，後者才是使用者要看的東西。
+
+    （`ingest/pair_source.missing_columns` 是同一支，掛第二份時用；F16 起
+    main 那一份也要問同一個問題，所以它住在這裡。）
+    """
+    have = set(columns_of(dataset))
+    if not have:
+        return []
+    out: List[str] = []
+    for c in (columns or ()):
+        c = str(c).strip().upper()
+        if c and c not in have and c not in out:
+            out.append(c)
+    return out

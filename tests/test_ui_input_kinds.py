@@ -82,11 +82,12 @@ def test_the_single_image_cards_are_in_the_library_now(window):
     """單張那條路要有自己的載入卡與量測卡。
 
     2026-08-18：這一條原本點的是 `golden_cell` / `cell_period`，後來改點
-    `pattern_ref`。那一張當天傍晚也收進 `HIDDEN_STEPS` 了（見
-    `test_pattern_ref_is_hidden_but_still_runs`），所以現在點的是單張那條路
-    **真正在用**的四張：載入、找區域（大圖上鋪 ROI 也是它）、比兩塊區域、相減。
+    `pattern_ref` —— 而那一張 2026-08-20 刪掉了（見
+    `test_pattern_ref_is_gone_and_nothing_quietly_replaced_it`）。現在點的是
+    單張那條路**真正在用**的四張：載入、找區域（大圖上鋪 ROI 也是它）、
+    Gray level（`method="compare"` 就是以前的 Compare regions）、相減。
     """
-    for key in ("load_single", "roi_template", "roi_compare", "subtract"):
+    for key in ("load_single", "roi_template", "glv_stats", "subtract"):
         assert window.library.entry(key) is not None, key
     # `align` 曾經在這一列上。2026-08-18 使用者把它收起來了 ——
     # 見 test_align_is_hidden_but_still_runs。
@@ -153,33 +154,37 @@ def test_align_is_hidden_but_still_runs(window):
     assert window.model.add_step("align")             # 舊 recipe 也放得進來
 
 
-def test_pattern_ref_is_hidden_but_still_runs(window):
-    """使用者 2026-08-18：「請拿掉吧」——「收起來只是加一個字串」的那個拿掉。
+def test_pattern_ref_is_gone_and_nothing_quietly_replaced_it(window):
+    """使用者 2026-08-20（F16）：「Compare 中 pattern_ref 這項功能完全沒用，
+    請直接拿掉」——**這一次是刪掉，不是收起來**。
 
-    **它沒事做了**，而不是它壞了：它被期待的「單張影像找 ROI 的第三種方法」，
-    那件事 **Template 已經在做**（量過：1000×1000 → 625 個框，見
-    `tests/test_roi_template_full_image.py`）。剩下的唯一能力是「疊一張 ref 去
-    相減」，而使用者現在的 RSEM 路線是「Region 段圈區域 → Compare regions」，
-    用不到 ref。
+    這張卡走完了這個 repo 的四種下場：刪掉（`golden_cell`，2026-08-18 早上）→
+    量代價（rsem route 24/24 → 12/24）→ 要回來並改名（`pattern_ref`）→
+    收起來（同日晚間）→ **刪掉**（今天）。判準每一次都是使用者說的那句話。
 
-    **這一次是收起來不是刪掉**，而理由是硬的：這張卡刪過一次、代價量過
-    （rsem route 24/24 → 12/24）之後又被要回來；而且
-    `tests/fixtures/recipes/dual_route_basic.json` 的 rsem route 正用著它，
-    撐著一組黃金值 —— 刪掉 = 那份 recipe 開不起來 = 黃金值要重新定錨。
+    代價這一次**真的付了**：`dual_route_basic.json` 的 rsem route 因此重做成
+    「直接量單張影像」，而 `tests/test_e2e_dual_route.py` 的 rsem 斷言從準確率
+    改成「跑得完、算得出分數」。那個 24/24 的證據沒有了 —— 這一條連同它一起
+    釘住，免得哪天有人看到那份 fixture 以為它還在證明什麼。
     """
-    from d4t.core.pipeline import Recipe, get_step, validate
+    from d4t.core.pipeline import Recipe, validate
+    from d4t.core.pipeline.step import REGISTRY
 
-    assert "pattern_ref" in scope_mod.HIDDEN_STEPS
-    assert window.library.entry("pattern_ref") is None   # 卡片庫看不到
-    assert get_step("pattern_ref") is not None           # 引擎照樣認得
+    assert "pattern_ref" not in REGISTRY
+    assert "pattern_ref" not in scope_mod.HIDDEN_STEPS     # 不是收起來，是不在了
+    assert window.library.entry("pattern_ref") is None
 
-    # 而那份 fixture 照樣開得起來、照樣沒有錯 —— 那才是「收起來」的定義。
+    # 那份 fixture 照樣開得起來、照樣沒有錯 —— 但它已經不含這張卡。
     import os
     here = os.path.dirname(os.path.abspath(__file__))
     recipe = Recipe.load(os.path.join(here, "fixtures", "recipes",
                                       "dual_route_basic.json"))
-    assert any(n.step == "pattern_ref" for n in recipe.nodes.values())
+    assert not any(n.step == "pattern_ref" for n in recipe.nodes.values())
     assert not [i for i in validate(recipe, kind="rsem") if i.level == "error"]
+    # 而且沒有別的卡偷偷接手「造一張 ref」—— rsem 那條 route 現在就是沒有 ref。
+    assert not any("ref" in REGISTRY[n.step].resolve_writes(n.params)
+                   for n in recipe.nodes.values()
+                   if n.id in recipe.routes["rsem"] and n.step in REGISTRY)
 
 
 def test_the_hide_a_card_mechanism_still_works(window):
@@ -195,30 +200,26 @@ def test_the_hide_a_card_mechanism_still_works(window):
         s.HIDDEN_STEPS = keep
 
 
-def test_the_golden_cell_cards_are_gone_for_good():
-    """那兩個舊 key 都不在 registry 裡了，但**理由不一樣**。
+def test_the_golden_cell_family_is_gone_for_good():
+    """那一家的三個 key 現在一個都不在 registry 裡了。
 
-    2026-08-18 一天之內，同一支 `steps/golden.py` 的兩張卡走了兩條不同的路：
+    走過的路（時間序）：
 
-    * `cell_period` —— **刪掉**（使用者：「不需要這功能」）。
-    * `golden_cell` —— 先刪，看了代價的數字之後要回來，並**改名**成
-      `pattern_ref`（使用者：「那可能要拿回來 不過要改名字 不然會誤會」）。
+    * `cell_period` —— 2026-08-18 **刪掉**（使用者：「不需要這功能」）。
+    * `golden_cell` —— 同日先刪，看了代價的數字之後要回來並**改名**成
+      `pattern_ref`（「那可能要拿回來 不過要改名字 不然會誤會」），當晚收起來。
+    * `pattern_ref` —— 2026-08-20 **刪掉**（「完全沒用，請直接拿掉」）。
 
-    這一條測的是**兩種下場都要成立**：舊 key 一個都不在 registry 裡（所以卡片庫
-    上不會有第二個 Golden Cell），而改名的那一張要真的還在、而且舊 recipe 打得開
-    （遷移在 `tests/test_pattern_ref.py`）。收起來的那一種（`align`）是第三條路
-    —— 它 `get_step` 還拿得到，見 `test_align_is_hidden_but_still_runs`。
-
-    ⚠ 演算法一層從頭到尾沒動過：`algo/golden.py`（Template 卡與 `pattern_ref`
-    都在用）、`algo/period.py`（見下一條）。
+    ⚠ **演算法一層仍然沒動**，而且現在更容易被誤刪：`algo/golden.py` 與
+    `algo/period.py` 的呼叫者只剩 `algo/template.py` 一個（Template 卡疊
+    Golden Cell 模板時要用）。只剩一個呼叫者的模組正是最容易被當成死碼清掉的
+    那一種 —— 這一條與下一條 (`test_period_module_is_not_orphaned`) 是那張便利貼。
     """
     from d4t.core.pipeline.step import REGISTRY
     import d4t.core.steps  # noqa: F401
 
-    for key in ("golden_cell", "cell_period"):
+    for key in ("golden_cell", "cell_period", "pattern_ref"):
         assert key not in REGISTRY, key
-    assert "pattern_ref" in REGISTRY, "改名回來的那一張不見了"
-    assert REGISTRY["pattern_ref"].resolve_writes({}) == ["ref"]
 
     from d4t.core.algo import golden, template
     assert hasattr(golden, "stack_cells")

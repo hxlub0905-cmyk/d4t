@@ -7,7 +7,7 @@
 - ``labels``   整數 ROI label map（0=背景, 1..N；GLAS 契約 gray[labels==k]）。
 - ``features`` 扁平特徵區 —— **score 表達式的唯一變數空間**。
   任何卡塞進來的數字（CD、SNR、GLV、focus…）一視同仁。
-- ``meta``     診斷與雜項（nm_per_px、對位 dx/dy、fallback_reason、blob 清單…）。
+- ``meta``     診斷與雜項（nm_per_px、對位 dx/dy、fallback_reason…）。
 
 慣例：
 - Step 對同名影像流做 in-place 覆寫（linear 鏈的預設行為）；要保留舊圖就寫新 key。
@@ -23,6 +23,14 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 
+#: ``meta`` 裡放「每個特徵是哪張卡產出的」的鍵。
+#:
+#: 放在 meta 而不是 :class:`~d4t.core.pipeline.engine.DefectResult` 的新欄位，
+#: 是為了**不動序列化** —— `store/results.py` 的資料表、CSV 的欄位、KLARF 寫回
+#: 全部吃的是扁平的 ``features`` dict。
+FEATURE_OWNER_KEY = "feature_owner"
+
+
 class ContextError(RuntimeError):
     """步驟向 Context 要不存在的資源時拋出（訊息需列出現有 keys）。"""
 
@@ -34,6 +42,15 @@ class Context:
     labels: Optional[np.ndarray] = None
     features: Dict[str, float] = field(default_factory=dict)
     meta: Dict[str, Any] = field(default_factory=dict)
+    #: 現在正在跑的是哪一張卡（引擎每跑一張之前設好；F17-②）。
+    #:
+    #: **特徵的擁有者是在寫進來的當下記下的，不是事後推的。** 以前引擎是比對
+    #: 每張卡跑前跑後的 ``features`` dict 差異，再回推「這張卡產出了什麼」——
+    #: 而那份差異在「後面那張卡剛好算出一樣的值」時是空的（F9-3 踩過，見
+    #: `docs/PITFALLS.md` 的「把『要不要記錄』跟『值有沒有變』綁在一起」）。
+    #: 寫入當下就記，那個巧合就不存在了。
+    current_node: str = ""
+
     #: 記錄「這一步把某條影像流改成什麼樣」（F7-17，**預設關閉**）。
     #:
     #: Enhance 卡是就地改寫同一條流的（``test → test``），所以跑完之後「之前
@@ -202,11 +219,18 @@ class Context:
 
     # ---- features ---------------------------------------------------------
     def add_feature(self, name: str, value: Any) -> None:
-        """寫入一個特徵值（強制轉 float；NaN/inf 允許，由表達式層做安全處理）。"""
+        """寫入一個特徵值（強制轉 float；NaN/inf 允許，由表達式層做安全處理）。
+
+        **順便記下擁有者**（F17-②）：``current_node`` 是引擎在跑這張卡之前設好
+        的，所以「這個數字是誰算的」是**寫入當下的事實**，不是事後從 dict 的
+        差異回推出來的。
+        """
         v = float(value)
         if name in self.features:
             self.meta.setdefault("feature_overwrites", []).append(name)
         self.features[name] = v
+        if self.current_node:
+            self.meta.setdefault(FEATURE_OWNER_KEY, {})[name] = self.current_node
 
     def add_features(self, mapping: Dict[str, Any]) -> None:
         for k, v in mapping.items():
@@ -293,3 +317,66 @@ def _clipped(arr: "np.ndarray", low: bool) -> float:
         return 0.0
     hit = (a <= 0.5) if low else (a >= 254.5)
     return float(np.count_nonzero(hit)) / float(a.size)
+
+
+# --------------------------------------------------------------------------- #
+# 跨顆那一層（F16）
+# --------------------------------------------------------------------------- #
+@dataclass
+class BatchContext:
+    """一張**跨顆卡**看得到的東西：整批跑完之後的結果表。
+
+    為什麼需要一個新的 Context
+    --------------------------
+    :class:`Context` 是**一顆** defect 的（images / rois / features），而
+    ``run_defect`` 一顆一顆跑、從不 raise（鐵則 7）。所以任何「要看過整批才算
+    得出來」的東西現在都沒有地方放，而那不是一個需求，是四個：
+
+    * Output 的 CSV / KLARF / Report / HTML（一批一個檔案）
+    * 離群旗標（Tukey IQR、z-score —— 門檻由整批的分布決定）
+    * F15 欠的那份點對點 report（一顆一列的表 ＋ 整批的分布）
+    * ``H2H`` 的 ``expect_dx_px`` 建議值（整批取中位數）
+
+    先做機制，四個都便宜；不做機制，四個各自發明一套。
+
+    欄位
+    ----
+    ``rows``
+        每一顆的結果 dict（``result_to_json_dict`` 的產物：``defect_id`` /
+        ``ok`` / ``error`` / ``score`` / ``bin`` / ``features``）。**這就是
+        報表與寫回吃的東西**，所以跨顆卡拿到的跟 `core/export/` 要的一模一樣。
+    ``dataset``
+        原始資料集。``output_klarf`` 要它的 ``.klarf``（KlarfDoc）——
+        那份東西刻意不進 worker，而跨顆那一層跑在主行程，所以拿得到。
+    ``outputs``
+        寫出去的檔案路徑（給 UI 與 CLI 報告「這一次產出了什麼」）。
+    ``errors``
+        ``{節點 id: 訊息}`` —— **鐵則 7 的跨顆版**：一張跨顆卡出錯只記在這裡，
+        其他卡照跑，而整批的結果仍然拿得到。
+    """
+
+    rows: List[Dict[str, Any]] = field(default_factory=list)
+    dataset: Any = None
+    recipe: Any = None
+    kind: str = ""
+    outputs: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    errors: Dict[str, str] = field(default_factory=dict)
+
+    def add_output(self, path: Any) -> None:
+        """記下一個寫出去的檔案（同一個路徑只記一次）。"""
+        s = str(path)
+        if s and s not in self.outputs:
+            self.outputs.append(s)
+
+    def warn(self, msg: str) -> None:
+        self.warnings.append(str(msg))
+
+    @property
+    def ok_rows(self) -> List[Dict[str, Any]]:
+        """只有跑成功的那幾顆。
+
+        失敗的那幾顆**留在 ``rows`` 裡**（報表要看得到它們失敗了，那是
+        `write_csv` 的 ``error`` 欄），所以這是一個**選配**的視角，不是預設。
+        """
+        return [r for r in self.rows if r.get("ok")]

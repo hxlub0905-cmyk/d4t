@@ -52,10 +52,10 @@ d4t 的第一原則是：
 【影像段】把圖變乾淨、可比  →  【算法段】從圖量出數字  →  【ADC 判定】score → bin → 寫回 KLARF
 ```
 
-使用者看到的則是另一個軸 —— 依「想解決什麼問題」分六階段：
+使用者看到的則是另一個軸 —— 依「想解決什麼問題」分八階段：
 
 ```
-Input → Enhance → Region → Compare → Measure → ADC
+Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output
 ```
 
 兩個軸各有用途，不合併；詳見 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。

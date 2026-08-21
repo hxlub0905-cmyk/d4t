@@ -42,7 +42,6 @@ def _load_qt() -> None:
     from PySide6.QtGui import QMouseEvent  # noqa: F401
     from PySide6.QtWidgets import QApplication  # noqa: F401
 
-    from d4t.ui import export_dialog as ex_mod  # noqa: F401
     from d4t.ui import studio as studio_mod  # noqa: F401
     from d4t.ui import theme as theme_mod  # noqa: F401
 
@@ -339,32 +338,32 @@ def test_real_drag_still_commits_the_threshold(ran, qapp):
 # --------------------------------------------------------------------------- #
 # 5. 輸出動作
 # --------------------------------------------------------------------------- #
-def test_export_action_disabled_before_run_enabled_after(qapp, synlot):
+def test_the_write_action_runs_the_whole_lot(qapp, synlot, tmp_path):
+    """工具列那一格從「Export…」變成「Run all & write」（F16 Stage 5c）。
+
+    M5 的規則是「有結果才能輸出」，因為那時候那顆鈕開的是一個**吃結果**的
+    對話框。現在它自己就是那一次跑 —— 所以前提跟 Run trial 一樣（有資料、
+    流程跑得動），而**寫什麼、寫去哪**在畫布上的 Output 卡上。
+    """
     win = studio_mod.StudioWindow()
     try:
-        assert win.btn_export.isEnabled() is False
-        assert win.open_export_dialog() is None
-        assert "No results to export yet" in win.status_text()
+        assert win.btn_run_all.isEnabled() is False      # 沒資料、畫布是空的
+        assert win.btn_run_all.toolTip().strip()
 
         assert win.load_dataset_path(synlot["klarf"], sync=True) is True
         assert win.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
-        assert win.btn_export.isEnabled() is False, "載入資料集不等於有結果"
+        assert win.btn_run_all.isEnabled() is True, "有資料、有流程就按得下去"
 
-        assert win.run_trial(N, workers=1, sync=True) is True
-        assert win.btn_export.isEnabled() is True
+        # 加一張 Output 卡 → 按下去真的寫出東西
+        out = tmp_path / "m5.csv"
+        node = win.model.add_step("output_csv")
+        win.model.set_param(node, "path", str(out))
+        assert win.run_all(sync=True) is True
+        assert out.exists()
+        assert win.gallery.total_count() == N
 
-        dlg = win.open_export_dialog()
-        assert isinstance(dlg, ex_mod.ExportDialog)
-        try:
-            assert dlg.klarf_columns() == list(win.dataset.klarf.defect_columns)
-            assert len(dlg.results) == N
-            assert dlg.recipe is not None
-        finally:
-            dlg.close()
-
-        # 換一份資料集 → 舊結果作廢，輸出鎖回去
+        # 換一份資料集 → 舊結果作廢（那條規則沒變）
         assert win.load_dataset_path(synlot["klarf"], sync=True) is True
-        assert win.btn_export.isEnabled() is False
         assert win.gallery.total_count() == 0
     finally:
         win.close()

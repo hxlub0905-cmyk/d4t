@@ -80,10 +80,16 @@ NEEDS_MORE_SETUP = {
     # 它吃的是 `load_sidecar` 吐的那條流，而那張卡在這個 harness 上跑不起來
     # （上一行）。專屬驗收在 tests/test_roi_from_mask.py。
     "roi_from_mask": "需要 GLAS 的 label map 那條流（前一張卡在這裡跑不起來）",
-    # 它比的是**兩個具名區域**，而這個 harness 只接 load_patch（沒有 Region 卡，
-    # 所以一個區域都沒有）。「沒挑區域」時它正確的行為就是擋下來並講出要填哪
-    # 兩格。專屬驗收在 tests/test_roi_compare.py。
-    "roi_compare": "需要上游先有一張 Region 卡（harness 只接 load_patch）",
+    # F16：`roi_compare` 併進 `glv_stats` 的 ``method="compare"`` 了。
+    # 那個 method 需要上游先有一張 Region 卡（這個 harness 只接 load_patch，
+    # 所以一個區域都沒有），而**預設的 method 是 `stats`**，在這裡跑得起來 ——
+    # 所以 `glv_stats` 不在這張表上，compare 那一半的專屬驗收在
+    # tests/test_glv_compare.py。
+    #
+    # 它的表達式預設是空的 —— 而那是對的（F7-13：卡片一開始就該說「我還沒設定
+    # 完」，不是猜一個式子）。空的時候它正確的行為就是擋下來並講出要填哪一格。
+    # 專屬驗收在 tests/test_feature_math.py。
+    "feature_math": "要填一個表達式（預設空的，那是刻意的）",
     # 它要的是**第二份 lot**（`Dataset.sources`），而這個 harness 只載了一份。
     # 沒掛的時候它正確的行為就是擋下來並講出「用這張卡上的 Open data…」。
     # 專屬驗收在 tests/test_pair_source.py。
@@ -177,7 +183,14 @@ def recipe_for(key: str, sparse: bool = False,
     )
 
 
-CARDS = sorted(REGISTRY)
+#: 這六條不變量問的都是「**一顆** defect 跑起來會怎樣」，所以跨顆卡不在裡面
+#: —— 它們根本沒有 `run(ctx, params)`（F16：`Step.is_batch`）。
+#:
+#: **用類別的性質篩，不是逐張列名字**：列名字的話，第二張跨顆卡加進來的那天
+#: 它會撞上一個看不懂的錯誤（「這張卡跑起來就丟 StepError」），而正確的答案是
+#: 「它本來就不該用這種方式跑」。跨顆卡自己的驗收在 tests/test_batch_steps.py。
+CARDS = sorted(k for k, c in REGISTRY.items() if not c.is_batch)
+BATCH_CARDS = sorted(k for k, c in REGISTRY.items() if c.is_batch)
 
 #: 參數寫滿 vs 省略 —— 兩種都要跑，見 :func:`recipe_for` 的說明。
 PARAM_STYLES = [False, True]

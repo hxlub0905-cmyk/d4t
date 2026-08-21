@@ -8,10 +8,17 @@
 
 新算法 = 新 class + ``@register_step``，UI 與引擎零修改。
 
-分類（三段式，見 master plan §5）：
+分類（見 master plan §5）—— **這張卡吐什麼型別**：
 - ``CATEGORY_IMAGE``  影像段（把圖變乾淨；寫 images）
 - ``CATEGORY_ALGO``   算法段（從圖量出數字；寫 features）
-- ``CATEGORY_ADC``    判定段（score / bin / 輸出）
+- ``CATEGORY_ADC``    判定段（score / bin）
+- ``CATEGORY_BATCH``  整批那一層（跑完全部才跑一次；F17-③）
+
+⚠ **``category`` 不再決定快取邊界**（F17-③，2026-08-20）。以前 checkpoint 問的
+是 ``category == CATEGORY_IMAGE``，於是它被當成**定位手段**用：五張 Output 卡
+的 category 曾經是 ``CATEGORY_ADC``，而它們跟 ADC 毫無關係 —— 填那個值只是為了
+落在 checkpoint 之後。現在快取邊界由 ``resolve_writes``（會不會吐影像流）推導
+（`engine._writes_an_image`），category 只剩它字面上的意思。
 """
 from __future__ import annotations
 
@@ -28,6 +35,24 @@ from .curve import CurveError, format_curve, parse_curve
 CATEGORY_IMAGE = "image"
 CATEGORY_ALGO = "algo"
 CATEGORY_ADC = "adc"
+#: 一張卡跑的**尺度**（F17-④）：一顆一次，還是整批一次。
+#:
+#: 以前這件事是一個布林 ``is_batch``，而布林答不出「還有第三種嗎」。宣告成尺度
+#: 之後，「一顆」與「整批」是**同一個模型的兩層**：兩層都是同一份 recipe 的
+#: DAG，都用同一支 `execution_order` 排序，差別只在餵進去的是一顆 defect 還是
+#: 整批的結果表。
+#:
+#: ⚠ **「試跑不寫」不能因為統一而消失**（使用者 2026-08-20 定調）。統一的是
+#: **宣告**，不是**入口**：`run_batch` 只跑、`run_batch_steps` 才寫，而試跑那
+#: 條路根本不叫後者。旗標遲早有人忘記關，兩支函式不會。
+SCALE_DEFECT = "defect"
+SCALE_LOT = "lot"
+_SCALES = (SCALE_DEFECT, SCALE_LOT)
+
+#: 整批那一層（F17-③）：跑完全部 defect 之後才跑一次的卡（Output 段那五張）。
+#: 它們以前借用 ``CATEGORY_ADC`` —— 不是因為它們在做 ADC，而是因為那個值剛好
+#: 讓它們落在快取 checkpoint 之後。現在那件事由宣告推導，這個值可以講實話了。
+CATEGORY_BATCH = "batch"
 
 # --------------------------------------------------------------------------- #
 # 流程階段（F7-3）—— 卡片庫的分組依據
@@ -45,30 +70,49 @@ CATEGORY_ADC = "adc"
 #: =============  =========================  ==============================
 #: input          （固定頭節點）              load_patch
 #: enhance        影像 → 影像                normalize / gamma / denoise
-#: region         找出「要看哪裡」            snr_map / blob_segment / roi_define
-#: compare        影像＋影像 → 影像           align / subtract
+#: region         找出「要看哪裡」            roi_cross / roi_template
 #: measure        影像＋區域 → 數字           glv_stats / cd_measure
+#: algo           **數字 → 數字**（不碰影像）  feature_math
+#: compare        影像＋影像 → 影像           align / subtract
 #: adc            數字 → score → bin         （固定尾節點）
+#: output         （固定尾節點，什麼都不吐）   output_csv / output_klarf
 #: =============  =========================  ==============================
 #:
 #: **型別規則是預設的裁決方式，但不是唯一的。** ``snr_map`` 是影像進影像出，
-#: 照型別會落在 enhance —— 但它的**唯一**消費者是 ``blob_segment``
-#: （每一份範例 recipe 都是 snr → blob），而且它必須跑在 Compare 之後，
-#: 放在讀起來排第二的 Enhance 裡永遠用不到。所以規則補一條：
+#: 照型別會落在 enhance —— 但它答的是「哪裡突出」，而且它必須跑在 Compare
+#: 之後，放在讀起來排第二的 Enhance 裡永遠用不到。所以規則補一條：
 #: **一張卡如果只為了餵另一段而存在，就跟著那一段走。**
 GROUP_INPUT = "input"
 GROUP_ENHANCE = "enhance"
 GROUP_REGION = "region"
 GROUP_COMPARE = "compare"
 GROUP_MEASURE = "measure"
+#: ⚠ 字串跟 :data:`CATEGORY_ALGO` 一模一樣，**但它們是兩個不同的軸**
+#: （見這一段開頭）：``CATEGORY_ALGO`` 說的是「這張卡吐數字」——
+#: 每一張量測卡都是 ``CATEGORY_ALGO``，而它們的 ``group`` 是 ``measure``。
+#: ``GROUP_ALGO`` 說的是「這張卡**只**吃數字、不碰影像」（F16，使用者定調：
+#: 「measure 是量出數值來，Algo 是拿這些 feature 去做更 custom 的處理」）。
+#: 那條界線有測試守著：Algo 段的卡 ``resolve_reads()`` 恆為空。
+GROUP_ALGO = "algo"
 GROUP_ADC = "adc"
+#: 這一段的卡是 **end point**：不吐影像流、不吐特徵，只把東西寫出去。
+#: 同樣有測試守著（``resolve_writes()`` 與 ``resolve_features()`` 都是空的）。
+GROUP_OUTPUT = "output"
 
 #: 卡片庫的顯示順序（讀起來是一句話：
-#: Input → Enhance → Region → Compare → Measure → ADC）。
-GROUP_ORDER = (GROUP_INPUT, GROUP_ENHANCE, GROUP_REGION,
-               GROUP_COMPARE, GROUP_MEASURE, GROUP_ADC)
+#: Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output）。
+#:
+#: **這個順序不決定執行順序。** 執行是 :func:`recipe.execution_order` 的 DAG
+#: 拓撲排序 —— 線怎麼拉就怎麼跑。這裡排的是**卡片庫的分區順序**（連帶 rail 的
+#: 上下順序與階段顏色），所以「Compare 排在 Measure 後面」不代表 ``diff`` 會
+#: 晚一步產生：那件事由線保證。
+#:
+#: ⚠ 這份順序在 UI 有第二份：``ui/widgets.py`` 的 ``LibraryPanel.GROUPS``
+#: （它多帶標題與副標）。兩份要一致，``tests/test_ui_f16_stages.py`` 鎖著。
+GROUP_ORDER = (GROUP_INPUT, GROUP_ENHANCE, GROUP_REGION, GROUP_MEASURE,
+               GROUP_ALGO, GROUP_COMPARE, GROUP_ADC, GROUP_OUTPUT)
 _GROUPS = GROUP_ORDER
-_CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC)
+_CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC, CATEGORY_BATCH)
 
 #: ``curve`` 是一個「值是控制點字串」的參數（見 ``pipeline/curve.py``）——
 #: 跟 ``image_key`` 一樣，型別上就是 str，但 UI 認得它、會給專用編輯器。
@@ -92,12 +136,14 @@ PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
 #: * ``sources``          —— 現在掛了哪幾份第二 source（代號）
 #: * ``source_images``    —— 那一份的一顆 defect 有哪幾張圖
 #: * ``source_columns``   —— 那一份的 KLARF 有哪些欄
+#: * ``main_columns``     —— **主資料集**的 KLARF 有哪些欄（F16 的 ``carry``）
 #:
 #: 清單列在 core 而不是 UI，理由跟 `ParamSpec.direction` 一樣：卡片作者打錯
 #: 一個鍵的話，那一格會安靜地退化成文字框（看起來只是「這個功能沒做」）。
 #: 列在這裡就變成註冊時就擋下來。**UI 認不認得是另一回事**：認不得的鍵一樣
 #: 退化成文字框，那是相容行為，不是錯誤。
-RUNTIME_CHOICES = ("sources", "source_images", "source_columns")
+RUNTIME_CHOICES = ("sources", "source_images", "source_columns",
+                   "main_columns")
 
 #: 值是**影像流名**的型別（畫布上的圓埠 + 實線）。
 IMAGE_TYPES = ("image_key", "image_keys")
@@ -117,6 +163,12 @@ REGION_TYPES = ("region_key", "region_keys")
 #: 分數的時候才會發現，那時候他已經不記得問題出在三張卡以前的一個命名。
 #: 所以擋在打字的當下（鐵則 4：壞值不准跑到演算法裡）。
 STREAM_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
+
+
+
+def cls_name(obj: Any) -> str:
+    """給錯誤訊息用的卡片名（有 ``key`` 就用它，那是使用者看得到的字）。"""
+    return str(getattr(obj, "key", None) or type(obj).__name__)
 
 
 class ParamError(ValueError):
@@ -373,7 +425,7 @@ class ParamSpec:
                     # 擋下來的那句話要是白話的）。
                     raise ParamError(
                         "parameter '%s' takes one region name, not a list "
-                        "(got %r). Use one Compare regions card per pair."
+                        "(got %r). Use one Gray level card per pair."
                         % (self.name, str(value)))
             elif self.type in ("image_keys", "multi_choice", "region_keys"):
                 # 正規化：去空白、去空項、去重複但保留順序。
@@ -582,8 +634,18 @@ class Step(ABC):
         看**宣告**而不看**值**（``resolve_reads(params)``）也是刻意的，理由跟
         F10 那條一樣：值是會被清空的（剛加進畫布的卡輸入本來就是空的），
         用值判斷的話一張還沒接線的卡會變成「入口」而躲過 ``not-connected``。
+
+        **第三條是 F16 加的：入口要真的產出影像流。**
+        F16 之前「不吃影像」與「是入口」是同一件事，因為每一張不吃影像的卡都是
+        load 卡。Algo 段（`feature_math`：吃數字、吐數字、一張圖都不碰）讓那個
+        巧合不成立了 —— 而被當成入口的後果是**整條 lint 對它靜音**：
+        ``validate`` 對入口卡會 ``continue``，於是「這張卡指到一個沒人算出來的
+        數字」那條 error 根本走不到（實測就是這樣：一條 issue 都沒有）。
+        Output 段（什麼都不吐）之後也會落在同一條規則上。
+
+        判準仍然是事實而不是標籤：**入口 = 沒有輸入、而且憑空生出影像流**。
         """
-        return not cls.input_specs() and not cls.reads
+        return bool(cls.writes) and not cls.input_specs() and not cls.reads
 
     @classmethod
     def missing_inputs(cls, params: Dict[str, Any]) -> List[str]:
@@ -615,8 +677,8 @@ class Step(ABC):
     # ---- 具名區域（F7-9）---------------------------------------------------
     #: 影像流有 reads/writes 可以在 validate 裡模擬，**具名 ROI 以前沒有**。
     #: 於是「量測卡指到一個沒人定義的區域」只有兩種下場：名字打錯 → 每顆
-    #: defect 執行到一半才 StepError；名字剛好是保留字 ``blob`` 而上游又沒有
-    #: Blob 卡 → **安靜地改量整張圖**，跑得完、有數字、而且是錯的。
+    #: defect 執行到一半才 StepError；上游那張 Region 卡被拿掉 →
+    #: **安靜地改量整張圖**，跑得完、有數字、而且是錯的。
     #: 後者是最糟的一種：使用者看不出哪裡不對。所以區域也宣告成契約，
     #: 跟影像流走同一條檢查路徑（``recipe.validate`` 的 unknown-region）。
     @classmethod
@@ -627,6 +689,27 @@ class Step(ABC):
     @classmethod
     def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
         """這張卡需要哪些具名區域（空字串 = 整張影像，不算需求）。"""
+        return []
+
+    # ---- 吃**特徵**的卡（F16，Algo 段）------------------------------------
+    #: 影像流有 ``resolve_reads``、具名區域有 ``resolve_regions_in``，而
+    #: **特徵一直沒有對應的宣告** —— 因為在 F16 之前，唯一吃特徵的東西是
+    #: recipe 上那個 ``score`` 欄位，而它由 ``validate`` 特別處理。
+    #:
+    #: Algo 段（「拿這些 feature 去做更 custom 的處理」）讓「吃特徵的卡」變成
+    #: 一整類，所以那件事要有自己的宣告 —— 不然「這張卡指到一個沒人算出來的
+    #: 數字」要等**每一顆 defect 都失敗**才看得出來，而那正是這個 repo 對
+    #: 具名區域做過一次的事（F7-9 的 unknown-region）。
+    #:
+    #: ⚠ **這個宣告目前在畫布上沒有對應的線。** 特徵是扁平的全域命名空間
+    #: （見 docs/ARCHITECTURE.md），而 d4t 從來沒有「特徵從哪一張卡來」的埠 ——
+    #: 分數表達式也是這樣。所以 Algo 卡的相依性靠的是 route 上的先後順序，
+    #: 而 ``validate`` 的 ``unknown-feature-input`` 是目前唯一擋得住它的東西。
+    #: 要讓它變成畫布上的一條線，得先決定第三種埠長什麼樣（見 ROADMAP 的
+    #: 「跨顆那一層」——那一段有同一個問題）。
+    @classmethod
+    def resolve_features_in(cls, params: Dict[str, Any]) -> List[str]:
+        """這張卡會讀哪些**已經算出來的特徵**（Algo 段用）。"""
         return []
 
     # ---- 「還沒設定完」（F7-13）--------------------------------------------
@@ -641,6 +724,59 @@ class Step(ABC):
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
         """這張卡還缺哪些設定才跑得起來（空 list = 沒問題）。"""
         return []
+
+    # ---- 跨顆那一層（F16）--------------------------------------------------
+    #: 這張卡是**整批跑完之後跑一次**的嗎（而不是一顆一顆）。
+    #:
+    #: ``run_defect`` 一顆一顆跑、從不 raise（鐵則 7），所以「要看過整批才算得
+    #: 出來」的東西沒有地方放：Output 的 CSV／KLARF（一批一個檔案）、離群旗標
+    #: （門檻由整批的分布決定）、F15 欠的那份點對點 report。
+    #:
+    #: ``is_batch`` 的卡**不實作** :meth:`run`（它拿不到「一顆」），改實作
+    #: :meth:`run_batch`。引擎的分工：``run_defect`` 跳過它們，
+    #: :func:`batch.run_batch_steps` 在所有結果收齊之後跑它們一次。
+    #:
+    #: ⚠ **不進影像段快取的簽章**：快取是逐顆的、切點在最後一張影像段卡的下一
+    #: 格，而跨顆那一層整個在 checkpoint 之後 —— 它看的是結果表，不是像素。
+    #: （鐵則 9 問的是「會影響影像段結果的東西進簽章了嗎」，這裡的答案是「它
+    #: 影響不到影像段」。寫在這裡是因為那個問題以後一定會再被問一次。）
+    #:
+    #: F17-④ 起這是 :attr:`scale` 推導出來的（``scale == SCALE_LOT``），
+    #: **不要直接指定它** —— 直接寫 ``is_batch = True`` 仍然認得（舊卡片、外掛），
+    #: `__init_subclass__` 會把 ``scale`` 補成 ``SCALE_LOT``。
+    is_batch: ClassVar[bool] = False
+
+    #: 這張卡跑的尺度：``SCALE_DEFECT``（一顆一次）或 ``SCALE_LOT``（整批一次）。
+    scale: ClassVar[str] = SCALE_DEFECT
+
+    def __init_subclass__(cls, **kw: Any) -> None:
+        """讓 ``scale`` 與 ``is_batch`` 永遠是同一句話。
+
+        **兩個方向都要**（鐵則 9 的形狀 —— 判準是「舊東西在不在」）：
+
+        * 新卡片宣告 ``scale = SCALE_LOT`` → ``is_batch`` 跟著變 True；
+        * 舊卡片（或外掛）宣告 ``is_batch = True`` 而沒有 ``scale`` →
+          ``scale`` 補成 ``SCALE_LOT``。
+
+        只做前者的話，一張還沒遷移的卡會宣告 is_batch 卻被引擎當成逐顆的 ——
+        而它的 `run()` 是一句「這張卡不該這樣跑」，於是**每一顆都失敗**。
+        """
+        super().__init_subclass__(**kw)
+        own = cls.__dict__
+        if "scale" in own:
+            cls.is_batch = str(own["scale"]) == SCALE_LOT
+        elif own.get("is_batch"):
+            cls.scale = SCALE_LOT
+
+    def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
+        """整批跑完之後跑一次（``is_batch`` 的卡實作這個，不是 :meth:`run`）。
+
+        ``bctx`` 是 :class:`~d4t.core.pipeline.context.BatchContext`。
+        失敗請 raise StepError —— :func:`batch.run_batch_steps` 會接住並記進
+        ``bctx.errors``，其他卡照跑（鐵則 7 的跨顆版）。
+        """
+        raise NotImplementedError(
+            "%s declares is_batch but does not implement run_batch()" % cls_name(self))
 
     # ---- 執行 -------------------------------------------------------------
     @abstractmethod
@@ -663,6 +799,8 @@ class Step(ABC):
             return GROUP_MEASURE
         if cls.category == CATEGORY_ADC:
             return GROUP_ADC
+        if cls.category == CATEGORY_BATCH:
+            return GROUP_OUTPUT
         return GROUP_ENHANCE
 
     @classmethod
@@ -672,6 +810,7 @@ class Step(ABC):
             "key": cls.key,
             "label": cls.label,
             "category": cls.category,
+            "scale": cls.scale,
             "group": cls.resolve_group(),
             "help": cls.help,
             "requires_ref": cls.requires_ref,
@@ -711,6 +850,9 @@ def register_step(cls: Type[Step]) -> Type[Step]:
     """類別裝飾器：把卡片註冊進全域 registry（key 重複 = 程式錯誤，立刻爆）。"""
     if not cls.key:
         raise ValueError(f"{cls.__name__}: key must not be empty")
+    if cls.scale not in _SCALES:
+        raise ValueError(f"{cls.__name__}: scale must be one of {_SCALES}, "
+                         f"got '{cls.scale}'")
     if cls.category not in _CATEGORIES:
         raise ValueError(f"{cls.__name__}: category must be one of {_CATEGORIES}, "
                          f"got '{cls.category}'")

@@ -1,7 +1,7 @@
 # d4t step-card library — authored 2026-07-28 (M1).
 """roi_snr — ROI SNR 量測卡。
 
-在指定影像流上對一個 ROI（最大 blob 的 bbox，或影像中央固定方框）量
+在指定影像流上對一個 ROI（上游 Region 卡定義的框，或整張影像）量
 訊噪比與相關統計。roi_snr_signed 沿用 e-beam 正負號慣例：比背景暗的
 缺陷是負值。
 """
@@ -27,7 +27,8 @@ class RoiSnrStep(MultiSourceStep):
     """ROI SNR：缺陷區對周邊背景的訊噪比與對比統計。"""
 
     key = "roi_snr"
-    label = "ROI SNR"
+    #: ``key`` 不動（recipe 的鍵）。短名是使用者要的（F16）。
+    label = "SNR"
     category = CATEGORY_ALGO
     group = GROUP_MEASURE
     help = ("Measure the defect region's signal-to-noise against the "
@@ -47,7 +48,7 @@ class RoiSnrStep(MultiSourceStep):
         ParamSpec(name="background_margin", type="int", default=20, min=1, max=200,
                   help=("Background sampling width in pixels: the ring outside the "
                         "ROI used for background statistics.")),
-        output_prefix_spec("blob"),
+        output_prefix_spec("defect"),
     ]
     reads = ["diff"]
     writes: List[str] = []
@@ -57,9 +58,10 @@ class RoiSnrStep(MultiSourceStep):
     def measure(self, ctx: Context, img, p: Dict[str, Any]):
         rect = roi_rect_or_none(ctx, self.key, img, p["roi"])
         if rect is None:
-            ctx.warn(f"[{self.key}] no blob found (run Blob segment first, or "
-                     f"point roi at a Define region card); all ROI SNR "
-                     f"features recorded as 0.")
+            # ⚠ 同 `steps/cd.py`：這句話以前指向一張不存在的「Blob segment」卡。
+            ctx.warn(f"[{self.key}] no region to measure: drag a line from a "
+                     f"Region card into “Region”, or leave it empty to measure "
+                     f"the whole image; all SNR features recorded as 0.")
             return dict(_ZERO)
 
         res = algo_snr.roi_snr(img, rect, background_margin=int(p["background_margin"]))

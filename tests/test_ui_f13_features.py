@@ -83,11 +83,18 @@ def test_the_diagnostics_are_the_ones_the_card_declared(ran):
     diag = next(s for s in sections if s["title"] == "Diagnostics")
     assert diag["collapsed"] is True, "它每張 Enhance 卡都會產出，攤開會擠掉量測值"
 
+    # 救回來那一份的前綴**跟引擎用同一支**（F17-②）—— 測試自己組一份的話，
+    # 引擎改了規則它就會漂，而症狀是這條測試紅得莫名其妙。
+    from d4t.core.pipeline.engine import feature_prefixes
+    from d4t.core.pipeline.step import REGISTRY
+
+    prefixes = feature_prefixes(list(ran.model.node_order),
+                                ran.model.to_recipe(), REGISTRY)
     declared = set()
     for nid, node in ran.model.nodes.items():
         for f in get_step(node.step).diagnostic_features(node.params):
             declared.add(f)
-            declared.add("%s_%s" % (nid, f))
+            declared.add("%s_%s" % (prefixes.get(nid, nid), f))
     for name in diag["names"]:
         assert name in declared, name
 
@@ -104,7 +111,7 @@ def test_a_rescued_feature_is_still_a_diagnostic(ran):
 
 
 def test_two_cards_with_the_same_name_get_their_id(qapp, lot):
-    """兩組都叫 `Gray-level stats` 的話，使用者分不出哪一組是哪一張卡。
+    """兩組都叫 `Gray level` 的話，使用者分不出哪一組是哪一張卡。
 
     只有**重複的時候**才帶 id —— 每一組都掛一個 node id 是在每一份正常的
     recipe 上加噪音（畫布的副標用的是同一條規則）。
@@ -123,7 +130,7 @@ def test_two_cards_with_the_same_name_get_their_id(qapp, lot):
         win.refresh_preview(sync=True)
 
         titles = [s["title"] for s in win._feature_sections(win._last_result)]
-        dupes = [t for t in titles if t.startswith("Gray-level stats")]
+        dupes = [t for t in titles if t.startswith(get_step("glv_stats").label)]
         assert len(dupes) >= 2 and len(set(dupes)) == len(dupes), titles
         assert all(" · " in t for t in dupes), dupes
     finally:

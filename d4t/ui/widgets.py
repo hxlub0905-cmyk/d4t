@@ -3807,14 +3807,19 @@ class LibraryPanel(QWidget):
     #: 收起來時整欄只留 rail，工作區才真的變寬。
     panel_toggled = Signal(bool)
 
-    #: 顯示順序與標題。id 對應 ``pipeline/step.py`` 的 ``GROUP_*``。
+    #: 顯示順序與標題。id 對應 ``pipeline/step.py`` 的 ``GROUP_*``，而**順序必須
+    #: 與那邊的 ``GROUP_ORDER`` 逐項相同** —— 兩份表是同一件事的兩半（這裡多帶
+    #: 給人看的標題與副標），而它們漂開的話卡片庫的順序會跟引擎講的不一樣。
+    #: ``tests/test_ui_f16_stages.py`` 鎖著。
     GROUPS = (
         ("input", "Input", "Load this defect's images"),
         ("enhance", "Enhance", "Image in, image out"),
         ("region", "ROI", "Decide where to look"),
-        ("compare", "Compare", "Two images in, difference out"),
         ("measure", "Measure", "Image + region in, numbers out"),
+        ("algo", "Algo", "Numbers in, numbers out"),
+        ("compare", "Compare", "Two images in, difference out"),
         ("adc", "ADC", "Numbers in, score and bin out"),
+        ("output", "Output", "The end of the line - write it somewhere"),
     )
     _ORDER = tuple(g for g, _t, _s in GROUPS)
     _EMPTY_TEXT = "(no cards in this section)"

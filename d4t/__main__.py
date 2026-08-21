@@ -14,7 +14,7 @@ import argparse
 import csv
 import json
 import sys
-from typing import List, Optional
+from typing import Any, List, Optional
 
 
 def _cmd_steps(_args: argparse.Namespace) -> int:
@@ -88,6 +88,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
     print(f"資料集：kind={ds.kind}，{len(ds.items)} 顆 defect")
     for w in ds.warnings:
         print(f"  △ {w}")
+    # Load 卡上 `carry` 點名的 KLARF 欄位（F16）。**只帶點名的那幾欄** ——
+    # 一份 raw data 幾十萬顆 ×24 欄字串是幾百 MB，而且要 pickle 進每個 worker。
+    # 一格都沒勾就一欄都不帶，所以既有的 recipe 一個位元組都沒多帶。
+    _carry_main_columns(ds, recipe)
     if getattr(args, "gds", ""):
         from d4t.core.ingest import glas_export
 
@@ -211,6 +215,24 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     + [feats.get(k) for k in feat_keys]
                 )
         print(f"→ CSV：{args.csv}")
+
+    # ---- Output 段：跨顆那一層（F16）------------------------------------
+    # **這裡才叫，試跑那條路不叫**（使用者定調：「試跑不寫，只有整批才寫」）。
+    # 做成另一支要自己叫的函式而不是 run_batch 的一個旗標，就是為了讓那件事
+    # 是結構上的 —— 旗標遲早有人忘記關，而症狀是不可逆的覆寫。
+    from d4t.core.pipeline import run_batch_steps
+
+    bctx = run_batch_steps(recipe, ds, payload)
+    for w in bctx.warnings:
+        print(f"  △ {w}")
+    for path in bctx.outputs:
+        print(f"→ {path}")
+    if bctx.errors:
+        # **一張跨顆卡出錯不影響其他卡**（鐵則 7 的跨顆版），但要講出來 ——
+        # 而且回非 0：批次跑完了，可是使用者要的東西沒有全部寫出來。
+        for nid, msg in bctx.errors.items():
+            print(f"[錯誤] 輸出卡 '{nid}'：{msg}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -258,6 +280,34 @@ def _cmd_rescore(args: argparse.Namespace) -> int:
     if summary.get("saved_run_id"):
         print(f"→ 已另存為新 run：{summary['saved_run_id']}")
     return 0
+
+
+
+def _carry_main_columns(ds: Any, recipe: Any) -> None:
+    """把 Load 卡點名的 KLARF 欄位填進每一顆（`DefectItem.fields`）。
+
+    **答案只有一份**：`steps.load.columns_for_main`（`carry` 的意思住在卡片）。
+    Studio 走的是同一支（`StudioWindow._carry_main_columns`）—— 這裡與那裡
+    只是兩個入口，不是兩份規則。
+    """
+    from d4t.core.ingest.dataset import fill_fields, missing_columns_of
+    from d4t.core.steps.load import columns_for_main
+
+    want = columns_for_main(getattr(recipe, "nodes", None) or {})
+    if not want:
+        return
+    absent = missing_columns_of(ds, want)
+    if absent:
+        # **在跑之前講**：整批跑完才發現「那一欄根本不存在」是最貴的一種發現
+        # 方式（F15-2 的同一條教訓）。這裡答得出「那它有哪些欄」——卡片手上
+        # 只有複製過去的那幾欄，答不出來。
+        from d4t.core.ingest.dataset import columns_of
+        print("[錯誤] Load 卡的 “Carry these columns” 指到這份 KLARF 沒有的欄："
+              "%s。它有的是：%s" % (", ".join(absent), ", ".join(columns_of(ds))),
+              file=sys.stderr)
+        raise SystemExit(2)
+    n = fill_fields(ds, want)
+    print("KLARF 欄位：帶了 %d 欄（%s）" % (n, ", ".join(want)))
 
 
 def _cmd_export(args: argparse.Namespace) -> int:

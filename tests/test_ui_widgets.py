@@ -558,8 +558,11 @@ def test_library_panel_groups_and_double_click(qapp):
     steps = _steps()
     panel.set_steps(steps)
 
+    # 標題與順序的**唯一出處**是 LibraryPanel.GROUPS（它自己再對齊
+    # step.GROUP_ORDER，由 tests/test_ui_f16_stages.py 鎖住）。這裡以前抄了
+    # 第四份，於是 F16 加兩段時它是「忘了改」的那一份。
     assert panel.section_titles() == [
-        "Input", "Enhance", "ROI", "Compare", "Measure", "ADC"]
+        t for _gid, t, _sub in widgets_mod.LibraryPanel.GROUPS]
     assert set(panel.step_keys()) == {s["key"] for s in steps}
 
     # 每張卡都被歸進宣告的那一段

@@ -90,8 +90,10 @@ def test_window_constructs_with_library_cards(window):
     # 卡片庫用的是真實 registry，不是手捏假資料
     assert window.library.entry("snr_map") is not None
     assert window.library.entry("load_patch") is not None
+    # 同 tests/test_ui_widgets.py：順序的出處是 LibraryPanel.GROUPS，不要再抄一份。
+    from d4t.ui.widgets import LibraryPanel
     assert window.library.section_titles() == [
-        "Input", "Enhance", "ROI", "Compare", "Measure", "ADC"]
+        t for _gid, t, _sub in LibraryPanel.GROUPS]
 
     # 空狀態：**畫布是空的**（F11 Enhance-4，使用者定調：「Load image 卡片改成
     # 預設沒有，user 可以選擇要 Load images or Load one image，add 才會出現」）。
@@ -354,11 +356,11 @@ def test_actions_are_disabled_until_their_preconditions_hold(qapp, synlot):
         assert win.btn_trial_more.isEnabled() is False
         assert win.act_run_all.isEnabled() is False
         assert win.spin_trial_n.isEnabled() is False
-        assert win.btn_export.isEnabled() is False
+        assert win.btn_run_all.isEnabled() is False
         # 兩件事都還沒做（沒有資料、畫布也是空的，F11 Enhance-4）——
         # tooltip 要把**兩件**都講出來，不是只講其中一件。
         assert "Load a KLARF and add at least one card" in win.btn_trial.toolTip()
-        for w in (win.btn_trial, win.btn_export):
+        for w in (win.btn_trial, win.btn_run_all):
             assert w.toolTip().strip(), "變灰的按鈕一定要說明原因"
 
         # 加一張卡進去 → 理由要換一句（缺的只剩資料）
@@ -374,18 +376,19 @@ def test_actions_are_disabled_until_their_preconditions_hold(qapp, synlot):
         assert win.btn_trial.isEnabled() is False
         assert "pipeline is empty" in win.btn_trial.toolTip()
 
-        # 資料集 + 流程 → 可以跑；但還沒有結果，所以還不能輸出
+        # 資料集 + 流程 → 兩顆都能按。「Run all & write」跟 Run trial 是**同一個
+        # 前提** —— 它自己就是那一次跑，不必先有結果（F16 Stage 5c：以前這一格
+        # 是輸出精靈，那時候「先跑一次才會亮」是對的）。
         assert win.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
         assert win.btn_trial.isEnabled() is True
         assert win.btn_trial_more.isEnabled() is True
         assert win.act_run_all.isEnabled() is True
         assert win.spin_trial_n.isEnabled() is True
-        assert win.btn_export.isEnabled() is False
-        assert "No results yet" in win.btn_export.toolTip()
+        assert win.btn_run_all.isEnabled() is True
+        assert win.btn_run_all.toolTip().strip()
 
-        # 跑完 → 輸出解鎖
         assert win.run_trial(8, workers=1, sync=True) is True
-        assert win.btn_export.isEnabled() is True
+        assert win.btn_run_all.isEnabled() is True
     finally:
         win.close()
 

@@ -46,8 +46,8 @@ class SnrMapStep(Step):
             "stands out from its own surroundings, counted in standard "
             "deviations (a z-map), and report the peak as snr_max. This is a "
             "picture of where something is unusual - not the single "
-            "region-against-region number that the ROI SNR and Compare "
-            "regions cards report.")
+            "region-against-region number that the SNR and Gray level "
+            "cards report.")
     params = [
         ParamSpec(name="source", type="image_key", direction="in", default="diff",
                   help=("Input difference image stream (usually the diff "

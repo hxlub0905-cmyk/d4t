@@ -53,14 +53,14 @@ __all__ = ["ResultsWindow"]
 
 
 class ResultsWindow(QMainWindow):
-    """一批結果的檢視：Gallery（上）+ 分數分佈（下）+ 輸出入口。
+    """一批結果的檢視：Gallery（上）+ 分數分佈（下）+ 整批入口。
 
     本視窗**不自己驅動任何東西** —— 所有互動都轉成訊號交給
     :class:`~d4t.ui.studio.StudioWindow`，跟 ``WelcomeDialog`` 同一個慣例。
     這樣它可以單獨測，Studio 也可以在沒有它的情況下跑完整流程。
     """
 
-    export_requested = Signal()
+    run_all_requested = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -82,16 +82,20 @@ class ResultsWindow(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(spacer)
 
-        self.btn_export = QToolButton(self)
-        self.btn_export.setText("Export…")
-        self.btn_export.setToolButtonStyle(Qt.ToolButtonTextOnly)
-        self.btn_export.setCursor(Qt.PointingHandCursor)
-        self.btn_export.setObjectName("primary")
-        self.btn_export.setToolTip(
-            "Write these results back to KLARF, or produce reports and overlays")
-        self.btn_export.clicked.connect(self.export_requested)
-        bar.addWidget(self.btn_export)
-        self.set_export_enabled(False)      # 還沒有結果（同 A1 的可用性規則）
+        # 試跑看起來對了之後，**下一步就是整批跑並寫出去** —— 所以那顆鈕在
+        # 這裡（使用者正在看的是試跑的結果）。以前這一格是「Export…」，開一個
+        # 輸出精靈；精靈拿掉之後（F16 Stage 5c）寫什麼、寫去哪住在畫布上的
+        # Output 卡上，這顆鈕只負責「跑完整批然後照卡片寫」。
+        self.btn_run_all = QToolButton(self)
+        self.btn_run_all.setText("Run all & write")
+        self.btn_run_all.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.btn_run_all.setCursor(Qt.PointingHandCursor)
+        self.btn_run_all.setObjectName("primary")
+        self.btn_run_all.setToolTip(
+            "Run every defect, then write whatever the Output cards say")
+        self.btn_run_all.clicked.connect(self.run_all_requested)
+        bar.addWidget(self.btn_run_all)
+        self.set_run_all_enabled(False)     # 還沒有結果（同 A1 的可用性規則）
 
         self.gallery = GalleryPanel(self)
         self.histogram = HistogramWidget(self)
@@ -116,10 +120,10 @@ class ResultsWindow(QMainWindow):
     def summary_text(self) -> str:
         return self.summary_label.text()
 
-    def set_export_enabled(self, enabled: bool) -> None:
-        self.btn_export.setEnabled(bool(enabled))
-        self.btn_export.setToolTip(
-            "Write these results back to KLARF, or produce reports and overlays"
+    def set_run_all_enabled(self, enabled: bool) -> None:
+        self.btn_run_all.setEnabled(bool(enabled))
+        self.btn_run_all.setToolTip(
+            "Run every defect, then write whatever the Output cards say"
             if enabled else "No results yet — run a trial first.")
 
     def status(self, msg: str) -> None:

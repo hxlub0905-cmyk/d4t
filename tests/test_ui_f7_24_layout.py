@@ -166,7 +166,7 @@ def test_each_toolbar_button_has_its_own_silhouette(window):
     圖示給每一顆一個輪廓 —— 這是對「單調」的正解，而不是替它們各上一個顏色
     （這個主題的規則是**顏色只表達語意**，見 theme.py 的 docstring）。
     """
-    buttons = (window.btn_open_recipe, window.btn_examples, window.btn_export)
+    buttons = (window.btn_open_recipe, window.btn_examples, window.btn_run_all)
     names = [b.glyph_name() for b in buttons]
     assert all(names), "這些工具列按鈕沒有圖示：%s" % names
     assert len(set(names)) == len(names), "圖示重複了：%s" % names
@@ -183,7 +183,7 @@ def test_the_two_actions_worth_pressing_are_the_two_with_colour(window, qapp):
     不是拿來讓畫面熱鬧的。
     """
     assert window.btn_trial.objectName() == "primary"
-    assert window.btn_export.property("variant") == "secondary"
+    assert window.btn_run_all.property("variant") == "secondary"
     plain = (window.btn_open_recipe, window.btn_examples, window.btn_help)
     for b in plain:
         assert b.objectName() != "primary"

@@ -370,6 +370,43 @@ def nm_per_px_spec() -> ParamSpec:
     )
 
 
+# --------------------------------------------------------------------------- #
+# KLARF 的欄位帶成 feature（F16）
+# --------------------------------------------------------------------------- #
+#: 讀資料那幾張卡共用的 ``carry``。
+#:
+#: 使用者 2026-08-20 對 ADC 的定調是「利用 feature 內數值資料**跟原始 klarf 帶的
+#: 資訊**去做分類」，而在此之前 main 那一份的 KLARF 欄位**進不了 pipeline**
+#: （`DefectItem.fields` 只有掛上來的第二份會填）。
+#:
+#: 做法跟 F15 的 `pair_source.carry` 逐字同一套 —— 那不是巧合，是同一件事：
+#: **一份 KLARF 有幾十欄，而其中絕大多數沒有人要**。全帶的話幾十萬顆 × 24 欄
+#: 字串是幾百 MB，而且要 pickle 進每一個 worker。所以規則是「點名的才帶」，
+#: 兩邊一樣，使用者只要學一次。
+#:
+#: 型別是 ``multi_choice`` 而不是 ``choice``：`choice` 會擋掉不在清單裡的值，
+#: 而 recipe 是在資料載進來**之前**讀的 —— 每一份存了欄名的 recipe 都會在開檔
+#: 那一刻爆掉（F15-2 踩過，見 `ParamSpec.choices_from`）。
+CARRY_HELP = (
+    "KLARF columns to bring into the pipeline as numbers you can use later "
+    "(ROUGHBINNUMBER, CLASSNUMBER, …). Each one arrives under its own name, "
+    "so the score expression and the report can both refer to it. Columns "
+    "that are not numbers are kept for the report but are not usable in the "
+    "score. Tick nothing and nothing is carried - which is what every recipe "
+    "did before this box existed.")
+
+
+def carry_spec() -> ParamSpec:
+    """讀資料那幾張卡共用的 ``carry``（見 :data:`CARRY_HELP`）。"""
+    return ParamSpec(
+        name="carry", type="multi_choice", default="",
+        label="Carry these columns",
+        choices_from="main_columns",
+        advanced=True,
+        help=CARRY_HELP,
+    )
+
+
 #: 兩張 Region 卡共用的「靠邊的框不要」開關（F11 Region 第八輪，使用者要求）。
 #:
 #: 為什麼兩張卡要**同一組參數名**：使用者心裡這是**一件事**（「靠邊的不要」），
@@ -646,7 +683,7 @@ def set_region_family(ctx, step_key: str, name: str, norm_boxes,
 #: 在這之前三張卡各寫各的：Profile **一個都沒有**（只有卡自己的 `cross_*`）、
 #: Template 三個（`present` / `others_present` / `edge_dropped`）、GDS 四個
 #: （`present` / `pieces` / `area_px` / `clipped`）。於是下游（分數表達式、
-#: `Compare regions`、報表）**得先知道這個區域是誰找的**才問得出「它有沒有落
+#: `Gray level` 的 compare、報表）**得先知道這個區域是誰找的**才問得出「它有沒有落
 #: 在這一顆上」—— 那正是漏出去的地方。
 #:
 #: 五個數字對應下游真正會問的五個問題：
@@ -688,7 +725,7 @@ def region_facts(ctx, names, shape, clipped: bool = False,
 
     ``clipped`` / ``edge_dropped`` 講的是**這一組區域是怎麼建出來的**，所以
     一個家族（``<n>`` / ``<n>_center`` / ``<n>_others``）三個名字拿到同一個值。
-    重複是刻意的：下游手上只有**一個**名字（使用者在 `Compare regions` 上挑的
+    重複是刻意的：下游手上只有**一個**名字（使用者在 `Gray level` 上挑的
     那一個），它必須不必知道那是不是衍生名就問得出全部五件事。
 
     ``located=False`` 是「框在、但那是退回整張圖的保險，不是這個區域」——
@@ -721,7 +758,7 @@ def region_family(name: str):
 
 
 def crop_to_roi(ctx, step_key: str, image, roi_name):
-    """依 ``roi`` 參數裁出要量測的像素（找不到 blob 時退回整張圖）。"""
+    """依 ``roi`` 參數裁出要量測的像素（找不到那個區域時退回整張圖）。"""
     rect = roi_rect_or_none(ctx, step_key, image, roi_name)
     if rect is None:
         return image
@@ -828,8 +865,8 @@ class MultiSourceStep(Step):
     #: 成立：同一組統計量、同一張圖，量在兩個不同的區域上。
     REGION = "roi"
 
-    #: 這張卡**沒有影像也量得下去**嗎（``cd_measure`` 是：``roi="blob"`` 時
-    #: 矩形已經是像素座標，影像只用來做次像素精修）。設 False 的卡拿到的
+    #: 這張卡**沒有影像也量得下去**嗎（``cd_measure`` 是：區域的矩形已經是
+    #: 像素座標，影像只用來做次像素精修）。設 False 的卡拿到的
     #: ``img`` 可能是 ``None``，自己決定怎麼辦。
     REQUIRE_IMAGE = True
 

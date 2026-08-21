@@ -118,7 +118,8 @@ def test_each_entry_reports_its_own_channel_count(lot):
     """`n_channels` 是**每張入口卡自己的**，撞名由既有機制處理。
 
     兩張 load 卡都寫 `n_channels`，後面那張的值會贏（`Context.add_feature`
-    允許覆寫），而前面那張仍然拿得到 —— 名字是 `<節點id>_n_channels`。
+    允許覆寫），而前面那張仍然拿得到 —— 名字是 **`<那張卡吐的那條流>_n_channels`**
+    （F17-②；以前是 `<節點id>_n_channels`，而節點 id 對使用者等於 `node_3`）。
     這一條把那個語意鎖住，因為它是分數表達式指得到的東西。
 
     lint 會為此發一個 `feature-collision` **警告**（不是 error）：同名覆寫
@@ -127,7 +128,7 @@ def test_each_entry_reports_its_own_channel_count(lot):
     res = run_defect(_two_entries(), lot.items[0], lot.kind)
     assert res.ok, res.error
     assert res.features["n_channels"] == 1.0            # 後面那張（load_r）
-    assert res.features["load_t_n_channels"] == 1.0     # 前面那張仍然指得到
+    assert res.features["test_n_channels"] == 1.0       # 前面那張仍然指得到
 
     warns = [i for i in validate(_two_entries(), kind="ebi_patch")
              if i.code == "feature-collision"]

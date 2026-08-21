@@ -3,7 +3,7 @@
 
 為什麼不是一塊通用面板
 ----------------------
-右下角本來是一張「特徵 / 數值」表：`blob_dist_center 11.170`、`blob_snr 255`。
+右下角本來是一張「特徵 / 數值」表：`roi_snr_signed 11.170`、`glv_max 255`。
 問題不是它佔位子，是**那些數字沒有辦法判讀** —— 11.17 是大還是小？255 是不是
 飽和了？一個數字單獨存在，回答不了使用者真正在問的問題。
 
@@ -1054,7 +1054,7 @@ class MeasureInspector(Inspector):
 
     為什麼是這一張圖
     ----------------
-    `blob_dist_center 11.170` 單獨存在回答不了任何問題。而調一張量測卡的時候，
+    `roi_snr_signed 11.170` 單獨存在回答不了任何問題。而調一張量測卡的時候，
     要問的其實是：**我把參數設成這樣，量出來的東西分不分得開？**
 
     分布回答得了：擠成一根柱子 = 這個特徵對這批資料沒有鑑別力（不管門檻設哪裡
@@ -1520,6 +1520,109 @@ class PairInspector(MeasureInspector):
         return bool(self.match()) or super().has_data()
 
 
+
+class WriteBackInspector(Inspector):
+    """Write KLARF：**這一次寫下去會改到什麼**（F16 Stage 5c）。
+
+    M5 那條規則是硬性的：**寫回前一定先預覽變更**。Export 精靈的做法是把
+    「寫出」鈕鎖住，直到使用者按過「預覽變更」。精靈拿掉之後那條規則不能跟著
+    消失 —— 而它其實不需要一顆鈕：機制本來就在 core
+    （``klarf_out.plan_writeback`` 的**乾跑**，一個位元組都不寫），
+    所以它可以是**這張卡的儀表**。
+
+    這樣比精靈**更早**：選到那張卡就看得到，不必等按下 Export。
+
+    ⚠ **只有 `inplace` 會動到原檔**，而那是唯一不可逆的一種。面板上那句話因此
+    分三種寫（`annotate` / `topn` 寫的是新檔）—— 把三種都講成「危險」的話，
+    使用者很快就不讀它了。
+
+    數字從哪來：``trial_results``（上一次跑的那一批）。**還沒跑過就講那句話**，
+    不要畫一個看起來像答案的空面板。
+    """
+
+    title = "Write-back"
+
+    def mode(self) -> str:
+        return str(self.params.get("mode", "annotate") or "annotate").strip()
+
+    def path(self) -> str:
+        return str(self.params.get("path", "") or "").strip()
+
+    def has_data(self) -> bool:
+        return bool(self.batch)
+
+    def empty_reason(self) -> str:
+        if not self.path():
+            return ("Put the full path of the KLARF file into “Write to”, "
+                    "then run the batch to see what would change.")
+        return ("Run the batch to see how many rows this would change "
+                "before anything is written.")
+
+    def plan(self) -> Dict[str, Any]:
+        """乾跑一次（**不寫任何東西**），回 ``{changed, out, note}``。
+
+        算不出來就回空的 —— 這是一句提示，不准擋路（同 `paintEvent` 的鐵則）。
+        """
+        rows = [dict(r) for r in (self.batch or [])]
+        if not rows:
+            return {}
+        doc = self.meta.get("_klarf_doc")
+        if doc is None:
+            # 儀表拿不到 KlarfDoc（它不該自己去讀檔）。退而求其次：講得出
+            # 「有幾顆會被寫」，那已經是使用者要的量級。
+            ok = sum(1 for r in rows if r.get("ok"))
+            return {"changed": ok, "out": len(rows), "note": "estimated"}
+        try:
+            from d4t.core.export.klarf_out import plan_writeback
+
+            plan = plan_writeback(doc, rows, self.mode())
+            return {"changed": int(getattr(plan, "n_rows_changed", 0)),
+                    "out": int(getattr(plan, "n_rows_out", 0)), "note": ""}
+        except Exception:                  # noqa: BLE001 — 提示不准擋路
+            ok = sum(1 for r in rows if r.get("ok"))
+            return {"changed": ok, "out": len(rows), "note": "estimated"}
+
+    def summary(self) -> str:
+        info = self.plan()
+        if not info:
+            return ""
+        mode = self.mode()
+        what = ("edits the original file" if mode == "inplace"
+                else "writes a new file")
+        return ("%s — %s; %d of %d row(s) would change%s"
+                % (mode, what, info.get("changed", 0), info.get("out", 0),
+                   " (estimated)" if info.get("note") else ""))
+
+    def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
+        info = self.plan()
+        mode = self.mode()
+        lines = [("Mode", mode)]
+        if mode == "inplace":
+            lines.append(("Original file",
+                          "EDITED IN PLACE - cannot be undone"))
+        else:
+            lines.append(("Original", "untouched (a new file is written)"))
+        lines.append(("Rows changed",
+                      "%d of %d%s" % (info.get("changed", 0),
+                                      info.get("out", 0),
+                                      " (estimated)" if info.get("note") else "")))
+        lines.append(("Write to", self.path() or "(not set yet)"))
+
+        row_h = max(16.0, rect.height() / max(1, len(lines) + 1))
+        y = rect.top()
+        for label, value in lines:
+            p.setPen(QColor(TOKENS["text_secondary"]))
+            p.drawText(QRectF(rect.left(), y, rect.width() * 0.32, row_h),
+                       Qt.AlignLeft | Qt.AlignVCenter, label)
+            danger = (label == "Original file")
+            p.setPen(QColor(TOKENS["danger_text"] if danger
+                            else TOKENS["text_primary"]))
+            p.drawText(QRectF(rect.left() + rect.width() * 0.34, y,
+                              rect.width() * 0.66, row_h),
+                       Qt.AlignLeft | Qt.AlignVCenter, str(value))
+            y += row_h
+
+
 INSPECTORS: Dict[str, type] = {
     "load_patch": InputInspector,
     # 同一個面板：它讀的是 meta["input"]，兩張 Input 卡都會寫（F11 Input-4）。
@@ -1539,6 +1642,8 @@ INSPECTORS: Dict[str, type] = {
     "pair_source": PairInspector,
     # 對圖的分數只有**跟整批比**才讀得懂：0.62 是高是低要看其他顆長什麼樣。
     "align_to": MeasureInspector,
+    # 寫回前一定先預覽變更（M5 的硬性規則，F16 Stage 5c 搬過來的）。
+    "output_klarf": WriteBackInspector,
 }
 
 

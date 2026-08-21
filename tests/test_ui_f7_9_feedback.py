@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 from d4t.core.pipeline import (          # noqa: E402 — Qt-free，可以直接 import
     Recipe, RecipeNode, ScoreSpec, get_step, list_steps, validate,
 )
+from d4t.core.pipeline.step import GROUP_ORDER   # noqa: E402
 import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 
 FIXTURE_RECIPES = Path(__file__).resolve().parent / "fixtures" / "recipes"
@@ -76,9 +77,12 @@ def window(qapp, lot):
 
 
 # --------------------------------------------------------------------------- #
-# 1. 六個階段六個顏色
+# 1. 一個階段一個顏色
 # --------------------------------------------------------------------------- #
-GROUPS = ("input", "enhance", "region", "compare", "measure", "adc")
+#: **從 `GROUP_ORDER` 拿，不要在這裡再抄一份**（F16）。
+#: 這裡原本寫死六個字串，於是加一段的人要記得回來補 —— 忘了的話這條測試會
+#: 「檢查了六個顏色」然後綠燈通過，而新那一段的顏色從來沒有被驗過。
+GROUPS = tuple(GROUP_ORDER)
 
 
 def _lab(hex_str):
@@ -545,7 +549,10 @@ def test_adding_a_card_says_what_is_still_missing_and_who_provides_it(window):
     window.library.add_requested.emit("snr_map")
     msg = window.status_text()
     assert "diff" in msg
-    assert "Compare two streams" in msg, "要講出哪一張卡會產出這條流"
+    # 名字從 registry 拿，不要抄一份 —— 這條測的是「訊息講得出是**哪一張卡**」，
+    # 不是那張卡現在叫什麼（F16 把它從 `Compare two streams` 改成
+    # `Image Combination`，而寫死的那份當場變成假失敗）。
+    assert get_step("subtract").label in msg, "要講出哪一張卡會產出這條流"
     assert "test" in msg and "ref" in msg, "也要講現在有哪些流可以改指"
 
 

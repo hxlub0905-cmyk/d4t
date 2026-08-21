@@ -271,9 +271,26 @@ def test_execution_order_edge_outside_route_ignored():
 
 
 def test_execution_order_cycle_raises():
-    r = make_recipe(edges=[Edge("snr", "load")])
+    """真的循環：兩條線互指。
+
+    F17-① 之前這一條寫的是**一條**往回的線（`snr → load`），而它之所以是
+    循環，靠的是 route 相鄰對那串隱含邊。隱含邊拿掉之後，一條往回的線只是
+    「這兩張卡的順序跟排版相反」—— 那是合法的（見下一條）。
+    """
+    r = make_recipe(edges=[Edge("snr", "load"), Edge("load", "snr")])
     with pytest.raises(RecipeError):
         execution_order(r, "ebi_patch")
+
+
+def test_one_backward_line_is_not_a_cycle_any_more(): 
+    """**F17-① 唯一的行為改變**：線與 route 排列相反的 recipe。
+
+    以前它是 `cycle` 錯誤 —— 一份完全合理的 pipeline 因為卡片在畫布上的左右
+    位置而開不起來。現在**線說了算**，排版只在沒有線的時候當平手依據。
+    """
+    r = make_recipe(edges=[Edge("snr", "load")])
+    order = execution_order(r, "ebi_patch")
+    assert order.index("snr") < order.index("load")
 
 
 def test_execution_order_unknown_kind_raises():
@@ -329,7 +346,8 @@ def test_validate_unknown_route_kind():
 
 
 def test_validate_cycle():
-    r = make_recipe(edges=[Edge("snr", "load")])
+    # 真的循環要兩條線互指（F17-①：一條往回的線不再是循環）。
+    r = make_recipe(edges=[Edge("snr", "load"), Edge("load", "snr")])
     issues = validate(r, registry=REG)
     assert "cycle" in codes(issues)
 

@@ -282,13 +282,18 @@ def test_every_measure_card_can_take_more_than_one_source(window):
     #: 有一種量測卡的來源不是那個意思：它們的每一條流有**自己的角色**，
     #: 而角色不能排成一串 —— 那時候第二條線的正解是**第二個埠**，不是清單。
     #:
-    #: `roi_compare`（F11 Measure）：一條流是 target 的、一條是 reference 的。
-    #: 排成清單就答不出「哪一條是 target」，而使用者列的三種情況裡有一種正是
-    #: 「同一個區域、兩條不同的流」。所以它有兩個 `image_key` 埠。
+    #: `glv_stats` 的 ``method="compare"``（F16 之前是獨立的 `roi_compare`）：
+    #: 一條流是 target 的、一條是 reference 的。排成清單就答不出「哪一條是
+    #: target」，而使用者列的三種情況裡有一種正是「同一個區域、兩條不同的流」。
+    #: 所以那個 method 有兩個 `image_key` 埠。
+    #:
+    #: **F16 之後這是一張卡的兩種模式**，所以驗的方式跟著變：不再是「這張卡是
+    #: 哪一類」，而是「**在這組參數下**是哪一類」—— 而兩種接線方式不准同時出現
+    #: （`show_when` 保證那件事，這裡驗它真的成立）。
     #:
     #: **列在這裡而不是放寬條件**：加第 18 張量測卡的那天，它仍然要做一個明確
     #: 的決定（是多連一、還是角色不同），而不是安靜地留在單一來源上。
-    ROLE_PORTS = {"roi_compare"}
+    ROLE_PORTS = {"glv_stats": {"method": "compare"}}
 
     for cls in list_steps():
         # 「量測卡」＝**只吐數字、不吐影像**的那一類。``snr_map`` 掛在 Measure
@@ -299,14 +304,27 @@ def test_every_measure_card_can_take_more_than_one_source(window):
                 or cls.writes or not cls.features_out):
             continue
         if cls.key in ROLE_PORTS:
-            # 角色不同的那一類：驗的東西反過來 —— **要有兩個以上的輸入埠，
-            # 而且每一個都是單一來源**（清單型別在這裡就是那個 bug）。
-            ports = [sp for sp in cls.input_specs() if sp.type == "image_key"]
+            # 角色不同的那一類：驗的東西反過來 —— **在那組參數下要有兩個以上
+            # 的輸入埠，而且每一個都是單一來源**（清單型別在這裡就是那個 bug）。
+            role_params = ROLE_PORTS[cls.key]
+            visible = [sp for sp in cls.input_specs()
+                       if sp.visible_for(role_params)]
+            ports = [sp for sp in visible if sp.type == "image_key"]
             assert len(ports) >= 2, \
-                "%s 的來源有角色之分，那就該是兩個埠" % cls.key
-            assert not [sp for sp in cls.input_specs()
-                        if sp.type == "image_keys"], \
-                "%s 混用了清單來源與角色埠 —— 那兩種接線方式對不起來" % cls.key
+                "%s 在 %r 下的來源有角色之分，那就該是兩個埠" % (cls.key, role_params)
+            assert not [sp for sp in visible if sp.type == "image_keys"], \
+                "%s 在 %r 下混用了清單來源與角色埠 —— 那兩種接線方式對不起來" \
+                % (cls.key, role_params)
+            # 而它的**另一種** method 仍然要是正常的多連一（不然合併就等於
+            # 把「量一塊」那一半弄丟了）。
+            other = {k: ("stats" if v == "compare" else v)
+                     for k, v in role_params.items()}
+            other_visible = [sp for sp in cls.input_specs()
+                             if sp.visible_for(other)]
+            assert not [sp for sp in other_visible if sp.type == "image_key"], \
+                "%s 在 %r 下不該還看得到角色埠" % (cls.key, other)
+            assert [sp for sp in other_visible if sp.type == "image_keys"], \
+                "%s 在 %r 下應該是多連一的清單來源" % (cls.key, other)
             continue
         assert issubclass(cls, MultiSourceStep), \
             "%s 是量測卡，但接不了第二條來源" % cls.key

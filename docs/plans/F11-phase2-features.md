@@ -117,7 +117,7 @@ manifest 的 `label_map`（label id → layer 名）與 alignment CSV/JSON；
 
 | 題 | 答 |
 |---|---|
-| 開發順序 | **從左側功能一步一步往下**（Input → Enhance → Region → Compare → Measure → ADC），**每張卡的功能／UI／設定放哪都要先討論** |
+| 開發順序 | **從左側功能一步一步往下**（F16 起是 Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output），**每張卡的功能／UI／設定放哪都要先討論** |
 | 週期 | **會拉很長**（新功能 + 完善舊功能）—— 所以這一份是議程，不是待辦清單 |
 | 演算法 | **不照抄 vendored 的**：「演算法請幫我移除，我要重新來，基本上不用照抄就有 vendor 的算法（我基本會想要優化改良）」。範圍見 §7.1 |
 | GDS ROI | **d4t 不解析 layout**，只吃上游 GLAS 的 mask（一一對應）。契約見 [`../GLAS-INTERFACE.md`](../GLAS-INTERFACE.md) |

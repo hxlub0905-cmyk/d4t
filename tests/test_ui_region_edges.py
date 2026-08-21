@@ -237,13 +237,18 @@ def test_a_name_the_user_typed_is_not_taken_back(window):
 
 
 def test_a_role_region_port_is_still_replaced(window):
-    """``roi_compare`` 的 target / reference 是**角色**：數量固定、接錯就算錯。
+    """Gray level 的 ``method="compare"`` 下，target / reference 是**角色**：
+    數量固定、接錯就算錯。
 
     往 target 再拉一條的意思是「改比別的」，不是「target 有兩個」。
+
+    （F16 之前這是獨立的 `roi_compare` 卡。合併之後這條測的東西一個字都沒變，
+    只是要先把 method 切到 compare —— 而那正是「兩種接線方式不同時出現」。）
     """
     src = first_source(window, "load_single")
     gds = window.add_card_after(src, "roi_from_mask")
-    cmp_ = window.add_card_after(gds, "roi_compare")
+    cmp_ = window.add_card_after(gds, "glv_stats")
+    window.model.set_param(cmp_, "method", "compare")
     window._on_edge_added(src, gds, "single", "source")
     window.model.set_param(gds, "layers", "1:epi, 2:mg")
     window._on_edge_added(src, cmp_, "single", "target_source")

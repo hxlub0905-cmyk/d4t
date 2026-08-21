@@ -20,12 +20,14 @@ import os
 import sys
 import threading
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from ..ingest import pair_source
 from .cache import StageCache, dataset_token
+from .context import BatchContext
+from .step import REGISTRY, SCALE_LOT
 from .engine import result_to_json_dict, run_defect, run_defect_cached
-from .recipe import Recipe
+from .recipe import Recipe, execution_order
 
 __all__ = ["run_batch", "pin_cv2_deterministic"]
 
@@ -312,3 +314,55 @@ def run_batch(recipe: Recipe, dataset: Any, *,
                 break
 
     return [results[i] for i in sorted(results)]
+
+
+# --------------------------------------------------------------------------- #
+# 跨顆那一層（F16）
+# --------------------------------------------------------------------------- #
+def run_batch_steps(recipe: Recipe, dataset: Any,
+                    rows: Sequence[Dict[str, Any]],
+                    kind: Optional[str] = None,
+                    registry: Optional[Dict[str, Any]] = None) -> BatchContext:
+    """整批跑完之後，把**整批一次**（``scale == SCALE_LOT``）的卡各跑一次。
+
+    **這一支跟 :func:`run_batch` 是分開的兩件事，而那是刻意的。**
+    使用者定調（2026-08-20）：「**試跑不寫，只有整批才寫**」—— Studio 的
+    Run trial 是調參數的迴圈（拖門檻、改參數跟著跑），每拖一下就覆寫一次 KLARF
+    是不可逆的災難。把「寫出去」做成 ``run_batch`` 的一個旗標的話，那個旗標
+    遲早會有人忘記關；做成**另一支要自己叫的函式**，試跑那條路就是根本沒叫它。
+
+    所以規則是一句話：**要寫出東西的那條路自己叫這一支，試跑不叫。**
+    目前叫它的只有 CLI（`python -m d4t run`）—— Studio 只有試跑那條路，
+    它的輸出目前仍然走 Export 精靈（見 docs/ROADMAP.md）。
+
+    一張卡出錯**不影響其他卡**（鐵則 7 的跨顆版）：訊息記進 ``bctx.errors``，
+    其餘照跑，而整批的結果本來就已經在 ``rows`` 裡了。
+    """
+    from .context import BatchContext
+
+    reg = REGISTRY if registry is None else registry
+    k = str(kind if kind is not None else getattr(dataset, "kind", "") or "")
+    bctx = BatchContext(rows=list(rows), dataset=dataset, recipe=recipe, kind=k)
+    try:
+        order = execution_order(recipe, k)
+    except Exception as e:
+        # route 有問題的話 `run_defect` 已經一顆一顆講過了，所以這裡不再報
+        # 一次 error（同一件事兩個訊息，使用者會以為是兩個問題）。但也**不能
+        # 完全不出聲**：`rows` 是空的時候（整批一顆都沒跑）就沒有人講過，
+        # 而症狀會是「按了跑，什麼檔案都沒出現」。
+        bctx.warn("No output was written: this recipe has no route for '%s' "
+                  "(%s)." % (k, e))
+        return bctx
+    for nid in order:
+        node = recipe.nodes.get(nid)
+        if node is None or not node.enabled:
+            continue
+        step_cls = reg.get(node.step)
+        if step_cls is None or step_cls.scale != SCALE_LOT:
+            continue
+        try:
+            params = step_cls.validate_params(node.params)
+            step_cls().run_batch(bctx, params)
+        except Exception as e:              # noqa: BLE001 — 鐵則 7 的跨顆版
+            bctx.errors[nid] = str(e)
+    return bctx

@@ -5,9 +5,12 @@
 """
 from __future__ import annotations
 
-from .context import Context, ContextError
+from .context import Context, ContextError, BatchContext
 from .step import (
     CATEGORY_ADC,
+    CATEGORY_BATCH,
+    SCALE_DEFECT,
+    SCALE_LOT,
     CATEGORY_ALGO,
     CATEGORY_IMAGE,
     ParamError,
@@ -40,15 +43,16 @@ from .engine import (
     run_defect_cached,
 )
 from .cache import StageCache
-from .batch import run_batch
+from .batch import run_batch, run_batch_steps
 
 __all__ = [
     # context
-    "Context", "ContextError",
+    "Context", "ContextError", "BatchContext",
     # step
     "Step", "ParamSpec", "ParamError", "StepError",
     "register_step", "get_step", "list_steps", "REGISTRY",
-    "CATEGORY_IMAGE", "CATEGORY_ALGO", "CATEGORY_ADC",
+    "CATEGORY_IMAGE", "CATEGORY_ALGO", "CATEGORY_ADC", "CATEGORY_BATCH",
+    "SCALE_DEFECT", "SCALE_LOT",
     # recipe
     "Edge", "Recipe", "RecipeNode", "ScoreSpec", "Issue",
     "validate", "execution_order", "RecipeError",
@@ -59,4 +63,5 @@ __all__ = [
     "result_to_json_dict",
     # M2：checkpoint 快取與平行批次
     "run_defect_cached", "image_segment_signature", "StageCache", "run_batch",
+    "run_batch_steps",
 ]

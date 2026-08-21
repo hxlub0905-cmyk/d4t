@@ -2,7 +2,7 @@
   "recipe_id": "dual_route_basic",
   "version": 1,
   "author": "HX",
-  "description": "測試用的最小 recipe（不是給使用者看的範例）。ROI 卡在 F8 第五輪收斂成 Profile / Template / GDS，所以這裡量的是整張圖 —— 這幾條 e2e 測的是**引擎跑不跑得完、分數算不算得出來**，不是某一張 ROI 卡的行為。rsem 那條 route 沒有 ref，靠 `pattern_ref`（2026-08-18 之前叫 `golden_cell`）從圖自己的重複 pattern 疊一張出來。",
+  "description": "測試用的最小 recipe（不是給使用者看的範例）。ebi_patch 那條有機台附的 ref，所以走「相減 → 去噪 → Z-map → CD → GLV」。rsem 那條**沒有 ref**：F16 拿掉 `pattern_ref` 之後，單張影像再也造不出參考圖，所以它改成直接量單張影像（Z-map → CD → GLV）。那條 route 因此**不再是一個準確率的證據** —— 見 tests/test_e2e_dual_route.py。 rsem 那條的影像流叫 `test` 不是 `single`：那條 route 上的 load 卡是由 `_migrate_split_load_cards` 從共用的 `load_patch` 換成 `load_single` 的，而它把輸出名設成 `test`（見那支遷移的 docstring）——這份 fixture 同時是**那道遷移的共用節點案例**。",
   "routes": {
     "ebi_patch": [
       "load",
@@ -17,14 +17,8 @@
     ],
     "rsem": [
       "load",
-      "golden",
-      "norm_ref",
-      "norm",
-      "align",
-      "sub",
-      "dn",
-      "snr",
-      "cd",
+      "snr_rsem",
+      "cd_rsem",
       "glv_rsem"
     ]
   },
@@ -97,20 +91,29 @@
       },
       "enabled": true
     },
-    "golden": {
-      "step": "pattern_ref",
-      "params": {
-        "source": "test",
-        "out": "ref",
-        "method": "median"
-      },
-      "enabled": true
-    },
     "glv_rsem": {
       "step": "glv_stats",
       "params": {
-        "source": "diff",
+        "source": "test",
         "metrics": "glv_max,glv_median,glv_std",
+        "roi": ""
+      },
+      "enabled": true
+    },
+    "snr_rsem": {
+      "step": "snr_map",
+      "params": {
+        "source": "test",
+        "window": 15,
+        "exclude_border": 8,
+        "out": "snr_map"
+      },
+      "enabled": true
+    },
+    "cd_rsem": {
+      "step": "cd_measure",
+      "params": {
+        "source": "test",
         "roi": ""
       },
       "enabled": true
