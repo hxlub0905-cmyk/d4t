@@ -550,6 +550,10 @@ METRIC_GLYPHS = (
     # 識別度比任何示意圖都高，而且跟分布那一族一看就不同族。後兩個畫的是
     # 「差距 ÷ 散布」那個比例本身。
     "delta", "ratio", "percent", "snr", "tstat",
+    # F18 補課第二輪（使用者 2026-08-21：「我覺得 Report 要有更多統計量可以
+    # 量」）。前兩個仍然畫**運算的符號**（|Δ| / 半黑半白的圓 = 對比），後三個
+    # 畫的是它們各自比的東西：名次、兩條分布疊多少、兩段散布誰長。
+    "abs_delta", "contrast", "pct_rank", "overlap", "spread_ratio",
 )
 
 
@@ -783,6 +787,67 @@ def draw_metric_glyph(p: QPainter, name: str, size: float, color: str,
                 p.drawRect(QRectF(pad + bw * 0.10 + i * side * 1.28,
                                   pad + bh * 0.80, side, side))
         p.setBrush(Qt.NoBrush)
+    elif n == "abs_delta":
+        # |Δ| —— 三角形描邊（`delta` 是實心的），兩側各一根絕對值的直槓。
+        p.setPen(QPen(solid, max(1.2, size / 11.0)))
+        p.setBrush(Qt.NoBrush)
+        p.drawPolygon(QPolygonF([
+            QPointF(pad + bw * 0.50, pad + bh * 0.14),
+            QPointF(pad + bw * 0.22, pad + bh * 0.86),
+            QPointF(pad + bw * 0.78, pad + bh * 0.86)]))
+        p.setPen(QPen(solid, max(1.3, size / 10.0), Qt.SolidLine, Qt.RoundCap))
+        for fx in (0.06, 0.94):
+            p.drawLine(QPointF(pad + fx * bw, pad + bh * 0.08),
+                       QPointF(pad + fx * bw, pad + bh * 0.92))
+    elif n == "contrast":
+        # 半黑半白的圓 —— 對比這件事最老的那張圖。
+        box = QRectF(pad + bw * 0.06, pad + bh * 0.06, bw * 0.88, bh * 0.88)
+        p.setPen(QPen(solid, max(1.2, size / 11.0)))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(box)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(solid))
+        p.drawPie(box, 90 * 16, 180 * 16)
+    elif n == "pct_rank":
+        # 一排格子（參照的那些）加一根站在它們右邊的實心標記 —— 「排第幾」。
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(faint))
+        hs = (0.30, 0.44, 0.36, 0.52)
+        cw = bw * 0.17
+        for i, hh in enumerate(hs):
+            p.drawRect(QRectF(pad + i * cw, pad + bh * (1 - hh),
+                              cw * 0.66, bh * hh))
+        p.setBrush(QBrush(solid))
+        p.drawRect(QRectF(pad + bw * 0.76, pad + bh * 0.10, bw * 0.20, bh * 0.90))
+    elif n == "overlap":
+        # 兩個相交的圓，中間那片填起來 = 兩條分布共用的部分。
+        r = bw * 0.30
+        cy = pad + bh * 0.50
+        a = QRectF(pad + bw * 0.02, cy - r, 2 * r, 2 * r)
+        b = QRectF(pad + bw * 0.98 - 2 * r, cy - r, 2 * r, 2 * r)
+        pa, pb = QPainterPath(), QPainterPath()
+        pa.addEllipse(a)
+        pb.addEllipse(b)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(solid))
+        p.drawPath(pa.intersected(pb))
+        # 兩個圈**不用 `faint`**：19 px 下 `#bcbcbc` 的一圈在白底上等於不見，
+        # 而剩下的那片交集看起來只是一顆點。
+        ring = QColor(solid)
+        ring.setAlpha(120)
+        p.setPen(QPen(ring, max(1.1, size / 12.0)))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(a)
+        p.drawEllipse(b)
+    elif n == "spread_ratio":
+        # 兩段長短不同的散布（上長下短）—— 它們的**比**就是這個數字。
+        p.setPen(bold)
+        for fy, fa, fb in ((0.30, 0.06, 0.94), (0.74, 0.34, 0.66)):
+            y = pad + bh * fy
+            p.drawLine(QPointF(pad + fa * bw, y), QPointF(pad + fb * bw, y))
+            for fx in (fa, fb):                # 兩端的擋頭
+                x = pad + fx * bw
+                p.drawLine(QPointF(x, y - bh * 0.11), QPointF(x, y + bh * 0.11))
     elif n == "saturated":
         curve(_dist_curve())
         p.setPen(Qt.NoPen)                    # 貼在頂端的那一根
@@ -2400,18 +2465,27 @@ METRIC_GROUPS: Dict[str, Tuple[str, str, str]] = {
     # 「跟誰比」那一排 —— 同一個 widget、同一種膠囊（F18 補課，2026-08-21）。
     # 使用者：「Compare 跟 absolute 一樣重要，而且它的 Metric 面板 UI 也沒有
     # Statistics 那麼漂亮，我覺得可以改成切換式」。
-    "delta": ("Compare", "Difference", "delta"),
-    "ratio": ("Compare", "Ratio", "ratio"),
-    "percent": ("Compare", "Percent", "percent"),
-    "snr": ("Compare", "SNR", "snr"),
-    "tstat": ("Compare", "t-stat", "tstat"),
+    #
+    # **分成三群不是分成一群**（F18 補課第二輪，使用者：「我覺得 Report 要有
+    # 更多統計量可以量」）：九顆膠囊排成一列的時候，「哪幾個需要參照的格子」
+    # 這件事在畫面上看不出來 —— 而它正是「為什麼我的 snr 是空的」的答案。
+    "delta": ("Difference", "Difference", "delta"),
+    "abs_delta": ("Difference", "|Difference|", "abs_delta"),
+    "ratio": ("Difference", "Ratio", "ratio"),
+    "percent": ("Difference", "Percent", "percent"),
+    "contrast": ("Difference", "Contrast", "contrast"),
+    "snr": ("Vs boxes", "SNR", "snr"),
+    "tstat": ("Vs boxes", "t-stat", "tstat"),
+    "pct_rank": ("Vs boxes", "Rank %", "pct_rank"),
+    "overlap": ("Distributions", "Overlap", "overlap"),
+    "spread_ratio": ("Distributions", "Spread ratio", "spread_ratio"),
 }
 
 #: 分群的顯示順序。不在 :data:`METRIC_GROUPS` 裡的 id（手寫 recipe 的
 #: ``glv_q37``、``glv_trim05``…）落在最後一群 —— **列出來並且勾著**，因為
 #: 「看不到就被靜靜刪掉」是最糟的一種幫忙（同 `MultiChoicePicker` 的老規矩）。
 METRIC_GROUP_ORDER = ("Center", "Spread", "Ends", "Shape", "Counts",
-                      "Compare", "Other")
+                      "Difference", "Vs boxes", "Distributions", "Other")
 
 
 def metric_face(mid: str) -> Tuple[str, str, str]:
@@ -2708,6 +2782,19 @@ class MetricChips(QWidget):
         # 按了會加出一個那張表不認得的值的鈕。
         adders = any(str(m).startswith("glv_") for m in ids)
 
+        # 群名那一欄有多寬**由最長的那個群名決定**，不是一個寫死的數字。
+        # 以前是 46 px，剛好裝得下 Statistics 的五個群（Center…Counts）——
+        # 而 Report 分成三群之後，「Difference」與「Distributions」在畫面上
+        # 是「ifference」與「ributions」。同一種 QSS 的字級也要進度量
+        # （`* { font-size: 13px }` 會蓋掉 `setFont`，那是膠囊那邊踩過的坑）。
+        gf = QFont(self.font())
+        gf.setPixelSize(10)
+        gm = QFontMetricsF(gf)
+        shown = [g for g in METRIC_GROUP_ORDER
+                 if (by_group.get(g) or (adders and g == "Ends"))]
+        label_w = (max([46] + [int(gm.horizontalAdvance(g)) + 4 for g in shown])
+                   if len(by_group) > 1 else 46)
+
         row = 1
         for group in METRIC_GROUP_ORDER:
             members = by_group.get(group) or []
@@ -2719,7 +2806,12 @@ class MetricChips(QWidget):
             lbl = QLabel(group if len(by_group) > 1 else "", self)
             lbl.setObjectName("metricGroup")
             lbl.setAlignment(Qt.AlignRight | Qt.AlignTop)
-            lbl.setFixedWidth(46)
+            # 字級**兩邊都設**（QFont 與 QSS）：`* { font-size: 13px }` 會蓋掉
+            # `setFont`，所以只設 QFont 的話畫出來是 13 px；只設 QSS 的話
+            # `lbl.fontMetrics()` 量的是 13 px 而畫出來是 10 px —— 兩種都會讓
+            # 「這個字裝得下嗎」的答案跟畫面不一致（膠囊那邊踩過同一個坑）。
+            lbl.setFont(gf)
+            lbl.setFixedWidth(label_w)
             lbl.setStyleSheet("color:%s; font-size:10px; padding-top:8px;"
                               % TOKENS["text_hint"])
             flow = _ChipFlow(self)

@@ -285,14 +285,30 @@ def roi_metric(image: np.ndarray, roi: ROI, mid: str) -> float:
 #: **值是英文的**：它們會顯示給使用者（`tests/test_ui_english_only.py` 會擋）。
 #: 中文的說明寫在註解與 :func:`compare_pixels` 的 docstring 裡。
 COMPARE_METRICS: Dict[str, str] = {
+    # -- 灰階上的算術（只用兩個 stat）------------------------------------
     "delta": "target minus reference, in gray levels",
+    "abs_delta": "the same, without the direction",
     "ratio": "target divided by reference",
     "percent": "the difference as a percentage of the reference",
+    "contrast": ("the difference over the sum of the two - between -1 and 1, "
+                 "and it still means something when the reference is nearly "
+                 "black"),
+    # -- 跟參照的那些格子比（需要 reference_boxes）------------------------
     "snr": ("how far apart they are, in standard deviations of the "
             "reference's own box-to-box variation (never negative - the "
             "direction is what delta is for)"),
     "tstat": "the same, but with how many reference boxes there are taken into account",
+    "pct_rank": ("where the target sits among the reference boxes, 0-100 - "
+                 "100 means it is brighter than every one of them"),
+    # -- 兩堆像素的分布（不看 stat）--------------------------------------
+    "overlap": ("how much of the two gray-level distributions coincide, "
+                "0 to 1 - 0 means they share no gray level at all"),
+    "spread_ratio": ("how much rougher the target is than the reference "
+                     "(MAD over MAD), 1 means equally uniform"),
 }
+
+#: 這幾個**要有 `reference_boxes`** 才算得出來（少於兩格 → `nan` → 不寫）。
+BOX_METRICS = ("snr", "tstat", "pct_rank")
 
 
 def compare_pixels(target: np.ndarray, reference: np.ndarray,
@@ -337,15 +353,28 @@ def compare_pixels(target: np.ndarray, reference: np.ndarray,
     tv = glv_value(t, stat)
     rv = glv_value(r, stat)
     out: Dict[str, float] = {"delta": float(tv - rv)}
+    out["abs_delta"] = float(abs(tv - rv))
     out["ratio"] = float(tv / rv) if abs(rv) > 1e-12 else float("nan")
     out["percent"] = (float((tv - rv) / rv * 100.0) if abs(rv) > 1e-12
                       else float("nan"))
+    # Michelson 對比：分母是**和**不是參照，所以參照接近黑的時候它不會爆掉
+    # （`ratio` 與 `percent` 在那裡會噴出幾千）。範圍恆在 −1..1。
+    total = tv + rv
+    out["contrast"] = (float((tv - rv) / total) if abs(total) > 1e-12
+                       else float("nan"))
+
+    # 粗糙度的比：**問的不是亮不亮，是均不均勻**。用 MAD 不用 std，理由跟
+    # `DEFAULT_METRICS` 換成 robust 那一組一樣（一顆 hot pixel 就能拉走 std）。
+    mad_r = glv_value(r, "glv_mad")
+    out["spread_ratio"] = (float(glv_value(t, "glv_mad") / mad_r)
+                           if mad_r > _EPS else float("nan"))
+    out["overlap"] = _hist_overlap(t, r)
 
     boxes = [float(v) for v in (reference_boxes or [])
              if v is not None and np.isfinite(v)]
     if len(boxes) < 2:
-        out["snr"] = float("nan")
-        out["tstat"] = float("nan")
+        for k in BOX_METRICS:
+            out[k] = float("nan")
         return out
     # ddof=1：這幾格是「同類的格子」的一個樣本，不是全部的母體。格子數常常
     # 只有幾十個，那個差別看得出來。
@@ -354,7 +383,35 @@ def compare_pixels(target: np.ndarray, reference: np.ndarray,
     out["snr"] = float(gap / sd_box) if sd_box > 1e-9 else float("nan")
     se = sd_box / (len(boxes) ** 0.5)
     out["tstat"] = float(gap / se) if se > 1e-12 else float("nan")
+    # 名次：**不假設那些格子是常態分布的**。σ 說「幾倍」，這一個說「排第幾」——
+    # 格子的分布歪掉（例如邊緣那幾格系統性偏暗）時，前者會誇大而後者不會。
+    below = sum(1 for v in boxes if v < tv)
+    same = sum(1 for v in boxes if v == tv)
+    out["pct_rank"] = float(100.0 * (below + 0.5 * same) / len(boxes))
     return out
+
+
+def _hist_overlap(t: np.ndarray, r: np.ndarray) -> float:
+    """兩堆像素的灰階分布**重疊多少**（0..1）。
+
+    ``sum(min(h_T, h_R))``，兩邊各自正規化成 1 —— 所以它跟「哪一塊比較大」
+    無關（參照常常是 target 的幾十倍大）。1 = 兩條分布疊得一模一樣，
+    0 = 連一個灰階都不共用。
+
+    **它是 Report 裡唯一不看 `Compare their` 那一格的數字**：其餘的都先把兩塊
+    各壓成一個統計量再相減，而這一個比的是整條分布。兩塊平均一樣、但一塊平坦
+    一塊分成兩座山的時候，只有它看得出來。
+
+    bin 走 :func:`pixel_hist` 的 0–255 固定格（整張卡的橫軸就是它）——
+    **不用資料自己的範圍**：那樣每顆 defect 的 bin 寬度都不同，算出來的數字
+    彼此不能比，而它會被打進分數表達式裡跟一個固定門檻比大小。
+    """
+    ht, _ = pixel_hist(t, bins=256)
+    hr, _ = pixel_hist(r, bins=256)
+    st, sr = float(ht.sum()), float(hr.sum())
+    if st <= 0.0 or sr <= 0.0:
+        return float("nan")
+    return float(np.minimum(ht / st, hr / sr).sum())
 
 
 def group_snr(image: np.ndarray, rois: List[ROI],

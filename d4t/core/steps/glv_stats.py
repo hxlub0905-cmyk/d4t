@@ -127,12 +127,35 @@ DEFAULT_METRICS = "glv_median,glv_mad,glv_min,glv_max"
 #: 順序＝畫面上的順序；分群與短標籤住在 `ui/widgets.METRIC_GROUPS`
 #: （引擎說「有哪些」，UI 說「長什麼樣」）。
 METRIC_CHOICES = (
-    "glv_median", "glv_mean", "glv_trim10",
+    "glv_median", "glv_mean",
     "glv_mad", "glv_std", "glv_iqr",
     "glv_min", "glv_max",
-    "glv_skew", "glv_kurt", "glv_entropy", "glv_bimodality",
+    "glv_skew", "glv_bimodality",
     "glv_above128", "glv_sat_frac",
 )
+
+#: **收起來的那幾顆**（使用者 2026-08-21：「請幫我將這些收起來」）。
+#:
+#: 收起來 ≠ 刪掉（`CLAUDE.md` §5 那張表）：它們仍然算得出來、手寫得進 recipe、
+#: 舊 recipe 照跑、黃金值不動 —— 拿掉的只有卡片庫上那一顆膠囊。要回來的成本
+#: 是把字串搬回上面那一份。
+#:
+#: 為什麼是這三顆：`glv_trim10` 夾在 median 與 mean 中間（三顆都留等於同一件
+#: 事量三次）、`glv_kurt` 最難解釋而且已經被包在 `glv_bimodality` 的分母裡、
+#: `glv_entropy` 常被對比度與雜訊混淆。
+HIDDEN_METRICS = ("glv_trim10", "glv_kurt", "glv_entropy")
+
+#: ``Report`` 那一格列得出來的（同樣**不是**全部合法的 id ——
+#: :data:`algo_glv.COMPARE_METRICS` 才是，而驗證看的是後者）。
+#:
+#: `percent` 收起來的理由跟上面同一種：``percent = (ratio − 1) × 100``，
+#: 同一個數字兩種寫法。留下 `ratio`，而參照接近黑的時候該用的是 `contrast`。
+COMPARE_CHOICES = (
+    "delta", "abs_delta", "ratio", "contrast",
+    "snr", "tstat", "pct_rank",
+    "overlap", "spread_ratio",
+)
+HIDDEN_COMPARE_METRICS = ("percent",)
 
 #: 「跟誰比」的四個答案（F18 第 5 步，2026-08-21）。順序＝下拉的順序。
 #:
@@ -317,16 +340,20 @@ class GlvStatsStep(MultiSourceStep):
             name="compare_metrics", type="metric_chips",
             default=DEFAULT_COMPARE_METRICS, section="3 · Compare against",
             show_when=("reference", tuple(r for r in REFERENCES if r != REF_NONE)),
-            choices=list(algo_glv.COMPARE_METRICS),
+            choices=list(COMPARE_CHOICES),
             label="Report",
-            help=("delta is the plain difference in gray levels. snr divides "
-                  "it by how much the reference itself varies, which answers "
-                  "“is this bigger than the normal spread?” - the same signed "
-                  "convention the rest of d4t uses. tstat is snr with the "
-                  "region sizes taken into account, which matters when one "
-                  "region has far more pixels than the other. ratio and "
-                  "percent are the same difference expressed relative to the "
-                  "reference."),
+            help=("Three families. Difference is plain arithmetic on the two "
+                  "numbers: delta in gray levels (it keeps the direction), "
+                  "abs_delta without it, ratio, and contrast, which is the "
+                  "difference over the sum and so survives a nearly black "
+                  "reference. Vs boxes asks “is this bigger than the normal "
+                  "spread?”: snr counts standard deviations of the "
+                  "reference's own box-to-box variation, tstat also counts "
+                  "how many boxes there are, and pct_rank just says where the "
+                  "target ranks among them. Distributions ignore the "
+                  "statistic above and compare all the pixels: overlap is how "
+                  "much the two gray-level distributions coincide, "
+                  "spread_ratio how much rougher the target is."),
         ),
         # ---- 量得準不準（F18 第 4 步）--------------------------------------
         # 三個都**預設不作用**：既有 recipe 的 JSON 沒有這幾個鍵，

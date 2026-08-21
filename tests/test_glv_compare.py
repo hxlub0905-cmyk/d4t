@@ -277,6 +277,102 @@ def test_the_statistic_being_compared_is_the_users_choice():
     assert mean > 0.1 and median == pytest.approx(0.0)
 
 
+def test_contrast_survives_a_nearly_black_reference():
+    """`ratio` / `percent` 在參照接近 0 的時候會噴出幾千 —— `contrast` 不會。
+
+    這不是理論上的角落：`diff` 那一條流的背景本來就在 0 附近，而使用者是拿
+    一個固定門檻去比這個數字的。
+    """
+    dim = algo_glv.compare_pixels(np.full(50, 12.0), np.full(50, 0.4))
+    assert dim["ratio"] > 25.0, "比值在這裡沒有可用的刻度"
+    assert -1.0 <= dim["contrast"] <= 1.0
+    assert dim["contrast"] == pytest.approx((12.0 - 0.4) / 12.4)
+
+    # 一樣亮 → 0；而它跟 delta 一樣**帶方向**
+    same = algo_glv.compare_pixels(np.full(50, 90.0), np.full(50, 90.0))
+    assert same["contrast"] == pytest.approx(0.0)
+    dark = algo_glv.compare_pixels(np.full(50, 40.0), np.full(50, 90.0))
+    assert dark["contrast"] < 0 < dim["contrast"]
+
+
+def test_abs_delta_is_delta_without_the_direction():
+    up = algo_glv.compare_pixels(np.full(50, 130.0), np.full(50, 100.0))
+    down = algo_glv.compare_pixels(np.full(50, 70.0), np.full(50, 100.0))
+    assert up["delta"] == pytest.approx(-down["delta"])
+    assert up["abs_delta"] == down["abs_delta"] == pytest.approx(30.0)
+
+
+def test_pct_rank_says_where_it_ranks_without_assuming_a_bell():
+    """名次不假設那些格子是常態分布的 —— σ 說「幾倍」，它說「排第幾」。"""
+    boxes = [98.0, 99.0, 100.0, 101.0, 102.0]
+    r = np.full(200, 100.0)
+
+    top = algo_glv.compare_pixels(np.full(200, 140.0), r, reference_boxes=boxes)
+    assert top["pct_rank"] == pytest.approx(100.0), "比每一格都亮"
+    bottom = algo_glv.compare_pixels(np.full(200, 10.0), r, reference_boxes=boxes)
+    assert bottom["pct_rank"] == pytest.approx(0.0)
+    mid = algo_glv.compare_pixels(np.full(200, 100.0), r, reference_boxes=boxes)
+    assert mid["pct_rank"] == pytest.approx(50.0), "正中間（兩格低、一格同）"
+
+    # 跟 snr / tstat 同一條規矩：少於兩格 → 沒有答案（**不是 0**）
+    assert np.isnan(algo_glv.compare_pixels(np.full(9, 5.0), r)["pct_rank"])
+
+
+def test_overlap_and_spread_ratio_see_what_one_statistic_cannot():
+    """兩塊的平均一模一樣，而它們根本不是同一件事。
+
+    這是「Report 只有 delta 那一族」時整個看不見的一種缺陷：`delta` = 0、
+    `ratio` = 1、`snr` = 0，而其中一塊是雙峰的、粗糙度差三倍。
+    """
+    rng = np.random.default_rng(3)
+    ref = rng.normal(100.0, 3.0, 4000)
+    # 同樣的平均，一半 70 一半 130 —— 兩座山，沒有一個像素落在 100 附近
+    tgt = np.concatenate([np.full(2000, 70.0), np.full(2000, 130.0)])
+
+    got = algo_glv.compare_pixels(tgt, ref, stat="glv_mean")
+    assert abs(got["delta"]) < 1.0, "壓成一個統計量之後它們一樣"
+    assert got["overlap"] == pytest.approx(0.0, abs=1e-6), "連一個灰階都不共用"
+    assert got["spread_ratio"] > 5.0, "粗糙得多"
+
+    # 同一堆像素跟自己比 → 完全重疊、一樣粗
+    same = algo_glv.compare_pixels(ref, ref.copy(), stat="glv_mean")
+    assert same["overlap"] == pytest.approx(1.0)
+    assert same["spread_ratio"] == pytest.approx(1.0)
+
+
+def test_overlap_does_not_care_which_side_is_bigger():
+    """參照常常是 target 的幾十倍大 —— 兩邊各自正規化，所以那不影響答案。"""
+    rng = np.random.default_rng(7)
+    small = rng.normal(100.0, 4.0, 300)
+    big = rng.normal(100.0, 4.0, 30000)
+    a = algo_glv.compare_pixels(small, big)["overlap"]
+    b = algo_glv.compare_pixels(small, big[:3000])["overlap"]
+    assert a == pytest.approx(b, abs=0.06)
+    assert a > 0.7, "同一個母體的兩份樣本應該疊得很好"
+
+
+def test_the_hidden_metrics_are_hidden_not_gone():
+    """收起來 ≠ 刪掉（使用者 2026-08-21：「請幫我將這些收起來」）。
+
+    卡片庫上沒有它們，但**手寫進 recipe 照樣算得出來、舊 recipe 照跑** ——
+    那正是「收起來」值得選的理由：回復的成本是把字串搬回清單。
+    """
+    from d4t.core.steps.glv_stats import (COMPARE_CHOICES,
+                                          HIDDEN_COMPARE_METRICS,
+                                          HIDDEN_METRICS, METRIC_CHOICES)
+
+    for mid in HIDDEN_METRICS:
+        assert mid not in METRIC_CHOICES
+        assert np.isfinite(algo_glv.glv_value(np.arange(64.0), mid))
+    for mid in HIDDEN_COMPARE_METRICS:
+        assert mid not in COMPARE_CHOICES
+        assert mid in algo_glv.COMPARE_METRICS      # 驗證看的是這一份
+
+    ctx = _run(_ctx(), metrics="glv_median,glv_entropy",
+               compare_metrics="delta,percent")
+    assert "glv_entropy" in ctx.features and "percent" in ctx.features
+
+
 def test_an_unknown_comparison_is_refused_with_the_list():
     with pytest.raises(StepError) as e:
         _run(_ctx(), compare_metrics="delta,bogus")

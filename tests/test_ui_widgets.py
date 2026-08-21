@@ -798,6 +798,77 @@ def test_every_statistic_the_card_offers_has_a_face(qapp):
     assert widgets_mod.metric_face("glv_above200")[0] == "Counts"
 
 
+def test_every_report_metric_the_card_offers_has_a_face(qapp):
+    """Report 那一格跟 Statistics 同一條規矩（F18 補課第二輪，2026-08-21）。
+
+    使用者：「我覺得 Report 要有更多統計量可以量」。多的那五顆一樣要有分群、
+    短標籤與小圖 —— 沒有的話它們會是一排原始 id 的膠囊排在漂亮的那幾顆旁邊。
+    """
+    from d4t.core.steps.glv_stats import COMPARE_CHOICES
+
+    groups = set()
+    for mid in COMPARE_CHOICES:
+        group, label, glyph = widgets_mod.metric_face(mid)
+        assert group in widgets_mod.METRIC_GROUP_ORDER, mid
+        assert group != "Other", "%s 沒有登記在 METRIC_GROUPS" % mid
+        assert label and glyph in widgets_mod.METRIC_GLYPHS, mid
+        groups.add(group)
+    # **「哪幾個需要參照的格子」要在畫面上分得出來** —— 那是「為什麼我的 snr
+    # 是空的」唯一的線索。
+    assert groups == {"Difference", "Vs boxes", "Distributions"}
+    assert widgets_mod.metric_face("pct_rank")[0] == "Vs boxes"
+
+
+def test_a_hidden_metric_is_still_shown_when_a_recipe_has_it(qapp):
+    """收起來 ≠ 刪掉（使用者 2026-08-21：「請幫我將這些收起來」）。
+
+    卡片庫上沒有那顆膠囊，但舊 recipe 帶著它進來的時候要列出來並且勾著 ——
+    「看不到就被靜靜刪掉」是這個 widget 從 `MultiChoicePicker` 繼承來的老規矩。
+    """
+    from d4t.core.steps.glv_stats import (COMPARE_CHOICES, HIDDEN_METRICS,
+                                          HIDDEN_COMPARE_METRICS,
+                                          METRIC_CHOICES)
+
+    for mid in HIDDEN_METRICS:
+        assert mid not in METRIC_CHOICES
+    for mid in HIDDEN_COMPARE_METRICS:
+        assert mid not in COMPARE_CHOICES
+
+    w = widgets_mod.MetricChips(METRIC_CHOICES, "glv_median,glv_entropy")
+    assert w.chip("glv_entropy") is not None
+    assert w.chip("glv_entropy").is_checked()
+    assert "glv_entropy" in w.text()
+    # 而且它們照樣有臉（收起來的只有清單上那一顆膠囊）
+    assert widgets_mod.metric_face("glv_kurt")[0] == "Shape"
+    assert widgets_mod.metric_face("percent")[0] == "Difference"
+
+    c = widgets_mod.MetricChips(COMPARE_CHOICES, "delta,percent")
+    assert c.chip("percent") is not None and c.chip("percent").is_checked()
+
+
+def test_the_group_column_fits_the_longest_group_name(qapp):
+    """群名那一欄的寬度**由最長的群名決定**，不是一個寫死的 46 px。
+
+    寫死的那個數字剛好裝得下 Statistics 的五個群（Center…Counts），所以
+    Report 分成三群的那一刻，畫面上是「ifference」與「ributions」——
+    一個切掉了頭的字，而不是一個看起來就壞掉的版面。
+    """
+    from PySide6.QtWidgets import QLabel
+
+    from d4t.core.steps.glv_stats import COMPARE_CHOICES
+
+    w = widgets_mod.MetricChips(list(COMPARE_CHOICES), "delta,snr")
+    seen = {}
+    for lbl in w.findChildren(QLabel):
+        if lbl.objectName() == "metricGroup" and lbl.text():
+            seen[lbl.text()] = lbl
+    assert "Distributions" in seen, "群名沒有印出來"
+    for text, lbl in seen.items():
+        need = lbl.fontMetrics().horizontalAdvance(text)
+        assert lbl.width() >= need, "%s 被切掉了（%d < %d）" % (
+            text, lbl.width(), need)
+
+
 def test_metric_chips_round_trip_the_recipe_string(qapp):
     """值的格式跟 ``multi_choice`` 一字不差 —— 換掉的只有長相。"""
     from d4t.core.steps.glv_stats import DEFAULT_METRICS, METRIC_CHOICES
@@ -866,12 +937,12 @@ def test_the_compare_chips_do_not_offer_to_add_a_percentile(qapp):
 
     在「跟誰比」那一格長出它，會是一顆按了就加出一個那張表不認得的值的鈕。
     """
-    from d4t.core.algo.glv import COMPARE_METRICS
+    from d4t.core.steps.glv_stats import COMPARE_CHOICES
 
-    w = widgets_mod.MetricChips(list(COMPARE_METRICS), "delta,snr")
-    assert set(w.choice_names()) == set(COMPARE_METRICS)
+    w = widgets_mod.MetricChips(list(COMPARE_CHOICES), "delta,snr")
+    assert set(w.choice_names()) == set(COMPARE_CHOICES)
     assert not [c for c in w.findChildren(widgets_mod._MetricChip) if c.adder]
-    assert widgets_mod.metric_face("snr") == ("Compare", "SNR", "snr")
+    assert widgets_mod.metric_face("snr") == ("Vs boxes", "SNR", "snr")
 
     # Statistics 那一格照樣有
     from d4t.core.steps.glv_stats import METRIC_CHOICES

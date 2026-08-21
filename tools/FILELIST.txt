@@ -5,7 +5,7 @@ a6b298c38249d1758d17f7780df10626e05c809d .gitignore
 dc5d3e24d36ca139df3d9ccac1034075e7698f6e AGENTS.md
 8ad51660214ce61e629e9ef97a1b4cfdd0fb910a CLAUDE.md
 b20e9b7f31aa8195e297b4a124b69252cd4c56cf README.md
-9636f0a0a657d3c4727f45a94c4e8b2e30354ea7 SESSION_LOG.md
+80f141a4f61e25d1a9421c91b3dabfd270d8f96c SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 fa7805cc486a9e7dda00cd42366d7b95fc486862 d4t/__main__.py
@@ -14,7 +14,7 @@ e75a08b69155620720f17d638c3b8e14489091f3 d4t/core/__init__.py
 9f95cc3f4f930324566729bd82462d38777841d2 d4t/core/algo/align.py
 ee35d3a74a03161fd795cb83d72d5aca0622273a d4t/core/algo/curve.py
 d2f7e50ff4920fefc608e7d83117c771276104b7 d4t/core/algo/enhance.py
-bdcf6bead7895f9d48e5b31aba051e1c8b8506eb d4t/core/algo/glv.py
+06484831bc54fcb363434d1af1795981486c7695 d4t/core/algo/glv.py
 0cab7d03486a6ca498b9aa2831f34e02dc273d11 d4t/core/algo/golden.py
 36dba0cb2492842918d64a6c855214bad2266b7b d4t/core/algo/grid.py
 01246b411a141df2e3d1281d272275ea709d8935 d4t/core/algo/histmatch.py
@@ -60,7 +60,7 @@ d908fe6e0daf98a16f6fbc1115cefdd5641f5f57 d4t/core/steps/cd.py
 39bbc384b66e024f67200a76598d4f6f255e5100 d4t/core/steps/denoise.py
 93588a88b65e8b98525d7344246251b13f9da31b d4t/core/steps/feature_math.py
 00f877fe38f316bc2a74cb2659a2e5ac63b7055c d4t/core/steps/flatten.py
-c42ac8d47ceacad14c39ec9600d7377c6435a532 d4t/core/steps/glv_stats.py
+e232b319b7a9441486e007c0cd211116e4f1d4a9 d4t/core/steps/glv_stats.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
@@ -93,7 +93,7 @@ b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 b24576feb08cf1517b18a0d0a04f302fcb9ea840 d4t/ui/theme.py
 af42b652c4e56b5a8458ab24a5f03ee959638139 d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
-283716d19a91516e801825470d086827fca09cfb d4t/ui/widgets.py
+6d2e9e1cb4c86a4225dffab3c8c480e03227ba4c d4t/ui/widgets.py
 2eb7813f6dbd6c7d0beff0496ed0d1e6dc87d484 d4t/ui/workers.py
 b422213d7d29a9914abfe9cb76bd23f434fbe13c docs/ARCHITECTURE.md
 d2e715f4e80e97523329d2f400138e68b2b6f82f docs/FAB-VALIDATION.md
@@ -106,7 +106,7 @@ f0d4a071efb72fb1829ccb6cc01dec549c47b8a9 docs/ROADMAP.md
 f6378d9ba391a4e1e3ef7ed855c7694b6b7f50b9 docs/plans/F0-master-plan.md
 d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 c4f06765ad918545511da042eb8d2b63df19795f docs/plans/F15-pair-sources.md
-af0001543d5da0d9e4fa6d0b86c777084eee54fd docs/plans/F18-glv.md
+67ede0ba5e0836e2575515bfb50a5c6bf874d2ca docs/plans/F18-glv.md
 773d4c5652e1abd95b7bf06591a691c07c1c9fa1 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -156,7 +156,7 @@ af91354855f9f11d953dfd45857bb779eb4c55dd tests/test_f11_split_load_cards.py
 174025a7a178c938717f8b8eee4095e19d2165e3 tests/test_feature_owner_prefix.py
 21b2046491056e3656ad2f7905951a6e5902b0fa tests/test_glas_sidecar.py
 32a5dcca2bcda8a98897603cfe771268e012e926 tests/test_glv.py
-a57642d3d3150ee802c21c4bf7f5297e76a253b7 tests/test_glv_compare.py
+fdc54a90646311076abaaaba849cb7a84b376ab0 tests/test_glv_compare.py
 675878e5aa5eb58645f91f8b7645f13c81995a5a tests/test_golden_features.py
 68f4c1d0784f125b13994a5fc576da6ac9270279 tests/test_histmatch.py
 fe72fa26322dce38e7c382a5d7cbb19a3cfd5a95 tests/test_klarf_core.py
@@ -238,7 +238,7 @@ ffaf2b51fd05ba67c769cd6145cc7678e7fa7201 tests/test_ui_results.py
 aac33a171461716ba66c0897a7ecb7c2b9b5526b tests/test_ui_studio_m5.py
 7b68620f346d92ce5881cb47ce652801b28d2e0f tests/test_ui_studio_smoke.py
 f6714258293363ce472b166d0afed030cb7c8f8f tests/test_ui_welcome.py
-56da65703e64e2ef71fc70806e8bce9f83583d72 tests/test_ui_widgets.py
+68e742ad818d0a8377dd09825bc1ffa3b520f214 tests/test_ui_widgets.py
 9b0109451826af217e7fdba9108d3d414161a74f tests/test_ui_workers.py
 ef81a4b13388fde52b6f5cda5e25e4f3dee6a382 tests/test_viewmodel.py
 053de95b4e3bc885b9ce45f8c850f6a885345ba8 tools/_synth.py

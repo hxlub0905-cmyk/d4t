@@ -471,6 +471,56 @@ Statistics 那麼漂亮，我覺得可以改成切換式」。
 
 ---
 
+## 8.7 收起四顆、Report 從五個變九個（2026-08-21，使用者列完定義之後）
+
+使用者先問「你可以每個 Statistic 跟 Report 的定義列出來嗎，因為我可能會認為
+有些不需要」，看完之後兩句話：**「請幫我將這些收起來：Trimmed mean、
+Kurtosis、Entropy、Percent」**、**「我覺得 Report 要有更多統計量可以量」**。
+
+### 8.7.1 收起來 ≠ 刪掉，而這一次連「哪一份是清單」都要分開
+
+`METRIC_CHOICES` 本來就**不是**全部合法的 id（任意分位數寫得進 recipe），
+所以 Statistics 那三顆直接從清單拿掉就是「收起來」：算得出來、舊 recipe 照跑、
+黃金值不動。
+
+`percent` 不一樣：`algo_glv.COMPARE_METRICS` 同時是**清單**與**驗證表**
+（`_check` 拿它擋不認得的值）。從那一份拿掉等於**刪掉** —— 舊 recipe 會在
+「這不是一個比較」那句話上炸。所以多了一份 `COMPARE_CHOICES`（卡片庫列什麼），
+驗證仍然看 `COMPARE_METRICS`（什麼算得出來）。兩份的關係跟 Statistics 那邊
+一字不差：**引擎說「有哪些」，UI 說「列哪些」**。
+
+收起來的四顆與理由：`glv_trim10` 夾在 median 與 mean 中間、`glv_kurt` 最難
+解釋而且已經在 `glv_bimodality` 的分母裡、`glv_entropy` 常被對比度與雜訊混淆、
+`percent` 是 `(ratio − 1) × 100`（同一個數字兩種寫法）。
+
+### 8.7.2 多的五個，分成三群
+
+| 群 | id | 是什麼 | 為什麼值得多一顆 |
+|---|---|---|---|
+| Difference | `abs_delta` | \|Δ\| | 方向不重要的時候，門檻不必寫兩條 |
+| Difference | `contrast` | (T−R)/(T+R) | 參照接近黑的時候 `ratio`/`percent` 會噴出幾千，它恆在 −1..1 |
+| Vs boxes | `pct_rank` | 在參照那些格子裡排第幾（0–100）| **不假設格子是常態分布的** —— σ 說「幾倍」，它說「排第幾」 |
+| Distributions | `overlap` | 兩條灰階分布疊多少（0–1）| Report 裡**唯一不看 `Compare their`** 的數字：兩塊平均一樣、一塊卻是雙峰的時候，只有它看得出來 |
+| Distributions | `spread_ratio` | MAD_T / MAD_R | 問的不是亮不亮，是**均不均勻** |
+
+**分成三群不是分成一群**：九顆排成一列的時候，「哪幾個需要參照有好幾格」
+在畫面上看不出來 —— 而那正是「為什麼我的 snr 是空的」的答案。`pct_rank` 跟
+`snr`/`tstat` 同一條規矩：少於兩格 → 不寫（不是 0）。
+
+`overlap` 的 bin 走 `pixel_hist` 的 **0–255 固定格**，不用資料自己的範圍：
+後者每顆 defect 的 bin 寬度都不同，而這個數字會被打進分數表達式跟一個固定
+門檻比大小。兩邊各自正規化，所以「參照比 target 大幾十倍」不影響答案。
+
+### 8.7.3 一個只有做了才看得到的版面 bug
+
+群名那一欄的寬度是寫死的 46 px —— 剛好裝得下 Statistics 的五個群
+（Center…Counts）。Report 分成三群的那一刻，畫面上是「ifference」與
+「ributions」。改成由最長的群名算出來，而**字級要 QFont 與 QSS 兩邊都設**：
+`* { font-size: 13px }` 會蓋掉 `setFont`，只設一邊的話「這個字裝得下嗎」量到的
+跟畫出來的不是同一個尺寸（膠囊的文字被切成「Trimmed mear」是同一個坑）。
+
+---
+
 ## 9. 不在這一輪，但已經談過的
 
 * **CD 整張重做**（使用者：「基本上要全部砍掉」）—— `profile` / `contour` /

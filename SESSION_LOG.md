@@ -19,6 +19,35 @@
 
 ---
 
+## F18 第四件：收起四顆、Report 從五個變九個（2026-08-21）
+
+使用者先要一份「每個 Statistic 跟 Report 的定義」，說「因為我可能會認為，
+有些不需要」。列完之後兩句話：**收起 Trimmed mean / Kurtosis / Entropy /
+Percent**、**「Report 要有更多統計量可以量」**。
+
+* **收起來 ≠ 刪掉**（`CLAUDE.md` §5）。Statistics 那三顆直接離開
+  `METRIC_CHOICES` 就成立 —— 那一份本來就不是「全部合法的 id」。
+  `percent` 不行：`COMPARE_METRICS` 同時是清單**與驗證表**，從它拿掉等於
+  舊 recipe 會炸。所以多了一份 `COMPARE_CHOICES`（列什麼），驗證仍看
+  `COMPARE_METRICS`（算得出什麼）—— 跟 Statistics 那邊一字不差。
+* **多的五個分成三群**：Difference（`abs_delta`、`contrast`）、
+  Vs boxes（`pct_rank`）、Distributions（`overlap`、`spread_ratio`）。
+  分群不是排版偏好：九顆排成一列的時候，「哪幾個需要參照有好幾格」在畫面上
+  看不出來，而那正是「為什麼我的 snr 是空的」的答案。
+* `overlap` 是 Report 裡**唯一不看 `Compare their`** 的數字（它比的是整條
+  分布）—— 兩塊平均一樣、一塊卻是雙峰的時候，只有它看得出來。bin 走
+  `pixel_hist` 的 0–255 固定格，因為這個數字要跟一個固定門檻比大小。
+* 順手修掉一個只有做了才看得到的版面 bug：群名那一欄寬度寫死 46 px，
+  Report 分三群之後畫面上是「ifference」「ributions」。改成由最長的群名算，
+  而字級 QFont 與 QSS **兩邊都要設**（`* { font-size: 13px }` 會蓋掉
+  `setFont`，只設一邊的話量到的跟畫出來的不同尺寸）。
+* 另外把 `glv_stats` 檔頭那段還在寫 `(μ_T − μ_R) / σ_R` 的 SNR 說明改掉 ——
+  昨天改公式時只改了 `compare_pixels` 那一份，同一件事兩份說法。
+
+計畫書：[`docs/plans/F18-glv.md`](docs/plans/F18-glv.md) §8.7。
+
+---
+
 ## F18 收尾三件（2026-08-21，使用者用起來之後問出來的）
 
 ### ① 「另一塊 @ 另一條流」沒有家 —— 而且它是**安靜地**錯
