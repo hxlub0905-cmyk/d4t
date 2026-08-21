@@ -1803,6 +1803,10 @@ class CdInspector(Inspector):
     PROFILE_W = 0.46
     #: 每條線的寬度那一格佔的比例（剩下的給整批分布）。
     WOBBLE_W = 0.24
+    #: 剖面圖在量到的那一對兩側各留幾倍的寬度（見 :meth:`_profile_window`）。
+    PROFILE_MARGIN = 1.1
+    #: 圖底下那一行「尺有多長」的字佔多高 —— **畫圖之前要先扣掉它**。
+    SCALE_ROW = 14.0
 
     # -- 資料 ---------------------------------------------------------------
     def notes(self) -> List[Dict[str, Any]]:
@@ -1913,6 +1917,11 @@ class CdInspector(Inspector):
                         rect.height())
         third = QRectF(rect.left() + pw + ww + gap, rect.top(),
                        rect.width() - pw - ww - gap, rect.height())
+        # 三格之間各畫一條很淡的直線。**三張圖並排而沒有界線的話，眼睛會把
+        # 隔壁那一格的線讀進來** —— 尤其中間那一格的橫軸跟左邊那一格完全不是
+        # 同一件事（一個是灰階、一個是寬度）。
+        self._paint_divider(p, first.right() + gap / 2.0, rect)
+        self._paint_divider(p, second.right() + gap / 2.0, rect)
         if self.is_blob():
             # 直方圖 ＋ 判準那條線是剖面圖的**同義詞**：它一樣回答
             # 「為什麼是這個數字」。
@@ -1925,6 +1934,13 @@ class CdInspector(Inspector):
         self._paint_wobble(p, second, note)
         self._paint_batch(p, third, note)
 
+    @staticmethod
+    def _paint_divider(p: QPainter, x: float, rect: QRectF) -> None:
+        pen = QPen(QColor(TOKENS["border_default"]), 1.0)
+        pen.setCosmetic(True)
+        p.setPen(pen)
+        p.drawLine(QPointF(x, rect.top() + 2.0), QPointF(x, rect.bottom() - 2.0))
+
     def _caption(self, p: QPainter, rect: QRectF, text: str) -> QRectF:
         """小標題，回剩下可以畫的那一塊。"""
         p.setPen(QColor(TOKENS["text_secondary"]))
@@ -1935,7 +1951,12 @@ class CdInspector(Inspector):
 
     def _paint_profile(self, p: QPainter, rect: QRectF,
                        note: Dict[str, Any]) -> None:
-        """曲線 ＋ 判準那條橫線 ＋ 兩個交點 ＋ 中間標著量到多寬。"""
+        """曲線 ＋ 判準那條橫線 ＋ 兩個交點 ＋ 中間標著量到多寬。
+
+        **只畫量到的那一段前後**（見 :data:`PROFILE_MARGIN`），不是整條剖面。
+        一張 128 px 的 patch 上有八個一模一樣的週期，整條畫出來的話那兩個交點
+        淹在裡面 —— 而這一格的**唯一**工作就是「邊被判在哪」。
+        """
         body = self._caption(p, rect, "Profile of one line")
         prof = note.get("profile") or {}
         values = [float(v) for v in (prof.get("values") or [])]
@@ -1944,12 +1965,15 @@ class CdInspector(Inspector):
             p.drawText(body, Qt.AlignCenter | Qt.TextWordWrap,
                        "no line here measured a pair of edges")
             return
-        lo, hi = min(values), max(values)
-        span = (hi - lo) or 1.0
         n = len(values)
+        x0, x1 = self._profile_window(prof, n)
+        seen = values[int(x0):int(x1) + 1] or values
+        lo, hi = min(seen), max(seen)
+        span = (hi - lo) or 1.0
+        width = max(1.0, float(x1 - x0))
 
         def at(x: float, v: float) -> QPointF:
-            return QPointF(body.left() + (x / max(1.0, n - 1.0)) * body.width(),
+            return QPointF(body.left() + ((x - x0) / width) * body.width(),
                            body.bottom() - ((v - lo) / span) * body.height())
 
         # 判準那條橫線先畫（曲線要壓在它上面）
@@ -1961,7 +1985,8 @@ class CdInspector(Inspector):
             p.drawLine(QPointF(body.left(), y), QPointF(body.right(), y))
         p.setPen(QPen(QColor(TOKENS["accent"]), 1.4))
         p.setBrush(Qt.NoBrush)
-        p.drawPolyline(QPolygonF([at(i, v) for i, v in enumerate(values)]))
+        p.drawPolyline(QPolygonF([at(i, values[i])
+                                  for i in range(int(x0), int(x1) + 1)]))
 
         a, b = prof.get("a"), prof.get("b")
         if a is None or b is None:
@@ -1979,11 +2004,33 @@ class CdInspector(Inspector):
                       else values[max(0, min(n - 1, int(round(x))))])
             p.drawEllipse(at(x, float(centre)), 3.0, 3.0)
         p.setBrush(Qt.NoBrush)
-        # 中間那一行：量到多寬
-        p.setPen(QColor(TOKENS["text_primary"]))
-        mid = QRectF(at(min(a, b), hi).x(), body.center().y() - 8.0,
-                     max(24.0, abs(at(b, hi).x() - at(a, hi).x())), 16.0)
-        p.drawText(mid, Qt.AlignCenter, "%.2f px" % abs(b - a))
+        # 兩個交點之間拉一條有擋頭的量測線，數字寫在它上面 —— **那才是這張圖
+        # 在講的東西**。第一版把數字壓在曲線正中間，剛好落在訊號上。
+        left, right = at(min(a, b), hi).x(), at(max(a, b), hi).x()
+        y = body.bottom() - 6.0
+        p.setPen(QPen(QColor(TOKENS["text_primary"]), 1.2))
+        p.drawLine(QPointF(left, y), QPointF(right, y))
+        for x in (left, right):
+            p.drawLine(QPointF(x, y - 3.0), QPointF(x, y + 3.0))
+        p.drawText(QRectF(min(left, right) - 30.0, y - 24.0,
+                          abs(right - left) + 60.0, 15.0),
+                   Qt.AlignHCenter | Qt.AlignBottom, "%.2f px" % abs(b - a))
+
+    def _profile_window(self, prof: Dict[str, Any], n: int):
+        """剖面圖要畫哪一段 ``(x0, x1)``（整數索引，含兩端）。
+
+        以量到的那一對為中心，兩側各留 :data:`PROFILE_MARGIN` 倍的寬度 ——
+        留白是為了看得到「邊的外面長什麼樣」（平台平不平、是不是緊鄰著另一個
+        結構），那正是判斷「這一對配對得對不對」要看的東西。
+        """
+        a, b = prof.get("a"), prof.get("b")
+        if a is None or b is None:
+            return 0, n - 1
+        a, b = float(a), float(b)
+        pad = max(4.0, abs(b - a) * self.PROFILE_MARGIN)
+        x0 = int(max(0, math.floor(min(a, b) - pad)))
+        x1 = int(min(n - 1, math.ceil(max(a, b) + pad)))
+        return (0, n - 1) if x1 - x0 < 4 else (x0, x1)
 
     def _paint_wobble(self, p: QPainter, rect: QRectF,
                       note: Dict[str, Any]) -> None:
@@ -1992,32 +2039,56 @@ class CdInspector(Inspector):
         一個 σ 說得出「有多不齊」，說不出「哪一段不齊」。頸縮在這張圖上是一個
         往內凹的缺口，而那是 ``cd_min`` 那個數字答不出來的事。
         """
-        body = self._caption(p, rect, "Each line")
+        # ⚠ 這一格只有兩百像素寬。第一版把「band = 1 sigma」跟範圍寫在同一行，
+        # 於是畫出來是「85 - 25.76 px · band = 1 sig」—— **兩端都被截掉**，而
+        # 被截掉的正好是最需要讀的那兩個數字。說明搬到標題（那裡寬得多）。
+        body = self._caption(p, rect, "Each line · band = 1 sigma")
         widths = [float(v) for v in (note.get("widths") or [])]
         if len(widths) < 2 or body.height() < 24:
             return
+        # **底下那一行字自己的位置要先扣掉。** 第一版把範圍寫在 `body` 的下緣，
+        # 而曲線畫滿整個 `body` —— 兩個疊在一起（截圖出來才看到）。
+        plot = QRectF(body.left(), body.top(), body.width(),
+                      body.height() - self.SCALE_ROW)
         lo, hi = min(widths), max(widths)
         span = (hi - lo) or 1.0
         # 太窄的話把尺撐開一點，不然逐點的抖動會被畫成滿版的鋸齒
         if span < 0.5:
             mid = (lo + hi) / 2.0
             lo, hi, span = mid - 0.25, mid + 0.25, 0.5
-        pts = []
-        for i, v in enumerate(widths):
-            y = body.top() + (i / max(1.0, len(widths) - 1.0)) * body.height()
-            pts.append(QPointF(body.left()
-                               + ((v - lo) / span) * body.width(), y))
+
+        def at(v: float, i: int) -> QPointF:
+            return QPointF(plot.left() + ((v - lo) / span) * plot.width(),
+                           plot.top() + (i / max(1.0, len(widths) - 1.0))
+                           * plot.height())
+
+        srt = sorted(widths)
+        med = srt[len(srt) // 2]
+        mean = sum(widths) / len(widths)
+        sd = math.sqrt(sum((v - mean) ** 2 for v in widths) / len(widths))
+        # ±σ 墊成一條淡帶：**沒有它，一條很齊的線跟一條很糙的線長得一樣**
+        # （橫軸是自動縮放的，3 px 的散布也會撐滿整格）。
+        if sd > 0:
+            band = QColor(TOKENS["accent"])
+            band.setAlpha(38)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(band))
+            x_lo = at(max(lo, med - sd), 0).x()
+            x_hi = at(min(hi, med + sd), 0).x()
+            p.drawRect(QRectF(x_lo, plot.top(), max(1.0, x_hi - x_lo),
+                              plot.height()))
+            p.setBrush(Qt.NoBrush)
         p.setPen(QPen(QColor(TOKENS["text_disabled"]), 1.0, Qt.DashLine))
-        med = sorted(widths)[len(widths) // 2]
-        x = body.left() + ((med - lo) / span) * body.width()
-        p.drawLine(QPointF(x, body.top()), QPointF(x, body.bottom()))
+        p.drawLine(QPointF(at(med, 0).x(), plot.top()),
+                   QPointF(at(med, 0).x(), plot.bottom()))
         p.setPen(QPen(QColor(TOKENS["accent"]), 1.2))
         p.setBrush(Qt.NoBrush)
-        p.drawPolyline(QPolygonF(pts))
+        p.drawPolyline(QPolygonF([at(v, i) for i, v in enumerate(widths)]))
         p.setPen(QColor(TOKENS["text_secondary"]))
-        p.drawText(QRectF(body.left(), body.bottom() - 12.0, body.width(), 12.0),
-                   Qt.AlignHCenter | Qt.AlignBottom,
-                   "%.2f - %.2f px" % (min(widths), max(widths)))
+        p.drawText(QRectF(body.left(), body.bottom() - self.SCALE_ROW,
+                          body.width(), self.SCALE_ROW),
+                   Qt.AlignHCenter | Qt.AlignVCenter,
+                   "%.1f - %.1f px" % (min(widths), max(widths)))
 
     def _paint_levels(self, p: QPainter, rect: QRectF,
                       note: Dict[str, Any]) -> None:
@@ -2114,7 +2185,10 @@ class CdInspector(Inspector):
         if note.get("prefix"):
             name = "%s_%s" % (note["prefix"], name)
         values = self.feature_values(name)
-        body = self._caption(p, rect, caption)
+        # 右邊留一點：分布是雙峰的時候最右邊那一根會貼著外框，讀起來像被切掉。
+        body = self._caption(p, QRectF(rect.left(), rect.top(),
+                                       max(10.0, rect.width() - 4.0),
+                                       rect.height()), caption)
         if len(values) < 3 or body.height() < 24:
             p.setPen(QColor(TOKENS["text_disabled"]))
             p.drawText(body, Qt.AlignCenter | Qt.TextWordWrap,
@@ -2122,25 +2196,34 @@ class CdInspector(Inspector):
             return
         lo, hi = min(values), max(values)
         span = (hi - lo) or 1.0
+        # 三格裡只有這一格沒說過自己的軸跨多少 —— 而「這一顆在整批的哪裡」
+        # 沒有尺就只是一條線的位置。
+        plot = QRectF(body.left(), body.top(), body.width(),
+                      body.height() - self.SCALE_ROW)
         bins = [0] * 20
         for v in values:
             bins[min(19, int((v - lo) / span * 19.999))] += 1
         peak = max(bins) or 1
-        bw = body.width() / 20.0
+        bw = plot.width() / 20.0
         p.setPen(Qt.NoPen)
         faint = QColor(TOKENS["accent"])
         faint.setAlpha(110)
         p.setBrush(QBrush(faint))
         for i, c in enumerate(bins):
-            h = (c / float(peak)) * (body.height() - 12.0)
-            p.drawRect(QRectF(body.left() + i * bw, body.bottom() - h,
+            h = (c / float(peak)) * plot.height()
+            p.drawRect(QRectF(plot.left() + i * bw, plot.bottom() - h,
                               max(1.0, bw - 1.0), h))
         p.setBrush(Qt.NoBrush)
         here = self.this_value(name)
         if here is not None:
-            x = body.left() + ((here - lo) / span) * body.width()
+            x = plot.left() + ((here - lo) / span) * plot.width()
             p.setPen(QPen(QColor(TOKENS["text_primary"]), 1.6))
-            p.drawLine(QPointF(x, body.top()), QPointF(x, body.bottom()))
+            p.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        p.drawText(QRectF(body.left(), body.bottom() - self.SCALE_ROW,
+                          body.width(), self.SCALE_ROW),
+                   Qt.AlignHCenter | Qt.AlignVCenter,
+                   "%.1f - %.1f px  (%d)" % (lo, hi, len(values)))
 
 
 class InputInspector(Inspector):

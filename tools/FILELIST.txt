@@ -5,7 +5,7 @@ a6b298c38249d1758d17f7780df10626e05c809d .gitignore
 dc5d3e24d36ca139df3d9ccac1034075e7698f6e AGENTS.md
 a26fc55c97b3da895209a321f467a0f7ee8a3542 CLAUDE.md
 b20e9b7f31aa8195e297b4a124b69252cd4c56cf README.md
-0f3f2893484d50a86f65d8cce3c13d389b30c94d SESSION_LOG.md
+faa0fbde41278dd5f8614f130f4fa666127aeb93 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 e52e68d42e36aaf1de491a50d51affa9c86db540 d4t/__main__.py
@@ -86,7 +86,7 @@ a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
 3ae1ab8a3277cd505874be9e502926b8a5807fcb d4t/ui/canvas.py
 3b58b7e078d58ad84a8939734b65952a75a029f3 d4t/ui/cell_canvas.py
 511288a738743288b669fedb83036486a25fc673 d4t/ui/gallery.py
-9893cc5727766f9809162026c760d1df3be8a5b0 d4t/ui/inspectors.py
+e11baca246548a21c3d7ddb44c95d37754d833a7 d4t/ui/inspectors.py
 68e6ac894866da63ca055b9082523ffb89656702 d4t/ui/region_check.py
 cc73ee4493625b81df5d6d9eec7c12128d0eda12 d4t/ui/results.py
 e3248e389f47ff9a0f8b911de3f2ef58c4bf9208 d4t/ui/scope.py
@@ -95,7 +95,7 @@ b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 b24576feb08cf1517b18a0d0a04f302fcb9ea840 d4t/ui/theme.py
 af42b652c4e56b5a8458ab24a5f03ee959638139 d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
-04a5c6d0233e2412e7a1454c90b736fb52cb266c d4t/ui/widgets.py
+a7846c74fa52296c52016c2361027303e1a7b69f d4t/ui/widgets.py
 2eb7813f6dbd6c7d0beff0496ed0d1e6dc87d484 d4t/ui/workers.py
 b422213d7d29a9914abfe9cb76bd23f434fbe13c docs/ARCHITECTURE.md
 e91e2809486e7306a360421877c50b667c01df64 docs/FAB-VALIDATION.md
@@ -216,7 +216,7 @@ fcd1e48c4e17fa1ec6699b9ef3efc16298adedf8 tests/test_ui_f13_layout.py
 74d93d285e3309dc7aa42147ab754045d006c19f tests/test_ui_f15_pair_source.py
 6c3b80a9fafb778887978e9322044d3e1e224a2e tests/test_ui_f16_run_all.py
 0f67a345d22df53300395cdd9542c27a9578cf1a tests/test_ui_f16_stages.py
-3cd9632d324548346543c1da134778b2c6fd2f6f tests/test_ui_f19_cd.py
+42b2deaa80a2ac93efecfe74442fe6f4f950283b tests/test_ui_f19_cd.py
 96614052cb62c64c136380faaa466cdba0a4d759 tests/test_ui_f7_10_route_edges.py
 614330562a47a9d3792982af350231abed883867 tests/test_ui_f7_11_roi.py
 b3bcc7956841e98b5cd4ad05bfddefbe1da58fcf tests/test_ui_f7_12_template.py

@@ -1809,6 +1809,14 @@ class _HintLabel(QLabel):
             self._full, Qt.ElideRight, w))
 
 
+#: 這幾種編輯器是**一整塊**，不是一行 —— 它們那一列的名字要對齊到最上面。
+#:
+#: 為什麼要列出來而不是量 widget 的高度：``sizeHint`` 在建構的當下還沒定案
+#: （膠囊要排版完才知道會不會換行），量到的會是一個還沒長好的數字。
+_BLOCK_EDITORS = ("metric_chips", "multi_choice", "curve", "template",
+                  "channel_map", "cell_rois")
+
+
 class _ParamRow(QFrame):
     """一個參數 = 一列（名稱 + 滑桿 + 數字框）。說明住在 tooltip 裡。
 
@@ -1850,7 +1858,23 @@ class _ParamRow(QFrame):
         self.name_label = QLabel(str(spec.get("label") or spec.get("name", "")))
         self.name_label.setObjectName("paramLabel")
         self.name_label.setMinimumWidth(104)
-        top.addWidget(self.name_label)
+        # **重複自己的小標題的那個名字要拿掉。** CD 的膠囊那一格 `label` 與
+        # `section` 都是 "Report"，於是畫面上同一個字出現兩次 —— 而下面那條
+        # 對齊的規矩會讓它落在群組區塊的**中間那一列**旁邊，讀起來像是一個叫
+        # 「Report」的群（截圖出來才看到：Size 的第二排看起來屬於它）。
+        self._label_is_echo = bool(
+            str(spec.get("label") or "").strip()
+            and str(spec.get("label") or "").strip()
+            == str(spec.get("section") or "").strip())
+        if self._label_is_echo:
+            self.name_label.hide()
+        else:
+            top.addWidget(self.name_label)
+        # **一整塊的編輯器，名字要對齊到最上面。** 垂直置中的話那個名字會落在
+        # 區塊中間的某一列上，而那一列有它自己的意思（群名、第幾條曲線…）。
+        if str(spec.get("type") or "") in _BLOCK_EDITORS:
+            top.setAlignment(self.name_label, Qt.AlignTop)
+            self.name_label.setContentsMargins(0, 6, 0, 0)
 
         self.slider = _make_slider(spec, editor)
         if self.slider is not None:

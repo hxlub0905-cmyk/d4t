@@ -367,3 +367,76 @@ def test_the_blob_panel_never_prints_a_zero_area(qapp):
     ctx, p = measured_blob(canvas(64))
     said = make_panel(qapp, ctx, p).summary()
     assert "0 px" not in said and "no size here" in said
+
+
+# --------------------------------------------------------------------------- #
+# 版面（截圖出來才看得到的那幾件）
+# --------------------------------------------------------------------------- #
+def test_a_row_label_that_echoes_its_section_is_dropped(qapp):
+    """**同一個字不要在畫面上出現兩次。**
+
+    CD 的膠囊那一格 ``label`` 與 ``section`` 都是 "Report"，而一整塊的編輯器
+    那一列的名字是垂直置中的 —— 於是那個字落在群組區塊的**中間那一列**旁邊，
+    讀起來像是一個叫「Report」的群（Size 的第二排看起來屬於它）。
+    """
+    from d4t.ui.widgets import ParamForm
+
+    form = ParamForm()
+    form.set_step(REGISTRY["cd_measure"].describe(),
+                  REGISTRY["cd_measure"].validate_params({}))
+    row = form._rows["report"]
+    assert row.spec["label"] == row.spec["section"] == "Report"
+    assert row.name_label.isHidden(), "重複自己小標題的名字要收起來"
+
+    # 而**不**重複的那些照常顯示
+    assert not form._rows["criterion"].name_label.isHidden()
+
+
+def _label_alignment(row):
+    """那一列的名稱在它自己那一列裡對齊到哪（`_ParamRow` 的第一個 HBox）。"""
+    top = row.layout().itemAt(0).layout()
+    for i in range(top.count()):
+        if top.itemAt(i).widget() is row.name_label:
+            return top.itemAt(i).alignment()
+    return None
+
+
+def test_block_editors_get_their_label_at_the_top(qapp):
+    """一整塊的編輯器（膠囊、曲線、表格…）名字要對齊到最上面。
+
+    垂直置中的話，那個名字會落在區塊**中間某一列**旁邊，而那一列有它自己的
+    意思（群名、第幾條曲線…）—— 讀起來就變成那一列的標題。
+    """
+    from PySide6.QtCore import Qt
+    from d4t.ui.widgets import ParamForm, _BLOCK_EDITORS
+
+    form = ParamForm()
+    form.set_step(REGISTRY["glv_stats"].describe(),
+                  REGISTRY["glv_stats"].validate_params({}))
+    row = form._rows["metrics"]
+    assert row.spec["type"] in _BLOCK_EDITORS
+    assert not row.name_label.isHidden()          # 這一格沒有重複小標題
+    assert _label_alignment(row) & Qt.AlignTop
+
+    # 一行高的那些**不要**跟著改 —— 它們垂直置中才對得上輸入框
+    plain = form._rows["source"]
+    assert plain.spec["type"] not in _BLOCK_EDITORS
+    assert not (_label_alignment(plain) or 0) & Qt.AlignTop
+
+
+def test_the_profile_zooms_to_the_pair_it_measured(qapp):
+    """**一張 128 px 的 patch 上有八個一模一樣的週期。** 整條畫出來的話，
+    那兩個交點淹在裡面 —— 而這一格的唯一工作就是「邊被判在哪」。"""
+    ctx, p = measured()
+    insp = make_panel(qapp, ctx, p)
+    prof = insp.note()["profile"]
+    x0, x1 = insp._profile_window(prof, len(prof["values"]))
+    assert x0 < prof["a"] < prof["b"] < x1          # 兩個交點都在視窗裡
+    assert (x1 - x0) < len(prof["values"]) * 0.8    # 而且真的有放大
+    # 兩側都要留白 —— 「邊的外面長什麼樣」是判斷配對對不對的依據
+    assert prof["a"] - x0 > 1.0 and x1 - prof["b"] > 1.0
+
+
+def test_a_profile_with_no_pair_falls_back_to_the_whole_line(qapp):
+    insp = make_panel(qapp, *measured())
+    assert insp._profile_window({}, 64) == (0, 63)
