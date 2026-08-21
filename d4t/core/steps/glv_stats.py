@@ -87,7 +87,7 @@ compare 算什麼（`algo/glv.compare_pixels`）
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -103,6 +103,12 @@ from ._util import (
 
 _P_ALIAS = re.compile(r"^glv_p(\d+)$")
 _Q_FORM = re.compile(r"^glv_q(\d+)$")
+
+#: 相對量的特徵名一律以這個開頭（見 :func:`cmp_feature_name`）。
+CMP_PREFIX = "cmp_"
+
+#: 「Compare their」預設拿哪一個統計量去比。
+DEFAULT_COMPARE_STAT = "glv_mean"
 
 #: ``compare`` 預設勾哪幾個。`delta` 與 `snr` 是兩個不同的問題（差多少 /
 #: 差幾個 σ），兩個都預設勾著 —— 只給前者的話，使用者要自己想起來後者存在。
@@ -150,6 +156,15 @@ HIDDEN_METRICS = ("glv_trim10", "glv_kurt", "glv_entropy")
 #:
 #: `percent` 收起來的理由跟上面同一種：``percent = (ratio − 1) × 100``，
 #: 同一個數字兩種寫法。留下 `ratio`，而參照接近黑的時候該用的是 `contrast`。
+#: 「Compare their」列得出來的統計量（**不是**全部合法的 —— 任意分位數走
+#: 「+ Percentile…」，而手寫 recipe 什麼 `glv_*` 都填得進來）。
+#: 只列中心與兩端那幾個：離散度與形狀那一族要比的話，`spread_ratio` 與
+#: `overlap` 已經在 Report 那一格答得更直接。
+COMPARE_STAT_CHOICES = (
+    "glv_median", "glv_mean", "glv_q25", "glv_q75", "glv_q90",
+    "glv_min", "glv_max",
+)
+
 COMPARE_CHOICES = (
     "delta", "abs_delta", "ratio", "contrast",
     "snr", "tstat", "pct_rank",
@@ -255,6 +270,56 @@ def _compare_metrics_of(params: Dict[str, Any]) -> List[str]:
     return parse_key_list(params.get("compare_metrics", DEFAULT_COMPARE_METRICS))
 
 
+def _stats_of(params: Dict[str, Any]) -> List[str]:
+    """「拿哪幾個統計量去比」（F18 補課第三輪，2026-08-21）。
+
+    使用者：「Compare their 只能單參數嗎？我不能一次選擇 report glv_median
+    或 glv_pn 的資訊嗎？」—— 可以了，這一格跟 Statistics 一樣是一串。
+
+    **鍵沒有改名**（仍然是 ``stat``）：舊 recipe 的 ``"glv_mean"`` 本來就是
+    一個合法的「一個元素的清單」，所以不需要遷移。改名才需要。
+    """
+    got = parse_key_list(params.get("stat", DEFAULT_COMPARE_STAT))
+    return got or [DEFAULT_COMPARE_STAT]
+
+
+def cmp_feature_name(metric: str, stat: str) -> str:
+    """相對量的特徵名：``cmp_<metric>[_<stat>]``（F18 補課第三輪）。
+
+    使用者：「絕對量的跟相對量的還是要分類好，不然不清楚命名規則會很痛苦。」
+    規則一句話講得完：
+
+    ===============  =========================  ===============================
+    看到什麼         意思                       例
+    ===============  =========================  ===============================
+    ``glv_…``        **這一塊自己**的灰階       ``epi_glv_median``
+    ``cmp_…``        跟參照**比出來**的         ``epi_cmp_delta_median``
+    ===============  =========================  ===============================
+
+    統計量後綴去掉 ``glv_``（``glv_q90`` → ``q90``）—— 留著的話名字會變成
+    ``cmp_delta_glv_q90``，中間那個 ``glv_`` 在講一件已經不成立的事：那個數字
+    不是一個灰階，是兩個灰階的差。
+
+    :data:`algo_glv.STAT_FREE_METRICS` 那兩個**不帶後綴**（它們不看 stat）。
+    """
+    if metric in algo_glv.STAT_FREE_METRICS:
+        return CMP_PREFIX + metric
+    short = stat[4:] if stat.startswith("glv_") else stat
+    return "%s%s_%s" % (CMP_PREFIX, metric, short)
+
+
+def cmp_feature_names(params: Dict[str, Any]) -> List[str]:
+    """這組參數會寫出哪幾個 ``cmp_*``（順序＝勾選的順序，去重）。"""
+    stats = _stats_of(params)
+    out: List[str] = []
+    for metric in _compare_metrics_of(params):
+        for stat in stats:
+            name = cmp_feature_name(metric, stat)
+            if name not in out:
+                out.append(name)
+    return out
+
+
 @register_step
 class GlvStatsStep(MultiSourceStep):
     """Gray level：量一塊的灰階，可以再說「跟誰比」（見模組 docstring）。"""
@@ -325,16 +390,19 @@ class GlvStatsStep(MultiSourceStep):
                   "same block is compared across the pair."),
         ),
         ParamSpec(
-            name="stat", type="choice", default="glv_mean",
+            name="stat", type="metric_chips", default=DEFAULT_COMPARE_STAT,
             section="3 · Compare against",
             show_when=("reference", tuple(r for r in REFERENCES if r != REF_NONE)),
-            choices=["glv_mean", "glv_median", "glv_q25", "glv_q75",
-                     "glv_q90", "glv_min", "glv_max"],
+            choices=list(COMPARE_STAT_CHOICES),
             label="Compare their",
-            help=("Which single number stands for each block. The mean is the "
-                  "usual choice; the median ignores a few very bright or dark "
+            help=("Which number stands for each block. The mean is the usual "
+                  "choice; the median ignores a few very bright or dark "
                   "pixels, which matters when a region has a speck in it that "
-                  "is not what you are measuring."),
+                  "is not what you are measuring. Tick several and every "
+                  "report below is computed for each of them - the statistic "
+                  "ends up in the feature name (cmp_delta_median, "
+                  "cmp_delta_q90), so they never collide. “+ Percentile…” "
+                  "adds any percentile you like."),
         ),
         ParamSpec(
             name="compare_metrics", type="metric_chips",
@@ -412,7 +480,9 @@ class GlvStatsStep(MultiSourceStep):
         # ⚠ 宣告是「**可能**會產出的」：``snr`` / ``tstat`` 在參照只有一格的
         # defect 上算不出來，那一顆就不會有那一格（同 nm 孿生的理由）。
         if _reference_of(params) != REF_NONE:
-            base = base + (_compare_metrics_of(params) or ["delta", "snr"])
+            base = base + (cmp_feature_names(params)
+                           or [cmp_feature_name("delta", DEFAULT_COMPARE_STAT),
+                               cmp_feature_name("snr", DEFAULT_COMPARE_STAT)])
         if str(params.get("across_boxes", POOLED)) == EACH_BOX:
             # 一格一格量：每個數字變成「典型 / 最不一樣的那一格 / 那是第幾格」。
             spread = [n + suffix for n in base
@@ -420,6 +490,32 @@ class GlvStatsStep(MultiSourceStep):
                                      OUTLIER_BOX_SUFFIX)]
             return spread + [BOX_COUNT] + extra
         return base + extra
+
+    @classmethod
+    def legacy_feature_renames(cls, params: Dict[str, Any]) -> Dict[str, str]:
+        """舊的相對量特徵名 → 新的（``epi_delta`` → ``epi_cmp_delta_mean``）。
+
+        給 `recipe._migrate_compare_features_into_cmp` 改寫分數表達式用。
+        **住在這張卡上而不是 recipe.py**：名字的規則是這張卡的事，兩份說法
+        必然有一份會漂（`CLAUDE.md` §0），而漂掉的症狀是遷移改寫成一個不存在
+        的變數 —— 跑起來才炸，而且炸在別的地方。
+
+        舊 recipe 的 ``stat`` 一定只有一個（那時候那一格是下拉），所以對應是
+        一對一的；真的有好幾個時取第一個 —— 那份 recipe 本來就不是舊的。
+        """
+        if _reference_of(params) == REF_NONE:
+            return {}
+        stat = _stats_of(params)[0]
+        out: Dict[str, str] = {}
+        for key in cls.source_list(params) or [""]:
+            for region in cls.region_list(params) or [""]:
+                pfx = cls.full_prefix(params, key, region)
+                for metric in _compare_metrics_of(params):
+                    old = prefix_names(pfx, [metric])[0]
+                    new = prefix_names(pfx, [cmp_feature_name(metric, stat)])[0]
+                    if old != new:
+                        out[old] = new
+        return out
 
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
@@ -556,9 +652,12 @@ class GlvStatsStep(MultiSourceStep):
             feats[mid] = algo_glv.glv_value(src, canon)   # feature 名照使用者列的寫
 
         extra = self._quality_features(patch, p)
+        ref_note: Optional[Dict[str, Any]] = None
         if not thin:
-            extra.update(self._compare_with_reference(ctx, img, patch, p))
-        self._note_distribution(ctx, patch, p, feats, n_raw=n_raw, thin=thin)
+            got, ref_note = self._compare_with_reference(ctx, img, patch, p)
+            extra.update(got)
+        self._note_distribution(ctx, patch, p, feats, n_raw=n_raw, thin=thin,
+                                ref=ref_note)
         if thin:
             ctx.warn(
                 "[%s] only %d pixels were left to measure in '%s' (the card "
@@ -602,11 +701,14 @@ class GlvStatsStep(MultiSourceStep):
         region = str(p.get(self.REGION) or "")
         arr = np.asarray(img)
         rects = ctx.roi_rects(region, arr.shape[:2])
-        ref_px, ref_boxes = None, []
+        ref_px, boxes_by_stat = None, {}
         if _reference_of(p) != REF_NONE:
-            ref_px, ref_boxes = self._reference_block(
+            ref_px, ref_image, ref_region = self._reference_block(
                 ctx, img, p, _reference_of(p))
-        compare_names = (_compare_metrics_of(p) if ref_px is not None else [])
+            # **參照的每一格算一次就好**：它對每一顆 target 的格子都一樣，
+            # 而 RSEM 的大圖上「每一格都重算一次」是幾百倍的工。
+            boxes_by_stat = self._reference_boxes(ctx, ref_image, p, ref_region)
+        compare_names = (cmp_feature_names(p) if ref_px is not None else [])
 
         per_box: List[Dict[str, float]] = []
         kept_index: List[int] = []
@@ -633,11 +735,7 @@ class GlvStatsStep(MultiSourceStep):
                 one[mid] = algo_glv.glv_value(
                     raw if canon == "glv_sat_frac" else patch, canon)
             if ref_px is not None:
-                got = algo_glv.compare_pixels(
-                    patch, ref_px, str(p.get("stat", "glv_mean")),
-                    reference_boxes=ref_boxes)
-                one.update({m: float(got[m]) for m in compare_names
-                            if got.get(m) is not None and np.isfinite(got[m])})
+                one.update(self._compare_values(patch, ref_px, p, boxes_by_stat))
             per_box.append(one)
             kept_index.append(i)
 
@@ -741,7 +839,8 @@ class GlvStatsStep(MultiSourceStep):
     def _note_distribution(self, ctx: Context, patch, p: Dict[str, Any],
                            feats: Dict[str, float], n_raw: int = 0,
                            thin: bool = False, box: int = -1,
-                           boxes: int = 0) -> None:
+                           boxes: int = 0,
+                           ref: Optional[Dict[str, Any]] = None) -> None:
         """把這一塊的灰階分布留給儀表（F18 第 2 步）。
 
         **畫面上的那張圖就是引擎算的這一份** —— UI 不自己再跑一次統計，不然
@@ -772,6 +871,11 @@ class GlvStatsStep(MultiSourceStep):
             "sat": float(((arr <= 0.0) | (arr >= 255.0)).mean()) if arr.size else 0.0,
             "bins": [int(c) for c in counts],
             "marks": {str(k): float(v) for k, v in feats.items()},
+            # 參照那一塊（`reference == none` 時是 None）—— 面板把它**疊在
+            # 同一把尺上**（使用者 2026-08-21：「疊上參照那條分布」）。
+            # 「相對」在這張卡上一直都只是幾個數字，而數字看不出「這個差在不在
+            # 雜訊裡」；兩條分布疊起來一眼就看得出來。
+            "ref": dict(ref) if ref else None,
         })
 
     # ---- 跟誰比（F18 第 5 步）----------------------------------------------
@@ -789,7 +893,7 @@ class GlvStatsStep(MultiSourceStep):
         """
         ref = _reference_of(p)
         if ref == REF_NONE:
-            return {}
+            return {}, None
         metrics = _compare_metrics_of(p)
         if not metrics:
             raise StepError(self.key, "tick at least one thing to report "
@@ -799,21 +903,17 @@ class GlvStatsStep(MultiSourceStep):
             raise StepError(self.key, "unknown comparison %r; available: %s"
                             % (bad[0], ", ".join(algo_glv.COMPARE_METRICS)))
 
-        ref_px, ref_boxes = self._reference_block(ctx, img, p, ref)
-        got = algo_glv.compare_pixels(patch, ref_px,
-                                      str(p.get("stat", "glv_mean")),
-                                      reference_boxes=ref_boxes)
-        # **算不出來的那一格不寫**（同 `_too_thin` 的三選一）：NaN 看起來比較
-        # 誠實，實際更糟 —— ``NaN < threshold`` 是 False，那顆 defect 會被
-        # 安靜地判成真缺陷（`tests/test_card_invariants.py` 的 I5 守著）。
-        out = {m: float(got[m]) for m in metrics
-               if got.get(m) is not None and np.isfinite(got[m])}
-        if len(ref_boxes) < 2 and {"snr", "tstat"} & set(metrics):
+        ref_px, ref_image, ref_region = self._reference_block(ctx, img, p, ref)
+        boxes_by_stat = self._reference_boxes(ctx, ref_image, p, ref_region)
+        ref_boxes = boxes_by_stat.get(_stats_of(p)[0]) or []
+        out = self._compare_values(patch, ref_px, p, boxes_by_stat)
+        if len(ref_boxes) < 2 and set(algo_glv.BOX_METRICS) & set(metrics):
             # 分母沒有東西可裝的時候要講話，而不是留一格 nan 讓人猜。
             ctx.warn(
                 "[%s] the block it compares against ('%s') is a single box, so "
-                "there is no box-to-box spread to divide by - snr and tstat "
-                "are blank for this defect. Point it at a region that is laid "
+                "there is no box-to-box spread to divide by - snr, tstat and "
+                "pct_rank are blank for this defect. Point it at a region "
+                "that is laid "
                 "out as repeated boxes (a Golden Cell template, for example)."
                 % (self.key, self._ref_label(p, ref)))
 
@@ -826,11 +926,74 @@ class GlvStatsStep(MultiSourceStep):
             "reference_source": (str(p.get("reference_source", ""))
                                  if ref == REF_STREAM
                                  else str(p.get(self.CURRENT_STREAM, ""))),
-            "stat": str(p.get("stat", "glv_mean")),
+            "stat": ",".join(_stats_of(p)),
             "target_px": int(np.asarray(patch).size),
             "reference_px": int(np.asarray(ref_px).size),
+            # **完整的特徵名**（含前綴）—— 特徵表要靠它說得出「這個數字是跟誰
+            # 比出來的」，而那件事名字裡沒有（`epi_cmp_delta_median` 不講 mg）。
+            "names": [prefix_names(str(p.get(self.CURRENT_PREFIX, "") or ""),
+                                   [n])[0] for n in out],
             "values": dict(out),
         }
+        # 面板要**把參照那條分布疊上去**（使用者 2026-08-21：「疊上參照那條
+        # 分布」）。算式與畫面的數字因此出自同一次計算 —— UI 不自己再跑一次。
+        ref_counts, _e = algo_glv.pixel_hist(
+            np.asarray(ref_px, dtype=np.float64).ravel(), bins=self.HIST_BINS)
+        note = {
+            "label": self._ref_label(p, ref),
+            "bins": [int(c) for c in ref_counts],
+            "n": int(np.asarray(ref_px).size),
+            "boxes": len(ref_boxes),
+            # 兩邊的 stat 各一個 —— 面板用它們畫那一段 Δ。
+            "marks": {stat: float(algo_glv.glv_value(
+                np.asarray(ref_px, dtype=np.float64).ravel(),
+                _canonical(stat) or DEFAULT_COMPARE_STAT))
+                for stat in _stats_of(p)},
+            "here": {stat: float(algo_glv.glv_value(
+                np.asarray(patch, dtype=np.float64).ravel(),
+                _canonical(stat) or DEFAULT_COMPARE_STAT))
+                for stat in _stats_of(p)},
+            "values": dict(out),
+        }
+        return out, note
+
+    @classmethod
+    def _reference_boxes(cls, ctx: Context, image, p: Dict[str, Any],
+                         region: str) -> Dict[str, List[float]]:
+        """參照那一塊**每一格**的 stat —— 一個勾到的統計量一份。
+
+        算一次就好：一格一格量的時候，這一份對**每一顆 target 的格子都一樣**
+        （參照是共用的），而 RSEM 的大圖上那是幾百次重算。
+        """
+        out: Dict[str, List[float]] = {}
+        for stat in _stats_of(p):
+            out[stat] = cls._box_values(ctx, image, p, region, stat)
+        return out
+
+    @classmethod
+    def _compare_values(cls, patch, ref_px, p: Dict[str, Any],
+                        boxes_by_stat: Dict[str, List[float]]
+                        ) -> Dict[str, float]:
+        """一塊像素跟參照比出來的所有 ``cmp_*``（勾幾個統計量就算幾輪）。
+
+        **算不出來的那一格不寫**（同 `_too_thin` 的三選一）：NaN 看起來比較
+        誠實，實際更糟 —— ``NaN < threshold`` 是 False，那顆 defect 會被
+        安靜地判成真缺陷（`tests/test_card_invariants.py` 的 I5 守著）。
+        """
+        metrics = _compare_metrics_of(p)
+        out: Dict[str, float] = {}
+        for stat in _stats_of(p):
+            canon = _canonical(stat) or DEFAULT_COMPARE_STAT
+            got = algo_glv.compare_pixels(
+                patch, ref_px, canon,
+                reference_boxes=boxes_by_stat.get(stat) or [])
+            for m in metrics:
+                name = cmp_feature_name(m, stat)
+                if name in out:
+                    continue        # 不看 stat 的那兩個只寫一次
+                v = got.get(m)
+                if v is not None and np.isfinite(v):
+                    out[name] = float(v)
         return out
 
     @classmethod
@@ -847,7 +1010,10 @@ class GlvStatsStep(MultiSourceStep):
         return str(p.get(cls.REGION) or "") + OTHERS_SUFFIX
 
     def _reference_block(self, ctx: Context, img, p: Dict[str, Any], ref: str):
-        """參照那一塊 → ``(全部像素, 每一格的 stat)``。
+        """參照那一塊 → ``(全部像素, 它住的那張影像, 它的區域名)``。
+
+        後兩個是給 :meth:`_reference_boxes` 用的：勾了好幾個統計量的時候，
+        「每一格的 stat」一個統計量一份，而算它需要影像與區域名。
 
         第二個回傳值是 ``snr`` / ``tstat`` 的分母來源 —— **框與框之間**，不是
         像素與像素之間（使用者定調 2026-08-21：「SNR 的定義全線幫我改成是
@@ -887,16 +1053,15 @@ class GlvStatsStep(MultiSourceStep):
                 "defect%s. The rest of the batch is unaffected."
                 % (want, (" — %s" % why) if why else
                    " (no card upstream produced it)"))
-        return (roi_pixels(ctx, self.key, image, want),
-                self._box_values(ctx, image, p, want))
+        return (roi_pixels(ctx, self.key, image, want), image, want)
 
     @classmethod
     def _box_values(cls, ctx: Context, image, p: Dict[str, Any],
-                    region: str) -> List[float]:
-        """一個區域**每一格**的 `stat`（只有一格時回空的）。"""
+                    region: str, stat: str) -> List[float]:
+        """一個區域**每一格**的 ``stat``（只有一格時回空的）。"""
         if ctx.roi_count(region) <= 1:
             return []
-        canon = _canonical(str(p.get("stat", "glv_mean"))) or "glv_mean"
+        canon = _canonical(stat) or DEFAULT_COMPARE_STAT
         arr = np.asarray(image)
         out: List[float] = []
         for x, y, w, h in ctx.roi_rects(region, arr.shape[:2]):

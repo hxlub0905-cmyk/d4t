@@ -310,6 +310,11 @@ COMPARE_METRICS: Dict[str, str] = {
 #: 這幾個**要有 `reference_boxes`** 才算得出來（少於兩格 → `nan` → 不寫）。
 BOX_METRICS = ("snr", "tstat", "pct_rank")
 
+#: 這幾個**不看 `stat`**：它們比的是整條分布，不是壓成一個數字之後的差。
+#: 「Compare their」可以一次勾好幾個統計量（2026-08-21），而這兩個對每一個
+#: 統計量都會算出同一個值 —— 所以它們的特徵名不帶統計量後綴，也只寫一次。
+STAT_FREE_METRICS = ("overlap", "spread_ratio")
+
 
 def compare_pixels(target: np.ndarray, reference: np.ndarray,
                    stat: str = "glv_mean",

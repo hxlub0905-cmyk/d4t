@@ -83,11 +83,11 @@ def _run(ctx, **over):
 def test_two_regions_on_one_stream():
     """情況 1／3：跟同一張圖上的另一塊比。"""
     ctx = _run(_boxed_ctx(hot_glv=140.0, cold_glv=100.0))
-    assert ctx.features["delta"] == pytest.approx(40.0, abs=1.0)
+    assert ctx.features["cmp_delta_mean"] == pytest.approx(40.0, abs=1.0)
     # snr 的分母是參照那六格**彼此**的散布（同材質，所以很小）—— 一個真的
     # 差 40 階的缺陷因此是很大的 snr。by pixel 的話分母裡有 shot noise，
     # 同一件事會被壓成個位數（使用者：「by pixel 會太小」）。
-    assert ctx.features["snr"] > 20.0
+    assert ctx.features["cmp_snr_mean"] > 20.0
 
 
 def test_the_same_region_on_two_streams():
@@ -99,7 +99,7 @@ def test_the_same_region_on_two_streams():
     ctx = _ctx()
     ctx.set_image("ref", np.asarray(ctx.images["test"]) - 25.0)
     _run(ctx, roi="hot", reference="another stream", reference_source="ref")
-    assert ctx.features["delta"] == pytest.approx(25.0, abs=1.0)
+    assert ctx.features["cmp_delta_mean"] == pytest.approx(25.0, abs=1.0)
 
 
 def test_it_declares_both_streams_and_both_regions():
@@ -130,20 +130,22 @@ def test_what_it_cannot_compute_is_absent_not_nan():
     宣告不變（宣告是「**可能**會產出的」，同 nm 孿生的理由）。
     """
     ctx = _run(_ctx())                       # cold 只有一格
-    assert "delta" in ctx.features           # 這些照樣算得出來
-    assert "snr" not in ctx.features
-    assert "tstat" not in ctx.features
+    assert "cmp_delta_mean" in ctx.features   # 這些照樣算得出來
+    assert "cmp_snr_mean" not in ctx.features
+    assert "cmp_tstat_mean" not in ctx.features
     assert all(not np.isnan(v) for v in ctx.features.values())
 
 
 def test_the_prefix_applies():
-    """相對值的名字**逐字不變** —— 那是舊 recipe 的分數表達式不必改寫的前提。
+    """絕對量與相對量吃**同一個前綴** —— 所以看得出來講的是同一塊。
 
-    絕對值與樣本數是 F18 疊上去的（`compare` 以前從不吐絕對值，而那正是這一刀
-    要解的坑），它們吃同一個前綴，所以看得出來講的是同一塊。
+    名字本身分得出兩者（F18 補課第三輪，使用者：「絕對量的跟相對量的還是要
+    分類好」）：``glv_`` 是這一塊自己的灰階，``cmp_`` 是跟參照比出來的，而
+    統計量在名字尾巴上（勾了好幾個也不會撞）。
     """
     ctx = _run(_ctx(), output_prefix="epi_vs_mg", compare_metrics="delta")
-    assert set(ctx.features) == {"epi_vs_mg_delta", "epi_vs_mg_glv_mean",
+    assert set(ctx.features) == {"epi_vs_mg_cmp_delta_mean",
+                                 "epi_vs_mg_glv_mean",
                                  "epi_vs_mg_glv_pixels"}
 
 
@@ -270,10 +272,12 @@ def test_the_statistic_being_compared_is_the_users_choice():
     img = np.asarray(ctx.images["test"]).copy()
     img[0, :3] = 255.0                      # 三顆亮點在 hot 那半邊
     ctx.set_image("test", img)
-    mean = _run(ctx, stat="glv_mean", compare_metrics="delta").features["delta"]
+    mean = _run(ctx, stat="glv_mean",
+                compare_metrics="delta").features["cmp_delta_mean"]
     ctx2 = _ctx(hot_glv=100.0, cold_glv=100.0, spread=0.0)
     ctx2.set_image("test", img)
-    median = _run(ctx2, stat="glv_median", compare_metrics="delta").features["delta"]
+    median = _run(ctx2, stat="glv_median",
+                  compare_metrics="delta").features["cmp_delta_median"]
     assert mean > 0.1 and median == pytest.approx(0.0)
 
 
@@ -370,7 +374,104 @@ def test_the_hidden_metrics_are_hidden_not_gone():
 
     ctx = _run(_ctx(), metrics="glv_median,glv_entropy",
                compare_metrics="delta,percent")
-    assert "glv_entropy" in ctx.features and "percent" in ctx.features
+    assert "glv_entropy" in ctx.features
+    assert "cmp_percent_mean" in ctx.features
+
+
+def test_several_statistics_can_be_compared_at_once():
+    """使用者 2026-08-21：「我不能一次選擇 report glv_median 或 glv_pn 嗎？」
+
+    可以 —— 而**統計量進到名字裡**，所以兩輪不會撞在一起。
+    """
+    ctx = _run(_boxed_ctx(hot_glv=140.0, cold_glv=100.0),
+               stat="glv_median,glv_q90", compare_metrics="delta,snr")
+    assert set(ctx.features) >= {"cmp_delta_median", "cmp_delta_q90",
+                                 "cmp_snr_median", "cmp_snr_q90"}
+    # 宣告與實際寫出來的**一字不差**（那是畫布與分數下拉的來源）
+    assert set(get_step("glv_stats").resolve_features(
+        dict(BASE, stat="glv_median,glv_q90",
+             compare_metrics="delta,snr"))) >= {"cmp_delta_q90"}
+
+    # P90 比中位數更靠近亮的那一端 —— 兩個數字不該一樣
+    assert ctx.features["cmp_delta_median"] != ctx.features["cmp_delta_q90"]
+
+
+def test_the_two_stat_free_reports_are_written_once():
+    """`overlap` / `spread_ratio` 不看 stat —— 勾三個統計量也只有一個它。
+
+    帶後綴的話會冒出 `cmp_overlap_median`、`cmp_overlap_q90`… 三個一模一樣的
+    數字，而看到三個不同名字的人會以為它們在講三件事。
+    """
+    ctx = _run(_boxed_ctx(), stat="glv_median,glv_mean,glv_q90",
+               compare_metrics="delta,overlap,spread_ratio")
+    names = [n for n in ctx.features if n.startswith("cmp_")]
+    assert names.count("cmp_overlap") == 1
+    assert names.count("cmp_spread_ratio") == 1
+    assert not [n for n in names if n.startswith("cmp_overlap_")]
+    assert len([n for n in names if n.startswith("cmp_delta_")]) == 3
+
+
+def test_one_statistic_still_reads_like_the_old_single_choice():
+    """舊 recipe 的 ``stat: "glv_mean"`` 是一個合法的「一個元素的清單」。
+
+    所以這一格從下拉變成膠囊**不需要遷移** —— 需要遷移的是改名，而這裡沒改名。
+    """
+    from d4t.core.steps.glv_stats import _stats_of
+
+    assert _stats_of({"stat": "glv_mean"}) == ["glv_mean"]
+    assert _stats_of({}) == ["glv_mean"]
+    assert _stats_of({"stat": ""}) == ["glv_mean"]
+    assert _stats_of({"stat": "glv_median,glv_q90"}) == ["glv_median", "glv_q90"]
+
+
+def test_the_name_says_which_side_of_the_card_it_came_from():
+    """`glv_` 是這一塊自己的、`cmp_` 是比出來的 —— 規則一句話講得完。
+
+    使用者 2026-08-21：「絕對量的跟相對量的還是要分類好，不然不清楚命名規則
+    會很痛苦。」
+    """
+    from d4t.core.steps.glv_stats import cmp_feature_name
+
+    assert cmp_feature_name("delta", "glv_median") == "cmp_delta_median"
+    assert cmp_feature_name("snr", "glv_q90") == "cmp_snr_q90"
+    # 不看 stat 的那兩個不帶後綴
+    assert cmp_feature_name("overlap", "glv_q90") == "cmp_overlap"
+
+    ctx = _run(_boxed_ctx(), metrics="glv_median", compare_metrics="delta,snr")
+    absolute = {n for n in ctx.features if n.startswith("glv_")}
+    relative = {n for n in ctx.features if n.startswith("cmp_")}
+    assert absolute and relative
+    assert absolute | relative == set(ctx.features)
+
+
+def test_the_expression_migration_only_fires_on_the_old_name():
+    """鐵則 9：判準是「舊東西在不在」，而且第二次跑要是 no-op。
+
+    `to_json_dict → from_json_dict` 是 `run_batch` 送 recipe 進 worker 的路 ——
+    它一旦不是 identity，``workers=1`` 與 ``workers=2`` 會算出不同的分數。
+    """
+    import json
+
+    from d4t.core.pipeline import Recipe
+
+    doc = {"recipe_id": "old", "version": 1,
+           "routes": {"ebi_patch": ["cmp"]},
+           "nodes": {"cmp": {"step": "glv_stats", "enabled": True,
+                             "params": {"source": "test", "roi": "epi",
+                                        "reference": "another region",
+                                        "reference_region": "mg",
+                                        "stat": "glv_median",
+                                        "metrics": "glv_median",
+                                        "compare_metrics": "delta,snr"}}},
+           "edges": [],
+           "score": {"expr": "delta / (my_delta_ratio + 1)", "threshold": 1.0,
+                     "bins": {"below": 0, "above": 1}}}
+    r = Recipe.from_json_dict(doc)
+    # 整個識別字才算 —— `my_delta_ratio` 是使用者自己取的名字，不准被打斷
+    assert r.score.expr == "cmp_delta_median / (my_delta_ratio + 1)"
+    again = Recipe.from_json_dict(r.to_json_dict())
+    assert again.score.expr == r.score.expr
+    assert again.to_json_dict() == r.to_json_dict()
 
 
 def test_an_unknown_comparison_is_refused_with_the_list():
@@ -414,7 +515,7 @@ def test_the_card_uses_the_right_plurality_for_each_region_field():
 def test_the_panel_sees_the_same_numbers():
     ctx = _run(_ctx())
     rec = ctx.meta["compares"]["hot_vs_cold"]
-    assert rec["values"]["delta"] == ctx.features["delta"]
+    assert rec["values"]["cmp_delta_mean"] == ctx.features["cmp_delta_mean"]
     assert rec["target_px"] == 40 * 20 and rec["reference_px"] == 40 * 20
     assert rec["stat"] == "glv_mean"
 
@@ -507,11 +608,15 @@ def test_an_old_roi_compare_recipe_still_opens(tmp_path):
     assert node.params["compare_metrics"] == "delta,ratio"
     assert node.params["stat"] == "glv_median"
     assert node.params["metrics"] == "glv_median"
-    # **相對值的名字逐字相同** —— 分數表達式不用改寫。絕對值與樣本數是疊上去的。
+    # **相對值改叫 `cmp_*`**（F18 補課第三輪）—— 而分數表達式跟著改寫，
+    # 不然那份 recipe 打開來是一條 unknown-feature 加一個算不出來的分數。
     got = set(get_step("glv_stats").resolve_features(node.params))
-    assert {"epi_vs_mg_delta", "epi_vs_mg_ratio"} <= got
-    assert got == {"epi_vs_mg_delta", "epi_vs_mg_ratio",
+    assert got == {"epi_vs_mg_cmp_delta_median", "epi_vs_mg_cmp_ratio_median",
                    "epi_vs_mg_glv_median", "epi_vs_mg_glv_pixels"}
+    assert r.score.expr == "epi_vs_mg_cmp_delta_median"
+    # 表達式裡指得到的東西真的在（遷移改寫成一個不存在的變數是最糟的結果 ——
+    # 跑起來才炸，而且炸在別的地方）
+    assert r.score.expr in got
 
     # 走第二次不能再動它（`run_batch` 送 recipe 進 worker 走的正是那條路）
     again = Recipe.from_json_dict(r.to_json_dict())
@@ -547,7 +652,7 @@ def test_not_comparing_anything_is_the_default_and_still_measures():
         "source": "test", "roi": "hot",
         "metrics": "glv_mean,glv_std", "output_prefix": ""})
     assert ctx.features["glv_mean"] == pytest.approx(140.0, abs=1.0)
-    assert "delta" not in ctx.features
+    assert "cmp_delta_mean" not in ctx.features
 
 
 def test_the_absolute_numbers_come_out_even_when_it_compares():
@@ -558,7 +663,7 @@ def test_the_absolute_numbers_come_out_even_when_it_compares():
     """
     ctx = _run(_ctx(hot_glv=140.0, cold_glv=100.0), compare_metrics="delta")
     assert ctx.features["glv_mean"] == pytest.approx(140.0, abs=1.0)
-    assert ctx.features["delta"] == pytest.approx(40.0, abs=1.0)
+    assert ctx.features["cmp_delta_mean"] == pytest.approx(40.0, abs=1.0)
 
 
 def test_the_other_regions_needs_no_second_line():
@@ -575,7 +680,7 @@ def test_the_other_regions_needs_no_second_line():
     ctx = _ctx()
     ctx.set_roi_boxes("hot_others", [(0.5, 0.0, 0.5, 1.0)])
     get_step("glv_stats")().run(ctx, dict(p, compare_metrics="delta"))
-    assert ctx.features["delta"] == pytest.approx(40.0, abs=1.0)
+    assert ctx.features["cmp_delta_mean"] == pytest.approx(40.0, abs=1.0)
 
     # 沒有 `_others` 的那一顆要講出真正的原因，而不是「少了一個東西」
     lonely = _ctx()
@@ -674,9 +779,9 @@ def test_each_box_compares_each_box_too():
         "source": "test", "roi": "cells", "metrics": "glv_median",
         "across_boxes": "each box", "reference": "another region",
         "reference_region": "background", "compare_metrics": "delta"})
-    assert ctx.features["delta_typical"] == pytest.approx(0.0, abs=1.0)
-    assert ctx.features["delta_outlier"] == pytest.approx(60.0, abs=1.0)
-    assert ctx.features["delta_outlier_box"] == 12.0
+    assert ctx.features["cmp_delta_mean_typical"] == pytest.approx(0.0, abs=1.0)
+    assert ctx.features["cmp_delta_mean_outlier"] == pytest.approx(60.0, abs=1.0)
+    assert ctx.features["cmp_delta_mean_outlier_box"] == 12.0
 
 
 def test_each_box_without_a_region_is_caught_before_the_run():
@@ -726,7 +831,7 @@ def test_another_region_on_another_stream():
          reference_source="ref", reference_region="cold",
          compare_metrics="delta")
     # 140 (hot @ test) − 75 (cold @ ref) = 65，**不是** 25（那是同一塊的答案）
-    assert ctx.features["delta"] == pytest.approx(65.0, abs=1.5)
+    assert ctx.features["cmp_delta_mean"] == pytest.approx(65.0, abs=1.5)
 
     card = get_step("glv_stats")
     p = dict(BASE, reference="another region on another stream",

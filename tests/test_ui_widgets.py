@@ -912,21 +912,23 @@ def test_a_hand_written_statistic_is_shown_and_stays_ticked(qapp):
     assert w.chip("glv_trim05").label == "Trimmed 5%"
 
 
-def test_both_metric_fields_on_the_gray_level_card_are_chips(qapp):
-    """**Statistics 與 Report 是同一種膠囊**（F18 補課，2026-08-21）。
+def test_all_three_metric_fields_on_the_gray_level_card_are_chips(qapp):
+    """**Statistics、Compare their 與 Report 是同一種膠囊**（F18 補課）。
 
-    使用者：「Compare 跟 absolute 一樣重要，而且它的 Metric 面板 UI 也沒有
-    Statistics 那麼漂亮，我覺得可以改成切換式」。以前 Report 那一格是舊的
-    勾選網格 —— 同一張卡上兩種長相，而其中一種看起來像沒做完。
+    使用者第一輪：「Compare 跟 absolute 一樣重要，而且它的 Metric 面板 UI 也
+    沒有 Statistics 那麼漂亮，我覺得可以改成切換式」；第二輪：「Compare their
+    只能單參數嗎？我不能一次選擇 report glv_median 或 glv_pn 的資訊嗎？」——
+    後者讓那一格從下拉變成同一種膠囊（值仍然是逗號分隔，所以不必遷移）。
     """
     form = widgets_mod.ParamForm()
     form.set_step(_describe("glv_stats"),
                   {"metrics": "glv_median,glv_mad",
                    "reference": "another region",
+                   "stat": "glv_median,glv_q90",
                    "compare_metrics": "delta,snr"},
                   ["test", "ref"])
     chips = {c.text() for c in form.findChildren(widgets_mod.MetricChips)}
-    assert chips == {"glv_median,glv_mad", "delta,snr"}
+    assert chips == {"glv_median,glv_mad", "glv_median,glv_q90", "delta,snr"}
     # 舊的勾選網格在這張卡上一個都不剩
     assert not [g for g in form.findChildren(widgets_mod.MultiChoicePicker)
                 if g.isVisibleTo(form)]

@@ -14,7 +14,7 @@ e75a08b69155620720f17d638c3b8e14489091f3 d4t/core/__init__.py
 9f95cc3f4f930324566729bd82462d38777841d2 d4t/core/algo/align.py
 ee35d3a74a03161fd795cb83d72d5aca0622273a d4t/core/algo/curve.py
 d2f7e50ff4920fefc608e7d83117c771276104b7 d4t/core/algo/enhance.py
-06484831bc54fcb363434d1af1795981486c7695 d4t/core/algo/glv.py
+ce31bf5ba78d78b67d1ad5ec205adc7942019258 d4t/core/algo/glv.py
 0cab7d03486a6ca498b9aa2831f34e02dc273d11 d4t/core/algo/golden.py
 36dba0cb2492842918d64a6c855214bad2266b7b d4t/core/algo/grid.py
 01246b411a141df2e3d1281d272275ea709d8935 d4t/core/algo/histmatch.py
@@ -49,7 +49,7 @@ ec7bdb58e7da611ac74f16b53e218f9a65476bdc d4t/core/pipeline/cellrois.py
 fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 8be219b056d2bb84d48741c5c8855a73f155949f d4t/core/pipeline/engine.py
 f1cbd776b47948629028c3f204e3dfb811a5ae2b d4t/core/pipeline/expression.py
-41c3a5d109713648cad30ed92ff419e4ed264b8e d4t/core/pipeline/recipe.py
+fab734244eb3ebe490cfed8d0e8dbf0e9f7d645b d4t/core/pipeline/recipe.py
 52b0f56c81d40b601fb82a5735cc512530e39824 d4t/core/pipeline/step.py
 76ca34cd929af84dfe0141daf4852ddc0faa69c7 d4t/core/steps/__init__.py
 13a17126c91e8899981a147a5729edd614c043e5 d4t/core/steps/_util.py
@@ -60,7 +60,7 @@ d908fe6e0daf98a16f6fbc1115cefdd5641f5f57 d4t/core/steps/cd.py
 39bbc384b66e024f67200a76598d4f6f255e5100 d4t/core/steps/denoise.py
 93588a88b65e8b98525d7344246251b13f9da31b d4t/core/steps/feature_math.py
 00f877fe38f316bc2a74cb2659a2e5ac63b7055c d4t/core/steps/flatten.py
-e232b319b7a9441486e007c0cd211116e4f1d4a9 d4t/core/steps/glv_stats.py
+3f94a01daadf086e2e3d60a2a7b63de0767aaa9f d4t/core/steps/glv_stats.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
@@ -156,7 +156,7 @@ af91354855f9f11d953dfd45857bb779eb4c55dd tests/test_f11_split_load_cards.py
 174025a7a178c938717f8b8eee4095e19d2165e3 tests/test_feature_owner_prefix.py
 21b2046491056e3656ad2f7905951a6e5902b0fa tests/test_glas_sidecar.py
 32a5dcca2bcda8a98897603cfe771268e012e926 tests/test_glv.py
-fdc54a90646311076abaaaba849cb7a84b376ab0 tests/test_glv_compare.py
+e0bad7cd25e6d54db5a42ac269006ebb5078ee50 tests/test_glv_compare.py
 675878e5aa5eb58645f91f8b7645f13c81995a5a tests/test_golden_features.py
 68f4c1d0784f125b13994a5fc576da6ac9270279 tests/test_histmatch.py
 fe72fa26322dce38e7c382a5d7cbb19a3cfd5a95 tests/test_klarf_core.py
@@ -238,7 +238,7 @@ ffaf2b51fd05ba67c769cd6145cc7678e7fa7201 tests/test_ui_results.py
 aac33a171461716ba66c0897a7ecb7c2b9b5526b tests/test_ui_studio_m5.py
 7b68620f346d92ce5881cb47ce652801b28d2e0f tests/test_ui_studio_smoke.py
 f6714258293363ce472b166d0afed030cb7c8f8f tests/test_ui_welcome.py
-68e742ad818d0a8377dd09825bc1ffa3b520f214 tests/test_ui_widgets.py
+cb2cdb9964c37deb02b440b854143744961d1079 tests/test_ui_widgets.py
 9b0109451826af217e7fdba9108d3d414161a74f tests/test_ui_workers.py
 ef81a4b13388fde52b6f5cda5e25e4f3dee6a382 tests/test_viewmodel.py
 053de95b4e3bc885b9ce45f8c850f6a885345ba8 tools/_synth.py
