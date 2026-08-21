@@ -723,6 +723,139 @@ def test_every_stage_icon_is_a_different_shape(qapp):
 
 
 # --------------------------------------------------------------------------- #
+# 3b. MetricChips（F18）
+# --------------------------------------------------------------------------- #
+def _metric_ink(size=19):
+    """每一顆統計量小圖畫出來的「有沒有墨」點陣（給下面兩條測試共用）。"""
+    from PySide6.QtGui import QColor, QPainter, QPixmap
+
+    out = {}
+    for name in widgets_mod.METRIC_GLYPHS:
+        pm = QPixmap(size, size)
+        pm.fill(QColor("#ffffff"))
+        p = QPainter(pm)
+        widgets_mod.draw_metric_glyph(p, name, float(size), "#000000", "#bbbbbb")
+        p.end()
+        img = pm.toImage()
+        out[name] = [img.pixelColor(x, y).value() < 200
+                     for y in range(size) for x in range(size)]
+    return out
+
+
+def test_every_metric_glyph_is_a_different_shape(qapp):
+    """十五張統計量小圖要在 **19 px**（膠囊裡的尺寸）下兩兩分得開。
+
+    第一版有六顆是廢的：``mean`` 只是「``median`` 沒填色」、``trimmed`` 的虛線
+    在這個尺寸下整條不見、``skew`` 的箭頭搶戲而不對稱的山根本看不出來、
+    ``percentile`` 跟 ``median`` 幾乎一樣。那些都是 render 出來逐顆看才發現的
+    —— 斷言「有沒有寫 elif」不會發現任何一個。
+    """
+    import pytest as _pytest
+
+    ink = _metric_ink()
+    blank = [n for n, m in ink.items() if sum(m) < 12]
+    assert not blank, "這些小圖畫出來幾乎是空的：%s" % ", ".join(blank)
+
+    too_close = []
+    names = list(ink)
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            d = sum(1 for x, y in zip(ink[a], ink[b]) if x != y)
+            if d < 20:
+                too_close.append("%s 與 %s 只差 %d 個畫素" % (a, b, d))
+    assert not too_close, "這幾對小圖看起來是同一個：\n  " + "\n  ".join(too_close)
+
+    from PySide6.QtGui import QPainter, QPixmap
+    with _pytest.raises(ValueError):
+        pm = QPixmap(19, 19)
+        p = QPainter(pm)
+        try:
+            widgets_mod.draw_metric_glyph(p, "no_such", 19.0, "#000", "#888")
+        finally:
+            p.end()
+
+
+def test_every_statistic_the_card_offers_has_a_face(qapp):
+    """引擎說「有哪些」，UI 說「長什麼樣」—— 兩份不准漂開。
+
+    卡片多宣告一顆統計量而 UI 沒登記，畫出來會是一顆沒有分群、標籤是原始
+    id（``glv_kurt``）的膠囊 —— 跑得完、看得到、而且醜，也就是不會有人回報。
+    """
+    from d4t.core.steps.glv_stats import METRIC_CHOICES
+
+    for mid in METRIC_CHOICES:
+        group, label, glyph = widgets_mod.metric_face(mid)
+        assert group in widgets_mod.METRIC_GROUP_ORDER, mid
+        assert group != "Other", "%s 沒有登記在 METRIC_GROUPS" % mid
+        assert label and not label.startswith("glv_"), mid
+        assert glyph in widgets_mod.METRIC_GLYPHS, mid
+
+    # 手寫 recipe 的那三種參數化 id 也答得出來（它們不在 METRIC_GROUPS 裡）
+    assert widgets_mod.metric_face("glv_q37") == ("Ends", "P37", "percentile")
+    assert widgets_mod.metric_face("glv_trim05")[2] == "trimmed"
+    assert widgets_mod.metric_face("glv_above200")[0] == "Counts"
+
+
+def test_metric_chips_round_trip_the_recipe_string(qapp):
+    """值的格式跟 ``multi_choice`` 一字不差 —— 換掉的只有長相。"""
+    from d4t.core.steps.glv_stats import DEFAULT_METRICS, METRIC_CHOICES
+
+    seen = []
+    w = widgets_mod.MetricChips(METRIC_CHOICES, DEFAULT_METRICS)
+    w.changed.connect(seen.append)
+    assert w.text() == DEFAULT_METRICS
+    assert w.picked() == ["glv_median", "glv_mad", "glv_min", "glv_max"]
+
+    w.chip("glv_mean").click()
+    assert "glv_mean" in w.picked() and seen[-1] == w.text()
+    w.chip("glv_mean").click()
+    assert "glv_mean" not in w.picked()
+
+    # 順序＝畫面上的順序，**不是點選的順序** —— 同一組勾選每次都要產生同一個
+    # 字串，不然一份 recipe 會因為使用者點的先後而長得不一樣（而它進得了
+    # 快取簽章）。
+    w.set_text("glv_max,glv_median")
+    assert w.text() == "glv_median,glv_max"
+
+    # 「不是 metric chip 的那幾顆」不算進值裡（+ Percentile… 是動作）
+    adders = [c for c in w.findChildren(widgets_mod._MetricChip) if c.adder]
+    assert adders, "應該要有『再加一顆』的膠囊"
+    assert all(a.mid not in w.text() for a in adders)
+
+
+def test_a_hand_written_statistic_is_shown_and_stays_ticked(qapp):
+    """recipe 帶進來、清單上沒有的值要列出來並勾著。
+
+    看不到就被靜靜刪掉，是最糟的一種「幫忙」—— `MultiChoicePicker` 的老規矩，
+    換了長相之後仍然要成立。
+    """
+    from d4t.core.steps.glv_stats import METRIC_CHOICES
+
+    w = widgets_mod.MetricChips(METRIC_CHOICES, "glv_median,glv_q37,glv_trim05")
+    # 順序是**畫面上的**（Center 那一群在 Ends 前面），不是使用者列的順序 ——
+    # 見 `MetricChips.text` 為什麼那件事必須是穩定的。
+    assert w.text() == "glv_median,glv_trim05,glv_q37"
+    assert w.chip("glv_q37") is not None and w.chip("glv_q37").is_checked()
+    assert w.chip("glv_trim05").label == "Trimmed 5%"
+
+
+def test_the_gray_level_card_gets_chips_not_a_checkbox_grid(qapp):
+    """ParamForm 要真的替 ``metric_chips`` 這個型別配到新的編輯器。"""
+    form = widgets_mod.ParamForm()
+    form.set_step(_describe("glv_stats"),
+                  {"method": "stats", "metrics": "glv_median,glv_mad"},
+                  ["test", "ref"])
+    chips = form.findChildren(widgets_mod.MetricChips)
+    assert len(chips) == 1
+    assert chips[0].text() == "glv_median,glv_mad"
+    # 舊的勾選網格不該同時出現在這張卡上（compare 那一格是 multi_choice，
+    # 但它在 stats 模式下是藏起來的）
+    grids = [g for g in form.findChildren(widgets_mod.MultiChoicePicker)
+             if g.isVisibleTo(form)]
+    assert not grids
+
+
+# --------------------------------------------------------------------------- #
 # 4. PipelinePanel
 # --------------------------------------------------------------------------- #
 # （PipelinePanel 的兩支測試連同那個 widget 一起刪掉了 —— 見下面的說明）

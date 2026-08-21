@@ -124,10 +124,15 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC, CATEGORY_BATCH)
 #: 型別上仍是 str，但那個字串有六千多個字元，而且**沒有人能用打的**。
 #: 一個放不下、也編輯不了的值配一個文字框，等於邀請使用者去改它。
 #: UI 認得這個型別：它給的是「建一個」的按鈕加一行摘要，欄位本身唯讀。
+#: ``metric_chips``（F18）是 ``multi_choice`` 的第二種長相，**值的格式一字
+#: 不差**（逗號分隔的 id）—— 差別只在 UI：勾選網格換成分群的膠囊，每一顆帶
+#: 一個「這個統計量在分布上是哪一段」的小圖。分群與短標籤住在 UI
+#: （``widgets.METRIC_GROUPS``），卡片這邊只宣告 ``choices``：
+#: **引擎說有哪些，UI 說長什麼樣。**
 PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
                "image_keys", "curve", "template", "multi_choice",
-               "channel_map", "cell_rois", "region_key", "region_keys",
-               "icon_choice")
+               "metric_chips", "channel_map", "cell_rois", "region_key",
+               "region_keys", "icon_choice")
 
 #: ``ParamSpec.choices_from`` 認得的鍵：**執行期才知道的選單**（F15-2）。
 #:
@@ -333,7 +338,8 @@ class ParamSpec:
         elif self.icons:
             raise ParamError(f"parameter '{self.name}': only icon_choice takes "
                              f"icons")
-        if (self.type in ("choice", "icon_choice", "multi_choice")
+        if (self.type in ("choice", "icon_choice", "multi_choice",
+                          "metric_chips")
                 and not self.choices and not self.choices_from):
             raise ParamError(f"parameter '{self.name}': type '{self.type}' "
                              f"requires choices (or choices_from)")
@@ -427,13 +433,14 @@ class ParamSpec:
                         "parameter '%s' takes one region name, not a list "
                         "(got %r). Use one Gray level card per pair."
                         % (self.name, str(value)))
-            elif self.type in ("image_keys", "multi_choice", "region_keys"):
+            elif self.type in ("image_keys", "multi_choice", "metric_chips",
+                               "region_keys"):
                 # 正規化：去空白、去空項、去重複但保留順序。
                 # 手打的 "ref, ref ,, test" 與 UI 勾出來的 "ref,test" 等價，
                 # 存進 recipe 的字串才不會因為輸入方式不同而長得不一樣。
-                # multi_choice 刻意**不**強制值落在 choices 裡：清單是「常用的
-                # 那幾個」，手寫 recipe 的自由值（例 glv_q37）照樣合法，
-                # 認不認得由卡片的 run() 用它自己的話說。
+                # multi_choice / metric_chips 刻意**不**強制值落在 choices
+                # 裡：清單是「常用的那幾個」，手寫 recipe 的自由值（例
+                # glv_q37）照樣合法，認不認得由卡片的 run() 用它自己的話說。
                 seen: List[str] = []
                 for tok in str(value).split(","):
                     tok = tok.strip()

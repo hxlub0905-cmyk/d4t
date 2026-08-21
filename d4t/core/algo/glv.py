@@ -48,6 +48,21 @@ GLV_STATS: Dict[str, str] = {
     "glv_std": "GLV std",
     "glv_min": "GLV min",
     "glv_max": "GLV max",
+    # -- d4t F18（2026-08-21）：robust 與分布形狀 --------------------------
+    # 為什麼要有這一組：e-beam 的影像有 charging、hot pixel 與掃描條紋，
+    # 而 mean/std 是對它們最脆的一組 —— 一顆貼在 255 的壞點就能把 std 拉走，
+    # 於是「這塊亮不亮」變成「這塊有沒有壞點」。中位數那一路對它們免疫。
+    #
+    # `glv_bimodality` 不是拿來當分數用的，是拿來**自檢**的：一個區域的灰階
+    # 出現兩座山，意思通常是這塊 ROI 裡混了兩種材質 —— 也就是「你量的東西
+    # 不對」，而那件事比任何平均值都更早該被知道。
+    "glv_mad": "GLV MAD",
+    "glv_iqr": "GLV IQR",
+    "glv_skew": "GLV skew",
+    "glv_kurt": "GLV kurtosis",
+    "glv_entropy": "GLV entropy",
+    "glv_bimodality": "GLV bimodality",
+    "glv_sat_frac": "GLV saturated fraction",
 }
 
 # Short formulas, shown as tooltips.
@@ -59,6 +74,13 @@ GLV_FORMULAS: Dict[str, str] = {
     "glv_std": "std(gray)",
     "glv_min": "min(gray)",
     "glv_max": "max(gray)",
+    "glv_mad": "median(|gray − median|)",
+    "glv_iqr": "Q75 − Q25",
+    "glv_skew": "Fisher-Pearson skewness",
+    "glv_kurt": "excess kurtosis (normal = 0)",
+    "glv_entropy": "Shannon entropy, in bits",
+    "glv_bimodality": "(skew² + 1) / kurtosis",
+    "glv_sat_frac": "fraction of pixels at 0 or 255",
 }
 
 SNR_ID = "snr"
@@ -87,8 +109,35 @@ def quantile_of(mid: str) -> Optional[int]:
     return None
 
 
+def _number_after(mid: str, prefix: str, hi: int) -> Optional[int]:
+    """``glv_trim10`` + ``glv_trim`` -> 10（超出 0..hi 回 None）。
+
+    跟 :func:`quantile_of` 是同一個形狀，而那不是巧合：**帶一個數字的統計量
+    一律走 ``<id><數字>``**（d4t 2026-08-21）。理由是 metric 的值是一串逗號
+    分隔的 id，多一種語法（例如 ``glv_trim(10)``）等於多一種打錯的方式，
+    而這些字串在手寫 recipe 裡是人打出來的。
+    """
+    if not mid.startswith(prefix):
+        return None
+    tail = mid[len(prefix):]
+    if not tail.isdigit():
+        return None
+    n = int(tail)
+    return n if 0 <= n <= hi else None
+
+
+def trim_of(mid: str) -> Optional[int]:
+    """``glv_trim10`` -> 10（兩端各去掉 10% 之後的平均）。"""
+    return _number_after(mid, "glv_trim", 49)
+
+
+def above_of(mid: str) -> Optional[int]:
+    """``glv_above128`` -> 128（灰階高於它的像素佔多少）。"""
+    return _number_after(mid, "glv_above", 255)
+
+
 def metric_label(mid: str) -> str:
-    """Human label for any metric id (fixed, custom quantile, or SNR)."""
+    """Human label for any metric id (fixed, parameterised, or SNR)."""
     if mid in GLV_STATS:
         return GLV_STATS[mid]
     if mid == SNR_ID:
@@ -96,6 +145,12 @@ def metric_label(mid: str) -> str:
     q = quantile_of(mid)
     if q is not None:
         return f"GLV Q{q}"
+    t = trim_of(mid)
+    if t is not None:
+        return f"GLV trimmed mean {t}%"
+    a = above_of(mid)
+    if a is not None:
+        return f"GLV fraction above {a}"
     return mid
 
 
@@ -107,11 +162,35 @@ def metric_formula(mid: str) -> str:
     q = quantile_of(mid)
     if q is not None:
         return f"{q}th percentile"
+    t = trim_of(mid)
+    if t is not None:
+        return f"mean(gray), {t}% cut off each end"
+    a = above_of(mid)
+    if a is not None:
+        return f"share of pixels with gray > {a}"
     return "—"
 
 
+def _moment(f: np.ndarray, order: int) -> float:
+    """Standardised central moment; 0.0 when the patch has no spread at all."""
+    sd = float(f.std())
+    if sd < _EPS:
+        return 0.0
+    return float((((f - f.mean()) / sd) ** order).mean())
+
+
 def glv_value(patch: np.ndarray, mid: str) -> float:
-    """One GLV statistic of a patch. Custom quantiles (``glv_q<NN>``) work too."""
+    """One GLV statistic of a patch.
+
+    Parameterised ids work too: ``glv_q<NN>`` (percentile), ``glv_trim<NN>``
+    (mean after cutting NN% off each end) and ``glv_above<NN>`` (fraction of
+    pixels brighter than NN).
+
+    Everything is guarded: a patch with no pixels, or one where every pixel is
+    the same value, returns 0.0 rather than a NaN from a 0/0. That guard is why
+    the shape statistics can be offered at all — a flat ROI is normal on a
+    saturated patch, and it must not poison the whole feature row.
+    """
     f = np.asarray(patch, dtype=np.float64).ravel()
     if f.size == 0:
         return 0.0
@@ -125,9 +204,48 @@ def glv_value(patch: np.ndarray, mid: str) -> float:
         return float(f.max())
     if mid == "glv_median":
         return float(np.median(f))
+    if mid == "glv_mad":
+        # **原始的 MAD，不乘 1.4826。** 那個係數是為了讓它估計常態分布的 σ，
+        # 而這裡的值要給製程工程師讀 ——「典型偏離中位數幾階灰階」比「換算成
+        # 相當於幾個 σ」直觀，而且後者在雙峰的 ROI 上根本沒有意義。
+        return float(np.median(np.abs(f - np.median(f))))
+    if mid == "glv_iqr":
+        return float(np.percentile(f, 75) - np.percentile(f, 25))
+    if mid == "glv_skew":
+        return _moment(f, 3)
+    if mid == "glv_kurt":
+        return _moment(f, 4) - 3.0 if f.std() >= _EPS else 0.0
+    if mid == "glv_entropy":
+        counts = np.bincount(np.clip(np.rint(f), 0, 255).astype(np.int64),
+                             minlength=256).astype(np.float64)
+        p = counts[counts > 0] / float(f.size)
+        # max()：全部同一個值時 -(1*log2 1) 會給 -0.0，而 CSV 上的 "-0.0"
+        # 讀起來像個負的量。熵在數學上不會是負的。
+        return max(0.0, float(-(p * np.log2(p)).sum()))
+    if mid == "glv_bimodality":
+        # Bimodality coefficient：(skew² + 1) / kurtosis（未減 3 的那個）。
+        # 0.555（均勻分布的值）以上通常代表兩座山。分母恆 ≥ 1，不必再防除零。
+        sd = float(f.std())
+        if sd < _EPS:
+            return 0.0
+        return (_moment(f, 3) ** 2 + 1.0) / max(1.0, _moment(f, 4))
+    if mid == "glv_sat_frac":
+        return float(((f <= 0.0) | (f >= 255.0)).mean())
     q = quantile_of(mid)
     if q is not None:
         return float(np.percentile(f, q))
+    t = trim_of(mid)
+    if t is not None:
+        if t == 0:
+            return float(f.mean())
+        lo, hi = np.percentile(f, t), np.percentile(f, 100 - t)
+        kept = f[(f >= lo) & (f <= hi)]
+        # 修剪掉全部是可能的（例如整塊只有兩個值）—— 那時候退回全體平均，
+        # 而不是回 0：0 在分數表達式裡看起來像個答案。
+        return float(kept.mean()) if kept.size else float(f.mean())
+    a = above_of(mid)
+    if a is not None:
+        return float((f > float(a)).mean())
     return 0.0
 
 

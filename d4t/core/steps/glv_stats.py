@@ -32,13 +32,23 @@ param-dependent 的直接後果，不是新機制。`tests/test_ui_f10_canvas_re
 理由是黃金值：兩份 fixture recipe 與 `tests/fixtures/golden/` 都指著它。
 舊的 ``roi_compare`` 節點由 `recipe._migrate_roi_compare_into_glv_stats` 接住。
 
-metrics（``stats``）的規則沒變
-------------------------------
+metrics（``stats``）的規則
+--------------------------
 逗號清單，每個 id 產生一個同名 feature：
-- 固定集：glv_mean / glv_median / glv_std / glv_min / glv_max / glv_q25 / glv_q75
-- 動態分位數：glv_q<NN>（例 glv_q90）
+
+- 中心：glv_median / glv_mean / glv_trim<NN>（兩端各去 NN%）
+- 離散：glv_mad（median(|x−median|)）/ glv_std / glv_iqr
+- 端點：glv_min / glv_max / glv_q<NN>
+- 形狀：glv_skew / glv_kurt（excess）/ glv_entropy（bits）/ glv_bimodality
+- 計數：glv_above<NN>（灰階高於 NN 的比例）/ glv_sat_frac（貼在 0 或 255 的比例）
 - 別名：glv_p50 = glv_median；glv_p<NN> = glv_q<NN>
+
 feature 名稱「照使用者列的寫」（別名不改名），數值一致。
+
+**F18（2026-08-21）把後三群補進來，預設也換成 robust 的那一組**
+（``glv_median,glv_mad,glv_min,glv_max``，見 :data:`DEFAULT_METRICS`）。
+`glv_bimodality` 是拿來**自檢**的：一塊 ROI 的灰階出現兩座山，通常代表這塊
+框裡混了兩種材質 —— 也就是「你量的東西不對」，而那比任何平均值都更早該知道。
 
 compare 算什麼（`algo/glv.compare_pixels`）
 -------------------------------------------
@@ -92,6 +102,32 @@ _Q_FORM = re.compile(r"^glv_q(\d+)$")
 #: 差幾個 σ），兩個都預設勾著 —— 只給前者的話，使用者要自己想起來後者存在。
 DEFAULT_COMPARE_METRICS = "delta,snr"
 
+#: ``stats`` 預設勾哪幾個（**F18 換成 robust 的那一組**，使用者定調
+#: 2026-08-21）。以前是 ``glv_mean,glv_std,glv_p50``。
+#:
+#: 為什麼換得掉而不會動到任何既有的數字：`add_step` 走
+#: ``validate_params(cleared_inputs())``，也就是**每一格都會被寫進 recipe**，
+#: 所以既有的檔案帶著自己那一份 metrics；兩份 fixture recipe 也都明寫了。
+#: 換掉的只有「之後新加的卡」與「手寫時省略這一格的 recipe」。
+#:
+#: 為什麼是 median/MAD 而不是 mean/std：e-beam 影像有 charging、hot pixel
+#: 與掃描條紋，一顆貼在 255 的壞點就能把 std 拉走 —— 於是「這塊亮不亮」
+#: 悄悄變成「這塊有沒有壞點」。min/max 留著是因為它們正好是那個壞點本身，
+#: 而「有沒有很亮的一點」常常就是缺陷訊號。
+DEFAULT_METRICS = "glv_median,glv_mad,glv_min,glv_max"
+
+#: 卡片庫面板上列得出來的那幾顆（**不是**全部合法的 id —— 任意分位數、
+#: 任意修剪比例、任意亮度門檻仍然寫得進 recipe，見 `_canonical`）。
+#: 順序＝畫面上的順序；分群與短標籤住在 `ui/widgets.METRIC_GROUPS`
+#: （引擎說「有哪些」，UI 說「長什麼樣」）。
+METRIC_CHOICES = (
+    "glv_median", "glv_mean", "glv_trim10",
+    "glv_mad", "glv_std", "glv_iqr",
+    "glv_min", "glv_max",
+    "glv_skew", "glv_kurt", "glv_entropy", "glv_bimodality",
+    "glv_above128", "glv_sat_frac",
+)
+
 #: 這張卡的兩種問法。順序＝下拉的順序，第一個是預設。
 METHOD_STATS = "stats"
 METHOD_COMPARE = "compare"
@@ -113,6 +149,12 @@ def _canonical(mid: str) -> str:
         return f"glv_q{m.group(1)}"  # glv_pNN → glv_qNN
     m = _Q_FORM.match(mid)
     if m and 0 <= int(m.group(1)) <= 100:
+        return mid
+    # 帶一個數字的那三種（F18）。範圍檢查住在 `algo.glv` 那三支解析器裡 ——
+    # `glv_trim60` 那種「兩端各去 60%」不是打錯字就是誤解，兩者都該被擋在
+    # 這裡而不是安靜地算出一個空集合的平均。
+    if (algo_glv.trim_of(mid) is not None
+            or algo_glv.above_of(mid) is not None):
         return mid
     return ""
 
@@ -141,9 +183,9 @@ class GlvStatsStep(MultiSourceStep):
     category = CATEGORY_ALGO
     group = GROUP_MEASURE
     help = ("Gray levels, two ways: measure a region and write out its "
-            "statistics (mean, standard deviation, percentiles…), or compare "
-            "two regions and write out how far apart they are. Pick which "
-            "with “What to do”.")
+            "statistics (median, spread, percentiles, distribution shape…), "
+            "or compare two regions and write out how far apart they are. "
+            "Pick which with “What to do”.")
     params = [
         ParamSpec(
             name="method", type="choice", default=METHOD_STATS,
@@ -167,16 +209,15 @@ class GlvStatsStep(MultiSourceStep):
                         "No line means the whole image.")),
         # 勾選而不是用打的（2026-08-14 使用者要求）。清單是常用的那幾個；
         # 手寫 recipe 仍可以放任何 glv_q<0-100>（清單外的值會列出來並勾著）。
-        ParamSpec(name="metrics", type="multi_choice",
-                  default="glv_mean,glv_std,glv_p50",
+        ParamSpec(name="metrics", type="metric_chips",
+                  default=DEFAULT_METRICS,
                   label="Statistics", show_when=_WHEN_STATS,
-                  choices=["glv_mean", "glv_std", "glv_p50", "glv_min",
-                           "glv_max", "glv_q25", "glv_q75", "glv_q90",
-                           "glv_q99"],
-                  help=("Tick the statistics to output - each becomes a "
-                        "feature with the same name. glv_p50 is the median; "
-                        "hand-written recipes may also use any percentile "
-                        "like glv_q37.")),
+                  choices=list(METRIC_CHOICES),
+                  help=("Pick the statistics to output - each becomes a "
+                        "feature with the same name. Hand-written recipes may "
+                        "also use any percentile (glv_q37), any trimmed mean "
+                        "(glv_trim05) and any brightness share "
+                        "(glv_above200).")),
         # ---- method = compare ----------------------------------------------
         ParamSpec(
             name="target_source", type="image_key", direction="in",
@@ -239,7 +280,7 @@ class GlvStatsStep(MultiSourceStep):
     ]
     reads = ["test"]
     writes: List[str] = []
-    features_out = ["glv_mean", "glv_std", "glv_p50"]
+    features_out = ["glv_median", "glv_mad", "glv_min", "glv_max"]
 
     # ---- 宣告 ---------------------------------------------------------------
     # `compare` 那一半不走 MultiSourceStep 的迴圈（它的兩條流有角色，排不成
@@ -247,7 +288,7 @@ class GlvStatsStep(MultiSourceStep):
 
     @classmethod
     def feature_names(cls, params: Dict[str, Any]) -> List[str]:
-        mids = parse_key_list(params.get("metrics", "glv_mean,glv_std,glv_p50"))
+        mids = parse_key_list(params.get("metrics", DEFAULT_METRICS))
         return mids or list(cls.features_out)
 
     @classmethod

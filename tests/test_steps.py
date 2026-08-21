@@ -447,6 +447,50 @@ def test_glv_stats_matches_numpy_including_aliases():
         run_step("glv_stats", Context(images={"test": img}), metrics="glv_bogus")
 
 
+def test_glv_stats_defaults_are_the_robust_set(tmp_path):
+    """F18：新加的卡預設吐 median/MAD/min/max（以前是 mean/std/P50）。
+
+    為什麼換得掉：`add_step` 走 ``validate_params(cleared_inputs())``，
+    **每一格都會被寫進 recipe** —— 所以既有檔案帶著自己那一份 metrics，
+    換掉的只有「之後新加的卡」。這一條同時鎖住那個前提：預設一旦沒有被寫進
+    params，改預設就會安靜地改掉舊 recipe 的數字。
+    """
+    from d4t.core.pipeline.step import get_step
+    from d4t.core.steps.glv_stats import DEFAULT_METRICS
+
+    step = get_step("glv_stats")
+    params = step.validate_params(step.cleared_inputs())
+    assert params["metrics"] == DEFAULT_METRICS == \
+        "glv_median,glv_mad,glv_min,glv_max"
+
+    img = _rng(21).integers(0, 256, size=(48, 48)).astype(np.uint8)
+    ctx = Context(images={"test": img})
+    run_step("glv_stats", ctx)
+    assert set(ctx.features) == {"glv_median", "glv_mad", "glv_min", "glv_max"}
+    f64 = img.astype(np.float64)
+    assert ctx.features["glv_median"] == pytest.approx(np.median(f64))
+    assert ctx.features["glv_mad"] == pytest.approx(
+        np.median(np.abs(f64 - np.median(f64))))
+
+
+def test_glv_stats_takes_the_shape_and_count_statistics():
+    """形狀那一群要真的跑得完，而且 feature 名照使用者列的寫。"""
+    img = _rng(5).integers(0, 256, size=(40, 40)).astype(np.uint8)
+    ctx = Context(images={"test": img})
+    run_step("glv_stats", ctx,
+             metrics="glv_iqr,glv_skew,glv_kurt,glv_entropy,glv_bimodality,"
+                     "glv_trim10,glv_above128,glv_sat_frac")
+    assert set(ctx.features) == {
+        "glv_iqr", "glv_skew", "glv_kurt", "glv_entropy", "glv_bimodality",
+        "glv_trim10", "glv_above128", "glv_sat_frac"}
+    assert all(np.isfinite(v) for v in ctx.features.values())
+
+    # 數字打錯範圍的照樣是「未知統計項」，不是安靜地算出一個空集合的平均
+    with pytest.raises(StepError):
+        run_step("glv_stats", Context(images={"test": img}),
+                 metrics="glv_trim60")
+
+
 # ---------------------------------------------------------------- tone (F7-7)
 
 def test_brightness_contrast_pivots_around_mid_gray():

@@ -49,6 +49,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QGridLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QDialog,
@@ -64,6 +65,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..core.algo import glv as algo_glv
 from . import theme
 from .theme import TOKENS, region_hex
 
@@ -82,6 +84,10 @@ __all__ = [
     "IconButton",
     "GLYPH_ICONS",
     "draw_glyph_icon",
+    "draw_metric_glyph",
+    "METRIC_GLYPHS",
+    "METRIC_GROUPS",
+    "MetricChips",
 ]
 
 
@@ -522,6 +528,209 @@ def _draw_profile_glyph(p: QPainter, name: str, w: float, h: float,
             ghost(0.39, 0.61)
             blk(0.81, 0.05, 0.92, 0.95, True)
     p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+
+
+#: 統計量的小圖（F18，2026-08-21）。名字是**圖形**的名字，不是 metric id ——
+#: `glv_q90` / `glv_q25` / `glv_p50` 是無限多個 id，但它們在分布上標的是同一
+#: 件事（一條線切在某個位置），所以共用 ``percentile`` 這張圖。
+#: id → 圖的對照住在 :data:`METRIC_GROUPS`。
+METRIC_GLYPHS = (
+    "median", "mean", "trimmed",
+    "mad", "std", "iqr",
+    "min", "max", "percentile",
+    "skew", "kurtosis", "entropy", "bimodality",
+    "above", "saturated",
+    # 「再加一顆」那種膠囊用的：它是**動作**不是統計量，所以它不畫分布。
+    "plus",
+)
+
+
+def _dist_curve(peak: float = 1.0, twin: bool = False,
+                skew: bool = False) -> List[Tuple[float, float]]:
+    """一條分布曲線的取樣點（x、y 都是 0..1，y 往上）。"""
+    pts: List[Tuple[float, float]] = []
+    n = 26
+    for i in range(n + 1):
+        x = i / float(n)
+        if twin:
+            y = (math.exp(-((x - 0.28) ** 2) / 0.012)
+                 + math.exp(-((x - 0.72) ** 2) / 0.012))
+        elif skew:
+            t = max(1e-3, x)                      # 對數常態：峰靠左、長尾在右
+            y = math.exp(-((math.log(t / 0.30)) ** 2) / 0.26) / t
+        else:
+            y = math.exp(-((x - 0.5) ** 2) / (0.036 / max(0.35, peak)))
+        pts.append((x, y))
+    top = max(q[1] for q in pts) or 1.0
+    return [(x, min(1.0, y / top)) for x, y in pts]
+
+
+def draw_metric_glyph(p: QPainter, name: str, size: float, color: str,
+                      dim: str) -> None:
+    """在 ``p`` 的目前原點畫一個 ``size`` × ``size`` 的統計量圖示。
+
+    共通語言（F18）
+    ---------------
+    **淡的那條線是分布本身，實的那一筆才是這個統計量在講的東西。**
+    十五張圖的差別只在「實的那一筆標在哪」—— 而那正好就是這些統計量彼此唯一
+    的差別。使用者因此不需要知道 MAD 的定義：他看得到它在圖上是哪一段。
+
+    為什麼不是純文字的膠囊
+    ----------------------
+    十六顆一模一樣的膠囊在掃視時沒有錨點：要找「離散」那一群，眼睛只能一個字
+    一個字讀過去。小圖給了那個錨點，而且它**教**了一件事 —— 這一段的使用者是
+    製程工程師，不是統計學家。
+
+    ⚠ **這些圖要在 19 px 下讀得出來**（膠囊裡就是那個尺寸）。第一版有六顆是
+    廢的：``mean`` 只是「``median`` 沒填色」、``trimmed`` 的虛線在那個尺寸下
+    整條不見、``skew`` 的箭頭搶戲而不對稱的山根本看不出來、``percentile`` 跟
+    ``median`` 幾乎一樣。逐顆 render 出來看過才改成現在這樣，而
+    `tests/test_ui_widgets.py` 有一條在 19 px 下兩兩比畫素的測試守著。
+    """
+    p.setRenderHint(QPainter.Antialiasing, True)
+    w = h = float(size)
+    pad = w * 0.10
+    bw, bh = w - 2 * pad, h - 2 * pad
+    faint, solid = QColor(dim), QColor(color)
+    thin = QPen(faint, max(1.0, size / 14.0))
+    bold = QPen(solid, max(1.3, size / 10.0))
+    bold.setCapStyle(Qt.RoundCap)
+
+    def poly_of(pts):
+        return QPolygonF([QPointF(pad + x * bw, pad + (1 - y) * bh)
+                          for x, y in pts])
+
+    def curve(pts, pen=None):
+        p.setPen(pen or thin)
+        p.setBrush(Qt.NoBrush)
+        p.drawPolyline(poly_of(pts))
+
+    def vline(fx, pen=None):
+        p.setPen(pen or bold)
+        p.drawLine(QPointF(pad + fx * bw, pad), QPointF(pad + fx * bw, pad + bh))
+
+    def band(fa, fb):
+        c = QColor(solid)
+        c.setAlpha(80)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(c))
+        p.drawRect(QRectF(pad + fa * bw, pad + bh * 0.18,
+                          (fb - fa) * bw, bh * 0.82))
+
+    def fill_under(pts, fa, fb):
+        pl = [QPointF(pad + fa * bw, pad + bh)]
+        pl += [QPointF(pad + x * bw, pad + (1 - y) * bh)
+               for x, y in pts if fa <= x <= fb]
+        pl.append(QPointF(pad + fb * bw, pad + bh))
+        c = QColor(solid)
+        c.setAlpha(95)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(c))
+        p.drawPolygon(QPolygonF(pl))
+
+    def arrow_span(fa, fb):
+        y = pad + bh * 0.86
+        p.setPen(bold)
+        p.drawLine(QPointF(pad + fa * bw, y), QPointF(pad + fb * bw, y))
+        a = w * 0.09
+        for fx, d in ((fa, 1), (fb, -1)):
+            x = pad + fx * bw
+            p.drawLine(QPointF(x, y), QPointF(x + a * d, y - a * 0.8))
+            p.drawLine(QPointF(x, y), QPointF(x + a * d, y + a * 0.8))
+
+    n = str(name)
+    if n == "median":
+        pts = _dist_curve()
+        curve(pts)
+        fill_under(pts, 0.0, 0.5)            # 一半的面積 —— 中位數的定義
+        vline(0.5)
+    elif n == "mean":
+        curve(_dist_curve())
+        p.setPen(bold)                        # 天平：橫桿 + 支點（重心）
+        y = pad + bh * 0.70
+        p.drawLine(QPointF(pad + 0.10 * bw, y), QPointF(pad + 0.90 * bw, y))
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(solid))
+        p.drawPolygon(QPolygonF([
+            QPointF(pad + 0.50 * bw, y),
+            QPointF(pad + 0.50 * bw - w * 0.19, pad + bh),
+            QPointF(pad + 0.50 * bw + w * 0.19, pad + bh)]))
+    elif n == "trimmed":
+        pts = _dist_curve()
+        curve(pts)
+        fill_under(pts, 0.26, 0.74)           # 只有中段算數
+        p.setPen(QPen(solid, max(1.2, size / 11.0)))
+        for fx in (0.26, 0.74):               # 兩端被剪掉的地方
+            x = pad + fx * bw
+            p.drawLine(QPointF(x, pad + bh * 0.10), QPointF(x, pad + bh))
+    elif n == "mad":
+        curve(_dist_curve())
+        band(0.34, 0.66)                      # 中位數兩側的一段：離散度
+    elif n == "std":
+        curve(_dist_curve())
+        arrow_span(0.26, 0.74)
+        vline(0.5, QPen(faint, max(1.0, size / 14.0), Qt.DotLine))
+    elif n == "iqr":
+        curve(_dist_curve())
+        p.setPen(bold)                        # 箱形圖的箱子
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(QRectF(pad + 0.30 * bw, pad + bh * 0.34, 0.40 * bw, bh * 0.42))
+        p.drawLine(QPointF(pad + 0.50 * bw, pad + bh * 0.34),
+                   QPointF(pad + 0.50 * bw, pad + bh * 0.76))
+    elif n in ("min", "max"):
+        curve(_dist_curve())
+        vline(0.12 if n == "min" else 0.88)   # 差別只有線靠哪一邊
+    elif n == "percentile":
+        # 一條線切在某個位置，左邊那一塊填起來 = 「這麼多比例的像素比它暗」。
+        # 跟 ``median`` 的差別只有線在哪 —— 而中位數正是 P50，所以那個相似
+        # 是對的。
+        pts = _dist_curve()
+        curve(pts)
+        fill_under(pts, 0.0, 0.72)
+        vline(0.72)
+    elif n == "plus":
+        # **動作，不是統計量**（「再加一個分位數」），所以不畫分布。
+        # 這一顆一定要跟 ``percentile`` 分得開：加出來的那顆膠囊會選著，
+        # 而兩顆並排在同一列上。
+        p.setPen(QPen(solid, max(1.6, size / 8.0), Qt.SolidLine, Qt.RoundCap))
+        cx, cy = pad + bw / 2, pad + bh / 2
+        a = bw * 0.30
+        p.drawLine(QPointF(cx - a, cy), QPointF(cx + a, cy))
+        p.drawLine(QPointF(cx, cy - a), QPointF(cx, cy + a))
+    elif n == "skew":
+        curve(_dist_curve(skew=True), bold)   # 峰靠左、尾巴拖到右邊
+    elif n == "kurtosis":
+        curve(_dist_curve(peak=0.35))         # 淡的：矮胖的那一條
+        curve(_dist_curve(peak=2.4), bold)    # 實的：尖瘦的那一條
+    elif n == "entropy":
+        p.setPen(Qt.NoPen)                    # 高低不齊的一排 —— 亂度
+        p.setBrush(QBrush(solid))
+        hs = (0.35, 0.85, 0.20, 0.65, 0.45, 0.95, 0.30)
+        cw = bw / len(hs)
+        for i, hh in enumerate(hs):
+            p.drawRect(QRectF(pad + i * cw + cw * 0.16, pad + bh * (1 - hh),
+                              cw * 0.68, bh * hh))
+    elif n == "bimodality":
+        curve(_dist_curve(twin=True))
+        p.setPen(bold)                        # 中間的谷 —— 兩種材質的界線
+        p.drawLine(QPointF(pad + 0.5 * bw, pad + bh * 0.30),
+                   QPointF(pad + 0.5 * bw, pad + bh))
+    elif n == "above":
+        pts = _dist_curve()
+        curve(pts)
+        fill_under(pts, 0.58, 1.0)            # 門檻**右邊**那一塊
+        # 虛線 = 這條線可以自己調（``glv_above<NN>``）。
+        vline(0.58, QPen(solid, max(1.2, size / 11.0), Qt.DashLine))
+    elif n == "saturated":
+        curve(_dist_curve())
+        p.setPen(Qt.NoPen)                    # 貼在頂端的那一根
+        p.setBrush(QBrush(solid))
+        p.drawRect(QRectF(pad + 0.90 * bw, pad + bh * 0.10, bw * 0.10, bh * 0.90))
+    else:
+        raise ValueError("unknown metric glyph: %r (known: %s)"
+                         % (name, ", ".join(METRIC_GLYPHS)))
+    p.setPen(bold)
     p.setBrush(Qt.NoBrush)
 
 
@@ -2104,6 +2313,396 @@ class MultiChoicePicker(QWidget):
             self.changed.emit(self.text())
 
 
+#: metric id -> (分群, 短標籤, 小圖)。**引擎說有哪些，UI 說長什麼樣**：
+#: 「有哪些統計量」的唯一出處是 ``ParamSpec.choices``（卡片宣告的），這裡只
+#: 補上分群與怎麼畫。兩份漂開會被 `tests/test_ui_widgets.py` 擋下來。
+#:
+#: 分群的順序＝畫面上的順序，而它是一句話：**中心 → 離散 → 端點 → 形狀 →
+#: 計數**。十四顆平鋪是一面牆；分群之後使用者只要先決定「我要問的是中心還是
+#: 離散」，而那個問題他答得出來。
+METRIC_GROUPS: Dict[str, Tuple[str, str, str]] = {
+    "glv_median": ("Center", "Median", "median"),
+    "glv_mean": ("Center", "Mean", "mean"),
+    "glv_p50": ("Center", "Median (P50)", "median"),
+    "glv_trim10": ("Center", "Trimmed mean", "trimmed"),
+    "glv_mad": ("Spread", "MAD", "mad"),
+    "glv_std": ("Spread", "Std dev", "std"),
+    "glv_iqr": ("Spread", "IQR", "iqr"),
+    "glv_min": ("Ends", "Min", "min"),
+    "glv_max": ("Ends", "Max", "max"),
+    "glv_skew": ("Shape", "Skew", "skew"),
+    "glv_kurt": ("Shape", "Kurtosis", "kurtosis"),
+    "glv_entropy": ("Shape", "Entropy", "entropy"),
+    "glv_bimodality": ("Shape", "Bimodality", "bimodality"),
+    "glv_above128": ("Counts", "Above 128", "above"),
+    "glv_sat_frac": ("Counts", "Saturated %", "saturated"),
+}
+
+#: 分群的顯示順序。不在 :data:`METRIC_GROUPS` 裡的 id（手寫 recipe 的
+#: ``glv_q37``、``glv_trim05``…）落在最後一群 —— **列出來並且勾著**，因為
+#: 「看不到就被靜靜刪掉」是最糟的一種幫忙（同 `MultiChoicePicker` 的老規矩）。
+METRIC_GROUP_ORDER = ("Center", "Spread", "Ends", "Shape", "Counts", "Other")
+
+
+def metric_face(mid: str) -> Tuple[str, str, str]:
+    """一個 metric id 的（分群, 短標籤, 小圖）—— 沒登記過的也答得出來。"""
+    known = METRIC_GROUPS.get(mid)
+    if known:
+        return known
+    q = algo_glv.quantile_of(mid)
+    if q is not None:
+        return ("Ends", "P%d" % q, "percentile")
+    t = algo_glv.trim_of(mid)
+    if t is not None:
+        return ("Center", "Trimmed %d%%" % t, "trimmed")
+    a = algo_glv.above_of(mid)
+    if a is not None:
+        return ("Counts", "Above %d" % a, "above")
+    return ("Other", mid, "percentile")
+
+
+class _MetricChip(QFrame):
+    """一顆膠囊：小圖 + 短標籤，點一下切換選/不選。
+
+    為什麼是自繪而不是 QCheckBox + QSS：選中的狀態要用**階段色**（量測段的
+    橙），而那個顏色是算出來的（`theme.group_hex` / `readable_on`），不是主題
+    的一個 token —— 走 QSS 的話每換一次主題都要重寫一次樣式表字串。
+    """
+
+    toggled = Signal(str, bool)
+    #: 「再加一顆」的那種膠囊被按了（``adder_label`` 有值時才會發）。
+    add_clicked = Signal(str)
+
+    H = 30
+    GLYPH = 19
+    #: ⚠ **字級要用 px 並且同時寫進 stylesheet**：QSS 的 ``* { font-size: 13px }``
+    #: 會蓋掉 ``setFont``，於是「量寬度用的字」與「畫出來的字」不是同一個 ——
+    #: 症狀是膠囊右邊被切掉（第一版的 “Trimmed mean” 少了半個 n）。
+    FONT_PX = 11
+
+    def __init__(self, mid: str, colour: str, checked: bool = False,
+                 parent: Optional[QWidget] = None,
+                 adder_label: str = ""):
+        super().__init__(parent)
+        self.mid = str(mid)
+        if adder_label:
+            # 這一顆是**動作**不是統計量：虛線框、永遠不是「選中」。
+            self.group, self.label, self.glyph = "", str(adder_label), "plus"
+        else:
+            self.group, self.label, self.glyph = metric_face(self.mid)
+        self.adder = bool(adder_label)
+        self.colour = str(colour)
+        self._checked = bool(checked)
+        self._hover = False
+        self.setObjectName("metricChip")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(self.H)
+        f = QFont(self.font())
+        f.setPixelSize(self.FONT_PX)
+        self.setFont(f)
+        self.setStyleSheet("font-size: %dpx;" % self.FONT_PX)
+        self.setFixedWidth(int(11 + self.GLYPH + 7
+                               + QFontMetricsF(f).horizontalAdvance(self.label)
+                               + 15))
+        # tooltip = 這個統計量到底算什麼（引擎那一份公式，不要再寫第二份）。
+        self.setToolTip("Add one and pick the number" if self.adder else
+                        "%s — %s" % (algo_glv.metric_label(self.mid),
+                                     algo_glv.metric_formula(self.mid)))
+        self.setAccessibleName(self.label)
+
+    # -- 狀態 ---------------------------------------------------------------
+    def is_checked(self) -> bool:
+        return self._checked
+
+    def set_checked(self, on: bool) -> None:
+        self._checked = bool(on)
+        self.update()
+
+    def set_colour(self, colour: str) -> None:
+        self.colour = str(colour)
+        self.update()
+
+    # -- Qt hooks -----------------------------------------------------------
+    def enterEvent(self, _e) -> None:      # noqa: D102 - Qt hook
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, _e) -> None:      # noqa: D102 - Qt hook
+        self._hover = False
+        self.update()
+
+    def mousePressEvent(self, e) -> None:  # noqa: D102 - Qt hook
+        if e.button() == Qt.LeftButton:
+            self.click()
+
+    def click(self) -> None:
+        """切換這一顆（測試直接呼叫這支，不模擬滑鼠）。"""
+        if self.adder:
+            self.add_clicked.emit(self.mid)
+            return
+        self._checked = not self._checked
+        self.update()
+        self.toggled.emit(self.mid, self._checked)
+
+    def paintEvent(self, _e) -> None:      # noqa: D102 - Qt hook
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        rad = r.height() / 2.0
+        if self._checked:
+            bg = QColor(self.colour)
+            bg.setAlpha(42 if self._hover else 30)
+            border = QColor(self.colour)
+            border.setAlpha(200)
+            ink = QColor(theme.readable_on(self.colour, TOKENS["bg_surface"]))
+            dim = QColor(ink)
+            dim.setAlpha(85)
+        else:
+            bg = QColor(TOKENS["hover_warm"] if self._hover
+                        else TOKENS["bg_surface"])
+            border = QColor(TOKENS["border_default"])
+            ink = QColor(TOKENS["text_secondary"])
+            dim = QColor(TOKENS["text_hint"])
+            dim.setAlpha(110)
+        pen = QPen(border, 1.4 if self._checked else 1.0)
+        if self.adder:
+            pen.setStyle(Qt.DashLine)     # 虛線 = 這裡還沒有東西，按了才長出來
+        p.setBrush(QBrush(bg))
+        p.setPen(pen)
+        p.drawRoundedRect(r, rad, rad)
+        p.save()
+        p.translate(11, (self.height() - self.GLYPH) / 2.0)
+        draw_metric_glyph(p, self.glyph, float(self.GLYPH), ink.name(),
+                          dim.name())
+        p.restore()
+        p.setPen(ink)
+        p.drawText(QRectF(11 + self.GLYPH + 7, 0, self.width(), self.height()),
+                   Qt.AlignLeft | Qt.AlignVCenter, self.label)
+        p.end()
+
+
+class _ChipFlow(QWidget):
+    """一群膠囊，寬度不夠就換行（QLayout 排不出「換行」，所以自己排）。"""
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        #: 膠囊**與**「+ Percentile」那種鈕都排在這裡 —— 它們在同一列上，
+        #: 分開排的話換行的位置會兩邊各算各的。
+        self._items: List[QWidget] = []
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def add(self, item: QWidget) -> None:
+        item.setParent(self)
+        item.show()
+        self._items.append(item)
+        self._relayout()
+
+    def chips(self) -> List["_MetricChip"]:
+        return [c for c in self._items if isinstance(c, _MetricChip)]
+
+    def _relayout(self, width: Optional[int] = None) -> None:
+        w = int(width or self.width() or 320)
+        x = y = 0
+        for c in self._items:
+            if x and x + c.width() > w:
+                x = 0
+                y += _MetricChip.H + 5
+            c.move(x, y)
+            x += c.width() + 5
+        self.setFixedHeight(y + _MetricChip.H if self._items else 0)
+
+    def resizeEvent(self, e) -> None:      # noqa: D102 - Qt hook
+        self._relayout(e.size().width())
+        super().resizeEvent(e)
+
+
+class MetricChips(QWidget):
+    """``metric_chips`` 參數的編輯器：分群的膠囊 + 「會變成哪幾個 feature」。
+
+    值的格式跟 :class:`MultiChoicePicker` **一字不差**（逗號分隔的 id），所以
+    recipe JSON 沒有變 —— 換掉的只有長相。為什麼要換（F18，使用者：「metric
+    部分的 UI 我希望更漂亮一點」）：
+
+    * **分群**讓十四顆不再是一面牆；
+    * **小圖**給了掃視時的錨點，而且它教了一件事（見 :func:`draw_metric_glyph`）；
+    * **底下那一行**把勾選變成 feature 名講出來 —— 那些名字會被打進分數表達式，
+      所以它們不能只活在文件裡。
+
+    ``+ Percentile`` 與 ``+ Above`` 是**動作**不是統計量：按下去問一個數字，
+    長出一顆 ``glv_q<NN>`` / ``glv_above<NN>``。以前要在自由文字裡自己打
+    ``glv_q37``，而打錯只會安靜地少一個 feature。
+    """
+
+    changed = Signal(str)
+
+    #: 「再加一顆」的兩個動作：(按鈕字, 問句, 下限, 上限, id 模板)。
+    _ADDERS = (
+        ("Percentile", "Which percentile? (0-100)", 0, 100, "glv_q%d", 90),
+        ("Above", "Count pixels brighter than? (0-255)", 0, 255,
+         "glv_above%d", 200),
+    )
+
+    def __init__(self, choices: Sequence[str], value: str = "",
+                 parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._choices = [str(c) for c in (choices or [])]
+        self._chips: List[_MetricChip] = []
+        self._flows: Dict[str, _ChipFlow] = {}
+        self._emitting = False
+
+        self._grid = QGridLayout(self)
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setHorizontalSpacing(9)
+        self._grid.setVerticalSpacing(6)
+        self._grid.setColumnStretch(1, 1)
+
+        self.count = QLabel("", self)
+        self.count.setObjectName("paramHint")
+        self.count.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self._grid.addWidget(self.count, 0, 1)
+
+        self.out = QLabel("", self)
+        self.out.setObjectName("paramHint")
+        self.out.setWordWrap(True)
+
+        self._build(value)
+
+    # -- public API ---------------------------------------------------------
+    def text(self) -> str:
+        """目前的值（逗號分隔）。**順序＝畫面上的順序**，不是點選的順序 ——
+        同一組勾選每次都要產生同一個字串，不然一份 recipe 會因為使用者點的
+        先後而長得不一樣（而它進得了快取簽章）。"""
+        return ",".join(c.mid for c in self._chips if c.is_checked())
+
+    def set_text(self, value: str) -> None:
+        picked = {t.strip() for t in str(value or "").split(",") if t.strip()}
+        unknown = [m for m in picked
+                   if m not in [c.mid for c in self._chips]]
+        if unknown:                       # recipe 帶進來的手寫 id
+            self._build(str(value or ""))
+            return
+        self._emitting = True
+        try:
+            for c in self._chips:
+                c.set_checked(c.mid in picked)
+        finally:
+            self._emitting = False
+        self._sync_labels()
+
+    def chip(self, mid: str) -> Optional["_MetricChip"]:
+        """某一顆膠囊（測試點它、Studio 高亮它用）。"""
+        for c in self._chips:
+            if c.mid == str(mid):
+                return c
+        return None
+
+    def picked(self) -> List[str]:
+        return [c.mid for c in self._chips if c.is_checked()]
+
+    def choice_names(self) -> List[str]:
+        """畫面上列得出來的每一顆（同 :meth:`MultiChoicePicker.choice_names`）。
+
+        **不含**「+ Percentile…」那種膠囊 —— 它們是動作，不是可以勾的統計量。
+        """
+        return [c.mid for c in self._chips]
+
+    def refresh_colour(self) -> None:
+        colour = theme.group_hex("measure")
+        for c in self._chips:
+            c.set_colour(colour)
+
+    # -- internals ----------------------------------------------------------
+    def _build(self, value: str) -> None:
+        while self._grid.count() > 1:
+            item = self._grid.takeAt(1)
+            w = item.widget()
+            if w is not None and w is not self.count and w is not self.out:
+                w.setParent(None)
+                w.deleteLater()
+        self._chips = []
+        self._flows = {}
+
+        picked = [t.strip() for t in str(value or "").split(",") if t.strip()]
+        # 卡片宣告的在前、recipe 帶來的在後（同 MultiChoicePicker 的規矩）。
+        ids: List[str] = []
+        for mid in list(self._choices) + picked:
+            if mid and mid not in ids:
+                ids.append(mid)
+
+        colour = theme.group_hex("measure")
+        by_group: Dict[str, List[str]] = {}
+        for mid in ids:
+            by_group.setdefault(metric_face(mid)[0], []).append(mid)
+
+        row = 1
+        for group in METRIC_GROUP_ORDER:
+            members = by_group.get(group) or []
+            if not members and group != "Ends":
+                continue
+            lbl = QLabel(group, self)
+            lbl.setObjectName("metricGroup")
+            lbl.setAlignment(Qt.AlignRight | Qt.AlignTop)
+            lbl.setFixedWidth(46)
+            lbl.setStyleSheet("color:%s; font-size:10px; padding-top:8px;"
+                              % TOKENS["text_hint"])
+            flow = _ChipFlow(self)
+            for mid in members:
+                c = _MetricChip(mid, colour, mid in picked, flow)
+                c.toggled.connect(self._on_toggled)
+                flow.add(c)
+                self._chips.append(c)
+            # 「再加一顆」的膠囊跟著它產生的東西放：分位數在 Ends、亮度在
+            # Counts。做成**同一種膠囊**（虛線框）而不是一顆按鈕 —— 那一列上
+            # 混一顆長得不一樣的鈕，讀起來像是它跟旁邊那些不是同一件事。
+            for text, question, lo, hi, tmpl, start in self._ADDERS:
+                if metric_face(tmpl % start)[0] != group:
+                    continue
+                b = _MetricChip("+" + tmpl, colour, False, flow,
+                                adder_label=text + "…")
+                b.add_clicked.connect(
+                    lambda _m="", q=question, a=lo, z=hi, t=tmpl, s=start:
+                    self._add_number(q, a, z, t, s))
+                flow.add(b)
+            self._grid.addWidget(lbl, row, 0)
+            self._grid.addWidget(flow, row, 1)
+            self._flows[group] = flow
+            row += 1
+
+        self._grid.addWidget(self.out, row, 1)
+        self._sync_labels()
+
+    def _add_number(self, question: str, lo: int, hi: int, tmpl: str,
+                    start: int) -> None:
+        n, ok = QInputDialog.getInt(self, "Add a statistic", question,
+                                    start, lo, hi, 1)
+        if not ok:
+            return
+        mid = tmpl % int(n)
+        existing = self.chip(mid)
+        if existing is not None:              # 已經有了 -> 勾起來就好
+            existing.set_checked(True)
+        else:
+            self._build(",".join(self.picked() + [mid]))
+        self._emit()
+
+    def _on_toggled(self, _mid: str, _on: bool) -> None:
+        if not self._emitting:
+            self._emit()
+
+    def _emit(self) -> None:
+        self._sync_labels()
+        self.changed.emit(self.text())
+
+    def _sync_labels(self) -> None:
+        names = self.picked()
+        self.count.setText("%d picked" % len(names))
+        # **這一行是「會變成哪幾個 feature」**，不是「你勾了什麼」的複述：
+        # 接了區域的時候引擎會加上區域名前綴（`epi_glv_median`），而那件事
+        # 這裡不知道 —— 所以只講字尾，並且由 help 說明前綴。
+        self.out.setText("→  " + (", ".join(names) if names
+                                  else "nothing picked yet"))
+
+
 class ChannelMapField(QWidget):
     """``channel_map`` 參數的編輯器：一張「第幾張圖 → 叫什麼」的小表（F11 Input-1）。
 
@@ -3029,6 +3628,13 @@ class ParamForm(QWidget):
                 choices, "" if value is None else str(value),
                 empty_hint=self._EMPTY_HINTS.get(
                     str(spec.get("choices_from") or ""), ""))
+            w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
+            return w
+
+        if ptype == "metric_chips":
+            # `multi_choice` 的第二種長相（F18）—— **值的格式一字不差**。
+            w = MetricChips([str(c) for c in (spec.get("choices") or [])],
+                            "" if value is None else str(value))
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 
