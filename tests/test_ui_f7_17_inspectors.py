@@ -608,3 +608,104 @@ def test_a_panel_that_throws_does_not_take_the_window_with_it(qapp):
     w.resize(200, 100)
     w.grab()                                     # 不准往外丟
     w.grab()                                     # 第二次照樣畫得動（painter 有收尾）
+
+
+# --------------------------------------------------------------------------- #
+# 9. Gray level：這一顆的分布（F18 第 2 步，取代 Spread）
+# --------------------------------------------------------------------------- #
+def _glv_meta(img, **params):
+    """真的跑一次卡片，拿它留給儀表的那一份（不是測試自己編的）。"""
+    from d4t.core.pipeline.context import Context
+    from d4t.core.pipeline.step import get_step
+    import d4t.core.steps  # noqa: F401
+
+    ctx = Context(images={"test": img})
+    get_step("glv_stats")().run(ctx, dict({"source": "test"}, **params))
+    return dict(ctx.meta), dict(ctx.features)
+
+
+def test_the_gray_level_panel_has_something_before_any_batch_has_run(qapp):
+    """使用者原話：「他在 run 之前都是空的」。這一條就是那句話的驗收。
+
+    Spread 讀的是 ``trial_results``（整批），所以選到卡片時它必然是空的。
+    新的面板讀 ``ctx.meta``（引擎在預覽時就寫了）—— 跟 Enhance 卡的
+    before/after 同一條路。
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(3)
+    img = np.clip(rng.normal(120, 20, (50, 50)), 0, 255).astype(np.uint8)
+    meta, feats = _glv_meta(img)
+
+    insp = insp_mod.GlvInspector()
+    insp.set_context("glv_stats", result={"features": feats},
+                     batch=[],                    # **一批都還沒跑**
+                     meta=meta, feature_names=list(feats))
+    assert insp.has_data() is True
+    assert "2500 px" in insp.summary()
+    rows = insp.rows()
+    assert len(rows) == 1 and sum(rows[0]["bins"]) == 2500
+
+
+def test_a_width_statistic_is_not_drawn_as_a_position(qapp):
+    """MAD 是一個**寬度**，不是灰階軸上的一個位置。
+
+    第一版把每個勾到的統計量都畫成一條線，於是 ``glv_mad = 65`` 在灰階 65 的
+    地方畫了一條線 —— 那裡什麼都沒有，而畫面上沒有任何東西說得出那條線是假的。
+
+    測法是量畫出來的畫素（同 F7-23 那一套）：
+    * 只有 MAD、沒有中心 → **什麼都不該多畫**（寬度沒有地方可以掛）
+    * 中位數 + MAD → 要比只有中位數多畫東西（那條淡帶）
+    """
+    from PySide6.QtGui import QColor, QPixmap
+
+    def shot(marks):
+        insp = insp_mod.GlvInspector()
+        insp.set_context("glv_stats", meta={"glv_hist": [{
+            "stream": "test", "region": "", "prefix": "", "n": 900,
+            "sat": 0.0,
+            # 一座山（不是平的）—— 全平的話長條會塞滿整個繪圖區，
+            # 畫在上面的線疊在已經有墨的畫素上，兩張圖就分不出來了。
+            "bins": [max(1, 40 - abs(i - 32)) for i in range(64)],
+            "marks": dict(marks)}]})
+        insp.resize(420, 160)
+        pm = QPixmap(420, 160)
+        pm.fill(QColor("#ffffff"))
+        # `render(pixmap)` 而不是 `render(painter)` —— 後者在 PySide6 的多載裡
+        # 要吃 (painter, offset)，少一個引數會炸在型別解析上。
+        insp.render(pm)
+        return pm.toImage()
+
+    def differs(a, b):
+        return sum(1 for x in range(0, 420, 2) for y in range(0, 160, 2)
+                   if a.pixelColor(x, y) != b.pixelColor(x, y))
+
+    nothing = shot({})
+    only_width = shot({"glv_mad": 65.0})
+    centre = shot({"glv_median": 120.0})
+    centre_and_width = shot({"glv_median": 120.0, "glv_mad": 65.0})
+
+    assert differs(only_width, nothing) == 0, \
+        "MAD 沒有中心可以掛的時候不該畫任何東西（畫了就是在灰階 65 說謊）"
+    assert differs(centre, nothing) > 0, "中位數要畫得出一條線"
+    assert differs(centre_and_width, centre) > 0, "MAD 要多畫出中心兩側的那一段"
+
+
+def test_it_says_when_the_region_is_too_thin_to_trust(qapp):
+    """patch 的 ROI 常常只有幾百個像素 —— 那時候離散度本身沒有意義。
+
+    而畫面上以前沒有任何地方說得出這件事：一個算得出來的 std 看起來跟一個
+    可信的 std 一模一樣。
+    """
+    import numpy as np
+
+    meta, feats = _glv_meta(np.full((10, 10), 40, dtype=np.uint8))
+    insp = insp_mod.GlvInspector()
+    insp.set_context("glv_stats", result={"features": feats}, meta=meta)
+    assert "100 px" in insp.summary()
+    assert "not reliable" in insp.summary()
+
+    hot = np.full((40, 40), 255, dtype=np.uint8)
+    meta2, feats2 = _glv_meta(hot)
+    insp.set_context("glv_stats", result={"features": feats2}, meta=meta2)
+    assert "0 or 255" in insp.summary(), "整塊飽和要講出來"

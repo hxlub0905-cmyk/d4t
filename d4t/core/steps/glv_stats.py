@@ -282,6 +282,9 @@ class GlvStatsStep(MultiSourceStep):
     writes: List[str] = []
     features_out = ["glv_median", "glv_mad", "glv_min", "glv_max"]
 
+    #: 留給儀表的直方圖有幾個 bin（見 :meth:`_note_distribution`）。
+    HIST_BINS = 64
+
     # ---- 宣告 ---------------------------------------------------------------
     # `compare` 那一半不走 MultiSourceStep 的迴圈（它的兩條流有角色，排不成
     # 一串），所以四個 resolve_* 都要分岔。分岔點只有 `_method_of` 一個。
@@ -406,7 +409,35 @@ class GlvStatsStep(MultiSourceStep):
                     f"unknown statistic '{mid}'; available: "
                     f"{sorted(algo_glv.GLV_STATS)} or glv_q<0-100> / glv_p<0-100>.")
             feats[mid] = algo_glv.glv_value(patch, canon)   # feature 名照使用者列的寫
+        self._note_distribution(ctx, patch, p, feats)
         return feats
+
+    def _note_distribution(self, ctx: Context, patch, p: Dict[str, Any],
+                           feats: Dict[str, float]) -> None:
+        """把這一塊的灰階分布留給儀表（F18 第 2 步）。
+
+        **畫面上的那張圖就是引擎算的這一份** —— UI 不自己再跑一次統計，不然
+        面板上的曲線跟真的寫出去的數字有機會不一樣（`ui/inspectors.py` 檔頭
+        的第 2 條）。這跟 Enhance 卡的 ``stream_change`` 是同一條路，而那正是
+        它的面板**預覽就有東西**、Spread 卻要跑完一批的差別。
+
+        64 個 bin：面板寬度撐死兩百多個畫素，256 個 bin 有一半畫不出來，而這
+        份東西會跟著結果被送進 worker 與資料庫。
+        """
+        arr = np.asarray(patch, dtype=np.float64).ravel()
+        counts, _edges = algo_glv.pixel_hist(arr, bins=self.HIST_BINS)
+        ctx.meta.setdefault("glv_hist", []).append({
+            "stream": str(p.get(self.CURRENT_STREAM, "") or ""),
+            "region": str(p.get(self.REGION, "") or ""),
+            "prefix": str(p.get(self.CURRENT_PREFIX, "") or ""),
+            "n": int(arr.size),
+            # 「貼在 0 或 255 的比例」永遠記著 —— 它不是使用者勾了才成立的事實，
+            # 而面板要用它回答「這塊還能不能信」。勾了 `glv_sat_frac` 的人另外
+            # 得到一個同名特徵，那是**輸出**，這裡這個是**診斷**。
+            "sat": float(((arr <= 0.0) | (arr >= 255.0)).mean()) if arr.size else 0.0,
+            "bins": [int(c) for c in counts],
+            "marks": {str(k): float(v) for k, v in feats.items()},
+        })
 
     def _run_compare(self, ctx: Context, params: Dict[str, Any]) -> Context:
         """``compare``：兩塊區域比一次（原 `roi_compare` 的 run，逐行搬過來）。"""

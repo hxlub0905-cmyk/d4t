@@ -43,12 +43,14 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
+from ..core.algo import glv as algo_glv
 from ..core.steps._util import CLIP_FRAC, PAIR_FEATURES
 from ..core.steps.denoise import HOT_FRAC, REMOVED_OVER_NOISE
-from .theme import TOKENS
+from . import theme
+from .theme import TOKENS, region_hex
 
 __all__ = ["Inspector", "AlignInspector", "EnhanceInspector",
-           "MeasureInspector", "InputInspector",
+           "MeasureInspector", "GlvInspector", "InputInspector",
            "CrossInspector", "TemplateInspector",
            "INSPECTORS", "inspector_for"]
 
@@ -1260,6 +1262,282 @@ def _fmt(v: float) -> str:
     return "%.3f" % v if a < 100 else "%.1f" % v
 
 
+class GlvInspector(Inspector):
+    """Gray level：**這一顆量到的分布**，勾選的統計量標在上面（F18 第 2 步）。
+
+    為什麼換掉 Spread（使用者 2026-08-21）
+    -------------------------------------
+    原話：「我不太喜歡要跑完才有 Spread 的設計，他是很重要，但他不應該被放在
+    這邊，因為他在 run 之前都是空的。」而那句話有程式碼上的證據：
+
+    ==============================  ====================  ================
+    儀表                            資料從哪來            什麼時候有東西
+    ==============================  ====================  ================
+    `EnhanceInspector`              ``ctx.meta``          **預覽就有**
+    `MeasureInspector`（Spread）    ``trial_results``     跑完一批才有
+    ==============================  ====================  ================
+
+    同一塊面板、同一個位置、兩種資料生命週期。這一張走的是前者：引擎在
+    ``ctx.meta["glv_hist"]`` 留了每一塊的直方圖，所以**選到卡片的那一刻就有東西**。
+
+    整批的資訊沒有消失，它縮成底下一條 8 px 的帶子（這一顆落在整批的哪裡），
+    而「這個特徵分不分得開」那個問題搬去 Results —— 那裡本來就是「跑完才看」
+    的地方，而且門檻拉得動（見 `ui/results.py`）。
+
+    畫什麼
+    ------
+    * 一塊區域一條直方圖（最多 :data:`MAX_ROWS` 條，多的收成一句話）
+    * 勾選到的統計量畫成刻度：**中心那一類畫實線，其餘畫短刻度** ——
+      十個標記全畫成一樣的線的話，圖上會是一排看不出誰是誰的柵欄
+    * 標題右邊是 ``n=… px · …% saturated`` —— 「這塊還能不能信」的兩個數字，
+      而 patch 的 ROI 常常只有幾百個像素
+    """
+
+    title = "Gray level"
+
+    #: 一次畫幾條分布。面板不高，四條以上每一條就只剩幾個畫素。
+    MAX_ROWS = 3
+    #: 底下那條「這一顆在整批的哪裡」的帶子有多高（跑過才畫）。
+    BAND_H = 14.0
+    #: 一個**位置**、畫整條實線的那幾個。
+    CENTRE_MARKS = ("glv_median", "glv_p50", "glv_mean", "glv_trim")
+    #: 一個**位置**、畫貼著底的短刻度的那幾個。
+    POSITION_MARKS = ("glv_min", "glv_max", "glv_q")
+    #: 一個**寬度**（不是位置）—— 畫成中心兩側的一段淡帶，見 :meth:`_paint_marks`。
+    WIDTH_MARKS = ("glv_mad", "glv_std", "glv_iqr")
+
+    # -- 資料 ---------------------------------------------------------------
+    def rows(self) -> List[Dict[str, Any]]:
+        """引擎留下的每一塊（`glv_stats._note_distribution` 寫的）。"""
+        raw = self.meta.get("glv_hist")
+        return [dict(r) for r in raw][:self.MAX_ROWS] if isinstance(raw, list) else []
+
+    def has_data(self) -> bool:
+        return bool(self.rows())
+
+    def empty_reason(self) -> str:
+        return ("Wire an image into this card and it will show the gray levels "
+                "it measured, with the statistics you ticked marked on them.")
+
+    def summary(self) -> str:
+        rows = self.rows()
+        if not rows:
+            return ""
+        bits = []
+        for r in rows:
+            where = r.get("region") or r.get("stream") or "whole image"
+            bits.append("%s: %d px" % (where, int(r.get("n") or 0)))
+        text = "  ·  ".join(bits)
+        thin = [r for r in rows if int(r.get("n") or 0) < self.THIN_PX]
+        if thin:
+            # **樣本數太少的時候要講出來。** patch 的 ROI 常常只有幾百個像素，
+            # 而在那個數量下離散度本身沒有意義 —— 而畫面上以前沒有任何地方
+            # 說得出這件事。
+            text += ("  ⚠ %s under %d pixels — spread statistics are not "
+                     "reliable that thin."
+                     % (", ".join(str(r.get("region") or r.get("stream") or "it")
+                                  for r in thin), self.THIN_PX))
+        hot = [r for r in rows if float(r.get("sat") or 0.0) > self.SAT_WARN]
+        if hot:
+            text += ("  ⚠ %.0f%% of the pixels sit at 0 or 255 — whatever was "
+                     "in them is already gone."
+                     % (100.0 * max(float(r.get("sat") or 0.0) for r in hot)))
+        return text
+
+    #: 少於這麼多像素就講一句話（見 :meth:`summary`）。
+    THIN_PX = 400
+    #: 貼在 0/255 的比例超過這個就講一句話。
+    SAT_WARN = 0.02
+
+    # -- 畫 -----------------------------------------------------------------
+    def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
+        rows = self.rows()
+        if not rows:
+            self._say_empty(p, rect)
+            return
+        body = rect
+        band = None
+        if self._batch_marks(rows[0]):
+            body = QRectF(rect.left(), rect.top(), rect.width(),
+                          rect.height() - self.BAND_H - 4)
+            band = QRectF(rect.left(), body.bottom() + 4, rect.width(),
+                          self.BAND_H)
+        row_h = body.height() / float(len(rows))
+        for i, r in enumerate(rows):
+            self._paint_row(p, QRectF(body.left(), body.top() + i * row_h,
+                                      body.width(), row_h - 3), r, i)
+        if band is not None:
+            self._paint_batch_band(p, band, rows[0])
+
+    def _colour(self, index: int) -> QColor:
+        """一塊區域一個顏色 —— **跟影像上的疊框、模板編輯器同一組**。
+
+        不同一組的話，使用者在畫面上認得的那個綠色 ROI1，到了這裡是別的顏色，
+        而沒有任何東西說得出它們是同一個。
+        """
+        return QColor(region_hex(index))
+
+    def _paint_row(self, p: QPainter, band: QRectF, row: Dict[str, Any],
+                   index: int) -> None:
+        counts = [max(0, int(c)) for c in (row.get("bins") or [])]
+        if not counts or band.height() < 12:
+            return
+        colour = self._colour(index)
+
+        label = str(row.get("region") or row.get("stream") or "whole image")
+        head = QRectF(band.left(), band.top(), band.width(), 13)
+        p.setPen(colour)
+        p.drawText(head, Qt.AlignLeft | Qt.AlignVCenter, label)
+        p.setPen(QColor(TOKENS["text_hint"]))
+        p.drawText(head, Qt.AlignRight | Qt.AlignVCenter,
+                   "n=%d px · %.1f%% saturated"
+                   % (int(row.get("n") or 0), 100.0 * float(row.get("sat") or 0.0)))
+
+        plot = QRectF(band.left(), head.bottom() + 1, band.width(),
+                      max(8.0, band.bottom() - head.bottom() - 12))
+        top = max(counts) or 1
+        bw = plot.width() / float(len(counts))
+        fill = QColor(colour)
+        fill.setAlpha(90)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(fill))
+        for k, c in enumerate(counts):
+            h = (c / float(top)) * plot.height()
+            p.drawRect(QRectF(plot.left() + k * bw, plot.bottom() - h,
+                              max(1.0, bw - 0.4), h))
+        p.setPen(QColor(TOKENS["border_default"]))
+        p.setBrush(Qt.NoBrush)
+        p.drawLine(QPointF(plot.left(), plot.bottom()),
+                   QPointF(plot.right(), plot.bottom()))
+
+        # 0 與 255 —— 橫軸是灰階，而**每一條的尺都一樣**（不像 Spread 那邊
+        # 每一排各有各的單位），所以刻度寫兩端就夠。
+        axis = QRectF(plot.left(), plot.bottom() + 1, plot.width(), 11)
+        p.setPen(QColor(TOKENS["text_hint"]))
+        p.drawText(axis, Qt.AlignLeft | Qt.AlignVCenter, "0")
+        p.drawText(axis, Qt.AlignRight | Qt.AlignVCenter, "255")
+
+        self._paint_marks(p, plot, row, colour)
+
+    def _paint_marks(self, p: QPainter, plot: QRectF, row: Dict[str, Any],
+                     colour: QColor) -> None:
+        """把勾選到的統計量標在這條分布上 —— **用它自己的形狀**。
+
+        這是整塊面板最容易說謊的地方。三種統計量在灰階軸上的意思完全不同：
+
+        ==========================  ==========================================
+        中位數 / 平均 / 修剪平均     一個**位置** → 整條實線
+        最小 / 最大 / 分位數         一個**位置** → 貼著底的短刻度
+        MAD / 標準差 / IQR           一個**寬度** → 中心兩側的一段淡帶
+        ==========================  ==========================================
+
+        第三種畫成一條線的話（第一版就是），`glv_mad = 65` 會在灰階 65 的地方
+        畫一條線 —— 那裡什麼都沒有，而畫面上沒有任何東西說得出那條線是假的。
+        寬度沒有中心可以掛的時候（只勾了 MAD、沒勾中位數）就**不畫** ——
+        「這個數字沒有畫得出來的位置」是一個誠實的答案。
+
+        剩下那幾個（偏度、峰度、熵、雙峰、飽和比例、亮度佔比）的單位根本不是
+        灰階，一律不畫；它們的值在特徵表上。唯一的例外是 ``glv_above<NN>``：
+        畫的是**那個門檻**（虛線），不是它的值 —— 門檻真的在灰階軸上。
+        """
+        marks = {str(k): v for k, v in (row.get("marks") or {}).items()}
+        ink = QColor(theme.readable_on(colour.name(), TOKENS["bg_surface"]))
+
+        def as_gray(mid):
+            try:
+                v = float(marks[mid])
+            except (KeyError, TypeError, ValueError):
+                return None
+            return v if 0.0 <= v <= 255.0 else None
+
+        def x_at(v):
+            return plot.left() + (v / 255.0) * plot.width()
+
+        centre = next((as_gray(m) for m in sorted(marks)
+                       if m.startswith(self.CENTRE_MARKS)
+                       and as_gray(m) is not None), None)
+
+        # 先畫寬度（淡帶），線才不會被蓋掉。
+        for mid in sorted(marks):
+            if not mid.startswith(self.WIDTH_MARKS) or centre is None:
+                continue
+            w = as_gray(mid)
+            if w is None or w <= 0:
+                continue
+            lo, hi = max(0.0, centre - w), min(255.0, centre + w)
+            wash = QColor(ink)
+            wash.setAlpha(46)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(wash))
+            p.drawRect(QRectF(x_at(lo), plot.top() + plot.height() * 0.30,
+                              x_at(hi) - x_at(lo), plot.height() * 0.70))
+            p.setBrush(Qt.NoBrush)
+
+        for mid in sorted(marks):
+            if mid.startswith(self.CENTRE_MARKS):
+                v = as_gray(mid)
+                if v is None:
+                    continue
+                p.setPen(QPen(ink, 1.6))
+                p.drawLine(QPointF(x_at(v), plot.top()),
+                           QPointF(x_at(v), plot.bottom()))
+            elif mid.startswith(self.POSITION_MARKS):
+                v = as_gray(mid)
+                if v is None:
+                    continue
+                p.setPen(QPen(ink, 1.1))
+                p.drawLine(QPointF(x_at(v), plot.bottom() - plot.height() * 0.34),
+                           QPointF(x_at(v), plot.bottom()))
+            else:
+                thr = algo_glv.above_of(mid)      # glv_above<NN>：畫門檻不畫值
+                if thr is None:
+                    continue
+                p.setPen(QPen(ink, 1.1, Qt.DashLine))
+                p.drawLine(QPointF(x_at(float(thr)), plot.top()),
+                           QPointF(x_at(float(thr)), plot.bottom()))
+        p.setPen(Qt.NoPen)
+
+    # -- 整批那一條帶子 -----------------------------------------------------
+    def _batch_marks(self, row: Dict[str, Any]) -> Optional[Tuple[str, float, float]]:
+        """(特徵名, 這一顆的值, 百分位) —— 沒跑過整批就回 None。"""
+        prefix = str(row.get("prefix") or "")
+        for mid in sorted((row.get("marks") or {})):
+            name = "%s_%s" % (prefix, mid) if prefix else mid
+            vals = self.feature_values(name)
+            here = self.this_value(name)
+            if len(vals) >= 2 and here is not None:
+                below = sum(1 for v in vals if v < here)
+                return (name, here, 100.0 * below / float(len(vals)))
+        return None
+
+    def _paint_batch_band(self, p: QPainter, box: QRectF,
+                          row: Dict[str, Any]) -> None:
+        """整批的資訊縮成一條帶子：**這一顆落在整批的哪裡**。
+
+        它跑完才有，所以它不能是這塊面板的主體 —— 那正是 Spread 搬家的理由。
+        一條帶子放得下的東西剛好就是它真正回答得了的問題。
+        """
+        got = self._batch_marks(row)
+        if not got:
+            return
+        name, here, pct = got
+        p.setPen(QColor(TOKENS["text_hint"]))
+        text = "%s = %s · top %d%% of the batch" % (
+            name, _fmt(here), int(round(100.0 - pct)))
+        left = QRectF(box.left(), box.top(), box.width() * 0.62, box.height())
+        p.drawText(left, Qt.AlignLeft | Qt.AlignVCenter, text)
+
+        track = QRectF(box.right() - box.width() * 0.34, box.center().y() - 3,
+                       box.width() * 0.34, 6)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor(TOKENS["border_default"])))
+        p.drawRoundedRect(track, 3, 3)
+        x = track.left() + (pct / 100.0) * track.width()
+        p.setBrush(QBrush(QColor(TOKENS["danger_text"])))
+        p.drawEllipse(QRectF(x - 3.5, track.center().y() - 3.5, 7, 7))
+        p.setBrush(Qt.NoBrush)
+
+
 class InputInspector(Inspector):
     """Load images：**哪一頁變成哪一條流**，以及每一頁載進來長什麼樣。
 
@@ -1634,7 +1912,10 @@ INSPECTORS: Dict[str, type] = {
     "normalize": EnhanceInspector,
     "denoise": EnhanceInspector,
     "flatten": EnhanceInspector,
-    "glv_stats": MeasureInspector,
+    # F18 第 2 步：Gray level 換成「這一顆的分布」（Spread 搬去 Results）。
+    # 其餘量測卡暫時留在 Spread —— 它們還沒有自己的面板，而**沒有面板比
+    # 「跑完才有東西的面板」更糟**。CD 那張本來就要整張重做（F19）。
+    "glv_stats": GlvInspector,
     "cd_measure": MeasureInspector,
     "focus_quality": MeasureInspector,
     "roi_snr": MeasureInspector,

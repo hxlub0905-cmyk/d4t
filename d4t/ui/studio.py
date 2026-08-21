@@ -69,6 +69,7 @@ tests/test_ui_studio_m5.py）：
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import time
@@ -1363,6 +1364,7 @@ class StudioWindow(QMainWindow):
         self.image_view_b.view_changed.connect(
             lambda s, o: self._link_views(self.image_view_b, self.image_view, s, o))
 
+        self.results.shown_feature_changed.connect(self._on_spread_feature_changed)
         self.histogram.threshold_changed.connect(self._on_threshold_changed)
         self.histogram.threshold_committed.connect(self._on_threshold_committed)
         self.histogram.bar_clicked.connect(self._on_bar_clicked)
@@ -1812,6 +1814,79 @@ class StudioWindow(QMainWindow):
             self.feature_combo.setCurrentIndex(0)
         finally:
             self._syncing = False
+
+    # ---- Spread（F18 第 2 步：它從量測卡的儀表搬來這裡）--------------------
+    def _features_in_results(self, results: Sequence[Dict[str, Any]]) -> List[str]:
+        """整批結果裡真的有值的特徵名（順序照第一顆的順序）。
+
+        **從結果讀而不是從 recipe 問**（`model.available_features()`）：
+        那一份是「宣告會產出的」，而這張圖畫的是「真的算出來的」。一張卡出錯
+        的那幾顆不會有它的特徵，而下拉裡多一個永遠畫不出東西的名字，正是
+        「按了撞牆的鈕」那一類。
+        """
+        names: List[str] = []
+        for r in results:
+            for k in (r.get("features") or {}):
+                if k not in names:
+                    names.append(str(k))
+        return names
+
+    def _refresh_spread(self) -> None:
+        """把下面那張圖換成「現在選的那個東西」的分佈。"""
+        name = self.results.shown_feature()
+        if name == self.results.SCORE:
+            self.histogram.set_interactive(True)
+            self.histogram.set_marker(None)
+            self.histogram.set_empty_text(
+                "(Score distribution appears after a trial run)")
+            edges, counts = histogram(self.trial_scores)
+            self.histogram.set_data(edges, counts)
+            self.histogram.set_threshold(self.model.threshold)
+            self._refresh_bin_summary(self.model.threshold)
+            self.results.set_spread_hint("")
+            return
+
+        vals = [float(v) for r in self.trial_results
+                for v in [(r.get("features") or {}).get(name)]
+                if isinstance(v, (int, float))
+                and not (math.isnan(float(v)) or math.isinf(float(v)))]
+        # 門檻是**分數**的門檻 —— 在別的特徵上它沒有意義，所以整張圖唯讀
+        # （見 `HistogramWidget.set_interactive`）。
+        self.histogram.set_interactive(False)
+        self.histogram.set_threshold(None)
+        self.histogram.set_bin_summary(None)
+        self.histogram.set_empty_text("(no values for %s in this run)" % name)
+        edges, counts = histogram(vals)
+        self.histogram.set_data(edges, counts)
+        # `_last_result` 是 `DefectResult`（dataclass），不是 dict —— 這一格
+        # 曾經寫成 `.get("features")`，而它在**選了特徵之後**才會走到，
+        # 所以那個錯不會在「按 Run」的路徑上出現。
+        here = (getattr(self._last_result, "features", None) or {}).get(name)
+        try:
+            here = float(here)
+        except (TypeError, ValueError):
+            here = None
+        self.histogram.set_marker(here, "this defect" if here is not None else "")
+        self.results.set_spread_hint(self._spread_hint(name, vals))
+
+    def _spread_hint(self, name: str, values: Sequence[float]) -> str:
+        """一句話：這個特徵在這一批上分不分得開。
+
+        這是 Spread 面板原本最有用的那一句 —— 擠成一根柱子的特徵，門檻設哪裡
+        都一樣，而光看長條圖不一定看得出「它其實只差 0.3%」。
+        """
+        vals = [float(v) for v in values]
+        if len(vals) < 4:
+            return "%d values — too few to say anything about the spread." % len(vals)
+        lo, hi = min(vals), max(vals)
+        mid = (abs(lo) + abs(hi)) / 2.0 or 1.0
+        if hi - lo <= 0 or (hi - lo) / mid < 0.01:
+            return ("%s barely varies across the batch — no threshold on it "
+                    "will separate anything." % name)
+        return "%d defects · %.4g to %.4g" % (len(vals), lo, hi)
+
+    def _on_spread_feature_changed(self, _name: str) -> None:
+        self._refresh_spread()
 
     def _refresh_bin_summary(self, threshold: float) -> None:
         if not self.trial_scores:
@@ -4503,9 +4578,8 @@ class StudioWindow(QMainWindow):
         self.trial_results = results
         self.trial_scores = [r["score"] for r in results
                              if r.get("ok") and r.get("score") is not None]
-        edges, counts = histogram(self.trial_scores)
-        self.histogram.set_data(edges, counts)
-        self.histogram.set_threshold(self.model.threshold)
+        self.results.set_features(self._features_in_results(results))
+        self._refresh_spread()
         self._refresh_bin_summary(self.model.threshold)
         self._populate_gallery(results)
         self._refresh_inspector(self._last_result)   # 儀表吃的是整批（F7-17）

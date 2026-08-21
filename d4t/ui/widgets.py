@@ -4851,6 +4851,10 @@ class HistogramWidget(QWidget):
         self._press_threshold: Optional[float] = None
         self._press_on_handle = False
         self._moved = False
+        self._marker: Optional[float] = None
+        self._marker_label = ""
+        self._interactive = True
+        self._empty_text = self._EMPTY_TEXT
 
     # -- public API --------------------------------------------------------
     def set_data(self, edges: Sequence[float], counts: Sequence[int]) -> None:
@@ -4862,6 +4866,40 @@ class HistogramWidget(QWidget):
         self._edges, self._counts = edges, counts
         if self._threshold is not None:
             self._threshold = self._clamp(self._threshold)
+        self.update()
+
+    def set_marker(self, value: Optional[float], label: str = "") -> None:
+        """畫一條**不能拖**的標記線（F18：「這一顆落在哪裡」）。
+
+        跟門檻線刻意長得不一樣（虛線、另一個顏色）：一條看起來能拖、拖了卻
+        什麼都不會發生的線，比沒有線更糟。
+        """
+        try:
+            self._marker = None if value is None else float(value)
+        except (TypeError, ValueError):
+            self._marker = None
+        self._marker_label = str(label or "")
+        self.update()
+
+    def marker(self) -> Optional[float]:
+        return self._marker
+
+    def set_interactive(self, on: bool) -> None:
+        """門檻線拖不拖得動。
+
+        看「分數」以外的特徵時是 ``False`` —— 門檻是**分數**的門檻，在別的
+        特徵上拖它會寫回一個跟畫面無關的值。那種互動是這個 repo 反覆在避免的
+        「跑得完、有反應、而且是錯的」。
+        """
+        self._interactive = bool(on)
+        self.setCursor(Qt.ArrowCursor)
+        self.update()
+
+    def is_interactive(self) -> bool:
+        return self._interactive
+
+    def set_empty_text(self, text: str) -> None:
+        self._empty_text = str(text or self._EMPTY_TEXT)
         self.update()
 
     def set_threshold(self, value: Optional[float]) -> None:
@@ -4953,7 +4991,7 @@ class HistogramWidget(QWidget):
 
         if not self.has_data():
             p.setPen(QColor(TOKENS["text_disabled"]))
-            p.drawText(self.rect(), Qt.AlignCenter, self._EMPTY_TEXT)
+            p.drawText(self.rect(), Qt.AlignCenter, self._empty_text)
             p.end()
             return
 
@@ -5012,6 +5050,22 @@ class HistogramWidget(QWidget):
                               self._M_TOP - 4),
                        Qt.AlignLeft | Qt.AlignVCenter, label)
 
+        # 「這一顆在哪裡」的標記線（F18）。虛線 + 另一個顏色，而且**畫在
+        # 門檻線之後** —— 兩條同時在的時候，能拖的那條要在上面。
+        if self._marker is not None:
+            mx = self._x_at(self._marker)
+            p.setPen(QPen(QColor(TOKENS["danger_text"]), 1.6))
+            p.setBrush(Qt.NoBrush)
+            p.drawLine(QPointF(mx, r.top() - 3), QPointF(mx, r.bottom() + 3))
+            if self._marker_label:
+                fm = p.fontMetrics()
+                tw = fm.horizontalAdvance(self._marker_label) + 4
+                tx = min(max(mx + 3, r.left()), max(r.left(), r.right() - tw))
+                p.setPen(QColor(TOKENS["danger_text"]))
+                p.drawText(QRectF(tx, r.top() - self._M_TOP + 2, tw,
+                                  self._M_TOP - 4),
+                           Qt.AlignLeft | Qt.AlignVCenter, self._marker_label)
+
         # bin 摘要
         if self._bin_text:
             p.setPen(QColor(TOKENS["text_secondary"]))
@@ -5023,6 +5077,11 @@ class HistogramWidget(QWidget):
     # -- interaction -------------------------------------------------------
     def mousePressEvent(self, e) -> None:   # noqa: D102 - Qt hook
         if e.button() != Qt.LeftButton or not self.has_data():
+            return
+        if not self._interactive:
+            # 看別的特徵時整張圖是唯讀的：門檻是**分數**的門檻（見
+            # `set_interactive`）。點長條篩 Gallery 也一起關掉 —— 那個篩選
+            # 用的是分數區間。
             return
         pos = QPointF(e.position())
         if not self._plot_rect().adjusted(-6, -6, 6, 6).contains(pos):
@@ -5038,6 +5097,8 @@ class HistogramWidget(QWidget):
         e.accept()
 
     def mouseMoveEvent(self, e) -> None:    # noqa: D102 - Qt hook
+        if not self._interactive:
+            return
         pos = QPointF(e.position())
         if self._dragging:
             if (self._press_x is not None

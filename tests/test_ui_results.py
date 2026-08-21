@@ -168,3 +168,65 @@ def test_closing_results_does_not_lose_them(window):
     window.show_gallery()
     assert window.results_visible() is True
     assert window.gallery.displayed_count() == 8
+
+
+# --------------------------------------------------------------------------- #
+# 4. Spread 的新家（F18 第 2 步）
+# --------------------------------------------------------------------------- #
+def test_spread_moved_here_and_lists_the_features_that_really_ran(window):
+    """量測卡的儀表以前放整批的分佈，而它在跑之前永遠是空的。
+
+    使用者原話：「他在 run 之前都是空的，我覺得這塊 UI 可以放別的」。
+    它真正回答的問題（這個特徵分不分得開）是跑完才問得出來的 —— 而這個視窗
+    本來就是「跑完才有意義的東西」的家。
+    """
+    assert window.run_trial(8, workers=1, sync=True) is True
+    combo = window.results.feature_combo
+    assert window.results.shown_feature() == window.results.SCORE
+    names = [combo.itemData(i) for i in range(combo.count())]
+    assert names[0] == window.results.SCORE
+    # 下拉列的是**真的算出來的**那些（從結果讀，不是從 recipe 宣告讀）
+    ran = set()
+    for r in window.trial_results:
+        ran |= set(r.get("features") or {})
+    assert ran and set(names[1:]) == ran
+
+
+def test_a_feature_spread_does_not_pretend_the_threshold_applies(window):
+    """門檻是**分數**的門檻 —— 看別的特徵時整張圖唯讀。
+
+    一條看起來能拖、拖了卻什麼都不會發生的線，比沒有線更糟；而拖得動又真的
+    寫回去更糟 —— 那會拿一個跟畫面無關的值改掉 bin。
+    """
+    assert window.run_trial(8, workers=1, sync=True) is True
+    feature = next(n for n in (window.results.feature_combo.itemData(i)
+                               for i in range(window.results.feature_combo.count()))
+                   if n != window.results.SCORE)
+
+    window.results.show_feature(feature)
+    assert window.histogram.is_interactive() is False
+    assert window.histogram.threshold() is None
+    assert window.histogram.has_data() is True
+    assert feature in window.results.spread_hint_text() \
+        or "defects" in window.results.spread_hint_text()
+
+    # 拖不動：按下去不該有任何訊號
+    fired = []
+    window.histogram.threshold_committed.connect(fired.append)
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtCore import QEvent
+    pos = QPointF(window.histogram.width() / 2.0, window.histogram.height() / 2.0)
+    window.histogram.mousePressEvent(
+        QMouseEvent(QEvent.MouseButtonPress, pos, pos, Qt.LeftButton,
+                    Qt.LeftButton, Qt.NoModifier))
+    window.histogram.mouseReleaseEvent(
+        QMouseEvent(QEvent.MouseButtonRelease, pos, pos, Qt.LeftButton,
+                    Qt.NoButton, Qt.NoModifier))
+    assert fired == []
+
+    # 選回 Score：門檻回來，而且拖得動
+    window.results.show_feature(window.results.SCORE)
+    assert window.histogram.is_interactive() is True
+    assert window.histogram.threshold() is not None
+    assert window.results.spread_hint_text() == ""
