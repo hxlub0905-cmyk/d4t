@@ -26,7 +26,7 @@ GLV statistic ids are stable strings; custom quantiles use the id form
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
@@ -319,6 +319,7 @@ STAT_FREE_METRICS = ("overlap", "spread_ratio")
 def compare_pixels(target: np.ndarray, reference: np.ndarray,
                    stat: str = "glv_mean",
                    reference_boxes: Optional[List[float]] = None,
+                   want: Optional[Iterable[str]] = None,
                    ) -> Dict[str, float]:
     """兩塊區域的像素 → 一組比較的數字。
 
@@ -347,13 +348,19 @@ def compare_pixels(target: np.ndarray, reference: np.ndarray,
     ``tstat`` 是它的「格子數也算」版本：σ / √n。格子多的那一邊，同樣的差距更
     值得相信，而 ``snr`` 看不到這件事。
 
+    ``want`` 是「只要算這幾個」（``None`` = 全部）。它存在的理由只有一個：
+    「Compare their」可以勾好幾個統計量，而 ``overlap`` / ``spread_ratio``
+    對每一個統計量都是同一個答案 —— 沒有這一格的話，一格一格量的 RSEM 大圖
+    上，同一張直方圖會被重算幾百次。**只影響算不算，不影響算出來的值。**
+
     分母是 0（格子都一樣、或只有一格）時那一項是 ``nan`` —— **不是 0**：
     0 的意思是「沒有差異」，而這裡的事實是「這個問題答不出來」。
     """
     t = np.asarray(target, dtype=np.float64).ravel()
     r = np.asarray(reference, dtype=np.float64).ravel()
+    todo = set(COMPARE_METRICS if want is None else want)
     if t.size == 0 or r.size == 0:
-        return {k: float("nan") for k in COMPARE_METRICS}
+        return {k: float("nan") for k in COMPARE_METRICS if k in todo}
 
     tv = glv_value(t, stat)
     rv = glv_value(r, stat)
@@ -370,10 +377,12 @@ def compare_pixels(target: np.ndarray, reference: np.ndarray,
 
     # 粗糙度的比：**問的不是亮不亮，是均不均勻**。用 MAD 不用 std，理由跟
     # `DEFAULT_METRICS` 換成 robust 那一組一樣（一顆 hot pixel 就能拉走 std）。
-    mad_r = glv_value(r, "glv_mad")
-    out["spread_ratio"] = (float(glv_value(t, "glv_mad") / mad_r)
-                           if mad_r > _EPS else float("nan"))
-    out["overlap"] = _hist_overlap(t, r)
+    if "spread_ratio" in todo:
+        mad_r = glv_value(r, "glv_mad")
+        out["spread_ratio"] = (float(glv_value(t, "glv_mad") / mad_r)
+                               if mad_r > _EPS else float("nan"))
+    if "overlap" in todo:
+        out["overlap"] = _hist_overlap(t, r)
 
     boxes = [float(v) for v in (reference_boxes or [])
              if v is not None and np.isfinite(v)]

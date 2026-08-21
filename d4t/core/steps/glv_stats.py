@@ -983,17 +983,20 @@ class GlvStatsStep(MultiSourceStep):
         metrics = _compare_metrics_of(p)
         out: Dict[str, float] = {}
         for stat in _stats_of(p):
+            # **不看 stat 的那兩個只算第一輪**：它們對每一個統計量都是同一個
+            # 答案，而 `overlap` 是一趟 256 bin 的直方圖 —— 一格一格量的 RSEM
+            # 大圖上，沒有這一行就是同一張圖重算幾百次。
+            want = [m for m in metrics if cmp_feature_name(m, stat) not in out]
+            if not want:
+                continue
             canon = _canonical(stat) or DEFAULT_COMPARE_STAT
             got = algo_glv.compare_pixels(
                 patch, ref_px, canon,
-                reference_boxes=boxes_by_stat.get(stat) or [])
-            for m in metrics:
-                name = cmp_feature_name(m, stat)
-                if name in out:
-                    continue        # 不看 stat 的那兩個只寫一次
+                reference_boxes=boxes_by_stat.get(stat) or [], want=want)
+            for m in want:
                 v = got.get(m)
                 if v is not None and np.isfinite(v):
-                    out[name] = float(v)
+                    out[cmp_feature_name(m, stat)] = float(v)
         return out
 
     @classmethod

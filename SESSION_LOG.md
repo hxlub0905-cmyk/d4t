@@ -42,7 +42,7 @@
   （`Δ +26 · SNR 66 · overlap 0.06`）寫在座標軸那一列的中間 —— 第一版寫在
   右上角，跟 Δ 撞在一起。
 
-計畫書：[`docs/plans/F18-glv.md`](docs/plans/F18-glv.md) §8.8。
+計畫書：[`docs/history/plans/F18-glv.md`](docs/history/plans/F18-glv.md) §8.8。
 
 ---
 
@@ -71,7 +71,7 @@ Percent**、**「Report 要有更多統計量可以量」**。
 * 另外把 `glv_stats` 檔頭那段還在寫 `(μ_T − μ_R) / σ_R` 的 SNR 說明改掉 ——
   昨天改公式時只改了 `compare_pixels` 那一份，同一件事兩份說法。
 
-計畫書：[`docs/plans/F18-glv.md`](docs/plans/F18-glv.md) §8.7。
+計畫書：[`docs/history/plans/F18-glv.md`](docs/history/plans/F18-glv.md) §8.7。
 
 ---
 
@@ -125,7 +125,7 @@ Report 那一格改用同一個 `MetricChips`（使用者：「Compare 跟 absol
 
 ## F18 第 2、4、5、6 步：Gray level 收斂（2026-08-21，第三十二輪續）
 
-使用者：「繼續到完成」。計畫書 [`docs/plans/F18-glv.md`](docs/plans/F18-glv.md)
+使用者：「繼續到完成」。計畫書 [`docs/history/plans/F18-glv.md`](docs/history/plans/F18-glv.md)
 六步做完，剩下的只有明確排在後面的兩件（`lot baseline` 的 two-pass、CD 重做）。
 
 ### 第 2 步：儀表換人，Spread 搬家
@@ -188,7 +188,7 @@ Spread 那邊也多學到一條**沒寫進計畫但不寫就會錯**的：**門�
 
 ## F18 第 1 步：Gray level 的統計量與它的選法（2026-08-21，第三十二輪續）
 
-計畫書：[`docs/plans/F18-glv.md`](docs/plans/F18-glv.md)（§10.1 是這一步的落地
+計畫書：[`docs/history/plans/F18-glv.md`](docs/history/plans/F18-glv.md)（§10.1 是這一步的落地
 紀錄）。使用者：「1,2 都做」「3 好」「METRIC 部分的 UI 我希望更漂亮一點」。
 
 ### 計畫寫「第 1 步純 UI」，落地時把引擎那一半一起做了
@@ -289,7 +289,7 @@ Output 被前面七段各推 8 px，標題落在 y=58，Input 在 y=2：點不�
 
 ### ③ 同一輪談定了 GLV 量測卡的重做（設計，還沒動工）
 
-計畫書：[`docs/plans/F18-glv.md`](docs/plans/F18-glv.md)。三個定案：
+計畫書：[`docs/history/plans/F18-glv.md`](docs/history/plans/F18-glv.md)。三個定案：
 **`compare` 併進 `reference` 維度**（絕對值與相對值同一張卡同時吐）、
 **預設 metrics 換成 robust**（median/MAD）、**Spread 搬去 Results 並且可以拖
 門檻**。

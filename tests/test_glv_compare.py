@@ -411,6 +411,31 @@ def test_the_two_stat_free_reports_are_written_once():
     assert len([n for n in names if n.startswith("cmp_delta_")]) == 3
 
 
+def test_the_stat_free_pair_is_computed_once_not_once_per_statistic():
+    """只寫一次不夠 —— **也只能算一次**。
+
+    `overlap` 是一趟 256 bin 的直方圖，而一格一格量的 RSEM 大圖上有幾百格；
+    勾三個統計量就重算三次的話，那是同一張圖白算幾百次。
+    """
+    calls = []
+    real = algo_glv.compare_pixels
+
+    def spy(*a, **kw):
+        calls.append(sorted(kw.get("want") or algo_glv.COMPARE_METRICS))
+        return real(*a, **kw)
+
+    algo_glv.compare_pixels = spy
+    try:
+        _run(_boxed_ctx(), stat="glv_median,glv_mean,glv_q90",
+             compare_metrics="delta,overlap")
+    finally:
+        algo_glv.compare_pixels = real
+
+    assert len(calls) == 3, "一個統計量一輪"
+    assert calls[0] == ["delta", "overlap"]
+    assert calls[1] == calls[2] == ["delta"], "第二、三輪不該再算 overlap"
+
+
 def test_one_statistic_still_reads_like_the_old_single_choice():
     """舊 recipe 的 ``stat: "glv_mean"`` 是一個合法的「一個元素的清單」。
 

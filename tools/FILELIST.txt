@@ -3,9 +3,9 @@
 f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 a6b298c38249d1758d17f7780df10626e05c809d .gitignore
 dc5d3e24d36ca139df3d9ccac1034075e7698f6e AGENTS.md
-8ad51660214ce61e629e9ef97a1b4cfdd0fb910a CLAUDE.md
+3dc18283bc032707713de8c731b38024b2b53f8a CLAUDE.md
 b20e9b7f31aa8195e297b4a124b69252cd4c56cf README.md
-98044a47b5d86ab0c5401eb59f3e87c56ba5a3fd SESSION_LOG.md
+ff3ad98c3023181e08f8c3ce0d7b5baf346bb7be SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 fa7805cc486a9e7dda00cd42366d7b95fc486862 d4t/__main__.py
@@ -14,7 +14,7 @@ e75a08b69155620720f17d638c3b8e14489091f3 d4t/core/__init__.py
 9f95cc3f4f930324566729bd82462d38777841d2 d4t/core/algo/align.py
 ee35d3a74a03161fd795cb83d72d5aca0622273a d4t/core/algo/curve.py
 d2f7e50ff4920fefc608e7d83117c771276104b7 d4t/core/algo/enhance.py
-ce31bf5ba78d78b67d1ad5ec205adc7942019258 d4t/core/algo/glv.py
+b5f673071bb4685c7ceb496afe05d6c66296c7f9 d4t/core/algo/glv.py
 0cab7d03486a6ca498b9aa2831f34e02dc273d11 d4t/core/algo/golden.py
 36dba0cb2492842918d64a6c855214bad2266b7b d4t/core/algo/grid.py
 01246b411a141df2e3d1281d272275ea709d8935 d4t/core/algo/histmatch.py
@@ -60,7 +60,7 @@ d908fe6e0daf98a16f6fbc1115cefdd5641f5f57 d4t/core/steps/cd.py
 39bbc384b66e024f67200a76598d4f6f255e5100 d4t/core/steps/denoise.py
 93588a88b65e8b98525d7344246251b13f9da31b d4t/core/steps/feature_math.py
 00f877fe38f316bc2a74cb2659a2e5ac63b7055c d4t/core/steps/flatten.py
-3f94a01daadf086e2e3d60a2a7b63de0767aaa9f d4t/core/steps/glv_stats.py
+df47ecb8ca3017f1c9966648c6ab6f32d76e02f2 d4t/core/steps/glv_stats.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
@@ -101,12 +101,11 @@ ffb40bc7e7d8fbac0d7c9402064fe639d1a41740 docs/GLAS-INTERFACE.md
 2392b569d39a556942221eaec6aa8b437a42a199 docs/HANDOVER.md
 160ffb5f501ade00ca2bf417133ef49c3d2e09b1 docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
-6b27419ab01a5af35f3d89b271074dba67a937b5 docs/PITFALLS.md
-f0d4a071efb72fb1829ccb6cc01dec549c47b8a9 docs/ROADMAP.md
+1399d3b08ceb79e1475bccabcd2851c30ad25704 docs/PITFALLS.md
+f97f2c6a337992477561c8e53cdf2f767b705f1c docs/ROADMAP.md
 f6378d9ba391a4e1e3ef7ed855c7694b6b7f50b9 docs/plans/F0-master-plan.md
 d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 c4f06765ad918545511da042eb8d2b63df19795f docs/plans/F15-pair-sources.md
-a48c5ebfbf03b6e74df6609adb399fc45fa7de80 docs/plans/F18-glv.md
 773d4c5652e1abd95b7bf06591a691c07c1c9fa1 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -156,7 +155,7 @@ af91354855f9f11d953dfd45857bb779eb4c55dd tests/test_f11_split_load_cards.py
 174025a7a178c938717f8b8eee4095e19d2165e3 tests/test_feature_owner_prefix.py
 21b2046491056e3656ad2f7905951a6e5902b0fa tests/test_glas_sidecar.py
 32a5dcca2bcda8a98897603cfe771268e012e926 tests/test_glv.py
-bf75323a68fec6e291767dac6824c3ecc828992d tests/test_glv_compare.py
+a09041dd2348f2b2aefe2912344eec380e147389 tests/test_glv_compare.py
 675878e5aa5eb58645f91f8b7645f13c81995a5a tests/test_golden_features.py
 68f4c1d0784f125b13994a5fc576da6ac9270279 tests/test_histmatch.py
 fe72fa26322dce38e7c382a5d7cbb19a3cfd5a95 tests/test_klarf_core.py
