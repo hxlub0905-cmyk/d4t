@@ -332,20 +332,21 @@ def test_a_pixel_size_adds_the_nm_numbers_beside_the_pixel_ones():
         assert name + "_nm" not in on
 
 
-def test_area_still_converts_with_the_square_even_though_nobody_produces_one():
-    """⚠ ``AREA_FEATURES`` 現在**一個生產者都沒有** —— 不要當死碼清掉。
+def test_area_converts_with_the_square_and_lengths_do_not():
+    """長度乘一次、**面積乘平方** —— 而名字看不出是哪一種，所以要靠兩張表。
 
-    CD 重做之後不吐面積了（舊的 ``area_px`` 是「框的寬 × 高」，不是任何東西的
-    面積）。真正的面積跟著 F19 第二批的無方向那一支進來（Feret／等效直徑／
-    真實覆蓋面積），而那一支就會用到這條乘平方的規則。
-
-    這正是 `period.py` 那種模組被順手刪掉的形狀，所以這裡留一支測試釘住規則
-    本身：長度乘一次、面積乘平方。
+    F19 第一批之後這條規則一度**一個生產者都沒有**（舊的 ``area_px`` 是「框的
+    寬 × 高」，跟著 bbox 一起刪掉了）。第二批的無方向那一支把它帶回來：
+    ``cd_area_px`` 是真實覆蓋像素。這一支測試從那段空窗期就在，釘的是規則本身
+    —— 少乘一次的話面積會安靜地小 N 倍。
     """
     from d4t.core.steps._util import nm_twins
 
     assert nm_twins({"area_px": 4.0}, 2.0) == {"area_nm2": 16.0}
+    assert nm_twins({"cd_area_px": 4.0}, 2.0) == {"cd_area_nm2": 16.0}
     assert nm_twins({"cd_median": 4.0}, 2.0) == {"cd_median_nm": 8.0}
+    assert nm_twins({"cd_deq": 4.0}, 2.0) == {"cd_deq_nm": 8.0}
+    assert nm_twins({"cd_aspect": 4.0}, 2.0) == {}      # 無因次的不配
     assert nm_twins({"area_px": 4.0}, 0.0) == {}        # 沒填就一個都不配
 
 

@@ -147,6 +147,9 @@ GLYPH_ICONS = (
     # 「要量的是亮的那條還是暗的那條」（F19）。同一套小版圖，**實心的那一條就是
     # 要量的那一條** —— 這個問題問的是樣品，而樣品長什麼樣正好畫得出來。
     "target_auto", "target_bright", "target_dark",
+    # 「量的是一條線還是一團東西」（F19 第二批）。這兩顆**不是**同一套小版圖：
+    # 它們畫的就是那兩種樣品本身，而那正是這個岔路在問的事。
+    "shape_line", "shape_blob",
 )
 
 
@@ -279,6 +282,32 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         head = (w - 2 * m) * 0.38
         p.drawLine(QPointF(ax1, ay1), QPointF(ax1 - head, ay1))
         p.drawLine(QPointF(ax1, ay1), QPointF(ax1, ay1 + head))
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+    elif n == "shape_line":
+        # 一條有方向的帶子，加兩個箭頭說「量的是橫過去的那一段」。
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        p.drawRect(QRectF(w * 0.36, m, w * 0.28, h - 2 * m))
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        y = h * 0.5
+        p.drawLine(QPointF(m, y), QPointF(w - m, y))
+        a = w * 0.10
+        for x, d in ((m, 1), (w - m, -1)):
+            p.drawLine(QPointF(x, y), QPointF(x + a * d, y - a * 0.8))
+            p.drawLine(QPointF(x, y), QPointF(x + a * d, y + a * 0.8))
+    elif n == "shape_blob":
+        # 一團沒有方向的東西。**刻意不是圓** —— 圓看起來像一個按鈕，而這顆要
+        # 說的正是「形狀不規則」。
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        blob = QPolygonF([
+            QPointF(w * 0.30, h * 0.16), QPointF(w * 0.66, h * 0.10),
+            QPointF(w * 0.86, h * 0.36), QPointF(w * 0.78, h * 0.70),
+            QPointF(w * 0.48, h * 0.88), QPointF(w * 0.16, h * 0.66),
+            QPointF(w * 0.12, h * 0.34)])
+        p.drawPolygon(blob)
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
     elif n.startswith(("place_", "side_", "fill_", "dir_", "target_")):
@@ -582,7 +611,45 @@ METRIC_GLYPHS = (
     # 語言；後兩顆**刻意跳出那套** —— LER 講的不是一條分布，是一條邊在抖，而把
     # 它畫成第四張分布圖會讓它跟 ``std`` 在 19 px 下變成同一張圖。
     "range", "ler_a", "ler_b",
+    # 團那一支（F19 第二批）。這一族**整族跳出「淡的是分布」那套語言** ——
+    # 它們講的是一個形狀的性質，不是一條分布上的一段，所以五顆都畫在同一團
+    # 輪廓上，差別在**標出來的是哪一部分**（填滿的內部／一個等面積的圓／最長
+    # 的弦／最窄的夾／周長）。
+    "area", "deq", "feret_max", "feret_min", "roundness",
 )
+
+
+def _poly_area(poly: "QPolygonF") -> float:
+    """多邊形的面積（鞋帶公式）。只給 ``deq`` 那顆圖示畫等面積圓用。"""
+    n = poly.count()
+    total = 0.0
+    for i in range(n):
+        a, b = poly.at(i), poly.at((i + 1) % n)
+        total += a.x() * b.y() - b.x() * a.y()
+    return total / 2.0
+
+
+def _extreme_pair(pts, longest: bool = True):
+    """一組點裡最遠（或最近）的兩個。只給圖示用，所以直接兩兩比。"""
+    best = None
+    for i, a in enumerate(pts):
+        for b in pts[i + 1:]:
+            d = math.hypot(a[0] - b[0], a[1] - b[1])
+            if best is None or (d > best[0] if longest else d < best[0]):
+                best = (d, a, b)
+    return (best[1], best[2]) if best else ((0.0, 0.0), (0.0, 0.0))
+
+
+def _blob_outline(pad: float, bw: float, bh: float) -> "QPolygonF":
+    """這一族共用的那一團輪廓（0..1 的控制點打到 ``pad``/``bw``/``bh`` 上）。
+
+    **五顆用同一團**：差別要落在「標了哪裡」，而不是「畫了不同的東西」——
+    形狀也不一樣的話，眼睛會先去比形狀，那就看不出它們是同一族的了。
+    """
+    pts = [(0.30, 0.86), (0.66, 0.92), (0.88, 0.62), (0.78, 0.24),
+           (0.46, 0.10), (0.14, 0.32), (0.10, 0.66)]
+    return QPolygonF([QPointF(pad + x * bw, pad + (1 - y) * bh)
+                      for x, y in pts])
 
 
 def _dist_curve(peak: float = 1.0, twin: bool = False,
@@ -907,6 +974,38 @@ def draw_metric_glyph(p: QPainter, name: str, size: float, color: str,
         wob = [(fx + (0.08 if (i % 2) else -0.08), 0.03 + i * 0.188)
                for i in range(6)]
         p.drawPolyline(poly_of(wob))
+    elif n in ("area", "deq", "feret_max", "feret_min", "roundness"):
+        # 同一團輪廓，差別在標出來的是哪一部分（見 :func:`_blob_outline`）。
+        blob = _blob_outline(pad, bw, bh)
+        filled = QColor(solid)
+        filled.setAlpha(95 if n == "area" else 45)
+        p.setPen(QPen(faint if n == "area" else bold.color(),
+                      max(1.0, size / 13.0)))
+        p.setBrush(QBrush(filled))
+        p.drawPolygon(blob)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(bold)
+        if n == "deq":
+            # 一個**等面積的圓**疊上去 —— 「跟它一樣大的圓有多寬」。
+            r = math.sqrt(abs(_poly_area(blob)) / math.pi)
+            p.drawEllipse(blob.boundingRect().center(), r, r)
+        elif n in ("feret_max", "feret_min"):
+            pts = [(blob.at(i).x(), blob.at(i).y()) for i in range(blob.count())]
+            if n == "feret_max":
+                a, b = _extreme_pair(pts, longest=True)
+                p.drawLine(QPointF(*a), QPointF(*b))
+            else:
+                # 最窄的那一夾：兩條平行線貼著輪廓的上下
+                rect = blob.boundingRect()
+                for fy in (0.30, 0.70):
+                    y = rect.top() + fy * rect.height()
+                    p.drawLine(QPointF(rect.left(), y),
+                               QPointF(rect.right(), y))
+        elif n == "roundness":
+            # 周長本身畫粗 —— roundness 問的是「這一圈相對於它圍住的面積」。
+            p.setPen(QPen(solid, max(1.6, size / 8.0)))
+            p.setBrush(Qt.NoBrush)
+            p.drawPolygon(blob)
     else:
         raise ValueError("unknown metric glyph: %r (known: %s)"
                          % (name, ", ".join(METRIC_GLYPHS)))
@@ -2621,6 +2720,16 @@ METRIC_GROUPS: Dict[str, Tuple[str, str, str]] = {
     "ler_b_std": ("Roughness", "LER other side", "ler_b"),
     "cd_dev": ("Vs target", "Off target", "delta"),
     "cd_dev_frac": ("Vs target", "Off target %", "percent"),
+    # CD 的無方向那一支（F19 第二批）。群名用 ``Size`` / ``Outline`` ——
+    # **不要用 ``Shape``**，那個字在上面已經是 GLV 的偏度那一群了。
+    "cd_area_px": ("Size", "Area", "area"),
+    "cd_deq": ("Size", "Equivalent diameter", "deq"),
+    "cd_feret_max": ("Size", "Widest across", "feret_max"),
+    "cd_feret_min": ("Size", "Narrowest across", "feret_min"),
+    # ``aspect`` 重用 ``ratio``：它**本來就是**一個比值，而多畫一顆長得像
+    # 「兩個 Feret」的圖示只會跟上面那兩顆撞在一起。
+    "cd_aspect": ("Outline", "Long / short", "ratio"),
+    "cd_roundness": ("Outline", "Roundness", "roundness"),
 }
 
 #: 分群的顯示順序。不在 :data:`METRIC_GROUPS` 裡的 id（手寫 recipe 的
@@ -2628,7 +2737,8 @@ METRIC_GROUPS: Dict[str, Tuple[str, str, str]] = {
 #: 「看不到就被靜靜刪掉」是最糟的一種幫忙（同 `MultiChoicePicker` 的老規矩）。
 METRIC_GROUP_ORDER = ("Center", "Spread", "Ends", "Shape", "Counts",
                       "Difference", "Vs boxes", "Distributions",
-                      "Width", "Roughness", "Vs target", "Other")
+                      "Width", "Roughness", "Vs target",
+                      "Size", "Outline", "Other")
 
 
 def metric_face(mid: str) -> Tuple[str, str, str]:

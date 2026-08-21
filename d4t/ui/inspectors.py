@@ -45,6 +45,7 @@ from PySide6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
 from ..core.algo import glv as algo_glv
 from ..core.steps._util import CLIP_FRAC, PAIR_FEATURES
+from ..core.steps.cd import _BLOB_REASONS as _CD_BLOB_REASONS
 from ..core.steps.cd import reasons_in_words as _cd_reasons_in_words
 from ..core.steps.denoise import HOT_FRAC, REMOVED_OVER_NOISE
 from . import theme
@@ -1838,10 +1839,18 @@ class CdInspector(Inspector):
         note = self.note()
         return "CD" if note is None else "CD · %s" % self.where()
 
+    def is_blob(self) -> bool:
+        """這一顆走的是無方向那一支嗎（F19 第二批）。"""
+        note = self.note() or {}
+        return str(note.get("shape")) == "blob"
+
     def tab_tooltip(self) -> str:              # noqa: D102
         note = self.note()
         if note is None:
             return ""
+        if self.is_blob():
+            return ("area and calipers of the %s blob, cut at %.0f"
+                    % (note.get("target_used") or "?", note.get("level", 0.0)))
         return ("%s edges, measured along %s, on the %s band"
                 % (note.get("criterion", "?"), note.get("axis", "?"),
                    note.get("target_used") or note.get("target", "?")))
@@ -1850,6 +1859,8 @@ class CdInspector(Inspector):
         note = self.note()
         if note is None:
             return ""
+        if str(note.get("shape")) == "blob":
+            return self._blob_summary(note)
         widths = [float(v) for v in (note.get("widths") or [])]
         n, total = int(note.get("n", 0)), int(note.get("lines", 0))
         if not widths:
@@ -1868,6 +1879,26 @@ class CdInspector(Inspector):
             extra = "  ·  +%d more" % (len(self.notes()) - 1)
         return "  ·  ".join([b for b in bits if b]) + extra
 
+    def _blob_summary(self, note: Dict[str, Any]) -> str:
+        """團那一支的一行。失敗時講**為什麼**，成功時講量到什麼與可不可信。"""
+        if not note.get("ok"):
+            why = _CD_BLOB_REASONS.get(str(note.get("reason")),
+                                       str(note.get("reason") or "unknown"))
+            return "no size here — %s" % why
+        bits = ["area %d px" % int(note.get("area", 0)),
+                "%.1f × %.1f px" % (float(note.get("feret_max", 0.0)),
+                                    float(note.get("feret_min", 0.0))),
+                "at %.0f°" % float(note.get("feret_angle", 0.0))]
+        if int(note.get("pieces", 1)) > 1:
+            # **它挑了一團**，而那是使用者該知道的
+            bits.append("%d blobs, measured the middle one"
+                        % int(note.get("pieces", 1)))
+        if note.get("touches_edge"):
+            bits.append("⚠ touches the edge — a lower bound")
+        if len(self.notes()) > 1:
+            bits.append("+%d more" % (len(self.notes()) - 1))
+        return "  ·  ".join(bits)
+
     # -- 畫 -----------------------------------------------------------------
     def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
         note = self.note()
@@ -1877,13 +1908,22 @@ class CdInspector(Inspector):
         gap = 10.0
         pw = rect.width() * self.PROFILE_W
         ww = rect.width() * self.WOBBLE_W
-        self._paint_profile(p, QRectF(rect.left(), rect.top(), pw,
-                                      rect.height()), note)
-        self._paint_wobble(p, QRectF(rect.left() + pw + gap, rect.top(),
-                                     ww - gap, rect.height()), note)
-        self._paint_batch(p, QRectF(rect.left() + pw + ww + gap, rect.top(),
-                                    rect.width() - pw - ww - gap,
-                                    rect.height()), note)
+        first = QRectF(rect.left(), rect.top(), pw, rect.height())
+        second = QRectF(rect.left() + pw + gap, rect.top(), ww - gap,
+                        rect.height())
+        third = QRectF(rect.left() + pw + ww + gap, rect.top(),
+                       rect.width() - pw - ww - gap, rect.height())
+        if self.is_blob():
+            # 直方圖 ＋ 判準那條線是剖面圖的**同義詞**：它一樣回答
+            # 「為什麼是這個數字」。
+            self._paint_levels(p, first, note)
+            self._paint_outline(p, second, note)
+            self._paint_batch(p, third, note, name="cd_area_px",
+                              caption="Area across the batch")
+            return
+        self._paint_profile(p, first, note)
+        self._paint_wobble(p, second, note)
+        self._paint_batch(p, third, note)
 
     def _caption(self, p: QPainter, rect: QRectF, text: str) -> QRectF:
         """小標題，回剩下可以畫的那一塊。"""
@@ -1979,13 +2019,96 @@ class CdInspector(Inspector):
                    Qt.AlignHCenter | Qt.AlignBottom,
                    "%.2f - %.2f px" % (min(widths), max(widths)))
 
-    def _paint_batch(self, p: QPainter, rect: QRectF,
-                     note: Dict[str, Any]) -> None:
+    def _paint_levels(self, p: QPainter, rect: QRectF,
+                      note: Dict[str, Any]) -> None:
+        """區域的灰階直方圖 ＋ 判準那條線 —— **剖面圖的同義詞**。
+
+        它回答的是同一個問題：**為什麼是這個數字**。門檻切在直方圖的哪裡看得
+        見，所以「切太多／切太少」不必先跑一批才發現。
+        """
+        body = self._caption(p, rect, "Levels in this region")
+        hist = note.get("hist") or {}
+        counts = [max(0, int(c)) for c in (hist.get("counts") or [])]
+        if not counts or body.height() < 24:
+            p.setPen(QColor(TOKENS["text_disabled"]))
+            p.drawText(body, Qt.AlignCenter | Qt.TextWordWrap,
+                       "nothing measured in this region")
+            return
+        lo, hi = float(hist.get("lo", 0.0)), float(hist.get("hi", 1.0))
+        span = (hi - lo) or 1.0
+        # 縱軸取 log：背景那一根通常是前景的幾百倍高，線性軸上前景會整個不見。
+        heights = [math.log1p(c) for c in counts]
+        peak = max(heights) or 1.0
+        bw = body.width() / float(len(counts))
+        faint = QColor(TOKENS["accent"])
+        faint.setAlpha(110)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(faint))
+        for i, val in enumerate(heights):
+            h = (val / peak) * (body.height() - 14.0)
+            p.drawRect(QRectF(body.left() + i * bw, body.bottom() - h,
+                              max(1.0, bw - 1.0), h))
+        p.setBrush(Qt.NoBrush)
+
+        def at(v: float) -> float:
+            return body.left() + ((float(v) - lo) / span) * body.width()
+
+        for key, style in (("bg", Qt.DotLine), ("fg", Qt.DotLine)):
+            if note.get(key) is None:
+                continue
+            p.setPen(QPen(QColor(TOKENS["text_disabled"]), 1.0, style))
+            x = at(note[key])
+            p.drawLine(QPointF(x, body.top()), QPointF(x, body.bottom()))
+        if note.get("level") is not None:
+            p.setPen(QPen(QColor(TOKENS["accent_active"]), 1.6))
+            x = at(note["level"])
+            p.drawLine(QPointF(x, body.top()), QPointF(x, body.bottom()))
+        p.setPen(QColor(TOKENS["text_primary"]))
+        p.drawText(QRectF(body.left(), body.top(), body.width(), 14.0),
+                   Qt.AlignRight | Qt.AlignTop,
+                   "area %d px" % int(note.get("area", 0)))
+
+    def _paint_outline(self, p: QPainter, rect: QRectF,
+                       note: Dict[str, Any]) -> None:
+        """那一團的輪廓與最長的弦 —— 面板上這一格回答「形狀長什麼樣」。
+
+        座標是**整張影像**的正規化座標，所以這裡先縮到輪廓自己的框上；
+        **等比例**縮（不要拉伸），不然一條細棒會被畫成一團圓的。
+        """
+        body = self._caption(p, rect, "Outline")
+        pts = [(float(x), float(y)) for x, y in (note.get("outline") or [])]
+        if len(pts) < 3 or body.height() < 24:
+            return
+        xs = [x for x, _y in pts]
+        ys = [y for _x, y in pts]
+        w = max(1e-9, max(xs) - min(xs))
+        h = max(1e-9, max(ys) - min(ys))
+        scale = min((body.width() - 6.0) / w, (body.height() - 6.0) / h)
+        ox = body.center().x() - (min(xs) + w / 2.0) * scale
+        oy = body.center().y() - (min(ys) + h / 2.0) * scale
+
+        def at(pt) -> QPointF:
+            return QPointF(ox + pt[0] * scale, oy + pt[1] * scale)
+
+        fill = QColor(TOKENS["accent"])
+        fill.setAlpha(60)
+        p.setPen(QPen(QColor(TOKENS["accent"]), 1.3))
+        p.setBrush(QBrush(fill))
+        p.drawPolygon(QPolygonF([at(pt) for pt in pts]))
+        p.setBrush(Qt.NoBrush)
+        chord = [(float(x), float(y)) for x, y in (note.get("chord") or [])]
+        if len(chord) == 2:
+            p.setPen(QPen(QColor(TOKENS["accent_active"]), 1.6))
+            p.drawLine(at(chord[0]), at(chord[1]))
+
+    def _paint_batch(self, p: QPainter, rect: QRectF, note: Dict[str, Any],
+                     name: str = "cd_median",
+                     caption: str = "Across the batch") -> None:
         """整批的分布 ＋ 這一顆在哪 —— 跑過才有東西（同 `MeasureInspector`）。"""
-        name = ("%s_cd_median" % note["prefix"] if note.get("prefix")
-                else "cd_median")
+        if note.get("prefix"):
+            name = "%s_%s" % (note["prefix"], name)
         values = self.feature_values(name)
-        body = self._caption(p, rect, "Across the batch")
+        body = self._caption(p, rect, caption)
         if len(values) < 3 or body.height() < 24:
             p.setPen(QColor(TOKENS["text_disabled"]))
             p.drawText(body, Qt.AlignCenter | Qt.TextWordWrap,

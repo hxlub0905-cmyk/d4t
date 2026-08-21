@@ -11,9 +11,13 @@ import pytest
 import d4t.core.steps  # noqa: F401 — registration side-effect
 from d4t.core.pipeline.context import Context
 from d4t.core.pipeline.step import REGISTRY, get_step
-from d4t.core.steps.cd import MAX_DRAWN_LINES, REPORT_CHOICES
+from d4t.core.steps.cd import (
+    MAX_CONTOUR_POINTS, MAX_DRAWN_LINES, REPORT_CHOICES, SHAPE_BLOB,
+    SHAPE_LINE, SIZE_CHOICES,
+)
 
 from tests.test_algo_edge import line_block
+from tests.test_algo_shape import add_ellipse, canvas, disc
 
 
 @pytest.fixture(scope="module")
@@ -216,3 +220,124 @@ def test_the_image_stream_and_region_rows_stay_read_only(qapp):
     assert specs["roi"].type == "region_keys"
     assert specs["source"].direction == "in"
     assert specs["roi"].direction == "in"
+
+
+# --------------------------------------------------------------------------- #
+# 無方向那一支的 UI（F19 第二批）
+# --------------------------------------------------------------------------- #
+def measured_blob(img=None, **params):
+    cls = REGISTRY["cd_measure"]
+    p = cls.validate_params(dict({"shape": SHAPE_BLOB}, **params))
+    block = disc(d=20.0) if img is None else img
+    ctx = Context(images={"test": np.asarray(block, dtype=np.float32)})
+    return cls().run(ctx, p), p
+
+
+def test_the_outline_and_the_chord_become_marks():
+    """**沒有新的 UI 原語** —— 一圈輪廓是一串線段，最長的弦是第 N+1 條。"""
+    ctx, p = measured_blob()
+    lines, points, focus = get_step("cd_measure").overlay_marks(ctx, p)
+    assert len(lines) == len(points) > 3
+    assert focus == len(lines) - 1                 # 弦畫成醒目的那一條
+    assert len(points[focus]) == 2
+    assert len(lines) <= MAX_CONTOUR_POINTS + 1    # 輪廓抽稀過
+    for seg in lines:
+        for x, y in seg:
+            assert 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0
+
+
+def test_nothing_measured_means_no_marks_at_all():
+    """「框還在但標記沒了」= 這一顆量不出來，而那是最有用的一個狀態。"""
+    ctx, p = measured_blob(canvas(64))
+    lines, points, focus = get_step("cd_measure").overlay_marks(ctx, p)
+    assert lines == [] and points == [] and focus == -1
+
+
+def test_the_panel_switches_to_the_blob_view(qapp):
+    ctx, p = measured_blob()
+    insp = make_panel(qapp, ctx, p)
+    assert insp.is_blob()
+    said = insp.summary()
+    assert "area 3" in said and "px" in said
+    assert "at " in said and "°" in said
+    assert "blob" in insp.tab_tooltip()
+
+
+def test_the_blob_panel_says_why_when_there_is_no_size(qapp):
+    ctx, p = measured_blob(canvas(64))
+    insp = make_panel(qapp, ctx, p)
+    assert insp.has_data()                          # 有 meta = 講得出為什麼
+    assert "no size here" in insp.summary()
+    assert "stands out from the noise" in insp.summary()
+
+
+def test_the_blob_panel_flags_the_two_things_worth_knowing(qapp):
+    """挑了哪一團、以及貼不貼邊 —— 兩個都要在那一行字上。"""
+    two = canvas(96)
+    add_ellipse(two, 48, 48, 8.0, 8.0)
+    add_ellipse(two, 80, 80, 13.0, 13.0)
+    ctx, p = measured_blob(two)
+    assert "2 blobs" in make_panel(qapp, ctx, p).summary()
+
+    edge = canvas(64)
+    add_ellipse(edge, 58, 32, 14.0, 10.0)
+    ctx, p = measured_blob(edge)
+    assert "lower bound" in make_panel(qapp, ctx, p).summary()
+
+
+def test_the_blob_panel_draws_without_blowing_up(qapp):
+    from PySide6.QtGui import QPixmap
+
+    for img in (disc(d=20.0), canvas(64)):
+        ctx, p = measured_blob(img)
+        insp = make_panel(qapp, ctx, p,
+                          batch=[{"features": {"cd_area_px": 300.0 + i}}
+                                 for i in range(30)])
+        insp.resize(560, 190)
+        insp.render(QPixmap(560, 190))
+
+
+def test_every_size_metric_the_card_offers_has_a_face(qapp):
+    from d4t.ui import widgets as widgets_mod
+
+    groups = set()
+    for mid in SIZE_CHOICES:
+        group, label, glyph = widgets_mod.metric_face(mid)
+        assert group in widgets_mod.METRIC_GROUP_ORDER, mid
+        assert group != "Other", "%s 沒有登記在 METRIC_GROUPS" % mid
+        assert label and not label.startswith("cd_"), mid
+        assert glyph in widgets_mod.METRIC_GLYPHS, mid
+        groups.add(group)
+    # **不要用 ``Shape``** —— 那個字在 GLV 那邊已經是偏度那一群了。
+    assert groups == {"Size", "Outline"}
+    assert "Shape" not in groups
+
+
+def test_the_shape_fork_is_two_buttons_not_a_dropdown(qapp):
+    from d4t.ui import widgets as widgets_mod
+
+    spec = {s.name: s for s in REGISTRY["cd_measure"].params}["shape"]
+    assert spec.type == "icon_choice"
+    assert list(spec.choices) == [SHAPE_LINE, SHAPE_BLOB]
+    for icon in spec.icons:
+        assert icon in widgets_mod.GLYPH_ICONS, icon
+    for choice in spec.choices:
+        assert spec.choice_help.get(choice), choice
+
+
+def test_the_two_shape_icons_do_not_look_the_same(qapp):
+    """兩顆並排的鈕長得一樣 = 那一列等於沒有（同 F11 那四支 ROI 工具）。"""
+    from PySide6.QtGui import QImage, QPainter
+    from d4t.ui import widgets as widgets_mod
+
+    shots = []
+    for name in ("shape_line", "shape_blob"):
+        img = QImage(19, 19, QImage.Format_ARGB32)
+        img.fill(0)
+        p = QPainter(img)
+        try:
+            widgets_mod.draw_glyph_icon(p, name, 19.0, "#000000")
+        finally:
+            p.end()
+        shots.append(img.constBits().tobytes())
+    assert shots[0] != shots[1]

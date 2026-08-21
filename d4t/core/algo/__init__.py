@@ -25,5 +25,10 @@ from .quality import check_lap_quality, compute_quality, DEFAULT_LAP_THRESHOLD
 from .edge import (
     EdgePoint, ScanLine, ScanResult, CRITERIA, TARGETS, AXES,
     find_edges, pair_across, measure_line, scan, choose_axis,
+    threshold_level, profile_noise, edge_quality,
+)
+from .shape import (
+    BlobResult, measure_blob, feret, pick_levels, equivalent_diameter,
+    roundness,
 )
 from . import subpixel

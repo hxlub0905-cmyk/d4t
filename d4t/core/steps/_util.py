@@ -504,7 +504,7 @@ def prefix_features(prefix: str, feats: Dict[str, float]) -> Dict[str, float]:
 #: 而它們差一個次方。照結尾一律乘一次的話，面積會安靜地少乘一次 ——
 #: 跑得完、有數字、而且是錯的。改名成 ``area_px2`` 也能解，但那會動到既有的
 #: recipe 與黃金值，代價比一行表大得多。
-AREA_FEATURES = ("area_px",)
+AREA_FEATURES = ("area_px", "cd_area_px")
 
 #: 名字**不是** ``_px`` 結尾、但意思就是一段長度的那幾個（F19）。
 #:
@@ -516,7 +516,12 @@ AREA_FEATURES = ("area_px",)
 #: 不在這裡、也不以 ``_px`` 結尾的一律不配 —— ``cd_dev_frac``（比例）、
 #: ``cd_n``（條數）、``cd_axis_deg``（角度）都不該有 nm 版本。
 LENGTH_FEATURES = ("cd_median", "cd_mean", "cd_min", "cd_max", "cd_range",
-                   "cd_std", "ler_a_std", "ler_b_std", "cd_dev")
+                   "cd_std", "ler_a_std", "ler_b_std", "cd_dev",
+                   # 團那一支（F19 第二批）。``cd_area_px`` **不在這裡** ——
+                   # 它結尾是 `_px` 但意思是面積，所以它住 :data:`AREA_FEATURES`
+                   # 而且那一張表先比對。少了那一行的話它會被配成 `cd_area_nm`
+                   # （少乘一次），而那正是 AREA_FEATURES 上面那段在講的事。
+                   "cd_deq", "cd_feret_max", "cd_feret_min")
 
 
 def nm_twins(feats: Dict[str, float],

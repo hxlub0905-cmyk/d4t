@@ -1,5 +1,10 @@
 # d4t algorithm library — authored 2026-08-21 (F19).
-"""edge — 一條剖面上的次像素邊緣定位與配對。**CD 的全部數學都在這裡。**
+"""edge — 一條剖面上的次像素邊緣定位與配對。**CD「有方向」那一半的數學。**
+
+無方向的那一半（顆粒／孔洞：門檻切割、Feret、面積）住 :mod:`d4t.core.algo.shape`。
+分法不是隨意的：**這裡吃一條剖面，那裡吃一塊區域。** 兩支共用三樣東西 ——
+:func:`threshold_level`（門檻的高度）、:func:`profile_noise`（雜訊）與
+:func:`edge_quality`（品質），所以 ``cd_edge_score`` 在兩支之間仍然可以互相比較。
 
 為什麼原子單位是「一條量測線」，不是「一個區域」
 ------------------------------------------------
@@ -85,7 +90,8 @@ __all__ = [
     "CRITERIA", "TARGETS", "AXES", "AXIS_X", "AXIS_Y", "MIN_QUALITY",
     "EdgePoint", "ScanLine", "ScanResult",
     "find_edges", "pair_across", "measure_line", "scan", "choose_axis",
-    "threshold_level",
+    # 兩支共用的三個（見模組說明）
+    "threshold_level", "profile_noise", "edge_quality",
 ]
 
 #: 邊界判準。順序 = UI 下拉的順序（預設在最前面）。
@@ -111,7 +117,7 @@ _REL_GRAD = 0.35
 #: 而 1 GLV 是量化的下限 —— 同 `F11` 給 ``hot_pixels`` 門檻加地板的理由。
 _MIN_CONTRAST = 1.0
 
-#: :func:`_edge_quality` 的分母權重（見那支函式）。
+#: :func:`edge_quality` 的分母權重（見那支函式）。
 _QUALITY_K = 4.0
 
 #: 一條邊至少要有這個品質分才算數（``品質 = 對比/(對比 + 4×雜訊)``，
@@ -144,7 +150,7 @@ class EdgePoint(NamedTuple):
     contrast: float
     #: 邊有多糊（px，erf 的 σ），由 20–80% 上升距離量 —— **三個判準都有**。
     blur: float
-    #: 0..1，見 :func:`_edge_quality`。
+    #: 0..1，見 :func:`edge_quality`。
     quality: float
     reason: str
     method: str
@@ -219,7 +225,7 @@ def _mad(values: np.ndarray) -> float:
     return float(np.median(np.abs(v - np.median(v))))
 
 
-def _profile_noise(raw: np.ndarray) -> float:
+def profile_noise(raw: np.ndarray) -> float:
     """這條剖面的雜訊 σ（GLV），由**一階差分**估計。
 
     為什麼不用平台自己的 MAD（第一版的做法）：一條 10 px 的線，內側「平台」其實
@@ -236,7 +242,7 @@ def _profile_noise(raw: np.ndarray) -> float:
     return float(1.4826 * _mad(np.diff(v)) / math.sqrt(2.0))
 
 
-def _edge_quality(contrast: float, noise: float) -> float:
+def edge_quality(contrast: float, noise: float) -> float:
     """這條邊有多可信：``對比 / (對比 + k×雜訊)``，夾在 0..1。
 
     **整個 repo 只有這一份定義**（同一個名字在不同地方算出不同的東西，是這裡
@@ -444,7 +450,7 @@ def find_edges(profile: Any, criterion: str = "threshold", threshold_frac: float
     prof = np.asarray(profile, dtype=np.float64).ravel()
     if prof.size < 5:
         return []
-    noise = _profile_noise(prof)           # **原始**的那一份，見那支函式
+    noise = profile_noise(prof)           # **原始**的那一份，見那支函式
     work = gaussian_filter1d(prof, smooth) if smooth > 0 else prof
     grad = np.gradient(work)
     mag = np.abs(grad)
@@ -461,7 +467,7 @@ def find_edges(profile: Any, criterion: str = "threshold", threshold_frac: float
         polarity = 1 if hi >= lo else -1
         if contrast < max(min_contrast, 0.0):
             continue                       # 平的地方不是邊
-        quality = _edge_quality(contrast, noise)
+        quality = edge_quality(contrast, noise)
         if quality < min_quality:
             continue                       # 雜訊裡的起伏不是邊（見 _MIN_QUALITY）
         blur = _edge_blur(work, peak, left_half, right_half, lo, hi)
