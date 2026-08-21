@@ -17,18 +17,21 @@
 「這塊 EPI 的平均灰階是 120」跟「它比隔壁亮 12」不能在同一張卡上同時得到，
 使用者得放兩張卡、接兩次線，而那兩張卡各自有機會設得不一樣。
 
-``reference`` 的四個答案（:data:`REFERENCES`）：
+``reference`` 的五個答案（:data:`REFERENCES`）—— 前面四個是一張真值表
+（**流一不一樣 × 區域一不一樣**），最後一個是它的自動版：
 
-=====================  ========================================  ============
-值                     跟誰比                                    誰在用
-=====================  ========================================  ============
-``none``               不比，只要絕對值                          兩種資料
-``another region``     同一張圖的另一塊（背景、鄰近 cell）        RSEM 大圖
-``another stream``     同一塊在另一條流上（test vs ref）          patch
-``the other regions``  ``<name>_others``（同類區域的其他份）      patch
-=====================  ========================================  ============
+===============================  ==============================  ==============
+值                               跟誰比                          誰在用
+===============================  ==============================  ==============
+``none``                         不比，只要絕對值                兩種資料
+``another region``               另一塊 @ 同一條流                RSEM 大圖
+``another stream``               同一塊 @ 另一條流                patch
+``another region on another      另一塊 @ 另一條流                EBI↔RSEM 對照
+stream``
+``the other regions``            ``<name>_others`` @ 同一條流     patch
+===============================  ==============================  ==============
 
-四個都只吃「現在這一顆」的資料 —— 所以儀表在預覽時就畫得出來（那是
+五個都只吃「現在這一顆」的資料 —— 所以儀表在預覽時就畫得出來（那是
 `ui/inspectors.GlvInspector` 成立的前提）。
 
 舊 recipe 由 `recipe._migrate_compare_method_into_reference` 接住，
@@ -143,8 +146,16 @@ METRIC_CHOICES = (
 REF_NONE = "none"
 REF_REGION = "another region"
 REF_STREAM = "another stream"
+#: 兩邊都不一樣的那一種。**第一版漏了它**（2026-08-21 使用者問「test 取
+#: EPI_center、ref 取 EPI_others 要怎麼拉線」才發現）—— 而漏得很難看：
+#: ``another stream`` 那條路把 `reference_region` **安靜地忽略掉**，於是那份
+#: 設定跑得完、有數字，而那個數字是「同一塊在另一條流上」的答案。
+#:
+#: 舊的 `method="compare"` 有四個獨立的角色參數，所以它表達得出這一種；
+#: 是我把二選一拆成「跟誰比」的時候把它弄丟的。
+REF_BOTH = "another region on another stream"
 REF_OTHERS = "the other regions"
-REFERENCES = (REF_NONE, REF_REGION, REF_STREAM, REF_OTHERS)
+REFERENCES = (REF_NONE, REF_REGION, REF_STREAM, REF_BOTH, REF_OTHERS)
 
 #: ``the other regions`` 靠的是 Region 卡的家族慣例：``epi`` 這一塊的「其他同類」
 #: 叫 ``epi_others``（`_util.set_region_family`）。**不必多接一條線** ——
@@ -274,7 +285,7 @@ class GlvStatsStep(MultiSourceStep):
         ParamSpec(
             name="reference_region", type="region_key", direction="in", default="",
             section="3 · Compare against", label="That region",
-            show_when=("reference", (REF_REGION,)),
+            show_when=("reference", (REF_REGION, REF_BOTH)),
             help=("The region to judge against - the background, the "
                   "neighbouring cell, another layer. Drag a line from the "
                   "Region card that defines it."),
@@ -282,7 +293,7 @@ class GlvStatsStep(MultiSourceStep):
         ParamSpec(
             name="reference_source", type="image_key", direction="in",
             default="ref", section="3 · Compare against", label="That stream",
-            show_when=("reference", (REF_STREAM,)),
+            show_when=("reference", (REF_STREAM, REF_BOTH)),
             help=("The image stream to judge against - normally ref, so the "
                   "same block is compared across the pair."),
         ),
@@ -380,7 +391,7 @@ class GlvStatsStep(MultiSourceStep):
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
         out = list(super().resolve_reads(params))
-        if _reference_of(params) == REF_STREAM:
+        if _reference_of(params) in (REF_STREAM, REF_BOTH):
             name = str(params.get("reference_source", "") or "").strip()
             if name and name not in out:
                 out.append(name)
@@ -389,7 +400,7 @@ class GlvStatsStep(MultiSourceStep):
     @classmethod
     def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
         out = list(super().resolve_regions_in(params))
-        if _reference_of(params) == REF_REGION:
+        if _reference_of(params) in (REF_REGION, REF_BOTH):
             name = str(params.get("reference_region", "") or "").strip()
             if name and name not in out:
                 out.append(name)
@@ -419,14 +430,14 @@ class GlvStatsStep(MultiSourceStep):
         if ref == REF_NONE:
             return out
         mine = [r for r in cls.region_list(params) if r]
-        if ref == REF_REGION:
+        if ref in (REF_REGION, REF_BOTH):
             other = str(params.get("reference_region", "") or "").strip()
             if not other:
                 out.append("This card is set to compare against another "
                            "region, but no region is picked yet. Drag a line "
                            "from the Region card that defines it into “That "
                            "region”.")
-            elif mine and other in mine:
+            elif ref == REF_REGION and mine and other in mine:
                 # 同一塊比自己 = delta 恆為 0、snr 恆為 0。跑得完、有數字、
                 # 而且那些數字不會因為任何缺陷而改變。
                 out.append("The region being measured and the one it is "
@@ -435,13 +446,13 @@ class GlvStatsStep(MultiSourceStep):
                            "zero no matter what the defect looks like. Pick a "
                            "different region, or compare against another "
                            "image stream instead.")
-        elif ref == REF_STREAM:
+        if ref in (REF_STREAM, REF_BOTH):
             other = str(params.get("reference_source", "") or "").strip()
             if not other:
                 out.append("This card is set to compare against another image "
                            "stream, but none is wired into “That stream” yet.")
-            elif other in cls.source_list(params) \
-                    and len(cls.source_list(params)) == 1:
+            elif (ref == REF_STREAM and other in cls.source_list(params)
+                    and len(cls.source_list(params)) == 1):
                 out.append("The stream being measured and the one it is "
                            "compared against are the same stream, so every "
                            "comparison this card produces is zero no matter "
@@ -772,10 +783,15 @@ class GlvStatsStep(MultiSourceStep):
 
     @classmethod
     def _ref_label(cls, p: Dict[str, Any], ref: str) -> str:
+        """參照那一塊叫什麼（面板與 `ctx.meta` 用）—— **講得出流與區域**。"""
+        region = str(p.get("reference_region", "") or "?")
+        stream = str(p.get("reference_source", "") or "?")
         if ref == REF_REGION:
-            return str(p.get("reference_region", "") or "?")
+            return region
         if ref == REF_STREAM:
-            return str(p.get("reference_source", "") or "?")
+            return "%s @ %s" % (str(p.get(cls.REGION) or "the image"), stream)
+        if ref == REF_BOTH:
+            return "%s @ %s" % (region, stream)
         return str(p.get(cls.REGION) or "") + OTHERS_SUFFIX
 
     def _reference_pixels(self, ctx: Context, img, p: Dict[str, Any], ref: str):
@@ -786,19 +802,21 @@ class GlvStatsStep(MultiSourceStep):
         （見 `_util.set_region_family`）。
         """
         region = str(p.get(self.REGION) or "")
-        if ref == REF_STREAM:
+        image = img
+        if ref in (REF_STREAM, REF_BOTH):
             name = str(p.get("reference_source", "") or "").strip()
-            other = ctx.images.get(name)
-            if other is None:
+            image = ctx.images.get(name)
+            if image is None:
                 raise StepError(
                     self.key,
                     "the stream to compare against ('%s') does not exist "
                     "here; available: %s."
                     % (name, ", ".join(sorted(ctx.images)) or "none"))
-            return roi_pixels(ctx, self.key, other, region)
+            if ref == REF_STREAM:
+                return roi_pixels(ctx, self.key, image, region)
 
         want = (str(p.get("reference_region", "") or "").strip()
-                if ref == REF_REGION else region + OTHERS_SUFFIX)
+                if ref in (REF_REGION, REF_BOTH) else region + OTHERS_SUFFIX)
         if not want:
             raise StepError(
                 self.key,
@@ -813,4 +831,4 @@ class GlvStatsStep(MultiSourceStep):
                 "defect%s. The rest of the batch is unaffected."
                 % (want, (" — %s" % why) if why else
                    " (no card upstream produced it)"))
-        return roi_pixels(ctx, self.key, img, want)
+        return roi_pixels(ctx, self.key, image, want)

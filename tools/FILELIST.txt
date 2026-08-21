@@ -49,7 +49,7 @@ ec7bdb58e7da611ac74f16b53e218f9a65476bdc d4t/core/pipeline/cellrois.py
 fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 8be219b056d2bb84d48741c5c8855a73f155949f d4t/core/pipeline/engine.py
 f1cbd776b47948629028c3f204e3dfb811a5ae2b d4t/core/pipeline/expression.py
-066b16e12fe1ca479640dcf9adf3d13911d71d5f d4t/core/pipeline/recipe.py
+41c3a5d109713648cad30ed92ff419e4ed264b8e d4t/core/pipeline/recipe.py
 52b0f56c81d40b601fb82a5735cc512530e39824 d4t/core/pipeline/step.py
 afcd1284d3abd421d5d3ffcffaf596f78f50c6e3 d4t/core/steps/__init__.py
 13a17126c91e8899981a147a5729edd614c043e5 d4t/core/steps/_util.py
@@ -60,7 +60,7 @@ d908fe6e0daf98a16f6fbc1115cefdd5641f5f57 d4t/core/steps/cd.py
 39bbc384b66e024f67200a76598d4f6f255e5100 d4t/core/steps/denoise.py
 93588a88b65e8b98525d7344246251b13f9da31b d4t/core/steps/feature_math.py
 00f877fe38f316bc2a74cb2659a2e5ac63b7055c d4t/core/steps/flatten.py
-bf0437b076bd9d8289f6c11483b02a9aa969338b d4t/core/steps/glv_stats.py
+b9c453a75c0cebd3dab932e9e26c41db2cf10be7 d4t/core/steps/glv_stats.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
@@ -85,11 +85,11 @@ a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
 3ae1ab8a3277cd505874be9e502926b8a5807fcb d4t/ui/canvas.py
 3b58b7e078d58ad84a8939734b65952a75a029f3 d4t/ui/cell_canvas.py
 511288a738743288b669fedb83036486a25fc673 d4t/ui/gallery.py
-f7c240b6ad90f3a3eb745288fa3d39f8310e8a45 d4t/ui/inspectors.py
+82476da043bf2d25fa6797fcda4e97a9d6518bd9 d4t/ui/inspectors.py
 68e6ac894866da63ca055b9082523ffb89656702 d4t/ui/region_check.py
 cc73ee4493625b81df5d6d9eec7c12128d0eda12 d4t/ui/results.py
 e3248e389f47ff9a0f8b911de3f2ef58c4bf9208 d4t/ui/scope.py
-ff4689352d99404261da9b49b58627300761289f d4t/ui/studio.py
+55f72b3e6ec6d1131ec47bf4a83ea71bcf02f25f d4t/ui/studio.py
 b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 b24576feb08cf1517b18a0d0a04f302fcb9ea840 d4t/ui/theme.py
 af42b652c4e56b5a8458ab24a5f03ee959638139 d4t/ui/viewmodel.py
@@ -107,7 +107,7 @@ f0d4a071efb72fb1829ccb6cc01dec549c47b8a9 docs/ROADMAP.md
 f6378d9ba391a4e1e3ef7ed855c7694b6b7f50b9 docs/plans/F0-master-plan.md
 d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 c4f06765ad918545511da042eb8d2b63df19795f docs/plans/F15-pair-sources.md
-99ca2975abb21c5c1c8959ff6109b6670ab6f84a docs/plans/F18-glv.md
+a6d8ff84a976fc8d7c35587c4c691f5b48483006 docs/plans/F18-glv.md
 773d4c5652e1abd95b7bf06591a691c07c1c9fa1 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -157,7 +157,7 @@ af91354855f9f11d953dfd45857bb779eb4c55dd tests/test_f11_split_load_cards.py
 174025a7a178c938717f8b8eee4095e19d2165e3 tests/test_feature_owner_prefix.py
 21b2046491056e3656ad2f7905951a6e5902b0fa tests/test_glas_sidecar.py
 32a5dcca2bcda8a98897603cfe771268e012e926 tests/test_glv.py
-26a2fe4a1a8de6c3e8a153eef2851634195ffb0d tests/test_glv_compare.py
+6571db60d0748c8225591f188bffd8f29f8d5de6 tests/test_glv_compare.py
 675878e5aa5eb58645f91f8b7645f13c81995a5a tests/test_golden_features.py
 68f4c1d0784f125b13994a5fc576da6ac9270279 tests/test_histmatch.py
 fe72fa26322dce38e7c382a5d7cbb19a3cfd5a95 tests/test_klarf_core.py
@@ -217,7 +217,7 @@ b3bcc7956841e98b5cd4ad05bfddefbe1da58fcf tests/test_ui_f7_12_template.py
 1694cad7276e7ed4b40d70577b7b65e2ff5dccdb tests/test_ui_f7_14_canvas_flow.py
 f8c81d4bc6d24760e934aa8854c16dd58cece5e7 tests/test_ui_f7_15_reading_load.py
 9bec4152dcfde2c411ff1cd7f9ce546aa1511921 tests/test_ui_f7_16_safety_net.py
-1063f2140c84dc173cd7177a095366120371d52c tests/test_ui_f7_17_inspectors.py
+4508610522e5fbee34521324d4fe7f168cf12ed3 tests/test_ui_f7_17_inspectors.py
 3f9f8332942c17df727a7072c60e4ae1109bb704 tests/test_ui_f7_18_streams_as_nodes.py
 77e958df0f3c27dcdd8ab80b43fd3b59e904d571 tests/test_ui_f7_19_wiring.py
 6eeab6eebd1c63ac6d3f65d80b981a4d438d57ef tests/test_ui_f7_23_buttons.py

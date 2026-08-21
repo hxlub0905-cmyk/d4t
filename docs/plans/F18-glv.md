@@ -98,6 +98,33 @@
 所以 `ROLE_PORTS` 清空，改成一條新的不變量：
 `test_the_reference_ports_are_singular_and_only_show_when_asked`。
 
+### 3.2.2 第一版漏了一格 —— 而漏得很難看（2026-08-21，使用者問出來的）
+
+使用者：「如果我想要比對的是兩個 source，test 取 EPI_center、ref 則是
+EPI_others，這種的我要怎麼拉線?」
+
+**答案是拉不出來。** 把 `method` 二選一拆成「跟誰比」的時候，我把四個獨立的
+角色參數（`target_source` / `target_region` / `reference_source` /
+`reference_region`）壓成一個下拉，而下拉只有兩種「另一個」：
+
+* `another region` = 另一塊 @ **同一條流**
+* `another stream` = **同一塊** @ 另一條流
+
+「另一塊 @ 另一條流」沒有家。更糟的是 `another stream` 那條路**安靜地忽略**
+`reference_region`：那份設定跑得完、有數字，而那個數字答的是另一個問題。
+而 `_migrate_compare_method_into_reference` 也照著同一個漏洞轉舊 recipe ——
+**特徵名一樣、跑得完、數字不同**，這是最難發現的那一種。
+
+修法：`reference` 補上第四格 `another region on another stream`（兩個埠都要
+接），遷移改成一張完整的真值表（流一不一樣 × 區域一不一樣）。
+
+**這一格為什麼一開始會漏**值得記住：我是從「三個獨立的問題」那個漂亮的模型
+往下推的，而**推出來的選項少了一個組合**。舊卡片那四個參數醜，但它們是
+**兩個獨立的座標軸**，所以它表達得完；下拉是一條線，要表達二維就得把格子列滿。
+
+驗收：`tests/test_glv_compare.py::test_another_region_on_another_stream` 與
+`::test_the_migration_covers_the_whole_truth_table`。
+
 ### 3.3 遷移（鐵則 9：只能靠「舊東西在不在」判斷）
 
 舊 recipe 的 `method="compare"` 還在 → 轉成
@@ -304,6 +331,24 @@ e-beam 影像有 charging、hot pixel、掃描條紋 —— `mean/std` 是最脆
 「這個數字沒有畫得出來的位置」是一個誠實的答案。
 `tests/test_ui_f7_17_inspectors.py::test_a_width_statistic_is_not_drawn_as_a_position`
 用畫素比對鎖住這三條。
+
+### 7.0.2 分頁鈕的字（使用者 2026-08-21：「title 要更詳細一點」）
+
+原話：「右側 Gray level 面板我覺得他的 title 要更詳細一點（顯示的是什麼、
+誰跟誰比之類的）」。以前那顆分頁鈕讀的是**類別屬性**，所以不管畫面上是什麼，
+它永遠寫著「Gray level」。
+
+改成由**儀表現在畫的東西**決定（`Inspector.tab_title()` / `tab_tooltip()`）：
+
+| 情況 | 分頁鈕 |
+|---|---|
+| 不比 | `Gray level · epi on test` |
+| 跟同一張圖的另一塊比 | `Gray level · epi vs mg` |
+| 跟另一條流的另一塊比 | `Gray level · epi vs mg @ ref` |
+| 接了好幾個區域 | `Gray level · 3 regions` |
+
+放不下的那半句進 tooltip（每一塊在哪條流、跟誰比、幾格、在顯示哪幾個統計量）。
+面板裡每一列的標籤也跟著補上 `vs <參照>`。
 
 ### 7.1 Spread 搬去哪
 

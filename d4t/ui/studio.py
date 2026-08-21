@@ -3732,6 +3732,8 @@ class StudioWindow(QMainWindow):
                 self._inspector = cls(self.inspector_host)
                 self.inspector_slot.addWidget(self._inspector)
                 self._connect_inspector(self._inspector)
+            # 字在 `_refresh_inspector` 餵完資料之後才定案（儀表要看得到
+            # 現在畫的是什麼才說得出「誰跟誰比」）—— 這裡先給一個保底。
             self.btn_tab_card.setText(str(getattr(cls, "title", "Card"))
                                       if cls is not None else "Card")
         # **每次都要同步頁面**，不能因為「儀表類別沒變」就跳過：兩張都沒有儀表
@@ -3920,6 +3922,11 @@ class StudioWindow(QMainWindow):
                          feature_names=feats,
                          shown_streams=[s for s in shown if s])
         self.inspector_summary.setText(insp.summary())
+        # 分頁鈕的字由**儀表現在畫的東西**決定（使用者 2026-08-21：「title 要
+        # 更詳細一點」）。放不下的那半句進 tooltip。
+        if hasattr(insp, "tab_title"):
+            self.btn_tab_card.setText(str(insp.tab_title() or "Card"))
+            self.btn_tab_card.setToolTip(str(insp.tab_tooltip() or ""))
         self._refresh_curve_backdrop(meta)
 
     def _refresh_curve_backdrop(self, meta: Dict[str, Any]) -> None:

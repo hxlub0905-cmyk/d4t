@@ -97,6 +97,19 @@ class Inspector(QWidget):
         self.update()
 
     # -- 子類覆寫 -----------------------------------------------------------
+    def tab_title(self) -> str:
+        """分頁鈕上的字。**預設是類別的 `title`，但子類可以按狀態改**。
+
+        以前這一格讀的是**類別屬性**，所以不管畫面上是什麼，它永遠寫著
+        「Gray level」——「這一塊在講什麼」得自己從圖裡推。使用者 2026-08-21：
+        「他的 title 要更詳細一點（顯示的是什麼、誰跟誰比之類的）」。
+        """
+        return str(getattr(self, "title", "Card"))
+
+    def tab_tooltip(self) -> str:
+        """分頁鈕的 tooltip —— 標題放不下的那半句話。"""
+        return ""
+
     def summary(self) -> str:
         """一行文字摘要。**測試與狀態列讀這個**，不去讀畫素。"""
         return ""
@@ -1356,6 +1369,51 @@ class GlvInspector(Inspector):
     #: 貼在 0/255 的比例超過這個就講一句話。
     SAT_WARN = 0.02
 
+    # -- 標題（使用者 2026-08-21：「要更詳細一點」）--------------------------
+    def _pairs(self) -> Dict[str, str]:
+        """區域名 -> 它跟誰比（引擎在 ``ctx.meta["compares"]`` 留的那一份）。"""
+        out: Dict[str, str] = {}
+        for rec in (self.meta.get("compares") or {}).values():
+            if isinstance(rec, dict):
+                out[str(rec.get("target") or "")] = str(rec.get("reference") or "")
+        return out
+
+    def tab_title(self) -> str:                # noqa: D102
+        rows = self.rows()
+        if not rows:
+            return self.title
+        pairs = self._pairs()
+        first = rows[0]
+        who = str(first.get("region") or "the image")
+        if len(rows) > 1:
+            return "%s · %d regions" % (self.title, len(rows))
+        versus = pairs.get(who)
+        if versus:
+            # 「誰跟誰比」比「在哪條流上」重要 —— 兩個都塞得下的話字會太長，
+            # 而流名在比較的那一邊已經寫出來了（`epi_others @ ref`）。
+            return "%s · %s vs %s" % (self.title, who, versus)
+        return "%s · %s on %s" % (self.title, who,
+                                  str(first.get("stream") or "?"))
+
+    def tab_tooltip(self) -> str:              # noqa: D102
+        rows = self.rows()
+        if not rows:
+            return self.empty_reason()
+        pairs = self._pairs()
+        bits = []
+        for r in rows:
+            who = str(r.get("region") or "the whole image")
+            line = "%s on %s" % (who, r.get("stream") or "?")
+            if pairs.get(who):
+                line += "  compared against %s" % pairs[who]
+            if int(r.get("boxes") or 0) > 1:
+                line += "  (%d boxes, one at a time)" % int(r.get("boxes") or 0)
+            bits.append(line)
+        marks = sorted((rows[0].get("marks") or {}))
+        if marks:
+            bits.append("showing: " + ", ".join(marks))
+        return "\n".join(bits)
+
     # -- 畫 -----------------------------------------------------------------
     def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
         rows = self.rows()
@@ -1392,6 +1450,9 @@ class GlvInspector(Inspector):
         colour = self._colour(index)
 
         label = str(row.get("region") or row.get("stream") or "whole image")
+        versus = self._pairs().get(str(row.get("region") or ""))
+        if versus:
+            label += "  vs  " + versus
         if int(row.get("boxes") or 0) > 1:
             # 一格一格量的時候畫的是**典型那一格**，而畫面必須說出這件事 ——
             # 不說的話這條分布看起來像整個區域的，那是兩個不同的東西。

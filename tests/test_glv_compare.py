@@ -560,3 +560,78 @@ def test_a_box_too_small_to_measure_is_skipped_not_counted_as_zero():
     assert ctx.features["boxes"] == 0.0, "每一格都只有 256 px，全部低於下限"
     assert ctx.features["glv_ok"] == 0.0
     assert "glv_median_typical" not in ctx.features
+
+
+# --------------------------------------------------------------------------- #
+# 10. 兩邊都不一樣的那一種（2026-08-21 使用者問出來的洞）
+# --------------------------------------------------------------------------- #
+def test_another_region_on_another_stream():
+    """`test` 的 `epi_center` 對上 `ref` 的 `epi_others`。
+
+    使用者原話：「如果我想要比對的是兩個 source，test 取 EPI_center、ref 則是
+    EPI_others，這種的我要怎麼拉線?」—— 答案是**當時拉不出來**。
+
+    F18 第 5 步把 `method` 二選一拆成「跟誰比」的時候漏了這一格，而漏得很難看：
+    `another stream` 那條路把 `reference_region` **安靜地忽略掉**，於是那份設定
+    跑得完、有數字，而那個數字答的是「同一塊在另一條流上」。舊的
+    `method="compare"` 有四個獨立的角色參數，所以它表達得出這一種。
+    """
+    ctx = _ctx()                                   # hot=140, cold=100
+    ctx.set_image("ref", np.asarray(ctx.images["test"]) - 25.0)
+    _run(ctx, roi="hot", reference="another region on another stream",
+         reference_source="ref", reference_region="cold",
+         compare_metrics="delta")
+    # 140 (hot @ test) − 75 (cold @ ref) = 65，**不是** 25（那是同一塊的答案）
+    assert ctx.features["delta"] == pytest.approx(65.0, abs=1.5)
+
+    card = get_step("glv_stats")
+    p = dict(BASE, reference="another region on another stream",
+             reference_source="ref", reference_region="cold")
+    assert card.resolve_reads(p) == ["test", "ref"], "兩個影像埠"
+    assert card.resolve_regions_in(p) == ["hot", "cold"], "兩個區域埠"
+
+    # 兩格都要填 —— 少一格在跑之前就講
+    assert card.configuration_issues(dict(p, reference_region=""))
+    assert card.configuration_issues(dict(p, reference_source=""))
+    assert card.configuration_issues(p) == []
+
+
+def test_the_migration_covers_the_whole_truth_table(tmp_path):
+    """流一不一樣 × 區域一不一樣 —— 四格，舊 recipe 每一格都要落對地方。
+
+    第一版漏了「兩邊都不一樣」，於是那種舊 recipe 被安靜地轉成「同一塊、另一條
+    流」。特徵名一樣、跑得完、數字不同 —— 這是最難發現的那一種。
+    """
+    import json
+    from d4t.core.pipeline import Recipe
+
+    def migrated(**over):
+        doc = {"recipe_id": "old", "version": 1,
+               "routes": {"ebi_patch": ["cmp"]},
+               "nodes": {"cmp": {"step": "glv_stats", "enabled": True,
+                                 "params": dict(
+                                     {"method": "compare",
+                                      "target_source": "test",
+                                      "target_region": "epi",
+                                      "reference_source": "test",
+                                      "reference_region": "mg",
+                                      "stat": "glv_mean",
+                                      "compare_metrics": "delta"}, **over)}},
+               "edges": [], "score": {"expr": "delta", "threshold": 1.0,
+                                      "bins": {"below": 0, "above": 1}}}
+        path = tmp_path / ("%s.json" % abs(hash(json.dumps(doc, sort_keys=True))))
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        return Recipe.load(str(path)).nodes["cmp"].params
+
+    same_stream = migrated()
+    assert same_stream["reference"] == "another region"
+    assert same_stream["reference_region"] == "mg"
+
+    same_region = migrated(reference_source="ref", reference_region="epi")
+    assert same_region["reference"] == "another stream"
+    assert same_region["reference_source"] == "ref"
+
+    both = migrated(reference_source="ref", reference_region="epi_others")
+    assert both["reference"] == "another region on another stream"
+    assert both["reference_source"] == "ref"
+    assert both["reference_region"] == "epi_others"

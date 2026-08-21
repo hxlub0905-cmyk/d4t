@@ -709,3 +709,48 @@ def test_it_says_when_the_region_is_too_thin_to_trust(qapp):
     meta2, feats2 = _glv_meta(hot)
     insp.set_context("glv_stats", result={"features": feats2}, meta=meta2)
     assert "0 or 255" in insp.summary(), "整塊飽和要講出來"
+
+
+def test_the_gray_level_tab_says_what_it_is_showing(qapp):
+    """分頁鈕的字要說得出「顯示的是什麼、誰跟誰比」（使用者 2026-08-21）。
+
+    以前它讀的是**類別屬性**，所以不管畫面上是什麼，它永遠寫著「Gray level」——
+    那一塊在講什麼得自己從圖裡推。
+    """
+    import numpy as np
+
+    img = np.zeros((40, 40), np.float32)
+    img[:, :20] = 140.0
+    img[:, 20:] = 100.0
+
+    from d4t.core.pipeline.context import Context
+    from d4t.core.pipeline.step import get_step
+    import d4t.core.steps  # noqa: F401
+
+    def run(**over):
+        ctx = Context(images={"test": img, "ref": img - 25.0})
+        ctx.set_roi_boxes("epi", [(0.0, 0.0, 0.5, 1.0)])
+        ctx.set_roi_boxes("mg", [(0.5, 0.0, 0.5, 1.0)])
+        get_step("glv_stats")().run(ctx, dict(
+            {"source": "test", "roi": "epi", "metrics": "glv_median"}, **over))
+        insp = insp_mod.GlvInspector()
+        insp.set_context("glv_stats", meta=dict(ctx.meta))
+        return insp
+
+    plain = run()
+    assert plain.tab_title() == "Gray level · epi on test"
+
+    beside = run(reference="another region", reference_region="mg",
+                 compare_metrics="delta")
+    assert beside.tab_title() == "Gray level · epi vs mg"
+
+    across = run(reference="another region on another stream",
+                 reference_source="ref", reference_region="mg",
+                 compare_metrics="delta")
+    assert across.tab_title() == "Gray level · epi vs mg @ ref"
+    assert "compared against mg @ ref" in across.tab_tooltip()
+    assert "glv_median" in across.tab_tooltip(), "tooltip 要說出在顯示哪幾個"
+
+    # 沒資料的時候退回類別的名字（分頁鈕不能是空的）
+    empty = insp_mod.GlvInspector()
+    assert empty.tab_title() == "Gray level"

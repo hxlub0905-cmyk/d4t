@@ -549,16 +549,21 @@ def _migrate_compare_method_into_reference(nodes: Dict[str, "RecipeNode"]) -> No
         ref_region = str(params.pop("reference_region", "") or "").strip()
         params["source"] = target_source
         params["roi"] = str(params.pop("target_region", "") or "").strip()
-        # 兩邊同一條流 = 「跟同一張圖上的另一塊比」；不同 = 「跟另一條流比」。
-        # 這個判斷用的是**舊參數的值**，不是猜的。
-        if ref_source and ref_source != target_source:
+        # 哪一種「跟誰比」，由**舊參數的值**決定（不是猜的）：流一不一樣 ×
+        # 區域一不一樣，正好是一張真值表。
+        #
+        # ⚠ 第一版漏了「兩邊都不一樣」那一格，於是那種舊 recipe 被轉成
+        # 「同一塊、另一條流」—— 跑得完、有數字，而那個數字**答的是另一個
+        # 問題**。舊卡片有四個獨立的角色參數，所以它表達得出這一種。
+        other_stream = bool(ref_source) and ref_source != target_source
+        other_region = bool(ref_region) and ref_region != params["roi"]
+        if other_stream and other_region:
+            params["reference"] = "another region on another stream"
+            params["reference_source"] = ref_source
+            params["reference_region"] = ref_region
+        elif other_stream:
             params["reference"] = "another stream"
             params["reference_source"] = ref_source
-            if ref_region:
-                # 舊卡片允許「另一條流上的**另一塊**」。新的那一格是「同一塊、
-                # 另一條流」—— 兩者不同時，區域那一格才是使用者真正挑的東西，
-                # 所以以它為準（跟著它走比較不會算出別的數字）。
-                params["roi"] = ref_region if not params["roi"] else params["roi"]
         else:
             params["reference"] = "another region"
             params["reference_region"] = ref_region
