@@ -341,3 +341,29 @@ def test_the_two_shape_icons_do_not_look_the_same(qapp):
             p.end()
         shots.append(img.constBits().tobytes())
     assert shots[0] != shots[1]
+
+
+def test_the_blob_panel_never_prints_a_zero_area(qapp):
+    """**0 是一個看起來很像答案的答案** —— 而面板一度自己犯了卡片的規矩 3。
+
+    第一版把 ``area %d px`` **無條件**畫在直方圖右上角，所以量不出來的那一顆上面
+    寫著「area 0 px」。（那一行後來整個拿掉了：它右對齊之後緊貼著隔壁那一格的
+    標題，而摘要那一行本來就寫了同一句話。）兩件都是**截圖出來才看到的**，所以
+    這裡留一支釘住：畫出來的東西要跟「有沒有量到」有關，而數字只在摘要那一行。
+    """
+    from PySide6.QtGui import QImage
+
+    shots = {}
+    for tag, img in (("ok", disc(d=20.0)), ("none", canvas(64))):
+        ctx, p = measured_blob(img)
+        insp = make_panel(qapp, ctx, p)
+        insp.resize(560, 190)
+        pic = QImage(560, 190, QImage.Format_ARGB32)
+        pic.fill(0)
+        insp.render(pic)
+        shots[tag] = pic.constBits().tobytes()
+    assert shots["ok"] != shots["none"]
+    # 而**摘要那一行**才是講「為什麼沒有」的地方
+    ctx, p = measured_blob(canvas(64))
+    said = make_panel(qapp, ctx, p).summary()
+    assert "0 px" not in said and "no size here" in said

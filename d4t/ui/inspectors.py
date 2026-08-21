@@ -2063,10 +2063,12 @@ class CdInspector(Inspector):
             p.setPen(QPen(QColor(TOKENS["accent_active"]), 1.6))
             x = at(note["level"])
             p.drawLine(QPointF(x, body.top()), QPointF(x, body.bottom()))
-        p.setPen(QColor(TOKENS["text_primary"]))
-        p.drawText(QRectF(body.left(), body.top(), body.width(), 14.0),
-                   Qt.AlignRight | Qt.AlignTop,
-                   "area %d px" % int(note.get("area", 0)))
+        # ⚠ 這裡**不要**再印一次面積。第一版把 ``area %d px`` 右對齊在這一格的
+        # 上緣，而它緊貼著隔壁那一格的標題 —— 截圖出來讀起來像是「Outline」那
+        # 一格的標題，而摘要那一行本來就已經寫了同一句話。
+        # （第一版還有一個更糟的：它是**無條件**印的，所以量不到的那一顆上面
+        #  寫著「area 0 px」，而 0 是一個看起來很像答案的答案 —— 這張卡的
+        #  規矩 3，截圖時才看到自己犯了它。）
 
     def _paint_outline(self, p: QPainter, rect: QRectF,
                        note: Dict[str, Any]) -> None:
@@ -2078,6 +2080,10 @@ class CdInspector(Inspector):
         body = self._caption(p, rect, "Outline")
         pts = [(float(x), float(y)) for x, y in (note.get("outline") or [])]
         if len(pts) < 3 or body.height() < 24:
+            if body.height() >= 24:
+                p.setPen(QColor(TOKENS["text_disabled"]))
+                p.drawText(body, Qt.AlignCenter | Qt.TextWordWrap,
+                           "nothing was outlined here")
             return
         xs = [x for x, _y in pts]
         ys = [y for _x, y in pts]
