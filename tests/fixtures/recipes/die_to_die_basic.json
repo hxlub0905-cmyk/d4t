@@ -64,7 +64,12 @@
     },
     "cd": {
       "step": "cd_measure",
-      "params": {},
+      "params": {
+        "source": "test",
+        "axis": "x",
+        "target": "bright",
+        "report": "cd_median,cd_std,cd_min,cd_max"
+      },
       "enabled": true
     },
     "glv": {

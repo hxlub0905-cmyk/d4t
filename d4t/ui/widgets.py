@@ -144,6 +144,12 @@ GLYPH_ICONS = (
     # 「這張圖的圖案往哪個方向跑」（F11 Region-2c）—— 同一套小版圖，
     # 亮的是**在看的那個方向**。
     "dir_both", "dir_upright", "dir_flat",
+    # 「要量的是亮的那條還是暗的那條」（F19）。同一套小版圖，**實心的那一條就是
+    # 要量的那一條** —— 這個問題問的是樣品，而樣品長什麼樣正好畫得出來。
+    "target_auto", "target_bright", "target_dark",
+    # 「量的是一條線還是一團東西」（F19 第二批）。這兩顆**不是**同一套小版圖：
+    # 它們畫的就是那兩種樣品本身，而那正是這個岔路在問的事。
+    "shape_line", "shape_blob",
 )
 
 
@@ -278,7 +284,33 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         p.drawLine(QPointF(ax1, ay1), QPointF(ax1, ay1 + head))
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
-    elif n.startswith(("place_", "side_", "fill_", "dir_")):
+    elif n == "shape_line":
+        # 一條有方向的帶子，加兩個箭頭說「量的是橫過去的那一段」。
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        p.drawRect(QRectF(w * 0.36, m, w * 0.28, h - 2 * m))
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        y = h * 0.5
+        p.drawLine(QPointF(m, y), QPointF(w - m, y))
+        a = w * 0.10
+        for x, d in ((m, 1), (w - m, -1)):
+            p.drawLine(QPointF(x, y), QPointF(x + a * d, y - a * 0.8))
+            p.drawLine(QPointF(x, y), QPointF(x + a * d, y + a * 0.8))
+    elif n == "shape_blob":
+        # 一團沒有方向的東西。**刻意不是圓** —— 圓看起來像一個按鈕，而這顆要
+        # 說的正是「形狀不規則」。
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        blob = QPolygonF([
+            QPointF(w * 0.30, h * 0.16), QPointF(w * 0.66, h * 0.10),
+            QPointF(w * 0.86, h * 0.36), QPointF(w * 0.78, h * 0.70),
+            QPointF(w * 0.48, h * 0.88), QPointF(w * 0.16, h * 0.66),
+            QPointF(w * 0.12, h * 0.34)])
+        p.drawPolygon(blob)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+    elif n.startswith(("place_", "side_", "fill_", "dir_", "target_")):
         _draw_profile_glyph(p, n, w, h, color, pen)
     elif n == "roi_cursor":
         # 一支箭頭游標：**選**已經有的框（不是畫新的）。
@@ -497,6 +529,27 @@ def _draw_profile_glyph(p: QPainter, name: str, w: float, h: float,
         # 兩組交會的地方 —— 也就是這幾顆圖示最該乾淨的位置。
         for rect, on in sorted(bars, key=lambda t: bool(t[1])):
             blk(rect[0], rect[1], rect[2], rect[3], on)
+    elif name.startswith("target_"):
+        # 三條橫帶，**實心的那一條就是要量的那一條**。
+        #
+        # 為什麼不是畫一個「亮」跟一個「暗」的方塊：那要求使用者先判斷「畫面上
+        # 比較亮的是哪一塊」，而在 21 px 的按鈕上兩塊灰階分不出來。改成「哪一條
+        # 被選起來」之後，三顆的差別是**位置**，那在小尺寸下讀得出來。
+        if name == "target_bright":
+            blk(0.05, 0.06, 0.95, 0.30, False)
+            blk(0.05, 0.38, 0.95, 0.62, True)          # 中間那條 = 亮帶
+            blk(0.05, 0.70, 0.95, 0.94, False)
+        elif name == "target_dark":
+            blk(0.05, 0.06, 0.95, 0.30, True)          # 兩側是亮的
+            blk(0.05, 0.38, 0.95, 0.62, False)         # 中間那條 = 暗帶
+            blk(0.05, 0.70, 0.95, 0.94, True)
+        else:                                          # target_auto：兩種都可以
+            blk(0.05, 0.06, 0.46, 0.30, False)
+            blk(0.05, 0.38, 0.46, 0.62, True)
+            blk(0.05, 0.70, 0.46, 0.94, False)
+            blk(0.54, 0.06, 0.95, 0.30, True)
+            blk(0.54, 0.38, 0.95, 0.62, False)
+            blk(0.54, 0.70, 0.95, 0.94, True)
     elif name.startswith("side_"):
         # 跟 place_beside_v 的差別刻意做在**高度**：這裡的塊是滿高的
         blk(0.42, 0.05, 0.58, 0.95, False)
@@ -554,7 +607,49 @@ METRIC_GLYPHS = (
     # 量」）。前兩個仍然畫**運算的符號**（|Δ| / 半黑半白的圓 = 對比），後三個
     # 畫的是它們各自比的東西：名次、兩條分布疊多少、兩段散布誰長。
     "abs_delta", "contrast", "pct_rank", "overlap", "spread_ratio",
+    # CD 那張卡的三顆（F19）。第一顆仍然是「淡的是分布、實的是這個統計量」那套
+    # 語言；後兩顆**刻意跳出那套** —— LER 講的不是一條分布，是一條邊在抖，而把
+    # 它畫成第四張分布圖會讓它跟 ``std`` 在 19 px 下變成同一張圖。
+    "range", "ler_a", "ler_b",
+    # 團那一支（F19 第二批）。這一族**整族跳出「淡的是分布」那套語言** ——
+    # 它們講的是一個形狀的性質，不是一條分布上的一段，所以五顆都畫在同一團
+    # 輪廓上，差別在**標出來的是哪一部分**（填滿的內部／一個等面積的圓／最長
+    # 的弦／最窄的夾／周長）。
+    "area", "deq", "feret_max", "feret_min", "roundness",
 )
+
+
+def _poly_area(poly: "QPolygonF") -> float:
+    """多邊形的面積（鞋帶公式）。只給 ``deq`` 那顆圖示畫等面積圓用。"""
+    n = poly.count()
+    total = 0.0
+    for i in range(n):
+        a, b = poly.at(i), poly.at((i + 1) % n)
+        total += a.x() * b.y() - b.x() * a.y()
+    return total / 2.0
+
+
+def _extreme_pair(pts, longest: bool = True):
+    """一組點裡最遠（或最近）的兩個。只給圖示用，所以直接兩兩比。"""
+    best = None
+    for i, a in enumerate(pts):
+        for b in pts[i + 1:]:
+            d = math.hypot(a[0] - b[0], a[1] - b[1])
+            if best is None or (d > best[0] if longest else d < best[0]):
+                best = (d, a, b)
+    return (best[1], best[2]) if best else ((0.0, 0.0), (0.0, 0.0))
+
+
+def _blob_outline(pad: float, bw: float, bh: float) -> "QPolygonF":
+    """這一族共用的那一團輪廓（0..1 的控制點打到 ``pad``/``bw``/``bh`` 上）。
+
+    **五顆用同一團**：差別要落在「標了哪裡」，而不是「畫了不同的東西」——
+    形狀也不一樣的話，眼睛會先去比形狀，那就看不出它們是同一族的了。
+    """
+    pts = [(0.30, 0.86), (0.66, 0.92), (0.88, 0.62), (0.78, 0.24),
+           (0.46, 0.10), (0.14, 0.32), (0.10, 0.66)]
+    return QPolygonF([QPointF(pad + x * bw, pad + (1 - y) * bh)
+                      for x, y in pts])
 
 
 def _dist_curve(peak: float = 1.0, twin: bool = False,
@@ -853,6 +948,64 @@ def draw_metric_glyph(p: QPainter, name: str, size: float, color: str,
         p.setPen(Qt.NoPen)                    # 貼在頂端的那一根
         p.setBrush(QBrush(solid))
         p.drawRect(QRectF(pad + 0.90 * bw, pad + bh * 0.10, bw * 0.10, bh * 0.90))
+    elif n == "range":
+        # 整條分布的兩端 —— 跟 ``std`` 的差別是箭頭拉到**底**，因為 range 講的
+        # 正是「最極端的兩顆之間」，而那是它跟任何離散度指標唯一的差別。
+        curve(_dist_curve())
+        arrow_span(0.06, 0.94)
+    elif n in ("ler_a", "ler_b"):
+        # 一條**在抖的邊**，另一側墊一塊淡的（哪一邊是「裡面」看得出來）。
+        # 左右鏡像 = 兩條邊。
+        #
+        # **刻意跳出「淡的是分布、實的是這個統計量」那套語言**：LER 量的不是一
+        # 條分布，是一條邊自己的位置在跳。畫成第四張分布圖的話，它跟 ``std``
+        # 在 19 px 下是同一張圖，而那正是這一族小圖存在的理由。
+        left = (n == "ler_a")
+        fx = 0.34 if left else 0.66
+        c = QColor(faint)
+        c.setAlpha(70)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(c))
+        x0 = pad + (0.0 if left else (fx + 0.12) * bw)
+        span = ((fx - 0.12) if left else (1.0 - fx - 0.12)) * bw
+        p.drawRect(QRectF(x0, pad, max(0.0, span), bh))
+        p.setPen(bold)
+        p.setBrush(Qt.NoBrush)
+        wob = [(fx + (0.08 if (i % 2) else -0.08), 0.03 + i * 0.188)
+               for i in range(6)]
+        p.drawPolyline(poly_of(wob))
+    elif n in ("area", "deq", "feret_max", "feret_min", "roundness"):
+        # 同一團輪廓，差別在標出來的是哪一部分（見 :func:`_blob_outline`）。
+        blob = _blob_outline(pad, bw, bh)
+        filled = QColor(solid)
+        filled.setAlpha(95 if n == "area" else 45)
+        p.setPen(QPen(faint if n == "area" else bold.color(),
+                      max(1.0, size / 13.0)))
+        p.setBrush(QBrush(filled))
+        p.drawPolygon(blob)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(bold)
+        if n == "deq":
+            # 一個**等面積的圓**疊上去 —— 「跟它一樣大的圓有多寬」。
+            r = math.sqrt(abs(_poly_area(blob)) / math.pi)
+            p.drawEllipse(blob.boundingRect().center(), r, r)
+        elif n in ("feret_max", "feret_min"):
+            pts = [(blob.at(i).x(), blob.at(i).y()) for i in range(blob.count())]
+            if n == "feret_max":
+                a, b = _extreme_pair(pts, longest=True)
+                p.drawLine(QPointF(*a), QPointF(*b))
+            else:
+                # 最窄的那一夾：兩條平行線貼著輪廓的上下
+                rect = blob.boundingRect()
+                for fy in (0.30, 0.70):
+                    y = rect.top() + fy * rect.height()
+                    p.drawLine(QPointF(rect.left(), y),
+                               QPointF(rect.right(), y))
+        elif n == "roundness":
+            # 周長本身畫粗 —— roundness 問的是「這一圈相對於它圍住的面積」。
+            p.setPen(QPen(solid, max(1.6, size / 8.0)))
+            p.setBrush(Qt.NoBrush)
+            p.drawPolygon(blob)
     else:
         raise ValueError("unknown metric glyph: %r (known: %s)"
                          % (name, ", ".join(METRIC_GLYPHS)))
@@ -1055,6 +1208,12 @@ class ImageView(QWidget):
         self._overlay_labels: List[str] = []
         #: 區域名 -> 顏色索引，依**第一次出現**的順序。畫圖例時也走這一份。
         self._overlay_order: List[str] = []
+        #: 量測標記（F19）：線段、每條線上的點、要畫粗的那一條。見 :meth:`set_marks`。
+        self._marks: List[Any] = []
+        self._mark_points: List[Any] = []
+        self._mark_focus = -1
+        #: 每一條標記屬於哪一個具名區域（跟 ``_marks`` 等長；空字串 = 不分色）。
+        self._mark_labels: List[str] = []
         #: 量測尺按著時的那一條帶（axis, 起, 迄；影像像素）。見 :meth:`set_measure`。
         self._measure: Optional[Tuple[str, float, float]] = None
         #: 選取的卡片上那個「以像素為單位」的參數有多大（大小, 標籤）。
@@ -1200,6 +1359,64 @@ class ImageView(QWidget):
                 order.append(n)
         self._overlay_order = order
         self.update()
+
+    def set_marks(self, lines: Optional[Sequence[Any]] = None,
+                  points: Optional[Sequence[Any]] = None,
+                  focus: int = -1,
+                  labels: Optional[Sequence[str]] = None) -> None:
+        """把**量測標記**疊在影像上（正規化座標）。
+
+        ``lines`` 是 ``[[(x0, y0), (x1, y1)], …]``，``points[i]`` 是第 i 條線段
+        上的點。``focus`` 是要畫粗的那一條（代表值那一條）。
+
+        為什麼跟 :meth:`set_overlay` 分開
+        ---------------------------------
+        框回答的是「recipe 說要看哪裡」，標記回答的是「這一顆**真的量到了**
+        什麼」—— 後者只有跑過才有，而且它是逐顆變的。混在同一支裡的話，
+        「框還在但標記消失了」這個最有用的狀態（這顆量不出來）就講不出來。
+
+        資料由**卡片自己**交出來（`Step.overlay_marks`）：meta 的形狀是那張卡的
+        事，UI 只負責畫。所以下一張量測卡不必再發明一套。
+
+        ``labels`` 是每一條標記屬於**哪一個具名區域**，而顏色**沿用框那一組的
+        順序**（:meth:`set_overlay` 已經排好的 ``_overlay_order``）—— 各自從
+        自己那邊數的話，同一塊區域的框是綠的、量它的那些線卻是橘的，而畫面上
+        沒有任何東西說得出它們是同一塊。沒給 labels 就整組畫 accent。
+
+        兩條保險跟 :meth:`set_overlay` 一字不差：座標正規化（縮放平移、換一顆
+        patch 都跟著走），而**長度對不上就整組不畫** —— 錯位的標記會指向錯的
+        地方，而畫面上沒有任何東西透露那件事。
+        """
+        segs = [[(float(a[0]), float(a[1])), (float(b[0]), float(b[1]))]
+                for a, b in (lines or []) if a is not None and b is not None]
+        pts = [[(float(x), float(y)) for x, y in (grp or [])]
+               for grp in (points or [])]
+        names = [str(v) for v in (labels or [])]
+        self._marks = segs
+        self._mark_points = pts if len(pts) == len(segs) else []
+        self._mark_labels = (names if len(names) == len(segs)
+                             else [""] * len(segs))
+        for n in self._mark_labels:
+            if n and n not in self._overlay_order:
+                self._overlay_order.append(n)
+        self._mark_focus = int(focus)
+        self.update()
+
+    def clear_marks(self) -> None:
+        self.set_marks([], [], -1, [])
+
+    def mark_legend(self) -> List[Tuple[str, str]]:
+        """標記用到的 ``[(區域名, 顏色 hex), …]``。測試與狀態列讀這個。"""
+        index_of = {n: i for i, n in enumerate(self._overlay_order)}
+        out: List[Tuple[str, str]] = []
+        for n in self._mark_labels:
+            if n and n in index_of and n not in [k for k, _c in out]:
+                out.append((n, region_hex(index_of[n])))
+        return out
+
+    def mark_count(self) -> int:
+        """畫了幾條量測線。測試與狀態列讀這個，不去讀畫素。"""
+        return len(self._marks)
 
     def overlay_legend(self) -> List[Tuple[str, str]]:
         """圖例：``[(區域名, 顏色 hex), …]``，依第一次出現的順序。
@@ -1357,6 +1574,52 @@ class ImageView(QWidget):
                        Qt.AlignLeft | Qt.AlignVCenter, name)
         p.setBrush(Qt.NoBrush)
 
+    def _paint_marks(self, p: QPainter) -> None:
+        """掃描線很淡、邊點是實心的小圓，代表那一條加粗。
+
+        **點比線重要**：使用者要判斷的是「邊被判在哪」，線只是告訴他那個判斷
+        是在哪一列上做的。所以線畫到幾乎看不見，點畫滿。
+        """
+        if self._pixmap is None or not self._marks:
+            return
+        iw, ih = self._pixmap.width(), self._pixmap.height()
+        s_ = self._scale or 1.0
+        ox, oy = self._offset.x(), self._offset.y()
+
+        def at(pt) -> QPointF:
+            return QPointF(ox + pt[0] * iw * s_, oy + pt[1] * ih * s_)
+
+        index_of = {n: i for i, n in enumerate(self._overlay_order)}
+        plain = QColor(TOKENS["accent"])
+
+        def colour_of(i: int) -> QColor:
+            name = (self._mark_labels[i] if i < len(self._mark_labels) else "")
+            return (QColor(region_hex(index_of[name])) if name in index_of
+                    else plain)
+
+        for i, (a, b) in enumerate(self._marks):
+            focused = (i == self._mark_focus)
+            col = colour_of(i)
+            if not focused:
+                col = QColor(col)
+                col.setAlpha(70)
+            pen = QPen(col, 1.6 if focused else 1.0)
+            pen.setCosmetic(True)
+            p.setPen(pen)
+            p.drawLine(at(a), at(b))
+        p.setPen(Qt.NoPen)
+        for i, grp in enumerate(self._mark_points):
+            focused = (i == self._mark_focus)
+            col = colour_of(i)
+            if not focused:
+                col = QColor(col)
+                col.setAlpha(70)
+            p.setBrush(QBrush(col))
+            r = 2.6 if focused else 1.5
+            for pt in grp:
+                p.drawEllipse(at(pt), r, r)
+        p.setBrush(Qt.NoBrush)
+
     def _paint_measure(self, p: QPainter) -> None:
         """量測尺按著時的那一條帶：兩條綠線 + 中間一層很淡的綠。
 
@@ -1454,6 +1717,7 @@ class ImageView(QWidget):
         p.drawPixmap(target, self._pixmap, QRectF(self._pixmap.rect()))
         p.setRenderHint(QPainter.SmoothPixmapTransform, False)
         self._paint_overlay(p)
+        self._paint_marks(p)
         self._paint_measure(p)
         self._paint_kernel(p)
         p.end()
@@ -1581,6 +1845,14 @@ class _HintLabel(QLabel):
             self._full, Qt.ElideRight, w))
 
 
+#: 這幾種編輯器是**一整塊**，不是一行 —— 它們那一列的名字要對齊到最上面。
+#:
+#: 為什麼要列出來而不是量 widget 的高度：``sizeHint`` 在建構的當下還沒定案
+#: （膠囊要排版完才知道會不會換行），量到的會是一個還沒長好的數字。
+_BLOCK_EDITORS = ("metric_chips", "multi_choice", "curve", "template",
+                  "channel_map", "cell_rois")
+
+
 class _ParamRow(QFrame):
     """一個參數 = 一列（名稱 + 滑桿 + 數字框）。說明住在 tooltip 裡。
 
@@ -1622,7 +1894,23 @@ class _ParamRow(QFrame):
         self.name_label = QLabel(str(spec.get("label") or spec.get("name", "")))
         self.name_label.setObjectName("paramLabel")
         self.name_label.setMinimumWidth(104)
-        top.addWidget(self.name_label)
+        # **重複自己的小標題的那個名字要拿掉。** CD 的膠囊那一格 `label` 與
+        # `section` 都是 "Report"，於是畫面上同一個字出現兩次 —— 而下面那條
+        # 對齊的規矩會讓它落在群組區塊的**中間那一列**旁邊，讀起來像是一個叫
+        # 「Report」的群（截圖出來才看到：Size 的第二排看起來屬於它）。
+        self._label_is_echo = bool(
+            str(spec.get("label") or "").strip()
+            and str(spec.get("label") or "").strip()
+            == str(spec.get("section") or "").strip())
+        if self._label_is_echo:
+            self.name_label.hide()
+        else:
+            top.addWidget(self.name_label)
+        # **一整塊的編輯器，名字要對齊到最上面。** 垂直置中的話那個名字會落在
+        # 區塊中間的某一列上，而那一列有它自己的意思（群名、第幾條曲線…）。
+        if str(spec.get("type") or "") in _BLOCK_EDITORS:
+            top.setAlignment(self.name_label, Qt.AlignTop)
+            self.name_label.setContentsMargins(0, 6, 0, 0)
 
         self.slider = _make_slider(spec, editor)
         if self.slider is not None:
@@ -2479,13 +2767,38 @@ METRIC_GROUPS: Dict[str, Tuple[str, str, str]] = {
     "pct_rank": ("Vs boxes", "Rank %", "pct_rank"),
     "overlap": ("Distributions", "Overlap", "overlap"),
     "spread_ratio": ("Distributions", "Spread ratio", "spread_ratio"),
+    # CD 的 Report（F19）。**分三群不是分成一群**，理由跟上面那一段一字不差：
+    # Roughness 那一群只有在量測線夠多的時候才有意義，而那件事在一排攤平的
+    # 膠囊上看不出來 —— 它正是「為什麼我的 LER 是 0」的答案。
+    "cd_median": ("Width", "Median", "median"),
+    "cd_mean": ("Width", "Mean", "mean"),
+    "cd_min": ("Width", "Narrowest", "min"),
+    "cd_max": ("Width", "Widest", "max"),
+    "cd_range": ("Width", "Widest - narrowest", "range"),
+    "cd_std": ("Roughness", "LWR (sigma)", "std"),
+    "ler_a_std": ("Roughness", "LER one side", "ler_a"),
+    "ler_b_std": ("Roughness", "LER other side", "ler_b"),
+    "cd_dev": ("Vs target", "Off target", "delta"),
+    "cd_dev_frac": ("Vs target", "Off target %", "percent"),
+    # CD 的無方向那一支（F19 第二批）。群名用 ``Size`` / ``Outline`` ——
+    # **不要用 ``Shape``**，那個字在上面已經是 GLV 的偏度那一群了。
+    "cd_area_px": ("Size", "Area", "area"),
+    "cd_deq": ("Size", "Equivalent diameter", "deq"),
+    "cd_feret_max": ("Size", "Widest across", "feret_max"),
+    "cd_feret_min": ("Size", "Narrowest across", "feret_min"),
+    # ``aspect`` 重用 ``ratio``：它**本來就是**一個比值，而多畫一顆長得像
+    # 「兩個 Feret」的圖示只會跟上面那兩顆撞在一起。
+    "cd_aspect": ("Outline", "Long / short", "ratio"),
+    "cd_roundness": ("Outline", "Roundness", "roundness"),
 }
 
 #: 分群的顯示順序。不在 :data:`METRIC_GROUPS` 裡的 id（手寫 recipe 的
 #: ``glv_q37``、``glv_trim05``…）落在最後一群 —— **列出來並且勾著**，因為
 #: 「看不到就被靜靜刪掉」是最糟的一種幫忙（同 `MultiChoicePicker` 的老規矩）。
 METRIC_GROUP_ORDER = ("Center", "Spread", "Ends", "Shape", "Counts",
-                      "Difference", "Vs boxes", "Distributions", "Other")
+                      "Difference", "Vs boxes", "Distributions",
+                      "Width", "Roughness", "Vs target",
+                      "Size", "Outline", "Other")
 
 
 def metric_face(mid: str) -> Tuple[str, str, str]:

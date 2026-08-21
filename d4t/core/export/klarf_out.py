@@ -500,7 +500,7 @@ def _build_inplace(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
                    *, class_col: Optional[str] = None,
                    bin_col: Optional[str] = None,
                    size_col: Optional[str] = None,
-                   size_feature: str = "cd_x_px",
+                   size_feature: str = "cd_median",
                    size_scale: float = 1.0,
                    bin_map: Optional[Dict[Any, Any]] = None,
                    decimals: int = 4,
@@ -806,7 +806,7 @@ def apply_writeback(doc: KlarfDoc, results: Sequence[Dict[str, Any]], mode: str,
         ``class_col`` / ``bin_col``（把 bin 寫進這些既有欄位，例如
         ``CLASSNUMBER`` / ``ROUGHBINNUMBER`` / ``FINEBINNUMBER``）、
         ``size_col``（把 ``size_feature`` 寫進去，例如 ``DSIZE``）、
-        ``size_feature``（預設 ``"cd_x_px"``）、``size_scale``
+        ``size_feature``（預設 ``"cd_median"``）、``size_scale``
         （預設 ``1.0``；寫進去之前乘上的係數 —— pipeline 全程用 pixel，
         要 nm 的話由**使用者填 nm/px**，見 ``steps/cd.py``）、``bin_map``
         （``{bin: 要寫的值}``，預設原樣寫）、``decimals``（預設 4）、

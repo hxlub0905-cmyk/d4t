@@ -18,15 +18,19 @@
 ### 單位一律 pixel，換算在輸出那一刻由使用者填（2026-07-30）
 
 `nm_per_px` 在 KLARF 裡找不到來源，而舊做法是「找不到就吐 0」——
-`cd_measure` 在沒有它的時候照樣吐 `cd_x_nm` / `cd_y_nm` / `area_nm2` 三個 **0**。
+`cd_measure` 在沒有它的時候照樣吐三個 **0** 的 `*_nm` 特徵。
 那是最糟的一種缺值：**0 是個看起來很像答案的答案**，它進得了分數表達式、
 寫得進 DSIZE 欄，一路安靜到最後。而實務上它每一顆都是 0。
 
 現在的分工：
 
-- **pipeline 全程用 pixel。** `cd_measure` 吐 `cd_x_px` / `cd_y_px` / `area_px`
-  （`area_px` 是新的 —— 以前只在算 nm 的時候用到，沒有吐出來）。
-  卡片裡不做單位換算，**任何 `*_nm` 特徵都不該再出現**。
+- **pipeline 全程用 pixel。** 卡片裡不做單位換算。
+  ⚠ **2026-08-20 之後這一段被補完了，不是被推翻**：`nm_per_px` 的來源出現了
+  （Load 卡上使用者自己填的那一格），所以填了就**多配一份** `*_nm`
+  （`_util.nm_twins`）—— 多一組而不是換單位，名字因此永遠帶著單位。
+  沒填就跟以前一樣一個 `*_nm` 都沒有。
+  （F19 之後 CD 吐的是 `cd_median` / `cd_std` / `cd_min` / `cd_max` 那一族；
+  舊的 `cd_x_px` / `cd_y_px` / `area_px` 已經刪掉。）
 - **換算只發生在輸出。** `Write KLARF` 那張卡（`output_klarf`，inplace 模式）
   上有一格「nm per pixel for sizes」（`klarf_out` 的 `size_scale`，CLI 是
   `--size-scale`），預設 `1` = 原樣寫 pixel。

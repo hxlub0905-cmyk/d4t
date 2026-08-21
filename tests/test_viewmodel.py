@@ -78,7 +78,7 @@ def test_histogram_and_rebin():
 
 
 def test_the_nm_numbers_are_only_offered_when_someone_says_how_big_a_pixel_is():
-    """量測卡**一律宣告** `cd_x_nm` 那一組（它看不到 Load 卡上填了什麼）。
+    """量測卡**一律宣告** `cd_median_nm` 那一組（它看不到 Load 卡上填了什麼）。
 
     但下拉是使用者**會去點**的東西 —— 點了一個永遠不會出現的名字，recipe 就
     會在跑起來的時候每一顆都失敗。這裡看得到每一張卡，所以這句話在這裡回答。
@@ -90,14 +90,14 @@ def test_the_nm_numbers_are_only_offered_when_someone_says_how_big_a_pixel_is():
 
     assert not m.nm_per_px_is_known()
     feats = m.available_features()
-    assert "cd_x_px" in feats
-    assert "cd_x_nm" not in feats and "area_nm2" not in feats
+    assert "cd_median" in feats
+    assert "cd_median_nm" not in feats
 
     m.set_param(load, "nm_per_px", 1.5)
     assert m.nm_per_px_is_known()
     feats = m.available_features()
-    assert "cd_x_px" in feats                      # pixel 那一份沒有被換掉
-    assert "cd_x_nm" in feats and "area_nm2" in feats
+    assert "cd_median" in feats                    # pixel 那一份沒有被換掉
+    assert "cd_median_nm" in feats
 
     m.set_param(load, "nm_per_px", 0.0)            # 清掉就收回去
-    assert "cd_x_nm" not in m.available_features()
+    assert "cd_median_nm" not in m.available_features()

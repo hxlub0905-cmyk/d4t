@@ -306,7 +306,7 @@ class OutputKlarfStep(_OutputStep):
                   "(DSIZE is the usual one). Leave it empty to not touch it."),
         ),
         ParamSpec(
-            name="size_feature", type="str", default="cd_x_px",
+            name="size_feature", type="str", default="cd_median",
             advanced=True, show_when=("mode", ("inplace",)),
             label="…using this number",
             help=("Which measured number goes into the size column. Only used "
@@ -351,7 +351,7 @@ class OutputKlarfStep(_OutputStep):
             opts["include_annotations"] = bool(p["include_annotations"])
         elif mode == "inplace":
             opts["size_scale"] = float(p["size_scale"])
-            opts["size_feature"] = str(p["size_feature"]).strip() or "cd_x_px"
+            opts["size_feature"] = str(p["size_feature"]).strip() or "cd_median"
             # **空字串 = 不要碰那一欄**，所以空的不能送進去 —— 送了的話
             # `apply_writeback` 會去找一個叫 "" 的欄位然後報「沒有這個欄位」。
             for name, key in (("class_col", "class_col"),

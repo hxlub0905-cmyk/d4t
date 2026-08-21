@@ -364,7 +364,8 @@ def nm_per_px_spec() -> ParamSpec:
         advanced=True,
         help=("How many nanometres one pixel is, from the tool's settings. "
               "Fill it in and every length this pipeline measures also comes "
-              "out in nanometres (cd_x_px gets a cd_x_nm beside it). Leave it "
+              "out in nanometres (cd_median gets a cd_median_nm beside it). "
+              "Leave it "
               "at 0 if you do not know it - everything stays in pixels, which "
               "is what it has always been."),
     )
@@ -499,11 +500,28 @@ def prefix_features(prefix: str, feats: Dict[str, float]) -> Dict[str, float]:
 
 #: 名字結尾是 ``_px`` 但**意思是面積**的那幾個 —— 換算要平方（nm²）。
 #:
-#: 為什麼要列出來而不是看名字：``area_px`` 的結尾跟 ``cd_x_px`` 一模一樣，
+#: 為什麼要列出來而不是看名字：``area_px`` 的結尾跟任何一個長度特徵一模一樣，
 #: 而它們差一個次方。照結尾一律乘一次的話，面積會安靜地少乘一次 ——
 #: 跑得完、有數字、而且是錯的。改名成 ``area_px2`` 也能解，但那會動到既有的
 #: recipe 與黃金值，代價比一行表大得多。
-AREA_FEATURES = ("area_px",)
+AREA_FEATURES = ("area_px", "cd_area_px")
+
+#: 名字**不是** ``_px`` 結尾、但意思就是一段長度的那幾個（F19）。
+#:
+#: 跟 :data:`AREA_FEATURES` 是同一張表的另一半，理由也一樣 —— **看名字猜不到**。
+#: CD 那張卡吐的是 ``cd_median`` / ``ler_a_std`` 這種名字（``cd_median_px``
+#: 在膠囊上又長又醜），而它們每一個都該配一份 nm 的。漏掉的下場不是報錯，是
+#: 使用者填了 nm/px 之後**只有一半的長度換得出單位**。
+#:
+#: 不在這裡、也不以 ``_px`` 結尾的一律不配 —— ``cd_dev_frac``（比例）、
+#: ``cd_n``（條數）、``cd_axis_deg``（角度）都不該有 nm 版本。
+LENGTH_FEATURES = ("cd_median", "cd_mean", "cd_min", "cd_max", "cd_range",
+                   "cd_std", "ler_a_std", "ler_b_std", "cd_dev",
+                   # 團那一支（F19 第二批）。``cd_area_px`` **不在這裡** ——
+                   # 它結尾是 `_px` 但意思是面積，所以它住 :data:`AREA_FEATURES`
+                   # 而且那一張表先比對。少了那一行的話它會被配成 `cd_area_nm`
+                   # （少乘一次），而那正是 AREA_FEATURES 上面那段在講的事。
+                   "cd_deq", "cd_feret_max", "cd_feret_min")
 
 
 def nm_twins(feats: Dict[str, float],
@@ -531,6 +549,8 @@ def nm_twins(feats: Dict[str, float],
             continue
         if name in AREA_FEATURES:
             out[name[:-3] + "_nm2"] = float(value) * scale * scale
+        elif name in LENGTH_FEATURES:
+            out[name + "_nm"] = float(value) * scale
         elif name.endswith("_px"):
             out[name[:-3] + "_nm"] = float(value) * scale
     return out
@@ -542,6 +562,8 @@ def nm_twin_names(names: Sequence[str]) -> List[str]:
     for name in names or ():
         if name in AREA_FEATURES:
             out.append(name[:-3] + "_nm2")
+        elif name in LENGTH_FEATURES:
+            out.append(str(name) + "_nm")
         elif str(name).endswith("_px"):
             out.append(name[:-3] + "_nm")
     return out
@@ -954,6 +976,15 @@ class MultiSourceStep(Step):
     CURRENT_STREAM = "_stream"
     CURRENT_PREFIX = "_prefix"
 
+    #: 這一輪是**第幾個**區域（``region_list`` 裡的位置）。
+    #:
+    #: 為什麼非得由基底給：迴圈把 :data:`REGION` 換成了**當前那一個**區域名，
+    #: 所以子類再也數不出「這是第幾個」—— 它拿到的 ``roi`` 永遠只有一個值。
+    #: 而那個順序有用途：**顏色**。區域框、面板、影像上的標記都照它挑
+    #: `theme.REGION_COLORS`，各自從自己那邊數的話，"top,bot" 在一邊是 0/1、
+    #: 在另一邊（照名字排序）是 1/0，而顏色指錯區域比沒有顏色糟得多。
+    CURRENT_REGION_INDEX = "_region_index"
+
     def measure(self, ctx: Context, img, params: Dict[str, object]):
         """量一張影像，回 ``{特徵名: 值}``（回 ``None`` = 這條流沒有東西可記）。"""
         raise NotImplementedError
@@ -970,6 +1001,7 @@ class MultiSourceStep(Step):
                 one = dict(p, **{self.REGION: region}) if self.REGION else dict(p)
                 one[self.CURRENT_STREAM] = key
                 one[self.CURRENT_PREFIX] = self.full_prefix(p, key, region)
+                one[self.CURRENT_REGION_INDEX] = regions.index(region)
                 feats = self.measure(ctx, img, one)
                 if not feats:
                     continue

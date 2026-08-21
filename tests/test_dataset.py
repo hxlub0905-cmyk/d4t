@@ -293,7 +293,8 @@ def test_the_pixel_size_on_the_load_card_reaches_the_measurements(tmp_path):
         nodes = {
             "load": RecipeNode("load", "load_patch", {"nm_per_px": nm_per_px}),
             "sub": RecipeNode("sub", "subtract", {}),
-            "cd": RecipeNode("cd", "cd_measure", {"roi": ""}),
+            "cd": RecipeNode("cd", "cd_measure",
+                             {"roi": "", "report": "cd_median"}),
         }
         rec = Recipe(recipe_id="nm", routes={"ebi_patch": list(nodes)},
                      nodes=nodes,
@@ -307,9 +308,10 @@ def test_the_pixel_size_on_the_load_card_reaches_the_measurements(tmp_path):
     assert not [k for k in off if k.endswith(("_nm", "_nm2"))]
 
     on, ctx = features(2.0)
-    assert on["cd_x_px"] == off["cd_x_px"]              # pixel 那一份沒變
-    assert on["cd_x_nm"] == off["cd_x_px"] * 2.0
-    assert on["area_nm2"] == off["area_px"] * 4.0       # 面積乘平方
+    assert on["cd_median"] == off["cd_median"]          # pixel 那一份沒變
+    assert on["cd_median_nm"] == off["cd_median"] * 2.0
+    # 面積乘平方那條規則現在沒有生產者（F19 第二批才回來），釘在
+    # `test_steps.py::test_area_still_converts_with_the_square_...`
     # 每一條這張卡吐的流都登記得到（`align_to` 問的是流，不是全域）
     assert ctx.stream_nm_per_px("test") == 2.0
     assert ctx.stream_nm_per_px("ref") == 2.0

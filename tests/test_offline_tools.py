@@ -1254,7 +1254,11 @@ def test_no_test_uses_the_3_10_only_write_text_newline_argument():
     """
     bad = []
     for root, _dirs, names in os.walk(REPO):
-        if any(part in root for part in (".git", "__pycache__", "bundle")):
+        # ``.venv`` 也要跳過：`CLAUDE.md` §4 就是叫人建在 repo 根目錄的，而
+        # site-packages 裡有一堆 3.10+ 的寫法 —— 掃到它們等於這支測試在**照著
+        # 開發指南做**的機器上恆紅。
+        if any(part in root for part in (".git", "__pycache__", "bundle",
+                                         ".venv")):
             continue
         for name in names:
             if not name.endswith(".py"):

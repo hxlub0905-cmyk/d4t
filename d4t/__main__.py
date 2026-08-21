@@ -180,10 +180,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
         g = (summarize(payload, ground_truth=gt).get("ground_truth") or {})
         print(f"\n對照 ground truth（{gt_path}）：")
         if g.get("n_evaluated"):
-            print(f"  正確率 {g.get('accuracy', 0):.1%}　"
-                  f"抓漏率 {g.get('miss_rate', 0):.1%}"
+            print(f"  正確率 {_pct(g.get('accuracy'))}　"
+                  f"抓漏率 {_pct(g.get('miss_rate'))}"
                   f"（漏抓 {g.get('fn', 0)} 顆真缺陷）　"
-                  f"誤殺率 {g.get('false_alarm_rate', 0):.1%}"
+                  f"誤殺率 {_pct(g.get('false_alarm_rate'))}"
                   f"（誤判 {g.get('fp', 0)} 顆假點）")
         else:
             print("  這一批沒有一顆對得上 ground truth 裡的 defect id —— "
@@ -407,6 +407,19 @@ def _cmd_gui(_args: argparse.Namespace) -> int:
     return gui_main([])
 
 
+def _pct(value: Any) -> str:
+    """比率 → ``"25.0%"``，**沒有定義的時候是 `—` 不是 0%**。
+
+    `report._ground_truth` 的三個比率在分母是 0 的時候回 None（一批裡一顆假點
+    都沒有 → 誤殺率沒有定義）。以前這裡寫 ``g.get(k, 0):.1%``，而那個鍵
+    **存在**、值是 None —— 預設值救不了，於是整個 `d4t run` 在印摘要的最後一行
+    炸掉。而「一批全是真缺陷」一點都不罕見。
+
+    印 `—` 也比印 `0.0%` 誠實：**沒有分母不等於一個都沒誤殺。**
+    """
+    return "—" if value is None else format(float(value), ".1%")
+
+
 def _find_ground_truth(arg, klarf_path: str):
     """``(用了哪個檔, 內容)``；沒有就 ``("", None)``。
 
@@ -495,7 +508,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_ex.add_argument("--bin-col", default=None, help="inplace：bin 寫進哪個 bin 欄（例 ROUGHBINNUMBER）")
     p_ex.add_argument("--size-col", default=None, help="inplace：CD 寫進哪個尺寸欄（例 DSIZE）")
     p_ex.add_argument("--size-feature", default=None,
-                      help="inplace：尺寸欄寫哪個特徵（預設 cd_x_px）")
+                      help="inplace：尺寸欄寫哪個特徵（預設 cd_median）")
     p_ex.add_argument("--size-scale", type=float, default=None,
                       help="inplace：尺寸值寫進去之前乘上的係數。量測全是 pixel，"
                            "要寫 nm 就填 nm/px（預設 1 = 原樣寫 pixel）")
