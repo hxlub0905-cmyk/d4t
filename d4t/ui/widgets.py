@@ -3534,7 +3534,41 @@ def draw_group_icon(p: QPainter, group: str, color: str, size: float) -> None:
         p.drawEllipse(QRectF(m, m, 2 * r, 2 * r))
         p.drawLine(QPointF(m + 2 * r * 0.86, m + 2 * r * 0.86),
                    QPointF(w - m, h - m))
-    else:                               # adc / 其他：打勾
+    elif g == "algo":                   # Σ：數字進、數字出的算式
+        # 這一段一張影像都不碰（`GROUP_ALGO` 的說明），所以圖示裡刻意**沒有
+        # 任何方框** —— 其他七顆全都是某種框或版圖，一眼就分得出「這一段不是
+        # 在處理圖」。Σ 是試算表裡「這一格是算出來的」那顆鈕，而 feature_math
+        # 做的正好是那件事。
+        p.drawPolyline(QPolygonF([
+            QPointF(w - m, h * 0.14), QPointF(m, h * 0.14),
+            QPointF(w * 0.56, h / 2), QPointF(m, h - h * 0.14),
+            QPointF(w - m, h - h * 0.14)]))
+    elif g == "adc":                    # 標籤：給這顆 defect 一個 bin
+        # ADC 這一段的產物是 score + **bin**，而「貼上一個分類」就是標籤。
+        # 尖的那一頭讓輪廓在 15 px 下仍然不像任何一個方框（region 是四個角、
+        # compare 是兩個疊起來的框）。
+        p.drawPolygon(QPolygonF([
+            QPointF(m, h * 0.26), QPointF(w * 0.62, h * 0.26),
+            QPointF(w - m, h / 2), QPointF(w * 0.62, h - h * 0.26),
+            QPointF(m, h - h * 0.26)]))
+        p.setBrush(QColor(color))
+        p.setPen(Qt.NoPen)
+        r = w * 0.075                   # 標籤上的孔。實心的 —— 15 px 下描邊會糊掉
+        p.drawEllipse(QRectF(m + w * 0.14 - r, h / 2 - r, 2 * r, 2 * r))
+    elif g == "output":                 # 敞口的托盤 + 往外走的箭頭
+        # 跟 ``input`` 是**一對**（跟 glyph 的 save / export 同一種對比）：
+        # 一樣是托盤加箭頭，差別在**箭頭往哪走**，而那正好是這兩段唯一的差別。
+        # 托盤這裡是**敞口的**（只有左、下、右三邊）—— input 那個是封起來的
+        # 方匣（東西掉進去），output 是東西離開的地方，所以上緣不封。
+        base = h - m
+        p.drawLine(QPointF(m, h * 0.62), QPointF(m, base))
+        p.drawLine(QPointF(m, base), QPointF(w - m, base))
+        p.drawLine(QPointF(w - m, base), QPointF(w - m, h * 0.62))
+        p.drawLine(QPointF(w / 2, h * 0.60), QPointF(w / 2, m))
+        a = w * 0.17
+        p.drawLine(QPointF(w / 2, m), QPointF(w / 2 - a, m + a))
+        p.drawLine(QPointF(w / 2, m), QPointF(w / 2 + a, m + a))
+    else:                               # 沒見過的 group：打勾（保底，不是某一段）
         p.drawLine(QPointF(m, h * 0.52), QPointF(w * 0.42, h - m))
         p.drawLine(QPointF(w * 0.42, h - m), QPointF(w - m, m))
 
@@ -3841,6 +3875,7 @@ class LibraryPanel(QWidget):
         self._items: Dict[str, _LibraryItem] = {}
         self._describes: Dict[str, Dict[str, Any]] = {}
         self._section_boxes: Dict[str, QVBoxLayout] = {}
+        self._sections: Dict[str, QWidget] = {}
         self._headers: Dict[str, QWidget] = {}
         self._icons: Dict[str, GroupIcon] = {}
         self._available: List[str] = []
@@ -3916,10 +3951,20 @@ class LibraryPanel(QWidget):
 
         for gid, title, subtitle in self.GROUPS:
             self._body.addWidget(self._make_header(gid, title, subtitle))
-            box = QVBoxLayout()
+            # 卡片列裝在**一個自己的 widget 裡**，而不是直接 addLayout 一個
+            # QVBoxLayout（F17）。收起來的那七段要真的不佔位置：
+            # 一個藏起來的 widget 在父層 layout 裡是零，但一個**空的巢狀
+            # layout 不是** —— 它的 contentsMargins（這裡是下緣 8 px）照算。
+            # 於是「展開哪一段」會決定那一段往下掉多少：Input 的標題貼在最上面，
+            # Output 的被前面七段各推 8 px，整整低了 56 px。使用者看到的就是
+            # 「點 Input 跟點 Output 帶出來的高度不一樣」。
+            body = QWidget(self._host)
+            body.setObjectName("libSection")
+            box = QVBoxLayout(body)
             box.setContentsMargins(0, 0, 0, 8)
             box.setSpacing(1)
-            self._body.addLayout(box)
+            self._body.addWidget(body)
+            self._sections[gid] = body
             self._section_boxes[gid] = box
 
         self._body.addStretch(1)
@@ -3974,7 +4019,7 @@ class LibraryPanel(QWidget):
                 continue
             colour = theme.group_hex(gid)
             for d in entries:
-                item = _LibraryItem(d, colour, self._host)
+                item = _LibraryItem(d, colour, self._sections[gid])
                 item.activated.connect(self.add_requested)
                 box.addWidget(item)
                 self._items[item.step_key] = item
@@ -4116,6 +4161,10 @@ class LibraryPanel(QWidget):
                     w.setVisible(show)
                     hit = hit or show
             head.setVisible(hit)
+            # 標題與卡片列是一起出現、一起消失的（見建構式裡的說明）：
+            # 只藏標題的話，收起來的那一段仍然會用它 layout 的下緣把後面的
+            # 每一段往下推。
+            self._sections[gid].setVisible(hit)
             if hit:
                 shown.append(gid)
         self._shown_groups = [g for g in self._ORDER if g in shown]

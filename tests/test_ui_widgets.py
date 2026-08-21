@@ -681,6 +681,47 @@ def test_group_icons_are_painted_not_files(qapp):
         panel.refresh_colors()
 
 
+def test_every_stage_icon_is_a_different_shape(qapp):
+    """八個階段要有八個**看得出差別**的圖示（F17）。
+
+    這一條以前不存在，於是 ``draw_group_icon`` 的 ``else`` 分支（一個打勾）
+    同時服務 Algo、ADC、Output 三段 —— rail 上由上而下掃過去，最後三顆一模一樣。
+    顏色也救不了：F16 那兩段刻意畫得淡（見 ``theme`` 的說明），三個打勾裡有兩個
+    是低彩度的，實際看起來就是「同一個圖示重複三次」。
+
+    測法是**量畫出來的畫素**，跟 ``test_ui_f7_23_buttons`` 同一種：斷言
+    「有沒有寫 elif」沒有用，因為兩段各寫各的、畫出同一個形狀也會過。
+    這裡比的是 15 px（區塊標題與畫布節點磚用的尺寸）—— 大顆的 rail 圖示只會
+    更容易分辨，會先在小的這一邊糊掉。
+    """
+    from PySide6.QtGui import QColor, QPainter, QPixmap
+
+    size = 15
+    ink = {}
+    for gid, _t, _s in widgets_mod.LibraryPanel.GROUPS:
+        pm = QPixmap(size, size)
+        pm.fill(QColor("#ffffff"))
+        p = QPainter(pm)
+        widgets_mod.draw_group_icon(p, gid, "#000000", float(size))
+        p.end()
+        img = pm.toImage()
+        ink[gid] = [img.pixelColor(x, y).value() < 200
+                    for y in range(size) for x in range(size)]
+        assert sum(ink[gid]) >= 12, "%s 幾乎沒畫出東西" % gid
+
+    # 差 24 個畫素 ≈ 15×15 的一成。最接近的一對是 Input / Output（35 個）——
+    # 那一對**刻意**相像：同樣是托盤加箭頭，差別在箭頭往哪走，跟 glyph 的
+    # save / export 是同一種對比。其餘每一對都差得更多。
+    too_close = []
+    keys = list(ink)
+    for i, a in enumerate(keys):
+        for b in keys[i + 1:]:
+            d = sum(1 for x, y in zip(ink[a], ink[b]) if x != y)
+            if d < 24:
+                too_close.append("%s 與 %s 只差 %d 個畫素" % (a, b, d))
+    assert not too_close, "這幾對圖示看起來是同一個：\n  " + "\n  ".join(too_close)
+
+
 # --------------------------------------------------------------------------- #
 # 4. PipelinePanel
 # --------------------------------------------------------------------------- #
@@ -896,6 +937,36 @@ def test_stage_rail_drills_down_one_stage_at_a_time(qapp):
     panel.toggle_group("measure")
     assert panel.open_group() is None
     assert panel.visible_step_keys() == []
+
+
+def test_every_stage_opens_at_the_same_height(qapp):
+    """哪一段展開，卡片就從**同一個高度**開始（F17）。
+
+    使用者原話：「點 Input 出來的選擇 card，跟點 Output 的高度不一樣」。
+    收起來的那七段本來仍然各佔 8 px —— 一個藏起來的 widget 在父層 layout 裡是
+    零，但一個**空的巢狀 layout 不是**，它的 contentsMargins 照算。於是
+    Output（排第八）的標題被前面七段推下去 56 px，畫面上就是一條沒有東西的
+    空白，而且高度隨著點哪一段變。
+
+    量的是「標題離捲動區頂端多遠」，不是某一段的實作 —— 這樣未來不管卡片區
+    怎麼重排，只要它又開始隨段數飄移，這條就會紅。
+    """
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps(_steps())
+    panel.resize(300, 500)
+    panel.show()                                # 沒 show 過的話 layout 不會重排
+
+    tops = {}
+    panel.toggle_group(None)
+    for gid, _t, _s in panel.GROUPS:
+        panel.toggle_group(gid)
+        qapp.processEvents()
+        head = panel._headers[gid]
+        host = head.parentWidget()
+        tops[gid] = head.mapTo(host, head.rect().topLeft()).y()
+        panel.toggle_group(gid)                 # 收回來，換下一段
+    assert len(set(tops.values())) == 1, \
+        "每一段展開時標題的位置不一樣：%r" % (tops,)
 
 
 def test_search_still_reaches_across_collapsed_stages(qapp):
