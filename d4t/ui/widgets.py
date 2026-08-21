@@ -5349,14 +5349,85 @@ def _fmt_number(value: Any) -> str:
     return "%.3f" % f
 
 
+#: 絕對量 / 相對量 —— :func:`feature_gloss` 回的第一個值。
+FEATURE_ABSOLUTE = "absolute"
+FEATURE_RELATIVE = "relative"
+
+
+def feature_gloss(name: str, about: Optional[Dict[str, str]] = None
+                  ) -> Tuple[str, str]:
+    """一個特徵名 →（絕對量／相對量／空的, 一句話說它是什麼）。
+
+    F18 補課第三輪（使用者 2026-08-21）：「我認為 feature 中絕對量的跟相對量
+    的還是要分類好（不然不清楚命名規則會很痛苦），或者 Feature 的功能 UI
+    顯示需要再優化」。**兩件都做**：名字本身有規則（`glv_` / `cmp_`），
+    而這一支把那個規則**翻成畫面上讀得懂的一句話** —— 使用者不必先背規則。
+
+    說明的內容不是在這裡發明的：絕對量走 `algo.glv.metric_formula`（公式的
+    家），相對量走 :data:`METRIC_GROUPS` 的短標籤（膠囊的家）。抄第二份出來
+    的那一份一定會漂（`CLAUDE.md` §0）。
+
+    ``about`` 是「跟誰比」——名字裡沒有那件事（``epi_cmp_delta_median`` 不講
+    mg），所以由呼叫端從引擎的 ``meta["compares"]`` 帶進來。
+    """
+    text = str(name or "")
+    ref = str((about or {}).get(text, "") or "")
+    body, kind = "", ""
+    if text.startswith(CMP_TAG) or ("_" + CMP_TAG) in text:
+        kind = FEATURE_RELATIVE
+        rest = text.split(CMP_TAG, 1)[1]
+        metric, stat = _split_cmp(rest)
+        label = metric_face(metric)[1] if metric else rest
+        body = label if not stat else "%s of %s" % (label, stat)
+        body += " vs %s" % (ref or "the reference")
+    elif text.startswith(GLV_TAG) or ("_" + GLV_TAG) in text:
+        kind = FEATURE_ABSOLUTE
+        mid = GLV_TAG + text.split(GLV_TAG, 1)[1]
+        body = _ABS_GLOSS.get(mid) or algo_glv.metric_formula(mid)
+        if body == "—":
+            body = metric_face(mid)[1]
+    return kind, body
+
+
+#: 名字裡的那兩個家族標記（引擎那邊的 `glv_stats.CMP_PREFIX`）。
+GLV_TAG = "glv_"
+CMP_TAG = "cmp_"
+
+#: 這幾個不是統計量，`metric_formula` 答不出來 —— 而它們每一顆都在。
+_ABS_GLOSS = {
+    "glv_pixels": "how many pixels counted",
+    "glv_ok": "1 when there were enough pixels",
+}
+
+
+def _split_cmp(rest: str) -> Tuple[str, str]:
+    """``delta_median`` → ``("delta", "median")``；``overlap`` → ``("overlap", "")``。
+
+    **比對真的存在的 metric id，不是切最後一個底線**：``spread_ratio`` 本身
+    就帶一個底線，切法會把它變成「spread 這個 metric 的 ratio 統計量」。
+    """
+    for metric in sorted(algo_glv.COMPARE_METRICS, key=len, reverse=True):
+        if rest == metric:
+            return metric, ""
+        if rest.startswith(metric + "_"):
+            return metric, rest[len(metric) + 1:]
+    return rest, ""
+
+
 class FeatureTable(QTableWidget):
-    """特徵 / 數值 兩欄表；``score`` 永遠釘在最後一列且用粗體。"""
+    """特徵 / 它是什麼 / 數值 三欄表；``score`` 永遠釘在最後一列且用粗體。
+
+    中間那一欄是 F18 補課第三輪加的（使用者：「目前只有縱向空間被用到，
+    橫向空間幾乎沒有 —— Feature 右側就只有 Value 還到最右邊」）。它放的是
+    :func:`feature_gloss` 翻出來的那一句話，而**絕對量與相對量用顏色分**：
+    相對量是強調色，絕對量是次要色。名字的規則因此不必先背。
+    """
 
     _SCORE = "score"
 
     def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(0, 2, parent)
-        self.setHorizontalHeaderLabels(["Feature", "Value"])
+        super().__init__(0, 3, parent)
+        self.setHorizontalHeaderLabels(["Feature", "What it is", "Value"])
         self.verticalHeader().setVisible(False)
         self.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -5364,8 +5435,9 @@ class FeatureTable(QTableWidget):
         self.setAlternatingRowColors(True)
         self.setShowGrid(False)
         head = self.horizontalHeader()
-        head.setSectionResizeMode(0, QHeaderView.Stretch)
-        head.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        head.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        head.setSectionResizeMode(1, QHeaderView.Stretch)
+        head.setSectionResizeMode(2, QHeaderView.ResizeToContents)
 
     #: 一個分組（F13-1 的 ①）：``title`` 是**哪張卡產出的**、``color`` 是那張卡
     #: 的階段色、``names`` 是這一組裡的特徵、``collapsed`` 決定一開始收不收。
@@ -5374,7 +5446,8 @@ class FeatureTable(QTableWidget):
 
     def set_features(self, features: Optional[Dict[str, Any]],
                      highlight: Iterable[str] = (),
-                     sections: Optional[Sequence[Dict[str, Any]]] = None) -> None:
+                     sections: Optional[Sequence[Dict[str, Any]]] = None,
+                     about: Optional[Dict[str, str]] = None) -> None:
         """填表。``highlight`` 內的特徵名會用 accent 底色標出（例：分數用到的）。
 
         ``sections`` 是**分組**（F13-1 ①，2026-08-19 使用者：「feature 的顯示
@@ -5391,12 +5464,17 @@ class FeatureTable(QTableWidget):
         """
         features = dict(features or {})
         hi = set(highlight or ())
+        self._about = dict(about or {})
         rows: List[Tuple[str, Any]] = []          # ("head"/"row", 內容)
         if sections:
             seen = set()
             for sec in sections:
                 names = [n for n in (sec.get("names") or [])
                          if n in features and n != self._SCORE and n not in seen]
+                # 同一張卡底下**絕對量在前、相對量在後**（其餘保持原順序）。
+                # 兩者交錯的話，那一段要一行一行讀才知道自己在看哪一種。
+                names.sort(key=lambda n: 1 if feature_gloss(n)[0]
+                           == FEATURE_RELATIVE else 0)
                 if not names:
                     continue
                 seen.update(names)
@@ -5446,15 +5524,26 @@ class FeatureTable(QTableWidget):
         item.setBackground(QColor(theme.mix_hex(
             colour, TOKENS["bg_surface"], 0.14)))
         self.setItem(row, 0, item)
-        self.setItem(row, 1, QTableWidgetItem(""))
-        self.item(row, 1).setBackground(QColor(theme.mix_hex(
-            colour, TOKENS["bg_surface"], 0.14)))
-        self.setSpan(row, 0, 1, 2)
+        for col in (1, 2):
+            self.setItem(row, col, QTableWidgetItem(""))
+            self.item(row, col).setBackground(QColor(theme.mix_hex(
+                colour, TOKENS["bg_surface"], 0.14)))
+        self.setSpan(row, 0, 1, 3)
         return item
 
     def _fill_row(self, row: int, name: str, value: Any,
                   highlighted: bool, is_score: bool) -> None:
         key_item = QTableWidgetItem(str(name))
+        kind, gloss = feature_gloss(str(name), getattr(self, "_about", None))
+        about_item = QTableWidgetItem(gloss)
+        # **絕對量與相對量用顏色分**（使用者要的第二種分類）：相對量走強調色，
+        # 絕對量走次要色。文字本身也講得出來（`… vs mg`），所以不是只靠顏色。
+        about_item.setForeground(QColor(
+            TOKENS["accent_active"] if kind == FEATURE_RELATIVE
+            else TOKENS["text_hint"]))
+        small = about_item.font()
+        small.setPointSizeF(max(7.0, small.pointSizeF() - 1.0))
+        about_item.setFont(small)
         val_item = QTableWidgetItem(_fmt_number(value))
         val_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
         if is_score:
@@ -5467,9 +5556,21 @@ class FeatureTable(QTableWidget):
         if highlighted:
             bg = QColor(TOKENS["accent_bg"])
             key_item.setBackground(bg)
+            about_item.setBackground(bg)
             val_item.setBackground(bg)
         self.setItem(row, 0, key_item)
-        self.setItem(row, 1, val_item)
+        self.setItem(row, 1, about_item)
+        self.setItem(row, 2, val_item)
+
+    def about_text(self, name: str) -> Optional[str]:
+        """中間那一欄寫了什麼（測試與工具讀得到）。"""
+        for r in range(self.rowCount()):
+            key = self.item(r, 0)
+            if key is not None and not self.is_header_row(r) \
+                    and key.text() == name:
+                item = self.item(r, 1)
+                return None if item is None else item.text()
+        return None
 
     def is_header_row(self, row: int) -> bool:
         item = self.item(int(row), 0)
@@ -5518,7 +5619,7 @@ class FeatureTable(QTableWidget):
         for r in range(self.rowCount()):
             key = self.item(r, 0)
             if key is not None and key.text() == name:
-                val = self.item(r, 1)
+                val = self.item(r, 2)
                 return None if val is None else val.text()
         return None
 

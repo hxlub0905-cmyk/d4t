@@ -474,6 +474,39 @@ def test_the_expression_migration_only_fires_on_the_old_name():
     assert again.to_json_dict() == r.to_json_dict()
 
 
+def test_the_panel_gets_the_reference_distribution_too():
+    """面板要把參照那條分布疊上去（使用者 2026-08-21），所以引擎要留給它。
+
+    **畫面上的數字就是引擎算的這一份** —— UI 不自己再跑一次統計，不然面板上
+    的曲線跟真的寫出去的數字有機會不一樣。
+    """
+    ctx = _run(_boxed_ctx(hot_glv=140.0, cold_glv=100.0),
+               stat="glv_median", compare_metrics="delta,snr")
+    row = ctx.meta["glv_hist"][0]
+    ref = row["ref"]
+    assert ref["label"] == "cold" and ref["boxes"] == 6
+    assert sum(ref["bins"]) == ref["n"] > 0
+    # 兩邊的同一個統計量 —— 面板拿它們畫那一段 Δ
+    assert ref["here"]["glv_median"] - ref["marks"]["glv_median"] == \
+        pytest.approx(ctx.features["cmp_delta_median"], abs=1.0)
+    assert ref["values"] == {k: v for k, v in ctx.features.items()
+                             if k.startswith("cmp_")}
+
+    # 不比的時候那一格是 None（面板據此決定畫不畫）
+    plain = _run(_ctx(), reference="none")
+    assert plain.meta["glv_hist"][0]["ref"] is None
+
+
+def test_the_compare_note_carries_the_full_feature_names():
+    """特徵表要說得出「這個數字是跟誰比的」，而名字裡沒有那件事。"""
+    ctx = _run(_boxed_ctx(), output_prefix="epi_vs_mg",
+               compare_metrics="delta")
+    rec = list(ctx.meta["compares"].values())[0]
+    assert rec["reference"] == "cold"
+    assert rec["names"] == ["epi_vs_mg_cmp_delta_mean"]
+    assert set(rec["names"]) <= set(ctx.features)
+
+
 def test_an_unknown_comparison_is_refused_with_the_list():
     with pytest.raises(StepError) as e:
         _run(_ctx(), compare_metrics="delta,bogus")

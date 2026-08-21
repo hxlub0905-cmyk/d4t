@@ -1062,8 +1062,9 @@ def test_feature_table_formatting_and_score_pinned_last(qapp):
          "glv_mean": 128.0, "tiny": 0.00002},
         highlight={"snr_peak"},
     )
-    assert table.columnCount() == 2
-    assert [table.horizontalHeaderItem(i).text() for i in range(2)] == ["Feature", "Value"]
+    assert table.columnCount() == 3
+    assert [table.horizontalHeaderItem(i).text() for i in range(3)] == [
+        "Feature", "What it is", "Value"]
 
     names = table.feature_names()
     assert names[-1] == "score"                          # score 釘最後
@@ -1077,7 +1078,7 @@ def test_feature_table_formatting_and_score_pinned_last(qapp):
 
     score_row = names.index("score")
     assert table.item(score_row, 0).font().bold() is True
-    assert table.item(score_row, 1).font().bold() is True
+    assert table.item(score_row, 2).font().bold() is True
 
     hi_row = names.index("snr_peak")
     assert table.item(hi_row, 0).background().color().name() == \
@@ -1085,6 +1086,57 @@ def test_feature_table_formatting_and_score_pinned_last(qapp):
 
     table.set_features({})                               # 清空不該炸
     assert table.rowCount() == 0
+
+
+def test_the_middle_column_says_what_each_feature_is(qapp):
+    """橫向空間拿來**解釋名字**（F18 補課第三輪，2026-08-21）。
+
+    使用者：「目前只有縱向空間被用到（橫向空間幾乎沒有：Feature 右側就只有
+    Value 還到最右邊）」＋「絕對量的跟相對量的還是要分類好」。所以中間那一欄
+    是「這是什麼」，而**兩種量用顏色分**。
+    """
+    table = widgets_mod.FeatureTable()
+    table.set_features(
+        {"epi_glv_median": 128.0, "epi_cmp_delta_median": 23.4,
+         "epi_cmp_overlap": 0.02, "epi_glv_pixels": 812.0},
+        about={"epi_cmp_delta_median": "mg", "epi_cmp_overlap": "mg"})
+
+    assert table.about_text("epi_glv_median") == "median(gray)"
+    assert table.about_text("epi_glv_pixels") == "how many pixels counted"
+    assert table.about_text("epi_cmp_delta_median") == \
+        "Difference of median vs mg"
+    # 不看 stat 的那兩個沒有「of …」那一段（`spread_ratio` 自己就帶底線 ——
+    # 切最後一個底線的寫法會把它變成「spread 的 ratio」）
+    assert table.about_text("epi_cmp_overlap") == "Overlap vs mg"
+
+    names = table.feature_names()
+    rel = names.index("epi_cmp_delta_median")
+    abs_ = names.index("epi_glv_median")
+    assert table.item(rel, 1).foreground().color().name() == \
+        theme_mod.TOKENS["accent_active"]
+    assert table.item(abs_, 1).foreground().color().name() == \
+        theme_mod.TOKENS["text_hint"]
+    table.deleteLater()
+
+
+def test_a_feature_nobody_can_decode_gets_no_gloss(qapp):
+    """別張卡寫的數字沒有這套命名規則 —— 那一格留白，不要瞎猜一句話。"""
+    assert widgets_mod.feature_gloss("blob_area") == ("", "")
+    assert widgets_mod.feature_gloss("score") == ("", "")
+
+
+def test_absolute_comes_before_relative_inside_a_card(qapp):
+    """交錯的話，那一段要一行一行讀才知道自己在看哪一種。"""
+    table = widgets_mod.FeatureTable()
+    table.set_features(
+        {"cmp_delta_mean": 1.0, "glv_median": 2.0, "cmp_snr_mean": 3.0,
+         "glv_mad": 4.0},
+        sections=[{"title": "Gray level", "color": "#bf7030",
+                   "names": ["cmp_delta_mean", "glv_median", "cmp_snr_mean",
+                             "glv_mad"]}])
+    assert table.feature_names() == ["glv_median", "glv_mad",
+                                     "cmp_delta_mean", "cmp_snr_mean"]
+    table.deleteLater()
 
 
 def test_verdict_chip(qapp):

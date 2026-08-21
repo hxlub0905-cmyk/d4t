@@ -3530,7 +3530,8 @@ class StudioWindow(QMainWindow):
         highlight = self._highlight_features(result)
         self.feature_table.set_features(getattr(result, "features", {}) or {},
                                         highlight=highlight,
-                                        sections=self._feature_sections(result))
+                                        sections=self._feature_sections(result),
+                                        about=self._feature_about(result))
         score = getattr(result, "score", None)
         self.verdict.set_verdict(getattr(result, "bin", None)
                                  if score is not None else None)
@@ -4041,6 +4042,23 @@ class StudioWindow(QMainWindow):
         """面板現在開著嗎（用明確狀態，不要問 ``isVisible()``）。"""
         node = self.model.nodes.get(self.selected_node or "")
         return bool(node is not None and node.step == self.PROFILE_STEP)
+
+    def _feature_about(self, result: Any) -> Dict[str, str]:
+        """哪一個相對量是**跟誰**比出來的（特徵表中間那一欄要用）。
+
+        名字裡沒有這件事 —— ``epi_cmp_delta_median`` 不講 mg，而把它塞進名字
+        會變成 ``epi_vs_mg_cmp_delta_median`` 那種長度。引擎在
+        ``meta["compares"]`` 已經記著（那一份本來就是給儀表用的），
+        這裡只是讀出來，**不重算**。
+        """
+        ctx = getattr(result, "context", None)
+        rows = (getattr(ctx, "meta", {}) or {}).get("compares") or {}
+        out: Dict[str, str] = {}
+        for rec in rows.values():
+            ref = str((rec or {}).get("reference") or "")
+            for name in (rec or {}).get("names") or []:
+                out[str(name)] = ref
+        return out
 
     def _feature_sections(self, result: Any) -> List[Dict[str, Any]]:
         """特徵表要怎麼分組（F13-1 ①）—— **照引擎已經記下來的事分**。

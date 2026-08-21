@@ -691,6 +691,75 @@ def test_a_width_statistic_is_not_drawn_as_a_position(qapp):
     assert differs(centre_and_width, centre) > 0, "MAD 要多畫出中心兩側的那一段"
 
 
+def test_the_reference_distribution_is_drawn_on_the_same_axis(qapp):
+    """使用者 2026-08-21：「疊上參照那條分布」。
+
+    這張卡有一半在做的事是比較，而相對的那一半以前只是特徵表上的幾個數字 ——
+    而數字答不出「這個差在不在雜訊裡」。兩條分布疊在**同一把尺**上就看得出來。
+
+    測法同上：量畫出來的畫素。有參照的那一張要比沒有的多畫東西，而多出來的
+    不能只是那一行字（把說明關掉也還要多）。
+    """
+    from PySide6.QtGui import QColor, QPixmap
+
+    hill = [max(1, 40 - abs(i - 32)) for i in range(64)]
+    left = [max(1, 40 - abs(i - 16)) for i in range(64)]
+
+    def shot(ref):
+        insp = insp_mod.GlvInspector()
+        insp.set_context("glv_stats", meta={"glv_hist": [{
+            "stream": "test", "region": "epi", "prefix": "", "n": 900,
+            "sat": 0.0, "bins": list(hill),
+            "marks": {"glv_median": 128.0}, "ref": ref}]})
+        insp.resize(420, 160)
+        pm = QPixmap(420, 160)
+        pm.fill(QColor("#ffffff"))
+        insp.render(pm)
+        return pm.toImage()
+
+    def differs(a, b):
+        return sum(1 for x in range(0, 420, 2) for y in range(0, 160, 2)
+                   if a.pixelColor(x, y) != b.pixelColor(x, y))
+
+    alone = shot(None)
+    with_ref = shot({"label": "mg", "bins": list(left), "n": 3600,
+                     "boxes": 6, "marks": {"glv_median": 64.0},
+                     "here": {"glv_median": 128.0},
+                     "values": {"cmp_delta_median": 64.0}})
+    assert differs(with_ref, alone) > 40, "參照那條分布沒有畫出來"
+
+    # 沒有 bins 的參照（例：舊的結果）不能讓面板炸掉，也不該多畫
+    empty = shot({"label": "mg", "bins": [], "values": {}})
+    assert differs(empty, alone) == 0
+
+
+def test_the_numbers_on_the_plot_are_short_and_keep_their_direction(qapp):
+    """圖上的字只有 10 px 高，而 `SNR 66.116` 裡真正在講事情的是 `66`。
+
+    `delta` 的正負號**要留**：往亮的差 26 階與往暗的差 26 階是兩種缺陷，
+    而 `snr` 照定義不帶方向（使用者：「SNR 不會有負值」）。
+    """
+    caption = insp_mod.GlvInspector._compare_caption
+    text = caption({"values": {"cmp_delta_median": 26.138,
+                               "cmp_snr_median": 66.116,
+                               "cmp_overlap": 0.0604}})
+    assert text == "Δ +26  ·  SNR 66  ·  overlap 0.06"
+
+    # 方向反過來 -> 減號（真的減號，不是 hyphen）
+    dark = caption({"values": {"cmp_delta_median": -26.138}})
+    assert dark == "Δ \u221226"
+
+    # 同一個 metric 勾了好幾個統計量 -> 圖上只寫第一個（其餘在特徵表上）
+    many = caption({"values": {"cmp_delta_median": 26.0, "cmp_delta_q90": 25.0,
+                               "cmp_snr_median": 66.0, "cmp_ratio_median": 1.2,
+                               "cmp_overlap": 0.06}})
+    assert many.count("Δ") == 1
+    assert len(many.split("  ·  ")) == insp_mod.GlvInspector.CMP_MAX
+
+    # 不是這張卡寫的名字不要瞎猜
+    assert caption({"values": {"blob_area": 3.0}}) == ""
+
+
 def test_it_says_when_the_region_is_too_thin_to_trust(qapp):
     """patch 的 ROI 常常只有幾百個像素 —— 那時候離散度本身沒有意義。
 

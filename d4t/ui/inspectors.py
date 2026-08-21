@@ -1268,6 +1268,19 @@ class MeasureInspector(Inspector):
                                          QPointF(x, mid + 4.0)]))
 
 
+def _short_number(v: float, signed: bool = False) -> str:
+    """圖上那一行用的短數字：`26.1` / `66` / `0.06`（`_fmt` 給的是 3 位小數）。
+
+    圖上的字只有 10 px 高，而 `SNR 66.116` 裡真正在講事情的是 `66`。
+    """
+    a = abs(float(v))
+    text = ("%.0f" % v) if a >= 10 else (("%.1f" % v) if a >= 1
+                                         else ("%.2f" % v))
+    if signed and float(v) > 0:
+        text = "+" + text
+    return text.replace("-", "\u2212")     # 真的減號，跟畫面其他地方一致
+
+
 def _fmt(v: float) -> str:
     a = abs(v)
     if a >= 1000 or (a and a < 0.01):
@@ -1451,8 +1464,11 @@ class GlvInspector(Inspector):
 
         label = str(row.get("region") or row.get("stream") or "whole image")
         versus = self._pairs().get(str(row.get("region") or ""))
+        tail = ""
         if versus:
-            label += "  vs  " + versus
+            # **虛線那條就是它** —— 標題上的這一段用同一個顏色寫（見下面
+            # 那個兩段式的 drawText），不然畫面上沒有任何東西說得出那條線是誰。
+            tail = "  vs  " + versus
         if int(row.get("boxes") or 0) > 1:
             # 一格一格量的時候畫的是**典型那一格**，而畫面必須說出這件事 ——
             # 不說的話這條分布看起來像整個區域的，那是兩個不同的東西。
@@ -1461,6 +1477,12 @@ class GlvInspector(Inspector):
         head = QRectF(band.left(), band.top(), band.width(), 13)
         p.setPen(colour)
         p.drawText(head, Qt.AlignLeft | Qt.AlignVCenter, label)
+        if tail:
+            w = QFontMetricsF(p.font()).horizontalAdvance(label)
+            p.setPen(QColor(TOKENS[self.REF_TOKEN]))
+            p.drawText(QRectF(head.left() + w, head.top(),
+                              head.width() - w, head.height()),
+                       Qt.AlignLeft | Qt.AlignVCenter, tail)
         p.setPen(QColor(TOKENS["text_hint"]))
         # 三個旋鈕丟掉了像素的時候要講出來（F18 第 4 步）：畫面上這條分布是
         # **留下來的那些**，而使用者需要知道那不是整塊。
@@ -1495,7 +1517,144 @@ class GlvInspector(Inspector):
         p.drawText(axis, Qt.AlignLeft | Qt.AlignVCenter, "0")
         p.drawText(axis, Qt.AlignRight | Qt.AlignVCenter, "255")
 
+        self._paint_reference(p, plot, row)
         self._paint_marks(p, plot, row, colour)
+
+    #: 參照那條分布用什麼顏色（虛線、次要色）—— 它是**背景**，量的那一塊才是
+    #: 主角，所以不搶顏色。
+    REF_TOKEN = "text_secondary"
+
+    #: 相對量在圖上寫成什麼（`cmp_delta_median` → `Δ median`）。
+    CMP_SHORT = {"delta": "Δ", "abs_delta": "|Δ|", "ratio": "ratio",
+                 "percent": "%", "contrast": "contrast", "snr": "SNR",
+                 "tstat": "t", "pct_rank": "rank", "overlap": "overlap",
+                 "spread_ratio": "MAD ratio"}
+    #: 圖上最多寫幾個（其餘在特徵表上）。
+    CMP_MAX = 3
+    #: 這幾個帶方向 —— 正負號要寫出來（`Δ +26` 與 `Δ −26` 是兩種缺陷）。
+    SIGNED = ("delta", "contrast", "percent")
+    #: 寫哪幾個、什麼順序 —— 「差多少」「這個差大不大」「兩邊像不像」。
+    CMP_ORDER = ("delta", "snr", "overlap", "abs_delta", "contrast", "ratio",
+                 "pct_rank", "tstat", "percent", "spread_ratio")
+
+    def _paint_reference(self, p: QPainter, plot: QRectF,
+                         row: Dict[str, Any]) -> None:
+        """把參照那一塊的分布**疊在同一把尺上**（使用者 2026-08-21）。
+
+        原話：「Feature 左側的 histogram 我還是沒有很滿意（相對／絕對？）」。
+        面板本來只畫「這一塊自己」，而這張卡有一半在做的事是比較 —— 相對的
+        那一半以前只是特徵表上的幾個數字，而數字答不出「這個差在不在雜訊裡」。
+        兩條分布疊起來一眼就看得出來。
+
+        三個刻意的選擇：
+
+        * 參照畫**外框虛線**、不填色 —— 填兩塊色的話上面那一塊會被蓋住，而
+          被蓋住的正好是量的那一塊（主角）。
+        * 兩條**各自**正規化到自己的最高點。橫軸（灰階）是共用的尺，縱軸不是
+          —— 參照常常是 target 的幾十倍大，照原始計數畫的話 target 會被壓成
+          貼著底的一條線。
+        * 兩邊的統計量各畫一條線，中間那一段就是 ``delta``：**那個數字在圖上
+          的長度**，而不是另一個要自己想像的量。
+        """
+        ref = row.get("ref")
+        if not isinstance(ref, dict):
+            return
+        counts = [max(0, int(c)) for c in (ref.get("bins") or [])]
+        if not counts or plot.height() < 10:
+            return
+        ink = QColor(TOKENS[self.REF_TOKEN])
+        top = max(counts) or 1
+        bw = plot.width() / float(len(counts))
+        pts = [QPointF(plot.left() + (k + 0.5) * bw,
+                       plot.bottom() - (c / float(top)) * plot.height())
+               for k, c in enumerate(counts)]
+        # 先鋪一層很淡的底再描虛線：只有虛線的話，那條高對比的曲線會比**量的
+        # 那一塊**（淡色的長條）還搶眼 —— 而主角是後者。
+        wash = QColor(ink)
+        wash.setAlpha(26)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(wash))
+        p.drawPolygon(QPolygonF(
+            [QPointF(plot.left(), plot.bottom())] + pts
+            + [QPointF(plot.right(), plot.bottom())]))
+        pen = QPen(ink, 1.0, Qt.DashLine)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawPolyline(QPolygonF(pts))
+
+        self._paint_gap(p, plot, ref, ink)
+        text = self._compare_caption(ref)
+        if text:
+            # **寫在座標軸那一列的正中間**：圖裡面已經有兩條分布、兩條 stat
+            # 的線與那一段 Δ，再壓一行字上去就是誰都讀不到。左右兩端是 0 與
+            # 255，中間本來就空著。
+            p.setPen(ink)
+            p.drawText(QRectF(plot.left(), plot.bottom() + 1, plot.width(), 11),
+                       Qt.AlignHCenter | Qt.AlignVCenter, text)
+
+    def _paint_gap(self, p: QPainter, plot: QRectF, ref: Dict[str, Any],
+                   ink: QColor) -> None:
+        """兩邊的 stat 各一條線，中間拉一段 —— 那一段的長度就是 ``delta``。
+
+        勾了好幾個統計量的時候只畫**第一個**：十條線疊在一張 40 px 高的圖上
+        會變成一排看不出誰是誰的柵欄（同 `_paint_marks` 的老問題）。
+        """
+        here, there = ref.get("here") or {}, ref.get("marks") or {}
+        stat = next((k for k in here if k in there), "")
+        if not stat:
+            return
+        try:
+            a, b = float(here[stat]), float(there[stat])
+        except (TypeError, ValueError):
+            return
+        if not (0.0 <= a <= 255.0 and 0.0 <= b <= 255.0):
+            return
+        y = plot.top() + 5.0
+        xa = plot.left() + (a / 255.0) * plot.width()
+        xb = plot.left() + (b / 255.0) * plot.width()
+        p.setPen(QPen(ink, 1.0, Qt.DotLine))
+        p.drawLine(QPointF(xb, plot.top()), QPointF(xb, plot.bottom()))
+        p.setPen(QPen(ink, 1.2))
+        p.drawLine(QPointF(xa, y), QPointF(xb, y))
+        for x, d in ((xa, 1 if xb > xa else -1), (xb, -1 if xb > xa else 1)):
+            p.drawLine(QPointF(x, y), QPointF(x + 3.0 * d, y - 2.5))
+            p.drawLine(QPointF(x, y), QPointF(x + 3.0 * d, y + 2.5))
+
+    @classmethod
+    def _compare_caption(cls, ref: Dict[str, Any]) -> str:
+        """圖上那一行相對量（``Δ +23.4 · SNR 5.1 · overlap 0.02``）。
+
+        **數字是引擎算的那一份**（`ref["values"]` 就是寫進特徵表的東西）——
+        面板不自己再算一次，不然畫面上的數字跟寫出去的有機會不一樣。
+        """
+        values = ref.get("values") or {}
+        rows: List[Tuple[int, str, float]] = []
+        for name, value in values.items():
+            rest = str(name).split("cmp_", 1)[-1]
+            metric = next((m for m in sorted(cls.CMP_SHORT, key=len,
+                                             reverse=True)
+                           if rest == m or rest.startswith(m + "_")), "")
+            if not metric:
+                continue
+            try:
+                rows.append((cls.CMP_ORDER.index(metric)
+                             if metric in cls.CMP_ORDER else 99,
+                             cls.CMP_SHORT[metric], float(value),
+                             metric in cls.SIGNED))
+            except (TypeError, ValueError):
+                continue
+        rows.sort(key=lambda t: t[0])
+        seen: List[str] = []
+        out: List[str] = []
+        for _order, short, value, signed in rows:
+            if short in seen:
+                continue        # 同一個 metric 勾了好幾個統計量 -> 只寫第一個
+            seen.append(short)
+            out.append("%s %s" % (short, _short_number(value, signed)))
+            if len(out) >= cls.CMP_MAX:
+                break
+        return "  ·  ".join(out)
 
     def _paint_marks(self, p: QPainter, plot: QRectF, row: Dict[str, Any],
                      colour: QColor) -> None:
