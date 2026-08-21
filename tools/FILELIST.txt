@@ -5,7 +5,7 @@ a6b298c38249d1758d17f7780df10626e05c809d .gitignore
 dc5d3e24d36ca139df3d9ccac1034075e7698f6e AGENTS.md
 b404ab73fd00a46fa43d83d173fe5d973f01bfd7 CLAUDE.md
 b20e9b7f31aa8195e297b4a124b69252cd4c56cf README.md
-c16f8d1642caf6ecf85f5cc3656de33c373053ce SESSION_LOG.md
+8f4ec9861aea5911b53d3c9d5beb5fa9de99aaf3 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 7742c2cd23ceff1a020c07c4c4684d332ee78050 d4t/__main__.py
@@ -104,12 +104,11 @@ ffb40bc7e7d8fbac0d7c9402064fe639d1a41740 docs/GLAS-INTERFACE.md
 160ffb5f501ade00ca2bf417133ef49c3d2e09b1 docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
 f9d119616d2879a13822d4611375f46b889e6388 docs/PITFALLS.md
-887f4cbe8397dec23ba9656ff760528f4c7c5569 docs/ROADMAP.md
-16945bcaa6f76dc549fb185246582626f023f6eb docs/USING-CD.md
+1bf397e6a0b810ffd16ffa73dc4e35f9e85e1d59 docs/ROADMAP.md
+a6207427b19c048a912217932f37525a2a8350cd docs/USING-CD.md
 f6378d9ba391a4e1e3ef7ed855c7694b6b7f50b9 docs/plans/F0-master-plan.md
 d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 c4f06765ad918545511da042eb8d2b63df19795f docs/plans/F15-pair-sources.md
-a1bfb41fcd7601224e14ccf936d07af31b033c08 docs/plans/F19-cd.md
 773d4c5652e1abd95b7bf06591a691c07c1c9fa1 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py

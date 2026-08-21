@@ -3,7 +3,7 @@
 > **d4t — defect**　·　Measure 段的 `CD`（`cd_measure`）
 > 這一份是**給使用者的操作手冊**：每一格是什麼、什麼時候該動它、動了之後
 > 數字會往哪邊走。設計上的來龍去脈在
-> [`docs/plans/F19-cd.md`](plans/F19-cd.md)，那一份不必讀。
+> [`docs/history/plans/F19-cd.md`](history/plans/F19-cd.md)，那一份不必讀。
 
 ---
 
