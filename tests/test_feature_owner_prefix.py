@@ -25,7 +25,10 @@
 1. **被蓋掉那份的前綴是流名**（這一輪的重點），而短名的規則沒有變；
 2. 沒撞名時**一個字都不會變**（D2 —— 那是黃金值不動的前提）；
 3. **擁有者是寫進來的當下記的**，不是事後比對 dict 差異推的；
-4. 舊 recipe 指著舊名字時**遷移得過去**，不是變成一條 unknown-feature。
+4. 舊 recipe 指著舊名字時**遷移得過去**，不是變成一條 unknown-feature ——
+   而那一道遷移住在 `Recipe.load`（讀檔案）**不是** `from_json_dict`（重建物件），
+   因為它不冪等而重建那條路是 worker 走的（鐵則 9）。整條性質見
+   `tests/test_recipe_roundtrip.py`。
 """
 from __future__ import annotations
 
@@ -207,7 +210,15 @@ def test_nobody_owns_a_feature_written_outside_a_card():
 # --------------------------------------------------------------------------- #
 # 5. 舊 recipe 遷移得過去
 # --------------------------------------------------------------------------- #
-def test_an_old_expression_is_migrated():
+def _loaded(tmp_path, d):
+    """走**檔案**那一路 —— 遷移住在 `Recipe.load`（F17 審查之後）。"""
+    import json
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps(d), encoding="utf-8")
+    return Recipe.load(path)
+
+
+def test_an_old_expression_is_migrated(tmp_path):
     old = {
         "recipe_id": "old", "version": 3,
         "routes": {KIND: ["load", "norm_ref", "norm"]},
@@ -220,11 +231,10 @@ def test_an_old_expression_is_migrated():
         "score": {"expr": "norm_clip_frac + norm_ref_clip_frac * 2",
                   "threshold": 1.0, "bins": {"below": 0, "above": 1}},
     }
-    r = Recipe.from_json_dict(old)
-    assert r.score.expr == "test_clip_frac + ref_clip_frac * 2"
+    assert _loaded(tmp_path, old).score.expr == "test_clip_frac + ref_clip_frac * 2"
 
 
-def test_the_migration_leaves_a_users_own_name_alone():
+def test_the_migration_leaves_a_users_own_name_alone(tmp_path):
     """判準是「舊東西在不在」（鐵則 9）：只有
     ``<節點 id>_<那張卡真的會產出的特徵名>`` 這個形狀才算數。
 
@@ -241,10 +251,10 @@ def test_the_migration_leaves_a_users_own_name_alone():
         "score": {"expr": "norm_my_own_number + 1",
                   "threshold": 1.0, "bins": {"below": 0, "above": 1}},
     }
-    assert Recipe.from_json_dict(old).score.expr == "norm_my_own_number + 1"
+    assert _loaded(tmp_path, old).score.expr == "norm_my_own_number + 1"
 
 
-def test_the_migration_also_reaches_the_algo_card():
+def test_the_migration_also_reaches_the_algo_card(tmp_path):
     """分數表達式不是唯一吃特徵名的地方 —— Algo 卡的算式也是。"""
     old = {
         "recipe_id": "old", "version": 3,
@@ -260,5 +270,5 @@ def test_the_migration_also_reaches_the_algo_card():
         "score": {"expr": "pct", "threshold": 1.0,
                   "bins": {"below": 0, "above": 1}},
     }
-    r = Recipe.from_json_dict(old)
+    r = _loaded(tmp_path, old)
     assert r.nodes["fm"].params["expr"] == "test_clip_frac * 100"

@@ -875,8 +875,10 @@ class _EdgeItem(QGraphicsItem):
 
     歷史：F7-10 起這裡還有第二種線 —— route 隱含順序的金色虛線
     （``implicit=True``）。**2026-08-14 使用者退掉了它**：「會混淆」。
-    引擎的依賴仍然是「route 相鄰對 ∪ 顯式 edges」（那沒有變，變的只有
-    畫不畫），排版也仍然吃隱含順序（``set_nodes`` 的 ``self._implicit``）。
+    ⚠ **引擎那一句在 F17-① 之後不成立了**：執行順序的邊**只**來自
+    ``recipe.edges``，route 的排列退成 Kahn 的平手依據（見
+    `core/pipeline/recipe.py` 的 `execution_order`）。排版仍然吃排列順序
+    （``set_nodes`` 的 ``self._implicit``），但理由換了 —— 見那裡的說明。
     F7-10 擔心的「沒有線以為互不相干」由現在的預設行為緩解：從卡片庫加卡
     （``add_card_after``）與拖放都會建**顯式**連線，新做的 recipe 天生有線。
     """
@@ -1300,10 +1302,15 @@ class PipelineCanvas(QGraphicsView):
             if (a, b) not in self._pairs:
                 self._pairs.append((a, b))
 
-        # route 的相鄰對是**真的依賴**（engine 的 execution_order 是
-        # 「route 相鄰對 ∪ edges」），**排版**照樣把它算進去 —— 但 2026-08-14
-        # 起不再畫成金色虛線（使用者：「會混淆」）。畫布上只畫使用者拉的線；
-        # 順序上的依賴由卡片的排列（左→右、上→下）表達。
+        # **排版**把相鄰的卡片排成一串。以前這裡寫的理由是「route 相鄰對是真的
+        # 依賴（engine 的 execution_order 是『route 相鄰對 ∪ edges』）」——
+        # **F17-① 之後那句話是假的**：執行順序的邊只來自 `edges`。
+        #
+        # 但這件事照做仍然是對的，理由換成一句更準的：**沒有線的卡片，執行順序
+        # 就是 route 的排列**（那是 `execution_order` 裡 Kahn 的平手依據）。
+        # 所以照排列由左往右擺，畫面上的先後跟真正跑的先後仍然一致。
+        # 2026-08-14 起不畫成金色虛線（使用者：「會混淆」）—— 畫布上只畫使用者
+        # 拉的線，排列本身就是那句話。
         self._implicit = [pair for pair in zip(self._order, self._order[1:])
                           if pair not in set(self._pairs)]
 

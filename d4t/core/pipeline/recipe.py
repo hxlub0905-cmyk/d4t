@@ -526,6 +526,7 @@ def _migrate_renamed_features(score: "ScoreSpec") -> "ScoreSpec":
 
 
 def _rescued_name_renames(nodes: Dict[str, "RecipeNode"],
+                          routes: Optional[Dict[str, List[str]]] = None,
                           registry: Optional[Dict[str, Any]] = None
                           ) -> Dict[str, str]:
     """撞名時「被蓋掉那份」的舊名字 → 新名字（F17-②）。
@@ -539,27 +540,42 @@ def _rescued_name_renames(nodes: Dict[str, "RecipeNode"],
     ``<節點 id>_<這張卡真的會產出的特徵名>`` 這個形狀成立、而且那張卡的新前綴
     跟節點 id 不同，才算數。少了最後那個條件會把使用者自己取的名字
     （`output_prefix` 剛好叫 `norm` 的那種）也改掉。
+
+    ⚠ **逐 route 算，不是整份 nodes 一起算**（F17 審查抓到的）。執行時
+    `_run_nodes` 拿的是**那一條 route 的 order**，而 `feature_prefixes` 的去重
+    池子就是那份清單。整份一起算的話池子多了別條 route 的節點 → 多判出撞名 →
+    多退回節點 id。實測：兩條 route 各一張 `normalize`，執行時兩邊都是 ``test``，
+    整份一起算卻是「撞名」→ **一個字都不遷移**，而引擎產出的是新名字。
+
+    同一個節點在兩條 route 上算出**不同**前綴時退回節點 id（不遷移）：那時候
+    沒有一個正確答案 —— 分數表達式是兩條 route 共用的。
     """
     from .engine import feature_prefixes        # 延後匯入：避免 import 迴圈
 
     if registry is None:
         from .step import REGISTRY as registry  # type: ignore[no-redef]
-    # **跟執行時同一支** —— 兩邊各算一次的話，遷移換出來的名字有機會跟引擎
-    # 真的產出的名字不一樣，而那比不遷移更糟（表達式指到一個永遠不存在的數字）。
     holder = type("_R", (), {"nodes": nodes})()
-    prefixes = feature_prefixes(list(nodes or {}), holder, registry)
+    lists = [list(v) for v in (routes or {}).values()] or [list(nodes or {})]
+
+    # 每條 route 各算一次，再合併；答案不一致的節點退回節點 id。
+    prefixes: Dict[str, str] = {}
+    for order in lists:
+        for nid, pfx in feature_prefixes(order, holder, registry).items():
+            if prefixes.setdefault(nid, pfx) != pfx:
+                prefixes[nid] = nid
+
     out: Dict[str, str] = {}
     for nid, node in (nodes or {}).items():
         step_cls = registry.get(node.step)
         if step_cls is None:
             continue
+        prefix = prefixes.get(nid, nid)
+        if prefix == nid:
+            continue                   # 名字沒變，沒得遷移
         try:
             p = step_cls.validate_params(dict(node.params))
         except Exception:              # noqa: BLE001
             p = dict(node.params)
-        prefix = prefixes.get(nid, nid)
-        if prefix == nid:
-            continue                   # 名字沒變，沒得遷移
         try:
             feats = list(step_cls.resolve_features(p))
         except Exception:              # noqa: BLE001
@@ -570,13 +586,19 @@ def _rescued_name_renames(nodes: Dict[str, "RecipeNode"],
 
 
 def _migrate_rescued_feature_names(nodes: Dict[str, "RecipeNode"],
-                                   score: "ScoreSpec") -> "ScoreSpec":
+                                   score: "ScoreSpec",
+                                   routes: Optional[Dict[str, List[str]]] = None
+                                   ) -> "ScoreSpec":
     """把舊的「節點 id 前綴」名字換成流名前綴 —— 分數表達式與 Algo 卡的算式。
 
     跟 :func:`_migrate_renamed_features` 一樣**只換整個識別字**（邊界比對），
     不做子字串取代。
+
+    ⚠ **這一道只在 :meth:`Recipe.load` 跑**（讀檔案），不在
+    :meth:`Recipe.from_json_dict`（重建物件）—— 理由見 `Recipe.load` 的說明：
+    它不冪等，而重建那條路是 worker 走的（鐵則 9）。
     """
-    renames = _rescued_name_renames(nodes)
+    renames = _rescued_name_renames(nodes, routes)
     if not renames:
         return score
     pattern = re.compile(r"\b(%s)\b" % "|".join(map(re.escape, renames)))
@@ -708,10 +730,9 @@ class Recipe:
         # 兩張 GLV 卡收成一張的兩個 method（F16）。
         _migrate_roi_compare_into_glv_stats(nodes)
         score = _migrate_renamed_features(score)
-        # 撞名時「被蓋掉那份」的前綴：節點 id → 流名（F17-②）。
-        # **一定要排在最後** —— 它問的是「這張卡讀／寫哪一條流」，而上面那幾道
-        # 遷移會換卡、拆卡、改參數，都會改變那個答案。
-        score = _migrate_rescued_feature_names(nodes, score)
+        # ⚠ **撞名前綴那一道遷移不在這裡**（`_migrate_rescued_feature_names`）。
+        # 它住在 :meth:`load` —— 理由見那一支的說明：這裡是「重建一個物件」，
+        # 而那是 `run_batch` 送 recipe 進 worker 走的路。
         return cls(
             recipe_id=str(d["recipe_id"]),
             routes=routes,
@@ -726,9 +747,42 @@ class Recipe:
 
     @classmethod
     def load(cls, path: Any) -> "Recipe":
+        """從磁碟讀一份 recipe。
+
+        **這裡跟 :meth:`from_json_dict` 差一道遷移**，而那個差別是刻意的
+        （F17 審查，2026-08-20）：
+
+        * :meth:`from_json_dict` ＝ **重建一個物件**。``to_json_dict`` →
+          ``from_json_dict`` 是 `run_batch` 送 recipe 進 worker 的路
+          （`batch.py`），所以它**必須是 identity**（鐵則 9）——
+          不是的話 ``workers=1`` 與 ``workers=2`` 會算出不同的分數。
+        * :meth:`load` ＝ **讀一個檔案**。檔案是使用者留在磁碟上的舊東西，
+          遷移屬於這一層。
+
+        為什麼只有這一道搬過來、其他幾道留在 ``from_json_dict``
+        --------------------------------------------------------
+        其他幾道**冪等是構造上的**：``also_apply`` 被 pop 掉就不在了、改名的卡
+        換成新 key 之後就不再符合舊 key。跑第二次是純粹的 no-op。
+
+        `_migrate_rescued_feature_names` 沒有那個性質：**它換出來的新名字與它
+        要換掉的舊名字活在同一個命名空間裡**。``<節點 id>_<特徵>`` 與
+        ``<流名>_<特徵>`` 長得一模一樣，而節點 id **真的**可能等於流名 ——
+        節點 id 就是 step key（`viewmodel._new_id`），而 `snr_map` 既是 step key
+        也是那張卡吐出來的流名。實測過：一個叫 `test` 的節點會讓
+        ``norm_clip_frac`` 第一次變成 ``test_clip_frac``、第二次變成
+        ``diff_clip_frac``。
+
+        所以它不能靠「寫得夠小心」冪等，要靠**根本不會跑第二次**。
+        迴歸測試：`tests/test_recipe_roundtrip.py`。
+        """
         with open(str(path), "r", encoding="utf-8") as f:
             d = json.load(f)
-        return cls.from_json_dict(d)
+        recipe = cls.from_json_dict(d)
+        # 撞名時「被蓋掉那份」的前綴：節點 id → 流名（F17-②）。
+        # **排在所有遷移之後** —— 它問的是「這張卡讀／寫哪一條流」，而前面那幾道
+        # 會換卡、拆卡、改參數，都會改變那個答案。
+        return replace(recipe, score=_migrate_rescued_feature_names(
+            recipe.nodes, recipe.score, recipe.routes))
 
 
 # ---------------------------------------------------------------------------

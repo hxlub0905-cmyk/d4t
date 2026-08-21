@@ -5,7 +5,7 @@ a6b298c38249d1758d17f7780df10626e05c809d .gitignore
 dc5d3e24d36ca139df3d9ccac1034075e7698f6e AGENTS.md
 8ad51660214ce61e629e9ef97a1b4cfdd0fb910a CLAUDE.md
 b20e9b7f31aa8195e297b4a124b69252cd4c56cf README.md
-6081457f3e4f2d4d26e9747d188593ec75e46a6b SESSION_LOG.md
+ba972fd9ac70dbe576882bb5328235eb68bb82d9 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 fa7805cc486a9e7dda00cd42366d7b95fc486862 d4t/__main__.py
@@ -49,7 +49,7 @@ ec7bdb58e7da611ac74f16b53e218f9a65476bdc d4t/core/pipeline/cellrois.py
 fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 8be219b056d2bb84d48741c5c8855a73f155949f d4t/core/pipeline/engine.py
 f1cbd776b47948629028c3f204e3dfb811a5ae2b d4t/core/pipeline/expression.py
-bd7dea7198c7f2e2cb51278c6e2e08cfeecab4ca d4t/core/pipeline/recipe.py
+80cdb99c1cc80587a42942389343453042fb65d1 d4t/core/pipeline/recipe.py
 20a6c3e21e696a3a177b69d8bdbc8f26ecf6f959 d4t/core/pipeline/step.py
 afcd1284d3abd421d5d3ffcffaf596f78f50c6e3 d4t/core/steps/__init__.py
 83542ab9f61ac7132944c9619ec8730041606d33 d4t/core/steps/_util.py
@@ -82,7 +82,7 @@ bcea66e1a82ee590f997bbf319fea696277be9f6 d4t/ui/app.py
 f8cbf586f20a72eb7dbeae1b04aaf0d47f3cbe6a d4t/ui/assets/d4t-wordmark.svg
 a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
 87bce11608d08f4302947e917b2b24d076571775 d4t/ui/branding.py
-c6fdb6478ea20491cdae53551465776c4927de29 d4t/ui/canvas.py
+3ae1ab8a3277cd505874be9e502926b8a5807fcb d4t/ui/canvas.py
 3b58b7e078d58ad84a8939734b65952a75a029f3 d4t/ui/cell_canvas.py
 511288a738743288b669fedb83036486a25fc673 d4t/ui/gallery.py
 d27d68ead331084a740d3d5958e523c913fe98c9 d4t/ui/inspectors.py
@@ -92,7 +92,7 @@ e3248e389f47ff9a0f8b911de3f2ef58c4bf9208 d4t/ui/scope.py
 9db69de939d32688eb659e1ee4a99128077427d8 d4t/ui/studio.py
 b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 b24576feb08cf1517b18a0d0a04f302fcb9ea840 d4t/ui/theme.py
-d5c19e3d7a2e3b2db902b079e9a01a8ab9061373 d4t/ui/viewmodel.py
+af42b652c4e56b5a8458ab24a5f03ee959638139 d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
 92f7b538ea2e0aa400941fc7561e347e7df4d7e4 d4t/ui/widgets.py
 2eb7813f6dbd6c7d0beff0496ed0d1e6dc87d484 d4t/ui/workers.py
@@ -102,7 +102,7 @@ ffb40bc7e7d8fbac0d7c9402064fe639d1a41740 docs/GLAS-INTERFACE.md
 2392b569d39a556942221eaec6aa8b437a42a199 docs/HANDOVER.md
 160ffb5f501ade00ca2bf417133ef49c3d2e09b1 docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
-2b3993c8ebe1f907cce3cb7e04c5752d04ebea76 docs/PITFALLS.md
+6b27419ab01a5af35f3d89b271074dba67a937b5 docs/PITFALLS.md
 f0d4a071efb72fb1829ccb6cc01dec549c47b8a9 docs/ROADMAP.md
 f6378d9ba391a4e1e3ef7ed855c7694b6b7f50b9 docs/plans/F0-master-plan.md
 d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
@@ -153,7 +153,7 @@ af91354855f9f11d953dfd45857bb779eb4c55dd tests/test_f11_split_load_cards.py
 7c7df6c7c646d40764b53a5dbb45747562c7f66f tests/test_f9_8_cache_and_disabled.py
 63d8348237ca965585064db004191a9cd8b4d03d tests/test_fab_probe.py
 6816f1f0f85211829aa8fc935b2e65e6e6c79957 tests/test_feature_math.py
-e34d3f7be3cebfe65f9e48e0e4c01dda8aae9c01 tests/test_feature_owner_prefix.py
+174025a7a178c938717f8b8eee4095e19d2165e3 tests/test_feature_owner_prefix.py
 21b2046491056e3656ad2f7905951a6e5902b0fa tests/test_glas_sidecar.py
 07408efb6f6559b07b28266dc2ab7ca282254182 tests/test_glv.py
 0ac2f93ee5d579cc3f8c26266e1e6429065b23b0 tests/test_glv_compare.py
@@ -173,6 +173,7 @@ db020b9f0a27ed36b68f4f53d5781df357c8df72 tests/test_make_glas_export.py
 37fe3291f5eb15938ef1e8097b3a955e106be9f4 tests/test_phase_origin.py
 d3bf372a8505a94d5d189082b01b566b036bc87c tests/test_quality.py
 ce96e14fa4e4370968384ad979e08b3ea9f9dfb8 tests/test_recipe.py
+87319a4c0f3076f770dc94dee4337b84f8df4aea tests/test_recipe_roundtrip.py
 015f9074a9d390c01212492d90c6d03f264155e0 tests/test_region_facts.py
 3b5f5eec393a4bd203095e437572cd787b93c6ef tests/test_results_store.py
 b6ab82b338b5047b9d6ccec28d421beaadb74051 tests/test_roi.py
