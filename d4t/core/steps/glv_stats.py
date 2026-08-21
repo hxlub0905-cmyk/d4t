@@ -77,26 +77,6 @@ compare 算什麼（`algo/glv.compare_pixels`）
 兩個地方在用它（`algo.glv.group_snr`、`algo/snr`）。**不發明第三種寫法**：
 同一個名字在不同卡片上算出不同的東西，是最難發現的那種錯。
 
-為什麼 target/reference 住在**這張卡的參數上**（原 `roi_compare` 的立論，保留）
-------------------------------------------------------------------------------
-使用者定調（2026-08-18）：「以這張 card 的功能（ROI）來說我不太想要去區分
-target 跟 reference⋯⋯我傾向這邊 ROI 只 labeled 出區域，之後再給 card 標註 T 跟 R。」
-
-**角色是「這一次比較」的屬性，不是區域的屬性**。同一塊 EPI 在一個比較裡是
-target、在另一個裡是 reference —— 角色寫進區域的話，每一種比較都要複製一份區域，
-而區域是**畫**出來的。
-
-而且是**兩對**（流 + 區域）不是一條流兩個區域，因為使用者列的三種情況裡有一種
-兩邊的流不一樣：
-
-| 情況 | target | reference |
-|---|---|---|
-| patch，跟自己兩側的 EPI 比 | `epi_center` @ test | `epi_others` @ test |
-| patch，跟 ref 那張的同一塊比 | `epi` @ **test** | `epi` @ **ref** |
-| 單張 source（沒有 ref）| `epi_center` @ single | `epi_others` @ single |
-
-GDS 那條路特別需要 compare：`roi_from_mask` **只吐 `<name>`**（非週期的 layout
-上沒有 `_others` —— 形狀不是複本），所以那條路真正該比的是**層 vs 層**。
 """
 from __future__ import annotations
 
@@ -172,6 +152,36 @@ REFERENCES = (REF_NONE, REF_REGION, REF_STREAM, REF_OTHERS)
 #: 「用到的每一個區域都要有一條線指到定義它的那張卡」，而這裡指的是同一張）。
 OTHERS_SUFFIX = "_others"
 
+#: 一個區域底下**好幾個框**的時候，要把它們當成一個像素母體，還是一格一格量
+#: （F18 第 6 步，2026-08-21）。
+#:
+#: 兩種都是對的，答的是不同的問題：
+#:
+#: ==============  =========================================================
+#: ``pooled``      「這一整組交界長什麼樣」—— 分散的 N 個框就是一個母體
+#:                 （F8 多框區域本來的用途，也是既有 recipe 的行為）
+#: ``each box``    「**哪一格**跟別人不一樣」—— RSEM 大圖上一個名字底下可能是
+#:                 幾百個重複單元（`roi_template` 在 1000×1000 上鋪出 625 個
+#:                 框），把它們平均起來正好把缺陷抹掉
+#: ==============  =========================================================
+#:
+#: 預設是 ``pooled``：既有 recipe 的 JSON 沒有這個鍵，`validate_params` 會補
+#: 預設值 —— 一個會動的預設等於安靜地改掉每一份舊 recipe 的數字。
+POOLED = "pooled"
+EACH_BOX = "each box"
+BOX_MODES = (POOLED, EACH_BOX)
+
+#: 一格一格量之後，每個數字會變成三個（外加一個 ``boxes`` 說總共幾格）。
+#:
+#: 用字而不是 ``med`` / ``p95``：讀它們的人是製程工程師，而 `_typical` 與
+#: `_outlier` 這兩個詞不必查就懂。**刻意只有兩個端點**（計畫書原本還列了
+#: p95）—— 「典型長什麼樣」與「最不一樣的那一格是誰」是這個問題的全部，
+#: 第三個分位數只是多一欄 CSV。
+TYPICAL_SUFFIX = "_typical"
+OUTLIER_SUFFIX = "_outlier"
+OUTLIER_BOX_SUFFIX = "_outlier_box"
+BOX_COUNT = "boxes"
+
 
 def _canonical(mid: str) -> str:
     """把使用者寫的 metric id 轉成 algo.glv 認得的 id；不認得回傳空字串。"""
@@ -242,6 +252,15 @@ class GlvStatsStep(MultiSourceStep):
                         "also use any percentile (glv_q37), any trimmed mean "
                         "(glv_trim05) and any brightness share "
                         "(glv_above200).")),
+        ParamSpec(
+            name="across_boxes", type="choice", default=POOLED,
+            choices=list(BOX_MODES), label="Boxes in the region",
+            help=("A region can be many boxes at once (a Golden Cell template "
+                  "lays hundreds of them across a big image). pooled treats "
+                  "them as one pile of pixels; each box measures every box on "
+                  "its own and reports the typical one, the odd one out, and "
+                  "which box that was."),
+        ),
         # ---- 跟誰比（F18 第 5 步）------------------------------------------
         ParamSpec(
             name="reference", type="choice", default=REF_NONE,
@@ -349,7 +368,13 @@ class GlvStatsStep(MultiSourceStep):
             extra.append("glv_ok")
         # 相對值疊在絕對值上（不是取代它）—— 那正是這一刀的重點。
         if _reference_of(params) != REF_NONE:
-            extra += _compare_metrics_of(params) or ["delta", "snr"]
+            base = base + (_compare_metrics_of(params) or ["delta", "snr"])
+        if str(params.get("across_boxes", POOLED)) == EACH_BOX:
+            # 一格一格量：每個數字變成「典型 / 最不一樣的那一格 / 那是第幾格」。
+            spread = [n + suffix for n in base
+                      for suffix in (TYPICAL_SUFFIX, OUTLIER_SUFFIX,
+                                     OUTLIER_BOX_SUFFIX)]
+            return spread + [BOX_COUNT] + extra
         return base + extra
 
     @classmethod
@@ -380,11 +405,20 @@ class GlvStatsStep(MultiSourceStep):
         wrong = cls._metrics_in_the_wrong_box(params)
         if wrong:
             return wrong
+        out: List[str] = []
+        if (str(params.get("across_boxes", POOLED)) == EACH_BOX
+                and not [r for r in cls.region_list(params) if r]):
+            # 「一格一格量」講的是**區域裡的那些框**。沒有區域就是量整張圖，
+            # 而整張圖只有一格 —— 那時候這個選項不是錯，是**沒有作用**，
+            # 而一個沒有作用的設定看起來跟一個有作用的一模一樣。
+            out.append("“Boxes in the region” is set to measure each box, but "
+                       "no region is wired in - the whole image is a single "
+                       "box, so this setting does nothing. Wire a Region card "
+                       "in, or set it back to pooled.")
         ref = _reference_of(params)
         if ref == REF_NONE:
-            return []
+            return out
         mine = [r for r in cls.region_list(params) if r]
-        out: List[str] = []
         if ref == REF_REGION:
             other = str(params.get("reference_region", "") or "").strip()
             if not other:
@@ -451,6 +485,9 @@ class GlvStatsStep(MultiSourceStep):
         if not mids:
             raise StepError(self.key, "metrics is empty; list at least one statistic (e.g. glv_mean).")
 
+        if self._each_box(ctx, p):
+            return self._measure_each_box(ctx, img, p, mids)
+
         # ``roi_pixels`` 而不是 ``crop_to_roi``：統計量只要「有哪些像素」，
         # 所以分散的多個框（F8 的交會處）也答得出來 —— 那正是
         # 「這一組交界整體長什麼樣」這個問題。單框走同一條路。
@@ -487,6 +524,109 @@ class GlvStatsStep(MultiSourceStep):
                    int(p.get("min_pixels") or 0)))
         feats.update(extra)
         return feats
+
+    # ---- 一格一格量（F18 第 6 步）------------------------------------------
+    @classmethod
+    def _each_box(cls, ctx: Context, p: Dict[str, Any]) -> bool:
+        """要一格一格量嗎（只有「這個區域真的有好幾格」時才算數）。"""
+        if str(p.get("across_boxes", POOLED)) != EACH_BOX:
+            return False
+        region = str(p.get(cls.REGION) or "").strip()
+        return bool(region) and ctx.roi_count(region) > 1
+
+    def _measure_each_box(self, ctx: Context, img, p: Dict[str, Any],
+                          mids: List[str]) -> Dict[str, float]:
+        """一個框一個框量，再把幾百格收成三個數字。
+
+        為什麼不是每一格各吐一個特徵：`roi_template` 在一張 1000×1000 上鋪得出
+        625 個框，而框的數量**隨影像而異**（換一顆 defect 就不一樣）。逐格吐的
+        話 recipe 得寫死一個不存在的數量，CSV 也會多出幾千欄。
+
+        所以吐的是**分布的兩端加一個地址**：
+
+        =====================  ================================================
+        ``<n>_typical``        每一格算完之後的中位數 —— 「這一批單元長什麼樣」
+        ``<n>_outlier``        離 typical 最遠的那一格的值
+        ``<n>_outlier_box``    那是第幾格（0 起算）—— 缺陷定位的答案
+        ``boxes``              總共量了幾格
+        =====================  ================================================
+
+        「跟誰比」也一格一格算（參照那一塊是共用的），所以 `delta` 那幾個吃的
+        是同一套後綴 —— 「跟隔壁材質比，哪一格最不一樣」是 RSEM 大圖上真正的
+        問題，而它只有在這個模式下答得出來。
+        """
+        region = str(p.get(self.REGION) or "")
+        arr = np.asarray(img)
+        rects = ctx.roi_rects(region, arr.shape[:2])
+        ref_px = None
+        if _reference_of(p) != REF_NONE:
+            ref_px = self._reference_pixels(ctx, img, p, _reference_of(p))
+        compare_names = (_compare_metrics_of(p) if ref_px is not None else [])
+
+        per_box: List[Dict[str, float]] = []
+        kept_index: List[int] = []
+        total_px = 0
+        for i, (x, y, w, h) in enumerate(rects):
+            if w <= 0 or h <= 0:
+                continue
+            raw = arr[y:y + h, x:x + w].reshape(-1).astype(np.float64)
+            patch, _n_raw = self._pixels_that_count(raw, p)
+            total_px += int(patch.size)
+            # 太小的格子**跳過**，不是寫 0 —— 一格壓在影像邊上只剩幾個像素是
+            # 正常的（框是鋪出來的），而它的統計量會把 typical 拉走。
+            if patch.size == 0 or self._too_thin(patch, p):
+                continue
+            one: Dict[str, float] = {}
+            for mid in mids:
+                canon = _canonical(mid)
+                if not canon:
+                    raise StepError(
+                        self.key,
+                        f"unknown statistic '{mid}'; available: "
+                        f"{sorted(algo_glv.GLV_STATS)} or glv_q<0-100> / "
+                        f"glv_p<0-100>.")
+                one[mid] = algo_glv.glv_value(
+                    raw if canon == "glv_sat_frac" else patch, canon)
+            if ref_px is not None:
+                got = algo_glv.compare_pixels(patch, ref_px,
+                                              str(p.get("stat", "glv_mean")))
+                one.update({m: float(got[m]) for m in compare_names})
+            per_box.append(one)
+            kept_index.append(i)
+
+        out: Dict[str, float] = {BOX_COUNT: float(len(per_box)),
+                                 "glv_pixels": float(total_px)}
+        if int(p.get("min_pixels") or 0):
+            out["glv_ok"] = 1.0 if per_box else 0.0
+        if not per_box:
+            ctx.warn(
+                "[%s] none of the %d boxes in '%s' had enough pixels to "
+                "measure, so this defect has no gray levels from this card. "
+                "The rest of the batch is unaffected."
+                % (self.key, len(rects), region))
+            self._note_distribution(ctx, np.zeros(0), p, {}, n_raw=0, thin=True)
+            return out
+
+        for name in list(mids) + list(compare_names):
+            values = [b[name] for b in per_box]
+            typical = float(np.median(values))
+            k = int(np.argmax([abs(v - typical) for v in values]))
+            out[name + TYPICAL_SUFFIX] = typical
+            out[name + OUTLIER_SUFFIX] = float(values[k])
+            out[name + OUTLIER_BOX_SUFFIX] = float(kept_index[k])
+
+        # 面板畫的是**典型那一格**的分布（把幾百格疊起來畫等於畫了一張
+        # 什麼都看不出來的圖）。
+        mid_box = kept_index[int(np.argsort(
+            [b[mids[0]] for b in per_box])[len(per_box) // 2])]
+        x, y, w, h = rects[mid_box]
+        typical_px, n_raw = self._pixels_that_count(
+            arr[y:y + h, x:x + w].reshape(-1).astype(np.float64), p)
+        self._note_distribution(
+            ctx, typical_px, p,
+            {n: out[n + TYPICAL_SUFFIX] for n in mids}, n_raw=n_raw,
+            box=mid_box, boxes=len(per_box))
+        return out
 
     # ---- 量得準不準（F18 第 4 步）------------------------------------------
     @classmethod
@@ -551,7 +691,8 @@ class GlvStatsStep(MultiSourceStep):
 
     def _note_distribution(self, ctx: Context, patch, p: Dict[str, Any],
                            feats: Dict[str, float], n_raw: int = 0,
-                           thin: bool = False) -> None:
+                           thin: bool = False, box: int = -1,
+                           boxes: int = 0) -> None:
         """把這一塊的灰階分布留給儀表（F18 第 2 步）。
 
         **畫面上的那張圖就是引擎算的這一份** —— UI 不自己再跑一次統計，不然
@@ -572,6 +713,10 @@ class GlvStatsStep(MultiSourceStep):
             # 三個旋鈕丟掉了幾成 —— 面板要說得出「你量的不是整塊」。
             "n_raw": int(n_raw or arr.size),
             "thin": bool(thin),
+            # 一格一格量的時候，畫的是**典型那一格**（把幾百格疊起來畫等於
+            # 畫了一張什麼都看不出來的圖）—— 面板要說得出那是哪一格。
+            "box": int(box),
+            "boxes": int(boxes),
             # 「貼在 0 或 255 的比例」永遠記著 —— 它不是使用者勾了才成立的事實，
             # 而面板要用它回答「這塊還能不能信」。勾了 `glv_sat_frac` 的人另外
             # 得到一個同名特徵，那是**輸出**，這裡這個是**診斷**。

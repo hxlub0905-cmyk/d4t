@@ -458,3 +458,105 @@ def test_putting_the_metrics_in_the_wrong_box_is_caught():
     assert not card.configuration_issues(BASE)
     assert not card.configuration_issues(
         {"method": "stats", "metrics": "glv_mean", "roi": ""})
+
+
+# --------------------------------------------------------------------------- #
+# 9. 一格一格量（F18 第 6 步）—— RSEM 大圖上「哪一格跟別人不一樣」
+# --------------------------------------------------------------------------- #
+def _grid_ctx(n=5, side=100, hot_cell=12, hot=160.0, base=100.0):
+    """一張大圖鋪 n×n 個框，其中一格比別人亮（RSEM 的重複單元）。"""
+    img = np.full((side, side), base, np.float32)
+    step = side // n
+    r, c = divmod(hot_cell, n)
+    img[r * step + 2:(r + 1) * step - 2, c * step + 2:(c + 1) * step - 2] = hot
+    ctx = Context(images={"test": img})
+    ctx.set_roi_boxes("cells", [
+        (col / n + 0.02, row / n + 0.02, 1.0 / n - 0.04, 1.0 / n - 0.04)
+        for row in range(n) for col in range(n)])
+    return ctx
+
+
+def test_measuring_each_box_finds_the_odd_one_out():
+    """把幾百個重複單元平均起來，正好把缺陷抹掉。
+
+    `roi_template` 在一張 1000×1000 上鋪得出 625 個框，而 pooled 模式問的是
+    「這一整組長什麼樣」—— 那是 F8 多框區域本來的用途，對交界統計是對的，
+    對「哪一格壞了」是錯的。
+    """
+    ctx = _grid_ctx()
+    get_step("glv_stats")().run(ctx, {
+        "source": "test", "roi": "cells", "metrics": "glv_median",
+        "across_boxes": "each box"})
+
+    assert ctx.features["boxes"] == 25.0
+    assert ctx.features["glv_median_typical"] == pytest.approx(100.0)
+    assert ctx.features["glv_median_outlier"] == pytest.approx(160.0)
+    assert ctx.features["glv_median_outlier_box"] == 12.0, "缺陷定位的答案"
+
+    # pooled（預設）答的是另一個問題，而它**看不出**那一格
+    pooled = _grid_ctx()
+    get_step("glv_stats")().run(pooled, {
+        "source": "test", "roi": "cells", "metrics": "glv_median"})
+    assert pooled.features["glv_median"] == pytest.approx(100.0)
+    assert "glv_median_outlier" not in pooled.features
+
+
+def test_each_box_declares_exactly_what_it_writes():
+    """框的數量**隨影像而異**，所以逐格吐特徵是寫不出宣告的。
+
+    宣告的是分布的兩端加一個地址 —— 那三個名字的數量不隨資料變。
+    """
+    card = get_step("glv_stats")
+    p = {"source": "test", "roi": "cells", "metrics": "glv_median,glv_mad",
+         "across_boxes": "each box"}
+    assert set(card.resolve_features(p)) == {
+        "glv_median_typical", "glv_median_outlier", "glv_median_outlier_box",
+        "glv_mad_typical", "glv_mad_outlier", "glv_mad_outlier_box",
+        "boxes", "glv_pixels"}
+
+    ctx = _grid_ctx()
+    get_step("glv_stats")().run(ctx, p)
+    assert set(ctx.features) == set(card.resolve_features(p))
+
+
+def test_each_box_compares_each_box_too():
+    """「跟隔壁材質比，**哪一格**最不一樣」—— RSEM 大圖上真正的問題。
+
+    比較也一格一格算（參照那一塊是共用的），所以 delta 吃同一套後綴。
+    """
+    ctx = _grid_ctx()
+    ctx.set_roi_boxes("background", [(0.0, 0.9, 1.0, 0.1)])
+    get_step("glv_stats")().run(ctx, {
+        "source": "test", "roi": "cells", "metrics": "glv_median",
+        "across_boxes": "each box", "reference": "another region",
+        "reference_region": "background", "compare_metrics": "delta"})
+    assert ctx.features["delta_typical"] == pytest.approx(0.0, abs=1.0)
+    assert ctx.features["delta_outlier"] == pytest.approx(60.0, abs=1.0)
+    assert ctx.features["delta_outlier_box"] == 12.0
+
+
+def test_each_box_without_a_region_is_caught_before_the_run():
+    """整張圖只有一格 —— 那時候這個選項不是錯，是**沒有作用**。
+
+    而一個沒有作用的設定看起來跟一個有作用的一模一樣。
+    """
+    says = get_step("glv_stats").configuration_issues(
+        {"across_boxes": "each box", "roi": ""})
+    assert says and "does nothing" in says[0]
+    assert get_step("glv_stats").configuration_issues(
+        {"across_boxes": "each box", "roi": "cells"}) == []
+
+
+def test_a_box_too_small_to_measure_is_skipped_not_counted_as_zero():
+    """框是鋪出來的，壓在影像邊上只剩幾個像素是正常的。
+
+    那一格的統計量會把 typical 拉走，所以它**不算**（而 `boxes` 說得出來
+    真正量了幾格）。
+    """
+    ctx = _grid_ctx()
+    get_step("glv_stats")().run(ctx, {
+        "source": "test", "roi": "cells", "metrics": "glv_median",
+        "across_boxes": "each box", "min_pixels": 400})
+    assert ctx.features["boxes"] == 0.0, "每一格都只有 256 px，全部低於下限"
+    assert ctx.features["glv_ok"] == 0.0
+    assert "glv_median_typical" not in ctx.features

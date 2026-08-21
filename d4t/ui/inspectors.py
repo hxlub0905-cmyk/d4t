@@ -1392,6 +1392,11 @@ class GlvInspector(Inspector):
         colour = self._colour(index)
 
         label = str(row.get("region") or row.get("stream") or "whole image")
+        if int(row.get("boxes") or 0) > 1:
+            # 一格一格量的時候畫的是**典型那一格**，而畫面必須說出這件事 ——
+            # 不說的話這條分布看起來像整個區域的，那是兩個不同的東西。
+            label += "  ·  typical box #%d of %d" % (int(row.get("box") or 0),
+                                                     int(row.get("boxes") or 0))
         head = QRectF(band.left(), band.top(), band.width(), 13)
         p.setPen(colour)
         p.drawText(head, Qt.AlignLeft | Qt.AlignVCenter, label)
