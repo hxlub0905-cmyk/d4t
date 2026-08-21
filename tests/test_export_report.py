@@ -277,3 +277,35 @@ def test_write_excel_empty_results(tmp_path):
     wb = openpyxl.load_workbook(str(path))
     assert wb["Details"].max_row == 1
     assert wb["Summary"].cell(row=3, column=2).value == 0
+
+
+# ---------------------------------------------------------------------------
+# 分母是 0 的那三個比率（CLI 印它們的時候炸過）
+# ---------------------------------------------------------------------------
+def test_rates_are_none_when_there_is_nothing_to_divide_by():
+    """一批裡一顆假點都沒有 → 誤殺率**沒有定義**，回 None 不是 0。
+
+    這不是挑剔：`d4t run` 以前寫 ``g.get('false_alarm_rate', 0):.1%``，而那個鍵
+    **存在**、值是 None，所以預設值救不了 —— 整個 run 在印摘要的時候炸掉，
+    而「一批全是真缺陷」一點都不罕見。
+    """
+    all_real = {str(i): {"is_real": True} for i in range(1, 11)}
+    g = report.summarize(hand_results(), ground_truth=all_real)["ground_truth"]
+    assert g["n_nuisance"] == 0
+    assert g["false_alarm_rate"] is None
+    assert g["miss_rate"] is not None          # 真缺陷有，所以這個算得出來
+
+    all_fake = {str(i): {"is_real": False} for i in range(1, 11)}
+    g = report.summarize(hand_results(), ground_truth=all_fake)["ground_truth"]
+    assert g["n_real"] == 0
+    assert g["miss_rate"] is None
+    assert g["false_alarm_rate"] is not None
+
+
+def test_the_cli_prints_a_dash_instead_of_crashing_on_those():
+    """CLI 那一行要印得出來，而且印 `—` 比印 `0.0%` 誠實。"""
+    from d4t.__main__ import _pct
+
+    assert _pct(None) == "—"
+    assert _pct(0.25) == "25.0%"
+    assert _pct(0.0) == "0.0%"        # 真的是 0 跟沒有定義是兩件事

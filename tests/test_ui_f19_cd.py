@@ -488,8 +488,12 @@ def test_the_panel_uses_the_region_palette_not_a_flat_accent(qapp):
     """
     from d4t.ui.theme import region_hex
 
-    ctx, p = measured()
-    insp = make_panel(qapp, ctx, p)
+    cls = REGISTRY["cd_measure"]
+    p = cls.validate_params({"roi": "band"})
+    ctx = Context(images={"test": line_block(rows=40, width=12.0,
+                                             blur=1.2).astype(np.float32)})
+    ctx.set_roi("band", (0.0, 0.0, 1.0, 1.0))
+    insp = make_panel(qapp, cls().run(ctx, p), p)
     assert insp.colour() == region_hex(0)
 
     # 第二個區域拿第二個顏色 —— 而索引是**卡片**給的，不是面板自己數的
@@ -649,3 +653,24 @@ def test_rows_follow_the_wiring_order_not_the_alphabet(qapp):
     insp = two_regions(qapp)
     assert [n["region"] for n in insp.notes()] == ["top", "bot"]
     assert paint_calls(insp)["regions"] == ["top", "bot"]
+
+
+def test_no_region_means_accent_in_the_panel_too(qapp):
+    """量整張圖的時候沒有區域，也就沒有那個區域的顏色。影像上的標記在這個情況
+    畫 accent（`ImageView._paint_marks`：沒有 labels 就整組 accent）—— 面板照樣
+    畫 `region_hex(0)` 的綠的話，同一件事在兩邊又是兩個顏色。"""
+    from d4t.ui.theme import TOKENS, region_hex
+    from d4t.ui.widgets import ImageView
+
+    ctx, p = measured()                       # 沒有 roi
+    insp = make_panel(qapp, ctx, p)
+    assert str(insp.note().get("region") or "") == ""
+    assert insp.colour() == str(TOKENS["accent"])
+    assert insp.colour() != region_hex(0)
+
+    # 而影像那一邊本來就是 accent —— 兩邊現在講同一句話
+    lines, points, focus, labels = REGISTRY["cd_measure"].overlay_marks(ctx, p)
+    view = ImageView()
+    view.set_image(np.zeros((64, 64), np.uint8))
+    view.set_marks(lines, points, focus, labels)
+    assert view.mark_legend() == []

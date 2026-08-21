@@ -1875,6 +1875,12 @@ class CdInspector(Inspector):
         而**顏色指錯區域比沒有顏色糟得多**。
         """
         note = (self.note() if note is None else note) or {}
+        if not str(note.get("region") or ""):
+            # **量整張圖的時候沒有區域，也就沒有那個區域的顏色。**
+            # 影像上的標記在這個情況畫 accent（`ImageView._paint_marks`：沒有
+            # labels 就整組 accent），面板照樣畫 `region_hex(0)` 的綠的話，
+            # 同一件事在兩邊又是兩個顏色 —— 那正是這條規矩要擋的東西。
+            return str(TOKENS["accent"])
         return region_hex(int(note.get("region_index", 0) or 0))
 
     def is_blob(self, note: Optional[Dict[str, Any]] = None) -> bool:
