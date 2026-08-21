@@ -32,15 +32,17 @@ from d4t.core.pipeline import get_step  # noqa: E402
 from d4t.core.pipeline.context import Context  # noqa: E402
 from d4t.core.pipeline.step import ParamError, ParamSpec, StepError  # noqa: E402
 
-#: F16：這張卡併進了 `glv_stats`（label `Gray level`），成為它的
-#: ``method="compare"``。參數逐格相同，只有 ``metrics`` 改叫
-#: ``compare_metrics`` —— 兩種 method 的可選值完全不同，共用一格的話切換
-#: method 會留下一組對方不認得的值。舊 recipe 由
-#: `recipe._migrate_roi_compare_into_glv_stats` 接住（見
+#: F16 把這張卡併進 `glv_stats`（label `Gray level`）當它的
+#: ``method="compare"``；**F18 第 5 步再把那個二選一拆成「跟誰比」的一格**
+#: （`reference`）—— 絕對值永遠吐，相對值疊在上面。舊 recipe 由
+#: `recipe._migrate_compare_method_into_reference` 接住（見
 #: `test_an_old_roi_compare_recipe_still_opens`）。
-BASE = {"method": "compare",
-        "target_source": "test", "target_region": "hot",
-        "reference_source": "test", "reference_region": "cold",
+#:
+#: 這一份的每一條測的東西**都沒有變**，只有參數名跟著卡片走：
+#: ``target_source/target_region`` 就是這張卡本來就在量的 ``source``/``roi``。
+BASE = {"source": "test", "roi": "hot",
+        "metrics": "glv_mean",
+        "reference": "another region", "reference_region": "cold",
         "stat": "glv_mean",
         "compare_metrics": "delta,snr,tstat,ratio,percent",
         "output_prefix": ""}
@@ -84,19 +86,20 @@ def test_the_same_region_on_two_streams():
     """
     ctx = _ctx()
     ctx.set_image("ref", np.asarray(ctx.images["test"]) - 25.0)
-    _run(ctx, target_region="hot", reference_region="hot",
-         reference_source="ref")
+    _run(ctx, roi="hot", reference="another stream", reference_source="ref")
     assert ctx.features["delta"] == pytest.approx(25.0, abs=1.0)
 
 
 def test_it_declares_both_streams_and_both_regions():
     """畫布上要有**兩個**輸入埠，lint 要看得到兩個區域。"""
     card = get_step("glv_stats")
-    p = dict(BASE, reference_source="ref")
-    assert card.resolve_reads(p) == ["test", "ref"]
-    assert card.resolve_regions_in(p) == ["hot", "cold"]
-    # 兩邊同一條流時不重複宣告（一個埠一條線，F9）
+    across = dict(BASE, reference="another stream", reference_source="ref")
+    assert card.resolve_reads(across) == ["test", "ref"]
+    # 跟另一條流比 = **同一塊**在兩張圖上，所以區域只有一個
+    assert card.resolve_regions_in(across) == ["hot"]
+    # 跟另一塊比 = 一條流、兩個區域
     assert card.resolve_reads(BASE) == ["test"]
+    assert card.resolve_regions_in(BASE) == ["hot", "cold"]
 
 
 def test_the_declared_features_are_what_it_writes():
@@ -106,8 +109,14 @@ def test_the_declared_features_are_what_it_writes():
 
 
 def test_the_prefix_applies():
+    """相對值的名字**逐字不變** —— 那是舊 recipe 的分數表達式不必改寫的前提。
+
+    絕對值與樣本數是 F18 疊上去的（`compare` 以前從不吐絕對值，而那正是這一刀
+    要解的坑），它們吃同一個前綴，所以看得出來講的是同一塊。
+    """
     ctx = _run(_ctx(), output_prefix="epi_vs_mg", compare_metrics="delta")
-    assert list(ctx.features) == ["epi_vs_mg_delta"]
+    assert set(ctx.features) == {"epi_vs_mg_delta", "epi_vs_mg_glv_mean",
+                                 "epi_vs_mg_glv_pixels"}
 
 
 # --------------------------------------------------------------------------- #
@@ -124,23 +133,23 @@ def test_comparing_a_region_with_itself_is_caught_before_the_run():
 def test_the_same_region_on_two_different_streams_is_fine():
     """那正是情況 2 —— 不可以連它一起擋掉。"""
     assert get_step("glv_stats").configuration_issues(
-        dict(BASE, reference_region="hot", reference_source="ref")) == []
+        dict(BASE, reference="another stream", reference_source="ref")) == []
 
 
-def test_nothing_picked_yet_points_at_the_two_fields():
+def test_nothing_picked_yet_points_at_the_field():
     """訊息要指向**填得到的東西**（`test_ui_f7_9_feedback` 的不變量）。"""
     says = get_step("glv_stats").configuration_issues(
-        dict(BASE, target_region="", reference_region=""))
+        dict(BASE, reference_region=""))
     assert says
     labels = {p.label for p in get_step("glv_stats").params}
-    assert "“Target region”" in says[0] and "“Reference region”" in says[0]
-    assert {"Target region", "Reference region"} <= labels
+    assert "“That region”" in says[0]
+    assert "That region" in labels
 
 
 def test_running_with_nothing_picked_says_so():
     with pytest.raises(StepError) as e:
-        _run(_ctx(), target_region="", reference_region="")
-    assert "compares two" in str(e.value)
+        _run(_ctx(), reference_region="")
+    assert "none is picked" in str(e.value)
 
 
 # --------------------------------------------------------------------------- #
@@ -168,7 +177,7 @@ def test_a_region_nobody_produced_says_that_instead():
 
 def test_a_missing_stream_names_what_is_there():
     with pytest.raises(StepError) as e:
-        _run(_ctx(), reference_source="diff")
+        _run(_ctx(), reference="another stream", reference_source="diff")
     assert "does not exist here" in str(e.value) and "test" in str(e.value)
 
 
@@ -231,7 +240,7 @@ def test_an_unknown_comparison_is_refused_with_the_list():
 # --------------------------------------------------------------------------- #
 def test_a_region_key_takes_one_name_not_a_list():
     """`region_keys`（複數）是逗號清單，這個不是 —— 而錯的那句話要是白話的。"""
-    spec = ParamSpec(name="target_region", type="region_key", direction="in",
+    spec = ParamSpec(name="reference_region", type="region_key", direction="in",
                      default="", help="x")
     assert spec.validate("epi") == "epi"
     with pytest.raises(ParamError) as e:
@@ -242,10 +251,17 @@ def test_a_region_key_takes_one_name_not_a_list():
     assert "one %s card per pair" % get_step("glv_stats").label in str(e.value)
 
 
-def test_the_card_uses_the_singular_type_for_both_regions():
+def test_the_card_uses_the_right_plurality_for_each_region_field():
+    """量的那一格是**一串**（同一件事做在好幾塊上），參照那一格是**一個**。
+
+    單數／複數的意思跟影像流一字不差（F13-⑥）：複數的第二條線是累加，
+    單數的第二條線是取代 —— 而「跟誰比」只有一個答案。
+    """
     kinds = {p.name: p.type for p in get_step("glv_stats").params}
-    assert kinds["target_region"] == "region_key"
+    assert kinds["roi"] == "region_keys"
     assert kinds["reference_region"] == "region_key"
+    assert kinds["source"] == "image_keys"
+    assert kinds["reference_source"] == "image_key"
 
 
 # --------------------------------------------------------------------------- #
@@ -306,8 +322,11 @@ def test_streams_and_regions_multiply():
 # 8. F16：兩張卡收成一張（`glv_stats` 的兩個 method）
 # --------------------------------------------------------------------------- #
 def test_an_old_roi_compare_recipe_still_opens(tmp_path):
-    """舊 recipe 裡的 `roi_compare` 節點要變成 `glv_stats` + method=compare，
-    **而且特徵名逐字不變** —— 那些名字會被打進分數表達式。
+    """舊 recipe 裡的 `roi_compare` 節點要**走完兩道遷移**（F16 → F18），
+    **而且相對值的特徵名逐字不變** —— 那些名字會被打進分數表達式。
+
+    兩道：`roi_compare` → ``method="compare"`` → ``reference``。順序要緊，
+    第一道產生的東西正是第二道的輸入。
     """
     import json
     from d4t.core.pipeline import Recipe
@@ -333,14 +352,26 @@ def test_an_old_roi_compare_recipe_still_opens(tmp_path):
     r = Recipe.load(str(path))
     node = r.nodes["cmp"]
     assert node.step == "glv_stats"
-    assert node.params["method"] == "compare"
-    # `metrics` 換名字（兩種 method 的可選值互斥，共用一格會留下對方不認得的值）
+    assert "method" not in node.params, "第二道遷移做完要把舊鍵拿掉（idempotent）"
+    assert node.params["reference"] == "another stream", \
+        "兩邊的流不同 → 跟另一條流比"
+    assert node.params["reference_source"] == "ref"
+    assert node.params["source"] == "test" and node.params["roi"] == "epi"
+    # `compare_metrics` 是 F16 換的名字（兩格清單的值互斥，共用一格會留下對方
+    # 不認得的值）；`metrics` 補成 `stat` —— 舊卡片用那個統計量代表每一塊，
+    # 所以「它的絕對值」正是使用者心裡的那個數字。
     assert node.params["compare_metrics"] == "delta,ratio"
-    assert "metrics" not in node.params
-    # 其他參數原封不動，而特徵名因此逐字相同 —— 分數表達式不用改寫。
     assert node.params["stat"] == "glv_median"
-    assert set(get_step("glv_stats").resolve_features(node.params)) == {
-        "epi_vs_mg_delta", "epi_vs_mg_ratio"}
+    assert node.params["metrics"] == "glv_median"
+    # **相對值的名字逐字相同** —— 分數表達式不用改寫。絕對值與樣本數是疊上去的。
+    got = set(get_step("glv_stats").resolve_features(node.params))
+    assert {"epi_vs_mg_delta", "epi_vs_mg_ratio"} <= got
+    assert got == {"epi_vs_mg_delta", "epi_vs_mg_ratio",
+                   "epi_vs_mg_glv_median", "epi_vs_mg_glv_pixels"}
+
+    # 走第二次不能再動它（`run_batch` 送 recipe 進 worker 走的正是那條路）
+    again = Recipe.from_json_dict(r.to_json_dict())
+    assert again.nodes["cmp"].params == node.params
 
 
 def test_the_migration_keys_on_the_old_thing_being_there_not_the_new_one():
@@ -365,15 +396,50 @@ def test_the_migration_keys_on_the_old_thing_being_there_not_the_new_one():
     assert nodes["b"].params["metrics"] == "glv_mean"
 
 
-def test_stats_mode_still_measures_absolute_gray_levels():
-    """合併之後 `stats` 那一半要原封不動 —— 它是這張卡唯一答得出
-    「這塊 EPI 的平均灰階是多少」的那一半，而 compare 從不輸出絕對值。"""
+def test_not_comparing_anything_is_the_default_and_still_measures():
+    """不挑「跟誰比」就只有絕對值 —— 那是這張卡最常見的用法。"""
     ctx = _ctx(hot_glv=140.0, cold_glv=100.0)
     get_step("glv_stats")().run(ctx, {
-        "method": "stats", "source": "test", "roi": "hot",
+        "source": "test", "roi": "hot",
         "metrics": "glv_mean,glv_std", "output_prefix": ""})
     assert ctx.features["glv_mean"] == pytest.approx(140.0, abs=1.0)
     assert "delta" not in ctx.features
+
+
+def test_the_absolute_numbers_come_out_even_when_it_compares():
+    """F18 這一刀要解的坑：舊的 `compare` **從不輸出絕對值**。
+
+    於是「這塊 EPI 的平均灰階是 120」跟「它比隔壁亮 12」不能在同一張卡上同時
+    得到 —— 使用者得放兩張卡、接兩次線，而那兩張卡各自有機會設得不一樣。
+    """
+    ctx = _run(_ctx(hot_glv=140.0, cold_glv=100.0), compare_metrics="delta")
+    assert ctx.features["glv_mean"] == pytest.approx(140.0, abs=1.0)
+    assert ctx.features["delta"] == pytest.approx(40.0, abs=1.0)
+
+
+def test_the_other_regions_needs_no_second_line():
+    """``the other regions`` 用的是 Region 卡的家族慣例（`<name>_others`）。
+
+    那個名字跟 `<name>` 出自同一張卡，畫布上那條線已經在了 —— 所以它**不宣告**
+    第二個區域輸入（F12 的規矩是「用到的每一個區域都要有一條線指到定義它的那
+    張卡」，而這裡指的是同一張）。
+    """
+    card = get_step("glv_stats")
+    p = dict(BASE, reference="the other regions")
+    assert card.resolve_regions_in(p) == ["hot"]
+
+    ctx = _ctx()
+    ctx.set_roi_boxes("hot_others", [(0.5, 0.0, 0.5, 1.0)])
+    get_step("glv_stats")().run(ctx, dict(p, compare_metrics="delta"))
+    assert ctx.features["delta"] == pytest.approx(40.0, abs=1.0)
+
+    # 沒有 `_others` 的那一顆要講出真正的原因，而不是「少了一個東西」
+    lonely = _ctx()
+    lonely.meta.setdefault("regions_absent", {})["hot_others"] = (
+        "this patch only has one copy of 'hot'")
+    with pytest.raises(StepError) as e:
+        get_step("glv_stats")().run(lonely, dict(p, compare_metrics="delta"))
+    assert "only has one copy" in str(e.value)
 
 
 def test_putting_the_metrics_in_the_wrong_box_is_caught():

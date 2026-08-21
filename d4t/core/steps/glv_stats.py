@@ -1,39 +1,59 @@
 # d4t step-card library — authored 2026-07-28 (M1).
-"""glv_stats — **Gray level**：一張卡，兩種問法。
+"""glv_stats — **Gray level**：在哪量 × 量什麼 × 跟誰比。
 
-F16（2026-08-20）把 `roi_compare`（Compare regions）併進來 —— 使用者：
-「Gray level Stats 跟 Compare regions 應該是做同樣的事（量 GLV 相關）吧，
-留其中一個就好」。
+三個彼此獨立的問題，順序就是使用者腦裡的順序（F18 第 5 步，2026-08-21）：
 
-它們**不是**同一件事，而那正是它變成 `method` 而不是被刪掉的理由：
+======================  ==================================================
+① 在哪量？              ``source``（流）× ``roi``（區域）—— 畫布上的線
+② 量什麼？              ``metrics`` —— **絕對值，永遠吐**
+③ 跟誰比？              ``reference`` —— 相對值，疊在絕對值上（可以不比）
+======================  ==================================================
 
-===========  ==================================  ==============================
-method       吃什麼                              吐什麼
-===========  ==================================  ==============================
-``stats``    一條以上的流 × 一個以上的區域        **絕對值** glv_mean / glv_std
-             （多連一累加）                       / 任意分位數
-``compare``  **兩個角色**：target 與 reference    **差異** delta / ratio /
-             （各自一條流 + 一個區域）            percent / snr / tstat
-===========  ==================================  ==============================
+**`compare` 不是另一個 method，是 `reference ≠ none` 的情況。**
 
-`compare` 的 ``stat`` 只是「用哪個數字代表每一塊」，它**從不輸出那個絕對值** ——
-所以「這塊 EPI 的平均灰階是 120」只有 ``stats`` 答得出來，而它是 ADC 判亮暗常常
-要的東西。留一張刪一張會少掉一整類問題，收成一個下拉才是「同一家族收成一張卡的
-method」（F7-10／F7-20 的慣例）。
+以前這裡是 ``method = stats | compare`` 的二選一，而那兩種的**接線方式不同**
+（清單埠 vs 角色埠）—— 對製程工程師，那是「還沒開始量，就先被問了一個關於
+軟體架構的問題」。更實際的坑是：舊的 ``compare`` **從不輸出絕對值**，所以
+「這塊 EPI 的平均灰階是 120」跟「它比隔壁亮 12」不能在同一張卡上同時得到，
+使用者得放兩張卡、接兩次線，而那兩張卡各自有機會設得不一樣。
 
-⚠ **兩種 method 的接線方式不同**，這是這張卡唯一特別的地方：``stats`` 的來源是
-清單（`image_keys` / `region_keys`，第二條線**累加**），``compare`` 的來源是
-**角色埠**（`image_key` / `region_key`，第二條線**取代**）。畫布上的埠因此隨
-``method`` 變形 —— 那是 `resolve_reads` / `resolve_regions_in` 本來就是
-param-dependent 的直接後果，不是新機制。`tests/test_ui_f10_canvas_reality.py`
-的 `ROLE_PORTS` 那條不變量改成「**兩種接線方式各自合法、而且不同時出現**」。
+``reference`` 的四個答案（:data:`REFERENCES`）：
+
+=====================  ========================================  ============
+值                     跟誰比                                    誰在用
+=====================  ========================================  ============
+``none``               不比，只要絕對值                          兩種資料
+``another region``     同一張圖的另一塊（背景、鄰近 cell）        RSEM 大圖
+``another stream``     同一塊在另一條流上（test vs ref）          patch
+``the other regions``  ``<name>_others``（同類區域的其他份）      patch
+=====================  ========================================  ============
+
+四個都只吃「現在這一顆」的資料 —— 所以儀表在預覽時就畫得出來（那是
+`ui/inspectors.GlvInspector` 成立的前提）。
+
+舊 recipe 由 `recipe._migrate_compare_method_into_reference` 接住，
+**相對值的特徵名逐字不變**（``<prefix>_delta``）—— 那是舊分數表達式不必改寫
+的前提。更舊的 ``roi_compare`` 節點先被 `_migrate_roi_compare_into_glv_stats`
+變成 ``method="compare"``，再走同一道。
 
 ``key`` 仍然是 ``glv_stats``（recipe 的鍵）—— 留它而不是留 ``roi_compare``，
 理由是黃金值：兩份 fixture recipe 與 `tests/fixtures/golden/` 都指著它。
-舊的 ``roi_compare`` 節點由 `recipe._migrate_roi_compare_into_glv_stats` 接住。
 
-metrics（``stats``）的規則
---------------------------
+為什麼 target/reference 住在**這張卡的參數上**（原 `roi_compare` 的立論，保留）
+------------------------------------------------------------------------------
+使用者定調（2026-08-18）：「以這張 card 的功能（ROI）來說我不太想要去區分
+target 跟 reference⋯⋯我傾向這邊 ROI 只 labeled 出區域，之後再給 card 標註 T 跟 R。」
+
+**角色是「這一次比較」的屬性，不是區域的屬性**。同一塊 EPI 在一個比較裡是
+target、在另一個裡是 reference —— 角色寫進區域的話，每一種比較都要複製一份區域，
+而區域是**畫**出來的。
+
+GDS 那條路特別需要比較：`roi_from_mask` **只吐 `<name>`**（非週期的 layout
+上沒有 `_others` —— 形狀不是複本），所以那條路真正該比的是**層 vs 層**，
+也就是 ``another region``。
+
+metrics 的規則
+--------------
 逗號清單，每個 id 產生一個同名 feature：
 
 - 中心：glv_median / glv_mean / glv_trim<NN>（兩端各去 NN%）
@@ -128,14 +148,29 @@ METRIC_CHOICES = (
     "glv_above128", "glv_sat_frac",
 )
 
-#: 這張卡的兩種問法。順序＝下拉的順序，第一個是預設。
-METHOD_STATS = "stats"
-METHOD_COMPARE = "compare"
-METHODS = (METHOD_STATS, METHOD_COMPARE)
+#: 「跟誰比」的四個答案（F18 第 5 步，2026-08-21）。順序＝下拉的順序。
+#:
+#: **這不是 `method` 換個名字。** 舊的 `method` 是二選一：``stats`` 吐絕對值、
+#: ``compare`` 吐差異，而且**從不吐絕對值** —— 所以「這塊 EPI 的平均灰階是 120」
+#: 跟「它比隔壁亮 12」不能在同一張卡上同時得到，使用者得放兩張卡、接兩次線，
+#: 而那兩張卡各自有機會設得不一樣。
+#:
+#: 現在絕對值**永遠**吐，相對值疊在它上面。三個問題因此互相獨立：
+#: 在哪量（線）× 量什麼（metrics）× 跟誰比（這一格）。
+#:
+#: 值是給人看的字（下拉直接顯示它們）。它們是穩定的字串 id，除了相等比較
+#: 之外沒有人解析它們。
+REF_NONE = "none"
+REF_REGION = "another region"
+REF_STREAM = "another stream"
+REF_OTHERS = "the other regions"
+REFERENCES = (REF_NONE, REF_REGION, REF_STREAM, REF_OTHERS)
 
-#: 只在 ``stats`` 下顯示 / 只在 ``compare`` 下顯示。
-_WHEN_STATS = ("method", (METHOD_STATS,))
-_WHEN_COMPARE = ("method", (METHOD_COMPARE,))
+#: ``the other regions`` 靠的是 Region 卡的家族慣例：``epi`` 這一塊的「其他同類」
+#: 叫 ``epi_others``（`_util.set_region_family`）。**不必多接一條線** ——
+#: 那個名字跟 ``epi`` 出自同一張卡，畫布上那條線已經在了（F12 的規矩是
+#: 「用到的每一個區域都要有一條線指到定義它的那張卡」，而這裡指的是同一張）。
+OTHERS_SUFFIX = "_others"
 
 
 def _canonical(mid: str) -> str:
@@ -159,14 +194,14 @@ def _canonical(mid: str) -> str:
     return ""
 
 
-def _method_of(params: Dict[str, Any]) -> str:
-    """這組參數用的是哪一種問法（不認得的字一律當 ``stats``）。
+def _reference_of(params: Dict[str, Any]) -> str:
+    """這組參數要跟誰比（不認得的字、沒填的一律當「不比」）。
 
-    **不要用 `params.get("method")` 直接比**：`method` 缺席的意思是「舊 recipe」，
-    而舊的 `glv_stats` 就是 ``stats``。這一段是那個判斷的唯一出處。
+    **不要在別處直接讀 `params["reference"]`**：這一段是那個判斷的唯一出處，
+    而「缺席」的意思是舊 recipe（那時候只有絕對值）。
     """
-    return (METHOD_COMPARE if str(params.get("method", METHOD_STATS)).strip()
-            == METHOD_COMPARE else METHOD_STATS)
+    got = str(params.get("reference", REF_NONE) or REF_NONE).strip()
+    return got if got in REFERENCES else REF_NONE
 
 
 def _compare_metrics_of(params: Dict[str, Any]) -> List[str]:
@@ -175,33 +210,22 @@ def _compare_metrics_of(params: Dict[str, Any]) -> List[str]:
 
 @register_step
 class GlvStatsStep(MultiSourceStep):
-    """Gray level：量一塊的絕對灰階，或比兩塊的差異（見模組 docstring）。"""
+    """Gray level：量一塊的灰階，可以再說「跟誰比」（見模組 docstring）。"""
 
     key = "glv_stats"
     #: ``key`` 不動（recipe 的鍵）。短名是使用者要的（F16）。
     label = "Gray level"
     category = CATEGORY_ALGO
     group = GROUP_MEASURE
-    help = ("Gray levels, two ways: measure a region and write out its "
-            "statistics (median, spread, percentiles, distribution shape…), "
-            "or compare two regions and write out how far apart they are. "
-            "Pick which with “What to do”.")
+    help = ("Gray levels of a region: pick the statistics you want (median, "
+            "spread, percentiles, distribution shape…) and, if you also want "
+            "to know how far it is from something else, pick what to compare "
+            "it against. The absolute numbers come out either way.")
     params = [
-        ParamSpec(
-            name="method", type="choice", default=METHOD_STATS,
-            choices=list(METHODS), label="What to do",
-            help=("stats = measure one region (or several) and report its own "
-                  "gray levels. compare = take two regions, one as the target "
-                  "and one as the reference, and report how far apart they "
-                  "are. The two need different connections, so the ports on "
-                  "this card change when you switch."),
-        ),
-        # ---- method = stats ------------------------------------------------
         ParamSpec(name="source", type="image_keys", direction="in", default="test",
-                  show_when=_WHEN_STATS,
                   help="Image stream to compute statistics on."),
         ParamSpec(name="roi", type="region_keys", direction="in", default="",
-                  label="Region", show_when=_WHEN_STATS,
+                  label="Region",
                   help=("Which region(s) to measure in - drag a line from the "
                         "Region card that defines each one. Two regions here "
                         "means the same statistics measured in both, and every "
@@ -211,60 +235,54 @@ class GlvStatsStep(MultiSourceStep):
         # 手寫 recipe 仍可以放任何 glv_q<0-100>（清單外的值會列出來並勾著）。
         ParamSpec(name="metrics", type="metric_chips",
                   default=DEFAULT_METRICS,
-                  label="Statistics", show_when=_WHEN_STATS,
+                  label="Statistics",
                   choices=list(METRIC_CHOICES),
                   help=("Pick the statistics to output - each becomes a "
                         "feature with the same name. Hand-written recipes may "
                         "also use any percentile (glv_q37), any trimmed mean "
                         "(glv_trim05) and any brightness share "
                         "(glv_above200).")),
-        # ---- method = compare ----------------------------------------------
+        # ---- 跟誰比（F18 第 5 步）------------------------------------------
         ParamSpec(
-            name="target_source", type="image_key", direction="in",
-            default="test", section="1 · Target (the thing being judged)",
-            label="Measure it on", show_when=_WHEN_COMPARE,
-            help="Which image stream the target region is measured on.",
-        ),
-        ParamSpec(
-            name="target_region", type="region_key", direction="in", default="",
-            section="1 · Target (the thing being judged)",
-            label="Target region", show_when=_WHEN_COMPARE,
-            help=("The region being judged - normally the one the defect is "
-                  "in. Leave a Region card upstream and its names appear "
-                  "here."),
-        ),
-        ParamSpec(
-            name="reference_source", type="image_key", direction="in",
-            default="test", section="2 · Reference (what it is judged against)",
-            label="Measure it on", show_when=_WHEN_COMPARE,
-            help=("Which image stream the reference region is measured on. "
-                  "Point it at ref to compare the same block across the pair; "
-                  "leave it on the same stream as the target to compare "
-                  "against another region of the same image."),
+            name="reference", type="choice", default=REF_NONE,
+            choices=list(REFERENCES), section="3 · Compare against",
+            label="Compare against",
+            help=("Leave it at none to just report the gray levels above. "
+                  "Pick something else and the card also reports how far the "
+                  "region is from it - and the ports change to match what you "
+                  "picked."),
         ),
         ParamSpec(
             name="reference_region", type="region_key", direction="in", default="",
-            section="2 · Reference (what it is judged against)",
-            label="Reference region", show_when=_WHEN_COMPARE,
-            help=("What the target is judged against - the same material "
-                  "elsewhere on this image (<name>_others), the same block on "
-                  "the other image, or a different layer entirely."),
+            section="3 · Compare against", label="That region",
+            show_when=("reference", (REF_REGION,)),
+            help=("The region to judge against - the background, the "
+                  "neighbouring cell, another layer. Drag a line from the "
+                  "Region card that defines it."),
+        ),
+        ParamSpec(
+            name="reference_source", type="image_key", direction="in",
+            default="ref", section="3 · Compare against", label="That stream",
+            show_when=("reference", (REF_STREAM,)),
+            help=("The image stream to judge against - normally ref, so the "
+                  "same block is compared across the pair."),
         ),
         ParamSpec(
             name="stat", type="choice", default="glv_mean",
-            section="3 · What to compare", show_when=_WHEN_COMPARE,
+            section="3 · Compare against",
+            show_when=("reference", tuple(r for r in REFERENCES if r != REF_NONE)),
             choices=["glv_mean", "glv_median", "glv_q25", "glv_q75",
                      "glv_q90", "glv_min", "glv_max"],
             label="Compare their",
-            help=("Which single number stands for each region. The mean is "
-                  "the usual choice; the median ignores a few very bright or "
-                  "dark pixels, which matters when a region has a speck in it "
-                  "that is not what you are measuring."),
+            help=("Which single number stands for each block. The mean is the "
+                  "usual choice; the median ignores a few very bright or dark "
+                  "pixels, which matters when a region has a speck in it that "
+                  "is not what you are measuring."),
         ),
         ParamSpec(
             name="compare_metrics", type="multi_choice",
-            default=DEFAULT_COMPARE_METRICS,
-            section="3 · What to compare", show_when=_WHEN_COMPARE,
+            default=DEFAULT_COMPARE_METRICS, section="3 · Compare against",
+            show_when=("reference", tuple(r for r in REFERENCES if r != REF_NONE)),
             choices=list(algo_glv.COMPARE_METRICS),
             label="Report",
             help=("delta is the plain difference in gray levels. snr divides "
@@ -282,7 +300,7 @@ class GlvStatsStep(MultiSourceStep):
         # 舊 recipe 的數字。
         ParamSpec(
             name="exclude_saturated", type="bool", default=False,
-            section="4 · Which pixels count", show_when=_WHEN_STATS,
+            section="4 · Which pixels count",
             label="Ignore pixels at 0 or 255",
             help=("Pixels stuck at pure black or pure white have already lost "
                   "whatever was in them. Leaving them in pulls the average "
@@ -290,7 +308,7 @@ class GlvStatsStep(MultiSourceStep):
         ),
         ParamSpec(
             name="trim_percent", type="float", default=0.0, min=0.0, max=49.0,
-            unit="%", section="4 · Which pixels count", show_when=_WHEN_STATS,
+            unit="%", section="4 · Which pixels count",
             label="Trim each end by",
             help=("Throw away this share of the darkest and the brightest "
                   "pixels before measuring. A couple of hot pixels can move "
@@ -299,7 +317,7 @@ class GlvStatsStep(MultiSourceStep):
         ),
         ParamSpec(
             name="min_pixels", type="int", default=0, min=0, max=100000,
-            unit="px", section="4 · Which pixels count", show_when=_WHEN_STATS,
+            unit="px", section="4 · Which pixels count",
             label="Need at least",
             help=("Below this many pixels the card writes blanks instead of "
                   "numbers, and says so. A spread measured on 20 pixels is "
@@ -316,8 +334,10 @@ class GlvStatsStep(MultiSourceStep):
     HIST_BINS = 64
 
     # ---- 宣告 ---------------------------------------------------------------
-    # `compare` 那一半不走 MultiSourceStep 的迴圈（它的兩條流有角色，排不成
-    # 一串），所以四個 resolve_* 都要分岔。分岔點只有 `_method_of` 一個。
+    # **只有一條路**（F18 第 5 步）：整張卡都走 MultiSourceStep 的迴圈，
+    # 「跟誰比」只是多接一個埠、多吐幾個數字。舊的 `method` 有兩種接線方式
+    # （清單埠 vs 角色埠），於是四個 resolve_* 各自分岔，而使用者得先回答
+    # 一個關於軟體架構的問題才能開始量。
 
     @classmethod
     def feature_names(cls, params: Dict[str, Any]) -> List[str]:
@@ -327,105 +347,106 @@ class GlvStatsStep(MultiSourceStep):
         extra = ["glv_pixels"]
         if int(params.get("min_pixels") or 0):
             extra.append("glv_ok")
+        # 相對值疊在絕對值上（不是取代它）—— 那正是這一刀的重點。
+        if _reference_of(params) != REF_NONE:
+            extra += _compare_metrics_of(params) or ["delta", "snr"]
         return base + extra
 
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
-        if _method_of(params) != METHOD_COMPARE:
-            return super().resolve_reads(params)
-        out: List[str] = []
-        for key in ("target_source", "reference_source"):
-            name = str(params.get(key, "") or "").strip()
+        out = list(super().resolve_reads(params))
+        if _reference_of(params) == REF_STREAM:
+            name = str(params.get("reference_source", "") or "").strip()
             if name and name not in out:
                 out.append(name)
         return out
 
     @classmethod
     def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
-        if _method_of(params) != METHOD_COMPARE:
-            return super().resolve_regions_in(params)
-        out: List[str] = []
-        for key in ("target_region", "reference_region"):
-            name = str(params.get(key, "") or "").strip()
+        out = list(super().resolve_regions_in(params))
+        if _reference_of(params) == REF_REGION:
+            name = str(params.get("reference_region", "") or "").strip()
             if name and name not in out:
                 out.append(name)
+        # ``the other regions`` **不宣告**：`epi_others` 跟 `epi` 出自同一張
+        # Region 卡，畫布上那條線已經在了（見 :data:`OTHERS_SUFFIX`）。
         return out
 
     @classmethod
-    def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
-        if _method_of(params) != METHOD_COMPARE:
-            return super().resolve_features(params)
-        # compare **只吃 output_prefix**，不加流名／區域名前綴 —— 那兩個前綴的
-        # 意思是「同一件事做在好幾個東西上」，而這裡的兩條流有角色之分。
-        # （也是舊 `roi_compare` recipe 的特徵名逐字不變的前提。）
-        return prefix_names(params.get("output_prefix", ""),
-                            _compare_metrics_of(params)
-                            or ["delta", "snr"])
-
-    @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
-        """`compare` 要兩塊、不能挑到同一塊，而且清單不能填錯格。
-
-        （`stats` 只有最後那一條 —— 它沒有「兩塊」的概念。）
-        """
-        # 兩種 method 各有一格清單，而**填錯格是安靜的**：`compare` 只看
-        # `compare_metrics`，所以把 `delta,snr` 打進 Statistics 那一格的人
-        # 會得到一張跑得完、吐著預設值、而且完全不理他的卡。兩組值互斥，
-        # 所以認得出來 —— 認得出來的安靜失敗就不該讓它安靜。
+        """挑了「跟誰比」卻沒挑到東西，或挑到自己 —— 兩個都在跑之前擋。"""
+        # 兩格清單的值互斥，而**填錯格是安靜的**：把 `delta,snr` 打進
+        # Statistics 那一格的人會得到一張跑得完、吐著別的數字的卡。
         wrong = cls._metrics_in_the_wrong_box(params)
         if wrong:
             return wrong
-        if _method_of(params) != METHOD_COMPARE:
+        ref = _reference_of(params)
+        if ref == REF_NONE:
             return []
-        t = str(params.get("target_region", "") or "").strip()
-        r = str(params.get("reference_region", "") or "").strip()
-        ts = str(params.get("target_source", "") or "").strip()
-        rs = str(params.get("reference_source", "") or "").strip()
+        mine = [r for r in cls.region_list(params) if r]
         out: List[str] = []
-        if not t or not r:
-            out.append("This card has no pair to compare yet. Pick a "
-                       "“Target region” and a “Reference region” - the names "
-                       "come from the Region card upstream.")
-        elif t == r and ts == rs:
-            # 同一塊比自己 = delta 恆為 0、snr 恆為 0。跑得完、有數字、
-            # 而且那些數字不會因為任何缺陷而改變。
-            out.append("The target and the reference are the same region on "
-                       "the same image, so every number this card produces is "
-                       "zero no matter what the defect looks like. Pick a "
-                       "different region, or point one of them at another "
-                       "image stream.")
+        if ref == REF_REGION:
+            other = str(params.get("reference_region", "") or "").strip()
+            if not other:
+                out.append("This card is set to compare against another "
+                           "region, but no region is picked yet. Drag a line "
+                           "from the Region card that defines it into “That "
+                           "region”.")
+            elif mine and other in mine:
+                # 同一塊比自己 = delta 恆為 0、snr 恆為 0。跑得完、有數字、
+                # 而且那些數字不會因為任何缺陷而改變。
+                out.append("The region being measured and the one it is "
+                           "compared against are the same region on the same "
+                           "image, so every comparison this card produces is "
+                           "zero no matter what the defect looks like. Pick a "
+                           "different region, or compare against another "
+                           "image stream instead.")
+        elif ref == REF_STREAM:
+            other = str(params.get("reference_source", "") or "").strip()
+            if not other:
+                out.append("This card is set to compare against another image "
+                           "stream, but none is wired into “That stream” yet.")
+            elif other in cls.source_list(params) \
+                    and len(cls.source_list(params)) == 1:
+                out.append("The stream being measured and the one it is "
+                           "compared against are the same stream, so every "
+                           "comparison this card produces is zero no matter "
+                           "what the defect looks like.")
+        elif ref == REF_OTHERS and not mine:
+            out.append("“The other regions” needs a region to start from - "
+                       "there is nothing for the rest to be the others of. "
+                       "Wire a Region card in, or compare against a named "
+                       "region instead.")
         return out
 
     @classmethod
     def _metrics_in_the_wrong_box(cls, params: Dict[str, Any]) -> List[str]:
-        """把一種 method 的清單打進另一種的格子裡（見 `configuration_issues`）。"""
+        """把一格清單的值打進另一格（見 `configuration_issues`）。
+
+        兩組值完全不重疊，所以認得出來 —— 而認得出來的安靜失敗就不該讓它安靜。
+        """
         compare_names = set(algo_glv.COMPARE_METRICS)
-        if _method_of(params) == METHOD_COMPARE:
-            stray = [m for m in parse_key_list(params.get("metrics", ""))
-                     if m in compare_names]
-            if stray:
-                return ["“%s” belongs in “Report”, not “Statistics” - this "
-                        "card is set to compare, so the Statistics box is not "
-                        "read at all and those values are being ignored."
-                        % ", ".join(stray)]
-            return []
+        stray = [m for m in parse_key_list(params.get("metrics", ""))
+                 if m in compare_names]
+        if stray:
+            return ["“%s” belongs in “Report”, not “Statistics” - it is a "
+                    "comparison, not a gray level, so it is being ignored "
+                    "where it is." % ", ".join(stray)]
         stray = [m for m in parse_key_list(params.get("compare_metrics", ""))
                  if m not in compare_names]
         if stray:
-            return ["“%s” belongs in “Statistics”, not “Report” - this card is "
-                    "set to measure one region, so the Report box is not read "
-                    "at all and those values are being ignored."
-                    % ", ".join(stray)]
+            return ["“%s” belongs in “Statistics”, not “Report” - it is a gray "
+                    "level, not a comparison, so it is being ignored where it "
+                    "is." % ", ".join(stray)]
         return []
 
     # ---- 執行 ---------------------------------------------------------------
-    def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
-        if _method_of(params) != METHOD_COMPARE:
-            return super().run(ctx, params)      # MultiSourceStep 的迴圈
-        return self._run_compare(ctx, params)
-
     def measure(self, ctx: Context, img, p: Dict[str, Any]):
-        """``stats``：量一張影像的一個區域（迴圈在 MultiSourceStep）。"""
+        """量一張影像的一個區域（迴圈在 MultiSourceStep）。
+
+        絕對值先算，「跟誰比」疊在它上面 —— 兩者**同一組前綴**，所以
+        ``epi_glv_median`` 與 ``epi_delta`` 講的看得出來是同一塊。
+        """
         mids = parse_key_list(p["metrics"])
         if not mids:
             raise StepError(self.key, "metrics is empty; list at least one statistic (e.g. glv_mean).")
@@ -454,6 +475,8 @@ class GlvStatsStep(MultiSourceStep):
             feats[mid] = algo_glv.glv_value(src, canon)   # feature 名照使用者列的寫
 
         extra = self._quality_features(patch, p)
+        if not thin:
+            extra.update(self._compare_with_reference(ctx, img, patch, p))
         self._note_distribution(ctx, patch, p, feats, n_raw=n_raw, thin=thin)
         if thin:
             ctx.warn(
@@ -557,16 +580,22 @@ class GlvStatsStep(MultiSourceStep):
             "marks": {str(k): float(v) for k, v in feats.items()},
         })
 
-    def _run_compare(self, ctx: Context, params: Dict[str, Any]) -> Context:
-        """``compare``：兩塊區域比一次（原 `roi_compare` 的 run，逐行搬過來）。"""
-        p = self.validate_params(params)
-        target, reference = (str(p["target_region"]).strip(),
-                             str(p["reference_region"]).strip())
-        if not target or not reference:
-            raise StepError(
-                self.key,
-                "pick a target region and a reference region - this card "
-                "compares two, and which is which is the whole point of it.")
+    # ---- 跟誰比（F18 第 5 步）----------------------------------------------
+    def _compare_with_reference(self, ctx: Context, img, patch,
+                                p: Dict[str, Any]) -> Dict[str, float]:
+        """這一塊跟它的參照差多少（``reference == none`` 時回空的）。
+
+        原 `roi_compare` / `method="compare"` 的算術逐行搬過來 —— **算法沒有
+        變**，變的是它不再需要一組自己的角色埠：target 就是這張卡正在量的那
+        一塊（迴圈給的），reference 由 `reference` 那一格決定。
+
+        ``snr`` 的公式仍然是 ``(μ_T − μ_R) / σ_R``（`algo.glv.compare_pixels`）
+        —— 不發明第三種寫法，同一個名字在不同卡片上算出不同的東西是最難發現
+        的那種錯。
+        """
+        ref = _reference_of(p)
+        if ref == REF_NONE:
+            return {}
         metrics = _compare_metrics_of(p)
         if not metrics:
             raise StepError(self.key, "tick at least one thing to report "
@@ -576,43 +605,67 @@ class GlvStatsStep(MultiSourceStep):
             raise StepError(self.key, "unknown comparison %r; available: %s"
                             % (bad[0], ", ".join(algo_glv.COMPARE_METRICS)))
 
-        px = {}
-        for role, region, source in (("target", target, p["target_source"]),
-                                     ("reference", reference,
-                                      p["reference_source"])):
-            img = ctx.images.get(str(source))
-            if img is None:
-                raise StepError(
-                    self.key,
-                    "the %s image stream '%s' does not exist here; available: "
-                    "%s." % (role, source, ", ".join(sorted(ctx.images))
-                             or "none"))
-            # **區域不在的時候要講出真正的原因。** `<name>_others` 在只有一份的
-            # patch 上是**不存在**的（不是空的）—— 那不是設定錯，是這一顆沒有
-            # 基準，而使用者要分得出那兩件事（見 `_util.set_region_family`）。
-            if region not in ctx.roi_names():
-                why = dict(ctx.meta.get("regions_absent") or {}).get(region, "")
-                raise StepError(
-                    self.key,
-                    "the %s region '%s' is not on this defect%s. The rest of "
-                    "the batch is unaffected."
-                    % (role, region, (" — %s" % why) if why else
-                       " (no card upstream produced it)"))
-            px[role] = roi_pixels(ctx, self.key, img, region)
-
-        got = algo_glv.compare_pixels(px["target"], px["reference"],
-                                      str(p["stat"]))
-        ctx.add_features(prefix_features(
-            p["output_prefix"], {m: got[m] for m in metrics}))
+        ref_px = self._reference_pixels(ctx, img, p, ref)
+        got = algo_glv.compare_pixels(patch, ref_px, str(p.get("stat", "glv_mean")))
+        out = {m: float(got[m]) for m in metrics}
 
         # 儀表用（同其他卡的慣例）：**畫面上的數字就是引擎算的這一份**。
-        ctx.meta.setdefault("compares", {})["%s_vs_%s" % (target, reference)] = {
-            "target": target, "reference": reference,
-            "target_source": str(p["target_source"]),
-            "reference_source": str(p["reference_source"]),
-            "stat": str(p["stat"]),
-            "target_px": int(px["target"].size),
-            "reference_px": int(px["reference"].size),
-            "values": {m: float(got[m]) for m in metrics},
+        here = str(p.get(self.REGION) or "the image")
+        ctx.meta.setdefault("compares", {})["%s_vs_%s" % (here, self._ref_label(p, ref))] = {
+            "target": here,
+            "reference": self._ref_label(p, ref),
+            "target_source": str(p.get(self.CURRENT_STREAM, "")),
+            "reference_source": (str(p.get("reference_source", ""))
+                                 if ref == REF_STREAM
+                                 else str(p.get(self.CURRENT_STREAM, ""))),
+            "stat": str(p.get("stat", "glv_mean")),
+            "target_px": int(np.asarray(patch).size),
+            "reference_px": int(np.asarray(ref_px).size),
+            "values": dict(out),
         }
-        return ctx
+        return out
+
+    @classmethod
+    def _ref_label(cls, p: Dict[str, Any], ref: str) -> str:
+        if ref == REF_REGION:
+            return str(p.get("reference_region", "") or "?")
+        if ref == REF_STREAM:
+            return str(p.get("reference_source", "") or "?")
+        return str(p.get(cls.REGION) or "") + OTHERS_SUFFIX
+
+    def _reference_pixels(self, ctx: Context, img, p: Dict[str, Any], ref: str):
+        """參照那一塊的像素 —— 拿不到的時候講出**真正的原因**。
+
+        `<name>_others` 在只有一份的 patch 上是**不存在**的（不是空的）——
+        那不是設定錯，是這一顆沒有基準，而使用者要分得出那兩件事
+        （見 `_util.set_region_family`）。
+        """
+        region = str(p.get(self.REGION) or "")
+        if ref == REF_STREAM:
+            name = str(p.get("reference_source", "") or "").strip()
+            other = ctx.images.get(name)
+            if other is None:
+                raise StepError(
+                    self.key,
+                    "the stream to compare against ('%s') does not exist "
+                    "here; available: %s."
+                    % (name, ", ".join(sorted(ctx.images)) or "none"))
+            return roi_pixels(ctx, self.key, other, region)
+
+        want = (str(p.get("reference_region", "") or "").strip()
+                if ref == REF_REGION else region + OTHERS_SUFFIX)
+        if not want:
+            raise StepError(
+                self.key,
+                "this card is set to compare against another region, but "
+                "none is picked - drag a line from the Region card that "
+                "defines it.")
+        if want not in ctx.roi_names():
+            why = dict(ctx.meta.get("regions_absent") or {}).get(want, "")
+            raise StepError(
+                self.key,
+                "the region to compare against ('%s') is not on this "
+                "defect%s. The rest of the batch is unaffected."
+                % (want, (" — %s" % why) if why else
+                   " (no card upstream produced it)"))
+        return roi_pixels(ctx, self.key, img, want)

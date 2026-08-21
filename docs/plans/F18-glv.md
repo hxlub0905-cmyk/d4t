@@ -1,6 +1,6 @@
 # F18 — Gray level 量測卡：從「四個絕對值」到一張量得懂的卡
 
-**狀態**：🚧 **第 1、2、4 步落地**（2026-08-21）—— metric 的晶片 UI ＋ 引擎那一半
+**狀態**：🚧 **第 1、2、4、5 步落地**（2026-08-21）—— metric 的晶片 UI ＋ 引擎那一半
 的統計量 ＋ robust 預設 ＋ 儀表換成「這一顆的分布」＋ Spread 搬去 Results。
 **範圍**：`glv_stats` 這一張卡 + 它的儀表 + Spread 的搬家。
 **不在範圍**：CD（`cd_measure` 之後**整張重做**，見 §9）、通道之間的比值
@@ -85,11 +85,31 @@
 現在鎖的是「兩種接線方式各自合法、而且不同時出現」，之後鎖的是
 「參考埠只在 `reference != none` 時存在」。
 
+### 3.2.1 落地時多學到的一條（2026-08-21）
+
+計畫說「參考埠只在 `reference != none` 時存在」，而
+`tests/test_ui_f10_canvas_reality.py` 原本的 `ROLE_PORTS` 還鎖著一條更強的話：
+**「不准混用清單來源與角色埠」**。新設計是**故意混用**的 —— 主埠是清單
+（`source` / `roi`：多連一 = 同一件事量在好幾條流／好幾塊上），參考埠是單數
+（一次只跟一個東西比）。
+
+那條舊規矩不是白寫的，它防的是「**同一個**概念輸入有兩種形狀」；現在兩個埠
+是兩個不同的問題、兩個不同的名字、而且參考埠只在使用者說要比的時候才出現。
+所以 `ROLE_PORTS` 清空，改成一條新的不變量：
+`test_the_reference_ports_are_singular_and_only_show_when_asked`。
+
 ### 3.3 遷移（鐵則 9：只能靠「舊東西在不在」判斷）
 
 舊 recipe 的 `method="compare"` 還在 → 轉成
 `reference="another region"`（或 `another stream`，看 `reference_source` 跟
-`target_source` 一不一樣），四個角色參數原封不動搬過去。
+`target_source` 一不一樣），四個角色參數搬過去：
+`target_source`→`source`、`target_region`→`roi`，`metrics` 補成 `stat`
+（舊卡片用那個統計量代表每一塊，所以「它的絕對值」正是使用者心裡的那個數字）。
+做完把 `method` 刪掉，所以走第二次是 identity。
+
+更舊的 `roi_compare` 節點先被 `_migrate_roi_compare_into_glv_stats` 變成
+`method="compare"`，**再走這一道** —— 兩道的順序在 `from_json_dict` 裡是寫死的，
+反過來的話那些節點會漏掉第二段。
 **不能**用「新的 `reference` 鍵不在」來判斷 —— 那分不出「舊檔」與「新 recipe
 吃新預設」，而 `to_json_dict → from_json_dict` 是 `run_batch` 送 recipe 進
 worker 的路，它一旦不是 identity，`workers=1` 與 `workers=2` 會算出不同的分數。
@@ -340,7 +360,7 @@ e-beam 影像有 charging、hot pixel、掃描條紋 —— `mean/std` 是最脆
 | 2 ✅ | 儀表換成「這一顆的分布」；Spread 搬去 Results | ✅ 只多寫一份 meta | ❌ |
 | 3 | robust 預設（含 §5 的確認）| ✅ 小 | ⚠ 要先確認 |
 | 4 ✅ | §6 的三個旋鈕 + `glv_pixels` / `glv_ok` | ✅ 小 | ⚠ 特徵名多一個，見 §6.1 |
-| 5 | `reference` 維度取代 `method`（含遷移）| ✅ 中，動埠 | ❌（等價遷移）|
+| 5 ✅ | `reference` 維度取代 `method`（含遷移）| ✅ 中，動埠 | ❌（相對值的名字逐字不變）|
 | 6 | region set 聚合（RSEM）| ✅ 中 | ❌（只在多區域時改變）|
 
 ### 10.1 第 1 步實際做了什麼（2026-08-21）

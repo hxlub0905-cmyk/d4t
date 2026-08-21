@@ -237,28 +237,30 @@ def test_a_name_the_user_typed_is_not_taken_back(window):
 
 
 def test_a_role_region_port_is_still_replaced(window):
-    """Gray level 的 ``method="compare"`` 下，target / reference 是**角色**：
-    數量固定、接錯就算錯。
+    """「跟誰比」那一格是**角色**：一次只有一個答案，第二條線是**取代**。
 
-    往 target 再拉一條的意思是「改比別的」，不是「target 有兩個」。
+    往它再拉一條的意思是「改跟別的比」，不是「參照有兩個」。
 
-    （F16 之前這是獨立的 `roi_compare` 卡。合併之後這條測的東西一個字都沒變，
-    只是要先把 method 切到 compare —— 而那正是「兩種接線方式不同時出現」。）
+    （F16 之前這是獨立的 `roi_compare` 卡，F16 併成 `method="compare"`，
+    F18 再變成 `reference` 那一格。這條測的東西一路上一個字都沒變 ——
+    變的只是那個角色埠現在叫什麼、以及它什麼時候才長出來。）
     """
+    from d4t.core.steps.glv_stats import REF_REGION
+
     src = first_source(window, "load_single")
     gds = window.add_card_after(src, "roi_from_mask")
     cmp_ = window.add_card_after(gds, "glv_stats")
-    window.model.set_param(cmp_, "method", "compare")
+    window.model.set_param(cmp_, "reference", REF_REGION)
     window._on_edge_added(src, gds, "single", "source")
     window.model.set_param(gds, "layers", "1:epi, 2:mg")
-    window._on_edge_added(src, cmp_, "single", "target_source")
+    window._on_edge_added(src, cmp_, "single", "source")
 
-    window._on_edge_added(gds, cmp_, "epi", "target_region")
-    window._on_edge_added(gds, cmp_, "mg", "target_region")
-    assert window.model.nodes[cmp_].params["target_region"] == "mg"
+    window._on_edge_added(gds, cmp_, "epi", "reference_region")
+    window._on_edge_added(gds, cmp_, "mg", "reference_region")
+    assert window.model.nodes[cmp_].params["reference_region"] == "mg"
     lines = [ln for ln in window.model.region_lines()
-             if ln[1] == cmp_ and ln[3] == "target_region"]
-    assert lines == [(gds, cmp_, "mg", "target_region")], "舊線沒有跟著消失"
+             if ln[1] == cmp_ and ln[3] == "reference_region"]
+    assert lines == [(gds, cmp_, "mg", "reference_region")], "舊線沒有跟著消失"
 
 
 def test_a_region_goes_in_one_side_and_out_the_other(window):

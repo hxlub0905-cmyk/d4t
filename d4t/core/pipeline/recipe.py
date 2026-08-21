@@ -504,6 +504,69 @@ def _migrate_roi_compare_into_glv_stats(nodes: Dict[str, "RecipeNode"]) -> None:
                                 enabled=node.enabled)
 
 
+def _migrate_compare_method_into_reference(nodes: Dict[str, "RecipeNode"]) -> None:
+    """``glv_stats`` 的 ``method="compare"`` → ``reference`` 那一格（F18 第 5 步）。
+
+    使用者 2026-08-21 定調把 ``compare`` 併進「跟誰比」這個維度：**絕對值永遠
+    吐，相對值疊在上面**。舊的二選一最實際的坑是 ``compare`` 從不輸出絕對值，
+    所以「這塊 EPI 的平均灰階是 120」跟「它比隔壁亮 12」不能在同一張卡上同時
+    得到 —— 使用者得放兩張卡、接兩次線，而那兩張各自有機會設得不一樣。
+
+    對照：
+
+    ======================  ==========================================
+    舊                      新
+    ======================  ==========================================
+    ``target_source``       ``source``（本來就是這張卡在量的那條流）
+    ``target_region``       ``roi``
+    ``reference_source``    ``reference_source``（兩條流不同時才有意義）
+    ``reference_region``    ``reference_region``
+    ``stat``                ``stat`` ＋ ``metrics``（絕對值現在也吐）
+    ======================  ==========================================
+
+    ``metrics`` 補成 ``stat``：舊卡片用那個統計量代表每一塊，所以「它的絕對值」
+    正是使用者心裡的那個數字。**相對值的名字逐字不變**（``<prefix>_delta``）——
+    那是舊 recipe 的分數表達式不必改寫的前提。
+
+    判準是「**舊東西在不在**」（鐵則 9）：``method`` 這個鍵還在，而且是
+    ``compare``。做完把它刪掉，所以 ``to_json_dict → from_json_dict`` 走第二次
+    時什麼都不會發生（identity）—— `run_batch` 送 recipe 進 worker 走的正是那
+    條路，它一旦不是 identity，``workers=1`` 與 ``workers=2`` 會算出不同的分數。
+    """
+    for nid, node in list(nodes.items()):
+        if node.step != "glv_stats":
+            continue
+        params = dict(node.params)
+        method = str(params.pop("method", "") or "").strip()
+        if not method:
+            continue                      # 新 recipe：沒有這個鍵，什麼都不做
+        if method != "compare":
+            nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
+                                    enabled=node.enabled)
+            continue                      # ``stats`` 就是現在的預設行為
+        target_source = str(params.pop("target_source", "") or "test").strip()
+        ref_source = str(params.pop("reference_source", "") or "").strip()
+        ref_region = str(params.pop("reference_region", "") or "").strip()
+        params["source"] = target_source
+        params["roi"] = str(params.pop("target_region", "") or "").strip()
+        # 兩邊同一條流 = 「跟同一張圖上的另一塊比」；不同 = 「跟另一條流比」。
+        # 這個判斷用的是**舊參數的值**，不是猜的。
+        if ref_source and ref_source != target_source:
+            params["reference"] = "another stream"
+            params["reference_source"] = ref_source
+            if ref_region:
+                # 舊卡片允許「另一條流上的**另一塊**」。新的那一格是「同一塊、
+                # 另一條流」—— 兩者不同時，區域那一格才是使用者真正挑的東西，
+                # 所以以它為準（跟著它走比較不會算出別的數字）。
+                params["roi"] = ref_region if not params["roi"] else params["roi"]
+        else:
+            params["reference"] = "another region"
+            params["reference_region"] = ref_region
+        params.setdefault("metrics", str(params.get("stat", "") or "glv_mean"))
+        nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
+                                enabled=node.enabled)
+
+
 def _migrate_renamed_features(score: "ScoreSpec") -> "ScoreSpec":
     """分數表達式裡的舊 feature 名換成新的。
 
@@ -729,6 +792,9 @@ class Recipe:
         _migrate_renamed_cards(nodes)
         # 兩張 GLV 卡收成一張的兩個 method（F16）。
         _migrate_roi_compare_into_glv_stats(nodes)
+        # 順序要緊：上面那一道會產生 ``method="compare"``，這一道再把它變成
+        # ``reference``。反過來的話 roi_compare 的節點會漏掉第二段。
+        _migrate_compare_method_into_reference(nodes)
         score = _migrate_renamed_features(score)
         # ⚠ **撞名前綴那一道遷移不在這裡**（`_migrate_rescued_feature_names`）。
         # 它住在 :meth:`load` —— 理由見那一支的說明：這裡是「重建一個物件」，
