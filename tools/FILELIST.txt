@@ -5,7 +5,7 @@ a6b298c38249d1758d17f7780df10626e05c809d .gitignore
 dc5d3e24d36ca139df3d9ccac1034075e7698f6e AGENTS.md
 a26fc55c97b3da895209a321f467a0f7ee8a3542 CLAUDE.md
 b20e9b7f31aa8195e297b4a124b69252cd4c56cf README.md
-de94a4720c409c8f3c69374a0882888017c00ed1 SESSION_LOG.md
+c16f8d1642caf6ecf85f5cc3656de33c373053ce SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 e52e68d42e36aaf1de491a50d51affa9c86db540 d4t/__main__.py
@@ -86,7 +86,7 @@ a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
 3ae1ab8a3277cd505874be9e502926b8a5807fcb d4t/ui/canvas.py
 3b58b7e078d58ad84a8939734b65952a75a029f3 d4t/ui/cell_canvas.py
 511288a738743288b669fedb83036486a25fc673 d4t/ui/gallery.py
-42b0f5038940d80615a89ef93a61d3076a657dbe d4t/ui/inspectors.py
+3c56fbbd04fdb7814838100cbd0f58b7ee6d2d08 d4t/ui/inspectors.py
 68e6ac894866da63ca055b9082523ffb89656702 d4t/ui/region_check.py
 cc73ee4493625b81df5d6d9eec7c12128d0eda12 d4t/ui/results.py
 e3248e389f47ff9a0f8b911de3f2ef58c4bf9208 d4t/ui/scope.py
@@ -103,12 +103,12 @@ ffb40bc7e7d8fbac0d7c9402064fe639d1a41740 docs/GLAS-INTERFACE.md
 2392b569d39a556942221eaec6aa8b437a42a199 docs/HANDOVER.md
 160ffb5f501ade00ca2bf417133ef49c3d2e09b1 docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
-657151651cf6d0eca2afd0c7e39dd457f12f053d docs/PITFALLS.md
+70a36d8a077d9ea6f922b17457c13e3fdb2613ec docs/PITFALLS.md
 887f4cbe8397dec23ba9656ff760528f4c7c5569 docs/ROADMAP.md
 f6378d9ba391a4e1e3ef7ed855c7694b6b7f50b9 docs/plans/F0-master-plan.md
 d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 c4f06765ad918545511da042eb8d2b63df19795f docs/plans/F15-pair-sources.md
-99aa334a8f070a233094fbfbf18130ba9faa4fec docs/plans/F19-cd.md
+a1bfb41fcd7601224e14ccf936d07af31b033c08 docs/plans/F19-cd.md
 773d4c5652e1abd95b7bf06591a691c07c1c9fa1 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -216,7 +216,7 @@ fcd1e48c4e17fa1ec6699b9ef3efc16298adedf8 tests/test_ui_f13_layout.py
 74d93d285e3309dc7aa42147ab754045d006c19f tests/test_ui_f15_pair_source.py
 6c3b80a9fafb778887978e9322044d3e1e224a2e tests/test_ui_f16_run_all.py
 0f67a345d22df53300395cdd9542c27a9578cf1a tests/test_ui_f16_stages.py
-5ff64263a9633b7f30a637052eb80bf2fab5ed3e tests/test_ui_f19_cd.py
+e90a73f4c7389ca133e9fd28a85a86aebe4f0a51 tests/test_ui_f19_cd.py
 96614052cb62c64c136380faaa466cdba0a4d759 tests/test_ui_f7_10_route_edges.py
 614330562a47a9d3792982af350231abed883867 tests/test_ui_f7_11_roi.py
 b3bcc7956841e98b5cd4ad05bfddefbe1da58fcf tests/test_ui_f7_12_template.py

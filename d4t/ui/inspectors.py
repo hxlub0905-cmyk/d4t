@@ -1807,10 +1807,20 @@ class CdInspector(Inspector):
     PROFILE_MARGIN = 1.1
     #: 圖底下那一行「尺有多長」的字佔多高 —— **畫圖之前要先扣掉它**。
     SCALE_ROW = 14.0
+    #: 一次畫幾個區域。面板不高，四列以上每一列的曲線就只剩幾個畫素
+    #: （跟 `GlvInspector.MAX_ROWS` 同一個理由、同一個數字）。
+    MAX_ROWS = 3
+    #: 兩列之間留多少（分隔線畫在正中間）。
+    ROW_GAP = 8.0
 
     # -- 資料 ---------------------------------------------------------------
     def notes(self) -> List[Dict[str, Any]]:
-        """這張卡在這一顆上留下的每一份（一條流 × 一個區域一份）。"""
+        """這張卡在這一顆上留下的每一份（一條流 × 一個區域一份）。
+
+        **順序跟接線的順序一樣**（``region_index``），不是照名字排序 ——
+        面板一列一個區域、而顏色是照 ``region_index`` 給的，照名字排的話
+        "top,bot" 會畫成「橘的在上、綠的在下」，跟影像上的框反過來。
+        """
         raw = self.meta.get("cd")
         if not isinstance(raw, dict):
             return []
@@ -1819,6 +1829,8 @@ class CdInspector(Inspector):
             note = raw[prefix]
             if isinstance(note, dict):
                 out.append(dict(note, prefix=str(prefix)))
+        out.sort(key=lambda n: (int(n.get("region_index", 0) or 0),
+                                str(n.get("prefix", ""))))
         return out
 
     def note(self) -> Optional[Dict[str, Any]]:
@@ -1840,10 +1852,16 @@ class CdInspector(Inspector):
         return "%s @ %s" % (region, stream) if stream else region
 
     def tab_title(self) -> str:                # noqa: D102
-        note = self.note()
-        return "CD" if note is None else "CD · %s" % self.where()
+        notes = self.notes()
+        if not notes:
+            return "CD"
+        if len(notes) > 1:
+            # 面板現在**每一個區域都畫**，所以標題不能只叫其中一個的名字
+            # （`GlvInspector.tab_title` 同一句話、同一個理由）。
+            return "CD · %d regions" % len(notes)
+        return "CD · %s" % self.where()
 
-    def colour(self) -> str:
+    def colour(self, note: Optional[Dict[str, Any]] = None) -> str:
         """這一份要畫成什麼顏色 —— **跟影像上那個區域的框同一個**。
 
         既有的規矩（`GlvInspector._colour` 立下的）：一個具名區域一個顏色，
@@ -1856,12 +1874,12 @@ class CdInspector(Inspector):
         兩邊各數各的話，"top,bot" 在一邊是 0/1、在另一邊（照名字排序）是 1/0，
         而**顏色指錯區域比沒有顏色糟得多**。
         """
-        note = self.note() or {}
+        note = (self.note() if note is None else note) or {}
         return region_hex(int(note.get("region_index", 0) or 0))
 
-    def is_blob(self) -> bool:
+    def is_blob(self, note: Optional[Dict[str, Any]] = None) -> bool:
         """這一顆走的是無方向那一支嗎（F19 第二批）。"""
-        note = self.note() or {}
+        note = (self.note() if note is None else note) or {}
         return str(note.get("shape")) == "blob"
 
     def tab_tooltip(self) -> str:              # noqa: D102
@@ -1876,7 +1894,20 @@ class CdInspector(Inspector):
                    note.get("target_used") or note.get("target", "?")))
 
     def summary(self) -> str:                  # noqa: D102
-        note = self.note()
+        """一行 —— 接了幾個區域就講幾個，各自冠上自己的名字。
+
+        以前這裡只講第一個、後面補一句 ``+N more``，而「+1 more」說不出那一個
+        是量到了還是量不到 —— 面板既然每一列都畫了，這一行也要每一個都講。
+        """
+        notes = self.notes()
+        if len(notes) > 1:
+            return "  |  ".join(
+                "%s: %s" % (n.get("region") or "whole image", self._one_summary(n))
+                for n in notes[:self.MAX_ROWS])
+        return self._one_summary(notes[0]) if notes else ""
+
+    def _one_summary(self, note: Dict[str, Any]) -> str:
+        """一個區域那一段（多區域的時候會冠上區域名，見 :meth:`summary`）。"""
         if note is None:
             return ""
         if str(note.get("shape")) == "blob":
@@ -1894,10 +1925,7 @@ class CdInspector(Inspector):
         bits = ["CD %.2f px" % med, "sigma %.2f" % sd,
                 "%d/%d lines" % (n, total),
                 str(note.get("criterion") or ""), str(note.get("axis") or "")]
-        extra = ""
-        if len(self.notes()) > 1:
-            extra = "  ·  +%d more" % (len(self.notes()) - 1)
-        return "  ·  ".join([b for b in bits if b]) + extra
+        return "  ·  ".join([b for b in bits if b])
 
     def _blob_summary(self, note: Dict[str, Any]) -> str:
         """團那一支的一行。失敗時講**為什麼**，成功時講量到什麼與可不可信。"""
@@ -1915,20 +1943,53 @@ class CdInspector(Inspector):
                         % int(note.get("pieces", 1)))
         if note.get("touches_edge"):
             bits.append("⚠ touches the edge — a lower bound")
-        if len(self.notes()) > 1:
-            bits.append("+%d more" % (len(self.notes()) - 1))
         return "  ·  ".join(bits)
 
     # -- 畫 -----------------------------------------------------------------
     def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
-        note = self.note()
-        if note is None:
+        """**接了幾個區域就畫幾列**（每列一個顏色）。
+
+        以前這裡只畫 ``notes()[0]``，而那一份是**照名字排序**的第一個 ——
+        於是接兩個區域的時候，影像上兩塊都畫了標記，面板卻只講其中一塊，
+        而且沒有任何東西說得出另一塊去了哪。最糟的形狀是那一塊剛好量不到：
+        圖上的輪廓在 B 區、面板卻在講 A 區的「什麼都沒有」。
+
+        `GlvInspector` 早就是這樣畫的（一塊區域一條分布），這裡只是跟上。
+        """
+        notes = self.notes()
+        if not notes:
             self._say_empty(p, rect)
             return
+        shown = notes[:self.MAX_ROWS]
+        row_h = rect.height() / float(len(shown))
+        for i, note in enumerate(shown):
+            body = QRectF(rect.left(), rect.top() + i * row_h, rect.width(),
+                          row_h - (self.ROW_GAP if len(shown) > 1 else 0.0))
+            if i:
+                self._paint_row_divider(p, body.top() - self.ROW_GAP / 2.0, rect)
+            self._paint_one(p, body, note, first=(i == 0),
+                            solo=(len(shown) == 1))
+
+    def _paint_one(self, p: QPainter, rect: QRectF, note: Dict[str, Any],
+                   first: bool = True, solo: bool = True) -> None:
+        """一個區域那一列 —— 三格並排，跟以前一模一樣。
+
+        疊起來的時候**第一格的小標題換成區域名**（畫成那個區域的顏色）：
+        每一列因此自己說得出自己是誰，而顏色與名字是同一個地方講的。
+        第二、三格的小標題只畫在最上面那一列 —— 它們是**欄位名**，一列一份
+        只是噪音，而每一列本來就只有一百來個畫素高。
+        """
         gap = 10.0
         pw = rect.width() * self.PROFILE_W
         ww = rect.width() * self.WOBBLE_W
-        first = QRectF(rect.left(), rect.top(), pw, rect.height())
+        blob = self.is_blob(note)
+        head = (None if solo
+                else (str(note.get("region") or "whole image"),
+                      QColor(self.colour(note))))
+        firsts = (("Levels in this region" if blob else "Profile of one line")
+                  if solo else "")
+        others = (first or solo)
+        one = QRectF(rect.left(), rect.top(), pw, rect.height())
         second = QRectF(rect.left() + pw + gap, rect.top(), ww - gap,
                         rect.height())
         third = QRectF(rect.left() + pw + ww + gap, rect.top(),
@@ -1936,19 +1997,23 @@ class CdInspector(Inspector):
         # 三格之間各畫一條很淡的直線。**三張圖並排而沒有界線的話，眼睛會把
         # 隔壁那一格的線讀進來** —— 尤其中間那一格的橫軸跟左邊那一格完全不是
         # 同一件事（一個是灰階、一個是寬度）。
-        self._paint_divider(p, first.right() + gap / 2.0, rect)
+        self._paint_divider(p, one.right() + gap / 2.0, rect)
         self._paint_divider(p, second.right() + gap / 2.0, rect)
-        if self.is_blob():
+        if blob:
             # 直方圖 ＋ 判準那條線是剖面圖的**同義詞**：它一樣回答
             # 「為什麼是這個數字」。
-            self._paint_levels(p, first, note)
-            self._paint_outline(p, second, note)
+            self._paint_levels(p, one, note, caption=firsts, head=head)
+            self._paint_outline(p, second, note,
+                                caption="Outline" if others else "")
             self._paint_batch(p, third, note, name="cd_area_px",
-                              caption="Area across the batch")
+                              caption="Area across the batch" if others else "")
             return
-        self._paint_profile(p, first, note)
-        self._paint_wobble(p, second, note)
-        self._paint_batch(p, third, note)
+        self._paint_profile(p, one, note, caption=firsts, head=head)
+        self._paint_wobble(p, second, note,
+                           caption=("Each line · band = 1 sigma"
+                                    if others else ""))
+        self._paint_batch(p, third, note,
+                          caption="Across the batch" if others else "")
 
     @staticmethod
     def _paint_divider(p: QPainter, x: float, rect: QRectF) -> None:
@@ -1957,23 +2022,54 @@ class CdInspector(Inspector):
         p.setPen(pen)
         p.drawLine(QPointF(x, rect.top() + 2.0), QPointF(x, rect.bottom() - 2.0))
 
-    def _caption(self, p: QPainter, rect: QRectF, text: str) -> QRectF:
-        """小標題，回剩下可以畫的那一塊。"""
-        p.setPen(QColor(TOKENS["text_secondary"]))
-        p.drawText(QRectF(rect.left(), rect.top(), rect.width(), 13.0),
-                   Qt.AlignLeft | Qt.AlignVCenter, text)
-        return QRectF(rect.left(), rect.top() + 15.0, rect.width(),
-                      rect.height() - 15.0)
+    @staticmethod
+    def _paint_row_divider(p: QPainter, y: float, rect: QRectF) -> None:
+        """兩個區域之間那一條 —— 直的分隔線在列與列之間是連著的，
+        沒有這一條的話上下兩列讀起來像同一張圖被切成兩半。"""
+        pen = QPen(QColor(TOKENS["border_default"]), 1.0)
+        pen.setCosmetic(True)
+        p.setPen(pen)
+        p.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
 
-    def _paint_profile(self, p: QPainter, rect: QRectF,
-                       note: Dict[str, Any]) -> None:
+    def _caption(self, p: QPainter, rect: QRectF, text: str,
+                 head: Optional[Tuple[str, QColor]] = None) -> QRectF:
+        """小標題，回剩下可以畫的那一塊。
+
+        ``head`` 是「這一列是哪個區域」——畫在最前面、用那個區域的顏色。
+        給了 ``head`` 就一定佔一行（即使 ``text`` 是空的），因為那一行是這一列
+        的身分，不是裝飾。
+        """
+        if head is None and not text:
+            return rect
+        # ⚠ 這一行要**照字型自己的高度**留，不能寫死 13 px：區域名裡的底線畫在
+        # 基線底下，13 px 的框把它切掉，於是 ``band_a_center`` 在畫面上是
+        # 「band a center」—— 而那不是同一個名字（它在 CSV 上是有底線的那個）。
+        row = QRectF(rect.left(), rect.top(), rect.width(),
+                     max(13.0, QFontMetricsF(p.font()).height()))
+        if head is not None:
+            name, colour = head
+            p.setPen(QColor(colour))
+            p.drawText(row, Qt.AlignLeft | Qt.AlignVCenter, name)
+            used = QFontMetricsF(p.font()).horizontalAdvance(name) + 8.0
+            row = QRectF(row.left() + used, row.top(),
+                         max(0.0, row.width() - used), row.height())
+        if text:
+            p.setPen(QColor(TOKENS["text_secondary"]))
+            p.drawText(row, Qt.AlignLeft | Qt.AlignVCenter, text)
+        used = row.height() + 2.0
+        return QRectF(rect.left(), rect.top() + used, rect.width(),
+                      rect.height() - used)
+
+    def _paint_profile(self, p: QPainter, rect: QRectF, note: Dict[str, Any],
+                       caption: str = "Profile of one line",
+                       head: Optional[Tuple[str, QColor]] = None) -> None:
         """曲線 ＋ 判準那條橫線 ＋ 兩個交點 ＋ 中間標著量到多寬。
 
         **只畫量到的那一段前後**（見 :data:`PROFILE_MARGIN`），不是整條剖面。
         一張 128 px 的 patch 上有八個一模一樣的週期，整條畫出來的話那兩個交點
         淹在裡面 —— 而這一格的**唯一**工作就是「邊被判在哪」。
         """
-        body = self._caption(p, rect, "Profile of one line")
+        body = self._caption(p, rect, caption, head)
         prof = note.get("profile") or {}
         values = [float(v) for v in (prof.get("values") or [])]
         if len(values) < 3 or body.height() < 24:
@@ -1999,7 +2095,7 @@ class CdInspector(Inspector):
             pen = QPen(QColor(TOKENS["text_disabled"]), 1.0, Qt.DashLine)
             p.setPen(pen)
             p.drawLine(QPointF(body.left(), y), QPointF(body.right(), y))
-        p.setPen(QPen(QColor(self.colour()), 1.4))
+        p.setPen(QPen(QColor(self.colour(note)), 1.4))
         p.setBrush(Qt.NoBrush)
         p.drawPolyline(QPolygonF([at(i, values[i])
                                   for i in range(int(x0), int(x1) + 1)]))
@@ -2009,12 +2105,12 @@ class CdInspector(Inspector):
             return
         a, b = float(a), float(b)
         # 兩個交點：一條到底的點線 + 實心圓（「邊被判在這裡」）
-        p.setPen(QPen(QColor(self.colour()), 1.0, Qt.DotLine))
+        p.setPen(QPen(QColor(self.colour(note)), 1.0, Qt.DotLine))
         for x in (a, b):
             vx = at(x, hi).x()
             p.drawLine(QPointF(vx, body.top()), QPointF(vx, body.bottom()))
         p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(QColor(self.colour())))
+        p.setBrush(QBrush(QColor(self.colour(note))))
         for x in (a, b):
             centre = (level if level is not None
                       else values[max(0, min(n - 1, int(round(x))))])
@@ -2048,8 +2144,8 @@ class CdInspector(Inspector):
         x1 = int(min(n - 1, math.ceil(max(a, b) + pad)))
         return (0, n - 1) if x1 - x0 < 4 else (x0, x1)
 
-    def _paint_wobble(self, p: QPainter, rect: QRectF,
-                      note: Dict[str, Any]) -> None:
+    def _paint_wobble(self, p: QPainter, rect: QRectF, note: Dict[str, Any],
+                      caption: str = "Each line · band = 1 sigma") -> None:
         """每條線量到多寬 —— **粗糙度的圖**，縱軸是沿著結構的位置。
 
         一個 σ 說得出「有多不齊」，說不出「哪一段不齊」。頸縮在這張圖上是一個
@@ -2058,7 +2154,7 @@ class CdInspector(Inspector):
         # ⚠ 這一格只有兩百像素寬。第一版把「band = 1 sigma」跟範圍寫在同一行，
         # 於是畫出來是「85 - 25.76 px · band = 1 sig」—— **兩端都被截掉**，而
         # 被截掉的正好是最需要讀的那兩個數字。說明搬到標題（那裡寬得多）。
-        body = self._caption(p, rect, "Each line · band = 1 sigma")
+        body = self._caption(p, rect, caption)
         widths = [float(v) for v in (note.get("widths") or [])]
         if len(widths) < 2 or body.height() < 24:
             return
@@ -2085,7 +2181,7 @@ class CdInspector(Inspector):
         # ±σ 墊成一條淡帶：**沒有它，一條很齊的線跟一條很糙的線長得一樣**
         # （橫軸是自動縮放的，3 px 的散布也會撐滿整格）。
         if sd > 0:
-            band = QColor(self.colour())
+            band = QColor(self.colour(note))
             band.setAlpha(38)
             p.setPen(Qt.NoPen)
             p.setBrush(QBrush(band))
@@ -2097,7 +2193,7 @@ class CdInspector(Inspector):
         p.setPen(QPen(QColor(TOKENS["text_disabled"]), 1.0, Qt.DashLine))
         p.drawLine(QPointF(at(med, 0).x(), plot.top()),
                    QPointF(at(med, 0).x(), plot.bottom()))
-        p.setPen(QPen(QColor(self.colour()), 1.2))
+        p.setPen(QPen(QColor(self.colour(note)), 1.2))
         p.setBrush(Qt.NoBrush)
         p.drawPolyline(QPolygonF([at(v, i) for i, v in enumerate(widths)]))
         p.setPen(QColor(TOKENS["text_secondary"]))
@@ -2106,14 +2202,15 @@ class CdInspector(Inspector):
                    Qt.AlignHCenter | Qt.AlignVCenter,
                    "%.1f - %.1f px" % (min(widths), max(widths)))
 
-    def _paint_levels(self, p: QPainter, rect: QRectF,
-                      note: Dict[str, Any]) -> None:
+    def _paint_levels(self, p: QPainter, rect: QRectF, note: Dict[str, Any],
+                      caption: str = "Levels in this region",
+                      head: Optional[Tuple[str, QColor]] = None) -> None:
         """區域的灰階直方圖 ＋ 判準那條線 —— **剖面圖的同義詞**。
 
         它回答的是同一個問題：**為什麼是這個數字**。門檻切在直方圖的哪裡看得
         見，所以「切太多／切太少」不必先跑一批才發現。
         """
-        body = self._caption(p, rect, "Levels in this region")
+        body = self._caption(p, rect, caption, head)
         hist = note.get("hist") or {}
         counts = [max(0, int(c)) for c in (hist.get("counts") or [])]
         if not counts or body.height() < 24:
@@ -2127,7 +2224,7 @@ class CdInspector(Inspector):
         heights = [math.log1p(c) for c in counts]
         peak = max(heights) or 1.0
         bw = body.width() / float(len(counts))
-        faint = QColor(self.colour())
+        faint = QColor(self.colour(note))
         faint.setAlpha(110)
         p.setPen(Qt.NoPen)
         p.setBrush(QBrush(faint))
@@ -2147,7 +2244,7 @@ class CdInspector(Inspector):
             x = at(note[key])
             p.drawLine(QPointF(x, body.top()), QPointF(x, body.bottom()))
         if note.get("level") is not None:
-            p.setPen(QPen(QColor(self.colour()), 1.6))
+            p.setPen(QPen(QColor(self.colour(note)), 1.6))
             x = at(note["level"])
             p.drawLine(QPointF(x, body.top()), QPointF(x, body.bottom()))
         # ⚠ 這裡**不要**再印一次面積。第一版把 ``area %d px`` 右對齊在這一格的
@@ -2157,14 +2254,14 @@ class CdInspector(Inspector):
         #  寫著「area 0 px」，而 0 是一個看起來很像答案的答案 —— 這張卡的
         #  規矩 3，截圖時才看到自己犯了它。）
 
-    def _paint_outline(self, p: QPainter, rect: QRectF,
-                       note: Dict[str, Any]) -> None:
+    def _paint_outline(self, p: QPainter, rect: QRectF, note: Dict[str, Any],
+                       caption: str = "Outline") -> None:
         """那一團的輪廓與最長的弦 —— 面板上這一格回答「形狀長什麼樣」。
 
         座標是**整張影像**的正規化座標，所以這裡先縮到輪廓自己的框上；
         **等比例**縮（不要拉伸），不然一條細棒會被畫成一團圓的。
         """
-        body = self._caption(p, rect, "Outline")
+        body = self._caption(p, rect, caption)
         pts = [(float(x), float(y)) for x, y in (note.get("outline") or [])]
         if len(pts) < 3 or body.height() < 24:
             if body.height() >= 24:
@@ -2183,15 +2280,15 @@ class CdInspector(Inspector):
         def at(pt) -> QPointF:
             return QPointF(ox + pt[0] * scale, oy + pt[1] * scale)
 
-        fill = QColor(self.colour())
+        fill = QColor(self.colour(note))
         fill.setAlpha(60)
-        p.setPen(QPen(QColor(self.colour()), 1.3))
+        p.setPen(QPen(QColor(self.colour(note)), 1.3))
         p.setBrush(QBrush(fill))
         p.drawPolygon(QPolygonF([at(pt) for pt in pts]))
         p.setBrush(Qt.NoBrush)
         chord = [(float(x), float(y)) for x, y in (note.get("chord") or [])]
         if len(chord) == 2:
-            p.setPen(QPen(QColor(self.colour()), 1.6))
+            p.setPen(QPen(QColor(self.colour(note)), 1.6))
             p.drawLine(at(chord[0]), at(chord[1]))
 
     def _paint_batch(self, p: QPainter, rect: QRectF, note: Dict[str, Any],
@@ -2222,7 +2319,7 @@ class CdInspector(Inspector):
         peak = max(bins) or 1
         bw = plot.width() / 20.0
         p.setPen(Qt.NoPen)
-        faint = QColor(self.colour())
+        faint = QColor(self.colour(note))
         faint.setAlpha(110)
         p.setBrush(QBrush(faint))
         for i, c in enumerate(bins):

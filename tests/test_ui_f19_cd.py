@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QRectF
+from PySide6.QtGui import QColor
 
 import d4t.core.steps  # noqa: F401 — registration side-effect
 from d4t.core.pipeline.context import Context
@@ -116,6 +118,33 @@ def make_panel(qapp, ctx, params, batch=None):
                      batch=batch or [], meta=dict(ctx.meta),
                      feature_names=list(cls.resolve_features(params)))
     return insp
+
+
+
+def paint_calls(insp):
+    """把面板畫進一張離屏圖，回它畫了幾列（`_paint_one` 被呼叫幾次）。
+
+    數呼叫次數而不是數畫素：畫素會隨字型與抗鋸齒漂，而這裡要問的是**結構**
+    （幾個區域就幾列）。
+    """
+    from PySide6.QtGui import QPainter, QPixmap
+
+    seen = []
+    real = insp._paint_one
+
+    def spy(p, rect, note, **kw):
+        seen.append(str(note.get("region") or ""))
+        return real(p, rect, note, **kw)
+
+    insp._paint_one = spy
+    pm = QPixmap(800, 260)
+    painter = QPainter(pm)
+    try:
+        insp.paint_body(painter, QRectF(0, 0, 800, 260))
+    finally:
+        painter.end()
+        insp._paint_one = real
+    return {"rows": len(seen), "regions": seen}
 
 
 def test_the_panel_has_something_before_you_run_a_batch(qapp):
@@ -519,3 +548,104 @@ def test_marks_without_labels_still_draw(qapp):
     view.set_marks([[(0.0, 0.2), (1.0, 0.2)]], [[(0.3, 0.2), (0.7, 0.2)]], 0)
     assert view.mark_count() == 1
     assert view.mark_legend() == []
+
+
+# --------------------------------------------------------------------------- #
+# 接了幾個區域，面板就畫幾列
+# --------------------------------------------------------------------------- #
+def two_regions(qapp, shape=None, batch=None):
+    """兩個區域跑一次，回面板。上面那一塊量得到、下面那一塊量不到。"""
+    cls = REGISTRY["cd_measure"]
+    p = cls.validate_params(dict({"roi": "top,bot"},
+                                 **({"shape": shape} if shape else {})))
+    img = line_block(rows=64, width=12.0, blur=1.2).astype(np.float32)
+    img[40:, :] = 0.0                       # 下面那一塊什麼都沒有
+    ctx = Context(images={"test": img})
+    ctx.set_roi("top", (0.0, 4 / 64.0, 1.0, 12 / 64.0))
+    ctx.set_roi("bot", (0.0, 40 / 64.0, 1.0, 20 / 64.0))
+    return make_panel(qapp, cls().run(ctx, p), p, batch=batch)
+
+
+def test_the_panel_draws_every_region_not_just_the_first(qapp):
+    """以前只畫 ``notes()[0]``，而那是**照名字排序**的第一個 —— 於是影像上
+    兩塊都有標記、面板卻只講其中一塊，另一塊去了哪畫面上沒有任何線索。
+
+    最糟的形狀是被留下的那一塊剛好量不到：圖上的輪廓在 B 區、面板在講 A 區的
+    「什麼都沒有」。這裡就是那個形狀（``bot`` 是空的）。
+    """
+    insp = two_regions(qapp)
+    assert len(insp.notes()) == 2
+    drawn = paint_calls(insp)
+    # 一個區域一列，而且每一列都畫過東西
+    assert drawn["rows"] == 2
+    assert insp.tab_title() == "CD · 2 regions"
+
+
+def test_each_row_is_its_own_region_colour(qapp):
+    """兩列的顏色就是那兩塊區域在影像上的框的顏色（`region_hex` 同一組）。"""
+    from d4t.ui.theme import region_hex
+
+    insp = two_regions(qapp)
+    got = [insp.colour(n) for n in insp.notes()]
+    assert got == [region_hex(0), region_hex(1)]
+    # 一列一個顏色 —— 兩列同色的話，畫面上分不出哪一條曲線是哪一塊
+    assert len(set(got)) == 2
+
+
+def test_the_summary_line_names_every_region(qapp):
+    """「+1 more」說不出那一個是量到了還是量不到 —— 面板每一列都畫了，
+    這一行也要每一個都講。"""
+    insp = two_regions(qapp)
+    said = insp.summary()
+    assert "top:" in said and "bot:" in said
+    assert "more" not in said
+    # 而且講得出「那一塊沒有」
+    assert "no width here" in said
+
+
+def test_one_region_still_reads_exactly_as_before(qapp):
+    """一個區域的時候標題還是區域名、小標題還是那三句話 —— 疊列的機制
+    不能讓最常見的那個情況變複雜。"""
+    ctx, p = measured()
+    insp = make_panel(qapp, ctx, p)
+    assert insp.tab_title().startswith("CD · ")
+    assert "regions" not in insp.tab_title()
+    assert ":" not in insp.summary().split("·")[0]     # 沒有冠上區域名
+
+
+def test_too_many_regions_stop_at_max_rows(qapp):
+    """面板不高。四列以上每一列的曲線就只剩幾個畫素（`GlvInspector.MAX_ROWS`
+    同一個理由）—— 多的不畫，而不是每一列都畫不清楚。"""
+    insp = two_regions(qapp)
+    one = insp.notes()[0]
+    insp.meta = {"cd": {k: dict(one, region_index=i)
+                        for i, k in enumerate("abcde")}}
+    assert len(insp.notes()) == 5
+    assert paint_calls(insp)["rows"] == insp.MAX_ROWS
+
+
+def test_the_row_label_keeps_its_underscores(qapp):
+    """區域名畫在一個**照字型高度**留的行裡。寫死 13 px 的話底線被切掉，
+    ``band_a_center`` 在畫面上變成「band a center」—— 那不是同一個名字
+    （CSV 上的欄名是有底線的那個）。"""
+    from PySide6.QtGui import QFontMetricsF, QPainter, QPixmap
+
+    insp = two_regions(qapp)
+    pm = QPixmap(600, 200)
+    p = QPainter(pm)
+    try:
+        rect = QRectF(0, 0, 600, 200)
+        body = insp._caption(p, rect, "", ("band_a_center", QColor("#5fd0a0")))
+        used = rect.height() - body.height()
+        assert used >= QFontMetricsF(p.font()).height()
+    finally:
+        p.end()
+
+
+def test_rows_follow_the_wiring_order_not_the_alphabet(qapp):
+    """"top,bot" 接進來的順序是 top 先，而顏色是照那個順序給的。照名字排的話
+    面板會是「橘的在上、綠的在下」，跟影像上的框正好相反 —— 而使用者是拿
+    顏色在兩邊之間認位置的。"""
+    insp = two_regions(qapp)
+    assert [n["region"] for n in insp.notes()] == ["top", "bot"]
+    assert paint_calls(insp)["regions"] == ["top", "bot"]
