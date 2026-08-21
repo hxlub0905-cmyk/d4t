@@ -297,78 +297,56 @@ def test_snr_map_planted_much_higher_than_clean():
 
 
 # ---------------------------------------------------------------- cd_measure
-
-def _cd_ctx(nm_per_px=None):
-    """一張含 10×20 矩形的 diff，外加一個框住它的具名 ROI。
-
-    ROI 以前是 ``blob_segment`` 自動找出來的，那張卡在 F8 第五輪被拿掉了
-    （ROI 只留 Profile / Template / GDS）。``cd_measure`` 現在量的是**你指給它
-    的那個區域** —— 所以測試自己把區域放進去，量的東西一模一樣。
-    """
-    diff = np.zeros((128, 128), dtype=np.float32)
-    diff[50:70, 50:60] = 80.0                           # 10 寬 × 20 高矩形
-    meta = {} if nm_per_px is None else {"nm_per_px": nm_per_px}
-    ctx = Context(images={"diff": diff}, meta=meta)
-    ctx.set_roi("spot", (50 / 128.0, 50 / 128.0, 10 / 128.0, 20 / 128.0))
-    return ctx
-
-
-def test_cd_measure_reports_pixels_when_nobody_says_how_big_a_pixel_is():
-    """**沒填 nm/px 就一個 `_nm` 都不要有**（2026-07-30 的決定，仍然成立）。
-
-    以前這張卡在沒有 ``nm_per_px`` 時照樣吐三個 0（``cd_x_nm`` / ``cd_y_nm`` /
-    ``area_nm2``），而 ``nm_per_px`` 那時候**沒有來源**，所以那三個 0 是每一顆
-    的常態 —— 它們進得了分數表達式、也寫得進 DSIZE 欄。0 是個看起來很像答案
-    的答案。
-    """
-    ctx = _cd_ctx()
-    run_step("cd_measure", ctx, roi="spot")
-    assert ctx.features["cd_x_px"] == 10.0
-    assert ctx.features["cd_y_px"] == 20.0
-    assert ctx.features["area_px"] == 200.0            # blob 的真實像素面積
-    assert not [k for k in ctx.features if k.endswith(("_nm", "_nm2"))]
-    assert not [w for w in ctx.meta.get("warnings", []) if "nm_per_px" in w]
+#
+# CD 那張卡在 F19 整張重做了（bbox → 一堆量測線）。它自己的測試在
+# `tests/test_cd_measure.py`（量得準、失敗說了什麼、meta 畫得出來），演算法在
+# `tests/test_algo_edge.py`。這裡只留**跨卡片共用的那一件事**：nm 那一份。
 
 
 def test_a_pixel_size_adds_the_nm_numbers_beside_the_pixel_ones():
-    """2026-08-20：那個來源出現了 —— 使用者在 Load 卡上填的那一格。
+    """填了 nm/px 就**多一組**，不是換掉（2026-08-20 的決定，F19 之後仍然成立）。
 
-    所以上一條測試的理由（「沒有來源，所以每一顆都是 0」）沒有被推翻，是被
-    **補完**了。而補的方式是**多一組**不是換掉：同一個特徵名在不同資料上是
-    不同單位的話，``score = cd_x > 50`` 這一行會在填了 nm/px 之後意思整個改變
-    —— recipe 沒改、資料沒改、bin 卻不一樣，而 CSV 上看不出來。
+    同一個特徵名在不同資料上是不同單位的話，``score = cd_median > 50`` 這一行
+    會在填了 nm/px 之後意思整個改變 —— recipe 沒改、資料沒改、bin 卻不一樣，
+    而 CSV 上看不出來。所以名字自己帶著單位。
     """
-    ctx = _cd_ctx(nm_per_px=2.5)
-    run_step("cd_measure", ctx, roi="spot")
-    # pixel 那一份**一個字都沒變**
-    assert ctx.features["cd_x_px"] == 10.0
-    assert ctx.features["cd_y_px"] == 20.0
-    assert ctx.features["area_px"] == 200.0
-    # nm 那一份：長度乘一次，**面積乘平方**
-    assert ctx.features["cd_x_nm"] == 25.0
-    assert ctx.features["cd_y_nm"] == 50.0
-    assert ctx.features["area_nm2"] == 200.0 * 2.5 * 2.5
-    assert sorted(ctx.features) == ["area_nm2", "area_px", "cd_x_nm", "cd_x_px",
-                                    "cd_y_nm", "cd_y_px"]
+    from tests.test_algo_edge import line_block
+
+    def run(nm_per_px):
+        ctx = Context(images={"test": line_block(rows=24, width=12.0,
+                                                 blur=1.2).astype(np.float32)},
+                      meta=({} if nm_per_px is None
+                            else {"nm_per_px": nm_per_px}))
+        run_step("cd_measure", ctx, report="cd_median,cd_std")
+        return ctx.features
+
+    off = run(None)
+    assert not [k for k in off if k.endswith(("_nm", "_nm2"))]
+
+    on = run(2.5)
+    assert on["cd_median"] == off["cd_median"]          # pixel 那一份沒變
+    assert on["cd_median_nm"] == pytest.approx(off["cd_median"] * 2.5)
+    assert on["cd_std_nm"] == pytest.approx(off["cd_std"] * 2.5)
+    # 條數與角度**不是長度**，不該有 nm 版本
+    for name in ("cd_n", "cd_lines", "cd_axis_deg", "cd_edge_score"):
+        assert name + "_nm" not in on
 
 
-def test_cd_measure_can_target_a_named_region():
-    """F7-4：CD 也可以量使用者畫的框，不再只能吃 meta['blobs']。"""
-    img = np.zeros((64, 64), np.float32)
-    ctx = Context(images={"diff": img})
-    _centre_roi(ctx, "mid", 20, key="diff")
-    run_step("cd_measure", ctx, roi="mid")
-    assert ctx.features["cd_x_px"] == 20.0
-    assert ctx.features["cd_y_px"] == 20.0
+def test_area_still_converts_with_the_square_even_though_nobody_produces_one():
+    """⚠ ``AREA_FEATURES`` 現在**一個生產者都沒有** —— 不要當死碼清掉。
 
+    CD 重做之後不吐面積了（舊的 ``area_px`` 是「框的寬 × 高」，不是任何東西的
+    面積）。真正的面積跟著 F19 第二批的無方向那一支進來（Feret／等效直徑／
+    真實覆蓋面積），而那一支就會用到這條乘平方的規則。
 
-def test_cd_measure_subpixel_refine_and_fallbacks():
-    ctx = _cd_ctx(nm_per_px=1.0)
-    run_step("cd_measure", ctx, roi="spot", refine="subpixel")
-    assert ctx.features["cd_y_px"] == pytest.approx(20.0, abs=2.0)
-    assert ctx.features["cd_x_px"] == 10.0              # X 仍是 bbox（M1 簡化）
+    這正是 `period.py` 那種模組被順手刪掉的形狀，所以這裡留一支測試釘住規則
+    本身：長度乘一次、面積乘平方。
+    """
+    from d4t.core.steps._util import nm_twins
 
-
+    assert nm_twins({"area_px": 4.0}, 2.0) == {"area_nm2": 16.0}
+    assert nm_twins({"cd_median": 4.0}, 2.0) == {"cd_median_nm": 8.0}
+    assert nm_twins({"area_px": 4.0}, 0.0) == {}        # 沒填就一個都不配
 
 
 def _centre_roi(ctx, name: str, size: int, key: str = "test") -> None:

@@ -495,7 +495,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_ex.add_argument("--bin-col", default=None, help="inplace：bin 寫進哪個 bin 欄（例 ROUGHBINNUMBER）")
     p_ex.add_argument("--size-col", default=None, help="inplace：CD 寫進哪個尺寸欄（例 DSIZE）")
     p_ex.add_argument("--size-feature", default=None,
-                      help="inplace：尺寸欄寫哪個特徵（預設 cd_x_px）")
+                      help="inplace：尺寸欄寫哪個特徵（預設 cd_median）")
     p_ex.add_argument("--size-scale", type=float, default=None,
                       help="inplace：尺寸值寫進去之前乘上的係數。量測全是 pixel，"
                            "要寫 nm 就填 nm/px（預設 1 = 原樣寫 pixel）")

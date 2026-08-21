@@ -22,4 +22,8 @@ from .glv import glv_value, glv_stats, default_metrics, roi_patch, group_snr, pi
 from .period import estimate_period, PeriodResult
 from .golden import tile_coords, stack_cells, ghosting_score, refine_period, candidate_periods
 from .quality import check_lap_quality, compute_quality, DEFAULT_LAP_THRESHOLD
+from .edge import (
+    EdgePoint, ScanLine, ScanResult, CRITERIA, TARGETS, AXES,
+    find_edges, pair_across, measure_line, scan, choose_axis,
+)
 from . import subpixel

@@ -96,7 +96,7 @@ UI 介面、設定放哪都要先討論過**才動手。所以計畫書是**議�
 | **Enhance** | ✅ **收斂 2026-08-17**（Enhance-1…3）：**值域變成明講的契約**（實測 `stripes_h` 吐 261.5，會活到後面某個 `to_uint8` 才被壓掉）＋ `clip_frac`；三個新方法（`flatten` 的 median 背景估計、`denoise` 的 `hot_pixels`、`normalize` 的耐離群 `zscore`），**一張新卡都沒開**；五個面板輔助（核心大小畫在影像上、削平的整批走勢、曲線墊直方圖、磨掉幾個 σ、兩條流還有多像）；兩支 lint（`uneven-treatment` / `card-order`）。**融合卡（PCA Ref、BSE·SE quadrant）擱置** —— 使用者 2026-08-17：「我決定我暫時不做 multi channel，暫時 focus 在 patch 跟 RSEM Image」|
 | **Region** | **分三個階段，對應三種 mode（使用者定調 2026-08-17，照難度爬）**：**Region-1 Template ✅ 2026-08-18**（`roi_template` 改成「一張卡好幾個區域、一個區域好幾個矩形」，框在 Golden Cell 上**畫**出來 —— 含 multi add 一次長一整排等距的框；框映到 patch 時整片鋪過去，不再只取離缺陷最近的那一份。尾巴：模板過期健檢還沒做）→ **Region-2 Profile ✅ 2026-08-18**（`roi_cross`：三個下拉改圖示、點曲線就是挑材質，以及**單方向** —— 原本寫死「兩組正交條紋」是需求的形狀不是演算法的形狀，新的 `directions` 讓一張只有 line/space 的 patch 也定得出位置，做法是給沒在用的那一軸一根滿版的條紋，交會的幾何一行都不用改。**「三個框尺寸改成在影像上拖」使用者否決了** —— 那些框是逐顆的結果，拖它等於改輸出；可以用拖的只有所有 defect 共用的那一個物件）→ **兩張卡共用的兩件小事 ✅ 2026-08-18**（`drop_edge`／`edge_margin`：靠邊 n px 內的框自動拿掉 —— 壓在 patch 邊上的框量到的是半截的那一塊，而它照樣吐得出看起來正常的數字；**滿版的那一軸不算靠邊**、**缺陷那一塊永遠留著**。以及**疊框一個區域一個顏色**，跟模板編輯器同一組 —— 一張卡好幾個區域之後，全部畫成藍色就分不出哪塊是 ROI1）→ **Region-3 GDS**（**只做 RSEM**：單張 + KLARF，使用者定調 2026-08-18 —— GLAS 是瞄著 RSEM 大圖對的，patch 太小且 GLAS 那邊沒打通；那一刀讓「給 GLAS 的兩件必要需求」都不需要了。**匯出健檢 ✅**：`tools/check_glas_export.py` 印出可以貼出來的遮蔽報告，四條核心檢查是讀 GLAS 程式碼讀出來的。**第 1／2 步 ✅ 2026-08-18**：`tools/make_glas_export.py`（家用機的合成匯出）＋ `ingest/glas_export.py` 配對 ＋ `load_sidecar` 卡（附加檔住 `DefectItem.sidecars`，不進 `images` —— 混進去 `load_single` 會因為「一顆兩張」而全部載不進來）。順手修掉兩個安靜的錯：換匯出快取不失效、`load_raw` 會把三通道 label 合成灰階把 id 混掉。**第 3／4 步 ✅ 2026-08-18**：`roi_from_mask`（精確拆矩形 —— L 形的 bbox 會框到別的材質；`max_boxes` 預設 8192 是量出來的，真實一層是幾十到約五千個矩形，既有的 64 會安靜砍掉 95%）＋ Studio（`Open GDS export…`、`layers` 的表格、儀表）。新卡 `roi_from_mask` 吃 GLAS 的 label map；每個 layer 切成一堆小矩形 —— 站點的區域本來就都是矩形，所以那是等價不是近似）。出口契約已經留好（見 [`ARCHITECTURE.md`](ARCHITECTURE.md)），下游零改動）→ **Region-4 輸出統一 ✅ 2026-08-18**（三張找 ROI 的卡對**每一個區域**寫同一組五個數字 `present`／`boxes`／`area_px`／`clipped`／`edge_dropped`，使用者：「現在有點像大家資料結構不一樣」。前三個從 ctx 讀回來、不是卡片自己記一份；`clipped`／`edge_dropped` 整個家族共用；`present` 與 `boxes` 刻意會不一致 —— 退回整張圖那個保險是「有東西可以量，但它不是你要的那個」）→ **Region-5 單張大圖 ✅ 2026-08-18**（使用者要第四種「用重複結構鋪 ROI」的卡，**量過之後不必新卡**：Template 餵一張 1000×1000 就得到 625 個框、相位正確、61 ms，差別只在接哪一條流。修掉三個擋路的：`max_boxes` 64 → 8192（同 `roi_from_mask`）、`<name>_clipped` 在 Template 上原本恆為 0、對話框多一顆 `Use the image on screen`。`pattern_ref` 因此沒事做了，先收進 `HIDDEN_STEPS`、2026-08-20 刪掉）。**Region 段到此收斂 —— 四種找 ROI 的方法都在，輸出契約一致。** |
 | **Compare** | **它不缺卡，缺的是既有那幾張長 method**（2026-08-20 讀 code 讀出來的）：`Image Combination`（原 `Compare two streams`）加 `abs` / normalized `(a−b)/(a+b)`；`align`（在 `HIDDEN_STEPS`）加一個吃 GLAS 算好 offset 的 method。小圖對大圖那張已經有了（`H2H`，原 `Align to other stream`，F15）。**ROADMAP 以前寫的「GLAS 合成 gray 當 ref」不需要新卡** —— gray 由 `load_sidecar` 在 Input 載進來，Compare 只負責對位＋相減。⚠ **`pattern_ref` 已於 F16 刪除**（使用者：「完全沒用」），所以單張影像那條路現在**造不出 ref**。⚠ **F15 的配對引擎做完了但停在那裡** —— 見下面「F15 停在哪裡」|
-| **Measure** | **Gray level ✅ 收斂 2026-08-21（F18）** —— 見下面那一段。剩下：**CD 整張重做**（F19，下一個 session）、離群旗標（跨顆 —— 要 `lot baseline` 那一層）、Region Stats / FFT、`snr_map` 多來源。~~Blob 分割~~ **不做**（使用者 2026-08-20：「不需要 也不要再出現」）|
+| **Measure** | **Gray level ✅ 收斂 2026-08-21（F18）** ＋ **CD ✅ 收斂 2026-08-21（F19）** —— 見下面兩段。剩下：CD 的**無方向那一支**（Feret／等效直徑／真實面積，F19 第二批）、離群旗標（跨顆 —— 要 `lot baseline` 那一層）、Region Stats / FFT、`snr_map` 多來源。~~Blob 分割~~ **不做**（使用者 2026-08-20：「不需要 也不要再出現」）|
 | **ADC** | **一張卡都沒有，而且只分得出兩類。** score 是 recipe 上的一個欄位（`bins` 被強制只有 `below`/`above`），`__score__` 是 UI 造的假節點。多類別要先設計資料結構，不是加一張卡 —— 這是整個 app 最大的功能缺口 |
 | ML Classify | **Phase 2 後半**。吃已經匯得出來的 feature vector CSV；相依策略到時候再定 |
 
@@ -120,6 +120,32 @@ UI 介面、設定放哪都要先討論過**才動手。所以計畫書是**議�
 
 **還缺的四件都不在這張卡上**（`lot baseline` 那一層、Measure 段共用的影像
 overlay、CSV 欄位排序）—— 見計畫書 §9.0。
+
+### Measure 段第二張：CD ✅ 收斂（F19，2026-08-21）
+
+整張砍掉重做（使用者：「基本上要全部砍掉」）。全部在
+[`plans/F19-cd.md`](plans/F19-cd.md)。留下來的形狀：
+
+* **原子單位從「一個區域」換成「一條量測線」。** 舊的 bbox 是極值統計量 ——
+  一顆離群像素 100% 傳進答案，圖再大也不會變準。換成 N 條線之後平均是 CD、
+  **σ 就是 LWR**、min 是頸縮、max 是橋接：粗糙度不是另外加的功能，是同一趟的
+  副產品。兩條邊各自的 σ 是 LER，而 LER 有、LWR 沒有 = 載台在漂。
+* **四個彼此正交的問題**（在哪量 × 沿哪個方向 × 邊界怎麼定義 × 怎麼收），
+  **不是四個 method** —— 那種選項每一個都同時綁死三件事。判準是一句話：
+  這個參數問的是使用者的樣品，還是問軟體。
+* **預設的判準被實測推翻了。** 設計時主張 `fit`（√N），量出來 `threshold` 的
+  σ 最小、`gradient` 的偏差最小。兩份說法都留在 `algo/edge` 的檔頭 ——
+  下一個人很可能會再推論一次同樣的 √N。
+* **三條寫死的規矩**：沒有「要不要次像素」的開關；絕不把畫面或框的邊界當成
+  一條邊；量不到就不寫那一格。
+* **卡片自動做的每一個決定都變成一個數字**（`cd_axis_deg` / `cd_bright`）——
+  這一條是實跑合成 lot 才補上的：`target="auto"` 逐顆挑了不同的極性，於是同
+  一欄裡裝著「線寬 6.5」與「溝寬 9.4」兩群。
+* **影像上看得到掃描線與邊點**（`ImageView.set_marks` ＋ `Step.overlay_marks`），
+  而那是**整個 Measure 段共用**的機制，不是 CD 專用（F18 §9.0 指名的那一件）。
+
+⚠ **黃金值要在家用機重凍**（`tools/freeze_golden.py`）—— 那些是浮點數，在別台
+機器上重凍會把每一個特徵的基準線都換掉，不只是 CD 那幾欄。
 
 ### 畫布的八段（F16，使用者 2026-08-20 定稿）
 

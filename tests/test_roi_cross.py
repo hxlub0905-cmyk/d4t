@@ -265,7 +265,9 @@ def test_a_card_that_needs_one_box_says_so_instead_of_taking_the_first():
 
     # 而 _center 走得通（它就是一個框）
     get_step("cd_measure")().run(ctx, {"source": "test", "roi": "cross_center"})
-    assert "cd_x_px" in ctx.features
+    # 那一格量不量得出寬度是另一回事（合成的交會處未必有一對邊）——
+    # 這一支問的是「它有沒有被擋下來」，所以看的是一律會吐的那幾個。
+    assert "cd_lines" in ctx.features
 
 
 def test_failing_to_locate_falls_back_loudly():

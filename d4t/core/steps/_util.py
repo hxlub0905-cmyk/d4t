@@ -364,7 +364,8 @@ def nm_per_px_spec() -> ParamSpec:
         advanced=True,
         help=("How many nanometres one pixel is, from the tool's settings. "
               "Fill it in and every length this pipeline measures also comes "
-              "out in nanometres (cd_x_px gets a cd_x_nm beside it). Leave it "
+              "out in nanometres (cd_median gets a cd_median_nm beside it). "
+              "Leave it "
               "at 0 if you do not know it - everything stays in pixels, which "
               "is what it has always been."),
     )
@@ -499,11 +500,23 @@ def prefix_features(prefix: str, feats: Dict[str, float]) -> Dict[str, float]:
 
 #: 名字結尾是 ``_px`` 但**意思是面積**的那幾個 —— 換算要平方（nm²）。
 #:
-#: 為什麼要列出來而不是看名字：``area_px`` 的結尾跟 ``cd_x_px`` 一模一樣，
+#: 為什麼要列出來而不是看名字：``area_px`` 的結尾跟任何一個長度特徵一模一樣，
 #: 而它們差一個次方。照結尾一律乘一次的話，面積會安靜地少乘一次 ——
 #: 跑得完、有數字、而且是錯的。改名成 ``area_px2`` 也能解，但那會動到既有的
 #: recipe 與黃金值，代價比一行表大得多。
 AREA_FEATURES = ("area_px",)
+
+#: 名字**不是** ``_px`` 結尾、但意思就是一段長度的那幾個（F19）。
+#:
+#: 跟 :data:`AREA_FEATURES` 是同一張表的另一半，理由也一樣 —— **看名字猜不到**。
+#: CD 那張卡吐的是 ``cd_median`` / ``ler_a_std`` 這種名字（``cd_median_px``
+#: 在膠囊上又長又醜），而它們每一個都該配一份 nm 的。漏掉的下場不是報錯，是
+#: 使用者填了 nm/px 之後**只有一半的長度換得出單位**。
+#:
+#: 不在這裡、也不以 ``_px`` 結尾的一律不配 —— ``cd_dev_frac``（比例）、
+#: ``cd_n``（條數）、``cd_axis_deg``（角度）都不該有 nm 版本。
+LENGTH_FEATURES = ("cd_median", "cd_mean", "cd_min", "cd_max", "cd_range",
+                   "cd_std", "ler_a_std", "ler_b_std", "cd_dev")
 
 
 def nm_twins(feats: Dict[str, float],
@@ -531,6 +544,8 @@ def nm_twins(feats: Dict[str, float],
             continue
         if name in AREA_FEATURES:
             out[name[:-3] + "_nm2"] = float(value) * scale * scale
+        elif name in LENGTH_FEATURES:
+            out[name + "_nm"] = float(value) * scale
         elif name.endswith("_px"):
             out[name[:-3] + "_nm"] = float(value) * scale
     return out
@@ -542,6 +557,8 @@ def nm_twin_names(names: Sequence[str]) -> List[str]:
     for name in names or ():
         if name in AREA_FEATURES:
             out.append(name[:-3] + "_nm2")
+        elif name in LENGTH_FEATURES:
+            out.append(str(name) + "_nm")
         elif str(name).endswith("_px"):
             out.append(name[:-3] + "_nm")
     return out

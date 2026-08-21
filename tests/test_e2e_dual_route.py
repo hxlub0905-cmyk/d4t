@@ -118,7 +118,8 @@ def test_same_recipe_scores_both_input_types(request, recipe, lot_name, expect_k
 
     # 每顆都要有完整特徵向量（供報表與 ML 備料）—— 兩條 route 都要。
     for r in results:
-        for key in ("glv_max", "glv_median", "glv_std", "cd_x_px", "score"):
+        for key in ("glv_max", "glv_median", "glv_std", "cd_median",
+                    "score"):
             assert key in r.features, f"{r.defect_id} 缺 {key}"
 
     if expect_kind != "ebi_patch":

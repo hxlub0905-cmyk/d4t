@@ -45,6 +45,7 @@ from PySide6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
 from ..core.algo import glv as algo_glv
 from ..core.steps._util import CLIP_FRAC, PAIR_FEATURES
+from ..core.steps.cd import reasons_in_words as _cd_reasons_in_words
 from ..core.steps.denoise import HOT_FRAC, REMOVED_OVER_NOISE
 from . import theme
 from .theme import TOKENS, region_hex
@@ -1775,6 +1776,244 @@ class GlvInspector(Inspector):
         p.setBrush(Qt.NoBrush)
 
 
+class CdInspector(Inspector):
+    """CD：**這一條線的剖面**、每條線量到多寬、以及這一顆站在整批的哪裡（F19）。
+
+    為什麼主角是剖面圖
+    ------------------
+    CD 是所有量測裡最特別的一種：**數字錯了從數字上完全看不出來，從圖上一眼就
+    看得出來**（掃描線壓在錯的結構上、切到轉角、跨過兩根線）。所以這張面板的
+    第一格是計量儀器的那個經典畫面 —— 曲線、判準那條橫線、兩個交點 ——
+    它不需要任何說明文件就講完了整張卡的語義：判準是什麼、邊被判在哪、為什麼是
+    這個數字。
+
+    **參數面板存在的目的，是讓這張圖看起來對。**
+
+    第二格是**粗糙度的圖**，不只是一個 σ：頸縮發生在結構的哪一段看得到，而那是
+    ``cd_min`` 那個數字答不出來的。第三格重用 `MeasureInspector` 的分布圖。
+
+    資料從 ``ctx.meta["cd"]`` 來（`cd_measure._note` 寫的）—— 跟
+    `GlvInspector` 同一條路，所以**選到卡片的那一刻就有東西**，不必先跑一批。
+    """
+
+    title = "CD"
+
+    #: 剖面圖佔的寬度比例。它是主角，所以拿走一半。
+    PROFILE_W = 0.46
+    #: 每條線的寬度那一格佔的比例（剩下的給整批分布）。
+    WOBBLE_W = 0.24
+
+    # -- 資料 ---------------------------------------------------------------
+    def notes(self) -> List[Dict[str, Any]]:
+        """這張卡在這一顆上留下的每一份（一條流 × 一個區域一份）。"""
+        raw = self.meta.get("cd")
+        if not isinstance(raw, dict):
+            return []
+        out = []
+        for prefix in sorted(raw):
+            note = raw[prefix]
+            if isinstance(note, dict):
+                out.append(dict(note, prefix=str(prefix)))
+        return out
+
+    def note(self) -> Optional[Dict[str, Any]]:
+        got = self.notes()
+        return got[0] if got else None
+
+    def has_data(self) -> bool:
+        return self.note() is not None
+
+    def empty_reason(self) -> str:
+        return ("Run a trial to see the profile this card is measuring, where "
+                "it put the two edges, and how the width varies along the "
+                "structure.")
+
+    def where(self) -> str:
+        note = self.note() or {}
+        region = str(note.get("region") or "whole image")
+        stream = str(note.get("stream") or "")
+        return "%s @ %s" % (region, stream) if stream else region
+
+    def tab_title(self) -> str:                # noqa: D102
+        note = self.note()
+        return "CD" if note is None else "CD · %s" % self.where()
+
+    def tab_tooltip(self) -> str:              # noqa: D102
+        note = self.note()
+        if note is None:
+            return ""
+        return ("%s edges, measured along %s, on the %s band"
+                % (note.get("criterion", "?"), note.get("axis", "?"),
+                   note.get("target_used") or note.get("target", "?")))
+
+    def summary(self) -> str:                  # noqa: D102
+        note = self.note()
+        if note is None:
+            return ""
+        widths = [float(v) for v in (note.get("widths") or [])]
+        n, total = int(note.get("n", 0)), int(note.get("lines", 0))
+        if not widths:
+            # **失敗時這一行比任何圖都有用** —— 它是使用者唯一會讀的東西。
+            why = _cd_reasons_in_words(note.get("reasons") or {})
+            return ("no width here — %s (0 of %d lines)"
+                    % (why or "no pair of edges found", total)) if total else ""
+        med = sorted(widths)[len(widths) // 2]
+        sd = math.sqrt(sum((v - sum(widths) / len(widths)) ** 2
+                           for v in widths) / len(widths))
+        bits = ["CD %.2f px" % med, "sigma %.2f" % sd,
+                "%d/%d lines" % (n, total),
+                str(note.get("criterion") or ""), str(note.get("axis") or "")]
+        extra = ""
+        if len(self.notes()) > 1:
+            extra = "  ·  +%d more" % (len(self.notes()) - 1)
+        return "  ·  ".join([b for b in bits if b]) + extra
+
+    # -- 畫 -----------------------------------------------------------------
+    def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
+        note = self.note()
+        if note is None:
+            self._say_empty(p, rect)
+            return
+        gap = 10.0
+        pw = rect.width() * self.PROFILE_W
+        ww = rect.width() * self.WOBBLE_W
+        self._paint_profile(p, QRectF(rect.left(), rect.top(), pw,
+                                      rect.height()), note)
+        self._paint_wobble(p, QRectF(rect.left() + pw + gap, rect.top(),
+                                     ww - gap, rect.height()), note)
+        self._paint_batch(p, QRectF(rect.left() + pw + ww + gap, rect.top(),
+                                    rect.width() - pw - ww - gap,
+                                    rect.height()), note)
+
+    def _caption(self, p: QPainter, rect: QRectF, text: str) -> QRectF:
+        """小標題，回剩下可以畫的那一塊。"""
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        p.drawText(QRectF(rect.left(), rect.top(), rect.width(), 13.0),
+                   Qt.AlignLeft | Qt.AlignVCenter, text)
+        return QRectF(rect.left(), rect.top() + 15.0, rect.width(),
+                      rect.height() - 15.0)
+
+    def _paint_profile(self, p: QPainter, rect: QRectF,
+                       note: Dict[str, Any]) -> None:
+        """曲線 ＋ 判準那條橫線 ＋ 兩個交點 ＋ 中間標著量到多寬。"""
+        body = self._caption(p, rect, "Profile of one line")
+        prof = note.get("profile") or {}
+        values = [float(v) for v in (prof.get("values") or [])]
+        if len(values) < 3 or body.height() < 24:
+            p.setPen(QColor(TOKENS["text_disabled"]))
+            p.drawText(body, Qt.AlignCenter | Qt.TextWordWrap,
+                       "no line here measured a pair of edges")
+            return
+        lo, hi = min(values), max(values)
+        span = (hi - lo) or 1.0
+        n = len(values)
+
+        def at(x: float, v: float) -> QPointF:
+            return QPointF(body.left() + (x / max(1.0, n - 1.0)) * body.width(),
+                           body.bottom() - ((v - lo) / span) * body.height())
+
+        # 判準那條橫線先畫（曲線要壓在它上面）
+        level = prof.get("level")
+        if level is not None:
+            y = at(0.0, float(level)).y()
+            pen = QPen(QColor(TOKENS["text_disabled"]), 1.0, Qt.DashLine)
+            p.setPen(pen)
+            p.drawLine(QPointF(body.left(), y), QPointF(body.right(), y))
+        p.setPen(QPen(QColor(TOKENS["accent"]), 1.4))
+        p.setBrush(Qt.NoBrush)
+        p.drawPolyline(QPolygonF([at(i, v) for i, v in enumerate(values)]))
+
+        a, b = prof.get("a"), prof.get("b")
+        if a is None or b is None:
+            return
+        a, b = float(a), float(b)
+        # 兩個交點：一條到底的點線 + 實心圓（「邊被判在這裡」）
+        p.setPen(QPen(QColor(TOKENS["accent_active"]), 1.0, Qt.DotLine))
+        for x in (a, b):
+            vx = at(x, hi).x()
+            p.drawLine(QPointF(vx, body.top()), QPointF(vx, body.bottom()))
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor(TOKENS["accent"])))
+        for x in (a, b):
+            centre = (level if level is not None
+                      else values[max(0, min(n - 1, int(round(x))))])
+            p.drawEllipse(at(x, float(centre)), 3.0, 3.0)
+        p.setBrush(Qt.NoBrush)
+        # 中間那一行：量到多寬
+        p.setPen(QColor(TOKENS["text_primary"]))
+        mid = QRectF(at(min(a, b), hi).x(), body.center().y() - 8.0,
+                     max(24.0, abs(at(b, hi).x() - at(a, hi).x())), 16.0)
+        p.drawText(mid, Qt.AlignCenter, "%.2f px" % abs(b - a))
+
+    def _paint_wobble(self, p: QPainter, rect: QRectF,
+                      note: Dict[str, Any]) -> None:
+        """每條線量到多寬 —— **粗糙度的圖**，縱軸是沿著結構的位置。
+
+        一個 σ 說得出「有多不齊」，說不出「哪一段不齊」。頸縮在這張圖上是一個
+        往內凹的缺口，而那是 ``cd_min`` 那個數字答不出來的事。
+        """
+        body = self._caption(p, rect, "Each line")
+        widths = [float(v) for v in (note.get("widths") or [])]
+        if len(widths) < 2 or body.height() < 24:
+            return
+        lo, hi = min(widths), max(widths)
+        span = (hi - lo) or 1.0
+        # 太窄的話把尺撐開一點，不然逐點的抖動會被畫成滿版的鋸齒
+        if span < 0.5:
+            mid = (lo + hi) / 2.0
+            lo, hi, span = mid - 0.25, mid + 0.25, 0.5
+        pts = []
+        for i, v in enumerate(widths):
+            y = body.top() + (i / max(1.0, len(widths) - 1.0)) * body.height()
+            pts.append(QPointF(body.left()
+                               + ((v - lo) / span) * body.width(), y))
+        p.setPen(QPen(QColor(TOKENS["text_disabled"]), 1.0, Qt.DashLine))
+        med = sorted(widths)[len(widths) // 2]
+        x = body.left() + ((med - lo) / span) * body.width()
+        p.drawLine(QPointF(x, body.top()), QPointF(x, body.bottom()))
+        p.setPen(QPen(QColor(TOKENS["accent"]), 1.2))
+        p.setBrush(Qt.NoBrush)
+        p.drawPolyline(QPolygonF(pts))
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        p.drawText(QRectF(body.left(), body.bottom() - 12.0, body.width(), 12.0),
+                   Qt.AlignHCenter | Qt.AlignBottom,
+                   "%.2f - %.2f px" % (min(widths), max(widths)))
+
+    def _paint_batch(self, p: QPainter, rect: QRectF,
+                     note: Dict[str, Any]) -> None:
+        """整批的分布 ＋ 這一顆在哪 —— 跑過才有東西（同 `MeasureInspector`）。"""
+        name = ("%s_cd_median" % note["prefix"] if note.get("prefix")
+                else "cd_median")
+        values = self.feature_values(name)
+        body = self._caption(p, rect, "Across the batch")
+        if len(values) < 3 or body.height() < 24:
+            p.setPen(QColor(TOKENS["text_disabled"]))
+            p.drawText(body, Qt.AlignCenter | Qt.TextWordWrap,
+                       "run a trial to compare this defect with the rest")
+            return
+        lo, hi = min(values), max(values)
+        span = (hi - lo) or 1.0
+        bins = [0] * 20
+        for v in values:
+            bins[min(19, int((v - lo) / span * 19.999))] += 1
+        peak = max(bins) or 1
+        bw = body.width() / 20.0
+        p.setPen(Qt.NoPen)
+        faint = QColor(TOKENS["accent"])
+        faint.setAlpha(110)
+        p.setBrush(QBrush(faint))
+        for i, c in enumerate(bins):
+            h = (c / float(peak)) * (body.height() - 12.0)
+            p.drawRect(QRectF(body.left() + i * bw, body.bottom() - h,
+                              max(1.0, bw - 1.0), h))
+        p.setBrush(Qt.NoBrush)
+        here = self.this_value(name)
+        if here is not None:
+            x = body.left() + ((here - lo) / span) * body.width()
+            p.setPen(QPen(QColor(TOKENS["text_primary"]), 1.6))
+            p.drawLine(QPointF(x, body.top()), QPointF(x, body.bottom()))
+
+
 class InputInspector(Inspector):
     """Load images：**哪一頁變成哪一條流**，以及每一頁載進來長什麼樣。
 
@@ -2153,7 +2392,8 @@ INSPECTORS: Dict[str, type] = {
     # 其餘量測卡暫時留在 Spread —— 它們還沒有自己的面板，而**沒有面板比
     # 「跑完才有東西的面板」更糟**。CD 那張本來就要整張重做（F19）。
     "glv_stats": GlvInspector,
-    "cd_measure": MeasureInspector,
+    # F19：CD 有自己的面板了（剖面圖是它唯一講得清楚自己的方式）。
+    "cd_measure": CdInspector,
     "focus_quality": MeasureInspector,
     "roi_from_mask": GdsInspector,
     "pair_source": PairInspector,
