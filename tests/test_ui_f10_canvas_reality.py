@@ -257,17 +257,21 @@ def test_two_sources_get_the_stream_name_in_front_of_every_number(window):
     黃金值一個數字都不動（`tests/test_e2e_*` 與 freeze_golden 對著這件事）。
     """
     glv = get_step("glv_stats")
+    # `glv_pixels`（F18 第 4 步）跟著每一塊走，所以它也帶前綴 —— 這一條測的
+    # 是**前綴規則**，不是「這張卡吐幾個數字」。
     one = glv.validate_params({"source": "diff", "metrics": "glv_max"})
-    assert glv.resolve_features(one) == ["glv_max"]
+    assert glv.resolve_features(one) == ["glv_max", "glv_pixels"]
 
     two = glv.validate_params({"source": "diff,test", "metrics": "glv_max"})
-    assert glv.resolve_features(two) == ["diff_glv_max", "test_glv_max"]
+    assert glv.resolve_features(two) == ["diff_glv_max", "diff_glv_pixels",
+                                         "test_glv_max", "test_glv_pixels"]
 
     # 使用者自己填的 output_prefix 疊在流名後面，而且只有一個底線
     named = glv.validate_params({"source": "diff,test", "metrics": "glv_max",
                                  "output_prefix": "center"})
-    assert glv.resolve_features(named) == ["diff_center_glv_max",
-                                           "test_center_glv_max"]
+    assert glv.resolve_features(named) == [
+        "diff_center_glv_max", "diff_center_glv_pixels",
+        "test_center_glv_max", "test_center_glv_pixels"]
 
 
 def test_every_measure_card_can_take_more_than_one_source(window):

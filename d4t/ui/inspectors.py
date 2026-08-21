@@ -1328,7 +1328,14 @@ class GlvInspector(Inspector):
             where = r.get("region") or r.get("stream") or "whole image"
             bits.append("%s: %d px" % (where, int(r.get("n") or 0)))
         text = "  ·  ".join(bits)
-        thin = [r for r in rows if int(r.get("n") or 0) < self.THIN_PX]
+        gated = [r for r in rows if r.get("thin")]
+        if gated:
+            # 使用者自己設了「至少要幾個像素」，而這一顆沒過 —— 那不是警告，
+            # 是這張卡在照他說的做，所以講法是陳述句。
+            text += ("  ·  under the minimum you set, so this defect's gray "
+                     "levels are blank")
+        thin = [r for r in rows if int(r.get("n") or 0) < self.THIN_PX
+                and not r.get("thin")]
         if thin:
             # **樣本數太少的時候要講出來。** patch 的 ROI 常常只有幾百個像素，
             # 而在那個數量下離散度本身沒有意義 —— 而畫面上以前沒有任何地方
@@ -1389,9 +1396,14 @@ class GlvInspector(Inspector):
         p.setPen(colour)
         p.drawText(head, Qt.AlignLeft | Qt.AlignVCenter, label)
         p.setPen(QColor(TOKENS["text_hint"]))
+        # 三個旋鈕丟掉了像素的時候要講出來（F18 第 4 步）：畫面上這條分布是
+        # **留下來的那些**，而使用者需要知道那不是整塊。
+        n, n_raw = int(row.get("n") or 0), int(row.get("n_raw") or 0)
+        count = ("n=%d of %d px" % (n, n_raw)) if n_raw and n_raw != n \
+            else ("n=%d px" % n)
         p.drawText(head, Qt.AlignRight | Qt.AlignVCenter,
-                   "n=%d px · %.1f%% saturated"
-                   % (int(row.get("n") or 0), 100.0 * float(row.get("sat") or 0.0)))
+                   "%s · %.1f%% saturated"
+                   % (count, 100.0 * float(row.get("sat") or 0.0)))
 
         plot = QRectF(band.left(), head.bottom() + 1, band.width(),
                       max(8.0, band.bottom() - head.bottom() - 12))

@@ -479,10 +479,14 @@ def test_measuring_two_regions_warns_instead_of_silently_losing_one(qapp):
                                      bins={"below": 0, "above": 1}))
     issues = validate(recipe, kind="ebi_patch")
     collisions = [i for i in issues if i.code == "feature-collision"]
-    assert len(collisions) == 1
-    assert collisions[0].level == "warning", "撞名不擋執行，但要講出來"
-    assert collisions[0].node_id == "glvB"
-    assert "glv_mean" in collisions[0].title
+    # 兩張卡都吐 `glv_mean` **與** `glv_pixels`（F18 第 4 步：樣本數跟著每一塊
+    # 走），所以撞的是兩個名字。多報一個不是雜訊 —— 兩個名字都真的被蓋掉。
+    assert len(collisions) == 2
+    assert all(i.level == "warning" for i in collisions), "撞名不擋執行，但要講出來"
+    assert all(i.node_id == "glvB" for i in collisions)
+    assert {"glv_mean", "glv_pixels"} == {
+        n for i in collisions for n in ("glv_mean", "glv_pixels")
+        if n in i.title}
     assert not [i for i in issues if i.level == "error"]
 
 

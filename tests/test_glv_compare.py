@@ -283,7 +283,9 @@ def test_one_region_keeps_the_old_names():
     p = {"source": "test", "roi": "hot", "metrics": "glv_mean",
          "output_prefix": ""}
     get_step("glv_stats")().run(ctx, p)
-    assert list(ctx.features) == ["glv_mean"]
+    # `glv_pixels` 跟著每一塊走（F18 第 4 步）——「只接一個時逐字相同」講的是
+    # **前綴**，不是「這張卡只吐一個數字」。
+    assert list(ctx.features) == ["glv_mean", "glv_pixels"]
 
 
 def test_streams_and_regions_multiply():
@@ -293,8 +295,11 @@ def test_streams_and_regions_multiply():
     p = {"source": "test,ref", "roi": "hot,cold", "metrics": "glv_mean",
          "output_prefix": ""}
     get_step("glv_stats")().run(ctx, p)
-    assert set(ctx.features) == {"test_hot_glv_mean", "test_cold_glv_mean",
-                                 "ref_hot_glv_mean", "ref_cold_glv_mean"}
+    assert set(ctx.features) == {
+        "test_hot_glv_mean", "test_cold_glv_mean",
+        "ref_hot_glv_mean", "ref_cold_glv_mean",
+        "test_hot_glv_pixels", "test_cold_glv_pixels",
+        "ref_hot_glv_pixels", "ref_cold_glv_pixels"}
 
 
 # --------------------------------------------------------------------------- #

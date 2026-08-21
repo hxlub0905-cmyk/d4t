@@ -466,7 +466,11 @@ def test_glv_stats_defaults_are_the_robust_set(tmp_path):
     img = _rng(21).integers(0, 256, size=(48, 48)).astype(np.uint8)
     ctx = Context(images={"test": img})
     run_step("glv_stats", ctx)
-    assert set(ctx.features) == {"glv_median", "glv_mad", "glv_min", "glv_max"}
+    # `glv_pixels` 跟著每一塊走（F18 第 4 步）：patch 的 ROI 常常只有幾百個
+    # 像素，而在那個數量下離散度本身沒有意義 —— 樣本數必須跟數字一起走。
+    assert set(ctx.features) == {"glv_median", "glv_mad", "glv_min", "glv_max",
+                                 "glv_pixels"}
+    assert ctx.features["glv_pixels"] == 48 * 48
     f64 = img.astype(np.float64)
     assert ctx.features["glv_median"] == pytest.approx(np.median(f64))
     assert ctx.features["glv_mad"] == pytest.approx(
@@ -482,7 +486,7 @@ def test_glv_stats_takes_the_shape_and_count_statistics():
                      "glv_trim10,glv_above128,glv_sat_frac")
     assert set(ctx.features) == {
         "glv_iqr", "glv_skew", "glv_kurt", "glv_entropy", "glv_bimodality",
-        "glv_trim10", "glv_above128", "glv_sat_frac"}
+        "glv_trim10", "glv_above128", "glv_sat_frac", "glv_pixels"}
     assert all(np.isfinite(v) for v in ctx.features.values())
 
     # 數字打錯範圍的照樣是「未知統計項」，不是安靜地算出一個空集合的平均
@@ -548,3 +552,63 @@ def test_tone_cards_keep_float_streams_float_and_only_touch_their_own():
     ctx2 = Context(images={"test": f.copy()})
     with pytest.raises(StepError):
         run_step("tone", ctx2, streams="nope")
+
+
+def test_glv_stats_can_say_which_pixels_count(tmp_path):
+    """F18 第 4 步：三個旋鈕決定哪些像素算數，**而它們預設全部不作用**。
+
+    預設是不是 no-op 不是風格問題：既有 recipe 的 JSON 裡沒有這幾個鍵，
+    `validate_params` 會補上預設值 —— 一個會動的預設 = 安靜地改掉每一份舊
+    recipe 的數字。這一條把那件事鎖起來。
+    """
+    img = _rng(2).integers(60, 180, size=(30, 30)).astype(np.uint8)
+    img[0, 0] = 255
+    img[0, 1] = 0
+    mids = "glv_mean,glv_min,glv_max,glv_sat_frac"
+
+    plain = Context(images={"test": img})
+    run_step("glv_stats", plain, metrics=mids)
+    assert plain.features["glv_min"] == 0.0 and plain.features["glv_max"] == 255.0
+    assert plain.features["glv_pixels"] == 900.0
+    assert "glv_ok" not in plain.features, \
+        "沒設下限的時候 glv_ok 恆為 1，而一整欄的 1 是雜訊"
+
+    # 丟掉貼在 0/255 的：min/max 收進來，但**飽和比例照樣量原始的那一份**
+    # （丟掉之後再問「有多少貼在邊上」，答案恆為 0 —— 那是個沒有用的答案）
+    clean = Context(images={"test": img})
+    run_step("glv_stats", clean, metrics=mids, exclude_saturated=True)
+    assert clean.features["glv_min"] > 0.0 and clean.features["glv_max"] < 255.0
+    assert clean.features["glv_pixels"] == 898.0
+    assert clean.features["glv_sat_frac"] == pytest.approx(2.0 / 900.0)
+
+    # 兩端各修 5%：留下來的像素變少，全距一定不會變大
+    trimmed = Context(images={"test": img})
+    run_step("glv_stats", trimmed, metrics=mids, trim_percent=5.0)
+    assert trimmed.features["glv_pixels"] < 900.0
+    assert (trimmed.features["glv_max"] - trimmed.features["glv_min"]
+            <= plain.features["glv_max"] - plain.features["glv_min"])
+
+
+def test_glv_stats_writes_nothing_rather_than_a_wrong_number_when_too_thin():
+    """量不出來的時候**那幾格不寫** —— 不是 0，也不是 NaN。
+
+    三種都想過（`GlvStatsStep._too_thin` 的表）：0 會安靜地混進分數表達式；
+    NaN 更糟，因為 ``NaN < threshold`` 是 False，那顆 defect 會被安靜地判成
+    真缺陷（`tests/test_card_invariants.py` 的 I5 守著這件事）。不寫的話，
+    沒有人引用就什麼都不會發生，有人引用就當場失敗並指名那個變數。
+
+    而且不能用 raise：鐵則 7（單顆出錯不得殺掉整批）。
+    """
+    img = _rng(9).integers(0, 256, size=(20, 20)).astype(np.uint8)
+    ctx = Context(images={"test": img})
+    run_step("glv_stats", ctx, metrics="glv_mean,glv_std", min_pixels=5000)
+
+    assert "glv_mean" not in ctx.features and "glv_std" not in ctx.features
+    assert ctx.features["glv_ok"] == 0.0, "分數表達式要有一個乾淨的分支點"
+    assert ctx.features["glv_pixels"] == 400.0, "樣本數本身還是要說得出來"
+    assert all(not np.isnan(v) for v in ctx.features.values())
+
+    ok = Context(images={"test": img})
+    run_step("glv_stats", ok, metrics="glv_mean", min_pixels=100)
+    assert ok.features["glv_ok"] == 1.0
+    assert not np.isnan(ok.features["glv_mean"])

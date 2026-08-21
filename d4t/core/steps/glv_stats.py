@@ -276,6 +276,36 @@ class GlvStatsStep(MultiSourceStep):
                   "percent are the same difference expressed relative to the "
                   "reference."),
         ),
+        # ---- 量得準不準（F18 第 4 步）--------------------------------------
+        # 三個都**預設不作用**：既有 recipe 的 JSON 沒有這幾個鍵，
+        # `validate_params` 會補預設值 —— 一個會動的預設等於安靜地改掉每一份
+        # 舊 recipe 的數字。
+        ParamSpec(
+            name="exclude_saturated", type="bool", default=False,
+            section="4 · Which pixels count", show_when=_WHEN_STATS,
+            label="Ignore pixels at 0 or 255",
+            help=("Pixels stuck at pure black or pure white have already lost "
+                  "whatever was in them. Leaving them in pulls the average "
+                  "towards the edge and inflates the spread."),
+        ),
+        ParamSpec(
+            name="trim_percent", type="float", default=0.0, min=0.0, max=49.0,
+            unit="%", section="4 · Which pixels count", show_when=_WHEN_STATS,
+            label="Trim each end by",
+            help=("Throw away this share of the darkest and the brightest "
+                  "pixels before measuring. A couple of hot pixels can move "
+                  "the mean and the spread on a small region; the median "
+                  "does not care, but min, max and std do."),
+        ),
+        ParamSpec(
+            name="min_pixels", type="int", default=0, min=0, max=100000,
+            unit="px", section="4 · Which pixels count", show_when=_WHEN_STATS,
+            label="Need at least",
+            help=("Below this many pixels the card writes blanks instead of "
+                  "numbers, and says so. A spread measured on 20 pixels is "
+                  "not wrong so much as meaningless - and it looks exactly "
+                  "like a good one. 0 = always measure."),
+        ),
         output_prefix_spec("center"),
     ]
     reads = ["test"]
@@ -292,7 +322,12 @@ class GlvStatsStep(MultiSourceStep):
     @classmethod
     def feature_names(cls, params: Dict[str, Any]) -> List[str]:
         mids = parse_key_list(params.get("metrics", DEFAULT_METRICS))
-        return mids or list(cls.features_out)
+        base = mids or list(cls.features_out)
+        # 「這塊還能不能信」的那兩個跟著每一塊走（見 `_quality_features`）。
+        extra = ["glv_pixels"]
+        if int(params.get("min_pixels") or 0):
+            extra.append("glv_ok")
+        return base + extra
 
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
@@ -398,9 +433,12 @@ class GlvStatsStep(MultiSourceStep):
         # ``roi_pixels`` 而不是 ``crop_to_roi``：統計量只要「有哪些像素」，
         # 所以分散的多個框（F8 的交會處）也答得出來 —— 那正是
         # 「這一組交界整體長什麼樣」這個問題。單框走同一條路。
-        patch = roi_pixels(ctx, self.key, img, p["roi"])
+        raw = np.asarray(roi_pixels(ctx, self.key, img, p["roi"]),
+                         dtype=np.float64).ravel()
+        patch, n_raw = self._pixels_that_count(raw, p)
 
         feats: Dict[str, float] = {}
+        thin = self._too_thin(patch, p)
         for mid in mids:
             canon = _canonical(mid)
             if not canon:
@@ -408,12 +446,89 @@ class GlvStatsStep(MultiSourceStep):
                     self.key,
                     f"unknown statistic '{mid}'; available: "
                     f"{sorted(algo_glv.GLV_STATS)} or glv_q<0-100> / glv_p<0-100>.")
-            feats[mid] = algo_glv.glv_value(patch, canon)   # feature 名照使用者列的寫
-        self._note_distribution(ctx, patch, p, feats)
+            if thin:
+                continue        # 量不出來就**不寫那一格**（見下面 `_too_thin` 的說明）
+            # 飽和比例故意量**原始**的那一份：它回答的是「進來的東西長什麼樣」，
+            # 而把貼在 0/255 的像素丟掉之後再問這個問題，答案恆為 0。
+            src = raw if canon == "glv_sat_frac" else patch
+            feats[mid] = algo_glv.glv_value(src, canon)   # feature 名照使用者列的寫
+
+        extra = self._quality_features(patch, p)
+        self._note_distribution(ctx, patch, p, feats, n_raw=n_raw, thin=thin)
+        if thin:
+            ctx.warn(
+                "[%s] only %d pixels were left to measure in '%s' (the card "
+                "asks for at least %d), so its gray levels are not written "
+                "for this defect. The rest of the batch is unaffected."
+                % (self.key, int(patch.size), str(p.get("roi") or "the image"),
+                   int(p.get("min_pixels") or 0)))
+        feats.update(extra)
         return feats
 
+    # ---- 量得準不準（F18 第 4 步）------------------------------------------
+    @classmethod
+    def _pixels_that_count(cls, raw, p: Dict[str, Any]):
+        """哪些像素算數 —— 回 ``(留下來的, 原本有幾個)``。
+
+        三個旋鈕**預設全部不作用**（False / 0 / 0），這不是保守，是必要：
+        既有 recipe 的 JSON 裡沒有這幾個鍵，`validate_params` 會補上預設值，
+        所以一個會動的預設 = 安靜地改掉每一份舊 recipe 的數字。
+        """
+        n_raw = int(raw.size)
+        kept = raw
+        if bool(p.get("exclude_saturated")) and kept.size:
+            kept = kept[(kept > 0.0) & (kept < 255.0)]
+        trim = float(p.get("trim_percent") or 0.0)
+        if trim > 0.0 and kept.size:
+            lo, hi = np.percentile(kept, trim), np.percentile(kept, 100.0 - trim)
+            kept = kept[(kept >= lo) & (kept <= hi)]
+        return kept, n_raw
+
+    @staticmethod
+    def _too_thin(patch, p: Dict[str, Any]) -> bool:
+        """使用者設的「至少要幾個像素」沒過嗎（``min_pixels=0`` = 永遠量）。
+
+        沒過的時候這張卡**不寫那幾格特徵**（連同一句話），而不是寫 0，也不是
+        寫 NaN。三種都想過，這是唯一不會安靜出錯的：
+
+        =========  ==========================================================
+        寫 0       0 進得了分數表達式、寫得進 KLARF 的 DSIZE，一路安靜到最後
+                   （`cd_x_nm` 恆為 0 就是這樣咬過一次的，見 `steps/cd.py`）
+        寫 NaN     **看起來**比較誠實，其實更糟：``NaN < threshold`` 是 False，
+                   於是那顆 defect 被安靜地判成真缺陷。這條有測試守著
+                   （`tests/test_card_invariants.py` 的 I5），而它是對的 ——
+                   NaN 的下游政策要 ADC 段先有（F19），現在還沒有
+        不寫       沒有人引用 → 什麼事都不會發生；**有人引用 → 那顆 defect 當場
+                   失敗**，訊息裡帶著變數名。吵，但吵在正確的地方
+        =========  ==========================================================
+
+        ``glv_ok`` 仍然會寫（值是 0），所以分數表達式有一個乾淨的分支點。
+        """
+        floor = int(p.get("min_pixels") or 0)
+        return bool(floor) and int(patch.size) < floor
+
+    @classmethod
+    def _quality_features(cls, patch, p: Dict[str, Any]) -> Dict[str, float]:
+        """跟著每一塊一起吐的那幾個「這塊還能不能信」的數字。
+
+        * ``glv_pixels`` —— **永遠吐**。patch 的 ROI 常常只有幾百個像素，而在那個
+          數量下離散度本身沒有意義；一個算得出來的 std 看起來跟一個可信的 std
+          一模一樣，所以樣本數必須跟著數字一起走。
+
+          ⚠ 名字**不是** ``glv_n_px``（計畫書原本寫的那個）：以 ``_px`` 結尾的
+          特徵會被 nm 孿生規則自動配一個 ``_nm``（`_util.nm_twin_names`），
+          而「幾個像素」換算成奈米沒有意義。這一格是個**數量**，不是長度。
+        * ``glv_ok`` —— **只有設了 ``min_pixels`` 才吐**。沒設的時候它恆為 1，
+          而一整欄的 1 是雜訊：它看起來像個答案，實際上什麼都沒說。
+        """
+        out = {"glv_pixels": float(int(patch.size))}
+        if int(p.get("min_pixels") or 0):
+            out["glv_ok"] = 0.0 if cls._too_thin(patch, p) else 1.0
+        return out
+
     def _note_distribution(self, ctx: Context, patch, p: Dict[str, Any],
-                           feats: Dict[str, float]) -> None:
+                           feats: Dict[str, float], n_raw: int = 0,
+                           thin: bool = False) -> None:
         """把這一塊的灰階分布留給儀表（F18 第 2 步）。
 
         **畫面上的那張圖就是引擎算的這一份** —— UI 不自己再跑一次統計，不然
@@ -431,6 +546,9 @@ class GlvStatsStep(MultiSourceStep):
             "region": str(p.get(self.REGION, "") or ""),
             "prefix": str(p.get(self.CURRENT_PREFIX, "") or ""),
             "n": int(arr.size),
+            # 三個旋鈕丟掉了幾成 —— 面板要說得出「你量的不是整塊」。
+            "n_raw": int(n_raw or arr.size),
+            "thin": bool(thin),
             # 「貼在 0 或 255 的比例」永遠記著 —— 它不是使用者勾了才成立的事實，
             # 而面板要用它回答「這塊還能不能信」。勾了 `glv_sat_frac` 的人另外
             # 得到一個同名特徵，那是**輸出**，這裡這個是**診斷**。
