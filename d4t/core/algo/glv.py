@@ -85,7 +85,7 @@ GLV_FORMULAS: Dict[str, str] = {
 
 SNR_ID = "snr"
 SNR_LABEL = "SNR"
-SNR_FORMULA = "(mean_T − mean_R) / std_R"
+SNR_FORMULA = "|stat_T − stat_R| / std across the reference boxes"
 
 _EPS = 1e-9
 
@@ -288,32 +288,45 @@ COMPARE_METRICS: Dict[str, str] = {
     "delta": "target minus reference, in gray levels",
     "ratio": "target divided by reference",
     "percent": "the difference as a percentage of the reference",
-    "snr": "the difference divided by how much the reference itself varies",
-    "tstat": "the same, but with the size of each region taken into account",
+    "snr": ("how far apart they are, in standard deviations of the "
+            "reference's own box-to-box variation (never negative - the "
+            "direction is what delta is for)"),
+    "tstat": "the same, but with how many reference boxes there are taken into account",
 }
 
 
 def compare_pixels(target: np.ndarray, reference: np.ndarray,
-                   stat: str = "glv_mean") -> Dict[str, float]:
+                   stat: str = "glv_mean",
+                   reference_boxes: Optional[List[float]] = None,
+                   ) -> Dict[str, float]:
     """兩塊區域的像素 → 一組比較的數字。
 
     ``stat`` 決定「拿哪一個統計量來比」（``glv_mean`` / ``glv_median`` /
-    ``glv_q90`` …，同 :func:`glv_value`）。``snr`` 與 ``tstat`` 的分母一律是
-    **像素的散布**，跟 ``stat`` 挑哪一個無關 —— 「差幾個 σ」問的是散布，
-    而中位數沒有自己的 σ。
+    ``glv_q90`` …，同 :func:`glv_value`）。
 
-    為什麼 ``snr`` 的公式是 ``(μ_T − μ_R) / σ_R``
-    ---------------------------------------------
-    那是 e-beam 這一行**帶正負號**的 SNR 慣例，而這個 repo 已經有兩個地方在用
-    它（:func:`group_snr` 與 ``algo/snr``）。這裡不發明第三種寫法 ——
-    同一個名字在不同卡片上算出不同的東西，是最難發現的那種錯。
+    ``snr`` 與 ``tstat`` 的分母：**框與框之間，不是像素與像素之間**
+    ------------------------------------------------------------------
+    使用者定調 2026-08-21：「SNR 的定義全線幫我改成是 by box（by pixel 會
+    太小），然後 SNR 不會有負值，有負代表亮暗差異而已」。
 
-    ``tstat`` 是它的「樣本數也算」版本：兩塊區域的像素數差很多的時候
-    （GDS 的一層可能是另一層的十倍大），``snr`` 只看參考那邊的散布，
-    而 ``tstat`` 的分母把兩邊的樣本數都算進去。兩個都給，因為它們回答的是
-    不同的問題，而使用者要選哪一個取決於他在比什麼。
+    ``reference_boxes`` 是**參照那一塊每一格各自算出來的 stat**（一個框一個
+    數字）。σ 取自它們之間的散布：
 
-    分母是 0（區域太小、或整塊同一個值）時那一項是 ``nan`` —— **不是 0**：
+    * per-pixel 的 σ 裡有 shot noise，它比「同材質的格子彼此差多少」大得多，
+      於是 SNR 被壓得很小 —— 而那個小不是訊號弱，是分母裝錯東西；
+    * 「這一塊比那些格子亮幾個 σ」問的本來就是**格與格之間的變異**。
+
+    格子少於兩個 → σ 沒有定義 → ``snr`` / ``tstat`` 是 ``nan``。
+    **不退回 per-pixel**：同一個名字在不同情況下算出不同的東西，是這個 repo
+    最怕的那種錯（`snr_map` 的檔頭就在講這件事）。
+
+    ``snr`` **不帶正負號**（``|Δ| / σ``）：方向是 ``delta`` 的事，而 ``delta``
+    照樣帶正負 —— 「有負代表亮暗差異而已」。
+
+    ``tstat`` 是它的「格子數也算」版本：σ / √n。格子多的那一邊，同樣的差距更
+    值得相信，而 ``snr`` 看不到這件事。
+
+    分母是 0（格子都一樣、或只有一格）時那一項是 ``nan`` —— **不是 0**：
     0 的意思是「沒有差異」，而這裡的事實是「這個問題答不出來」。
     """
     t = np.asarray(target, dtype=np.float64).ravel()
@@ -328,15 +341,19 @@ def compare_pixels(target: np.ndarray, reference: np.ndarray,
     out["percent"] = (float((tv - rv) / rv * 100.0) if abs(rv) > 1e-12
                       else float("nan"))
 
-    sd_r = float(r.std())
-    out["snr"] = float((tv - rv) / sd_r) if sd_r > 1e-9 else float("nan")
-
-    # Welch 的標準誤（不假設兩邊變異數相同 —— 兩塊區域的材質不同，
-    # 假設它們散布一樣沒有道理）。
-    vt, vr = float(t.var(ddof=1)) if t.size > 1 else 0.0, \
-        float(r.var(ddof=1)) if r.size > 1 else 0.0
-    se = (vt / max(1, t.size) + vr / max(1, r.size)) ** 0.5
-    out["tstat"] = float((tv - rv) / se) if se > 1e-12 else float("nan")
+    boxes = [float(v) for v in (reference_boxes or [])
+             if v is not None and np.isfinite(v)]
+    if len(boxes) < 2:
+        out["snr"] = float("nan")
+        out["tstat"] = float("nan")
+        return out
+    # ddof=1：這幾格是「同類的格子」的一個樣本，不是全部的母體。格子數常常
+    # 只有幾十個，那個差別看得出來。
+    sd_box = float(np.std(boxes, ddof=1))
+    gap = abs(tv - rv)
+    out["snr"] = float(gap / sd_box) if sd_box > 1e-9 else float("nan")
+    se = sd_box / (len(boxes) ** 0.5)
+    out["tstat"] = float(gap / se) if se > 1e-12 else float("nan")
     return out
 
 

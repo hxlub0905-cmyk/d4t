@@ -275,7 +275,7 @@ def test_a_region_goes_in_one_side_and_out_the_other(window):
     src = first_source(window, "load_single")
     gds = window.add_card_after(src, "roi_from_mask")
     a = window.add_card_after(gds, "glv_stats")
-    b = window.add_card_after(a, "roi_snr")
+    b = window.add_card_after(a, "cd_measure")
     window._on_edge_added(src, gds, "single", "source")
     window.model.set_param(gds, "layers", "1:epi")
     window._on_edge_added(src, a, "single", "source")

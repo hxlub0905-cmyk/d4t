@@ -9,7 +9,6 @@
   load_patch, load_single, load_sidecar, normalize, tone, denoise, flatten,
   align, subtract, align_to, pair_source,
   roi_cross, roi_template, roi_from_mask, roi_mask,
-  snr_map, cd_measure, roi_snr, focus_quality, glv_stats,
   feature_math,
   output_csv, output_report, output_klarf, output_image
 
@@ -55,7 +54,6 @@ from . import roi_from_mask  # GDS label map -> 具名區域
 from . import roi_mask       # roi_mask（區域 → 0/255 mask 影像流，F8c）
 from . import roi_template   # roi_template
 from . import cd             # cd_measure
-from . import roi_snr        # roi_snr
 from . import quality        # focus_quality
 from . import glv_stats      # glv_stats（Gray level：stats / compare）
 from . import feature_math   # feature_math（Algo 段：數字 → 數字）
@@ -63,6 +61,5 @@ from . import output         # Output 段（csv / report / klarf / image）
 
 __all__ = [
     "load", "load_sidecar", "normalize", "denoise", "tone", "flatten", "align", "arith",
-    "align_to", "pair_source", "roi_cross", "roi_from_mask", "roi_mask", "roi_template", "snr_map", "cd", "roi_snr",
     "quality", "glv_stats", "feature_math", "output",
 ]

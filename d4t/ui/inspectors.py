@@ -3,7 +3,7 @@
 
 為什麼不是一塊通用面板
 ----------------------
-右下角本來是一張「特徵 / 數值」表：`roi_snr_signed 11.170`、`glv_max 255`。
+右下角本來是一張「特徵 / 數值」表：`glv_snr 11.170`、`glv_max 255`。
 問題不是它佔位子，是**那些數字沒有辦法判讀** —— 11.17 是大還是小？255 是不是
 飽和了？一個數字單獨存在，回答不了使用者真正在問的問題。
 
@@ -1069,7 +1069,7 @@ class MeasureInspector(Inspector):
 
     為什麼是這一張圖
     ----------------
-    `roi_snr_signed 11.170` 單獨存在回答不了任何問題。而調一張量測卡的時候，
+    `glv_snr 11.170` 單獨存在回答不了任何問題。而調一張量測卡的時候，
     要問的其實是：**我把參數設成這樣，量出來的東西分不分得開？**
 
     分布回答得了：擠成一根柱子 = 這個特徵對這批資料沒有鑑別力（不管門檻設哪裡
@@ -1996,7 +1996,6 @@ INSPECTORS: Dict[str, type] = {
     "glv_stats": GlvInspector,
     "cd_measure": MeasureInspector,
     "focus_quality": MeasureInspector,
-    "roi_snr": MeasureInspector,
     "roi_from_mask": GdsInspector,
     "pair_source": PairInspector,
     # 對圖的分數只有**跟整批比**才讀得懂：0.62 是高是低要看其他顆長什麼樣。

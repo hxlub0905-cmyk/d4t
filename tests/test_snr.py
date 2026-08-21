@@ -1,68 +1,20 @@
-"""Tests for d4t.core.algo.snr (vendored 2026-07-27)."""
+"""Tests for d4t.core.algo.snr (vendored 2026-07-27).
+
+⚠ `roi_snr()`（ROI 對周邊 margin 背景）與它的三支測試在 2026-08-21 連同
+`roi_snr` 卡一起刪掉了 —— 使用者：「原來的 SNR 那張卡請幫我拿掉整個程式碼
+刪掉避免混淆，我需要的是 GL 比對的 SNR」。這一份剩下的是 Z-map 用的那幾支，
+以及帶正負號慣例的規範出處 `snr_signed`。
+"""
 from __future__ import annotations
 
 import numpy as np
 
 from d4t.core.algo.snr import (
-    RoiSnrResult,
     SnrMapResult,
     center_gaussian_mask,
     compute_snr_map,
-    roi_snr,
     snr_signed,
 )
-
-
-def _image_with_patch(bg_mean: float, patch_value: float, seed: int = 5) -> np.ndarray:
-    rng = np.random.default_rng(seed)
-    img = np.clip(rng.normal(bg_mean, 5.0, size=(120, 120)), 0, 255)
-    img[40:50, 40:50] = patch_value
-    return img.astype(np.float32)
-
-
-def test_snr_signed_primitive():
-    rng = np.random.default_rng(3)
-    ref = rng.normal(50.0, 5.0, size=500)
-    target = np.full(100, 60.0)
-    val = snr_signed(target, ref)
-    assert 1.0 < val < 3.0  # (60-50)/5 = 2 nominal
-
-    # Dark target -> negative
-    assert snr_signed(np.full(100, 40.0), ref) < 0
-
-    # Flat reference or empty inputs -> 0.0
-    assert snr_signed(target, np.full(100, 50.0)) == 0.0
-    assert snr_signed(np.array([]), ref) == 0.0
-
-
-def test_roi_snr_bright_on_dark_positive():
-    img = _image_with_patch(bg_mean=50.0, patch_value=150.0)
-    res = roi_snr(img, (40, 40, 10, 10), background_margin=15)
-    assert isinstance(res, RoiSnrResult)
-    assert res.snr_signed > 5.0
-    assert res.snr_abs > 5.0
-    assert abs(res.snr_abs - abs(res.snr_signed)) < 1e-3
-    assert res.defect_mean > res.background_mean
-    assert res.contrast > 50.0
-    assert res.contrast_ratio > 1.5
-    assert res.dvi > 0.0
-    assert res.edge_sharpness >= 0.0
-
-
-def test_roi_snr_dark_on_bright_negative():
-    img = _image_with_patch(bg_mean=200.0, patch_value=20.0)
-    res = roi_snr(img, (40, 40, 10, 10), background_margin=15)
-    assert res.snr_signed < -5.0
-    assert res.snr_abs > 5.0
-    assert abs(res.snr_abs - abs(res.snr_signed)) < 1e-3
-    assert res.defect_mean < res.background_mean
-
-
-def test_roi_snr_invalid_rect_returns_none():
-    img = _image_with_patch(50.0, 150.0)
-    assert roi_snr(None, (0, 0, 10, 10)) is None
-    assert roi_snr(img, (200, 200, 10, 10)) is None  # fully outside
-
 
 def _diff_with_blob(seed: int = 9):
     """Flat noise plus a plateau blob wider than the SNR window.

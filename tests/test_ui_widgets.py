@@ -572,7 +572,7 @@ def test_library_panel_groups_and_double_click(qapp):
     assert "load_patch" in by_group["input"]
     assert {"subtract", "align"} <= by_group["compare"]
     assert "roi_cross" in by_group["region"]
-    assert {"glv_stats", "cd_measure", "roi_snr"} <= by_group["measure"]
+    assert {"glv_stats", "cd_measure"} <= by_group["measure"]
 
     # 空的段落要留一行提示（registry 目前沒有 adc 卡片）
     empties = [lbl for lbl in panel.findChildren(QLabel)
@@ -611,14 +611,16 @@ def test_library_search_filters_cards_and_hides_empty_sections(qapp):
 
     panel.set_query("snr")
     hit = set(panel.visible_step_keys())
-    assert {"snr_map", "roi_snr"} <= hit
+    # `snr_map`（Z-map）的說明裡有 SNR；Gray level 的 `snr` 是它的比較項之一。
+    # （`roi_snr` 那張卡在 2026-08-21 刪掉了 —— 使用者要的是 GL 比對的 SNR。）
+    assert {"snr_map", "glv_stats"} <= hit
     assert "denoise" not in hit
     assert "Input" not in panel.visible_section_titles(), \
         "整組都沒命中的區塊標題要一起收起來"
 
     # 多個詞是 AND；說明文字也在搜尋範圍內
-    panel.set_query("region signal")
-    assert set(panel.visible_step_keys()) == {"roi_snr"}
+    panel.set_query("gray percentiles")
+    assert set(panel.visible_step_keys()) == {"glv_stats"}
 
     # F7-7：清空搜尋之後回到 rail 的狀態（這裡是全部收起來），不是全部攤開
     panel.set_query("")
@@ -839,20 +841,42 @@ def test_a_hand_written_statistic_is_shown_and_stays_ticked(qapp):
     assert w.chip("glv_trim05").label == "Trimmed 5%"
 
 
-def test_the_gray_level_card_gets_chips_not_a_checkbox_grid(qapp):
-    """ParamForm 要真的替 ``metric_chips`` 這個型別配到新的編輯器。"""
+def test_both_metric_fields_on_the_gray_level_card_are_chips(qapp):
+    """**Statistics 與 Report 是同一種膠囊**（F18 補課，2026-08-21）。
+
+    使用者：「Compare 跟 absolute 一樣重要，而且它的 Metric 面板 UI 也沒有
+    Statistics 那麼漂亮，我覺得可以改成切換式」。以前 Report 那一格是舊的
+    勾選網格 —— 同一張卡上兩種長相，而其中一種看起來像沒做完。
+    """
     form = widgets_mod.ParamForm()
     form.set_step(_describe("glv_stats"),
-                  {"method": "stats", "metrics": "glv_median,glv_mad"},
+                  {"metrics": "glv_median,glv_mad",
+                   "reference": "another region",
+                   "compare_metrics": "delta,snr"},
                   ["test", "ref"])
-    chips = form.findChildren(widgets_mod.MetricChips)
-    assert len(chips) == 1
-    assert chips[0].text() == "glv_median,glv_mad"
-    # 舊的勾選網格不該同時出現在這張卡上（compare 那一格是 multi_choice，
-    # 但它在 stats 模式下是藏起來的）
-    grids = [g for g in form.findChildren(widgets_mod.MultiChoicePicker)
-             if g.isVisibleTo(form)]
-    assert not grids
+    chips = {c.text() for c in form.findChildren(widgets_mod.MetricChips)}
+    assert chips == {"glv_median,glv_mad", "delta,snr"}
+    # 舊的勾選網格在這張卡上一個都不剩
+    assert not [g for g in form.findChildren(widgets_mod.MultiChoicePicker)
+                if g.isVisibleTo(form)]
+
+
+def test_the_compare_chips_do_not_offer_to_add_a_percentile(qapp):
+    """「+ Percentile…」是 GLV 統計量專屬的動作。
+
+    在「跟誰比」那一格長出它，會是一顆按了就加出一個那張表不認得的值的鈕。
+    """
+    from d4t.core.algo.glv import COMPARE_METRICS
+
+    w = widgets_mod.MetricChips(list(COMPARE_METRICS), "delta,snr")
+    assert set(w.choice_names()) == set(COMPARE_METRICS)
+    assert not [c for c in w.findChildren(widgets_mod._MetricChip) if c.adder]
+    assert widgets_mod.metric_face("snr") == ("Compare", "SNR", "snr")
+
+    # Statistics 那一格照樣有
+    from d4t.core.steps.glv_stats import METRIC_CHOICES
+    g = widgets_mod.MetricChips(METRIC_CHOICES, "glv_median")
+    assert [c for c in g.findChildren(widgets_mod._MetricChip) if c.adder]
 
 
 # --------------------------------------------------------------------------- #

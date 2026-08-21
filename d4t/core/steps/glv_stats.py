@@ -241,7 +241,8 @@ class GlvStatsStep(MultiSourceStep):
     help = ("Gray levels of a region: pick the statistics you want (median, "
             "spread, percentiles, distribution shape…) and, if you also want "
             "to know how far it is from something else, pick what to compare "
-            "it against. The absolute numbers come out either way.")
+            "it against - the difference, the ratio, or the SNR. The absolute "
+            "numbers come out either way.")
     params = [
         ParamSpec(name="source", type="image_keys", direction="in", default="test",
                   help="Image stream to compute statistics on."),
@@ -310,7 +311,7 @@ class GlvStatsStep(MultiSourceStep):
                   "is not what you are measuring."),
         ),
         ParamSpec(
-            name="compare_metrics", type="multi_choice",
+            name="compare_metrics", type="metric_chips",
             default=DEFAULT_COMPARE_METRICS, section="3 · Compare against",
             show_when=("reference", tuple(r for r in REFERENCES if r != REF_NONE)),
             choices=list(algo_glv.COMPARE_METRICS),
@@ -378,6 +379,8 @@ class GlvStatsStep(MultiSourceStep):
         if int(params.get("min_pixels") or 0):
             extra.append("glv_ok")
         # 相對值疊在絕對值上（不是取代它）—— 那正是這一刀的重點。
+        # ⚠ 宣告是「**可能**會產出的」：``snr`` / ``tstat`` 在參照只有一格的
+        # defect 上算不出來，那一顆就不會有那一格（同 nm 孿生的理由）。
         if _reference_of(params) != REF_NONE:
             base = base + (_compare_metrics_of(params) or ["delta", "snr"])
         if str(params.get("across_boxes", POOLED)) == EACH_BOX:
@@ -569,9 +572,10 @@ class GlvStatsStep(MultiSourceStep):
         region = str(p.get(self.REGION) or "")
         arr = np.asarray(img)
         rects = ctx.roi_rects(region, arr.shape[:2])
-        ref_px = None
+        ref_px, ref_boxes = None, []
         if _reference_of(p) != REF_NONE:
-            ref_px = self._reference_pixels(ctx, img, p, _reference_of(p))
+            ref_px, ref_boxes = self._reference_block(
+                ctx, img, p, _reference_of(p))
         compare_names = (_compare_metrics_of(p) if ref_px is not None else [])
 
         per_box: List[Dict[str, float]] = []
@@ -599,9 +603,11 @@ class GlvStatsStep(MultiSourceStep):
                 one[mid] = algo_glv.glv_value(
                     raw if canon == "glv_sat_frac" else patch, canon)
             if ref_px is not None:
-                got = algo_glv.compare_pixels(patch, ref_px,
-                                              str(p.get("stat", "glv_mean")))
-                one.update({m: float(got[m]) for m in compare_names})
+                got = algo_glv.compare_pixels(
+                    patch, ref_px, str(p.get("stat", "glv_mean")),
+                    reference_boxes=ref_boxes)
+                one.update({m: float(got[m]) for m in compare_names
+                            if got.get(m) is not None and np.isfinite(got[m])})
             per_box.append(one)
             kept_index.append(i)
 
@@ -619,7 +625,9 @@ class GlvStatsStep(MultiSourceStep):
             return out
 
         for name in list(mids) + list(compare_names):
-            values = [b[name] for b in per_box]
+            values = [b[name] for b in per_box if name in b]
+            if not values:
+                continue            # 每一格都算不出來（例：參照只有一格）
             typical = float(np.median(values))
             k = int(np.argmax([abs(v - typical) for v in values]))
             out[name + TYPICAL_SUFFIX] = typical
@@ -761,9 +769,23 @@ class GlvStatsStep(MultiSourceStep):
             raise StepError(self.key, "unknown comparison %r; available: %s"
                             % (bad[0], ", ".join(algo_glv.COMPARE_METRICS)))
 
-        ref_px = self._reference_pixels(ctx, img, p, ref)
-        got = algo_glv.compare_pixels(patch, ref_px, str(p.get("stat", "glv_mean")))
-        out = {m: float(got[m]) for m in metrics}
+        ref_px, ref_boxes = self._reference_block(ctx, img, p, ref)
+        got = algo_glv.compare_pixels(patch, ref_px,
+                                      str(p.get("stat", "glv_mean")),
+                                      reference_boxes=ref_boxes)
+        # **算不出來的那一格不寫**（同 `_too_thin` 的三選一）：NaN 看起來比較
+        # 誠實，實際更糟 —— ``NaN < threshold`` 是 False，那顆 defect 會被
+        # 安靜地判成真缺陷（`tests/test_card_invariants.py` 的 I5 守著）。
+        out = {m: float(got[m]) for m in metrics
+               if got.get(m) is not None and np.isfinite(got[m])}
+        if len(ref_boxes) < 2 and {"snr", "tstat"} & set(metrics):
+            # 分母沒有東西可裝的時候要講話，而不是留一格 nan 讓人猜。
+            ctx.warn(
+                "[%s] the block it compares against ('%s') is a single box, so "
+                "there is no box-to-box spread to divide by - snr and tstat "
+                "are blank for this defect. Point it at a region that is laid "
+                "out as repeated boxes (a Golden Cell template, for example)."
+                % (self.key, self._ref_label(p, ref)))
 
         # 儀表用（同其他卡的慣例）：**畫面上的數字就是引擎算的這一份**。
         here = str(p.get(self.REGION) or "the image")
@@ -794,12 +816,18 @@ class GlvStatsStep(MultiSourceStep):
             return "%s @ %s" % (region, stream)
         return str(p.get(cls.REGION) or "") + OTHERS_SUFFIX
 
-    def _reference_pixels(self, ctx: Context, img, p: Dict[str, Any], ref: str):
-        """參照那一塊的像素 —— 拿不到的時候講出**真正的原因**。
+    def _reference_block(self, ctx: Context, img, p: Dict[str, Any], ref: str):
+        """參照那一塊 → ``(全部像素, 每一格的 stat)``。
 
-        `<name>_others` 在只有一份的 patch 上是**不存在**的（不是空的）——
-        那不是設定錯，是這一顆沒有基準，而使用者要分得出那兩件事
-        （見 `_util.set_region_family`）。
+        第二個回傳值是 ``snr`` / ``tstat`` 的分母來源 —— **框與框之間**，不是
+        像素與像素之間（使用者定調 2026-08-21：「SNR 的定義全線幫我改成是
+        by box（by pixel 會太小）」，算式見 `algo.glv.compare_pixels`）。
+        參照只有一格時它是空的，那兩個數字就不寫；**不退回 per-pixel** ——
+        同一個名字在不同情況下算出不同的東西，是最難發現的那種錯。
+
+        拿不到那一塊的時候講出**真正的原因**：`<name>_others` 在只有一份的
+        patch 上是**不存在**的（不是空的）—— 那不是設定錯，是這一顆沒有基準，
+        而使用者要分得出那兩件事（見 `_util.set_region_family`）。
         """
         region = str(p.get(self.REGION) or "")
         image = img
@@ -812,11 +840,9 @@ class GlvStatsStep(MultiSourceStep):
                     "the stream to compare against ('%s') does not exist "
                     "here; available: %s."
                     % (name, ", ".join(sorted(ctx.images)) or "none"))
-            if ref == REF_STREAM:
-                return roi_pixels(ctx, self.key, image, region)
-
-        want = (str(p.get("reference_region", "") or "").strip()
-                if ref in (REF_REGION, REF_BOTH) else region + OTHERS_SUFFIX)
+        want = region if ref == REF_STREAM else (
+            str(p.get("reference_region", "") or "").strip()
+            if ref in (REF_REGION, REF_BOTH) else region + OTHERS_SUFFIX)
         if not want:
             raise StepError(
                 self.key,
@@ -831,4 +857,23 @@ class GlvStatsStep(MultiSourceStep):
                 "defect%s. The rest of the batch is unaffected."
                 % (want, (" — %s" % why) if why else
                    " (no card upstream produced it)"))
-        return roi_pixels(ctx, self.key, image, want)
+        return (roi_pixels(ctx, self.key, image, want),
+                self._box_values(ctx, image, p, want))
+
+    @classmethod
+    def _box_values(cls, ctx: Context, image, p: Dict[str, Any],
+                    region: str) -> List[float]:
+        """一個區域**每一格**的 `stat`（只有一格時回空的）。"""
+        if ctx.roi_count(region) <= 1:
+            return []
+        canon = _canonical(str(p.get("stat", "glv_mean"))) or "glv_mean"
+        arr = np.asarray(image)
+        out: List[float] = []
+        for x, y, w, h in ctx.roi_rects(region, arr.shape[:2]):
+            if w <= 0 or h <= 0:
+                continue
+            kept, _n = cls._pixels_that_count(
+                arr[y:y + h, x:x + w].reshape(-1).astype(np.float64), p)
+            if kept.size:
+                out.append(algo_glv.glv_value(kept, canon))
+        return out

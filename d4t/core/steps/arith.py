@@ -5,7 +5,7 @@
 色調映射，使用者的問題只有一個「把這張圖調得看得清楚」）。
 
 注意：subtract 產出的 diff 流是 **float32**（可能含負值，取決於 absolute），
-下游卡（snr_map / roi_snr / glv_stats…）都吃得下 float32。
+下游卡（snr_map / glv_stats…）都吃得下 float32。
 """
 from __future__ import annotations
 

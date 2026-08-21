@@ -19,7 +19,7 @@ from d4t.core.pipeline.step import REGISTRY, StepError
 ALL_KEYS = [
     "load_patch", "normalize", "tone",
     "denoise", "align", "subtract",
-    "snr_map", "cd_measure", "roi_snr",
+    "snr_map", "cd_measure",
     "focus_quality", "glv_stats",
 ]
 
@@ -384,25 +384,6 @@ def _centre_roi(ctx, name: str, size: int, key: str = "test") -> None:
                        size / float(w), size / float(h)))
 
 
-# ---------------------------------------------------------------- roi_snr
-
-def test_roi_snr_signed_sign_bright_vs_dark():
-    size = 128
-    for sign in (+1.0, -1.0):
-        img = _rng(9).normal(0, 3, (size, size)).astype(np.float32)
-        c0 = size // 2 - 12
-        img[c0:c0 + 24, c0:c0 + 24] += sign * 60.0
-        ctx = Context(images={"diff": img})
-        _centre_roi(ctx, "mid", 24, key="diff")
-        run_step("roi_snr", ctx, roi="mid")
-        if sign > 0:
-            assert ctx.features["roi_snr_signed"] > 3.0
-        else:
-            assert ctx.features["roi_snr_signed"] < -3.0
-        assert ctx.features["roi_snr_abs"] > 3.0
-        assert ctx.features["roi_contrast"] > 30.0
-
-
 def test_focus_quality_sharp_vs_blurred():
     yy, xx = np.mgrid[0:128, 0:128]
     sharp = (((xx // 4 + yy // 4) % 2) * 255).astype(np.uint8)
@@ -612,3 +593,24 @@ def test_glv_stats_writes_nothing_rather_than_a_wrong_number_when_too_thin():
     run_step("glv_stats", ok, metrics="glv_mean", min_pixels=100)
     assert ok.features["glv_ok"] == 1.0
     assert not np.isnan(ok.features["glv_mean"])
+
+
+def test_gray_level_is_the_only_card_that_makes_an_snr_number():
+    """`roi_snr` 那張卡刪掉之後，SNR 只剩一個出處（2026-08-21 使用者要求）。
+
+    以前卡片庫裡有一張卡就叫 `SNR`（ROI 對周邊 margin 背景），而 Gray level
+    也吐 `snr`（對使用者接的那一塊）—— 兩個名字一樣、分母不同。使用者：
+    「原來的 SNR 那張卡請幫我拿掉整個程式碼刪掉避免混淆」。
+
+    Z-map（`snr_map`）留著，但它吐的是一張**圖**，不是一個數字。
+    """
+    from d4t.core.pipeline.step import REGISTRY
+
+    assert "roi_snr" not in REGISTRY
+    from d4t.core.algo import snr as algo_snr
+    assert not hasattr(algo_snr, "roi_snr"), "卡片走了，它的算法也不留著"
+    assert hasattr(algo_snr, "compute_snr_map"), "Z-map 還要用"
+    assert hasattr(algo_snr, "snr_signed"), "帶正負號慣例的規範出處"
+
+    # 搜尋「snr」要找得到現在真的產出它的那張卡
+    assert "SNR" in REGISTRY["glv_stats"].help

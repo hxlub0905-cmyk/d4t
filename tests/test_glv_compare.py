@@ -61,6 +61,15 @@ def _ctx(hot_glv=140.0, cold_glv=100.0, spread=4.0, seed=0, shape=(40, 40)):
     return ctx
 
 
+def _boxed_ctx(hot_glv=140.0, cold_glv=100.0, spread=4.0, seed=0, n=6):
+    """右半邊切成 n 格的版本 —— ``snr`` / ``tstat`` 的分母是**框與框之間**，
+    所以參照那一塊必須有好幾格才算得出來（2026-08-21 起）。"""
+    ctx = _ctx(hot_glv=hot_glv, cold_glv=cold_glv, spread=spread, seed=seed)
+    ctx.set_roi_boxes("cold", [(0.5, i / float(n), 0.5, 1.0 / n)
+                               for i in range(n)])
+    return ctx
+
+
 def _run(ctx, **over):
     p = dict(BASE)
     p.update(over)
@@ -73,9 +82,12 @@ def _run(ctx, **over):
 # --------------------------------------------------------------------------- #
 def test_two_regions_on_one_stream():
     """情況 1／3：跟同一張圖上的另一塊比。"""
-    ctx = _run(_ctx(hot_glv=140.0, cold_glv=100.0))
+    ctx = _run(_boxed_ctx(hot_glv=140.0, cold_glv=100.0))
     assert ctx.features["delta"] == pytest.approx(40.0, abs=1.0)
-    assert ctx.features["snr"] == pytest.approx(10.0, rel=0.15)
+    # snr 的分母是參照那六格**彼此**的散布（同材質，所以很小）—— 一個真的
+    # 差 40 階的缺陷因此是很大的 snr。by pixel 的話分母裡有 shot noise，
+    # 同一件事會被壓成個位數（使用者：「by pixel 會太小」）。
+    assert ctx.features["snr"] > 20.0
 
 
 def test_the_same_region_on_two_streams():
@@ -103,9 +115,25 @@ def test_it_declares_both_streams_and_both_regions():
 
 
 def test_the_declared_features_are_what_it_writes():
-    ctx = _run(_ctx())
+    ctx = _run(_boxed_ctx())
     declared = set(get_step("glv_stats").resolve_features(BASE))
     assert set(ctx.features) == declared
+
+
+def test_what_it_cannot_compute_is_absent_not_nan():
+    """參照只有一格 → 沒有「框與框之間」的散布 → ``snr`` / ``tstat`` 不寫。
+
+    **不是寫 NaN**：`NaN < threshold` 是 False，那顆 defect 會被安靜地判成真
+    缺陷（`tests/test_card_invariants.py` 的 I5）。也不是退回 per-pixel ——
+    同一個名字在不同情況下算出不同的東西，是最難發現的那種錯。
+
+    宣告不變（宣告是「**可能**會產出的」，同 nm 孿生的理由）。
+    """
+    ctx = _run(_ctx())                       # cold 只有一格
+    assert "delta" in ctx.features           # 這些照樣算得出來
+    assert "snr" not in ctx.features
+    assert "tstat" not in ctx.features
+    assert all(not np.isnan(v) for v in ctx.features.values())
 
 
 def test_the_prefix_applies():
@@ -184,16 +212,29 @@ def test_a_missing_stream_names_what_is_there():
 # --------------------------------------------------------------------------- #
 # 4. 算術：**不發明第三種 SNR**
 # --------------------------------------------------------------------------- #
-def test_snr_is_the_same_signed_convention_the_repo_already_uses():
-    """`(μ_T − μ_R) / σ_R` —— 跟 `algo.glv.group_snr` 與 `algo/snr` 同一個。
+def test_snr_is_by_box_and_never_negative():
+    """使用者定調 2026-08-21：**by box、而且不帶正負號**。
 
-    同一個名字在不同卡片上算出不同的東西，是最難發現的那種錯。
+    * 分母是「參照那一塊**每一格**的 stat」之間的標準差 —— per-pixel 的 σ 裡有
+      shot noise，它比同材質格子之間的差大得多，於是 SNR 被壓得很小，而那個小
+      不是訊號弱，是分母裝錯東西（使用者：「by pixel 會太小」）。
+    * 亮的缺陷與暗的缺陷給**同一個** snr —— 方向是 `delta` 的事
+      （使用者：「有負代表亮暗差異而已」）。
     """
-    rng = np.random.default_rng(3)
-    t = rng.normal(130, 3, 500)
-    r = rng.normal(100, 6, 500)
-    got = algo_glv.compare_pixels(t, r)
-    assert got["snr"] == pytest.approx((t.mean() - r.mean()) / r.std())
+    ref_boxes = [98.0, 100.0, 102.0, 99.0, 101.0, 100.0]
+    t = np.full(400, 140.0)
+    r = np.full(400, 100.0)
+    got = algo_glv.compare_pixels(t, r, reference_boxes=ref_boxes)
+    assert got["snr"] == pytest.approx(40.0 / np.std(ref_boxes, ddof=1))
+
+    dark = algo_glv.compare_pixels(np.full(400, 60.0), r,
+                                   reference_boxes=ref_boxes)
+    assert dark["snr"] == pytest.approx(got["snr"]), "亮暗一樣大"
+    assert dark["delta"] < 0 < got["delta"], "方向由 delta 講"
+
+    # 少於兩格 → 沒有 by-box 的散布 → nan（**不退回 per-pixel**）
+    assert np.isnan(algo_glv.compare_pixels(t, r)["snr"])
+    assert np.isnan(algo_glv.compare_pixels(t, r, reference_boxes=[100.0])["snr"])
 
 
 def test_a_denominator_of_zero_is_nan_not_zero():
@@ -206,14 +247,21 @@ def test_a_denominator_of_zero_is_nan_not_zero():
     assert np.isnan(got0["ratio"]) and np.isnan(got0["percent"])
 
 
-def test_tstat_takes_the_region_sizes_into_account_and_snr_does_not():
-    """GDS 的一層可能是另一層的十倍大 —— 兩個問題，兩個數字。"""
+def test_tstat_counts_the_boxes_and_snr_does_not():
+    """同樣的差距，格子多的那一邊更值得相信 —— 而 `snr` 看不到這件事。
+
+    （2026-08-21 起兩者的分母都 by box，所以「樣本數」指的是**幾格**，
+    不再是幾個像素。）
+    """
     rng = np.random.default_rng(5)
-    r = rng.normal(100, 5, 4000)
-    small = algo_glv.compare_pixels(rng.normal(110, 5, 20), r)
-    big = algo_glv.compare_pixels(rng.normal(110, 5, 2000), r)
-    assert small["snr"] == pytest.approx(big["snr"], rel=0.25)
-    assert big["tstat"] > small["tstat"] * 3, "樣本數沒有進 tstat"
+    t, r = np.full(400, 140.0), np.full(400, 100.0)
+    few = [float(v) for v in rng.normal(100, 3, 4)]
+    many = [float(v) for v in rng.normal(100, 3, 64)]
+
+    a = algo_glv.compare_pixels(t, r, reference_boxes=few)
+    b = algo_glv.compare_pixels(t, r, reference_boxes=many)
+    assert a["snr"] == pytest.approx(b["snr"], rel=0.5), "snr 只看散布"
+    assert b["tstat"] > a["tstat"] * 2.5, "格子數沒有進 tstat"
 
 
 def test_the_statistic_being_compared_is_the_users_choice():

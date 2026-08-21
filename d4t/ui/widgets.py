@@ -543,6 +543,13 @@ METRIC_GLYPHS = (
     "above", "saturated",
     # 「再加一顆」那種膠囊用的：它是**動作**不是統計量，所以它不畫分布。
     "plus",
+    # 「跟誰比」那一排（F18 補課，2026-08-21 使用者：「Compare 跟 absolute
+    # 一樣重要，而且它的面板 UI 沒有 Statistics 那麼漂亮，可以改成切換式」）。
+    #
+    # 前三個直接畫**那個運算的符號**（Δ / ÷ / %）—— 它們是這三個數字的名字，
+    # 識別度比任何示意圖都高，而且跟分布那一族一看就不同族。後兩個畫的是
+    # 「差距 ÷ 散布」那個比例本身。
+    "delta", "ratio", "percent", "snr", "tstat",
 )
 
 
@@ -722,6 +729,60 @@ def draw_metric_glyph(p: QPainter, name: str, size: float, color: str,
         fill_under(pts, 0.58, 1.0)            # 門檻**右邊**那一塊
         # 虛線 = 這條線可以自己調（``glv_above<NN>``）。
         vline(0.58, QPen(solid, max(1.2, size / 11.0), Qt.DashLine))
+    elif n == "delta":
+        # Δ —— 兩塊的差。實心三角形，19 px 下比描邊清楚。
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(solid))
+        p.drawPolygon(QPolygonF([
+            QPointF(pad + bw / 2, pad + bh * 0.06),
+            QPointF(pad + bw * 0.06, pad + bh * 0.94),
+            QPointF(pad + bw * 0.94, pad + bh * 0.94)]))
+    elif n == "ratio":
+        # ÷ —— 一條橫線加上下兩點。
+        p.setPen(QPen(solid, max(1.5, size / 9.0), Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(QPointF(pad + bw * 0.08, pad + bh / 2),
+                   QPointF(pad + bw * 0.92, pad + bh / 2))
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(solid))
+        r = bw * 0.11
+        for fy in (0.20, 0.80):
+            p.drawEllipse(QRectF(pad + bw / 2 - r, pad + bh * fy - r, 2 * r, 2 * r))
+    elif n == "percent":
+        # % —— 兩個小圈加一條斜線。
+        p.setPen(QPen(solid, max(1.3, size / 11.0)))
+        p.setBrush(Qt.NoBrush)
+        r = bw * 0.16
+        p.drawEllipse(QRectF(pad + bw * 0.06, pad + bh * 0.06, 2 * r, 2 * r))
+        p.drawEllipse(QRectF(pad + bw * 0.94 - 2 * r, pad + bh * 0.94 - 2 * r,
+                             2 * r, 2 * r))
+        p.setPen(QPen(solid, max(1.4, size / 10.0), Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(QPointF(pad + bw * 0.88, pad + bh * 0.10),
+                   QPointF(pad + bw * 0.12, pad + bh * 0.90))
+    elif n in ("snr", "tstat"):
+        # 「差距 ÷ 散布」那個**比例**本身：上面一條長的雙箭頭（差多遠），
+        # 底下一段短的實心帶（參照的格子彼此差多少）。兩者的長度比就是 snr。
+        y_gap = pad + bh * (0.24 if n == "snr" else 0.18)
+        p.setPen(bold)
+        p.drawLine(QPointF(pad + bw * 0.08, y_gap), QPointF(pad + bw * 0.92, y_gap))
+        a = bw * 0.13
+        for fx, d in ((0.08, 1), (0.92, -1)):
+            x = pad + fx * bw
+            p.drawLine(QPointF(x, y_gap), QPointF(x + a * d, y_gap - a * 0.7))
+            p.drawLine(QPointF(x, y_gap), QPointF(x + a * d, y_gap + a * 0.7))
+        band = QColor(solid)
+        band.setAlpha(190)          # 19 px 下太淡就整條不見了
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(band))
+        y_sd = pad + bh * (0.62 if n == "snr" else 0.50)
+        p.drawRect(QRectF(pad + bw * 0.36, y_sd, bw * 0.28, bh * 0.16))
+        if n == "tstat":
+            # 多一排格子：**幾格**也算進去。
+            p.setBrush(QBrush(solid))
+            side = bw * 0.16
+            for i in range(4):
+                p.drawRect(QRectF(pad + bw * 0.10 + i * side * 1.28,
+                                  pad + bh * 0.80, side, side))
+        p.setBrush(Qt.NoBrush)
     elif n == "saturated":
         curve(_dist_curve())
         p.setPen(Qt.NoPen)                    # 貼在頂端的那一根
@@ -2336,12 +2397,21 @@ METRIC_GROUPS: Dict[str, Tuple[str, str, str]] = {
     "glv_bimodality": ("Shape", "Bimodality", "bimodality"),
     "glv_above128": ("Counts", "Above 128", "above"),
     "glv_sat_frac": ("Counts", "Saturated %", "saturated"),
+    # 「跟誰比」那一排 —— 同一個 widget、同一種膠囊（F18 補課，2026-08-21）。
+    # 使用者：「Compare 跟 absolute 一樣重要，而且它的 Metric 面板 UI 也沒有
+    # Statistics 那麼漂亮，我覺得可以改成切換式」。
+    "delta": ("Compare", "Difference", "delta"),
+    "ratio": ("Compare", "Ratio", "ratio"),
+    "percent": ("Compare", "Percent", "percent"),
+    "snr": ("Compare", "SNR", "snr"),
+    "tstat": ("Compare", "t-stat", "tstat"),
 }
 
 #: 分群的顯示順序。不在 :data:`METRIC_GROUPS` 裡的 id（手寫 recipe 的
 #: ``glv_q37``、``glv_trim05``…）落在最後一群 —— **列出來並且勾著**，因為
 #: 「看不到就被靜靜刪掉」是最糟的一種幫忙（同 `MultiChoicePicker` 的老規矩）。
-METRIC_GROUP_ORDER = ("Center", "Spread", "Ends", "Shape", "Counts", "Other")
+METRIC_GROUP_ORDER = ("Center", "Spread", "Ends", "Shape", "Counts",
+                      "Compare", "Other")
 
 
 def metric_face(mid: str) -> Tuple[str, str, str]:
@@ -2633,13 +2703,20 @@ class MetricChips(QWidget):
         by_group: Dict[str, List[str]] = {}
         for mid in ids:
             by_group.setdefault(metric_face(mid)[0], []).append(mid)
+        # 「再加一顆」是 GLV 統計量專屬的（分位數、亮度門檻）。這個 widget 也
+        # 服務「跟誰比」那一格，而在那裡長出一顆 `+ Percentile…` 只會是一顆
+        # 按了會加出一個那張表不認得的值的鈕。
+        adders = any(str(m).startswith("glv_") for m in ids)
 
         row = 1
         for group in METRIC_GROUP_ORDER:
             members = by_group.get(group) or []
-            if not members and group != "Ends":
+            if not members and not (adders and group == "Ends"):
                 continue
-            lbl = QLabel(group, self)
+            # 只有一群的時候不印群名（「跟誰比」那一格就是這種）—— 那一列的
+            # 標籤已經寫了「Report」，旁邊再擺一個「Compare」只是一個沒有在
+            # 分辨任何東西的字。
+            lbl = QLabel(group if len(by_group) > 1 else "", self)
             lbl.setObjectName("metricGroup")
             lbl.setAlignment(Qt.AlignRight | Qt.AlignTop)
             lbl.setFixedWidth(46)
@@ -2655,7 +2732,7 @@ class MetricChips(QWidget):
             # Counts。做成**同一種膠囊**（虛線框）而不是一顆按鈕 —— 那一列上
             # 混一顆長得不一樣的鈕，讀起來像是它跟旁邊那些不是同一件事。
             for text, question, lo, hi, tmpl, start in self._ADDERS:
-                if metric_face(tmpl % start)[0] != group:
+                if not adders or metric_face(tmpl % start)[0] != group:
                     continue
                 b = _MetricChip("+" + tmpl, colour, False, flow,
                                 adder_label=text + "…")

@@ -573,7 +573,6 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
         "subtract": ["align"],
         "snr_map": ["align", "subtract"],
         "cd_measure": ["align", "subtract", "snr_map"],
-        "roi_snr": ["align", "subtract", "snr_map"],
         # GDS 那條路的上游不是影像處理，是**另一張 Input 卡**：label map 那條流
         # 由 `load_sidecar` 產（配對在 ingest 層做，見 F11 Region-3 第 2 步）。
         "roi_from_mask": ["load_sidecar"],
