@@ -504,6 +504,89 @@ def _migrate_roi_compare_into_glv_stats(nodes: Dict[str, "RecipeNode"]) -> None:
                                 enabled=node.enabled)
 
 
+def _migrate_compare_method_into_reference(nodes: Dict[str, "RecipeNode"]) -> None:
+    """``glv_stats`` 的 ``method="compare"`` → ``reference`` 那一格（F18 第 5 步）。
+
+    使用者 2026-08-21 定調把 ``compare`` 併進「跟誰比」這個維度：**絕對值永遠
+    吐，相對值疊在上面**。舊的二選一最實際的坑是 ``compare`` 從不輸出絕對值，
+    所以「這塊 EPI 的平均灰階是 120」跟「它比隔壁亮 12」不能在同一張卡上同時
+    得到 —— 使用者得放兩張卡、接兩次線，而那兩張各自有機會設得不一樣。
+
+    對照：
+
+    ======================  ==========================================
+    舊                      新
+    ======================  ==========================================
+    ``target_source``       ``source``（本來就是這張卡在量的那條流）
+    ``target_region``       ``roi``
+    ``reference_source``    ``reference_source``（兩條流不同時才有意義）
+    ``reference_region``    ``reference_region``
+    ``stat``                ``stat`` ＋ ``metrics``（絕對值現在也吐）
+    ======================  ==========================================
+
+    ``metrics`` 補成 ``stat``：舊卡片用那個統計量代表每一塊，所以「它的絕對值」
+    正是使用者心裡的那個數字。**相對值的名字逐字不變**（``<prefix>_delta``）——
+    那是舊 recipe 的分數表達式不必改寫的前提。
+
+    判準是「**舊東西在不在**」（鐵則 9）：``method`` 這個鍵還在，而且是
+    ``compare``。做完把它刪掉，所以 ``to_json_dict → from_json_dict`` 走第二次
+    時什麼都不會發生（identity）—— `run_batch` 送 recipe 進 worker 走的正是那
+    條路，它一旦不是 identity，``workers=1`` 與 ``workers=2`` 會算出不同的分數。
+    """
+    for nid, node in list(nodes.items()):
+        if node.step != "glv_stats":
+            continue
+        params = dict(node.params)
+        method = str(params.pop("method", "") or "").strip()
+        if not method:
+            continue                      # 新 recipe：沒有這個鍵，什麼都不做
+        if method != "compare":
+            nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
+                                    enabled=node.enabled)
+            continue                      # ``stats`` 就是現在的預設行為
+        target_source = str(params.pop("target_source", "") or "test").strip()
+        ref_source = str(params.pop("reference_source", "") or "").strip()
+        ref_region = str(params.pop("reference_region", "") or "").strip()
+        params["source"] = target_source
+        params["roi"] = str(params.pop("target_region", "") or "").strip()
+        # 哪一種「跟誰比」，由**舊參數的值**決定（不是猜的）：流一不一樣 ×
+        # 區域一不一樣，正好是一張真值表。
+        #
+        # ⚠ 第一版漏了「兩邊都不一樣」那一格，於是那種舊 recipe 被轉成
+        # 「同一塊、另一條流」—— 跑得完、有數字，而那個數字**答的是另一個
+        # 問題**。舊卡片有四個獨立的角色參數，所以它表達得出這一種。
+        other_stream = bool(ref_source) and ref_source != target_source
+        other_region = bool(ref_region) and ref_region != params["roi"]
+        if other_stream and other_region:
+            params["reference"] = "another region on another stream"
+            params["reference_source"] = ref_source
+            params["reference_region"] = ref_region
+        elif other_stream:
+            params["reference"] = "another stream"
+            params["reference_source"] = ref_source
+        else:
+            params["reference"] = "another region"
+            params["reference_region"] = ref_region
+        params.setdefault("metrics", str(params.get("stat", "") or "glv_mean"))
+        nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
+                                enabled=node.enabled)
+
+
+def _rename_in_expr(score: "ScoreSpec", table: Dict[str, str]) -> "ScoreSpec":
+    """把分數表達式裡的**整個識別字**照 ``table`` 換掉（子字串不算）。
+
+    ``str.replace`` 會把 ``my_delta_ratio`` 這種自訂名字打斷 —— 所以用邊界比對，
+    而且**長的先比**：``epi_delta`` 與 ``delta`` 同時在表裡時，前者要先中。
+    """
+    expr = str(getattr(score, "expr", "") or "")
+    if not expr or not table:
+        return score
+    keys = sorted(table, key=len, reverse=True)
+    new_expr = re.sub(r"\b(%s)\b" % "|".join(map(re.escape, keys)),
+                      lambda m: table[m.group(1)], expr)
+    return score if new_expr == expr else replace(score, expr=new_expr)
+
+
 def _migrate_renamed_features(score: "ScoreSpec") -> "ScoreSpec":
     """分數表達式裡的舊 feature 名換成新的。
 
@@ -523,6 +606,38 @@ def _migrate_renamed_features(score: "ScoreSpec") -> "ScoreSpec":
     if new_expr == expr:
         return score
     return replace(score, expr=new_expr)
+
+
+def _compare_feature_renames(nodes: Dict[str, "RecipeNode"]) -> Dict[str, str]:
+    """舊的相對量特徵名 → ``cmp_*``（F18 補課第三輪，2026-08-21）。
+
+    使用者：「絕對量的跟相對量的還是要分類好，不然不清楚命名規則會很痛苦。」
+    ``epi_delta`` 因此變成 ``epi_cmp_delta_median`` —— 而分數表達式裡指著舊
+    名字的那一份，不換就是一條 `unknown-feature` 加一個算不出來的分數
+    （同 :func:`_migrate_renamed_features` 的理由）。
+
+    **對照表跟名字的規則住在同一個地方**（`GlvStatsStep.legacy_feature_renames`）：
+    抄一份到這裡的話，改一次名字有兩個地方要跟上，而漏掉的那一次會改寫成一個
+    不存在的變數 —— 跑起來才炸，而且炸在別的地方（`CLAUDE.md` §0）。
+
+    **判準是「舊東西在不在」**（鐵則 9）：只有表達式裡真的出現舊名字才動它。
+    換完之後留下的是 ``cmp_…``，它不在對照表的左邊 —— 所以第二次跑是 no-op，
+    而 ``to_json_dict → from_json_dict`` 仍然是 identity。
+    """
+    out: Dict[str, str] = {}
+    for node in nodes.values():
+        try:
+            step_cls = REGISTRY[node.step]
+        except Exception:              # noqa: BLE001 — 不認得的卡就跳過
+            continue
+        renames = getattr(step_cls, "legacy_feature_renames", None)
+        if renames is None:
+            continue
+        try:
+            out.update(renames(dict(node.params)))
+        except Exception:              # noqa: BLE001 — 遷移不該讓開檔失敗
+            continue
+    return out
 
 
 def _rescued_name_renames(nodes: Dict[str, "RecipeNode"],
@@ -729,7 +844,13 @@ class Recipe:
         _migrate_renamed_cards(nodes)
         # 兩張 GLV 卡收成一張的兩個 method（F16）。
         _migrate_roi_compare_into_glv_stats(nodes)
+        # 順序要緊：上面那一道會產生 ``method="compare"``，這一道再把它變成
+        # ``reference``。反過來的話 roi_compare 的節點會漏掉第二段。
+        _migrate_compare_method_into_reference(nodes)
         score = _migrate_renamed_features(score)
+        # 相對量改叫 `cmp_*` 之後，舊表達式裡的 `epi_delta` 要跟著換
+        # （順序要緊：上面兩道遷移跑完，節點的參數才是新的形狀）。
+        score = _rename_in_expr(score, _compare_feature_renames(nodes))
         # ⚠ **撞名前綴那一道遷移不在這裡**（`_migrate_rescued_feature_names`）。
         # 它住在 :meth:`load` —— 理由見那一支的說明：這裡是「重建一個物件」，
         # 而那是 `run_batch` 送 recipe 進 worker 走的路。

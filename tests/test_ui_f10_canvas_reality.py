@@ -257,17 +257,21 @@ def test_two_sources_get_the_stream_name_in_front_of_every_number(window):
     黃金值一個數字都不動（`tests/test_e2e_*` 與 freeze_golden 對著這件事）。
     """
     glv = get_step("glv_stats")
+    # `glv_pixels`（F18 第 4 步）跟著每一塊走，所以它也帶前綴 —— 這一條測的
+    # 是**前綴規則**，不是「這張卡吐幾個數字」。
     one = glv.validate_params({"source": "diff", "metrics": "glv_max"})
-    assert glv.resolve_features(one) == ["glv_max"]
+    assert glv.resolve_features(one) == ["glv_max", "glv_pixels"]
 
     two = glv.validate_params({"source": "diff,test", "metrics": "glv_max"})
-    assert glv.resolve_features(two) == ["diff_glv_max", "test_glv_max"]
+    assert glv.resolve_features(two) == ["diff_glv_max", "diff_glv_pixels",
+                                         "test_glv_max", "test_glv_pixels"]
 
     # 使用者自己填的 output_prefix 疊在流名後面，而且只有一個底線
     named = glv.validate_params({"source": "diff,test", "metrics": "glv_max",
                                  "output_prefix": "center"})
-    assert glv.resolve_features(named) == ["diff_center_glv_max",
-                                           "test_center_glv_max"]
+    assert glv.resolve_features(named) == [
+        "diff_center_glv_max", "diff_center_glv_pixels",
+        "test_center_glv_max", "test_center_glv_pixels"]
 
 
 def test_every_measure_card_can_take_more_than_one_source(window):
@@ -289,11 +293,15 @@ def test_every_measure_card_can_take_more_than_one_source(window):
     #:
     #: **F16 之後這是一張卡的兩種模式**，所以驗的方式跟著變：不再是「這張卡是
     #: 哪一類」，而是「**在這組參數下**是哪一類」—— 而兩種接線方式不准同時出現
-    #: （`show_when` 保證那件事，這裡驗它真的成立）。
     #:
-    #: **列在這裡而不是放寬條件**：加第 18 張量測卡的那天，它仍然要做一個明確
-    #: 的決定（是多連一、還是角色不同），而不是安靜地留在單一來源上。
-    ROLE_PORTS = {"glv_stats": {"method": "compare"}}
+    #: **F18 第 5 步之後這一份是空的**：Gray level 不再有兩種接線方式。
+    #: 它的主埠永遠是清單（多連一 = 同一件事量在好幾條流上），而「跟誰比」
+    #: 是**另一個問題**、另一個埠、另一個名字 —— 那一個是單數（一次只跟一個
+    #: 東西比），而且只在使用者說要比的時候才長出來。
+    #:
+    #: 表留著不是留戀：加第 18 張量測卡的那天，它仍然要做一個明確的決定
+    #: （是多連一、還是角色不同），而不是安靜地留在單一來源上。
+    ROLE_PORTS: dict = {}
 
     for cls in list_steps():
         # 「量測卡」＝**只吐數字、不吐影像**的那一類。``snr_map`` 掛在 Measure
@@ -303,34 +311,42 @@ def test_every_measure_card_can_take_more_than_one_source(window):
         if (cls.resolve_group() != "measure" or cls.key in HIDDEN_STEPS
                 or cls.writes or not cls.features_out):
             continue
-        if cls.key in ROLE_PORTS:
-            # 角色不同的那一類：驗的東西反過來 —— **在那組參數下要有兩個以上
-            # 的輸入埠，而且每一個都是單一來源**（清單型別在這裡就是那個 bug）。
-            role_params = ROLE_PORTS[cls.key]
-            visible = [sp for sp in cls.input_specs()
-                       if sp.visible_for(role_params)]
-            ports = [sp for sp in visible if sp.type == "image_key"]
-            assert len(ports) >= 2, \
-                "%s 在 %r 下的來源有角色之分，那就該是兩個埠" % (cls.key, role_params)
-            assert not [sp for sp in visible if sp.type == "image_keys"], \
-                "%s 在 %r 下混用了清單來源與角色埠 —— 那兩種接線方式對不起來" \
-                % (cls.key, role_params)
-            # 而它的**另一種** method 仍然要是正常的多連一（不然合併就等於
-            # 把「量一塊」那一半弄丟了）。
-            other = {k: ("stats" if v == "compare" else v)
-                     for k, v in role_params.items()}
-            other_visible = [sp for sp in cls.input_specs()
-                             if sp.visible_for(other)]
-            assert not [sp for sp in other_visible if sp.type == "image_key"], \
-                "%s 在 %r 下不該還看得到角色埠" % (cls.key, other)
-            assert [sp for sp in other_visible if sp.type == "image_keys"], \
-                "%s 在 %r 下應該是多連一的清單來源" % (cls.key, other)
-            continue
         assert issubclass(cls, MultiSourceStep), \
             "%s 是量測卡，但接不了第二條來源" % cls.key
         spec = next(sp for sp in cls.input_specs() if sp.name == cls.SOURCE)
         assert spec.type == "image_keys", \
             "%s.%s 還是單一來源的型別" % (cls.key, spec.name)
+
+
+def test_the_reference_ports_are_singular_and_only_show_when_asked(window):
+    """「跟誰比」是**另一個問題**，所以它有自己的埠 —— 而那個埠是單數。
+
+    單數／複數的意思跟影像流一字不差（F13-⑥）：複數的第二條線是**累加**
+    （同一件事量在好幾條流／好幾塊上），單數的第二條線是**取代**。
+    而「跟誰比」一次只有一個答案。
+
+    「只在說要比的時候才長出來」是 F18 這一刀的重點：主埠永遠在，使用者不必
+    先回答一個關於軟體架構的問題（舊的 `method` 一切換，整組埠就換一套）。
+    """
+    from d4t.core.steps.glv_stats import REF_NONE, REF_REGION, REF_STREAM
+
+    cls = get_step("glv_stats")
+    # 影像埠與區域埠是兩份（圓埠 / 菱形埠），所以兩邊都要問
+    ports = cls.input_specs() + cls.region_input_specs()
+    specs = {sp.name: sp for sp in ports}
+    assert specs["source"].type == "image_keys"
+    assert specs["roi"].type == "region_keys"
+    assert specs["reference_source"].type == "image_key"
+    assert specs["reference_region"].type == "region_key"
+
+    def shown(reference):
+        return [sp.name for sp in ports if sp.visible_for({"reference": reference})]
+
+    assert shown(REF_NONE) == ["source", "roi"], "沒說要比的時候不該有參照埠"
+    assert "reference_source" in shown(REF_STREAM)
+    assert "reference_region" not in shown(REF_STREAM)
+    assert "reference_region" in shown(REF_REGION)
+    assert "reference_source" not in shown(REF_REGION)
 
 
 # --------------------------------------------------------------------------- #

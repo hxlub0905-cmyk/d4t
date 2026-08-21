@@ -94,7 +94,9 @@ def test_picking_a_region_names_the_results_after_it(window):
     assert window.model.nodes[nid].params["output_prefix"] == "epi"
     assert "named" in window.status_text()
     from d4t.core.pipeline import get_step
-    assert "epi_glv_mean" in get_step("glv_stats").resolve_features(
+    # 這一條測的是**前綴**（區域名跑到 feature 名前面），所以拿預設勾的第一顆
+    # 來問就好 —— 它是哪一顆由卡片的預設決定（F18 起是 median）。
+    assert "epi_glv_median" in get_step("glv_stats").resolve_features(
         window.model.nodes[nid].params)
 
 

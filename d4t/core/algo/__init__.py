@@ -14,7 +14,7 @@ from .align import (
     ncc_score, parabola_subpx, template_align_nm,
 )
 from .snr import (
-    snr_signed, roi_snr, RoiSnrResult, compute_snr_map, SnrMapResult,
+    snr_signed, compute_snr_map, SnrMapResult,
     center_gaussian_mask,
 )
 from .roi import NamedROI, ROIStats, MultiROISet, pixel_rect_to_norm

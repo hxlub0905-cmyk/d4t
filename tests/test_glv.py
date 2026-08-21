@@ -110,3 +110,83 @@ def test_group_snr_signed_convention():
 
 def test_default_metrics():
     assert default_metrics() == ["glv_mean", "glv_median"]
+
+
+# --------------------------------------------------------------------------- #
+# F18（2026-08-21）：robust／形狀／計數那三群
+# --------------------------------------------------------------------------- #
+def test_robust_and_shape_metrics_match_their_formulas(patch):
+    """新的每一顆都要**等於它自己 tooltip 上寫的那條公式**。
+
+    這些值會被打進分數表達式，所以「大概是那個意思」不夠 —— 而 MAD 特別
+    值得釘住：文獻上常見的是 1.4826×MAD（拿來估 σ 的那個），d4t 用的是
+    **原始的** MAD，因為它要給製程工程師讀成「典型偏離中位數幾階灰階」。
+    """
+    f = patch.astype(np.float64).ravel()
+    z = (f - f.mean()) / f.std()
+
+    assert glv_value(patch, "glv_mad") == pytest.approx(
+        np.median(np.abs(f - np.median(f))))
+    assert glv_value(patch, "glv_iqr") == pytest.approx(
+        np.percentile(f, 75) - np.percentile(f, 25))
+    assert glv_value(patch, "glv_skew") == pytest.approx((z ** 3).mean())
+    assert glv_value(patch, "glv_kurt") == pytest.approx((z ** 4).mean() - 3.0)
+    assert glv_value(patch, "glv_above128") == pytest.approx((f > 128).mean())
+    assert glv_value(patch, "glv_sat_frac") == pytest.approx(
+        ((f <= 0) | (f >= 255)).mean())
+
+    # 熵：0..255 每一階一個 bin，單位是 bit（所以 8 bit 的均勻分布 = 8）
+    flat_uniform = np.arange(256, dtype=np.uint8)
+    assert glv_value(flat_uniform, "glv_entropy") == pytest.approx(8.0)
+
+
+def test_trimmed_mean_actually_drops_the_outlier():
+    """修剪平均要真的把兩端丟掉 —— 這是它存在的唯一理由。"""
+    base = np.full(100, 100.0)
+    base[0] = 255.0                       # 一顆 hot pixel
+    assert glv_value(base, "glv_mean") > 101.0
+    assert glv_value(base, "glv_trim10") == pytest.approx(100.0)
+    # 0% = 不修剪，逐字等於平均（邊界不要特例化成別的東西）
+    assert glv_value(base, "glv_trim0") == pytest.approx(base.mean())
+
+
+def test_bimodality_separates_one_hill_from_two():
+    """`glv_bimodality` 是拿來自檢的：ROI 裡混了兩種材質時要看得出來。"""
+    rng = np.random.default_rng(7)
+    one_hill = rng.normal(120, 12, 4000)
+    two_hills = np.concatenate([rng.normal(70, 8, 2000),
+                                rng.normal(180, 8, 2000)])
+    # 0.555 是均勻分布的值，慣例上以它當「像是兩座山」的線
+    assert glv_value(one_hill, "glv_bimodality") < 0.555
+    assert glv_value(two_hills, "glv_bimodality") > 0.555
+
+
+def test_a_flat_or_empty_patch_never_produces_nan():
+    """整塊同一個值是**正常**的（飽和的 patch 上很常見），不能毒到整列特徵。
+
+    鐵則 7 的算式版：單顆出錯不得殺掉整批，而一個 NaN 進了分數表達式就是
+    那種「跑得完、有數字、而且是錯的」。
+    """
+    for patch_ in (np.full((8, 8), 40.0), np.array([], dtype=np.uint8)):
+        for mid in ("glv_std", "glv_mad", "glv_iqr", "glv_skew", "glv_kurt",
+                    "glv_entropy", "glv_bimodality", "glv_sat_frac",
+                    "glv_trim10", "glv_above128"):
+            v = glv_value(patch_, mid)
+            assert np.isfinite(v), "%s on a flat/empty patch gave %r" % (mid, v)
+            # 熵在全平的時候是 0，不是 -0.0（CSV 上的 "-0.0" 讀起來像個負的量）
+            assert not (v == 0.0 and np.copysign(1.0, v) < 0), mid
+
+
+def test_the_numbered_ids_refuse_a_number_that_makes_no_sense():
+    """``glv_trim60``（兩端各去 60%）不是打錯字就是誤解，兩者都要擋。"""
+    from d4t.core.algo.glv import above_of, trim_of
+
+    assert trim_of("glv_trim10") == 10
+    assert trim_of("glv_trim49") == 49
+    assert trim_of("glv_trim60") is None      # 兩端加起來超過 100%
+    assert trim_of("glv_trimx") is None
+    assert above_of("glv_above200") == 200
+    assert above_of("glv_above300") is None   # 灰階只到 255
+    assert above_of("glv_mean") is None
+    assert metric_label("glv_trim10") == "GLV trimmed mean 10%"
+    assert metric_formula("glv_above200") == "share of pixels with gray > 200"

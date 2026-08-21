@@ -3,7 +3,7 @@
 
 為什麼不是一塊通用面板
 ----------------------
-右下角本來是一張「特徵 / 數值」表：`roi_snr_signed 11.170`、`glv_max 255`。
+右下角本來是一張「特徵 / 數值」表：`glv_snr 11.170`、`glv_max 255`。
 問題不是它佔位子，是**那些數字沒有辦法判讀** —— 11.17 是大還是小？255 是不是
 飽和了？一個數字單獨存在，回答不了使用者真正在問的問題。
 
@@ -43,12 +43,14 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
+from ..core.algo import glv as algo_glv
 from ..core.steps._util import CLIP_FRAC, PAIR_FEATURES
 from ..core.steps.denoise import HOT_FRAC, REMOVED_OVER_NOISE
-from .theme import TOKENS
+from . import theme
+from .theme import TOKENS, region_hex
 
 __all__ = ["Inspector", "AlignInspector", "EnhanceInspector",
-           "MeasureInspector", "InputInspector",
+           "MeasureInspector", "GlvInspector", "InputInspector",
            "CrossInspector", "TemplateInspector",
            "INSPECTORS", "inspector_for"]
 
@@ -95,6 +97,19 @@ class Inspector(QWidget):
         self.update()
 
     # -- 子類覆寫 -----------------------------------------------------------
+    def tab_title(self) -> str:
+        """分頁鈕上的字。**預設是類別的 `title`，但子類可以按狀態改**。
+
+        以前這一格讀的是**類別屬性**，所以不管畫面上是什麼，它永遠寫著
+        「Gray level」——「這一塊在講什麼」得自己從圖裡推。使用者 2026-08-21：
+        「他的 title 要更詳細一點（顯示的是什麼、誰跟誰比之類的）」。
+        """
+        return str(getattr(self, "title", "Card"))
+
+    def tab_tooltip(self) -> str:
+        """分頁鈕的 tooltip —— 標題放不下的那半句話。"""
+        return ""
+
     def summary(self) -> str:
         """一行文字摘要。**測試與狀態列讀這個**，不去讀畫素。"""
         return ""
@@ -1054,7 +1069,7 @@ class MeasureInspector(Inspector):
 
     為什麼是這一張圖
     ----------------
-    `roi_snr_signed 11.170` 單獨存在回答不了任何問題。而調一張量測卡的時候，
+    `glv_snr 11.170` 單獨存在回答不了任何問題。而調一張量測卡的時候，
     要問的其實是：**我把參數設成這樣，量出來的東西分不分得開？**
 
     分布回答得了：擠成一根柱子 = 這個特徵對這批資料沒有鑑別力（不管門檻設哪裡
@@ -1253,11 +1268,511 @@ class MeasureInspector(Inspector):
                                          QPointF(x, mid + 4.0)]))
 
 
+def _short_number(v: float, signed: bool = False) -> str:
+    """圖上那一行用的短數字：`26.1` / `66` / `0.06`（`_fmt` 給的是 3 位小數）。
+
+    圖上的字只有 10 px 高，而 `SNR 66.116` 裡真正在講事情的是 `66`。
+    """
+    a = abs(float(v))
+    text = ("%.0f" % v) if a >= 10 else (("%.1f" % v) if a >= 1
+                                         else ("%.2f" % v))
+    if signed and float(v) > 0:
+        text = "+" + text
+    return text.replace("-", "\u2212")     # 真的減號，跟畫面其他地方一致
+
+
 def _fmt(v: float) -> str:
     a = abs(v)
     if a >= 1000 or (a and a < 0.01):
         return "%.3g" % v
     return "%.3f" % v if a < 100 else "%.1f" % v
+
+
+class GlvInspector(Inspector):
+    """Gray level：**這一顆量到的分布**，勾選的統計量標在上面（F18 第 2 步）。
+
+    為什麼換掉 Spread（使用者 2026-08-21）
+    -------------------------------------
+    原話：「我不太喜歡要跑完才有 Spread 的設計，他是很重要，但他不應該被放在
+    這邊，因為他在 run 之前都是空的。」而那句話有程式碼上的證據：
+
+    ==============================  ====================  ================
+    儀表                            資料從哪來            什麼時候有東西
+    ==============================  ====================  ================
+    `EnhanceInspector`              ``ctx.meta``          **預覽就有**
+    `MeasureInspector`（Spread）    ``trial_results``     跑完一批才有
+    ==============================  ====================  ================
+
+    同一塊面板、同一個位置、兩種資料生命週期。這一張走的是前者：引擎在
+    ``ctx.meta["glv_hist"]`` 留了每一塊的直方圖，所以**選到卡片的那一刻就有東西**。
+
+    整批的資訊沒有消失，它縮成底下一條 8 px 的帶子（這一顆落在整批的哪裡），
+    而「這個特徵分不分得開」那個問題搬去 Results —— 那裡本來就是「跑完才看」
+    的地方，而且門檻拉得動（見 `ui/results.py`）。
+
+    畫什麼
+    ------
+    * 一塊區域一條直方圖（最多 :data:`MAX_ROWS` 條，多的收成一句話）
+    * 勾選到的統計量畫成刻度：**中心那一類畫實線，其餘畫短刻度** ——
+      十個標記全畫成一樣的線的話，圖上會是一排看不出誰是誰的柵欄
+    * 標題右邊是 ``n=… px · …% saturated`` —— 「這塊還能不能信」的兩個數字，
+      而 patch 的 ROI 常常只有幾百個像素
+    """
+
+    title = "Gray level"
+
+    #: 一次畫幾條分布。面板不高，四條以上每一條就只剩幾個畫素。
+    MAX_ROWS = 3
+    #: 底下那條「這一顆在整批的哪裡」的帶子有多高（跑過才畫）。
+    BAND_H = 14.0
+    #: 一個**位置**、畫整條實線的那幾個。
+    CENTRE_MARKS = ("glv_median", "glv_p50", "glv_mean", "glv_trim")
+    #: 一個**位置**、畫貼著底的短刻度的那幾個。
+    POSITION_MARKS = ("glv_min", "glv_max", "glv_q")
+    #: 一個**寬度**（不是位置）—— 畫成中心兩側的一段淡帶，見 :meth:`_paint_marks`。
+    WIDTH_MARKS = ("glv_mad", "glv_std", "glv_iqr")
+
+    # -- 資料 ---------------------------------------------------------------
+    def rows(self) -> List[Dict[str, Any]]:
+        """引擎留下的每一塊（`glv_stats._note_distribution` 寫的）。"""
+        raw = self.meta.get("glv_hist")
+        return [dict(r) for r in raw][:self.MAX_ROWS] if isinstance(raw, list) else []
+
+    def has_data(self) -> bool:
+        return bool(self.rows())
+
+    def empty_reason(self) -> str:
+        return ("Wire an image into this card and it will show the gray levels "
+                "it measured, with the statistics you ticked marked on them.")
+
+    def summary(self) -> str:
+        rows = self.rows()
+        if not rows:
+            return ""
+        bits = []
+        for r in rows:
+            where = r.get("region") or r.get("stream") or "whole image"
+            bits.append("%s: %d px" % (where, int(r.get("n") or 0)))
+        text = "  ·  ".join(bits)
+        gated = [r for r in rows if r.get("thin")]
+        if gated:
+            # 使用者自己設了「至少要幾個像素」，而這一顆沒過 —— 那不是警告，
+            # 是這張卡在照他說的做，所以講法是陳述句。
+            text += ("  ·  under the minimum you set, so this defect's gray "
+                     "levels are blank")
+        thin = [r for r in rows if int(r.get("n") or 0) < self.THIN_PX
+                and not r.get("thin")]
+        if thin:
+            # **樣本數太少的時候要講出來。** patch 的 ROI 常常只有幾百個像素，
+            # 而在那個數量下離散度本身沒有意義 —— 而畫面上以前沒有任何地方
+            # 說得出這件事。
+            text += ("  ⚠ %s under %d pixels — spread statistics are not "
+                     "reliable that thin."
+                     % (", ".join(str(r.get("region") or r.get("stream") or "it")
+                                  for r in thin), self.THIN_PX))
+        hot = [r for r in rows if float(r.get("sat") or 0.0) > self.SAT_WARN]
+        if hot:
+            text += ("  ⚠ %.0f%% of the pixels sit at 0 or 255 — whatever was "
+                     "in them is already gone."
+                     % (100.0 * max(float(r.get("sat") or 0.0) for r in hot)))
+        return text
+
+    #: 少於這麼多像素就講一句話（見 :meth:`summary`）。
+    THIN_PX = 400
+    #: 貼在 0/255 的比例超過這個就講一句話。
+    SAT_WARN = 0.02
+
+    # -- 標題（使用者 2026-08-21：「要更詳細一點」）--------------------------
+    def _pairs(self) -> Dict[str, str]:
+        """區域名 -> 它跟誰比（引擎在 ``ctx.meta["compares"]`` 留的那一份）。"""
+        out: Dict[str, str] = {}
+        for rec in (self.meta.get("compares") or {}).values():
+            if isinstance(rec, dict):
+                out[str(rec.get("target") or "")] = str(rec.get("reference") or "")
+        return out
+
+    def tab_title(self) -> str:                # noqa: D102
+        rows = self.rows()
+        if not rows:
+            return self.title
+        pairs = self._pairs()
+        first = rows[0]
+        who = str(first.get("region") or "the image")
+        if len(rows) > 1:
+            return "%s · %d regions" % (self.title, len(rows))
+        versus = pairs.get(who)
+        if versus:
+            # 「誰跟誰比」比「在哪條流上」重要 —— 兩個都塞得下的話字會太長，
+            # 而流名在比較的那一邊已經寫出來了（`epi_others @ ref`）。
+            return "%s · %s vs %s" % (self.title, who, versus)
+        return "%s · %s on %s" % (self.title, who,
+                                  str(first.get("stream") or "?"))
+
+    def tab_tooltip(self) -> str:              # noqa: D102
+        rows = self.rows()
+        if not rows:
+            return self.empty_reason()
+        pairs = self._pairs()
+        bits = []
+        for r in rows:
+            who = str(r.get("region") or "the whole image")
+            line = "%s on %s" % (who, r.get("stream") or "?")
+            if pairs.get(who):
+                line += "  compared against %s" % pairs[who]
+            if int(r.get("boxes") or 0) > 1:
+                line += "  (%d boxes, one at a time)" % int(r.get("boxes") or 0)
+            bits.append(line)
+        marks = sorted((rows[0].get("marks") or {}))
+        if marks:
+            bits.append("showing: " + ", ".join(marks))
+        return "\n".join(bits)
+
+    # -- 畫 -----------------------------------------------------------------
+    def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
+        rows = self.rows()
+        if not rows:
+            self._say_empty(p, rect)
+            return
+        body = rect
+        band = None
+        if self._batch_marks(rows[0]):
+            body = QRectF(rect.left(), rect.top(), rect.width(),
+                          rect.height() - self.BAND_H - 4)
+            band = QRectF(rect.left(), body.bottom() + 4, rect.width(),
+                          self.BAND_H)
+        row_h = body.height() / float(len(rows))
+        for i, r in enumerate(rows):
+            self._paint_row(p, QRectF(body.left(), body.top() + i * row_h,
+                                      body.width(), row_h - 3), r, i)
+        if band is not None:
+            self._paint_batch_band(p, band, rows[0])
+
+    def _colour(self, index: int) -> QColor:
+        """一塊區域一個顏色 —— **跟影像上的疊框、模板編輯器同一組**。
+
+        不同一組的話，使用者在畫面上認得的那個綠色 ROI1，到了這裡是別的顏色，
+        而沒有任何東西說得出它們是同一個。
+        """
+        return QColor(region_hex(index))
+
+    def _paint_row(self, p: QPainter, band: QRectF, row: Dict[str, Any],
+                   index: int) -> None:
+        counts = [max(0, int(c)) for c in (row.get("bins") or [])]
+        if not counts or band.height() < 12:
+            return
+        colour = self._colour(index)
+
+        label = str(row.get("region") or row.get("stream") or "whole image")
+        versus = self._pairs().get(str(row.get("region") or ""))
+        tail = ""
+        if versus:
+            # **虛線那條就是它** —— 標題上的這一段用同一個顏色寫（見下面
+            # 那個兩段式的 drawText），不然畫面上沒有任何東西說得出那條線是誰。
+            tail = "  vs  " + versus
+        if int(row.get("boxes") or 0) > 1:
+            # 一格一格量的時候畫的是**典型那一格**，而畫面必須說出這件事 ——
+            # 不說的話這條分布看起來像整個區域的，那是兩個不同的東西。
+            label += "  ·  typical box #%d of %d" % (int(row.get("box") or 0),
+                                                     int(row.get("boxes") or 0))
+        head = QRectF(band.left(), band.top(), band.width(), 13)
+        p.setPen(colour)
+        p.drawText(head, Qt.AlignLeft | Qt.AlignVCenter, label)
+        if tail:
+            w = QFontMetricsF(p.font()).horizontalAdvance(label)
+            p.setPen(QColor(TOKENS[self.REF_TOKEN]))
+            p.drawText(QRectF(head.left() + w, head.top(),
+                              head.width() - w, head.height()),
+                       Qt.AlignLeft | Qt.AlignVCenter, tail)
+        p.setPen(QColor(TOKENS["text_hint"]))
+        # 三個旋鈕丟掉了像素的時候要講出來（F18 第 4 步）：畫面上這條分布是
+        # **留下來的那些**，而使用者需要知道那不是整塊。
+        n, n_raw = int(row.get("n") or 0), int(row.get("n_raw") or 0)
+        count = ("n=%d of %d px" % (n, n_raw)) if n_raw and n_raw != n \
+            else ("n=%d px" % n)
+        p.drawText(head, Qt.AlignRight | Qt.AlignVCenter,
+                   "%s · %.1f%% saturated"
+                   % (count, 100.0 * float(row.get("sat") or 0.0)))
+
+        plot = QRectF(band.left(), head.bottom() + 1, band.width(),
+                      max(8.0, band.bottom() - head.bottom() - 12))
+        top = max(counts) or 1
+        bw = plot.width() / float(len(counts))
+        fill = QColor(colour)
+        fill.setAlpha(90)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(fill))
+        for k, c in enumerate(counts):
+            h = (c / float(top)) * plot.height()
+            p.drawRect(QRectF(plot.left() + k * bw, plot.bottom() - h,
+                              max(1.0, bw - 0.4), h))
+        p.setPen(QColor(TOKENS["border_default"]))
+        p.setBrush(Qt.NoBrush)
+        p.drawLine(QPointF(plot.left(), plot.bottom()),
+                   QPointF(plot.right(), plot.bottom()))
+
+        # 0 與 255 —— 橫軸是灰階，而**每一條的尺都一樣**（不像 Spread 那邊
+        # 每一排各有各的單位），所以刻度寫兩端就夠。
+        axis = QRectF(plot.left(), plot.bottom() + 1, plot.width(), 11)
+        p.setPen(QColor(TOKENS["text_hint"]))
+        p.drawText(axis, Qt.AlignLeft | Qt.AlignVCenter, "0")
+        p.drawText(axis, Qt.AlignRight | Qt.AlignVCenter, "255")
+
+        self._paint_reference(p, plot, row)
+        self._paint_marks(p, plot, row, colour)
+
+    #: 參照那條分布用什麼顏色（虛線、次要色）—— 它是**背景**，量的那一塊才是
+    #: 主角，所以不搶顏色。
+    REF_TOKEN = "text_secondary"
+
+    #: 相對量在圖上寫成什麼（`cmp_delta_median` → `Δ median`）。
+    CMP_SHORT = {"delta": "Δ", "abs_delta": "|Δ|", "ratio": "ratio",
+                 "percent": "%", "contrast": "contrast", "snr": "SNR",
+                 "tstat": "t", "pct_rank": "rank", "overlap": "overlap",
+                 "spread_ratio": "MAD ratio"}
+    #: 圖上最多寫幾個（其餘在特徵表上）。
+    CMP_MAX = 3
+    #: 這幾個帶方向 —— 正負號要寫出來（`Δ +26` 與 `Δ −26` 是兩種缺陷）。
+    SIGNED = ("delta", "contrast", "percent")
+    #: 寫哪幾個、什麼順序 —— 「差多少」「這個差大不大」「兩邊像不像」。
+    CMP_ORDER = ("delta", "snr", "overlap", "abs_delta", "contrast", "ratio",
+                 "pct_rank", "tstat", "percent", "spread_ratio")
+
+    def _paint_reference(self, p: QPainter, plot: QRectF,
+                         row: Dict[str, Any]) -> None:
+        """把參照那一塊的分布**疊在同一把尺上**（使用者 2026-08-21）。
+
+        原話：「Feature 左側的 histogram 我還是沒有很滿意（相對／絕對？）」。
+        面板本來只畫「這一塊自己」，而這張卡有一半在做的事是比較 —— 相對的
+        那一半以前只是特徵表上的幾個數字，而數字答不出「這個差在不在雜訊裡」。
+        兩條分布疊起來一眼就看得出來。
+
+        三個刻意的選擇：
+
+        * 參照畫**外框虛線**、不填色 —— 填兩塊色的話上面那一塊會被蓋住，而
+          被蓋住的正好是量的那一塊（主角）。
+        * 兩條**各自**正規化到自己的最高點。橫軸（灰階）是共用的尺，縱軸不是
+          —— 參照常常是 target 的幾十倍大，照原始計數畫的話 target 會被壓成
+          貼著底的一條線。
+        * 兩邊的統計量各畫一條線，中間那一段就是 ``delta``：**那個數字在圖上
+          的長度**，而不是另一個要自己想像的量。
+        """
+        ref = row.get("ref")
+        if not isinstance(ref, dict):
+            return
+        counts = [max(0, int(c)) for c in (ref.get("bins") or [])]
+        if not counts or plot.height() < 10:
+            return
+        ink = QColor(TOKENS[self.REF_TOKEN])
+        top = max(counts) or 1
+        bw = plot.width() / float(len(counts))
+        pts = [QPointF(plot.left() + (k + 0.5) * bw,
+                       plot.bottom() - (c / float(top)) * plot.height())
+               for k, c in enumerate(counts)]
+        # 先鋪一層很淡的底再描虛線：只有虛線的話，那條高對比的曲線會比**量的
+        # 那一塊**（淡色的長條）還搶眼 —— 而主角是後者。
+        wash = QColor(ink)
+        wash.setAlpha(26)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(wash))
+        p.drawPolygon(QPolygonF(
+            [QPointF(plot.left(), plot.bottom())] + pts
+            + [QPointF(plot.right(), plot.bottom())]))
+        pen = QPen(ink, 1.0, Qt.DashLine)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawPolyline(QPolygonF(pts))
+
+        self._paint_gap(p, plot, ref, ink)
+        text = self._compare_caption(ref)
+        if text:
+            # **寫在座標軸那一列的正中間**：圖裡面已經有兩條分布、兩條 stat
+            # 的線與那一段 Δ，再壓一行字上去就是誰都讀不到。左右兩端是 0 與
+            # 255，中間本來就空著。
+            p.setPen(ink)
+            p.drawText(QRectF(plot.left(), plot.bottom() + 1, plot.width(), 11),
+                       Qt.AlignHCenter | Qt.AlignVCenter, text)
+
+    def _paint_gap(self, p: QPainter, plot: QRectF, ref: Dict[str, Any],
+                   ink: QColor) -> None:
+        """兩邊的 stat 各一條線，中間拉一段 —— 那一段的長度就是 ``delta``。
+
+        勾了好幾個統計量的時候只畫**第一個**：十條線疊在一張 40 px 高的圖上
+        會變成一排看不出誰是誰的柵欄（同 `_paint_marks` 的老問題）。
+        """
+        here, there = ref.get("here") or {}, ref.get("marks") or {}
+        stat = next((k for k in here if k in there), "")
+        if not stat:
+            return
+        try:
+            a, b = float(here[stat]), float(there[stat])
+        except (TypeError, ValueError):
+            return
+        if not (0.0 <= a <= 255.0 and 0.0 <= b <= 255.0):
+            return
+        y = plot.top() + 5.0
+        xa = plot.left() + (a / 255.0) * plot.width()
+        xb = plot.left() + (b / 255.0) * plot.width()
+        p.setPen(QPen(ink, 1.0, Qt.DotLine))
+        p.drawLine(QPointF(xb, plot.top()), QPointF(xb, plot.bottom()))
+        p.setPen(QPen(ink, 1.2))
+        p.drawLine(QPointF(xa, y), QPointF(xb, y))
+        for x, d in ((xa, 1 if xb > xa else -1), (xb, -1 if xb > xa else 1)):
+            p.drawLine(QPointF(x, y), QPointF(x + 3.0 * d, y - 2.5))
+            p.drawLine(QPointF(x, y), QPointF(x + 3.0 * d, y + 2.5))
+
+    @classmethod
+    def _compare_caption(cls, ref: Dict[str, Any]) -> str:
+        """圖上那一行相對量（``Δ +23.4 · SNR 5.1 · overlap 0.02``）。
+
+        **數字是引擎算的那一份**（`ref["values"]` 就是寫進特徵表的東西）——
+        面板不自己再算一次，不然畫面上的數字跟寫出去的有機會不一樣。
+        """
+        values = ref.get("values") or {}
+        rows: List[Tuple[int, str, float]] = []
+        for name, value in values.items():
+            rest = str(name).split("cmp_", 1)[-1]
+            metric = next((m for m in sorted(cls.CMP_SHORT, key=len,
+                                             reverse=True)
+                           if rest == m or rest.startswith(m + "_")), "")
+            if not metric:
+                continue
+            try:
+                rows.append((cls.CMP_ORDER.index(metric)
+                             if metric in cls.CMP_ORDER else 99,
+                             cls.CMP_SHORT[metric], float(value),
+                             metric in cls.SIGNED))
+            except (TypeError, ValueError):
+                continue
+        rows.sort(key=lambda t: t[0])
+        seen: List[str] = []
+        out: List[str] = []
+        for _order, short, value, signed in rows:
+            if short in seen:
+                continue        # 同一個 metric 勾了好幾個統計量 -> 只寫第一個
+            seen.append(short)
+            out.append("%s %s" % (short, _short_number(value, signed)))
+            if len(out) >= cls.CMP_MAX:
+                break
+        return "  ·  ".join(out)
+
+    def _paint_marks(self, p: QPainter, plot: QRectF, row: Dict[str, Any],
+                     colour: QColor) -> None:
+        """把勾選到的統計量標在這條分布上 —— **用它自己的形狀**。
+
+        這是整塊面板最容易說謊的地方。三種統計量在灰階軸上的意思完全不同：
+
+        ==========================  ==========================================
+        中位數 / 平均 / 修剪平均     一個**位置** → 整條實線
+        最小 / 最大 / 分位數         一個**位置** → 貼著底的短刻度
+        MAD / 標準差 / IQR           一個**寬度** → 中心兩側的一段淡帶
+        ==========================  ==========================================
+
+        第三種畫成一條線的話（第一版就是），`glv_mad = 65` 會在灰階 65 的地方
+        畫一條線 —— 那裡什麼都沒有，而畫面上沒有任何東西說得出那條線是假的。
+        寬度沒有中心可以掛的時候（只勾了 MAD、沒勾中位數）就**不畫** ——
+        「這個數字沒有畫得出來的位置」是一個誠實的答案。
+
+        剩下那幾個（偏度、峰度、熵、雙峰、飽和比例、亮度佔比）的單位根本不是
+        灰階，一律不畫；它們的值在特徵表上。唯一的例外是 ``glv_above<NN>``：
+        畫的是**那個門檻**（虛線），不是它的值 —— 門檻真的在灰階軸上。
+        """
+        marks = {str(k): v for k, v in (row.get("marks") or {}).items()}
+        ink = QColor(theme.readable_on(colour.name(), TOKENS["bg_surface"]))
+
+        def as_gray(mid):
+            try:
+                v = float(marks[mid])
+            except (KeyError, TypeError, ValueError):
+                return None
+            return v if 0.0 <= v <= 255.0 else None
+
+        def x_at(v):
+            return plot.left() + (v / 255.0) * plot.width()
+
+        centre = next((as_gray(m) for m in sorted(marks)
+                       if m.startswith(self.CENTRE_MARKS)
+                       and as_gray(m) is not None), None)
+
+        # 先畫寬度（淡帶），線才不會被蓋掉。
+        for mid in sorted(marks):
+            if not mid.startswith(self.WIDTH_MARKS) or centre is None:
+                continue
+            w = as_gray(mid)
+            if w is None or w <= 0:
+                continue
+            lo, hi = max(0.0, centre - w), min(255.0, centre + w)
+            wash = QColor(ink)
+            wash.setAlpha(46)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(wash))
+            p.drawRect(QRectF(x_at(lo), plot.top() + plot.height() * 0.30,
+                              x_at(hi) - x_at(lo), plot.height() * 0.70))
+            p.setBrush(Qt.NoBrush)
+
+        for mid in sorted(marks):
+            if mid.startswith(self.CENTRE_MARKS):
+                v = as_gray(mid)
+                if v is None:
+                    continue
+                p.setPen(QPen(ink, 1.6))
+                p.drawLine(QPointF(x_at(v), plot.top()),
+                           QPointF(x_at(v), plot.bottom()))
+            elif mid.startswith(self.POSITION_MARKS):
+                v = as_gray(mid)
+                if v is None:
+                    continue
+                p.setPen(QPen(ink, 1.1))
+                p.drawLine(QPointF(x_at(v), plot.bottom() - plot.height() * 0.34),
+                           QPointF(x_at(v), plot.bottom()))
+            else:
+                thr = algo_glv.above_of(mid)      # glv_above<NN>：畫門檻不畫值
+                if thr is None:
+                    continue
+                p.setPen(QPen(ink, 1.1, Qt.DashLine))
+                p.drawLine(QPointF(x_at(float(thr)), plot.top()),
+                           QPointF(x_at(float(thr)), plot.bottom()))
+        p.setPen(Qt.NoPen)
+
+    # -- 整批那一條帶子 -----------------------------------------------------
+    def _batch_marks(self, row: Dict[str, Any]) -> Optional[Tuple[str, float, float]]:
+        """(特徵名, 這一顆的值, 百分位) —— 沒跑過整批就回 None。"""
+        prefix = str(row.get("prefix") or "")
+        for mid in sorted((row.get("marks") or {})):
+            name = "%s_%s" % (prefix, mid) if prefix else mid
+            vals = self.feature_values(name)
+            here = self.this_value(name)
+            if len(vals) >= 2 and here is not None:
+                below = sum(1 for v in vals if v < here)
+                return (name, here, 100.0 * below / float(len(vals)))
+        return None
+
+    def _paint_batch_band(self, p: QPainter, box: QRectF,
+                          row: Dict[str, Any]) -> None:
+        """整批的資訊縮成一條帶子：**這一顆落在整批的哪裡**。
+
+        它跑完才有，所以它不能是這塊面板的主體 —— 那正是 Spread 搬家的理由。
+        一條帶子放得下的東西剛好就是它真正回答得了的問題。
+        """
+        got = self._batch_marks(row)
+        if not got:
+            return
+        name, here, pct = got
+        p.setPen(QColor(TOKENS["text_hint"]))
+        text = "%s = %s · top %d%% of the batch" % (
+            name, _fmt(here), int(round(100.0 - pct)))
+        left = QRectF(box.left(), box.top(), box.width() * 0.62, box.height())
+        p.drawText(left, Qt.AlignLeft | Qt.AlignVCenter, text)
+
+        track = QRectF(box.right() - box.width() * 0.34, box.center().y() - 3,
+                       box.width() * 0.34, 6)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor(TOKENS["border_default"])))
+        p.drawRoundedRect(track, 3, 3)
+        x = track.left() + (pct / 100.0) * track.width()
+        p.setBrush(QBrush(QColor(TOKENS["danger_text"])))
+        p.drawEllipse(QRectF(x - 3.5, track.center().y() - 3.5, 7, 7))
+        p.setBrush(Qt.NoBrush)
 
 
 class InputInspector(Inspector):
@@ -1634,10 +2149,12 @@ INSPECTORS: Dict[str, type] = {
     "normalize": EnhanceInspector,
     "denoise": EnhanceInspector,
     "flatten": EnhanceInspector,
-    "glv_stats": MeasureInspector,
+    # F18 第 2 步：Gray level 換成「這一顆的分布」（Spread 搬去 Results）。
+    # 其餘量測卡暫時留在 Spread —— 它們還沒有自己的面板，而**沒有面板比
+    # 「跑完才有東西的面板」更糟**。CD 那張本來就要整張重做（F19）。
+    "glv_stats": GlvInspector,
     "cd_measure": MeasureInspector,
     "focus_quality": MeasureInspector,
-    "roi_snr": MeasureInspector,
     "roi_from_mask": GdsInspector,
     "pair_source": PairInspector,
     # 對圖的分數只有**跟整批比**才讀得懂：0.62 是高是低要看其他顆長什麼樣。

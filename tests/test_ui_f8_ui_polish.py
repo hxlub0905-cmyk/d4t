@@ -317,8 +317,12 @@ def test_a_measure_card_draws_the_region_it_reads(window, qapp):
 
 def test_glv_metrics_are_ticked_not_typed(window, qapp):
     """統計量用勾的不是用打的（使用者要求）。清單外的手寫值（glv_q37）
-    照樣列出來並勾著 —— 看不到就被靜靜刪掉是最糟的一種「幫忙」。"""
-    from d4t.ui.widgets import MultiChoicePicker
+    照樣列出來並勾著 —— 看不到就被靜靜刪掉是最糟的一種「幫忙」。
+
+    F18 把勾選網格換成分群的膠囊（`MetricChips`）—— **這一條要的東西沒有變**，
+    換的只有長相，所以測的仍然是「列得出來、勾著、值一字不差」。
+    """
+    from d4t.ui.widgets import MetricChips
 
     m = window.model
     gs = m.add_step("glv_stats")
@@ -326,7 +330,7 @@ def test_glv_metrics_are_ticked_not_typed(window, qapp):
     window.select_node(gs)
     qapp.processEvents()
     editor = window.param_form.editor("metrics")
-    assert isinstance(editor, MultiChoicePicker)
+    assert isinstance(editor, MetricChips)
     assert "glv_q37" in editor.choice_names(), "recipe 帶來的自由值要列出來"
     assert editor.text() == "glv_mean,glv_q37"
 

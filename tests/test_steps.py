@@ -19,7 +19,7 @@ from d4t.core.pipeline.step import REGISTRY, StepError
 ALL_KEYS = [
     "load_patch", "normalize", "tone",
     "denoise", "align", "subtract",
-    "snr_map", "cd_measure", "roi_snr",
+    "snr_map", "cd_measure",
     "focus_quality", "glv_stats",
 ]
 
@@ -384,25 +384,6 @@ def _centre_roi(ctx, name: str, size: int, key: str = "test") -> None:
                        size / float(w), size / float(h)))
 
 
-# ---------------------------------------------------------------- roi_snr
-
-def test_roi_snr_signed_sign_bright_vs_dark():
-    size = 128
-    for sign in (+1.0, -1.0):
-        img = _rng(9).normal(0, 3, (size, size)).astype(np.float32)
-        c0 = size // 2 - 12
-        img[c0:c0 + 24, c0:c0 + 24] += sign * 60.0
-        ctx = Context(images={"diff": img})
-        _centre_roi(ctx, "mid", 24, key="diff")
-        run_step("roi_snr", ctx, roi="mid")
-        if sign > 0:
-            assert ctx.features["roi_snr_signed"] > 3.0
-        else:
-            assert ctx.features["roi_snr_signed"] < -3.0
-        assert ctx.features["roi_snr_abs"] > 3.0
-        assert ctx.features["roi_contrast"] > 30.0
-
-
 def test_focus_quality_sharp_vs_blurred():
     yy, xx = np.mgrid[0:128, 0:128]
     sharp = (((xx // 4 + yy // 4) % 2) * 255).astype(np.uint8)
@@ -445,6 +426,54 @@ def test_glv_stats_matches_numpy_including_aliases():
     # 未知統計項 → StepError
     with pytest.raises(StepError):
         run_step("glv_stats", Context(images={"test": img}), metrics="glv_bogus")
+
+
+def test_glv_stats_defaults_are_the_robust_set(tmp_path):
+    """F18：新加的卡預設吐 median/MAD/min/max（以前是 mean/std/P50）。
+
+    為什麼換得掉：`add_step` 走 ``validate_params(cleared_inputs())``，
+    **每一格都會被寫進 recipe** —— 所以既有檔案帶著自己那一份 metrics，
+    換掉的只有「之後新加的卡」。這一條同時鎖住那個前提：預設一旦沒有被寫進
+    params，改預設就會安靜地改掉舊 recipe 的數字。
+    """
+    from d4t.core.pipeline.step import get_step
+    from d4t.core.steps.glv_stats import DEFAULT_METRICS
+
+    step = get_step("glv_stats")
+    params = step.validate_params(step.cleared_inputs())
+    assert params["metrics"] == DEFAULT_METRICS == \
+        "glv_median,glv_mad,glv_min,glv_max"
+
+    img = _rng(21).integers(0, 256, size=(48, 48)).astype(np.uint8)
+    ctx = Context(images={"test": img})
+    run_step("glv_stats", ctx)
+    # `glv_pixels` 跟著每一塊走（F18 第 4 步）：patch 的 ROI 常常只有幾百個
+    # 像素，而在那個數量下離散度本身沒有意義 —— 樣本數必須跟數字一起走。
+    assert set(ctx.features) == {"glv_median", "glv_mad", "glv_min", "glv_max",
+                                 "glv_pixels"}
+    assert ctx.features["glv_pixels"] == 48 * 48
+    f64 = img.astype(np.float64)
+    assert ctx.features["glv_median"] == pytest.approx(np.median(f64))
+    assert ctx.features["glv_mad"] == pytest.approx(
+        np.median(np.abs(f64 - np.median(f64))))
+
+
+def test_glv_stats_takes_the_shape_and_count_statistics():
+    """形狀那一群要真的跑得完，而且 feature 名照使用者列的寫。"""
+    img = _rng(5).integers(0, 256, size=(40, 40)).astype(np.uint8)
+    ctx = Context(images={"test": img})
+    run_step("glv_stats", ctx,
+             metrics="glv_iqr,glv_skew,glv_kurt,glv_entropy,glv_bimodality,"
+                     "glv_trim10,glv_above128,glv_sat_frac")
+    assert set(ctx.features) == {
+        "glv_iqr", "glv_skew", "glv_kurt", "glv_entropy", "glv_bimodality",
+        "glv_trim10", "glv_above128", "glv_sat_frac", "glv_pixels"}
+    assert all(np.isfinite(v) for v in ctx.features.values())
+
+    # 數字打錯範圍的照樣是「未知統計項」，不是安靜地算出一個空集合的平均
+    with pytest.raises(StepError):
+        run_step("glv_stats", Context(images={"test": img}),
+                 metrics="glv_trim60")
 
 
 # ---------------------------------------------------------------- tone (F7-7)
@@ -504,3 +533,84 @@ def test_tone_cards_keep_float_streams_float_and_only_touch_their_own():
     ctx2 = Context(images={"test": f.copy()})
     with pytest.raises(StepError):
         run_step("tone", ctx2, streams="nope")
+
+
+def test_glv_stats_can_say_which_pixels_count(tmp_path):
+    """F18 第 4 步：三個旋鈕決定哪些像素算數，**而它們預設全部不作用**。
+
+    預設是不是 no-op 不是風格問題：既有 recipe 的 JSON 裡沒有這幾個鍵，
+    `validate_params` 會補上預設值 —— 一個會動的預設 = 安靜地改掉每一份舊
+    recipe 的數字。這一條把那件事鎖起來。
+    """
+    img = _rng(2).integers(60, 180, size=(30, 30)).astype(np.uint8)
+    img[0, 0] = 255
+    img[0, 1] = 0
+    mids = "glv_mean,glv_min,glv_max,glv_sat_frac"
+
+    plain = Context(images={"test": img})
+    run_step("glv_stats", plain, metrics=mids)
+    assert plain.features["glv_min"] == 0.0 and plain.features["glv_max"] == 255.0
+    assert plain.features["glv_pixels"] == 900.0
+    assert "glv_ok" not in plain.features, \
+        "沒設下限的時候 glv_ok 恆為 1，而一整欄的 1 是雜訊"
+
+    # 丟掉貼在 0/255 的：min/max 收進來，但**飽和比例照樣量原始的那一份**
+    # （丟掉之後再問「有多少貼在邊上」，答案恆為 0 —— 那是個沒有用的答案）
+    clean = Context(images={"test": img})
+    run_step("glv_stats", clean, metrics=mids, exclude_saturated=True)
+    assert clean.features["glv_min"] > 0.0 and clean.features["glv_max"] < 255.0
+    assert clean.features["glv_pixels"] == 898.0
+    assert clean.features["glv_sat_frac"] == pytest.approx(2.0 / 900.0)
+
+    # 兩端各修 5%：留下來的像素變少，全距一定不會變大
+    trimmed = Context(images={"test": img})
+    run_step("glv_stats", trimmed, metrics=mids, trim_percent=5.0)
+    assert trimmed.features["glv_pixels"] < 900.0
+    assert (trimmed.features["glv_max"] - trimmed.features["glv_min"]
+            <= plain.features["glv_max"] - plain.features["glv_min"])
+
+
+def test_glv_stats_writes_nothing_rather_than_a_wrong_number_when_too_thin():
+    """量不出來的時候**那幾格不寫** —— 不是 0，也不是 NaN。
+
+    三種都想過（`GlvStatsStep._too_thin` 的表）：0 會安靜地混進分數表達式；
+    NaN 更糟，因為 ``NaN < threshold`` 是 False，那顆 defect 會被安靜地判成
+    真缺陷（`tests/test_card_invariants.py` 的 I5 守著這件事）。不寫的話，
+    沒有人引用就什麼都不會發生，有人引用就當場失敗並指名那個變數。
+
+    而且不能用 raise：鐵則 7（單顆出錯不得殺掉整批）。
+    """
+    img = _rng(9).integers(0, 256, size=(20, 20)).astype(np.uint8)
+    ctx = Context(images={"test": img})
+    run_step("glv_stats", ctx, metrics="glv_mean,glv_std", min_pixels=5000)
+
+    assert "glv_mean" not in ctx.features and "glv_std" not in ctx.features
+    assert ctx.features["glv_ok"] == 0.0, "分數表達式要有一個乾淨的分支點"
+    assert ctx.features["glv_pixels"] == 400.0, "樣本數本身還是要說得出來"
+    assert all(not np.isnan(v) for v in ctx.features.values())
+
+    ok = Context(images={"test": img})
+    run_step("glv_stats", ok, metrics="glv_mean", min_pixels=100)
+    assert ok.features["glv_ok"] == 1.0
+    assert not np.isnan(ok.features["glv_mean"])
+
+
+def test_gray_level_is_the_only_card_that_makes_an_snr_number():
+    """`roi_snr` 那張卡刪掉之後，SNR 只剩一個出處（2026-08-21 使用者要求）。
+
+    以前卡片庫裡有一張卡就叫 `SNR`（ROI 對周邊 margin 背景），而 Gray level
+    也吐 `snr`（對使用者接的那一塊）—— 兩個名字一樣、分母不同。使用者：
+    「原來的 SNR 那張卡請幫我拿掉整個程式碼刪掉避免混淆」。
+
+    Z-map（`snr_map`）留著，但它吐的是一張**圖**，不是一個數字。
+    """
+    from d4t.core.pipeline.step import REGISTRY
+
+    assert "roi_snr" not in REGISTRY
+    from d4t.core.algo import snr as algo_snr
+    assert not hasattr(algo_snr, "roi_snr"), "卡片走了，它的算法也不留著"
+    assert hasattr(algo_snr, "compute_snr_map"), "Z-map 還要用"
+    assert hasattr(algo_snr, "snr_signed"), "帶正負號慣例的規範出處"
+
+    # 搜尋「snr」要找得到現在真的產出它的那張卡
+    assert "SNR" in REGISTRY["glv_stats"].help

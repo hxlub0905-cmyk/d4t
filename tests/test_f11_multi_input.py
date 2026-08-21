@@ -58,7 +58,10 @@ def _one_entry() -> Recipe:
             "load": RecipeNode("load", "load_patch", {"channels": "test,ref"}),
             "sub": RecipeNode("sub", "subtract",
                               {"a": "test", "b": "ref", "out": "diff"}),
-            "measure": RecipeNode("measure", "glv_stats", {"source": "diff"}),
+            # metrics 明寫（F18 起預設是 robust 的那一組）—— 這條測的是
+            # 「兩個入口跟一個入口算出同樣的數字」，不是預設值。
+            "measure": RecipeNode("measure", "glv_stats",
+                                  {"source": "diff", "metrics": "glv_mean"}),
         },
         score=_score(),
         edges=[Edge("load", "sub", src_out="test", dst_in="a"),
@@ -81,7 +84,10 @@ def _two_entries() -> Recipe:
             "load_r": RecipeNode("load_r", "load_patch", {"channels": "ref"}),
             "sub": RecipeNode("sub", "subtract",
                               {"a": "test", "b": "ref", "out": "diff"}),
-            "measure": RecipeNode("measure", "glv_stats", {"source": "diff"}),
+            # metrics 明寫（F18 起預設是 robust 的那一組）—— 這條測的是
+            # 「兩個入口跟一個入口算出同樣的數字」，不是預設值。
+            "measure": RecipeNode("measure", "glv_stats",
+                                  {"source": "diff", "metrics": "glv_mean"}),
         },
         score=_score(),
         edges=[Edge("load_t", "sub", src_out="test", dst_in="a"),

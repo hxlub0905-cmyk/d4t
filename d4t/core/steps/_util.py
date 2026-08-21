@@ -941,6 +941,19 @@ class MultiSourceStep(Step):
     def resolve_regions_in(cls, params: Dict[str, object]) -> List[str]:
         return [r for r in cls.region_list(params) if r]
 
+    #: 迴圈目前跑到哪一條流／哪一個前綴 —— :meth:`run` 塞進交給 :meth:`measure`
+    #: 的那份參數裡（F18 第 2 步）。
+    #:
+    #: 為什麼要有：子類**刻意**不知道「接了幾條流、幾個區域」（那是基底的事），
+    #: 但一張卡如果要往 ``ctx.meta`` 留一份給儀表看的東西，它就得說得出「這一份
+    #: 是誰的」—— 而畫面上那句話要跟特徵名對得起來，否則兩條流的兩張直方圖在
+    #: 面板上是分不出來的兩塊。
+    #:
+    #: 底線開頭 = 這不是使用者填的參數（`validate_params` 產生的 dict 裡不會有
+    #: 它們，是 `run` 事後加的）。
+    CURRENT_STREAM = "_stream"
+    CURRENT_PREFIX = "_prefix"
+
     def measure(self, ctx: Context, img, params: Dict[str, object]):
         """量一張影像，回 ``{特徵名: 值}``（回 ``None`` = 這條流沒有東西可記）。"""
         raise NotImplementedError
@@ -954,7 +967,9 @@ class MultiSourceStep(Step):
             for region in regions:
                 # 每一輪交給 `measure` 的是**一個**區域 —— 子類完全不必知道
                 # 「接了幾個」，跟它不必知道接了幾條流是同一件事。
-                one = dict(p, **{self.REGION: region}) if self.REGION else p
+                one = dict(p, **{self.REGION: region}) if self.REGION else dict(p)
+                one[self.CURRENT_STREAM] = key
+                one[self.CURRENT_PREFIX] = self.full_prefix(p, key, region)
                 feats = self.measure(ctx, img, one)
                 if not feats:
                     continue

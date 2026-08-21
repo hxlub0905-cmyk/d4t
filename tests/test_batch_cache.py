@@ -371,8 +371,11 @@ def _roi_then_image_recipe() -> Recipe:
                           {"source": "test", "roi_out": "main"}),
         "dn": RecipeNode("dn", "denoise",
                          {"streams": "test", "method": "median", "ksize": 3}),
+        # metrics 明寫（F18 起預設是 robust 的那一組）—— 這條測的是快取，
+        # 不是預設值，而分數表達式打的是 glv_mean。
         "glv": RecipeNode("glv", "glv_stats",
-                          {"source": "test", "roi": "main"}),
+                          {"source": "test", "roi": "main",
+                           "metrics": "glv_mean"}),
     }
     return Recipe(recipe_id="roi_in_cached_segment",
                   routes={KIND: ["load", "roi", "dn", "glv"]}, nodes=nodes,

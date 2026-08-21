@@ -69,6 +69,7 @@ tests/test_ui_studio_m5.py）：
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import time
@@ -1266,7 +1267,7 @@ class StudioWindow(QMainWindow):
 
         # 右下角那一塊：**選哪張卡就換成那張卡的儀表**（F7-17）。
         # 原本固定是一張「特徵 / 數值」表 —— 問題不是它佔位子，是那些數字沒有
-        # 辦法判讀（`roi_snr_signed 11.170` 是大還是小？），而且使用者在問的
+        # 辦法判讀（`glv_snr 11.170` 是大還是小？），而且使用者在問的
         # 問題**每張卡都不一樣**。特徵表仍然留著，用切換列回去。
         self.feature_table = FeatureTable(pane)
         self.feature_table.setMinimumHeight(120)
@@ -1363,6 +1364,7 @@ class StudioWindow(QMainWindow):
         self.image_view_b.view_changed.connect(
             lambda s, o: self._link_views(self.image_view_b, self.image_view, s, o))
 
+        self.results.shown_feature_changed.connect(self._on_spread_feature_changed)
         self.histogram.threshold_changed.connect(self._on_threshold_changed)
         self.histogram.threshold_committed.connect(self._on_threshold_committed)
         self.histogram.bar_clicked.connect(self._on_bar_clicked)
@@ -1812,6 +1814,79 @@ class StudioWindow(QMainWindow):
             self.feature_combo.setCurrentIndex(0)
         finally:
             self._syncing = False
+
+    # ---- Spread（F18 第 2 步：它從量測卡的儀表搬來這裡）--------------------
+    def _features_in_results(self, results: Sequence[Dict[str, Any]]) -> List[str]:
+        """整批結果裡真的有值的特徵名（順序照第一顆的順序）。
+
+        **從結果讀而不是從 recipe 問**（`model.available_features()`）：
+        那一份是「宣告會產出的」，而這張圖畫的是「真的算出來的」。一張卡出錯
+        的那幾顆不會有它的特徵，而下拉裡多一個永遠畫不出東西的名字，正是
+        「按了撞牆的鈕」那一類。
+        """
+        names: List[str] = []
+        for r in results:
+            for k in (r.get("features") or {}):
+                if k not in names:
+                    names.append(str(k))
+        return names
+
+    def _refresh_spread(self) -> None:
+        """把下面那張圖換成「現在選的那個東西」的分佈。"""
+        name = self.results.shown_feature()
+        if name == self.results.SCORE:
+            self.histogram.set_interactive(True)
+            self.histogram.set_marker(None)
+            self.histogram.set_empty_text(
+                "(Score distribution appears after a trial run)")
+            edges, counts = histogram(self.trial_scores)
+            self.histogram.set_data(edges, counts)
+            self.histogram.set_threshold(self.model.threshold)
+            self._refresh_bin_summary(self.model.threshold)
+            self.results.set_spread_hint("")
+            return
+
+        vals = [float(v) for r in self.trial_results
+                for v in [(r.get("features") or {}).get(name)]
+                if isinstance(v, (int, float))
+                and not (math.isnan(float(v)) or math.isinf(float(v)))]
+        # 門檻是**分數**的門檻 —— 在別的特徵上它沒有意義，所以整張圖唯讀
+        # （見 `HistogramWidget.set_interactive`）。
+        self.histogram.set_interactive(False)
+        self.histogram.set_threshold(None)
+        self.histogram.set_bin_summary(None)
+        self.histogram.set_empty_text("(no values for %s in this run)" % name)
+        edges, counts = histogram(vals)
+        self.histogram.set_data(edges, counts)
+        # `_last_result` 是 `DefectResult`（dataclass），不是 dict —— 這一格
+        # 曾經寫成 `.get("features")`，而它在**選了特徵之後**才會走到，
+        # 所以那個錯不會在「按 Run」的路徑上出現。
+        here = (getattr(self._last_result, "features", None) or {}).get(name)
+        try:
+            here = float(here)
+        except (TypeError, ValueError):
+            here = None
+        self.histogram.set_marker(here, "this defect" if here is not None else "")
+        self.results.set_spread_hint(self._spread_hint(name, vals))
+
+    def _spread_hint(self, name: str, values: Sequence[float]) -> str:
+        """一句話：這個特徵在這一批上分不分得開。
+
+        這是 Spread 面板原本最有用的那一句 —— 擠成一根柱子的特徵，門檻設哪裡
+        都一樣，而光看長條圖不一定看得出「它其實只差 0.3%」。
+        """
+        vals = [float(v) for v in values]
+        if len(vals) < 4:
+            return "%d values — too few to say anything about the spread." % len(vals)
+        lo, hi = min(vals), max(vals)
+        mid = (abs(lo) + abs(hi)) / 2.0 or 1.0
+        if hi - lo <= 0 or (hi - lo) / mid < 0.01:
+            return ("%s barely varies across the batch — no threshold on it "
+                    "will separate anything." % name)
+        return "%d defects · %.4g to %.4g" % (len(vals), lo, hi)
+
+    def _on_spread_feature_changed(self, _name: str) -> None:
+        self._refresh_spread()
 
     def _refresh_bin_summary(self, threshold: float) -> None:
         if not self.trial_scores:
@@ -3455,7 +3530,8 @@ class StudioWindow(QMainWindow):
         highlight = self._highlight_features(result)
         self.feature_table.set_features(getattr(result, "features", {}) or {},
                                         highlight=highlight,
-                                        sections=self._feature_sections(result))
+                                        sections=self._feature_sections(result),
+                                        about=self._feature_about(result))
         score = getattr(result, "score", None)
         self.verdict.set_verdict(getattr(result, "bin", None)
                                  if score is not None else None)
@@ -3657,6 +3733,8 @@ class StudioWindow(QMainWindow):
                 self._inspector = cls(self.inspector_host)
                 self.inspector_slot.addWidget(self._inspector)
                 self._connect_inspector(self._inspector)
+            # 字在 `_refresh_inspector` 餵完資料之後才定案（儀表要看得到
+            # 現在畫的是什麼才說得出「誰跟誰比」）—— 這裡先給一個保底。
             self.btn_tab_card.setText(str(getattr(cls, "title", "Card"))
                                       if cls is not None else "Card")
         # **每次都要同步頁面**，不能因為「儀表類別沒變」就跳過：兩張都沒有儀表
@@ -3845,6 +3923,11 @@ class StudioWindow(QMainWindow):
                          feature_names=feats,
                          shown_streams=[s for s in shown if s])
         self.inspector_summary.setText(insp.summary())
+        # 分頁鈕的字由**儀表現在畫的東西**決定（使用者 2026-08-21：「title 要
+        # 更詳細一點」）。放不下的那半句進 tooltip。
+        if hasattr(insp, "tab_title"):
+            self.btn_tab_card.setText(str(insp.tab_title() or "Card"))
+            self.btn_tab_card.setToolTip(str(insp.tab_tooltip() or ""))
         self._refresh_curve_backdrop(meta)
 
     def _refresh_curve_backdrop(self, meta: Dict[str, Any]) -> None:
@@ -3959,6 +4042,23 @@ class StudioWindow(QMainWindow):
         """面板現在開著嗎（用明確狀態，不要問 ``isVisible()``）。"""
         node = self.model.nodes.get(self.selected_node or "")
         return bool(node is not None and node.step == self.PROFILE_STEP)
+
+    def _feature_about(self, result: Any) -> Dict[str, str]:
+        """哪一個相對量是**跟誰**比出來的（特徵表中間那一欄要用）。
+
+        名字裡沒有這件事 —— ``epi_cmp_delta_median`` 不講 mg，而把它塞進名字
+        會變成 ``epi_vs_mg_cmp_delta_median`` 那種長度。引擎在
+        ``meta["compares"]`` 已經記著（那一份本來就是給儀表用的），
+        這裡只是讀出來，**不重算**。
+        """
+        ctx = getattr(result, "context", None)
+        rows = (getattr(ctx, "meta", {}) or {}).get("compares") or {}
+        out: Dict[str, str] = {}
+        for rec in rows.values():
+            ref = str((rec or {}).get("reference") or "")
+            for name in (rec or {}).get("names") or []:
+                out[str(name)] = ref
+        return out
 
     def _feature_sections(self, result: Any) -> List[Dict[str, Any]]:
         """特徵表要怎麼分組（F13-1 ①）—— **照引擎已經記下來的事分**。
@@ -4503,9 +4603,8 @@ class StudioWindow(QMainWindow):
         self.trial_results = results
         self.trial_scores = [r["score"] for r in results
                              if r.get("ok") and r.get("score") is not None]
-        edges, counts = histogram(self.trial_scores)
-        self.histogram.set_data(edges, counts)
-        self.histogram.set_threshold(self.model.threshold)
+        self.results.set_features(self._features_in_results(results))
+        self._refresh_spread()
         self._refresh_bin_summary(self.model.threshold)
         self._populate_gallery(results)
         self._refresh_inspector(self._last_result)   # 儀表吃的是整批（F7-17）

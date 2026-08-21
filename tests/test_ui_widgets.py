@@ -572,7 +572,7 @@ def test_library_panel_groups_and_double_click(qapp):
     assert "load_patch" in by_group["input"]
     assert {"subtract", "align"} <= by_group["compare"]
     assert "roi_cross" in by_group["region"]
-    assert {"glv_stats", "cd_measure", "roi_snr"} <= by_group["measure"]
+    assert {"glv_stats", "cd_measure"} <= by_group["measure"]
 
     # 空的段落要留一行提示（registry 目前沒有 adc 卡片）
     empties = [lbl for lbl in panel.findChildren(QLabel)
@@ -611,14 +611,16 @@ def test_library_search_filters_cards_and_hides_empty_sections(qapp):
 
     panel.set_query("snr")
     hit = set(panel.visible_step_keys())
-    assert {"snr_map", "roi_snr"} <= hit
+    # `snr_map`（Z-map）的說明裡有 SNR；Gray level 的 `snr` 是它的比較項之一。
+    # （`roi_snr` 那張卡在 2026-08-21 刪掉了 —— 使用者要的是 GL 比對的 SNR。）
+    assert {"snr_map", "glv_stats"} <= hit
     assert "denoise" not in hit
     assert "Input" not in panel.visible_section_titles(), \
         "整組都沒命中的區塊標題要一起收起來"
 
     # 多個詞是 AND；說明文字也在搜尋範圍內
-    panel.set_query("region signal")
-    assert set(panel.visible_step_keys()) == {"roi_snr"}
+    panel.set_query("gray percentiles")
+    assert set(panel.visible_step_keys()) == {"glv_stats"}
 
     # F7-7：清空搜尋之後回到 rail 的狀態（這裡是全部收起來），不是全部攤開
     panel.set_query("")
@@ -679,6 +681,275 @@ def test_group_icons_are_painted_not_files(qapp):
     finally:
         theme_mod.set_theme("light")
         panel.refresh_colors()
+
+
+def test_every_stage_icon_is_a_different_shape(qapp):
+    """八個階段要有八個**看得出差別**的圖示（F17）。
+
+    這一條以前不存在，於是 ``draw_group_icon`` 的 ``else`` 分支（一個打勾）
+    同時服務 Algo、ADC、Output 三段 —— rail 上由上而下掃過去，最後三顆一模一樣。
+    顏色也救不了：F16 那兩段刻意畫得淡（見 ``theme`` 的說明），三個打勾裡有兩個
+    是低彩度的，實際看起來就是「同一個圖示重複三次」。
+
+    測法是**量畫出來的畫素**，跟 ``test_ui_f7_23_buttons`` 同一種：斷言
+    「有沒有寫 elif」沒有用，因為兩段各寫各的、畫出同一個形狀也會過。
+    這裡比的是 15 px（區塊標題與畫布節點磚用的尺寸）—— 大顆的 rail 圖示只會
+    更容易分辨，會先在小的這一邊糊掉。
+    """
+    from PySide6.QtGui import QColor, QPainter, QPixmap
+
+    size = 15
+    ink = {}
+    for gid, _t, _s in widgets_mod.LibraryPanel.GROUPS:
+        pm = QPixmap(size, size)
+        pm.fill(QColor("#ffffff"))
+        p = QPainter(pm)
+        widgets_mod.draw_group_icon(p, gid, "#000000", float(size))
+        p.end()
+        img = pm.toImage()
+        ink[gid] = [img.pixelColor(x, y).value() < 200
+                    for y in range(size) for x in range(size)]
+        assert sum(ink[gid]) >= 12, "%s 幾乎沒畫出東西" % gid
+
+    # 差 24 個畫素 ≈ 15×15 的一成。最接近的一對是 Input / Output（35 個）——
+    # 那一對**刻意**相像：同樣是托盤加箭頭，差別在箭頭往哪走，跟 glyph 的
+    # save / export 是同一種對比。其餘每一對都差得更多。
+    too_close = []
+    keys = list(ink)
+    for i, a in enumerate(keys):
+        for b in keys[i + 1:]:
+            d = sum(1 for x, y in zip(ink[a], ink[b]) if x != y)
+            if d < 24:
+                too_close.append("%s 與 %s 只差 %d 個畫素" % (a, b, d))
+    assert not too_close, "這幾對圖示看起來是同一個：\n  " + "\n  ".join(too_close)
+
+
+# --------------------------------------------------------------------------- #
+# 3b. MetricChips（F18）
+# --------------------------------------------------------------------------- #
+def _metric_ink(size=19):
+    """每一顆統計量小圖畫出來的「有沒有墨」點陣（給下面兩條測試共用）。"""
+    from PySide6.QtGui import QColor, QPainter, QPixmap
+
+    out = {}
+    for name in widgets_mod.METRIC_GLYPHS:
+        pm = QPixmap(size, size)
+        pm.fill(QColor("#ffffff"))
+        p = QPainter(pm)
+        widgets_mod.draw_metric_glyph(p, name, float(size), "#000000", "#bbbbbb")
+        p.end()
+        img = pm.toImage()
+        out[name] = [img.pixelColor(x, y).value() < 200
+                     for y in range(size) for x in range(size)]
+    return out
+
+
+def test_every_metric_glyph_is_a_different_shape(qapp):
+    """十五張統計量小圖要在 **19 px**（膠囊裡的尺寸）下兩兩分得開。
+
+    第一版有六顆是廢的：``mean`` 只是「``median`` 沒填色」、``trimmed`` 的虛線
+    在這個尺寸下整條不見、``skew`` 的箭頭搶戲而不對稱的山根本看不出來、
+    ``percentile`` 跟 ``median`` 幾乎一樣。那些都是 render 出來逐顆看才發現的
+    —— 斷言「有沒有寫 elif」不會發現任何一個。
+    """
+    import pytest as _pytest
+
+    ink = _metric_ink()
+    blank = [n for n, m in ink.items() if sum(m) < 12]
+    assert not blank, "這些小圖畫出來幾乎是空的：%s" % ", ".join(blank)
+
+    too_close = []
+    names = list(ink)
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            d = sum(1 for x, y in zip(ink[a], ink[b]) if x != y)
+            if d < 20:
+                too_close.append("%s 與 %s 只差 %d 個畫素" % (a, b, d))
+    assert not too_close, "這幾對小圖看起來是同一個：\n  " + "\n  ".join(too_close)
+
+    from PySide6.QtGui import QPainter, QPixmap
+    with _pytest.raises(ValueError):
+        pm = QPixmap(19, 19)
+        p = QPainter(pm)
+        try:
+            widgets_mod.draw_metric_glyph(p, "no_such", 19.0, "#000", "#888")
+        finally:
+            p.end()
+
+
+def test_every_statistic_the_card_offers_has_a_face(qapp):
+    """引擎說「有哪些」，UI 說「長什麼樣」—— 兩份不准漂開。
+
+    卡片多宣告一顆統計量而 UI 沒登記，畫出來會是一顆沒有分群、標籤是原始
+    id（``glv_kurt``）的膠囊 —— 跑得完、看得到、而且醜，也就是不會有人回報。
+    """
+    from d4t.core.steps.glv_stats import METRIC_CHOICES
+
+    for mid in METRIC_CHOICES:
+        group, label, glyph = widgets_mod.metric_face(mid)
+        assert group in widgets_mod.METRIC_GROUP_ORDER, mid
+        assert group != "Other", "%s 沒有登記在 METRIC_GROUPS" % mid
+        assert label and not label.startswith("glv_"), mid
+        assert glyph in widgets_mod.METRIC_GLYPHS, mid
+
+    # 手寫 recipe 的那三種參數化 id 也答得出來（它們不在 METRIC_GROUPS 裡）
+    assert widgets_mod.metric_face("glv_q37") == ("Ends", "P37", "percentile")
+    assert widgets_mod.metric_face("glv_trim05")[2] == "trimmed"
+    assert widgets_mod.metric_face("glv_above200")[0] == "Counts"
+
+
+def test_every_report_metric_the_card_offers_has_a_face(qapp):
+    """Report 那一格跟 Statistics 同一條規矩（F18 補課第二輪，2026-08-21）。
+
+    使用者：「我覺得 Report 要有更多統計量可以量」。多的那五顆一樣要有分群、
+    短標籤與小圖 —— 沒有的話它們會是一排原始 id 的膠囊排在漂亮的那幾顆旁邊。
+    """
+    from d4t.core.steps.glv_stats import COMPARE_CHOICES
+
+    groups = set()
+    for mid in COMPARE_CHOICES:
+        group, label, glyph = widgets_mod.metric_face(mid)
+        assert group in widgets_mod.METRIC_GROUP_ORDER, mid
+        assert group != "Other", "%s 沒有登記在 METRIC_GROUPS" % mid
+        assert label and glyph in widgets_mod.METRIC_GLYPHS, mid
+        groups.add(group)
+    # **「哪幾個需要參照的格子」要在畫面上分得出來** —— 那是「為什麼我的 snr
+    # 是空的」唯一的線索。
+    assert groups == {"Difference", "Vs boxes", "Distributions"}
+    assert widgets_mod.metric_face("pct_rank")[0] == "Vs boxes"
+
+
+def test_a_hidden_metric_is_still_shown_when_a_recipe_has_it(qapp):
+    """收起來 ≠ 刪掉（使用者 2026-08-21：「請幫我將這些收起來」）。
+
+    卡片庫上沒有那顆膠囊，但舊 recipe 帶著它進來的時候要列出來並且勾著 ——
+    「看不到就被靜靜刪掉」是這個 widget 從 `MultiChoicePicker` 繼承來的老規矩。
+    """
+    from d4t.core.steps.glv_stats import (COMPARE_CHOICES, HIDDEN_METRICS,
+                                          HIDDEN_COMPARE_METRICS,
+                                          METRIC_CHOICES)
+
+    for mid in HIDDEN_METRICS:
+        assert mid not in METRIC_CHOICES
+    for mid in HIDDEN_COMPARE_METRICS:
+        assert mid not in COMPARE_CHOICES
+
+    w = widgets_mod.MetricChips(METRIC_CHOICES, "glv_median,glv_entropy")
+    assert w.chip("glv_entropy") is not None
+    assert w.chip("glv_entropy").is_checked()
+    assert "glv_entropy" in w.text()
+    # 而且它們照樣有臉（收起來的只有清單上那一顆膠囊）
+    assert widgets_mod.metric_face("glv_kurt")[0] == "Shape"
+    assert widgets_mod.metric_face("percent")[0] == "Difference"
+
+    c = widgets_mod.MetricChips(COMPARE_CHOICES, "delta,percent")
+    assert c.chip("percent") is not None and c.chip("percent").is_checked()
+
+
+def test_the_group_column_fits_the_longest_group_name(qapp):
+    """群名那一欄的寬度**由最長的群名決定**，不是一個寫死的 46 px。
+
+    寫死的那個數字剛好裝得下 Statistics 的五個群（Center…Counts），所以
+    Report 分成三群的那一刻，畫面上是「ifference」與「ributions」——
+    一個切掉了頭的字，而不是一個看起來就壞掉的版面。
+    """
+    from PySide6.QtWidgets import QLabel
+
+    from d4t.core.steps.glv_stats import COMPARE_CHOICES
+
+    w = widgets_mod.MetricChips(list(COMPARE_CHOICES), "delta,snr")
+    seen = {}
+    for lbl in w.findChildren(QLabel):
+        if lbl.objectName() == "metricGroup" and lbl.text():
+            seen[lbl.text()] = lbl
+    assert "Distributions" in seen, "群名沒有印出來"
+    for text, lbl in seen.items():
+        need = lbl.fontMetrics().horizontalAdvance(text)
+        assert lbl.width() >= need, "%s 被切掉了（%d < %d）" % (
+            text, lbl.width(), need)
+
+
+def test_metric_chips_round_trip_the_recipe_string(qapp):
+    """值的格式跟 ``multi_choice`` 一字不差 —— 換掉的只有長相。"""
+    from d4t.core.steps.glv_stats import DEFAULT_METRICS, METRIC_CHOICES
+
+    seen = []
+    w = widgets_mod.MetricChips(METRIC_CHOICES, DEFAULT_METRICS)
+    w.changed.connect(seen.append)
+    assert w.text() == DEFAULT_METRICS
+    assert w.picked() == ["glv_median", "glv_mad", "glv_min", "glv_max"]
+
+    w.chip("glv_mean").click()
+    assert "glv_mean" in w.picked() and seen[-1] == w.text()
+    w.chip("glv_mean").click()
+    assert "glv_mean" not in w.picked()
+
+    # 順序＝畫面上的順序，**不是點選的順序** —— 同一組勾選每次都要產生同一個
+    # 字串，不然一份 recipe 會因為使用者點的先後而長得不一樣（而它進得了
+    # 快取簽章）。
+    w.set_text("glv_max,glv_median")
+    assert w.text() == "glv_median,glv_max"
+
+    # 「不是 metric chip 的那幾顆」不算進值裡（+ Percentile… 是動作）
+    adders = [c for c in w.findChildren(widgets_mod._MetricChip) if c.adder]
+    assert adders, "應該要有『再加一顆』的膠囊"
+    assert all(a.mid not in w.text() for a in adders)
+
+
+def test_a_hand_written_statistic_is_shown_and_stays_ticked(qapp):
+    """recipe 帶進來、清單上沒有的值要列出來並勾著。
+
+    看不到就被靜靜刪掉，是最糟的一種「幫忙」—— `MultiChoicePicker` 的老規矩，
+    換了長相之後仍然要成立。
+    """
+    from d4t.core.steps.glv_stats import METRIC_CHOICES
+
+    w = widgets_mod.MetricChips(METRIC_CHOICES, "glv_median,glv_q37,glv_trim05")
+    # 順序是**畫面上的**（Center 那一群在 Ends 前面），不是使用者列的順序 ——
+    # 見 `MetricChips.text` 為什麼那件事必須是穩定的。
+    assert w.text() == "glv_median,glv_trim05,glv_q37"
+    assert w.chip("glv_q37") is not None and w.chip("glv_q37").is_checked()
+    assert w.chip("glv_trim05").label == "Trimmed 5%"
+
+
+def test_all_three_metric_fields_on_the_gray_level_card_are_chips(qapp):
+    """**Statistics、Compare their 與 Report 是同一種膠囊**（F18 補課）。
+
+    使用者第一輪：「Compare 跟 absolute 一樣重要，而且它的 Metric 面板 UI 也
+    沒有 Statistics 那麼漂亮，我覺得可以改成切換式」；第二輪：「Compare their
+    只能單參數嗎？我不能一次選擇 report glv_median 或 glv_pn 的資訊嗎？」——
+    後者讓那一格從下拉變成同一種膠囊（值仍然是逗號分隔，所以不必遷移）。
+    """
+    form = widgets_mod.ParamForm()
+    form.set_step(_describe("glv_stats"),
+                  {"metrics": "glv_median,glv_mad",
+                   "reference": "another region",
+                   "stat": "glv_median,glv_q90",
+                   "compare_metrics": "delta,snr"},
+                  ["test", "ref"])
+    chips = {c.text() for c in form.findChildren(widgets_mod.MetricChips)}
+    assert chips == {"glv_median,glv_mad", "glv_median,glv_q90", "delta,snr"}
+    # 舊的勾選網格在這張卡上一個都不剩
+    assert not [g for g in form.findChildren(widgets_mod.MultiChoicePicker)
+                if g.isVisibleTo(form)]
+
+
+def test_the_compare_chips_do_not_offer_to_add_a_percentile(qapp):
+    """「+ Percentile…」是 GLV 統計量專屬的動作。
+
+    在「跟誰比」那一格長出它，會是一顆按了就加出一個那張表不認得的值的鈕。
+    """
+    from d4t.core.steps.glv_stats import COMPARE_CHOICES
+
+    w = widgets_mod.MetricChips(list(COMPARE_CHOICES), "delta,snr")
+    assert set(w.choice_names()) == set(COMPARE_CHOICES)
+    assert not [c for c in w.findChildren(widgets_mod._MetricChip) if c.adder]
+    assert widgets_mod.metric_face("snr") == ("Vs boxes", "SNR", "snr")
+
+    # Statistics 那一格照樣有
+    from d4t.core.steps.glv_stats import METRIC_CHOICES
+    g = widgets_mod.MetricChips(METRIC_CHOICES, "glv_median")
+    assert [c for c in g.findChildren(widgets_mod._MetricChip) if c.adder]
 
 
 # --------------------------------------------------------------------------- #
@@ -791,8 +1062,9 @@ def test_feature_table_formatting_and_score_pinned_last(qapp):
          "glv_mean": 128.0, "tiny": 0.00002},
         highlight={"snr_peak"},
     )
-    assert table.columnCount() == 2
-    assert [table.horizontalHeaderItem(i).text() for i in range(2)] == ["Feature", "Value"]
+    assert table.columnCount() == 3
+    assert [table.horizontalHeaderItem(i).text() for i in range(3)] == [
+        "Feature", "What it is", "Value"]
 
     names = table.feature_names()
     assert names[-1] == "score"                          # score 釘最後
@@ -806,7 +1078,7 @@ def test_feature_table_formatting_and_score_pinned_last(qapp):
 
     score_row = names.index("score")
     assert table.item(score_row, 0).font().bold() is True
-    assert table.item(score_row, 1).font().bold() is True
+    assert table.item(score_row, 2).font().bold() is True
 
     hi_row = names.index("snr_peak")
     assert table.item(hi_row, 0).background().color().name() == \
@@ -814,6 +1086,57 @@ def test_feature_table_formatting_and_score_pinned_last(qapp):
 
     table.set_features({})                               # 清空不該炸
     assert table.rowCount() == 0
+
+
+def test_the_middle_column_says_what_each_feature_is(qapp):
+    """橫向空間拿來**解釋名字**（F18 補課第三輪，2026-08-21）。
+
+    使用者：「目前只有縱向空間被用到（橫向空間幾乎沒有：Feature 右側就只有
+    Value 還到最右邊）」＋「絕對量的跟相對量的還是要分類好」。所以中間那一欄
+    是「這是什麼」，而**兩種量用顏色分**。
+    """
+    table = widgets_mod.FeatureTable()
+    table.set_features(
+        {"epi_glv_median": 128.0, "epi_cmp_delta_median": 23.4,
+         "epi_cmp_overlap": 0.02, "epi_glv_pixels": 812.0},
+        about={"epi_cmp_delta_median": "mg", "epi_cmp_overlap": "mg"})
+
+    assert table.about_text("epi_glv_median") == "median(gray)"
+    assert table.about_text("epi_glv_pixels") == "how many pixels counted"
+    assert table.about_text("epi_cmp_delta_median") == \
+        "Difference of median vs mg"
+    # 不看 stat 的那兩個沒有「of …」那一段（`spread_ratio` 自己就帶底線 ——
+    # 切最後一個底線的寫法會把它變成「spread 的 ratio」）
+    assert table.about_text("epi_cmp_overlap") == "Overlap vs mg"
+
+    names = table.feature_names()
+    rel = names.index("epi_cmp_delta_median")
+    abs_ = names.index("epi_glv_median")
+    assert table.item(rel, 1).foreground().color().name() == \
+        theme_mod.TOKENS["accent_active"]
+    assert table.item(abs_, 1).foreground().color().name() == \
+        theme_mod.TOKENS["text_hint"]
+    table.deleteLater()
+
+
+def test_a_feature_nobody_can_decode_gets_no_gloss(qapp):
+    """別張卡寫的數字沒有這套命名規則 —— 那一格留白，不要瞎猜一句話。"""
+    assert widgets_mod.feature_gloss("blob_area") == ("", "")
+    assert widgets_mod.feature_gloss("score") == ("", "")
+
+
+def test_absolute_comes_before_relative_inside_a_card(qapp):
+    """交錯的話，那一段要一行一行讀才知道自己在看哪一種。"""
+    table = widgets_mod.FeatureTable()
+    table.set_features(
+        {"cmp_delta_mean": 1.0, "glv_median": 2.0, "cmp_snr_mean": 3.0,
+         "glv_mad": 4.0},
+        sections=[{"title": "Gray level", "color": "#bf7030",
+                   "names": ["cmp_delta_mean", "glv_median", "cmp_snr_mean",
+                             "glv_mad"]}])
+    assert table.feature_names() == ["glv_median", "glv_mad",
+                                     "cmp_delta_mean", "cmp_snr_mean"]
+    table.deleteLater()
 
 
 def test_verdict_chip(qapp):
@@ -896,6 +1219,36 @@ def test_stage_rail_drills_down_one_stage_at_a_time(qapp):
     panel.toggle_group("measure")
     assert panel.open_group() is None
     assert panel.visible_step_keys() == []
+
+
+def test_every_stage_opens_at_the_same_height(qapp):
+    """哪一段展開，卡片就從**同一個高度**開始（F17）。
+
+    使用者原話：「點 Input 出來的選擇 card，跟點 Output 的高度不一樣」。
+    收起來的那七段本來仍然各佔 8 px —— 一個藏起來的 widget 在父層 layout 裡是
+    零，但一個**空的巢狀 layout 不是**，它的 contentsMargins 照算。於是
+    Output（排第八）的標題被前面七段推下去 56 px，畫面上就是一條沒有東西的
+    空白，而且高度隨著點哪一段變。
+
+    量的是「標題離捲動區頂端多遠」，不是某一段的實作 —— 這樣未來不管卡片區
+    怎麼重排，只要它又開始隨段數飄移，這條就會紅。
+    """
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps(_steps())
+    panel.resize(300, 500)
+    panel.show()                                # 沒 show 過的話 layout 不會重排
+
+    tops = {}
+    panel.toggle_group(None)
+    for gid, _t, _s in panel.GROUPS:
+        panel.toggle_group(gid)
+        qapp.processEvents()
+        head = panel._headers[gid]
+        host = head.parentWidget()
+        tops[gid] = head.mapTo(host, head.rect().topLeft()).y()
+        panel.toggle_group(gid)                 # 收回來，換下一段
+    assert len(set(tops.values())) == 1, \
+        "每一段展開時標題的位置不一樣：%r" % (tops,)
 
 
 def test_search_still_reaches_across_collapsed_stages(qapp):

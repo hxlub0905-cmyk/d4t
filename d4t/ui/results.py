@@ -36,6 +36,8 @@ from typing import Any, Optional, Sequence
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
     QSizePolicy,
@@ -43,6 +45,7 @@ from PySide6.QtWidgets import (
     QStatusBar,
     QToolBar,
     QToolButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -61,6 +64,9 @@ class ResultsWindow(QMainWindow):
     """
 
     run_all_requested = Signal()
+    #: 下面那張圖現在要看哪一個東西（``SCORE`` 或一個 feature 名）。
+    #: 這是 Spread 的新家（F18 第 2 步）—— 見 :meth:`_build_spread`。
+    shown_feature_changed = Signal(str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -100,10 +106,11 @@ class ResultsWindow(QMainWindow):
         self.gallery = GalleryPanel(self)
         self.histogram = HistogramWidget(self)
         self.histogram.setMinimumHeight(150)
+        spread = self._build_spread()
 
         split = QSplitter(Qt.Vertical, self)
         split.addWidget(self.gallery)
-        split.addWidget(self.histogram)
+        split.addWidget(spread)
         split.setStretchFactor(0, 4)
         split.setStretchFactor(1, 1)
         split.setSizes([500, 190])
@@ -111,6 +118,89 @@ class ResultsWindow(QMainWindow):
         self.setCentralWidget(split)
         self.setStatusBar(QStatusBar(self))
         apply_button_cursors(self)
+
+    #: 下拉裡代表「分數」的那一項（不是 feature 名，所以用一個不可能撞名的字）。
+    SCORE = "(score)"
+
+    def _build_spread(self) -> QWidget:
+        """分數/特徵的分佈圖，上面一條「要看哪一個」的選擇列（F18 第 2 步）。
+
+        **Spread 的新家。** 它以前住在量測卡的儀表上，而那個位置在跑之前
+        永遠是空的（使用者：「他在 run 之前都是空的」）。它真正回答的問題是
+        「這個特徵分不分得開、門檻該設哪」—— 那是跑完之後才問得出來的問題，
+        也是這個視窗存在的理由。
+
+        分數與特徵的差別要說得出來：**門檻是分數的門檻**，所以看別的特徵時
+        整張圖是唯讀的（`HistogramWidget.set_interactive`）。一條看起來能拖、
+        拖了卻什麼都不會發生的線，比沒有線更糟。
+        """
+        host = QWidget(self)
+        lay = QVBoxLayout(host)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+
+        row = QWidget(host)
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(8, 4, 8, 0)
+        rl.setSpacing(8)
+        title = QLabel("Spread of", row)
+        title.setObjectName("paramHint")
+        rl.addWidget(title)
+
+        self.feature_combo = QComboBox(row)
+        self.feature_combo.setMinimumWidth(190)
+        self.feature_combo.addItem("Score", self.SCORE)
+        self.feature_combo.setToolTip(
+            "Which number to spread out across the batch. Squeezed into one "
+            "bar means it separates nothing; two humps means there is "
+            "something to cut between.")
+        self.feature_combo.currentIndexChanged.connect(self._on_feature_pick)
+        rl.addWidget(self.feature_combo)
+
+        self.spread_hint = QLabel("", row)
+        self.spread_hint.setObjectName("paramHint")
+        self.spread_hint.setWordWrap(True)
+        rl.addWidget(self.spread_hint, 1)
+        lay.addWidget(row)
+        lay.addWidget(self.histogram, 1)
+        return host
+
+    def set_features(self, names: Sequence[str]) -> None:
+        """下拉裡可以選哪些特徵（跑完之後由 Studio 餵）。
+
+        目前選著的那一個**留著** —— 使用者調了一輪參數再跑一次，最想看的
+        通常就是同一個特徵，而下拉自己跳回「Score」等於每次都要重選。
+        """
+        keep = self.shown_feature()
+        self.feature_combo.blockSignals(True)
+        try:
+            self.feature_combo.clear()
+            self.feature_combo.addItem("Score", self.SCORE)
+            for n in names:
+                self.feature_combo.addItem(str(n), str(n))
+            idx = self.feature_combo.findData(keep)
+            self.feature_combo.setCurrentIndex(max(0, idx))
+        finally:
+            self.feature_combo.blockSignals(False)
+
+    def shown_feature(self) -> str:
+        data = self.feature_combo.currentData()
+        return str(data if data is not None else self.SCORE)
+
+    def show_feature(self, name: str) -> None:
+        """程式化選一個（測試 / 外部呼叫用）。"""
+        idx = self.feature_combo.findData(str(name))
+        if idx >= 0:
+            self.feature_combo.setCurrentIndex(idx)
+
+    def set_spread_hint(self, text: str) -> None:
+        self.spread_hint.setText(str(text or ""))
+
+    def spread_hint_text(self) -> str:
+        return self.spread_hint.text()
+
+    def _on_feature_pick(self, _index: int) -> None:
+        self.shown_feature_changed.emit(self.shown_feature())
 
     # ---- 對外 -------------------------------------------------------------
     def set_summary(self, text: str) -> None:

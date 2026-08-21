@@ -608,3 +608,218 @@ def test_a_panel_that_throws_does_not_take_the_window_with_it(qapp):
     w.resize(200, 100)
     w.grab()                                     # 不准往外丟
     w.grab()                                     # 第二次照樣畫得動（painter 有收尾）
+
+
+# --------------------------------------------------------------------------- #
+# 9. Gray level：這一顆的分布（F18 第 2 步，取代 Spread）
+# --------------------------------------------------------------------------- #
+def _glv_meta(img, **params):
+    """真的跑一次卡片，拿它留給儀表的那一份（不是測試自己編的）。"""
+    from d4t.core.pipeline.context import Context
+    from d4t.core.pipeline.step import get_step
+    import d4t.core.steps  # noqa: F401
+
+    ctx = Context(images={"test": img})
+    get_step("glv_stats")().run(ctx, dict({"source": "test"}, **params))
+    return dict(ctx.meta), dict(ctx.features)
+
+
+def test_the_gray_level_panel_has_something_before_any_batch_has_run(qapp):
+    """使用者原話：「他在 run 之前都是空的」。這一條就是那句話的驗收。
+
+    Spread 讀的是 ``trial_results``（整批），所以選到卡片時它必然是空的。
+    新的面板讀 ``ctx.meta``（引擎在預覽時就寫了）—— 跟 Enhance 卡的
+    before/after 同一條路。
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(3)
+    img = np.clip(rng.normal(120, 20, (50, 50)), 0, 255).astype(np.uint8)
+    meta, feats = _glv_meta(img)
+
+    insp = insp_mod.GlvInspector()
+    insp.set_context("glv_stats", result={"features": feats},
+                     batch=[],                    # **一批都還沒跑**
+                     meta=meta, feature_names=list(feats))
+    assert insp.has_data() is True
+    assert "2500 px" in insp.summary()
+    rows = insp.rows()
+    assert len(rows) == 1 and sum(rows[0]["bins"]) == 2500
+
+
+def test_a_width_statistic_is_not_drawn_as_a_position(qapp):
+    """MAD 是一個**寬度**，不是灰階軸上的一個位置。
+
+    第一版把每個勾到的統計量都畫成一條線，於是 ``glv_mad = 65`` 在灰階 65 的
+    地方畫了一條線 —— 那裡什麼都沒有，而畫面上沒有任何東西說得出那條線是假的。
+
+    測法是量畫出來的畫素（同 F7-23 那一套）：
+    * 只有 MAD、沒有中心 → **什麼都不該多畫**（寬度沒有地方可以掛）
+    * 中位數 + MAD → 要比只有中位數多畫東西（那條淡帶）
+    """
+    from PySide6.QtGui import QColor, QPixmap
+
+    def shot(marks):
+        insp = insp_mod.GlvInspector()
+        insp.set_context("glv_stats", meta={"glv_hist": [{
+            "stream": "test", "region": "", "prefix": "", "n": 900,
+            "sat": 0.0,
+            # 一座山（不是平的）—— 全平的話長條會塞滿整個繪圖區，
+            # 畫在上面的線疊在已經有墨的畫素上，兩張圖就分不出來了。
+            "bins": [max(1, 40 - abs(i - 32)) for i in range(64)],
+            "marks": dict(marks)}]})
+        insp.resize(420, 160)
+        pm = QPixmap(420, 160)
+        pm.fill(QColor("#ffffff"))
+        # `render(pixmap)` 而不是 `render(painter)` —— 後者在 PySide6 的多載裡
+        # 要吃 (painter, offset)，少一個引數會炸在型別解析上。
+        insp.render(pm)
+        return pm.toImage()
+
+    def differs(a, b):
+        return sum(1 for x in range(0, 420, 2) for y in range(0, 160, 2)
+                   if a.pixelColor(x, y) != b.pixelColor(x, y))
+
+    nothing = shot({})
+    only_width = shot({"glv_mad": 65.0})
+    centre = shot({"glv_median": 120.0})
+    centre_and_width = shot({"glv_median": 120.0, "glv_mad": 65.0})
+
+    assert differs(only_width, nothing) == 0, \
+        "MAD 沒有中心可以掛的時候不該畫任何東西（畫了就是在灰階 65 說謊）"
+    assert differs(centre, nothing) > 0, "中位數要畫得出一條線"
+    assert differs(centre_and_width, centre) > 0, "MAD 要多畫出中心兩側的那一段"
+
+
+def test_the_reference_distribution_is_drawn_on_the_same_axis(qapp):
+    """使用者 2026-08-21：「疊上參照那條分布」。
+
+    這張卡有一半在做的事是比較，而相對的那一半以前只是特徵表上的幾個數字 ——
+    而數字答不出「這個差在不在雜訊裡」。兩條分布疊在**同一把尺**上就看得出來。
+
+    測法同上：量畫出來的畫素。有參照的那一張要比沒有的多畫東西，而多出來的
+    不能只是那一行字（把說明關掉也還要多）。
+    """
+    from PySide6.QtGui import QColor, QPixmap
+
+    hill = [max(1, 40 - abs(i - 32)) for i in range(64)]
+    left = [max(1, 40 - abs(i - 16)) for i in range(64)]
+
+    def shot(ref):
+        insp = insp_mod.GlvInspector()
+        insp.set_context("glv_stats", meta={"glv_hist": [{
+            "stream": "test", "region": "epi", "prefix": "", "n": 900,
+            "sat": 0.0, "bins": list(hill),
+            "marks": {"glv_median": 128.0}, "ref": ref}]})
+        insp.resize(420, 160)
+        pm = QPixmap(420, 160)
+        pm.fill(QColor("#ffffff"))
+        insp.render(pm)
+        return pm.toImage()
+
+    def differs(a, b):
+        return sum(1 for x in range(0, 420, 2) for y in range(0, 160, 2)
+                   if a.pixelColor(x, y) != b.pixelColor(x, y))
+
+    alone = shot(None)
+    with_ref = shot({"label": "mg", "bins": list(left), "n": 3600,
+                     "boxes": 6, "marks": {"glv_median": 64.0},
+                     "here": {"glv_median": 128.0},
+                     "values": {"cmp_delta_median": 64.0}})
+    assert differs(with_ref, alone) > 40, "參照那條分布沒有畫出來"
+
+    # 沒有 bins 的參照（例：舊的結果）不能讓面板炸掉，也不該多畫
+    empty = shot({"label": "mg", "bins": [], "values": {}})
+    assert differs(empty, alone) == 0
+
+
+def test_the_numbers_on_the_plot_are_short_and_keep_their_direction(qapp):
+    """圖上的字只有 10 px 高，而 `SNR 66.116` 裡真正在講事情的是 `66`。
+
+    `delta` 的正負號**要留**：往亮的差 26 階與往暗的差 26 階是兩種缺陷，
+    而 `snr` 照定義不帶方向（使用者：「SNR 不會有負值」）。
+    """
+    caption = insp_mod.GlvInspector._compare_caption
+    text = caption({"values": {"cmp_delta_median": 26.138,
+                               "cmp_snr_median": 66.116,
+                               "cmp_overlap": 0.0604}})
+    assert text == "Δ +26  ·  SNR 66  ·  overlap 0.06"
+
+    # 方向反過來 -> 減號（真的減號，不是 hyphen）
+    dark = caption({"values": {"cmp_delta_median": -26.138}})
+    assert dark == "Δ \u221226"
+
+    # 同一個 metric 勾了好幾個統計量 -> 圖上只寫第一個（其餘在特徵表上）
+    many = caption({"values": {"cmp_delta_median": 26.0, "cmp_delta_q90": 25.0,
+                               "cmp_snr_median": 66.0, "cmp_ratio_median": 1.2,
+                               "cmp_overlap": 0.06}})
+    assert many.count("Δ") == 1
+    assert len(many.split("  ·  ")) == insp_mod.GlvInspector.CMP_MAX
+
+    # 不是這張卡寫的名字不要瞎猜
+    assert caption({"values": {"blob_area": 3.0}}) == ""
+
+
+def test_it_says_when_the_region_is_too_thin_to_trust(qapp):
+    """patch 的 ROI 常常只有幾百個像素 —— 那時候離散度本身沒有意義。
+
+    而畫面上以前沒有任何地方說得出這件事：一個算得出來的 std 看起來跟一個
+    可信的 std 一模一樣。
+    """
+    import numpy as np
+
+    meta, feats = _glv_meta(np.full((10, 10), 40, dtype=np.uint8))
+    insp = insp_mod.GlvInspector()
+    insp.set_context("glv_stats", result={"features": feats}, meta=meta)
+    assert "100 px" in insp.summary()
+    assert "not reliable" in insp.summary()
+
+    hot = np.full((40, 40), 255, dtype=np.uint8)
+    meta2, feats2 = _glv_meta(hot)
+    insp.set_context("glv_stats", result={"features": feats2}, meta=meta2)
+    assert "0 or 255" in insp.summary(), "整塊飽和要講出來"
+
+
+def test_the_gray_level_tab_says_what_it_is_showing(qapp):
+    """分頁鈕的字要說得出「顯示的是什麼、誰跟誰比」（使用者 2026-08-21）。
+
+    以前它讀的是**類別屬性**，所以不管畫面上是什麼，它永遠寫著「Gray level」——
+    那一塊在講什麼得自己從圖裡推。
+    """
+    import numpy as np
+
+    img = np.zeros((40, 40), np.float32)
+    img[:, :20] = 140.0
+    img[:, 20:] = 100.0
+
+    from d4t.core.pipeline.context import Context
+    from d4t.core.pipeline.step import get_step
+    import d4t.core.steps  # noqa: F401
+
+    def run(**over):
+        ctx = Context(images={"test": img, "ref": img - 25.0})
+        ctx.set_roi_boxes("epi", [(0.0, 0.0, 0.5, 1.0)])
+        ctx.set_roi_boxes("mg", [(0.5, 0.0, 0.5, 1.0)])
+        get_step("glv_stats")().run(ctx, dict(
+            {"source": "test", "roi": "epi", "metrics": "glv_median"}, **over))
+        insp = insp_mod.GlvInspector()
+        insp.set_context("glv_stats", meta=dict(ctx.meta))
+        return insp
+
+    plain = run()
+    assert plain.tab_title() == "Gray level · epi on test"
+
+    beside = run(reference="another region", reference_region="mg",
+                 compare_metrics="delta")
+    assert beside.tab_title() == "Gray level · epi vs mg"
+
+    across = run(reference="another region on another stream",
+                 reference_source="ref", reference_region="mg",
+                 compare_metrics="delta")
+    assert across.tab_title() == "Gray level · epi vs mg @ ref"
+    assert "compared against mg @ ref" in across.tab_tooltip()
+    assert "glv_median" in across.tab_tooltip(), "tooltip 要說出在顯示哪幾個"
+
+    # 沒資料的時候退回類別的名字（分頁鈕不能是空的）
+    empty = insp_mod.GlvInspector()
+    assert empty.tab_title() == "Gray level"
