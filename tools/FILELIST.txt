@@ -5,7 +5,7 @@ a6b298c38249d1758d17f7780df10626e05c809d .gitignore
 dc5d3e24d36ca139df3d9ccac1034075e7698f6e AGENTS.md
 8ad51660214ce61e629e9ef97a1b4cfdd0fb910a CLAUDE.md
 b20e9b7f31aa8195e297b4a124b69252cd4c56cf README.md
-6404dda68fba427192fa762801413f4c20e52877 SESSION_LOG.md
+71bbc686ee80bbd3a4f245ec69dfd257b7f3ae28 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 fa7805cc486a9e7dda00cd42366d7b95fc486862 d4t/__main__.py
@@ -107,6 +107,7 @@ f0d4a071efb72fb1829ccb6cc01dec549c47b8a9 docs/ROADMAP.md
 f6378d9ba391a4e1e3ef7ed855c7694b6b7f50b9 docs/plans/F0-master-plan.md
 d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 c4f06765ad918545511da042eb8d2b63df19795f docs/plans/F15-pair-sources.md
+e9e7b3a18f8968ae543fffbacd32f34de8496d35 docs/plans/F18-glv.md
 773d4c5652e1abd95b7bf06591a691c07c1c9fa1 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py

@@ -60,6 +60,24 @@ Output 被前面七段各推 8 px，標題落在 y=58，Input 在 y=2：點不�
 
 （兩件事都只動 `d4t/ui/widgets.py`；引擎、recipe、黃金值一個字都沒動。）
 
+### ③ 同一輪談定了 GLV 量測卡的重做（設計，還沒動工）
+
+計畫書：[`docs/plans/F18-glv.md`](docs/plans/F18-glv.md)。三個定案：
+**`compare` 併進 `reference` 維度**（絕對值與相對值同一張卡同時吐）、
+**預設 metrics 換成 robust**（median/MAD）、**Spread 搬去 Results 並且可以拖
+門檻**。
+
+第三件事使用者的原話是「他在 run 之前都是空的」，而那句話有程式碼上的證據：
+`EnhanceInspector` 讀 `ctx.meta`（預覽就有）、`MeasureInspector` 讀
+`trial_results`（跑完才有）—— 同一塊面板、同一個位置、兩種資料生命週期。
+量測卡的儀表要換成**這一顆的直方圖**，整批的資訊縮成底下一條 8 px 的帶子。
+
+Metric 的選法從勾選網格改成**分群的膠囊晶片，每顆帶一個「它在分布上是哪一段」
+的小圖**（median 是把面積切一半的線、mean 是天平的支點、MAD 是中位數兩側的
+一段、bimodality 是兩座山中間的谷）。mockup 是用專案自己的 theme token 真的
+畫出來的 —— 十六顆小圖在 19 px 下逐顆看過，改了六顆才分得開（第一版的 mean
+只是「median 沒填色」，trimmed 的虛線在那個尺寸下整條不見）。
+
 ---
 
 ## F17：讓 DAG 引擎名實相符（2026-08-20，第三十一輪）
