@@ -836,6 +836,67 @@ class GlvStatsStep(MultiSourceStep):
             out["glv_ok"] = 0.0 if cls._too_thin(patch, p) else 1.0
         return out
 
+    # ---- 影像上標出「面板正在講的那一格」（2026-08-22）---------------------
+    @classmethod
+    def overlay_marks(cls, ctx: Any, params: Dict[str, Any],
+                      stream: Optional[str] = None) -> Any:
+        """把**典型那一格**的外框交出去（正規化座標）。
+
+        為什麼需要它
+        ------------
+        一個具名區域常常是**一組**框（`roi_cross` 一張 patch 上放二十個很正常）。
+        那時候面板畫的是「典型那一格」的分布 —— 把二十格疊起來畫等於畫了一張
+        什麼都看不出來的圖 —— 而標題老實地寫著 ``typical box #7 of 20``。
+
+        但**影像上沒有任何東西指得出第 7 格是哪一格**：二十個一模一樣的框，
+        使用者只能猜。於是面板與影像在講同一件事，畫面上卻連不起來 ——
+        那正是 `Step.overlay_marks` 這個 hook 存在的理由（F18 §9.0：
+        「影像上把正在量的那一塊點出來」是整個 Measure 段共用的）。
+
+        只有**一格**的時候不畫：那時候區域框本身就是答案，再描一次只是把線加粗。
+
+        怎麼畫：**四個角各一個實心點**，不是再描一圈外框。
+        `ImageView._paint_marks` 的規矩是「線畫到幾乎看不見（alpha 70）、
+        點畫滿」—— 用線描的外框會跟區域框**完全重疊、同一個顏色**，等於沒畫
+        （2026-08-22 截圖出來才看到）。四個角點是這個畫面既有的語彙，
+        而且不會被誤讀成一個新的邊界。
+
+        ``labels`` 給區域名，顏色因此跟影像上那個區域的框一模一樣；
+        ``focus`` 指著它，所以是滿的 alpha。
+        """
+        notes = (getattr(ctx, "meta", None) or {}).get("glv_hist") or []
+        want = str(stream or "").strip()
+        lines: List[Any] = []
+        points: List[Any] = []
+        labels: List[str] = []
+        focus = -1
+        for note in notes:
+            if not isinstance(note, dict):
+                continue
+            mine = str(note.get("stream") or "").strip()
+            if want and mine and mine != want:
+                continue               # 這一份是量在別張影像上的
+            if int(note.get("boxes") or 0) <= 1:
+                continue               # 只有一格 —— 區域框本身就是答案
+            name = str(note.get("region") or "")
+            idx = int(note.get("box", -1))
+            try:
+                rects = list(ctx.roi_norm_rects(name)) if name else []
+            except Exception:          # noqa: BLE001 — 顯示用，不能擋畫面
+                continue
+            if not (0 <= idx < len(rects)):
+                continue               # 對不上就整組不畫（同 `set_marks` 的規矩）
+            x, y, w, h = (float(v) for v in rects[idx])
+            corners = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
+            if focus < 0:
+                focus = len(lines)     # 面板畫的就是這一格 → 滿的 alpha
+            # 一條線段（上緣，畫得很淡）＋ 四個角點（畫滿）。線段是必要的：
+            # ``points[i]`` 的定義是「第 i 條線段上的點」，兩串必須等長。
+            lines.append([corners[0], corners[1]])
+            points.append(corners)
+            labels.append(name)
+        return lines, points, focus, labels
+
     def _note_distribution(self, ctx: Context, patch, p: Dict[str, Any],
                            feats: Dict[str, float], n_raw: int = 0,
                            thin: bool = False, box: int = -1,

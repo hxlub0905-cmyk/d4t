@@ -4314,8 +4314,12 @@ class StudioWindow(QMainWindow):
             view.set_overlay(boxes, focus, labels)
         self._refresh_measure_marks()
 
-    def measure_marks(self):
+    def measure_marks(self, stream: Optional[str] = None):
         """選著那張卡要畫的量測標記 ``(lines, points, focus, labels)``（F19）。
+
+        ``stream`` 是**這個 view 現在顯示的那一條流** —— 卡片只交那一條量到的
+        （見 `Step.overlay_marks`）。不給就是全部，`measure_marks()` 那樣呼叫的
+        既有測試因此不用動。
 
         資料由**卡片自己**交出來（`Step.overlay_marks`）—— meta 的形狀是那張卡
         的事。這裡只問「現在選著的是誰」，所以整個 Measure 段共用同一條路。
@@ -4330,29 +4334,92 @@ class StudioWindow(QMainWindow):
             return [], [], -1, []
         try:
             lines, points, focus, labels = get_step(node.step).overlay_marks(
-                ctx, node.params)
+                ctx, node.params, stream)
         except Exception:                  # noqa: BLE001 — 顯示用，不能擋畫面
             return [], [], -1, []
         return (list(lines or []), list(points or []), int(focus),
                 [str(v) for v in (labels or [])])
 
     def _refresh_measure_marks(self) -> None:
-        lines, points, focus, labels = self.measure_marks()
-        for view in (self.image_view, self.image_view_b):
+        """**一個 view 一次** —— 兩張圖顯示的可能是不同的流（比對模式）。
+
+        以前這裡取一次就推給兩個 view，於是一張卡在 test 與 ref 上各量一次時，
+        兩組線會同時畫在**你正在看的那一張**上，同色、同標籤、分不出來。
+        現在各問各的，比對模式因此也才是對的（2026-08-22）。
+        """
+        for view, combo in ((self.image_view, self.stream_combo),
+                            (self.image_view_b, self.stream_combo_b)):
+            lines, points, focus, labels = self.measure_marks(
+                str(combo.currentText() or ""))
             view.set_marks(lines, points, focus, labels)
 
     def _focus_box_index(self, boxes: Sequence[Sequence[float]]) -> int:
-        """哪一個框要畫成醒目的那一個 —— 離影像正中心最近的那個。
+        """哪一個框要畫成醒目的那一個 —— **卡片真的挑走的那一塊**。
 
-        缺陷永遠在 patch 正中心（裁切方式保證的），所以那一塊就是「**這一顆**
-        發生了什麼」的所在。一堆一模一樣的框裡看不出哪個是它。
+        醒目的那一個的意思一直都是 ``<name>_center``（見
+        :meth:`_overlay_region_names` 的註解：「它的角色由 focus 表達」）。
+        以前這裡是用「離影像正中心最近」算出來的，而那在 F20 之前跟
+        ``_center`` **必定一致** —— 那一版的 `_center` 就是這樣定義的。
+
+        F20（2026-08-22）之後 Region 卡多了一格「哪一塊是缺陷那一塊」，
+        選「訊號最強」時 ``_center`` 會落在別的地方。這裡不跟著改的話，
+        影像上被畫成醒目的是 A、卡片實際量的是 B —— 而畫面上沒有任何東西
+        透露那件事（那正是這個 repo 最怕的那種錯）。
+
+        所以改成**去問 context 那一塊到底是哪一個**，對不上才退回舊規則
+        （沒跑過、或那張卡不吐 ``_center``）。
         """
+        rects = self._center_rects()
+        for i, box in enumerate(boxes):
+            if any(all(abs(float(a) - float(b)) < 1e-6 for a, b in zip(box, r))
+                   for r in rects):
+                return i
+        if not self._defines_regions():
+            # **量測卡選著的時候不要亂指一個。** 這裡的醒目一直都是
+            # ``<name>_center`` 的意思，而那是 **Region 卡**的產物。
+            # 量測卡（GLV / CD）只是**引用**別人定義的區域 —— 一個 24 格的
+            # 區域被 pooled 成一堆像素時，沒有任何一格是特別的，把離畫面中心
+            # 最近的那一格畫成醒目等於在說一件不成立的事。
+            # 量測卡要指哪一格，走的是自己的 `overlay_marks`（那才是
+            # 「這一顆真的量到了什麼」那條路）。
+            return -1
         best, best_d = -1, None
         for i, (nx, ny, nw, nh) in enumerate(boxes):
             d = (nx + nw / 2.0 - 0.5) ** 2 + (ny + nh / 2.0 - 0.5) ** 2
             if best_d is None or d < best_d:
                 best, best_d = i, d
         return best
+
+    def _defines_regions(self) -> bool:
+        """選著的這張卡是不是**定義**區域的那種（Region 卡）。
+
+        引用別人區域的量測卡不算 —— 見 :meth:`_focus_box_index` 的說明。
+        """
+        node = self.model.nodes.get(self.selected_node or "")
+        if node is None:
+            return False
+        try:
+            return bool(get_step(node.step).resolve_regions_out(node.params))
+        except Exception:                  # noqa: BLE001 — 顯示用，不能擋畫面
+            return False
+
+    def _center_rects(self) -> List[Sequence[float]]:
+        """這一顆上 ``<name>_center`` 實際落在哪 —— 沒跑過就是空的。"""
+        node = self.model.nodes.get(self.selected_node or "")
+        ctx = getattr(getattr(self, "_last_result", None), "context", None)
+        if node is None or ctx is None:
+            return []
+        out: List[Sequence[float]] = []
+        try:
+            names = list(get_step(node.step).resolve_regions_out(node.params))
+        except Exception:                  # noqa: BLE001 — 顯示用，不能擋畫面
+            return []
+        for name in names:
+            if not str(name).endswith("_center"):
+                continue
+            out.extend(tuple(float(v) for v in r)
+                       for r in ctx.roi_norm_rects(name))
+        return out
 
     def _on_stream_changed(self, text: str) -> None:
         if self._syncing:

@@ -13,3 +13,11 @@ dist/
 
 # 離線安裝 wheels（各機器自行取得，不進版控）
 wheels/
+
+# 廠內驗證用的合成資料（2026-08-22）。**產生器在版控裡、資料不在**：
+#   tools/make_mgext.py       → 0822test/mgext/       （F20 的校正那一批）
+#   tools/make_mgepi_real.py  → 0822test/mgepi_real3/ （分離度那一批）
+# 兩支都是固定種子、逐位元組可重現（`tests/test_make_mgext.py` 鎖住這件事），
+# 所以進版控的是「怎麼產」而不是幾 MB 的 TIFF。這個目錄底下也放跑實驗用的
+# recipe —— 那是草稿，不是範例（這個 repo 刻意沒有範例 recipe，見 CLAUDE.md §1）。
+0822test/

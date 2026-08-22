@@ -326,3 +326,33 @@ def test_choose_axis_survives_a_flat_block():
 def test_scan_of_an_empty_block_does_not_raise():
     res = algo_edge.scan(np.empty((0, 0)))
     assert res.widths.size == 0 and res.reasons == {"empty": 1}
+
+
+# --------------------------------------------------------------------------- #
+# 剖面兩端的平滑（2026-08-22）
+# --------------------------------------------------------------------------- #
+def test_smoothing_does_not_invent_a_gradient_at_the_ends():
+    """平的剖面平滑完還是平的 —— 補零的話兩端會被拉向 0。
+
+    這不是「頭尾兩格不準」而已：``find_edges`` 的偵測門檻是**相對的**
+    （0.35 × 該剖面最大梯度），所以端點的假梯度會把門檻整個墊高。
+    """
+    flat = np.full(40, 180.0)
+    out = algo_edge.gaussian_filter1d(flat, 1.5)
+    assert np.allclose(out, 180.0, atol=1e-9)
+
+
+def test_a_bright_end_of_the_profile_does_not_hide_a_real_edge():
+    """框切在亮的地方，中間那條比較弱的邊仍然要找得到。
+
+    真實案例（F19 之後、mgext 合成資料）：一根 MG 從側壁竄出去一段，
+    框的兩端各切在別的材質上。補零時端點的假梯度是全剖面最強的，
+    門檻被墊高到 14.2，而凸出物末端那條真的邊只有 8.4 —— 於是那一列回
+    ``open_edge``，看起來完全像「結構被框切掉了」。
+    """
+    prof = np.full(40, 205.0)              # 兩端都是亮的（框切在材質裡）
+    prof[26:] = 165.0                      # 中間偏右一條比較弱的邊（對比 40）
+    prof = algo_edge.gaussian_filter1d(prof, 0.8)
+    edges = algo_edge.find_edges(prof, window=6, smooth=0.8, min_quality=0.2)
+    assert [e.polarity for e in edges] == [-1]
+    assert edges[0].pos == pytest.approx(25.5, abs=1.0)

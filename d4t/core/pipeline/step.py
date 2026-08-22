@@ -683,7 +683,8 @@ class Step(ABC):
 
     # ---- 影像上的量測標記（F19）--------------------------------------------
     @classmethod
-    def overlay_marks(cls, ctx: Any, params: Dict[str, Any]) -> Any:
+    def overlay_marks(cls, ctx: Any, params: Dict[str, Any],
+                      stream: Optional[str] = None) -> Any:
         """這張卡要在預覽影像上畫哪些**線段與點**（正規化座標）。
 
         回 ``(lines, points, focus, labels)``：
@@ -707,6 +708,12 @@ class Step(ABC):
         區域框走的是另一條路（`viewmodel.region_overlay`，從 model 推導）——
         **兩者來源不同，不要混**：框是「recipe 說要看哪裡」，標記是「這一顆真的
         量到了什麼」，而後者只有跑過才有。
+
+        ``stream`` 是**畫面現在顯示的那一條影像流**（``None`` = 不知道）。
+        一張卡可以在好幾條流上各量一次（``source`` 是複數型別），而那些量測
+        **是在不同的影像上做的** —— 全部畫上去的話，你正在看的那張圖上會有
+        一半的線是量在另一張圖上的結果，而畫面上沒有任何東西透露那件事。
+        所以知道是哪一條時就只交那一條的（2026-08-22）。
 
         預設什麼都不畫，所以既有的卡一張都不用動。
         """
