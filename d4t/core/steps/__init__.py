@@ -9,7 +9,7 @@
   load_patch, load_single, load_sidecar, normalize, tone, denoise, flatten,
   align, subtract, align_to, pair_source,
   roi_cross, roi_template, roi_from_mask, roi_mask,
-  feature_math,
+  feature_math, feature_fill,
   output_csv, output_report, output_klarf, output_image
 
 **2026-08-20（F16）：``pattern_ref`` 刪掉了。** 使用者：「Compare 中
@@ -57,9 +57,10 @@ from . import cd             # cd_measure
 from . import quality        # focus_quality
 from . import glv_stats      # glv_stats（Gray level：stats / compare）
 from . import feature_math   # feature_math（Algo 段：數字 → 數字）
+from . import feature_fill   # feature_fill（Algo 段：量不到的那一格）
 from . import output         # Output 段（csv / report / klarf / image）
 
 __all__ = [
     "load", "load_sidecar", "normalize", "denoise", "tone", "flatten", "align", "arith",
-    "quality", "glv_stats", "feature_math", "output",
+    "quality", "glv_stats", "feature_math", "feature_fill", "output",
 ]

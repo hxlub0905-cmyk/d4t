@@ -26,6 +26,23 @@ from ..pipeline.step import ParamSpec, Step, StepError
 #: 而不是等使用者寫完表達式才發現（鐵則 4）。
 FEATURE_PREFIX_PATTERN = r"^$|^[A-Za-z_][A-Za-z0-9_]*$"
 
+#: 一串特徵名（逗號分隔）—— 影像流的 ``image_keys`` 用的是同一種值格式。
+#: 空字串合法（卡片自己用 ``configuration_issues`` 講「還沒填」，那句話比
+#: 一個正規表達式的錯誤訊息有用得多）。
+FEATURE_LIST_PATTERN = (r"^\s*$|^\s*[A-Za-z_][A-Za-z0-9_]*"
+                        r"(\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*\s*$")
+
+
+def feature_list(value) -> list:
+    """把逗號分隔的特徵名切成一串（去空白、去重、保留順序）。"""
+    out, seen = [], set()
+    for part in str(value or "").split(","):
+        name = part.strip()
+        if name and name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
+
 
 # --------------------------------------------------------------------------- #
 # 一張卡做一條流（F7-18）
