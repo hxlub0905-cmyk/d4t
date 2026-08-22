@@ -385,19 +385,33 @@ class CdMeasureStep(MultiSourceStep):
 
     # ---- 影像上的標記（見 Step.overlay_marks）------------------------------ #
     @classmethod
-    def overlay_marks(cls, ctx: Any, params: Dict[str, Any]) -> Any:
+    def overlay_marks(cls, ctx: Any, params: Dict[str, Any],
+                      stream: Optional[str] = None) -> Any:
         """把 ``ctx.meta["cd"]`` 裡的掃描線與邊點交出去。
 
         線太多會糊成一片，所以最多畫 :data:`MAX_DRAWN_LINES` 條（等距抽樣）——
         但**代表那一條一定在裡面**，它是面板上那張剖面圖畫的同一條。
+
+        ``stream`` 給了就**只交那一條流量到的**。這張卡的 ``source`` 是複數
+        型別，接兩條線就在兩條流上各量一次（見 ``docs/USING-CD.md`` §2）——
+        而那兩組線是在**兩張不同的影像**上量出來的。全部畫上去的話，你正在看
+        的 test 上會有一半的線是量在 ref 上的結果，同一個顏色、同一個標籤，
+        分不出來（2026-08-22 在 `0822test/mgext` 的 recipe 上實際看到）。
+        比對模式因此也才是對的：左邊畫左邊那條流的、右邊畫右邊那條流的。
+
+        note 沒記流名的時候不過濾 —— 過濾要根據**知道的事**，不是猜的。
         """
         notes = (getattr(ctx, "meta", None) or {}).get(cls.META_KEY) or {}
         lines: List[Any] = []
         points: List[Any] = []
         labels: List[str] = []
         focus = -1
+        want = str(stream or "").strip()
         for prefix in sorted(notes):
             note = notes[prefix] or {}
+            mine = str(note.get("stream") or "").strip()
+            if want and mine and mine != want:
+                continue                   # 這一份是量在別張影像上的
             name = str(note.get("region") or "")
             before = len(lines)
             if str(note.get("shape")) == SHAPE_BLOB:

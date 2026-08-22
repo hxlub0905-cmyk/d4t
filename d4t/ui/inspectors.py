@@ -147,6 +147,24 @@ class Inspector(QWidget):
             return None
         return None if (math.isnan(f) or math.isinf(f)) else f
 
+    def _label_rows(self) -> List[Dict[str, Any]]:
+        """這張面板一列一份的那組記錄 —— 只給 :meth:`_row_label` 用。
+
+        預設空的：沒有覆寫的面板不是多列的，標題本來就不必分辨誰是誰。
+        """
+        return []
+
+    def _row_label(self, note: Dict[str, Any]) -> str:
+        """這一列的標題 —— 只說出真正把它跟別列分開的那件事（見 `row_labels`）。"""
+        rows = self._label_rows() or [note]
+        labels = row_labels(rows)
+        key = (str(note.get("region") or ""), str(note.get("stream") or ""))
+        for row, label in zip(rows, labels):
+            if row is note or (str(row.get("region") or ""),
+                               str(row.get("stream") or "")) == key:
+                return label
+        return str(note.get("region") or note.get("stream") or "whole image")
+
     def _frame(self, p: QPainter) -> QRectF:
         rect = QRectF(self.rect()).adjusted(6, 6, -6, -6)
         p.setRenderHint(QPainter.Antialiasing, True)
@@ -1457,6 +1475,9 @@ class GlvInspector(Inspector):
         """
         return QColor(region_hex(index))
 
+    def _label_rows(self) -> List[Dict[str, Any]]:   # noqa: D102
+        return list(self.rows())
+
     def _paint_row(self, p: QPainter, band: QRectF, row: Dict[str, Any],
                    index: int) -> None:
         counts = [max(0, int(c)) for c in (row.get("bins") or [])]
@@ -1464,7 +1485,7 @@ class GlvInspector(Inspector):
             return
         colour = self._colour(index)
 
-        label = str(row.get("region") or row.get("stream") or "whole image")
+        label = self._row_label(row)
         versus = self._pairs().get(str(row.get("region") or ""))
         tail = ""
         if versus:
@@ -1777,6 +1798,46 @@ class GlvInspector(Inspector):
         p.setBrush(Qt.NoBrush)
 
 
+def row_labels(notes: Sequence[Dict[str, Any]]) -> List[str]:
+    """一組 note → 每一列的標題：**只說出真正把它們分開的那件事**。
+
+    量測卡的面板一列一份記錄，而「一份」可以是一個區域，也可以是同一個區域的
+    另一條影像流（`source` 是複數型別，接第二條線就多一份 —— 見
+    ``docs/USING-CD.md`` §2）。列標題原本一律寫區域名，於是
+    **同一個區域接了 test 與 ref 兩條流時，兩列標的是同一個名字**，
+    而且顏色也一樣（顏色照區域給）—— 畫面上沒有任何東西說得出哪一列是哪一條。
+    2026-08-22 在 `0822test/mgext` 的 recipe 上實際看到：兩列都寫 ``mg_center``，
+    一列 9.17 px、一列 8.50 px，而使用者要相減的正是這兩個數字。
+
+    規則就一句：**把不變的那一半省掉。**
+
+    * 區域都一樣、流不一樣 → 只寫流名
+    * 流都一樣、區域不一樣 → 只寫區域名（＝ 原本的行為，多區域是常態）
+    * 兩個都不一樣 → 兩個都寫
+
+    ⚠ **顏色不動。** 顏色的意思是「影像上那個框」（`GlvInspector._colour` 立下
+    的規矩），兩條流量的是同一個框 —— 給它們兩個顏色的話，面板上的顏色就不再
+    對得回影像上的框，那比標題重複糟得多。分辨兩條流是**標題**的工作。
+    """
+    rows = list(notes)
+    if not rows:
+        return []
+    regions = [str(n.get("region") or "") for n in rows]
+    streams = [str(n.get("stream") or "") for n in rows]
+    many_regions = len(set(regions)) > 1
+    many_streams = len(set(streams)) > 1
+    out = []
+    for region, stream in zip(regions, streams):
+        who = region or "whole image"
+        if many_streams and not many_regions:
+            out.append(stream or who)
+        elif many_streams and many_regions:
+            out.append("%s @ %s" % (who, stream) if stream else who)
+        else:
+            out.append(who)
+    return out
+
+
 class CdInspector(Inspector):
     """CD：**這一條線的剖面**、每條線量到多寬、以及這一顆站在整批的哪裡（F19）。
 
@@ -1832,6 +1893,9 @@ class CdInspector(Inspector):
         out.sort(key=lambda n: (int(n.get("region_index", 0) or 0),
                                 str(n.get("prefix", ""))))
         return out
+
+    def _label_rows(self) -> List[Dict[str, Any]]:   # noqa: D102
+        return self.notes()
 
     def note(self) -> Optional[Dict[str, Any]]:
         got = self.notes()
@@ -1907,9 +1971,9 @@ class CdInspector(Inspector):
         """
         notes = self.notes()
         if len(notes) > 1:
-            return "  |  ".join(
-                "%s: %s" % (n.get("region") or "whole image", self._one_summary(n))
-                for n in notes[:self.MAX_ROWS])
+            pairs = list(zip(row_labels(notes), notes))[:self.MAX_ROWS]
+            return "  |  ".join("%s: %s" % (lab, self._one_summary(n))
+                                for lab, n in pairs)
         return self._one_summary(notes[0]) if notes else ""
 
     def _one_summary(self, note: Dict[str, Any]) -> str:
@@ -1990,8 +2054,7 @@ class CdInspector(Inspector):
         ww = rect.width() * self.WOBBLE_W
         blob = self.is_blob(note)
         head = (None if solo
-                else (str(note.get("region") or "whole image"),
-                      QColor(self.colour(note))))
+                else (self._row_label(note), QColor(self.colour(note))))
         firsts = (("Levels in this region" if blob else "Profile of one line")
                   if solo else "")
         others = (first or solo)

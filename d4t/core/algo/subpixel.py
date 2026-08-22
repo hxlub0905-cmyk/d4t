@@ -77,24 +77,50 @@ class SubpixelResult(NamedTuple):
 # --------------------------------------------------------------------------- #
 # filtering / strip helpers
 # --------------------------------------------------------------------------- #
-def gaussian_filter1d(profile: np.ndarray, sigma: float) -> np.ndarray:
-    """Apply a 1-D Gaussian LPF using numpy convolution (no scipy dependency)."""
+def _gaussian_kernel(sigma: float) -> np.ndarray:
     k = max(3, int(6 * sigma) | 1)          # odd kernel, at least 3 wide
     x = np.arange(k, dtype=np.float64) - k // 2
     kernel = np.exp(-0.5 * (x / sigma) ** 2)
-    kernel /= kernel.sum()
-    return np.convolve(profile, kernel, mode='same')
+    return kernel / kernel.sum()
+
+
+def gaussian_filter1d(profile: np.ndarray, sigma: float) -> np.ndarray:
+    """Apply a 1-D Gaussian LPF using numpy convolution (no scipy dependency).
+
+    **邊界補的是端點值，不是 0**（``mode='edge'``）。``np.convolve`` 的
+    ``mode='same'`` 補零，於是剖面的頭尾兩端被拉向 0 —— 那在梯度上是一道
+    **假的、而且通常是全剖面最強的**轉折。
+
+    後果不是「頭尾兩格不準」而已：``algo.edge.find_edges`` 的偵測門檻是
+    **相對的**（``0.35 × 該剖面最大梯度``），所以那道假梯度會把門檻整個墊高，
+    於是**真正的邊被安靜地丟掉** —— 剖面兩端的材質對比越強，被丟掉的越多。
+    2026-08-22 在 MG extrusion 的合成資料上量到：凸出量對設計值的回歸斜率
+    0.079、R² 0.030（等於完全沒有量到），改成 edge padding 之後是 0.917 / 0.792。
+    症狀是那幾列回 ``open_edge``，而 ``open_edge`` 看起來完全像「結構被框切掉了」。
+
+    同一份檔案裡 :func:`smooth_strip_2d` 一直都是 ``mode='edge'``；
+    MMH 那幾支則是用一個 ``k//2+1`` 的 margin 把被汙染的樣本排除掉
+    （見 :func:`refine_yedge_gradient_peak` 的 Step 7）。也就是說這件事
+    這個 repo 早就知道，只有這一支漏掉 —— 而 ``algo.edge`` 沒有那個 margin。
+    """
+    kernel = _gaussian_kernel(sigma)
+    pad = kernel.size // 2
+    padded = np.pad(np.asarray(profile, dtype=np.float64), (pad, pad), mode='edge')
+    return np.convolve(padded, kernel, mode='valid')
 
 
 def gaussian_filter1d_2d(arr: np.ndarray, sigma: float) -> np.ndarray:
-    """Apply per-column Gaussian LPF on a 2-D array (axis=0), pure numpy."""
-    k = max(3, int(6 * sigma) | 1)
-    x = np.arange(k, dtype=np.float64) - k // 2
-    kernel = np.exp(-0.5 * (x / sigma) ** 2)
-    kernel /= kernel.sum()
+    """Apply per-column Gaussian LPF on a 2-D array (axis=0), pure numpy.
+
+    邊界處理與 :func:`gaussian_filter1d` 一致（見那一支的說明）——
+    兩支對同一件事給出不同答案，是最難發現的那種錯。
+    """
+    kernel = _gaussian_kernel(sigma)
+    pad = kernel.size // 2
     result = np.zeros_like(arr, dtype=np.float64)
     for col in range(arr.shape[1]):
-        result[:, col] = np.convolve(arr[:, col], kernel, mode='same')
+        padded = np.pad(arr[:, col].astype(np.float64), (pad, pad), mode='edge')
+        result[:, col] = np.convolve(padded, kernel, mode='valid')
     return result
 
 

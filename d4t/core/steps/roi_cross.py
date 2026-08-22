@@ -43,8 +43,9 @@ from ..pipeline.step import (
 )
 from ._util import (
     FEATURE_PREFIX_PATTERN, drop_edge_boxes, drop_edge_specs,
-    output_prefix_spec, prefix_features, prefix_names, region_family,
-    region_fact_names, region_facts, require_image, set_region_family,
+    output_prefix_spec, pick_defect_box, pick_rule_specs, prefix_features,
+    prefix_names, region_family, region_fact_names, region_facts,
+    require_image, set_region_family,
 )
 
 _BESIDE = ("beside_vertical", "beside_horizontal")
@@ -332,6 +333,7 @@ class RoiCrossStep(Step):
             show_when=("place", _BESIDE),
             help="Which side of the stripe the box goes on.",
         ),
+        *pick_rule_specs("4 · Where the box goes"),
         ParamSpec(
             name="gap", type="float", default=1.0, min=0.0, max=100.0,
             section="4 · Where the box goes",
@@ -393,12 +395,20 @@ class RoiCrossStep(Step):
     features_out = ["cross_count", "cross_pitch_x_px", "cross_pitch_y_px",
                     "cross_filled", "cross_dist_px", "cross_pitch_ratio_x",
                     "cross_pitch_ratio_y", "cross_edge_dropped",
-                    "locate_conf", "locate_ok"]
+                    "cross_pick_by_signal", "locate_conf", "locate_ok"]
 
     # ---- 宣告（給 lint / UI）------------------------------------------------
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
-        return [str(params.get("source", "ref"))]
+        # 判斷訊號的那條流也要宣告 —— 它在畫布上是一條真的線，而且它會
+        # 改變框挑到哪一塊（也就是改變下游的結果），所以它必須進拓撲排序
+        # 與快取簽章（鐵則 10）。
+        out = [str(params.get("source", "ref"))]
+        if str(params.get("pick", "centre")) == "strongest":
+            judge = str(params.get("pick_source", "") or "").strip()
+            if judge and judge not in out:
+                out.append(judge)
+        return out
 
     @classmethod
     def resolve_regions_out(cls, params: Dict[str, Any]) -> List[str]:
@@ -503,6 +513,7 @@ class RoiCrossStep(Step):
                 "cross_pitch_ratio_x": float(res.x.pitch_ratio),
                 "cross_pitch_ratio_y": float(res.y.pitch_ratio),
                 "cross_edge_dropped": 0.0,
+                "cross_pick_by_signal": 0.0,
                 "locate_conf": float(res.confidence),
                 "locate_ok": 0.0,
             }, **region_facts(ctx, self.resolve_regions_out(p), shape,
@@ -515,8 +526,15 @@ class RoiCrossStep(Step):
         # 「缺陷所在的那一塊」變成「留下來的裡面離中心最近的那一塊」，而那兩者
         # 在缺陷靠近 patch 邊緣時不是同一塊（見 ``_util.drop_edge_boxes``）。
         boxes = list(res.boxes)
-        centre = res.center_box
-        idx = boxes.index(centre) if centre in boxes else 0
+        judge = None
+        if str(p["pick"]) == "strongest":
+            key = str(p.get("pick_source", "") or "").strip()
+            judge = ctx.images.get(key) if key else None
+            if judge is None:
+                ctx.warn("[%s] nothing is wired into “Judge on”, so the box "
+                         "nearest the middle was used instead." % self.key)
+        idx, by_signal = pick_defect_box(boxes, shape, str(p["pick"]), judge)
+        centre = boxes[idx]
         dropped = 0
         if bool(p["drop_edge"]) and float(p["edge_margin"]) > 0.0:
             boxes, dropped, idx = drop_edge_boxes(
@@ -547,13 +565,19 @@ class RoiCrossStep(Step):
             # ``locate_ok`` 答不出「錯得多嚴重」，而那兩種的下一步不一樣。
             "cross_pitch_ratio_x": float(res.x.pitch_ratio),
             "cross_pitch_ratio_y": float(res.y.pitch_ratio),
-            # 缺陷（永遠在正中心）離最近那個交會有多遠。落在交界上跟落在
+            # **挑中的那一塊**離 patch 正中心有多遠。挑框規則是「離中心最近」
+            # 時它就是「缺陷（在正中心）離最近那個交會有多遠」；改成「訊號最強」
+            # 之後它變成**座標偏了多少**，而那本身就是值得畫分布的東西。
+            # 落在交界上跟落在
             # 兩個交界中間，通常不是同一回事，所以這本身就是可以打分的數字。
             "cross_dist_px": float(dist),
             # 因為靠邊被丟掉幾塊。這個開關會**安靜地改變基準的樣本數**（同一份
             # recipe 在 wafer 中心與邊緣的 defect 上留下的框數不一樣），看得到
             # 才知道某一顆的基準是不是只剩一塊。
             "cross_edge_dropped": float(dropped),
+            # 1 = 「缺陷那一塊」真的是用訊號挑的；0 = 用離正中心最近挑的。
+            # 選了「訊號最強」卻沒接線的話整批會是 0 —— 那是唯一看得出來的地方。
+            "cross_pick_by_signal": 1.0 if by_signal else 0.0,
             "locate_conf": float(res.confidence),
             "locate_ok": 1.0,
         }, **region_facts(ctx, self.resolve_regions_out(p), shape,

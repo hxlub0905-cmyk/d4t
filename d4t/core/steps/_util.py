@@ -450,6 +450,113 @@ def drop_edge_specs(section: str) -> List[ParamSpec]:
     ]
 
 
+#: 「這一組框裡，哪一塊是缺陷那一塊」的兩種規則（F20，2026-08-22）。
+#:
+#: 在這之前只有一種，而且是寫死的：**離 patch 正中心最近的那一塊**。
+#: 那句話背後有一個假設 —— patch 是以 KLARF 座標為中心裁的，所以缺陷就在正中心。
+#: 假設成立的時候它完全夠用，而且不必接任何線。
+#:
+#: 但座標會偏。在 ``0822test/mgepi_real3`` 上實測（48 顆，缺陷離正中心中位數
+#: 7.1 px）：「離中心最近」只有 **14 / 24** 顆真的框到缺陷，而下游的凸出量
+#: 從 AUC 0.985 掉到 0.680 —— **框放錯吃掉的比任何一個量測參數都多**。
+#: 換成「訊號最強的那一塊」是 **23 / 24**。
+#:
+#: 為什麼是一格參數而不是一張新卡：兩者挑的是**同一組框裡的同一個東西**，
+#: 差別只在「憑什麼挑」。做成兩張卡的話，下游的 ``<name>_center``
+#: 會有兩個來源，而它們遲早會漂。
+PICK_RULES = ("centre", "strongest")
+
+#: 「訊號最強」在挑之前先做的均值視窗（px）。
+#:
+#: **不是為了好看**：缺陷在 patch 上是 ~3 px 的一塊，單像素的最大值在這種紋理
+#: 上太脆 —— 一顆熱點就能把整塊框挑走。3×3 均值是最小的匹配濾波，
+#: ``snr_map`` 用的是同一個理由。這個數字寫死不給調：它是「怎麼挑框」的一部分，
+#: 不是「量什麼」的一部分，而多一格能調的東西就多一種調錯的方式。
+PICK_SMOOTH_PX = 3
+
+
+def pick_rule_specs(section: str) -> List[ParamSpec]:
+    """兩張找 ROI 的卡共用的那兩格（規則 ＋ 在哪一條流上判斷）。
+
+    共用一份的理由跟 ``output_prefix_spec`` 一樣：**同一句話在兩張卡上要
+    一字不差**。使用者學一次，而兩張卡的行為不會各自漂走。
+    """
+    return [
+        ParamSpec(
+            name="pick", type="choice", default="centre",
+            choices=list(PICK_RULES), section=section,
+            label="Which box is the defect in",
+            choice_help={
+                "centre": "The one nearest the middle of the image. Patches "
+                          "are cut around the defect, so the middle one is "
+                          "usually it - and this needs nothing wired in.",
+                "strongest": "The one with the strongest signal in it, judged "
+                             "on the image stream you drag in below. Use this "
+                             "when the coordinate is off, or when the defect "
+                             "does not sit in the middle.",
+            },
+            help=("How to tell which of these boxes the defect is in - that is "
+                  "the one that becomes <name>_center, and every other one "
+                  "becomes the baseline <name>_others."),
+        ),
+        ParamSpec(
+            name="pick_source", type="image_key", direction="in", default="",
+            section=section, label="Judge on",
+            show_when=("pick", ("strongest",)),
+            help=("Which image stream to judge the signal on - drag a line "
+                  "from the difference image or from the Z-map. The box whose "
+                  "brightest 3x3 patch is highest wins. Leave nothing wired "
+                  "and the card falls back to the middle one and says so."),
+        ),
+    ]
+
+
+def pick_defect_box(boxes, patch_shape, rule: str = "centre",
+                    signal=None) -> tuple:
+    """哪一塊是缺陷那一塊 → ``(索引, 真的用訊號挑了嗎)``。
+
+    ``boxes`` 是像素矩形 ``(x, y, w, h)``。``signal`` 是要判斷的那條影像流
+    （``None`` = 沒接線）。
+
+    ⚠ **接不到線就退回「離中心最近」，並且回報退回了。**
+    安靜地照做才是最糟的：使用者以為自己挑的是訊號最強的那一塊，
+    而整批其實是用正中心挑的 —— 每一顆都吐得出正常的數字。
+    退回這件事因此要變成一個看得見的數字（見兩張卡的 ``*_pick_by_signal``）。
+    """
+    if not boxes:
+        return 0, False
+    h, w = float(patch_shape[0]), float(patch_shape[1])
+    cx, cy = w / 2.0, h / 2.0
+
+    def nearest() -> int:
+        return min(range(len(boxes)),
+                   key=lambda k: ((boxes[k][0] + boxes[k][2] / 2.0 - cx) ** 2
+                                  + (boxes[k][1] + boxes[k][3] / 2.0 - cy) ** 2))
+
+    if str(rule) != "strongest" or signal is None:
+        return nearest(), False
+    arr = np.asarray(signal, dtype=np.float64)
+    if arr.ndim != 2 or arr.size == 0:
+        return nearest(), False
+    k = int(PICK_SMOOTH_PX)
+    smooth = cv2.blur(arr.astype(np.float32), (k, k)).astype(np.float64)
+    best, best_val = None, None
+    for i, (bx, by, bw, bh) in enumerate(boxes):
+        x0 = max(0, min(int(round(bx)), smooth.shape[1] - 1))
+        y0 = max(0, min(int(round(by)), smooth.shape[0] - 1))
+        x1 = max(x0 + 1, min(int(round(bx + bw)), smooth.shape[1]))
+        y1 = max(y0 + 1, min(int(round(by + bh)), smooth.shape[0]))
+        seg = smooth[y0:y1, x0:x1]
+        if seg.size == 0:
+            continue
+        val = float(seg.max())
+        if best_val is None or val > best_val:
+            best, best_val = i, val
+    if best is None:
+        return nearest(), False
+    return best, True
+
+
 def drop_edge_boxes(boxes, patch_shape, margin: float, keep: int = -1):
     """丟掉靠邊的框。回傳 ``(留下的框, 丟掉幾個, keep 在新清單的位置)``。
 
@@ -654,7 +761,9 @@ def set_region_family(ctx, step_key: str, name: str, norm_boxes,
     ADC 常問的是「缺陷那一塊比旁邊同材質的暗多少」。以前只有兩個名字：
 
     * ``<name>``        —— 全部接起來的像素母體
-    * ``<name>_center`` —— 離 patch 正中心最近的那一塊（缺陷永遠在正中央）
+    * ``<name>_center`` —— **缺陷所在的那一塊**（哪一塊由 `pick_defect_box`
+      決定：預設「離 patch 正中心最近」，因為 patch 是以缺陷為中心裁的；
+      座標會偏的時候改成「訊號最強的那一塊」—— F20，2026-08-22）
 
     少的正是**基準**。拿 ``<name>`` 當基準是有偏的：N 塊的時候缺陷佔 1/N 的
     像素，N=4、缺陷偏 50 GLV 的話基準本身就被拉走 12.5 GLV —— 跟要量的量同一個
