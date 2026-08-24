@@ -1,0 +1,609 @@
+# d4t Studio 判定區 — authored 2026-08-24 (F24 ②).
+"""判定樹住在畫布上（F24 定稿：「分揀槽也要在畫布上呈現，而且是多步驟判定」）。
+
+這一份管**唯讀渲染**：判定區（淡紫底虛線框）、入口小卡、菱形（一步一問）、
+托盤（葉子）、分支流量。編輯互動是 F24 ③ 的事。
+
+三個不變量（`docs/plans/F24-decision-tree.md` §4、§10）：
+
+* **樹的每一步就是引擎的一步** —— 這裡畫的樹直接來自 `DecideSpec`
+  （`rules` 模式先過 `rules_to_tree`，那個轉換無損，F24 ① 的測試釘住了）。
+* **分支流量守恆**：每個菱形 in = yes + no；根 = 這一批跑成功的顆數。
+  流量是**拿每一顆的特徵把樹重走一遍**算的（`flow_counts`）——
+  引擎的 `meta["decide"]["path"]` 刻意不進結果 JSON（動 schema 動到黃金值），
+  而 F24 ① 已證明「拿 features 重走 = 引擎走的那一條」（path replay 測試）。
+* **未試跑：數字誠實地不在**（F18 的老規矩，不顯示 0）——
+  `counts=None` 時整個判定區一個數字都不畫。
+
+跟 `canvas.py` 的分工：`PipelineCanvas.set_decision` 收一份 **info dict**
+（`decision_info` 組的），把這裡的圖元擺進同一個 scene —— 判定區因此跟著
+畫布一起平移縮放，它是畫布的一部分，不是側欄。
+"""
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional, Tuple
+
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import QGraphicsItem
+
+from ..core.pipeline.expression import parse_expression
+from ..core.pipeline.recipe import TreeLeaf, rules_to_tree
+from .theme import TOKENS
+
+__all__ = [
+    "decision_info", "display_tree", "layout_cells", "flow_counts",
+    "leaf_stats", "leaf_hex", "build_zone",
+]
+
+
+# --------------------------------------------------------------------------- #
+# 純資料（headless 測得到）
+# --------------------------------------------------------------------------- #
+def display_tree(decide: Any) -> Optional[Any]:
+    """要畫的那棵樹。``decide`` 是 None → 沒有判定區的樹（回 None）。
+
+    `rules` 模式**畫成等價的鏈狀樹**（`rules_to_tree`，無損）—— 畫布上只有
+    一種語言：一步一問。使用者看到的形狀跟引擎走的形狀是同一個。
+    """
+    if decide is None:
+        return None
+    if decide.tree is not None:
+        return decide.tree
+    return rules_to_tree(decide)
+
+
+def _is_otherwise(decide: Any, path: str, tree: Any) -> bool:
+    """這片葉子是不是「(anything else)」—— 全部往 no 走到底的那一片。
+
+    只有 `rules` 模式有 otherwise 的概念（鏈狀樹的最深 no 葉）；手寫的樹
+    沒有 —— 每片葉子都是使用者自己放的。
+    """
+    if decide is None or decide.tree is not None:
+        return False
+    return path == "n" * len(path) and bool(path) or (
+        path == "" and isinstance(tree, TreeLeaf))
+
+
+#: 排版格（畫布座標）。菱形一格、托盤一格；yes 往右、no 往下。
+CELL_W, CELL_H = 196.0, 92.0
+
+
+def layout_cells(tree: Any, decide: Any = None) -> List[Dict[str, Any]]:
+    """樹 → 一串格子：``{"path","kind","col","row", ...}``。
+
+    佈局規則（mockup 定稿）：**yes 往右、no 往下**。yes 那一支排完佔了幾列，
+    no 那一支從它下面接著排 —— 所以鏈狀樹（rules）畫出來就是一道樓梯：
+    每一步右邊一個托盤、往下一步。
+    """
+    cells: List[Dict[str, Any]] = []
+    if tree is None:
+        return cells
+
+    def walk(node: Any, path: str, col: int, row: int) -> int:
+        if isinstance(node, TreeLeaf):
+            cells.append({"path": path, "kind": "leaf", "col": col, "row": row,
+                          "bin": int(node.bin), "label": str(node.label),
+                          "otherwise": _is_otherwise(decide, path, tree)})
+            return 1
+        cells.append({"path": path, "kind": "step", "col": col, "row": row,
+                      "when": str(node.when)})
+        h_yes = walk(node.yes, path + "y", col + 1, row)
+        h_no = walk(node.no, path + "n", col, row + h_yes)
+        return h_yes + h_no
+
+    walk(tree, "", 0, 0)
+    return cells
+
+
+def _path_of(tree: Any, feats: Dict[str, Any]) -> str:
+    """一顆 defect 的特徵走這棵樹，走的是哪條路（``"yn…"``）。
+
+    判準跟引擎一字不差（`engine._eval_decision`）：**非 0 就是成立**。
+    """
+    node, path = tree, ""
+    while not isinstance(node, TreeLeaf):
+        yes = parse_expression(node.when).eval(feats) != 0.0
+        node = node.yes if yes else node.no
+        path += "y" if yes else "n"
+    return path
+
+
+def flow_counts(tree: Any, rows: Any) -> Dict[str, int]:
+    """每個節點「流過幾顆」：``路徑前綴 → 顆數``（``""`` = 根 = 全部）。
+
+    守恆是**構造上的**：一顆走到路徑 p，就把 p 的每一個前綴各 +1 ——
+    所以每個菱形的 in 恆等於它 yes + no 的和，不必另外對帳。
+
+    只算**判定真的跑到**的顆（``ok`` 且有 ``bin``）；某一顆的特徵走不動樹
+    （表達式炸了）就整顆不計 —— 記半條路會把守恆弄破，而那正是這張圖存在
+    的理由。
+    """
+    counts: Dict[str, int] = {}
+    if tree is None:
+        return counts
+    for r in rows or []:
+        if not r.get("ok") or r.get("bin") is None:
+            continue
+        try:
+            p = _path_of(tree, dict(r.get("features") or {}))
+        except Exception:              # noqa: BLE001 — 顯示用，走不動就不計
+            continue
+        for i in range(len(p) + 1):
+            prefix = p[:i]
+            counts[prefix] = counts.get(prefix, 0) + 1
+    return counts
+
+
+def leaf_stats(tree: Any, rows: Any,
+               ground_truth: Optional[Dict[str, Any]]) -> Dict[str, Tuple[int, int]]:
+    """每片葉子「幾顆是真的」：``路徑 → (真缺陷數, 對得上 ground truth 的顆數)``。
+
+    沒有 ground truth 就是空的 —— 托盤上那一小條純度就不畫
+    （不是畫一條 0%：沒有分母不等於純度是零）。
+    """
+    out: Dict[str, Tuple[int, int]] = {}
+    if tree is None or not ground_truth:
+        return out
+    for r in rows or []:
+        if not r.get("ok") or r.get("bin") is None:
+            continue
+        gt = ground_truth.get(str(r.get("defect_id")))
+        if not isinstance(gt, dict) or "is_real" not in gt:
+            continue
+        try:
+            p = _path_of(tree, dict(r.get("features") or {}))
+        except Exception:              # noqa: BLE001
+            continue
+        real, n = out.get(p, (0, 0))
+        out[p] = (real + (1 if gt.get("is_real") else 0), n + 1)
+    return out
+
+
+def decision_info(decide: Any, rows: Any = None,
+                  ground_truth: Optional[Dict[str, Any]] = None
+                  ) -> Optional[Dict[str, Any]]:
+    """`PipelineCanvas.set_decision` 吃的那一份 dict。
+
+    ``decide`` 是 None（recipe 走二元 score 老路）→ 回 None，畫布上沒有
+    判定區 —— 那條路的判定住在右欄的門檻滑桿，畫一個空樹只會讓人問這是
+    什麼。``rows`` 是 None 或空 = **還沒試跑**：樹的形狀在、數字不在。
+    """
+    if decide is None:
+        return None
+    tree = display_tree(decide)
+    ran = bool(rows)
+    return {
+        "lets": ["%s = %s" % (x.name, x.expr) for x in decide.let],
+        "cells": layout_cells(tree, decide),
+        "counts": flow_counts(tree, rows) if ran else None,
+        "leaf_stats": leaf_stats(tree, rows, ground_truth) if ran else {},
+    }
+
+
+#: 托盤色條的顏色（類別色）。bin 0 慣例上是 nuisance —— 灰；其餘照調色盤輪。
+_LEAF_PALETTE = ("#3574d6", "#2e9e62", "#d97706", "#8a5fbf",
+                 "#c2418a", "#0e9aa7")
+
+
+def leaf_hex(bin_: int) -> str:
+    """一個 bin 一個穩定的顏色（同一份 recipe 重開顏色不變）。"""
+    b = int(bin_)
+    if b == 0:
+        return TOKENS["seg_disabled"]
+    return _LEAF_PALETTE[(b - 1) % len(_LEAF_PALETTE)]
+
+
+# --------------------------------------------------------------------------- #
+# 圖元（全部唯讀：不可拖、不可刪 —— 樹是一個結構，不是幾張散卡）
+# --------------------------------------------------------------------------- #
+_ENTRY_W, _ENTRY_H = 204.0, 56.0
+_DIA_W, _DIA_H = 156.0, 64.0
+_TRAY_W, _TRAY_H = 168.0, 48.0
+_PAD = 26.0                       # 判定區框到內容的邊距
+_ENTRY_GAP = 30.0                 # 入口卡到根節點的垂直距離
+
+
+def _adc_color() -> QColor:
+    return QColor(TOKENS["seg_adc"])
+
+
+def _elide(p: QPainter, rect: QRectF, text: str, align=Qt.AlignLeft) -> None:
+    fm = p.fontMetrics()
+    s = str(text)
+    if fm.horizontalAdvance(s) > rect.width():
+        s = fm.elidedText(s, Qt.ElideRight, int(rect.width()))
+    p.drawText(rect, Qt.AlignVCenter | align, s)
+
+
+class _ZoneItem(QGraphicsItem):
+    """判定區的底：淡紫底、虛線框、DECISION 標題、左緣的 ``numbers →`` 提示。
+
+    量測卡到判定區之間**刻意沒有存的線**（引擎裡數字是一張全域的表，
+    畫一條存起來的線就是說謊）—— 只有這一句淡淡的提示。
+    """
+
+    def __init__(self, rect: QRectF):
+        super().__init__()
+        self._rect = QRectF(rect)
+        self.setZValue(-3.0)          # 墊在所有東西（含連線 -1）底下
+
+    def boundingRect(self) -> QRectF:
+        return self._rect.adjusted(-84.0, -24.0, 4.0, 4.0)
+
+    def paint(self, p: QPainter, _opt, _widget=None) -> None:
+        p.setRenderHint(QPainter.Antialiasing, True)
+        col = _adc_color()
+        pen = QPen(col, 1.2, Qt.DashLine)
+        pen.setDashPattern([5.0, 4.0])
+        p.setPen(pen)
+        p.setBrush(QColor(TOKENS["seg_adc_bg"]))
+        p.drawRoundedRect(self._rect, 10, 10)
+        f = p.font()
+        f.setBold(True)
+        f.setPointSizeF(max(7.0, f.pointSizeF() - 1.0))
+        f.setLetterSpacing(f.SpacingType.AbsoluteSpacing, 1.2)
+        p.setFont(f)
+        p.setPen(col)
+        p.drawText(QRectF(self._rect.left() + 12, self._rect.top() + 4,
+                          self._rect.width() - 24, 16),
+                   Qt.AlignLeft | Qt.AlignVCenter, "DECISION")
+        # 左緣的提示：數字從量測卡「流」過來，但那不是一條存的線。
+        f2 = p.font()
+        f2.setBold(False)
+        f2.setLetterSpacing(f2.SpacingType.AbsoluteSpacing, 0.0)
+        p.setFont(f2)
+        faded = QColor(TOKENS["text_secondary"])
+        faded.setAlpha(140)
+        p.setPen(faded)
+        p.drawText(QRectF(self._rect.left() - 80, self._rect.top() + 20,
+                          72, 16), Qt.AlignRight | Qt.AlignVCenter,
+                   "numbers →")
+
+
+class _EntryItem(QGraphicsItem):
+    """入口小卡：funnel icon ＋ Decision ＋ ƒ working numbers ＋「N in」。
+
+    **永遠恰好一個、不能刪** —— 所以它不可選取也不可拖（要動的是樹，
+    不是這張卡的位置）。點它 = 跳到判定的編輯（canvas 發 `decision_clicked`）。
+    """
+
+    def __init__(self, canvas: Any, lets: List[str], n_in: Optional[int]):
+        super().__init__()
+        self._canvas = canvas
+        self._lets = list(lets)
+        self._n_in = n_in
+        tip = "The decision tree sorts every defect into a class."
+        if lets:
+            tip += "\n\nWorking numbers:\n" + "\n".join(self._lets)
+        self.setToolTip(tip)
+
+    def boundingRect(self) -> QRectF:
+        return QRectF(-2, -2, _ENTRY_W + 4, _ENTRY_H + 4)
+
+    def paint(self, p: QPainter, _opt, _widget=None) -> None:
+        p.setRenderHint(QPainter.Antialiasing, True)
+        col = _adc_color()
+        body = QRectF(0, 0, _ENTRY_W, _ENTRY_H)
+        p.setPen(QPen(col, 1.4))
+        p.setBrush(QColor(TOKENS["bg_surface"]))
+        p.drawRoundedRect(body, 7, 7)
+        # funnel（分揀槽）—— 手畫的小漏斗，跟 mockup 同一個記號。
+        tile = QRectF(8, (_ENTRY_H - 32) / 2.0, 32, 32)
+        wash = QColor(col)
+        wash.setAlpha(42)
+        p.setPen(QPen(col, 1.0))
+        p.setBrush(wash)
+        p.drawRoundedRect(tile, 6, 6)
+        cx, cy = tile.center().x(), tile.center().y()
+        fun = QPainterPath(QPointF(cx - 8, cy - 7))
+        fun.lineTo(QPointF(cx + 8, cy - 7))
+        fun.lineTo(QPointF(cx + 2.5, cy + 1))
+        fun.lineTo(QPointF(cx + 2.5, cy + 8))
+        fun.lineTo(QPointF(cx - 2.5, cy + 6))
+        fun.lineTo(QPointF(cx - 2.5, cy + 1))
+        fun.closeSubpath()
+        p.setBrush(col)
+        p.setPen(Qt.NoPen)
+        p.drawPath(fun)
+
+        text_x = tile.right() + 9
+        p.setPen(QColor(TOKENS["text_primary"]))
+        f = p.font()
+        f.setBold(True)
+        p.setFont(f)
+        _elide(p, QRectF(text_x, 9, _ENTRY_W - text_x - 8, 16), "Decision")
+        f.setBold(False)
+        f.setPointSizeF(max(6.0, f.pointSizeF() - 1.0))
+        p.setFont(f)
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        sub = ("ƒ %s" % ", ".join(x.split("=", 1)[0].strip()
+                                  for x in self._lets)
+               if self._lets else "sorts by the tree below")
+        _elide(p, QRectF(text_x, 30, _ENTRY_W - text_x - 8, 14), sub)
+        # 「N in」只在試跑過之後（F18：不顯示 0）。
+        if self._n_in is not None:
+            chip = "%d in" % int(self._n_in)
+            fm = p.fontMetrics()
+            w = fm.horizontalAdvance(chip) + 12
+            r = QRectF(_ENTRY_W - w - 6, 6, w, 16)
+            p.setPen(Qt.NoPen)
+            badge = QColor(col)
+            badge.setAlpha(36)
+            p.setBrush(badge)
+            p.drawRoundedRect(r, 8, 8)
+            p.setPen(_adc_color())
+            p.drawText(r, Qt.AlignCenter, chip)
+
+    def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
+        if e.button() == Qt.LeftButton:
+            self._canvas.decision_clicked.emit()
+            e.accept()
+            return
+        super().mousePressEvent(e)
+
+
+class _DiamondItem(QGraphicsItem):
+    """一步一問的菱形（流程圖語言 —— 製程工程師本來就會讀）。"""
+
+    def __init__(self, when: str, path: str):
+        super().__init__()
+        self.when = str(when)
+        self.tree_path = str(path)
+        self.setToolTip("%s ?\n\nyes goes right, no goes down."
+                        % self.when)
+
+    def boundingRect(self) -> QRectF:
+        return QRectF(-2, -2, _DIA_W + 4, _DIA_H + 4)
+
+    def shape(self) -> QPainterPath:
+        return self._diamond()
+
+    def _diamond(self) -> QPainterPath:
+        path = QPainterPath(QPointF(_DIA_W / 2.0, 0.0))
+        path.lineTo(QPointF(_DIA_W, _DIA_H / 2.0))
+        path.lineTo(QPointF(_DIA_W / 2.0, _DIA_H))
+        path.lineTo(QPointF(0.0, _DIA_H / 2.0))
+        path.closeSubpath()
+        return path
+
+    def paint(self, p: QPainter, _opt, _widget=None) -> None:
+        p.setRenderHint(QPainter.Antialiasing, True)
+        col = _adc_color()
+        p.setPen(QPen(col, 1.4))
+        p.setBrush(QColor(TOKENS["bg_surface"]))
+        p.drawPath(self._diamond())
+        p.setPen(QColor(TOKENS["text_primary"]))
+        f = p.font()
+        f.setPointSizeF(max(6.5, f.pointSizeF() - 1.0))
+        p.setFont(f)
+        _elide(p, QRectF(18, _DIA_H / 2.0 - 8, _DIA_W - 36, 16),
+               self.when + " ?", align=Qt.AlignHCenter)
+
+
+class _TrayItem(QGraphicsItem):
+    """葉子＝托盤：類別色條＋名字＋顆數＋「x/y real」＋微型純度條。"""
+
+    def __init__(self, cell: Dict[str, Any], count: Optional[int],
+                 stats: Optional[Tuple[int, int]]):
+        super().__init__()
+        self.cell = dict(cell)
+        self.count = count
+        self.stats = stats
+        tip = "bin %d" % int(cell.get("bin", 0))
+        if cell.get("label"):
+            tip = "%s — %s" % (cell["label"], tip)
+        if cell.get("otherwise"):
+            tip += "\nEverything no rule matched lands here."
+        self.setToolTip(tip)
+
+    def boundingRect(self) -> QRectF:
+        return QRectF(-2, -2, _TRAY_W + 4, _TRAY_H + 4)
+
+    def paint(self, p: QPainter, _opt, _widget=None) -> None:
+        p.setRenderHint(QPainter.Antialiasing, True)
+        body = QRectF(0, 0, _TRAY_W, _TRAY_H)
+        col = QColor(leaf_hex(self.cell.get("bin", 0)))
+        pen = QPen(QColor(TOKENS["border_default"]), 1.0)
+        if self.cell.get("otherwise"):
+            pen.setStyle(Qt.DashLine)
+        p.setPen(pen)
+        p.setBrush(QColor(TOKENS["bg_surface"]))
+        p.drawRoundedRect(body, 6, 6)
+        p.setPen(Qt.NoPen)
+        p.setBrush(col)
+        p.drawRoundedRect(QRectF(0, 0, 5, _TRAY_H), 2.5, 2.5)
+
+        label = str(self.cell.get("label") or "")
+        if self.cell.get("otherwise") and not label:
+            label = "(anything else)"
+        title = label or "bin %d" % int(self.cell.get("bin", 0))
+        p.setPen(QColor(TOKENS["text_primary"]))
+        f = p.font()
+        f.setBold(True)
+        f.setPointSizeF(max(6.5, f.pointSizeF() - 0.5))
+        p.setFont(f)
+        _elide(p, QRectF(12, 6, _TRAY_W - 52, 15), title)
+        f.setBold(False)
+        p.setFont(f)
+        p.setPen(QColor(TOKENS["text_secondary"]))
+        p.drawText(QRectF(_TRAY_W - 44, 6, 38, 15),
+                   Qt.AlignRight | Qt.AlignVCenter,
+                   "bin %d" % int(self.cell.get("bin", 0)))
+
+        # 第二行：顆數（試跑後才有）＋ x/y real ＋ 純度條。
+        if self.count is None:
+            return
+        bits = ["%d" % int(self.count)]
+        if self.stats is not None:
+            real, n = self.stats
+            bits.append("%d/%d real" % (int(real), int(n)))
+        _elide(p, QRectF(12, 24, _TRAY_W - 60, 14), " · ".join(bits))
+        if self.stats is not None and self.stats[1] > 0:
+            real, n = self.stats
+            bar = QRectF(_TRAY_W - 46, 30, 38, 4)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(TOKENS["seg_disabled"]))
+            p.drawRoundedRect(bar, 2, 2)
+            frac = max(0.0, min(1.0, float(real) / float(n)))
+            if frac > 0:
+                p.setBrush(col)
+                p.drawRoundedRect(QRectF(bar.left(), bar.top(),
+                                         bar.width() * frac, bar.height()),
+                                  2, 2)
+
+
+class _BranchItem(QGraphicsItem):
+    """一條分支：yes 往右（水平）或 no 往下（垂直），加「yes · N」標籤。"""
+
+    def __init__(self, a: QPointF, b: QPointF, word: str,
+                 count: Optional[int]):
+        super().__init__()
+        self._a, self._b = QPointF(a), QPointF(b)
+        self._word = str(word)
+        self._count = count
+        self.setZValue(-2.0)
+
+    def _label(self) -> str:
+        if not self._word:
+            return "" if self._count is None else "%d" % int(self._count)
+        if self._count is None:
+            return self._word
+        return "%s · %d" % (self._word, int(self._count))
+
+    def boundingRect(self) -> QRectF:
+        return QRectF(self._a, self._b).normalized().adjusted(-40, -18, 40, 18)
+
+    def paint(self, p: QPainter, _opt, _widget=None) -> None:
+        p.setRenderHint(QPainter.Antialiasing, True)
+        col = _adc_color()
+        p.setPen(QPen(col, 1.4))
+        p.drawLine(self._a, self._b)
+        # 箭頭在終點。
+        d = self._b - self._a
+        horiz = abs(d.x()) > abs(d.y())
+        s = 4.5
+        head = QPainterPath(self._b)
+        if horiz:
+            head.lineTo(self._b + QPointF(-s * 1.6, -s))
+            head.lineTo(self._b + QPointF(-s * 1.6, s))
+        else:
+            head.lineTo(self._b + QPointF(-s, -s * 1.6))
+            head.lineTo(self._b + QPointF(s, -s * 1.6))
+        head.closeSubpath()
+        p.setPen(Qt.NoPen)
+        p.setBrush(col)
+        p.drawPath(head)
+
+        text = self._label()
+        if not text:
+            return
+        mid = (self._a + self._b) / 2.0
+        f = p.font()
+        f.setPointSizeF(max(6.0, f.pointSizeF() - 1.5))
+        p.setFont(f)
+        fm = p.fontMetrics()
+        w = fm.horizontalAdvance(text) + 8
+        if horiz:
+            r = QRectF(mid.x() - w / 2.0, mid.y() - 18, w, 14)
+        else:
+            r = QRectF(mid.x() + 6, mid.y() - 7, w, 14)
+        bg = QColor(TOKENS["seg_adc_bg"])
+        bg.setAlpha(230)
+        p.setPen(Qt.NoPen)
+        p.setBrush(bg)
+        p.drawRoundedRect(r, 4, 4)
+        p.setPen(_adc_color())
+        p.drawText(r, Qt.AlignCenter, text)
+
+
+# --------------------------------------------------------------------------- #
+# 組裝
+# --------------------------------------------------------------------------- #
+def _cell_pos(cell: Dict[str, Any], origin: QPointF) -> QPointF:
+    """一格的左上角（入口卡佔掉第一列，樹從 origin 下方開始）。"""
+    x = origin.x() + cell["col"] * CELL_W
+    y = origin.y() + _ENTRY_H + _ENTRY_GAP + cell["row"] * CELL_H
+    return QPointF(x, y)
+
+
+def build_zone(scene: Any, canvas: Any,
+               info: Dict[str, Any], origin: QPointF) -> List[QGraphicsItem]:
+    """把判定區的圖元擺進 scene，回傳擺了哪些（畫布重建時要清）。"""
+    items: List[QGraphicsItem] = []
+    cells = list(info.get("cells") or [])
+    counts = info.get("counts")           # None = 還沒試跑 → 不畫任何數字
+    stats = dict(info.get("leaf_stats") or {})
+
+    entry = _EntryItem(canvas, list(info.get("lets") or []),
+                       None if counts is None else int(counts.get("", 0)))
+    entry.setPos(origin)
+    scene.addItem(entry)
+    items.append(entry)
+
+    by_path: Dict[str, Dict[str, Any]] = {}
+    made: Dict[str, QGraphicsItem] = {}
+    for cell in cells:
+        pos = _cell_pos(cell, origin)
+        if cell["kind"] == "step":
+            it: QGraphicsItem = _DiamondItem(cell["when"], cell["path"])
+        else:
+            c = None if counts is None else int(counts.get(cell["path"], 0))
+            it = _TrayItem(cell, c, stats.get(cell["path"]))
+        it.setPos(pos)
+        scene.addItem(it)
+        items.append(it)
+        by_path[cell["path"]] = cell
+        made[cell["path"]] = it
+
+    def centre(path: str) -> QPointF:
+        it = made[path]
+        cell = by_path[path]
+        w = _DIA_W if cell["kind"] == "step" else _TRAY_W
+        h = _DIA_H if cell["kind"] == "step" else _TRAY_H
+        return it.pos() + QPointF(w / 2.0, h / 2.0)
+
+    # 入口卡 → 根。根是菱形或（空樹＝只有 otherwise）一個托盤。
+    if "" in made:
+        root_cell = by_path[""]
+        w = _DIA_W if root_cell["kind"] == "step" else _TRAY_W
+        a = origin + QPointF(_ENTRY_W / 2.0, _ENTRY_H)
+        b = made[""].pos() + QPointF(w / 2.0, 0.0)
+        # 位置故意讓兩點同一條垂直線（入口在 col0 上方）——
+        # 寬度不同時稍斜一點也讀得懂。
+        items.append(_BranchItem(a, b, "",
+                                 None if counts is None
+                                 else counts.get("", 0)))
+        scene.addItem(items[-1])
+
+    # 每個菱形到它的 yes / no。
+    for path, cell in by_path.items():
+        if cell["kind"] != "step":
+            continue
+        it = made[path]
+        for word, suffix in (("yes", "y"), ("no", "n")):
+            child = path + suffix
+            if child not in made:
+                continue
+            ccell = by_path[child]
+            cw = _DIA_W if ccell["kind"] == "step" else _TRAY_W
+            ch = _DIA_H if ccell["kind"] == "step" else _TRAY_H
+            n = None if counts is None else counts.get(child, 0)
+            if word == "yes":
+                a = it.pos() + QPointF(_DIA_W, _DIA_H / 2.0)
+                b = made[child].pos() + QPointF(0.0, ch / 2.0)
+            else:
+                a = it.pos() + QPointF(_DIA_W / 2.0, _DIA_H)
+                b = made[child].pos() + QPointF(cw / 2.0, 0.0)
+            branch = _BranchItem(a, b, word, n)
+            scene.addItem(branch)
+            items.append(branch)
+
+    # 底框（最後算，才知道內容多大）。
+    rect = QRectF()
+    for it in items:
+        rect = rect.united(it.sceneBoundingRect())
+    zone = _ZoneItem(rect.adjusted(-_PAD, -_PAD, _PAD, _PAD))
+    scene.addItem(zone)
+    items.append(zone)
+    return items

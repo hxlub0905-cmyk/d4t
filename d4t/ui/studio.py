@@ -1281,6 +1281,8 @@ class StudioWindow(QMainWindow):
         view.move_requested.connect(self._on_move_requested)
         view.remove_requested.connect(self._on_remove_requested)
         view.score_clicked.connect(self.show_score_page)
+        # 判定區的入口小卡（F24 ②）：點了＝跳到判定的編輯（同 score 那條路）。
+        view.decision_clicked.connect(self.show_score_page)
         view.edge_added.connect(self._on_edge_added)
         view.edge_removed.connect(self._on_edge_removed)
         view.popout_requested.connect(self.open_canvas_window)
@@ -1737,13 +1739,29 @@ class StudioWindow(QMainWindow):
         if self.selected_node not in self.model.nodes:
             self.selected_node = None
         self._sync_params_pane()
+        decision = self._decision_info()
         for view in self._canvases():
             # 影像線（存在 recipe 裡）＋ 區域線（從參數推導；F12）。畫布不分
             # 兩份收 —— 一條線就是一條線，它是哪一種由它出發的那顆埠決定。
             view.set_nodes(nodes, list(self.model.edge_lines())
                            + list(self.model.region_lines()))
+            # 判定區（F24 ②）：多類別的 recipe，判定樹住在畫布上。
+            view.set_decision(decision)
             view.set_selected(self.selected_node)
             view.set_score_summary(self.model.expr, self.model.threshold)
+
+    def _decision_info(self) -> Optional[Dict[str, Any]]:
+        """畫布判定區要畫的東西（F24 ②）。
+
+        走二元 score 的 recipe 回 None —— 那條路的判定住在右欄的門檻滑桿。
+        流量吃**這一批試跑的結果**：沒跑過就是 None，判定區的形狀在、
+        數字誠實地不在（F18 的老規矩）。
+        """
+        from .tree_scene import decision_info
+
+        return decision_info(getattr(self.model, "decide", None),
+                             list(self.trial_results or []),
+                             self.ground_truth)
 
     def _sync_score_widgets(self) -> None:
         """model 換過（載入、undo、切 route）之後把判定面板重畫一次。
@@ -1843,6 +1861,10 @@ class StudioWindow(QMainWindow):
         沒跑過就餵空的 —— 顯示 0 會讓人以為「這一格一顆都沒有」。
         """
         rows = list(self.trial_results or [])
+        # 畫布上的判定區跟著這一批走（F24 ②：分支流量、托盤顆數）。
+        decision = self._decision_info()
+        for view in self._canvases():
+            view.set_decision(decision)
         if not rows:
             self.decide_panel.set_counts(None)
             return

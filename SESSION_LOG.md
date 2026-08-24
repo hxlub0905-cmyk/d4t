@@ -19,6 +19,35 @@
 
 ---
 
+## F24 ②：判定樹上畫布 —— 唯讀渲染（2026-08-24）
+
+判定區照 mockup 定稿長進畫布（`d4t/ui/tree_scene.py` ＋
+`PipelineCanvas.set_decision`）：
+
+* **判定區**是畫布右側一塊淡紫底虛線框（`seg_adc_bg`，跟著平移縮放）；
+  量測卡到它之間**刻意沒有存的線**，只有一句淡淡的 `numbers →`。
+* **入口小卡**（funnel ＋ Decision ＋ ƒ working numbers ＋試跑後的「N in」）
+  永遠恰好一個、不可拖不可刪；點了跳到判定編輯（`decision_clicked` →
+  `show_score_page`，跟 score 那條路同一個 handler）。
+* **菱形＝一步一問、yes 往右 no 往下**；`rules` 模式畫成等價鏈狀樹
+  （`rules_to_tree`，F24 ① 證過無損）——樓梯狀，`(anything else)` 虛線框。
+* **分支流量拿每一顆的特徵把樹重走一遍**（`flow_counts`）——
+  `meta["decide"]["path"]` 刻意不進結果 JSON（動 schema 動到黃金值），而
+  F24 ① 的 path-replay 測試證明「拿 features 重走＝引擎走的那條」。
+  守恆是構造上的：走到 p 就把 p 的每個前綴 +1，菱形 in ≡ yes+no。
+  表達式走不動的顆整顆不計（記半條路會把守恆弄破）。
+* **托盤**：類別色條（`leaf_hex`，bin 0 灰、其餘輪調色盤）＋名字＋顆數＋
+  「x/y real」＋微型純度條（有 ground truth 才畫）。
+* **未試跑：數字誠實地不在**（F18）——`counts=None` 時整區一個數字都不畫；
+  走二元 score 的 recipe 沒有判定區（那條路的判定住在門檻滑桿）。
+* 純函式（layout／counts／stats）與圖元分開 —— 流量守恆、樓梯佈局、
+  「沒跑不畫 0」全部 headless 測得到（`tests/test_ui_tree_canvas.py`，14 條）。
+* 截圖：`scratchpad/f24_tree_before.png`（形狀在、數字不在）與
+  `f24_tree_after.png`（48 → 1/47 → 11/36 → 16/20 → 20/0，跟 F22 那批
+  實跑逐項一致）。
+
+---
+
 ## F23 期1：route_by 引擎（2026-08-24）
 
 四題使用者一句「照提案著做」全數定調（default 兩種都支援、第一期選項 A、

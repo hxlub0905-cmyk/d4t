@@ -1128,6 +1128,9 @@ class PipelineCanvas(QGraphicsView):
     #: 「在自己的視窗打開畫布」（F8-UI D 案）。畫布在主視窗只佔中上一塊
     #: （它會 zoom，不需要常駐大面積），要看全貌就彈出去。
     popout_requested = Signal()
+    #: 點了判定區的入口小卡（F24 ②）——「跳到判定的編輯」。
+    #: 入口卡永遠恰好一個、不能刪，所以這裡沒有 id 要帶。
+    decision_clicked = Signal()
 
     def __init__(self, parent=None, popout_button: bool = True):
         super().__init__(parent)
@@ -1353,9 +1356,52 @@ class PipelineCanvas(QGraphicsView):
                 self._scene.addItem(edge)
                 self._edges.append(edge)
 
+        # 判定區（F24 ②）：scene 剛被 clear()，舊圖元已銷毀 —— 用存著的 info
+        # 重建。它跟節點一起住在 scene 裡，所以平移縮放是同一件事。
+        self._tree_items = []
+        self._rebuild_decision()
+
         self.set_selected(self._selected)
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self._scene.setSceneRect(rect)
+
+    # ---- 判定區（F24 ②）---------------------------------------------------
+    def set_decision(self, info: Optional[Dict[str, Any]]) -> None:
+        """換掉判定區的內容（``None`` = 這份 recipe 走二元 score，沒有判定區）。
+
+        info 的形狀見 `tree_scene.decision_info`。畫布只負責畫 ——
+        counts 是不是 None（試跑過沒）由呼叫端決定，這裡不猜。
+        """
+        self._decision_info = None if info is None else dict(info)
+        self._rebuild_decision()
+
+    def _rebuild_decision(self) -> None:
+        from . import tree_scene
+
+        for it in getattr(self, "_tree_items", []) or []:
+            try:
+                self._scene.removeItem(it)
+            except Exception:              # noqa: BLE001 — clear() 先銷毀過就算了
+                pass
+        self._tree_items = []
+        info = getattr(self, "_decision_info", None)
+        if not info:
+            return
+        # 判定區放在所有卡片的右邊（mockup 定稿：畫布右側一塊淡紫區）。
+        right = 0.0
+        top = 0.0
+        for item in self._items.values():
+            right = max(right, item.pos().x() + NODE_W)
+            top = min(top, item.pos().y())
+        origin = QPointF(right + COL_GAP * 1.8, top)
+        self._tree_items = tree_scene.build_zone(self._scene, self, info,
+                                                 origin)
+        rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
+        self._scene.setSceneRect(self._scene.sceneRect().united(rect))
+
+    def decision_items(self) -> List[Any]:
+        """判定區現在的圖元（測試與外部檢查用）。"""
+        return list(getattr(self, "_tree_items", []) or [])
 
     def copy_positions_from(self, other: "PipelineCanvas") -> None:
         """把另一份畫布的節點位置搬過來（彈出視窗開啟時跟主視窗一致）。"""

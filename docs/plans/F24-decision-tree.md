@@ -142,8 +142,8 @@ THIS BATCH  47 arrive here → 11 yes · 36 no
 
 | 期 | 內容 | 依賴 |
 |---|---|---|
-| ① | 資料結構＋引擎：`tree` 節點、路徑記錄、`rules`→鏈狀樹遷移、lint | 無（F22 之上） |
-| ② | 畫布渲染（唯讀）：判定區、入口卡、菱形、托盤、分支流量、未試跑狀態 | ① |
+| ① | 資料結構＋引擎：`tree` 節點、路徑記錄、`rules`→鏈狀樹遷移、lint | ✅ 2026-08-24 |
+| ② | 畫布渲染（唯讀）：判定區、入口卡、菱形、托盤、分支流量、未試跑狀態 | ✅ 2026-08-24（`ui/tree_scene.py`；流量由特徵重走樹算，見 SESSION_LOG） |
 | ③ | 編輯互動：點菱形→右欄面板、加/刪步、收合 | ② |
 | ④ | 幽靈線 ＋ Algo 收進 `HIDDEN_STEPS` ＋ Preview Path | ②（幽靈線只要 `feat_owner`，可先做） |
 | ⑤ | working numbers 的「missing ⇒」與「跟整批比」（吸收 feature_fill / lot_stats） | ③ ＋ F23 §8 的兩趟引擎 |
