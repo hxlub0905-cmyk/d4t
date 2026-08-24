@@ -34,7 +34,8 @@ import csv
 import math
 import os
 import statistics
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
+from typing import (Any, Dict, Iterable, List, Optional, Sequence,
+                    Set, Tuple)
 
 from .klarf_out import ExportError
 
@@ -194,6 +195,68 @@ def summarize(results: Sequence[Dict[str, Any]], *,
     }
     if ground_truth:
         out["ground_truth"] = _confusion(results, ground_truth, positive_bins)
+        out["bin_purity"] = _bin_purity(results, ground_truth)
+    return out
+
+
+def _bin_purity(results: Sequence[Dict[str, Any]],
+                ground_truth: Dict[Any, Any]) -> List[Dict[str, Any]]:
+    """**每一個 bin 裡有幾顆是真的**（F22-UI）—— 多類別唯一量得出來的東西。
+
+    為什麼不是「多類別的正確率」
+    ----------------------------
+    正確率要先知道「這一顆應該落在哪一個 bin」，而那需要把 ground truth 標到
+    **類別**。手上的資料（包含合成的那幾份）只標了 ``is_real`` ——
+    一個二元的旗標。硬要算多類別正確率就得先假造一份對照，而那不是量出來的。
+
+    純度不需要那個假設：它問的是「**我判進這一類的，有幾顆真的是缺陷**」，
+    而那正是調規則的人一條一條在看的東西。一條規則太寬 → 那個 bin 的純度掉；
+    太窄 → 那個 bin 的顆數掉。兩件事都看得見。
+
+    ⚠ **`bin 0` 的純度要反過來讀**：它是「都沒對上」那一格，所以那裡的
+    「真缺陷」是**漏抓**。所以每一列都同時給 ``n_real`` 與 ``n_nuisance``，
+    不只給一個比例 —— 一個數字答不出「這一格好不好」，因為好壞取決於那一格
+    本來要收什麼。
+
+    回傳一串（照 bin 由大到小），每一項::
+
+        {"bin": 3, "n": 11, "n_real": 11, "n_nuisance": 0,
+         "n_unlabelled": 0, "purity": 1.0}
+
+    ``purity`` 在整格都沒標註時是 ``None``（不是 0 —— 沒有分母不等於零純度，
+    跟 CLI 的 `_pct` 是同一條規矩）。
+    """
+    buckets: Dict[Any, Dict[str, int]] = {}
+    for r in results:
+        b = r.get("bin")
+        key = UNBINNED_KEY if b is None else int(b)
+        row = buckets.setdefault(key, {"n": 0, "n_real": 0, "n_nuisance": 0,
+                                       "n_unlabelled": 0})
+        row["n"] += 1
+        truth = _lookup_gt(ground_truth, r.get("defect_id"))
+        if truth is None:
+            row["n_unlabelled"] += 1
+        elif truth:
+            row["n_real"] += 1
+        else:
+            row["n_nuisance"] += 1
+
+    def _order(k: Any) -> Tuple[int, int]:
+        # 沒判定的那一格排最後（它不是一個 bin）
+        return (1, 0) if k == UNBINNED_KEY else (0, -int(k))
+
+    out: List[Dict[str, Any]] = []
+    for key in sorted(buckets, key=_order):
+        row = buckets[key]
+        labelled = row["n_real"] + row["n_nuisance"]
+        out.append({
+            "bin": key,
+            "n": row["n"],
+            "n_real": row["n_real"],
+            "n_nuisance": row["n_nuisance"],
+            "n_unlabelled": row["n_unlabelled"],
+            "purity": (row["n_real"] / labelled) if labelled else None,
+        })
     return out
 
 

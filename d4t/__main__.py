@@ -176,8 +176,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
                                      str(args.klarf))
     if gt:
         from d4t.core.export import summarize
+        from d4t.core.export.report import UNBINNED_KEY
 
-        g = (summarize(payload, ground_truth=gt).get("ground_truth") or {})
+        summary = summarize(payload, ground_truth=gt)
+        g = (summary.get("ground_truth") or {})
         print(f"\n對照 ground truth（{gt_path}）：")
         if g.get("n_evaluated"):
             print(f"  正確率 {_pct(g.get('accuracy'))}　"
@@ -188,6 +190,19 @@ def _cmd_run(args: argparse.Namespace) -> int:
         else:
             print("  這一批沒有一顆對得上 ground truth 裡的 defect id —— "
                   "是不是對到別的 lot 了？")
+
+        # 每一個 bin 的純度（F22-UI）—— 多類別唯一量得出來的東西。
+        # **只在真的分出兩類以上時才印**：二元判定的純度上面那三個數字已經
+        # 講完了，多印一張表只是同一件事講兩次。
+        purity = summary.get("bin_purity") or []
+        if len([r for r in purity if r.get("bin") != UNBINNED_KEY]) > 2:
+            print("  每一個 bin 裡有幾顆是真的：")
+            for row in purity:
+                pct = ("—" if row.get("purity") is None
+                       else "%.0f%%" % (row["purity"] * 100))
+                print("    bin %-4s %3d 顆　真缺陷 %3d　假點 %3d　純度 %s"
+                      % (row["bin"], row["n"], row["n_real"],
+                         row["n_nuisance"], pct))
 
     for r in fail[:5]:
         print(f"  ✗ {r.get('defect_id')}: {r.get('error')}")

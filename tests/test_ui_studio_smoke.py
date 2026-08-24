@@ -299,7 +299,10 @@ def test_threshold_live_preview_vs_commit(window, synlot):
     window._on_threshold_committed(42.5)
     assert window.model.threshold == pytest.approx(42.5)
     assert window.model.to_recipe().score.threshold == pytest.approx(42.5)
-    assert window.threshold_spin.value() == pytest.approx(42.5)
+    # 那一格現在住在判定面板裡（F22-UI）——「二元」那一種才有它。
+    from PySide6.QtWidgets import QDoubleSpinBox
+    spin = window.decide_panel.findChild(QDoubleSpinBox)
+    assert spin is not None and spin.value() == pytest.approx(42.5)
 
     # 拖曳中（changed）只重算 bin 摘要，絕對不能動 model
     before = window.model.threshold

@@ -12,9 +12,33 @@ import math
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from dataclasses import replace
+
 from d4t.core.pipeline import (
     Edge, ParamError, Recipe, RecipeNode, ScoreSpec, get_step, validate,
 )
+from d4t.core.pipeline.recipe import DecideSpec, Let, Rule
+
+
+def _decide_snapshot(d: "DecideSpec") -> Dict[str, Any]:
+    """判定段的純值快照（undo 堆用）—— 跟 `Recipe.to_json_dict` 同一個形狀。"""
+    return {
+        "let": [(x.name, x.expr) for x in d.let],
+        "rules": [(r.when, int(r.bin), r.label) for r in d.rules],
+        "otherwise": (int(d.otherwise_bin), d.otherwise_label),
+        "score": d.score,
+    }
+
+
+def _decide_restore(snap: Optional[Dict[str, Any]]) -> Optional["DecideSpec"]:
+    if not snap:
+        return None
+    ob, ol = snap.get("otherwise") or (0, "")
+    return DecideSpec(
+        let=[Let(n, e) for n, e in snap.get("let") or []],
+        rules=[Rule(w, int(b), l) for w, b, l in snap.get("rules") or []],
+        otherwise_bin=int(ob), otherwise_label=str(ol),
+        score=str(snap.get("score", "") or ""))
 
 
 class RecipeModel:
@@ -40,6 +64,10 @@ class RecipeModel:
         self.edges: List[Edge] = []
         self.expr = "0"
         self.threshold = 0.0
+        #: 多類別判定（F22-UI）。``None`` = 這份 recipe 走 ``expr + threshold``
+        #: 那條二元的老路。兩者**不能並存**（`validate` 的 `ambiguous-decision`），
+        #: 所以切換是「換一種」而不是「多一種」—— 見 :meth:`use_decide`。
+        self.decide: Optional[DecideSpec] = None
         self.bins = {"below": 0, "above": 1}
         self.dirty = False
         self._listeners: List[Callable[[], None]] = []
@@ -122,6 +150,7 @@ class RecipeModel:
             "edges": [Edge(e.src, e.dst, e.src_out, e.dst_in)
                       for e in self.edges],
             "expr": self.expr, "threshold": self.threshold,
+            "decide": None if self.decide is None else _decide_snapshot(self.decide),
             "bins": dict(self.bins),
         }
 
@@ -139,6 +168,7 @@ class RecipeModel:
         self.edges = list(snap["edges"])
         self.expr = snap["expr"]
         self.threshold = snap["threshold"]
+        self.decide = _decide_restore(snap.get("decide"))
         self.bins = dict(snap["bins"])
 
     @contextmanager
@@ -354,6 +384,121 @@ class RecipeModel:
                 continue
 
     # ---- score ------------------------------------------------------------
+    # ---- 多類別判定（F22-UI）---------------------------------------------
+    #
+    # 為什麼 setter 這麼細（一條規則一支）而不是「整包換掉」：undo 是**逐步**
+    # 的（`_push_undo` 每次改動存一份），整包換掉的話「改了第 3 條的門檻」跟
+    # 「重排了規則」在 undo 堆上長得一模一樣。
+    def use_decide(self, on: bool) -> None:
+        """切成多類別／切回二元門檻。**兩者不能並存**（`ambiguous-decision`）。
+
+        切成多類別時把現有的 `expr` + `threshold` **翻成兩條規則**，而不是丟掉
+        —— 使用者調了半天的那個門檻是他的工作成果。切回去時反過來不還原：
+        多類別的規則翻不回一個門檻（那是有損的），所以那一邊只留一句話。
+        """
+        if on == (self.decide is not None):
+            return
+        self._push_undo()
+        if on:
+            expr = str(self.expr or "").strip()
+            rules = []
+            if expr:
+                rules.append(Rule(when="%s >= %g" % (expr, float(self.threshold)),
+                                  bin=int(self.bins.get("above", 1)), label=""))
+            self.decide = DecideSpec(
+                let=[], rules=rules,
+                otherwise_bin=int(self.bins.get("below", 0)), otherwise_label="",
+                score=expr)
+            self.expr = ""          # 並存是 error，所以這一格要清掉
+        else:
+            self.decide = None
+            if not str(self.expr or "").strip():
+                self.expr = "0"
+        self._changed()
+
+    def _edit_decide(self, **kw) -> None:
+        if self.decide is None:
+            return
+        self._push_undo()
+        self.decide = replace(self.decide, **kw)
+        self._changed()
+
+    def set_let(self, i: int, name: Optional[str] = None,
+                expr: Optional[str] = None) -> None:
+        if self.decide is None or not (0 <= i < len(self.decide.let)):
+            return
+        cur = self.decide.let[i]
+        new = Let(name=cur.name if name is None else str(name),
+                  expr=cur.expr if expr is None else str(expr))
+        if new == cur:
+            return
+        rows = list(self.decide.let); rows[i] = new
+        self._edit_decide(let=rows)
+
+    def add_let(self) -> None:
+        if self.decide is None:
+            return
+        self._edit_decide(let=list(self.decide.let) + [Let(name="", expr="")])
+
+    def remove_let(self, i: int) -> None:
+        if self.decide is None or not (0 <= i < len(self.decide.let)):
+            return
+        rows = list(self.decide.let); rows.pop(i)
+        self._edit_decide(let=rows)
+
+    def set_rule(self, i: int, when: Optional[str] = None,
+                 bin: Optional[int] = None, label: Optional[str] = None) -> None:
+        if self.decide is None or not (0 <= i < len(self.decide.rules)):
+            return
+        cur = self.decide.rules[i]
+        new = Rule(when=cur.when if when is None else str(when),
+                   bin=cur.bin if bin is None else int(bin),
+                   label=cur.label if label is None else str(label))
+        if new == cur:
+            return
+        rows = list(self.decide.rules); rows[i] = new
+        self._edit_decide(rules=rows)
+
+    def add_rule(self) -> None:
+        if self.decide is None:
+            return
+        used = {r.bin for r in self.decide.rules} | {self.decide.otherwise_bin}
+        nxt = next(b for b in range(1, 1000) if b not in used)
+        self._edit_decide(rules=list(self.decide.rules) + [Rule("", nxt, "")])
+
+    def remove_rule(self, i: int) -> None:
+        if self.decide is None or not (0 <= i < len(self.decide.rules)):
+            return
+        rows = list(self.decide.rules); rows.pop(i)
+        self._edit_decide(rules=rows)
+
+    def move_rule(self, i: int, delta: int) -> None:
+        """**換順序就是換優先權** —— 所以它是一個第一級的動作，不是排版。"""
+        if self.decide is None:
+            return
+        rows = list(self.decide.rules)
+        j = i + int(delta)
+        if not (0 <= i < len(rows)) or not (0 <= j < len(rows)) or delta == 0:
+            return
+        rows[i], rows[j] = rows[j], rows[i]
+        self._edit_decide(rules=rows)
+
+    def set_otherwise(self, bin: Optional[int] = None,
+                      label: Optional[str] = None) -> None:
+        if self.decide is None:
+            return
+        kw = {}
+        if bin is not None and int(bin) != self.decide.otherwise_bin:
+            kw["otherwise_bin"] = int(bin)
+        if label is not None and str(label) != self.decide.otherwise_label:
+            kw["otherwise_label"] = str(label)
+        if kw:
+            self._edit_decide(**kw)
+
+    def set_decide_score(self, expr: str) -> None:
+        if self.decide is not None and str(expr) != self.decide.score:
+            self._edit_decide(score=str(expr))
+
     def set_expr(self, expr: str) -> None:
         if expr != self.expr:
             self._push_undo("expr")
@@ -742,6 +887,7 @@ class RecipeModel:
                    for nid, n in self.nodes.items()},
             score=ScoreSpec(expr=self.expr, threshold=self.threshold,
                             bins=dict(self.bins)),
+            decide=self.decide,
             version=self.version, author=self.author, description=self.description,
         )
 
@@ -764,6 +910,7 @@ class RecipeModel:
                    for nid, n in recipe.nodes.items() if nid in set(m.node_order)}
         m.expr = recipe.score.expr
         m.threshold = float(recipe.score.threshold)
+        m.decide = getattr(recipe, "decide", None)
         m.bins = dict(recipe.score.bins)
         m.dirty = False
         m.clear_history()

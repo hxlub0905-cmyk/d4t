@@ -125,6 +125,7 @@ from .scope import (
     is_supported_kind, no_klarf_message, recipe_is_supported,
     unsupported_kind_message, visible_steps,
 )
+from .decide_panel import DecidePanel
 from .viewmodel import RecipeModel, accuracy_at, histogram, rebin
 from . import theme
 from .theme import DEFAULT_THEME, THEMES, apply_theme, current_theme
@@ -1001,65 +1002,16 @@ class StudioWindow(QMainWindow):
         self.setCentralWidget(root)
 
     def _build_score_pane(self) -> QWidget:
-        pane = QWidget(self)
-        lay = QVBoxLayout(pane)
-        lay.setContentsMargins(0, 0, 8, 0)
-        lay.setSpacing(8)
+        """判定段那一欄 —— 內容全部住在 `DecidePanel`（F22-UI）。
 
-        title = QLabel("Score / Bin decision", pane)
-        title.setObjectName("paramTitle")
-        lay.addWidget(title)
-
-        head = QLabel("The last step of the pipeline: turn features into one score, then split into bins by a threshold.", pane)
-        head.setObjectName("paramStepHelp")
-        head.setWordWrap(True)
-        lay.addWidget(head)
-
-        row1 = QHBoxLayout()
-        row1.setSpacing(8)
-        lbl_expr = QLabel("Score expression", pane)
-        lbl_expr.setObjectName("paramLabel")
-        lbl_expr.setMinimumWidth(104)
-        self.expr_edit = QLineEdit(pane)
-        self.expr_edit.setPlaceholderText("e.g. glv_max + (glv_max - glv_q99)")
-        self.expr_edit.setToolTip("Write an expression over feature names — the result is this defect's score")
-        row1.addWidget(lbl_expr)
-        row1.addWidget(self.expr_edit, 1)
-        lay.addLayout(row1)
-
-        row2 = QHBoxLayout()
-        row2.setSpacing(8)
-        lbl_ins = QLabel("Insert feature", pane)
-        lbl_ins.setObjectName("paramLabel")
-        lbl_ins.setMinimumWidth(104)
-        self.feature_combo = QComboBox(pane)
-        self.feature_combo.setToolTip("Pick a feature name to insert at the cursor in the expression")
-        row2.addWidget(lbl_ins)
-        row2.addWidget(self.feature_combo, 1)
-        lay.addLayout(row2)
-
-        row3 = QHBoxLayout()
-        row3.setSpacing(8)
-        lbl_thr = QLabel("Decision threshold", pane)
-        lbl_thr.setObjectName("paramLabel")
-        lbl_thr.setMinimumWidth(104)
-        self.threshold_spin = QDoubleSpinBox(pane)
-        self.threshold_spin.setDecimals(3)
-        self.threshold_spin.setRange(-1e9, 1e9)
-        self.threshold_spin.setSingleStep(0.5)
-        self.threshold_spin.setToolTip("score >= threshold -> bin 1 (the ones you want), otherwise bin 0")
-        row3.addWidget(lbl_thr)
-        row3.addWidget(self.threshold_spin, 1)
-        lay.addLayout(row3)
-
-        hint = QLabel(_SCORE_HELP, pane)
-        hint.setObjectName("paramHint")
-        hint.setWordWrap(True)
-        lay.addWidget(hint)
-        self.score_hint = hint
-
-        lay.addStretch(1)
-        return pane
+        為什麼搬出去：這一欄現在有兩種樣子（一個門檻／一串規則），而規則那一種
+        是逐列生出來的。留在 `studio.py`（已經 5000 多行）的話，這一欄會是這個
+        檔案裡最長的一段，而它跟視窗的其他部分沒有任何共用的東西。
+        """
+        self.decide_panel = DecidePanel(self)
+        self.decide_panel.set_model(self.model)
+        self.decide_panel.mode_changed.connect(self._on_decide_mode)
+        return self.decide_panel
 
     def _build_preview_pane(self) -> QWidget:
         pane = QWidget(self)
@@ -1340,9 +1292,8 @@ class StudioWindow(QMainWindow):
 
         self.param_form.param_edited.connect(self._on_param_edited)
 
-        self.expr_edit.textEdited.connect(self._on_expr_edited)
-        self.feature_combo.activated.connect(self._on_feature_chosen)
-        self.threshold_spin.valueChanged.connect(self._on_threshold_spin)
+        # 判定段的每一格直接寫 model（`DecidePanel` 的模組說明）——
+        # 這裡不再轉手。
 
         self.btn_prev.clicked.connect(lambda: self.step_defect(-1))
         self.btn_next.clicked.connect(lambda: self.step_defect(+1))
@@ -1795,33 +1746,22 @@ class StudioWindow(QMainWindow):
             view.set_score_summary(self.model.expr, self.model.threshold)
 
     def _sync_score_widgets(self) -> None:
-        self._syncing = True
-        try:
-            if self.expr_edit.text() != self.model.expr:
-                self.expr_edit.setText(self.model.expr)
-            if float(self.threshold_spin.value()) != float(self.model.threshold):
-                self.threshold_spin.setValue(float(self.model.threshold))
-        finally:
-            self._syncing = False
+        """model 換過（載入、undo、切 route）之後把判定面板重畫一次。
+
+        **打字時不會走到這裡** —— 那一格是直接寫 model 的，而 `DecidePanel`
+        自己會跳過「有人正在打字」的重建（見它的 `refresh`）。
+        """
+        self.decide_panel.refresh()
         self.pipeline.set_score_summary(self.model.expr, self.model.threshold)
 
+    def _on_decide_mode(self, on: bool) -> None:
+        """切了「分成好幾類」——  bin 直方圖那條門檻線只對二元那一種有意義。"""
+        self.histogram.set_threshold(None if on else self.model.threshold)
+        self._sync_score_widgets()
+
     def _refresh_feature_combo(self) -> None:
-        self._syncing = True
-        try:
-            self.feature_combo.clear()
-            self.feature_combo.addItem(_FEATURE_PLACEHOLDER, "")
-            # 顯示的是「名字 — 誰算的」，插進去的只有名字（F21-B）。
-            # 兩張同型別的量測卡（例：量兩個區域的 Gray level）在這裡本來
-            # 長得一模一樣 —— 名字自帶前綴的只有撞名被蓋掉的那一份（F17-②）。
-            for item in self.model.labelled_features():
-                fname, owner = split_labelled(item)
-                if not fname:
-                    continue
-                self.feature_combo.addItem(
-                    "%s   —   %s" % (fname, owner) if owner else fname, fname)
-            self.feature_combo.setCurrentIndex(0)
-        finally:
-            self._syncing = False
+        """判定面板的「插入數字 ▾」清單（F21-B）。"""
+        self.decide_panel.set_features(self.model.labelled_features())
 
     # ---- Spread（F18 第 2 步：它從量測卡的儀表搬來這裡）--------------------
     def _features_in_results(self, results: Sequence[Dict[str, Any]]) -> List[str]:
@@ -1896,7 +1836,30 @@ class StudioWindow(QMainWindow):
     def _on_spread_feature_changed(self, _name: str) -> None:
         self._refresh_spread()
 
+    def _refresh_decide_counts(self) -> None:
+        """判定面板每一條規則右邊的「bin N · 幾顆 · 純度」（F22-UI）。
+
+        跟 F18 的灰階面板同一個立論：調規則的人是**一邊改一邊看**的。
+        沒跑過就餵空的 —— 顯示 0 會讓人以為「這一格一顆都沒有」。
+        """
+        rows = list(self.trial_results or [])
+        if not rows:
+            self.decide_panel.set_counts(None)
+            return
+        counts: Dict[int, int] = {}
+        for r in rows:
+            b = r.get("bin")
+            if b is None:
+                continue
+            counts[int(b)] = counts.get(int(b), 0) + 1
+        purity = None
+        if self.ground_truth:
+            from d4t.core.export import summarize
+            purity = summarize(rows, ground_truth=self.ground_truth).get("bin_purity")
+        self.decide_panel.set_counts(counts, purity=purity)
+
     def _refresh_bin_summary(self, threshold: float) -> None:
+        self._refresh_decide_counts()
         if not self.trial_scores:
             self.histogram.set_bin_summary(None)
             return
@@ -3029,39 +2992,6 @@ class StudioWindow(QMainWindow):
     # ==================================================================== #
     # 分數編輯
     # ==================================================================== #
-    def _on_expr_edited(self, text: str) -> None:
-        if self._syncing:
-            return
-        self.model.set_expr(str(text))
-
-    def _on_feature_chosen(self, index: int) -> None:
-        """「插入特徵 ▾」：把特徵名插到表達式的游標位置。"""
-        if self._syncing or int(index) <= 0:
-            return
-        token = str(self.feature_combo.itemData(int(index)) or "")
-        self._syncing = True
-        try:
-            self.feature_combo.setCurrentIndex(0)
-        finally:
-            self._syncing = False
-        if not token:
-            return
-        text = self.expr_edit.text()
-        pos = self.expr_edit.cursorPosition()
-        pos = max(0, min(pos, len(text)))
-        new_text = text[:pos] + token + text[pos:]
-        self._syncing = True
-        try:
-            self.expr_edit.setText(new_text)
-            self.expr_edit.setCursorPosition(pos + len(token))
-        finally:
-            self._syncing = False
-        self.model.set_expr(new_text)
-
-    def _on_threshold_spin(self, value: float) -> None:
-        if self._syncing:
-            return
-        self.model.set_threshold(float(value))
 
     # ---- 直方圖門檻線 -----------------------------------------------------
     def _on_threshold_changed(self, value: float) -> None:
@@ -3394,6 +3324,10 @@ class StudioWindow(QMainWindow):
         """換掉 model 並重接所有顯示（listener 一定要重掛）。"""
         self.model = model
         self.model.add_listener(self._on_model_changed)
+        # 判定面板抓著 model 的參考（它直接寫進去），所以**換 model 一定要
+        # 跟著換**。漏掉的話它會安靜地繼續編輯上一份 recipe 的判定段，而畫面
+        # 上唯一的線索是「那一格的數字沒跟著載進來的 recipe 動」。
+        self.decide_panel.set_model(model)
         self.selected_node = None
         self._user_stream = None
         for view in self._canvases():
