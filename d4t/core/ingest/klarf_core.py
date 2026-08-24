@@ -7,6 +7,9 @@
 #     `Image/Images N { "file" ... }` block (concept ported from GLAS
 #     glas/core/klarf_parser.py `_map_row_tokens` / `_image_filename`,
 #     re-expressed on klarf_core's raw-token row representation)
+#   - KlarfDoc.save() writes atomically (.tmp + os.replace) instead of
+#     straight into the target — d4t 鐵則 5, and a truncated KLARF would
+#     overwrite the only copy of the fab's raw data (2026-08-24)
 #   - no other changes; parse / lossless round-trip behavior is identical
 #     to upstream (Chinese docstrings/comments kept verbatim).
 """
@@ -746,8 +749,26 @@ class KlarfDoc:
         return t
 
     def save(self, path):
-        with open(path, 'w', encoding='utf-8', newline='') as f:
+        """把目前的內容寫進 ``path``（**atomic**：先 ``.tmp`` 再 ``os.replace``）。
+
+        ⚠ **這一支是 d4t 對上游唯一的行為改動**（2026-08-24）。上游是直接
+        ``open(path, 'w')`` 寫進去，而 d4t 的鐵則 5 是「檔案寫入一律 atomic」——
+        理由在這個檔案上特別重的：KLARF 寫回是**不可逆**的，而寫到一半斷掉
+        （磁碟滿、行程被殺、網路碟斷線）留下的是一份**截斷的 KLARF**，
+        它會蓋掉原本那一份，而原本那一份是廠內唯一的一手資料。
+
+        ``.tmp`` + ``os.replace`` 讓那個狀態不存在：要嘛是舊的完整檔案，
+        要嘛是新的完整檔案，沒有中間態。
+
+        寫回的正規入口仍然是 `d4t.core.export.klarf_out`（它自己就是 atomic
+        的，而且會先給一份「按下去會發生什麼」的預覽）。這一支是
+        `KlarfDoc` 上的低階便道 —— 現在它至少不會比正規入口危險。
+        """
+        path = str(path)
+        tmp = path + ".tmp"
+        with open(tmp, 'w', encoding='utf-8', newline='') as f:
             f.write(self.to_text())
+        os.replace(tmp, path)
 
     # ---------- API KLARF：用固定 FOV 網格鋪滿一或多塊區域 ----------
     def _grid_centers(self, rects, fov_x, fov_y, overlap):

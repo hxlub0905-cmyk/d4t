@@ -2364,9 +2364,22 @@ class StudioWindow(QMainWindow):
                   and not (e.src == str(src) and e.src_out == str(stream))
                   and (spec.type == "image_key" or e.src_out == str(stream))]
         for e in losers:
-            # 帶著流名剪 —— 兩張卡之間可以有好幾條並排的線（F9-9），
-            # 不指名的話會把隔壁那條一起剪掉。
-            self.model.remove_edge(e.src, e.dst, src_out=e.src_out or None)
+            # **兩個埠都要指名**（B1，2026-08-24）。兩張卡之間可以有好幾條並排
+            # 的線（F9-9），而它們可能落在**不同的輸入格**上 —— 只帶 `src_out`
+            # 的話 `remove_edge` 的語意是「符合這個 src_out 的**全部**」，
+            # 於是剪一條會剪掉一整排。
+            #
+            # 實測：`load.test → subtract.a` 與 `load.test → subtract.b` 兩條
+            # 並存時，把別的卡接到 `b` 會**連 `a` 那條一起剪掉** —— 沒有人碰過
+            # `a`，而 `a` 的參數還留著 `test`：畫布上沒有線、卡片卻還指著那條
+            # 流，於是引擎退回「執行順序上最後一個寫它的人」用猜的。線性時猜得
+            # 中、分岔時猜錯，而且跑得完、有數字（F9／F10 整整兩輪在防的形狀）。
+            #
+            # ⚠ **不可以寫 `e.src_out or None`。** 空字串在 `remove_edge` 裡
+            # 本來就是「精確比對空埠」，`or None` 會把它變成「全部」——
+            # 那正是上面那個洞的第二階。
+            self.model.remove_edge(e.src, e.dst, src_out=e.src_out,
+                                   dst_in=e.dst_in)
         if not losers:
             return ""
         return (" (replacing the line from %s)"
@@ -2395,10 +2408,16 @@ class StudioWindow(QMainWindow):
         得到一句「already connected」然後什麼都沒發生 —— 看起來就像畫布不准
         你碰 ref。
 
-        **拉一條線 = 一步復原**（F9-7）。在 model 上它其實是三、四個動作
-        （add_edge → set_param → set_edge_ports →（有時）拿掉搶同一個輸入的
-        舊線），各記一步的話按一次 Ctrl+Z 會停在「線還在但埠沒了」這種中間
+        **拉一條線 = 一步復原**（F9-7）。在 model 上它其實是三個動作
+        （add_edge → set_param →（有時）拿掉搶同一個輸入的舊線），各記一步
+        的話按一次 Ctrl+Z 會停在「線接上了但那張卡還沒改成處理它」這種中間
         狀態 —— 使用者從來沒有做出過那個畫面。
+
+        ⚠ 這一段以前寫著 ``add_edge → set_param → set_edge_ports → …``，
+        而 `set_edge_ports` 從 F9-9 起就沒有人叫了（那一輪改成「加線的時候
+        就把埠一起帶進去」，因為補埠只找得到一對節點之間的第一條線，
+        兩條並排的線會補錯）。留著一個描述不存在流程的說明比沒有說明更糟 ——
+        它就寫在那段程式碼的正上方。
         """
         src, dst, stream = str(src), str(dst), str(stream or "")
         with self.model.compound("connect"):
@@ -2604,10 +2623,22 @@ class StudioWindow(QMainWindow):
         with self.model.compound("disconnect"):
             one = stream and self.model.remove_edge(
                 src, dst, src_out=stream, dst_in=dst_in or None)
+            # **知道是哪一格就用它**（B5，2026-08-24）。上面那一段已經從線本身
+            # 問出了 ``dst_in``，但沒有流名時 ``stream and …`` 整條短路掉，於是
+            # 直接跳到最後那個「拿掉整對」—— 兩張卡之間有兩條並排的線時
+            # （F9-9 起是正常的接法），使用者按一把剪刀會斷兩條。
+            if not one and dst_in:
+                one = self.model.remove_edge(src, dst, dst_in=dst_in)
+                if one:
+                    note = self._unpoint_stream(dst, stream, dst_in)
+                    self._status("Disconnected %s → %s%s" % (src, dst, note))
+                    return
             if one:
                 note = self._unpoint_stream(dst, stream, dst_in)
                 self._status("Disconnected %s → %s on %s%s"
                              % (src, dst, stream, note))
+            # 兩個埠都問不出來（舊格式的線沒有埠）→ 拿掉整對。那是刻意的：
+            # 瞄不到特定那一條的時候，「全部拿掉」至少是可預期的。
             elif self.model.remove_edge(src, dst):
                 note = self._unpoint_stream(dst, stream, dst_in)
                 self._status("Disconnected %s → %s%s" % (src, dst, note))

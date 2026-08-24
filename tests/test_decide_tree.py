@@ -239,3 +239,57 @@ def test_the_editor_snapshot_carries_the_tree():
     from d4t.ui.viewmodel import _decide_restore, _decide_snapshot
     back = _decide_restore(_decide_snapshot(DECIDE_TREE))
     assert back == DECIDE_TREE
+
+
+# --------------------------------------------------------------------------- #
+# 樹的路徑定址：只認 y 與 n（B4，2026-08-24）
+# --------------------------------------------------------------------------- #
+def _two_level_model():
+    """一棵兩層的樹（根一步、no 那邊再一步），用 model 的編輯 API 長出來。
+
+    ⚠ `RecipeModel` 是 **Qt-free** 的（`docs/ARCHITECTURE.md` 講的那一條：
+    「viewmodel.py：RecipeModel，Qt-free、可 headless 測」）—— 所以這幾條
+    測試留在核心那一輪，不必也**不該**放進 `test_ui_*`。第一版寫了
+    `pytest.importorskip("PySide6")`，那反而會把 Qt 拉進一個本來乾淨的行程。
+    """
+    from d4t.ui.viewmodel import RecipeModel
+
+    m = RecipeModel.starter("ebi_patch")
+    m.use_decide(True)
+    m.ensure_tree()
+    m.split_tree_leaf("")
+    m.split_tree_leaf("n")
+    return m
+
+
+def test_a_path_char_that_is_not_y_or_n_addresses_nothing():
+    """壞掉的路徑要回 ``None``，不可以安靜地指到一個**真實但錯的**節點。
+
+    以前的寫法是 ``node.yes if ch == "y" else node.no`` —— 於是 ``"x"``
+    被當成 ``"n"``，``tree_node("x")`` 回的是 no 那一邊那個真的存在的節點。
+    今天路徑全部由 UI 產生所以碰不到，但「壞輸入指到一個合法的東西」
+    正是這個 repo 最怕的形狀（它不會報錯，只會改錯地方）。
+    """
+    m = _two_level_model()
+
+    assert m.tree_node("") is not None          # 根
+    assert m.tree_node("n") is not None         # no 那一步
+    assert m.tree_node("x") is None             # ← 以前回的是 no 那一步
+    assert m.tree_node("nq") is None
+    assert m.tree_node("yyy") is None           # 走過頭
+
+
+def test_editing_through_a_bad_path_changes_nothing():
+    """四支編輯操作對壞路徑都是**安靜的 no-op**（它們先用 tree_node 檢查）。
+
+    安靜的 no-op 不理想（使用者按了、什麼都沒發生），但它遠好過改錯節點 ——
+    而這一條鎖住的是「不會改錯」。
+    """
+    for op, args in (("set_tree_when", ("x", "a > 1")),
+                     ("set_tree_leaf", ("x", 5, "nope")),
+                     ("split_tree_leaf", ("x",)),
+                     ("remove_tree_step", ("x",))):
+        m = _two_level_model()
+        before = m.decide.tree
+        getattr(m, op)(*args)
+        assert m.decide.tree == before, "%s 用壞路徑改到了東西" % op

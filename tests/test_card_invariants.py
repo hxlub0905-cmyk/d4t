@@ -560,6 +560,122 @@ def test_the_cache_replay_check_actually_uses_the_cache(dataset, lot, tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# I7：改一個參數，快取一定要跟著失效
+# --------------------------------------------------------------------------- #
+def _another_value(spec):
+    """這個參數的**另一個**值（跟預設不同、而且在宣告的界線裡）。
+
+    回 ``None`` = 這一格造不出第二個值（自由文字、影像流、曲線…）——
+    那些格子的變化不由這條測試負責。
+    """
+    default = spec.default
+    if spec.type == "bool":
+        return not bool(default)
+    if spec.type == "choice" and spec.choices:
+        for choice in spec.choices:
+            if choice != default:
+                return choice
+        return None
+    if spec.type in ("int", "float"):
+        cast = int if spec.type == "int" else float
+        lo = cast(spec.min) if spec.min is not None else None
+        hi = cast(spec.max) if spec.max is not None else None
+        for candidate in (cast(default) + (2 if spec.type == "int" else 1.0),
+                          cast(default) - (2 if spec.type == "int" else 1.0),
+                          hi, lo):
+            if candidate is None or candidate == default:
+                continue
+            if lo is not None and candidate < lo:
+                continue
+            if hi is not None and candidate > hi:
+                continue
+            return candidate
+    return None
+
+
+def _param_change_cases():
+    """``(卡片, 參數名, 另一個值)`` —— 每一張卡的每一個造得出第二個值的參數。"""
+    for key in CARDS:
+        if key in NEEDS_MORE_SETUP:
+            continue
+        for spec in REGISTRY[key].params:
+            value = _another_value(spec)
+            if value is not None:
+                yield (key, spec.name, value)
+
+
+PARAM_CHANGES = list(_param_change_cases())
+
+
+@pytest.mark.parametrize("key, name, value", PARAM_CHANGES,
+                         ids=["%s.%s" % (k, n) for k, n, _ in PARAM_CHANGES])
+def test_changing_a_parameter_invalidates_the_cache(key, name, value,
+                                                    dataset, tmp_path):
+    """**改了會影響結果的東西，快取一定要失效**（鐵則 9）。
+
+    I4 問的是「同一份 recipe，冷跑與熱跑一不一樣」。這一條問的是**另一半**：
+    **改了參數之後**，帶著舊快取跑出來的，還是不是對的答案。
+
+    兩者不能互相取代，而缺的那一半正是這個 repo 踩過的形狀 ——
+    F9-8 的實測原話是「把 ``x5`` 的輸入從 ``load`` 改接到 ``x3``，正確答案
+    15.0，帶著舊快取跑出來是 5.0」。那一次是**線**沒進簽章；同一個洞在
+    **參數**上一樣開得起來（``_writes_an_image`` 第一版漏了 ``validate_params``，
+    於是一張正常的 Enhance 卡被判成「不吐影像」，checkpoint 整個往前縮）。
+
+    做法：同一個快取目錄，先用預設參數跑一次（把舊影像寫進去），
+    再改一個參數跑一次，結果必須等於**乾淨重跑**（沒有快取）。
+    不等於就代表簽章看不見這一格。
+    """
+    from dataclasses import replace as dc_replace
+
+    from d4t.core.pipeline.batch import pin_cv2_deterministic, run_batch
+    pin_cv2_deterministic()
+
+    base = recipe_for(key, trailing_image=True)
+    if key not in base.nodes:                  # 這張卡是別人的前置，沒有自己的節點
+        pytest.skip("%s 在這個 harness 裡沒有自己的節點" % key)
+
+    cache_dir = str(tmp_path / "cache")
+    # ① 先用預設參數跑一次 —— 這一步是把「舊影像」寫進快取
+    run_batch(base, dataset, workers=1, cache_dir=cache_dir)
+
+    # ② 改一格
+    node = base.nodes[key]
+    params = dict(node.params)
+    params[name] = value
+    changed = dc_replace(base, nodes=dict(base.nodes,
+                                          **{key: dc_replace(node, params=params)}))
+
+    clean = _numbers(run_batch(changed, dataset, workers=1))
+    warm = _numbers(run_batch(changed, dataset, workers=1, cache_dir=cache_dir))
+    assert warm == clean, (
+        "%s 的 %s 改成 %r 之後，帶著舊快取跑出來跟乾淨重跑不一樣 —— "
+        "影像段簽章看不見這一格" % (key, name, value))
+
+
+def _numbers(rows):
+    """一批結果裡「所有算出來的數字」，可以逐項比對。"""
+    return [(r.get("defect_id"), bool(r.get("ok")),
+             None if r.get("score") is None else repr(float(r["score"])),
+             tuple(sorted((k, repr(float(v)))
+                          for k, v in (r.get("features") or {}).items())))
+            for r in rows]
+
+
+def test_the_parameter_change_check_covers_a_real_spread_of_cards():
+    """上面那一組必須真的涵蓋到卡片與參數 —— 否則它會安靜地空轉。
+
+    同 `test_the_extreme_parameter_check_is_not_vacuous` 的理由：
+    ``_another_value`` 回 None 太多的話（例如有人把 min/max 拿掉），
+    這一組會縮到剩幾個而沒有人發現。
+    """
+    cards = {k for k, _, _ in PARAM_CHANGES}
+    assert len(PARAM_CHANGES) >= 60, (
+        "只造得出 %d 組參數變化 —— _another_value 可能失效了" % len(PARAM_CHANGES))
+    assert len(cards) >= 10, "只涵蓋到 %d 張卡：%s" % (len(cards), sorted(cards))
+
+
+# --------------------------------------------------------------------------- #
 # I5：參數推到上下界不炸，而且不吐出 NaN
 # --------------------------------------------------------------------------- #
 def _extreme_param_cases(key: str):

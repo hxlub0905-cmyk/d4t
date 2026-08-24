@@ -574,11 +574,23 @@ class RecipeModel:
         for ch in str(path):
             if isinstance(node, TreeLeaf):
                 return None
+            # **只認 y 與 n**（B4，2026-08-24）。以前是 ``ch == "y"`` 否則走
+            # ``no`` —— 一個壞掉的路徑不會回 None，會安靜地指到一個**真實但
+            # 錯的節點**，而編輯操作就會改到那裡。今天路徑全部由 UI 產生所以
+            # 碰不到，但「壞輸入指到一個合法的東西」正是這個 repo 最怕的形狀。
+            if ch not in ("y", "n"):
+                return None
             node = node.yes if ch == "y" else node.no
         return node
 
     @staticmethod
     def _tree_replace(node: Any, path: str, new: Any) -> Any:
+        """路徑指到的那個節點換成 ``new``，回傳新的樹。
+
+        ⚠ 呼叫端（`_edit_tree`）一律先用 :meth:`tree_node` 確認路徑指得到
+        東西才叫這一支 —— 所以這裡不必再擋一次，但也**不可以**把「不是 y」
+        當成 n（見 :meth:`tree_node` 的說明）。
+        """
         if not path:
             return new
         if path[0] == "y":
@@ -898,6 +910,15 @@ class RecipeModel:
     def set_edge_ports(self, src: str, dst: str, src_out: str = "",
                        dst_in: str = "") -> bool:
         """補上一條**還沒有埠**的線的埠。
+
+        ⚠ **目前沒有任何呼叫者**（2026-08-24 全 repo 查過）。F9-9 把
+        `studio._connect` 改成「先算出埠、加線的時候一起帶進去」之後，
+        這條兩步的路就沒事做了 —— 理由見下面那段：補埠只挑得到一對節點之間
+        的某一條，而兩條並排的線分不出該補哪一條。
+
+        留著而不刪掉是因為它是 model 的公開 API，而「收起來的成本是零、
+        刪掉的成本要先量」（`CLAUDE.md` §5 那張表）。要刪的話直接刪，
+        沒有東西會壞。
 
         分成兩步是因為 Studio 的順序是「先確定線接得起來（不成環），**再**去改
         下游卡的參數」—— 而 ``dst_in`` 是那一步才知道的（要看那張卡的哪個參數

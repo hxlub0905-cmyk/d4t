@@ -374,6 +374,19 @@ class OutputKlarfStep(_OutputStep):
         bctx.warn("KLARF %s: %d row(s) changed, %d row(s) written."
                   % (str(p["mode"]), int(getattr(plan, "n_rows_changed", 0)),
                      int(getattr(plan, "n_rows_out", 0))))
+        # **`plan.notes` 也要帶出來**（B6，2026-08-24）。`klarf_out` 已經把
+        # 「為什麼」寫好了，而以前只有計數走得出來 —— 於是 inplace 一格目標
+        # 欄位都沒填的時候，使用者看到的是「0 row(s) changed」，
+        # 一句答不出「那我該填什麼」的話。那份說明就在手上：
+        #
+        #   "No target column was given (class_col / bin_col / size_col are
+        #    all empty), so the output file will be byte-for-byte identical
+        #    to the original."
+        #
+        # 其他 mode 的 notes 同樣有用（影像參照怎麼處理、幾顆對不到 DEFECTID、
+        # DSIZE 那一欄的單位換算）—— 那些以前也全部沒有出口。
+        for note in (getattr(plan, "notes", None) or []):
+            bctx.warn("KLARF %s: %s" % (str(p["mode"]), note))
 
 
 @register_step
