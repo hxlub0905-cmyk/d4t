@@ -287,18 +287,32 @@ class DecidePanel(QWidget):
         add_let.clicked.connect(lambda: self._restructure(m.add_let))
         self.body_lay.addWidget(add_let)
 
-        # ── 規則 ──
-        self.body_lay.addWidget(self._section(
-            "Rules", "Top to bottom - the first one that matches wins"))
-        for i, rule in enumerate(d.rules):
-            self.body_lay.addWidget(self._rule_row(i, rule, len(d.rules)))
-        add_rule = small_button("+ Add a rule")
-        add_rule.clicked.connect(lambda: self._restructure(m.add_rule))
-        self.body_lay.addWidget(add_rule)
+        if getattr(d, "tree", None) is not None:
+            # ── 判定樹模式（F24 ③）──
+            # 樹住在畫布上，這裡不擺第二份編輯器：`rules` 與 `tree` 並存是
+            # `ambiguous-decision` 的 error，而「同一件事有兩個編輯入口」正是
+            # 那個形狀的 UI 版。
+            self.body_lay.addWidget(self._section(
+                "Sorting",
+                "This recipe sorts with the decision tree on the canvas"))
+            note = QLabel("Click a diamond on the canvas to edit a step, "
+                          "or a tray to edit a class.")
+            note.setObjectName("paramHint")
+            note.setWordWrap(True)
+            self.body_lay.addWidget(note)
+        else:
+            # ── 規則 ──
+            self.body_lay.addWidget(self._section(
+                "Rules", "Top to bottom - the first one that matches wins"))
+            for i, rule in enumerate(d.rules):
+                self.body_lay.addWidget(self._rule_row(i, rule, len(d.rules)))
+            add_rule = small_button("+ Add a rule")
+            add_rule.clicked.connect(lambda: self._restructure(m.add_rule))
+            self.body_lay.addWidget(add_rule)
 
-        # ── 都沒對上 ──
-        self.body_lay.addWidget(self._section("Nothing matched", ""))
-        self.body_lay.addWidget(self._otherwise_row(d))
+            # ── 都沒對上 ──
+            self.body_lay.addWidget(self._section("Nothing matched", ""))
+            self.body_lay.addWidget(self._otherwise_row(d))
 
         # ── 分數 ──
         self.body_lay.addWidget(self._section(

@@ -952,9 +952,16 @@ class StudioWindow(QMainWindow):
         self.pipeline.MIN_FIT_SCALE = 0.5
         self.param_form = ParamForm(self)
         self.score_pane = self._build_score_pane()
+        # 判定樹一步的編輯面板（F24 ③）—— 點畫布上的菱形時換到它。
+        from .tree_panel import TreePanel
+
+        self.tree_pane = TreePanel(self)
+        self.tree_pane.set_model(self.model)
+        self.tree_pane.step_requested.connect(self._on_tree_step_clicked)
         self.stack = QStackedWidget(self)
         self.stack.addWidget(self.param_form)     # index 0
         self.stack.addWidget(self.score_pane)     # index 1
+        self.stack.addWidget(self.tree_pane)      # index 2
 
         middle = QSplitter(Qt.Vertical, self)
         middle.addWidget(self.pipeline)
@@ -1260,7 +1267,12 @@ class StudioWindow(QMainWindow):
         self.verdict = VerdictChip(pane)
         vrow.addWidget(QLabel("Verdict", pane))
         vrow.addWidget(self.verdict)
-        vrow.addStretch(1)
+        # 這一顆走過的路（F24 §8）：`missing? no → contrast > 120 ? yes`。
+        # 沒有判定樹（或還沒預覽）就是空字串 —— 不佔位、不寫 N/A。
+        self.decide_path = QLabel("", pane)
+        self.decide_path.setObjectName("paramHint")
+        self.decide_path.setWordWrap(False)
+        vrow.addWidget(self.decide_path, 1)
         lay.addLayout(vrow)
 
         return pane
@@ -1283,6 +1295,9 @@ class StudioWindow(QMainWindow):
         view.score_clicked.connect(self.show_score_page)
         # 判定區的入口小卡（F24 ②）：點了＝跳到判定的編輯（同 score 那條路）。
         view.decision_clicked.connect(self.show_score_page)
+        # 判定樹的菱形／托盤（F24 ③）：右欄變成那一步／那一類的編輯面板。
+        view.tree_step_clicked.connect(self._on_tree_step_clicked)
+        view.tree_leaf_clicked.connect(self._on_tree_step_clicked)
         view.edge_added.connect(self._on_edge_added)
         view.edge_removed.connect(self._on_edge_removed)
         view.popout_requested.connect(self.open_canvas_window)
@@ -1395,6 +1410,9 @@ class StudioWindow(QMainWindow):
         """model 任何變動的統一入口（listener）。"""
         self._refresh_pipeline()
         self._sync_score_widgets()
+        # 判定樹面板（F24 ③）：結構變了要跟上（打字不重建 —— 它自己的
+        # typing guard 擋著）。
+        self.tree_pane.refresh()
         self.histogram.set_threshold(self.model.threshold)
         self._refresh_bin_summary(self.model.threshold)
         self._update_action_states()
@@ -1759,9 +1777,13 @@ class StudioWindow(QMainWindow):
         """
         from .tree_scene import decision_info
 
-        return decision_info(getattr(self.model, "decide", None),
+        info = decision_info(getattr(self.model, "decide", None),
                              list(self.trial_results or []),
                              self.ground_truth)
+        if info is not None:
+            # 幽靈線（F24 ④）：菱形上的數字 → 產出它的卡。宣告層的答案。
+            info["feat_owner"] = self.model.feature_owners()
+        return info
 
     def _sync_score_widgets(self) -> None:
         """model 換過（載入、undo、切 route）之後把判定面板重畫一次。
@@ -2596,6 +2618,7 @@ class StudioWindow(QMainWindow):
         self.model.end_coalescing()
         for view in self._canvases():
             view.set_selected(node_id)
+            view.set_tree_selected(None)   # 一次只編一個東西（卡片或樹的一步）
         try:
             describe = get_step(node.step).describe()
         except KeyError:
@@ -2929,6 +2952,24 @@ class StudioWindow(QMainWindow):
 
     def show_param_page(self) -> None:
         self.stack.setCurrentWidget(self.param_form)
+
+    def _on_tree_step_clicked(self, path: str) -> None:
+        """畫布上點了判定樹的一步／一類（F24 ③），或面板要求跳到另一步。
+
+        `rules` 模式先無損翻成樹（`ensure_tree`）—— 編輯動作只有樹的形狀
+        表達得了「yes 接另一步」。
+        """
+        if getattr(self.model, "decide", None) is None:
+            return
+        self.model.ensure_tree()
+        info = self._decision_info()
+        self.tree_pane.set_features(self.model.labelled_features())
+        self.tree_pane.set_counts(None if not info else info.get("counts"))
+        self.tree_pane.show_path(str(path))
+        self.stack.setCurrentWidget(self.tree_pane)
+        self.set_params_open(True)
+        for view in self._canvases():
+            view.set_tree_selected(str(path))
 
     # ==================================================================== #
     # 參數編輯
@@ -3350,10 +3391,12 @@ class StudioWindow(QMainWindow):
         # 跟著換**。漏掉的話它會安靜地繼續編輯上一份 recipe 的判定段，而畫面
         # 上唯一的線索是「那一格的數字沒跟著載進來的 recipe 動」。
         self.decide_panel.set_model(model)
+        self.tree_pane.set_model(model)   # 同一個理由：它也直接寫 model
         self.selected_node = None
         self._user_stream = None
         for view in self._canvases():
             view.set_selected(None)
+            view.set_tree_selected(None)
             view.forget_positions()   # 換了一份 recipe，別繼承上一份拖過的位置
         self.param_form.set_step(None, {}, [])
         self.stack.setCurrentWidget(self.param_form)
@@ -3499,6 +3542,7 @@ class StudioWindow(QMainWindow):
         score = getattr(result, "score", None)
         self.verdict.set_verdict(getattr(result, "bin", None)
                                  if score is not None else None)
+        self._show_decide_path(result)
 
         if not ran:
             # 兩種「沒有東西可看」要講不同的話，因為下一步不一樣：
@@ -3527,6 +3571,35 @@ class StudioWindow(QMainWindow):
             self._status("Preview done (%d image streams)%s"
                          % (len(images),
                             "   score %.4g" % score if score is not None else ""))
+
+    def _show_decide_path(self, result: Any) -> None:
+        """Preview 的 Path（F24 §8）：這一顆走過的路，一句話＋樹上亮起來。
+
+        資料是引擎記的 ``ctx.meta["decide"]["path"]``（一串 yes/no）——
+        判定樹模式才有；`rules` 模式講「第幾條規則對上」；沒有判定（或這一顆
+        沒跑到判定）就清空，**不寫 N/A**。
+        """
+        from .tree_scene import display_tree, path_text
+
+        ctx = getattr(result, "context", None)
+        meta = (getattr(ctx, "meta", None) or {}).get("decide") \
+            if ctx is not None else None
+        text, hl = "", None
+        if isinstance(meta, dict):
+            steps = [str(s) for s in (meta.get("path") or [])]
+            if steps:
+                hl = "".join("y" if s == "yes" else "n" for s in steps)
+                tree = display_tree(getattr(self.model, "decide", None))
+                text = path_text(tree, hl) if tree is not None else ""
+                if text:
+                    text = "Path:  " + text
+            elif meta.get("rule", -1) is not None and int(meta.get("rule", -1)) >= 0:
+                text = "Path:  rule %d matched" % (int(meta["rule"]) + 1)
+                if meta.get("label"):
+                    text += " (%s)" % meta["label"]
+        self.decide_path.setText(text)
+        for view in self._canvases():
+            view.set_tree_highlight(hl)
 
     #: 會產生投影曲線的卡片 key（面板只在編輯它的時候出現）。
     PROFILE_STEP = "roi_cross"

@@ -19,6 +19,43 @@
 
 ---
 
+## F24 ③④：判定樹的編輯互動＋幽靈線（2026-08-24）
+
+* **點菱形／托盤 → 右欄變成那一步的編輯面板**（`ui/tree_panel.py`，跟點卡片
+  同一條路）：Question ＋ Insert a number ▾（F21-B 第四個使用者）、Yes/No
+  各自是「一個類別（名字＋bin＋Split…）」或「另一步（摘要＋Edit 跳過去）」、
+  THIS BATCH（47 arrive here → 11 yes · 36 no，沒跑過一個字不畫）、
+  Insert step above／Remove step。
+* **`rules` 模式在第一次點菱形時無損轉樹**（`RecipeModel.ensure_tree`，
+  rules 清空 —— 兩個都在是 `ambiguous-decision`）；`DecidePanel` 在樹模式
+  收起規則清單，指去畫布（同一件事不擺兩個編輯入口）。
+* **樹的編輯 op 全在 viewmodel**（路徑當身分、整棵 immutable 重建、一動作
+  一步 undo）：`set_tree_when/set_tree_leaf/split_tree_leaf/
+  insert_tree_step_above/remove_tree_step`。加一步＝新問題的 yes 掛新類、
+  原本那類留在 no（同「在 otherwise 前插一條規則」的形狀）；拿掉一步＝no 邊
+  接回上游，yes 邊掛著子樹時先問過使用者。
+* **雙擊入口卡收合整棵樹**成一張小卡（檢視狀態，不進 recipe）。
+* **幽靈線**：滑鼠停在菱形上 → 它用到的每個數字畫一條**臨時**點線回產出它
+  的卡（卡片同時亮 hover 框），`let` 中間值指回入口卡。來源從**宣告**推
+  （`RecipeModel.feature_owners`，第一個宣告的人贏）—— 所以它不說謊。
+  樣式跟資料流的線刻意不同（點線＋`contrast · from Gray level` 標籤），
+  移開就消失、從不存檔。
+* **Preview 的 Path**（F24 §8）：Verdict 旁一行
+  `Path: cd_deq_missing > 0 ? no → contrast > 120 ? yes`（樹模式；rules 模式
+  講第幾條規則對上），同時那條路**在樹上亮起來**（沿路分支加粗全彩）。
+  資料是引擎記的 `meta["decide"]["path"]`，人話由 `tree_scene.path_text`
+  沿樹重走組出來。
+* **`feature_math` / `feature_fill` 收進 `HIDDEN_STEPS`**（F24 §5 定調：
+  算式住進 working numbers、補值是樹第一步的形狀）。收不是刪：registry 照認、
+  舊 recipe 照跑、F21 的測試直接從 registry 拿。卡片庫的 Algo 段因此清空 ——
+  **GROUP_ORDER 沒動**（F16 的八段是使用者定的，動之前要再點一次頭）。
+* 測試：`test_ui_tree_edit.py`（15 條：轉樹清 rules、路徑尋址、split 保留
+  原類、remove 接回 no、undo 逐步、面板讀寫 model、HIDDEN_STEPS 收不是刪）＋
+  `test_ui_tree_canvas.py` 補 6 條（收合、幽靈線出現與消失、路徑亮起、
+  path_text）。截圖：`f24_edit_step.png`、`f24_ghost_path.png`。
+
+---
+
 ## F24 ②：判定樹上畫布 —— 唯讀渲染（2026-08-24）
 
 判定區照 mockup 定稿長進畫布（`d4t/ui/tree_scene.py` ＋

@@ -17,8 +17,9 @@ from dataclasses import replace
 from d4t.core.pipeline import (
     Edge, ParamError, Recipe, RecipeNode, ScoreSpec, get_step, validate,
 )
-from d4t.core.pipeline.recipe import (DecideSpec, Let, Rule,
-                                      _tree_from_json, _tree_to_json)
+from d4t.core.pipeline.recipe import (DecideSpec, Let, Rule, TreeLeaf,
+                                      TreeStep, _tree_from_json, _tree_to_json,
+                                      rules_to_tree)
 
 
 def _decide_snapshot(d: "DecideSpec") -> Dict[str, Any]:
@@ -507,6 +508,115 @@ class RecipeModel:
         if self.decide is not None and str(expr) != self.decide.score:
             self._edit_decide(score=str(expr))
 
+    # ---- 判定樹（F24 ③）---------------------------------------------------
+    #
+    # 樹上的一步用**路徑**指（``""`` = 根、``"y"`` / ``"n"`` 一路往下）——
+    # 節點是 frozen dataclass，同一片葉子可以出現兩次，路徑才是唯一的身分。
+    # 每一支 setter 都是「整棵換掉」（`_tree_replace` 沿路重建）：樹很小
+    # （lint 在 16 層就警告），而 immutable 的節點沒有第二種寫法。
+    def ensure_tree(self) -> None:
+        """`rules` 模式 → 等價鏈狀樹（無損，F24 ① 的測試釘住了）。
+
+        畫布上點一個菱形開始編輯的那一刻呼叫 —— 編輯動作只有樹的形狀，
+        rules 清單表達不了「yes 接另一步」。轉了之後 serde 只寫 `tree`
+        （`Recipe.to_json_dict`），舊寫法從此離開這份 recipe —— 那是使用者
+        動手改樹的那一刻，不是打開檔案的那一刻（鐵則 9：讀檔不改檔）。
+        """
+        if self.decide is None or self.decide.tree is not None:
+            return
+        self._edit_decide(tree=rules_to_tree(self.decide), rules=[])
+
+    def tree_node(self, path: str) -> Any:
+        """路徑指到的節點（不存在回 ``None``）。"""
+        if self.decide is None or self.decide.tree is None:
+            return None
+        node = self.decide.tree
+        for ch in str(path):
+            if isinstance(node, TreeLeaf):
+                return None
+            node = node.yes if ch == "y" else node.no
+        return node
+
+    @staticmethod
+    def _tree_replace(node: Any, path: str, new: Any) -> Any:
+        if not path:
+            return new
+        if path[0] == "y":
+            return replace(node, yes=RecipeModel._tree_replace(
+                node.yes, path[1:], new))
+        return replace(node, no=RecipeModel._tree_replace(
+            node.no, path[1:], new))
+
+    def _edit_tree(self, path: str, new: Any) -> None:
+        if self.decide is None or self.decide.tree is None:
+            return
+        self._edit_decide(tree=self._tree_replace(self.decide.tree,
+                                                  str(path), new))
+
+    def _fresh_bin(self) -> int:
+        """一個還沒被任何葉子用掉的 bin（跟 `add_rule` 同一個規則）。"""
+        used = {int(self.decide.otherwise_bin)} if self.decide else set()
+
+        def walk(node: Any) -> None:
+            if isinstance(node, TreeLeaf):
+                used.add(int(node.bin))
+                return
+            walk(node.yes)
+            walk(node.no)
+
+        if self.decide is not None and self.decide.tree is not None:
+            walk(self.decide.tree)
+        if self.decide is not None:
+            used |= {int(r.bin) for r in self.decide.rules}
+        return next(b for b in range(1, 1000) if b not in used)
+
+    def set_tree_when(self, path: str, when: str) -> None:
+        node = self.tree_node(path)
+        if not isinstance(node, TreeStep) or str(when) == node.when:
+            return
+        self._edit_tree(path, replace(node, when=str(when)))
+
+    def set_tree_leaf(self, path: str, bin: Optional[int] = None,
+                      label: Optional[str] = None) -> None:
+        node = self.tree_node(path)
+        if not isinstance(node, TreeLeaf):
+            return
+        new = TreeLeaf(bin=node.bin if bin is None else int(bin),
+                       label=node.label if label is None else str(label))
+        if new != node:
+            self._edit_tree(path, new)
+
+    def split_tree_leaf(self, path: str) -> None:
+        """把一片葉子換成一個新菱形（mockup：「加一步」）。
+
+        原本那一類**留著**（掛在新步驟的 no 邊）—— 跟「在 otherwise 前面
+        加一條規則」同一個形狀：新問題答 yes 的走新的類，其他照舊。
+        """
+        node = self.tree_node(path)
+        if not isinstance(node, TreeLeaf):
+            return
+        self._edit_tree(path, TreeStep(
+            when="", yes=TreeLeaf(bin=self._fresh_bin(), label=""), no=node))
+
+    def insert_tree_step_above(self, path: str) -> None:
+        """在這一步**前面**插一個新問題（原本的子樹整個掛在 no 邊）。"""
+        node = self.tree_node(path)
+        if node is None:
+            return
+        self._edit_tree(path, TreeStep(
+            when="", yes=TreeLeaf(bin=self._fresh_bin(), label=""), no=node))
+
+    def remove_tree_step(self, path: str) -> None:
+        """拿掉一步：它的 **no 邊接回上游**（F24 §6 定的規則）。
+
+        yes 那一邊跟著消失 —— 呼叫端（面板）在 yes 是一整個子樹時要先問過
+        使用者；model 不擋，因為「問」是 UI 的事，而 undo 一步就回得來。
+        """
+        node = self.tree_node(path)
+        if not isinstance(node, TreeStep):
+            return
+        self._edit_tree(path, node.no)
+
     def set_expr(self, expr: str) -> None:
         if expr != self.expr:
             self._push_undo("expr")
@@ -591,6 +701,29 @@ class RecipeModel:
                     out.append(f + self.FEATURE_LABEL_SEP + label)
             if nid == upto_node:
                 break
+        return out
+
+    def feature_owners(self) -> Dict[str, str]:
+        """特徵名 → 產出它的**節點 id**（幽靈線用，F24 ④）。
+
+        宣告層的答案（`resolve_features`，第一個宣告的人贏）—— 跟
+        `labelled_features` 同一個迴圈同一個規則，只是那份給人看（label）、
+        這份給畫布找卡片（node id）。判定段 `let` 的中間值屬於入口卡，
+        值是**空字串**（畫布上那張卡沒有 node id）。
+        """
+        out: Dict[str, str] = {}
+        for nid in self.node_order:
+            node = self.nodes[nid]
+            if not node.enabled:
+                continue
+            step_cls = get_step(node.step)
+            for f in step_cls.resolve_features(node.params):
+                out.setdefault(str(f), nid)
+        if self.decide is not None:
+            for x in self.decide.let:
+                name = str(x.name).strip()
+                if name:
+                    out.setdefault(name, "")
         return out
 
     def nm_per_px_is_known(self) -> bool:

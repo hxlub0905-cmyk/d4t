@@ -213,6 +213,67 @@ def test_clicking_the_entry_card_jumps_to_the_decision(qapp):
     assert hits == [1]
 
 
+def test_double_click_collapses_the_tree_to_the_entry_card(qapp):
+    """F24 §4：雙擊入口卡收合整棵樹（嫌佔位的出口）—— 再雙擊回來。"""
+    view = _canvas()
+    view.set_decision(tree_mod.decision_info(_decide_rules(), [], None))
+    assert len(_trays(view)) == 3
+    view.toggle_tree_collapsed()
+    assert len(_entries(view)) == 1 and len(_trays(view)) == 0
+    view.toggle_tree_collapsed()
+    assert len(_trays(view)) == 3
+
+
+def test_hovering_a_diamond_draws_ghost_wires_and_leaving_clears(qapp):
+    """F24 ④：幽靈線是**臨時**的 —— 出現在 hover、消失在移開。"""
+    view = _canvas()
+    info = tree_mod.decision_info(_decide_rules(), [], None)
+    info["feat_owner"] = {"contrast": "load"}     # contrast 由 load 卡「產出」
+    view.set_decision(info)
+    diamond = next(it for it in view.decision_items()
+                   if isinstance(it, tree_mod._DiamondItem))
+    view.show_tree_ghosts(diamond)
+    assert len(view.ghost_items()) == 1
+    assert view.node_item("load")._hover           # 來源卡亮起來
+    view.clear_tree_ghosts()
+    assert view.ghost_items() == []
+    assert not view.node_item("load")._hover
+
+
+def test_ghost_wires_point_at_the_entry_for_working_numbers(qapp):
+    """`let` 的中間值沒有卡 —— 幽靈線指回入口小卡（Decision）。"""
+    view = _canvas()
+    info = tree_mod.decision_info(_decide_rules(), [], None)
+    info["feat_owner"] = {"contrast": ""}          # 空字串 = let 中間值
+    view.set_decision(info)
+    diamond = next(it for it in view.decision_items()
+                   if isinstance(it, tree_mod._DiamondItem))
+    view.show_tree_ghosts(diamond)
+    assert len(view.ghost_items()) == 1
+
+
+def test_the_previewed_defects_path_lights_up_on_the_tree(qapp):
+    """F24 §8：看某一顆時，它走過的分支在樹上亮起來。"""
+    view = _canvas()
+    view.set_decision(tree_mod.decision_info(_decide_rules(), [], None))
+    view.set_tree_highlight("ny")
+    hot = [it for it in view.decision_items()
+           if isinstance(it, tree_mod._BranchItem) and it._hot]
+    # 入口→根、根→n、n→ny —— 整條路三段。
+    assert len(hot) == 3
+    view.set_tree_highlight(None)
+    hot = [it for it in view.decision_items()
+           if isinstance(it, tree_mod._BranchItem) and it._hot]
+    assert hot == []
+
+
+def test_path_text_reads_the_walk_back(qapp):
+    tree = tree_mod.display_tree(_decide_rules())
+    assert tree_mod.path_text(tree, "ny") == \
+        "contrast > 100 ? no → contrast > 30 ? yes"
+    assert tree_mod.path_text(tree, "yyy") == ""   # 走不完就不硬湊
+
+
 def test_the_zone_sits_to_the_right_of_the_cards(qapp):
     """mockup 定稿：判定區在畫布右側 —— 不能壓在卡片上。"""
     view = _canvas()
