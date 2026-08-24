@@ -674,6 +674,20 @@ class StudioWindow(QMainWindow):
                 bar.addWidget(b)
             bar.addSeparator()
 
+        # 分流的 route 切換器（F23 期2）：`RecipeModel` 一次編一條 route
+        # （§6 第一期不動的那條），切換是「換一條來編」—— 畫布跟著換。
+        # 只有一條 route 時整組收起來（多數 recipe 用不到它）。
+        self.lbl_route = QLabel("Route ", bar)
+        self.route_combo = QComboBox(bar)
+        self.route_combo.setToolTip(
+            "Which route (which set of cards) the canvas is editing. "
+            "With route_by, each defect picks its own route at run time.")
+        self.route_combo.activated.connect(self._on_route_combo)
+        bar.addWidget(self.lbl_route)
+        bar.addWidget(self.route_combo)
+        self.lbl_route.setVisible(False)
+        self.route_combo.setVisible(False)
+
         spacer = QWidget(bar)
         spacer.setObjectName("toolbarSpacer")
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -1018,7 +1032,19 @@ class StudioWindow(QMainWindow):
         self.decide_panel = DecidePanel(self)
         self.decide_panel.set_model(self.model)
         self.decide_panel.mode_changed.connect(self._on_decide_mode)
-        return self.decide_panel
+        # 分流的編輯區塊（F23 期2）—— 判定欄**上方**：它在跑之前就決定每一顆
+        # 走哪條 route，判定是跑完之後的事，由上往下讀正好是時間順序。
+        from .route_panel import RouteByBox
+
+        self.route_box = RouteByBox(self)
+        self.route_box.set_model(self.model)
+        pane = QWidget(self)
+        lay = QVBoxLayout(pane)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self.route_box)
+        lay.addWidget(self.decide_panel, 1)
+        return pane
 
     def _build_preview_pane(self) -> QWidget:
         pane = QWidget(self)
@@ -1413,6 +1439,9 @@ class StudioWindow(QMainWindow):
         # 判定樹面板（F24 ③）：結構變了要跟上（打字不重建 —— 它自己的
         # typing guard 擋著）。
         self.tree_pane.refresh()
+        # 分流（F23 期2）：route 清單與編輯區塊跟著 model 走。
+        self._refresh_route_switcher()
+        self.route_box.refresh()
         self.histogram.set_threshold(self.model.threshold)
         self._refresh_bin_summary(self.model.threshold)
         self._update_action_states()
@@ -2953,6 +2982,104 @@ class StudioWindow(QMainWindow):
     def show_param_page(self) -> None:
         self.stack.setCurrentWidget(self.param_form)
 
+    # ---- 分流（F23 期2）----------------------------------------------------
+    def _refresh_route_switcher(self) -> None:
+        """工具列的 route 下拉：跟 model 的 route 清單同步；單 route 收起來。"""
+        keys = list(self.model.route_keys())
+        show = len(keys) > 1
+        self.lbl_route.setVisible(show)
+        self.route_combo.setVisible(show)
+        if not show:
+            return
+        current = [self.route_combo.itemText(i)
+                   for i in range(self.route_combo.count())]
+        want = sorted(keys)
+        if current != want:
+            self.route_combo.blockSignals(True)
+            self.route_combo.clear()
+            for k in want:
+                self.route_combo.addItem(k)
+            self.route_combo.blockSignals(False)
+        i = self.route_combo.findText(self.model.kind)
+        if i >= 0 and self.route_combo.currentIndex() != i:
+            self.route_combo.blockSignals(True)
+            self.route_combo.setCurrentIndex(i)
+            self.route_combo.blockSignals(False)
+
+    def _on_route_combo(self, index: int) -> None:
+        self.switch_route(str(self.route_combo.itemText(int(index))))
+
+    def switch_route(self, key: str) -> bool:
+        """切到另一條 route 編輯（畫布跟著換）。
+
+        做法是「收回去再拿出來」（`to_recipe` → `from_recipe`）—— 正在編的
+        改動全部保住（`to_recipe` 會把其他 route 原樣合併回去）。代價是
+        **undo 堆疊重來**：復原是編輯這一條 route 的歷史，切走再切回來是
+        兩段不同的編輯。
+        """
+        key = str(key)
+        if key == self.model.kind or key not in self.model.route_keys():
+            return False
+        dirty = self.model.dirty
+        m = RecipeModel.from_recipe(self.model.to_recipe(), kind=key)
+        m.dirty = dirty
+        self._apply_model(m)
+        self._status("Route: %s" % key)
+        return True
+
+    def _fill_route_fields(self) -> None:
+        """`route_by` 的那一欄要進每一顆的 `fields`（預覽逐顆解 route 要讀它）。
+
+        跟 `run_batch` 同一套規矩：只在有顆缺這一欄時動手，補「現有欄位 ∪
+        這一欄」（`fill_fields` 是整份換掉，只補一欄會洗掉 carry 進來的）。
+        欄位不存在時**在這裡就講**（手上有 KlarfDoc，答得出它有哪些欄）。
+        """
+        rb = getattr(self.model, "route_by", None)
+        if rb is None or self.dataset is None:
+            return
+        from d4t.core.ingest.dataset import (
+            columns_of, fill_fields, missing_columns_of,
+        )
+
+        if getattr(self.dataset, "klarf", None) is None:
+            self._status("route_by needs KLARF columns, and this data has "
+                         "no KLARF - every defect will fail to route.",
+                         "error")
+            return
+        absent = missing_columns_of(self.dataset, [rb.column])
+        if absent:
+            self._status("route_by points at a column this KLARF does not "
+                         "have: %s. It has: %s"
+                         % (", ".join(absent),
+                            ", ".join(columns_of(self.dataset))), "error")
+            return
+        col = str(rb.column).strip().upper()
+        items = list(getattr(self.dataset, "items", []) or [])
+        if any(col not in (getattr(it, "fields", None) or {})
+               for it in items):
+            have: set = set()
+            for it in items:
+                have.update((getattr(it, "fields", None) or {}).keys())
+            fill_fields(self.dataset, sorted(have | {col}))
+
+    def _follow_defect_route(self) -> None:
+        """預覽跟著這一顆走（F23 §6-2）：看 defect 12 時，畫布自動切到它真正
+        走的 route —— 不做這個就是 F10 那批「畫布說謊」的重演。"""
+        rb = getattr(self.model, "route_by", None)
+        if rb is None or self.dataset is None:
+            return
+        item = self._current_item()
+        if item is None:
+            return
+        from d4t.core.pipeline import resolve_route
+
+        self._fill_route_fields()
+        route, _value, _how = resolve_route(self.model, item,
+                                            str(self.dataset.kind))
+        if route and route != self.model.kind \
+                and route in self.model.route_keys():
+            self.switch_route(route)
+
     def _on_tree_step_clicked(self, path: str) -> None:
         """畫布上點了判定樹的一步／一類（F24 ③），或面板要求跳到另一步。
 
@@ -3165,6 +3292,12 @@ class StudioWindow(QMainWindow):
         # 留在這一份的每一顆上，跑得完、有數字、而且是別人的。
         self._carry_filled = None
         self._carry_main_columns()
+        # 分流（F23 期2）：編輯區塊的欄位下拉要吃這一份的欄名；route_by 的
+        # 那一欄也趁現在填進每一顆（換一份資料＝值全變了，同 carry 的理由）。
+        from d4t.core.ingest.dataset import columns_of as _cols
+
+        self.route_box.set_columns(_cols(dataset))
+        self._fill_route_fields()
         # 入口卡上要印出**現在載的是哪一份**（F14-1）。名字在請求的那一刻就
         # 知道了，但要等載成功才採用 —— 開錯一個檔不會讓卡片上的名字先變。
         self.dataset_name = str(getattr(self, "_pending_dataset_name", "") or "")
@@ -3315,10 +3448,23 @@ class StudioWindow(QMainWindow):
         # 同一個教訓在 ground truth 那一輪就學過了（見 `_on_dataset_loaded`）。
         # 掛在資料集標籤上：它就在使用者眼前，而且它講的正是「你現在手上是什麼資料」。
         no_klarf = getattr(self.dataset, "klarf", None) is None
+        # 分流（F23 期2）：這一顆的欄位值與它真正走的 route **常駐在標籤上**
+        # —— 畫布自動切了 route，這一行就是「為什麼畫布剛剛跳了」的答案。
+        route_bit = ""
+        rb = getattr(self.model, "route_by", None)
+        if rb is not None and 0 <= i < len(items):
+            from d4t.core.pipeline import resolve_route
+
+            route, value, _how = resolve_route(self.model, items[i],
+                                               str(self.dataset.kind))
+            route_bit = " · %s=%s → %s" % (
+                rb.column, value or "?",
+                ("route “%s”" % route) if route else "no route (fails)")
         self.defect_label.setText(
-            "%s · defect %d / %d%s" % (getattr(self.dataset, "kind", "?"),
-                                       i + 1, len(items),
-                                       " · no KLARF" if no_klarf else ""))
+            "%s · defect %d / %d%s%s" % (getattr(self.dataset, "kind", "?"),
+                                         i + 1, len(items),
+                                         " · no KLARF" if no_klarf else "",
+                                         route_bit))
         self.defect_label.setToolTip(
             no_klarf_message(getattr(self.dataset, "kind", ""))
             if no_klarf else "")
@@ -3337,6 +3483,9 @@ class StudioWindow(QMainWindow):
                 self.defect_combo.setCurrentIndex(i)
         finally:
             self._syncing = False
+        # 分流：先跟著這一顆切 route（切了會整個 _refresh_all），標籤才會寫出
+        # 它真正走的那一條。
+        self._follow_defect_route()
         self._update_defect_label()
         self._schedule_preview()
         return True
@@ -3376,7 +3525,10 @@ class StudioWindow(QMainWindow):
         else:
             self._status("Loaded recipe “%s” (%d steps, route %s)"
                          % (self.model.recipe_id, n, self.model.kind))
-        if ds_kind and ds_kind not in recipe.routes:
+        # route_by 存在時 route 鍵是任意字串、覆蓋 kind 選路（F23 §4.2）——
+        # 「沒有這個 kind 的 route」對它不是問題，別嚇人。
+        if ds_kind and ds_kind not in recipe.routes \
+                and getattr(recipe, "route_by", None) is None:
             self._status("Loaded recipe “%s”, but it has no '%s' route — "
                          "preview and trial runs will fail."
                          % (self.model.recipe_id, ds_kind))
@@ -3392,6 +3544,9 @@ class StudioWindow(QMainWindow):
         # 上唯一的線索是「那一格的數字沒跟著載進來的 recipe 動」。
         self.decide_panel.set_model(model)
         self.tree_pane.set_model(model)   # 同一個理由：它也直接寫 model
+        self.route_box.set_model(model)   # 同上（F23 期2）
+        self._refresh_route_switcher()
+        self._fill_route_fields()
         self.selected_node = None
         self._user_stream = None
         for view in self._canvases():
@@ -3449,9 +3604,17 @@ class StudioWindow(QMainWindow):
 
         recipe = self.model.to_recipe()
         upto = self.selected_node if self.selected_node in self.model.nodes else None
+        # 分流（F23 期2）：`kind` 是**資料的身分**（load 卡讀
+        # `meta["_dataset_kind"]`），route 由 `run_defect` 逐顆自己解。
+        # route_by 存在時 model.kind 是一個 route 鍵（"particle_route"），
+        # 把它當 kind 傳會讓 load 卡把資料認成不存在的型別。
+        kind = self.model.kind
+        if getattr(self.model, "route_by", None) is not None \
+                and self.dataset is not None:
+            kind = str(getattr(self.dataset, "kind", "") or kind)
         if sync:
             try:
-                result = PreviewWorker.run_sync(recipe, item, self.model.kind,
+                result = PreviewWorker.run_sync(recipe, item, kind,
                                                 upto_node=upto,
                                                 sources=self.sources_for_run())
             except Exception as e:      # noqa: BLE001 — UI 邊界
@@ -3460,7 +3623,7 @@ class StudioWindow(QMainWindow):
             self._on_preview_ready(result)
             return True
         self._async_epoch = self._preview_epoch
-        self.preview_worker.request(recipe, item, self.model.kind,
+        self.preview_worker.request(recipe, item, kind,
                                     upto_node=upto,
                                     sources=self.sources_for_run())
         return True

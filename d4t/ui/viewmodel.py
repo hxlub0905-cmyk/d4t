@@ -15,7 +15,8 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from dataclasses import replace
 
 from d4t.core.pipeline import (
-    Edge, ParamError, Recipe, RecipeNode, ScoreSpec, get_step, validate,
+    Edge, ParamError, Recipe, RecipeNode, RouteBy, ScoreSpec, get_step,
+    validate,
 )
 from d4t.core.pipeline.recipe import (DecideSpec, Let, Rule, TreeLeaf,
                                       TreeStep, _tree_from_json, _tree_to_json,
@@ -77,6 +78,16 @@ class RecipeModel:
         #: 那條二元的老路。兩者**不能並存**（`validate` 的 `ambiguous-decision`），
         #: 所以切換是「換一種」而不是「多一種」—— 見 :meth:`use_decide`。
         self.decide: Optional[DecideSpec] = None
+        #: 分流（F23 期2）。``None`` = 照舊用 kind 選路。編輯器在判定欄上方。
+        self.route_by: Optional[RouteBy] = None
+        #: **這個 model 一次只編一條 route**（F23 §6 第一期不動的那條），
+        #: 其他 route 的排列／專屬節點／線原樣抱著 —— `to_recipe` 時合併回去。
+        #: 少了這三份，載入一份分流 recipe 再試跑，**其他 route 會安靜地消失**
+        #: （`to_recipe` 只寫得出正在編的那一條），而分流跑起來每一顆走不到的
+        #: route 都是一句 unknown-route 的失敗。
+        self._other_routes: Dict[str, List[str]] = {}
+        self._other_nodes: Dict[str, RecipeNode] = {}
+        self._other_edges: List[Edge] = []
         self.bins = {"below": 0, "above": 1}
         self.dirty = False
         self._listeners: List[Callable[[], None]] = []
@@ -161,6 +172,16 @@ class RecipeModel:
             "expr": self.expr, "threshold": self.threshold,
             "decide": None if self.decide is None else _decide_snapshot(self.decide),
             "bins": dict(self.bins),
+            # 分流（F23 期2）。**其他 route 也要進快照** —— 少了的話 undo 一步
+            # 會把「載入時抱著的另一條 route」安靜地丟掉。
+            "route_by": None if self.route_by is None else
+                (self.route_by.column, dict(self.route_by.map),
+                 self.route_by.default),
+            "other_routes": {k: list(v)
+                             for k, v in self._other_routes.items()},
+            "other_nodes": {nid: (n.step, dict(n.params), bool(n.enabled))
+                            for nid, n in self._other_nodes.items()},
+            "other_edges": list(self._other_edges),
         }
 
     def restore(self, snap: Dict[str, Any]) -> None:
@@ -178,6 +199,17 @@ class RecipeModel:
         self.expr = snap["expr"]
         self.threshold = snap["threshold"]
         self.decide = _decide_restore(snap.get("decide"))
+        rb = snap.get("route_by")
+        self.route_by = None if rb is None else RouteBy(
+            column=str(rb[0]), map=dict(rb[1]), default=str(rb[2]))
+        self._other_routes = {k: list(v)
+                              for k, v in (snap.get("other_routes") or {}).items()}
+        self._other_nodes = {
+            nid: RecipeNode(id=nid, step=step, params=dict(params),
+                            enabled=enabled)
+            for nid, (step, params, enabled)
+            in (snap.get("other_nodes") or {}).items()}
+        self._other_edges = list(snap.get("other_edges") or [])
         self.bins = dict(snap["bins"])
 
     @contextmanager
@@ -1019,16 +1051,26 @@ class RecipeModel:
 
     # ---- Recipe 互轉 -------------------------------------------------------
     def to_recipe(self) -> Recipe:
+        # 其他 route 原樣寫回去（F23 期2）。**正在編的這一條贏**：兩條 route
+        # 共用的節點（load）以編輯中的版本為準 —— 使用者改的就是它。
+        routes = {k: list(v) for k, v in self._other_routes.items()}
+        routes[self.kind] = list(self.node_order)
+        nodes = {nid: RecipeNode(id=nid, step=n.step, params=dict(n.params),
+                                 enabled=n.enabled)
+                 for nid, n in self._other_nodes.items()}
+        nodes.update({nid: RecipeNode(id=nid, step=n.step,
+                                      params=dict(n.params), enabled=n.enabled)
+                      for nid, n in self.nodes.items()})
         return Recipe(
             recipe_id=self.recipe_id,
-            routes={self.kind: list(self.node_order)},
-            edges=list(self.edges),
-            nodes={nid: RecipeNode(id=nid, step=n.step, params=dict(n.params),
-                                   enabled=n.enabled)
-                   for nid, n in self.nodes.items()},
+            routes=routes,
+            edges=list(self.edges) + [e for e in self._other_edges
+                                      if e not in self.edges],
+            nodes=nodes,
             score=ScoreSpec(expr=self.expr, threshold=self.threshold,
                             bins=dict(self.bins)),
             decide=self.decide,
+            route_by=self.route_by,
             version=self.version, author=self.author, description=self.description,
         )
 
@@ -1052,10 +1094,47 @@ class RecipeModel:
         m.expr = recipe.score.expr
         m.threshold = float(recipe.score.threshold)
         m.decide = getattr(recipe, "decide", None)
+        # 分流與**沒在編的那幾條 route**（F23 期2）：原樣抱著，`to_recipe`
+        # 合併回去。共用的節點在 `m.nodes`（上面那行收了），這裡只留其他
+        # route 專屬的。
+        m.route_by = getattr(recipe, "route_by", None)
+        m._other_routes = {rk: list(v) for rk, v in recipe.routes.items()
+                           if rk != k}
+        m._other_nodes = {nid: RecipeNode(id=nid, step=n.step,
+                                          params=dict(n.params),
+                                          enabled=n.enabled)
+                          for nid, n in recipe.nodes.items()
+                          if nid not in in_route}
+        m._other_edges = [e for e in (recipe.edges or [])
+                          if not (e.src in in_route and e.dst in in_route)]
         m.bins = dict(recipe.score.bins)
         m.dirty = False
         m.clear_history()
         return m
+
+    # ---- 分流（F23 期2）----------------------------------------------------
+    def route_keys(self) -> List[str]:
+        """這份 recipe 所有的 route 鍵（正在編的排最前面）。"""
+        return [self.kind] + sorted(self._other_routes)
+
+    def set_route_by(self, column: str, mapping: Dict[str, str],
+                     default: str = "") -> None:
+        """整包換掉 ``route_by``（編輯器一格一格改，最後長的就是這一包）。"""
+        new = RouteBy(column=str(column).strip().upper(),
+                      map={str(k).strip(): str(v) for k, v in mapping.items()},
+                      default=str(default))
+        if new == self.route_by:
+            return
+        self._push_undo()
+        self.route_by = new
+        self._changed()
+
+    def clear_route_by(self) -> None:
+        if self.route_by is None:
+            return
+        self._push_undo()
+        self.route_by = None
+        self._changed()
 
     def validate(self):
         return validate(self.to_recipe(), kind=self.kind)

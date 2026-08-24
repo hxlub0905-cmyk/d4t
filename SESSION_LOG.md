@@ -19,6 +19,40 @@
 
 ---
 
+## F23 期2：分流的 UI（2026-08-24）
+
+§6 的三件照計畫落地，外加一件計畫書沒點名但**不做就全錯**的：
+
+* **model 抱得住整份分流 recipe**。`RecipeModel` 仍然一次編一條 route
+  （§6 第一期不動的那條），但 `from_recipe` 把其他 route 的排列／專屬節點／
+  線與 `route_by` 原樣收著，`to_recipe` 合併回去（共用節點以正在編的版本
+  為準）；快照／undo 也帶著。少了這個，載入分流 recipe 再試跑，**其他
+  route 會安靜地消失**（舊 `to_recipe` 只寫得出正在編的那一條）。
+  round-trip 對 `to_json_dict` 是 identity（測試釘住）。
+* **route 切換器**（工具列 `Route [b_route ▾]`，單 route 收起來）：切＝
+  「收回去再拿出來」（`to_recipe → from_recipe`），畫布整個跟著換；
+  代價是 undo 堆疊重來（兩段不同的編輯歷史）。
+* **預覽跟著這一顆走**（§6-2）：`set_defect_index` 逐顆
+  `resolve_route`（跟引擎同一支），走的 route 跟畫布不同就自動切；
+  資料集標籤**常駐**寫出 `CLASSNUMBER=2 → route "b_route"` ——
+  畫布剛剛為什麼跳，答案就在眼前。route_by 的欄位在載資料／載 recipe 時
+  自動補進 `fields`（同 `run_batch` 的規矩：缺才補、補「現有 ∪ 這一欄」）。
+* **`RouteByBox` 編輯區塊**（`ui/route_panel.py`，判定欄**上方** ——
+  它在跑之前決定，判定在跑完之後，由上往下正好是時間順序）：欄位下拉吃
+  這份 KLARF 的欄名、值→route 對照表、「Everything else →」含
+  `(fail that defect)`（default 留空＝失敗，站點政策的另一半）。
+  整包寫回 `model.set_route_by`（一次改動一步 undo）。
+* 預覽的 `kind` 修正：route_by 存在時 model.kind 是 route 鍵
+  （"particle_route"），把它當 kind 傳給 `run_defect` 會讓 load 卡把資料
+  認成不存在的型別 —— 預覽改傳 `dataset.kind`（kind 是資料的身分，route
+  由引擎逐顆解）。`load_recipe_path` 那句「no '%s' route」的警告對分流
+  recipe 不再誤報。
+* 測試：`tests/test_ui_route_by.py`（11 條：round-trip identity、改 A 路
+  不動 B 路、undo 不丟另一條、切 route 無損、預覽自動切＋標籤、編輯區塊
+  讀寫、toggle 清掉可 undo）。截圖：`f23_route_ui.png`。
+
+---
+
 ## F24 ③④：判定樹的編輯互動＋幽靈線（2026-08-24）
 
 * **點菱形／托盤 → 右欄變成那一步的編輯面板**（`ui/tree_panel.py`，跟點卡片

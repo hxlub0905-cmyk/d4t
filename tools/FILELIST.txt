@@ -5,7 +5,7 @@ f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 ac0c96cd0d671a439c492b72fae0379d364aeb62 AGENTS.md
 b404ab73fd00a46fa43d83d173fe5d973f01bfd7 CLAUDE.md
 b20e9b7f31aa8195e297b4a124b69252cd4c56cf README.md
-b31eec4992f71726142a89e5df2f4f386ff20359 SESSION_LOG.md
+65d761513d156733c9c1e3ecf6315b5417e587b5 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 006dfca218aa672b81ccddb1860dbeec06e0c8bb d4t/__main__.py
@@ -91,13 +91,14 @@ c151d427df3d43b5fbdd7c5c6d10744bd90c2f5c d4t/ui/canvas.py
 bb477b853cd1454a08774a2a2405c5f8294c0055 d4t/ui/inspectors.py
 68e6ac894866da63ca055b9082523ffb89656702 d4t/ui/region_check.py
 cc73ee4493625b81df5d6d9eec7c12128d0eda12 d4t/ui/results.py
+8621116b74cde38262252ec00246591a20cb4f17 d4t/ui/route_panel.py
 221a34a4f458d4b7be5212b06c4123363d614f80 d4t/ui/scope.py
-595bbc7f6b4c8a03b7e80daefb82d4a93da6f4d5 d4t/ui/studio.py
+59f34f35ccfc39b12edb0cc8f9d8b87a15ac2461 d4t/ui/studio.py
 b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 b24576feb08cf1517b18a0d0a04f302fcb9ea840 d4t/ui/theme.py
 15e940c10c0a0fcecbd0d9a2503218b98807aa40 d4t/ui/tree_panel.py
 eb7ca111fa85e056f73109d2c7448644b75db193 d4t/ui/tree_scene.py
-68239e230f9a993ca37325aa3ee784252220c2dc d4t/ui/viewmodel.py
+a47cec48e990f15cd32231981781f5c8e8a0a807 d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
 e6e33ac842d0ab50246d992de2f536d9b6afc21d d4t/ui/widgets.py
 2eb7813f6dbd6c7d0beff0496ed0d1e6dc87d484 d4t/ui/workers.py
@@ -116,7 +117,7 @@ c4f06765ad918545511da042eb8d2b63df19795f docs/plans/F15-pair-sources.md
 a5b31733923c0c3a3f54782a7720c76fdbbafc38 docs/plans/F20-pick-defect-box.md
 580aa51df6c26db9beb45cf3d3926f4eb33724c9 docs/plans/F21-algo-and-roi.md
 ac99957a7da2f9b9d766ac442082131be4b8d7db docs/plans/F22-adc-multiclass.md
-9510f42503965d0993f40bcd00c2405748c48283 docs/plans/F23-route-by.md
+1e89d4aaff9bf0e3a46177f0cf343c4097294a90 docs/plans/F23-route-by.md
 f8fb1f29b8e8f1069bb7221a0159860e2f288dcc docs/plans/F24-decision-tree.md
 773d4c5652e1abd95b7bf06591a691c07c1c9fa1 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
@@ -261,6 +262,7 @@ f480eedce6d10f8e192050bdbe65d03676911df0 tests/test_ui_ground_truth.py
 773d0ddbacf6fa7eacff323cd7123c4accec6905 tests/test_ui_input_kinds.py
 ff499f86917330d5fd1ec0c7e971dd2db0a0506e tests/test_ui_region_edges.py
 ffaf2b51fd05ba67c769cd6145cc7678e7fa7201 tests/test_ui_results.py
+178ad947cbe03ae16ca494523710cc9f23287a24 tests/test_ui_route_by.py
 aac33a171461716ba66c0897a7ecb7c2b9b5526b tests/test_ui_studio_m5.py
 6236300c6b88aca9b098faeb26e1c8d5491dfdfc tests/test_ui_studio_smoke.py
 c7caa8c05dcf2c3b64ef12ba36478b7767da1e2e tests/test_ui_tree_canvas.py
