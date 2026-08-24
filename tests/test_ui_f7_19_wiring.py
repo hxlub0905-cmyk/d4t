@@ -474,7 +474,7 @@ def test_the_toolbar_is_grouped_not_one_long_row(window):
     assert window.btn_trial.parent() is window.trial_group
     assert window.btn_trial_more.parent() is window.trial_group
     # Help 與主題被移到右邊（在撐開的空白之後），不再混在檔案操作裡
-    assert index_of(window.btn_help) > index_of(window.btn_run_all)
+    assert index_of(window.btn_help) > index_of(window.btn_open_recipe)
     assert index_of(window.btn_help) > index_of(window.btn_undo)
 
 

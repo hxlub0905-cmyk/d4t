@@ -30,7 +30,8 @@
    → :class:`ThumbWorker`（背景執行緒讀檔 + :func:`~d4t.ui.gallery.make_thumb`）
    → ``ready(dict)`` → ``set_thumbs``。**解碼絕不在 GUI 執行緒**，而且忙碌時
    新的請求會合併進待跑集合（``request`` 只累積、不排隊、不阻塞）。
-5. **輸出流**（M5 → F16 Stage 5c 改寫）：工具列「Run all & write」→
+5. **輸出流**（M5 → F16 Stage 5c 改寫）：`Run trial ▾` 選單裡的
+   「Run all & write」（以及 Results 視窗上同名的那顆）→
    :meth:`StudioWindow.run_all` → 跑完整批之後把 **Output 段的卡**跑一次
    （:class:`~d4t.ui.workers.OutputWorker`）。**Output 卡是真相**（使用者
    2026-08-20 定調），輸出精靈已經拿掉 —— 寫去哪、寫什麼，全部在畫布上的
@@ -584,7 +585,10 @@ class StudioWindow(QMainWindow):
           用的人是行話。現在只留一個入口，範本庫自己把 die-to-die 排第一。
         * **「全跑」收進「Run trial」的下拉** —— 兩顆長得一樣的 ▶ 鈕擺在一起，
           新手分不出差別也不知道該按哪顆。主要動作只留一顆，破壞性比較大的
-          「跑整批」降級成選單項目。
+          「跑整批」降級成選單項目。⚠ 這一條後來被 F16 Stage 5c 悄悄破壞了
+          （「Export…」空出來的那一格改成整批入口，於是同一支 `run_all()`
+          在工具列上有兩顆鈕）—— 2026-08-24 使用者指出來之後拿掉那一顆，
+          這條規矩恢復成唯一的答案。
 
         分組（F7-22）
         -------------
@@ -632,20 +636,16 @@ class StudioWindow(QMainWindow):
         # **建出來再藏**，不是不建：版面量測、``_update_action_states``、既有測試
         # 都還指得到它，回復只要改 ``scope.SHOW_SAMPLE_ENTRIES``。
         self.btn_examples.setVisible(bool(scope.SHOW_SAMPLE_ENTRIES))
-        self.btn_run_all = self._tool_button(
-            "Run all & write",
-            "Run every defect, then write whatever the Output cards say",
-            self.run_all, icon="export")
-        # 這是這條流程的**終點**，也是「跑完之後要做的那件事」—— 它跟旁邊
-        # 那幾顆檔案操作不同級。所以給它 accent 的外框（不是填滿，填滿的是
-        # Run trial）。這不是裝飾：工具列上唯一有顏色的兩顆，正好是使用者
-        # 真正要按的那兩顆。
+        # ⚠ **這裡以前還有一顆「Run all & write」**，而它跟 `Run trial ▾` 選單
+        # 裡的「跑整批」是**同一支函式**（兩邊都是 `run_all()`，一個位元的
+        # 差別都沒有）。兩個決定各自都對，只是沒有互相看到：M7 把「全跑」收進
+        # 下拉（見這支的說明），而 F16 Stage 5c 把「Export…」空出來的那一格
+        # 改成整批入口。合起來就是同一個動作在工具列上有兩顆鈕。
         #
-        # 以前這一格是「Export…」，開一個跑完才打得開的輸出精靈。精靈拿掉之後
-        # （F16 Stage 5c）這一格改成整批入口 —— **同一個位子、同一件事**：
-        # 「把結果寫出去」。差別是寫什麼、寫去哪現在看得見（畫布上的 Output
-        # 卡），而不是藏在對話框裡。
-        self.btn_run_all.setProperty("variant", "secondary")
+        # 使用者 2026-08-24：「若沒差或差不多 請留一個即可（傾向 trial）」。
+        # 留下的是下拉裡那一項 —— 而**「跑完之後要做的那件事」搬到它真的會
+        # 發生的地方**：Results 視窗（使用者正在看試跑結果，下一步才是整批）。
+        # 工具列因此只剩一顆有顏色的鈕，而那正是這個畫面唯一的主要動作。
         self.btn_undo = self._tool_button(
             "", "Undo the last change", self.undo, icon="undo")
         self.btn_redo = self._tool_button(
@@ -667,12 +667,32 @@ class StudioWindow(QMainWindow):
         self.btn_theme.setProperty("variant", "ghost")
 
         # 一段 = 一種事情；段與段之間一條分隔線。
+        #
+        # ⚠ **整段都看不見的時候不要放那條分隔線。** 「Templates…」平常是藏著的
+        # （`scope.SHOW_SAMPLE_ENTRIES`），而它那一段以前還有「Run all & write」
+        # 撐著；那顆鈕 2026-08-24 拿掉之後，那一段變成空的 —— 工具列上因此出現
+        # 兩條連在一起的分隔線，中間夾著什麼都沒有。分隔線講的是「這裡換一種
+        # 事情」，而一條隔開空氣的線只是雜訊。
         for group in ((self.btn_open_recipe,),
-                      (self.btn_examples, self.btn_run_all),
+                      (self.btn_examples,),
                       (self.btn_undo, self.btn_redo)):
+            # ⚠ **鈕還是要 addWidget**（藏著的也要）：建了卻沒加進工具列的
+            # widget 會以工具列為 parent 疊在左上角
+            # （`test_every_button_built_for_the_toolbar_is_actually_on_it`
+            # 在第一版就抓到了）。跳過的只有那條**分隔線**。
+            #
+            # ⚠ 而「這一段看不看得見」**要在 addWidget 之前問**，用的也不是
+            # `isHidden()`：`addWidget` 會把 widget 包進一個 QWidgetAction，
+            # 而 Qt 在工具列真的顯示出來以前把它們**全部**藏著 —— 那時候
+            # 每一顆都答 hidden，於是一條分隔線都不會加。要問的是「**我們**
+            # 有沒有明講要藏它」（`setVisible(False)` 留下的那兩個屬性）。
+            visible = [b for b in group
+                       if not (b.testAttribute(Qt.WA_WState_ExplicitShowHide)
+                               and b.testAttribute(Qt.WA_WState_Hidden))]
             for b in group:
                 bar.addWidget(b)
-            bar.addSeparator()
+            if visible:
+                bar.addSeparator()
 
         # 分流的 route 切換器（F23 期2）：`RecipeModel` 一次編一條 route
         # （§6 第一期不動的那條），切換是「換一條來編」—— 畫布跟著換。
@@ -718,8 +738,16 @@ class StudioWindow(QMainWindow):
             self._on_trial_clicked, primary=True, icon="play")
         # 「跑整批」是同一顆鈕的次要動作：點主體 = 試跑，點箭頭才看得到它。
         menu = QMenu(self.btn_trial)
-        self.act_run_all = QAction("Run all defects", menu)
-        self.act_run_all.setToolTip("Run the whole dataset, not just the first N")
+        # ⚠ ``&&`` 不是筆誤：Qt 把單一個 ``&`` 當成助憶鍵的記號吃掉，畫出來
+        # 是 **``Run all _write``**（使用者就是這樣叫它的）。要顯示一個真的
+        # ``&`` 就得寫兩個。
+        #
+        # 名字跟 Results 視窗那顆**逐字相同** —— 同一個動作在兩個地方叫兩個
+        # 名字，正是上面那兩顆鈕變成兩顆的第一步。
+        self.act_run_all = QAction("Run all && write", menu)
+        self.act_run_all.setToolTip(
+            "Run every defect, not just the first N - then write whatever "
+            "the Output cards say")
         self.act_run_all.triggered.connect(self._on_full_clicked)
         menu.addAction(self.act_run_all)
         self.trial_menu = menu
@@ -1532,7 +1560,8 @@ class StudioWindow(QMainWindow):
                       run_why or "More ways to run — including the whole dataset")
         self.act_run_all.setEnabled(can_run)
         self.act_run_all.setToolTip(
-            run_why or "Run all %d defects, not just the first %d"
+            run_why or "Run all %d defects, not just the first %d - then "
+                       "write whatever the Output cards say"
                        % (n_items, int(self.spin_trial_n.value())))
         self.spin_trial_n.setEnabled(can_run)
         self.lbl_trial_n.setEnabled(can_run)
@@ -1548,13 +1577,6 @@ class StudioWindow(QMainWindow):
                       "Redo the change you just undid" if self.model.can_redo()
                       else "Nothing to redo.")
 
-        # 「Run all & write」跟 Run trial 是**同一個前提**（有資料、流程跑得動）
-        # —— 它不需要先有結果。以前這一格是輸出精靈，那時候「先跑一次才會亮」
-        # 是對的；現在它自己就是那一次跑。
-        self.btn_run_all.setEnabled(can_run)
-        self._set_tip(self.btn_run_all,
-                      run_why or "Run all %d defects, then write whatever the "
-                                 "Output cards say" % n_items)
 
     def _card_summary_parts(self, node: Any, reads, writes, regions_out,
                             region_inputs) -> List[str]:

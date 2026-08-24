@@ -19,6 +19,58 @@
 
 ---
 
+## 同一個動作，工具列上兩顆鈕（2026-08-24）
+
+使用者：「UI 上有兩個相同功能的鍵 Run all _write 跟 Run trial (run all) 差別在哪
+若沒差或差不多 請留一個即可（傾向 trial）」。
+
+**沒差。** 工具列的 `btn_run_all` 與 `Run trial ▾` 選單裡的 `act_run_all`
+兩邊都是 `StudioWindow.run_all()`，一個位元的差別都沒有。兩個決定各自都對，
+只是沒有互相看到：
+
+* **M7** 把「全跑」收進 `Run trial` 的下拉（理由寫在 `_build_toolbar` 的
+  docstring 裡：「兩顆長得一樣的 ▶ 鈕擺在一起，新手分不出差別」）；
+* **F16 Stage 5c** 把「Export…」精靈拿掉，空出來的那一格改成整批入口。
+
+拿掉工具列那一顆。留下的是下拉裡那一項 —— 而「跑完之後要做的那件事」搬到它
+真的會發生的地方：**Results 視窗**（使用者正在看試跑結果，下一步才是整批）。
+工具列因此只剩一顆有顏色的鈕，而那正是這個畫面唯一的主要動作。
+
+### 順手抓到的：`&` 被 Qt 吃掉
+
+使用者叫它「Run all **_write**」—— 那個名字不是打錯，是**畫面上真的長那樣**。
+Qt 把單一個 `&` 當成助憶鍵的記號吃掉，於是 `"Run all & write"` 畫出來少一個
+`&`、多一條底線。全 repo 有三處中招（`results.py`、`widgets.py` 兩個
+`template & regions`），另外三處看起來像但**不是**（視窗標題、`drawText`、
+tooltip 都不做助憶鍵處理 —— 那裡寫 `&&` 反而會畫出兩個 `&`）。
+
+所以尺是兩把：一把在**執行期**掃主視窗與 Results 視窗上每一顆鈕與選單項，
+一把掃原始碼但**只認會被當成標籤畫出來的呼叫**（白名單，不是黑名單 ——
+同一個 `&` 在別的地方是對的）。
+
+### 自己種的兩個坑
+
+* **空的那一段還留著分隔線**：`Templates…` 平常是藏著的，而它那一段本來靠
+  `Run all & write` 撐著 —— 那顆走了之後工具列上出現兩條連在一起的線。
+* 修的第一版**把整段 `addWidget` 一起跳掉**了，於是 `Templates…` 建了卻沒進
+  工具列（會以工具列為 parent 疊在左上角）—— repo 既有的
+  `test_every_button_built_for_the_toolbar_is_actually_on_it` 當場抓到。
+* 第二版用 `isHidden()` 判斷「這一段看不看得見」，而 **`addWidget` 會把
+  widget 包進 QWidgetAction 並在工具列顯示之前把它們全部藏起來** ——
+  那時候每一顆都答 hidden，一條分隔線都不會加。要問的是「**我們**有沒有
+  明講要藏它」（`WA_WState_ExplicitShowHide` ＋ `WA_WState_Hidden`）。
+
+`isHidden()` / `isVisible()` 這一族在這兩輪裡總共騙過三次 —— 每一次的形狀
+都是**「量的東西跟畫出來的東西不是同一個」**。
+
+### 驗收
+
+`tests/test_ui_button_labels.py`（7 條，新）＋ 六個既有 UI 檔跟著改
+（`act_run_all` 取代 `btn_run_all`、選單那一項的名字、工具列的顏色分級）。
+core 全過、每一個 UI 檔逐一跑過。每一條迴歸測試都做過「把 bug 放回去 → 變紅」。
+
+---
+
 ## 判定面板：一個假問題，與六條草案（2026-08-24）
 
 使用者：「1. ADC Classifier 的 UI 介面 有辦法做得更好嗎（請從 UI/UX 方面提供

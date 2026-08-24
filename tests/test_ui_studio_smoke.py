@@ -361,12 +361,12 @@ def test_actions_are_disabled_until_their_preconditions_hold(qapp, synlot):
         assert win.btn_trial_more.isEnabled() is False
         assert win.act_run_all.isEnabled() is False
         assert win.spin_trial_n.isEnabled() is False
-        assert win.btn_run_all.isEnabled() is False
         # 兩件事都還沒做（沒有資料、畫布也是空的，F11 Enhance-4）——
         # tooltip 要把**兩件**都講出來，不是只講其中一件。
         assert "Load a KLARF and add at least one card" in win.btn_trial.toolTip()
-        for w in (win.btn_trial, win.btn_run_all):
+        for w in (win.btn_trial, win.btn_trial_more):
             assert w.toolTip().strip(), "變灰的按鈕一定要說明原因"
+        assert win.act_run_all.toolTip().strip(), "變灰的選單項也要說明原因"
 
         # 加一張卡進去 → 理由要換一句（缺的只剩資料）
         win.library.add_requested.emit("load_patch")
@@ -381,7 +381,7 @@ def test_actions_are_disabled_until_their_preconditions_hold(qapp, synlot):
         assert win.btn_trial.isEnabled() is False
         assert "pipeline is empty" in win.btn_trial.toolTip()
 
-        # 資料集 + 流程 → 兩顆都能按。「Run all & write」跟 Run trial 是**同一個
+        # 資料集 + 流程 → 都能按。「Run all & write」跟 Run trial 是**同一個
         # 前提** —— 它自己就是那一次跑，不必先有結果（F16 Stage 5c：以前這一格
         # 是輸出精靈，那時候「先跑一次才會亮」是對的）。
         assert win.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
@@ -389,11 +389,10 @@ def test_actions_are_disabled_until_their_preconditions_hold(qapp, synlot):
         assert win.btn_trial_more.isEnabled() is True
         assert win.act_run_all.isEnabled() is True
         assert win.spin_trial_n.isEnabled() is True
-        assert win.btn_run_all.isEnabled() is True
-        assert win.btn_run_all.toolTip().strip()
+        assert win.act_run_all.toolTip().strip()
 
         assert win.run_trial(8, workers=1, sync=True) is True
-        assert win.btn_run_all.isEnabled() is True
+        assert win.act_run_all.isEnabled() is True
     finally:
         win.close()
 
@@ -415,8 +414,13 @@ def test_run_all_lives_in_the_trial_button_menu(window):
     F7-23 第二輪把那顆 ``MenuButtonPopup`` 拆成兩顆真的按鈕（主體 + ▾）——
     **選單的擁有者換了，但這條測試問的事沒有換**：跑整批仍然只在下拉裡。
     箭頭改成一顆自己的按鈕的理由（QSS 修不了那半邊的外觀）見計畫書 §27.5。
+
+    2026-08-24 這條規矩被恢復成唯一的答案：工具列上那顆重複的
+    「Run all & write」拿掉了（同一支 `run_all()`），而選單這一項改成
+    **跟 Results 視窗上那顆逐字相同**的名字 —— 同一個動作在兩個地方叫兩個
+    名字，正是它一開始變成兩顆鈕的那一步。
     """
-    assert [a.text() for a in window.trial_menu.actions()] == ["Run all defects"]
+    assert [a.text() for a in window.trial_menu.actions()] == ["Run all && write"]
     # F7-23 第四輪把 ``▶`` 與 ``▾`` 換成自繪圖示（那兩個字元在廠內的 Windows
     # 上不保證有字型），所以問的是圖示的名字，不是那顆字。
     assert window.btn_trial.text() == "Run trial"

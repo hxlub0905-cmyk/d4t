@@ -347,20 +347,24 @@ def test_real_drag_still_commits_the_threshold(ran, qapp):
 # 5. 輸出動作
 # --------------------------------------------------------------------------- #
 def test_the_write_action_runs_the_whole_lot(qapp, synlot, tmp_path):
-    """工具列那一格從「Export…」變成「Run all & write」（F16 Stage 5c）。
+    """「跑整批然後照 Output 卡寫出去」這件事（M5 → F16 Stage 5c）。
 
     M5 的規則是「有結果才能輸出」，因為那時候那顆鈕開的是一個**吃結果**的
     對話框。現在它自己就是那一次跑 —— 所以前提跟 Run trial 一樣（有資料、
     流程跑得動），而**寫什麼、寫去哪**在畫布上的 Output 卡上。
+
+    ⚠ 入口是 `Run trial ▾` 選單裡那一項（`act_run_all`）與 Results 視窗上
+    同名的那顆。工具列上那顆重複的鈕 2026-08-24 拿掉了 —— 它跟選單那一項
+    是同一支 `run_all()`。
     """
     win = studio_mod.StudioWindow()
     try:
-        assert win.btn_run_all.isEnabled() is False      # 沒資料、畫布是空的
-        assert win.btn_run_all.toolTip().strip()
+        assert win.act_run_all.isEnabled() is False      # 沒資料、畫布是空的
+        assert win.act_run_all.toolTip().strip()
 
         assert win.load_dataset_path(synlot["klarf"], sync=True) is True
         assert win.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
-        assert win.btn_run_all.isEnabled() is True, "有資料、有流程就按得下去"
+        assert win.act_run_all.isEnabled() is True, "有資料、有流程就按得下去"
 
         # 加一張 Output 卡 → 按下去真的寫出東西
         out = tmp_path / "m5.csv"

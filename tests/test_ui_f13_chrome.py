@@ -104,15 +104,17 @@ def test_readable_on_keeps_the_hue_and_stops_as_soon_as_it_passes():
 # F13-2：三級，而且只有兩顆有顏色
 # --------------------------------------------------------------------------- #
 def test_the_toolbar_has_three_weights(window):
+    # ⚠ 「secondary」那一級**現在工具列上沒有成員**：唯一那顆
+    # （accent 外框的「Run all & write」）2026-08-24 拿掉了，因為它跟
+    # `Run trial ▾` 選單裡那一項是同一支 `run_all()`。這一級**沒有刪**
+    # —— QSS 還在，Results 視窗與其他地方用得到，而工具列上不該有第二個
+    # 主要動作。
     tiers = {
         "primary": [window.btn_trial, window.btn_trial_more],
-        "secondary": [window.btn_run_all],
         "ghost": [window.btn_undo, window.btn_redo, window.btn_theme],
     }
     for b in tiers["primary"]:
         assert b.objectName() == "primary"
-    for b in tiers["secondary"]:
-        assert b.property("variant") == "secondary"
     for b in tiers["ghost"]:
         assert b.property("variant") == "ghost"
         assert b.text() == "", \

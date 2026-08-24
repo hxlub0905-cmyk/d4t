@@ -3382,7 +3382,8 @@ class TemplateField(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(3)
 
-        self.button = QPushButton("Edit template & regions…", self)
+        # ``&&`` 見 `set_text`（Qt 會把單一個 ``&`` 當助憶鍵吃掉）。
+        self.button = QPushButton("Edit template && regions…", self)
         self.button.setProperty("variant", "secondary")
         self.button.setToolTip(
             "Measure the repeating cell from one full-size image, then draw "
@@ -3412,8 +3413,12 @@ class TemplateField(QWidget):
             "color:%s; font-size:11px;%s"
             % (TOKENS["text_hint"] if self.has_template() else TOKENS["danger_text"],
                "" if self.has_template() else " font-weight:600;"))
-        self.button.setText("Build template & regions…" if not self._value
-                            else "Edit template & regions…")
+        # ⚠ ``&&`` 不是筆誤：Qt 把單一個 ``&`` 當成助憶鍵的記號吃掉，畫出來
+        # 少一個 ``&`` 又多一條底線（``Build template _regions…``）。
+        # 同一個坑 2026-08-24 在「Run all & write」上被使用者指出來，
+        # `tests/test_ui_button_labels.py` 現在會掃出所有的。
+        self.button.setText("Build template && regions…" if not self._value
+                            else "Edit template && regions…")
 
     def has_template(self) -> bool:
         return bool(self._value.strip())

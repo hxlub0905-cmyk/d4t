@@ -93,7 +93,10 @@ class ResultsWindow(QMainWindow):
         # 輸出精靈；精靈拿掉之後（F16 Stage 5c）寫什麼、寫去哪住在畫布上的
         # Output 卡上，這顆鈕只負責「跑完整批然後照卡片寫」。
         self.btn_run_all = QToolButton(self)
-        self.btn_run_all.setText("Run all & write")
+        # ⚠ ``&&`` 不是筆誤：Qt 把單一個 ``&`` 當成助憶鍵的記號吃掉，畫出來
+        # 是 **``Run all _write``**（使用者就是這樣叫它的 —— 那個名字是從畫面上
+        # 讀來的，不是從程式碼）。要顯示一個真的 ``&`` 就得寫兩個。
+        self.btn_run_all.setText("Run all && write")
         self.btn_run_all.setToolButtonStyle(Qt.ToolButtonTextOnly)
         self.btn_run_all.setCursor(Qt.PointingHandCursor)
         self.btn_run_all.setObjectName("primary")
