@@ -115,6 +115,45 @@ def small_button(text: str, tip: str = "", parent: Optional[QWidget] = None,
     return b
 
 
+def clear_layout_parked(layout, graveyard: list) -> None:
+    """把 ``layout`` 裡的 widget 全部拿下來 —— **停放，不銷毀**（F25）。
+
+    為什麼不能直接 ``setParent(None)``
+    ---------------------------------
+    這幾個面板（判定、判定樹的一步、分流）是「改一格就整段重建」的：
+    使用者動了某一格 → 那一格的訊號寫進 model → model 的 listener 打回來
+    → 面板重建 → **舊的那一格就是正在發訊號的那一個**。
+
+    ``setParent(None)`` 之後 Python 就是它唯一的持有者，而 layout item 一丟
+    參考數歸零 → C++ 物件當場解構 —— 而 Qt 的訊號還在那個物件的堆疊上。
+    那是 use-after-free：跑得完的時候什麼事都沒有，跑不完的時候是**閃退**，
+    而且跟平台的事件流有關（offscreen 重現不出來，真機上「有機會」發生）。
+    使用者 2026-08-24 回報的正是這個形狀：「輸入 bin 有機會閃退」。
+
+    所以這裡只做兩件事：把它藏起來、把它從版面上拿掉，**參考留著**。
+    真正的解構排到下一輪 event loop（那時候訊號早就返回了）。
+
+    ``graveyard`` 是呼叫端持有的一個 list —— 停屍間必須活得比這一次事件久，
+    所以它不能是這支函式裡的區域變數。
+    """
+    from PySide6.QtCore import QTimer
+
+    while layout.count():
+        item = layout.takeAt(0)
+        w = item.widget()
+        if w is None:
+            sub = item.layout()
+            if sub is not None:
+                clear_layout_parked(sub, graveyard)
+            continue
+        w.hide()
+        w.setParent(None)
+        graveyard.append(w)
+    if graveyard:
+        # 排到下一輪：這一輪的訊號返回之後才真的釋放。
+        QTimer.singleShot(0, graveyard.clear)
+
+
 #: 按鈕上畫得出來的圖示（F7-23 第四輪）。名字是**這顆鈕在做什麼**，
 #: 不是它長什麼樣 —— 呼叫端說 ``"fit"``，不說「兩端帶箭頭的斜線」。
 GLYPH_ICONS = (

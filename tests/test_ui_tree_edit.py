@@ -169,18 +169,99 @@ def _texts(panel):
     return [w.text() for w in panel.findChildren(QLabel)]
 
 
-def test_the_panel_shows_question_and_both_sides(qapp):
+def test_the_panel_shows_the_question_as_three_pickers(qapp):
+    """F25：問題不再是一格要自己打的算式，是「哪個數字·比什麼·多少」。"""
+    from PySide6.QtWidgets import QComboBox, QDoubleSpinBox
+
     m = _model_with_tree()
     panel = TreePanel()
     panel.set_model(m)
     panel.show_path("")
-    edits = panel.findChildren(QLineEdit)
-    assert any(e.text() == "contrast > 100" for e in edits)
+    combos = panel.findChildren(QComboBox)
+    assert any(c.currentText() == "contrast" for c in combos), \
+        [c.currentText() for c in combos]
+    assert any(c.currentText() == "is greater than" for c in combos)
+    spins = panel.findChildren(QDoubleSpinBox)
+    assert any(s.value() == 100.0 for s in spins)
     texts = _texts(panel)
     assert any("Yes" in t for t in texts) and any("No" in t for t in texts)
     # yes 邊是葉子 → 名字可編；no 邊是另一步 → 一句摘要
-    assert any(e.text() == "big" for e in edits)
+    assert any(e.text() == "big" for e in panel.findChildren(QLineEdit))
     assert any("contrast > 30" in t for t in texts)
+
+
+def test_dragging_the_value_writes_the_model(qapp):
+    from PySide6.QtWidgets import QDoubleSpinBox
+
+    m = _model_with_tree()
+    panel = TreePanel()
+    panel.set_model(m)
+    panel.show_path("")
+    spin = next(s for s in panel.findChildren(QDoubleSpinBox)
+                if s.value() == 100.0)
+    spin.setValue(88.0)
+    assert m.tree_node("").when == "contrast > 88"
+
+
+def test_switching_the_comparison_writes_the_model(qapp):
+    from PySide6.QtWidgets import QComboBox
+
+    m = _model_with_tree()
+    panel = TreePanel()
+    panel.set_model(m)
+    panel.show_path("")
+    opbox = next(c for c in panel.findChildren(QComboBox)
+                 if c.currentText() == "is greater than")
+    i = opbox.findData("<=")
+    opbox.setCurrentIndex(i)
+    opbox.activated.emit(i)
+    assert m.tree_node("").when == "contrast <= 100"
+
+
+def test_a_compound_condition_falls_back_to_the_expression_box(qapp):
+    """複合條件拆不成三格 —— 誠實地給算式框，不要猜。"""
+    m = _model_with_tree()
+    m.set_tree_when("", "(contrast > 5) * (glv_mad < 2)")
+    panel = TreePanel()
+    panel.set_model(m)
+    panel.show_path("")
+    assert any(e.text() == "(contrast > 5) * (glv_mad < 2)"
+               for e in panel.findChildren(QLineEdit))
+
+
+def test_the_live_count_says_how_many_reach_here_and_say_yes(qapp):
+    """「一邊拖一邊看」的那一行 —— 沒跑過就一個數字都不畫（F18）。"""
+    m = _model_with_tree()
+    panel = TreePanel()
+    panel.set_model(m)
+    panel.show_path("")
+    assert not any("say yes" in t for t in _texts(panel))
+
+    rows = [{"defect_id": str(i), "ok": True, "bin": 0, "score": 0.0,
+             "features": {"contrast": float(v), "a": float(v) / 2}}
+            for i, v in enumerate((10.0, 50.0, 150.0, 300.0))]
+    panel.set_rows(rows)
+    panel.show_path("")
+    # contrast > 100 → 150 與 300 兩顆
+    assert any("2 of the 4 defects that reach here say yes" in t
+               for t in _texts(panel)), _texts(panel)
+
+
+def test_a_new_step_arrives_with_a_question_that_asks_something(qapp):
+    """F25：加一步不要丟一格空白給使用者 —— 挑這一批分得最開的數字。"""
+    m = _model_with_tree()
+    panel = TreePanel()
+    panel.set_model(m)
+    rows = [{"defect_id": str(i), "ok": True, "bin": 0, "score": 0.0,
+             "features": {"contrast": float(v), "flat": 1.0}}
+            for i, v in enumerate((1.0, 20.0, 60.0, 900.0))]
+    panel.set_rows(rows)
+    panel.show_path("y")
+    panel._split("y")                      # ＝ 按了 Split…
+    node = m.tree_node("y")
+    assert node.when, "新的一步是空白的 —— 使用者又被丟回原點"
+    assert node.when.startswith("contrast"), node.when
+    assert "flat" not in node.when         # 完全分不開的數字不會被挑中
 
 
 def test_no_batch_line_before_a_run(qapp):
@@ -200,17 +281,6 @@ def test_the_batch_line_reads_the_flow_counts(qapp):
     panel.show_path("")
     assert any("47 arrive here" in t and "11 yes" in t and "36 no" in t
                for t in _texts(panel))
-
-
-def test_editing_the_question_writes_the_model(qapp):
-    m = _model_with_tree()
-    panel = TreePanel()
-    panel.set_model(m)
-    panel.show_path("")
-    edit = next(e for e in panel.findChildren(QLineEdit)
-                if e.text() == "contrast > 100")
-    edit.textEdited.emit("contrast > 88")
-    assert m.tree_node("").when == "contrast > 88"
 
 
 def test_a_leaf_panel_edits_the_class(qapp):

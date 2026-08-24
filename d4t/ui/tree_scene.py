@@ -21,6 +21,7 @@
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -34,7 +35,151 @@ from .theme import TOKENS
 __all__ = [
     "decision_info", "display_tree", "layout_cells", "flow_counts",
     "leaf_stats", "leaf_hex", "build_zone", "build_ghosts", "path_text",
+    "parse_simple_condition", "format_condition", "rows_reaching",
+    "count_yes", "suggest_condition", "OPS",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# 導引式的問題（F25）：一個問題大部分時候就是「哪個數字 · 比什麼 · 多少」
+# --------------------------------------------------------------------------- #
+#: 比較運算子 → 給人看的話。**順序就是下拉的順序**（最常用的排前面）。
+#:
+#: 為什麼要這一層：`when` 是一個表達式，而目標使用者是不會寫 code 的製程
+#: 工程師（推廣鐵則）。`contrast > 120` 這種東西他讀得懂，但**要他從空白
+#: 打出來**就卡住了 —— 打錯一個字得到的是一條 `bad-rule`，而畫面上看起來
+#: 只是「這個工具不理我」。挑三格永遠打不錯。
+OPS = (
+    (">", "is greater than"),
+    ("<", "is less than"),
+    (">=", "is at least"),
+    ("<=", "is at most"),
+    ("==", "equals"),
+    ("!=", "is not"),
+)
+
+#: 一個「單純的比較」長什麼樣：一個數字的名字、一個運算子、一個數值。
+_SIMPLE_RE = re.compile(
+    r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(>=|<=|==|!=|>|<)\s*"
+    r"(-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*$")
+
+
+def parse_simple_condition(when: str):
+    """``"contrast > 120"`` → ``("contrast", ">", 120.0)``；不是單純比較回
+    ``None``（那時候編輯器退回「自己寫算式」那一格）。
+
+    刻意**只認最單純的那一種**：複合條件（``(a > 5) * (b < 2)``）用猜的去
+    拆成幾格，猜錯的那次會安靜地改掉使用者的判定 —— 而它跑得完、有數字。
+    認不得就誠實地說「這一條要用算式編輯」。
+    """
+    m = _SIMPLE_RE.match(str(when or ""))
+    if not m:
+        return None
+    return (m.group(1), m.group(2), float(m.group(3)))
+
+
+def format_condition(name: str, op: str, value: float) -> str:
+    """三格 → ``when`` 的字串。``%g`` 讓 120.0 寫成 ``120``（使用者打的樣子）。"""
+    return "%s %s %g" % (str(name), str(op), float(value))
+
+
+def rows_reaching(tree: Any, rows: Any, path: str) -> List[Dict[str, Any]]:
+    """走到樹上這一步（或這片葉子）的那些顆。
+
+    滑桿的範圍與「幾顆說 yes」都吃它 —— 用**流到這一步**的顆而不是整批，
+    因為那才是這一步真正在分的東西（畫布上那條分支的顆數講的也是它，
+    兩個數字必須是同一個）。
+    """
+    out: List[Dict[str, Any]] = []
+    if tree is None:
+        return out
+    want = str(path)
+    for r in rows or []:
+        if not r.get("ok") or r.get("bin") is None:
+            continue
+        try:
+            p = _path_of(tree, dict(r.get("features") or {}))
+        except Exception:              # noqa: BLE001 — 顯示用，走不動就不算
+            continue
+        if p.startswith(want):
+            out.append(r)
+    return out
+
+
+def _compare(value: float, op: str, threshold: float) -> bool:
+    if op == ">":
+        return value > threshold
+    if op == "<":
+        return value < threshold
+    if op == ">=":
+        return value >= threshold
+    if op == "<=":
+        return value <= threshold
+    if op == "==":
+        return value == threshold
+    return value != threshold
+
+
+def count_yes(rows: Any, name: str, op: str, value: float):
+    """``(幾顆說 yes, 有值的顆數)`` —— 拖滑桿時旁邊那一行即時的數字。
+
+    沒有那個數字的顆不算進分母：它們在引擎裡會走 `Let.fill` 或整顆失敗，
+    把它們算成「no」會讓這一行說一個不成立的話。
+    """
+    yes = n = 0
+    for r in rows or []:
+        v = (r.get("features") or {}).get(str(name))
+        if not isinstance(v, (int, float)):
+            continue
+        n += 1
+        if _compare(float(v), str(op), float(value)):
+            yes += 1
+    return yes, n
+
+
+#: 建議問題時**不挑**這些（它們不是「量出來的東西」）。
+_NOT_A_QUESTION = ("score", "route_taken")
+
+
+def suggest_condition(rows: Any, prefer: Any = ()):
+    """幫使用者挑一個起手的問題：``(名字, ">", 門檻)``；挑不出來回 ``None``。
+
+    規則刻意簡單、而且講得出理由：**挑這一批上分得最開的那個數字**
+    （四分位距 ÷ 中位數，量綱無關），門檻放在**中位數**——
+    一按就有東西看，剩下的用滑桿調。這不是自動最佳化，是一個
+    「不會卡在空白畫面」的起點（推廣鐵則：按了要有東西發生）。
+
+    ``prefer`` 是這份 recipe 的 working numbers（`decide.let` 的名字）——
+    使用者自己組出來的數字優先，那是他心裡的量。
+    """
+    stats: Dict[str, List[float]] = {}
+    for r in rows or []:
+        if not r.get("ok"):
+            continue
+        for k, v in (r.get("features") or {}).items():
+            k = str(k)
+            if k in _NOT_A_QUESTION or k.endswith("_missing") \
+                    or k.endswith("_raw"):
+                continue
+            if isinstance(v, (int, float)):
+                stats.setdefault(k, []).append(float(v))
+    best = None
+    prefer = {str(x) for x in (prefer or ())}
+    for name, vals in stats.items():
+        if len(vals) < 4:
+            continue
+        s = sorted(vals)
+        med = s[len(s) // 2]
+        q1, q3 = s[len(s) // 4], s[(3 * len(s)) // 4]
+        spread = (q3 - q1) / (abs(med) or 1.0)
+        if spread <= 0:
+            continue
+        rank = (1 if name in prefer else 0, spread)
+        if best is None or rank > best[0]:
+            best = (rank, name, med)
+    if best is None:
+        return None
+    return (best[1], ">", round(float(best[2]), 4))
 
 
 # --------------------------------------------------------------------------- #

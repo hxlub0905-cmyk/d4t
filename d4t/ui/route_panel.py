@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from .widgets import small_button
+from .widgets import clear_layout_parked, small_button
 
 __all__ = ["RouteByBox"]
 
@@ -33,6 +33,8 @@ class RouteByBox(QWidget):
         self._model: Any = None
         self._columns: List[str] = []
         self._building = False
+        #: 見 `widgets.clear_layout_parked`（閃退的結構性修正，F25）。
+        self._parked: list = []
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 0)
@@ -76,11 +78,7 @@ class RouteByBox(QWidget):
             self._building = False
 
     def _clear(self) -> None:
-        while self.body_lay.count():
-            item = self.body_lay.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.setParent(None)
+        clear_layout_parked(self.body_lay, self._parked)
 
     def _rb(self):
         return None if self._model is None else getattr(self._model,

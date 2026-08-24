@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
 
-from .widgets import small_button, split_labelled
+from .widgets import clear_layout_parked, small_button, split_labelled
 
 __all__ = ["DecidePanel"]
 
@@ -129,6 +129,9 @@ class DecidePanel(QWidget):
         self._building = False
         #: 有人在打字時來的重建請求記在這裡，等焦點離開再補（見 `refresh`）。
         self._stale = False
+        #: 拆下來的舊 widget 停在這裡等下一輪 event loop 才釋放
+        #: （`clear_layout_parked` —— 閃退的結構性修正，F25）。
+        self._parked: list = []
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 8, 0)
@@ -138,15 +141,12 @@ class DecidePanel(QWidget):
         title.setObjectName("paramTitle")
         outer.addWidget(title)
 
-        self.mode = QCheckBox("Sort into several classes (not just one threshold)",
-                              self)
-        self.mode.setToolTip(
-            "Off: one score and one threshold - two bins only.\n"
-            "On: a list of rules read top to bottom; the first one that "
-            "matches is the answer.")
-        self.mode.toggled.connect(self._on_mode)
-        outer.addWidget(self.mode)
-
+        # 這裡以前有一顆「Sort into several classes」的勾選框 —— 2026-08-24
+        # 使用者定調拿掉：「加 ADC card 是要直接顯示在畫布上，而不是要勾選
+        # 才顯示；我甚至認為直接進去就要是 advanced 了（原來的根本不會用到）」。
+        # 分成好幾類現在是**預設**（加 ADC 卡就是一棵判定樹），二元門檻只留給
+        # 舊 recipe，而換過去是一顆講得出結果的按鈕（見 `_rebuild`）。
+        # 機制沒有變（`RecipeModel.use_decide`），變的是它不再是入口。
         self.head = QLabel("", self)
         self.head.setObjectName("paramStepHelp")
         self.head.setWordWrap(True)
@@ -227,11 +227,7 @@ class DecidePanel(QWidget):
         self.refresh(force=True)
 
     def _clear(self) -> None:
-        while self.body_lay.count():
-            item = self.body_lay.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.setParent(None)
+        clear_layout_parked(self.body_lay, self._parked)
 
     def _rebuild(self) -> None:
         self._clear()
@@ -239,16 +235,27 @@ class DecidePanel(QWidget):
         if m is None:
             return
         on = getattr(m, "decide", None) is not None
-        self.mode.setChecked(on)
         if on:
-            self.head.setText("Read top to bottom - the first rule that "
-                              "matches is the answer. Reordering the rules "
-                              "is how you change which one wins.")
+            tree = getattr(m.decide, "tree", None) is not None
+            self.head.setText(
+                "The decision tree on the canvas does the sorting - click a "
+                "diamond there to edit a step." if tree else
+                "Read top to bottom - the first rule that matches is the "
+                "answer. Reordering the rules is how you change which one "
+                "wins.")
             self._build_decide()
         else:
-            self.head.setText("Work the measured numbers into one score, then "
-                              "split into two bins with a threshold.")
+            # 舊 recipe（只有一個門檻）。**不是一顆勾選框** —— 它是一句講得出
+            # 結果的話加一顆按鈕，而且按下去現有的門檻會變成第一條規則。
+            self.head.setText("This recipe still sorts with one score and one "
+                              "threshold, so it can only make two bins.")
             self._build_binary()
+            go = small_button("Sort into several classes…", shape="wide")
+            go.setToolTip("Turn this into a decision tree on the canvas. "
+                          "The threshold you have now becomes its first "
+                          "question - nothing is thrown away.")
+            go.clicked.connect(lambda: self.set_multi_class(True))
+            self.body_lay.addWidget(go)
 
     # ---- 兩類（老路）--------------------------------------------------------
     def _build_binary(self) -> None:
@@ -410,8 +417,23 @@ class DecidePanel(QWidget):
         return row
 
     def _rule_row(self, i: int, rule: Any, n: int) -> QWidget:
+        """一條規則 ＝ 面板上的**兩行**（條件一行、結果一行）。
+
+        擠成一行放不下：這一欄的寬度是使用者拖的，實測預設 437 px 而八個
+        元件要 590 px —— 於是「名字」那一格被壓成 92 px，`not measurable`
+        在畫面上變成 `measurable`（**一個意思相反的字**）。同一個教訓在
+        working numbers 那一列付過一次，答案一樣：換行。
+        """
         m = self._model
         row = _Row(self)
+        col = QWidget(row)
+        vlay = QVBoxLayout(col)
+        vlay.setContentsMargins(0, 0, 0, 0)
+        vlay.setSpacing(2)
+        top = QHBoxLayout()
+        top.setSpacing(4)
+        bottom = QHBoxLayout()
+        bottom.setSpacing(4)
 
         num = QLabel("%d" % (i + 1))
         num.setObjectName("paramHint")
@@ -437,8 +459,8 @@ class DecidePanel(QWidget):
         binspin.valueChanged.connect(lambda v, k=i: m.set_rule(k, bin=int(v)))
 
         label = QLineEdit(str(rule.label))
-        label.setPlaceholderText("call it")
-        label.setFixedWidth(92)
+        label.setPlaceholderText("call this class")
+        label.setMinimumWidth(120)
         label.textEdited.connect(lambda t, k=i: m.set_rule(k, label=str(t)))
 
         up = _tight(small_button("▲"), 24)
@@ -453,8 +475,16 @@ class DecidePanel(QWidget):
         rm.setToolTip("Take this rule out")
         rm.clicked.connect(lambda _=False, k=i: self._restructure(m.remove_rule, k))
 
-        for w in (num, when, arrow, binspin, label, up, dn, rm):
-            row.lay.addWidget(w, 1 if w is when else 0)
+        for w in (num, when, up, dn, rm):
+            top.addWidget(w, 1 if w is when else 0)
+        indent = QLabel("")
+        indent.setMinimumWidth(16)
+        for w in (indent, arrow, binspin, label):
+            bottom.addWidget(w, 1 if w is label else 0)
+
+        vlay.addLayout(top)
+        vlay.addLayout(bottom)
+        row.lay.addWidget(col, 1)
 
         cnt = self._count_label(int(rule.bin))
         if cnt is None:
@@ -569,8 +599,17 @@ class DecidePanel(QWidget):
         if self._stale:
             self.refresh(force=True)
 
-    def _on_mode(self, on: bool) -> None:
+    def set_multi_class(self, on: bool) -> None:
+        """換成「分成好幾類」／換回單一門檻。
+
+        以前這是一顆勾選框（`self.mode`），2026-08-24 拿掉了 —— 分成好幾類
+        現在是預設，這支只剩兩個呼叫端：舊 recipe 上那顆「換成判定樹」的
+        按鈕，以及它的回頭路。機制不變（`use_decide` 會把現有的門檻翻成
+        第一條規則，使用者調了半天的那個數字不會消失）。
+        """
         if self._building or self._model is None:
+            return
+        if bool(on) == (getattr(self._model, "decide", None) is not None):
             return
         self._model.use_decide(bool(on))
         self.mode_changed.emit(bool(on))

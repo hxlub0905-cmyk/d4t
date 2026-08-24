@@ -1919,6 +1919,9 @@ class StudioWindow(QMainWindow):
         decision = self._decision_info()
         for view in self._canvases():
             view.set_decision(decision)
+        self.tree_pane.set_rows(rows)
+        self.tree_pane.set_counts(None if not decision
+                                  else decision.get("counts"))
         if not rows:
             self.decide_panel.set_counts(None)
             return
@@ -1987,10 +1990,10 @@ class StudioWindow(QMainWindow):
     # ==================================================================== #
     def _on_add_requested(self, step_key: str) -> None:
         if str(step_key) == _SCORE_LIBRARY_KEY:
-            # 「Score / Bin」不是可增刪的卡片 —— 每條 pipeline 固定有一張，
-            # 點它就是去編輯分數表達式與門檻（三段式的最後一段）。
-            self.show_score_page()
-            self._status("Editing the score / threshold")
+            # 「Decision」不是可增刪的卡片 —— 每條 pipeline 固定有一棵判定樹，
+            # 點它就是**把它放上畫布並開始編第一步**（F25，使用者定調：
+            # 「加 ADC card 是要直接顯示在畫布上，而不是要勾選才顯示」）。
+            self.add_decision()
             return
         # 選著一張卡的時候，新的卡排在它後面 —— 但**線不會自己出現**
         # （2026-08-16，使用者：「新增卡 不要自己接線（線都給 user 接）」）。
@@ -3083,6 +3086,36 @@ class StudioWindow(QMainWindow):
                 and route in self.model.route_keys():
             self.switch_route(route)
 
+    def add_decision(self) -> bool:
+        """把判定樹放上畫布，並開始編第一步（F25）。
+
+        使用者 2026-08-24 定調的兩件事都在這裡：**加 ADC 卡＝畫布上直接
+        有東西**（不是勾一個選項），而且**一進去就是多類別**（「原來的
+        根本不會用到」）。二元門檻沒有被拿掉 —— 它變成舊 recipe 的樣子，
+        而換過來的時候現有的門檻會變成樹的第一個問題（`use_decide`）。
+        """
+        from d4t.core.pipeline.recipe import TreeLeaf
+
+        m = self.model
+        with m.compound("add decision"):
+            if getattr(m, "decide", None) is None:
+                m.use_decide(True)      # 現有門檻 → 第一條規則（不丟東西）
+            m.ensure_tree()             # 規則清單 → 等價的樹
+            if isinstance(m.tree_node(""), TreeLeaf):
+                # 整棵樹只有一片葉子（這份 recipe 還沒有任何判定）——
+                # 給一個真的問得出東西的起手問題，不是一格空白。
+                m.split_tree_leaf("")
+                self.tree_pane.set_rows(self.trial_results or [])
+                self.tree_pane.suggest_question("")
+        self._on_tree_step_clicked("")
+        # **看得到才算在畫布上**：判定區長在所有卡片的右邊，而畫布這時多半
+        # 停在左半邊 —— 不 fit 的話使用者按了 ADC 卡，畫面上什麼都沒發生。
+        for view in self._canvases():
+            view.fit()
+        self._status("Decision: the tree is on the canvas - edit this step "
+                     "on the right, or click another diamond.")
+        return True
+
     def _on_tree_step_clicked(self, path: str) -> None:
         """畫布上點了判定樹的一步／一類（F24 ③），或面板要求跳到另一步。
 
@@ -3095,6 +3128,8 @@ class StudioWindow(QMainWindow):
         info = self._decision_info()
         self.tree_pane.set_features(self.model.labelled_features())
         self.tree_pane.set_counts(None if not info else info.get("counts"))
+        # 導引式問題的滑桿範圍與「幾顆說 yes」吃這一批的結果（F25）。
+        self.tree_pane.set_rows(self.trial_results or [])
         self.tree_pane.show_path(str(path))
         self.stack.setCurrentWidget(self.tree_pane)
         self.set_params_open(True)

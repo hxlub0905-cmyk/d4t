@@ -55,14 +55,14 @@ def _texts(p, cls):
 # --------------------------------------------------------------------------- #
 def test_it_starts_on_the_two_bin_threshold(panel):
     from PySide6.QtWidgets import QDoubleSpinBox
-    assert not panel.mode.isChecked()
+    assert panel._model.decide is None
     spin = panel.findChild(QDoubleSpinBox)
     assert spin is not None and spin.value() == pytest.approx(3.0)
 
 
 def test_switching_turns_the_threshold_into_the_first_rule(panel):
     m = panel._model
-    panel.mode.setChecked(True)
+    panel.set_multi_class(True)
     assert m.decide is not None
     assert len(m.decide.rules) == 1
     assert "glv_max" in m.decide.rules[0].when and "3" in m.decide.rules[0].when
@@ -73,15 +73,15 @@ def test_switching_turns_the_threshold_into_the_first_rule(panel):
 
 def test_switching_back_leaves_a_usable_expression(panel):
     m = panel._model
-    panel.mode.setChecked(True)
-    panel.mode.setChecked(False)
+    panel.set_multi_class(True)
+    panel.set_multi_class(False)
     assert m.decide is None
     assert str(m.expr).strip(), "切回去之後那一格不能是空的（空的解析不出來）"
 
 
 def test_only_one_of_the_two_is_on_screen(panel):
     from PySide6.QtWidgets import QDoubleSpinBox
-    panel.mode.setChecked(True)
+    panel.set_multi_class(True)
     assert panel.findChild(QDoubleSpinBox) is None, "多類別那一種沒有門檻格"
 
 
@@ -90,7 +90,7 @@ def test_only_one_of_the_two_is_on_screen(panel):
 # --------------------------------------------------------------------------- #
 def test_adding_a_rule_picks_a_bin_nobody_is_using(panel):
     m = panel._model
-    panel.mode.setChecked(True)
+    panel.set_multi_class(True)
     m.add_rule()
     bins = [r.bin for r in m.decide.rules] + [m.decide.otherwise_bin]
     assert len(bins) == len(set(bins)), bins
@@ -99,7 +99,7 @@ def test_adding_a_rule_picks_a_bin_nobody_is_using(panel):
 def test_moving_a_rule_changes_which_one_wins(panel):
     """**換順序就是換優先權** —— 所以它是一個第一級的動作，不是排版。"""
     m = panel._model
-    panel.mode.setChecked(True)
+    panel.set_multi_class(True)
     m.add_rule()
     m.set_rule(1, when="glv_max > 0", label="catch-all")
     first_before = m.decide.rules[0].label
@@ -109,7 +109,7 @@ def test_moving_a_rule_changes_which_one_wins(panel):
 
 def test_removing_a_rule_removes_exactly_one(panel):
     m = panel._model
-    panel.mode.setChecked(True)
+    panel.set_multi_class(True)
     m.add_rule(); m.add_rule()
     n = len(m.decide.rules)
     m.remove_rule(1)
@@ -118,7 +118,7 @@ def test_removing_a_rule_removes_exactly_one(panel):
 
 def test_the_lot_of_it_round_trips_through_a_recipe(panel):
     m = panel._model
-    panel.mode.setChecked(True)
+    panel.set_multi_class(True)
     m.add_let(); m.set_let(0, name="contrast", expr="glv_max * cd_deq")
     m.add_rule(); m.set_rule(1, when="contrast > 10", bin=5, label="big")
     r = m.to_recipe()
@@ -137,7 +137,7 @@ def test_typing_does_not_rebuild_and_steal_the_cursor(panel, qapp):
     跳過有游標的那一格」。
     """
     from PySide6.QtWidgets import QLineEdit
-    panel.mode.setChecked(True)
+    panel.set_multi_class(True)
     panel.show()
     qapp.processEvents()
     edits = panel.findChildren(QLineEdit)
@@ -155,7 +155,7 @@ def test_typing_does_not_rebuild_and_steal_the_cursor(panel, qapp):
 
 def test_a_structural_change_does_rebuild(panel):
     from PySide6.QtWidgets import QLineEdit
-    panel.mode.setChecked(True)
+    panel.set_multi_class(True)
     before = panel.findChildren(QLineEdit)
     panel._restructure(panel._model.add_rule)
     assert len(panel.findChildren(QLineEdit)) > len(before)
@@ -165,13 +165,13 @@ def test_a_structural_change_does_rebuild(panel):
 # 5. 顆數
 # --------------------------------------------------------------------------- #
 def test_before_a_run_there_are_no_counts(panel):
-    panel.mode.setChecked(True)
+    panel.set_multi_class(True)
     assert panel._count_label(0) is None, "沒跑過就不要顯示 0 —— 那會被讀成「一顆都沒有」"
 
 
 def test_the_count_says_which_quantity_it_is(panel):
     """它是 **bin 的顆數**，不是「這條規則抓到幾顆」—— 兩條規則可以共用一個 bin。"""
-    panel.mode.setChecked(True)
+    panel.set_multi_class(True)
     panel.set_counts({3: 11}, purity=[{"bin": 3, "purity": 1.0}])
     lab = panel._count_label(3)
     assert lab is not None
