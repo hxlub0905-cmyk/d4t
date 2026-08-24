@@ -5,7 +5,7 @@ f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 ac0c96cd0d671a439c492b72fae0379d364aeb62 AGENTS.md
 b404ab73fd00a46fa43d83d173fe5d973f01bfd7 CLAUDE.md
 b20e9b7f31aa8195e297b4a124b69252cd4c56cf README.md
-8c7a848bbf8c253fc3973395eb82e8650e3c9b75 SESSION_LOG.md
+359cd6b29029d43dd61e12027fc1dcdbae0f4edd SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 d896e5054c3a39bece820b0ba6e798d943b7395e d4t/__main__.py
@@ -49,9 +49,9 @@ ec7bdb58e7da611ac74f16b53e218f9a65476bdc d4t/core/pipeline/cellrois.py
 204e9f613715f6e9af467b79f5368b7e7a45556b d4t/core/pipeline/channels.py
 942fcb5a17829498aec9f8eb5c490785c5d19916 d4t/core/pipeline/context.py
 fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
-c9602dc050c55f0917b9300b7a156e15473ac627 d4t/core/pipeline/engine.py
+c0286ffd2109295d942e8e988b5df9df0984c92e d4t/core/pipeline/engine.py
 17f8abfc3739d6860f5b9b063c2c608a9cd08b1e d4t/core/pipeline/expression.py
-7e343fff73bfa998440c6eae872eb5fc261d0753 d4t/core/pipeline/recipe.py
+acd9176cf53f1298d6e8359f34099809ae48e211 d4t/core/pipeline/recipe.py
 6d8a3d52f4bbf378c8bd1f1de2b4c1c60ec29678 d4t/core/pipeline/step.py
 54503e5000aeae968a523044183f5bf544671ae7 d4t/core/steps/__init__.py
 d9d78b9c74d5495419eb584a96436c56cf028641 d4t/core/steps/_util.py
@@ -95,7 +95,7 @@ e3248e389f47ff9a0f8b911de3f2ef58c4bf9208 d4t/ui/scope.py
 a3d5b2cc1111de56136cf5900ed6a8fcc1fc1074 d4t/ui/studio.py
 b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 b24576feb08cf1517b18a0d0a04f302fcb9ea840 d4t/ui/theme.py
-f1785012f8529b6414f7e1e821fe8ea402c326ac d4t/ui/viewmodel.py
+3bcf53b87c01c3e20e683480e96661f10620fb6e d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
 e6e33ac842d0ab50246d992de2f536d9b6afc21d d4t/ui/widgets.py
 2eb7813f6dbd6c7d0beff0496ed0d1e6dc87d484 d4t/ui/workers.py
@@ -148,6 +148,7 @@ d30e533c8f476e52e0e9942e25316487eabfcc41 tests/test_cli_encoding.py
 9e47488159ddde54f903cddf9fa0f3d88e103e99 tests/test_dag_order.py
 70ea34793a5b48433120c5f0b5ef913df7eacfa1 tests/test_dataset.py
 4795be578be4cf1c81d3c439dd35fbd16cf691ce tests/test_decide_multiclass.py
+0fdb5e01335580fd34c493d6236ce0202d4b2b0d tests/test_decide_tree.py
 9b9f40478da74058b851a9a1c9930f52cdcdca28 tests/test_e2e_die_to_die.py
 2a8e6b9761dfcf7906c3e4e1a3762975ced8447e tests/test_e2e_dual_route.py
 8b0ab7fe7dae38c1494a5e162ccdbcaf1f4bf553 tests/test_engine.py

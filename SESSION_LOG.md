@@ -43,6 +43,33 @@ lot_stats 併不併。
 
 ---
 
+## F24 ①：判定樹引擎（2026-08-24）
+
+F24 的第一期做完：`decide` 從清單長成樹。**畫布是第 ② 期，這一輪只有引擎。**
+
+* **資料結構**：`TreeStep(when, yes, no)`（二叉 —— 一步一問是流程圖語言；多叉
+  要在一顆節點上排好幾個互斥條件，而互斥在畫面上驗不了）＋ `TreeLeaf(bin,
+  label)`。`DecideSpec.tree` 是嚴格附加的第三層（score → decide.rules →
+  decide.tree），每一層不在就完全不動下一層。
+* **`rules_to_tree`**：平面規則清單＝鏈狀樹，轉換無損 —— 值網格逐點同 bin
+  同 label 的測試釘住「F24 是 F22 的一般化，不是取代」。
+* **引擎**：`_eval_decision` 走樹並記 `path`（一串 yes/no，進
+  `ctx.meta["decide"]`）—— Preview 的 Path 與畫布的分支流量都吃它。
+* **serde 只寫在用的那一種**（樹模式不寫 rules/otherwise）：兩個都寫出去，
+  讀回來就是 `ambiguous-decision` —— 一份自己存的檔案不該把自己弄壞。
+* **三條 lint**：rules+tree 並存（error）、樹太深 >16（warning）、
+  步驟的問題解析不了（`bad-rule`）。寫壞的樹在**讀檔當場擋**。
+* **undo 快照帶得動樹**（`viewmodel._decide_snapshot`）—— 漏掉的話一份樹
+  recipe 在 Studio 按一次 undo，樹就安靜地消失。
+
+**驗收（計畫書 §10，實跑）**：48 顆合成 lot，rules recipe vs 等價鏈狀樹
+（走過 serde 一圈）—— **bin 相同 48/48、score 相同 48/48**；路徑分布
+1/11/16/20 加總 = 48（流量守恆）。F22 的 21 條測試一條沒動、黃金值三份全綠。
+
+新測試 `tests/test_decide_tree.py` 31 條；核心 1841 passed、UI 逐檔全綠。
+
+---
+
 ## F24：判定樹上畫布 —— 分揀槽定稿（2026-08-24）
 
 使用者問「ADC 跟 Algo 畫布上要怎麼呈現（畫布不能說謊），跳脫框架你有什麼建議」。

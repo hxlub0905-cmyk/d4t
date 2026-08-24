@@ -17,16 +17,22 @@ from dataclasses import replace
 from d4t.core.pipeline import (
     Edge, ParamError, Recipe, RecipeNode, ScoreSpec, get_step, validate,
 )
-from d4t.core.pipeline.recipe import DecideSpec, Let, Rule
+from d4t.core.pipeline.recipe import (DecideSpec, Let, Rule,
+                                      _tree_from_json, _tree_to_json)
 
 
 def _decide_snapshot(d: "DecideSpec") -> Dict[str, Any]:
-    """判定段的純值快照（undo 堆用）—— 跟 `Recipe.to_json_dict` 同一個形狀。"""
+    """判定段的純值快照（undo 堆用）—— 跟 `Recipe.to_json_dict` 同一個形狀。
+
+    ⚠ **樹也要進來**（F24）。漏掉的話，一份判定樹 recipe 在 Studio 裡按一次
+    undo，樹就安靜地消失 —— 而畫面上看起來只是「回到上一步」。
+    """
     return {
         "let": [(x.name, x.expr) for x in d.let],
         "rules": [(r.when, int(r.bin), r.label) for r in d.rules],
         "otherwise": (int(d.otherwise_bin), d.otherwise_label),
         "score": d.score,
+        "tree": None if d.tree is None else _tree_to_json(d.tree),
     }
 
 
@@ -34,11 +40,13 @@ def _decide_restore(snap: Optional[Dict[str, Any]]) -> Optional["DecideSpec"]:
     if not snap:
         return None
     ob, ol = snap.get("otherwise") or (0, "")
+    tree = snap.get("tree")
     return DecideSpec(
         let=[Let(n, e) for n, e in snap.get("let") or []],
         rules=[Rule(w, int(b), l) for w, b, l in snap.get("rules") or []],
         otherwise_bin=int(ob), otherwise_label=str(ol),
-        score=str(snap.get("score", "") or ""))
+        score=str(snap.get("score", "") or ""),
+        tree=None if tree is None else _tree_from_json(tree))
 
 
 class RecipeModel:

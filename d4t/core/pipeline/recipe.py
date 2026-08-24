@@ -129,6 +129,92 @@ class Let:
     expr: str
 
 
+@dataclass(frozen=True)
+class TreeLeaf:
+    """判定樹的葉子：走到這裡就是這一類。"""
+    bin: int
+    label: str = ""
+
+
+@dataclass(frozen=True)
+class TreeStep:
+    """判定樹的一步：問一個問題，yes 一邊、no 一邊（各自是步驟或葉子）。
+
+    為什麼是二叉不是多叉（F24）：一步一問是**流程圖語言**，製程工程師本來就
+    會讀；多叉要在一顆節點上排好幾個互斥條件，而「互斥」在畫面上驗不了 ——
+    那正是 F22 挑「第一個成立的贏」而不是「每條算分取最高」的同一個理由。
+    多路分岔用巢狀的步驟表達，畫出來就是一條 yes 鏈。
+    """
+    when: str
+    yes: Any            # TreeStep | TreeLeaf
+    no: Any             # TreeStep | TreeLeaf
+
+
+def rules_to_tree(spec: "DecideSpec") -> Any:
+    """把平面規則清單翻成**等價的鏈狀樹**（F24 §3）。
+
+    「由上往下第一個成立的贏」就是一條每步 yes → 葉子、no → 下一步的鏈，
+    所以這個轉換**無損**：同一組特徵值走 rules 與走轉出來的樹，bin 與 label
+    逐項相同（`tests/test_decide_tree.py` 用值網格驗）。空清單＝直接是
+    otherwise 那片葉子。
+    """
+    node: Any = TreeLeaf(bin=int(spec.otherwise_bin),
+                         label=str(spec.otherwise_label))
+    for rule in reversed(list(spec.rules)):
+        node = TreeStep(when=rule.when,
+                        yes=TreeLeaf(bin=int(rule.bin), label=rule.label),
+                        no=node)
+    return node
+
+
+def _tree_to_json(node: Any) -> Dict[str, Any]:
+    if isinstance(node, TreeLeaf):
+        return {"bin": int(node.bin), "label": node.label}
+    return {"when": node.when,
+            "yes": _tree_to_json(node.yes),
+            "no": _tree_to_json(node.no)}
+
+
+def _tree_from_json(raw: Any, where: str = "decide.tree") -> Any:
+    """讀一個樹節點。格式錯**當場講**（同 `_decide_from_json` 的理由）。
+
+    判準：有 ``when`` 是步驟（要有 ``yes`` 與 ``no``）、有 ``bin`` 是葉子 ——
+    兩個都有或都沒有就是寫壞了，不猜。
+    """
+    if not isinstance(raw, dict):
+        raise RecipeError("%s must be an object (dict), got %s"
+                          % (where, type(raw).__name__))
+    has_when, has_bin = "when" in raw, "bin" in raw
+    if has_when and has_bin:
+        raise RecipeError("%s has both 'when' and 'bin' - a node is either a "
+                          "step (when/yes/no) or a leaf (bin/label), not both"
+                          % where)
+    if has_bin:
+        return TreeLeaf(bin=int(raw["bin"]),
+                        label=str(raw.get("label", "") or ""))
+    if has_when:
+        if "yes" not in raw or "no" not in raw:
+            raise RecipeError("%s is a step ('when') but is missing its "
+                              "'yes' or 'no' side" % where)
+        return TreeStep(when=str(raw["when"]),
+                        yes=_tree_from_json(raw["yes"], where + ".yes"),
+                        no=_tree_from_json(raw["no"], where + ".no"))
+    raise RecipeError("%s must have either 'when' (a step) or 'bin' (a leaf)"
+                      % where)
+
+
+def _tree_depth(node: Any) -> int:
+    if isinstance(node, TreeLeaf):
+        return 0
+    return 1 + max(_tree_depth(node.yes), _tree_depth(node.no))
+
+
+def _tree_whens(node: Any) -> List[str]:
+    if isinstance(node, TreeLeaf):
+        return []
+    return [node.when] + _tree_whens(node.yes) + _tree_whens(node.no)
+
+
 @dataclass
 class DecideSpec:
     """ADC 判定段（多類別，F21-D）—— **一張由上往下讀的篩子**。
@@ -169,6 +255,11 @@ class DecideSpec:
     otherwise_label: str = ""
     #: 這一顆的分數（KLARF 的 DSIZE／Top-N 排序要一個數字）。空字串 = 0.0。
     score: str = ""
+    #: 判定樹（F24）。有它就走樹、忽略 ``rules``/``otherwise`` —— 但**兩個都
+    #: 寫**是 `ambiguous-decision` 的 error（同 `score` vs `decide`：同一件事
+    #: 兩個地方存，挑一個贏的話另一份會安靜地漂）。``rules`` 是它的特例
+    #: （鏈狀樹，見 :func:`rules_to_tree`），所以舊寫法照讀不誤。
+    tree: Any = None
 
 
 @dataclass(frozen=True)
@@ -238,7 +329,33 @@ def _decide_issues(recipe: "Recipe", decide: "DecideSpec") -> List["Issue"]:
                    "Keep one of them: 'decide' is the one with several "
                    "classes; 'score' is the two-bin threshold. Clear "
                    "score.expr to use 'decide'."))
-    if not decide.rules:
+    # ---- 判定樹（F24）----
+    if decide.tree is not None and decide.rules:
+        out.append(Issue(
+            code="ambiguous-decision", level="error", node_id=None,
+            title="This decide block sorts in two different ways",
+            detail="it has both a flat 'rules' list and a 'tree'. Keep one: "
+                   "the rules list is just a chain-shaped tree, so move the "
+                   "rules into the tree (or drop the tree)."))
+    if decide.tree is not None:
+        depth = _tree_depth(decide.tree)
+        if depth > 16:
+            out.append(Issue(
+                code="deep-tree", level="warning", node_id=None,
+                title="The decision tree is very deep",
+                detail="%d questions deep. A defect only ever takes one path, "
+                       "but nobody can read a tree this tall - consider "
+                       "combining conditions ((a > 5) * (b < 2) means both)."
+                       % depth))
+        for i, when in enumerate(_tree_whens(decide.tree)):
+            try:
+                parse_expression(when)
+            except ExpressionError as e:
+                out.append(Issue(
+                    code="bad-rule", level="error", node_id=None,
+                    title="A tree step's question does not parse",
+                    detail=str(e)))
+    if not decide.rules and decide.tree is None:
         out.append(Issue(
             code="no-rules", level="warning", node_id=None,
             title="The decide block has no rules",
@@ -313,11 +430,14 @@ def _decide_from_json(raw: Any) -> Optional["DecideSpec"]:
     other = raw.get("otherwise") or {}
     if not isinstance(other, dict):
         raise RecipeError("decide.otherwise must be an object with 'bin'")
+    tree = (None if raw.get("tree") is None
+            else _tree_from_json(raw.get("tree")))
     return DecideSpec(
         let=lets, rules=rules,
         otherwise_bin=int(other.get("bin", 0)),
         otherwise_label=str(other.get("label", "") or ""),
         score=str(raw.get("score", "") or ""),
+        tree=tree,
     )
 
 
@@ -946,14 +1066,21 @@ class Recipe:
         # 相同（`test_a_json_round_trip_changes_nothing` 與 export parity 都
         # 靠這件事）。
         if self.decide is not None:
-            out["decide"] = {
+            d_out: Dict[str, Any] = {
                 "let": [{"name": x.name, "expr": x.expr} for x in self.decide.let],
-                "rules": [{"when": r.when, "bin": int(r.bin), "label": r.label}
-                          for r in self.decide.rules],
-                "otherwise": {"bin": int(self.decide.otherwise_bin),
-                              "label": self.decide.otherwise_label},
-                "score": self.decide.score,
             }
+            # 樹與清單**只寫在用的那一種** —— 兩個都寫出去，讀回來就是
+            # `ambiguous-decision`，一份自己存的檔案不該把自己弄壞。
+            if self.decide.tree is not None:
+                d_out["tree"] = _tree_to_json(self.decide.tree)
+            else:
+                d_out["rules"] = [{"when": r.when, "bin": int(r.bin),
+                                   "label": r.label}
+                                  for r in self.decide.rules]
+                d_out["otherwise"] = {"bin": int(self.decide.otherwise_bin),
+                                      "label": self.decide.otherwise_label}
+            d_out["score"] = self.decide.score
+            out["decide"] = d_out
         return out
 
     @classmethod

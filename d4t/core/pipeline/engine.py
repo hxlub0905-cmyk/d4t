@@ -565,13 +565,27 @@ def _eval_decision(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
             raise ExpressionError("a 'let' line has no name", "", 0)
         ctx.features[name] = parse_expression(item.expr).eval(ctx.features)
 
-    chosen_bin = int(recipe.decide.otherwise_bin)
-    chosen_label = str(recipe.decide.otherwise_label)
-    chosen_rule = -1
-    for i, rule in enumerate(recipe.decide.rules):
-        if parse_expression(rule.when).eval(ctx.features) != 0.0:
-            chosen_bin, chosen_label, chosen_rule = int(rule.bin), rule.label, i
-            break
+    path: List[str] = []
+    if recipe.decide.tree is not None:
+        # 判定樹（F24）：從根往下走，每一步記 yes/no —— Preview 的 Path 與
+        # 畫布的分支流量都吃這一串。**非 0 就是成立**（同 rules 的判準）。
+        from .recipe import TreeLeaf
+        node = recipe.decide.tree
+        while not isinstance(node, TreeLeaf):
+            took_yes = parse_expression(node.when).eval(ctx.features) != 0.0
+            path.append("yes" if took_yes else "no")
+            node = node.yes if took_yes else node.no
+        chosen_bin, chosen_label = int(node.bin), str(node.label)
+        chosen_rule = -1
+    else:
+        chosen_bin = int(recipe.decide.otherwise_bin)
+        chosen_label = str(recipe.decide.otherwise_label)
+        chosen_rule = -1
+        for i, rule in enumerate(recipe.decide.rules):
+            if parse_expression(rule.when).eval(ctx.features) != 0.0:
+                chosen_bin, chosen_label, chosen_rule = (int(rule.bin),
+                                                         rule.label, i)
+                break
 
     expr = str(recipe.decide.score or "").strip()
     score = parse_expression(expr).eval(ctx.features) if expr else 0.0
@@ -580,7 +594,7 @@ def _eval_decision(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
     # SQLite schema 與 CSV 的欄，而黃金值現在是壞的（見 F21 §6），
     # 「改了但數字沒變」這句話目前沒有人證得了。
     ctx.meta["decide"] = {"rule": chosen_rule, "label": chosen_label,
-                          "bin": chosen_bin}
+                          "bin": chosen_bin, "path": path}
     return score, chosen_bin
 
 
