@@ -180,7 +180,7 @@ def test_the_panel_shows_the_question_as_three_pickers(qapp):
     combos = panel.findChildren(QComboBox)
     assert any(c.currentText() == "contrast" for c in combos), \
         [c.currentText() for c in combos]
-    assert any(c.currentText() == "is greater than" for c in combos)
+    assert any(c.currentText() == "greater than" for c in combos)
     spins = panel.findChildren(QDoubleSpinBox)
     assert any(s.value() == 100.0 for s in spins)
     texts = _texts(panel)
@@ -211,7 +211,7 @@ def test_switching_the_comparison_writes_the_model(qapp):
     panel.set_model(m)
     panel.show_path("")
     opbox = next(c for c in panel.findChildren(QComboBox)
-                 if c.currentText() == "is greater than")
+                 if c.currentText() == "greater than")
     i = opbox.findData("<=")
     opbox.setCurrentIndex(i)
     opbox.activated.emit(i)
@@ -230,21 +230,30 @@ def test_a_compound_condition_falls_back_to_the_expression_box(qapp):
 
 
 def test_the_live_count_says_how_many_reach_here_and_say_yes(qapp):
-    """「一邊拖一邊看」的那一行 —— 沒跑過就一個數字都不畫（F18）。"""
+    """「一邊拖一邊看」的那個回饋 —— 沒跑過就一個數字都不畫（F18）。
+
+    ⚠ 這一條驗的**事實沒變、形狀變了**（草案 2，2026-08-24）：以前是一行字
+    「2 of the 4 defects that reach here say yes」，現在是一條**寬度就是顆數**
+    的分流條 —— 同一個問題，但掃一眼就知道這一刀切得均不均。
+    """
+    from d4t.ui.threshold_view import SplitBar
+
     m = _model_with_tree()
     panel = TreePanel()
     panel.set_model(m)
     panel.show_path("")
-    assert not any("say yes" in t for t in _texts(panel))
+    assert not [b for b in panel.findChildren(SplitBar) if not b.isHidden()], \
+        "沒跑過卻畫了一條分流條"
 
     rows = [{"defect_id": str(i), "ok": True, "bin": 0, "score": 0.0,
              "features": {"contrast": float(v), "a": float(v) / 2}}
             for i, v in enumerate((10.0, 50.0, 150.0, 300.0))]
     panel.set_rows(rows)
     panel.show_path("")
+    bars = [b for b in panel.findChildren(SplitBar) if not b.isHidden()]
+    assert len(bars) == 1, bars
     # contrast > 100 → 150 與 300 兩顆
-    assert any("2 of the 4 defects that reach here say yes" in t
-               for t in _texts(panel)), _texts(panel)
+    assert bars[0].counts() == (2, 2), bars[0].counts()
 
 
 def test_a_new_step_arrives_with_a_question_that_asks_something(qapp):
@@ -264,13 +273,18 @@ def test_a_new_step_arrives_with_a_question_that_asks_something(qapp):
     assert "flat" not in node.when         # 完全分不開的數字不會被挑中
 
 
+# ⚠ **THIS BATCH 那一段現在只在葉子上**（草案 2／3，2026-08-24）。一個步驟
+# 上它講的三件事都有更好的位置了：「幾顆流到這裡」在最上面的麵包屑、「切成
+# 幾比幾」是分流條的寬度、兩邊各幾顆寫在 Yes／No 的標籤上 —— 留著就是同一個
+# 事實在一個 550px 的面板裡講三次。葉子沒有「切成兩邊」，「20 land here」是
+# 它唯一的批次數字，所以那裡留著，而下面兩條就指著那裡。
 def test_no_batch_line_before_a_run(qapp):
     m = _model_with_tree()
     panel = TreePanel()
     panel.set_model(m)
     panel.set_counts(None)
-    panel.show_path("")
-    assert not any("arrive here" in t for t in _texts(panel))
+    panel.show_path("y")                   # ← 葉子
+    assert not any("land here" in t for t in _texts(panel))
 
 
 def test_the_batch_line_reads_the_flow_counts(qapp):
@@ -278,9 +292,24 @@ def test_the_batch_line_reads_the_flow_counts(qapp):
     panel = TreePanel()
     panel.set_model(m)
     panel.set_counts({"": 47, "y": 11, "n": 36})
+    panel.show_path("y")                   # ← 葉子
+    assert any("11" in t and "land here" in t for t in _texts(panel)), \
+        _texts(panel)
+
+
+def test_a_step_says_the_flow_counts_without_a_batch_line(qapp):
+    """步驟那一邊的**同一份數字**：麵包屑一個、Yes／No 標籤各一個。
+
+    這一條接住上面兩條讓出來的地盤 —— 拿掉 THIS BATCH 不等於拿掉顆數。
+    """
+    m = _model_with_tree()
+    panel = TreePanel()
+    panel.set_model(m)
+    panel.set_counts({"": 47, "y": 11, "n": 36})
     panel.show_path("")
-    assert any("47 arrive here" in t and "11 yes" in t and "36 no" in t
-               for t in _texts(panel))
+    texts = _texts(panel)
+    assert any("47 defects reach here" in t for t in texts), texts
+    assert "Yes 11" in texts and "No 36" in texts, texts
 
 
 def test_a_leaf_panel_edits_the_class(qapp):
@@ -333,9 +362,16 @@ def _spin(panel):
     return spins[0]
 
 
-def _sliders(panel):
-    from PySide6.QtWidgets import QSlider
-    return panel.findChildren(QSlider)
+def _plots(panel):
+    """畫出來的分布圖（草案 1 之後取代滑桿的那個東西）。
+
+    ⚠ 用 ``isHidden()`` 不是 ``isVisible()``：這些面板從來沒有 ``show()``
+    過，那時候每一個子元件的 ``isVisible()`` 都是 ``False`` —— 底下兩條會
+    **兩條都通過**，而其中一條根本沒有在驗東西。
+    """
+    from d4t.ui.threshold_view import ThresholdHistogram
+    return [w for w in panel.findChildren(ThresholdHistogram)
+            if not w.isHidden()]
 
 
 def test_the_threshold_box_accepts_a_number_bigger_than_one(qapp):
@@ -362,9 +398,9 @@ def test_the_threshold_box_accepts_a_number_bigger_than_one(qapp):
     assert m.tree_node("").when.endswith("-12.5"), m.tree_node("").when
 
 
-def test_no_slider_before_a_run_but_it_says_why(qapp):
-    """滑桿要跨的是**這一批真的量到什麼**。沒有那份資料時它跨不出東西來 ——
-    生一支跨著憑空範圍的滑桿，等於讓一個控制項說一件不成立的話。
+def test_no_plot_before_a_run_but_it_says_why(qapp):
+    """門檻的那個把手要跨的是**這一批真的量到什麼**。沒有那份資料時它跨不出
+    東西來 —— 生一個跨著憑空範圍的控制項，等於讓它說一件不成立的話。
 
     但**安靜地少一個控制項比沒有用的控制項更難懂**，所以那句話要說出來，
     而且要指向拿得回它的動作。
@@ -374,12 +410,13 @@ def test_no_slider_before_a_run_but_it_says_why(qapp):
     panel.set_model(m)
     panel.show_path("")
 
-    assert not _sliders(panel), "沒有資料卻生了一支滑桿"
+    assert not _plots(panel), "沒有資料卻畫了一張分布圖"
     assert any("Run a trial" in t for t in _texts(panel)), _texts(panel)
 
 
-def test_the_slider_comes_back_once_there_is_a_distribution(qapp):
-    """有分布就該有滑桿 —— 那是 F25「問題不用打的」的主角。"""
+def test_the_plot_comes_back_once_there_is_a_distribution(qapp):
+    """有分布就該畫出來 —— 那是 F25「問題不用打的」的主角（草案 1 把它從
+    一根沒有刻度的滑桿換成一張看得到形狀的分布圖）。"""
     m = _model_with_tree()
     panel = TreePanel()
     panel.set_model(m)
@@ -388,7 +425,7 @@ def test_the_slider_comes_back_once_there_is_a_distribution(qapp):
                     for i, v in enumerate((10.0, 50.0, 150.0, 300.0))])
     panel.show_path("")
 
-    assert _sliders(panel), "有分布卻沒有滑桿"
+    assert _plots(panel), "有分布卻沒有畫出來"
     assert not any("Run a trial" in t for t in _texts(panel))
 
 

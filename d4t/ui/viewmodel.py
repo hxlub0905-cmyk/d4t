@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from dataclasses import replace
 
+from d4t.core.pipeline.expression import parse_expression
 from d4t.core.pipeline import (
     Edge, ParamError, Recipe, RecipeNode, RouteBy, ScoreSpec, get_step,
     validate,
@@ -61,6 +62,40 @@ def _decide_restore(snap: Optional[Dict[str, Any]]) -> Optional["DecideSpec"]:
         otherwise_bin=int(ob), otherwise_label=str(ol),
         score=str(snap.get("score", "") or ""),
         tree=None if tree is None else _tree_from_json(tree))
+
+
+def is_a_constant_expression(text: Any) -> bool:
+    """這段文字對**每一顆 defect 都給同一個答案**嗎（空的也算）。
+
+    存在的理由是一個 bug（U1，2026-08-24）
+    -------------------------------------
+    ``RecipeModel`` 全新時 ``expr = "0"`` —— 那是**二元門檻那條老路的佔位值**
+    （`__init__` 與 :meth:`use_decide` ``(False)`` 都塞它）。而 :meth:`use_decide`
+    以前只問「``expr`` 是不是空的」，於是那個佔位值被翻成一條規則：
+
+        Rule(when="0 >= 0", bin=1)      ← 對每一顆都成立
+
+    後果有三層，而使用者只看得到最後一層：起手問題是一個永遠成立的假條件
+    （整批全走 yes、第二類永遠是空的）；它**解析不成單純的比較**，所以
+    `TreePanel` 退回表達式框，**F25 一整輪做的導引式編輯器（挑數字 ▾ ／
+    比什麼 ▾ ／多少 ＋ 滑桿）在最常見的那條路徑上根本不會出現**；而因為
+    沒有顆流到 no 邊，下一步的滑桿也拿不到分布。
+
+    判準是「**用不用得到至少一個量出來的數字**」而不是「是不是字串 ``"0"``」：
+    ``"1"``、``"2*3"`` 一樣不是一條判定線。
+
+    ⚠ **解析不出來的不算常數。** 那是使用者打到一半或打錯的東西，
+    是他的工作成果 —— :meth:`use_decide` 的立場一直是「調了半天的那個門檻
+    不該因為換一個檢視就沒了」，所以壞掉的表達式照樣翻成規則（跑起來會
+    在判定那一步報錯，而那句話講得出是哪裡錯）。
+    """
+    body = str(text or "").strip()
+    if not body:
+        return True
+    try:
+        return not parse_expression(body).variables
+    except Exception:          # noqa: BLE001 — 壞表達式是使用者的東西，留著
+        return False
 
 
 class RecipeModel:
@@ -454,14 +489,18 @@ class RecipeModel:
         self._push_undo()
         if on:
             expr = str(self.expr or "").strip()
+            # **常數不是門檻**（U1，2026-08-24）—— 見 `is_a_constant_expression`。
+            # 這裡以前問的是「``expr`` 是不是空的」，而全新 recipe 的 ``expr``
+            # 是佔位值 ``"0"``，於是每一份新 recipe 都從一條 ``0 >= 0`` 開始。
+            real = expr and not is_a_constant_expression(expr)
             rules = []
-            if expr:
+            if real:
                 rules.append(Rule(when="%s >= %g" % (expr, float(self.threshold)),
                                   bin=int(self.bins.get("above", 1)), label=""))
             self.decide = DecideSpec(
                 let=[], rules=rules,
                 otherwise_bin=int(self.bins.get("below", 0)), otherwise_label="",
-                score=expr)
+                score=expr if real else "")
             self.expr = ""          # 並存是 error，所以這一格要清掉
         else:
             self.decide = None

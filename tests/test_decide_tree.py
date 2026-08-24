@@ -293,3 +293,77 @@ def test_editing_through_a_bad_path_changes_nothing():
         before = m.decide.tree
         getattr(m, op)(*args)
         assert m.decide.tree == before, "%s 用壞路徑改到了東西" % op
+
+
+# --------------------------------------------------------------------------- #
+# U1：佔位值 "0" 不可以變成一條 `0 >= 0` 的假規則（2026-08-24）
+# --------------------------------------------------------------------------- #
+def test_a_brand_new_recipe_does_not_start_with_a_fake_rule():
+    """全新 recipe 的 ``expr`` 是 **佔位值** ``"0"``，不是使用者的門檻。
+
+    以前 `use_decide` 只問「``expr`` 是不是空的」，於是每一份新 recipe 都從
+    ``Rule(when="0 >= 0")`` 開始 —— 一個對每一顆都成立的假條件。後果有三層，
+    而使用者只看得到最後一層：整批全走 yes、第二類永遠是空的；它解析不成
+    單純的比較，所以面板退回表達式框，**F25 一整輪做的導引式編輯器
+    （挑數字 ▾／比什麼 ▾／多少 ＋ 滑桿）在最常見的那條路徑上根本不會出現**。
+    """
+    from d4t.ui.viewmodel import RecipeModel
+
+    m = RecipeModel.starter("ebi_patch")
+    assert m.expr == "0", "前提變了：這條測試要的是那個佔位值"
+
+    m.use_decide(True)
+
+    assert m.decide.rules == [], m.decide.rules
+    assert m.decide.score == ""
+    m.ensure_tree()
+    assert isinstance(m.decide.tree, TreeLeaf), (
+        "樹的根不是葉子 —— add_decision 因此不會去建議一個起手問題")
+
+
+def test_a_real_threshold_is_still_carried_over():
+    """放寬的是「常數不算門檻」，**不是**「不再保留使用者的門檻」。
+
+    使用者調了半天的那個數字是他的工作成果（`use_decide` 的原話），
+    所以有變數的表達式照樣翻成規則。
+    """
+    from d4t.ui.viewmodel import RecipeModel
+
+    m = RecipeModel.starter("ebi_patch")
+    m.set_expr("glv_max - 2")
+    m.set_threshold(3.0)
+    m.use_decide(True)
+
+    assert len(m.decide.rules) == 1
+    assert m.decide.rules[0].when == "glv_max - 2 >= 3"
+    assert m.decide.score == "glv_max - 2"
+
+
+def test_a_broken_expression_is_kept_because_it_is_the_users_work():
+    """解析不出來的表達式**不算常數** —— 那是打到一半或打錯的東西。
+
+    丟掉它比留著更糟：留著的話跑起來會在判定那一步報錯，而那句話講得出
+    是哪裡錯；丟掉的話使用者只會發現他的門檻不見了。
+    """
+    from d4t.ui.viewmodel import RecipeModel
+
+    m = RecipeModel.starter("ebi_patch")
+    m.set_expr("glv_max +")          # 打到一半
+    m.set_threshold(1.0)
+    m.use_decide(True)
+
+    assert len(m.decide.rules) == 1
+    assert "glv_max +" in m.decide.rules[0].when
+
+
+@pytest.mark.parametrize("text, constant", [
+    ("", True), ("   ", True), ("0", True), ("1", True), ("2 * 3", True),
+    ("0 >= 0", True), ("-1e3", True),
+    ("glv_max", False), ("glv_max - 2", False), ("a > 5", False),
+    ("glv_max +", False),          # 壞的 → 當成使用者的東西
+])
+def test_what_counts_as_a_constant_expression(text, constant):
+    """判準是「**用不用得到至少一個量出來的數字**」，不是「是不是字串 0」。"""
+    from d4t.ui.viewmodel import is_a_constant_expression
+
+    assert is_a_constant_expression(text) is constant, text

@@ -126,7 +126,7 @@ from .scope import (
     unsupported_kind_message, visible_steps,
 )
 from .decide_panel import DecidePanel
-from .viewmodel import RecipeModel, accuracy_at, histogram, rebin
+from .viewmodel import RecipeModel, is_a_constant_expression, accuracy_at, histogram, rebin
 from . import theme
 from .theme import DEFAULT_THEME, THEMES, apply_theme, current_theme
 from .welcome import (
@@ -3186,7 +3186,11 @@ class StudioWindow(QMainWindow):
         m = self.model
         if getattr(m, "decide", None) is not None:
             return False
-        if not str(getattr(m, "expr", "") or "").strip():
+        # **常數的 score 不是門檻**（U1，2026-08-24）。這裡以前只問「是不是
+        # 空的」，於是一份 `score.expr` 是 `"0"` 的檔案打開之後會被塞一棵
+        # `0 >= 0` 的樹 —— 而那句「只在真的有 score 表達式時做」的本意
+        # 正是不要發生這件事。見 `viewmodel.is_a_constant_expression`。
+        if is_a_constant_expression(getattr(m, "expr", "")):
             return False
         m.use_decide(True)
         m.ensure_tree()
@@ -3213,8 +3217,13 @@ class StudioWindow(QMainWindow):
                 # 整棵樹只有一片葉子（這份 recipe 還沒有任何判定）——
                 # 給一個真的問得出東西的起手問題，不是一格空白。
                 m.split_tree_leaf("")
-                self.tree_pane.set_rows(self.trial_results or [])
-                self.tree_pane.suggest_question("")
+            # **建議一律問一次**（U1，2026-08-24）。這裡以前縮在上面那個
+            # `if` 裡面，所以一個**已經是 TreeStep** 的根就跳過建議 ——
+            # 而全新 recipe 的根正好是那樣（佔位值 `"0"` 被翻成 `0 >= 0`）。
+            # `suggest_question` 自己會判斷該不該動：真的問題它不碰，
+            # 空的或常數的它才填。
+            self.tree_pane.set_rows(self.trial_results or [])
+            self.tree_pane.suggest_question("")
         self._on_tree_step_clicked("")
         # **看得到才算在畫布上**：判定區長在所有卡片的右邊，而畫布這時多半
         # 停在左半邊 —— 不 fit 的話使用者按了 ADC 卡，畫面上什麼都沒發生。

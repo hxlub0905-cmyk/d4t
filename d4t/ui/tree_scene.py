@@ -49,11 +49,16 @@ __all__ = [
 #: 工程師（推廣鐵則）。`contrast > 120` 這種東西他讀得懂，但**要他從空白
 #: 打出來**就卡住了 —— 打錯一個字得到的是一條 `bad-rule`，而畫面上看起來
 #: 只是「這個工具不理我」。挑三格永遠打不錯。
+#: ⚠ **這幾個字要放得進 118px 的下拉**（2026-08-24）。以前是
+#: ``"is greater than"`` 那一組，在判定面板那一欄被截成 ``is greater tha…``
+#: —— 而六個運算子的差別**正好在被截掉的那幾個字**（greater than ／
+#: greater than or equal）。少掉一個 ``is``，句子讀起來一樣完整
+#: （``glv_max`` ／ ``greater than`` ／ ``67``），而且放得下。
 OPS = (
-    (">", "is greater than"),
-    ("<", "is less than"),
-    (">=", "is at least"),
-    ("<=", "is at most"),
+    (">", "greater than"),
+    ("<", "less than"),
+    (">=", "at least"),
+    ("<=", "at most"),
     ("==", "equals"),
     ("!=", "is not"),
 )
