@@ -66,6 +66,7 @@ from .edge import edge_quality, profile_noise, threshold_level
 
 __all__ = [
     "BlobResult", "MIN_AREA", "measure_blob", "feret", "pick_levels",
+    "ring_is_a_border",
 ]
 
 #: 小於這麼多像素的連通元件不算一團（預設值；卡片可以改）。
@@ -153,6 +154,43 @@ def pick_levels(block: Any, target: str = "auto"
             else (bg, lo, "dark"))
 
 
+#: 外框那一圈最多可以佔整塊區域的幾成，才還算是「一圈邊」。
+#:
+#: 見 :func:`ring_is_a_border`。二分之一是**幾何上的分界**，不是調出來的數字：
+#: 超過它，外框的像素就比內部還多。
+_RING_IS_A_BORDER_MAX = 0.5
+
+
+def ring_is_a_border(shape: Any) -> bool:
+    """這塊區域夠大，讓「外框那一圈」還算是**一圈邊**嗎。
+
+    ``_region_noise`` 的空間項用外框當**背景的樣本**，而那個前提有一個尺寸下限
+    ——它成立的時候外框是一圈細邊，內部才是前景待的地方。
+
+    小到某個程度之後那句話就反過來了：一個 4×8 的框，外框有 20 個像素、內部只有
+    12 —— **「外框」已經不是一圈邊，它就是這塊區域本身**。而一團直徑 3 px 的東西
+    放在 4 px 寬的框裡**必然碰到外框**，於是它自己被算進「背景起伏」：實測
+    （合成 lot 的 spacer 框，48 顆）逐點 σ 是 8.3，外框 MAD 卻是 26.5，取大的
+    那一個把品質從 0.60 壓到 0.35，整塊被判成 ``"flat"``。
+
+    ⚠ **症狀是反過來的，所以特別難查**：ROI 框得**越準**越量不到
+    （緊框 92% 量不到、整張圖只有 2%）——而框得準正是整個 Region 段存在的目的。
+
+    這**不會**放掉空間項本來擋的那一類（低頻起伏，見 :func:`_region_noise`）：
+    起伏的尺度遠大於一個小框，所以在框內它幾乎是常數，製造不出假的前景。
+    那條防線守的是大區域，而它的驗收（`test_a_wandering_background_is_not_a_blob`）
+    用的是 64×64 —— 外框只佔 6%，一個位元都沒動到。
+    """
+    try:
+        h, w = int(shape[0]), int(shape[1])
+    except (TypeError, ValueError, IndexError):
+        return False
+    if h < 3 or w < 3:
+        return False
+    ring = 2 * w + 2 * h - 4
+    return bool(ring <= _RING_IS_A_BORDER_MAX * (w * h))
+
+
 def _region_noise(block: np.ndarray) -> float:
     """背景自己起伏多少（GLV）—— **兩種估計取大的那一個**。
 
@@ -181,7 +219,7 @@ def _region_noise(block: np.ndarray) -> float:
     arr = np.asarray(block, dtype=np.float64)
     rows = [profile_noise(r) for r in arr if r.size >= 3]
     pointwise = float(np.median(rows)) if rows else 0.0
-    if min(arr.shape[:2]) < 3:
+    if min(arr.shape[:2]) < 3 or not ring_is_a_border(arr.shape):
         return pointwise
     ring = np.concatenate([arr[0, :], arr[-1, :], arr[1:-1, 0], arr[1:-1, -1]])
     spatial = 1.4826 * float(np.median(np.abs(ring - np.median(ring))))

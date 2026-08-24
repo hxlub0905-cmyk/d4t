@@ -5,7 +5,7 @@ f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 ac0c96cd0d671a439c492b72fae0379d364aeb62 AGENTS.md
 b404ab73fd00a46fa43d83d173fe5d973f01bfd7 CLAUDE.md
 b20e9b7f31aa8195e297b4a124b69252cd4c56cf README.md
-716fa83db0c1920b79aea0180d51da5ac117eeab SESSION_LOG.md
+bc6a02c1199b33a06f73939d1f5ad6cbb97826aa SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 7742c2cd23ceff1a020c07c4c4684d332ee78050 d4t/__main__.py
@@ -26,7 +26,7 @@ d090bc2eefc1fe45c48d60848280ba323b0ef4a7 d4t/core/algo/pairing.py
 acba11d258e8a4fb5250d478a59b2d02fe57fe35 d4t/core/algo/profile.py
 c1049c4ae6c2505db6e37b7edeaf364e1244b026 d4t/core/algo/quality.py
 674556c1ad3f6f8d92b26856c455eb02c5125bea d4t/core/algo/roi.py
-1e9aaad7f292805c96c6fc030360d46d29ed6cd3 d4t/core/algo/shape.py
+dc20bcbe71b466b3dee757e62ecf86385df52589 d4t/core/algo/shape.py
 46f9f2aa659d5d22045dc72158126506ce931bab d4t/core/algo/snr.py
 e1f7a95ad976983aa0f1f16b7bd52cdcc67494dd d4t/core/algo/subpixel.py
 82791f0e16286d803ddba7220ac56aec5548f6d4 d4t/core/algo/template.py
@@ -111,6 +111,7 @@ f6378d9ba391a4e1e3ef7ed855c7694b6b7f50b9 docs/plans/F0-master-plan.md
 d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 c4f06765ad918545511da042eb8d2b63df19795f docs/plans/F15-pair-sources.md
 a5b31733923c0c3a3f54782a7720c76fdbbafc38 docs/plans/F20-pick-defect-box.md
+580aa51df6c26db9beb45cf3d3926f4eb33724c9 docs/plans/F21-algo-and-roi.md
 773d4c5652e1abd95b7bf06591a691c07c1c9fa1 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -125,7 +126,7 @@ c5c48dea9e47ea234abb8f488b37f43c6205642b tests/fixtures/golden/dual_route_basic_
 de551d043fb832a5b36c1f4381125aa70afcb61c tests/fixtures/recipes/dual_route_basic.json
 745560662f263dc8a471f910d8b4640c647dd68d tests/fixtures/sample_real.klarf
 ea645411eb897baeb9d9d4967d5e41a86820960f tests/test_algo_edge.py
-afda43c3b63642c80d2d0209a8f66dd407685baa tests/test_algo_shape.py
+43980cd5cff27c39b6a1ce168feae5c9495b0491 tests/test_algo_shape.py
 4282f3b4b954d939d2bb6bb33bcd78757108ba4a tests/test_align.py
 cd34f3f086538f932a481b86326f5ff3846fa9fb tests/test_batch_cache.py
 cab40c428871bfbdb6a7b9c7197dbbf0b10bb1c3 tests/test_batch_steps.py
