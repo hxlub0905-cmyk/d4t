@@ -1585,8 +1585,14 @@ class PipelineCanvas(QGraphicsView):
         """取某個節點的圖元（highlight / 測試用；對應舊的 ``card()``）。"""
         return self._items.get(str(node_id))
 
-    def set_score_summary(self, expr: str, threshold: Any) -> None:
-        self._score_summary = "score = %s   threshold %s" % (expr, threshold)
+    def set_score_summary(self, text: str) -> None:
+        """判定段的一句話摘要（狀態列與測試讀得到）。
+
+        ⚠ 以前這裡自己組 ``"score = … threshold …"`` —— 而 F25 之後**每一份
+        開起來的 recipe 都是判定樹**，那句話會永遠是空的門檻。組字的責任因此
+        搬去 Studio（它才知道現在是哪一種判定），這裡只收結果。
+        """
+        self._score_summary = str(text)
 
     def score_summary(self) -> str:
         return self._score_summary

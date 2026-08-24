@@ -295,3 +295,29 @@ def test_a_leaf_panel_edits_the_class(qapp):
     spin = panel.findChildren(QSpinBox)[0]
     spin.valueChanged.emit(7)
     assert m.tree_node("y").bin == 7
+
+
+def test_converting_a_threshold_recipe_keeps_every_verdict():
+    """F25：舊 recipe 一打開就變成樹 —— **判定不能因此改變**。
+
+    用值網格逐點比（同 F24 ① 證明 `rules_to_tree` 無損的那一套）：同一個
+    分數表達式，走老路（score + threshold）與走轉出來的樹，score 與 bin
+    逐點相同。這是「自動遷移」敢做的唯一理由。
+    """
+    from d4t.core.pipeline import Context, Recipe, ScoreSpec
+    from d4t.core.pipeline.engine import _eval_score
+
+    base = Recipe(recipe_id="t", routes={"ebi_patch": []}, nodes={},
+                  score=ScoreSpec(expr="glv_max - 2", threshold=3.0,
+                                  bins={"below": 0, "above": 1}))
+    m = RecipeModel.from_recipe(base, kind="ebi_patch")
+    m.use_decide(True)
+    m.ensure_tree()
+    converted = m.to_recipe()
+    assert converted.decide is not None and converted.decide.tree is not None
+
+    for v in (-10.0, 0.0, 4.9, 5.0, 5.1, 100.0):
+        old_ctx, new_ctx = Context(), Context()
+        old_ctx.features["glv_max"] = v
+        new_ctx.features["glv_max"] = v
+        assert _eval_score(base, old_ctx) == _eval_score(converted, new_ctx), v

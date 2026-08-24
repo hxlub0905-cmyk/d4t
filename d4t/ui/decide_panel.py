@@ -119,6 +119,10 @@ class DecidePanel(QWidget):
     #: 使用者按了「試跑」以外的任何改動都走 model 的 listener，所以這裡只留
     #: 一個訊號：切換了檢視（Studio 要重排右邊那一欄的高度）。
     mode_changed = Signal(bool)
+    #: 「還沒有判定」那一頁上那顆鈕 —— Studio 接住它去 `add_decision()`
+    #: （放上畫布 ＋ 給一個起手問題）。面板自己做不到那件事：它只有 model，
+    #: 而「放上畫布並跳過去」是視窗的事。
+    decision_requested = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -245,38 +249,16 @@ class DecidePanel(QWidget):
                 "wins.")
             self._build_decide()
         else:
-            # 舊 recipe（只有一個門檻）。**不是一顆勾選框** —— 它是一句講得出
-            # 結果的話加一顆按鈕，而且按下去現有的門檻會變成第一條規則。
-            self.head.setText("This recipe still sorts with one score and one "
-                              "threshold, so it can only make two bins.")
-            self._build_binary()
-            go = small_button("Sort into several classes…", shape="wide")
-            go.setToolTip("Turn this into a decision tree on the canvas. "
-                          "The threshold you have now becomes its first "
-                          "question - nothing is thrown away.")
-            go.clicked.connect(lambda: self.set_multi_class(True))
+            # **沒有判定**（還沒加 ADC 卡的新 recipe）。二元門檻那個編輯器
+            # 2026-08-24 整個拿掉了（使用者：「UI 完全拿掉」；舊 recipe 一打開
+            # 就自動轉成樹，見 `StudioWindow.load_recipe_path`）—— 所以這裡
+            # 不是「另一種判定」，是「還沒有判定」。
+            self.head.setText("Nothing sorts the defects yet.")
+            go = small_button("Add the decision", shape="wide")
+            go.setToolTip("Put a decision tree on the canvas and start with "
+                          "its first question.")
+            go.clicked.connect(self.decision_requested.emit)
             self.body_lay.addWidget(go)
-
-    # ---- 兩類（老路）--------------------------------------------------------
-    def _build_binary(self) -> None:
-        m = self._model
-        edit = QLineEdit(str(m.expr or ""))
-        edit.setPlaceholderText("e.g. glv_max - glv_median")
-        edit.textEdited.connect(lambda t: m.set_expr(str(t)))
-        self.body_lay.addWidget(self._labelled("Score", edit,
-                                               _feature_combo(
-                                                   self._features,
-                                                   lambda tok: m.set_expr(
-                                                       _insert_at_cursor(edit, tok)))))
-
-        spin = QDoubleSpinBox()
-        spin.setDecimals(3)
-        spin.setRange(-1e9, 1e9)
-        spin.setSingleStep(0.5)
-        spin.setValue(float(m.threshold))
-        spin.setToolTip("score >= threshold -> bin 1, otherwise bin 0")
-        spin.valueChanged.connect(lambda v: m.set_threshold(float(v)))
-        self.body_lay.addWidget(self._labelled("Threshold", spin))
 
     # ---- 多類別 -------------------------------------------------------------
     def _build_decide(self) -> None:

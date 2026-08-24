@@ -53,11 +53,16 @@ def _texts(p, cls):
 # --------------------------------------------------------------------------- #
 # 1 & 2. 兩種樣子，一次一種；切過去不丟工作成果
 # --------------------------------------------------------------------------- #
-def test_it_starts_on_the_two_bin_threshold(panel):
+def test_with_no_decision_it_offers_to_add_one(panel):
+    """F25：二元門檻的編輯器拿掉了（使用者：「UI 完全拿掉」）——
+    沒有判定的時候這一頁不是「另一種判定」，是「還沒有判定」。"""
     from PySide6.QtWidgets import QDoubleSpinBox
+
     assert panel._model.decide is None
-    spin = panel.findChild(QDoubleSpinBox)
-    assert spin is not None and spin.value() == pytest.approx(3.0)
+    assert panel.findChild(QDoubleSpinBox) is None, "門檻格應該已經不存在"
+    assert any("Add the decision" in t
+               for t in _texts(panel, __import__(
+                   "PySide6.QtWidgets", fromlist=["QPushButton"]).QPushButton))
 
 
 def test_switching_turns_the_threshold_into_the_first_rule(panel):
@@ -79,10 +84,12 @@ def test_switching_back_leaves_a_usable_expression(panel):
     assert str(m.expr).strip(), "切回去之後那一格不能是空的（空的解析不出來）"
 
 
-def test_only_one_of_the_two_is_on_screen(panel):
+def test_there_is_no_threshold_editor_anywhere(panel):
+    """兩種樣子只剩一種 —— 門檻格在哪一頁都不該出現（F25）。"""
     from PySide6.QtWidgets import QDoubleSpinBox
+    assert panel.findChild(QDoubleSpinBox) is None
     panel.set_multi_class(True)
-    assert panel.findChild(QDoubleSpinBox) is None, "多類別那一種沒有門檻格"
+    assert panel.findChild(QDoubleSpinBox) is None
 
 
 # --------------------------------------------------------------------------- #

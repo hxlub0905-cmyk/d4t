@@ -119,7 +119,11 @@ def test_gallery_populates_after_trial(ran):
 
     ids = window.gallery.displayed_ids()
     assert sorted(ids) == sorted(str(r["defect_id"]) for r in window.trial_results)
-    # 縮圖一開始一律是 None（解碼是背景的事）
+    # 縮圖一開始一律是 None（解碼是背景的事）。
+    # **重新 populate 一次再看**：原本是跑完直接斷言，而那是在賭「背景那批
+    # 還沒回來」—— 它賭的是 event loop 轉了幾圈，不是這裡要守的性質。
+    # 要守的是「populate 自己不解碼」，所以就地 populate 再問。
+    window._populate_gallery(window.trial_results)
     assert all(item["thumb"] is None for item in window.gallery.grid.items())
     # bin 一定寫在說明文字裡（不是只有顏色）
     assert "bin" in window.gallery.caption_at(0)
@@ -153,6 +157,10 @@ def test_thumbs_requested_leads_to_thumbs(ran, qapp):
     # 把那個備忘重置，才驗得到「量到可視範圍就會要縮圖」這件事本身。
     # （這一批全部塞得進畫面，所以範圍從頭到尾都是 (0, N)，
     #   單純再 resize 一次是不會重發的。）
+    #
+    # **也要把已經貼上的縮圖清掉**：背景那批可能已經回來了（那取決於 event
+    # loop 轉了幾圈，不是這裡要守的性質），而已經有縮圖的顆本來就不必再要。
+    window._populate_gallery(window.trial_results)
     window.gallery.grid._last_request = None
     window.gallery.grid.resize(860, 520)
     qapp.processEvents()

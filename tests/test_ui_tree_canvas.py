@@ -282,3 +282,30 @@ def test_the_zone_sits_to_the_right_of_the_cards(qapp):
     node_right = node.pos().x() + canvas_mod.NODE_W
     entry = _entries(view)[0]
     assert entry.pos().x() > node_right
+
+
+def test_opening_a_threshold_recipe_puts_a_tree_on_the_canvas(qapp, tmp_path):
+    """F25（使用者：「二元門檻的 UI 完全拿掉」）：舊 recipe 一打開，
+    畫布上就是一棵樹 —— 而且**不算改過**（關窗不該問要不要存）。"""
+    import json
+
+    from d4t.core.pipeline import Recipe, RecipeNode, ScoreSpec
+    from d4t.ui.studio import StudioWindow
+
+    recipe = Recipe(
+        recipe_id="old", routes={"ebi_patch": ["load"]},
+        nodes={"load": RecipeNode("load", "load_patch", {})},
+        score=ScoreSpec(expr="glv_max", threshold=3.0,
+                        bins={"below": 0, "above": 1}))
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps(recipe.to_json_dict()), encoding="utf-8")
+
+    w = StudioWindow()
+    try:
+        assert w.load_recipe_path(str(path), sync=True)
+        assert w.model.decide is not None
+        assert w.model.tree_node("").when.startswith("glv_max")
+        assert w.pipeline.decision_items(), "畫布上沒有判定區"
+        assert not w.model.dirty, "只是打開一個檔案，不該算成使用者改過"
+    finally:
+        w.close()

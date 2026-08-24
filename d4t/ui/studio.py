@@ -1035,6 +1035,7 @@ class StudioWindow(QMainWindow):
         self.decide_panel = DecidePanel(self)
         self.decide_panel.set_model(self.model)
         self.decide_panel.mode_changed.connect(self._on_decide_mode)
+        self.decide_panel.decision_requested.connect(self.add_decision)
         # 分流的編輯區塊（F23 期2）—— 判定欄**上方**：它在跑之前就決定每一顆
         # 走哪條 route，判定是跑完之後的事，由上往下讀正好是時間順序。
         from .route_panel import RouteByBox
@@ -1804,7 +1805,27 @@ class StudioWindow(QMainWindow):
             # 「這一批分兩條路跑」，而不是只有工具列一個下拉。
             view.set_prefilter(prefilter)
             view.set_selected(self.selected_node)
-            view.set_score_summary(self.model.expr, self.model.threshold)
+            view.set_score_summary(self._score_summary_text())
+
+    def _score_summary_text(self) -> str:
+        """判定段現在在做什麼，一句話。
+
+        三種樣子各講各的：判定樹講「幾個問題」、規則清單講「幾條規則」、
+        什麼都沒有就講沒有。（二元門檻那一句 F25 之後不會再出現 ——
+        開起來的 recipe 一律是樹。）
+        """
+        from .tree_scene import display_tree, layout_cells
+
+        d = getattr(self.model, "decide", None)
+        if d is None:
+            return "no decision yet"
+        if getattr(d, "tree", None) is not None:
+            steps = sum(1 for c in layout_cells(display_tree(d), d)
+                        if c["kind"] == "step")
+            return "decision tree · %d question%s" % (steps,
+                                                      "" if steps == 1 else "s")
+        return "decision · %d rule%s" % (len(d.rules),
+                                         "" if len(d.rules) == 1 else "s")
 
     def _prefilter_info(self) -> Optional[Dict[str, Any]]:
         """畫布上的分流徽章要畫的東西（F25-B）；沒有 route_by 回 None。
@@ -1849,7 +1870,7 @@ class StudioWindow(QMainWindow):
         自己會跳過「有人正在打字」的重建（見它的 `refresh`）。
         """
         self.decide_panel.refresh()
-        self.pipeline.set_score_summary(self.model.expr, self.model.threshold)
+        self.pipeline.set_score_summary(self._score_summary_text())
 
     def _on_decide_mode(self, on: bool) -> None:
         """切了「分成好幾類」——  bin 直方圖那條門檻線只對二元那一種有意義。"""
@@ -3114,6 +3135,34 @@ class StudioWindow(QMainWindow):
                 and route in self.model.route_keys():
             self.switch_route(route)
 
+    def _adopt_threshold_as_a_tree(self) -> bool:
+        """開一份**用門檻分兩類**的舊 recipe → 當場變成判定樹（F25，使用者
+        2026-08-24：「二元門檻的 UI 完全拿掉」）。
+
+        只在**讀檔案**這條路上做，而且只在真的有 score 表達式時做 ——
+        空白的新 recipe 不會被塞一棵樹（那是 ADC 卡的工作）。
+
+        ⚠ 這是 **UI 層的遷移**，不是引擎的：`Recipe.load` 一個位元都沒動，
+        CLI 照舊跑那份檔案的 `score`（黃金值因此不受影響），而 Studio 現在
+        又存不了檔（2026-08-16 拿掉），所以磁碟上的東西不會被改寫。
+
+        ⚠ 一個誠實的落差：`use_decide` 產出的規則是 ``expr >= threshold``，
+        而老路是 ``score < threshold`` 判 below —— 兩者在**分數是 NaN** 的
+        時候會分到不同的 bin（老路進 above、新的進 otherwise）。留 ``>=``
+        是因為它讀起來才是正著的（「大於就是這一類」）；NaN 的分數本來就是
+        一份算壞了的 recipe。
+        """
+        m = self.model
+        if getattr(m, "decide", None) is not None:
+            return False
+        if not str(getattr(m, "expr", "") or "").strip():
+            return False
+        m.use_decide(True)
+        m.ensure_tree()
+        m.dirty = False          # 使用者什麼都還沒做，關窗不要問他要不要存
+        m.clear_history()        # 「復原」不該把他退回一個看不到編輯器的狀態
+        return True
+
     def add_decision(self) -> bool:
         """把判定樹放上畫布，並開始編第一步（F25）。
 
@@ -3584,6 +3633,7 @@ class StudioWindow(QMainWindow):
         if ds_kind and ds_kind in recipe.routes:
             kind = ds_kind
         self._apply_model(RecipeModel.from_recipe(recipe, kind=kind))
+        converted = self._adopt_threshold_as_a_tree()
         self.recipe_path = path
         self.setWindowTitle("d4t Studio — %s" % self.model.recipe_id)
         n = len(self.model.node_order)
@@ -3592,6 +3642,12 @@ class StudioWindow(QMainWindow):
         skew = version_skew(getattr(recipe, "app_version", ""))
         if skew:
             self._status(skew, "error")
+        elif converted:
+            # 轉過去了就**講出來** —— 使用者存的是一個門檻，打開看到的是一棵
+            # 樹，不說的話那是「這個工具把我的東西改掉了」。
+            self._status("Loaded recipe “%s” (%d steps). Its threshold is now "
+                         "the first question of the decision tree on the "
+                         "canvas." % (self.model.recipe_id, n))
         else:
             self._status("Loaded recipe “%s” (%d steps, route %s)"
                          % (self.model.recipe_id, n, self.model.kind))
