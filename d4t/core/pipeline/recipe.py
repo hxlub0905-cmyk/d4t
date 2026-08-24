@@ -43,6 +43,7 @@ from .step import (
 
 __all__ = [
     "RecipeError", "RecipeNode", "ScoreSpec", "Edge", "Recipe",
+    "RouteBy", "resolve_route", "route_miss_message",
     "Issue", "execution_order", "validate",
 ]
 
@@ -263,6 +264,98 @@ class DecideSpec:
 
 
 @dataclass(frozen=True)
+class RouteBy:
+    """分流（F23）：**跑之前**逐顆看 KLARF 的一欄，決定這一顆走哪條 route。
+
+    為什麼它是 recipe 頂層的一個區塊、不是一張卡也不是 decide 的規則
+    ------------------------------------------------------------------
+    它在**跑之前**就要決定 —— 卡片是在 route 裡面跑的（雞生蛋），而 decide 的
+    變數是特徵、特徵要跑完才有。分流要的是 Class 2 的顆**根本不跑** A 組卡：
+    省的是實打實的計算，擋的是「對 Class 2 跑 A 組 CD 卡量出一個看起來正常、
+    但問錯問題的數字」。
+
+    語意（F23 §4，使用者 2026-08-24 定調）：
+
+    * ``column`` 是 KLARF 的欄名（一律大寫存放）；值**先 strip 再比字串**
+      （KLARF 的值都是字串，``"1"`` 與 ``" 1"`` 要落在同一格）。
+    * 對不上 ``map`` 的走 ``default``；``default`` 留空＝那一顆**失敗**
+      （``ok=False``，訊息講出值 X 不在對照表裡）。兩種都要支援 ——
+      「沒見過的 class 該怎麼辦」是站點政策，不是軟體能替使用者決定的。
+    * ``route_by`` 存在時**覆蓋 kind 選路**（§4.2）：route 鍵因此可以是任意
+      字串（``particle_route``），不必是 dataset kind。
+    * **鐵則 9 條款**：這個區塊不在 → 一個位元都不動（同 ``decide`` 的嚴格
+      附加模式）。round-trip 是 identity。
+    """
+    column: str
+    map: Dict[str, str] = field(default_factory=dict)
+    default: str = ""
+
+
+def _route_by_from_json(raw: Any) -> Optional["RouteBy"]:
+    """讀 ``route_by`` 區塊。**沒有就回 None** —— 那份 recipe 照舊用 kind 選路。
+
+    格式錯**當場講**而不是安靜地退回老路（同 `_decide_from_json` 的理由）：
+    安靜退回的話，一份打錯字的分流 recipe 會整批走同一條路 —— 跑得完、有數字、
+    而且 CSV 上沒有任何線索說它沒分流。
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise RecipeError("the 'route_by' block must be an object (dict), got "
+                          "%s" % type(raw).__name__)
+    missing = [k for k in ("column", "map") if k not in raw]
+    if missing:
+        raise RecipeError("route_by is missing %s - it needs 'column' (the "
+                          "KLARF column to look at) and 'map' (value -> route "
+                          "name)" % missing)
+    m = raw["map"]
+    if not isinstance(m, dict):
+        raise RecipeError("route_by.map must be an object mapping column "
+                          "values to route names, got %s" % type(m).__name__)
+    return RouteBy(
+        column=str(raw["column"]).strip().upper(),
+        map={str(k).strip(): str(v) for k, v in m.items()},
+        default=str(raw.get("default", "") or ""),
+    )
+
+
+def resolve_route(recipe: "Recipe", item: Any, kind: str
+                  ) -> Tuple[Optional[str], str, str]:
+    """這一顆走哪條 route：``(route 鍵, 欄位值, 決定的來源)``。
+
+    來源三種：``"kind"``（沒有 ``route_by``，維持舊語意 —— route 鍵就是
+    dataset kind）、``"map"``（值對上了對照表）、``"default"``（沒對上、走
+    預設路）。對不上而且 ``default`` 留空時 route 鍵是 **None** ——
+    呼叫端把那一顆判失敗（訊息用 :func:`route_miss_message`）。
+
+    欄位值從 ``item.fields`` 讀（`ingest.dataset.fill_fields` 填的那一份，
+    大寫欄名）—— **這一支不碰 KLARF**，跟卡片同一條規矩（鐵則：讀檔在 ingest
+    層）。欄位沒被填進來時值是空字串，走「對不上」那條路。
+    """
+    rb = getattr(recipe, "route_by", None)
+    if rb is None:
+        return kind, "", "kind"
+    fields = getattr(item, "fields", None) or {}
+    raw = fields.get(str(rb.column).strip().upper())
+    value = str(raw).strip() if raw is not None else ""
+    if value in rb.map:
+        return str(rb.map[value]), value, "map"
+    default = str(rb.default or "").strip()
+    if default:
+        return default, value, "default"
+    return None, value, "miss"
+
+
+def route_miss_message(route_by: "RouteBy", value: str) -> str:
+    """「這一顆對不上對照表」的白話訊息（每一顆失敗都帶著它）。"""
+    mapped = ", ".join("'%s'" % k for k in sorted(route_by.map)) or "(none)"
+    return ("route_by: the %s value '%s' is not in the route map (mapped "
+            "values: %s) and no default route is set. Add this value to the "
+            "map, or set a default route for everything else."
+            % (route_by.column, value, mapped))
+
+
+@dataclass(frozen=True)
 class Edge:
     """畫布上的一條線：**來源節點的哪個輸出埠 → 下游節點的哪個輸入參數**。
 
@@ -399,6 +492,51 @@ def _decide_issues(recipe: "Recipe", decide: "DecideSpec") -> List["Issue"]:
                 code="bad-rule", level="error", node_id=None,
                 title="The decide block's score expression does not parse",
                 detail=str(e)))
+    return out
+
+
+def _route_by_issues(recipe: "Recipe", rb: "RouteBy") -> List["Issue"]:
+    """``route_by`` 的健檢（F23 §4.1）。
+
+    兩條 error 擋的是同一個形狀：**寫了一條沒有人走得到的路**。map 或 default
+    指到不存在的 route，那幾顆會逐顆失敗 —— 而那是整批跑完才發現的最貴發現法。
+    「欄位在不在這份 KLARF 裡」不在這裡查：validate 手上沒有資料集，那一條在
+    CLI／Studio 開跑之前查（`missing_columns_of`）。
+    """
+    out: List[Issue] = []
+    if not str(rb.column or "").strip():
+        out.append(Issue(
+            code="bad-route-by", level="error", node_id=None,
+            title="route_by has no column",
+            detail="route_by.column is empty - name the KLARF column whose "
+                   "value picks the route (CLASSNUMBER is the usual one)."))
+    if not rb.map:
+        out.append(Issue(
+            code="bad-route-by", level="error", node_id=None,
+            title="route_by has an empty map",
+            detail="route_by.map has no entries, so no defect can ever be "
+                   "routed. Map at least one column value to a route."))
+    targets = [str(v) for v in rb.map.values()]
+    if str(rb.default or "").strip():
+        targets.append(str(rb.default).strip())
+    missing = sorted({t for t in targets if t not in recipe.routes})
+    if missing:
+        out.append(Issue(
+            code="bad-route-by", level="error", node_id=None,
+            title="route_by points at a route that does not exist",
+            detail="%s are not among this recipe's routes (%s) - every defect "
+                   "sent there would fail." % (missing, sorted(recipe.routes))))
+    # 寫了但 route_by 指不到的 route：**永遠不會有人走**（route_by 存在時它
+    # 覆蓋 kind 選路，§4.2），而寫了沒人走的路最容易爛。
+    unreachable = sorted(set(recipe.routes) - set(targets))
+    if unreachable:
+        out.append(Issue(
+            code="route-not-reachable", level="warning", node_id=None,
+            title="Some routes can never be taken",
+            detail="with route_by present, the route is picked per defect "
+                   "from %s only - %s are defined but nothing maps to them, "
+                   "so no defect will ever run them."
+                   % (rb.column, unreachable)))
     return out
 
 
@@ -1035,6 +1173,9 @@ class Recipe:
     #: 多類別判定（F21-D）。``None`` = 這份 recipe 走 ``score`` 那條老路
     #: （一個位元都不動）。兩個都寫是 ``ambiguous-decision`` 的 error。
     decide: Optional["DecideSpec"] = None
+    #: 分流（F23）。``None`` = 照舊用 dataset kind 選 route（一個位元都不動）。
+    #: 有它時每一顆逐顆看 KLARF 的一欄決定走哪條 route（:func:`resolve_route`）。
+    route_by: Optional["RouteBy"] = None
 
     # ---- JSON serde -------------------------------------------------------
     def to_json_dict(self) -> Dict[str, Any]:
@@ -1081,6 +1222,11 @@ class Recipe:
                                       "label": self.decide.otherwise_label}
             d_out["score"] = self.decide.score
             out["decide"] = d_out
+        # 同一條規矩：**沒有就不寫這個鍵**（嚴格附加，鐵則 9）。
+        if self.route_by is not None:
+            out["route_by"] = {"column": self.route_by.column,
+                               "map": dict(self.route_by.map),
+                               "default": self.route_by.default}
         return out
 
     @classmethod
@@ -1114,6 +1260,7 @@ class Recipe:
         )
 
         decide = _decide_from_json(d.get("decide"))
+        route_by = _route_by_from_json(d.get("route_by"))
 
         routes = {str(k): [str(x) for x in v] for k, v in dict(d["routes"]).items()}
 
@@ -1172,6 +1319,7 @@ class Recipe:
             description=str(d.get("description", "")),
             edges=edges,
             decide=decide,
+            route_by=route_by,
         )
 
     @classmethod
@@ -1513,6 +1661,11 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     if decide is not None:
         issues.extend(_decide_issues(recipe, decide))
 
+    # ---- 分流（F23）：map/default 指到的 route 要存在 ----
+    route_by = getattr(recipe, "route_by", None)
+    if route_by is not None:
+        issues.extend(_route_by_issues(recipe, route_by))
+
     # ---- bins 必須含 below / above ----（有 decide 就整段跳過，見上）
     if decide is None:
         bins = recipe.score.bins or {}
@@ -1526,7 +1679,14 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                            f"{sorted(bins)}"))
 
     # ---- 要檢查哪些 route ----
-    if kind is not None:
+    #
+    # ``route_by`` 存在時它**覆蓋 kind 選路**（F23 §4.2）：route 鍵是任意字串
+    # （``particle_route``），dataset kind 本來就不該在 routes 裡 —— 對它報
+    # `unknown-route` 等於「recipe 是對的，但健檢說它壞了」。所以這時一律檢查
+    # **全部** route（每一條都可能被某個 class 走到）。
+    if route_by is not None:
+        kinds = list(recipe.routes)
+    elif kind is not None:
         if kind not in recipe.routes:
             issues.append(Issue(
                 code="unknown-route", level="error", node_id=None,

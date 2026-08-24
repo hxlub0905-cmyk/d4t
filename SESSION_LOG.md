@@ -19,6 +19,42 @@
 
 ---
 
+## F23 期1：route_by 引擎（2026-08-24）
+
+四題使用者一句「照提案著做」全數定調（default 兩種都支援、第一期選項 A、
+預覽自動切 route、lot_stats 併第 3 期），期1 當天做完。
+
+* **`RouteBy{column, map, default}`** 是 recipe 頂層的嚴格附加區塊（不在就
+  一個位元不動；round-trip identity）。欄名讀進來就正規化成大寫，值先 strip
+  再比字串。
+* **route 在 `run_defect`／`run_defect_cached` 裡自己解**（`resolve_route`），
+  不是叫呼叫端解 —— batch、Studio 預覽、CLI 自動拿到同一個答案，「預覽跟批次
+  走不同路」從結構上長不出來。`kind` 只剩資料身分（`meta["_dataset_kind"]`）。
+* **快取簽章吃 route 鍵**（`image_segment_signature(recipe, route)`）：
+  兩條路各自一份條目，換 route 不會拿到隔壁那條路的影像。
+* `route_taken` 特徵（sorted routes 的索引）＋ `meta["route"]`，**只在
+  route_by 存在時寫**（黃金值三份不動的前提）。對不上而沒 default 的那一顆
+  `ok=False`，訊息講出值 X 不在對照表裡（`route_miss_message`）。
+* `run_batch` 開跑前自動補欄 —— 但**只在有顆缺這一欄時**，而且補的是
+  「現有欄位 ∪ 這一欄」（`fill_fields` 是整份換掉，只補一欄會把 carry 進來的
+  其他欄洗掉；每顆都有＝一個位元不動，測試靠這個手排路線）。
+* `run_batch_steps`：route_by 存在時走 map/default 指到的**每一條** route 的
+  跨顆卡，同一個節點只跑一次（Output 寫檔不可逆，寫兩次是覆寫不是保險）。
+* **兩條 error lint**（`bad-route-by`：空欄名/空 map/指到不存在的 route）＋
+  `route-not-reachable` warning；route_by 存在時 validate 檢查**全部** route、
+  不再對 kind 報 `unknown-route`（route_by 覆蓋 kind 選路，§4.2）。
+* CLI：開跑前查欄位在不在（`missing_columns_of`，手上有 KlarfDoc 答得出
+  「它有哪些欄」）；跑完印分流結果＋**掉進 default 的顆數**＋一顆都沒走的
+  route（寫了沒人走的路最容易爛）。
+* `make_sample.py --class-by-truth`（**選配**，預設逐位元組不變 ——
+  `test_export_klarf` 倚著「原檔 CLASSNUMBER 全 0」在算改動列數）：
+  REAL=1、NUISANCE=2，分流的合成資料一行指令就有。
+* 驗收全過（`tests/test_route_by.py`，27 條）：走對路 24/24、B 路的顆**沒有**
+  A 路的特徵、workers=1/2 逐項相同、快取冷跑＝熱跑、兩條 route 簽章不同、
+  黃金值與全套 core 測試不動。
+
+---
+
 ## F23 計畫書：分流（route_by）—— 議程，未動工（2026-08-24）
 
 使用者定調 pre-filter 的真正需求：「**不同的 Classnumber 走不同的『卡片』**」

@@ -248,6 +248,21 @@ def run_batch(recipe: Recipe, dataset: Any, *,
     items = list(dataset.items) if limit is None else list(dataset.items)[:limit]
     n = len(items)
     kind = str(getattr(dataset, "kind", ""))
+    # ---- 分流（F23）：route_by 的那一欄要在每一顆的 `fields` 裡 ----
+    # 使用者不必記得先 carry —— 開跑前自動補。**只在有顆缺這一欄時才動手**，
+    # 而且補的是「現有欄位 ∪ 這一欄」：`fill_fields` 是整份換掉（刻意的，見
+    # 它的說明），只補一欄的話會把 Load 卡 carry 進來的其他欄安靜地洗掉。
+    # 每一顆都已經有這一欄（測試手填、或上游已 carry）→ 一個位元都不動。
+    rb = getattr(recipe, "route_by", None)
+    if rb is not None:
+        col = str(rb.column or "").strip().upper()
+        if col and any(col not in (getattr(it, "fields", None) or {})
+                       for it in items):
+            from ..ingest.dataset import fill_fields
+            have: set = set()
+            for it in getattr(dataset, "items", []) or []:
+                have.update((getattr(it, "fields", None) or {}).keys())
+            fill_fields(dataset, sorted(have | {col}))
     token = _dataset_token_for(dataset) if cache_dir else ""
     # 掛在 main 上的第二份資料（F15）。只送 items —— `Dataset` 掛著 `KlarfDoc`，
     # 而那個東西刻意不進 worker（見模組說明）。
@@ -343,8 +358,18 @@ def run_batch_steps(recipe: Recipe, dataset: Any,
     reg = REGISTRY if registry is None else registry
     k = str(kind if kind is not None else getattr(dataset, "kind", "") or "")
     bctx = BatchContext(rows=list(rows), dataset=dataset, recipe=recipe, kind=k)
+    # 分流（F23）：route_by 存在時 route 鍵不是 kind，而是 map/default 指到的
+    # 那幾條 —— 每一條上的跨顆卡都要跑到（同一個節點出現在兩條 route 上時
+    # 只跑一次：Output 卡寫檔是不可逆的，寫兩次不是「再保險一次」是覆寫）。
+    rb = getattr(recipe, "route_by", None)
+    if rb is None:
+        route_keys = [k]
+    else:
+        route_keys = sorted({str(v) for v in rb.map.values()}
+                            | ({str(rb.default).strip()}
+                               if str(rb.default or "").strip() else set()))
     try:
-        order = execution_order(recipe, k)
+        orders = [execution_order(recipe, rk) for rk in route_keys]
     except Exception as e:
         # route 有問題的話 `run_defect` 已經一顆一顆講過了，所以這裡不再報
         # 一次 error（同一件事兩個訊息，使用者會以為是兩個問題）。但也**不能
@@ -353,16 +378,21 @@ def run_batch_steps(recipe: Recipe, dataset: Any,
         bctx.warn("No output was written: this recipe has no route for '%s' "
                   "(%s)." % (k, e))
         return bctx
-    for nid in order:
-        node = recipe.nodes.get(nid)
-        if node is None or not node.enabled:
-            continue
-        step_cls = reg.get(node.step)
-        if step_cls is None or step_cls.scale != SCALE_LOT:
-            continue
-        try:
-            params = step_cls.validate_params(node.params)
-            step_cls().run_batch(bctx, params)
-        except Exception as e:              # noqa: BLE001 — 鐵則 7 的跨顆版
-            bctx.errors[nid] = str(e)
+    seen: set = set()
+    for order in orders:
+        for nid in order:
+            if nid in seen:
+                continue
+            seen.add(nid)
+            node = recipe.nodes.get(nid)
+            if node is None or not node.enabled:
+                continue
+            step_cls = reg.get(node.step)
+            if step_cls is None or step_cls.scale != SCALE_LOT:
+                continue
+            try:
+                params = step_cls.validate_params(node.params)
+                step_cls().run_batch(bctx, params)
+            except Exception as e:          # noqa: BLE001 — 鐵則 7 的跨顆版
+                bctx.errors[nid] = str(e)
     return bctx

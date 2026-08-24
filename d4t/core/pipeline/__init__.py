@@ -29,8 +29,11 @@ from .recipe import (
     Recipe,
     RecipeError,
     RecipeNode,
+    RouteBy,
     ScoreSpec,
     execution_order,
+    resolve_route,
+    route_miss_message,
     validate,
 )
 from .engine import (
@@ -56,6 +59,8 @@ __all__ = [
     # recipe
     "Edge", "Recipe", "RecipeNode", "ScoreSpec", "Issue",
     "validate", "execution_order", "RecipeError",
+    # 分流（F23）
+    "RouteBy", "resolve_route", "route_miss_message",
     # expression
     "parse_expression", "Expression", "ExpressionError",
     # engine

@@ -135,7 +135,25 @@ def _cmd_run(args: argparse.Namespace) -> int:
         for w in second.warnings:
             print("  △ %s" % w)
 
-    if ds.kind not in recipe.routes:
+    # ---- 分流（F23）：route_by 存在時它覆蓋 kind 選路 ----
+    # 欄位在不在**這裡**查（手上有 KlarfDoc，答得出「那它有哪些欄」）——
+    # 整批跑完才發現「那一欄根本不存在」是最貴的一種發現方式。
+    rb = getattr(recipe, "route_by", None)
+    if rb is not None:
+        from d4t.core.ingest.dataset import columns_of, missing_columns_of
+
+        absent = missing_columns_of(ds, [rb.column])
+        if absent:
+            have = ", ".join(columns_of(ds)) or "（這種資料沒有 KLARF，沒有欄位）"
+            print("[錯誤] route_by 指到這份資料沒有的欄：%s。它有的是：%s"
+                  % (", ".join(absent), have), file=sys.stderr)
+            return 2
+        mapping = "、".join("%s→%s" % (v, r)
+                            for v, r in sorted(rb.map.items()))
+        tail = ("；其他走 %s" % rb.default.strip()) if rb.default.strip() \
+            else "；對不上＝那一顆失敗"
+        print(f"分流：{rb.column}（{mapping}{tail}）")
+    elif ds.kind not in recipe.routes:
         print(f"[錯誤] recipe 沒有 '{ds.kind}' 的 route（有：{sorted(recipe.routes)}）", file=sys.stderr)
         return 2
 
@@ -172,6 +190,32 @@ def _cmd_run(args: argparse.Namespace) -> int:
         for r in ok:
             bins[r.get("bin")] = bins.get(r.get("bin"), 0) + 1
         print("bin 分佈：" + " · ".join(f"bin {b}={c}" for b, c in sorted(bins.items())))
+    # ---- 分流摘要（F23 §4.1）----
+    # 「掉進 default 的顆數」一定要看得見：站點換了編碼、整批掉進 default，
+    # 是「跑得完、有數字、而且是錯的」的形狀。route 的決定是純函式
+    # （fields → route），所以這裡重算一次就是批次裡用的那個答案。
+    if rb is not None:
+        from d4t.core.pipeline.recipe import resolve_route
+
+        route_counts: dict = {}
+        n_defaulted = 0
+        for item in list(ds.items)[:n_total]:
+            r_key, _val, how = resolve_route(recipe, item, ds.kind)
+            key = r_key if r_key is not None else "（沒有 route，該顆失敗）"
+            route_counts[key] = route_counts.get(key, 0) + 1
+            if how == "default":
+                n_defaulted += 1
+        print("分流結果：" + " · ".join(f"{rk}={c}"
+                                      for rk, c in sorted(route_counts.items())))
+        if n_defaulted:
+            print(f"  △ {n_defaulted} 顆的 {rb.column} 值不在對照表裡，"
+                  f"走了 default route「{rb.default.strip()}」")
+        declared = set(rb.map.values()) | ({rb.default.strip()}
+                                           if rb.default.strip() else set())
+        untaken = sorted(declared - set(route_counts))
+        if untaken:
+            print("  △ 這幾條 route 一顆都沒走到：%s（寫了但用不到的路最容易爛）"
+                  % ", ".join(untaken))
     gt_path, gt = _find_ground_truth(getattr(args, "ground_truth", None),
                                      str(args.klarf))
     if gt:
