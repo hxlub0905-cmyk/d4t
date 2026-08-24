@@ -1131,6 +1131,8 @@ class PipelineCanvas(QGraphicsView):
     #: 點了判定區的入口小卡（F24 ②）——「跳到判定的編輯」。
     #: 入口卡永遠恰好一個、不能刪，所以這裡沒有 id 要帶。
     decision_clicked = Signal()
+    #: 點了畫布上的分流徽章（F25-B）—— 去編 route_by。
+    prefilter_clicked = Signal()
     #: 點了判定樹的一個菱形／托盤（F24 ③）—— 帶的是**路徑**（"" = 根、
     #: "yn…" 一路往下）。節點是 frozen dataclass，路徑才是唯一的身分。
     tree_step_clicked = Signal(str)
@@ -1364,6 +1366,9 @@ class PipelineCanvas(QGraphicsView):
         # 重建。它跟節點一起住在 scene 裡，所以平移縮放是同一件事。
         self._tree_items = []
         self._rebuild_decision()
+        # 分流徽章（F25-B）同理：它站在所有卡片的**前面**。
+        self._prefilter_items = []
+        self._rebuild_prefilter()
 
         self.set_selected(self._selected)
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
@@ -1411,6 +1416,48 @@ class PipelineCanvas(QGraphicsView):
     def decision_items(self) -> List[Any]:
         """判定區現在的圖元（測試與外部檢查用）。"""
         return list(getattr(self, "_tree_items", []) or [])
+
+    # ---- 分流徽章（F25-B）-------------------------------------------------
+    def set_prefilter(self, info: Optional[Dict[str, Any]]) -> None:
+        """換掉分流徽章（``None`` = 這份 recipe 沒有分流，畫布上就沒有它）。
+
+        形狀見 `route_badge.route_badge_info`。它**不是一張卡**（不可拖、
+        沒有埠）—— 理由見那個模組的說明。
+        """
+        self._prefilter_info = None if info is None else dict(info)
+        self._rebuild_prefilter()
+
+    def _rebuild_prefilter(self) -> None:
+        from . import route_badge
+
+        for it in getattr(self, "_prefilter_items", []) or []:
+            try:
+                self._scene.removeItem(it)
+            except Exception:          # noqa: BLE001 — clear() 先銷毀過就算了
+                pass
+        self._prefilter_items = []
+        info = getattr(self, "_prefilter_info", None)
+        if not info:
+            return
+        # 站在最左邊那張卡的**前面**（左→右讀起來就是時間順序：
+        # 先分流、再跑卡片、最後判定）。
+        left, top, feed = None, 0.0, None
+        for item in self._items.values():
+            x = item.pos().x()
+            if left is None or x < left:
+                left, top = x, item.pos().y()
+                feed = QPointF(x, item.pos().y() + item.height() / 2.0)
+        if left is None:
+            left, top = 0.0, 0.0
+        origin = QPointF(left - route_badge.BADGE_W - COL_GAP, top)
+        self._prefilter_items = route_badge.build_badge(
+            self._scene, self, info, origin, feed_to=feed)
+        rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
+        self._scene.setSceneRect(self._scene.sceneRect().united(rect))
+
+    def prefilter_items(self) -> List[Any]:
+        """分流徽章現在的圖元（測試與外部檢查用）。"""
+        return list(getattr(self, "_prefilter_items", []) or [])
 
     def set_tree_selected(self, path: Optional[str]) -> None:
         """畫布上亮起判定樹的某一步（右欄正在編它）。``None`` = 沒有。"""

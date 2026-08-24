@@ -5,7 +5,7 @@ f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 ac0c96cd0d671a439c492b72fae0379d364aeb62 AGENTS.md
 b404ab73fd00a46fa43d83d173fe5d973f01bfd7 CLAUDE.md
 b20e9b7f31aa8195e297b4a124b69252cd4c56cf README.md
-43d1f5dc7c09ee4dfe58f79636ee7aecdc9ab799 SESSION_LOG.md
+28f5b616436c97742fa6bad8685f8ff9490041b5 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 006dfca218aa672b81ccddb1860dbeec06e0c8bb d4t/__main__.py
@@ -84,16 +84,17 @@ bcea66e1a82ee590f997bbf319fea696277be9f6 d4t/ui/app.py
 f8cbf586f20a72eb7dbeae1b04aaf0d47f3cbe6a d4t/ui/assets/d4t-wordmark.svg
 a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
 87bce11608d08f4302947e917b2b24d076571775 d4t/ui/branding.py
-c151d427df3d43b5fbdd7c5c6d10744bd90c2f5c d4t/ui/canvas.py
+79541d1ae01234d33234781cd54026c9741c28cd d4t/ui/canvas.py
 3b58b7e078d58ad84a8939734b65952a75a029f3 d4t/ui/cell_canvas.py
 b5d82cc922ba05966a072a974b6685b29e8ee7db d4t/ui/decide_panel.py
 511288a738743288b669fedb83036486a25fc673 d4t/ui/gallery.py
 bb477b853cd1454a08774a2a2405c5f8294c0055 d4t/ui/inspectors.py
 68e6ac894866da63ca055b9082523ffb89656702 d4t/ui/region_check.py
 cc73ee4493625b81df5d6d9eec7c12128d0eda12 d4t/ui/results.py
+1d1ca0ee2e4ebbedfa11b027bb9e7d735500ad2d d4t/ui/route_badge.py
 11a38b9e760697b23510805b56706f1eb8f6c85e d4t/ui/route_panel.py
 221a34a4f458d4b7be5212b06c4123363d614f80 d4t/ui/scope.py
-ca68e5896dd06bb91f8df4252ebb1e907907b791 d4t/ui/studio.py
+e5ea8889e5b79eca1efff8c6e774da21a1080de0 d4t/ui/studio.py
 b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 b24576feb08cf1517b18a0d0a04f302fcb9ea840 d4t/ui/theme.py
 104150e7fb81d477bdb1d220a8d11d53bf9100be d4t/ui/tree_panel.py
@@ -119,7 +120,7 @@ a5b31733923c0c3a3f54782a7720c76fdbbafc38 docs/plans/F20-pick-defect-box.md
 ac99957a7da2f9b9d766ac442082131be4b8d7db docs/plans/F22-adc-multiclass.md
 9da1ea44d6f76876c4ebd0dd0de339462df1eda4 docs/plans/F23-route-by.md
 9ea69732a923f2d3749502baea2b7c28bde2161b docs/plans/F24-decision-tree.md
-c4fcace617f7e98821396d22171f6bd2f13a1e46 docs/plans/F25-adc-usable.md
+fd83c397d2973bcb50383c93dfb46ccb57db17b1 docs/plans/F25-adc-usable.md
 773d4c5652e1abd95b7bf06591a691c07c1c9fa1 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -266,7 +267,7 @@ f480eedce6d10f8e192050bdbe65d03676911df0 tests/test_ui_ground_truth.py
 773d0ddbacf6fa7eacff323cd7123c4accec6905 tests/test_ui_input_kinds.py
 ff499f86917330d5fd1ec0c7e971dd2db0a0506e tests/test_ui_region_edges.py
 ffaf2b51fd05ba67c769cd6145cc7678e7fa7201 tests/test_ui_results.py
-178ad947cbe03ae16ca494523710cc9f23287a24 tests/test_ui_route_by.py
+4e1f48504faed1c1d5ed847e99b3db5e5c052447 tests/test_ui_route_by.py
 aac33a171461716ba66c0897a7ecb7c2b9b5526b tests/test_ui_studio_m5.py
 6236300c6b88aca9b098faeb26e1c8d5491dfdfc tests/test_ui_studio_smoke.py
 c7caa8c05dcf2c3b64ef12ba36478b7767da1e2e tests/test_ui_tree_canvas.py

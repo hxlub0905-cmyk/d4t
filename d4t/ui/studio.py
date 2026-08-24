@@ -1324,6 +1324,8 @@ class StudioWindow(QMainWindow):
         view.score_clicked.connect(self.show_score_page)
         # 判定區的入口小卡（F24 ②）：點了＝跳到判定的編輯（同 score 那條路）。
         view.decision_clicked.connect(self.show_score_page)
+        # 分流徽章（F25-B）：點了去編 route_by（它就在判定欄的最上面）。
+        view.prefilter_clicked.connect(self.show_score_page)
         # 判定樹的菱形／托盤（F24 ③）：右欄變成那一步／那一類的編輯面板。
         view.tree_step_clicked.connect(self._on_tree_step_clicked)
         view.tree_leaf_clicked.connect(self._on_tree_step_clicked)
@@ -1790,6 +1792,7 @@ class StudioWindow(QMainWindow):
             self.selected_node = None
         self._sync_params_pane()
         decision = self._decision_info()
+        prefilter = self._prefilter_info()
         for view in self._canvases():
             # 影像線（存在 recipe 裡）＋ 區域線（從參數推導；F12）。畫布不分
             # 兩份收 —— 一條線就是一條線，它是哪一種由它出發的那顆埠決定。
@@ -1797,8 +1800,30 @@ class StudioWindow(QMainWindow):
                            + list(self.model.region_lines()))
             # 判定區（F24 ②）：多類別的 recipe，判定樹住在畫布上。
             view.set_decision(decision)
+            # 分流徽章（F25-B）：有 route_by 才有 —— 畫布因此講得出
+            # 「這一批分兩條路跑」，而不是只有工具列一個下拉。
+            view.set_prefilter(prefilter)
             view.set_selected(self.selected_node)
             view.set_score_summary(self.model.expr, self.model.threshold)
+
+    def _prefilter_info(self) -> Optional[Dict[str, Any]]:
+        """畫布上的分流徽章要畫的東西（F25-B）；沒有 route_by 回 None。
+
+        「現在這一顆走哪一條」跟資料集標籤是**同一支** `resolve_route`
+        算的 —— 兩個地方各算一次的話，遲早會有一個說錯。
+        """
+        from .route_badge import route_badge_info
+
+        current = None
+        rb = getattr(self.model, "route_by", None)
+        item = self._current_item() if rb is not None else None
+        if item is not None and self.dataset is not None:
+            from d4t.core.pipeline import resolve_route
+
+            route, value, _how = resolve_route(self.model, item,
+                                               str(self.dataset.kind))
+            current = (value, route or "(fails)")
+        return route_badge_info(self.model, self.trial_results or [], current)
 
     def _decision_info(self) -> Optional[Dict[str, Any]]:
         """畫布判定區要畫的東西（F24 ②）。
@@ -1922,6 +1947,9 @@ class StudioWindow(QMainWindow):
         self.tree_pane.set_rows(rows)
         self.tree_pane.set_counts(None if not decision
                                   else decision.get("counts"))
+        prefilter = self._prefilter_info()
+        for view in self._canvases():
+            view.set_prefilter(prefilter)
         if not rows:
             self.decide_panel.set_counts(None)
             return
@@ -3525,6 +3553,10 @@ class StudioWindow(QMainWindow):
         # 它真正走的那一條。
         self._follow_defect_route()
         self._update_defect_label()
+        # 徽章上「現在這一顆走哪一條」要跟著換（F25-B）。
+        info = self._prefilter_info()
+        for view in self._canvases():
+            view.set_prefilter(info)
         self._schedule_preview()
         return True
 

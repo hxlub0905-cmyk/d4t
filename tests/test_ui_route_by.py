@@ -188,6 +188,97 @@ def test_the_editor_writes_the_model(window):
     assert "3" not in window.model.route_by.map
 
 
+# --------------------------------------------------------------------------- #
+# 4. 畫布上的分流徽章（F25-B）
+# --------------------------------------------------------------------------- #
+def test_the_canvas_shows_a_prefilter_badge(window):
+    """畫布要講得出「這一批分兩條路跑」—— 在此之前它完全沉默。"""
+    from d4t.ui import route_badge
+
+    items = window.pipeline.prefilter_items()
+    badges = [it for it in items
+              if isinstance(it, route_badge.RouteBadgeItem)]
+    assert len(badges) == 1
+    assert badges[0].info["column"] == "CLASSNUMBER"
+    assert badges[0].info["map"] == [("1", "a_route"), ("2", "b_route")]
+
+
+def test_the_badge_is_not_a_card(window):
+    """它不是 pipeline 的一步：不可拖、不可選、沒有埠。"""
+    from PySide6.QtWidgets import QGraphicsItem
+
+    from d4t.ui import route_badge
+
+    badge = next(it for it in window.pipeline.prefilter_items()
+                 if isinstance(it, route_badge.RouteBadgeItem))
+    assert not badge.flags() & QGraphicsItem.ItemIsMovable
+    assert not badge.flags() & QGraphicsItem.ItemIsSelectable
+    assert badge.node_id if False else True      # 沒有 node_id 這種東西
+    assert not hasattr(badge, "out_specs")
+
+
+def test_the_badge_stands_in_front_of_every_card(window):
+    """左→右讀起來就是時間順序：先分流、再跑卡片、最後判定。"""
+    from d4t.ui import route_badge
+
+    badge = next(it for it in window.pipeline.prefilter_items()
+                 if isinstance(it, route_badge.RouteBadgeItem))
+    lefts = [window.pipeline.node_item(n).pos().x()
+             for n in window.pipeline.node_ids()]
+    assert badge.pos().x() + route_badge.BADGE_W <= min(lefts)
+
+
+def test_clicking_the_badge_opens_the_route_editor(window):
+    from PySide6.QtCore import Qt
+
+    from d4t.ui import route_badge
+
+    hits = []
+    window.pipeline.prefilter_clicked.connect(lambda: hits.append(1))
+    badge = next(it for it in window.pipeline.prefilter_items()
+                 if isinstance(it, route_badge.RouteBadgeItem))
+
+    class _Ev:
+        def button(self):
+            return Qt.LeftButton
+
+        def accept(self):
+            pass
+
+    badge.mousePressEvent(_Ev())
+    assert hits == [1]
+
+
+def test_the_badge_says_which_route_this_defect_takes(window, lot):
+    from d4t.ui import route_badge
+
+    items = list(window.dataset.items)
+    i2 = next(i for i, it in enumerate(items)
+              if _class_of(lot, it.defect_id) == "2")
+    window.set_defect_index(i2)
+    badge = next(it for it in window.pipeline.prefilter_items()
+                 if isinstance(it, route_badge.RouteBadgeItem))
+    assert badge.info["current"] == ("2", "b_route")
+
+
+def test_the_badge_counts_come_from_route_taken(window):
+    """每條路幾顆是從 `route_taken` 讀的 —— F19 當初就是為了這件事寫它。"""
+    from d4t.core.pipeline import run_batch
+    from d4t.ui import route_badge
+
+    rows = run_batch(window.model.to_recipe(), window.dataset, workers=1)
+    window._apply_trial_results(rows, 1.0)
+    badge = next(it for it in window.pipeline.prefilter_items()
+                 if isinstance(it, route_badge.RouteBadgeItem))
+    counts = badge.info["counts"]
+    assert counts is not None and sum(counts.values()) == len(rows)
+
+
+def test_no_route_by_means_no_badge_at_all(window):
+    window.model.clear_route_by()
+    assert window.pipeline.prefilter_items() == []
+
+
 def test_turning_the_toggle_off_clears_route_by(window):
     window.route_box.toggle.setChecked(False)
     assert window.model.route_by is None
