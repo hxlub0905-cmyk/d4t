@@ -285,7 +285,16 @@ def test_run_trial_fills_histogram(window, synlot):
     assert len(window.trial_scores) == 8
     assert window.histogram.has_data() is True
     assert sum(window.histogram._counts) == 8
-    assert window.histogram.bin_summary_text().startswith("bin ")
+    # ⚠ **「bin 0=5   bin 1=3」那一行只在二元那條路上**（R1，2026-08-24）。
+    # 這份 recipe 一打開就是一棵樹（F25），而樹判出來的顆數在判定段上有更好
+    # 的位置（每一類一列、寬度就是顆數）—— 在這裡再寫一次的話，那個「再一次」
+    # 是用門檻**重算**的，跟樹判出來的對不起來。實測過的下場：每一張縮圖說
+    # `bin 3`，而 150px 底下的圖例說 `bin 1=24`。
+    assert window.model.decide is not None
+    assert window.histogram.bin_summary_text() == ""
+    assert [r["count"] for r in window.results.verdict.rows()], \
+        "顆數要在判定段上"
+    assert sum(r["count"] for r in window.results.verdict.rows()) == 8
     assert "Run finished" in window.status_text()
 
 

@@ -5463,6 +5463,8 @@ class HistogramWidget(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self._edges: List[float] = []
         self._counts: List[int] = []
+        #: 每根長條的 ``[(顏色, 顆數), …]``（見 `set_segments`）；None = 單色。
+        self._segments: Optional[List[List[Any]]] = None
         self._threshold: Optional[float] = None
         self._bin_text = ""
         self._dragging = False
@@ -5478,6 +5480,27 @@ class HistogramWidget(QWidget):
         self._empty_text = self._EMPTY_TEXT
 
     # -- public API --------------------------------------------------------
+    def set_segments(self, segments: Optional[Sequence[Sequence[Any]]]) -> None:
+        """每一根長條**照類別分段染色**（R2 第二半，2026-08-24）。
+
+        ``segments[i]`` 是第 i 根長條的 ``[(顏色, 顆數), …]``，由下往上疊；
+        傳 ``None`` 回到單色。
+
+        為什麼值得這樣畫：這張圖回答的問題是「這個數字分不分得開」，而
+        **分得開誰**才是使用者真正在問的 —— 一根單色的長條答不出「這一段裡
+        是哪一類」。染色之後兩座駝峰各是什麼顏色，一眼就是答案。
+
+        ⚠ 分段的總和**不必**等於 ``counts``：算不出這個數字的那幾顆不會出現在
+        任何一段裡（F19：算不出來的那一格不寫），而長條的高度仍然照 ``counts``
+        —— 差額畫成中性色，那才是誠實的（「這一段裡有幾顆我說不出是哪一類」）。
+        """
+        self._segments = None if segments is None else [
+            [(str(c), int(n)) for c, n in (seg or [])] for seg in segments]
+        self.update()
+
+    def segments(self) -> Optional[List[List[Any]]]:
+        return None if self._segments is None else [list(x) for x in self._segments]
+
     def set_data(self, edges: Sequence[float], counts: Sequence[int]) -> None:
         """``edges`` / ``counts`` 直接吃 ``viewmodel.histogram()`` 的回傳值。"""
         edges = [float(e) for e in (edges or [])]
@@ -5485,6 +5508,7 @@ class HistogramWidget(QWidget):
         if len(edges) != len(counts) + 1 or not counts:
             edges, counts = [], []
         self._edges, self._counts = edges, counts
+        self._segments = None       # 新資料 = 舊的分段一定不再對得上
         if self._threshold is not None:
             self._threshold = self._clamp(self._threshold)
         self.update()
@@ -5637,8 +5661,27 @@ class HistogramWidget(QWidget):
                 continue
             bh = c / float(ymax) * r.height()
             x = r.left() + i * bw
-            p.setBrush(hover if i == self._hover_bin else bar)
-            p.drawRect(QRectF(x + 0.5, r.bottom() - bh, max(1.0, bw - 1.0), bh))
+            w = max(1.0, bw - 1.0)
+            segs = (self._segments[i]
+                    if self._segments is not None and i < len(self._segments)
+                    else None)
+            if not segs or i == self._hover_bin:
+                # 滑鼠指著的那一根整根反白 —— 那一刻使用者問的是「這一根是
+                # 哪個區間、幾顆」，不是「裡面有幾類」。
+                p.setBrush(hover if i == self._hover_bin else bar)
+                p.drawRect(QRectF(x + 0.5, r.bottom() - bh, w, bh))
+                continue
+            # 由下往上疊。分段加起來少於 c 的那個差額留在最上面畫成中性色 ——
+            # 它是「這一段裡有幾顆我說不出是哪一類」，不該假裝屬於某一類。
+            y = r.bottom()
+            for colour, n in list(segs) + [
+                    (TOKENS["seg_disabled"], c - sum(n for _c, n in segs))]:
+                if n <= 0:
+                    continue
+                h = n / float(ymax) * r.height()
+                p.setBrush(QColor(colour))
+                p.drawRect(QRectF(x + 0.5, y - h, w, h))
+                y -= h
 
         # 刻度文字
         lo, hi = self._span()

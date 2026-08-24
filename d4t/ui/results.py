@@ -37,6 +37,8 @@ from typing import Any, Optional, Sequence
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
+    QStackedWidget,
+    QToolButton,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -50,6 +52,8 @@ from PySide6.QtWidgets import (
 )
 
 from .gallery import GalleryPanel
+from .results_table import ResultsTable
+from .verdict_band import VerdictBand, verdict_rows
 from .widgets import HistogramWidget, apply_button_cursors
 
 __all__ = ["ResultsWindow"]
@@ -67,6 +71,10 @@ class ResultsWindow(QMainWindow):
     #: 下面那張圖現在要看哪一個東西（``SCORE`` 或一個 feature 名）。
     #: 這是 Spread 的新家（F18 第 2 步）—— 見 :meth:`_build_spread`。
     shown_feature_changed = Signal(str)
+    #: 使用者點了判定段的某一類（``""`` = 看全部）。R3，2026-08-24。
+    class_selected = Signal(str)
+    #: 表格上雙擊一列 = 去看那一顆（跟 Gallery 的 `defect_activated` 同一個約定）。
+    defect_activated = Signal(str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -107,23 +115,93 @@ class ResultsWindow(QMainWindow):
         self.set_run_all_enabled(False)     # 還沒有結果（同 A1 的可用性規則）
 
         self.gallery = GalleryPanel(self)
+        # ⚠ **同一份資料兩種看法，而不是兩個地方各存一份**（R7，2026-08-24）：
+        # 縮圖回答「這一顆長什麼樣」，表格回答「照這個數字排一下、哪幾顆算不
+        # 出來、為什麼」。兩邊都由 `set_results` 從同一批結果餵。
+        self.table = ResultsTable(self)
+        self.table.defect_activated.connect(self.defect_activated)
+        self.gallery.defect_activated.connect(self.defect_activated)
+        self.view_stack = QStackedWidget(self)
+        self.view_stack.addWidget(self.gallery)
+        self.view_stack.addWidget(self.table)
         self.histogram = HistogramWidget(self)
         self.histogram.setMinimumHeight(150)
         spread = self._build_spread()
 
+        # ⚠ **判定段在最上面，而且不在 splitter 裡。**
+        # 這一頁的順序是由粗到細：判定 → 哪幾顆 → 憑什麼。而它是這三段裡唯一
+        # 高度固定的一段（列數＝樹上的類別數），放進 splitter 只會給使用者一個
+        # 可以把它拖到看不見的把手 —— 而它正是他最先要讀的東西。
+        self.verdict = VerdictBand(self)
+        self.verdict.class_selected.connect(self.class_selected)
+
         split = QSplitter(Qt.Vertical, self)
-        split.addWidget(self.gallery)
+        split.addWidget(self._build_view_switch())
         split.addWidget(spread)
         split.setStretchFactor(0, 4)
         split.setStretchFactor(1, 1)
         split.setSizes([500, 190])
         self.splitter = split
-        self.setCentralWidget(split)
+
+        host = QWidget(self)
+        hl = QVBoxLayout(host)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(0)
+        hl.addWidget(self.verdict)
+        hl.addWidget(split, 1)
+        self.setCentralWidget(host)
         self.setStatusBar(QStatusBar(self))
         apply_button_cursors(self)
 
     #: 下拉裡代表「分數」的那一項（不是 feature 名，所以用一個不可能撞名的字）。
     SCORE = "(score)"
+
+    def _build_view_switch(self) -> QWidget:
+        """``[▦ Tiles] [☰ Table]`` ＋ 底下那一塊（R7，2026-08-24）。
+
+        兩顆是**同一件事的兩個半邊**（同 F7-24 對 `Run trial ▾` 的做法）：
+        看的是同一批結果，只是換一種排版 —— 所以它們並排、只有一顆是按下去的
+        狀態，而不是兩顆各自獨立的鈕。
+        """
+        host = QWidget(self)
+        lay = QVBoxLayout(host)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        row = QWidget(host)
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(10, 6, 10, 4)
+        rl.setSpacing(1)
+        self.btn_tiles = QToolButton(row)
+        self.btn_tiles.setText("▦ Tiles")
+        self.btn_table = QToolButton(row)
+        self.btn_table.setText("☰ Table")
+        for i, b in enumerate((self.btn_tiles, self.btn_table)):
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setProperty("seg", "left" if i == 0 else "right")
+            b.clicked.connect(lambda _c=False, k=i: self.show_view(k))
+            rl.addWidget(b)
+        self.btn_tiles.setChecked(True)
+        self.btn_tiles.setToolTip("One thumbnail per defect - what each one "
+                                  "actually looks like")
+        self.btn_table.setToolTip("One row per defect, every measured number "
+                                  "as a column - sort by any of them, and see "
+                                  "why the failed ones failed")
+        rl.addStretch(1)
+        lay.addWidget(row)
+        lay.addWidget(self.view_stack, 1)
+        return host
+
+    def show_view(self, index: int) -> None:
+        """0 = 縮圖、1 = 表格。"""
+        i = 1 if int(index) else 0
+        self.view_stack.setCurrentIndex(i)
+        self.btn_tiles.setChecked(i == 0)
+        self.btn_table.setChecked(i == 1)
+
+    def shown_view(self) -> int:
+        return int(self.view_stack.currentIndex())
 
     def _build_spread(self) -> QWidget:
         """分數/特徵的分佈圖，上面一條「要看哪一個」的選擇列（F18 第 2 步）。
@@ -157,6 +235,8 @@ class ResultsWindow(QMainWindow):
             "Which number to spread out across the batch. Squeezed into one "
             "bar means it separates nothing; two humps means there is "
             "something to cut between.")
+        #: 使用者自己挑過那一格了嗎（挑過就不要再幫他選；見 `set_features`）。
+        self._picked_by_user = False
         self.feature_combo.currentIndexChanged.connect(self._on_feature_pick)
         rl.addWidget(self.feature_combo)
 
@@ -168,13 +248,25 @@ class ResultsWindow(QMainWindow):
         lay.addWidget(self.histogram, 1)
         return host
 
-    def set_features(self, names: Sequence[str]) -> None:
+    def set_features(self, names: Sequence[str],
+                     default: str = "") -> None:
         """下拉裡可以選哪些特徵（跑完之後由 Studio 餵）。
 
         目前選著的那一個**留著** —— 使用者調了一輪參數再跑一次，最想看的
         通常就是同一個特徵，而下拉自己跳回「Score」等於每次都要重選。
+
+        ``default`` 是**還沒有人選過的時候**要看哪一個（R2，2026-08-24）。
+        以前一律開在「Score」，而 F25 之後樹的 recipe 沒有分數表達式 ——
+        每一顆都是 0，這一頁最大的那張圖畫出來是**一根柱子**，什麼都沒說。
+        Studio 傳進來的是「你的第一個問題問的那個數字」（見
+        `StudioWindow._default_spread_feature`）。
+
+        ⚠ **只在使用者沒選過的時候用。** 他自己挑過的那一個要留著，
+        而「留著」正是上面那一段在講的事。
         """
         keep = self.shown_feature()
+        if not self._picked_by_user and str(default or ""):
+            keep = str(default)
         self.feature_combo.blockSignals(True)
         try:
             self.feature_combo.clear()
@@ -203,9 +295,29 @@ class ResultsWindow(QMainWindow):
         return self.spread_hint.text()
 
     def _on_feature_pick(self, _index: int) -> None:
+        # 使用者自己動過這一格 —— 從現在起不要再幫他選（見 `set_features`）。
+        self._picked_by_user = True
         self.shown_feature_changed.emit(self.shown_feature())
 
     # ---- 對外 -------------------------------------------------------------
+    def set_verdict(self, decide: Any, results: Any = None,
+                    ground_truth: Any = None) -> None:
+        """判定段：**這一批判成了什麼**（R3，2026-08-24）。
+
+        數字全部由 :func:`~d4t.ui.verdict_band.verdict_rows` 從
+        `tree_scene` 那一份算出來 —— 畫布上的分支流量吃的是同一份，
+        所以兩邊不會對不起來。
+        """
+        self.verdict.set_rows(verdict_rows(decide, list(results or []),
+                                           ground_truth))
+
+    def selected_class(self) -> str:
+        return self.verdict.selected()
+
+    def set_table(self, results: Any, class_names: Any = None) -> None:
+        """表格那一半（跟 Gallery 吃同一批結果）。"""
+        self.table.set_results(list(results or []), dict(class_names or {}))
+
     def set_summary(self, text: str) -> None:
         """工具列左側的一句話（「跑了幾顆、成功幾顆、花多久」）。"""
         self.summary_label.setText(str(text or ""))
@@ -234,6 +346,29 @@ class ResultsWindow(QMainWindow):
     def closeEvent(self, event) -> None:      # noqa: D102 - Qt hook
         # 關掉不丟結果：下次再跑（或按主視窗的 Gallery 入口）就會回來。
         super().closeEvent(event)
+
+
+def extra_only(message: str) -> str:
+    """一句跑完的訊息 → **只留工具列沒講到的那一半**（R4，2026-08-24）。
+
+    `_apply_trial_results` 組出來的那一句是
+    ``Run finished: 24 defects (24 ok, 0 failed) in 0.1 s`` 再接上警告與
+    「停掉所以沒有寫」。前半段跟 :func:`summarize_run` 講的是同一件事，
+    而它們在 Results 視窗上只隔 30px —— 同一個事實兩個位置，遲早有一個先過期。
+
+    ⚠ **「Run stopped」要留下來。** 它不是重複的：數字是真的，但它描述的是
+    「你叫我停的時候跑到哪裡」，不是整批的結果 —— 而工具列那一行講不出這件事。
+    """
+    text = str(message or "").strip()
+    if not text:
+        return ""
+    head, sep, tail = text.partition("  ")
+    stopped = head.lower().startswith("run stopped")
+    rest = (sep + tail).strip()
+    if stopped:
+        return ("Stopped part-way - these numbers are where it got to, "
+                "not the whole batch." + ("  " + rest if rest else ""))
+    return rest
 
 
 def summarize_run(n_total: int, n_ok: int, elapsed: float,

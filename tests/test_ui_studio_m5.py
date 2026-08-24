@@ -86,6 +86,28 @@ def ran(window, qapp):
     return window
 
 
+@pytest.fixture()
+def scored(ran, qapp):
+    """把畫面切回**分數的直方圖**，而且是門檻真的在決定事情的那條路。
+
+    ⚠ 兩件事 2026-08-24 變了，而底下那幾條門檻互動的測試各踩到一個：
+
+    * R2：那張圖預設不再開在「Score」上（樹的 recipe 沒有分數表達式，
+      開在 Score 上是一根柱子）—— 不切回去的話，``set_threshold(50)`` 會被
+      **夾進那個特徵的值域**（實測 50 變成 5.6）；
+    * R1：有判定樹的時候門檻線整條不畫，也拖不動 —— 那正是它該有的樣子，
+      所以要驗「拖得動」就得先回到二元那條路。
+    """
+    keep = ran.model.decide
+    ran.model.decide = None
+    ran.results.show_feature(ran.results.SCORE)
+    ran._refresh_spread()
+    qapp.processEvents()
+    yield ran
+    ran.model.decide = keep
+    ran._refresh_spread()
+
+
 def _mouse(widget, etype, pos, button=None, buttons=None):
     """建構並派送一顆滑鼠事件（離屏環境下比 QTest 可靠）。"""
     button = Qt.NoButton if button is None else button
@@ -280,9 +302,9 @@ def test_chip_clears_filter_and_same_bar_refilters(ran):
     window.gallery.clear_filter()
 
 
-def test_real_click_on_bar_does_not_move_the_threshold(ran, qapp):
+def test_real_click_on_bar_does_not_move_the_threshold(scored, qapp):
     """按下 + 原地放開 = 點長條（篩 Gallery）；門檻一動也不動。"""
-    window = ran
+    window = scored
     hist = window.histogram
     hist.resize(520, 200)
     qapp.processEvents()
@@ -314,9 +336,9 @@ def test_real_click_on_bar_does_not_move_the_threshold(ran, qapp):
     window._score_filter = None
 
 
-def test_real_drag_still_commits_the_threshold(ran, qapp):
+def test_real_drag_still_commits_the_threshold(scored, qapp):
     """按下 + 拖過去 + 放開 = 拖門檻（老行為不能壞）。"""
-    window = ran
+    window = scored
     hist = window.histogram
     hist.resize(520, 200)
     qapp.processEvents()
