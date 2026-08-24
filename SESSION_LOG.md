@@ -19,6 +19,22 @@
 
 ---
 
+## cp950：CLI 在廠內 console 上炸在成功的那一刻（2026-08-24 修）
+
+F20 §5 記下的那一條。廠內機器的 console 是 cp950，而 CLI 印 ✓ / ✗ / △ / →
+（cp950 沒有這幾個字）—— 症狀特別壞：**跑完 48 顆、CSV 也寫好了**，使用者
+看到的卻是一條 `UnicodeEncodeError` 的 traceback，在成功的那一刻。
+
+修法一小段：`main()` 開頭對 stdout / stderr `reconfigure(errors="replace")`
+—— 印不出的字換成 `?`，中文照常（cp950 本來就有中文），檔案輸出全部自帶
+`encoding="utf-8"` 不受影響。
+
+迴歸測試用 **subprocess ＋ `PYTHONIOENCODING=cp950`**（不是 monkeypatch
+sys.stdout）—— 子行程的 stdout 真的是 strict cp950，跟廠內那台一模一樣。
+驗過「把 bug 放回去會紅」。
+
+---
+
 ## F22-UI：多類別在 Studio 上真的能編輯了（2026-08-23）
 
 在這之前 `decide` 只能手寫 JSON。做完的是**方案 B 的前兩步**（純度報表 → 面板），

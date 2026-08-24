@@ -466,6 +466,17 @@ def _find_ground_truth(arg, klarf_path: str):
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    # 廠內機器的 console 是 cp950，而這支 CLI 印 ✓ / ✗ / △ / →（cp950 沒有
+    # 這幾個字）。不設這個的話，跑完 48 顆、CSV 也寫好了，使用者看到的卻是
+    # 一條 UnicodeEncodeError 的 traceback —— 在**成功**的那一刻。
+    # ``errors="replace"`` 把印不出的字換成 ?（中文 cp950 本來就有，不受影響）；
+    # 檔案輸出全部自帶 encoding="utf-8"，不走這裡。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass    # 不是真的 console（被 redirect 成別的東西）就算了
+
     ap = argparse.ArgumentParser(
         prog="d4t",
         description="d4t — 把想法變算法的 ADC 工具",
