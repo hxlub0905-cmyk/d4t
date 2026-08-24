@@ -395,6 +395,51 @@ class RecipeModel:
                 break
         return feats
 
+    #: 「數字 → 誰算的」清單裡，名字與來源之間的分隔（F21-B）。
+    #: 一個字串裝兩件事是刻意的：``ParamForm`` 的執行期選單是
+    #: ``Dict[str, List[str]]``，為了一個標籤去改那個型別，會動到每一個
+    #: 用 ``choices_from`` 的地方。**拆開的規矩只有一份**（`split_labelled`）。
+    FEATURE_LABEL_SEP = "\t"
+
+    def labelled_features(self, upto_node: Optional[str] = None,
+                          include_upto: bool = True) -> List[str]:
+        """`available_features` 的每一項後面接上**誰算的**（F21-B）。
+
+        格式是 ``"cd_median\tCD"`` —— 前半是要插進算式的字，後半只是給人看的。
+        兩件事同一份來源（同一個迴圈），所以它們不會漂。
+
+        ``include_upto=False`` 時**連 `upto_node` 自己的輸出都不列** ——
+        給「這張卡的算式可以用哪些數字」用的（一張卡不能吃自己還沒寫的東西）。
+
+        為什麼要有「誰算的」：一份 recipe 可以有兩張 `Gray level`（量兩個區域），
+        那時候光看 `glv_mad` 這個名字選不出要哪一個。名字自帶前綴的只有**撞名
+        被蓋掉**的那一份（F17-②）—— 沒撞名的時候仍然只有一個短名。
+        """
+        out: List[str] = []
+        known = self.nm_per_px_is_known()
+        for nid in self.node_order:
+            node = self.nodes[nid]
+            if not node.enabled:
+                continue
+            if nid == upto_node and not include_upto:
+                # **這張卡自己的輸出不能列進來**（F21-B，實跑截圖抓到）：
+                # `Feature math` 的清單裡出現 `defect_score`，而那正是它自己
+                # 要寫出去的名字 —— 點下去就是 `defect_score = defect_score`。
+                # 引擎擋得住（`unknown-feature-input`），但**讓使用者點一個
+                # 保證壞掉的選項，本身就是 bug**（推廣鐵則）。
+                break
+            step_cls = get_step(node.step)
+            label = str(getattr(step_cls, "label", "") or node.step)
+            for f in step_cls.resolve_features(node.params):
+                if not known and (f.endswith("_nm") or f.endswith("_nm2")):
+                    continue
+                if not any(x.split(self.FEATURE_LABEL_SEP, 1)[0] == f
+                           for x in out):
+                    out.append(f + self.FEATURE_LABEL_SEP + label)
+            if nid == upto_node:
+                break
+        return out
+
     def nm_per_px_is_known(self) -> bool:
         """有沒有任何一張卡填了 nm/px（`_util.nm_per_px_spec`）。"""
         for node in self.nodes.values():

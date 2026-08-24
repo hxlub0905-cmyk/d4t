@@ -88,7 +88,10 @@ class FeatureFillStep(Step):
             "is reported the same way as one that crashed.")
     params = [
         ParamSpec(
-            name="features", type="str", default="",
+            # ``feature_keys`` 不是 ``str``：值的格式一字不差（逗號分隔），
+            # 但 UI 認得它是一串數字名，於是那一格配得出「插入數字 ▾」——
+            # 跟 `feature_math` 的算式共用同一支（F21-B）。
+            name="features", type="feature_keys", default="",
             label="Numbers to check",
             pattern=FEATURE_LIST_PATTERN,
             pattern_help=("write the names separated by commas, for example "

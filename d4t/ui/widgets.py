@@ -3531,6 +3531,22 @@ class CellRoisField(QWidget):
             for n, b in regions)
 
 
+#: 「數字 → 誰算的」那份清單的分隔（跟 `viewmodel.ViewModel.FEATURE_LABEL_SEP`
+#: 是同一個字）。**拆開的規矩只有這一份** —— 抄第二份出來的那份會漂。
+FEATURE_LABEL_SEP = "\t"
+
+
+def split_labelled(item: Any) -> "tuple":
+    """``"cd_median\tCD"`` → ``("cd_median", "CD")``；沒有標籤就回空字串。
+
+    前半是**要插進算式的字**，後半只是給人看的 —— 插錯半邊的話，使用者會得到
+    一個永遠指不到的變數名，而錯誤要等跑起來才出現。
+    """
+    text = str(item or "")
+    name, _sep, label = text.partition(FEATURE_LABEL_SEP)
+    return name.strip(), label.strip()
+
+
 class ParamForm(QWidget):
     """由 ``Step.describe()`` 的 ParamSpec dict 自動長出來的參數表單。
 
@@ -4016,6 +4032,77 @@ class ParamForm(QWidget):
             return None
         return list(self._dynamic.get(key, ()))
 
+    def _make_expr_editor(self, name: str, value: Any,
+                          kind: str = "expr") -> QWidget:
+        """算式那一格：一個文字框 ＋ 一支「插入數字 ▾」（F21-B）。
+
+        清單來自 ``dynamic_choices["features"]``，項目是
+        ``"名字\t誰算的"``（見 `split_labelled`）。拿不到清單的時候它仍然是
+        一個**完全可用的文字框** —— 那正是 Studio 以外的地方（測試、將來的
+        別的宿主）會遇到的情況，而少一支下拉不該讓那一格不能填。
+        """
+        box = QWidget()
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+
+        edit = QLineEdit()
+        edit.setText("" if value is None else str(value))
+        edit.setPlaceholderText("e.g. glv_max - glv_median" if kind == "expr"
+                                else "e.g. cd_median, cd_min")
+        edit.textEdited.connect(lambda t, n=name: self._emit(n, str(t)))
+        lay.addWidget(edit)
+
+        items = list(self._dynamic.get("features", ()))
+        combo = QComboBox()
+        combo.addItem("Insert a number…" if items
+                      else "No numbers upstream yet")
+        combo.setEnabled(bool(items))
+        for it in items:
+            fname, owner = split_labelled(it)
+            if not fname:
+                continue
+            combo.addItem("%s   —   %s" % (fname, owner) if owner else fname,
+                          fname)
+        combo.setToolTip("Pick one of the numbers the cards above work out - "
+                         "it is put in at the cursor.")
+        combo.activated.connect(
+            lambda i, c=combo, e=edit, n=name, k=kind:
+            self._insert_feature(i, c, e, n, k))
+        lay.addWidget(combo)
+        return box
+
+    def _insert_feature(self, index: int, combo: QComboBox,
+                        edit: QLineEdit, name: str,
+                        kind: str = "expr") -> None:
+        """把選到的數字送進那一格，然後把下拉撥回標題那一列。
+
+        ``expr`` 插在**游標的位置**（式子中間常常要補一個名字）；
+        ``feature_keys`` **接在後面**並補一個逗號（那一格是一串名字，插在中間
+        會把別人的名字剖成兩半）。同一支下拉、兩種送進去的方式 —— 差別由那一格
+        的型別決定，不由使用者記得。
+        """
+        if int(index) <= 0:
+            return
+        token = str(combo.itemData(int(index)) or "")
+        combo.setCurrentIndex(0)
+        if not token:
+            return
+        text = edit.text()
+        if kind == "feature_keys":
+            have = [x.strip() for x in text.split(",") if x.strip()]
+            if token in have:            # 已經在裡面就不重複加
+                return
+            new_text = ", ".join(have + [token])
+            pos = len(new_text)
+        else:
+            pos = max(0, min(edit.cursorPosition(), len(text)))
+            new_text = text[:pos] + token + text[pos:]
+            pos = pos + len(token)
+        edit.setText(new_text)
+        edit.setCursorPosition(pos)
+        self._emit(name, new_text)
+
     def _make_editor(self, spec: Dict[str, Any], value: Any,
                      streams: Sequence[str]) -> QWidget:
         name = str(spec.get("name", ""))
@@ -4037,6 +4124,12 @@ class ParamForm(QWidget):
                 w.lineEdit().setPlaceholderText(hint)
             w.currentTextChanged.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
+
+        if ptype in ("expr", "feature_keys"):
+            # 算式／一串數字名 ＋ 一支「插入數字 ▾」（F21-B）。**不是**可編輯
+            # 的下拉：使用者要打的是一個式子（或一串名字），不是從清單裡挑一個
+            # 值 —— 下拉只負責把名字送進去，省掉「記得拼對」這件事。
+            return self._make_expr_editor(name, value, kind=ptype)
 
         if ptype == "int":
             w = QSpinBox()

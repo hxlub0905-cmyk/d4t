@@ -129,7 +129,22 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC, CATEGORY_BATCH)
 #: 一個「這個統計量在分布上是哪一段」的小圖。分群與短標籤住在 UI
 #: （``widgets.METRIC_GROUPS``），卡片這邊只宣告 ``choices``：
 #: **引擎說有哪些，UI 說長什麼樣。**
-PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
+#: ``"expr"``（F21-B）：值是一個**吃特徵名的算式**（字串）。
+#: 儲存格式跟 ``"str"`` 一字不差 —— recipe JSON 完全不變，**差別只在 UI**：
+#: 它會配一支「插入數字 ▾」，列出這張卡**之前**算得出來的每一個數字、
+#: 各是誰算的。跟 ``image_keys`` 是同一個先例（值的格式一樣，但 UI 認得
+#: 它是什麼）。
+#:
+#: 為什麼要它：F21 實測，第一次真的用 `feature_math` 的時候，**最痛的不是
+#: 看不出數字從哪來，是不知道有哪些數字可以用** —— 得跑 Python 呼叫
+#: ``resolve_features()`` 才知道 ``cmp_delta_median`` 存在。而目標使用者
+#: 不會寫 code（推廣鐵則）。
+#: ``"feature_keys"``（F21-B）：值是**一串特徵名**（逗號分隔的字串）。
+#: 跟 ``"expr"`` 是同一個家族 —— 儲存格式就是 ``"str"``，而 UI 認得它，
+#: 所以那一格配得出同一支「插入數字 ▾」（差別只在插進去的方式：算式插在游標
+#: 位置，清單接在後面）。
+PARAM_TYPES = ("int", "float", "bool", "str", "expr", "feature_keys",
+               "choice", "image_key",
                "image_keys", "curve", "template", "multi_choice",
                "metric_chips", "channel_map", "cell_rois", "region_key",
                "region_keys", "icon_choice")
@@ -419,7 +434,12 @@ class ParamSpec:
                     v = value.strip().lower() in ("1", "true", "yes", "on")
                 else:
                     v = bool(value)
-            elif self.type in ("str", "image_key", "template"):
+            elif self.type in ("str", "expr", "feature_keys",
+                               "image_key", "template"):
+                # ``expr`` 跟 ``str`` **存的是同一個東西**（F21-B）——
+                # 差別只在 UI 認得它是算式。這一行漏掉 ``expr`` 的話，
+                # 每一份用到那張卡的 recipe 都會在 `validate_params` 炸
+                # 「unknown type」（`tests/test_ui_f21_expr_picker.py` 擋著）。
                 v = str(value)
             elif self.type == "region_key":
                 # **一個**區域名（``region_keys`` 是逗號清單）。空字串合法 ——

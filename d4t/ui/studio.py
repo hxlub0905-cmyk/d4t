@@ -144,6 +144,7 @@ from .widgets import (
     apply_button_cursors,
     column_header,
     small_button,
+    split_labelled,
 )
 
 
@@ -1808,9 +1809,16 @@ class StudioWindow(QMainWindow):
         self._syncing = True
         try:
             self.feature_combo.clear()
-            self.feature_combo.addItem(_FEATURE_PLACEHOLDER)
-            for name in self.model.available_features():
-                self.feature_combo.addItem(name)
+            self.feature_combo.addItem(_FEATURE_PLACEHOLDER, "")
+            # 顯示的是「名字 — 誰算的」，插進去的只有名字（F21-B）。
+            # 兩張同型別的量測卡（例：量兩個區域的 Gray level）在這裡本來
+            # 長得一模一樣 —— 名字自帶前綴的只有撞名被蓋掉的那一份（F17-②）。
+            for item in self.model.labelled_features():
+                fname, owner = split_labelled(item)
+                if not fname:
+                    continue
+                self.feature_combo.addItem(
+                    "%s   —   %s" % (fname, owner) if owner else fname, fname)
             self.feature_combo.setCurrentIndex(0)
         finally:
             self._syncing = False
@@ -3030,7 +3038,7 @@ class StudioWindow(QMainWindow):
         """「插入特徵 ▾」：把特徵名插到表達式的游標位置。"""
         if self._syncing or int(index) <= 0:
             return
-        token = self.feature_combo.itemText(int(index))
+        token = str(self.feature_combo.itemData(int(index)) or "")
         self._syncing = True
         try:
             self.feature_combo.setCurrentIndex(0)
@@ -5084,6 +5092,12 @@ class StudioWindow(QMainWindow):
         # 所以它在下面那個 early return 之前。
         out["main_columns"] = (pair_ingest.columns_of(self.dataset)
                                if self.dataset is not None else [])
+        # 算式那一格的「插入數字 ▾」（F21-B）。**到這張卡為止**，不是整條 route
+        # —— 列出一個排在自己後面才算出來的數字，點下去就是一份跑起來每一顆
+        # 都失敗的 recipe。
+        out["features"] = self.model.labelled_features(
+            upto_node=str(getattr(node, "id", "") or "") or None,
+            include_upto=False)
         src = sources.get(str(node.params.get("source", "") or "").strip())
         if src is None:
             return out

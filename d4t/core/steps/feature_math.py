@@ -83,11 +83,15 @@ class FeatureMathStep(Step):
             "score expression.")
     params = [
         ParamSpec(
-            name="expr", type="str", default="",
+            # ``expr`` 不是 ``str``：值的格式一字不差，但 UI 認得它是算式，
+            # 於是那一格會配一支「插入數字 ▾」（F21-B）。
+            name="expr", type="expr", default="",
             label="Work out",
             help=("The sum to work out. The names in it are the numbers the "
                   "cards above produce (glv_max, roi_snr_signed, …). You can "
                   "use + - * / ( ) and sqrt / abs / log / exp / min / max. "
+                  "Comparisons work too and give 1 or 0, so "
+                  "(cd_median > 5) * 100 turns a rule into a number. "
                   "Dividing by zero gives 0 rather than stopping the batch."),
         ),
         ParamSpec(

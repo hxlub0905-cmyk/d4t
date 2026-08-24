@@ -5,7 +5,7 @@ f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 ac0c96cd0d671a439c492b72fae0379d364aeb62 AGENTS.md
 b404ab73fd00a46fa43d83d173fe5d973f01bfd7 CLAUDE.md
 b20e9b7f31aa8195e297b4a124b69252cd4c56cf README.md
-bc6a02c1199b33a06f73939d1f5ad6cbb97826aa SESSION_LOG.md
+01a924e18b114fd659693edb4b4ad4ce0174415a SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 7742c2cd23ceff1a020c07c4c4684d332ee78050 d4t/__main__.py
@@ -52,7 +52,7 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 8be219b056d2bb84d48741c5c8855a73f155949f d4t/core/pipeline/engine.py
 17f8abfc3739d6860f5b9b063c2c608a9cd08b1e d4t/core/pipeline/expression.py
 fab734244eb3ebe490cfed8d0e8dbf0e9f7d645b d4t/core/pipeline/recipe.py
-21ec1b4855a83d8e3246cc01027d50603306388c d4t/core/pipeline/step.py
+6d8a3d52f4bbf378c8bd1f1de2b4c1c60ec29678 d4t/core/pipeline/step.py
 54503e5000aeae968a523044183f5bf544671ae7 d4t/core/steps/__init__.py
 d9d78b9c74d5495419eb584a96436c56cf028641 d4t/core/steps/_util.py
 c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
@@ -60,8 +60,8 @@ cf162d9e699b12b6e4cd5d6d9706484b19eda598 d4t/core/steps/align_to.py
 2c48cd738d30003227a9aad3f34e5c8565a9c6ab d4t/core/steps/arith.py
 9898cc199bd1896a65931a8103975971599a6217 d4t/core/steps/cd.py
 39bbc384b66e024f67200a76598d4f6f255e5100 d4t/core/steps/denoise.py
-efb63411d165caa02161d2a0308d984ee15f17a3 d4t/core/steps/feature_fill.py
-93588a88b65e8b98525d7344246251b13f9da31b d4t/core/steps/feature_math.py
+639e9fcfdef07879fe1001d6050d1e29acb989f9 d4t/core/steps/feature_fill.py
+80c6222fc7efde8d449a9920cdb69d2080f76d38 d4t/core/steps/feature_math.py
 00f877fe38f316bc2a74cb2659a2e5ac63b7055c d4t/core/steps/flatten.py
 67ad8acd2c70e0b62ca89cf8557ac7783850f3cc d4t/core/steps/glv_stats.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
@@ -91,12 +91,12 @@ bb477b853cd1454a08774a2a2405c5f8294c0055 d4t/ui/inspectors.py
 68e6ac894866da63ca055b9082523ffb89656702 d4t/ui/region_check.py
 cc73ee4493625b81df5d6d9eec7c12128d0eda12 d4t/ui/results.py
 e3248e389f47ff9a0f8b911de3f2ef58c4bf9208 d4t/ui/scope.py
-3140c689e3c277d9363fb46398fa6c0b0fed8598 d4t/ui/studio.py
+f1107cf502cc7cbc4e167cc39870ab0d846a6a73 d4t/ui/studio.py
 b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 b24576feb08cf1517b18a0d0a04f302fcb9ea840 d4t/ui/theme.py
-af42b652c4e56b5a8458ab24a5f03ee959638139 d4t/ui/viewmodel.py
+26e283de5f23a2a416b7e6e8806a923e1e987083 d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
-32411d131fb1d99c1906add019fffd6747a92fb3 d4t/ui/widgets.py
+e6e33ac842d0ab50246d992de2f536d9b6afc21d d4t/ui/widgets.py
 2eb7813f6dbd6c7d0beff0496ed0d1e6dc87d484 d4t/ui/workers.py
 b422213d7d29a9914abfe9cb76bd23f434fbe13c docs/ARCHITECTURE.md
 e91e2809486e7306a360421877c50b667c01df64 docs/FAB-VALIDATION.md
@@ -224,6 +224,7 @@ fcd1e48c4e17fa1ec6699b9ef3efc16298adedf8 tests/test_ui_f13_layout.py
 0f67a345d22df53300395cdd9542c27a9578cf1a tests/test_ui_f16_stages.py
 e44e08e96d75fabcfc8d9394684e3643370729f2 tests/test_ui_f19_cd.py
 62ab91082b51aea5a11e7afdedc0dd0db94da861 tests/test_ui_f20_panel_truth.py
+1457ab962fa76cc2c9956fc351821f2e8e589dca tests/test_ui_f21_expr_picker.py
 96614052cb62c64c136380faaa466cdba0a4d759 tests/test_ui_f7_10_route_edges.py
 614330562a47a9d3792982af350231abed883867 tests/test_ui_f7_11_roi.py
 b3bcc7956841e98b5cd4ad05bfddefbe1da58fcf tests/test_ui_f7_12_template.py
