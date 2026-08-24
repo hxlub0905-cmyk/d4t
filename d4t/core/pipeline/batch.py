@@ -357,9 +357,11 @@ def _median(vals):
 def _stat_rows(rows, name: str, expr: str):
     """這一行的整批統計要看哪幾顆的值。
 
-    排除：跑失敗的、沒判定的、值不是數字的，以及 **`feature_fill` 補過值的**
-    （expr 用到的任何變數帶著 ``<變數>_missing == 1`` —— A1 的規矩：補進去的
-    值不進中位數，不然「整批的中位數」有一半是同一個補進去的常數）。
+    排除：跑失敗的、沒判定的、值不是數字的，以及**補過值的** ——
+    expr 用到的任何變數帶著 ``<變數>_missing == 1``（`feature_fill` 補的），
+    或這一行自己的 ``<name>_missing == 1``（`Let.fill` 補的，F24 ⑤）。
+    A1 的規矩：補進去的值不進中位數，不然「整批的中位數」有一半是同一個
+    補進去的常數。
     """
     try:
         variables = sorted(parse_expression(str(expr)).variables)
@@ -373,7 +375,8 @@ def _stat_rows(rows, name: str, expr: str):
         v = feats.get(name)
         if not isinstance(v, (int, float)):
             continue
-        if any(feats.get("%s_missing" % var) == 1 for var in variables):
+        if any(feats.get("%s_missing" % var) == 1
+               for var in variables + [name]):
             continue
         out.append(float(v))
     return out

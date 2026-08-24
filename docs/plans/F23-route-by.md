@@ -188,10 +188,11 @@ run_batch_steps（Output 卡照舊最後）
 1. **對不上 map 的預設行為**：兩種都支援，`default` 留空＝那一顆失敗
    （訊息講出值 X 不在對照表裡）。✅ 已實作。
 2. **route 模型**：第一期用選項 A（不同節點 id）。`routes-drift` lint
-   **先不做**：它會對**每一份**刻意分流的 recipe 叫（兩條路的卡不同參數
-   正是分流的目的），而「一支會誤報的 lint 比沒有 lint 更糟」是這個 repo
-   自己的規矩（F11 Enhance-3）。要不要做、判準收多窄，等真的漂過一次
-   再跟使用者定調。
+   ✅ 2026-08-24 補做（使用者：「那三件事接著做」）：warning、只在
+   `route_by` 存在時看（kind 選路的多 route 不同設定是常態）、影像流／
+   區域參數不比（兩條路各接各的流本來就不同）、detail 講**差在哪幾格**
+   （「metrics is glv_max on route 'a' but glv_mean on route 'b'」）——
+   看一眼就分得出「這是我設計的」還是「這是我忘了的」。
 3. **UI**：預覽自動切 route。→ 期2。
 4. **`lot_stats`**：併第 3 期。
 

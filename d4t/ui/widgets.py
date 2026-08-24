@@ -5031,7 +5031,9 @@ class LibraryPanel(QWidget):
         ("enhance", "Enhance", "Image in, image out"),
         ("region", "ROI", "Decide where to look"),
         ("measure", "Measure", "Image + region in, numbers out"),
-        ("algo", "Algo", "Numbers in, numbers out"),
+        # Algo 那一列拿掉了（F24 §5，使用者 2026-08-24 點頭）：算式、補值、
+        # 跨顆換算全部住進判定（working numbers），這一段清空之後留著只是
+        # 一個永遠空白的抽屜。
         ("compare", "Compare", "Two images in, difference out"),
         ("adc", "ADC", "Numbers in, score and bin out"),
         ("output", "Output", "The end of the line - write it somewhere"),

@@ -61,7 +61,7 @@ from typing import Any, Dict, List
 
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, GROUP_ALGO, ParamSpec, Step, StepError, register_step,
+    CATEGORY_ALGO, GROUP_ADC, ParamSpec, Step, StepError, register_step,
 )
 from ._util import FEATURE_LIST_PATTERN, feature_list
 
@@ -82,7 +82,9 @@ class FeatureFillStep(Step):
     key = "feature_fill"
     label = "Missing numbers"
     category = CATEGORY_ALGO
-    group = GROUP_ALGO
+    # Algo 段解散後歸到判定那一段（F24 §5）：這張卡的功能已被
+    # decide 的 working numbers 吸收，卡片收在 HIDDEN_STEPS、只服務舊 recipe。
+    group = GROUP_ADC
     help = ("Decide what happens when a card above could not measure "
             "something on this defect. Without this, one unmeasurable defect "
             "is reported the same way as one that crashed.")

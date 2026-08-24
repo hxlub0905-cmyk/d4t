@@ -19,6 +19,38 @@
 
 ---
 
+## 收尾三件：routes-drift、七段、missing ⇒（2026-08-24）
+
+使用者對前一輪留下的三個問號一句「那三件事接著做」全數放行：
+
+* **`routes-drift` lint**（F23 §5 選項 A 的配套）：warning ——「刻意不同
+  正是分流的目的」。誤報的顧慮用三道收窄解掉：只在 `route_by` 存在時看
+  （kind 選路的多 route 不同設定是常態）、影像流／區域參數不比（兩條路
+  各接各的流）、一對 route 一張卡講一次。detail 講**差在哪幾格**
+  （`metrics is glv_max on route 'a' but glv_mean on route 'b'`）。
+* **八段變七段**（F16 的段落，使用者點頭）：Algo 從 `GROUP_ORDER` 與
+  `LibraryPanel.GROUPS` 拿掉 —— 算式、補值、跨顆換算全部住進判定，那一段
+  清空之後留著只是一個永遠空白的抽屜。`GROUP_ALGO` 常數留給外掛相容；
+  被吸收的兩張卡（仍收在 `HIDDEN_STEPS`）改掛 `GROUP_ADC`（它們的功能
+  現在就是判定段的一部分）。「Algo 卡不吃影像流」那條界線的測試改成
+  點名那兩張卡＋外掛的 GROUP_ALGO 卡，繼續守著。
+* **`Let.fill`（missing ⇒ 用 __，F24 ⑤ 的後一半）**：working number 一行
+  的第三個屬性。非空時，這一行用到的數字缺了就用 fallback 頂著、
+  `<name>_missing` 旗標寫 1（**有 fill 的行每顆都寫旗標**，0 或 1 ——
+  CSV 那一欄才完整；判定樹第一步問 `<name>_missing > 0` 就是它的形狀）；
+  留空＝照舊整顆失敗（嚴格附加，serde 有才寫）。壞的 fallback 是
+  `bad-let` error。「跟整批比」的統計**也排除這一行自己補過值的顆**。
+  面板的 let 行改成**兩行**（算式一行、`if missing → __ · 跟整批比` 一行
+  —— F22 量過七個元件擠一行會互相切字）。F24 ⑤ 至此全部完成，
+  `feature_fill` / `feature_math` 只剩「使用者確認夠了再刪」那一步。
+* 順手修兩個現撈的 UI 蟲：工具列的 Route 下拉在單 route 時藏不掉
+  （QToolBar 的顯示要走 addWidget 回傳的 QAction，不是 widget）；
+  「+ Add a line / rule」被 `shape="square"` 的 QSS 釘死寬度切字。
+* 測試：`test_let_fill.py`（8 條）＋ `test_route_by.py` 補 4 條 drift ＋
+  `test_ui_f16_stages.py` 改鎖七段。全套 core 1812 過、黃金值不動。
+
+---
+
 ## F23 期3：「跟整批比」的兩趟判定（2026-08-24）
 
 §8 的 lot_stats **不是一張卡** —— F24 §5 定的家：它是 working number 一行的

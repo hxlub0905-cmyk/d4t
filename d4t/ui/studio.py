@@ -683,10 +683,13 @@ class StudioWindow(QMainWindow):
             "Which route (which set of cards) the canvas is editing. "
             "With route_by, each defect picks its own route at run time.")
         self.route_combo.activated.connect(self._on_route_combo)
-        bar.addWidget(self.lbl_route)
-        bar.addWidget(self.route_combo)
-        self.lbl_route.setVisible(False)
-        self.route_combo.setVisible(False)
+        # ⚠ 工具列上的顯示/隱藏要走 **addWidget 回傳的 QAction**：直接
+        # `widget.setVisible(False)` 會被 QToolBar 的排版蓋回去 —— 症狀是
+        # 單 route 的 recipe 工具列上掛著一個空的下拉。
+        self._route_actions = [bar.addWidget(self.lbl_route),
+                               bar.addWidget(self.route_combo)]
+        for act in self._route_actions:
+            act.setVisible(False)
 
         spacer = QWidget(bar)
         spacer.setObjectName("toolbarSpacer")
@@ -2987,8 +2990,8 @@ class StudioWindow(QMainWindow):
         """工具列的 route 下拉：跟 model 的 route 清單同步；單 route 收起來。"""
         keys = list(self.model.route_keys())
         show = len(keys) > 1
-        self.lbl_route.setVisible(show)
-        self.route_combo.setVisible(show)
+        for act in getattr(self, "_route_actions", []):
+            act.setVisible(show)
         if not show:
             return
         current = [self.route_combo.itemText(i)

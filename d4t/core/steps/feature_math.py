@@ -44,7 +44,7 @@ from typing import Any, Dict, List
 from ..pipeline.context import Context
 from ..pipeline.expression import ExpressionError, parse_expression
 from ..pipeline.step import (
-    CATEGORY_ALGO, GROUP_ALGO, ParamSpec, Step, StepError, register_step,
+    CATEGORY_ALGO, GROUP_ADC, ParamSpec, Step, StepError, register_step,
 )
 from ._util import FEATURE_PREFIX_PATTERN
 
@@ -76,7 +76,9 @@ class FeatureMathStep(Step):
     key = "feature_math"
     label = "Feature math"
     category = CATEGORY_ALGO
-    group = GROUP_ALGO
+    # Algo 段解散後歸到判定那一段（F24 §5）：這張卡的功能已被
+    # decide 的 working numbers 吸收，卡片收在 HIDDEN_STEPS、只服務舊 recipe。
+    group = GROUP_ADC
     help = ("Work out a new number from the numbers the cards above already "
             "measured - for example “glv_max - glv_median”. Use it to keep "
             "the arithmetic on the canvas instead of hiding it inside the "

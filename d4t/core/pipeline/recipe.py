@@ -143,10 +143,19 @@ class Let:
     取整批統計時**排除 `feature_fill` 補過值的顆**（`<變數>_missing == 1`
     的列不進中位數 —— A1 當時就記下的規矩）；那幾顆自己仍然拿到換算值
     （用大家的統計換算它，數字看得出它是補的）。
+
+    ``fill``（F24 ⑤，「missing ⇒ 用 __」）：非空時，這一行用到的數字**缺了**
+    （上游量不出來、那一格沒寫 —— F19：算不出來的不寫）就不讓整顆失敗，
+    值改用這個數字，並寫 ``<name>_missing = 1``（有 fill 時每顆都寫這個旗標,
+    0 或 1 —— CSV 那一欄才是完整的）。判定樹的第一步問
+    ``<name>_missing > 0`` 就是它的形狀。留空＝照舊：缺了就是這一顆失敗，
+    訊息講出缺哪個數字。這正是 `feature_fill` 卡的那件事搬進 working number
+    一行 —— 補值跟著「誰要用它」住，不再是一張要另外接的卡。
     """
     name: str
     expr: str
     scale: str = ""
+    fill: str = ""
 
 
 @dataclass(frozen=True)
@@ -496,6 +505,19 @@ def _decide_issues(recipe: "Recipe", decide: "DecideSpec") -> List["Issue"]:
             out.append(Issue(
                 code="bad-let", level="error", node_id=None,
                 title="A 'let' line does not parse", detail=str(e)))
+        fill = str(getattr(item, "fill", "") or "")
+        if fill:
+            try:
+                float(fill)
+            except ValueError:
+                out.append(Issue(
+                    code="bad-let", level="error", node_id=None,
+                    title="A 'let' line's missing-value fallback is not "
+                          "a number",
+                    detail="decide.let[%d] says 'if missing use %s' - that "
+                           "has to be a plain number (it stands in for the "
+                           "value when the measurement is not there)."
+                           % (i, fill)))
         scale = str(getattr(item, "scale", "") or "")
         if scale not in LET_SCALES:
             # 打錯的 scale 不能安靜地當成「照算」：那一行看起來在跟整批比,
@@ -521,6 +543,83 @@ def _decide_issues(recipe: "Recipe", decide: "DecideSpec") -> List["Issue"]:
                 code="bad-rule", level="error", node_id=None,
                 title="The decide block's score expression does not parse",
                 detail=str(e)))
+    return out
+
+
+def _param_diff_text(step_cls, pa: Dict[str, Any], pb: Dict[str, Any],
+                     ka: str, kb: str) -> str:
+    """兩張同型卡片差在哪幾格，一句白話（`routes-drift` 的 detail）。
+
+    影像流／區域參數刻意不比（`_treatment_sig` 的同一個理由）：兩條 route
+    各接各的流本來就不同，比它們的話這支 lint 對每一份分流 recipe 都叫 ——
+    而「一支會誤報的 lint 比沒有 lint 更糟」（F11 Enhance-3）。
+    """
+    skip = {s.name for s in step_cls.params
+            if s.type in ("image_key", "image_keys",
+                          "region_key", "region_keys")}
+    names = {s.name: (s.label or s.name) for s in step_cls.params}
+    diff = sorted(n for n in set(pa) | set(pb)
+                  if n not in skip and pa.get(n) != pb.get(n))
+    return ", ".join(
+        "%s is %s on route '%s' but %s on route '%s'"
+        % (names.get(n, n), pa.get(n, "(unset)"), ka,
+           pb.get(n, "(unset)"), kb)
+        for n in diff[:3])
+
+
+def _routes_drift_issues(recipe: "Recipe", kinds: List[str],
+                         clean_params: Dict[str, Dict[str, Any]],
+                         registry) -> List["Issue"]:
+    """分流的兩條 route 用了**同一張卡、不同設定**時提個醒（F23 §5 選項 A）。
+
+    這不是 error —— 「刻意不同」正是分流的目的。它存在的理由是選項 A 的
+    風險本身：兩條幾乎一樣的 route，改了 A 路的卡忘了 B 路的，畫布一次只看
+    一條所以**看不出來**。提示講出差在哪幾格，看一眼就分得出「這是我設計的」
+    還是「這是我忘了的」。
+    """
+    out: List[Issue] = []
+    per_route: Dict[str, Dict[str, List[str]]] = {}
+    for k in kinds:
+        by_step: Dict[str, List[str]] = {}
+        for nid in recipe.routes.get(k, []):
+            node = recipe.nodes.get(nid)
+            if node is None or not node.enabled:
+                continue
+            by_step.setdefault(node.step, []).append(nid)
+        per_route[k] = by_step
+    ordered = list(kinds)
+    for i, ka in enumerate(ordered):
+        for kb in ordered[i + 1:]:
+            shared = set(per_route[ka]) & set(per_route[kb])
+            for step_key in sorted(shared):
+                step_cls = registry.get(step_key)
+                if step_cls is None:
+                    continue
+                for na in per_route[ka][step_key]:
+                    for nb in per_route[kb][step_key]:
+                        if na == nb:
+                            continue    # 共用同一個節點＝同一組設定，沒得漂
+                        pa = clean_params.get(na, {})
+                        pb = clean_params.get(nb, {})
+                        bits = _param_diff_text(step_cls, pa, pb, ka, kb)
+                        if not bits:
+                            continue
+                        out.append(Issue(
+                            code="routes-drift", level="warning", node_id=na,
+                            title="Two routes use the same card with "
+                                  "different settings",
+                            detail="'%s' (route '%s') and '%s' (route '%s') "
+                                   "are both %s, but %s. If that is "
+                                   "deliberate, fine - this note is here so "
+                                   "an edit on one side is not quietly "
+                                   "forgotten on the other."
+                                   % (na, ka, nb, kb,
+                                      getattr(step_cls, "label", step_key),
+                                      bits)))
+                        break       # 一對 route 一張卡講一次就夠
+                    else:
+                        continue
+                    break
     return out
 
 
@@ -587,7 +686,8 @@ def _decide_from_json(raw: Any) -> Optional["DecideSpec"]:
                               "and 'expr'" % i)
         lets.append(Let(name=str(item["name"]).strip(),
                         expr=str(item["expr"]),
-                        scale=str(item.get("scale", "") or "")))
+                        scale=str(item.get("scale", "") or ""),
+                        fill=str(item.get("fill", "") or "")))
     rules: List[Rule] = []
     for i, item in enumerate(list(raw.get("rules") or [])):
         if not isinstance(item, dict) or "when" not in item or "bin" not in item:
@@ -1237,13 +1337,16 @@ class Recipe:
         # 相同（`test_a_json_round_trip_changes_nothing` 與 export parity 都
         # 靠這件事）。
         if self.decide is not None:
-            # ``scale`` **有才寫**（嚴格附加）：沒用「跟整批比」的 recipe
+            # ``scale`` / ``fill`` **有才寫**（嚴格附加）：沒用到的 recipe
             # 存出來要跟以前逐位元組相同。
             d_out: Dict[str, Any] = {
-                "let": [dict({"name": x.name, "expr": x.expr},
-                             **({"scale": x.scale} if str(
-                                 getattr(x, "scale", "") or "") else {}))
-                        for x in self.decide.let],
+                "let": [dict(
+                    {"name": x.name, "expr": x.expr},
+                    **({"scale": x.scale} if str(
+                        getattr(x, "scale", "") or "") else {}),
+                    **({"fill": x.fill} if str(
+                        getattr(x, "fill", "") or "") else {}))
+                    for x in self.decide.let],
             }
             # 樹與清單**只寫在用的那一種** —— 兩個都寫出去，讀回來就是
             # `ambiguous-decision`，一份自己存的檔案不該把自己弄壞。
@@ -1984,5 +2087,12 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                     detail=f"route '{k}': the variables {unknown} are not among "
                            f"the features this route produces ({sorted(feats)}), "
                            f"so the score may not be computable at run time"))
+
+    # ---- 分流的 route 之間有沒有漂（F23 §5 選項 A 的配套）----
+    # 只在 route_by 存在時看：多 route 在此之前的意思是「一種 kind 一條路」
+    # （ebi_patch / rsem），兩條路的卡不同設定是常態，不是漂。
+    if route_by is not None and len(kinds) > 1:
+        issues.extend(_routes_drift_issues(recipe, kinds, clean_params,
+                                           registry))
 
     return issues

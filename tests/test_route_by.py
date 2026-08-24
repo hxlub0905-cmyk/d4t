@@ -213,6 +213,38 @@ def test_without_route_by_an_unknown_kind_is_still_an_error():
                                      "error")
 
 
+def test_two_routes_with_the_same_card_but_different_settings_get_a_note():
+    """F23 §5 選項 A 的配套：`routes-drift` 是 warning（刻意不同正是分流的
+    目的），detail 講**差在哪幾格**。"""
+    recipe = _recipe(route_by=_rb())      # glv_a / glv_b：metrics 不同
+    hits = [i for i in validate(recipe) if i.code == "routes-drift"]
+    assert len(hits) == 1 and hits[0].level == "warning"
+    assert "glv_max" in hits[0].detail and "glv_mean" in hits[0].detail
+
+
+def test_identical_settings_across_routes_do_not_drift():
+    recipe = _recipe(route_by=_rb())
+    recipe.nodes["glv_b"] = RecipeNode("glv_b", "glv_stats",
+                                       {"source": "test",
+                                        "metrics": "glv_max"})
+    assert not [i for i in validate(recipe) if i.code == "routes-drift"]
+
+
+def test_only_the_wiring_differing_is_not_drift():
+    """影像流參數不比（兩條 route 各接各的流本來就不同）。"""
+    recipe = _recipe(route_by=_rb())
+    recipe.nodes["glv_b"] = RecipeNode("glv_b", "glv_stats",
+                                       {"source": "diff",
+                                        "metrics": "glv_max"})
+    assert not [i for i in validate(recipe) if i.code == "routes-drift"]
+
+
+def test_without_route_by_multi_route_recipes_do_not_drift():
+    """kind 選路的多 route（ebi_patch/rsem）兩條路不同設定是常態，不是漂。"""
+    recipe = _recipe(route_by=None)
+    assert not [i for i in validate(recipe) if i.code == "routes-drift"]
+
+
 # --------------------------------------------------------------------------- #
 # 4. 逐顆走對路（引擎，run_batch 自動補欄）
 # --------------------------------------------------------------------------- #

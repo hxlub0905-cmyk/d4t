@@ -283,7 +283,7 @@ class DecidePanel(QWidget):
             "them."))
         for i, item in enumerate(d.let):
             self.body_lay.addWidget(self._let_row(i, item))
-        add_let = small_button("+ Add a line")
+        add_let = small_button("+ Add a line", shape="wide")
         add_let.clicked.connect(lambda: self._restructure(m.add_let))
         self.body_lay.addWidget(add_let)
 
@@ -306,7 +306,7 @@ class DecidePanel(QWidget):
                 "Rules", "Top to bottom - the first one that matches wins"))
             for i, rule in enumerate(d.rules):
                 self.body_lay.addWidget(self._rule_row(i, rule, len(d.rules)))
-            add_rule = small_button("+ Add a rule")
+            add_rule = small_button("+ Add a rule", shape="wide")
             add_rule.clicked.connect(lambda: self._restructure(m.add_rule))
             self.body_lay.addWidget(add_rule)
 
@@ -327,8 +327,23 @@ class DecidePanel(QWidget):
                                        _insert_at_cursor(sc, tok)))))
 
     def _let_row(self, i: int, item: Any) -> QWidget:
+        """一行 working number ＝ 面板上的**兩行**。
+
+        第一行是算式本體，第二行是它的兩個屬性（「missing ⇒」與「跟整批
+        比」）。擠成一行的話七個元件在 437px 的欄裡會互相切字 ——
+        F22 那一輪量過同一件事（顆數擠掉純度），答案也一樣：換行。
+        """
         m = self._model
         row = _Row(self)
+        col = QWidget(row)
+        vlay = QVBoxLayout(col)
+        vlay.setContentsMargins(0, 0, 0, 0)
+        vlay.setSpacing(2)
+        top = QHBoxLayout()
+        top.setSpacing(4)
+        bottom = QHBoxLayout()
+        bottom.setSpacing(4)
+
         name = QLineEdit(str(item.name))
         name.setPlaceholderText("give it a name")
         name.setFixedWidth(120)
@@ -343,9 +358,30 @@ class DecidePanel(QWidget):
                               lambda tok, e=expr, k=i:
                               m.set_let(k, expr=_insert_at_cursor(e, tok)))
         pick.setFixedWidth(140)
-        # 「跟整批比」（F23 期3）：這一行算完之後換算成整批尺度，判定重算。
-        # 跨顆的數字（「這一顆比整批亮多少」）在單顆的 run 裡根本不存在 ——
-        # 所以它是這一行的一個屬性，不是另一張卡（F24 §5 定的家）。
+        rm = _tight(small_button("✕"), 24)
+        rm.setToolTip("Take this line out")
+        rm.clicked.connect(lambda _=False, k=i: self._restructure(m.remove_let, k))
+        for w in (name, eq, expr, pick, rm):
+            top.addWidget(w, 1 if w is expr else 0)
+
+        # 「missing ⇒ 用 __」（F24 ⑤）：上游量不出來的顆不整顆失敗，值用這個
+        # 數字頂著，`<名字>_missing` 旗標寫 1 —— 判定樹的第一步問的就是它。
+        # 這正是 `feature_fill` 卡的那件事，搬進它服務的這一行。
+        miss_tag = QLabel("if missing →")
+        miss_tag.setObjectName("paramHint")
+        fill = QLineEdit(str(getattr(item, "fill", "") or ""))
+        fill.setPlaceholderText("(fail the defect)")
+        fill.setFixedWidth(96)
+        fill.setToolTip(
+            "What this number becomes when a measurement it needs is not "
+            "there.\nLeave it empty and such a defect fails with a message; "
+            "put a number here\nand the defect keeps going - with "
+            "'%s_missing' set to 1 so the tree can\nsend it to its own tray "
+            "(e.g. '%s_missing > 0')." % (item.name or "name",
+                                          item.name or "name"))
+        fill.textEdited.connect(lambda t, k=i: m.set_let(k, fill=str(t)))
+        # 「跟整批比」（F23 期3）：跨顆的數字在單顆的 run 裡根本不存在 ——
+        # 所以它是這一行的屬性，不是另一張卡（F24 §5 定的家）。
         scale = QComboBox()
         for text, val in (("as measured", ""),
                           ("z vs the batch", "z"),
@@ -364,11 +400,13 @@ class DecidePanel(QWidget):
         scale.activated.connect(
             lambda j2, c=scale, k=i:
             m.set_let(k, scale=str(c.itemData(int(j2)) or "")))
-        rm = _tight(small_button("✕"), 24)
-        rm.setToolTip("Take this line out")
-        rm.clicked.connect(lambda _=False, k=i: self._restructure(m.remove_let, k))
-        for w in (name, eq, expr, pick, scale, rm):
-            row.lay.addWidget(w, 1 if w is expr else 0)
+        for w in (miss_tag, fill, scale):
+            bottom.addWidget(w)
+        bottom.addStretch(1)
+
+        vlay.addLayout(top)
+        vlay.addLayout(bottom)
+        row.lay.addWidget(col, 1)
         return row
 
     def _rule_row(self, i: int, rule: Any, n: int) -> QWidget:

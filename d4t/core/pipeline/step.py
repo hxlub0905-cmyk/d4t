@@ -92,7 +92,12 @@ GROUP_MEASURE = "measure"
 #: 每一張量測卡都是 ``CATEGORY_ALGO``，而它們的 ``group`` 是 ``measure``。
 #: ``GROUP_ALGO`` 說的是「這張卡**只**吃數字、不碰影像」（F16，使用者定調：
 #: 「measure 是量出數值來，Algo 是拿這些 feature 去做更 custom 的處理」）。
-#: 那條界線有測試守著：Algo 段的卡 ``resolve_reads()`` 恆為空。
+#:
+#: ⚠ **這一段已解散**（F24 §5，使用者 2026-08-24 點頭）：算式住進判定的
+#: working numbers（`decide.let`）、補值變成那一行的「missing ⇒」屬性、
+#: 跨顆換算變成「跟整批比」（`Let.scale`）—— 三件事都比一張卡更靠近它們
+#: 服務的判定。這個常數留著給外掛卡相容（`resolve_group` 照認），但它不在
+#: :data:`GROUP_ORDER` 裡：卡片庫與 rail 上沒有這一段。
 GROUP_ALGO = "algo"
 GROUP_ADC = "adc"
 #: 這一段的卡是 **end point**：不吐影像流、不吐特徵，只把東西寫出去。
@@ -100,7 +105,11 @@ GROUP_ADC = "adc"
 GROUP_OUTPUT = "output"
 
 #: 卡片庫的顯示順序（讀起來是一句話：
-#: Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output）。
+#: Input → Enhance → ROI → Measure → Compare → ADC → Output）。
+#:
+#: **七段**（F24 §5，2026-08-24）：F16 定的八段少了 Algo —— 那一段解散進
+#: 判定（見 :data:`GROUP_ALGO` 的說明），而「段落是使用者 2026-08-20 定的、
+#: 動之前要再點一次頭」那條規矩履行過了（使用者：「那三件事接著做」）。
 #:
 #: **這個順序不決定執行順序。** 執行是 :func:`recipe.execution_order` 的 DAG
 #: 拓撲排序 —— 線怎麼拉就怎麼跑。這裡排的是**卡片庫的分區順序**（連帶 rail 的
@@ -110,7 +119,7 @@ GROUP_OUTPUT = "output"
 #: ⚠ 這份順序在 UI 有第二份：``ui/widgets.py`` 的 ``LibraryPanel.GROUPS``
 #: （它多帶標題與副標）。兩份要一致，``tests/test_ui_f16_stages.py`` 鎖著。
 GROUP_ORDER = (GROUP_INPUT, GROUP_ENHANCE, GROUP_REGION, GROUP_MEASURE,
-               GROUP_ALGO, GROUP_COMPARE, GROUP_ADC, GROUP_OUTPUT)
+               GROUP_COMPARE, GROUP_ADC, GROUP_OUTPUT)
 _GROUPS = GROUP_ORDER
 _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC, CATEGORY_BATCH)
 

@@ -585,7 +585,30 @@ def _eval_decision(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
         name = str(item.name).strip()
         if not name:
             raise ExpressionError("a 'let' line has no name", "", 0)
-        ctx.features[name] = parse_expression(item.expr).eval(ctx.features)
+        expr_obj = parse_expression(item.expr)
+        fill = str(getattr(item, "fill", "") or "")
+        if fill:
+            # 「missing ⇒ 用 __」（F24 ⑤）：這一行用到的數字缺了，值改用
+            # fallback，並且**永遠寫旗標**（0 或 1）—— 有 fill 的行，
+            # `<name>_missing` 那一欄在 CSV 上才是完整的，判定樹的第一步
+            # 問的就是它。留空（預設）走下面那條老路：缺了＝這一顆失敗，
+            # 一個位元都沒變。
+            try:
+                fallback = float(fill)
+            except ValueError:
+                raise ExpressionError(
+                    "the 'if missing' fallback of '%s' is not a number"
+                    % name, fill, 0)
+            missing = [v for v in expr_obj.variables
+                       if v not in ctx.features]
+            if missing:
+                ctx.features[name] = fallback
+                ctx.features[name + "_missing"] = 1.0
+            else:
+                ctx.features[name] = expr_obj.eval(ctx.features)
+                ctx.features[name + "_missing"] = 0.0
+            continue
+        ctx.features[name] = expr_obj.eval(ctx.features)
 
     path: List[str] = []
     if recipe.decide.tree is not None:
