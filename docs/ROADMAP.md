@@ -77,7 +77,8 @@
 計畫書：[`plans/F11-phase2-features.md`](plans/F11-phase2-features.md)。
 
 **做法是「逐段逐卡」**（使用者 2026-08-17）：從左側卡片庫的順序一步一步往下
-（F16 起是 Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output），**每張卡的預期功能、
+（F16 起是 Input → Enhance → ROI → Measure → Compare → ADC → Output；F24 §5 之後
+是七段，Algo 解散進判定），**每張卡的預期功能、
 UI 介面、設定放哪都要先討論過**才動手。所以計畫書是**議程**不是待辦清單，
 而這個 phase 的**週期會拉很長**（新功能 + 完善舊功能）。
 
@@ -180,11 +181,14 @@ meta，`MultiSourceStep` 注入 `CURRENT_REGION_INDEX`）而**標記上色重用
 「消失 area_px / cd_x_px / cd_y_px / test_clip_frac、新增 cd_* 那一批 ＋
 norm_clip_frac」，逐項對得上 F19 與 F17-②。
 
-### 畫布的八段（F16，使用者 2026-08-20 定稿）
+### 畫布的七段（F16 定八段，F24 §5 解散 Algo）
 
 ```
-Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output
+Input → Enhance → ROI → Measure → Compare → ADC → Output
 ```
+
+⚠ **這裡以前寫著八段。** `Algo` 在 F24 §5（使用者 2026-08-24 點頭）解散進判定，
+`GROUP_ORDER` 現在是七段 —— 唯一出處在 `d4t/core/pipeline/step.py`。
 
 **段落本身 ✅ 2026-08-20**：`GROUP_ORDER` 重排並加了 `algo` / `output` 兩段，
 `LibraryPanel.GROUPS` 對齊（`tests/test_ui_f16_stages.py` 把兩份綁在一起），

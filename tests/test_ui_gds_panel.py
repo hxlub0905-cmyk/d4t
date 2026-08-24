@@ -28,8 +28,16 @@ def qapp():
 
     from d4t.ui import theme
     app = QApplication.instance() or QApplication([])
+    # ⚠ **還原是必要的，不是禮貌。** `theme.TOKENS` 是就地更新的模組層 dict，
+    # 所以這一行改的是**整個行程**的主題。不還原的話它會漏給下一個測試檔 ——
+    # 而字母序排在後面的 `test_ui_widgets.py` 有一條斷言讀的正是 `TOKENS`，
+    # 於是「一個檔案一個行程」全綠、「一個行程跑整套」紅（CI 因此紅了三週）。
+    # conftest 那支 autouse fixture 是 function scope，接不到 module scope 的
+    # 這一次切換 —— 它比那一支早建立、晚拆除。
+    before = theme.current_theme()
     theme.apply_theme(app, "dark")
     yield app
+    theme.apply_theme(app, before)
 
 
 # --------------------------------------------------------------------------- #

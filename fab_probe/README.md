@@ -12,7 +12,7 @@ d4t 全程用合成資料開發（真實資料不能出廠），因此有三個�
 | `probe_tiff.py`  | 交叉確認 **假設 #1**：每顆 defect 是不是兩頁（test/ref） | 否（只讀 IFD 標籤） |
 | `probe_stats.py` | 影像段參數怎麼設；奇偶頁亮度差是 **假設 #1** 的旁證 | **是（唯一會讀像素的一支）** |
 
-三個假設的原文在 `CLAUDE.md` §8。**2026-07-30 結掉了前兩個**，只剩第 3 個要確認：
+三個假設的原文在 [`../docs/FAB-VALIDATION.md`](../docs/FAB-VALIDATION.md)。**2026-07-30 結掉了前兩個**，只剩第 3 個要確認：
 
 1. ~~EBI patch 的 page→channel 對應~~ —— ✅ **已確認**：第 1 張 = test、第 2 張 = ref。
    `probe_tiff.py` / `probe_stats.py` 現在是**交叉確認**，不是前提。

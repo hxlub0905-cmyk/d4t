@@ -16,12 +16,14 @@ SAFE 語意（inline 調參不炸批次的鐵則）：
 - 例外：**變數不存在**與**變數值不是數字**會 raise ExpressionError
   （這是 recipe 寫錯，不是資料髒 —— 要讓使用者看到）。
 
-錯誤訊息以繁體中文白話呈現，附 caret（^）指出出錯位置，
-非工程師同事也能看懂哪裡打錯了。
+錯誤訊息附 caret（^）指出出錯位置，非工程師同事也能看懂哪裡打錯了。
+**訊息本身是英文** —— 它們會出現在 Studio 上，而 UI 一律英文
+（`tests/test_ui_english_only.py` 守著這件事）。
 """
 from __future__ import annotations
 
 import math
+from contextlib import contextmanager
 from typing import Any, FrozenSet, List, Mapping, Set, Tuple
 
 __all__ = ["ExpressionError", "Expression", "parse_expression"]
@@ -35,6 +37,14 @@ _VARIADIC = ("min", "max")
 _KEYWORDS = ("and", "or", "not")
 _CMP_OPS = (">", "<", ">=", "<=", "==", "!=")
 _TWO_CHAR_OPS = ("**", ">=", "<=", "==", "!=")
+
+#: 括號／函式呼叫的巢狀上限。**存在的理由是訊息，不是安全。**
+#:
+#: parser 是遞迴下降的，所以夠深的巢狀會撞 Python 的遞迴上限，而
+#: ``RecursionError`` 不是 :class:`ExpressionError` —— 讀 recipe 那條路接不住
+#: 它，使用者看到的是一段 traceback（推廣鐵則）。實測 400 層就會撞。
+#: 64 層遠超過任何人寫得出來的分數表達式，所以擋在這裡的一定是貼壞的東西。
+MAX_DEPTH = 64
 
 
 class ExpressionError(ValueError):
@@ -154,6 +164,7 @@ class _Parser:
         self.text = text
         self.toks = _tokenize(text)
         self.i = 0
+        self.depth = 0
 
     def _peek(self) -> _Token:
         return self.toks[self.i]
@@ -166,6 +177,20 @@ class _Parser:
     def _is_name(self, word: str) -> bool:
         kind, val, _ = self._peek()
         return kind == "name" and val == word
+
+    @contextmanager
+    def _nested(self, pos: int):
+        """往裡面遞迴一層，超過 :data:`MAX_DEPTH` 就講人話（見那裡的說明）。"""
+        self.depth += 1
+        if self.depth > MAX_DEPTH:
+            raise ExpressionError(
+                "this expression nests brackets more than %d levels deep - "
+                "that is deeper than any formula anyone writes, so something "
+                "was pasted in wrong" % MAX_DEPTH, self.text, pos)
+        try:
+            yield
+        finally:
+            self.depth -= 1
 
     # ---- 進入點 -----------------------------------------------------------
     def parse(self) -> tuple:
@@ -259,7 +284,8 @@ class _Parser:
                 return self.parse_call(str(val), pos)
             return ("var", str(val), pos)
         if kind == "lparen":
-            node = self.parse_or()
+            with self._nested(pos):
+                node = self.parse_or()
             k2, _, p2 = self._peek()
             if k2 != "rparen":
                 raise ExpressionError("missing a closing bracket ')'", self.text, p2)
@@ -282,7 +308,8 @@ class _Parser:
             self._next()
         else:
             while True:
-                args.append(self.parse_or())
+                with self._nested(name_pos):
+                    args.append(self.parse_or())
                 kind, _, pos = self._peek()
                 if kind == "comma":
                     self._next()

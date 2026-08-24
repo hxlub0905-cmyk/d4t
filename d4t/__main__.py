@@ -326,7 +326,10 @@ def _cmd_rescore(args: argparse.Namespace) -> int:
             summary = rescore(store, args.run_id, expr=args.expr,
                               threshold=args.threshold, bins=bins,
                               save_as=(True if args.save else None), notes=args.notes or "")
-        except KeyError as e:
+        # ValueError：判定樹的 recipe 傳了 --expr/--threshold/--bins，
+        # 或那份 recipe 根本沒有分數表達式。兩種都是「講一句白話就好」，
+        # 不是 traceback（推廣鐵則）。
+        except (KeyError, ValueError) as e:
             print(f"[錯誤] {e}", file=sys.stderr)
             return 2
     print(f"rescore {summary['run_id']}：n={summary['n']}，錯誤 {summary['n_errors']}，"

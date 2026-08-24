@@ -52,6 +52,41 @@ class RecipeError(ValueError):
     """Recipe 結構性錯誤（循環、未知 route、JSON 缺欄位…）。"""
 
 
+#: 判定樹的巢狀上限。**存在的理由是訊息，不是安全。**
+#:
+#: `_tree_from_json` / `_tree_depth` / `_eval_decision` 都是遞迴的，所以一份
+#: 巢狀夠深的 JSON 會撞 Python 的遞迴上限 —— 而 `RecursionError` 不是
+#: `RecipeError`，讀檔那條路接不住它，使用者看到的是一段 traceback（推廣鐵則）。
+#: 200 層遠遠超過任何人畫得出來的判定樹（F24 的驗收案例最深是 4 層），
+#: 所以擋在這裡的一定是寫壞的檔案，而它現在會拿到一句白話。
+MAX_TREE_DEPTH = 200
+
+
+def _as_number(raw: Any, where: str, cast, kind: str):
+    """把 JSON 裡的一個值轉成數字，**轉不動就講人話**。
+
+    recipe 是使用者留在磁碟上的檔案，而它會被手改（這個 repo 沒有存檔功能，
+    所以手改是唯一的編輯方式）。直接 ``int()`` / ``float()`` 下去的話，一個
+    打錯的欄位吐出來的是 ``invalid literal for int() with base 10: '1.0'`` ——
+    那句話沒有講出是**哪一個欄位**，而使用者是不會寫 code 的製程工程師。
+    """
+    if isinstance(raw, bool):      # bool 是 int 的子類，但當數字用一定是筆誤
+        raise RecipeError("%s must be %s, got the true/false value %r"
+                          % (where, kind, raw))
+    try:
+        return cast(raw)
+    except (TypeError, ValueError):
+        raise RecipeError("%s must be %s, got %r" % (where, kind, raw))
+
+
+def _as_int(raw: Any, where: str) -> int:
+    return _as_number(raw, where, int, "a whole number")
+
+
+def _as_float(raw: Any, where: str) -> float:
+    return _as_number(raw, where, float, "a number")
+
+
 def _app_version() -> str:
     """現在跑的這一版 d4t。"""
     from d4t import __version__
@@ -204,12 +239,22 @@ def _tree_to_json(node: Any) -> Dict[str, Any]:
             "no": _tree_to_json(node.no)}
 
 
-def _tree_from_json(raw: Any, where: str = "decide.tree") -> Any:
+def _tree_from_json(raw: Any, where: str = "decide.tree", depth: int = 0) -> Any:
     """讀一個樹節點。格式錯**當場講**（同 `_decide_from_json` 的理由）。
 
     判準：有 ``when`` 是步驟（要有 ``yes`` 與 ``no``）、有 ``bin`` 是葉子 ——
     兩個都有或都沒有就是寫壞了，不猜。
+
+    ``depth`` 擋的是 :data:`MAX_TREE_DEPTH`（見那裡的說明）：這一支是遞迴的，
+    而撞到 Python 遞迴上限吐出來的 ``RecursionError`` 不是 ``RecipeError``，
+    讀檔那條路接不住。
     """
+    if depth > MAX_TREE_DEPTH:
+        # ``where`` 到這裡已經是 200 段 ".no" —— 印全長只會把訊息淹掉。
+        raise RecipeError(
+            "the decision tree is nested more than %d levels deep - that is "
+            "not a tree anyone drew, so the file is almost certainly damaged "
+            "(the path starts %s...)" % (MAX_TREE_DEPTH, where[:60]))
     if not isinstance(raw, dict):
         raise RecipeError("%s must be an object (dict), got %s"
                           % (where, type(raw).__name__))
@@ -219,15 +264,17 @@ def _tree_from_json(raw: Any, where: str = "decide.tree") -> Any:
                           "step (when/yes/no) or a leaf (bin/label), not both"
                           % where)
     if has_bin:
-        return TreeLeaf(bin=int(raw["bin"]),
+        return TreeLeaf(bin=_as_int(raw["bin"], where + ".bin"),
                         label=str(raw.get("label", "") or ""))
     if has_when:
         if "yes" not in raw or "no" not in raw:
             raise RecipeError("%s is a step ('when') but is missing its "
                               "'yes' or 'no' side" % where)
         return TreeStep(when=str(raw["when"]),
-                        yes=_tree_from_json(raw["yes"], where + ".yes"),
-                        no=_tree_from_json(raw["no"], where + ".no"))
+                        yes=_tree_from_json(raw["yes"], where + ".yes",
+                                            depth + 1),
+                        no=_tree_from_json(raw["no"], where + ".no",
+                                           depth + 1))
     raise RecipeError("%s must have either 'when' (a step) or 'bin' (a leaf)"
                       % where)
 
@@ -693,7 +740,8 @@ def _decide_from_json(raw: Any) -> Optional["DecideSpec"]:
         if not isinstance(item, dict) or "when" not in item or "bin" not in item:
             raise RecipeError("decide.rules[%d] must be an object with 'when' "
                               "and 'bin'" % i)
-        rules.append(Rule(when=str(item["when"]), bin=int(item["bin"]),
+        rules.append(Rule(when=str(item["when"]),
+                          bin=_as_int(item["bin"], "decide.rules[%d].bin" % i),
                           label=str(item.get("label", "") or "")))
     other = raw.get("otherwise") or {}
     if not isinstance(other, dict):
@@ -702,7 +750,7 @@ def _decide_from_json(raw: Any) -> Optional["DecideSpec"]:
             else _tree_from_json(raw.get("tree")))
     return DecideSpec(
         let=lets, rules=rules,
-        otherwise_bin=int(other.get("bin", 0)),
+        otherwise_bin=_as_int(other.get("bin", 0), "decide.otherwise.bin"),
         otherwise_label=str(other.get("label", "") or ""),
         score=str(raw.get("score", "") or ""),
         tree=tree,
@@ -1372,35 +1420,64 @@ class Recipe:
         if not isinstance(d, dict):
             raise RecipeError(f"the top level of a recipe JSON must be an object "
                               f"(dict), got {type(d).__name__}")
-        missing = [k for k in ("recipe_id", "routes", "nodes", "score") if k not in d]
+        # ``score`` **只有在沒有 ``decide`` 的時候才是必填**（2026-08-24）。
+        # 兩者是二選一的契約（見 :class:`DecideSpec` 的說明），而硬性要求
+        # ``score`` 等於逼一份判定樹 recipe 也帶一個它根本不用的區塊 ——
+        # 手寫一份 decide recipe 會拿到「missing required fields: ['score']」，
+        # 那句話對使用者是死路。自己存出來的檔案不受影響：:meth:`to_json_dict`
+        # 一直都會寫 ``score``（空表達式），所以 round-trip 逐位元組不變。
+        need = ["recipe_id", "routes", "nodes"]
+        if "decide" not in d:
+            need.append("score")
+        missing = [k for k in need if k not in d]
         if missing:
             raise RecipeError(f"recipe JSON is missing required fields: {missing}")
 
+        if not isinstance(d["nodes"], dict):
+            raise RecipeError("recipe JSON field 'nodes' must be an object "
+                              "(dict), got %s" % type(d["nodes"]).__name__)
         nodes: Dict[str, RecipeNode] = {}
         for nid, nd in dict(d["nodes"]).items():
             if not isinstance(nd, dict) or "step" not in nd:
                 raise RecipeError(f"step '{nid}' has no 'step' field")
+            raw_params = nd.get("params") or {}
+            if not isinstance(raw_params, dict):
+                raise RecipeError(
+                    "the 'params' of step '%s' must be an object (dict), got %s"
+                    % (nid, type(raw_params).__name__))
             nodes[str(nid)] = RecipeNode(
                 id=str(nid),
                 step=str(nd["step"]),
-                params=dict(nd.get("params") or {}),
+                params=dict(raw_params),
                 enabled=bool(nd.get("enabled", True)),
             )
 
-        sd = d["score"]
+        sd = d.get("score") or {"expr": ""}
         if not isinstance(sd, dict) or "expr" not in sd:
             raise RecipeError(
                 "the score block must be an object containing 'expr'")
         score = ScoreSpec(
             expr=str(sd["expr"]),
-            threshold=float(sd.get("threshold", 0.0)),
-            bins={str(k): int(v) for k, v in dict(sd.get("bins") or {}).items()},
+            threshold=_as_float(sd.get("threshold", 0.0), "score.threshold"),
+            bins={str(k): _as_int(v, "score.bins[%r]" % str(k))
+                  for k, v in dict(sd.get("bins") or {}).items()},
         )
 
         decide = _decide_from_json(d.get("decide"))
         route_by = _route_by_from_json(d.get("route_by"))
 
-        routes = {str(k): [str(x) for x in v] for k, v in dict(d["routes"]).items()}
+        if not isinstance(d["routes"], dict):
+            raise RecipeError("recipe JSON field 'routes' must be an object "
+                              "(dict) of route name -> list of step ids, got "
+                              "%s" % type(d["routes"]).__name__)
+        routes: Dict[str, List[str]] = {}
+        for k, v in dict(d["routes"]).items():
+            # ⚠ 字串也是可迭代的 —— ``"abc"`` 會安靜地變成三個節點 id。
+            if not isinstance(v, (list, tuple)):
+                raise RecipeError(
+                    "route '%s' must be a list of step ids, got %s"
+                    % (k, type(v).__name__))
+            routes[str(k)] = [str(x) for x in v]
 
         edges: List[Edge] = [Edge.from_json(e) for e in (d.get("edges") or [])]
 
@@ -1452,7 +1529,7 @@ class Recipe:
             nodes=nodes,
             score=score,
             app_version=str(d.get("app_version", "") or ""),
-            version=int(d.get("version", 1)),
+            version=_as_int(d.get("version", 1), "recipe 'version'"),
             author=str(d.get("author", "")),
             description=str(d.get("description", "")),
             edges=edges,

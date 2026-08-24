@@ -33,7 +33,7 @@ d4t 的第一原則是：
 | | |
 |---|---|
 | **輸入** | 四種 source，各有各的入口：`ebi_patch`（KLARF ＋ 多頁 patch TIFF）、`rsem`（KLARF ＋ 每顆一個影像檔）、`tiff_stack`（多頁 TIFF，無 KLARF）、`folder`（單張影像資料夾，無 KLARF） |
-| **組裝** | 20 張步驟卡片（卡片庫現行可見 18 張）；節點畫布拉線接卡，recipe 即 DAG |
+| **組裝** | 26 張步驟卡片（卡片庫現行可見 23 張，其餘收在 `ui/scope.py` 的 `HIDDEN_STEPS`）；節點畫布拉線接卡，recipe 即 DAG |
 | **量測** | SNR／GLV 統計、CD 次像素邊緣定位、影像品質指標、區域對比、SNR map、blob 分割 |
 | **輸出** | 無損寫回 KLARF（class／bin／DSIZE）、Top-N 新 KLARF、CSV／Excel 報表、feature vector（供日後 ML 訓練備料） |
 | **介面** | PySide6 桌面編輯器（Studio）＋ CLI（可排程、可腳本化） |

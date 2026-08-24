@@ -106,15 +106,51 @@ def test_theme_is_neutral_and_flat(qapp):
     舊配色是暖奶油底 + 琥珀 accent + 填滿色塊，使用者的評語是「太像玩具」。
     這裡鎖住的是**中性**（大面積不帶色相）與**平面**（無陰影漸層），
     色碼本身還可以繼續微調。
+
+    ⚠ **中性這一條只對 light 盤成立，而且那是使用者定調的**（2026-08-24）。
+    dark 盤的大面積底色刻意帶一點冷色調（`#1e2127` = 30/33/39，RGB 跨距 9），
+    所以下面那個 ``<= 8`` 套上去會紅 —— 差一。實測的感知彩度（CIE L*a*b*
+    的 C*ab）：light 是 0.0–1.1、dark 是 3.8–5.1，而被否決掉的那種暖奶油底
+    大約落在 3.7–7.5。**dark 與「玩具」在這個尺上分不開**，所以這條要求
+    留給 light，不去調寬容差讓它同時涵蓋兩者（調寬之後它就再也擋不住暖奶油）。
+
+    ⚠ 而且這裡讀的是 ``PALETTES["light"]``，**不是 ``TOKENS``**。
+    ``TOKENS`` 裝著的是「現在這個行程剛好套著哪一組」—— 讀它等於讓這條測試
+    的成敗由檔案順序決定，而那正是 CI 紅了三週的原因（見 conftest 那支
+    `_the_theme_does_not_leak_into_the_next_test`）。**一條性質測試要自己
+    講清楚它測的是哪一組值。**
     """
+    light = theme_mod.PALETTES["light"]
     for key in ("bg_page", "bg_panel", "bg_surface", "toolbar", "statusbar"):
-        r, g, b = _rgb(theme_mod.TOKENS[key])
+        r, g, b = _rgb(light[key])
         assert max(r, g, b) - min(r, g, b) <= 8, \
-            "%s = %s 帶了明顯色相，大面積底色要中性" % (key, theme_mod.TOKENS[key])
+            "light 的 %s = %s 帶了明顯色相，大面積底色要中性" % (key, light[key])
 
     qss = theme_mod.build_stylesheet()
     for banned in ("box-shadow", "qlineargradient", "qradialgradient"):
         assert banned not in qss, "平面設計不用 %s" % banned
+
+
+#: 上一條測試離開時的主題 —— 下一條測試用它驗 conftest 真的把主題收回來了。
+_theme_before_the_switch = {}
+
+
+def test_a_test_may_switch_the_theme(qapp):
+    """故意把主題留在 dark 就收工 —— 下一條測試負責證明它沒有漏出去。"""
+    _theme_before_the_switch["name"] = theme_mod.current_theme()
+    theme_mod.set_theme("dark")
+    assert theme_mod.current_theme() == "dark"
+
+
+def test_and_the_next_test_does_not_inherit_it(qapp):
+    """conftest 的 autouse fixture 要把上一條測試切走的主題收回來。
+
+    這兩條合起來是那個「CI 紅三週」的迴歸測試：把 conftest 那支 fixture 拿掉，
+    這一條會紅。它們**必須相鄰而且照順序**（pytest 在同一個檔案裡照定義順序跑），
+    所以中間不要插東西。
+    """
+    assert theme_mod.current_theme() == _theme_before_the_switch["name"], \
+        "上一條測試把主題留成 dark 了 —— conftest 的還原沒有生效"
 
 
 def test_every_colour_token_is_a_real_colour(qapp):

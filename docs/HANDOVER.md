@@ -168,7 +168,7 @@ vendoring 過來的。那六個專案在使用者的桌面上（`Desktop\hxlub09
 
 ### 開發過程中踩到、已修但值得知道的坑
 
-完整表在 `CLAUDE.md` §7。三個最容易再踩的：
+完整表在 [`PITFALLS.md`](PITFALLS.md)。三個最容易再踩的：
 
 - **fork 死鎖**：Linux 預設 fork 若從 QThread 呼叫，ProcessPool 100% 卡死（GUI 按「試跑」
   永遠不回、也不報錯）。已改成主執行緒 fork、非主執行緒 spawn。
@@ -218,7 +218,7 @@ RSEM 沒有機台給的參考圖，Golden Cell 疊一張出來後命名為 `ref`
    （寫法參考 `tests/test_klarf_variant_d.py`：先斷言「這份檔案確實是該變體」當前提，再測行為）。
 2. **拿一份真實 lot 跑一次完整流程**，看分數分佈長什麼樣、Gallery 掃起來合不合理。
    這是第一次知道合成資料上的 95% 有多少能兌現。
-3. **v2 backlog**（`CLAUDE.md` §9 底部）：ground-truth 標注 + 混淆矩陣儀表板
+3. **v2 backlog**（[`ROADMAP.md`](ROADMAP.md) 底部）：ground-truth 標注 + 混淆矩陣儀表板
    （KPI「分類準確度」的完整量化靠這個）、自由 DAG 畫布、ML Classify 卡、
    快速參考卡 PDF、以及 §3 那些還沒挖的來源專案資產。
 

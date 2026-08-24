@@ -24,11 +24,14 @@
 （快取切點、驗證順序）。**使用者看到的**分組是另一個軸 `Step.group`：
 
 ```
-Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output
+Input → Enhance → ROI → Measure → Compare → ADC → Output
 ```
 
-（F16，2026-08-20 使用者定稿。`ROI` 的內部 id 仍是 `region` —— 顯示名與 id 是
-兩件事。）
+（**七段**。F16 2026-08-20 使用者定稿的是八段；`Algo` 那一段在 F24 §5 解散進
+判定（算式住進 `decide.let` 的 working numbers、補值變成那一行的「missing ⇒」
+屬性、跨顆換算變成 `Let.scale`），2026-08-24 使用者點頭。`GROUP_ALGO` 這個常數
+留著給外掛卡相容，但它不在 `GROUP_ORDER` 裡。`ROI` 的內部 id 仍是 `region`
+—— 顯示名與 id 是兩件事。）
 
 因為 category 描述的是「這張卡吐什麼型別」，不是「使用者想解決什麼問題」。
 兩個軸各有各的用途，不要合併。新卡片放哪一組：看它吃什麼、吐什麼
@@ -150,12 +153,12 @@ d4t/
 │   ├── welcome.py           #   首啟導覽 + 範例 recipe 庫對話框
 │   ├── workers.py           #   載入/預覽(請求合併)/試跑/寫出 背景執行緒
 │   └── studio.py app.py     #   主視窗 + 進入點
-├── tests/                   # 1250+ 個測試，全部用合成資料
+├── tests/                   # 2900+ 個測試，全部用合成資料
 │   └── fixtures/recipes/    #   e2e 用的最小 recipe（**測試用，不是教學範例**）
 ├── tools/                   # make_sample(_rsem).py 合成資料；離線安裝三件套：
 │                            #   fetch_wheels.py（有網路的機器抓）→ install_offline.py
 │                            #   （air-gapped 機器裝）→ doctor.py（環境自檢）
-├── fab_probe/               # 廠內格式探測腳本（stdlib-only、純文字輸出），見 §8
+├── fab_probe/               # 廠內格式探測腳本（stdlib-only、純文字輸出）
 ├── docs/plans/              # 進行中的開發計畫（F0 = master plan、F8）
 └── docs/history/            # 封存：按月的 SESSION_LOG、做完的計畫書（**不進搬運包**）
 ```

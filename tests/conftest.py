@@ -28,6 +28,38 @@ def _no_modal_dialogs_in_tests():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _the_theme_does_not_leak_into_the_next_test():
+    """一條測試切換過的主題，收工時要收回來。
+
+    ``theme.TOKENS`` 是**就地**更新的模組層 dict（那是刻意的 —— 各模組都
+    ``import`` 過它了，換掉物件會讓它們抱著舊的那一份）。代價是它變成一份
+    跨測試共享的全域狀態：40 幾個 UI 測試檔在動它，而**忘記還原不會在當場
+    失敗**，只會讓「下一條測試看到的是什麼顏色」變成檔案順序的函數。
+
+    真的發生過（2026-08-24 這一輪查出來的）：`test_ui_gds_panel.py` 的
+    module fixture 把主題切成 dark 沒還原，字母序排在 `test_ui_widgets.py`
+    前面，於是 `test_theme_is_neutral_and_flat` 讀到的是 dark 那一組 ——
+    **一個檔案一個行程跑（開發者的做法）全綠，一個行程跑整套（CI 的做法）
+    紅**，而 CI 因此紅了三週沒有人看得出原因。
+
+    這一支收的是 function scope 的洩漏。module/session scope 的 fixture 要
+    自己在 ``yield`` 之後還原（`test_ui_gds_panel.py` 就是那樣做的）——
+    它們比這一支早建立、比它晚拆除，這裡接不到。
+
+    刻意用 ``sys.modules.get``：核心那一輪不該因為一個 conftest 就把
+    `d4t.ui.theme` 載進來（同上面那一支的理由）。
+    """
+    theme = sys.modules.get("d4t.ui.theme")
+    if theme is None:
+        yield
+        return
+    before = theme.current_theme()
+    yield
+    if theme.current_theme() != before:
+        theme.set_theme(before)
+
+
 def wire_up(model, node_id: str) -> str:
     """把這張卡的每一格輸入接上它的預設流（F10）。
 

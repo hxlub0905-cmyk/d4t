@@ -58,7 +58,30 @@ jobs:
           print("all of requirements.txt is importable:", names)
           EOF
 
-      - name: Run tests
+      # ⚠ **不要把整套塞進一個 pytest 行程。** `AGENTS.md` §5 寫著原因：UI 測試
+      # 在單一行程裡跑整套會累積 Qt 記憶體，然後變得極慢。這一步以前就是
+      # `pytest -q`，實測 **1:39:09**（2026-08-24 的 run 220，三個 job 各一次）
+      # —— 而同一套測試分兩批跑是 **7 分鐘**。CI 因此慢了十幾倍，而且慢到
+      # 沒有人想看它為什麼紅。
+      #
+      # 兩批加起來 = 全部：2,078（核心）+ 911（UI 逐檔）= 2,989，
+      # 跟 `pytest --collect-only` 的總數逐項相符。
+      - name: Run tests (core)
         env:
           QT_QPA_PLATFORM: offscreen
-        run: pytest -q
+        run: pytest -q --ignore-glob="*test_ui_*"
+
+      - name: Run tests (UI, one process per file)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        # 一個檔案一個行程 —— 跟 `AGENTS.md` §5 給開發者的做法一模一樣。
+        # `|| fail=1` 而不是讓它當場中斷：一次跑完看到全部紅的檔案，
+        # 比修一個、推一次、再等一輪快得多。
+        run: |
+          fail=0
+          for f in tests/test_ui_*.py; do
+            echo "::group::$f"
+            pytest -q "$f" || fail=1
+            echo "::endgroup::"
+          done
+          exit $fail
