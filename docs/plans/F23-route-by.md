@@ -178,7 +178,7 @@ run_batch_steps（Output 卡照舊最後）
 |---|---|---|
 | 1 | `route_by` 引擎（§4、§7）＋ lint ＋ 驗收 | ✅ **2026-08-24 完成** |
 | 2 | UI 三件（§6） | ✅ **2026-08-24 完成**（route 切換器、預覽跟著顆走＋標籤、`RouteByBox` 編輯區塊；model 抱住整份多 route recipe，見 SESSION_LOG） |
-| 3 | `lot_stats` ＋ 兩趟判定（§8） | 一輪 |
+| 3 | `lot_stats` ＋ 兩趟判定（§8） | ✅ **2026-08-24 完成**（不是一張卡 —— 照 F24 §5 做成 `Let.scale`「跟整批比」；`batch.apply_lot_scaling` 回填＋重算判定，`_missing==1` 的顆不進統計） |
 | — | F17-⑤ 選項 B | 等症狀 |
 
 ---

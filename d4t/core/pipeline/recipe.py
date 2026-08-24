@@ -123,11 +123,30 @@ class Rule:
     label: str = ""
 
 
+#: `Let.scale` 認得的值：""＝照算（逐顆）、"z"＝跟整批比（robust z：
+#: (值 − 整批中位數) / (1.4826 × MAD)，跟 `algo/enhance.py` 同一個係數）、
+#: "percentile"＝在整批裡排第幾百分位（0–100，midrank）。
+LET_SCALES = ("", "z", "percentile")
+
+
 @dataclass(frozen=True)
 class Let:
-    """判定段的一個中間值：``name = expr``，算完寫進 ``ctx.features``。"""
+    """判定段的一個中間值：``name = expr``，算完寫進 ``ctx.features``。
+
+    ``scale``（F23 期3，「跟整批比」）：非空時這一行是**兩趟**算的 ——
+    第一趟逐顆算出原始值，整批收齊後把它換算成整批尺度（robust z 或
+    百分位），原始值改名 ``<name>_raw`` 留著，然後**用換算後的值重算判定**
+    （`batch.apply_lot_scaling`）。為什麼要兩趟：跨顆算出來的數字（「這一顆
+    比整批亮多少」）在單顆的 `run_defect` 裡根本不存在 —— 那正是舊
+    `lot_stats` 卡一直卡住的地方（F23 §8）。
+
+    取整批統計時**排除 `feature_fill` 補過值的顆**（`<變數>_missing == 1`
+    的列不進中位數 —— A1 當時就記下的規矩）；那幾顆自己仍然拿到換算值
+    （用大家的統計換算它，數字看得出它是補的）。
+    """
     name: str
     expr: str
+    scale: str = ""
 
 
 @dataclass(frozen=True)
@@ -477,6 +496,16 @@ def _decide_issues(recipe: "Recipe", decide: "DecideSpec") -> List["Issue"]:
             out.append(Issue(
                 code="bad-let", level="error", node_id=None,
                 title="A 'let' line does not parse", detail=str(e)))
+        scale = str(getattr(item, "scale", "") or "")
+        if scale not in LET_SCALES:
+            # 打錯的 scale 不能安靜地當成「照算」：那一行看起來在跟整批比,
+            # 實際上每一顆還是自己的原始值 —— 跑得完、有數字、而且是錯的。
+            out.append(Issue(
+                code="bad-let", level="error", node_id=None,
+                title="A 'let' line has an unknown batch scaling",
+                detail="decide.let[%d] says scale='%s'; the choices are '' "
+                       "(as measured), 'z' (robust z against the batch) and "
+                       "'percentile' (rank within the batch)." % (i, scale)))
     for i, rule in enumerate(decide.rules):
         try:
             parse_expression(rule.when)
@@ -557,7 +586,8 @@ def _decide_from_json(raw: Any) -> Optional["DecideSpec"]:
             raise RecipeError("decide.let[%d] must be an object with 'name' "
                               "and 'expr'" % i)
         lets.append(Let(name=str(item["name"]).strip(),
-                        expr=str(item["expr"])))
+                        expr=str(item["expr"]),
+                        scale=str(item.get("scale", "") or "")))
     rules: List[Rule] = []
     for i, item in enumerate(list(raw.get("rules") or [])):
         if not isinstance(item, dict) or "when" not in item or "bin" not in item:
@@ -1207,8 +1237,13 @@ class Recipe:
         # 相同（`test_a_json_round_trip_changes_nothing` 與 export parity 都
         # 靠這件事）。
         if self.decide is not None:
+            # ``scale`` **有才寫**（嚴格附加）：沒用「跟整批比」的 recipe
+            # 存出來要跟以前逐位元組相同。
             d_out: Dict[str, Any] = {
-                "let": [{"name": x.name, "expr": x.expr} for x in self.decide.let],
+                "let": [dict({"name": x.name, "expr": x.expr},
+                             **({"scale": x.scale} if str(
+                                 getattr(x, "scale", "") or "") else {}))
+                        for x in self.decide.let],
             }
             # 樹與清單**只寫在用的那一種** —— 兩個都寫出去，讀回來就是
             # `ambiguous-decision`，一份自己存的檔案不該把自己弄壞。

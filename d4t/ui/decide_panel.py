@@ -343,10 +343,31 @@ class DecidePanel(QWidget):
                               lambda tok, e=expr, k=i:
                               m.set_let(k, expr=_insert_at_cursor(e, tok)))
         pick.setFixedWidth(140)
+        # 「跟整批比」（F23 期3）：這一行算完之後換算成整批尺度，判定重算。
+        # 跨顆的數字（「這一顆比整批亮多少」）在單顆的 run 裡根本不存在 ——
+        # 所以它是這一行的一個屬性，不是另一張卡（F24 §5 定的家）。
+        scale = QComboBox()
+        for text, val in (("as measured", ""),
+                          ("z vs the batch", "z"),
+                          ("percentile in batch", "percentile")):
+            scale.addItem(text, val)
+        j = scale.findData(str(getattr(item, "scale", "") or ""))
+        scale.setCurrentIndex(max(0, j))
+        scale.setToolTip(
+            "How this number is used by the rules:\n"
+            "as measured - each defect keeps its own value;\n"
+            "z vs the batch - (value - batch median) / spread, so 'how "
+            "unusual is this defect';\n"
+            "percentile in batch - where it ranks, 0 to 100.\n"
+            "Batch scaling needs a run over the batch - the preview shows "
+            "the raw value.")
+        scale.activated.connect(
+            lambda j2, c=scale, k=i:
+            m.set_let(k, scale=str(c.itemData(int(j2)) or "")))
         rm = _tight(small_button("✕"), 24)
         rm.setToolTip("Take this line out")
         rm.clicked.connect(lambda _=False, k=i: self._restructure(m.remove_let, k))
-        for w in (name, eq, expr, pick, rm):
+        for w in (name, eq, expr, pick, scale, rm):
             row.lay.addWidget(w, 1 if w is expr else 0)
         return row
 

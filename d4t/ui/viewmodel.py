@@ -30,7 +30,8 @@ def _decide_snapshot(d: "DecideSpec") -> Dict[str, Any]:
     undo，樹就安靜地消失 —— 而畫面上看起來只是「回到上一步」。
     """
     return {
-        "let": [(x.name, x.expr) for x in d.let],
+        "let": [(x.name, x.expr, str(getattr(x, "scale", "") or ""))
+                for x in d.let],
         "rules": [(r.when, int(r.bin), r.label) for r in d.rules],
         "otherwise": (int(d.otherwise_bin), d.otherwise_label),
         "score": d.score,
@@ -44,7 +45,7 @@ def _decide_restore(snap: Optional[Dict[str, Any]]) -> Optional["DecideSpec"]:
     ob, ol = snap.get("otherwise") or (0, "")
     tree = snap.get("tree")
     return DecideSpec(
-        let=[Let(n, e) for n, e in snap.get("let") or []],
+        let=[Let(*row) for row in snap.get("let") or []],
         rules=[Rule(w, int(b), l) for w, b, l in snap.get("rules") or []],
         otherwise_bin=int(ob), otherwise_label=str(ol),
         score=str(snap.get("score", "") or ""),
@@ -465,12 +466,15 @@ class RecipeModel:
         self._changed()
 
     def set_let(self, i: int, name: Optional[str] = None,
-                expr: Optional[str] = None) -> None:
+                expr: Optional[str] = None,
+                scale: Optional[str] = None) -> None:
         if self.decide is None or not (0 <= i < len(self.decide.let)):
             return
         cur = self.decide.let[i]
         new = Let(name=cur.name if name is None else str(name),
-                  expr=cur.expr if expr is None else str(expr))
+                  expr=cur.expr if expr is None else str(expr),
+                  scale=(str(getattr(cur, "scale", "") or "")
+                         if scale is None else str(scale)))
         if new == cur:
             return
         rows = list(self.decide.let); rows[i] = new

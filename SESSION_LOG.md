@@ -19,6 +19,33 @@
 
 ---
 
+## F23 期3：「跟整批比」的兩趟判定（2026-08-24）
+
+§8 的 lot_stats **不是一張卡** —— F24 §5 定的家：它是 working number 一行的
+屬性（`Let.scale`）。跨顆的數字（「這一顆比整批亮多少」）在單顆的
+`run_defect` 裡根本不存在，所以是兩趟：
+
+* **`Let.scale`**：`""`（照算）／`"z"`（robust z：(值−整批中位數)/(1.4826×
+  MAD)，跟 `algo/enhance.py` 同一個係數）／`"percentile"`（0–100 midrank）。
+  serde **有才寫**（嚴格附加）；打錯的值是 `bad-let` error（安靜當成照算＝
+  「看起來在跟整批比、其實沒有」）。
+* **`batch.apply_lot_scaling(recipe, rows)`**：`run_batch` 兩條路徑（循序／
+  平行）都在回傳前呼叫 —— CLI、Studio 試跑、測試拿到同一份數字，
+  workers=1/2 逐項相同免費。原始值改名 `<name>_raw` 留著（F19）；
+  **`feature_fill` 補過值的顆不進整批統計**（`<變數>_missing == 1`，A1 的
+  規矩），但自己仍拿到換算值；然後**用換算後的值重算判定**（rescore 那條
+  路：`_eval_decision` 跑在只有數字的 Context 上，不重跑影像；換算過的行
+  不重算、沒換算的行照原順序重算 —— 用到換算值的拿到新值）。
+  失敗的顆一根手指都不碰（鐵則 7）。
+* **UI**：判定面板每一行 working number 多一格下拉
+  （as measured / z vs the batch / percentile in batch），tooltip 講明
+  「整批換算要跑過整批，預覽顯示的是原始值」。
+* 測試：`tests/test_lot_scaling.py`（9 條：嚴格附加、serde、z 與 percentile
+  的數學、補值不進統計、失敗顆不碰、未換算行跟著新值、run_batch 兩路徑
+  逐項相同）。
+
+---
+
 ## F23 期2：分流的 UI（2026-08-24）
 
 §6 的三件照計畫落地，外加一件計畫書沒點名但**不做就全錯**的：

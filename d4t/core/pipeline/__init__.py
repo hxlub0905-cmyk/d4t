@@ -46,7 +46,7 @@ from .engine import (
     run_defect_cached,
 )
 from .cache import StageCache
-from .batch import run_batch, run_batch_steps
+from .batch import apply_lot_scaling, run_batch, run_batch_steps
 
 __all__ = [
     # context
@@ -69,4 +69,6 @@ __all__ = [
     # M2：checkpoint 快取與平行批次
     "run_defect_cached", "image_segment_signature", "StageCache", "run_batch",
     "run_batch_steps",
+    # 「跟整批比」的兩趟判定（F23 期3）
+    "apply_lot_scaling",
 ]

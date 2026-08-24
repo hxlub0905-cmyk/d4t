@@ -146,7 +146,7 @@ THIS BATCH  47 arrive here → 11 yes · 36 no
 | ② | 畫布渲染（唯讀）：判定區、入口卡、菱形、托盤、分支流量、未試跑狀態 | ✅ 2026-08-24（`ui/tree_scene.py`；流量由特徵重走樹算，見 SESSION_LOG） |
 | ③ | 編輯互動：點菱形→右欄面板、加/刪步、收合 | ✅ 2026-08-24（`ui/tree_panel.py`；rules 在第一次點菱形時無損轉樹） |
 | ④ | 幽靈線 ＋ Algo 收進 `HIDDEN_STEPS` ＋ Preview Path | ✅ 2026-08-24（幽靈線從宣告推 `feature_owners`；path 亮在樹上） |
-| ⑤ | working numbers 的「missing ⇒」與「跟整批比」（吸收 feature_fill / lot_stats） | ③ ＋ F23 §8 的兩趟引擎 |
+| ⑤ | working numbers 的「missing ⇒」與「跟整批比」（吸收 feature_fill / lot_stats） | 「跟整批比」✅ 2026-08-24（`Let.scale` ＋ `apply_lot_scaling` 兩趟判定，F23 期3）；「missing ⇒」未做（feature_fill 仍收在 `HIDDEN_STEPS`，引擎照認） |
 
 與 **F23（route_by）**的關係：分流的每條支線最後都流進**同一棵**判定樹 ——
 畫布上兩條支線匯進一個判定區，pre-filter 的故事一張圖講完。F23 §6 的 UI 期
