@@ -22,6 +22,16 @@ from d4t.core.pipeline.recipe import (DecideSpec, Let, Rule, TreeLeaf,
                                       TreeStep, _tree_from_json, _tree_to_json,
                                       rules_to_tree)
 
+#: bin 編號的上限。**它的用途是「別讓數字框變成一格自由文字」，不是「分類碼
+#: 應該多大」** —— 後者是廠決定的，不是我們。
+#:
+#: 以前四個數字框各自寫死 ``setRange(0, 999)``，而**引擎與 KLARF 寫回都沒有
+#: 這個上限**（``CLASSNUMBER`` 就是一個整數欄）。廠內的分類碼四五位數很常見，
+#: 於是「打 1200 進去變成 999」—— 安靜地改掉使用者填的分類碼，而寫回是不可逆的。
+#: 跟導引式問題那一格數字框同一個形狀（A1，2026-08-24）：一個我們自己發明出來、
+#: 而且擋得住真實用法的上限。
+MAX_BIN = 999999
+
 
 def _decide_snapshot(d: "DecideSpec") -> Dict[str, Any]:
     """判定段的純值快照（undo 堆用）—— 跟 `Recipe.to_json_dict` 同一個形狀。
@@ -606,7 +616,12 @@ class RecipeModel:
                                                   str(path), new))
 
     def _fresh_bin(self) -> int:
-        """一個還沒被任何葉子用掉的 bin（跟 `add_rule` 同一個規則）。"""
+        """一個還沒被任何葉子用掉的 bin（跟 `add_rule` 同一個規則）。
+
+        用光了回 :data:`MAX_BIN` **而不是拋例外** —— 這一支以前是
+        ``next(b for b in range(1, 1000) ...)``，找不到會漏出一個
+        ``StopIteration``，而它會在一顆按鈕的 handler 裡冒出來。
+        """
         used = {int(self.decide.otherwise_bin)} if self.decide else set()
 
         def walk(node: Any) -> None:
@@ -620,7 +635,8 @@ class RecipeModel:
             walk(self.decide.tree)
         if self.decide is not None:
             used |= {int(r.bin) for r in self.decide.rules}
-        return next(b for b in range(1, 1000) if b not in used)
+        return next((b for b in range(1, MAX_BIN + 1) if b not in used),
+                    MAX_BIN)
 
     def set_tree_when(self, path: str, when: str) -> None:
         node = self.tree_node(path)

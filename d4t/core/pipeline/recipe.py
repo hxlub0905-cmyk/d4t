@@ -593,6 +593,80 @@ def _decide_issues(recipe: "Recipe", decide: "DecideSpec") -> List["Issue"]:
     return out
 
 
+def _decide_unknown(decide: "DecideSpec", feats: Set[str],
+                    kind: str) -> List["Issue"]:
+    """判定段的表達式指到**沒有人算得出來的數字**時講一句（F21-D 漏掉的那一半）。
+
+    為什麼這一段一定要有
+    --------------------
+    `validate` 對舊的 ``score.expr`` 一直有這道檢查（``unknown-feature``），
+    而 F21-D 加上 ``decide`` 之後，那一段變成「有 decide 就整個跳過」——
+    理由是對的（有 decide 的時候 ``score.expr`` 根本不會跑），但**替代的檢查
+    從來沒有補上**。於是打錯一個數字名字的下場是：
+
+    * ``validate`` 全綠、畫布上一片正常；
+    * 跑起來**每一顆都失敗**，訊息是 ``variable 'nosuch' is not available``。
+
+    而 F25 把二元門檻的 UI 整個拿掉之後，``decide`` 是使用者唯一走得到的路
+    —— 也就是說唯一有人用的那條路，lint 覆蓋比沒人用的那條還少。
+
+    看得到哪些名字（順序是規格，不是實作細節）
+    ------------------------------------------
+    跟 `engine._eval_decision` 逐項對齊：
+
+    * 卡片算出來的特徵（``feats``）；
+    * ``score`` —— 判定段自己寫進 ``ctx.features`` 的那一個；
+    * ``let`` 的名字，而且**是累加的**：第 n 行看得到前 n−1 行，看不到自己
+      後面的（引擎就是照順序算的）；
+    * 有 ``fill`` 的 let 會多寫一個 ``<名字>_missing``（F24 ⑤），
+      有 ``scale`` 的會多留一個 ``<名字>_raw``（F23 期3）——
+      判定樹的第一步常常問的就是 ``_missing``。
+
+    ⚠ **級別是 warning 不是 error**，跟舊的那一條一致：一份 recipe 可以在
+    「還沒接上那張量測卡」的中間狀態被打開，那時候擋住編輯比講一句更煩。
+    """
+    out: List[Issue] = []
+    seen = set(feats) | {"score"}
+
+    def check(where: str, text: str) -> None:
+        try:
+            e = parse_expression(str(text))
+        except ExpressionError:
+            return                      # 語法錯已經由 `_decide_issues` 講過了
+        unknown = sorted(e.variables - seen)
+        if unknown:
+            out.append(Issue(
+                code="unknown-feature", level="warning", node_id=None,
+                title="The decision uses a number nobody produces",
+                detail="route '%s': %s uses %s, but no card in this route "
+                       "writes those out (available here: %s). Check the "
+                       "spelling, or add the card that measures it - every "
+                       "defect will fail on this line at run time."
+                       % (kind, where, unknown, sorted(seen) or "none")))
+
+    for i, item in enumerate(decide.let):
+        check("working number '%s'" % (str(item.name).strip() or "#%d" % i),
+              item.expr)
+        name = str(item.name).strip()
+        if name:
+            seen.add(name)
+            if str(getattr(item, "fill", "") or ""):
+                seen.add(name + "_missing")
+            if str(getattr(item, "scale", "") or ""):
+                seen.add(name + "_raw")
+
+    if decide.tree is not None:
+        for when in _tree_whens(decide.tree):
+            check("the question \"%s\"" % when, when)
+    else:
+        for i, rule in enumerate(decide.rules):
+            check("rule %d (\"%s\")" % (i + 1, rule.when), rule.when)
+
+    if str(decide.score or "").strip():
+        check("the score", decide.score)
+    return out
+
+
 def _param_diff_text(step_cls, pa: Dict[str, Any], pb: Dict[str, Any],
                      ka: str, kb: str) -> str:
     """兩張同型卡片差在哪幾格，一句白話（`routes-drift` 的 detail）。
@@ -2154,7 +2228,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
 
         # score 變數 ⊆ 此 route 會產出的特徵 ∪ {"score"}（僅警告）
         # ⚠ 有 `decide` 的時候 `score.expr` **根本不會跑**，對它報一條警告等於
-        # 叫使用者去修一個不影響結果的地方。
+        # 叫使用者去修一個不影響結果的地方 —— 但**判定段自己的表達式要檢查**，
+        # 那正是下面那一段（在此之前它整段不見了，見 :func:`_decide_unknown`）。
         if expr is not None and getattr(recipe, "decide", None) is None:
             unknown = sorted(expr.variables - feats)
             if unknown:
@@ -2164,6 +2239,9 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                     detail=f"route '{k}': the variables {unknown} are not among "
                            f"the features this route produces ({sorted(feats)}), "
                            f"so the score may not be computable at run time"))
+        decide = getattr(recipe, "decide", None)
+        if decide is not None:
+            issues.extend(_decide_unknown(decide, feats, k))
 
     # ---- 分流的 route 之間有沒有漂（F23 §5 選項 A 的配套）----
     # 只在 route_by 存在時看：多 route 在此之前的意思是「一種 kind 一條路」

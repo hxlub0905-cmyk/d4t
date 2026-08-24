@@ -33,8 +33,13 @@ from .tree_scene import (
     rows_reaching, suggest_condition,
 )
 from .widgets import _make_slider, clear_layout_parked, small_button, split_labelled
+from .viewmodel import MAX_BIN
 
 __all__ = ["TreePanel"]
+
+#: 導引式問題那一格數字框的上下界。**它的用途是「別讓 Qt 溢位」，不是
+#: 「這個門檻應該多大」** —— 後者沒有通用答案（見 `_build_guided` 的說明）。
+_SPIN_LIMIT = 1e12
 
 
 class TreePanel(QWidget):
@@ -214,8 +219,23 @@ class TreePanel(QWidget):
         tree = display_tree(getattr(m, "decide", None))
         return rows_reaching(tree, self._rows, self._path)
 
-    def _range_for(self, name: str, value: float):
-        """這個數字在**流到這裡的顆**上的範圍（滑桿用）。回 ``(lo, hi)``。"""
+    def _slider_range(self, name: str, value: float):
+        """滑桿要跨的範圍，從**流到這一步的顆**推。沒有資料就回 ``None``。
+
+        ⚠ **回 None 的時候不要生一個滑桿出來。** 這一支以前在沒有資料時
+        自己編一個範圍（``value ± max(|value|, 1)``），而那有兩個後果，
+        第二個是真的擋人的：
+
+        1. 滑桿假裝有一個分布，但它跨的是一個沒有任何意義的區間；
+        2. **數字框跟滑桿共用同一組上下界**，所以一個剛加進來的步驟
+           （``value`` 是 0）會把使用者夾在 **−1 … 1** —— 想問
+           「``cd_median`` 大於 6.5」時，那個 6.5 **打不進去**。
+           使用者回報的原話是「搖桿只能填最大 1」。
+
+        資料只有一個值的時候（整批只有一顆，或那個數字每顆都一樣）仍然
+        **用得上**：一個量到的 6.5 遠比憑空的 ±1 有用，所以那時候以它為中心
+        撐開一個範圍，而不是把資料丟掉退回上面那條老路。
+        """
         vals = [float(v) for r in self._rows_here()
                 for v in [(r.get("features") or {}).get(str(name))]
                 if isinstance(v, (int, float))]
@@ -223,9 +243,12 @@ class TreePanel(QWidget):
             lo, hi = min(vals), max(vals)
             pad = (hi - lo) * 0.05
             lo, hi = lo - pad, hi + pad
+        elif vals:
+            here = vals[0]
+            span = abs(here) * 0.5 or 1.0
+            lo, hi = here - span, here + span
         else:
-            span = abs(float(value)) or 1.0
-            lo, hi = float(value) - span, float(value) + span
+            return None
         # 現在的值一定要在範圍裡，否則滑桿會把它拉走（改到一個沒人要的數）。
         return min(lo, float(value)), max(hi, float(value))
 
@@ -263,16 +286,24 @@ class TreePanel(QWidget):
         opbox.activated.connect(
             lambda k, c=opbox: self._guided_changed(op=str(c.itemData(k))))
 
-        lo, hi = self._range_for(name, value)
+        rng = self._slider_range(name, value)
+        span = (rng[1] - rng[0]) if rng else 0.0
         spin = QDoubleSpinBox()
         spin.setFixedWidth(84)
-        span = hi - lo
         spin.setDecimals(0 if span > 200 else (2 if span > 1 else 4))
-        spin.setRange(lo, hi)
-        spin.setSingleStep(max(span / 100.0, 1e-6))
+        # ⚠ **數字框不夾人。** 門檻的合理範圍是「這個數字可能是多少」，而那
+        # 隨著卡片天差地遠（灰階 0–255、CD 幾個 px、面積上萬 px²、z 分數是負
+        # 的、百分位 0–100）—— 沒有一個通用的上下界，所以這裡不要假裝有一個。
+        #
+        # 而且**跟這一批量到的範圍夾住它也是錯的**：「大於 12」在這批最大只有
+        # 9 的時候仍然是一條完全合法的規則（那正是怎麼寫一條今天抓不到、
+        # 明天出事才抓得到的規則）。夾住等於把那件事變成打不出來的東西。
+        spin.setRange(-_SPIN_LIMIT, _SPIN_LIMIT)
+        spin.setSingleStep(max(span / 100.0, 1e-6) if span else 0.1)
         spin.setValue(float(value))
-        spin.setToolTip("The value to compare against. Drag the slider and "
-                        "watch the count below.")
+        spin.setToolTip("The value to compare against. Type any number - "
+                        "a threshold outside what this batch measured is a "
+                        "perfectly good rule.")
         spin.valueChanged.connect(lambda v: self._guided_changed(value=float(v)))
 
         lay.addWidget(which, 1)
@@ -280,10 +311,20 @@ class TreePanel(QWidget):
         lay.addWidget(spin)
         self.body_lay.addWidget(row)
 
-        slider = _make_slider({"type": "float", "min": lo, "max": hi,
-                               "help": "Drag to move the threshold."}, spin)
+        # 滑桿只在**真的有分布**的時候出現（見 `_slider_range`）。
+        slider = None if rng is None else _make_slider(
+            {"type": "float", "min": rng[0], "max": rng[1],
+             "help": "Drag to move the threshold."}, spin)
         if slider is not None:
             self.body_lay.addWidget(slider)
+        elif name:
+            # 沒有滑桿的時候要講出**為什麼**，而且那句話要指向能拿回它的動作
+            # —— 一個安靜消失的控制項比一個沒有用的控制項更難懂。
+            hint = QLabel("Run a trial to get a slider over what this batch "
+                          "actually measured.")
+            hint.setObjectName("paramHint")
+            hint.setWordWrap(True)
+            self.body_lay.addWidget(hint)
 
         # 即時顆數：**拖的時候就地改這一行**（不重建）。沒跑過就不畫 —— 一個
         # 「0 of 0」比沒有更糟（F18）。
@@ -377,7 +418,7 @@ class TreePanel(QWidget):
             label.textEdited.connect(
                 lambda t, p=child_path: m.set_tree_leaf(p, label=str(t)))
             spin = QSpinBox()
-            spin.setRange(0, 999)
+            spin.setRange(0, MAX_BIN)
             spin.setValue(int(child.bin))
             spin.setPrefix("bin ")
             spin.setToolTip("The bin number written back to the KLARF.")
@@ -412,7 +453,7 @@ class TreePanel(QWidget):
         label.textEdited.connect(
             lambda t, p=self._path: m.set_tree_leaf(p, label=str(t)))
         spin = QSpinBox()
-        spin.setRange(0, 999)
+        spin.setRange(0, MAX_BIN)
         spin.setValue(int(node.bin))
         spin.setPrefix("bin ")
         spin.setToolTip("The bin number written back to the KLARF.")

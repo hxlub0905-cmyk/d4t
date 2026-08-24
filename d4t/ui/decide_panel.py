@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 )
 
 from .widgets import clear_layout_parked, small_button, split_labelled
+from .viewmodel import MAX_BIN
 
 __all__ = ["DecidePanel"]
 
@@ -434,7 +435,7 @@ class DecidePanel(QWidget):
         arrow.setObjectName("paramHint")
 
         binspin = QSpinBox()
-        binspin.setRange(0, 999)
+        binspin.setRange(0, MAX_BIN)
         binspin.setPrefix("bin ")
         binspin.setValue(int(rule.bin))
         binspin.setFixedWidth(66)
@@ -487,7 +488,7 @@ class DecidePanel(QWidget):
         arrow = QLabel("→")
         arrow.setObjectName("paramHint")
         binspin = QSpinBox()
-        binspin.setRange(0, 999)
+        binspin.setRange(0, MAX_BIN)
         binspin.setPrefix("bin ")
         binspin.setValue(int(d.otherwise_bin))
         binspin.setFixedWidth(66)

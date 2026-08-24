@@ -321,3 +321,176 @@ def test_converting_a_threshold_recipe_keeps_every_verdict():
         old_ctx.features["glv_max"] = v
         new_ctx.features["glv_max"] = v
         assert _eval_score(base, old_ctx) == _eval_score(converted, new_ctx), v
+
+
+# --------------------------------------------------------------------------- #
+# 導引式問題的數字範圍（A1，2026-08-24）
+# --------------------------------------------------------------------------- #
+def _spin(panel):
+    from PySide6.QtWidgets import QDoubleSpinBox
+    spins = panel.findChildren(QDoubleSpinBox)
+    assert spins, "面板上沒有數字框"
+    return spins[0]
+
+
+def _sliders(panel):
+    from PySide6.QtWidgets import QSlider
+    return panel.findChildren(QSlider)
+
+
+def test_the_threshold_box_accepts_a_number_bigger_than_one(qapp):
+    """**使用者回報的那一條：「搖桿只能填最大 1」。**
+
+    還沒試跑的時候沒有分布，而舊的 `_range_for` 會憑空編一個範圍
+    （``value ± max(|value|, 1)``）。剛加進來的一步 ``value`` 是 0，
+    所以那個範圍是 **−1 … 1** —— 而**數字框跟滑桿共用同一組上下界**，
+    於是想問「大於 6.5」的人，那個 6.5 打不進去。
+
+    門檻的合理範圍隨著卡片天差地遠（灰階 0–255、CD 幾個 px、面積上萬 px²、
+    z 分數是負的、百分位 0–100），沒有一個通用的上下界 —— 所以數字框不夾人。
+    """
+    m = _model_with_tree()
+    panel = TreePanel()
+    panel.set_model(m)
+    panel.show_path("")                    # 沒有 set_rows ＝ 還沒試跑
+
+    spin = _spin(panel)
+    for want in (6.5, 255.0, 16384.0, -12.5):
+        spin.setValue(want)
+        assert spin.value() == want, (
+            "打 %r 之後變成 %r —— 數字框把它夾掉了" % (want, spin.value()))
+    assert m.tree_node("").when.endswith("-12.5"), m.tree_node("").when
+
+
+def test_no_slider_before_a_run_but_it_says_why(qapp):
+    """滑桿要跨的是**這一批真的量到什麼**。沒有那份資料時它跨不出東西來 ——
+    生一支跨著憑空範圍的滑桿，等於讓一個控制項說一件不成立的話。
+
+    但**安靜地少一個控制項比沒有用的控制項更難懂**，所以那句話要說出來，
+    而且要指向拿得回它的動作。
+    """
+    m = _model_with_tree()
+    panel = TreePanel()
+    panel.set_model(m)
+    panel.show_path("")
+
+    assert not _sliders(panel), "沒有資料卻生了一支滑桿"
+    assert any("Run a trial" in t for t in _texts(panel)), _texts(panel)
+
+
+def test_the_slider_comes_back_once_there_is_a_distribution(qapp):
+    """有分布就該有滑桿 —— 那是 F25「問題不用打的」的主角。"""
+    m = _model_with_tree()
+    panel = TreePanel()
+    panel.set_model(m)
+    panel.set_rows([{"defect_id": str(i), "ok": True, "bin": 0, "score": 0.0,
+                     "features": {"contrast": float(v)}}
+                    for i, v in enumerate((10.0, 50.0, 150.0, 300.0))])
+    panel.show_path("")
+
+    assert _sliders(panel), "有分布卻沒有滑桿"
+    assert not any("Run a trial" in t for t in _texts(panel))
+
+
+def test_the_box_still_takes_a_threshold_outside_what_the_batch_measured(qapp):
+    """滑桿跨觀測範圍是對的；**數字框跟著夾就不對**。
+
+    「大於 500」在這一批最大只有 300 的時候仍然是一條完全合法的規則 ——
+    那正是怎麼寫一條今天抓不到、明天出事才抓得到的規則。
+    """
+    m = _model_with_tree()
+    panel = TreePanel()
+    panel.set_model(m)
+    panel.set_rows([{"defect_id": str(i), "ok": True, "bin": 0, "score": 0.0,
+                     "features": {"contrast": float(v)}}
+                    for i, v in enumerate((10.0, 50.0, 150.0, 300.0))])
+    panel.show_path("")
+
+    spin = _spin(panel)
+    spin.setValue(500.0)
+    assert spin.value() == 500.0
+    assert m.tree_node("").when == "contrast > 500"
+
+
+def test_one_measured_value_is_better_than_an_invented_range(qapp):
+    """整批只有一顆、或那個數字每顆都一樣的時候，**資料還是在手上**。
+
+    舊的寫法把它丟掉，退回 ``value ± 1`` 的憑空範圍 —— 於是量到的是 6.5，
+    而滑桿跨的是 −1…1。改成以那個量到的值為中心撐開。
+    """
+    m = _model_with_tree()
+    panel = TreePanel()
+    panel.set_model(m)
+    panel.set_rows([{"defect_id": "1", "ok": True, "bin": 0, "score": 0.0,
+                     "features": {"contrast": 6.5}}])
+    panel.show_path("")
+
+    rng = panel._slider_range("contrast", 0.0)
+    assert rng is not None, "有一個量到的值卻說沒有範圍"
+    assert rng[1] >= 6.5, "範圍 %r 跨不到量到的 6.5" % (rng,)
+
+
+def test_the_slider_range_is_none_only_when_there_is_nothing_to_go_on(qapp):
+    """`_slider_range` 的契約：**回 None ＝ 真的沒有資料**。
+
+    這一條顧的是上面那幾條的前提 —— 如果它變成「幾乎都回 None」，
+    「有分布就有滑桿」那條會安靜地永遠成立。
+    """
+    m = _model_with_tree()
+    panel = TreePanel()
+    panel.set_model(m)
+    panel.show_path("")
+    assert panel._slider_range("contrast", 0.0) is None
+
+    panel.set_rows([{"defect_id": str(i), "ok": True, "bin": 0, "score": 0.0,
+                     "features": {"contrast": float(v)}}
+                    for i, v in enumerate((10.0, 50.0))])
+    panel.show_path("")
+    assert panel._slider_range("contrast", 0.0) is not None
+
+
+def test_the_bin_box_takes_a_real_fab_class_code(qapp):
+    """**跟 A1 同一個形狀：一個我們自己發明的上限。**
+
+    四個 bin 數字框以前都寫死 ``setRange(0, 999)``，而**引擎與 KLARF 寫回都
+    沒有這個上限**（``CLASSNUMBER`` 就是一個整數欄）。廠內的分類碼四五位數
+    很常見 —— 打 1200 進去會安靜地變成 999，而寫回是不可逆的。
+    """
+    from PySide6.QtWidgets import QSpinBox
+
+    m = _model_with_tree()
+    panel = TreePanel()
+    panel.set_model(m)
+    panel.show_path("y")                   # 一片葉子 → 有 bin 的數字框
+
+    spin = next(s for s in panel.findChildren(QSpinBox) if s.prefix() == "bin ")
+    spin.setValue(1200)
+    assert spin.value() == 1200, "1200 被夾成 %d" % spin.value()
+    assert m.tree_node("y").bin == 1200
+
+
+def test_running_out_of_bin_numbers_does_not_raise(qapp, monkeypatch):
+    """`_fresh_bin` 用光了要**回一個數字**，不是漏出 ``StopIteration``。
+
+    它被一顆按鈕（Split）直接呼叫，所以那個例外會冒到 Qt 的事件迴圈裡。
+
+    真的用光 999999 個 bin 沒辦法在測試裡湊出來，所以把上限暫時壓到 3 —— 驗的
+    是**那條路本身**（``next(..., 預設值)`` 而不是 ``next(...)``），
+    不是那個數字。
+    """
+    from d4t.ui import viewmodel as vm
+
+    monkeypatch.setattr(vm, "MAX_BIN", 3)
+    m = _model_with_tree()
+    # 樹裡已經有 bin 3 / 2 / 0，再把 1 也用掉 → 1..3 全滿
+    m.set_tree_leaf("nn", bin=1)
+    assert sorted(_all_bins(m.decide.tree)) == [1, 2, 3]
+
+    assert m._fresh_bin() == 3, "用光了應該回上限，而不是拋例外"
+
+
+def _all_bins(node):
+    from d4t.core.pipeline.recipe import TreeLeaf
+    if isinstance(node, TreeLeaf):
+        return [int(node.bin)]
+    return _all_bins(node.yes) + _all_bins(node.no)

@@ -5,7 +5,7 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 16cadcfb415c6b974b7456a139261754ce6d98ee CLAUDE.md
 9f2ac5da7d952f009587855b3f4fd13a03130b14 README.md
-34e51b06f01b018dcb88bc989c5dd4ef35f31e37 SESSION_LOG.md
+205eac482d77bb6231bc61b0fe50147e04c6e4ce SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 3aaac5dda62a621badb9011b1516a87c816a825b d4t/__main__.py
@@ -51,7 +51,7 @@ ec7bdb58e7da611ac74f16b53e218f9a65476bdc d4t/core/pipeline/cellrois.py
 fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 d1806fb9cd8371362f6c456dce4d321a57917b38 d4t/core/pipeline/engine.py
 7e2797dce8253240fcf45a27f57f28d2c246e272 d4t/core/pipeline/expression.py
-85cecd1a5cdf18fbdd06862aaad6ac985b2b0004 d4t/core/pipeline/recipe.py
+03060bc9ac0b993f54dbbe4b5daeadf845b9d8dd d4t/core/pipeline/recipe.py
 d4082fd65340f79a467f07627e0bd2d01face9a8 d4t/core/pipeline/step.py
 54503e5000aeae968a523044183f5bf544671ae7 d4t/core/steps/__init__.py
 d9d78b9c74d5495419eb584a96436c56cf028641 d4t/core/steps/_util.py
@@ -86,7 +86,7 @@ a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
 87bce11608d08f4302947e917b2b24d076571775 d4t/ui/branding.py
 9ba1642f685d6f8b1ec0c1b89733dad75a46b923 d4t/ui/canvas.py
 3b58b7e078d58ad84a8939734b65952a75a029f3 d4t/ui/cell_canvas.py
-b57f73f8b8d38efe08aafb65780211cc759ad183 d4t/ui/decide_panel.py
+334c58d35c83167967e43b30982092b44dcb920a d4t/ui/decide_panel.py
 511288a738743288b669fedb83036486a25fc673 d4t/ui/gallery.py
 bb477b853cd1454a08774a2a2405c5f8294c0055 d4t/ui/inspectors.py
 68e6ac894866da63ca055b9082523ffb89656702 d4t/ui/region_check.py
@@ -97,9 +97,9 @@ cc73ee4493625b81df5d6d9eec7c12128d0eda12 d4t/ui/results.py
 8fc0e7c67f28e2aabec643163040c124ada34760 d4t/ui/studio.py
 b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 b24576feb08cf1517b18a0d0a04f302fcb9ea840 d4t/ui/theme.py
-104150e7fb81d477bdb1d220a8d11d53bf9100be d4t/ui/tree_panel.py
+d92921c31cd584765e700dcf638c6340bb34d27a d4t/ui/tree_panel.py
 4a832efdfa436ddacfe2b28606f0e91229edfb6a d4t/ui/tree_scene.py
-c9ec2a8514b8a094d691043e429759cf634c7189 d4t/ui/viewmodel.py
+081877b4e3b6d7f054ae82be023261208e363feb d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
 d592d14f94d604aa3a50df88111926f6d5f8963e d4t/ui/widgets.py
 2eb7813f6dbd6c7d0beff0496ed0d1e6dc87d484 d4t/ui/workers.py
@@ -152,7 +152,7 @@ d30e533c8f476e52e0e9942e25316487eabfcc41 tests/test_cli_encoding.py
 9ce9779e28138d01220cbe750e4dcaa31c624263 tests/test_dag_branching.py
 9e47488159ddde54f903cddf9fa0f3d88e103e99 tests/test_dag_order.py
 70ea34793a5b48433120c5f0b5ef913df7eacfa1 tests/test_dataset.py
-4795be578be4cf1c81d3c439dd35fbd16cf691ce tests/test_decide_multiclass.py
+b66575449e7121a62bddb8f88a86dae2c2b3b7bf tests/test_decide_multiclass.py
 66eaca1c61159363a8f164d64bbbcc5890256340 tests/test_decide_tree.py
 c2f7df52f855141ec0c0b85e71faa3a821ae31f5 tests/test_docs_links.py
 9b9f40478da74058b851a9a1c9930f52cdcdca28 tests/test_e2e_die_to_die.py
@@ -275,7 +275,7 @@ ffaf2b51fd05ba67c769cd6145cc7678e7fa7201 tests/test_ui_results.py
 eaba3e833965c7fafe60129565ebe5c0bc0a8809 tests/test_ui_studio_m5.py
 2d4242782e8de437335381e8dc57bb6321c497e2 tests/test_ui_studio_smoke.py
 368736d6e4b6b9e1b7c9caa2a2faf52ea3fdde5c tests/test_ui_tree_canvas.py
-1f64b676cb9b4900a2fca7ef42e453e3cb037602 tests/test_ui_tree_edit.py
+079bf67ea16c92d45fc7425553dba3b222a23eb3 tests/test_ui_tree_edit.py
 f6714258293363ce472b166d0afed030cb7c8f8f tests/test_ui_welcome.py
 b266b8a72e329a1f57ff00fd8086d12e0342dfc5 tests/test_ui_widgets.py
 9b0109451826af217e7fdba9108d3d414161a74f tests/test_ui_workers.py
