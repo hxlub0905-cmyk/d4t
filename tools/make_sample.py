@@ -101,13 +101,20 @@ def _make_klarf_text(n: int, rows) -> str:
 
 def generate(out_dir, n: int = 24, real_frac: float = 0.5, size: int = 128,
              pitch: int = 16, noise: float = 6.0, seed: int = 7,
-             shift_max: int = 0, pattern: str = "cells") -> Dict[str, str]:
+             shift_max: int = 0, pattern: str = "cells",
+             class_by_truth: bool = False) -> Dict[str, str]:
     """產生合成 lot 並自我驗證 ingest 層讀得回來。回傳輸出檔路徑 dict。
 
     ``pattern="cells"``（預設）是圓角方塊晶格 —— 兩軸同週期。
     ``pattern="lines"`` 是**直線壓在橫線上**、兩軸週期不同（F8 的交會定位要
     練的就是這種 layout）。預設那條路的數值行為一個位元組都沒有變 ——
     ``tests/test_make_sample.py`` 有「同 seed → TIFF 位元組完全相同」的鎖。
+
+    ``class_by_truth=True``（F23）：KLARF 的 CLASSNUMBER 欄照 ground truth 填
+    （REAL=1、NUISANCE=2），給分流（route_by）練習用 —— 廠內的預分類欄長的就是
+    這個樣子。**預設 False：每一顆都是 "0"，跟以前逐位元組相同**（好幾條測試
+    倚著「原檔的 CLASSNUMBER 全是 0」在算「應該改動幾列」，那個假設不能被一個
+    預設值悄悄改掉）。
     """
     if n < 1:
         raise ValueError(f"n 至少要 1（收到 {n}）")
@@ -175,8 +182,9 @@ def generate(out_dir, n: int = 24, real_frac: float = 0.5, size: int = 128,
         xindex = int(rng.integers(-2, 3))
         yindex = int(rng.integers(-2, 3))
         # IMAGELIST：TiffSpec 每張圖 1 個 token（1-based TIFF 頁碼）
+        cls = ("1" if is_real else "2") if class_by_truth else "0"
         rows.append([defect_id, f"{xrel:.3f}", f"{yrel:.3f}",
-                     str(xindex), str(yindex), "0",
+                     str(xindex), str(yindex), cls,
                      "2", str(2 * i + 1), str(2 * i + 2)])
 
     # ---- 寫 TIFF（多頁；同 seed → 位元組完全相同）----
@@ -235,11 +243,14 @@ def main(argv=None) -> int:
                     help=("圖案：cells = 圓角方塊晶格（兩軸同週期，預設）；"
                           "lines = 直線壓在橫線上、兩軸週期不同"
                           "（練 Locate regions where patterns cross）"))
+    ap.add_argument("--class-by-truth", action="store_true",
+                    help=("CLASSNUMBER 照 ground truth 填（REAL=1、NUISANCE=2），"
+                          "給分流（route_by）練習用；預設每一顆都是 0"))
     args = ap.parse_args(argv)
     paths = generate(args.out_dir, n=args.n, real_frac=args.real_frac,
                      size=args.size, pitch=args.pitch, noise=args.noise,
                      seed=args.seed, shift_max=args.shift_max,
-                     pattern=args.pattern)
+                     pattern=args.pattern, class_by_truth=args.class_by_truth)
     print("Generated synthetic lot:")
     for k in ("klarf", "tiff", "ground_truth"):
         print(f"  {k:12s} {paths[k]}")

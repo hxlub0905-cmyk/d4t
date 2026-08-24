@@ -19,8 +19,10 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 
 from .context import FEATURE_OWNER_KEY, Context
-from .expression import parse_expression
-from .recipe import Recipe, RecipeError, execution_order
+from .expression import ExpressionError, parse_expression
+from .recipe import (
+    Recipe, RecipeError, execution_order, resolve_route, route_miss_message,
+)
 from .step import REGISTRY, SCALE_LOT, Step, StepError
 
 __all__ = ["StepTrace", "DefectResult", "run_defect", "run_defect_cached",
@@ -68,6 +70,26 @@ def _seed_context(item: Any, kind: str, defect_id: str,
     # `ingest/pair_source.py` 的模組說明（鐵則 9）。
     ctx.meta["_sources"] = dict(sources or {})
     return ctx
+
+
+def _note_route(ctx: Context, recipe: Recipe, route: str, value: str,
+                how: str) -> None:
+    """分流選了哪條路 → 一個畫得出分布的數字＋meta（F23 §4.1）。
+
+    F19 的規矩：自動做的每個決定都要是一個畫得出分布的數字。沒有
+    ``route_taken`` 的話，CSV 上 ``cd_median`` 空白的顆分不出「走了 B 路
+    沒量」還是「走了 A 路量不到」。值＝route 鍵在 ``sorted(recipe.routes)``
+    裡的索引（穩定、可畫直方圖）；route 名本身進 ``ctx.meta["route"]``。
+
+    **只在 ``route_by`` 存在時呼叫** —— 沒有分流的 recipe 一個位元都不動
+    （黃金值三份靠這件事）。
+    """
+    keys = sorted(recipe.routes)
+    ctx.features["route_taken"] = float(keys.index(route)
+                                        if route in keys else -1)
+    ctx.meta["route"] = {"key": str(route),
+                         "column": str(recipe.route_by.column),
+                         "value": str(value), "source": str(how)}
 
 
 def _finish(defect_id: str, ctx: Context, traces: List[StepTrace],
@@ -541,8 +563,95 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
     return ctx, None
 
 
+def _eval_decision(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
+    """多類別判定（F21-D）：``let`` → 由上往下第一個成立的規則 → bin。
+
+    三件事的順序是**規格**，不是實作細節：
+
+    1. ``let`` 先算完，而且每一行**寫進 ``ctx.features``** —— 中間值因此會進
+       CSV 與報表，使用者畫得出它的分布（F19 的規矩：卡片自動做的每一個決定，
+       都要變成一個畫得出分布的數字）。後面一行看得到前面一行。
+    2. ``rules`` **由上往下，第一個成立的贏**。所以「改順序＝改優先權」，
+       而那句話使用者讀得懂。
+    3. ``score`` 最後算（它可以用 ``let`` 出來的中間值），寫進
+       ``ctx.features["score"]`` —— 跟老路一字不差，所以 KLARF 的 DSIZE、
+       Top-N 排序、CSV 的 score 欄都不必知道這一段換過。
+
+    規則的值怎麼判真假：**非 0 就是成立**。表達式的比較運算子本來就回 1.0／0.0
+    （`expression.py` 的左結合折疊），所以 ``"a > 5"`` 與 ``"(a > 5) * (b < 2)"``
+    都是合法的規則，而使用者不必學第二套語法。
+    """
+    for item in recipe.decide.let:
+        name = str(item.name).strip()
+        if not name:
+            raise ExpressionError("a 'let' line has no name", "", 0)
+        expr_obj = parse_expression(item.expr)
+        fill = str(getattr(item, "fill", "") or "")
+        if fill:
+            # 「missing ⇒ 用 __」（F24 ⑤）：這一行用到的數字缺了，值改用
+            # fallback，並且**永遠寫旗標**（0 或 1）—— 有 fill 的行，
+            # `<name>_missing` 那一欄在 CSV 上才是完整的，判定樹的第一步
+            # 問的就是它。留空（預設）走下面那條老路：缺了＝這一顆失敗，
+            # 一個位元都沒變。
+            try:
+                fallback = float(fill)
+            except ValueError:
+                raise ExpressionError(
+                    "the 'if missing' fallback of '%s' is not a number"
+                    % name, fill, 0)
+            missing = [v for v in expr_obj.variables
+                       if v not in ctx.features]
+            if missing:
+                ctx.features[name] = fallback
+                ctx.features[name + "_missing"] = 1.0
+            else:
+                ctx.features[name] = expr_obj.eval(ctx.features)
+                ctx.features[name + "_missing"] = 0.0
+            continue
+        ctx.features[name] = expr_obj.eval(ctx.features)
+
+    path: List[str] = []
+    if recipe.decide.tree is not None:
+        # 判定樹（F24）：從根往下走，每一步記 yes/no —— Preview 的 Path 與
+        # 畫布的分支流量都吃這一串。**非 0 就是成立**（同 rules 的判準）。
+        from .recipe import TreeLeaf
+        node = recipe.decide.tree
+        while not isinstance(node, TreeLeaf):
+            took_yes = parse_expression(node.when).eval(ctx.features) != 0.0
+            path.append("yes" if took_yes else "no")
+            node = node.yes if took_yes else node.no
+        chosen_bin, chosen_label = int(node.bin), str(node.label)
+        chosen_rule = -1
+    else:
+        chosen_bin = int(recipe.decide.otherwise_bin)
+        chosen_label = str(recipe.decide.otherwise_label)
+        chosen_rule = -1
+        for i, rule in enumerate(recipe.decide.rules):
+            if parse_expression(rule.when).eval(ctx.features) != 0.0:
+                chosen_bin, chosen_label, chosen_rule = (int(rule.bin),
+                                                         rule.label, i)
+                break
+
+    expr = str(recipe.decide.score or "").strip()
+    score = parse_expression(expr).eval(ctx.features) if expr else 0.0
+    ctx.features["score"] = score
+    # 哪一條規則對上了 —— 給面板與報表。**不進 `DefectResult`**：那會動到
+    # SQLite schema 與 CSV 的欄，而黃金值現在是壞的（見 F21 §6），
+    # 「改了但數字沒變」這句話目前沒有人證得了。
+    ctx.meta["decide"] = {"rule": chosen_rule, "label": chosen_label,
+                          "bin": chosen_bin, "path": path}
+    return score, chosen_bin
+
+
 def _eval_score(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
-    """ADC 判定：score = expr(features) → bin。失敗會 raise（呼叫端攔截）。"""
+    """ADC 判定：score = expr(features) → bin。失敗會 raise（呼叫端攔截）。
+
+    ``recipe.decide`` 有東西的時候走多類別那一支（F21-D）—— **沒有的時候
+    這一支一個位元都沒動**，因為黃金值現在是壞的，「改了判定段但數字沒變」
+    這句話目前沒有人證得了（見 `docs/plans/F21-algo-and-roi.md` §6）。
+    """
+    if getattr(recipe, "decide", None) is not None:
+        return _eval_decision(recipe, ctx)
     expr = parse_expression(recipe.score.expr)
     score = expr.eval(ctx.features)
     ctx.features["score"] = score
@@ -572,6 +681,11 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
       停在它前面、不執行它；不在 route 上 → ok=False（不 raise）。
     - 步驟全過後：score = expr(features)、features["score"] = score、
       bin = bins["below"]（score < threshold）否則 bins["above"]。
+    - **分流（F23）**：``recipe.route_by`` 有東西時，走哪條 route 由這一顆的
+      KLARF 欄位值決定（:func:`resolve_route`），``kind`` 只剩「這批是什麼
+      資料」的身分（``meta["_dataset_kind"]``，load 卡讀它）。route 在**這裡**
+      解，不是叫呼叫端解 —— 每一個呼叫端（batch、Studio 預覽、CLI）都自動
+      拿到同一個答案，預覽跟批次走不同路的那種坑從結構上長不出來。
     """
     if registry is None:
         registry = REGISTRY
@@ -583,8 +697,15 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
     ctx.track_changes = bool(track_changes)
     traces: List[StepTrace] = []
 
+    route, route_value, route_how = resolve_route(recipe, item, kind)
+    if route is None:
+        return _finish(defect_id, ctx, traces, keep_context, False,
+                       route_miss_message(recipe.route_by, route_value))
+    if getattr(recipe, "route_by", None) is not None:
+        _note_route(ctx, recipe, route, route_value, route_how)
+
     try:
-        order = execution_order(recipe, kind)
+        order = execution_order(recipe, route)
     except RecipeError as e:
         return _finish(defect_id, ctx, traces, keep_context, False, str(e))
 
@@ -592,7 +713,7 @@ def run_defect(recipe: Recipe, item: Any, kind: str, *,
         return _finish(
             defect_id, ctx, traces, keep_context, False,
             f"upto_node '{upto_node}' is not in the execution order {order} "
-            f"of route '{kind}'")
+            f"of route '{route}'")
 
     ctx, err = _run_nodes(recipe, order, 0, len(order), ctx, traces,
                           registry, upto_node, kind)
@@ -852,12 +973,21 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
     - checkpoint == 0（沒有影像段節點）或快取讀/寫失敗 → 退回全程重算，
       不會 crash。
     - 快取命中時 ``traces`` 只含 checkpoint 之後的節點（影像段沒真的跑）。
+    - **分流（F23）**：route 在這裡解（同 :func:`run_defect` 的理由），而且
+      **簽章吃的是 route 鍵** —— 兩條路各自一份快取條目，換 route 不會拿到
+      隔壁那條路算出來的影像（鐵則 9 的形狀）。
     """
     if registry is None:
         registry = REGISTRY
 
+    route, route_value, route_how = resolve_route(recipe, item, kind)
+    if route is None:
+        # 對不上對照表：跟 `run_defect` 同一句話、同一種失敗（不碰快取）。
+        return run_defect(recipe, item, kind, keep_context=keep_context,
+                          sources=sources, registry=registry)
+
     try:
-        sig, ckpt = image_segment_signature(recipe, kind, registry=registry)
+        sig, ckpt = image_segment_signature(recipe, route, registry=registry)
     except Exception:
         return run_defect(recipe, item, kind, keep_context=keep_context,
                           sources=sources, registry=registry)
@@ -874,7 +1004,7 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
     except Exception:
         snap = None  # 快取層出包 → 當作 miss
 
-    order = execution_order(recipe, kind)  # signature 已驗證過，不會再 raise
+    order = execution_order(recipe, route)  # signature 已驗證過，不會再 raise
     traces: List[StepTrace] = []
     ctx: Optional[Context] = None
 
@@ -917,6 +1047,11 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
                                     if k in produced})
             except Exception:
                 pass  # 快取寫入失敗 → 不影響本次結果
+
+    # 分流的紀錄在**兩條路徑收攏之後**補（冷跑、熱跑同一個值 —— 它是由
+    # item.fields 決定的，跟快取無關）。
+    if getattr(recipe, "route_by", None) is not None:
+        _note_route(ctx, recipe, route, route_value, route_how)
 
     # 續跑算法段 + ADC 判定
     ctx, err = _run_nodes(recipe, order, ckpt, len(order), ctx, traces,

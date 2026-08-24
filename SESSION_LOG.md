@@ -19,6 +19,694 @@
 
 ---
 
+## F25：判定段要有人會用（2026-08-24）
+
+使用者看過 F24 的成品之後的四句話，全部是同一件事的四個面 ——
+**引擎做完了，但入口是一格空白**。計畫書：[`docs/plans/F25-adc-usable.md`](docs/plans/F25-adc-usable.md)。
+
+* **閃退（最優先）**：`widgets.clear_layout_parked()`。面板是「改一格就整段
+  重建」的，而改那一格的訊號**還在被拆掉的那個 widget 的堆疊上** ——
+  `setParent(None)` 讓 Python 成為唯一持有者，layout item 一丟就當場解構，
+  那是 use-after-free。offscreen 重現不出來（跟真實平台的事件流有關，
+  所以是「有機會」閃退），因此**從結構上移除**而不是猜：拆下來的 widget
+  藏起來、參考留著，解構排到下一輪 event loop。三個面板共用同一支，
+  迴歸測試驗的是「拆完之後還碰得到它」與「按鈕在自己的 clicked 裡把整個
+  版面拆掉不會爆」。
+* **加 ADC 卡＝畫布上直接有樹**（不用勾任何東西）：`add_decision()` ——
+  現有門檻變成樹的第一個問題（不丟東西）、只有一片葉子就給一個起手問題、
+  右欄跳到那一步、**最後 `fit()`**（判定區長在卡片右邊，不 fit 的話使用者
+  按了鈕畫面上什麼都沒發生）。「Sort into several classes」勾選框拿掉，
+  多類別成為預設；二元門檻只留在舊 recipe 上，配一顆換過去的按鈕。
+* **問題不用打的**（核心）：`[哪個數字 ▾][比什麼 ▾][多少] ＋ 滑桿`，
+  滑桿範圍取自**流到這一步的那些顆**的分布，底下一行即時的
+  「34 of the 48 defects that reach here say yes」拖的時候就地更新
+  （不重建 —— 重建會把滑桿從手上搶走，所以 `_typing` 的範圍加上滑桿與下拉）。
+  複合條件拆不成三格就**誠實地**回算式框（`parse_simple_condition` 認不得
+  就說認不得，猜錯會安靜地改掉使用者的判定）。
+* **新的一步不是空白**：`suggest_condition` 挑這一批分得最開的數字、門檻放
+  中位數（使用者自己的 working numbers 優先）。沒跑過就不填 —— 沒有分布的
+  時候硬猜比留白更糟。
+* **裁字**：規則列拆兩行 —— 實測 437 px 的欄要塞 590 px，名字那一格被壓成
+  92 px，**`not measurable` 在畫面上變成 `measurable`**（意思相反的字）。
+  導引式那一列固定比較與數值的寬度；按鈕不再撐滿整列（撐滿讀起來像標題）。
+* **分流上畫布（F25-B，使用者定調「繼續做 B」）**：`ui/route_badge.py` ——
+  站在所有卡片**前面**的徽章（不可拖、不可選、沒有埠、一條虛線箭頭指進第一
+  張卡）。上面三件事：看哪一欄、對照表、**現在這一顆走哪一條**（粗體，跟著
+  換 defect 動）；試跑後每條路的顆數**從 `route_taken` 讀**（F19 當初就是為
+  了這件事寫它）。
+  使用者接著問「pre-filter 需不需要獨立一張 card」「放進 ADC card 裡是否
+  合理」——**兩個都是不要，理由是同一條：時間順序**。pre-filter 在任何卡跑
+  之前、ADC 在全部跑完之後，是同一條 pipeline 的兩端；把最先發生的事畫進
+  最後發生的框裡就是畫布把順序講反了。編輯器裡它們**本來就在一起**
+  （`RouteByBox` 在判定欄最上面，由上往下讀正好是時間順序）——
+  要分開的只有畫布。兩者因此共用同一套視覺語言（虛線框、大寫標題、不是
+  卡片、點了去同一欄），tooltip 互相指認。
+* 測試：`test_guided_condition.py`（26）＋ `test_ui_tree_edit.py` 改寫成
+  驗導引式（19）＋ `test_ui_route_by.py` 補徽章 7 條（不是卡片、站在最前面、
+  點了發訊號、顆數來自 route_taken、沒有分流就沒有徽章）。
+  core 1839 過、每一個 UI 檔逐一跑過、黃金值不動。
+
+---
+
+## 收尾三件：routes-drift、七段、missing ⇒（2026-08-24）
+
+使用者對前一輪留下的三個問號一句「那三件事接著做」全數放行：
+
+* **`routes-drift` lint**（F23 §5 選項 A 的配套）：warning ——「刻意不同
+  正是分流的目的」。誤報的顧慮用三道收窄解掉：只在 `route_by` 存在時看
+  （kind 選路的多 route 不同設定是常態）、影像流／區域參數不比（兩條路
+  各接各的流）、一對 route 一張卡講一次。detail 講**差在哪幾格**
+  （`metrics is glv_max on route 'a' but glv_mean on route 'b'`）。
+* **八段變七段**（F16 的段落，使用者點頭）：Algo 從 `GROUP_ORDER` 與
+  `LibraryPanel.GROUPS` 拿掉 —— 算式、補值、跨顆換算全部住進判定，那一段
+  清空之後留著只是一個永遠空白的抽屜。`GROUP_ALGO` 常數留給外掛相容；
+  被吸收的兩張卡（仍收在 `HIDDEN_STEPS`）改掛 `GROUP_ADC`（它們的功能
+  現在就是判定段的一部分）。「Algo 卡不吃影像流」那條界線的測試改成
+  點名那兩張卡＋外掛的 GROUP_ALGO 卡，繼續守著。
+* **`Let.fill`（missing ⇒ 用 __，F24 ⑤ 的後一半）**：working number 一行
+  的第三個屬性。非空時，這一行用到的數字缺了就用 fallback 頂著、
+  `<name>_missing` 旗標寫 1（**有 fill 的行每顆都寫旗標**，0 或 1 ——
+  CSV 那一欄才完整；判定樹第一步問 `<name>_missing > 0` 就是它的形狀）；
+  留空＝照舊整顆失敗（嚴格附加，serde 有才寫）。壞的 fallback 是
+  `bad-let` error。「跟整批比」的統計**也排除這一行自己補過值的顆**。
+  面板的 let 行改成**兩行**（算式一行、`if missing → __ · 跟整批比` 一行
+  —— F22 量過七個元件擠一行會互相切字）。F24 ⑤ 至此全部完成，
+  `feature_fill` / `feature_math` 只剩「使用者確認夠了再刪」那一步。
+* 順手修兩個現撈的 UI 蟲：工具列的 Route 下拉在單 route 時藏不掉
+  （QToolBar 的顯示要走 addWidget 回傳的 QAction，不是 widget）；
+  「+ Add a line / rule」被 `shape="square"` 的 QSS 釘死寬度切字。
+* 測試：`test_let_fill.py`（8 條）＋ `test_route_by.py` 補 4 條 drift ＋
+  `test_ui_f16_stages.py` 改鎖七段。全套 core 1812 過、黃金值不動。
+
+---
+
+## F23 期3：「跟整批比」的兩趟判定（2026-08-24）
+
+§8 的 lot_stats **不是一張卡** —— F24 §5 定的家：它是 working number 一行的
+屬性（`Let.scale`）。跨顆的數字（「這一顆比整批亮多少」）在單顆的
+`run_defect` 裡根本不存在，所以是兩趟：
+
+* **`Let.scale`**：`""`（照算）／`"z"`（robust z：(值−整批中位數)/(1.4826×
+  MAD)，跟 `algo/enhance.py` 同一個係數）／`"percentile"`（0–100 midrank）。
+  serde **有才寫**（嚴格附加）；打錯的值是 `bad-let` error（安靜當成照算＝
+  「看起來在跟整批比、其實沒有」）。
+* **`batch.apply_lot_scaling(recipe, rows)`**：`run_batch` 兩條路徑（循序／
+  平行）都在回傳前呼叫 —— CLI、Studio 試跑、測試拿到同一份數字，
+  workers=1/2 逐項相同免費。原始值改名 `<name>_raw` 留著（F19）；
+  **`feature_fill` 補過值的顆不進整批統計**（`<變數>_missing == 1`，A1 的
+  規矩），但自己仍拿到換算值；然後**用換算後的值重算判定**（rescore 那條
+  路：`_eval_decision` 跑在只有數字的 Context 上，不重跑影像；換算過的行
+  不重算、沒換算的行照原順序重算 —— 用到換算值的拿到新值）。
+  失敗的顆一根手指都不碰（鐵則 7）。
+* **UI**：判定面板每一行 working number 多一格下拉
+  （as measured / z vs the batch / percentile in batch），tooltip 講明
+  「整批換算要跑過整批，預覽顯示的是原始值」。
+* 測試：`tests/test_lot_scaling.py`（9 條：嚴格附加、serde、z 與 percentile
+  的數學、補值不進統計、失敗顆不碰、未換算行跟著新值、run_batch 兩路徑
+  逐項相同）。
+
+---
+
+## F23 期2：分流的 UI（2026-08-24）
+
+§6 的三件照計畫落地，外加一件計畫書沒點名但**不做就全錯**的：
+
+* **model 抱得住整份分流 recipe**。`RecipeModel` 仍然一次編一條 route
+  （§6 第一期不動的那條），但 `from_recipe` 把其他 route 的排列／專屬節點／
+  線與 `route_by` 原樣收著，`to_recipe` 合併回去（共用節點以正在編的版本
+  為準）；快照／undo 也帶著。少了這個，載入分流 recipe 再試跑，**其他
+  route 會安靜地消失**（舊 `to_recipe` 只寫得出正在編的那一條）。
+  round-trip 對 `to_json_dict` 是 identity（測試釘住）。
+* **route 切換器**（工具列 `Route [b_route ▾]`，單 route 收起來）：切＝
+  「收回去再拿出來」（`to_recipe → from_recipe`），畫布整個跟著換；
+  代價是 undo 堆疊重來（兩段不同的編輯歷史）。
+* **預覽跟著這一顆走**（§6-2）：`set_defect_index` 逐顆
+  `resolve_route`（跟引擎同一支），走的 route 跟畫布不同就自動切；
+  資料集標籤**常駐**寫出 `CLASSNUMBER=2 → route "b_route"` ——
+  畫布剛剛為什麼跳，答案就在眼前。route_by 的欄位在載資料／載 recipe 時
+  自動補進 `fields`（同 `run_batch` 的規矩：缺才補、補「現有 ∪ 這一欄」）。
+* **`RouteByBox` 編輯區塊**（`ui/route_panel.py`，判定欄**上方** ——
+  它在跑之前決定，判定在跑完之後，由上往下正好是時間順序）：欄位下拉吃
+  這份 KLARF 的欄名、值→route 對照表、「Everything else →」含
+  `(fail that defect)`（default 留空＝失敗，站點政策的另一半）。
+  整包寫回 `model.set_route_by`（一次改動一步 undo）。
+* 預覽的 `kind` 修正：route_by 存在時 model.kind 是 route 鍵
+  （"particle_route"），把它當 kind 傳給 `run_defect` 會讓 load 卡把資料
+  認成不存在的型別 —— 預覽改傳 `dataset.kind`（kind 是資料的身分，route
+  由引擎逐顆解）。`load_recipe_path` 那句「no '%s' route」的警告對分流
+  recipe 不再誤報。
+* 測試：`tests/test_ui_route_by.py`（11 條：round-trip identity、改 A 路
+  不動 B 路、undo 不丟另一條、切 route 無損、預覽自動切＋標籤、編輯區塊
+  讀寫、toggle 清掉可 undo）。截圖：`f23_route_ui.png`。
+
+---
+
+## F24 ③④：判定樹的編輯互動＋幽靈線（2026-08-24）
+
+* **點菱形／托盤 → 右欄變成那一步的編輯面板**（`ui/tree_panel.py`，跟點卡片
+  同一條路）：Question ＋ Insert a number ▾（F21-B 第四個使用者）、Yes/No
+  各自是「一個類別（名字＋bin＋Split…）」或「另一步（摘要＋Edit 跳過去）」、
+  THIS BATCH（47 arrive here → 11 yes · 36 no，沒跑過一個字不畫）、
+  Insert step above／Remove step。
+* **`rules` 模式在第一次點菱形時無損轉樹**（`RecipeModel.ensure_tree`，
+  rules 清空 —— 兩個都在是 `ambiguous-decision`）；`DecidePanel` 在樹模式
+  收起規則清單，指去畫布（同一件事不擺兩個編輯入口）。
+* **樹的編輯 op 全在 viewmodel**（路徑當身分、整棵 immutable 重建、一動作
+  一步 undo）：`set_tree_when/set_tree_leaf/split_tree_leaf/
+  insert_tree_step_above/remove_tree_step`。加一步＝新問題的 yes 掛新類、
+  原本那類留在 no（同「在 otherwise 前插一條規則」的形狀）；拿掉一步＝no 邊
+  接回上游，yes 邊掛著子樹時先問過使用者。
+* **雙擊入口卡收合整棵樹**成一張小卡（檢視狀態，不進 recipe）。
+* **幽靈線**：滑鼠停在菱形上 → 它用到的每個數字畫一條**臨時**點線回產出它
+  的卡（卡片同時亮 hover 框），`let` 中間值指回入口卡。來源從**宣告**推
+  （`RecipeModel.feature_owners`，第一個宣告的人贏）—— 所以它不說謊。
+  樣式跟資料流的線刻意不同（點線＋`contrast · from Gray level` 標籤），
+  移開就消失、從不存檔。
+* **Preview 的 Path**（F24 §8）：Verdict 旁一行
+  `Path: cd_deq_missing > 0 ? no → contrast > 120 ? yes`（樹模式；rules 模式
+  講第幾條規則對上），同時那條路**在樹上亮起來**（沿路分支加粗全彩）。
+  資料是引擎記的 `meta["decide"]["path"]`，人話由 `tree_scene.path_text`
+  沿樹重走組出來。
+* **`feature_math` / `feature_fill` 收進 `HIDDEN_STEPS`**（F24 §5 定調：
+  算式住進 working numbers、補值是樹第一步的形狀）。收不是刪：registry 照認、
+  舊 recipe 照跑、F21 的測試直接從 registry 拿。卡片庫的 Algo 段因此清空 ——
+  **GROUP_ORDER 沒動**（F16 的八段是使用者定的，動之前要再點一次頭）。
+* 測試：`test_ui_tree_edit.py`（15 條：轉樹清 rules、路徑尋址、split 保留
+  原類、remove 接回 no、undo 逐步、面板讀寫 model、HIDDEN_STEPS 收不是刪）＋
+  `test_ui_tree_canvas.py` 補 6 條（收合、幽靈線出現與消失、路徑亮起、
+  path_text）。截圖：`f24_edit_step.png`、`f24_ghost_path.png`。
+
+---
+
+## F24 ②：判定樹上畫布 —— 唯讀渲染（2026-08-24）
+
+判定區照 mockup 定稿長進畫布（`d4t/ui/tree_scene.py` ＋
+`PipelineCanvas.set_decision`）：
+
+* **判定區**是畫布右側一塊淡紫底虛線框（`seg_adc_bg`，跟著平移縮放）；
+  量測卡到它之間**刻意沒有存的線**，只有一句淡淡的 `numbers →`。
+* **入口小卡**（funnel ＋ Decision ＋ ƒ working numbers ＋試跑後的「N in」）
+  永遠恰好一個、不可拖不可刪；點了跳到判定編輯（`decision_clicked` →
+  `show_score_page`，跟 score 那條路同一個 handler）。
+* **菱形＝一步一問、yes 往右 no 往下**；`rules` 模式畫成等價鏈狀樹
+  （`rules_to_tree`，F24 ① 證過無損）——樓梯狀，`(anything else)` 虛線框。
+* **分支流量拿每一顆的特徵把樹重走一遍**（`flow_counts`）——
+  `meta["decide"]["path"]` 刻意不進結果 JSON（動 schema 動到黃金值），而
+  F24 ① 的 path-replay 測試證明「拿 features 重走＝引擎走的那條」。
+  守恆是構造上的：走到 p 就把 p 的每個前綴 +1，菱形 in ≡ yes+no。
+  表達式走不動的顆整顆不計（記半條路會把守恆弄破）。
+* **托盤**：類別色條（`leaf_hex`，bin 0 灰、其餘輪調色盤）＋名字＋顆數＋
+  「x/y real」＋微型純度條（有 ground truth 才畫）。
+* **未試跑：數字誠實地不在**（F18）——`counts=None` 時整區一個數字都不畫；
+  走二元 score 的 recipe 沒有判定區（那條路的判定住在門檻滑桿）。
+* 純函式（layout／counts／stats）與圖元分開 —— 流量守恆、樓梯佈局、
+  「沒跑不畫 0」全部 headless 測得到（`tests/test_ui_tree_canvas.py`，14 條）。
+* 截圖：`scratchpad/f24_tree_before.png`（形狀在、數字不在）與
+  `f24_tree_after.png`（48 → 1/47 → 11/36 → 16/20 → 20/0，跟 F22 那批
+  實跑逐項一致）。
+
+---
+
+## F23 期1：route_by 引擎（2026-08-24）
+
+四題使用者一句「照提案著做」全數定調（default 兩種都支援、第一期選項 A、
+預覽自動切 route、lot_stats 併第 3 期），期1 當天做完。
+
+* **`RouteBy{column, map, default}`** 是 recipe 頂層的嚴格附加區塊（不在就
+  一個位元不動；round-trip identity）。欄名讀進來就正規化成大寫，值先 strip
+  再比字串。
+* **route 在 `run_defect`／`run_defect_cached` 裡自己解**（`resolve_route`），
+  不是叫呼叫端解 —— batch、Studio 預覽、CLI 自動拿到同一個答案，「預覽跟批次
+  走不同路」從結構上長不出來。`kind` 只剩資料身分（`meta["_dataset_kind"]`）。
+* **快取簽章吃 route 鍵**（`image_segment_signature(recipe, route)`）：
+  兩條路各自一份條目，換 route 不會拿到隔壁那條路的影像。
+* `route_taken` 特徵（sorted routes 的索引）＋ `meta["route"]`，**只在
+  route_by 存在時寫**（黃金值三份不動的前提）。對不上而沒 default 的那一顆
+  `ok=False`，訊息講出值 X 不在對照表裡（`route_miss_message`）。
+* `run_batch` 開跑前自動補欄 —— 但**只在有顆缺這一欄時**，而且補的是
+  「現有欄位 ∪ 這一欄」（`fill_fields` 是整份換掉，只補一欄會把 carry 進來的
+  其他欄洗掉；每顆都有＝一個位元不動，測試靠這個手排路線）。
+* `run_batch_steps`：route_by 存在時走 map/default 指到的**每一條** route 的
+  跨顆卡，同一個節點只跑一次（Output 寫檔不可逆，寫兩次是覆寫不是保險）。
+* **兩條 error lint**（`bad-route-by`：空欄名/空 map/指到不存在的 route）＋
+  `route-not-reachable` warning；route_by 存在時 validate 檢查**全部** route、
+  不再對 kind 報 `unknown-route`（route_by 覆蓋 kind 選路，§4.2）。
+* CLI：開跑前查欄位在不在（`missing_columns_of`，手上有 KlarfDoc 答得出
+  「它有哪些欄」）；跑完印分流結果＋**掉進 default 的顆數**＋一顆都沒走的
+  route（寫了沒人走的路最容易爛）。
+* `make_sample.py --class-by-truth`（**選配**，預設逐位元組不變 ——
+  `test_export_klarf` 倚著「原檔 CLASSNUMBER 全 0」在算改動列數）：
+  REAL=1、NUISANCE=2，分流的合成資料一行指令就有。
+* 驗收全過（`tests/test_route_by.py`，27 條）：走對路 24/24、B 路的顆**沒有**
+  A 路的特徵、workers=1/2 逐項相同、快取冷跑＝熱跑、兩條 route 簽章不同、
+  黃金值與全套 core 測試不動。
+
+---
+
+## F23 計畫書：分流（route_by）—— 議程，未動工（2026-08-24）
+
+使用者定調 pre-filter 的真正需求：「**不同的 Classnumber 走不同的『卡片』**」
+—— 不是判定段的條件（那個每顆還是全跑），是 Class 2 根本不跑 A 組卡。
+計畫書在 [`docs/plans/F23-route-by.md`](docs/plans/F23-route-by.md)，
+照 Phase 2 規矩先討論再動手。要點：
+
+* **機制八成在**（多 route、`fill_fields`、快取簽章含鍵），卡住的只有
+  `run_batch` 把 route 鍵當一批一個常數 —— 改成逐顆算。
+* `route_by` 是 recipe 頂層區塊（跑之前決定，不能是卡也不能是 decide 條件），
+  **嚴格附加**（不在就一個位元不動，同 F22 的 decide）。
+* 三個必須跟著出生的：`route_taken` 特徵（F19 規矩）、default 顆數看得見、
+  三條 lint（欄不存在／route 不存在／有 route 沒人走）。
+* **前置是 F17-⑤ 的取捨**：第一期提案用「不同節點 id ＋ routes-drift lint」，
+  一份 recipe 一個圖等症狀出現再做。
+* `lot_stats` ＋ 兩趟判定提案併第 3 期（動同一段批次程式）。
+* 驗收先寫好：走對路 100%、B 路的顆**沒有** A 路的特徵（證明真的沒跑）、
+  workers=1/4 逐位元組相同、無 route_by 的黃金值不動。
+
+**留了四題等定調**：default 行為、route 模型選項、預覽自動切 route、
+lot_stats 併不併。
+
+---
+
+## F24 ①：判定樹引擎（2026-08-24）
+
+F24 的第一期做完：`decide` 從清單長成樹。**畫布是第 ② 期，這一輪只有引擎。**
+
+* **資料結構**：`TreeStep(when, yes, no)`（二叉 —— 一步一問是流程圖語言；多叉
+  要在一顆節點上排好幾個互斥條件，而互斥在畫面上驗不了）＋ `TreeLeaf(bin,
+  label)`。`DecideSpec.tree` 是嚴格附加的第三層（score → decide.rules →
+  decide.tree），每一層不在就完全不動下一層。
+* **`rules_to_tree`**：平面規則清單＝鏈狀樹，轉換無損 —— 值網格逐點同 bin
+  同 label 的測試釘住「F24 是 F22 的一般化，不是取代」。
+* **引擎**：`_eval_decision` 走樹並記 `path`（一串 yes/no，進
+  `ctx.meta["decide"]`）—— Preview 的 Path 與畫布的分支流量都吃它。
+* **serde 只寫在用的那一種**（樹模式不寫 rules/otherwise）：兩個都寫出去，
+  讀回來就是 `ambiguous-decision` —— 一份自己存的檔案不該把自己弄壞。
+* **三條 lint**：rules+tree 並存（error）、樹太深 >16（warning）、
+  步驟的問題解析不了（`bad-rule`）。寫壞的樹在**讀檔當場擋**。
+* **undo 快照帶得動樹**（`viewmodel._decide_snapshot`）—— 漏掉的話一份樹
+  recipe 在 Studio 按一次 undo，樹就安靜地消失。
+
+**驗收（計畫書 §10，實跑）**：48 顆合成 lot，rules recipe vs 等價鏈狀樹
+（走過 serde 一圈）—— **bin 相同 48/48、score 相同 48/48**；路徑分布
+1/11/16/20 加總 = 48（流量守恆）。F22 的 21 條測試一條沒動、黃金值三份全綠。
+
+新測試 `tests/test_decide_tree.py` 31 條；核心 1841 passed、UI 逐檔全綠。
+
+---
+
+## F24：判定樹上畫布 —— 分揀槽定稿（2026-08-24）
+
+使用者問「ADC 跟 Algo 畫布上要怎麼呈現（畫布不能說謊），跳脫框架你有什麼建議」。
+討論 → mockup → 兩輪修訂 → 拍板。定稿在
+[`docs/plans/F24-decision-tree.md`](docs/plans/F24-decision-tree.md)，
+mockup（四個 artboard）在
+https://claude.ai/code/artifact/adfed023-6280-4acf-b6c0-749c9f299767 。
+
+### 心智模型（病根與定稿）
+
+所有「畫布說謊」的病根是同一個：**硬把數字塞進線的隱喻**。定稿一句話：
+
+> 畫布管「圖與區域怎麼流」，表格管「數字」，判定樹管「怎麼分」。
+
+### 定稿的四件事
+
+* **判定整棵住在畫布上**（使用者：「ADC 也在畫布上呈現」「多步驟判定
+  decision tree like」）：淡紫判定區、funnel 入口小卡（永遠恰好一個、不能刪、
+  可收合）、**步驟＝菱形**（流程圖語言）、**葉子＝托盤**（顆數＋x/y real）、
+  試跑後**每條分支標流過幾顆**（48 → 1/47 → 11/36 → …）。
+* **`decide` 從清單長成樹**：`rules`（第一個成立的贏）就是一條鏈狀樹，
+  遷移無損；`tree` 節點＝`when`＋`yes`＋`no`，兩邊各是步驟或葉子；
+  每顆記 `path`，Preview 顯示走過的路。
+* **Algo 段解散**：`feature_math`→working numbers（`let`）、`feature_fill`→
+  樹的第一步＋「missing ⇒」屬性、`lot_stats`→「跟整批比」勾選。兩張卡先收
+  `HIDDEN_STEPS`。**ADC 入口保留但特別化**（使用者補充定調：「左側 ADC card
+  不要拿掉，但不要跟畫布 card 放在一起／讓它特別一點」）—— rail 底部分隔線下
+  一顆紫框 funnel、庫底部淡紫常駐入口（`1 of 1` 徽章，點了跳到樹，不是生卡）。
+* **幽靈線**：滑鼠停在數字名上→產出它的卡發亮＋臨時點線拉回去，移開消失。
+  從 `feat_owner` 推導所以不說謊；樣式刻意不像資料線 ——「它是答案，不是連接」。
+
+F22 §6 的開放問題（ADC 要不要有線）標為已定稿、F23 §6 的 UI 期改引用 F24。
+分期五期寫在 F24 §9，驗收先寫好（含「rules 舊 recipe＝等價鏈狀樹，48 顆逐顆
+bin 相同」與「分支流量守恆」）。
+
+---
+
+## cp950：CLI 在廠內 console 上炸在成功的那一刻（2026-08-24 修）
+
+F20 §5 記下的那一條。廠內機器的 console 是 cp950，而 CLI 印 ✓ / ✗ / △ / →
+（cp950 沒有這幾個字）—— 症狀特別壞：**跑完 48 顆、CSV 也寫好了**，使用者
+看到的卻是一條 `UnicodeEncodeError` 的 traceback，在成功的那一刻。
+
+修法一小段：`main()` 開頭對 stdout / stderr `reconfigure(errors="replace")`
+—— 印不出的字換成 `?`，中文照常（cp950 本來就有中文），檔案輸出全部自帶
+`encoding="utf-8"` 不受影響。
+
+迴歸測試用 **subprocess ＋ `PYTHONIOENCODING=cp950`**（不是 monkeypatch
+sys.stdout）—— 子行程的 stdout 真的是 strict cp950，跟廠內那台一模一樣。
+驗過「把 bug 放回去會紅」。
+
+---
+
+## F22-UI：多類別在 Studio 上真的能編輯了（2026-08-23）
+
+在這之前 `decide` 只能手寫 JSON。做完的是**方案 B 的前兩步**（純度報表 → 面板），
+第三步（節點上列來源）撞到一件事，見下面 §4。
+
+### 1. 純度報表：多類別唯一量得出來的東西
+
+`report.summarize` 多一個 `bin_purity`，CLI 在**真的分出兩類以上時**才印：
+
+```
+  每一個 bin 裡有幾顆是真的：
+    bin 9      1 顆　真缺陷   0　假點   1　純度 0%
+    bin 3     11 顆　真缺陷  11　假點   0　純度 100%
+    bin 2     16 顆　真缺陷  13　假點   3　純度 81%
+    bin 1     20 顆　真缺陷   0　假點  20　純度 0%
+```
+
+**為什麼是純度不是「多類別正確率」**：正確率要先知道「這一顆應該落在哪個 bin」，
+而手上的 ground truth 只標了 `is_real`（二元）。硬算就得先假造一份對照。
+純度不需要那個假設 —— 它問「我判進這一類的，有幾顆真的是缺陷」，而那正是調規則
+的人一條一條在看的東西。⚠ `bin 0` 的純度要反過來讀（那裡的真缺陷是**漏抓**），
+所以每一列同時給 `n_real` 與 `n_nuisance`，不只給一個比例。
+
+### 2. 判定面板（新模組 `ui/decide_panel.py`）
+
+一個切換：**一個門檻（兩類）** 或 **一串規則（多類別）**。切成多類別時
+**現有的門檻會被翻成第一條規則** —— 使用者調了半天的那個數字是他的工作成果。
+兩者不能並存（照引擎的 `ambiguous-decision`）。
+
+規則列有 ▲▼（**換順序就是換優先權**，所以它跟改門檻同一級）、bin、名字，
+下面一行是**這一批的顆數與純度**（跟 F18 的灰階面板同一個立論：調規則的人是
+一邊改一邊看的）。中間值與分數都配 F21-B 的「插入數字 ▾」。
+
+**開新模組而不是塞進 `studio.py`**：那個檔案已經 5000 多行，而這一欄現在有兩種
+樣子、規則是逐列生出來的。
+
+### 3. 四個只有真的做／真的跑才會抓到的
+
+* **打字會被重建搶走游標。** 面板不訂閱 model 的 listener，只有**結構性改動**
+  （加／刪／換順序）才重建；外面餵進來的重建請求（試跑跑完）遇到有人在打字就
+  記著、等焦點離開再補。
+* **`_typing()` 的判準一開始寫錯**：`self.focusWidget() is not None` 幾乎永遠是
+  True（Qt 顯示視窗時會自動把焦點給第一個可聚焦元件），於是**每一次重建都被
+  擋掉** —— 症狀是「拖完門檻放開，那一格還是 0.0」。判準要是 `w.hasFocus()`。
+* **換 recipe 會換掉整個 `self.model`**，而面板抓著參考 → 它會安靜地繼續編輯
+  上一份 recipe 的判定段。`_apply_model` 要跟著 `set_model`。
+* **UI 一律英文**（`test_ui_english_only`）—— 我第一版把面板的字寫成中文，
+  32 條全部翻掉。docstring 與註解維持中文，那是刻意的。
+
+**版面也是截圖抓的**：第一版一列八個東西，而這一欄的寬度是使用者拖的 ——
+實測預設 437 px、內容要 592 px，於是**最有價值的那一格（顆數與純度）變成要捲
+才看得到**。改成兩行（顆數是規則的註腳）之後 459 px，再加一個捲動區當保險。
+另外 `small_button` 的邊長由 QSS 給，**沒套主題時會撐開**（獨立截圖實測三顆
+▲▼✕ 各佔 90 px，把條件欄壓成裝得下 `> 0` 的小框）—— 元件不該靠外面有沒有套
+QSS 才排得對。
+
+### 4. 方案 B 的第三步卡住了（要先決定一件事）
+
+「節點上列出它吃哪幾個數字」需要畫布上**有一個 ADC 節點** —— 而查了之後：
+**畫布上根本沒有。** `set_score_summary` 有設一個字串，但它從來沒有被畫出來；
+ADC 只是卡片庫裡一個「點了會開面板」的項目（`_SCORE_LIBRARY_ENTRY`）。
+
+所以那一步比估的大：要造一個**不在 `recipe.nodes` 裡的終點節點**（位置怎麼定、
+點它做什麼、怎麼跟 F17 記的「end point 的畫法」對上）。而 F17 當時記的正是
+使用者的「再看看」。
+
+**建議先看過面板再決定**：面板做完之後，「那個節點該顯示什麼」的答案不一樣了。
+
+驗收：`tests/test_ui_f22_decide_panel.py` 16 條；核心 1806 passed、UI 逐檔全綠、
+**黃金值三份全綠**；面板與整個視窗都實際開 Studio 截圖看過。
+
+---
+
+## 黃金值重凍 —— 那條「只能在家用機凍」的規矩是錯的（2026-08-23）
+
+使用者問「黃金值你應該也可以凍吧」。**量了一次，答案是可以，而且那條規矩擋掉的
+風險不存在。**
+
+`ROADMAP.md` 寫著「那些是浮點數，在別台機器上重凍會把每一個特徵的基準線都換掉」。
+實測（容器裡，**numpy 2.4.6 / opencv 5.0** —— 比 pin 的 1.24 / 4.8 新兩個 major）：
+
+| | |
+|---|---|
+| `FLOAT_FORMAT` | `%.17g`（完整雙精度） |
+| 共有特徵的數值差異 | **0** |
+| bin / score / ok / error 差異 | **0** |
+| 22 條差異的內容 | **全部**是「特徵名不同」 |
+
+推論是硬的：**現在的黃金值是在家用機凍的**，而在這台機器上每一個共有特徵都
+逐位元組相同 —— 那就是跨機器的證明，而且跨了兩個 major 版本。
+
+重凍之後 `--check` 三份全綠、`D4T_GOLDEN=1` 的 4 條測試全過。diff 逐項對得上
+F19（`area_px` / `cd_x_px` / `cd_y_px` → `cd_*` 那一批）與 F17-②
+（`test_clip_frac` → `norm_clip_frac`）。
+
+**這條規矩的代價**：它從 F19（08-21）擋到現在，也就是「重構的驗收＝跟改動前
+逐項相同」那條防線兩天沒有在守 —— 而 F21 的 blob 修法與 F22 的判定段都是在那
+兩天做的。（兩者都另外有自己的迴歸測試，而且這次重凍證實了它們沒有動到既有
+的數字。）
+
+**留下來的那一半**：重凍是「把現在的值當成新基準」，所以**看差異那一步不能跳過**。
+`ROADMAP.md` 那一段改成講這件事，而不是講機器。
+
+---
+
+## F22：多類別 ADC 的引擎（2026-08-23）
+
+整個 app 最大的功能缺口 —— 一個叫 Auto Defect **Classification** 的工具，
+`score.bins` 卻被強制只有 `below`/`above`。設計與量測全部在
+[`docs/plans/F22-adc-multiclass.md`](docs/plans/F22-adc-multiclass.md)。
+
+### 形狀：一張由上往下讀的篩子
+
+`decide` = `let`（中間值）＋ `rules`（第一個成立的贏）＋ `otherwise` ＋ `score`。
+
+實跑 48 顆（F21 那份 recipe，把 `Feature math` 拔掉、算式搬進判定段）：
+
+| bin | 類別 | 總數 | 真缺陷 | 假的 |
+|---:|---|---:|---:|---:|
+| 9 | not measurable | 1 | 0 | 1 |
+| 3 | big particle | 11 | **11** | 0 |
+| 2 | particle | 16 | 13 | 3 |
+| 1 | faint | 20 | 0 | 20 |
+
+**這個 app 第一次分出兩類以上。**
+
+### 四個決定
+
+* **由上往下第一個成立的贏**，不是「每條算分取最高」。理由是使用者讀得懂
+  「改順序＝改優先權」；算分取最高要他想像好幾條分數線的相對高度，而那件事
+  畫不出來。
+* **`let` 的中間值是真的特徵**（寫進 `ctx.features` → 進 CSV → 畫得出分布）。
+  這正是 `feature_math` 存在的唯一真理由，而在這裡它不必是一張卡 ——
+  F21 §5.3 留的那個題目，**引擎這一半成立了**。
+* **不用學第二套語法**：比較運算子本來就回 1.0／0.0，所以
+  `(a > 5) * (b < 2)` 就是 AND。判準是「非 0 就是成立」。
+* **`score` 還是 `score`**：寫進 `features["score"]`，所以 KLARF 的 DSIZE、
+  Top-N、CSV 的 score 欄都不必知道這一段換過。
+
+### 嚴格附加，而且理由不是保守
+
+`decide` 不在 → `_eval_score` 第一行就分岔，老路一個位元都沒動；`to_json_dict`
+也不會長出那個鍵。**因為黃金值從 F19 起就是壞的** —— 沒有那條防線的時候，
+「改了判定段但既有的數字沒變」這句話沒有人證得了。目前唯一守著它的是
+`test_an_old_recipe_round_trips_without_growing_a_decide_key`。
+
+**兩種寫法不能並存**（`ambiguous-decision` 是 error，不是挑一個贏）：同一件事
+兩個地方存是這個 repo 最怕的形狀。
+
+### 還沒做的四件（見計畫書 §4）
+
+UI 的判定面板、`label` 進 CSV（會動序列化，黃金值壞著不動）、多類別的
+ground-truth 比對（要先定義「對」是什麼）、舊 recipe 的自動遷移。
+
+⚠ **還不能刪 `feature_math`**：`let` 在引擎上取代得了它，但 UI 還沒有 `let` 的
+編輯器（現在只能手寫 JSON），而 F21-B 的挑選器也還沒做到那幾行上。
+
+### 開放問題：ADC 要不要有線
+
+使用者：「**我覺得 ADC 也可以有線啦（但我們再來討論）**」。F21 §5.3 我主張
+「ADC 吃全部所以不需要埠」—— **多類別之後那個論證有漏洞**：每條規則吃的是
+特定幾個數字，不是全部。這一題要在 UI 那一輪一起決定，不是先做完面板再補。
+
+驗收：`tests/test_decide_multiclass.py` 21 條；核心 1805 passed / 63 skipped、
+UI 逐檔全綠。
+
+---
+
+## F21-B：算式那一格說得出「有哪些數字、誰算的」（2026-08-23）
+
+F21 實測掉出來**最痛的那一項**：第一次真的用 `feature_math` 的時候，我得跑
+Python 呼叫 `resolve_features()` 才知道 `cmp_delta_median` 存在。而目標使用者
+不會寫 code（推廣鐵則）。痛的順序跟先前猜的相反 —— 「看不出數字從哪來」反而
+是最不痛的那一項（只有一張 glv 卡時一次都沒混淆過）。
+
+### 兩個新型別，儲存格式一個位元都沒變
+
+`expr`（一個算式）與 `feature_keys`（一串數字名）。**存的就是 `str`** ——
+recipe JSON 完全不變，差別只在 UI 認得它是什麼。這是 `image_keys` 的先例
+（「值的格式一樣（逗號分隔字串），但 UI 認得它是接線的結果」）。
+
+兩格共用同一支「插入數字 ▾」，差別只在**送進去的方式**：算式插在**游標位置**
+（式子中間常常要補一個名字），一串名字**接在後面**並補逗號（插在中間會把別人
+的名字剖成兩半）。那個差別由型別決定，不由使用者記得。
+
+清單的每一項說得出**誰算的**（`cd_median   —   CD`），因為一份 recipe 可以有
+兩張 `Gray level`（量兩個區域）—— 名字自帶前綴的只有撞名被蓋掉的那一份
+（F17-②），沒撞名時仍然只有一個短名，光看名字選不出要哪一個。
+分數那一格（`score.expr`）本來就有下拉，這一輪讓它也講得出來源。
+
+### 兩個只有「真的跑起來」才會抓到的
+
+* **`expr` 進了 `PARAM_TYPES` 卻沒進 coerce** —— `validate_params` 會丟
+  「unknown type」，也就是**每一份用到那張卡的 recipe 都會炸**。測試當場抓到。
+* **`Feature math` 的清單裡有 `defect_score`** —— 它自己要寫出去的名字，點下去
+  就是 `defect_score = defect_score`。這是把 Studio 跑起來、把選單印出來才看到
+  的（元件測試看不到，因為清單是 Studio 填的）。引擎擋得住
+  （`unknown-feature-input`），但**讓使用者點一個保證壞掉的選項本身就是 bug**。
+  修法：`labelled_features(..., include_upto=False)`。
+
+### 順手補的一致性
+
+`feature_fill`（A1 那張卡）的「守哪幾個數字」有**一模一樣**的痛點，卻沒有挑選器
+—— 昨天做的卡如果不補，等於我一邊修這個痛點一邊留一個。所以它換成
+`feature_keys`，共用同一支。
+
+驗收：`tests/test_ui_f21_expr_picker.py` 12 條；核心 1783 passed、UI 逐檔全綠；
+兩張卡的面板都實際開 Studio 截圖看過。
+
+---
+
+## F21：照著用一次 Algo 段，掉出「框越準越量不到」（2026-08-23）
+
+使用者問「algo 這張 card 有沒有存在的必要」。查 repo 得到的事實是**三個收斂過的
+段落零使用**：`feature_math` 0 次、任何 ROI 卡 0 次、F18 的 compare 0 次。
+所以先串起來跑一次，再談要不要為 Algo 段加東西。全部在
+[`docs/plans/F21-algo-and-roi.md`](docs/plans/F21-algo-and-roi.md)。
+
+### 1. ROI 是槓桿，實測 +0.35
+
+同一批資料（48 顆，24 真 24 假）：正確率 **50.0% → 93.8%**、誤殺率
+**95.8% → 12.5%**、`glv_max` 的 AUC **0.632 → 0.944**。
+
+### 2. 修掉：**ROI 框得越準，blob 越量不到**（症狀是反過來的）
+
+`algo/shape._region_noise` 的空間項拿「外框那一圈」當背景樣本。4×8 的框，外框有
+20 個像素、內部只有 12 —— 而一團 3 px 的東西在 4 px 寬的框裡**必然碰到外框**，
+於是它自己被算成背景起伏（逐點 σ 8.3 vs 外框 MAD 26.5，取大的 → 品質 0.35 →
+判 `flat`）。
+
+| | 量不到 | `cd_deq` 的 AUC |
+|---|---|---|
+| 緊框（預設 `min_edge=0.5`） | **92%** | 0.514 |
+| 整張圖 | 2% | 0.564 |
+| 緊框，修好之後 | **12%** | **0.901** |
+
+修法 `ring_is_a_border(shape)`：外框像素超過整塊一半時它就不是一圈邊，那時只用
+逐點估計。判準是**幾何**不是調出來的數字。低頻那條防線一個位元都沒動（它守大
+區域，驗收用 64×64、外框佔 6%），並加了一條測試釘住這件事。
+
+### 3. A1 第一次真用就救了場
+
+第一次跑 **44/48 顆失敗** —— `cd_deq` 這一格量不到，`feature_math` raise，
+整顆 `ok=False`。插進 `feature_fill` 之後 48/48 跑完。那張卡昨天做對了。
+
+### 4. Algo 段的決定（§5）
+
+* **保留 `feature_math`，現在不做特徵線。** 它值 +0.012（576 對多排對 7 對）；
+  而畫布缺口比想像小 —— 11 個節點只有 2 個沒線，且它們的上游已經被**區域線**
+  綁在一起。加上**特徵不跟線跑**（`_local_view` 只有 `images` 是每張卡自己的），
+  現在畫的線會是「說明」不是資料流。重啟條件寫在計畫書。
+* **錢花在真正的痛點**：實際用過之後，最痛的是**不知道有哪些數字可以用**
+  （我得跑 Python 才知道 `cmp_delta_median` 存在），最不痛的反而是「看不出從
+  哪來」。所以做「可以點的數字清單」，而且**做在 `expression` 編輯器上**——
+  `score.expr` 痛點一模一樣。
+* **判準寫死**：式子寫得出來 → 不開卡；要看整批 → 才開卡。Algo 段最終三張。
+* **留給 ADC 的題目**：把「算式子」搬進 ADC（好幾行的計算表），讓 `feature_math`
+  被吸收。理由：F17 對 Output 卡說的「吃的是全部，所以不需要埠」對 ADC 一字不差
+  —— **ADC 沒有線不是說謊，`feature_math` 站在中間卻沒有線才是。**
+
+### 5. 順手發現：黃金值從 F19 起就是壞的
+
+`freeze_golden.py --check` 現在會紅，而且**跟這一輪無關**（把 `shape.py` 暫存
+起來再跑一樣紅）。差異是 F19 改名留下的（少了 `cd_x_px`、多了 `cd_axis_deg` …）。
+也就是說「重構的驗收＝跟改動前逐項相同」這條防線**從 2026-08-21 起就沒在守**，
+而它擋在任何後續重構前面。⚠ 只能在家用機重凍。
+
+### 6. 一個不採信的數字
+
+`cross_dist_px` AUC 0.922、加進任何組合都變 1.000 —— **不採信**：這批資料的假點
+是 `type:"none"`（完全沒有缺陷），所以「最強訊號離中心很遠」幾乎就是 ground
+truth 本身。所有結論都排除了它。
+
+---
+
+## Algo A1：量不到不是跑錯了（2026-08-22）
+
+Algo 段從一張卡（`feature_math`）開始往下做。**第一件事不是加能力，是補一個
+現成的洞** —— 而那個洞是兩條各自都對的規矩留下來的：
+
+* 「算不出來的那一格不寫」（F18／F19：不是 0、也不是 NaN）
+* 「變數不存在會 raise」（`expression.py`：那通常是打錯字，安靜給 0 會把
+  使用者送去查一個沒有問題的地方）
+
+實跑證實過：`parse_expression("cd_median * 2").eval({"glv_mean": 100.0})` 丟
+`ExpressionError`，`engine._eval_score` 攔下來之後回 `ok=False`。於是
+**「這一顆量不到」跟「這一顆跑到一半炸掉」在結果表上是同一件事** —— 而在 fab
+裡「量不到」常常就是一種缺陷型態的訊號（結構被填掉、對比消失），它該分得進
+某一類，不是被丟出批次。
+
+### 新卡 `feature_fill`（Missing numbers）
+
+兩格：守哪幾個數字（逗號分隔）、補什麼值。寫出去的是兩個東西，**第二個才是
+重點**：`<name>` 補上值讓下游跑得完，`<name>_missing` **永遠寫**（0／1）——
+沒有它，CSV 上那 12 個 `cd_median = 0` 跟真的量到 0 的那幾顆分不出來，
+那正是這張卡要修的病換一個地方發作（F19 的規矩：卡片自動做的每一個決定，
+都要變成一個使用者畫得出分布的數字）。
+
+旗標本身可以進分數表達式（`cd_median * 2 + cd_median_missing * 1000`），
+所以**「量不到自成一類」不必等多類別 ADC**。
+
+### 三個設計問題的答案（都是從既有機制推出來的，不是選的）
+
+* **要不要讓表達式一律容忍缺變數** —— 不要。那條 raise 要擋的是打錯字，而打錯字
+  `validate` 已經先擋掉了（`unknown-feature-input` error ＋ `unknown-feature`
+  warning）。所以**跑到執行期還缺的那一個，一定是「宣告了但這一顆沒寫」**。
+  兩件事引擎已經分開，讓表達式一律容忍會把前者也吞掉。
+* **「量不到」要不要跟「沒接線」分兩種狀態** —— 不要，而且是同一個理由：
+  沒接線在跑之前就是一條 error，執行期不可能遇到它。
+* **要不要「只掛旗標、不補值」的模式** —— 不要。那個模式解不掉 raise，也就解不掉
+  這張卡存在的理由，而它會讓使用者以為自己選了一個安全的預設。
+  ⚠ 但它指出一件**下一批要記得的事**：`lot_stats` 對一整欄取中位數時要排除
+  補進去的值（12% 的假 0 會把中位數拉走）。判斷「哪幾列算數」是**算中位數的
+  那張卡**的事。
+
+### 一個刻意的宣告不對稱（違反 I3 的字面，理由寫在三個地方）
+
+`run()` 寫 `<name>`，但 `resolve_features` 只宣告 `<name>_missing`。
+
+I3（`test_card_invariants` 的「只碰宣告過的東西」）講明它要擋的害處是
+「它會出現在自動完成裡，但沒有任何地方說得出它從哪來」—— 而那在這裡**不會
+發生，且是引擎保證的**：`resolve_features_in` 讓 `unknown-feature-input` 擋住
+「沒有任何卡宣告這個名字」的 recipe，所以跑得起來的每一份，`<name>` 都已經有
+一個上游的擁有者。這張卡填的是那個名字上的一個洞，不是憑空生一個新名字。
+
+反過來宣告它的代價是實的：`<name>` 的擁有者（量測卡）不是診斷數字，所以
+`feature-collision` 的「兩邊都是診斷才跳過」不成立 —— **每一份正確使用這張卡的
+recipe 都會多一條警告**，而使用者學會忽略一條警告之後真的那一條也一起被忽略
+（推廣鐵則、F11 Enhance-3 的原話）。
+
+卡片跟 `feature_math` 一樣進 `NEEDS_MORE_SETUP`（預設沒設定完是刻意的，F7-13），
+所以 I3 跳過它 —— **跳過的東西有人接**：
+`test_feature_fill.py::test_it_writes_nothing_else_beyond_that` 是 I3 的專屬版，
+用**設定好的**參數跑，比那個 harness 問得更嚴。
+
+驗收：`tests/test_feature_fill.py` 18 條；核心 1779 passed / 66 skipped，
+UI 測試逐檔全綠。黃金值零變動（這張卡不在任何一份黃金 recipe 上）。
+
+---
+
 ## F19 之後照著量一次：一個安靜的平滑 bug、一組新資料、一格新參數（2026-08-22）
 
 使用者拿 MG × EPI 的合成資料問「凸出量怎麼量」。整輪都是**照著真的量一次**

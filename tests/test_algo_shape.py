@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 
+import cv2
 import numpy as np
 import pytest
 
@@ -383,6 +384,52 @@ def test_a_wandering_background_is_not_a_blob():
     with_blob = add_ellipse(wander(7), 32, 32, 8.0, 8.0, amp=90.0)
     got = algo_shape.measure_blob(with_blob)
     assert got.ok and got.area == pytest.approx(math.pi * 64.0, rel=0.25)
+
+
+def test_a_tight_region_does_not_count_its_own_blob_as_background():
+    """**框得越準越量不到** —— 反過來的症狀，所以特別難查（2026-08-23 實測）。
+
+    `_region_noise` 的空間項拿「外框那一圈」當背景的樣本。一個 4×8 的框裡，
+    外框有 20 個像素、內部只有 12 —— 外框已經不是一圈邊，它就是這塊區域本身。
+    而一團 3 px 的東西在 4 px 寬的框裡**必然碰到外框**，於是它自己被算成背景
+    起伏：實測合成 lot 的 spacer 框（48 顆）逐點 σ 8.3、外框 MAD 26.5，
+    取大的那個把品質從 0.60 壓到 0.35，整塊判成 "flat"。
+
+    端到端的代價（同一份 recipe，只差這一項）：
+      緊框 spacer_center  →  92% 量不到，cd_deq 的 AUC 0.514
+      修好之後            →   2% 量不到，cd_deq 的 AUC 0.941
+    """
+    rng = np.random.default_rng(3)
+    tight = canvas(8)[:8, :4] + rng.normal(0.0, 3.0, (8, 4))
+    tight[3:6, 1:3] += 60.0            # 一團碰得到外框的前景
+    assert not algo_shape.ring_is_a_border(tight.shape), \
+        "4×8 的外框佔 62% 的像素 —— 它不是一圈邊"
+    got = algo_shape.measure_blob(tight, min_area=2)
+    assert got.ok, "緊框上量不到：reason=%r quality=%.3f" % (got.reason, got.quality)
+
+
+def test_the_border_rule_is_geometry_not_a_tuned_number():
+    """判準是「外框的像素會不會比內部多」，不是一個調出來的門檻。"""
+    for (h, w), want in (((4, 8), False), ((3, 3), False), ((2, 2), False),
+                         ((6, 8), True), ((8, 8), True), ((64, 64), True)):
+        ring = 2 * w + 2 * h - 4
+        assert algo_shape.ring_is_a_border((h, w)) is want, (h, w)
+        if want:
+            assert ring <= 0.5 * w * h, (h, w)
+
+
+def test_the_wandering_background_guard_is_untouched_by_the_border_rule():
+    """**沒有把原本修好的 bug 放回去。**
+
+    低頻起伏那條防線（見 `test_a_wandering_background_is_not_a_blob`）守的是
+    大區域，而它的驗收用 64×64 —— 外框只佔 6%，規則對它恆為真。
+    """
+    assert algo_shape.ring_is_a_border((64, 64))
+    rng = np.random.default_rng(7)
+    wander = canvas(64) + cv2.GaussianBlur(
+        rng.normal(0.0, 5.0, (64, 64)), (0, 0), 3.0) * 3.0
+    res = algo_shape.measure_blob(wander)
+    assert not res.ok and res.reason == "flat"
 
 
 def test_the_two_noise_estimates_agree_on_white_noise():

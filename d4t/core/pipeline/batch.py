@@ -22,14 +22,20 @@ import threading
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
+from dataclasses import replace as _replace
+
 from ..ingest import pair_source
 from .cache import StageCache, dataset_token
-from .context import BatchContext
+from .context import BatchContext, Context
+from .expression import parse_expression
 from .step import REGISTRY, SCALE_LOT
-from .engine import result_to_json_dict, run_defect, run_defect_cached
+from .engine import (
+    _eval_decision, _safe_num, result_to_json_dict, run_defect,
+    run_defect_cached,
+)
 from .recipe import Recipe, execution_order
 
-__all__ = ["run_batch", "pin_cv2_deterministic"]
+__all__ = ["run_batch", "apply_lot_scaling", "pin_cv2_deterministic"]
 
 # d4t/core/pipeline/batch.py → 上四層 = repo root（spawn 模式 sys.path 保險）
 _REPO_ROOT = os.path.abspath(
@@ -248,6 +254,21 @@ def run_batch(recipe: Recipe, dataset: Any, *,
     items = list(dataset.items) if limit is None else list(dataset.items)[:limit]
     n = len(items)
     kind = str(getattr(dataset, "kind", ""))
+    # ---- 分流（F23）：route_by 的那一欄要在每一顆的 `fields` 裡 ----
+    # 使用者不必記得先 carry —— 開跑前自動補。**只在有顆缺這一欄時才動手**，
+    # 而且補的是「現有欄位 ∪ 這一欄」：`fill_fields` 是整份換掉（刻意的，見
+    # 它的說明），只補一欄的話會把 Load 卡 carry 進來的其他欄安靜地洗掉。
+    # 每一顆都已經有這一欄（測試手填、或上游已 carry）→ 一個位元都不動。
+    rb = getattr(recipe, "route_by", None)
+    if rb is not None:
+        col = str(rb.column or "").strip().upper()
+        if col and any(col not in (getattr(it, "fields", None) or {})
+                       for it in items):
+            from ..ingest.dataset import fill_fields
+            have: set = set()
+            for it in getattr(dataset, "items", []) or []:
+                have.update((getattr(it, "fields", None) or {}).keys())
+            fill_fields(dataset, sorted(have | {col}))
     token = _dataset_token_for(dataset) if cache_dir else ""
     # 掛在 main 上的第二份資料（F15）。只送 items —— `Dataset` 掛著 `KlarfDoc`，
     # 而那個東西刻意不進 worker（見模組說明）。
@@ -284,6 +305,8 @@ def run_batch(recipe: Recipe, dataset: Any, *,
             done += 1
             if progress is not None:
                 progress(done, n, d)
+        # 「跟整批比」的兩趟判定（F23 期3）。沒有 scale 行＝一個位元不動。
+        apply_lot_scaling(recipe, out)
         return out
 
     # ---- 平行路徑：ProcessPoolExecutor ----
@@ -313,7 +336,126 @@ def run_batch(recipe: Recipe, dataset: Any, *,
                     f.cancel()  # 尚未開跑的顆取消；跑一半的顆等它結束但不收
                 break
 
-    return [results[i] for i in sorted(results)]
+    out = [results[i] for i in sorted(results)]
+    # 同循序路徑：兩條路收攏在同一份數字上（workers=1 與 2 逐項相同）。
+    apply_lot_scaling(recipe, out)
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# 「跟整批比」的兩趟判定（F23 期3）
+# --------------------------------------------------------------------------- #
+def _median(vals):
+    s = sorted(vals)
+    n = len(s)
+    if n == 0:
+        return 0.0
+    mid = n // 2
+    return float(s[mid]) if n % 2 else (s[mid - 1] + s[mid]) / 2.0
+
+
+def _stat_rows(rows, name: str, expr: str):
+    """這一行的整批統計要看哪幾顆的值。
+
+    排除：跑失敗的、沒判定的、值不是數字的，以及**補過值的** ——
+    expr 用到的任何變數帶著 ``<變數>_missing == 1``（`feature_fill` 補的），
+    或這一行自己的 ``<name>_missing == 1``（`Let.fill` 補的，F24 ⑤）。
+    A1 的規矩：補進去的值不進中位數，不然「整批的中位數」有一半是同一個
+    補進去的常數。
+    """
+    try:
+        variables = sorted(parse_expression(str(expr)).variables)
+    except Exception:              # noqa: BLE001 — 壞算式第一趟就逐顆失敗了
+        variables = []
+    out = []
+    for r in rows:
+        if not r.get("ok") or r.get("bin") is None:
+            continue
+        feats = r.get("features") or {}
+        v = feats.get(name)
+        if not isinstance(v, (int, float)):
+            continue
+        if any(feats.get("%s_missing" % var) == 1
+               for var in variables + [name]):
+            continue
+        out.append(float(v))
+    return out
+
+
+def apply_lot_scaling(recipe: Recipe, rows) -> int:
+    """把 ``decide.let`` 裡標了「跟整批比」的行換算成整批尺度，並重算判定。
+
+    F23 §8 的兩趟引擎：`run_batch`（逐顆，判定先算一版）→ 這裡回填 → 重算
+    判定（**不重跑影像**，秒級）。`run_batch` 的兩條路徑都在回傳前呼叫它，
+    所以 CLI、Studio 試跑、測試拿到的是同一份數字。
+
+    * 沒有任何 ``scale`` 行 → **一個位元都不動**（嚴格附加；黃金值三份靠它）。
+    * 原始值改名 ``<name>_raw`` 留著（F19：換算前後都要畫得出分布）。
+    * 重算判定時**不重算換算過的行**（它們的值已經是最終的），其他行照原順序
+      重算 —— 一行沒換算的 let 用到換算過的值時，拿到的是新值（跟規則看到的
+      一致）。
+    * 回傳重算判定的顆數。
+    """
+    decide = getattr(recipe, "decide", None)
+    if decide is None:
+        return 0
+    scaled = [x for x in decide.let if str(getattr(x, "scale", "") or "")]
+    rows = list(rows or [])
+    if not scaled or not rows:
+        return 0
+
+    for item in scaled:
+        name = str(item.name).strip()
+        if not name:
+            continue
+        stat_vals = _stat_rows(rows, name, item.expr)
+        if not stat_vals:
+            # 整批一顆可用的值都沒有 —— 沒有統計就沒有換算，這一行原樣留著
+            # （每一顆的原始值還在，CSV 看得出這件事）。
+            continue
+        med = _median(stat_vals)
+        if item.scale == "z":
+            mad = _median([abs(v - med) for v in stat_vals])
+            spread = 1.4826 * mad          # 同 algo/enhance.py 的一致性因子
+        n = len(stat_vals)
+        for r in rows:
+            feats = r.get("features") or {}
+            v = feats.get(name)
+            if not isinstance(v, (int, float)):
+                continue
+            feats["%s_raw" % name] = float(v)
+            if item.scale == "z":
+                feats[name] = ((float(v) - med) / spread) if spread > 0 else 0.0
+            else:                          # "percentile"（值域 0–100，midrank）
+                less = sum(1 for s in stat_vals if s < float(v))
+                equal = sum(1 for s in stat_vals if s == float(v))
+                feats[name] = 100.0 * (less + 0.5 * equal) / n
+
+    # ---- 重算判定（rescore 那條路：只有數字，沒有影像）----
+    decide2 = _replace(decide, let=[x for x in decide.let
+                                    if not str(getattr(x, "scale", "") or "")])
+    recipe2 = _replace(recipe, decide=decide2)
+    redone = 0
+    for r in rows:
+        if not r.get("ok") or r.get("bin") is None:
+            continue
+        ctx = Context()
+        ctx.features.update({k: v for k, v in (r.get("features") or {}).items()
+                             if isinstance(v, (int, float))})
+        try:
+            score, b = _eval_decision(recipe2, ctx)
+        except Exception as e:             # noqa: BLE001 — 鐵則 7：單顆失敗
+            r["ok"] = False
+            r["error"] = "[score] %s" % e
+            r["score"], r["bin"] = None, None
+            continue
+        feats = dict(r.get("features") or {})
+        feats.update({k: _safe_num(v) for k, v in ctx.features.items()})
+        r["features"] = feats
+        r["score"] = _safe_num(score)
+        r["bin"] = int(b)
+        redone += 1
+    return redone
 
 
 # --------------------------------------------------------------------------- #
@@ -343,8 +485,18 @@ def run_batch_steps(recipe: Recipe, dataset: Any,
     reg = REGISTRY if registry is None else registry
     k = str(kind if kind is not None else getattr(dataset, "kind", "") or "")
     bctx = BatchContext(rows=list(rows), dataset=dataset, recipe=recipe, kind=k)
+    # 分流（F23）：route_by 存在時 route 鍵不是 kind，而是 map/default 指到的
+    # 那幾條 —— 每一條上的跨顆卡都要跑到（同一個節點出現在兩條 route 上時
+    # 只跑一次：Output 卡寫檔是不可逆的，寫兩次不是「再保險一次」是覆寫）。
+    rb = getattr(recipe, "route_by", None)
+    if rb is None:
+        route_keys = [k]
+    else:
+        route_keys = sorted({str(v) for v in rb.map.values()}
+                            | ({str(rb.default).strip()}
+                               if str(rb.default or "").strip() else set()))
     try:
-        order = execution_order(recipe, k)
+        orders = [execution_order(recipe, rk) for rk in route_keys]
     except Exception as e:
         # route 有問題的話 `run_defect` 已經一顆一顆講過了，所以這裡不再報
         # 一次 error（同一件事兩個訊息，使用者會以為是兩個問題）。但也**不能
@@ -353,16 +505,21 @@ def run_batch_steps(recipe: Recipe, dataset: Any,
         bctx.warn("No output was written: this recipe has no route for '%s' "
                   "(%s)." % (k, e))
         return bctx
-    for nid in order:
-        node = recipe.nodes.get(nid)
-        if node is None or not node.enabled:
-            continue
-        step_cls = reg.get(node.step)
-        if step_cls is None or step_cls.scale != SCALE_LOT:
-            continue
-        try:
-            params = step_cls.validate_params(node.params)
-            step_cls().run_batch(bctx, params)
-        except Exception as e:              # noqa: BLE001 — 鐵則 7 的跨顆版
-            bctx.errors[nid] = str(e)
+    seen: set = set()
+    for order in orders:
+        for nid in order:
+            if nid in seen:
+                continue
+            seen.add(nid)
+            node = recipe.nodes.get(nid)
+            if node is None or not node.enabled:
+                continue
+            step_cls = reg.get(node.step)
+            if step_cls is None or step_cls.scale != SCALE_LOT:
+                continue
+            try:
+                params = step_cls.validate_params(node.params)
+                step_cls().run_batch(bctx, params)
+            except Exception as e:          # noqa: BLE001 — 鐵則 7 的跨顆版
+                bctx.errors[nid] = str(e)
     return bctx

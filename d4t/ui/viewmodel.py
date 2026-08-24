@@ -12,9 +12,45 @@ import math
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from dataclasses import replace
+
 from d4t.core.pipeline import (
-    Edge, ParamError, Recipe, RecipeNode, ScoreSpec, get_step, validate,
+    Edge, ParamError, Recipe, RecipeNode, RouteBy, ScoreSpec, get_step,
+    validate,
 )
+from d4t.core.pipeline.recipe import (DecideSpec, Let, Rule, TreeLeaf,
+                                      TreeStep, _tree_from_json, _tree_to_json,
+                                      rules_to_tree)
+
+
+def _decide_snapshot(d: "DecideSpec") -> Dict[str, Any]:
+    """判定段的純值快照（undo 堆用）—— 跟 `Recipe.to_json_dict` 同一個形狀。
+
+    ⚠ **樹也要進來**（F24）。漏掉的話，一份判定樹 recipe 在 Studio 裡按一次
+    undo，樹就安靜地消失 —— 而畫面上看起來只是「回到上一步」。
+    """
+    return {
+        "let": [(x.name, x.expr, str(getattr(x, "scale", "") or ""),
+                 str(getattr(x, "fill", "") or ""))
+                for x in d.let],
+        "rules": [(r.when, int(r.bin), r.label) for r in d.rules],
+        "otherwise": (int(d.otherwise_bin), d.otherwise_label),
+        "score": d.score,
+        "tree": None if d.tree is None else _tree_to_json(d.tree),
+    }
+
+
+def _decide_restore(snap: Optional[Dict[str, Any]]) -> Optional["DecideSpec"]:
+    if not snap:
+        return None
+    ob, ol = snap.get("otherwise") or (0, "")
+    tree = snap.get("tree")
+    return DecideSpec(
+        let=[Let(*row) for row in snap.get("let") or []],
+        rules=[Rule(w, int(b), l) for w, b, l in snap.get("rules") or []],
+        otherwise_bin=int(ob), otherwise_label=str(ol),
+        score=str(snap.get("score", "") or ""),
+        tree=None if tree is None else _tree_from_json(tree))
 
 
 class RecipeModel:
@@ -40,6 +76,20 @@ class RecipeModel:
         self.edges: List[Edge] = []
         self.expr = "0"
         self.threshold = 0.0
+        #: 多類別判定（F22-UI）。``None`` = 這份 recipe 走 ``expr + threshold``
+        #: 那條二元的老路。兩者**不能並存**（`validate` 的 `ambiguous-decision`），
+        #: 所以切換是「換一種」而不是「多一種」—— 見 :meth:`use_decide`。
+        self.decide: Optional[DecideSpec] = None
+        #: 分流（F23 期2）。``None`` = 照舊用 kind 選路。編輯器在判定欄上方。
+        self.route_by: Optional[RouteBy] = None
+        #: **這個 model 一次只編一條 route**（F23 §6 第一期不動的那條），
+        #: 其他 route 的排列／專屬節點／線原樣抱著 —— `to_recipe` 時合併回去。
+        #: 少了這三份，載入一份分流 recipe 再試跑，**其他 route 會安靜地消失**
+        #: （`to_recipe` 只寫得出正在編的那一條），而分流跑起來每一顆走不到的
+        #: route 都是一句 unknown-route 的失敗。
+        self._other_routes: Dict[str, List[str]] = {}
+        self._other_nodes: Dict[str, RecipeNode] = {}
+        self._other_edges: List[Edge] = []
         self.bins = {"below": 0, "above": 1}
         self.dirty = False
         self._listeners: List[Callable[[], None]] = []
@@ -122,7 +172,18 @@ class RecipeModel:
             "edges": [Edge(e.src, e.dst, e.src_out, e.dst_in)
                       for e in self.edges],
             "expr": self.expr, "threshold": self.threshold,
+            "decide": None if self.decide is None else _decide_snapshot(self.decide),
             "bins": dict(self.bins),
+            # 分流（F23 期2）。**其他 route 也要進快照** —— 少了的話 undo 一步
+            # 會把「載入時抱著的另一條 route」安靜地丟掉。
+            "route_by": None if self.route_by is None else
+                (self.route_by.column, dict(self.route_by.map),
+                 self.route_by.default),
+            "other_routes": {k: list(v)
+                             for k, v in self._other_routes.items()},
+            "other_nodes": {nid: (n.step, dict(n.params), bool(n.enabled))
+                            for nid, n in self._other_nodes.items()},
+            "other_edges": list(self._other_edges),
         }
 
     def restore(self, snap: Dict[str, Any]) -> None:
@@ -139,6 +200,18 @@ class RecipeModel:
         self.edges = list(snap["edges"])
         self.expr = snap["expr"]
         self.threshold = snap["threshold"]
+        self.decide = _decide_restore(snap.get("decide"))
+        rb = snap.get("route_by")
+        self.route_by = None if rb is None else RouteBy(
+            column=str(rb[0]), map=dict(rb[1]), default=str(rb[2]))
+        self._other_routes = {k: list(v)
+                              for k, v in (snap.get("other_routes") or {}).items()}
+        self._other_nodes = {
+            nid: RecipeNode(id=nid, step=step, params=dict(params),
+                            enabled=enabled)
+            for nid, (step, params, enabled)
+            in (snap.get("other_nodes") or {}).items()}
+        self._other_edges = list(snap.get("other_edges") or [])
         self.bins = dict(snap["bins"])
 
     @contextmanager
@@ -354,6 +427,236 @@ class RecipeModel:
                 continue
 
     # ---- score ------------------------------------------------------------
+    # ---- 多類別判定（F22-UI）---------------------------------------------
+    #
+    # 為什麼 setter 這麼細（一條規則一支）而不是「整包換掉」：undo 是**逐步**
+    # 的（`_push_undo` 每次改動存一份），整包換掉的話「改了第 3 條的門檻」跟
+    # 「重排了規則」在 undo 堆上長得一模一樣。
+    def use_decide(self, on: bool) -> None:
+        """切成多類別／切回二元門檻。**兩者不能並存**（`ambiguous-decision`）。
+
+        切成多類別時把現有的 `expr` + `threshold` **翻成兩條規則**，而不是丟掉
+        —— 使用者調了半天的那個門檻是他的工作成果。切回去時反過來不還原：
+        多類別的規則翻不回一個門檻（那是有損的），所以那一邊只留一句話。
+        """
+        if on == (self.decide is not None):
+            return
+        self._push_undo()
+        if on:
+            expr = str(self.expr or "").strip()
+            rules = []
+            if expr:
+                rules.append(Rule(when="%s >= %g" % (expr, float(self.threshold)),
+                                  bin=int(self.bins.get("above", 1)), label=""))
+            self.decide = DecideSpec(
+                let=[], rules=rules,
+                otherwise_bin=int(self.bins.get("below", 0)), otherwise_label="",
+                score=expr)
+            self.expr = ""          # 並存是 error，所以這一格要清掉
+        else:
+            self.decide = None
+            if not str(self.expr or "").strip():
+                self.expr = "0"
+        self._changed()
+
+    def _edit_decide(self, **kw) -> None:
+        if self.decide is None:
+            return
+        self._push_undo()
+        self.decide = replace(self.decide, **kw)
+        self._changed()
+
+    def set_let(self, i: int, name: Optional[str] = None,
+                expr: Optional[str] = None,
+                scale: Optional[str] = None,
+                fill: Optional[str] = None) -> None:
+        if self.decide is None or not (0 <= i < len(self.decide.let)):
+            return
+        cur = self.decide.let[i]
+        new = Let(name=cur.name if name is None else str(name),
+                  expr=cur.expr if expr is None else str(expr),
+                  scale=(str(getattr(cur, "scale", "") or "")
+                         if scale is None else str(scale)),
+                  fill=(str(getattr(cur, "fill", "") or "")
+                        if fill is None else str(fill)))
+        if new == cur:
+            return
+        rows = list(self.decide.let); rows[i] = new
+        self._edit_decide(let=rows)
+
+    def add_let(self) -> None:
+        if self.decide is None:
+            return
+        self._edit_decide(let=list(self.decide.let) + [Let(name="", expr="")])
+
+    def remove_let(self, i: int) -> None:
+        if self.decide is None or not (0 <= i < len(self.decide.let)):
+            return
+        rows = list(self.decide.let); rows.pop(i)
+        self._edit_decide(let=rows)
+
+    def set_rule(self, i: int, when: Optional[str] = None,
+                 bin: Optional[int] = None, label: Optional[str] = None) -> None:
+        if self.decide is None or not (0 <= i < len(self.decide.rules)):
+            return
+        cur = self.decide.rules[i]
+        new = Rule(when=cur.when if when is None else str(when),
+                   bin=cur.bin if bin is None else int(bin),
+                   label=cur.label if label is None else str(label))
+        if new == cur:
+            return
+        rows = list(self.decide.rules); rows[i] = new
+        self._edit_decide(rules=rows)
+
+    def add_rule(self) -> None:
+        if self.decide is None:
+            return
+        used = {r.bin for r in self.decide.rules} | {self.decide.otherwise_bin}
+        nxt = next(b for b in range(1, 1000) if b not in used)
+        self._edit_decide(rules=list(self.decide.rules) + [Rule("", nxt, "")])
+
+    def remove_rule(self, i: int) -> None:
+        if self.decide is None or not (0 <= i < len(self.decide.rules)):
+            return
+        rows = list(self.decide.rules); rows.pop(i)
+        self._edit_decide(rules=rows)
+
+    def move_rule(self, i: int, delta: int) -> None:
+        """**換順序就是換優先權** —— 所以它是一個第一級的動作，不是排版。"""
+        if self.decide is None:
+            return
+        rows = list(self.decide.rules)
+        j = i + int(delta)
+        if not (0 <= i < len(rows)) or not (0 <= j < len(rows)) or delta == 0:
+            return
+        rows[i], rows[j] = rows[j], rows[i]
+        self._edit_decide(rules=rows)
+
+    def set_otherwise(self, bin: Optional[int] = None,
+                      label: Optional[str] = None) -> None:
+        if self.decide is None:
+            return
+        kw = {}
+        if bin is not None and int(bin) != self.decide.otherwise_bin:
+            kw["otherwise_bin"] = int(bin)
+        if label is not None and str(label) != self.decide.otherwise_label:
+            kw["otherwise_label"] = str(label)
+        if kw:
+            self._edit_decide(**kw)
+
+    def set_decide_score(self, expr: str) -> None:
+        if self.decide is not None and str(expr) != self.decide.score:
+            self._edit_decide(score=str(expr))
+
+    # ---- 判定樹（F24 ③）---------------------------------------------------
+    #
+    # 樹上的一步用**路徑**指（``""`` = 根、``"y"`` / ``"n"`` 一路往下）——
+    # 節點是 frozen dataclass，同一片葉子可以出現兩次，路徑才是唯一的身分。
+    # 每一支 setter 都是「整棵換掉」（`_tree_replace` 沿路重建）：樹很小
+    # （lint 在 16 層就警告），而 immutable 的節點沒有第二種寫法。
+    def ensure_tree(self) -> None:
+        """`rules` 模式 → 等價鏈狀樹（無損，F24 ① 的測試釘住了）。
+
+        畫布上點一個菱形開始編輯的那一刻呼叫 —— 編輯動作只有樹的形狀，
+        rules 清單表達不了「yes 接另一步」。轉了之後 serde 只寫 `tree`
+        （`Recipe.to_json_dict`），舊寫法從此離開這份 recipe —— 那是使用者
+        動手改樹的那一刻，不是打開檔案的那一刻（鐵則 9：讀檔不改檔）。
+        """
+        if self.decide is None or self.decide.tree is not None:
+            return
+        self._edit_decide(tree=rules_to_tree(self.decide), rules=[])
+
+    def tree_node(self, path: str) -> Any:
+        """路徑指到的節點（不存在回 ``None``）。"""
+        if self.decide is None or self.decide.tree is None:
+            return None
+        node = self.decide.tree
+        for ch in str(path):
+            if isinstance(node, TreeLeaf):
+                return None
+            node = node.yes if ch == "y" else node.no
+        return node
+
+    @staticmethod
+    def _tree_replace(node: Any, path: str, new: Any) -> Any:
+        if not path:
+            return new
+        if path[0] == "y":
+            return replace(node, yes=RecipeModel._tree_replace(
+                node.yes, path[1:], new))
+        return replace(node, no=RecipeModel._tree_replace(
+            node.no, path[1:], new))
+
+    def _edit_tree(self, path: str, new: Any) -> None:
+        if self.decide is None or self.decide.tree is None:
+            return
+        self._edit_decide(tree=self._tree_replace(self.decide.tree,
+                                                  str(path), new))
+
+    def _fresh_bin(self) -> int:
+        """一個還沒被任何葉子用掉的 bin（跟 `add_rule` 同一個規則）。"""
+        used = {int(self.decide.otherwise_bin)} if self.decide else set()
+
+        def walk(node: Any) -> None:
+            if isinstance(node, TreeLeaf):
+                used.add(int(node.bin))
+                return
+            walk(node.yes)
+            walk(node.no)
+
+        if self.decide is not None and self.decide.tree is not None:
+            walk(self.decide.tree)
+        if self.decide is not None:
+            used |= {int(r.bin) for r in self.decide.rules}
+        return next(b for b in range(1, 1000) if b not in used)
+
+    def set_tree_when(self, path: str, when: str) -> None:
+        node = self.tree_node(path)
+        if not isinstance(node, TreeStep) or str(when) == node.when:
+            return
+        self._edit_tree(path, replace(node, when=str(when)))
+
+    def set_tree_leaf(self, path: str, bin: Optional[int] = None,
+                      label: Optional[str] = None) -> None:
+        node = self.tree_node(path)
+        if not isinstance(node, TreeLeaf):
+            return
+        new = TreeLeaf(bin=node.bin if bin is None else int(bin),
+                       label=node.label if label is None else str(label))
+        if new != node:
+            self._edit_tree(path, new)
+
+    def split_tree_leaf(self, path: str) -> None:
+        """把一片葉子換成一個新菱形（mockup：「加一步」）。
+
+        原本那一類**留著**（掛在新步驟的 no 邊）—— 跟「在 otherwise 前面
+        加一條規則」同一個形狀：新問題答 yes 的走新的類，其他照舊。
+        """
+        node = self.tree_node(path)
+        if not isinstance(node, TreeLeaf):
+            return
+        self._edit_tree(path, TreeStep(
+            when="", yes=TreeLeaf(bin=self._fresh_bin(), label=""), no=node))
+
+    def insert_tree_step_above(self, path: str) -> None:
+        """在這一步**前面**插一個新問題（原本的子樹整個掛在 no 邊）。"""
+        node = self.tree_node(path)
+        if node is None:
+            return
+        self._edit_tree(path, TreeStep(
+            when="", yes=TreeLeaf(bin=self._fresh_bin(), label=""), no=node))
+
+    def remove_tree_step(self, path: str) -> None:
+        """拿掉一步：它的 **no 邊接回上游**（F24 §6 定的規則）。
+
+        yes 那一邊跟著消失 —— 呼叫端（面板）在 yes 是一整個子樹時要先問過
+        使用者；model 不擋，因為「問」是 UI 的事，而 undo 一步就回得來。
+        """
+        node = self.tree_node(path)
+        if not isinstance(node, TreeStep):
+            return
+        self._edit_tree(path, node.no)
+
     def set_expr(self, expr: str) -> None:
         if expr != self.expr:
             self._push_undo("expr")
@@ -394,6 +697,74 @@ class RecipeModel:
             if nid == upto_node:
                 break
         return feats
+
+    #: 「數字 → 誰算的」清單裡，名字與來源之間的分隔（F21-B）。
+    #: 一個字串裝兩件事是刻意的：``ParamForm`` 的執行期選單是
+    #: ``Dict[str, List[str]]``，為了一個標籤去改那個型別，會動到每一個
+    #: 用 ``choices_from`` 的地方。**拆開的規矩只有一份**（`split_labelled`）。
+    FEATURE_LABEL_SEP = "\t"
+
+    def labelled_features(self, upto_node: Optional[str] = None,
+                          include_upto: bool = True) -> List[str]:
+        """`available_features` 的每一項後面接上**誰算的**（F21-B）。
+
+        格式是 ``"cd_median\tCD"`` —— 前半是要插進算式的字，後半只是給人看的。
+        兩件事同一份來源（同一個迴圈），所以它們不會漂。
+
+        ``include_upto=False`` 時**連 `upto_node` 自己的輸出都不列** ——
+        給「這張卡的算式可以用哪些數字」用的（一張卡不能吃自己還沒寫的東西）。
+
+        為什麼要有「誰算的」：一份 recipe 可以有兩張 `Gray level`（量兩個區域），
+        那時候光看 `glv_mad` 這個名字選不出要哪一個。名字自帶前綴的只有**撞名
+        被蓋掉**的那一份（F17-②）—— 沒撞名的時候仍然只有一個短名。
+        """
+        out: List[str] = []
+        known = self.nm_per_px_is_known()
+        for nid in self.node_order:
+            node = self.nodes[nid]
+            if not node.enabled:
+                continue
+            if nid == upto_node and not include_upto:
+                # **這張卡自己的輸出不能列進來**（F21-B，實跑截圖抓到）：
+                # `Feature math` 的清單裡出現 `defect_score`，而那正是它自己
+                # 要寫出去的名字 —— 點下去就是 `defect_score = defect_score`。
+                # 引擎擋得住（`unknown-feature-input`），但**讓使用者點一個
+                # 保證壞掉的選項，本身就是 bug**（推廣鐵則）。
+                break
+            step_cls = get_step(node.step)
+            label = str(getattr(step_cls, "label", "") or node.step)
+            for f in step_cls.resolve_features(node.params):
+                if not known and (f.endswith("_nm") or f.endswith("_nm2")):
+                    continue
+                if not any(x.split(self.FEATURE_LABEL_SEP, 1)[0] == f
+                           for x in out):
+                    out.append(f + self.FEATURE_LABEL_SEP + label)
+            if nid == upto_node:
+                break
+        return out
+
+    def feature_owners(self) -> Dict[str, str]:
+        """特徵名 → 產出它的**節點 id**（幽靈線用，F24 ④）。
+
+        宣告層的答案（`resolve_features`，第一個宣告的人贏）—— 跟
+        `labelled_features` 同一個迴圈同一個規則，只是那份給人看（label）、
+        這份給畫布找卡片（node id）。判定段 `let` 的中間值屬於入口卡，
+        值是**空字串**（畫布上那張卡沒有 node id）。
+        """
+        out: Dict[str, str] = {}
+        for nid in self.node_order:
+            node = self.nodes[nid]
+            if not node.enabled:
+                continue
+            step_cls = get_step(node.step)
+            for f in step_cls.resolve_features(node.params):
+                out.setdefault(str(f), nid)
+        if self.decide is not None:
+            for x in self.decide.let:
+                name = str(x.name).strip()
+                if name:
+                    out.setdefault(name, "")
+        return out
 
     def nm_per_px_is_known(self) -> bool:
         """有沒有任何一張卡填了 nm/px（`_util.nm_per_px_spec`）。"""
@@ -688,15 +1059,26 @@ class RecipeModel:
 
     # ---- Recipe 互轉 -------------------------------------------------------
     def to_recipe(self) -> Recipe:
+        # 其他 route 原樣寫回去（F23 期2）。**正在編的這一條贏**：兩條 route
+        # 共用的節點（load）以編輯中的版本為準 —— 使用者改的就是它。
+        routes = {k: list(v) for k, v in self._other_routes.items()}
+        routes[self.kind] = list(self.node_order)
+        nodes = {nid: RecipeNode(id=nid, step=n.step, params=dict(n.params),
+                                 enabled=n.enabled)
+                 for nid, n in self._other_nodes.items()}
+        nodes.update({nid: RecipeNode(id=nid, step=n.step,
+                                      params=dict(n.params), enabled=n.enabled)
+                      for nid, n in self.nodes.items()})
         return Recipe(
             recipe_id=self.recipe_id,
-            routes={self.kind: list(self.node_order)},
-            edges=list(self.edges),
-            nodes={nid: RecipeNode(id=nid, step=n.step, params=dict(n.params),
-                                   enabled=n.enabled)
-                   for nid, n in self.nodes.items()},
+            routes=routes,
+            edges=list(self.edges) + [e for e in self._other_edges
+                                      if e not in self.edges],
+            nodes=nodes,
             score=ScoreSpec(expr=self.expr, threshold=self.threshold,
                             bins=dict(self.bins)),
+            decide=self.decide,
+            route_by=self.route_by,
             version=self.version, author=self.author, description=self.description,
         )
 
@@ -719,10 +1101,48 @@ class RecipeModel:
                    for nid, n in recipe.nodes.items() if nid in set(m.node_order)}
         m.expr = recipe.score.expr
         m.threshold = float(recipe.score.threshold)
+        m.decide = getattr(recipe, "decide", None)
+        # 分流與**沒在編的那幾條 route**（F23 期2）：原樣抱著，`to_recipe`
+        # 合併回去。共用的節點在 `m.nodes`（上面那行收了），這裡只留其他
+        # route 專屬的。
+        m.route_by = getattr(recipe, "route_by", None)
+        m._other_routes = {rk: list(v) for rk, v in recipe.routes.items()
+                           if rk != k}
+        m._other_nodes = {nid: RecipeNode(id=nid, step=n.step,
+                                          params=dict(n.params),
+                                          enabled=n.enabled)
+                          for nid, n in recipe.nodes.items()
+                          if nid not in in_route}
+        m._other_edges = [e for e in (recipe.edges or [])
+                          if not (e.src in in_route and e.dst in in_route)]
         m.bins = dict(recipe.score.bins)
         m.dirty = False
         m.clear_history()
         return m
+
+    # ---- 分流（F23 期2）----------------------------------------------------
+    def route_keys(self) -> List[str]:
+        """這份 recipe 所有的 route 鍵（正在編的排最前面）。"""
+        return [self.kind] + sorted(self._other_routes)
+
+    def set_route_by(self, column: str, mapping: Dict[str, str],
+                     default: str = "") -> None:
+        """整包換掉 ``route_by``（編輯器一格一格改，最後長的就是這一包）。"""
+        new = RouteBy(column=str(column).strip().upper(),
+                      map={str(k).strip(): str(v) for k, v in mapping.items()},
+                      default=str(default))
+        if new == self.route_by:
+            return
+        self._push_undo()
+        self.route_by = new
+        self._changed()
+
+    def clear_route_by(self) -> None:
+        if self.route_by is None:
+            return
+        self._push_undo()
+        self.route_by = None
+        self._changed()
 
     def validate(self):
         return validate(self.to_recipe(), kind=self.kind)

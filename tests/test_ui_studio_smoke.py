@@ -137,9 +137,10 @@ def test_load_dataset_and_recipe(window, synlot):
     # 標題帶 recipe id，狀態列有講人話
     assert "die_to_die_basic" in window.windowTitle()
     assert window.status_text()
-    # Score/Bin 尾卡摘要跟著 model 走
+    # 判定段的摘要跟著 model 走。F25 起**開起來的 recipe 一律是判定樹**
+    # （舊的門檻自動變成第一個問題），所以這裡問的是那棵樹，不是門檻。
     summary = window.pipeline.score_summary_text()
-    assert recipe.score.expr in summary and "50" in summary
+    assert "decision tree" in summary and "question" in summary
     # 節點摘要 = 非預設參數的 k=v（最多 3 個）—— F7-6 起節點是自繪圖元
     assert "window=15" in window.pipeline.card("snr").info["summary"]
 
@@ -299,7 +300,11 @@ def test_threshold_live_preview_vs_commit(window, synlot):
     window._on_threshold_committed(42.5)
     assert window.model.threshold == pytest.approx(42.5)
     assert window.model.to_recipe().score.threshold == pytest.approx(42.5)
-    assert window.threshold_spin.value() == pytest.approx(42.5)
+    # F25：門檻**沒有編輯格了**（使用者：「二元門檻的 UI 完全拿掉」）。
+    # 這一條守的是底下那條規矩本身 —— 拖曳只預覽、放開才寫回 model ——
+    # 而那條規矩對任何一個「拖了才算數」的控制項都要成立。
+    from PySide6.QtWidgets import QDoubleSpinBox
+    assert window.decide_panel.findChild(QDoubleSpinBox) is None
 
     # 拖曳中（changed）只重算 bin 摘要，絕對不能動 model
     before = window.model.threshold

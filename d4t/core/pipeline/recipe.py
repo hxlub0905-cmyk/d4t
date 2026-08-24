@@ -43,6 +43,7 @@ from .step import (
 
 __all__ = [
     "RecipeError", "RecipeNode", "ScoreSpec", "Edge", "Recipe",
+    "RouteBy", "resolve_route", "route_miss_message",
     "Issue", "execution_order", "validate",
 ]
 
@@ -105,10 +106,281 @@ class RecipeNode:
 
 @dataclass
 class ScoreSpec:
-    """ADC 判定段：score 表達式 + 門檻 + bin 對應（{"below": 0, "above": 1}）。"""
+    """ADC 判定段：score 表達式 + 門檻 + bin 對應（{"below": 0, "above": 1}）。
+
+    **只分得出兩類。** 多類別走 :class:`DecideSpec`（F21-D）。
+    """
     expr: str
     threshold: float
     bins: Dict[str, int]
+
+
+@dataclass(frozen=True)
+class Rule:
+    """判定的一條規則：``when`` 成立就是 ``bin``（``label`` 只是給人看的字）。"""
+    when: str
+    bin: int
+    label: str = ""
+
+
+#: `Let.scale` 認得的值：""＝照算（逐顆）、"z"＝跟整批比（robust z：
+#: (值 − 整批中位數) / (1.4826 × MAD)，跟 `algo/enhance.py` 同一個係數）、
+#: "percentile"＝在整批裡排第幾百分位（0–100，midrank）。
+LET_SCALES = ("", "z", "percentile")
+
+
+@dataclass(frozen=True)
+class Let:
+    """判定段的一個中間值：``name = expr``，算完寫進 ``ctx.features``。
+
+    ``scale``（F23 期3，「跟整批比」）：非空時這一行是**兩趟**算的 ——
+    第一趟逐顆算出原始值，整批收齊後把它換算成整批尺度（robust z 或
+    百分位），原始值改名 ``<name>_raw`` 留著，然後**用換算後的值重算判定**
+    （`batch.apply_lot_scaling`）。為什麼要兩趟：跨顆算出來的數字（「這一顆
+    比整批亮多少」）在單顆的 `run_defect` 裡根本不存在 —— 那正是舊
+    `lot_stats` 卡一直卡住的地方（F23 §8）。
+
+    取整批統計時**排除 `feature_fill` 補過值的顆**（`<變數>_missing == 1`
+    的列不進中位數 —— A1 當時就記下的規矩）；那幾顆自己仍然拿到換算值
+    （用大家的統計換算它，數字看得出它是補的）。
+
+    ``fill``（F24 ⑤，「missing ⇒ 用 __」）：非空時，這一行用到的數字**缺了**
+    （上游量不出來、那一格沒寫 —— F19：算不出來的不寫）就不讓整顆失敗，
+    值改用這個數字，並寫 ``<name>_missing = 1``（有 fill 時每顆都寫這個旗標,
+    0 或 1 —— CSV 那一欄才是完整的）。判定樹的第一步問
+    ``<name>_missing > 0`` 就是它的形狀。留空＝照舊：缺了就是這一顆失敗，
+    訊息講出缺哪個數字。這正是 `feature_fill` 卡的那件事搬進 working number
+    一行 —— 補值跟著「誰要用它」住，不再是一張要另外接的卡。
+    """
+    name: str
+    expr: str
+    scale: str = ""
+    fill: str = ""
+
+
+@dataclass(frozen=True)
+class TreeLeaf:
+    """判定樹的葉子：走到這裡就是這一類。"""
+    bin: int
+    label: str = ""
+
+
+@dataclass(frozen=True)
+class TreeStep:
+    """判定樹的一步：問一個問題，yes 一邊、no 一邊（各自是步驟或葉子）。
+
+    為什麼是二叉不是多叉（F24）：一步一問是**流程圖語言**，製程工程師本來就
+    會讀；多叉要在一顆節點上排好幾個互斥條件，而「互斥」在畫面上驗不了 ——
+    那正是 F22 挑「第一個成立的贏」而不是「每條算分取最高」的同一個理由。
+    多路分岔用巢狀的步驟表達，畫出來就是一條 yes 鏈。
+    """
+    when: str
+    yes: Any            # TreeStep | TreeLeaf
+    no: Any             # TreeStep | TreeLeaf
+
+
+def rules_to_tree(spec: "DecideSpec") -> Any:
+    """把平面規則清單翻成**等價的鏈狀樹**（F24 §3）。
+
+    「由上往下第一個成立的贏」就是一條每步 yes → 葉子、no → 下一步的鏈，
+    所以這個轉換**無損**：同一組特徵值走 rules 與走轉出來的樹，bin 與 label
+    逐項相同（`tests/test_decide_tree.py` 用值網格驗）。空清單＝直接是
+    otherwise 那片葉子。
+    """
+    node: Any = TreeLeaf(bin=int(spec.otherwise_bin),
+                         label=str(spec.otherwise_label))
+    for rule in reversed(list(spec.rules)):
+        node = TreeStep(when=rule.when,
+                        yes=TreeLeaf(bin=int(rule.bin), label=rule.label),
+                        no=node)
+    return node
+
+
+def _tree_to_json(node: Any) -> Dict[str, Any]:
+    if isinstance(node, TreeLeaf):
+        return {"bin": int(node.bin), "label": node.label}
+    return {"when": node.when,
+            "yes": _tree_to_json(node.yes),
+            "no": _tree_to_json(node.no)}
+
+
+def _tree_from_json(raw: Any, where: str = "decide.tree") -> Any:
+    """讀一個樹節點。格式錯**當場講**（同 `_decide_from_json` 的理由）。
+
+    判準：有 ``when`` 是步驟（要有 ``yes`` 與 ``no``）、有 ``bin`` 是葉子 ——
+    兩個都有或都沒有就是寫壞了，不猜。
+    """
+    if not isinstance(raw, dict):
+        raise RecipeError("%s must be an object (dict), got %s"
+                          % (where, type(raw).__name__))
+    has_when, has_bin = "when" in raw, "bin" in raw
+    if has_when and has_bin:
+        raise RecipeError("%s has both 'when' and 'bin' - a node is either a "
+                          "step (when/yes/no) or a leaf (bin/label), not both"
+                          % where)
+    if has_bin:
+        return TreeLeaf(bin=int(raw["bin"]),
+                        label=str(raw.get("label", "") or ""))
+    if has_when:
+        if "yes" not in raw or "no" not in raw:
+            raise RecipeError("%s is a step ('when') but is missing its "
+                              "'yes' or 'no' side" % where)
+        return TreeStep(when=str(raw["when"]),
+                        yes=_tree_from_json(raw["yes"], where + ".yes"),
+                        no=_tree_from_json(raw["no"], where + ".no"))
+    raise RecipeError("%s must have either 'when' (a step) or 'bin' (a leaf)"
+                      % where)
+
+
+def _tree_depth(node: Any) -> int:
+    if isinstance(node, TreeLeaf):
+        return 0
+    return 1 + max(_tree_depth(node.yes), _tree_depth(node.no))
+
+
+def _tree_whens(node: Any) -> List[str]:
+    if isinstance(node, TreeLeaf):
+        return []
+    return [node.when] + _tree_whens(node.yes) + _tree_whens(node.no)
+
+
+@dataclass
+class DecideSpec:
+    """ADC 判定段（多類別，F21-D）—— **一張由上往下讀的篩子**。
+
+    為什麼是「第一個成立的贏」而不是「每條算分取最高」
+    --------------------------------------------------
+    使用者是不會寫 code 的製程工程師（推廣鐵則）。「由上往下，第一個對上的
+    就是答案」是一句他讀得懂、而且**改順序就等於改優先權**的規則；算分取最高
+    要他同時想像好幾條分數線的相對高度，而那件事在畫面上畫不出來。
+
+    ``let``：中間值，而且它們是**真的特徵**
+    ---------------------------------------
+    每一行 ``{"name": …, "expr": …}`` 算完就寫進 ``ctx.features`` —— 所以它們
+    會進 CSV、進報表，使用者畫得出它們的分布。這正是 `feature_math` 存在的唯一
+    真理由（「一份 recipe 只有一條表達式，中間值沒有地方放」），而在這裡它不必
+    是一張卡：**判定段吃的是「這一次跑出來的全部」，沒有「哪一個」可以選**
+    —— 那是 F17 對 Output 卡講過的話，對這一段一字不差地成立。
+
+    ⚠ 使用者 2026-08-23 提出「ADC 也可以有線」，而那句話**不在這一版否決**：
+    多類別之後每條規則吃的是**特定幾個**數字，不是全部，那時候線是有意義的。
+    這一版只做引擎，畫布留在後面（見 `docs/plans/F22-adc-multiclass.md`）。
+
+    跟 :class:`ScoreSpec` 的關係：**二選一，不能並存**
+    -------------------------------------------------
+    並存的話同一件事會有兩個地方存，而這個 repo 最怕的就是那個形狀
+    （抄第二份出來的那份一定會漂）。所以 ``validate`` 把「兩個都寫」判成
+    ``ambiguous-decision`` 的 error，而不是挑一個贏。
+
+    這一版**沒有自動遷移**：舊 recipe 照舊走 ``score``，一個位元都不動。
+    理由不是保守，是**黃金值現在是壞的**（見 `docs/plans/F21-algo-and-roi.md`
+    §6）—— 沒有那條防線的時候，「改了判定段但數字沒變」這句話沒有人證得了。
+    """
+    #: 中間值（一行一個），算完寫進 features。
+    let: List[Let] = field(default_factory=list)
+    rules: List[Rule] = field(default_factory=list)
+    #: 一條都沒對上的時候。
+    otherwise_bin: int = 0
+    otherwise_label: str = ""
+    #: 這一顆的分數（KLARF 的 DSIZE／Top-N 排序要一個數字）。空字串 = 0.0。
+    score: str = ""
+    #: 判定樹（F24）。有它就走樹、忽略 ``rules``/``otherwise`` —— 但**兩個都
+    #: 寫**是 `ambiguous-decision` 的 error（同 `score` vs `decide`：同一件事
+    #: 兩個地方存，挑一個贏的話另一份會安靜地漂）。``rules`` 是它的特例
+    #: （鏈狀樹，見 :func:`rules_to_tree`），所以舊寫法照讀不誤。
+    tree: Any = None
+
+
+@dataclass(frozen=True)
+class RouteBy:
+    """分流（F23）：**跑之前**逐顆看 KLARF 的一欄，決定這一顆走哪條 route。
+
+    為什麼它是 recipe 頂層的一個區塊、不是一張卡也不是 decide 的規則
+    ------------------------------------------------------------------
+    它在**跑之前**就要決定 —— 卡片是在 route 裡面跑的（雞生蛋），而 decide 的
+    變數是特徵、特徵要跑完才有。分流要的是 Class 2 的顆**根本不跑** A 組卡：
+    省的是實打實的計算，擋的是「對 Class 2 跑 A 組 CD 卡量出一個看起來正常、
+    但問錯問題的數字」。
+
+    語意（F23 §4，使用者 2026-08-24 定調）：
+
+    * ``column`` 是 KLARF 的欄名（一律大寫存放）；值**先 strip 再比字串**
+      （KLARF 的值都是字串，``"1"`` 與 ``" 1"`` 要落在同一格）。
+    * 對不上 ``map`` 的走 ``default``；``default`` 留空＝那一顆**失敗**
+      （``ok=False``，訊息講出值 X 不在對照表裡）。兩種都要支援 ——
+      「沒見過的 class 該怎麼辦」是站點政策，不是軟體能替使用者決定的。
+    * ``route_by`` 存在時**覆蓋 kind 選路**（§4.2）：route 鍵因此可以是任意
+      字串（``particle_route``），不必是 dataset kind。
+    * **鐵則 9 條款**：這個區塊不在 → 一個位元都不動（同 ``decide`` 的嚴格
+      附加模式）。round-trip 是 identity。
+    """
+    column: str
+    map: Dict[str, str] = field(default_factory=dict)
+    default: str = ""
+
+
+def _route_by_from_json(raw: Any) -> Optional["RouteBy"]:
+    """讀 ``route_by`` 區塊。**沒有就回 None** —— 那份 recipe 照舊用 kind 選路。
+
+    格式錯**當場講**而不是安靜地退回老路（同 `_decide_from_json` 的理由）：
+    安靜退回的話，一份打錯字的分流 recipe 會整批走同一條路 —— 跑得完、有數字、
+    而且 CSV 上沒有任何線索說它沒分流。
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise RecipeError("the 'route_by' block must be an object (dict), got "
+                          "%s" % type(raw).__name__)
+    missing = [k for k in ("column", "map") if k not in raw]
+    if missing:
+        raise RecipeError("route_by is missing %s - it needs 'column' (the "
+                          "KLARF column to look at) and 'map' (value -> route "
+                          "name)" % missing)
+    m = raw["map"]
+    if not isinstance(m, dict):
+        raise RecipeError("route_by.map must be an object mapping column "
+                          "values to route names, got %s" % type(m).__name__)
+    return RouteBy(
+        column=str(raw["column"]).strip().upper(),
+        map={str(k).strip(): str(v) for k, v in m.items()},
+        default=str(raw.get("default", "") or ""),
+    )
+
+
+def resolve_route(recipe: "Recipe", item: Any, kind: str
+                  ) -> Tuple[Optional[str], str, str]:
+    """這一顆走哪條 route：``(route 鍵, 欄位值, 決定的來源)``。
+
+    來源三種：``"kind"``（沒有 ``route_by``，維持舊語意 —— route 鍵就是
+    dataset kind）、``"map"``（值對上了對照表）、``"default"``（沒對上、走
+    預設路）。對不上而且 ``default`` 留空時 route 鍵是 **None** ——
+    呼叫端把那一顆判失敗（訊息用 :func:`route_miss_message`）。
+
+    欄位值從 ``item.fields`` 讀（`ingest.dataset.fill_fields` 填的那一份，
+    大寫欄名）—— **這一支不碰 KLARF**，跟卡片同一條規矩（鐵則：讀檔在 ingest
+    層）。欄位沒被填進來時值是空字串，走「對不上」那條路。
+    """
+    rb = getattr(recipe, "route_by", None)
+    if rb is None:
+        return kind, "", "kind"
+    fields = getattr(item, "fields", None) or {}
+    raw = fields.get(str(rb.column).strip().upper())
+    value = str(raw).strip() if raw is not None else ""
+    if value in rb.map:
+        return str(rb.map[value]), value, "map"
+    default = str(rb.default or "").strip()
+    if default:
+        return default, value, "default"
+    return None, value, "miss"
+
+
+def route_miss_message(route_by: "RouteBy", value: str) -> str:
+    """「這一顆對不上對照表」的白話訊息（每一顆失敗都帶著它）。"""
+    mapped = ", ".join("'%s'" % k for k in sorted(route_by.map)) or "(none)"
+    return ("route_by: the %s value '%s' is not in the route map (mapped "
+            "values: %s) and no default route is set. Add this value to the "
+            "map, or set a default route for everything else."
+            % (route_by.column, value, mapped))
 
 
 @dataclass(frozen=True)
@@ -157,6 +429,284 @@ class Edge:
         raise RecipeError(
             "an edge must be [from, to] or [from, from_port, to, to_param] — "
             "got %d item(s): %r" % (len(e), e))
+
+
+# ---------------------------------------------------------------------------
+# 多類別判定（F21-D）
+# ---------------------------------------------------------------------------
+def _decide_issues(recipe: "Recipe", decide: "DecideSpec") -> List["Issue"]:
+    """`decide` 的健檢（F21-D）。
+
+    最重要的一條是 ``ambiguous-decision``：``score`` 與 ``decide`` **不能並存**。
+    這個 repo 最怕的形狀就是「同一件事有兩個地方存」—— 挑一個贏的話，另一份會
+    安靜地漂，而使用者改了沒用的那一份時畫面上看不出來。
+    """
+    out: List[Issue] = []
+    if str(recipe.score.expr or "").strip():
+        out.append(Issue(
+            code="ambiguous-decision", level="error", node_id=None,
+            title="This recipe decides the bin in two different ways",
+            detail="it has both a 'score' expression and a 'decide' block. "
+                   "Keep one of them: 'decide' is the one with several "
+                   "classes; 'score' is the two-bin threshold. Clear "
+                   "score.expr to use 'decide'."))
+    # ---- 判定樹（F24）----
+    if decide.tree is not None and decide.rules:
+        out.append(Issue(
+            code="ambiguous-decision", level="error", node_id=None,
+            title="This decide block sorts in two different ways",
+            detail="it has both a flat 'rules' list and a 'tree'. Keep one: "
+                   "the rules list is just a chain-shaped tree, so move the "
+                   "rules into the tree (or drop the tree)."))
+    if decide.tree is not None:
+        depth = _tree_depth(decide.tree)
+        if depth > 16:
+            out.append(Issue(
+                code="deep-tree", level="warning", node_id=None,
+                title="The decision tree is very deep",
+                detail="%d questions deep. A defect only ever takes one path, "
+                       "but nobody can read a tree this tall - consider "
+                       "combining conditions ((a > 5) * (b < 2) means both)."
+                       % depth))
+        for i, when in enumerate(_tree_whens(decide.tree)):
+            try:
+                parse_expression(when)
+            except ExpressionError as e:
+                out.append(Issue(
+                    code="bad-rule", level="error", node_id=None,
+                    title="A tree step's question does not parse",
+                    detail=str(e)))
+    if not decide.rules and decide.tree is None:
+        out.append(Issue(
+            code="no-rules", level="warning", node_id=None,
+            title="The decide block has no rules",
+            detail="every defect will land in the 'otherwise' bin (%d). "
+                   "Add a rule, or use a score expression instead."
+                   % int(decide.otherwise_bin)))
+    seen: Set[str] = set()
+    for i, item in enumerate(decide.let):
+        name = str(item.name).strip()
+        if not name:
+            out.append(Issue(
+                code="bad-let", level="error", node_id=None,
+                title="A 'let' line has no name",
+                detail="decide.let[%d] must have a name - that name is what "
+                       "the rules below refer to." % i))
+        elif name in seen:
+            out.append(Issue(
+                code="bad-let", level="error", node_id=None,
+                title="Two 'let' lines have the same name",
+                detail="decide.let[%d] is called '%s' again - the second one "
+                       "would quietly replace the first." % (i, name)))
+        seen.add(name)
+        try:
+            parse_expression(item.expr)
+        except ExpressionError as e:
+            out.append(Issue(
+                code="bad-let", level="error", node_id=None,
+                title="A 'let' line does not parse", detail=str(e)))
+        fill = str(getattr(item, "fill", "") or "")
+        if fill:
+            try:
+                float(fill)
+            except ValueError:
+                out.append(Issue(
+                    code="bad-let", level="error", node_id=None,
+                    title="A 'let' line's missing-value fallback is not "
+                          "a number",
+                    detail="decide.let[%d] says 'if missing use %s' - that "
+                           "has to be a plain number (it stands in for the "
+                           "value when the measurement is not there)."
+                           % (i, fill)))
+        scale = str(getattr(item, "scale", "") or "")
+        if scale not in LET_SCALES:
+            # 打錯的 scale 不能安靜地當成「照算」：那一行看起來在跟整批比,
+            # 實際上每一顆還是自己的原始值 —— 跑得完、有數字、而且是錯的。
+            out.append(Issue(
+                code="bad-let", level="error", node_id=None,
+                title="A 'let' line has an unknown batch scaling",
+                detail="decide.let[%d] says scale='%s'; the choices are '' "
+                       "(as measured), 'z' (robust z against the batch) and "
+                       "'percentile' (rank within the batch)." % (i, scale)))
+    for i, rule in enumerate(decide.rules):
+        try:
+            parse_expression(rule.when)
+        except ExpressionError as e:
+            out.append(Issue(
+                code="bad-rule", level="error", node_id=None,
+                title="Rule %d does not parse" % (i + 1), detail=str(e)))
+    if str(decide.score or "").strip():
+        try:
+            parse_expression(decide.score)
+        except ExpressionError as e:
+            out.append(Issue(
+                code="bad-rule", level="error", node_id=None,
+                title="The decide block's score expression does not parse",
+                detail=str(e)))
+    return out
+
+
+def _param_diff_text(step_cls, pa: Dict[str, Any], pb: Dict[str, Any],
+                     ka: str, kb: str) -> str:
+    """兩張同型卡片差在哪幾格，一句白話（`routes-drift` 的 detail）。
+
+    影像流／區域參數刻意不比（`_treatment_sig` 的同一個理由）：兩條 route
+    各接各的流本來就不同，比它們的話這支 lint 對每一份分流 recipe 都叫 ——
+    而「一支會誤報的 lint 比沒有 lint 更糟」（F11 Enhance-3）。
+    """
+    skip = {s.name for s in step_cls.params
+            if s.type in ("image_key", "image_keys",
+                          "region_key", "region_keys")}
+    names = {s.name: (s.label or s.name) for s in step_cls.params}
+    diff = sorted(n for n in set(pa) | set(pb)
+                  if n not in skip and pa.get(n) != pb.get(n))
+    return ", ".join(
+        "%s is %s on route '%s' but %s on route '%s'"
+        % (names.get(n, n), pa.get(n, "(unset)"), ka,
+           pb.get(n, "(unset)"), kb)
+        for n in diff[:3])
+
+
+def _routes_drift_issues(recipe: "Recipe", kinds: List[str],
+                         clean_params: Dict[str, Dict[str, Any]],
+                         registry) -> List["Issue"]:
+    """分流的兩條 route 用了**同一張卡、不同設定**時提個醒（F23 §5 選項 A）。
+
+    這不是 error —— 「刻意不同」正是分流的目的。它存在的理由是選項 A 的
+    風險本身：兩條幾乎一樣的 route，改了 A 路的卡忘了 B 路的，畫布一次只看
+    一條所以**看不出來**。提示講出差在哪幾格，看一眼就分得出「這是我設計的」
+    還是「這是我忘了的」。
+    """
+    out: List[Issue] = []
+    per_route: Dict[str, Dict[str, List[str]]] = {}
+    for k in kinds:
+        by_step: Dict[str, List[str]] = {}
+        for nid in recipe.routes.get(k, []):
+            node = recipe.nodes.get(nid)
+            if node is None or not node.enabled:
+                continue
+            by_step.setdefault(node.step, []).append(nid)
+        per_route[k] = by_step
+    ordered = list(kinds)
+    for i, ka in enumerate(ordered):
+        for kb in ordered[i + 1:]:
+            shared = set(per_route[ka]) & set(per_route[kb])
+            for step_key in sorted(shared):
+                step_cls = registry.get(step_key)
+                if step_cls is None:
+                    continue
+                for na in per_route[ka][step_key]:
+                    for nb in per_route[kb][step_key]:
+                        if na == nb:
+                            continue    # 共用同一個節點＝同一組設定，沒得漂
+                        pa = clean_params.get(na, {})
+                        pb = clean_params.get(nb, {})
+                        bits = _param_diff_text(step_cls, pa, pb, ka, kb)
+                        if not bits:
+                            continue
+                        out.append(Issue(
+                            code="routes-drift", level="warning", node_id=na,
+                            title="Two routes use the same card with "
+                                  "different settings",
+                            detail="'%s' (route '%s') and '%s' (route '%s') "
+                                   "are both %s, but %s. If that is "
+                                   "deliberate, fine - this note is here so "
+                                   "an edit on one side is not quietly "
+                                   "forgotten on the other."
+                                   % (na, ka, nb, kb,
+                                      getattr(step_cls, "label", step_key),
+                                      bits)))
+                        break       # 一對 route 一張卡講一次就夠
+                    else:
+                        continue
+                    break
+    return out
+
+
+def _route_by_issues(recipe: "Recipe", rb: "RouteBy") -> List["Issue"]:
+    """``route_by`` 的健檢（F23 §4.1）。
+
+    兩條 error 擋的是同一個形狀：**寫了一條沒有人走得到的路**。map 或 default
+    指到不存在的 route，那幾顆會逐顆失敗 —— 而那是整批跑完才發現的最貴發現法。
+    「欄位在不在這份 KLARF 裡」不在這裡查：validate 手上沒有資料集，那一條在
+    CLI／Studio 開跑之前查（`missing_columns_of`）。
+    """
+    out: List[Issue] = []
+    if not str(rb.column or "").strip():
+        out.append(Issue(
+            code="bad-route-by", level="error", node_id=None,
+            title="route_by has no column",
+            detail="route_by.column is empty - name the KLARF column whose "
+                   "value picks the route (CLASSNUMBER is the usual one)."))
+    if not rb.map:
+        out.append(Issue(
+            code="bad-route-by", level="error", node_id=None,
+            title="route_by has an empty map",
+            detail="route_by.map has no entries, so no defect can ever be "
+                   "routed. Map at least one column value to a route."))
+    targets = [str(v) for v in rb.map.values()]
+    if str(rb.default or "").strip():
+        targets.append(str(rb.default).strip())
+    missing = sorted({t for t in targets if t not in recipe.routes})
+    if missing:
+        out.append(Issue(
+            code="bad-route-by", level="error", node_id=None,
+            title="route_by points at a route that does not exist",
+            detail="%s are not among this recipe's routes (%s) - every defect "
+                   "sent there would fail." % (missing, sorted(recipe.routes))))
+    # 寫了但 route_by 指不到的 route：**永遠不會有人走**（route_by 存在時它
+    # 覆蓋 kind 選路，§4.2），而寫了沒人走的路最容易爛。
+    unreachable = sorted(set(recipe.routes) - set(targets))
+    if unreachable:
+        out.append(Issue(
+            code="route-not-reachable", level="warning", node_id=None,
+            title="Some routes can never be taken",
+            detail="with route_by present, the route is picked per defect "
+                   "from %s only - %s are defined but nothing maps to them, "
+                   "so no defect will ever run them."
+                   % (rb.column, unreachable)))
+    return out
+
+
+def _decide_from_json(raw: Any) -> Optional["DecideSpec"]:
+    """讀 ``decide`` 區塊。**沒有就回 None** —— 那份 recipe 走 ``score`` 老路。
+
+    格式錯要**當場講**而不是安靜地退回老路：安靜退回的話，一份打錯字的多類別
+    recipe 會跑得完、有數字、而且每一顆都是 bin 0（推廣鐵則的老形狀）。
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise RecipeError("the 'decide' block must be an object (dict), got "
+                          "%s" % type(raw).__name__)
+    lets: List[Let] = []
+    for i, item in enumerate(list(raw.get("let") or [])):
+        if not isinstance(item, dict) or "name" not in item or "expr" not in item:
+            raise RecipeError("decide.let[%d] must be an object with 'name' "
+                              "and 'expr'" % i)
+        lets.append(Let(name=str(item["name"]).strip(),
+                        expr=str(item["expr"]),
+                        scale=str(item.get("scale", "") or ""),
+                        fill=str(item.get("fill", "") or "")))
+    rules: List[Rule] = []
+    for i, item in enumerate(list(raw.get("rules") or [])):
+        if not isinstance(item, dict) or "when" not in item or "bin" not in item:
+            raise RecipeError("decide.rules[%d] must be an object with 'when' "
+                              "and 'bin'" % i)
+        rules.append(Rule(when=str(item["when"]), bin=int(item["bin"]),
+                          label=str(item.get("label", "") or "")))
+    other = raw.get("otherwise") or {}
+    if not isinstance(other, dict):
+        raise RecipeError("decide.otherwise must be an object with 'bin'")
+    tree = (None if raw.get("tree") is None
+            else _tree_from_json(raw.get("tree")))
+    return DecideSpec(
+        let=lets, rules=rules,
+        otherwise_bin=int(other.get("bin", 0)),
+        otherwise_label=str(other.get("label", "") or ""),
+        score=str(raw.get("score", "") or ""),
+        tree=tree,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -750,10 +1300,16 @@ class Recipe:
     #: 新建的 recipe 就是「這一版寫的」，所以預設值是現在這一版 ——
     #: 空字串保留給**舊檔案**（那些檔案是真的沒有這個欄位）。
     app_version: str = field(default_factory=_app_version)
+    #: 多類別判定（F21-D）。``None`` = 這份 recipe 走 ``score`` 那條老路
+    #: （一個位元都不動）。兩個都寫是 ``ambiguous-decision`` 的 error。
+    decide: Optional["DecideSpec"] = None
+    #: 分流（F23）。``None`` = 照舊用 dataset kind 選 route（一個位元都不動）。
+    #: 有它時每一顆逐顆看 KLARF 的一欄決定走哪條 route（:func:`resolve_route`）。
+    route_by: Optional["RouteBy"] = None
 
     # ---- JSON serde -------------------------------------------------------
     def to_json_dict(self) -> Dict[str, Any]:
-        return {
+        out: Dict[str, Any] = {
             "recipe_id": self.recipe_id,
             "version": int(self.version),
             # 存檔時一律寫**現在這一版**（不是讀進來的那一版）——
@@ -777,6 +1333,39 @@ class Recipe:
                 "bins": dict(self.score.bins),
             },
         }
+        # **沒有就不寫這個鍵** —— 一份走老路的 recipe 存出來要跟以前逐位元組
+        # 相同（`test_a_json_round_trip_changes_nothing` 與 export parity 都
+        # 靠這件事）。
+        if self.decide is not None:
+            # ``scale`` / ``fill`` **有才寫**（嚴格附加）：沒用到的 recipe
+            # 存出來要跟以前逐位元組相同。
+            d_out: Dict[str, Any] = {
+                "let": [dict(
+                    {"name": x.name, "expr": x.expr},
+                    **({"scale": x.scale} if str(
+                        getattr(x, "scale", "") or "") else {}),
+                    **({"fill": x.fill} if str(
+                        getattr(x, "fill", "") or "") else {}))
+                    for x in self.decide.let],
+            }
+            # 樹與清單**只寫在用的那一種** —— 兩個都寫出去，讀回來就是
+            # `ambiguous-decision`，一份自己存的檔案不該把自己弄壞。
+            if self.decide.tree is not None:
+                d_out["tree"] = _tree_to_json(self.decide.tree)
+            else:
+                d_out["rules"] = [{"when": r.when, "bin": int(r.bin),
+                                   "label": r.label}
+                                  for r in self.decide.rules]
+                d_out["otherwise"] = {"bin": int(self.decide.otherwise_bin),
+                                      "label": self.decide.otherwise_label}
+            d_out["score"] = self.decide.score
+            out["decide"] = d_out
+        # 同一條規矩：**沒有就不寫這個鍵**（嚴格附加，鐵則 9）。
+        if self.route_by is not None:
+            out["route_by"] = {"column": self.route_by.column,
+                               "map": dict(self.route_by.map),
+                               "default": self.route_by.default}
+        return out
 
     @classmethod
     def from_json_dict(cls, d: Dict[str, Any]) -> "Recipe":
@@ -807,6 +1396,9 @@ class Recipe:
             threshold=float(sd.get("threshold", 0.0)),
             bins={str(k): int(v) for k, v in dict(sd.get("bins") or {}).items()},
         )
+
+        decide = _decide_from_json(d.get("decide"))
+        route_by = _route_by_from_json(d.get("route_by"))
 
         routes = {str(k): [str(x) for x in v] for k, v in dict(d["routes"]).items()}
 
@@ -864,6 +1456,8 @@ class Recipe:
             author=str(d.get("author", "")),
             description=str(d.get("description", "")),
             edges=edges,
+            decide=decide,
+            route_by=route_by,
         )
 
     @classmethod
@@ -1197,19 +1791,40 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
         registry = REGISTRY
     issues: List[Issue] = []
 
-    # ---- bins 必須含 below / above ----
-    bins = recipe.score.bins or {}
-    for key in ("below", "above"):
-        if key not in bins:
-            issues.append(Issue(
-                code="bad-bins", level="error", node_id=None,
-                title="Incomplete bin settings",
-                detail=f"score.bins has no '{key}' (both below and above bin "
-                       f"values are required); it currently has: "
-                       f"{sorted(bins)}"))
+    # ---- 判定段（F21-D）：兩種寫法只能有一種 ----
+    #
+    # **這一段要排在 score 的檢查之前**：有 `decide` 的時候整個 score 區塊都
+    # 不會跑（`_eval_score` 的第一行就分了岔），下面兩道檢查因此要跳過它。
+    decide = getattr(recipe, "decide", None)
+    if decide is not None:
+        issues.extend(_decide_issues(recipe, decide))
+
+    # ---- 分流（F23）：map/default 指到的 route 要存在 ----
+    route_by = getattr(recipe, "route_by", None)
+    if route_by is not None:
+        issues.extend(_route_by_issues(recipe, route_by))
+
+    # ---- bins 必須含 below / above ----（有 decide 就整段跳過，見上）
+    if decide is None:
+        bins = recipe.score.bins or {}
+        for key in ("below", "above"):
+            if key not in bins:
+                issues.append(Issue(
+                    code="bad-bins", level="error", node_id=None,
+                    title="Incomplete bin settings",
+                    detail=f"score.bins has no '{key}' (both below and above "
+                           f"bin values are required); it currently has: "
+                           f"{sorted(bins)}"))
 
     # ---- 要檢查哪些 route ----
-    if kind is not None:
+    #
+    # ``route_by`` 存在時它**覆蓋 kind 選路**（F23 §4.2）：route 鍵是任意字串
+    # （``particle_route``），dataset kind 本來就不該在 routes 裡 —— 對它報
+    # `unknown-route` 等於「recipe 是對的，但健檢說它壞了」。所以這時一律檢查
+    # **全部** route（每一條都可能被某個 class 走到）。
+    if route_by is not None:
+        kinds = list(recipe.routes)
+    elif kind is not None:
         if kind not in recipe.routes:
             issues.append(Issue(
                 code="unknown-route", level="error", node_id=None,
@@ -1287,13 +1902,19 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             seen_inputs[(e.dst, local)] = e.src
 
     # ---- score 表達式解析 ----
+    #
+    # ⚠ 有 `decide` 的時候**整個 score 區塊都不會跑**（`_eval_score` 的第一行
+    # 就分了岔），所以它連解析都不該解析：一份走多類別的 recipe 的 score.expr
+    # 是空字串，而空字串解析不出來 —— 對它報一條 error 等於「recipe 是對的，
+    # 但健檢說它壞了」，而使用者只會相信健檢。
     expr = None
-    try:
-        expr = parse_expression(recipe.score.expr)
-    except ExpressionError as e:
-        issues.append(Issue(
-            code="score-expr", level="error", node_id=None,
-            title="Score expression failed to parse", detail=str(e)))
+    if decide is None:
+        try:
+            expr = parse_expression(recipe.score.expr)
+        except ExpressionError as e:
+            issues.append(Issue(
+                code="score-expr", level="error", node_id=None,
+                title="Score expression failed to parse", detail=str(e)))
 
     # ---- 每條 route：unknown-node / cycle / reads 模擬 / requires_ref ----
     for k in kinds:
@@ -1455,7 +2076,9 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             regions |= set(step_cls.resolve_regions_out(p))
 
         # score 變數 ⊆ 此 route 會產出的特徵 ∪ {"score"}（僅警告）
-        if expr is not None:
+        # ⚠ 有 `decide` 的時候 `score.expr` **根本不會跑**，對它報一條警告等於
+        # 叫使用者去修一個不影響結果的地方。
+        if expr is not None and getattr(recipe, "decide", None) is None:
             unknown = sorted(expr.variables - feats)
             if unknown:
                 issues.append(Issue(
@@ -1464,5 +2087,12 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                     detail=f"route '{k}': the variables {unknown} are not among "
                            f"the features this route produces ({sorted(feats)}), "
                            f"so the score may not be computable at run time"))
+
+    # ---- 分流的 route 之間有沒有漂（F23 §5 選項 A 的配套）----
+    # 只在 route_by 存在時看：多 route 在此之前的意思是「一種 kind 一條路」
+    # （ebi_patch / rsem），兩條路的卡不同設定是常態，不是漂。
+    if route_by is not None and len(kinds) > 1:
+        issues.extend(_routes_drift_issues(recipe, kinds, clean_params,
+                                           registry))
 
     return issues

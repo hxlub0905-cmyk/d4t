@@ -125,6 +125,7 @@ from .scope import (
     is_supported_kind, no_klarf_message, recipe_is_supported,
     unsupported_kind_message, visible_steps,
 )
+from .decide_panel import DecidePanel
 from .viewmodel import RecipeModel, accuracy_at, histogram, rebin
 from . import theme
 from .theme import DEFAULT_THEME, THEMES, apply_theme, current_theme
@@ -144,6 +145,7 @@ from .widgets import (
     apply_button_cursors,
     column_header,
     small_button,
+    split_labelled,
 )
 
 
@@ -672,6 +674,23 @@ class StudioWindow(QMainWindow):
                 bar.addWidget(b)
             bar.addSeparator()
 
+        # 分流的 route 切換器（F23 期2）：`RecipeModel` 一次編一條 route
+        # （§6 第一期不動的那條），切換是「換一條來編」—— 畫布跟著換。
+        # 只有一條 route 時整組收起來（多數 recipe 用不到它）。
+        self.lbl_route = QLabel("Route ", bar)
+        self.route_combo = QComboBox(bar)
+        self.route_combo.setToolTip(
+            "Which route (which set of cards) the canvas is editing. "
+            "With route_by, each defect picks its own route at run time.")
+        self.route_combo.activated.connect(self._on_route_combo)
+        # ⚠ 工具列上的顯示/隱藏要走 **addWidget 回傳的 QAction**：直接
+        # `widget.setVisible(False)` 會被 QToolBar 的排版蓋回去 —— 症狀是
+        # 單 route 的 recipe 工具列上掛著一個空的下拉。
+        self._route_actions = [bar.addWidget(self.lbl_route),
+                               bar.addWidget(self.route_combo)]
+        for act in self._route_actions:
+            act.setVisible(False)
+
         spacer = QWidget(bar)
         spacer.setObjectName("toolbarSpacer")
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -950,9 +969,16 @@ class StudioWindow(QMainWindow):
         self.pipeline.MIN_FIT_SCALE = 0.5
         self.param_form = ParamForm(self)
         self.score_pane = self._build_score_pane()
+        # 判定樹一步的編輯面板（F24 ③）—— 點畫布上的菱形時換到它。
+        from .tree_panel import TreePanel
+
+        self.tree_pane = TreePanel(self)
+        self.tree_pane.set_model(self.model)
+        self.tree_pane.step_requested.connect(self._on_tree_step_clicked)
         self.stack = QStackedWidget(self)
         self.stack.addWidget(self.param_form)     # index 0
         self.stack.addWidget(self.score_pane)     # index 1
+        self.stack.addWidget(self.tree_pane)      # index 2
 
         middle = QSplitter(Qt.Vertical, self)
         middle.addWidget(self.pipeline)
@@ -1000,64 +1026,28 @@ class StudioWindow(QMainWindow):
         self.setCentralWidget(root)
 
     def _build_score_pane(self) -> QWidget:
+        """判定段那一欄 —— 內容全部住在 `DecidePanel`（F22-UI）。
+
+        為什麼搬出去：這一欄現在有兩種樣子（一個門檻／一串規則），而規則那一種
+        是逐列生出來的。留在 `studio.py`（已經 5000 多行）的話，這一欄會是這個
+        檔案裡最長的一段，而它跟視窗的其他部分沒有任何共用的東西。
+        """
+        self.decide_panel = DecidePanel(self)
+        self.decide_panel.set_model(self.model)
+        self.decide_panel.mode_changed.connect(self._on_decide_mode)
+        self.decide_panel.decision_requested.connect(self.add_decision)
+        # 分流的編輯區塊（F23 期2）—— 判定欄**上方**：它在跑之前就決定每一顆
+        # 走哪條 route，判定是跑完之後的事，由上往下讀正好是時間順序。
+        from .route_panel import RouteByBox
+
+        self.route_box = RouteByBox(self)
+        self.route_box.set_model(self.model)
         pane = QWidget(self)
         lay = QVBoxLayout(pane)
-        lay.setContentsMargins(0, 0, 8, 0)
-        lay.setSpacing(8)
-
-        title = QLabel("Score / Bin decision", pane)
-        title.setObjectName("paramTitle")
-        lay.addWidget(title)
-
-        head = QLabel("The last step of the pipeline: turn features into one score, then split into bins by a threshold.", pane)
-        head.setObjectName("paramStepHelp")
-        head.setWordWrap(True)
-        lay.addWidget(head)
-
-        row1 = QHBoxLayout()
-        row1.setSpacing(8)
-        lbl_expr = QLabel("Score expression", pane)
-        lbl_expr.setObjectName("paramLabel")
-        lbl_expr.setMinimumWidth(104)
-        self.expr_edit = QLineEdit(pane)
-        self.expr_edit.setPlaceholderText("e.g. glv_max + (glv_max - glv_q99)")
-        self.expr_edit.setToolTip("Write an expression over feature names — the result is this defect's score")
-        row1.addWidget(lbl_expr)
-        row1.addWidget(self.expr_edit, 1)
-        lay.addLayout(row1)
-
-        row2 = QHBoxLayout()
-        row2.setSpacing(8)
-        lbl_ins = QLabel("Insert feature", pane)
-        lbl_ins.setObjectName("paramLabel")
-        lbl_ins.setMinimumWidth(104)
-        self.feature_combo = QComboBox(pane)
-        self.feature_combo.setToolTip("Pick a feature name to insert at the cursor in the expression")
-        row2.addWidget(lbl_ins)
-        row2.addWidget(self.feature_combo, 1)
-        lay.addLayout(row2)
-
-        row3 = QHBoxLayout()
-        row3.setSpacing(8)
-        lbl_thr = QLabel("Decision threshold", pane)
-        lbl_thr.setObjectName("paramLabel")
-        lbl_thr.setMinimumWidth(104)
-        self.threshold_spin = QDoubleSpinBox(pane)
-        self.threshold_spin.setDecimals(3)
-        self.threshold_spin.setRange(-1e9, 1e9)
-        self.threshold_spin.setSingleStep(0.5)
-        self.threshold_spin.setToolTip("score >= threshold -> bin 1 (the ones you want), otherwise bin 0")
-        row3.addWidget(lbl_thr)
-        row3.addWidget(self.threshold_spin, 1)
-        lay.addLayout(row3)
-
-        hint = QLabel(_SCORE_HELP, pane)
-        hint.setObjectName("paramHint")
-        hint.setWordWrap(True)
-        lay.addWidget(hint)
-        self.score_hint = hint
-
-        lay.addStretch(1)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self.route_box)
+        lay.addWidget(self.decide_panel, 1)
         return pane
 
     def _build_preview_pane(self) -> QWidget:
@@ -1307,7 +1297,12 @@ class StudioWindow(QMainWindow):
         self.verdict = VerdictChip(pane)
         vrow.addWidget(QLabel("Verdict", pane))
         vrow.addWidget(self.verdict)
-        vrow.addStretch(1)
+        # 這一顆走過的路（F24 §8）：`missing? no → contrast > 120 ? yes`。
+        # 沒有判定樹（或還沒預覽）就是空字串 —— 不佔位、不寫 N/A。
+        self.decide_path = QLabel("", pane)
+        self.decide_path.setObjectName("paramHint")
+        self.decide_path.setWordWrap(False)
+        vrow.addWidget(self.decide_path, 1)
         lay.addLayout(vrow)
 
         return pane
@@ -1328,6 +1323,13 @@ class StudioWindow(QMainWindow):
         view.move_requested.connect(self._on_move_requested)
         view.remove_requested.connect(self._on_remove_requested)
         view.score_clicked.connect(self.show_score_page)
+        # 判定區的入口小卡（F24 ②）：點了＝跳到判定的編輯（同 score 那條路）。
+        view.decision_clicked.connect(self.show_score_page)
+        # 分流徽章（F25-B）：點了去編 route_by（它就在判定欄的最上面）。
+        view.prefilter_clicked.connect(self.show_score_page)
+        # 判定樹的菱形／托盤（F24 ③）：右欄變成那一步／那一類的編輯面板。
+        view.tree_step_clicked.connect(self._on_tree_step_clicked)
+        view.tree_leaf_clicked.connect(self._on_tree_step_clicked)
         view.edge_added.connect(self._on_edge_added)
         view.edge_removed.connect(self._on_edge_removed)
         view.popout_requested.connect(self.open_canvas_window)
@@ -1339,9 +1341,8 @@ class StudioWindow(QMainWindow):
 
         self.param_form.param_edited.connect(self._on_param_edited)
 
-        self.expr_edit.textEdited.connect(self._on_expr_edited)
-        self.feature_combo.activated.connect(self._on_feature_chosen)
-        self.threshold_spin.valueChanged.connect(self._on_threshold_spin)
+        # 判定段的每一格直接寫 model（`DecidePanel` 的模組說明）——
+        # 這裡不再轉手。
 
         self.btn_prev.clicked.connect(lambda: self.step_defect(-1))
         self.btn_next.clicked.connect(lambda: self.step_defect(+1))
@@ -1441,6 +1442,12 @@ class StudioWindow(QMainWindow):
         """model 任何變動的統一入口（listener）。"""
         self._refresh_pipeline()
         self._sync_score_widgets()
+        # 判定樹面板（F24 ③）：結構變了要跟上（打字不重建 —— 它自己的
+        # typing guard 擋著）。
+        self.tree_pane.refresh()
+        # 分流（F23 期2）：route 清單與編輯區塊跟著 model 走。
+        self._refresh_route_switcher()
+        self.route_box.refresh()
         self.histogram.set_threshold(self.model.threshold)
         self._refresh_bin_summary(self.model.threshold)
         self._update_action_states()
@@ -1785,35 +1792,94 @@ class StudioWindow(QMainWindow):
         if self.selected_node not in self.model.nodes:
             self.selected_node = None
         self._sync_params_pane()
+        decision = self._decision_info()
+        prefilter = self._prefilter_info()
         for view in self._canvases():
             # 影像線（存在 recipe 裡）＋ 區域線（從參數推導；F12）。畫布不分
             # 兩份收 —— 一條線就是一條線，它是哪一種由它出發的那顆埠決定。
             view.set_nodes(nodes, list(self.model.edge_lines())
                            + list(self.model.region_lines()))
+            # 判定區（F24 ②）：多類別的 recipe，判定樹住在畫布上。
+            view.set_decision(decision)
+            # 分流徽章（F25-B）：有 route_by 才有 —— 畫布因此講得出
+            # 「這一批分兩條路跑」，而不是只有工具列一個下拉。
+            view.set_prefilter(prefilter)
             view.set_selected(self.selected_node)
-            view.set_score_summary(self.model.expr, self.model.threshold)
+            view.set_score_summary(self._score_summary_text())
+
+    def _score_summary_text(self) -> str:
+        """判定段現在在做什麼，一句話。
+
+        三種樣子各講各的：判定樹講「幾個問題」、規則清單講「幾條規則」、
+        什麼都沒有就講沒有。（二元門檻那一句 F25 之後不會再出現 ——
+        開起來的 recipe 一律是樹。）
+        """
+        from .tree_scene import display_tree, layout_cells
+
+        d = getattr(self.model, "decide", None)
+        if d is None:
+            return "no decision yet"
+        if getattr(d, "tree", None) is not None:
+            steps = sum(1 for c in layout_cells(display_tree(d), d)
+                        if c["kind"] == "step")
+            return "decision tree · %d question%s" % (steps,
+                                                      "" if steps == 1 else "s")
+        return "decision · %d rule%s" % (len(d.rules),
+                                         "" if len(d.rules) == 1 else "s")
+
+    def _prefilter_info(self) -> Optional[Dict[str, Any]]:
+        """畫布上的分流徽章要畫的東西（F25-B）；沒有 route_by 回 None。
+
+        「現在這一顆走哪一條」跟資料集標籤是**同一支** `resolve_route`
+        算的 —— 兩個地方各算一次的話，遲早會有一個說錯。
+        """
+        from .route_badge import route_badge_info
+
+        current = None
+        rb = getattr(self.model, "route_by", None)
+        item = self._current_item() if rb is not None else None
+        if item is not None and self.dataset is not None:
+            from d4t.core.pipeline import resolve_route
+
+            route, value, _how = resolve_route(self.model, item,
+                                               str(self.dataset.kind))
+            current = (value, route or "(fails)")
+        return route_badge_info(self.model, self.trial_results or [], current)
+
+    def _decision_info(self) -> Optional[Dict[str, Any]]:
+        """畫布判定區要畫的東西（F24 ②）。
+
+        走二元 score 的 recipe 回 None —— 那條路的判定住在右欄的門檻滑桿。
+        流量吃**這一批試跑的結果**：沒跑過就是 None，判定區的形狀在、
+        數字誠實地不在（F18 的老規矩）。
+        """
+        from .tree_scene import decision_info
+
+        info = decision_info(getattr(self.model, "decide", None),
+                             list(self.trial_results or []),
+                             self.ground_truth)
+        if info is not None:
+            # 幽靈線（F24 ④）：菱形上的數字 → 產出它的卡。宣告層的答案。
+            info["feat_owner"] = self.model.feature_owners()
+        return info
 
     def _sync_score_widgets(self) -> None:
-        self._syncing = True
-        try:
-            if self.expr_edit.text() != self.model.expr:
-                self.expr_edit.setText(self.model.expr)
-            if float(self.threshold_spin.value()) != float(self.model.threshold):
-                self.threshold_spin.setValue(float(self.model.threshold))
-        finally:
-            self._syncing = False
-        self.pipeline.set_score_summary(self.model.expr, self.model.threshold)
+        """model 換過（載入、undo、切 route）之後把判定面板重畫一次。
+
+        **打字時不會走到這裡** —— 那一格是直接寫 model 的，而 `DecidePanel`
+        自己會跳過「有人正在打字」的重建（見它的 `refresh`）。
+        """
+        self.decide_panel.refresh()
+        self.pipeline.set_score_summary(self._score_summary_text())
+
+    def _on_decide_mode(self, on: bool) -> None:
+        """切了「分成好幾類」——  bin 直方圖那條門檻線只對二元那一種有意義。"""
+        self.histogram.set_threshold(None if on else self.model.threshold)
+        self._sync_score_widgets()
 
     def _refresh_feature_combo(self) -> None:
-        self._syncing = True
-        try:
-            self.feature_combo.clear()
-            self.feature_combo.addItem(_FEATURE_PLACEHOLDER)
-            for name in self.model.available_features():
-                self.feature_combo.addItem(name)
-            self.feature_combo.setCurrentIndex(0)
-        finally:
-            self._syncing = False
+        """判定面板的「插入數字 ▾」清單（F21-B）。"""
+        self.decide_panel.set_features(self.model.labelled_features())
 
     # ---- Spread（F18 第 2 步：它從量測卡的儀表搬來這裡）--------------------
     def _features_in_results(self, results: Sequence[Dict[str, Any]]) -> List[str]:
@@ -1888,7 +1954,40 @@ class StudioWindow(QMainWindow):
     def _on_spread_feature_changed(self, _name: str) -> None:
         self._refresh_spread()
 
+    def _refresh_decide_counts(self) -> None:
+        """判定面板每一條規則右邊的「bin N · 幾顆 · 純度」（F22-UI）。
+
+        跟 F18 的灰階面板同一個立論：調規則的人是**一邊改一邊看**的。
+        沒跑過就餵空的 —— 顯示 0 會讓人以為「這一格一顆都沒有」。
+        """
+        rows = list(self.trial_results or [])
+        # 畫布上的判定區跟著這一批走（F24 ②：分支流量、托盤顆數）。
+        decision = self._decision_info()
+        for view in self._canvases():
+            view.set_decision(decision)
+        self.tree_pane.set_rows(rows)
+        self.tree_pane.set_counts(None if not decision
+                                  else decision.get("counts"))
+        prefilter = self._prefilter_info()
+        for view in self._canvases():
+            view.set_prefilter(prefilter)
+        if not rows:
+            self.decide_panel.set_counts(None)
+            return
+        counts: Dict[int, int] = {}
+        for r in rows:
+            b = r.get("bin")
+            if b is None:
+                continue
+            counts[int(b)] = counts.get(int(b), 0) + 1
+        purity = None
+        if self.ground_truth:
+            from d4t.core.export import summarize
+            purity = summarize(rows, ground_truth=self.ground_truth).get("bin_purity")
+        self.decide_panel.set_counts(counts, purity=purity)
+
     def _refresh_bin_summary(self, threshold: float) -> None:
+        self._refresh_decide_counts()
         if not self.trial_scores:
             self.histogram.set_bin_summary(None)
             return
@@ -1940,10 +2039,10 @@ class StudioWindow(QMainWindow):
     # ==================================================================== #
     def _on_add_requested(self, step_key: str) -> None:
         if str(step_key) == _SCORE_LIBRARY_KEY:
-            # 「Score / Bin」不是可增刪的卡片 —— 每條 pipeline 固定有一張，
-            # 點它就是去編輯分數表達式與門檻（三段式的最後一段）。
-            self.show_score_page()
-            self._status("Editing the score / threshold")
+            # 「Decision」不是可增刪的卡片 —— 每條 pipeline 固定有一棵判定樹，
+            # 點它就是**把它放上畫布並開始編第一步**（F25，使用者定調：
+            # 「加 ADC card 是要直接顯示在畫布上，而不是要勾選才顯示」）。
+            self.add_decision()
             return
         # 選著一張卡的時候，新的卡排在它後面 —— 但**線不會自己出現**
         # （2026-08-16，使用者：「新增卡 不要自己接線（線都給 user 接）」）。
@@ -2603,6 +2702,7 @@ class StudioWindow(QMainWindow):
         self.model.end_coalescing()
         for view in self._canvases():
             view.set_selected(node_id)
+            view.set_tree_selected(None)   # 一次只編一個東西（卡片或樹的一步）
         try:
             describe = get_step(node.step).describe()
         except KeyError:
@@ -2937,6 +3037,182 @@ class StudioWindow(QMainWindow):
     def show_param_page(self) -> None:
         self.stack.setCurrentWidget(self.param_form)
 
+    # ---- 分流（F23 期2）----------------------------------------------------
+    def _refresh_route_switcher(self) -> None:
+        """工具列的 route 下拉：跟 model 的 route 清單同步；單 route 收起來。"""
+        keys = list(self.model.route_keys())
+        show = len(keys) > 1
+        for act in getattr(self, "_route_actions", []):
+            act.setVisible(show)
+        if not show:
+            return
+        current = [self.route_combo.itemText(i)
+                   for i in range(self.route_combo.count())]
+        want = sorted(keys)
+        if current != want:
+            self.route_combo.blockSignals(True)
+            self.route_combo.clear()
+            for k in want:
+                self.route_combo.addItem(k)
+            self.route_combo.blockSignals(False)
+        i = self.route_combo.findText(self.model.kind)
+        if i >= 0 and self.route_combo.currentIndex() != i:
+            self.route_combo.blockSignals(True)
+            self.route_combo.setCurrentIndex(i)
+            self.route_combo.blockSignals(False)
+
+    def _on_route_combo(self, index: int) -> None:
+        self.switch_route(str(self.route_combo.itemText(int(index))))
+
+    def switch_route(self, key: str) -> bool:
+        """切到另一條 route 編輯（畫布跟著換）。
+
+        做法是「收回去再拿出來」（`to_recipe` → `from_recipe`）—— 正在編的
+        改動全部保住（`to_recipe` 會把其他 route 原樣合併回去）。代價是
+        **undo 堆疊重來**：復原是編輯這一條 route 的歷史，切走再切回來是
+        兩段不同的編輯。
+        """
+        key = str(key)
+        if key == self.model.kind or key not in self.model.route_keys():
+            return False
+        dirty = self.model.dirty
+        m = RecipeModel.from_recipe(self.model.to_recipe(), kind=key)
+        m.dirty = dirty
+        self._apply_model(m)
+        self._status("Route: %s" % key)
+        return True
+
+    def _fill_route_fields(self) -> None:
+        """`route_by` 的那一欄要進每一顆的 `fields`（預覽逐顆解 route 要讀它）。
+
+        跟 `run_batch` 同一套規矩：只在有顆缺這一欄時動手，補「現有欄位 ∪
+        這一欄」（`fill_fields` 是整份換掉，只補一欄會洗掉 carry 進來的）。
+        欄位不存在時**在這裡就講**（手上有 KlarfDoc，答得出它有哪些欄）。
+        """
+        rb = getattr(self.model, "route_by", None)
+        if rb is None or self.dataset is None:
+            return
+        from d4t.core.ingest.dataset import (
+            columns_of, fill_fields, missing_columns_of,
+        )
+
+        if getattr(self.dataset, "klarf", None) is None:
+            self._status("route_by needs KLARF columns, and this data has "
+                         "no KLARF - every defect will fail to route.",
+                         "error")
+            return
+        absent = missing_columns_of(self.dataset, [rb.column])
+        if absent:
+            self._status("route_by points at a column this KLARF does not "
+                         "have: %s. It has: %s"
+                         % (", ".join(absent),
+                            ", ".join(columns_of(self.dataset))), "error")
+            return
+        col = str(rb.column).strip().upper()
+        items = list(getattr(self.dataset, "items", []) or [])
+        if any(col not in (getattr(it, "fields", None) or {})
+               for it in items):
+            have: set = set()
+            for it in items:
+                have.update((getattr(it, "fields", None) or {}).keys())
+            fill_fields(self.dataset, sorted(have | {col}))
+
+    def _follow_defect_route(self) -> None:
+        """預覽跟著這一顆走（F23 §6-2）：看 defect 12 時，畫布自動切到它真正
+        走的 route —— 不做這個就是 F10 那批「畫布說謊」的重演。"""
+        rb = getattr(self.model, "route_by", None)
+        if rb is None or self.dataset is None:
+            return
+        item = self._current_item()
+        if item is None:
+            return
+        from d4t.core.pipeline import resolve_route
+
+        self._fill_route_fields()
+        route, _value, _how = resolve_route(self.model, item,
+                                            str(self.dataset.kind))
+        if route and route != self.model.kind \
+                and route in self.model.route_keys():
+            self.switch_route(route)
+
+    def _adopt_threshold_as_a_tree(self) -> bool:
+        """開一份**用門檻分兩類**的舊 recipe → 當場變成判定樹（F25，使用者
+        2026-08-24：「二元門檻的 UI 完全拿掉」）。
+
+        只在**讀檔案**這條路上做，而且只在真的有 score 表達式時做 ——
+        空白的新 recipe 不會被塞一棵樹（那是 ADC 卡的工作）。
+
+        ⚠ 這是 **UI 層的遷移**，不是引擎的：`Recipe.load` 一個位元都沒動，
+        CLI 照舊跑那份檔案的 `score`（黃金值因此不受影響），而 Studio 現在
+        又存不了檔（2026-08-16 拿掉），所以磁碟上的東西不會被改寫。
+
+        ⚠ 一個誠實的落差：`use_decide` 產出的規則是 ``expr >= threshold``，
+        而老路是 ``score < threshold`` 判 below —— 兩者在**分數是 NaN** 的
+        時候會分到不同的 bin（老路進 above、新的進 otherwise）。留 ``>=``
+        是因為它讀起來才是正著的（「大於就是這一類」）；NaN 的分數本來就是
+        一份算壞了的 recipe。
+        """
+        m = self.model
+        if getattr(m, "decide", None) is not None:
+            return False
+        if not str(getattr(m, "expr", "") or "").strip():
+            return False
+        m.use_decide(True)
+        m.ensure_tree()
+        m.dirty = False          # 使用者什麼都還沒做，關窗不要問他要不要存
+        m.clear_history()        # 「復原」不該把他退回一個看不到編輯器的狀態
+        return True
+
+    def add_decision(self) -> bool:
+        """把判定樹放上畫布，並開始編第一步（F25）。
+
+        使用者 2026-08-24 定調的兩件事都在這裡：**加 ADC 卡＝畫布上直接
+        有東西**（不是勾一個選項），而且**一進去就是多類別**（「原來的
+        根本不會用到」）。二元門檻沒有被拿掉 —— 它變成舊 recipe 的樣子，
+        而換過來的時候現有的門檻會變成樹的第一個問題（`use_decide`）。
+        """
+        from d4t.core.pipeline.recipe import TreeLeaf
+
+        m = self.model
+        with m.compound("add decision"):
+            if getattr(m, "decide", None) is None:
+                m.use_decide(True)      # 現有門檻 → 第一條規則（不丟東西）
+            m.ensure_tree()             # 規則清單 → 等價的樹
+            if isinstance(m.tree_node(""), TreeLeaf):
+                # 整棵樹只有一片葉子（這份 recipe 還沒有任何判定）——
+                # 給一個真的問得出東西的起手問題，不是一格空白。
+                m.split_tree_leaf("")
+                self.tree_pane.set_rows(self.trial_results or [])
+                self.tree_pane.suggest_question("")
+        self._on_tree_step_clicked("")
+        # **看得到才算在畫布上**：判定區長在所有卡片的右邊，而畫布這時多半
+        # 停在左半邊 —— 不 fit 的話使用者按了 ADC 卡，畫面上什麼都沒發生。
+        for view in self._canvases():
+            view.fit()
+        self._status("Decision: the tree is on the canvas - edit this step "
+                     "on the right, or click another diamond.")
+        return True
+
+    def _on_tree_step_clicked(self, path: str) -> None:
+        """畫布上點了判定樹的一步／一類（F24 ③），或面板要求跳到另一步。
+
+        `rules` 模式先無損翻成樹（`ensure_tree`）—— 編輯動作只有樹的形狀
+        表達得了「yes 接另一步」。
+        """
+        if getattr(self.model, "decide", None) is None:
+            return
+        self.model.ensure_tree()
+        info = self._decision_info()
+        self.tree_pane.set_features(self.model.labelled_features())
+        self.tree_pane.set_counts(None if not info else info.get("counts"))
+        # 導引式問題的滑桿範圍與「幾顆說 yes」吃這一批的結果（F25）。
+        self.tree_pane.set_rows(self.trial_results or [])
+        self.tree_pane.show_path(str(path))
+        self.stack.setCurrentWidget(self.tree_pane)
+        self.set_params_open(True)
+        for view in self._canvases():
+            view.set_tree_selected(str(path))
+
     # ==================================================================== #
     # 參數編輯
     # ==================================================================== #
@@ -3021,39 +3297,6 @@ class StudioWindow(QMainWindow):
     # ==================================================================== #
     # 分數編輯
     # ==================================================================== #
-    def _on_expr_edited(self, text: str) -> None:
-        if self._syncing:
-            return
-        self.model.set_expr(str(text))
-
-    def _on_feature_chosen(self, index: int) -> None:
-        """「插入特徵 ▾」：把特徵名插到表達式的游標位置。"""
-        if self._syncing or int(index) <= 0:
-            return
-        token = self.feature_combo.itemText(int(index))
-        self._syncing = True
-        try:
-            self.feature_combo.setCurrentIndex(0)
-        finally:
-            self._syncing = False
-        if not token:
-            return
-        text = self.expr_edit.text()
-        pos = self.expr_edit.cursorPosition()
-        pos = max(0, min(pos, len(text)))
-        new_text = text[:pos] + token + text[pos:]
-        self._syncing = True
-        try:
-            self.expr_edit.setText(new_text)
-            self.expr_edit.setCursorPosition(pos + len(token))
-        finally:
-            self._syncing = False
-        self.model.set_expr(new_text)
-
-    def _on_threshold_spin(self, value: float) -> None:
-        if self._syncing:
-            return
-        self.model.set_threshold(float(value))
 
     # ---- 直方圖門檻線 -----------------------------------------------------
     def _on_threshold_changed(self, value: float) -> None:
@@ -3164,6 +3407,12 @@ class StudioWindow(QMainWindow):
         # 留在這一份的每一顆上，跑得完、有數字、而且是別人的。
         self._carry_filled = None
         self._carry_main_columns()
+        # 分流（F23 期2）：編輯區塊的欄位下拉要吃這一份的欄名；route_by 的
+        # 那一欄也趁現在填進每一顆（換一份資料＝值全變了，同 carry 的理由）。
+        from d4t.core.ingest.dataset import columns_of as _cols
+
+        self.route_box.set_columns(_cols(dataset))
+        self._fill_route_fields()
         # 入口卡上要印出**現在載的是哪一份**（F14-1）。名字在請求的那一刻就
         # 知道了，但要等載成功才採用 —— 開錯一個檔不會讓卡片上的名字先變。
         self.dataset_name = str(getattr(self, "_pending_dataset_name", "") or "")
@@ -3314,10 +3563,23 @@ class StudioWindow(QMainWindow):
         # 同一個教訓在 ground truth 那一輪就學過了（見 `_on_dataset_loaded`）。
         # 掛在資料集標籤上：它就在使用者眼前，而且它講的正是「你現在手上是什麼資料」。
         no_klarf = getattr(self.dataset, "klarf", None) is None
+        # 分流（F23 期2）：這一顆的欄位值與它真正走的 route **常駐在標籤上**
+        # —— 畫布自動切了 route，這一行就是「為什麼畫布剛剛跳了」的答案。
+        route_bit = ""
+        rb = getattr(self.model, "route_by", None)
+        if rb is not None and 0 <= i < len(items):
+            from d4t.core.pipeline import resolve_route
+
+            route, value, _how = resolve_route(self.model, items[i],
+                                               str(self.dataset.kind))
+            route_bit = " · %s=%s → %s" % (
+                rb.column, value or "?",
+                ("route “%s”" % route) if route else "no route (fails)")
         self.defect_label.setText(
-            "%s · defect %d / %d%s" % (getattr(self.dataset, "kind", "?"),
-                                       i + 1, len(items),
-                                       " · no KLARF" if no_klarf else ""))
+            "%s · defect %d / %d%s%s" % (getattr(self.dataset, "kind", "?"),
+                                         i + 1, len(items),
+                                         " · no KLARF" if no_klarf else "",
+                                         route_bit))
         self.defect_label.setToolTip(
             no_klarf_message(getattr(self.dataset, "kind", ""))
             if no_klarf else "")
@@ -3336,7 +3598,14 @@ class StudioWindow(QMainWindow):
                 self.defect_combo.setCurrentIndex(i)
         finally:
             self._syncing = False
+        # 分流：先跟著這一顆切 route（切了會整個 _refresh_all），標籤才會寫出
+        # 它真正走的那一條。
+        self._follow_defect_route()
         self._update_defect_label()
+        # 徽章上「現在這一顆走哪一條」要跟著換（F25-B）。
+        info = self._prefilter_info()
+        for view in self._canvases():
+            view.set_prefilter(info)
         self._schedule_preview()
         return True
 
@@ -3364,6 +3633,7 @@ class StudioWindow(QMainWindow):
         if ds_kind and ds_kind in recipe.routes:
             kind = ds_kind
         self._apply_model(RecipeModel.from_recipe(recipe, kind=kind))
+        converted = self._adopt_threshold_as_a_tree()
         self.recipe_path = path
         self.setWindowTitle("d4t Studio — %s" % self.model.recipe_id)
         n = len(self.model.node_order)
@@ -3372,10 +3642,19 @@ class StudioWindow(QMainWindow):
         skew = version_skew(getattr(recipe, "app_version", ""))
         if skew:
             self._status(skew, "error")
+        elif converted:
+            # 轉過去了就**講出來** —— 使用者存的是一個門檻，打開看到的是一棵
+            # 樹，不說的話那是「這個工具把我的東西改掉了」。
+            self._status("Loaded recipe “%s” (%d steps). Its threshold is now "
+                         "the first question of the decision tree on the "
+                         "canvas." % (self.model.recipe_id, n))
         else:
             self._status("Loaded recipe “%s” (%d steps, route %s)"
                          % (self.model.recipe_id, n, self.model.kind))
-        if ds_kind and ds_kind not in recipe.routes:
+        # route_by 存在時 route 鍵是任意字串、覆蓋 kind 選路（F23 §4.2）——
+        # 「沒有這個 kind 的 route」對它不是問題，別嚇人。
+        if ds_kind and ds_kind not in recipe.routes \
+                and getattr(recipe, "route_by", None) is None:
             self._status("Loaded recipe “%s”, but it has no '%s' route — "
                          "preview and trial runs will fail."
                          % (self.model.recipe_id, ds_kind))
@@ -3386,10 +3665,19 @@ class StudioWindow(QMainWindow):
         """換掉 model 並重接所有顯示（listener 一定要重掛）。"""
         self.model = model
         self.model.add_listener(self._on_model_changed)
+        # 判定面板抓著 model 的參考（它直接寫進去），所以**換 model 一定要
+        # 跟著換**。漏掉的話它會安靜地繼續編輯上一份 recipe 的判定段，而畫面
+        # 上唯一的線索是「那一格的數字沒跟著載進來的 recipe 動」。
+        self.decide_panel.set_model(model)
+        self.tree_pane.set_model(model)   # 同一個理由：它也直接寫 model
+        self.route_box.set_model(model)   # 同上（F23 期2）
+        self._refresh_route_switcher()
+        self._fill_route_fields()
         self.selected_node = None
         self._user_stream = None
         for view in self._canvases():
             view.set_selected(None)
+            view.set_tree_selected(None)
             view.forget_positions()   # 換了一份 recipe，別繼承上一份拖過的位置
         self.param_form.set_step(None, {}, [])
         self.stack.setCurrentWidget(self.param_form)
@@ -3442,9 +3730,17 @@ class StudioWindow(QMainWindow):
 
         recipe = self.model.to_recipe()
         upto = self.selected_node if self.selected_node in self.model.nodes else None
+        # 分流（F23 期2）：`kind` 是**資料的身分**（load 卡讀
+        # `meta["_dataset_kind"]`），route 由 `run_defect` 逐顆自己解。
+        # route_by 存在時 model.kind 是一個 route 鍵（"particle_route"），
+        # 把它當 kind 傳會讓 load 卡把資料認成不存在的型別。
+        kind = self.model.kind
+        if getattr(self.model, "route_by", None) is not None \
+                and self.dataset is not None:
+            kind = str(getattr(self.dataset, "kind", "") or kind)
         if sync:
             try:
-                result = PreviewWorker.run_sync(recipe, item, self.model.kind,
+                result = PreviewWorker.run_sync(recipe, item, kind,
                                                 upto_node=upto,
                                                 sources=self.sources_for_run())
             except Exception as e:      # noqa: BLE001 — UI 邊界
@@ -3453,7 +3749,7 @@ class StudioWindow(QMainWindow):
             self._on_preview_ready(result)
             return True
         self._async_epoch = self._preview_epoch
-        self.preview_worker.request(recipe, item, self.model.kind,
+        self.preview_worker.request(recipe, item, kind,
                                     upto_node=upto,
                                     sources=self.sources_for_run())
         return True
@@ -3535,6 +3831,7 @@ class StudioWindow(QMainWindow):
         score = getattr(result, "score", None)
         self.verdict.set_verdict(getattr(result, "bin", None)
                                  if score is not None else None)
+        self._show_decide_path(result)
 
         if not ran:
             # 兩種「沒有東西可看」要講不同的話，因為下一步不一樣：
@@ -3563,6 +3860,35 @@ class StudioWindow(QMainWindow):
             self._status("Preview done (%d image streams)%s"
                          % (len(images),
                             "   score %.4g" % score if score is not None else ""))
+
+    def _show_decide_path(self, result: Any) -> None:
+        """Preview 的 Path（F24 §8）：這一顆走過的路，一句話＋樹上亮起來。
+
+        資料是引擎記的 ``ctx.meta["decide"]["path"]``（一串 yes/no）——
+        判定樹模式才有；`rules` 模式講「第幾條規則對上」；沒有判定（或這一顆
+        沒跑到判定）就清空，**不寫 N/A**。
+        """
+        from .tree_scene import display_tree, path_text
+
+        ctx = getattr(result, "context", None)
+        meta = (getattr(ctx, "meta", None) or {}).get("decide") \
+            if ctx is not None else None
+        text, hl = "", None
+        if isinstance(meta, dict):
+            steps = [str(s) for s in (meta.get("path") or [])]
+            if steps:
+                hl = "".join("y" if s == "yes" else "n" for s in steps)
+                tree = display_tree(getattr(self.model, "decide", None))
+                text = path_text(tree, hl) if tree is not None else ""
+                if text:
+                    text = "Path:  " + text
+            elif meta.get("rule", -1) is not None and int(meta.get("rule", -1)) >= 0:
+                text = "Path:  rule %d matched" % (int(meta["rule"]) + 1)
+                if meta.get("label"):
+                    text += " (%s)" % meta["label"]
+        self.decide_path.setText(text)
+        for view in self._canvases():
+            view.set_tree_highlight(hl)
 
     #: 會產生投影曲線的卡片 key（面板只在編輯它的時候出現）。
     PROFILE_STEP = "roi_cross"
@@ -5084,6 +5410,12 @@ class StudioWindow(QMainWindow):
         # 所以它在下面那個 early return 之前。
         out["main_columns"] = (pair_ingest.columns_of(self.dataset)
                                if self.dataset is not None else [])
+        # 算式那一格的「插入數字 ▾」（F21-B）。**到這張卡為止**，不是整條 route
+        # —— 列出一個排在自己後面才算出來的數字，點下去就是一份跑起來每一顆
+        # 都失敗的 recipe。
+        out["features"] = self.model.labelled_features(
+            upto_node=str(getattr(node, "id", "") or "") or None,
+            include_upto=False)
         src = sources.get(str(node.params.get("source", "") or "").strip())
         if src is None:
             return out

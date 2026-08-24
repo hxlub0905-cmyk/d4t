@@ -44,7 +44,7 @@ from typing import Any, Dict, List
 from ..pipeline.context import Context
 from ..pipeline.expression import ExpressionError, parse_expression
 from ..pipeline.step import (
-    CATEGORY_ALGO, GROUP_ALGO, ParamSpec, Step, StepError, register_step,
+    CATEGORY_ALGO, GROUP_ADC, ParamSpec, Step, StepError, register_step,
 )
 from ._util import FEATURE_PREFIX_PATTERN
 
@@ -76,18 +76,24 @@ class FeatureMathStep(Step):
     key = "feature_math"
     label = "Feature math"
     category = CATEGORY_ALGO
-    group = GROUP_ALGO
+    # Algo 段解散後歸到判定那一段（F24 §5）：這張卡的功能已被
+    # decide 的 working numbers 吸收，卡片收在 HIDDEN_STEPS、只服務舊 recipe。
+    group = GROUP_ADC
     help = ("Work out a new number from the numbers the cards above already "
             "measured - for example “glv_max - glv_median”. Use it to keep "
             "the arithmetic on the canvas instead of hiding it inside the "
             "score expression.")
     params = [
         ParamSpec(
-            name="expr", type="str", default="",
+            # ``expr`` 不是 ``str``：值的格式一字不差，但 UI 認得它是算式，
+            # 於是那一格會配一支「插入數字 ▾」（F21-B）。
+            name="expr", type="expr", default="",
             label="Work out",
             help=("The sum to work out. The names in it are the numbers the "
                   "cards above produce (glv_max, roi_snr_signed, …). You can "
                   "use + - * / ( ) and sqrt / abs / log / exp / min / max. "
+                  "Comparisons work too and give 1 or 0, so "
+                  "(cd_median > 5) * 100 turns a rule into a number. "
                   "Dividing by zero gives 0 rather than stopping the batch."),
         ),
         ParamSpec(

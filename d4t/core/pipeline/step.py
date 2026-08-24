@@ -92,7 +92,12 @@ GROUP_MEASURE = "measure"
 #: 每一張量測卡都是 ``CATEGORY_ALGO``，而它們的 ``group`` 是 ``measure``。
 #: ``GROUP_ALGO`` 說的是「這張卡**只**吃數字、不碰影像」（F16，使用者定調：
 #: 「measure 是量出數值來，Algo 是拿這些 feature 去做更 custom 的處理」）。
-#: 那條界線有測試守著：Algo 段的卡 ``resolve_reads()`` 恆為空。
+#:
+#: ⚠ **這一段已解散**（F24 §5，使用者 2026-08-24 點頭）：算式住進判定的
+#: working numbers（`decide.let`）、補值變成那一行的「missing ⇒」屬性、
+#: 跨顆換算變成「跟整批比」（`Let.scale`）—— 三件事都比一張卡更靠近它們
+#: 服務的判定。這個常數留著給外掛卡相容（`resolve_group` 照認），但它不在
+#: :data:`GROUP_ORDER` 裡：卡片庫與 rail 上沒有這一段。
 GROUP_ALGO = "algo"
 GROUP_ADC = "adc"
 #: 這一段的卡是 **end point**：不吐影像流、不吐特徵，只把東西寫出去。
@@ -100,7 +105,11 @@ GROUP_ADC = "adc"
 GROUP_OUTPUT = "output"
 
 #: 卡片庫的顯示順序（讀起來是一句話：
-#: Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output）。
+#: Input → Enhance → ROI → Measure → Compare → ADC → Output）。
+#:
+#: **七段**（F24 §5，2026-08-24）：F16 定的八段少了 Algo —— 那一段解散進
+#: 判定（見 :data:`GROUP_ALGO` 的說明），而「段落是使用者 2026-08-20 定的、
+#: 動之前要再點一次頭」那條規矩履行過了（使用者：「那三件事接著做」）。
 #:
 #: **這個順序不決定執行順序。** 執行是 :func:`recipe.execution_order` 的 DAG
 #: 拓撲排序 —— 線怎麼拉就怎麼跑。這裡排的是**卡片庫的分區順序**（連帶 rail 的
@@ -110,7 +119,7 @@ GROUP_OUTPUT = "output"
 #: ⚠ 這份順序在 UI 有第二份：``ui/widgets.py`` 的 ``LibraryPanel.GROUPS``
 #: （它多帶標題與副標）。兩份要一致，``tests/test_ui_f16_stages.py`` 鎖著。
 GROUP_ORDER = (GROUP_INPUT, GROUP_ENHANCE, GROUP_REGION, GROUP_MEASURE,
-               GROUP_ALGO, GROUP_COMPARE, GROUP_ADC, GROUP_OUTPUT)
+               GROUP_COMPARE, GROUP_ADC, GROUP_OUTPUT)
 _GROUPS = GROUP_ORDER
 _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC, CATEGORY_BATCH)
 
@@ -129,7 +138,22 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC, CATEGORY_BATCH)
 #: 一個「這個統計量在分布上是哪一段」的小圖。分群與短標籤住在 UI
 #: （``widgets.METRIC_GROUPS``），卡片這邊只宣告 ``choices``：
 #: **引擎說有哪些，UI 說長什麼樣。**
-PARAM_TYPES = ("int", "float", "bool", "str", "choice", "image_key",
+#: ``"expr"``（F21-B）：值是一個**吃特徵名的算式**（字串）。
+#: 儲存格式跟 ``"str"`` 一字不差 —— recipe JSON 完全不變，**差別只在 UI**：
+#: 它會配一支「插入數字 ▾」，列出這張卡**之前**算得出來的每一個數字、
+#: 各是誰算的。跟 ``image_keys`` 是同一個先例（值的格式一樣，但 UI 認得
+#: 它是什麼）。
+#:
+#: 為什麼要它：F21 實測，第一次真的用 `feature_math` 的時候，**最痛的不是
+#: 看不出數字從哪來，是不知道有哪些數字可以用** —— 得跑 Python 呼叫
+#: ``resolve_features()`` 才知道 ``cmp_delta_median`` 存在。而目標使用者
+#: 不會寫 code（推廣鐵則）。
+#: ``"feature_keys"``（F21-B）：值是**一串特徵名**（逗號分隔的字串）。
+#: 跟 ``"expr"`` 是同一個家族 —— 儲存格式就是 ``"str"``，而 UI 認得它，
+#: 所以那一格配得出同一支「插入數字 ▾」（差別只在插進去的方式：算式插在游標
+#: 位置，清單接在後面）。
+PARAM_TYPES = ("int", "float", "bool", "str", "expr", "feature_keys",
+               "choice", "image_key",
                "image_keys", "curve", "template", "multi_choice",
                "metric_chips", "channel_map", "cell_rois", "region_key",
                "region_keys", "icon_choice")
@@ -419,7 +443,12 @@ class ParamSpec:
                     v = value.strip().lower() in ("1", "true", "yes", "on")
                 else:
                     v = bool(value)
-            elif self.type in ("str", "image_key", "template"):
+            elif self.type in ("str", "expr", "feature_keys",
+                               "image_key", "template"):
+                # ``expr`` 跟 ``str`` **存的是同一個東西**（F21-B）——
+                # 差別只在 UI 認得它是算式。這一行漏掉 ``expr`` 的話，
+                # 每一份用到那張卡的 recipe 都會在 `validate_params` 炸
+                # 「unknown type」（`tests/test_ui_f21_expr_picker.py` 擋著）。
                 v = str(value)
             elif self.type == "region_key":
                 # **一個**區域名（``region_keys`` 是逗號清單）。空字串合法 ——

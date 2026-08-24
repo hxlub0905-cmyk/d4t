@@ -29,8 +29,11 @@ from .recipe import (
     Recipe,
     RecipeError,
     RecipeNode,
+    RouteBy,
     ScoreSpec,
     execution_order,
+    resolve_route,
+    route_miss_message,
     validate,
 )
 from .engine import (
@@ -43,7 +46,7 @@ from .engine import (
     run_defect_cached,
 )
 from .cache import StageCache
-from .batch import run_batch, run_batch_steps
+from .batch import apply_lot_scaling, run_batch, run_batch_steps
 
 __all__ = [
     # context
@@ -56,6 +59,8 @@ __all__ = [
     # recipe
     "Edge", "Recipe", "RecipeNode", "ScoreSpec", "Issue",
     "validate", "execution_order", "RecipeError",
+    # 分流（F23）
+    "RouteBy", "resolve_route", "route_miss_message",
     # expression
     "parse_expression", "Expression", "ExpressionError",
     # engine
@@ -64,4 +69,6 @@ __all__ = [
     # M2：checkpoint 快取與平行批次
     "run_defect_cached", "image_segment_signature", "StageCache", "run_batch",
     "run_batch_steps",
+    # 「跟整批比」的兩趟判定（F23 期3）
+    "apply_lot_scaling",
 ]

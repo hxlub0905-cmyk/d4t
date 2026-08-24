@@ -54,31 +54,37 @@ def test_every_stage_has_a_title_and_a_subtitle(qapp):
         assert sub.strip(), "段落 %r 沒有副標（rail 上會只剩一個字）" % gid
 
 
-def test_the_new_stages_are_in_the_order(qapp):
-    """F16 的兩段真的進去了（而且在使用者定的位置上）。"""
+def test_the_stages_are_in_the_order(qapp):
+    """段落照使用者定的順序（而且是**七段**）。
+
+    F16（2026-08-20）定的是八段；F24 §5 把 Algo 段解散進判定（算式住進
+    working numbers、補值變成「missing ⇒」、跨顆換算變成「跟整批比」），
+    而「動段落要使用者再點一次頭」那條規矩履行過了（2026-08-24：
+    「那三件事接著做」）。
+    """
     order = list(GROUP_ORDER)
-    assert GROUP_ALGO in order and GROUP_OUTPUT in order
-    # 使用者 2026-08-20 定稿：Input · Enhance · ROI · Measure · Algo · Compare · ADC · Output
+    assert GROUP_ALGO not in order and GROUP_OUTPUT in order
     assert order == ["input", "enhance", "region", "measure",
-                     "algo", "compare", "adc", "output"], order
+                     "compare", "adc", "output"], order
 
 
-def test_algo_cards_never_read_an_image_stream():
+def test_the_absorbed_algo_cards_never_read_an_image_stream():
     """Algo 與 Measure 的界線（使用者定調）：
 
     > measure 是量出數值來，但 Algo 是拿這些 feature 去做更 custom 的處理
 
-    寫成一條**自動套用到 registry 每一張卡**的性質：Algo 段的卡不吃影像流。
-    沒有這一條的話，Algo 段會慢慢長成第二個 Measure —— 而那時候使用者要在
-    兩個看起來一樣的段落裡猜他的卡在哪一段。
+    Algo 段解散之後這條界線仍然成立 —— 被吸收的那兩張卡（收在
+    `HIDDEN_STEPS`，只服務舊 recipe）不吃影像流；`GROUP_ALGO` 留給外掛
+    相容，掛在那上面的卡也一樣。
     """
     for key, cls in sorted(REGISTRY.items()):
-        if cls.resolve_group() != GROUP_ALGO:
+        if key not in ("feature_math", "feature_fill") \
+                and cls.resolve_group() != GROUP_ALGO:
             continue
         params = {p.name: p.default for p in cls.params}
         reads = cls.resolve_reads(params)
         assert not reads, (
-            "卡片 %r 在 Algo 段，卻要讀影像流 %s。"
+            "卡片 %r 只吃數字，卻要讀影像流 %s。"
             "吃影像的卡屬於 Measure（影像＋區域 → 數字）。" % (key, reads))
 
 

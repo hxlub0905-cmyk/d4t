@@ -1128,6 +1128,15 @@ class PipelineCanvas(QGraphicsView):
     #: 「在自己的視窗打開畫布」（F8-UI D 案）。畫布在主視窗只佔中上一塊
     #: （它會 zoom，不需要常駐大面積），要看全貌就彈出去。
     popout_requested = Signal()
+    #: 點了判定區的入口小卡（F24 ②）——「跳到判定的編輯」。
+    #: 入口卡永遠恰好一個、不能刪，所以這裡沒有 id 要帶。
+    decision_clicked = Signal()
+    #: 點了畫布上的分流徽章（F25-B）—— 去編 route_by。
+    prefilter_clicked = Signal()
+    #: 點了判定樹的一個菱形／托盤（F24 ③）—— 帶的是**路徑**（"" = 根、
+    #: "yn…" 一路往下）。節點是 frozen dataclass，路徑才是唯一的身分。
+    tree_step_clicked = Signal(str)
+    tree_leaf_clicked = Signal(str)
 
     def __init__(self, parent=None, popout_button: bool = True):
         super().__init__(parent)
@@ -1353,9 +1362,158 @@ class PipelineCanvas(QGraphicsView):
                 self._scene.addItem(edge)
                 self._edges.append(edge)
 
+        # 判定區（F24 ②）：scene 剛被 clear()，舊圖元已銷毀 —— 用存著的 info
+        # 重建。它跟節點一起住在 scene 裡，所以平移縮放是同一件事。
+        self._tree_items = []
+        self._rebuild_decision()
+        # 分流徽章（F25-B）同理：它站在所有卡片的**前面**。
+        self._prefilter_items = []
+        self._rebuild_prefilter()
+
         self.set_selected(self._selected)
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self._scene.setSceneRect(rect)
+
+    # ---- 判定區（F24 ②）---------------------------------------------------
+    def set_decision(self, info: Optional[Dict[str, Any]]) -> None:
+        """換掉判定區的內容（``None`` = 這份 recipe 走二元 score，沒有判定區）。
+
+        info 的形狀見 `tree_scene.decision_info`。畫布只負責畫 ——
+        counts 是不是 None（試跑過沒）由呼叫端決定，這裡不猜。
+        """
+        self._decision_info = None if info is None else dict(info)
+        self._rebuild_decision()
+
+    def _rebuild_decision(self) -> None:
+        from . import tree_scene
+
+        # 幽靈線指著即將被換掉的圖元 —— 先清（滑鼠移開的事件不一定會來）。
+        self.clear_tree_ghosts()
+        for it in getattr(self, "_tree_items", []) or []:
+            try:
+                self._scene.removeItem(it)
+            except Exception:              # noqa: BLE001 — clear() 先銷毀過就算了
+                pass
+        self._tree_items = []
+        info = getattr(self, "_decision_info", None)
+        if not info:
+            return
+        # 判定區放在所有卡片的右邊（mockup 定稿：畫布右側一塊淡紫區）。
+        right = 0.0
+        top = 0.0
+        for item in self._items.values():
+            right = max(right, item.pos().x() + NODE_W)
+            top = min(top, item.pos().y())
+        origin = QPointF(right + COL_GAP * 1.8, top)
+        self._tree_items = tree_scene.build_zone(
+            self._scene, self, info, origin,
+            collapsed=bool(getattr(self, "_tree_collapsed", False)),
+            selected_path=getattr(self, "_tree_selected", None),
+            highlight_path=getattr(self, "_tree_highlight", None))
+        rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
+        self._scene.setSceneRect(self._scene.sceneRect().united(rect))
+
+    def decision_items(self) -> List[Any]:
+        """判定區現在的圖元（測試與外部檢查用）。"""
+        return list(getattr(self, "_tree_items", []) or [])
+
+    # ---- 分流徽章（F25-B）-------------------------------------------------
+    def set_prefilter(self, info: Optional[Dict[str, Any]]) -> None:
+        """換掉分流徽章（``None`` = 這份 recipe 沒有分流，畫布上就沒有它）。
+
+        形狀見 `route_badge.route_badge_info`。它**不是一張卡**（不可拖、
+        沒有埠）—— 理由見那個模組的說明。
+        """
+        self._prefilter_info = None if info is None else dict(info)
+        self._rebuild_prefilter()
+
+    def _rebuild_prefilter(self) -> None:
+        from . import route_badge
+
+        for it in getattr(self, "_prefilter_items", []) or []:
+            try:
+                self._scene.removeItem(it)
+            except Exception:          # noqa: BLE001 — clear() 先銷毀過就算了
+                pass
+        self._prefilter_items = []
+        info = getattr(self, "_prefilter_info", None)
+        if not info:
+            return
+        # 站在最左邊那張卡的**前面**（左→右讀起來就是時間順序：
+        # 先分流、再跑卡片、最後判定）。
+        left, top, feed = None, 0.0, None
+        for item in self._items.values():
+            x = item.pos().x()
+            if left is None or x < left:
+                left, top = x, item.pos().y()
+                feed = QPointF(x, item.pos().y() + item.height() / 2.0)
+        if left is None:
+            left, top = 0.0, 0.0
+        origin = QPointF(left - route_badge.BADGE_W - COL_GAP, top)
+        self._prefilter_items = route_badge.build_badge(
+            self._scene, self, info, origin, feed_to=feed)
+        rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
+        self._scene.setSceneRect(self._scene.sceneRect().united(rect))
+
+    def prefilter_items(self) -> List[Any]:
+        """分流徽章現在的圖元（測試與外部檢查用）。"""
+        return list(getattr(self, "_prefilter_items", []) or [])
+
+    def set_tree_selected(self, path: Optional[str]) -> None:
+        """畫布上亮起判定樹的某一步（右欄正在編它）。``None`` = 沒有。"""
+        self._tree_selected = None if path is None else str(path)
+        self._rebuild_decision()
+
+    def tree_selected(self) -> Optional[str]:
+        return getattr(self, "_tree_selected", None)
+
+    def toggle_tree_collapsed(self) -> None:
+        """雙擊入口卡＝收合整棵樹成那一張小卡（嫌佔位的出口，F24 §4）。
+
+        收合是**這一份畫布的檢視狀態**，不進 recipe —— 跟縮放平移同一類。
+        """
+        self._tree_collapsed = not bool(getattr(self, "_tree_collapsed", False))
+        self._rebuild_decision()
+
+    def tree_collapsed(self) -> bool:
+        return bool(getattr(self, "_tree_collapsed", False))
+
+    def set_tree_highlight(self, path: Optional[str]) -> None:
+        """亮起「現在預覽那一顆走過的路」（F24 §8）。``None`` = 清掉。"""
+        new = None if path is None else str(path)
+        if new == getattr(self, "_tree_highlight", None):
+            return
+        self._tree_highlight = new
+        self._rebuild_decision()
+
+    # ---- 幽靈線（F24 ④）---------------------------------------------------
+    def show_tree_ghosts(self, diamond: Any) -> None:
+        """滑鼠停在一個菱形上：它用到的數字各自亮出來源卡＋一條臨時點線。"""
+        from . import tree_scene
+
+        self.clear_tree_ghosts()
+        info = getattr(self, "_decision_info", None)
+        if not info:
+            return
+        self._ghost_items, self._ghost_cards = tree_scene.build_ghosts(
+            self._scene, self, diamond, dict(info.get("feat_owner") or {}))
+
+    def clear_tree_ghosts(self) -> None:
+        for it in getattr(self, "_ghost_items", []) or []:
+            try:
+                self._scene.removeItem(it)
+            except Exception:              # noqa: BLE001 — clear() 先銷毀就算了
+                pass
+        for card in getattr(self, "_ghost_cards", []) or []:
+            try:
+                card.set_hovered(False)
+            except Exception:              # noqa: BLE001
+                pass
+        self._ghost_items, self._ghost_cards = [], []
+
+    def ghost_items(self) -> List[Any]:
+        """現在畫著的幽靈線（測試用）。"""
+        return list(getattr(self, "_ghost_items", []) or [])
 
     def copy_positions_from(self, other: "PipelineCanvas") -> None:
         """把另一份畫布的節點位置搬過來（彈出視窗開啟時跟主視窗一致）。"""
@@ -1427,8 +1585,14 @@ class PipelineCanvas(QGraphicsView):
         """取某個節點的圖元（highlight / 測試用；對應舊的 ``card()``）。"""
         return self._items.get(str(node_id))
 
-    def set_score_summary(self, expr: str, threshold: Any) -> None:
-        self._score_summary = "score = %s   threshold %s" % (expr, threshold)
+    def set_score_summary(self, text: str) -> None:
+        """判定段的一句話摘要（狀態列與測試讀得到）。
+
+        ⚠ 以前這裡自己組 ``"score = … threshold …"`` —— 而 F25 之後**每一份
+        開起來的 recipe 都是判定樹**，那句話會永遠是空的門檻。組字的責任因此
+        搬去 Studio（它才知道現在是哪一種判定），這裡只收結果。
+        """
+        self._score_summary = str(text)
 
     def score_summary(self) -> str:
         return self._score_summary

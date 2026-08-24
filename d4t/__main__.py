@@ -135,7 +135,25 @@ def _cmd_run(args: argparse.Namespace) -> int:
         for w in second.warnings:
             print("  △ %s" % w)
 
-    if ds.kind not in recipe.routes:
+    # ---- 分流（F23）：route_by 存在時它覆蓋 kind 選路 ----
+    # 欄位在不在**這裡**查（手上有 KlarfDoc，答得出「那它有哪些欄」）——
+    # 整批跑完才發現「那一欄根本不存在」是最貴的一種發現方式。
+    rb = getattr(recipe, "route_by", None)
+    if rb is not None:
+        from d4t.core.ingest.dataset import columns_of, missing_columns_of
+
+        absent = missing_columns_of(ds, [rb.column])
+        if absent:
+            have = ", ".join(columns_of(ds)) or "（這種資料沒有 KLARF，沒有欄位）"
+            print("[錯誤] route_by 指到這份資料沒有的欄：%s。它有的是：%s"
+                  % (", ".join(absent), have), file=sys.stderr)
+            return 2
+        mapping = "、".join("%s→%s" % (v, r)
+                            for v, r in sorted(rb.map.items()))
+        tail = ("；其他走 %s" % rb.default.strip()) if rb.default.strip() \
+            else "；對不上＝那一顆失敗"
+        print(f"分流：{rb.column}（{mapping}{tail}）")
+    elif ds.kind not in recipe.routes:
         print(f"[錯誤] recipe 沒有 '{ds.kind}' 的 route（有：{sorted(recipe.routes)}）", file=sys.stderr)
         return 2
 
@@ -172,12 +190,40 @@ def _cmd_run(args: argparse.Namespace) -> int:
         for r in ok:
             bins[r.get("bin")] = bins.get(r.get("bin"), 0) + 1
         print("bin 分佈：" + " · ".join(f"bin {b}={c}" for b, c in sorted(bins.items())))
+    # ---- 分流摘要（F23 §4.1）----
+    # 「掉進 default 的顆數」一定要看得見：站點換了編碼、整批掉進 default，
+    # 是「跑得完、有數字、而且是錯的」的形狀。route 的決定是純函式
+    # （fields → route），所以這裡重算一次就是批次裡用的那個答案。
+    if rb is not None:
+        from d4t.core.pipeline.recipe import resolve_route
+
+        route_counts: dict = {}
+        n_defaulted = 0
+        for item in list(ds.items)[:n_total]:
+            r_key, _val, how = resolve_route(recipe, item, ds.kind)
+            key = r_key if r_key is not None else "（沒有 route，該顆失敗）"
+            route_counts[key] = route_counts.get(key, 0) + 1
+            if how == "default":
+                n_defaulted += 1
+        print("分流結果：" + " · ".join(f"{rk}={c}"
+                                      for rk, c in sorted(route_counts.items())))
+        if n_defaulted:
+            print(f"  △ {n_defaulted} 顆的 {rb.column} 值不在對照表裡，"
+                  f"走了 default route「{rb.default.strip()}」")
+        declared = set(rb.map.values()) | ({rb.default.strip()}
+                                           if rb.default.strip() else set())
+        untaken = sorted(declared - set(route_counts))
+        if untaken:
+            print("  △ 這幾條 route 一顆都沒走到：%s（寫了但用不到的路最容易爛）"
+                  % ", ".join(untaken))
     gt_path, gt = _find_ground_truth(getattr(args, "ground_truth", None),
                                      str(args.klarf))
     if gt:
         from d4t.core.export import summarize
+        from d4t.core.export.report import UNBINNED_KEY
 
-        g = (summarize(payload, ground_truth=gt).get("ground_truth") or {})
+        summary = summarize(payload, ground_truth=gt)
+        g = (summary.get("ground_truth") or {})
         print(f"\n對照 ground truth（{gt_path}）：")
         if g.get("n_evaluated"):
             print(f"  正確率 {_pct(g.get('accuracy'))}　"
@@ -188,6 +234,19 @@ def _cmd_run(args: argparse.Namespace) -> int:
         else:
             print("  這一批沒有一顆對得上 ground truth 裡的 defect id —— "
                   "是不是對到別的 lot 了？")
+
+        # 每一個 bin 的純度（F22-UI）—— 多類別唯一量得出來的東西。
+        # **只在真的分出兩類以上時才印**：二元判定的純度上面那三個數字已經
+        # 講完了，多印一張表只是同一件事講兩次。
+        purity = summary.get("bin_purity") or []
+        if len([r for r in purity if r.get("bin") != UNBINNED_KEY]) > 2:
+            print("  每一個 bin 裡有幾顆是真的：")
+            for row in purity:
+                pct = ("—" if row.get("purity") is None
+                       else "%.0f%%" % (row["purity"] * 100))
+                print("    bin %-4s %3d 顆　真缺陷 %3d　假點 %3d　純度 %s"
+                      % (row["bin"], row["n"], row["n_real"],
+                         row["n_nuisance"], pct))
 
     for r in fail[:5]:
         print(f"  ✗ {r.get('defect_id')}: {r.get('error')}")
@@ -451,6 +510,17 @@ def _find_ground_truth(arg, klarf_path: str):
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    # 廠內機器的 console 是 cp950，而這支 CLI 印 ✓ / ✗ / △ / →（cp950 沒有
+    # 這幾個字）。不設這個的話，跑完 48 顆、CSV 也寫好了，使用者看到的卻是
+    # 一條 UnicodeEncodeError 的 traceback —— 在**成功**的那一刻。
+    # ``errors="replace"`` 把印不出的字換成 ?（中文 cp950 本來就有，不受影響）；
+    # 檔案輸出全部自帶 encoding="utf-8"，不走這裡。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass    # 不是真的 console（被 redirect 成別的東西）就算了
+
     ap = argparse.ArgumentParser(
         prog="d4t",
         description="d4t — 把想法變算法的 ADC 工具",

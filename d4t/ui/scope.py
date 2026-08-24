@@ -103,7 +103,13 @@ SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder")
 #: 而那 12 正好是沒有缺陷的那 12 顆）。詳見 `tests/test_e2e_dual_route.py`。
 #:
 #: 所以「不確定的時候先收起來」那句話沒有被推翻 —— 這一次是使用者確定了。
-HIDDEN_STEPS: Sequence[str] = ("align",)
+#:
+#: 2026-08-24（F24 ④）：`feature_math` 與 `feature_fill` 收起來 ——
+#: 算式住進了判定的 working numbers（`let`，同一個引擎、進 CSV），補值那件事
+#: 是判定樹第一步的天然形狀（`cd_deq_missing > 0` 就是它）。**收不是刪**：
+#: 兩張卡引擎照認、舊 recipe 照跑、`tests/test_ui_f21_expr_picker.py` 直接從
+#: registry 拿它們測。使用者用過樹之後確認夠了再談刪（CLAUDE.md 那張對照表）。
+HIDDEN_STEPS: Sequence[str] = ("align", "feature_math", "feature_fill")
 
 #: 沒有資料集時 ``RecipeModel`` 用的 route 名稱。
 DEFAULT_KIND: str = SUPPORTED_KINDS[0]
