@@ -5,7 +5,7 @@ f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 ac0c96cd0d671a439c492b72fae0379d364aeb62 AGENTS.md
 b404ab73fd00a46fa43d83d173fe5d973f01bfd7 CLAUDE.md
 b20e9b7f31aa8195e297b4a124b69252cd4c56cf README.md
-01a924e18b114fd659693edb4b4ad4ce0174415a SESSION_LOG.md
+d5d3b8a12fe51adf2a43011e91f2e69cbac315b7 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 7742c2cd23ceff1a020c07c4c4684d332ee78050 d4t/__main__.py
@@ -49,9 +49,9 @@ ec7bdb58e7da611ac74f16b53e218f9a65476bdc d4t/core/pipeline/cellrois.py
 204e9f613715f6e9af467b79f5368b7e7a45556b d4t/core/pipeline/channels.py
 942fcb5a17829498aec9f8eb5c490785c5d19916 d4t/core/pipeline/context.py
 fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
-8be219b056d2bb84d48741c5c8855a73f155949f d4t/core/pipeline/engine.py
+c9602dc050c55f0917b9300b7a156e15473ac627 d4t/core/pipeline/engine.py
 17f8abfc3739d6860f5b9b063c2c608a9cd08b1e d4t/core/pipeline/expression.py
-fab734244eb3ebe490cfed8d0e8dbf0e9f7d645b d4t/core/pipeline/recipe.py
+7e343fff73bfa998440c6eae872eb5fc261d0753 d4t/core/pipeline/recipe.py
 6d8a3d52f4bbf378c8bd1f1de2b4c1c60ec29678 d4t/core/pipeline/step.py
 54503e5000aeae968a523044183f5bf544671ae7 d4t/core/steps/__init__.py
 d9d78b9c74d5495419eb584a96436c56cf028641 d4t/core/steps/_util.py
@@ -112,6 +112,7 @@ d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 c4f06765ad918545511da042eb8d2b63df19795f docs/plans/F15-pair-sources.md
 a5b31733923c0c3a3f54782a7720c76fdbbafc38 docs/plans/F20-pick-defect-box.md
 580aa51df6c26db9beb45cf3d3926f4eb33724c9 docs/plans/F21-algo-and-roi.md
+b0ba74382976b92f219b135a52c4d55793ce2079 docs/plans/F22-adc-multiclass.md
 773d4c5652e1abd95b7bf06591a691c07c1c9fa1 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -142,6 +143,7 @@ c01fd4f7804f568260bb05fa61871b1f65906c25 tests/test_cd_blob.py
 9ce9779e28138d01220cbe750e4dcaa31c624263 tests/test_dag_branching.py
 9e47488159ddde54f903cddf9fa0f3d88e103e99 tests/test_dag_order.py
 70ea34793a5b48433120c5f0b5ef913df7eacfa1 tests/test_dataset.py
+4795be578be4cf1c81d3c439dd35fbd16cf691ce tests/test_decide_multiclass.py
 9b9f40478da74058b851a9a1c9930f52cdcdca28 tests/test_e2e_die_to_die.py
 2a8e6b9761dfcf7906c3e4e1a3762975ced8447e tests/test_e2e_dual_route.py
 8b0ab7fe7dae38c1494a5e162ccdbcaf1f4bf553 tests/test_engine.py

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 
 from .context import FEATURE_OWNER_KEY, Context
-from .expression import parse_expression
+from .expression import ExpressionError, parse_expression
 from .recipe import Recipe, RecipeError, execution_order
 from .step import REGISTRY, SCALE_LOT, Step, StepError
 
@@ -541,8 +541,58 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
     return ctx, None
 
 
+def _eval_decision(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
+    """多類別判定（F21-D）：``let`` → 由上往下第一個成立的規則 → bin。
+
+    三件事的順序是**規格**，不是實作細節：
+
+    1. ``let`` 先算完，而且每一行**寫進 ``ctx.features``** —— 中間值因此會進
+       CSV 與報表，使用者畫得出它的分布（F19 的規矩：卡片自動做的每一個決定，
+       都要變成一個畫得出分布的數字）。後面一行看得到前面一行。
+    2. ``rules`` **由上往下，第一個成立的贏**。所以「改順序＝改優先權」，
+       而那句話使用者讀得懂。
+    3. ``score`` 最後算（它可以用 ``let`` 出來的中間值），寫進
+       ``ctx.features["score"]`` —— 跟老路一字不差，所以 KLARF 的 DSIZE、
+       Top-N 排序、CSV 的 score 欄都不必知道這一段換過。
+
+    規則的值怎麼判真假：**非 0 就是成立**。表達式的比較運算子本來就回 1.0／0.0
+    （`expression.py` 的左結合折疊），所以 ``"a > 5"`` 與 ``"(a > 5) * (b < 2)"``
+    都是合法的規則，而使用者不必學第二套語法。
+    """
+    for item in recipe.decide.let:
+        name = str(item.name).strip()
+        if not name:
+            raise ExpressionError("a 'let' line has no name", "", 0)
+        ctx.features[name] = parse_expression(item.expr).eval(ctx.features)
+
+    chosen_bin = int(recipe.decide.otherwise_bin)
+    chosen_label = str(recipe.decide.otherwise_label)
+    chosen_rule = -1
+    for i, rule in enumerate(recipe.decide.rules):
+        if parse_expression(rule.when).eval(ctx.features) != 0.0:
+            chosen_bin, chosen_label, chosen_rule = int(rule.bin), rule.label, i
+            break
+
+    expr = str(recipe.decide.score or "").strip()
+    score = parse_expression(expr).eval(ctx.features) if expr else 0.0
+    ctx.features["score"] = score
+    # 哪一條規則對上了 —— 給面板與報表。**不進 `DefectResult`**：那會動到
+    # SQLite schema 與 CSV 的欄，而黃金值現在是壞的（見 F21 §6），
+    # 「改了但數字沒變」這句話目前沒有人證得了。
+    ctx.meta["decide"] = {"rule": chosen_rule, "label": chosen_label,
+                          "bin": chosen_bin}
+    return score, chosen_bin
+
+
 def _eval_score(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
-    """ADC 判定：score = expr(features) → bin。失敗會 raise（呼叫端攔截）。"""
+    """ADC 判定：score = expr(features) → bin。失敗會 raise（呼叫端攔截）。
+
+    ``recipe.decide`` 有東西的時候走多類別那一支（F21-D）—— **沒有的時候
+    這一支一個位元都沒動**，因為黃金值現在是壞的，「改了判定段但數字沒變」
+    這句話目前沒有人證得了（見 `docs/plans/F21-algo-and-roi.md` §6）。
+    """
+    if getattr(recipe, "decide", None) is not None:
+        return _eval_decision(recipe, ctx)
     expr = parse_expression(recipe.score.expr)
     score = expr.eval(ctx.features)
     ctx.features["score"] = score

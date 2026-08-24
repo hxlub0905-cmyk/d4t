@@ -105,10 +105,70 @@ class RecipeNode:
 
 @dataclass
 class ScoreSpec:
-    """ADC 判定段：score 表達式 + 門檻 + bin 對應（{"below": 0, "above": 1}）。"""
+    """ADC 判定段：score 表達式 + 門檻 + bin 對應（{"below": 0, "above": 1}）。
+
+    **只分得出兩類。** 多類別走 :class:`DecideSpec`（F21-D）。
+    """
     expr: str
     threshold: float
     bins: Dict[str, int]
+
+
+@dataclass(frozen=True)
+class Rule:
+    """判定的一條規則：``when`` 成立就是 ``bin``（``label`` 只是給人看的字）。"""
+    when: str
+    bin: int
+    label: str = ""
+
+
+@dataclass(frozen=True)
+class Let:
+    """判定段的一個中間值：``name = expr``，算完寫進 ``ctx.features``。"""
+    name: str
+    expr: str
+
+
+@dataclass
+class DecideSpec:
+    """ADC 判定段（多類別，F21-D）—— **一張由上往下讀的篩子**。
+
+    為什麼是「第一個成立的贏」而不是「每條算分取最高」
+    --------------------------------------------------
+    使用者是不會寫 code 的製程工程師（推廣鐵則）。「由上往下，第一個對上的
+    就是答案」是一句他讀得懂、而且**改順序就等於改優先權**的規則；算分取最高
+    要他同時想像好幾條分數線的相對高度，而那件事在畫面上畫不出來。
+
+    ``let``：中間值，而且它們是**真的特徵**
+    ---------------------------------------
+    每一行 ``{"name": …, "expr": …}`` 算完就寫進 ``ctx.features`` —— 所以它們
+    會進 CSV、進報表，使用者畫得出它們的分布。這正是 `feature_math` 存在的唯一
+    真理由（「一份 recipe 只有一條表達式，中間值沒有地方放」），而在這裡它不必
+    是一張卡：**判定段吃的是「這一次跑出來的全部」，沒有「哪一個」可以選**
+    —— 那是 F17 對 Output 卡講過的話，對這一段一字不差地成立。
+
+    ⚠ 使用者 2026-08-23 提出「ADC 也可以有線」，而那句話**不在這一版否決**：
+    多類別之後每條規則吃的是**特定幾個**數字，不是全部，那時候線是有意義的。
+    這一版只做引擎，畫布留在後面（見 `docs/plans/F22-adc-multiclass.md`）。
+
+    跟 :class:`ScoreSpec` 的關係：**二選一，不能並存**
+    -------------------------------------------------
+    並存的話同一件事會有兩個地方存，而這個 repo 最怕的就是那個形狀
+    （抄第二份出來的那份一定會漂）。所以 ``validate`` 把「兩個都寫」判成
+    ``ambiguous-decision`` 的 error，而不是挑一個贏。
+
+    這一版**沒有自動遷移**：舊 recipe 照舊走 ``score``，一個位元都不動。
+    理由不是保守，是**黃金值現在是壞的**（見 `docs/plans/F21-algo-and-roi.md`
+    §6）—— 沒有那條防線的時候，「改了判定段但數字沒變」這句話沒有人證得了。
+    """
+    #: 中間值（一行一個），算完寫進 features。
+    let: List[Let] = field(default_factory=list)
+    rules: List[Rule] = field(default_factory=list)
+    #: 一條都沒對上的時候。
+    otherwise_bin: int = 0
+    otherwise_label: str = ""
+    #: 這一顆的分數（KLARF 的 DSIZE／Top-N 排序要一個數字）。空字串 = 0.0。
+    score: str = ""
 
 
 @dataclass(frozen=True)
@@ -157,6 +217,108 @@ class Edge:
         raise RecipeError(
             "an edge must be [from, to] or [from, from_port, to, to_param] — "
             "got %d item(s): %r" % (len(e), e))
+
+
+# ---------------------------------------------------------------------------
+# 多類別判定（F21-D）
+# ---------------------------------------------------------------------------
+def _decide_issues(recipe: "Recipe", decide: "DecideSpec") -> List["Issue"]:
+    """`decide` 的健檢（F21-D）。
+
+    最重要的一條是 ``ambiguous-decision``：``score`` 與 ``decide`` **不能並存**。
+    這個 repo 最怕的形狀就是「同一件事有兩個地方存」—— 挑一個贏的話，另一份會
+    安靜地漂，而使用者改了沒用的那一份時畫面上看不出來。
+    """
+    out: List[Issue] = []
+    if str(recipe.score.expr or "").strip():
+        out.append(Issue(
+            code="ambiguous-decision", level="error", node_id=None,
+            title="This recipe decides the bin in two different ways",
+            detail="it has both a 'score' expression and a 'decide' block. "
+                   "Keep one of them: 'decide' is the one with several "
+                   "classes; 'score' is the two-bin threshold. Clear "
+                   "score.expr to use 'decide'."))
+    if not decide.rules:
+        out.append(Issue(
+            code="no-rules", level="warning", node_id=None,
+            title="The decide block has no rules",
+            detail="every defect will land in the 'otherwise' bin (%d). "
+                   "Add a rule, or use a score expression instead."
+                   % int(decide.otherwise_bin)))
+    seen: Set[str] = set()
+    for i, item in enumerate(decide.let):
+        name = str(item.name).strip()
+        if not name:
+            out.append(Issue(
+                code="bad-let", level="error", node_id=None,
+                title="A 'let' line has no name",
+                detail="decide.let[%d] must have a name - that name is what "
+                       "the rules below refer to." % i))
+        elif name in seen:
+            out.append(Issue(
+                code="bad-let", level="error", node_id=None,
+                title="Two 'let' lines have the same name",
+                detail="decide.let[%d] is called '%s' again - the second one "
+                       "would quietly replace the first." % (i, name)))
+        seen.add(name)
+        try:
+            parse_expression(item.expr)
+        except ExpressionError as e:
+            out.append(Issue(
+                code="bad-let", level="error", node_id=None,
+                title="A 'let' line does not parse", detail=str(e)))
+    for i, rule in enumerate(decide.rules):
+        try:
+            parse_expression(rule.when)
+        except ExpressionError as e:
+            out.append(Issue(
+                code="bad-rule", level="error", node_id=None,
+                title="Rule %d does not parse" % (i + 1), detail=str(e)))
+    if str(decide.score or "").strip():
+        try:
+            parse_expression(decide.score)
+        except ExpressionError as e:
+            out.append(Issue(
+                code="bad-rule", level="error", node_id=None,
+                title="The decide block's score expression does not parse",
+                detail=str(e)))
+    return out
+
+
+def _decide_from_json(raw: Any) -> Optional["DecideSpec"]:
+    """讀 ``decide`` 區塊。**沒有就回 None** —— 那份 recipe 走 ``score`` 老路。
+
+    格式錯要**當場講**而不是安靜地退回老路：安靜退回的話，一份打錯字的多類別
+    recipe 會跑得完、有數字、而且每一顆都是 bin 0（推廣鐵則的老形狀）。
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise RecipeError("the 'decide' block must be an object (dict), got "
+                          "%s" % type(raw).__name__)
+    lets: List[Let] = []
+    for i, item in enumerate(list(raw.get("let") or [])):
+        if not isinstance(item, dict) or "name" not in item or "expr" not in item:
+            raise RecipeError("decide.let[%d] must be an object with 'name' "
+                              "and 'expr'" % i)
+        lets.append(Let(name=str(item["name"]).strip(),
+                        expr=str(item["expr"])))
+    rules: List[Rule] = []
+    for i, item in enumerate(list(raw.get("rules") or [])):
+        if not isinstance(item, dict) or "when" not in item or "bin" not in item:
+            raise RecipeError("decide.rules[%d] must be an object with 'when' "
+                              "and 'bin'" % i)
+        rules.append(Rule(when=str(item["when"]), bin=int(item["bin"]),
+                          label=str(item.get("label", "") or "")))
+    other = raw.get("otherwise") or {}
+    if not isinstance(other, dict):
+        raise RecipeError("decide.otherwise must be an object with 'bin'")
+    return DecideSpec(
+        let=lets, rules=rules,
+        otherwise_bin=int(other.get("bin", 0)),
+        otherwise_label=str(other.get("label", "") or ""),
+        score=str(raw.get("score", "") or ""),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -750,10 +912,13 @@ class Recipe:
     #: 新建的 recipe 就是「這一版寫的」，所以預設值是現在這一版 ——
     #: 空字串保留給**舊檔案**（那些檔案是真的沒有這個欄位）。
     app_version: str = field(default_factory=_app_version)
+    #: 多類別判定（F21-D）。``None`` = 這份 recipe 走 ``score`` 那條老路
+    #: （一個位元都不動）。兩個都寫是 ``ambiguous-decision`` 的 error。
+    decide: Optional["DecideSpec"] = None
 
     # ---- JSON serde -------------------------------------------------------
     def to_json_dict(self) -> Dict[str, Any]:
-        return {
+        out: Dict[str, Any] = {
             "recipe_id": self.recipe_id,
             "version": int(self.version),
             # 存檔時一律寫**現在這一版**（不是讀進來的那一版）——
@@ -777,6 +942,19 @@ class Recipe:
                 "bins": dict(self.score.bins),
             },
         }
+        # **沒有就不寫這個鍵** —— 一份走老路的 recipe 存出來要跟以前逐位元組
+        # 相同（`test_a_json_round_trip_changes_nothing` 與 export parity 都
+        # 靠這件事）。
+        if self.decide is not None:
+            out["decide"] = {
+                "let": [{"name": x.name, "expr": x.expr} for x in self.decide.let],
+                "rules": [{"when": r.when, "bin": int(r.bin), "label": r.label}
+                          for r in self.decide.rules],
+                "otherwise": {"bin": int(self.decide.otherwise_bin),
+                              "label": self.decide.otherwise_label},
+                "score": self.decide.score,
+            }
+        return out
 
     @classmethod
     def from_json_dict(cls, d: Dict[str, Any]) -> "Recipe":
@@ -807,6 +985,8 @@ class Recipe:
             threshold=float(sd.get("threshold", 0.0)),
             bins={str(k): int(v) for k, v in dict(sd.get("bins") or {}).items()},
         )
+
+        decide = _decide_from_json(d.get("decide"))
 
         routes = {str(k): [str(x) for x in v] for k, v in dict(d["routes"]).items()}
 
@@ -864,6 +1044,7 @@ class Recipe:
             author=str(d.get("author", "")),
             description=str(d.get("description", "")),
             edges=edges,
+            decide=decide,
         )
 
     @classmethod
@@ -1197,16 +1378,25 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
         registry = REGISTRY
     issues: List[Issue] = []
 
-    # ---- bins 必須含 below / above ----
-    bins = recipe.score.bins or {}
-    for key in ("below", "above"):
-        if key not in bins:
-            issues.append(Issue(
-                code="bad-bins", level="error", node_id=None,
-                title="Incomplete bin settings",
-                detail=f"score.bins has no '{key}' (both below and above bin "
-                       f"values are required); it currently has: "
-                       f"{sorted(bins)}"))
+    # ---- 判定段（F21-D）：兩種寫法只能有一種 ----
+    #
+    # **這一段要排在 score 的檢查之前**：有 `decide` 的時候整個 score 區塊都
+    # 不會跑（`_eval_score` 的第一行就分了岔），下面兩道檢查因此要跳過它。
+    decide = getattr(recipe, "decide", None)
+    if decide is not None:
+        issues.extend(_decide_issues(recipe, decide))
+
+    # ---- bins 必須含 below / above ----（有 decide 就整段跳過，見上）
+    if decide is None:
+        bins = recipe.score.bins or {}
+        for key in ("below", "above"):
+            if key not in bins:
+                issues.append(Issue(
+                    code="bad-bins", level="error", node_id=None,
+                    title="Incomplete bin settings",
+                    detail=f"score.bins has no '{key}' (both below and above "
+                           f"bin values are required); it currently has: "
+                           f"{sorted(bins)}"))
 
     # ---- 要檢查哪些 route ----
     if kind is not None:
@@ -1287,13 +1477,19 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             seen_inputs[(e.dst, local)] = e.src
 
     # ---- score 表達式解析 ----
+    #
+    # ⚠ 有 `decide` 的時候**整個 score 區塊都不會跑**（`_eval_score` 的第一行
+    # 就分了岔），所以它連解析都不該解析：一份走多類別的 recipe 的 score.expr
+    # 是空字串，而空字串解析不出來 —— 對它報一條 error 等於「recipe 是對的，
+    # 但健檢說它壞了」，而使用者只會相信健檢。
     expr = None
-    try:
-        expr = parse_expression(recipe.score.expr)
-    except ExpressionError as e:
-        issues.append(Issue(
-            code="score-expr", level="error", node_id=None,
-            title="Score expression failed to parse", detail=str(e)))
+    if decide is None:
+        try:
+            expr = parse_expression(recipe.score.expr)
+        except ExpressionError as e:
+            issues.append(Issue(
+                code="score-expr", level="error", node_id=None,
+                title="Score expression failed to parse", detail=str(e)))
 
     # ---- 每條 route：unknown-node / cycle / reads 模擬 / requires_ref ----
     for k in kinds:
@@ -1455,7 +1651,9 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             regions |= set(step_cls.resolve_regions_out(p))
 
         # score 變數 ⊆ 此 route 會產出的特徵 ∪ {"score"}（僅警告）
-        if expr is not None:
+        # ⚠ 有 `decide` 的時候 `score.expr` **根本不會跑**，對它報一條警告等於
+        # 叫使用者去修一個不影響結果的地方。
+        if expr is not None and getattr(recipe, "decide", None) is None:
             unknown = sorted(expr.variables - feats)
             if unknown:
                 issues.append(Issue(
