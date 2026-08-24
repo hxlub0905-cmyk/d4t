@@ -5,7 +5,7 @@ f2bf0bd69e5c75960e7038807d0bfbf9474fbebd .github/workflows/ci.yml
 ac0c96cd0d671a439c492b72fae0379d364aeb62 AGENTS.md
 b404ab73fd00a46fa43d83d173fe5d973f01bfd7 CLAUDE.md
 b20e9b7f31aa8195e297b4a124b69252cd4c56cf README.md
-2f76b74e5e50cb8c42994113a6b60f93348b016d SESSION_LOG.md
+1638941587864cf030a8de8e9505c8405f1fd2e4 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 d896e5054c3a39bece820b0ba6e798d943b7395e d4t/__main__.py
@@ -114,6 +114,7 @@ c4f06765ad918545511da042eb8d2b63df19795f docs/plans/F15-pair-sources.md
 a5b31733923c0c3a3f54782a7720c76fdbbafc38 docs/plans/F20-pick-defect-box.md
 580aa51df6c26db9beb45cf3d3926f4eb33724c9 docs/plans/F21-algo-and-roi.md
 b0ba74382976b92f219b135a52c4d55793ce2079 docs/plans/F22-adc-multiclass.md
+59ccdacea803ead53826bf512c5124dcb912d1c9 docs/plans/F23-route-by.md
 773d4c5652e1abd95b7bf06591a691c07c1c9fa1 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py

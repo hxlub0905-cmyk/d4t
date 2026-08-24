@@ -19,6 +19,30 @@
 
 ---
 
+## F23 計畫書：分流（route_by）—— 議程，未動工（2026-08-24）
+
+使用者定調 pre-filter 的真正需求：「**不同的 Classnumber 走不同的『卡片』**」
+—— 不是判定段的條件（那個每顆還是全跑），是 Class 2 根本不跑 A 組卡。
+計畫書在 [`docs/plans/F23-route-by.md`](docs/plans/F23-route-by.md)，
+照 Phase 2 規矩先討論再動手。要點：
+
+* **機制八成在**（多 route、`fill_fields`、快取簽章含鍵），卡住的只有
+  `run_batch` 把 route 鍵當一批一個常數 —— 改成逐顆算。
+* `route_by` 是 recipe 頂層區塊（跑之前決定，不能是卡也不能是 decide 條件），
+  **嚴格附加**（不在就一個位元不動，同 F22 的 decide）。
+* 三個必須跟著出生的：`route_taken` 特徵（F19 規矩）、default 顆數看得見、
+  三條 lint（欄不存在／route 不存在／有 route 沒人走）。
+* **前置是 F17-⑤ 的取捨**：第一期提案用「不同節點 id ＋ routes-drift lint」，
+  一份 recipe 一個圖等症狀出現再做。
+* `lot_stats` ＋ 兩趟判定提案併第 3 期（動同一段批次程式）。
+* 驗收先寫好：走對路 100%、B 路的顆**沒有** A 路的特徵（證明真的沒跑）、
+  workers=1/4 逐位元組相同、無 route_by 的黃金值不動。
+
+**留了四題等定調**：default 行為、route 模型選項、預覽自動切 route、
+lot_stats 併不併。
+
+---
+
 ## cp950：CLI 在廠內 console 上炸在成功的那一刻（2026-08-24 修）
 
 F20 §5 記下的那一條。廠內機器的 console 是 cp950，而 CLI 印 ✓ / ✗ / △ / →
