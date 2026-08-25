@@ -1092,20 +1092,24 @@ def test_judge_takes_one_id_not_a_list():
 def test_the_preview_outlines_the_worst_box_before_any_batch():
     """試跑（甚至只是預覽）當下就看得到贏家 —— `overlay_marks` 讀 worst note。
 
-    形狀：典型那一格 1 條淡線＋4 角點，贏家 4 條邊（完整外框），
-    `focus` 指著贏家的第一條邊（滿 alpha —— 它才是主角）。
+    形狀：典型那一格 1 條淡線＋4 角點，贏家**一個 X（兩條對角線）**——
+    描邊會跟區域框完全重疊、同一個顏色，等於沒畫（實測截圖抓到的，
+    典型格用角點的理由一字不差）。`focus` 指著 X 的第一條（滿 alpha）。
     """
     ctx = _run_each_box(_grid_ctx(hot_cell=12))
     card = get_step("glv_stats")
     lines, points, focus, labels = card.overlay_marks(ctx, {}, "test")
-    assert len(lines) == len(points) == len(labels) == 5    # 1 典型 + 4 邊
-    assert focus == 1                                        # 贏家的第一條邊
+    assert len(lines) == len(points) == len(labels) == 3    # 1 典型 + 2 對角
+    assert focus == 1                                        # X 的第一條
     wi = int(ctx.features["worst_i"])
     wx, wy, ww, wh = ctx.roi_norm_rects("cells")[wi]
     xs = {round(pt[0], 6) for seg in lines[1:] for pt in seg}
     ys = {round(pt[1], 6) for seg in lines[1:] for pt in seg}
     assert xs == {round(wx, 6), round(wx + ww, 6)}
     assert ys == {round(wy, 6), round(wy + wh, 6)}
+    # 對角線：每一條的兩端 x 不同、y 也不同（描邊的水平/垂直線做不到）
+    for seg in lines[1:]:
+        assert seg[0][0] != seg[1][0] and seg[0][1] != seg[1][1]
     assert set(labels) == {"cells"}
 
 

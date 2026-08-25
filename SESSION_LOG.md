@@ -19,6 +19,47 @@
 
 ---
 
+## F32 實測：端到端跑一輪，抓到一個「畫了等於沒畫」（2026-08-25）
+
+使用者：「實測跑一次，看截圖結果。」合成 RSEM lot（384²、12 顆、一半有真缺陷）
+＋手寫 recipe：`load_single` → `roi_reference`（stripes、`pick="none"`）→
+`glv_stats`（each box、judge=median）→ score=`worst_score` →
+`output_image`／`output_bundle`（rank_by=worst_score、draw all、mark 3σ）。
+
+### 量出來的
+
+* 12/12 跑完、51 ms/顆。每顆 ~500 個框（stripes 交會），`Draw at most` 的
+  自動退化警告如預期出現。
+* **照 `worst_score` 排序，前四名全是真缺陷**：bridge 47.9σ、bright_blob
+  29.0σ／6.7σ／4.7σ；九顆正常的擠在 2.7–4.1σ。兩顆 dark_blob 沒浮上來 ——
+  一小塊暗點動不了那格的 median，**這是 judge 的選擇不是機制的錯**（合成的
+  暗點太弱，換 q05 也拉不起來）。
+* 自訂 judge 端到端通：`glv_q05`（清單外的手寫 id）從 recipe 一路到 CSV 與
+  meta 都對。
+* 報表 bundle：贏家琥珀粗框＋像素染色正落在 bridge 上、鄰近細藍框、
+  `report.html` 的判定條／表格／點一列換圖都對。Studio offscreen 實跑：
+  GLV 面板 `typical box #401 of 527 · worst #439 at 4.7σ (median)`、
+  1–5 段設定區、單選膠囊，全部在畫面上。
+
+### 抓到的：贏家描邊跟區域框完全重疊 —— 畫了等於沒畫
+
+W2 的預覽把贏家描**四邊**。`overlay_marks` 的 docstring 自己寫著典型格為什麼
+用角點：「用線描的外框會跟區域框完全重疊、同一個顏色，等於沒畫」——
+我在贏家上原樣踩了一次，527 個綠框的截圖裡完全認不出哪一格是贏家。
+改成畫**一個 X（兩條對角線）**：不跟任何框的邊重合，再小的格子也認得出。
+測試跟著改並多一條「對角線的兩端 x、y 都不同（描邊做不到）」。
+
+一個看到但**不改**的：正常顆的疊圖上贏家框也整格染色（分數 2.7σ 也有像素過
+3σ）—— 那是任務書指定的像素判準（分母是框間統計量的散布，比像素雜訊小）
+照做的結果，而標籤上的 `score=2.698 bin=0` 讓讀圖的人分得出來。要更安靜可以
+把 `Mark pixels beyond` 調高，或哪天把染色綁到 bin 上 —— 等使用者真的被吵到
+再說。
+
+驗收：core 2203 過、黃金值三份全綠、f20_panel_truth／f19_cd／widgets 逐檔
+全綠。截圖（overlay ×2、report.html、Studio 全窗＋放大）都交給使用者了。
+
+---
+
 ## F32 W3：GLV 設定區整理（2026-08-25）
 
 使用者：「GLV measure UI 介面（左側設定區）要做好看一點。」先 offscreen 截了

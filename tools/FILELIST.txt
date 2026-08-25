@@ -5,7 +5,7 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 b7de91c3029b706bf544976890dcf876cabb5a6b CLAUDE.md
 6adcf70fd5d443f757d78b4d337e1866a9af3ed7 README.md
-09f58eae309120cebeda76c831708ac41b0809c5 SESSION_LOG.md
+8498dfafe42fea129c5f3f1c26b68a2609647aaa SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -65,7 +65,7 @@ cf162d9e699b12b6e4cd5d6d9706484b19eda598 d4t/core/steps/align_to.py
 8ef5c8396cd11fe7299037d7865c66fa3ab7830a d4t/core/steps/feature_fill.py
 9b417df41842c99263f3a477022e26c05e135bf5 d4t/core/steps/feature_math.py
 00f877fe38f316bc2a74cb2659a2e5ac63b7055c d4t/core/steps/flatten.py
-584c7a17144e4c2df8eaeb127f5747df421304e8 d4t/core/steps/glv_stats.py
+06881dc28bfc8c95699d1004e1e068da13536e23 d4t/core/steps/glv_stats.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
@@ -184,7 +184,7 @@ eaff022e045a6b08dd7090f0181355bbae21118b tests/test_feature_fill.py
 174025a7a178c938717f8b8eee4095e19d2165e3 tests/test_feature_owner_prefix.py
 21b2046491056e3656ad2f7905951a6e5902b0fa tests/test_glas_sidecar.py
 306625aa08ded107633669f205bc09ad021e41fe tests/test_glv.py
-6d1ebb40c4cab1feb72ecb4e94d0528222e0b07e tests/test_glv_compare.py
+a1c33aa1a74860ce4c7608c9bcd03328303cbb4d tests/test_glv_compare.py
 675878e5aa5eb58645f91f8b7645f13c81995a5a tests/test_golden_features.py
 d644e6c465d92bf9bee29d6fb9e1c2905ceab9d4 tests/test_guided_condition.py
 68f4c1d0784f125b13994a5fc576da6ac9270279 tests/test_histmatch.py

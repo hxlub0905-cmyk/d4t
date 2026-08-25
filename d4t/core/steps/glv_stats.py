@@ -987,12 +987,14 @@ class GlvStatsStep(MultiSourceStep):
 
         ``labels`` 給區域名，顏色因此跟影像上那個區域的框一模一樣。
 
-        **贏家那一格另外畫**（F32）：worst note 在的時候，最異常的那一格描
-        **完整四邊**＋四個角點，``focus`` 指著它（滿的 alpha —— 它才是主角，
-        典型那一格退成淡的）。使用者一按試跑、甚至只是切到下一顆（預覽每顆
-        都會跑），影像上當場看得到「挑到哪一格、為什麼」—— 不用等 batch。
-        描邊在這裡**不會**跟區域框重疊到看不見：區域框畫的是整組二十格，
-        贏家的四邊是其中一格的邊，粗細與 alpha 都不同（focus 規則）。
+        **贏家那一格另外畫**（F32）：worst note 在的時候，最異常的那一格畫
+        **一個 X（兩條對角線）**＋角點，``focus`` 指著它（滿的 alpha ——
+        它才是主角，典型那一格退成淡的）。使用者一按試跑、甚至只是切到下一顆
+        （預覽每顆都會跑），影像上當場看得到「挑到哪一格」—— 不用等 batch。
+        為什麼是 X 不是描邊：**描邊跟區域框完全重疊、同一個顏色，等於沒畫**
+        —— 上面典型格用角點的理由一字不差，而第一版真的畫了四邊、真的在
+        527 個框裡看不見（實測截圖抓到的）。對角線不跟任何框的邊重合，
+        再小的格子也認得出。
         """
         notes = (getattr(ctx, "meta", None) or {}).get("glv_hist") or []
         want = str(stream or "").strip()
@@ -1025,8 +1027,9 @@ class GlvStatsStep(MultiSourceStep):
             points.append(corners)
             labels.append(name)
 
-            # 贏家那一格（F32）：完整四邊 + 角點。focus 給贏家（它才是主角）；
-            # 沒有 worst（單框、還沒比出來）就照舊給典型那一格。
+            # 贏家那一格（F32）：一個 X（兩條對角線）+ 角點 —— 描邊會跟
+            # 區域框重疊到看不見（見 docstring）。focus 給贏家（它才是
+            # 主角）；沒有 worst（單框、還沒比出來）就照舊給典型那一格。
             worst = note.get("worst") or {}
             wi = int(worst.get("i", -1)) if isinstance(worst, dict) else -1
             worst_at = -1
@@ -1035,8 +1038,7 @@ class GlvStatsStep(MultiSourceStep):
                 wc = [(wx, wy), (wx + ww, wy), (wx + ww, wy + wh),
                       (wx, wy + wh)]
                 worst_at = len(lines)
-                for a, b in ((wc[0], wc[1]), (wc[1], wc[2]),
-                             (wc[2], wc[3]), (wc[3], wc[0])):
+                for a, b in ((wc[0], wc[2]), (wc[1], wc[3])):
                     lines.append([a, b])
                     points.append([a, b])
                     labels.append(name)
