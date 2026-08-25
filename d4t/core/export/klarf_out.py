@@ -674,10 +674,24 @@ def _build_topn(doc: KlarfDoc, results: Sequence[Dict[str, Any]], *,
         seen.add(idx)
         cands.append((idx, sf))
     if n_no_score:
-        plan.notes.append(
-            "{} defects have no score (the run failed, or the score is nan) and "
-            "will not appear in the output file."
-            .format(n_no_score))
+        # **「全部都沒有分數」跟「有幾顆失敗」是兩件事**（F30）。判定樹是一個
+        # 分類器，多數樹沒有分數表達式 —— 那時候這裡會把**每一顆**都丟掉，
+        # 而舊的那句話（「the run failed, or the score is nan」）會讓使用者去
+        # 找一批根本沒有失敗的 defect。
+        if not cands:
+            plan.notes.append(
+                "None of the {} defects has a score, so there is nothing to "
+                "rank and the output file would be empty. A decision tree "
+                "classifies without a score - to write a top-N KLARF, either "
+                "give the decision a score formula, or export by class "
+                "instead of by score."
+                .format(n_no_score))
+        else:
+            plan.notes.append(
+                "{} defects have no score (the run failed, the score is nan, "
+                "or the decision has no score formula) and will not appear in "
+                "the output file."
+                .format(n_no_score))
 
     order = sorted(range(len(cands)), key=lambda k: (-cands[k][1], cands[k][0]))
     picked = [cands[k] for k in order]

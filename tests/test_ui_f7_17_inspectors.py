@@ -13,6 +13,9 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.region_cards import (  # noqa: E402
+    add_region_step, region_card,
+)
 
 from conftest import first_source, wire_up  # noqa: E402  —— F10：加完卡要接線
 
@@ -491,7 +494,7 @@ def test_it_reads_the_engine_verdict_end_to_end(window, tmp_path):
 
     out = generate(str(tmp_path / "lotT"), n=4, seed=61)
     window.load_dataset_path(out["klarf"], sync=True)
-    nid = wire_up(window.model, window.model.add_step("roi_template"))
+    nid = wire_up(window.model, add_region_step(window.model, "roi_template"))
     window.select_node(nid)
 
     img = np.zeros((240, 320), np.float32)

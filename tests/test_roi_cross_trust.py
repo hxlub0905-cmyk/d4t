@@ -30,6 +30,7 @@ import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 from d4t.core.algo import grid as algo_grid  # noqa: E402
 from d4t.core.pipeline import get_step  # noqa: E402
 from d4t.core.pipeline.context import Context  # noqa: E402
+from tests.region_cards import region_card  # noqa: E402
 
 SIZE, MG_PITCH, MG_W, EPI_PITCH = 128, 24, 8, 34
 
@@ -134,7 +135,7 @@ def _run(**over) -> Context:
     params.update(over)
     img = _img(cpode=(2, 5))
     ctx = Context(images={"test": img.copy(), "ref": img.copy()})
-    get_step("roi_cross")().run(ctx, params)
+    region_card("roi_cross")().run(ctx, params)
     return ctx
 
 

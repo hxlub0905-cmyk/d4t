@@ -16,6 +16,9 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.region_cards import (  # noqa: E402
+    add_region_step, region_card,
+)
 
 from conftest import wire_up  # noqa: E402  —— F10：加完卡要接線
 
@@ -300,7 +303,7 @@ def test_a_measure_card_draws_the_region_it_reads(window, qapp):
     """選著量測卡時，預覽要畫出**它在量的那個區域**（使用者：「mask 蓋在
     diff 上」）。以前只有 Region 卡畫框 —— 量測卡 roi 填錯只能用數字猜。"""
     m = window.model
-    pr = wire_up(m, m.add_step("roi_cross"))
+    pr = wire_up(m, add_region_step(m, "roi_cross"))
     gs = wire_up(m, m.add_step("glv_stats"))
     m.set_param(gs, "roi", "cross")
     window.select_node(gs)
@@ -405,7 +408,7 @@ def test_a_new_mask_card_takes_its_regions_from_a_line_not_from_typing(window, q
     """
     window.show()
     qapp.processEvents()
-    with_regions = wire_up(window.model, window.model.add_step("roi_cross"))
+    with_regions = wire_up(window.model, add_region_step(window.model, "roi_cross"))
     qapp.processEvents()
     window.select_node(with_regions)
     window._on_add_requested("roi_mask")
@@ -417,7 +420,7 @@ def test_a_new_mask_card_takes_its_regions_from_a_line_not_from_typing(window, q
         "加卡不准順手接線（鐵則 10）"
 
     from d4t.core.pipeline.step import get_step as _get
-    outs = _get("roi_cross").resolve_regions_out(
+    outs = region_card("roi_cross").resolve_regions_out(
         window.model.nodes[with_regions].params)
     # 名字在上游那張卡的埠上（不必用抄的），拉一條線就填好了。
     assert outs

@@ -1181,6 +1181,73 @@ def _migrate_roi_from_mask_into_roi_reference(nodes: Dict[str, "RecipeNode"]
                                 params=params, enabled=node.enabled)
 
 
+#: 折進 ``roi_reference`` 的那兩張卡：舊 key → ``method`` 的值（F30）。
+_FOLDED_REGION_CARDS = {
+    "roi_cross": "stripes in the image",
+    "roi_template": "a cell I mark myself",
+}
+
+#: 合併之後**只有一格**，而舊卡各有各的預設 —— 遷移要把舊預設**逐字寫進參數**。
+#:
+#: 為什麼不是「讓新卡的預設剛好等於舊的」：三支的舊預設互相衝突
+#: （``source`` 是 ``test`` vs ``ref``、``roi_out`` 是 ``cell`` vs ``cross``、
+#: ``max_boxes`` 是 8192 vs 64）。挑任何一個當共用預設，另外兩支的舊 recipe
+#: 就會**安靜地換一個值跑** —— ``max_boxes`` 從 64 變 8192 不會報錯，它會多量
+#: 一百個框然後吐出一組不一樣的統計量。
+_FOLDED_CARD_OLD_DEFAULTS = {
+    "roi_cross": {"source": "ref", "roi_out": "cross", "max_boxes": 64},
+    "roi_template": {"source": "ref", "max_boxes": 8192},
+}
+
+#: 撞名而**意思不同**的那一格：舊名 → 新名（每張卡各自一份）。
+#:
+#: ``min_confidence`` 在 ``roi_cross`` 上是「條紋的信心」（0..100 那種刻度，
+#: 預設 5.0），在 ``repeating cells`` 上是「週期的強度」（0..1，預設 0.18）。
+#: 共用一格的話，切換 method 會留下一組對方**看得懂但意思完全不同**的值 ——
+#: 而它不會報錯，它會照著跑（同 `_migrate_roi_compare_into_glv_stats` 裡
+#: ``metrics`` 那一段記下的教訓）。
+_FOLDED_CARD_RENAMES = {
+    "roi_cross": {"min_confidence": "min_stripe_confidence"},
+    "roi_reference": {"min_confidence": "min_repeat_strength"},
+}
+
+
+def _migrate_folded_region_cards(nodes: Dict[str, "RecipeNode"]) -> None:
+    """``roi_cross`` / ``roi_template`` → ``roi_reference`` ＋ 對應的 ``method``（F30）。
+
+    使用者 2026-08-25：「把 Profile / Template 也折進 roi_reference」。四張
+    Region 卡回答的是同一句話（「哪些地方應該長得一樣」），所以它們是一張卡的
+    四個 method —— 跟 ``roi_from_mask``（F29）與 ``roi_compare``（F16）同一個
+    形狀，連遷移的寫法都照抄。
+
+    判準是「**舊 step 名在不在**」（鐵則 9）。換完之後不再命中，所以
+    ``to_json_dict → from_json_dict`` 走第二次什麼都不會發生（identity）——
+    `run_batch` 送 recipe 進 worker 走的正是那條路。
+
+    ⚠ ``roi_reference`` 自己那一格的改名（``min_confidence`` →
+    ``min_repeat_strength``）也在這裡，而它的判準一樣是「舊鍵在不在」——
+    F29 到 F30 之間存下來的檔案帶著舊名字。
+    """
+    for nid, node in list(nodes.items()):
+        method = _FOLDED_REGION_CARDS.get(node.step)
+        renames = _FOLDED_CARD_RENAMES.get(node.step) or {}
+        if method is None and not (node.step == "roi_reference" and renames):
+            continue
+        params = dict(node.params)
+        for old, new in renames.items():
+            if old in params:
+                params[new] = params.pop(old)
+        if method is None:
+            nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
+                                    enabled=node.enabled)
+            continue
+        for name, value in (_FOLDED_CARD_OLD_DEFAULTS.get(node.step) or {}).items():
+            params.setdefault(name, value)
+        params["method"] = method
+        nodes[nid] = RecipeNode(id=node.id, step="roi_reference",
+                                params=params, enabled=node.enabled)
+
+
 def _migrate_roi_compare_into_glv_stats(nodes: Dict[str, "RecipeNode"]) -> None:
     """``roi_compare`` → ``glv_stats`` + ``method="compare"``（F16）。
 
@@ -1622,6 +1689,8 @@ class Recipe:
         _migrate_renamed_cards(nodes)
         # GDS 那張卡收成「參照區域」的一個 method（F29）。
         _migrate_roi_from_mask_into_roi_reference(nodes)
+        # Profile / Template 也折進去（F30）—— 四張 Region 卡變一張。
+        _migrate_folded_region_cards(nodes)
         # 兩張 GLV 卡收成一張的兩個 method（F16）。
         _migrate_roi_compare_into_glv_stats(nodes)
         # 順序要緊：上面那一道會產生 ``method="compare"``，這一道再把它變成

@@ -2923,7 +2923,9 @@ class StudioWindow(QMainWindow):
         self.stack.setCurrentWidget(self.param_form)
         self._sync_params_pane()
         self._refresh_region_button()
-        self._install_inspector(node.step)     # 右下角換成這張卡的儀表（F7-17）
+        # 右下角換成這張卡的儀表（F7-17）。**參數要一起給**：`roi_reference`
+        # 一個 key 有四種面板，由 ``method`` 決定（F30）。
+        self._install_inspector(node.step, node.params)
         self._refresh_inspector(self._last_result)
         self._refresh_kernel_hint()            # 核心大小畫在影像上（F11 UI-A）
         self._schedule_preview()
@@ -4136,8 +4138,13 @@ class StudioWindow(QMainWindow):
         for view in self._canvases():
             view.set_tree_highlight(hl)
 
-    #: 會產生投影曲線的卡片 key（面板只在編輯它的時候出現）。
-    PROFILE_STEP = "roi_cross"
+    #: 會產生投影曲線的那一支（面板只在編輯它的時候出現）。
+    #:
+    #: ⚠ **一張卡、四個 method**（F30）—— 所以判準是 ``(key, method)``，
+    #: 不是 key。只看 key 的話 Region 卡全部都會亮起那塊面板，而其中三支根本
+    #: 產不出投影曲線：使用者會看到一塊永遠是空的面板。
+    PROFILE_STEP = "roi_reference"
+    PROFILE_METHOD = "stripes in the image"
 
     # ==================================================================== #
     # 區域跨顆檢視（F7-11）
@@ -4147,13 +4154,29 @@ class StudioWindow(QMainWindow):
         node = self.model.nodes.get(self.selected_node or "")
         return regions_of_node(node) if node is not None else []
 
-    #: 需要模板的卡片 key（那張卡的模板只能用這個對話框做出來）。
-    TEMPLATE_STEP = "roi_template"
+    #: 需要模板的那一支（模板只能用那個對話框做出來）。見 `PROFILE_STEP`。
+    TEMPLATE_STEP = "roi_reference"
+    TEMPLATE_METHOD = "a cell I mark myself"
+
+    def _is_method(self, node: Any, step: str, method: str) -> bool:
+        """這個節點是不是「那張卡的那一支」（F30）。
+
+        ``method`` 沒填時用卡片的預設值 —— 引擎那一邊看到的永遠是
+        `validate_params` 補完的一份，兩邊的判斷要一致。
+        """
+        if node is None or node.step != step:
+            return False
+        got = str(node.params.get("method", "") or "")
+        if not got:
+            from ..core.pipeline.step import get_step
+            spec = {p.name: p for p in get_step(step).params}.get("method")
+            got = str(getattr(spec, "default", "") or "")
+        return got == method
 
     def template_build_available(self) -> bool:
         """選取的卡片需要模板嗎（用明確狀態，不要問 widget 的可見性）。"""
         node = self.model.nodes.get(self.selected_node or "")
-        return bool(node is not None and node.step == self.TEMPLATE_STEP)
+        return self._is_method(node, self.TEMPLATE_STEP, self.TEMPLATE_METHOD)
 
     def _on_param_action(self, param_name: str) -> None:
         """某個參數說「我的值要用別的方式產生」。
@@ -4289,9 +4312,10 @@ class StudioWindow(QMainWindow):
         """目前掛著的卡片儀表（沒有就 None）。"""
         return self._inspector
 
-    def _install_inspector(self, step_key: str) -> None:
+    def _install_inspector(self, step_key: str,
+                           params: Optional[Dict[str, Any]] = None) -> None:
         """換卡片時換儀表。沒有註冊儀表的卡就只剩特徵表。"""
-        cls = inspector_for(step_key)
+        cls = inspector_for(step_key, params)
         current = type(self._inspector) if self._inspector is not None else None
         if cls is not current:
             if self._inspector is not None:
@@ -4349,7 +4373,8 @@ class StudioWindow(QMainWindow):
         """
         nid = self.selected_node
         node = self.model.nodes.get(nid or "")
-        if node is None or node.step != self.PROFILE_STEP:
+        if not self._is_method(node, self.PROFILE_STEP,
+                               self.PROFILE_METHOD):
             return
         items = self._items()
         if not items:
@@ -4369,7 +4394,8 @@ class StudioWindow(QMainWindow):
         """量完了：能填的填進卡片（走 set_param，可復原），不能填的講原因。"""
         nid = self.selected_node
         node = self.model.nodes.get(nid or "")
-        if node is None or node.step != self.PROFILE_STEP:
+        if not self._is_method(node, self.PROFILE_STEP,
+                               self.PROFILE_METHOD):
             return                        # 量的過程中使用者換卡了 —— 別亂寫
         res = dict(result or {})
         filled, refused = [], []
@@ -4613,7 +4639,8 @@ class StudioWindow(QMainWindow):
     def profile_panel_visible(self) -> bool:
         """面板現在開著嗎（用明確狀態，不要問 ``isVisible()``）。"""
         node = self.model.nodes.get(self.selected_node or "")
-        return bool(node is not None and node.step == self.PROFILE_STEP)
+        return self._is_method(node, self.PROFILE_STEP,
+                               self.PROFILE_METHOD)
 
     def _feature_about(self, result: Any) -> Dict[str, str]:
         """哪一個相對量是**跟誰**比出來的（特徵表中間那一欄要用）。

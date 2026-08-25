@@ -1378,10 +1378,39 @@ class PipelineCanvas(QGraphicsView):
         # 分流徽章（F25-B）同理：它站在所有卡片的**前面**。
         self._prefilter_items = []
         self._rebuild_prefilter()
+        # Output 段那一塊（F30 Phase D）：它站在所有卡片的**後面**。
+        self._output_items = []
+        self._rebuild_output_band()
 
         self.set_selected(self._selected)
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self._scene.setSceneRect(rect)
+
+    # ---- Output 段那一塊（F30 Phase D）------------------------------------
+    def output_items(self) -> List[Any]:
+        """Output 段那個框現在的圖元（測試與外部檢查用）。"""
+        return list(getattr(self, "_output_items", []) or [])
+
+    def _output_nodes(self) -> List[Any]:
+        """哪幾張卡是 Output 段的。
+
+        看的是**卡片自己宣告的 group**（`Step.resolve_group`），不是一份寫死的
+        key 清單 —— 加一張新的 Output 卡不必動這裡（同卡片庫的分組）。
+        """
+        return [it for it in self._items.values()
+                if str(it.info.get("group", "") or "") == "output"]
+
+    def _rebuild_output_band(self) -> None:
+        from . import output_band
+
+        for it in getattr(self, "_output_items", []) or []:
+            try:
+                self._scene.removeItem(it)
+            except Exception:              # noqa: BLE001 — clear() 先銷毀過就算了
+                pass
+        mine = self._output_nodes()
+        rest = [it for it in self._items.values() if it not in mine]
+        self._output_items = output_band.build_band(self._scene, mine, rest)
 
     # ---- 判定區（F24 ②）---------------------------------------------------
     def set_decision(self, info: Optional[Dict[str, Any]]) -> None:
@@ -1782,6 +1811,9 @@ class PipelineCanvas(QGraphicsView):
         for e in self._edges:
             e.prepareGeometryChange()
             e.update()
+        # Output 段那個框是**從卡片的位置算出來的**，所以卡片一動它就得重算
+        # —— 不然拖走一張 Output 卡之後，框會留在原地框著空氣（F30）。
+        self._rebuild_output_band()
         # 卡片拖到 sceneRect 外面，那一塊是**捲不到的** —— 埠與標籤就這樣
         # 「不見」（使用者回報的）。所以 sceneRect 跟著拖曳長大（只長不縮：
         # 拖曳中一直重算縮小的話畫面會跳；縮回來由 set_nodes / tidy 做）。

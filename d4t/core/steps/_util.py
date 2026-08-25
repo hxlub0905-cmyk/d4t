@@ -979,6 +979,17 @@ def to_uint8(arr: np.ndarray) -> np.ndarray:
     return np.clip(f, 0, 255).astype(np.uint8)
 
 
+#: ``max_boxes`` 的上限 —— **三支共用一個數字**（F30）。
+#:
+#: 為什麼要共用：四張 Region 卡收成一張之後，使用者調的是合併卡上那一格，
+#: 而實作那一邊會再 `validate_params` 一次。兩邊的上限不同的話，畫面上填得
+#: 進去的值會在引擎裡被打回來 —— 實測 ``roi_cross`` 的舊上限是 4096、合併卡
+#: 是 65536，於是預設值 8192 讓 Profile 那一支**每一顆都失敗**，而症狀是一句
+#: 「parameter 'max_boxes': 8192 is above the maximum of 4096」，指著一個
+#: 使用者從來沒有打過的數字。
+LIMIT_MAX_BOXES = 65536
+
+
 def parse_key_list(raw: str) -> List[str]:
     """逗號分隔字串 → key 清單；空白與空項自動忽略。"""
     if not raw:

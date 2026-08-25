@@ -65,8 +65,8 @@ def test_the_flag_is_declared_not_guessed_from_the_unit():
     assert spec("flatten", "size").extent is True
     assert spec("denoise", "ksize").extent is True
     # 同樣是 unit="px"，但這些不是鄰域邊長
-    assert spec("roi_cross", "vertical_pitch").extent is False
-    assert spec("roi_cross", "inset").extent is False
+    assert spec("roi_reference", "vertical_pitch").extent is False
+    assert spec("roi_reference", "inset").extent is False
     # 宣告要進 describe()，UI 才看得到
     got = {p["name"]: p for p in get_step("flatten").describe()["params"]}
     assert got["size"]["extent"] is True

@@ -8,7 +8,7 @@
 已註冊的 key（影像段 → 算法段）：
   load_patch, load_single, load_sidecar, normalize, tone, denoise, flatten,
   align, subtract, align_to, pair_source,
-  roi_cross, roi_template, roi_reference, roi_mask,
+  roi_reference, roi_mask,
   glv_stats, cd_measure, focus_quality,
   feature_math, feature_fill,
   output_csv, output_report, output_klarf, output_image
@@ -59,12 +59,13 @@ from . import tone           # tone（亮度/對比/gamma/曲線/反相）
 from . import flatten        # flatten
 from . import align          # align
 from . import arith          # subtract / invert
-from . import roi_cross      # roi_cross
 from . import align_to       # 小圖在大圖裡的位置（F15-C）
 from . import pair_source    # 另一份資料的對應那一顆（F15）
-from . import roi_reference  # roi_reference（重複晶格 / GDS 一層 → 具名區域）
+# Region 段只剩兩張（F30）。`roi_cross`（Profile）與 `roi_template`（Template）
+# 折進 `roi_reference` 變成它的兩個 method，所以那兩個模組**不在這裡 import**
+# —— 它們不再自己註冊，是被 `roi_reference` 取用的實作。
+from . import roi_reference  # roi_reference（四種找法 → 具名區域）
 from . import roi_mask       # roi_mask（區域 → 0/255 mask 影像流，F8c）
-from . import roi_template   # roi_template
 # ⚠ **Measure 段的順序就是這幾行的順序**（使用者 2026-08-25：「Measure 的 card
 # 順序幫我改命名&重排：GLV → CD → Focus index」）。`list_steps` 照 REGISTRY 的
 # 插入序回，而 REGISTRY 的插入序就是這裡的 import 序 —— 卡片庫裡看到的先後

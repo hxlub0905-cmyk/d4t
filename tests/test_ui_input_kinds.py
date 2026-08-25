@@ -87,7 +87,7 @@ def test_the_single_image_cards_are_in_the_library_now(window):
     單張那條路**真正在用**的四張：載入、找區域（大圖上鋪 ROI 也是它）、
     Gray level（`method="compare"` 就是以前的 Compare regions）、相減。
     """
-    for key in ("load_single", "roi_template", "glv_stats", "subtract"):
+    for key in ("load_single", "roi_reference", "glv_stats", "subtract"):
         assert window.library.entry(key) is not None, key
     # `align` 曾經在這一列上。2026-08-18 使用者把它收起來了 ——
     # 見 test_align_is_hidden_but_still_runs。

@@ -156,7 +156,14 @@ def _qimage_from_uint8(arr: np.ndarray) -> QImage:
 
 
 def _fmt_score(value: Any) -> str:
-    """分數 → 說明文字用的短字串（3 位有效數字，整數不拖小數）。"""
+    """分數 → 說明文字用的短字串（3 位有效數字，整數不拖小數）。
+
+    ⚠ **沒有值就留白**（F30）。以前這裡走 `str(value)`，於是 ``None`` 會在縮圖
+    的說明列上畫出 **``None``** 那四個字。判定樹是一個分類器，多數樹沒有分數
+    表達式 —— 那時候**每一格**都會是它。
+    """
+    if value is None:
+        return ""
     try:
         f = float(value)
     except (TypeError, ValueError):

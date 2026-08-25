@@ -27,6 +27,7 @@ import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 from d4t.core.algo import template as algo_template  # noqa: E402
 from d4t.core.pipeline import get_step  # noqa: E402
 from d4t.core.pipeline.context import Context  # noqa: E402
+from tests.region_cards import region_card  # noqa: E402
 
 PITCH = 40
 
@@ -51,8 +52,8 @@ def _run(image, regions="epi: 0.05,0.05,0.35,0.35", **over):
     ctx = Context(images={"ref": np.asarray(image)})
     params = dict({"source": "ref", "template": _frozen(periodic()),
                    "regions": regions, "locate_axis": "both"}, **over)
-    get_step("roi_template")().run(
-        ctx, get_step("roi_template").validate_params(params))
+    region_card("roi_template")().run(
+        ctx, region_card("roi_template").validate_params(params))
     return ctx
 
 
@@ -99,7 +100,7 @@ def test_a_patch_smaller_than_one_cell_still_works_the_old_way():
 # --------------------------------------------------------------------------- #
 def test_the_default_limit_no_longer_silently_keeps_64_of_them():
     """預設 64 會把 100 份安靜留 64 份 —— 而那 64 份算得出一個很正常的灰階值。"""
-    spec = {p.name: p for p in get_step("roi_template").params}["max_boxes"]
+    spec = {p.name: p for p in region_card("roi_template").params}["max_boxes"]
     assert spec.default == 8192, "預設要撐得住整張大圖"
     # 跟 `roi_reference` 用同一組數字：兩張會吐幾千個框的 ROI 卡不該有兩套上限
     gds = {p.name: p for p in get_step("roi_reference").params}["max_boxes"]
@@ -125,12 +126,12 @@ def test_not_capping_a_finely_repeating_image_is_still_fast():
     frozen = algo_template.encode_cell(
         algo_template.build_golden_cell(src).cell)
     ctx = Context(images={"ref": src})
-    params = get_step("roi_template").validate_params(
+    params = region_card("roi_template").validate_params(
         {"source": "ref", "template": frozen,
          "regions": "epi: 0.05,0.05,0.35,0.35", "locate_axis": "both",
          "max_boxes": 65536})
     t = time.perf_counter()
-    get_step("roi_template")().run(ctx, params)
+    region_card("roi_template")().run(ctx, params)
     dt = time.perf_counter() - t
     assert ctx.roi_count("epi") > 1000
     assert dt < 5.0, "不封頂就慢到不能用的話，那個小預設才有理由回來（%.1fs）" % dt
@@ -141,7 +142,7 @@ def test_not_capping_a_finely_repeating_image_is_still_fast():
 # --------------------------------------------------------------------------- #
 def test_the_card_says_it_works_on_a_full_size_image_too():
     """使用者不會自己猜到 Template 吃得下大圖 —— 猜不到的功能等於沒有。"""
-    d = get_step("roi_template").describe()
+    d = region_card("roi_template").describe()
     blurb = str(d["help"]).lower()
     assert "full-size" in blurb or "full size" in blurb
     source = {p["name"]: p for p in d["params"]}["source"]

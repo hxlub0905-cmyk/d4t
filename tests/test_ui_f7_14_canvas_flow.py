@@ -119,11 +119,17 @@ def test_the_subtitle_says_what_the_card_does_not_its_id(window):
     b = window.add_card_after(a, "subtract")
     window._on_edge_added(src, b, "test", "a")
     window._on_edge_added(a, b, "ref_aligned", "b")
-    c = window.add_card_after(b, "roi_template")
+    c = window.add_card_after(b, "roi_reference")
     window._on_edge_added(b, c, "diff")        # 來源由線決定（F9-7）
+    # ⚠ F30 起這張卡預設是 ``repeating cells`` —— 那一支**不需要使用者填任何
+    # 東西**（它自己量週期），所以區域名一開始就有。要看「還沒產出任何東西」
+    # 的那個狀態，得選一支要外部資料的 method。
+    window.model.set_param(c, "method", "a cell I mark myself")
     # 還沒畫任何區域 -> 這張卡真的還沒產出任何東西，副標照實只講輸入
     assert window.pipeline.card(c).subtitle() == "diff"
     # Region 卡不寫影像流，它定義的是具名區域 —— 副標仍然要講得出它產出什麼
+    # （F30：四張 Region 卡收成一張之後，「用我自己標的那一格」是一個 method，
+    # 而 `regions` 只在那一支上算數 —— 所以先選它，那也是使用者會做的第一步）
     window.model.set_param(c, "regions", "epi: 0.1,0,0.3,1")
     window.select_node(c)
     assert window.pipeline.card(c).subtitle() == "diff → epi epi_center epi_others"

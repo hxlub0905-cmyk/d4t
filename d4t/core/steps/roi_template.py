@@ -153,11 +153,21 @@ _MATCH_FEATURES = ["match_score", "match_margin", "match_structure",
                    "phase_x", "phase_y", "pick_by_signal", "locate_ok"]
 
 
-@register_step
+# ⚠ **這個類別不再自己註冊**（F30，2026-08-25）。使用者：「把 Profile /
+# Template 也折進 roi_reference」—— 四張 Region 卡回答的是同一句話（「哪些地方
+# 應該長得一樣」），所以它們是一張卡的四個 method，不是四張卡。
+#
+# 留在這個檔案裡而不是搬進 `roi_reference.py`：把 1100 行演算法搬過去只會讓那
+# 個檔案變成 1700 行，而「哪一支怎麼算」本來就各自看得懂 —— 要合的是**使用者
+# 看到的那張卡**，不是檔案。`roi_reference` 從這裡取 ``params``（加上一條
+# 「method 要是它」的條件）並轉呼叫 ``run`` / ``resolve_*``。
+#
+# ``key`` 改成 ``roi_reference``：它只剩下「錯誤訊息前面那個名字」這一個用途，
+# 而使用者放進畫布的那張卡就叫這個名字。
 class RoiTemplateStep(Step):
     """模板定位：把 patch 對回 Golden Cell 的相位，再把標好的框搬過來。"""
 
-    key = "roi_template"
+    key = "roi_reference"
     label = "Template"
     category = CATEGORY_ALGO
     group = GROUP_REGION

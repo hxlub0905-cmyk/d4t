@@ -30,6 +30,7 @@ from d4t.core.pipeline import ParamError, get_step  # noqa: E402
 from d4t.core.pipeline.context import Context  # noqa: E402
 from d4t.core.pipeline.step import StepError  # noqa: E402
 from d4t.core.steps._util import roi_pixels  # noqa: E402
+from tests.region_cards import region_card  # noqa: E402
 
 PERIOD = 40
 BIG_H = 240
@@ -338,7 +339,7 @@ def _params(gc, **over):
 
 
 def _run(ctx, params):
-    return get_step("roi_template")().run(ctx, params)
+    return region_card("roi_template")().run(ctx, params)
 
 
 def test_the_card_places_the_region_and_reports_the_evidence():
@@ -431,7 +432,7 @@ def test_a_card_with_no_regions_says_where_to_draw_them():
     with pytest.raises(StepError) as e:
         _run(ctx, _params(gc, regions=""))
     assert "no regions are marked" in str(e.value)
-    assert get_step("roi_template").configuration_issues(
+    assert region_card("roi_template").configuration_issues(
         {"template": "x", "regions": ""})
 
 
@@ -452,11 +453,11 @@ def test_the_panel_data_is_the_engines_own_calculation():
 
 def test_the_region_name_must_be_usable_as_a_variable_name():
     with pytest.raises(ParamError):
-        get_step("roi_template").validate_params({"regions": "my region: 0,0,1,1"})
+        region_card("roi_template").validate_params({"regions": "my region: 0,0,1,1"})
 
 
 def test_the_card_declares_the_regions_it_defines():
-    cls = get_step("roi_template")
+    cls = region_card("roi_template")
     params = cls.validate_params({"regions": "epi: 0,0,1,1 | mg: 0,0,0.2,1"})
     assert cls.resolve_regions_out(params) == [
         "epi", "epi_center", "epi_others",
@@ -530,7 +531,7 @@ def test_the_card_never_says_which_one_is_the_target():
     所以 Region 卡只出名詞 —— 它不可以有任何一個叫 target/reference 的參數，
     也不可以在區域上標記角色。
     """
-    cls = get_step("roi_template")
+    cls = region_card("roi_template")
     names = {p["name"] for p in cls.describe()["params"]}
     assert not {n for n in names if "target" in n or "reference" in n}
 
@@ -600,7 +601,7 @@ def test_certainty_is_reported_but_does_not_reject_by_default():
     而「落在另一份上要不要緊」已經有一個確定的答案了（區域平移 1/k 落不落回
     自己），所以 margin 不必再當一道盲目的閘門。
     """
-    cls = get_step("roi_template")
+    cls = region_card("roi_template")
     assert cls.validate_params({})["min_margin"] == 0.0
 
     gc = algo_template.build_golden_cell(big_image())
@@ -651,7 +652,7 @@ def _tiled_ctx(**over):
 
 def test_the_switch_is_off_by_default_and_changes_nothing():
     """鐵則 9：舊 recipe 沒有這兩個鍵，行為必須逐位元組不變。"""
-    specs = {s.name: s for s in get_step("roi_template").params}
+    specs = {s.name: s for s in region_card("roi_template").params}
     assert specs["drop_edge"].default is False
     plain, _ = _tiled_ctx()
     same, _ = _tiled_ctx(drop_edge=False, edge_margin=64.0)
@@ -703,7 +704,7 @@ def test_losing_the_baseline_to_the_filter_says_so():
 
 def test_the_dropped_count_is_declared_per_region():
     """多標一個區域不必動任何下游 —— 跟 ``_present`` 同一個命名規則。"""
-    feats = get_step("roi_template").resolve_features(
+    feats = region_card("roi_template").resolve_features(
         {"regions": "epi: 0,0,0.5,1 | mg: 0.5,0,0.5,1"})
     assert "epi_edge_dropped" in feats and "mg_edge_dropped" in feats
 

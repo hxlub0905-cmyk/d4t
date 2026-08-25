@@ -3795,6 +3795,13 @@ class ParamForm(QWidget):
         從這裡傳進來，而不是讓元件自己去問（`widgets` 不認得 `Dataset`）。
         """
         current_params = dict(current_params or {})
+        # **沒填的那幾格用預設值補上**（F30）。`show_when` 問的是「另外那一格
+        # 現在是什麼」，而引擎那一邊看到的永遠是 `validate_params` 補完的一份
+        # —— 這裡不補的話，一張剛加進來、參數還是空的卡，它的 `method` 在
+        # 面板眼裡是空字串，於是**每一格都被判定為不該顯示**，整張卡看起來
+        # 是空的。實測就是這樣發現的（四張 Region 卡收成一張之後）。
+        for spec in (describe or {}).get("params") or []:
+            current_params.setdefault(str(spec.get("name")), spec.get("default"))
         streams = [str(s) for s in (stream_choices or [])]
         self._regions = [str(r) for r in (region_choices or [])]
         self._dynamic = {str(k): [str(v) for v in (vals or [])]
@@ -3987,11 +3994,11 @@ class ParamForm(QWidget):
         ``p_low`` 根本不是這張卡的一部分，留在畫面上只會讓人問「那它算不算數」。
         """
         for name, row in self._rows.items():
-            spec = row.spec.get("show_when")
-            shown = True
-            if spec:
-                ctrl, values = str(spec[0]), [str(v) for v in spec[1]]
-                shown = str(self._values.get(ctrl, "")) in values
+            # **規則住在 core**（`step.param_visible`）—— 這裡以前自己又寫了
+            # 一次同樣的判斷，而兩份會漂：漂掉的症狀是「設定區看得到某一格，
+            # 但引擎當它不存在」，使用者填了一個沒有作用的值而畫面上不會說。
+            from ..core.pipeline.step import param_visible
+            shown = param_visible(row.spec.get("show_when"), self._values)
             # 兩個規則是 **and**：進階的那一列被 show_when 排除掉的時候，
             # 展開進階也不該把它變出來（那一列在這個方法下根本不算數）。
             if name in self._advanced and not self._advanced_open:
@@ -4051,11 +4058,13 @@ class ParamForm(QWidget):
 
     def _shown_by_rules(self, name: str) -> bool:
         """撇開「進階收起來了」這件事，這一列本身算不算數（``show_when``）。"""
+        from ..core.pipeline.step import param_visible
         row = self._rows.get(name)
-        spec = None if row is None else row.spec.get("show_when")
-        if not spec:
-            return row is not None
-        return str(self._values.get(str(spec[0]), "")) in [str(v) for v in spec[1]]
+        if row is None:
+            return False
+        # **同一支規則**（`step.param_visible`）—— 這裡是第二個自己寫一份的
+        # 地方，而兩份會漂：漂掉的症狀是同一列在兩個問句下有兩個答案。
+        return param_visible(row.spec.get("show_when"), self._values)
 
     #: `choices_from` 的鍵 → 空清單時那一格要說的話。**空清單是正常狀態**
     #: （還沒掛第二份），而它畫出來是一塊空白 —— 留白讀起來像壞掉。

@@ -27,6 +27,7 @@ import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 from d4t.core.algo import grid as algo_grid  # noqa: E402
 from d4t.core.pipeline import get_step  # noqa: E402
 from d4t.core.pipeline.context import Context  # noqa: E402
+from tests.region_cards import region_card  # noqa: E402
 
 SIZE, MG_PITCH, MG_W, EPI_PITCH = 128, 24, 8, 34
 CPODE_SITES = (2, 5)          # 由左到右：MG MG CPODE MG MG CPODE
@@ -198,7 +199,7 @@ def _run(**over):
     params.update(over)
     img = _mg_cpode()
     ctx = Context(images={"test": img.copy(), "ref": img.copy()})
-    get_step("roi_cross")().run(ctx, params)
+    region_card("roi_cross")().run(ctx, params)
     return ctx
 
 
@@ -344,7 +345,7 @@ def _boxes(**over):
     params.update(over)
     img = _mg_cpode()
     ctx = Context(images={"test": img.copy(), "ref": img.copy()})
-    get_step("roi_cross")().run(ctx, params)
+    region_card("roi_cross")().run(ctx, params)
     return sorted({x for x, _y, _w, _h in ctx.roi_rects("xing", (SIZE, SIZE))})
 
 
@@ -383,7 +384,7 @@ def test_a_layout_with_no_odd_sites_is_untouched_by_the_rule():
     def run(rule):
         img = _mg_cpode(cpode=False)
         ctx = Context(images={"test": img.copy(), "ref": img.copy()})
-        get_step("roi_cross")().run(ctx, {
+        region_card("roi_cross")().run(ctx, {
             "source": "ref", "place": "beside_vertical", "box_size": 5.0,
             "roi_out": "xing", "vertical_pitch": MG_PITCH,
             "horizontal_pitch": EPI_PITCH, "fill_rule": rule})

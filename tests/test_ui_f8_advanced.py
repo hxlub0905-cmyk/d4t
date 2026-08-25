@@ -25,6 +25,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 from d4t.core.pipeline import get_step, list_steps  # noqa: E402
+from tests.region_cards import (  # noqa: E402
+    add_region_step, region_card,
+)
 
 
 def _import_qt(g):
@@ -47,7 +50,7 @@ def qapp():
 @pytest.fixture
 def form(qapp):
     f = widgets_mod.ParamForm()
-    f.set_step(get_step("roi_cross")().describe(), {}, ["test", "ref"])
+    f.set_step(region_card("roi_cross")().describe(), {}, ["test", "ref"])
     yield f
     f.deleteLater()
 
@@ -101,7 +104,7 @@ def test_switching_card_folds_it_back(form):
     """上一張卡展開過，不代表這一張也要 —— 那是**這一張**卡的問題。"""
     form.toggle_advanced()
     assert form.advanced_open() is True
-    form.set_step(get_step("roi_cross")().describe(), {}, ["test", "ref"])
+    form.set_step(region_card("roi_cross")().describe(), {}, ["test", "ref"])
     assert form.advanced_open() is False
 
 
@@ -124,7 +127,7 @@ def test_show_when_still_wins_over_being_expanded(qapp):
 def test_the_count_only_counts_rows_that_apply_right_now(qapp):
     """數字要是**按下去會出現幾格**，不是「這張卡標了幾格」。"""
     f = widgets_mod.ParamForm()
-    f.set_step(get_step("roi_cross")().describe(), {}, ["test", "ref"])
+    f.set_step(region_card("roi_cross")().describe(), {}, ["test", "ref"])
     n = len([x for x in f.advanced_names() if f._shown_by_rules(x)])
     assert str(n) in f.advanced_button_text()
     f.set_advanced_open(True)

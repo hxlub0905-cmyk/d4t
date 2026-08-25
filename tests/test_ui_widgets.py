@@ -24,6 +24,9 @@ import sys
 
 import numpy as np
 import pytest
+from tests.region_cards import (  # noqa: E402
+    add_region_step, region_card,
+)
 
 
 def _load_qt() -> None:
@@ -342,8 +345,9 @@ def test_param_form_int_float_and_image_key(qapp):
 
     # `snr_map`（Z-map）2026-08-25 刪掉了 —— 這裡要的是同時有
     # **int（帶上下界）／float／image_key** 三種型別的一張卡，
-    # 才驗得到「哪一種型別配哪一種編輯器」。`roi_cross` 是同一個形狀。
-    desc = _describe("roi_cross")
+    # 才驗得到「哪一種型別配哪一種編輯器」。`roi_reference` 是同一個形狀
+    # （F30 起 Profile 是它的一個 method，`smooth` 那幾格在它上面）。
+    desc = region_card("roi_cross").describe()
     streams = ["test", "ref", "diff", "ref_aligned"]
     form.set_step(desc, {"smooth": 31}, streams)
 
@@ -564,7 +568,7 @@ def test_param_form_bool_choice_and_str(qapp):
 
 def test_param_form_show_and_clear_errors(qapp):
     form = widgets_mod.ParamForm()
-    desc = _describe("roi_cross")
+    desc = region_card("roi_cross").describe()
     form.set_step(desc, {}, ["diff"])
     help_text = [p for p in desc["params"]
                  if p["name"] == "smooth"][0]["help"]
@@ -611,7 +615,8 @@ def test_library_panel_groups_and_double_click(qapp):
         by_group.setdefault(s_["group"], set()).add(s_["key"])
     assert "load_patch" in by_group["input"]
     assert {"subtract", "align"} <= by_group["compare"]
-    assert "roi_cross" in by_group["region"]
+    # F30：四張 Region 卡收成一張（`roi_reference` 的四個 method）。
+    assert "roi_reference" in by_group["region"]
     assert {"glv_stats", "cd_measure"} <= by_group["measure"]
 
     # 空的段落要留一行提示（registry 目前沒有 adc 卡片）
@@ -1404,7 +1409,7 @@ def test_an_icon_choice_row_is_buttons_not_a_dropdown(qapp):
     from d4t.ui.widgets import IconButton, IconChoice, ParamForm
 
     form = ParamForm()
-    form.set_step(get_step("roi_cross").describe(),
+    form.set_step(region_card("roi_cross").describe(),
                   {"place": "crossing"}, ["ref", "test"])
     editor = form.editor("place")
     assert isinstance(editor, IconChoice)
@@ -1442,7 +1447,7 @@ def test_the_profile_card_lost_three_dropdowns_of_english(qapp):
     from d4t.core.pipeline import get_step
 
     kinds = {p["name"]: p["type"]
-             for p in get_step("roi_cross").describe()["params"]}
+             for p in region_card("roi_cross").describe()["params"]}
     assert kinds["place"] == "icon_choice"
     assert kinds["side"] == "icon_choice"
     assert kinds["fill_rule"] == "icon_choice"
