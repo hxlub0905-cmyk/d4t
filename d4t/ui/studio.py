@@ -3485,15 +3485,19 @@ class StudioWindow(QMainWindow):
             self._refresh_kernel_hint()
 
     def _after_pair_param(self, node_id: str, name: str) -> None:
-        """配對卡改了 `source` / `carry` 之後要跟上的兩件事（F15-2）。
+        """配對卡改了 `source` / `carry` / 排名欄位之後要跟上的兩件事（F15-2）。
 
         **不重建表單**：使用者可能正在 “Source name” 那一格打字，而重建會把
         游標搶走 —— `set_dynamic_choices` 只換內容，還會跳過有游標的那一格。
+
+        排名那兩格（F33）跟 `carry` 是同一件事：它們指名的欄位要跟著複製過來
+        （`columns_for_source` 的聯集），少了重灌那一步，剛挑好的排序欄在
+        `fields` 裡是空的。``rank_desc`` 不在名單裡 —— 它不指名任何欄位。
         """
         node = self.model.nodes.get(str(node_id))
         if node is None or node.step not in self._PAIR_CARDS:
             return
-        if name not in ("source", "carry"):
+        if name not in ("source", "carry", "rank_within", "rank_by"):
             return
         self._sync_pair_fields(str(node.params.get("source", "") or ""))
         if name == "source" and self.selected_node == str(node_id):

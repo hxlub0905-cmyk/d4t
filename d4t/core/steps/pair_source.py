@@ -14,6 +14,18 @@ RSEM API 空拍（拍滿、直接對影像抓 defect）是 ground truth；拿它
 中間那一列是這張卡存在的理由，而它要答得出來就必須把配到那一顆的 **KLARF 欄位**
 帶成 feature（`carry`）——否則第一列與第二列在資料上長得一模一樣。
 
+排名為什麼算在這裡（F33，2026-08-25）
+------------------------------------
+「分數低到沒被 sample」問的是**名次**：sample 是照分數排序、每個 die 取前幾名
+去 review 的。而那個名次的母體是**第二份的完整 defect list**（幾千筆），
+不是這一批跑過 pipeline 的那三十顆。
+
+判定段有一個現成的「跟整批比」（`Let.scale`）—— 它在這裡是錯的，因為它看得到
+的只有跑過 pipeline 的那幾十顆，那是「這顆在我挑出來看的 30 顆裡排第幾」，
+對 sample 門檻沒有意義。整份只有**掛上來的這一層**看得到，所以排名算在這張卡
+（而它本來就是「讀那份資料」的那一層 —— 同「一格 nm/px 長在把那份資料讀進來
+的那張卡上」）。
+
 卡片不自己讀檔
 --------------
 「這張卡 load 自己的 source」是**使用者看到的事**。第二份資料是由 Studio / CLI
@@ -63,8 +75,106 @@ def _carry_names(params: Dict[str, Any]) -> List[str]:
     return [c.upper() for c in parse_key_list(params.get("carry", ""))]
 
 
+def _rank_by(params: Dict[str, Any]) -> str:
+    return str(params.get("rank_by", "") or "").strip().upper()
+
+
+def _rank_within(params: Dict[str, Any]) -> List[str]:
+    return [c.upper() for c in parse_key_list(params.get("rank_within", ""))]
+
+
+def _rank_columns(params: Dict[str, Any]) -> List[str]:
+    """排名要用到的欄位（分組欄 + 排序欄）—— 沒設排序欄就一欄都不要。
+
+    這幾欄跟 `carry` 走同一條路進 `DefectItem.fields`（見
+    :func:`columns_for_source`）：掛第二份的時候只複製指名的那幾欄，
+    而排名讀的是**整份**的那一欄 —— 沒複製過去的話它讀到的是一片空白。
+    """
+    by = _rank_by(params)
+    if not by:
+        return []
+    out = list(_rank_within(params))
+    if by not in out:
+        out.append(by)
+    return out
+
+
+def _rank_key(params: Dict[str, Any]) -> Optional[tuple]:
+    """這組排名設定的身分；沒設排序欄回 ``None``（＝不算排名）。
+
+    同一份第二 source 可以被兩張卡指著、各自排各自的（一張照分數、一張照
+    另一欄）—— 所以備忘是**一組設定一個 key**，不是一份資料一個。
+    """
+    by = _rank_by(params)
+    if not by:
+        return None
+    return (tuple(_rank_within(params)), by, bool(params.get("rank_desc", True)))
+
+
+def _rank_all(others: List[Any], key: tuple, sid: str, step_key: str) -> None:
+    """把整份第二來源分組排名，結果掛回每一顆 item 上。
+
+    **一份資料算一次**（O(N log N)），不是逐顆算：整份本來就在記憶體裡，
+    而 raw KLARF 是幾千幾萬筆 —— 逐顆重排的話 30 顆就掃 30 遍。備忘掛在
+    item 物件上（`_d4t_rank`），因為 `sources_for_run` 重建的是 list、
+    item 物件是共用的，而重掛一份 lot 會產生全新的 item —— 過期不了。
+
+    **tie-break 是 DEFECTID**：同分的兩筆誰在前面必須是確定的，否則同一份
+    資料跑兩次名次會變（而黃金值會抓不到真正的迴歸）。
+    """
+    within, by, desc = key
+    groups: Dict[tuple, List[Any]] = {}
+    for item in others:
+        fields = dict(getattr(item, "fields", None) or {})
+        missing = [c for c in within if c not in fields] or (
+            [] if by in fields else [by])
+        if missing:
+            raise StepError(
+                step_key,
+                "cannot rank the defects in '%s': the column %s did not come "
+                "over. What did: %s. Ranking reads those columns from that "
+                "whole lot, so they are copied over with the carried ones."
+                % (sid, ", ".join(missing),
+                   ", ".join(sorted(fields)) or "(nothing)"))
+        raw = str(fields.get(by, ""))
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            # **不可以安靜地全部並列第一**：那樣每一顆都拿到 rank 1，
+            # 而報表上它跟「真的是第一名」長得一模一樣。
+            raise StepError(
+                step_key,
+                "cannot rank by '%s' in '%s': defect %s has %r there, which "
+                "is not a number. Pick the column that holds the tool's own "
+                "score in “Rank by”."
+                % (by, sid, getattr(item, "defect_id", "?"), raw))
+        groups.setdefault(tuple(fields[c] for c in within), []).append(
+            (value, str(getattr(item, "defect_id", "")), item))
+
+    for rows in groups.values():
+        rows.sort(key=lambda r: (-r[0] if desc else r[0], r[1]))
+        total = len(rows)
+        for i, (_v, _did, item) in enumerate(rows, start=1):
+            memo = getattr(item, "_d4t_rank", None)
+            if memo is None:
+                memo = {}
+                setattr(item, "_d4t_rank", memo)
+            memo[key] = (i, total)
+
+
+def _ensure_ranks(others: List[Any], key: tuple, sid: str,
+                  step_key: str) -> None:
+    """還沒排過就排一次（探第一顆就知道）。"""
+    if not others:
+        return
+    memo = getattr(others[0], "_d4t_rank", None)
+    if memo is not None and key in memo:
+        return
+    _rank_all(others, key, sid, step_key)
+
+
 def columns_for_source(nodes: Any, source_id: str) -> List[str]:
-    """指著 ``source_id`` 的每一張配對卡，`carry` 的聯集（大寫）。
+    """指著 ``source_id`` 的每一張配對卡，`carry` **＋排名欄位**的聯集（大寫）。
 
     掛第二份的時候只複製這幾欄（`ingest/pair_source.fill_fields` 的 ``columns``）
     —— raw data 是幾十萬顆，×24 欄字串是幾百 MB，而那幾欄還要 pickle 進 worker。
@@ -84,7 +194,9 @@ def columns_for_source(nodes: Any, source_id: str) -> List[str]:
         params = dict(getattr(node, "params", None) or {})
         if str(params.get("source", "") or "").strip() != str(source_id):
             continue
-        for col in _carry_names(params):
+        # 排名欄位跟 carry 走同一條路：排名讀的是**整份**的那一欄，
+        # 沒複製過去的話它讀到一片空白（而那會變成一個很難查的錯誤）。
+        for col in _carry_names(params) + _rank_columns(params):
             if col not in want:
                 want.append(col)
     return want
@@ -151,6 +263,32 @@ class PairSourceStep(Step):
                   "is what that lot actually has. This is what makes \"it was "
                   "detected but scored too low\" answerable.")),
         ParamSpec(
+            name="rank_within", type="multi_choice", default="",
+            label="Rank within",
+            choices_from="source_columns",
+            help=("Columns that say which defects to rank against each other "
+                  "- pick XINDEX and YINDEX to rank inside each die. Leave it "
+                  "empty to rank the whole lot as one group.")),
+        ParamSpec(
+            name="rank_by", type="str", default="",
+            label="Rank by",
+            choices_from="source_columns",
+            help=("Rank every defect in that whole lot by this column - the "
+                  "other tool's own score, usually. This is how \"it was "
+                  "detected, but it ranked too low to be sampled\" becomes a "
+                  "number: the rank comes from that lot's full defect list, "
+                  "not from the few defects in this run. Leave it empty and "
+                  "no rank is worked out.")),
+        ParamSpec(
+            name="rank_desc", type="bool", default=True,
+            label="Highest first",
+            # ⚠ 沒有 `show_when`：它比的是「值在不在這幾個之中」，而
+            # 「Rank by 有沒有填」不是一組固定的值（那一格是欄位名）。
+            # 這一格在沒排名的時候不影響任何結果（見 `_rank_key`）。
+            help=("On: the biggest value is rank 1 - right for a score. Off: "
+                  "the smallest is rank 1, for a column that already counts "
+                  "up from the best one.")),
+        ParamSpec(
             name="channel", type="str", default="",
             label="Which image",
             choices_from="source_images",
@@ -176,6 +314,10 @@ class PairSourceStep(Step):
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
         out = list(cls.features_out)
         out += ["pair_%s" % c for c in _carry_names(params)]
+        if _rank_by(params):
+            # 沒填「Rank by」就**一格都不宣告** —— 宣告了而永遠不寫的話，
+            # CSV 上會多出兩欄空的，而空欄跟「這一顆算不出來」講的是同一句話。
+            out += ["pair_die_rank", "pair_die_total"]
         return out
 
     @classmethod
@@ -198,6 +340,10 @@ class PairSourceStep(Step):
         if not str(params.get("source", "") or "").strip():
             return ["This card has no second lot yet. Use “Open data…” on this "
                     "card - the name you give it is what “Source name” holds."]
+        if _rank_within(params) and not _rank_by(params):
+            return ["“Rank within” says which defects to rank against each "
+                    "other, but “Rank by” is empty - pick the column that "
+                    "orders them (the other tool's score, usually)."]
         return []
 
     # ---- 挑哪一顆 --------------------------------------------------------
@@ -292,6 +438,19 @@ class PairSourceStep(Step):
 
         ctx.add_feature("match_dist_nm", float(dist))
         ctx.add_feature("match_ambiguous", 1.0 if ambiguous else 0.0)
+
+        # 排名：母體是**那一份的完整 defect list**（幾千筆），不是這一批跑過
+        # pipeline 的那幾十顆。判定段的「跟整批比」答的是另一個問題 ——
+        # 「這顆在我挑出來看的 30 顆裡排第幾」對 sample 門檻沒有意義。
+        rank_key = _rank_key(p)
+        if rank_key is not None:
+            _ensure_ranks(others, rank_key, sid, self.key)
+            rank, total = getattr(hit, "_d4t_rank", {})[rank_key]
+            ctx.add_feature("pair_die_rank", float(rank))
+            # **「第 7 名」在 10 筆裡跟在 3000 筆裡是兩件事**，而 rank 那一格
+            # 看起來一模一樣。
+            ctx.add_feature("pair_die_total", float(total))
+
         fields = dict(getattr(hit, "fields", None) or {})
         for col in _carry_names(p):
             raw = str(fields.get(col, ""))

@@ -58,7 +58,8 @@ def _ctx(main_item, sources):
 
 def _run(ctx, **over):
     p = {"source": "ebi", "match": "position", "tol_nm": 500.0,
-         "candidates": 1, "carry": "", "channel": "", "out": "paired"}
+         "candidates": 1, "carry": "", "channel": "", "out": "paired",
+         "rank_within": "", "rank_by": "", "rank_desc": True}
     p.update(over)
     get_step("pair_source")().run(ctx, p)
     return ctx
@@ -812,3 +813,240 @@ def test_a_name_that_merely_contains_paired_is_left_alone():
                   "bins": {"below": 0, "above": 1}},
     }
     assert Recipe.from_json_dict(raw).score.expr == "my_paired_ratio"
+
+
+# --------------------------------------------------------------------------- #
+# 10. F33：die 內排名 —— 母體是**那一份的完整清單**，不是這一批
+# --------------------------------------------------------------------------- #
+def _ranked_lot():
+    """三個 die、各若干筆，分數刻意跨 die 交錯（排錯母體就會看得出來）。"""
+    rows = [
+        # (id,  x,     y,  XINDEX, YINDEX, SCORE)
+        ("a1", 0, 0, "1", "1", "90"),
+        ("a2", 1000, 0, "1", "1", "70"),
+        ("a3", 2000, 0, "1", "1", "50"),
+        ("b1", 0, 1000, "2", "1", "95"),
+        ("b2", 1000, 1000, "2", "1", "20"),
+        ("c1", 0, 2000, "3", "7", "80"),
+        ("c2", 1000, 2000, "3", "7", "85"),
+        ("c3", 2000, 2000, "3", "7", "60"),
+        ("c4", 3000, 2000, "3", "7", "10"),
+    ]
+    return [_item(did, x, y, die=(int(xi), int(yi)),
+                  fields={"XINDEX": xi, "YINDEX": yi, "SCORE": sc})
+            for did, x, y, xi, yi, sc in rows]
+
+
+def _rank_of(target_id, others, **over):
+    """把 ``target_id`` 那一顆當成 main 的配對對象，跑一次拿排名。"""
+    hit = next(o for o in others if o.defect_id == target_id)
+    ctx = _ctx(_item("gt", hit.xrel_nm, hit.yrel_nm, die=hit.die),
+               {"ebi": others})
+    p = dict(rank_within="XINDEX,YINDEX", rank_by="SCORE")
+    p.update(over)
+    with pytest.raises(StepError):        # 沒有影像 → 配到了但載不出圖
+        _run(ctx, tol_nm=10.0, **p)
+    return ctx.features
+
+
+def test_the_rank_is_worked_out_inside_each_die_over_the_whole_lot():
+    """名次的母體是**那一份的完整清單**，不是跑過 pipeline 的那幾顆。
+
+    分數刻意跨 die 交錯：`c1`（80 分）在整份裡排第 3，但在它自己的 die 裡
+    是第 2 —— 兩個數字不一樣，所以這條測試分得出母體有沒有搞錯。
+    """
+    others = _ranked_lot()
+    f = _rank_of("c1", others)
+    assert f["pair_die_rank"] == 2.0        # 自己 die 內：85 > 80 > 60 > 10
+    assert f["pair_die_total"] == 4.0       # 而那個 die 有四筆
+
+    assert _rank_of("a1", others)["pair_die_rank"] == 1.0
+    assert _rank_of("a3", others)["pair_die_total"] == 3.0
+    assert _rank_of("b2", others)["pair_die_rank"] == 2.0
+
+
+def test_the_total_is_there_because_seventh_of_ten_is_not_seventh_of_3000():
+    """`pair_die_rank` 那一格在 10 筆裡跟在 3000 筆裡看起來一模一樣。"""
+    others = _ranked_lot()
+    assert _rank_of("a2", others)["pair_die_total"] == 3.0
+    assert _rank_of("c3", others)["pair_die_total"] == 4.0
+
+
+def test_no_grouping_ranks_the_whole_lot_as_one():
+    """分組欄留空 = 整份排一組。**不預設 XINDEX/YINDEX** —— 那是這個 lot
+    剛好有，不是通則。"""
+    others = _ranked_lot()
+    f = _rank_of("c1", others, rank_within="")
+    # 整份九筆：95 > 90 > 85 > **80** —— 而它在自己的 die 裡是第 2（見上一條）
+    assert f["pair_die_rank"] == 4.0
+    assert f["pair_die_total"] == 9.0
+
+    card = get_step("pair_source")
+    spec = next(p for p in card.params if p.name == "rank_within")
+    assert spec.default == ""
+
+
+def test_ties_break_by_defect_id_so_two_runs_agree():
+    """同分的兩筆誰在前面必須是確定的 —— 不然同一份資料跑兩次名次會變。"""
+    def lot():
+        return [_item("z_later", 0, 0, die=(1, 1),
+                      fields={"XINDEX": "1", "YINDEX": "1", "SCORE": "50"}),
+                _item("a_first", 1000, 0, die=(1, 1),
+                      fields={"XINDEX": "1", "YINDEX": "1", "SCORE": "50"})]
+
+    first = [_rank_of(d, lot())["pair_die_rank"] for d in ("a_first", "z_later")]
+    # 反過來擺一次：名次不可以跟著 list 的順序跑
+    reversed_lot = list(reversed(lot()))
+    second = [_rank_of(d, list(reversed_lot))["pair_die_rank"]
+              for d in ("a_first", "z_later")]
+    assert first == second == [1.0, 2.0]
+
+
+def test_lowest_first_when_highest_first_is_off():
+    others = _ranked_lot()
+    assert _rank_of("c4", others, rank_desc=False)["pair_die_rank"] == 1.0
+    assert _rank_of("c2", others, rank_desc=False)["pair_die_rank"] == 4.0
+
+
+def test_no_rank_columns_means_no_rank_features():
+    """排名參數沒填 → 那兩格**一格都不寫**（不是 0、不是 -1）。"""
+    others = _ranked_lot()
+    hit = others[0]
+    ctx = _ctx(_item("gt", hit.xrel_nm, hit.yrel_nm, die=hit.die),
+               {"ebi": others})
+    with pytest.raises(StepError):
+        _run(ctx, tol_nm=10.0)
+    assert "pair_die_rank" not in ctx.features
+    assert "pair_die_total" not in ctx.features
+
+    # 宣告也一樣：沒填就不宣告，CSV 上不會多出兩欄空的
+    card = get_step("pair_source")
+    plain = card.resolve_features(card.validate_params({}))
+    assert "pair_die_rank" not in plain
+    ranked = card.resolve_features(card.validate_params({"rank_by": "SCORE"}))
+    assert "pair_die_rank" in ranked and "pair_die_total" in ranked
+
+
+def test_a_defect_with_no_match_gets_no_rank_either():
+    """沒配到就沒有「它在那份裡排第幾」可言 —— `pair_found = 0` 說明了為什麼。"""
+    ctx = _ctx(_item("gt", 999999, 999999), {"ebi": _ranked_lot()})
+    _run(ctx, rank_within="XINDEX,YINDEX", rank_by="SCORE")
+    assert ctx.features["pair_found"] == 0.0
+    assert "pair_die_rank" not in ctx.features
+    assert "pair_die_total" not in ctx.features
+
+
+def test_a_rank_column_that_is_not_a_number_names_the_column_and_the_value():
+    """**不可以安靜地全部並列第一** —— 那樣每一顆都拿到 rank 1，而它跟
+    「真的是第一名」在報表上長得一模一樣。"""
+    others = _ranked_lot()
+    others[2].fields["SCORE"] = "n/a"
+    hit = others[0]
+    ctx = _ctx(_item("gt", hit.xrel_nm, hit.yrel_nm, die=hit.die),
+               {"ebi": others})
+    with pytest.raises(StepError) as e:
+        _run(ctx, tol_nm=10.0, rank_within="XINDEX,YINDEX", rank_by="SCORE")
+    msg = str(e.value)
+    assert "SCORE" in msg and "n/a" in msg and "a3" in msg
+
+
+def test_a_rank_column_that_never_came_over_is_said_out_loud():
+    """排名讀的是整份的那一欄 —— 沒複製過去的話它讀到的是一片空白。"""
+    others = _ranked_lot()
+    hit = others[0]
+    ctx = _ctx(_item("gt", hit.xrel_nm, hit.yrel_nm, die=hit.die),
+               {"ebi": others})
+    with pytest.raises(StepError) as e:
+        _run(ctx, tol_nm=10.0, rank_by="PMSCORE")
+    assert "PMSCORE" in str(e.value) and "SCORE" in str(e.value)
+
+
+def test_the_rank_columns_join_the_carry_union():
+    """掛第二份時要複製的欄位 = carry ∪ 排名欄位（少一個就讀不到）。"""
+    from d4t.core.steps.pair_source import columns_for_source
+
+    class _N:
+        def __init__(self, step, params):
+            self.step, self.params = step, params
+
+    nodes = [_N("pair_source", {"source": "ebi", "carry": "DEFECTID",
+                                "rank_within": "XINDEX,YINDEX",
+                                "rank_by": "SCORE"})]
+    cols = columns_for_source(nodes, "ebi")
+    assert set(cols) == {"DEFECTID", "XINDEX", "YINDEX", "SCORE"}
+
+    # 沒填排序欄 → 分組欄也不必帶（排名根本不會算）
+    nodes2 = [_N("pair_source", {"source": "ebi", "carry": "DEFECTID",
+                                 "rank_within": "XINDEX,YINDEX"})]
+    assert columns_for_source(nodes2, "ebi") == ["DEFECTID"]
+
+
+def test_two_cards_ranking_the_same_lot_differently_do_not_collide():
+    """同一份第二 source 可以被兩張卡指著、各自排各自的。"""
+    others = _ranked_lot()
+    high = _rank_of("c4", others)                        # 照分數，大的第一
+    low = _rank_of("c4", others, rank_desc=False)        # 同一份，反過來
+    assert high["pair_die_rank"] == 4.0 and low["pair_die_rank"] == 1.0
+    # 兩組設定的備忘同時掛在同一顆 item 上，互不覆蓋
+    memo = getattr(next(o for o in others if o.defect_id == "c4"), "_d4t_rank")
+    assert len(memo) == 2
+
+
+def test_ranking_the_whole_lot_happens_once_not_once_per_defect():
+    """整份本來就在記憶體裡，分組排序是一次 O(N log N) —— 攤到每一顆是零。"""
+    from d4t.core.steps import pair_source as card_mod
+
+    others = _ranked_lot()
+    calls = []
+    real = card_mod._rank_all
+
+    def counted(*a, **kw):
+        calls.append(1)
+        return real(*a, **kw)
+
+    card_mod._rank_all = counted
+    try:
+        for did in ("a1", "a2", "a3", "b1", "c1"):
+            _rank_of(did, others)
+    finally:
+        card_mod._rank_all = real
+    assert len(calls) == 1
+
+
+def test_rank_features_survive_the_worker_boundary(tmp_path):
+    """`workers=1` 與 `workers=2` 的排名要**逐項相同**（鐵則 9 的形狀）。
+
+    備忘掛在 item 物件上，而 worker 拿到的是另一份 pickle —— 每個 process
+    自己算一次，而算出來的必須是同一個答案（tie-break 是 DEFECTID）。
+    """
+    from d4t.core.ingest.dataset import load_dataset
+    from d4t.core.pipeline import run_batch
+    from d4t.core.pipeline.recipe import Recipe, RecipeNode, ScoreSpec
+
+    main_paths, gt_paths = _two_lots(tmp_path)
+    ds = load_dataset(main_paths["klarf"])
+    pair_ingest.attach(ds, load_dataset(gt_paths["klarf"]), "gt",
+                       columns=["DEFECTID", "XINDEX", "YINDEX"])
+
+    nodes = {
+        "load": RecipeNode("load", "load_patch", {}),
+        "pair": RecipeNode("pair", "pair_source",
+                           {"source": "gt", "match": "position",
+                            "tol_nm": 100000.0, "carry": "DEFECTID",
+                            "rank_within": "XINDEX,YINDEX",
+                            "rank_by": "DEFECTID"}),
+    }
+    rec = Recipe(recipe_id="f33-rank", routes={"ebi_patch": list(nodes)},
+                 nodes=nodes,
+                 score=ScoreSpec(expr="pair_die_rank", threshold=0.5,
+                                 bins={"below": 0, "above": 1}))
+
+    def ranks(workers):
+        return [(r["defect_id"],
+                 r.get("features", {}).get("pair_die_rank"),
+                 r.get("features", {}).get("pair_die_total"))
+                for r in run_batch(rec, ds, workers=workers)]
+
+    one = ranks(1)
+    assert any(r is not None for _d, r, _t in one)
+    assert ranks(2) == one
