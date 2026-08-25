@@ -314,3 +314,144 @@ def test_renders_from_a_real_context_images_dict():
                                  blobs=ctx.meta["blobs"], label="bin=1")
     assert out.shape == (H, 2 * W, 3)
     assert out.dtype == np.uint8
+
+
+# ---------------------------------------------------------------------------
+# 逐框比較的 ROI 框（F31）—— 贏家粗、其餘細，來源是 GLV 的 meta
+# ---------------------------------------------------------------------------
+def _nboxes(n=4):
+    """一排並肩的正規化框。"""
+    return [(i / n + 0.05 / n, 0.25, 0.9 / n, 0.5) for i in range(n)]
+
+
+def test_the_winner_is_thick_and_amber_the_rest_thin_and_blue():
+    img = flat(60, 200, 200)          # ≥192 → 贏家粗 3px、其餘 1px
+    out = overlay.render_overlay({"test": img}, {}, roi_boxes=_nboxes(4),
+                                 roi_winner=2)
+    assert (out == overlay.ROI_WINNER_COLOR).all(axis=-1).any()
+    assert (out == overlay.ROI_BOX_COLOR).all(axis=-1).any()
+    # 粗細就是那句話本身：贏家的框邊要比其餘的厚
+    win = (out == overlay.ROI_WINNER_COLOR).all(axis=-1).sum()
+    one_other = (out == overlay.ROI_BOX_COLOR).all(axis=-1).sum() / 3.0
+    assert win > one_other * 1.5
+
+
+def test_no_winner_means_all_thin_and_no_guessing():
+    out = overlay.render_overlay({"test": flat(60, 200, 200)}, {},
+                                 roi_boxes=_nboxes(4), roi_winner=-1)
+    assert not (out == overlay.ROI_WINNER_COLOR).all(axis=-1).any()
+    assert (out == overlay.ROI_BOX_COLOR).all(axis=-1).any()
+
+
+def test_no_roi_boxes_changes_nothing_byte_for_byte():
+    """沒接 ROI 的 recipe 一個位元不變 —— 預設值就是「這個參數不存在」。"""
+    a = overlay.render_overlay({"test": flat()}, {"blob_x": 10.0,
+                               "blob_y": 10.0, "blob_w": 8.0, "blob_h": 8.0})
+    b = overlay.render_overlay({"test": flat()}, {"blob_x": 10.0,
+                               "blob_y": 10.0, "blob_w": 8.0, "blob_h": 8.0},
+                               roi_boxes=None, roi_winner=-1)
+    assert a.tobytes() == b.tobytes()
+
+
+def test_roi_boxes_land_on_both_montage_panels():
+    imgs = {"test": flat(60), "diff": flat(10)}
+    out = overlay.render_overlay(imgs, {}, roi_boxes=_nboxes(2), roi_winner=0)
+    left, right = out[:, :W], out[:, W:]
+    for half in (left, right):
+        assert (half == overlay.ROI_WINNER_COLOR).all(axis=-1).any()
+        assert (half == overlay.ROI_BOX_COLOR).all(axis=-1).any()
+
+
+def test_the_measured_box_stays_on_top_of_the_roi_boxes():
+    """量測框（紅）後畫 —— 疊到的地方「量到的東西在哪」在最上面。"""
+    boxes = [(0.1, 0.1, 0.5, 0.5)]
+    out = overlay.render_overlay(
+        {"test": flat(60)}, {}, box=(6, 6, 32, 32), roi_boxes=boxes,
+        roi_winner=0)
+    assert (out == overlay.BOX_COLOR).all(axis=-1).any()
+
+
+# ---------------------------------------------------------------------------
+# pick_roi_boxes —— 畫哪幾個（all / none / near the winner ＋ 自動退化）
+# ---------------------------------------------------------------------------
+def test_all_keeps_everything_below_the_cap():
+    boxes, win, degraded = overlay.pick_roi_boxes(_nboxes(4), 2, "all", 300)
+    assert len(boxes) == 4 and win == 2 and not degraded
+
+
+def test_none_keeps_only_the_winner():
+    boxes, win, degraded = overlay.pick_roi_boxes(_nboxes(4), 2, "none", 300)
+    assert boxes == [_nboxes(4)[2]] and win == 0 and not degraded
+
+
+def test_near_the_winner_keeps_the_cap_nearest():
+    rects = _nboxes(10)
+    boxes, win, degraded = overlay.pick_roi_boxes(rects, 5, "near the winner", 3)
+    assert len(boxes) == 3 and not degraded
+    assert rects[5] in boxes and boxes[win] == rects[5]
+    assert rects[4] in boxes and rects[6] in boxes      # 貼著贏家的那兩個
+
+
+def test_all_quietly_degrades_above_the_cap_and_says_so():
+    rects = _nboxes(10)
+    boxes, win, degraded = overlay.pick_roi_boxes(rects, 5, "all", 3)
+    assert degraded and len(boxes) == 3 and boxes[win] == rects[5]
+
+
+def test_no_winner_and_too_many_draws_nothing_rather_than_guessing():
+    rects = _nboxes(10)
+    boxes, win, degraded = overlay.pick_roi_boxes(rects, -1, "all", 3)
+    assert boxes == [] and win == -1 and degraded
+
+
+def test_the_winner_survives_even_a_cap_of_one():
+    rects = _nboxes(6)
+    boxes, win, _ = overlay.pick_roi_boxes(rects, 3, "near the winner", 1)
+    assert boxes == [rects[3]] and win == 0
+
+
+# ---------------------------------------------------------------------------
+# roi_boxes_for_overlay —— 從 rerun 的 Context 撿，跟特徵同一次計算
+# ---------------------------------------------------------------------------
+def _each_box_ctx():
+    import d4t.core.steps  # noqa: F401 — 觸發卡片註冊
+    from d4t.core.pipeline import get_step
+    from d4t.core.pipeline.context import Context
+
+    img = np.full((100, 100), 100, np.float32)
+    img[42:58, 42:58] = 170.0                      # cell 12 (5×5 的正中)
+    ctx = Context(images={"test": img})
+    n = 5
+    ctx.set_roi_boxes("cells", [
+        (c / n + 0.02, r / n + 0.02, 1.0 / n - 0.04, 1.0 / n - 0.04)
+        for r in range(n) for c in range(n)])
+    get_step("glv_stats")().run(ctx, {
+        "source": "test", "roi": "cells", "metrics": "glv_median",
+        "across_boxes": "each box"})
+    return ctx
+
+
+def test_the_boxes_come_from_the_glv_note_not_a_second_pick():
+    ctx = _each_box_ctx()
+    rects, win = overlay.roi_boxes_for_overlay(ctx)
+    assert len(rects) == 25
+    assert win == int(ctx.features["worst_i"]) == 12
+    assert rects == ctx.roi_norm_rects("cells")
+
+
+def test_a_pooled_run_yields_no_roi_boxes():
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import get_step
+    from d4t.core.pipeline.context import Context
+
+    ctx = Context(images={"test": np.full((60, 60), 90, np.float32)})
+    ctx.set_roi_boxes("cells", [(0.1, 0.1, 0.5, 0.5), (0.6, 0.1, 0.3, 0.5)])
+    get_step("glv_stats")().run(ctx, {
+        "source": "test", "roi": "cells", "metrics": "glv_median"})
+    assert overlay.roi_boxes_for_overlay(ctx) == ([], -1)
+
+
+def test_a_context_without_glv_yields_no_roi_boxes():
+    class Bare:
+        meta: dict = {}
+    assert overlay.roi_boxes_for_overlay(Bare()) == ([], -1)

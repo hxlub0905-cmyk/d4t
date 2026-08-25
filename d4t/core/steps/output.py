@@ -436,6 +436,52 @@ def rank_by_spec() -> ParamSpec:
               "in file order."))
 
 
+def roi_draw_specs() -> List[ParamSpec]:
+    """出圖那兩張卡共用的「ROI 框怎麼畫」（F31）。**兩張卡逐字同一組**。
+
+    GLV 的逐框比較（each box）在報表上要看得到：贏家（最異常的那一格）粗框、
+    其餘細線 —— 其餘的是**參照**，要看得到（比較的分母是什麼）但不能把整張圖
+    蓋滿。500 個框全畫就是蓋滿，所以「畫幾個」是使用者的一格，不是程式裡的
+    魔術數字；而那個數字同時是 ``all`` 的自動退化門檻與 ``near the winner``
+    的數量（`overlay.pick_roi_boxes`）—— 一個數字管兩件事，不必發明第二個。
+    """
+    return [
+        ParamSpec(
+            name="draw_boxes", type="choice", default=overlay.DRAW_ALL,
+            choices=list(overlay.DRAW_MODES), label="Draw the other boxes",
+            help=("When a GLV card compared the region box by box, each "
+                  "picture gets the winning box drawn thick - and this "
+                  "decides what happens to all the other boxes. all shows "
+                  "the whole set as thin lines (best when there are few); "
+                  "near the winner keeps only the closest ones; none draws "
+                  "just the winner. With thousands of boxes, all quietly "
+                  "becomes near the winner at the limit below."),
+        ),
+        ParamSpec(
+            name="draw_boxes_cap", type="int", default=300, min=1, max=100000,
+            label="Draw at most", advanced=True,
+            help=("The most boxes to draw on one picture. all switches to "
+                  "near the winner above this number, and near the winner "
+                  "keeps this many (the winner plus its closest "
+                  "neighbours)."),
+        ),
+    ]
+
+
+def _roi_overlay_kwargs(ctx: Any, p: Dict[str, Any]):
+    """一顆的 ``roi_boxes`` / ``roi_winner`` → ``(kwargs, 有沒有自動退化)``。
+
+    兩張出圖卡逐字同一段（同 `roi_draw_specs` 的理由）。退化（``all`` 超過
+    上限退成 ``near the winner``）由呼叫端**整批警告一次** —— 一顆一句的話
+    6000 顆就是 6000 句。
+    """
+    rects, win = (overlay.roi_boxes_for_overlay(ctx)
+                  if ctx is not None else ([], -1))
+    boxes, win, degraded = overlay.pick_roi_boxes(
+        rects, win, str(p["draw_boxes"]), int(p["draw_boxes_cap"]))
+    return {"roi_boxes": boxes, "roi_winner": win}, degraded
+
+
 @register_step
 class OutputImageStep(_OutputStep):
     """每一顆一張疊圖 PNG（整批跑完之後一顆一顆重跑取影像）。"""
@@ -469,6 +515,7 @@ class OutputImageStep(_OutputStep):
             help=("On: each PNG is the image and the difference side by "
                   "side. Off: just the image."),
         ),
+        *roi_draw_specs(),
     ]
 
     def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
@@ -496,6 +543,7 @@ class OutputImageStep(_OutputStep):
         # Export 精靈今天做的事，所以這裡不是新的成本，只是換了一個地方。
         wrote = 0
         skipped = 0
+        degraded_any = False
         for row in chosen:
             item = by_id.get(str(row.get("defect_id", "")))
             if item is None:
@@ -512,10 +560,12 @@ class OutputImageStep(_OutputStep):
                 if not images:
                     skipped += 1
                     continue
+                roi_kw, degraded = _roi_overlay_kwargs(ctx, p)
+                degraded_any = degraded_any or degraded
                 panel = overlay.render_overlay(
                     images, dict(getattr(r, "features", {}) or {}),
                     label=overlay.overlay_label(row),
-                    montage=bool(p["montage"]))
+                    montage=bool(p["montage"]), **roi_kw)
                 overlay.write_png(
                     panel,
                     os.path.join(folder, overlay.overlay_filename(
@@ -528,6 +578,11 @@ class OutputImageStep(_OutputStep):
             # **講出來**：少幾張 PNG 的資料夾跟完整的資料夾長得一模一樣。
             bctx.warn("Images: wrote %d, skipped %d (no image, or the "
                       "pipeline did not run for them)." % (wrote, skipped))
+        if degraded_any:
+            # 安靜退化的圖跟全畫的圖看起來都「有框」—— 要講一次。
+            bctx.warn("Images: more region boxes than “Draw at most” (%d), so "
+                      "only the boxes near the winner are drawn."
+                      % int(p["draw_boxes_cap"]))
         if len(bctx.rows) > len(chosen):
             bctx.warn("Images: the %d highest scoring of %d defects (the “At "
                       "most this many” setting)."
@@ -589,6 +644,7 @@ class OutputBundleStep(_OutputStep):
             help=("On: each picture is the image and the difference side by "
                   "side. Off: just the image."),
         ),
+        *roi_draw_specs(),
     ]
 
     #: 資料夾裡那幾個名字（**寫死**：一份 bundle 換一台機器打開還是同一個形狀）。
@@ -619,6 +675,7 @@ class OutputBundleStep(_OutputStep):
         _warn_if_unranked(self.key, bctx, rows, rank_by, int(p["limit"]))
         images: Dict[str, str] = {}
         skipped = 0
+        degraded_any = False
         for row in chosen:
             did = str(row.get("defect_id", ""))
             item = by_id.get(did)
@@ -633,10 +690,12 @@ class OutputBundleStep(_OutputStep):
                 if not pix:
                     skipped += 1
                     continue
+                roi_kw, degraded = _roi_overlay_kwargs(ctx, p)
+                degraded_any = degraded_any or degraded
                 panel = overlay.render_overlay(
                     pix, dict(getattr(r, "features", {}) or {}),
                     label=overlay.overlay_label(row),
-                    montage=bool(p["montage"]))
+                    montage=bool(p["montage"]), **roi_kw)
                 name = os.path.splitext(overlay.overlay_filename(did))[0] + ".jpg"
                 overlay.write_jpeg(panel, os.path.join(shots, name),
                                    int(p["jpeg_quality"]))
@@ -669,6 +728,10 @@ class OutputBundleStep(_OutputStep):
             bctx.warn("Report folder: %d picture(s) written, %d skipped (no "
                       "image, or the pipeline did not run for them)."
                       % (len(images), skipped))
+        if degraded_any:
+            bctx.warn("Report folder: more region boxes than “Draw at most” "
+                      "(%d), so only the boxes near the winner are drawn."
+                      % int(p["draw_boxes_cap"]))
 
     def _write_recipe(self, bctx: Any, path: str) -> None:
         """把 recipe 原樣寫進 bundle（atomic，同鐵則 5）。

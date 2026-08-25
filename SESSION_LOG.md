@@ -19,6 +19,46 @@
 
 ---
 
+## F31 T2：overlay 畫 ROI 框 —— 報表上圈出最異常的那一格（2026-08-25）
+
+使用者：「我說的把它框出來，只是最終在 final report 要用 overlay 把它框出來。」
+`render_overlay` 自己的註解早就寫著答案：「兩個都在時畫兩個才誠實，**等疊圖
+畫得下第二個框再說**」—— 這一輪就是那一天。
+
+### 做了什麼
+
+* `render_overlay` 多 `roi_boxes`（**正規化** 0..1）與 `roi_winner` 兩個
+  kwarg：贏家粗琥珀框（`ROI_WINNER_COLOR`）、其餘細鋼青線（`ROI_BOX_COLOR`
+  —— 它們是**參照**，要看得到比較的分母是什麼，但不能跟主角搶畫面）。量測框
+  （紅）**後畫** —— 疊到的地方「量到的東西在哪」在最上面。montage 兩個面板
+  都畫。預設 `None` 逐位元組不變（有測試逐位元組比）。
+* 來源 `overlay.roi_boxes_for_overlay(ctx)`：讀 **T1 留在
+  `ctx.meta["glv_hist"]` 的 note**（`boxes >= 1` 的是 each box 跑的），贏家
+  就是 `worst["i"]` —— **跟 `worst_*` 特徵同一次計算**，不在疊圖端重挑一次。
+  拿不到贏家 → 全部細線，**不猜**（猜錯的框比沒有框糟得多）。好幾個區域都有
+  框時先只畫第一組（挑一組畫而畫面上不說是哪一組，正是最怕的形狀 ——
+  等疊圖說得清「哪組框是誰的」再開）。
+* 「框太多」是使用者的一格不是魔術數字：兩張出圖卡共用
+  `Draw the other boxes`＝`all / none / near the winner` ＋ `Draw at most`
+  （預設 300）。**一個數字管兩件事**：它同時是 `all` 的自動退化門檻與
+  `near the winner` 的數量 —— 不必發明第二個。退化發生時整批**警告一次**
+  （一顆一句的話 6000 顆就是 6000 句）。
+* 沒有贏家又超過上限 → 一個都不畫：畫不下又挑不出來，誠實的答案是不畫。
+* 贏家永遠畫得出來（`near` 的名單先放贏家再補最近的 —— 第一版
+  `sorted(...)[:cap]` 在「另一格跟贏家同心」時會把贏家自己擠掉）。
+
+### 兩條既有的逐位元組防線都還綠
+
+`test_export_parity`（卡 vs 精靈）與 `test_the_cached_pass_produces_the_same_pictures`
+（快取 vs 直跑）：fixture recipe 沒有 each box 的 GLV → 抽取回空 → 一個位元
+不變。新畫的路徑只讀 meta 與 rois，無隨機源，快取重放照樣逐位元組相同。
+
+驗收：`test_export_overlay.py` 47 條（+14）、`test_output_bundle.py` +2
+（兩卡逐字同一組、`_roi_overlay_kwargs` 吃真的 each box ctx）、黃金值三份
+全綠、core 2122 過。
+
+---
+
 ## F31 T1：GLV 逐框比較 —— 「這張圖最異常的地方」有座標、有分數（2026-08-25）
 
 使用者換了方向（取代前一份「擴充 find_defect」的任務書）：「原來的 GLV 跟 CD

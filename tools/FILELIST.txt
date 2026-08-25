@@ -5,7 +5,7 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 b7de91c3029b706bf544976890dcf876cabb5a6b CLAUDE.md
 87bdb4613531303fd0dcd79696bc65b14675d267 README.md
-9271466c8ca10357a9556344ca1c5ad54cbfb312 SESSION_LOG.md
+621488da3ee933d1ad474fe3a194790242d5fe39 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -34,7 +34,7 @@ e1f7a95ad976983aa0f1f16b7bd52cdcc67494dd d4t/core/algo/subpixel.py
 78924f0edd38b3d96346542c63372c7fee679a91 d4t/core/export/__init__.py
 db57a3c6edf2c820287f7671be06d10d16816d52 d4t/core/export/html.py
 a4a93fb5fc256c767f2c31f387f7ab4962b5868d d4t/core/export/klarf_out.py
-b89ffeb80a0bf74e1a1c8a47aea336781953a009 d4t/core/export/overlay.py
+1e41c00282dc706f925783169a5512bf56b826d6 d4t/core/export/overlay.py
 ab5031e7056134aa94c5551aba9b80a774b6397a d4t/core/export/report.py
 4599be07de9d76b7a008bdc400e22cfaa0c7acd2 d4t/core/ingest/__init__.py
 987ec64e2830c1e9e7ee535c3aa91e020f5bd0be d4t/core/ingest/dataset.py
@@ -70,7 +70,7 @@ e9c81c67c24be98678b46af75d3d729fbe0ba21f d4t/core/steps/glv_stats.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
-dda718c69b6f37783e61e27331340d2cb3bd437b d4t/core/steps/output.py
+a0a1b0f875d4950a15d4160da5ff5716f83ac9bd d4t/core/steps/output.py
 0299cafc4d75895f8b322be5433f7fb3e37455d3 d4t/core/steps/pair_source.py
 46e24cde47cccae307704861c349c75887a27da4 d4t/core/steps/quality.py
 b8cee087adb193dff32a8ae69ad7981ad882d8f5 d4t/core/steps/roi_cross.py
@@ -166,7 +166,7 @@ c2f7df52f855141ec0c0b85e71faa3a821ae31f5 tests/test_docs_links.py
 8b0ab7fe7dae38c1494a5e162ccdbcaf1f4bf553 tests/test_engine.py
 418fc5470ce715a88c0c5983ae40a59b19600974 tests/test_enhance.py
 5bcbc5d88b74b990dac7d69874664cc9ca5617fe tests/test_export_klarf.py
-44c0ccd94edc439c85f62d12f2c025980c63ad42 tests/test_export_overlay.py
+74b80a5c4c0b9ee1675505830858312585a04e5d tests/test_export_overlay.py
 305b78487054af80ea56c569548c997f82c12bf4 tests/test_export_parity.py
 ed412883e22f01db1c0bb3eb0cec4e24dd093ad9 tests/test_export_report.py
 2415c6f4229d2d8ff5044b35cdde8560d3bcd8c2 tests/test_expression.py
@@ -201,7 +201,7 @@ f74d5228a3ab2e7c1ce81b65b0edeebb470b624d tests/test_make_mgext.py
 33071fd9690ad145172ab6a178471283523e3c75 tests/test_no_real_fab_data.py
 3103276cac06035f1a18a7d18cb90bdafd7d2f26 tests/test_normalize.py
 637f52a992403f3403b5942019aed2c048059554 tests/test_offline_tools.py
-80ba7f5732b0abe3ef42448c78ac9cdbce14ddab tests/test_output_bundle.py
+daf046d0b51f240995f5347e86158007e42c03b1 tests/test_output_bundle.py
 760493e6e43124ec37e48463773e51291e595c9c tests/test_pair_probe.py
 342afa983abf91cec2b2b54f548fb6161a6c809b tests/test_pair_source.py
 34f1bcdbffc5c85f790e98e5bd1c4b1f10fe795f tests/test_period_golden.py

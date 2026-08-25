@@ -46,6 +46,21 @@ BOX_COLOR = (255, 32, 32)
 TEXT_COLOR = (255, 255, 255)
 BANNER_COLOR = (0, 0, 0)
 
+#: 逐框比較（GLV 的 each box，F31）畫在報表上的兩種框（RGB）。
+#: 贏家（最異常的那一格）用琥珀色粗框 —— 跟量測框（`BOX_COLOR` 的紅）分開，
+#: 一張圖上兩種框各自講的是「哪一格異常」與「量到的東西在哪」。
+#: 其餘的框畫細的鋼青色：它們是**參照**，要看得到（使用者才知道比較的分母是
+#: 什麼）但不能跟主角搶畫面。core 不得 import Qt，所以這裡是自己的常數，
+#: 不是 `theme.REGION_COLORS`。
+ROI_WINNER_COLOR = (255, 176, 0)
+ROI_BOX_COLOR = (110, 165, 220)
+
+#: 「其餘的框」怎麼畫（出圖卡的 `draw_boxes` 那一格；`pick_roi_boxes`）。
+DRAW_ALL = "all"
+DRAW_NONE = "none"
+DRAW_NEAR = "near the winner"
+DRAW_MODES = (DRAW_ALL, DRAW_NONE, DRAW_NEAR)
+
 #: 底圖的挑選順序（第一個找得到的就用）。
 BASE_PRIORITY = ("test", "single", "aligned", "ref", "diff")
 
@@ -285,16 +300,46 @@ def _pick_base(images: Dict[str, Any]) -> Tuple[str, np.ndarray]:
 
 
 def _draw_box(panel: np.ndarray, box: Tuple[int, int, int, int],
-              color: Tuple[int, int, int] = BOX_COLOR) -> None:
-    """在 panel 上畫框（超出邊界會被裁到圖內，至少留 1 px 寬高）。"""
+              color: Tuple[int, int, int] = BOX_COLOR,
+              thick: Optional[int] = None) -> None:
+    """在 panel 上畫框（超出邊界會被裁到圖內，至少留 1 px 寬高）。
+
+    ``thick=None``＝照影像大小自動（量測框一直以來的規則）；
+    逐框比較的 ROI 框自帶粗細（贏家粗、其餘細 —— 粗細就是那句話本身）。
+    """
     h, w = panel.shape[:2]
     x, y, bw, bh = box
     x0 = max(0, min(int(x), w - 1))
     y0 = max(0, min(int(y), h - 1))
     x1 = max(x0, min(int(x) + max(1, int(bw)) - 1, w - 1))
     y1 = max(y0, min(int(y) + max(1, int(bh)) - 1, h - 1))
-    thick = 1 if min(h, w) < 192 else 2
-    cv2.rectangle(panel, (x0, y0), (x1, y1), tuple(int(c) for c in color), thick)
+    if thick is None:
+        thick = 1 if min(h, w) < 192 else 2
+    cv2.rectangle(panel, (x0, y0), (x1, y1), tuple(int(c) for c in color),
+                  int(thick))
+
+
+def _draw_roi_boxes(panel: np.ndarray, roi_boxes, roi_winner: int) -> None:
+    """畫逐框比較的 ROI 框（**正規化座標** 0..1）：其餘細、贏家粗。
+
+    先畫其餘再畫贏家 —— 疊到的地方贏家在上面。贏家索引指不到（-1 或越界）
+    就全部細線：**不猜**哪一格是主角（猜錯的框比沒有框糟得多）。
+    """
+    h, w = panel.shape[:2]
+    boxes = list(roi_boxes or [])
+
+    def _px(nb):
+        nx, ny, nw, nh = (float(v) for v in nb)
+        return (int(round(nx * w)), int(round(ny * h)),
+                max(1, int(round(nw * w))), max(1, int(round(nh * h))))
+
+    for i, nb in enumerate(boxes):
+        if i != roi_winner:
+            _draw_box(panel, _px(nb), color=ROI_BOX_COLOR, thick=1)
+    if 0 <= roi_winner < len(boxes):
+        thick = 2 if min(h, w) < 192 else 3
+        _draw_box(panel, _px(boxes[roi_winner]), color=ROI_WINNER_COLOR,
+                  thick=thick)
 
 
 def _draw_label(panel: np.ndarray, label: str) -> None:
@@ -316,6 +361,86 @@ def _draw_label(panel: np.ndarray, label: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 逐框比較的框（F31）：從重跑回來的 Context 撿出來、決定畫哪幾個
+# ---------------------------------------------------------------------------
+def roi_boxes_for_overlay(ctx: Any) -> Tuple[list, int]:
+    """從 rerun 的 Context 撿逐框比較的 ROI 框 → ``(正規化框列表, 贏家索引)``。
+
+    來源是 GLV 卡留在 ``ctx.meta["glv_hist"]`` 的 note（``boxes >= 1`` 的那些
+    是 each box 模式跑出來的）—— **跟 `worst_*` 特徵同一次計算**，不在這裡
+    重新挑一次贏家。沒有逐框比較（pooled、沒接區域、根本沒跑 GLV）就回
+    ``([], -1)``，疊圖照舊 —— 沒接 ROI 的 recipe 一個位元不變。
+
+    好幾條 note 都有框時取**第一條**（＝接線順序的第一個區域）：兩個區域各
+    畫一組框、各有各的贏家，要等疊圖說得清「哪組框是誰的」再說 —— 挑一組畫
+    而畫面上不說是哪一組，正是這個 repo 最怕的形狀，所以先只畫第一組，而
+    「第一」是穩定的。
+    """
+    meta = getattr(ctx, "meta", None) or {}
+    for note in meta.get("glv_hist") or []:
+        region = str(note.get("region") or "")
+        if not region or int(note.get("boxes") or 0) < 1:
+            continue
+        try:
+            rects = list(ctx.roi_norm_rects(region))
+        except Exception:       # noqa: BLE001 — note 指著一個已經不在的區域
+            continue
+        if not rects:
+            continue
+        worst = note.get("worst") or {}
+        i = int(worst.get("i", -1)) if isinstance(worst, dict) else -1
+        return rects, (i if 0 <= i < len(rects) else -1)
+    return [], -1
+
+
+def pick_roi_boxes(rects, winner: int, mode: str, cap: int):
+    """哪幾個框真的畫 → ``(要畫的框, 贏家在其中的索引, 有沒有自動退化)``。
+
+    ``mode`` 是使用者那一格（:data:`DRAW_MODES`）；``cap`` 是「最多畫幾個」
+    —— 它同時是 ``all`` 的自動退化門檻與 ``near the winner`` 的數量，**一個
+    數字管兩件事**，所以不必再發明第二個。500 個框全畫會把整張圖蓋滿。
+
+    * ``all``：全畫；超過 ``cap`` 自動退成 ``near the winner``（回傳的第三個
+      值講出退化發生了，呼叫端要警告一次 —— 安靜退化的圖跟全畫的圖看起來
+      都「有框」）。
+    * ``near the winner``：贏家 ＋ 離它最近的 ``cap − 1`` 個（中心距離，平手
+      照索引 —— 決定性）。
+    * ``none``：只畫贏家。
+    * 沒有贏家（-1）：``near`` 沒有「近」的參考點 —— ``all`` 且 ≤ ``cap``
+      就全部細線，否則一個都不畫（畫不下又挑不出來，誠實的答案是不畫）。
+    """
+    boxes = list(rects or [])
+    n = len(boxes)
+    cap = max(1, int(cap))
+    if not boxes:
+        return [], -1, False
+    mode = str(mode or DRAW_ALL)
+    degraded = mode == DRAW_ALL and n > cap
+    if degraded:
+        mode = DRAW_NEAR
+    if winner < 0 or winner >= n:
+        if mode == DRAW_ALL:
+            return boxes, -1, False
+        return [], -1, degraded
+    if mode == DRAW_ALL:
+        return boxes, winner, False
+    if mode == DRAW_NONE:
+        return [boxes[winner]], 0, False
+    # near the winner
+    wx, wy, ww, wh = (float(v) for v in boxes[winner])
+    wcx, wcy = wx + ww / 2.0, wy + wh / 2.0
+
+    def _dist(k):
+        x, y, w, h = (float(v) for v in boxes[k])
+        return (x + w / 2.0 - wcx) ** 2 + (y + h / 2.0 - wcy) ** 2
+
+    others = [k for k in range(n) if k != winner]
+    others.sort(key=lambda k: (_dist(k), k))  # 平手照索引 —— 決定性
+    keep = sorted([winner] + others[:cap - 1])  # 贏家一定在；照原框序畫
+    return [boxes[k] for k in keep], keep.index(winner), degraded
+
+
+# ---------------------------------------------------------------------------
 # 主函式
 # ---------------------------------------------------------------------------
 def render_overlay(images: Dict[str, Any],
@@ -325,7 +450,9 @@ def render_overlay(images: Dict[str, Any],
                    label: Optional[str] = None,
                    base_key: Optional[str] = None,
                    diff_key: str = "diff",
-                   montage: bool = True) -> np.ndarray:
+                   montage: bool = True,
+                   roi_boxes: Optional[Sequence[Any]] = None,
+                   roi_winner: int = -1) -> np.ndarray:
     """把一顆 defect 畫成 RGB uint8 面板。
 
     參數
@@ -348,6 +475,12 @@ def render_overlay(images: Dict[str, Any],
     montage
         ``images`` 有 ``diff`` 時是否輸出 **[底圖 | diff] 並排**
         （預設 True，寬度剛好是底圖的兩倍）。
+    roi_boxes / roi_winner
+        逐框比較的 ROI 框（F31）：**正規化** 0..1 的 ``(x, y, w, h)`` 清單與
+        贏家的索引。其餘畫細的鋼青色、贏家畫粗的琥珀色；索引是 -1 就全部
+        細線（**不猜**）。誰畫、畫幾個由呼叫端的 :func:`pick_roi_boxes`
+        決定，來源用 :func:`roi_boxes_for_overlay` 從 Context 撿。
+        預設 ``None``：不畫，跟這個參數出現之前逐位元組相同。
 
     回傳 ``(H, W, 3)`` 或 ``(H, 2W, 3)`` 的 uint8 RGB 陣列。
     """
@@ -368,6 +501,9 @@ def render_overlay(images: Dict[str, Any],
     left = to_display_rgb(base)
     h, w = left.shape[:2]
 
+    # ROI 框先畫、量測框後畫 —— 疊到的地方「量到的東西在哪」在最上面。
+    if roi_boxes:
+        _draw_roi_boxes(left, roi_boxes, int(roi_winner))
     the_box = _blob_box(box) if box is not None else primary_blob_box(blobs, features)
     if the_box is not None:
         _draw_box(left, the_box)
@@ -378,6 +514,8 @@ def render_overlay(images: Dict[str, Any],
         right = to_display_rgb(right_src)
         if right.shape[:2] != (h, w):
             right = cv2.resize(right, (w, h), interpolation=cv2.INTER_NEAREST)
+        if roi_boxes:
+            _draw_roi_boxes(right, roi_boxes, int(roi_winner))
         if the_box is not None:
             _draw_box(right, the_box)
         panel = np.concatenate([left, right], axis=1)
