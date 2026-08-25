@@ -21,11 +21,25 @@ RSEM API 空拍（拍滿、直接對影像抓 defect）是 ground truth；拿它
 的那一份裡挑一顆。理由是快取簽章：卡片偷偷讀檔的話，換一份第二 source 而簽章
 看不見 → 回舊影像（鐵則 9，F9 踩過兩次）。
 
-配不到的那一顆
---------------
-**不吐流、`paired = 0`。** 下游要那條流的卡會失敗，於是那一顆 `ok=False` 而整批
-照跑（鐵則 7）—— 跟 `load_sidecar` 遇到沒有 label 的那一顆是同一個行為，
-不發明第二套。
+配不到的那一顆**要留下來**（F33，2026-08-25）
+--------------------------------------------
+**不吐流、`pair_found = 0`、這一顆繼續走。** 以前這裡是 `raise StepError` ——
+那一顆於是 `ok=False`、沒有分數也沒有 bin，**走不到判定樹**。而上面那三種結果
+裡的第三種（「根本沒偵測到」）正是 characterization 要數的那一類：它被當成錯誤
+處理，就等於這個功能問不出自己的結論。CSV 上還看不出來 —— 少了幾列，跟「本來
+就沒那幾顆」長得一模一樣。
+
+所以配不到的那一顆現在：`pair_found = 0`（**一律寫**，它就是那個結論）、
+其餘 `pair_*` 一格都不寫、下游的 compare 卡靠 `meta["pair_match"]` 安靜讓路
+（見 `align_to`）、而這一顆照樣進判定樹。
+
+⚠ `match_dist_nm` 在配不到時**不寫**（以前寫 NaN）。理由有兩層：算不出來的
+那一格本來就不該寫（`CLAUDE.md` 共通規矩），而 NaN 更糟 —— 判定樹問問題是
+`expr.eval(feats) != 0.0`，`NaN != 0.0` 是 **True**，於是 `match_dist_nm > X`
+會對一顆根本沒配到的 defect 答「是」。
+
+判定樹的第一步請問 `pair_found`：`walk` 只評走得到的那條路，所以第三類那一支
+永遠問不到 ncc / 分數那幾題，`decide_unanswered` 維持 0。
 """
 from __future__ import annotations
 
@@ -89,9 +103,10 @@ class PairSourceStep(Step):
             "on this card, and every defect here is matched to one over there "
             "by wafer position. The match distance and the columns you carry "
             "over become features, so \"detected but scored too low\" is "
-            "something you can write into the score. Defects with no match "
-            "get paired = 0 and fail this card; the rest of the batch carries "
-            "on.")
+            "something you can write into the score. A defect with no match "
+            "gets pair_found = 0 and still goes through to the decision - "
+            "\"the other tool never saw it\" is one of the answers you are "
+            "counting, not an error. Ask pair_found first in the tree.")
     params = [
         ParamSpec(
             name="source", type="str", default="",
@@ -150,7 +165,7 @@ class PairSourceStep(Step):
     ]
     reads: List[str] = []
     writes = ["paired"]
-    features_out = ["paired", "match_dist_nm", "match_ambiguous"]
+    features_out = ["pair_found", "match_dist_nm", "match_ambiguous"]
 
     @classmethod
     def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:
@@ -162,6 +177,21 @@ class PairSourceStep(Step):
         out = list(cls.features_out)
         out += ["pair_%s" % c for c in _carry_names(params)]
         return out
+
+    @classmethod
+    def legacy_feature_renames(cls, params: Dict[str, Any]) -> Dict[str, str]:
+        """``paired`` → ``pair_found``（F33，2026-08-25）。
+
+        **特徵名與影像流名共用一個字是個坑**：這張卡的 `out` 預設就叫
+        ``paired``，於是「有沒有配到」那個數字跟那條流在畫面上、在表達式裡
+        長得一樣。流名不動（它是畫布上的接線身分，改了等於剪掉所有人的線），
+        改的是特徵 —— 而 `pair_found` 順帶跟 `pair_<欄位>` 排成同一家族。
+
+        給 `recipe._compare_feature_renames` 收（那一支對每一張卡問這件事）。
+        右邊的名字不在左邊 → 第二次跑是 no-op，`to_json_dict → from_json_dict`
+        仍然是 identity（鐵則 9）。
+        """
+        return {"paired": "pair_found"}
 
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
@@ -236,12 +266,33 @@ class PairSourceStep(Step):
                 "to be chosen for this run." % sid)
 
         hit, dist, ambiguous = self._pick(item, others, p)
-        # **每一顆都要有這幾個數字**，配到與否都一樣 —— 「沒配到」本身就是
+        out_key = str(p["out"]).strip() or "paired"
+        # **每一顆都有這個數字**，配到與否都一樣 —— 「沒配到」本身就是
         # characterization 的結論之一，它不可以只是一個缺席的欄位。
-        ctx.add_feature("paired", 1.0 if hit is not None else 0.0)
+        ctx.add_feature("pair_found", 1.0 if hit is not None else 0.0)
+        if hit is None:
+            # 配不到 → 不吐流、其餘 pair_* 一格都不寫，**但這一顆繼續走**
+            # （見模組說明）。`out` 也記進 meta：下游要靠它分辨「上游沒配到」
+            # 與「這條線根本接錯了」。
+            ctx.meta["pair_match"] = {
+                "source": sid,
+                "defect_id": "",
+                "index": -1,
+                "dist_nm": float("nan"),
+                "candidates": int(p["candidates"]),
+                "out": out_key,
+            }
+            ctx.warn(
+                "[%s] no defect in '%s' is within %.0f nm of this one - "
+                "recorded as pair_found = 0. The compare cards downstream let "
+                "this defect through, and it still reaches the decision: "
+                "\"the other lot never saw it\" is one of the answers."
+                % (self.key, sid, float(p["tol_nm"])))
+            return ctx
+
         ctx.add_feature("match_dist_nm", float(dist))
         ctx.add_feature("match_ambiguous", 1.0 if ambiguous else 0.0)
-        fields = dict(getattr(hit, "fields", None) or {}) if hit is not None else {}
+        fields = dict(getattr(hit, "fields", None) or {})
         for col in _carry_names(p):
             raw = str(fields.get(col, ""))
             try:
@@ -253,15 +304,16 @@ class PairSourceStep(Step):
                 ctx.meta.setdefault("pair_fields", {})[col] = raw
         ctx.meta["pair_match"] = {
             "source": sid,
-            "defect_id": str(getattr(hit, "defect_id", "")) if hit else "",
-            "index": int(getattr(hit, "index", -1)) if hit else -1,
+            "defect_id": str(getattr(hit, "defect_id", "")),
+            "index": int(getattr(hit, "index", -1)),
             "dist_nm": float(dist),
             "candidates": int(p["candidates"]),
+            "out": out_key,
         }
         # **打錯一個欄位名不可以安靜地沒事**：這張卡的存在理由就是把那幾欄帶
         # 過來（「偵測到但分數太低」只有靠它答得出來），少了一欄的 CSV 跟成功
         # 的 CSV 長得一模一樣。擋在這裡＝這幾顆 ok=False 而整批照跑（鐵則 7）。
-        missing = [c for c in _carry_names(p) if hit is not None and c not in fields]
+        missing = [c for c in _carry_names(p) if c not in fields]
         if missing:
             # **列的是「帶過來的是哪幾欄」，不是「那一份有哪幾欄」**：卡片手上
             # 只有複製過去的那幾欄（第二份的 KlarfDoc 刻意不進 worker）。
@@ -274,15 +326,6 @@ class PairSourceStep(Step):
                 % (sid, ", ".join(missing),
                    ", ".join(sorted(fields)) or "(nothing)"))
 
-        if hit is None:
-            raise StepError(
-                self.key,
-                "no defect in '%s' is within %.0f nm of this one, so there is "
-                "nothing to compare it with. It is recorded as paired = 0 and "
-                "the rest of the batch is unaffected."
-                % (sid, float(p["tol_nm"])))
-
-        out_key = str(p["out"]).strip() or "paired"
         ctx.set_image(out_key, self._image_of(hit, p["channel"]))
         # **第二份的像素大小掛在它自己那條流上**（2026-08-20）：兩台機台不一樣，
         # 而那正是 `align_to` 要縮放才對得起來的原因。

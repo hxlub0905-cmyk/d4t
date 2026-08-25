@@ -1349,19 +1349,68 @@ def _migrate_compare_method_into_reference(nodes: Dict[str, "RecipeNode"]) -> No
                                 enabled=node.enabled)
 
 
-def _rename_in_expr(score: "ScoreSpec", table: Dict[str, str]) -> "ScoreSpec":
-    """把分數表達式裡的**整個識別字**照 ``table`` 換掉（子字串不算）。
+def _renamed_idents(expr: str, table: Dict[str, str]) -> str:
+    """一條表達式裡的**整個識別字**照 ``table`` 換掉（子字串不算）。
 
     ``str.replace`` 會把 ``my_delta_ratio`` 這種自訂名字打斷 —— 所以用邊界比對，
     而且**長的先比**：``epi_delta`` 與 ``delta`` 同時在表裡時，前者要先中。
     """
-    expr = str(getattr(score, "expr", "") or "")
     if not expr or not table:
-        return score
+        return expr
     keys = sorted(table, key=len, reverse=True)
-    new_expr = re.sub(r"\b(%s)\b" % "|".join(map(re.escape, keys)),
-                      lambda m: table[m.group(1)], expr)
+    return re.sub(r"\b(%s)\b" % "|".join(map(re.escape, keys)),
+                  lambda m: table[m.group(1)], expr)
+
+
+def _rename_in_expr(score: "ScoreSpec", table: Dict[str, str]) -> "ScoreSpec":
+    """分數表達式裡的舊 feature 名換成新的（見 :func:`_renamed_idents`）。"""
+    expr = str(getattr(score, "expr", "") or "")
+    new_expr = _renamed_idents(expr, table)
     return score if new_expr == expr else replace(score, expr=new_expr)
+
+
+def _rename_in_tree(node: Any, table: Dict[str, str]) -> Any:
+    """判定樹每一步的 ``when`` 照 ``table`` 換名（葉子沒有表達式）。"""
+    if node is None or isinstance(node, TreeLeaf):
+        return node
+    when = _renamed_idents(str(getattr(node, "when", "") or ""), table)
+    yes = _rename_in_tree(node.yes, table)
+    no = _rename_in_tree(node.no, table)
+    if when == node.when and yes is node.yes and no is node.no:
+        return node
+    return TreeStep(when=when, yes=yes, no=no)
+
+
+def _rename_in_decide(decide: Optional["DecideSpec"],
+                      table: Dict[str, str]) -> Optional["DecideSpec"]:
+    """判定段裡的舊 feature 名換成新的（F33，2026-08-25）。
+
+    **這一支是補上來的**：改名遷移本來只走 `score.expr`
+    （:func:`_rename_in_expr`），而判定段的 ``let`` / ``rules`` / ``tree``
+    裡的表達式一個都沒人改寫。F30 之後那裡才是問問題的地方 ——
+    樹上的 ``pair_found < 1`` 沒跟著換，開起來就是一題**永遠答「否」**的問題
+    （問不到的特徵算否），而畫面上它長得跟一條正常的規則一模一樣：
+    跑得完、有數字、而且是錯的。
+
+    **判準仍然是「舊東西在不在」**（鐵則 9）：表達式裡真的出現舊名字才動它，
+    換完留下的新名字不在表的左邊 → 第二次跑是 no-op，
+    ``to_json_dict → from_json_dict`` 仍然是 identity。
+    """
+    if decide is None or not table:
+        return decide
+    score = _renamed_idents(str(decide.score or ""), table)
+    lets = [replace(l, expr=_renamed_idents(str(l.expr or ""), table))
+            for l in decide.let]
+    rules = [replace(r, when=_renamed_idents(str(r.when or ""), table))
+             for r in decide.rules]
+    tree = _rename_in_tree(decide.tree, table)
+    unchanged = (score == decide.score
+                 and all(a.expr == b.expr for a, b in zip(lets, decide.let))
+                 and all(a.when == b.when for a, b in zip(rules, decide.rules))
+                 and tree is decide.tree)
+    if unchanged:
+        return decide
+    return replace(decide, let=lets, rules=rules, score=score, tree=tree)
 
 
 def _migrate_renamed_features(score: "ScoreSpec") -> "ScoreSpec":
@@ -1702,7 +1751,11 @@ class Recipe:
         score = _migrate_renamed_features(score)
         # 相對量改叫 `cmp_*` 之後，舊表達式裡的 `epi_delta` 要跟著換
         # （順序要緊：上面兩道遷移跑完，節點的參數才是新的形狀）。
-        score = _rename_in_expr(score, _compare_feature_renames(nodes))
+        renames = _compare_feature_renames(nodes)
+        score = _rename_in_expr(score, renames)
+        # **判定段吃同一張表**（F33）：F30 之後問問題的地方在這裡，
+        # 改名只換 `score.expr` 的話樹上那一題會安靜地永遠答「否」。
+        decide = _rename_in_decide(decide, renames)
         # ⚠ **撞名前綴那一道遷移不在這裡**（`_migrate_rescued_feature_names`）。
         # 它住在 :meth:`load` —— 理由見那一支的說明：這裡是「重建一個物件」，
         # 而那是 `run_batch` 送 recipe 進 worker 走的路。

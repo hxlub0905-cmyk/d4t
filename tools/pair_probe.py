@@ -92,7 +92,7 @@ def _recipe(args):
     return Recipe(recipe_id="pair-probe",
                   routes={"ebi_patch": list(nodes), "rsem": list(nodes)},
                   nodes=nodes,
-                  score=ScoreSpec(expr="paired", threshold=0.5,
+                  score=ScoreSpec(expr="pair_found", threshold=0.5,
                                   bins={"below": 0, "above": 1}))
 
 
@@ -137,7 +137,7 @@ def probe(args):
         return [r.get("features", {}).get(name) for r in results]
 
     ok = [r for r in results if r.get("ok")]
-    paired = [v for v in col("paired") if v is not None]
+    paired = [v for v in col("pair_found") if v is not None]
     n_paired = sum(1 for v in paired if v > 0)
     say("配對     : %d / %d 顆配到（%.0f%%）"
         % (n_paired, len(results), 100.0 * n_paired / max(1, len(results))))
@@ -192,7 +192,7 @@ def _verdicts(args, results, col):
     ratio = [v for v in col("align_peak_ratio") if v is not None]
     offx = [v for v in col("align_off_x_px") if v is not None]
     offy = [v for v in col("align_off_y_px") if v is not None]
-    n_paired = sum(1 for v in col("paired") if v)
+    n_paired = sum(1 for v in col("pair_found") if v)
 
     # ① 容差
     if n_paired < 0.5 * len(results):

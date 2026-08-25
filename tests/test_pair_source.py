@@ -73,19 +73,28 @@ def test_the_nearest_defect_within_the_tolerance_wins():
     ctx = _ctx(main, {"ebi": others})
     with pytest.raises(StepError):
         _run(ctx)                      # 沒有影像 → 配到了但載不出圖
-    assert ctx.features["paired"] == 1.0
+    assert ctx.features["pair_found"] == 1.0
     assert ctx.features["match_dist_nm"] == pytest.approx(126.49, abs=0.1)
     assert ctx.meta["pair_match"]["defect_id"] == "ebi_near"
 
 
 def test_nothing_within_the_tolerance_is_recorded_not_guessed():
-    """配不到**不是**「取最近的那顆」——EBI 根本沒偵測到，就是這個結論本身。"""
+    """配不到**不是**「取最近的那顆」——EBI 根本沒偵測到，就是這個結論本身。
+
+    而那個結論要**留得下來**（F33）：這一顆不吐流、不炸，繼續走到判定樹。
+    以前這裡是 raise，於是「根本沒偵測到」那一整類都變成 `ok=False`
+    —— characterization 要數的正是那一類。
+    """
     ctx = _ctx(_item("gt1", 0, 0), {"ebi": _lot([("ebi", 9000, 0)]).items})
-    with pytest.raises(StepError) as e:
-        _run(ctx)
-    assert "within" in str(e.value) and "rest of the batch" in str(e.value)
-    assert ctx.features["paired"] == 0.0
-    assert np.isnan(ctx.features["match_dist_nm"])
+    _run(ctx)                                   # 不再 raise
+    assert ctx.features["pair_found"] == 0.0
+    assert "paired" not in ctx.images           # 不吐流
+    # **算不出來的不寫**：NaN 更糟 —— 判定樹問 `expr != 0`，而 `NaN != 0` 是真，
+    # 於是 `match_dist_nm > X` 會對一顆根本沒配到的 defect 答「是」。
+    assert "match_dist_nm" not in ctx.features
+    assert "match_ambiguous" not in ctx.features
+    assert ctx.meta["pair_match"]["index"] == -1
+    assert any("pair_found = 0" in w for w in ctx.meta.get("warnings", []))
 
 
 def test_a_second_defect_inside_the_tolerance_is_flagged():
@@ -102,9 +111,9 @@ def test_a_defect_with_no_coordinates_does_not_pair_with_everything():
     ctx = _ctx(DefectItem(defect_id="no_xy", die=(1, 1), xrel_nm=None,
                           yrel_nm=None),
                {"ebi": _lot([("a", 0, 0)]).items})
-    with pytest.raises(StepError):
-        _run(ctx)
-    assert ctx.features["paired"] == 0.0
+    _run(ctx)
+    assert ctx.features["pair_found"] == 0.0
+    assert "match_dist_nm" not in ctx.features
 
 
 def test_matching_by_order_and_by_id():
@@ -249,7 +258,7 @@ def test_the_declared_features_include_the_carried_ones():
     """lint 與畫布靠宣告，而使用者要在分數表達式的下拉裡看到它們。"""
     card = get_step("pair_source")
     names = card.resolve_features(card.validate_params({"carry": "SCORE"}))
-    assert "pair_SCORE" in names and "paired" in names
+    assert "pair_SCORE" in names and "pair_found" in names
 
 
 def test_carry_reads_the_columns_ingest_filled_in():
@@ -453,7 +462,7 @@ def _paired_recipe():
         "glv": RecipeNode("glv", "glv_stats", {"source": "aligned"}),
     }
     return Recipe(recipe_id="f15", routes={"ebi_patch": list(nodes)}, nodes=nodes,
-                  score=ScoreSpec(expr="paired", threshold=0.5,
+                  score=ScoreSpec(expr="pair_found", threshold=0.5,
                                   bins={"below": 0, "above": 1}))
 
 
@@ -478,7 +487,7 @@ def test_the_second_lot_reaches_the_workers(tmp_path):
 
     one = features(1)
     assert len(one) == 6 and all(ok for _d, ok, _f in one)
-    assert dict(one[0][2])["paired"] == 1.0
+    assert dict(one[0][2])["pair_found"] == 1.0
     assert dict(one[0][2])["pair_DEFECTID"] > 0
     assert dict(one[0][2])["ncc_score"] > 0.9
     assert features(2) == one
@@ -651,3 +660,155 @@ def test_a_repeating_pattern_shows_up_as_a_peak_ratio_near_one():
     plain = _fov(seed=9)
     ctx2, err2 = _align(plain, _cut(plain, 200, 200), search_within=0.0)
     assert ctx2.features["align_peak_ratio"] < 0.5   # 這種才是真的對到
+
+
+# --------------------------------------------------------------------------- #
+# 9. F33：配不到的那一顆要**留下來**（③「根本沒偵測到」是一個結論，不是錯誤）
+# --------------------------------------------------------------------------- #
+def test_align_to_lets_an_unpaired_defect_through_quietly():
+    """上游沒配到 → 這張卡沒有東西可比，**安靜讓路**而不是炸。
+
+    炸掉的話那一顆 `ok=False`、沒有 bin，於是 ③ 那一類從輸出裡整個消失 ——
+    而 CSV 上看不出來（少了幾列，跟「本來就沒那幾顆」長得一模一樣）。
+    """
+    ctx = Context(images={"test": _noise(64, 64, 3)})
+    ctx.meta["pair_match"] = {"source": "ebi", "defect_id": "", "index": -1,
+                              "dist_nm": float("nan"), "candidates": 1,
+                              "out": "paired"}
+    get_step("align_to")().run(ctx, {"template": "test", "search": "paired",
+                                     "min_score": 0.3, "out": "aligned"})
+    # 一個數字都不寫（算不出來的不寫），也不吐流
+    assert "ncc_score" not in ctx.features and "align_ok" not in ctx.features
+    assert "aligned" not in ctx.images
+    assert any("no match" in w for w in ctx.meta.get("warnings", []))
+
+
+def test_align_to_still_errors_when_the_line_is_just_wrong():
+    """讓路與**接錯線**不可以長得一樣。
+
+    少了「那張卡的 out 就是我要的這條流」這個條件，打錯流名的 recipe 會被當成
+    「沒配到」而安靜跳過 —— 每一顆都沒有數字，而畫面上沒有一句話說為什麼。
+    """
+    # ① 完全沒有配對卡：照舊炸
+    ctx = Context(images={"test": _noise(64, 64, 3)})
+    with pytest.raises(Exception) as e1:
+        get_step("align_to")().run(ctx, {"template": "test", "search": "paired",
+                                         "min_score": 0.3, "out": "aligned"})
+    assert "paired" in str(e1.value)
+
+    # ② 有配對卡、也沒配到，但它吐的是**另一條**流 → 這裡要的那條是接錯的
+    ctx2 = Context(images={"test": _noise(64, 64, 3)})
+    ctx2.meta["pair_match"] = {"source": "ebi", "index": -1, "out": "second"}
+    with pytest.raises(Exception):
+        get_step("align_to")().run(ctx2, {"template": "test", "search": "typo",
+                                          "min_score": 0.3, "out": "aligned"})
+
+
+def _tree_recipe():
+    """characterization 的樹：先問「有沒有配到」，才分得出 ②③。"""
+    from d4t.core.pipeline.recipe import (
+        DecideSpec, Recipe, RecipeNode, ScoreSpec, TreeLeaf, TreeStep,
+    )
+
+    nodes = {
+        "load": RecipeNode("load", "load_patch", {}),
+        "pair": RecipeNode("pair", "pair_source",
+                           {"source": "gt", "match": "position",
+                            "tol_nm": 100000.0, "carry": "DEFECTID"}),
+    }
+    tree = TreeStep(
+        when="pair_found < 1",
+        yes=TreeLeaf(bin=3, label="not detected"),
+        no=TreeStep(when="pair_DEFECTID > 0",
+                    yes=TreeLeaf(bin=1, label="caught"),
+                    no=TreeLeaf(bin=2, label="detected, not sampled")))
+    return Recipe(recipe_id="f33", routes={"ebi_patch": list(nodes)},
+                  nodes=nodes,
+                  score=ScoreSpec(expr="", threshold=0.5,
+                                  bins={"below": 0, "above": 1}),
+                  decide=DecideSpec(tree=tree))
+
+
+def test_an_unmatched_defect_still_reaches_the_third_verdict(tmp_path):
+    """③ 那一類要**數得出來**：它是輸出裡的一列、有 bin、進得了判定樹。
+
+    這是整個 characterization 的地基 —— ③ 的顆數就是這份分析的結論。
+    """
+    from d4t.core.ingest.dataset import load_dataset
+    from d4t.core.pipeline import run_batch
+    from d4t.core.pipeline import decide_tree
+
+    main_paths, gt_paths = _two_lots(tmp_path)
+    ds = load_dataset(main_paths["klarf"])
+    second = load_dataset(gt_paths["klarf"])
+    # 第二份少一顆 → 那一顆在 main 裡配不到，就是「EBI 根本沒偵測到」
+    missing_id = second.items[0].defect_id
+    second.items = second.items[1:]
+    pair_ingest.attach(ds, second, "gt", columns=["DEFECTID"])
+
+    rec = _tree_recipe()
+    rows = run_batch(rec, ds, workers=1)
+    lost = [r for r in rows if r["defect_id"] == missing_id]
+    assert len(lost) == 1, "配不到的那一顆必須仍然是輸出裡的一列"
+    row = lost[0]
+    assert row["ok"] is True and row["bin"] == 3
+    assert row["features"]["pair_found"] == 0.0
+    # 樹只評走得到的那條路 → 第三類那一支不會累積「問不到」
+    assert row["features"].get("decide_unanswered", 0.0) == 0.0
+    # Results 面板的顆數加總對得起來
+    entries = decide_tree.verdict_rows(rec.decide, rows)
+    not_detected = [e for e in entries if e["name"] == "not detected"]
+    assert not_detected and missing_id in not_detected[0]["ids"]
+    assert sum(e["count"] for e in entries) == len(rows)
+
+
+def test_an_old_recipe_that_says_paired_is_migrated_everywhere():
+    """改名要**連同它被寫進去的每一個地方**一起遷移。
+
+    以前遷移只換 `score.expr` —— F30 之後問問題的地方是判定樹，而樹上沒跟著
+    換的那一題會安靜地永遠答「否」（問不到的特徵算否），畫面上它跟一條正常的
+    規則長得一模一樣。
+    """
+    from d4t.core.pipeline.recipe import Recipe
+
+    raw = {
+        "recipe_id": "old",
+        "routes": {"ebi_patch": ["pair"]},
+        "nodes": {"pair": {"step": "pair_source",
+                           "params": {"source": "gt", "carry": "DEFECTID"}}},
+        "score": {"expr": "paired * 10", "threshold": 0.5,
+                  "bins": {"below": 0, "above": 1}},
+        "decide": {
+            "let": [{"name": "hit", "expr": "paired"}],
+            "rules": [{"when": "paired < 1", "bin": 3, "label": "missed"}],
+            "score": "paired",
+            "tree": {"when": "paired < 1",
+                     "yes": {"bin": 3, "label": "missed"},
+                     "no": {"bin": 1, "label": "caught"}},
+        },
+    }
+    rec = Recipe.from_json_dict(raw)
+    assert rec.score.expr == "pair_found * 10"
+    assert rec.decide.let[0].expr == "pair_found"
+    assert rec.decide.rules[0].when == "pair_found < 1"
+    assert rec.decide.score == "pair_found"
+    assert rec.decide.tree.when == "pair_found < 1"
+
+    # 冪等 —— 第二趟是 no-op，`to_json_dict → from_json_dict` 仍是 identity
+    # （鐵則 9：那是 `run_batch` 送 recipe 進 worker 的路）。
+    again = Recipe.from_json_dict(rec.to_json_dict())
+    assert again.to_json_dict() == rec.to_json_dict()
+
+
+def test_a_name_that_merely_contains_paired_is_left_alone():
+    """換的是**整個識別字**：`my_paired_ratio` 不是 `paired`。"""
+    from d4t.core.pipeline.recipe import Recipe
+
+    raw = {
+        "recipe_id": "old",
+        "routes": {"ebi_patch": ["pair"]},
+        "nodes": {"pair": {"step": "pair_source", "params": {"source": "gt"}}},
+        "score": {"expr": "my_paired_ratio", "threshold": 0.5,
+                  "bins": {"below": 0, "above": 1}},
+    }
+    assert Recipe.from_json_dict(raw).score.expr == "my_paired_ratio"

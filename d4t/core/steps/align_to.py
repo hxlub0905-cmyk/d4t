@@ -201,8 +201,40 @@ class AlignToStep(Step):
                 % (pct, window[2], window[3],
                    int(search_shape[1]), int(search_shape[0])))
 
+    @staticmethod
+    def _upstream_found_nothing(ctx: Context, search_key: str) -> bool:
+        """接進來的那條流不在，**而且**是上游配對卡沒配到造成的（F33）。
+
+        三個條件缺一不可，因為「讓路」與「接錯線」不可以長得一樣：
+
+        1. 那條流真的不在 —— 有圖就照比，這張卡不去猜；
+        2. `meta["pair_match"]["index"] == -1` —— 上游確實跑過而且沒配到；
+        3. 那張卡的 ``out`` **就是**這裡要的那條流 —— 少了這一條，畫布上
+           另一條線接錯（打錯流名）的 recipe 也會被當成「沒配到」而安靜跳過，
+           於是每一顆都沒有數字、而畫面上沒有任何一句話說為什麼。
+
+        接錯線的那一種照舊從 `require_image` 炸出帶說明的錯誤。
+        """
+        if not search_key or search_key in ctx.images:
+            return False
+        pm = ctx.meta.get("pair_match") or {}
+        try:
+            missed = int(pm.get("index", 0)) == -1
+        except (TypeError, ValueError):
+            return False
+        return missed and str(pm.get("out", "")) == search_key
+
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
+        if self._upstream_found_nothing(ctx, str(p["search"])):
+            # 上游那張配對卡沒配到 → 這一顆沒有東西可以比，**安靜讓路**
+            # （F33）：一個數字都不寫（算不出來的不寫），這一顆繼續走完，
+            # 由判定樹的第一題 `pair_found` 去數它。以前這裡會炸，於是
+            # 「根本沒偵測到」那一類全部變成 ok=False —— 而那正是要數的東西。
+            ctx.warn("[%s] the pair card upstream found no match for this "
+                     "defect (pair_found = 0), so there is nothing to compare "
+                     "it with - skipped." % self.key)
+            return ctx
         tmpl = ensure_gray(require_image(ctx, self.key, str(p["template"])))
         search = ensure_gray(require_image(ctx, self.key, str(p["search"])))
 

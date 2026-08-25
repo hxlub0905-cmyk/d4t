@@ -2631,7 +2631,7 @@ class PairInspector(MeasureInspector):
 
     為什麼不是只有分布
     ------------------
-    分布（`paired` / `match_dist_nm` 整批長什麼樣）是 `MeasureInspector` 已經在
+    分布（`pair_found` / `match_dist_nm` 整批長什麼樣）是 `MeasureInspector` 已經在
     畫的東西，而它正是調容差要看的圖 —— 距離擠在左邊一坨 = 容差可以收；拖出一
     條長尾 = 那條尾巴配到的是鄰居。
 
@@ -2668,7 +2668,7 @@ class PairInspector(MeasureInspector):
                 if dist is not None and not math.isnan(float(dist)):
                     bits.append("%.0f nm away" % float(dist))
             else:
-                bits.append("no match in '%s' — recorded as paired = 0"
+                bits.append("no match in '%s' — recorded as pair_found = 0"
                             % rec.get("source"))
         carried = dict(self.meta.get("pair_fields") or {})
         if carried:
