@@ -149,6 +149,10 @@ class Step(ABC):
 }
 ```
 
+> ⚠ 歷史草圖，欄位形狀對、範例值不必跟著現況：`blob_area`（`find_defect`
+> 那一族）已於 F31 T5（2026-08-25）刪除 —— 現在的等價寫法是 GLV 逐框比較的
+> `worst_score`。
+
 - v1 UI 產生直線＋分流（routes），core 以一般 DAG 執行（拓撲排序 ← GLAS
   `recipe_dependency_order`），v2 上自由畫布時引擎零改動。
 - 驗證走 lint 模式（← KLIP `Issue` 結構）：無環、reads/writes 相容、params 範圍、

@@ -434,3 +434,41 @@ def test_the_roi_kwargs_helper_reads_the_glv_note():
         ctx, {"draw_boxes": "all", "draw_boxes_cap": 300,
               "mark_pixels_k": 0.0})
     assert "odd_pixels" not in kw
+
+    # 染色門檻是同一個 k、比的是贏家自己的分數：把 k 調到比 score 高，
+    # 同一顆、同一份 meta → 不帶（證明門檻不是寫死的 3）。
+    assert worst["score"] >= 3.0
+    kw, _ = _roi_overlay_kwargs(
+        ctx, {"draw_boxes": "all", "draw_boxes_cap": 300,
+              "mark_pixels_k": worst["score"] + 1.0})
+    assert "odd_pixels" not in kw
+
+
+def test_a_quiet_image_gets_no_tint():
+    """正常顆（worst_score < k）整張安靜 —— 實測 overlay_10 的那個坑：
+    像素判準的分母是框間統計量的散布（常踩 1 灰階地板），遠小於像素雜訊，
+    沒有這道門的話**每一顆**的贏家框都整格染色。"""
+    import numpy as np
+
+    from d4t.core.pipeline import get_step
+    from d4t.core.pipeline.context import Context
+    from d4t.core.steps.output import _roi_overlay_kwargs
+
+    rng = np.random.default_rng(7)
+    img = (100.0 + rng.normal(0, 5.0, (100, 100))).astype(np.float32)
+    ctx = Context(images={"test": img})
+    n = 5
+    ctx.set_roi_boxes("cells", [
+        (c / n + 0.02, r / n + 0.02, 1.0 / n - 0.04, 1.0 / n - 0.04)
+        for r in range(n) for c in range(n)])
+    get_step("glv_stats")().run(ctx, {
+        "source": "test", "roi": "cells", "metrics": "glv_median",
+        "across_boxes": "each box"})
+
+    worst = [m for m in ctx.meta["glv_hist"] if m.get("worst")][0]["worst"]
+    assert worst["score"] < 3.0          # 純雜訊：沒有一格真的異常
+    kw, _ = _roi_overlay_kwargs(
+        ctx, {"draw_boxes": "all", "draw_boxes_cap": 300,
+              "mark_pixels_k": 3.0})
+    assert "odd_pixels" not in kw        # 安靜的圖保持安靜
+    assert kw["roi_winner"] >= 0         # 框照畫 —— 只有染色被門住

@@ -472,7 +472,9 @@ def roi_draw_specs() -> List[ParamSpec]:
                   "than this many robust sigmas from the other boxes' "
                   "baseline - the same baseline and spread the worst_score "
                   "was computed from, so what lights up is exactly what the "
-                  "number is talking about. 0 turns the tint off. This only "
+                  "number is talking about. The tint only appears when the "
+                  "winning box itself is at least that many sigmas out - a "
+                  "quiet image stays quiet. 0 turns the tint off. This only "
                   "draws: it writes no feature and makes no region."),
         ),
     ]
@@ -497,7 +499,12 @@ def _roi_overlay_kwargs(ctx: Any, p: Dict[str, Any]):
     kwargs: Dict[str, Any] = {"roi_boxes": boxes, "roi_winner": drawn_win}
     k = float(p.get("mark_pixels_k", 0.0) or 0.0)
     worst = (note or {}).get("worst") or {}
-    if k > 0.0 and 0 <= win < len(rects) and worst:
+    # 染色跟贏家自己的分數綁同一個 k：像素判準的分母是框間統計量的穩健散布
+    # （常踩 1 灰階地板），遠小於像素雜訊，所以正常顆的贏家框也會整格過線
+    # （實測 2.7σ 的 bin 0 顆整框染色）。「這一格自己至少偏離 k 個 σ」時才
+    # 標像素，正常顆整張安靜，而 score 與像素用的本來就是同一組 baseline/spread。
+    if (k > 0.0 and 0 <= win < len(rects) and worst
+            and float(worst["score"]) >= k):
         src = (getattr(ctx, "images", {}) or {}).get(
             str((note or {}).get("stream") or ""))
         if src is not None:
