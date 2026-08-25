@@ -52,7 +52,7 @@ def parse_channel_map(text: object, noun: str = "image") -> List[Pair]:
     空字串（或 ``None``）→ ``[]`` ＝**照 ingest 給的名字**（現行行為）。
 
     ``noun`` 是**這一列在講什麼東西**（``"image"`` / ``"layer"``）。同一支解析器
-    服務兩張卡：`load_patch` 的一列是一張圖，`roi_from_mask` 的一列是一層 ——
+    服務兩張卡：`load_patch` 的一列是一張圖，`roi_reference` 的一列是一層 ——
     而錯誤訊息是使用者唯一看得到的東西。2026-08-18 使用者在 GDS 那張卡上打錯
     一列，看到的是「image 2 has no name」，而那張卡上一張圖都沒有。
     UI 那一頭早就分開講了（`ChannelMapField._WORDS`），只有這裡還沒有。

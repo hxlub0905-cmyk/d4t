@@ -1146,6 +1146,41 @@ def _migrate_renamed_cards(nodes: Dict[str, "RecipeNode"]) -> None:
                                 enabled=node.enabled)
 
 
+def _migrate_roi_from_mask_into_roi_reference(nodes: Dict[str, "RecipeNode"]
+                                             ) -> None:
+    """``roi_from_mask`` → ``roi_reference`` + ``method="layout layers"``（F29）。
+
+    使用者 2026-08-25：「golden cell 跟 GDS 同樣重要而且他們要能在同張 card 裡
+    （都是接區域 ROI 卡）」。兩支回答的是同一句話（「哪些地方應該長得一樣」），
+    所以是一張卡的兩個 method —— 跟 ``roi_compare`` → ``glv_stats`` 一模一樣的
+    形狀，連遷移的寫法都照抄（見 :func:`_migrate_roi_compare_into_glv_stats`）。
+
+    這一次 key 真的換掉（不像那一次留了 ``glv_stats``），理由是**沒有黃金值
+    指著它**：``tests/fixtures/golden/`` 三份 recipe 用到的是
+    ``load_patch / normalize / denoise / align / subtract / glv_stats /
+    cd_measure`` —— 一張 Region 卡都沒有。而 ``roi_from_mask`` 這個 key 在有了
+    第二個 method 之後是一句謊話。
+
+    ``source`` 要跟著換名字：新卡有**兩個**來源參數（一張晶圓的照片、一張
+    label map），因為那是兩種完全不同的東西 —— 共用一格的話畫布上那條線會在
+    切換 method 之後指著一個意思完全不同的東西。
+
+    判準是「**舊 step 名在不在**」（鐵則 9）。換完之後不再命中，所以
+    ``to_json_dict → from_json_dict`` 走第二次什麼都不會發生（identity）——
+    `run_batch` 送 recipe 進 worker 走的正是那條路，它一旦不是 identity，
+    ``workers=1`` 與 ``workers=2`` 會算出不同的分數。
+    """
+    for nid, node in list(nodes.items()):
+        if node.step != "roi_from_mask":
+            continue
+        params = dict(node.params)
+        params["method"] = "layout layers"
+        params["label_source"] = str(
+            params.pop("source", "") or "layout_label").strip() or "layout_label"
+        nodes[nid] = RecipeNode(id=node.id, step="roi_reference",
+                                params=params, enabled=node.enabled)
+
+
 def _migrate_roi_compare_into_glv_stats(nodes: Dict[str, "RecipeNode"]) -> None:
     """``roi_compare`` → ``glv_stats`` + ``method="compare"``（F16）。
 
@@ -1585,6 +1620,8 @@ class Recipe:
         _migrate_template_regions(nodes)
         # 只改了名字的卡（＋分數表達式裡它寫出來的 feature 名）。
         _migrate_renamed_cards(nodes)
+        # GDS 那張卡收成「參照區域」的一個 method（F29）。
+        _migrate_roi_from_mask_into_roi_reference(nodes)
         # 兩張 GLV 卡收成一張的兩個 method（F16）。
         _migrate_roi_compare_into_glv_stats(nodes)
         # 順序要緊：上面那一道會產生 ``method="compare"``，這一道再把它變成

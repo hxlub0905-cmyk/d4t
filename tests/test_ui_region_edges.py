@@ -58,16 +58,17 @@ def window(qapp):
 
 
 def _gds_route(model: RecipeModel):
-    """``load_single → load_sidecar → roi_from_mask → glv_stats``（GDS 那條路）。
+    """``load_single → load_sidecar → roi_reference → glv_stats``（GDS 那條路）。
 
     這正是 `docs/GLAS-INTERFACE.md` 講的接法，也是使用者問「某個 layer 的 GLV
     要怎麼設定」時得到的那張圖。
     """
     img = model.add_step("load_single")
     lbl = model.add_step("load_sidecar")
-    gds = model.add_step("roi_from_mask")
+    gds = model.add_step("roi_reference")
     glv = model.add_step("glv_stats")
-    model.set_param(gds, "source", "layout_label")
+    model.set_param(gds, "method", "layout layers")
+    model.set_param(gds, "label_source", "layout_label")
     model.set_param(gds, "layers", "1:epi")
     model.set_param(glv, "source", "single")
     return img, lbl, gds, glv
@@ -170,9 +171,10 @@ def test_a_region_nobody_defines_draws_no_line():
 # --------------------------------------------------------------------------- #
 def test_dragging_a_line_picks_the_region(window):
     src = first_source(window, "load_single")
-    gds = window.add_card_after(src, "roi_from_mask")
+    gds = window.add_card_after(src, "roi_reference")
+    window.model.set_param(gds, "method", "layout layers")
     glv = window.add_card_after(gds, "glv_stats")
-    window._on_edge_added(src, gds, "single", "source")
+    window._on_edge_added(src, gds, "single", "label_source")
     window.model.set_param(gds, "layers", "1:epi")
     window._on_edge_added(src, glv, "single", "source")
 
@@ -193,9 +195,10 @@ def test_a_measure_card_takes_more_than_one_region(window):
     ``region_key``（單一角色）**取代**。
     """
     src = first_source(window, "load_single")
-    gds = window.add_card_after(src, "roi_from_mask")
+    gds = window.add_card_after(src, "roi_reference")
+    window.model.set_param(gds, "method", "layout layers")
     glv = window.add_card_after(gds, "glv_stats")
-    window._on_edge_added(src, gds, "single", "source")
+    window._on_edge_added(src, gds, "single", "label_source")
     window.model.set_param(gds, "layers", "1:epi, 2:mg")
     window._on_edge_added(src, glv, "single", "source")
 
@@ -224,9 +227,10 @@ def test_a_name_the_user_typed_is_not_taken_back(window):
     """只收回**自動填的那個值**（正好等於原本那一個區域的名字）。
     使用者自己打的字被收掉，比沒有這個功能更糟。"""
     src = first_source(window, "load_single")
-    gds = window.add_card_after(src, "roi_from_mask")
+    gds = window.add_card_after(src, "roi_reference")
+    window.model.set_param(gds, "method", "layout layers")
     glv = window.add_card_after(gds, "glv_stats")
-    window._on_edge_added(src, gds, "single", "source")
+    window._on_edge_added(src, gds, "single", "label_source")
     window.model.set_param(gds, "layers", "1:epi, 2:mg")
     window._on_edge_added(src, glv, "single", "source")
 
@@ -248,10 +252,11 @@ def test_a_role_region_port_is_still_replaced(window):
     from d4t.core.steps.glv_stats import REF_REGION
 
     src = first_source(window, "load_single")
-    gds = window.add_card_after(src, "roi_from_mask")
+    gds = window.add_card_after(src, "roi_reference")
+    window.model.set_param(gds, "method", "layout layers")
     cmp_ = window.add_card_after(gds, "glv_stats")
     window.model.set_param(cmp_, "reference", REF_REGION)
-    window._on_edge_added(src, gds, "single", "source")
+    window._on_edge_added(src, gds, "single", "label_source")
     window.model.set_param(gds, "layers", "1:epi, 2:mg")
     window._on_edge_added(src, cmp_, "single", "source")
 
@@ -273,10 +278,11 @@ def test_a_region_goes_in_one_side_and_out_the_other(window):
     區域。混在一起的話，一張 Gray-level stats 在畫布上會讀起來像 Region 卡。
     """
     src = first_source(window, "load_single")
-    gds = window.add_card_after(src, "roi_from_mask")
+    gds = window.add_card_after(src, "roi_reference")
+    window.model.set_param(gds, "method", "layout layers")
     a = window.add_card_after(gds, "glv_stats")
     b = window.add_card_after(a, "cd_measure")
-    window._on_edge_added(src, gds, "single", "source")
+    window._on_edge_added(src, gds, "single", "label_source")
     window.model.set_param(gds, "layers", "1:epi")
     window._on_edge_added(src, a, "single", "source")
     window._on_edge_added(src, b, "single", "source")
@@ -294,9 +300,10 @@ def test_a_region_goes_in_one_side_and_out_the_other(window):
 
 def test_cutting_the_line_clears_the_field(window):
     src = first_source(window, "load_single")
-    gds = window.add_card_after(src, "roi_from_mask")
+    gds = window.add_card_after(src, "roi_reference")
+    window.model.set_param(gds, "method", "layout layers")
     glv = window.add_card_after(gds, "glv_stats")
-    window._on_edge_added(src, gds, "single", "source")
+    window._on_edge_added(src, gds, "single", "label_source")
     window.model.set_param(gds, "layers", "1:epi")
     window._on_edge_added(src, glv, "single", "source")
     window._on_edge_added(gds, glv, "epi", "roi")
@@ -309,9 +316,10 @@ def test_cutting_the_line_clears_the_field(window):
 def test_removing_the_region_card_empties_the_field(window):
     """畫面上線沒了、卡片卻還指著一個再也沒有人定義的區域 —— 那是同一種說謊。"""
     src = first_source(window, "load_single")
-    gds = window.add_card_after(src, "roi_from_mask")
+    gds = window.add_card_after(src, "roi_reference")
+    window.model.set_param(gds, "method", "layout layers")
     glv = window.add_card_after(gds, "glv_stats")
-    window._on_edge_added(src, gds, "single", "source")
+    window._on_edge_added(src, gds, "single", "label_source")
     window.model.set_param(gds, "layers", "1:epi")
     window._on_edge_added(src, glv, "single", "source")
     window._on_edge_added(gds, glv, "epi", "roi")
@@ -359,8 +367,9 @@ def test_a_region_defined_later_cannot_be_measured_earlier(window):
     src = first_source(window, "load_single")
     glv = window.add_card_after(src, "glv_stats")
     window._on_edge_added(src, glv, "single", "source")
-    gds = window.add_card_after(glv, "roi_from_mask")
-    window._on_edge_added(src, gds, "single", "source")
+    gds = window.add_card_after(glv, "roi_reference")
+    window.model.set_param(gds, "method", "layout layers")
+    window._on_edge_added(src, gds, "single", "label_source")
     window.model.set_param(gds, "layers", "1:epi")
 
     window._on_edge_added(gds, glv, "epi", "roi")
@@ -373,9 +382,10 @@ def test_a_region_defined_later_cannot_be_measured_earlier(window):
 # --------------------------------------------------------------------------- #
 def test_the_canvas_draws_the_region_line_as_a_region_line(window):
     src = first_source(window, "load_single")
-    gds = window.add_card_after(src, "roi_from_mask")
+    gds = window.add_card_after(src, "roi_reference")
+    window.model.set_param(gds, "method", "layout layers")
     glv = window.add_card_after(gds, "glv_stats")
-    window._on_edge_added(src, gds, "single", "source")
+    window._on_edge_added(src, gds, "single", "label_source")
     window.model.set_param(gds, "layers", "1:epi")
     window._on_edge_added(src, glv, "single", "source")
     window._on_edge_added(gds, glv, "epi", "roi")
@@ -393,14 +403,18 @@ def test_the_canvas_draws_the_region_line_as_a_region_line(window):
 def test_ports_never_pile_up_on_a_card_with_many_regions(window):
     """埠多就長高 —— 疊在一起的埠是**點不到**的（取最近的那一顆）。"""
     src = first_source(window, "load_single")
-    gds = window.add_card_after(src, "roi_from_mask")
-    window._on_edge_added(src, gds, "single", "source")
+    gds = window.add_card_after(src, "roi_reference")
+    window.model.set_param(gds, "method", "layout layers")
+    window._on_edge_added(src, gds, "single", "label_source")
     window.model.set_param(gds, "layers", "1:a, 2:b, 3:c, 4:d, 5:e")
     window._refresh_pipeline()
 
     item = window.pipeline.node_item(gds)
     anchors = item.out_anchors_local()
-    assert len(anchors) == 6, [d["name"] for d in item.out_specs()]
+    # 一條原樣送出的流 ＋ 五層 × **三個名字**（F29 之前一層只有一個名字，
+    # 所以這裡本來是 6）。`canvas._MAX_REGION_PORTS` 數的是埠不是區域 ——
+    # 它留在 6 的話，第三層開始的每一個區域在畫布上都沒有出口。
+    assert len(anchors) == 1 + 5 * 3, [d["name"] for d in item.out_specs()]
     gaps = [anchors[i + 1].y() - anchors[i].y() for i in range(len(anchors) - 1)]
     assert min(gaps) >= 2 * canvas_mod._PORT_R, gaps
     for i, anchor in enumerate(anchors):

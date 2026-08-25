@@ -101,8 +101,8 @@ def test_the_default_limit_no_longer_silently_keeps_64_of_them():
     """預設 64 會把 100 份安靜留 64 份 —— 而那 64 份算得出一個很正常的灰階值。"""
     spec = {p.name: p for p in get_step("roi_template").params}["max_boxes"]
     assert spec.default == 8192, "預設要撐得住整張大圖"
-    # 跟 `roi_from_mask` 用同一組數字：兩張會吐幾千個框的 ROI 卡不該有兩套上限
-    gds = {p.name: p for p in get_step("roi_from_mask").params}["max_boxes"]
+    # 跟 `roi_reference` 用同一組數字：兩張會吐幾千個框的 ROI 卡不該有兩套上限
+    gds = {p.name: p for p in get_step("roi_reference").params}["max_boxes"]
     assert (spec.default, spec.max) == (gds.default, gds.max)
 
 

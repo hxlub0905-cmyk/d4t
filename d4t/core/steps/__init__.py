@@ -8,7 +8,7 @@
 已註冊的 key（影像段 → 算法段）：
   load_patch, load_single, load_sidecar, normalize, tone, denoise, flatten,
   align, subtract, align_to, pair_source,
-  roi_cross, roi_template, roi_from_mask, roi_mask,
+  roi_cross, roi_template, roi_reference, roi_mask,
   glv_stats, cd_measure, focus_quality,
   feature_math, feature_fill,
   output_csv, output_report, output_klarf, output_image
@@ -62,7 +62,7 @@ from . import arith          # subtract / invert
 from . import roi_cross      # roi_cross
 from . import align_to       # 小圖在大圖裡的位置（F15-C）
 from . import pair_source    # 另一份資料的對應那一顆（F15）
-from . import roi_from_mask  # GDS label map -> 具名區域
+from . import roi_reference  # roi_reference（重複晶格 / GDS 一層 → 具名區域）
 from . import roi_mask       # roi_mask（區域 → 0/255 mask 影像流，F8c）
 from . import roi_template   # roi_template
 # ⚠ **Measure 段的順序就是這幾行的順序**（使用者 2026-08-25：「Measure 的 card

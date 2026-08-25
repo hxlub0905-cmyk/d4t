@@ -6,7 +6,7 @@
 --------------
 Region-3（GDS mode）吃的是 GLAS 匯出的東西，而 **GLAS 的輸出只在公司機上**
 （`AGENTS.md` §1：新功能只能用真實資料驗證的話，它在家用機上就等於不能驗證）。
-所以先有一份形狀一模一樣的合成品，`roi_from_mask` 才有東西可以對著寫。
+所以先有一份形狀一模一樣的合成品，`roi_reference` 才有東西可以對著寫。
 
 它不是 GLAS 的替代品，是**格式與幾何的替身**：欄位名、檔名慣例、label 的整數
 語意、三種 PNG 的通道數，全部照真實匯出（見
@@ -43,7 +43,7 @@ python tools/check_glas_export.py /tmp/gds --samples 2    # 健檢應該全過
 label 的幾何**不對應 SEM 影像的像素**
 --------------------------------------
 lot 的影像是 `make_sample_rsem.py` 的週期方格，而這裡的 layout 刻意非週期 ——
-兩者對不起來。這對 `roi_from_mask` 沒有影響（它只讀 label 那條流，從不看 SEM），
+兩者對不起來。這對 `roi_reference` 沒有影響（它只讀 label 那條流，從不看 SEM），
 但**用這份資料量出來的 GLV 沒有意義**，所以測試要斷言幾何與計數，不要斷言灰階。
 
 要看得對得起來的話，用同時產出的 **`<id>_gray.png`** 當影像（它是同一份 layout
@@ -82,7 +82,7 @@ ALIGN_COLUMNS = ["image_id", "klarf_path", "gds_path", "poi_layer",
 
 #: 層的名字**刻意長成 GLAS 的形狀**（`NAME (L17/D0)` / 裸的 `L17/D0`）——
 #: 那個形狀裡的 `/` 與空白是 d4t 的區域名規則不收的字元，而「怎麼改寫」
-#: 是 `roi_from_mask` 一定要處理的事。用乾淨的名字產測試資料等於把那題藏起來。
+#: 是 `roi_reference` 一定要處理的事。用乾淨的名字產測試資料等於把那題藏起來。
 LAYER_NAMES = ("L17/D0", "L21/D0", "L33/D0", "L44/D2", "L51/D0", "L60/D0")
 
 #: 每層畫成什麼灰階（gray 圖用）。跟 GLAS 一樣是「每層一個 fg_glv」。

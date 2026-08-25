@@ -92,13 +92,54 @@ Region 段的 `roi_mask` 會跳到 `roi_cross` 前面）。每一段現在讀起
 `nm_twins` 的規則是「`_px` 結尾 → ×s」，而面積要 ×s²，所以面積住在一張
 名單上（`_util.AREA_FEATURES`）。加一張會吐面積的新卡就要記得加一行。
 
+### B：Reference regions —— golden cell 與 GDS 收成同一張卡
+
+使用者：「我不同意 GDS 為主力，應該說 golden cell 跟 GDS 同樣重要而且他們要能
+在同張 card 裡（都是接區域 ROI 卡）」。收下 —— 而且這正是 repo 自己的規矩
+（`CLAUDE.md` §3），也已經做過一次一模一樣的事（`roi_compare` → `glv_stats` ＋
+`method="compare"`），連遷移的寫法都照抄得到。
+
+`roi_from_mask` →**`roi_reference`「Reference regions」**，兩個 method：
+
+* `repeating cells`（預設）—— `algo/period.estimate_period` 量週期 →
+  `choose_origin` 定相位 → `algo/golden.tile_coords` 每一格一個框。
+  **不合成任何影像**，那正是它跟被刪掉的 `pattern_ref` 的差別：那張卡把幾百格
+  疊成一張參照圖再相減（對不齊就吐一張糊的 ref，畫面上看不出來），這裡只是把
+  晶格切成區域，比的是統計量。
+* `layout layers` —— 原本 GDS 那一支，一層一塊，形狀照 GLAS 給的。
+
+**GDS 那一支現在也吐 `_center` / `_others`**，而當初不吐的理由**沒有被推翻**：
+幾何的 `_center`（缺陷在正中央）在一張 RSEM 大圖上仍然沒有意義。變的是有了
+`pick="strongest"` —— 它不假設缺陷在哪，**它去找**。被推翻的只有那句
+「所以不能有 `_center`」。
+
+接完之後**不需要任何新卡**就有區域級 detect：
+`roi_reference(pick=strongest)` → `glv_stats(roi=..._center, reference="the
+other regions")` → `cmp_snr_mean` → 判定樹 → `cd_measure` / `find_defect` 給框。
+
+三件跟計畫不同的：
+
+1. **`_others` 不必抽樣。** 計畫要求先量：`set_region_family` 在實測最壞的
+   5 295 個矩形上是 **36 ms／顆**，只有下游 `glv_stats` 在同一組框上（105 ms）
+   的三分之一。抽樣要多一個發明出來的數字，換到的時間比使用者自己接的那張
+   量測卡還少。
+2. **`source` 拆成兩格**（`source` / `label_source`）—— 一張晶圓的照片，跟一張
+   「每個像素值就是層號」的圖，是兩種東西。共用一格的話，畫布上那條線會在切換
+   method 之後指著一個意思完全不同的東西。
+3. **`cells_confidence` 報 `peak_strength`（0..1）不是 `confidence`（0..100）**
+   —— 使用者那一格擋的就是前者。報另一個刻度的話，「我設 0.18，它說 85」這句話
+   沒有人解得開。
+
+順手又抓到一個安靜的：**畫布的區域埠上限數的是「埠」不是「區域」。**
+`_MAX_REGION_PORTS = 6` 原本剛好等於「六個區域」（那時候 GDS 卡一層只吐一個
+名字）；一層變三個名字之後，6 就等於**兩層** —— 第三層開始的每一個區域在畫布上
+都沒有出口，而 `_NodeItem.height` 的 docstring 自己寫著「截掉的那幾個⋯⋯畫布上
+看不到它們就是說謊」。改成 18。
+
 ### 下一步
 
-Phase B（Reference regions：golden cell 與 GDS 收成同一張卡的兩個 `method`）
-與 Phase C（報表 bundle）都還沒開始，形狀寫在計畫書裡。使用者定調
-「golden cell 跟 GDS 同樣重要而且他們要能在同張 card 裡」——
-而 `tests/fixtures/golden/` 三份 recipe **一張 Region 卡都沒用到**，
-所以那個合併不會動到任何被凍住的數字。
+Phase C（報表 bundle：判定樹搬進 core → JPEG → 共用的 HTML 產生器 →
+`OutputBundleStep` → 第二趟吃快取）還沒開始，形狀寫在計畫書裡。
 
 ---
 

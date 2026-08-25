@@ -1,6 +1,6 @@
 # F29 — 把已經量到的位置說出來，加上報表 bundle
 
-> 狀態：**Phase A 完成**（2026-08-25）。B／C 未開始。
+> 狀態：**Phase A、B 完成**（2026-08-25）。C 未開始。
 > 主計畫：[`docs/ROADMAP.md`](../ROADMAP.md)。
 
 ---
@@ -154,7 +154,7 @@ output   Write CSV → Write report → Write KLARF → Write images → Write H
 
 ---
 
-## 4. Phase B（未開始）：Reference regions —— GDS 與 golden cell 同一張卡
+## 4. Phase B（✅ 2026-08-25）：Reference regions —— GDS 與 golden cell 同一張卡
 
 `roi_from_mask` 就地改成一張有 `method` 的卡：
 
@@ -199,6 +199,27 @@ roi_reference(method=golden_cell|gds, pick=strongest)
 > **`pattern_ref` 不回來。** golden cell 走區域這條路之後它多餘了，而使用者
 > 2026-08-20 才說過那張卡「完全沒用，請直接拿掉」。
 
+### 實作完之後的三件事（跟計畫不同的部分）
+
+1. **`_others` 的規模不必抽樣。** 計畫書要求先量再決定，量出來是（1000×1000）：
+   `set_region_family` 在 N=1000 約 8 ms、N=5000 約 **36 ms**、N=20000 約 157 ms。
+   實測最壞的一層是 5 295 個矩形 → 36 ms／顆，而下游 `glv_stats` 在同一組框上是
+   105 ms。抽樣要多一個發明出來的數字，換到的時間比使用者自己接的那張量測卡還少
+   —— 所以沒有加。
+2. **`source` 拆成兩格**（`source` / `label_source`）。兩支吃的是兩種完全不同的
+   東西：一張晶圓的照片，跟一張「每個像素值就是層號」的圖。共用一格的話，畫布上
+   那條線會在切換 method 之後指著一個意思完全不同的東西，而畫面上不會說。
+   `resolve_reads` 只宣告目前這一支真的會讀的那一條（同 `glv_stats`）。
+3. **順手修掉一個安靜的：畫布的區域埠上限數的是「埠」不是「區域」。**
+   `canvas._MAX_REGION_PORTS = 6` 原本剛好等於「六個區域」（那時候 GDS 卡一層只吐
+   一個名字）。一層變三個名字之後，6 就等於**兩層** —— 第三層開始的每一個區域在
+   畫布上都沒有出口，而它們確實是這張卡產出的東西（`_NodeItem.height` 的
+   docstring 自己寫著「截掉的那幾個⋯⋯畫布上看不到它們就是說謊」）。改成 18。
+
+**`cells_confidence` 報的是 `peak_strength`（0..1）不是 `confidence`（0..100）。**
+使用者那一格（`Ignore repeats weaker than`）擋的就是 `peak_strength`，所以它們
+必須是同一個數字 —— 報另一個刻度的話，「我設 0.18，它說 85」這句話沒有人解得開。
+
 ---
 
 ## 5. Phase C（未開始）：報表 bundle
@@ -228,6 +249,13 @@ roi_reference(method=golden_cell|gds, pick=strongest)
   帶前綴的不撿。
 * `tests/test_card_library_order.py`（5 條）—— 使用者點名的順序、註冊順序、
   **而且不是同義反覆**（Enhance 段字母序與註冊序是不同的答案）。
+* `tests/test_roi_reference_cells.py`（18 條）—— 晶格切得對、格子數對得上手算的、
+  **純雜訊要拒絕**（一格猜出來的晶格照樣讓每一顆吐得出很正常的灰階值）、
+  條紋的另一軸取滿整張圖、兩支共用哪幾格、每一支只宣告它真的讀的那條流、
+  `strongest` 挑對那一格、以及**舊 recipe 遷得過來而且第二次是 identity**。
+* `tests/test_roi_reference.py`（原 `test_roi_from_mask.py`，31 條）——
+  幾何一個像素都不差的那幾條原封不動，加上三個名字、只有一塊時沒有 `_others`、
+  `strongest` 找得到被塗亮的那一塊、退回中心要講出來。
 
 每一條回歸測試都驗過會紅（把 bug 放回去 → 它抓到）：
 拿掉區域偏移、質心改用框算、量不到時寫 0、退路順序寫反、少一格也算框、

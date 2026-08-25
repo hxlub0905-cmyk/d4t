@@ -2502,7 +2502,7 @@ class InputInspector(Inspector):
 #: （我把資訊弄掉了嗎）。F7-20 把九張併成四張，所以這裡只剩四個 key ——
 #: 少的那五個不是被拿掉，是變成 ``normalize`` / ``tone`` 的一個下拉選項。
 class GdsInspector(Inspector):
-    """`roi_from_mask`：**這一顆對到了哪幾層**、各幾塊、多大。
+    """`roi_reference`（``layout layers`` 那一支）：**這一顆對到了哪幾層**、各幾塊、多大。
 
     為什麼是一張表而不是「label map 的上色預覽」
     ------------------------------------------
@@ -2523,7 +2523,7 @@ class GdsInspector(Inspector):
     不然「畫面上的層」與「真的量下去的層」會不一樣，而那種 bug 極難發現。
     """
 
-    title = "GDS layers"
+    title = "Layout layers"
 
     def record(self) -> Dict[str, Any]:
         by_source = dict(self.meta.get("gds_layers") or {})
@@ -2789,7 +2789,7 @@ INSPECTORS: Dict[str, type] = {
     # F19：CD 有自己的面板了（剖面圖是它唯一講得清楚自己的方式）。
     "cd_measure": CdInspector,
     "focus_quality": MeasureInspector,
-    "roi_from_mask": GdsInspector,
+    "roi_reference": GdsInspector,
     "pair_source": PairInspector,
     # 對圖的分數只有**跟整批比**才讀得懂：0.62 是高是低要看其他顆長什麼樣。
     "align_to": MeasureInspector,

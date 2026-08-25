@@ -47,7 +47,7 @@ d4t 的 ROI 定位法有一個**共同出口**：吐**具名區域**（`resolve_
 ```
 ingest 層（配對 + 讀檔）      <DEFECTID>_label.png → 影像流 layout_label
   └ 同一條路也載 gray            <DEFECTID>_gray.png  → 影像流 layout_gray
-       └ Region 卡（暫名 roi_from_mask）吃 layout_label 那條流
+       └ Region 卡（`roi_reference`，method = layout layers）吃 layout_label 那條流
             + manifest 的 label_map → 每個 label id 一個具名區域
               （名字取 layer 名；座標一律正規化 0–1，因為 patch 尺寸會變）
 ```
@@ -92,7 +92,7 @@ label 是 1000×1000 單通道 8-bit、3 層、`nm_per_px` 全批都是 1、
 `image_id` 是不補零的數字（長度 1–6）、檔名不需要 `_safe_name` 改寫、沒有碰撞。
 
 **唯一的 WARN 是 layer 名**：三個名字都含有 d4t 的區域名規則不接受的字元
-（`L17/D0` 那種形式）。所以 `roi_from_mask` 一定要有一層「layer 名 → 區域名」的
+（`L17/D0` 那種形式）。所以 `roi_reference` 一定要有一層「layer 名 → 區域名」的
 改寫，而且**改寫規則要固定、要能查碰撞**（見 §3.6）。
 
 ## 3.6 一層 mask 拆成幾個矩形 —— 量過了（2026-08-18，真實資料）
@@ -124,14 +124,14 @@ label 是 1000×1000 單通道 8-bit、3 層、`nm_per_px` 全批都是 1、
 
 ### 上限：275 vs 8192
 
-最大 275 個矩形，而 `roi_from_mask` 的 `max_boxes` 預設是 **8192** —— 30 倍餘裕，
+最大 275 個矩形，而 `roi_reference` 的 `max_boxes` 預設是 **8192** —— 30 倍餘裕，
 不用調。（既有的 Profile / Template 卡預設 **64**，那是為「重複結構的幾份」設計
 的；GDS 這條路走的不是那張卡，所以那個數字不適用。健檢比的就是 8192，
 `tests/test_check_glas_export.py::test_the_box_cap_is_the_one_that_actually_applies`
 逐次核對報告裡的上限跟卡片的預設值是同一個。）
 
 實測成本（1000×1000、3 層、30/100/275 個矩形，同樣形狀的合成資料）：
-`roi_from_mask` **54 ms／顆**，下游拿 275 個框量一次 `glv_stats` **5 ms**。
+`roi_reference` **54 ms／顆**，下游拿 275 個框量一次 `glv_stats` **5 ms**。
 399 顆單執行緒約 25 秒。
 
 ### layer 名的改寫要能查碰撞

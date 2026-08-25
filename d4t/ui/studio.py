@@ -2262,7 +2262,7 @@ class StudioWindow(QMainWindow):
     def _autofill_new_card(self, node_id: Optional[str]) -> None:
         """剛加進來的卡，把**這個畫面上已經知道的答案**先填好。
 
-        現在只有一張卡走這條路：``roi_from_mask`` —— **已經掛上來的那份 GLAS
+        現在只有一張卡走這條路：``roi_reference`` —— **已經掛上來的那份 GLAS
         匯出**的層對照表。那個答案已經在畫面上了，讓使用者用手抄一次是在製造
         一個可以抄錯的機會，而它是一張**對照表**（層號 → 名字），不是接線。
 
@@ -2282,7 +2282,7 @@ class StudioWindow(QMainWindow):
         node = self.model.nodes.get(str(node_id or ""))
         if node is None:
             return
-        if node.step == "roi_from_mask":
+        if node.step == "roi_reference":
             self._autofill_gds_layers(node)
 
     def _autofill_gds_layers(self, node: Any) -> None:
@@ -2304,10 +2304,18 @@ class StudioWindow(QMainWindow):
            名字很爛，但它讓接線這件事**當場看得到結果**，而名字使用者本來就會改。
 
         只在**空的**時候填 —— 使用者打過的字不覆蓋（重新掛一次匯出也不覆蓋）。
+
+        ⚠ **``method`` 也一起填**（F29）。這張卡收成兩支之後預設是
+        ``repeating cells``（不需要任何外部資料，所以它是對的預設）——
+        但畫面上已經掛著一份 GLAS 匯出的人，加這張卡要的一定是另一支，
+        而那一支的層對照表就在旁邊。同一句話：**把畫面上已經知道的答案先填好**。
+        不是自動接線（鐵則 10 擋的是那件事）—— 這裡改的是一個下拉，
+        而使用者一眼看得到它，改回去是一個動作。
         """
         if str(node.params.get("layers", "") or "").strip():
             return              # 使用者打過的字不覆蓋
         from d4t.core.ingest import glas_export
+        from d4t.core.steps.roi_reference import METHOD_GDS
 
         default = glas_export.layer_map_default(self._gds_layers)
         count = len(self._gds_layers)
@@ -2316,6 +2324,7 @@ class StudioWindow(QMainWindow):
             default = glas_export.fallback_layer_names(ids)
             count = len(ids)
         if default:
+            self.model.set_param(node.id, "method", METHOD_GDS)
             self.model.set_param(node.id, "layers", default)
             self.param_form.set_label_count(count)
 
@@ -2329,7 +2338,7 @@ class StudioWindow(QMainWindow):
         ctx = getattr(getattr(self, "_last_result", None), "context", None)
         if ctx is None:
             return []
-        stream = str(node.params.get("source", "") or "")
+        stream = str(node.params.get("label_source", "") or "")
         rec = (getattr(ctx, "meta", None) or {}).get("layout_label") or {}
         entry = rec.get(stream) or {}
         return [int(i) for i in (entry.get("ids") or ()) if int(i) > 0]
@@ -5835,13 +5844,13 @@ class StudioWindow(QMainWindow):
             self._status(str(e))
             return str(e)
 
-        # 名字填進**每一張** roi_from_mask 卡（還沒設定過的才填 —— 使用者改過的
+        # 名字填進**每一張** roi_reference 卡（還沒設定過的才填 —— 使用者改過的
         # 名字不能被一次「重新掛載」洗掉）。
         default = glas_export.default_layer_map(doc)
         filled = 0
         if default:
             for nid, node in self.model.nodes.items():
-                if node.step == "roi_from_mask" and not str(
+                if node.step == "roi_reference" and not str(
                         node.params.get("layers", "") or "").strip():
                     self.model.set_param(nid, "layers", default)
                     filled += 1

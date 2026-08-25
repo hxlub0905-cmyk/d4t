@@ -580,12 +580,12 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
         "cd_measure": ["align", "subtract", "glv_stats"],
         # `find_defect` 的預設來源是 **diff**（不是 `test`），而那是刻意的：
         # 差影像已經把結構減掉了，剩下的就是缺陷。它是唯一一張預設吃 diff 的
-        # 量測卡，所以前置鏈裡一定要有 `subtract`（同 `roi_from_mask` 一定要有
+        # 量測卡，所以前置鏈裡一定要有 `subtract`（同 `roi_reference` 一定要有
         # `load_sidecar`）。
         "find_defect": ["align", "subtract"],
         # GDS 那條路的上游不是影像處理，是**另一張 Input 卡**：label map 那條流
         # 由 `load_sidecar` 產（配對在 ingest 層做，見 F11 Region-3 第 2 步）。
-        "roi_from_mask": ["load_sidecar"],
+        "roi_reference": ["load_sidecar"],
         # 比較卡吃的是**區域**，所以上游要有一張出得了區域的 Region 卡。
         # `roi_cross` 是三張裡唯一不需要外部資料的（純規則）。
         "roi_compare": ["roi_cross"],

@@ -3746,7 +3746,7 @@ class ParamForm(QWidget):
         """告訴表單「掛上的 GLAS 匯出有幾層」（F11 Region-3）。
 
         跟 :meth:`set_image_count` 同一個形狀，而且**兩者不可以互相蓋掉** ——
-        一張 recipe 上可能同時有 `load_patch`（一列一張圖）與 `roi_from_mask`
+        一張 recipe 上可能同時有 `load_patch`（一列一張圖）與 `roi_reference`
         （一列一層）兩個 `channel_map`，用同一個數字去排兩者的列數，其中一邊
         一定是錯的。
         """
