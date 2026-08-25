@@ -311,7 +311,7 @@ class DecideSpec:
 
     ⚠ 使用者 2026-08-23 提出「ADC 也可以有線」，而那句話**不在這一版否決**：
     多類別之後每條規則吃的是**特定幾個**數字，不是全部，那時候線是有意義的。
-    這一版只做引擎，畫布留在後面（見 `docs/plans/F22-adc-multiclass.md`）。
+    這一版只做引擎，畫布留在後面（見 `docs/history/plans/F22-adc-multiclass.md`）。
 
     跟 :class:`ScoreSpec` 的關係：**二選一，不能並存**
     -------------------------------------------------
@@ -320,8 +320,11 @@ class DecideSpec:
     ``ambiguous-decision`` 的 error，而不是挑一個贏。
 
     這一版**沒有自動遷移**：舊 recipe 照舊走 ``score``，一個位元都不動。
-    理由不是保守，是**黃金值現在是壞的**（見 `docs/plans/F21-algo-and-roi.md`
-    §6）—— 沒有那條防線的時候，「改了判定段但數字沒變」這句話沒有人證得了。
+    理由不是保守，是寫這一版的當下**黃金值是壞的**（見
+    `docs/history/plans/F21-algo-and-roi.md` §6）—— 沒有那條防線的時候，
+    「改了判定段但數字沒變」這句話沒有人證得了。
+    （尺 2026-08-23 已重凍、三份全綠；**不遷移這個決定仍然成立** ——
+    舊 recipe 照舊走 ``score`` 是使用者定的，不是那把尺定的。）
     """
     #: 中間值（一行一個），算完寫進 features。
     let: List[Let] = field(default_factory=list)

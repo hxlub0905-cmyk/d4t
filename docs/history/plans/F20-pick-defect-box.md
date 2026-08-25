@@ -1,7 +1,7 @@
 # F20 — 哪一塊是缺陷那一塊
 
 > 狀態：**引擎與 UI 都完成、實測驗過（2026-08-22）**。
-> 相關：[`docs/USING-CD.md`](../USING-CD.md)、`_util.pick_defect_box`
+> 相關：[`docs/USING-CD.md`](../../USING-CD.md)、`_util.pick_defect_box`
 
 ---
 

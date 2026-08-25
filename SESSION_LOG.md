@@ -6,7 +6,7 @@
 
 | 期間 | 在哪 |
 |---|---|
-| **2026-08-19 起**（第十六輪～）| 這個檔案（下面）—— 改名 d4t、F12 區域線、F13 UI、F14 入口搬進卡片、F15 配對分析、F16 畫布的八段、F17 純 DAG 引擎 |
+| **2026-08-19 起**（第十六輪～）| 這個檔案（下面）—— 改名 d4t、F12 區域線、F13 UI、F14 入口搬進卡片、F15 配對分析、F16 畫布的八段、F17 純 DAG 引擎、F18 GLV、F19 CD、F20–F25 多類別 ADC 與判定樹、F26/F27 判定與 Results 面板、F28–F30 位置／報表／Region 收卡 |
 | 2026-08-07 ～ 08-18（第十五輪以前）| [`docs/history/2026-08.md`](docs/history/2026-08.md) —— F8 純規則 ROI、畫布 n8n 化、Phase 1 收斂、F10、Phase 2 的 Input／Enhance／Region 三段 |
 | 2026-07 | [`docs/history/2026-07.md`](docs/history/2026-07.md) —— M0–M7、F7-9…F7-24 前半、兩台機器與搬運通道的成形 |
 
@@ -19,10 +19,152 @@
 
 ---
 
+## 文件追上程式碼：README、四個沒進紀錄的 commit、計畫書歸檔（2026-08-25）
+
+使用者：先把整個專案與最近幾次的修改讀一遍列出來，然後「三個都先幫我做」——
+指的是讀完之後回報的那三條漂移。**這一輪一行程式邏輯都沒動**，動的是文件與
+檔案位置（`.py` 只改到指向計畫書的那幾行路徑）。
+
+### 一、README 講的是三個星期前的 app
+
+`CLAUDE.md` §0 那條「同一件事只寫在一個地方」擋的正是這個，而 README 是唯一
+一份沒有人在改的入口文件。逐項對過程式碼之後改掉五處：
+
+| README 說 | 實際上 |
+|---|---|
+| 26 張卡、可見 23 張 | `REGISTRY` 是 **25 張**、扣掉 `HIDDEN_STEPS` 可見 **22 張** |
+| 量測有「SNR map、blob 分割」 | 兩個都不在了 —— Z-map 2026-08-25 刪（F28）、blob 分割使用者定調「不需要 也不要再出現」。改成寫**現在真的有的**：GLV／CD（同一趟給 LWR／LER）／Focus index／Find defect |
+| 使用者看到的是**八**階段（含 Algo）| **七**段 —— Algo 在 F24 §5 解散進判定，唯一出處是 `GROUP_ORDER` |
+| 「ADC 判定不是卡片，而是 score 運算式與 bin 規則」| 那是 F22 以前的語言。現在是 recipe 頂層的 `decide` 區塊＝一棵**判定樹**，畫布上有自己的判定區，另有 `route_by` 分流 |
+| 「`roi_snr` 同時回報 signed 與 abs」| 那張卡與那支函式 2026-08-21 就刪了。`algo/snr.py` 留著的理由要寫出來：它是**正負號慣例的規範出處** |
+
+輸出那一列也補齊了（六張 Output 卡，含 F29 的報表資料夾），文件索引補上
+`docs/USING-CD.md`。
+
+### 二、`CLAUDE.md` §4 那條擋路的警語，理由已經過期
+
+它寫著「現在不要動 `studio.py`，因為那把尺（黃金值）是壞的」。查下去：
+**黃金值 2026-08-23 就重凍了、三份全綠**（見本檔「黃金值重凍」那一段）——
+也就是那條警語自己引用的前提，在寫下它之後兩天就解除了。
+
+沒有把警語拿掉（使用者定的順序仍然是「先把引擎做對，再回頭產品化」），但
+**把理由換成真的那一個**，並把前置條件寫成做得到的動作：動之前先
+`freeze_golden.py --check` 三份全綠。同一段的數字也重量了 ——
+`StudioWindow` 從 5,244 行長到 **6,017 行**（三天 773 行），而那正是這一段
+存在的理由。
+
+### 三、十份做完的計畫書還住在 `docs/plans/`
+
+`docs/history/README.md` 寫著判準：「標成 ✅ 而且不再有人往裡面寫東西」。
+照它搬了八份（F20…F25、F28、F29），留下五份還在寫的：`F0`（原始總計畫）、
+`F11`（Phase 2 的議程）、`F15`（⏸ 使用者叫停）、`F26`／`F27`（各有一條等使用者
+定調的版面決定）。
+
+**搬之前先把狀態改對** —— 四份頂上寫的是當時的話，而它們早就上線了：
+
+| | 頂上寫著 | 實際 |
+|---|---|---|
+| F22 | 「畫布那一半還沒做，有一個開放問題」| 開放問題 08-24 定稿（有線，而且是一整個判定區），畫布那一半由 F24 接手 |
+| F23 | 「期2、期3 未動」| 三期全部完成（08-24）|
+| F24 | 「方向已定稿，**未動工**」| ①②③④⑤ 全數完成，判定區 08-25 補上拖曳與移除 |
+| F29 | 「C 未開始」| A／B／C 全完成，可選的 D（Output 段的視覺）當天也做了 |
+
+一份寫著「未動工」而其實已經上線的計畫書，封存起來就是一句會誤導下一個人的
+話 —— 所以 `docs/history/README.md` 那句「內容一個字都不改」補成
+**「搬的時候不改，要改的是搬之前那一步」**。F21 §6（黃金值是壞的）加了一條
+指向重凍的後記；索引表補上 F18／F19（它們早就搬過來了但沒進表）與這八份。
+
+引用路徑一起改（`grep -rn "docs/plans/<名字>"`）：`CLAUDE.md`、`SESSION_LOG.md`、
+`d4t/` 四個模組、`tests/` 五個檔案、`tools/make_mgext.py`。
+`tests/test_docs_links.py` 59 條全綠 —— 這一輪唯一一把有意義的尺。
+
+---
+
+## 補記：兩個假數字、Region 卡收成一張、Output 段上畫布（2026-08-25）
+
+底下四個 commit 當時沒有寫進 SESSION_LOG（`CLAUDE.md` 開頭那句「每次 session
+結束請更新最上方」漏掉的正好是它們），補在這裡。
+
+### 兩個假數字（`c100565`）
+
+**① 沒有分數表達式 ⇒ 沒有分數（不是 0）。** `_eval_decision` 以前寫
+`score = expr.eval(...) if expr else 0.0`，而判定樹是一個**分類器**，多數樹根本
+沒有分數表達式 —— 於是每一顆拿到一個假的 0，最嚴重的後果是
+**「照分數排序取前 N 顆」變成「檔案順序的前 N 顆」**（全部同分時 `sorted` 是
+穩定的）。而排序正是使用者要那份報表的理由。改成 `None` 且那一格不寫；三個
+不擋 `None` 的下游各自處理：`pick_overlay_results` 多一格 `rank_by` 並在排不
+出來時明講、KLARF top-N 的「the run failed」拆成兩句話、Gallery 不再畫出
+`None` 那四個字。⚠ 既有測試 `test_no_score_expression_is_allowed_and_gives_zero`
+**鎖住的正是這個 bug**。
+
+**② 判定樹問到一個「量不到所以沒寫」的特徵時，整顆算失敗。** 可是那一顆跑得
+好好的 —— CD 卡正確地什麼都沒量到所以什麼都沒寫（規矩 3），而「什麼都沒量到」
+正是使用者最想看到的那一類之一。使用者定調：**那一題答「否」，繼續走**，而且
+不可以是安靜的（`decide_unanswered` 進 features、缺的名字進 meta 與一條警告）。
+判準抽成 `decide_tree.answer()` / `walk()` —— 引擎與畫布的分支流量以前是兩段
+各自寫的迴圈，而後者的說明寫著「判準跟引擎一字不差」。
+
+回歸測試的第一版**是假的**：隨機樹只生 `x > k`（k ≥ 0），於是「問不出來 → 答否」
+與「缺值當 0」在每一題上給同一個答案，200 棵樹一棵都沒抓到。加上 `<` 與負門檻
+才有鑑別力。
+
+### 四張 Region 卡收成一張（`e8bb9f2`，F30）
+
+使用者：「把 Profile / Template 也折進 `roi_reference`」。四張卡回答的是同一句話
+——「哪些地方應該長得一樣」—— 所以是一張卡的四個 method（`CLAUDE.md` §3）。
+**參數定義沒有第二份**：`_folded()` 從實作類別上取 `params` 再加一條「method 要
+是它」的條件；那兩個模組留在原地、不再自己 `@register_step`（要合的是**使用者
+看到的那張卡**，不是檔案）。
+
+四件事是被這個合併逼出來的，每一件都比合併本身重要：`show_when` 要能 and、
+那條可見性規則只能有一份（`ParamForm` 以前自己寫了兩次 → 抽成
+`step.param_visible`）、表單要用預設值補沒填的格子（否則新加的卡每一格都被判定
+為不該顯示，整張看起來是空的）、儀表與兩個入口要改看 method 不看 key。
+
+遷移照 `_migrate_roi_compare_into_glv_stats` 抄（鐵則 9）。兩件不做就會**安靜換
+一組值跑**：舊預設逐字寫進參數（三支互相衝突，`max_boxes` 64 → 8192 不報錯，
+它會多量一百個框），撞名而意思不同的那一格改名（`min_confidence` 在 Profile 是
+條紋信心 0..200、在 cells 是週期強度 0..1）。既有測試改成指向合併卡
+（`tests/region_cards.py` 的 `BoundRegionCard`）而**一條斷言都沒有改** —— 那個
+shim 綁的正是遷移寫進舊 recipe 的那三樣，所以那幾十條問的就是「舊 recipe 行為
+有沒有變」。
+
+### `repeating cells` 走人，而打錯的層號表要講出來（`3c748a0`）
+
+使用者：「repeating cell 跟 a cell I mark myself 應該一樣，而且後者完整很多，
+請把前者刪掉」。確實在回答同一句話，差別只在那一格 cell 是**量**出來的還是
+**標**出來的，而標的那條路多了三道閘門與一個看得到的編輯器。method 四個變三個、
+預設改 `stripes in the image`。⚠ **舊 recipe 明確報錯，不安靜換一支跑**（`method`
+是 choice，值進不了 `validate_params`）—— 那個 method 是同一天早上才進 main 的，
+沒有第二個使用者。`algo/period.py` 與 `algo/golden.py` **不動**（`CLAUDE.md` §5
+的便利貼：`algo/template.py` 還在用，而「自己標的那一格 cell」正是靠它們疊出來的）。
+
+第二件是使用者在畫布上看到的：「選 layout layers 之後沒有出口可以輸出區域線」。
+查下去是一個安靜的錯 —— `_layers_of` 把 `ChannelMapError` 吞掉回空 list（打到
+一半不准拋，那是對的），於是一個寫成 `17=epi` 的層號表（正確是 `17:epi`）產不出
+任何區域埠，而畫面上沒有任何東西說為什麼。`configuration_issues` 現在分得出三種
+狀態：表格是空的、表格讀不懂（錯在哪 ＋ 正確寫法）、表格沒問題。
+
+### 畫布上的 Output 段：這幾張整批只跑一次（`9b913cc`）
+
+畫布上其他每一張卡都是「一顆 defect 跑一次」，Output 段那幾張是整批跑完之後
+只跑一次（`Step.scale == SCALE_LOT`）—— 而畫面上沒有任何東西說得出那件事。
+給它跟判定區同一套視覺（虛線框、`OUTPUT / once per lot`），**不加埠、不加線**
+（進去的是整批的結果表，那不是一條影像流）。新模組 `ui/output_band.py`
+（`CLAUDE.md` §4），`canvas.py` 只負責接線；哪幾張算數看的是**卡片自己宣告的
+group**，不是一份寫死的 key 清單。
+
+三件是實際畫出來才發現的：**一個大框會說謊**（畫布會換行，四張卡的外接矩形把
+上一列的 Normalize 與 GLV 一起框進去）→ 改成一列一串、中間夾到別人就不畫
+（消失的框只是少一個提示，說謊的框是錯的）；框要用卡片**看得見**的那塊，不是
+`sceneBoundingRect()`；那行字改放左邊走廊，否則相鄰兩列的框實測疊 42px。
+
+---
+
 ## 量到了，然後丟掉：那一團在哪（2026-08-25）
 
 使用者要的是「跑完一整筆 image，缺陷被框出來、照分數排序、6000 顆出成報表」。
-計畫書：[`docs/plans/F29-detect-and-report.md`](docs/plans/F29-detect-and-report.md)。
+計畫書：[`docs/history/plans/F29-detect-and-report.md`](docs/history/plans/F29-detect-and-report.md)。
 
 ### 計畫被退了兩次，而第二次的理由是對的
 
@@ -316,7 +458,7 @@ core 全過、每一個 UI 檔逐一跑過。每一條迴歸測試都做過「�
 ## ADC 上畫布、Measure 段改名，Z-map 走人（2026-08-25）
 
 使用者一次給了四件事，這一輪做掉動手的兩件（另外兩件是問看法，見回覆）。
-計畫書：[`docs/plans/F28-canvas-and-measure.md`](docs/plans/F28-canvas-and-measure.md)。
+計畫書：[`docs/history/plans/F28-canvas-and-measure.md`](docs/history/plans/F28-canvas-and-measure.md)。
 
 ### ADC 判定區：拖得動、拿得掉
 
@@ -672,7 +814,7 @@ F24 §5 解散掉的八段、README 說 20 張卡（實際 26）、8 條指向�
 ## F25：判定段要有人會用（2026-08-24）
 
 使用者看過 F24 的成品之後的四句話，全部是同一件事的四個面 ——
-**引擎做完了，但入口是一格空白**。計畫書：[`docs/plans/F25-adc-usable.md`](docs/plans/F25-adc-usable.md)。
+**引擎做完了，但入口是一格空白**。計畫書：[`docs/history/plans/F25-adc-usable.md`](docs/history/plans/F25-adc-usable.md)。
 
 * **閃退（最優先）**：`widgets.clear_layout_parked()`。面板是「改一格就整段
   重建」的，而改那一格的訊號**還在被拆掉的那個 widget 的堆疊上** ——
@@ -917,7 +1059,7 @@ F24 §5 解散掉的八段、README 說 20 張卡（實際 26）、8 條指向�
 
 使用者定調 pre-filter 的真正需求：「**不同的 Classnumber 走不同的『卡片』**」
 —— 不是判定段的條件（那個每顆還是全跑），是 Class 2 根本不跑 A 組卡。
-計畫書在 [`docs/plans/F23-route-by.md`](docs/plans/F23-route-by.md)，
+計畫書在 [`docs/history/plans/F23-route-by.md`](docs/history/plans/F23-route-by.md)，
 照 Phase 2 規矩先討論再動手。要點：
 
 * **機制八成在**（多 route、`fill_fields`、快取簽章含鍵），卡住的只有
@@ -968,7 +1110,7 @@ F24 的第一期做完：`decide` 從清單長成樹。**畫布是第 ② 期，
 
 使用者問「ADC 跟 Algo 畫布上要怎麼呈現（畫布不能說謊），跳脫框架你有什麼建議」。
 討論 → mockup → 兩輪修訂 → 拍板。定稿在
-[`docs/plans/F24-decision-tree.md`](docs/plans/F24-decision-tree.md)，
+[`docs/history/plans/F24-decision-tree.md`](docs/history/plans/F24-decision-tree.md)，
 mockup（四個 artboard）在
 https://claude.ai/code/artifact/adfed023-6280-4acf-b6c0-749c9f299767 。
 
@@ -1126,7 +1268,7 @@ F19（`area_px` / `cd_x_px` / `cd_y_px` → `cd_*` 那一批）與 F17-②
 
 整個 app 最大的功能缺口 —— 一個叫 Auto Defect **Classification** 的工具，
 `score.bins` 卻被強制只有 `below`/`above`。設計與量測全部在
-[`docs/plans/F22-adc-multiclass.md`](docs/plans/F22-adc-multiclass.md)。
+[`docs/history/plans/F22-adc-multiclass.md`](docs/history/plans/F22-adc-multiclass.md)。
 
 ### 形狀：一張由上往下讀的篩子
 
@@ -1233,7 +1375,7 @@ recipe JSON 完全不變，差別只在 UI 認得它是什麼。這是 `image_ke
 使用者問「algo 這張 card 有沒有存在的必要」。查 repo 得到的事實是**三個收斂過的
 段落零使用**：`feature_math` 0 次、任何 ROI 卡 0 次、F18 的 compare 0 次。
 所以先串起來跑一次，再談要不要為 Algo 段加東西。全部在
-[`docs/plans/F21-algo-and-roi.md`](docs/plans/F21-algo-and-roi.md)。
+[`docs/history/plans/F21-algo-and-roi.md`](docs/history/plans/F21-algo-and-roi.md)。
 
 ### 1. ROI 是槓桿，實測 +0.35
 
@@ -1414,7 +1556,7 @@ MMH 那幾支則是用一個 `k//2+1` 的 margin 把被汙染的樣本排除掉�
 
 ### 4. F20：一格「哪一塊是缺陷那一塊」
 
-見 [`docs/plans/F20-pick-defect-box.md`](docs/plans/F20-pick-defect-box.md)。
+見 [`docs/history/plans/F20-pick-defect-box.md`](docs/history/plans/F20-pick-defect-box.md)。
 `<name>_center` 原本寫死是「離 patch 正中心最近」，那句話假設缺陷在正中心。
 在 `mgepi_real3` 上實測 **11/24**；換成「diff 訊號最強的那一塊」是 **24/24**，
 端到端正確率 **72.9% → 97.9%**。預設值不動，黃金值零變動。

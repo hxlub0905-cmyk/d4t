@@ -2,7 +2,7 @@
 
 這一支產的資料**不進版控**（`0822test/` 在 .gitignore 裡）—— 2 MB 的 TIFF，
 而且隨時重產得出來。所以這份測試鎖住的正是那句話：**同一個種子產出來的東西
-逐位元組相同**。它一旦不成立，`docs/plans/F20-pick-defect-box.md` 上那些數字
+逐位元組相同**。它一旦不成立，`docs/history/plans/F20-pick-defect-box.md` 上那些數字
 就沒有人能重跑了。
 """
 from __future__ import annotations

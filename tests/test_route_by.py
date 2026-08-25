@@ -1,5 +1,5 @@
 # F23 期1：分流（route_by）—— 不同 CLASSNUMBER 走不同的卡片。
-"""這一份鎖住分流的六條性質（`docs/plans/F23-route-by.md` §10 的驗收）：
+"""這一份鎖住分流的六條性質（`docs/history/plans/F23-route-by.md` §10 的驗收）：
 
 1. **嚴格附加**（鐵則 9）：沒有 `route_by` 的 recipe 一個位元都不動 ——
    JSON 沒有那個鍵、round-trip 是 identity、features 裡沒有 `route_taken`。

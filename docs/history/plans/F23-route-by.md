@@ -1,6 +1,9 @@
 # F23 — 分流：不同 CLASSNUMBER 走不同的卡片
 
-> 狀態：**期1（引擎）已完成（2026-08-24）**；期2（UI）、期3（lot_stats）未動。
+> 狀態：**✅ 三期全部完成（2026-08-24）。** 期1 引擎、期2 UI（route 切換器、
+> 預覽跟著顆走、`route_by` 編輯區塊）、期3「跟整批比」（`Let.scale` ＋
+> `apply_lot_scaling`）。`routes-drift` lint 同日定調為**先不做**（見 §10 末），
+> 分流在畫布上是徽章不是卡片（F25-B）。
 > 四題已定調（使用者 2026-08-24「照提案著做」）：① default 兩種都支援、
 > ② 第一期用選項 A、③ 預覽自動切 route、④ lot_stats 併第 3 期。
 > 期1 的實作紀錄見 `SESSION_LOG.md`；驗收在 `tests/test_route_by.py`（27 條）。

@@ -33,9 +33,9 @@ d4t 的第一原則是：
 | | |
 |---|---|
 | **輸入** | 四種 source，各有各的入口：`ebi_patch`（KLARF ＋ 多頁 patch TIFF）、`rsem`（KLARF ＋ 每顆一個影像檔）、`tiff_stack`（多頁 TIFF，無 KLARF）、`folder`（單張影像資料夾，無 KLARF） |
-| **組裝** | 26 張步驟卡片（卡片庫現行可見 23 張，其餘收在 `ui/scope.py` 的 `HIDDEN_STEPS`）；節點畫布拉線接卡，recipe 即 DAG |
-| **量測** | SNR／GLV 統計、CD 次像素邊緣定位、影像品質指標、區域對比、SNR map、blob 分割 |
-| **輸出** | 無損寫回 KLARF（class／bin／DSIZE）、Top-N 新 KLARF、CSV／Excel 報表、feature vector（供日後 ML 訓練備料） |
+| **組裝** | 25 張步驟卡片（卡片庫現行可見 22 張，其餘收在 `ui/scope.py` 的 `HIDDEN_STEPS`）；節點畫布拉線接卡，recipe 即 DAG |
+| **量測** | GLV 統計與區域對比（含 SNR）、CD 次像素邊緣定位（同一趟給 LWR／LER）、對焦品質指標、找出最突出的那一團並給框與強度 |
+| **輸出** | 六張 Output 卡（整批跑完只跑一次）：無損寫回 KLARF（class／bin／DSIZE）與 Top-N 新 KLARF、CSV／Excel 報表、單檔 HTML、逐顆疊圖，以及**報表資料夾**（`report.html` ＋ `images/*.jpg` ＋ `defects.csv` ＋ `recipe.json`，6000 顆量級一次出得完） |
 | **介面** | PySide6 桌面編輯器（Studio）＋ CLI（可排程、可腳本化） |
 | **執行** | 多行程批次、影像段快取；設計目標為單批 10,000 顆 defect 仍流暢 |
 
@@ -52,14 +52,19 @@ d4t 的第一原則是：
 【影像段】把圖變乾淨、可比  →  【算法段】從圖量出數字  →  【ADC 判定】score → bin → 寫回 KLARF
 ```
 
-使用者看到的則是另一個軸 —— 依「想解決什麼問題」分八階段：
+使用者看到的則是另一個軸 —— 依「想解決什麼問題」分**七階段**：
 
 ```
-Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output
+Input → Enhance → ROI → Measure → Compare → ADC → Output
 ```
+
+（原本的 `Algo` 段已於 2026-08-24 解散進判定段：算式住進 `decide.let`、
+補值變成那一行的「missing ⇒」屬性。唯一出處是 `pipeline/step.py` 的 `GROUP_ORDER`。）
 
 兩個軸各有用途，不合併；詳見 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
-ADC 判定不是卡片，而是 recipe 上的 score 運算式與 bin 規則。
+ADC 判定不是一張卡片，而是 recipe 頂層的 `decide` 區塊 —— 一棵**判定樹**，
+在畫布上有自己的判定區（拖得動、拿得掉），可分出兩類以上；
+另有 `route_by` 讓不同 CLASSNUMBER 走不同的卡片。
 
 **畫布上的每一條線都是使用者拉的。** 影像流的身分是 `(節點, 埠)` 而非全域名稱；
 一個輸入埠只能接一條線，接錯會在 `validate` report `ambiguous-input`。
@@ -157,7 +162,9 @@ git add -A && python tools/release.py && git add -A
 
 - **ROI 座標**：正規化座標（`NamedROI`）為正典；像素矩形一律 `(x, y, w, h)`。
 - **SNR 正負號**：`snr_signed = (μ_target − μ_ref) / σ_ref`（e-beam 定義）為唯一正典
-  primitive（`algo/snr.py`）；`roi_snr` 同時回報 signed 與 abs。
+  primitive（`algo/snr.py`）；GLV 卡的 `snr` 統計量照它做。
+  （`roi_snr` 那張卡與函式已於 2026-08-21 移除，`snr_map`／Z-map 於 2026-08-25 移除；
+  `algo/snr.py` 保留，因為它是這個正負號慣例的規範出處。）
 - **Vendoring**：每個 vendored 模組於檔頭註明來源專案、原始檔案與改動清單。
 
 ---
@@ -172,6 +179,7 @@ git add -A && python tools/release.py && git add -A
 | 開發手冊：鐵則、加卡片、開發流程 | [`CLAUDE.md`](CLAUDE.md) |
 | 架構：心智模型、資料模型、目錄結構 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
 | 進度與 phase 計畫 | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
+| 給使用者的操作手冊：CD 那張卡每一格什麼時候動 | [`docs/USING-CD.md`](docs/USING-CD.md) |
 | 已知的坑（30 條以上，只增不減） | [`docs/PITFALLS.md`](docs/PITFALLS.md) |
 | 設計緣由：需求訪談結論、名稱由來、六個來源專案 | [`docs/HANDOVER.md`](docs/HANDOVER.md) |
 | 廠內待驗證假設、受限機器部署 | [`docs/FAB-VALIDATION.md`](docs/FAB-VALIDATION.md) |

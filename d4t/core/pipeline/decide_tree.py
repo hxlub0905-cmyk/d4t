@@ -12,7 +12,7 @@
 改成 import 它並原樣再匯出：既有的 `from d4t.ui.tree_scene import
 flow_counts` 一個字都不用改，而**只有一份實作**。
 
-三個不變量沒有變（`docs/plans/F24-decision-tree.md` §4、§10）：
+三個不變量沒有變（`docs/history/plans/F24-decision-tree.md` §4、§10）：
 
 * **樹的每一步就是引擎的一步** —— 這裡走的樹直接來自 `DecideSpec`
   （`rules` 模式先過 `rules_to_tree`，那個轉換無損）。

@@ -676,8 +676,9 @@ def _eval_decision(recipe: Recipe,
     if score is not None:
         ctx.features["score"] = score
     # 哪一條規則對上了 —— 給面板與報表。**不進 `DefectResult`**：那會動到
-    # SQLite schema 與 CSV 的欄，而黃金值現在是壞的（見 F21 §6），
-    # 「改了但數字沒變」這句話目前沒有人證得了。
+    # SQLite schema 與 CSV 的欄。（寫這一段時黃金值是壞的（見 F21 §6）；
+    # 尺 2026-08-23 重凍回來了，但「要不要進結果 schema」是另一個決定，
+    # 目前仍然是不進。）
     ctx.meta["decide"] = {"rule": chosen_rule, "label": chosen_label,
                           "bin": chosen_bin, "path": path,
                           "unanswered": sorted(set(unanswered))}
@@ -689,8 +690,9 @@ def _eval_score(recipe: Recipe,
     """ADC 判定：score = expr(features) → bin。失敗會 raise（呼叫端攔截）。
 
     ``recipe.decide`` 有東西的時候走多類別那一支（F21-D）—— **沒有的時候
-    這一支一個位元都沒動**，因為黃金值現在是壞的，「改了判定段但數字沒變」
-    這句話目前沒有人證得了（見 `docs/plans/F21-algo-and-roi.md` §6）。
+    這一支一個位元都沒動**。寫的當下的理由是黃金值壞了（見
+    `docs/history/plans/F21-algo-and-roi.md` §6，2026-08-23 已重凍）；
+    現在的理由是那條老路仍然有 recipe 在走，動它要有人證明數字沒變。
     """
     if getattr(recipe, "decide", None) is not None:
         return _eval_decision(recipe, ctx)

@@ -12,8 +12,8 @@ Classification）的工具，只做得到二元判定。
    score 欄都不必知道這一段換過；
 4. **`score` 與 `decide` 不能並存**（`ambiguous-decision`）—— 同一件事兩個地方
    存，是這個 repo 最怕的形狀；
-5. **沒有 `decide` 的 recipe 一個位元都沒動**（黃金值現在是壞的，見 F21 §6 ——
-   所以「改了判定段但數字沒變」只能靠這一條守）；
+5. **沒有 `decide` 的 recipe 一個位元都沒動**（寫的當下黃金值是壞的，見
+   F21 §6；尺 2026-08-23 重凍回來了，而這一條仍然是老路的第一道守門）；
 6. round-trip 是 identity（鐵則 9：`to_json_dict → from_json_dict` 是
    `run_batch` 送 recipe 進 worker 的路）。
 """
@@ -194,7 +194,7 @@ def test_no_rules_at_all_is_a_warning_not_a_crash():
 def test_an_old_recipe_round_trips_without_growing_a_decide_key():
     """**這一條是這一輪唯一的防線。**
 
-    黃金值從 F19 起就是壞的（`docs/plans/F21-algo-and-roi.md` §6），所以
+    黃金值從 F19 起就是壞的（`docs/history/plans/F21-algo-and-roi.md` §6），所以
     「改了判定段但既有的數字沒變」這句話沒有別的東西證得了。
     """
     raw = json.loads(FIXTURE.read_text(encoding="utf-8"))

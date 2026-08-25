@@ -1,5 +1,5 @@
 # F23 期2：分流的 UI —— route 切換器、預覽跟著顆走、route_by 編輯區塊。
-"""鎖住三件事（`docs/plans/F23-route-by.md` §6）：
+"""鎖住三件事（`docs/history/plans/F23-route-by.md` §6）：
 
 1. **model 抱得住整份分流 recipe**：`from_recipe → to_recipe` 對其他 route
    與 `route_by` 是 identity（少了這個，載入分流 recipe 再試跑，其他 route

@@ -24,7 +24,7 @@
 一條規則」時相同，而規則可以共用 bin。所以標籤上寫的是 ``bin 2 · 16 顆``——
 講的是哪一個量，不留給使用者猜。要做到逐規則的顆數，得把「第幾條對上」帶進
 `DefectResult`，而那會動到 SQLite schema 與 CSV 的欄（見
-`docs/plans/F22-adc-multiclass.md` §4）。
+`docs/history/plans/F22-adc-multiclass.md` §4）。
 
 這個模組**直接改 model**（不是發 signal 讓 Studio 轉手）—— 它是一個 Studio 層
 的面板而不是可重用元件，而 `RecipeModel` 本來就有 listener 機制負責把改動廣播
