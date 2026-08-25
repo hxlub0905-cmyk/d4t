@@ -19,6 +19,31 @@
 
 ---
 
+## F32 W3：GLV 設定區整理（2026-08-25）
+
+使用者：「GLV measure UI 介面（左側設定區）要做好看一點。」先 offscreen 截了
+一張現況（before/after 兩張都貼給使用者了），照截圖上看得到的問題逐條修：
+
+* **段落編號補齊成 1–5**：以前只有「3 · Compare against」與「4 · Which
+  pixels count」，前面四格是一塊沒名字的區。現在 `1 · What to measure`
+  （Statistics）、`2 · Boxes in the region`（across_boxes ＋ judge ——
+  逐框那兩格終於有自己的家）、3、4 不動、`5 · Output`（Name these results
+  以前因為沒有段，畫面上黏在第 4 段裡）。
+* **段標題下不再重複同名列標籤**：`_ParamRow` 的 echo 抑制以前只認逐字相等
+  （CD 的 "Report"）—— 帶編號的段（"3 · Compare against" vs 列標籤
+  "Compare against"）抓不到。改成先剝掉 `"N · "` 再比。掃過全 registry：
+  新規則只多吃掉 GLV 那兩列（across_boxes、reference），沒有誤傷。
+* `source` 那列補 `label="Measure on"`（原本顯示小寫的參數名 `source`，
+  跟其他 Title Case 的標籤不一致）。
+* judge 那列的裸下拉在 W2 已換成跟 Statistics 一致的單選膠囊。
+
+驗收：受影響 UI 檔逐檔全綠（widgets 58、f8_ui_polish、f8_advanced、
+controls_readable、f20_panel_truth、f19_cd、f7_9_feedback）、core 2203 過。
+黃金值不看（純 UI／label／section，引擎路徑零改動 —— label 與 section 不進
+recipe 的鍵）。
+
+---
+
 ## F32 W2：judge 可自訂 ＋ 贏家框即時預覽（2026-08-25）
 
 使用者：「Pick the odd one by 除了 median 當 index 外，希望可以 custom 參數

@@ -5,7 +5,7 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 b7de91c3029b706bf544976890dcf876cabb5a6b CLAUDE.md
 6adcf70fd5d443f757d78b4d337e1866a9af3ed7 README.md
-bc9052c65accfecea12381a88769adf44e01c809 SESSION_LOG.md
+09f58eae309120cebeda76c831708ac41b0809c5 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -65,7 +65,7 @@ cf162d9e699b12b6e4cd5d6d9706484b19eda598 d4t/core/steps/align_to.py
 8ef5c8396cd11fe7299037d7865c66fa3ab7830a d4t/core/steps/feature_fill.py
 9b417df41842c99263f3a477022e26c05e135bf5 d4t/core/steps/feature_math.py
 00f877fe38f316bc2a74cb2659a2e5ac63b7055c d4t/core/steps/flatten.py
-b6037a22968d03eaf5b2f1ed960f54c40415bd70 d4t/core/steps/glv_stats.py
+584c7a17144e4c2df8eaeb127f5747df421304e8 d4t/core/steps/glv_stats.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
@@ -106,7 +106,7 @@ b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 c894b98548a3a06f98ed531901518a429768879f d4t/ui/verdict_band.py
 7f48fa4f149190f559b6dea998a39bbb46dc870a d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
-c329590bea8223ff59c34ce11004080080f3bebe d4t/ui/widgets.py
+08772be389f8fe4c8e35a5a0183d62caf1904cd8 d4t/ui/widgets.py
 2eb7813f6dbd6c7d0beff0496ed0d1e6dc87d484 d4t/ui/workers.py
 991b2b3b4ff0da1b085f1828c38dbbc14891d4b4 docs/ARCHITECTURE.md
 e91e2809486e7306a360421877c50b667c01df64 docs/FAB-VALIDATION.md

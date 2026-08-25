@@ -292,6 +292,14 @@ def _reference_of(params: Dict[str, Any]) -> str:
     return got if got in REFERENCES else REF_NONE
 
 
+def _prefix_in_output_section() -> ParamSpec:
+    """``output_prefix`` 是共用的那一顆，只差掛在哪個小標題底下（F32 —— 它
+    以前沒有段，於是在畫面上黏在「4 · Which pixels count」裡）。"""
+    spec = output_prefix_spec("center")
+    spec.section = "5 · Output"
+    return spec
+
+
 def _judge_of(params: Dict[str, Any]) -> str:
     """逐框比較照哪個統計量挑 —— 回**原樣**的 id（沒填的當預設）。
 
@@ -377,6 +385,7 @@ class GlvStatsStep(MultiSourceStep):
             "numbers come out either way.")
     params = [
         ParamSpec(name="source", type="image_keys", direction="in", default="test",
+                  label="Measure on",
                   help="Image stream to compute statistics on."),
         ParamSpec(name="roi", type="region_keys", direction="in", default="",
                   label="Region",
@@ -389,7 +398,7 @@ class GlvStatsStep(MultiSourceStep):
         # 手寫 recipe 仍可以放任何 glv_q<0-100>（清單外的值會列出來並勾著）。
         ParamSpec(name="metrics", type="metric_chips",
                   default=DEFAULT_METRICS,
-                  label="Statistics",
+                  label="Statistics", section="1 · What to measure",
                   choices=list(METRIC_CHOICES),
                   help=("Pick the statistics to output - each becomes a "
                         "feature with the same name. Hand-written recipes may "
@@ -399,6 +408,7 @@ class GlvStatsStep(MultiSourceStep):
         ParamSpec(
             name="across_boxes", type="choice", default=POOLED,
             choices=list(BOX_MODES), label="Boxes in the region",
+            section="2 · Boxes in the region",
             help=("A region can be many boxes at once (a Golden Cell template "
                   "lays hundreds of them across a big image). pooled treats "
                   "them as one pile of pixels; each box measures every box on "
@@ -408,6 +418,7 @@ class GlvStatsStep(MultiSourceStep):
         ParamSpec(
             name="judge", type="metric_choice", default=JUDGE_DEFAULT,
             choices=list(METRIC_CHOICES), label="Pick the odd one by",
+            section="2 · Boxes in the region",
             show_when=("across_boxes", (EACH_BOX,)),
             help=("Which statistic decides the odd box out. Every box is "
                   "compared against the middle of all the other boxes, in "
@@ -508,7 +519,7 @@ class GlvStatsStep(MultiSourceStep):
                   "not wrong so much as meaningless - and it looks exactly "
                   "like a good one. 0 = always measure."),
         ),
-        output_prefix_spec("center"),
+        _prefix_in_output_section(),
     ]
     reads = ["test"]
     writes: List[str] = []
