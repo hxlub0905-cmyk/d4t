@@ -1,5 +1,5 @@
 # F13-①：特徵表分組 — authored 2026-08-19.
-"""**一條平的清單裡，`n_channels` 跟 `snr_max` 長得一模一樣。**
+"""**一條平的清單裡，`n_channels` 跟 `glv_median` 長得一模一樣。**
 
 使用者：「目前 feature 的顯示太陽春了不易閱讀，試著將他分類」。而一個是
 「這張卡讀了幾頁」、一個是會決定 bin 的量測值 —— 那個差別在畫面上完全看不到。
@@ -142,7 +142,7 @@ def test_two_cards_with_the_same_name_get_their_id(qapp, lot):
 # --------------------------------------------------------------------------- #
 def test_a_group_header_is_not_a_feature(ran):
     """`feature_names()` 有一堆呼叫端（報表、測試）—— 標題混進去的話，
-    它們會拿到一個叫 `▾ Z-map · 1` 的「特徵」。"""
+    它們會拿到一個叫 `▾ GLV · 1` 的「特徵」。"""
     names = ran.feature_table.feature_names()
     assert names, "表上要有東西"
     assert not any(n.startswith("▾") or n.startswith("▸") for n in names)

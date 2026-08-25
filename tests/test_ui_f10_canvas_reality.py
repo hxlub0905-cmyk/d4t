@@ -304,7 +304,7 @@ def test_every_measure_card_can_take_more_than_one_source(window):
     ROLE_PORTS: dict = {}
 
     for cls in list_steps():
-        # 「量測卡」＝**只吐數字、不吐影像**的那一類。``snr_map`` 掛在 Measure
+        # 「量測卡」＝**只吐數字、不吐影像**的那一類。Measure 段的卡
         # 這一組是因為它只為了餵 blob 而存在（見 step.py 的分組規則），但它
         # 產出的是一張圖 —— 多連一對它的意思是「一條流一張輸出圖」，那是另一
         # 個題目（要先決定輸出流怎麼命名），不在這一輪。

@@ -34,12 +34,12 @@ def test_build_route_by_mouse_ops():
 def test_param_validation_rejects_bad_value():
     m = RecipeModel()
     m.add_step("load_patch")
-    n = m.add_step("snr_map")
-    m.set_param(n, "window", 15)
-    assert m.nodes[n].params["window"] == 15
+    n = m.add_step("denoise")
+    m.set_param(n, "ksize", 5)
+    assert m.nodes[n].params["ksize"] == 5
     with pytest.raises(ParamError):
-        m.set_param(n, "window", 999)          # 超出上限
-    assert m.nodes[n].params["window"] == 15   # 不落地
+        m.set_param(n, "ksize", 999)           # 超出上限
+    assert m.nodes[n].params["ksize"] == 5     # 不落地
 
 
 def test_available_streams_and_features():
@@ -47,13 +47,13 @@ def test_available_streams_and_features():
     load = m.add_step("load_patch")
     m.add_step("align")
     sub = m.add_step("subtract")
-    snr = m.add_step("snr_map")
+    glv = m.add_step("glv_stats")
     streams = m.available_streams(before_node=sub)
     assert "test" in streams and "ref" in streams and "ref_aligned" in streams
     feats = m.available_features()
-    assert "snr_max" in feats and "align_dx" in feats
-    assert "snr_max" not in m.available_features(upto_node=sub)
-    assert m.category_of(load) == "image" and m.category_of(snr) == "algo"
+    assert "glv_median" in feats and "align_dx" in feats
+    assert "glv_median" not in m.available_features(upto_node=sub)
+    assert m.category_of(load) == "image" and m.category_of(glv) == "algo"
 
 
 def test_roundtrip_with_example_recipe():

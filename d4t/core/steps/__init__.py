@@ -9,8 +9,21 @@
   load_patch, load_single, load_sidecar, normalize, tone, denoise, flatten,
   align, subtract, align_to, pair_source,
   roi_cross, roi_template, roi_from_mask, roi_mask,
+  glv_stats, cd_measure, focus_quality,
   feature_math, feature_fill,
   output_csv, output_report, output_klarf, output_image
+
+**2026-08-25：``snr_map``（畫面上叫 Z-map）刪掉了。** 使用者：「Z-map 功能請
+先幫我完整刪掉」。代價量過：兩份 fixture recipe 有三個 `snr_map` 節點，而
+**沒有任何一張下游的卡讀它那條流**（`cd` / `glv` 讀的是 `test` 與 `diff`），
+兩份 recipe 的 score 也都不含 `snr_max` —— 所以拿掉它只是三份黃金值各少一個
+特徵欄，分數與 bin 一個都沒有動。這跟 `pattern_ref` 那次不一樣（那次
+rsem route 的準確率從 24/24 掉到 12/24）。
+
+⚠ ``d4t/core/algo/snr.py`` **不刪**。它的呼叫者確實只剩測試，但 `snr_signed`
+是**帶正負號那個慣例的規範出處** —— GLV 卡的 `snr` 統計量照它做，而
+`tests/test_steps.py` 就在斷言它還在。同一條規矩 `algo/period.py` 與
+`algo/golden.py` 已經寫過一次（見 `d4t/ui/scope.py`）。
 
 **2026-08-20（F16）：``pattern_ref`` 刪掉了。** 使用者：「Compare 中
 pattern_ref 這項功能完全沒用，請直接拿掉」。
@@ -46,16 +59,19 @@ from . import tone           # tone（亮度/對比/gamma/曲線/反相）
 from . import flatten        # flatten
 from . import align          # align
 from . import arith          # subtract / invert
-from . import snr_map        # snr_map
 from . import roi_cross      # roi_cross
 from . import align_to       # 小圖在大圖裡的位置（F15-C）
 from . import pair_source    # 另一份資料的對應那一顆（F15）
 from . import roi_from_mask  # GDS label map -> 具名區域
 from . import roi_mask       # roi_mask（區域 → 0/255 mask 影像流，F8c）
 from . import roi_template   # roi_template
-from . import cd             # cd_measure
-from . import quality        # focus_quality
-from . import glv_stats      # glv_stats（Gray level：stats / compare）
+# ⚠ **Measure 段的順序就是這三行的順序**（使用者 2026-08-25：「Measure 的 card
+# 順序幫我改命名&重排：GLV → CD → Focus index」）。`list_steps` 照 REGISTRY 的
+# 插入序回，而 REGISTRY 的插入序就是這裡的 import 序 —— 卡片庫裡看到的先後
+# 住在這四行，不住在任何一張卡上。
+from . import glv_stats      # glv_stats（GLV：stats / compare）
+from . import cd             # cd_measure（CD）
+from . import quality        # focus_quality（Focus index）
 from . import feature_math   # feature_math（Algo 段：數字 → 數字）
 from . import feature_fill   # feature_fill（Algo 段：量不到的那一格）
 from . import output         # Output 段（csv / report / klarf / image）

@@ -157,12 +157,11 @@ def recipe_for(key: str, sparse: bool = False,
 
     nodes = {"load": RecipeNode("load", "load_patch", node_params("load_patch"))}
     route = ["load"]
-    if reads & {"diff", "snr_map"}:
+    # `snr_map`（Z-map）2026-08-25 刪掉之後，**沒有任何一張卡再讀那條流**了
+    # —— 所以這裡只剩 `diff` 要有人產。
+    if "diff" in reads:
         nodes["sub"] = RecipeNode("sub", "subtract", node_params("subtract"))
         route.append("sub")
-    if "snr_map" in reads:
-        nodes["snr"] = RecipeNode("snr", "snr_map", node_params("snr_map"))
-        route.append("snr")
     if key not in nodes:
         nodes[key] = RecipeNode(key, key, params)
         route.append(key)
@@ -454,7 +453,11 @@ def test_the_declaration_check_is_not_vacuous(dataset):
         step.run(ctx, step.validate_params(params))
         if rec.reads:
             checked += 1
-    assert checked >= 12, "只有 %d 張卡真的讀了影像流，這組測試沒測到什麼" % checked
+    # ⚠ **這個下限 2026-08-25 從 12 降到 11，因為卡片庫少了一張**
+    #（`snr_map` / Z-map 刪掉了）。降下限是**唯一**誠實的改法：這一條問的是
+    # 「這組測試有沒有真的測到東西」，而不是「卡片有幾張」——
+    # 把它留在 12 只會逼出「找一張卡湊數」，而那時它就不再擋得住任何事。
+    assert checked >= 11, "只有 %d 張卡真的讀了影像流，這組測試沒測到什麼" % checked
 
 
 # --------------------------------------------------------------------------- #

@@ -521,9 +521,9 @@ def pick_rule_specs(section: str) -> List[ParamSpec]:
             section=section, label="Judge on",
             show_when=("pick", ("strongest",)),
             help=("Which image stream to judge the signal on - drag a line "
-                  "from the difference image or from the Z-map. The box whose "
-                  "brightest 3x3 patch is highest wins. Leave nothing wired "
-                  "and the card falls back to the middle one and says so."),
+                  "from the difference image. The box whose brightest 3x3 "
+                  "patch is highest wins. Leave nothing wired and the card "
+                  "falls back to the middle one and says so."),
         ),
     ]
 

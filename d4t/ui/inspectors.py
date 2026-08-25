@@ -1339,7 +1339,7 @@ class GlvInspector(Inspector):
       而 patch 的 ROI 常常只有幾百個像素
     """
 
-    title = "Gray level"
+    title = "GLV"          # 跟卡片庫上的名字一致（2026-08-25 改名）
 
     #: 一次畫幾條分布。面板不高，四條以上每一條就只剩幾個畫素。
     MAX_ROWS = 3

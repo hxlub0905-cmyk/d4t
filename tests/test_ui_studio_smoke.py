@@ -88,7 +88,7 @@ def _loaded(window, synlot):
 def test_window_constructs_with_library_cards(window):
     assert window.windowTitle().startswith("d4t Studio")
     # 卡片庫用的是真實 registry，不是手捏假資料
-    assert window.library.entry("snr_map") is not None
+    assert window.library.entry("glv_stats") is not None
     assert window.library.entry("load_patch") is not None
     # 同 tests/test_ui_widgets.py：順序的出處是 LibraryPanel.GROUPS，不要再抄一份。
     from d4t.ui.widgets import LibraryPanel
@@ -142,7 +142,11 @@ def test_load_dataset_and_recipe(window, synlot):
     summary = window.pipeline.score_summary_text()
     assert "decision tree" in summary and "question" in summary
     # 節點摘要 = 非預設參數的 k=v（最多 3 個）—— F7-6 起節點是自繪圖元
-    assert "window=15" in window.pipeline.card("snr").info["summary"]
+    # 摘要 = **非預設**參數的 k=v。以前這裡指著 `snr` 的 `window=15`；
+    # 那張卡（Z-map）2026-08-25 刪掉了，而影像段剩下的幾張在這份 fixture 裡
+    # 全部吃預設值 —— 摘要因此是空的（那是對的，不是壞的）。改指真的有
+    # 非預設參數的那一張。
+    assert "target=bright" in window.pipeline.card("cd").info["summary"]
 
 
 # --------------------------------------------------------------------------- #
@@ -151,23 +155,25 @@ def test_load_dataset_and_recipe(window, synlot):
 def test_select_node_and_preview(window, synlot):
     _loaded(window, synlot)
 
-    assert window.select_node("snr") is True
-    assert window.selected_node == "snr"
-    assert window.pipeline.selected() == "snr"
+    assert window.select_node("dn") is True
+    assert window.selected_node == "dn"
+    assert window.pipeline.selected() == "dn"
     assert window.stack.currentWidget() is window.param_form
-    assert window.param_form.step_key() == "snr_map"
+    assert window.param_form.step_key() == "denoise"
 
     assert window.refresh_preview(sync=True) is True
     assert window.image_view.has_image() is True
 
     streams = [window.stream_combo.itemText(i)
                for i in range(window.stream_combo.count())]
-    assert "snr_map" in streams and "test" in streams
-    # 選了 snr 節點 → 預設看它寫出來的那條流
-    assert window.stream_combo.currentText() == "snr_map"
+    assert "diff" in streams and "test" in streams
+    # 選了 dn 節點 → 預設看它寫出來的那條流
+    assert window.stream_combo.currentText() == "diff"
 
     assert window.feature_table.rowCount() > 0
-    assert "snr_max" in window.feature_table.feature_names()
+    # 特徵表看的是**跑到這一個節點為止**算出來的東西 —— `dn` 是影像段的卡，
+    # 所以這裡該有的是它自己那一個，不是後面量測卡的 `glv_*`。
+    assert "removed_over_noise" in window.feature_table.feature_names()
 
     # 換一條影像流，畫面要跟著換（不用重跑 pipeline）
     window.stream_combo.setCurrentText("test")
@@ -222,20 +228,20 @@ def test_compare_shows_two_streams_with_linked_zoom_and_pan(window, synlot):
 # --------------------------------------------------------------------------- #
 def test_param_edit_valid_then_invalid(window, synlot):
     _loaded(window, synlot)
-    assert window.select_node("snr") is True
+    assert window.select_node("dn") is True
 
-    window._on_param_edited("window", 21)
-    assert window.model.nodes["snr"].params["window"] == 21
-    assert window.param_form.has_error("window") is False
+    window._on_param_edited("ksize", 5)
+    assert window.model.nodes["dn"].params["ksize"] == 5
+    assert window.param_form.has_error("ksize") is False
 
-    window._on_param_edited("window", 15)
-    assert window.model.nodes["snr"].params["window"] == 15
+    window._on_param_edited("ksize", 3)
+    assert window.model.nodes["dn"].params["ksize"] == 3
 
-    # 999 超過 ParamSpec 上限 201 → 不可以丟例外，該列要變紅字，值不落地
-    window._on_param_edited("window", 999)
-    assert window.model.nodes["snr"].params["window"] == 15
-    assert window.param_form.has_error("window") is True
-    assert "maximum" in window.param_form.hint_text("window")
+    # 999 超過 ParamSpec 上限 15 → 不可以丟例外，該列要變紅字，值不落地
+    window._on_param_edited("ksize", 999)
+    assert window.model.nodes["dn"].params["ksize"] == 3
+    assert window.param_form.has_error("ksize") is True
+    assert "maximum" in window.param_form.hint_text("ksize")
 
     # 再改一個合法值 → 錯誤狀態清掉
     window._on_param_edited("window", 15)
@@ -348,8 +354,8 @@ def test_the_model_converts_to_a_runnable_recipe(window, synlot):
     assert again == rec
     assert again.score.threshold == pytest.approx(window.model.threshold)
     assert sorted(again.nodes) == sorted(window.model.nodes)
-    assert again.nodes["snr"].params["window"] == \
-        window.model.nodes["snr"].params["window"]
+    assert again.nodes["dn"].params["ksize"] == \
+        window.model.nodes["dn"].params["ksize"]
 
 
 # --------------------------------------------------------------------------- #

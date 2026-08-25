@@ -76,13 +76,13 @@ def test_layout_puts_each_node_at_its_topological_depth(qapp):
 def test_canvas_shows_every_node_of_the_recipe(window):
     assert window.pipeline.node_ids() == window.model.node_order
     assert len(window.pipeline.node_ids()) > 3
-    assert window.pipeline.card("snr") is not None
+    assert window.pipeline.card("dn") is not None
 
 
 def test_selecting_a_node_on_the_canvas_drives_the_param_form(window):
-    assert window.select_node("snr") is True
-    assert window.pipeline.selected() == "snr"
-    assert window.param_form.step_key() == "snr_map"
+    assert window.select_node("dn") is True
+    assert window.pipeline.selected() == "dn"
+    assert window.param_form.step_key() == "denoise"
 
 
 # --------------------------------------------------------------------------- #

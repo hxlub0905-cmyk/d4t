@@ -1356,6 +1356,7 @@ class StudioWindow(QMainWindow):
         view.decision_clicked.connect(self.show_score_page)
         # 分流徽章（F25-B）：點了去編 route_by（它就在判定欄的最上面）。
         view.prefilter_clicked.connect(self.show_score_page)
+        view.decision_remove_requested.connect(self.remove_decision)
         # 判定樹的菱形／托盤（F24 ③）：右欄變成那一步／那一類的編輯面板。
         view.tree_step_clicked.connect(self._on_tree_step_clicked)
         view.tree_leaf_clicked.connect(self._on_tree_step_clicked)
@@ -3223,6 +3224,36 @@ class StudioWindow(QMainWindow):
         for w in (self.histogram, self.image_view, self.verdict,
                   self.feature_table, self.library, self.pipeline, self.gallery):
             w.update()
+
+    def remove_decision(self) -> bool:
+        """把整個判定拿掉（畫布上判定區右上角那顆 ✕，2026-08-25）。
+
+        使用者：「ADC 也要能在原畫布上拖曳 移除」。
+
+        **先問過**：底下掛著使用者自己畫的整棵樹，而一顆 ✕ 的重量看起來跟
+        刪一張卡一樣 —— `_remove_step` 對「yes 邊掛著一整個子樹」講過同一句話。
+        復原回得來（`use_decide` 自己會 `_push_undo`），但「一個 ✕ 把三層樹
+        默默吃掉」不是一顆按鈕該有的重量。
+        """
+        m = self.model
+        if getattr(m, "decide", None) is None:
+            return False
+        from .tree_scene import display_tree, layout_cells
+
+        n_class = sum(1 for c in layout_cells(display_tree(m.decide), m.decide)
+                      if c.get("kind") == "leaf")
+        answer = QMessageBox.question(
+            self, "Remove the decision?",
+            "This takes the whole decision off the canvas - %d class%s and "
+            "every question that sorts into them.\n\nUndo brings it back."
+            % (n_class, "" if n_class == 1 else "es"),
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+        if answer != QMessageBox.Yes:
+            return False
+        m.use_decide(False)
+        self.show_param_page()
+        self._status("Decision removed. Undo brings it back.")
+        return True
 
     def show_score_page(self) -> None:
         """切到分數編輯頁（順便刷新特徵下拉）。"""

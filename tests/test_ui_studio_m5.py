@@ -153,7 +153,7 @@ def test_gallery_populates_after_trial(ran):
     # 排序欄位 = score + 這批真的量到的特徵
     keys = window.gallery.sort_keys()
     assert keys[0] == "score"
-    assert "snr_max" in keys
+    assert "glv_max" in keys
     assert "defect_id" in keys
     feats = set()
     for r in window.trial_results:

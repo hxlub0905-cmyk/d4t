@@ -807,19 +807,19 @@ def test_the_gray_level_tab_says_what_it_is_showing(qapp):
         return insp
 
     plain = run()
-    assert plain.tab_title() == "Gray level · epi on test"
+    assert plain.tab_title() == "GLV · epi on test"
 
     beside = run(reference="another region", reference_region="mg",
                  compare_metrics="delta")
-    assert beside.tab_title() == "Gray level · epi vs mg"
+    assert beside.tab_title() == "GLV · epi vs mg"
 
     across = run(reference="another region on another stream",
                  reference_source="ref", reference_region="mg",
                  compare_metrics="delta")
-    assert across.tab_title() == "Gray level · epi vs mg @ ref"
+    assert across.tab_title() == "GLV · epi vs mg @ ref"
     assert "compared against mg @ ref" in across.tab_tooltip()
     assert "glv_median" in across.tab_tooltip(), "tooltip 要說出在顯示哪幾個"
 
     # 沒資料的時候退回類別的名字（分頁鈕不能是空的）
     empty = insp_mod.GlvInspector()
-    assert empty.tab_title() == "Gray level"
+    assert empty.tab_title() == "GLV"

@@ -360,7 +360,9 @@ def leaf_hex(bin_: int) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# 圖元（全部唯讀：不可拖、不可刪 —— 樹是一個結構，不是幾張散卡）
+# 圖元（**裡面的**全部唯讀：不可拖、不可刪 —— 樹是一個結構，不是幾張散卡。
+# 2026-08-25 起**整個判定區**拖得動也拿得掉，把手是外框 `_ZoneItem`：
+# 動的是整區的位置，樹的形狀一個位元都沒變。）
 # --------------------------------------------------------------------------- #
 _ENTRY_W, _ENTRY_H = 204.0, 56.0
 _DIA_W, _DIA_H = 156.0, 64.0
@@ -381,20 +383,98 @@ def _elide(p: QPainter, rect: QRectF, text: str, align=Qt.AlignLeft) -> None:
     p.drawText(rect, Qt.AlignVCenter | align, s)
 
 
+#: ✕ 那顆鈕的大小與它離右上角的距離。
+_CLOSE_R = 8.0
+_CLOSE_INSET = 14.0
+
+
 class _ZoneItem(QGraphicsItem):
     """判定區的底：淡紫底、虛線框、DECISION 標題、左緣的 ``numbers →`` 提示。
 
     量測卡到判定區之間**刻意沒有存的線**（引擎裡數字是一張全域的表，
     畫一條存起來的線就是說謊）—— 只有這一句淡淡的提示。
+
+    **它同時是整個判定區的把手**（2026-08-25，使用者：「ADC 也要能在原畫布上
+    拖曳 移除」）。拖的是**整區**，不是裡面某一個菱形 —— 樹是一個結構，
+    把某一步單獨拖走只會讓畫面說一句樹上沒有的話。所以：
+
+    * 在框上（不是在卡片上）按住拖 → 整區跟著走；
+    * 右上角一顆 ✕ → 請畫布問「要拿掉整個判定嗎」。
+
+    位置**不寫進 recipe**，跟卡片的位置同一個待遇（見 `canvas` 模組說明）——
+    所以拖它不會讓檔案變髒，`Tidy up` 也把它一起排回去。
     """
 
-    def __init__(self, rect: QRectF):
+    def __init__(self, rect: QRectF, canvas: Any = None):
         super().__init__()
         self._rect = QRectF(rect)
+        self._canvas = canvas
+        self._drag_from: Optional[QPointF] = None
+        self._hover_close = False
         self.setZValue(-3.0)          # 墊在所有東西（含連線 -1）底下
+        if canvas is not None:
+            self.setAcceptHoverEvents(True)
+            self.setCursor(Qt.OpenHandCursor)
+
+    # ---- ✕ 的位置（畫與打到都用這一個，不要算兩次）----------------------
+    def _close_centre(self) -> QPointF:
+        return QPointF(self._rect.right() - _CLOSE_INSET,
+                       self._rect.top() + _CLOSE_INSET)
+
+    def _on_close(self, pos: QPointF) -> bool:
+        d = pos - self._close_centre()
+        return (d.x() * d.x() + d.y() * d.y()) <= (_CLOSE_R + 3.0) ** 2
 
     def boundingRect(self) -> QRectF:
         return self._rect.adjusted(-84.0, -24.0, 4.0, 4.0)
+
+    # ---- 互動 -------------------------------------------------------------
+    def hoverMoveEvent(self, e) -> None:        # noqa: N802 — Qt
+        on = self._on_close(e.pos())
+        if on != self._hover_close:
+            self._hover_close = on
+            self.setCursor(Qt.ArrowCursor if on else Qt.OpenHandCursor)
+            self.update()
+        super().hoverMoveEvent(e)
+
+    def hoverLeaveEvent(self, e) -> None:       # noqa: N802 — Qt
+        if self._hover_close:
+            self._hover_close = False
+            self.update()
+        super().hoverLeaveEvent(e)
+
+    def mousePressEvent(self, e) -> None:       # noqa: N802 — Qt
+        if self._canvas is None or e.button() != Qt.LeftButton:
+            super().mousePressEvent(e)
+            return
+        if self._on_close(e.pos()):
+            e.accept()
+            return                              # 真的拿掉在 release（同按鈕慣例）
+        self._drag_from = e.scenePos()
+        self.setCursor(Qt.ClosedHandCursor)
+        e.accept()
+
+    def mouseMoveEvent(self, e) -> None:        # noqa: N802 — Qt
+        if self._drag_from is None:
+            super().mouseMoveEvent(e)
+            return
+        delta = e.scenePos() - self._drag_from
+        self._drag_from = e.scenePos()
+        # **就地移動整區**（不重建）：重建會把滑鼠從把手上搶走，
+        # 而那正是 F26 在拖門檻時學到的同一條。
+        self._canvas.move_decision_by(delta.x(), delta.y())
+        e.accept()
+
+    def mouseReleaseEvent(self, e) -> None:     # noqa: N802 — Qt
+        was_dragging = self._drag_from is not None
+        self._drag_from = None
+        self.setCursor(Qt.OpenHandCursor)
+        if (self._canvas is not None and e.button() == Qt.LeftButton
+                and not was_dragging and self._on_close(e.pos())):
+            self._canvas.decision_remove_requested.emit()
+            e.accept()
+            return
+        super().mouseReleaseEvent(e)
 
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         p.setRenderHint(QPainter.Antialiasing, True)
@@ -424,6 +504,23 @@ class _ZoneItem(QGraphicsItem):
         p.drawText(QRectF(self._rect.left() - 80, self._rect.top() + 20,
                           72, 16), Qt.AlignRight | Qt.AlignVCenter,
                    "numbers →")
+
+        # 右上角那顆 ✕：拿掉整個判定（2026-08-25）。
+        # **只有畫布接得住的時候才畫** —— 畫一顆按不動的鈕比沒有那顆鈕更糟。
+        if self._canvas is not None:
+            c = self._close_centre()
+            if self._hover_close:
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(TOKENS["danger_bg"]))
+                p.drawEllipse(c, _CLOSE_R, _CLOSE_R)
+            pen = QPen(QColor(TOKENS["danger_text"] if self._hover_close
+                              else TOKENS["text_secondary"]), 1.4)
+            pen.setCapStyle(Qt.RoundCap)
+            p.setPen(pen)
+            p.setBrush(Qt.NoBrush)
+            r = _CLOSE_R * 0.45
+            p.drawLine(QPointF(c.x() - r, c.y() - r), QPointF(c.x() + r, c.y() + r))
+            p.drawLine(QPointF(c.x() - r, c.y() + r), QPointF(c.x() + r, c.y() - r))
 
 
 class _EntryItem(QGraphicsItem):
@@ -857,7 +954,7 @@ def build_zone(scene: Any, canvas: Any,
     rect = QRectF()
     for it in items:
         rect = rect.united(it.sceneBoundingRect())
-    zone = _ZoneItem(rect.adjusted(-_PAD, -_PAD, _PAD, _PAD))
+    zone = _ZoneItem(rect.adjusted(-_PAD, -_PAD, _PAD, _PAD), canvas)
     scene.addItem(zone)
     items.append(zone)
     return items

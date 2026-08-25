@@ -326,7 +326,11 @@ class GlvStatsStep(MultiSourceStep):
 
     key = "glv_stats"
     #: ``key`` 不動（recipe 的鍵）。短名是使用者要的（F16）。
-    label = "Gray level"
+    # ⚠ **只有 `label` 換掉**（使用者 2026-08-25：「Measure 的 card 順序幫我
+    # 改命名&重排：GLV → CD → Focus index」）。`key`（`glv_stats`）是 recipe
+    # 的鍵、`glv_*` 是分數表達式裡的變數名 —— 兩者都不准動，那是 §5 那張表裡
+    # 「只改 label」跟「改名」的差別（前者零代價，後者要一道遷移）。
+    label = "GLV"
     category = CATEGORY_ALGO
     group = GROUP_MEASURE
     help = ("Gray levels of a region: pick the statistics you want (median, "

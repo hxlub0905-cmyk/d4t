@@ -75,7 +75,7 @@ def test_recipe_has_both_routes_and_validates(recipe):
 def test_both_routes_end_in_the_same_adc(recipe):
     """兩條 route 共用的是 **ADC 那一段**：同一條分數表達式、同一個門檻。
 
-    F16 之前這裡斷言的是「影像段也共用」（align / sub / dn / snr / cd 五個節點）
+    F16 之前這裡斷言的是「影像段也共用」（align / sub / dn / cd 四個節點）
     —— 那件事靠的是 `pattern_ref` 幫 rsem 造一張 ref 出來，讓它也走得了相減
     那條路。那張卡拿掉之後**那句話就不成立了**，而 recipe 只剩一個共用點：
     `score`。
@@ -156,5 +156,5 @@ def test_the_rsem_route_measures_the_single_image_directly(recipe, rsem_lot):
         "rsem 這條 route 不該有 ref/diff（沒有卡片造得出來）：%s" % sorted(ctx.images)
     assert "test" in ctx.images, sorted(ctx.images)
     # 量出來的東西要真的來自那張圖（Z-map 的峰值不是常數）
-    assert "snr_max" in res.features
+    assert "glv_median" in res.features
     assert res.features["glv_std"] > 0.0

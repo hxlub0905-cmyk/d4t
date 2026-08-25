@@ -1131,6 +1131,9 @@ class PipelineCanvas(QGraphicsView):
     #: 點了判定區的入口小卡（F24 ②）——「跳到判定的編輯」。
     #: 入口卡永遠恰好一個、不能刪，所以這裡沒有 id 要帶。
     decision_clicked = Signal()
+    #: 使用者按了判定區右上角那顆 ✕（2026-08-25）。畫布只**請**，
+    #: 要不要真的拿掉由 Studio 決定（底下掛著一整棵樹，要問過）。
+    decision_remove_requested = Signal()
     #: 點了畫布上的分流徽章（F25-B）—— 去編 route_by。
     prefilter_clicked = Signal()
     #: 點了判定樹的一個菱形／托盤（F24 ③）—— 帶的是**路徑**（"" = 根、
@@ -1398,13 +1401,19 @@ class PipelineCanvas(QGraphicsView):
         info = getattr(self, "_decision_info", None)
         if not info:
             return
-        # 判定區放在所有卡片的右邊（mockup 定稿：畫布右側一塊淡紫區）。
+        # 判定區放在所有卡片的右邊（mockup 定稿：畫布右側一塊淡紫區），
+        # 再加上使用者自己拖出來的位移（2026-08-25）。
+        #
+        # **位移是 session 狀態，不進 recipe** —— 跟卡片的位置一模一樣的待遇
+        # （見模組 docstring）。所以拖它不會讓檔案變髒，也不必進復原堆疊，
+        # 而 `tidy()` 會把它跟卡片一起排回去。
         right = 0.0
         top = 0.0
         for item in self._items.values():
             right = max(right, item.pos().x() + NODE_W)
             top = min(top, item.pos().y())
-        origin = QPointF(right + COL_GAP * 1.8, top)
+        off = getattr(self, "_tree_offset", None) or QPointF(0.0, 0.0)
+        origin = QPointF(right + COL_GAP * 1.8 + off.x(), top + off.y())
         self._tree_items = tree_scene.build_zone(
             self._scene, self, info, origin,
             collapsed=bool(getattr(self, "_tree_collapsed", False)),
@@ -1416,6 +1425,30 @@ class PipelineCanvas(QGraphicsView):
     def decision_items(self) -> List[Any]:
         """判定區現在的圖元（測試與外部檢查用）。"""
         return list(getattr(self, "_tree_items", []) or [])
+
+    # ---- 拖整個判定區（2026-08-25）----------------------------------------
+    def move_decision_by(self, dx: float, dy: float) -> None:
+        """把整個判定區平移 ``(dx, dy)``。
+
+        **就地搬每一個圖元，不重建**：重建會把滑鼠從把手上搶走（拖到一半突然
+        失去控制比慢一點更難用 —— F26 在拖門檻時學到同一條）。累積的位移記在
+        `_tree_offset`，下一次真的重建時 `_rebuild_decision` 會把它加回去。
+        """
+        off = getattr(self, "_tree_offset", None) or QPointF(0.0, 0.0)
+        self._tree_offset = QPointF(off.x() + float(dx), off.y() + float(dy))
+        for it in getattr(self, "_tree_items", []) or []:
+            it.moveBy(float(dx), float(dy))
+        rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
+        self._scene.setSceneRect(self._scene.sceneRect().united(rect))
+
+    def decision_offset(self) -> QPointF:
+        """使用者把判定區拖了多遠（測試用）。"""
+        return QPointF(getattr(self, "_tree_offset", None) or QPointF(0.0, 0.0))
+
+    def reset_decision_offset(self) -> None:
+        """把判定區排回自動的位置（`tidy()` 會叫它）。"""
+        self._tree_offset = QPointF(0.0, 0.0)
+        self._rebuild_decision()
 
     # ---- 分流徽章（F25-B）-------------------------------------------------
     def set_prefilter(self, info: Optional[Dict[str, Any]]) -> None:
@@ -1731,6 +1764,10 @@ class PipelineCanvas(QGraphicsView):
         for nid, item in self._items.items():
             col, row = pos.get(nid, (0, 0))
             item.setPos(col * (NODE_W + COL_GAP), row * pitch)
+        # 判定區也是「拖得動的東西」，所以 Tidy up 也要把它排回去 ——
+        # 只排一半的整理，下一次還是得自己搬。
+        self._tree_offset = QPointF(0.0, 0.0)
+        self._rebuild_decision()
         self.refresh_edges()
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self._scene.setSceneRect(rect)

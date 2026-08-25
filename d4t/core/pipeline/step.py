@@ -458,10 +458,15 @@ class ParamSpec:
                     # 直接丟 ParamError —— 下面那個通用的 except 會把
                     # 「為什麼壞」蓋成「converted to region_key」（鐵則 4：
                     # 擋下來的那句話要是白話的）。
+                    # ⚠ **卡片的名字從 REGISTRY 問，不要寫死。**
+                    # 這一句以前寫死「Gray level」，而 2026-08-25 那張卡改叫
+                    # GLV —— 一句擋在使用者面前的錯誤訊息因此指著一張畫面上
+                    # 不存在的卡。`tests/test_glv_compare.py` 當場抓到了，
+                    # 而它抓得到正是因為它問的是 `label` 而不是那串字。
                     raise ParamError(
                         "parameter '%s' takes one region name, not a list "
-                        "(got %r). Use one Gray level card per pair."
-                        % (self.name, str(value)))
+                        "(got %r). Use one %s card per pair."
+                        % (self.name, str(value), _label_of("glv_stats")))
             elif self.type in ("image_keys", "multi_choice", "metric_chips",
                                "region_keys"):
                 # 正規化：去空白、去空項、去重複但保留順序。
@@ -918,6 +923,16 @@ class Step(ABC):
 # Registry
 # ---------------------------------------------------------------------------
 REGISTRY: Dict[str, Type[Step]] = {}
+
+
+def _label_of(key: str) -> str:
+    """一張卡**現在**畫面上叫什麼；認不得就退回 key。
+
+    給錯誤訊息用：一句話裡提到另一張卡的時候，名字要跟卡片庫上的一致。
+    寫死的話，那張卡改名的那一天這句話就開始指著一個不存在的東西。
+    """
+    cls = REGISTRY.get(str(key))
+    return str(getattr(cls, "label", "") or key)
 
 
 def register_step(cls: Type[Step]) -> Type[Step]:
