@@ -312,9 +312,14 @@ def _draw_roi_boxes(panel: np.ndarray, roi_boxes, roi_winner: int) -> None:
         if i != roi_winner:
             _draw_box(panel, _px(nb), color=ROI_BOX_COLOR, thick=1)
     if 0 <= roi_winner < len(boxes):
+        px = _px(boxes[roi_winner])
         thick = 2 if min(h, w) < 192 else 3
-        _draw_box(panel, _px(boxes[roi_winner]), color=ROI_WINNER_COLOR,
-                  thick=thick)
+        # 粗線不准吃掉框的內部：cv2 的線是騎在邊上畫的（往內外各長一半），
+        # 一格只有幾 px 寬時 3 px 的四條邊會把整格塗滿 —— 於是 T3 的像素
+        # 染色（畫在框**底下**）整片被蓋住，贏家框變成一顆實心色塊。
+        # 實測（384²、~500 框、贏家 5×9 px）：染了 32 px、畫完框一個都看不見。
+        thick = max(1, min(thick, (min(px[2], px[3]) - 1) // 3))
+        _draw_box(panel, px, color=ROI_WINNER_COLOR, thick=thick)
 
 
 def _draw_label(panel: np.ndarray, label: str) -> None:

@@ -5,7 +5,7 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 b7de91c3029b706bf544976890dcf876cabb5a6b CLAUDE.md
 6adcf70fd5d443f757d78b4d337e1866a9af3ed7 README.md
-d33dd4f584a7ff02ba73d5692d2bcd00093ba08d SESSION_LOG.md
+fa1ce5dcbca559c84a81b14cd7b328cb05936eb2 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -34,7 +34,7 @@ e1f7a95ad976983aa0f1f16b7bd52cdcc67494dd d4t/core/algo/subpixel.py
 78924f0edd38b3d96346542c63372c7fee679a91 d4t/core/export/__init__.py
 db57a3c6edf2c820287f7671be06d10d16816d52 d4t/core/export/html.py
 a4a93fb5fc256c767f2c31f387f7ab4962b5868d d4t/core/export/klarf_out.py
-e913f3d366fcebe23cf70b556442b3374118750c d4t/core/export/overlay.py
+29ddf4a594809b86beb299389ec5a5d5523771de d4t/core/export/overlay.py
 ab5031e7056134aa94c5551aba9b80a774b6397a d4t/core/export/report.py
 4599be07de9d76b7a008bdc400e22cfaa0c7acd2 d4t/core/ingest/__init__.py
 987ec64e2830c1e9e7ee535c3aa91e020f5bd0be d4t/core/ingest/dataset.py
@@ -165,7 +165,7 @@ c2f7df52f855141ec0c0b85e71faa3a821ae31f5 tests/test_docs_links.py
 8b0ab7fe7dae38c1494a5e162ccdbcaf1f4bf553 tests/test_engine.py
 418fc5470ce715a88c0c5983ae40a59b19600974 tests/test_enhance.py
 5bcbc5d88b74b990dac7d69874664cc9ca5617fe tests/test_export_klarf.py
-fbdcd0a460bbe0cce50922d7dec67d4bc3a9f12c tests/test_export_overlay.py
+34b03d1bea05ae4d8ee4b621e178762e02867792 tests/test_export_overlay.py
 305b78487054af80ea56c569548c997f82c12bf4 tests/test_export_parity.py
 ed412883e22f01db1c0bb3eb0cec4e24dd093ad9 tests/test_export_report.py
 2415c6f4229d2d8ff5044b35cdde8560d3bcd8c2 tests/test_expression.py

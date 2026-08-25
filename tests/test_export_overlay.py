@@ -497,6 +497,31 @@ def test_marking_writes_no_feature_and_no_region():
     assert "blobs" not in ctx.meta
 
 
+def test_the_winner_outline_does_not_swallow_the_tint_on_a_tiny_box():
+    """實測踩到的：384²、~500 框時贏家框只有 5×9 px，3 px 的粗描邊
+    （cv2 的線騎在邊上、往內外各長一半）把整格塗滿 —— T3 染的 32 個像素
+    一個都看不見，贏家框變成一顆實心色塊。粗細要讓路給框的內部。"""
+    img = np.full((384, 384), 100, np.uint8)
+    box = (0.30, 0.30, 5 / 384.0, 9 / 384.0)      # 實測那顆的尺寸
+    x0, y0 = int(0.30 * 384), int(0.30 * 384)
+    img[y0:y0 + 9, x0:x0 + 5] = 180               # 整格偏亮 → 全部該染
+    plain = overlay.render_overlay({"test": img}, {}, montage=False)
+    boxed = overlay.render_overlay({"test": img}, {}, montage=False,
+                                   roi_boxes=[box], roi_winner=0)
+    both = overlay.render_overlay({"test": img}, {}, montage=False,
+                                  roi_boxes=[box], roi_winner=0,
+                                  odd_pixels=_odd(img, box=box))
+    assert boxed.tobytes() != plain.tobytes()      # 框有畫
+    assert both.tobytes() != boxed.tobytes()       # 染色沒有被描邊整片蓋掉
+    # 大框不受影響：描邊照舊是粗的（跟細的其餘框分得出來）
+    big = (0.1, 0.1, 0.5, 0.5)
+    a = overlay.render_overlay({"test": img}, {}, montage=False,
+                               roi_boxes=[big], roi_winner=0)
+    b = overlay.render_overlay({"test": img}, {}, montage=False,
+                               roi_boxes=[big], roi_winner=-1)
+    assert a.tobytes() != b.tobytes()
+
+
 def test_a_missing_source_stream_marks_nothing():
     img = np.full((64, 64), 100, np.uint8)
     img[30:34, 30:34] = 250
