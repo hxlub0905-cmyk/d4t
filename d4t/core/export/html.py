@@ -19,6 +19,12 @@
 load，光是 DOM 節點就會讓瀏覽器很鈍。改成**點一列 → 右邊那一格換圖**，
 整份報表從頭到尾只有**一個** ``<img>``。
 
+**而 characterization 那一份剛好相反**（:func:`build_char_report`，F33）：
+那種批次是三十顆，使用者要的是「一一對應」—— 圖跟數字在同一列上，一眼掃完。
+點一列換一張圖答不出那句話，因為任何一個時刻畫面上只有一顆。上面那個取捨的
+每一項在幾十顆的規模都反過來，所以它是**第二支函式**（共用這裡的 CSS／跳脫／
+判定那一段），而不是這一支的一個旗標。
+
 ⚠ **圖是相對路徑，不是 base64。** 6000 張 JPEG 嵌進 HTML 是 ~76 MB 的一個
 檔案（而 PNG 是 566 MB）；擺成 ``images/<id>.jpg`` 的話報表本身約 3 MB，
 瀏覽器一次只載看得到的那一張。代價是「一個資料夾而不是一個檔案」——
@@ -39,8 +45,8 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from ..pipeline import decide_tree
 
-__all__ = ["build_report", "write_html", "escape", "number",
-           "bin_summary", "CSS", "NUISANCE_HEX"]
+__all__ = ["build_report", "build_char_report", "write_html", "escape",
+           "number", "bin_summary", "CSS", "NUISANCE_HEX"]
 
 #: bin 0（慣例上的 nuisance）在報表上的顏色 —— **跟 core 那一份同一個**
 #: （畫面上會換成主題的 `theme.TOKENS["seg_disabled"]`）。
@@ -69,6 +75,12 @@ tr.pick td{outline:2px solid #3574d6;outline-offset:-2px}
 .viewer{position:sticky;top:0;flex:0 0 auto}
 .viewer img{max-width:520px;border:1px solid #ddd;display:block}
 .viewer .cap{font-size:12px;color:#666;margin:4px 0 0}
+td.shot{text-align:center;padding:4px}
+td.shot img{max-width:180px;max-height:180px;border:1px solid #ddd;display:block}
+td.shot a{display:block}
+td.none{color:#999;font-style:italic;text-align:center}
+td.verdict{text-align:left}
+.chip{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px}
 """
 
 
@@ -219,6 +231,95 @@ def build_report(rows: Sequence[Dict[str, Any]], title: str,
         out.append("</div><div class='viewer'><img id='shot' alt=''>"
                    "<p class='cap' id='shotcap'></p></div></div>")
         out.append("<script>%s</script>" % _VIEWER_JS)
+    out.append("</body></html>")
+    return "\n".join(out)
+
+
+def _thumb_cell(rel: Optional[str], alt: str) -> str:
+    """一格縮圖。**沒有圖的那一格完全不產生 ``<img>``**（F33）。
+
+    空的 ``src`` 在瀏覽器裡是一個破圖示 —— 而那一格要講的話是「這一顆在
+    另一份資料裡不存在」，那是 characterization 的結論之一，不是一個載入失敗。
+    """
+    if not rel:
+        return "<td class='none'>&mdash;</td>"
+    return ("<td class='shot'><a href='%s' target='_blank'>"
+            "<img src='%s' alt='%s' loading='lazy'></a></td>"
+            % (escape(rel), escape(rel), escape(alt)))
+
+
+def build_char_report(rows: Sequence[Dict[str, Any]], title: str,
+                      columns: Sequence[str],
+                      thumbs: Dict[Any, Dict[str, Optional[str]]],
+                      verdicts: Optional[Dict[Any, Dict[str, Any]]] = None,
+                      decide: Any = None,
+                      headings: Sequence[str] = ("ground truth", "second lot"),
+                      note: str = "") -> str:
+    """characterization 的點對點報表 —— **一顆一列，圖跟數字在同一列上**。
+
+    跟 :func:`build_report` 的差別只有一個，而那個差別就是這張卡存在的理由：
+    **縮圖直接排在列上**，不是點一列才換圖。使用者原話是「我可以一一對應
+    這樣子」—— 點一列換一張圖的版面答不出那句話，因為任何一個時刻畫面上
+    只有一顆。
+
+    那個取捨在 6000 顆時是反過來的（見模組說明），所以這是**第二張卡**而不是
+    第一張卡的一格參數：一格參數的話「這張卡長什麼樣」就有兩個答案。
+    這裡只服務幾十顆的 characterization 批次，顆數上限由卡片講出來。
+
+    ``thumbs`` 是 ``{defect_id: {"main": 相對路徑或 None, "pair": …}}``；
+    ``verdicts`` 是 ``{defect_id: decide_tree.verdict_rows 的那一列}`` ——
+    葉子的名字**不在 rows 裡**（engine 刻意不放進 CSV schema），所以由呼叫端
+    反查一次再送進來。
+    """
+    rows = list(rows or [])
+    keys = [str(c) for c in (columns or [])]
+    shots = {str(k): dict(v or {}) for k, v in (thumbs or {}).items()}
+    seats = {str(k): dict(v or {}) for k, v in (verdicts or {}).items()}
+    left, right = (list(headings) + ["ground truth", "second lot"])[:2]
+
+    bins: Dict[Any, int] = {}
+    for r in rows:
+        bins[r.get("bin")] = bins.get(r.get("bin"), 0) + 1
+    n_bad = sum(1 for r in rows if not r.get("ok"))
+
+    out = ["<!doctype html>", "<html><head><meta charset='utf-8'>",
+           "<title>%s</title>" % escape(title),
+           "<style>%s</style></head><body>" % CSS,
+           "<h1>%s</h1>" % escape(title),
+           "<p class='sub'>%d defect(s)%s &middot; bins: %s</p>"
+           % (len(rows),
+              (" &middot; <b>%d did not run</b>" % n_bad) if n_bad else "",
+              escape(bin_summary(bins)))]
+    if note:
+        out.append("<p class='cards'>%s</p>" % escape(note))
+    out += _verdict_html(decide_tree.verdict_rows(decide, rows))
+
+    out.append("<h2>2 &middot; Defect by defect</h2>")
+    out.append("<div class='tablewrap'><table><tr><th>defect</th>"
+               "<th>%s</th><th>%s</th>" % (escape(left), escape(right)))
+    out += ["<th>%s</th>" % escape(k) for k in keys]
+    out.append("<th>verdict</th></tr>")
+    for r in rows:
+        did = str(r.get("defect_id", ""))
+        pair = shots.get(did) or {}
+        cells = ["<td class='id'>%s</td>" % escape(r.get("defect_id")),
+                 _thumb_cell(pair.get("main"), "%s %s" % (did, left)),
+                 _thumb_cell(pair.get("pair"), "%s %s" % (did, right))]
+        feats = r.get("features") or {}
+        cells += ["<td>%s</td>" % number(feats.get(k)) for k in keys]
+        seat = seats.get(did) or {}
+        name = seat.get("name")
+        if name:
+            cells.append("<td class='verdict'><span class='chip' "
+                         "style='background:%s'></span>%s</td>"
+                         % (escape(seat.get("colour") or NUISANCE_HEX),
+                            escape(name)))
+        else:
+            cells.append("<td class='verdict'>%s</td>"
+                         % escape(r.get("error") or ""))
+        out.append("<tr%s>%s</tr>"
+                   % ("" if r.get("ok") else " class='bad'", "".join(cells)))
+    out.append("</table></div>")
     out.append("</body></html>")
     return "\n".join(out)
 

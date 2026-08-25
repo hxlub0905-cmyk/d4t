@@ -32,7 +32,8 @@ from .klarf_out import ExportError
 
 __all__ = ["render_overlay", "write_png", "write_jpeg",
            "DEFAULT_JPEG_QUALITY", "to_display_rgb",
-           "primary_blob_box", "pick_overlay_results", "overlay_label",
+           "primary_blob_box", "pick_base", "pick_overlay_results",
+           "overlay_label",
            "rank_value", "rank_is_meaningless", "RANK_BY_SCORE",
            "overlay_filename", "OVERLAY_PREFIX", "BOX_COLOR"]
 
@@ -262,7 +263,12 @@ def rank_is_meaningless(results: Sequence[Dict[str, Any]],
                    for r in (results or []))
 
 
-def _pick_base(images: Dict[str, Any]) -> Tuple[str, np.ndarray]:
+def pick_base(images: Dict[str, Any]) -> Tuple[str, np.ndarray]:
+    """「沒有指名的時候，這一顆的圖是哪一張」——``BASE_PRIORITY`` 由前往後。
+
+    出圖的卡也要問同一個問題（`output_char` 的左邊那一格），而**答案只能有
+    一個**：兩個地方各自挑的話，同一顆 defect 在兩份輸出上會是兩張不同的圖。
+    """
     for k in BASE_PRIORITY:
         if k in images and images[k] is not None:
             return k, images[k]
@@ -526,7 +532,7 @@ def render_overlay(images: Dict[str, Any],
                     base_key, ", ".join(sorted(images))))
         base = images[base_key]
     else:
-        base_key, base = _pick_base(images)
+        base_key, base = pick_base(images)
 
     left = to_display_rgb(base)
     h, w = left.shape[:2]

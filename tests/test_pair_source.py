@@ -666,18 +666,29 @@ def test_a_repeating_pattern_shows_up_as_a_peak_ratio_near_one():
 # --------------------------------------------------------------------------- #
 # 9. F33：配不到的那一顆要**留下來**（③「根本沒偵測到」是一個結論，不是錯誤）
 # --------------------------------------------------------------------------- #
-def test_align_to_lets_an_unpaired_defect_through_quietly():
+@pytest.mark.parametrize("wiring", [
+    # 配對卡的圖接在哪一個埠是**使用者拉的線**決定的，兩種都要成立
+    {"template": "test", "search": "paired"},      # 大圖來自第二份
+    {"template": "paired", "search": "single"},    # ← characterization 那條
+])
+def test_align_to_lets_an_unpaired_defect_through_quietly(wiring):
     """上游沒配到 → 這張卡沒有東西可比，**安靜讓路**而不是炸。
 
     炸掉的話那一顆 `ok=False`、沒有 bin，於是 ③ 那一類從輸出裡整個消失 ——
     而 CSV 上看不出來（少了幾列，跟「本來就沒那幾顆」長得一模一樣）。
+
+    ⚠ **兩個輸入埠都要問。** characterization 那條 recipe 把第二份接在
+    ``template`` 上（小圖是 EBI 的 patch、大圖是 RSEM 空拍），所以只問
+    ``search`` 的版本在真的跑的時候，八顆裡的三顆照樣 `ok=False` ——
+    而那三顆正是要數的那一類。這一條是端對端跑出來的，不是想出來的。
     """
-    ctx = Context(images={"test": _noise(64, 64, 3)})
+    ctx = Context(images={"test": _noise(64, 64, 3),
+                          "single": _noise(64, 64, 4)})
     ctx.meta["pair_match"] = {"source": "ebi", "defect_id": "", "index": -1,
                               "dist_nm": float("nan"), "candidates": 1,
                               "out": "paired"}
-    get_step("align_to")().run(ctx, {"template": "test", "search": "paired",
-                                     "min_score": 0.3, "out": "aligned"})
+    p = dict(wiring, min_score=0.3, out="aligned")
+    get_step("align_to")().run(ctx, p)
     # 一個數字都不寫（算不出來的不寫），也不吐流
     assert "ncc_score" not in ctx.features and "align_ok" not in ctx.features
     assert "aligned" not in ctx.images
