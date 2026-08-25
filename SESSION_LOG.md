@@ -19,6 +19,36 @@
 
 ---
 
+## F31 T3：贏家框內標出異常像素 —— 只進 overlay（2026-08-25）
+
+視覺上這件事等同被刪掉的 find_defect，所以**界線先寫死**（任務書原文）：
+只進 overlay —— 不吐特徵、不生具名區域、不寫 `ctx.meta["blobs"]`。一旦它開始
+吐 `blob_x` 那一族，find_defect 就從後門長回來，而整個 F31 的設計是為了
+**只有一種框**。有一條測試守著「render 前後特徵表零新增」。
+
+### 判準不另外算一次
+
+`|pixel − baseline| / spread > k` 的 baseline / spread **逐字是 T1 算
+`worst_score` 用的那兩個數字**（GLV 留在 meta 的 `worst` note；spread 已含
+地板）。畫面跟數字各自算的話，遲早出現「圖上標紅但數字說正常」——
+Results R1 那個 bug 的形狀。所以改 GLV 的判準統計量，標出來的東西跟著變
+（測試：同一張圖、兩組 baseline/spread → 標記不同；spread 夠大 → 逐位元組
+等於不標的那張）。
+
+* 像素吃**量測那條流的原始陣列**，不是顯示用被 `to_display_rgb` 拉過值域的
+  那份 —— 判準跟數字同一份輸入。拿不到那條流、幾何對不上 → 不標（不猜）。
+* 疊層順序：像素標記最底、ROI 框中間、量測框最上。
+* `k` 是兩張出圖卡共用的一格（`Mark pixels beyond`，單位 σ，預設 3.0，
+  0 = 關）—— 跟 T2 的兩格同一份 spec。
+* 抽取重構成 `worst_note_for_overlay`（回 note 本身），
+  `roi_boxes_for_overlay` 變薄包裝 —— 「哪一條 note」的判斷仍然只有一份。
+
+驗收：`test_export_overlay.py` 52 條（+5）、`test_output_bundle.py` 的
+`_roi_overlay_kwargs` 測試補 odd_pixels（k>0 才帶、數字逐字是 meta 的
+worst、k=0 不帶）、core 2245 過。
+
+---
+
 ## F31 T4：pick 加「none」—— `_center` 從唯一解法變成一個選項（2026-08-25）
 
 使用者：「可以把 pick 換成在影像上挑，但 centre / strongest 還是可以自己選」、

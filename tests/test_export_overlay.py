@@ -455,3 +455,79 @@ def test_a_context_without_glv_yields_no_roi_boxes():
     class Bare:
         meta: dict = {}
     assert overlay.roi_boxes_for_overlay(Bare()) == ([], -1)
+
+
+# ---------------------------------------------------------------------------
+# 贏家框內的像素標記（F31 T3）—— 只進 overlay，判準來自 T1 的數字
+# ---------------------------------------------------------------------------
+def _odd(src, box=(0.25, 0.25, 0.5, 0.5), baseline=100.0, spread=1.0, k=3.0):
+    return {"box": box, "baseline": baseline, "spread": spread, "k": k,
+            "src": src}
+
+
+def test_pixels_beyond_k_get_tinted_inside_the_winner_box():
+    img = np.full((64, 64), 100, np.uint8)
+    img[30:34, 30:34] = 180                      # 框內一小塊偏亮
+    img[4:8, 4:8] = 180                          # 框外也有 —— 不准標
+    plain = overlay.render_overlay({"test": img}, {}, montage=False)
+    out = overlay.render_overlay({"test": img}, {}, montage=False,
+                                 odd_pixels=_odd(img))
+    tinted = (out != plain).any(axis=-1)        # 跟不標的那張比 —— 亮度不算
+    ys, xs = np.nonzero(tinted)
+    assert tinted.any()
+    assert xs.min() >= 16 and xs.max() < 48 and ys.min() >= 16 and ys.max() < 48
+
+
+def test_a_huge_k_marks_nothing_and_does_not_crash():
+    img = np.full((64, 64), 100, np.uint8)
+    img[30:34, 30:34] = 180
+    plain = overlay.render_overlay({"test": img}, {}, montage=False)
+    out = overlay.render_overlay({"test": img}, {}, montage=False,
+                                 odd_pixels=_odd(img, k=1e9))
+    assert out.tobytes() == plain.tobytes()
+
+
+def test_the_criterion_is_the_same_numbers_the_score_used():
+    """改 GLV 的判準統計量 → baseline/spread 變 → 標出來的東西跟著變。
+
+    這裡直接用兩組不同的 baseline/spread（同一張圖）驗「判準只吃那兩個數字」
+    —— 端到端那半（meta 的 worst 就是這兩個數字）由
+    `test_the_overlay_note_is_the_same_computation` 鎖著。
+    """
+    img = np.full((64, 64), 100, np.uint8)
+    img[30:34, 30:34] = 130
+    a = overlay.render_overlay({"test": img}, {}, montage=False,
+                               odd_pixels=_odd(img, baseline=100.0, spread=1.0))
+    b = overlay.render_overlay({"test": img}, {}, montage=False,
+                               odd_pixels=_odd(img, baseline=100.0,
+                                               spread=50.0))
+    assert a.tobytes() != b.tobytes()            # spread 大 → 130 不算異常
+    plain = overlay.render_overlay({"test": img}, {}, montage=False)
+    assert b.tobytes() == plain.tobytes()
+
+
+def test_marking_writes_no_feature_and_no_region():
+    """界線寫死：只進 overlay。它一旦開始吐特徵，find_defect 就從後門長回來。"""
+    ctx = _each_box_ctx()
+    feats_before = dict(ctx.features)
+    rois_before = list(ctx.roi_names())
+    rects, win, note = overlay.worst_note_for_overlay(ctx)
+    worst = note["worst"]
+    overlay.render_overlay(
+        {"test": ctx.images["test"]}, dict(ctx.features), montage=False,
+        roi_boxes=rects, roi_winner=win,
+        odd_pixels={"box": rects[win], "baseline": worst["baseline"],
+                    "spread": worst["spread"], "k": 3.0,
+                    "src": ctx.images["test"]})
+    assert ctx.features == feats_before
+    assert ctx.roi_names() == rois_before
+    assert "blobs" not in ctx.meta
+
+
+def test_a_missing_source_stream_marks_nothing():
+    img = np.full((64, 64), 100, np.uint8)
+    img[30:34, 30:34] = 250
+    plain = overlay.render_overlay({"test": img}, {}, montage=False)
+    out = overlay.render_overlay({"test": img}, {}, montage=False,
+                                 odd_pixels=_odd(None))
+    assert out.tobytes() == plain.tobytes()

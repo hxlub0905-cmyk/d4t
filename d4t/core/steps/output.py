@@ -465,21 +465,47 @@ def roi_draw_specs() -> List[ParamSpec]:
                   "keeps this many (the winner plus its closest "
                   "neighbours)."),
         ),
+        ParamSpec(
+            name="mark_pixels_k", type="float", default=3.0, min=0.0,
+            max=99.0, unit="σ", label="Mark pixels beyond", advanced=True,
+            help=("Inside the winning box, tint every pixel that sits more "
+                  "than this many robust sigmas from the other boxes' "
+                  "baseline - the same baseline and spread the worst_score "
+                  "was computed from, so what lights up is exactly what the "
+                  "number is talking about. 0 turns the tint off. This only "
+                  "draws: it writes no feature and makes no region."),
+        ),
     ]
 
 
 def _roi_overlay_kwargs(ctx: Any, p: Dict[str, Any]):
-    """一顆的 ``roi_boxes`` / ``roi_winner`` → ``(kwargs, 有沒有自動退化)``。
+    """一顆的 ``roi_boxes`` / ``roi_winner`` / ``odd_pixels``
+    → ``(kwargs, 有沒有自動退化)``。
 
     兩張出圖卡逐字同一段（同 `roi_draw_specs` 的理由）。退化（``all`` 超過
     上限退成 ``near the winner``）由呼叫端**整批警告一次** —— 一顆一句的話
     6000 顆就是 6000 句。
+
+    像素標記（T3）的 baseline / spread 來自 GLV 的 `worst` note —— 跟
+    `worst_score` 同一次計算；`src` 是量測那條流的**原始**陣列（顯示用那份
+    被拉過值域）。拿不到贏家、拿不到那條流、或 k = 0，就不標。
     """
-    rects, win = (overlay.roi_boxes_for_overlay(ctx)
-                  if ctx is not None else ([], -1))
-    boxes, win, degraded = overlay.pick_roi_boxes(
+    rects, win, note = (overlay.worst_note_for_overlay(ctx)
+                        if ctx is not None else ([], -1, None))
+    boxes, drawn_win, degraded = overlay.pick_roi_boxes(
         rects, win, str(p["draw_boxes"]), int(p["draw_boxes_cap"]))
-    return {"roi_boxes": boxes, "roi_winner": win}, degraded
+    kwargs: Dict[str, Any] = {"roi_boxes": boxes, "roi_winner": drawn_win}
+    k = float(p.get("mark_pixels_k", 0.0) or 0.0)
+    worst = (note or {}).get("worst") or {}
+    if k > 0.0 and 0 <= win < len(rects) and worst:
+        src = (getattr(ctx, "images", {}) or {}).get(
+            str((note or {}).get("stream") or ""))
+        if src is not None:
+            kwargs["odd_pixels"] = {
+                "box": rects[win], "baseline": float(worst["baseline"]),
+                "spread": float(worst["spread"]), "k": k, "src": src,
+            }
+    return kwargs, degraded
 
 
 @register_step

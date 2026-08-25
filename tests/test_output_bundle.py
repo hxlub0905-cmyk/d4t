@@ -419,3 +419,18 @@ def test_the_roi_kwargs_helper_reads_the_glv_note():
     kw, degraded = _roi_overlay_kwargs(
         None, {"draw_boxes": "all", "draw_boxes_cap": 300})
     assert kw == {"roi_boxes": [], "roi_winner": -1} and not degraded
+
+    # 像素標記（T3）：k > 0 才帶，數字逐字是 meta 的 worst 那兩個
+    kw, _ = _roi_overlay_kwargs(
+        ctx, {"draw_boxes": "all", "draw_boxes_cap": 300,
+              "mark_pixels_k": 3.0})
+    worst = [n for n in ctx.meta["glv_hist"] if n.get("worst")][0]["worst"]
+    odd = kw["odd_pixels"]
+    assert odd["baseline"] == worst["baseline"]
+    assert odd["spread"] == worst["spread"]
+    assert odd["box"] == ctx.roi_norm_rects("cells")[12]
+    assert odd["src"] is ctx.images["test"]
+    kw, _ = _roi_overlay_kwargs(
+        ctx, {"draw_boxes": "all", "draw_boxes_cap": 300,
+              "mark_pixels_k": 0.0})
+    assert "odd_pixels" not in kw

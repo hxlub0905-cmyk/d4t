@@ -363,13 +363,15 @@ def _draw_label(panel: np.ndarray, label: str) -> None:
 # ---------------------------------------------------------------------------
 # 逐框比較的框（F31）：從重跑回來的 Context 撿出來、決定畫哪幾個
 # ---------------------------------------------------------------------------
-def roi_boxes_for_overlay(ctx: Any) -> Tuple[list, int]:
-    """從 rerun 的 Context 撿逐框比較的 ROI 框 → ``(正規化框列表, 贏家索引)``。
+def worst_note_for_overlay(ctx: Any) -> Tuple[list, int, Optional[Dict[str, Any]]]:
+    """從 rerun 的 Context 撿逐框比較 → ``(正規化框列表, 贏家索引, note)``。
 
     來源是 GLV 卡留在 ``ctx.meta["glv_hist"]`` 的 note（``boxes >= 1`` 的那些
     是 each box 模式跑出來的）—— **跟 `worst_*` 特徵同一次計算**，不在這裡
-    重新挑一次贏家。沒有逐框比較（pooled、沒接區域、根本沒跑 GLV）就回
-    ``([], -1)``，疊圖照舊 —— 沒接 ROI 的 recipe 一個位元不變。
+    重新挑一次贏家。回傳的第三個值是那條 note 本身（贏家的 ``worst`` 帶著
+    baseline / spread —— 像素標記的分母，見 :func:`_mark_odd_pixels`）；
+    沒有逐框比較（pooled、沒接區域、根本沒跑 GLV）就回 ``([], -1, None)``，
+    疊圖照舊 —— 沒接 ROI 的 recipe 一個位元不變。
 
     好幾條 note 都有框時取**第一條**（＝接線順序的第一個區域）：兩個區域各
     畫一組框、各有各的贏家，要等疊圖說得清「哪組框是誰的」再說 —— 挑一組畫
@@ -389,8 +391,53 @@ def roi_boxes_for_overlay(ctx: Any) -> Tuple[list, int]:
             continue
         worst = note.get("worst") or {}
         i = int(worst.get("i", -1)) if isinstance(worst, dict) else -1
-        return rects, (i if 0 <= i < len(rects) else -1)
-    return [], -1
+        return rects, (i if 0 <= i < len(rects) else -1), dict(note)
+    return [], -1, None
+
+
+def roi_boxes_for_overlay(ctx: Any) -> Tuple[list, int]:
+    """:func:`worst_note_for_overlay` 的前兩項（只要框的呼叫端用這個）。"""
+    rects, winner, _note = worst_note_for_overlay(ctx)
+    return rects, winner
+
+
+def _mark_odd_pixels(panel: np.ndarray, src: Any, odd: Dict[str, Any]) -> None:
+    """贏家框內偏離基準的像素上一層半透明的贏家色（F31 T3）。
+
+    判準是 ``|pixel − baseline| / spread > k`` —— **baseline / spread 逐字是
+    T1 算 `worst_score` 用的那兩個數字**（GLV 留在 meta 的 `worst` note；
+    `spread` 已含地板）。這裡**不另外算一次**：畫面跟數字各自算的話，遲早出現
+    「圖上標紅但數字說正常」—— Results R1 那個 bug 的形狀（同一個判斷散在
+    兩個地方）。所以改 GLV 卡的判準統計量，標出來的東西**跟著變**。
+
+    ``src`` 是**量測那條流的原始像素**（不是顯示用、被 `to_display_rgb` 拉過
+    值域的那份）—— 判準跟數字同一份輸入。拿不到就一個都不標（不猜）。
+
+    界線（任務書寫死的）：**只進 overlay**。不吐特徵、不生具名區域、不寫
+    ``ctx.meta["blobs"]`` —— 一旦它開始吐 `blob_x` 那一族，find_defect 就從
+    後門長回來了，而整個 F31 的設計是為了只有一種框。
+    """
+    if src is None:
+        return
+    arr = np.asarray(src, dtype=np.float64)
+    if arr.ndim == 3:
+        arr = arr.mean(axis=2)
+    h, w = panel.shape[:2]
+    if arr.shape[:2] != (h, w):
+        return                       # 幾何對不上就不標 —— 標錯位置比不標糟
+    nx, ny, nw, nh = (float(v) for v in odd["box"])
+    x0 = max(0, min(int(round(nx * w)), w - 1))
+    y0 = max(0, min(int(round(ny * h)), h - 1))
+    x1 = max(x0 + 1, min(int(round((nx + nw) * w)), w))
+    y1 = max(y0 + 1, min(int(round((ny + nh) * h)), h))
+    spread = max(float(odd["spread"]), 1e-12)
+    mask = (np.abs(arr[y0:y1, x0:x1] - float(odd["baseline"])) / spread
+            > float(odd["k"]))
+    if not mask.any():
+        return
+    seg = panel[y0:y1, x0:x1]
+    tint = np.asarray(ROI_WINNER_COLOR, dtype=np.uint16)
+    seg[mask] = ((seg[mask].astype(np.uint16) + tint) // 2).astype(np.uint8)
 
 
 def pick_roi_boxes(rects, winner: int, mode: str, cap: int):
@@ -452,7 +499,8 @@ def render_overlay(images: Dict[str, Any],
                    diff_key: str = "diff",
                    montage: bool = True,
                    roi_boxes: Optional[Sequence[Any]] = None,
-                   roi_winner: int = -1) -> np.ndarray:
+                   roi_winner: int = -1,
+                   odd_pixels: Optional[Dict[str, Any]] = None) -> np.ndarray:
     """把一顆 defect 畫成 RGB uint8 面板。
 
     參數
@@ -481,6 +529,12 @@ def render_overlay(images: Dict[str, Any],
         細線（**不猜**）。誰畫、畫幾個由呼叫端的 :func:`pick_roi_boxes`
         決定，來源用 :func:`roi_boxes_for_overlay` 從 Context 撿。
         預設 ``None``：不畫，跟這個參數出現之前逐位元組相同。
+    odd_pixels
+        贏家框內的像素標記（F31 T3；:func:`_mark_odd_pixels`）：
+        ``{"box": 正規化rect, "baseline": …, "spread": …, "k": …,
+        "src": 量測那條流的原始陣列}``。判準的 baseline / spread 逐字是
+        GLV 算 `worst_score` 用的那兩個數字 —— 不另外算一次。
+        預設 ``None``：不標。
 
     回傳 ``(H, W, 3)`` 或 ``(H, 2W, 3)`` 的 uint8 RGB 陣列。
     """
@@ -501,7 +555,10 @@ def render_overlay(images: Dict[str, Any],
     left = to_display_rgb(base)
     h, w = left.shape[:2]
 
-    # ROI 框先畫、量測框後畫 —— 疊到的地方「量到的東西在哪」在最上面。
+    # 像素標記最底、ROI 框中間、量測框最上 —— 疊到的地方
+    # 「量到的東西在哪」在最上面。
+    if odd_pixels:
+        _mark_odd_pixels(left, odd_pixels.get("src"), odd_pixels)
     if roi_boxes:
         _draw_roi_boxes(left, roi_boxes, int(roi_winner))
     the_box = _blob_box(box) if box is not None else primary_blob_box(blobs, features)
