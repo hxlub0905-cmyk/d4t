@@ -819,7 +819,10 @@ def test_each_box_declares_exactly_what_it_writes():
     assert set(card.resolve_features(p)) == {
         "glv_median_typical", "glv_median_outlier", "glv_median_outlier_box",
         "glv_mad_typical", "glv_mad_outlier", "glv_mad_outlier_box",
-        "boxes", "glv_pixels"}
+        "boxes", "glv_pixels",
+        # F31：總冠軍那一組（照 `judge` 挑）＋ score 的分布。
+        "worst_i", "worst_x", "worst_y", "worst_w", "worst_h",
+        "worst_score", "worst_value", "score_median", "score_spread"}
 
     ctx = _grid_ctx()
     get_step("glv_stats")().run(ctx, p)
@@ -942,3 +945,119 @@ def test_the_migration_covers_the_whole_truth_table(tmp_path):
     assert both["reference"] == "another region on another stream"
     assert both["reference_source"] == "ref"
     assert both["reference_region"] == "epi_others"
+
+
+# --------------------------------------------------------------------------- #
+# 10. 逐框比較的總冠軍（F31）—— 「這張圖最異常的地方」有座標、有分數
+# --------------------------------------------------------------------------- #
+def _run_each_box(ctx, **over):
+    p = {"source": "test", "roi": "cells", "metrics": "glv_median",
+         "across_boxes": "each box"}
+    p.update(over)
+    get_step("glv_stats")().run(ctx, p)
+    return ctx
+
+
+def test_the_worst_box_is_the_hot_one():
+    """25 格裡亮的那一格就是 worst —— 分數是「偏離其他格幾個穩健 σ」。"""
+    ctx = _run_each_box(_grid_ctx(hot_cell=12))
+    assert ctx.features["worst_i"] == 12.0
+    assert ctx.features["worst_value"] == pytest.approx(160.0)
+    # 其他 24 格完全一樣（spread 踩地板 1 灰階）→ score = |160-100| / 1 = 60
+    assert ctx.features["worst_score"] == pytest.approx(60.0)
+    assert ctx.features["score_median"] == pytest.approx(0.0)
+
+
+def test_the_worst_box_is_the_roi_box_itself():
+    """座標不另外量：逐位元組就是 `ctx.roi_rects()[worst_i]` 那一格。
+
+    「只有一種框」—— ROI 的框既是輸入也是報表上畫的那個框。把 bug 放回去的
+    形狀是任何一種自己換算座標的寫法（正規化來回、中心點重算）。
+    """
+    ctx = _run_each_box(_grid_ctx(hot_cell=7))
+    wi = int(ctx.features["worst_i"])
+    x, y, w, h = ctx.roi_rects("cells", ctx.images["test"].shape[:2])[wi]
+    assert ctx.features["worst_x"] == float(x)
+    assert ctx.features["worst_y"] == float(y)
+    assert ctx.features["worst_w"] == float(w)
+    assert ctx.features["worst_h"] == float(h)
+
+
+def test_identical_boxes_do_not_divide_by_zero():
+    """其他格完全相同 → spread 是 0 → 地板（1 灰階）接住，score 全體是 0。"""
+    ctx = _run_each_box(_grid_ctx(hot=100.0))     # 亮格跟別人一樣亮
+    assert ctx.features["worst_score"] == pytest.approx(0.0)
+    assert ctx.features["score_median"] == pytest.approx(0.0)
+    assert ctx.features["score_spread"] == pytest.approx(0.0)
+    assert np.isfinite(ctx.features["worst_value"])
+
+
+def test_a_single_box_has_no_other_boxes_to_compare():
+    """單框不吐 worst 那一組（沒得比），但**不偷退 pooled**（boxes = 1）。
+
+    退回 pooled 的話同一格參數有兩種意思，而且宣告（帶後綴的名字）跟寫出的
+    （裸名）對不上 —— 那正是以前 `_each_box` 寫 `> 1` 時的樣子。
+    """
+    img = np.full((60, 60), 100.0, np.float32)
+    ctx = Context(images={"test": img})
+    ctx.set_roi_boxes("cells", [(0.1, 0.1, 0.4, 0.4)])
+    _run_each_box(ctx)
+    assert ctx.features["boxes"] == 1.0
+    assert "glv_median_typical" in ctx.features       # 不是 pooled 的裸名
+    assert "glv_median" not in ctx.features
+    for name in ("worst_i", "worst_x", "worst_score", "worst_value",
+                 "score_median", "score_spread"):
+        assert name not in ctx.features
+
+
+def test_the_judge_changes_who_wins():
+    """判準是使用者的一格：中位數看不見的一顆亮點，max 看得見。
+
+    一格裡塞一顆很亮的單點：它動不了那一格的 median，但 max 直接變成它。
+    """
+    ctx = _grid_ctx(hot=100.0)                        # 全部格子一樣
+    img = ctx.images["test"]
+    # cells[6] 的正中央放一顆亮點（格子 20px、邊距 2px → cell 6 = row1,col1）
+    x, y, w, h = ctx.roi_rects("cells", img.shape[:2])[6]
+    img[y + h // 2, x + w // 2] = 250.0
+    by_median = _run_each_box(ctx)
+    assert by_median.features["worst_score"] == pytest.approx(0.0)
+
+    ctx2 = _grid_ctx(hot=100.0)
+    img2 = ctx2.images["test"]
+    img2[y + h // 2, x + w // 2] = 250.0
+    by_max = _run_each_box(ctx2, judge="glv_max")
+    assert by_max.features["worst_i"] == 6.0
+    assert by_max.features["worst_value"] == pytest.approx(250.0)
+    assert by_max.features["worst_score"] > 10.0
+
+
+def test_the_overlay_note_is_the_same_computation():
+    """meta 的 `worst` 跟特徵是**同一次計算** —— 疊圖讀它畫框、標像素。
+
+    `spread` 已含地板，所以 score == |value − baseline| / spread 逐位元組
+    成立 —— 像素標記用同一條除法，不必自己知道地板的存在。
+    """
+    ctx = _run_each_box(_grid_ctx(hot_cell=12))
+    notes = [n for n in ctx.meta["glv_hist"] if n.get("worst")]
+    assert len(notes) == 1
+    worst = notes[0]["worst"]
+    assert worst["i"] == int(ctx.features["worst_i"])
+    assert worst["score"] == ctx.features["worst_score"]
+    assert worst["value"] == ctx.features["worst_value"]
+    assert worst["rect"] == [int(ctx.features["worst_x"]),
+                             int(ctx.features["worst_y"]),
+                             int(ctx.features["worst_w"]),
+                             int(ctx.features["worst_h"])]
+    assert worst["judge"] == "glv_median"
+    assert worst["score"] == pytest.approx(
+        abs(worst["value"] - worst["baseline"]) / worst["spread"])
+
+
+def test_pooled_and_no_region_write_no_worst():
+    """pooled 一個位元不動；沒接區域的 each box 也不會憑空長出 worst。"""
+    pooled = _grid_ctx()
+    get_step("glv_stats")().run(pooled, {
+        "source": "test", "roi": "cells", "metrics": "glv_median"})
+    assert not any(k.startswith("worst") for k in pooled.features)
+    assert not any(n.get("worst") for n in pooled.meta["glv_hist"])

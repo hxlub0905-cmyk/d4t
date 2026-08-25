@@ -19,6 +19,78 @@
 
 ---
 
+## F31 T1：GLV 逐框比較 —— 「這張圖最異常的地方」有座標、有分數（2026-08-25）
+
+使用者換了方向（取代前一份「擴充 find_defect」的任務書）：「原來的 GLV 跟 CD
+這方面可能就做得到，接 ROI 卡，但要能自動算多框，找最異常去比較。然後下游可以
+就把這個 ROI 框（因為它本身就是異常點）給 draw 出來。」三條原則：**只有一種框**
+（ROI 的框既是輸入也是報表上畫的框）、**挑選的家在量測卡**（ROI 卡跑在量測卡
+之前，不可能用還沒算出來的統計量挑）、**特徵表固定欄位**。
+
+### 不是蓋新的，是把既有的 each box 模式補完
+
+讀 code 讀出來：`glv_stats` **已經有**逐框模式（F18 第 6 步的
+`across_boxes="each box"`，吐 `_typical`/`_outlier`/`_outlier_box`）。缺的是
+「總冠軍」—— `_outlier` 那三個後綴是**每個統計量各自**的極端格，而使用者要的
+是照**他挑的那一個**判準選出唯一的贏家，帶座標、帶分數。同一件事不開第二個家。
+
+### 做了什麼
+
+* **`algo/glv.odd_box_scores(values)`**：每一格跟「其他所有格」比 ——
+  `baseline = median(others)`、`spread = 1.4826 × MAD(others)`、
+  `score = |v − baseline| / max(spread, 1)`。基準用 median 不用 mean 的理由
+  寫在 docstring：**平均數會被異常格自己拉走，而我們正在找的就是那個異常格**。
+  1.4826 跟 `Let.scale` 的 robust z 同一個係數（`batch.py:476`）；地板 1 灰階
+  跟 `algo/shape._MIN_CONTRAST` 同一個數字同一個理由。回傳的 spread **已含
+  地板**，所以 `score == |v−baseline|/spread` 逐位元組成立 —— 讀這三個數字的
+  人（T3 的像素標記）不必自己知道地板的存在。
+* **leave-one-out 是 O(N log N) 不是 O(N²)**：拿掉一個元素的中位數對每一格
+  只有 ≤3 個候選值 → 按候選值分組、每組排一次偏差陣列。正確性對 `np.delete`
+  的暴力版**逐位元組**驗證（`test_glv.py`，含重複值／奇偶長度／常數陣列）。
+* **`judge` 參數**（label `Pick the odd one by`，`show_when` 綁 each box，
+  選項＝現有 `METRIC_CHOICES` 那份來源）：判準是使用者的樣品問題（median 看
+  不見的一顆亮點，max 看得見），獨立於 Statistics 那格勾了什麼。
+* **特徵**：贏家組 `worst_i / worst_x / worst_y / worst_w / worst_h /
+  worst_score / worst_value`（座標＝整張影像像素，**逐位元組就是
+  `ctx.roi_rects()[worst_i]` 那一格** —— 只有一種框，位置不另外量）＋分布組
+  `score_median / score_spread`（「一個框特別怪」跟「500 框都一樣怪」只看
+  worst 分不出來，而那兩件事的處置完全相反）。單框或算不出 → **一格都不寫**。
+* **meta**：`glv_hist` 的 note 多一份 `worst`（i/rect/score/value/baseline/
+  spread/judge）—— 疊圖畫框（T2）與像素標記（T3）讀**這一份**，跟特徵同一次
+  計算，不是第二份。
+
+### 兩處刻意偏離任務書（否決理由）
+
+* `boxes_n` 不另開 —— 既有的 `boxes` 特徵就是它，同一件事第二個名字會漂。
+* `score_max` 不另開 —— 它逐字等於 `worst_score`；同一個數字兩個名字排在同
+  一份 CSV 裡，沒有任何線索說它們是同一個（F18 名字分家族那條規矩擋的正是
+  這個）。表達式直接用 `worst_score`。
+
+### 順手修掉一個宣告與寫出對不上的洞
+
+`_each_box` 以前寫 `roi_count > 1`：**單框的區域安靜地退回 pooled**，於是同
+一格參數有兩種意思，而且宣告（`feature_names` 只看參數，吐帶後綴的名字）跟
+實際寫出的（pooled 裸名）對不上 —— 既有的宣告測試沒抓到，因為 fixture 是
+25 格的網格。使用者這次明文定調「不要偷偷退回 pooled」，改成 `>= 1`：單框
+照走逐框路，吐 `boxes = 1` 與那一格自己的 `_typical`，只是沒有 worst。
+`== 0`（區域在這顆上不存在）仍走 pooled，讓 `roi_pixels` 用既有訊息報錯。
+
+### 先量再改（效能，1000×1000 合成圖、glv_median+glv_mad）
+
+| 框數 | each box | pooled 對照 |
+|---:|---:|---:|
+| 50 | 39 ms | 47 ms |
+| 500 | 68 ms | 46 ms |
+| 5000 | **343 ms** | 50 ms |
+
+5000 框是基準（`glv_stats` 在 5,295 框上 105 ms）的 3.3 倍 —— 沒超過一個
+數量級，**不做抽樣**（抽樣要多發明一個數字，`_others` 那次已經判過一次不值得）。
+
+驗收：`test_glv_compare.py` 58 條（+7 新）、`test_glv.py` +4 條（暴力版逐位元
+組）、黃金值三份全綠（沒有 golden recipe 用 each box）、core 2186 過。
+
+---
+
 ## 文件追上程式碼：README、四個沒進紀錄的 commit、計畫書歸檔（2026-08-25）
 
 使用者：先把整個專案與最近幾次的修改讀一遍列出來，然後「三個都先幫我做」——

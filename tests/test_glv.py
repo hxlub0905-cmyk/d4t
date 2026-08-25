@@ -190,3 +190,57 @@ def test_the_numbered_ids_refuse_a_number_that_makes_no_sense():
     assert above_of("glv_mean") is None
     assert metric_label("glv_trim10") == "GLV trimmed mean 10%"
     assert metric_formula("glv_above200") == "share of pixels with gray > 200"
+
+
+# --------------------------------------------------------------------------- #
+# 逐框比較的分數（F31）—— leave-one-out 的快路要跟暴力版逐位元組相同
+# --------------------------------------------------------------------------- #
+def test_odd_box_scores_match_the_brute_force_leave_one_out():
+    """O(N log N) 的分組算法對上 `np.delete` 的逐格暴力版，逐位元組相同。
+
+    重複值、奇偶長度、常數陣列都要過 —— leave-one-out 中位數的位移規則
+    正是在這些邊界上寫錯的。
+    """
+    from d4t.core.algo.glv import odd_box_scores
+
+    rng = np.random.default_rng(7)
+    cases = [rng.normal(100, 5, n) for n in (2, 3, 4, 5, 10, 101)]
+    cases += [rng.choice([1.0, 2.0, 3.5, 7.0, 100.0], size=n)
+              for n in (4, 9, 50)]
+    cases += [np.full(6, 42.0)]
+    for v in cases:
+        score, base, spread = odd_box_scores(v)
+        for i in range(v.size):
+            others = np.delete(v, i)
+            b = float(np.median(others))
+            s = max(1.4826 * float(np.median(np.abs(others - b))), 1.0)
+            assert base[i] == b
+            assert spread[i] == s          # 已含地板
+            assert score[i] == abs(float(v[i]) - b) / s
+
+
+def test_odd_box_scores_needs_two_boxes():
+    from d4t.core.algo.glv import odd_box_scores
+
+    for v in ([], [5.0]):
+        score, base, spread = odd_box_scores(v)
+        assert score.size == base.size == spread.size == 0
+
+
+def test_the_spread_floor_is_one_gray_level():
+    """全同的其他格 → spread 踩地板 1（灰階是量化的），score 不爆掉。"""
+    from d4t.core.algo.glv import odd_box_scores
+
+    score, _base, spread = odd_box_scores([100.0, 100.0, 100.0, 160.0])
+    assert spread[3] == 1.0
+    assert score[3] == 60.0
+
+
+def test_robust_spread_matches_its_formula():
+    from d4t.core.algo.glv import robust_spread
+
+    v = np.array([1.0, 2.0, 3.0, 4.0, 100.0])
+    med = np.median(v)
+    assert robust_spread(v) == pytest.approx(
+        1.4826 * np.median(np.abs(v - med)))
+    assert robust_spread([7.0]) == 0.0

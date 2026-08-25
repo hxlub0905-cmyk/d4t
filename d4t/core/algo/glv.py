@@ -476,3 +476,103 @@ def summarize(values: np.ndarray) -> Dict[str, float]:
             "median": float(np.median(v)), "q25": float(np.percentile(v, 25)),
             "q75": float(np.percentile(v, 75)), "min": float(v.min()),
             "max": float(v.max())}
+
+
+# ---------------------------------------------------------------------------
+# Odd-one-out across boxes (d4t-native, 2026-08-25; not part of the PEAR
+# vendoring above).  Serves glv_stats' "each box" mode: which of the N boxes
+# of one region deviates most from the rest.
+# ---------------------------------------------------------------------------
+
+#: 分母的地板（灰階）。灰階是量化的，1 個灰階以下的差別本來就不該相信 ——
+#: 跟 `algo.shape._MIN_CONTRAST` / `algo.edge._MIN_CONTRAST` 同一個數字、
+#: 同一個理由（那兩份也是各自寫 1.0 並互相指著對方）。
+_MIN_BOX_SPREAD = 1.0
+
+#: MAD → σ 的一致性因子，跟 `algo/enhance.py`（背景+抖動）與
+#: `pipeline/batch.py` 的 Let.scale robust z **同一個係數** —— 同一個概念在
+#: 兩個地方要是同一個數字。⚠ `glv_value` 的 `glv_mad` 刻意**不**乘它
+#: （那一格量的是分布本身，`tests/test_glv.py` 鎖著）；這裡乘，因為 score
+#: 的單位是「幾個 σ」，跟 Let.scale 的 z 同一把尺。
+_MAD_TO_SIGMA = 1.4826
+
+
+def _median_of_sorted_without(s, r: int) -> float:
+    """已排序陣列 ``s`` 拿掉第 ``r`` 個位置之後的中位數，O(1)。
+
+    拿掉一個元素不必重排：剩下的仍然有序，第 ``k`` 個就是
+    ``s[k] if k < r else s[k + 1]``。
+    """
+    n = len(s) - 1
+    if n <= 0:
+        return float("nan")
+    if n % 2:
+        m = n // 2
+        return float(s[m] if m < r else s[m + 1])
+    a, b = n // 2 - 1, n // 2
+    va = s[a] if a < r else s[a + 1]
+    vb = s[b] if b < r else s[b + 1]
+    return (float(va) + float(vb)) / 2.0
+
+
+def odd_box_scores(values, floor: float = _MIN_BOX_SPREAD):
+    """每一格跟「其他所有格」比 → ``(score, baseline, spread)`` 三個等長陣列。
+
+    對第 ``i`` 格::
+
+        baseline_i = median(其他所有格的值)
+        spread_i   = 1.4826 × MAD(其他所有格的值)     # MAD 對 baseline_i 算
+        score_i    = |v_i − baseline_i| / max(spread_i, floor)
+
+    **基準用 median 不用 mean**：平均數會被異常格自己拉走 —— 而我們正在找的
+    就是那個異常格。用 median 的話，一個異常格對基準的影響趨近於零；散布用
+    MAD 同理。「其他所有格」（leave-one-out）而不是「全部」也是同一個理由的
+    下半句：異常格連自己那一票都不該投。
+
+    ``floor``：其他格完全相同時 spread 是 0，除下去 score 全體爆掉；地板取
+    1 個灰階（:data:`_MIN_BOX_SPREAD` 的理由）。回傳的 ``spread`` **已含地板**
+    —— 所以 ``score == |v − baseline| / spread`` 逐位元組成立，讀這三個數字的
+    人（疊圖的像素標記）不必自己再知道地板的存在。
+
+    複雜度 O(N log N)，不是 O(N²)：leave-one-out 的中位數對每一格只有
+    ≤3 個候選值（拿掉的元素落在中位數左邊或右邊），所以按候選值分組，每組
+    只排一次偏差陣列，逐格再用 :func:`_median_of_sorted_without` 拿掉自己。
+    正確性由測試對 ``np.delete`` 的逐格暴力版逐位元組驗證。
+
+    元素少於 2 個時回三個空陣列（沒有「其他格」可比）。
+    """
+    v = np.asarray(values, dtype=np.float64).ravel()
+    n = int(v.size)
+    if n < 2:
+        empty = np.zeros(0, dtype=np.float64)
+        return empty, empty.copy(), empty.copy()
+
+    order = np.argsort(v, kind="stable")
+    s = v[order]
+    rank = np.empty(n, dtype=np.int64)
+    rank[order] = np.arange(n)
+
+    baseline = np.array([_median_of_sorted_without(s, int(r)) for r in rank],
+                        dtype=np.float64)
+
+    spread = np.empty(n, dtype=np.float64)
+    for base in np.unique(baseline):
+        idx = np.flatnonzero(baseline == base)
+        d = np.abs(v - base)
+        ds = np.sort(d, kind="stable")
+        for i in idx:
+            r = int(np.searchsorted(ds, d[i], side="left"))
+            spread[i] = _MAD_TO_SIGMA * _median_of_sorted_without(ds, r)
+
+    spread = np.maximum(spread, float(floor))
+    score = np.abs(v - baseline) / spread
+    return score, baseline, spread
+
+
+def robust_spread(values) -> float:
+    """一串數字的穩健散布：``1.4826 × MAD``（同 :func:`odd_box_scores` 的分母，
+    但**不含地板** —— 這裡量的是分布本身，不是一個要除下去的分母）。"""
+    v = np.asarray(values, dtype=np.float64).ravel()
+    if v.size < 2:
+        return 0.0
+    return float(_MAD_TO_SIGMA * np.median(np.abs(v - np.median(v))))

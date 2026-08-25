@@ -237,6 +237,28 @@ OUTLIER_SUFFIX = "_outlier"
 OUTLIER_BOX_SUFFIX = "_outlier_box"
 BOX_COUNT = "boxes"
 
+#: 逐框比較的「總冠軍」那一組（F31，2026-08-25）。`_outlier` 那三個後綴回答
+#: 「**每個統計量各自**最極端的是哪一格」；這一組回答的是另一個問題 ——
+#: 「照**使用者挑的那一個**判準（`judge`），哪一格最異常、它在哪、多異常」。
+#: 座標是**整張影像的像素**，逐位元組等於 `ctx.roi_rects()[worst_i]`：ROI 的
+#: 框既是輸入也是報表上要畫的那個框（只有一種框），所以位置不另外量，就是
+#: 那一格 ROI 自己。找不到（單框、或每一格都量不出來）就**一格都不寫**。
+#:
+#: ⚠ 任務書原本還列了 ``boxes_n`` 與 ``score_max`` —— 兩個都**刻意不開**：
+#: `boxes_n` 就是既有的 :data:`BOX_COUNT`（同一件事第二個名字會漂），
+#: `score_max` 逐字等於 ``worst_score``（同一個數字兩個名字，CSV 上沒有任何
+#: 線索說它們是同一個 —— F18 名字分家族那條規矩擋的正是這個）。
+WORST_FEATURES = ("worst_i", "worst_x", "worst_y", "worst_w", "worst_h",
+                  "worst_score", "worst_value")
+
+#: 逐框 score 的分布（框數 ≥ 2 才有）。只有 worst 的話，「一個框特別怪」跟
+#: 「500 個框都一樣怪」在特徵表上看起來一模一樣 —— 而那兩件事的處置完全相反
+#: （前者是缺陷，後者是製程漂移或框放錯了）。
+SCORE_FEATURES = ("score_median", "score_spread")
+
+#: 「照哪個數字挑最異常」的預設。median 跟 Statistics 的預設第一顆同一個。
+JUDGE_DEFAULT = "glv_median"
+
 
 def _canonical(mid: str) -> str:
     """把使用者寫的 metric id 轉成 algo.glv 認得的 id；不認得回傳空字串。"""
@@ -267,6 +289,15 @@ def _reference_of(params: Dict[str, Any]) -> str:
     """
     got = str(params.get("reference", REF_NONE) or REF_NONE).strip()
     return got if got in REFERENCES else REF_NONE
+
+
+def _judge_of(params: Dict[str, Any]) -> str:
+    """逐框比較照哪個統計量挑（不認得的字、沒填的一律當預設）。
+
+    **不要在別處直接讀 `params["judge"]`**（同 :func:`_reference_of` 的理由）。
+    """
+    got = str(params.get("judge", JUDGE_DEFAULT) or JUDGE_DEFAULT).strip()
+    return got if _canonical(got) else JUDGE_DEFAULT
 
 
 def _compare_metrics_of(params: Dict[str, Any]) -> List[str]:
@@ -370,6 +401,18 @@ class GlvStatsStep(MultiSourceStep):
                   "them as one pile of pixels; each box measures every box on "
                   "its own and reports the typical one, the odd one out, and "
                   "which box that was."),
+        ),
+        ParamSpec(
+            name="judge", type="choice", default=JUDGE_DEFAULT,
+            choices=list(METRIC_CHOICES), label="Pick the odd one by",
+            show_when=("across_boxes", (EACH_BOX,)),
+            help=("Which statistic decides the odd box out. Every box is "
+                  "compared against the middle of all the other boxes, in "
+                  "robust sigmas - the winner's box and score come out as "
+                  "worst_x/y/w/h and worst_score, ready to rank a report by "
+                  "and to draw on the overlay. The median ignores a few hot "
+                  "pixels inside a box; use the max to hunt for a single "
+                  "bright speck instead."),
         ),
         # ---- 跟誰比（F18 第 5 步）------------------------------------------
         ParamSpec(
@@ -492,10 +535,13 @@ class GlvStatsStep(MultiSourceStep):
                                cmp_feature_name("snr", DEFAULT_COMPARE_STAT)])
         if str(params.get("across_boxes", POOLED)) == EACH_BOX:
             # 一格一格量：每個數字變成「典型 / 最不一樣的那一格 / 那是第幾格」。
+            # ⚠ 宣告是「**可能**會產出的」（同上面 snr/tstat 那行）：worst 那
+            # 一組在只剩一格可量的 defect 上算不出來，那一顆就不會有那幾格。
             spread = [n + suffix for n in base
                       for suffix in (TYPICAL_SUFFIX, OUTLIER_SUFFIX,
                                      OUTLIER_BOX_SUFFIX)]
-            return spread + [BOX_COUNT] + extra
+            return (spread + [BOX_COUNT] + list(WORST_FEATURES)
+                    + list(SCORE_FEATURES) + extra)
         return base + extra
 
     @classmethod
@@ -678,11 +724,20 @@ class GlvStatsStep(MultiSourceStep):
     # ---- 一格一格量（F18 第 6 步）------------------------------------------
     @classmethod
     def _each_box(cls, ctx: Context, p: Dict[str, Any]) -> bool:
-        """要一格一格量嗎（只有「這個區域真的有好幾格」時才算數）。"""
+        """要一格一格量嗎（接了區域、而且它在這一顆上真的存在）。
+
+        ⚠ 這裡以前寫 ``roi_count > 1`` —— 單框的區域**安靜地退回 pooled**，
+        於是同一格參數有兩種意思，而且宣告（`feature_names` 只看參數，吐的是
+        帶後綴的名字）跟實際寫出的（pooled 的裸名）對不上。改成 ``>= 1``
+        （F31，使用者定調「不要偷偷退回 pooled」）：單框走同一條路，吐
+        ``boxes = 1`` 與那一格自己的 `_typical`/`_outlier`，只是沒有「其他格」
+        可比所以沒有 worst。``== 0`` 仍走 pooled —— 那是「區域在這一顆上
+        不存在」，讓 `roi_pixels` 用它既有的錯誤訊息講。
+        """
         if str(p.get("across_boxes", POOLED)) != EACH_BOX:
             return False
         region = str(p.get(cls.REGION) or "").strip()
-        return bool(region) and ctx.roi_count(region) > 1
+        return bool(region) and ctx.roi_count(region) >= 1
 
     def _measure_each_box(self, ctx: Context, img, p: Dict[str, Any],
                           mids: List[str]) -> Dict[str, float]:
@@ -717,8 +772,11 @@ class GlvStatsStep(MultiSourceStep):
             boxes_by_stat = self._reference_boxes(ctx, ref_image, p, ref_region)
         compare_names = (cmp_feature_names(p) if ref_px is not None else [])
 
+        judge = _judge_of(p)
+        judge_canon = _canonical(judge)
         per_box: List[Dict[str, float]] = []
         kept_index: List[int] = []
+        judge_vals: List[float] = []
         total_px = 0
         for i, (x, y, w, h) in enumerate(rects):
             if w <= 0 or h <= 0:
@@ -741,6 +799,10 @@ class GlvStatsStep(MultiSourceStep):
                         f"glv_p<0-100>.")
                 one[mid] = algo_glv.glv_value(
                     raw if canon == "glv_sat_frac" else patch, canon)
+            # 判準統計量獨立於 Statistics 那一格（使用者挑 max 當判準時不必
+            # 為此多勾一顆膠囊）；已經算過就不重算。
+            judge_vals.append(one[judge] if judge in one else algo_glv.glv_value(
+                raw if judge_canon == "glv_sat_frac" else patch, judge_canon))
             if ref_px is not None:
                 one.update(self._compare_values(patch, ref_px, p, boxes_by_stat))
             per_box.append(one)
@@ -769,6 +831,38 @@ class GlvStatsStep(MultiSourceStep):
             out[name + OUTLIER_SUFFIX] = float(values[k])
             out[name + OUTLIER_BOX_SUFFIX] = float(kept_index[k])
 
+        # ---- 總冠軍（F31）：照 `judge` 挑出最異常的那一格 -------------------
+        # 只有一格可量的時候**不吐**（沒有「其他格」可比）—— 不是 0：一個 0
+        # 分的 worst 讀起來像「量了而且很正常」，而真相是「沒得比」。
+        worst_note: Optional[Dict[str, Any]] = None
+        if len(per_box) >= 2:
+            scores, baselines, spreads = algo_glv.odd_box_scores(judge_vals)
+            k = int(np.argmax(scores))      # 平手取第一個（照框的順序，決定性）
+            wi = int(kept_index[k])
+            wx, wy, ww, wh = (float(v) for v in rects[wi])
+            out["worst_i"] = float(wi)
+            # ROI 的框就是報表上要畫的那個框（只有一種框）—— 座標不另外量，
+            # 逐位元組就是 `ctx.roi_rects()[worst_i]` 那一格。
+            out["worst_x"] = wx
+            out["worst_y"] = wy
+            out["worst_w"] = ww
+            out["worst_h"] = wh
+            out["worst_score"] = float(scores[k])
+            out["worst_value"] = float(judge_vals[k])
+            out["score_median"] = float(np.median(scores))
+            out["score_spread"] = algo_glv.robust_spread(scores)
+            # 疊圖讀的那一份（畫 ROI 框、標框內像素）—— **跟上面的特徵同一次
+            # 計算**：baseline / spread 是像素判準的分母，各自再算一次的話，
+            # 圖上標紅而數字說正常的那一天遲早會來（Results R1 的形狀）。
+            # `spread` 已含地板（見 `odd_box_scores`），所以
+            # score == |value − baseline| / spread 逐位元組成立。
+            worst_note = {
+                "i": wi, "rect": [int(wx), int(wy), int(ww), int(wh)],
+                "score": float(scores[k]), "value": float(judge_vals[k]),
+                "baseline": float(baselines[k]), "spread": float(spreads[k]),
+                "judge": judge,
+            }
+
         # 面板畫的是**典型那一格**的分布（把幾百格疊起來畫等於畫了一張
         # 什麼都看不出來的圖）。
         mid_box = kept_index[int(np.argsort(
@@ -779,7 +873,7 @@ class GlvStatsStep(MultiSourceStep):
         self._note_distribution(
             ctx, typical_px, p,
             {n: out[n + TYPICAL_SUFFIX] for n in mids}, n_raw=n_raw,
-            box=mid_box, boxes=len(per_box))
+            box=mid_box, boxes=len(per_box), worst=worst_note)
         return out
 
     # ---- 量得準不準（F18 第 4 步）------------------------------------------
@@ -908,7 +1002,8 @@ class GlvStatsStep(MultiSourceStep):
                            feats: Dict[str, float], n_raw: int = 0,
                            thin: bool = False, box: int = -1,
                            boxes: int = 0,
-                           ref: Optional[Dict[str, Any]] = None) -> None:
+                           ref: Optional[Dict[str, Any]] = None,
+                           worst: Optional[Dict[str, Any]] = None) -> None:
         """把這一塊的灰階分布留給儀表（F18 第 2 步）。
 
         **畫面上的那張圖就是引擎算的這一份** —— UI 不自己再跑一次統計，不然
@@ -944,6 +1039,11 @@ class GlvStatsStep(MultiSourceStep):
             # 「相對」在這張卡上一直都只是幾個數字，而數字看不出「這個差在不在
             # 雜訊裡」；兩條分布疊起來一眼就看得出來。
             "ref": dict(ref) if ref else None,
+            # 逐框比較的總冠軍（F31）：`{i, rect, score, value, baseline,
+            # spread, judge}`。疊圖畫 ROI 框、標框內像素讀的是**這一份** ——
+            # 跟 `worst_*` 特徵同一次計算，不是第二份（會漂的那種）。
+            # 沒有逐框比較（pooled、單框）時是 None。
+            "worst": dict(worst) if worst else None,
         })
 
     # ---- 跟誰比（F18 第 5 步）----------------------------------------------
