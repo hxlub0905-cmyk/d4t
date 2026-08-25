@@ -19,6 +19,57 @@
 
 ---
 
+## F31 T4：pick 加「none」—— `_center` 從唯一解法變成一個選項（2026-08-25）
+
+使用者：「可以把 pick 換成在影像上挑，但 centre / strongest 還是可以自己選」、
+「我覺得只有在 patch 有用，但我想把它完全拿掉（或自己可以選）」。選項名
+使用者定了 `none`。
+
+### 開關只有一個家
+
+三張 Region 卡的家族宣告都經過 `_util.region_family`、執行都經過
+`set_region_family` —— 兩支各加一個 `pick` 旗標，off 只留主名字（不寫
+`_center`/`_others`、也不記 `regions_absent`：那兩個名字**沒有被宣告**，
+不是「該在而不在」）。單一出處 reader `_util.pick_rule_of`（照
+`glv_stats._reference_of` 的樣子）——**必要**而不只是整潔：`pick_defect_box`
+對不認得的 rule 會**安靜退回「離中心最近」**，`none` 必須在三個呼叫端短路。
+
+跟著挑選一起走的：`pick_by_signal`／`cross_pick_by_signal`（「有沒有真的用
+訊號挑」在不挑之下不存在）、`cross_dist_px`（「挑中那塊離中心多遠」同理）——
+宣告與執行同步拿掉，`test_what_it_declares_is_what_it_writes` 那條逐字相等
+照綠。`drop_edge_boxes` 的 `keep` 傳 -1（沒有受保護的框 —— 函式本來就安全）。
+
+### 錯誤訊息分兩種情況講
+
+`roi_rect_or_none` 那句「'<name>_center'（the box nearest the middle of the
+patch, **which is where the defect is**）」在 RSEM 大圖上是錯的解釋，會把人
+推去用一個無意義的名字。改成兩條路：patch 上 `_center` 是缺陷那一塊；大圖上
+「pick the box by signal … or use a card that compares all the boxes」。
+同族的無條件斷言一起改：`drop_edge`/`edge_margin` 的 help、兩張卡 `roi_out`
+的 help。加了一條 grep 式測試：三個模組的原始碼裡**不准再出現**那句話。
+
+### 畫布跟著宣告走
+
+* 埠數走 `resolve_regions_out` 自動 3→1（`_NodeItem.height` 自動縮）——
+  新 UI 測試：五層 × `none` = 1+5 顆埠、名字正好是五個主名。
+  `_MAX_REGION_PORTS` 不動（它數的是埠）。
+* `studio._focus_box_index` 的「離中心最近」退路在 `none` 的卡上是說謊
+  （引擎明講沒有哪一格特別，畫布卻畫一個醒目的）→ 新 `_picks_a_center()`：
+  宣告裡沒有 `_center` 就不畫。
+
+### 下游斷線要吵、舊 recipe 一個位元不變
+
+* `pick=none` ＋ 下游還指 `epi_center` → 現有 `unknown-region` lint 響
+  （新測試證明，而 `centre` 之下不響）。
+* 遷移**不需要**：預設仍 `centre`，舊 recipe 缺鍵補同一個預設（鐵則 9 的
+  形狀完全沒動到），全部既有測試不改一條斷言照綠。
+
+這一輪起容器裡裝得動 PySide6（＋ libegl1）—— UI 測試**逐檔**跑過
+region_edges（19）、f7_11_roi、gds_panel、f7_9_feedback、f10_canvas_reality、
+controls_readable，全綠。core 2240 過、黃金值三份全綠。
+
+---
+
 ## F31 T2：overlay 畫 ROI 框 —— 報表上圈出最異常的那一格（2026-08-25）
 
 使用者：「我說的把它框出來，只是最終在 final report 要用 overlay 把它框出來。」

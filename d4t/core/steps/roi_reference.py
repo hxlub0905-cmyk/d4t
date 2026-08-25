@@ -96,9 +96,9 @@ from ..pipeline.step import (
 )
 from ._util import (
     FEATURE_PREFIX_PATTERN, drop_edge_boxes, drop_edge_specs, ensure_gray,
-    output_prefix_spec, pick_defect_box, pick_rule_specs, prefix_features,
-    prefix_names, region_family, region_fact_names, region_facts,
-    require_image, set_region_family,
+    PICK_NONE, output_prefix_spec, pick_defect_box, pick_rule_of,
+    pick_rule_specs, prefix_features, prefix_names, region_family,
+    region_fact_names, region_facts, require_image, set_region_family,
     LIMIT_MAX_BOXES,
 )
 
@@ -306,9 +306,10 @@ class RoiReferenceStep(Step):
                           "not start with a digit"),
             show_when=("method", (METHOD_PROFILE,)),
             help=("What to call this set of regions. The name becomes the "
-                  "prefix on every number measured in it, and you point the "
-                  "measure cards at <name>_center (the one the defect is in) "
-                  "and <name>_others (all the rest, your baseline)."),
+                  "prefix on every number measured in it. When “Which box is "
+                  "the defect in” picks one, you also get <name>_center (the "
+                  "picked box) and <name>_others (all the rest, your "
+                  "baseline)."),
         ),
         ParamSpec(
             name="layers", type="channel_map", default="", row_kind="labels",
@@ -403,7 +404,7 @@ class RoiReferenceStep(Step):
                  if method == METHOD_GDS else [])
         out: List[str] = []
         for name in names:
-            out.extend(region_family(name))
+            out.extend(region_family(name, pick_rule_of(params) != PICK_NONE))
         return out
 
     @classmethod
@@ -420,7 +421,9 @@ class RoiReferenceStep(Step):
                              for f in _EXTRA_REGION_FEATURES)
         else:
             names = region_fact_names(regions)
-        names.append(_PICK_FEATURE)
+        if pick_rule_of(params) != PICK_NONE:
+            # ``none`` 沒有「有沒有真的用訊號挑」可言 —— 那一格跟著挑選一起走。
+            names.append(_PICK_FEATURE)
         return prefix_names(params.get("output_prefix", ""), names)
 
     @classmethod
@@ -474,7 +477,14 @@ class RoiReferenceStep(Step):
         return self._run_gds(ctx, self.validate_params(params))
 
     def _pick(self, ctx: Context, p: Dict[str, Any], boxes, shape):
-        """哪一塊是缺陷那一塊 —— **三張 Region 卡逐字同一支**。"""
+        """哪一塊是缺陷那一塊 —— **三張 Region 卡逐字同一支**。
+
+        ``pick="none"`` 回 ``(-1, False)``：**這裡短路**，不能靠
+        `pick_defect_box`（它對不認得的 rule 會安靜退回「離中心最近」）。
+        -1 順便就是 `drop_edge_boxes` 的「沒有受保護的框」。
+        """
+        if pick_rule_of(p) == PICK_NONE:
+            return -1, False
         judge = None
         if str(p["pick"]) == "strongest":
             key = str(p.get("pick_source", "") or "").strip()
@@ -548,7 +558,8 @@ class RoiReferenceStep(Step):
                         rects, shape, float(p["edge_margin"]), idx)
                 set_region_family(ctx, self.key, name,
                                   algo_mask.to_normalised(rects, shape),
-                                  idx, edge_dropped)
+                                  idx, edge_dropped,
+                                  pick=pick_rule_of(p) != PICK_NONE)
                 found += 1
             else:
                 # **不退回整張圖。** 那會安靜地量到全部的像素，而那是錯的
@@ -566,14 +577,15 @@ class RoiReferenceStep(Step):
             # 這張卡多的那一個。**三個名字各報各的** —— 「這一顆上有沒有
             # `epi_others`」跟「有沒有 `epi`」是兩個不同的問題，而下游問的是
             # 它接的那一個。
-            feats.update(region_facts(ctx, region_family(name), shape,
-                                      clipped=clipped,
-                                      edge_dropped=edge_dropped))
+            feats.update(region_facts(
+                ctx, region_family(name, pick_rule_of(p) != PICK_NONE), shape,
+                clipped=clipped, edge_dropped=edge_dropped))
             feats["%s_pieces" % name] = float(len(set(piece_of)))
 
         feats["layout_ok"] = 1.0 if found else 0.0
         feats["layout_layers"] = float(found)
-        feats[_PICK_FEATURE] = 1.0 if by_signal_any else 0.0
+        if pick_rule_of(p) != PICK_NONE:
+            feats[_PICK_FEATURE] = 1.0 if by_signal_any else 0.0
         ctx.add_features(prefix_features(p["output_prefix"], feats))
 
         # 儀表用（跟另外兩張 Region 卡同一個慣例）：**UI 畫的就是引擎算的這一份**。

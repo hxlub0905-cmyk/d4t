@@ -5,7 +5,7 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 b7de91c3029b706bf544976890dcf876cabb5a6b CLAUDE.md
 87bdb4613531303fd0dcd79696bc65b14675d267 README.md
-621488da3ee933d1ad474fe3a194790242d5fe39 SESSION_LOG.md
+14a2e6e6f898876c73b281597401cfee4023c01e SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -56,7 +56,7 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 5522c2df74f5a6ec151b546b642cf465eccad470 d4t/core/pipeline/recipe.py
 230ad64e32b76b0fd8e37cb883de6c4b2ff77c87 d4t/core/pipeline/step.py
 d54104de166f940371dd49bf01f0c8cd482d76f4 d4t/core/steps/__init__.py
-98a7f6596516eaac919254e1d3372922d7af5c66 d4t/core/steps/_util.py
+d9b4267ae492296b55f8c457451a6c86b8b8f531 d4t/core/steps/_util.py
 c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
 cf162d9e699b12b6e4cd5d6d9706484b19eda598 d4t/core/steps/align_to.py
 2c48cd738d30003227a9aad3f34e5c8565a9c6ab d4t/core/steps/arith.py
@@ -73,10 +73,10 @@ ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
 a0a1b0f875d4950a15d4160da5ff5716f83ac9bd d4t/core/steps/output.py
 0299cafc4d75895f8b322be5433f7fb3e37455d3 d4t/core/steps/pair_source.py
 46e24cde47cccae307704861c349c75887a27da4 d4t/core/steps/quality.py
-b8cee087adb193dff32a8ae69ad7981ad882d8f5 d4t/core/steps/roi_cross.py
+acdb58380e184c616547caf40a7b0933f91f14a5 d4t/core/steps/roi_cross.py
 f9c9c80c5382b2d3a03602fb5be62b2c09abf81e d4t/core/steps/roi_mask.py
-7541bc1c78347558ea358295a66f3c5d25967dfa d4t/core/steps/roi_reference.py
-916055526d377548b4771fda3cfbbf9aab1eb5e9 d4t/core/steps/roi_template.py
+ee7d169391f2bdcd507ca75a192efb21d2148990 d4t/core/steps/roi_reference.py
+47b750ebaa8dbad663c60dba0961a8ba372259b8 d4t/core/steps/roi_template.py
 d2d8addef914c6e008d5c6c3bcd94b62faaa60c8 d4t/core/steps/tone.py
 0a37eeb8bcaa987e2955fbc1fdf0b1598461380c d4t/core/store/__init__.py
 9a3eed9632b5f594658ab22ac49ccdcc4e17472b d4t/core/store/results.py
@@ -86,7 +86,7 @@ bcea66e1a82ee590f997bbf319fea696277be9f6 d4t/ui/app.py
 f8cbf586f20a72eb7dbeae1b04aaf0d47f3cbe6a d4t/ui/assets/d4t-wordmark.svg
 a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
 87bce11608d08f4302947e917b2b24d076571775 d4t/ui/branding.py
-3005ab4ee7867ecd9587f57aa748f0d8677c0e1e d4t/ui/canvas.py
+145ba310d181d68b7a544f80f4e76ffd75038371 d4t/ui/canvas.py
 3b58b7e078d58ad84a8939734b65952a75a029f3 d4t/ui/cell_canvas.py
 ba56fb546fe526adff22b670501f0eecf322cfde d4t/ui/decide_panel.py
 f35d9a2caf5de689eca2bef5df59e460d1617c46 d4t/ui/gallery.py
@@ -98,7 +98,7 @@ a108febbe68c248b3cc2c8b05bd5cd079984772c d4t/ui/output_band.py
 1d1ca0ee2e4ebbedfa11b027bb9e7d735500ad2d d4t/ui/route_badge.py
 11a38b9e760697b23510805b56706f1eb8f6c85e d4t/ui/route_panel.py
 dee39628f8ce1af0cf87d9edee3ed1c6074db962 d4t/ui/scope.py
-bfba06950644522db8aa225a68e81356c255495b d4t/ui/studio.py
+f401b2b3c8b59b9c6e223ae05419f33f40505a08 d4t/ui/studio.py
 b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 44f3712558bc51d6e32e76b2f85eb0e07b016328 d4t/ui/theme.py
 3cc7d61199e03eaba0eb61f5a749b9f6cfca9ba5 d4t/ui/threshold_view.py
@@ -206,7 +206,7 @@ daf046d0b51f240995f5347e86158007e42c03b1 tests/test_output_bundle.py
 342afa983abf91cec2b2b54f548fb6161a6c809b tests/test_pair_source.py
 34f1bcdbffc5c85f790e98e5bd1c4b1f10fe795f tests/test_period_golden.py
 37fe3291f5eb15938ef1e8097b3a955e106be9f4 tests/test_phase_origin.py
-76eb1fc2423bf8c68fa483116f9a6cffd37d3daa tests/test_pick_defect_box.py
+61ca20a05b7fdc9a2f644f506a99c6991b1c5fa7 tests/test_pick_defect_box.py
 d3bf372a8505a94d5d189082b01b566b036bc87c tests/test_quality.py
 1cffe766e317628f5e972907d5cd093261da2cf2 tests/test_rank_without_a_score.py
 ce96e14fa4e4370968384ad979e08b3ea9f9dfb8 tests/test_recipe.py
@@ -282,7 +282,7 @@ e2a6023e7f084d770093b0242979d5b96551af10 tests/test_ui_f9_7_user_draws_the_lines
 f480eedce6d10f8e192050bdbe65d03676911df0 tests/test_ui_ground_truth.py
 f6a8f5fde90667317b98ab75b71f1ed5f10d68ef tests/test_ui_input_kinds.py
 799d26af534c4cc7522b65b1678a6e8c2fb54c43 tests/test_ui_output_band.py
-d6cb858f6d158e260bc9b92be13e52fdc93be42d tests/test_ui_region_edges.py
+a8ece3542ff939d54833c5ccd72cd6936cbef2a7 tests/test_ui_region_edges.py
 f35854d42e3a131d727f21a57e761f4d4ec87bc4 tests/test_ui_results.py
 a1b67be14f6e990a9ef7434a8ff9a567f94f4c12 tests/test_ui_results_table.py
 5e4e6505131825e584a8664806ddb3f7d514824c tests/test_ui_route_by.py

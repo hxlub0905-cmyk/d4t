@@ -450,8 +450,8 @@ def drop_edge_specs(section: str) -> List[ParamSpec]:
                   "partly on the image, or sits on a stripe that is itself "
                   "half cut off - the gray level it reports is measured over "
                   "fewer pixels and over the wrong ones, and it still looks "
-                  "like a perfectly normal number. The box the defect is in "
-                  "is always kept (see below)."),
+                  "like a perfectly normal number. A box picked as the "
+                  "defect's is always kept (see below)."),
         ),
         ParamSpec(
             name="edge_margin", type="float", default=4.0, min=0.0, max=64.0,
@@ -459,10 +459,11 @@ def drop_edge_specs(section: str) -> List[ParamSpec]:
             show_when=("drop_edge", (True,)),
             help=("How close to the edge of the image is too close, in "
                   "pixels. A box is dropped when any part of it falls inside "
-                  "this band. The one box the defect is in is never dropped - "
-                  "it is not one of the samples, it is the thing being "
-                  "measured, and dropping it would quietly point "
-                  "<name>_center at a box the defect is not in."),
+                  "this band. When a box was picked as the defect's "
+                  "(<name>_center), that one is never dropped - it is not "
+                  "one of the samples, it is the thing being measured, and "
+                  "dropping it would quietly point <name>_center at a box "
+                  "the defect is not in."),
         ),
     ]
 
@@ -481,7 +482,24 @@ def drop_edge_specs(section: str) -> List[ParamSpec]:
 #: 為什麼是一格參數而不是一張新卡：兩者挑的是**同一組框裡的同一個東西**，
 #: 差別只在「憑什麼挑」。做成兩張卡的話，下游的 ``<name>_center``
 #: 會有兩個來源，而它們遲早會漂。
-PICK_RULES = ("centre", "strongest")
+#:
+#: **第三個值 ``none`` = 不挑**（F31 T4，使用者：「我覺得只有在 patch 有用，
+#: 但我想把它完全拿掉（或自己可以選）」）。RSEM 大圖上缺陷不在中央，
+#: ``_center`` / ``_others`` 那兩個名字是雜訊 —— 選了 ``none`` 就只留主名字，
+#: 挑選交給下游的量測卡（GLV 的 each box 逐框比較）。
+PICK_NONE = "none"
+PICK_RULES = ("centre", "strongest", PICK_NONE)
+
+
+def pick_rule_of(params) -> str:
+    """這組參數的挑框規則（不認得的字、沒填的一律當 ``centre``）。
+
+    **不要在別處直接讀 ``params["pick"]`` 來分支**（同 `glv_stats._reference_of`
+    的理由）—— 尤其因為 :func:`pick_defect_box` 對它不認得的 rule 會**安靜地
+    退回「離中心最近」**：``none`` 必須在呼叫端短路，不能靠它。
+    """
+    got = str(params.get("pick", "centre") or "centre").strip()
+    return got if got in PICK_RULES else "centre"
 
 #: 「訊號最強」在挑之前先做的均值視窗（px）。
 #:
@@ -511,10 +529,16 @@ def pick_rule_specs(section: str) -> List[ParamSpec]:
                              "on the image stream you drag in below. Use this "
                              "when the coordinate is off, or when the defect "
                              "does not sit in the middle.",
+                PICK_NONE: "Do not pick one. On a full-size image the defect "
+                           "is not in one particular box, so <name>_center "
+                           "and <name>_others are not made - only the plain "
+                           "set of boxes, and a measure card (GLV, box by "
+                           "box) finds the odd one out.",
             },
-            help=("How to tell which of these boxes the defect is in - that is "
-                  "the one that becomes <name>_center, and every other one "
-                  "becomes the baseline <name>_others."),
+            help=("How to tell which of these boxes the defect is in. Pick "
+                  "centre or strongest and that box becomes <name>_center "
+                  "with every other one as the baseline <name>_others; pick "
+                  "none and only the plain name is made."),
         ),
         ParamSpec(
             name="pick_source", type="image_key", direction="in", default="",
@@ -751,12 +775,17 @@ def roi_rect_or_none(ctx, step_key: str, image, roi_name):
         # 量框本身）本來就該指名單一的框，而每張多框卡都會另外給一個
         # ``<name>_center``（離 patch 中心最近的那一塊，也就是缺陷所在的那塊）。
         if ctx.roi_count(name) > 1:
+            # ⚠ 分兩種情況講（F31 T4）。以前這句無條件寫著「which is where
+            # the defect is」—— 那個假設只在 patch 上成立（以缺陷為中心裁切），
+            # 在 RSEM 大圖上是錯的，而錯的解釋會把人推去用一個無意義的名字。
             raise StepError(
                 step_key,
                 "region '%s' is %d separate boxes, and this card needs a "
-                "single one. Point it at '%s_center' (the box nearest the "
-                "middle of the patch, which is where the defect is), or use a "
-                "card that can measure across several boxes."
+                "single one. On a patch cut round a defect, '%s_center' is "
+                "the box the defect is in. On a full-size image the defect "
+                "is not in the middle - either pick the box by signal (the "
+                "Region card's “Which box is the defect in”), or "
+                "use a card that compares all the boxes."
                 % (name, ctx.roi_count(name), name))
         # 具名 ROI 存的是正規化座標，一樣需要尺寸才展得開
         return None if shape is None else ctx.roi_rect(name, shape)
@@ -781,8 +810,13 @@ def roi_rect_or_none(ctx, step_key: str, image, roi_name):
 
 
 def set_region_family(ctx, step_key: str, name: str, norm_boxes,
-                      centre_index: int = 0, edge_dropped: int = 0) -> int:
+                      centre_index: int = 0, edge_dropped: int = 0,
+                      pick: bool = True) -> int:
     """一組框 → **三個**具名區域：全部、缺陷那一塊、其餘那些（F11 Region-1）。
+
+    ``pick=False``（``pick="none"``，F31 T4）只放主名字：不寫 ``_center`` /
+    ``_others``、也不記 ``regions_absent``（那兩個名字**沒有被宣告**，不是
+    「該在而不在」）。宣告端的開關在 :func:`region_family` —— 兩支要一起看。
 
     為什麼是三個
     ------------
@@ -814,6 +848,9 @@ def set_region_family(ctx, step_key: str, name: str, norm_boxes,
     """
     boxes = [tuple(float(v) for v in b) for b in norm_boxes]
     if not boxes:
+        return 0
+    if not pick:
+        ctx.set_roi_boxes(name, boxes)
         return 0
     i = max(0, min(int(centre_index), len(boxes) - 1))
     ctx.set_roi_boxes(name, boxes)
@@ -910,10 +947,18 @@ def region_facts(ctx, names, shape, clipped: bool = False,
     return out
 
 
-def region_family(name: str):
-    """一個區域名 → 它實際定義的三個名字（宣告用；空名字回空）。"""
+def region_family(name: str, pick: bool = True):
+    """一個區域名 → 它實際定義的名字（宣告用；空名字回空）。
+
+    ``pick=True``（centre / strongest）是三個：全部、缺陷那一塊、其餘那些。
+    ``pick=False``（``pick="none"``，F31 T4）只有主名字 —— 大圖上沒有
+    「缺陷那一塊」可言，``_center`` / ``_others`` 是雜訊。三張 Region 卡的
+    宣告都經過這一支，開關只在這裡。
+    """
     n = str(name or "").strip()
-    return [n, "%s_center" % n, "%s_others" % n] if n else []
+    if not n:
+        return []
+    return [n, "%s_center" % n, "%s_others" % n] if pick else [n]
 
 
 def crop_to_roi(ctx, step_key: str, image, roi_name):
