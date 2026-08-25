@@ -1395,6 +1395,12 @@ class GlvInspector(Inspector):
             text += ("  ⚠ %.0f%% of the pixels sit at 0 or 255 — whatever was "
                      "in them is already gone."
                      % (100.0 * max(float(r.get("sat") or 0.0) for r in hot)))
+        worst = [r for r in rows
+                 if isinstance(r.get("worst"), dict) and r.get("worst")]
+        if worst:
+            w = worst[0]["worst"]
+            text += ("  ·  odd box out: #%d at %.1fσ"
+                     % (int(w.get("i", -1)), float(w.get("score") or 0.0)))
         return text
 
     #: 少於這麼多像素就講一句話（見 :meth:`summary`）。
@@ -1497,6 +1503,15 @@ class GlvInspector(Inspector):
             # 不說的話這條分布看起來像整個區域的，那是兩個不同的東西。
             label += "  ·  typical box #%d of %d" % (int(row.get("box") or 0),
                                                      int(row.get("boxes") or 0))
+            worst = row.get("worst") or {}
+            if isinstance(worst, dict) and worst:
+                # 贏家（F32）：影像上描四邊的那一格，這裡講「第幾格、幾個 σ、
+                # 照什麼挑」—— 跟 `worst_*` 特徵同一份 meta，不重算。
+                judge = str(worst.get("judge") or "")
+                label += "  ·  worst #%d at %.1fσ%s" % (
+                    int(worst.get("i", -1)), float(worst.get("score") or 0.0),
+                    (" (%s)" % judge[4:] if judge.startswith("glv_")
+                     else (" (%s)" % judge if judge else "")))
         head = QRectF(band.left(), band.top(), band.width(), 13)
         p.setPen(colour)
         p.drawText(head, Qt.AlignLeft | Qt.AlignVCenter, label)

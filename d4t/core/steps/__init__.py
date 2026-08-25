@@ -13,6 +13,15 @@
   feature_math, feature_fill,
   output_csv, output_report, output_klarf, output_image
 
+**2026-08-25（F31 T5）：``find_defect`` 刪掉了。** 使用者：「我覺得 find
+defect 不需要。」它 2026-08-25 早上才進來（F29），零 recipe、零 fixture、
+零黃金值在用 —— 「先收後刪」那條規矩服務的是「舊 recipe 還在用」，這裡沒有
+那個問題，所以直接刪。三類輸出全部有了替代：位置＝GLV 逐框比較的
+``worst_x/y/w/h``（框就是 ROI 自己）、突出度＝``worst_score``、框內細節＝
+疊圖的像素標記（只畫，不吐數字）。``algo/shape.py`` 的 ``find_blobs`` /
+``BlobScan`` / ``BlobHit`` 一起刪（唯一呼叫者就是這張卡）；``measure_blob``
+與共用的準位不動 —— CD 在用。
+
 **2026-08-25：``snr_map``（畫面上叫 Z-map）刪掉了。** 使用者：「Z-map 功能請
 先幫我完整刪掉」。代價量過：兩份 fixture recipe 有三個 `snr_map` 節點，而
 **沒有任何一張下游的卡讀它那條流**（`cd` / `glv` 讀的是 `test` 與 `diff`），
@@ -71,19 +80,15 @@ from . import roi_mask       # roi_mask（區域 → 0/255 mask 影像流，F8c�
 # 插入序回，而 REGISTRY 的插入序就是這裡的 import 序 —— 卡片庫裡看到的先後
 # 住在這幾行，不住在任何一張卡上。
 #
-# `find_defect`（F29）**接在那三張後面**：使用者點名的順序是那三張，而在中間
-# 插一張等於替他重排一次。它是三種情況下的退路（沒在量 CD、CD 在線那一支、
-# 一塊區域裡不只一個東西），不是常用的第一張。
 from . import glv_stats      # glv_stats（GLV：stats / compare）
 from . import cd             # cd_measure（CD）
 from . import quality        # focus_quality（Focus index）
-from . import find_defect    # find_defect（Find defect：框 + 強度）
 from . import feature_math   # feature_math（Algo 段：數字 → 數字）
 from . import feature_fill   # feature_fill（Algo 段：量不到的那一格）
 from . import output         # Output 段（csv / report / klarf / image）
 
 __all__ = [
     "load", "load_sidecar", "normalize", "denoise", "tone", "flatten", "align", "arith",
-    "quality", "glv_stats", "find_defect", "feature_math", "feature_fill",
+    "quality", "glv_stats", "feature_math", "feature_fill",
     "output",
 ]

@@ -68,6 +68,8 @@ def test_the_highlighted_box_is_the_one_the_card_picked(qapp, monkeypatch):
                  (0.80, 0.45, 0.1, 0.1)]      # 右邊
         monkeypatch.setattr(type(win), "_defines_regions",
                             lambda self: True, raising=False)
+        monkeypatch.setattr(type(win), "_picks_a_center",
+                            lambda self: True, raising=False)
         # 卡片挑走的是最右邊那一塊（＝ 訊號最強的那一塊）
         monkeypatch.setattr(type(win), "_center_rects",
                             lambda self: [boxes[2]], raising=False)
@@ -76,6 +78,11 @@ def test_the_highlighted_box_is_the_one_the_card_picked(qapp, monkeypatch):
         monkeypatch.setattr(type(win), "_center_rects",
                             lambda self: [], raising=False)
         assert win._focus_box_index(boxes) == 1
+        # `pick="none"`（F31 T4）：卡片明講「沒有哪一格是缺陷那一塊」——
+        # 退回舊規則畫一個醒目的，等於畫布替引擎說一句它沒說的話。
+        monkeypatch.setattr(type(win), "_picks_a_center",
+                            lambda self: False, raising=False)
+        assert win._focus_box_index(boxes) == -1
     finally:
         win.close()
         win.deleteLater()

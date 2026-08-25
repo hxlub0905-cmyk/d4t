@@ -42,7 +42,7 @@ inner spacer 6 nm、BSE 對比、LER、束斑模糊、shot noise）：
 ----
     python tools/make_mgext.py <輸出目錄> [顆數] [seed]
 
-預設 60 顆、seed 23 —— 那正是 `docs/plans/F20-pick-defect-box.md` 與
+預設 60 顆、seed 23 —— 那正是 `docs/history/plans/F20-pick-defect-box.md` 與
 2026-08-22 那份校正報告用的那一批。
 """
 from __future__ import annotations

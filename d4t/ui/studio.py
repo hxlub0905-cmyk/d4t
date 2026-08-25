@@ -4982,6 +4982,11 @@ class StudioWindow(QMainWindow):
             # 量測卡要指哪一格，走的是自己的 `overlay_marks`（那才是
             # 「這一顆真的量到了什麼」那條路）。
             return -1
+        if not self._picks_a_center():
+            # **``pick="none"`` 的 Region 卡也不畫醒目框**（F31 T4）：它明講
+            # 「沒有哪一格是缺陷那一塊」，退回「離中心最近」畫一個醒目的，
+            # 等於畫布替引擎說了一句它沒說的話。
+            return -1
         best, best_d = -1, None
         for i, (nx, ny, nw, nh) in enumerate(boxes):
             d = (nx + nw / 2.0 - 0.5) ** 2 + (ny + nh / 2.0 - 0.5) ** 2
@@ -5001,6 +5006,21 @@ class StudioWindow(QMainWindow):
             return bool(get_step(node.step).resolve_regions_out(node.params))
         except Exception:                  # noqa: BLE001 — 顯示用，不能擋畫面
             return False
+
+    def _picks_a_center(self) -> bool:
+        """這張卡有沒有挑一塊 —— 宣告裡有沒有 ``<name>_center``。
+
+        `pick="none"` 的 Region 卡定義區域但**不挑**，宣告裡因此沒有那個
+        名字（`_util.region_family` 的開關）—— 醒目框跟著挑選一起走。
+        """
+        node = self.model.nodes.get(self.selected_node or "")
+        if node is None:
+            return False
+        try:
+            names = get_step(node.step).resolve_regions_out(node.params)
+        except Exception:                  # noqa: BLE001 — 顯示用，不能擋畫面
+            return False
+        return any(str(n).endswith("_center") for n in names)
 
     def _center_rects(self) -> List[Sequence[float]]:
         """這一顆上 ``<name>_center`` 實際落在哪 —— 沒跑過就是空的。"""

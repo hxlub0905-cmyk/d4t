@@ -56,10 +56,11 @@ def stripes(size=192, period=16, width=8, bg=40.0, fg=200.0):
 def test_both_methods_share_the_same_wiring_params():
     card = get_step(CARD)
     names = {s.name: s for s in card.params}
-    for shared in ("pick", "pick_source", "drop_edge", "edge_margin",
+    for shared in ("pick", "drop_edge", "edge_margin",
                    "output_prefix", "max_boxes", "method"):
-        assert names[shared].show_when in (None, ("pick", ("strongest",)),
+        assert names[shared].show_when in (None,
                                            ("drop_edge", (True,))), shared
+    assert "pick_source" not in names        # strongest 連線一起走了（F32）
     # 兩支各自的那幾格要**藏起來**，不是攤在那裡讓使用者猜。
     assert names["layers"].show_when == ("method", (METHOD_GDS,))
     assert names["source"].show_when[1] == (METHOD_PROFILE, METHOD_TEMPLATE)
@@ -77,13 +78,11 @@ def test_each_method_declares_only_the_stream_it_really_reads():
     assert gds == ["layout_label"]
 
 
-def test_judging_on_another_stream_is_declared_as_a_read():
-    """`pick="strongest"` 要判斷的那條流，畫布上也是一條線。"""
+def test_the_pick_choices_are_centre_and_none_only():
+    """``strongest`` 於 F32 刪掉（見 `_util.PICK_RULES` 的史料註解）。"""
     card = get_step(CARD)
-    got = card.resolve_reads(card.validate_params(
-        {"method": METHOD_PROFILE, "source": "test", "pick": "strongest",
-         "pick_source": "diff"}))
-    assert got == ["test", "diff"]
+    names = {s.name: s for s in card.params}
+    assert list(names["pick"].choices) == ["centre", "none"]
 
 
 

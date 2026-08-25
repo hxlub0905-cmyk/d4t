@@ -1,7 +1,9 @@
 # docs/history —— 封存
 
 做完的東西搬到這裡：按月封存的開發紀錄、已完成 milestone 的計畫書。
-**內容一個字都不改**，只是換個地方住。
+**搬的時候內容一個字都不改**，只是換個地方住 —— 要改的是**搬之前**那一步：
+把頂上的狀態標成 ✅ 並寫出它實際收在哪裡（一份寫著「未動工」而其實已經上線的
+計畫書，封存起來就是一句會誤導下一個人的話）。
 
 | 檔案 | 是什麼 |
 |---|---|
@@ -12,6 +14,20 @@
 | [`plans/F9-dag-streams.md`](plans/F9-dag-streams.md) | 影像流變成 DAG 上的線 ✅ —— CLAUDE.md 鐵則 10 引用它 |
 | [`plans/F10-canvas-tells-the-truth.md`](plans/F10-canvas-tells-the-truth.md) | 畫布要符合現實（剛加的卡前後都是空的、埠點得到、多連一）✅ |
 | [`plans/F12-region-edges.md`](plans/F12-region-edges.md) | 具名區域也有線了（虛線＋菱形埠，**線從參數推導、不存第二份**）✅ |
+| [`plans/F18-glv.md`](plans/F18-glv.md) | Measure 段第一張：Gray level ✅（三個互相獨立的問題、名字分家族、量得準不準是明講的）|
+| [`plans/F19-cd.md`](plans/F19-cd.md) | Measure 段第二張：CD ✅（原子單位從「一個區域」換成「一條量測線」，σ 就是 LWR）|
+| [`plans/F20-pick-defect-box.md`](plans/F20-pick-defect-box.md) | 哪一塊是缺陷那一塊（`_util.pick_defect_box`）✅ |
+| [`plans/F21-algo-and-roi.md`](plans/F21-algo-and-roi.md) | Algo 段要不要存在、ROI 值多少 —— **用量的不是用想的** ✅。§6 那條「黃金值是壞的」已於 2026-08-23 重凍解除（見該節後記）|
+| [`plans/F22-adc-multiclass.md`](plans/F22-adc-multiclass.md) | 多類別 ADC ✅ —— 這個 app 第一次分得出兩類以上 |
+| [`plans/F23-route-by.md`](plans/F23-route-by.md) | 分流：不同 CLASSNUMBER 走不同的卡片 ✅（三期全完成；`routes-drift` lint 定調為先不做）|
+| [`plans/F24-decision-tree.md`](plans/F24-decision-tree.md) | 判定樹上畫布 ✅ —— Algo 段在這一份 §5 解散進判定（八段變七段）|
+| [`plans/F25-adc-usable.md`](plans/F25-adc-usable.md) | 判定段要**有人會用** ✅（二元門檻的 UI 整支拿掉，舊 recipe 一打開就是樹）|
+| [`plans/F28-canvas-and-measure.md`](plans/F28-canvas-and-measure.md) | ADC 判定區拖得動拿得掉、Measure 段改名重排、Z-map 走人 ✅ |
+| [`plans/F29-detect-and-report.md`](plans/F29-detect-and-report.md) | 把已經量到的位置說出來 ＋ 報表 bundle ✅（A／B／C／D 全數完成）|
+
+**還在寫的計畫書留在 [`../plans/`](../plans/)**：`F0`（原始總計畫）、
+`F11`（Phase 2 的議程）、`F15`（⏸ 配對分析，使用者叫停）、
+`F26`／`F27`（各有一條等使用者定調的版面決定）。
 
 ## 為什麼要有這個目錄
 

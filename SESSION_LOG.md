@@ -6,7 +6,7 @@
 
 | 期間 | 在哪 |
 |---|---|
-| **2026-08-19 起**（第十六輪～）| 這個檔案（下面）—— 改名 d4t、F12 區域線、F13 UI、F14 入口搬進卡片、F15 配對分析、F16 畫布的八段、F17 純 DAG 引擎 |
+| **2026-08-19 起**（第十六輪～）| 這個檔案（下面）—— 改名 d4t、F12 區域線、F13 UI、F14 入口搬進卡片、F15 配對分析、F16 畫布的八段、F17 純 DAG 引擎、F18 GLV、F19 CD、F20–F25 多類別 ADC 與判定樹、F26/F27 判定與 Results 面板、F28–F30 位置／報表／Region 收卡、F31/F32 逐框比較 |
 | 2026-08-07 ～ 08-18（第十五輪以前）| [`docs/history/2026-08.md`](docs/history/2026-08.md) —— F8 純規則 ROI、畫布 n8n 化、Phase 1 收斂、F10、Phase 2 的 Input／Enhance／Region 三段 |
 | 2026-07 | [`docs/history/2026-07.md`](docs/history/2026-07.md) —— M0–M7、F7-9…F7-24 前半、兩台機器與搬運通道的成形 |
 
@@ -19,10 +19,555 @@
 
 ---
 
+## F32 收尾：像素染色只在「真的有異常」的顆上出現（2026-08-25）
+
+實測的第二個發現收掉：正常顆（#10，`worst_score` 2.7σ、bin 0）的疊圖上
+贏家框也**整格**染色。原因不是 bug 是尺度 —— 像素判準的分母是框間統計量的
+穩健散布（一批安靜的框常踩 1 灰階地板），遠小於像素雜訊（σ≈5 灰階），
+所以 3σ 門檻在**任何**框裡都有一堆像素過線。
+
+**做法：染色跟贏家自己的分數綁同一個 k**（`_roi_overlay_kwargs` 的條件多一項
+`worst["score"] >= k`）。`Mark pixels beyond k σ` 的語意變成一句完整的話：
+「這一格自己至少偏離 k 個 σ 時，把推它過線的像素標出來」—— 不新增參數、
+不新增概念，而 score 跟染色本來就是同一組 baseline/spread 算的（T1 的
+meta note），語意天然一致。實測：#2（47.9σ）照染、#10（2.7σ）整張安靜。
+
+否決的兩個候選：**調高預設 k** —— 發明一個跟影像相依的魔術數字，還安靜地
+弱化真缺陷的染色；**綁到 bin** —— F25 之後 bin 是判定樹的任意類別，
+「哪個 bin 算 flagged」沒有定義。
+
+驗收時逐像素對 PNG，又抓到一個藏在下面的：**贏家的粗描邊把小框整格塗滿**
+（cv2 的線騎在邊上畫、往內外各長一半 —— 5×9 px 的框配 3 px 四條邊就是
+實心色塊），染色畫在框底下所以 32 個像素一個都看不見；前一輪截圖裡
+「正常顆也整格染色」其實看到的是這個。修法：贏家描邊的粗細讓路給框的
+內部（`(min(w,h)−1)//3` 封頂），大框照舊是粗的。修完 #2 的框內染 15 px
+看得見、#10 的框內乾淨 —— 兩顆終於長得不一樣。
+
+順手把相關 md 對齊現況：ROADMAP 的 Measure 列補 F31/F32 一句、
+F0 草圖裡的 `blob_area` 範例加「曾在這裡」註記。這一輪整批 merge 回 main
+（使用者定調）。
+
+## F32 實測：端到端跑一輪，抓到一個「畫了等於沒畫」（2026-08-25）
+
+使用者：「實測跑一次，看截圖結果。」合成 RSEM lot（384²、12 顆、一半有真缺陷）
+＋手寫 recipe：`load_single` → `roi_reference`（stripes、`pick="none"`）→
+`glv_stats`（each box、judge=median）→ score=`worst_score` →
+`output_image`／`output_bundle`（rank_by=worst_score、draw all、mark 3σ）。
+
+### 量出來的
+
+* 12/12 跑完、51 ms/顆。每顆 ~500 個框（stripes 交會），`Draw at most` 的
+  自動退化警告如預期出現。
+* **照 `worst_score` 排序，前四名全是真缺陷**：bridge 47.9σ、bright_blob
+  29.0σ／6.7σ／4.7σ；九顆正常的擠在 2.7–4.1σ。兩顆 dark_blob 沒浮上來 ——
+  一小塊暗點動不了那格的 median，**這是 judge 的選擇不是機制的錯**（合成的
+  暗點太弱，換 q05 也拉不起來）。
+* 自訂 judge 端到端通：`glv_q05`（清單外的手寫 id）從 recipe 一路到 CSV 與
+  meta 都對。
+* 報表 bundle：贏家琥珀粗框＋像素染色正落在 bridge 上、鄰近細藍框、
+  `report.html` 的判定條／表格／點一列換圖都對。Studio offscreen 實跑：
+  GLV 面板 `typical box #401 of 527 · worst #439 at 4.7σ (median)`、
+  1–5 段設定區、單選膠囊，全部在畫面上。
+
+### 抓到的：贏家描邊跟區域框完全重疊 —— 畫了等於沒畫
+
+W2 的預覽把贏家描**四邊**。`overlay_marks` 的 docstring 自己寫著典型格為什麼
+用角點：「用線描的外框會跟區域框完全重疊、同一個顏色，等於沒畫」——
+我在贏家上原樣踩了一次，527 個綠框的截圖裡完全認不出哪一格是贏家。
+改成畫**一個 X（兩條對角線）**：不跟任何框的邊重合，再小的格子也認得出。
+測試跟著改並多一條「對角線的兩端 x、y 都不同（描邊做不到）」。
+
+一個看到但**不改**的：正常顆的疊圖上贏家框也整格染色（分數 2.7σ 也有像素過
+3σ）—— 那是任務書指定的像素判準（分母是框間統計量的散布，比像素雜訊小）
+照做的結果，而標籤上的 `score=2.698 bin=0` 讓讀圖的人分得出來。要更安靜可以
+把 `Mark pixels beyond` 調高，或哪天把染色綁到 bin 上 —— 等使用者真的被吵到
+再說。
+
+驗收：core 2203 過、黃金值三份全綠、f20_panel_truth／f19_cd／widgets 逐檔
+全綠。截圖（overlay ×2、report.html、Studio 全窗＋放大）都交給使用者了。
+
+---
+
+## F32 W3：GLV 設定區整理（2026-08-25）
+
+使用者：「GLV measure UI 介面（左側設定區）要做好看一點。」先 offscreen 截了
+一張現況（before/after 兩張都貼給使用者了），照截圖上看得到的問題逐條修：
+
+* **段落編號補齊成 1–5**：以前只有「3 · Compare against」與「4 · Which
+  pixels count」，前面四格是一塊沒名字的區。現在 `1 · What to measure`
+  （Statistics）、`2 · Boxes in the region`（across_boxes ＋ judge ——
+  逐框那兩格終於有自己的家）、3、4 不動、`5 · Output`（Name these results
+  以前因為沒有段，畫面上黏在第 4 段裡）。
+* **段標題下不再重複同名列標籤**：`_ParamRow` 的 echo 抑制以前只認逐字相等
+  （CD 的 "Report"）—— 帶編號的段（"3 · Compare against" vs 列標籤
+  "Compare against"）抓不到。改成先剝掉 `"N · "` 再比。掃過全 registry：
+  新規則只多吃掉 GLV 那兩列（across_boxes、reference），沒有誤傷。
+* `source` 那列補 `label="Measure on"`（原本顯示小寫的參數名 `source`，
+  跟其他 Title Case 的標籤不一致）。
+* judge 那列的裸下拉在 W2 已換成跟 Statistics 一致的單選膠囊。
+
+驗收：受影響 UI 檔逐檔全綠（widgets 58、f8_ui_polish、f8_advanced、
+controls_readable、f20_panel_truth、f19_cd、f7_9_feedback）、core 2203 過。
+黃金值不看（純 UI／label／section，引擎路徑零改動 —— label 與 section 不進
+recipe 的鍵）。
+
+---
+
+## F32 W2：judge 可自訂 ＋ 贏家框即時預覽（2026-08-25）
+
+使用者：「Pick the odd one by 除了 median 當 index 外，希望可以 custom 參數
+（可選或自定義）」＋「接上後 image stream 可以預覽 overlay 嗎（在還沒跑 batch
+之前，當下就看 outlier）」。
+
+### 自訂：清單只是常用的那幾個
+
+引擎其實**早就吃**任何 `_canonical` 認得的 id（glv_qNN／trim／above）——
+是 `judge` 的 `type="choice"` 嚴格驗證把它擋住了（驗證比 runtime 窄）。做法
+不是放鬆 choice，是新 ParamSpec 型別 **`metric_choice`**（`metric_chips` 的
+**單選**長相，同一條規矩：不強制值落在 choices，認不認得由卡片的 run() 說）：
+
+* 新 widget `MetricPick`（`MetricChips` 的子類）：同一種帶小圖的膠囊、同一顆
+  「+ Percentile…」，差別只有三件 —— 值是一個 id、點一顆關掉其他、**恆有一顆
+  選著**（取消最後一顆會留下空值，看起來像「取消沒生效」，不如不准）。
+  judge 那格從「顯示原始 id 的裸下拉」變成跟 Statistics 一致的膠囊 ——
+  這同時是 W3（好看）的一半。
+* 值格式不變（一個 id 字串）—— 舊 recipe 逐位元組相容，鐵則 9 不觸。
+* **打錯的 id 當場報錯**：`_judge_of` 以前安靜退回預設 —— 那是安靜換值
+  （使用者以為照 glv_q97 挑、整批其實照 median 挑，每顆都吐得出正常數字）。
+  改成 `measure` 裡用跟 `metrics` 同一句話 raise。
+
+### 即時預覽：不用等 batch
+
+預覽管線本來就每顆自動跑（切一顆 defect 就重跑一次 preview、marks 跟著刷），
+缺的只是 `overlay_marks` 沒讀 `worst`。現在：贏家那一格描**完整四邊**＋角點、
+`focus` 指著它（滿 alpha —— 它才是主角；典型那一格退成淡的，沒有 worst 時
+照舊聚焦典型格）。GLV 面板標題列加 `· worst #12 at 4.3σ (median)`，
+`summary()` 帶一句 —— 讀的都是 T1 的 `worst` note，跟 `worst_*` 特徵同一次
+計算。
+
+驗收：`test_glv_compare` 63 條（+5：custom id 端到端、爛 id 報錯、單值不收
+清單、預覽形狀 1+4 條線與 focus、無 worst 的退路）、`test_ui_widgets` +4
+（單選、不准空、手寫 id 顯示且選著、judge 列真的是 MetricPick）、
+UI 批 163 條全綠、core 2203 過、黃金值三份全綠。
+
+---
+
+## F32 W1：刪掉 pick 的 `strongest`（2026-08-25）
+
+使用者：「Which box is the defect in 這邊選 strongest 好像就跟後面量測卡功能
+稍微衝突了，我傾向留 centre & none。」**攤過代價之後仍定調直接刪**（有問過
+「收起來」的零成本選項 —— F20 量過 strongest 在 patch 座標偏移時是
+11/24→24/24、AUC 0.688→0.977 的差距）：大圖上「找最異常」現在整件事歸 GLV
+的逐框比較，patch 座標偏移那條路**從此沒有訊號救援**，只剩「離中心最近」。
+
+### 刪了什麼
+
+* `PICK_RULES` 剩 `("centre", "none")`；`pick_source`（Judge on 那條線）、
+  `pick_defect_box` 的訊號分支與 `PICK_SMOOTH_PX`（3×3 匹配濾波）、
+  `pick_by_signal`／`cross_pick_by_signal` 特徵（宣告＋寫出）全部一起走。
+  `pick_defect_box` 簡化成 `(boxes, shape) -> 索引`。
+* 三張 Region 卡的 `resolve_reads` 不再因 pick 多宣告一條流；
+  `_pick`／`_place` 的 judge 佈線拆掉。`cross_dist_px` 留著（離中心距離，
+  centre 之下仍有意義）。
+* 舊 recipe 填過 `strongest` 的**明確報錯**（choice 驗證），不遷移 ——
+  安靜換成 centre 等於安靜換一組數字（3c748a0 的規矩）。有測試鎖。
+
+### 順手校正一份漂掉的數字
+
+F20 的實測在 repo 裡有兩份且互相矛盾（`_util.py` 寫 14/24→23/24、
+`test_pick_defect_box.py` 寫 11/24→24/24）。以
+`docs/history/plans/F20-pick-defect-box.md` 為準（**11/24→24/24、
+AUC 0.688→0.977**），留下來的史料註解（`_util.PICK_RULES` 上那一段 ——
+照 F28「例子沒了寫進去」的樣子，把代價與「要回來得整支重做」寫明）用的是
+正確的那一份。
+
+驗收：core 2199 過、黃金值三份全綠（fixture 無 pick 鍵）、受影響 UI 檔
+逐檔全綠。`tests/test_pick_defect_box.py` 改寫成 11 條（含「strongest 不准
+安靜長回來」與「舊 recipe 報得出讀得懂的錯」）。
+
+---
+
+## F31 T5：刪掉 find_defect（2026-08-25）
+
+使用者：「我覺得 find defect 不需要。」T1–T3 做完之後它的三類輸出全部有了
+替代：位置＝GLV 逐框比較的 `worst_x/y/w/h`（框就是 ROI 自己）、突出度＝
+`worst_score`、框內細節＝疊圖的像素標記（只畫，不吐數字）。
+
+### 直接刪，不進 HIDDEN_STEPS
+
+「先收後刪」那條規矩（CLAUDE.md §5 那張表）服務的是「舊 recipe 還在用」——
+這張卡今天早上才進 main（F29），零 recipe、零 fixture、零黃金值在用。收起來
+只會留下一張沒人用、卻要一直維護的卡。這跟 `pattern_ref` 那次（rsem 準確率
+24/24 → 12/24）完全不同：這次的代價量出來是**零**。
+
+### 刪了什麼、留了什麼
+
+* 刪：`steps/find_defect.py`、`tests/test_find_defect.py`、
+  `steps/__init__.py` 的 import；`algo/shape.py` 的 `find_blobs` /
+  `BlobScan` / `BlobHit` / `_scan_fail`（**唯一呼叫者就是這張卡** ——
+  `cd.py` 用的是 `measure_blob`，`test_algo_shape.py` 也全是）。
+* 留：`measure_blob` 與兩支共用過的準位（`pick_levels`、
+  `edge.threshold_level`、`edge_quality`、`_MIN_CONTRAST`）—— CD 在用。
+* 連帶清（照 F28 刪 Z-map 的樣子，把「例子沒了」寫進去而不是放寬斷言）：
+  * `overlay._BOX_FEATURE_SETS` 的 `blob_*` 那組（產者沒了）；**連
+    `blobs=` 那個參數一起**（`ctx.meta["blobs"]` 的 richer path —— 全 repo
+    沒有任何東西在寫那個鍵，它是更早被刪的 blob 分割的遺跡）。
+    `primary_blob_box` 只剩 features 一個參數。
+  * `_util.AREA_FEATURES` 的 `blob_area_px`、`LENGTH_FEATURES` 的
+    `blob_deq` —— 各留一行「曾在這裡」的註記（加會吐面積的新卡時那張表
+    就是為那一刻留的）。
+  * `rank_by` help 的例子 `blob_strength` → `worst_score`（被鎖的
+    `"decision tree"`/`"file order"` 兩個子字串不動）。
+  * 卡片庫順序測試：Measure 斷言改成**正好三張** GLV → CD → Focus index。
+  * README 能力表（今天早上才寫上 Find defect 的那格）、卡片數 25/22 →
+    **24/21**。
+* 新的一條守門：`test_blob_features_are_gone_and_stay_gone` —— 哪天有一張卡
+  又吐 `blob_x` 這組名字它會紅，而那正是它要講的話。
+
+驗收：core 2205 過、黃金值三份全綠、Measure 段剩三張、受影響 UI 檔逐檔跑過
+（f7_9_feedback、input_kinds、f10_canvas_reality、f16_stages、widgets）全綠。
+
+---
+
+## F31 T3：贏家框內標出異常像素 —— 只進 overlay（2026-08-25）
+
+視覺上這件事等同被刪掉的 find_defect，所以**界線先寫死**（任務書原文）：
+只進 overlay —— 不吐特徵、不生具名區域、不寫 `ctx.meta["blobs"]`。一旦它開始
+吐 `blob_x` 那一族，find_defect 就從後門長回來，而整個 F31 的設計是為了
+**只有一種框**。有一條測試守著「render 前後特徵表零新增」。
+
+### 判準不另外算一次
+
+`|pixel − baseline| / spread > k` 的 baseline / spread **逐字是 T1 算
+`worst_score` 用的那兩個數字**（GLV 留在 meta 的 `worst` note；spread 已含
+地板）。畫面跟數字各自算的話，遲早出現「圖上標紅但數字說正常」——
+Results R1 那個 bug 的形狀。所以改 GLV 的判準統計量，標出來的東西跟著變
+（測試：同一張圖、兩組 baseline/spread → 標記不同；spread 夠大 → 逐位元組
+等於不標的那張）。
+
+* 像素吃**量測那條流的原始陣列**，不是顯示用被 `to_display_rgb` 拉過值域的
+  那份 —— 判準跟數字同一份輸入。拿不到那條流、幾何對不上 → 不標（不猜）。
+* 疊層順序：像素標記最底、ROI 框中間、量測框最上。
+* `k` 是兩張出圖卡共用的一格（`Mark pixels beyond`，單位 σ，預設 3.0，
+  0 = 關）—— 跟 T2 的兩格同一份 spec。
+* 抽取重構成 `worst_note_for_overlay`（回 note 本身），
+  `roi_boxes_for_overlay` 變薄包裝 —— 「哪一條 note」的判斷仍然只有一份。
+
+驗收：`test_export_overlay.py` 52 條（+5）、`test_output_bundle.py` 的
+`_roi_overlay_kwargs` 測試補 odd_pixels（k>0 才帶、數字逐字是 meta 的
+worst、k=0 不帶）、core 2245 過。
+
+---
+
+## F31 T4：pick 加「none」—— `_center` 從唯一解法變成一個選項（2026-08-25）
+
+使用者：「可以把 pick 換成在影像上挑，但 centre / strongest 還是可以自己選」、
+「我覺得只有在 patch 有用，但我想把它完全拿掉（或自己可以選）」。選項名
+使用者定了 `none`。
+
+### 開關只有一個家
+
+三張 Region 卡的家族宣告都經過 `_util.region_family`、執行都經過
+`set_region_family` —— 兩支各加一個 `pick` 旗標，off 只留主名字（不寫
+`_center`/`_others`、也不記 `regions_absent`：那兩個名字**沒有被宣告**，
+不是「該在而不在」）。單一出處 reader `_util.pick_rule_of`（照
+`glv_stats._reference_of` 的樣子）——**必要**而不只是整潔：`pick_defect_box`
+對不認得的 rule 會**安靜退回「離中心最近」**，`none` 必須在三個呼叫端短路。
+
+跟著挑選一起走的：`pick_by_signal`／`cross_pick_by_signal`（「有沒有真的用
+訊號挑」在不挑之下不存在）、`cross_dist_px`（「挑中那塊離中心多遠」同理）——
+宣告與執行同步拿掉，`test_what_it_declares_is_what_it_writes` 那條逐字相等
+照綠。`drop_edge_boxes` 的 `keep` 傳 -1（沒有受保護的框 —— 函式本來就安全）。
+
+### 錯誤訊息分兩種情況講
+
+`roi_rect_or_none` 那句「'<name>_center'（the box nearest the middle of the
+patch, **which is where the defect is**）」在 RSEM 大圖上是錯的解釋，會把人
+推去用一個無意義的名字。改成兩條路：patch 上 `_center` 是缺陷那一塊；大圖上
+「pick the box by signal … or use a card that compares all the boxes」。
+同族的無條件斷言一起改：`drop_edge`/`edge_margin` 的 help、兩張卡 `roi_out`
+的 help。加了一條 grep 式測試：三個模組的原始碼裡**不准再出現**那句話。
+
+### 畫布跟著宣告走
+
+* 埠數走 `resolve_regions_out` 自動 3→1（`_NodeItem.height` 自動縮）——
+  新 UI 測試：五層 × `none` = 1+5 顆埠、名字正好是五個主名。
+  `_MAX_REGION_PORTS` 不動（它數的是埠）。
+* `studio._focus_box_index` 的「離中心最近」退路在 `none` 的卡上是說謊
+  （引擎明講沒有哪一格特別，畫布卻畫一個醒目的）→ 新 `_picks_a_center()`：
+  宣告裡沒有 `_center` 就不畫。
+
+### 下游斷線要吵、舊 recipe 一個位元不變
+
+* `pick=none` ＋ 下游還指 `epi_center` → 現有 `unknown-region` lint 響
+  （新測試證明，而 `centre` 之下不響）。
+* 遷移**不需要**：預設仍 `centre`，舊 recipe 缺鍵補同一個預設（鐵則 9 的
+  形狀完全沒動到），全部既有測試不改一條斷言照綠。
+
+這一輪起容器裡裝得動 PySide6（＋ libegl1）—— UI 測試**逐檔**跑過
+region_edges（19）、f7_11_roi、gds_panel、f7_9_feedback、f10_canvas_reality、
+controls_readable，全綠。core 2240 過、黃金值三份全綠。
+
+---
+
+## F31 T2：overlay 畫 ROI 框 —— 報表上圈出最異常的那一格（2026-08-25）
+
+使用者：「我說的把它框出來，只是最終在 final report 要用 overlay 把它框出來。」
+`render_overlay` 自己的註解早就寫著答案：「兩個都在時畫兩個才誠實，**等疊圖
+畫得下第二個框再說**」—— 這一輪就是那一天。
+
+### 做了什麼
+
+* `render_overlay` 多 `roi_boxes`（**正規化** 0..1）與 `roi_winner` 兩個
+  kwarg：贏家粗琥珀框（`ROI_WINNER_COLOR`）、其餘細鋼青線（`ROI_BOX_COLOR`
+  —— 它們是**參照**，要看得到比較的分母是什麼，但不能跟主角搶畫面）。量測框
+  （紅）**後畫** —— 疊到的地方「量到的東西在哪」在最上面。montage 兩個面板
+  都畫。預設 `None` 逐位元組不變（有測試逐位元組比）。
+* 來源 `overlay.roi_boxes_for_overlay(ctx)`：讀 **T1 留在
+  `ctx.meta["glv_hist"]` 的 note**（`boxes >= 1` 的是 each box 跑的），贏家
+  就是 `worst["i"]` —— **跟 `worst_*` 特徵同一次計算**，不在疊圖端重挑一次。
+  拿不到贏家 → 全部細線，**不猜**（猜錯的框比沒有框糟得多）。好幾個區域都有
+  框時先只畫第一組（挑一組畫而畫面上不說是哪一組，正是最怕的形狀 ——
+  等疊圖說得清「哪組框是誰的」再開）。
+* 「框太多」是使用者的一格不是魔術數字：兩張出圖卡共用
+  `Draw the other boxes`＝`all / none / near the winner` ＋ `Draw at most`
+  （預設 300）。**一個數字管兩件事**：它同時是 `all` 的自動退化門檻與
+  `near the winner` 的數量 —— 不必發明第二個。退化發生時整批**警告一次**
+  （一顆一句的話 6000 顆就是 6000 句）。
+* 沒有贏家又超過上限 → 一個都不畫：畫不下又挑不出來，誠實的答案是不畫。
+* 贏家永遠畫得出來（`near` 的名單先放贏家再補最近的 —— 第一版
+  `sorted(...)[:cap]` 在「另一格跟贏家同心」時會把贏家自己擠掉）。
+
+### 兩條既有的逐位元組防線都還綠
+
+`test_export_parity`（卡 vs 精靈）與 `test_the_cached_pass_produces_the_same_pictures`
+（快取 vs 直跑）：fixture recipe 沒有 each box 的 GLV → 抽取回空 → 一個位元
+不變。新畫的路徑只讀 meta 與 rois，無隨機源，快取重放照樣逐位元組相同。
+
+驗收：`test_export_overlay.py` 47 條（+14）、`test_output_bundle.py` +2
+（兩卡逐字同一組、`_roi_overlay_kwargs` 吃真的 each box ctx）、黃金值三份
+全綠、core 2122 過。
+
+---
+
+## F31 T1：GLV 逐框比較 —— 「這張圖最異常的地方」有座標、有分數（2026-08-25）
+
+使用者換了方向（取代前一份「擴充 find_defect」的任務書）：「原來的 GLV 跟 CD
+這方面可能就做得到，接 ROI 卡，但要能自動算多框，找最異常去比較。然後下游可以
+就把這個 ROI 框（因為它本身就是異常點）給 draw 出來。」三條原則：**只有一種框**
+（ROI 的框既是輸入也是報表上畫的框）、**挑選的家在量測卡**（ROI 卡跑在量測卡
+之前，不可能用還沒算出來的統計量挑）、**特徵表固定欄位**。
+
+### 不是蓋新的，是把既有的 each box 模式補完
+
+讀 code 讀出來：`glv_stats` **已經有**逐框模式（F18 第 6 步的
+`across_boxes="each box"`，吐 `_typical`/`_outlier`/`_outlier_box`）。缺的是
+「總冠軍」—— `_outlier` 那三個後綴是**每個統計量各自**的極端格，而使用者要的
+是照**他挑的那一個**判準選出唯一的贏家，帶座標、帶分數。同一件事不開第二個家。
+
+### 做了什麼
+
+* **`algo/glv.odd_box_scores(values)`**：每一格跟「其他所有格」比 ——
+  `baseline = median(others)`、`spread = 1.4826 × MAD(others)`、
+  `score = |v − baseline| / max(spread, 1)`。基準用 median 不用 mean 的理由
+  寫在 docstring：**平均數會被異常格自己拉走，而我們正在找的就是那個異常格**。
+  1.4826 跟 `Let.scale` 的 robust z 同一個係數（`batch.py:476`）；地板 1 灰階
+  跟 `algo/shape._MIN_CONTRAST` 同一個數字同一個理由。回傳的 spread **已含
+  地板**，所以 `score == |v−baseline|/spread` 逐位元組成立 —— 讀這三個數字的
+  人（T3 的像素標記）不必自己知道地板的存在。
+* **leave-one-out 是 O(N log N) 不是 O(N²)**：拿掉一個元素的中位數對每一格
+  只有 ≤3 個候選值 → 按候選值分組、每組排一次偏差陣列。正確性對 `np.delete`
+  的暴力版**逐位元組**驗證（`test_glv.py`，含重複值／奇偶長度／常數陣列）。
+* **`judge` 參數**（label `Pick the odd one by`，`show_when` 綁 each box，
+  選項＝現有 `METRIC_CHOICES` 那份來源）：判準是使用者的樣品問題（median 看
+  不見的一顆亮點，max 看得見），獨立於 Statistics 那格勾了什麼。
+* **特徵**：贏家組 `worst_i / worst_x / worst_y / worst_w / worst_h /
+  worst_score / worst_value`（座標＝整張影像像素，**逐位元組就是
+  `ctx.roi_rects()[worst_i]` 那一格** —— 只有一種框，位置不另外量）＋分布組
+  `score_median / score_spread`（「一個框特別怪」跟「500 框都一樣怪」只看
+  worst 分不出來，而那兩件事的處置完全相反）。單框或算不出 → **一格都不寫**。
+* **meta**：`glv_hist` 的 note 多一份 `worst`（i/rect/score/value/baseline/
+  spread/judge）—— 疊圖畫框（T2）與像素標記（T3）讀**這一份**，跟特徵同一次
+  計算，不是第二份。
+
+### 兩處刻意偏離任務書（否決理由）
+
+* `boxes_n` 不另開 —— 既有的 `boxes` 特徵就是它，同一件事第二個名字會漂。
+* `score_max` 不另開 —— 它逐字等於 `worst_score`；同一個數字兩個名字排在同
+  一份 CSV 裡，沒有任何線索說它們是同一個（F18 名字分家族那條規矩擋的正是
+  這個）。表達式直接用 `worst_score`。
+
+### 順手修掉一個宣告與寫出對不上的洞
+
+`_each_box` 以前寫 `roi_count > 1`：**單框的區域安靜地退回 pooled**，於是同
+一格參數有兩種意思，而且宣告（`feature_names` 只看參數，吐帶後綴的名字）跟
+實際寫出的（pooled 裸名）對不上 —— 既有的宣告測試沒抓到，因為 fixture 是
+25 格的網格。使用者這次明文定調「不要偷偷退回 pooled」，改成 `>= 1`：單框
+照走逐框路，吐 `boxes = 1` 與那一格自己的 `_typical`，只是沒有 worst。
+`== 0`（區域在這顆上不存在）仍走 pooled，讓 `roi_pixels` 用既有訊息報錯。
+
+### 先量再改（效能，1000×1000 合成圖、glv_median+glv_mad）
+
+| 框數 | each box | pooled 對照 |
+|---:|---:|---:|
+| 50 | 39 ms | 47 ms |
+| 500 | 68 ms | 46 ms |
+| 5000 | **343 ms** | 50 ms |
+
+5000 框是基準（`glv_stats` 在 5,295 框上 105 ms）的 3.3 倍 —— 沒超過一個
+數量級，**不做抽樣**（抽樣要多發明一個數字，`_others` 那次已經判過一次不值得）。
+
+驗收：`test_glv_compare.py` 58 條（+7 新）、`test_glv.py` +4 條（暴力版逐位元
+組）、黃金值三份全綠（沒有 golden recipe 用 each box）、core 2186 過。
+
+---
+
+## 文件追上程式碼：README、四個沒進紀錄的 commit、計畫書歸檔（2026-08-25）
+
+使用者：先把整個專案與最近幾次的修改讀一遍列出來，然後「三個都先幫我做」——
+指的是讀完之後回報的那三條漂移。**這一輪一行程式邏輯都沒動**，動的是文件與
+檔案位置（`.py` 只改到指向計畫書的那幾行路徑）。
+
+### 一、README 講的是三個星期前的 app
+
+`CLAUDE.md` §0 那條「同一件事只寫在一個地方」擋的正是這個，而 README 是唯一
+一份沒有人在改的入口文件。逐項對過程式碼之後改掉五處：
+
+| README 說 | 實際上 |
+|---|---|
+| 26 張卡、可見 23 張 | `REGISTRY` 是 **25 張**、扣掉 `HIDDEN_STEPS` 可見 **22 張** |
+| 量測有「SNR map、blob 分割」 | 兩個都不在了 —— Z-map 2026-08-25 刪（F28）、blob 分割使用者定調「不需要 也不要再出現」。改成寫**現在真的有的**：GLV／CD（同一趟給 LWR／LER）／Focus index／Find defect |
+| 使用者看到的是**八**階段（含 Algo）| **七**段 —— Algo 在 F24 §5 解散進判定，唯一出處是 `GROUP_ORDER` |
+| 「ADC 判定不是卡片，而是 score 運算式與 bin 規則」| 那是 F22 以前的語言。現在是 recipe 頂層的 `decide` 區塊＝一棵**判定樹**，畫布上有自己的判定區，另有 `route_by` 分流 |
+| 「`roi_snr` 同時回報 signed 與 abs」| 那張卡與那支函式 2026-08-21 就刪了。`algo/snr.py` 留著的理由要寫出來：它是**正負號慣例的規範出處** |
+
+輸出那一列也補齊了（六張 Output 卡，含 F29 的報表資料夾），文件索引補上
+`docs/USING-CD.md`。
+
+### 二、`CLAUDE.md` §4 那條擋路的警語，理由已經過期
+
+它寫著「現在不要動 `studio.py`，因為那把尺（黃金值）是壞的」。查下去：
+**黃金值 2026-08-23 就重凍了、三份全綠**（見本檔「黃金值重凍」那一段）——
+也就是那條警語自己引用的前提，在寫下它之後兩天就解除了。
+
+沒有把警語拿掉（使用者定的順序仍然是「先把引擎做對，再回頭產品化」），但
+**把理由換成真的那一個**，並把前置條件寫成做得到的動作：動之前先
+`freeze_golden.py --check` 三份全綠。同一段的數字也重量了 ——
+`StudioWindow` 從 5,244 行長到 **6,017 行**（三天 773 行），而那正是這一段
+存在的理由。
+
+### 三、十份做完的計畫書還住在 `docs/plans/`
+
+`docs/history/README.md` 寫著判準：「標成 ✅ 而且不再有人往裡面寫東西」。
+照它搬了八份（F20…F25、F28、F29），留下五份還在寫的：`F0`（原始總計畫）、
+`F11`（Phase 2 的議程）、`F15`（⏸ 使用者叫停）、`F26`／`F27`（各有一條等使用者
+定調的版面決定）。
+
+**搬之前先把狀態改對** —— 四份頂上寫的是當時的話，而它們早就上線了：
+
+| | 頂上寫著 | 實際 |
+|---|---|---|
+| F22 | 「畫布那一半還沒做，有一個開放問題」| 開放問題 08-24 定稿（有線，而且是一整個判定區），畫布那一半由 F24 接手 |
+| F23 | 「期2、期3 未動」| 三期全部完成（08-24）|
+| F24 | 「方向已定稿，**未動工**」| ①②③④⑤ 全數完成，判定區 08-25 補上拖曳與移除 |
+| F29 | 「C 未開始」| A／B／C 全完成，可選的 D（Output 段的視覺）當天也做了 |
+
+一份寫著「未動工」而其實已經上線的計畫書，封存起來就是一句會誤導下一個人的
+話 —— 所以 `docs/history/README.md` 那句「內容一個字都不改」補成
+**「搬的時候不改，要改的是搬之前那一步」**。F21 §6（黃金值是壞的）加了一條
+指向重凍的後記；索引表補上 F18／F19（它們早就搬過來了但沒進表）與這八份。
+
+引用路徑一起改（`grep -rn "docs/plans/<名字>"`）：`CLAUDE.md`、`SESSION_LOG.md`、
+`d4t/` 四個模組、`tests/` 五個檔案、`tools/make_mgext.py`。
+`tests/test_docs_links.py` 59 條全綠 —— 這一輪唯一一把有意義的尺。
+
+---
+
+## 補記：兩個假數字、Region 卡收成一張、Output 段上畫布（2026-08-25）
+
+底下四個 commit 當時沒有寫進 SESSION_LOG（`CLAUDE.md` 開頭那句「每次 session
+結束請更新最上方」漏掉的正好是它們），補在這裡。
+
+### 兩個假數字（`c100565`）
+
+**① 沒有分數表達式 ⇒ 沒有分數（不是 0）。** `_eval_decision` 以前寫
+`score = expr.eval(...) if expr else 0.0`，而判定樹是一個**分類器**，多數樹根本
+沒有分數表達式 —— 於是每一顆拿到一個假的 0，最嚴重的後果是
+**「照分數排序取前 N 顆」變成「檔案順序的前 N 顆」**（全部同分時 `sorted` 是
+穩定的）。而排序正是使用者要那份報表的理由。改成 `None` 且那一格不寫；三個
+不擋 `None` 的下游各自處理：`pick_overlay_results` 多一格 `rank_by` 並在排不
+出來時明講、KLARF top-N 的「the run failed」拆成兩句話、Gallery 不再畫出
+`None` 那四個字。⚠ 既有測試 `test_no_score_expression_is_allowed_and_gives_zero`
+**鎖住的正是這個 bug**。
+
+**② 判定樹問到一個「量不到所以沒寫」的特徵時，整顆算失敗。** 可是那一顆跑得
+好好的 —— CD 卡正確地什麼都沒量到所以什麼都沒寫（規矩 3），而「什麼都沒量到」
+正是使用者最想看到的那一類之一。使用者定調：**那一題答「否」，繼續走**，而且
+不可以是安靜的（`decide_unanswered` 進 features、缺的名字進 meta 與一條警告）。
+判準抽成 `decide_tree.answer()` / `walk()` —— 引擎與畫布的分支流量以前是兩段
+各自寫的迴圈，而後者的說明寫著「判準跟引擎一字不差」。
+
+回歸測試的第一版**是假的**：隨機樹只生 `x > k`（k ≥ 0），於是「問不出來 → 答否」
+與「缺值當 0」在每一題上給同一個答案，200 棵樹一棵都沒抓到。加上 `<` 與負門檻
+才有鑑別力。
+
+### 四張 Region 卡收成一張（`e8bb9f2`，F30）
+
+使用者：「把 Profile / Template 也折進 `roi_reference`」。四張卡回答的是同一句話
+——「哪些地方應該長得一樣」—— 所以是一張卡的四個 method（`CLAUDE.md` §3）。
+**參數定義沒有第二份**：`_folded()` 從實作類別上取 `params` 再加一條「method 要
+是它」的條件；那兩個模組留在原地、不再自己 `@register_step`（要合的是**使用者
+看到的那張卡**，不是檔案）。
+
+四件事是被這個合併逼出來的，每一件都比合併本身重要：`show_when` 要能 and、
+那條可見性規則只能有一份（`ParamForm` 以前自己寫了兩次 → 抽成
+`step.param_visible`）、表單要用預設值補沒填的格子（否則新加的卡每一格都被判定
+為不該顯示，整張看起來是空的）、儀表與兩個入口要改看 method 不看 key。
+
+遷移照 `_migrate_roi_compare_into_glv_stats` 抄（鐵則 9）。兩件不做就會**安靜換
+一組值跑**：舊預設逐字寫進參數（三支互相衝突，`max_boxes` 64 → 8192 不報錯，
+它會多量一百個框），撞名而意思不同的那一格改名（`min_confidence` 在 Profile 是
+條紋信心 0..200、在 cells 是週期強度 0..1）。既有測試改成指向合併卡
+（`tests/region_cards.py` 的 `BoundRegionCard`）而**一條斷言都沒有改** —— 那個
+shim 綁的正是遷移寫進舊 recipe 的那三樣，所以那幾十條問的就是「舊 recipe 行為
+有沒有變」。
+
+### `repeating cells` 走人，而打錯的層號表要講出來（`3c748a0`）
+
+使用者：「repeating cell 跟 a cell I mark myself 應該一樣，而且後者完整很多，
+請把前者刪掉」。確實在回答同一句話，差別只在那一格 cell 是**量**出來的還是
+**標**出來的，而標的那條路多了三道閘門與一個看得到的編輯器。method 四個變三個、
+預設改 `stripes in the image`。⚠ **舊 recipe 明確報錯，不安靜換一支跑**（`method`
+是 choice，值進不了 `validate_params`）—— 那個 method 是同一天早上才進 main 的，
+沒有第二個使用者。`algo/period.py` 與 `algo/golden.py` **不動**（`CLAUDE.md` §5
+的便利貼：`algo/template.py` 還在用，而「自己標的那一格 cell」正是靠它們疊出來的）。
+
+第二件是使用者在畫布上看到的：「選 layout layers 之後沒有出口可以輸出區域線」。
+查下去是一個安靜的錯 —— `_layers_of` 把 `ChannelMapError` 吞掉回空 list（打到
+一半不准拋，那是對的），於是一個寫成 `17=epi` 的層號表（正確是 `17:epi`）產不出
+任何區域埠，而畫面上沒有任何東西說為什麼。`configuration_issues` 現在分得出三種
+狀態：表格是空的、表格讀不懂（錯在哪 ＋ 正確寫法）、表格沒問題。
+
+### 畫布上的 Output 段：這幾張整批只跑一次（`9b913cc`）
+
+畫布上其他每一張卡都是「一顆 defect 跑一次」，Output 段那幾張是整批跑完之後
+只跑一次（`Step.scale == SCALE_LOT`）—— 而畫面上沒有任何東西說得出那件事。
+給它跟判定區同一套視覺（虛線框、`OUTPUT / once per lot`），**不加埠、不加線**
+（進去的是整批的結果表，那不是一條影像流）。新模組 `ui/output_band.py`
+（`CLAUDE.md` §4），`canvas.py` 只負責接線；哪幾張算數看的是**卡片自己宣告的
+group**，不是一份寫死的 key 清單。
+
+三件是實際畫出來才發現的：**一個大框會說謊**（畫布會換行，四張卡的外接矩形把
+上一列的 Normalize 與 GLV 一起框進去）→ 改成一列一串、中間夾到別人就不畫
+（消失的框只是少一個提示，說謊的框是錯的）；框要用卡片**看得見**的那塊，不是
+`sceneBoundingRect()`；那行字改放左邊走廊，否則相鄰兩列的框實測疊 42px。
+
+---
+
 ## 量到了，然後丟掉：那一團在哪（2026-08-25）
 
 使用者要的是「跑完一整筆 image，缺陷被框出來、照分數排序、6000 顆出成報表」。
-計畫書：[`docs/plans/F29-detect-and-report.md`](docs/plans/F29-detect-and-report.md)。
+計畫書：[`docs/history/plans/F29-detect-and-report.md`](docs/history/plans/F29-detect-and-report.md)。
 
 ### 計畫被退了兩次，而第二次的理由是對的
 
@@ -316,7 +861,7 @@ core 全過、每一個 UI 檔逐一跑過。每一條迴歸測試都做過「�
 ## ADC 上畫布、Measure 段改名，Z-map 走人（2026-08-25）
 
 使用者一次給了四件事，這一輪做掉動手的兩件（另外兩件是問看法，見回覆）。
-計畫書：[`docs/plans/F28-canvas-and-measure.md`](docs/plans/F28-canvas-and-measure.md)。
+計畫書：[`docs/history/plans/F28-canvas-and-measure.md`](docs/history/plans/F28-canvas-and-measure.md)。
 
 ### ADC 判定區：拖得動、拿得掉
 
@@ -672,7 +1217,7 @@ F24 §5 解散掉的八段、README 說 20 張卡（實際 26）、8 條指向�
 ## F25：判定段要有人會用（2026-08-24）
 
 使用者看過 F24 的成品之後的四句話，全部是同一件事的四個面 ——
-**引擎做完了，但入口是一格空白**。計畫書：[`docs/plans/F25-adc-usable.md`](docs/plans/F25-adc-usable.md)。
+**引擎做完了，但入口是一格空白**。計畫書：[`docs/history/plans/F25-adc-usable.md`](docs/history/plans/F25-adc-usable.md)。
 
 * **閃退（最優先）**：`widgets.clear_layout_parked()`。面板是「改一格就整段
   重建」的，而改那一格的訊號**還在被拆掉的那個 widget 的堆疊上** ——
@@ -917,7 +1462,7 @@ F24 §5 解散掉的八段、README 說 20 張卡（實際 26）、8 條指向�
 
 使用者定調 pre-filter 的真正需求：「**不同的 Classnumber 走不同的『卡片』**」
 —— 不是判定段的條件（那個每顆還是全跑），是 Class 2 根本不跑 A 組卡。
-計畫書在 [`docs/plans/F23-route-by.md`](docs/plans/F23-route-by.md)，
+計畫書在 [`docs/history/plans/F23-route-by.md`](docs/history/plans/F23-route-by.md)，
 照 Phase 2 規矩先討論再動手。要點：
 
 * **機制八成在**（多 route、`fill_fields`、快取簽章含鍵），卡住的只有
@@ -968,7 +1513,7 @@ F24 的第一期做完：`decide` 從清單長成樹。**畫布是第 ② 期，
 
 使用者問「ADC 跟 Algo 畫布上要怎麼呈現（畫布不能說謊），跳脫框架你有什麼建議」。
 討論 → mockup → 兩輪修訂 → 拍板。定稿在
-[`docs/plans/F24-decision-tree.md`](docs/plans/F24-decision-tree.md)，
+[`docs/history/plans/F24-decision-tree.md`](docs/history/plans/F24-decision-tree.md)，
 mockup（四個 artboard）在
 https://claude.ai/code/artifact/adfed023-6280-4acf-b6c0-749c9f299767 。
 
@@ -1126,7 +1671,7 @@ F19（`area_px` / `cd_x_px` / `cd_y_px` → `cd_*` 那一批）與 F17-②
 
 整個 app 最大的功能缺口 —— 一個叫 Auto Defect **Classification** 的工具，
 `score.bins` 卻被強制只有 `below`/`above`。設計與量測全部在
-[`docs/plans/F22-adc-multiclass.md`](docs/plans/F22-adc-multiclass.md)。
+[`docs/history/plans/F22-adc-multiclass.md`](docs/history/plans/F22-adc-multiclass.md)。
 
 ### 形狀：一張由上往下讀的篩子
 
@@ -1233,7 +1778,7 @@ recipe JSON 完全不變，差別只在 UI 認得它是什麼。這是 `image_ke
 使用者問「algo 這張 card 有沒有存在的必要」。查 repo 得到的事實是**三個收斂過的
 段落零使用**：`feature_math` 0 次、任何 ROI 卡 0 次、F18 的 compare 0 次。
 所以先串起來跑一次，再談要不要為 Algo 段加東西。全部在
-[`docs/plans/F21-algo-and-roi.md`](docs/plans/F21-algo-and-roi.md)。
+[`docs/history/plans/F21-algo-and-roi.md`](docs/history/plans/F21-algo-and-roi.md)。
 
 ### 1. ROI 是槓桿，實測 +0.35
 
@@ -1414,7 +1959,7 @@ MMH 那幾支則是用一個 `k//2+1` 的 margin 把被汙染的樣本排除掉�
 
 ### 4. F20：一格「哪一塊是缺陷那一塊」
 
-見 [`docs/plans/F20-pick-defect-box.md`](docs/plans/F20-pick-defect-box.md)。
+見 [`docs/history/plans/F20-pick-defect-box.md`](docs/history/plans/F20-pick-defect-box.md)。
 `<name>_center` 原本寫死是「離 patch 正中心最近」，那句話假設缺陷在正中心。
 在 `mgepi_real3` 上實測 **11/24**；換成「diff 訊號最強的那一塊」是 **24/24**，
 端到端正確率 **72.9% → 97.9%**。預設值不動，黃金值零變動。

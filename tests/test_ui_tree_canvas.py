@@ -1,5 +1,5 @@
 # F24 ②：判定樹上畫布（唯讀渲染）。
-"""鎖住判定區的五條性質（`docs/plans/F24-decision-tree.md` §4、§10）：
+"""鎖住判定區的五條性質（`docs/history/plans/F24-decision-tree.md` §4、§10）：
 
 1. **樹的形狀直接來自 DecideSpec**：`rules` 模式畫成等價鏈狀樹（樓梯 ——
    yes 往右、no 往下），`(anything else)` 那片葉子標得出來。

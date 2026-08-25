@@ -4,7 +4,7 @@
 這一份管**唯讀渲染**：判定區（淡紫底虛線框）、入口小卡、菱形（一步一問）、
 托盤（葉子）、分支流量。編輯互動是 F24 ③ 的事。
 
-三個不變量（`docs/plans/F24-decision-tree.md` §4、§10）：
+三個不變量（`docs/history/plans/F24-decision-tree.md` §4、§10）：
 
 * **樹的每一步就是引擎的一步** —— 這裡畫的樹直接來自 `DecideSpec`
   （`rules` 模式先過 `rules_to_tree`，那個轉換無損，F24 ① 的測試釘住了）。

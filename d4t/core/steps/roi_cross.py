@@ -43,9 +43,9 @@ from ..pipeline.step import (
 )
 from ._util import (
     FEATURE_PREFIX_PATTERN, drop_edge_boxes, drop_edge_specs,
-    output_prefix_spec, pick_defect_box, pick_rule_specs, prefix_features,
-    prefix_names, region_family, region_fact_names, region_facts,
-    require_image, set_region_family,
+    PICK_NONE, output_prefix_spec, pick_defect_box, pick_rule_of,
+    pick_rule_specs, prefix_features, prefix_names, region_family,
+    region_fact_names, region_facts, require_image, set_region_family,
     LIMIT_MAX_BOXES,
 )
 
@@ -372,10 +372,10 @@ class RoiCrossStep(Step):
             pattern_help=("use letters, digits and underscores only, and do "
                           "not start with a digit"),
             help=("Name for the boxes. Measure cards refer to it by this name. "
-                  "You also get <name>_center - the single box nearest the "
-                  "middle of the patch, which is where the defect is - and "
-                  "<name>_others, the rest of them, which is the baseline of "
-                  "the same material on the same image."),
+                  "When “Which box is the defect in” picks one, you also get "
+                  "<name>_center - the picked box - and <name>_others, the "
+                  "rest of them, which is the baseline of the same material "
+                  "on the same image."),
         ),
         ParamSpec(
             # ⚠ 上限跟合併卡**同一個常數**（`_util.LIMIT_MAX_BOXES`）——
@@ -409,24 +409,17 @@ class RoiCrossStep(Step):
     features_out = ["cross_count", "cross_pitch_x_px", "cross_pitch_y_px",
                     "cross_filled", "cross_dist_px", "cross_pitch_ratio_x",
                     "cross_pitch_ratio_y", "cross_edge_dropped",
-                    "cross_pick_by_signal", "locate_conf", "locate_ok"]
+                    "locate_conf", "locate_ok"]
 
     # ---- 宣告（給 lint / UI）------------------------------------------------
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
-        # 判斷訊號的那條流也要宣告 —— 它在畫布上是一條真的線，而且它會
-        # 改變框挑到哪一塊（也就是改變下游的結果），所以它必須進拓撲排序
-        # 與快取簽章（鐵則 10）。
-        out = [str(params.get("source", "ref"))]
-        if str(params.get("pick", "centre")) == "strongest":
-            judge = str(params.get("pick_source", "") or "").strip()
-            if judge and judge not in out:
-                out.append(judge)
-        return out
+        return [str(params.get("source", "ref"))]
 
     @classmethod
     def resolve_regions_out(cls, params: Dict[str, Any]) -> List[str]:
-        return region_family(params.get("roi_out", "cross"))
+        return region_family(params.get("roi_out", "cross"),
+                             pick_rule_of(params) != PICK_NONE)
 
     @classmethod
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
@@ -434,10 +427,13 @@ class RoiCrossStep(Step):
         # 見 `_util.REGION_FACTS`）。這張卡以前一個區域數字都沒有 —— 下游要問
         # 「這一顆上到底有沒有 cross_center」只能去看 `locate_ok`，而那是**整張
         # 卡**的旗標，不是那個區域的。
+        names = list(cls.features_out)
+        if pick_rule_of(params) == PICK_NONE:
+            # ``none`` 之下「挑中的那一塊離中心多遠」問的東西不存在。
+            names.remove("cross_dist_px")
         return prefix_names(
             params.get("output_prefix", ""),
-            list(cls.features_out)
-            + region_fact_names(cls.resolve_regions_out(params)))
+            names + region_fact_names(cls.resolve_regions_out(params)))
 
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
@@ -517,20 +513,23 @@ class RoiCrossStep(Step):
                      % (self.key, res.reason or "could not locate the pattern",
                         name))
             whole = (0.0, 0.0, 1.0, 1.0)
-            set_region_family(ctx, self.key, name, [whole])
-            ctx.add_features(prefix_features(p["output_prefix"], dict({
+            set_region_family(ctx, self.key, name, [whole],
+                              pick=pick_rule_of(p) != PICK_NONE)
+            fallback = {
                 "cross_count": 0.0,
                 "cross_pitch_x_px": float(res.x.pitch_measured),
                 "cross_pitch_y_px": float(res.y.pitch_measured),
                 "cross_filled": 0.0,
-                "cross_dist_px": -1.0,
                 "cross_pitch_ratio_x": float(res.x.pitch_ratio),
                 "cross_pitch_ratio_y": float(res.y.pitch_ratio),
                 "cross_edge_dropped": 0.0,
-                "cross_pick_by_signal": 0.0,
                 "locate_conf": float(res.confidence),
                 "locate_ok": 0.0,
-            }, **region_facts(ctx, self.resolve_regions_out(p), shape,
+            }
+            if pick_rule_of(p) != PICK_NONE:
+                fallback["cross_dist_px"] = -1.0
+            ctx.add_features(prefix_features(p["output_prefix"], dict(
+                fallback, **region_facts(ctx, self.resolve_regions_out(p), shape,
                               # 退回整張圖 = 框在但那不是這個區域（同
                               # Template；見 `_util.REGION_FACTS` 的 ⚠）。
                               located=False))))
@@ -540,15 +539,11 @@ class RoiCrossStep(Step):
         # 「缺陷所在的那一塊」變成「留下來的裡面離中心最近的那一塊」，而那兩者
         # 在缺陷靠近 patch 邊緣時不是同一塊（見 ``_util.drop_edge_boxes``）。
         boxes = list(res.boxes)
-        judge = None
-        if str(p["pick"]) == "strongest":
-            key = str(p.get("pick_source", "") or "").strip()
-            judge = ctx.images.get(key) if key else None
-            if judge is None:
-                ctx.warn("[%s] nothing is wired into “Judge on”, so the box "
-                         "nearest the middle was used instead." % self.key)
-        idx, by_signal = pick_defect_box(boxes, shape, str(p["pick"]), judge)
-        centre = boxes[idx]
+        # ``none`` 短路（`pick_defect_box` 沒有「不挑」這個概念）；
+        # -1 順便就是 `drop_edge_boxes` 的「沒有受保護的框」。
+        idx = (-1 if pick_rule_of(p) == PICK_NONE
+               else pick_defect_box(boxes, shape))
+        centre = boxes[idx] if idx >= 0 else None
         dropped = 0
         if bool(p["drop_edge"]) and float(p["edge_margin"]) > 0.0:
             boxes, dropped, idx = drop_edge_boxes(
@@ -559,13 +554,19 @@ class RoiCrossStep(Step):
             ctx.meta["crossings"][name]["edge_dropped"] = int(dropped)
 
         norm_boxes = [_norm(b, shape) for b in boxes]
-        set_region_family(ctx, self.key, name, norm_boxes, idx, dropped)
+        set_region_family(ctx, self.key, name, norm_boxes, idx, dropped,
+                          pick=pick_rule_of(p) != PICK_NONE)
         if res.reason:
             ctx.warn("[%s] %s." % (self.key, res.reason))
 
         cx, cy = shape[1] / 2.0, shape[0] / 2.0
-        dist = ((centre[0] + centre[2] / 2.0 - cx) ** 2
-                + (centre[1] + centre[3] / 2.0 - cy) ** 2) ** 0.5
+        picked: Dict[str, float] = {}
+        if centre is not None:
+            dist = ((centre[0] + centre[2] / 2.0 - cx) ** 2
+                    + (centre[1] + centre[3] / 2.0 - cy) ** 2) ** 0.5
+            # 這一格以「挑了一塊」為前提 —— ``pick="none"`` 時**不寫**
+            # （不是 0：0 讀起來像「挑中的就在正中心」）。
+            picked["cross_dist_px"] = float(dist)
         ctx.add_features(prefix_features(p["output_prefix"], dict({
             "cross_count": float(len(boxes)),
             "cross_pitch_x_px": float(res.x.pitch_used),
@@ -579,22 +580,15 @@ class RoiCrossStep(Step):
             # ``locate_ok`` 答不出「錯得多嚴重」，而那兩種的下一步不一樣。
             "cross_pitch_ratio_x": float(res.x.pitch_ratio),
             "cross_pitch_ratio_y": float(res.y.pitch_ratio),
-            # **挑中的那一塊**離 patch 正中心有多遠。挑框規則是「離中心最近」
-            # 時它就是「缺陷（在正中心）離最近那個交會有多遠」；改成「訊號最強」
-            # 之後它變成**座標偏了多少**，而那本身就是值得畫分布的東西。
-            # 落在交界上跟落在
-            # 兩個交界中間，通常不是同一回事，所以這本身就是可以打分的數字。
-            "cross_dist_px": float(dist),
             # 因為靠邊被丟掉幾塊。這個開關會**安靜地改變基準的樣本數**（同一份
             # recipe 在 wafer 中心與邊緣的 defect 上留下的框數不一樣），看得到
             # 才知道某一顆的基準是不是只剩一塊。
             "cross_edge_dropped": float(dropped),
-            # 1 = 「缺陷那一塊」真的是用訊號挑的；0 = 用離正中心最近挑的。
-            # 選了「訊號最強」卻沒接線的話整批會是 0 —— 那是唯一看得出來的地方。
-            "cross_pick_by_signal": 1.0 if by_signal else 0.0,
             "locate_conf": float(res.confidence),
             "locate_ok": 1.0,
-        }, **region_facts(ctx, self.resolve_regions_out(p), shape,
+            # ``picked``：`cross_dist_px` —— 挑中那塊（離中心最近的交會）
+            # 離 patch 正中心多遠，本身就是可以畫分布的數字。
+        }, **picked, **region_facts(ctx, self.resolve_regions_out(p), shape,
                           clipped=bool(res.clipped), edge_dropped=dropped))))
         return ctx
 

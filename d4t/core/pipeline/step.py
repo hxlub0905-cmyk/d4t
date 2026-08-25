@@ -152,11 +152,16 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC, CATEGORY_BATCH)
 #: 跟 ``"expr"`` 是同一個家族 —— 儲存格式就是 ``"str"``，而 UI 認得它，
 #: 所以那一格配得出同一支「插入數字 ▾」（差別只在插進去的方式：算式插在游標
 #: 位置，清單接在後面）。
+#: ``metric_choice``（F32）是 ``metric_chips`` 的**單選**長相：值是一個
+#: 統計量 id（``glv_median``、手寫的 ``glv_q37`` 也合法 —— 跟 metric_chips
+#: 同一條規矩，清單只是「常用的那幾個」，認不認得由卡片的 run() 用它自己的
+#: 話說）。儲存格式就是一個字串，差別只在 UI：一排單選的膠囊，
+#: 「+ Percentile…」照樣長得出自訂值。
 PARAM_TYPES = ("int", "float", "bool", "str", "expr", "feature_keys",
                "choice", "image_key",
                "image_keys", "curve", "template", "multi_choice",
-               "metric_chips", "channel_map", "cell_rois", "region_key",
-               "region_keys", "icon_choice")
+               "metric_chips", "metric_choice", "channel_map", "cell_rois",
+               "region_key", "region_keys", "icon_choice")
 
 #: ``ParamSpec.choices_from`` 認得的鍵：**執行期才知道的選單**（F15-2）。
 #:
@@ -397,7 +402,7 @@ class ParamSpec:
             raise ParamError(f"parameter '{self.name}': only icon_choice takes "
                              f"icons")
         if (self.type in ("choice", "icon_choice", "multi_choice",
-                          "metric_chips")
+                          "metric_chips", "metric_choice")
                 and not self.choices and not self.choices_from):
             raise ParamError(f"parameter '{self.name}': type '{self.type}' "
                              f"requires choices (or choices_from)")
@@ -527,6 +532,17 @@ class ParamSpec:
                 # 同上：擋在打字的當下，並正規化成「依頁碼排序、", " 分隔」
                 # —— round-trip 要是 identity（見 channels.format_channel_map）。
                 v = format_channel_map(parse_channel_map(value))
+            elif self.type == "metric_choice":
+                # 單選版 metric_chips：**不**強制值落在 choices（同上面那條
+                # 規矩 —— 手寫的 glv_q37 合法，認不認得由卡片的 run() 說），
+                # 但一定是**一個** id：逗號進得來的話它就變回多選了。
+                v = str(value).strip()
+                if "," in v:
+                    raise ParamError(
+                        f"parameter '{self.name}' takes one statistic id, "
+                        f"not a list (got {v!r})")
+                if not v:
+                    v = str(self.default)
             elif self.type in ("choice", "icon_choice"):
                 v = str(value)
                 if v not in (self.choices or []):

@@ -421,3 +421,24 @@ def test_ports_never_pile_up_on_a_card_with_many_regions(window):
     assert min(gaps) >= 2 * canvas_mod._PORT_R, gaps
     for i, anchor in enumerate(anchors):
         assert item.out_port_at(anchor) == i, "第 %d 顆埠點到的是別人" % i
+
+
+def test_pick_none_folds_a_family_into_one_port(window):
+    """`pick="none"` 的家族只有主名字 —— 畫布上一個區域一顆菱形埠（F31 T4）。
+
+    埠的數量走 `resolve_regions_out`，所以宣告變了畫布就跟著變 ——
+    畫著一顆沒有人產出的 `_center` 埠，跟少畫一顆真的產出的埠一樣是說謊。
+    """
+    src = first_source(window, "load_single")
+    gds = window.add_card_after(src, "roi_reference")
+    window.model.set_param(gds, "method", "layout layers")
+    window._on_edge_added(src, gds, "single", "label_source")
+    window.model.set_param(gds, "layers", "1:a, 2:b, 3:c, 4:d, 5:e")
+    window.model.set_param(gds, "pick", "none")
+    window._refresh_pipeline()
+
+    item = window.pipeline.node_item(gds)
+    assert len(item.out_anchors_local()) == 1 + 5 * 1, \
+        [d["name"] for d in item.out_specs()]
+    names = [d["name"] for d in item.out_specs() if d["kind"] == "region"]
+    assert names == ["a", "b", "c", "d", "e"]

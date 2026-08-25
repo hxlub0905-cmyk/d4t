@@ -1,7 +1,11 @@
 # F29 — 把已經量到的位置說出來，加上報表 bundle
 
-> 狀態：**Phase A、B 完成**（2026-08-25）。C 未開始。
-> 主計畫：[`docs/ROADMAP.md`](../ROADMAP.md)。
+> 狀態：**✅ A／B／C 全部完成（2026-08-25）**，可選的 Phase D（Output 段在畫布上
+> 有自己的視覺）當天也做了 —— `ui/output_band.py`，虛線框 ＋ `OUTPUT / once per lot`。
+> 之後 `repeating cells` 這個 method 被使用者拿掉（跟「a cell I mark myself」
+> 回答同一句話而且後者完整很多），所以 §4 那一支現在只剩 `algo/period` 還在服務
+> Template。逐輪紀錄在 `SESSION_LOG.md`。
+> 主計畫：[`docs/ROADMAP.md`](../../ROADMAP.md)。
 
 ---
 

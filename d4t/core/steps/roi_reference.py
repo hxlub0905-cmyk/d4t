@@ -42,10 +42,11 @@ GLAS 產的 mask 已經是對位完的（使用者原話「我們產的那些 pn
 裁切）；這條路上缺陷不保證在正中央（RSEM 大圖），硬給的話使用者會照 Template
 的直覺去用它，而畫面上不會說。
 
-**那個反對意見是對的，而且沒有被推翻 —— 被推翻的是「所以不能有 ``_center``」。**
-`pick="strongest"`（訊號最強的那一塊，`_util.pick_defect_box`）不假設缺陷在
-中央：**它去找**。所以這條路的用法是 ``strongest``，而 ``centre`` 那個選項
-在大圖上仍然只是「離正中心最近的那一塊」—— 那句話在 help 裡逐字寫著。
+**那個反對意見仍然成立，而答案換過兩次。** F29 的答案是 `pick="strongest"`
+（訊號最強的那一塊去找）；F32 使用者把它刪了（「跟後面量測卡功能稍微衝突」）
+—— 大圖上「找最異常」現在**整件事歸 GLV 的逐框比較**（`each box` ＋
+`worst_*`），這張卡在大圖上就選 ``none``（只放框、不挑）。``centre`` 留給
+patch（缺陷在正中央是幾何保證的那條路）。
 
 一層 = 好幾個矩形，而數量比另外兩張卡大一個數量級
 ------------------------------------------------
@@ -96,9 +97,9 @@ from ..pipeline.step import (
 )
 from ._util import (
     FEATURE_PREFIX_PATTERN, drop_edge_boxes, drop_edge_specs, ensure_gray,
-    output_prefix_spec, pick_defect_box, pick_rule_specs, prefix_features,
-    prefix_names, region_family, region_fact_names, region_facts,
-    require_image, set_region_family,
+    PICK_NONE, output_prefix_spec, pick_defect_box, pick_rule_of,
+    pick_rule_specs, prefix_features, prefix_names, region_family,
+    region_fact_names, region_facts, require_image, set_region_family,
     LIMIT_MAX_BOXES,
 )
 
@@ -151,7 +152,7 @@ def _impl(method: str):
 #: 那幾格在三支上是同一句話，各留一份的話**同一個名字會有三個 ParamSpec**，
 #: 而 `validate_params` 只看得到最後一個 —— 於是使用者在畫面上調的是 A，
 #: 引擎讀的是 B，兩者的預設值還不一樣。
-_SHARED_PARAMS = ("source", "pick", "pick_source", "drop_edge", "edge_margin",
+_SHARED_PARAMS = ("source", "pick", "drop_edge", "edge_margin",
                   "output_prefix", "max_boxes", "roi_out")
 
 
@@ -210,10 +211,6 @@ _EXTRA_REGION_FEATURES = ["pieces"]
 #: ``layout layers`` 那一支自己的（跟區域無關）。
 _GDS_FEATURES = ["layout_ok", "layout_layers"]
 
-#: 兩支共用的一個（跟另外兩張 ROI 卡逐字同名）：**有沒有真的用訊號挑**。
-#: 接不到 ``Judge on`` 就退回「離中心最近」，而安靜地照做是最糟的
-#: （見 `_util.pick_defect_box`）。
-_PICK_FEATURE = "pick_by_signal"
 
 #: ``max_boxes`` 的預設 —— 這個數字是量出來的，理由見模組說明。
 #: 上限（:data:`_util.LIMIT_MAX_BOXES`）三支共用，見那裡的說明。
@@ -306,9 +303,10 @@ class RoiReferenceStep(Step):
                           "not start with a digit"),
             show_when=("method", (METHOD_PROFILE,)),
             help=("What to call this set of regions. The name becomes the "
-                  "prefix on every number measured in it, and you point the "
-                  "measure cards at <name>_center (the one the defect is in) "
-                  "and <name>_others (all the rest, your baseline)."),
+                  "prefix on every number measured in it. When “Which box is "
+                  "the defect in” picks one, you also get <name>_center (the "
+                  "picked box) and <name>_others (all the rest, your "
+                  "baseline)."),
         ),
         ParamSpec(
             name="layers", type="channel_map", default="", row_kind="labels",
@@ -362,7 +360,7 @@ class RoiReferenceStep(Step):
     ]
     reads = ["test"]
     writes: List[str] = []
-    features_out = list(_GDS_FEATURES) + [_PICK_FEATURE]
+    features_out = list(_GDS_FEATURES)
 
     # ---- 宣告 ---------------------------------------------------------------
     @classmethod
@@ -379,21 +377,15 @@ class RoiReferenceStep(Step):
         impl = _impl(method)
         if impl is not None:
             return impl.resolve_reads(_params_for(method, params))
-        out = [str(params.get("source", "test"))]
-        if str(params.get("pick", "")) == "strongest":
-            judge = str(params.get("pick_source", "") or "").strip()
-            if judge and judge not in out:
-                out.append(judge)
-        return out
+        return [str(params.get("source", "test"))]
 
     @classmethod
     def resolve_regions_out(cls, params: Dict[str, Any]) -> List[str]:
         """每一個區域都是**三個名字**（``<name>`` / ``_center`` / ``_others``）。
 
-        ⚠ 這張卡以前**只吐 ``<name>``**，而那個決定的理由沒有被推翻 ——
-        幾何的 ``_center``（缺陷在正中央）在一張 RSEM 大圖上仍然沒有意義。
-        變的是有了 ``pick="strongest"``：它不假設缺陷在哪，**它去找**
-        （見模組說明）。
+        ⚠ 幾何的 ``_center``（缺陷在正中央）在一張 RSEM 大圖上沒有意義 ——
+        大圖上請選 ``pick="none"``（只吐 ``<name>``），找最異常那格歸 GLV
+        的逐框比較（見模組說明；``strongest`` 於 F32 刪掉）。
         """
         method = _method_of(params)
         impl = _impl(method)
@@ -403,7 +395,7 @@ class RoiReferenceStep(Step):
                  if method == METHOD_GDS else [])
         out: List[str] = []
         for name in names:
-            out.extend(region_family(name))
+            out.extend(region_family(name, pick_rule_of(params) != PICK_NONE))
         return out
 
     @classmethod
@@ -420,7 +412,6 @@ class RoiReferenceStep(Step):
                              for f in _EXTRA_REGION_FEATURES)
         else:
             names = region_fact_names(regions)
-        names.append(_PICK_FEATURE)
         return prefix_names(params.get("output_prefix", ""), names)
 
     @classmethod
@@ -473,16 +464,13 @@ class RoiReferenceStep(Step):
             return impl().run(ctx, _params_for(method, params))
         return self._run_gds(ctx, self.validate_params(params))
 
-    def _pick(self, ctx: Context, p: Dict[str, Any], boxes, shape):
-        """哪一塊是缺陷那一塊 —— **三張 Region 卡逐字同一支**。"""
-        judge = None
-        if str(p["pick"]) == "strongest":
-            key = str(p.get("pick_source", "") or "").strip()
-            judge = ctx.images.get(key) if key else None
-            if judge is None:
-                ctx.warn("[%s] nothing is wired into “Judge on”, so the box "
-                         "nearest the middle was used instead." % self.key)
-        return pick_defect_box(boxes, shape, str(p["pick"]), judge)
+    def _pick(self, ctx: Context, p: Dict[str, Any], boxes, shape) -> int:
+        """哪一塊是缺陷那一塊（``none`` 回 -1 —— 這裡短路，
+        `pick_defect_box` 沒有「不挑」這個概念）。-1 順便就是
+        `drop_edge_boxes` 的「沒有受保護的框」。"""
+        if pick_rule_of(p) == PICK_NONE:
+            return -1
+        return pick_defect_box(boxes, shape)
 
     # ---- ② GDS 的一層 ------------------------------------------------------- #
     def _run_gds(self, ctx: Context, p: Dict[str, Any]) -> Context:
@@ -512,7 +500,6 @@ class RoiReferenceStep(Step):
 
         feats: Dict[str, float] = {}
         found = 0
-        by_signal_any = False
         for lid, name in layers:
             try:
                 rects, piece_of = algo_mask.decompose(arr, lid)
@@ -539,16 +526,16 @@ class RoiReferenceStep(Step):
             edge_dropped = 0
             if rects:
                 # **三個名字，不是一個**（F29）。挑哪一塊是缺陷那一塊走的是三張
-                # Region 卡共用的那一支 —— 這條路上正解是 ``strongest``
-                # （大圖上缺陷不保證在正中央，見模組說明）。
-                idx, by_signal = self._pick(ctx, p, rects, shape)
-                by_signal_any = by_signal_any or by_signal
+                # Region 卡共用的那一支 —— 大圖上請選 ``none``（缺陷不保證在
+                # 正中央，找最異常歸 GLV 的逐框比較，見模組說明）。
+                idx = self._pick(ctx, p, rects, shape)
                 if bool(p["drop_edge"]) and float(p["edge_margin"]) > 0.0:
                     rects, edge_dropped, idx = drop_edge_boxes(
                         rects, shape, float(p["edge_margin"]), idx)
                 set_region_family(ctx, self.key, name,
                                   algo_mask.to_normalised(rects, shape),
-                                  idx, edge_dropped)
+                                  idx, edge_dropped,
+                                  pick=pick_rule_of(p) != PICK_NONE)
                 found += 1
             else:
                 # **不退回整張圖。** 那會安靜地量到全部的像素，而那是錯的
@@ -566,14 +553,13 @@ class RoiReferenceStep(Step):
             # 這張卡多的那一個。**三個名字各報各的** —— 「這一顆上有沒有
             # `epi_others`」跟「有沒有 `epi`」是兩個不同的問題，而下游問的是
             # 它接的那一個。
-            feats.update(region_facts(ctx, region_family(name), shape,
-                                      clipped=clipped,
-                                      edge_dropped=edge_dropped))
+            feats.update(region_facts(
+                ctx, region_family(name, pick_rule_of(p) != PICK_NONE), shape,
+                clipped=clipped, edge_dropped=edge_dropped))
             feats["%s_pieces" % name] = float(len(set(piece_of)))
 
         feats["layout_ok"] = 1.0 if found else 0.0
         feats["layout_layers"] = float(found)
-        feats[_PICK_FEATURE] = 1.0 if by_signal_any else 0.0
         ctx.add_features(prefix_features(p["output_prefix"], feats))
 
         # 儀表用（跟另外兩張 Region 卡同一個慣例）：**UI 畫的就是引擎算的這一份**。

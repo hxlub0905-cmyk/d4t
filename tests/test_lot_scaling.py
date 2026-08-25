@@ -1,5 +1,5 @@
 # F23 期3：「跟整批比」的兩趟判定（lot scaling）。
-"""鎖住六條性質（`docs/plans/F23-route-by.md` §8）：
+"""鎖住六條性質（`docs/history/plans/F23-route-by.md` §8）：
 
 1. **嚴格附加**（鐵則 9）：沒有 ``scale`` 行的 recipe —— JSON 沒有那個鍵、
    `apply_lot_scaling` 一個位元都不動。
