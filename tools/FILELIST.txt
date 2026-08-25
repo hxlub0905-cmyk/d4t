@@ -26,14 +26,14 @@ d090bc2eefc1fe45c48d60848280ba323b0ef4a7 d4t/core/algo/pairing.py
 acba11d258e8a4fb5250d478a59b2d02fe57fe35 d4t/core/algo/profile.py
 c1049c4ae6c2505db6e37b7edeaf364e1244b026 d4t/core/algo/quality.py
 674556c1ad3f6f8d92b26856c455eb02c5125bea d4t/core/algo/roi.py
-dc20bcbe71b466b3dee757e62ecf86385df52589 d4t/core/algo/shape.py
+81d9c6780b3bbf895971915b798200c237454150 d4t/core/algo/shape.py
 0f0727a89f62065c799e7c8fe234fc7b5c3545f9 d4t/core/algo/snr.py
 e1f7a95ad976983aa0f1f16b7bd52cdcc67494dd d4t/core/algo/subpixel.py
 82791f0e16286d803ddba7220ac56aec5548f6d4 d4t/core/algo/template.py
 5f93cfe3c9daa7b50b5efa3dd329c847e5c26c91 d4t/core/calibration.py
 78924f0edd38b3d96346542c63372c7fee679a91 d4t/core/export/__init__.py
 e53c86e86a7bc2ab2d6a18ac00c9b20e4d3829ca d4t/core/export/klarf_out.py
-d40dfe352b51f2374b84d004f5d5a18508d42480 d4t/core/export/overlay.py
+74c057157413c18d557353d5e3663753f4160ffe d4t/core/export/overlay.py
 ab5031e7056134aa94c5551aba9b80a774b6397a d4t/core/export/report.py
 4599be07de9d76b7a008bdc400e22cfaa0c7acd2 d4t/core/ingest/__init__.py
 987ec64e2830c1e9e7ee535c3aa91e020f5bd0be d4t/core/ingest/dataset.py
@@ -58,7 +58,7 @@ e410dea339f3f92530fbac9c9461c2d22ed0d555 d4t/core/steps/_util.py
 c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
 cf162d9e699b12b6e4cd5d6d9706484b19eda598 d4t/core/steps/align_to.py
 2c48cd738d30003227a9aad3f34e5c8565a9c6ab d4t/core/steps/arith.py
-9898cc199bd1896a65931a8103975971599a6217 d4t/core/steps/cd.py
+4d91da90d6ed3dbfc1c6d26e9c18072fc84e91cd d4t/core/steps/cd.py
 39bbc384b66e024f67200a76598d4f6f255e5100 d4t/core/steps/denoise.py
 8ef5c8396cd11fe7299037d7865c66fa3ab7830a d4t/core/steps/feature_fill.py
 9b417df41842c99263f3a477022e26c05e135bf5 d4t/core/steps/feature_math.py
@@ -150,6 +150,7 @@ e530fae4e34f94d92f38eab941d799fbef96b01d tests/test_batch_cache.py
 eec62f1d38fdcefcf2f311cc74ac3b7cbb7e1530 tests/test_carry_klarf_columns.py
 c01fd4f7804f568260bb05fa61871b1f65906c25 tests/test_cd_blob.py
 6d1186f5b2372b93d5fa8d5190e479acb6bdecf6 tests/test_cd_measure.py
+eae17fdff6a4d62a20e2fe3fe4ebebbfd6dfa7d6 tests/test_cd_position.py
 16180dcebe118863c983b720586e849f0a78bc8a tests/test_cell_rois.py
 2f5f82b156ff84e43430ad8f9fa8b4411c3cfd3b tests/test_check_glas_export.py
 d30e533c8f476e52e0e9942e25316487eabfcc41 tests/test_cli_encoding.py
@@ -165,7 +166,7 @@ c2f7df52f855141ec0c0b85e71faa3a821ae31f5 tests/test_docs_links.py
 8b0ab7fe7dae38c1494a5e162ccdbcaf1f4bf553 tests/test_engine.py
 418fc5470ce715a88c0c5983ae40a59b19600974 tests/test_enhance.py
 5bcbc5d88b74b990dac7d69874664cc9ca5617fe tests/test_export_klarf.py
-ab0c8765d998ab5ffce1e741b57991f97c22188e tests/test_export_overlay.py
+44c0ccd94edc439c85f62d12f2c025980c63ad42 tests/test_export_overlay.py
 305b78487054af80ea56c569548c997f82c12bf4 tests/test_export_parity.py
 ed412883e22f01db1c0bb3eb0cec4e24dd093ad9 tests/test_export_report.py
 2415c6f4229d2d8ff5044b35cdde8560d3bcd8c2 tests/test_expression.py

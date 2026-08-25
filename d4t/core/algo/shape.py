@@ -119,6 +119,16 @@ class BlobResult(NamedTuple):
     chord: Tuple[Tuple[float, float], Tuple[float, float]]
     #: 區域灰階的直方圖（面板畫的那一張），``(counts, lo, hi)``。
     hist: Tuple[List[int], float, float]
+    #: 選中那一團的外接矩形（block 座標，``(x, y, w, h)``；``ok=False`` 時全 0）。
+    #:
+    #: 這兩格是 F29 加的，而它們**本來就已經算出來了**：``bbox`` 是
+    #: ``connectedComponentsWithStats`` 的 stats（原本只拿來判 ``touches_edge``
+    #: 就丟掉），``centroid`` 是同一支回傳的 centroids（原本接成 ``_cent``）。
+    #: 缺的從來不是計算，是出口 —— 這一團在哪，量到了卻沒有人講得出來。
+    bbox: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    #: 選中那一團的像素質心（block 座標）。**不是外接矩形的中心** ——
+    #: 一個 L 形的兩者可以差很遠，而質心才落在東西上。
+    centroid: Tuple[float, float] = (0.0, 0.0)
 
 
 # --------------------------------------------------------------------------- #
@@ -317,7 +327,7 @@ def measure_blob(block: Any, target: str = "auto", frac: float = 0.5,
         return _fail("flat", level, bg, fg, used, quality, hist)
 
     mask = (arr >= level) if used == "bright" else (arr <= level)
-    n_lab, labels, stats, _cent = cv2.connectedComponentsWithStats(
+    n_lab, labels, stats, cent = cv2.connectedComponentsWithStats(
         mask.astype(np.uint8), connectivity=8)
     keep = [i for i in range(1, n_lab)
             if int(stats[i, cv2.CC_STAT_AREA]) >= max(1, int(min_area))]
@@ -350,7 +360,9 @@ def measure_blob(block: Any, target: str = "auto", frac: float = 0.5,
     return BlobResult(True, "", level, bg, fg, used, quality, area,
                       len(keep), touches,
                       outline.reshape(-1, 2).astype(np.float64),
-                      perimeter, fmax, fmin, angle, chord, hist)
+                      perimeter, fmax, fmin, angle, chord, hist,
+                      (x0, y0, bw, bh),
+                      (float(cent[chosen][0]), float(cent[chosen][1])))
 
 
 # --------------------------------------------------------------------------- #

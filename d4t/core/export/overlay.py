@@ -123,13 +123,34 @@ def _blob_rank(b: Any) -> float:
         return 0.0
 
 
+#: 特徵裡「一個框」長什麼名字 —— **順序就是優先順序**（F29）。
+#:
+#: * ``blob_*`` —— `find_defect` **去圖上找**出來的那一團；
+#: * ``cd_box_*`` —— CD 卡量那一塊的時候**順手知道**的位置。
+#:
+#: 先找的贏，理由是它回答的問題比較接近疊圖要問的那一句：「這張圖上最可疑的
+#: 東西在哪」。CD 的框是「使用者用線指給我的那一塊裡面，那一團在哪」——
+#: 一樣有用，但它已經預設了範圍。兩個都在的時候畫兩個框才是誠實的做法，
+#: 而那要等疊圖畫得下第二個框（今天 `render_overlay` 只吃一個 ``box``）。
+_BOX_FEATURE_SETS = (
+    ("blob_x", "blob_y", "blob_w", "blob_h"),
+    ("cd_box_x", "cd_box_y", "cd_box_w", "cd_box_h"),
+)
+
+
 def primary_blob_box(blobs: Optional[Sequence[Any]] = None,
                      features: Optional[Dict[str, Any]] = None
                      ) -> Optional[Tuple[int, int, int, int]]:
     """挑出「主 blob」的框：blobs 裡 SNR 最強的那塊；
 
-    blobs 是空的時候，退而求其次看 features 有沒有
-    ``blob_x`` / ``blob_y`` / ``blob_w`` / ``blob_h``。都沒有回 None。
+    blobs 是空的時候，退而求其次看 features 裡有沒有一組框 ——
+    順序見 :data:`_BOX_FEATURE_SETS`。都沒有回 None。
+
+    ⚠ **只認沒有前綴的那一份。** 量測卡接了兩個以上的區域時，名字會變成
+    ``epi_cd_box_x`` / ``mg_cd_box_x`` —— 那時候「主 blob」有兩個答案，
+    而在兩個裡面挑一個畫出來、畫面上又不說是哪一個，正是這個 repo 最怕的
+    「跑得完、有圖、而且是錯的」。所以那種情況下不畫框（回 None），
+    等疊圖畫得下好幾個框再說。
     """
     best = None
     best_rank = None
@@ -143,9 +164,10 @@ def primary_blob_box(blobs: Optional[Sequence[Any]] = None,
     if best is not None:
         return best
     f = features or {}
-    if all(k in f for k in ("blob_x", "blob_y", "blob_w", "blob_h")):
-        return _blob_box({k[5:]: f[k] for k in
-                          ("blob_x", "blob_y", "blob_w", "blob_h")})
+    for keys in _BOX_FEATURE_SETS:
+        if all(k in f for k in keys):
+            return _blob_box(dict(zip(("x", "y", "w", "h"),
+                                      (f[k] for k in keys))))
     return None
 
 
