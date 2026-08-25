@@ -2789,6 +2789,8 @@ INSPECTORS: Dict[str, type] = {
     # F19：CD 有自己的面板了（剖面圖是它唯一講得清楚自己的方式）。
     "cd_measure": CdInspector,
     "focus_quality": MeasureInspector,
+    # ⚠ ``roi_reference`` **一個 key、四種面板**（F30）—— 見 :data:`BY_METHOD`。
+    # 這裡放的是「沒有 method 可看時的那一個」。
     "roi_reference": GdsInspector,
     "pair_source": PairInspector,
     # 對圖的分數只有**跟整批比**才讀得懂：0.62 是高是低要看其他顆長什麼樣。
@@ -2798,5 +2800,35 @@ INSPECTORS: Dict[str, type] = {
 }
 
 
-def inspector_for(step_key: str) -> Optional[type]:
-    return INSPECTORS.get(str(step_key or ""))
+#: 一個 step key 有好幾種面板時，由**哪一個參數**決定，以及各對應哪一個
+#: （F30：四張 Region 卡收成 ``roi_reference`` 的四個 ``method``）。
+#:
+#: 為什麼不是「一張卡一個面板」就好：面板講的是**這一支怎麼算的**（Profile 的
+#: 兩條投影曲線、Template 的三道閘門、GDS 的層清單），而那三件事沒有一個共同的
+#: 畫法。硬湊一個的話，使用者看到的是一塊「有時候是空的」的面板。
+BY_METHOD: Dict[str, Dict[str, Optional[type]]] = {
+    "roi_reference": {
+        "stripes in the image": CrossInspector,
+        "a cell I mark myself": TemplateInspector,
+        "layout layers": GdsInspector,
+        # **``None`` 是一個明講的答案**：這一支還沒有自己的面板，而沒有面板
+        # 比一塊空的面板好（同 INSPECTORS 上面那一段記下的理由）。寫成 None
+        # 而不是「不列」，是為了跟「這個 method 我不認得」分得開 —— 後者要
+        # 落回舊表，前者不要。
+        "repeating cells": None,
+    },
+}
+
+
+def inspector_for(step_key: str,
+                  params: Optional[Dict[str, Any]] = None) -> Optional[type]:
+    """這張卡的儀表。``params`` 給了的話，同一個 key 可以有好幾種（見
+    :data:`BY_METHOD`）。"""
+    key = str(step_key or "")
+    table = BY_METHOD.get(key)
+    if table is not None and params is not None:
+        method = str((params or {}).get("method", ""))
+        if method in table:
+            return table[method]
+        # method 認不得（舊檔、打字錯）→ 落回 INSPECTORS 那一個，不要當機。
+    return INSPECTORS.get(key)

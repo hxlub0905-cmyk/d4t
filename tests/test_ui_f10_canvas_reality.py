@@ -422,7 +422,7 @@ def test_deleting_a_card_takes_its_lines_with_it(window):
     src = first_source(window)
     dn = window.add_card_after(src, "denoise")
     window._on_edge_added(src, dn, "ref", "streams")
-    pr = window.add_card_after(dn, "roi_cross")
+    pr = window.add_card_after(dn, "roi_reference")
     window._on_edge_added(dn, pr, "ref", "source")
     assert len(window.model.edges) == 2
 
@@ -431,7 +431,7 @@ def test_deleting_a_card_takes_its_lines_with_it(window):
         "刪掉的卡還留著一條線在 model 裡"
 
     # 再加一張同型別的卡 —— 它會拿到同一個 node id，而線不可以跟著回來
-    again = window.add_card_after(dn, "roi_cross")
+    again = window.add_card_after(dn, "roi_reference")
     assert again == pr, "這條測試的前提是 node id 會被重複使用"
     assert not [e for e in window.model.edges if e.dst == again]
     assert not [e for e in window.pipeline._edges if e.pair()[1] == again], \

@@ -30,6 +30,7 @@ from d4t.core.pipeline import get_step  # noqa: E402
 from d4t.core.pipeline.context import Context  # noqa: E402
 from d4t.core.pipeline.step import REGISTRY  # noqa: E402
 from d4t.core.steps._util import REGION_FACTS  # noqa: E402
+from tests.region_cards import region_card  # noqa: E402
 
 PERIOD = 40
 PATCH = 32
@@ -58,23 +59,23 @@ def _big(seed: int = 0) -> np.ndarray:
 
 def _run_profile():
     ctx = Context(images={"ref": _stripes()})
-    p = get_step("roi_cross").validate_params(
+    p = region_card("roi_cross").validate_params(
         {"source": "ref", "roi_out": "epi", "place": "crossing"})
-    get_step("roi_cross")().run(ctx, p)
-    return ctx, get_step("roi_cross").resolve_features(p), \
-        get_step("roi_cross").resolve_regions_out(p)
+    region_card("roi_cross")().run(ctx, p)
+    return ctx, region_card("roi_cross").resolve_features(p), \
+        region_card("roi_cross").resolve_regions_out(p)
 
 
 def _run_template():
     cell = algo_template.build_golden_cell(_big()).cell
     frozen = algo_template.encode_cell(cell)
     ctx = Context(images={"ref": _big()[100:100 + PATCH, 0:PATCH]})
-    p = get_step("roi_template").validate_params(
+    p = region_card("roi_template").validate_params(
         {"source": "ref", "template": frozen, "regions": "epi: 0.1,0,0.3,1",
          "locate_axis": "x"})
-    get_step("roi_template")().run(ctx, p)
-    return ctx, get_step("roi_template").resolve_features(p), \
-        get_step("roi_template").resolve_regions_out(p)
+    region_card("roi_template")().run(ctx, p)
+    return ctx, region_card("roi_template").resolve_features(p), \
+        region_card("roi_template").resolve_regions_out(p)
 
 
 def _run_gds():
@@ -171,19 +172,19 @@ def test_the_fallback_to_the_whole_image_is_not_reported_as_present():
     """
     for source in (np.full((64, 64), 120, np.uint8),):
         ctx = Context(images={"ref": source})
-        p = get_step("roi_cross").validate_params(
+        p = region_card("roi_cross").validate_params(
             {"source": "ref", "roi_out": "epi"})
-        get_step("roi_cross")().run(ctx, p)
+        region_card("roi_cross")().run(ctx, p)
         assert ctx.features["locate_ok"] == 0.0
         assert ctx.features["epi_present"] == 0.0
         assert ctx.features["epi_boxes"] == 1.0, "保險的那一個框應該還在"
 
     cell = algo_template.build_golden_cell(_big()).cell
     ctx = Context(images={"ref": np.full((PATCH, PATCH), 120, np.uint8)})
-    p = get_step("roi_template").validate_params(
+    p = region_card("roi_template").validate_params(
         {"source": "ref", "template": algo_template.encode_cell(cell),
          "regions": "epi: 0.1,0,0.3,1"})
-    get_step("roi_template")().run(ctx, p)
+    region_card("roi_template")().run(ctx, p)
     assert ctx.features["locate_ok"] == 0.0
     assert ctx.features["epi_present"] == 0.0
 

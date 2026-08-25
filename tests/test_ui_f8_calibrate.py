@@ -22,6 +22,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 from d4t.core.pipeline import get_step  # noqa: E402
 from d4t.core.pipeline.context import Context  # noqa: E402
+from tests.region_cards import (  # noqa: E402
+    add_region_step, region_card,
+)
 
 _TOOLS = str(Path(__file__).resolve().parent.parent / "tools")
 if _TOOLS not in sys.path:
@@ -60,7 +63,7 @@ def lines_lot(tmp_path_factory):
 def win(qapp, lines_lot):
     w = studio_mod.StudioWindow(show_welcome_on_start=False)
     w.load_dataset_path(lines_lot["klarf"], sync=True)
-    nid = wire_up(w.model, w.model.add_step("roi_cross"))
+    nid = wire_up(w.model, add_region_step(w.model, "roi_cross"))
     w.model.set_param(nid, "roi_out", "xing")
     w.select_node(nid)
     yield w
@@ -176,7 +179,7 @@ def test_the_use_button_is_wide_enough_for_its_own_text(qapp):
     img[:, np.arange(SIZE) % MG < 8] = 220.0
     img += rng.normal(0, 2.0, (SIZE, SIZE)).astype(np.float32)
     ctx = Context(images={"test": img.copy(), "ref": img.copy()})
-    get_step("roi_cross")().run(ctx, {
+    region_card("roi_cross")().run(ctx, {
         "source": "ref", "place": "beside_vertical", "roi_out": "xing"})
 
     insp = insp_mod.CrossInspector()

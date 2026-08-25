@@ -12,6 +12,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from tests.region_cards import (  # noqa: E402
+    add_region_step, region_card,
+)
 
 from conftest import first_source, wire_up  # noqa: E402  —— F10：加完卡要接線
 
@@ -127,7 +130,7 @@ def test_a_prefix_that_cannot_be_a_variable_name_is_refused(window):
 # --------------------------------------------------------------------------- #
 
 def test_the_panel_hides_itself_for_any_other_card(window):
-    nid = wire_up(window.model, window.model.add_step("roi_cross"))
+    nid = wire_up(window.model, add_region_step(window.model, "roi_cross"))
     window.select_node(nid)
     window.refresh_preview(sync=True)
     assert window.profile_panel_visible() is True
@@ -202,7 +205,7 @@ def mixed_lot(tmp_path_factory):
 def mixed_window(qapp, mixed_lot):
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     win.load_dataset_path(mixed_lot["klarf"], sync=True)
-    nid = wire_up(win.model, win.model.add_step("roi_cross"))
+    nid = wire_up(win.model, add_region_step(win.model, "roi_cross"))
     win.model.set_param(nid, "roi_out", "epi")
     win.select_node(nid)
     yield win
@@ -305,7 +308,7 @@ def test_the_button_only_appears_for_cards_that_define_a_region(mixed_window):
 def test_without_a_dataset_the_button_is_off_and_says_why(qapp):
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     try:
-        nid = wire_up(win.model, win.model.add_step("roi_cross"))
+        nid = wire_up(win.model, add_region_step(win.model, "roi_cross"))
         win.select_node(nid)
         assert win.selected_regions() == ["cross", "cross_center", "cross_others"]
         assert win.region_check_available() is False
@@ -343,7 +346,7 @@ def test_the_mask_card_offers_the_regions_defined_upstream(window):
     """
     from PySide6.QtWidgets import QLineEdit
 
-    tpl = wire_up(window.model, window.model.add_step("roi_template"))
+    tpl = wire_up(window.model, add_region_step(window.model, "roi_template"))
     window.model.set_param(tpl, "regions", "epi: 0.1,0,0.3,1 | mg: 0.5,0,0.2,1")
 
     mask = wire_up(window.model, window.model.add_step("roi_mask"))

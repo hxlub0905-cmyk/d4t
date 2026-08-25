@@ -212,6 +212,43 @@ class StepError(RuntimeError):
         self.step_key = step_key
 
 
+def show_when_conditions(show_when: Any) -> List[Tuple[str, Tuple[Any, ...]]]:
+    """``show_when`` → 一串 ``(參數名, 允許的值)``，**全部成立才顯示**。
+
+    兩種寫法，因為多數卡片只需要一條：
+
+    * 一條 —— ``("method", ("percentile",))``
+    * 好幾條 —— ``(("method", ("profile",)), ("directions", ("both", "flat")))``
+
+    第二種是 F30 加的，而它是被**逼**出來的而不是想出來的：四張 Region 卡收成
+    一張之後，``vertical_width`` 那幾格同時屬於「``method`` 是 profile」與
+    「``directions`` 含直的」兩個條件。少了 and 的話只剩兩條路 —— 把條件揉進
+    卡片自己的程式碼（於是 UI 與引擎各有一份「這一格算不算數」），或者不合併。
+    """
+    if not show_when:
+        return []
+    # ``("method", ("a", "b"))`` 的第一格是字串；多條的第一格是一個 tuple。
+    if isinstance(show_when[0], str):
+        return [(str(show_when[0]), tuple(show_when[1]))]
+    return [(str(name), tuple(values)) for name, values in show_when]
+
+
+def param_visible(show_when: Any, params: Optional[Dict[str, Any]]) -> bool:
+    """這一列在這組參數下算不算數 —— **UI 與引擎共用的那一份規則**。
+
+    ⚠ 住在 core 而不是 `ui/widgets.py`：`ParamForm` 拿到的是**序列化過的
+    dict**（不是 ParamSpec），所以它以前自己又寫了一次同樣的判斷。兩份就會漂，
+    而漂掉的症狀是「設定區看得到某一格，但引擎當它不存在」—— 使用者填了一個
+    完全沒有作用的值，而畫面上不會說。
+    """
+    values = params or {}
+    for name, allowed in show_when_conditions(show_when):
+        if str(values.get(name, "")) not in {str(v) for v in allowed}:
+            return False
+    return True
+
+
+
 @dataclass
 class ParamSpec:
     """一個參數的完整描述 —— UI 表單由此自動生成。
@@ -341,10 +378,7 @@ class ParamSpec:
 
     def visible_for(self, params: Optional[Dict[str, Any]]) -> bool:
         """在這組參數下，這一列該不該顯示（沒有 ``show_when`` 就永遠顯示）。"""
-        if not self.show_when:
-            return True
-        name, values = self.show_when[0], tuple(self.show_when[1])
-        return str((params or {}).get(name, "")) in {str(v) for v in values}
+        return param_visible(self.show_when, params)
 
     def __post_init__(self) -> None:
         if self.type not in PARAM_TYPES:
@@ -901,9 +935,14 @@ class Step(ABC):
                     "choice_help": p.choice_help, "unit": p.unit,
                     "label": p.label or p.name,
                     "pattern": p.pattern,
-                    # ``("method", ("percentile",))`` → JSON-safe 的兩個 list。
-                    "show_when": (None if not p.show_when
-                                  else [p.show_when[0], list(p.show_when[1])]),
+                    # ``("method", ("percentile",))`` → JSON-safe 的**一串
+                    # 條件** ``[["method", ["percentile"]], …]``。一律吐多條的
+                    # 形狀（F30）：單條也包成一串，於是讀的那一邊只有一種形狀
+                    # 要認 —— 而 `param_visible` 兩種都吃，所以序列化過的與
+                    # 原生的走的是同一支規則。
+                    "show_when": (None if not p.show_when else
+                                  [[n, list(v)] for n, v
+                                   in show_when_conditions(p.show_when)]),
                     "section": p.section,
                     "advanced": p.advanced,
                     "direction": p.direction,

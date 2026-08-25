@@ -31,6 +31,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 from d4t.core.pipeline import get_step  # noqa: E402
 from d4t.core.pipeline.context import Context  # noqa: E402
+from tests.region_cards import (  # noqa: E402
+    add_region_step, region_card,
+)
 
 SIZE, MG_PITCH, EPI_PITCH = 128, 24, 34
 
@@ -73,7 +76,7 @@ def _img() -> np.ndarray:
 def record():
     """一次真的計算 —— 面板畫的資料一律來自引擎，UI 不自己再算一次。"""
     ctx = Context(images={"test": _img(), "ref": _img()})
-    get_step("roi_cross")().run(ctx, {
+    region_card("roi_cross")().run(ctx, {
         "source": "ref", "place": "beside_vertical", "box_size": 5.0,
         "roi_out": "xing", "vertical_pitch": MG_PITCH,
         "horizontal_pitch": EPI_PITCH})
@@ -332,7 +335,7 @@ def test_holding_the_ruler_marks_the_preview_image(qapp, lines_lot):
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     try:
         win.load_dataset_path(lines_lot["klarf"], sync=True)
-        nid = wire_up(win.model, win.model.add_step("roi_cross"))
+        nid = wire_up(win.model, add_region_step(win.model, "roi_cross"))
         win.model.set_param(nid, "roi_out", "xing")
         win.select_node(nid)
         win.refresh_preview(sync=True)
@@ -362,7 +365,7 @@ def test_leaving_the_card_clears_the_band(qapp, lines_lot):
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     try:
         win.load_dataset_path(lines_lot["klarf"], sync=True)
-        nid = wire_up(win.model, win.model.add_step("roi_cross"))
+        nid = wire_up(win.model, add_region_step(win.model, "roi_cross"))
         win.select_node(nid)
         win.refresh_preview(sync=True)
         insp = win.inspector()

@@ -22,6 +22,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 from d4t.core.pipeline import get_step  # noqa: E402
 from d4t.core.pipeline.context import Context  # noqa: E402
+from tests.region_cards import (  # noqa: E402
+    add_region_step, region_card,
+)
 
 SIZE, MG_PITCH, EPI_PITCH = 128, 24, 34
 
@@ -63,7 +66,7 @@ def lines_lot(tmp_path_factory):
 def cross_window(qapp, lines_lot):
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     win.load_dataset_path(lines_lot["klarf"], sync=True)
-    nid = wire_up(win.model, win.model.add_step("roi_cross"))
+    nid = wire_up(win.model, add_region_step(win.model, "roi_cross"))
     win.model.set_param(nid, "roi_out", "xing")
     win.model.set_param(nid, "place", "beside_vertical")
     win.select_node(nid)
@@ -83,7 +86,7 @@ def _img(ox: int = 0, epi_width: int = 14) -> np.ndarray:
 def _run(epi_width: int = 14) -> Context:
     img = _img(epi_width=epi_width)
     ctx = Context(images={"test": img.copy(), "ref": img.copy()})
-    get_step("roi_cross")().run(ctx, {
+    region_card("roi_cross")().run(ctx, {
         "source": "ref", "place": "beside_vertical", "box_size": 5.0,
         "inset": 3.0, "roi_out": "xing",
         "vertical_pitch": MG_PITCH, "horizontal_pitch": EPI_PITCH})
@@ -260,7 +263,7 @@ def test_only_the_selected_card_draws_its_boxes(qapp, cross_window):
     mine = list(win.region_overlay())
     assert len(mine) > 4
 
-    other = wire_up(win.model, win.model.add_step("roi_cross"))
+    other = wire_up(win.model, add_region_step(win.model, "roi_cross"))
     win.model.set_param(other, "roi_out", "second")
     win.model.set_param(other, "place", "crossing")
     win.select_node(other)
@@ -288,7 +291,7 @@ def _cpode_ctx() -> Context:
         img[:, site * MG_PITCH:site * MG_PITCH + 8] = 30.0
     img += rng.normal(0, 2.0, (SIZE, SIZE)).astype(np.float32)
     ctx = Context(images={"test": img.copy(), "ref": img.copy()})
-    get_step("roi_cross")().run(ctx, {
+    region_card("roi_cross")().run(ctx, {
         "source": "ref", "place": "beside_vertical", "box_size": 5.0,
         "inset": 3.0, "roi_out": "xing", "vertical_kinds": 3,
         "vertical_pitch": MG_PITCH, "horizontal_pitch": EPI_PITCH})
@@ -504,7 +507,7 @@ def test_the_studio_sends_it_to_the_right_axis(cross_window):
     """``x`` 那條曲線講的是**直的**條紋。接反的症狀是點左邊改到右邊的參數 ——
     而畫面上兩邊都會動，看起來像是「有反應」。"""
     win = cross_window
-    nid = wire_up(win.model, win.model.add_step("roi_cross"))
+    nid = wire_up(win.model, add_region_step(win.model, "roi_cross"))
     win.select_node(nid)
 
     win._on_select_requested("x", "darkest")
@@ -547,7 +550,7 @@ def _run_one_way() -> Context:
     """只有直條紋的圖 ＋ 只看直的方向。"""
     img = _img(epi_width=0)
     ctx = Context(images={"test": img.copy(), "ref": img.copy()})
-    get_step("roi_cross")().run(ctx, {
+    region_card("roi_cross")().run(ctx, {
         "source": "ref", "directions": "upright", "place": "crossing",
         "inset": 0.0, "roi_out": "xing", "vertical_pitch": MG_PITCH})
     return ctx

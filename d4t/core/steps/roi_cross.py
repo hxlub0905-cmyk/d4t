@@ -46,6 +46,7 @@ from ._util import (
     output_prefix_spec, pick_defect_box, pick_rule_specs, prefix_features,
     prefix_names, region_family, region_fact_names, region_facts,
     require_image, set_region_family,
+    LIMIT_MAX_BOXES,
 )
 
 _BESIDE = ("beside_vertical", "beside_horizontal")
@@ -78,11 +79,21 @@ def _norm(rect, shape) -> tuple:
     return (x / w, y / h, bw / w, bh / h)
 
 
-@register_step
+# ⚠ **這個類別不再自己註冊**（F30，2026-08-25）。使用者：「把 Profile /
+# Template 也折進 roi_reference」—— 四張 Region 卡回答的是同一句話（「哪些地方
+# 應該長得一樣」），所以它們是一張卡的四個 method，不是四張卡。
+#
+# 留在這個檔案裡而不是搬進 `roi_reference.py`：把 1100 行演算法搬過去只會讓那
+# 個檔案變成 1700 行，而「哪一支怎麼算」本來就各自看得懂 —— 要合的是**使用者
+# 看到的那張卡**，不是檔案。`roi_reference` 從這裡取 ``params``（加上一條
+# 「method 要是它」的條件）並轉呼叫 ``run`` / ``resolve_*``。
+#
+# ``key`` 改成 ``roi_reference``：它只剩下「錯誤訊息前面那個名字」這一個用途，
+# 而使用者放進畫布的那張卡就叫這個名字。
 class RoiCrossStep(Step):
     """交會定位：兩組條紋交叉出格子，在格子上放一組框。"""
 
-    key = "roi_cross"
+    key = "roi_reference"
     label = "Profile"
     category = CATEGORY_ALGO
     group = GROUP_REGION
@@ -367,7 +378,10 @@ class RoiCrossStep(Step):
                   "the same material on the same image."),
         ),
         ParamSpec(
-            name="max_boxes", type="int", default=64, min=1, max=4096,
+            # ⚠ 上限跟合併卡**同一個常數**（`_util.LIMIT_MAX_BOXES`）——
+            # 使用者調的是那張卡上的格子，而這裡會再驗一次。見那個常數的說明。
+            name="max_boxes", type="int", default=64, min=1,
+            max=LIMIT_MAX_BOXES,
             section="5 · Name and limits",
             label="At most this many boxes",
             help=("A guard for images with very fine patterns. The boxes "
@@ -376,7 +390,7 @@ class RoiCrossStep(Step):
             advanced=True,
         ),
         ParamSpec(
-            name="min_confidence", type="float", default=5.0, min=0.0,
+            name="min_stripe_confidence", type="float", default=5.0, min=0.0,
             section="5 · Name and limits",
             max=200.0, label="Give up below",
             help=("How much of each curve must be real signal rather than "
@@ -476,7 +490,7 @@ class RoiCrossStep(Step):
             fill_rule=str(p["fill_rule"]),
             placement=str(p["place"]), box_size=float(p["box_size"]),
             side=str(p["side"]), gap=float(p["gap"]), inset=float(p["inset"]),
-            min_confidence=float(p["min_confidence"]),
+            min_confidence=float(p["min_stripe_confidence"]),
             max_boxes=int(p["max_boxes"]),
             directions=str(p["directions"]))
 

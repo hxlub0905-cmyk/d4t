@@ -32,6 +32,7 @@ from d4t.core.algo import grid as algo_grid  # noqa: E402
 from d4t.core.pipeline import get_step  # noqa: E402
 from d4t.core.pipeline.context import Context  # noqa: E402
 from d4t.core.pipeline.step import StepError  # noqa: E402
+from tests.region_cards import region_card  # noqa: E402
 
 SIZE = 128
 MG_PITCH, MG_W = 24, 8          # 直的 Metal Gate
@@ -220,7 +221,7 @@ def _run(ctx: Context, **params) -> Context:
          "horizontal_pitch": EPI_PITCH,
          "vertical_select": "brightest", "horizontal_select": "brightest"}
     p.update(params)
-    return get_step("roi_cross")().run(ctx, p)
+    return region_card("roi_cross")().run(ctx, p)
 
 
 def test_one_name_holds_every_box_and_center_holds_exactly_one():
@@ -289,7 +290,7 @@ def test_the_card_declares_both_regions_so_lint_can_see_them():
 
     第三個 ``_others`` 是 F11 Region-1 加的基準（除了缺陷那一塊以外的每一塊）。
     """
-    step = get_step("roi_cross")
+    step = region_card("roi_cross")
     out = step.resolve_regions_out({"roi_out": "xing"})
     assert out == ["xing", "xing_center", "xing_others"]
 
@@ -401,7 +402,7 @@ def test_an_alternating_pitch_fills_in_a_missing_stripe():
 def test_the_card_passes_both_pitches_through():
     img = _alternating()
     ctx = Context(images={"test": img.copy(), "ref": img.copy()})
-    get_step("roi_cross")().run(ctx, {
+    region_card("roi_cross")().run(ctx, {
         "source": "ref", "place": "crossing", "roi_out": "xing",
         "vertical_select": "brightest", "horizontal_select": "brightest",
         "horizontal_pitch": 24.0, "horizontal_pitch_2": 36.0})
@@ -678,7 +679,7 @@ def _run_lines(**params) -> Context:
     p = {"source": "ref", "directions": "upright", "place": "crossing",
          "inset": 0.0, "vertical_select": "brightest"}
     p.update(params)
-    return get_step("roi_cross")().run(ctx, p)
+    return region_card("roi_cross")().run(ctx, p)
 
 
 def test_a_patch_with_stripes_one_way_only_used_to_be_refused():
@@ -707,7 +708,7 @@ def test_the_boxes_land_on_the_stripes_not_between_them():
     """滿版的框仍然要落在**要的那種材質**上 —— 這是這張卡唯一的工作。"""
     img = _lines_only(ox=5)
     ctx = Context(images={"ref": img})
-    get_step("roi_cross")().run(ctx, {
+    region_card("roi_cross")().run(ctx, {
         "source": "ref", "directions": "upright", "place": "crossing",
         "inset": 0.0, "vertical_select": "brightest"})
     for x, _y, w, _h in ctx.roi_norm_rects("cross"):
@@ -752,7 +753,7 @@ def test_a_placement_that_needs_the_other_direction_is_refused_before_the_run():
     它不會報錯，它會安靜地產出零個框、退回整張圖、把每一顆都標成
     locate_ok = 0 —— 而畫面上看起來就跟「這批圖沒有結構」一模一樣。
     """
-    card = get_step("roi_cross")
+    card = region_card("roi_cross")
     says = card.configuration_issues({"directions": "upright",
                                       "place": "between_horizontal"})
     assert says and "left-to-right" in says[0]
@@ -772,7 +773,7 @@ def test_the_run_says_the_same_thing_if_it_gets_there_anyway():
 
 def test_an_old_recipe_keeps_looking_both_ways():
     """鐵則 9：舊 recipe 沒有 ``directions`` 這個鍵 → 預設必須是舊行為。"""
-    spec = {s.name: s for s in get_step("roi_cross").params}["directions"]
+    spec = {s.name: s for s in region_card("roi_cross").params}["directions"]
     assert spec.default == "both"
     ctx = _run(_ctx())                     # 完全不提 directions
     assert ctx.features["locate_ok"] == 1.0
@@ -780,12 +781,22 @@ def test_an_old_recipe_keeps_looking_both_ways():
 
 def test_the_two_sets_of_stripe_settings_disappear_with_the_direction():
     """一個方向不看的時候，它那六格參數不該還在畫面上等人填。"""
-    specs = {s.name: s for s in get_step("roi_cross").params}
-    assert specs["vertical_pitch"].show_when == ("directions",
-                                                 ("both", "upright"))
-    assert specs["horizontal_sensitivity"].show_when == ("directions",
-                                                         ("both", "flat"))
-    assert specs["smooth"].show_when is None      # 共用的那一顆留著
+    card = region_card("roi_cross")
+    specs = {s.name: s for s in card.params}
+
+    def shown(name, **over):
+        return specs[name].visible_for(card.bind(over))
+
+    # ⚠ 問的是「這一格**什麼時候在**」，不是它的 `show_when` 長成哪個 tuple。
+    # 四張 Region 卡收成一張之後（F30）那個 tuple 多了一條「method 要是
+    # profile」，而斷言值本身完全沒有變 —— 值才是規格。
+    assert shown("vertical_pitch", directions="both")
+    assert shown("vertical_pitch", directions="upright")
+    assert not shown("vertical_pitch", directions="flat")
+    assert shown("horizontal_sensitivity", directions="flat")
+    assert not shown("horizontal_sensitivity", directions="upright")
+    for d in ("both", "upright", "flat"):         # 共用的那一顆留著
+        assert shown("smooth", directions=d)
 
 
 # --------------------------------------------------------------------------- #
@@ -809,13 +820,13 @@ def _edge_ctx(**params) -> Context:
     p = {"source": "ref", "directions": "upright", "place": "crossing",
          "inset": 0.0, "vertical_select": "brightest"}
     p.update(params)
-    get_step("roi_cross")().run(ctx, p)
+    region_card("roi_cross")().run(ctx, p)
     return ctx
 
 
 def test_the_switch_is_off_by_default_and_changes_nothing():
     """鐵則 9：舊 recipe 沒有這兩個鍵，行為必須逐位元組不變。"""
-    specs = {s.name: s for s in get_step("roi_cross").params}
+    specs = {s.name: s for s in region_card("roi_cross").params}
     assert specs["drop_edge"].default is False
     plain = _edge_ctx()
     same = _edge_ctx(drop_edge=False, edge_margin=64.0)

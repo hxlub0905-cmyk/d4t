@@ -367,11 +367,15 @@ def _roi_then_image_recipe() -> Recipe:
     """
     nodes = {
         "load": RecipeNode("load", "load_patch", {}),
-        # ROI 卡在 F8 第五輪只剩 Profile / Template / GDS —— 這裡用 Profile
-        # （``roi_cross``），它跟被拿掉的 ``roi_define`` 一樣是 algo 段，
-        # 一樣會落在快取段裡面，所以這條迴歸測的東西沒有變。
-        "roi": RecipeNode("roi", "roi_cross",
-                          {"source": "test", "roi_out": "main"}),
+        # ROI 卡 F30 起只剩一張（``roi_reference``，四個 method）—— 這裡用
+        # Profile 那一支，它跟被拿掉的 ``roi_define`` 一樣是 algo 段，一樣會
+        # 落在快取段裡面，所以這條迴歸測的東西沒有變。
+        #
+        # ⚠ 這裡是**直接建 RecipeNode**，不走 `Recipe.from_json_dict` ——
+        # 所以遷移不會跑，step key 要寫新的那一個。
+        "roi": RecipeNode("roi", "roi_reference",
+                          {"method": "stripes in the image",
+                           "source": "test", "roi_out": "main"}),
         "dn": RecipeNode("dn", "denoise",
                          {"streams": "test", "method": "median", "ksize": 3}),
         # metrics 明寫（F18 起預設是 robust 的那一組）—— 這條測的是快取，

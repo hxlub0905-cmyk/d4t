@@ -14,6 +14,9 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.region_cards import (  # noqa: E402
+    add_region_step, region_card,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
@@ -52,7 +55,7 @@ def window(qapp):
 # --------------------------------------------------------------------------- #
 def test_help_lives_in_the_tooltip_not_on_the_row(window, qapp):
     window.show()
-    nid = window.model.add_step("roi_template")
+    nid = add_region_step(window.model, "roi_template")
     window.select_node(nid)
     qapp.processEvents()
 
@@ -67,7 +70,7 @@ def test_help_lives_in_the_tooltip_not_on_the_row(window, qapp):
 def test_the_full_text_is_still_the_full_text(window):
     """畫面上不畫只是**畫面上**的事。問「這個參數的說明寫了什麼」的人要的，
     從來不是「現在放得下多少」。"""
-    nid = window.model.add_step("roi_template")
+    nid = add_region_step(window.model, "roi_template")
     window.select_node(nid)
     full = window.param_form.hint_text("min_structure")
     assert "featureless patch scores about 1" in full
@@ -78,7 +81,7 @@ def test_the_full_text_is_still_the_full_text(window):
 def test_an_error_is_painted_on_the_row_and_stays(window):
     """錯誤是他現在最需要讀完的一句話 —— 它是唯一准許回到列面上的說明，
     而且出現就是整段（不裁切、不跟著滑鼠收合）。"""
-    nid = window.model.add_step("roi_template")
+    nid = add_region_step(window.model, "roi_template")
     window.select_node(nid)
     form = window.param_form
     row = form._rows["min_score"]
@@ -95,7 +98,7 @@ def test_rows_are_one_line_tall_without_hints(window, qapp):
     """這一項的重點就是**看得到幾個參數**。拿掉常駐說明之後，每一列只剩
     標題列一行高；掛上錯誤那一列才長高。"""
     window.show()
-    nid = window.model.add_step("roi_template")
+    nid = add_region_step(window.model, "roi_template")
     window.select_node(nid)
     qapp.processEvents()
     form = window.param_form
@@ -158,7 +161,7 @@ def test_a_refusal_is_marked_as_one(window, tmp_path):
     window._status("Added denoise")
     assert window.status_level() == "info"
 
-    nid = window.model.add_step("roi_template")
+    nid = add_region_step(window.model, "roi_template")
     window.select_node(nid)
     assert window.run_trial(n=4) is False
     assert "Cannot run" in window.status_text()

@@ -440,8 +440,9 @@ def test_a_measure_card_that_needs_a_region_nobody_defines_is_caught(qapp):
     assert "unknown-region" in codes
 
     # 補上一張 ROI 卡（Profile 定義 'nobody_defines_this'）之後就乾淨了
-    nodes["roi"] = RecipeNode("roi", "roi_cross",
-                              {"roi_out": "nobody_defines_this"})
+    nodes["roi"] = RecipeNode("roi", "roi_reference",
+                              {"method": "stripes in the image",
+                               "roi_out": "nobody_defines_this"})
     ok = validate(Recipe(recipe_id="r",
                          routes={"ebi_patch": ["load", "roi", "glv"]},
                          nodes=nodes,
@@ -462,10 +463,12 @@ def test_measuring_two_regions_warns_instead_of_silently_losing_one(qapp):
         "load": RecipeNode("load", "load_patch", {}),
         # 兩張 ROI 卡各給自己的 output_prefix —— 不然它們**自己**的特徵就先撞
         # 起來了，而這條測的是下面那兩張量測卡的撞名。
-        "roiA": RecipeNode("roiA", "roi_cross",
-                           {"roi_out": "center", "output_prefix": "a"}),
-        "roiB": RecipeNode("roiB", "roi_cross",
-                           {"roi_out": "wide", "place": "crossing",
+        "roiA": RecipeNode("roiA", "roi_reference",
+                           {"method": "stripes in the image",
+                            "roi_out": "center", "output_prefix": "a"}),
+        "roiB": RecipeNode("roiB", "roi_reference",
+                           {"method": "stripes in the image",
+                            "roi_out": "wide", "place": "crossing",
                             "output_prefix": "b"}),
         "glvA": RecipeNode("glvA", "glv_stats",
                            {"roi": "center", "metrics": "glv_mean"}),
@@ -587,8 +590,8 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
         # 由 `load_sidecar` 產（配對在 ingest 層做，見 F11 Region-3 第 2 步）。
         "roi_reference": ["load_sidecar"],
         # 比較卡吃的是**區域**，所以上游要有一張出得了區域的 Region 卡。
-        # `roi_cross` 是三張裡唯一不需要外部資料的（純規則）。
-        "roi_compare": ["roi_cross"],
+        # `roi_reference` 預設那一支（重複晶格）不需要任何外部資料。
+        "roi_compare": ["roi_reference"],
         # 配對卡吐的那條流（配到的那顆的圖）—— 上游一樣是**另一張 Input 卡**。
         "align_to": ["pair_source"],
     }

@@ -79,6 +79,7 @@ N=1 000 約 3 ms、N=10 000 約 60 ms、N=50 000 約 280 ms、N=200 000 約 1 s�
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
@@ -91,12 +92,14 @@ from ..pipeline.channels import ChannelMapError, parse_channel_map
 from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_ALGO, GROUP_REGION, ParamSpec, Step, StepError, register_step,
+    show_when_conditions,
 )
 from ._util import (
     FEATURE_PREFIX_PATTERN, drop_edge_boxes, drop_edge_specs, ensure_gray,
     output_prefix_spec, pick_defect_box, pick_rule_specs, prefix_features,
     prefix_names, region_family, region_fact_names, region_facts,
     require_image, set_region_family,
+    LIMIT_MAX_BOXES,
 )
 
 #: ``method`` 的兩個值 —— **地位相同**，順序就是下拉由上到下。
@@ -105,12 +108,91 @@ from ._util import (
 #: ``reference``：``"another region"`` / ``"the other regions"``）。
 METHOD_CELLS = "repeating cells"
 METHOD_GDS = "layout layers"
-METHODS = (METHOD_CELLS, METHOD_GDS)
+METHOD_PROFILE = "stripes in the image"
+METHOD_TEMPLATE = "a cell I mark myself"
+METHODS = (METHOD_CELLS, METHOD_GDS, METHOD_PROFILE, METHOD_TEMPLATE)
+
+#: 哪一支的程式碼在哪個模組（F30 把四張卡收成一張）。
+#:
+#: ⚠ **run 的內容沒有搬家。** `roi_cross` / `roi_template` 那兩個檔案還在，
+#: 只是不再各自 `@register_step` —— 它們的 ``key`` 改成 ``roi_reference``，
+#: 所以錯誤訊息上使用者看到的是他真的放的那張卡。這樣做的理由是代價：把
+#: 1100 行演算法搬進來只會讓這個檔案變成 1700 行，而「哪一支怎麼算」本來就
+#: 各自看得懂 —— 要合的是**使用者看到的那張卡**，不是檔案。
+_IMPL_MODULE = {
+    METHOD_PROFILE: ("roi_cross", "RoiCrossStep"),
+    METHOD_TEMPLATE: ("roi_template", "RoiTemplateStep"),
+}
 
 
 def _method_of(params: Dict[str, Any]) -> str:
     m = str((params or {}).get("method", "") or "").strip()
     return m if m in METHODS else METHOD_CELLS
+
+
+def _impl(method: str):
+    """這個 method 的實作類別（``None`` = 就在這個檔案裡）。"""
+    where = _IMPL_MODULE.get(method)
+    if where is None:
+        return None
+    import importlib
+    mod = importlib.import_module("." + where[0], __package__)
+    return getattr(mod, where[1])
+
+
+#: 折進來的那兩支**不再自己宣告**的參數 —— 它們在這張卡上是共用的一格。
+#:
+#: 為什麼要一張排除表而不是「照抄全部」：``source`` / ``pick`` / ``max_boxes``
+#: 那幾格在三支上是同一句話，各留一份的話**同一個名字會有三個 ParamSpec**，
+#: 而 `validate_params` 只看得到最後一個 —— 於是使用者在畫面上調的是 A，
+#: 引擎讀的是 B，兩者的預設值還不一樣。
+_SHARED_PARAMS = ("source", "pick", "pick_source", "drop_edge", "edge_margin",
+                  "output_prefix", "max_boxes", "roi_out")
+
+
+def _params_for(method: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """交給某一支實作的那一份參數 —— **只留它宣告的鍵，預設值取自這張卡**。
+
+    兩件事缺一不可：
+
+    * **只留它認得的** —— `validate_params` 對未知的鍵是**報錯**（不是忽略），
+      而這張卡的 ``params`` 是四支的聯集。
+    * **預設值取自這張卡** —— ``source`` / ``roi_out`` / ``max_boxes`` 那幾格
+      合併之後只有一份，而實作那一邊還留著自己的舊預設（``ref`` / ``cross`` /
+      64）。不覆蓋的話，使用者**沒有動過**那一格時畫面上顯示這張卡的預設、
+      引擎讀到的卻是實作的舊預設 —— 而那個差別在畫面上看不出來。
+    """
+    impl = _impl(method)
+    given = dict(params or {})
+    if impl is None:
+        return given
+    mine = {spec.name: spec for spec in RoiReferenceStep.params}
+    out: Dict[str, Any] = {}
+    for spec in impl.params:
+        if spec.name in given:
+            out[spec.name] = given[spec.name]
+        elif spec.name in mine:
+            out[spec.name] = mine[spec.name].default
+    return out
+
+
+def _folded(method: str) -> List[ParamSpec]:
+    """把一支實作自己的參數搬過來，並且**加上「method 要是它」這個條件**。
+
+    `show_when` 因此可能有兩條（F30 為此讓它接受一串條件）：``vertical_width``
+    要的是「method 是 profile」**而且**「directions 含直的」。
+    """
+    impl = _impl(method)
+    if impl is None:
+        return []
+    out: List[ParamSpec] = []
+    for spec in impl.params:
+        if spec.name in _SHARED_PARAMS:
+            continue
+        mine = ("method", (method,))
+        rest = show_when_conditions(spec.show_when)
+        out.append(replace(spec, show_when=tuple([mine] + rest)))
+    return out
 
 #: 這張卡**多**寫的那一個（`_util.REGION_FACTS` 的五個之外）。
 #:
@@ -142,9 +224,9 @@ _CELL_FEATURES = ["cells_px", "cells_py", "cells_n", "cells_confidence",
 #: （見 `_util.pick_defect_box`）。
 _PICK_FEATURE = "pick_by_signal"
 
-#: ``max_boxes`` 的預設與上限 —— 兩個數字都是量出來的，理由見模組說明。
+#: ``max_boxes`` 的預設 —— 這個數字是量出來的，理由見模組說明。
+#: 上限（:data:`_util.LIMIT_MAX_BOXES`）三支共用，見那裡的說明。
 DEFAULT_MAX_BOXES = 8192
-LIMIT_MAX_BOXES = 65536
 
 
 def _layers_of(params: Dict[str, Any]) -> List[Tuple[int, str]]:
@@ -155,8 +237,15 @@ def _layers_of(params: Dict[str, Any]) -> List[Tuple[int, str]]:
         return []
 
 
+#: ``roi_out`` 沒填時的名字。**中性**，因為 ``repeating cells`` 與
+#: ``stripes in the image`` 共用這一格 —— 叫 ``cell`` 對條紋是錯的、叫
+#: ``cross`` 對晶格是錯的，而舊 recipe 的名字由遷移逐字寫進參數裡。
+DEFAULT_REGION_NAME = "region"
+
+
 def _cell_name(params: Dict[str, Any]) -> str:
-    return str((params or {}).get("roi_out", "") or "cell").strip() or "cell"
+    return (str((params or {}).get("roi_out", "") or DEFAULT_REGION_NAME)
+            .strip() or DEFAULT_REGION_NAME)
 
 
 @register_step
@@ -168,11 +257,10 @@ class RoiReferenceStep(Step):
     category = CATEGORY_ALGO
     group = GROUP_REGION
     help = ("Mark every place on the image that should look the same, so the "
-            "one that does not stand out. Two ways to find them, and they are "
-            "equally good - the repeating cells of the pattern itself, or one "
-            "layer of the layout from a GDS export. Either way you get the "
-            "whole set, the one the defect is in, and every other one as the "
-            "baseline to compare it against.")
+            "one that does not stand out. Four ways to find them, and they "
+            "are equally good - pick whichever your sample gives you. Either "
+            "way you get the whole set, the one the defect is in, and every "
+            "other one as the baseline to compare it against.")
     params = [
         ParamSpec(
             name="method", type="choice", default=METHOD_CELLS,
@@ -185,6 +273,19 @@ class RoiReferenceStep(Step):
                 METHOD_GDS: "One layer of the layout, from a GDS export. Use "
                             "this where the pattern does not repeat, which is "
                             "where there is nothing to lock onto.",
+                METHOD_PROFILE: "The stripes in the image - the card finds "
+                                "them and puts a box on every one, so the "
+                                "boxes follow the pattern instead of sitting "
+                                "at fixed spots on the screen.",
+                METHOD_TEMPLATE: "You mark the regions once on one cell of "
+                                 "the layout, and the card puts them in the "
+                                 "right place on every image. It works both "
+                                 "ways round: on a small patch, where one "
+                                 "cell is bigger than the patch and you get "
+                                 "the one copy this defect can see, and on a "
+                                 "full-size SEM image, where the cell is much "
+                                 "smaller and every copy across the image "
+                                 "gets marked.",
             },
             help=("Both answer the same question - which places should look "
                   "the same. Pick whichever your sample gives you: a "
@@ -194,11 +295,18 @@ class RoiReferenceStep(Step):
         ParamSpec(
             name="source", type="image_key", direction="in",
             default="test", section="1 · How to find them", label="Image",
-            show_when=("method", (METHOD_CELLS,)),
-            help=("Which image stream to measure the repeat on - drag a line "
-                  "from the card that produces it. Normally the test image: "
-                  "the pattern has to still be in it, so a difference image "
-                  "is the wrong one to point at."),
+            show_when=("method", (METHOD_CELLS, METHOD_PROFILE,
+                                  METHOD_TEMPLATE)),
+            help=("Which image stream this card works on - drag a line from "
+                  "the card that produces it. The pattern has to still be in "
+                  "it, so a difference image is the wrong one to point at. "
+                  "For the repeating cells, normally the test image. For "
+                  "stripes and for a cell you mark yourself, ref is better "
+                  "where you have a test/ref pair: it has no defect on it, so "
+                  "nothing interferes, and the pair is already aligned so the "
+                  "answer applies to test as well. With a single full-size "
+                  "image there is only one stream, and the regions are "
+                  "repeated across the whole of it."),
         ),
         ParamSpec(
             name="label_source", type="image_key", direction="in",
@@ -209,12 +317,12 @@ class RoiReferenceStep(Step):
                   "picture of the wafer."),
         ),
         ParamSpec(
-            name="roi_out", type="str", default="cell",
+            name="roi_out", type="str", default="region",
             section="2 · Which layers, and what to call them",
             label="Call the regions", pattern=FEATURE_PREFIX_PATTERN,
             pattern_help=("use letters, digits and underscores only, and do "
                           "not start with a digit"),
-            show_when=("method", (METHOD_CELLS,)),
+            show_when=("method", (METHOD_CELLS, METHOD_PROFILE)),
             help=("What to call this set of regions. The name becomes the "
                   "prefix on every number measured in it, and you point the "
                   "measure cards at <name>_center (the one the defect is in) "
@@ -239,7 +347,7 @@ class RoiReferenceStep(Step):
                   "range from the image size."),
         ),
         ParamSpec(
-            name="min_confidence", type="float", default=0.18, min=0.0,
+            name="min_repeat_strength", type="float", default=0.18, min=0.0,
             max=0.95, section="2 · Which layers, and what to call them",
             label="Ignore repeats weaker than",
             show_when=("method", (METHOD_CELLS,)),
@@ -280,6 +388,10 @@ class RoiReferenceStep(Step):
         ),
         # **兩支共用**，而且跟另外兩張 Region 卡逐字相同（`_util` 那兩支）——
         # 同一句話在三張卡上不可以各長各的。
+        # 折進來的那兩支（F30）—— **參數定義沒有第二份**，是從實作類別上
+        # 搬過來再加一條「method 要是它」的條件（見 `_folded`）。
+        *_folded(METHOD_PROFILE),
+        *_folded(METHOD_TEMPLATE),
         *pick_rule_specs("3 · Which one is the defect in"),
         *drop_edge_specs("4 · Name and limits"),
         output_prefix_spec("gds"),
@@ -310,8 +422,12 @@ class RoiReferenceStep(Step):
         層號」的 label map。共用一格的話畫布上那條線會在切換 method 之後指著
         一個意思完全不同的東西，而畫面上不會說。
         """
-        if _method_of(params) == METHOD_GDS:
+        method = _method_of(params)
+        if method == METHOD_GDS:
             return [str(params.get("label_source", SIDECAR_LABEL))]
+        impl = _impl(method)
+        if impl is not None:
+            return impl.resolve_reads(_params_for(method, params))
         out = [str(params.get("source", "test"))]
         if str(params.get("pick", "")) == "strongest":
             judge = str(params.get("pick_source", "") or "").strip()
@@ -328,7 +444,11 @@ class RoiReferenceStep(Step):
         變的是有了 ``pick="strongest"``：它不假設缺陷在哪，**它去找**
         （見模組說明）。
         """
-        if _method_of(params) == METHOD_GDS:
+        method = _method_of(params)
+        impl = _impl(method)
+        if impl is not None:
+            return impl.resolve_regions_out(_params_for(method, params))
+        if method == METHOD_GDS:
             names = [name for _lid, name in _layers_of(params)]
         else:
             names = [_cell_name(params)]
@@ -339,6 +459,10 @@ class RoiReferenceStep(Step):
 
     @classmethod
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
+        impl = _impl(_method_of(params))
+        if impl is not None:
+            return impl.resolve_features(
+                _params_for(_method_of(params), params))
         regions = cls.resolve_regions_out(params)
         if _method_of(params) == METHOD_GDS:
             names = list(_GDS_FEATURES) + region_fact_names(regions)
@@ -357,6 +481,10 @@ class RoiReferenceStep(Step):
         ``repeating cells`` 那一支**沒有這種狀態**：它不需要任何外部資料，
         接上一條影像線就跑得動。
         """
+        impl = _impl(_method_of(params))
+        if impl is not None:
+            return impl.configuration_issues(
+                _params_for(_method_of(params), params))
         if _method_of(params) != METHOD_GDS:
             return []
         if not _layers_of(params):
@@ -370,8 +498,16 @@ class RoiReferenceStep(Step):
 
     # ---- 執行 ---------------------------------------------------------------
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
+        method = _method_of(params)
+        impl = _impl(method)
+        if impl is not None:
+            # ⚠ **參數交給實作自己 validate。** 這張卡的 params 是四支的聯集，
+            # 而每一支只認得自己那一份 —— 拿這裡 validate 過的 dict 餵過去
+            # 會多帶一堆它沒宣告的鍵，而 `validate_params` 對未知的鍵是沉默的
+            # （不是報錯），所以那個錯法會一路安靜到跑出數字為止。
+            return impl().run(ctx, _params_for(method, params))
         p = self.validate_params(params)
-        if _method_of(p) == METHOD_GDS:
+        if method == METHOD_GDS:
             return self._run_gds(ctx, p)
         return self._run_cells(ctx, p)
 
@@ -397,7 +533,7 @@ class RoiReferenceStep(Step):
             gray,
             min_period=int(p["min_period"]) or None,
             max_period=int(p["max_period"]) or None,
-            strength_threshold=float(p["min_confidence"]))
+            strength_threshold=float(p["min_repeat_strength"]))
 
         # **誠實閘門。** 量不到週期就停下來說原因，不可以吐一格猜出來的晶格 ——
         # 一個編出來的網格照樣讓每一顆 defect 吐得出很正常的灰階值，而 CSV 上

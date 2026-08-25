@@ -15,6 +15,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from tests.region_cards import (  # noqa: E402
+    add_region_step, region_card,
+)
 
 from conftest import first_source  # noqa: E402
 
@@ -131,7 +134,7 @@ def test_the_template_parameter_is_not_a_text_box(qapp):
     from d4t.core.pipeline.step import get_step
 
     form = widgets_mod.ParamForm()
-    step = get_step("roi_template")
+    step = region_card("roi_template")
     form.set_step(step.describe(), {}, ["test", "ref"])
     editor = form.editor("template")
     assert isinstance(editor, widgets_mod.TemplateField)
@@ -150,7 +153,7 @@ def test_the_button_asks_studio_to_open_the_dialog(qapp):
     from d4t.core.pipeline.step import get_step
 
     form = widgets_mod.ParamForm()
-    form.set_step(get_step("roi_template").describe(), {}, ["ref"])
+    form.set_step(region_card("roi_template").describe(), {}, ["ref"])
     seen = []
     form.action_requested.connect(seen.append)
     form.editor("template").button.click()
@@ -174,7 +177,7 @@ def test_a_card_that_cannot_run_is_marked_on_the_canvas(window):
     # 做（以前是起手卡順便提供的）—— 少了它，這一題會問到另一個錯（沒有人產出
     # `ref`），而那是 missing-image 不是 not-configured。
     first_source(window)
-    nid = window.model.add_step("roi_template")
+    nid = add_region_step(window.model, "roi_template")
     # F10：先接上來源，這一題才問得到「模板還沒建」——「還沒接線」是另一個錯，
     # 而兩個一起出現時，先修哪一個由使用者決定，不是由這條測試決定。
     window.model.set_param(nid, "source", "ref")
@@ -201,7 +204,7 @@ def test_the_badge_paints_in_both_themes(window):
     """標記畫在卡片的右上角，而那裡本來是卡片名字的尾巴。"""
     from PySide6.QtGui import QColor, QPainter
 
-    nid = window.model.add_step("roi_template")
+    nid = add_region_step(window.model, "roi_template")
     item = window.pipeline.node_item(nid)
     for name in ("light", "dark"):
         theme_mod.set_theme(name)
@@ -217,7 +220,7 @@ def test_the_badge_paints_in_both_themes(window):
 def test_the_card_summary_never_shows_the_raw_template(window):
     """節點的第三行是「哪些參數被改過」。模板直接串進去的話，那一行就變成
     一段 base64 —— 既沒有資訊，也把真正有用的參數擠掉了。"""
-    nid = window.model.add_step("roi_template")
+    nid = add_region_step(window.model, "roi_template")
     window._apply_template(nid, _a_template(), "x")
     summary = window.pipeline.node_item(nid).info.get("summary", "")
     assert "gc1:" not in summary

@@ -14,6 +14,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 from PySide6.QtCore import Qt
+from tests.region_cards import (  # noqa: E402
+    add_region_step, region_card,
+)
 
 from conftest import wire_up  # noqa: E402  —— F10：加完卡要接線
 
@@ -296,11 +299,11 @@ def test_deleting_a_rectangle_and_a_region(qapp):
 # 2. 接回 Studio
 # --------------------------------------------------------------------------- #
 def test_the_button_only_shows_for_the_card_that_needs_a_template(window):
-    nid = wire_up(window.model, window.model.add_step("roi_template"))
+    nid = wire_up(window.model, add_region_step(window.model, "roi_template"))
     window.select_node(nid)
     assert window.template_build_available() is True
 
-    other = wire_up(window.model, window.model.add_step("roi_cross"))
+    other = wire_up(window.model, add_region_step(window.model, "roi_cross"))
     window.select_node(other)
     assert window.template_build_available() is False
     assert window.open_template_dialog() is None
@@ -310,7 +313,7 @@ def test_the_button_only_shows_for_the_card_that_needs_a_template(window):
 def test_accepting_the_dialog_stores_the_template_in_the_recipe(window):
     """存進 recipe 的是**模板本身**，不是大圖的路徑 ——
     recipe 要能寄給別人，存路徑的話圖被換掉之後結果會安靜地變。"""
-    nid = wire_up(window.model, window.model.add_step("roi_template"))
+    nid = wire_up(window.model, add_region_step(window.model, "roi_template"))
     window.select_node(nid)
     dlg = window.open_template_dialog()
     assert dlg is not None
@@ -329,7 +332,7 @@ def test_accepting_the_dialog_stores_the_template_in_the_recipe(window):
 
 def test_reopening_the_dialog_shows_what_is_already_stored(window):
     """第二次打開要看得到現在的模板與框 —— 不然使用者只能從頭再畫一次。"""
-    nid = wire_up(window.model, window.model.add_step("roi_template"))
+    nid = wire_up(window.model, add_region_step(window.model, "roi_template"))
     window.select_node(nid)
     dlg = window.open_template_dialog()
     dlg.load_image(big_image(), "LOT_full.tif")
@@ -345,7 +348,7 @@ def test_reopening_the_dialog_shows_what_is_already_stored(window):
 
 def test_the_stored_template_actually_locates_the_regions(window):
     """存完之後真的跑一顆，區域要落在有結構的地方而不是退回整張圖。"""
-    nid = wire_up(window.model, window.model.add_step("roi_template"))
+    nid = wire_up(window.model, add_region_step(window.model, "roi_template"))
     window.select_node(nid)
     dlg = window.open_template_dialog()
     dlg.load_image(big_image(3), "LOT_full.tif")
@@ -368,7 +371,7 @@ def test_the_stored_template_actually_locates_the_regions(window):
 
 def test_a_card_with_no_template_refuses_to_run_and_says_where_to_go(window):
     """跑之前的 lint 會擋下來，訊息要指向那顆按鈕，不是丟一個空參數給人猜。"""
-    nid = wire_up(window.model, window.model.add_step("roi_template"))
+    nid = wire_up(window.model, add_region_step(window.model, "roi_template"))
     window.select_node(nid)
     assert window.refresh_preview(sync=True) is True
     assert "Edit template & regions" in window.status_text()
@@ -376,7 +379,7 @@ def test_a_card_with_no_template_refuses_to_run_and_says_where_to_go(window):
 
 def test_the_region_check_view_works_for_the_template_card_too(window):
     """跨顆檢視對**任何**會定義區域的卡片都成立 —— 模板卡也不例外。"""
-    nid = wire_up(window.model, window.model.add_step("roi_template"))
+    nid = wire_up(window.model, add_region_step(window.model, "roi_template"))
     window.select_node(nid)
     dlg = window.open_template_dialog()
     dlg.load_image(big_image(3), "LOT_full.tif")
@@ -928,7 +931,7 @@ def test_the_card_refuses_to_be_configured_that_way_too(qapp):
     dlg._on_double()
     dlg.canvas.add_box((0.1, 0.0, 0.1, 1.0))
 
-    cls = get_step("roi_template")
+    cls = region_card("roi_template")
     params = {"template": dlg.encoded(), "regions": dlg.regions_text()}
     issues = cls.configuration_issues(params)
     assert issues and "wrong one" in issues[0]
@@ -1153,7 +1156,7 @@ def test_studio_hands_the_dialog_the_stream_the_card_actually_reads(window):
         context = _Ctx()
 
     window._last_result = _Res()
-    nid = window.model.add_step("roi_template")
+    nid = add_region_step(window.model, "roi_template")
     node = window.model.nodes[nid]
 
     # 卡片指到 `single` → 拿到 `single`（不是 ref）
