@@ -302,11 +302,13 @@ F30 的 `ui/output_band.py` 已經都是這樣做的 —— 這一段只是把�
 後兩種沒有 KLARF → 沒有座標、**寫不回 KLARF**，而那句話**常駐在資料集標籤上**
 （`tiff_stack · defect 1 / 3 · no KLARF`）—— 不是等使用者按了 Export 才發現。
 
-**第二份 lot 走另一條路**（F15，2026-08-19）—— ⏸ **這一段停在原地，不要接著做**
-（使用者 2026-08-20：「太快了」）。引擎那一半做完且有測試，缺的是「對得對不對」
-的證據與那份點對點 report，而它要等 Compare 段做完才有形狀。詳見
-[`docs/plans/F15-pair-sources.md`](docs/plans/F15-pair-sources.md) §16 與
-[`docs/ROADMAP.md`](docs/ROADMAP.md)。以下是它現在的樣子：
+**第二份 lot 走另一條路**（F15，2026-08-19；**F33 於 2026-08-25 續完**）。
+那份缺的「點對點包含圖的 report」現在是 `output_char` 那張卡，而它需要的兩個
+資料缺口也補了：**配不到的那一顆會留下來**（`pair_found = 0`，繼續走到判定樹
+—— 「EBI 根本沒偵測到」是 characterization 要數的一類，不是一個錯誤）與
+**die 內排名**（`pair_die_rank` / `pair_die_total`，母體是第二份的完整清單）。
+詳見 [`docs/plans/F33-ebi-characterization.md`](docs/plans/F33-ebi-characterization.md)。
+以下是它現在的樣子：
 
 `pair_source` 這張卡上的
 `Open data…` 掛的是「拿來對照的那一份」（EBI ↔ RSEM(API) characterization），
