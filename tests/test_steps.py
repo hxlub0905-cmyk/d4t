@@ -19,8 +19,7 @@ from d4t.core.pipeline.step import REGISTRY, StepError
 ALL_KEYS = [
     "load_patch", "normalize", "tone",
     "denoise", "align", "subtract",
-    "snr_map", "cd_measure",
-    "focus_quality", "glv_stats",
+    "glv_stats", "cd_measure", "focus_quality",
 ]
 
 
@@ -275,25 +274,12 @@ def test_invert_uint8():
     assert np.array_equal(ctx.images["test"], 255 - img)
 
 
-# ---------------------------------------------------------------- snr_map
-
-def _diff_pair(size=128, amp=100.0, seed=5):
-    noise = np.abs(_rng(seed).normal(0, 2, (size, size))).astype(np.float32)
-    clean = noise
-    planted = noise + amp * _blob(size, size // 2, size // 2, 3.0).astype(np.float32)
-    return planted, clean
-
-
-def test_snr_map_planted_much_higher_than_clean():
-    planted, clean = _diff_pair()
-    ctx_p = Context(images={"diff": planted})
-    ctx_c = Context(images={"diff": clean})
-    run_step("snr_map", ctx_p)
-    run_step("snr_map", ctx_c)
-    assert ctx_p.images["snr_map"].dtype == np.float32
-    assert ctx_p.features["snr_max"] > 3.0 * ctx_c.features["snr_max"]
-    with pytest.raises(StepError):                      # 偶數視窗防呆
-        run_step("snr_map", Context(images={"diff": planted}), window=30)
+# ⚠ **`snr_map`（Z-map）那張卡 2026-08-25 刪掉了**（使用者：「Z-map 功能請先
+# 幫我完整刪掉」），所以這裡原本那一條卡片層級的測試跟著走。
+#
+# **演算法沒有跟著走**：`d4t/core/algo/snr.py` 留著，而
+# `tests/test_snr.py` 仍然在測 `compute_snr_map` 與 `snr_signed`
+# —— 後者是這個 repo 帶正負號慣例的規範出處，GLV 卡的 `snr` 統計量照它做。
 
 
 # ---------------------------------------------------------------- cd_measure

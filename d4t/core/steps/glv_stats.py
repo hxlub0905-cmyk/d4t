@@ -51,9 +51,12 @@ target 跟 reference⋯⋯我傾向這邊 ROI 只 labeled 出區域，之後再�
 target、在另一個裡是 reference —— 角色寫進區域的話，每一種比較都要複製一份區域，
 而區域是**畫**出來的。
 
-GDS 那條路特別需要比較：`roi_from_mask` **只吐 `<name>`**（非週期的 layout
-上沒有 `_others` —— 形狀不是複本），所以那條路真正該比的是**層 vs 層**，
-也就是 ``another region``。
+GDS 那條路兩種比較都成立（F29 之後）：`roi_reference` 的 ``layout layers``
+現在也吐 ``_center`` / ``_others``，所以既可以比**層 vs 層**（``another
+region``，例如 EPI vs MG），也可以比**同一層裡那一塊 vs 其餘那些**
+（``the other regions``）。後者是區域級 detect 的形狀 —— 而它靠的是
+``pick="strongest"``：非週期的 layout 上「哪一塊是缺陷那一塊」不是幾何保證的，
+要**去找**（見 `roi_reference` 的模組說明）。
 
 metrics 的規則
 --------------
@@ -326,7 +329,11 @@ class GlvStatsStep(MultiSourceStep):
 
     key = "glv_stats"
     #: ``key`` 不動（recipe 的鍵）。短名是使用者要的（F16）。
-    label = "Gray level"
+    # ⚠ **只有 `label` 換掉**（使用者 2026-08-25：「Measure 的 card 順序幫我
+    # 改命名&重排：GLV → CD → Focus index」）。`key`（`glv_stats`）是 recipe
+    # 的鍵、`glv_*` 是分數表達式裡的變數名 —— 兩者都不准動，那是 §5 那張表裡
+    # 「只改 label」跟「改名」的差別（前者零代價，後者要一道遷移）。
+    label = "GLV"
     category = CATEGORY_ALGO
     group = GROUP_MEASURE
     help = ("Gray levels of a region: pick the statistics you want (median, "

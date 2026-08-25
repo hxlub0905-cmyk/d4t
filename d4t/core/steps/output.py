@@ -47,6 +47,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List
 
+from ..export import html as export_html
 from ..export import klarf_out, overlay
 from ..export import report as export_report
 from ..pipeline.context import Context
@@ -374,6 +375,19 @@ class OutputKlarfStep(_OutputStep):
         bctx.warn("KLARF %s: %d row(s) changed, %d row(s) written."
                   % (str(p["mode"]), int(getattr(plan, "n_rows_changed", 0)),
                      int(getattr(plan, "n_rows_out", 0))))
+        # **`plan.notes` 也要帶出來**（B6，2026-08-24）。`klarf_out` 已經把
+        # 「為什麼」寫好了，而以前只有計數走得出來 —— 於是 inplace 一格目標
+        # 欄位都沒填的時候，使用者看到的是「0 row(s) changed」，
+        # 一句答不出「那我該填什麼」的話。那份說明就在手上：
+        #
+        #   "No target column was given (class_col / bin_col / size_col are
+        #    all empty), so the output file will be byte-for-byte identical
+        #    to the original."
+        #
+        # 其他 mode 的 notes 同樣有用（影像參照怎麼處理、幾顆對不到 DEFECTID、
+        # DSIZE 那一欄的單位換算）—— 那些以前也全部沒有出口。
+        for note in (getattr(plan, "notes", None) or []):
+            bctx.warn("KLARF %s: %s" % (str(p["mode"]), note))
 
 
 @register_step
@@ -411,8 +425,6 @@ class OutputImageStep(_OutputStep):
     ]
 
     def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
-        from ..pipeline.engine import run_defect
-
         p = self.validate_params(params)
         folder = str(p["folder"]).strip()
         if not folder:
@@ -441,9 +453,11 @@ class OutputImageStep(_OutputStep):
                 skipped += 1
                 continue
             try:
-                r = run_defect(bctx.recipe, item, bctx.kind, keep_context=True,
-                               sources={k: getattr(v, "items", v)
-                                        for k, v in sources.items()})
+                # **有快取就走快取**（F29 C4）：這一趟的影像段跟剛才那一批
+                # 逐位元組相同，所以命中之後只跑算法段。`bctx.rerun` 兩條路的
+                # 結果位元級一致，所以這裡完全不必知道有沒有快取。
+                r = bctx.rerun(item, sources={k: getattr(v, "items", v)
+                                              for k, v in sources.items()})
                 ctx = getattr(r, "context", None)
                 images = dict(getattr(ctx, "images", {}) or {})
                 if not images:
@@ -474,49 +488,155 @@ class OutputImageStep(_OutputStep):
 #: HTML 報表的樣式。**inline，而且只有純文字** —— 這個 repo 是純文字的
 #: （`AGENTS.md` §2：唯一的傳輸通道是剪貼簿），而且報表要能單獨寄給別人：
 #: 一個外部 .css 檔會在轉寄的那一刻不見。
-_HTML_CSS = """
-body{font-family:Segoe UI,Arial,sans-serif;margin:24px;color:#222}
-h1{font-size:18px;margin:0 0 4px} .sub{color:#666;font-size:12px;margin:0 0 18px}
-table{border-collapse:collapse;font-size:12px}
-th,td{border:1px solid #ddd;padding:4px 8px;text-align:right;white-space:nowrap}
-th{background:#f4f5f7;position:sticky;top:0;text-align:center}
-td.id,td.err{text-align:left} tr.bad td{background:#fdeeeb}
-.cards{margin:0 0 18px;font-size:12px;color:#444}
-.cards b{font-weight:600}
-"""
+# ⚠ **HTML 的版面與那幾支小工具搬去 `core/export/html.py` 了**（F29 C2）：
+# `output_html` 與 `output_bundle` 產的是同一份東西，差別只在圖放不放得進來 ——
+# 抄第二份出來的那一份一定會漂。
 
 
+@register_step
+class OutputBundleStep(_OutputStep):
+    """一個資料夾：報表 ＋ 一顆一張的疊圖 ＋ CSV ＋ 產它的那份 recipe。"""
 
-def _bin_summary(bins: Dict[Any, int]) -> str:
-    """``bin 0=12, bin 1=8, (none)=1`` —— 沒跑起來的那幾顆 bin 是 None，
-    而它們**要出現在這一行上**（少了的話「這批有幾顆沒跑」看不出來）。"""
-    def order(item):
-        k = item[0]
-        return (k is None, k if k is not None else 0)
+    key = "output_bundle"
+    label = "Write report folder"
+    PATH = "folder"
+    WHAT = "folder"
+    help = ("Write everything about this run into one folder: a report you "
+            "can open in a browser with a picture of every defect, the same "
+            "numbers as a spreadsheet, and the recipe that produced them. "
+            "Made for a whole lot - thousands of defects fit, because the "
+            "pictures sit beside the report instead of inside it.")
+    params = [
+        ParamSpec(
+            name="folder", type="str", default="",
+            label="Write to",
+            help=("Folder to write everything into. It is created if it does "
+                  "not exist; files with the same names are overwritten."),
+        ),
+        # **預設 0 = 全部**（使用者定調 2026-08-25：「參數化，預設全部」）。
+        # `output_image` 那張卡預設 200，而它們的用途不同：那張是「挑幾顆來
+        # 看」，這一張是「這一批的報表」—— 一份少了一半的報表跟完整的長得
+        # 一模一樣。
+        ParamSpec(
+            name="limit", type="int", default=0, min=0, max=1000000,
+            label="At most this many pictures",
+            help=("Zero means every defect. Set a number to keep only the "
+                  "worst that many (highest score first) - the report still "
+                  "lists every defect, only the pictures are limited."),
+        ),
+        ParamSpec(
+            name="jpeg_quality", type="int",
+            default=overlay.DEFAULT_JPEG_QUALITY, min=40, max=100,
+            label="Picture quality", advanced=True,
+            help=("How much detail to keep in the pictures, from 40 (small "
+                  "files) to 100 (biggest). The pictures are for looking at, "
+                  "not for measuring - the numbers in the report come from "
+                  "the originals either way."),
+        ),
+        ParamSpec(
+            name="montage", type="bool", default=True,
+            label="Show the difference beside it",
+            help=("On: each picture is the image and the difference side by "
+                  "side. Off: just the image."),
+        ),
+    ]
 
-    return ", ".join("%s=%d" % ("(none)" if k is None else k, v)
-                     for k, v in sorted(bins.items(), key=order))
+    #: 資料夾裡那幾個名字（**寫死**：一份 bundle 換一台機器打開還是同一個形狀）。
+    REPORT_NAME = "report.html"
+    CSV_NAME = "defects.csv"
+    RECIPE_NAME = "recipe.json"
+    IMAGE_DIR = "images"
 
+    def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
+        p = self.validate_params(params)
+        folder = str(p["folder"]).strip()
+        if not folder:
+            raise StepError(self.key, "nowhere to write - fill in “Write to”.")
+        if os.path.isfile(folder):
+            raise StepError(
+                self.key,
+                "“%s” is a file, not a folder. This card writes several files, "
+                "so it needs a folder to put them in." % folder)
+        rows = list(bctx.rows)
+        items = list(getattr(bctx.dataset, "items", None) or [])
+        by_id = {str(getattr(it, "defect_id", "")): it for it in items}
+        sources = dict(getattr(bctx.dataset, "sources", None) or {})
+        shots = os.path.join(folder, self.IMAGE_DIR)
 
-def _html_escape(value: Any) -> str:
-    """給 HTML 用的跳脫。**自己寫一份**是因為 `html.escape` 也在 stdlib，
-    但這裡要順便把 None 變成空字串、把數字變成短一點的字。"""
-    if value is None:
-        return ""
-    s = str(value)
-    for a, b in (("&", "&amp;"), ("<", "&lt;"), (">", "&gt;"), ('"', "&quot;")):
-        s = s.replace(a, b)
-    return s
+        # ---- ① 圖（一顆一張，照分數由高到低）-------------------------------
+        chosen = overlay.pick_overlay_results(rows, int(p["limit"]))
+        images: Dict[str, str] = {}
+        skipped = 0
+        for row in chosen:
+            did = str(row.get("defect_id", ""))
+            item = by_id.get(did)
+            if item is None:
+                skipped += 1
+                continue
+            try:
+                r = bctx.rerun(item, sources={k: getattr(v, "items", v)
+                                              for k, v in sources.items()})
+                ctx = getattr(r, "context", None)
+                pix = dict(getattr(ctx, "images", {}) or {})
+                if not pix:
+                    skipped += 1
+                    continue
+                panel = overlay.render_overlay(
+                    pix, dict(getattr(r, "features", {}) or {}),
+                    label=overlay.overlay_label(row),
+                    montage=bool(p["montage"]))
+                name = os.path.splitext(overlay.overlay_filename(did))[0] + ".jpg"
+                overlay.write_jpeg(panel, os.path.join(shots, name),
+                                   int(p["jpeg_quality"]))
+                # **相對路徑**：報表跟圖一起搬走的時候連結還是通的。
+                images[did] = "%s/%s" % (self.IMAGE_DIR, name)
+            except Exception:       # noqa: BLE001 — 一顆畫不出來不該殺掉整批
+                skipped += 1
 
+        # ---- ② 報表（**每一顆都在**，只有圖有上限）-------------------------
+        title = str(getattr(bctx.recipe, "recipe_id", "") or "d4t results")
+        report_path = os.path.join(folder, self.REPORT_NAME)
+        try:
+            export_html.write_html(
+                export_html.build_report(
+                    rows, title, export_report.feature_keys(rows),
+                    decide=getattr(bctx.recipe, "decide", None),
+                    images=images),
+                report_path)
+            export_report.write_csv(rows, os.path.join(folder, self.CSV_NAME))
+            # ---- ③ 產它的那份 recipe --------------------------------------
+            # **沒有它，半年後沒人重現得出這份報表。** 那不是保險，是這份東西
+            # 有沒有用的分界：一疊數字沒有配方，等於一句「我們那時候量到這樣」。
+            self._write_recipe(bctx, os.path.join(folder, self.RECIPE_NAME))
+        except OSError as e:
+            raise StepError(self.key,
+                            "could not write into %s: %s" % (folder, e)) from e
+        bctx.add_output(folder)
+        if skipped:
+            # **講出來**：少幾張圖的報表跟完整的長得一模一樣。
+            bctx.warn("Report folder: %d picture(s) written, %d skipped (no "
+                      "image, or the pipeline did not run for them)."
+                      % (len(images), skipped))
 
-def _html_num(value: Any) -> str:
-    try:
-        f = float(value)
-    except (TypeError, ValueError):
-        return _html_escape(value)
-    if f != f:                      # nan
-        return ""
-    return ("%.4g" % f) if abs(f) < 1e15 else "%g" % f
+    def _write_recipe(self, bctx: Any, path: str) -> None:
+        """把 recipe 原樣寫進 bundle（atomic，同鐵則 5）。
+
+        走 ``to_json_dict`` 而不是「複製使用者那個檔案」—— 使用者可能在
+        Studio 裡改過還沒存，而**報表要對得上真的跑出這些數字的那一份**。
+        """
+        import json
+
+        recipe = getattr(bctx, "recipe", None)
+        to_dict = getattr(recipe, "to_json_dict", None)
+        if to_dict is None:
+            return
+        parent = os.path.dirname(os.path.abspath(path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(to_dict(), f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
 
 
 @register_step
@@ -549,48 +669,19 @@ class OutputHtmlStep(_OutputStep):
         p = self.validate_params(params)
         path = self._path_of(p)
         rows = list(bctx.rows)
-        keys = export_report.feature_keys(rows)
         title = (str(p["title"]).strip()
                  or str(getattr(bctx.recipe, "recipe_id", "") or "d4t results"))
-
-        bins: Dict[Any, int] = {}
-        for r in rows:
-            bins[r.get("bin")] = bins.get(r.get("bin"), 0) + 1
-        n_bad = sum(1 for r in rows if not r.get("ok"))
-
-        out = ["<!doctype html>", "<html><head><meta charset='utf-8'>",
-               "<title>%s</title>" % _html_escape(title),
-               "<style>%s</style></head><body>" % _HTML_CSS,
-               "<h1>%s</h1>" % _html_escape(title),
-               "<p class='sub'>%d defect(s)%s · bins: %s</p>"
-               % (len(rows),
-                  (" · <b>%d did not run</b>" % n_bad) if n_bad else "",
-                  _html_escape(_bin_summary(bins))),
-               "<table><tr><th>defect</th><th>ok</th><th>score</th><th>bin</th>"]
-        out += ["<th>%s</th>" % _html_escape(k) for k in keys]
-        out.append("<th>error</th></tr>")
-        for r in rows:
-            cls = "" if r.get("ok") else " class='bad'"
-            cells = ["<td class='id'>%s</td>" % _html_escape(r.get("defect_id")),
-                     "<td>%s</td>" % ("yes" if r.get("ok") else "no"),
-                     "<td>%s</td>" % _html_num(r.get("score")),
-                     "<td>%s</td>" % _html_escape(r.get("bin"))]
-            feats = r.get("features") or {}
-            cells += ["<td>%s</td>" % _html_num(feats.get(k)) for k in keys]
-            cells.append("<td class='err'>%s</td>" % _html_escape(r.get("error")))
-            out.append("<tr%s>%s</tr>" % (cls, "".join(cells)))
-        out.append("</table></body></html>")
-
-        text = "\n".join(out)
+        # **版面住 `export/html.py`，兩張卡共用同一支**（F29 C2）。以前整份
+        # HTML inline 在這裡，於是 bundle 那張卡要嘛抄一份（兩份會漂），
+        # 要嘛長得不一樣（同一批資料兩種報表，而使用者分不出差別）。
+        #
+        # 這張卡**不放圖**：它的賣點就是單檔可轉寄，而圖要嘛是相對路徑
+        # （那就不是單檔了）要嘛 base64（6000 顆是 76 MB 的一個檔案）。
+        text = export_html.build_report(
+            rows, title, export_report.feature_keys(rows),
+            decide=getattr(bctx.recipe, "decide", None))
         try:
-            # atomic（鐵則 5）：`.tmp` + `os.replace`，跟 `report.write_csv` 一樣。
-            parent = os.path.dirname(os.path.abspath(path))
-            if parent:
-                os.makedirs(parent, exist_ok=True)
-            tmp = path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.write(text)
-            os.replace(tmp, path)
+            export_html.write_html(text, path)
         except OSError as e:
             raise StepError(self.key,
                             "could not write %s: %s" % (path, e)) from e

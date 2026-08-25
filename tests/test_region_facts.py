@@ -83,15 +83,16 @@ def _run_gds():
     lab[20:30, 20:30] = 1
     lab[2:10, 20:30] = 2
     ctx = Context(images={"layout_label": lab})
-    p = get_step("roi_from_mask").validate_params(
-        {"source": "layout_label", "layers": "1:epi, 2:mg"})
-    get_step("roi_from_mask")().run(ctx, p)
-    return ctx, get_step("roi_from_mask").resolve_features(p), \
-        get_step("roi_from_mask").resolve_regions_out(p)
+    p = get_step("roi_reference").validate_params(
+        {"method": "layout layers", "label_source": "layout_label",
+         "layers": "1:epi, 2:mg"})
+    get_step("roi_reference")().run(ctx, p)
+    return ctx, get_step("roi_reference").resolve_features(p), \
+        get_step("roi_reference").resolve_regions_out(p)
 
 
 RUNNERS = {"Profile": _run_profile, "Template": _run_template,
-           "GDS layers": _run_gds}
+           "Reference regions · GDS": _run_gds}
 
 
 # --------------------------------------------------------------------------- #
@@ -151,9 +152,10 @@ def test_a_region_that_is_not_on_this_defect_says_present_zero():
     lab = np.zeros((40, 40), np.uint8)
     lab[2:10, 2:10] = 1                        # 只有第 1 層，沒有第 2 層
     ctx = Context(images={"layout_label": lab})
-    p = get_step("roi_from_mask").validate_params(
-        {"source": "layout_label", "layers": "1:epi, 2:mg"})
-    get_step("roi_from_mask")().run(ctx, p)
+    p = get_step("roi_reference").validate_params(
+        {"method": "layout layers", "label_source": "layout_label",
+         "layers": "1:epi, 2:mg"})
+    get_step("roi_reference")().run(ctx, p)
     assert ctx.features["epi_present"] == 1.0
     assert ctx.features["mg_present"] == 0.0
     assert ctx.features["mg_boxes"] == 0.0
@@ -200,9 +202,10 @@ def test_clipped_fires_when_the_box_limit_bites():
     lab = np.array([[1 if x <= y else 0 for x in range(n)] for y in range(n)],
                    np.uint8)
     ctx = Context(images={"layout_label": lab})
-    p = get_step("roi_from_mask").validate_params(
-        {"source": "layout_label", "layers": "1:epi", "max_boxes": 5})
-    get_step("roi_from_mask")().run(ctx, p)
+    p = get_step("roi_reference").validate_params(
+        {"method": "layout layers", "label_source": "layout_label",
+         "layers": "1:epi", "max_boxes": 5})
+    get_step("roi_reference")().run(ctx, p)
     assert ctx.features["epi_clipped"] == 1.0
     assert ctx.features["epi_boxes"] == 5.0
 
@@ -240,7 +243,7 @@ def test_a_new_roi_card_cannot_quietly_invent_its_own_set():
             continue
         regions = list(cls.resolve_regions_out(params) or ())
         if not regions:
-            # 預設參數下吐不出區域的卡（`roi_template` 要模板、`roi_from_mask`
+            # 預設參數下吐不出區域的卡（`roi_template` 要模板、`roi_reference`
             # 要層對照表）—— 它們由上面那三條逐張跑過，這裡掃不到是正常的。
             continue
         checked.append(key)

@@ -103,16 +103,34 @@ def test_a_node_named_like_a_stream_is_still_a_fixed_point(nid, streams):
     _fixed_point(_recipe_with_node_named(nid, streams))
 
 
-def test_a_node_id_can_really_equal_a_stream_name():
-    """**可達性**：節點 id 就是 step key（`viewmodel._new_id`），而 `snr_map`
-    既是 step key 也是那張卡吐出來的流名 —— 從卡片庫拉一張進來就是這個形狀。
+def test_whether_a_node_id_can_still_equal_a_stream_name():
+    """上面那組對抗案例**現在還從卡片庫裡拉得出來嗎**。
 
-    這一條讓上面那組對抗案例不是憑空想出來的。
+    節點 id 就是 step key（`viewmodel._new_id`），所以只要有一張卡的 key 跟它
+    自己吐出來的流名相同，使用者從卡片庫拉一張進來就是那個形狀。以前那張卡是
+    `snr_map`（key 與流名都叫 `snr_map`）。
+
+    ⚠ **2026-08-25 起答案是「拉不出來」**：Z-map 刪掉之後，卡片庫裡一張都
+    沒有。所以這一條現在記錄的是**這件事**，而不是假裝還有一個活例子 ——
+    上面那組 round-trip 案例因此從「觀察到的形狀」降級成「防守用的形狀」，
+    它們仍然該綠（規則沒變），但沒有人再從畫面上走到那裡。
+
+    哪一天又有一張卡長成那樣（很容易：一張卡叫 `mask`、又吐一條叫 `mask` 的
+    流），這一條會**紅**，而那正是它要講的話：對抗案例重新變成真的了。
     """
-    from d4t.core.pipeline.step import get_step
-    cls = get_step("snr_map")
-    p = {sp.name: sp.default for sp in cls.params}
-    assert "snr_map" in cls.resolve_writes(p)
+    from d4t.core.pipeline.step import REGISTRY
+
+    live = []
+    for key, cls in REGISTRY.items():
+        p = {sp.name: sp.default for sp in cls.params}
+        try:
+            if key in set(cls.resolve_writes(p)):
+                live.append(key)
+        except Exception:          # noqa: BLE001 — 參數湊不齊的卡跳過
+            continue
+    assert live == [], (
+        "卡片庫又有 key 等於自己流名的卡了：%s —— 上面那組 round-trip 對抗"
+        "案例重新變成活的，請把這條測試改回斷言它們可達" % live)
 
 
 # --------------------------------------------------------------------------- #

@@ -74,6 +74,24 @@ contour」問軟體，後者不該出現在卡片上。
 2026-08-21：「就得完全刪掉 以新的為主」）。舊 recipe 的分數表達式引用它們會拿到
 ``unknown-feature`` warning 指名那個變數——**那正是要看到的**：舊值是 bbox，
 跟新值不是同一種量測，安靜地改寫等於換掉那條表達式的意思。
+
+那一團在哪（F29，2026-08-25）
+-----------------------------
+團那一支**一直都知道位置**：`_note_blob` 存了整條輪廓與最長那條弦，面板上也
+畫出來了。它只是從來沒有把位置**吐成特徵** —— 26 個 ``cd_*`` 全部在講「多大、
+長什麼樣」，一個都沒在講「在哪」。於是疊圖框不出來、報表排不了序、分數表達式
+碰不到它。使用者 2026-08-25：「GLV CD 在 Measurements 就已經量出這顆 defect 或
+位置的一些資訊了（這些資訊不能拿來用嗎）」—— 能，缺的只是出口。
+
+所以 :data:`ALWAYS_BLOB` 多了六格：``cd_box_x/y/w/h``（框）與
+``cd_cx``/``cd_cy``（質心），**單位是整張影像的像素**（不是區域內的偏移）——
+疊圖畫在整張圖上，而換算的地方只該有一個。
+
+⚠ **這沒有把 F19 那個決定翻過來。** 那次刪的是「舊名字的意思被悄悄換掉」，
+不是「位置沒用」，所以位置用**新名字**回來，``cd_x_px`` 永遠不會再出現。
+而新名字刻意**不叫 ``_px`` 結尾、也不進 `_util.LENGTH_FEATURES`**：這六格是
+「畫在哪」不是「多大」，尺寸請看 ``cd_feret_*`` / ``cd_area_px``（有 nm 版的
+是那些）。給框配一份 nm 等於請使用者拿 bbox 當尺寸用 —— 那正是 F19 拆掉的東西。
 """
 from __future__ import annotations
 
@@ -143,8 +161,21 @@ DEFAULT_SIZE_REPORT = "cd_area_px,cd_deq,cd_feret_max,cd_feret_min"
 #:   而區域卡的 ``<name>_clipped`` 已經是這個做法。
 #: * ``cd_feret_angle`` —— 最長的方向。自動算出來的，而且它本身有用
 #:   （一條刮傷與一顆顆粒的差別就在這裡）。
+#: * ``cd_box_x`` / ``cd_box_y`` / ``cd_box_w`` / ``cd_box_h`` ＋ ``cd_cx`` /
+#:   ``cd_cy`` —— **這一團在哪**（F29）。座標是**整張影像的像素**，區域偏移
+#:   已經加回去了，所以疊圖與 CSV 上是同一個座標系。
+#:
+#:   為什麼是「一律吐」而不是 ``size_report`` 上的一個選項：位置不是「要不要
+#:   量」的選擇，它是「我剛才量在哪」。少了它，畫面上那一圈輪廓與 CSV 上那一
+#:   列就沒有任何東西對得起來。
+#:
+#:   ⚠ ``cd_box_w`` / ``cd_box_h`` 是**框**不是尺寸（一個 L 形的框是它真實面積
+#:   的 1.9 倍，見 `algo.shape` 檔頭）。要尺寸請用 ``cd_feret_*`` /
+#:   ``cd_area_px``。這也是它們不配 nm 版的理由。
 ALWAYS_BLOB = ("cd_pieces", "cd_touches_edge", "cd_feret_angle",
-               "cd_bright", "cd_edge_score")
+               "cd_bright", "cd_edge_score",
+               "cd_box_x", "cd_box_y", "cd_box_w", "cd_box_h",
+               "cd_cx", "cd_cy")
 
 #: 這張卡**一律**吐的五個（不在膠囊裡）。
 #:
@@ -547,6 +578,8 @@ class CdMeasureStep(MultiSourceStep):
             # 吐 `cd_n` / `cd_lines` 是同一條規矩。`cd_edge_score` 在這裡尤其
             # 重要：它就是「為什麼沒有」的那個數字，而一整批畫出來看得到門檻
             # 該往哪邊調。`cd_touches_edge` 不寫 —— 沒有團的時候它沒有意義。
+            # **位置那六格也不寫**（規矩 3）：沒有團的時候「在哪」沒有答案，
+            # 而 0 會讓疊圖在左上角畫一個 0×0 的框 —— 看起來像量到了。
             return {"cd_pieces": 0.0,
                     "cd_bright": 1.0 if res.target == "bright" else 0.0,
                     "cd_edge_score": float(res.quality)}
@@ -558,12 +591,21 @@ class CdMeasureStep(MultiSourceStep):
                      "Widen the region if you need the whole thing."
                      % (self.key, where))
 
+        bx, by, bw, bh = res.bbox
+        rx, ry, _rw, _rh = rect
         feats: Dict[str, float] = {
             "cd_pieces": float(res.pieces),
             "cd_touches_edge": 1.0 if res.touches_edge else 0.0,
             "cd_feret_angle": float(res.feret_angle),
             "cd_bright": 1.0 if res.target == "bright" else 0.0,
             "cd_edge_score": float(res.quality),
+            # **在哪**（F29）。`res.bbox` / `res.centroid` 是 block 座標，
+            # 這裡把區域的左上角加回去 —— 換算只做這一次，其他人拿到的一律是
+            # 整張影像的像素（`_note_blob` 的輪廓走同一個 `rect`）。
+            "cd_box_x": float(rx + bx), "cd_box_y": float(ry + by),
+            "cd_box_w": float(bw), "cd_box_h": float(bh),
+            "cd_cx": float(rx + res.centroid[0]),
+            "cd_cy": float(ry + res.centroid[1]),
         }
         feats.update(self._size_report(res, p))
         return feats

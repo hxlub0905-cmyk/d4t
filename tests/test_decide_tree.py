@@ -239,3 +239,193 @@ def test_the_editor_snapshot_carries_the_tree():
     from d4t.ui.viewmodel import _decide_restore, _decide_snapshot
     back = _decide_restore(_decide_snapshot(DECIDE_TREE))
     assert back == DECIDE_TREE
+
+
+# --------------------------------------------------------------------------- #
+# 樹的路徑定址：只認 y 與 n（B4，2026-08-24）
+# --------------------------------------------------------------------------- #
+def _two_level_model():
+    """一棵兩層的樹（根一步、no 那邊再一步），用 model 的編輯 API 長出來。
+
+    ⚠ `RecipeModel` 是 **Qt-free** 的（`docs/ARCHITECTURE.md` 講的那一條：
+    「viewmodel.py：RecipeModel，Qt-free、可 headless 測」）—— 所以這幾條
+    測試留在核心那一輪，不必也**不該**放進 `test_ui_*`。第一版寫了
+    `pytest.importorskip("PySide6")`，那反而會把 Qt 拉進一個本來乾淨的行程。
+    """
+    from d4t.ui.viewmodel import RecipeModel
+
+    m = RecipeModel.starter("ebi_patch")
+    m.use_decide(True)
+    m.ensure_tree()
+    m.split_tree_leaf("")
+    m.split_tree_leaf("n")
+    return m
+
+
+def test_a_path_char_that_is_not_y_or_n_addresses_nothing():
+    """壞掉的路徑要回 ``None``，不可以安靜地指到一個**真實但錯的**節點。
+
+    以前的寫法是 ``node.yes if ch == "y" else node.no`` —— 於是 ``"x"``
+    被當成 ``"n"``，``tree_node("x")`` 回的是 no 那一邊那個真的存在的節點。
+    今天路徑全部由 UI 產生所以碰不到，但「壞輸入指到一個合法的東西」
+    正是這個 repo 最怕的形狀（它不會報錯，只會改錯地方）。
+    """
+    m = _two_level_model()
+
+    assert m.tree_node("") is not None          # 根
+    assert m.tree_node("n") is not None         # no 那一步
+    assert m.tree_node("x") is None             # ← 以前回的是 no 那一步
+    assert m.tree_node("nq") is None
+    assert m.tree_node("yyy") is None           # 走過頭
+
+
+def test_editing_through_a_bad_path_changes_nothing():
+    """四支編輯操作對壞路徑都是**安靜的 no-op**（它們先用 tree_node 檢查）。
+
+    安靜的 no-op 不理想（使用者按了、什麼都沒發生），但它遠好過改錯節點 ——
+    而這一條鎖住的是「不會改錯」。
+    """
+    for op, args in (("set_tree_when", ("x", "a > 1")),
+                     ("set_tree_leaf", ("x", 5, "nope")),
+                     ("split_tree_leaf", ("x",)),
+                     ("remove_tree_step", ("x",))):
+        m = _two_level_model()
+        before = m.decide.tree
+        getattr(m, op)(*args)
+        assert m.decide.tree == before, "%s 用壞路徑改到了東西" % op
+
+
+# --------------------------------------------------------------------------- #
+# U1：佔位值 "0" 不可以變成一條 `0 >= 0` 的假規則（2026-08-24）
+# --------------------------------------------------------------------------- #
+def test_a_brand_new_recipe_does_not_start_with_a_fake_rule():
+    """全新 recipe 的 ``expr`` 是 **佔位值** ``"0"``，不是使用者的門檻。
+
+    以前 `use_decide` 只問「``expr`` 是不是空的」，於是每一份新 recipe 都從
+    ``Rule(when="0 >= 0")`` 開始 —— 一個對每一顆都成立的假條件。後果有三層，
+    而使用者只看得到最後一層：整批全走 yes、第二類永遠是空的；它解析不成
+    單純的比較，所以面板退回表達式框，**F25 一整輪做的導引式編輯器
+    （挑數字 ▾／比什麼 ▾／多少 ＋ 滑桿）在最常見的那條路徑上根本不會出現**。
+    """
+    from d4t.ui.viewmodel import RecipeModel
+
+    m = RecipeModel.starter("ebi_patch")
+    assert m.expr == "0", "前提變了：這條測試要的是那個佔位值"
+
+    m.use_decide(True)
+
+    assert m.decide.rules == [], m.decide.rules
+    assert m.decide.score == ""
+    m.ensure_tree()
+    assert isinstance(m.decide.tree, TreeLeaf), (
+        "樹的根不是葉子 —— add_decision 因此不會去建議一個起手問題")
+
+
+def test_a_real_threshold_is_still_carried_over():
+    """放寬的是「常數不算門檻」，**不是**「不再保留使用者的門檻」。
+
+    使用者調了半天的那個數字是他的工作成果（`use_decide` 的原話），
+    所以有變數的表達式照樣翻成規則。
+    """
+    from d4t.ui.viewmodel import RecipeModel
+
+    m = RecipeModel.starter("ebi_patch")
+    m.set_expr("glv_max - 2")
+    m.set_threshold(3.0)
+    m.use_decide(True)
+
+    assert len(m.decide.rules) == 1
+    assert m.decide.rules[0].when == "glv_max - 2 >= 3"
+    assert m.decide.score == "glv_max - 2"
+
+
+def test_a_broken_expression_is_kept_because_it_is_the_users_work():
+    """解析不出來的表達式**不算常數** —— 那是打到一半或打錯的東西。
+
+    丟掉它比留著更糟：留著的話跑起來會在判定那一步報錯，而那句話講得出
+    是哪裡錯；丟掉的話使用者只會發現他的門檻不見了。
+    """
+    from d4t.ui.viewmodel import RecipeModel
+
+    m = RecipeModel.starter("ebi_patch")
+    m.set_expr("glv_max +")          # 打到一半
+    m.set_threshold(1.0)
+    m.use_decide(True)
+
+    assert len(m.decide.rules) == 1
+    assert "glv_max +" in m.decide.rules[0].when
+
+
+@pytest.mark.parametrize("text, constant", [
+    ("", True), ("   ", True), ("0", True), ("1", True), ("2 * 3", True),
+    ("0 >= 0", True), ("-1e3", True),
+    ("glv_max", False), ("glv_max - 2", False), ("a > 5", False),
+    ("glv_max +", False),          # 壞的 → 當成使用者的東西
+])
+def test_what_counts_as_a_constant_expression(text, constant):
+    """判準是「**用不用得到至少一個量出來的數字**」，不是「是不是字串 0」。"""
+    from d4t.ui.viewmodel import is_a_constant_expression
+
+    assert is_a_constant_expression(text) is constant, text
+
+
+# --------------------------------------------------------------------------- #
+# 走訪住在 core（F29 C0，2026-08-25）
+# --------------------------------------------------------------------------- #
+def test_the_traversal_lives_in_core_and_needs_no_qt():
+    """報表也要寫「每一類幾顆」，而 **core 不得 import Qt**（鐵則 1）。
+
+    所以那份邏輯 2026-08-25 從 `ui/tree_scene.py` 搬進了
+    `core.pipeline.decide_tree`。這一條釘的是「**搬過去了**」——
+    沒有它，下一個人會在 core 裡再寫一份（而抄第二份出來的那份一定會漂）。
+    """
+    import ast
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent / "d4t" / "core" / \
+        "pipeline" / "decide_tree.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    mods = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            mods.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            mods.add(node.module.split(".")[0])
+    assert "PySide6" not in mods and "PyQt5" not in mods, sorted(mods)
+
+
+def test_the_ui_re_exports_the_same_objects_not_a_copy():
+    """`tree_scene` 與 `verdict_band` 改成 import 它 —— **不留第二份**。
+
+    既有的 `from d4t.ui.tree_scene import flow_counts` 因此一個字都不用改，
+    而 `is` 這個比較就是「真的是同一支」的證明（抄一份出來的話這裡會是 False，
+    而兩邊的測試仍然全綠）。
+    """
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+
+    from d4t.core.pipeline import decide_tree as core
+    from d4t.ui import tree_scene, verdict_band
+
+    for name in ("display_tree", "layout_cells", "flow_counts", "leaf_stats",
+                 "decision_info", "path_text", "rows_reaching", "count_yes",
+                 "suggest_condition", "parse_simple_condition",
+                 "format_condition"):
+        assert getattr(tree_scene, name) is getattr(core, name), name
+    assert verdict_band.FAILED_KEY == core.FAILED_KEY
+    assert verdict_band.UNBINNED_KEY == core.UNBINNED_KEY
+
+
+def test_the_report_and_the_screen_use_the_same_class_colours():
+    """同一類在畫面與報表上不同色的話，「這根柱子是哪一類」要重新學一次。"""
+    from d4t.core.export import html
+    from d4t.core.pipeline import decide_tree as core
+
+    assert html.NUISANCE_HEX == core.NUISANCE_HEX
+    for b in range(1, 8):
+        assert core.leaf_color(b) in core.LEAF_PALETTE
+    assert core.leaf_color(0) == core.NUISANCE_HEX
+    assert core.leaf_color(0, "#123456") == "#123456"

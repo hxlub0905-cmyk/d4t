@@ -125,6 +125,47 @@ def test_box_from_features_when_no_blobs():
     assert tuple(int(v) for v in out[20, 25]) == overlay.BOX_COLOR
 
 
+def test_the_cd_card_can_supply_the_box_when_nothing_searched():
+    """CD 卡量一團的時候順手就知道位置 —— F29 之前那件事沒有出口。
+
+    使用者 2026-08-25：「GLV CD 在 Measurements 就已經量出這顆 defect 或位置的
+    一些資訊了（這些資訊不能拿來用嗎）」。這一條就是「能」的那一半。
+    """
+    feats = {"cd_box_x": 20, "cd_box_y": 20, "cd_box_w": 10, "cd_box_h": 10}
+    assert overlay.primary_blob_box(None, feats) == (20, 20, 10, 10)
+    out = overlay.render_overlay({"test": flat()}, feats)
+    assert tuple(int(v) for v in out[20, 25]) == overlay.BOX_COLOR
+
+
+def test_a_searched_box_wins_over_a_measured_one():
+    """兩組都在的時候，**去圖上找出來的那一個**贏（見 `_BOX_FEATURE_SETS`）。
+
+    順序有沒有寫對，在畫面上是看不出來的 —— 兩個都是一個紅框。
+    """
+    feats = {"blob_x": 4, "blob_y": 4, "blob_w": 6, "blob_h": 6,
+             "cd_box_x": 40, "cd_box_y": 40, "cd_box_w": 10, "cd_box_h": 10}
+    assert overlay.primary_blob_box(None, feats) == (4, 4, 6, 6)
+
+
+def test_a_half_written_box_is_not_a_box():
+    """量不到的時候那幾格**不寫**（CD 的規矩 3），所以少一格就是「沒有框」。
+
+    少了這一條，``cd_box_w`` 漏掉會讓框退回上一組、或拿到一個部分填好的
+    dict —— 兩種都會畫出一個看起來很正常的錯框。
+    """
+    assert overlay.primary_blob_box(None, {"cd_box_x": 1, "cd_box_y": 2}) is None
+    assert overlay.primary_blob_box(None, {}) is None
+
+
+def test_a_prefixed_box_is_not_picked_up():
+    """接了兩個區域時「主 blob」有兩個答案 —— 挑一個畫等於畫布說謊。"""
+    feats = {"epi_cd_box_x": 20, "epi_cd_box_y": 20,
+             "epi_cd_box_w": 10, "epi_cd_box_h": 10,
+             "mg_cd_box_x": 40, "mg_cd_box_y": 40,
+             "mg_cd_box_w": 10, "mg_cd_box_h": 10}
+    assert overlay.primary_blob_box(None, feats) is None
+
+
 def test_box_outside_image_is_clipped_not_crashing():
     out = overlay.render_overlay({"test": flat()}, {}, box=(60, 60, 999, 999))
     assert out.shape == (H, W, 3)

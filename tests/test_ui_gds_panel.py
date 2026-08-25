@@ -28,14 +28,22 @@ def qapp():
 
     from d4t.ui import theme
     app = QApplication.instance() or QApplication([])
+    # ⚠ **還原是必要的，不是禮貌。** `theme.TOKENS` 是就地更新的模組層 dict，
+    # 所以這一行改的是**整個行程**的主題。不還原的話它會漏給下一個測試檔 ——
+    # 而字母序排在後面的 `test_ui_widgets.py` 有一條斷言讀的正是 `TOKENS`，
+    # 於是「一個檔案一個行程」全綠、「一個行程跑整套」紅（CI 因此紅了三週）。
+    # conftest 那支 autouse fixture 是 function scope，接不到 module scope 的
+    # 這一次切換 —— 它比那一支早建立、晚拆除。
+    before = theme.current_theme()
     theme.apply_theme(app, "dark")
     yield app
+    theme.apply_theme(app, before)
 
 
 # --------------------------------------------------------------------------- #
 # 1. 「掛上匯出」那顆鈕
 # --------------------------------------------------------------------------- #
-"""為什麼這一顆鈕必須在這一輪就有：`roi_from_mask` 的「還沒設定完」那句話
+"""為什麼這一顆鈕必須在這一輪就有：`roi_reference` 的「還沒設定完」那句話
 **指向它**。訊息指向一個不存在的東西，那句話本身就是死路（推廣鐵則），而
 `tests/test_ui_f7_9_feedback.py` 有一條不變量在擋。"""
 
@@ -56,7 +64,7 @@ def test_the_card_message_points_at_a_button_that_exists(qapp):
     from d4t.core.pipeline import get_step
     from d4t.ui.studio import StudioWindow
 
-    says = get_step("roi_from_mask").configuration_issues({"layers": ""})[0]
+    says = get_step("roi_reference").configuration_issues({"method": "layout layers", "layers": ""})[0]
     named = re.findall(r"“([^”]+…)”", says)
     assert named, "訊息沒有指向任何一個按得下去的東西：%s" % says
 
@@ -115,7 +123,7 @@ def _no_sidecar_message(card) -> str:
 """這兩件都只有一個共同的要求：**畫面上的東西要跟引擎算的一樣**。
 
 表格那一件還多一條：一張 recipe 上可能同時有 `load_patch`（一列一張圖）與
-`roi_from_mask`（一列一層）兩個 `channel_map` —— 用同一個數字去排兩者的列數，
+`roi_reference`（一列一層）兩個 `channel_map` —— 用同一個數字去排兩者的列數，
 其中一邊一定是錯的。
 """
 
@@ -137,7 +145,7 @@ def test_the_two_kinds_of_row_count_do_not_overwrite_each_other(qapp):
     from d4t.ui.widgets import ChannelMapField, ParamForm
 
     form = ParamForm()
-    form.set_step(get_step("roi_from_mask").describe(), {"layers": ""},
+    form.set_step(get_step("roi_reference").describe(), {"layers": ""},
                   stream_choices=["layout_label"])
     form.set_image_count(5)          # 一顆五張圖 —— 跟層數無關
     form.set_label_count(3)
@@ -165,14 +173,15 @@ def test_the_inspector_is_registered_and_reads_the_engines_numbers(qapp):
     from d4t.core.pipeline.context import Context
     from d4t.ui import inspectors as insp
 
-    assert insp.inspector_for("roi_from_mask") is insp.GdsInspector
+    assert insp.inspector_for("roi_reference") is insp.GdsInspector
 
     lab = np.zeros((10, 10), np.uint8)
     lab[1:5, 1:5] = 1
     ctx = Context(images={"layout_label": lab})
-    params = {"source": "layout_label", "layers": "1:epi, 2:mg",
+    params = {"method": "layout layers", "label_source": "layout_label",
+              "layers": "1:epi, 2:mg",
               "min_area": 0, "output_prefix": "", "max_boxes": 8192}
-    get_step("roi_from_mask")().run(ctx, params)
+    get_step("roi_reference")().run(ctx, params)
 
     w = insp.GdsInspector()
     w.set_context("n", params, meta=ctx.meta)
@@ -196,9 +205,10 @@ def test_the_inspector_says_when_a_layer_has_no_name(qapp):
     lab[1:5, 1:5] = 1
     lab[6:9, 6:9] = 3                       # 圖裡有第 3 層，recipe 只講到 2
     ctx = Context(images={"layout_label": lab})
-    params = {"source": "layout_label", "layers": "1:epi, 2:mg",
+    params = {"method": "layout layers", "label_source": "layout_label",
+              "layers": "1:epi, 2:mg",
               "min_area": 0, "output_prefix": "", "max_boxes": 8192}
-    get_step("roi_from_mask")().run(ctx, params)
+    get_step("roi_reference")().run(ctx, params)
     w = insp.GdsInspector()
     w.set_context("n", params, meta=ctx.meta)
     assert "have no name" in w.summary()
@@ -215,9 +225,10 @@ def test_the_inspector_says_when_the_box_limit_bit(qapp):
     lab = np.array([[1 if x <= y else 0 for x in range(n)] for y in range(n)],
                    np.uint8)
     ctx = Context(images={"layout_label": lab})
-    params = {"source": "layout_label", "layers": "1:epi", "min_area": 0,
+    params = {"method": "layout layers", "label_source": "layout_label",
+              "layers": "1:epi", "min_area": 0,
               "output_prefix": "", "max_boxes": 5}
-    get_step("roi_from_mask")().run(ctx, params)
+    get_step("roi_reference")().run(ctx, params)
     w = insp.GdsInspector()
     w.set_context("n", params, meta=ctx.meta)
     assert "box limit" in w.summary()
@@ -295,10 +306,10 @@ def test_a_card_added_after_the_export_still_gets_its_layer_names(qapp,
             assert win.load_dataset_path(lot["klarf"], sync=True)
             if order == "attach-first":
                 win.attach_gds_export(str(tmp_path / "exp"))
-                nid = win.model.add_step("roi_from_mask")
+                nid = win.model.add_step("roi_reference")
                 win._autofill_new_card(nid)
             else:
-                nid = win.model.add_step("roi_from_mask")
+                nid = win.model.add_step("roi_reference")
                 win._autofill_new_card(nid)
                 win.attach_gds_export(str(tmp_path / "exp"))
             return str(win.model.nodes[nid].params.get("layers", ""))
@@ -332,7 +343,7 @@ def test_the_users_own_names_are_never_overwritten(qapp, tmp_path):
     try:
         win.load_dataset_path(lot["klarf"], sync=True)
         win.attach_gds_export(str(tmp_path / "exp"))
-        nid = win.model.add_step("roi_from_mask")
+        nid = win.model.add_step("roi_reference")
         win._autofill_new_card(nid)
         win.model.set_param(nid, "layers", "1:epi, 2:mg")
         win.attach_gds_export(str(tmp_path / "exp"))          # 再掛一次
@@ -394,11 +405,11 @@ def test_connecting_the_labels_fills_the_layers_and_shows_boxes(qapp, tmp_path):
         sid = win.model.add_step("load_sidecar")
         win.select_node(sid)
         win.refresh_preview(sync=True)
-        gid = win.model.add_step("roi_from_mask")
+        gid = win.model.add_step("roi_reference")
         win.select_node(gid)
         win._autofill_new_card(gid)
 
-        win._connect(sid, gid, "layout_label", dst_in="source")
+        win._connect(sid, gid, "layout_label", dst_in="label_source")
         got = win.model.nodes[gid].params["layers"]
         # 字母跟著 **id** 走：這一顆上剛好沒有某一層時，字母不該整排往前遞補。
         assert got and all(
@@ -407,7 +418,13 @@ def test_connecting_the_labels_fills_the_layers_and_shows_boxes(qapp, tmp_path):
 
         win.refresh_preview(sync=True)
         shown = set(win.region_overlay_names())
-        assert shown == {r.split(":")[1] for r in got.split(", ")}, shown
+        # F29：每一層現在是**三個名字**（`<name>` / `_center` / `_others`）。
+        # 只有一塊的那幾層沒有 `_others`（那張圖上就是沒有基準），所以這裡問的
+        # 是「每一層至少畫得出它自己，而畫出來的每一個都屬於某一層的家族」。
+        layers = {r.split(":")[1] for r in got.split(", ")}
+        assert layers <= shown, (layers, shown)
+        assert shown <= {n for k in layers
+                         for n in (k, k + "_center", k + "_others")}, shown
         assert shown, "接上線之後畫面上一個框都沒有 —— 那跟沒接上長得一樣"
     finally:
         win.deleteLater()
@@ -422,7 +439,7 @@ def test_the_real_layer_names_win_over_the_fallback(qapp, tmp_path):
     try:
         win.load_dataset_path(lot["klarf"], sync=True)
         win.attach_gds_export(exp)
-        gid = win.model.add_step("roi_from_mask")
+        gid = win.model.add_step("roi_reference")
         win._autofill_new_card(gid)
         got = win.model.nodes[gid].params["layers"]
         assert "Layer" not in got, got      # 不可以退回防呆的名字
@@ -435,7 +452,7 @@ def test_an_excluded_layer_stays_excluded(qapp, tmp_path):
     """防呆只填**整張卡都空著**的時候。
 
     「某一列空著 = 那一層不要」這條規則不可以被防呆吃掉 —— 那是使用者唯一能
-    排除一層的方法（`tests/test_roi_from_mask.py` 鎖著它的引擎行為）。
+    排除一層的方法（`tests/test_roi_reference.py` 鎖著它的引擎行為）。
     """
     from d4t.ui.studio import StudioWindow
 
@@ -447,12 +464,12 @@ def test_an_excluded_layer_stays_excluded(qapp, tmp_path):
         sid = win.model.add_step("load_sidecar")
         win.select_node(sid)
         win.refresh_preview(sync=True)
-        gid = win.model.add_step("roi_from_mask")
+        gid = win.model.add_step("roi_reference")
         # 「不要第 2 層」在這張表上的寫法是**那個 id 不出現**
         # （`ChannelMapField` 的空列不會被寫出來，見
         #  test_an_empty_layer_row_means_no_region_not_a_default_name）。
         win.model.set_param(gid, "layers", "1:epi, 3:mg")
-        win._connect(sid, gid, "layout_label", dst_in="source")
+        win._connect(sid, gid, "layout_label", dst_in="label_source")
         assert win.model.nodes[gid].params["layers"] == "1:epi, 3:mg"
     finally:
         win.deleteLater()

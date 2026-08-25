@@ -71,8 +71,12 @@ def snr_signed(target_pixels: np.ndarray, ref_pixels: np.ndarray) -> float:
 # GL 比對的 SNR」。現在 SNR 只有一個出處：`algo.glv.compare_pixels`，
 # 而它的參照是**使用者接的那一塊**（畫布上有線），不是自動長出來的一圈 margin。
 #
-# `snr_signed` 留著：它是這個 repo 帶正負號慣例的**規範出處**（給 Z-map 用，
-# 也給任何要問「比背景亮還是暗」的地方）。`compute_snr_map` 是 Z-map 卡的。
+# ⚠ **2026-08-25：Z-map 卡（`steps/snr_map.py`）刪掉了，這個模組留著。**
+# `snr_signed` 是這個 repo 帶正負號慣例的**規範出處** —— GLV 卡的 `snr` 統計量
+# 照它做（見 `algo/glv.py`），而 `tests/test_steps.py` 就在斷言它還在。
+# `compute_snr_map` 現在只剩 `tests/test_snr.py` 一個呼叫者：那正是這種模組被
+# 當成死碼順手清掉的狀態（同 `algo/period.py` / `algo/golden.py` 那條規矩，
+# 見 `d4t/ui/scope.py`）—— **要刪它請先把上面那個慣例搬個家。**
 
 @dataclass
 class SnrMapResult:

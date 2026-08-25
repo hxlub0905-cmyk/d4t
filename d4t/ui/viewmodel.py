@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from dataclasses import replace
 
+from d4t.core.pipeline.expression import parse_expression
 from d4t.core.pipeline import (
     Edge, ParamError, Recipe, RecipeNode, RouteBy, ScoreSpec, get_step,
     validate,
@@ -21,6 +22,16 @@ from d4t.core.pipeline import (
 from d4t.core.pipeline.recipe import (DecideSpec, Let, Rule, TreeLeaf,
                                       TreeStep, _tree_from_json, _tree_to_json,
                                       rules_to_tree)
+
+#: bin 編號的上限。**它的用途是「別讓數字框變成一格自由文字」，不是「分類碼
+#: 應該多大」** —— 後者是廠決定的，不是我們。
+#:
+#: 以前四個數字框各自寫死 ``setRange(0, 999)``，而**引擎與 KLARF 寫回都沒有
+#: 這個上限**（``CLASSNUMBER`` 就是一個整數欄）。廠內的分類碼四五位數很常見，
+#: 於是「打 1200 進去變成 999」—— 安靜地改掉使用者填的分類碼，而寫回是不可逆的。
+#: 跟導引式問題那一格數字框同一個形狀（A1，2026-08-24）：一個我們自己發明出來、
+#: 而且擋得住真實用法的上限。
+MAX_BIN = 999999
 
 
 def _decide_snapshot(d: "DecideSpec") -> Dict[str, Any]:
@@ -51,6 +62,40 @@ def _decide_restore(snap: Optional[Dict[str, Any]]) -> Optional["DecideSpec"]:
         otherwise_bin=int(ob), otherwise_label=str(ol),
         score=str(snap.get("score", "") or ""),
         tree=None if tree is None else _tree_from_json(tree))
+
+
+def is_a_constant_expression(text: Any) -> bool:
+    """這段文字對**每一顆 defect 都給同一個答案**嗎（空的也算）。
+
+    存在的理由是一個 bug（U1，2026-08-24）
+    -------------------------------------
+    ``RecipeModel`` 全新時 ``expr = "0"`` —— 那是**二元門檻那條老路的佔位值**
+    （`__init__` 與 :meth:`use_decide` ``(False)`` 都塞它）。而 :meth:`use_decide`
+    以前只問「``expr`` 是不是空的」，於是那個佔位值被翻成一條規則：
+
+        Rule(when="0 >= 0", bin=1)      ← 對每一顆都成立
+
+    後果有三層，而使用者只看得到最後一層：起手問題是一個永遠成立的假條件
+    （整批全走 yes、第二類永遠是空的）；它**解析不成單純的比較**，所以
+    `TreePanel` 退回表達式框，**F25 一整輪做的導引式編輯器（挑數字 ▾ ／
+    比什麼 ▾ ／多少 ＋ 滑桿）在最常見的那條路徑上根本不會出現**；而因為
+    沒有顆流到 no 邊，下一步的滑桿也拿不到分布。
+
+    判準是「**用不用得到至少一個量出來的數字**」而不是「是不是字串 ``"0"``」：
+    ``"1"``、``"2*3"`` 一樣不是一條判定線。
+
+    ⚠ **解析不出來的不算常數。** 那是使用者打到一半或打錯的東西，
+    是他的工作成果 —— :meth:`use_decide` 的立場一直是「調了半天的那個門檻
+    不該因為換一個檢視就沒了」，所以壞掉的表達式照樣翻成規則（跑起來會
+    在判定那一步報錯，而那句話講得出是哪裡錯）。
+    """
+    body = str(text or "").strip()
+    if not body:
+        return True
+    try:
+        return not parse_expression(body).variables
+    except Exception:          # noqa: BLE001 — 壞表達式是使用者的東西，留著
+        return False
 
 
 class RecipeModel:
@@ -444,14 +489,18 @@ class RecipeModel:
         self._push_undo()
         if on:
             expr = str(self.expr or "").strip()
+            # **常數不是門檻**（U1，2026-08-24）—— 見 `is_a_constant_expression`。
+            # 這裡以前問的是「``expr`` 是不是空的」，而全新 recipe 的 ``expr``
+            # 是佔位值 ``"0"``，於是每一份新 recipe 都從一條 ``0 >= 0`` 開始。
+            real = expr and not is_a_constant_expression(expr)
             rules = []
-            if expr:
+            if real:
                 rules.append(Rule(when="%s >= %g" % (expr, float(self.threshold)),
                                   bin=int(self.bins.get("above", 1)), label=""))
             self.decide = DecideSpec(
                 let=[], rules=rules,
                 otherwise_bin=int(self.bins.get("below", 0)), otherwise_label="",
-                score=expr)
+                score=expr if real else "")
             self.expr = ""          # 並存是 error，所以這一格要清掉
         else:
             self.decide = None
@@ -574,11 +623,23 @@ class RecipeModel:
         for ch in str(path):
             if isinstance(node, TreeLeaf):
                 return None
+            # **只認 y 與 n**（B4，2026-08-24）。以前是 ``ch == "y"`` 否則走
+            # ``no`` —— 一個壞掉的路徑不會回 None，會安靜地指到一個**真實但
+            # 錯的節點**，而編輯操作就會改到那裡。今天路徑全部由 UI 產生所以
+            # 碰不到，但「壞輸入指到一個合法的東西」正是這個 repo 最怕的形狀。
+            if ch not in ("y", "n"):
+                return None
             node = node.yes if ch == "y" else node.no
         return node
 
     @staticmethod
     def _tree_replace(node: Any, path: str, new: Any) -> Any:
+        """路徑指到的那個節點換成 ``new``，回傳新的樹。
+
+        ⚠ 呼叫端（`_edit_tree`）一律先用 :meth:`tree_node` 確認路徑指得到
+        東西才叫這一支 —— 所以這裡不必再擋一次，但也**不可以**把「不是 y」
+        當成 n（見 :meth:`tree_node` 的說明）。
+        """
         if not path:
             return new
         if path[0] == "y":
@@ -594,7 +655,12 @@ class RecipeModel:
                                                   str(path), new))
 
     def _fresh_bin(self) -> int:
-        """一個還沒被任何葉子用掉的 bin（跟 `add_rule` 同一個規則）。"""
+        """一個還沒被任何葉子用掉的 bin（跟 `add_rule` 同一個規則）。
+
+        用光了回 :data:`MAX_BIN` **而不是拋例外** —— 這一支以前是
+        ``next(b for b in range(1, 1000) ...)``，找不到會漏出一個
+        ``StopIteration``，而它會在一顆按鈕的 handler 裡冒出來。
+        """
         used = {int(self.decide.otherwise_bin)} if self.decide else set()
 
         def walk(node: Any) -> None:
@@ -608,7 +674,8 @@ class RecipeModel:
             walk(self.decide.tree)
         if self.decide is not None:
             used |= {int(r.bin) for r in self.decide.rules}
-        return next(b for b in range(1, 1000) if b not in used)
+        return next((b for b in range(1, MAX_BIN + 1) if b not in used),
+                    MAX_BIN)
 
     def set_tree_when(self, path: str, when: str) -> None:
         node = self.tree_node(path)
@@ -898,6 +965,15 @@ class RecipeModel:
     def set_edge_ports(self, src: str, dst: str, src_out: str = "",
                        dst_in: str = "") -> bool:
         """補上一條**還沒有埠**的線的埠。
+
+        ⚠ **目前沒有任何呼叫者**（2026-08-24 全 repo 查過）。F9-9 把
+        `studio._connect` 改成「先算出埠、加線的時候一起帶進去」之後，
+        這條兩步的路就沒事做了 —— 理由見下面那段：補埠只挑得到一對節點之間
+        的某一條，而兩條並排的線分不出該補哪一條。
+
+        留著而不刪掉是因為它是 model 的公開 API，而「收起來的成本是零、
+        刪掉的成本要先量」（`CLAUDE.md` §5 那張表）。要刪的話直接刪，
+        沒有東西會壞。
 
         分成兩步是因為 Studio 的順序是「先確定線接得起來（不成環），**再**去改
         下游卡的參數」—— 而 ``dst_in`` 是那一步才知道的（要看那張卡的哪個參數

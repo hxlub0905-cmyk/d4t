@@ -34,7 +34,7 @@ d4t 的具名區域是「一組軸對齊矩形」，而 GLAS 給的是一張整�
 （一個 45° 的邊每一列都是一個矩形 —— 那是精確的代價，不是 bug）。
 下游的成本（同一天量的，1000×1000）：N=1 000 約 3 ms、N=10 000 約 60 ms、
 N=50 000 約 280 ms **而且是每張量測卡每顆各一次**。卡片的預設上限就是照這組
-數字定的（見 `steps/roi_from_mask.py`）。
+數字定的（見 `steps/roi_reference.py`）。
 """
 from __future__ import annotations
 

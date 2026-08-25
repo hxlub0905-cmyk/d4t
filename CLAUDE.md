@@ -187,6 +187,16 @@ param 相依 I/O（例如輸出流名稱由參數決定）覆寫 `resolve_reads/
 > 改名要**連同分數表達式一起遷移**，而對照表住在那張卡上
 > （`Step.legacy_feature_renames`），不是住在 `recipe.py`。
 
+> **卡片庫由上而下的順序 = `steps/__init__.py` 的 import 順序**（F29，
+> 2026-08-25）。`list_steps()` 就是照 `REGISTRY` 的插入序回，不排序 ——
+> 所以加一張卡要**放在它該出現的位置**，不是接在檔案最後。
+> 這一條是踩出來的：2026-08-25 使用者說「Measure 的 card 順序幫我改命名&重排：
+> GLV → CD → Focus index」，那一輪改了 import 順序、也在那裡寫下這句話，
+> **而畫面上一格都沒有動** —— 當時 `list_steps` 是照 `key` 的字母序排的
+> （CD、Focus index、GLV）。整個改動看起來完成了，全套測試也全綠，因為沒有
+> 任何一條測試問過「使用者看到的第一張是哪一張」。現在有了：
+> `tests/test_card_library_order.py`。
+
 > **把 `min`/`max` 填好，滑桿是免費的**（F7-8）。ParamForm 看到有上下界的
 > `int`/`float` 就自動配一支跟數字框雙向綁定的滑桿。這不只是好看 ——
 > 使用者是一邊拖一邊看影像決定值的，「先想好一個數字再輸入」那個順序是反的。
@@ -244,6 +254,25 @@ git add -A && python tools/release.py && git add -A
 新功能請開 `docs/plans/F<n>-<name>.md`（沿用 GLAS/MMH 慣例），完成後更新
 `SESSION_LOG.md`；做完不再改的計畫書搬進 `docs/history/plans/`。
 
+### 新的 UI 面板一律開新模組（不要塞進 `studio.py`）
+
+`StudioWindow` 現在是 **5,244 行、229 個方法、344 個 `self.*` 屬性**的一個類別。
+它還沒到「非拆不可」，但**拆分壓力已經在影響新功能該放哪裡**了 —— F22 的 commit
+訊息裡就寫著「不塞進已經 5000 多行的 `studio.py`」，那是一個人在替一個結構問題
+繞路。
+
+所以規矩寫下來：**一塊新的面板／畫布元件＝一個新模組**。F22 的
+`ui/decide_panel.py`、F24 的 `ui/tree_panel.py`／`ui/tree_scene.py`、F25 的
+`ui/route_badge.py` 已經都是這樣做的 —— 這一段只是把它從「這次剛好這樣做」
+變成「本來就這樣做」。`studio.py` 留給**接線**（建 widget、接訊號、轉呼叫），
+不留給內容。
+
+⚠ **現在不要動 `studio.py` 本身。** 使用者定的順序是「先把引擎做對，再回頭
+產品化」，而大重構的驗收條件是「跟改動前逐項相同」—— 那把尺（黃金值）現在是
+壞的（見 `docs/plans/F21-algo-and-roi.md` §6）。**沒有那把尺，「改了但數字沒變」
+這句話沒有人證得了**，而那正是這個 repo 踩過六次的形狀。等黃金值重凍好，
+第一個該切出去的是 `widgets.py` 那幾群自繪圖示（最好拆、風險最低）。
+
 ---
 
 ## 5. 產品範圍開關
@@ -285,7 +314,8 @@ git add -A && python tools/release.py && git add -A
 
 ```python
 SUPPORTED_KINDS = ("ebi_patch", "tiff_stack", "rsem", "folder")
-HIDDEN_STEPS = ("align",)        # 收起來（引擎照認、舊 recipe 照跑）
+HIDDEN_STEPS = ("align", "feature_math", "feature_fill")
+                                 # 收起來（引擎照認、舊 recipe 照跑）
 SHOW_SAMPLE_ENTRIES = False      # 範例入口（見下）
 INPUT_SOURCES = (...)            # 三顆 Open 的字、圖示、一句白話說明
 ATTACHMENTS = (...)              # 掛在已載入 lot 上的附加檔（GLAS 匯出）

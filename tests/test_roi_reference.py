@@ -1,4 +1,7 @@
 # F11 Region-3 第 3 步：GDS label map → 具名區域。
+# 2026-08-25（F29）：這張卡收成「參照區域」的一個 method（``layout layers``），
+# 另一個是 ``repeating cells``。這一份仍然只測 GDS 那一支 ——
+# 週期那一支住 `tests/test_roi_reference_cells.py`。
 """這一份鎖住的是**框真的等於那一層**，不是「卡片跑得完」。
 
 d4t 的區域是一組軸對齊矩形，而 GLAS 給的是任意形狀的 mask。中間那個轉換有
@@ -13,8 +16,9 @@ d4t 的區域是一組軸對齊矩形，而 GLAS 給的是任意形狀的 mask�
 五入掉一個像素的地方）。
 
 另外三件：**非週期**（這條路的前提就是前兩張卡的前提都不成立）、
-**只吐 ``<name>``**（不吐 ``_center`` / ``_others``，理由見卡片檔頭）、
-以及**砍到上限要講出來**（少掉一半框的區域仍然算得出很正常的數字）。
+**三個名字**（``<name>`` / ``_center`` / ``_others`` —— F29 之前只有第一個，
+換掉的理由與沒有被推翻的那一半見卡片檔頭）、以及**砍到上限要講出來**
+（少掉一半框的區域仍然算得出很正常的數字）。
 """
 from __future__ import annotations
 
@@ -36,12 +40,20 @@ from d4t.core.pipeline.step import StepError  # noqa: E402
 LAYERS = "1:epi, 2:mg"
 
 
-def _run(label, **over):
-    p = {"source": "layout_label", "layers": LAYERS, "min_area": 0,
-         "output_prefix": "", "max_boxes": 8192}
+CARD = "roi_reference"
+GDS = {"method": "layout layers"}
+
+
+def _params(**over):
+    p = dict(GDS, label_source="layout_label", layers=LAYERS, min_area=0,
+             output_prefix="", max_boxes=8192)
     p.update(over)
+    return p
+
+
+def _run(label, **over):
     ctx = Context(images={"layout_label": np.asarray(label, np.uint8)})
-    get_step("roi_from_mask")().run(ctx, p)
+    get_step(CARD)().run(ctx, _params(**over))
     return ctx
 
 
@@ -120,29 +132,68 @@ def test_the_layout_does_not_have_to_repeat():
 
 
 # --------------------------------------------------------------------------- #
-# 2. 只吐 <name>
+# 2. 三個名字（F29 之前只有 <name>）
 # --------------------------------------------------------------------------- #
-def test_it_declares_only_the_plain_names():
-    """``_center`` 在這條路上沒有幾何依據（形狀不是複本、缺陷不保證在中央）。
-    同一個名字在兩張卡上代表不同的東西，比少一個名字糟得多。"""
-    out = get_step("roi_from_mask").resolve_regions_out({"layers": LAYERS})
-    assert out == ["epi", "mg"]
-    assert not [n for n in out if n.endswith(("_center", "_others"))]
+def test_it_declares_the_whole_family():
+    """``_center`` / ``_others`` 在 F29 補上了 —— 而**原本的反對意見沒有被推翻**。
+
+    當初不吐它們的理由是：另外兩張卡的 ``_center`` 是「缺陷所在的那一份」，
+    那是幾何保證的（patch 以缺陷為中心裁切）；這條路上缺陷不保證在正中央。
+    那句話今天仍然成立 —— 變的是有了 ``pick="strongest"``：它不假設缺陷在哪，
+    **它去找**（下面那條測試就是在測這件事）。
+    """
+    out = get_step(CARD).resolve_regions_out(_params())
+    assert out == ["epi", "epi_center", "epi_others",
+                   "mg", "mg_center", "mg_others"]
 
 
-def test_it_really_only_produces_those(tmp_path):
+def test_it_really_produces_those(tmp_path):
+    lab = np.zeros((8, 8), np.uint8)
+    lab[1:4, 1:4] = 1
+    lab[5:7, 5:7] = 1
+    ctx = _run(lab)
+    assert sorted(ctx.roi_names()) == ["epi", "epi_center", "epi_others"]
+
+
+def test_one_piece_means_no_baseline_at_all():
+    """只有一塊的時候 ``_others`` **不存在**（不是空的、也不是退回整張圖）。"""
     lab = np.zeros((8, 8), np.uint8)
     lab[1:4, 1:4] = 1
     ctx = _run(lab)
-    assert sorted(ctx.roi_names()) == ["epi"]
+    assert "epi_others" not in ctx.roi_names()
+    assert "epi_others" in (ctx.meta.get("regions_absent") or {})
+
+
+def test_strongest_finds_the_odd_box_out():
+    """**這條路真正的用法。** 缺陷不在正中央，所以用訊號去找那一塊。"""
+    lab = np.zeros((40, 40), np.uint8)
+    for x in (2, 14, 26):
+        lab[4:12, x:x + 8] = 1
+    sig = np.zeros((40, 40), np.float32)
+    sig[4:12, 26:34] = 200.0                     # 最右邊那一塊才是缺陷
+    ctx = Context(images={"layout_label": lab, "diff": sig})
+    get_step(CARD)().run(ctx, _params(pick="strongest", pick_source="diff"))
+    box = ctx.roi_rects("epi_center", lab.shape)[0]
+    assert box[0] >= 26
+    assert ctx.roi_count("epi_others") == 2
+
+
+def test_falling_back_to_the_middle_is_said_out_loud():
+    """接不到 ``Judge on`` 就退回「離中心最近」—— 而安靜地照做是最糟的。"""
+    lab = np.zeros((40, 40), np.uint8)
+    for x in (2, 14, 26):
+        lab[4:12, x:x + 8] = 1
+    ctx = Context(images={"layout_label": lab})
+    get_step(CARD)().run(ctx, _params(pick="strongest"))
+    assert ctx.features["pick_by_signal"] == 0.0
+    assert "Judge on" in " ".join(ctx.meta["warnings"])
 
 
 def test_the_declared_features_match_what_it_writes():
     lab = np.zeros((8, 8), np.uint8)
     lab[1:4, 1:4] = 1
     lab[5:7, 5:7] = 2
-    declared = set(get_step("roi_from_mask").resolve_features(
-        {"layers": LAYERS, "output_prefix": ""}))
+    declared = set(get_step(CARD).resolve_features(_params()))
     assert set(_run(lab).features) == declared
 
 
@@ -218,12 +269,14 @@ def test_the_two_reasons_for_an_empty_layer_are_told_apart():
 # --------------------------------------------------------------------------- #
 def test_no_layers_yet_is_a_configuration_issue_not_a_crash():
     """空字串是合法的值，但這張卡跑起來每一顆都會失敗 —— 要在跑之前就講。"""
-    says = get_step("roi_from_mask").configuration_issues({"layers": ""})
+    says = get_step(CARD).configuration_issues(_params(layers=""))
     # 訊息必須指向一個**按得下去**的東西（`tests/test_ui_f7_9_feedback.py` 的
     # 那條不變量）—— 「還沒設定完」而沒有下一步，就是死路。
     assert says and "Open GDS export…" in says[0]
-    assert get_step("roi_from_mask").configuration_issues(
-        {"layers": LAYERS}) == []
+    assert get_step(CARD).configuration_issues(_params()) == []
+    # ``repeating cells`` 那一支**沒有這種狀態** —— 它不需要任何外部資料。
+    assert get_step(CARD).configuration_issues(
+        {"method": "repeating cells"}) == []
 
 
 def test_running_with_no_layers_says_what_to_fill_in():
@@ -254,9 +307,9 @@ def test_a_shredded_image_is_refused_rather_than_run_for_ever():
 
 def test_a_half_typed_layer_map_does_not_kill_the_canvas():
     """宣告用的那幾支不准拋 —— 打到一半的時候畫布不能整個消失。"""
-    card = get_step("roi_from_mask")
-    assert card.resolve_regions_out({"layers": "1:"}) == []
-    assert card.resolve_features({"layers": "1:", "output_prefix": ""})
+    card = get_step(CARD)
+    assert card.resolve_regions_out(_params(layers="1:")) == []
+    assert card.resolve_features(_params(layers="1:"))
 
 
 # --------------------------------------------------------------------------- #

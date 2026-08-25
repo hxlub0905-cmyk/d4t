@@ -32,7 +32,7 @@ sys.path.insert(0, str(REPO / "tools"))
 from make_sample import generate  # noqa: E402
 
 TIMEOUT_MS = 30000          # 單次等待上限（實測整檔 < 5s）
-PREVIEW_NODES = ["norm", "align", "sub", "dn", "snr"]
+PREVIEW_NODES = ["norm", "align", "sub", "dn"]
 
 
 # ---------------------------------------------------------------------------
@@ -342,7 +342,7 @@ def test_stop_during_running_job_joins(qt, recipe, dataset, synlot):
     assert not w._zombies
 
     p = workers.PreviewWorker()
-    p.request(recipe, dataset.items[0], dataset.kind, upto_node="snr")
+    p.request(recipe, dataset.items[0], dataset.kind, upto_node="dn")
     p.request(recipe, dataset.items[0], dataset.kind, upto_node="glv")
     assert p.has_pending() is True
     assert p.shutdown(10000) is True

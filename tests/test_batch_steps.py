@@ -409,6 +409,35 @@ def test_inplace_with_nothing_named_leaves_the_file_identical(dataset, tmp_path,
     bctx = run_batch_steps(recipe, dataset, rows)
     assert not bctx.errors, bctx.errors
     assert out.read_bytes() == Path(lot["klarf"]).read_bytes()
+    # **而且要講出「為什麼沒動」**（B6，2026-08-24）。逐位元組相同是刻意的，
+    # 但使用者看到的以前只有「0 row(s) changed」—— 一句答不出「那我該填什麼」
+    # 的話。`klarf_out` 早就把理由寫進 `plan.notes` 了，這裡是它的出口。
+    assert any("No target column" in w for w in bctx.warnings), bctx.warnings
+
+
+def test_the_write_back_plan_notes_reach_the_user(dataset, tmp_path):
+    """`plan.notes` 是「按下去會發生什麼」的白話說明，每一種模式都有話要說
+    （影像參照怎麼處理、幾顆對不到 DEFECTID、DSIZE 那一欄的單位換算）。
+
+    在 B6 之前它們**一句都沒有出口** —— 卡片只把 `n_rows_changed` 帶出來。
+    這一條鎖住那條路還在，而不是只鎖住 inplace 那一句
+    （上面那條測的是「說了那句話」，這條測的是「這條路本身」）。
+    """
+    out = tmp_path / "ann.001"
+    recipe = _out_recipe("kl", "output_klarf",
+                         {"mode": "annotate", "path": str(out)})
+    rows = run_batch(recipe, dataset, workers=1)
+    bctx = run_batch_steps(recipe, dataset, rows)
+    assert not bctx.errors, bctx.errors
+
+    from d4t.core.export import klarf_out
+    from d4t.core.ingest import klarf_core
+    plan = klarf_out.plan_writeback(klarf_core.load(dataset.klarf.source_path),
+                                    rows, "annotate")
+    assert plan.notes, "這一輪 annotate 沒有任何 note —— 這條測試會空轉"
+    for note in plan.notes:
+        assert any(note in w for w in bctx.warnings), (
+            "plan 說了「%s」，但它沒有走到使用者眼前" % note)
 
 
 def test_the_images_card_picks_the_highest_scoring_ones(dataset, tmp_path):

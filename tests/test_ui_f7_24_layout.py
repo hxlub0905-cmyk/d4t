@@ -166,7 +166,7 @@ def test_each_toolbar_button_has_its_own_silhouette(window):
     圖示給每一顆一個輪廓 —— 這是對「單調」的正解，而不是替它們各上一個顏色
     （這個主題的規則是**顏色只表達語意**，見 theme.py 的 docstring）。
     """
-    buttons = (window.btn_open_recipe, window.btn_examples, window.btn_run_all)
+    buttons = (window.btn_open_recipe, window.btn_examples)
     names = [b.glyph_name() for b in buttons]
     assert all(names), "這些工具列按鈕沒有圖示：%s" % names
     assert len(set(names)) == len(names), "圖示重複了：%s" % names
@@ -175,19 +175,28 @@ def test_each_toolbar_button_has_its_own_silhouette(window):
         assert b.property("hasGlyph") == "true", b.text()
 
 
-def test_the_two_actions_worth_pressing_are_the_two_with_colour(window, qapp):
-    """整條工具列只有兩顆有顏色，而它們正好是使用者真正要按的那兩顆。
+def test_the_one_action_worth_pressing_is_the_one_with_colour(window, qapp):
+    """整條工具列只有一顆有顏色，而它正好是這個畫面唯一的主要動作。
 
-    ``Run trial`` 是填滿的 accent（主要動作），``Export…`` 是 accent 外框
-    （跑完之後要做的那件事）。其餘是中性的 —— 顏色在這個主題裡表達語意，
-    不是拿來讓畫面熱鬧的。
+    ``Run trial`` 是填滿的 accent。其餘是中性的 —— 顏色在這個主題裡表達
+    語意，不是拿來讓畫面熱鬧的。
+
+    ⚠ 以前是**兩顆**：`Run trial` ＋ accent 外框的「Run all & write」。
+    後者 2026-08-24 拿掉了 —— 它跟 `Run trial ▾` 選單裡那一項是同一支
+    `run_all()`，而「跑完之後要做的那件事」搬到了它真的會發生的地方
+    （Results 視窗）。
     """
     assert window.btn_trial.objectName() == "primary"
-    assert window.btn_run_all.property("variant") == "secondary"
     plain = (window.btn_open_recipe, window.btn_examples, window.btn_help)
     for b in plain:
         assert b.objectName() != "primary"
         assert b.property("variant") is None, b.text()
+    coloured = [b for b in window.toolbar.findChildren(type(window.btn_trial))
+                if b.objectName() == "primary"
+                or b.property("variant") == "secondary"]
+    # `Run trial` 與它的 ▾ 是同一件事的兩個半邊（F7-24），所以是兩個 widget。
+    assert {b for b in coloured} == {window.btn_trial, window.btn_trial_more}, \
+        [b.text() or "(▾)" for b in coloured]
 
 
 # --------------------------------------------------------------------------- #

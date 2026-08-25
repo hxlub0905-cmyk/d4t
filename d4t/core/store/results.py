@@ -282,6 +282,61 @@ class RunStore:
         return path
 
 
+def _summary(run_id: str, rows: List[Dict[str, Any]], t0: float,
+             saved_run_id: Optional[str]) -> Dict[str, Any]:
+    """把重算完的 rows 收成 :func:`rescore` 的回傳格式（兩條路共用）。"""
+    scores = [float(r["score"]) for r in rows
+              if r.get("ok") and isinstance(r.get("score"), (int, float))]
+    bin_counts: Dict[int, int] = {}
+    for r in rows:
+        if r.get("ok") and r.get("bin") is not None:
+            b = int(r["bin"])
+            bin_counts[b] = bin_counts.get(b, 0) + 1
+    return {
+        "run_id": run_id,
+        "n": len(rows),
+        "n_errors": sum(1 for r in rows if not r.get("ok")),
+        "bin_counts": bin_counts,
+        "score_min": min(scores) if scores else None,
+        "score_median": statistics.median(scores) if scores else None,
+        "score_max": max(scores) if scores else None,
+        "elapsed_s": time.perf_counter() - t0,
+        "saved_run_id": saved_run_id,
+    }
+
+
+def _rescore_with_decide(store: "RunStore", run: Dict[str, Any], run_id: str,
+                         rdict: Dict[str, Any], t0: float, *,
+                         save_as: Optional[Union[str, bool]],
+                         notes: str) -> Dict[str, Any]:
+    """判定樹／多類別那條路 —— 走引擎，不自己實作一次（見 :func:`rescore`）。
+
+    ``decide.let`` 裡標了「跟整批比」的行**不重算**（`redecide` 負責這件事）：
+    它們的值是整批收齊之後才算得出來的，逐顆重算只會拿回換算前的數字。
+    """
+    from d4t.core.pipeline.batch import redecide
+    from d4t.core.pipeline.recipe import Recipe
+
+    recipe = Recipe.from_json_dict(rdict)
+    rows: List[Dict[str, Any]] = []
+    for r in store.iter_results(run_id):
+        feats = {k: v for k, v in r["features"].items() if k != "score"}
+        rows.append({"defect_id": r["defect_id"], "ok": True, "error": None,
+                     "features": feats, "score": r.get("score"),
+                     "bin": r.get("bin") if r.get("bin") is not None else 0})
+    redecide(recipe, rows)
+
+    saved_run_id: Optional[str] = None
+    if save_as:
+        saved_run_id = store.save_run(
+            rdict, rows,
+            klarf_path=run.get("klarf_path", ""),
+            dataset_kind=run.get("dataset_kind", ""),
+            notes=notes,
+            run_id=(None if save_as is True else str(save_as)))
+    return _summary(run_id, rows, t0, saved_run_id)
+
+
 # ---------------------------------------------------------------------------
 # rescore：改表達式/門檻不重跑影像
 # ---------------------------------------------------------------------------
@@ -292,6 +347,14 @@ def rescore(store: RunStore, run_id: str, *,
             save_as: Optional[Union[str, bool]] = None,
             notes: str = "") -> Dict[str, Any]:
     """用既有 run 的 features 重算 score/bin（**不重跑影像**）。
+
+    ⚠ **判定樹／多類別的 recipe 走另一條路**（F3，2026-08-24）：``decide``
+    區塊存在時，這一支不碰 ``score``，改叫 `pipeline.redecide`（引擎那一支，
+    跟 `apply_lot_scaling` 共用）。理由見 :func:`_rescore_with_decide`。
+    那條路上 ``expr`` / ``threshold`` / ``bins`` 沒有東西可以改 ——
+    傳了就 ``ValueError`` 講一句白話，而不是安靜地忽略。
+
+    以下是**老路**（單一分數門檻）的行為，一個位元都沒動：
 
     - ``expr`` / ``threshold`` / ``bins``：None → 沿用該 run recipe 的設定。
     - 每顆的變數 = 存下來的 features **排除 "score"**（避免舊分數污染新式）。
@@ -316,6 +379,31 @@ def rescore(store: RunStore, run_id: str, *,
         rdict: Dict[str, Any] = json.loads(run["recipe_json"]) or {}
     except (ValueError, TypeError):
         rdict = {}
+
+    # ---- 判定樹那條路（F3，2026-08-24）------------------------------------
+    # 這一支以前**自己實作了一次判定**（讀 ``score``、比 ``threshold``、
+    # 分 below/above），而它從來沒有看過 ``decide``。F21–F25 把整個判定段搬
+    # 進 `DecideSpec` 之後那份實作就漂了，症狀分兩種、後面那種最壞：
+    #
+    # * 正規的 decide recipe（``score.expr == ""``）→ 丟一句
+    #   「the expression is empty」。使用者從來沒寫過分數表達式，他做的是
+    #   一棵樹 —— 那句話對他是死路。
+    # * 兩個區塊都有值的過渡期 recipe → **安靜地**用那個廢棄的 ``score``
+    #   算完，回報 ``n_errors: 0``，而每一顆都是 bin 0。``--save-as`` 會把
+    #   那份錯的存成一個新 run。
+    #
+    # 現在走 `pipeline.redecide` —— 跟 `apply_lot_scaling` 同一支，而它叫的是
+    # 引擎的 `_eval_score`（自己會分流到 `_eval_decision`）。判定邏輯回到一份。
+    if rdict.get("decide") is not None:
+        if expr is not None or threshold is not None or bins is not None:
+            raise ValueError(
+                "run '{}' decides with a tree, so --expr / --threshold / "
+                "--bins have nothing to change here - those only apply to the "
+                "old single-threshold recipes. Edit the tree in Studio and "
+                "run the batch again.".format(run_id))
+        return _rescore_with_decide(store, run, run_id, rdict, t0,
+                                    save_as=save_as, notes=notes)
+
     spec = dict(rdict.get("score") or {})
     if expr is not None:
         spec["expr"] = str(expr)

@@ -362,6 +362,29 @@ class BatchContext:
     outputs: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     errors: Dict[str, str] = field(default_factory=dict)
+    #: 影像段的快取與「這是哪一份資料」（F29 C4）—— 出圖那幾張卡要重跑一次
+    #: pipeline 才拿得到像素，而那一趟的影像段跟剛才那一批逐位元組相同。
+    #: ``None`` = 沒有快取可用（照 `run_defect` 全程重算，結果一模一樣）。
+    #: 走 :meth:`rerun` 而不是自己叫 —— 那一格 `None` 檢查漏在任何一張卡上，
+    #: 症狀都是「報表慢了十倍」而不是一個錯誤。
+    cache: Any = None
+    dataset_token: str = ""
+
+    def rerun(self, item: Any, sources: Optional[Dict[str, Any]] = None):
+        """重跑**一顆**，拿回它的 Context（出圖那幾張卡走這一支）。
+
+        有快取就走 `engine.run_defect_cached`（影像段命中，只跑算法段），
+        沒有就 `engine.run_defect` —— **兩條路的 features / score / bin
+        位元級一致**（那是 `run_defect_cached` 的合約）。
+        """
+        from .engine import run_defect, run_defect_cached
+
+        if self.cache is not None:
+            return run_defect_cached(self.recipe, item, self.kind, self.cache,
+                                     self.dataset_token, keep_context=True,
+                                     sources=sources)
+        return run_defect(self.recipe, item, self.kind, keep_context=True,
+                          sources=sources)
 
     def add_output(self, path: Any) -> None:
         """記下一個寫出去的檔案（同一個路徑只記一次）。"""

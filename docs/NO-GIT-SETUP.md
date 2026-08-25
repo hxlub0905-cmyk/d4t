@@ -99,7 +99,7 @@ GitHub 的網址一起印出來，貼到瀏覽器就能開。所以更新一次�
 
 ### 0c. 只想跑格式探測：三支單檔腳本
 
-要驗證 `CLAUDE.md` §8 那三個廠內假設，**不需要整個專案**。
+要驗證 [`FAB-VALIDATION.md`](FAB-VALIDATION.md) 那三個廠內假設，**不需要整個專案**。
 `fab_probe/probe_klarf.py` / `probe_tiff.py` / `probe_stats.py` 各 24–46 KB、
 stdlib-only、單檔，複製過去直接跑。輸出是純文字且預設遮蔽 Lot／Wafer／Device，
 所以結果可以貼回開發端。

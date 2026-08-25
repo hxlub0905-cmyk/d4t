@@ -88,7 +88,7 @@ def _loaded(window, synlot):
 def test_window_constructs_with_library_cards(window):
     assert window.windowTitle().startswith("d4t Studio")
     # 卡片庫用的是真實 registry，不是手捏假資料
-    assert window.library.entry("snr_map") is not None
+    assert window.library.entry("glv_stats") is not None
     assert window.library.entry("load_patch") is not None
     # 同 tests/test_ui_widgets.py：順序的出處是 LibraryPanel.GROUPS，不要再抄一份。
     from d4t.ui.widgets import LibraryPanel
@@ -142,7 +142,11 @@ def test_load_dataset_and_recipe(window, synlot):
     summary = window.pipeline.score_summary_text()
     assert "decision tree" in summary and "question" in summary
     # 節點摘要 = 非預設參數的 k=v（最多 3 個）—— F7-6 起節點是自繪圖元
-    assert "window=15" in window.pipeline.card("snr").info["summary"]
+    # 摘要 = **非預設**參數的 k=v。以前這裡指著 `snr` 的 `window=15`；
+    # 那張卡（Z-map）2026-08-25 刪掉了，而影像段剩下的幾張在這份 fixture 裡
+    # 全部吃預設值 —— 摘要因此是空的（那是對的，不是壞的）。改指真的有
+    # 非預設參數的那一張。
+    assert "target=bright" in window.pipeline.card("cd").info["summary"]
 
 
 # --------------------------------------------------------------------------- #
@@ -151,23 +155,25 @@ def test_load_dataset_and_recipe(window, synlot):
 def test_select_node_and_preview(window, synlot):
     _loaded(window, synlot)
 
-    assert window.select_node("snr") is True
-    assert window.selected_node == "snr"
-    assert window.pipeline.selected() == "snr"
+    assert window.select_node("dn") is True
+    assert window.selected_node == "dn"
+    assert window.pipeline.selected() == "dn"
     assert window.stack.currentWidget() is window.param_form
-    assert window.param_form.step_key() == "snr_map"
+    assert window.param_form.step_key() == "denoise"
 
     assert window.refresh_preview(sync=True) is True
     assert window.image_view.has_image() is True
 
     streams = [window.stream_combo.itemText(i)
                for i in range(window.stream_combo.count())]
-    assert "snr_map" in streams and "test" in streams
-    # 選了 snr 節點 → 預設看它寫出來的那條流
-    assert window.stream_combo.currentText() == "snr_map"
+    assert "diff" in streams and "test" in streams
+    # 選了 dn 節點 → 預設看它寫出來的那條流
+    assert window.stream_combo.currentText() == "diff"
 
     assert window.feature_table.rowCount() > 0
-    assert "snr_max" in window.feature_table.feature_names()
+    # 特徵表看的是**跑到這一個節點為止**算出來的東西 —— `dn` 是影像段的卡，
+    # 所以這裡該有的是它自己那一個，不是後面量測卡的 `glv_*`。
+    assert "removed_over_noise" in window.feature_table.feature_names()
 
     # 換一條影像流，畫面要跟著換（不用重跑 pipeline）
     window.stream_combo.setCurrentText("test")
@@ -222,20 +228,20 @@ def test_compare_shows_two_streams_with_linked_zoom_and_pan(window, synlot):
 # --------------------------------------------------------------------------- #
 def test_param_edit_valid_then_invalid(window, synlot):
     _loaded(window, synlot)
-    assert window.select_node("snr") is True
+    assert window.select_node("dn") is True
 
-    window._on_param_edited("window", 21)
-    assert window.model.nodes["snr"].params["window"] == 21
-    assert window.param_form.has_error("window") is False
+    window._on_param_edited("ksize", 5)
+    assert window.model.nodes["dn"].params["ksize"] == 5
+    assert window.param_form.has_error("ksize") is False
 
-    window._on_param_edited("window", 15)
-    assert window.model.nodes["snr"].params["window"] == 15
+    window._on_param_edited("ksize", 3)
+    assert window.model.nodes["dn"].params["ksize"] == 3
 
-    # 999 超過 ParamSpec 上限 201 → 不可以丟例外，該列要變紅字，值不落地
-    window._on_param_edited("window", 999)
-    assert window.model.nodes["snr"].params["window"] == 15
-    assert window.param_form.has_error("window") is True
-    assert "maximum" in window.param_form.hint_text("window")
+    # 999 超過 ParamSpec 上限 15 → 不可以丟例外，該列要變紅字，值不落地
+    window._on_param_edited("ksize", 999)
+    assert window.model.nodes["dn"].params["ksize"] == 3
+    assert window.param_form.has_error("ksize") is True
+    assert "maximum" in window.param_form.hint_text("ksize")
 
     # 再改一個合法值 → 錯誤狀態清掉
     window._on_param_edited("window", 15)
@@ -285,7 +291,16 @@ def test_run_trial_fills_histogram(window, synlot):
     assert len(window.trial_scores) == 8
     assert window.histogram.has_data() is True
     assert sum(window.histogram._counts) == 8
-    assert window.histogram.bin_summary_text().startswith("bin ")
+    # ⚠ **「bin 0=5   bin 1=3」那一行只在二元那條路上**（R1，2026-08-24）。
+    # 這份 recipe 一打開就是一棵樹（F25），而樹判出來的顆數在判定段上有更好
+    # 的位置（每一類一列、寬度就是顆數）—— 在這裡再寫一次的話，那個「再一次」
+    # 是用門檻**重算**的，跟樹判出來的對不起來。實測過的下場：每一張縮圖說
+    # `bin 3`，而 150px 底下的圖例說 `bin 1=24`。
+    assert window.model.decide is not None
+    assert window.histogram.bin_summary_text() == ""
+    assert [r["count"] for r in window.results.verdict.rows()], \
+        "顆數要在判定段上"
+    assert sum(r["count"] for r in window.results.verdict.rows()) == 8
     assert "Run finished" in window.status_text()
 
 
@@ -339,8 +354,8 @@ def test_the_model_converts_to_a_runnable_recipe(window, synlot):
     assert again == rec
     assert again.score.threshold == pytest.approx(window.model.threshold)
     assert sorted(again.nodes) == sorted(window.model.nodes)
-    assert again.nodes["snr"].params["window"] == \
-        window.model.nodes["snr"].params["window"]
+    assert again.nodes["dn"].params["ksize"] == \
+        window.model.nodes["dn"].params["ksize"]
 
 
 # --------------------------------------------------------------------------- #
@@ -361,12 +376,12 @@ def test_actions_are_disabled_until_their_preconditions_hold(qapp, synlot):
         assert win.btn_trial_more.isEnabled() is False
         assert win.act_run_all.isEnabled() is False
         assert win.spin_trial_n.isEnabled() is False
-        assert win.btn_run_all.isEnabled() is False
         # 兩件事都還沒做（沒有資料、畫布也是空的，F11 Enhance-4）——
         # tooltip 要把**兩件**都講出來，不是只講其中一件。
         assert "Load a KLARF and add at least one card" in win.btn_trial.toolTip()
-        for w in (win.btn_trial, win.btn_run_all):
+        for w in (win.btn_trial, win.btn_trial_more):
             assert w.toolTip().strip(), "變灰的按鈕一定要說明原因"
+        assert win.act_run_all.toolTip().strip(), "變灰的選單項也要說明原因"
 
         # 加一張卡進去 → 理由要換一句（缺的只剩資料）
         win.library.add_requested.emit("load_patch")
@@ -381,7 +396,7 @@ def test_actions_are_disabled_until_their_preconditions_hold(qapp, synlot):
         assert win.btn_trial.isEnabled() is False
         assert "pipeline is empty" in win.btn_trial.toolTip()
 
-        # 資料集 + 流程 → 兩顆都能按。「Run all & write」跟 Run trial 是**同一個
+        # 資料集 + 流程 → 都能按。「Run all & write」跟 Run trial 是**同一個
         # 前提** —— 它自己就是那一次跑，不必先有結果（F16 Stage 5c：以前這一格
         # 是輸出精靈，那時候「先跑一次才會亮」是對的）。
         assert win.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
@@ -389,11 +404,10 @@ def test_actions_are_disabled_until_their_preconditions_hold(qapp, synlot):
         assert win.btn_trial_more.isEnabled() is True
         assert win.act_run_all.isEnabled() is True
         assert win.spin_trial_n.isEnabled() is True
-        assert win.btn_run_all.isEnabled() is True
-        assert win.btn_run_all.toolTip().strip()
+        assert win.act_run_all.toolTip().strip()
 
         assert win.run_trial(8, workers=1, sync=True) is True
-        assert win.btn_run_all.isEnabled() is True
+        assert win.act_run_all.isEnabled() is True
     finally:
         win.close()
 
@@ -415,8 +429,13 @@ def test_run_all_lives_in_the_trial_button_menu(window):
     F7-23 第二輪把那顆 ``MenuButtonPopup`` 拆成兩顆真的按鈕（主體 + ▾）——
     **選單的擁有者換了，但這條測試問的事沒有換**：跑整批仍然只在下拉裡。
     箭頭改成一顆自己的按鈕的理由（QSS 修不了那半邊的外觀）見計畫書 §27.5。
+
+    2026-08-24 這條規矩被恢復成唯一的答案：工具列上那顆重複的
+    「Run all & write」拿掉了（同一支 `run_all()`），而選單這一項改成
+    **跟 Results 視窗上那顆逐字相同**的名字 —— 同一個動作在兩個地方叫兩個
+    名字，正是它一開始變成兩顆鈕的那一步。
     """
-    assert [a.text() for a in window.trial_menu.actions()] == ["Run all defects"]
+    assert [a.text() for a in window.trial_menu.actions()] == ["Run all && write"]
     # F7-23 第四輪把 ``▶`` 與 ``▾`` 換成自繪圖示（那兩個字元在廠內的 Windows
     # 上不保證有字型），所以問的是圖示的名字，不是那顆字。
     assert window.btn_trial.text() == "Run trial"

@@ -30,7 +30,8 @@
    → :class:`ThumbWorker`（背景執行緒讀檔 + :func:`~d4t.ui.gallery.make_thumb`）
    → ``ready(dict)`` → ``set_thumbs``。**解碼絕不在 GUI 執行緒**，而且忙碌時
    新的請求會合併進待跑集合（``request`` 只累積、不排隊、不阻塞）。
-5. **輸出流**（M5 → F16 Stage 5c 改寫）：工具列「Run all & write」→
+5. **輸出流**（M5 → F16 Stage 5c 改寫）：`Run trial ▾` 選單裡的
+   「Run all & write」（以及 Results 視窗上同名的那顆）→
    :meth:`StudioWindow.run_all` → 跑完整批之後把 **Output 段的卡**跑一次
    （:class:`~d4t.ui.workers.OutputWorker`）。**Output 卡是真相**（使用者
    2026-08-20 定調），輸出精靈已經拿掉 —— 寫去哪、寫什麼，全部在畫布上的
@@ -119,14 +120,14 @@ from .inspectors import inspector_for
 from .gallery import make_thumb
 from .region_check import MAX_CHECK, RegionCheckWindow, regions_of_node
 from .template_dialog import TemplateDialog
-from .results import ResultsWindow, summarize_run
+from .results import ResultsWindow, extra_only, summarize_run
 from . import scope
 from .scope import (
     is_supported_kind, no_klarf_message, recipe_is_supported,
     unsupported_kind_message, visible_steps,
 )
 from .decide_panel import DecidePanel
-from .viewmodel import RecipeModel, accuracy_at, histogram, rebin
+from .viewmodel import RecipeModel, is_a_constant_expression, accuracy_at, histogram, rebin
 from . import theme
 from .theme import DEFAULT_THEME, THEMES, apply_theme, current_theme
 from .welcome import (
@@ -584,7 +585,10 @@ class StudioWindow(QMainWindow):
           用的人是行話。現在只留一個入口，範本庫自己把 die-to-die 排第一。
         * **「全跑」收進「Run trial」的下拉** —— 兩顆長得一樣的 ▶ 鈕擺在一起，
           新手分不出差別也不知道該按哪顆。主要動作只留一顆，破壞性比較大的
-          「跑整批」降級成選單項目。
+          「跑整批」降級成選單項目。⚠ 這一條後來被 F16 Stage 5c 悄悄破壞了
+          （「Export…」空出來的那一格改成整批入口，於是同一支 `run_all()`
+          在工具列上有兩顆鈕）—— 2026-08-24 使用者指出來之後拿掉那一顆，
+          這條規矩恢復成唯一的答案。
 
         分組（F7-22）
         -------------
@@ -632,20 +636,16 @@ class StudioWindow(QMainWindow):
         # **建出來再藏**，不是不建：版面量測、``_update_action_states``、既有測試
         # 都還指得到它，回復只要改 ``scope.SHOW_SAMPLE_ENTRIES``。
         self.btn_examples.setVisible(bool(scope.SHOW_SAMPLE_ENTRIES))
-        self.btn_run_all = self._tool_button(
-            "Run all & write",
-            "Run every defect, then write whatever the Output cards say",
-            self.run_all, icon="export")
-        # 這是這條流程的**終點**，也是「跑完之後要做的那件事」—— 它跟旁邊
-        # 那幾顆檔案操作不同級。所以給它 accent 的外框（不是填滿，填滿的是
-        # Run trial）。這不是裝飾：工具列上唯一有顏色的兩顆，正好是使用者
-        # 真正要按的那兩顆。
+        # ⚠ **這裡以前還有一顆「Run all & write」**，而它跟 `Run trial ▾` 選單
+        # 裡的「跑整批」是**同一支函式**（兩邊都是 `run_all()`，一個位元的
+        # 差別都沒有）。兩個決定各自都對，只是沒有互相看到：M7 把「全跑」收進
+        # 下拉（見這支的說明），而 F16 Stage 5c 把「Export…」空出來的那一格
+        # 改成整批入口。合起來就是同一個動作在工具列上有兩顆鈕。
         #
-        # 以前這一格是「Export…」，開一個跑完才打得開的輸出精靈。精靈拿掉之後
-        # （F16 Stage 5c）這一格改成整批入口 —— **同一個位子、同一件事**：
-        # 「把結果寫出去」。差別是寫什麼、寫去哪現在看得見（畫布上的 Output
-        # 卡），而不是藏在對話框裡。
-        self.btn_run_all.setProperty("variant", "secondary")
+        # 使用者 2026-08-24：「若沒差或差不多 請留一個即可（傾向 trial）」。
+        # 留下的是下拉裡那一項 —— 而**「跑完之後要做的那件事」搬到它真的會
+        # 發生的地方**：Results 視窗（使用者正在看試跑結果，下一步才是整批）。
+        # 工具列因此只剩一顆有顏色的鈕，而那正是這個畫面唯一的主要動作。
         self.btn_undo = self._tool_button(
             "", "Undo the last change", self.undo, icon="undo")
         self.btn_redo = self._tool_button(
@@ -667,12 +667,32 @@ class StudioWindow(QMainWindow):
         self.btn_theme.setProperty("variant", "ghost")
 
         # 一段 = 一種事情；段與段之間一條分隔線。
+        #
+        # ⚠ **整段都看不見的時候不要放那條分隔線。** 「Templates…」平常是藏著的
+        # （`scope.SHOW_SAMPLE_ENTRIES`），而它那一段以前還有「Run all & write」
+        # 撐著；那顆鈕 2026-08-24 拿掉之後，那一段變成空的 —— 工具列上因此出現
+        # 兩條連在一起的分隔線，中間夾著什麼都沒有。分隔線講的是「這裡換一種
+        # 事情」，而一條隔開空氣的線只是雜訊。
         for group in ((self.btn_open_recipe,),
-                      (self.btn_examples, self.btn_run_all),
+                      (self.btn_examples,),
                       (self.btn_undo, self.btn_redo)):
+            # ⚠ **鈕還是要 addWidget**（藏著的也要）：建了卻沒加進工具列的
+            # widget 會以工具列為 parent 疊在左上角
+            # （`test_every_button_built_for_the_toolbar_is_actually_on_it`
+            # 在第一版就抓到了）。跳過的只有那條**分隔線**。
+            #
+            # ⚠ 而「這一段看不看得見」**要在 addWidget 之前問**，用的也不是
+            # `isHidden()`：`addWidget` 會把 widget 包進一個 QWidgetAction，
+            # 而 Qt 在工具列真的顯示出來以前把它們**全部**藏著 —— 那時候
+            # 每一顆都答 hidden，於是一條分隔線都不會加。要問的是「**我們**
+            # 有沒有明講要藏它」（`setVisible(False)` 留下的那兩個屬性）。
+            visible = [b for b in group
+                       if not (b.testAttribute(Qt.WA_WState_ExplicitShowHide)
+                               and b.testAttribute(Qt.WA_WState_Hidden))]
             for b in group:
                 bar.addWidget(b)
-            bar.addSeparator()
+            if visible:
+                bar.addSeparator()
 
         # 分流的 route 切換器（F23 期2）：`RecipeModel` 一次編一條 route
         # （§6 第一期不動的那條），切換是「換一條來編」—— 畫布跟著換。
@@ -718,8 +738,16 @@ class StudioWindow(QMainWindow):
             self._on_trial_clicked, primary=True, icon="play")
         # 「跑整批」是同一顆鈕的次要動作：點主體 = 試跑，點箭頭才看得到它。
         menu = QMenu(self.btn_trial)
-        self.act_run_all = QAction("Run all defects", menu)
-        self.act_run_all.setToolTip("Run the whole dataset, not just the first N")
+        # ⚠ ``&&`` 不是筆誤：Qt 把單一個 ``&`` 當成助憶鍵的記號吃掉，畫出來
+        # 是 **``Run all _write``**（使用者就是這樣叫它的）。要顯示一個真的
+        # ``&`` 就得寫兩個。
+        #
+        # 名字跟 Results 視窗那顆**逐字相同** —— 同一個動作在兩個地方叫兩個
+        # 名字，正是上面那兩顆鈕變成兩顆的第一步。
+        self.act_run_all = QAction("Run all && write", menu)
+        self.act_run_all.setToolTip(
+            "Run every defect, not just the first N - then write whatever "
+            "the Output cards say")
         self.act_run_all.triggered.connect(self._on_full_clicked)
         menu.addAction(self.act_run_all)
         self.trial_menu = menu
@@ -1010,6 +1038,7 @@ class StudioWindow(QMainWindow):
         self.histogram = self.results.histogram
         self.gallery = self.results.gallery
         self.results.run_all_requested.connect(self.run_all)
+        self.results.class_selected.connect(self._on_verdict_class)
 
         root = QSplitter(Qt.Horizontal, self)
         root.addWidget(self.library)
@@ -1327,6 +1356,7 @@ class StudioWindow(QMainWindow):
         view.decision_clicked.connect(self.show_score_page)
         # 分流徽章（F25-B）：點了去編 route_by（它就在判定欄的最上面）。
         view.prefilter_clicked.connect(self.show_score_page)
+        view.decision_remove_requested.connect(self.remove_decision)
         # 判定樹的菱形／托盤（F24 ③）：右欄變成那一步／那一類的編輯面板。
         view.tree_step_clicked.connect(self._on_tree_step_clicked)
         view.tree_leaf_clicked.connect(self._on_tree_step_clicked)
@@ -1372,6 +1402,8 @@ class StudioWindow(QMainWindow):
 
         self.gallery.thumbs_requested.connect(self._on_thumbs_requested)
         self.gallery.defect_activated.connect(self._on_defect_activated)
+        # 表格上雙擊一列跟縮圖上雙擊一張是同一件事（R7）—— 同一支處理常式。
+        self.results.table.defect_activated.connect(self._on_defect_activated)
         self.gallery.selection_changed.connect(self._on_gallery_selection)
 
     def _wire_workers(self) -> None:
@@ -1448,8 +1480,7 @@ class StudioWindow(QMainWindow):
         # 分流（F23 期2）：route 清單與編輯區塊跟著 model 走。
         self._refresh_route_switcher()
         self.route_box.refresh()
-        self.histogram.set_threshold(self.model.threshold)
-        self._refresh_bin_summary(self.model.threshold)
+        self._sync_threshold_line()
         self._update_action_states()
         self._refresh_library_badges()
         self._refresh_region_button()
@@ -1459,8 +1490,7 @@ class StudioWindow(QMainWindow):
         self._refresh_pipeline()
         self._sync_score_widgets()
         self._refresh_feature_combo()
-        self.histogram.set_threshold(self.model.threshold)
-        self._refresh_bin_summary(self.model.threshold)
+        self._sync_threshold_line()
         self._update_action_states()
         self._refresh_library_badges()
 
@@ -1532,7 +1562,8 @@ class StudioWindow(QMainWindow):
                       run_why or "More ways to run — including the whole dataset")
         self.act_run_all.setEnabled(can_run)
         self.act_run_all.setToolTip(
-            run_why or "Run all %d defects, not just the first %d"
+            run_why or "Run all %d defects, not just the first %d - then "
+                       "write whatever the Output cards say"
                        % (n_items, int(self.spin_trial_n.value())))
         self.spin_trial_n.setEnabled(can_run)
         self.lbl_trial_n.setEnabled(can_run)
@@ -1548,13 +1579,6 @@ class StudioWindow(QMainWindow):
                       "Redo the change you just undid" if self.model.can_redo()
                       else "Nothing to redo.")
 
-        # 「Run all & write」跟 Run trial 是**同一個前提**（有資料、流程跑得動）
-        # —— 它不需要先有結果。以前這一格是輸出精靈，那時候「先跑一次才會亮」
-        # 是對的；現在它自己就是那一次跑。
-        self.btn_run_all.setEnabled(can_run)
-        self._set_tip(self.btn_run_all,
-                      run_why or "Run all %d defects, then write whatever the "
-                                 "Output cards say" % n_items)
 
     def _card_summary_parts(self, node: Any, reads, writes, regions_out,
                             region_inputs) -> List[str]:
@@ -1873,8 +1897,12 @@ class StudioWindow(QMainWindow):
         self.pipeline.set_score_summary(self._score_summary_text())
 
     def _on_decide_mode(self, on: bool) -> None:
-        """切了「分成好幾類」——  bin 直方圖那條門檻線只對二元那一種有意義。"""
-        self.histogram.set_threshold(None if on else self.model.threshold)
+        """切了「分成好幾類」—— 門檻線只對二元那一種有意義。
+
+        ⚠ 這裡以前自己判一次（``None if on else …``），而 `_refresh_spread`
+        每跑一次就把它蓋回去。判斷現在只有一份（`_uses_a_threshold`）。
+        """
+        self._sync_threshold_line()
         self._sync_score_widgets()
 
     def _refresh_feature_combo(self) -> None:
@@ -1897,18 +1925,93 @@ class StudioWindow(QMainWindow):
                     names.append(str(k))
         return names
 
+    def _spread_segments(self, name: str) -> List[Any]:
+        """``[(這個數字的值, 那一顆所屬類別的顏色), …]``（算不出來的不列）。"""
+        colours: Dict[str, str] = {}
+        for row in self.results.verdict.rows():
+            if row.get("kind") != "class":
+                continue
+            for did in (row.get("ids") or ()):
+                colours[str(did)] = str(row.get("colour"))
+        out = []
+        for r in self.trial_results or []:
+            v = (r.get("features") or {}).get(str(name))
+            colour = colours.get(str(r.get("defect_id")))
+            if colour and isinstance(v, (int, float)) \
+                    and not (math.isnan(float(v)) or math.isinf(float(v))):
+                out.append((float(v), colour))
+        return out
+
+    @staticmethod
+    def _bin_segments(edges: Sequence[float], points: Sequence[Any]):
+        """把 ``(值, 顏色)`` 灑進直方圖的格子裡 → 每一格的 ``[(顏色, 顆數)]``。
+
+        ⚠ **每一格裡的顏色順序要穩定**（照第一次出現的順序），否則同一批資料
+        重畫兩次，堆疊的上下會換位子 —— 而那看起來像數字變了。
+        """
+        n = max(0, len(list(edges)) - 1)
+        if n <= 0 or not points:
+            return None
+        lo, hi = float(edges[0]), float(edges[-1])
+        width = (hi - lo) or 1.0
+        order: List[List[Any]] = [[] for _ in range(n)]
+        for value, colour in points:
+            i = min(n - 1, max(0, int((float(value) - lo) / width * n)))
+            cell = order[i]
+            for pair in cell:
+                if pair[0] == colour:
+                    pair[1] += 1
+                    break
+            else:
+                cell.append([colour, 1])
+        return [[(c, k) for c, k in cell] for cell in order]
+
+    def _default_spread_feature(self, results: Sequence[Dict[str, Any]]) -> str:
+        """第一次打開那張圖要看哪個數字（R2，2026-08-24）。
+
+        **你的第一個問題問的那個數字。** 那是這份 recipe 的判定真正建立在
+        上面的量，所以「這一批在它上面長什麼樣」正是使用者接下來要問的事 ——
+        而且它不必猜，樹上就寫著。
+
+        沒有樹（二元那條老路）就退回 `suggest_condition` 挑分得最開的那個；
+        兩個都答不出來就回空字串 = 維持「Score」。
+
+        ⚠ 以前這裡沒有東西，一律開在「Score」—— 而樹的 recipe 沒有分數表達式，
+        於是整批 24 顆全部落在 0，畫出來是**一根柱子**。這一頁最大的那張圖，
+        在最常見的情況下什麼都沒說。
+        """
+        from .tree_scene import display_tree, parse_simple_condition, suggest_condition
+
+        tree = display_tree(getattr(self.model, "decide", None))
+        root = getattr(tree, "when", None)
+        if root:
+            simple = parse_simple_condition(str(root))
+            if simple and simple[0]:
+                return str(simple[0])
+        guess = suggest_condition(list(results or []))
+        return str(guess[0]) if guess else ""
+
     def _refresh_spread(self) -> None:
         """把下面那張圖換成「現在選的那個東西」的分佈。"""
         name = self.results.shown_feature()
         if name == self.results.SCORE:
-            self.histogram.set_interactive(True)
+            # ⚠ **門檻線只在真的有一條門檻在決定事情的時候才畫**（R1，2026-08-24）。
+            #
+            # 這裡以前無條件 `set_threshold(self.model.threshold)` ＋
+            # `rebin(scores, threshold, bins)` —— 而 `_on_decide_mode(True)` 早就
+            # 把那條線關掉了。它**只在模式切換時觸發一次**，這一支每跑一次都
+            # 蓋回去，所以蓋掉的那一份才是使用者看到的。
+            #
+            # 後果是畫面上兩個互相矛盾的答案：每一張卡說 `bin 3`（樹真的判出來
+            # 的），而 150px 底下的圖例說 `bin 1=24`，還附一行用那條門檻算的
+            # `accuracy 50% missed 0 false alarms 12`。F25 之後**每一份 recipe
+            # 一打開就是一棵樹**，所以那是所有人都會看到的畫面。
             self.histogram.set_marker(None)
             self.histogram.set_empty_text(
                 "(Score distribution appears after a trial run)")
             edges, counts = histogram(self.trial_scores)
             self.histogram.set_data(edges, counts)
-            self.histogram.set_threshold(self.model.threshold)
-            self._refresh_bin_summary(self.model.threshold)
+            self._sync_threshold_line()
             self.results.set_spread_hint("")
             return
 
@@ -1916,6 +2019,13 @@ class StudioWindow(QMainWindow):
                 for v in [(r.get("features") or {}).get(name)]
                 if isinstance(v, (int, float))
                 and not (math.isnan(float(v)) or math.isinf(float(v)))]
+        # **這一段裡是哪一類**（R2 第二半）：一根單色的長條答不出這個，
+        # 而「分得開誰」才是看這張圖的人真正在問的事。
+        #
+        # ⚠ **只有「看某個特徵」時才染。** 看「Score」是二元那條路，而那條路
+        # 上的類別就是門檻切出來的兩邊 —— 門檻線本身已經畫在那裡了，再上一次
+        # 色是同一件事講兩次。
+        segments = self._spread_segments(name)
         # 門檻是**分數**的門檻 —— 在別的特徵上它沒有意義，所以整張圖唯讀
         # （見 `HistogramWidget.set_interactive`）。
         self.histogram.set_interactive(False)
@@ -1924,6 +2034,7 @@ class StudioWindow(QMainWindow):
         self.histogram.set_empty_text("(no values for %s in this run)" % name)
         edges, counts = histogram(vals)
         self.histogram.set_data(edges, counts)
+        self.histogram.set_segments(self._bin_segments(edges, segments))
         # `_last_result` 是 `DefectResult`（dataclass），不是 dict —— 這一格
         # 曾經寫成 `.get("features")`，而它在**選了特徵之後**才會走到，
         # 所以那個錯不會在「按 Run」的路徑上出現。
@@ -1985,6 +2096,62 @@ class StudioWindow(QMainWindow):
             from d4t.core.export import summarize
             purity = summarize(rows, ground_truth=self.ground_truth).get("bin_purity")
         self.decide_panel.set_counts(counts, purity=purity)
+
+    def _refresh_verdict(self) -> None:
+        """判定段（R3）：**這一批判成了什麼**。
+
+        跟畫布的分支流量吃同一份 `tree_scene` —— 不自己數第二份。
+        """
+        self.results.set_verdict(getattr(self.model, "decide", None),
+                                 list(self.trial_results or []),
+                                 self.ground_truth)
+
+    def _on_verdict_class(self, key: str) -> None:
+        """點了判定段的某一類 → Gallery 只留那一類（``""`` = 看全部）。
+
+        ⚠ 篩的是 **defect_id**，不是 bin：一個 bin 可能有好幾片葉子，照 bin
+        篩會把另一片葉子的顆一起撈進來 —— 而那兩片葉子是使用者刻意分開命名的。
+        """
+        want = str(key or "")
+        if not want:
+            self.gallery.set_filter(None)
+            return
+        row = next((r for r in self.results.verdict.rows()
+                    if str(r.get("key")) == want), None)
+        if row is None:
+            self.gallery.set_filter(None)
+            return
+        name = str(row.get("name") or "").strip() or "these"
+        self.gallery.set_filter({"mode": "ids", "ids": list(row.get("ids") or ()),
+                                 "label": "%s only" % name})
+
+    def _uses_a_threshold(self) -> bool:
+        """**這份 recipe 真的有一條門檻在決定事情嗎。**
+
+        R1（2026-08-24）修的那個 bug 的形狀是：這個判斷散在四個地方，而其中
+        三個沒有做 —— 於是「關掉門檻線」與「無條件把門檻線設回去」在同一次
+        重新整理裡互相蓋，最後贏的是錯的那一個。畫面上的下場是每一張縮圖說
+        `bin 3`、150px 底下的圖例說 `bin 1=24`，還附一行用那條門檻算出來的
+        準確率。同一批 24 顆，兩個答案。
+
+        所以判斷收成這一支，四個呼叫端都問它。F25 之後幾乎永遠是 False
+        （每一份 recipe 一打開就是一棵樹），但二元那條老路仍然走得到。
+        """
+        return getattr(self.model, "decide", None) is None
+
+    def _sync_threshold_line(self) -> None:
+        """門檻線與它底下那行字 —— **有門檻才畫**（見 `_uses_a_threshold`）。"""
+        if self._uses_a_threshold():
+            self.histogram.set_interactive(True)
+            self.histogram.set_threshold(self.model.threshold)
+            self._refresh_bin_summary(self.model.threshold)
+            return
+        self.histogram.set_interactive(False)
+        self.histogram.set_threshold(None)
+        # 樹判出來的顆數是**真的那一份**，不是重算的，而它在判定段上已經有
+        # 更好的位置了（每一類一列、寬度就是顆數）—— 不在這裡再講一次。
+        self._refresh_decide_counts()
+        self.histogram.set_bin_summary(None)
 
     def _refresh_bin_summary(self, threshold: float) -> None:
         self._refresh_decide_counts()
@@ -2095,7 +2262,7 @@ class StudioWindow(QMainWindow):
     def _autofill_new_card(self, node_id: Optional[str]) -> None:
         """剛加進來的卡，把**這個畫面上已經知道的答案**先填好。
 
-        現在只有一張卡走這條路：``roi_from_mask`` —— **已經掛上來的那份 GLAS
+        現在只有一張卡走這條路：``roi_reference`` —— **已經掛上來的那份 GLAS
         匯出**的層對照表。那個答案已經在畫面上了，讓使用者用手抄一次是在製造
         一個可以抄錯的機會，而它是一張**對照表**（層號 → 名字），不是接線。
 
@@ -2115,7 +2282,7 @@ class StudioWindow(QMainWindow):
         node = self.model.nodes.get(str(node_id or ""))
         if node is None:
             return
-        if node.step == "roi_from_mask":
+        if node.step == "roi_reference":
             self._autofill_gds_layers(node)
 
     def _autofill_gds_layers(self, node: Any) -> None:
@@ -2137,10 +2304,18 @@ class StudioWindow(QMainWindow):
            名字很爛，但它讓接線這件事**當場看得到結果**，而名字使用者本來就會改。
 
         只在**空的**時候填 —— 使用者打過的字不覆蓋（重新掛一次匯出也不覆蓋）。
+
+        ⚠ **``method`` 也一起填**（F29）。這張卡收成兩支之後預設是
+        ``repeating cells``（不需要任何外部資料，所以它是對的預設）——
+        但畫面上已經掛著一份 GLAS 匯出的人，加這張卡要的一定是另一支，
+        而那一支的層對照表就在旁邊。同一句話：**把畫面上已經知道的答案先填好**。
+        不是自動接線（鐵則 10 擋的是那件事）—— 這裡改的是一個下拉，
+        而使用者一眼看得到它，改回去是一個動作。
         """
         if str(node.params.get("layers", "") or "").strip():
             return              # 使用者打過的字不覆蓋
         from d4t.core.ingest import glas_export
+        from d4t.core.steps.roi_reference import METHOD_GDS
 
         default = glas_export.layer_map_default(self._gds_layers)
         count = len(self._gds_layers)
@@ -2149,6 +2324,7 @@ class StudioWindow(QMainWindow):
             default = glas_export.fallback_layer_names(ids)
             count = len(ids)
         if default:
+            self.model.set_param(node.id, "method", METHOD_GDS)
             self.model.set_param(node.id, "layers", default)
             self.param_form.set_label_count(count)
 
@@ -2162,7 +2338,7 @@ class StudioWindow(QMainWindow):
         ctx = getattr(getattr(self, "_last_result", None), "context", None)
         if ctx is None:
             return []
-        stream = str(node.params.get("source", "") or "")
+        stream = str(node.params.get("label_source", "") or "")
         rec = (getattr(ctx, "meta", None) or {}).get("layout_label") or {}
         entry = rec.get(stream) or {}
         return [int(i) for i in (entry.get("ids") or ()) if int(i) > 0]
@@ -2364,9 +2540,22 @@ class StudioWindow(QMainWindow):
                   and not (e.src == str(src) and e.src_out == str(stream))
                   and (spec.type == "image_key" or e.src_out == str(stream))]
         for e in losers:
-            # 帶著流名剪 —— 兩張卡之間可以有好幾條並排的線（F9-9），
-            # 不指名的話會把隔壁那條一起剪掉。
-            self.model.remove_edge(e.src, e.dst, src_out=e.src_out or None)
+            # **兩個埠都要指名**（B1，2026-08-24）。兩張卡之間可以有好幾條並排
+            # 的線（F9-9），而它們可能落在**不同的輸入格**上 —— 只帶 `src_out`
+            # 的話 `remove_edge` 的語意是「符合這個 src_out 的**全部**」，
+            # 於是剪一條會剪掉一整排。
+            #
+            # 實測：`load.test → subtract.a` 與 `load.test → subtract.b` 兩條
+            # 並存時，把別的卡接到 `b` 會**連 `a` 那條一起剪掉** —— 沒有人碰過
+            # `a`，而 `a` 的參數還留著 `test`：畫布上沒有線、卡片卻還指著那條
+            # 流，於是引擎退回「執行順序上最後一個寫它的人」用猜的。線性時猜得
+            # 中、分岔時猜錯，而且跑得完、有數字（F9／F10 整整兩輪在防的形狀）。
+            #
+            # ⚠ **不可以寫 `e.src_out or None`。** 空字串在 `remove_edge` 裡
+            # 本來就是「精確比對空埠」，`or None` 會把它變成「全部」——
+            # 那正是上面那個洞的第二階。
+            self.model.remove_edge(e.src, e.dst, src_out=e.src_out,
+                                   dst_in=e.dst_in)
         if not losers:
             return ""
         return (" (replacing the line from %s)"
@@ -2395,10 +2584,16 @@ class StudioWindow(QMainWindow):
         得到一句「already connected」然後什麼都沒發生 —— 看起來就像畫布不准
         你碰 ref。
 
-        **拉一條線 = 一步復原**（F9-7）。在 model 上它其實是三、四個動作
-        （add_edge → set_param → set_edge_ports →（有時）拿掉搶同一個輸入的
-        舊線），各記一步的話按一次 Ctrl+Z 會停在「線還在但埠沒了」這種中間
+        **拉一條線 = 一步復原**（F9-7）。在 model 上它其實是三個動作
+        （add_edge → set_param →（有時）拿掉搶同一個輸入的舊線），各記一步
+        的話按一次 Ctrl+Z 會停在「線接上了但那張卡還沒改成處理它」這種中間
         狀態 —— 使用者從來沒有做出過那個畫面。
+
+        ⚠ 這一段以前寫著 ``add_edge → set_param → set_edge_ports → …``，
+        而 `set_edge_ports` 從 F9-9 起就沒有人叫了（那一輪改成「加線的時候
+        就把埠一起帶進去」，因為補埠只找得到一對節點之間的第一條線，
+        兩條並排的線會補錯）。留著一個描述不存在流程的說明比沒有說明更糟 ——
+        它就寫在那段程式碼的正上方。
         """
         src, dst, stream = str(src), str(dst), str(stream or "")
         with self.model.compound("connect"):
@@ -2604,10 +2799,22 @@ class StudioWindow(QMainWindow):
         with self.model.compound("disconnect"):
             one = stream and self.model.remove_edge(
                 src, dst, src_out=stream, dst_in=dst_in or None)
+            # **知道是哪一格就用它**（B5，2026-08-24）。上面那一段已經從線本身
+            # 問出了 ``dst_in``，但沒有流名時 ``stream and …`` 整條短路掉，於是
+            # 直接跳到最後那個「拿掉整對」—— 兩張卡之間有兩條並排的線時
+            # （F9-9 起是正常的接法），使用者按一把剪刀會斷兩條。
+            if not one and dst_in:
+                one = self.model.remove_edge(src, dst, dst_in=dst_in)
+                if one:
+                    note = self._unpoint_stream(dst, stream, dst_in)
+                    self._status("Disconnected %s → %s%s" % (src, dst, note))
+                    return
             if one:
                 note = self._unpoint_stream(dst, stream, dst_in)
                 self._status("Disconnected %s → %s on %s%s"
                              % (src, dst, stream, note))
+            # 兩個埠都問不出來（舊格式的線沒有埠）→ 拿掉整對。那是刻意的：
+            # 瞄不到特定那一條的時候，「全部拿掉」至少是可預期的。
             elif self.model.remove_edge(src, dst):
                 note = self._unpoint_stream(dst, stream, dst_in)
                 self._status("Disconnected %s → %s%s" % (src, dst, note))
@@ -3027,6 +3234,36 @@ class StudioWindow(QMainWindow):
                   self.feature_table, self.library, self.pipeline, self.gallery):
             w.update()
 
+    def remove_decision(self) -> bool:
+        """把整個判定拿掉（畫布上判定區右上角那顆 ✕，2026-08-25）。
+
+        使用者：「ADC 也要能在原畫布上拖曳 移除」。
+
+        **先問過**：底下掛著使用者自己畫的整棵樹，而一顆 ✕ 的重量看起來跟
+        刪一張卡一樣 —— `_remove_step` 對「yes 邊掛著一整個子樹」講過同一句話。
+        復原回得來（`use_decide` 自己會 `_push_undo`），但「一個 ✕ 把三層樹
+        默默吃掉」不是一顆按鈕該有的重量。
+        """
+        m = self.model
+        if getattr(m, "decide", None) is None:
+            return False
+        from .tree_scene import display_tree, layout_cells
+
+        n_class = sum(1 for c in layout_cells(display_tree(m.decide), m.decide)
+                      if c.get("kind") == "leaf")
+        answer = QMessageBox.question(
+            self, "Remove the decision?",
+            "This takes the whole decision off the canvas - %d class%s and "
+            "every question that sorts into them.\n\nUndo brings it back."
+            % (n_class, "" if n_class == 1 else "es"),
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+        if answer != QMessageBox.Yes:
+            return False
+        m.use_decide(False)
+        self.show_param_page()
+        self._status("Decision removed. Undo brings it back.")
+        return True
+
     def show_score_page(self) -> None:
         """切到分數編輯頁（順便刷新特徵下拉）。"""
         self._refresh_feature_combo()
@@ -3155,7 +3392,11 @@ class StudioWindow(QMainWindow):
         m = self.model
         if getattr(m, "decide", None) is not None:
             return False
-        if not str(getattr(m, "expr", "") or "").strip():
+        # **常數的 score 不是門檻**（U1，2026-08-24）。這裡以前只問「是不是
+        # 空的」，於是一份 `score.expr` 是 `"0"` 的檔案打開之後會被塞一棵
+        # `0 >= 0` 的樹 —— 而那句「只在真的有 score 表達式時做」的本意
+        # 正是不要發生這件事。見 `viewmodel.is_a_constant_expression`。
+        if is_a_constant_expression(getattr(m, "expr", "")):
             return False
         m.use_decide(True)
         m.ensure_tree()
@@ -3182,8 +3423,13 @@ class StudioWindow(QMainWindow):
                 # 整棵樹只有一片葉子（這份 recipe 還沒有任何判定）——
                 # 給一個真的問得出東西的起手問題，不是一格空白。
                 m.split_tree_leaf("")
-                self.tree_pane.set_rows(self.trial_results or [])
-                self.tree_pane.suggest_question("")
+            # **建議一律問一次**（U1，2026-08-24）。這裡以前縮在上面那個
+            # `if` 裡面，所以一個**已經是 TreeStep** 的根就跳過建議 ——
+            # 而全新 recipe 的根正好是那樣（佔位值 `"0"` 被翻成 `0 >= 0`）。
+            # `suggest_question` 自己會判斷該不該動：真的問題它不碰，
+            # 空的或常數的它才填。
+            self.tree_pane.set_rows(self.trial_results or [])
+            self.tree_pane.suggest_question("")
         self._on_tree_step_clicked("")
         # **看得到才算在畫布上**：判定區長在所有卡片的右邊，而畫布這時多半
         # 停在左半邊 —— 不 fit 的話使用者按了 ADC 卡，畫面上什麼都沒發生。
@@ -5024,9 +5270,23 @@ class StudioWindow(QMainWindow):
         self.trial_results = results
         self.trial_scores = [r["score"] for r in results
                              if r.get("ok") and r.get("score") is not None]
-        self.results.set_features(self._features_in_results(results))
+        # ⚠ **判定段要先算**：分布圖的分段染色讀的是它算好的「哪一類是哪幾顆」
+        # （`_spread_segments`）。順序反過來的話，圖上染的是**上一批**的類別
+        # —— 跑得完、有顏色、而且是錯的（這個 repo 最怕的形狀）。
+        self._refresh_verdict()
+        self.results.set_features(self._features_in_results(results),
+                                  default=self._default_spread_feature(results))
+        # ⚠ **畫布上的數字自己叫一次，不要靠別人的副作用。**
+        # 這一行以前是不存在的：畫布的分支流量與分流徽章跟著
+        # `_refresh_bin_summary` 一起被順手更新，而那一支是「直方圖底下那行字」
+        # 的事。R2 讓那張圖預設不再開在 Score 上之後，那條路就走不到了 ——
+        # 於是徽章上的顆數整個變成 None。**一件事要有自己的呼叫。**
+        self._refresh_decide_counts()
+        # ⚠ **不要在這裡再叫一次 `_refresh_bin_summary`**（R1，2026-08-24）：
+        # `_refresh_spread()` 已經照「這份 recipe 到底有沒有門檻在決定事情」
+        # 決定過了，而這一行無條件用二元那條老路算一次，正好把它蓋掉。
+        # 這是同一個 bug 的第二個入口 —— 第一個在 `_refresh_spread` 裡面。
         self._refresh_spread()
-        self._refresh_bin_summary(self.model.threshold)
         self._populate_gallery(results)
         self._refresh_inspector(self._last_result)   # 儀表吃的是整批（F7-17）
         self._update_action_states()
@@ -5065,7 +5325,12 @@ class StudioWindow(QMainWindow):
         self.results.set_summary(
             summarize_run(len(results), ok, elapsed, self.trial_scores))
         self.results.set_run_all_enabled(bool(results))
-        self.results.status(msg)
+        # ⚠ **狀態列只講工具列沒講的那一半**（R4，2026-08-24）。
+        # 這裡以前把整句 `msg` 原封不動再貼一次，而它的前半段
+        #（「24 defects (24 ok, 0 failed) in 0.1 s」）跟 30px 上面那一行
+        # 是同一件事。同一個事實兩個位置，遲早會有一個先過期。
+        # 剩下的那一半（lint 警告、「停掉所以沒有寫」）沒有別的地方講，留著。
+        self.results.status(extra_only(msg))
         if results:
             self.results.present()
 
@@ -5085,12 +5350,19 @@ class StudioWindow(QMainWindow):
                 if k not in feats:
                     feats.append(str(k))
         self.gallery.set_sort_keys(["score"] + sorted(feats))
+        # **每一顆判成了哪一類**（R5，2026-08-24）。縮圖底下第一行寫的是這個字
+        # —— 使用者在樹上親手取的名字，而不是 `bin 3`（那是 KLARF 的實作細節）。
+        # 名字從判定段那一份算出來（`verdict_rows`），所以整個 Results 視窗
+        # 講的是同一份東西，不是兩份各自數出來的。
+        names = self._class_names(results)
+        self.results.set_table(results, names)   # 表格那一半（R7）
         self.gallery.set_items([
             {
                 "defect_id": str(r.get("defect_id", "")),
                 "ok": bool(r.get("ok", True)),
                 "score": r.get("score"),
                 "bin": r.get("bin"),
+                "cls": names.get(str(r.get("defect_id", "")), ""),
                 "features": dict(r.get("features") or {}),
                 "thumb": None,
             }
@@ -5100,6 +5372,25 @@ class StudioWindow(QMainWindow):
         # 一個對不上新直方圖的區間（而且 chip 還掛在那裡）。
         self.gallery.clear_filter()
         self._score_filter = None
+
+    def _class_names(self, results: Sequence[Dict[str, Any]]) -> Dict[str, str]:
+        """``defect_id → 這一顆判成了哪一類的名字``（沒取名字的那一類是空的）。
+
+        ⚠ **不自己走一次樹**：判定段已經算好每一類是哪幾顆
+        （`verdict_rows` 的 ``ids``），這裡只是把它翻過來。兩邊各走一次的話，
+        縮圖上的名字跟判定段上的顆數會是兩份會漂的東西。
+        """
+        from .verdict_band import verdict_rows
+
+        out: Dict[str, str] = {}
+        for row in verdict_rows(getattr(self.model, "decide", None),
+                                list(results or []), self.ground_truth):
+            if row.get("kind") != "class":
+                continue
+            name = str(row.get("name") or "").strip()
+            for did in (row.get("ids") or ()):
+                out[str(did)] = name
+        return out
 
     def show_gallery(self) -> None:
         """把 Results 視窗叫出來（Gallery 與分數分佈都在那裡）。"""
@@ -5553,13 +5844,13 @@ class StudioWindow(QMainWindow):
             self._status(str(e))
             return str(e)
 
-        # 名字填進**每一張** roi_from_mask 卡（還沒設定過的才填 —— 使用者改過的
+        # 名字填進**每一張** roi_reference 卡（還沒設定過的才填 —— 使用者改過的
         # 名字不能被一次「重新掛載」洗掉）。
         default = glas_export.default_layer_map(doc)
         filled = 0
         if default:
             for nid, node in self.model.nodes.items():
-                if node.step == "roi_from_mask" and not str(
+                if node.step == "roi_reference" and not str(
                         node.params.get("layers", "") or "").strip():
                     self.model.set_param(nid, "layers", default)
                     filled += 1

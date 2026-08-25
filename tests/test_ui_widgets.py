@@ -106,15 +106,51 @@ def test_theme_is_neutral_and_flat(qapp):
     舊配色是暖奶油底 + 琥珀 accent + 填滿色塊，使用者的評語是「太像玩具」。
     這裡鎖住的是**中性**（大面積不帶色相）與**平面**（無陰影漸層），
     色碼本身還可以繼續微調。
+
+    ⚠ **中性這一條只對 light 盤成立，而且那是使用者定調的**（2026-08-24）。
+    dark 盤的大面積底色刻意帶一點冷色調（`#1e2127` = 30/33/39，RGB 跨距 9），
+    所以下面那個 ``<= 8`` 套上去會紅 —— 差一。實測的感知彩度（CIE L*a*b*
+    的 C*ab）：light 是 0.0–1.1、dark 是 3.8–5.1，而被否決掉的那種暖奶油底
+    大約落在 3.7–7.5。**dark 與「玩具」在這個尺上分不開**，所以這條要求
+    留給 light，不去調寬容差讓它同時涵蓋兩者（調寬之後它就再也擋不住暖奶油）。
+
+    ⚠ 而且這裡讀的是 ``PALETTES["light"]``，**不是 ``TOKENS``**。
+    ``TOKENS`` 裝著的是「現在這個行程剛好套著哪一組」—— 讀它等於讓這條測試
+    的成敗由檔案順序決定，而那正是 CI 紅了三週的原因（見 conftest 那支
+    `_the_theme_does_not_leak_into_the_next_test`）。**一條性質測試要自己
+    講清楚它測的是哪一組值。**
     """
+    light = theme_mod.PALETTES["light"]
     for key in ("bg_page", "bg_panel", "bg_surface", "toolbar", "statusbar"):
-        r, g, b = _rgb(theme_mod.TOKENS[key])
+        r, g, b = _rgb(light[key])
         assert max(r, g, b) - min(r, g, b) <= 8, \
-            "%s = %s 帶了明顯色相，大面積底色要中性" % (key, theme_mod.TOKENS[key])
+            "light 的 %s = %s 帶了明顯色相，大面積底色要中性" % (key, light[key])
 
     qss = theme_mod.build_stylesheet()
     for banned in ("box-shadow", "qlineargradient", "qradialgradient"):
         assert banned not in qss, "平面設計不用 %s" % banned
+
+
+#: 上一條測試離開時的主題 —— 下一條測試用它驗 conftest 真的把主題收回來了。
+_theme_before_the_switch = {}
+
+
+def test_a_test_may_switch_the_theme(qapp):
+    """故意把主題留在 dark 就收工 —— 下一條測試負責證明它沒有漏出去。"""
+    _theme_before_the_switch["name"] = theme_mod.current_theme()
+    theme_mod.set_theme("dark")
+    assert theme_mod.current_theme() == "dark"
+
+
+def test_and_the_next_test_does_not_inherit_it(qapp):
+    """conftest 的 autouse fixture 要把上一條測試切走的主題收回來。
+
+    這兩條合起來是那個「CI 紅三週」的迴歸測試：把 conftest 那支 fixture 拿掉，
+    這一條會紅。它們**必須相鄰而且照順序**（pytest 在同一個檔案裡照定義順序跑），
+    所以中間不要插東西。
+    """
+    assert theme_mod.current_theme() == _theme_before_the_switch["name"], \
+        "上一條測試把主題留成 dark 了 —— conftest 的還原沒有生效"
 
 
 def test_every_colour_token_is_a_real_colour(qapp):
@@ -299,33 +335,36 @@ def test_image_view_wheel_zoom_changes_scale(qapp):
 # --------------------------------------------------------------------------- #
 # 2. ParamForm（用真實 registry 的卡片）
 # --------------------------------------------------------------------------- #
-def test_param_form_int_and_image_key_from_snr_map(qapp):
+def test_param_form_int_float_and_image_key(qapp):
     form = widgets_mod.ParamForm()
     edits = []
     form.param_edited.connect(lambda n, v: edits.append((n, v)))
 
-    desc = _describe("snr_map")
+    # `snr_map`（Z-map）2026-08-25 刪掉了 —— 這裡要的是同時有
+    # **int（帶上下界）／float／image_key** 三種型別的一張卡，
+    # 才驗得到「哪一種型別配哪一種編輯器」。`roi_cross` 是同一個形狀。
+    desc = _describe("roi_cross")
     streams = ["test", "ref", "diff", "ref_aligned"]
-    form.set_step(desc, {"window": 31}, streams)
+    form.set_step(desc, {"smooth": 31}, streams)
 
     # 每個 ParamSpec 都要有一列
     assert form.param_names() == [p["name"] for p in desc["params"]]
     # 建表本身不可以噴 param_edited
     assert edits == []
 
-    window = form.editor("window")
-    assert isinstance(window, QSpinBox)
-    assert (window.minimum(), window.maximum()) == (5, 201)
-    assert window.value() == 31
-    window.setValue(41)
-    assert edits[-1] == ("window", 41)
+    smooth = form.editor("smooth")
+    assert isinstance(smooth, QSpinBox)
+    assert (smooth.minimum(), smooth.maximum()) == (1, 99)
+    assert smooth.value() == 31
+    smooth.setValue(41)
+    assert edits[-1] == ("smooth", 41)
     assert isinstance(edits[-1][1], int)
 
-    clip = form.editor("clip_sigma")
-    assert isinstance(clip, QDoubleSpinBox)
-    assert clip.value() == pytest.approx(3.0)
-    clip.setValue(4.5)
-    assert edits[-1] == ("clip_sigma", pytest.approx(4.5))
+    box = form.editor("box_size")
+    assert isinstance(box, QDoubleSpinBox)
+    assert box.value() == pytest.approx(5.0)
+    box.setValue(4.5)
+    assert edits[-1] == ("box_size", pytest.approx(4.5))
     assert isinstance(edits[-1][1], float)
 
     # image_key -> **唯讀顯示**（F9-6：來源只在畫布上決定）。
@@ -336,7 +375,7 @@ def test_param_form_int_and_image_key_from_snr_map(qapp):
     source = form.editor("source")
     assert isinstance(source, QLineEdit)
     assert source.isReadOnly() is True, "來源不該在參數表單裡改得動"
-    assert source.text() == "diff", "要看得到現在接的是哪一條"
+    assert source.text() == "ref", "要看得到現在接的是哪一條"
     assert source.toolTip().strip(), "唯讀就要講得出去哪裡改（推廣鐵則）"
     n_before = len(edits)
     source.setText("ref_aligned")          # 程式硬設也不該當成使用者編輯
@@ -378,10 +417,10 @@ def test_bounded_numbers_get_a_slider_bound_both_ways(qapp):
     assert len([e for e in edits if e[0] == "gamma"]) == 3
 
     # 整數參數也有；沒有上下界的就沒有（硬給一支只會誤導）
-    form.set_step(_describe("snr_map"), {}, ["test", "diff"])
-    assert isinstance(form.slider("window"), QSlider)
-    assert (form.slider("window").minimum(),
-            form.slider("window").maximum()) == (5, 201)
+    form.set_step(_describe("align"), {}, ["test", "diff"])
+    assert isinstance(form.slider("search_radius"), QSlider)
+    assert (form.slider("search_radius").minimum(),
+            form.slider("search_radius").maximum()) == (1, 64)
     form.set_step(_describe("load_patch"), {}, [])
     assert form.slider("channels") is None
 
@@ -525,21 +564,22 @@ def test_param_form_bool_choice_and_str(qapp):
 
 def test_param_form_show_and_clear_errors(qapp):
     form = widgets_mod.ParamForm()
-    desc = _describe("snr_map")
+    desc = _describe("roi_cross")
     form.set_step(desc, {}, ["diff"])
-    help_text = [p for p in desc["params"] if p["name"] == "window"][0]["help"]
+    help_text = [p for p in desc["params"]
+                 if p["name"] == "smooth"][0]["help"]
 
-    assert form.has_error("window") is False
-    form.show_error("window", "參數 'window'：4 低於下限 5")
-    assert form.has_error("window") is True
-    assert "低於下限 5" in form.hint_text("window")
+    assert form.has_error("smooth") is False
+    form.show_error("smooth", "參數 'smooth'：0 低於下限 1")
+    assert form.has_error("smooth") is True
+    assert "低於下限 1" in form.hint_text("smooth")
     assert "color:%s" % theme_mod.TOKENS["danger_text"] in \
-        form._rows["window"].hint.styleSheet()
-    assert form.has_error("out") is False        # 其他列不受影響
+        form._rows["smooth"].hint.styleSheet()
+    assert form.has_error("source") is False     # 其他列不受影響
 
     form.clear_errors()
-    assert form.has_error("window") is False
-    assert form.hint_text("window") == help_text
+    assert form.has_error("smooth") is False
+    assert form.hint_text("smooth") == help_text
 
 
 def test_param_form_empty_state(qapp):
@@ -583,23 +623,23 @@ def test_library_panel_groups_and_double_click(qapp):
     got = []
     panel.add_requested.connect(got.append)
 
-    snr_desc = _describe("snr_map")
-    item = panel.entry("snr_map")
+    snr_desc = _describe("glv_stats")
+    item = panel.entry("glv_stats")
     assert item is not None
     assert item.label.text() == snr_desc["label"]
     assert item.toolTip() == snr_desc["help"]             # help 掛成 tooltip
     QTest.mouseDClick(item, Qt.LeftButton)
-    assert got == ["snr_map"]
+    assert got == ["glv_stats"]
 
     # 另一條路：hover 出現的「Add」按鈕
     other = panel.entry("align")
     assert other.add_button.text() == "Add"
     other.add_button.click()
-    assert got == ["snr_map", "align"]
+    assert got == ["glv_stats", "align"]
 
     # 重新 set_steps 不會留下舊項目
     panel.set_steps([s_ for s_ in steps if s_["group"] == "compare"])
-    assert panel.entry("snr_map") is None
+    assert panel.entry("glv_stats") is None
     assert panel.entry("align") is not None
 
 
@@ -611,9 +651,10 @@ def test_library_search_filters_cards_and_hides_empty_sections(qapp):
 
     panel.set_query("snr")
     hit = set(panel.visible_step_keys())
-    # `snr_map`（Z-map）的說明裡有 SNR；Gray level 的 `snr` 是它的比較項之一。
-    # （`roi_snr` 那張卡在 2026-08-21 刪掉了 —— 使用者要的是 GL 比對的 SNR。）
-    assert {"snr_map", "glv_stats"} <= hit
+    # GLV 卡的 `snr` 是它的比較項之一。（`roi_snr` 那張卡 2026-08-21 刪掉了
+    # —— 使用者要的是 GL 比對的 SNR；`snr_map` / Z-map 2026-08-25 也刪掉了，
+    # 所以現在整個卡片庫只剩這一張講得到 SNR。）
+    assert {"glv_stats"} <= hit
     assert "denoise" not in hit
     assert "Input" not in panel.visible_section_titles(), \
         "整組都沒命中的區塊標題要一起收起來"
@@ -643,20 +684,21 @@ def test_library_badges_unmet_prerequisites_but_still_allows_adding(qapp):
     # 還不知道上游有什麼 -> 一個 badge 都不該出現（別在空流程上嚇人）
     assert not [k for k in panel.step_keys() if panel.entry(k).badge_text()]
 
-    panel.set_available_streams(["test", "ref"])
-    assert panel.entry("snr_map").badge_text() == "needs diff"
-    # subtract 2026-08-14 起預設吃 ref（patch 本來就對齊）—— 不再有假前置
-    assert panel.entry("subtract").badge_text() == ""
+    # ⚠ 這裡以前用 `snr_map`（預設吃 `diff`）當例子。它 2026-08-25 刪掉之後，
+    # **卡片庫裡沒有任何一張卡預設讀 `diff`** 了 —— `diff` 仍然到處在用，
+    # 但都是使用者接出來的。所以例子換成 `subtract`：只給 `test` 的時候，
+    # 它缺的是 `ref`。
+    panel.set_available_streams(["test"])
+    assert panel.entry("subtract").badge_text() == "needs ref"
     assert panel.entry("denoise").badge_text() == ""      # 只讀 test，滿足了
 
     got = []
     panel.add_requested.connect(got.append)
-    panel.entry("snr_map").add_button.click()
-    assert got == ["snr_map"], "有 badge 的卡仍然要加得進去"
+    panel.entry("subtract").add_button.click()
+    assert got == ["subtract"], "有 badge 的卡仍然要加得進去"
 
     # 上游補齊之後 badge 要消失
     panel.set_available_streams(["test", "ref", "ref_aligned", "diff"])
-    assert panel.entry("snr_map").badge_text() == ""
     assert panel.entry("subtract").badge_text() == ""
 
 

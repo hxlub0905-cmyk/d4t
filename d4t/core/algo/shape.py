@@ -14,9 +14,24 @@
 這不是被砍掉的那張 blob 分割卡
 ------------------------------
 使用者 2026-08-20 定調「Blob 分割不需要 也不要再出現」，2026-08-21 補上界線：
-**門檻切割可以做，但只在區域內、且不產生具名區域。** 差別是一句話 ——
-它**不去找「有哪些缺陷」**，只量使用者已經用線指給它的那一塊。所以這個模組
-吃的是一塊裁好的影像，回的是一組數字，從頭到尾不碰 `Context`、不吐區域。
+**門檻切割可以做，但只在區域內、且不產生具名區域。**
+
+**2026-08-25（F29）界線往前挪了一格，而挪的是哪一格要講清楚。**
+使用者要的是「跑完一整筆 image，缺陷被框出來、照分數排序」，所以
+:func:`find_blobs` **會去找「有哪些東西」** —— 那正是舊界線的前半句禁止的事。
+新的界線是後半句：
+
+    **可以找一個框，不可以產生具名區域。**
+
+差別不是文字遊戲。具名區域是**下游所有卡片的輸入**（`roi=` 那一格），
+一張卡自動長出區域，等於畫布上出現一條沒有人拉過的線 —— 而 F9 那六個
+「跑得完、有數字、而且是錯的」全部長那個樣子。一個框只是一組數字，
+它進 CSV、進疊圖、進分數表達式，跟任何一個特徵一樣要有人接才會被用到。
+
+所以這個模組仍然吃一塊裁好的影像、回一組數字，從頭到尾不碰 `Context`、
+不吐區域。:func:`measure_blob`（量使用者指給它的那一塊）與
+:func:`find_blobs`（在那一塊裡面找有哪些）**共用同一組準位與門檻** ——
+兩張卡因此是同一句話，而不是兩個各自調出來的數字。
 
 門檻怎麼定（沒有 Otsu、沒有 k-means）
 -------------------------------------
@@ -63,10 +78,11 @@ import cv2
 import numpy as np
 
 from .edge import edge_quality, profile_noise, threshold_level
+from .snr import snr_signed
 
 __all__ = [
-    "BlobResult", "MIN_AREA", "measure_blob", "feret", "pick_levels",
-    "ring_is_a_border",
+    "BlobResult", "BlobHit", "BlobScan", "MIN_AREA", "measure_blob",
+    "find_blobs", "feret", "pick_levels", "ring_is_a_border",
 ]
 
 #: 小於這麼多像素的連通元件不算一團（預設值；卡片可以改）。
@@ -119,6 +135,16 @@ class BlobResult(NamedTuple):
     chord: Tuple[Tuple[float, float], Tuple[float, float]]
     #: 區域灰階的直方圖（面板畫的那一張），``(counts, lo, hi)``。
     hist: Tuple[List[int], float, float]
+    #: 選中那一團的外接矩形（block 座標，``(x, y, w, h)``；``ok=False`` 時全 0）。
+    #:
+    #: 這兩格是 F29 加的，而它們**本來就已經算出來了**：``bbox`` 是
+    #: ``connectedComponentsWithStats`` 的 stats（原本只拿來判 ``touches_edge``
+    #: 就丟掉），``centroid`` 是同一支回傳的 centroids（原本接成 ``_cent``）。
+    #: 缺的從來不是計算，是出口 —— 這一團在哪，量到了卻沒有人講得出來。
+    bbox: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    #: 選中那一團的像素質心（block 座標）。**不是外接矩形的中心** ——
+    #: 一個 L 形的兩者可以差很遠，而質心才落在東西上。
+    centroid: Tuple[float, float] = (0.0, 0.0)
 
 
 # --------------------------------------------------------------------------- #
@@ -317,7 +343,7 @@ def measure_blob(block: Any, target: str = "auto", frac: float = 0.5,
         return _fail("flat", level, bg, fg, used, quality, hist)
 
     mask = (arr >= level) if used == "bright" else (arr <= level)
-    n_lab, labels, stats, _cent = cv2.connectedComponentsWithStats(
+    n_lab, labels, stats, cent = cv2.connectedComponentsWithStats(
         mask.astype(np.uint8), connectivity=8)
     keep = [i for i in range(1, n_lab)
             if int(stats[i, cv2.CC_STAT_AREA]) >= max(1, int(min_area))]
@@ -350,7 +376,133 @@ def measure_blob(block: Any, target: str = "auto", frac: float = 0.5,
     return BlobResult(True, "", level, bg, fg, used, quality, area,
                       len(keep), touches,
                       outline.reshape(-1, 2).astype(np.float64),
-                      perimeter, fmax, fmin, angle, chord, hist)
+                      perimeter, fmax, fmin, angle, chord, hist,
+                      (x0, y0, bw, bh),
+                      (float(cent[chosen][0]), float(cent[chosen][1])))
+
+
+# --------------------------------------------------------------------------- #
+# 找：這一塊裡面有哪些東西（F29）
+# --------------------------------------------------------------------------- #
+class BlobHit(NamedTuple):
+    """找到的一團 —— **只有「在哪」與「多突出」**，沒有形狀。
+
+    形狀是 :func:`measure_blob` 的工作，而那張卡量的是**使用者指給它的那一塊**。
+    這裡回的東西是拿來畫框與排序的，多吐一份形狀等於同一件事有兩個出處
+    （而它們會漂）。
+    """
+
+    #: block 座標的外接矩形 ``(x, y, w, h)``。
+    bbox: Tuple[int, int, int, int]
+    area: int
+    #: block 座標的像素質心。
+    centroid: Tuple[float, float]
+    #: 這一團比背景高出幾個 σ（**絕對值**，見 :func:`find_blobs`）。
+    strength: float
+
+
+class BlobScan(NamedTuple):
+    """:func:`find_blobs` 的結果。``ok`` 是 ``False`` 時 ``hits`` 是空的。"""
+
+    ok: bool
+    #: ``""`` = 成功。跟 :class:`BlobResult` 同一組字：``"flat"`` / ``"no_blob"``
+    #: / ``"too_small"`` —— **同一個原因在兩張卡上要是同一個字**。
+    reason: str
+    level: float
+    bg: float
+    fg: float
+    target: str
+    quality: float
+    #: 過門檻的每一團，**照 ``strength`` 由大到小**。
+    hits: List[BlobHit]
+
+
+def _scan_fail(reason: str, level: float = 0.0, bg: float = 0.0,
+               fg: float = 0.0, target: str = "",
+               quality: float = 0.0) -> BlobScan:
+    return BlobScan(False, reason, level, bg, fg, target, quality, [])
+
+
+def find_blobs(block: Any, target: str = "auto", frac: float = 0.5,
+               min_quality: float = 0.5, min_area: int = MIN_AREA,
+               max_hits: int = 64) -> BlobScan:
+    """一塊裁好的影像 → 裡面**有哪些東西**，照突出程度排好。
+
+    跟 :func:`measure_blob` 的差別只有一句話：那一支問「使用者指的這一塊有多
+    大」，這一支問「這一塊裡面哪一個最可疑」。所以
+
+    * 準位（:func:`pick_levels`）、門檻高度（`edge.threshold_level`）、
+      品質閘門（:func:`edge_quality` ＋ :data:`_MIN_CONTRAST`）**逐字共用** ——
+      兩張卡的「…at this height」是同一句話，調一邊不會讓另一邊變成另一個意思；
+    * **挑哪一團的規則相反**：那一支挑「中心那一團」（patch 以缺陷為中心裁），
+      這一支**全部回傳並排序**，因為它面對的是 RSEM 大圖 —— 缺陷不保證在中央，
+      而「在哪」正是要問的問題。
+
+``strength`` 怎麼算
+    ------------------
+    這一團的像素對**沒過門檻的那些像素**做
+    :func:`d4t.core.algo.snr.snr_signed`（``(平均−參照平均)/參照σ``，這個 repo
+    帶號 SNR 的規範出處），取**絕對值**，而分母有一道地板。
+
+    * **背景取「沒過門檻的那些」而不是外框那一圈**：外框在 patch 上是背景，在
+      一張 RSEM 大圖的某一塊區域裡不一定是（那一圈可能整條壓在結構上）。
+    * **取絕對值**是刻意的：``target`` 已經定了極性（``auto`` 選出來的那一個由
+      呼叫端吐成一個數字），所以同一次掃描裡每一團的正負號都一樣 —— 留著負號
+      只會讓「暗缺陷」那條路上的分數表達式要寫 ``-blob_strength > 3``，而寫成
+      ``blob_strength > 3`` 的人會拿到一個永遠不成立的條件，畫面上看不出來。
+    * **分母地板 = :data:`_MIN_CONTRAST`（1 個灰階）**。`snr_signed` 在參照
+      完全平坦時照定義回 0.0 —— 而「背景一點都不抖」的時候，最突出的那一團
+      拿到的分數是 **0**，也就是「完全不可疑」。那不只是難看：`hits` 的排序
+      整個垮掉（每一團都是 0）。地板用的是這個模組已經有的那個數字，理由也
+      一模一樣 —— **灰階是量化的，1 個灰階以下的差別本來就不該相信**，
+      所以以灰階為單位的 σ 到 1 就見底。
+
+    ⚠ 地板**只在雜訊低於 1 灰階時**才作用，而真實資料從來不會 —— 所以在真實
+    資料上這個數字**逐位元組等於** ``abs(snr_signed(...))``（有一條測試釘住
+    這件事）。它守的是合成資料與「乾淨到不像話」的那幾張圖。
+    """
+    arr = np.asarray(block, dtype=np.float64)
+    if arr.ndim != 2 or min(arr.shape) < 3:
+        return _scan_fail("too_small")
+
+    bg, fg, used = pick_levels(arr, target)
+    contrast = abs(fg - bg)
+    quality = edge_quality(contrast, _region_noise(arr))
+    level = threshold_level(bg, fg, frac)
+    if contrast < _MIN_CONTRAST or quality < max(0.0, float(min_quality)):
+        return _scan_fail("flat", level, bg, fg, used, quality)
+
+    mask = (arr >= level) if used == "bright" else (arr <= level)
+    n_lab, labels, stats, cent = cv2.connectedComponentsWithStats(
+        mask.astype(np.uint8), connectivity=8)
+    keep = [i for i in range(1, n_lab)
+            if int(stats[i, cv2.CC_STAT_AREA]) >= max(1, int(min_area))]
+    if not keep:
+        return _scan_fail("no_blob", level, bg, fg, used, quality)
+
+    ref = arr[~mask]
+    # 平坦的背景才走地板那一條 —— 一般情況**真的呼叫**那支規範函式，
+    # 而不是抄一份它的公式（同一個名字兩份實作是這個 repo 最怕的錯）。
+    ref_sd = float(ref.std()) if ref.size else 0.0
+    ref_mean = float(ref.mean()) if ref.size else float(bg)
+    floored = ref_sd < _MIN_CONTRAST
+    hits: List[BlobHit] = []
+    for i in keep:
+        pixels = arr[labels == i]
+        strength = (abs(float(pixels.mean()) - ref_mean) / _MIN_CONTRAST
+                    if floored else abs(snr_signed(pixels, ref)))
+        hits.append(BlobHit(
+            (int(stats[i, cv2.CC_STAT_LEFT]), int(stats[i, cv2.CC_STAT_TOP]),
+             int(stats[i, cv2.CC_STAT_WIDTH]), int(stats[i, cv2.CC_STAT_HEIGHT])),
+            int(stats[i, cv2.CC_STAT_AREA]),
+            (float(cent[i][0]), float(cent[i][1])),
+            float(strength)))
+    # **面積是決勝點**，不是為了好看：兩團等強度的時候（合成資料上很常見，
+    # 兩個一樣亮的方塊 SNR 逐位元組相同），沒有決勝點的話順序由標籤編號決定
+    # ——那是掃描順序，也就是「比較上面的那一個」。而那是一個看不出來的偏好。
+    hits.sort(key=lambda h: (-h.strength, -h.area))
+    return BlobScan(True, "", level, bg, fg, used, quality,
+                    hits[:max(1, int(max_hits))])
 
 
 # --------------------------------------------------------------------------- #

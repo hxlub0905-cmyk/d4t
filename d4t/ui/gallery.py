@@ -234,6 +234,14 @@ def make_filter(spec: Any) -> Tuple[Optional[Callable[[Dict[str, Any]], bool]], 
         want = None if want is None else int(want)
         return ((lambda it: it.get("bin") == want),
                 "bin %s only" % ("—" if want is None else want))
+    if mode == "ids":
+        # ⚠ **一個 bin 可能有好幾片葉子**，所以判定段點一列不能用
+        # ``{"mode": "bin"}``（那會把另一片葉子的顆一起撈進來）。呼叫端
+        # 已經拿樹走過一遍算出這一類真正是哪幾顆了，直接吃那一份。
+        want = {str(x) for x in (spec.get("ids") or ())}
+        label = str(spec.get("label") or "")
+        return ((lambda it: str(it.get("defect_id")) in want),
+                label or "%d selected" % len(want))
     if mode == "score_range":
         lo = spec.get("lo")
         hi = spec.get("hi")
@@ -294,7 +302,10 @@ class _GridView(QAbstractScrollArea):
     _GAP = 8
     _PAD = 6
     _BAR_H = 4                              # bin 色條
-    _CAPTION_H = 17
+    #: 說明文字兩行（R5）：第一行是類別名，第二行是 ``#id · bin · 值``。
+    #: **高度是免費的** —— 這一格會捲，而寬度不會（同 F26 那條）。
+    _CAPTION_H = 30
+    _CAPTION_LINE = 15
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -330,6 +341,11 @@ class _GridView(QAbstractScrollArea):
                 "score": _opt_float(raw.get("score")),
                 "bin": _opt_int(raw.get("bin")),
                 "ok": bool(raw.get("ok", True)),
+                # 使用者在判定樹上取的那一類的名字（R5，2026-08-24）。
+                # **它是這一顆最該先讀到的東西** —— `bin 3` 是 KLARF 的實作
+                # 細節，而「bright blob」是他自己打的字。沒有判定樹時是空的，
+                # 那時候說明文字退回 `bin N`。
+                "cls": str(raw.get("cls") or ""),
                 "features": dict(raw.get("features") or {}),
                 "thumb": raw.get("thumb"),
             }
@@ -610,6 +626,12 @@ class _GridView(QAbstractScrollArea):
         if selected:
             p.setPen(QPen(QColor(TOKENS["accent"]), 2))
             p.setBrush(QColor(TOKENS["accent_bg"]))
+        elif not item["ok"]:
+            # **算不出來的那一顆要看得出來**（R6）。以前它只有說明文字是紅的，
+            # 而在一牆縮圖裡那三個字比整張卡的底色難找太多 —— 而它正是使用者
+            # 最需要先挑出來的那幾顆。
+            p.setPen(QPen(QColor(TOKENS["danger_border"]), 1))
+            p.setBrush(QColor(TOKENS["danger_bg"]))
         else:
             p.setPen(QPen(QColor(TOKENS["border_default"]), 1))
             p.setBrush(QColor(TOKENS["bg_surface"]))
@@ -636,13 +658,26 @@ class _GridView(QAbstractScrollArea):
             y = img_rect.top() + (img_rect.height() - pm.height()) // 2
             p.drawPixmap(QPoint(x, y), pm)
 
+        top, sub = caption_lines_of(item, self._sort_key or "score")
         cap_rect = QRect(rect.left() + self._PAD, img_rect.bottom() + 3,
-                         self._thumb, self._CAPTION_H)
-        p.setPen(QColor(TOKENS["text_secondary"] if item["ok"]
+                         self._thumb, self._CAPTION_LINE)
+        # 第一行（類別名）是主角：跟正文同色、粗一級。
+        p.setPen(QColor(TOKENS["text_primary"] if item["ok"]
                         else TOKENS["danger_text"]))
-        text = p.fontMetrics().elidedText(caption_of(item), Qt.ElideMiddle,
-                                          cap_rect.width())
-        p.drawText(cap_rect, Qt.AlignLeft | Qt.AlignVCenter, text)
+        font = p.font()
+        font.setBold(True)
+        p.setFont(font)
+        p.drawText(cap_rect, Qt.AlignLeft | Qt.AlignVCenter,
+                   p.fontMetrics().elidedText(top, Qt.ElideRight,
+                                              cap_rect.width()))
+        font.setBold(False)
+        p.setFont(font)
+        p.setPen(QColor(TOKENS["text_hint"] if item["ok"]
+                        else TOKENS["danger_text"]))
+        sub_rect = cap_rect.translated(0, self._CAPTION_LINE)
+        p.drawText(sub_rect, Qt.AlignLeft | Qt.AlignVCenter,
+                   p.fontMetrics().elidedText(sub, Qt.ElideMiddle,
+                                              sub_rect.width()))
 
     # -- 互動 ---------------------------------------------------------------
     def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
@@ -711,21 +746,39 @@ def bin_hex(item: Dict[str, Any]) -> str:
     return TOKENS["success"]
 
 
-def caption_of(item: Dict[str, Any]) -> str:
-    """一行說明：``#id · bin 1 · 3.21``。
+def caption_lines_of(item: Dict[str, Any],
+                     value_key: str = "score") -> Tuple[str, str]:
+    """一張縮圖底下的兩行：``("bright blob", "#7 · bin 2 · 118.4")``。
 
-    **bin 一定寫成文字**，色條只是輔助 —— 色盲、投影機、黑白列印都要讀得到。
+    **第一行是這一顆判成了什麼**（R5，2026-08-24）。以前整張說明是
+    ``#1 · bin 3 · 0``：``bin 3`` 是 KLARF 的實作細節、末尾那個沒有標籤的
+    數字是分數，而**使用者在樹上親手打的「bright blob」一次都沒有出現**。
+    F26 才剛在判定面板上把這件事翻過來（類別名是主角、bin 降成它的編號），
+    這一頁跟上。
+
+    **bin 仍然寫成文字**，色條只是輔助 —— 色盲、投影機、黑白列印都要讀得到
+    （那條規矩沒有變，只是它移到第二行）。
+
+    ``value_key`` 是**現在排序用的那個數字**：一牆縮圖照 ``cd_median`` 排好
+    之後，看不到那個值等於只能看順序。預設 ``"score"`` 維持原本的行為。
     """
-    parts = ["#%s" % item.get("defect_id", "")]
+    did = "#%s" % item.get("defect_id", "")
     if not item.get("ok", True):
-        parts.append("FAILED")
-        return " · ".join(parts)
+        # 失敗的那一顆**不是一個類別**，而它要一眼看得出來（R6）。
+        return "FAILED", did
     b = item.get("bin")
-    parts.append("bin %d" % int(b) if b is not None else "bin —")
-    s = item.get("score")
-    if s is not None:
-        parts.append(_fmt_score(s))
-    return " · ".join(parts)
+    bin_text = "bin %d" % int(b) if b is not None else "bin —"
+    cls = str(item.get("cls") or "").strip()
+    rest = [did, bin_text] if cls else [did]
+    v = _value_of(item, str(value_key or "score"))
+    if v is not None:
+        rest.append(_fmt_score(v) if isinstance(v, (int, float)) else str(v))
+    return (cls or bin_text), " · ".join(rest)
+
+
+def caption_of(item: Dict[str, Any], value_key: str = "score") -> str:
+    """兩行接成一行（tooltip 與測試用）。"""
+    return " · ".join(x for x in caption_lines_of(item, value_key) if x)
 
 
 def _opt_float(v: Any) -> Optional[float]:
@@ -816,6 +869,11 @@ class GalleryPanel(QWidget):
         for name, px in THUMB_SIZES:
             self.zoom_combo.addItem(name, px)
         self.zoom_combo.setCurrentIndex(1)
+        # ⚠ **一個字母的下拉仍然要放得下那顆箭頭**（R6，2026-08-24）。
+        # 不設的話 Qt 照「S / M / L」算寬度，而那算不進 QSS 給 ``::drop-down``
+        # 的寬度 —— 實測整格被視窗右邊界切掉一半。同一條坑 F7-13 在
+        # ``QComboBox::drop-down`` 上踩過。
+        self.zoom_combo.setMinimumWidth(58)
         self.zoom_combo.currentIndexChanged.connect(self._on_zoom_changed)
         head.addWidget(self.zoom_combo)
         outer.addLayout(head)
@@ -1051,12 +1109,14 @@ class GalleryPanel(QWidget):
         self.order_button.setText(self._ORDER_DESC if self.grid.sort_descending()
                                   else self._ORDER_ASC)
         self._clear_chips()
-        key = self.grid.sort_key()
-        if key:
-            arrow = "↓" if self.grid.sort_descending() else "↑"
-            self._add_chip("Sort: %s %s" % (key, arrow),
-                           "Click to clear sorting and return to the original order",
-                           lambda: self.set_sort(None, self.grid.sort_descending()))
+        # ⚠ **排序沒有 chip**（R4，2026-08-24）。它以前有一顆
+        # ``Sort: score ↓ ×``，而正上方 24px 就是 ``Sort by [score ▾] ↓``
+        # —— 同一件事、兩種格式、隔著一列。chip 存在的理由是「這個條件在別的
+        # 地方看不到，而且要拿得掉」，排序兩件都不成立：它有自己的下拉，
+        # 而「拿掉排序」在那個下拉裡就是選回第一項。
+        #
+        # 篩選不一樣：畫面上沒有別的地方講得出「現在只看 bright blob」，
+        # 所以它的 chip 留著 —— 而那正是判定段點一列之後唯一的退路。
         ftext = self.grid.filter_text()
         if ftext:
             self._add_chip("Filter: %s" % ftext, "Click to remove this filter",

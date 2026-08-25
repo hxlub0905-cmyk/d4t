@@ -194,10 +194,12 @@ def test_a_wired_card_is_not_told_it_is_missing_that_stream(window):
     線走的：線可以從執行順序上「後面」的節點接過來（分支的兩支各自往前接）。
     所以「上游有哪些流」要把**接進這張卡的線自己帶的流名**也算進去。
     """
-    src, nid = _load_and(window, "snr_map")      # 預設吃 diff，一定缺上游
+    # ⚠ 觸發用的卡 2026-08-25 換過（同 F7-9 那條）：Z-map 刪掉之後沒有卡預設
+    # 吃 `diff` 了，改用預設吃 `paired` 的 `align_to`。
+    src, nid = _load_and(window, "align_to")
     assert "still needs" in window._unmet_needs(nid), \
         "這條測試的前提是「沒接線時真的會報缺」"
 
-    window._on_edge_added(src, nid, "diff")
+    window._on_edge_added(src, nid, "paired")
     assert window._unmet_needs(nid) == "", \
         "線就在畫布上，提示卻還在說缺這條流"

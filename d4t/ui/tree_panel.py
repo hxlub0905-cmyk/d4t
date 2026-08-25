@@ -32,9 +32,15 @@ from .tree_scene import (
     OPS, count_yes, display_tree, format_condition, parse_simple_condition,
     rows_reaching, suggest_condition,
 )
-from .widgets import _make_slider, clear_layout_parked, small_button, split_labelled
+from .threshold_view import SplitBar, ThresholdHistogram
+from .widgets import clear_layout_parked, small_button, split_labelled
+from .viewmodel import MAX_BIN, is_a_constant_expression
 
 __all__ = ["TreePanel"]
+
+#: 導引式問題那一格數字框的上下界。**它的用途是「別讓 Qt 溢位」，不是
+#: 「這個門檻應該多大」** —— 後者沒有通用答案（見 `_build_guided` 的說明）。
+_SPIN_LIMIT = 1e12
 
 
 class TreePanel(QWidget):
@@ -54,13 +60,15 @@ class TreePanel(QWidget):
         self._building = False
         #: 見 `widgets.clear_layout_parked`（閃退的結構性修正，F25）。
         self._parked: list = []
-        #: 這一批試跑的結果（F25）。滑桿的範圍與「幾顆說 yes」都吃它 ——
+        #: 這一批試跑的結果（F25）。分布圖、分流條與麵包屑上的顆數都吃它 ——
         #: 沒跑過就是空的，那時候一個數字都不畫（F18）。
         self._rows: List[Dict[str, Any]] = []
         #: 哪幾步使用者切到了「自己寫算式」（複合條件本來就只能那樣編）。
         self._advanced: set = set()
-        #: 拖滑桿時就地更新的那一行字（不重建 —— 重建會把滑桿從手上搶走）。
-        self._yes_label: Optional[QLabel] = None
+        #: 拖門檻時**就地更新**的兩個元件（不重建 —— 重建會把滑鼠從把手上
+        #: 搶走）。分流條講「切成幾比幾」，分布圖講「切在分布的哪裡」。
+        self._split_bar: Optional[SplitBar] = None
+        self._plot: Optional[ThresholdHistogram] = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -151,8 +159,41 @@ class TreePanel(QWidget):
             self._build_step(node)
         self.body_lay.addStretch(1)
 
+    # ---- 草案 3：我在樹的哪裡 ----------------------------------------------
+    def _breadcrumb(self) -> Optional[QWidget]:
+        """最上面一行：**這是第幾步、從哪一邊來的、幾顆流到這裡**。
+
+        樹深了以後「我在哪裡」在畫面上完全看不出來 —— 右欄長得一模一樣，
+        只有裡面的數字不同。而這三件事全部都是現成的：路徑就是 `self._path`，
+        上一步的問題問得到，顆數 `flow_counts` 已經算出來了。
+
+        根（``path == ""``）只說「第 1 步」—— 它沒有上一步，硬要寫一句
+        「from …」會是一句空話。
+        """
+        path = str(self._path)
+        bits: List[str] = []
+        node = self._node()
+        kind = "class" if isinstance(node, TreeLeaf) else "step %d" % (len(path) + 1)
+        bits.append("Decision tree · %s" % kind)
+        if path:
+            parent = self._model.tree_node(path[:-1]) if self._model else None
+            side = "yes" if path[-1] == "y" else "no"
+            if isinstance(parent, TreeStep) and str(parent.when).strip():
+                bits.append("the %s side of “%s”" % (side, str(parent.when)))
+            else:
+                bits.append("the %s side" % side)
+        if self._counts is not None:
+            bits.append("%d defects reach here" % self._counts.get(path, 0))
+        lab = QLabel(" · ".join(bits))
+        lab.setObjectName("paramHint")
+        lab.setWordWrap(True)
+        return lab
+
     # ---- 一步（菱形）-------------------------------------------------------
     def _build_step(self, node: TreeStep) -> None:
+        crumb = self._breadcrumb()
+        if crumb is not None:
+            self.body_lay.addWidget(crumb)
         self.body_lay.addWidget(self._section("Question"))
         simple = parse_simple_condition(node.when)
         # 空的問題（剛加的一步）也走導引式 —— 一張空白的算式框正是使用者
@@ -163,31 +204,35 @@ class TreePanel(QWidget):
         else:
             self._build_guided(simple)
 
-        self.body_lay.addWidget(self._side_row("Yes →", self._path + "y",
+        self.body_lay.addWidget(self._side_row("Yes", self._path + "y",
                                                node.yes))
-        self.body_lay.addWidget(self._side_row("No →", self._path + "n",
+        self.body_lay.addWidget(self._side_row("No", self._path + "n",
                                                node.no))
 
-        batch = self._batch_line()
-        if batch:
-            self.body_lay.addWidget(self._section("This batch", batch))
+        # ⚠ **這裡以前還有一段 THIS BATCH**（``24 arrive here → 11 yes · 13 no``）。
+        # 草案 2／3 之後它講的每一件事都已經有更好的位置了：「幾顆流到這裡」
+        # 在最上面的麵包屑、「切成幾比幾」是分流條的寬度、而兩邊各幾顆寫在
+        # Yes／No 的標籤上。留著就是同一個事實在一個 550px 的面板裡講三次。
+        #
+        # 葉子那一邊（`_build_leaf`）**留著** —— 一片葉子沒有「切成兩邊」，
+        # 「20 land here」是它唯一的批次數字，而它沒有別的地方講。
 
+        # 動作是**兩列**：上面一列是「還要做什麼」，下面一列只有「拿掉」。
+        # 一列塞得下三顆（176 + 111 + 92 = 391px）的前提是欄寬 400 以上，
+        # 而廠內機器多半是 1366×768 —— 那時候整列會被推出畫面。
         row2 = QWidget(self)
         lay2 = QHBoxLayout(row2)
         lay2.setContentsMargins(0, 0, 0, 0)
-        ins = small_button("+ Insert step above", shape="wide")
+        lay2.setSpacing(6)
+        ins = small_button("+ Ask one before this", shape="wide")
         ins.setToolTip("Ask a new question before this one - everything "
                        "here moves to its no side.")
         ins.clicked.connect(self._insert_above)
-        rm = small_button("✕ Remove step", shape="wide")
-        rm.setToolTip("The no side takes this step's place.")
-        rm.clicked.connect(self._remove_step)
         lay2.addWidget(ins)
-        lay2.addWidget(rm)
-        # 「自己寫算式」是這一步的**另一種編法**，所以跟加/刪擺在同一列 ——
+        # 「自己寫算式」是這一步的**另一種編法**，所以跟加/刪擺在同一區 ——
         # 夾在問題與 Yes/No 中間的話，它會被讀成一個段落標題。
         if self._path not in self._advanced:
-            adv = small_button("Expression…", shape="wide")
+            adv = small_button("As a formula", shape="wide")
             adv.setToolTip("Write this question as an expression instead - "
                            "for one that needs more than one comparison, "
                            "e.g. (a > 5) * (b < 2).")
@@ -195,6 +240,18 @@ class TreePanel(QWidget):
             lay2.addWidget(adv)
         lay2.addStretch(1)
         self.body_lay.addWidget(row2)
+
+        # **拿掉這一步自己一列、推到最右邊**（草案 6）：它是這裡唯一會弄丟
+        # 東西的動作，跟「再問一個問題」並排、同一個樣子，是在請人手滑。
+        row3 = QWidget(self)
+        lay3 = QHBoxLayout(row3)
+        lay3.setContentsMargins(0, 0, 0, 0)
+        lay3.addStretch(1)
+        rm = small_button("✕ Remove", shape="wide")
+        rm.setToolTip("The no side takes this step's place.")
+        rm.clicked.connect(self._remove_step)
+        lay3.addWidget(rm)
+        self.body_lay.addWidget(row3)
 
     # ---- 導引式的問題（F25）------------------------------------------------
     def _feature_names(self) -> List[str]:
@@ -214,8 +271,23 @@ class TreePanel(QWidget):
         tree = display_tree(getattr(m, "decide", None))
         return rows_reaching(tree, self._rows, self._path)
 
-    def _range_for(self, name: str, value: float):
-        """這個數字在**流到這裡的顆**上的範圍（滑桿用）。回 ``(lo, hi)``。"""
+    def _slider_range(self, name: str, value: float):
+        """滑桿要跨的範圍，從**流到這一步的顆**推。沒有資料就回 ``None``。
+
+        ⚠ **回 None 的時候不要生一個滑桿出來。** 這一支以前在沒有資料時
+        自己編一個範圍（``value ± max(|value|, 1)``），而那有兩個後果，
+        第二個是真的擋人的：
+
+        1. 滑桿假裝有一個分布，但它跨的是一個沒有任何意義的區間；
+        2. **數字框跟滑桿共用同一組上下界**，所以一個剛加進來的步驟
+           （``value`` 是 0）會把使用者夾在 **−1 … 1** —— 想問
+           「``cd_median`` 大於 6.5」時，那個 6.5 **打不進去**。
+           使用者回報的原話是「搖桿只能填最大 1」。
+
+        資料只有一個值的時候（整批只有一顆，或那個數字每顆都一樣）仍然
+        **用得上**：一個量到的 6.5 遠比憑空的 ±1 有用，所以那時候以它為中心
+        撐開一個範圍，而不是把資料丟掉退回上面那條老路。
+        """
         vals = [float(v) for r in self._rows_here()
                 for v in [(r.get("features") or {}).get(str(name))]
                 if isinstance(v, (int, float))]
@@ -223,9 +295,12 @@ class TreePanel(QWidget):
             lo, hi = min(vals), max(vals)
             pad = (hi - lo) * 0.05
             lo, hi = lo - pad, hi + pad
+        elif vals:
+            here = vals[0]
+            span = abs(here) * 0.5 or 1.0
+            lo, hi = here - span, here + span
         else:
-            span = abs(float(value)) or 1.0
-            lo, hi = float(value) - span, float(value) + span
+            return None
         # 現在的值一定要在範圍裡，否則滑桿會把它拉走（改到一個沒人要的數）。
         return min(lo, float(value)), max(hi, float(value))
 
@@ -250,6 +325,13 @@ class TreePanel(QWidget):
         which.setCurrentIndex(max(0, i))
         which.setToolTip("Which of the measured numbers this step asks about.")
         which.setMinimumWidth(120)
+        # ⚠ **這一格是三個裡面唯一「截字沒關係」的**，所以窄欄要靠它讓位。
+        # 運算子不行（六個的差別正好在尾巴）、數字不行（看不到自己填的值）；
+        # 而一個特徵名截掉尾巴仍然認得出來，點開下拉也看得到全名。
+        # 不設的話它的 `minimumSizeHint` 會跟著最長的特徵名長到 150px 以上，
+        # 把整列的最小寬度撐過欄寬 → 橫向捲軸 → 數字框被藏起來。
+        which.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        which.setMinimumContentsLength(9)
         which.activated.connect(
             lambda j, c=which: self._guided_changed(
                 name=str(c.itemData(j) or ""), rebuild=True))
@@ -263,16 +345,33 @@ class TreePanel(QWidget):
         opbox.activated.connect(
             lambda k, c=opbox: self._guided_changed(op=str(c.itemData(k))))
 
-        lo, hi = self._range_for(name, value)
+        rng = self._slider_range(name, value)
+        span = (rng[1] - rng[0]) if rng else 0.0
         spin = QDoubleSpinBox()
-        spin.setFixedWidth(84)
-        span = hi - lo
+        # 96 而不是 84：**還沒試跑**的時候沒有 span，小數位只能給到最寬的
+        # 那一檔（4 位）—— 而 ``42.0000`` 在 84px 裡剛好把整個框塞滿，看起來
+        # 像被切掉一半。小數位不能為了版面砍掉（砍掉＝``0.0001`` 這種門檻
+        # 打不進去，那正是 A1 那個 bug 的形狀），所以讓框變寬。
+        spin.setFixedWidth(96)
         spin.setDecimals(0 if span > 200 else (2 if span > 1 else 4))
-        spin.setRange(lo, hi)
-        spin.setSingleStep(max(span / 100.0, 1e-6))
+        # ⚠ **數字框不夾人。** 門檻的合理範圍是「這個數字可能是多少」，而那
+        # 隨著卡片天差地遠（灰階 0–255、CD 幾個 px、面積上萬 px²、z 分數是負
+        # 的、百分位 0–100）—— 沒有一個通用的上下界，所以這裡不要假裝有一個。
+        #
+        # 而且**跟這一批量到的範圍夾住它也是錯的**：「大於 12」在這批最大只有
+        # 9 的時候仍然是一條完全合法的規則（那正是怎麼寫一條今天抓不到、
+        # 明天出事才抓得到的規則）。夾住等於把那件事變成打不出來的東西。
+        spin.setRange(-_SPIN_LIMIT, _SPIN_LIMIT)
+        # ⚠ 上面那個範圍讓 Qt 以為要替 `-1000000000000.0000` 留位置，於是
+        # `minimumSizeHint()` 變成 193px —— 而那個值會一路撐到整個面板的
+        # 最小寬度，在窄欄裡把自己擠出畫面。固定寬度**壓不過** minimumSizeHint
+        # 在 layout 上的傳遞，要明講最小寬度。
+        spin.setMinimumWidth(96)
+        spin.setSingleStep(max(span / 100.0, 1e-6) if span else 0.1)
         spin.setValue(float(value))
-        spin.setToolTip("The value to compare against. Drag the slider and "
-                        "watch the count below.")
+        spin.setToolTip("The value to compare against. Type any number - "
+                        "a threshold outside what this batch measured is a "
+                        "perfectly good rule.")
         spin.valueChanged.connect(lambda v: self._guided_changed(value=float(v)))
 
         lay.addWidget(which, 1)
@@ -280,34 +379,67 @@ class TreePanel(QWidget):
         lay.addWidget(spin)
         self.body_lay.addWidget(row)
 
-        slider = _make_slider({"type": "float", "min": lo, "max": hi,
-                               "help": "Drag to move the threshold."}, spin)
-        if slider is not None:
-            self.body_lay.addWidget(slider)
+        # ---- 草案 1：滑桿換成分布圖 ----------------------------------------
+        # 以前這裡是一根**沒有刻度**的滑桿：使用者拖的時候不知道自己在 60
+        # 還是 200，唯一的回饋是上面那個數字框。而面板手上一直有這一步流到
+        # 的每一顆的值（`_rows_here`）—— 這個專案的 Gray level 面板早就在畫
+        # 分布了（F18），真正在挑門檻的地方反而沒有。
+        #
+        # 圖與數字框是**同一個值的兩個把手**：拖圖改數字框、改數字框圖跟著走。
+        # 兩邊互相回彈是這種雙向綁定的老坑，所以圖那一邊用 `set_threshold`
+        # （不發訊號）回寫。
+        # ⚠ **沒有要放進版面就不要生出來。** 這裡以前無條件
+        # `ThresholdHistogram(self)`，只在有資料時 `addWidget` —— 而
+        # `clear_layout_parked` 清的是**版面裡**的東西，所以沒進版面的那些
+        # 就永遠掛在面板上：實測每重建一次多一個，拖一次門檻就是幾十個。
+        # 這個面板重建得非常兇（改一格就整段重建），所以「每次多一個」
+        # 在一個 session 裡是幾百個看不見的 widget。
+        self._plot = None
+        vals = self._values_here(name)
+        if vals:
+            self._plot = ThresholdHistogram(self)
+            self._plot.set_data(vals, float(value), above_is_yes=op in (">", ">="))
+            self._plot.threshold_changed.connect(
+                lambda v, sp=spin: sp.setValue(float(v)))
+            spin.valueChanged.connect(
+                lambda v, pl=self._plot: pl.set_threshold(float(v)))
+            self.body_lay.addWidget(self._plot)
+        elif name:
+            # 沒有分布的時候要講出**為什麼**，而且那句話要指向能拿回它的動作
+            # —— 一個安靜消失的控制項比一個沒有用的控制項更難懂。
+            hint = QLabel("Run a trial to see how this batch is spread out "
+                          "here, and drag the threshold on it.")
+            hint.setObjectName("paramHint")
+            hint.setWordWrap(True)
+            self.body_lay.addWidget(hint)
 
-        # 即時顆數：**拖的時候就地改這一行**（不重建）。沒跑過就不畫 —— 一個
-        # 「0 of 0」比沒有更糟（F18）。
-        self._yes_label = QLabel("")
-        self._yes_label.setObjectName("paramHint")
-        self._yes_label.setWordWrap(True)
-        self._sync_yes_label(name, op, value)
-        self.body_lay.addWidget(self._yes_label)
+        # ---- 草案 2：兩句重複的話收成一條分流條 ----------------------------
+        # 以前這裡是「11 of the 24 defects that reach here say yes」，而底下
+        # 100px 的 THIS BATCH 又寫一次「24 arrive here → 11 yes · 13 no」——
+        # 同一件事、兩種格式、隔著一個段落。一條有寬度的橫條回答同一個問題，
+        # 但**顆數變成寬度**，掃一眼就知道這一刀切得均不均。
+        self._split_bar = SplitBar(self)
+        self._sync_split(name, op, value)
+        self.body_lay.addWidget(self._split_bar)
 
+    def _values_here(self, name: str) -> List[float]:
+        """流到這一步的顆在 ``name`` 上的值（分布圖與分流條共用的那一份）。"""
+        if not name:
+            return []
+        return [float(v) for r in self._rows_here()
+                for v in [(r.get("features") or {}).get(str(name))]
+                if isinstance(v, (int, float))]
 
-
-    def _sync_yes_label(self, name: str, op: str, value: float) -> None:
-        if self._yes_label is None:
+    def _sync_split(self, name: str, op: str, value: float) -> None:
+        """拖的時候**就地改**這一條（不重建 —— 重建會把滑鼠從把手上搶走）。"""
+        if self._split_bar is None:
             return
         rows = self._rows_here()
         if not rows or not name:
-            self._yes_label.setText("")
+            self._split_bar.set_counts(0, 0)
             return
         yes, n = count_yes(rows, name, op, float(value))
-        if not n:
-            self._yes_label.setText("")
-            return
-        self._yes_label.setText(
-            "%d of the %d defects that reach here say yes" % (yes, n))
+        self._split_bar.set_counts(yes, max(0, n - yes))
 
     def _guided_changed(self, name: Optional[str] = None,
                         op: Optional[str] = None,
@@ -325,7 +457,7 @@ class TreePanel(QWidget):
             return                      # 還沒挑數字：不要寫出一句半截的問題
         self._model.set_tree_when(self._path,
                                   format_condition(new_name, new_op, new_value))
-        self._sync_yes_label(new_name, new_op, new_value)
+        self._sync_split(new_name, new_op, new_value)
         if rebuild:
             # 換了數字 → 滑桿的範圍整個不一樣，非重建不可。
             self.refresh(force=True)
@@ -363,45 +495,97 @@ class TreePanel(QWidget):
         self.refresh(force=True)
 
     def _side_row(self, word: str, child_path: str, child: Any) -> QWidget:
+        """一個分支：``Yes 11 → [類別名] [bin ▾]`` 或 ``No 13 → 再問一個問題``。
+
+        草案 4／5 動了三件事：
+
+        * **兩邊帶顆數**（``Yes 11``）—— 一步分成兩邊，而「各分到幾顆」是
+          看這一步時最先想知道的事；以前那個數字只在下面 THIS BATCH 那一行。
+        * **兩邊視覺對稱**。以前一邊是輸入框、一邊是灰字＋Edit 連結，
+          看起來像兩種不同的東西；其實它們是同一個位置的兩種填法
+          （一個類別 / 再問一個問題）。
+        * **類別名是主角，bin 降成它的編號**。使用者想的是「亮點」不是
+          「bin 2」—— bin 是 KLARF 的實作細節，仍然改得到，只是不再跟名字
+          搶同一階的視覺重量。
+        """
         m = self._model
+        # **兩行，不是一行**。這一欄只有 430px（那正是草案第 7 條在講的事），
+        # 而一行要塞下「Yes 11 / 名字 / bin / 再問一個問題」就一定會橫向溢位
+        # —— 而橫向捲軸在一個編輯面板上等於把控制項藏起來。
+        # 面板底下本來就有 300 多 px 是空的，**高度是免費的、寬度不是**。
         row = QWidget(self)
-        lay = QHBoxLayout(row)
+        outer = QVBoxLayout(row)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(2)
+        top = QWidget(row)
+        lay = QHBoxLayout(top)
         lay.setContentsMargins(0, 0, 0, 0)
-        tag = QLabel(word)
+        lay.setSpacing(6)
+        outer.addWidget(top)
+
+        tag = QLabel(self._side_tag(word, child_path))
         tag.setObjectName("paramHint")
-        tag.setMinimumWidth(44)
+        tag.setMinimumWidth(52)
         lay.addWidget(tag)
+
         if isinstance(child, TreeLeaf):
             label = QLineEdit(str(child.label))
             label.setPlaceholderText("name this class")
+            label.setToolTip("What this class is called - this is the name "
+                             "that shows up on the canvas and in the report.")
             label.textEdited.connect(
                 lambda t, p=child_path: m.set_tree_leaf(p, label=str(t)))
             spin = QSpinBox()
-            spin.setRange(0, 999)
+            spin.setRange(0, MAX_BIN)
             spin.setValue(int(child.bin))
             spin.setPrefix("bin ")
+            # bin 是編號不是名字：固定一個剛好放得下的寬度，把剩下的都給名字。
+            # 66 而不是 74 —— 那一欄右邊還有捲軸要站的位置，多 8px 就會被切掉
+            # （而一個被切掉一半的數字框比一個小一點的更難用）。
+            spin.setFixedWidth(66)
+            spin.setMinimumWidth(60)      # 同上：壓過 range 撐出來的 minHint
+            spin.setObjectName("paramHint")
             spin.setToolTip("The bin number written back to the KLARF.")
             spin.valueChanged.connect(
                 lambda v, p=child_path: m.set_tree_leaf(p, bin=int(v)))
-            split = small_button("Split", shape="wide")
-            split.setFixedWidth(52)
-            split.setToolTip("Turn this class into another step - the class "
-                             "moves to the new step's no side.")
-            split.clicked.connect(
-                lambda _=False, p=child_path: self._split(p))
             lay.addWidget(label, 1)
             lay.addWidget(spin)
-            lay.addWidget(split)
+            # ⚠ **字剪到「一行放得下」為止**：``about this class`` 那四個字
+            # 讓這顆鈕變成 311px，加上縮排 58px 就超過 1366×768 那台機器上
+            # 這一欄的寬度 —— 而它上面那一行正是那個類別，缺的脈絡在畫面上。
+            ask = small_button("↳ Ask another question", shape="wide")
+            ask.setToolTip("Turn this class into another step - the class "
+                           "moves to the new step's no side.")
+            ask.clicked.connect(
+                lambda _=False, p=child_path: self._split(p))
+            outer.addWidget(self._indent(ask))
         else:
-            text = QLabel("next: %s ?" % (str(child.when) or "( … )"))
+            text = QLabel("asks: %s" % (str(child.when).strip() or "( … )"))
             text.setObjectName("paramHint")
-            go = small_button("Edit", shape="wide")
+            text.setWordWrap(True)
+            lay.addWidget(text, 1)
+            go = small_button("↳ Edit that step", shape="wide")
             go.setToolTip("Edit that step instead.")
             go.clicked.connect(
                 lambda _=False, p=child_path: self.step_requested.emit(p))
-            lay.addWidget(text, 1)
-            lay.addWidget(go)
+            outer.addWidget(self._indent(go))
         return row
+
+    def _indent(self, widget: QWidget) -> QWidget:
+        """把一顆按鈕靠左、往內縮一格 —— 讀起來是「屬於上面那一行的動作」。"""
+        box = QWidget(self)
+        lay = QHBoxLayout(box)
+        lay.setContentsMargins(58, 0, 0, 0)
+        lay.addWidget(widget)
+        lay.addStretch(1)
+        return box
+
+    def _side_tag(self, word: str, child_path: str) -> str:
+        """``Yes`` ／ ``Yes 11`` —— 沒跑過就不帶數字（F18：不顯示 0）。"""
+        base = str(word).replace("→", "").strip()
+        if self._counts is None:
+            return base
+        return "%s %d" % (base, self._counts.get(str(child_path), 0))
 
     # ---- 一類（托盤）-------------------------------------------------------
     def _build_leaf(self, node: TreeLeaf) -> None:
@@ -412,7 +596,7 @@ class TreePanel(QWidget):
         label.textEdited.connect(
             lambda t, p=self._path: m.set_tree_leaf(p, label=str(t)))
         spin = QSpinBox()
-        spin.setRange(0, 999)
+        spin.setRange(0, MAX_BIN)
         spin.setValue(int(node.bin))
         spin.setPrefix("bin ")
         spin.setToolTip("The bin number written back to the KLARF.")
@@ -429,7 +613,7 @@ class TreePanel(QWidget):
         if batch:
             self.body_lay.addWidget(self._section("This batch", batch))
 
-        split = small_button("Split into a step", shape="wide")
+        split = small_button("↳ Ask another question", shape="wide")
         split.setToolTip("Ask another question here - this class moves to "
                          "the new step's no side.")
         split.clicked.connect(lambda: self._split(self._path))
@@ -456,10 +640,28 @@ class TreePanel(QWidget):
         比留白更糟。
         """
         node = self._model.tree_node(path) if self._model else None
-        if not isinstance(node, TreeStep) or str(node.when).strip():
-            return False               # 已經有問題了就不要蓋掉使用者的東西
-        rows = rows_reaching(display_tree(getattr(self._model, "decide", None)),
-                             self._rows, str(path)) if self._rows else []
+        if not isinstance(node, TreeStep):
+            return False
+        # 「已經有問題了就不要蓋掉使用者的東西」—— 但**常數不是問題**
+        # （U1，2026-08-24）：`0 >= 0` 對每一顆都成立，它不是使用者的工作成果，
+        # 是一個佔位值漏過來的東西。見 `viewmodel.is_a_constant_expression`。
+        if not is_a_constant_expression(node.when):
+            return False
+        # ⚠ **要用「這一步還不存在」的樹去問誰流到這裡**（2026-08-24）。
+        # 一個剛加進來的步驟 ``when`` 是空的，而 `_path_of` 走到它就會炸
+        # （`parse_expression("")`）—— 那一顆因此**整條路都不算**，於是
+        # `rows_reaching` 回空的、下面那段退回整批，而整批算出來的建議
+        # 正好就是**上一步已經問過的那一個**（實測：第一步 `glv_max > 67`，
+        # 第二步建議一模一樣的 `glv_max > 67`，切出來 0 yes / 13 no）。
+        #
+        # 把這一格暫時換成一片葉子，`_path_of` 就會**停在這裡**並回傳這條路徑
+        # —— 那正是「誰流到這一步」的定義。
+        # 不去動 `_path_of` 本身：`flow_counts` 靠它「走不動就整顆不計」
+        # 來保住守恆（見那一支的說明），改它會把那件事弄破。
+        tree = display_tree(getattr(self._model, "decide", None))
+        if tree is not None and str(path):
+            tree = self._model._tree_replace(tree, str(path), TreeLeaf(bin=0))
+        rows = rows_reaching(tree, self._rows, str(path)) if self._rows else []
         if len(rows) < 4:
             # 這一步下面的顆太少，算不出「哪個數字分得開」——**退回整批**。
             # 建議本來就只是一個起點（滑桿旁邊那一行會誠實地說這裡只有幾顆），

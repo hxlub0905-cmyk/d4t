@@ -221,3 +221,122 @@ def test_a_broken_decide_block_is_refused_at_read_time_not_silently_ignored():
     raw["decide"]["rules"] = [{"when": "a > 1"}]        # 少了 bin
     with pytest.raises(RecipeError):
         Recipe.from_json_dict(raw)
+
+
+# --------------------------------------------------------------------------- #
+# 判定段指到「沒有人算得出來的數字」要講一句（A2，2026-08-24）
+# --------------------------------------------------------------------------- #
+def _measuring_recipe(decide: dict) -> Recipe:
+    """一份真的會算出東西的 recipe：``load_patch`` → ``glv_stats``。
+
+    這一組測試問的是「validate 分不分得出**哪些名字算得出來**」，所以 recipe
+    必須真的有一張量測卡 —— 空的 route 會讓每一個名字都是未知的，那時候測試
+    看起來會過，但它什麼都沒有鑑別。
+    """
+    return Recipe.from_json_dict({
+        "version": 1, "recipe_id": "t",
+        "nodes": {
+            "load": {"step": "load_patch", "params": {}, "enabled": True},
+            "g": {"step": "glv_stats",
+                  "params": {"source": "test", "metrics": "glv_median,glv_mad"},
+                  "enabled": True},
+        },
+        "routes": {"ebi_patch": ["load", "g"]},
+        "edges": [["load", "test", "g", "source"]],
+        "score": {"expr": "", "threshold": 0.0, "bins": {"below": 0, "above": 1}},
+        "decide": decide,
+    })
+
+
+def _unknown(decide: dict):
+    return [i for i in validate(_measuring_recipe(decide))
+            if i.code == "unknown-feature"]
+
+
+def test_a_question_that_names_a_number_nobody_produces_is_reported():
+    """**F21-D 漏掉的那一半。**
+
+    `validate` 對舊的 ``score.expr`` 一直有 ``unknown-feature``，而加上
+    ``decide`` 之後那一段變成「有 decide 就整個跳過」—— 理由是對的
+    （有 decide 時 ``score.expr`` 根本不會跑），但替代的檢查從沒補上。
+
+    後果：打錯一個數字名字 → validate 全綠、畫布正常，而跑起來**每一顆都失敗**。
+    F25 把二元門檻的 UI 拿掉之後，``decide`` 是唯一走得到的路 —— 也就是說
+    唯一有人用的那條路，lint 覆蓋比沒人用的那條還少。
+    """
+    issues = _unknown({"let": [],
+                       "tree": {"when": "glv_medain > 6.5",   # 打錯字
+                                "yes": {"bin": 1}, "no": {"bin": 0}},
+                       "score": "glv_median"})
+    assert issues, "打錯的數字名字沒有被講出來"
+    assert "glv_medain" in issues[0].detail
+    assert issues[0].level == "warning"      # 跟舊的那一條同級
+
+
+def test_a_question_that_names_a_real_number_is_quiet():
+    """有鑑別力才算數：正確的名字不可以也被報。"""
+    assert not _unknown({"let": [],
+                         "tree": {"when": "glv_median > 6.5",
+                                  "yes": {"bin": 1}, "no": {"bin": 0}},
+                         "score": "glv_median"})
+
+
+def test_the_working_numbers_are_visible_to_the_lines_below_them():
+    """``let`` 是**累加**的：第 n 行看得到前 n−1 行（引擎就是照順序算的）。"""
+    assert not _unknown({
+        "let": [{"name": "ratio", "expr": "glv_median / glv_mad"}],
+        "tree": {"when": "ratio > 2", "yes": {"bin": 1}, "no": {"bin": 0}},
+        "score": "ratio"})
+
+
+def test_a_working_number_cannot_use_one_defined_below_it():
+    """反過來就不行 —— 引擎算到那一行時，下面那一行還不存在。
+
+    這一條是上一條的另一半：只驗「看得到前面」而不驗「看不到後面」的話，
+    一個永遠回空集合的實作也會過。
+    """
+    issues = _unknown({
+        "let": [{"name": "a1", "expr": "later * 2"},
+                {"name": "later", "expr": "glv_median"}],
+        "tree": {"when": "a1 > 1", "yes": {"bin": 1}, "no": {"bin": 0}},
+        "score": "a1"})
+    assert issues and "later" in issues[0].detail
+
+
+@pytest.mark.parametrize("extra, when", [
+    ({"fill": "0"}, "m_missing > 0"),      # F24 ⑤：有 fill 就多一個 _missing
+    ({"scale": "z"}, "m_raw > 5"),         # F23 期3：有 scale 就留一個 _raw
+], ids=["fill-writes-missing", "scale-keeps-raw"])
+def test_the_flags_a_working_number_produces_are_visible_too(extra, when):
+    """``fill`` 與 ``scale`` 各自多寫一個名字，而判定樹的第一步常常問的就是它們。
+
+    漏掉的話這條檢查會對一份**完全正確**的 recipe 大叫 —— 那比沒有檢查更糟。
+    """
+    let = dict({"name": "m", "expr": "glv_median"}, **extra)
+    assert not _unknown({"let": [let],
+                         "tree": {"when": when, "yes": {"bin": 9},
+                                  "no": {"bin": 0}},
+                         "score": "m"})
+
+
+def test_the_score_and_the_old_flat_rules_are_checked_as_well():
+    """判定段有三種地方寫得出表達式，三種都要檢查。"""
+    bad_score = _unknown({"let": [],
+                          "tree": {"when": "glv_median > 1",
+                                   "yes": {"bin": 1}, "no": {"bin": 0}},
+                          "score": "glv_mdian"})
+    assert bad_score and "glv_mdian" in bad_score[0].detail
+
+    bad_rule = _unknown({"let": [], "rules": [{"when": "nosuch > 1", "bin": 1}],
+                         "otherwise": {"bin": 0}, "score": "glv_median"})
+    assert bad_rule and "nosuch" in bad_rule[0].detail
+
+
+def test_a_question_that_does_not_even_parse_is_not_reported_twice():
+    """語法錯已經由 ``bad-rule`` 講過了 —— 同一件事講兩次是雜訊。"""
+    decide = {"let": [], "tree": {"when": "glv_median >", "yes": {"bin": 1},
+                                  "no": {"bin": 0}}, "score": "glv_median"}
+    issues = validate(_measuring_recipe(decide))
+    assert any(i.code == "bad-rule" for i in issues)
+    assert not [i for i in issues
+                if i.code == "unknown-feature" and "glv_median >" in i.detail]

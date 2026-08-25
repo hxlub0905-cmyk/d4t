@@ -547,16 +547,21 @@ def test_a_broken_combination_refuses_to_run_instead_of_failing_every_defect(win
 
 def test_adding_a_card_says_what_is_still_missing_and_who_provides_it(window):
     """卡片庫上那個 ``needs …`` 的灰字 badge 對不會寫 code 的人沒有動作可做
-    —— 他不知道那條流是誰產的。（改用 SNR map 觸發：它預設吃 ``diff``，
-    Load 之後直接加一定缺；subtract 的預設已改成 patch 加了就能跑。）"""
+    —— 他不知道那條流是誰產的。
+
+    ⚠ 觸發用的卡 2026-08-25 換過：以前是 `snr_map`（預設吃 `diff`），而
+    Z-map 刪掉之後**整個卡片庫沒有一張卡預設吃 `diff`** 了。現在用
+    `align_to`：它預設吃 `paired`，而那條流只有 `pair_source` 產得出來 ——
+    Load 之後直接加一定缺，形狀跟以前一字不差。
+    """
     window.selected_node = None        # 沒選卡（否則會接在選取卡後、指到它的流）
-    window.library.add_requested.emit("snr_map")
+    window.library.add_requested.emit("align_to")
     msg = window.status_text()
-    assert "diff" in msg
+    assert "paired" in msg
     # 名字從 registry 拿，不要抄一份 —— 這條測的是「訊息講得出是**哪一張卡**」，
     # 不是那張卡現在叫什麼（F16 把它從 `Compare two streams` 改成
     # `Image Combination`，而寫死的那份當場變成假失敗）。
-    assert get_step("subtract").label in msg, "要講出哪一張卡會產出這條流"
+    assert get_step("pair_source").label in msg, "要講出哪一張卡會產出這條流"
     assert "test" in msg and "ref" in msg, "也要講現在有哪些流可以改指"
 
 
@@ -571,11 +576,16 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end(qapp):
     # 前置鏈：能滿足所有 reads / regions 的最短已知順序
     PREREQ = {
         "subtract": ["align"],
-        "snr_map": ["align", "subtract"],
-        "cd_measure": ["align", "subtract", "snr_map"],
+        "glv_stats": ["align", "subtract"],
+        "cd_measure": ["align", "subtract", "glv_stats"],
+        # `find_defect` 的預設來源是 **diff**（不是 `test`），而那是刻意的：
+        # 差影像已經把結構減掉了，剩下的就是缺陷。它是唯一一張預設吃 diff 的
+        # 量測卡，所以前置鏈裡一定要有 `subtract`（同 `roi_reference` 一定要有
+        # `load_sidecar`）。
+        "find_defect": ["align", "subtract"],
         # GDS 那條路的上游不是影像處理，是**另一張 Input 卡**：label map 那條流
         # 由 `load_sidecar` 產（配對在 ingest 層做，見 F11 Region-3 第 2 步）。
-        "roi_from_mask": ["load_sidecar"],
+        "roi_reference": ["load_sidecar"],
         # 比較卡吃的是**區域**，所以上游要有一張出得了區域的 Region 卡。
         # `roi_cross` 是三張裡唯一不需要外部資料的（純規則）。
         "roi_compare": ["roi_cross"],

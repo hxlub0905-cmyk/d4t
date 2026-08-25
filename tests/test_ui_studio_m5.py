@@ -86,6 +86,28 @@ def ran(window, qapp):
     return window
 
 
+@pytest.fixture()
+def scored(ran, qapp):
+    """把畫面切回**分數的直方圖**，而且是門檻真的在決定事情的那條路。
+
+    ⚠ 兩件事 2026-08-24 變了，而底下那幾條門檻互動的測試各踩到一個：
+
+    * R2：那張圖預設不再開在「Score」上（樹的 recipe 沒有分數表達式，
+      開在 Score 上是一根柱子）—— 不切回去的話，``set_threshold(50)`` 會被
+      **夾進那個特徵的值域**（實測 50 變成 5.6）；
+    * R1：有判定樹的時候門檻線整條不畫，也拖不動 —— 那正是它該有的樣子，
+      所以要驗「拖得動」就得先回到二元那條路。
+    """
+    keep = ran.model.decide
+    ran.model.decide = None
+    ran.results.show_feature(ran.results.SCORE)
+    ran._refresh_spread()
+    qapp.processEvents()
+    yield ran
+    ran.model.decide = keep
+    ran._refresh_spread()
+
+
 def _mouse(widget, etype, pos, button=None, buttons=None):
     """建構並派送一顆滑鼠事件（離屏環境下比 QTest 可靠）。"""
     button = Qt.NoButton if button is None else button
@@ -131,7 +153,7 @@ def test_gallery_populates_after_trial(ran):
     # 排序欄位 = score + 這批真的量到的特徵
     keys = window.gallery.sort_keys()
     assert keys[0] == "score"
-    assert "snr_max" in keys
+    assert "glv_max" in keys
     assert "defect_id" in keys
     feats = set()
     for r in window.trial_results:
@@ -280,9 +302,9 @@ def test_chip_clears_filter_and_same_bar_refilters(ran):
     window.gallery.clear_filter()
 
 
-def test_real_click_on_bar_does_not_move_the_threshold(ran, qapp):
+def test_real_click_on_bar_does_not_move_the_threshold(scored, qapp):
     """按下 + 原地放開 = 點長條（篩 Gallery）；門檻一動也不動。"""
-    window = ran
+    window = scored
     hist = window.histogram
     hist.resize(520, 200)
     qapp.processEvents()
@@ -314,9 +336,9 @@ def test_real_click_on_bar_does_not_move_the_threshold(ran, qapp):
     window._score_filter = None
 
 
-def test_real_drag_still_commits_the_threshold(ran, qapp):
+def test_real_drag_still_commits_the_threshold(scored, qapp):
     """按下 + 拖過去 + 放開 = 拖門檻（老行為不能壞）。"""
-    window = ran
+    window = scored
     hist = window.histogram
     hist.resize(520, 200)
     qapp.processEvents()
@@ -347,20 +369,24 @@ def test_real_drag_still_commits_the_threshold(ran, qapp):
 # 5. 輸出動作
 # --------------------------------------------------------------------------- #
 def test_the_write_action_runs_the_whole_lot(qapp, synlot, tmp_path):
-    """工具列那一格從「Export…」變成「Run all & write」（F16 Stage 5c）。
+    """「跑整批然後照 Output 卡寫出去」這件事（M5 → F16 Stage 5c）。
 
     M5 的規則是「有結果才能輸出」，因為那時候那顆鈕開的是一個**吃結果**的
     對話框。現在它自己就是那一次跑 —— 所以前提跟 Run trial 一樣（有資料、
     流程跑得動），而**寫什麼、寫去哪**在畫布上的 Output 卡上。
+
+    ⚠ 入口是 `Run trial ▾` 選單裡那一項（`act_run_all`）與 Results 視窗上
+    同名的那顆。工具列上那顆重複的鈕 2026-08-24 拿掉了 —— 它跟選單那一項
+    是同一支 `run_all()`。
     """
     win = studio_mod.StudioWindow()
     try:
-        assert win.btn_run_all.isEnabled() is False      # 沒資料、畫布是空的
-        assert win.btn_run_all.toolTip().strip()
+        assert win.act_run_all.isEnabled() is False      # 沒資料、畫布是空的
+        assert win.act_run_all.toolTip().strip()
 
         assert win.load_dataset_path(synlot["klarf"], sync=True) is True
         assert win.load_recipe_path(str(EXAMPLE_RECIPE), sync=True) is True
-        assert win.btn_run_all.isEnabled() is True, "有資料、有流程就按得下去"
+        assert win.act_run_all.isEnabled() is True, "有資料、有流程就按得下去"
 
         # 加一張 Output 卡 → 按下去真的寫出東西
         out = tmp_path / "m5.csv"

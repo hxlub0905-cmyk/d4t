@@ -2,7 +2,7 @@
   "recipe_id": "die_to_die_basic",
   "version": 2,
   "author": "HX",
-  "description": "測試用的最小 recipe（不是給使用者看的範例）。ROI 卡在 F8 第五輪收斂成 Profile / Template / GDS，所以這裡量的是整張圖 —— 這幾條 e2e 測的是**引擎跑不跑得完、分數算不算得出來**，不是某一張 ROI 卡的行為。",
+  "description": "\u6e2c\u8a66\u7528\u7684\u6700\u5c0f recipe\uff08\u4e0d\u662f\u7d66\u4f7f\u7528\u8005\u770b\u7684\u7bc4\u4f8b\uff09\u3002ROI \u5361\u5728 F8 \u7b2c\u4e94\u8f2a\u6536\u6582\u6210 Profile / Template / GDS\uff0c\u6240\u4ee5\u9019\u88e1\u91cf\u7684\u662f\u6574\u5f35\u5716 \u2014\u2014 \u9019\u5e7e\u689d e2e \u6e2c\u7684\u662f**\u5f15\u64ce\u8dd1\u4e0d\u8dd1\u5f97\u5b8c\u3001\u5206\u6578\u7b97\u4e0d\u7b97\u5f97\u51fa\u4f86**\uff0c\u4e0d\u662f\u67d0\u4e00\u5f35 ROI \u5361\u7684\u884c\u70ba\u3002",
   "routes": {
     "ebi_patch": [
       "load",
@@ -10,7 +10,6 @@
       "norm",
       "sub",
       "dn",
-      "snr",
       "cd",
       "glv"
     ]
@@ -51,14 +50,6 @@
         "method": "median",
         "ksize": 3,
         "streams": "diff"
-      },
-      "enabled": true
-    },
-    "snr": {
-      "step": "snr_map",
-      "params": {
-        "window": 15,
-        "exclude_border": 8
       },
       "enabled": true
     },

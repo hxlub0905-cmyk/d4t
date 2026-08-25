@@ -24,11 +24,14 @@
 （快取切點、驗證順序）。**使用者看到的**分組是另一個軸 `Step.group`：
 
 ```
-Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output
+Input → Enhance → ROI → Measure → Compare → ADC → Output
 ```
 
-（F16，2026-08-20 使用者定稿。`ROI` 的內部 id 仍是 `region` —— 顯示名與 id 是
-兩件事。）
+（**七段**。F16 2026-08-20 使用者定稿的是八段；`Algo` 那一段在 F24 §5 解散進
+判定（算式住進 `decide.let` 的 working numbers、補值變成那一行的「missing ⇒」
+屬性、跨顆換算變成 `Let.scale`），2026-08-24 使用者點頭。`GROUP_ALGO` 這個常數
+留著給外掛卡相容，但它不在 `GROUP_ORDER` 裡。`ROI` 的內部 id 仍是 `region`
+—— 顯示名與 id 是兩件事。）
 
 因為 category 描述的是「這張卡吐什麼型別」，不是「使用者想解決什麼問題」。
 兩個軸各有各的用途，不要合併。新卡片放哪一組：看它吃什麼、吐什麼
@@ -85,7 +88,7 @@ Context 有三層資料：**影像流 images**（名字 → 像素陣列，綁�
 ```
 影像流通道（像素）  Load ─→ Enhance ─→ Compare ─→ 'diff' ──────┐
                                                               ├─→ 量測卡 ─→ 特徵 ─→ score
-區域通道（哪裡）    roi_cross / roi_template / roi_from_mask      │   source='diff'（流）
+區域通道（哪裡）    roi_cross / roi_template / roi_reference      │   source='diff'（流）
                       └╌→ 具名區域 'cross' ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┘   roi='cross'（名字，
                           （畫布上是虛線）                            畫布上有線）
                             └─→ roi_mask ─→ 'mask' 流 ─→ Normalize 的 use_within（影像段）
@@ -107,7 +110,7 @@ Context 有三層資料：**影像流 images**（名字 → 像素陣列，綁�
 晶格相位逐顆不同 —— recipe 存「怎麼找」，定位卡**每顆重新定位**；
 (2) 比例座標讓同一份 recipe 在 128² 與 512² 上都對（F7-4 的坑）。
 
-定位法契約：`roi_cross`（純規則）、`roi_template`（Golden Cell）、`roi_from_mask`（GDS）
+定位法契約：`roi_cross`（純規則）、`roi_template`（Golden Cell）、`roi_reference`（重複晶格／GDS，一張卡兩個 method）
 —— **出口相同：吐具名區域**（`resolve_regions_out`），下游零改動。
 新 image source 進來的 checklist：Load 層吐具名流 → 挑一個定位法吐具名區域 →
 下游（量測/mask/overlay/region check）不用動。
@@ -150,12 +153,12 @@ d4t/
 │   ├── welcome.py           #   首啟導覽 + 範例 recipe 庫對話框
 │   ├── workers.py           #   載入/預覽(請求合併)/試跑/寫出 背景執行緒
 │   └── studio.py app.py     #   主視窗 + 進入點
-├── tests/                   # 1250+ 個測試，全部用合成資料
+├── tests/                   # 2900+ 個測試，全部用合成資料
 │   └── fixtures/recipes/    #   e2e 用的最小 recipe（**測試用，不是教學範例**）
 ├── tools/                   # make_sample(_rsem).py 合成資料；離線安裝三件套：
 │                            #   fetch_wheels.py（有網路的機器抓）→ install_offline.py
 │                            #   （air-gapped 機器裝）→ doctor.py（環境自檢）
-├── fab_probe/               # 廠內格式探測腳本（stdlib-only、純文字輸出），見 §8
+├── fab_probe/               # 廠內格式探測腳本（stdlib-only、純文字輸出）
 ├── docs/plans/              # 進行中的開發計畫（F0 = master plan、F8）
 └── docs/history/            # 封存：按月的 SESSION_LOG、做完的計畫書（**不進搬運包**）
 ```

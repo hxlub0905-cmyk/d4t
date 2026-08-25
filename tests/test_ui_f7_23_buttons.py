@@ -473,7 +473,9 @@ def test_run_trial_no_longer_leaves_half_of_itself_to_qt(qapp):
         assert win.btn_trial.menu() is None
         assert win.btn_trial_more.menu() is None
         assert win.btn_trial.popupMode() != QToolButton.MenuButtonPopup
-        assert [a.text() for a in win.trial_menu.actions()] == ["Run all defects"]
+        # 名字 2026-08-24 改成跟 Results 視窗那顆逐字相同（工具列上那顆重複的
+        # 「Run all & write」同時拿掉了 —— 兩邊是同一支 `run_all()`）。
+        assert [a.text() for a in win.trial_menu.actions()] == ["Run all && write"]
     finally:
         win.close()
 

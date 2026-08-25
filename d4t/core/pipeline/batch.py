@@ -30,12 +30,13 @@ from .context import BatchContext, Context
 from .expression import parse_expression
 from .step import REGISTRY, SCALE_LOT
 from .engine import (
-    _eval_decision, _safe_num, result_to_json_dict, run_defect,
+    _eval_score, _safe_num, result_to_json_dict, run_defect,
     run_defect_cached,
 )
 from .recipe import Recipe, execution_order
 
-__all__ = ["run_batch", "apply_lot_scaling", "pin_cv2_deterministic"]
+__all__ = ["run_batch", "apply_lot_scaling", "redecide",
+           "pin_cv2_deterministic"]
 
 # d4t/core/pipeline/batch.py → 上四層 = repo root（spawn 模式 sys.path 保險）
 _REPO_ROOT = os.path.abspath(
@@ -372,7 +373,10 @@ def _stat_rows(rows, name: str, expr: str):
         if not r.get("ok") or r.get("bin") is None:
             continue
         feats = r.get("features") or {}
-        v = feats.get(name)
+        # ⚠ **有 ``_raw`` 就用它**（F4，2026-08-24）。這一支跑第二次的時候，
+        # ``feats[name]`` 裝的已經是換算過的值 —— 拿它再算一次整批統計，
+        # 得到的是「z 分數的 z 分數」。原始量測值一直在 ``<name>_raw``。
+        v = feats.get("%s_raw" % name, feats.get(name))
         if not isinstance(v, (int, float)):
             continue
         if any(feats.get("%s_missing" % var) == 1
@@ -380,6 +384,59 @@ def _stat_rows(rows, name: str, expr: str):
             continue
         out.append(float(v))
     return out
+
+
+def redecide(recipe: Recipe, rows) -> int:
+    """用**已經算好的 features** 重跑一次判定（不重跑影像），就地改寫 ``rows``。
+
+    回傳重算成功的顆數。
+
+    **判定邏輯只有一個家**（F3，2026-08-24）
+    ----------------------------------------
+    在這之前有兩份：這一支（`apply_lot_scaling` 裡的那一段）走
+    :func:`engine._eval_score`，而 `store.rescore` 自己實作了一次 ——
+    讀 ``recipe.score``、算 ``expr``、跟 ``threshold`` 比、分 below/above，
+    **從來沒有看過 ``decide``**。F21–F25 把整個判定段搬進 `DecideSpec` 之後
+    那一份就漂了：一份判定樹 recipe 走 rescore 會拿那個廢棄的 ``score`` 區塊
+    算完，回報 ``n_errors: 0``，而每一顆都是 bin 0 —— 跑得完、有數字、
+    而且是錯的。
+
+    所以現在兩邊都叫這一支，而它叫的是引擎那一支
+    （:func:`engine._eval_score` 自己會分流到 `_eval_decision`）。
+
+    ``scale`` 的行為什麼不重算
+    --------------------------
+    標了「跟整批比」的 ``let`` 行，值是**整批收齊之後**才算得出來的
+    （`apply_lot_scaling`），逐顆重算只會拿回換算前的那個數字。它們的值在
+    ``features`` 裡已經是最終的，所以這裡把它們從 ``let`` 拿掉 ——
+    沒換算的行照原順序重算，用到換算值時拿到的是新值（跟規則看到的一致）。
+    """
+    decide = getattr(recipe, "decide", None)
+    if decide is not None:
+        recipe = _replace(recipe, decide=_replace(
+            decide, let=[x for x in decide.let
+                         if not str(getattr(x, "scale", "") or "")]))
+    redone = 0
+    for r in rows:
+        if not r.get("ok") or r.get("bin") is None:
+            continue
+        ctx = Context()
+        ctx.features.update({k: v for k, v in (r.get("features") or {}).items()
+                             if isinstance(v, (int, float))})
+        try:
+            score, b = _eval_score(recipe, ctx)
+        except Exception as e:             # noqa: BLE001 — 鐵則 7：單顆失敗
+            r["ok"] = False
+            r["error"] = "[score] %s" % e
+            r["score"], r["bin"] = None, None
+            continue
+        feats = dict(r.get("features") or {})
+        feats.update({k: _safe_num(v) for k, v in ctx.features.items()})
+        r["features"] = feats
+        r["score"] = _safe_num(score)
+        r["bin"] = int(b)
+        redone += 1
+    return redone
 
 
 def apply_lot_scaling(recipe: Recipe, rows) -> int:
@@ -418,44 +475,29 @@ def apply_lot_scaling(recipe: Recipe, rows) -> int:
             mad = _median([abs(v - med) for v in stat_vals])
             spread = 1.4826 * mad          # 同 algo/enhance.py 的一致性因子
         n = len(stat_vals)
+        raw_key = "%s_raw" % name
         for r in rows:
             feats = r.get("features") or {}
-            v = feats.get(name)
+            # ⚠ **``_raw`` 是冪等的錨**（F4，2026-08-24）。這一支以前無條件
+            # 覆寫它，所以跑第二次時寫進去的是「已經 z 化過的值」——
+            # 真正的量測值就此消失，而 ``name`` 被換算了兩次。今天 `run_batch`
+            # 的兩條路徑各只叫一次，但這是公開 API（`pipeline.__all__`），
+            # 而 F3 把 rescore 接上判定引擎之後它會有第二個呼叫點。
+            # 規矩：**已經有 ``_raw`` 就從它算起，而且不覆寫它。**
+            v = feats.get(raw_key, feats.get(name))
             if not isinstance(v, (int, float)):
                 continue
-            feats["%s_raw" % name] = float(v)
+            v = float(v)
+            feats.setdefault(raw_key, v)
             if item.scale == "z":
-                feats[name] = ((float(v) - med) / spread) if spread > 0 else 0.0
+                feats[name] = ((v - med) / spread) if spread > 0 else 0.0
             else:                          # "percentile"（值域 0–100，midrank）
-                less = sum(1 for s in stat_vals if s < float(v))
-                equal = sum(1 for s in stat_vals if s == float(v))
+                less = sum(1 for s in stat_vals if s < v)
+                equal = sum(1 for s in stat_vals if s == v)
                 feats[name] = 100.0 * (less + 0.5 * equal) / n
 
-    # ---- 重算判定（rescore 那條路：只有數字，沒有影像）----
-    decide2 = _replace(decide, let=[x for x in decide.let
-                                    if not str(getattr(x, "scale", "") or "")])
-    recipe2 = _replace(recipe, decide=decide2)
-    redone = 0
-    for r in rows:
-        if not r.get("ok") or r.get("bin") is None:
-            continue
-        ctx = Context()
-        ctx.features.update({k: v for k, v in (r.get("features") or {}).items()
-                             if isinstance(v, (int, float))})
-        try:
-            score, b = _eval_decision(recipe2, ctx)
-        except Exception as e:             # noqa: BLE001 — 鐵則 7：單顆失敗
-            r["ok"] = False
-            r["error"] = "[score] %s" % e
-            r["score"], r["bin"] = None, None
-            continue
-        feats = dict(r.get("features") or {})
-        feats.update({k: _safe_num(v) for k, v in ctx.features.items()})
-        r["features"] = feats
-        r["score"] = _safe_num(score)
-        r["bin"] = int(b)
-        redone += 1
-    return redone
+    # ---- 重算判定（只有數字，沒有影像）—— 跟 rescore 同一支（F3）----
+    return redecide(recipe, rows)
 
 
 # --------------------------------------------------------------------------- #
@@ -464,7 +506,8 @@ def apply_lot_scaling(recipe: Recipe, rows) -> int:
 def run_batch_steps(recipe: Recipe, dataset: Any,
                     rows: Sequence[Dict[str, Any]],
                     kind: Optional[str] = None,
-                    registry: Optional[Dict[str, Any]] = None) -> BatchContext:
+                    registry: Optional[Dict[str, Any]] = None,
+                    cache_dir: Optional[str] = None) -> BatchContext:
     """整批跑完之後，把**整批一次**（``scale == SCALE_LOT``）的卡各跑一次。
 
     **這一支跟 :func:`run_batch` 是分開的兩件事，而那是刻意的。**
@@ -479,12 +522,23 @@ def run_batch_steps(recipe: Recipe, dataset: Any,
 
     一張卡出錯**不影響其他卡**（鐵則 7 的跨顆版）：訊息記進 ``bctx.errors``，
     其餘照跑，而整批的結果本來就已經在 ``rows`` 裡了。
+
+    ``cache_dir``：**出圖那幾張卡要重跑一次 pipeline 才拿得到像素**（結果表裡
+    只有數字），而那一趟的影像段跟剛才那一批是**逐位元組相同**的 —— 快取本來
+    就在（`run_batch` 用的那一份），只是沒接上（F29 C4）。接上之後第二趟只跑
+    算法段：6000 顆的報表因此不是「再跑一次整批」。
     """
     from .context import BatchContext
 
     reg = REGISTRY if registry is None else registry
     k = str(kind if kind is not None else getattr(dataset, "kind", "") or "")
     bctx = BatchContext(rows=list(rows), dataset=dataset, recipe=recipe, kind=k)
+    if cache_dir:
+        # 兩格都要：`run_defect_cached` 吃 (cache, token)，而 token 認的是
+        # **這一份資料**（換一份 lot 而簽章看不見的話，第二趟會拿到上一份的
+        # 影像 —— 鐵則 9 的形狀）。
+        bctx.cache = StageCache(str(cache_dir))
+        bctx.dataset_token = _dataset_token_for(dataset)
     # 分流（F23）：route_by 存在時 route 鍵不是 kind，而是 map/default 指到的
     # 那幾條 —— 每一條上的跨顆卡都要跑到（同一個節點出現在兩條 route 上時
     # 只跑一次：Output 卡寫檔是不可逆的，寫兩次不是「再保險一次」是覆寫）。

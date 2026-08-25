@@ -2,7 +2,7 @@
   "recipe_id": "dual_route_basic",
   "version": 1,
   "author": "HX",
-  "description": "測試用的最小 recipe（不是給使用者看的範例）。ebi_patch 那條有機台附的 ref，所以走「相減 → 去噪 → Z-map → CD → GLV」。rsem 那條**沒有 ref**：F16 拿掉 `pattern_ref` 之後，單張影像再也造不出參考圖，所以它改成直接量單張影像（Z-map → CD → GLV）。那條 route 因此**不再是一個準確率的證據** —— 見 tests/test_e2e_dual_route.py。 rsem 那條的影像流叫 `test` 不是 `single`：那條 route 上的 load 卡是由 `_migrate_split_load_cards` 從共用的 `load_patch` 換成 `load_single` 的，而它把輸出名設成 `test`（見那支遷移的 docstring）——這份 fixture 同時是**那道遷移的共用節點案例**。",
+  "description": "\u6e2c\u8a66\u7528\u7684\u6700\u5c0f recipe\uff08\u4e0d\u662f\u7d66\u4f7f\u7528\u8005\u770b\u7684\u7bc4\u4f8b\uff09\u3002ebi_patch \u90a3\u689d\u6709\u6a5f\u53f0\u9644\u7684 ref\uff0c\u6240\u4ee5\u8d70\u300c\u76f8\u6e1b \u2192 \u53bb\u566a \u2192 Z-map \u2192 CD \u2192 GLV\u300d\u3002rsem \u90a3\u689d**\u6c92\u6709 ref**\uff1aF16 \u62ff\u6389 `pattern_ref` \u4e4b\u5f8c\uff0c\u55ae\u5f35\u5f71\u50cf\u518d\u4e5f\u9020\u4e0d\u51fa\u53c3\u8003\u5716\uff0c\u6240\u4ee5\u5b83\u6539\u6210\u76f4\u63a5\u91cf\u55ae\u5f35\u5f71\u50cf\uff08Z-map \u2192 CD \u2192 GLV\uff09\u3002\u90a3\u689d route \u56e0\u6b64**\u4e0d\u518d\u662f\u4e00\u500b\u6e96\u78ba\u7387\u7684\u8b49\u64da** \u2014\u2014 \u898b tests/test_e2e_dual_route.py\u3002 rsem \u90a3\u689d\u7684\u5f71\u50cf\u6d41\u53eb `test` \u4e0d\u662f `single`\uff1a\u90a3\u689d route \u4e0a\u7684 load \u5361\u662f\u7531 `_migrate_split_load_cards` \u5f9e\u5171\u7528\u7684 `load_patch` \u63db\u6210 `load_single` \u7684\uff0c\u800c\u5b83\u628a\u8f38\u51fa\u540d\u8a2d\u6210 `test`\uff08\u898b\u90a3\u652f\u9077\u79fb\u7684 docstring\uff09\u2014\u2014\u9019\u4efd fixture \u540c\u6642\u662f**\u90a3\u9053\u9077\u79fb\u7684\u5171\u7528\u7bc0\u9ede\u6848\u4f8b**\u3002",
   "routes": {
     "ebi_patch": [
       "load",
@@ -11,13 +11,11 @@
       "align",
       "sub",
       "dn",
-      "snr",
       "cd",
       "glv_patch"
     ],
     "rsem": [
       "load",
-      "snr_rsem",
       "cd_rsem",
       "glv_rsem"
     ]
@@ -69,14 +67,6 @@
       },
       "enabled": true
     },
-    "snr": {
-      "step": "snr_map",
-      "params": {
-        "window": 15,
-        "exclude_border": 8
-      },
-      "enabled": true
-    },
     "cd": {
       "step": "cd_measure",
       "params": {
@@ -102,16 +92,6 @@
         "source": "test",
         "metrics": "glv_max,glv_median,glv_std",
         "roi": ""
-      },
-      "enabled": true
-    },
-    "snr_rsem": {
-      "step": "snr_map",
-      "params": {
-        "source": "test",
-        "window": 15,
-        "exclude_border": 8,
-        "out": "snr_map"
       },
       "enabled": true
     },

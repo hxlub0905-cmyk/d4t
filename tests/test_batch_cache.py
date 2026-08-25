@@ -88,7 +88,6 @@ def make_recipe(cd_prefix: str = "", search_radius: int = 8) -> Recipe:
         "sub": RecipeNode("sub", "subtract", {}),
         "dn": RecipeNode("dn", "denoise",
                          {"streams": "diff", "method": "median", "ksize": 3}),
-        "snr": RecipeNode("snr", "snr_map", {"window": 15, "exclude_border": 8}),
         # `cd_prefix` 落在**算法段**（checkpoint 之後）—— 改它不該讓影像段
         # 重算。以前這個位置是一個叫 `snr_threshold` 的參數，而它**沒有被任何
         # 節點用到**：兩份 recipe 其實一模一樣，於是「簽章不變」是拿一份 recipe
@@ -102,7 +101,7 @@ def make_recipe(cd_prefix: str = "", search_radius: int = 8) -> Recipe:
     return Recipe(
         recipe_id="m2_batch_cache_test",
         routes={KIND: ["load", "norm_ref", "norm", "align", "sub", "dn",
-                       "snr", "cd", "glv"]},
+                       "cd", "glv"]},
         nodes=nodes,
         score=ScoreSpec(expr="glv_max + (glv_max - glv_q99)", threshold=50.0,
                         bins={"below": 0, "above": 1}),
@@ -224,11 +223,15 @@ def test_algo_param_change_keeps_cache(ds, synlot, tmp_path):
     sig_a, ck_a = image_segment_signature(rec_a, KIND)
     sig_b, ck_b = image_segment_signature(rec_b, KIND)
     assert sig_a == sig_b
-    # load, norm_ref, norm, align, sub, dn, **snr** 之後（F17-③）。
-    # checkpoint 現在問的是「這張卡會不會寫出影像流」而不是它的 `category`
-    # 標籤 —— 而 `snr_map` 是 `algo` 卻真的吐一條 `snr_map` 影像流。它因此
-    # 落進影像段，那張圖從此也快取得到（以前每一顆都重算）。
-    assert ck_a == ck_b == 7
+    # load, norm_ref, norm, align, sub, dn 之後。
+    #
+    # ⚠ **這個數字 2026-08-25 從 7 變成 6，而那不是規則變了** —— 是
+    # `snr_map`（Z-map）那張卡刪掉了。checkpoint 問的仍然是「這張卡會不會寫出
+    # 影像流」而不是它的 `category` 標籤（F17-③），只是**卡片庫裡現在沒有一張
+    # `category=algo` 卻會寫影像流的卡了** —— 那條規則因此在真的卡片上看不到，
+    # 由底下 `test_the_checkpoint_asks_about_streams_not_the_category_label`
+    # 用一張臨時註冊的卡守著。
+    assert ck_a == ck_b == 6
 
     token = dataset_token(synlot["klarf"])
     cache = StageCache(str(tmp_path / "cache"))
@@ -531,11 +534,11 @@ def test_feature_ownership_survives_a_cache_hit(ds, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# F17-③：checkpoint 移到 snr_map 之後，冷跑仍然 == 熱跑
+# F17-③：checkpoint 看的是「寫不寫影像流」，不是 category 標籤
 # ---------------------------------------------------------------------------
 def test_the_moved_checkpoint_gives_the_same_numbers_hot_and_cold(ds, synlot,
                                                                   tmp_path):
-    """`snr_map` 進了影像段 —— 它的輸出從此走快取，而那是這一項唯一的風險面。
+    """影像段的最後一張卡的輸出走快取 —— 而那是這一項唯一的風險面。
 
     快取住的東西多一條流，就多一次「熱跑拿到的跟冷跑不一樣」的機會
     （F9-10 的那個坑就是這個形狀：快照少存了一份東西，只在分支時發作）。

@@ -11,6 +11,13 @@ dependencies = ["numpy>=1.24", "opencv-python>=4.8", "tifffile>=2023.7", "openpy
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
+# Studio（PySide6）**刻意不在 dependencies 裡**：CLI 那條路
+# （`python -m d4t run`）不需要 Qt，而公司機上有「只要跑批次」的情境。
+# 但這件事以前是隱性的 —— `pip install .` 裝出來的東西 CLI 跑得動、
+# Studio 開不起來，而錯誤訊息是一個 ImportError。列成一個具名的 extra
+# 之後它變成明說的：`pip install .[gui]`。
+# ⚠ `requirements.txt`（開發環境）仍然含 PySide6，兩份的用途不一樣。
+gui = ["PySide6>=6.5"]
 
 [tool.setuptools.packages.find]
 include = ["d4t*"]

@@ -46,7 +46,7 @@ from .engine import (
     run_defect_cached,
 )
 from .cache import StageCache
-from .batch import apply_lot_scaling, run_batch, run_batch_steps
+from .batch import apply_lot_scaling, redecide, run_batch, run_batch_steps
 
 __all__ = [
     # context
@@ -71,4 +71,5 @@ __all__ = [
     "run_batch_steps",
     # 「跟整批比」的兩趟判定（F23 期3）
     "apply_lot_scaling",
+    "redecide",
 ]

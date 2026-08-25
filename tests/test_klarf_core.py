@@ -154,3 +154,55 @@ def test_defect_image_filename_absent_on_12_token_rows():
     doc = klarf_core.load(KLARF12_WITH_IMAGES)
     # 1.2 IMAGELIST rows carry numeric image tokens, not Image {...} blocks
     assert all(doc.defect_image_filename(r) is None for r in doc.defects)
+
+
+# ---------------------------------------------------------------- atomic save
+def test_save_is_atomic_and_lossless(tmp_path):
+    """鐵則 5：檔案寫入一律 atomic（``.tmp`` + ``os.replace``）。
+
+    ``KlarfDoc.save`` 曾經是整個 ``core/`` 裡唯一的例外 —— 直接
+    ``open(path, 'w')`` 寫進去（那是上游 KLIP 的寫法）。這個檔案上那條規矩
+    特別重：KLARF 寫回不可逆，而寫到一半斷掉留下的是一份**截斷的 KLARF**，
+    它蓋掉的是廠內唯一的一手資料。
+    """
+    src = tmp_path / "in.001"
+    # ⚠ 用內建的 open 而不是 pathlib 的 write_text —— 後者的 newline 關鍵字
+    # 是 **3.10+**，而公司機的 Python 版本不由我們決定（`AGENTS.md` §3）。
+    # `tests/test_offline_tools.py` 有一條在守這件事，它當場抓到了第一版
+    # （而且連我這段註解裡的字面寫法都抓 —— 那個守門是掃原始碼文字的，
+    #  對這種事寧可過度警覺）。
+    with open(str(src), "w", encoding="utf-8", newline="") as f:
+        f.write(KLARF12_WITH_IMAGES)
+    doc = klarf_core.load(str(src))
+
+    out = tmp_path / "out.001"
+    doc.save(str(out))
+
+    # 什麼都沒改 → 逐位元組相同（span-splice 的承諾）
+    assert out.read_bytes() == src.read_bytes()
+    # 而且不留下 .tmp
+    assert not (tmp_path / "out.001.tmp").exists()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["in.001", "out.001"]
+
+
+def test_save_leaves_the_old_file_intact_when_writing_fails(tmp_path,
+                                                            monkeypatch):
+    """atomic 要換來的正是這件事：**沒有中間態**。
+
+    寫到一半炸掉的時候，目標路徑上要嘛是舊的完整檔案、要嘛是新的完整檔案。
+    非 atomic 的版本在這裡會留下一份被截斷的 KLARF。
+    """
+    target = tmp_path / "keep.001"
+    with open(str(target), "w", encoding="utf-8", newline="") as f:
+        f.write(KLARF12_WITH_IMAGES)
+    before = target.read_bytes()
+
+    doc = klarf_core.load(str(target))
+    monkeypatch.setattr(doc, "to_text",
+                        lambda: (_ for _ in ()).throw(RuntimeError("disk full")))
+    try:
+        doc.save(str(target))
+    except RuntimeError:
+        pass
+
+    assert target.read_bytes() == before, "原檔被寫壞了"

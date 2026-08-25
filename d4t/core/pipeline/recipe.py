@@ -52,6 +52,41 @@ class RecipeError(ValueError):
     """Recipe 結構性錯誤（循環、未知 route、JSON 缺欄位…）。"""
 
 
+#: 判定樹的巢狀上限。**存在的理由是訊息，不是安全。**
+#:
+#: `_tree_from_json` / `_tree_depth` / `_eval_decision` 都是遞迴的，所以一份
+#: 巢狀夠深的 JSON 會撞 Python 的遞迴上限 —— 而 `RecursionError` 不是
+#: `RecipeError`，讀檔那條路接不住它，使用者看到的是一段 traceback（推廣鐵則）。
+#: 200 層遠遠超過任何人畫得出來的判定樹（F24 的驗收案例最深是 4 層），
+#: 所以擋在這裡的一定是寫壞的檔案，而它現在會拿到一句白話。
+MAX_TREE_DEPTH = 200
+
+
+def _as_number(raw: Any, where: str, cast, kind: str):
+    """把 JSON 裡的一個值轉成數字，**轉不動就講人話**。
+
+    recipe 是使用者留在磁碟上的檔案，而它會被手改（這個 repo 沒有存檔功能，
+    所以手改是唯一的編輯方式）。直接 ``int()`` / ``float()`` 下去的話，一個
+    打錯的欄位吐出來的是 ``invalid literal for int() with base 10: '1.0'`` ——
+    那句話沒有講出是**哪一個欄位**，而使用者是不會寫 code 的製程工程師。
+    """
+    if isinstance(raw, bool):      # bool 是 int 的子類，但當數字用一定是筆誤
+        raise RecipeError("%s must be %s, got the true/false value %r"
+                          % (where, kind, raw))
+    try:
+        return cast(raw)
+    except (TypeError, ValueError):
+        raise RecipeError("%s must be %s, got %r" % (where, kind, raw))
+
+
+def _as_int(raw: Any, where: str) -> int:
+    return _as_number(raw, where, int, "a whole number")
+
+
+def _as_float(raw: Any, where: str) -> float:
+    return _as_number(raw, where, float, "a number")
+
+
 def _app_version() -> str:
     """現在跑的這一版 d4t。"""
     from d4t import __version__
@@ -204,12 +239,22 @@ def _tree_to_json(node: Any) -> Dict[str, Any]:
             "no": _tree_to_json(node.no)}
 
 
-def _tree_from_json(raw: Any, where: str = "decide.tree") -> Any:
+def _tree_from_json(raw: Any, where: str = "decide.tree", depth: int = 0) -> Any:
     """讀一個樹節點。格式錯**當場講**（同 `_decide_from_json` 的理由）。
 
     判準：有 ``when`` 是步驟（要有 ``yes`` 與 ``no``）、有 ``bin`` 是葉子 ——
     兩個都有或都沒有就是寫壞了，不猜。
+
+    ``depth`` 擋的是 :data:`MAX_TREE_DEPTH`（見那裡的說明）：這一支是遞迴的，
+    而撞到 Python 遞迴上限吐出來的 ``RecursionError`` 不是 ``RecipeError``，
+    讀檔那條路接不住。
     """
+    if depth > MAX_TREE_DEPTH:
+        # ``where`` 到這裡已經是 200 段 ".no" —— 印全長只會把訊息淹掉。
+        raise RecipeError(
+            "the decision tree is nested more than %d levels deep - that is "
+            "not a tree anyone drew, so the file is almost certainly damaged "
+            "(the path starts %s...)" % (MAX_TREE_DEPTH, where[:60]))
     if not isinstance(raw, dict):
         raise RecipeError("%s must be an object (dict), got %s"
                           % (where, type(raw).__name__))
@@ -219,15 +264,17 @@ def _tree_from_json(raw: Any, where: str = "decide.tree") -> Any:
                           "step (when/yes/no) or a leaf (bin/label), not both"
                           % where)
     if has_bin:
-        return TreeLeaf(bin=int(raw["bin"]),
+        return TreeLeaf(bin=_as_int(raw["bin"], where + ".bin"),
                         label=str(raw.get("label", "") or ""))
     if has_when:
         if "yes" not in raw or "no" not in raw:
             raise RecipeError("%s is a step ('when') but is missing its "
                               "'yes' or 'no' side" % where)
         return TreeStep(when=str(raw["when"]),
-                        yes=_tree_from_json(raw["yes"], where + ".yes"),
-                        no=_tree_from_json(raw["no"], where + ".no"))
+                        yes=_tree_from_json(raw["yes"], where + ".yes",
+                                            depth + 1),
+                        no=_tree_from_json(raw["no"], where + ".no",
+                                           depth + 1))
     raise RecipeError("%s must have either 'when' (a step) or 'bin' (a leaf)"
                       % where)
 
@@ -546,6 +593,80 @@ def _decide_issues(recipe: "Recipe", decide: "DecideSpec") -> List["Issue"]:
     return out
 
 
+def _decide_unknown(decide: "DecideSpec", feats: Set[str],
+                    kind: str) -> List["Issue"]:
+    """判定段的表達式指到**沒有人算得出來的數字**時講一句（F21-D 漏掉的那一半）。
+
+    為什麼這一段一定要有
+    --------------------
+    `validate` 對舊的 ``score.expr`` 一直有這道檢查（``unknown-feature``），
+    而 F21-D 加上 ``decide`` 之後，那一段變成「有 decide 就整個跳過」——
+    理由是對的（有 decide 的時候 ``score.expr`` 根本不會跑），但**替代的檢查
+    從來沒有補上**。於是打錯一個數字名字的下場是：
+
+    * ``validate`` 全綠、畫布上一片正常；
+    * 跑起來**每一顆都失敗**，訊息是 ``variable 'nosuch' is not available``。
+
+    而 F25 把二元門檻的 UI 整個拿掉之後，``decide`` 是使用者唯一走得到的路
+    —— 也就是說唯一有人用的那條路，lint 覆蓋比沒人用的那條還少。
+
+    看得到哪些名字（順序是規格，不是實作細節）
+    ------------------------------------------
+    跟 `engine._eval_decision` 逐項對齊：
+
+    * 卡片算出來的特徵（``feats``）；
+    * ``score`` —— 判定段自己寫進 ``ctx.features`` 的那一個；
+    * ``let`` 的名字，而且**是累加的**：第 n 行看得到前 n−1 行，看不到自己
+      後面的（引擎就是照順序算的）；
+    * 有 ``fill`` 的 let 會多寫一個 ``<名字>_missing``（F24 ⑤），
+      有 ``scale`` 的會多留一個 ``<名字>_raw``（F23 期3）——
+      判定樹的第一步常常問的就是 ``_missing``。
+
+    ⚠ **級別是 warning 不是 error**，跟舊的那一條一致：一份 recipe 可以在
+    「還沒接上那張量測卡」的中間狀態被打開，那時候擋住編輯比講一句更煩。
+    """
+    out: List[Issue] = []
+    seen = set(feats) | {"score"}
+
+    def check(where: str, text: str) -> None:
+        try:
+            e = parse_expression(str(text))
+        except ExpressionError:
+            return                      # 語法錯已經由 `_decide_issues` 講過了
+        unknown = sorted(e.variables - seen)
+        if unknown:
+            out.append(Issue(
+                code="unknown-feature", level="warning", node_id=None,
+                title="The decision uses a number nobody produces",
+                detail="route '%s': %s uses %s, but no card in this route "
+                       "writes those out (available here: %s). Check the "
+                       "spelling, or add the card that measures it - every "
+                       "defect will fail on this line at run time."
+                       % (kind, where, unknown, sorted(seen) or "none")))
+
+    for i, item in enumerate(decide.let):
+        check("working number '%s'" % (str(item.name).strip() or "#%d" % i),
+              item.expr)
+        name = str(item.name).strip()
+        if name:
+            seen.add(name)
+            if str(getattr(item, "fill", "") or ""):
+                seen.add(name + "_missing")
+            if str(getattr(item, "scale", "") or ""):
+                seen.add(name + "_raw")
+
+    if decide.tree is not None:
+        for when in _tree_whens(decide.tree):
+            check("the question \"%s\"" % when, when)
+    else:
+        for i, rule in enumerate(decide.rules):
+            check("rule %d (\"%s\")" % (i + 1, rule.when), rule.when)
+
+    if str(decide.score or "").strip():
+        check("the score", decide.score)
+    return out
+
+
 def _param_diff_text(step_cls, pa: Dict[str, Any], pb: Dict[str, Any],
                      ka: str, kb: str) -> str:
     """兩張同型卡片差在哪幾格，一句白話（`routes-drift` 的 detail）。
@@ -693,7 +814,8 @@ def _decide_from_json(raw: Any) -> Optional["DecideSpec"]:
         if not isinstance(item, dict) or "when" not in item or "bin" not in item:
             raise RecipeError("decide.rules[%d] must be an object with 'when' "
                               "and 'bin'" % i)
-        rules.append(Rule(when=str(item["when"]), bin=int(item["bin"]),
+        rules.append(Rule(when=str(item["when"]),
+                          bin=_as_int(item["bin"], "decide.rules[%d].bin" % i),
                           label=str(item.get("label", "") or "")))
     other = raw.get("otherwise") or {}
     if not isinstance(other, dict):
@@ -702,7 +824,7 @@ def _decide_from_json(raw: Any) -> Optional["DecideSpec"]:
             else _tree_from_json(raw.get("tree")))
     return DecideSpec(
         let=lets, rules=rules,
-        otherwise_bin=int(other.get("bin", 0)),
+        otherwise_bin=_as_int(other.get("bin", 0), "decide.otherwise.bin"),
         otherwise_label=str(other.get("label", "") or ""),
         score=str(raw.get("score", "") or ""),
         tree=tree,
@@ -1022,6 +1144,41 @@ def _migrate_renamed_cards(nodes: Dict[str, "RecipeNode"]) -> None:
         nodes[nid] = RecipeNode(id=node.id, step=new_key,
                                 params=dict(node.params),
                                 enabled=node.enabled)
+
+
+def _migrate_roi_from_mask_into_roi_reference(nodes: Dict[str, "RecipeNode"]
+                                             ) -> None:
+    """``roi_from_mask`` → ``roi_reference`` + ``method="layout layers"``（F29）。
+
+    使用者 2026-08-25：「golden cell 跟 GDS 同樣重要而且他們要能在同張 card 裡
+    （都是接區域 ROI 卡）」。兩支回答的是同一句話（「哪些地方應該長得一樣」），
+    所以是一張卡的兩個 method —— 跟 ``roi_compare`` → ``glv_stats`` 一模一樣的
+    形狀，連遷移的寫法都照抄（見 :func:`_migrate_roi_compare_into_glv_stats`）。
+
+    這一次 key 真的換掉（不像那一次留了 ``glv_stats``），理由是**沒有黃金值
+    指著它**：``tests/fixtures/golden/`` 三份 recipe 用到的是
+    ``load_patch / normalize / denoise / align / subtract / glv_stats /
+    cd_measure`` —— 一張 Region 卡都沒有。而 ``roi_from_mask`` 這個 key 在有了
+    第二個 method 之後是一句謊話。
+
+    ``source`` 要跟著換名字：新卡有**兩個**來源參數（一張晶圓的照片、一張
+    label map），因為那是兩種完全不同的東西 —— 共用一格的話畫布上那條線會在
+    切換 method 之後指著一個意思完全不同的東西。
+
+    判準是「**舊 step 名在不在**」（鐵則 9）。換完之後不再命中，所以
+    ``to_json_dict → from_json_dict`` 走第二次什麼都不會發生（identity）——
+    `run_batch` 送 recipe 進 worker 走的正是那條路，它一旦不是 identity，
+    ``workers=1`` 與 ``workers=2`` 會算出不同的分數。
+    """
+    for nid, node in list(nodes.items()):
+        if node.step != "roi_from_mask":
+            continue
+        params = dict(node.params)
+        params["method"] = "layout layers"
+        params["label_source"] = str(
+            params.pop("source", "") or "layout_label").strip() or "layout_label"
+        nodes[nid] = RecipeNode(id=node.id, step="roi_reference",
+                                params=params, enabled=node.enabled)
 
 
 def _migrate_roi_compare_into_glv_stats(nodes: Dict[str, "RecipeNode"]) -> None:
@@ -1372,35 +1529,64 @@ class Recipe:
         if not isinstance(d, dict):
             raise RecipeError(f"the top level of a recipe JSON must be an object "
                               f"(dict), got {type(d).__name__}")
-        missing = [k for k in ("recipe_id", "routes", "nodes", "score") if k not in d]
+        # ``score`` **只有在沒有 ``decide`` 的時候才是必填**（2026-08-24）。
+        # 兩者是二選一的契約（見 :class:`DecideSpec` 的說明），而硬性要求
+        # ``score`` 等於逼一份判定樹 recipe 也帶一個它根本不用的區塊 ——
+        # 手寫一份 decide recipe 會拿到「missing required fields: ['score']」，
+        # 那句話對使用者是死路。自己存出來的檔案不受影響：:meth:`to_json_dict`
+        # 一直都會寫 ``score``（空表達式），所以 round-trip 逐位元組不變。
+        need = ["recipe_id", "routes", "nodes"]
+        if "decide" not in d:
+            need.append("score")
+        missing = [k for k in need if k not in d]
         if missing:
             raise RecipeError(f"recipe JSON is missing required fields: {missing}")
 
+        if not isinstance(d["nodes"], dict):
+            raise RecipeError("recipe JSON field 'nodes' must be an object "
+                              "(dict), got %s" % type(d["nodes"]).__name__)
         nodes: Dict[str, RecipeNode] = {}
         for nid, nd in dict(d["nodes"]).items():
             if not isinstance(nd, dict) or "step" not in nd:
                 raise RecipeError(f"step '{nid}' has no 'step' field")
+            raw_params = nd.get("params") or {}
+            if not isinstance(raw_params, dict):
+                raise RecipeError(
+                    "the 'params' of step '%s' must be an object (dict), got %s"
+                    % (nid, type(raw_params).__name__))
             nodes[str(nid)] = RecipeNode(
                 id=str(nid),
                 step=str(nd["step"]),
-                params=dict(nd.get("params") or {}),
+                params=dict(raw_params),
                 enabled=bool(nd.get("enabled", True)),
             )
 
-        sd = d["score"]
+        sd = d.get("score") or {"expr": ""}
         if not isinstance(sd, dict) or "expr" not in sd:
             raise RecipeError(
                 "the score block must be an object containing 'expr'")
         score = ScoreSpec(
             expr=str(sd["expr"]),
-            threshold=float(sd.get("threshold", 0.0)),
-            bins={str(k): int(v) for k, v in dict(sd.get("bins") or {}).items()},
+            threshold=_as_float(sd.get("threshold", 0.0), "score.threshold"),
+            bins={str(k): _as_int(v, "score.bins[%r]" % str(k))
+                  for k, v in dict(sd.get("bins") or {}).items()},
         )
 
         decide = _decide_from_json(d.get("decide"))
         route_by = _route_by_from_json(d.get("route_by"))
 
-        routes = {str(k): [str(x) for x in v] for k, v in dict(d["routes"]).items()}
+        if not isinstance(d["routes"], dict):
+            raise RecipeError("recipe JSON field 'routes' must be an object "
+                              "(dict) of route name -> list of step ids, got "
+                              "%s" % type(d["routes"]).__name__)
+        routes: Dict[str, List[str]] = {}
+        for k, v in dict(d["routes"]).items():
+            # ⚠ 字串也是可迭代的 —— ``"abc"`` 會安靜地變成三個節點 id。
+            if not isinstance(v, (list, tuple)):
+                raise RecipeError(
+                    "route '%s' must be a list of step ids, got %s"
+                    % (k, type(v).__name__))
+            routes[str(k)] = [str(x) for x in v]
 
         edges: List[Edge] = [Edge.from_json(e) for e in (d.get("edges") or [])]
 
@@ -1434,6 +1620,8 @@ class Recipe:
         _migrate_template_regions(nodes)
         # 只改了名字的卡（＋分數表達式裡它寫出來的 feature 名）。
         _migrate_renamed_cards(nodes)
+        # GDS 那張卡收成「參照區域」的一個 method（F29）。
+        _migrate_roi_from_mask_into_roi_reference(nodes)
         # 兩張 GLV 卡收成一張的兩個 method（F16）。
         _migrate_roi_compare_into_glv_stats(nodes)
         # 順序要緊：上面那一道會產生 ``method="compare"``，這一道再把它變成
@@ -1452,7 +1640,7 @@ class Recipe:
             nodes=nodes,
             score=score,
             app_version=str(d.get("app_version", "") or ""),
-            version=int(d.get("version", 1)),
+            version=_as_int(d.get("version", 1), "recipe 'version'"),
             author=str(d.get("author", "")),
             description=str(d.get("description", "")),
             edges=edges,
@@ -2077,7 +2265,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
 
         # score 變數 ⊆ 此 route 會產出的特徵 ∪ {"score"}（僅警告）
         # ⚠ 有 `decide` 的時候 `score.expr` **根本不會跑**，對它報一條警告等於
-        # 叫使用者去修一個不影響結果的地方。
+        # 叫使用者去修一個不影響結果的地方 —— 但**判定段自己的表達式要檢查**，
+        # 那正是下面那一段（在此之前它整段不見了，見 :func:`_decide_unknown`）。
         if expr is not None and getattr(recipe, "decide", None) is None:
             unknown = sorted(expr.variables - feats)
             if unknown:
@@ -2087,6 +2276,9 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                     detail=f"route '{k}': the variables {unknown} are not among "
                            f"the features this route produces ({sorted(feats)}), "
                            f"so the score may not be computable at run time"))
+        decide = getattr(recipe, "decide", None)
+        if decide is not None:
+            issues.extend(_decide_unknown(decide, feats, k))
 
     # ---- 分流的 route 之間有沒有漂（F23 §5 選項 A 的配套）----
     # 只在 route_by 存在時看：多 route 在此之前的意思是「一種 kind 一條路」

@@ -277,30 +277,53 @@ def test_sort_by_score_feature_and_unknown_key(qapp):
     assert p.displayed_ids() == [d["defect_id"] for d in items]
 
 
-def test_sort_controls_and_chip(qapp):
+def test_sort_controls_have_no_chip_of_their_own(qapp):
+    """排序**沒有 chip**（R4，2026-08-24）。
+
+    它以前有一顆 ``Sort: score ↓ ×``，而正上方 24px 就是
+    ``Sort by [score ▾] ↓`` —— 同一件事、兩種格式、隔著一列。
+    chip 存在的理由是「這個條件在別的地方看不到，而且要拿得掉」，
+    排序兩件都不成立：它有自己的下拉，而「拿掉排序」在那個下拉裡就是
+    選回第一項。
+    """
     p = _panel(qapp, _items(8))
     p.set_sort_keys(["score", "snr", "area"])
     assert p.sort_keys() == ["score", "snr", "area", "defect_id"]
     assert p.sort_combo.itemText(0) == gal_mod.GalleryPanel.NO_SORT
     assert p.sort_key() == "score"
-    assert p.chip_texts() == ["Sort: score ↓"]
+    assert p.chip_texts() == [], "排序不該有 chip —— 它自己的下拉就在上面"
 
-    # 換方向鈕
+    # 換方向鈕：控制項照舊，只是不再多長一顆 chip
     p.order_button.click()
     assert p.sort_descending() is False
     assert p.displayed_ids()[0] == "D000"
-    assert p.chip_texts() == ["Sort: score ↑"]
+    assert p.chip_texts() == []
 
     # 下拉換欄位
     p.sort_combo.setCurrentIndex(p.sort_keys().index("area") + 1)
     assert p.sort_key() == "area"
 
-    # 點 chip -> 移除排序條件
-    p.chips()[0].click()
+    # 拿掉排序 = 下拉選回第一項（不必去找一顆 chip）
+    p.sort_combo.setCurrentIndex(0)
     qapp.processEvents()
     assert p.sort_key() is None
-    assert p.chip_texts() == []
-    assert p.sort_combo.currentIndex() == 0
+
+
+def test_a_filter_still_gets_a_chip(qapp):
+    """**篩選的 chip 留著。**
+
+    畫面上沒有別的地方講得出「現在只看 bright blob」—— 而那正是判定段點
+    一列之後唯一的退路。這一條接住上面那一條讓出來的地盤：R4 拿掉的是
+    「同一件事講兩次」，不是 chip 本身。
+    """
+    p = _panel(qapp, _items(8))
+    p.set_filter({"mode": "ids", "ids": ["D000", "D001"],
+                  "label": "bright blob only"})
+    assert p.chip_texts() == ["Filter: bright blob only"], p.chip_texts()
+    assert sorted(p.displayed_ids()) == ["D000", "D001"]  # 順序由排序決定
+    p.chips()[0].click()
+    qapp.processEvents()
+    assert p.chip_texts() == [] and len(p.displayed_ids()) == 8
 
 
 # --------------------------------------------------------------------------- #
