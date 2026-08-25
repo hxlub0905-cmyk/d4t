@@ -19,6 +19,48 @@
 
 ---
 
+## F31 T5：刪掉 find_defect（2026-08-25）
+
+使用者：「我覺得 find defect 不需要。」T1–T3 做完之後它的三類輸出全部有了
+替代：位置＝GLV 逐框比較的 `worst_x/y/w/h`（框就是 ROI 自己）、突出度＝
+`worst_score`、框內細節＝疊圖的像素標記（只畫，不吐數字）。
+
+### 直接刪，不進 HIDDEN_STEPS
+
+「先收後刪」那條規矩（CLAUDE.md §5 那張表）服務的是「舊 recipe 還在用」——
+這張卡今天早上才進 main（F29），零 recipe、零 fixture、零黃金值在用。收起來
+只會留下一張沒人用、卻要一直維護的卡。這跟 `pattern_ref` 那次（rsem 準確率
+24/24 → 12/24）完全不同：這次的代價量出來是**零**。
+
+### 刪了什麼、留了什麼
+
+* 刪：`steps/find_defect.py`、`tests/test_find_defect.py`、
+  `steps/__init__.py` 的 import；`algo/shape.py` 的 `find_blobs` /
+  `BlobScan` / `BlobHit` / `_scan_fail`（**唯一呼叫者就是這張卡** ——
+  `cd.py` 用的是 `measure_blob`，`test_algo_shape.py` 也全是）。
+* 留：`measure_blob` 與兩支共用過的準位（`pick_levels`、
+  `edge.threshold_level`、`edge_quality`、`_MIN_CONTRAST`）—— CD 在用。
+* 連帶清（照 F28 刪 Z-map 的樣子，把「例子沒了」寫進去而不是放寬斷言）：
+  * `overlay._BOX_FEATURE_SETS` 的 `blob_*` 那組（產者沒了）；**連
+    `blobs=` 那個參數一起**（`ctx.meta["blobs"]` 的 richer path —— 全 repo
+    沒有任何東西在寫那個鍵，它是更早被刪的 blob 分割的遺跡）。
+    `primary_blob_box` 只剩 features 一個參數。
+  * `_util.AREA_FEATURES` 的 `blob_area_px`、`LENGTH_FEATURES` 的
+    `blob_deq` —— 各留一行「曾在這裡」的註記（加會吐面積的新卡時那張表
+    就是為那一刻留的）。
+  * `rank_by` help 的例子 `blob_strength` → `worst_score`（被鎖的
+    `"decision tree"`/`"file order"` 兩個子字串不動）。
+  * 卡片庫順序測試：Measure 斷言改成**正好三張** GLV → CD → Focus index。
+  * README 能力表（今天早上才寫上 Find defect 的那格）、卡片數 25/22 →
+    **24/21**。
+* 新的一條守門：`test_blob_features_are_gone_and_stay_gone` —— 哪天有一張卡
+  又吐 `blob_x` 這組名字它會紅，而那正是它要講的話。
+
+驗收：core 2205 過、黃金值三份全綠、Measure 段剩三張、受影響 UI 檔逐檔跑過
+（f7_9_feedback、input_kinds、f10_canvas_reality、f16_stages、widgets）全綠。
+
+---
+
 ## F31 T3：贏家框內標出異常像素 —— 只進 overlay（2026-08-25）
 
 視覺上這件事等同被刪掉的 find_defect，所以**界線先寫死**（任務書原文）：

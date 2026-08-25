@@ -26,15 +26,10 @@ def order_in(group: str):
 
 
 def test_the_measure_stage_reads_the_way_the_user_asked_for():
-    """使用者 2026-08-25：「GLV → CD → Focus index」。逐字。"""
-    assert order_in("measure")[:3] == ["glv_stats", "cd_measure",
-                                       "focus_quality"]
-
-
-def test_find_defect_comes_after_the_three_he_named():
-    """在中間插一張等於替他重排一次。"""
-    assert order_in("measure") == ["glv_stats", "cd_measure", "focus_quality",
-                                   "find_defect"]
+    """使用者 2026-08-25：「GLV → CD → Focus index」。逐字，而且**正好三張**
+    —— `find_defect` 曾接在後面（F29），同日 F31 T5 刪掉（使用者：「我覺得
+    find defect 不需要」，替代是 GLV 的逐框比較）。"""
+    assert order_in("measure") == ["glv_stats", "cd_measure", "focus_quality"]
 
 
 def test_every_stage_reads_in_registration_order():

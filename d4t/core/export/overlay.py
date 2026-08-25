@@ -7,7 +7,8 @@ Gallery、CLI 的批次出圖、報表的插圖都能共用同一支渲染函式
 :func:`render_overlay` 產出 RGB uint8 面板：
 
 - 底圖取 ``images["test"]``（EBI patch）或 ``images["single"]``（rSEM）；
-- 主 blob 的 bounding box 畫**紅框**；
+- 量測框（``cd_box_*``）畫**紅框**；GLV 逐框比較的 ROI 框畫琥珀／鋼青
+  （:func:`_draw_roi_boxes`），贏家框內可再標異常像素；
 - 左上角可疊一行標籤（score / bin …），底下鋪半透明深色條方便閱讀；
 - ``images`` 裡有 ``"diff"`` 時輸出 **[test | diff] 並排**（寬度剛好兩倍）。
 
@@ -128,40 +129,25 @@ def _blob_box(b: Any) -> Optional[Tuple[int, int, int, int]]:
         return None
 
 
-def _blob_rank(b: Any) -> float:
-    """主 blob 的挑選依據：SNR 最強者；沒有 SNR 就用面積。"""
-    if isinstance(b, dict):
-        v = b.get("snr_value", b.get("area", 0.0))
-    else:
-        v = getattr(b, "snr_value", getattr(b, "area", 0.0))
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-#: 特徵裡「一個框」長什麼名字 —— **順序就是優先順序**（F29）。
+#: 特徵裡「一個框」長什麼名字。
 #:
-#: * ``blob_*`` —— `find_defect` **去圖上找**出來的那一團；
-#: * ``cd_box_*`` —— CD 卡量那一塊的時候**順手知道**的位置。
-#:
-#: 先找的贏，理由是它回答的問題比較接近疊圖要問的那一句：「這張圖上最可疑的
-#: 東西在哪」。CD 的框是「使用者用線指給我的那一塊裡面，那一團在哪」——
-#: 一樣有用，但它已經預設了範圍。兩個都在的時候畫兩個框才是誠實的做法，
-#: 而那要等疊圖畫得下第二個框（今天 `render_overlay` 只吃一個 ``box``）。
+#: 只剩 ``cd_box_*``（CD 卡量那一塊時**順手知道**的位置）——
+#: ``blob_x/y/w/h`` 那一組連同 `find_defect` 於 F31 T5 刪掉（產者沒了，
+#: 名單上多一組沒有人會寫的名字，等於邀請下一張卡撞進同一個名字空間）。
+#: 「這張圖最異常的地方」現在走另一條路：GLV 逐框比較的贏家框由
+#: :func:`worst_note_for_overlay` 從 meta 讀、當 ROI 框畫（粗琥珀），
+#: 不進這張「量測框」名單 —— ROI 的框跟量測框是兩種東西。
 _BOX_FEATURE_SETS = (
-    ("blob_x", "blob_y", "blob_w", "blob_h"),
     ("cd_box_x", "cd_box_y", "cd_box_w", "cd_box_h"),
 )
 
 
-def primary_blob_box(blobs: Optional[Sequence[Any]] = None,
-                     features: Optional[Dict[str, Any]] = None
+def primary_blob_box(features: Optional[Dict[str, Any]] = None
                      ) -> Optional[Tuple[int, int, int, int]]:
-    """挑出「主 blob」的框：blobs 裡 SNR 最強的那塊；
+    """features 裡的量測框（:data:`_BOX_FEATURE_SETS`）；沒有回 None。
 
-    blobs 是空的時候，退而求其次看 features 裡有沒有一組框 ——
-    順序見 :data:`_BOX_FEATURE_SETS`。都沒有回 None。
+    （``blobs`` 那個參數 —— ``ctx.meta["blobs"]`` 的 richer path —— 連同
+    `find_defect` 於 F31 T5 拿掉：全 repo 沒有任何東西在寫那個 meta 鍵。）
 
     ⚠ **只認沒有前綴的那一份。** 量測卡接了兩個以上的區域時，名字會變成
     ``epi_cd_box_x`` / ``mg_cd_box_x`` —— 那時候「主 blob」有兩個答案，
@@ -169,17 +155,6 @@ def primary_blob_box(blobs: Optional[Sequence[Any]] = None,
     「跑得完、有圖、而且是錯的」。所以那種情況下不畫框（回 None），
     等疊圖畫得下好幾個框再說。
     """
-    best = None
-    best_rank = None
-    for b in (blobs or ()):
-        box = _blob_box(b)
-        if box is None:
-            continue
-        rank = _blob_rank(b)
-        if best_rank is None or rank > best_rank:
-            best, best_rank = box, rank
-    if best is not None:
-        return best
     f = features or {}
     for keys in _BOX_FEATURE_SETS:
         if all(k in f for k in keys):
@@ -492,7 +467,6 @@ def pick_roi_boxes(rects, winner: int, mode: str, cap: int):
 # ---------------------------------------------------------------------------
 def render_overlay(images: Dict[str, Any],
                    features: Optional[Dict[str, Any]] = None, *,
-                   blobs: Optional[Sequence[Any]] = None,
                    box: Optional[Sequence[int]] = None,
                    label: Optional[str] = None,
                    base_key: Optional[str] = None,
@@ -510,14 +484,11 @@ def render_overlay(images: Dict[str, Any],
         ``aligned`` → ``ref`` → ``diff`` 的順序挑第一個找得到的；
         ``base_key`` 可以指定。
     features
-        該顆的特徵 dict。兩個用途：(1) ``box`` 與 ``blobs`` 都沒給時，
-        若含 ``blob_x/blob_y/blob_w/blob_h`` 就用它畫框；(2) ``label``
-        沒給但含 ``score`` 時自動組出 ``score=…`` 標籤。
-    blobs
-        ``ctx.meta["blobs"]``（dict 清單）或 ``DefectROI`` 清單；
-        取 SNR 最強的那塊畫紅框。
+        該顆的特徵 dict。兩個用途：(1) ``box`` 沒給時，若含
+        ``cd_box_x/y/w/h``（:data:`_BOX_FEATURE_SETS`）就用它畫紅框；
+        (2) ``label`` 沒給但含 ``score`` 時自動組出 ``score=…`` 標籤。
     box
-        直接指定 ``(x, y, w, h)``，優先於 ``blobs`` / ``features``。
+        直接指定 ``(x, y, w, h)``，優先於 ``features``。
     label
         左上角文字（非 ASCII 會顯示成 ``?``，見模組 docstring）。
     montage
@@ -561,7 +532,7 @@ def render_overlay(images: Dict[str, Any],
         _mark_odd_pixels(left, odd_pixels.get("src"), odd_pixels)
     if roi_boxes:
         _draw_roi_boxes(left, roi_boxes, int(roi_winner))
-    the_box = _blob_box(box) if box is not None else primary_blob_box(blobs, features)
+    the_box = _blob_box(box) if box is not None else primary_blob_box(features)
     if the_box is not None:
         _draw_box(left, the_box)
 

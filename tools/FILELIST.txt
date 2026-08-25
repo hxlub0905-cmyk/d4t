@@ -4,8 +4,8 @@
 32effd36c2614b3378219e38d064dfcbb4ef38e4 .gitignore
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 b7de91c3029b706bf544976890dcf876cabb5a6b CLAUDE.md
-87bdb4613531303fd0dcd79696bc65b14675d267 README.md
-985cc1308c43618a081c4fdebbc28c068f21624d SESSION_LOG.md
+6adcf70fd5d443f757d78b4d337e1866a9af3ed7 README.md
+cc45644322b14ccf24711efceb376f3c6ef0b45a SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -26,7 +26,7 @@ d090bc2eefc1fe45c48d60848280ba323b0ef4a7 d4t/core/algo/pairing.py
 acba11d258e8a4fb5250d478a59b2d02fe57fe35 d4t/core/algo/profile.py
 c1049c4ae6c2505db6e37b7edeaf364e1244b026 d4t/core/algo/quality.py
 674556c1ad3f6f8d92b26856c455eb02c5125bea d4t/core/algo/roi.py
-a4e1d5c123d70d976e2883eae72ba1c62650c27e d4t/core/algo/shape.py
+1a921c40045dd66301dba24ef8676a216fbf2c1b d4t/core/algo/shape.py
 0f0727a89f62065c799e7c8fe234fc7b5c3545f9 d4t/core/algo/snr.py
 e1f7a95ad976983aa0f1f16b7bd52cdcc67494dd d4t/core/algo/subpixel.py
 82791f0e16286d803ddba7220ac56aec5548f6d4 d4t/core/algo/template.py
@@ -34,7 +34,7 @@ e1f7a95ad976983aa0f1f16b7bd52cdcc67494dd d4t/core/algo/subpixel.py
 78924f0edd38b3d96346542c63372c7fee679a91 d4t/core/export/__init__.py
 db57a3c6edf2c820287f7671be06d10d16816d52 d4t/core/export/html.py
 a4a93fb5fc256c767f2c31f387f7ab4962b5868d d4t/core/export/klarf_out.py
-91b0aac2c8be7f1e70a4e86b609b270fbf81116c d4t/core/export/overlay.py
+e913f3d366fcebe23cf70b556442b3374118750c d4t/core/export/overlay.py
 ab5031e7056134aa94c5551aba9b80a774b6397a d4t/core/export/report.py
 4599be07de9d76b7a008bdc400e22cfaa0c7acd2 d4t/core/ingest/__init__.py
 987ec64e2830c1e9e7ee535c3aa91e020f5bd0be d4t/core/ingest/dataset.py
@@ -55,8 +55,8 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 7e2797dce8253240fcf45a27f57f28d2c246e272 d4t/core/pipeline/expression.py
 5522c2df74f5a6ec151b546b642cf465eccad470 d4t/core/pipeline/recipe.py
 230ad64e32b76b0fd8e37cb883de6c4b2ff77c87 d4t/core/pipeline/step.py
-d54104de166f940371dd49bf01f0c8cd482d76f4 d4t/core/steps/__init__.py
-d9b4267ae492296b55f8c457451a6c86b8b8f531 d4t/core/steps/_util.py
+458bc40837b773fdbfbf9d9675d23020e2903853 d4t/core/steps/__init__.py
+576990fa3a36cd6acbba1146cad19b5fe9d49ff1 d4t/core/steps/_util.py
 c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
 cf162d9e699b12b6e4cd5d6d9706484b19eda598 d4t/core/steps/align_to.py
 2c48cd738d30003227a9aad3f34e5c8565a9c6ab d4t/core/steps/arith.py
@@ -64,13 +64,12 @@ cf162d9e699b12b6e4cd5d6d9706484b19eda598 d4t/core/steps/align_to.py
 39bbc384b66e024f67200a76598d4f6f255e5100 d4t/core/steps/denoise.py
 8ef5c8396cd11fe7299037d7865c66fa3ab7830a d4t/core/steps/feature_fill.py
 9b417df41842c99263f3a477022e26c05e135bf5 d4t/core/steps/feature_math.py
-887755c1f854ce9142040b52f4e6c60877ea27fb d4t/core/steps/find_defect.py
 00f877fe38f316bc2a74cb2659a2e5ac63b7055c d4t/core/steps/flatten.py
 e9c81c67c24be98678b46af75d3d729fbe0ba21f d4t/core/steps/glv_stats.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
-ac930a76c3bbcbad67c79fe80c2c6790b2dbcc46 d4t/core/steps/output.py
+89e4de039ba1cf760f233c2095f025aa5061c5f7 d4t/core/steps/output.py
 0299cafc4d75895f8b322be5433f7fb3e37455d3 d4t/core/steps/pair_source.py
 46e24cde47cccae307704861c349c75887a27da4 d4t/core/steps/quality.py
 acdb58380e184c616547caf40a7b0933f91f14a5 d4t/core/steps/roi_cross.py
@@ -145,7 +144,7 @@ cc1fdb5b34bdfca549402c8fe2d3d06f1686ec9b tests/test_batch_cache.py
 1c3e6a27a18cad905fb862e5cb8180716b5f7735 tests/test_batch_thread_safety.py
 299ce9e0acf6811de39e6e92bf43664954cbd3ad tests/test_calibration.py
 0ce3bf2a25a1b02b1de9b85183858a3e08f228d7 tests/test_card_invariants.py
-a7f1b028d90b86cea23183d381df80d1a41a4d60 tests/test_card_library_order.py
+bddc487c7a4e701cb237d51c9b127cee4bcbaf4b tests/test_card_library_order.py
 eec62f1d38fdcefcf2f311cc74ac3b7cbb7e1530 tests/test_carry_klarf_columns.py
 c01fd4f7804f568260bb05fa61871b1f65906c25 tests/test_cd_blob.py
 6d1186f5b2372b93d5fa8d5190e479acb6bdecf6 tests/test_cd_measure.py
@@ -166,7 +165,7 @@ c2f7df52f855141ec0c0b85e71faa3a821ae31f5 tests/test_docs_links.py
 8b0ab7fe7dae38c1494a5e162ccdbcaf1f4bf553 tests/test_engine.py
 418fc5470ce715a88c0c5983ae40a59b19600974 tests/test_enhance.py
 5bcbc5d88b74b990dac7d69874664cc9ca5617fe tests/test_export_klarf.py
-ba545d93b3a2cd0293e8e11f29e616fd253bfc2c tests/test_export_overlay.py
+fbdcd0a460bbe0cce50922d7dec67d4bc3a9f12c tests/test_export_overlay.py
 305b78487054af80ea56c569548c997f82c12bf4 tests/test_export_parity.py
 ed412883e22f01db1c0bb3eb0cec4e24dd093ad9 tests/test_export_report.py
 2415c6f4229d2d8ff5044b35cdde8560d3bcd8c2 tests/test_expression.py
@@ -183,7 +182,6 @@ af91354855f9f11d953dfd45857bb779eb4c55dd tests/test_f11_split_load_cards.py
 eaff022e045a6b08dd7090f0181355bbae21118b tests/test_feature_fill.py
 6816f1f0f85211829aa8fc935b2e65e6e6c79957 tests/test_feature_math.py
 174025a7a178c938717f8b8eee4095e19d2165e3 tests/test_feature_owner_prefix.py
-563fbdb2ce84e11278db4fffebb2eac34db18b37 tests/test_find_defect.py
 21b2046491056e3656ad2f7905951a6e5902b0fa tests/test_glas_sidecar.py
 306625aa08ded107633669f205bc09ad021e41fe tests/test_glv.py
 298f3eb6e3c5b7d436d96741dde9b5683e342f3e tests/test_glv_compare.py
@@ -269,7 +267,7 @@ d576e0ec6f71b4eb90fe3a6b40a6907614f250cf tests/test_ui_f7_14_canvas_flow.py
 57ec44be8d2a89d6dce9daf170553833535cb858 tests/test_ui_f7_19_wiring.py
 66dbd307778b6e1d40cce9041a6dca086c947729 tests/test_ui_f7_23_buttons.py
 5d812dc226ce9589df9989d6c972f0d399f9c15f tests/test_ui_f7_24_layout.py
-426b121d39bb2fa6f6bc43c7b6f2a91e66b8c47e tests/test_ui_f7_9_feedback.py
+f6b36f32369becedea01a81b79716149b4e953b0 tests/test_ui_f7_9_feedback.py
 df87464d055b4cb78b7e32040385da76bf02abf8 tests/test_ui_f8_advanced.py
 e343ee4e93441411c3cc8d06c7a4be696c4aaebb tests/test_ui_f8_calibrate.py
 b38d9395e4c2fc2b76da3cedd8ac98ca234779bd tests/test_ui_f8_cross.py

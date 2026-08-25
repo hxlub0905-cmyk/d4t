@@ -431,7 +431,7 @@ def rank_by_spec() -> ParamSpec:
         help=("Which number decides the order, highest first. Leave it as "
               "“score” if your recipe has a score formula. If you classify "
               "with a decision tree instead, there is no score - put the name "
-              "of a number you measure here (for example blob_strength, "
+              "of a number you measure here (for example worst_score, "
               "cmp_snr_mean or cd_area_px), otherwise the pictures come out "
               "in file order."))
 
