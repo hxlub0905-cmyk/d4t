@@ -2789,7 +2789,7 @@ INSPECTORS: Dict[str, type] = {
     # F19：CD 有自己的面板了（剖面圖是它唯一講得清楚自己的方式）。
     "cd_measure": CdInspector,
     "focus_quality": MeasureInspector,
-    # ⚠ ``roi_reference`` **一個 key、四種面板**（F30）—— 見 :data:`BY_METHOD`。
+    # ⚠ ``roi_reference`` **一個 key、三種面板**（F30）—— 見 :data:`BY_METHOD`。
     # 這裡放的是「沒有 method 可看時的那一個」。
     "roi_reference": GdsInspector,
     "pair_source": PairInspector,
@@ -2811,11 +2811,6 @@ BY_METHOD: Dict[str, Dict[str, Optional[type]]] = {
         "stripes in the image": CrossInspector,
         "a cell I mark myself": TemplateInspector,
         "layout layers": GdsInspector,
-        # **``None`` 是一個明講的答案**：這一支還沒有自己的面板，而沒有面板
-        # 比一塊空的面板好（同 INSPECTORS 上面那一段記下的理由）。寫成 None
-        # 而不是「不列」，是為了跟「這個 method 我不認得」分得開 —— 後者要
-        # 落回舊表，前者不要。
-        "repeating cells": None,
     },
 }
 

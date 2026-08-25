@@ -88,7 +88,7 @@ Context 有三層資料：**影像流 images**（名字 → 像素陣列，綁�
 ```
 影像流通道（像素）  Load ─→ Enhance ─→ Compare ─→ 'diff' ──────┐
                                                               ├─→ 量測卡 ─→ 特徵 ─→ score
-區域通道（哪裡）    roi_reference（四個 method）                  │   source='diff'（流）
+區域通道（哪裡）    roi_reference（三個 method）                  │   source='diff'（流）
                       └╌→ 具名區域 'cross' ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┘   roi='cross'（名字，
                           （畫布上是虛線）                            畫布上有線）
                             └─→ roi_mask ─→ 'mask' 流 ─→ Normalize 的 use_within（影像段）
@@ -110,7 +110,7 @@ Context 有三層資料：**影像流 images**（名字 → 像素陣列，綁�
 晶格相位逐顆不同 —— recipe 存「怎麼找」，定位卡**每顆重新定位**；
 (2) 比例座標讓同一份 recipe 在 128² 與 512² 上都對（F7-4 的坑）。
 
-定位法契約：`roi_reference` **一張卡四個 method**（重複晶格／GDS 層／純規則的條紋／自己標的 cell；F30）
+定位法契約：`roi_reference` **一張卡三個 method**（純規則的條紋／自己標的 cell／GDS 層；F30）
 —— **出口相同：吐具名區域**（`resolve_regions_out`），下游零改動。
 新 image source 進來的 checklist：Load 層吐具名流 → 挑一個定位法吐具名區域 →
 下游（量測/mask/overlay/region check）不用動。

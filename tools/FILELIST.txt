@@ -75,7 +75,7 @@ dda718c69b6f37783e61e27331340d2cb3bd437b d4t/core/steps/output.py
 46e24cde47cccae307704861c349c75887a27da4 d4t/core/steps/quality.py
 b8cee087adb193dff32a8ae69ad7981ad882d8f5 d4t/core/steps/roi_cross.py
 f9c9c80c5382b2d3a03602fb5be62b2c09abf81e d4t/core/steps/roi_mask.py
-5bd0fcdf3bbada68dc7e842ad83cb1232507d098 d4t/core/steps/roi_reference.py
+7541bc1c78347558ea358295a66f3c5d25967dfa d4t/core/steps/roi_reference.py
 916055526d377548b4771fda3cfbbf9aab1eb5e9 d4t/core/steps/roi_template.py
 d2d8addef914c6e008d5c6c3bcd94b62faaa60c8 d4t/core/steps/tone.py
 0a37eeb8bcaa987e2955fbc1fdf0b1598461380c d4t/core/store/__init__.py
@@ -90,7 +90,7 @@ a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
 3b58b7e078d58ad84a8939734b65952a75a029f3 d4t/ui/cell_canvas.py
 334c58d35c83167967e43b30982092b44dcb920a d4t/ui/decide_panel.py
 f35d9a2caf5de689eca2bef5df59e460d1617c46 d4t/ui/gallery.py
-bad4dd5fc0689fb7aaaf165d13117db1411b946c d4t/ui/inspectors.py
+e0e1da185a13c469a4d3fa4405ec6a8da6f72145 d4t/ui/inspectors.py
 a108febbe68c248b3cc2c8b05bd5cd079984772c d4t/ui/output_band.py
 68e6ac894866da63ca055b9082523ffb89656702 d4t/ui/region_check.py
 863ce228ac0905923fcae5037e613b4700d4b244 d4t/ui/results.py
@@ -109,9 +109,9 @@ c894b98548a3a06f98ed531901518a429768879f d4t/ui/verdict_band.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
 8dfa6e3ff750e0b36d231db8650a206ebd9dce99 d4t/ui/widgets.py
 2eb7813f6dbd6c7d0beff0496ed0d1e6dc87d484 d4t/ui/workers.py
-36bfd106976b67472cd8903fc216d00889b6deef docs/ARCHITECTURE.md
+991b2b3b4ff0da1b085f1828c38dbbc14891d4b4 docs/ARCHITECTURE.md
 e91e2809486e7306a360421877c50b667c01df64 docs/FAB-VALIDATION.md
-319c1f258fddffd9f8498bf67acc9b069bf52b1d docs/GLAS-INTERFACE.md
+cb5ec1e3cc74cbfc6f03fe2edb526c0993465c6e docs/GLAS-INTERFACE.md
 98db709267e7d0f5dcfa835cbcb09e67b7d1ae51 docs/HANDOVER.md
 15c2bb25a9b655500c0706d899826872abbc425f docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
@@ -230,8 +230,7 @@ b6d422dc16742cc1a896ec46236cf4d4494bc28c tests/test_roi_cross.py
 c99f6b6166a2f25986a65c6eba2e019401e4ed7d tests/test_roi_cross_phase.py
 06d6d97022b61407a0c64c096b7b8728649cddb0 tests/test_roi_cross_trust.py
 78da66affaff254de77bff1ffad6d82bc6b06239 tests/test_roi_mask.py
-c718beab9c0f733871498d4ec7dd9e9614f2f952 tests/test_roi_reference.py
-9d4d2e1bc0966ff0826c2c568369f3333f7cc9be tests/test_roi_reference_cells.py
+7c224c23e3c638112d51ab4564a0af46b000f22a tests/test_roi_reference.py
 14f96c0d4422d2ee1365ead0f1660884829a7d47 tests/test_roi_template.py
 2342290f2ce3852c11802b8344ed58b877cb5fd2 tests/test_roi_template_full_image.py
 1bb3ccb4026431464d6f276cc6540152cb9f8c24 tests/test_route_by.py

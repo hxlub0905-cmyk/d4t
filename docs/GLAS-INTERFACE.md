@@ -38,7 +38,7 @@ d4t 裡**不會**有 OASIS/GDS parser（使用者 2026-08-17 定調）。
 ## 3. d4t 這邊會怎麼接（下游零改動的理由）
 
 d4t 的 ROI 定位法有一個**共同出口**：吐**具名區域**（`resolve_regions_out`，
-0–1 正規化座標）。`roi_reference` 的四個 method 都走這個出口，
+0–1 正規化座標）。`roi_reference` 的三個 method 都走這個出口，
 所以第三條路接上去之後，量測卡、`roi_mask`、overlay、region check **一行都不用改**
 （見 [`ARCHITECTURE.md`](ARCHITECTURE.md) 的定位法契約）。
 

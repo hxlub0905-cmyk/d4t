@@ -106,11 +106,16 @@ from ._util import (
 #:
 #: 值本身會進 recipe JSON，所以它們是白話短句而不是縮寫（同 `glv_stats` 的
 #: ``reference``：``"another region"`` / ``"the other regions"``）。
-METHOD_CELLS = "repeating cells"
+#: ⚠ **``repeating cells`` 已於 2026-08-25 刪掉**（F30，使用者：「repeating
+#: cell 功能在這邊跟 a cell I mark myself 應該一樣，而且後者完整很多，所以請把
+#: 前者刪掉」）。兩者確實在回答同一句話 —— 差別只在「那一格 cell 是量出來的
+#: 還是你標出來的」，而標出來的那條路多了三道閘門（match / margin / structure）
+#: 與一個看得到的編輯器。舊 recipe 的 ``method="repeating cells"`` 會**明確
+#: 報錯**（choice 不認得那個值），不會安靜地換一支跑。
 METHOD_GDS = "layout layers"
 METHOD_PROFILE = "stripes in the image"
 METHOD_TEMPLATE = "a cell I mark myself"
-METHODS = (METHOD_CELLS, METHOD_GDS, METHOD_PROFILE, METHOD_TEMPLATE)
+METHODS = (METHOD_PROFILE, METHOD_TEMPLATE, METHOD_GDS)
 
 #: 哪一支的程式碼在哪個模組（F30 把四張卡收成一張）。
 #:
@@ -127,7 +132,7 @@ _IMPL_MODULE = {
 
 def _method_of(params: Dict[str, Any]) -> str:
     m = str((params or {}).get("method", "") or "").strip()
-    return m if m in METHODS else METHOD_CELLS
+    return m if m in METHODS else METHOD_PROFILE
 
 
 def _impl(method: str):
@@ -205,20 +210,6 @@ _EXTRA_REGION_FEATURES = ["pieces"]
 #: ``layout layers`` 那一支自己的（跟區域無關）。
 _GDS_FEATURES = ["layout_ok", "layout_layers"]
 
-#: ``repeating cells`` 那一支自己的。**每一個都是「卡片自動決定了什麼」**
-#: （F19 的規矩）：
-#:
-#: * ``cells_px`` / ``cells_py`` —— 量出來的週期（沒有週期的那一軸 = 整張圖的
-#:   邊長，因為那一軸的「一格」就是整條）。整批應該收在一起；散開 = 週期估測
-#:   在逐顆給不同的答案，而每一顆都吐得出正常的灰階值。
-#: * ``cells_n`` —— 切出幾塊。1 表示**沒有基準**（``_others`` 不存在）。
-#: * ``cells_confidence`` —— 兩軸取小的那一個（**0..1，跟
-#:   ``Ignore repeats weaker than`` 那一格同一個刻度**）。低的時候框還在、
-#:   而「憑什麼在那裡」是猜的。
-#: * ``cells_axes`` —— 幾個軸有週期（2 = 晶格、1 = 條紋、0 = 拒絕）。
-_CELL_FEATURES = ["cells_px", "cells_py", "cells_n", "cells_confidence",
-                  "cells_axes"]
-
 #: 兩支共用的一個（跟另外兩張 ROI 卡逐字同名）：**有沒有真的用訊號挑**。
 #: 接不到 ``Judge on`` 就退回「離中心最近」，而安靜地照做是最糟的
 #: （見 `_util.pick_defect_box`）。
@@ -243,11 +234,6 @@ def _layers_of(params: Dict[str, Any]) -> List[Tuple[int, str]]:
 DEFAULT_REGION_NAME = "region"
 
 
-def _cell_name(params: Dict[str, Any]) -> str:
-    return (str((params or {}).get("roi_out", "") or DEFAULT_REGION_NAME)
-            .strip() or DEFAULT_REGION_NAME)
-
-
 @register_step
 class RoiReferenceStep(Step):
     """把「應該長得一樣」的地方全部標出來 —— 重複的晶格，或 GDS 的一層。"""
@@ -263,13 +249,10 @@ class RoiReferenceStep(Step):
             "other one as the baseline to compare it against.")
     params = [
         ParamSpec(
-            name="method", type="choice", default=METHOD_CELLS,
+            name="method", type="choice", default=METHOD_PROFILE,
             choices=list(METHODS), section="1 · How to find them",
             label="Find them by",
             choice_help={
-                METHOD_CELLS: "The repeating pattern in the image itself - "
-                              "the card measures the period and cuts the "
-                              "image into cells. Nothing else to load.",
                 METHOD_GDS: "One layer of the layout, from a GDS export. Use "
                             "this where the pattern does not repeat, which is "
                             "where there is nothing to lock onto.",
@@ -295,8 +278,7 @@ class RoiReferenceStep(Step):
         ParamSpec(
             name="source", type="image_key", direction="in",
             default="test", section="1 · How to find them", label="Image",
-            show_when=("method", (METHOD_CELLS, METHOD_PROFILE,
-                                  METHOD_TEMPLATE)),
+            show_when=("method", (METHOD_PROFILE, METHOD_TEMPLATE)),
             help=("Which image stream this card works on - drag a line from "
                   "the card that produces it. The pattern has to still be in "
                   "it, so a difference image is the wrong one to point at. "
@@ -322,42 +304,11 @@ class RoiReferenceStep(Step):
             label="Call the regions", pattern=FEATURE_PREFIX_PATTERN,
             pattern_help=("use letters, digits and underscores only, and do "
                           "not start with a digit"),
-            show_when=("method", (METHOD_CELLS, METHOD_PROFILE)),
+            show_when=("method", (METHOD_PROFILE,)),
             help=("What to call this set of regions. The name becomes the "
                   "prefix on every number measured in it, and you point the "
                   "measure cards at <name>_center (the one the defect is in) "
                   "and <name>_others (all the rest, your baseline)."),
-        ),
-        ParamSpec(
-            name="min_period", type="int", default=0, min=0, max=4096,
-            unit="px", section="2 · Which layers, and what to call them",
-            label="Cells are at least", advanced=True,
-            show_when=("method", (METHOD_CELLS,)),
-            help=("Smallest repeat to look for. Zero lets the card pick a "
-                  "range from the image size. Set it when the card locks onto "
-                  "something finer than the structure you mean - the value it "
-                  "actually used comes out as cells_px / cells_py."),
-        ),
-        ParamSpec(
-            name="max_period", type="int", default=0, min=0, max=4096,
-            unit="px", section="2 · Which layers, and what to call them",
-            label="Cells are at most", advanced=True,
-            show_when=("method", (METHOD_CELLS,)),
-            help=("Largest repeat to look for. Zero lets the card pick a "
-                  "range from the image size."),
-        ),
-        ParamSpec(
-            name="min_repeat_strength", type="float", default=0.18, min=0.0,
-            max=0.95, section="2 · Which layers, and what to call them",
-            label="Ignore repeats weaker than",
-            show_when=("method", (METHOD_CELLS,)),
-            help=("How clear the repeat has to be before the card believes "
-                  "it, from 0 (anything) to 0.95 (only very regular "
-                  "patterns). Below it the card stops and says so rather than "
-                  "cutting the image into a grid that means nothing - a made "
-                  "up grid still produces a perfectly normal-looking number "
-                  "for every defect. What it measured comes out as "
-                  "cells_confidence."),
         ),
         ParamSpec(
             name="layers", type="channel_map", default="", row_kind="labels",
@@ -411,7 +362,7 @@ class RoiReferenceStep(Step):
     ]
     reads = ["test"]
     writes: List[str] = []
-    features_out = list(_CELL_FEATURES) + list(_GDS_FEATURES) + [_PICK_FEATURE]
+    features_out = list(_GDS_FEATURES) + [_PICK_FEATURE]
 
     # ---- 宣告 ---------------------------------------------------------------
     @classmethod
@@ -448,10 +399,8 @@ class RoiReferenceStep(Step):
         impl = _impl(method)
         if impl is not None:
             return impl.resolve_regions_out(_params_for(method, params))
-        if method == METHOD_GDS:
-            names = [name for _lid, name in _layers_of(params)]
-        else:
-            names = [_cell_name(params)]
+        names = ([name for _lid, name in _layers_of(params)]
+                 if method == METHOD_GDS else [])
         out: List[str] = []
         for name in names:
             out.extend(region_family(name))
@@ -470,7 +419,7 @@ class RoiReferenceStep(Step):
                 names.extend("%s_%s" % (name, f)
                              for f in _EXTRA_REGION_FEATURES)
         else:
-            names = list(_CELL_FEATURES) + region_fact_names(regions)
+            names = region_fact_names(regions)
         names.append(_PICK_FEATURE)
         return prefix_names(params.get("output_prefix", ""), names)
 
@@ -487,13 +436,29 @@ class RoiReferenceStep(Step):
                 _params_for(_method_of(params), params))
         if _method_of(params) != METHOD_GDS:
             return []
+        raw = str(params.get("layers", "") or "").strip()
+        if raw and not _layers_of(params):
+            # ⚠ **打錯的層號表以前是安靜的**（2026-08-25 使用者回報：「選擇
+            # layout layers 後方阜沒有出口可以輸出區域線」）。`_layers_of` 把
+            # `ChannelMapError` 吞掉回空 list（打到一半不准拋，那是對的）——
+            # 於是一個寫成 ``17=epi`` 的表格產不出任何區域埠，而畫面上沒有任何
+            # 東西說為什麼。卡片跑起來才會報錯，可是使用者是在**畫布上**發現
+            # 「這張卡好像沒有輸出」的。
+            try:
+                parse_channel_map(raw, noun="layer")
+            except ChannelMapError as e:
+                return ["The layer table cannot be read, so this card defines "
+                        "no regions yet and has no outputs on the canvas. %s"
+                        % str(e)]
+            return ["The layer table is empty, so this card defines no "
+                    "regions yet."]
         if not _layers_of(params):
             return ["This card has no layers yet. Use “Open GDS export…” on "
                     "the “Load layout labels” card — attaching the export "
                     "fills in the layer numbers and the layout's own names "
                     "for them; then rename them to something you will "
-                    "recognise. Or switch “Find them by” to “%s”, which needs "
-                    "nothing but the image." % METHOD_CELLS]
+                    "recognise. Or switch “Find them by” to “%s”, which "
+                    "needs nothing but the image." % METHOD_PROFILE]
         return []
 
     # ---- 執行 ---------------------------------------------------------------
@@ -506,119 +471,7 @@ class RoiReferenceStep(Step):
             # 會多帶一堆它沒宣告的鍵，而 `validate_params` 對未知的鍵是沉默的
             # （不是報錯），所以那個錯法會一路安靜到跑出數字為止。
             return impl().run(ctx, _params_for(method, params))
-        p = self.validate_params(params)
-        if method == METHOD_GDS:
-            return self._run_gds(ctx, p)
-        return self._run_cells(ctx, p)
-
-    # ---- ① 影像自己的重複結構 ----------------------------------------------- #
-    def _run_cells(self, ctx: Context, p: Dict[str, Any]) -> Context:
-        """量週期 → 定相位 → 把圖切成一塊一塊的 cell，每一塊一個框。
-
-        **不合成任何影像。** 這裡跟被刪掉的 `pattern_ref` 的差別就在這一句：
-        那張卡把幾百格疊成一張參照圖再相減（對不齊就吐一張糊的 ref，而畫面上
-        看不出來），這裡只是把晶格切成區域，比的是統計量。
-        """
-        img = require_image(ctx, self.key, str(p["source"]))
-        gray = ensure_gray(np.asarray(img))
-        if gray.ndim != 2 or min(gray.shape[:2]) < 4:
-            raise StepError(
-                self.key,
-                "this image is %s - too small to find a repeat in."
-                % ("x".join(str(v) for v in gray.shape) or "empty"))
-        shape = gray.shape[:2]
-        h, w = int(shape[0]), int(shape[1])
-
-        res = algo_period.estimate_period(
-            gray,
-            min_period=int(p["min_period"]) or None,
-            max_period=int(p["max_period"]) or None,
-            strength_threshold=float(p["min_repeat_strength"]))
-
-        # **誠實閘門。** 量不到週期就停下來說原因，不可以吐一格猜出來的晶格 ——
-        # 一個編出來的網格照樣讓每一顆 defect 吐得出很正常的灰階值，而 CSV 上
-        # 沒有任何線索。上一次 rsem route 悄悄變成 12/24 就是這個形狀。
-        if res.axis_mode == "NONE":
-            raise StepError(
-                self.key,
-                "no repeating pattern was found in “%s” on this defect (%s). "
-                "Nothing is guessed here - a made up grid would still produce "
-                "a normal-looking number for every defect. Point it at the "
-                "image the pattern is actually in, lower “Ignore repeats "
-                "weaker than”, or switch “Find them by” to “%s”."
-                % (p["source"], "; ".join(res.warnings) or "the projection is "
-                   "too flat on both axes", METHOD_GDS))
-
-        # 沒有週期的那一軸**沒有相位可言**，所以那一軸取滿整張圖（同
-        # `algo/template.roi_boxes_in_patch` 的 ``periodic`` 那一段）——
-        # 硬給一個位置等於憑空捏造資訊。
-        px = int(res.px) if res.px else w
-        py = int(res.py) if res.py else h
-        origin = algo_period.choose_origin(shape, px, py, gray)
-        cells = algo_golden.tile_coords(shape, px, py, origin)
-        if not cells:
-            raise StepError(
-                self.key,
-                "the repeat measured %dx%d px, which does not fit inside this "
-                "%dx%d image even once. Set “Cells are at most” to something "
-                "smaller than the image." % (px, py, w, h))
-
-        name = _cell_name(p)
-        boxes = [(int(x), int(y), px, py) for x, y in cells]
-        cap = int(p["max_boxes"])
-        clipped = len(boxes) > cap
-        if clipped:
-            # 留下離中心最近的那些（同 `algo/mask.decompose` 的規則），
-            # **而且要講出來**。
-            cx, cy = w / 2.0, h / 2.0
-            boxes.sort(key=lambda b: ((b[0] + b[2] / 2.0 - cx) ** 2
-                                      + (b[1] + b[3] / 2.0 - cy) ** 2))
-            ctx.warn("[%s] the repeat gives %d cells, more than the %d limit; "
-                     "kept the ones nearest the middle. Raise “At most this "
-                     "many boxes”." % (self.key, len(boxes), cap))
-            boxes = boxes[:cap]
-
-        idx, by_signal = self._pick(ctx, p, boxes, shape)
-        dropped = 0
-        if bool(p["drop_edge"]) and float(p["edge_margin"]) > 0.0:
-            boxes, dropped, idx = drop_edge_boxes(
-                boxes, shape, float(p["edge_margin"]), idx)
-        norm = [(x / w, y / h, bw / w, bh / h) for x, y, bw, bh in boxes]
-        set_region_family(ctx, self.key, name, norm, idx, dropped)
-
-        feats = region_facts(ctx, region_family(name), shape, clipped=clipped,
-                             edge_dropped=dropped)
-        feats.update({
-            "cells_px": float(px), "cells_py": float(py),
-            "cells_n": float(len(boxes)),
-            # ⚠ 報的是 ``peak_strength``（0..1）**不是 ``confidence``（0..100）**：
-            # 使用者那一格（``Ignore repeats weaker than``）擋的就是
-            # ``peak_strength``，所以它們必須是同一個數字。報另一個刻度的話，
-            # 「我設 0.18，它說 85」這句話沒有人解得開。
-            #
-            # 兩軸取**小**的那一個：一個方向很清楚、另一個方向是猜的，整個晶格
-            # 就是猜的。只報大的那個會讓條紋圖看起來像晶格。單軸的時候另一軸
-            # 是 0（那一軸根本沒有週期），所以取大的才是那一軸真正的強度。
-            "cells_confidence": float(
-                min(res.peak_strength_x, res.peak_strength_y)
-                if res.axis_mode == "XY"
-                else max(res.peak_strength_x, res.peak_strength_y)),
-            "cells_axes": 2.0 if res.axis_mode == "XY" else 1.0,
-            _PICK_FEATURE: 1.0 if by_signal else 0.0,
-        })
-        ctx.add_features(prefix_features(p["output_prefix"], feats))
-
-        # 儀表用（跟另外兩張 Region 卡同一個慣例）：**UI 畫的就是引擎算的這一份**。
-        ctx.meta.setdefault("reference_cells", {})[str(p["source"])] = {
-            "shape": [h, w], "px": px, "py": py,
-            "origin": [int(origin[0]), int(origin[1])],
-            "axis_mode": res.axis_mode, "n": len(boxes),
-            "centre_index": int(idx), "by_signal": bool(by_signal),
-            "confidence_x": round(float(res.confidence_x), 4),
-            "confidence_y": round(float(res.confidence_y), 4),
-            "warnings": list(res.warnings),
-        }
-        return ctx
+        return self._run_gds(ctx, self.validate_params(params))
 
     def _pick(self, ctx: Context, p: Dict[str, Any], boxes, shape):
         """哪一塊是缺陷那一塊 —— **三張 Region 卡逐字同一支**。"""

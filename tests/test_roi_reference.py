@@ -1,27 +1,21 @@
-# F11 Region-3 第 3 步：GDS label map → 具名區域。
-# 2026-08-25（F29）：這張卡收成「參照區域」的一個 method（``layout layers``），
-# 另一個是 ``repeating cells``。這一份仍然只測 GDS 那一支 ——
-# 週期那一支住 `tests/test_roi_reference_cells.py`。
-"""這一份鎖住的是**框真的等於那一層**，不是「卡片跑得完」。
+# 參照區域的 ``repeating cells`` 那一支（F29，2026-08-25）。
+"""使用者：「golden cell 跟 GDS 同樣重要而且他們要能在同張 card 裡
+（都是接區域 ROI 卡）」。
 
-d4t 的區域是一組軸對齊矩形，而 GLAS 給的是任意形狀的 mask。中間那個轉換有
-兩種做法，而錯的那一種**不會報錯**：
+這一份問四件事：
 
-* **取 bounding box** —— 一個 L 形的 bbox 會框到別的材質，然後吐出一個看起來
-  完全正常的灰階值；
-* **精確拆解** —— 站點的 layout 是 Manhattan 的，所以那是等價不是近似。
-
-所以最重要的一條測試是「聯集起來**逐像素**等於 ``label == id``」，而且它要一路
-測到**正規化來回之後**（0–1 座標是為了換尺寸不錯位，但它同時是一個會偷偷四捨
-五入掉一個像素的地方）。
-
-另外三件：**非週期**（這條路的前提就是前兩張卡的前提都不成立）、
-**三個名字**（``<name>`` / ``_center`` / ``_others`` —— F29 之前只有第一個，
-換掉的理由與沒有被推翻的那一半見卡片檔頭）、以及**砍到上限要講出來**
-（少掉一半框的區域仍然算得出很正常的數字）。
+1. **切得對** —— 週期量得準、格子數對得上手算的。
+2. **量不到就停下來** —— 純雜訊要 `StepError`，不可以吐一格猜出來的晶格。
+   一個編出來的網格照樣讓每一顆 defect 吐得出很正常的灰階值，而 CSV 上沒有
+   任何線索（上一次 rsem route 悄悄變成 12/24 就是這個形狀）。
+3. **條紋不是晶格** —— 只有一軸有週期的時候，另一軸取滿整張圖。硬給一個位置
+   等於憑空捏造資訊。
+4. **它跟 GDS 那一支是同一張卡** —— 共用 `pick` / `drop_edge` /
+   `output_prefix` / `max_boxes`，而且舊 recipe 遷得過來。
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -31,325 +25,327 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from d4t.core.algo import mask as algo_mask  # noqa: E402
-from d4t.core.ingest import glas_export  # noqa: E402
 from d4t.core.pipeline import get_step  # noqa: E402
 from d4t.core.pipeline.context import Context  # noqa: E402
+from d4t.core.pipeline.recipe import Recipe  # noqa: E402
 from d4t.core.pipeline.step import StepError  # noqa: E402
-
-LAYERS = "1:epi, 2:mg"
-
+from d4t.core.steps.roi_reference import (  # noqa: E402
+    METHOD_GDS, METHOD_PROFILE, METHOD_TEMPLATE,
+)
 
 CARD = "roi_reference"
-GDS = {"method": "layout layers"}
+METHODS_ALL = (METHOD_PROFILE, METHOD_TEMPLATE, METHOD_GDS)
 
 
-def _params(**over):
-    p = dict(GDS, label_source="layout_label", layers=LAYERS, min_area=0,
-             output_prefix="", max_boxes=8192)
-    p.update(over)
-    return p
 
 
-def _run(label, **over):
-    ctx = Context(images={"layout_label": np.asarray(label, np.uint8)})
-    get_step(CARD)().run(ctx, _params(**over))
-    return ctx
+
+def stripes(size=192, period=16, width=8, bg=40.0, fg=200.0):
+    img = np.full((size, size), bg, np.float32)
+    for x in range(0, size, period):
+        img[:, x:x + width] = fg
+    return img
 
 
-def _union(ctx, name, shape):
-    back = np.zeros(shape, bool)
-    for x, y, w, h in ctx.roi_rects(name, shape):
-        back[y:y + h, x:x + w] = True
-    return back
+
 
 
 # --------------------------------------------------------------------------- #
-# 1. 幾何：框聯集起來就是那一層，一個像素都不差
+# 4. 跟 GDS 那一支是同一張卡
 # --------------------------------------------------------------------------- #
-def test_an_L_shape_is_two_rectangles_not_a_bounding_box():
-    """L 形的 bounding box 會把右下那塊背景一起框進去 —— 而那一塊是別的材質。"""
-    lab = np.zeros((6, 6), np.uint8)
-    lab[0:4, 0:6] = 1
-    lab[4:6, 0:2] = 1
-    ctx = _run(lab)
-    assert ctx.roi_count("epi") == 2
-    assert (_union(ctx, "epi", lab.shape) == (lab == 1)).all()
-    # bbox 會多框到 8 個像素 —— 這一行是「錯的做法錯多少」的紀錄
-    assert int(((lab[0:6, 0:6] == 0)).sum()) == 8
-
-
-@pytest.mark.parametrize("seed", [0, 1, 2, 3, 4])
-def test_the_boxes_are_pixel_exact_after_the_round_trip(seed):
-    """**這是這張卡唯一不能錯的東西。**
-
-    正規化（0–1）是為了換影像尺寸不錯位（F7-4 的坑），但它同時是一個會偷偷
-    四捨五入掉一個像素的地方 —— 所以要測的是**來回之後**還相同。
-    """
-    rng = np.random.default_rng(seed)
-    lab = np.zeros((64, 96), np.uint8)
-    for value in (1, 2):
-        for _ in range(6):
-            x, y = int(rng.integers(0, 80)), int(rng.integers(0, 50))
-            w, h = int(rng.integers(3, 20)), int(rng.integers(3, 14))
-            lab[y:y + h, x:x + w] = value
-    ctx = _run(lab)
-    for lid, name in ((1, "epi"), (2, "mg")):
-        assert (_union(ctx, name, lab.shape) == (lab == lid)).all(), name
-
-
-def test_a_diagonal_edge_costs_one_rectangle_per_row():
-    """`fillPoly` 沒有 LINE_AA，所以斜邊就是 1px 的階梯。那是**精確的代價**，
-    不是 bug —— 而它正是 `max_boxes` 要開大的原因。"""
-    n = 20
-    lab = np.array([[1 if x <= y else 0 for x in range(n)] for y in range(n)],
-                   np.uint8)
-    rects, piece_of = algo_mask.decompose(lab, 1)
-    assert len(rects) == n and len(set(piece_of)) == 1
-
-
-def test_separate_shapes_are_separate_pieces_but_one_region():
-    """一個名字底下好幾塊 —— 這條路上「一份」不是複本，所以 pieces 只是資訊。"""
-    lab = np.zeros((8, 12), np.uint8)
-    lab[1:4, 1:4] = 1
-    lab[5:7, 8:11] = 1
-    ctx = _run(lab)
-    assert ctx.roi_count("epi") == 2
-    assert ctx.features["epi_pieces"] == 2.0
-    assert ctx.features["epi_area_px"] == 3 * 3 + 2 * 3
-
-
-def test_the_layout_does_not_have_to_repeat():
-    """這條路的前提就是**前兩張卡的前提都不成立** —— 不准偷偷需要週期性。"""
-    rng = np.random.default_rng(9)
-    lab = np.zeros((48, 48), np.uint8)
-    for _ in range(7):
-        x, y = int(rng.integers(0, 40)), int(rng.integers(0, 40))
-        lab[y:y + int(rng.integers(2, 9)), x:x + int(rng.integers(2, 9))] = 1
-    ctx = _run(lab)
-    assert ctx.roi_count("epi") > 0
-    assert (_union(ctx, "epi", lab.shape) == (lab == 1)).all()
-
-
-# --------------------------------------------------------------------------- #
-# 2. 三個名字（F29 之前只有 <name>）
-# --------------------------------------------------------------------------- #
-def test_it_declares_the_whole_family():
-    """``_center`` / ``_others`` 在 F29 補上了 —— 而**原本的反對意見沒有被推翻**。
-
-    當初不吐它們的理由是：另外兩張卡的 ``_center`` 是「缺陷所在的那一份」，
-    那是幾何保證的（patch 以缺陷為中心裁切）；這條路上缺陷不保證在正中央。
-    那句話今天仍然成立 —— 變的是有了 ``pick="strongest"``：它不假設缺陷在哪，
-    **它去找**（下面那條測試就是在測這件事）。
-    """
-    out = get_step(CARD).resolve_regions_out(_params())
-    assert out == ["epi", "epi_center", "epi_others",
-                   "mg", "mg_center", "mg_others"]
-
-
-def test_it_really_produces_those(tmp_path):
-    lab = np.zeros((8, 8), np.uint8)
-    lab[1:4, 1:4] = 1
-    lab[5:7, 5:7] = 1
-    ctx = _run(lab)
-    assert sorted(ctx.roi_names()) == ["epi", "epi_center", "epi_others"]
-
-
-def test_one_piece_means_no_baseline_at_all():
-    """只有一塊的時候 ``_others`` **不存在**（不是空的、也不是退回整張圖）。"""
-    lab = np.zeros((8, 8), np.uint8)
-    lab[1:4, 1:4] = 1
-    ctx = _run(lab)
-    assert "epi_others" not in ctx.roi_names()
-    assert "epi_others" in (ctx.meta.get("regions_absent") or {})
-
-
-def test_strongest_finds_the_odd_box_out():
-    """**這條路真正的用法。** 缺陷不在正中央，所以用訊號去找那一塊。"""
-    lab = np.zeros((40, 40), np.uint8)
-    for x in (2, 14, 26):
-        lab[4:12, x:x + 8] = 1
-    sig = np.zeros((40, 40), np.float32)
-    sig[4:12, 26:34] = 200.0                     # 最右邊那一塊才是缺陷
-    ctx = Context(images={"layout_label": lab, "diff": sig})
-    get_step(CARD)().run(ctx, _params(pick="strongest", pick_source="diff"))
-    box = ctx.roi_rects("epi_center", lab.shape)[0]
-    assert box[0] >= 26
-    assert ctx.roi_count("epi_others") == 2
-
-
-def test_falling_back_to_the_middle_is_said_out_loud():
-    """接不到 ``Judge on`` 就退回「離中心最近」—— 而安靜地照做是最糟的。"""
-    lab = np.zeros((40, 40), np.uint8)
-    for x in (2, 14, 26):
-        lab[4:12, x:x + 8] = 1
-    ctx = Context(images={"layout_label": lab})
-    get_step(CARD)().run(ctx, _params(pick="strongest"))
-    assert ctx.features["pick_by_signal"] == 0.0
-    assert "Judge on" in " ".join(ctx.meta["warnings"])
-
-
-def test_the_declared_features_match_what_it_writes():
-    lab = np.zeros((8, 8), np.uint8)
-    lab[1:4, 1:4] = 1
-    lab[5:7, 5:7] = 2
-    declared = set(get_step(CARD).resolve_features(_params()))
-    assert set(_run(lab).features) == declared
-
-
-def test_the_prefix_applies_to_everything():
-    lab = np.zeros((8, 8), np.uint8)
-    lab[1:4, 1:4] = 1
-    ctx = _run(lab, output_prefix="g")
-    assert "g_epi_present" in ctx.features and "g_layout_ok" in ctx.features
-
-
-# --------------------------------------------------------------------------- #
-# 3. 上限與丟小塊 —— **都要講出來**
-# --------------------------------------------------------------------------- #
-def test_hitting_the_cap_is_said_out_loud():
-    """少掉一半框的區域仍然算得出一個很正常的灰階值。"""
-    n = 40
-    lab = np.array([[1 if x <= y else 0 for x in range(n)] for y in range(n)],
-                   np.uint8)
-    ctx = _run(lab, max_boxes=10)
-    assert ctx.roi_count("epi") == 10
-    assert ctx.features["epi_clipped"] == 1.0
-    assert any("more than the 10 limit" in w for w in ctx.meta["warnings"])
-
-
-def test_not_hitting_the_cap_leaves_clipped_at_zero():
-    lab = np.zeros((8, 8), np.uint8)
-    lab[1:4, 1:4] = 1
-    assert _run(lab).features["epi_clipped"] == 0.0
-
-
-def test_the_cap_keeps_the_boxes_nearest_the_middle():
-    """砍掉的要是最外圍的 —— 缺陷比較可能在中間。"""
-    lab = np.zeros((20, 20), np.uint8)
-    lab[0:2, 0:2] = 1                      # 角落
-    lab[9:11, 9:11] = 1                    # 正中央
-    ctx = _run(lab, max_boxes=1)
-    (x, y, w, h), = ctx.roi_rects("epi", lab.shape)
-    assert (x, y) == (9, 9)
-
-
-def test_a_piece_smaller_than_the_minimum_goes_whole():
-    """丟整塊不丟小矩形 —— 把一塊挖掉一角會改變答案而不改變它的樣子。"""
-    lab = np.zeros((10, 20), np.uint8)
-    lab[1:5, 1:9] = 1                      # 32 px
-    lab[8:9, 15:17] = 1                    # 2 px
-    ctx = _run(lab, min_area=10)
-    assert ctx.roi_count("epi") == 1
-    assert ctx.features["epi_area_px"] == 32
-    assert any("smaller than 10 px" in w for w in ctx.meta["warnings"])
-
-
-def test_a_layer_with_nothing_left_does_not_fall_back_to_the_whole_image():
-    """退回整張圖會**安靜地**量到全部的像素，而那是錯的。"""
-    lab = np.zeros((8, 8), np.uint8)
-    lab[1:4, 1:4] = 1                      # 只有第 1 層
-    ctx = _run(lab)
-    assert "mg" not in ctx.roi_names()
-    assert ctx.features["mg_present"] == 0.0
-    assert "not in this defect's label map" in ctx.meta["regions_absent"]["mg"]
-
-
-def test_the_two_reasons_for_an_empty_layer_are_told_apart():
-    """「這一顆沒有那一層」跟「那一層都被最小面積濾掉了」的下一步不同。"""
-    lab = np.zeros((8, 8), np.uint8)
-    lab[1:4, 1:4] = 1
-    lab[6:7, 6:7] = 2                      # 1 px 的第 2 層
-    ctx = _run(lab, min_area=5)
-    assert "smaller than the 5 px minimum" in ctx.meta["regions_absent"]["mg"]
-
-
-# --------------------------------------------------------------------------- #
-# 4. 設定與壞輸入
-# --------------------------------------------------------------------------- #
-def test_no_layers_yet_is_a_configuration_issue_not_a_crash():
-    """空字串是合法的值，但這張卡跑起來每一顆都會失敗 —— 要在跑之前就講。"""
-    says = get_step(CARD).configuration_issues(_params(layers=""))
-    # 訊息必須指向一個**按得下去**的東西（`tests/test_ui_f7_9_feedback.py` 的
-    # 那條不變量）—— 「還沒設定完」而沒有下一步，就是死路。
-    assert says and "Open GDS export…" in says[0]
-    assert get_step(CARD).configuration_issues(_params()) == []
-    # ``repeating cells`` 那一支**沒有這種狀態** —— 它不需要任何外部資料。
-    assert get_step(CARD).configuration_issues(
-        {"method": "repeating cells"}) == []
-
-
-def test_running_with_no_layers_says_what_to_fill_in():
-    lab = np.zeros((8, 8), np.uint8)
-    with pytest.raises(StepError) as e:
-        _run(lab, layers="")
-    text = str(e.value)
-    assert "Open GDS export…" in text          # GUI 那條路
-    assert "--gds" in text                     # CLI 那條路
-
-
-def test_a_three_channel_source_is_refused():
-    """label 的像素值**是**層號 —— 三通道多半是指到了 `_label_view.png`。"""
-    lab = np.zeros((8, 8, 3), np.uint8)
-    with pytest.raises(StepError) as e:
-        _run(lab)
-    assert "single-channel" in str(e.value)
-
-
-def test_a_shredded_image_is_refused_rather_than_run_for_ever():
-    """棋盤格會產生幾十萬個 run。「跑很久」跟「當掉」對使用者是同一件事。"""
-    yy, xx = np.mgrid[0:700, 0:700]
-    lab = ((yy + xx) % 2).astype(np.uint8)
-    with pytest.raises(algo_mask.MaskError) as e:
-        algo_mask.decompose(lab, 1)
-    assert "not a label map" in str(e.value)
-
-
-def test_a_half_typed_layer_map_does_not_kill_the_canvas():
-    """宣告用的那幾支不准拋 —— 打到一半的時候畫布不能整個消失。"""
+def test_both_methods_share_the_same_wiring_params():
     card = get_step(CARD)
-    assert card.resolve_regions_out(_params(layers="1:")) == []
-    assert card.resolve_features(_params(layers="1:"))
+    names = {s.name: s for s in card.params}
+    for shared in ("pick", "pick_source", "drop_edge", "edge_margin",
+                   "output_prefix", "max_boxes", "method"):
+        assert names[shared].show_when in (None, ("pick", ("strongest",)),
+                                           ("drop_edge", (True,))), shared
+    # 兩支各自的那幾格要**藏起來**，不是攤在那裡讓使用者猜。
+    assert names["layers"].show_when == ("method", (METHOD_GDS,))
+    assert names["source"].show_when[1] == (METHOD_PROFILE, METHOD_TEMPLATE)
+    assert names["label_source"].show_when == ("method", (METHOD_GDS,))
+
+
+def test_each_method_declares_only_the_stream_it_really_reads():
+    """兩支吃的是兩種完全不同的東西 —— 一張照片，跟一張「像素值就是層號」的圖。"""
+    card = get_step(CARD)
+    cells = card.resolve_reads(card.validate_params(
+        {"method": METHOD_PROFILE, "source": "test"}))
+    gds = card.resolve_reads(card.validate_params(
+        {"method": METHOD_GDS, "label_source": "layout_label"}))
+    assert cells == ["test"]
+    assert gds == ["layout_label"]
+
+
+def test_judging_on_another_stream_is_declared_as_a_read():
+    """`pick="strongest"` 要判斷的那條流，畫布上也是一條線。"""
+    card = get_step(CARD)
+    got = card.resolve_reads(card.validate_params(
+        {"method": METHOD_PROFILE, "source": "test", "pick": "strongest",
+         "pick_source": "diff"}))
+    assert got == ["test", "diff"]
+
+
+
+
+
+
+
+
+
 
 
 # --------------------------------------------------------------------------- #
-# 5. layer 名的改寫（GLAS 的 `L17/D0` 不能當變數）
+# 5. 舊 recipe 遷得過來（鐵則 9）
 # --------------------------------------------------------------------------- #
-def test_a_layout_layer_name_becomes_a_usable_region_name():
-    assert glas_export.region_name_for("L17/D0") == "L17_D0"
-    assert glas_export.region_name_for("EPI (L17/D0)") == "EPI_L17_D0"
-    assert glas_export.region_name_for("") == "layer"
-    assert glas_export.region_name_for("9x")[0].isalpha(), "不能以數字開頭"
+def _old_recipe():
+    return {
+        "recipe_id": "t", "version": 2, "score": {"expr": "0"},
+        "routes": {"ebi_patch": ["n0", "n1", "n2"]},
+        "nodes": {
+            "n0": {"step": "load_patch", "params": {}, "enabled": True},
+            "n1": {"step": "load_sidecar", "params": {}, "enabled": True},
+            "n2": {"step": "roi_from_mask", "enabled": True,
+                   "params": {"source": "layout_label", "layers": "17=epi",
+                              "max_boxes": 500}},
+        },
+    }
 
 
-def test_two_layers_that_would_collide_get_different_names():
-    """撞名的話後面那層會蓋掉前面那層，而畫面上只看得到一個區域。"""
-    taken = []
-    for raw in ("a/b", "a:b", "a b"):
-        taken.append(glas_export.region_name_for(raw, taken))
-    assert len(set(taken)) == 3
+def test_an_old_gds_card_becomes_this_card_on_the_gds_method():
+    r = Recipe.from_json_dict(_old_recipe())
+    n = r.nodes["n2"]
+    assert n.step == CARD
+    assert n.params["method"] == METHOD_GDS
+    # ``source`` 換名字：新卡有**兩個**來源參數，因為那是兩種不同的東西。
+    assert n.params["label_source"] == "layout_label"
+    assert "source" not in n.params
+    assert n.params["layers"] == "17=epi" and n.params["max_boxes"] == 500
 
 
-def test_the_default_layer_map_parses_as_the_card_parameter():
-    """預設值要能直接餵進 `channel_map` 的驗證（整數、不重複、名字能當變數）。"""
-    from d4t.core.pipeline.channels import parse_channel_map
+def test_the_migration_is_an_identity_the_second_time():
+    """``to_json_dict → from_json_dict`` 是 `run_batch` 送 recipe 進 worker 的
+    路（鐵則 9）—— 它一旦不是 identity，``workers=1`` 與 ``workers=2`` 會算出
+    不同的分數。真的發生過。"""
+    once = Recipe.from_json_dict(_old_recipe())
+    twice = Recipe.from_json_dict(json.loads(json.dumps(once.to_json_dict())))
+    a, b = once.nodes["n2"], twice.nodes["n2"]
+    assert (a.step, a.params) == (b.step, b.params)
 
-    doc = {"label_map": [{"id": 1, "layer": "L17/D0"},
-                         {"id": 2, "layer": "L21/D0"}]}
-    text = glas_export.default_layer_map(doc)
-    assert parse_channel_map(text) == [(1, "L17_D0"), (2, "L21_D0")]
+
+def test_a_new_recipe_is_left_alone():
+    """判準是「**舊 step 名在不在**」，不是「新參數不在」（鐵則 9）。"""
+    d = _old_recipe()
+    d["nodes"]["n2"] = {"step": CARD, "enabled": True,
+                        "params": {"method": METHOD_PROFILE, "source": "test",
+                                   "roi_out": "epi"}}
+    n = Recipe.from_json_dict(d).nodes["n2"]
+    assert n.step == CARD and n.params["method"] == METHOD_PROFILE
+    assert n.params["source"] == "test"
 
 
 # --------------------------------------------------------------------------- #
-# 6. 儀表看到的就是引擎算的
+# 四張收成一張之後：合併卡與實作對同一格的說法要一致（F30）
 # --------------------------------------------------------------------------- #
-def test_the_panel_sees_the_same_numbers(tmp_path):
-    lab = np.zeros((10, 10), np.uint8)
-    lab[1:5, 1:5] = 1
-    ctx = _run(lab)
-    rec = ctx.meta["gds_layers"]["layout_label"]
-    assert rec["shape"] == [10, 10]
-    assert rec["ids_in_image"] == [1]
-    by_name = {e["name"]: e for e in rec["layers"]}
-    assert by_name["epi"]["boxes"] == ctx.roi_count("epi")
-    assert by_name["mg"]["boxes"] == 0
+def test_the_merged_card_and_each_implementation_agree_on_every_shared_box():
+    """**這一條是踩出來的。**
+
+    折進來的兩支不再自己宣告 ``source`` / ``max_boxes`` 那幾格（合併卡上只有
+    一份），可是它們的 `run` 仍然會 `validate_params` 一次 —— 拿的是**自己
+    模組裡那一份舊 spec**。實測 ``roi_cross`` 的 ``max_boxes`` 上限是 4096、
+    合併卡是 65536，於是合併卡的預設值 8192 讓 Profile 那一支**每一顆都失敗**，
+    訊息是「parameter 'max_boxes': 8192 is above the maximum of 4096」——
+    指著一個使用者從來沒有打過的數字。
+
+    ``default`` **刻意不比**：三支的舊預設互相衝突，而遷移把舊值逐字寫進參數
+    （見 `recipe._FOLDED_CARD_OLD_DEFAULTS`）。會咬人的是**範圍與型別**。
+    """
+    from d4t.core.steps.roi_cross import RoiCrossStep
+    from d4t.core.steps.roi_template import RoiTemplateStep
+
+    merged = {s.name: s for s in get_step(CARD).params}
+    bad = []
+    for impl in (RoiCrossStep, RoiTemplateStep):
+        for spec in impl.params:
+            mine = merged.get(spec.name)
+            if mine is None:
+                bad.append("%s.%s 不在合併卡上" % (impl.__name__, spec.name))
+                continue
+            for field in ("type", "min", "max", "choices", "pattern"):
+                if getattr(spec, field, None) != getattr(mine, field, None):
+                    bad.append("%s.%s 的 %s：%r vs 合併卡的 %r"
+                               % (impl.__name__, spec.name, field,
+                                  getattr(spec, field, None),
+                                  getattr(mine, field, None)))
+    assert not bad, "\n".join(bad)
+
+
+def test_every_method_runs_with_nothing_but_its_defaults():
+    """合併卡的預設值餵給每一支，四支都要**至少驗得過參數**。
+
+    上面那條比的是 spec，這一條走的是真的那條路（`_params_for` → 實作的
+    `validate_params`）—— 兩者都要，因為填值的那一步自己也可能填錯。
+    """
+    from d4t.core.steps.roi_reference import _params_for, _impl, METHODS
+    card = get_step(CARD)
+    for method in METHODS:
+        impl = _impl(method)
+        if impl is None:
+            card.validate_params({"method": method})
+            continue
+        impl.validate_params(_params_for(method, {"method": method}))
+
+
+# --------------------------------------------------------------------------- #
+# 6. Profile / Template 也折進來（F30，2026-08-25）
+# --------------------------------------------------------------------------- #
+def _folded_recipe(step, params):
+    return {
+        "recipe_id": "t", "version": 2, "score": {"expr": "0"},
+        "routes": {"ebi_patch": ["n0", "n1"]},
+        "nodes": {
+            "n0": {"step": "load_patch", "params": {}, "enabled": True},
+            "n1": {"step": step, "params": dict(params), "enabled": True},
+        },
+    }
+
+
+def test_an_old_profile_card_keeps_its_own_defaults():
+    """**合併卡的共用預設故意跟舊卡不同** —— 三支的舊預設互相衝突。
+
+    所以遷移要把舊值逐字寫進參數。少了這一步，一份舊檔案會安靜地換一組值跑：
+    ``max_boxes`` 從 64 變 8192 不會報錯，它會多量一百個框然後吐出一組不一樣
+    的統計量。
+    """
+    r = Recipe.from_json_dict(_folded_recipe("roi_cross", {"directions": "flat"}))
+    n = r.nodes["n1"]
+    assert n.step == CARD and n.params["method"] == METHOD_PROFILE
+    assert n.params["source"] == "ref"          # 合併卡的預設是 test
+    assert n.params["roi_out"] == "cross"       # 合併卡的預設是 region
+    assert n.params["max_boxes"] == 64          # 合併卡的預設是 8192
+    assert n.params["directions"] == "flat"     # 使用者填過的原樣
+
+
+def test_an_old_template_card_becomes_the_template_method():
+    r = Recipe.from_json_dict(
+        _folded_recipe("roi_template", {"locate_axis": "y", "min_score": 0.7}))
+    n = r.nodes["n1"]
+    assert n.step == CARD and n.params["method"] == METHOD_TEMPLATE
+    assert n.params["source"] == "ref"
+    assert n.params["locate_axis"] == "y" and n.params["min_score"] == 0.7
+
+
+def test_the_two_min_confidence_boxes_do_not_share_a_name():
+    """撞名而**意思不同**的那一格要改名（同 `roi_compare` 的 ``metrics``）。
+
+    ``min_confidence`` 在 Profile 上是「條紋的信心」（0..200，預設 5.0），在
+    ``repeating cells`` 上是「週期的強度」（0..1，預設 0.18）。共用一格的話，
+    切換 method 會留下一組對方**看得懂但意思完全不同**的值 —— 它不會報錯，
+    它會照著跑。
+    """
+    old = Recipe.from_json_dict(
+        _folded_recipe("roi_cross", {"min_confidence": 7.0})).nodes["n1"]
+    assert old.params["min_stripe_confidence"] == 7.0
+    assert "min_confidence" not in old.params
+
+    names = {s.name for s in get_step(CARD).params}
+    assert "min_stripe_confidence" in names
+    # 撞名的那一格連同 ``repeating cells`` 一起走了（2026-08-25）
+    assert "min_confidence" not in names
+    assert "min_repeat_strength" not in names
+
+
+@pytest.mark.parametrize("step,params", [
+    ("roi_cross", {"directions": "flat", "min_confidence": 7.0}),
+    ("roi_template", {"locate_axis": "y"}),
+])
+def test_the_folded_migration_is_an_identity_the_second_time(step, params):
+    """鐵則 9：``to_json_dict → from_json_dict`` 是 `run_batch` 送 recipe 進
+    worker 的路 —— 它一旦不是 identity，``workers=1`` 與 ``workers=2`` 會算出
+    不同的分數。"""
+    once = Recipe.from_json_dict(_folded_recipe(step, params)).to_json_dict()
+    twice = Recipe.from_json_dict(once).to_json_dict()
+    assert once == twice
+
+
+def test_each_method_only_shows_its_own_settings():
+    """四支的參數不可以互相洩漏 —— 攤在那裡讓使用者猜是這張卡最大的風險。"""
+    card = get_step(CARD)
+    specs = {s.name: s for s in card.params}
+    seen = {}
+    for method in (METHOD_PROFILE, METHOD_GDS, METHOD_PROFILE, METHOD_TEMPLATE):
+        vals = card.validate_params({"method": method})
+        seen[method] = {n for n, s in specs.items() if s.visible_for(vals)}
+    # 各自的招牌參數只出現在自己那一支上
+    for name, owner in (("layers", METHOD_GDS),
+                        ("template", METHOD_TEMPLATE),
+                        ("directions", METHOD_PROFILE)):
+        for method, names in seen.items():
+            assert (name in names) == (method == owner), (name, method)
+    # `directions` 底下那一整組是 Profile 專屬的
+    assert not (seen[METHOD_TEMPLATE] & {"vertical_width", "horizontal_width"})
+    # 共用的那幾格每一支都在
+    for method, names in seen.items():
+        assert {"pick", "drop_edge", "output_prefix", "max_boxes"} <= names, method
+
+
+# --------------------------------------------------------------------------- #
+# 7. 打錯的層號表要**講出來**（2026-08-25）
+# --------------------------------------------------------------------------- #
+def test_a_layer_table_that_cannot_be_read_says_so():
+    """**這一條是使用者回報的那個形狀。**
+
+    原話：「如果選擇 layout layers 後方阜沒有出口可以輸出阜的區域線」。
+    `_layers_of` 把 `ChannelMapError` 吞掉回空 list（打到一半不准拋，那是對的）
+    —— 於是一個寫成 ``17=epi`` 的表格產不出任何區域埠，而畫面上**沒有任何東西
+    說為什麼**。卡片要跑起來才報錯，可是使用者是在畫布上發現「這張卡好像沒有
+    輸出」的。
+    """
+    card = get_step(CARD)
+    broken = {"method": METHOD_GDS, "layers": "17=epi"}     # 分隔符是 ':'
+    assert card.resolve_regions_out(broken) == []
+    said = " ".join(card.configuration_issues(broken))
+    assert "layer table cannot be read" in said
+    assert "no outputs on the canvas" in said
+    assert "':'" in said or ":" in said                      # 講得出正確寫法
+
+
+def test_a_correct_layer_table_produces_the_ports_and_no_complaint():
+    """否則上面那條只證明了「這張卡永遠在抱怨」。"""
+    card = get_step(CARD)
+    good = {"method": METHOD_GDS, "layers": "17:epi,22:mg"}
+    assert card.resolve_regions_out(good) == [
+        "epi", "epi_center", "epi_others", "mg", "mg_center", "mg_others"]
+    assert card.configuration_issues(good) == []
+
+
+def test_an_empty_layer_table_says_where_to_get_one():
+    card = get_step(CARD)
+    said = " ".join(card.configuration_issues({"method": METHOD_GDS}))
+    assert "Open GDS export" in said
+
+
+def test_the_repeating_cells_method_is_gone():
+    """使用者 2026-08-25：「請把前者刪掉」。
+
+    ⚠ **舊 recipe 要明確報錯，不可以安靜地換一支跑。** ``method`` 是一個
+    `choice`，所以一個認不得的值進不了 `validate_params` —— 那正是要的：
+    「這一份檔案用的那個方法不在了」比「它現在用另一個演算法算」好得多。
+    """
+    from d4t.core.steps import roi_reference as mod
+    assert not hasattr(mod, "METHOD_CELLS")
+    card = get_step(CARD)
+    choices = {s.name: s for s in card.params}["method"].choices
+    assert "repeating cells" not in choices
+    assert len(choices) == 3
+    with pytest.raises(Exception):
+        card.validate_params({"method": "repeating cells"})
+
+
+def test_nothing_declares_the_cells_features_any_more():
+    card = get_step(CARD)
+    declared = set(card.features_out)
+    for m in METHODS_ALL:
+        declared |= set(card.resolve_features({"method": m}))
+    assert not (declared & {"cells_px", "cells_py", "cells_n",
+                            "cells_confidence", "cells_axes"})
