@@ -367,3 +367,65 @@ def test_what_counts_as_a_constant_expression(text, constant):
     from d4t.ui.viewmodel import is_a_constant_expression
 
     assert is_a_constant_expression(text) is constant, text
+
+
+# --------------------------------------------------------------------------- #
+# 走訪住在 core（F29 C0，2026-08-25）
+# --------------------------------------------------------------------------- #
+def test_the_traversal_lives_in_core_and_needs_no_qt():
+    """報表也要寫「每一類幾顆」，而 **core 不得 import Qt**（鐵則 1）。
+
+    所以那份邏輯 2026-08-25 從 `ui/tree_scene.py` 搬進了
+    `core.pipeline.decide_tree`。這一條釘的是「**搬過去了**」——
+    沒有它，下一個人會在 core 裡再寫一份（而抄第二份出來的那份一定會漂）。
+    """
+    import ast
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent / "d4t" / "core" / \
+        "pipeline" / "decide_tree.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    mods = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            mods.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            mods.add(node.module.split(".")[0])
+    assert "PySide6" not in mods and "PyQt5" not in mods, sorted(mods)
+
+
+def test_the_ui_re_exports_the_same_objects_not_a_copy():
+    """`tree_scene` 與 `verdict_band` 改成 import 它 —— **不留第二份**。
+
+    既有的 `from d4t.ui.tree_scene import flow_counts` 因此一個字都不用改，
+    而 `is` 這個比較就是「真的是同一支」的證明（抄一份出來的話這裡會是 False，
+    而兩邊的測試仍然全綠）。
+    """
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+
+    from d4t.core.pipeline import decide_tree as core
+    from d4t.ui import tree_scene, verdict_band
+
+    for name in ("display_tree", "layout_cells", "flow_counts", "leaf_stats",
+                 "decision_info", "path_text", "rows_reaching", "count_yes",
+                 "suggest_condition", "parse_simple_condition",
+                 "format_condition"):
+        assert getattr(tree_scene, name) is getattr(core, name), name
+    assert verdict_band.FAILED_KEY == core.FAILED_KEY
+    assert verdict_band.UNBINNED_KEY == core.UNBINNED_KEY
+
+
+def test_the_report_and_the_screen_use_the_same_class_colours():
+    """同一類在畫面與報表上不同色的話，「這根柱子是哪一類」要重新學一次。"""
+    from d4t.core.export import html
+    from d4t.core.pipeline import decide_tree as core
+
+    assert html.NUISANCE_HEX == core.NUISANCE_HEX
+    for b in range(1, 8):
+        assert core.leaf_color(b) in core.LEAF_PALETTE
+    assert core.leaf_color(0) == core.NUISANCE_HEX
+    assert core.leaf_color(0, "#123456") == "#123456"

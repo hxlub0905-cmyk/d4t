@@ -31,16 +31,15 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget,
 )
 
+from ..core.pipeline import decide_tree
 from .theme import TOKENS
-from .tree_scene import (
-    _path_of, display_tree, layout_cells, leaf_hex,
-)
 
 __all__ = ["VerdictBand", "verdict_rows"]
 
-#: 「算不出來」那一列的 key（不可能跟樹的路徑撞名 —— 路徑只有 y/n）。
-FAILED_KEY = "!failed"
-UNBINNED_KEY = "!unbinned"
+#: 「算不出來」那兩列的 key —— **住 core**（F29 C0），這裡只是再匯出：
+#: 面板拿它們比對列，而報表也要認得同樣兩個字。
+FAILED_KEY = decide_tree.FAILED_KEY
+UNBINNED_KEY = decide_tree.UNBINNED_KEY
 
 
 def _hex(token: str, fallback: str) -> str:
@@ -53,87 +52,15 @@ def _hex(token: str, fallback: str) -> str:
 def verdict_rows(decide: Any, results: Sequence[Dict[str, Any]],
                  ground_truth: Optional[Dict[Any, Any]] = None
                  ) -> List[Dict[str, Any]]:
-    """``[{key, name, bin, count, ids, real, labelled, colour, kind}, …]``
+    """每一類幾顆 —— **實作住 `core.pipeline.decide_tree`**（F29 C0）。
 
-    順序**跟畫布上的樹一樣**（`layout_cells` 的走訪順序）—— 面板與畫布講同一
-    件事的時候，順序也該是同一個；而且它**穩定**：重跑一次列不會跳來跳去
-    （照顆數排序會，而那讓人以為結構變了）。
-
-    最後補上「算不出來」的那幾顆。它們是**兩種**不同的事故，所以是兩列：
-
-    * ``kind="failed"`` —— 這一顆有卡片出錯（鐵則 7：單顆出錯不殺整批，
-      回 ``ok=False`` 並帶原因），根本沒走到判定；
-    * ``kind="unbinned"`` —— 跑完了，但判定給不出 bin（表達式炸了）。
-
-    兩種都**沒有的時候整列不出現**（F18：不顯示 0）。
+    搬家的理由：報表也要寫同一份數字，而 `d4t/core` 不得 import Qt（鐵則 1）。
+    留在這裡的只有**主題的那兩個顏色** —— 它們是畫面的一部分，而報表沒有主題。
     """
-    rows_in = [dict(r) for r in (results or [])]
-    out: List[Dict[str, Any]] = []
-    tree = display_tree(decide)
-
-    if tree is not None:
-        # path → 走到那裡的 defect_id（順序照結果的順序）。
-        by_path: Dict[str, List[str]] = {}
-        for r in rows_in:
-            if not r.get("ok") or r.get("bin") is None:
-                continue
-            try:
-                p = _path_of(tree, dict(r.get("features") or {}))
-            except Exception:          # noqa: BLE001 — 顯示用，走不動就不計
-                continue
-            by_path.setdefault(p, []).append(str(r.get("defect_id")))
-
-        truth = dict(ground_truth or {})
-        for cell in layout_cells(tree, decide):
-            if cell.get("kind") != "leaf":
-                continue
-            path = str(cell.get("path"))
-            ids = by_path.get(path, [])
-            real = labelled = 0
-            for did in ids:
-                gt = truth.get(did)
-                if isinstance(gt, dict) and "is_real" in gt:
-                    labelled += 1
-                    real += 1 if gt.get("is_real") else 0
-            out.append({
-                "key": path or "root",
-                "name": str(cell.get("label") or ""),
-                "bin": int(cell.get("bin")),
-                "count": len(ids),
-                "ids": ids,
-                "real": real,
-                "labelled": labelled,
-                "colour": leaf_hex(int(cell.get("bin"))),
-                "kind": "class",
-            })
-    else:
-        # 沒有判定樹（二元 score 的老路）—— 一列一個 bin。
-        by_bin: Dict[int, List[str]] = {}
-        for r in rows_in:
-            b = r.get("bin")
-            if not r.get("ok") or b is None:
-                continue
-            by_bin.setdefault(int(b), []).append(str(r.get("defect_id")))
-        for b in sorted(by_bin):
-            out.append({"key": "bin%d" % b, "name": "bin %d" % b, "bin": b,
-                        "count": len(by_bin[b]), "ids": by_bin[b],
-                        "real": 0, "labelled": 0,
-                        "colour": leaf_hex(b), "kind": "class"})
-
-    failed = [str(r.get("defect_id")) for r in rows_in if not r.get("ok")]
-    unbinned = [str(r.get("defect_id")) for r in rows_in
-                if r.get("ok") and r.get("bin") is None]
-    if failed:
-        out.append({"key": FAILED_KEY, "name": "a card errored", "bin": None,
-                    "count": len(failed), "ids": failed, "real": 0,
-                    "labelled": 0, "colour": _hex("danger", "#d05a4c"),
-                    "kind": "failed"})
-    if unbinned:
-        out.append({"key": UNBINNED_KEY, "name": "no verdict", "bin": None,
-                    "count": len(unbinned), "ids": unbinned, "real": 0,
-                    "labelled": 0, "colour": _hex("danger", "#d05a4c"),
-                    "kind": "unbinned"})
-    return out
+    return decide_tree.verdict_rows(
+        decide, results, ground_truth,
+        nuisance=_hex("seg_disabled", decide_tree.NUISANCE_HEX),
+        danger=_hex("danger", decide_tree.DANGER_HEX))
 
 
 # --------------------------------------------------------------------------- #

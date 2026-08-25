@@ -136,10 +136,58 @@ other regions")` → `cmp_snr_mean` → 判定樹 → `cd_measure` / `find_defec
 都沒有出口，而 `_NodeItem.height` 的 docstring 自己寫著「截掉的那幾個⋯⋯畫布上
 看不到它們就是說謊」。改成 18。
 
+### C：報表 bundle —— 6000 顆一次出得完
+
+使用者：「我是想 output 報表（包含很多顆 >6000 的把每一張圖分數都算出來
+有 overlay 等等）但你說 html 這樣會很大 → 有替代方案嗎」。
+
+有：**圖擺在報表旁邊，不是嵌在裡面**。新的 `output_bundle`「Write report
+folder」寫出一個資料夾：`report.html` ＋ `images/<id>.jpg` ＋ `defects.csv`
+＋ **`recipe.json`**（沒有它，半年後沒人重現得出這份報表 —— 一疊數字沒有配方，
+等於一句「我們那時候量到這樣」）。
+
+實際量到的（120 顆合成 lot）：
+
+| | 值 |
+|---|---|
+| `report.html` | 47 KB → 6000 顆推估 **2.3 MB** |
+| `images/*.jpg` | 平均 **13.6 KB／張** → 6000 顆推估 **80 MB** |
+| 第二趟（出圖）| **cache hits 120 / misses 0** —— 影像段一次都沒重跑 |
+
+對照：6000 顆**嵌進** HTML 是 566 MB（PNG）／約 80 MB（JPEG base64）而且是
+**一個檔案**。那是「打不開」與「寄得出去」的差別。
+
+四件事：
+
+* **C0 判定樹的走訪搬進 core**（`core/pipeline/decide_tree.py`）。報表要寫
+  「每一類幾顆」，而 core 不得 import Qt（鐵則 1）—— 只剩兩條路：搬進去，
+  或在 core 再寫一份。第二條是這個 repo 踩過最多次的形狀。
+  `verdict_rows` 也一起搬（計畫書只寫了四支）：報表的「每一類幾顆」要跟畫面上
+  那一條**是同一支函式**算的。留在 UI 的只有主題的那兩個顏色，變成參數。
+  ⚠ `CELL_W`/`CELL_H` **留在 UI** —— `layout_cells` 回的是 col/row，
+  幾何是無單位的格子，一格幾個像素是畫面的事。第一版連它們一起帶走，
+  `tests/test_ui_results.py` 當場抓到。
+* **C1 `overlay.write_jpeg`**，跟 `write_png` 共用同一個 atomic 寫法
+  （抽成 `_write_encoded`）。JPEG 只給「拿來看的」那一份 —— 壓縮痕跡會在平坦
+  區域造成幾個灰階的起伏，而這個 repo 有一整族「幾個灰階」等級的判斷。
+* **C2 版面抽成 `core/export/html.py::build_report`**，`output_html` 與
+  `output_bundle` 共用。順序照 Results 三段（判定 → 哪幾顆 → 憑什麼）——
+  以前第一眼就是一張 6000 列的表，那是從細節開始。
+  **表格裡不放縮圖**：6000 個 `<tr>` 各一個 `<img>`，光是 DOM 節點就會讓瀏覽器
+  很鈍 —— 改成點一列換圖，整份報表只有**一個** `<img>`。
+* **C4 第二趟吃快取。** 出圖那幾張卡要重跑一次 pipeline 才拿得到像素，而那一趟
+  的影像段跟剛才那一批逐位元組相同。快取本來就在，只是三個地方沒接上：
+  `run_batch_steps` 沒有這個參數、`output_*` 叫的是 `run_defect`、CLI 手上有
+  `--cache` 也沒有傳。接起來走 `bctx.rerun(item)` —— 那個 `None` 檢查漏在任何
+  一張出圖卡上，症狀都是「報表慢了十倍」而不是一個錯誤。
+
+`<img src>` 那一條測試第一版有個洞：`Path(out) / "/abs/x.jpg"` 在 pathlib 底下
+直接變成那個絕對路徑，所以只檢查 `is_file()` 的話，絕對路徑也會過 ——
+而那正是「把資料夾寄給別人」的那一刻會破的東西。現在先問「它是相對的嗎」。
+
 ### 下一步
 
-Phase C（報表 bundle：判定樹搬進 core → JPEG → 共用的 HTML 產生器 →
-`OutputBundleStep` → 第二趟吃快取）還沒開始，形狀寫在計畫書裡。
+Phase D（畫布上的 Output 段：給那五張卡跟判定區同一套視覺）是可選的，沒做。
 
 ---
 

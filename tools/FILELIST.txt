@@ -5,10 +5,10 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 b85849de39319dccdd1113800e14671a38385090 CLAUDE.md
 9f2ac5da7d952f009587855b3f4fd13a03130b14 README.md
-fce0789a283e5f270f34c45c501813e46bd1ed5b SESSION_LOG.md
+7451310ad79ccd6850ce816d1fb5ba76062ecf0b SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
-3aaac5dda62a621badb9011b1516a87c816a825b d4t/__main__.py
+dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
 e75a08b69155620720f17d638c3b8e14489091f3 d4t/core/__init__.py
 e7da184fba607af1f4d3617a581abebda5079c8e d4t/core/algo/__init__.py
 9f95cc3f4f930324566729bd82462d38777841d2 d4t/core/algo/align.py
@@ -32,8 +32,9 @@ e1f7a95ad976983aa0f1f16b7bd52cdcc67494dd d4t/core/algo/subpixel.py
 82791f0e16286d803ddba7220ac56aec5548f6d4 d4t/core/algo/template.py
 5f93cfe3c9daa7b50b5efa3dd329c847e5c26c91 d4t/core/calibration.py
 78924f0edd38b3d96346542c63372c7fee679a91 d4t/core/export/__init__.py
+db57a3c6edf2c820287f7671be06d10d16816d52 d4t/core/export/html.py
 e53c86e86a7bc2ab2d6a18ac00c9b20e4d3829ca d4t/core/export/klarf_out.py
-74c057157413c18d557353d5e3663753f4160ffe d4t/core/export/overlay.py
+da008afe4aa0e0c87e8c36b35d0d616517e9c2be d4t/core/export/overlay.py
 ab5031e7056134aa94c5551aba9b80a774b6397a d4t/core/export/report.py
 4599be07de9d76b7a008bdc400e22cfaa0c7acd2 d4t/core/ingest/__init__.py
 987ec64e2830c1e9e7ee535c3aa91e020f5bd0be d4t/core/ingest/dataset.py
@@ -43,12 +44,13 @@ ab5031e7056134aa94c5551aba9b80a774b6397a d4t/core/export/report.py
 8853dcc140c1f95a6221e4205e318f8b0db6c68c d4t/core/ingest/pair_source.py
 44c4730891305a9d9ddecc14c48b8b67c9c4289e d4t/core/ingest/tiff_index.py
 0046c757bea0aab0d9276599d71424998ed8125b d4t/core/pipeline/__init__.py
-14758a4f0f7a2d5c17a6d3dffdf224d56cc3958b d4t/core/pipeline/batch.py
+3d748bab9c9744013f6f4996dedecc07dff7ab78 d4t/core/pipeline/batch.py
 3698713c994f58366c00d703c16182e16259b4a6 d4t/core/pipeline/cache.py
 ec7bdb58e7da611ac74f16b53e218f9a65476bdc d4t/core/pipeline/cellrois.py
 750feb625403c2d28566797d541ea2eab2aa22ce d4t/core/pipeline/channels.py
-942fcb5a17829498aec9f8eb5c490785c5d19916 d4t/core/pipeline/context.py
+43a6d8d2f81aece00d00ba3e3c901187f2a721d8 d4t/core/pipeline/context.py
 fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
+92866bc1242975e7be129a46b50dbd1acca3e9bc d4t/core/pipeline/decide_tree.py
 d1806fb9cd8371362f6c456dce4d321a57917b38 d4t/core/pipeline/engine.py
 7e2797dce8253240fcf45a27f57f28d2c246e272 d4t/core/pipeline/expression.py
 790dcfa0a11852fc02eb7b9840bd408139f61ef0 d4t/core/pipeline/recipe.py
@@ -68,7 +70,7 @@ cf162d9e699b12b6e4cd5d6d9706484b19eda598 d4t/core/steps/align_to.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
-0205ccdd35472a295eed8aa944d85ca89eea90c5 d4t/core/steps/output.py
+449c9454256028c3cda6e8b3f4ba0636ed221b69 d4t/core/steps/output.py
 0299cafc4d75895f8b322be5433f7fb3e37455d3 d4t/core/steps/pair_source.py
 46e24cde47cccae307704861c349c75887a27da4 d4t/core/steps/quality.py
 60e5359c0f45e51e4df1e91f87f82661574dd1a6 d4t/core/steps/roi_cross.py
@@ -100,8 +102,8 @@ b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 44f3712558bc51d6e32e76b2f85eb0e07b016328 d4t/ui/theme.py
 3cc7d61199e03eaba0eb61f5a749b9f6cfca9ba5 d4t/ui/threshold_view.py
 460ce5e5207486254f1bd5cd4701454a46b9e5ca d4t/ui/tree_panel.py
-9e17b66c3909ece6064a2981373e11bb3c07c401 d4t/ui/tree_scene.py
-2dff37a3664cc2a3e2af9d64510c600f91de5f33 d4t/ui/verdict_band.py
+8ca84dd5762b02af4523cb5f3102229b0622e1fc d4t/ui/tree_scene.py
+c894b98548a3a06f98ed531901518a429768879f d4t/ui/verdict_band.py
 7f48fa4f149190f559b6dea998a39bbb46dc870a d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
 c6c13c62ca2c08ad7d303af0d884950296dac28d d4t/ui/widgets.py
@@ -127,7 +129,7 @@ ac99957a7da2f9b9d766ac442082131be4b8d7db docs/plans/F22-adc-multiclass.md
 655f8cf83bfe142b0952aa2769fd420aec2698d3 docs/plans/F26-decide-panel-ux.md
 4b55069e016b2ca16b4ff7e9e929d7454db52172 docs/plans/F27-results-panel.md
 50f976ef4d6878b5f1f0fefcd6cc7ff02b1ceb47 docs/plans/F28-canvas-and-measure.md
-7d200cbe3909962014916bacb879b2dbe150d3c8 docs/plans/F29-detect-and-report.md
+f6f3703b38f13914a3fce1ccf1a1bc79000f4af4 docs/plans/F29-detect-and-report.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -162,7 +164,7 @@ d30e533c8f476e52e0e9942e25316487eabfcc41 tests/test_cli_encoding.py
 9e47488159ddde54f903cddf9fa0f3d88e103e99 tests/test_dag_order.py
 70ea34793a5b48433120c5f0b5ef913df7eacfa1 tests/test_dataset.py
 b66575449e7121a62bddb8f88a86dae2c2b3b7bf tests/test_decide_multiclass.py
-e867bc64a93c929f356e7f5d269d10f3570b8a6e tests/test_decide_tree.py
+31ab4204bdfb17cc95c8f8de05024c5a11ce7a07 tests/test_decide_tree.py
 c2f7df52f855141ec0c0b85e71faa3a821ae31f5 tests/test_docs_links.py
 11e73a391ca61bccbabd3aefc94d115c42e5f3a2 tests/test_e2e_die_to_die.py
 8126c3564cfefe4f7c263ea871ef5c4e46d6dae1 tests/test_e2e_dual_route.py
@@ -204,6 +206,7 @@ db020b9f0a27ed36b68f4f53d5781df357c8df72 tests/test_make_glas_export.py
 33071fd9690ad145172ab6a178471283523e3c75 tests/test_no_real_fab_data.py
 3103276cac06035f1a18a7d18cb90bdafd7d2f26 tests/test_normalize.py
 637f52a992403f3403b5942019aed2c048059554 tests/test_offline_tools.py
+e22bb75942560a1f693803442da75503e388716b tests/test_output_bundle.py
 760493e6e43124ec37e48463773e51291e595c9c tests/test_pair_probe.py
 342afa983abf91cec2b2b54f548fb6161a6c809b tests/test_pair_source.py
 34f1bcdbffc5c85f790e98e5bd1c4b1f10fe795f tests/test_period_golden.py

@@ -1,0 +1,307 @@
+# 報表 bundle：一個資料夾裝完一整批（F29 C，2026-08-25）。
+"""使用者：「我是想 output 報表（包含很多顆 >6000 的把每一張圖分數都算出來
+有 overlay 等等）但你說 html 這樣會很大 → 有替代方案嗎」。
+
+有：**圖擺在報表旁邊，不是嵌在裡面**。實測一張整版的 overlay panel
+PNG 70 KB、JPEG q75 12.6 KB；6000 顆嵌進 HTML 是 566 MB（PNG）／
+約 76 MB（JPEG base64），而純文字的報表約 3 MB。
+
+所以這一份鎖住四件事：
+
+1. **四個東西都在**，而且報表裡的 `<img src>` 真的指得到那些檔案；
+2. **報表列出每一顆，圖才有上限** —— 一份少了一半的報表跟完整的長得一樣；
+3. **報表本身不含圖片資料**（有大小回歸盯著）；
+4. **`recipe.json` 在** —— 沒有它，半年後沒人重現得出這份報表。
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "tools"))
+
+import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
+from d4t.core.ingest.dataset import load_dataset  # noqa: E402
+from d4t.core.pipeline import (  # noqa: E402
+    run_batch, run_batch_steps,
+)
+from d4t.core.pipeline.recipe import (  # noqa: E402
+    Recipe, RecipeNode, ScoreSpec,
+)
+
+KIND = "ebi_patch"
+
+
+@pytest.fixture(scope="module")
+def lot(tmp_path_factory):
+    from make_sample import generate
+    return generate(str(tmp_path_factory.mktemp("bundle")), n=6, seed=5)
+
+
+@pytest.fixture(scope="module")
+def dataset(lot):
+    return load_dataset(lot["klarf"])
+
+
+def recipe_for(folder, **over):
+    params = {"folder": str(folder)}
+    params.update(over)
+    return Recipe(
+        recipe_id="bundle_demo", routes={KIND: ["load", "glv", "out"]},
+        nodes={
+            "load": RecipeNode("load", "load_patch", {}),
+            "glv": RecipeNode("glv", "glv_stats",
+                              {"source": "test", "metrics": "glv_max"}),
+            "out": RecipeNode("out", "output_bundle", params),
+        },
+        score=ScoreSpec(expr="glv_max", threshold=1.0,
+                        bins={"below": 0, "above": 1}))
+
+
+def run(dataset, folder, **over):
+    r = recipe_for(folder, **over)
+    rows = run_batch(r, dataset, workers=1)
+    bctx = run_batch_steps(r, dataset, rows)
+    assert not bctx.errors, bctx.errors
+    return bctx, rows
+
+
+# --------------------------------------------------------------------------- #
+# 1. 四個東西都在，而且連得起來
+# --------------------------------------------------------------------------- #
+def test_the_folder_has_the_four_things(dataset, tmp_path):
+    out = tmp_path / "bundle"
+    bctx, rows = run(dataset, out)
+    assert (out / "report.html").is_file()
+    assert (out / "defects.csv").is_file()
+    assert (out / "recipe.json").is_file()
+    assert (out / "images").is_dir()
+    assert len(list((out / "images").glob("*.jpg"))) == len(rows)
+    assert str(out) in bctx.outputs
+
+
+def test_every_img_src_points_at_a_real_file(dataset, tmp_path):
+    """**這一條是「圖擺在旁邊」那個決定的驗收。**
+
+    相對路徑寫錯的話報表照樣開得起來 —— 只是每一格都是破圖，而那件事在
+    產出的當下完全看不出來。
+    """
+    out = tmp_path / "bundle"
+    run(dataset, out)
+    text = (out / "report.html").read_text(encoding="utf-8")
+    rels = set(re.findall(r'data-img="([^"]+)"', text))
+    assert rels, "報表裡一個可以點的列都沒有"
+    for rel in rels:
+        # ⚠ **先確認它是相對的。** `Path(out) / "/abs/x.jpg"` 在 pathlib 裡
+        # 會直接變成那個絕對路徑，所以只檢查 `is_file()` 的話，一個絕對路徑
+        # 也會過 —— 而那正是「把資料夾寄給別人」的那一刻會破的東西。
+        assert not os.path.isabs(rel) and ":" not in rel, rel
+        assert not rel.startswith(("/", "\\")), rel
+        assert (out / rel).is_file(), rel
+
+
+def test_the_report_names_the_recipe_that_made_it(dataset, tmp_path):
+    """一疊數字沒有配方，等於一句「我們那時候量到這樣」。"""
+    out = tmp_path / "bundle"
+    run(dataset, out)
+    doc = json.loads((out / "recipe.json").read_text(encoding="utf-8"))
+    assert doc["recipe_id"] == "bundle_demo"
+    assert doc["nodes"]["glv"]["step"] == "glv_stats"
+
+
+# --------------------------------------------------------------------------- #
+# 2. 每一顆都在報表上；有上限的是圖
+# --------------------------------------------------------------------------- #
+def test_the_limit_caps_the_pictures_not_the_rows(dataset, tmp_path):
+    out = tmp_path / "bundle"
+    _bctx, rows = run(dataset, out, limit=2)
+    assert len(list((out / "images").glob("*.jpg"))) == 2
+    text = (out / "report.html").read_text(encoding="utf-8")
+    assert text.count("<tr") == len(rows) + 1        # 每一顆一列 + 表頭
+
+
+def test_zero_means_every_defect(dataset, tmp_path):
+    """使用者定調 2026-08-25：「參數化，**預設全部**」。"""
+    from d4t.core.pipeline.step import REGISTRY
+    spec = {p.name: p for p in REGISTRY["output_bundle"].params}["limit"]
+    assert spec.default == 0
+
+    out = tmp_path / "bundle"
+    _bctx, rows = run(dataset, out, limit=0)
+    assert len(list((out / "images").glob("*.jpg"))) == len(rows)
+
+
+def test_the_pictures_are_the_worst_ones_first(dataset, tmp_path):
+    """截斷的時候留下的是**分數最高的那幾顆**，不是檔案順序上的前幾顆。
+
+    照 `rows` 的順序取的話，畫面上看不出差別（都是 N 張圖）。
+    """
+    out = tmp_path / "bundle"
+    _bctx, rows = run(dataset, out, limit=2)
+    best = sorted((r for r in rows if r.get("score") is not None),
+                  key=lambda r: -float(r["score"]))[:2]
+    kept = {p.stem.replace("overlay_", "")
+            for p in (out / "images").glob("*.jpg")}
+    assert kept == {str(r["defect_id"]) for r in best}
+
+
+# --------------------------------------------------------------------------- #
+# 3. 報表本身不含圖片資料（大小回歸）
+# --------------------------------------------------------------------------- #
+def test_the_report_stays_text_sized(dataset, tmp_path):
+    """**6000 顆的那份是這一條在守的。**
+
+    嵌進去的話 24 顆就已經是幾 MB，而「報表打不開」是一個沒有人會回報的 bug
+    （使用者只會不用它）。
+    """
+    out = tmp_path / "bundle"
+    _bctx, rows = run(dataset, out)
+    size = (out / "report.html").stat().st_size
+    assert size < 200_000, size
+    text = (out / "report.html").read_text(encoding="utf-8")
+    assert "base64" not in text
+    # 圖真的有寫出來（否則上面那條會因為「根本沒有圖」而永遠是綠的）
+    assert sum(p.stat().st_size for p in (out / "images").glob("*.jpg")) > size
+
+
+def test_jpeg_is_much_smaller_than_png(dataset, tmp_path):
+    """換成 JPEG 是這個功能可行的前提，所以那個差要有人盯著。"""
+    import numpy as np
+    from d4t.core.export import overlay
+
+    rng = np.random.default_rng(0)
+    base = np.clip(rng.normal(120, 12, (256, 256)), 0, 255).astype(np.uint8)
+    base[80:120, 60:110] = 220
+    panel = overlay.render_overlay({"test": base, "diff": base // 2}, {},
+                                   montage=True)
+    png = Path(overlay.write_png(panel, str(tmp_path / "a.png")))
+    jpg = Path(overlay.write_jpeg(panel, str(tmp_path / "a.jpg")))
+    assert jpg.stat().st_size * 3 < png.stat().st_size
+
+
+# --------------------------------------------------------------------------- #
+# 4. 第二趟吃快取（`limit=0` 的前提）
+# --------------------------------------------------------------------------- #
+def test_the_second_pass_hits_the_image_cache(dataset, tmp_path):
+    """**6000 顆的那份要跑得完，靠的就是這個。**
+
+    出圖那幾張卡要**重跑一次 pipeline** 才拿得到像素（結果表裡只有數字），
+    而那一趟的影像段跟剛才那一批是逐位元組相同的。快取本來就在
+    （`run_batch` 用的那一份），只是 `run_batch_steps` 沒有這個參數、
+    `output_*` 叫的是 `run_defect`、CLI 手上有 `--cache` 也沒有傳。
+
+    三個地方接起來之後，第二趟**每一顆都命中**，只跑算法段。
+    """
+    cache_dir = tmp_path / "cache"
+    out = tmp_path / "bundle"
+    r = recipe_for(out)
+    rows = run_batch(r, dataset, workers=1, cache_dir=str(cache_dir))
+    bctx = run_batch_steps(r, dataset, rows, cache_dir=str(cache_dir))
+    assert not bctx.errors, bctx.errors
+    assert bctx.cache is not None
+    assert bctx.cache.hits == len(rows), (bctx.cache.hits, bctx.cache.misses)
+    assert bctx.cache.misses == 0
+
+
+def test_without_a_cache_it_still_writes_everything(dataset, tmp_path):
+    """沒有快取就全程重算 —— **結果一模一樣**，只是慢。
+
+    少了這一條，`cache_dir=None` 那條路壞掉的症狀是「報表少了圖」。
+    """
+    out = tmp_path / "bundle"
+    _bctx, rows = run(dataset, out)          # 這個 helper 不給 cache_dir
+    assert len(list((out / "images").glob("*.jpg"))) == len(rows)
+
+
+def test_the_cached_pass_produces_the_same_pictures(dataset, tmp_path):
+    """快取那條路與全程重算那條路**寫出來的位元組要一樣**。
+
+    `run_defect_cached` 的合約是「結果與 `run_defect` 位元級一致」，而疊圖是
+    從影像畫出來的 —— 這一條把那個合約延伸到圖上。差別會很安靜：
+    一份用快取跑的報表跟一份沒用的長得一模一樣。
+    """
+    cache_dir = tmp_path / "cache"
+    cold, warm = tmp_path / "cold", tmp_path / "warm"
+    r_cold, r_warm = recipe_for(cold), recipe_for(warm)
+    rows = run_batch(r_cold, dataset, workers=1, cache_dir=str(cache_dir))
+    run_batch_steps(r_cold, dataset, rows)                       # 無快取
+    run_batch_steps(r_warm, dataset, rows, cache_dir=str(cache_dir))
+    a = sorted((cold / "images").glob("*.jpg"))
+    b = sorted((warm / "images").glob("*.jpg"))
+    assert [p.name for p in a] == [p.name for p in b] and a
+    for x, y in zip(a, b):
+        assert x.read_bytes() == y.read_bytes(), x.name
+
+
+# --------------------------------------------------------------------------- #
+# 5. 版面：判定 → 哪幾顆 → 憑什麼（同 Results 三段）
+# --------------------------------------------------------------------------- #
+def test_the_report_opens_with_what_it_decided(dataset, tmp_path):
+    """使用者跑完一整批之後問的是三個依序的問題，而報表要照那個順序排。
+
+    以前這張卡（`output_html`）第一眼就是一張 6000 列的表 —— 那是從細節開始。
+    """
+    out = tmp_path / "bundle"
+    _bctx, rows = run(dataset, out)
+    text = (out / "report.html").read_text(encoding="utf-8")
+    assert text.index("What it decided") < text.index("Which ones")
+    # 每一類一條橫條，而**顆數加起來就是這一批**（判定那一段不能少講一類）。
+    counts = [int(n) for n in re.findall(r"<div class='vn'>(\d+)</div>", text)]
+    assert counts and sum(counts) == len(rows)
+
+
+def test_the_report_and_the_panel_count_the_same_thing(dataset, tmp_path):
+    """報表的「每一類幾顆」跟畫面上那一條是**同一支函式**算的（F29 C0）。
+
+    抄第二份出來的話，兩邊的數字會在某一次改動之後悄悄分開 —— 而那時候
+    沒有人知道該相信哪一個。
+    """
+    from d4t.core.pipeline import decide_tree
+
+    out = tmp_path / "bundle"
+    _bctx, rows = run(dataset, out)
+    text = (out / "report.html").read_text(encoding="utf-8")
+    counts = [int(n) for n in re.findall(r"<div class='vn'>(\d+)</div>", text)]
+    assert counts == [int(e["count"])
+                      for e in decide_tree.verdict_rows(None, rows)]
+
+
+def test_a_defect_that_did_not_run_is_its_own_row(dataset, tmp_path):
+    """「有卡片出錯」跟「跑完了但判不出 bin」是兩種事故，不是同一列。"""
+    from d4t.core.export import html
+
+    rows = [{"defect_id": "1", "ok": True, "error": "", "score": 1.0,
+             "bin": 1, "features": {}},
+            {"defect_id": "2", "ok": False, "error": "boom", "score": None,
+             "bin": None, "features": {}}]
+    text = html.build_report(rows, "t", [])
+    assert "a card errored" in text and "boom" in text
+
+
+# --------------------------------------------------------------------------- #
+# 6. 壞輸入
+# --------------------------------------------------------------------------- #
+def test_pointing_at_a_file_says_so(dataset, tmp_path):
+    """貼了路徑忘了改成資料夾 —— 症狀不該是 `NotADirectoryError`。"""
+    f = tmp_path / "not_a_folder.txt"
+    f.write_text("x", encoding="utf-8")
+    r = recipe_for(f)
+    rows = run_batch(r, dataset, workers=1)
+    bctx = run_batch_steps(r, dataset, rows)
+    assert bctx.errors
+    assert "is a file, not a folder" in " ".join(bctx.errors.values())
+
+
+def test_an_empty_path_is_a_configuration_issue_not_a_crash():
+    from d4t.core.pipeline.step import REGISTRY
+    says = REGISTRY["output_bundle"].configuration_issues({"folder": ""})
+    assert says and "Write to" in says[0]
+    assert REGISTRY["output_bundle"].configuration_issues(
+        {"folder": "/tmp/x"}) == []

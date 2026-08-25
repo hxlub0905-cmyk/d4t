@@ -29,7 +29,8 @@ import numpy as np
 
 from .klarf_out import ExportError
 
-__all__ = ["render_overlay", "write_png", "to_display_rgb",
+__all__ = ["render_overlay", "write_png", "write_jpeg",
+           "DEFAULT_JPEG_QUALITY", "to_display_rgb",
            "primary_blob_box", "pick_overlay_results", "overlay_label",
            "overlay_filename", "OVERLAY_PREFIX", "BOX_COLOR"]
 
@@ -359,8 +360,8 @@ def render_overlay(images: Dict[str, Any],
     return np.ascontiguousarray(panel.astype(np.uint8))
 
 
-def write_png(arr: np.ndarray, path: str) -> str:
-    """把疊圖存成 PNG —— atomic（``.tmp`` + :func:`os.replace`）、CJK 路徑安全。
+def _write_encoded(arr: np.ndarray, path: str, ext: str, params=None) -> str:
+    """編碼 → atomic 落地（``.tmp`` + :func:`os.replace`）、CJK 路徑安全。
 
     走 ``cv2.imencode`` + ``ndarray.tofile``（``cv2.imwrite`` 在 Windows
     吃不到含中日韓字元的路徑）。輸入是 RGB，寫檔前轉成 cv2 要的 BGR。
@@ -374,10 +375,36 @@ def write_png(arr: np.ndarray, path: str) -> str:
         a = to_display_rgb(a)
     if a.ndim == 3 and a.shape[2] == 3:
         a = cv2.cvtColor(a, cv2.COLOR_RGB2BGR)
-    ok, buf = cv2.imencode(".png", a)
-    if not ok:      # pragma: no cover — PNG 編碼失敗實務上只在記憶體不足時發生
-        raise ExportError("PNG encoding failed; cannot write {}.".format(path))
+    ok, buf = cv2.imencode(ext, a, list(params or ()))
+    if not ok:      # pragma: no cover — 編碼失敗實務上只在記憶體不足時發生
+        raise ExportError("%s encoding failed; cannot write %s."
+                          % (ext.lstrip(".").upper(), path))
     tmp = path + ".tmp"
     buf.tofile(tmp)
     os.replace(tmp, path)
     return path
+
+
+def write_png(arr: np.ndarray, path: str) -> str:
+    """把疊圖存成 PNG —— atomic、CJK 路徑安全（見 :func:`_write_encoded`）。"""
+    return _write_encoded(arr, path, ".png")
+
+
+#: JPEG 的預設品質。**80 不是隨手挑的**：實測一張整版的 overlay panel
+#: （test | diff 並排、紅框、一行標籤）PNG 是 70 KB，JPEG q75 是 12.6 KB。
+#: 一份 6000 顆的報表因此是 566 MB 對上約 76 MB —— 那是「打不開」與「寄得出去」
+#: 的差別。80 比 75 再多一點餘裕，代價是幾 KB。
+DEFAULT_JPEG_QUALITY = 80
+
+
+def write_jpeg(arr: np.ndarray, path: str,
+               quality: int = DEFAULT_JPEG_QUALITY) -> str:
+    """把疊圖存成 JPEG —— 跟 :func:`write_png` 同一個 atomic 寫法。
+
+    ⚠ **JPEG 是有損的，所以它只給「拿來看的」那一份**（報表裡的縮圖）。
+    要拿去量、要逐位元組比對的那一份請用 PNG —— 壓縮痕跡會在平坦的區域上
+    造成幾個灰階的起伏，而這個 repo 有一整族「幾個灰階」等級的判斷
+    （`algo/shape._MIN_CONTRAST` 就是 1）。
+    """
+    q = max(1, min(100, int(quality)))
+    return _write_encoded(arr, path, ".jpg", (cv2.IMWRITE_JPEG_QUALITY, q))

@@ -506,7 +506,8 @@ def apply_lot_scaling(recipe: Recipe, rows) -> int:
 def run_batch_steps(recipe: Recipe, dataset: Any,
                     rows: Sequence[Dict[str, Any]],
                     kind: Optional[str] = None,
-                    registry: Optional[Dict[str, Any]] = None) -> BatchContext:
+                    registry: Optional[Dict[str, Any]] = None,
+                    cache_dir: Optional[str] = None) -> BatchContext:
     """整批跑完之後，把**整批一次**（``scale == SCALE_LOT``）的卡各跑一次。
 
     **這一支跟 :func:`run_batch` 是分開的兩件事，而那是刻意的。**
@@ -521,12 +522,23 @@ def run_batch_steps(recipe: Recipe, dataset: Any,
 
     一張卡出錯**不影響其他卡**（鐵則 7 的跨顆版）：訊息記進 ``bctx.errors``，
     其餘照跑，而整批的結果本來就已經在 ``rows`` 裡了。
+
+    ``cache_dir``：**出圖那幾張卡要重跑一次 pipeline 才拿得到像素**（結果表裡
+    只有數字），而那一趟的影像段跟剛才那一批是**逐位元組相同**的 —— 快取本來
+    就在（`run_batch` 用的那一份），只是沒接上（F29 C4）。接上之後第二趟只跑
+    算法段：6000 顆的報表因此不是「再跑一次整批」。
     """
     from .context import BatchContext
 
     reg = REGISTRY if registry is None else registry
     k = str(kind if kind is not None else getattr(dataset, "kind", "") or "")
     bctx = BatchContext(rows=list(rows), dataset=dataset, recipe=recipe, kind=k)
+    if cache_dir:
+        # 兩格都要：`run_defect_cached` 吃 (cache, token)，而 token 認的是
+        # **這一份資料**（換一份 lot 而簽章看不見的話，第二趟會拿到上一份的
+        # 影像 —— 鐵則 9 的形狀）。
+        bctx.cache = StageCache(str(cache_dir))
+        bctx.dataset_token = _dataset_token_for(dataset)
     # 分流（F23）：route_by 存在時 route 鍵不是 kind，而是 map/default 指到的
     # 那幾條 —— 每一條上的跨顆卡都要跑到（同一個節點出現在兩條 route 上時
     # 只跑一次：Output 卡寫檔是不可逆的，寫兩次不是「再保險一次」是覆寫）。

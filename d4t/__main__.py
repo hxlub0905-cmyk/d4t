@@ -281,7 +281,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
     # 是結構上的 —— 旗標遲早有人忘記關，而症狀是不可逆的覆寫。
     from d4t.core.pipeline import run_batch_steps
 
-    bctx = run_batch_steps(recipe, ds, payload)
+    # **快取也傳給這一層**（F29 C4）：出圖那幾張卡要重跑一次 pipeline 才拿得到
+    # 像素，而那一趟的影像段跟剛才那一批是同一份 —— 手上有 `--cache` 卻不傳，
+    # 等於整批再跑一次。
+    bctx = run_batch_steps(recipe, ds, payload, cache_dir=args.cache)
     for w in bctx.warnings:
         print(f"  △ {w}")
     for path in bctx.outputs:
