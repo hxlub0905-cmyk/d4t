@@ -19,6 +19,89 @@
 
 ---
 
+## 量到了，然後丟掉：那一團在哪（2026-08-25）
+
+使用者要的是「跑完一整筆 image，缺陷被框出來、照分數排序、6000 顆出成報表」。
+計畫書：[`docs/plans/F29-detect-and-report.md`](docs/plans/F29-detect-and-report.md)。
+
+### 計畫被退了兩次，而第二次的理由是對的
+
+第一版寫「像素級的位置沒有 → 要做一張新的偵測卡」。使用者連問兩次：
+
+> 「Q3 你還是沒回答我，GLV CD 在 Measurements 就已經量出這顆 defect 或位置的
+> 一些資訊了（這些資訊不能拿來用嗎）」
+
+去讀程式碼之後 —— **他是對的**。`cd_measure` 的團那一支早就算出整條輪廓與
+最長那條弦、存進 `ctx.meta["cd"]`、面板上也畫出來了；再往下一層，
+`algo/shape.py::measure_blob` 的 `connectedComponentsWithStats` 連外接矩形與
+質心都算好了（`stats` 只拿來判 `touches_edge` 就丟、`centroids` 接成 `_cent`）。
+**26 個 `cd_*` 特徵沒有一個在講「在哪」。**
+
+缺的從來不是計算，是出口。整個 Phase A 因此從「做一個偵測器」變成「把已經
+量到的接出來」。
+
+「Detect 你要 detect 什麼？數字？」的答案也跟著清楚了：**不是數字，只欠一個
+框** —— 排序已經有了（就是使用者自己寫的 `score`，`pick_overlay_results`
+現在就照它排），多大與長什麼樣也有了（CD），哪一塊不一樣也有了
+（`glv_stats` 的 `the other regions`）。
+
+### A1／A3：位置有了出口
+
+* `BlobResult` 多 `bbox` / `centroid`；`ALWAYS_BLOB` 多 `cd_box_x/y/w/h` 與
+  `cd_cx`/`cd_cy`，**整張影像的像素**（區域偏移在卡片裡加回去，換算只做一次）。
+* 一律吐而不是 `size_report` 的一個選項：**位置不是「要不要量」的選擇，
+  是「我剛才量在哪」**。量不到就一格都不寫（0 會讓疊圖在左上角畫一個 0×0 的框）。
+* **不配 nm 版**：框是「畫在哪」不是「多大」。這沒有把 F19 翻過來 ——
+  那次刪 `cd_x_px` 的理由是「舊值是 bbox，跟新值不是同一種量測」，
+  是在防名字換意思，所以位置用**新名字**回來。
+* `primary_blob_box` 的退路寫成一張表：`blobs` → `blob_*` → `cd_box_*`。
+  只認沒有前綴的那一份 —— 接兩個區域時「主 blob」有兩個答案。
+
+### A2：`find_defect`（Measure 段第四張）
+
+在一條流（可再指定區域）裡找出最突出的那一團，給框與強度。演算法
+（`algo/shape.py::find_blobs`）跟 `measure_blob` **共用同一組準位與門檻**，
+所以兩張卡的「…at this height」是同一句話。
+
+**界線移動了，而移的是哪一格寫下來了**（使用者 2026-08-20：「Blob 分割不需要
+也不要再出現」）：
+
+> **可以找一個框，不可以產生具名區域。**
+
+具名區域是下游每一張卡的輸入（`roi=`），自動長出一個等於畫布上出現一條沒有人
+拉過的線 —— F9 那六個「跑得完、有數字、而且是錯的」全部長那個樣子。
+一個框只是一組數字，要有人接才會被用到。
+
+### A0：卡片庫的順序一直是字母序（順手抓到的真 bug）
+
+2026-08-25 使用者說「Measure 的 card 順序幫我改命名&重排：GLV → CD →
+Focus index」。那一輪改了 `steps/__init__.py` 的 import 順序、還在那裡寫下
+「卡片庫裡看到的先後住在這三行」——**而畫面上一格都沒有動**：`list_steps` 是照
+`key` 的字母序排的（CD、Focus index、GLV）。改動看起來完成了，全套測試也全綠，
+因為沒有任何一條測試問過「使用者看到的第一張是哪一張」。
+
+改成**純註冊順序**（`category` 不再參與排序 —— 它跟卡片庫的分區是兩條不同的
+軸，兩條一起排的結果是「import 順序決定看到的先後」只對了一半，
+Region 段的 `roi_mask` 會跳到 `roi_cross` 前面）。每一段現在讀起來就是資料流過
+的順序。便利貼：`tests/test_card_library_order.py`，而它有一條專門證明自己不是
+同義反覆（Enhance 段的字母序與註冊序是不同的答案）。
+
+### 一個沒被抓到的話會很安靜的錯
+
+`find_defect` 剛寫好時宣告出來的 nm 版叫 `blob_area_nm` —— **少乘一次**。
+`nm_twins` 的規則是「`_px` 結尾 → ×s」，而面積要 ×s²，所以面積住在一張
+名單上（`_util.AREA_FEATURES`）。加一張會吐面積的新卡就要記得加一行。
+
+### 下一步
+
+Phase B（Reference regions：golden cell 與 GDS 收成同一張卡的兩個 `method`）
+與 Phase C（報表 bundle）都還沒開始，形狀寫在計畫書裡。使用者定調
+「golden cell 跟 GDS 同樣重要而且他們要能在同張 card 裡」——
+而 `tests/fixtures/golden/` 三份 recipe **一張 Region 卡都沒用到**，
+所以那個合併不會動到任何被凍住的數字。
+
+---
+
 ## Results 面板：跑完之後那一頁（2026-08-24）
 
 使用者：「目前的 results panel 太簡略了」。計畫書：

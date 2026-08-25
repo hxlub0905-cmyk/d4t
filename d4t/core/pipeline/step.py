@@ -963,5 +963,27 @@ def get_step(key: str) -> Type[Step]:
 
 
 def list_steps(category: Optional[str] = None) -> List[Type[Step]]:
-    steps = [s for s in REGISTRY.values() if category is None or s.category == category]
-    return sorted(steps, key=lambda s: (_CATEGORIES.index(s.category), s.key))
+    """卡片庫看到的順序：**先分類，同一類照註冊順序**。
+
+    ⚠ 同一類裡以前是照 ``key`` 排（字母序），而那是 2026-08-25 才發現的一個
+    安靜的 bug：使用者說「Measure 的 card 順序幫我改命名&重排：GLV → CD →
+    Focus index」，那一輪照著改了 ``steps/__init__.py`` 的 import 順序、還在
+    那裡寫下「卡片庫裡看到的先後住在這三行」—— **而畫面上一格都沒有動**
+    （字母序是 CD、Focus index、GLV）。整個改動看起來完成了，測試也全綠，
+    因為沒有任何一條測試問過「使用者看到的第一張是哪一張」。
+
+    註冊順序 = ``steps/__init__.py`` 的 import 順序 = **pipeline 的順序**
+    （load → normalize → denoise → … → measure → output）。對不會寫 code 的
+    製程工程師來說，那是唯一一個看得懂的順序：卡片庫由上而下讀就是資料流過的
+    先後。字母序把 ``align`` 排在 ``normalize`` 前面，而那是相反的。
+
+    ⚠ **``category`` 不再參與排序**（以前是主鍵）。它跟卡片庫的分區是**兩條
+    不同的軸**：分區用的是 ``group``（Input／Enhance／Region／…），而
+    ``category``（image／algo／adc／batch）是引擎在用的。兩條軸一起排的結果是
+    「import 順序決定看到的先後」**只對了一半** —— Region 段裡 ``roi_mask``
+    （category=image）會跳到 ``roi_cross``（category=algo）前面，而那件事在
+    import 那幾行上完全看不出來。一個規矩比兩個對，而這裡要的那個規矩是
+    「照 import 的順序」。
+    """
+    return [s for s in REGISTRY.values()
+            if category is None or s.category == category]

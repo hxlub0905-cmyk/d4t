@@ -3,9 +3,9 @@
 85ba76deb9e3e0de7fab20cbf4a2bb69e2c89d85 .github/workflows/ci.yml
 32effd36c2614b3378219e38d064dfcbb4ef38e4 .gitignore
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
-16cadcfb415c6b974b7456a139261754ce6d98ee CLAUDE.md
+b85849de39319dccdd1113800e14671a38385090 CLAUDE.md
 9f2ac5da7d952f009587855b3f4fd13a03130b14 README.md
-d374d05944dd5839f8c0ff5890767e1d0700db23 SESSION_LOG.md
+0e12a81fd81a30b785a26f63387b593a13c37601 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 3aaac5dda62a621badb9011b1516a87c816a825b d4t/__main__.py
@@ -26,7 +26,7 @@ d090bc2eefc1fe45c48d60848280ba323b0ef4a7 d4t/core/algo/pairing.py
 acba11d258e8a4fb5250d478a59b2d02fe57fe35 d4t/core/algo/profile.py
 c1049c4ae6c2505db6e37b7edeaf364e1244b026 d4t/core/algo/quality.py
 674556c1ad3f6f8d92b26856c455eb02c5125bea d4t/core/algo/roi.py
-81d9c6780b3bbf895971915b798200c237454150 d4t/core/algo/shape.py
+a4e1d5c123d70d976e2883eae72ba1c62650c27e d4t/core/algo/shape.py
 0f0727a89f62065c799e7c8fe234fc7b5c3545f9 d4t/core/algo/snr.py
 e1f7a95ad976983aa0f1f16b7bd52cdcc67494dd d4t/core/algo/subpixel.py
 82791f0e16286d803ddba7220ac56aec5548f6d4 d4t/core/algo/template.py
@@ -52,9 +52,9 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 d1806fb9cd8371362f6c456dce4d321a57917b38 d4t/core/pipeline/engine.py
 7e2797dce8253240fcf45a27f57f28d2c246e272 d4t/core/pipeline/expression.py
 03060bc9ac0b993f54dbbe4b5daeadf845b9d8dd d4t/core/pipeline/recipe.py
-2cc56f901ddf31e6bec2b831d9cdf7fa0f524463 d4t/core/pipeline/step.py
-e15dd8e47cd57e32c189eeb38354a1f2735036f3 d4t/core/steps/__init__.py
-e410dea339f3f92530fbac9c9461c2d22ed0d555 d4t/core/steps/_util.py
+9f7ed29e116872a2e73cac37d588effefc6b0fa0 d4t/core/pipeline/step.py
+70a25af983cef3e0f41e1958d96d512b6177e6e9 d4t/core/steps/__init__.py
+f8cbef88fa593eb793255f61a16bb1742192cec3 d4t/core/steps/_util.py
 c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
 cf162d9e699b12b6e4cd5d6d9706484b19eda598 d4t/core/steps/align_to.py
 2c48cd738d30003227a9aad3f34e5c8565a9c6ab d4t/core/steps/arith.py
@@ -62,6 +62,7 @@ cf162d9e699b12b6e4cd5d6d9706484b19eda598 d4t/core/steps/align_to.py
 39bbc384b66e024f67200a76598d4f6f255e5100 d4t/core/steps/denoise.py
 8ef5c8396cd11fe7299037d7865c66fa3ab7830a d4t/core/steps/feature_fill.py
 9b417df41842c99263f3a477022e26c05e135bf5 d4t/core/steps/feature_math.py
+887755c1f854ce9142040b52f4e6c60877ea27fb d4t/core/steps/find_defect.py
 00f877fe38f316bc2a74cb2659a2e5ac63b7055c d4t/core/steps/flatten.py
 707b055641501294c2e86c79531c5789afd2106f d4t/core/steps/glv_stats.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
@@ -113,7 +114,7 @@ ffb40bc7e7d8fbac0d7c9402064fe639d1a41740 docs/GLAS-INTERFACE.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
 5add754408a8324566ed29c95f855d9a0c429655 docs/PITFALLS.md
 e40b02f3ab915b8cb69a12027fa2299c09f1cea6 docs/ROADMAP.md
-a6207427b19c048a912217932f37525a2a8350cd docs/USING-CD.md
+c1cfb82e71df1d178b5f70766fcabf52d623476a docs/USING-CD.md
 f6378d9ba391a4e1e3ef7ed855c7694b6b7f50b9 docs/plans/F0-master-plan.md
 d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 c4f06765ad918545511da042eb8d2b63df19795f docs/plans/F15-pair-sources.md
@@ -126,6 +127,7 @@ ac99957a7da2f9b9d766ac442082131be4b8d7db docs/plans/F22-adc-multiclass.md
 655f8cf83bfe142b0952aa2769fd420aec2698d3 docs/plans/F26-decide-panel-ux.md
 4b55069e016b2ca16b4ff7e9e929d7454db52172 docs/plans/F27-results-panel.md
 50f976ef4d6878b5f1f0fefcd6cc7ff02b1ceb47 docs/plans/F28-canvas-and-measure.md
+93961c0b445c9fd56b1a16a3b6e63354209020ea docs/plans/F29-detect-and-report.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -147,6 +149,7 @@ e530fae4e34f94d92f38eab941d799fbef96b01d tests/test_batch_cache.py
 1c3e6a27a18cad905fb862e5cb8180716b5f7735 tests/test_batch_thread_safety.py
 299ce9e0acf6811de39e6e92bf43664954cbd3ad tests/test_calibration.py
 0ce3bf2a25a1b02b1de9b85183858a3e08f228d7 tests/test_card_invariants.py
+a7f1b028d90b86cea23183d381df80d1a41a4d60 tests/test_card_library_order.py
 eec62f1d38fdcefcf2f311cc74ac3b7cbb7e1530 tests/test_carry_klarf_columns.py
 c01fd4f7804f568260bb05fa61871b1f65906c25 tests/test_cd_blob.py
 6d1186f5b2372b93d5fa8d5190e479acb6bdecf6 tests/test_cd_measure.py
@@ -183,6 +186,7 @@ af91354855f9f11d953dfd45857bb779eb4c55dd tests/test_f11_split_load_cards.py
 eaff022e045a6b08dd7090f0181355bbae21118b tests/test_feature_fill.py
 6816f1f0f85211829aa8fc935b2e65e6e6c79957 tests/test_feature_math.py
 174025a7a178c938717f8b8eee4095e19d2165e3 tests/test_feature_owner_prefix.py
+563fbdb2ce84e11278db4fffebb2eac34db18b37 tests/test_find_defect.py
 21b2046491056e3656ad2f7905951a6e5902b0fa tests/test_glas_sidecar.py
 32a5dcca2bcda8a98897603cfe771268e012e926 tests/test_glv.py
 a09041dd2348f2b2aefe2912344eec380e147389 tests/test_glv_compare.py
@@ -266,7 +270,7 @@ f8c81d4bc6d24760e934aa8854c16dd58cece5e7 tests/test_ui_f7_15_reading_load.py
 57ec44be8d2a89d6dce9daf170553833535cb858 tests/test_ui_f7_19_wiring.py
 66dbd307778b6e1d40cce9041a6dca086c947729 tests/test_ui_f7_23_buttons.py
 5d812dc226ce9589df9989d6c972f0d399f9c15f tests/test_ui_f7_24_layout.py
-0eb20e87a0cbbe4333c06c2e265c53d415ffff07 tests/test_ui_f7_9_feedback.py
+03556f403c9bf1218e4377b7fd2a2498a21e0f84 tests/test_ui_f7_9_feedback.py
 fadac952b094981feea028833bd8ad9c3ec92738 tests/test_ui_f8_advanced.py
 1890a4686b8a77fafb983f0444ed1199b32b0541 tests/test_ui_f8_calibrate.py
 4d92eb2352cc2b85573c4662583ae35a25e1085d tests/test_ui_f8_cross.py

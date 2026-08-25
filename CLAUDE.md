@@ -187,6 +187,16 @@ param 相依 I/O（例如輸出流名稱由參數決定）覆寫 `resolve_reads/
 > 改名要**連同分數表達式一起遷移**，而對照表住在那張卡上
 > （`Step.legacy_feature_renames`），不是住在 `recipe.py`。
 
+> **卡片庫由上而下的順序 = `steps/__init__.py` 的 import 順序**（F29，
+> 2026-08-25）。`list_steps()` 就是照 `REGISTRY` 的插入序回，不排序 ——
+> 所以加一張卡要**放在它該出現的位置**，不是接在檔案最後。
+> 這一條是踩出來的：2026-08-25 使用者說「Measure 的 card 順序幫我改命名&重排：
+> GLV → CD → Focus index」，那一輪改了 import 順序、也在那裡寫下這句話，
+> **而畫面上一格都沒有動** —— 當時 `list_steps` 是照 `key` 的字母序排的
+> （CD、Focus index、GLV）。整個改動看起來完成了，全套測試也全綠，因為沒有
+> 任何一條測試問過「使用者看到的第一張是哪一張」。現在有了：
+> `tests/test_card_library_order.py`。
+
 > **把 `min`/`max` 填好，滑桿是免費的**（F7-8）。ParamForm 看到有上下界的
 > `int`/`float` 就自動配一支跟數字框雙向綁定的滑桿。這不只是好看 ——
 > 使用者是一邊拖一邊看影像決定值的，「先想好一個數字再輸入」那個順序是反的。

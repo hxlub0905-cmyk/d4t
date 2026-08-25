@@ -628,7 +628,7 @@ def prefix_features(prefix: str, feats: Dict[str, float]) -> Dict[str, float]:
 #: 而它們差一個次方。照結尾一律乘一次的話，面積會安靜地少乘一次 ——
 #: 跑得完、有數字、而且是錯的。改名成 ``area_px2`` 也能解，但那會動到既有的
 #: recipe 與黃金值，代價比一行表大得多。
-AREA_FEATURES = ("area_px", "cd_area_px")
+AREA_FEATURES = ("area_px", "cd_area_px", "blob_area_px")
 
 #: 名字**不是** ``_px`` 結尾、但意思就是一段長度的那幾個（F19）。
 #:
@@ -645,7 +645,18 @@ LENGTH_FEATURES = ("cd_median", "cd_mean", "cd_min", "cd_max", "cd_range",
                    # 它結尾是 `_px` 但意思是面積，所以它住 :data:`AREA_FEATURES`
                    # 而且那一張表先比對。少了那一行的話它會被配成 `cd_area_nm`
                    # （少乘一次），而那正是 AREA_FEATURES 上面那段在講的事。
-                   "cd_deq", "cd_feret_max", "cd_feret_min")
+                   "cd_deq", "cd_feret_max", "cd_feret_min",
+                   # `find_defect`（F29）。``blob_area_px`` **不在這裡** ——
+                   # 同 ``cd_area_px``，它結尾是 `_px` 但意思是面積，所以住
+                   # :data:`AREA_FEATURES`。少了那一行它會被配成
+                   # ``blob_area_nm``（少乘一次），而那是實際發生過的：
+                   # 這張卡剛寫好的時候宣告出來的就是那個名字。
+                   #
+                   # ``blob_x`` / ``blob_y`` / ``blob_w`` / ``blob_h`` /
+                   # ``blob_cx`` / ``blob_cy`` 也**不在這裡**（同 ``cd_box_*``）：
+                   # 它們是「畫在哪」不是「多大」。``blob_strength`` 是 σ，
+                   # 本來就沒有單位。
+                   "blob_deq")
 
 
 def nm_twins(feats: Dict[str, float],

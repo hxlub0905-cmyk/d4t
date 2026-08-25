@@ -65,18 +65,24 @@ from . import pair_source    # 另一份資料的對應那一顆（F15）
 from . import roi_from_mask  # GDS label map -> 具名區域
 from . import roi_mask       # roi_mask（區域 → 0/255 mask 影像流，F8c）
 from . import roi_template   # roi_template
-# ⚠ **Measure 段的順序就是這三行的順序**（使用者 2026-08-25：「Measure 的 card
+# ⚠ **Measure 段的順序就是這幾行的順序**（使用者 2026-08-25：「Measure 的 card
 # 順序幫我改命名&重排：GLV → CD → Focus index」）。`list_steps` 照 REGISTRY 的
 # 插入序回，而 REGISTRY 的插入序就是這裡的 import 序 —— 卡片庫裡看到的先後
-# 住在這四行，不住在任何一張卡上。
+# 住在這幾行，不住在任何一張卡上。
+#
+# `find_defect`（F29）**接在那三張後面**：使用者點名的順序是那三張，而在中間
+# 插一張等於替他重排一次。它是三種情況下的退路（沒在量 CD、CD 在線那一支、
+# 一塊區域裡不只一個東西），不是常用的第一張。
 from . import glv_stats      # glv_stats（GLV：stats / compare）
 from . import cd             # cd_measure（CD）
 from . import quality        # focus_quality（Focus index）
+from . import find_defect    # find_defect（Find defect：框 + 強度）
 from . import feature_math   # feature_math（Algo 段：數字 → 數字）
 from . import feature_fill   # feature_fill（Algo 段：量不到的那一格）
 from . import output         # Output 段（csv / report / klarf / image）
 
 __all__ = [
     "load", "load_sidecar", "normalize", "denoise", "tone", "flatten", "align", "arith",
-    "quality", "glv_stats", "feature_math", "feature_fill", "output",
+    "quality", "glv_stats", "find_defect", "feature_math", "feature_fill",
+    "output",
 ]
