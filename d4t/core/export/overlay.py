@@ -32,6 +32,7 @@ from .klarf_out import ExportError
 __all__ = ["render_overlay", "write_png", "write_jpeg",
            "DEFAULT_JPEG_QUALITY", "to_display_rgb",
            "primary_blob_box", "pick_overlay_results", "overlay_label",
+           "rank_value", "rank_is_meaningless", "RANK_BY_SCORE",
            "overlay_filename", "OVERLAY_PREFIX", "BOX_COLOR"]
 
 #: 疊圖 PNG 的檔名前綴。**留著**是因為使用者常常把疊圖寫進一個已經有東西的
@@ -210,9 +211,26 @@ def overlay_label(result: Dict[str, Any]) -> str:
     return "  ".join(parts)
 
 
-def pick_overlay_results(results: Sequence[Dict[str, Any]], limit: int
+#: 排序用的預設欄位。``"score"`` 讀的是每一顆結果最上層的那一格，其他名字
+#: 一律當成**特徵名**去 ``features`` 裡拿。
+RANK_BY_SCORE = "score"
+
+
+def rank_value(r: Dict[str, Any], rank_by: str = RANK_BY_SCORE) -> Optional[float]:
+    """這一顆拿來排序的那個數字（拿不到回 ``None``）。"""
+    raw = (r.get("score") if str(rank_by) == RANK_BY_SCORE
+           else (r.get("features") or {}).get(str(rank_by)))
+    try:
+        f = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return None if f != f else f          # nan 不是一個排得了序的數字
+
+
+def pick_overlay_results(results: Sequence[Dict[str, Any]], limit: int,
+                         rank_by: str = RANK_BY_SCORE
                          ) -> List[Dict[str, Any]]:
-    """依分數由高到低取前 ``limit`` 顆（沒有分數的排最後）。
+    """依 ``rank_by`` 由高到低取前 ``limit`` 顆（拿不到那個數字的排最後）。
 
     **住在這裡而不是 UI**（F16 Stage 5c 搬過來的）：它問的是「這一批裡最值得
     看的是哪幾顆」——跟畫面無關，而 `output_image` 跟 Export 精靈要的是同一個
@@ -220,20 +238,38 @@ def pick_overlay_results(results: Sequence[Dict[str, Any]], limit: int
     —— **檔案順序上的前 N 顆幾乎一定不是使用者想看的那幾顆**，而畫面上看不出
     差別（都是 N 張 PNG）。
 
+    ``rank_by`` 是 F30 加的，而它不是「多一個選項」那種加法：**判定樹是一個
+    分類器，多數樹沒有分數表達式**，於是這一批一顆分數都沒有 —— 而上面那句
+    警告講的正是那時候會發生的事。排序要有意義，就得由使用者指名一個他量得到
+    的數字（``blob_strength``、``cmp_snr_mean``、``cd_area_px``…）。
+    ``"score"`` 以外的名字一律當成**特徵名**。
+
+    ⚠ **一顆都排不出來的時候，這裡回的就是輸入順序** —— 呼叫端有責任把那件事
+    講出來（見 :func:`rank_is_meaningless`）。安靜地回檔案順序正是 F30 要修的
+    那個 bug。
+
     ``limit`` 是 0（或負的）＝ 全部，不截斷。
     """
     rows = [r for r in (results or []) if r.get("ok", True)] or list(results or [])
 
     def key(r: Dict[str, Any]) -> Tuple[int, float]:
-        s = r.get("score")
-        try:
-            return (0, -float(s))
-        except (TypeError, ValueError):
-            return (1, 0.0)
+        v = rank_value(r, rank_by)
+        return (1, 0.0) if v is None else (0, -v)
 
     rows = sorted(rows, key=key)
     n = max(0, int(limit))
     return rows[:n] if n else rows
+
+
+def rank_is_meaningless(results: Sequence[Dict[str, Any]],
+                        rank_by: str = RANK_BY_SCORE) -> bool:
+    """這一批**一顆都排不出來**嗎（⇒ 取前 N 顆等於取檔案順序的前 N 顆）。
+
+    分開成一支而不是讓 `pick_overlay_results` 自己 warn：它是純函式，而
+    「要對誰講這句話」（`ctx.warn`、報表上一行字、對話框）是呼叫端的事。
+    """
+    return not any(rank_value(r, rank_by) is not None
+                   for r in (results or []))
 
 
 def _pick_base(images: Dict[str, Any]) -> Tuple[str, np.ndarray]:

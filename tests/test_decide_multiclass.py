@@ -125,10 +125,26 @@ def test_the_score_still_lands_where_everything_downstream_looks_for_it():
     assert ctx.features["score"] == pytest.approx(20.0)
 
 
-def test_no_score_expression_is_allowed_and_gives_zero():
+def test_no_score_expression_means_no_score_at_all():
+    """**沒有分數表達式 ⇒ 沒有分數**（F30 改的，2026-08-25）。
+
+    這條測試以前叫 `..._and_gives_zero`，斷言的是 ``score == 0.0`` ——
+    也就是說**它把那個 bug 鎖住了**。判定樹是一個分類器，多數樹沒有分數
+    表達式，於是每一顆都拿到一個假的 0，而後果一個比一個嚴重：
+
+    1. CSV 多一欄全是 0 的 ``score``；
+    2. 每一張疊圖左上角寫著 ``score=0.000``（讀起來像「這顆得 0 分」）；
+    3. **「照分數排序取前 N 顆」變成「檔案順序的前 N 顆」** —— 全部同分時
+       `sorted` 是穩定的，於是它原封不動地回傳輸入順序。
+
+    第 3 點是實跑 6000 顆的報表時看到的，而排序正是使用者要那份報表的理由。
+    """
     d = DecideSpec(rules=[Rule("a > 1", 5, "")], score="")
-    score, got = _eval_score(_recipe(d, score_expr=""), _ctx(a=9.0))
-    assert (score, got) == (0.0, 5)
+    ctx = _ctx(a=9.0)
+    score, got = _eval_score(_recipe(d, score_expr=""), ctx)
+    assert (score, got) == (None, 5)
+    # 那一格**不寫**（同量測卡的規矩 3）—— 寫一個 None 進 CSV 跟寫 0 一樣糟
+    assert "score" not in ctx.features
 
 
 # --------------------------------------------------------------------------- #

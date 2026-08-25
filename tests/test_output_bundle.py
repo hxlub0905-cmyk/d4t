@@ -87,6 +87,65 @@ def test_the_folder_has_the_four_things(dataset, tmp_path):
     assert str(out) in bctx.outputs
 
 
+def _tree_recipe_for(folder, **over):
+    """同一份 pipeline，但**用判定樹分類、沒有分數表達式**（F30）。
+
+    那是判定樹最常見的樣子，而它以前會讓每一顆拿到一個假的 ``score = 0``。
+    """
+    params = {"folder": str(folder)}
+    params.update(over)
+    r = recipe_for(folder, **over)
+    raw = r.to_json_dict()
+    raw["nodes"]["out"]["params"] = params
+    raw["score"] = {"expr": "", "threshold": 1.0,
+                    "bins": {"below": 0, "above": 1}}
+    raw["decide"] = {"let": [],
+                     "tree": {"when": "glv_max > 200",
+                              "yes": {"bin": 2, "label": "bright"},
+                              "no": {"bin": 1, "label": "plain"}}}
+    return Recipe.from_json_dict(raw)
+
+
+def test_a_tree_without_a_score_says_the_order_is_not_a_ranking(dataset,
+                                                                tmp_path):
+    """**這一條是那個 bug 的形狀。**
+
+    判定樹是一個分類器 —— 沒有分數表達式的時候，「照分數取最差的 N 顆」
+    無事可排，於是拿到的是**檔案順序**的前 N 顆。圖的張數、報表的樣子、
+    資料夾的結構全部一模一樣，所以那件事在產出的當下完全看不出來。
+    """
+    r = _tree_recipe_for(tmp_path / "bundle", limit=2)
+    rows = run_batch(r, dataset, workers=1)
+    assert all(row.get("score") is None for row in rows)     # 沒有假的 0
+    assert all("score" not in (row.get("features") or {}) for row in rows)
+    bctx = run_batch_steps(r, dataset, rows)
+    said = " ".join(bctx.warnings)
+    assert "no defect has a score" in said
+    assert "not the worst" in said
+
+
+def test_ranking_by_a_measured_number_makes_the_warning_go_away(dataset,
+                                                                tmp_path):
+    """講出來的前提是它**只在真的排不出來時**講 —— 否則它是一句雜訊。"""
+    r = _tree_recipe_for(tmp_path / "bundle2", limit=2, rank_by="glv_max")
+    rows = run_batch(r, dataset, workers=1)
+    bctx = run_batch_steps(r, dataset, rows)
+    assert "nothing to sort on" not in " ".join(bctx.warnings)
+    assert "no defect has a score" not in " ".join(bctx.warnings)
+
+
+def test_the_pictures_are_the_top_ones_by_the_chosen_number(dataset, tmp_path):
+    """排序真的照那個數字走 —— 否則上面那條只證明了「沒有警告」。"""
+    out = tmp_path / "bundle3"
+    r = _tree_recipe_for(out, limit=2, rank_by="glv_max")
+    rows = run_batch(r, dataset, workers=1)
+    run_batch_steps(r, dataset, rows)
+    want = sorted(rows, key=lambda x: -float(x["features"]["glv_max"]))[:2]
+    got = {p.stem.replace("overlay_", "")
+           for p in (out / "images").glob("*.jpg")}
+    assert got == {str(x["defect_id"]) for x in want}
+
+
 def test_every_img_src_points_at_a_real_file(dataset, tmp_path):
     """**這一條是「圖擺在旁邊」那個決定的驗收。**
 

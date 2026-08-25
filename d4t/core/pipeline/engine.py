@@ -18,6 +18,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 
+from . import decide_tree
 from .context import FEATURE_OWNER_KEY, Context
 from .expression import ExpressionError, parse_expression
 from .recipe import (
@@ -563,7 +564,8 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
     return ctx, None
 
 
-def _eval_decision(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
+def _eval_decision(recipe: Recipe,
+                   ctx: Context) -> Tuple[Optional[float], int]:
     """多類別判定（F21-D）：``let`` → 由上往下第一個成立的規則 → bin。
 
     三件事的順序是**規格**，不是實作細節：
@@ -611,39 +613,79 @@ def _eval_decision(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
         ctx.features[name] = expr_obj.eval(ctx.features)
 
     path: List[str] = []
+    unanswered: List[str] = []
     if recipe.decide.tree is not None:
         # 判定樹（F24）：從根往下走，每一步記 yes/no —— Preview 的 Path 與
-        # 畫布的分支流量都吃這一串。**非 0 就是成立**（同 rules 的判準）。
-        from .recipe import TreeLeaf
-        node = recipe.decide.tree
-        while not isinstance(node, TreeLeaf):
-            took_yes = parse_expression(node.when).eval(ctx.features) != 0.0
-            path.append("yes" if took_yes else "no")
-            node = node.yes if took_yes else node.no
-        chosen_bin, chosen_label = int(node.bin), str(node.label)
+        # 畫布的分支流量都吃這一串。**非 0 就是成立**（同 rules 的判準），
+        # 而**問不出來的那一題算「否」**（F30，見 `decide_tree.answer`）。
+        #
+        # 走訪住在 `decide_tree.walk`，**不是**在這裡再寫一次：畫布的分支流量
+        # （`decide_tree._path_of`）走的必須是同一條路，而它們曾經是兩段各自
+        # 寫的迴圈。
+        leaf, walked, unanswered = decide_tree.walk(recipe.decide.tree,
+                                                    ctx.features)
+        path = ["yes" if ch == "y" else "no" for ch in walked]
+        chosen_bin, chosen_label = int(leaf.bin), str(leaf.label)
         chosen_rule = -1
     else:
         chosen_bin = int(recipe.decide.otherwise_bin)
         chosen_label = str(recipe.decide.otherwise_label)
         chosen_rule = -1
         for i, rule in enumerate(recipe.decide.rules):
-            if parse_expression(rule.when).eval(ctx.features) != 0.0:
+            hit, gaps = decide_tree.answer(rule.when, ctx.features)
+            unanswered.extend(gaps)
+            if hit:
                 chosen_bin, chosen_label, chosen_rule = (int(rule.bin),
                                                          rule.label, i)
                 break
 
+    # 「有幾題問不出來」是一個**畫得出分布的數字**（F19），所以它進 features；
+    # 缺的**名字**不是數字，進 meta 與一條 warning —— 一個名字塞不進 CSV 的
+    # 一欄，而使用者要的是「哪一個沒量到」，那句話在警告裡讀得到。
+    #
+    # ⚠ 它是判定跑完**之後**才寫的，所以樹上問不到自己。要把「有沒有量到」
+    # 當成一個明講的問題來問，走 `let` 的「missing ⇒ 用 __」（F24 ⑤）。
+    ctx.features["decide_unanswered"] = float(len(unanswered))
+    if unanswered:
+        names = sorted(set(unanswered))
+        ctx.warn("[decide] %d question(s) could not be asked on this defect "
+                 "because %s %s not measured on it, so they were answered "
+                 "'no'. A card writes nothing at all when it cannot measure "
+                 "(that is deliberate), so this is a normal outcome, not a "
+                 "failure. To ask about it on purpose, add a 'let' line with "
+                 "an 'if missing' fallback and test its <name>_missing flag."
+                 % (len(unanswered), ", ".join(names),
+                    "was" if len(names) == 1 else "were"))
+
+    # **沒有分數表達式 ⇒ 沒有分數**（F30）。以前這裡是 `else 0.0`，而判定樹
+    # 是一個**分類器** —— 多數樹根本沒有 score 表達式，於是每一顆的分數都是
+    # 一個假的 0。三個後果，一個比一個嚴重：
+    #
+    # 1. CSV 多一欄全是 0 的 `score`；
+    # 2. 每一張疊圖左上角寫著 `score=0.000`（讀起來像「這顆得 0 分」）；
+    # 3. **「照分數排序取前 N 顆」變成「檔案順序的前 N 顆」** —— 全部同分時
+    #    `sorted` 是穩定的，於是它原封不動地回傳輸入順序。而
+    #    `pick_overlay_results` 自己的說明寫著「檔案順序上的前 N 顆幾乎一定不是
+    #    使用者想看的那幾顆」。排序正是使用者要那份報表的理由。
+    #
+    # 算不出來的那一格**不寫**（同量測卡的規矩 3）：`DefectResult.score` 本來
+    # 就是 `Optional[float]`（`upto_node` 那條路一直在回 None），所以下游都
+    # 擋得住 —— 但「排不出來」要**講出來**，不可以安靜地退回檔案順序。
     expr = str(recipe.decide.score or "").strip()
-    score = parse_expression(expr).eval(ctx.features) if expr else 0.0
-    ctx.features["score"] = score
+    score = parse_expression(expr).eval(ctx.features) if expr else None
+    if score is not None:
+        ctx.features["score"] = score
     # 哪一條規則對上了 —— 給面板與報表。**不進 `DefectResult`**：那會動到
     # SQLite schema 與 CSV 的欄，而黃金值現在是壞的（見 F21 §6），
     # 「改了但數字沒變」這句話目前沒有人證得了。
     ctx.meta["decide"] = {"rule": chosen_rule, "label": chosen_label,
-                          "bin": chosen_bin, "path": path}
+                          "bin": chosen_bin, "path": path,
+                          "unanswered": sorted(set(unanswered))}
     return score, chosen_bin
 
 
-def _eval_score(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
+def _eval_score(recipe: Recipe,
+                ctx: Context) -> Tuple[Optional[float], int]:
     """ADC 判定：score = expr(features) → bin。失敗會 raise（呼叫端攔截）。
 
     ``recipe.decide`` 有東西的時候走多類別那一支（F21-D）—— **沒有的時候
@@ -653,6 +695,20 @@ def _eval_score(recipe: Recipe, ctx: Context) -> Tuple[float, int]:
     if getattr(recipe, "decide", None) is not None:
         return _eval_decision(recipe, ctx)
     expr = parse_expression(recipe.score.expr)
+    # 老路**沒有**「答否往下走」那條退路（F30）：一條分數表達式算不出來的時候
+    # 沒有第二個答案，硬給 0 分是發明一個數字。所以這裡仍然是失敗 ——
+    # 但要講出**為什麼**那一格不見了，否則使用者會去找一個不存在的 bug。
+    gaps = sorted(v for v in expr.variables if v not in ctx.features)
+    if gaps:
+        raise ExpressionError(
+            "%s %s not measured on this defect, so the score cannot be "
+            "worked out. A card writes nothing at all when it cannot measure "
+            "(that is deliberate - it is not a zero), so some defects will "
+            "always be missing some numbers. Use a decision tree instead: "
+            "there, a question that cannot be asked is answered 'no' and the "
+            "defect still gets classified."
+            % (", ".join(gaps), "was" if len(gaps) == 1 else "were"),
+            recipe.score.expr, 0)
     score = expr.eval(ctx.features)
     ctx.features["score"] = score
     if score < float(recipe.score.threshold):

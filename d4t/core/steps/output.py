@@ -390,6 +390,52 @@ class OutputKlarfStep(_OutputStep):
             bctx.warn("KLARF %s: %s" % (str(p["mode"]), note))
 
 
+def _warn_if_unranked(key: str, bctx: Any, rows: Any,
+                      rank_by: str, limit: int) -> None:
+    """一顆都排不出來 ⇒ **講出來**（F30）。
+
+    安靜地退回檔案順序正是這一輪要修的那個 bug：使用者拿到 N 張正常的圖，
+    而「最值得看的那 N 顆」這件事完全沒有發生。``limit`` 是 0（全部）時順序
+    只影響報表上的排列，話還是要講 —— 但語氣不同，所以分開寫。
+    """
+    if not overlay.rank_is_meaningless(rows, rank_by):
+        return
+    what = ("no defect has a score - a decision tree classifies without one"
+            if rank_by == overlay.RANK_BY_SCORE
+            else "no defect has a number called “%s”" % rank_by)
+    if limit and len(list(rows or [])) > limit:
+        bctx.warn("%s: %s, so “Worst first, by” had nothing to sort on and "
+                  "these are simply the first %d defects in the file, not the "
+                  "worst %d. Put the name of a number you measure in that box."
+                  % (key, what, limit, limit))
+    else:
+        bctx.warn("%s: %s, so the order is the order they came in. Put the "
+                  "name of a number you measure in “Worst first, by” if you "
+                  "want the worst at the top." % (key, what))
+
+
+def rank_by_spec() -> ParamSpec:
+    """出圖那兩張卡共用的「照什麼排」（F30，2026-08-25）。
+
+    **兩張卡逐字同一格** —— 同一句話在兩個地方長出兩種意思，是這個 repo 最常
+    踩的形狀（`_util.py` 裡那幾個共用 spec 同一個理由）。
+
+    為什麼需要它：**判定樹是一個分類器，多數樹沒有分數表達式**，於是那一批
+    一顆分數都沒有 —— 而「取分數最高的前 N 顆」在全部同分（或全部沒有）的時候
+    會安靜地退回**檔案順序**。使用者要的排序因此完全沒有發生，而畫面上是 N 張
+    正常的圖。
+    """
+    return ParamSpec(
+        name="rank_by", type="str", default=overlay.RANK_BY_SCORE,
+        label="Worst first, by", advanced=True,
+        help=("Which number decides the order, highest first. Leave it as "
+              "“score” if your recipe has a score formula. If you classify "
+              "with a decision tree instead, there is no score - put the name "
+              "of a number you measure here (for example blob_strength, "
+              "cmp_snr_mean or cd_area_px), otherwise the pictures come out "
+              "in file order."))
+
+
 @register_step
 class OutputImageStep(_OutputStep):
     """每一顆一張疊圖 PNG（整批跑完之後一顆一顆重跑取影像）。"""
@@ -416,6 +462,7 @@ class OutputImageStep(_OutputStep):
                   "thousands of defects, and each one means running the "
                   "pipeline again to get its images."),
         ),
+        rank_by_spec(),
         ParamSpec(
             name="montage", type="bool", default=True,
             label="Show the difference beside it",
@@ -442,7 +489,9 @@ class OutputImageStep(_OutputStep):
         # 精靈同一支）。照 `rows` 的順序取的話拿到的是**檔案順序**上的前 N 顆
         # —— 那幾乎一定不是使用者想看的那幾顆，而畫面上看不出差別（都是 N 張
         # PNG）。第一版就是那樣寫的。
-        chosen = overlay.pick_overlay_results(bctx.rows, limit)
+        rank_by = str(p["rank_by"]).strip() or overlay.RANK_BY_SCORE
+        chosen = overlay.pick_overlay_results(bctx.rows, limit, rank_by)
+        _warn_if_unranked(self.key, bctx, bctx.rows, rank_by, limit)
         # **一顆一顆重跑 pipeline** 才拿得到影像（結果表裡只有數字）。那正是
         # Export 精靈今天做的事，所以這裡不是新的成本，只是換了一個地方。
         wrote = 0
@@ -533,6 +582,7 @@ class OutputBundleStep(_OutputStep):
                   "not for measuring - the numbers in the report come from "
                   "the originals either way."),
         ),
+        rank_by_spec(),
         ParamSpec(
             name="montage", type="bool", default=True,
             label="Show the difference beside it",
@@ -564,7 +614,9 @@ class OutputBundleStep(_OutputStep):
         shots = os.path.join(folder, self.IMAGE_DIR)
 
         # ---- ① 圖（一顆一張，照分數由高到低）-------------------------------
-        chosen = overlay.pick_overlay_results(rows, int(p["limit"]))
+        rank_by = str(p["rank_by"]).strip() or overlay.RANK_BY_SCORE
+        chosen = overlay.pick_overlay_results(rows, int(p["limit"]), rank_by)
+        _warn_if_unranked(self.key, bctx, rows, rank_by, int(p["limit"]))
         images: Dict[str, str] = {}
         skipped = 0
         for row in chosen:

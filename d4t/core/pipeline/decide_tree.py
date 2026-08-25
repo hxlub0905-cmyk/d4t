@@ -41,6 +41,7 @@ __all__ = [
     "OPS", "parse_simple_condition", "format_condition", "rows_reaching",
     "count_yes", "suggest_condition", "display_tree", "layout_cells",
     "flow_counts", "leaf_stats", "decision_info", "path_text",
+    "answer", "walk",
     "LEAF_PALETTE", "leaf_color", "verdict_rows", "NUISANCE_HEX",
     "DANGER_HEX", "FAILED_KEY", "UNBINNED_KEY",
 ]
@@ -234,17 +235,65 @@ def layout_cells(tree: Any, decide: Any = None) -> List[Dict[str, Any]]:
     return cells
 
 
+def answer(when: str, feats: Any) -> Tuple[bool, List[str]]:
+    """一題的答案，以及**問不出來的話是缺了哪幾個數字**（F30，2026-08-25）。
+
+    ``(成立?, 缺了哪幾個)``。缺了東西的時候答案是 **False（走 no 那一支）**，
+    而缺的名字要交出去 —— 呼叫端負責讓那件事在畫面與 CSV 上看得見。
+
+    為什麼問不出來要算「否」而不是讓整顆失敗
+    ----------------------------------------
+    「量不到就不寫那一格」是量測卡的規矩（不是 0、也不是 NaN），所以
+    ``cd_area_px`` 在一顆什麼都沒量到的 defect 上**本來就不存在** ——
+    那是**正確**的行為。而 F30 之前，樹上只要問到它，`Expression.eval` 就
+    raise，`run_defect` 接成整顆 ``ok=False``、錯誤訊息
+    ``[score] unknown variable 'cd_area_px'``。
+
+    於是一顆跑得好好的 defect 被報成「執行失敗」：它不進 Results 的統計、
+    疊圖的 ``ok=True`` 過濾也把它濾掉 —— 而「什麼都沒量到」正是使用者最想
+    看到的那一類之一。使用者 2026-08-25 定調：**那一題答「否」，繼續走。**
+
+    ⚠ 這**不是**「缺值 = 0」。`0 > 5` 與「問不出來」在這裡都走 no，但兩者
+    在 CSV 上分得出來：問不出來的那些顆 ``decide_unanswered`` 大於 0。
+    要把「有沒有量到」當成一個**明講的**問題來問，走 ``let`` 的
+    「missing ⇒ 用 __」（F24 ⑤）—— 那條路會給你一個 ``<name>_missing`` 的
+    旗標，而它是一個真的特徵，樹上問得到、CSV 上畫得出分布。
+
+    ⚠ **值不是數字仍然 raise。** 那不是「量不到」，那是有人往 features 塞了
+    奇怪的東西 —— 安靜地答「否」會把一個真的 bug 埋掉。
+    """
+    expr = parse_expression(when)
+    missing = sorted(v for v in expr.variables if v not in (feats or {}))
+    if missing:
+        return False, missing
+    return expr.eval(feats) != 0.0, []
+
+
+def walk(tree: Any, feats: Any) -> Tuple[Any, str, List[str]]:
+    """把這一顆的特徵餵進樹裡走一遍：``(落在哪片葉子, 路徑, 問不出來的名字)``。
+
+    **引擎與畫布走的是這一支** —— `engine._eval_decision` 與 :func:`_path_of`
+    都叫它。以前那兩邊是各自寫的兩段迴圈，而 `_path_of` 的說明寫著「判準跟
+    引擎一字不差」：只改一邊的那一天，畫布上的顆數與引擎判的類別會對不起來，
+    而畫面上沒有任何東西看得出來。
+    """
+    node, path = tree, ""
+    missing: List[str] = []
+    while not isinstance(node, TreeLeaf):
+        yes, gaps = answer(node.when, feats)
+        missing.extend(gaps)
+        node = node.yes if yes else node.no
+        path += "y" if yes else "n"
+    return node, path, missing
+
+
 def _path_of(tree: Any, feats: Dict[str, Any]) -> str:
     """一顆 defect 的特徵走這棵樹，走的是哪條路（``"yn…"``）。
 
-    判準跟引擎一字不差（`engine._eval_decision`）：**非 0 就是成立**。
+    判準跟引擎一字不差（`engine._eval_decision`）—— 因為**是同一支**
+    （:func:`walk`）。**非 0 就是成立**；問不出來的那一題算「否」。
     """
-    node, path = tree, ""
-    while not isinstance(node, TreeLeaf):
-        yes = parse_expression(node.when).eval(feats) != 0.0
-        node = node.yes if yes else node.no
-        path += "y" if yes else "n"
-    return path
+    return walk(tree, feats)[1]
 
 
 def flow_counts(tree: Any, rows: Any) -> Dict[str, int]:

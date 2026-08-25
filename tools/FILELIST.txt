@@ -33,8 +33,8 @@ e1f7a95ad976983aa0f1f16b7bd52cdcc67494dd d4t/core/algo/subpixel.py
 5f93cfe3c9daa7b50b5efa3dd329c847e5c26c91 d4t/core/calibration.py
 78924f0edd38b3d96346542c63372c7fee679a91 d4t/core/export/__init__.py
 db57a3c6edf2c820287f7671be06d10d16816d52 d4t/core/export/html.py
-e53c86e86a7bc2ab2d6a18ac00c9b20e4d3829ca d4t/core/export/klarf_out.py
-da008afe4aa0e0c87e8c36b35d0d616517e9c2be d4t/core/export/overlay.py
+a4a93fb5fc256c767f2c31f387f7ab4962b5868d d4t/core/export/klarf_out.py
+b89ffeb80a0bf74e1a1c8a47aea336781953a009 d4t/core/export/overlay.py
 ab5031e7056134aa94c5551aba9b80a774b6397a d4t/core/export/report.py
 4599be07de9d76b7a008bdc400e22cfaa0c7acd2 d4t/core/ingest/__init__.py
 987ec64e2830c1e9e7ee535c3aa91e020f5bd0be d4t/core/ingest/dataset.py
@@ -50,8 +50,8 @@ ec7bdb58e7da611ac74f16b53e218f9a65476bdc d4t/core/pipeline/cellrois.py
 750feb625403c2d28566797d541ea2eab2aa22ce d4t/core/pipeline/channels.py
 43a6d8d2f81aece00d00ba3e3c901187f2a721d8 d4t/core/pipeline/context.py
 fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
-92866bc1242975e7be129a46b50dbd1acca3e9bc d4t/core/pipeline/decide_tree.py
-d1806fb9cd8371362f6c456dce4d321a57917b38 d4t/core/pipeline/engine.py
+1217dea826b338bcb7f78445b3456d41705a12ae d4t/core/pipeline/decide_tree.py
+ddaab22bda7d0feaa20d2676325ffd79acb5ab83 d4t/core/pipeline/engine.py
 7e2797dce8253240fcf45a27f57f28d2c246e272 d4t/core/pipeline/expression.py
 790dcfa0a11852fc02eb7b9840bd408139f61ef0 d4t/core/pipeline/recipe.py
 9f7ed29e116872a2e73cac37d588effefc6b0fa0 d4t/core/pipeline/step.py
@@ -70,7 +70,7 @@ cf162d9e699b12b6e4cd5d6d9706484b19eda598 d4t/core/steps/align_to.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
-449c9454256028c3cda6e8b3f4ba0636ed221b69 d4t/core/steps/output.py
+dda718c69b6f37783e61e27331340d2cb3bd437b d4t/core/steps/output.py
 0299cafc4d75895f8b322be5433f7fb3e37455d3 d4t/core/steps/pair_source.py
 46e24cde47cccae307704861c349c75887a27da4 d4t/core/steps/quality.py
 60e5359c0f45e51e4df1e91f87f82661574dd1a6 d4t/core/steps/roi_cross.py
@@ -89,7 +89,7 @@ a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
 776a0eacacda4938b98efc9f7d2251bc293de3f1 d4t/ui/canvas.py
 3b58b7e078d58ad84a8939734b65952a75a029f3 d4t/ui/cell_canvas.py
 334c58d35c83167967e43b30982092b44dcb920a d4t/ui/decide_panel.py
-5a12b2fb8d8f6f58ccae149fa078e334b619a354 d4t/ui/gallery.py
+f35d9a2caf5de689eca2bef5df59e460d1617c46 d4t/ui/gallery.py
 1c1b30fef408a59753c28cd2f3684111c6fa5392 d4t/ui/inspectors.py
 68e6ac894866da63ca055b9082523ffb89656702 d4t/ui/region_check.py
 863ce228ac0905923fcae5037e613b4700d4b244 d4t/ui/results.py
@@ -163,7 +163,8 @@ d30e533c8f476e52e0e9942e25316487eabfcc41 tests/test_cli_encoding.py
 9ce9779e28138d01220cbe750e4dcaa31c624263 tests/test_dag_branching.py
 9e47488159ddde54f903cddf9fa0f3d88e103e99 tests/test_dag_order.py
 70ea34793a5b48433120c5f0b5ef913df7eacfa1 tests/test_dataset.py
-b66575449e7121a62bddb8f88a86dae2c2b3b7bf tests/test_decide_multiclass.py
+c8ece3a6d5f3861df6bfb4b4baf6960d3c3aa4fb tests/test_decide_missing_feature.py
+9dbe6e77c142ce6272531410e38493e233132c91 tests/test_decide_multiclass.py
 31ab4204bdfb17cc95c8f8de05024c5a11ce7a07 tests/test_decide_tree.py
 c2f7df52f855141ec0c0b85e71faa3a821ae31f5 tests/test_docs_links.py
 11e73a391ca61bccbabd3aefc94d115c42e5f3a2 tests/test_e2e_die_to_die.py
@@ -206,13 +207,14 @@ db020b9f0a27ed36b68f4f53d5781df357c8df72 tests/test_make_glas_export.py
 33071fd9690ad145172ab6a178471283523e3c75 tests/test_no_real_fab_data.py
 3103276cac06035f1a18a7d18cb90bdafd7d2f26 tests/test_normalize.py
 637f52a992403f3403b5942019aed2c048059554 tests/test_offline_tools.py
-e22bb75942560a1f693803442da75503e388716b tests/test_output_bundle.py
+80ba7f5732b0abe3ef42448c78ac9cdbce14ddab tests/test_output_bundle.py
 760493e6e43124ec37e48463773e51291e595c9c tests/test_pair_probe.py
 342afa983abf91cec2b2b54f548fb6161a6c809b tests/test_pair_source.py
 34f1bcdbffc5c85f790e98e5bd1c4b1f10fe795f tests/test_period_golden.py
 37fe3291f5eb15938ef1e8097b3a955e106be9f4 tests/test_phase_origin.py
 76eb1fc2423bf8c68fa483116f9a6cffd37d3daa tests/test_pick_defect_box.py
 d3bf372a8505a94d5d189082b01b566b036bc87c tests/test_quality.py
+1cffe766e317628f5e972907d5cd093261da2cf2 tests/test_rank_without_a_score.py
 ce96e14fa4e4370968384ad979e08b3ea9f9dfb8 tests/test_recipe.py
 8575b77bd20f56793446e1b16f856d1467da1fb5 tests/test_recipe_broken_files.py
 106e471baea9a64133ad8a0fd2dd0922e860d513 tests/test_recipe_roundtrip.py
