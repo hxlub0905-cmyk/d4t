@@ -19,6 +19,45 @@
 
 ---
 
+## F32 W2：judge 可自訂 ＋ 贏家框即時預覽（2026-08-25）
+
+使用者：「Pick the odd one by 除了 median 當 index 外，希望可以 custom 參數
+（可選或自定義）」＋「接上後 image stream 可以預覽 overlay 嗎（在還沒跑 batch
+之前，當下就看 outlier）」。
+
+### 自訂：清單只是常用的那幾個
+
+引擎其實**早就吃**任何 `_canonical` 認得的 id（glv_qNN／trim／above）——
+是 `judge` 的 `type="choice"` 嚴格驗證把它擋住了（驗證比 runtime 窄）。做法
+不是放鬆 choice，是新 ParamSpec 型別 **`metric_choice`**（`metric_chips` 的
+**單選**長相，同一條規矩：不強制值落在 choices，認不認得由卡片的 run() 說）：
+
+* 新 widget `MetricPick`（`MetricChips` 的子類）：同一種帶小圖的膠囊、同一顆
+  「+ Percentile…」，差別只有三件 —— 值是一個 id、點一顆關掉其他、**恆有一顆
+  選著**（取消最後一顆會留下空值，看起來像「取消沒生效」，不如不准）。
+  judge 那格從「顯示原始 id 的裸下拉」變成跟 Statistics 一致的膠囊 ——
+  這同時是 W3（好看）的一半。
+* 值格式不變（一個 id 字串）—— 舊 recipe 逐位元組相容，鐵則 9 不觸。
+* **打錯的 id 當場報錯**：`_judge_of` 以前安靜退回預設 —— 那是安靜換值
+  （使用者以為照 glv_q97 挑、整批其實照 median 挑，每顆都吐得出正常數字）。
+  改成 `measure` 裡用跟 `metrics` 同一句話 raise。
+
+### 即時預覽：不用等 batch
+
+預覽管線本來就每顆自動跑（切一顆 defect 就重跑一次 preview、marks 跟著刷），
+缺的只是 `overlay_marks` 沒讀 `worst`。現在：贏家那一格描**完整四邊**＋角點、
+`focus` 指著它（滿 alpha —— 它才是主角；典型那一格退成淡的，沒有 worst 時
+照舊聚焦典型格）。GLV 面板標題列加 `· worst #12 at 4.3σ (median)`，
+`summary()` 帶一句 —— 讀的都是 T1 的 `worst` note，跟 `worst_*` 特徵同一次
+計算。
+
+驗收：`test_glv_compare` 63 條（+5：custom id 端到端、爛 id 報錯、單值不收
+清單、預覽形狀 1+4 條線與 focus、無 worst 的退路）、`test_ui_widgets` +4
+（單選、不准空、手寫 id 顯示且選著、judge 列真的是 MetricPick）、
+UI 批 163 條全綠、core 2203 過、黃金值三份全綠。
+
+---
+
 ## F32 W1：刪掉 pick 的 `strongest`（2026-08-25）
 
 使用者：「Which box is the defect in 這邊選 strongest 好像就跟後面量測卡功能

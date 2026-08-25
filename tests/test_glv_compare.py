@@ -1061,3 +1061,59 @@ def test_pooled_and_no_region_write_no_worst():
         "source": "test", "roi": "cells", "metrics": "glv_median"})
     assert not any(k.startswith("worst") for k in pooled.features)
     assert not any(n.get("worst") for n in pooled.meta["glv_hist"])
+
+
+# --------------------------------------------------------------------------- #
+# 11. judge 自訂（F32）—— 清單只是常用的那幾個，手寫的 glv_q97 一樣合法
+# --------------------------------------------------------------------------- #
+def test_a_custom_percentile_can_judge_the_odd_box():
+    ctx = _grid_ctx(hot_cell=12)
+    _run_each_box(ctx, judge="glv_q90")
+    assert ctx.features["worst_i"] == 12.0
+    meta = [n for n in ctx.meta["glv_hist"] if n.get("worst")][0]["worst"]
+    assert meta["judge"] == "glv_q90"
+
+
+def test_a_bad_judge_id_fails_loudly_not_quietly():
+    """打錯的 id 不准安靜換成預設 —— 使用者以為照 glv_q97 挑、整批其實照
+    median 挑，每一顆都吐得出正常的數字。"""
+    with pytest.raises(StepError) as e:
+        _run_each_box(_grid_ctx(), judge="glv_qq7")
+    text = str(e.value)
+    assert "glv_qq7" in text and "Pick the odd one by" in text
+
+
+def test_judge_takes_one_id_not_a_list():
+    with pytest.raises(ParamError):
+        get_step("glv_stats").validate_params(
+            {"judge": "glv_median,glv_max"})
+
+
+def test_the_preview_outlines_the_worst_box_before_any_batch():
+    """試跑（甚至只是預覽）當下就看得到贏家 —— `overlay_marks` 讀 worst note。
+
+    形狀：典型那一格 1 條淡線＋4 角點，贏家 4 條邊（完整外框），
+    `focus` 指著贏家的第一條邊（滿 alpha —— 它才是主角）。
+    """
+    ctx = _run_each_box(_grid_ctx(hot_cell=12))
+    card = get_step("glv_stats")
+    lines, points, focus, labels = card.overlay_marks(ctx, {}, "test")
+    assert len(lines) == len(points) == len(labels) == 5    # 1 典型 + 4 邊
+    assert focus == 1                                        # 贏家的第一條邊
+    wi = int(ctx.features["worst_i"])
+    wx, wy, ww, wh = ctx.roi_norm_rects("cells")[wi]
+    xs = {round(pt[0], 6) for seg in lines[1:] for pt in seg}
+    ys = {round(pt[1], 6) for seg in lines[1:] for pt in seg}
+    assert xs == {round(wx, 6), round(wx + ww, 6)}
+    assert ys == {round(wy, 6), round(wy + wh, 6)}
+    assert set(labels) == {"cells"}
+
+
+def test_no_worst_keeps_the_typical_focus():
+    """單框比不出贏家 → 照舊聚焦典型那一格（畫面不長出一個假的主角）。"""
+    ctx = _grid_ctx()
+    ctx.meta["glv_hist"] = [{"region": "cells", "stream": "test",
+                             "box": 2, "boxes": 3}]
+    lines, _points, focus, _labels = get_step("glv_stats").overlay_marks(
+        ctx, {}, "test")
+    assert len(lines) == 1 and focus == 0

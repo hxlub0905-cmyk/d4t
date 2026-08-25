@@ -293,12 +293,14 @@ def _reference_of(params: Dict[str, Any]) -> str:
 
 
 def _judge_of(params: Dict[str, Any]) -> str:
-    """逐框比較照哪個統計量挑（不認得的字、沒填的一律當預設）。
+    """逐框比較照哪個統計量挑 —— 回**原樣**的 id（沒填的當預設）。
 
     **不要在別處直接讀 `params["judge"]`**（同 :func:`_reference_of` 的理由）。
+    ⚠ 不認得的 id **不在這裡安靜換成預設**（F32 改的）：那是安靜換值 ——
+    使用者以為照 glv_q97 挑、整批其實照 median 挑，每一顆都吐得出正常的
+    數字。認不認得由 `_measure_each_box` 用跟 `metrics` 同一句話報錯。
     """
-    got = str(params.get("judge", JUDGE_DEFAULT) or JUDGE_DEFAULT).strip()
-    return got if _canonical(got) else JUDGE_DEFAULT
+    return str(params.get("judge", JUDGE_DEFAULT) or JUDGE_DEFAULT).strip()
 
 
 def _compare_metrics_of(params: Dict[str, Any]) -> List[str]:
@@ -404,7 +406,7 @@ class GlvStatsStep(MultiSourceStep):
                   "which box that was."),
         ),
         ParamSpec(
-            name="judge", type="choice", default=JUDGE_DEFAULT,
+            name="judge", type="metric_choice", default=JUDGE_DEFAULT,
             choices=list(METRIC_CHOICES), label="Pick the odd one by",
             show_when=("across_boxes", (EACH_BOX,)),
             help=("Which statistic decides the odd box out. Every box is "
@@ -413,7 +415,9 @@ class GlvStatsStep(MultiSourceStep):
                   "worst_x/y/w/h and worst_score, ready to rank a report by "
                   "and to draw on the overlay. The median ignores a few hot "
                   "pixels inside a box; use the max to hunt for a single "
-                  "bright speck instead."),
+                  "bright speck instead. “+ Percentile…” adds any percentile "
+                  "you like (hand-written recipes may also use glv_q<0-100>, "
+                  "glv_trim<0-49> or glv_above<0-255>)."),
         ),
         # ---- 跟誰比（F18 第 5 步）------------------------------------------
         ParamSpec(
@@ -775,6 +779,13 @@ class GlvStatsStep(MultiSourceStep):
 
         judge = _judge_of(p)
         judge_canon = _canonical(judge)
+        if not judge_canon:
+            # 同 `metrics` 那一句 —— 打錯的 id 要當場講，不是安靜換成預設。
+            raise StepError(
+                self.key,
+                f"unknown statistic '{judge}' in “Pick the odd one by”; "
+                f"available: {sorted(algo_glv.GLV_STATS)} or glv_q<0-100> / "
+                f"glv_p<0-100>.")
         per_box: List[Dict[str, float]] = []
         kept_index: List[int] = []
         judge_vals: List[float] = []
@@ -963,8 +974,14 @@ class GlvStatsStep(MultiSourceStep):
         （2026-08-22 截圖出來才看到）。四個角點是這個畫面既有的語彙，
         而且不會被誤讀成一個新的邊界。
 
-        ``labels`` 給區域名，顏色因此跟影像上那個區域的框一模一樣；
-        ``focus`` 指著它，所以是滿的 alpha。
+        ``labels`` 給區域名，顏色因此跟影像上那個區域的框一模一樣。
+
+        **贏家那一格另外畫**（F32）：worst note 在的時候，最異常的那一格描
+        **完整四邊**＋四個角點，``focus`` 指著它（滿的 alpha —— 它才是主角，
+        典型那一格退成淡的）。使用者一按試跑、甚至只是切到下一顆（預覽每顆
+        都會跑），影像上當場看得到「挑到哪一格、為什麼」—— 不用等 batch。
+        描邊在這裡**不會**跟區域框重疊到看不見：區域框畫的是整組二十格，
+        贏家的四邊是其中一格的邊，粗細與 alpha 都不同（focus 規則）。
         """
         notes = (getattr(ctx, "meta", None) or {}).get("glv_hist") or []
         want = str(stream or "").strip()
@@ -990,13 +1007,30 @@ class GlvStatsStep(MultiSourceStep):
                 continue               # 對不上就整組不畫（同 `set_marks` 的規矩）
             x, y, w, h = (float(v) for v in rects[idx])
             corners = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
-            if focus < 0:
-                focus = len(lines)     # 面板畫的就是這一格 → 滿的 alpha
+            typical_at = len(lines)
             # 一條線段（上緣，畫得很淡）＋ 四個角點（畫滿）。線段是必要的：
             # ``points[i]`` 的定義是「第 i 條線段上的點」，兩串必須等長。
             lines.append([corners[0], corners[1]])
             points.append(corners)
             labels.append(name)
+
+            # 贏家那一格（F32）：完整四邊 + 角點。focus 給贏家（它才是主角）；
+            # 沒有 worst（單框、還沒比出來）就照舊給典型那一格。
+            worst = note.get("worst") or {}
+            wi = int(worst.get("i", -1)) if isinstance(worst, dict) else -1
+            worst_at = -1
+            if 0 <= wi < len(rects):
+                wx, wy, ww, wh = (float(v) for v in rects[wi])
+                wc = [(wx, wy), (wx + ww, wy), (wx + ww, wy + wh),
+                      (wx, wy + wh)]
+                worst_at = len(lines)
+                for a, b in ((wc[0], wc[1]), (wc[1], wc[2]),
+                             (wc[2], wc[3]), (wc[3], wc[0])):
+                    lines.append([a, b])
+                    points.append([a, b])
+                    labels.append(name)
+            if focus < 0:
+                focus = worst_at if worst_at >= 0 else typical_at
         return lines, points, focus, labels
 
     def _note_distribution(self, ctx: Context, patch, p: Dict[str, Any],

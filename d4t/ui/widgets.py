@@ -1888,7 +1888,8 @@ class _HintLabel(QLabel):
 #:
 #: 為什麼要列出來而不是量 widget 的高度：``sizeHint`` 在建構的當下還沒定案
 #: （膠囊要排版完才知道會不會換行），量到的會是一個還沒長好的數字。
-_BLOCK_EDITORS = ("metric_chips", "multi_choice", "curve", "template",
+_BLOCK_EDITORS = ("metric_chips", "metric_choice", "multi_choice",
+                  "curve", "template",
                   "channel_map", "cell_rois")
 
 
@@ -3224,6 +3225,70 @@ class MetricChips(QWidget):
                                   else "nothing picked yet"))
 
 
+class MetricPick(MetricChips):
+    """``metric_choice`` 參數的編輯器：**單選**版膠囊（F32）。
+
+    跟 :class:`MetricChips` 同一種膠囊、同一個「+ Percentile…」——
+    差別只有三件：值是**一個** id、點一顆會把其他的關掉、恆有一顆選著
+    （取消最後一顆等於留下一個空值，而空值會在 validate 被換回預設 ——
+    看起來像「取消沒有生效」，不如一開始就不准）。
+
+    為什麼不是下拉：GLV 的統計量在這張卡的其他格都是帶小圖的膠囊，
+    同一個東西在同一張卡上兩種長相，使用者要學兩次（F18 的理由原封不動）。
+    """
+
+    def text(self) -> str:
+        picked = [c.mid for c in self._chips if c.is_checked()]
+        return picked[0] if picked else ""
+
+    def _on_toggled(self, mid: str, on: bool) -> None:
+        if self._emitting:
+            return
+        if on:
+            self._emitting = True
+            try:
+                for c in self._chips:
+                    if c.mid != mid:
+                        c.set_checked(False)
+            finally:
+                self._emitting = False
+        elif not any(c.is_checked() for c in self._chips):
+            # 恆有一顆選著：把它勾回來、值沒變、不 emit。
+            self._emitting = True
+            try:
+                got = self.chip(mid)
+                if got is not None:
+                    got.set_checked(True)
+            finally:
+                self._emitting = False
+            return
+        self._emit()
+
+    def _add_number(self, question: str, lo: int, hi: int, tmpl: str,
+                    start: int) -> None:
+        n, ok = QInputDialog.getInt(self, "Add a statistic", question,
+                                    start, lo, hi, 1)
+        if not ok:
+            return
+        mid = tmpl % int(n)
+        if self.chip(mid) is None:
+            self._build(mid)          # 重建：宣告的照列，而只有這一顆選著
+        else:
+            self._emitting = True
+            try:
+                for c in self._chips:
+                    c.set_checked(c.mid == mid)
+            finally:
+                self._emitting = False
+        self._emit()
+
+    def _sync_labels(self) -> None:
+        got = self.text()
+        self.count.setText("")        # 單選沒有「N picked」好講
+        self.out.setText("→  the odd box is judged by %s"
+                         % (got or "nothing yet"))
+
+
 class ChannelMapField(QWidget):
     """``channel_map`` 參數的編輯器：一張「第幾張圖 → 叫什麼」的小表（F11 Input-1）。
 
@@ -4263,6 +4328,13 @@ class ParamForm(QWidget):
             # `multi_choice` 的第二種長相（F18）—— **值的格式一字不差**。
             w = MetricChips([str(c) for c in (spec.get("choices") or [])],
                             "" if value is None else str(value))
+            w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
+            return w
+
+        if ptype == "metric_choice":
+            # 單選版（F32）—— 值是一個 id，膠囊長相跟上面同一套。
+            w = MetricPick([str(c) for c in (spec.get("choices") or [])],
+                           "" if value is None else str(value))
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 

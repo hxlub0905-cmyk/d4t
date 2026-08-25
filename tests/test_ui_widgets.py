@@ -974,7 +974,10 @@ def test_all_three_metric_fields_on_the_gray_level_card_are_chips(qapp):
                    "stat": "glv_median,glv_q90",
                    "compare_metrics": "delta,snr"},
                   ["test", "ref"])
-    chips = {c.text() for c in form.findChildren(widgets_mod.MetricChips)}
+    chips = {c.text() for c in form.findChildren(widgets_mod.MetricChips)
+             # `judge` 的單選膠囊（MetricPick）是它的子類 —— 那一格是另一個
+             # 參數型別（metric_choice），不在「三格多選」這一題裡。
+             if not isinstance(c, widgets_mod.MetricPick)}
     assert chips == {"glv_median,glv_mad", "glv_median,glv_q90", "delta,snr"}
     # 舊的勾選網格在這張卡上一個都不剩
     assert not [g for g in form.findChildren(widgets_mod.MultiChoicePicker)
@@ -1451,3 +1454,59 @@ def test_the_profile_card_lost_three_dropdowns_of_english(qapp):
     assert kinds["place"] == "icon_choice"
     assert kinds["side"] == "icon_choice"
     assert kinds["fill_rule"] == "icon_choice"
+
+
+# ---------------------------------------------------------------------------
+# MetricPick：`metric_choice` 的單選膠囊（F32 —— judge 那一格）
+# ---------------------------------------------------------------------------
+def test_metric_pick_is_single_select(qapp):
+    """點一顆就把其他的關掉 —— 值永遠是**一個** id。"""
+    from d4t.core.steps.glv_stats import METRIC_CHOICES
+
+    seen = []
+    w = widgets_mod.MetricPick(METRIC_CHOICES, "glv_median")
+    w.changed.connect(seen.append)
+    assert w.text() == "glv_median"
+    w.chip("glv_max").click()
+    assert w.text() == "glv_max"
+    assert not w.chip("glv_median").is_checked()
+    assert seen[-1] == "glv_max"
+
+
+def test_metric_pick_never_ends_up_empty(qapp):
+    """取消最後一顆 = 留下一個空值 —— 不准：把它勾回來、值不變、不發訊號。"""
+    from d4t.core.steps.glv_stats import METRIC_CHOICES
+
+    seen = []
+    w = widgets_mod.MetricPick(METRIC_CHOICES, "glv_median")
+    w.changed.connect(seen.append)
+    w.chip("glv_median").click()          # 想取消唯一選著的那顆
+    assert w.text() == "glv_median"
+    assert w.chip("glv_median").is_checked()
+    assert seen == []
+
+
+def test_metric_pick_shows_a_hand_written_id(qapp):
+    """recipe 帶進來、清單上沒有的 glv_q97 要列出來並選著（不是靜靜換掉）。"""
+    from d4t.core.steps.glv_stats import METRIC_CHOICES
+
+    w = widgets_mod.MetricPick(METRIC_CHOICES, "glv_q97")
+    assert w.text() == "glv_q97"
+    assert w.chip("glv_q97") is not None and w.chip("glv_q97").is_checked()
+    # 「+ Percentile…」照樣長得出來 —— 自訂值的入口跟 Statistics 那格同一個
+    adders = [c for c in w.findChildren(widgets_mod._MetricChip) if c.adder]
+    assert adders
+
+
+def test_the_judge_row_renders_as_a_metric_pick(qapp):
+    """glv_stats 的 `judge` 在面板上是單選膠囊，不是顯示原始 id 的下拉。"""
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import get_step
+
+    form = widgets_mod.ParamForm()
+    form.set_step(get_step("glv_stats").describe(),
+                  {"across_boxes": "each box"}, ["test"], [], {})
+    row = form._rows.get("judge")
+    assert row is not None
+    assert isinstance(row.editor, widgets_mod.MetricPick)
+    assert row.editor.text() == "glv_median"
