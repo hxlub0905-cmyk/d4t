@@ -5,7 +5,7 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 b7de91c3029b706bf544976890dcf876cabb5a6b CLAUDE.md
 6adcf70fd5d443f757d78b4d337e1866a9af3ed7 README.md
-cc45644322b14ccf24711efceb376f3c6ef0b45a SESSION_LOG.md
+74063b70be96c6a017266c3864a6f982ff62b479 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -56,7 +56,7 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 5522c2df74f5a6ec151b546b642cf465eccad470 d4t/core/pipeline/recipe.py
 230ad64e32b76b0fd8e37cb883de6c4b2ff77c87 d4t/core/pipeline/step.py
 458bc40837b773fdbfbf9d9675d23020e2903853 d4t/core/steps/__init__.py
-576990fa3a36cd6acbba1146cad19b5fe9d49ff1 d4t/core/steps/_util.py
+44ada36e81965cddff165fa32c598f0e94861d4e d4t/core/steps/_util.py
 c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
 cf162d9e699b12b6e4cd5d6d9706484b19eda598 d4t/core/steps/align_to.py
 2c48cd738d30003227a9aad3f34e5c8565a9c6ab d4t/core/steps/arith.py
@@ -65,17 +65,17 @@ cf162d9e699b12b6e4cd5d6d9706484b19eda598 d4t/core/steps/align_to.py
 8ef5c8396cd11fe7299037d7865c66fa3ab7830a d4t/core/steps/feature_fill.py
 9b417df41842c99263f3a477022e26c05e135bf5 d4t/core/steps/feature_math.py
 00f877fe38f316bc2a74cb2659a2e5ac63b7055c d4t/core/steps/flatten.py
-e9c81c67c24be98678b46af75d3d729fbe0ba21f d4t/core/steps/glv_stats.py
+fd4efddf0c30a87fe5615f7f0005ded281b0e67f d4t/core/steps/glv_stats.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
 89e4de039ba1cf760f233c2095f025aa5061c5f7 d4t/core/steps/output.py
 0299cafc4d75895f8b322be5433f7fb3e37455d3 d4t/core/steps/pair_source.py
 46e24cde47cccae307704861c349c75887a27da4 d4t/core/steps/quality.py
-acdb58380e184c616547caf40a7b0933f91f14a5 d4t/core/steps/roi_cross.py
+93c34393be2ee09fb4f4c137a722a047a5dd1e2d d4t/core/steps/roi_cross.py
 f9c9c80c5382b2d3a03602fb5be62b2c09abf81e d4t/core/steps/roi_mask.py
-ee7d169391f2bdcd507ca75a192efb21d2148990 d4t/core/steps/roi_reference.py
-47b750ebaa8dbad663c60dba0961a8ba372259b8 d4t/core/steps/roi_template.py
+a38321552ae4585fad1a990a7c94c34ff931afcf d4t/core/steps/roi_reference.py
+0a86061ca28163ebb95b1e4f9b3ed39c80f531b9 d4t/core/steps/roi_template.py
 d2d8addef914c6e008d5c6c3bcd94b62faaa60c8 d4t/core/steps/tone.py
 0a37eeb8bcaa987e2955fbc1fdf0b1598461380c d4t/core/store/__init__.py
 9a3eed9632b5f594658ab22ac49ccdcc4e17472b d4t/core/store/results.py
@@ -115,7 +115,7 @@ cb5ec1e3cc74cbfc6f03fe2edb526c0993465c6e docs/GLAS-INTERFACE.md
 15c2bb25a9b655500c0706d899826872abbc425f docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
 5add754408a8324566ed29c95f855d9a0c429655 docs/PITFALLS.md
-1cb14819174c9d8b03b479fb0783ea97c228dd6f docs/ROADMAP.md
+5b99035048e25b0b666de80fd0aa2023f8dc1ab1 docs/ROADMAP.md
 c1cfb82e71df1d178b5f70766fcabf52d623476a docs/USING-CD.md
 f6378d9ba391a4e1e3ef7ed855c7694b6b7f50b9 docs/plans/F0-master-plan.md
 d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
@@ -204,7 +204,7 @@ f74d5228a3ab2e7c1ce81b65b0edeebb470b624d tests/test_make_mgext.py
 342afa983abf91cec2b2b54f548fb6161a6c809b tests/test_pair_source.py
 34f1bcdbffc5c85f790e98e5bd1c4b1f10fe795f tests/test_period_golden.py
 37fe3291f5eb15938ef1e8097b3a955e106be9f4 tests/test_phase_origin.py
-61ca20a05b7fdc9a2f644f506a99c6991b1c5fa7 tests/test_pick_defect_box.py
+b50c831bcb56f33b701995f750409a06b054aa33 tests/test_pick_defect_box.py
 d3bf372a8505a94d5d189082b01b566b036bc87c tests/test_quality.py
 1cffe766e317628f5e972907d5cd093261da2cf2 tests/test_rank_without_a_score.py
 ce96e14fa4e4370968384ad979e08b3ea9f9dfb8 tests/test_recipe.py
@@ -220,7 +220,7 @@ b6d422dc16742cc1a896ec46236cf4d4494bc28c tests/test_roi_cross.py
 c99f6b6166a2f25986a65c6eba2e019401e4ed7d tests/test_roi_cross_phase.py
 06d6d97022b61407a0c64c096b7b8728649cddb0 tests/test_roi_cross_trust.py
 78da66affaff254de77bff1ffad6d82bc6b06239 tests/test_roi_mask.py
-7c224c23e3c638112d51ab4564a0af46b000f22a tests/test_roi_reference.py
+227ac3efc52c69e2a1666bdcee1bd9252d452aa9 tests/test_roi_reference.py
 14f96c0d4422d2ee1365ead0f1660884829a7d47 tests/test_roi_template.py
 2342290f2ce3852c11802b8344ed58b877cb5fd2 tests/test_roi_template_full_image.py
 1a47e4aa72f0f6b5d12127f97ee3d97a6e5b65c5 tests/test_route_by.py

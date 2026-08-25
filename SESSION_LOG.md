@@ -19,6 +19,41 @@
 
 ---
 
+## F32 W1：刪掉 pick 的 `strongest`（2026-08-25）
+
+使用者：「Which box is the defect in 這邊選 strongest 好像就跟後面量測卡功能
+稍微衝突了，我傾向留 centre & none。」**攤過代價之後仍定調直接刪**（有問過
+「收起來」的零成本選項 —— F20 量過 strongest 在 patch 座標偏移時是
+11/24→24/24、AUC 0.688→0.977 的差距）：大圖上「找最異常」現在整件事歸 GLV
+的逐框比較，patch 座標偏移那條路**從此沒有訊號救援**，只剩「離中心最近」。
+
+### 刪了什麼
+
+* `PICK_RULES` 剩 `("centre", "none")`；`pick_source`（Judge on 那條線）、
+  `pick_defect_box` 的訊號分支與 `PICK_SMOOTH_PX`（3×3 匹配濾波）、
+  `pick_by_signal`／`cross_pick_by_signal` 特徵（宣告＋寫出）全部一起走。
+  `pick_defect_box` 簡化成 `(boxes, shape) -> 索引`。
+* 三張 Region 卡的 `resolve_reads` 不再因 pick 多宣告一條流；
+  `_pick`／`_place` 的 judge 佈線拆掉。`cross_dist_px` 留著（離中心距離，
+  centre 之下仍有意義）。
+* 舊 recipe 填過 `strongest` 的**明確報錯**（choice 驗證），不遷移 ——
+  安靜換成 centre 等於安靜換一組數字（3c748a0 的規矩）。有測試鎖。
+
+### 順手校正一份漂掉的數字
+
+F20 的實測在 repo 裡有兩份且互相矛盾（`_util.py` 寫 14/24→23/24、
+`test_pick_defect_box.py` 寫 11/24→24/24）。以
+`docs/history/plans/F20-pick-defect-box.md` 為準（**11/24→24/24、
+AUC 0.688→0.977**），留下來的史料註解（`_util.PICK_RULES` 上那一段 ——
+照 F28「例子沒了寫進去」的樣子，把代價與「要回來得整支重做」寫明）用的是
+正確的那一份。
+
+驗收：core 2199 過、黃金值三份全綠（fixture 無 pick 鍵）、受影響 UI 檔
+逐檔全綠。`tests/test_pick_defect_box.py` 改寫成 11 條（含「strongest 不准
+安靜長回來」與「舊 recipe 報得出讀得懂的錯」）。
+
+---
+
 ## F31 T5：刪掉 find_defect（2026-08-25）
 
 使用者：「我覺得 find defect 不需要。」T1–T3 做完之後它的三類輸出全部有了

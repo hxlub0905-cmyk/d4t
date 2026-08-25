@@ -468,47 +468,36 @@ def drop_edge_specs(section: str) -> List[ParamSpec]:
     ]
 
 
-#: 「這一組框裡，哪一塊是缺陷那一塊」的兩種規則（F20，2026-08-22）。
+#: 「這一組框裡，哪一塊是缺陷那一塊」—— 剩兩個值（F32，2026-08-25）。
 #:
-#: 在這之前只有一種，而且是寫死的：**離 patch 正中心最近的那一塊**。
-#: 那句話背後有一個假設 —— patch 是以 KLARF 座標為中心裁的，所以缺陷就在正中心。
-#: 假設成立的時候它完全夠用，而且不必接任何線。
+#: ``centre``＝離 patch 正中心最近的那一塊（patch 以 KLARF 座標為中心裁，
+#: 缺陷就在正中心）；``none``＝不挑（F31 T4）—— RSEM 大圖上缺陷不在中央，
+#: ``_center`` / ``_others`` 是雜訊，挑選交給下游量測卡（GLV 的逐框比較）。
 #:
-#: 但座標會偏。在 ``0822test/mgepi_real3`` 上實測（48 顆，缺陷離正中心中位數
-#: 7.1 px）：「離中心最近」只有 **14 / 24** 顆真的框到缺陷，而下游的凸出量
-#: 從 AUC 0.985 掉到 0.680 —— **框放錯吃掉的比任何一個量測參數都多**。
-#: 換成「訊號最強的那一塊」是 **23 / 24**。
-#:
-#: 為什麼是一格參數而不是一張新卡：兩者挑的是**同一組框裡的同一個東西**，
-#: 差別只在「憑什麼挑」。做成兩張卡的話，下游的 ``<name>_center``
-#: 會有兩個來源，而它們遲早會漂。
-#:
-#: **第三個值 ``none`` = 不挑**（F31 T4，使用者：「我覺得只有在 patch 有用，
-#: 但我想把它完全拿掉（或自己可以選）」）。RSEM 大圖上缺陷不在中央，
-#: ``_center`` / ``_others`` 那兩個名字是雜訊 —— 選了 ``none`` 就只留主名字，
-#: 挑選交給下游的量測卡（GLV 的 each box 逐框比較）。
+#: **``strongest``（訊號最強的那一塊）於 F32 刪掉了**（使用者：「跟後面量測卡
+#: 功能稍微衝突了，我傾向留 centre & none」，在看過收起來的零成本選項後仍
+#: 定調直接刪）。代價要看得見：它當初是量出來的 —— F20 在
+#: ``0822test/mgepi_real3`` 上（缺陷離正中心中位數 7.1 px），「離中心最近」
+#: 只有 **11/24** 顆真的框到缺陷、下游 AUC 0.688，「訊號最強」是 **24/24**、
+#: AUC 0.977（數字以 `docs/history/plans/F20-pick-defect-box.md` 為準 ——
+#: 這裡曾抄成 14/24→23/24，校正過）。patch 座標偏移的那條路**從此沒有這個
+#: 救援**，只剩「離中心最近」；要回來得整支重做（訊號分支、``pick_source``
+#: 那條線、``pick_by_signal`` 特徵都一起走了）。
+#: 舊 recipe 填過 ``strongest`` 的**明確報錯**（choice 驗證擋），不安靜換成
+#: centre —— 換規則等於安靜換一組數字。
 PICK_NONE = "none"
-PICK_RULES = ("centre", "strongest", PICK_NONE)
+PICK_RULES = ("centre", PICK_NONE)
 
 
 def pick_rule_of(params) -> str:
     """這組參數的挑框規則（不認得的字、沒填的一律當 ``centre``）。
 
     **不要在別處直接讀 ``params["pick"]`` 來分支**（同 `glv_stats._reference_of`
-    的理由）—— 尤其因為 :func:`pick_defect_box` 對它不認得的 rule 會**安靜地
-    退回「離中心最近」**：``none`` 必須在呼叫端短路，不能靠它。
+    的理由）。``none`` 在呼叫端短路 —— :func:`pick_defect_box` 只認得
+    「離中心最近」，沒有「不挑」這個概念。
     """
     got = str(params.get("pick", "centre") or "centre").strip()
     return got if got in PICK_RULES else "centre"
-
-#: 「訊號最強」在挑之前先做的均值視窗（px）。
-#:
-#: **不是為了好看**：缺陷在 patch 上是 ~3 px 的一塊，單像素的最大值在這種紋理
-#: 上太脆 —— 一顆熱點就能把整塊框挑走。3×3 均值是最小的匹配濾波，
-#: ``snr_map`` 用的是同一個理由。這個數字寫死不給調：它是「怎麼挑框」的一部分，
-#: 不是「量什麼」的一部分，而多一格能調的東西就多一種調錯的方式。
-PICK_SMOOTH_PX = 3
-
 
 def pick_rule_specs(section: str) -> List[ParamSpec]:
     """兩張找 ROI 的卡共用的那兩格（規則 ＋ 在哪一條流上判斷）。
@@ -524,11 +513,7 @@ def pick_rule_specs(section: str) -> List[ParamSpec]:
             choice_help={
                 "centre": "The one nearest the middle of the image. Patches "
                           "are cut around the defect, so the middle one is "
-                          "usually it - and this needs nothing wired in.",
-                "strongest": "The one with the strongest signal in it, judged "
-                             "on the image stream you drag in below. Use this "
-                             "when the coordinate is off, or when the defect "
-                             "does not sit in the middle.",
+                          "usually it.",
                 PICK_NONE: "Do not pick one. On a full-size image the defect "
                            "is not in one particular box, so <name>_center "
                            "and <name>_others are not made - only the plain "
@@ -536,66 +521,28 @@ def pick_rule_specs(section: str) -> List[ParamSpec]:
                            "box) finds the odd one out.",
             },
             help=("How to tell which of these boxes the defect is in. Pick "
-                  "centre or strongest and that box becomes <name>_center "
-                  "with every other one as the baseline <name>_others; pick "
-                  "none and only the plain name is made."),
-        ),
-        ParamSpec(
-            name="pick_source", type="image_key", direction="in", default="",
-            section=section, label="Judge on",
-            show_when=("pick", ("strongest",)),
-            help=("Which image stream to judge the signal on - drag a line "
-                  "from the difference image. The box whose brightest 3x3 "
-                  "patch is highest wins. Leave nothing wired and the card "
-                  "falls back to the middle one and says so."),
+                  "centre and that box becomes <name>_center with every "
+                  "other one as the baseline <name>_others; pick none and "
+                  "only the plain name is made."),
         ),
     ]
 
 
-def pick_defect_box(boxes, patch_shape, rule: str = "centre",
-                    signal=None) -> tuple:
-    """哪一塊是缺陷那一塊 → ``(索引, 真的用訊號挑了嗎)``。
+def pick_defect_box(boxes, patch_shape) -> int:
+    """哪一塊是缺陷那一塊 → 索引（離 patch 正中心最近的那一塊）。
 
-    ``boxes`` 是像素矩形 ``(x, y, w, h)``。``signal`` 是要判斷的那條影像流
-    （``None`` = 沒接線）。
-
-    ⚠ **接不到線就退回「離中心最近」，並且回報退回了。**
-    安靜地照做才是最糟的：使用者以為自己挑的是訊號最強的那一塊，
-    而整批其實是用正中心挑的 —— 每一顆都吐得出正常的數字。
-    退回這件事因此要變成一個看得見的數字（見兩張卡的 ``*_pick_by_signal``）。
+    ``boxes`` 是像素矩形 ``(x, y, w, h)``。只剩這一種規則：patch 以 KLARF
+    座標為中心裁，缺陷就在正中心。訊號挑框（``strongest``）於 F32 刪掉 ——
+    來龍去脈與代價見 :data:`PICK_RULES` 上面那一段。
+    ``pick="none"`` 的呼叫端**不要叫這一支**（沒有「缺陷那一塊」可言）。
     """
     if not boxes:
-        return 0, False
+        return 0
     h, w = float(patch_shape[0]), float(patch_shape[1])
     cx, cy = w / 2.0, h / 2.0
-
-    def nearest() -> int:
-        return min(range(len(boxes)),
-                   key=lambda k: ((boxes[k][0] + boxes[k][2] / 2.0 - cx) ** 2
-                                  + (boxes[k][1] + boxes[k][3] / 2.0 - cy) ** 2))
-
-    if str(rule) != "strongest" or signal is None:
-        return nearest(), False
-    arr = np.asarray(signal, dtype=np.float64)
-    if arr.ndim != 2 or arr.size == 0:
-        return nearest(), False
-    k = int(PICK_SMOOTH_PX)
-    smooth = cv2.blur(arr.astype(np.float32), (k, k)).astype(np.float64)
-    best, best_val = None, None
-    for i, (bx, by, bw, bh) in enumerate(boxes):
-        x0 = max(0, min(int(round(bx)), smooth.shape[1] - 1))
-        y0 = max(0, min(int(round(by)), smooth.shape[0] - 1))
-        x1 = max(x0 + 1, min(int(round(bx + bw)), smooth.shape[1]))
-        y1 = max(y0 + 1, min(int(round(by + bh)), smooth.shape[0]))
-        seg = smooth[y0:y1, x0:x1]
-        if seg.size == 0:
-            continue
-        val = float(seg.max())
-        if best_val is None or val > best_val:
-            best, best_val = i, val
-    if best is None:
-        return nearest(), False
-    return best, True
+    return min(range(len(boxes)),
+               key=lambda k: ((boxes[k][0] + boxes[k][2] / 2.0 - cx) ** 2
+                              + (boxes[k][1] + boxes[k][3] / 2.0 - cy) ** 2))
 
 
 def drop_edge_boxes(boxes, patch_shape, margin: float, keep: int = -1):
@@ -778,9 +725,9 @@ def roi_rect_or_none(ctx, step_key: str, image, roi_name):
                 "region '%s' is %d separate boxes, and this card needs a "
                 "single one. On a patch cut round a defect, '%s_center' is "
                 "the box the defect is in. On a full-size image the defect "
-                "is not in the middle - either pick the box by signal (the "
-                "Region card's “Which box is the defect in”), or "
-                "use a card that compares all the boxes."
+                "is not in the middle - use a card that compares all the "
+                "boxes instead (GLV, with “Boxes in the region” set to "
+                "each box)."
                 % (name, ctx.roi_count(name), name))
         # 具名 ROI 存的是正規化座標，一樣需要尺寸才展得開
         return None if shape is None else ctx.roi_rect(name, shape)
@@ -818,9 +765,8 @@ def set_region_family(ctx, step_key: str, name: str, norm_boxes,
     ADC 常問的是「缺陷那一塊比旁邊同材質的暗多少」。以前只有兩個名字：
 
     * ``<name>``        —— 全部接起來的像素母體
-    * ``<name>_center`` —— **缺陷所在的那一塊**（哪一塊由 `pick_defect_box`
-      決定：預設「離 patch 正中心最近」，因為 patch 是以缺陷為中心裁的；
-      座標會偏的時候改成「訊號最強的那一塊」—— F20，2026-08-22）
+    * ``<name>_center`` —— **缺陷所在的那一塊**（`pick_defect_box`：離 patch
+      正中心最近，因為 patch 是以缺陷為中心裁的）
 
     少的正是**基準**。拿 ``<name>`` 當基準是有偏的：N 塊的時候缺陷佔 1/N 的
     像素，N=4、缺陷偏 50 GLV 的話基準本身就被拉走 12.5 GLV —— 跟要量的量同一個
@@ -945,7 +891,7 @@ def region_facts(ctx, names, shape, clipped: bool = False,
 def region_family(name: str, pick: bool = True):
     """一個區域名 → 它實際定義的名字（宣告用；空名字回空）。
 
-    ``pick=True``（centre / strongest）是三個：全部、缺陷那一塊、其餘那些。
+    ``pick=True``（``centre``）是三個：全部、缺陷那一塊、其餘那些。
     ``pick=False``（``pick="none"``，F31 T4）只有主名字 —— 大圖上沒有
     「缺陷那一塊」可言，``_center`` / ``_others`` 是雜訊。三張 Region 卡的
     宣告都經過這一支，開關只在這裡。

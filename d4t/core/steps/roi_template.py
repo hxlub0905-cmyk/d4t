@@ -151,7 +151,7 @@ def _prefix_in_section() -> ParamSpec:
 
 #: 每個區域固定會有的幾個數字（區域自己的那兩個另外加）。
 _MATCH_FEATURES = ["match_score", "match_margin", "match_structure",
-                   "phase_x", "phase_y", "pick_by_signal", "locate_ok"]
+                   "phase_x", "phase_y", "locate_ok"]
 
 
 # ⚠ **這個類別不再自己註冊**（F30，2026-08-25）。使用者：「把 Profile /
@@ -277,14 +277,7 @@ class RoiTemplateStep(Step):
     # ---- 宣告 ---------------------------------------------------------------
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
-        # 判斷訊號的那條流也是一條真的線，而且它會改變框挑到哪一塊 ——
-        # 必須進拓撲排序與快取簽章（鐵則 10）。跟 `roi_cross` 一字不差。
-        out = [str(params.get("source", "ref"))]
-        if str(params.get("pick", "centre")) == "strongest":
-            judge = str(params.get("pick_source", "") or "").strip()
-            if judge and judge not in out:
-                out.append(judge)
-        return out
+        return [str(params.get("source", "ref"))]
 
     @classmethod
     def resolve_regions_out(cls, params: Dict[str, Any]) -> List[str]:
@@ -300,13 +293,10 @@ class RoiTemplateStep(Step):
 
     @classmethod
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
-        names = list(_MATCH_FEATURES)
-        if pick_rule_of(params) == PICK_NONE:
-            # ``none`` 沒有「有沒有真的用訊號挑」可言。
-            names.remove("pick_by_signal")
         return prefix_names(
             params.get("output_prefix", ""),
-            names + region_fact_names(cls.resolve_regions_out(params)))
+            list(_MATCH_FEATURES)
+            + region_fact_names(cls.resolve_regions_out(params)))
 
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
@@ -395,13 +385,6 @@ class RoiTemplateStep(Step):
 
         shape = np.asarray(img).shape[:2]
         ph, pw = int(shape[0]), int(shape[1])
-        judge = None
-        if str(p["pick"]) == "strongest":
-            key = str(p.get("pick_source", "") or "").strip()
-            judge = ctx.images.get(key) if key else None
-            if judge is None:
-                ctx.warn("[%s] nothing is wired into “Judge on”, so the box "
-                         "nearest the middle was used instead." % self.key)
         feats: Dict[str, float] = {
             "match_score": float(match.score),
             "match_margin": float(match.margin),
@@ -409,18 +392,12 @@ class RoiTemplateStep(Step):
             "phase_x": float(match.phase_x), "phase_y": float(match.phase_y),
             "locate_ok": 1.0 if match.ok else 0.0,
         }
-        if pick_rule_of(p) != PICK_NONE:
-            # 1 = 「缺陷那一塊」真的是用訊號挑的；0 = 用離正中心最近挑的。
-            # 跟 `roi_cross` 的 `cross_pick_by_signal` 是同一件事、同一支函式。
-            # ``none`` 之下這一格問的東西不存在，不寫。
-            feats["pick_by_signal"] = 1.0 if (str(p["pick"]) == "strongest"
-                                              and judge is not None) else 0.0
 
         edge = float(p["edge_margin"]) if bool(p["drop_edge"]) else 0.0
         for name, norm_boxes in regions:
             boxes, others, dropped, clipped = self._place(
                 ctx, name, norm_boxes, match, cell.shape, (ph, pw), axes,
-                int(p["max_boxes"]), edge, pick_rule_of(p), judge)
+                int(p["max_boxes"]), edge, pick_rule_of(p))
             # 五個數字，跟另外兩張 ROI 卡同一組（`_util.REGION_FACTS`）。
             # 丟掉幾個是**每個區域各自**的數字（區域的形狀不一樣，靠邊的份數
             # 也不一樣），所以要在迴圈裡一個區域一次。
@@ -455,7 +432,7 @@ class RoiTemplateStep(Step):
                match: Any, cell_shape: Tuple[int, int],
                patch_shape: Tuple[int, int], axes: Tuple[bool, bool],
                max_boxes: int, edge_margin: float = 0.0,
-               pick_rule: str = "centre", signal: Any = None
+               pick_rule: str = "centre"
                ) -> Tuple[List[Tuple[int, int, int, int]], int, int, bool]:
         """一個區域的框搬到這張 patch 上，並寫進 ``ctx``。
 
@@ -515,14 +492,10 @@ class RoiTemplateStep(Step):
                     "not cover")
             return [], 0, 0, clipped
 
-        if pick_rule == PICK_NONE:
-            # **這裡短路**：`pick_defect_box` 對不認得的 rule 會安靜退回
-            # 「離中心最近」。-1 = `drop_edge_boxes` 的「沒有受保護的框」。
-            idx, by_signal = -1, False
-        else:
-            idx, by_signal = pick_defect_box(boxes, (ph, pw), pick_rule,
-                                             signal)
-            ctx.meta.setdefault("pick_by_signal", {})[name] = bool(by_signal)
+        # ``none`` 短路（`pick_defect_box` 沒有「不挑」這個概念）；
+        # -1 = `drop_edge_boxes` 的「沒有受保護的框」。
+        idx = (-1 if pick_rule == PICK_NONE
+               else pick_defect_box(boxes, (ph, pw)))
         # 靠邊的丟掉 —— **在挑出中心那一塊之後**。順序反過來的話，中心會從
         # 「離缺陷最近的那一塊」變成「留下來的裡面離缺陷最近的那一塊」，
         # 而那兩者在缺陷靠近 patch 邊緣時不是同一塊。
