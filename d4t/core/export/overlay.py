@@ -10,7 +10,8 @@ Gallery、CLI 的批次出圖、報表的插圖都能共用同一支渲染函式
 - 量測框（``cd_box_*``）畫**紅框**；GLV 逐框比較的 ROI 框畫琥珀／鋼青
   （:func:`_draw_roi_boxes`），贏家框內可再標異常像素；
 - 左上角可疊一行標籤（score / bin …），底下鋪半透明深色條方便閱讀；
-- ``images`` 裡有 ``"diff"`` 時輸出 **[test | diff] 並排**（寬度剛好兩倍）。
+- ``images`` 裡有 ``"diff"`` 時輸出 **[test | diff] 並排**（寬度剛好兩倍）；
+  要別的組合就給 ``panes``（指名哪幾條流）與 ``stack``（橫排／直疊）。
 
 ★ 字型限制 ★
   cv2 內建的 Hershey 字型**沒有中日韓字元**。標籤裡的非 ASCII 字元會被
@@ -31,6 +32,7 @@ import numpy as np
 from .klarf_out import ExportError
 
 __all__ = ["render_overlay", "write_png", "write_jpeg",
+           "STACK_H", "STACK_V", "STACK_MODES",
            "DEFAULT_JPEG_QUALITY", "to_display_rgb",
            "primary_blob_box", "pick_base", "pick_overlay_results",
            "overlay_label",
@@ -474,6 +476,58 @@ def pick_roi_boxes(rects, winner: int, mode: str, cap: int):
 
 
 # ---------------------------------------------------------------------------
+# 並排／堆疊
+# ---------------------------------------------------------------------------
+#: 面板之間那一條分隔線的灰階值。
+SEAM_GRAY = 96
+#: `render_overlay` 的 ``stack``：橫著排／直著疊。
+STACK_H = "h"
+STACK_V = "v"
+STACK_MODES = (STACK_H, STACK_V)
+
+
+def _pane(src: Any, size: Tuple[int, int],
+          roi_boxes: Optional[Sequence[Any]], roi_winner: int,
+          the_box: Optional[Tuple[int, int, int, int]]) -> np.ndarray:
+    """一格面板：拉成可顯示的 RGB、對齊到底圖的大小、把框畫上去。
+
+    **兩條路共用這一支**（預設的 [底圖 | diff] 與指名 ``panes`` 的那條）——
+    各寫一份的話，「框有沒有畫在第二格上」這種事會在其中一條路上安靜地漂掉。
+    """
+    h, w = int(size[0]), int(size[1])
+    arr = to_display_rgb(src)
+    if arr.shape[:2] != (h, w):
+        arr = cv2.resize(arr, (w, h), interpolation=cv2.INTER_NEAREST)
+    if roi_boxes:
+        _draw_roi_boxes(arr, roi_boxes, int(roi_winner))
+    if the_box is not None:
+        _draw_box(arr, the_box)
+    return arr
+
+
+def _stack_panes(parts: Sequence[np.ndarray], stack: str) -> np.ndarray:
+    """把幾格面板接成一張，接縫處畫一條細線。
+
+    ``"h"`` 橫著排、``"v"`` 直著疊。分隔線是**覆寫**接縫後的第一列／行，
+    不是插進去一條 —— 所以兩格橫排的總寬度剛好是兩倍（那是這個函式出現之前
+    就成立的事，不可以因為抽出來而改變）。
+    """
+    parts = [p for p in parts if p is not None]
+    if len(parts) <= 1:
+        return parts[0]
+    axis = 0 if str(stack) == STACK_V else 1
+    panel = np.concatenate(parts, axis=axis)
+    off = 0
+    for part in parts[:-1]:
+        off += int(part.shape[axis])
+        if axis == 1:
+            panel[:, off:off + 1] = SEAM_GRAY
+        else:
+            panel[off:off + 1, :] = SEAM_GRAY
+    return panel
+
+
+# ---------------------------------------------------------------------------
 # 主函式
 # ---------------------------------------------------------------------------
 def render_overlay(images: Dict[str, Any],
@@ -483,6 +537,8 @@ def render_overlay(images: Dict[str, Any],
                    base_key: Optional[str] = None,
                    diff_key: str = "diff",
                    montage: bool = True,
+                   panes: Optional[Sequence[str]] = None,
+                   stack: str = STACK_H,
                    roi_boxes: Optional[Sequence[Any]] = None,
                    roi_winner: int = -1,
                    odd_pixels: Optional[Dict[str, Any]] = None) -> np.ndarray:
@@ -504,7 +560,15 @@ def render_overlay(images: Dict[str, Any],
         左上角文字（非 ASCII 會顯示成 ``?``，見模組 docstring）。
     montage
         ``images`` 有 ``diff`` 時是否輸出 **[底圖 | diff] 並排**
-        （預設 True，寬度剛好是底圖的兩倍）。
+        （預設 True，寬度剛好是底圖的兩倍）。``panes`` 給了就不看這一個。
+    panes / stack
+        **指名哪幾條流、橫著排還是直著疊**（F33）。``panes`` 是一串流名，
+        第一個就是底圖（``base_key`` 沒給的話）；接不到的那一條跳過。
+        ``stack`` 是 ``"h"``（預設，橫排）或 ``"v"``（直疊）。
+
+        直疊是 characterization 要的方向：上面 ground truth、下面第二份 ——
+        它要對得上報表由上往下讀的順序。``panes=None``（預設）時整條路徑
+        跟這兩個參數出現之前**逐位元組相同**。
     roi_boxes / roi_winner
         逐框比較的 ROI 框（F31）：**正規化** 0..1 的 ``(x, y, w, h)`` 清單與
         贏家的索引。其餘畫細的鋼青色、贏家畫粗的琥珀色；索引是 -1 就全部
@@ -518,12 +582,28 @@ def render_overlay(images: Dict[str, Any],
         GLV 算 `worst_score` 用的那兩個數字 —— 不另外算一次。
         預設 ``None``：不標。
 
-    回傳 ``(H, W, 3)`` 或 ``(H, 2W, 3)`` 的 uint8 RGB 陣列。
+    回傳 ``(H, W, 3)`` 或 ``(H, 2W, 3)`` 的 uint8 RGB 陣列；
+    ``panes`` 給了 N 格就是 ``(H, N·W, 3)``（橫排）或 ``(N·H, W, 3)``（直疊）。
     """
     if not isinstance(images, dict) or not images:
         raise ExportError(
             "render_overlay needs a dict of images (e.g. ctx.images); it got an empty one.")
     features = dict(features or {})
+
+    names = None
+    if panes is not None:
+        names = [str(n) for n in panes if str(n).strip()]
+        if not names:
+            raise ExportError(
+                "render_overlay was asked for named panes but the list is "
+                "empty; leave panes out to get the usual [base | diff].")
+        if str(stack) not in STACK_MODES:
+            raise ExportError(
+                "render_overlay stack must be one of {}; got {!r}.".format(
+                    ", ".join(STACK_MODES), stack))
+        # 第一格**就是**底圖 —— 呼叫端指名了順序，這裡不再自己挑一張。
+        if base_key is None:
+            base_key = names[0]
 
     if base_key is not None:
         if base_key not in images or images[base_key] is None:
@@ -547,18 +627,24 @@ def render_overlay(images: Dict[str, Any],
     if the_box is not None:
         _draw_box(left, the_box)
 
-    panel = left
-    right_src = images.get(diff_key)
-    if montage and diff_key != base_key and right_src is not None:
-        right = to_display_rgb(right_src)
-        if right.shape[:2] != (h, w):
-            right = cv2.resize(right, (w, h), interpolation=cv2.INTER_NEAREST)
-        if roi_boxes:
-            _draw_roi_boxes(right, roi_boxes, int(roi_winner))
-        if the_box is not None:
-            _draw_box(right, the_box)
-        panel = np.concatenate([left, right], axis=1)
-        panel[:, w:w + 1] = 96          # 中間一條細分隔線（不改變總寬度）
+    if names is not None:
+        # 指名了哪幾條流：第一格就是底圖（上面已經畫好），其餘照順序接上去。
+        # **接不到的那一條就跳過** —— 同「``diff`` 不在就不並排」的老規矩：
+        # 缺一格不值得讓整張圖畫不出來，而缺的那一格本身常常就是答案
+        # （配不到的那一顆沒有第二張圖）。
+        parts = [left]
+        for name in names[1:]:
+            src = images.get(name)
+            if src is not None:
+                parts.append(_pane(src, (h, w), roi_boxes, roi_winner, the_box))
+        panel = _stack_panes(parts, stack)
+    else:
+        panel = left
+        right_src = images.get(diff_key)
+        if montage and diff_key != base_key and right_src is not None:
+            panel = _stack_panes(
+                [left, _pane(right_src, (h, w), roi_boxes, roi_winner,
+                             the_box)], STACK_H)
 
     if label is None:
         s = features.get("score")
