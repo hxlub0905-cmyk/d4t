@@ -39,7 +39,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
 from .expression import ExpressionError, parse_expression
 from .step import (
-    GROUP_COMPARE, GROUP_ENHANCE, SCALE_LOT, ParamError, Step, REGISTRY,
+    FEATURE_TYPES, GROUP_COMPARE, GROUP_ENHANCE, SCALE_LOT, ParamError, Step,
+    REGISTRY,
 )
 
 __all__ = [
@@ -1228,6 +1229,39 @@ _FOLDED_CARD_RENAMES = {
 }
 
 
+def _migrate_output_image_into_bundle(nodes: Dict[str, "RecipeNode"]) -> None:
+    """``output_image`` → ``output_bundle`` ＋ 只勾「圖」（F37，2026-08-26）。
+
+    `output_image`（Write images）的**七格參數一格不差全部是 `output_bundle`
+    的子集**，而它寫出來的東西正好是後者少了報表、表格與 recipe 三個檔案 ——
+    也就是同一張卡的一個程度，不是另一件事（`CLAUDE.md` §3，前例 F29 的
+    `roi_reference` 與 F19 的 CD）。
+
+    **兩個差別要明講，因為它們就是這道遷移在補的東西**：
+
+    ==================  =====================================================
+    檔案格式            `output_image` 寫 PNG、`output_bundle` 寫 JPEG。
+                        不指定 ``picture_format`` 的話，一份舊 recipe 會安靜
+                        地換一種副檔名 —— 而使用者的下游認的正是副檔名。
+    放在哪              `output_image` 把圖直接放在資料夾裡，`output_bundle`
+                        放進 ``images/``。那一層存在的理由是**報表要用相對
+                        路徑連過去**，所以沒有報表就沒有那一層（規則寫在
+                        `OutputBundleStep.run_batch` 的 ``nested``）。
+    ==================  =====================================================
+
+    判準是「**舊 step 名在不在**」（鐵則 9）。換完之後不再命中，所以
+    ``to_json_dict → from_json_dict`` 走第二次什麼都不會發生（identity）。
+    """
+    for nid, node in list(nodes.items()):
+        if node.step != "output_image":
+            continue
+        params = dict(node.params)
+        params["contents"] = "pictures"
+        params["picture_format"] = "png"
+        nodes[nid] = RecipeNode(id=node.id, step="output_bundle",
+                                params=params, enabled=node.enabled)
+
+
 def _migrate_folded_region_cards(nodes: Dict[str, "RecipeNode"]) -> None:
     """``roi_cross`` / ``roi_template`` → ``roi_reference`` ＋ 對應的 ``method``（F30）。
 
@@ -1392,6 +1426,77 @@ def _rename_in_tree(node: Any, table: Dict[str, str]) -> Any:
     if when == node.when and yes is node.yes and no is node.no:
         return node
     return TreeStep(when=when, yes=yes, no=no)
+
+
+def _swap_padded(part: str, swap) -> str:
+    """``"  worst_score "`` → ``"  glv_worst_score "``（前後空白原樣留著）。"""
+    core = part.strip()
+    if not core:
+        return part
+    lead = part[:len(part) - len(part.lstrip())]
+    tail = part[len(part.rstrip()):]
+    return lead + swap(core) + tail
+
+
+def _rename_in_node_params(nodes: Dict[str, "RecipeNode"],
+                           table: Dict[str, str],
+                           registry: Optional[Dict[str, Any]] = None) -> None:
+    """節點參數裡的舊 feature 名換成新的（**就地改**，F37）。
+
+    以前改名遷移只走三條路：分數表達式、判定段、以及 `feature_math` 的算式
+    （後者還只在 `_migrate_rescued_feature_names` 那一道裡）。第四條沒有人走
+    —— **參數值**：Output 卡的 ``rank_by`` / ``columns``、`output_boxplot` 的
+    ``features``、`output_klarf` 的 ``size_feature`` 每一格都裝著特徵名。
+
+    漏掉它的症狀特別壞，因為**它跑得完**：`rank_by` 指到一個不存在的數字時，
+    出圖卡排不出順序就安靜地退回檔案順序，於是使用者拿到 N 張正常的圖，
+    而「最值得看的那 N 顆」這件事完全沒有發生（那正是 F30 修過一次的 bug，
+    只是這次的來源是遷移）。
+
+    **照型別走，不照卡片清單走**（:data:`step.FEATURE_TYPES`）：第五張會用到
+    特徵名的卡不必回來這裡登記。三種型別裝法不同，所以改寫方式也不同：
+
+    ==================  ==========================================
+    ``expr``            一條算式 → 換整個識別字（`_renamed_idents`）
+    ``feature_keys``    逗號清單 → **逐項整格比對**
+    ``feature_key``     單獨一個名字 → 整格比對
+    ==================  ==========================================
+
+    清單與單格刻意**不走識別字比對**：那一格的值就是一個名字，而
+    `_renamed_idents` 對 ``score`` 這種哨兵值（`rank_by` 的預設）也會照樣
+    比對 —— 整格比對讓「這一格裝的是不是舊名字」只有一個答案。
+
+    **判準仍然是「舊東西在不在」**（鐵則 9）：換完留下的新名字不在表的左邊，
+    所以第二次跑是 no-op，``to_json_dict → from_json_dict`` 仍然是 identity。
+    """
+    if not table or not nodes:
+        return
+    if registry is None:
+        registry = REGISTRY
+
+    def one(name: str) -> str:
+        return table.get(str(name).strip(), str(name).strip())
+
+    for node in nodes.values():
+        step_cls = registry.get(node.step)
+        if step_cls is None:
+            continue
+        for spec in getattr(step_cls, "params", ()) or ():
+            if spec.type not in FEATURE_TYPES or spec.name not in node.params:
+                continue
+            raw = node.params[spec.name]
+            if not isinstance(raw, str) or not raw.strip():
+                continue
+            if spec.type == "expr":
+                new = _renamed_idents(raw, table)
+            elif spec.type == "feature_keys":
+                # **每一項的前後空白照原樣留著**：一份 recipe 被 diff 的時候，
+                # 沒有改到名字的那幾項不該因為重排空白而變成一行改動。
+                new = ",".join(_swap_padded(part, one) for part in raw.split(","))
+            else:
+                new = one(raw)
+            if new != raw:
+                node.params[spec.name] = new
 
 
 def _rename_in_decide(decide: Optional["DecideSpec"],
@@ -1756,6 +1861,8 @@ class Recipe:
         _migrate_roi_from_mask_into_roi_reference(nodes)
         # Profile / Template 也折進去（F30）—— 四張 Region 卡變一張。
         _migrate_folded_region_cards(nodes)
+        # 出圖那張卡折進報表資料夾那張（F37）。
+        _migrate_output_image_into_bundle(nodes)
         # 兩張 GLV 卡收成一張的兩個 method（F16）。
         _migrate_roi_compare_into_glv_stats(nodes)
         # 順序要緊：上面那一道會產生 ``method="compare"``，這一道再把它變成
@@ -1769,6 +1876,10 @@ class Recipe:
         # **判定段吃同一張表**（F33）：F30 之後問問題的地方在這裡，
         # 改名只換 `score.expr` 的話樹上那一題會安靜地永遠答「否」。
         decide = _rename_in_decide(decide, renames)
+        # **參數值也吃同一張表**（F37）：Output 卡的 `rank_by` / `columns`
+        # 那幾格裝的就是特徵名，而漏掉它們**跑得完** —— 排不出順序就安靜地
+        # 退回檔案順序。同一張表第四個消費者，見 `_rename_in_node_params`。
+        _rename_in_node_params(nodes, renames)
         # ⚠ **撞名前綴那一道遷移不在這裡**（`_migrate_rescued_feature_names`）。
         # 它住在 :meth:`load` —— 理由見那一支的說明：這裡是「重建一個物件」，
         # 而那是 `run_batch` 送 recipe 進 worker 走的路。

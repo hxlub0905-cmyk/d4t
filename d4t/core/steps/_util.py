@@ -620,9 +620,9 @@ LENGTH_FEATURES = ("cd_median", "cd_mean", "cd_min", "cd_max", "cd_range",
                    # （少乘一次），而那正是 AREA_FEATURES 上面那段在講的事。
                    "cd_deq", "cd_feret_max", "cd_feret_min")
                    # （``blob_deq`` 曾在這裡 —— `find_defect` 於 F31 T5 刪除
-                   #  後拿掉。GLV 逐框比較的 ``worst_x/y/w/h`` 刻意不配 nm：
+                   #  後拿掉。GLV 逐框比較的 ``glv_worst_x/y/w/h`` 刻意不配 nm：
                    #  它們是「畫在哪」不是「多大」，同 ``cd_box_*`` 的理由；
-                   #  ``worst_score`` 是 σ，本來就沒有單位。）
+                   #  ``glv_worst_score`` 是 σ，本來就沒有單位。）
 
 
 def nm_twins(feats: Dict[str, float],
@@ -795,10 +795,10 @@ def set_region_family(ctx, step_key: str, name: str, norm_boxes,
         return 0
     i = max(0, min(int(centre_index), len(boxes) - 1))
     ctx.set_roi_boxes(name, boxes)
-    ctx.set_roi("%s_center" % name, boxes[i])
+    ctx.set_roi(centre_name(name), boxes[i])
 
     others = [b for k, b in enumerate(boxes) if k != i]
-    rest = "%s_others" % name
+    rest = others_name(name)
     if others:
         ctx.set_roi_boxes(rest, others)
     else:
@@ -810,6 +810,26 @@ def set_region_family(ctx, step_key: str, name: str, norm_boxes,
             ("this patch only has one copy of '%s', so there is no other copy "
              "to use as a baseline" % name))
     return len(others)
+
+
+#: 一個區域名 → 它那一家的另外兩個名字（F11 Region-1；常數是 F37 收的）。
+#:
+#: 以前這兩個後綴被**拼在四個地方**：`set_region_family` 建區域時兩次、
+#: `region_family` 宣告時一次、`glv_stats` 推導「其餘那些」時一次。四份字面值
+#: 講同一件事，而改動其中一份不會讓任何測試變紅 —— 那正是 `CLAUDE.md` §0
+#: 「一個主題一個家」擋的形狀。
+CENTRE_SUFFIX = "_center"
+OTHERS_SUFFIX = "_others"
+
+
+def centre_name(name: str) -> str:
+    """``epi`` → ``epi_center``（缺陷所在的那一塊）。"""
+    return "%s%s" % (name, CENTRE_SUFFIX)
+
+
+def others_name(name: str) -> str:
+    """``epi`` → ``epi_others``（同一家的其餘那些，也就是基準）。"""
+    return "%s%s" % (name, OTHERS_SUFFIX)
 
 
 #: **每一張「找 ROI」的卡，對它吐的每一個區域，都寫這五個數字**（F11 Region-4）。
@@ -899,7 +919,7 @@ def region_family(name: str, pick: bool = True):
     n = str(name or "").strip()
     if not n:
         return []
-    return [n, "%s_center" % n, "%s_others" % n] if pick else [n]
+    return [n, centre_name(n), others_name(n)] if pick else [n]
 
 
 def crop_to_roi(ctx, step_key: str, image, roi_name):

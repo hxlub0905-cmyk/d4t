@@ -309,7 +309,9 @@ def test_write_images_is_a_batch_card_even_though_it_is_per_defect(dataset,
     而那條路**每切換一顆 defect 就走一次**：使用者瀏覽 defect 時會一直寫
     PNG 出來。所以它也是整批跑完之後跑一次。"""
     folder = tmp_path / "pngs"
-    recipe = _out_recipe("img", "output_image", {"folder": str(folder)})
+    recipe = _out_recipe("img", "output_bundle",
+                          {"folder": str(folder), "contents": "pictures",
+                           "picture_format": "png"})
     # 單顆跑：什麼都不該寫
     run_defect(recipe, dataset.items[0], KIND)
     assert not folder.exists()
@@ -449,8 +451,9 @@ def test_the_images_card_picks_the_highest_scoring_ones(dataset, tmp_path):
     from d4t.core.export.overlay import overlay_filename, pick_overlay_results
 
     folder = tmp_path / "pngs"
-    recipe = _out_recipe("img", "output_image",
-                         {"folder": str(folder), "limit": 2})
+    recipe = _out_recipe("img", "output_bundle",
+                         {"folder": str(folder), "limit": 2,
+                          "contents": "pictures", "picture_format": "png"})
     rows = run_batch(recipe, dataset, workers=1)
     run_batch_steps(recipe, dataset, rows)
     # 檔名是 `overlay_<id>.png`（`overlay_filename`，跟 Export 精靈同一支）——

@@ -157,7 +157,19 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC, CATEGORY_BATCH)
 #: 同一條規矩，清單只是「常用的那幾個」，認不認得由卡片的 run() 用它自己的
 #: 話說）。儲存格式就是一個字串，差別只在 UI：一排單選的膠囊，
 #: 「+ Percentile…」照樣長得出自訂值。
-PARAM_TYPES = ("int", "float", "bool", "str", "expr", "feature_keys",
+#: ``"feature_key"``（F37）：值是**一個**特徵名（``feature_keys`` 的單數）。
+#: 儲存格式一樣是 ``"str"``，加它的理由是**改名遷移**：特徵名住在四種地方
+#: （分數表達式、判定樹、`feature_math` 的算式、以及 Output 卡的
+#: ``rank_by`` / ``columns`` / ``size_feature`` 這種參數值），而前三種都已經
+#: 有人改寫，第四種以前沒有 —— 因為那一格從型別上看就是一個普通字串，
+#: 遷移認不出它裝著一個特徵名。
+#:
+#: **宣告式的標記，不是一張卡片清單**：加到 :data:`FEATURE_TYPES` 之後，
+#: 遷移走的是「每一個 spec 的型別」，所以第五張會用到特徵名的卡不必回來補登記。
+#: 抄一張清單的話，漏掉的那一張症狀是「改名之後那張卡指著一個不存在的數字」
+#: —— 而它跑得完（Output 卡找不到那個數字就安靜地退回檔案順序）。
+PARAM_TYPES = ("int", "float", "bool", "str", "expr",
+               "feature_key", "feature_keys",
                "choice", "image_key",
                "image_keys", "curve", "template", "multi_choice",
                "metric_chips", "metric_choice", "channel_map", "cell_rois",
@@ -188,6 +200,15 @@ IMAGE_TYPES = ("image_key", "image_keys")
 #: 區域埠，那一格會變成一個沒有人定義的區域名 —— 跑起來是 `unknown-region`，
 #: 而畫面上那條線看起來完全正常。
 REGION_TYPES = ("region_key", "region_keys")
+
+#: 值裡面裝著**特徵名**的型別（F37）。改名遷移照這一份走。
+#:
+#: 三種裝法不一樣，所以改寫的方式也不一樣（見
+#: `recipe._rename_in_node_params`）：``expr`` 是一條算式（換整個識別字）、
+#: ``feature_keys`` 是逗號清單（逐項換）、``feature_key`` 是單獨一個名字
+#: （整格比對）。**列在 core 而不是遷移那一支**，理由跟 :data:`IMAGE_TYPES`
+#: 一樣：這是「這個型別是什麼」的事實，而遷移只是它的一個消費者。
+FEATURE_TYPES = ("expr", "feature_key", "feature_keys")
 
 #: 輸出流的名字可以用哪些字（F10-7）。
 #:
@@ -248,7 +269,19 @@ def param_visible(show_when: Any, params: Optional[Dict[str, Any]]) -> bool:
     """
     values = params or {}
     for name, allowed in show_when_conditions(show_when):
-        if str(values.get(name, "")) not in {str(v) for v in allowed}:
+        want = {str(v) for v in allowed}
+        got = str(values.get(name, ""))
+        # **成員比對，不是整串相等**（F37）。多選那幾個型別
+        # （`multi_choice` / `metric_chips` / `image_keys` / `region_keys`）
+        # 的值是一個逗號清單，而「勾了 pictures 才顯示這一格」問的是
+        # **在不在裡面**。整串比對的話 ``"report,pictures"`` 不等於
+        # ``"pictures"``，那一格就永遠不出現 —— 而它會有一個預設值照樣生效，
+        # 也就是一個使用者看不到卻在作用的設定。
+        #
+        # 對單值型別（`choice` / `icon_choice` / `bool`）**逐位元組等價**：
+        # 沒有逗號的字串切出來就是它自己。2026-08-26 稽核過 registry 裡每一個
+        # `show_when`，目標全部是單值型別。
+        if not ({tok.strip() for tok in got.split(",")} & want):
             return False
     return True
 
@@ -482,7 +515,7 @@ class ParamSpec:
                     v = value.strip().lower() in ("1", "true", "yes", "on")
                 else:
                     v = bool(value)
-            elif self.type in ("str", "expr", "feature_keys",
+            elif self.type in ("str", "expr", "feature_key", "feature_keys",
                                "image_key", "template"):
                 # ``expr`` 跟 ``str`` **存的是同一個東西**（F21-B）——
                 # 差別只在 UI 認得它是算式。這一行漏掉 ``expr`` 的話，

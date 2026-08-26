@@ -107,14 +107,30 @@ def test_rank_value_reads_the_top_level_score_but_a_feature_by_name():
 # --------------------------------------------------------------------------- #
 # 兩張出圖的卡
 # --------------------------------------------------------------------------- #
-def test_both_image_cards_offer_the_same_box_word_for_word():
-    """同一句話在兩個地方長出兩種意思，是這個 repo 最常踩的形狀。"""
-    specs = {}
-    for key in ("output_image", "output_bundle"):
-        spec = {p.name: p for p in REGISTRY[key].params}["rank_by"]
-        specs[key] = (spec.type, spec.default, spec.label, spec.help)
-    assert specs["output_image"] == specs["output_bundle"]
-    assert specs["output_image"][1] == overlay.RANK_BY_SCORE
+def test_every_card_that_ranks_says_it_the_same_way_word_for_word():
+    """同一句話在兩個地方長出兩種意思，是這個 repo 最常踩的形狀。
+
+    ⚠ 配對換了（F37）：`output_image` 折進 `output_bundle` 之後，還在排序的
+    是 `output_bundle` 與 `output_char`。**改成問 registry「誰有 rank_by」**
+    而不是寫死兩個 key —— 第三張會排序的卡加進來時，這支測試自己就跟上了。
+    """
+    from d4t.core.steps.output import rank_by_spec
+
+    shared = rank_by_spec()
+    want = (shared.type, shared.default, shared.label, shared.help)
+    found = []
+    for key, cls in REGISTRY.items():
+        spec = {p.name: p for p in cls.params}.get(shared.name)
+        # ⚠ **只問 Output 段那幾張。** `pair_source` 上也有一格叫 `rank_by`，
+        # 而它問的是完全不同的事（「第二份那個 lot 自己照哪一欄排名次」）——
+        # 同一個參數名在兩個段落上是兩個概念，所以不能照名字掃整個 registry。
+        if spec is None or not str(getattr(cls, "key", "")).startswith("output_"):
+            continue
+        found.append(key)
+        assert (spec.type, spec.default, spec.label, spec.help) == want, (
+            "%s 的 rank_by 跟共用的那一份不一樣" % key)
+    assert len(found) >= 2, "至少該有兩張出圖卡在排序：%s" % found
+    assert shared.default == overlay.RANK_BY_SCORE
 
 
 def test_the_help_says_what_to_do_when_there_is_no_score():

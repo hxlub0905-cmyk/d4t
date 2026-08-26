@@ -727,13 +727,12 @@ def test_the_absolute_numbers_come_out_even_when_it_compares():
 def test_the_other_regions_needs_no_second_line():
     """``the other regions`` 用的是 Region 卡的家族慣例（`<name>_others`）。
 
-    那個名字跟 `<name>` 出自同一張卡，畫布上那條線已經在了 —— 所以它**不宣告**
-    第二個區域輸入（F12 的規矩是「用到的每一個區域都要有一條線指到定義它的那
-    張卡」，而這裡指的是同一張）。
+    使用者**不必自己接第二條線**：那個名字跟 `<name>` 出自同一張卡。
+    但它**要被宣告出來**（F37）—— 見下面那一支。
     """
     card = get_step("glv_stats")
     p = dict(BASE, reference="the other regions")
-    assert card.resolve_regions_in(p) == ["hot"]
+    assert card.resolve_regions_in(p) == ["hot", "hot_others"]
 
     ctx = _ctx()
     ctx.set_roi_boxes("hot_others", [(0.5, 0.0, 0.5, 1.0)])
@@ -747,6 +746,37 @@ def test_the_other_regions_needs_no_second_line():
     with pytest.raises(StepError) as e:
         get_step("glv_stats")().run(lonely, dict(p, compare_metrics="delta"))
     assert "only has one copy" in str(e.value)
+
+
+def test_the_other_regions_is_declared_so_the_lint_can_see_it():
+    """F37：``the other regions`` 以前**不宣告**，於是健檢看不到它。
+
+    代價是實測出來的：接 ``hot_center`` 再選「跟其餘那些比」時，
+    `configuration_issues()` 回空的、`unknown-region` 也沉默，而**跑起來每一顆
+    defect 各失敗一次**（找 ``hot_center_others``，那個名字沒有人產出）。
+    錯誤訊息本身是好的，只是它出現在跑完一批之後。
+
+    宣告出來之後，同一件事由既有的 `unknown-region` 在按下去之前講完。
+
+    ⚠ **把 `resolve_regions_in` 那一段的 `elif ref == REF_OTHERS` 拿掉，
+    這支測試會紅** —— 那就是它守著的東西。
+    """
+    card = get_step("glv_stats")
+
+    # 上游那張 Region 卡吐的是 hot / hot_center / hot_others（`region_family`）。
+    # 接家族的主名字 → 要的 `hot_others` 在裡面。
+    assert set(card.resolve_regions_in(dict(BASE, reference="the other regions"))
+               ) <= {"hot", "hot_center", "hot_others"}
+
+    # 接 `_center` → 它要的是 `hot_center_others`，而那個名字**不存在**。
+    # 宣告出來，`unknown-region` 才問得到。
+    got = card.resolve_regions_in(
+        dict(BASE, roi="hot_center", reference="the other regions"))
+    assert "hot_center_others" in got
+
+    # 量整張圖時沒有「其餘那些」可言 —— 不要憑空宣告一個 `_others`。
+    assert card.resolve_regions_in(
+        dict(BASE, roi="", reference="the other regions")) == []
 
 
 def test_putting_the_metrics_in_the_wrong_box_is_caught():
@@ -795,7 +825,7 @@ def test_measuring_each_box_finds_the_odd_one_out():
         "source": "test", "roi": "cells", "metrics": "glv_median",
         "across_boxes": "each box"})
 
-    assert ctx.features["boxes"] == 25.0
+    assert ctx.features["glv_boxes"] == 25.0
     assert ctx.features["glv_median_typical"] == pytest.approx(100.0)
     assert ctx.features["glv_median_outlier"] == pytest.approx(160.0)
     assert ctx.features["glv_median_outlier_box"] == 12.0, "缺陷定位的答案"
@@ -819,10 +849,11 @@ def test_each_box_declares_exactly_what_it_writes():
     assert set(card.resolve_features(p)) == {
         "glv_median_typical", "glv_median_outlier", "glv_median_outlier_box",
         "glv_mad_typical", "glv_mad_outlier", "glv_mad_outlier_box",
-        "boxes", "glv_pixels",
+        "glv_boxes", "glv_pixels",
         # F31：總冠軍那一組（照 `judge` 挑）＋ score 的分布。
-        "worst_i", "worst_x", "worst_y", "worst_w", "worst_h",
-        "worst_score", "worst_value", "score_median", "score_spread"}
+        "glv_worst_i", "glv_worst_x", "glv_worst_y", "glv_worst_w",
+        "glv_worst_h", "glv_worst_score", "glv_worst_value",
+        "glv_worst_score_median", "glv_worst_score_spread"}
 
     ctx = _grid_ctx()
     get_step("glv_stats")().run(ctx, p)
@@ -867,7 +898,7 @@ def test_a_box_too_small_to_measure_is_skipped_not_counted_as_zero():
     get_step("glv_stats")().run(ctx, {
         "source": "test", "roi": "cells", "metrics": "glv_median",
         "across_boxes": "each box", "min_pixels": 400})
-    assert ctx.features["boxes"] == 0.0, "每一格都只有 256 px，全部低於下限"
+    assert ctx.features["glv_boxes"] == 0.0, "每一格都只有 256 px，全部低於下限"
     assert ctx.features["glv_ok"] == 0.0
     assert "glv_median_typical" not in ctx.features
 
@@ -961,35 +992,35 @@ def _run_each_box(ctx, **over):
 def test_the_worst_box_is_the_hot_one():
     """25 格裡亮的那一格就是 worst —— 分數是「偏離其他格幾個穩健 σ」。"""
     ctx = _run_each_box(_grid_ctx(hot_cell=12))
-    assert ctx.features["worst_i"] == 12.0
-    assert ctx.features["worst_value"] == pytest.approx(160.0)
+    assert ctx.features["glv_worst_i"] == 12.0
+    assert ctx.features["glv_worst_value"] == pytest.approx(160.0)
     # 其他 24 格完全一樣（spread 踩地板 1 灰階）→ score = |160-100| / 1 = 60
-    assert ctx.features["worst_score"] == pytest.approx(60.0)
-    assert ctx.features["score_median"] == pytest.approx(0.0)
+    assert ctx.features["glv_worst_score"] == pytest.approx(60.0)
+    assert ctx.features["glv_worst_score_median"] == pytest.approx(0.0)
 
 
 def test_the_worst_box_is_the_roi_box_itself():
-    """座標不另外量：逐位元組就是 `ctx.roi_rects()[worst_i]` 那一格。
+    """座標不另外量：逐位元組就是 `ctx.roi_rects()[glv_worst_i]` 那一格。
 
     「只有一種框」—— ROI 的框既是輸入也是報表上畫的那個框。把 bug 放回去的
     形狀是任何一種自己換算座標的寫法（正規化來回、中心點重算）。
     """
     ctx = _run_each_box(_grid_ctx(hot_cell=7))
-    wi = int(ctx.features["worst_i"])
+    wi = int(ctx.features["glv_worst_i"])
     x, y, w, h = ctx.roi_rects("cells", ctx.images["test"].shape[:2])[wi]
-    assert ctx.features["worst_x"] == float(x)
-    assert ctx.features["worst_y"] == float(y)
-    assert ctx.features["worst_w"] == float(w)
-    assert ctx.features["worst_h"] == float(h)
+    assert ctx.features["glv_worst_x"] == float(x)
+    assert ctx.features["glv_worst_y"] == float(y)
+    assert ctx.features["glv_worst_w"] == float(w)
+    assert ctx.features["glv_worst_h"] == float(h)
 
 
 def test_identical_boxes_do_not_divide_by_zero():
     """其他格完全相同 → spread 是 0 → 地板（1 灰階）接住，score 全體是 0。"""
     ctx = _run_each_box(_grid_ctx(hot=100.0))     # 亮格跟別人一樣亮
-    assert ctx.features["worst_score"] == pytest.approx(0.0)
-    assert ctx.features["score_median"] == pytest.approx(0.0)
-    assert ctx.features["score_spread"] == pytest.approx(0.0)
-    assert np.isfinite(ctx.features["worst_value"])
+    assert ctx.features["glv_worst_score"] == pytest.approx(0.0)
+    assert ctx.features["glv_worst_score_median"] == pytest.approx(0.0)
+    assert ctx.features["glv_worst_score_spread"] == pytest.approx(0.0)
+    assert np.isfinite(ctx.features["glv_worst_value"])
 
 
 def test_a_single_box_has_no_other_boxes_to_compare():
@@ -1002,11 +1033,12 @@ def test_a_single_box_has_no_other_boxes_to_compare():
     ctx = Context(images={"test": img})
     ctx.set_roi_boxes("cells", [(0.1, 0.1, 0.4, 0.4)])
     _run_each_box(ctx)
-    assert ctx.features["boxes"] == 1.0
+    assert ctx.features["glv_boxes"] == 1.0
     assert "glv_median_typical" in ctx.features       # 不是 pooled 的裸名
     assert "glv_median" not in ctx.features
-    for name in ("worst_i", "worst_x", "worst_score", "worst_value",
-                 "score_median", "score_spread"):
+    for name in ("glv_worst_i", "glv_worst_x", "glv_worst_score",
+                 "glv_worst_value", "glv_worst_score_median",
+                 "glv_worst_score_spread"):
         assert name not in ctx.features
 
 
@@ -1021,15 +1053,15 @@ def test_the_judge_changes_who_wins():
     x, y, w, h = ctx.roi_rects("cells", img.shape[:2])[6]
     img[y + h // 2, x + w // 2] = 250.0
     by_median = _run_each_box(ctx)
-    assert by_median.features["worst_score"] == pytest.approx(0.0)
+    assert by_median.features["glv_worst_score"] == pytest.approx(0.0)
 
     ctx2 = _grid_ctx(hot=100.0)
     img2 = ctx2.images["test"]
     img2[y + h // 2, x + w // 2] = 250.0
     by_max = _run_each_box(ctx2, judge="glv_max")
-    assert by_max.features["worst_i"] == 6.0
-    assert by_max.features["worst_value"] == pytest.approx(250.0)
-    assert by_max.features["worst_score"] > 10.0
+    assert by_max.features["glv_worst_i"] == 6.0
+    assert by_max.features["glv_worst_value"] == pytest.approx(250.0)
+    assert by_max.features["glv_worst_score"] > 10.0
 
 
 def test_the_overlay_note_is_the_same_computation():
@@ -1042,13 +1074,13 @@ def test_the_overlay_note_is_the_same_computation():
     notes = [n for n in ctx.meta["glv_hist"] if n.get("worst")]
     assert len(notes) == 1
     worst = notes[0]["worst"]
-    assert worst["i"] == int(ctx.features["worst_i"])
-    assert worst["score"] == ctx.features["worst_score"]
-    assert worst["value"] == ctx.features["worst_value"]
-    assert worst["rect"] == [int(ctx.features["worst_x"]),
-                             int(ctx.features["worst_y"]),
-                             int(ctx.features["worst_w"]),
-                             int(ctx.features["worst_h"])]
+    assert worst["i"] == int(ctx.features["glv_worst_i"])
+    assert worst["score"] == ctx.features["glv_worst_score"]
+    assert worst["value"] == ctx.features["glv_worst_value"]
+    assert worst["rect"] == [int(ctx.features["glv_worst_x"]),
+                             int(ctx.features["glv_worst_y"]),
+                             int(ctx.features["glv_worst_w"]),
+                             int(ctx.features["glv_worst_h"])]
     assert worst["judge"] == "glv_median"
     assert worst["score"] == pytest.approx(
         abs(worst["value"] - worst["baseline"]) / worst["spread"])
@@ -1069,7 +1101,7 @@ def test_pooled_and_no_region_write_no_worst():
 def test_a_custom_percentile_can_judge_the_odd_box():
     ctx = _grid_ctx(hot_cell=12)
     _run_each_box(ctx, judge="glv_q90")
-    assert ctx.features["worst_i"] == 12.0
+    assert ctx.features["glv_worst_i"] == 12.0
     meta = [n for n in ctx.meta["glv_hist"] if n.get("worst")][0]["worst"]
     assert meta["judge"] == "glv_q90"
 
@@ -1101,7 +1133,7 @@ def test_the_preview_outlines_the_worst_box_before_any_batch():
     lines, points, focus, labels = card.overlay_marks(ctx, {}, "test")
     assert len(lines) == len(points) == len(labels) == 3    # 1 典型 + 2 對角
     assert focus == 1                                        # X 的第一條
-    wi = int(ctx.features["worst_i"])
+    wi = int(ctx.features["glv_worst_i"])
     wx, wy, ww, wh = ctx.roi_norm_rects("cells")[wi]
     xs = {round(pt[0], 6) for seg in lines[1:] for pt in seg}
     ys = {round(pt[1], 6) for seg in lines[1:] for pt in seg}
@@ -1121,3 +1153,62 @@ def test_no_worst_keeps_the_typical_focus():
     lines, _points, focus, _labels = get_step("glv_stats").overlay_marks(
         ctx, {}, "test")
     assert len(lines) == 1 and focus == 0
+
+
+# --------------------------------------------------------------------------- #
+# F37：名字的家族（2026-08-26）
+# --------------------------------------------------------------------------- #
+def test_glv_never_collides_with_the_region_cards_own_numbers():
+    """GLV 寫的名字**不能**撞到 Region 卡對同一個區域寫的那五個。
+
+    這是實測出來的：接兩個區域時 GLV 的前綴就是區域名，於是它的 ``boxes``
+    變成 ``epi_boxes`` —— 而 Region 卡對 ``epi`` 也寫一個 ``epi_boxes``
+    （`_util.REGION_FACTS`）。兩個數字，同一個名字：
+
+    ==================  ==========================================
+    Region 卡的         這個區域**有**幾個框
+    GLV 的              其中幾格**量得出來**（像素太少的跳過）
+    ==================  ==========================================
+
+    lint 報得出來（`feature-collision`）、engine 也把先寫的救成
+    ``<節點名>_epi_boxes`` —— 所以它從來不是安靜的。問題是這個撞名**由構造
+    決定**：只要接兩個區域就一定發生，使用者再小心都躲不掉，而每一份正常
+    recipe 上都會出現的警告最後就會被學會忽略（`_feature_collisions` 自己
+    寫下的話，F11 Enhance-3 為 `clip_frac` 開的例外就是同一個形狀）。
+
+    ⚠ **把 `BOX_COUNT` 改回 ``"boxes"`` 這支會紅** —— 那就是它守著的東西。
+    """
+    from d4t.core.steps._util import region_fact_names
+
+    card = get_step("glv_stats")
+    regions = ["epi", "mg"]
+    mine = set(card.resolve_features(dict(
+        source="test", roi=",".join(regions), metrics="glv_median",
+        across_boxes="each box", judge="glv_median", reference="none",
+        output_prefix="")))
+    theirs = set(region_fact_names(regions))
+    assert not (mine & theirs), (
+        "GLV 與 Region 卡撞名：%s" % sorted(mine & theirs))
+
+
+def test_every_number_this_card_writes_says_who_wrote_it():
+    """這張卡吐的每一個名字都以 ``glv_`` 或 ``cmp_`` 開頭（去掉前綴之後）。
+
+    F18 立了兩個家族（``glv_`` 是這一塊自己的灰階、``cmp_`` 是跟參照比出來
+    的），而 F31 加進來的逐框那一族**一個記號都沒有** —— ``worst_score`` /
+    ``score_median`` / ``boxes`` 排在一份同時有 ``cd_*`` 與 ``<n>_present``
+    的 CSV 上，是唯一說不出自己是誰算的一族。F37 補上。
+
+    ``score_median`` 那個名字特別值得記：在一份有分數表達式的 recipe 上它
+    讀起來像「分數的中位數」，而它其實是逐框異常度的中位數。
+    """
+    card = get_step("glv_stats")
+    names = card.resolve_features(dict(
+        source="test", roi="", metrics="glv_median,glv_mad",
+        across_boxes="each box", judge="glv_median",
+        reference="another region", reference_region="bg",
+        stat="glv_mean", compare_metrics="delta,snr", output_prefix=""))
+    assert names
+    stray = [n for n in names
+             if not (n.startswith("glv_") or n.startswith("cmp_"))]
+    assert not stray, "沒有家族記號的名字：%s" % stray

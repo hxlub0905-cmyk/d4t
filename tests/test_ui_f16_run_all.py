@@ -79,7 +79,7 @@ def _wire(win, out_path, step="output_csv", **params):
     win.model.set_param(glv, "source", "test")
     win.model.set_param(glv, "metrics", "glv_max")
     out = win.model.add_step(step)
-    key = "folder" if step == "output_image" else "path"
+    key = "folder" if step in ("output_bundle", "output_char") else "path"
     win.model.set_param(out, key, str(out_path))
     for name, value in params.items():
         win.model.set_param(out, name, value)
@@ -211,7 +211,7 @@ def test_a_disabled_inplace_card_does_not_ask(window, tmp_path, monkeypatch):
 # 4. 寫檔走背景執行緒（非同步那條路）
 # --------------------------------------------------------------------------- #
 def test_the_async_path_uses_a_background_thread(window, tmp_path, qapp):
-    """`output_image` 會一顆一顆重跑 pipeline —— 在 GUI 執行緒做會僵住。"""
+    """出圖那張卡會一顆一顆重跑 pipeline —— 在 GUI 執行緒做會僵住。"""
     out = tmp_path / "async.csv"
     _wire(window, out)
     assert window.run_all() is True          # 非同步
