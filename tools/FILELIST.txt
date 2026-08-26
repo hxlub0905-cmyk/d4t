@@ -5,7 +5,7 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 876266a7bfceb5ec0228cfed98d8ee9cc2da4c54 CLAUDE.md
 6adcf70fd5d443f757d78b4d337e1866a9af3ed7 README.md
-3258a67546236137f6d06b0b611d22fdbecadd8e SESSION_LOG.md
+18b9ca9aaf5ec093bb8e8f94a8a2960f6c6f8652 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -70,7 +70,7 @@ c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
 02021edc97759cf471e724b42e2b1952ec231cfb d4t/core/steps/output.py
-7a0e6629754f1cba9fc627c540c33f0cb1318e26 d4t/core/steps/pair_source.py
+5c9dfd23b929f805d416e6218be570b2bcbbeaaf d4t/core/steps/pair_source.py
 46e24cde47cccae307704861c349c75887a27da4 d4t/core/steps/quality.py
 93c34393be2ee09fb4f4c137a722a047a5dd1e2d d4t/core/steps/roi_cross.py
 f9c9c80c5382b2d3a03602fb5be62b2c09abf81e d4t/core/steps/roi_mask.py
@@ -117,7 +117,7 @@ cb5ec1e3cc74cbfc6f03fe2edb526c0993465c6e docs/GLAS-INTERFACE.md
 5add754408a8324566ed29c95f855d9a0c429655 docs/PITFALLS.md
 a6fd53c3e010ee9c7335def49ff3952e10511ba9 docs/ROADMAP.md
 c1cfb82e71df1d178b5f70766fcabf52d623476a docs/USING-CD.md
-7362f871c0b2e4d9efeefab93ae39f55a7cda2c3 docs/USING-CHARACTERIZATION.md
+3855d7584b919f1f403d5c2ce2bd0d54d5dc99cc docs/USING-CHARACTERIZATION.md
 6885e5767660656a9cc2ffda538b1fd0defd232c docs/plans/F0-master-plan.md
 d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 636ffca672050aefd5bdc5628b5c9f335018c41b docs/plans/F15-pair-sources.md
@@ -204,7 +204,7 @@ f74d5228a3ab2e7c1ce81b65b0edeebb470b624d tests/test_make_mgext.py
 77430b0b34d24773cbfe804119416ce5c2a40708 tests/test_output_bundle.py
 cdf46298db296a2d05e8fd42efcce246d971c55f tests/test_output_char.py
 760493e6e43124ec37e48463773e51291e595c9c tests/test_pair_probe.py
-b5b743b130fafc92a01e319f7bfad9a8a987182d tests/test_pair_source.py
+f20b372af8ebd20dad3ef13c5c6d1c6c19b3d0e4 tests/test_pair_source.py
 34f1bcdbffc5c85f790e98e5bd1c4b1f10fe795f tests/test_period_golden.py
 37fe3291f5eb15938ef1e8097b3a955e106be9f4 tests/test_phase_origin.py
 b50c831bcb56f33b701995f750409a06b054aa33 tests/test_pick_defect_box.py

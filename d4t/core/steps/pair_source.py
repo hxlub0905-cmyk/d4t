@@ -11,8 +11,23 @@ RSEM API 空拍（拍滿、直接對影像抓 defect）是 ground truth；拿它
 * **配到、但分數低沒被 sample → 藏在 raw data 內**；
 * 沒配到 → 根本沒偵測到。
 
-中間那一列是這張卡存在的理由，而它要答得出來就必須把配到那一顆的 **KLARF 欄位**
-帶成 feature（`carry`）——否則第一列與第二列在資料上長得一模一樣。
+中間那一列是這張卡存在的理由。**F15 時它靠 `carry`**（把 EBI 的分數欄帶成
+feature，才寫得出「分數 < 20」那種規則）；**F33 之後靠排名**
+（`pair_die_rank`，見下一段）—— 而排名才是對的那個問法，因為 sample 是照名次
+取的，不是照一個絕對分數。
+
+⚠ 所以 `carry` **不再是機制的必要條件**，它是「你想在報表與判定樹裡看到哪些
+EBI 欄位」。三件常被誤會的事，寫在這裡免得下一個人重推一次：
+
+* **座標配對不需要 carry**：`XREL` / `YREL` / `XINDEX` / `YINDEX` 在載檔那一刻
+  就被讀成 `DefectItem.xrel_nm / yrel_nm / die` 了（`ingest/dataset._base_item`）
+  —— `fields`（carry 填的那些）是另一份東西。
+  驗收：`tests/test_pair_source.py::test_matching_by_position_needs_no_carried_columns`
+* **排名也不需要**：`rank_within` / `rank_by` 指名的欄位由
+  :func:`columns_for_source` **自動**加進複製清單。
+* **要 carry 的理由**：回頭找得到原始那一筆（`DEFECTID`）、確認沒有跨 die
+  （`XINDEX` / `YINDEX` —— 報表的固定欄**沒有 die**，這是唯一的路）、
+  或判定樹要直接用原始分數。
 
 排名為什麼算在這裡（F33，2026-08-25）
 ------------------------------------
@@ -259,9 +274,14 @@ class PairSourceStep(Step):
             label="Carry these columns",
             choices_from="source_columns",
             help=("KLARF columns from the matched defect to bring over as "
-                  "features (for example DEFECTID, ROUGHBINNUMBER). The list "
-                  "is what that lot actually has. This is what makes \"it was "
-                  "detected but scored too low\" answerable.")),
+                  "features, named pair_<COLUMN> (for example DEFECTID, "
+                  "XINDEX, YINDEX). The list is what that lot actually has. "
+                  "This is for what you want to SEE and to write rules "
+                  "about - matching and ranking do not need it: coordinates "
+                  "are read when the lot is opened, and the two Rank boxes "
+                  "bring their own columns over. Carry XINDEX and YINDEX to "
+                  "get that lot's die into the spreadsheet, which has no die "
+                  "column of its own.")),
         ParamSpec(
             name="rank_within", type="multi_choice", default="",
             label="Rank within",

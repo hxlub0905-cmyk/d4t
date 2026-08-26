@@ -82,16 +82,37 @@ Pair with another source ──paired────┘
 | **Match by** | `position`（wafer 座標，主力）／`id`（兩邊 DEFECTID 相同時）／`order`（只拿來打通管線）|
 | **Within** | 座標容差（nm）。太大會配到鄰居 —— `match_dist_nm` 會告訴你該往哪邊調 |
 | **Keep this many candidates** | >1 時多留幾顆給 H2H 用 NCC 挑。座標最近的不一定是對的 |
-| **Carry these columns** | **EBI 的分數欄**（必填）＋ `XINDEX` `YINDEX` `DEFECTID`。清單是那一份真的有的欄位 |
+| **Carry these columns** | **證據**用的（見 §4.1.1）—— 建議 `XINDEX` `YINDEX` `DEFECTID`。清單是那一份真的有的欄位 |
 | **Rank within** | 挑 `XINDEX` ＋ `YINDEX` = 每個 die 各自排。留空 = 整份排一組 |
 | **Rank by** | **EBI 自己的分數欄**。這一格是 ② 答得出來的關鍵 |
 | **Highest first** | 分數欄就開著（最大值第 1 名）|
 
-> **Carry 是 ②③ 分得開的關鍵。** 少了它，「偵測到但分數太低」跟「根本沒偵測到」
-> 在資料上長得一模一樣。
-
 > **排名的母體是那一份的完整清單**（幾千筆），不是這一批的三十顆。
 > 判定段的「跟整批比」在這裡是錯的 —— 它只看得到跑過 pipeline 的那幾十顆。
+
+### 4.1.1 `Carry` 到底要填什麼（**不是你以為的那些**）
+
+最容易誤會的一格。**配對與排名都不需要它** ——
+
+* **座標配對不用**。`XREL` / `YREL` / `XINDEX` / `YINDEX` 在**載檔那一刻**就被
+  讀成 `DefectItem` 的座標與 die 了（`ingest/dataset._base_item`），跟 `carry`
+  是兩條路。實測：`carry` 一欄都不填，`position` 照樣配得到、`match_dist_nm`
+  照樣是對的。**所以不必為了配對去 carry `XREL`/`YREL`。**
+* **排名也不用**。`Rank within` 與 `Rank by` 指名的欄位會**自動**加進掛載時要
+  複製的清單，不必再手動 carry 一次。
+
+那 `carry` 是給誰的？**給你看的** —— 它決定哪些 EBI 的欄位會變成
+`pair_<欄位名>` 出現在 CSV、報表與判定樹裡。所以照「我要在報表上看到什麼」來填：
+
+| 想要 | carry 什麼 | 為什麼 |
+|---|---|---|
+| **回去 raw data 找得到那一顆** | `DEFECTID` | 沒有它，你只知道「有配到」，不知道配到哪一筆 |
+| **確認配對沒有跨 die** | `XINDEX` `YINDEX` | ⚠ **CSV 的固定欄沒有 die** —— 這是唯一把 EBI 那邊的 die 帶進輸出的方法 |
+| **判定樹想直接用原始分數**（例：`pair_PMSCORE > 20`）| 那個分數欄 | 只用 `pair_die_rank` 判定的話就不必 |
+| EBI 那邊的座標 | `XREL` `YREL` | **通常不必** —— `match_dist_nm` 已經告訴你兩邊差多遠了 |
+
+> 帶不動的欄位（`DEFECTID` 那種字串）**不會變成特徵**（feature 是數字的地盤），
+> 它會出現在卡片的面板上。打錯欄位名會在**掛上來的那一刻**就被擋下來。
 
 ### 4.2 `H2H`
 

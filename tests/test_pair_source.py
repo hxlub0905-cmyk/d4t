@@ -1148,3 +1148,46 @@ def test_h2h_does_not_mark_a_stream_it_never_searched():
 def test_h2h_draws_nothing_before_it_has_run():
     """沒跑過就沒有位置可言（配不到的那一顆也走這條 —— 那張卡讓路了）。"""
     assert get_step("align_to").overlay_marks(Context(), {}, "single")[0] == []
+
+
+def test_matching_by_position_needs_no_carried_columns():
+    """**座標配對跟 `carry` 是兩條路**（使用者 2026-08-26：「不用帶 XREL YREL 嗎」）。
+
+    `XREL` / `YREL` / `XINDEX` / `YINDEX` 在**載檔那一刻**就被讀成
+    `DefectItem` 的 `xrel_nm` / `yrel_nm` / `die` 了（`ingest/dataset._base_item`）
+    —— `fields`（`carry` 填的那些）是另一份東西，給報表與判定樹看的。
+
+    這條測試鎖的是那個分界：`fields` 全空，`position` 照樣配得到、距離照樣對。
+    哪天有人把座標改成「從 fields 讀」，這裡會紅。
+    """
+    others = [_item("far", 900, 0, fields={}),
+              _item("near", 120, 40, fields={})]
+    ctx = _ctx(_item("gt", 0, 0), {"ebi": others})
+    with pytest.raises(StepError):        # 配到了，只是沒有影像可載
+        _run(ctx, carry="")               # ← 一欄都不 carry
+    assert ctx.features["pair_found"] == 1.0
+    assert ctx.features["match_dist_nm"] == pytest.approx(126.49, abs=0.1)
+    assert ctx.meta["pair_match"]["defect_id"] == "near"
+
+
+def test_the_rank_columns_come_over_without_being_carried():
+    """排名指名的欄位**自動**進複製清單 —— 不必再手動 carry 一次。"""
+    from d4t.core.steps.pair_source import columns_for_source
+
+    class _N:
+        def __init__(self, step, params):
+            self.step, self.params = step, params
+
+    only_rank = [_N("pair_source", {"source": "ebi", "carry": "",
+                                    "rank_within": "XINDEX,YINDEX",
+                                    "rank_by": "PMSCORE"})]
+    assert set(columns_for_source(only_rank, "ebi")) == {
+        "XINDEX", "YINDEX", "PMSCORE"}
+
+    # 重複填也不會帶兩次
+    both = [_N("pair_source", {"source": "ebi", "carry": "XINDEX,PMSCORE",
+                               "rank_within": "XINDEX,YINDEX",
+                               "rank_by": "PMSCORE"})]
+    got = columns_for_source(both, "ebi")
+    assert sorted(got) == ["PMSCORE", "XINDEX", "YINDEX"]
+    assert len(got) == len(set(got))
