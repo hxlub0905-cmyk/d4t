@@ -52,6 +52,7 @@ from . import theme
 from .theme import TOKENS, region_hex
 
 __all__ = ["Inspector", "AlignInspector", "EnhanceInspector",
+           "H2HInspector",
            "MeasureInspector", "GlvInspector", "InputInspector",
            "CrossInspector", "TemplateInspector",
            "INSPECTORS", "inspector_for"]
@@ -2786,6 +2787,77 @@ class WriteBackInspector(Inspector):
             y += row_h
 
 
+class H2HInspector(MeasureInspector):
+    """`align_to`（H2H）：**對到哪、歪了多少、這個位置可不可信**。
+
+    為什麼不只是分布（F33，2026-08-26）
+    -----------------------------------
+    分布（`MeasureInspector` 已經在畫的那五條）是調參數要看的東西 —— 但這張卡
+    的產物是一個**位置**，而位置的三個問題分布答不出來：
+
+    * **對到哪** —— 大圖上的座標，使用者要拿它跟畫面上的框對起來；
+    * **歪了多少** —— `align_off_*`，也就是這一顆的 stage 偏移。整批取中位數
+      填回 `expect_dx_px` 就能把搜尋框縮小（F15 §14.3 的調校迴圈）；
+    * **可不可信** —— `align_peak_ratio`。⚠ **`ncc_score` 一個不夠**：陣列區
+      裡實測 NCC 0.98 而位置每一顆都錯，因為第二名跟第一名一樣好
+      （`docs/plans/F33-ebi-characterization.md` §8.5）。所以這一行**兩個數字
+      一起講**，不讓使用者只看到漂亮的那一個。
+
+    影像上的框與十字走的是另一條路（`AlignToStep.overlay_marks`）——
+    **文字說多少、圖上指哪裡**，兩邊是同一組數字的兩種說法。
+    """
+
+    title = "Match"
+
+    def note(self) -> Dict[str, Any]:
+        return dict(self.meta.get("align_to") or {})
+
+    def empty_reason(self) -> str:
+        # **對到了**跟**還沒跑**是兩句不同的話（同 `PairInspector`）。
+        if self.note():
+            return ("Matched - run a trial to see how the match score and the "
+                    "stage offset are spread across the batch. One value on "
+                    "its own cannot tell you whether it is a good match.")
+        return ("Run a trial to see where the small image sits inside the big "
+                "one. Nothing here yet? Check that both streams are wired up.")
+
+    def summary(self) -> str:
+        note = self.note()
+        bits: List[str] = []
+        if note:
+            try:
+                bits.append("matched at (%d, %d)"
+                            % (int(round(float(note["x"]))),
+                               int(round(float(note["y"])))))
+            except (KeyError, TypeError, ValueError):
+                pass
+        ox = self.this_value("align_off_x_px")
+        oy = self.this_value("align_off_y_px")
+        if ox is not None and oy is not None:
+            # 「歪了多少」是這張卡最實用的一個數字：整批的中位數就填回
+            # `expect_dx_px`，搜尋框因此縮得下來。
+            bits.append("off by (%+.0f, %+.0f) px" % (ox, oy))
+        score = self.this_value("ncc_score")
+        ratio = self.this_value("align_peak_ratio")
+        if score is not None:
+            # **兩個一起講**：陣列區裡 NCC 漂亮而位置是猜的（見類別說明）。
+            if ratio is not None and ratio >= 0.9:
+                bits.append("score %.2f but the runner-up scores %.0f%% as "
+                            "well - this position is a guess (repeating "
+                            "pattern)" % (score, 100.0 * ratio))
+            elif ratio is not None:
+                bits.append("score %.2f (runner-up %.0f%%)"
+                            % (score, 100.0 * ratio))
+            else:
+                bits.append("score %.2f" % score)
+        spread = super().summary()
+        if spread:
+            bits.append(spread)
+        return "  ·  ".join(bits)
+
+
+
+
 INSPECTORS: Dict[str, type] = {
     "load_patch": InputInspector,
     # 同一個面板：它讀的是 meta["input"]，兩張 Input 卡都會寫（F11 Input-4）。
@@ -2808,8 +2880,9 @@ INSPECTORS: Dict[str, type] = {
     # 這裡放的是「沒有 method 可看時的那一個」。
     "roi_reference": GdsInspector,
     "pair_source": PairInspector,
-    # 對圖的分數只有**跟整批比**才讀得懂：0.62 是高是低要看其他顆長什麼樣。
-    "align_to": MeasureInspector,
+    # 對圖的分數只有**跟整批比**才讀得懂（0.62 是高是低要看其他顆長什麼樣），
+    # 所以分布留著 —— 但 F33 之後上面多一行講「對到哪、歪多少、可不可信」。
+    "align_to": H2HInspector,
     # 寫回前一定先預覽變更（M5 的硬性規則，F16 Stage 5c 搬過來的）。
     "output_klarf": WriteBackInspector,
 }

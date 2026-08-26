@@ -239,6 +239,62 @@ class AlignToStep(Step):
         return bool(out_key) and any(
             str(k) == out_key and str(k) not in ctx.images for k in keys)
 
+    # ---- 影像上的標記（見 Step.overlay_marks）------------------------------ #
+    @classmethod
+    def overlay_marks(cls, ctx: Any, params: Dict[str, Any],
+                      stream: Optional[str] = None) -> Any:
+        """在預覽上畫**對到哪（框）**與**瞄準哪（十字）**（F33）。
+
+        這張卡以前在預覽上什麼都不畫 —— 而它做的事偏偏是「位置」。使用者
+        2026-08-26：「名義上 defect 會在 FOV 正中央…可是這樣就沒有明確在圖上
+        指出 defect 位置。」報表那邊已經畫了（`output_char` 的 `mark_defect`），
+        這裡是**同一件事在調參數的時候**：拖 `search_within`、填 `expect_dx_px`
+        的當下就看得到框往哪裡跑，而不是跑完一整批才知道。
+
+        兩個記號各自回答一半，而**它們的間距就是這一顆的 stage 偏移**
+        （＝`align_off_*`，見 `docs/plans/F33-ebi-characterization.md` §8.6）：
+
+        * **框** —— 小圖真的對到的那一塊（``x/y`` ＋ 模板尺寸）；
+        * **十字** —— 機台瞄準的那一點（``expected`` 的中心）。
+
+        ⚠ **只畫在被搜的那條流上。** 座標是**大圖**的，畫到 ``test``（模板）或
+        ``aligned``（裁出來的那一塊）上就指著錯的地方 —— 而正規化座標會讓它看
+        起來像個正常的框。`stream` 不知道是哪一條時不過濾（同 CD：**過濾要
+        根據知道的事，不是猜的**），因為 Studio 一定會給。
+        """
+        note = dict((getattr(ctx, "meta", None) or {}).get("align_to") or {})
+        want = str(stream or "").strip()
+        mine = str(note.get("search") or "").strip()
+        if want and mine and mine != want:
+            return [], [], -1, []
+        shape = list(note.get("shape") or [])
+        size = list(note.get("size") or [])
+        if len(shape) != 2 or len(size) != 2:
+            return [], [], -1, []
+        sw, sh = float(shape[0]), float(shape[1])
+        tw, th = float(size[0]), float(size[1])
+        if sw <= 0 or sh <= 0:
+            return [], [], -1, []
+
+        lines: List[Any] = []
+        try:
+            x0, y0 = float(note["x"]) / sw, float(note["y"]) / sh
+        except (KeyError, TypeError, ValueError):
+            return [], [], -1, []
+        x1, y1 = x0 + tw / sw, y0 + th / sh
+        lines += [[(x0, y0), (x1, y0)], [(x1, y0), (x1, y1)],
+                  [(x1, y1), (x0, y1)], [(x0, y1), (x0, y0)]]
+
+        exp = list(note.get("expected") or [])
+        if len(exp) == 2:
+            cx = (float(exp[0]) + tw / 2.0) / sw
+            cy = (float(exp[1]) + th / 2.0) / sh
+            arm = 0.04
+            lines += [[(cx - arm, cy), (cx + arm, cy)],
+                      [(cx, cy - arm), (cx, cy + arm)]]
+        # `points` 要跟 `lines` 等長（長度對不上就整組不畫）；這張卡沒有點。
+        return lines, [[] for _ in lines], -1, []
+
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
         if self._upstream_found_nothing(ctx, (p["template"], p["search"])):
@@ -310,6 +366,7 @@ class AlignToStep(Step):
                                 "expected": [float(ex), float(ey)],
                                 "search": str(p["search"]),
                                 "size": [int(tw), int(th)],
+                                "shape": [int(sw), int(sh)],
                                 "window": list(window) if window else None}
         if not ok:
             raise StepError(

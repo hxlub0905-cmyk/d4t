@@ -1092,3 +1092,54 @@ def test_a_defect_that_is_not_in_the_middle_needs_the_whole_image_searched():
     if err2 is None:
         landed = (ctx2.features["align_dx_px"], ctx2.features["align_dy_px"])
         assert abs(landed[0] - px) > 2 or abs(landed[1] - py) > 2
+
+
+# --------------------------------------------------------------------------- #
+# 11. F33：H2H 在預覽上指出「對到哪、瞄準哪」
+# --------------------------------------------------------------------------- #
+def _aligned_ctx():
+    """跑過一次 H2H 的 context（大圖 200²、模板 40²、對到 (120,60)）。"""
+    ctx = Context()
+    ctx.meta["align_to"] = {"x": 120.0, "y": 60.0, "score": 0.9, "second": 0.1,
+                            "candidate": 0, "expected": [80.0, 80.0],
+                            "search": "single", "size": [40, 40],
+                            "shape": [200, 200], "window": None}
+    return ctx
+
+
+def test_h2h_marks_the_match_and_the_aim_on_the_preview():
+    """這張卡的產物是一個**位置**，而它以前在預覽上什麼都不畫。
+
+    框＝對到哪、十字＝機台瞄準哪，**兩者的間距就是這一顆的 stage 偏移**。
+    """
+    lines, points, focus, labels = get_step("align_to").overlay_marks(
+        _aligned_ctx(), {}, "single")
+    assert len(lines) == 6                       # 4 條框 + 2 條十字
+    assert len(points) == len(lines)             # 長度對不上就整組不畫
+    assert focus == -1 and labels == []
+
+    # 框：正規化到大圖上 → x 從 120/200 到 160/200
+    xs = sorted({round(pt[0], 4) for seg in lines[:4] for pt in seg})
+    ys = sorted({round(pt[1], 4) for seg in lines[:4] for pt in seg})
+    assert xs == [0.6, 0.8] and ys == [0.3, 0.5]
+
+    # 十字：畫在 expected 的**中心**（80+20, 80+20）/200 = (0.5, 0.5)
+    cross = lines[4:]
+    assert cross[0][0][1] == pytest.approx(0.5)   # 橫的那一條在 y=0.5
+    assert cross[1][0][0] == pytest.approx(0.5)   # 直的那一條在 x=0.5
+
+
+def test_h2h_does_not_mark_a_stream_it_never_searched():
+    """⚠ 座標是**大圖**的。畫到模板或裁出來的那一塊上就指著錯的地方 ——
+    而正規化座標會讓它看起來像個正常的框。"""
+    card = get_step("align_to")
+    ctx = _aligned_ctx()
+    assert card.overlay_marks(ctx, {}, "aligned")[0] == []
+    assert card.overlay_marks(ctx, {}, "test")[0] == []
+    # 不知道是哪一條時**不過濾** —— 過濾要根據知道的事，不是猜的（同 CD）
+    assert len(card.overlay_marks(ctx, {}, None)[0]) == 6
+
+
+def test_h2h_draws_nothing_before_it_has_run():
+    """沒跑過就沒有位置可言（配不到的那一顆也走這條 —— 那張卡讓路了）。"""
+    assert get_step("align_to").overlay_marks(Context(), {}, "single")[0] == []

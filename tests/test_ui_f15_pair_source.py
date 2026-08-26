@@ -209,11 +209,67 @@ def test_the_inspector_says_it_when_there_was_no_match(qapp):
     assert "no match" in ins.summary()
 
 
-def test_the_align_card_has_the_spread_panel(qapp):
-    """0.62 是高是低要看其他顆長什麼樣 —— 對圖的分數只有跟整批比才讀得懂。"""
-    from d4t.ui.inspectors import MeasureInspector, inspector_for
+def test_the_align_card_keeps_the_spread_panel_and_gains_a_headline(qapp):
+    """0.62 是高是低要看其他顆長什麼樣 —— 對圖的分數只有跟整批比才讀得懂，
+    所以**分布留著**。
 
-    assert inspector_for("align_to") is MeasureInspector
+    F33 在它上面多一行：這張卡的產物是一個**位置**，而「對到哪、歪了多少、
+    可不可信」分布答不出來。所以是 `MeasureInspector` 的**子類**，不是換掉它。
+    """
+    from d4t.ui.inspectors import H2HInspector, MeasureInspector, inspector_for
+
+    panel = inspector_for("align_to")
+    assert panel is H2HInspector
+    assert issubclass(panel, MeasureInspector)      # 分布沒有被拿掉
+
+
+def test_the_h2h_headline_says_where_it_matched_and_how_far_off(qapp):
+    """這張卡的產物是一個**位置**：對到哪、歪了多少、可不可信。"""
+    from d4t.ui.inspectors import H2HInspector
+
+    ins = H2HInspector()
+    feats = {"ncc_score": 0.94, "align_peak_ratio": 0.12,
+             "align_off_x_px": -22.6, "align_off_y_px": 33.8}
+    ins.set_context(
+        "n1", params={"template": "paired", "search": "single"},
+        result={"features": feats}, batch=[{"features": feats}],
+        meta={"align_to": {"x": 120.0, "y": 60.0, "search": "single",
+                           "size": [40, 40], "shape": [200, 200],
+                           "expected": [80.0, 80.0]}},
+        feature_names=list(feats))
+    text = ins.summary()
+    assert "(120, 60)" in text                 # 對到哪
+    assert "-23" in text and "+34" in text     # 歪了多少（stage 偏移）
+    assert "0.94" in text                      # 分數
+
+
+def test_a_repeating_pattern_is_called_out_even_when_the_score_looks_great(qapp):
+    """⚠ **`ncc_score` 一個不夠。** 陣列區裡 NCC 0.98 而位置每一顆都錯 ——
+    只看分數的人會被騙，所以那一行要**兩個數字一起講**。"""
+    from d4t.ui.inspectors import H2HInspector
+
+    ins = H2HInspector()
+    feats = {"ncc_score": 0.98, "align_peak_ratio": 1.0,
+             "align_off_x_px": 3.0, "align_off_y_px": -1.0}
+    ins.set_context(
+        "n1", params={}, result={"features": feats},
+        batch=[{"features": feats}],
+        meta={"align_to": {"x": 10.0, "y": 10.0, "search": "single",
+                           "size": [40, 40], "shape": [200, 200],
+                           "expected": [80.0, 80.0]}},
+        feature_names=list(feats))
+    text = ins.summary()
+    assert "guess" in text and "0.98" in text
+
+
+def test_the_h2h_panel_tells_run_it_from_matched_apart(qapp):
+    """**對到了**跟**還沒跑**是兩句不同的話（同 `PairInspector`）。"""
+    from d4t.ui.inspectors import H2HInspector
+
+    ins = H2HInspector()
+    ins.set_context("n1", params={}, result=None, batch=[], meta={},
+                    feature_names=[])
+    assert "wired up" in ins.empty_reason()
 
 
 # --------------------------------------------------------------------------- #
