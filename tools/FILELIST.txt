@@ -33,7 +33,7 @@ e1f7a95ad976983aa0f1f16b7bd52cdcc67494dd d4t/core/algo/subpixel.py
 5f93cfe3c9daa7b50b5efa3dd329c847e5c26c91 d4t/core/calibration.py
 78924f0edd38b3d96346542c63372c7fee679a91 d4t/core/export/__init__.py
 9c183f1e91a70b09ace6aa37356a68a0fc30ed8a d4t/core/export/boxplot.py
-90858356add79c0250430552cd10505fc0b3eea9 d4t/core/export/html.py
+3bb985af5a2d37c32fc5b9ea8570c369c87c28d2 d4t/core/export/html.py
 a4a93fb5fc256c767f2c31f387f7ab4962b5868d d4t/core/export/klarf_out.py
 d8748df8402b2a6f8825d6ffa519e8550d9eb988 d4t/core/export/overlay.py
 ab5031e7056134aa94c5551aba9b80a774b6397a d4t/core/export/report.py
@@ -70,7 +70,7 @@ c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
-5149ea451e333c27bbe0459149c7680ebc5e1dcd d4t/core/steps/output.py
+e96d9c39105dd4402199afc8bf2d4d4940a6dbd5 d4t/core/steps/output.py
 8174f2b776a9b6398bd64660aff3a8506256c1fd d4t/core/steps/pair_source.py
 46e24cde47cccae307704861c349c75887a27da4 d4t/core/steps/quality.py
 93c34393be2ee09fb4f4c137a722a047a5dd1e2d d4t/core/steps/roi_cross.py
@@ -207,6 +207,7 @@ f74d5228a3ab2e7c1ce81b65b0edeebb470b624d tests/test_make_mgext.py
 b004ab50b918ff9fdd31827f26c8171d0afd4bdc tests/test_output_boxplot.py
 0fe8dc5958be292846335f6998c255fd1f49c78d tests/test_output_bundle.py
 cdf46298db296a2d05e8fd42efcce246d971c55f tests/test_output_char.py
+29f6b53623a3d60965b1ab99c5447fc33b8e052f tests/test_output_convergence.py
 760493e6e43124ec37e48463773e51291e595c9c tests/test_pair_probe.py
 9a088ee43eb4186246abd49dfa59f51007fa80c6 tests/test_pair_source.py
 34f1bcdbffc5c85f790e98e5bd1c4b1f10fe795f tests/test_period_golden.py

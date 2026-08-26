@@ -35,6 +35,21 @@ Output 段是什麼（使用者 2026-08-20 定調）
 
 規則因此是一句話：**Output 段的卡都是整批一次。**
 
+CSV 只有一種（F37 B2 查證，**沒有改動**）
+-----------------------------------------
+三張卡寫得出 CSV，而它們走的是同一支 `export/report.write_csv`，欄位逐字相同。
+唯一的差別是 ``output_csv`` 多一格 ``include_features``（關掉只留 id／ok／
+score／bin）。
+
+**那一格刻意不搬到寫資料夾的那兩張卡上。** 兩者的工作不同：``output_csv`` 是
+一份**交付物**（餵給下一支程式、貼進報告），所以「要不要那幾百欄」是使用者
+的一格；資料夾裡那份 ``defects.csv`` 是**報表的隨附檔**，關掉特徵之後它幾乎
+是空的 —— 一格沒有人會打開的開關，代價是使用者多讀一段說明才知道不用管它
+（推廣鐵則）。
+
+寫下來是因為「統一」聽起來永遠像對的：下一個看到這裡的人會想把那一格補到
+另外兩張卡上，而那是**加旋鈕**不是收斂。
+
 ⚠ **試跑不會寫**（使用者定調）
 ------------------------------
 Studio 的 Run trial 是調參數的迴圈 —— 每拖一下門檻就覆寫一次檔案是不可逆的。
@@ -104,21 +119,54 @@ class _OutputStep(Step):
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
         return []
 
+    #: 這張卡的 ``PATH`` 那一格指的是**資料夾**嗎（子類用 ``PATH = "folder"``
+    #: 宣告，這裡推導）。兩種卡的「填錯了」是**相反的兩句話**，而以前只有
+    #: 一半住在基底：寫檔案的那一句在這裡，寫資料夾的那一句被兩張卡各抄了
+    #: 一份到 `run_batch` 裡（F37 B2 收成一份）。
+    #:
+    #: 抄兩份的代價不是重複本身，是**時機**：`run_batch` 那一份要等使用者按下
+    #: 去、跑完一整批之後才講，而這裡這一份在畫布上就掛得出警示標記。
+    @classmethod
+    def wants_folder(cls) -> bool:
+        return cls.PATH == "folder"
+
+    @classmethod
+    def path_issue(cls, path: str) -> str:
+        """這條路徑填錯了嗎（沒問題回空字串）—— **兩種卡共用的那一份**。"""
+        if cls.wants_folder():
+            if os.path.isfile(path):
+                return ("“%s” is a file, not a folder. This card writes "
+                        "several files, so it needs a folder to put them in."
+                        % path)
+            return ""
+        if os.path.isdir(path):
+            # 指到一個**資料夾**是使用者最容易犯的那一個（貼了路徑忘了加檔名），
+            # 而跑起來的症狀是 `IsADirectoryError` —— 那句話對他沒有意義。
+            return ("“%s” is a folder, not a file. Add the file name to the "
+                    "end of the path." % path)
+        return ""
+
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
         path = str(params.get(cls.PATH, "") or "").strip()
         if not path:
             return ["This card has nowhere to write yet. Put the full path of "
                     "the %s into “Write to”." % cls.WHAT]
-        if cls.PATH == "path" and os.path.isdir(path):
-            # 指到一個**資料夾**是使用者最容易犯的那一個（貼了路徑忘了加檔名），
-            # 而跑起來的症狀是 `IsADirectoryError` —— 那句話對他沒有意義。
-            return ["“%s” is a folder, not a file. Add the file name to the "
-                    "end of the path." % path]
-        return []
+        wrong = cls.path_issue(path)
+        return [wrong] if wrong else []
         # ⚠ **不檢查「資料夾存不存在」**：`report.write_csv` 那一族會自己建
         # （`_ensure_parent`），而 Export 精靈走的是同一支。在這裡擋的話，
         # 一個完全正常的路徑會被說成設定錯誤。第一版真的這樣寫了，測試抓到。
+
+    def _folder_of(self, p: Dict[str, Any]) -> str:
+        """寫資料夾那幾張卡的開場白（**三行一模一樣的東西收成一支**）。"""
+        folder = str(p[self.PATH]).strip()
+        if not folder:
+            raise StepError(self.key, "nowhere to write - fill in “Write to”.")
+        wrong = self.path_issue(folder)
+        if wrong:
+            raise StepError(self.key, wrong)
+        return folder
 
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         """**不會被呼叫**：整批一次的卡由 `run_batch_steps` 跑。
@@ -601,6 +649,20 @@ def picture_specs() -> List[ParamSpec]:
     ]
 
 
+#: 「``0`` ＝ 全部」這句話**兩張卡逐字同一句**（F37 B2）。
+#:
+#: 以前它們不一致：報表資料夾那張是 ``min=0`` 而且 0 代表全部，
+#: characterization 那張是 ``min=1`` —— 於是同一個數字在兩張卡上，一張是
+#: 「不限」、另一張是**填不進去**。使用者學一次那個約定，然後在第二張卡上
+#: 被打回來。
+#:
+#: 兩張卡的 ``label`` 與**預設值**仍然不同，而那是對的：報表資料夾預設 0
+#: （一整批的報表，少一半跟完整的長得一模一樣），characterization 預設 200
+#: （它為幾十顆設計，每一列都掛圖正是它讀得下去的理由）。**約定共用，
+#: 取捨各自保留。**
+LIMIT_ZERO_HELP = "Zero means every defect."
+
+
 def ranked_feature(params: Dict[str, Any]) -> List[str]:
     """``rank_by`` 指著的那個特徵名（``score`` 這個哨兵不算）。
 
@@ -740,9 +802,9 @@ class OutputBundleStep(_OutputStep):
             name="limit", type="int", default=0, min=0, max=1000000,
             label="At most this many pictures",
             show_when=("contents", (CONTENT_PICTURES,)),
-            help=("Zero means every defect. Set a number to keep only the "
-                  "worst that many (highest score first) - the report still "
-                  "lists every defect, only the pictures are limited."),
+            help=("%s Set a number to keep only the worst that many (highest "
+                  "score first) - the report still lists every defect, only "
+                  "the pictures are limited." % LIMIT_ZERO_HELP),
         ),
         ParamSpec(
             name="jpeg_quality", type="int",
@@ -792,14 +854,7 @@ class OutputBundleStep(_OutputStep):
 
     def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
         p = self.validate_params(params)
-        folder = str(p["folder"]).strip()
-        if not folder:
-            raise StepError(self.key, "nowhere to write - fill in “Write to”.")
-        if os.path.isfile(folder):
-            raise StepError(
-                self.key,
-                "“%s” is a file, not a folder. This card writes several files, "
-                "so it needs a folder to put them in." % folder)
+        folder = self._folder_of(p)
         rows = list(bctx.rows)
         items = list(getattr(bctx.dataset, "items", None) or [])
         by_id = {str(getattr(it, "defect_id", "")): it for it in items}
@@ -927,12 +982,13 @@ class OutputCharStep(_OutputStep):
                   "not exist; files with the same names are overwritten."),
         ),
         ParamSpec(
-            name="limit", type="int", default=200, min=1, max=100000,
+            name="limit", type="int", default=200, min=0, max=100000,
             label="At most this many rows with pictures",
             help=("This report puts a picture on every row, which is what "
                   "makes it readable at a glance and also what stops it "
                   "scaling. Above this many defects the extra rows are still "
-                  "listed, without pictures, and the card says so."),
+                  "listed, without pictures, and the card says so. %s"
+                  % LIMIT_ZERO_HELP),
         ),
         ParamSpec(
             name="main_stream", type="str", default="",
@@ -984,6 +1040,11 @@ class OutputCharStep(_OutputStep):
                   "files) to 100 (biggest). The pictures are for looking at, "
                   "not for measuring."),
         ),
+        # **框怎麼畫跟報表資料夾那張逐字同一組**（F37 B2）。這張卡以前**畫圖
+        # 卻畫不出框** —— 而 GLV 逐框比較的贏家框正是報表上最該看到的東西
+        # （「這一顆為什麼被判成這一類」的答案就在那個框裡）。
+        *roi_draw_specs(),
+
     ]
 
     @classmethod
@@ -1004,14 +1065,7 @@ class OutputCharStep(_OutputStep):
 
     def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
         p = self.validate_params(params)
-        folder = str(p["folder"]).strip()
-        if not folder:
-            raise StepError(self.key, "nowhere to write - fill in “Write to”.")
-        if os.path.isfile(folder):
-            raise StepError(
-                self.key,
-                "“%s” is a file, not a folder. This card writes several files, "
-                "so it needs a folder to put them in." % folder)
+        folder = self._folder_of(p)
 
         rows = list(bctx.rows)
         items = list(getattr(bctx.dataset, "items", None) or [])
@@ -1024,7 +1078,10 @@ class OutputCharStep(_OutputStep):
         limit = int(p["limit"])
         ordered = overlay.pick_overlay_results(rows, 0, rank_by)
         _warn_if_unranked(self.key, bctx, rows, rank_by, limit)
-        if len(ordered) > limit:
+        # ``0`` ＝ 全部（見 :data:`LIMIT_ZERO_HELP`）。``ordered[:0]`` 會是
+        # **一張圖都沒有**，而那正好是「不限」的相反 —— 所以要轉成 None。
+        cut = limit if limit > 0 else None
+        if limit and len(ordered) > limit:
             # **講出來，不要自動換版面**：使用者要知道他拿到的是哪一種報表。
             bctx.warn(
                 "Characterization report: %d defects, but this report puts a "
@@ -1038,7 +1095,8 @@ class OutputCharStep(_OutputStep):
         pair_key = str(p["pair_stream"]).strip()
         thumbs: Dict[str, Dict[str, Optional[str]]] = {}
         skipped = 0
-        for row in ordered[:limit]:
+        degraded_any = False
+        for row in ordered[:cut]:
             did = str(row.get("defect_id", ""))
             item = by_id.get(did)
             if item is None:
@@ -1053,9 +1111,16 @@ class OutputCharStep(_OutputStep):
                     skipped += 1
                     continue
                 stem = os.path.splitext(overlay.overlay_filename(did))[0]
-                marks = (_defect_marks(getattr(r, "context", None), pix,
-                                       main_key)
+                ctx = getattr(r, "context", None)
+                marks = (_defect_marks(ctx, pix, main_key)
                          if bool(p["mark_defect"]) else {})
+                # ROI 框（F37 B2）—— **只畫在真的被量的那條流上**。
+                # 換一條流當背景時框的座標就沒有意義了，而一個指著錯地方的框
+                # 比沒有框糟得多（同 `_defect_marks` 的「不猜」）。
+                roi_kw, degraded = _roi_overlay_kwargs(ctx, p)
+                degraded_any = degraded_any or degraded
+                measured = str((overlay.worst_note_for_overlay(ctx)[2] or {})
+                               .get("stream") or "")
                 pair = {}
                 for side, key in (("main", main_key), ("pair", pair_key)):
                     arr = (pix.get(key) if key
@@ -1064,10 +1129,13 @@ class OutputCharStep(_OutputStep):
                         # 配不到的那一顆沒有第二張圖 —— 那一格留白，
                         # 而留白正是它要講的話（不是破圖、不是 0×0 的框）。
                         continue
-                    if side == "main" and marks:
+                    boxes = roi_kw if key and key == measured else {}
+                    if (side == "main" and marks) or boxes:
                         panel = overlay.render_overlay(
                             {"_": arr}, {}, base_key="_", montage=False,
-                            box=marks.get("box"), aim=marks.get("aim"))
+                            box=marks.get("box") if side == "main" else None,
+                            aim=marks.get("aim") if side == "main" else None,
+                            **boxes)
                     else:
                         panel = overlay.to_display_rgb(arr)
                     name = "%s_%s.jpg" % (stem, side)
@@ -1106,6 +1174,11 @@ class OutputCharStep(_OutputStep):
             bctx.warn("Characterization report: %d defect(s) got no picture "
                       "(no image, or the pipeline did not run for them)."
                       % skipped)
+        if degraded_any:
+            # 安靜退化的圖跟全畫的圖看起來都「有框」—— 要講一次（同另外那張）。
+            bctx.warn("Characterization report: more region boxes than “Draw "
+                      "at most” (%d), so only the boxes near the winner are "
+                      "drawn." % int(p["draw_boxes_cap"]))
 
 
 @register_step
