@@ -4954,7 +4954,21 @@ class StudioWindow(QMainWindow):
                             (self.image_view_b, self.stream_combo_b)):
             lines, points, focus, labels = self.measure_marks(
                 str(combo.currentText() or ""))
-            view.set_marks(lines, points, focus, labels)
+            view.set_marks(lines, points, focus, labels,
+                           solid=self._marks_solid())
+
+    def _marks_solid(self) -> bool:
+        """選著那張卡的標記要不要畫滿（`Step.marks_solid`）。
+
+        **那張卡說的，不是這裡猜的** —— 「幾條線算少」是卡片自己才知道的事。
+        """
+        node = self.model.nodes.get(self.selected_node or "")
+        if node is None:
+            return False
+        try:
+            return bool(getattr(get_step(node.step), "marks_solid", False))
+        except Exception:              # noqa: BLE001 — 顯示用，不能擋畫面
+            return False
 
     def _focus_box_index(self, boxes: Sequence[Sequence[float]]) -> int:
         """哪一個框要畫成醒目的那一個 —— **卡片真的挑走的那一塊**。

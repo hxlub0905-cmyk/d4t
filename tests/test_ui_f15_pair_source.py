@@ -580,3 +580,41 @@ def test_the_aligned_image_needs_the_align_card_selected(qapp, window, lots):
     window.select_node(align)
     assert _pump(qapp, lambda: "aligned" in names()), names()
     assert window.stream_combo.currentText() == "aligned"
+
+
+def test_h2h_marks_are_drawn_solid_but_the_scan_line_cards_are_not(qapp):
+    """「線畫到幾乎看不見」是為 **CD 的幾十條掃描線**寫的規矩 —— 線只是說那個
+    判斷在哪一列上做的，點才是答案。
+
+    H2H 交的是**結構**：少少幾條，而線本身就是答案（一個框、一個十字）。
+    那時候淡化不是在減少雜訊，是在**藏起唯一的資訊**（使用者：「預覽框太不
+    明顯了」）。所以是**卡片自己宣告**的一格，而不是把畫法改掉 ——
+    CD 與 GLV 都刻意靠淡化（GLV：描邊會跟區域框重疊，等於沒畫）。
+    """
+    from d4t.core.pipeline.step import REGISTRY
+
+    assert REGISTRY["align_to"].marks_solid is True
+    for key in ("cd_measure", "glv_stats"):
+        assert REGISTRY[key].marks_solid is False, key
+
+
+def test_the_view_remembers_whether_to_draw_them_solid(qapp):
+    from d4t.ui.widgets import ImageView
+
+    v = ImageView()
+    v.set_marks([[(0.1, 0.1), (0.9, 0.1)]], [[]], -1, [])
+    assert v._marks_solid is False              # 預設不變
+    v.set_marks([[(0.1, 0.1), (0.9, 0.1)]], [[]], -1, [], solid=True)
+    assert v._marks_solid is True
+    v.clear_marks()
+    assert v._marks_solid is False
+
+
+def test_studio_asks_the_card_not_itself(window):
+    """「幾條線算少」是卡片自己才知道的事。"""
+    h2h = window.model.add_step("align_to")
+    window.select_node(h2h)
+    assert window._marks_solid() is True
+    glv = window.model.add_step("glv_stats")
+    window.select_node(glv)
+    assert window._marks_solid() is False

@@ -54,11 +54,11 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 606216762745f16cd739a8323cf532888d85e3be d4t/core/pipeline/engine.py
 7e2797dce8253240fcf45a27f57f28d2c246e272 d4t/core/pipeline/expression.py
 08a23e51039b74fa8201ff21b1b55ccf1223f069 d4t/core/pipeline/recipe.py
-176eda791491443bfe21c2d984d710ba0280f506 d4t/core/pipeline/step.py
+006e85b6a1e310705513ea4720daf0180eb65bdb d4t/core/pipeline/step.py
 458bc40837b773fdbfbf9d9675d23020e2903853 d4t/core/steps/__init__.py
 44ada36e81965cddff165fa32c598f0e94861d4e d4t/core/steps/_util.py
 c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
-f49ded375efbe152199fb794d56775a7caca9e5f d4t/core/steps/align_to.py
+43e2109dfbcd60669e58caa5bc85de758e898858 d4t/core/steps/align_to.py
 2c48cd738d30003227a9aad3f34e5c8565a9c6ab d4t/core/steps/arith.py
 4d91da90d6ed3dbfc1c6d26e9c18072fc84e91cd d4t/core/steps/cd.py
 39bbc384b66e024f67200a76598d4f6f255e5100 d4t/core/steps/denoise.py
@@ -97,7 +97,7 @@ a108febbe68c248b3cc2c8b05bd5cd079984772c d4t/ui/output_band.py
 1d1ca0ee2e4ebbedfa11b027bb9e7d735500ad2d d4t/ui/route_badge.py
 11a38b9e760697b23510805b56706f1eb8f6c85e d4t/ui/route_panel.py
 dee39628f8ce1af0cf87d9edee3ed1c6074db962 d4t/ui/scope.py
-0e32e810427823cfd3fff59167fc22d4927dba1d d4t/ui/studio.py
+10eaaa5d7b888cadbc5c992e4dda56237de0d1cb d4t/ui/studio.py
 b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 44f3712558bc51d6e32e76b2f85eb0e07b016328 d4t/ui/theme.py
 3cc7d61199e03eaba0eb61f5a749b9f6cfca9ba5 d4t/ui/threshold_view.py
@@ -106,7 +106,7 @@ b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 c894b98548a3a06f98ed531901518a429768879f d4t/ui/verdict_band.py
 7f48fa4f149190f559b6dea998a39bbb46dc870a d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
-08772be389f8fe4c8e35a5a0183d62caf1904cd8 d4t/ui/widgets.py
+52087930dfbb1fc7430a63b3d8467ddf195fcffa d4t/ui/widgets.py
 2eb7813f6dbd6c7d0beff0496ed0d1e6dc87d484 d4t/ui/workers.py
 991b2b3b4ff0da1b085f1828c38dbbc14891d4b4 docs/ARCHITECTURE.md
 0240f4ebee4c1c3a72342cc8fcaff9e039632d8f docs/FAB-VALIDATION.md
@@ -122,7 +122,7 @@ d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 636ffca672050aefd5bdc5628b5c9f335018c41b docs/plans/F15-pair-sources.md
 655f8cf83bfe142b0952aa2769fd420aec2698d3 docs/plans/F26-decide-panel-ux.md
 4b55069e016b2ca16b4ff7e9e929d7454db52172 docs/plans/F27-results-panel.md
-15529c5827e7429de5a876aeb72bc0f1d4eb5002 docs/plans/F33-ebi-characterization.md
+e8efb61dc95f6a6cbd8c13b917fb0342085d5904 docs/plans/F33-ebi-characterization.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -251,7 +251,7 @@ b97b6c9f477ddf3777cda2a502f44ec5c8b1aa76 tests/test_ui_f13_chrome.py
 4423c2bd51647ab5b39a872cbcc89f97aeab21d8 tests/test_ui_f13_features.py
 fcd1e48c4e17fa1ec6699b9ef3efc16298adedf8 tests/test_ui_f13_layout.py
 1a71270eeb961ea4b067dfc8fa028b0a229421fd tests/test_ui_f14_input_on_the_card.py
-7c39839fd9ef192bea987781b976a7596e0a5cbd tests/test_ui_f15_pair_source.py
+80da0c79cfc2a7c91c2c969577b2bdd0cc71a5a3 tests/test_ui_f15_pair_source.py
 6c3b80a9fafb778887978e9322044d3e1e224a2e tests/test_ui_f16_run_all.py
 a567d5f4542cc7354618483705f30e5dc14fb124 tests/test_ui_f16_stages.py
 e44e08e96d75fabcfc8d9394684e3643370729f2 tests/test_ui_f19_cd.py

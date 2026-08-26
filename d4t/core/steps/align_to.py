@@ -240,6 +240,10 @@ class AlignToStep(Step):
             str(k) == out_key and str(k) not in ctx.images for k in keys)
 
     # ---- 影像上的標記（見 Step.overlay_marks）------------------------------ #
+    #: 這張卡交的是**結構**（一個框、一個十字），不是掃描線 —— 線本身就是
+    #: 答案，淡化只會把唯一的資訊藏起來。見 `Step.marks_solid`。
+    marks_solid = True
+
     @classmethod
     def overlay_marks(cls, ctx: Any, params: Dict[str, Any],
                       stream: Optional[str] = None) -> Any:
@@ -282,8 +286,11 @@ class AlignToStep(Step):
         except (KeyError, TypeError, ValueError):
             return [], [], -1, []
         x1, y1 = x0 + tw / sw, y0 + th / sh
+        # 四邊 ＋ **四個角各一個實心點**。角點是這個畫面既有的語彙（GLV 的
+        # 典型格用同一招），而且小圖上框縮成幾個像素時，角點還認得出來。
         lines += [[(x0, y0), (x1, y0)], [(x1, y0), (x1, y1)],
                   [(x1, y1), (x0, y1)], [(x0, y1), (x0, y0)]]
+        corners = [[(x0, y0)], [(x1, y0)], [(x1, y1)], [(x0, y1)]]
 
         exp = list(note.get("expected") or [])
         if len(exp) == 2:
@@ -292,8 +299,11 @@ class AlignToStep(Step):
             arm = 0.04
             lines += [[(cx - arm, cy), (cx + arm, cy)],
                       [(cx, cy - arm), (cx, cy + arm)]]
-        # `points` 要跟 `lines` 等長（長度對不上就整組不畫）；這張卡沒有點。
-        return lines, [[] for _ in lines], -1, []
+            corners += [[(cx, cy)], []]     # 十字的中心也點一個
+        # `points` 要跟 `lines` 等長（長度對不上就整組不畫）。
+        while len(corners) < len(lines):
+            corners.append([])
+        return lines, corners, -1, []
 
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
