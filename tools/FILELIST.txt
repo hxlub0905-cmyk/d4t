@@ -58,7 +58,7 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 458bc40837b773fdbfbf9d9675d23020e2903853 d4t/core/steps/__init__.py
 44ada36e81965cddff165fa32c598f0e94861d4e d4t/core/steps/_util.py
 c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
-43e2109dfbcd60669e58caa5bc85de758e898858 d4t/core/steps/align_to.py
+55add606c260bc9c0cbca681da37d9271ef536b5 d4t/core/steps/align_to.py
 2c48cd738d30003227a9aad3f34e5c8565a9c6ab d4t/core/steps/arith.py
 4d91da90d6ed3dbfc1c6d26e9c18072fc84e91cd d4t/core/steps/cd.py
 39bbc384b66e024f67200a76598d4f6f255e5100 d4t/core/steps/denoise.py
@@ -106,7 +106,7 @@ b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
 c894b98548a3a06f98ed531901518a429768879f d4t/ui/verdict_band.py
 7f48fa4f149190f559b6dea998a39bbb46dc870a d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
-52087930dfbb1fc7430a63b3d8467ddf195fcffa d4t/ui/widgets.py
+6ff6cfdf656cfc3fe1f394f86f95f284ab7fdc6f d4t/ui/widgets.py
 2eb7813f6dbd6c7d0beff0496ed0d1e6dc87d484 d4t/ui/workers.py
 991b2b3b4ff0da1b085f1828c38dbbc14891d4b4 docs/ARCHITECTURE.md
 0240f4ebee4c1c3a72342cc8fcaff9e039632d8f docs/FAB-VALIDATION.md
@@ -122,7 +122,7 @@ d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 636ffca672050aefd5bdc5628b5c9f335018c41b docs/plans/F15-pair-sources.md
 655f8cf83bfe142b0952aa2769fd420aec2698d3 docs/plans/F26-decide-panel-ux.md
 4b55069e016b2ca16b4ff7e9e929d7454db52172 docs/plans/F27-results-panel.md
-e8efb61dc95f6a6cbd8c13b917fb0342085d5904 docs/plans/F33-ebi-characterization.md
+af2ffd6e2b76f3c6801caa6a5174cd33077093fb docs/plans/F33-ebi-characterization.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -203,7 +203,7 @@ f74d5228a3ab2e7c1ce81b65b0edeebb470b624d tests/test_make_mgext.py
 77430b0b34d24773cbfe804119416ce5c2a40708 tests/test_output_bundle.py
 cdf46298db296a2d05e8fd42efcce246d971c55f tests/test_output_char.py
 760493e6e43124ec37e48463773e51291e595c9c tests/test_pair_probe.py
-c88a0e1c2de0f112f43319d8fd0162e8d82ab6ff tests/test_pair_source.py
+b5b743b130fafc92a01e319f7bfad9a8a987182d tests/test_pair_source.py
 34f1bcdbffc5c85f790e98e5bd1c4b1f10fe795f tests/test_period_golden.py
 37fe3291f5eb15938ef1e8097b3a955e106be9f4 tests/test_phase_origin.py
 b50c831bcb56f33b701995f750409a06b054aa33 tests/test_pick_defect_box.py
@@ -251,7 +251,7 @@ b97b6c9f477ddf3777cda2a502f44ec5c8b1aa76 tests/test_ui_f13_chrome.py
 4423c2bd51647ab5b39a872cbcc89f97aeab21d8 tests/test_ui_f13_features.py
 fcd1e48c4e17fa1ec6699b9ef3efc16298adedf8 tests/test_ui_f13_layout.py
 1a71270eeb961ea4b067dfc8fa028b0a229421fd tests/test_ui_f14_input_on_the_card.py
-80da0c79cfc2a7c91c2c969577b2bdd0cc71a5a3 tests/test_ui_f15_pair_source.py
+a6c5ab656be3574a0afafa77761d7ba9f550b8e4 tests/test_ui_f15_pair_source.py
 6c3b80a9fafb778887978e9322044d3e1e224a2e tests/test_ui_f16_run_all.py
 a567d5f4542cc7354618483705f30e5dc14fb124 tests/test_ui_f16_stages.py
 e44e08e96d75fabcfc8d9394684e3643370729f2 tests/test_ui_f19_cd.py

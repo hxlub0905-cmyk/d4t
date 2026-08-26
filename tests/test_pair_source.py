@@ -1116,7 +1116,12 @@ def test_h2h_marks_the_match_and_the_aim_on_the_preview():
         _aligned_ctx(), {}, "single")
     assert len(lines) == 6                       # 4 條框 + 2 條十字
     assert len(points) == len(lines)             # 長度對不上就整組不畫
-    assert focus == -1 and labels == []
+    assert focus == -1
+    # `labels` 帶的是**角色**（`!` 開頭 = 不是區域名），UI 據此分色：
+    # 紅框＝對到哪、綠十字＝瞄準哪。顏色住在 UI（core 不得 import Qt）。
+    assert len(labels) == len(lines)
+    assert all(v.startswith("!") for v in labels)
+    assert len(set(labels)) == 2
 
     # 框：正規化到大圖上 → x 從 120/200 到 160/200
     xs = sorted({round(pt[0], 4) for seg in lines[:4] for pt in seg})

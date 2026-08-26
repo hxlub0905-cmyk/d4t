@@ -618,3 +618,44 @@ def test_studio_asks_the_card_not_itself(window):
     glv = window.model.add_step("glv_stats")
     window.select_node(glv)
     assert window._marks_solid() is False
+
+
+def test_the_two_marks_are_different_colours(qapp):
+    """紅框＝對到哪、綠十字＝瞄準哪 —— 兩個同色的話，畫面上分不出哪個是哪個
+    （使用者：「預覽也分」）。"""
+    from d4t.core.steps.align_to import MARK_AIM, MARK_MATCH
+    from d4t.ui.widgets import MARK_ROLE_TOKENS
+
+    # 卡片只說**角色**，顏色是 UI 挑的（core 不得 import Qt）
+    assert MARK_ROLE_TOKENS[MARK_MATCH] != MARK_ROLE_TOKENS[MARK_AIM]
+    # 角色名以 `!` 開頭 —— 那不是一個區域名（沿用 decide_tree 的慣例）
+    for role in (MARK_MATCH, MARK_AIM):
+        assert role.startswith("!"), role
+
+
+def test_both_themes_have_the_colours_the_roles_ask_for(qapp):
+    """角色指的是**權杖**不是色碼，所以 light / dark 兩套都要有。"""
+    from d4t.ui import theme as theme_mod
+    from d4t.ui.widgets import MARK_ROLE_TOKENS
+
+    for name in ("light", "dark"):
+        theme_mod.apply_theme(qapp, name)
+        for token in MARK_ROLE_TOKENS.values():
+            assert theme_mod.TOKENS.get(token), (name, token)
+    theme_mod.apply_theme(qapp, "light")        # 收拾乾淨
+
+
+def test_the_card_labels_every_mark_with_its_role(qapp):
+    from d4t.core.pipeline import get_step
+    from d4t.core.pipeline.context import Context
+    from d4t.core.steps.align_to import MARK_AIM, MARK_MATCH
+
+    ctx = Context()
+    ctx.meta["align_to"] = {"x": 120.0, "y": 60.0, "search": "single",
+                            "size": [40, 40], "shape": [200, 200],
+                            "expected": [80.0, 80.0]}
+    lines, points, _focus, labels = get_step("align_to").overlay_marks(
+        ctx, {}, "single")
+    assert len(labels) == len(lines) == len(points)   # 三串要等長
+    assert labels[:4] == [MARK_MATCH] * 4             # 框
+    assert set(labels[4:]) == {MARK_AIM}              # 十字

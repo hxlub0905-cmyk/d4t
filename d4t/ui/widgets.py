@@ -70,6 +70,22 @@ from ..core.algo import glv as algo_glv
 from . import theme
 from .theme import TOKENS, region_hex
 
+#: 標記的**角色** → 主題的哪一個顏色權杖（F33）。
+#:
+#: `Step.overlay_marks` 的 ``labels`` 平常是**具名區域**的名字（顏色因此跟影像
+#: 上那個區域的框一模一樣）。``!`` 開頭的是**角色**而不是名字 —— 沿用
+#: `decide_tree` 的 ``!failed`` / ``!unbinned`` 那個慣例，而區域名是識別字，
+#: 不可能撞到。
+#:
+#: **卡片說角色，這裡挑顏色**：core 不得 import Qt，而「紅色是什麼紅」是主題的
+#: 事（light / dark 兩套值）。報表用的是同一組語言 —— 框紅、十字綠
+#: （`core/export/overlay.py` 的 `BOX_COLOR` / `AIM_COLOR`），所以同一顆 defect
+#: 在畫面上與在報表上，**紅的永遠是「對到哪」、綠的永遠是「瞄準哪」**。
+MARK_ROLE_TOKENS = {
+    "!match": "danger",      # 小圖真的對到的那一塊
+    "!aim": "success",       # 機台瞄準的那一點
+}
+
 __all__ = [
     "ImageView",
     "ParamForm",
@@ -1642,6 +1658,9 @@ class ImageView(QWidget):
 
         def colour_of(i: int) -> QColor:
             name = (self._mark_labels[i] if i < len(self._mark_labels) else "")
+            token = MARK_ROLE_TOKENS.get(name)
+            if token:
+                return QColor(TOKENS[token])
             return (QColor(region_hex(index_of[name])) if name in index_of
                     else plain)
 

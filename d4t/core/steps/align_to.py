@@ -35,6 +35,12 @@ from ..pipeline.step import (
 )
 from ._util import ensure_gray, require_image, resize_to
 
+#: 標記的**角色**（`Step.overlay_marks` 的 ``labels``）。``!`` 開頭表示
+#: 「這不是區域名，是一個角色」—— UI 據此上色，而顏色住在 UI（core 不得
+#: import Qt）。報表那邊是同一組語言：框紅、十字綠（`export/overlay.py`）。
+MARK_MATCH = "!match"        # 小圖真的對到的那一塊
+MARK_AIM = "!aim"            # 機台瞄準的那一點
+
 
 @register_step
 class AlignToStep(Step):
@@ -303,7 +309,12 @@ class AlignToStep(Step):
         # `points` 要跟 `lines` 等長（長度對不上就整組不畫）。
         while len(corners) < len(lines):
             corners.append([])
-        return lines, corners, -1, []
+        # **卡片說角色，UI 挑顏色**（同 `overlay_marks` 那句「meta 的形狀是那張
+        # 卡的事，UI 只負責畫」）。``!`` 開頭＝這不是一個區域名，是一個角色
+        # （沿用 `decide_tree` 的 ``!failed`` / ``!unbinned`` 那個慣例）——
+        # 區域名是識別字，不可能撞到。
+        roles = [MARK_MATCH] * 4 + [MARK_AIM] * (len(lines) - 4)
+        return lines, corners, -1, roles
 
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         p = self.validate_params(params)
