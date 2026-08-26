@@ -169,6 +169,37 @@ _VIEWER_JS = """
 """
 
 
+def _page_head(title: str, rows: Sequence[Dict[str, Any]],
+               decide: Any = None, note: str = "") -> List[str]:
+    """兩份報表**逐字相同**的那個開頭（F37 B2）。
+
+    標題、「幾顆／幾顆沒跑起來／bins 摘要」那一行、可有可無的一句說明，
+    以及第 1 段「判定」。
+
+    以前這 14 行在 :func:`build_report` 與 :func:`build_char_report` 裡各寫
+    一次 —— **而它們是同一句話**。版面確實該分開（那個取捨在 6000 顆與 30 顆
+    是反過來的，見模組說明），但一樣的那一段沒有理由寫兩次：改了其中一份的
+    那一天，同一批資料的兩份報表會有兩個不同的開頭，而沒有任何測試會問。
+    """
+    rows = list(rows or [])
+    bins: Dict[Any, int] = {}
+    for r in rows:
+        bins[r.get("bin")] = bins.get(r.get("bin"), 0) + 1
+    n_bad = sum(1 for r in rows if not r.get("ok"))
+    out = ["<!doctype html>", "<html><head><meta charset='utf-8'>",
+           "<title>%s</title>" % escape(title),
+           "<style>%s</style></head><body>" % CSS,
+           "<h1>%s</h1>" % escape(title),
+           "<p class='sub'>%d defect(s)%s &middot; bins: %s</p>"
+           % (len(rows),
+              (" &middot; <b>%d did not run</b>" % n_bad) if n_bad else "",
+              escape(bin_summary(bins)))]
+    if note:
+        out.append("<p class='cards'>%s</p>" % escape(note))
+    out += _verdict_html(decide_tree.verdict_rows(decide, rows))
+    return out
+
+
 def build_report(rows: Sequence[Dict[str, Any]], title: str,
                  feature_keys: Sequence[str],
                  decide: Any = None,
@@ -184,23 +215,7 @@ def build_report(rows: Sequence[Dict[str, Any]], title: str,
     keys = list(feature_keys or [])
     imgs = {str(k): str(v) for k, v in (images or {}).items()}
 
-    bins: Dict[Any, int] = {}
-    for r in rows:
-        bins[r.get("bin")] = bins.get(r.get("bin"), 0) + 1
-    n_bad = sum(1 for r in rows if not r.get("ok"))
-
-    out = ["<!doctype html>", "<html><head><meta charset='utf-8'>",
-           "<title>%s</title>" % escape(title),
-           "<style>%s</style></head><body>" % CSS,
-           "<h1>%s</h1>" % escape(title),
-           "<p class='sub'>%d defect(s)%s &middot; bins: %s</p>"
-           % (len(rows),
-              (" &middot; <b>%d did not run</b>" % n_bad) if n_bad else "",
-              escape(bin_summary(bins)))]
-    if cards:
-        out.append("<p class='cards'>%s</p>" % escape(cards))
-    out += _verdict_html(decide_tree.verdict_rows(decide, rows))
-
+    out = _page_head(title, rows, decide, cards)
     out.append("<h2>2 &middot; Which ones%s</h2>"
                % (" (click a row to see it)" if imgs else ""))
     if imgs:
@@ -277,23 +292,7 @@ def build_char_report(rows: Sequence[Dict[str, Any]], title: str,
     seats = {str(k): dict(v or {}) for k, v in (verdicts or {}).items()}
     left, right = (list(headings) + ["ground truth", "second lot"])[:2]
 
-    bins: Dict[Any, int] = {}
-    for r in rows:
-        bins[r.get("bin")] = bins.get(r.get("bin"), 0) + 1
-    n_bad = sum(1 for r in rows if not r.get("ok"))
-
-    out = ["<!doctype html>", "<html><head><meta charset='utf-8'>",
-           "<title>%s</title>" % escape(title),
-           "<style>%s</style></head><body>" % CSS,
-           "<h1>%s</h1>" % escape(title),
-           "<p class='sub'>%d defect(s)%s &middot; bins: %s</p>"
-           % (len(rows),
-              (" &middot; <b>%d did not run</b>" % n_bad) if n_bad else "",
-              escape(bin_summary(bins)))]
-    if note:
-        out.append("<p class='cards'>%s</p>" % escape(note))
-    out += _verdict_html(decide_tree.verdict_rows(decide, rows))
-
+    out = _page_head(title, rows, decide, note)
     out.append("<h2>2 &middot; Defect by defect</h2>")
     out.append("<div class='tablewrap'><table><tr><th>defect</th>"
                "<th>%s</th><th>%s</th>" % (escape(left), escape(right)))

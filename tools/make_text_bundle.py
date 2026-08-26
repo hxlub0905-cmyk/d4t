@@ -34,6 +34,9 @@ Python 的文字模式讀（它會把 CRLF 讀成 LF），所以來回一趟仍�
 
 每個檔案仍然帶 **git blob SHA-1**，解開時逐檔驗 —— 傳輸途中被動到的話要當場
 講出來，而不是讓使用者拿到一份安靜壞掉的程式碼。
+
+⚠ 這個「bundle」跟 ``output_bundle`` 那張卡**沒有關係**（那是報表資料夾，
+畫面上叫 “Write report folder”）。兩個都不改名，理由見 `CLAUDE.md` §0。
 """
 from __future__ import annotations
 

@@ -1,6 +1,10 @@
 # d4t step-card library — authored 2026-08-20 (F16：Output 段).
 """Output 段的卡：整批跑完之後，把結果寫出去。
 
+⚠ ``output_bundle`` 的 ``bundle`` 跟 ``bundle/d4t_bundle.py`` **沒有關係**
+（前者是這張卡寫出來的資料夾，畫面上叫 “Write report folder”；後者是搬程式碼
+進公司機的那個單檔包）。兩個都不改名，理由與代價見 `CLAUDE.md` §0 那張表。
+
 Output 段是什麼（使用者 2026-08-20 定調）
 -----------------------------------------
 > Output 我預期要可以產出多種 style（分 card），例如 Report / csv / klarf /
@@ -10,26 +14,45 @@ Output 段是什麼（使用者 2026-08-20 定調）
 ``resolve_writes()`` 與 ``resolve_features()`` 都是空的。一旦它吐了東西，下游就
 接得上它，而「這一段是最後一段」那句話就不再成立。
 
-四張卡，每一張都薄薄一層包在既有的 `core/export/` 上 —— **演算法一行都沒重寫**，
+每一張都薄薄一層包在既有的 `core/export/` 上 —— **演算法一行都沒重寫**，
 而那是「換一條路，東西沒變」可以被量出來的原因（見
 `tests/test_batch_steps.py` 的逐位元組比對，那是之後拿掉 Export 精靈的前提）。
 
-===============  ==========================================  =================
-卡               寫什麼                                      引擎
-===============  ==========================================  =================
-``output_csv``   一顆一列的明細表（＝ feature vector）        `export/report`
-``output_report`` Excel：摘要 / 明細 / 特徵統計三張表         `export/report`
-``output_klarf``  寫回 KLARF（三種模式）                      `export/klarf_out`
-``output_image``  每顆一張疊圖 PNG                            `export/overlay`
-===============  ==========================================  =================
+==================  =======================================  =================
+卡                  寫什麼                                   引擎
+==================  =======================================  =================
+``output_csv``      一顆一列的明細表（＝ feature vector）     `export/report`
+``output_report``   Excel：摘要 / 明細 / 特徵統計三張表       `export/report`
+``output_klarf``    寫回 KLARF（三種模式）                    `export/klarf_out`
+``output_bundle``   一個資料夾：報表／表格／圖／recipe        `export/html` ＋
+                    （要哪幾樣是一格勾選，F37）              `export/overlay`
+``output_char``     點對點兩張圖的 characterization 報表      `export/html`
+``output_boxplot``  一片葉子一個盒子的分布圖                  `export/boxplot`
+``output_html``     單檔可轉寄的 HTML 表                      `export/html`
+==================  =======================================  =================
 
-**四張的尺度都是「整批一次」（``scale = SCALE_LOT``），包含 ``output_image``。**
-前三張顯然是（一批一個檔案）。第四張看起來是逐顆的 —— 但它如果做成普通 Step，
+**每一張的尺度都是「整批一次」（``scale = SCALE_LOT``），包含會出圖的那幾張。**
+寫一個檔案的那些顯然是。出圖的看起來是逐顆的 —— 但它如果做成普通 Step，
 它就會在 ``run_defect`` 裡跑，而那條路**每切換一顆 defect 就走一次**：使用者
-瀏覽 defect 的時候會一直寫 PNG 出來。所以它也是整批跑完之後跑一次，一顆一顆
+瀏覽 defect 的時候會一直寫圖出來。所以它也是整批跑完之後跑一次，一顆一顆
 重跑 pipeline 取影像（那正是 Export 精靈今天做的事）。
 
 規則因此是一句話：**Output 段的卡都是整批一次。**
+
+CSV 只有一種（F37 B2 查證，**沒有改動**）
+-----------------------------------------
+三張卡寫得出 CSV，而它們走的是同一支 `export/report.write_csv`，欄位逐字相同。
+唯一的差別是 ``output_csv`` 多一格 ``include_features``（關掉只留 id／ok／
+score／bin）。
+
+**那一格刻意不搬到寫資料夾的那兩張卡上。** 兩者的工作不同：``output_csv`` 是
+一份**交付物**（餵給下一支程式、貼進報告），所以「要不要那幾百欄」是使用者
+的一格；資料夾裡那份 ``defects.csv`` 是**報表的隨附檔**，關掉特徵之後它幾乎
+是空的 —— 一格沒有人會打開的開關，代價是使用者多讀一段說明才知道不用管它
+（推廣鐵則）。
+
+寫下來是因為「統一」聽起來永遠像對的：下一個看到這裡的人會想把那一格補到
+另外兩張卡上，而那是**加旋鈕**不是收斂。
 
 ⚠ **試跑不會寫**（使用者定調）
 ------------------------------
@@ -100,21 +123,54 @@ class _OutputStep(Step):
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
         return []
 
+    #: 這張卡的 ``PATH`` 那一格指的是**資料夾**嗎（子類用 ``PATH = "folder"``
+    #: 宣告，這裡推導）。兩種卡的「填錯了」是**相反的兩句話**，而以前只有
+    #: 一半住在基底：寫檔案的那一句在這裡，寫資料夾的那一句被兩張卡各抄了
+    #: 一份到 `run_batch` 裡（F37 B2 收成一份）。
+    #:
+    #: 抄兩份的代價不是重複本身，是**時機**：`run_batch` 那一份要等使用者按下
+    #: 去、跑完一整批之後才講，而這裡這一份在畫布上就掛得出警示標記。
+    @classmethod
+    def wants_folder(cls) -> bool:
+        return cls.PATH == "folder"
+
+    @classmethod
+    def path_issue(cls, path: str) -> str:
+        """這條路徑填錯了嗎（沒問題回空字串）—— **兩種卡共用的那一份**。"""
+        if cls.wants_folder():
+            if os.path.isfile(path):
+                return ("“%s” is a file, not a folder. This card writes "
+                        "several files, so it needs a folder to put them in."
+                        % path)
+            return ""
+        if os.path.isdir(path):
+            # 指到一個**資料夾**是使用者最容易犯的那一個（貼了路徑忘了加檔名），
+            # 而跑起來的症狀是 `IsADirectoryError` —— 那句話對他沒有意義。
+            return ("“%s” is a folder, not a file. Add the file name to the "
+                    "end of the path." % path)
+        return ""
+
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
         path = str(params.get(cls.PATH, "") or "").strip()
         if not path:
             return ["This card has nowhere to write yet. Put the full path of "
                     "the %s into “Write to”." % cls.WHAT]
-        if cls.PATH == "path" and os.path.isdir(path):
-            # 指到一個**資料夾**是使用者最容易犯的那一個（貼了路徑忘了加檔名），
-            # 而跑起來的症狀是 `IsADirectoryError` —— 那句話對他沒有意義。
-            return ["“%s” is a folder, not a file. Add the file name to the "
-                    "end of the path." % path]
-        return []
+        wrong = cls.path_issue(path)
+        return [wrong] if wrong else []
         # ⚠ **不檢查「資料夾存不存在」**：`report.write_csv` 那一族會自己建
         # （`_ensure_parent`），而 Export 精靈走的是同一支。在這裡擋的話，
         # 一個完全正常的路徑會被說成設定錯誤。第一版真的這樣寫了，測試抓到。
+
+    def _folder_of(self, p: Dict[str, Any]) -> str:
+        """寫資料夾那幾張卡的開場白（**三行一模一樣的東西收成一支**）。"""
+        folder = str(p[self.PATH]).strip()
+        if not folder:
+            raise StepError(self.key, "nowhere to write - fill in “Write to”.")
+        wrong = self.path_issue(folder)
+        if wrong:
+            raise StepError(self.key, wrong)
+        return folder
 
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         """**不會被呼叫**：整批一次的卡由 `run_batch_steps` 跑。
@@ -310,7 +366,7 @@ class OutputKlarfStep(_OutputStep):
                   "(DSIZE is the usual one). Leave it empty to not touch it."),
         ),
         ParamSpec(
-            name="size_feature", type="str", default="cd_median",
+            name="size_feature", type="feature_key", default="cd_median",
             advanced=True, show_when=("mode", ("inplace",)),
             label="…using this number",
             help=("Which measured number goes into the size column. Only used "
@@ -326,6 +382,21 @@ class OutputKlarfStep(_OutputStep):
                   "measures."),
         ),
     ]
+
+    @classmethod
+    def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:
+        """``size_feature`` —— **只在真的指定了 size 欄位的時候才算數**。
+
+        它有一個非空的預設（``cd_median``），而 inplace 一格目標欄位都沒填是
+        完全正常的用法（輸出檔與原檔逐位元組相同）。照型別無條件掃的話，那種
+        recipe 會因為一個**沒有在用的預設值**被報一句話。
+        """
+        if str(params.get("mode", "") or "") != "inplace":
+            return []
+        if not str(params.get("size_col", "") or "").strip():
+            return []
+        name = str(params.get("size_feature", "") or "").strip()
+        return [name] if name else []
 
     def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
         p = self.validate_params(params)
@@ -505,14 +576,108 @@ def rank_by_spec() -> ParamSpec:
     正常的圖。
     """
     return ParamSpec(
-        name="rank_by", type="str", default=overlay.RANK_BY_SCORE,
+        name="rank_by", type="feature_key", default=overlay.RANK_BY_SCORE,
         label="Worst first, by", advanced=True,
         help=("Which number decides the order, highest first. Leave it as "
               "“score” if your recipe has a score formula. If you classify "
               "with a decision tree instead, there is no score - put the name "
-              "of a number you measure here (for example worst_score, "
+              "of a number you measure here (for example glv_worst_score, "
               "cmp_snr_mean or cd_area_px), otherwise the pictures come out "
               "in file order."))
+    # ⚠ 型別是 `feature_key` 而不是 `str`（F37）。差別有兩個，而第二個才是
+    # 加它的理由：UI 會給這一格一支「插入數字 ▾」（同 `feature_keys`），
+    # 而**改名遷移認得出這一格裝著一個特徵名**。以前它是 `str`，於是一次
+    # 改名之後這一格會指著一個不存在的數字 —— 而那不會報錯，出圖卡排不出
+    # 順序就安靜地退回檔案順序（F30 修過一次的那個 bug）。
+    # ``score`` 這個哨兵值不在任何改名表的左邊，所以整格比對不會動到它。
+
+
+#: 「這個資料夾裡要放什麼」的四個勾（F37，2026-08-26）。
+#:
+#: 為什麼是勾選而不是四張卡：`output_image`（Write images）的**七格參數一格
+#: 不差全部是 `output_bundle` 的子集**，而它寫出來的東西正好是後者少了報表、
+#: 表格與 recipe 三個檔案。兩張卡在使用者眼裡因此是同一件事的兩個程度，
+#: 而「我要一份報表」時面前有兩個答案（`CLAUDE.md` §3 的「同一個家族的做法
+#: 收成一張卡」，前例是 F29 的 `roi_reference` 與 F19 的 CD）。
+#:
+#: ⚠ **值是穩定的字串 id**，除了相等比較之外沒有人解析它們。
+CONTENT_REPORT = "report"
+CONTENT_TABLE = "table"
+CONTENT_PICTURES = "pictures"
+CONTENT_RECIPE = "recipe"
+CONTENTS = (CONTENT_REPORT, CONTENT_TABLE, CONTENT_PICTURES, CONTENT_RECIPE)
+
+#: 圖要寫成哪一種檔（F37）。
+#:
+#: 這一格是**合併的代價**，而它必須存在：`output_image` 寫的是 PNG、
+#: `output_bundle` 寫的是 JPEG，所以少了它的話，一份舊的 `output_image`
+#: recipe 遷移過來會安靜地換一種檔案格式 —— 而使用者的下游（另一支腳本、
+#: 一份報告的插圖）認的是副檔名。
+PIC_PNG = "png"
+PIC_JPEG = "jpeg"
+PIC_FORMATS = (PIC_JPEG, PIC_PNG)
+
+
+def contents_spec() -> ParamSpec:
+    """「這個資料夾裡要放什麼」（見 :data:`CONTENTS`）。"""
+    return ParamSpec(
+        name="contents", type="multi_choice", default=",".join(CONTENTS),
+        choices=list(CONTENTS), label="What to put in the folder",
+        help=("Tick what this folder should hold. report is a page you open "
+              "in a browser with a picture of every defect; table is the same "
+              "numbers as a CSV; pictures is one image per defect; recipe is "
+              "the settings that produced them, so the run can be reproduced "
+              "later. Tick pictures on its own and you get a plain folder of "
+              "images and nothing else."),
+    )
+
+
+def picture_specs() -> List[ParamSpec]:
+    """圖的格式與品質（見 :data:`PIC_FORMATS`）。"""
+    return [
+        ParamSpec(
+            name="picture_format", type="choice", default=PIC_JPEG,
+            choices=list(PIC_FORMATS), label="Picture files",
+            show_when=("contents", (CONTENT_PICTURES,)),
+            choice_help={
+                PIC_JPEG: "Smaller files. Right for a report you send to "
+                          "someone - a few thousand pictures still fit.",
+                PIC_PNG: "Every pixel exactly as drawn, and much bigger "
+                         "files. Right when something downstream reads these "
+                         "images back.",
+            },
+            help=("What kind of image file to write. The numbers in the "
+                  "report come from the originals either way - these "
+                  "pictures are for looking at."),
+        ),
+    ]
+
+
+#: 「``0`` ＝ 全部」這句話**兩張卡逐字同一句**（F37 B2）。
+#:
+#: 以前它們不一致：報表資料夾那張是 ``min=0`` 而且 0 代表全部，
+#: characterization 那張是 ``min=1`` —— 於是同一個數字在兩張卡上，一張是
+#: 「不限」、另一張是**填不進去**。使用者學一次那個約定，然後在第二張卡上
+#: 被打回來。
+#:
+#: 兩張卡的 ``label`` 與**預設值**仍然不同，而那是對的：報表資料夾預設 0
+#: （一整批的報表，少一半跟完整的長得一模一樣），characterization 預設 200
+#: （它為幾十顆設計，每一列都掛圖正是它讀得下去的理由）。**約定共用，
+#: 取捨各自保留。**
+LIMIT_ZERO_HELP = "Zero means every defect."
+
+
+def ranked_feature(params: Dict[str, Any]) -> List[str]:
+    """``rank_by`` 指著的那個特徵名（``score`` 這個哨兵不算）。
+
+    給 `Step.optional_features_in` 用 —— 出圖那幾張卡共用一份，同
+    `rank_by_spec` 的理由：**同一句話不准在兩個地方長出兩種意思**。
+
+    ``score`` 排除掉是因為它不是任何一張卡算出來的東西，它是 recipe 的分數
+    （lint 那邊的 ``feats`` 一開始就種著它）。
+    """
+    name = str((params or {}).get("rank_by", "") or "").strip()
+    return [name] if name and name != overlay.RANK_BY_SCORE else []
 
 
 def roi_draw_specs() -> List[ParamSpec]:
@@ -549,7 +714,7 @@ def roi_draw_specs() -> List[ParamSpec]:
             max=99.0, unit="σ", label="Mark pixels beyond", advanced=True,
             help=("Inside the winning box, tint every pixel that sits more "
                   "than this many robust sigmas from the other boxes' "
-                  "baseline - the same baseline and spread the worst_score "
+                  "baseline - the same baseline and spread the glv_worst_score "
                   "was computed from, so what lights up is exactly what the "
                   "number is talking about. The tint only appears when the "
                   "winning box itself is at least that many sigmas out - a "
@@ -568,7 +733,7 @@ def _roi_overlay_kwargs(ctx: Any, p: Dict[str, Any]):
     6000 顆就是 6000 句。
 
     像素標記（T3）的 baseline / spread 來自 GLV 的 `worst` note —— 跟
-    `worst_score` 同一次計算；`src` 是量測那條流的**原始**陣列（顯示用那份
+    `glv_worst_score` 同一次計算；`src` 是量測那條流的**原始**陣列（顯示用那份
     被拉過值域）。拿不到贏家、拿不到那條流、或 k = 0，就不標。
     """
     rects, win, note = (overlay.worst_note_for_overlay(ctx)
@@ -594,111 +759,13 @@ def _roi_overlay_kwargs(ctx: Any, p: Dict[str, Any]):
     return kwargs, degraded
 
 
-@register_step
-class OutputImageStep(_OutputStep):
-    """每一顆一張疊圖 PNG（整批跑完之後一顆一顆重跑取影像）。"""
-
-    key = "output_image"
-    label = "Write images"
-    PATH = "folder"
-    WHAT = "folder"
-    help = ("Write one PNG per defect when the whole lot has run: the image "
-            "the pipeline worked on, side by side with the difference image "
-            "when there is one. This is what the machine saw, not the raw "
-            "picture - which is the point of looking at it.")
-    params = [
-        ParamSpec(
-            name="folder", type="str", default="",
-            label="Write to",
-            help=("Folder to write the PNG files into, one per defect, named "
-                  "after the defect id. It is created if it does not exist."),
-        ),
-        ParamSpec(
-            name="limit", type="int", default=200, min=1, max=100000,
-            label="At most this many",
-            help=("Stop after this many images. A lot can have tens of "
-                  "thousands of defects, and each one means running the "
-                  "pipeline again to get its images."),
-        ),
-        rank_by_spec(),
-        ParamSpec(
-            name="montage", type="bool", default=True,
-            label="Show the difference beside it",
-            help=("On: each PNG is the image and the difference side by "
-                  "side. Off: just the image."),
-        ),
-        *roi_draw_specs(),
-    ]
-
-    def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
-        p = self.validate_params(params)
-        folder = str(p["folder"]).strip()
-        if not folder:
-            raise StepError(self.key, "nowhere to write - fill in “Write to”.")
-        if os.path.isfile(folder):
-            raise StepError(
-                self.key,
-                "“%s” is a file, not a folder. This card writes one PNG per "
-                "defect, so it needs a folder to put them in." % folder)
-        items = list(getattr(bctx.dataset, "items", None) or [])
-        by_id = {str(getattr(it, "defect_id", "")): it for it in items}
-        sources = dict(getattr(bctx.dataset, "sources", None) or {})
-        limit = int(p["limit"])
-        # **依分數由高到低取前 N**（`overlay.pick_overlay_results`，跟 Export
-        # 精靈同一支）。照 `rows` 的順序取的話拿到的是**檔案順序**上的前 N 顆
-        # —— 那幾乎一定不是使用者想看的那幾顆，而畫面上看不出差別（都是 N 張
-        # PNG）。第一版就是那樣寫的。
-        rank_by = str(p["rank_by"]).strip() or overlay.RANK_BY_SCORE
-        chosen = overlay.pick_overlay_results(bctx.rows, limit, rank_by)
-        _warn_if_unranked(self.key, bctx, bctx.rows, rank_by, limit)
-        # **一顆一顆重跑 pipeline** 才拿得到影像（結果表裡只有數字）。那正是
-        # Export 精靈今天做的事，所以這裡不是新的成本，只是換了一個地方。
-        wrote = 0
-        skipped = 0
-        degraded_any = False
-        for row in chosen:
-            item = by_id.get(str(row.get("defect_id", "")))
-            if item is None:
-                skipped += 1
-                continue
-            try:
-                # **有快取就走快取**（F29 C4）：這一趟的影像段跟剛才那一批
-                # 逐位元組相同，所以命中之後只跑算法段。`bctx.rerun` 兩條路的
-                # 結果位元級一致，所以這裡完全不必知道有沒有快取。
-                r = bctx.rerun(item, sources={k: getattr(v, "items", v)
-                                              for k, v in sources.items()})
-                ctx = getattr(r, "context", None)
-                images = dict(getattr(ctx, "images", {}) or {})
-                if not images:
-                    skipped += 1
-                    continue
-                roi_kw, degraded = _roi_overlay_kwargs(ctx, p)
-                degraded_any = degraded_any or degraded
-                panel = overlay.render_overlay(
-                    images, dict(getattr(r, "features", {}) or {}),
-                    label=overlay.overlay_label(row),
-                    montage=bool(p["montage"]), **roi_kw)
-                overlay.write_png(
-                    panel,
-                    os.path.join(folder, overlay.overlay_filename(
-                        row.get("defect_id", "x"))))
-                wrote += 1
-            except Exception:       # noqa: BLE001 — 一顆畫不出來不該殺掉整批
-                skipped += 1
-        bctx.add_output(folder)
-        if skipped:
-            # **講出來**：少幾張 PNG 的資料夾跟完整的資料夾長得一模一樣。
-            bctx.warn("Images: wrote %d, skipped %d (no image, or the "
-                      "pipeline did not run for them)." % (wrote, skipped))
-        if degraded_any:
-            # 安靜退化的圖跟全畫的圖看起來都「有框」—— 要講一次。
-            bctx.warn("Images: more region boxes than “Draw at most” (%d), so "
-                      "only the boxes near the winner are drawn."
-                      % int(p["draw_boxes_cap"]))
-        if len(bctx.rows) > len(chosen):
-            bctx.warn("Images: the %d highest scoring of %d defects (the “At "
-                      "most this many” setting)."
-                      % (len(chosen), len(bctx.rows)))
+# ⚠ **``output_image``（Write images）於 F37 折進 ``output_bundle`` 了**
+# （2026-08-26）。它的七格參數一格不差全部是那張卡的子集，而它寫的東西正好是
+# 那張卡少了報表、表格與 recipe —— 也就是同一張卡的一個程度。現在的做法是
+# 「只勾 pictures」，而 PNG／子資料夾這兩個差別由 ``picture_format`` 與
+# ``nested`` 保住（見 `_migrate_output_image_into_bundle`）。
+#
+# 舊 recipe 走那道遷移，所以**開得起來、而且寫出來的東西逐位元組一樣**。
 
 
 #: HTML 報表的樣式。**inline，而且只有純文字** —— 這個 repo 是純文字的
@@ -729,21 +796,25 @@ class OutputBundleStep(_OutputStep):
             help=("Folder to write everything into. It is created if it does "
                   "not exist; files with the same names are overwritten."),
         ),
+        contents_spec(),
+        *picture_specs(),
         # **預設 0 = 全部**（使用者定調 2026-08-25：「參數化，預設全部」）。
-        # `output_image` 那張卡預設 200，而它們的用途不同：那張是「挑幾顆來
-        # 看」，這一張是「這一批的報表」—— 一份少了一半的報表跟完整的長得
-        # 一模一樣。
+        # 併進來的 `output_image` 預設 200，而它們的用途不同：那個是「挑幾顆
+        # 來看」，這一張是「這一批的報表」—— 一份少了一半的報表跟完整的長得
+        # 一模一樣。遷移**照舊值搬**，所以既有的 recipe 行為不變。
         ParamSpec(
             name="limit", type="int", default=0, min=0, max=1000000,
             label="At most this many pictures",
-            help=("Zero means every defect. Set a number to keep only the "
-                  "worst that many (highest score first) - the report still "
-                  "lists every defect, only the pictures are limited."),
+            show_when=("contents", (CONTENT_PICTURES,)),
+            help=("%s Set a number to keep only the worst that many (highest "
+                  "score first) - the report still lists every defect, only "
+                  "the pictures are limited." % LIMIT_ZERO_HELP),
         ),
         ParamSpec(
             name="jpeg_quality", type="int",
             default=overlay.DEFAULT_JPEG_QUALITY, min=40, max=100,
             label="Picture quality", advanced=True,
+            show_when=("picture_format", (PIC_JPEG,)),
             help=("How much detail to keep in the pictures, from 40 (small "
                   "files) to 100 (biggest). The pictures are for looking at, "
                   "not for measuring - the numbers in the report come from "
@@ -765,26 +836,49 @@ class OutputBundleStep(_OutputStep):
     RECIPE_NAME = "recipe.json"
     IMAGE_DIR = "images"
 
+    @classmethod
+    def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:
+        """``rank_by``（見 `ranked_feature`）—— 少了圖照樣寫，順序退回檔案順序。"""
+        return ranked_feature(params)
+
+    @classmethod
+    def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
+        out = list(super().configuration_issues(params))
+        # **「這個鍵不在」＝還沒設過＝預設全勾**，不是「一個都沒勾」。
+        # 兩者差很多：前者是每一份合併之前存下來的 recipe（那時候沒有這一格），
+        # 而把它們一律說成設定錯誤，等於對著每一份舊檔案喊狼來了。
+        if not parse_key_list(params.get("contents", ",".join(CONTENTS))):
+            # 一個都沒勾的資料夾**會被建出來、而且是空的** —— 跑得完、
+            # 沒有錯誤、什麼都沒有。那是這張卡最容易犯的新錯（合併之前
+            # 不存在，因為當時沒有「要寫什麼」這一格）。
+            out.append("Nothing is ticked in “What to put in the folder”, so "
+                       "this card would make an empty folder. Tick at least "
+                       "one thing.")
+        return out
+
     def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
         p = self.validate_params(params)
-        folder = str(p["folder"]).strip()
-        if not folder:
-            raise StepError(self.key, "nowhere to write - fill in “Write to”.")
-        if os.path.isfile(folder):
-            raise StepError(
-                self.key,
-                "“%s” is a file, not a folder. This card writes several files, "
-                "so it needs a folder to put them in." % folder)
+        folder = self._folder_of(p)
         rows = list(bctx.rows)
         items = list(getattr(bctx.dataset, "items", None) or [])
         by_id = {str(getattr(it, "defect_id", "")): it for it in items}
         sources = dict(getattr(bctx.dataset, "sources", None) or {})
-        shots = os.path.join(folder, self.IMAGE_DIR)
+        want = set(parse_key_list(p["contents"]))
+
+        # **圖放不放進子資料夾，由「有沒有報表」決定**（F37）。子資料夾存在
+        # 的理由是報表要用相對路徑連過去；沒有報表的時候它只是多一層要點進去
+        # 的東西 —— 而那正是併進來的 `output_image` 的形狀（圖直接躺在資料夾
+        # 裡）。所以這不是為了相容湊出來的規則，是那一層本來就有的意思。
+        nested = CONTENT_REPORT in want
+        shots = os.path.join(folder, self.IMAGE_DIR) if nested else folder
 
         # ---- ① 圖（一顆一張，照分數由高到低）-------------------------------
         rank_by = str(p["rank_by"]).strip() or overlay.RANK_BY_SCORE
-        chosen = overlay.pick_overlay_results(rows, int(p["limit"]), rank_by)
-        _warn_if_unranked(self.key, bctx, rows, rank_by, int(p["limit"]))
+        chosen = (overlay.pick_overlay_results(rows, int(p["limit"]), rank_by)
+                  if CONTENT_PICTURES in want else [])
+        if CONTENT_PICTURES in want:
+            _warn_if_unranked(self.key, bctx, rows, rank_by, int(p["limit"]))
+        as_png = str(p["picture_format"]) == PIC_PNG
         images: Dict[str, str] = {}
         skipped = 0
         degraded_any = False
@@ -808,29 +902,37 @@ class OutputBundleStep(_OutputStep):
                     pix, dict(getattr(r, "features", {}) or {}),
                     label=overlay.overlay_label(row),
                     montage=bool(p["montage"]), **roi_kw)
-                name = os.path.splitext(overlay.overlay_filename(did))[0] + ".jpg"
-                overlay.write_jpeg(panel, os.path.join(shots, name),
-                                   int(p["jpeg_quality"]))
+                stem = os.path.splitext(overlay.overlay_filename(did))[0]
+                name = stem + (".png" if as_png else ".jpg")
+                if as_png:
+                    overlay.write_png(panel, os.path.join(shots, name))
+                else:
+                    overlay.write_jpeg(panel, os.path.join(shots, name),
+                                       int(p["jpeg_quality"]))
                 # **相對路徑**：報表跟圖一起搬走的時候連結還是通的。
-                images[did] = "%s/%s" % (self.IMAGE_DIR, name)
+                images[did] = ("%s/%s" % (self.IMAGE_DIR, name) if nested
+                               else name)
             except Exception:       # noqa: BLE001 — 一顆畫不出來不該殺掉整批
                 skipped += 1
 
         # ---- ② 報表（**每一顆都在**，只有圖有上限）-------------------------
         title = str(getattr(bctx.recipe, "recipe_id", "") or "d4t results")
-        report_path = os.path.join(folder, self.REPORT_NAME)
         try:
-            export_html.write_html(
-                export_html.build_report(
-                    rows, title, export_report.feature_keys(rows),
-                    decide=getattr(bctx.recipe, "decide", None),
-                    images=images),
-                report_path)
-            export_report.write_csv(rows, os.path.join(folder, self.CSV_NAME))
+            if CONTENT_REPORT in want:
+                export_html.write_html(
+                    export_html.build_report(
+                        rows, title, export_report.feature_keys(rows),
+                        decide=getattr(bctx.recipe, "decide", None),
+                        images=images),
+                    os.path.join(folder, self.REPORT_NAME))
+            if CONTENT_TABLE in want:
+                export_report.write_csv(rows,
+                                        os.path.join(folder, self.CSV_NAME))
             # ---- ③ 產它的那份 recipe --------------------------------------
             # **沒有它，半年後沒人重現得出這份報表。** 那不是保險，是這份東西
             # 有沒有用的分界：一疊數字沒有配方，等於一句「我們那時候量到這樣」。
-            self._write_recipe(bctx, os.path.join(folder, self.RECIPE_NAME))
+            if CONTENT_RECIPE in want:
+                self._write_recipe(bctx, os.path.join(folder, self.RECIPE_NAME))
         except OSError as e:
             raise StepError(self.key,
                             "could not write into %s: %s" % (folder, e)) from e
@@ -884,12 +986,13 @@ class OutputCharStep(_OutputStep):
                   "not exist; files with the same names are overwritten."),
         ),
         ParamSpec(
-            name="limit", type="int", default=200, min=1, max=100000,
+            name="limit", type="int", default=200, min=0, max=100000,
             label="At most this many rows with pictures",
             help=("This report puts a picture on every row, which is what "
                   "makes it readable at a glance and also what stops it "
                   "scaling. Above this many defects the extra rows are still "
-                  "listed, without pictures, and the card says so."),
+                  "listed, without pictures, and the card says so. %s"
+                  % LIMIT_ZERO_HELP),
         ),
         ParamSpec(
             name="main_stream", type="str", default="",
@@ -941,7 +1044,21 @@ class OutputCharStep(_OutputStep):
                   "files) to 100 (biggest). The pictures are for looking at, "
                   "not for measuring."),
         ),
+        # **框怎麼畫跟報表資料夾那張逐字同一組**（F37 B2）。這張卡以前**畫圖
+        # 卻畫不出框** —— 而 GLV 逐框比較的贏家框正是報表上最該看到的東西
+        # （「這一顆為什麼被判成這一類」的答案就在那個框裡）。
+        *roi_draw_specs(),
+
     ]
+
+    @classmethod
+    def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:
+        """``rank_by`` ＋ ``columns``。
+
+        ``columns`` 少一個的下場是**那一欄整排空白** —— 而一份每一格都空白的
+        欄位，跟一份「這一批真的都量不到」長得一模一樣。
+        """
+        return ranked_feature(params) + parse_key_list(params.get("columns", ""))
 
     #: 資料夾裡那幾個名字 —— **跟 bundle 逐字相同**（換一台機器打開還是同一個
     #: 形狀，而兩份東西長得一樣就不必記兩套）。
@@ -952,14 +1069,7 @@ class OutputCharStep(_OutputStep):
 
     def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
         p = self.validate_params(params)
-        folder = str(p["folder"]).strip()
-        if not folder:
-            raise StepError(self.key, "nowhere to write - fill in “Write to”.")
-        if os.path.isfile(folder):
-            raise StepError(
-                self.key,
-                "“%s” is a file, not a folder. This card writes several files, "
-                "so it needs a folder to put them in." % folder)
+        folder = self._folder_of(p)
 
         rows = list(bctx.rows)
         items = list(getattr(bctx.dataset, "items", None) or [])
@@ -972,7 +1082,10 @@ class OutputCharStep(_OutputStep):
         limit = int(p["limit"])
         ordered = overlay.pick_overlay_results(rows, 0, rank_by)
         _warn_if_unranked(self.key, bctx, rows, rank_by, limit)
-        if len(ordered) > limit:
+        # ``0`` ＝ 全部（見 :data:`LIMIT_ZERO_HELP`）。``ordered[:0]`` 會是
+        # **一張圖都沒有**，而那正好是「不限」的相反 —— 所以要轉成 None。
+        cut = limit if limit > 0 else None
+        if limit and len(ordered) > limit:
             # **講出來，不要自動換版面**：使用者要知道他拿到的是哪一種報表。
             bctx.warn(
                 "Characterization report: %d defects, but this report puts a "
@@ -986,7 +1099,8 @@ class OutputCharStep(_OutputStep):
         pair_key = str(p["pair_stream"]).strip()
         thumbs: Dict[str, Dict[str, Optional[str]]] = {}
         skipped = 0
-        for row in ordered[:limit]:
+        degraded_any = False
+        for row in ordered[:cut]:
             did = str(row.get("defect_id", ""))
             item = by_id.get(did)
             if item is None:
@@ -1001,9 +1115,16 @@ class OutputCharStep(_OutputStep):
                     skipped += 1
                     continue
                 stem = os.path.splitext(overlay.overlay_filename(did))[0]
-                marks = (_defect_marks(getattr(r, "context", None), pix,
-                                       main_key)
+                ctx = getattr(r, "context", None)
+                marks = (_defect_marks(ctx, pix, main_key)
                          if bool(p["mark_defect"]) else {})
+                # ROI 框（F37 B2）—— **只畫在真的被量的那條流上**。
+                # 換一條流當背景時框的座標就沒有意義了，而一個指著錯地方的框
+                # 比沒有框糟得多（同 `_defect_marks` 的「不猜」）。
+                roi_kw, degraded = _roi_overlay_kwargs(ctx, p)
+                degraded_any = degraded_any or degraded
+                measured = str((overlay.worst_note_for_overlay(ctx)[2] or {})
+                               .get("stream") or "")
                 pair = {}
                 for side, key in (("main", main_key), ("pair", pair_key)):
                     arr = (pix.get(key) if key
@@ -1012,10 +1133,13 @@ class OutputCharStep(_OutputStep):
                         # 配不到的那一顆沒有第二張圖 —— 那一格留白，
                         # 而留白正是它要講的話（不是破圖、不是 0×0 的框）。
                         continue
-                    if side == "main" and marks:
+                    boxes = roi_kw if key and key == measured else {}
+                    if (side == "main" and marks) or boxes:
                         panel = overlay.render_overlay(
                             {"_": arr}, {}, base_key="_", montage=False,
-                            box=marks.get("box"), aim=marks.get("aim"))
+                            box=marks.get("box") if side == "main" else None,
+                            aim=marks.get("aim") if side == "main" else None,
+                            **boxes)
                     else:
                         panel = overlay.to_display_rgb(arr)
                     name = "%s_%s.jpg" % (stem, side)
@@ -1054,6 +1178,11 @@ class OutputCharStep(_OutputStep):
             bctx.warn("Characterization report: %d defect(s) got no picture "
                       "(no image, or the pipeline did not run for them)."
                       % skipped)
+        if degraded_any:
+            # 安靜退化的圖跟全畫的圖看起來都「有框」—— 要講一次（同另外那張）。
+            bctx.warn("Characterization report: more region boxes than “Draw "
+                      "at most” (%d), so only the boxes near the winner are "
+                      "drawn." % int(p["draw_boxes_cap"]))
 
 
 @register_step
@@ -1102,6 +1231,11 @@ class OutputBoxPlotStep(_OutputStep):
             help="Heading on the page. Empty uses the recipe name.",
         ),
     ]
+
+    @classmethod
+    def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:
+        """``features``。**空的不算** —— 那是「畫判定問過的那幾個」。"""
+        return parse_key_list(params.get("features", ""))
 
     #: 判定沒有給出類別時（一份沒有 `decide` 的 recipe），全部畫成一個盒子。
     ALL_LABEL = "the whole lot"

@@ -545,7 +545,7 @@ class OutputWorker(_ThreadedWorker):
 
     為什麼要開背景執行緒
     --------------------
-    `output_image` **一顆一顆重跑 pipeline** 才拿得到影像（結果表裡只有數字），
+    出圖那張卡 **一顆一顆重跑 pipeline** 才拿得到影像（結果表裡只有數字），
     而那正是 Export 精靈今天做的事 —— 幾百顆就是幾十秒。在 GUI 執行緒做的話
     整個視窗會僵住，跟 :class:`RegionCheckWorker` 的理由一字不差。
 

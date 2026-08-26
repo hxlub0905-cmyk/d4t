@@ -74,7 +74,7 @@ def _both(lot, tmp_path, step, name, **params):
     wiz_dir, card_dir = tmp_path / "wizard", tmp_path / "card"
     wiz_dir.mkdir(exist_ok=True)
     card_dir.mkdir(exist_ok=True)
-    key = "folder" if step == "output_image" else "path"
+    key = "folder" if step in ("output_bundle", "output_char") else "path"
     recipe = _recipe(step, dict(params, **{key: str(card_dir / name)}))
     dataset = load_dataset(lot["klarf"])
     rows = run_batch(recipe, dataset, workers=1)
@@ -181,8 +181,9 @@ def test_the_image_card_writes_the_same_pngs_as_the_wizard(lot, tmp_path):
 
     兩件都搬進了 `core/export/overlay.py`，所以這一條比得起來。
     """
-    recipe, rows, dataset, wiz, card = _both(lot, tmp_path, "output_image",
-                                             "png", limit=3)
+    recipe, rows, dataset, wiz, card = _both(
+        lot, tmp_path, "output_bundle", "png", limit=3,
+        contents="pictures", picture_format="png")
     wiz.mkdir(parents=True, exist_ok=True)
     by_id = {str(it.defect_id): it for it in dataset.items}
     for row in pick_overlay_results(rows, 3):       # 精靈那幾行

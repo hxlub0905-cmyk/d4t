@@ -157,7 +157,19 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC, CATEGORY_BATCH)
 #: 同一條規矩，清單只是「常用的那幾個」，認不認得由卡片的 run() 用它自己的
 #: 話說）。儲存格式就是一個字串，差別只在 UI：一排單選的膠囊，
 #: 「+ Percentile…」照樣長得出自訂值。
-PARAM_TYPES = ("int", "float", "bool", "str", "expr", "feature_keys",
+#: ``"feature_key"``（F37）：值是**一個**特徵名（``feature_keys`` 的單數）。
+#: 儲存格式一樣是 ``"str"``，加它的理由是**改名遷移**：特徵名住在四種地方
+#: （分數表達式、判定樹、`feature_math` 的算式、以及 Output 卡的
+#: ``rank_by`` / ``columns`` / ``size_feature`` 這種參數值），而前三種都已經
+#: 有人改寫，第四種以前沒有 —— 因為那一格從型別上看就是一個普通字串，
+#: 遷移認不出它裝著一個特徵名。
+#:
+#: **宣告式的標記，不是一張卡片清單**：加到 :data:`FEATURE_TYPES` 之後，
+#: 遷移走的是「每一個 spec 的型別」，所以第五張會用到特徵名的卡不必回來補登記。
+#: 抄一張清單的話，漏掉的那一張症狀是「改名之後那張卡指著一個不存在的數字」
+#: —— 而它跑得完（Output 卡找不到那個數字就安靜地退回檔案順序）。
+PARAM_TYPES = ("int", "float", "bool", "str", "expr",
+               "feature_key", "feature_keys",
                "choice", "image_key",
                "image_keys", "curve", "template", "multi_choice",
                "metric_chips", "metric_choice", "channel_map", "cell_rois",
@@ -188,6 +200,15 @@ IMAGE_TYPES = ("image_key", "image_keys")
 #: 區域埠，那一格會變成一個沒有人定義的區域名 —— 跑起來是 `unknown-region`，
 #: 而畫面上那條線看起來完全正常。
 REGION_TYPES = ("region_key", "region_keys")
+
+#: 值裡面裝著**特徵名**的型別（F37）。改名遷移照這一份走。
+#:
+#: 三種裝法不一樣，所以改寫的方式也不一樣（見
+#: `recipe._rename_in_node_params`）：``expr`` 是一條算式（換整個識別字）、
+#: ``feature_keys`` 是逗號清單（逐項換）、``feature_key`` 是單獨一個名字
+#: （整格比對）。**列在 core 而不是遷移那一支**，理由跟 :data:`IMAGE_TYPES`
+#: 一樣：這是「這個型別是什麼」的事實，而遷移只是它的一個消費者。
+FEATURE_TYPES = ("expr", "feature_key", "feature_keys")
 
 #: 輸出流的名字可以用哪些字（F10-7）。
 #:
@@ -248,7 +269,19 @@ def param_visible(show_when: Any, params: Optional[Dict[str, Any]]) -> bool:
     """
     values = params or {}
     for name, allowed in show_when_conditions(show_when):
-        if str(values.get(name, "")) not in {str(v) for v in allowed}:
+        want = {str(v) for v in allowed}
+        got = str(values.get(name, ""))
+        # **成員比對，不是整串相等**（F37）。多選那幾個型別
+        # （`multi_choice` / `metric_chips` / `image_keys` / `region_keys`）
+        # 的值是一個逗號清單，而「勾了 pictures 才顯示這一格」問的是
+        # **在不在裡面**。整串比對的話 ``"report,pictures"`` 不等於
+        # ``"pictures"``，那一格就永遠不出現 —— 而它會有一個預設值照樣生效，
+        # 也就是一個使用者看不到卻在作用的設定。
+        #
+        # 對單值型別（`choice` / `icon_choice` / `bool`）**逐位元組等價**：
+        # 沒有逗號的字串切出來就是它自己。2026-08-26 稽核過 registry 裡每一個
+        # `show_when`，目標全部是單值型別。
+        if not ({tok.strip() for tok in got.split(",")} & want):
             return False
     return True
 
@@ -482,7 +515,7 @@ class ParamSpec:
                     v = value.strip().lower() in ("1", "true", "yes", "on")
                 else:
                     v = bool(value)
-            elif self.type in ("str", "expr", "feature_keys",
+            elif self.type in ("str", "expr", "feature_key", "feature_keys",
                                "image_key", "template"):
                 # ``expr`` 跟 ``str`` **存的是同一個東西**（F21-B）——
                 # 差別只在 UI 認得它是算式。這一行漏掉 ``expr`` 的話，
@@ -853,7 +886,64 @@ class Step(ABC):
     #: 「跨顆那一層」——那一段有同一個問題）。
     @classmethod
     def resolve_features_in(cls, params: Dict[str, Any]) -> List[str]:
-        """這張卡會讀哪些**已經算出來的特徵**（Algo 段用）。"""
+        """這張卡會讀哪些**已經算出來的特徵**（Algo 段用）。
+
+        少一個 = 這張卡**跑不起來**（`feature_math` 的算式指到一個不存在的
+        變數），所以 lint 報的是 error。「少了會退化但跑得完」的那一半在
+        :meth:`optional_features_in`。
+        """
+        return []
+
+    @classmethod
+    def feature_parts(cls, params: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        """每個宣告出來的名字 → **它是怎麼組出來的**（F37 A4）。
+
+        鍵是完整的特徵名，值是這幾格（沒有的就不放）::
+
+            {"base": "glv_median",   # 去掉前綴之後的那一段
+             "stream": "test",       # 影像流（只接一條時沒有這一格）
+             "region": "epi",        # 具名區域（只接一個時沒有這一格）
+             "region_index": 0,      # 第幾個 —— 決定顏色
+             "own": "hot"}           # 使用者自己填的 output_prefix
+
+        為什麼要卡片來答，而不是 UI 拆字串
+        ----------------------------------
+        **拆不出來。** ``test_epi_glv_median`` 這一串裡，哪一段是流、哪一段是
+        區域、哪一段是使用者自己取的名字 —— 三者都是任意的識別字，中間都用
+        底線接。UI 只能猜，而猜錯的下場是把一個區域名畫成流名（顏色跟著錯，
+        而顏色正是這件事的重點）。
+
+        組名字的規則住在 `MultiSourceStep.full_prefix`，所以**拆的規則要住在
+        同一個地方**（`CLAUDE.md` §0）。這一支就是那一支的反向。
+
+        預設回空的：不知道怎麼拆就不拆，UI 照原樣顯示整串。那是對的退化 ——
+        少一點資訊，不會是錯的資訊。
+        """
+        return {}
+
+    @classmethod
+    def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:
+        """這張卡會讀、但**少了只會退化不會失敗**的特徵（F37）。
+
+        跟 :meth:`resolve_features_in` 是同一對，分界跟
+        :meth:`configuration_issues` / :meth:`configuration_hints` 那一對
+        **一字不差**：上面那支是「會失敗」，這一支是「跑得起來，但你八成不是
+        這個意思」。所以 lint 對它報 warning，不擋住整份 recipe。
+
+        誰需要它：Output 段那幾張。``rank_by`` 指到一個沒人算出來的數字時，
+        出圖卡**排不出順序就安靜地退回檔案順序** —— 使用者拿到 N 張正常的圖，
+        而「最值得看的那 N 顆」完全沒有發生（F30 修過一次的那個 bug）。
+
+        它同時是**改名的安全網**（F37 A2）：量測卡的前綴是條件式的，所以在
+        既有的卡上多接一條區域線會把它寫的每一個名字都改掉（``glv_median``
+        → ``epi_glv_median`` ＋ ``mg_glv_median``），而指著舊名字的地方不會
+        跟著改。有了這一支，那件事在**按下去之前**就講得出來，而且講得出
+        「是哪一張卡的哪一格」。
+
+        ⚠ 由**卡片自己**決定哪一格算數（例如 KLARF 的 ``size_feature`` 只在
+        真的指定了 size 欄位時才有意義）—— lint 那邊照型別掃的話會對一個
+        完全沒有在用的預設值報警。
+        """
         return []
 
     # ---- 「還沒設定完」（F7-13）--------------------------------------------

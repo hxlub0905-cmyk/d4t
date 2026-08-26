@@ -369,20 +369,26 @@ def test_an_empty_path_is_a_configuration_issue_not_a_crash():
 # ---------------------------------------------------------------------------
 # 逐框比較的框上報表（F31 T2）—— 兩張出圖卡逐字同一組設定
 # ---------------------------------------------------------------------------
-def test_both_image_cards_offer_the_same_box_settings_word_for_word():
-    from d4t.core.pipeline.step import REGISTRY
+def test_the_box_settings_come_from_the_one_shared_spec():
+    """框怎麼畫的那幾格只有**一個出處**（`output.roi_draw_specs`）。
 
-    specs = {}
-    for key in ("output_image", "output_bundle"):
-        by_name = {p.name: p for p in REGISTRY[key].params}
-        specs[key] = tuple(
-            (by_name[n].type, by_name[n].default, by_name[n].label,
-             tuple(by_name[n].choices or ()), by_name[n].help,
-             by_name[n].advanced)
-            for n in ("draw_boxes", "draw_boxes_cap"))
-    assert specs["output_image"] == specs["output_bundle"]
+    ⚠ 這支測試以前比的是 `output_image` 與 `output_bundle` 兩張卡逐字相同 ——
+    F37 把前者折進後者之後，那個配對不存在了。守的不變量沒有變：**同一句話
+    不准在兩個地方長出兩種意思**，只是現在的做法是「誰要用就叫那支函式」，
+    而這裡驗的是卡片上真的擺著那一份。
+    """
+    from d4t.core.pipeline.step import REGISTRY
+    from d4t.core.steps.output import roi_draw_specs
+
+    shared = {sp.name: sp for sp in roi_draw_specs()}
+    on_card = {p.name: p for p in REGISTRY["output_bundle"].params}
+    for name, sp in shared.items():
+        assert name in on_card, "%s 不在卡片上" % name
+        got = on_card[name]
+        assert (got.type, got.default, got.label, got.help, got.advanced) == (
+            sp.type, sp.default, sp.label, sp.help, sp.advanced)
     # 預設 all（框少的時候最有用），上限是使用者的一格不是魔術數字
-    assert specs["output_image"][0][1] == "all"
+    assert shared["draw_boxes"].default == "all"
 
 
 def test_the_roi_kwargs_helper_reads_the_glv_note():
@@ -472,3 +478,79 @@ def test_a_quiet_image_gets_no_tint():
               "mark_pixels_k": 3.0})
     assert "odd_pixels" not in kw        # 安靜的圖保持安靜
     assert kw["roi_winner"] >= 0         # 框照畫 —— 只有染色被門住
+
+
+# --------------------------------------------------------------------------- #
+# F37：Write images 折進 Write report folder（2026-08-26）
+# --------------------------------------------------------------------------- #
+def test_only_pictures_writes_a_plain_folder_of_images(dataset, tmp_path):
+    """只勾「圖」＝ 折進來之前的 `output_image`：**圖直接躺在資料夾裡**。
+
+    子資料夾（``images/``）存在的理由是**報表要用相對路徑連過去**，所以沒有
+    報表就沒有那一層。這不是為了相容湊出來的規則，是那一層本來就有的意思。
+    """
+    folder = tmp_path / "pngs"
+    _bctx, rows = run(dataset, folder, contents="pictures",
+                      picture_format="png")
+
+    assert not (folder / "images").exists(), "沒有報表就不該有 images/ 那一層"
+    assert not (folder / "report.html").exists()
+    assert not (folder / "defects.csv").exists()
+    assert not (folder / "recipe.json").exists()
+    assert sorted(p.suffix for p in folder.iterdir()) == [".png"] * len(rows)
+
+
+def test_ticking_the_report_puts_the_pictures_in_a_subfolder(dataset, tmp_path):
+    """有報表 → 圖回到 ``images/``，而報表連得到它們（相對路徑）。"""
+    folder = tmp_path / "full"
+    run(dataset, folder)
+
+    assert (folder / "report.html").exists()
+    assert (folder / "defects.csv").exists()
+    assert (folder / "recipe.json").exists()
+    shots = sorted((folder / "images").glob("*.jpg"))
+    assert shots
+    page = (folder / "report.html").read_text(encoding="utf-8")
+    assert "images/%s" % shots[0].name in page
+
+
+def test_an_old_write_images_recipe_still_writes_the_same_files(tmp_path):
+    """折進來之前存下來的 recipe **開得起來，而且寫的東西沒有換格式**。
+
+    兩個差別就是這道遷移在補的東西：`output_image` 寫 PNG（`output_bundle`
+    寫 JPEG）、圖直接放在資料夾裡（不是 ``images/``）。少了 ``picture_format``
+    的話，一份舊 recipe 會安靜地換一種副檔名 —— 而使用者的下游認的正是副檔名。
+    """
+    import json
+
+    from d4t.core.pipeline.recipe import Recipe
+
+    d = {"recipe_id": "old", "version": 1,
+         "routes": {"ebi_patch": ["load", "img"]},
+         "nodes": {"load": {"step": "load_patch", "params": {}},
+                   "img": {"step": "output_image",
+                           "params": {"folder": "/tmp/x", "limit": 7,
+                                      "montage": False}}},
+         "score": {"expr": "1.0", "bins": {"below": 0, "above": 1},
+                   "threshold": 1.0}}
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps(d), encoding="utf-8")
+
+    node = Recipe.load(str(path)).nodes["img"]
+    assert node.step == "output_bundle"
+    assert node.params["contents"] == "pictures"      # 只有圖
+    assert node.params["picture_format"] == "png"     # 不是 JPEG
+    assert node.params["limit"] == 7 and node.params["montage"] is False
+
+
+def test_an_empty_tick_list_is_caught_before_it_makes_an_empty_folder():
+    """一個都沒勾**會建出一個空資料夾** —— 跑得完、沒有錯誤、什麼都沒有。
+
+    這是合併帶進來的新錯（以前沒有「要寫什麼」這一格）。而「這個鍵不在」
+    是另一回事：那是每一份合併之前的 recipe，預設全勾。
+    """
+    from d4t.core.pipeline.step import REGISTRY
+
+    card = REGISTRY["output_bundle"]
+    assert card.configuration_issues({"folder": "/tmp/x", "contents": ""})
+    assert card.configuration_issues({"folder": "/tmp/x"}) == []

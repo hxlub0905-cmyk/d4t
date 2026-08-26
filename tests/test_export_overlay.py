@@ -408,7 +408,7 @@ def test_the_boxes_come_from_the_glv_note_not_a_second_pick():
     ctx = _each_box_ctx()
     rects, win = overlay.roi_boxes_for_overlay(ctx)
     assert len(rects) == 25
-    assert win == int(ctx.features["worst_i"]) == 12
+    assert win == int(ctx.features["glv_worst_i"]) == 12
     assert rects == ctx.roi_norm_rects("cells")
 
 

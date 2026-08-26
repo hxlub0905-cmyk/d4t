@@ -11,13 +11,14 @@
   roi_reference, roi_mask,
   glv_stats, cd_measure, focus_quality,
   feature_math, feature_fill,
-  output_csv, output_report, output_klarf, output_image
+  output_csv, output_report, output_klarf, output_bundle, output_char,
+  output_boxplot, output_html
 
 **2026-08-25（F31 T5）：``find_defect`` 刪掉了。** 使用者：「我覺得 find
 defect 不需要。」它 2026-08-25 早上才進來（F29），零 recipe、零 fixture、
 零黃金值在用 —— 「先收後刪」那條規矩服務的是「舊 recipe 還在用」，這裡沒有
 那個問題，所以直接刪。三類輸出全部有了替代：位置＝GLV 逐框比較的
-``worst_x/y/w/h``（框就是 ROI 自己）、突出度＝``worst_score``、框內細節＝
+``glv_worst_x/y/w/h``（框就是 ROI 自己）、突出度＝``glv_worst_score``、框內細節＝
 疊圖的像素標記（只畫，不吐數字）。``algo/shape.py`` 的 ``find_blobs`` /
 ``BlobScan`` / ``BlobHit`` 一起刪（唯一呼叫者就是這張卡）；``measure_blob``
 與共用的準位不動 —— CD 在用。

@@ -658,3 +658,99 @@ def test_reading_a_recipe_never_invents_a_parameter():
     # 有寫 b 的檔案原樣保留
     d["nodes"]["sub"]["params"]["b"] = "ref"
     assert Recipe.from_json_dict(d).nodes["sub"].params["b"] == "ref"
+
+
+# --------------------------------------------------------------------------- #
+# F37：改名遷移要走完四條路（2026-08-26）
+# --------------------------------------------------------------------------- #
+def _old_style_recipe(tmp_path):
+    """一份**舊名字**的 recipe，四個地方各引用一次。"""
+    import json
+
+    d = {
+        "recipe_id": "f37_migration",
+        "version": 1,
+        "routes": {"ebi_patch": ["load", "roi", "glv", "img", "bp"]},
+        "nodes": {
+            "load": {"step": "load_patch", "params": {}},
+            "roi": {"step": "roi_reference",
+                    "params": {"method": "stripes in the image",
+                               "source": "test", "roi_out": "band"}},
+            "glv": {"step": "glv_stats",
+                    "params": {"source": "test", "roi": "band",
+                               "metrics": "glv_median",
+                               "across_boxes": "each box"}},
+            # ③ Output 卡的參數值 —— 這一條以前**沒有人走**
+            "img": {"step": "output_image",
+                    "params": {"folder": "/tmp/f37", "limit": 5,
+                               "rank_by": "worst_score"}},
+            "bp": {"step": "output_boxplot",
+                   "params": {"path": "/tmp/f37.html",
+                              "features": "worst_score, cd_median, score_median"}},
+        },
+        # ① 分數表達式
+        "score": {"expr": "worst_score * 2 + score_spread",
+                  "bins": {"below": 0, "above": 1}, "threshold": 1.0},
+        # ② 判定樹
+        "decide": {"tree": {"when": "worst_value > 3",
+                            "yes": {"bin": 1, "name": "hot"},
+                            "no": {"bin": 0, "name": "ok"}}},
+    }
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_renaming_a_feature_moves_every_place_that_refers_to_it(tmp_path):
+    """F37：``worst_*`` → ``glv_worst_*`` 的遷移要走完**四**條路。
+
+    以前只有前兩條（分數表達式、判定段）加上 `feature_math` 的算式。第四條
+    ——**參數值**——沒有人走，而漏掉它的症狀特別壞，因為**它跑得完**：
+    `rank_by` 指到一個不存在的數字時，出圖卡排不出順序就安靜地退回檔案順序，
+    於是使用者拿到 N 張正常的圖，而「最值得看的那 N 顆」完全沒有發生
+    （F30 修過一次的那個 bug，只是這次的來源是遷移）。
+
+    ⚠ **把 `from_json_dict` 裡的 `_rename_in_node_params(nodes, renames)`
+    那一行拿掉，這支測試會紅。**
+    """
+    rc = Recipe.load(str(_old_style_recipe(tmp_path)))
+
+    # ① 分數表達式
+    assert rc.score.expr == "glv_worst_score * 2 + glv_worst_score_spread"
+    # ② 判定樹
+    assert rc.decide.tree.when == "glv_worst_value > 3"
+    # ③ 單獨一格特徵名（`feature_key`）
+    assert rc.nodes["img"].params["rank_by"] == "glv_worst_score"
+    # ④ 一串特徵名（`feature_keys`）—— 沒改到的那一項連空白都不該動
+    assert (rc.nodes["bp"].params["features"]
+            == "glv_worst_score, cd_median, glv_worst_score_median")
+
+
+def test_the_rename_is_idempotent_so_round_trip_is_still_identity(tmp_path):
+    """遷移的判準是「舊東西在不在」（鐵則 9），所以第二次跑必須是 no-op。
+
+    不是這樣的話 ``to_json_dict → from_json_dict`` 就不是 identity，而那條路
+    正是 `run_batch` 送 recipe 進 worker 走的 —— ``workers=1`` 與 ``workers=2``
+    會算出不同的分數。真的發生過（見這個檔案上面那一段）。
+    """
+    rc = Recipe.load(str(_old_style_recipe(tmp_path)))
+    once = rc.to_json_dict()
+    twice = Recipe.from_json_dict(once).to_json_dict()
+    assert once == twice
+
+
+def test_a_sentinel_that_is_not_a_feature_name_is_left_alone(tmp_path):
+    """``rank_by`` 的預設值 ``score`` 是**哨兵**，不是特徵名 —— 不准被改寫。
+
+    這正是那一格用「整格比對」而不是識別字比對的理由：`_renamed_idents` 會在
+    任何字串裡找識別字，而哨兵值長得就像一個名字。
+    """
+    import json
+
+    path = _old_style_recipe(tmp_path)
+    d = json.loads(path.read_text(encoding="utf-8"))
+    d["nodes"]["img"]["params"]["rank_by"] = "score"
+    path.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+    rc = Recipe.load(str(path))
+    assert rc.nodes["img"].params["rank_by"] == "score"

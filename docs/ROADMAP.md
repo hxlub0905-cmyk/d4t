@@ -224,7 +224,7 @@ Input → Enhance → ROI → Measure → Compare → ADC → Output
 
 | 需求 | 為什麼是跨顆 |
 |---|---|
-| Output 的 CSV / KLARF / Report / HTML | 一批一個檔案（`output image` 是例外，逐顆）|
+| Output 的 CSV / KLARF / Report / HTML | 一批一個檔案（出圖那幾張是例外，逐顆）|
 | 離群旗標（Tukey IQR、z-score）| 門檻由整批的分布決定 |
 | ~~F15 欠的那份點對點 report~~ ✅ F33（2026-08-25）| 一顆一列的表 ＋ 整批的分布 —— `output_char` |
 | `H2H` 的 `expect_dx_px` 建議值 | 整批取中位數（現在只能靠 `tools/pair_probe.py` 在外面算）|
@@ -243,10 +243,15 @@ Input → Enhance → ROI → Measure → Compare → ADC → Output
 
 **五張卡 ✅ 2026-08-20**：`output_csv` / `output_report`（Excel）/
 `output_klarf`（三種寫回模式）/ `output_html`（自帶樣式，可以直接寄出去）/
-`output_image`（每顆一張疊圖）。**五張都是 `is_batch`，包含 `output_image`** ——
+`output_image`（每顆一張疊圖）。**五張都是 `is_batch`，包含會出圖的那一張** ——
 它看起來是逐顆的，但做成普通 Step 的話它會在 `run_defect` 裡跑，而那條路每切換
 一顆 defect 就走一次（瀏覽 defect 時會一直寫 PNG）。所以它也是整批之後跑一次，
 一顆一顆重跑 pipeline 取影像 —— 那正是 Export 精靈今天做的事。
+
+⚠ **`output_image` 於 F37（2026-08-26）折進 `output_bundle` 了**：它的七格參數
+一格不差全部是後者的子集，寫出來的東西正好是後者少了報表／表格／recipe。現在
+是那張卡上的「只勾 pictures」，舊 recipe 走遷移。上面那段「為什麼它也是整批
+一次」的道理**一字不變**，只是主詞換成了報表資料夾那張卡。
 
 ### Stage 5c ✅ 2026-08-20：Studio 的整批入口，然後刪掉精靈
 
@@ -258,7 +263,7 @@ Input → Enhance → ROI → Measure → Compare → ADC → Output
      別的東西。
    * **中途按停止 → 不寫，而且講出來**（部分結果寫進 KLARF 是不可逆的錯；
      安靜地不寫跟安靜地寫一樣糟）。
-   * 寫檔走背景執行緒（`workers.OutputWorker`）—— `output_image` 會一顆一顆
+   * 寫檔走背景執行緒（`workers.OutputWorker`）—— 出圖那張卡會一顆一顆
      重跑 pipeline，在 GUI 執行緒做會僵住幾十秒。
    * 工具列那一格從「Export…」變成「**Run all & write**」（同一個位子、同一件
      事），前提改成跟 Run trial 一樣（有資料、流程跑得動）——它自己就是那一次跑。

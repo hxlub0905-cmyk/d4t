@@ -419,7 +419,7 @@ def _mark_odd_pixels(panel: np.ndarray, src: Any, odd: Dict[str, Any]) -> None:
     """贏家框內偏離基準的像素上一層半透明的贏家色（F31 T3）。
 
     判準是 ``|pixel − baseline| / spread > k`` —— **baseline / spread 逐字是
-    T1 算 `worst_score` 用的那兩個數字**（GLV 留在 meta 的 `worst` note；
+    T1 算 `glv_worst_score` 用的那兩個數字**（GLV 留在 meta 的 `worst` note；
     `spread` 已含地板）。這裡**不另外算一次**：畫面跟數字各自算的話，遲早出現
     「圖上標紅但數字說正常」—— Results R1 那個 bug 的形狀（同一個判斷散在
     兩個地方）。所以改 GLV 卡的判準統計量，標出來的東西**跟著變**。
@@ -611,7 +611,7 @@ def render_overlay(images: Dict[str, Any],
         贏家框內的像素標記（F31 T3；:func:`_mark_odd_pixels`）：
         ``{"box": 正規化rect, "baseline": …, "spread": …, "k": …,
         "src": 量測那條流的原始陣列}``。判準的 baseline / spread 逐字是
-        GLV 算 `worst_score` 用的那兩個數字 —— 不另外算一次。
+        GLV 算 `glv_worst_score` 用的那兩個數字 —— 不另外算一次。
         預設 ``None``：不標。
 
     回傳 ``(H, W, 3)`` 或 ``(H, 2W, 3)`` 的 uint8 RGB 陣列；

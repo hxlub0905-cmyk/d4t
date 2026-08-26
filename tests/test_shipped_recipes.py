@@ -325,7 +325,7 @@ def test_the_patch_recipe_measures_and_classifies_end_to_end(tmp_path):
         [r.get("error") for r in rows if not r.get("ok")]
 
     feats = rows[0]["features"]
-    assert feats["boxes"] > 1, "templateGC 要在 patch 上鋪出好幾格才有得比"
+    assert feats["glv_boxes"] > 1, "templateGC 要在 patch 上鋪出好幾格才有得比"
     # **問樹要哪幾個，不要抄一份**（同一個理由：抄出來的那份會漂）。
     asked = decide_tree.features_used(recipe.decide)
     assert len(asked) == 3, asked

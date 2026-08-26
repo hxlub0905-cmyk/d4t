@@ -101,8 +101,8 @@ from ..pipeline.step import (
     CATEGORY_ALGO, ParamSpec, Step, StepError, register_step, GROUP_MEASURE,
 )
 from ._util import (
-    MultiSourceStep, output_prefix_spec, parse_key_list, prefix_features,
-    prefix_names, roi_pixels,
+    MultiSourceStep, OTHERS_SUFFIX, output_prefix_spec, parse_key_list,
+    prefix_features, prefix_names, roi_pixels,
 )
 
 _P_ALIAS = re.compile(r"^glv_p(\d+)$")
@@ -203,10 +203,12 @@ REF_OTHERS = "the other regions"
 REFERENCES = (REF_NONE, REF_REGION, REF_STREAM, REF_BOTH, REF_OTHERS)
 
 #: ``the other regions`` 靠的是 Region 卡的家族慣例：``epi`` 這一塊的「其他同類」
-#: 叫 ``epi_others``（`_util.set_region_family`）。**不必多接一條線** ——
-#: 那個名字跟 ``epi`` 出自同一張卡，畫布上那條線已經在了（F12 的規矩是
-#: 「用到的每一個區域都要有一條線指到定義它的那張卡」，而這裡指的是同一張）。
-OTHERS_SUFFIX = "_others"
+#: 叫 ``epi_others``。**名字怎麼拼住在 `_util`**（`others_name`）—— 這裡以前
+#: 自己拼了一份，而 Region 卡那邊拼了另外三份（F37 收成一個家）。
+#:
+#: 不必多接一條**線**：那個名字跟 ``epi`` 出自同一張卡。但它現在會被
+#: `resolve_regions_in` **宣告**出來，所以畫布上有埠、健檢也看得到它
+#: —— 見那一支的說明。
 
 #: 一個區域底下**好幾個框**的時候，要把它們當成一個像素母體，還是一格一格量
 #: （F18 第 6 步，2026-08-21）。
@@ -236,7 +238,14 @@ BOX_MODES = (POOLED, EACH_BOX)
 TYPICAL_SUFFIX = "_typical"
 OUTLIER_SUFFIX = "_outlier"
 OUTLIER_BOX_SUFFIX = "_outlier_box"
-BOX_COUNT = "boxes"
+
+#: 量了幾格。**名字帶 ``glv_``（F37，2026-08-26）** —— 以前它是裸的 ``boxes``，
+#: 而那撞到 Region 卡對每一個區域寫的 ``<name>_boxes``
+#: （`_util.REGION_FACTS`）：接兩個區域時這張卡的前綴是區域名，於是兩張卡
+#: 都寫 ``epi_boxes``，而它們是兩個數字（區域有幾個框 vs 其中幾格量得出來）。
+#: lint 報得出來、engine 也救得回先寫的那一份，但那個撞名**由構造決定** ——
+#: 只要接兩個區域就一定發生，使用者再小心都躲不掉。
+BOX_COUNT = "glv_boxes"
 
 #: 逐框比較的「總冠軍」那一組（F31，2026-08-25）。`_outlier` 那三個後綴回答
 #: 「**每個統計量各自**最極端的是哪一格」；這一組回答的是另一個問題 ——
@@ -249,13 +258,40 @@ BOX_COUNT = "boxes"
 #: `boxes_n` 就是既有的 :data:`BOX_COUNT`（同一件事第二個名字會漂），
 #: `score_max` 逐字等於 ``worst_score``（同一個數字兩個名字，CSV 上沒有任何
 #: 線索說它們是同一個 —— F18 名字分家族那條規矩擋的正是這個）。
-WORST_FEATURES = ("worst_i", "worst_x", "worst_y", "worst_w", "worst_h",
-                  "worst_score", "worst_value")
+#:
+#: **名字帶 ``glv_``（F37）**：這一族以前是裸的 ``worst_*`` —— 在一份同時有
+#: CD（``cd_*``）、Region（``<n>_present``）與比較（``cmp_*``）的 CSV 上，
+#: 它是唯一一族說不出自己是誰算的。
+WORST_FEATURES = ("glv_worst_i", "glv_worst_x", "glv_worst_y",
+                  "glv_worst_w", "glv_worst_h",
+                  "glv_worst_score", "glv_worst_value")
 
 #: 逐框 score 的分布（框數 ≥ 2 才有）。只有 worst 的話，「一個框特別怪」跟
 #: 「500 個框都一樣怪」在特徵表上看起來一模一樣 —— 而那兩件事的處置完全相反
 #: （前者是缺陷，後者是製程漂移或框放錯了）。
-SCORE_FEATURES = ("score_median", "score_spread")
+#:
+#: **名字帶 ``glv_worst_``（F37）**：以前是 ``score_median`` / ``score_spread``，
+#: 而在一份有分數表達式的 recipe 上那讀起來像「分數的中位數」。它們其實是
+#: **逐框異常度**（``glv_worst_score`` 那個量）的分布，所以名字掛在它下面。
+SCORE_FEATURES = ("glv_worst_score_median", "glv_worst_score_spread")
+
+#: F37 的改名對照表（**不含前綴** —— 前綴由 `legacy_feature_renames` 套）。
+#:
+#: 這一份是那次改名的**唯一出處**：卡片寫出去的名字用上面那幾個常數，遷移
+#: 用這張表，兩邊指的是同一件事。抄第二份出來的那一份一定會漂，而漂掉的症狀
+#: 是遷移把表達式改寫成一個不存在的變數（`CLAUDE.md` §0）。
+LEGACY_BOX_RENAMES = {
+    "boxes": BOX_COUNT,
+    "worst_i": "glv_worst_i",
+    "worst_x": "glv_worst_x",
+    "worst_y": "glv_worst_y",
+    "worst_w": "glv_worst_w",
+    "worst_h": "glv_worst_h",
+    "worst_score": "glv_worst_score",
+    "worst_value": "glv_worst_value",
+    "score_median": "glv_worst_score_median",
+    "score_spread": "glv_worst_score_spread",
+}
 
 #: 「照哪個數字挑最異常」的預設。median 跟 Statistics 的預設第一顆同一個。
 JUDGE_DEFAULT = "glv_median"
@@ -423,7 +459,8 @@ class GlvStatsStep(MultiSourceStep):
             help=("Which statistic decides the odd box out. Every box is "
                   "compared against the middle of all the other boxes, in "
                   "robust sigmas - the winner's box and score come out as "
-                  "worst_x/y/w/h and worst_score, ready to rank a report by "
+                  "glv_worst_x/y/w/h and glv_worst_score, ready to rank a "
+                  "report by "
                   "and to draw on the overlay. The median ignores a few hot "
                   "pixels inside a box; use the max to hunt for a single "
                   "bright speck instead. “+ Percentile…” adds any percentile "
@@ -562,9 +599,13 @@ class GlvStatsStep(MultiSourceStep):
 
     @classmethod
     def legacy_feature_renames(cls, params: Dict[str, Any]) -> Dict[str, str]:
-        """舊的相對量特徵名 → 新的（``epi_delta`` → ``epi_cmp_delta_mean``）。
+        """舊的特徵名 → 新的（兩批：F18 的 ``cmp_*``、F37 的 ``glv_worst_*``）。
 
-        給 `recipe._migrate_compare_features_into_cmp` 改寫分數表達式用。
+        給 `recipe._compare_feature_renames` 用 —— 而它現在改寫**四個地方**：
+        分數表達式、判定樹的 let/rules/tree、`feature_math` 的算式，以及
+        任何型別在 `step.FEATURE_TYPES` 裡的參數值（Output 卡的 ``rank_by`` /
+        ``columns`` 那幾格）。只搬前面幾種的話，改名之後 Output 卡會指著一個
+        不存在的數字 —— **而它跑得完**（排不出順序就安靜地退回檔案順序）。
         **住在這張卡上而不是 recipe.py**：名字的規則是這張卡的事，兩份說法
         必然有一份會漂（`CLAUDE.md` §0），而漂掉的症狀是遷移改寫成一個不存在
         的變數 —— 跑起來才炸，而且炸在別的地方。
@@ -572,13 +613,24 @@ class GlvStatsStep(MultiSourceStep):
         舊 recipe 的 ``stat`` 一定只有一個（那時候那一格是下拉），所以對應是
         一對一的；真的有好幾個時取第一個 —— 那份 recipe 本來就不是舊的。
         """
-        if _reference_of(params) == REF_NONE:
-            return {}
-        stat = _stats_of(params)[0]
         out: Dict[str, str] = {}
         for key in cls.source_list(params) or [""]:
             for region in cls.region_list(params) or [""]:
                 pfx = cls.full_prefix(params, key, region)
+                # ---- F37：逐框那一族補上 ``glv_`` 家族 tag ------------------
+                # **無條件加**（不看 `across_boxes`）：使用者可能是先設了
+                # each box、寫好分數表達式、之後才切回 pooled —— 那份表達式
+                # 裡的舊名字仍然要跟著換。遷移的判準是「舊東西在不在」
+                # （鐵則 9），而「在不在」問的是**表達式**，不是這一格參數。
+                for old_name, new_name in LEGACY_BOX_RENAMES.items():
+                    a = prefix_names(pfx, [old_name])[0]
+                    b = prefix_names(pfx, [new_name])[0]
+                    if a != b:
+                        out[a] = b
+                # ---- F18：相對量改叫 ``cmp_*`` -----------------------------
+                if _reference_of(params) == REF_NONE:
+                    continue
+                stat = _stats_of(params)[0]
                 for metric in _compare_metrics_of(params):
                     old = prefix_names(pfx, [metric])[0]
                     new = prefix_names(pfx, [cmp_feature_name(metric, stat)])[0]
@@ -597,13 +649,42 @@ class GlvStatsStep(MultiSourceStep):
 
     @classmethod
     def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
+        """這張卡吃哪幾個區域 —— **含 ``the other regions`` 那一個**（F37）。
+
+        以前 ``the other regions`` 刻意不宣告，理由是「``epi_others`` 跟 ``epi``
+        出自同一張 Region 卡，畫布上那條線已經在了」。那句話對線是對的，
+        **對埠是錯的**，而代價是實測出來的：
+
+        =====================================  ==================================
+        ``roi="epi_center"`` ＋ the other       `configuration_issues()` 回空的、
+        regions                                `unknown-region` 也看不到它 ——
+                                               因為沒有人宣告過那個名字
+        跑起來                                 每一顆 defect 各失敗一次：
+                                               ``'epi_center_others' is not on
+                                               this defect``
+        =====================================  ==================================
+
+        錯誤訊息本身是好的，但它出現在**跑完一批之後**。宣告出來之後，同一件事
+        由既有的 `unknown-region` 在按下去之前就講完。
+
+        **derive，不存第二份**（F12）：``<roi>_others`` 是從 ``roi`` 算出來的，
+        存進參數的話改了 ``roi`` 而那一格沒跟上，兩份就漂了 —— 而漂掉的症狀
+        正好是這一段要修的東西。
+        """
         out = list(super().resolve_regions_in(params))
-        if _reference_of(params) in (REF_REGION, REF_BOTH):
+        ref = _reference_of(params)
+        if ref in (REF_REGION, REF_BOTH):
             name = str(params.get("reference_region", "") or "").strip()
             if name and name not in out:
                 out.append(name)
-        # ``the other regions`` **不宣告**：`epi_others` 跟 `epi` 出自同一張
-        # Region 卡，畫布上那條線已經在了（見 :data:`OTHERS_SUFFIX`）。
+        elif ref == REF_OTHERS:
+            for region in cls.region_list(params):
+                name = str(region or "").strip()
+                if not name:
+                    continue        # 量整張圖時沒有「其餘那些」可言
+                name += OTHERS_SUFFIX
+                if name not in out:
+                    out.append(name)
         return out
 
     @classmethod
@@ -863,17 +944,17 @@ class GlvStatsStep(MultiSourceStep):
             k = int(np.argmax(scores))      # 平手取第一個（照框的順序，決定性）
             wi = int(kept_index[k])
             wx, wy, ww, wh = (float(v) for v in rects[wi])
-            out["worst_i"] = float(wi)
+            out["glv_worst_i"] = float(wi)
             # ROI 的框就是報表上要畫的那個框（只有一種框）—— 座標不另外量，
             # 逐位元組就是 `ctx.roi_rects()[worst_i]` 那一格。
-            out["worst_x"] = wx
-            out["worst_y"] = wy
-            out["worst_w"] = ww
-            out["worst_h"] = wh
-            out["worst_score"] = float(scores[k])
-            out["worst_value"] = float(judge_vals[k])
-            out["score_median"] = float(np.median(scores))
-            out["score_spread"] = algo_glv.robust_spread(scores)
+            out["glv_worst_x"] = wx
+            out["glv_worst_y"] = wy
+            out["glv_worst_w"] = ww
+            out["glv_worst_h"] = wh
+            out["glv_worst_score"] = float(scores[k])
+            out["glv_worst_value"] = float(judge_vals[k])
+            out["glv_worst_score_median"] = float(np.median(scores))
+            out["glv_worst_score_spread"] = algo_glv.robust_spread(scores)
             # 疊圖讀的那一份（畫 ROI 框、標框內像素）—— **跟上面的特徵同一次
             # 計算**：baseline / spread 是像素判準的分母，各自再算一次的話，
             # 圖上標紅而數字說正常的那一天遲早會來（Results R1 的形狀）。

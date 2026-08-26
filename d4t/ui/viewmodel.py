@@ -21,7 +21,7 @@ from d4t.core.pipeline import (
 )
 from d4t.core.pipeline.recipe import (DecideSpec, Let, Rule, TreeLeaf,
                                       TreeStep, _tree_from_json, _tree_to_json,
-                                      rules_to_tree)
+                                      feature_referrers, rules_to_tree)
 
 #: bin 編號的上限。**它的用途是「別讓數字框變成一格自由文字」，不是「分類碼
 #: 應該多大」** —— 後者是廠決定的，不是我們。
@@ -409,15 +409,21 @@ class RecipeModel:
             node.enabled = bool(enabled)
             self._changed()
 
-    def set_param(self, node_id: str, name: str, value: Any) -> None:
-        """設定單一參數；不合法 → raise ParamError（UI 顯示訊息、值不落地）。"""
+    def set_param(self, node_id: str, name: str, value: Any) -> List[str]:
+        """設定單一參數；不合法 → raise ParamError（UI 顯示訊息、值不落地）。
+
+        回一串「這次改動讓哪些下游指空了」的話（見 :meth:`rename_fallout`）。
+        **呼叫端可以整串忽略** —— 絕大多數呼叫者就是這樣，而那是對的：那句話
+        只有在使用者剛動過線的時候才值得講。
+        """
         node = self.nodes[node_id]
         step_cls = get_step(node.step)
+        before = dict(node.params)
         trial = dict(node.params)
         trial[name] = value
         clean = step_cls.validate_params(trial)   # 整組重驗（含相依預設）
         if clean == node.params:
-            return
+            return []
         spec = next((sp for sp in step_cls.params if sp.name == name), None)
         old_name = str(node.params.get(name, "") or "")
         new_name = str(clean.get(name, "") or "")
@@ -439,7 +445,49 @@ class RecipeModel:
         # 所以改名不該動到「誰接誰」，只該讓兩端的標籤跟著換。
         if spec is not None and spec.is_output() and old_name and new_name:
             self._rename_stream(node_id, old_name, new_name)
+        fallout = self.rename_fallout(node_id, before, clean)
         self._changed()
+        return fallout
+
+    def rename_fallout(self, node_id: str, before: Dict[str, Any],
+                       after: Dict[str, Any]) -> List[str]:
+        """這一次改動讓這張卡**不再產出**哪些名字，而誰還指著它們（F37 A2）。
+
+        為什麼需要它：量測卡的前綴是**條件式的**（`MultiSourceStep.stream_prefix`
+        ／`region_prefix` 只在超過一個的時候才加）。所以在一張既有的卡上多接
+        一條區域線，它寫的每一個名字都會改：
+
+            glv_median  →  epi_glv_median  ＋  mg_glv_median
+
+        而分數表達式、判定樹、Output 卡的 ``rank_by`` 裡指著舊名字的那幾個字
+        **不會跟著改**。使用者只做了一個動作（拉一條線），下游三個地方同時
+        失效 —— 而在這之前，畫面上沒有任何東西說得出那件事。
+
+        條件式前綴本身**沒有被改掉**（那要遷移每一份既有 recipe 加重凍三份
+        黃金值）。危險的不是它，是「改名是安靜的」—— 這一支只修那一件事。
+
+        回的是一串可以直接顯示的句子。剪掉一條線走的是同一條路（名字從兩個
+        變回一個），所以反過來也講得出來。
+        """
+        node = self.nodes.get(str(node_id))
+        if node is None:
+            return []
+        try:
+            step_cls = get_step(node.step)
+            gone = [n for n in step_cls.resolve_features(before)
+                    if n not in set(step_cls.resolve_features(after))]
+        except Exception:                  # noqa: BLE001 — 顯示用，壞了就不講
+            return []
+        out: List[str] = []
+        for name in gone:
+            where = feature_referrers(
+                name, self.nodes, score_expr=str(self.expr or ""),
+                decide=self.decide, skip=str(node_id))
+            if where:
+                out.append("“%s” is no longer produced — %s still refer%s to it."
+                           % (name, " and ".join(where),
+                              "" if len(where) > 1 else "s"))
+        return out
 
     def _rename_stream(self, node_id: str, old: str, new: str) -> None:
         """某張卡的輸出流改名 → 從它出發的線與下游的來源參數一起改。"""
