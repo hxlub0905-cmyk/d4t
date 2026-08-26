@@ -257,12 +257,19 @@ def test_a_defect_that_failed_still_gets_an_honest_row():
 # --------------------------------------------------------------------------- #
 # 6. 參數
 # --------------------------------------------------------------------------- #
-def test_ncc_score_is_a_column_by_default():
-    """配對是這條 recipe 唯一的風險，而 `ncc_score` 是唯一的擋板 ——
-    它要**在表格裡**，不是收在進階裡。"""
+def test_the_two_numbers_that_catch_a_wrong_pairing_are_columns_by_default():
+    """配對是這條 recipe 唯一的風險，而擋板要**在表格裡**，不是收在進階裡。
+
+    ⚠ **`ncc_score` 一個不夠。** 陣列區（週期性 layout）裡實測過：兩台機台各拍
+    一次同一塊，NCC 拿到 **0.98** 而位置**每一顆都錯** —— 因為第二名的位置跟
+    第一名一樣好。抓得到那件事的是 `align_peak_ratio`（第一名÷第二名，越接近 1
+    越是猜的）。只看 ncc_score 的人會拿到一份「分數漂亮、圖是錯的」報表。
+    """
     spec = next(p for p in REGISTRY["output_char"].params
                 if p.name == "columns")
-    assert "ncc_score" in str(spec.default)
+    default = str(spec.default)
+    assert "ncc_score" in default
+    assert "align_peak_ratio" in default
 
 
 def test_the_two_folder_cards_agree_word_for_word():

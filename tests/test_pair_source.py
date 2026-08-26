@@ -1061,3 +1061,34 @@ def test_rank_features_survive_the_worker_boundary(tmp_path):
     one = ranks(1)
     assert any(r is not None for _d, r, _t in one)
     assert ranks(2) == one
+
+
+def test_a_defect_that_is_not_in_the_middle_needs_the_whole_image_searched():
+    """空拍那種圖**不是以這一顆為中心拍的** —— defect 落在它剛好在的地方。
+
+    F33 實測（1000×1000 空拍、100×100 patch）：預設的 15% 框對偏離中心的那幾顆
+    **不會失敗**，它回一個**錯的位置**加一個過得了 `min_score` 的分數
+    （實測 NCC 0.30–0.43，而預設門檻是 0.3）—— 跑得完、有數字、而且是錯的。
+
+    這條測試鎖的是那條出路：`search_within=0`（整張搜）位置精確。
+    卡片的 help 上寫著什麼時候要設 0。
+    """
+    big = _noise(600, 600, 5)
+    # defect 在左上角那一帶，離中心很遠（> 15% FOV）
+    px, py = 90, 120
+    tmpl = big[py:py + 64, px:px + 64].copy()
+
+    # ① 整張搜：位置精確
+    ctx, err = _align(big, tmpl, search_within=0.0)
+    assert err is None
+    assert ctx.features["ncc_score"] > 0.99
+    assert ctx.features["align_dx_px"] == pytest.approx(px, abs=2)
+    assert ctx.features["align_dy_px"] == pytest.approx(py, abs=2)
+
+    # ② 預設的 15% 框：**對的那一塊根本不在搜尋範圍裡**，所以它不可能對到。
+    #    擋下來（好）或給一個錯的位置（就是這條測試在講的那個坑）都算數 ——
+    #    這裡鎖的是「它沒有安靜地給出正確答案」這件事本身。
+    ctx2, err2 = _align(big, tmpl, search_within=15.0)
+    if err2 is None:
+        landed = (ctx2.features["align_dx_px"], ctx2.features["align_dy_px"])
+        assert abs(landed[0] - px) > 2 or abs(landed[1] - py) > 2

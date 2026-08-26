@@ -69,13 +69,19 @@ class AlignToStep(Step):
         ParamSpec(name="search_within", type="float", default=15.0,
                   min=0.0, max=100.0, unit="% of FOV",
                   label="Look this far from the middle",
-                  help=("The tool moves to the defect's coordinate before it "
-                        "takes the big image, so the defect is near the middle "
-                        "- it is only off by however far the stage missed. "
-                        "Searching just that patch is faster and, more "
-                        "importantly, cannot land on a lookalike at the far "
-                        "side of the image. Set it to 0 to search the whole "
-                        "image.")),
+                  help=("Only search this much of the image, measured out from "
+                        "the middle. It fits a review tool, which moves to the "
+                        "defect's coordinate before it takes the picture, so "
+                        "the defect is near the middle and is only off by "
+                        "however far the stage missed. Searching just that "
+                        "patch is faster and cannot land on a lookalike at the "
+                        "far side of the image. ⚠ Set it to 0 whenever the "
+                        "picture is NOT taken around this defect - a blanket "
+                        "scan, where the defect sits wherever it happened to "
+                        "be found. Leaving it at 15 there does not fail "
+                        "loudly: the card searches the middle, finds the best "
+                        "of a bad lot, and reports a wrong position with a "
+                        "score that can still pass “Accept above”.")),
         ParamSpec(name="expect_dx_px", type="float", default=0.0,
                   min=-100000.0, max=100000.0, unit="px",
                   label="Expected shift across", advanced=True,

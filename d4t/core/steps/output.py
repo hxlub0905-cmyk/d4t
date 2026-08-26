@@ -858,12 +858,16 @@ class OutputCharStep(_OutputStep):
         ),
         ParamSpec(
             name="columns", type="feature_keys",
-            default="ncc_score,pair_die_rank,pair_die_total",
+            default="ncc_score,align_peak_ratio,pair_die_rank,pair_die_total",
             label="Numbers to show",
-            help=("Which measured numbers get a column, in this order. "
-                  "ncc_score is here by default on purpose: it is how a wrong "
-                  "pairing shows up. Everything else is in the spreadsheet "
-                  "beside this report."),
+            help=("Which measured numbers get a column, in this order. The "
+                  "first two are here on purpose - they are how a wrong "
+                  "pairing shows up. ncc_score is how alike the two pictures "
+                  "are. align_peak_ratio is the one that catches a repeating "
+                  "pattern: in an array area the second-best position scores "
+                  "as well as the best, so a near-1 ratio means the position "
+                  "was a guess even when ncc_score looks perfect. Everything "
+                  "else is in the spreadsheet beside this report."),
         ),
         rank_by_spec(),
         ParamSpec(
