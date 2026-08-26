@@ -3,7 +3,7 @@
 
 版面（全部用 QSplitter，使用者拉得動）::
 
-    ┌ 工具列：開啟 KLARF／Recipe／存檔／範本／範例 recipe ｜ 輸出… ｜ 說明
+    ┌ 工具列：開啟 Recipe／存檔／範本 ｜ 復原／重做 ｜ 說明／主題 ｜ 試跑
     │         ｜ 試跑筆數 ▶試跑 ▶全跑                                      ┐
     ├──────────┬──────────────────────┬──────────────────────────────┤
     │ 卡片庫    │ 流程（PipelineCanvas）│ ［單顆預覽］［Gallery］        │
@@ -52,7 +52,7 @@ tests/test_ui_studio_m5.py）：
 :meth:`StudioWindow.load_dataset_path` / :meth:`~StudioWindow.load_recipe_path` /
 :meth:`~StudioWindow.load_template` / :meth:`~StudioWindow.select_node` /
 :meth:`~StudioWindow.set_defect_index` / :meth:`~StudioWindow.refresh_preview` /
-:meth:`~StudioWindow.run_trial` /
+:meth:`~StudioWindow.run_trial` / :meth:`~StudioWindow.save_recipe_path` /
 :meth:`~StudioWindow.show_gallery` / :meth:`~StudioWindow.show_preview` /
 :meth:`~StudioWindow.request_thumbs` / :meth:`~StudioWindow.run_all` /
 :meth:`~StudioWindow.show_welcome` / :meth:`~StudioWindow.open_recipe_library` /
@@ -626,6 +626,15 @@ class StudioWindow(QMainWindow):
         self.btn_open_recipe = self._tool_button(
             "Open recipe…", "Load a recipe JSON", self._on_open_recipe,
             icon="document")
+        # **存檔回來了**（2026-08-26）。2026-08-16 拿掉的理由是「先把整個
+        # engine 用好，再來支援」，而 Phase 1 同一天就收斂了 —— 那個前提到期。
+        #
+        # 一顆鈕、兩個快捷鍵：`Ctrl+S` 存回原檔（第一次沒有原檔就問），
+        # `Ctrl+Shift+S` 一定問。鈕接的是 `Ctrl+S` 那一支 —— 使用者按工具列上
+        # 那顆鈕的意思是「存起來」，不是「我要選一個路徑」。
+        self.btn_save_recipe = self._tool_button(
+            "Save recipe…", "Save this pipeline as a recipe JSON",
+            self._on_save_recipe, icon="save")
         self.btn_examples = self._tool_button(
             "Templates…",
             "Open the template library — every entry is a complete, runnable "
@@ -673,7 +682,7 @@ class StudioWindow(QMainWindow):
         # 撐著；那顆鈕 2026-08-24 拿掉之後，那一段變成空的 —— 工具列上因此出現
         # 兩條連在一起的分隔線，中間夾著什麼都沒有。分隔線講的是「這裡換一種
         # 事情」，而一條隔開空氣的線只是雜訊。
-        for group in ((self.btn_open_recipe,),
+        for group in ((self.btn_open_recipe, self.btn_save_recipe),
                       (self.btn_examples,),
                       (self.btn_undo, self.btn_redo)):
             # ⚠ **鈕還是要 addWidget**（藏著的也要）：建了卻沒加進工具列的
@@ -798,6 +807,7 @@ class StudioWindow(QMainWindow):
     #: 不自己發明 —— 使用者的肌肉記憶是從別的軟體帶過來的，這裡不該重學。
     SHORTCUTS = (
         ("Ctrl+O", "open_klarf"), ("Ctrl+Shift+O", "open_recipe"),
+        ("Ctrl+S", "save_recipe"), ("Ctrl+Shift+S", "save_recipe_as"),
         ("Ctrl+R", "run"),
         ("Ctrl+Z", "undo"), ("Ctrl+Shift+Z", "redo"), ("Ctrl+Y", "redo"),
         ("Ctrl+0", "zoom_reset"), ("Ctrl++", "zoom_in"), ("Ctrl+=", "zoom_in"),
@@ -810,6 +820,8 @@ class StudioWindow(QMainWindow):
         handlers = {
             "open_klarf": self._on_open_klarf,
             "open_recipe": self._on_open_recipe,
+            "save_recipe": self._on_save_recipe,
+            "save_recipe_as": self._on_save_recipe_as,
             "run": self._on_trial_clicked,
             "undo": self.undo,
             "redo": self.redo,
@@ -835,6 +847,7 @@ class StudioWindow(QMainWindow):
         # refresh 就被蓋掉了。所以改成**設 tooltip 的那個動作自己會補上快捷鍵**。
         self._tip_keys = {
             id(self.btn_open_recipe): "Ctrl+Shift+O",
+            id(self.btn_save_recipe): "Ctrl+S",
             id(self.btn_trial): "Ctrl+R",
             # F14-1：`Ctrl+O` 的鈕搬到空白狀態與入口卡上了（工具列那幾顆
             # 拿掉了），而快捷鍵一個字都沒變 —— 它要在**還看得到的**那顆鈕上
@@ -844,7 +857,8 @@ class StudioWindow(QMainWindow):
             id(self.btn_undo): "Ctrl+Z",
             id(self.btn_redo): "Ctrl+Shift+Z",
         }
-        for w in (self.btn_open_recipe, self.btn_trial, self.btn_empty_open,
+        for w in (self.btn_open_recipe, self.btn_save_recipe,
+                  self.btn_trial, self.btn_empty_open,
                   self.btn_undo, self.btn_redo):
             self._set_tip(w, w.toolTip())
 
@@ -1578,7 +1592,36 @@ class StudioWindow(QMainWindow):
         self._set_tip(self.btn_redo,
                       "Redo the change you just undid" if self.model.can_redo()
                       else "Nothing to redo.")
+        # 存檔（2026-08-26）：空的 pipeline 沒東西可存，而那要**看得出來**
+        # 是「還沒有東西」不是「壞掉了」。標題列的星號跟它同一件事的兩個講法。
+        self.btn_save_recipe.setEnabled(has_steps)
+        if not has_steps:
+            save_tip = "The pipeline is empty — nothing to save yet."
+        elif self.recipe_path:
+            # **講出它會覆寫哪一個檔案。** `Ctrl+S` 不再問路徑（那是慣例），
+            # 所以「存回哪裡」這件事要在按下去**之前**看得到；否則第一次按
+            # 的人只能事後從狀態列知道自己蓋掉了什麼。
+            save_tip = ("Save back to “%s”"
+                        % os.path.basename(self.recipe_path))
+        else:
+            save_tip = "Save this pipeline as a recipe JSON"
+        self._set_tip(self.btn_save_recipe, save_tip)
+        self._refresh_title()
 
+
+    def _refresh_title(self) -> None:
+        """標題列 = ``d4t Studio — <recipe 名> *``。
+
+        那顆星號是**「還沒存」的唯一一個常駐訊號**（每個編輯器都是這個
+        慣例，使用者不必重學）。以前不需要它 —— 沒有存檔功能的時候「還沒存」
+        是恆真的，講了等於沒講。存檔回來之後它才開始有兩種狀態。
+        """
+        name = str(getattr(self.model, "recipe_id", "") or "").strip()
+        title = "d4t Studio" if not name else "d4t Studio — %s" % name
+        if self.model.dirty and self.model.node_order:
+            title += " *"
+        if self.windowTitle() != title:
+            self.setWindowTitle(title)
 
     def _card_summary_parts(self, node: Any, reads, writes, regions_out,
                             region_inputs) -> List[str]:
@@ -3382,8 +3425,19 @@ class StudioWindow(QMainWindow):
         空白的新 recipe 不會被塞一棵樹（那是 ADC 卡的工作）。
 
         ⚠ 這是 **UI 層的遷移**，不是引擎的：`Recipe.load` 一個位元都沒動，
-        CLI 照舊跑那份檔案的 `score`（黃金值因此不受影響），而 Studio 現在
-        又存不了檔（2026-08-16 拿掉），所以磁碟上的東西不會被改寫。
+        CLI 照舊跑那份檔案的 `score`（黃金值因此不受影響）。
+
+        ⚠⚠ **2026-08-26 起這一段多了一個後果**，而它以前不存在：存檔功能
+        回來了，所以使用者按一下 `Ctrl+S`，磁碟上那份**門檻 recipe 就變成
+        一份判定樹 recipe**。這裡以前寫的是「而 Studio 現在又存不了檔，
+        所以磁碟上的東西不會被改寫」—— 那句話現在是假的，留著就是這個 repo
+        最怕的那種漂移（`CLAUDE.md` §0）。
+
+        會不會不小心？**不會安靜地發生**：載入時狀態列已經講過一次
+        「Its threshold is now the first question of the decision tree」，
+        而覆寫原檔是使用者自己按的 `Ctrl+S`。存出跟畫面上不一樣的東西才是
+        說謊 —— 所以正確的行為就是照畫面存。想留住舊檔就 `Ctrl+Shift+S`
+        另存一份（那也是每個編輯器的慣例）。
 
         ⚠ 一個誠實的落差：`use_decide` 產出的規則是 ``expr >= threshold``，
         而老路是 ``score < threshold`` 判 below —— 兩者在**分數是 NaN** 的
@@ -3887,7 +3941,10 @@ class StudioWindow(QMainWindow):
         self._apply_model(RecipeModel.from_recipe(recipe, kind=kind))
         converted = self._adopt_threshold_as_a_tree()
         self.recipe_path = path
-        self.setWindowTitle("d4t Studio — %s" % self.model.recipe_id)
+        # ⚠ **要在這裡再刷一次**：`_apply_model` 已經 refresh 過了，但那時候
+        # `recipe_path` 還是舊的 —— 存檔鈕的 tooltip 要講「存回哪一個檔案」，
+        # 而它會停在載入前的答案。
+        self._update_action_states()
         n = len(self.model.node_order)
         # 版本落差要在**載入的那一刻**講，不是等他按了試跑才從 lint 冒出來 ——
         # 那時候他已經在調參數了，而該做的是先更新程式（見 recipe.version_skew）。
@@ -3911,6 +3968,29 @@ class StudioWindow(QMainWindow):
                          "preview and trial runs will fail."
                          % (self.model.recipe_id, ds_kind))
         self.refresh_preview(sync=sync, force=False)
+        return True
+
+    def save_recipe_path(self, path: Any) -> bool:
+        """把目前的 model 寫成一份 recipe JSON。回「真的存下去了嗎」。
+
+        測試接的是這一支（不是那個檔案對話框）—— 要驗的是「存出來的東西對
+        不對」，不是 ``QFileDialog`` 長什麼樣。
+        """
+        path = str(path)
+        if not self.model.node_order:
+            self._status("The pipeline is empty — nothing to save.")
+            return False
+        try:
+            self.model.to_recipe().save(path)
+        except Exception as e:          # noqa: BLE001 — UI 邊界
+            self._status("Could not save: %s: %s" % (type(e).__name__, e),
+                         "error")
+            return False
+        self.recipe_path = path
+        self.model.dirty = False
+        self.model.end_coalescing()      # 存檔＝一段編輯結束（見 viewmodel）
+        self._update_action_states()     # 星號、鈕的 tooltip 一起跟上
+        self._status("Saved: %s" % path)
         return True
 
     def _apply_model(self, model: RecipeModel) -> None:
@@ -5969,6 +6049,37 @@ class StudioWindow(QMainWindow):
             return
         self.load_recipe_path(path)
 
+    #: 「另存」對話框的副檔名 —— 這一個常數是為了**下面那句 endswith**
+    #: 而存在的，不是為了整齊：Windows 的另存對話框在使用者自己打了一個
+    #: 沒有副檔名的名字時**不會**幫他補（`docs/NO-GIT-SETUP.md` 記過記事本
+    #: 那個反例），而一份叫 `char` 的檔案下次打開時在「Recipe JSON」這個
+    #: 篩選底下**看不見**。
+    RECIPE_SUFFIX = ".json"
+
+    def _on_save_recipe(self) -> bool:
+        """`Ctrl+S` 與工具列那顆鈕：**存回原檔**，沒有原檔才問路徑。
+
+        回傳「真的存下去了嗎」—— 關窗前的確認要靠這個答案（F7-16）：
+        使用者在另存對話框按取消，意思是「先別關」，不是「丟掉」。
+        """
+        if self.recipe_path:
+            return bool(self.save_recipe_path(self.recipe_path))
+        return self._on_save_recipe_as()
+
+    def _on_save_recipe_as(self) -> bool:
+        """`Ctrl+Shift+S`：**一定問路徑**。"""
+        start = self.recipe_path or ("%s%s" % (
+            str(getattr(self.model, "recipe_id", "") or "recipe").strip()
+            or "recipe", self.RECIPE_SUFFIX))
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Recipe", start,
+            "Recipe JSON (*%s);;All files (*)" % self.RECIPE_SUFFIX)
+        if not path:
+            return False
+        if not str(path).lower().endswith(self.RECIPE_SUFFIX):
+            path = "%s%s" % (path, self.RECIPE_SUFFIX)
+        return bool(self.save_recipe_path(path))
+
     # ==================================================================== #
     # 關窗
     # ==================================================================== #
@@ -5977,42 +6088,53 @@ class StudioWindow(QMainWindow):
     PROMPT_ON_CLOSE = True
 
     def unsaved_changes(self) -> bool:
-        """有沒有還沒被保存的編輯（明確狀態，不要去猜）。
+        """有沒有還沒存的編輯（明確狀態，不要去猜）。
 
-        名字沿用 F7-16。存檔功能拿掉之後它的意思更強了：**沒有任何辦法保住
-        這份 pipeline**，關掉就是真的沒了。
+        2026-08-16 到 2026-08-26 之間這句話的意思比現在強 —— 那段時間沒有
+        存檔功能，所以「還沒存」是恆真的，而關窗提示講的是「關掉就沒了」。
+        存檔回來之後它回到原本的意思：**有一個辦法，而他還沒用**。
         """
         return bool(self.model.dirty)
 
     def _ask_unsaved(self) -> str:
-        """問使用者確定不確定。回 ``"discard"`` / ``"cancel"``。
+        """問使用者要不要存。回 ``"save"`` / ``"discard"`` / ``"cancel"``。
 
-        以前有三個答案（存 / 丟掉 / 取消）。存檔功能還沒支援（engine 先做完
-        再回來），所以「存」那個選項會是一顆做不到自己承諾的鈕 —— 拿掉。
-        剩下的兩個仍然要問：**現在關掉是不可逆的**。
+        第三個答案 2026-08-26 回來了（2026-08-16 拿掉，因為那時候它是一顆
+        做不到自己承諾的鈕）。**預設答案仍然不是「丟掉」** —— 那一顆按下去
+        沒有第二次機會。
 
-        單獨一個方法是為了測試接得住 —— 要驗的是「答案各自會怎樣」，
+        單獨一個方法是為了測試接得住 —— 要驗的是「三個答案各自會怎樣」，
         不是「QMessageBox 長什麼樣」。
         """
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Warning)
-        box.setWindowTitle("Close without keeping this pipeline?")
-        box.setText("Closing now discards the pipeline you just built.")
+        box.setWindowTitle("Save this pipeline before closing?")
+        box.setText("This recipe has changes you have not saved.")
         box.setInformativeText(
-            "Saving a recipe to a file is not supported yet, so there is no "
-            "way to get this back — write down the settings you care about "
-            "before you close.")
-        box.setStandardButtons(QMessageBox.Discard | QMessageBox.Cancel)
-        box.setDefaultButton(QMessageBox.Cancel)
+            "The pipeline you just built is the whole point of the tuning you "
+            "did — closing without saving throws it away.")
+        box.setStandardButtons(QMessageBox.Save | QMessageBox.Discard
+                               | QMessageBox.Cancel)
+        box.setDefaultButton(QMessageBox.Save)
         answer = box.exec()
-        return "discard" if answer == QMessageBox.Discard else "cancel"
+        return {QMessageBox.Save: "save",
+                QMessageBox.Discard: "discard"}.get(answer, "cancel")
 
     def confirm_close(self) -> bool:
-        """可以關了嗎。預設答案是 **Cancel**（「先別關」）—— 關掉之後沒有任何
-        辦法把這份 pipeline 找回來。"""
+        """可以關了嗎。
+
+        **存檔失敗、或使用者在另存對話框按了取消，都不算可以關** —— 那是
+        「我改變主意了」，不是「丟掉吧」。這一條 F7-16 就寫過，2026-08-26
+        存檔回來時一起回來。
+        """
         if not (self.PROMPT_ON_CLOSE and self.unsaved_changes()):
             return True
-        return self._ask_unsaved() == "discard"
+        answer = self._ask_unsaved()
+        if answer == "cancel":
+            return False
+        if answer == "discard":
+            return True
+        return bool(self._on_save_recipe())
 
     def showEvent(self, event) -> None:       # noqa: D102 - Qt hook
         super().showEvent(event)

@@ -23,16 +23,39 @@
 
 ---
 
-## 1. 一分鐘上手
+## 1. 一分鐘上手（用現成的那一份）
+
+**不要自己從零蓋。** `recipes/ebi-to-api-characterization.json` 已經接好線、
+判定樹也寫好了：
 
 1. **`Open KLARF…`** 載 **API（RSEM）那一份**當 main。⚠ 不是 EBI —— 理由見 §2。
-2. 卡片庫 → Input 段 → 加一張 **`Pair with another source`**。
-3. 在那張卡上按 **`Open data…`** 選 **EBI 那一份**。代號會從檔名自動取一個。
-4. 卡片庫 → Compare 段 → 加一張 **`H2H`**。
-5. **拉兩條線**（見 §3）。
-6. 判定段畫三片葉子的樹（見 §5）。
-7. 卡片庫 → Output 段 → 加一張 **`Write characterization report`**，填資料夾。
-8. `Run all`。
+2. **`Open recipe…`**（`Ctrl+Shift+O`）→ 選
+   `recipes/ebi-to-api-characterization.json`。
+3. 畫布上那張 **`Pair with another source`** → 按 **`Open data…`** 選
+   **EBI 那一份**。
+4. 同一張卡的 **`Rank by`** → 挑 **EBI 自己的分數欄**（下拉裡就是那一份真的
+   有的欄位）。這一格是 ① 與 ② 分得開的唯一條件 —— 見 §5。
+5. 輸出卡的 **`Write to`** → 你要的資料夾（預設 `char_report` 是**相對於你啟動
+   程式的位置**）。
+6. **`Run all`**（⚠ 不是 `Run trial` —— **試跑不寫檔**，見 §4.3）。
+
+第 3～5 步是**站點資料**，本來就不可能寫在 recipe 裡（路徑、你們機台那一欄的
+名字、你要的輸出位置）。其他都不用動。
+
+> **第 4 步沒做也跑得動**：每一顆會落在一片叫 `no ranking column picked yet`
+> 的葉子上 —— 那是報表在告訴你還有哪一格沒填。填了之後 ① 與 ② 才分得開。
+
+> **調完之後 `Ctrl+S` 存起來**（2026-08-26 起有存檔）。存回原檔用 `Ctrl+S`、
+> 另存一份用 `Ctrl+Shift+S`；標題列有 `*` 就代表還沒存。
+
+### 1.1 從零蓋（想知道那份 recipe 是怎麼組出來的）
+
+1. 卡片庫 → Input 段 → **`Pair with another source`** → `Open data…`。
+2. 卡片庫 → Compare 段 → **`H2H`**。
+3. **拉兩條線**（見 §3）。
+4. 判定段畫那棵樹（見 §5）。
+5. 卡片庫 → Output 段 → **`Write characterization report`**，填資料夾
+   （**不用接線**，見 §3）。
 
 ---
 
@@ -51,9 +74,13 @@ ground truth 是 API，所以要**走遍的是 API 的清單**。
 
 ```
 Load one image ──single──────────────┐
-   （API 空拍，main）                 ├──> H2H ──> [OUTPUT] Write characterization report
+   （API 空拍，main）                 ├──> H2H
 Pair with another source ──paired────┘
-   （EBI，第二份）
+
+         ┌ OUTPUT ────────────────────────────────┐
+         │  Write characterization report          │   ← 沒有線（見 §3.1）
+         │  (not connected) · once per lot         │
+         └─────────────────────────────────────────┘
 ```
 
 | 從哪 | 到哪 | 意思 |
@@ -67,8 +94,22 @@ Pair with another source ──paired────┘
 > `Pair with another source` **沒有影像輸入** —— 它是 Input 段的卡，
 > 圖是從第二份 lot 撈出來的，不是從上游接來的。所以它左邊沒有埠。
 
-> Output 卡副標寫 `(not connected)` 是**正常的**：Output 段每一張卡都這樣
-> （它們是終點，不吐流也不吐特徵）。
+### 3.1 Output 段**不用接線**（副標寫 `(not connected)` 是正常的）
+
+Output 段每一張卡都沒有輸入埠 —— 它們是終點，不吐流也不吐特徵。畫布上它們
+待在自己的虛線區塊裡（`OUTPUT` / 「once per lot」）。**在 route 上就會跑**，
+整批跑完之後各跑一次。
+
+由此來的三件事：
+
+* **不要拉線進去。** 那條線會落在一個不存在的埠上 —— 畫布會說謊。
+* 它要看哪一條影像流，是**打字**填的（`Left picture` / `Right picture`）。
+  拉線的那種欄位（`image_key`）在設定區是唯讀的，而這張卡不上畫布接線，
+  所以這兩格刻意是自由文字。慣用的名字：`single`（main 的原圖）、
+  `paired`（EBI 帶過來那一張）、`aligned`（H2H 對齊後裁出來的那一塊）。
+* **`Run trial` 不寫檔**（使用者 2026-08-20 定調：「試跑不寫，只有整批才寫」）
+  —— 試跑是調參數的迴圈，每拖一下滑桿就覆寫一次 KLARF 是不可逆的災難。
+  要寫出東西請按 **`Run all`**，或走命令列（§8）。
 
 ---
 
@@ -125,7 +166,7 @@ Pair with another source ──paired────┘
 | **Expected shift across / down** | 進階。跑一批取 `align_off_*` 的**中位數**填回來，搜尋框就能再縮小 |
 | **Size ratio** | 進階。0 = 自動（從兩張讀資料的卡上的 `Pixel size` 相除）。**兩台機台的像素大小不一樣時一定要有**，差幾個百分比就對不起來了 |
 
-### 4.3 `Write characterization report`
+### 4.3 `Write characterization report`（⚠ 只有 `Run all` 會跑到它）
 
 | 格子 | 填什麼 |
 |---|---|
@@ -147,12 +188,27 @@ Pair with another source ──paired────┘
          Yes → ● 沒偵測到                 （③）
          No  → ◇ 第二步
 
-第二步   pair_die_rank <= <你的 sample 名次門檻> ?
+第二步   die_rank_missing > 0 ?
+         Yes → ● 還沒選排名欄位           （不是一類，是「這一格沒填」）
+         No  → ◇ 第三步
+
+第三步   die_rank <= sample_top ?
          Yes → ● 抓到了                   （①）
          No  → ● 偵測到但沒被 sample       （②）
 ```
 
-`<sample 名次門檻>` 就是你們每個 die 取前幾名去 review 的那個數字。
+`sample_top` 是判定段的一個 working number（`let`），預設 200 —— 就是你們每個
+die 取前幾名去 review 的那個數字。改它只要改那一行，不必動樹。
+
+`die_rank` 也是一個 working number，而它帶 **「missing ⇒ 用 -1」**：
+
+```
+die_rank = pair_die_rank        missing ⇒ 用 -1
+```
+
+有了它，`Rank by` 那一格還沒填的時候**每一顆都拿得到 `die_rank_missing`**，
+第二步問得出來，於是使用者看到的是一片說得出原因的葉子，而不是一份看起來很
+正常、其實每一顆都判錯的結果。沒有 `fill` 的話那幾顆會**整顆失敗**。
 
 > **為什麼第一步非得是 `pair_found`**：樹只會評「走得到的那條路」。先問它，
 > 第三類那一支就永遠問不到 ncc / 分數那幾題，`decide_unanswered` 維持 0。

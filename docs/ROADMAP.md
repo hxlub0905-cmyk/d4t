@@ -17,10 +17,15 @@
 
 - **範例 recipe 全部拿掉**（`examples/` 已移除），Studio 上的「用範例資料試一次」
   與「Templates…」兩個入口跟著收起來（`ui/scope.py` 的 `SHOW_SAMPLE_ENTRIES`）。
-- **存檔 recipe 的功能拿掉了**（2026-08-16）。Studio 沒有「Save Recipe…」、
-  沒有 Ctrl+S，`Recipe.save()` 也移除了。**讀取仍然在** —— CLI
-  `python -m d4t run <recipe> <klarf>` 照跑，`tests/fixtures/recipes/` 照用。
-  等 engine 收斂了再把存檔做回來（那時要一併決定 recipe 的版本與相容策略）。
+  ⚠ **這一條有一半回來了**：2026-08-26 起 `recipes/` 底下有出貨的 recipe
+  （目前一份：characterization），走 `Open recipe…` 那條路。它跟舊的
+  `examples/` 差在**有測試守著**（`tests/test_shipped_recipes.py`）——
+  舊的那批就是因為沒人測而爛掉的。範本庫那個入口仍然關著。
+- ~~**存檔 recipe 的功能拿掉了**（2026-08-16）~~ →
+  **2026-08-26 做回來了**（F34）。`Recipe.save()`、工具列的「Save recipe…」、
+  `Ctrl+S`（存回原檔）與 `Ctrl+Shift+S`（另存）都在，標題列的星號是「還沒存」
+  的常駐訊號。拿掉的理由是「先把整個 engine 用好」，而 Phase 1 同一天就收斂了
+  —— 那個前提到期。計畫書：[`docs/plans/F34-save-recipe.md`](plans/F34-save-recipe.md)。
 
 ---
 
@@ -366,8 +371,8 @@ engine 與功能收斂之後才有意義。
 | 項目 | 說明 |
 |---|---|
 | ground truth **標注介面** | 讀答案卷與即時準確率已經在（Phase 1），缺的是**在 Studio 裡標**：現在還是要人另外準備一份 JSON／CSV |
-| 存檔 recipe 做回來 | 連同版本與相容策略一起想 |
-| 範例 recipe 庫 | 使用者的原話是「等 APP 完成再給範例」。回來時把 `SHOW_SAMPLE_ENTRIES` 打開 |
+| ~~存檔 recipe 做回來~~ | ✅ **2026-08-26（F34）**。`app_version` 那條相容策略本來就在（`version_skew`），這一輪只是把寫檔那一半接回來 |
+| 範例 recipe 庫 | 使用者的原話是「等 APP 完成再給範例」。`recipes/` 已經有出貨的 recipe（2026-08-26），缺的是**庫的入口**（`SHOW_SAMPLE_ENTRIES`）|
 | 使用者手冊 | 目前所有文件都是寫給開發者的。目標使用者是不寫 code 的製程／設備工程師 |
 | 快速參考卡 PDF | M6 欠著的 |
 

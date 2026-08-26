@@ -149,7 +149,12 @@ def test_json_missing_required_field():
 
 
 def test_load_reads_utf8_json(tmp_path):
-    """從磁碟讀一份 recipe（``Recipe.save`` 已移除 —— 存檔功能還沒支援）。"""
+    """從磁碟讀一份 recipe。
+
+    ⚠ 這裡**刻意自己寫檔案**而不是用 ``Recipe.save``（2026-08-26 回來了）——
+    要驗的是「讀得懂磁碟上的 JSON」，用 save 寫的話這一支就只證明了自己跟
+    自己相容。存檔那一半在 `tests/test_recipe_save.py`。
+    """
     r = make_recipe()
     p = tmp_path / "recipe.json"
     p.write_text(json.dumps(r.to_json_dict(), ensure_ascii=False, indent=2),

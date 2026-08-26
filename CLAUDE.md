@@ -48,16 +48,26 @@
 【影像段】把圖變乾淨可比 → 【算法段】從圖量出數字 → 【ADC 判定】score → bin → 寫回 KLARF
 ```
 
-### 目前不支援的兩件事（不是漏掉的）
+### 目前收起來的一件事（不是漏掉的）
 
 engine 還在做（**Phase 1「讓數字可信」已於 2026-08-16 收斂**，下一步是
 Phase 2），使用者定調**先把引擎做對，再回頭做產品化**（見
 [`docs/ROADMAP.md`](docs/ROADMAP.md)）：
 
-- **沒有範例 recipe**（`examples/` 已移除），Studio 的「用範例資料試一次」與
+- **範本庫是空的**（`examples/` 已移除），Studio 的「用範例資料試一次」與
   「Templates…」兩個入口收起來了 —— 開關在 `ui/scope.py`。
-- **不能存檔 recipe**（2026-08-16 移除）：沒有 Save Recipe…、沒有 Ctrl+S、
-  沒有 `Recipe.save()`。**讀取仍然在**，CLI 照跑。
+
+**出貨的 recipe 在 [`recipes/`](recipes/)**（2026-08-26），走 `Open recipe…`
+不走範本庫，而且**每一份都有測試真的跑一次**
+（`tests/test_shipped_recipes.py`）—— 舊的 `examples/` 就是因為沒人測而爛掉的。
+加一份新的就在那支測試裡加一段。
+
+**存檔 recipe 2026-08-26 做回來了**（F34，[`docs/plans/F34-save-recipe.md`](docs/plans/F34-save-recipe.md)）。
+`Recipe.save()`、工具列的「Save recipe…」、`Ctrl+S`（存回原檔）與
+`Ctrl+Shift+S`（另存）都在。⚠ 它帶來一個**以前不存在的後果**：Studio 載入時做的
+UI 層遷移（門檻 → 判定樹）現在會被存回磁碟。那是對的（存出跟畫面不一樣的東西
+才是說謊），但寫在 `_adopt_threshold_as_a_tree` 裡的「反正存不了檔」那句話
+已經作廢 —— 見 `Recipe.save` 的說明。
 
 ---
 

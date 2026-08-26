@@ -342,9 +342,13 @@ def test_threshold_live_preview_vs_commit(window, synlot):
 # 8. 編輯中的 model 轉得成 recipe
 # --------------------------------------------------------------------------- #
 def test_the_model_converts_to_a_runnable_recipe(window, synlot):
-    """以前這裡測的是「存檔往返」。存檔功能還沒支援（engine 先做完再回來），
-    但底下那件事沒消失、而且更重要了：**畫面上的 model 要轉得成引擎吃得下的
-    recipe** —— ``run_trial`` 與 ``run_batch`` 走的正是這條路。"""
+    """**畫面上的 model 要轉得成引擎吃得下的 recipe** —— ``run_trial`` 與
+    ``run_batch`` 走的正是這條路。
+
+    2026-08-16 到 2026-08-26 之間這是唯一問得到這件事的地方（存檔拿掉了）。
+    存檔回來之後**這一支仍然留著**：它問的是 model → recipe 那一步，
+    而經過磁碟的那條路在 `tests/test_ui_save_recipe.py`。兩者一起紅的時候
+    分得出斷在哪一段。"""
     _loaded(window, synlot)
     rec = window.model.to_recipe()
     assert rec.routes[window.model.kind] == window.model.node_order
