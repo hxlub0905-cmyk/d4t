@@ -5,7 +5,7 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 8ebcd23bc5d6a0b3b9e8913cba4e330cfe1ce419 CLAUDE.md
 2a88de1f46350abacaceaa0ac065279f42f9fc2a README.md
-9b6779d923e3481adef6c0474434ec71dcc222e6 SESSION_LOG.md
+4d600d52c8b33450de702b6b176911b386c79116 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -116,14 +116,13 @@ cb5ec1e3cc74cbfc6f03fe2edb526c0993465c6e docs/GLAS-INTERFACE.md
 15c2bb25a9b655500c0706d899826872abbc425f docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
 5add754408a8324566ed29c95f855d9a0c429655 docs/PITFALLS.md
-e61a667f8ae9773ed120ed209bf1a645d5ba552b docs/ROADMAP.md
+f7d46cec54c8e35ab7de752fa942e3324eb77a74 docs/ROADMAP.md
 c1cfb82e71df1d178b5f70766fcabf52d623476a docs/USING-CD.md
 1f16388adca3e35e6bdcb8b05e2ec1f7416ca99d docs/USING-CHARACTERIZATION.md
 6885e5767660656a9cc2ffda538b1fd0defd232c docs/plans/F0-master-plan.md
 d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 655f8cf83bfe142b0952aa2769fd420aec2698d3 docs/plans/F26-decide-panel-ux.md
 4b55069e016b2ca16b4ff7e9e929d7454db52172 docs/plans/F27-results-panel.md
-398b4e4134459fe36ac731a5bcba86083bdb6c3f docs/plans/F37-glv-roi-names-and-output.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
