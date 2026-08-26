@@ -2772,15 +2772,36 @@ class StudioWindow(QMainWindow):
                 return
             value = name
         try:
-            self.model.set_param(dst, param, value)
+            says = self.model.set_param(dst, param, value)
         except ParamError as e:
             self._status(str(e), "error")
             return
         # 挑了區域就順手把輸出名填成區域的名字（F7-11）—— 拉線跟在設定區挑
         # 是同一個動作，所以走同一條路。
         self._autofill_output_prefix(dst, param, value)
-        self._status("“%s” now measures %s (defined by “%s”)."
-                     % (dst, value.replace(",", " and "), src))
+        self._say_fallout(says, "“%s” now measures %s (defined by “%s”)."
+                          % (dst, value.replace(",", " and "), src))
+
+    def _say_fallout(self, says: List[str], otherwise: str = "") -> None:
+        """改名的連帶影響優先於「接好了」那句話（F37 A2）。
+
+        量測卡的前綴是條件式的，所以在一張既有的卡上多接一條區域線，它寫的
+        每一個名字都會改（``glv_median`` → ``epi_glv_median`` ＋
+        ``mg_glv_median``），而分數表達式、判定樹、Output 卡的 ``rank_by``
+        裡指著舊名字的字不會跟著改。
+
+        使用者只做了一個動作，下游三個地方同時失效 —— 而在這之前，畫面上唯一
+        的訊息是「接好了」。所以有連帶影響的時候，**那句話蓋過成功訊息**
+        （紅字），沒有的時候才報成功。
+
+        ⚠ 這一句是**當下**的提醒，不是唯一的防線：`stale-feature-ref` 這條
+        lint 會讓那張卡在畫布上一直掛著警示標記，直到有人處理它。狀態列的字
+        會被下一個動作蓋掉，而那正是它不能是唯一防線的理由。
+        """
+        if says:
+            self._status(" ".join(says), "error")
+        elif otherwise:
+            self._status(otherwise)
 
     def _param_for_stream(self, node_id: str) -> str:
         """線沒有指定落點時，這條線該接哪一格輸入（沒有輸入回空字串）。
@@ -2909,14 +2930,18 @@ class StudioWindow(QMainWindow):
         if value == str(node.params.get(param, "") or ""):
             return ""
         try:
-            self.model.set_param(str(node_id), param, value)
+            says = self.model.set_param(str(node_id), param, value)
         except ParamError:                     # pragma: no cover — 值就是流名
             return ""
+        # 影像流那一側同理（接第二條流也會把名字加上流名前綴）。這一支回的是
+        # 一段**接在成功訊息後面**的字，所以連帶影響也接在同一句話上 ——
+        # 而不是另外開一個要有人記得去消費的欄位。
+        tail = ("  " + " ".join(says)) if says else ""
         if not value:
-            return " — “%s” has no input on “%s” now" % (
-                node_id, spec.label or param)
-        return " — “%s” now works on %s" % (node_id, " and ".join(
-            value.split(",")))
+            return " — “%s” has no input on “%s” now%s" % (
+                node_id, spec.label or param, tail)
+        return " — “%s” now works on %s%s" % (node_id, " and ".join(
+            value.split(",")), tail)
 
     def _on_remove_requested(self, node_id: str) -> None:
         node_id = str(node_id)
@@ -3525,7 +3550,7 @@ class StudioWindow(QMainWindow):
             self._status("Select a step in the pipeline before editing parameters.", "error")
             return
         try:
-            self.model.set_param(node_id, str(name), value)
+            says = self.model.set_param(node_id, str(name), value)
         except ParamError as e:
             self.param_form.show_error(str(name), str(e))
             self._status(str(e))
@@ -3533,6 +3558,9 @@ class StudioWindow(QMainWindow):
             self.param_form.clear_errors()
             self._autofill_output_prefix(node_id, str(name), value)
             self._after_pair_param(node_id, str(name))
+            # 在設定區少勾一個統計量也是改名（那個數字從此不存在）——
+            # 跟拉線同一件事，所以講同一句話。
+            self._say_fallout(says)
             self._after_carry_param(node_id, str(name))
             # 拖滑桿的時候框要跟著變 —— 那正是這個輔助的全部意義（F7-8：
             # 使用者是一邊看影像一邊決定值的）。
@@ -4159,7 +4187,8 @@ class StudioWindow(QMainWindow):
         self.feature_table.set_features(getattr(result, "features", {}) or {},
                                         highlight=highlight,
                                         sections=self._feature_sections(result),
-                                        about=self._feature_about(result))
+                                        about=self._feature_about(result),
+                                        parts=self._feature_parts())
         score = getattr(result, "score", None)
         self.verdict.set_verdict(getattr(result, "bin", None)
                                  if score is not None else None)
@@ -4741,6 +4770,31 @@ class StudioWindow(QMainWindow):
             ref = str((rec or {}).get("reference") or "")
             for name in (rec or {}).get("names") or []:
                 out[str(name)] = ref
+        return out
+
+    def _feature_parts(self) -> Dict[str, Any]:
+        """特徵名 → 它是怎麼組出來的（F37 A4）。
+
+        **問每一張卡，不自己拆字串**：``test_epi_hot_glv_median`` 這一串裡哪
+        一段是流、哪一段是區域、哪一段是使用者自己取的名字，三者都是任意識別
+        字，UI 只能猜 —— 而猜錯會把區域畫成流，顏色跟著錯，而顏色正是這件事的
+        重點。組名字的規則住在卡片上，拆的規則就住在同一個地方
+        （`Step.feature_parts`）。
+
+        先出現的贏（同 `feature_owners`）：撞名的時候引擎留的是先寫那一份的
+        救援名，而畫面上那一格顯示的是後寫的值 —— 兩邊都指同一個人比較不會錯。
+        """
+        out: Dict[str, Any] = {}
+        for nid in self.model.node_order:
+            node = self.model.nodes.get(nid)
+            if node is None or not node.enabled:
+                continue
+            try:
+                got = get_step(node.step).feature_parts(node.params)
+            except Exception:              # noqa: BLE001 — 顯示用，壞了就不拆
+                continue
+            for name, parts in (got or {}).items():
+                out.setdefault(str(name), parts)
         return out
 
     def _feature_sections(self, result: Any) -> List[Dict[str, Any]]:

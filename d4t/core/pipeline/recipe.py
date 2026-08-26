@@ -1428,6 +1428,73 @@ def _rename_in_tree(node: Any, table: Dict[str, str]) -> Any:
     return TreeStep(when=when, yes=yes, no=no)
 
 
+def mentions_feature(text: str, name: str) -> bool:
+    """一條算式（或一格參數值）裡有沒有**整個識別字** ``name``。
+
+    用邊界比對而不是 ``in``：``glv_median in "epi_glv_median"`` 是 True，
+    而那是兩個不同的數字。同 :func:`_renamed_idents` 的理由，只是反過來問。
+    """
+    if not text or not name:
+        return False
+    return re.search(r"\b%s\b" % re.escape(str(name)), str(text)) is not None
+
+
+def feature_referrers(name: str, nodes: Dict[str, "RecipeNode"],
+                      score_expr: str = "", decide: Any = None,
+                      skip: str = "",
+                      registry: Optional[Dict[str, Any]] = None) -> List[str]:
+    """誰還指著 ``name`` —— 回一串**給人看的位置**（F37 A2）。
+
+    四個地方跟改名遷移走的**同一份清單**（`_rename_in_node_params` 的說明）：
+    分數表達式、判定段、`feature_math` 的算式、以及型別在
+    `step.FEATURE_TYPES` 裡的參數值。兩支要一起看 —— 遷移是「自動搬」，
+    這一支是「搬不動的時候說出搬不動的是哪幾個」。
+
+    ``skip`` 是**改名的那張卡自己**：它不算引用者（它是來源）。
+
+    ``score_expr`` 吃的是**字串**而不是 `ScoreSpec`：編輯中的 model 上分數就
+    是一個字串（`RecipeModel.expr`），為了呼叫這一支去湊一個完整的 ScoreSpec
+    等於發明一個假的門檻與 bins。
+    """
+    if registry is None:
+        registry = REGISTRY
+    out: List[str] = []
+    if mentions_feature(score_expr, name):
+        out.append("the score expression")
+    if decide is not None:
+        spots = [str(getattr(decide, "score", "") or "")]
+        spots += [str(getattr(l, "expr", "") or "") for l in decide.let]
+        spots += [str(getattr(r, "when", "") or "") for r in decide.rules]
+
+        def walk(node: Any) -> None:
+            if node is None or isinstance(node, TreeLeaf):
+                return
+            spots.append(str(getattr(node, "when", "") or ""))
+            walk(node.yes)
+            walk(node.no)
+
+        walk(getattr(decide, "tree", None))
+        if any(mentions_feature(t, name) for t in spots):
+            out.append("the decision")
+    for nid, node in (nodes or {}).items():
+        if nid == skip:
+            continue
+        step_cls = registry.get(node.step)
+        if step_cls is None:
+            continue
+        for spec in getattr(step_cls, "params", ()) or ():
+            if spec.type not in FEATURE_TYPES:
+                continue
+            raw = node.params.get(spec.name)
+            if not isinstance(raw, str) or not raw.strip():
+                continue
+            hit = (mentions_feature(raw, name) if spec.type == "expr"
+                   else name in [x.strip() for x in raw.split(",")])
+            if hit:
+                out.append("“%s” (%s)" % (nid, spec.label or spec.name))
+    return out
+
+
 def _swap_padded(part: str, swap) -> str:
     """``"  worst_score "`` → ``"  glv_worst_score "``（前後空白原樣留著）。"""
     core = part.strip()
@@ -2266,7 +2333,7 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     half-configured（warning）/ unknown-node /
     unknown-route / cycle / missing-image / unknown-region / requires-ref /
     ambiguous-input / score-expr / unknown-feature（warning）/
-    feature-collision（warning）/ bad-bins /
+    stale-feature-ref（warning）/ feature-collision（warning）/ bad-bins /
     uneven-treatment（warning）/ card-order（warning）。
     """
     if registry is None:
@@ -2522,6 +2589,26 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             # 吃**特徵**的卡（F16，Algo 段）：指到一個沒人算出來的數字，在跑
             # 之前就講。沒有這一段的話它要等**每一顆 defect 都失敗**才看得出來
             # —— 跟具名區域當初的處境一字不差（F7-9 的 unknown-region）。
+            # 「少了只會退化，不會失敗」那一半（F37）—— 見
+            # `Step.optional_features_in`。**warning，不是 error**：出圖卡的
+            # `rank_by` 指到一個沒人算出來的數字時它照樣寫得出圖，只是順序
+            # 安靜地退回檔案順序。這一條同時是改名的安全網：量測卡多接一條
+            # 區域線會把它寫的每一個名字都改掉，而指著舊名字的地方不會跟著改。
+            stale = [x for x in step_cls.optional_features_in(p)
+                     if x not in feats]
+            if stale:
+                issues.append(Issue(
+                    code="stale-feature-ref", level="warning", node_id=nid,
+                    title=f"step '{nid}' points at a number nobody produces",
+                    detail=f"route '{k}': it refers to {stale}, but nothing "
+                           f"upstream produces {'them' if len(stale) > 1 else 'it'}"
+                           f" (available: {sorted(feats)}). This card still "
+                           f"runs - it just quietly does without, so check "
+                           f"the spelling, or whether a card upstream renamed "
+                           f"its numbers (measuring two regions instead of "
+                           f"one puts the region's name in front of every "
+                           f"number it writes)."))
+
             missing_feat = [x for x in step_cls.resolve_features_in(p)
                             if x not in feats]
             if missing_feat:

@@ -886,7 +886,64 @@ class Step(ABC):
     #: 「跨顆那一層」——那一段有同一個問題）。
     @classmethod
     def resolve_features_in(cls, params: Dict[str, Any]) -> List[str]:
-        """這張卡會讀哪些**已經算出來的特徵**（Algo 段用）。"""
+        """這張卡會讀哪些**已經算出來的特徵**（Algo 段用）。
+
+        少一個 = 這張卡**跑不起來**（`feature_math` 的算式指到一個不存在的
+        變數），所以 lint 報的是 error。「少了會退化但跑得完」的那一半在
+        :meth:`optional_features_in`。
+        """
+        return []
+
+    @classmethod
+    def feature_parts(cls, params: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        """每個宣告出來的名字 → **它是怎麼組出來的**（F37 A4）。
+
+        鍵是完整的特徵名，值是這幾格（沒有的就不放）::
+
+            {"base": "glv_median",   # 去掉前綴之後的那一段
+             "stream": "test",       # 影像流（只接一條時沒有這一格）
+             "region": "epi",        # 具名區域（只接一個時沒有這一格）
+             "region_index": 0,      # 第幾個 —— 決定顏色
+             "own": "hot"}           # 使用者自己填的 output_prefix
+
+        為什麼要卡片來答，而不是 UI 拆字串
+        ----------------------------------
+        **拆不出來。** ``test_epi_glv_median`` 這一串裡，哪一段是流、哪一段是
+        區域、哪一段是使用者自己取的名字 —— 三者都是任意的識別字，中間都用
+        底線接。UI 只能猜，而猜錯的下場是把一個區域名畫成流名（顏色跟著錯，
+        而顏色正是這件事的重點）。
+
+        組名字的規則住在 `MultiSourceStep.full_prefix`，所以**拆的規則要住在
+        同一個地方**（`CLAUDE.md` §0）。這一支就是那一支的反向。
+
+        預設回空的：不知道怎麼拆就不拆，UI 照原樣顯示整串。那是對的退化 ——
+        少一點資訊，不會是錯的資訊。
+        """
+        return {}
+
+    @classmethod
+    def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:
+        """這張卡會讀、但**少了只會退化不會失敗**的特徵（F37）。
+
+        跟 :meth:`resolve_features_in` 是同一對，分界跟
+        :meth:`configuration_issues` / :meth:`configuration_hints` 那一對
+        **一字不差**：上面那支是「會失敗」，這一支是「跑得起來，但你八成不是
+        這個意思」。所以 lint 對它報 warning，不擋住整份 recipe。
+
+        誰需要它：Output 段那幾張。``rank_by`` 指到一個沒人算出來的數字時，
+        出圖卡**排不出順序就安靜地退回檔案順序** —— 使用者拿到 N 張正常的圖，
+        而「最值得看的那 N 顆」完全沒有發生（F30 修過一次的那個 bug）。
+
+        它同時是**改名的安全網**（F37 A2）：量測卡的前綴是條件式的，所以在
+        既有的卡上多接一條區域線會把它寫的每一個名字都改掉（``glv_median``
+        → ``epi_glv_median`` ＋ ``mg_glv_median``），而指著舊名字的地方不會
+        跟著改。有了這一支，那件事在**按下去之前**就講得出來，而且講得出
+        「是哪一張卡的哪一格」。
+
+        ⚠ 由**卡片自己**決定哪一格算數（例如 KLARF 的 ``size_feature`` 只在
+        真的指定了 size 欄位時才有意義）—— lint 那邊照型別掃的話會對一個
+        完全沒有在用的預設值報警。
+        """
         return []
 
     # ---- 「還沒設定完」（F7-13）--------------------------------------------

@@ -30,6 +30,7 @@ from PySide6.QtCore import QMimeData, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QTextDocument,
     QDrag,
     QFont,
     QFontMetricsF,
@@ -43,6 +44,9 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QStyle,
+    QStyleOptionViewItem,
+    QStyledItemDelegate,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -92,6 +96,7 @@ __all__ = [
     "LibraryPanel",
     "HistogramWidget",
     "FeatureTable",
+    "feature_html",
     "VerdictChip",
     "TemplateField",
     "to_uint8",
@@ -6022,6 +6027,115 @@ def _split_cmp(rest: str) -> Tuple[str, str]:
     return rest, ""
 
 
+#: 一個特徵名拆好之後，畫在畫面上要用哪些角色（F37 A4，2026-08-26）。
+#:
+#: 使用者 2026-08-26：「值可否用上下標　更清楚　配合顏色」。
+#:
+#: 三個角色，而**每一個都對應名字裡真的存在的一段**（拆解由卡片給，見
+#: `Step.feature_parts`）：
+#:
+#: =========  =========  ==================================================
+#: 主體       正常大小   ``glv_median`` —— 家族 tag ＋ 統計量
+#: 區域       **上標**   ``epi`` —— 顏色取自 `theme.region_hex`
+#: 影像流     **下標**   ``test``
+#: =========  =========  ==================================================
+#:
+#: 為什麼區域是上標而不是下標：一份 recipe 常常只有一條流、卻有好幾個區域，
+#: 所以區域是**比較常出現、也比較需要一眼分辨**的那一個，而上標的位置比下標
+#: 顯眼。挑一個然後從此不變 —— 兩種都成立，會出錯的是兩邊各挑一個。
+#:
+#: ⚠ **顏色不是在這裡發明的。** `theme.region_hex(index)` 同時是影像上那個
+#: ROI 框的顏色與畫布上區域埠的顏色（`MultiSourceStep.CURRENT_REGION_INDEX`
+#: 用同一個序）—— 三個地方同一個顏色，而來源只有一份。各自挑一份的話，
+#: "top,bot" 在一邊是 0/1、在另一邊是 1/0，而**顏色指錯區域比沒有顏色糟得多**。
+FEATURE_SUP = "region"
+FEATURE_SUB = "stream"
+
+
+def feature_html(name: str, parts: Optional[Dict[str, Any]] = None) -> str:
+    """一個特徵名 → 要畫的那一小段 HTML（拆不出來就是原樣的純文字）。
+
+    純函式，沒有 Qt —— 所以「畫成什麼樣」測得起來，不必開一個視窗。
+    """
+    text = _escape(str(name or ""))
+    got = dict(parts or {})
+    base = str(got.get("base", "") or "")
+    if not base:
+        return text
+    out = [_escape(base)]
+    region = str(got.get(FEATURE_SUP, "") or "")
+    if region:
+        colour = theme.region_hex(int(got.get("region_index", 0) or 0))
+        out.append('<sup style="color:%s"><b>%s</b></sup>'
+                   % (colour, _escape(region)))
+    stream = str(got.get(FEATURE_SUB, "") or "")
+    if stream:
+        out.append('<sub style="color:%s">%s</sub>'
+                   % (TOKENS["text_hint"], _escape(stream)))
+    own = str(got.get("own", "") or "")
+    if own:
+        # 使用者自己取的名字**不縮小也不上下標**：它是他打的字，不是軟體
+        # 推出來的一段 —— 兩者在畫面上要分得出來。
+        out.append(' <span style="color:%s">%s</span>'
+                   % (TOKENS["text_secondary"], _escape(own)))
+    return "".join(out)
+
+
+def _escape(text: str) -> str:
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;"))
+
+
+class _FeatureNameDelegate(QStyledItemDelegate):
+    """第一欄用 rich text 畫（上下標＋顏色）。
+
+    為什麼要一個 delegate：``QTableWidgetItem`` 只吃純文字，而 Unicode 的上標
+    只有幾個字母有（``ᵃᵇᶜ``）—— 區域名是使用者取的任意識別字，湊不出來。
+    """
+
+    #: item 上放 HTML 的那個角色（純文字仍然放在 DisplayRole，所以複製、
+    #: 搜尋、測試讀到的都還是**打得進分數表達式的那一串**）。
+    HTML_ROLE = Qt.UserRole + 7
+
+    def paint(self, painter, option, index) -> None:
+        html = index.data(self.HTML_ROLE)
+        if not html:
+            super().paint(painter, option, index)
+            return
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.text = ""                       # 文字交給 QTextDocument 畫
+        style = opt.widget.style() if opt.widget else QApplication.style()
+        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)
+
+        doc = QTextDocument()
+        doc.setDefaultFont(opt.font)
+        doc.setDocumentMargin(0)
+        doc.setHtml('<span style="color:%s">%s</span>'
+                    % (opt.palette.text().color().name(), html))
+        rect = style.subElementRect(QStyle.SE_ItemViewItemText, opt, opt.widget)
+        painter.save()
+        painter.translate(rect.left(),
+                          rect.top() + max(0.0, (rect.height()
+                                                 - doc.size().height()) / 2.0))
+        doc.drawContents(painter)
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        html = index.data(self.HTML_ROLE)
+        size = super().sizeHint(option, index)
+        if not html:
+            return size
+        doc = QTextDocument()
+        doc.setDefaultFont(option.font)
+        doc.setDocumentMargin(0)
+        doc.setHtml(html)
+        # 上下標會把行高撐高一點點 —— 讓欄寬跟著真的畫出來的寬度走，
+        # 否則名字會被截成 `test_epi_hot_glv_m…`（而那正是這一輪要治的病）。
+        return QSize(int(doc.idealWidth()) + 12, max(size.height(),
+                                                     int(doc.size().height())))
+
+
 class FeatureTable(QTableWidget):
     """特徵 / 它是什麼 / 數值 三欄表；``score`` 永遠釘在最後一列且用粗體。
 
@@ -6046,6 +6160,11 @@ class FeatureTable(QTableWidget):
         head.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         head.setSectionResizeMode(1, QHeaderView.Stretch)
         head.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        # 第一欄用 rich text 畫（上下標＋顏色，F37 A4）。**只有第一欄** ——
+        # 值那一欄要保持等寬對齊，說明那一欄本來就是一句話。
+        self._name_delegate = _FeatureNameDelegate(self)
+        self.setItemDelegateForColumn(0, self._name_delegate)
+        self._parts: Dict[str, Any] = {}
 
     #: 一個分組（F13-1 的 ①）：``title`` 是**哪張卡產出的**、``color`` 是那張卡
     #: 的階段色、``names`` 是這一組裡的特徵、``collapsed`` 決定一開始收不收。
@@ -6055,7 +6174,8 @@ class FeatureTable(QTableWidget):
     def set_features(self, features: Optional[Dict[str, Any]],
                      highlight: Iterable[str] = (),
                      sections: Optional[Sequence[Dict[str, Any]]] = None,
-                     about: Optional[Dict[str, str]] = None) -> None:
+                     about: Optional[Dict[str, str]] = None,
+                     parts: Optional[Dict[str, Any]] = None) -> None:
         """填表。``highlight`` 內的特徵名會用 accent 底色標出（例：分數用到的）。
 
         ``sections`` 是**分組**（F13-1 ①，2026-08-19 使用者：「feature 的顯示
@@ -6073,6 +6193,9 @@ class FeatureTable(QTableWidget):
         features = dict(features or {})
         hi = set(highlight or ())
         self._about = dict(about or {})
+        # 名字怎麼拆是**卡片答的**（`Step.feature_parts`）—— 沒給就照原樣顯示
+        # 整串。少一點資訊，不會是錯的資訊。
+        self._parts = dict(parts or {})
         rows: List[Tuple[str, Any]] = []          # ("head"/"row", 內容)
         if sections:
             seen = set()
@@ -6142,6 +6265,12 @@ class FeatureTable(QTableWidget):
     def _fill_row(self, row: int, name: str, value: Any,
                   highlighted: bool, is_score: bool) -> None:
         key_item = QTableWidgetItem(str(name))
+        # **純文字仍然是 DisplayRole** —— 複製、搜尋、測試讀到的都還是那一串
+        # 打得進分數表達式的字。HTML 只是它的長相。
+        html = feature_html(str(name),
+                            (getattr(self, "_parts", None) or {}).get(str(name)))
+        if html != _escape(str(name)):
+            key_item.setData(_FeatureNameDelegate.HTML_ROLE, html)
         kind, gloss = feature_gloss(str(name), getattr(self, "_about", None))
         about_item = QTableWidgetItem(gloss)
         # **絕對量與相對量用顏色分**（使用者要的第二種分類）：相對量走強調色，

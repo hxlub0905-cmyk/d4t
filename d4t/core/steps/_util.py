@@ -1114,6 +1114,37 @@ class MultiSourceStep(Step):
                 for n in prefix_names(cls.full_prefix(params, k, r), base)]
 
     @classmethod
+    def feature_parts(cls, params: Dict[str, object]) -> Dict[str, Dict[str, object]]:
+        """見 `Step.feature_parts` —— **`resolve_features` 的反向**。
+
+        兩支走**同一個雙層迴圈、同一組 `*_prefix` 呼叫**，所以它們不可能對
+        不上。各寫一份的話，「這個名字有沒有區域那一段」會有兩個答案，而畫面
+        用的是錯的那一個。
+        """
+        keys = cls.source_list(params) or [""]
+        regions = cls.region_list(params)
+        base = cls.feature_names(params)
+        base = base + nm_twin_names(base)
+        own = str(params.get("output_prefix", "") or "").strip()
+        out: Dict[str, Dict[str, object]] = {}
+        for key in keys:
+            stream = cls.stream_prefix(params, key)
+            for region in regions:
+                pfx = cls.full_prefix(params, key, region)
+                tag = cls.region_prefix(params, region)
+                for short, full in zip(base, prefix_names(pfx, base)):
+                    one: Dict[str, object] = {"base": short}
+                    if stream:
+                        one["stream"] = stream
+                    if tag:
+                        one["region"] = tag
+                        one["region_index"] = regions.index(region)
+                    if own:
+                        one["own"] = own
+                    out[full] = one
+        return out
+
+    @classmethod
     def resolve_regions_in(cls, params: Dict[str, object]) -> List[str]:
         return [r for r in cls.region_list(params) if r]
 

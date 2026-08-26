@@ -331,6 +331,21 @@ class OutputKlarfStep(_OutputStep):
         ),
     ]
 
+    @classmethod
+    def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:
+        """``size_feature`` —— **只在真的指定了 size 欄位的時候才算數**。
+
+        它有一個非空的預設（``cd_median``），而 inplace 一格目標欄位都沒填是
+        完全正常的用法（輸出檔與原檔逐位元組相同）。照型別無條件掃的話，那種
+        recipe 會因為一個**沒有在用的預設值**被報一句話。
+        """
+        if str(params.get("mode", "") or "") != "inplace":
+            return []
+        if not str(params.get("size_col", "") or "").strip():
+            return []
+        name = str(params.get("size_feature", "") or "").strip()
+        return [name] if name else []
+
     def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
         p = self.validate_params(params)
         path = self._path_of(p)
@@ -586,6 +601,19 @@ def picture_specs() -> List[ParamSpec]:
     ]
 
 
+def ranked_feature(params: Dict[str, Any]) -> List[str]:
+    """``rank_by`` 指著的那個特徵名（``score`` 這個哨兵不算）。
+
+    給 `Step.optional_features_in` 用 —— 出圖那幾張卡共用一份，同
+    `rank_by_spec` 的理由：**同一句話不准在兩個地方長出兩種意思**。
+
+    ``score`` 排除掉是因為它不是任何一張卡算出來的東西，它是 recipe 的分數
+    （lint 那邊的 ``feats`` 一開始就種著它）。
+    """
+    name = str((params or {}).get("rank_by", "") or "").strip()
+    return [name] if name and name != overlay.RANK_BY_SCORE else []
+
+
 def roi_draw_specs() -> List[ParamSpec]:
     """出圖那兩張卡共用的「ROI 框怎麼畫」（F31）。**兩張卡逐字同一組**。
 
@@ -741,6 +769,11 @@ class OutputBundleStep(_OutputStep):
     CSV_NAME = "defects.csv"
     RECIPE_NAME = "recipe.json"
     IMAGE_DIR = "images"
+
+    @classmethod
+    def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:
+        """``rank_by``（見 `ranked_feature`）—— 少了圖照樣寫，順序退回檔案順序。"""
+        return ranked_feature(params)
 
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
@@ -953,6 +986,15 @@ class OutputCharStep(_OutputStep):
         ),
     ]
 
+    @classmethod
+    def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:
+        """``rank_by`` ＋ ``columns``。
+
+        ``columns`` 少一個的下場是**那一欄整排空白** —— 而一份每一格都空白的
+        欄位，跟一份「這一批真的都量不到」長得一模一樣。
+        """
+        return ranked_feature(params) + parse_key_list(params.get("columns", ""))
+
     #: 資料夾裡那幾個名字 —— **跟 bundle 逐字相同**（換一台機器打開還是同一個
     #: 形狀，而兩份東西長得一樣就不必記兩套）。
     REPORT_NAME = "report.html"
@@ -1112,6 +1154,11 @@ class OutputBoxPlotStep(_OutputStep):
             help="Heading on the page. Empty uses the recipe name.",
         ),
     ]
+
+    @classmethod
+    def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:
+        """``features``。**空的不算** —— 那是「畫判定問過的那幾個」。"""
+        return parse_key_list(params.get("features", ""))
 
     #: 判定沒有給出類別時（一份沒有 `decide` 的 recipe），全部畫成一個盒子。
     ALL_LABEL = "the whole lot"
