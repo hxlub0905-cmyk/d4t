@@ -236,6 +236,12 @@ class StepError(RuntimeError):
     def __init__(self, step_key: str, msg: str):
         super().__init__(f"[{step_key}] {msg}")
         self.step_key = step_key
+        #: 訊息**不含** ``[key]`` 前綴的那一份。
+        #:
+        #: 一張卡在自己內部攔到另一段的 :class:`StepError` 再往外報的時候
+        #: （`output_report` 那六樣各自寫、各自失敗），拿 ``str(e)`` 會把前綴
+        #: 疊第二次。而那句話是給使用者看的（推廣鐵則），不是給 log 看的。
+        self.detail = msg
 
 
 def show_when_conditions(show_when: Any) -> List[Tuple[str, Tuple[Any, ...]]]:

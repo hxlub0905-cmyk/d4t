@@ -76,8 +76,21 @@ cycle 錯誤，現在照線跑。
 數值來，Algo 是拿這些 feature 去做更 custom 的處理」）、
 **Output 段的卡是 end point**（`resolve_writes()` 與 `resolve_features()` 都是空的）。
 
-UI 三段分色（影像=藍 `#6f93b5`／算法=橙 `#c06a1d`／判定=紫 `#8a6fb5`）。
+Output 段是**三張卡**（F38，2026-08-26）：`output_report`「Write report」
+（一個資料夾，要哪幾樣是一格勾選：報表／表格／圖／Excel／box plot／recipe）、
+`output_klarf`「Write KLARF」、`output_char`「Write comparison」。
+以前是七張，而其中五張回答的是同一個問題 —— 收斂的理由與那四張的去向見
+`d4t/core/steps/output.py` 的模組說明。
+
 這個分類不是裝飾 —— 它同時是 `Step.category`、快取切點、recipe 驗證順序的依據。
+
+⚠ **顏色不是照這三段分的**（F7-9 起）。以前這裡寫著「影像=藍／算法=橙／
+判定=紫」，而那在 F7-9 就過期了：試用回饋的原話是「圖示很不錯，但太多都同個
+顏色」—— 六個階段只有三種色，等於顏色這個維度白給了。現在**每個流程階段各一
+個色相**（冷暖仍然對得上三段式），`seg_hex` 只留給真的在講三段的地方（首啟
+導覽的三段說明、直方圖、Score/Bin 尾卡）。
+**唯一出處是 `d4t/ui/theme.py::group_hex` 的 docstring**，不要在這裡複製一份
+色碼 —— 上一次複製出來的那一份漂了一年。
 
 ## 資料模型：兩個通道（影像流 vs 具名區域）
 

@@ -43,11 +43,24 @@ def test_pointing_a_folder_card_at_a_file_is_caught_on_the_canvas(tmp_path):
         assert says and "is a file, not a folder" in says[0], cls.key
 
 
+def _file_cards():
+    """「一格路徑＝一個檔案」的那幾張（F38 之後只剩 KLARF）。
+
+    寫成推導而不是寫死一張卡：哪天又有一張寫單檔的 Output 卡進來，它自動
+    被這一條蓋到 —— 而寫死的那一版會安靜地只守著 KLARF。
+    """
+    return [c for c in REGISTRY.values()
+            if c.resolve_group() == "output"
+            and getattr(c, "PATH", "") == "path"]
+
+
 def test_pointing_a_file_card_at_a_folder_is_caught_too(tmp_path):
     """反過來那一半 —— 兩句話走同一支 `path_issue`。"""
-    card = get_step("output_csv")
-    says = card.configuration_issues({"path": str(tmp_path)})
-    assert says and "is a folder, not a file" in says[0]
+    cards = _file_cards()
+    assert cards, "一張寫單檔的卡都沒有？"
+    for cls in cards:
+        says = cls.configuration_issues({"path": str(tmp_path)})
+        assert says and "is a folder, not a file" in says[0], cls.key
 
 
 def test_a_folder_that_does_not_exist_yet_is_not_an_error(tmp_path):

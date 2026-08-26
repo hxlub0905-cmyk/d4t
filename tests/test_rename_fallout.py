@@ -56,11 +56,13 @@ def test_it_finds_all_four_places_a_feature_name_can_live():
                           {"source": "test", "metrics": "glv_median"}),
         "math": RecipeNode("math", "feature_math",
                            {"expr": "glv_median * 2", "out": "twice"}),
-        "img": RecipeNode("img", "output_bundle",
+        "img": RecipeNode("img", "output_report",
                           {"folder": "/tmp/x", "rank_by": "glv_median"}),
-        "bp": RecipeNode("bp", "output_boxplot",
-                         {"path": "/tmp/x.html",
-                          "features": "cd_median,glv_median"}),
+        # 同一張卡的第二個節點，這一次是 box plot 那一格（F38 併進來的，
+        # 而它的參數名也跟著換了：`features` → `plot_features`）。
+        "bp": RecipeNode("bp", "output_report",
+                         {"folder": "/tmp/x", "contents": "boxplot",
+                          "plot_features": "cd_median,glv_median"}),
     }
     decide = DecideSpec(tree=TreeStep(when="glv_median > 3",
                                       yes=TreeLeaf(bin=1, label="hot"),
@@ -98,7 +100,7 @@ def _wired_model():
     glv = m.add_step("glv_stats")
     for k, v in (("source", "test"), ("metrics", "glv_median"), ("roi", "epi")):
         m.set_param(glv, k, v)
-    out = m.add_step("output_bundle")
+    out = m.add_step("output_report")
     m.set_param(out, "folder", "/tmp/x")
     m.set_param(out, "rank_by", "glv_median")
     m.set_expr("glv_median")
@@ -124,7 +126,7 @@ def test_wiring_a_second_region_says_what_stopped_existing():
     joined = " ".join(says)
     assert "glv_median" in joined
     assert "score expression" in joined       # 分數表達式指空了
-    assert "output_bundle" in joined          # Output 卡那一格也是
+    assert "output_report" in joined          # Output 卡那一格也是
 
 
 def test_a_change_that_renames_nothing_says_nothing():
@@ -156,7 +158,7 @@ def _recipe(roi):
             "glv": RecipeNode("glv", "glv_stats",
                               {"source": "test", "roi": roi,
                                "metrics": "glv_median"}),
-            "out": RecipeNode("out", "output_bundle",
+            "out": RecipeNode("out", "output_report",
                               {"folder": "/tmp/x", "rank_by": "glv_median"}),
         },
         score=ScoreSpec(expr="glv_median", threshold=1.0,
@@ -171,7 +173,7 @@ def test_a_stale_rank_by_is_a_warning_not_an_error():
     出圖卡照樣寫得出圖 —— 它只是**安靜地退回檔案順序**，而使用者拿到 N 張
     正常的圖，「最值得看的那 N 顆」完全沒有發生（F30 修過一次的那個 bug）。
 
-    ⚠ **把 `optional_features_in` 從 `OutputBundleStep` 拿掉，這支會紅。**
+    ⚠ **把 `optional_features_in` 從 `OutputReportStep` 拿掉，這支會紅。**
     """
     stale = [i for i in validate(_recipe("epi,epi_center"), kind="ebi_patch")
              if i.code == "stale-feature-ref"]

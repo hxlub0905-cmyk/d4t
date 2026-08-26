@@ -1,9 +1,10 @@
 # d4t step-card library — authored 2026-08-20 (F16：Output 段).
 """Output 段的卡：整批跑完之後，把結果寫出去。
 
-⚠ ``output_bundle`` 的 ``bundle`` 跟 ``bundle/d4t_bundle.py`` **沒有關係**
-（前者是這張卡寫出來的資料夾，畫面上叫 “Write report folder”；後者是搬程式碼
-進公司機的那個單檔包）。兩個都不改名，理由與代價見 `CLAUDE.md` §0 那張表。
+⚠ **``output_bundle`` 這個 key 於 F38（2026-08-26）退休了**，折進
+``output_report``。它以前跟 ``bundle/d4t_bundle.py``（搬程式碼進公司機的那個
+單檔包）共用「bundle」這個字，而那件事混淆過人 —— 現在 repo 裡「bundle」只剩
+一個意思。**不要再造第二個**（`CLAUDE.md` §0 記著那次的代價）。
 
 Output 段是什麼（使用者 2026-08-20 定調）
 -----------------------------------------
@@ -18,18 +19,33 @@ Output 段是什麼（使用者 2026-08-20 定調）
 而那是「換一條路，東西沒變」可以被量出來的原因（見
 `tests/test_batch_steps.py` 的逐位元組比對，那是之後拿掉 Export 精靈的前提）。
 
+**三張卡**（F38，2026-08-26。使用者：「七張裡有五張在回答同一個問題，收成
+三張」）：
+
 ==================  =======================================  =================
 卡                  寫什麼                                   引擎
 ==================  =======================================  =================
-``output_csv``      一顆一列的明細表（＝ feature vector）     `export/report`
-``output_report``   Excel：摘要 / 明細 / 特徵統計三張表       `export/report`
+``output_report``   一個資料夾。要哪幾樣是一格勾選：報表／     `export/html` ＋
+                    表格／圖／Excel／box plot／recipe        `export/report` ＋
+                                                             `export/overlay` ＋
+                                                             `export/boxplot`
 ``output_klarf``    寫回 KLARF（三種模式）                    `export/klarf_out`
-``output_bundle``   一個資料夾：報表／表格／圖／recipe        `export/html` ＋
-                    （要哪幾樣是一格勾選，F37）              `export/overlay`
 ``output_char``     點對點兩張圖的 characterization 報表      `export/html`
-``output_boxplot``  一片葉子一個盒子的分布圖                  `export/boxplot`
-``output_html``     單檔可轉寄的 HTML 表                      `export/html`
+                    （畫面上叫 “Write comparison”）
 ==================  =======================================  =================
+
+收掉的四張與它們現在的樣子（遷移在 `recipe._migrate_folded_output_cards`）：
+
+=================  ==================================================
+``output_csv``     ``output_report`` 只勾 ``table``
+``output_html``    ``output_report`` 只勾 ``report``
+``output_boxplot`` ``output_report`` 只勾 ``boxplot``
+``output_bundle``  ``output_report``（勾選照舊）
+=================  ==================================================
+
+⚠ ``output_report`` 這個 key **留著但意思換了**：它以前是「寫一個 Excel 檔」，
+現在是「寫一個資料夾，Excel 是裡面的一個勾」。舊的那一格路徑（``path``）因此
+也要遷移成 ``folder``。
 
 **每一張的尺度都是「整批一次」（``scale = SCALE_LOT``），包含會出圖的那幾張。**
 寫一個檔案的那些顯然是。出圖的看起來是逐顆的 —— 但它如果做成普通 Step，
@@ -39,20 +55,24 @@ Output 段是什麼（使用者 2026-08-20 定調）
 
 規則因此是一句話：**Output 段的卡都是整批一次。**
 
-CSV 只有一種（F37 B2 查證，**沒有改動**）
------------------------------------------
-三張卡寫得出 CSV，而它們走的是同一支 `export/report.write_csv`，欄位逐字相同。
-唯一的差別是 ``output_csv`` 多一格 ``include_features``（關掉只留 id／ok／
-score／bin）。
+CSV 只有一種，而 ``include_features`` 跟著卡片走（F37 → F38）
+------------------------------------------------------------
+寫得出 CSV 的卡走的是同一支 `export/report.write_csv`，欄位逐字相同。
+差別只有一格 ``include_features``（關掉只留 id／ok／score／bin）。
 
-**那一格刻意不搬到寫資料夾的那兩張卡上。** 兩者的工作不同：``output_csv`` 是
-一份**交付物**（餵給下一支程式、貼進報告），所以「要不要那幾百欄」是使用者
-的一格；資料夾裡那份 ``defects.csv`` 是**報表的隨附檔**，關掉特徵之後它幾乎
-是空的 —— 一格沒有人會打開的開關，代價是使用者多讀一段說明才知道不用管它
-（推廣鐵則）。
+**F37 B2 查證後的結論是「不要把那一格補到寫資料夾的卡上」**，理由是：
+``output_csv`` 是一份**交付物**（餵給下一支程式、貼進報告），所以「要不要那
+幾百欄」是使用者的一格；資料夾裡那份 ``defects.csv`` 是**報表的隨附檔**，
+關掉特徵之後幾乎是空的 —— 一格沒有人會打開的開關。當時還特地寫下「下一個
+看到這裡的人會想統一它，而那是加旋鈕不是收斂」。
 
-寫下來是因為「統一」聽起來永遠像對的：下一個看到這裡的人會想把那一格補到
-另外兩張卡上，而那是**加旋鈕**不是收斂。
+**F38 這一輪那個答案變了，而變的不是理由，是題目。** ``output_csv`` 這張卡
+不存在了，所以問題從「要不要**加**一格」變成「那一格要不要**跟著它的卡一起
+消失**」—— 而讓它消失會拿掉一個真的有人在用的用途（乾淨的交付物），代價比
+多一格大。使用者 2026-08-26 定調：**跟著進來，列為 advanced**。
+
+所以現在它在 ``output_report`` 上，``advanced=True`` 且
+``show_when=("contents", ("table",))`` —— 沒勾表格的人根本看不到它。
 
 ⚠ **試跑不會寫**（使用者定調）
 ------------------------------
@@ -189,279 +209,6 @@ class _OutputStep(Step):
         if not path:
             raise StepError(self.key, "nowhere to write - fill in “Write to”.")
         return path
-
-
-@register_step
-class OutputCsvStep(_OutputStep):
-    """整批的結果 → 一份 CSV（見模組 docstring）。"""
-
-    key = "output_csv"
-    label = "Write CSV"
-    help = ("Write one row per defect to a CSV file when the whole lot has "
-            "run - the id, whether it worked, the score, the bin and every "
-            "number the cards above measured. This is the feature table, so "
-            "it is also what you would feed to a classifier later.")
-    params = [
-        ParamSpec(
-            name="path", type="str", default="",
-            label="Write to",
-            help=("Full path of the CSV file to write, including the file "
-                  "name (for example C:\\\\work\\\\lot123\\\\defects.csv). Folders "
-                  "that do not exist yet are created. A recipe carries this "
-                  "path with it, so check it after moving a recipe to another "
-                  "machine."),
-        ),
-        ParamSpec(
-            name="include_features", type="bool", default=True,
-            label="Include the measured numbers",
-            help=("On: one column per number the cards above produced (the "
-                  "feature table). Off: only the id, whether it worked, the "
-                  "score and the bin."),
-        ),
-    ]
-    WHAT = "CSV file"
-
-    def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
-        p = self.validate_params(params)
-        path = self._path_of(p)
-        try:
-            written = export_report.write_csv(
-                bctx.rows, path, include_features=bool(p["include_features"]))
-        except OSError as e:
-            # 磁碟滿了、沒有權限、路徑不合法 —— 都是使用者修得動的事，所以
-            # 訊息要帶原因與路徑，不要只說「寫入失敗」。
-            raise StepError(self.key,
-                            "could not write %s: %s" % (path, e)) from e
-        bctx.add_output(written)
-
-
-@register_step
-class OutputReportStep(_OutputStep):
-    """整批的結果 → 一份 Excel 報表（摘要 / 明細 / 特徵統計）。"""
-
-    key = "output_report"
-    label = "Write report"
-    WHAT = "Excel file"
-    help = ("Write an Excel report when the whole lot has run: a summary "
-            "sheet (how many, how they split across bins, the score range), "
-            "the same table the CSV card writes, and one row per measured "
-            "number with its range. If the lot has an answer sheet next to "
-            "it, the summary also shows how often the pipeline agreed.")
-    params = [
-        ParamSpec(
-            name="path", type="str", default="",
-            label="Write to",
-            help=("Full path of the .xlsx file to write, including the file "
-                  "name. Folders that do not exist yet are created."),
-        ),
-    ]
-
-    def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
-        p = self.validate_params(params)
-        path = self._path_of(p)
-        try:
-            written = export_report.write_excel(bctx.rows, path,
-                                                recipe=bctx.recipe)
-        except ImportError as e:
-            # openpyxl 沒裝 —— 那是**環境**的事，不是 recipe 的事，所以訊息要
-            # 指向 `tools/install_offline.py`（公司機裝不了東西，見 AGENTS.md）。
-            raise StepError(
-                self.key,
-                "cannot write Excel here: %s. Install openpyxl (on the fab "
-                "machine: tools/install_offline.py), or use the CSV card "
-                "instead - it needs nothing extra." % e) from e
-        except OSError as e:
-            raise StepError(self.key,
-                            "could not write %s: %s" % (path, e)) from e
-        bctx.add_output(written)
-
-
-@register_step
-class OutputKlarfStep(_OutputStep):
-    """整批的結果 → 寫回 KLARF（三種模式）。"""
-
-    key = "output_klarf"
-    label = "Write KLARF"
-    WHAT = "KLARF file"
-    help = ("Write the results back into a KLARF file when the whole lot has "
-            "run. “annotate” keeps the original untouched and saves a new "
-            "file with the score and class added; “in place” edits the "
-            "original, changing only the bytes it has to; “top N” saves a new "
-            "file holding just the highest scoring defects.")
-    params = [
-        ParamSpec(
-            name="mode", type="choice", default="annotate",
-            choices=list(klarf_out.MODES),
-            label="How to write it",
-            help=("annotate = a new file with ADCSCORE and ADCCLASS added "
-                  "(the original is untouched - start here). inplace = edit "
-                  "the original file, changing only the bytes that have to "
-                  "change. topn = a new file with only the highest scoring "
-                  "defects in it."),
-        ),
-        ParamSpec(
-            name="path", type="str", default="",
-            label="Write to",
-            help=("Full path of the KLARF file to write. Folders that do not "
-                  "exist yet are created. For “in place” this is the file "
-                  "that gets edited, so point it at the original."),
-        ),
-        # ---- mode = topn ---------------------------------------------------
-        ParamSpec(
-            name="top_n", type="int", default=100, min=0, max=1000000,
-            show_when=("mode", ("topn",)),
-            label="How many to keep",
-            help=("How many of the highest scoring defects to write out. Set "
-                  "it to 0 to use the score threshold below instead."),
-        ),
-        ParamSpec(
-            name="min_score", type="float", default=0.0, min=-1e9, max=1e9,
-            show_when=("mode", ("topn",)),
-            label="…or keep everything scoring at least",
-            help=("Used only when “How many to keep” is 0: keep every defect "
-                  "whose score is this or higher, however many that turns out "
-                  "to be."),
-        ),
-        ParamSpec(
-            name="renumber", type="bool", default=True,
-            show_when=("mode", ("topn",)),
-            label="Renumber the defects 1, 2, 3…",
-            help=("On: the defects in the new file are numbered from 1. Off: "
-                  "they keep the ids they had in the original, so you can "
-                  "still match them up."),
-        ),
-        ParamSpec(
-            name="include_annotations", type="bool", default=True,
-            show_when=("mode", ("topn",)),
-            label="Also add the score and class columns",
-            help=("On: the new file also gets the ADCSCORE and ADCCLASS "
-                  "columns, the same as the annotate mode writes."),
-        ),
-        # ---- mode = inplace --------------------------------------------------
-        # 這四格是「寫進**既有**的欄位」—— inplace 的全部意義。一格都不填的話
-        # 輸出檔與原檔**逐位元組相同**（`apply_writeback` 的契約），而那正是
-        # 使用者第一次按下去時該發生的事。
-        ParamSpec(
-            name="class_col", type="str", default="",
-            show_when=("mode", ("inplace",)),
-            label="Write the class into",
-            help=("Name of an existing column to write the bin number into "
-                  "(CLASSNUMBER is the usual one). Leave it empty to not "
-                  "touch it. The column has to be there already - in place "
-                  "never adds columns."),
-        ),
-        ParamSpec(
-            name="bin_col", type="str", default="",
-            show_when=("mode", ("inplace",)),
-            label="…and also into",
-            help=("A second existing column for the same bin number "
-                  "(ROUGHBINNUMBER or FINEBINNUMBER). Leave it empty to not "
-                  "touch it."),
-        ),
-        ParamSpec(
-            name="size_col", type="str", default="",
-            show_when=("mode", ("inplace",)),
-            label="Write the size into",
-            help=("Name of an existing column to write a measured size into "
-                  "(DSIZE is the usual one). Leave it empty to not touch it."),
-        ),
-        ParamSpec(
-            name="size_feature", type="feature_key", default="cd_median",
-            advanced=True, show_when=("mode", ("inplace",)),
-            label="…using this number",
-            help=("Which measured number goes into the size column. Only used "
-                  "when a size column is named above."),
-        ),
-        ParamSpec(
-            name="size_scale", type="float", default=1.0, min=0.0, max=1e6,
-            advanced=True, show_when=("mode", ("inplace",)),
-            label="nm per pixel for sizes",
-            help=("What to multiply the measured pixel sizes by before "
-                  "writing them into the size column. Leave it at 1 to write "
-                  "pixels, which is what everything in this pipeline "
-                  "measures."),
-        ),
-    ]
-
-    @classmethod
-    def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:
-        """``size_feature`` —— **只在真的指定了 size 欄位的時候才算數**。
-
-        它有一個非空的預設（``cd_median``），而 inplace 一格目標欄位都沒填是
-        完全正常的用法（輸出檔與原檔逐位元組相同）。照型別無條件掃的話，那種
-        recipe 會因為一個**沒有在用的預設值**被報一句話。
-        """
-        if str(params.get("mode", "") or "") != "inplace":
-            return []
-        if not str(params.get("size_col", "") or "").strip():
-            return []
-        name = str(params.get("size_feature", "") or "").strip()
-        return [name] if name else []
-
-    def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
-        p = self.validate_params(params)
-        path = self._path_of(p)
-        doc = getattr(bctx.dataset, "klarf", None)
-        if doc is None:
-            # 沒有 KLARF 的兩種輸入（folder / tiff_stack）—— 那件事在載入的當下
-            # 就講過了（資料集標籤上常駐 `· no KLARF`），這裡不要假裝是別的問題。
-            raise StepError(
-                self.key,
-                "this data has no KLARF to write back into (it came from a "
-                "folder of images or a TIFF stack, which carry no "
-                "coordinates). Use the CSV or report card instead.")
-        # **每個 mode 吃的選項不一樣**，而 `apply_writeback` 會把多給的那個
-        # 當成錯誤（那是對的 —— 悄悄忽略一個使用者填了的值更糟）。
-        # `size_scale` 只有 inplace 用得到（它是寫進 DSIZE 欄的那個換算）。
-        opts: Dict[str, Any] = {}
-        mode = str(p["mode"])
-        if mode == "topn":
-            # ⚠ 引擎那一邊的關鍵字是 **`n`**（`_build_topn`），不是 `top_n`。
-            # 參數名維持 `top_n`（recipe 的鍵，而且 `n` 對使用者不是一句話），
-            # 在這裡轉一次。第一版直接送 `top_n` —— 它落進 `**annot_opts`，
-            # 於是 **每一次 topn 寫回都失敗**，而測試只覆蓋了 annotate。
-            opts["n"] = int(p["top_n"])
-            opts["min_score"] = float(p["min_score"])
-            opts["renumber"] = bool(p["renumber"])
-            opts["include_annotations"] = bool(p["include_annotations"])
-        elif mode == "inplace":
-            opts["size_scale"] = float(p["size_scale"])
-            opts["size_feature"] = str(p["size_feature"]).strip() or "cd_median"
-            # **空字串 = 不要碰那一欄**，所以空的不能送進去 —— 送了的話
-            # `apply_writeback` 會去找一個叫 "" 的欄位然後報「沒有這個欄位」。
-            for name, key in (("class_col", "class_col"),
-                              ("bin_col", "bin_col"),
-                              ("size_col", "size_col")):
-                value = str(p[name]).strip()
-                if value:
-                    opts[key] = value
-        try:
-            plan = klarf_out.apply_writeback(doc, bctx.rows, str(p["mode"]),
-                                             path, **opts)
-        except klarf_out.ExportError as e:
-            raise StepError(self.key, str(e)) from e
-        except OSError as e:
-            raise StepError(self.key,
-                            "could not write %s: %s" % (path, e)) from e
-        bctx.add_output(path)
-        # 寫回是**不可逆**的，所以「到底改了幾列」要講出來 —— 那是 M5 的
-        # 「寫回前一定先預覽變更」在 CLI 這一側剩下的那一半。
-        bctx.warn("KLARF %s: %d row(s) changed, %d row(s) written."
-                  % (str(p["mode"]), int(getattr(plan, "n_rows_changed", 0)),
-                     int(getattr(plan, "n_rows_out", 0))))
-        # **`plan.notes` 也要帶出來**（B6，2026-08-24）。`klarf_out` 已經把
-        # 「為什麼」寫好了，而以前只有計數走得出來 —— 於是 inplace 一格目標
-        # 欄位都沒填的時候，使用者看到的是「0 row(s) changed」，
-        # 一句答不出「那我該填什麼」的話。那份說明就在手上：
-        #
-        #   "No target column was given (class_col / bin_col / size_col are
-        #    all empty), so the output file will be byte-for-byte identical
-        #    to the original."
-        #
-        # 其他 mode 的 notes 同樣有用（影像參照怎麼處理、幾顆對不到 DEFECTID、
-        # DSIZE 那一欄的單位換算）—— 那些以前也全部沒有出口。
-        for note in (getattr(plan, "notes", None) or []):
-            bctx.warn("KLARF %s: %s" % (str(p["mode"]), note))
 
 
 def _warn_if_unranked(key: str, bctx: Any, rows: Any,
@@ -605,7 +352,29 @@ CONTENT_REPORT = "report"
 CONTENT_TABLE = "table"
 CONTENT_PICTURES = "pictures"
 CONTENT_RECIPE = "recipe"
-CONTENTS = (CONTENT_REPORT, CONTENT_TABLE, CONTENT_PICTURES, CONTENT_RECIPE)
+#: F38 併進來的兩樣（原 ``output_report`` 的 Excel 與 ``output_boxplot``）。
+CONTENT_EXCEL = "excel"
+CONTENT_BOXPLOT = "boxplot"
+#: **勾得到的全部**（＝驗證表）。
+CONTENTS = (CONTENT_REPORT, CONTENT_TABLE, CONTENT_PICTURES, CONTENT_RECIPE,
+            CONTENT_EXCEL, CONTENT_BOXPLOT)
+
+#: **預設勾哪幾個** —— 跟 :data:`CONTENTS` 是**兩份**，這一點很要緊。
+#:
+#: 「列得出什麼」與「預設是什麼」寫成同一份的話，F38 加進 Excel 與 box plot
+#: 的那一刻，每一份**沒有寫 ``contents`` 這個鍵**的舊 ``output_bundle``
+#: recipe（出貨那份就是）都會安靜地多寫兩個檔案 —— 因為「鍵不在」的解讀是
+#: 「還沒設過＝用預設」。同一個形狀 F18 踩過一次（`COMPARE_METRICS` 同時是
+#: 清單與驗證表，見 `docs/PITFALLS.md`）。
+#:
+#: 另外兩個不預設勾，各自還有一個自己的理由：
+#:
+#: * **Excel 要 `openpyxl`**，而公司機不一定裝得起來（`AGENTS.md` §1）。
+#:   預設開啟等於把一個環境問題變成每一份 recipe 都會看到的一句警告。
+#: * **box plot 要有判定樹或一份指定的清單**，兩個都沒有的時候它講一句話 ——
+#:   預設開啟等於對每一份沒有樹的 recipe 喊狼來了（推廣鐵則）。
+DEFAULT_CONTENTS = (CONTENT_REPORT, CONTENT_TABLE, CONTENT_PICTURES,
+                    CONTENT_RECIPE)
 
 #: 圖要寫成哪一種檔（F37）。
 #:
@@ -619,16 +388,32 @@ PIC_FORMATS = (PIC_JPEG, PIC_PNG)
 
 
 def contents_spec() -> ParamSpec:
-    """「這個資料夾裡要放什麼」（見 :data:`CONTENTS`）。"""
+    """「這個資料夾裡要放什麼」（見 :data:`CONTENTS` 與 :data:`DEFAULT_CONTENTS`）。"""
     return ParamSpec(
-        name="contents", type="multi_choice", default=",".join(CONTENTS),
+        name="contents", type="multi_choice",
+        default=",".join(DEFAULT_CONTENTS),
         choices=list(CONTENTS), label="What to put in the folder",
-        help=("Tick what this folder should hold. report is a page you open "
-              "in a browser with a picture of every defect; table is the same "
-              "numbers as a CSV; pictures is one image per defect; recipe is "
-              "the settings that produced them, so the run can be reproduced "
-              "later. Tick pictures on its own and you get a plain folder of "
-              "images and nothing else."),
+        choice_help={
+            CONTENT_REPORT: "A page you open in a browser: how the lot split "
+                            "across the classes, then one row per defect. "
+                            "Tick pictures too and you can click a row to "
+                            "see that defect.",
+            CONTENT_TABLE: "The same numbers as a CSV, for opening in Excel "
+                           "or feeding to something else.",
+            CONTENT_PICTURES: "One image per defect, in an images folder "
+                              "beside the report.",
+            CONTENT_EXCEL: "An .xlsx workbook: a summary sheet, the same "
+                           "table again, and the range of every measured "
+                           "number. Needs openpyxl installed.",
+            CONTENT_BOXPLOT: "One box plot per number, with a box for each "
+                             "class the decision came up with - so you can "
+                             "see at a glance whether the classes separate.",
+            CONTENT_RECIPE: "The settings that produced all of this, so the "
+                            "run can be reproduced later.",
+        },
+        help=("Tick what this folder should hold. Everything else on this "
+              "card is about the things you tick here. Tick pictures on its "
+              "own and you get a plain folder of images and nothing else."),
     )
 
 
@@ -769,26 +554,52 @@ def _roi_overlay_kwargs(ctx: Any, p: Dict[str, Any]):
 
 
 #: HTML 報表的樣式。**inline，而且只有純文字** —— 這個 repo 是純文字的
-#: （`AGENTS.md` §2：唯一的傳輸通道是剪貼簿），而且報表要能單獨寄給別人：
-#: 一個外部 .css 檔會在轉寄的那一刻不見。
-# ⚠ **HTML 的版面與那幾支小工具搬去 `core/export/html.py` 了**（F29 C2）：
-# `output_html` 與 `output_bundle` 產的是同一份東西，差別只在圖放不放得進來 ——
-# 抄第二份出來的那一份一定會漂。
 
 
 @register_step
-class OutputBundleStep(_OutputStep):
-    """一個資料夾：報表 ＋ 一顆一張的疊圖 ＋ CSV ＋ 產它的那份 recipe。"""
+class OutputReportStep(_OutputStep):
+    """整批的結果 → 一個資料夾（**Output 段那五張報表卡收成的這一張**，F38）。
 
-    key = "output_bundle"
-    label = "Write report folder"
+    為什麼是一張卡加一排勾，不是五張卡
+    ----------------------------------
+    使用者 2026-08-26：「七張裡有五張在回答同一個問題，收成三張」。而那句話
+    量得出來 —— 合併之前：
+
+    * ``output_html`` 與 ``output_bundle`` 的報表**已經是同一支函式**
+      （`export/html.py::build_report`），差別只有一個關鍵字參數 ``images=``；
+    * ``output_csv`` / ``output_bundle`` / ``output_char`` 三張走同一支
+      `export_report.write_csv`，欄位逐字相同；
+    * Excel 的 ``Details`` 分頁就是 CSV 那張表（`export/report.py`）；
+    * 出貨的 `recipes/patch-dsnr-by-class.json` 裡，box plot 的路徑本來就寫著
+      ``patch_report/spread.html`` —— 它**早就寫進報表資料夾裡**。
+
+    所以在使用者眼裡它們不是五件事，是「我要一份報表，裡面要有什麼」的五個
+    程度（`CLAUDE.md` §3 的「同一個家族的做法收成一張卡」，前例 F19 的 CD、
+    F29 的 `roi_reference`、F37 的 `output_image`）。
+
+    ⚠ **`output_char` 沒有併進來**，而那是查過帳的決定（F37 §5.1，使用者
+    「先不合」）：兩種版面的取捨在 6000 顆與 30 顆是**反過來的**，共用的部分
+    F37 B2 已經抽乾淨了。守著那個決定的是
+    `tests/test_output_convergence.py::test_the_two_layouts_are_still_two_functions`。
+
+    ⚠ **產物的形狀一律是資料夾**（使用者 2026-08-26 定調）。合併之前
+    ``output_csv`` / ``output_html`` / ``output_boxplot`` / Excel 那四張各自
+    是「一格路徑＝一個檔案」，所以舊 recipe 遷移過來**檔名會換成底下那幾個
+    寫死的名字**（`/x/my.csv` → `/x/defects.csv`）。內容逐位元組相同、路徑會
+    位移，對照表寫在 `recipe._migrate_folded_output_cards` 的 docstring 裡。
+    """
+
+    key = "output_report"
+    label = "Write report"
     PATH = "folder"
     WHAT = "folder"
-    help = ("Write everything about this run into one folder: a report you "
-            "can open in a browser with a picture of every defect, the same "
-            "numbers as a spreadsheet, and the recipe that produced them. "
-            "Made for a whole lot - thousands of defects fit, because the "
-            "pictures sit beside the report instead of inside it.")
+    help = ("Write this run into one folder: a report you can open in a "
+            "browser, the same numbers as a spreadsheet, a picture of every "
+            "defect, and the recipe that produced them. Tick what you want in "
+            "“What to put in the folder” - everything else on this card is "
+            "about the things you ticked. Made for a whole lot: thousands of "
+            "defects fit, because the pictures sit beside the report instead "
+            "of inside it.")
     params = [
         ParamSpec(
             name="folder", type="str", default="",
@@ -828,26 +639,76 @@ class OutputBundleStep(_OutputStep):
                   "side. Off: just the image."),
         ),
         *roi_draw_specs(),
+        # 從 `output_html` 併進來的那一格。**box plot 那一頁共用它** ——
+        # 兩張卡以前各有一格 `title`，而它們問的是同一句話（這一頁的標題，
+        # 空的就用 recipe 的名字）。兩格留著的話，同一個資料夾裡兩份東西會
+        # 掛著兩個不同的抬頭，而使用者沒有理由要它們不一樣。
+        ParamSpec(
+            name="title", type="str", default="",
+            label="Heading",
+            help=("Heading to put at the top of the pages this card writes. "
+                  "Leave it empty to use the recipe's name."),
+        ),
+        # 從 `output_boxplot` 併進來的 `features`，**改名了**（F38）。
+        #
+        # 它跟底下那格 `include_features` 擺在同一張卡上，兩個名字都以
+        # 「features」開頭而意思完全不同（這一格是「畫哪幾個數字」，那一格是
+        # 「CSV 要不要帶特徵欄」）。`label` 逐字沒變，所以**畫面上一個字都
+        # 沒動** —— 換的只有 recipe 的鍵（`ParamSpec.label` 存在的理由，F7-9）。
+        #
+        # ⚠ 型別必須留著 `feature_keys`：特徵改名走的是**型別**不是卡片清單
+        # （`recipe._rename_in_node_params`），改成 `str` 的話這一格會安靜地
+        # 漏掉，而症狀是「圖照畫，只是畫的不是你在判的那個數字」。
+        ParamSpec(
+            name="plot_features", type="feature_keys", default="",
+            label="Numbers to plot",
+            show_when=("contents", (CONTENT_BOXPLOT,)),
+            help=("One chart per number, in this order. Leave it empty and "
+                  "the box plot shows whatever the decision itself asked "
+                  "about - which is usually exactly what you want to see "
+                  "spread out."),
+        ),
+        # 從 `output_csv` 併進來的那一格（使用者 2026-08-26 定調：跟著進來，
+        # 列為 advanced）。**這推翻了 F37 B2 §1 的結論**，見模組說明。
+        ParamSpec(
+            name="include_features", type="bool", default=True,
+            label="Include the measured numbers", advanced=True,
+            show_when=("contents", (CONTENT_TABLE,)),
+            help=("On: the spreadsheet gets one column per number the cards "
+                  "above produced (the feature table). Off: only the id, "
+                  "whether it worked, the score and the bin."),
+        ),
     ]
 
-    #: 資料夾裡那幾個名字（**寫死**：一份 bundle 換一台機器打開還是同一個形狀）。
+    #: 資料夾裡那幾個名字（**寫死**：一份報表換一台機器打開還是同一個形狀）。
     REPORT_NAME = "report.html"
     CSV_NAME = "defects.csv"
     RECIPE_NAME = "recipe.json"
+    EXCEL_NAME = "report.xlsx"
+    PLOT_NAME = "spread.html"
     IMAGE_DIR = "images"
+
+    #: 判定沒有給出類別時（一份沒有 `decide` 的 recipe），全部畫成一個盒子。
+    ALL_LABEL = "the whole lot"
 
     @classmethod
     def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:
-        """``rank_by``（見 `ranked_feature`）—— 少了圖照樣寫，順序退回檔案順序。"""
-        return ranked_feature(params)
+        """``rank_by`` ＋ ``plot_features``。
+
+        兩格都是「指到一個不存在的數字也跑得完」的那種（排不出順序就退回檔案
+        順序、畫不出來就少一張圖），所以是 optional 不是 required。
+        """
+        return (ranked_feature(params)
+                + parse_key_list(params.get("plot_features", "")))
 
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
         out = list(super().configuration_issues(params))
-        # **「這個鍵不在」＝還沒設過＝預設全勾**，不是「一個都沒勾」。
+        # **「這個鍵不在」＝還沒設過＝預設那幾個**，不是「一個都沒勾」。
         # 兩者差很多：前者是每一份合併之前存下來的 recipe（那時候沒有這一格），
         # 而把它們一律說成設定錯誤，等於對著每一份舊檔案喊狼來了。
-        if not parse_key_list(params.get("contents", ",".join(CONTENTS))):
+        if not parse_key_list(params.get("contents",
+                                         ",".join(DEFAULT_CONTENTS))):
             # 一個都沒勾的資料夾**會被建出來、而且是空的** —— 跑得完、
             # 沒有錯誤、什麼都沒有。那是這張卡最容易犯的新錯（合併之前
             # 不存在，因為當時沒有「要寫什麼」這一格）。
@@ -856,6 +717,91 @@ class OutputBundleStep(_OutputStep):
                        "one thing.")
         return out
 
+    # ----------------------------------------------------------------- #
+    # box plot（併進來的 `output_boxplot`，F38）
+    # ----------------------------------------------------------------- #
+    def _charts(self, bctx: Any, names: List[str],
+                groups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """``names`` × ``groups`` → 每個特徵一張圖。
+
+        **一顆都沒量到那個數字的特徵整張圖不畫**，而且要在 warn 裡說出來 ——
+        一張每一格都寫著「no data」的圖比沒有那張圖更糟（推廣鐵則）。
+        """
+        by_id: Dict[str, Dict[str, Any]] = {}
+        for row in bctx.rows:
+            by_id[str(row.get("defect_id", ""))] = dict(
+                row.get("features") or {})
+        charts: List[Dict[str, Any]] = []
+        empty: List[str] = []
+        for name in names:
+            series = []
+            for g in groups:
+                vals = [by_id.get(str(d), {}).get(name)
+                        for d in (g.get("ids") or [])]
+                series.append({"name": g.get("name") or "?",
+                               "colour": g.get("colour"),
+                               "values": [v for v in vals if v is not None]})
+            if not any(s["values"] for s in series):
+                empty.append(name)
+                continue
+            charts.append({"title": name, "series": series,
+                           "subtitle": "one box per class - the line is the "
+                                       "median, the box is the middle half"})
+        if empty:
+            bctx.warn(
+                "Box plot: no defect has a number called %s, so %s not "
+                "plotted. Check the spelling in “Numbers to plot”, or leave "
+                "that box empty to plot whatever the decision asks about."
+                % (", ".join("“%s”" % n for n in empty),
+                   "it was" if len(empty) == 1 else "they were"))
+        return charts
+
+    def _write_boxplot(self, bctx: Any, p: Dict[str, Any], path: str) -> None:
+        """一片葉子一個盒子（原 `output_boxplot`，行為逐字不變）。
+
+        ⚠ **一個盒子是一片葉子，不是一個 bin。** 兩片葉子共用一個 bin 是合法
+        的，而它們是使用者眼中兩個不同的類別（`verdict_rows` 的說明）。順序與
+        顏色跟畫布上的樹一樣 —— 三個地方講同一件事的時候，長相也該是同一個。
+        """
+        decide = getattr(bctx.recipe, "decide", None)
+        names = parse_key_list(p["plot_features"])
+        if not names:
+            # **判定問過的那幾個** —— 使用者想看的散布，九成是他拿來分類的那些。
+            names = decide_tree.features_used(decide) if decide else []
+        if not names:
+            raise StepError(
+                self.key,
+                "nothing to plot: “Numbers to plot” is empty and this recipe "
+                "has no decision to borrow the numbers from. Put the name of "
+                "at least one measured number in that box, or untick the box "
+                "plot.")
+        groups = [g for g in decide_tree.verdict_rows(decide, bctx.rows)
+                  if g.get("kind") not in ("failed", "unbinned")
+                  and (g.get("ids") or [])]
+        if not groups:
+            groups = [{"name": self.ALL_LABEL,
+                       "ids": [str(r.get("defect_id", ""))
+                               for r in bctx.rows if r.get("ok")],
+                       "colour": export_boxplot.FALLBACK_COLOUR}]
+        charts = self._charts(bctx, names, groups)
+        # ⚠ 這一頁的 fallback 是 ``"d4t"``，報表那一頁是 ``"d4t results"``
+        # —— 合併之前兩張卡就是這樣，而它只在「recipe 沒有名字」時看得出差別。
+        # 統一成一個的話，那幾份 recipe 的輸出會安靜地換一個抬頭。
+        title = (str(p["title"]).strip()
+                 or str(getattr(bctx.recipe, "recipe_id", "") or "d4t"))
+        export_html.write_html(
+            export_boxplot.build_boxplot_page(
+                charts, title,
+                subtitle="%d defect(s), %d class(es)"
+                         % (len(bctx.rows), len(groups)),
+                note=("Each box covers the middle half of the defects in that "
+                      "class; the whiskers reach the furthest defect within "
+                      "1.5 x that spread, and anything beyond is drawn as a "
+                      "ring. Classes that do not overlap are classes this "
+                      "number can tell apart.")),
+            path)
+
+    # ----------------------------------------------------------------- #
     def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
         p = self.validate_params(params)
         folder = self._folder_of(p)
@@ -915,27 +861,70 @@ class OutputBundleStep(_OutputStep):
             except Exception:       # noqa: BLE001 — 一顆畫不出來不該殺掉整批
                 skipped += 1
 
-        # ---- ② 報表（**每一顆都在**，只有圖有上限）-------------------------
-        title = str(getattr(bctx.recipe, "recipe_id", "") or "d4t results")
-        try:
-            if CONTENT_REPORT in want:
-                export_html.write_html(
-                    export_html.build_report(
-                        rows, title, export_report.feature_keys(rows),
-                        decide=getattr(bctx.recipe, "decide", None),
-                        images=images),
-                    os.path.join(folder, self.REPORT_NAME))
-            if CONTENT_TABLE in want:
-                export_report.write_csv(rows,
-                                        os.path.join(folder, self.CSV_NAME))
-            # ---- ③ 產它的那份 recipe --------------------------------------
+        # ---- ② 其餘每一樣**各自寫、各自失敗**（F38）-----------------------
+        #
+        # 合併之前這幾樣是五張卡，所以「Excel 寫不出來」只毀掉 Excel 那張卡。
+        # 併成一張之後，一個 raise 會把報表、CSV、圖、recipe 一起丟掉 ——
+        # 那是合併帶進來的、以前不存在的壞法。所以規則是：**一樣失敗就是一句
+        # 話，不連坐**；勾了的全部失敗才 raise（那時候這張卡真的什麼都沒做，
+        # 而「跑完了但資料夾是空的」比一個錯誤訊息糟得多）。
+        title = (str(p["title"]).strip()
+                 or str(getattr(bctx.recipe, "recipe_id", "") or "d4t results"))
+        jobs = [
+            (CONTENT_REPORT, "the report", self.REPORT_NAME,
+             lambda path: export_html.write_html(
+                 export_html.build_report(
+                     rows, title, export_report.feature_keys(rows),
+                     decide=getattr(bctx.recipe, "decide", None),
+                     images=images),
+                 path)),
+            (CONTENT_TABLE, "the spreadsheet", self.CSV_NAME,
+             lambda path: export_report.write_csv(
+                 rows, path, include_features=bool(p["include_features"]))),
+            (CONTENT_EXCEL, "the Excel report", self.EXCEL_NAME,
+             lambda path: export_report.write_excel(rows, path,
+                                                    recipe=bctx.recipe)),
+            (CONTENT_BOXPLOT, "the box plot", self.PLOT_NAME,
+             lambda path: self._write_boxplot(bctx, p, path)),
             # **沒有它，半年後沒人重現得出這份報表。** 那不是保險，是這份東西
             # 有沒有用的分界：一疊數字沒有配方，等於一句「我們那時候量到這樣」。
-            if CONTENT_RECIPE in want:
-                self._write_recipe(bctx, os.path.join(folder, self.RECIPE_NAME))
-        except OSError as e:
-            raise StepError(self.key,
-                            "could not write into %s: %s" % (folder, e)) from e
+            (CONTENT_RECIPE, "the recipe", self.RECIPE_NAME,
+             lambda path: write_recipe_json(bctx, path)),
+        ]
+        asked = 0
+        done = 0
+        why: List[str] = []
+        for tick, what, name, write in jobs:
+            if tick not in want:
+                continue
+            asked += 1
+            try:
+                write(os.path.join(folder, name))
+                done += 1
+                continue
+            except ImportError as e:
+                # openpyxl 沒裝 —— 那是**環境**的事，不是 recipe 的事，所以
+                # 訊息要指向 `tools/install_offline.py`（公司機裝不了東西，
+                # 見 AGENTS.md）。
+                said = ("could not write %s: %s. Install openpyxl (on the "
+                        "fab machine: tools/install_offline.py), or untick "
+                        "Excel - the spreadsheet tick needs nothing extra."
+                        % (what, e))
+            except StepError as e:
+                # 那一樣自己講得出**下一步**（box plot 的「Numbers to plot」
+                # 是空的那一句）。包一層「something went wrong」上去的話，
+                # 使用者拿到的是一句沒有下一步的話（推廣鐵則）。
+                said = str(getattr(e, "detail", "") or e)
+            except Exception as e:  # noqa: BLE001 — 一樣失敗不連坐其他樣
+                said = "could not write %s: %s" % (what, e)
+            why.append(said)
+            bctx.warn("Report folder: %s" % said)
+        if asked and not done:
+            # **勾了的全部失敗 ⇒ 這張卡真的什麼都沒做**，那不是一句警告。
+            # 訊息帶著每一樣自己的理由 —— 只勾了一樣的時候（＝每一份從舊的
+            # 單檔卡遷移過來的 recipe），那句話跟合併之前逐字相同。
+            raise StepError(self.key, " ".join(why))
+
         bctx.add_output(folder)
         if skipped:
             # **講出來**：少幾張圖的報表跟完整的長得一模一樣。
@@ -950,6 +939,194 @@ class OutputBundleStep(_OutputStep):
     def _write_recipe(self, bctx: Any, path: str) -> None:
         """見 :func:`write_recipe_json` —— 這裡只是它的舊名字。"""
         write_recipe_json(bctx, path)
+
+
+@register_step
+class OutputKlarfStep(_OutputStep):
+    """整批的結果 → 寫回 KLARF（三種模式）。"""
+
+    key = "output_klarf"
+    label = "Write KLARF"
+    WHAT = "KLARF file"
+    help = ("Write the results back into a KLARF file when the whole lot has "
+            "run. “annotate” keeps the original untouched and saves a new "
+            "file with the score and class added; “in place” edits the "
+            "original, changing only the bytes it has to; “top N” saves a new "
+            "file holding just the highest scoring defects.")
+    params = [
+        ParamSpec(
+            name="mode", type="choice", default="annotate",
+            choices=list(klarf_out.MODES),
+            label="How to write it",
+            help=("annotate = a new file with ADCSCORE and ADCCLASS added "
+                  "(the original is untouched - start here). inplace = edit "
+                  "the original file, changing only the bytes that have to "
+                  "change. topn = a new file with only the highest scoring "
+                  "defects in it."),
+        ),
+        ParamSpec(
+            name="path", type="str", default="",
+            label="Write to",
+            help=("Full path of the KLARF file to write. Folders that do not "
+                  "exist yet are created. For “in place” this is the file "
+                  "that gets edited, so point it at the original."),
+        ),
+        # ---- mode = topn ---------------------------------------------------
+        ParamSpec(
+            name="top_n", type="int", default=100, min=0, max=1000000,
+            show_when=("mode", ("topn",)),
+            label="How many to keep",
+            help=("How many of the highest scoring defects to write out. Set "
+                  "it to 0 to use the score threshold below instead."),
+        ),
+        ParamSpec(
+            name="min_score", type="float", default=0.0, min=-1e9, max=1e9,
+            show_when=("mode", ("topn",)),
+            label="…or keep everything scoring at least",
+            help=("Used only when “How many to keep” is 0: keep every defect "
+                  "whose score is this or higher, however many that turns out "
+                  "to be."),
+        ),
+        ParamSpec(
+            name="renumber", type="bool", default=True,
+            show_when=("mode", ("topn",)),
+            label="Renumber the defects 1, 2, 3…",
+            help=("On: the defects in the new file are numbered from 1. Off: "
+                  "they keep the ids they had in the original, so you can "
+                  "still match them up."),
+        ),
+        ParamSpec(
+            name="include_annotations", type="bool", default=True,
+            show_when=("mode", ("topn",)),
+            label="Also add the score and class columns",
+            help=("On: the new file also gets the ADCSCORE and ADCCLASS "
+                  "columns, the same as the annotate mode writes."),
+        ),
+        # ---- mode = inplace --------------------------------------------------
+        # 這四格是「寫進**既有**的欄位」—— inplace 的全部意義。一格都不填的話
+        # 輸出檔與原檔**逐位元組相同**（`apply_writeback` 的契約），而那正是
+        # 使用者第一次按下去時該發生的事。
+        ParamSpec(
+            name="class_col", type="str", default="",
+            show_when=("mode", ("inplace",)),
+            label="Write the class into",
+            help=("Name of an existing column to write the bin number into "
+                  "(CLASSNUMBER is the usual one). Leave it empty to not "
+                  "touch it. The column has to be there already - in place "
+                  "never adds columns."),
+        ),
+        ParamSpec(
+            name="bin_col", type="str", default="",
+            show_when=("mode", ("inplace",)),
+            label="…and also into",
+            help=("A second existing column for the same bin number "
+                  "(ROUGHBINNUMBER or FINEBINNUMBER). Leave it empty to not "
+                  "touch it."),
+        ),
+        ParamSpec(
+            name="size_col", type="str", default="",
+            show_when=("mode", ("inplace",)),
+            label="Write the size into",
+            help=("Name of an existing column to write a measured size into "
+                  "(DSIZE is the usual one). Leave it empty to not touch it."),
+        ),
+        ParamSpec(
+            name="size_feature", type="feature_key", default="cd_median",
+            advanced=True, show_when=("mode", ("inplace",)),
+            label="…using this number",
+            help=("Which measured number goes into the size column. Only used "
+                  "when a size column is named above."),
+        ),
+        ParamSpec(
+            name="size_scale", type="float", default=1.0, min=0.0, max=1e6,
+            advanced=True, show_when=("mode", ("inplace",)),
+            label="nm per pixel for sizes",
+            help=("What to multiply the measured pixel sizes by before "
+                  "writing them into the size column. Leave it at 1 to write "
+                  "pixels, which is what everything in this pipeline "
+                  "measures."),
+        ),
+    ]
+
+    @classmethod
+    def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:
+        """``size_feature`` —— **只在真的指定了 size 欄位的時候才算數**。
+
+        它有一個非空的預設（``cd_median``），而 inplace 一格目標欄位都沒填是
+        完全正常的用法（輸出檔與原檔逐位元組相同）。照型別無條件掃的話，那種
+        recipe 會因為一個**沒有在用的預設值**被報一句話。
+        """
+        if str(params.get("mode", "") or "") != "inplace":
+            return []
+        if not str(params.get("size_col", "") or "").strip():
+            return []
+        name = str(params.get("size_feature", "") or "").strip()
+        return [name] if name else []
+
+    def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
+        p = self.validate_params(params)
+        path = self._path_of(p)
+        doc = getattr(bctx.dataset, "klarf", None)
+        if doc is None:
+            # 沒有 KLARF 的兩種輸入（folder / tiff_stack）—— 那件事在載入的當下
+            # 就講過了（資料集標籤上常駐 `· no KLARF`），這裡不要假裝是別的問題。
+            raise StepError(
+                self.key,
+                "this data has no KLARF to write back into (it came from a "
+                "folder of images or a TIFF stack, which carry no "
+                "coordinates). Use the report card instead.")
+        # **每個 mode 吃的選項不一樣**，而 `apply_writeback` 會把多給的那個
+        # 當成錯誤（那是對的 —— 悄悄忽略一個使用者填了的值更糟）。
+        # `size_scale` 只有 inplace 用得到（它是寫進 DSIZE 欄的那個換算）。
+        opts: Dict[str, Any] = {}
+        mode = str(p["mode"])
+        if mode == "topn":
+            # ⚠ 引擎那一邊的關鍵字是 **`n`**（`_build_topn`），不是 `top_n`。
+            # 參數名維持 `top_n`（recipe 的鍵，而且 `n` 對使用者不是一句話），
+            # 在這裡轉一次。第一版直接送 `top_n` —— 它落進 `**annot_opts`，
+            # 於是 **每一次 topn 寫回都失敗**，而測試只覆蓋了 annotate。
+            opts["n"] = int(p["top_n"])
+            opts["min_score"] = float(p["min_score"])
+            opts["renumber"] = bool(p["renumber"])
+            opts["include_annotations"] = bool(p["include_annotations"])
+        elif mode == "inplace":
+            opts["size_scale"] = float(p["size_scale"])
+            opts["size_feature"] = str(p["size_feature"]).strip() or "cd_median"
+            # **空字串 = 不要碰那一欄**，所以空的不能送進去 —— 送了的話
+            # `apply_writeback` 會去找一個叫 "" 的欄位然後報「沒有這個欄位」。
+            for name, key in (("class_col", "class_col"),
+                              ("bin_col", "bin_col"),
+                              ("size_col", "size_col")):
+                value = str(p[name]).strip()
+                if value:
+                    opts[key] = value
+        try:
+            plan = klarf_out.apply_writeback(doc, bctx.rows, str(p["mode"]),
+                                             path, **opts)
+        except klarf_out.ExportError as e:
+            raise StepError(self.key, str(e)) from e
+        except OSError as e:
+            raise StepError(self.key,
+                            "could not write %s: %s" % (path, e)) from e
+        bctx.add_output(path)
+        # 寫回是**不可逆**的，所以「到底改了幾列」要講出來 —— 那是 M5 的
+        # 「寫回前一定先預覽變更」在 CLI 這一側剩下的那一半。
+        bctx.warn("KLARF %s: %d row(s) changed, %d row(s) written."
+                  % (str(p["mode"]), int(getattr(plan, "n_rows_changed", 0)),
+                     int(getattr(plan, "n_rows_out", 0))))
+        # **`plan.notes` 也要帶出來**（B6，2026-08-24）。`klarf_out` 已經把
+        # 「為什麼」寫好了，而以前只有計數走得出來 —— 於是 inplace 一格目標
+        # 欄位都沒填的時候，使用者看到的是「0 row(s) changed」，
+        # 一句答不出「那我該填什麼」的話。那份說明就在手上：
+        #
+        #   "No target column was given (class_col / bin_col / size_col are
+        #    all empty), so the output file will be byte-for-byte identical
+        #    to the original."
+        #
+        # 其他 mode 的 notes 同樣有用（影像參照怎麼處理、幾顆對不到 DEFECTID、
+        # DSIZE 那一欄的單位換算）—— 那些以前也全部沒有出口。
+        for note in (getattr(plan, "notes", None) or []):
+            bctx.warn("KLARF %s: %s" % (str(p["mode"]), note))
 
 
 @register_step
@@ -969,7 +1146,7 @@ class OutputCharStep(_OutputStep):
     """
 
     key = "output_char"
-    label = "Write characterization report"
+    label = "Write comparison"
     PATH = "folder"
     WHAT = "folder"
     help = ("Write a folder that puts the two lots side by side, one defect "
@@ -977,7 +1154,7 @@ class OutputCharStep(_OutputStep):
             "second lot, the numbers you pick, and what the recipe decided. "
             "Made for a characterization run of a few dozen defects, where "
             "you want to check every row by eye - for a whole lot use “Write "
-            "report folder” instead.")
+            "report” instead.")
     params = [
         ParamSpec(
             name="folder", type="str", default="",
@@ -1091,7 +1268,7 @@ class OutputCharStep(_OutputStep):
                 "Characterization report: %d defects, but this report puts a "
                 "picture on every row and is made for a few dozen - only the "
                 "first %d rows have pictures. For a whole lot use “Write "
-                "report folder”, which lists every defect and shows one "
+                "report”, which lists every defect and shows one "
                 "picture at a time." % (len(ordered), limit))
 
         # ---- ② 圖（一顆兩張：跑的這一份 ＋ 第二份帶過來的那一張）-----------
@@ -1183,187 +1360,3 @@ class OutputCharStep(_OutputStep):
             bctx.warn("Characterization report: more region boxes than “Draw "
                       "at most” (%d), so only the boxes near the winner are "
                       "drawn." % int(p["draw_boxes_cap"]))
-
-
-@register_step
-class OutputBoxPlotStep(_OutputStep):
-    """整批的分布 → 一張 box plot（**一片葉子一個盒子**，F36）。
-
-    為什麼是自己一張卡，不是報表裡的一個區塊
-    ----------------------------------------
-    使用者要的是「report **然後還有一張** box plot」—— 兩個交付物。而它們回答
-    的也是兩個問題：報表是「這一顆長什麼樣」（一顆一列），這張圖是「**這一批**
-    的這個數字散得多開，四類分不分得開」。
-
-    合成一張卡的話，「這張卡寫出什麼」就有兩個答案 —— 那是 `output_char` 當初
-    沒有做成 `output_bundle` 一格參數的同一個理由。底層仍然共用
-    （`export/boxplot.py`、`decide_tree.verdict_rows`）。
-
-    ⚠ **一個盒子是一片葉子，不是一個 bin。** 兩片葉子共用一個 bin 是合法的，
-    而它們是使用者眼中兩個不同的類別（`verdict_rows` 的說明）。順序與顏色跟
-    畫布上的樹一樣 —— 三個地方講同一件事的時候，長相也該是同一個。
-    """
-
-    key = "output_boxplot"
-    label = "Write a box plot"
-    WHAT = "HTML file"
-    help = ("Write one box plot per number you pick, when the whole lot has "
-            "run: one box for each class the decision came up with, so you "
-            "can see at a glance whether the classes actually separate. It is "
-            "a single HTML page that opens in any browser.")
-    params = [
-        ParamSpec(
-            name="path", type="str", default="",
-            label="Write to",
-            help=("Full path of the .html file to write, including the file "
-                  "name. Folders that do not exist yet are created."),
-        ),
-        ParamSpec(
-            name="features", type="feature_keys", default="",
-            label="Numbers to plot",
-            help=("One chart per number, in this order. Leave it empty and "
-                  "the card plots whatever the decision itself asked about - "
-                  "which is usually exactly what you want to see spread out."),
-        ),
-        ParamSpec(
-            name="title", type="str", default="",
-            label="Title", advanced=True,
-            help="Heading on the page. Empty uses the recipe name.",
-        ),
-    ]
-
-    @classmethod
-    def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:
-        """``features``。**空的不算** —— 那是「畫判定問過的那幾個」。"""
-        return parse_key_list(params.get("features", ""))
-
-    #: 判定沒有給出類別時（一份沒有 `decide` 的 recipe），全部畫成一個盒子。
-    ALL_LABEL = "the whole lot"
-
-    def _charts(self, bctx: Any, names: List[str],
-                groups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """``names`` × ``groups`` → 每個特徵一張圖。
-
-        **一顆都沒量到那個數字的特徵整張圖不畫**，而且要在 warn 裡說出來 ——
-        一張每一格都寫著「no data」的圖比沒有那張圖更糟（推廣鐵則）。
-        """
-        by_id: Dict[str, Dict[str, Any]] = {}
-        for row in bctx.rows:
-            by_id[str(row.get("defect_id", ""))] = dict(
-                row.get("features") or {})
-        charts: List[Dict[str, Any]] = []
-        empty: List[str] = []
-        for name in names:
-            series = []
-            for g in groups:
-                vals = [by_id.get(str(d), {}).get(name)
-                        for d in (g.get("ids") or [])]
-                series.append({"name": g.get("name") or "?",
-                               "colour": g.get("colour"),
-                               "values": [v for v in vals if v is not None]})
-            if not any(s["values"] for s in series):
-                empty.append(name)
-                continue
-            charts.append({"title": name, "series": series,
-                           "subtitle": "one box per class - the line is the "
-                                       "median, the box is the middle half"})
-        if empty:
-            bctx.warn(
-                "Box plot: no defect has a number called %s, so %s not "
-                "plotted. Check the spelling in “Numbers to plot”, or leave "
-                "that box empty to plot whatever the decision asks about."
-                % (", ".join("“%s”" % n for n in empty),
-                   "it was" if len(empty) == 1 else "they were"))
-        return charts
-
-    def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
-        p = self.validate_params(params)
-        path = self._path_of(p)
-        decide = getattr(bctx.recipe, "decide", None)
-
-        # ---- ① 哪幾個數字 ----------------------------------------------
-        names = parse_key_list(p["features"])
-        if not names:
-            # **判定問過的那幾個** —— 使用者想看的散布，九成是他拿來分類的那些。
-            names = decide_tree.features_used(decide) if decide else []
-        if not names:
-            raise StepError(
-                self.key,
-                "nothing to plot: “Numbers to plot” is empty and this recipe "
-                "has no decision to borrow the numbers from. Put the name of "
-                "at least one measured number in that box.")
-
-        # ---- ② 哪幾個盒子（一片葉子一個）--------------------------------
-        groups = [g for g in decide_tree.verdict_rows(decide, bctx.rows)
-                  if g.get("kind") not in ("failed", "unbinned")
-                  and (g.get("ids") or [])]
-        if not groups:
-            groups = [{"name": self.ALL_LABEL,
-                       "ids": [str(r.get("defect_id", ""))
-                               for r in bctx.rows if r.get("ok")],
-                       "colour": export_boxplot.FALLBACK_COLOUR}]
-
-        charts = self._charts(bctx, names, groups)
-        title = (str(p["title"]).strip()
-                 or str(getattr(bctx.recipe, "recipe_id", "") or "d4t"))
-        export_html.write_html(
-            export_boxplot.build_boxplot_page(
-                charts, title,
-                subtitle="%d defect(s), %d class(es)"
-                         % (len(bctx.rows), len(groups)),
-                note=("Each box covers the middle half of the defects in that "
-                      "class; the whiskers reach the furthest defect within "
-                      "1.5 x that spread, and anything beyond is drawn as a "
-                      "ring. Classes that do not overlap are classes this "
-                      "number can tell apart.")),
-            path)
-        bctx.add_output(path)
-
-
-@register_step
-class OutputHtmlStep(_OutputStep):
-    """整批的結果 → 一份可以直接寄出去的 HTML 表。"""
-
-    key = "output_html"
-    label = "Write HTML"
-    WHAT = "HTML file"
-    help = ("Write a single HTML page when the whole lot has run: how the "
-            "defects split across bins, and one row per defect with every "
-            "number that was measured. It opens in any browser and needs "
-            "nothing alongside it, so it can be emailed as is.")
-    params = [
-        ParamSpec(
-            name="path", type="str", default="",
-            label="Write to",
-            help=("Full path of the .html file to write, including the file "
-                  "name. Folders that do not exist yet are created."),
-        ),
-        ParamSpec(
-            name="title", type="str", default="",
-            label="Heading",
-            help=("Heading to put at the top of the page. Leave it empty to "
-                  "use the recipe's name."),
-        ),
-    ]
-
-    def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
-        p = self.validate_params(params)
-        path = self._path_of(p)
-        rows = list(bctx.rows)
-        title = (str(p["title"]).strip()
-                 or str(getattr(bctx.recipe, "recipe_id", "") or "d4t results"))
-        # **版面住 `export/html.py`，兩張卡共用同一支**（F29 C2）。以前整份
-        # HTML inline 在這裡，於是 bundle 那張卡要嘛抄一份（兩份會漂），
-        # 要嘛長得不一樣（同一批資料兩種報表，而使用者分不出差別）。
-        #
-        # 這張卡**不放圖**：它的賣點就是單檔可轉寄，而圖要嘛是相對路徑
-        # （那就不是單檔了）要嘛 base64（6000 顆是 76 MB 的一個檔案）。
-        text = export_html.build_report(
-            rows, title, export_report.feature_keys(rows),
-            decide=getattr(bctx.recipe, "decide", None))
-        try:
-            export_html.write_html(text, path)
-        except OSError as e:
-            raise StepError(self.key,
-                            "could not write %s: %s" % (path, e)) from e
-        bctx.add_output(path)

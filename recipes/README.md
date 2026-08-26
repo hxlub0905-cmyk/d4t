@@ -69,7 +69,8 @@ Load images ──test,ref──> Denoise (gaussian, k=3) ─┬─test──> R
                                                     └─ref───> GLV  (reference source)
 
         ┌ OUTPUT ─────────────────────────────────┐
-        │ Write report folder  ·  Write a box plot │   ← 兩張都不接線
+        │ Write report (report+images+csv+recipe)  │   ← 兩張都不接線
+        │ Write report (box plot)                  │   ← 同一張卡、兩個節點
         └──────────────────────────────────────────┘
 ```
 
@@ -115,5 +116,5 @@ box plot。只要抓亮的話，樹上第三題把 `cmp_abs_delta_mean_outlier` 
 盒子＝中間一半的 defect，鬚伸到 1.5×IQR 之內最遠的那一顆，超出的畫成小圈。
 **四類的盒子不重疊 = 那個數字分得開它們。**
 
-> `Write a box plot` 的 `Numbers to plot` 留空 = **判定問過的那幾個**。
+> box plot 那個節點的 `Numbers to plot` 留空 = **判定問過的那幾個**。
 > 寫死一份清單的話，樹改了而清單沒改的那一天，圖上畫的就不是在判的東西了。

@@ -55,8 +55,8 @@ def dataset(lot):
     return load_dataset(lot["klarf"])
 
 
-def _recipe(csv_path, **over):
-    params = {"path": str(csv_path)}
+def _recipe(out_dir, **over):
+    params = {"folder": str(out_dir), "contents": "table"}
     params.update(over)
     return Recipe(
         recipe_id="t", routes={KIND: ["load", "glv", "out"]},
@@ -64,7 +64,7 @@ def _recipe(csv_path, **over):
             "load": RecipeNode("load", "load_patch", {}),
             "glv": RecipeNode("glv", "glv_stats",
                               {"source": "test", "metrics": "glv_max"}),
-            "out": RecipeNode("out", "output_csv", params),
+            "out": RecipeNode("out", "output_report", params),
         },
         score=ScoreSpec(expr="glv_max", threshold=1.0,
                         bins={"below": 0, "above": 1}))
@@ -78,11 +78,11 @@ def test_a_single_defect_run_skips_the_batch_card(dataset, tmp_path):
 
     報錯的話，使用者一加上 Output 卡，預覽就整個壞掉（而他什麼都沒做錯）。
     """
-    csv_path = tmp_path / "out.csv"
-    res = run_defect(_recipe(csv_path), dataset.items[0], KIND)
+    out_dir = tmp_path / "out"
+    res = run_defect(_recipe(out_dir), dataset.items[0], KIND)
     assert res.ok, res.error
     assert "glv_max" in res.features
-    assert not csv_path.exists(), "單顆跑不該寫出任何東西"
+    assert not out_dir.exists(), "單顆跑不該寫出任何東西"
 
 
 def test_running_a_batch_card_the_per_defect_way_says_so(tmp_path):
@@ -92,8 +92,8 @@ def test_running_a_batch_card_the_per_defect_way_says_so(tmp_path):
     from d4t.core.pipeline.step import StepError
 
     with pytest.raises(StepError) as e:
-        get_step("output_csv")().run(Context(images={}),
-                                     {"path": str(tmp_path / "x.csv")})
+        get_step("output_report")().run(Context(images={}),
+                                        {"folder": str(tmp_path / "x")})
     assert "once per defect" in str(e.value)
 
 
@@ -101,15 +101,16 @@ def test_running_a_batch_card_the_per_defect_way_says_so(tmp_path):
 # 2. run_batch_steps 拿得到整批
 # --------------------------------------------------------------------------- #
 def test_the_batch_card_sees_every_row_and_writes_once(dataset, tmp_path):
-    csv_path = tmp_path / "out.csv"
-    recipe = _recipe(csv_path)
+    out_dir = tmp_path / "out"
+    csv_path = out_dir / "defects.csv"
+    recipe = _recipe(out_dir)
     rows = run_batch(recipe, dataset, workers=1)
     assert len(rows) == len(dataset.items)
-    assert not csv_path.exists(), "run_batch 自己不寫 —— 那是另一支的事"
+    assert not out_dir.exists(), "run_batch 自己不寫 —— 那是另一支的事"
 
     bctx = run_batch_steps(recipe, dataset, rows)
     assert bctx.errors == {}, bctx.errors
-    assert bctx.outputs == [str(csv_path)]
+    assert bctx.outputs == [str(out_dir)]
     lines = csv_path.read_text(encoding="utf-8-sig").splitlines()
     assert len(lines) == len(rows) + 1          # 表頭 + 一顆一列
     assert "glv_max" in lines[0]
@@ -122,12 +123,12 @@ def test_it_is_byte_for_byte_what_the_export_path_already_produces(dataset,
     兩邊呼叫的是同一支 `core/export/report.write_csv`，所以這裡驗的是「卡片沒有
     在中間偷改什麼」（例如只送成功的那幾顆、或重排欄位）。
     """
-    a, b = tmp_path / "card.csv", tmp_path / "direct.csv"
+    a, b = tmp_path / "card", tmp_path / "direct.csv"
     recipe = _recipe(a)
     rows = run_batch(recipe, dataset, workers=1)
     run_batch_steps(recipe, dataset, rows)
     export_report.write_csv(rows, str(b))
-    assert a.read_bytes() == b.read_bytes()
+    assert (a / "defects.csv").read_bytes() == b.read_bytes()
 
 
 def test_failed_defects_stay_in_the_table(dataset, tmp_path):
@@ -136,14 +137,14 @@ def test_failed_defects_stay_in_the_table(dataset, tmp_path):
     只寫成功的那幾顆的話，「這批有幾顆沒跑起來」在報表上看不出來 ——
     而那正是使用者最需要知道的事之一。
     """
-    csv_path = tmp_path / "out.csv"
+    out_dir = tmp_path / "out"
     rows = [{"defect_id": "1", "ok": True, "error": "", "score": 1.0,
              "bin": 1, "features": {"glv_max": 5.0}},
             {"defect_id": "2", "ok": False, "error": "boom", "score": None,
              "bin": None, "features": {}}]
-    bctx = run_batch_steps(_recipe(csv_path), dataset, rows)
+    bctx = run_batch_steps(_recipe(out_dir), dataset, rows)
     assert not bctx.errors
-    text = csv_path.read_text(encoding="utf-8-sig")
+    text = (out_dir / "defects.csv").read_text(encoding="utf-8-sig")
     assert "boom" in text
     assert len(text.splitlines()) == 3
 
@@ -152,22 +153,26 @@ def test_failed_defects_stay_in_the_table(dataset, tmp_path):
 # 3. 一張跨顆卡出錯不影響其他卡（鐵則 7 的跨顆版）
 # --------------------------------------------------------------------------- #
 def test_one_batch_card_failing_does_not_stop_the_others(dataset, tmp_path):
-    good = tmp_path / "good.csv"
+    good = tmp_path / "good"
+    a_file = tmp_path / "not_a_folder.txt"
+    a_file.write_text("", encoding="utf-8")
     recipe = Recipe(
         recipe_id="t", routes={KIND: ["load", "bad", "good"]},
         nodes={
             "load": RecipeNode("load", "load_patch", {}),
-            # 指到一個**資料夾** → IsADirectoryError → StepError。
-            # （寫到不存在的資料夾**不是**錯誤：`write_csv` 會自己建它。）
-            "bad": RecipeNode("bad", "output_csv", {"path": str(tmp_path)}),
-            "good": RecipeNode("good", "output_csv", {"path": str(good)}),
+            # 指到一個**檔案** → 那張卡要寫好幾樣東西，所以放不進去 →
+            # StepError。（寫到不存在的資料夾**不是**錯誤：它會自己建。）
+            "bad": RecipeNode("bad", "output_report",
+                              {"folder": str(a_file), "contents": "table"}),
+            "good": RecipeNode("good", "output_report",
+                               {"folder": str(good), "contents": "table"}),
         },
         score=ScoreSpec(expr="0", threshold=1.0,
                         bins={"below": 0, "above": 1}))
     rows = run_batch(recipe, dataset, workers=1)
     bctx = run_batch_steps(recipe, dataset, rows)
     assert "bad" in bctx.errors and "good" not in bctx.errors
-    assert good.exists(), "一張卡出錯不該讓後面那張也不跑"
+    assert (good / "defects.csv").exists(), "一張卡出錯不該讓後面那張也不跑"
     assert bctx.outputs == [str(good)]
 
 
@@ -261,15 +266,21 @@ def test_every_batch_card_declares_itself_properly():
 
 
 def test_nothing_configured_yet_points_at_the_field(tmp_path):
-    card = get_step("output_csv")
-    says = card.configuration_issues({"path": ""})
+    card = get_step("output_report")
+    says = card.configuration_issues({"folder": ""})
     assert says and "Write to" in says[0]
-    # 指到一個資料夾（貼了路徑忘了加檔名）也要在跑之前講
-    says = card.configuration_issues({"path": str(tmp_path)})
-    assert says and "is a folder" in says[0]
-    assert not card.configuration_issues({"path": str(tmp_path / "x.csv")})
+    # 指到一個**檔案**（那張卡要寫好幾樣東西）也要在跑之前講
+    a_file = tmp_path / "x.csv"
+    a_file.write_text("", encoding="utf-8")
+    says = card.configuration_issues({"folder": str(a_file)})
+    assert says and "is a file" in says[0]
+    assert not card.configuration_issues({"folder": str(tmp_path)})
     # **不存在的資料夾不算設定錯**：write_csv 會自己建它（精靈走同一支）
-    assert not card.configuration_issues({"path": str(tmp_path / "new" / "x.csv")})
+    assert not card.configuration_issues({"folder": str(tmp_path / "new")})
+    # 那張還是檔案的卡（KLARF）反過來講另一句
+    klarf = get_step("output_klarf")
+    says = klarf.configuration_issues({"path": str(tmp_path)})
+    assert says and "is a folder" in says[0]
 
 
 # --------------------------------------------------------------------------- #
@@ -291,7 +302,11 @@ def _out_recipe(node_id, step, params):
 def test_the_whole_output_section_is_end_points():
     """使用者：「他就是個 end point」—— 自動套用到這一段的每一張卡。"""
     section = [c for c in REGISTRY.values() if c.resolve_group() == "output"]
-    assert len(section) >= 5, [c.key for c in section]
+    # ⚠ **這個下限是防空轉的，不是規格。** F38 把七張收成三張之後它從 5 改
+    # 成 3 —— 同 `test_card_invariants` 在 `snr_map` 刪掉那天把 12 改成 11：
+    # 下修並寫下為什麼，是唯一誠實的修法（拿掉它，這支測試哪天一張卡都沒有
+    # 也會是綠的）。
+    assert len(section) >= 3, [c.key for c in section]
     for cls in section:
         params = {p.name: p.default for p in cls.params}
         assert cls.is_batch, "%s 不是 is_batch —— Output 段的卡都是" % cls.key
@@ -309,7 +324,7 @@ def test_write_images_is_a_batch_card_even_though_it_is_per_defect(dataset,
     而那條路**每切換一顆 defect 就走一次**：使用者瀏覽 defect 時會一直寫
     PNG 出來。所以它也是整批跑完之後跑一次。"""
     folder = tmp_path / "pngs"
-    recipe = _out_recipe("img", "output_bundle",
+    recipe = _out_recipe("img", "output_report",
                           {"folder": str(folder), "contents": "pictures",
                            "picture_format": "png"})
     # 單顆跑：什麼都不該寫
@@ -325,8 +340,9 @@ def test_write_images_is_a_batch_card_even_though_it_is_per_defect(dataset,
 
 def test_write_html_is_self_contained(dataset, tmp_path):
     """報表要能單獨寄給別人 —— 一個外部 .css 在轉寄的那一刻就不見了。"""
-    path = tmp_path / "r.html"
-    recipe = _out_recipe("html", "output_html", {"path": str(path)})
+    path = tmp_path / "r" / "report.html"
+    recipe = _out_recipe("html", "output_report",
+                         {"folder": str(path.parent), "contents": "report"})
     rows = run_batch(recipe, dataset, workers=1)
     bctx = run_batch_steps(recipe, dataset, rows)
     assert not bctx.errors, bctx.errors
@@ -339,13 +355,15 @@ def test_write_html_is_self_contained(dataset, tmp_path):
 
 def test_write_html_shows_the_defects_that_did_not_run(tmp_path, dataset):
     """少了的話，「這批有幾顆沒跑起來」在報表上看不出來。"""
-    path = tmp_path / "r.html"
+    path = tmp_path / "r" / "report.html"
     rows = [{"defect_id": "1", "ok": True, "error": "", "score": 2.0,
              "bin": 1, "features": {"glv_max": 9.0}},
             {"defect_id": "2", "ok": False, "error": "boom", "score": None,
              "bin": None, "features": {}}]
     bctx = run_batch_steps(
-        _out_recipe("html", "output_html", {"path": str(path)}), dataset, rows)
+        _out_recipe("html", "output_report",
+                    {"folder": str(path.parent), "contents": "report"}),
+        dataset, rows)
     assert not bctx.errors, bctx.errors
     text = path.read_text(encoding="utf-8")
     assert "did not run" in text and "boom" in text
@@ -451,7 +469,7 @@ def test_the_images_card_picks_the_highest_scoring_ones(dataset, tmp_path):
     from d4t.core.export.overlay import overlay_filename, pick_overlay_results
 
     folder = tmp_path / "pngs"
-    recipe = _out_recipe("img", "output_bundle",
+    recipe = _out_recipe("img", "output_report",
                          {"folder": str(folder), "limit": 2,
                           "contents": "pictures", "picture_format": "png"})
     rows = run_batch(recipe, dataset, workers=1)

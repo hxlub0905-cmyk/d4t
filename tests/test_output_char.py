@@ -198,7 +198,7 @@ def test_over_the_cap_it_says_so_and_names_the_other_card(dataset, tmp_path):
     out = tmp_path / "char"
     bctx, rows = run(dataset, out, limit=2, columns="glv_max")
     said = " ".join(bctx.warnings)
-    assert "Write report folder" in said
+    assert "Write report" in said
     assert str(len(rows)) in said and "2" in said
 
 
@@ -275,14 +275,14 @@ def test_the_two_numbers_that_catch_a_wrong_pairing_are_columns_by_default():
 def test_the_two_folder_cards_agree_word_for_word():
     """同一句話在兩張卡上長出兩種意思，是這個 repo 最常踩的形狀。"""
     char = {p.name: p for p in REGISTRY["output_char"].params}
-    bundle = {p.name: p for p in REGISTRY["output_bundle"].params}
+    bundle = {p.name: p for p in REGISTRY["output_report"].params}
     for name in ("rank_by", "jpeg_quality"):
         a, b = char[name], bundle[name]
         assert (a.type, a.default, a.label) == (b.type, b.default, b.label)
     assert REGISTRY["output_char"].RECIPE_NAME == \
-        REGISTRY["output_bundle"].RECIPE_NAME
+        REGISTRY["output_report"].RECIPE_NAME
     assert REGISTRY["output_char"].IMAGE_DIR == \
-        REGISTRY["output_bundle"].IMAGE_DIR
+        REGISTRY["output_report"].IMAGE_DIR
 
 
 def test_it_is_an_end_point_like_every_other_output_card():

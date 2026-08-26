@@ -72,14 +72,17 @@ def _spin(qapp, done, timeout_s=15.0):
     return done()
 
 
-def _wire(win, out_path, step="output_csv", **params):
-    """最小的 pipeline：Load → Gray level → 一張 Output 卡。"""
+def _wire(win, out_path, step="output_report", **params):
+    """最小的 pipeline：Load → Gray level → 一張 Output 卡。
+
+    F38 之後報表那張卡吃的是**資料夾**，只有 KLARF 還是一格檔案路徑。
+    """
     load = win.model.add_step("load_patch")
     glv = win.model.add_step("glv_stats")
     win.model.set_param(glv, "source", "test")
     win.model.set_param(glv, "metrics", "glv_max")
     out = win.model.add_step(step)
-    key = "folder" if step in ("output_bundle", "output_char") else "path"
+    key = "path" if step == "output_klarf" else "folder"
     win.model.set_param(out, key, str(out_path))
     for name, value in params.items():
         win.model.set_param(out, name, value)
@@ -93,18 +96,19 @@ def _wire(win, out_path, step="output_csv", **params):
 # --------------------------------------------------------------------------- #
 def test_a_trial_run_writes_nothing(window, tmp_path):
     """試跑是**調參數的迴圈** —— 每拖一下門檻就覆寫一次檔案是不可逆的。"""
-    out = tmp_path / "trial.csv"
-    _wire(window, out)
+    out = tmp_path / "trial"
+    _wire(window, out, contents="table")
     assert window.run_trial(N, workers=1, sync=True) is True
     assert not out.exists(), "試跑不該寫出任何東西"
 
 
 def test_run_all_writes(window, tmp_path):
-    out = tmp_path / "all.csv"
-    _wire(window, out)
+    out = tmp_path / "all"
+    _wire(window, out, contents="table")
     assert window.run_all(sync=True) is True
     assert out.exists()
-    lines = out.read_text(encoding="utf-8-sig").splitlines()
+    lines = (out / "defects.csv").read_text(
+        encoding="utf-8-sig").splitlines()
     assert len(lines) == N + 1          # 表頭 + 一顆一列
     assert "Wrote" in window.status_text() and str(out) in window.status_text()
 
@@ -112,15 +116,15 @@ def test_run_all_writes(window, tmp_path):
 def test_the_flag_follows_the_run_not_the_ui(window, tmp_path):
     """旗標**跟著那一次執行走**：Run all 之後馬上再按 Run trial，
     第二批不該因為第一批而寫出東西（反之亦然）。"""
-    first, second = tmp_path / "a.csv", tmp_path / "b.csv"
-    _wire(window, first)
+    first, second = tmp_path / "a", tmp_path / "b"
+    _wire(window, first, contents="table")
     assert window.run_all(sync=True) is True
     assert first.exists()
 
     # 換一個路徑，改按試跑 —— 不該寫
     out_node = [n for n in window.model.node_order
-                if window.model.nodes[n].step == "output_csv"][0]
-    window.model.set_param(out_node, "path", str(second))
+                if window.model.nodes[n].step == "output_report"][0]
+    window.model.set_param(out_node, "folder", str(second))
     assert window.run_trial(N, workers=1, sync=True) is True
     assert not second.exists(), "試跑用到了上一次 Run all 留下來的旗標"
 
@@ -212,8 +216,8 @@ def test_a_disabled_inplace_card_does_not_ask(window, tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 def test_the_async_path_uses_a_background_thread(window, tmp_path, qapp):
     """出圖那張卡會一顆一顆重跑 pipeline —— 在 GUI 執行緒做會僵住。"""
-    out = tmp_path / "async.csv"
-    _wire(window, out)
+    out = tmp_path / "async"
+    _wire(window, out, contents="table")
     assert window.run_all() is True          # 非同步
     # 兩段背景工作：先跑批次（TrialWorker），再寫輸出（OutputWorker）。
     # 兩個都要轉到 event loop 才會回來 —— 那正是這一條在驗的事。

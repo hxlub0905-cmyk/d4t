@@ -349,27 +349,33 @@ def test_the_two_routes_have_different_cache_signatures():
 # --------------------------------------------------------------------------- #
 def test_a_shared_output_card_runs_exactly_once_across_routes(dataset,
                                                               tmp_path):
-    csv_path = tmp_path / "out.csv"
+    out_dir = tmp_path / "out"
     recipe = _recipe(route_by=_rb(),
-                     out=RecipeNode("out", "output_csv",
-                                    {"path": str(csv_path)}))
+                     out=RecipeNode("out", "output_report",
+                                    {"folder": str(out_dir),
+                                     "contents": "table"}))
     recipe.routes = {"a_route": ["load", "glv_a", "out"],
                      "b_route": ["load", "glv_b", "out"]}
     rows = run_batch(recipe, dataset, workers=1)
     bctx = run_batch_steps(recipe, dataset, rows)
     assert bctx.errors == {}, bctx.errors
-    assert bctx.outputs == [str(csv_path)], "共用的 Output 卡要正好跑一次"
-    lines = csv_path.read_text(encoding="utf-8-sig").splitlines()
+    assert bctx.outputs == [str(out_dir)], "共用的 Output 卡要正好跑一次"
+    # 寫兩次不是「再保險一次」，是覆寫 —— 所以要看**內容**：一份表列完
+    # 兩條 route 的每一顆，正好一次。
+    lines = (out_dir / "defects.csv").read_text(
+        encoding="utf-8-sig").splitlines()
     assert len(lines) == len(rows) + 1
 
 
 def test_each_routes_own_output_card_runs(dataset, tmp_path):
-    pa, pb = tmp_path / "a.csv", tmp_path / "b.csv"
+    pa, pb = tmp_path / "a", tmp_path / "b"
     recipe = _recipe(route_by=_rb(),
-                     out_a=RecipeNode("out_a", "output_csv",
-                                      {"path": str(pa)}),
-                     out_b=RecipeNode("out_b", "output_csv",
-                                      {"path": str(pb)}))
+                     out_a=RecipeNode("out_a", "output_report",
+                                      {"folder": str(pa),
+                                       "contents": "table"}),
+                     out_b=RecipeNode("out_b", "output_report",
+                                      {"folder": str(pb),
+                                       "contents": "table"}))
     recipe.routes = {"a_route": ["load", "glv_a", "out_a"],
                      "b_route": ["load", "glv_b", "out_b"]}
     rows = run_batch(recipe, dataset, workers=1)

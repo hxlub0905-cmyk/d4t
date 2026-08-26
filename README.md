@@ -35,7 +35,7 @@ d4t 的第一原則是：
 | **輸入** | 四種 source，各有各的入口：`ebi_patch`（KLARF ＋ 多頁 patch TIFF）、`rsem`（KLARF ＋ 每顆一個影像檔）、`tiff_stack`（多頁 TIFF，無 KLARF）、`folder`（單張影像資料夾，無 KLARF） |
 | **組裝** | 24 張步驟卡片（卡片庫現行可見 21 張，其餘收在 `ui/scope.py` 的 `HIDDEN_STEPS`）；節點畫布拉線接卡，recipe 即 DAG |
 | **量測** | GLV 統計與區域對比（含 SNR）、逐框比較找出最異常的那一格（`worst_*`，框即 ROI 自己）、CD 次像素邊緣定位（同一趟給 LWR／LER）、對焦品質指標 |
-| **輸出** | 六張 Output 卡（整批跑完只跑一次）：無損寫回 KLARF（class／bin／DSIZE）與 Top-N 新 KLARF、CSV／Excel 報表、單檔 HTML、逐顆疊圖，以及**報表資料夾**（`report.html` ＋ `images/*.jpg` ＋ `defects.csv` ＋ `recipe.json`，6000 顆量級一次出得完） |
+| **輸出** | 三張 Output 卡（整批跑完只跑一次）：**報表資料夾**（`Write report` —— 勾選決定裡面有什麼：`report.html`／`defects.csv`／`report.xlsx`／`spread.html` box plot／`images/*.jpg`／`recipe.json`，6000 顆量級一次出得完）、**寫回 KLARF**（class／bin／DSIZE，或 Top-N 新檔）、**點對點比較報表**（`Write comparison`，一顆一列兩張圖）|
 | **介面** | PySide6 桌面編輯器（Studio）＋ CLI（可排程、可腳本化） |
 | **執行** | 多行程批次、影像段快取；設計目標為單批 10,000 顆 defect 仍流暢 |
 

@@ -86,7 +86,7 @@
       "enabled": true
     },
     "report": {
-      "step": "output_bundle",
+      "step": "output_report",
       "params": {
         "folder": "patch_report",
         "limit": 0,
@@ -95,16 +95,18 @@
         "montage": true,
         "draw_boxes": "all",
         "draw_boxes_cap": 300,
-        "mark_pixels_k": 3.0
+        "mark_pixels_k": 3.0,
+        "contents": "report,table,pictures,recipe"
       },
       "enabled": true
     },
     "spread": {
-      "step": "output_boxplot",
+      "step": "output_report",
       "params": {
-        "path": "patch_report/spread.html",
-        "features": "",
-        "title": ""
+        "title": "",
+        "plot_features": "",
+        "folder": "patch_report",
+        "contents": "boxplot"
       },
       "enabled": true
     }

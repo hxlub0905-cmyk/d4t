@@ -226,13 +226,13 @@ Input → Enhance → ROI → Measure → Compare → ADC → Output
 |---|---|
 | Output 的 CSV / KLARF / Report / HTML | 一批一個檔案（出圖那幾張是例外，逐顆）|
 | 離群旗標（Tukey IQR、z-score）| 門檻由整批的分布決定 |
-| ~~F15 欠的那份點對點 report~~ ✅ F33（2026-08-25）| 一顆一列的表 ＋ 整批的分布 —— `output_char` |
+| ~~F15 欠的那份點對點 report~~ ✅ F33（2026-08-25）| 一顆一列的表 ＋ 整批的分布 —— `output_char`（畫面上 F38 起叫 “Write comparison”）|
 | `H2H` 的 `expect_dx_px` 建議值 | 整批取中位數（現在只能靠 `tools/pair_probe.py` 在外面算）|
 
 先做機制，四個都便宜；不做機制，四個各自發明一套。
 
 **機制 ✅ 2026-08-20**（`Step.is_batch` ＋ `pipeline.run_batch_steps` ＋
-`BatchContext`），第一張消費者是 `output_csv`（產的 CSV 與 Export 精靈**逐位元組
+`BatchContext`），第一張消費者是 `output_csv`（F38 折進 `output_report` 了；產的 CSV 與 Export 精靈**逐位元組
 相同**，那是之後拿掉精靈的前提）。三條規矩：
 
 * **跨顆卡不在 `run_defect` 裡跑**，而且**跳過不是報錯** —— 一份含 Output 卡的
@@ -241,14 +241,24 @@ Input → Enhance → ROI → Measure → Compare → ADC → Output
 * **試跑不寫**（使用者定調）—— 而那不是一個旗標，是**兩支函式**：試跑那條路
   根本不叫 `run_batch_steps`。旗標遲早有人忘記關，而症狀是不可逆的覆寫。
 
-**五張卡 ✅ 2026-08-20**：`output_csv` / `output_report`（Excel）/
+**五張卡 ✅ 2026-08-20**（⚠ **F38 於 2026-08-26 收成三張**，見這一段結尾）：
+`output_csv` / `output_report`（Excel）/
 `output_klarf`（三種寫回模式）/ `output_html`（自帶樣式，可以直接寄出去）/
 `output_image`（每顆一張疊圖）。**五張都是 `is_batch`，包含會出圖的那一張** ——
 它看起來是逐顆的，但做成普通 Step 的話它會在 `run_defect` 裡跑，而那條路每切換
 一顆 defect 就走一次（瀏覽 defect 時會一直寫 PNG）。所以它也是整批之後跑一次，
 一顆一顆重跑 pipeline 取影像 —— 那正是 Export 精靈今天做的事。
 
-⚠ **`output_image` 於 F37（2026-08-26）折進 `output_bundle` 了**：它的七格參數
+⚠ **F38（2026-08-26）把七張收成三張**（使用者：「七張裡有五張在回答同一個
+問題，收成三張」）：`output_csv` / `output_html` / `output_boxplot` / `output_bundle`
+與原本的 Excel 卡全部折進 **`output_report`「Write report」**——一個資料夾，
+要哪幾樣是一格勾選。留下的另外兩張是 `output_klarf` 與 `output_char`
+（後者只改了 label：“Write comparison”）。舊 recipe 走
+`recipe._migrate_folded_output_cards`：**內容逐位元組相同，路徑依那道遷移的
+docstring 那張表位移**（`/x/my.csv` → `/x/defects.csv`）。
+
+⚠ **`output_image` 於 F37（2026-08-26）折進 `output_bundle` 了**（而後者又在
+F38 折進 `output_report`，遷移鏈一段一段接）：它的七格參數
 一格不差全部是後者的子集，寫出來的東西正好是後者少了報表／表格／recipe。現在
 是那張卡上的「只勾 pictures」，舊 recipe 走遷移。上面那段「為什麼它也是整批
 一次」的道理**一字不變**，只是主詞換成了報表資料夾那張卡。
@@ -376,7 +386,7 @@ engine 與功能收斂之後才有意義。
 | 項目 | 說明 |
 |---|---|
 | ground truth **標注介面** | 讀答案卷與即時準確率已經在（Phase 1），缺的是**在 Studio 裡標**：現在還是要人另外準備一份 JSON／CSV |
-| ~~整批的分布畫得出來~~ | ✅ **2026-08-26（F36）** `output_boxplot`「Write a box plot」：一片葉子一個盒子，手寫 SVG（零新相依 —— 公司機是用複製檔案更新的）。`Numbers to plot` 留空 = 判定問過的那幾個（`decide_tree.features_used`）|
+| ~~整批的分布畫得出來~~ | ✅ **2026-08-26（F36）**：一片葉子一個盒子，手寫 SVG（零新相依 —— 公司機是用複製檔案更新的）。`Numbers to plot` 留空 = 判定問過的那幾個（`decide_tree.features_used`）。⚠ **F38 起它不是自己一張卡**，是 `Write report` 上的一個勾（寫出 `spread.html`）|
 | ~~存檔 recipe 做回來~~ | ✅ **2026-08-26（F34）**。`app_version` 那條相容策略本來就在（`version_skew`），這一輪只是把寫檔那一半接回來 |
 | 範例 recipe 庫 | 使用者的原話是「等 APP 完成再給範例」。`recipes/` 已經有出貨的 recipe（2026-08-26），缺的是**庫的入口**（`SHOW_SAMPLE_ENTRIES`）|
 | 使用者手冊 | 目前所有文件都是寫給開發者的。目標使用者是不寫 code 的製程／設備工程師 |

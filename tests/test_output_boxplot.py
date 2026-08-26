@@ -35,7 +35,9 @@ from d4t.core.pipeline.recipe import (                            # noqa: E402
 )
 from d4t.core.pipeline.step import REGISTRY                       # noqa: E402
 
-CARD = "output_boxplot"
+#: F38：box plot 不再是自己一張卡，是 `output_report` 上的一個勾。
+CARD = "output_report"
+TICK = "boxplot"
 
 
 # --------------------------------------------------------------------------- #
@@ -152,8 +154,9 @@ def _rows():
     return out
 
 
-def _recipe(path, **over):
-    params = {"path": str(path), "features": "", "title": ""}
+def _recipe(folder, **over):
+    params = {"folder": str(folder), "contents": TICK,
+              "plot_features": "", "title": ""}
     params.update(over)
     return Recipe(
         recipe_id="plot_demo",
@@ -165,8 +168,8 @@ def _recipe(path, **over):
 
 
 def _run(tmp_path, rows=None, **over):
-    path = tmp_path / "spread.html"
-    recipe = _recipe(path, **over)
+    path = tmp_path / "out" / "spread.html"
+    recipe = _recipe(tmp_path / "out", **over)
     rows = list(rows if rows is not None else _rows())
     # 判定真的跑一遍 —— bin 是 `verdict_rows` 分盒子的依據。
     # ⚠ **working number 要先算進 features**，跟引擎一樣：少了它們，
@@ -193,7 +196,9 @@ def test_one_box_per_leaf_named_the_way_the_user_named_it(tmp_path):
     assert not bctx.errors
     for name in ("strong", "no signal", "garbage"):
         assert name in page
-    assert path.name in [Path(o).name for o in bctx.outputs]
+    # F38：這張卡回報的是**資料夾**（它寫得出好幾樣），圖在那個資料夾裡。
+    assert str(path.parent) in bctx.outputs
+    assert path.is_file()
 
 
 def test_an_empty_features_box_plots_what_the_decision_asked_about(tmp_path):
@@ -210,7 +215,7 @@ def test_a_misspelt_feature_is_said_out_loud_not_drawn_empty(tmp_path):
 
     畫一張每一格都是 no data 的圖的話，使用者會以為是資料的問題。
     """
-    path, bctx = _run(tmp_path, features="cmp_snr_mean_outlier,nosuchthing")
+    path, bctx = _run(tmp_path, plot_features="cmp_snr_mean_outlier,nosuchthing")
     page = path.read_text(encoding="utf-8")
     said = " ".join(bctx.warnings or [])
     assert "nosuchthing" in said and "Numbers to plot" in said
@@ -224,7 +229,8 @@ def test_it_refuses_politely_when_there_is_nothing_to_plot(tmp_path):
     recipe = Recipe(
         recipe_id="bare", routes={"ebi_patch": ["plot"]},
         nodes={"plot": RecipeNode("plot", CARD,
-                                  {"path": str(tmp_path / "x.html")})},
+                                  {"folder": str(tmp_path / "x"),
+                                   "contents": TICK})},
         score=ScoreSpec(expr="", threshold=0.5, bins={}))
     bctx = BatchContext(rows=_rows(), dataset=None, recipe=recipe,
                         kind="ebi_patch")
@@ -235,12 +241,14 @@ def test_it_refuses_politely_when_there_is_nothing_to_plot(tmp_path):
 
 def test_without_a_decision_it_still_draws_the_whole_lot(tmp_path):
     """沒有判定但有指定數字 → 一個盒子（這一批）。分不出類是實話，不是錯誤。"""
-    path = tmp_path / "one.html"
+    path = tmp_path / "one" / "spread.html"
     recipe = Recipe(
         recipe_id="bare", routes={"ebi_patch": ["plot"]},
         nodes={"plot": RecipeNode("plot", CARD,
-                                  {"path": str(path),
-                                   "features": "cmp_snr_mean_outlier"})},
+                                  {"folder": str(path.parent),
+                                   "contents": TICK,
+                                   "plot_features":
+                                       "cmp_snr_mean_outlier"})},
         score=ScoreSpec(expr="", threshold=0.5, bins={}))
     bctx = BatchContext(rows=_rows(), dataset=None, recipe=recipe,
                         kind="ebi_patch")
@@ -281,8 +289,8 @@ def test_the_page_is_a_single_file_with_the_svg_inline(tmp_path):
 def test_the_card_is_an_end_point_like_every_other_output_card(tmp_path):
     """Output 段的不變量：不吐流、不吐特徵、**沒有輸入埠**（不接線）。"""
     card = REGISTRY[CARD]
-    p = card.validate_params({"path": "x.html"})
+    p = card.validate_params({"folder": "x"})
     assert card.resolve_reads(p) == []
     assert card.resolve_writes(p) == []
     assert card.resolve_features(p) == []
-    assert card.configuration_issues({"path": ""}), "沒填路徑要講"
+    assert card.configuration_issues({"folder": ""}), "沒填路徑要講"

@@ -722,7 +722,11 @@ def test_renaming_a_feature_moves_every_place_that_refers_to_it(tmp_path):
     # ③ 單獨一格特徵名（`feature_key`）
     assert rc.nodes["img"].params["rank_by"] == "glv_worst_score"
     # ④ 一串特徵名（`feature_keys`）—— 沒改到的那一項連空白都不該動
-    assert (rc.nodes["bp"].params["features"]
+    #
+    # ⚠ 那一格在 F38 改名了（`features` → `plot_features`，因為它跟併進來的
+    # `include_features` 在同一張卡上）。**改名跟這支測試守的事是兩件** ——
+    # 這裡問的仍然是「特徵名有沒有換到」，只是要去新的那一格問。
+    assert (rc.nodes["bp"].params["plot_features"]
             == "glv_worst_score, cd_median, glv_worst_score_median")
 
 

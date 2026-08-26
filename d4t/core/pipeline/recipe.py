@@ -1262,6 +1262,96 @@ def _migrate_output_image_into_bundle(nodes: Dict[str, "RecipeNode"]) -> None:
                                 params=params, enabled=node.enabled)
 
 
+#: 折進 ``output_report`` 的那四張卡（F38，2026-08-26）：
+#: 舊 key → (``contents`` 要勾什麼, 路徑那一格的舊名, 參數改名表)。
+#:
+#: ``None`` 的那一列是 ``output_bundle`` —— 它本來就是資料夾那張卡，勾選也
+#: 已經有了，所以只換 key。
+_FOLDED_OUTPUT_CARDS: Dict[str, tuple] = {
+    # 舊 key:           (勾什麼,     路徑舊名,  參數改名表)
+    "output_csv":       ("table",   "path",   {}),
+    "output_html":      ("report",  "path",   {}),
+    "output_boxplot":   ("boxplot", "path",   {"features": "plot_features"}),
+    "output_bundle":    (None,      "folder", {}),
+}
+
+#: ``output_bundle`` 沒寫 ``contents`` 時要明寫進去的那幾個（＝合併之前的行為）。
+#:
+#: **不是**去讀 ``steps.output.DEFAULT_CONTENTS``：那是「新卡片的預設」，而這裡
+#: 要的是「舊檔案當時的行為」。同一個值，兩個意思 —— 綁在一起的話，哪天有人動
+#: 了預設，這些舊 recipe 會跟著換一個行為，而它們一個字都沒改過。
+_BUNDLE_OLD_CONTENTS = "report,table,pictures,recipe"
+
+
+def _migrate_folded_output_cards(nodes: Dict[str, "RecipeNode"]) -> None:
+    """四張報表卡 → ``output_report`` ＋ 對應的 ``contents``（F38，2026-08-26）。
+
+    使用者：「七張裡有五張在回答同一個問題，收成三張」。四張被折的卡與
+    ``output_report`` 自己（原本是「寫一個 Excel 檔」）合成一張寫資料夾的卡，
+    要哪幾樣是一格勾選 —— 跟 F37 把 ``output_image`` 折進來時同一個形狀，
+    連遷移的寫法都照抄（見 :func:`_migrate_folded_region_cards`）。
+
+    **這道遷移在補的東西：產物的形狀從「一個檔案」變成「一個資料夾」。**
+    被折的四張裡有三張是「一格路徑＝一個檔案」，而合併後那張卡寫的是一個
+    資料夾、裡面的檔名是寫死的。所以**內容逐位元組相同，路徑會位移**：
+
+    ==========================================  ===============================
+    舊                                          新（實際寫出）
+    ==========================================  ===============================
+    ``output_csv path=/x/my.csv``               ``/x/defects.csv``
+    ``output_html path=/x/page.html``           ``/x/report.html``
+    ``output_boxplot path=/x/spread.html``      ``/x/spread.html``（同名）
+    ``output_report path=/x/book.xlsx``         ``/x/report.xlsx``
+    ``output_bundle folder=/x``                 ``/x``（一個字都沒動）
+    ==========================================  ===============================
+
+    使用者取的檔名因此會不見，而那是**使用者定調的取捨**（2026-08-26，
+    「一律資料夾」）。`os.path.dirname` 的 ``or "."`` 不能省：
+    ``path="report.html"``（沒有目錄的相對路徑）的 dirname 是空字串，而空字串
+    在那張卡上的意思是「還沒填」—— 一份跑得動的 recipe 會變成一條設定錯誤。
+
+    **``contents`` 一律明寫**（連 ``output_bundle`` 沒寫過那一格的也補）：
+    把「舊檔案的行為」跟「新卡片的預設」脫鉤，之後有人動了預設，這些 recipe
+    不會跟著改。F38 加進 Excel 與 box plot 兩個勾的那一刻，這件事就是必要的。
+
+    判準是「**舊東西在不在**」（鐵則 9）——而**兩種節點的「舊東西」不一樣**：
+
+    * 被折的四張：``node.step`` 是舊 key。換完 key 就不再命中。
+    * ``output_report`` 自己：key 沒變，所以只能問**舊的參數名還在不在**
+      （``"path" in params``）。換完 ``path`` 就 pop 掉了，也不再命中。
+      **不准**寫成「``folder`` 不在就補」—— 那分不出「舊檔案」與「新 recipe
+      剛好還沒填路徑」，而 ``to_json_dict → from_json_dict`` 一旦不是
+      identity，``workers=1`` 與 ``workers=2`` 會算出不同的分數（真的發生過，
+      見 `docs/PITFALLS.md`）。
+
+    兩邊換完之後第二次走這一道什麼都不會發生 —— identity 成立。
+    """
+    for nid, node in list(nodes.items()):
+        folded = _FOLDED_OUTPUT_CARDS.get(node.step)
+        # ``output_report`` 自己那一張（原本的 Excel 卡）：key 沒換，靠舊參數名。
+        own = node.step == "output_report" and "path" in node.params
+        if folded is None and not own:
+            continue
+        params = dict(node.params)
+        if own:
+            tick, path_name, renames = "excel", "path", {}
+        else:
+            tick, path_name, renames = folded
+        for old, new in renames.items():
+            if old in params:
+                params[new] = params.pop(old)
+        if path_name == "path":
+            # 一個檔案的路徑 → 裝它的那個資料夾（見 docstring 那張表）。
+            path = str(params.pop("path", "") or "").strip()
+            params["folder"] = (os.path.dirname(path) or ".") if path else ""
+        if tick is not None:
+            params["contents"] = tick
+        else:
+            params.setdefault("contents", _BUNDLE_OLD_CONTENTS)
+        nodes[nid] = RecipeNode(id=node.id, step="output_report",
+                                params=params, enabled=node.enabled)
+
+
 def _migrate_folded_region_cards(nodes: Dict[str, "RecipeNode"]) -> None:
     """``roi_cross`` / ``roi_template`` → ``roi_reference`` ＋ 對應的 ``method``（F30）。
 
@@ -1930,6 +2020,15 @@ class Recipe:
         _migrate_folded_region_cards(nodes)
         # 出圖那張卡折進報表資料夾那張（F37）。
         _migrate_output_image_into_bundle(nodes)
+        # 四張報表卡再折進 `output_report`（F38）。**順序要緊**：上面那一道
+        # 會產出 `output_bundle` 節點，而這一道要把它換成 `output_report` ——
+        # 遷移鏈要一段一段接。寫一條 `output_image` 直達 `output_report` 的
+        # 捷徑只有舊檔案會走到，永遠不會有人在上面測試。
+        #
+        # 也**必須在底下 `_compare_feature_renames` 之前**：改名是靠
+        # `REGISTRY.get(node.step)` 找型別的，留在舊 key 上的節點對它是隱形的
+        # —— 而 `plot_features` / `rank_by` 那幾格裝的正是特徵名。
+        _migrate_folded_output_cards(nodes)
         # 兩張 GLV 卡收成一張的兩個 method（F16）。
         _migrate_roi_compare_into_glv_stats(nodes)
         # 順序要緊：上面那一道會產生 ``method="compare"``，這一道再把它變成

@@ -109,7 +109,7 @@ def test_a_bad_scale_is_refused_at_registration():
 def test_describe_carries_the_scale():
     """UI / CLI 的卡片列表看得到它 —— 不然「這張卡什麼時候跑」只存在程式碼裡。"""
     from d4t.core.pipeline.step import get_step
-    assert get_step("output_csv").describe()["scale"] == SCALE_LOT
+    assert get_step("output_report").describe()["scale"] == SCALE_LOT
     assert get_step("glv_stats").describe()["scale"] == SCALE_DEFECT
 
 
@@ -122,7 +122,8 @@ def _recipe(edges=()):
         edges=[Edge(*e) for e in edges],
         nodes={"load": RecipeNode("load", "load_patch", {}),
                "glv": RecipeNode("glv", "glv_stats", {"source": "test"}),
-               "csv": RecipeNode("csv", "output_csv", {"path": "/tmp/x.csv"})},
+               "csv": RecipeNode("csv", "output_report",
+                                 {"folder": "/tmp/x", "contents": "table"})},
         score=ScoreSpec(expr="1", threshold=1.0,
                         bins={"below": 0, "above": 1}))
 
