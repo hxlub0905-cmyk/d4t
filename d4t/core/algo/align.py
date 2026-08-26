@@ -722,7 +722,9 @@ def locate_template_peaks(search: np.ndarray, template: np.ndarray,
     """同 :func:`locate_template`，但**連第二高的峰一起回**。
 
     回 ``(x, y, score, second)``。``second`` 是把最高峰周圍 ``exclude`` 個像素
-    蓋掉之後剩下的最大值（預設半徑 = 模板短邊的一半）。
+    蓋掉之後剩下的最大值（預設半徑 = 模板短邊的一半）。**遮罩把整張回應圖蓋掉
+    時回 ``NaN``** —— 那是「看不夠遠、答不出來」，不是「沒有第二名」（見下面
+    的說明）。
 
     為什麼需要第二名（2026-08-20）
     ------------------------------
@@ -761,6 +763,17 @@ def locate_template_peaks(search: np.ndarray, template: np.ndarray,
     y0, y1 = max(0, by - r), min(res.shape[0], by + r + 1)
     masked[y0:y1, x0:x1] = -2.0
     second = float(masked.max()) if masked.size else -2.0
-    if second < -1.0:                       # 整張都被蓋掉 = 沒有第二個地方
-        second = 0.0
+    if second < -1.0:
+        # **整張回應圖都被遮罩蓋掉了 —— 那不是「沒有第二個地方」，是「我們
+        # 沒看夠遠，答不出來」**（F33，2026-08-26）。
+        #
+        # 以前這裡回 0.0，意思變成「第一名遙遙領先」。而它最容易發生的時機
+        # 正好是**最不該樂觀**的那一個：陣列區裡把 `search_within` 縮小到
+        # 半個晶格週期以內（那是對的做法，見 `docs/USING-CHARACTERIZATION.md`）
+        # 之後，回應圖比遮罩半徑還小 → ratio 變成一個假的 0.00，而使用者
+        # 剛好在那時候最需要它講實話。實測：模板 96 px、窗 ±32 px 時，
+        # 回應圖 65×65 而遮罩半徑 48 —— 全被蓋掉。
+        #
+        # 所以回 NaN：**算不出來的不寫**（呼叫端據此不寫那個特徵）。
+        second = float("nan")
     return float(bx + sx), float(by + sy), float(maxv), float(second)

@@ -5,13 +5,13 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 876266a7bfceb5ec0228cfed98d8ee9cc2da4c54 CLAUDE.md
 6adcf70fd5d443f757d78b4d337e1866a9af3ed7 README.md
-18b9ca9aaf5ec093bb8e8f94a8a2960f6c6f8652 SESSION_LOG.md
+fc97f3cc6cd3237c47bd9f5a49b12add34d7be32 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
 e75a08b69155620720f17d638c3b8e14489091f3 d4t/core/__init__.py
 e7da184fba607af1f4d3617a581abebda5079c8e d4t/core/algo/__init__.py
-9f95cc3f4f930324566729bd82462d38777841d2 d4t/core/algo/align.py
+96cfafdf14c8aaa57c2fdc2b914b9e86e24c651b d4t/core/algo/align.py
 ee35d3a74a03161fd795cb83d72d5aca0622273a d4t/core/algo/curve.py
 17e03ca94f0dd599c67258b0aff775147b9a10f2 d4t/core/algo/edge.py
 d2f7e50ff4920fefc608e7d83117c771276104b7 d4t/core/algo/enhance.py
@@ -58,7 +58,7 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 458bc40837b773fdbfbf9d9675d23020e2903853 d4t/core/steps/__init__.py
 44ada36e81965cddff165fa32c598f0e94861d4e d4t/core/steps/_util.py
 c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
-55add606c260bc9c0cbca681da37d9271ef536b5 d4t/core/steps/align_to.py
+32b8eac8dcc006a9cb67ca3215533ccd04430776 d4t/core/steps/align_to.py
 2c48cd738d30003227a9aad3f34e5c8565a9c6ab d4t/core/steps/arith.py
 4d91da90d6ed3dbfc1c6d26e9c18072fc84e91cd d4t/core/steps/cd.py
 39bbc384b66e024f67200a76598d4f6f255e5100 d4t/core/steps/denoise.py
@@ -117,7 +117,7 @@ cb5ec1e3cc74cbfc6f03fe2edb526c0993465c6e docs/GLAS-INTERFACE.md
 5add754408a8324566ed29c95f855d9a0c429655 docs/PITFALLS.md
 a6fd53c3e010ee9c7335def49ff3952e10511ba9 docs/ROADMAP.md
 c1cfb82e71df1d178b5f70766fcabf52d623476a docs/USING-CD.md
-3855d7584b919f1f403d5c2ce2bd0d54d5dc99cc docs/USING-CHARACTERIZATION.md
+a0d14bb3cea44f7975f26f43556112131805ee92 docs/USING-CHARACTERIZATION.md
 6885e5767660656a9cc2ffda538b1fd0defd232c docs/plans/F0-master-plan.md
 d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 636ffca672050aefd5bdc5628b5c9f335018c41b docs/plans/F15-pair-sources.md
@@ -204,7 +204,7 @@ f74d5228a3ab2e7c1ce81b65b0edeebb470b624d tests/test_make_mgext.py
 77430b0b34d24773cbfe804119416ce5c2a40708 tests/test_output_bundle.py
 cdf46298db296a2d05e8fd42efcce246d971c55f tests/test_output_char.py
 760493e6e43124ec37e48463773e51291e595c9c tests/test_pair_probe.py
-f20b372af8ebd20dad3ef13c5c6d1c6c19b3d0e4 tests/test_pair_source.py
+91a24e4197b38db32cdf8719cb2ba67deb15df8f tests/test_pair_source.py
 34f1bcdbffc5c85f790e98e5bd1c4b1f10fe795f tests/test_period_golden.py
 37fe3291f5eb15938ef1e8097b3a955e106be9f4 tests/test_phase_origin.py
 b50c831bcb56f33b701995f750409a06b054aa33 tests/test_pick_defect_box.py

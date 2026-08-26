@@ -1191,3 +1191,45 @@ def test_the_rank_columns_come_over_without_being_carried():
     got = columns_for_source(both, "ebi")
     assert sorted(got) == ["PMSCORE", "XINDEX", "YINDEX"]
     assert len(got) == len(set(got))
+
+
+def test_a_tight_search_window_does_not_fake_a_confident_peak_ratio():
+    """⚠ **看不夠遠 ≠ 第一名遙遙領先**（F33，2026-08-26）。
+
+    `align_peak_ratio` 的第二名是「把最高峰周圍蓋掉之後剩下的最大值」，遮罩半徑
+    是模板的一半。窗縮到比遮罩還小的時候**整張回應圖都被蓋掉** —— 以前那裡回
+    0.0，讀起來是「完全不含糊」。
+
+    而它最容易發生的時機正好是**最不該樂觀**的那一個：陣列區裡把
+    `search_within` 縮到半個晶格週期以內（那是對的做法）之後。實測模板 96 px、
+    窗 ±32 px 時回應圖 65×65 而遮罩半徑 48。
+
+    所以現在**那一格不寫**（算不出來的不寫）。
+    """
+    big = _noise(400, 400, 5)
+    tmpl = big[150:246, 150:246].copy()          # 96×96 模板
+
+    # 窗夠大 → 放得下第二個峰 → 有數字
+    wide, err = _align(big, tmpl, search_within=0.0)
+    assert err is None
+    assert "align_peak_ratio" in wide.features
+
+    # 窗比遮罩半徑還小 → 答不出來 → **不寫**（而不是寫一個假的 0）
+    tight, err2 = _align(big, tmpl, search_within=3.0)
+    assert err2 is None
+    assert "ncc_score" in tight.features          # 位置照樣找得到
+    assert "align_peak_ratio" not in tight.features
+
+
+def test_the_second_peak_says_nan_when_it_cannot_tell():
+    """演算法那一層回 NaN，讓呼叫端自己決定要不要寫。"""
+    import math
+
+    from d4t.core.algo.align import locate_template_peaks
+
+    big = _noise(400, 400, 7)
+    tmpl = big[150:246, 150:246].copy()
+    # 搜尋範圍只比模板大一點點 → 遮罩蓋掉整張
+    _x, _y, score, second = locate_template_peaks(big[140:256, 140:256], tmpl)
+    assert score > 0.99
+    assert math.isnan(second)

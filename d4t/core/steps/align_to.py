@@ -373,8 +373,13 @@ class AlignToStep(Step):
         ctx.add_feature("align_off_x_px", float(x - ex))
         ctx.add_feature("align_off_y_px", float(y - ey))
         # 第一名與第二名的比 —— 越接近 1，這個位置越是猜的（週期性結構）。
-        ratio = (float(second) / float(score)) if score > 1e-9 else 1.0
-        ctx.add_feature("align_peak_ratio", float(min(max(ratio, 0.0), 1.0)))
+        # **第二名答不出來（NaN）就不寫這一格**：搜尋窗縮到比遮罩半徑還小的
+        # 時候整張回應圖都被蓋掉，而那時候硬寫一個 0.00 等於說「遙遙領先」——
+        # 剛好在陣列區、剛好在使用者最需要它講實話的時候（F33）。
+        if second == second:                       # 不是 NaN
+            ratio = (float(second) / float(score)) if score > 1e-9 else 1.0
+            ctx.add_feature("align_peak_ratio",
+                            float(min(max(ratio, 0.0), 1.0)))
         ok = score >= float(p["min_score"])
         ctx.add_feature("align_ok", 1.0 if ok else 0.0)
         # ``search`` / ``size`` 是給**報表畫標記**用的（F33）：框要畫在
