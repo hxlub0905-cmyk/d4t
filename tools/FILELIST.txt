@@ -3,7 +3,7 @@
 85ba76deb9e3e0de7fab20cbf4a2bb69e2c89d85 .github/workflows/ci.yml
 32effd36c2614b3378219e38d064dfcbb4ef38e4 .gitignore
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
-964da8bce181f83e209fb5d6cce033b1c780ec3b CLAUDE.md
+8ebcd23bc5d6a0b3b9e8913cba4e330cfe1ce419 CLAUDE.md
 2a88de1f46350abacaceaa0ac065279f42f9fc2a README.md
 9b6779d923e3481adef6c0474434ec71dcc222e6 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
@@ -70,7 +70,7 @@ c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
-e96d9c39105dd4402199afc8bf2d4d4940a6dbd5 d4t/core/steps/output.py
+d95ab1605cca64f789a8e18177da0bcf576cba30 d4t/core/steps/output.py
 8174f2b776a9b6398bd64660aff3a8506256c1fd d4t/core/steps/pair_source.py
 46e24cde47cccae307704861c349c75887a27da4 d4t/core/steps/quality.py
 93c34393be2ee09fb4f4c137a722a047a5dd1e2d d4t/core/steps/roi_cross.py
@@ -123,7 +123,7 @@ c1cfb82e71df1d178b5f70766fcabf52d623476a docs/USING-CD.md
 d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 655f8cf83bfe142b0952aa2769fd420aec2698d3 docs/plans/F26-decide-panel-ux.md
 4b55069e016b2ca16b4ff7e9e929d7454db52172 docs/plans/F27-results-panel.md
-61207549e366ed5bbe743a7f27817e1d0cabb05c docs/plans/F37-glv-roi-names-and-output.md
+398b4e4134459fe36ac731a5bcba86083bdb6c3f docs/plans/F37-glv-roi-names-and-output.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -322,7 +322,7 @@ a3df102923d0ed766c1d93013b76aa74b1b939c7 tools/make_filelist.py
 9bc1b0c9d6ecb8dde211a5ec13ab11ef2810dbc1 tools/make_mgext.py
 930b578f2fefb97c662452a0b7911abc8c9f13f5 tools/make_sample.py
 cc79855184d36617d3df0e9e191d3492a726ca60 tools/make_sample_rsem.py
-bfffe92e9ec5d6b5cfb8f8be26380b514edd0442 tools/make_text_bundle.py
+1fec0052e43063d4113f84f84de258d8dec02961 tools/make_text_bundle.py
 6808d8d4d25095c0454a1ee8dc88c4dd0319b40d tools/pair_probe.py
 f4c33ded4be55525d92aafca7c45cceaed6df7f8 tools/release.py
 f4ee3956c51bf63e22c90eaa2401229f3281028e tools/validate_mgepi.py

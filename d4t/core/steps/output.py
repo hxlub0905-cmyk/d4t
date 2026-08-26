@@ -1,6 +1,10 @@
 # d4t step-card library — authored 2026-08-20 (F16：Output 段).
 """Output 段的卡：整批跑完之後，把結果寫出去。
 
+⚠ ``output_bundle`` 的 ``bundle`` 跟 ``bundle/d4t_bundle.py`` **沒有關係**
+（前者是這張卡寫出來的資料夾，畫面上叫 “Write report folder”；後者是搬程式碼
+進公司機的那個單檔包）。兩個都不改名，理由與代價見 `CLAUDE.md` §0 那張表。
+
 Output 段是什麼（使用者 2026-08-20 定調）
 -----------------------------------------
 > Output 我預期要可以產出多種 style（分 card），例如 Report / csv / klarf /
