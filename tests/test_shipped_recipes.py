@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -325,8 +326,10 @@ def test_the_patch_recipe_measures_and_classifies_end_to_end(tmp_path):
 
     feats = rows[0]["features"]
     assert feats["boxes"] > 1, "templateGC 要在 patch 上鋪出好幾格才有得比"
-    for name in ("focus_lapvar", "cmp_snr_mean_outlier",
-                 "cmp_delta_mean_outlier"):
+    # **問樹要哪幾個，不要抄一份**（同一個理由：抄出來的那份會漂）。
+    asked = decide_tree.features_used(recipe.decide)
+    assert len(asked) == 3, asked
+    for name in asked:
         assert name in feats, name
     assert all(r.get("bin") is not None for r in rows)
 
@@ -336,25 +339,38 @@ def test_the_patch_recipe_measures_and_classifies_end_to_end(tmp_path):
     assert (folder / "spread.html").is_file()
     plot = (folder / "spread.html").read_text(encoding="utf-8")
     assert "<svg" in plot
-    # box plot 畫的就是樹問過的那三個 —— 「留空 = 判定問過的那幾個」。
-    for name in ("focus_lapvar", "cmp_snr_mean_outlier",
-                 "cmp_delta_mean_outlier"):
+    # box plot 畫的就是樹問過的那幾個 —— 「留空 = 判定問過的那幾個」。
+    for name in asked:
         assert name in plot, name
 
 
-def test_the_signed_delta_is_a_bright_defect_rule_and_abs_is_measured_too():
-    """`cmp_delta_mean_outlier > 40` **只抓得到亮缺陷**，而那是使用者指定的。
+def test_the_third_cut_is_unsigned_so_dark_defects_count_too():
+    """第三刀問的是 **`cmp_abs_delta_mean_outlier`**，不是帶正負號的那個。
 
-    `_outlier` 挑的是「離典型最遠」的那一格 —— 兩個方向都算 —— 而 `delta`
-    帶正負號，所以暗缺陷是負的（合成資料上實測 −18.6），`> 40` 對它永遠不
-    成立。這支測試不是在說那樣不對，是**把那件事釘在有人會看的地方**，並且
-    保證逃生口一直在：`abs_delta` 也量了，換一個名字就是兩種都抓。
+    `_outlier` 挑的是「離典型最遠」的那一格 —— **兩個方向都算** —— 而 `delta`
+    帶正負號，所以暗缺陷是負的（合成資料上實測 −18.6），`> 40` 對它**永遠不
+    成立**。用 `delta` 等於一條「只抓亮缺陷」的規則，而那不是這份 recipe 在問
+    的問題（使用者 2026-08-26：「把 abs_delta 換上去」）。
+
+    ⚠ 反向那一半用的是**整字比對**：`"cmp_delta_mean_outlier" in whens` 對
+    `cmp_abs_delta_mean_outlier` 是 False（子字串不同），但這種比對很容易在
+    下一次改名時變成一支永遠綠的測試 —— 所以寫成邊界比對。
     """
     recipe = Recipe.load(PATCH)
-    metrics = recipe.nodes["glv"].params["compare_metrics"]
-    assert "abs_delta" in metrics, "逃生口要一直在（換名字不必重跑影像段）"
     whens = " ".join(w for w in _whens(recipe.decide.tree))
-    assert "cmp_delta_mean_outlier" in whens
+    assert "cmp_abs_delta_mean_outlier" in whens
+    assert not re.search(r"\bcmp_delta_mean_outlier\b", whens), \
+        "帶正負號的那個只抓得到亮缺陷"
+
+
+def test_the_signed_delta_is_still_measured_as_the_direction():
+    """`delta` 仍然一起量 —— 它是那個差的**方向**（亮還是暗）。
+
+    而且它是退回「只抓亮的」時的逃生口：樹上換一個名字就好，**不必重跑
+    影像段**。只量其中一個的話，那個選擇就變成一次重跑。
+    """
+    metrics = Recipe.load(PATCH).nodes["glv"].params["compare_metrics"]
+    assert "abs_delta" in metrics and "delta" in metrics
 
 
 def _whens(node):

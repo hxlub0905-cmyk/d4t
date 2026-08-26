@@ -22,7 +22,7 @@
 
 | 問的 | 為什麼要問 | 答案 |
 |---|---|---|
-| 「GLV contrast 超過 40」是哪一個數字 | 這個 repo 的 `contrast` 是 **Michelson**（`(T−R)/(T+R)`，範圍 −1..1）—— **40 不可能是它**。照字面實作等於做出一個永遠不成立的門檻 | **灰階差 `delta`** |
+| 「GLV contrast 超過 40」是哪一個數字 | 這個 repo 的 `contrast` 是 **Michelson**（`(T−R)/(T+R)`，範圍 −1..1）—— **40 不可能是它**。照字面實作等於做出一個永遠不成立的門檻 | **灰階差**（第一版 `delta`，同一輪換成 `abs_delta`，見 §3.2）|
 | 「dSNR」 | `compare_metrics` 同時有 `delta` 與 `snr`，而 `d` 兩邊都讀得通 | 就是 **`snr`** |
 | box plot 一個盒子代表什麼 | 這決定卡片長什麼樣（要不要一格「分組欄」） | **一個 bin 一個盒子** |
 
@@ -91,7 +91,7 @@ Output（不接線）：Write report folder ＋ Write a box plot
 ```
 
 判定：`focus_lapvar >= 150` → `cmp_snr_mean_outlier > 4` →
-`cmp_delta_mean_outlier > 40`，三個門檻是 `let`（改數字不動樹）。
+`cmp_abs_delta_mean_outlier > 40`，三個門檻是 `let`（改數字不動樹）。
 **問不到的題目一律答「否」**（F30），所以量不到 focus 的那一顆落在 bin 99 ——
 方向是安全的那一邊，而那是排題目順序時就決定的。
 
@@ -108,18 +108,25 @@ an image, it cannot be typed in」。所以這份 recipe 載進去有**兩條** 
 卻沒從表上拿掉的話，這份 recipe 從此少一條防線而測試照樣綠 —— 那是「例外表」
 唯一會爛的方式。
 
-### 3.2 ⚠ 帶正負號的 delta 是一條「只抓亮缺陷」的規則
+### 3.2 第三刀用 `abs_delta`（第一版是 `delta`，同一輪換掉的）
 
 `_outlier` 挑的是「離典型最遠」的那一格 —— **兩個方向都算** —— 而 `delta`
 帶正負號。所以暗缺陷的 `cmp_delta_mean_outlier` 是負的（合成資料上實測
-**−18.6**），`> 40` 對它永遠不成立。
+**−18.6**），`> 40` 對它**永遠不成立** ＝ 一條「只抓亮缺陷」的規則。
 
-**照使用者指定的走**（他選的是 delta），但：
+第一版照使用者指定的走 `delta`，並在 README、SESSION_LOG 與一支叫得出名字的
+測試裡把代價講清楚、把逃生口留著（`abs_delta` 一起量）。使用者看完之後說
+「**把 abs_delta 換上去**」—— 於是換了，而換的成本正好是**一個名字**：
+`abs_delta` 早就在 `compare_metrics` 裡，影像段一格都不用重跑。
 
-* `compare_metrics` 一起量 **`abs_delta`** —— 逃生口一直在，樹上換一個名字
-  就是兩種都抓，**不必重跑影像段**；
-* 這件事寫進 `recipes/README.md` 與一支叫得出名字的測試
-  （`test_the_signed_delta_is_a_bright_defect_rule_and_abs_is_measured_too`）。
+> **那三件事（做他要的 / 講清楚代價 / 留改回來的路）少一件，這一輪就不會有
+> 這個結果**：沒講的話他不會問，沒留路的話換回來要重跑一批。
+
+`delta` **仍然一起量** —— 它是那個差的**方向**（亮還是暗），而且是退回
+「只抓亮的」時的逃生口。測試：
+`test_the_third_cut_is_unsigned_so_dark_defects_count_too`（**整字**比對，
+子字串比對在下一次改名時會變成一支永遠綠的測試）＋
+`test_the_signed_delta_is_still_measured_as_the_direction`。
 
 ### 3.3 不會爛掉
 
@@ -128,6 +135,10 @@ an image, it cannot be typed in」。所以這份 recipe 載進去有**兩條** 
 數字」沒有藉口不驗 —— `test_the_patch_recipe_measures_and_classifies_end_to_end`
 補上模板之後**要求零 error**，跑完 12 顆、49 個框，三個特徵都在，兩個輸出檔
 都寫得出來。
+
+⚠ 那支端對端測試**問樹要哪幾個名字**（`decide_tree.features_used`），不抄
+一份清單 —— 這一輪把 `delta` 換成 `abs_delta` 時，它自己就跟上了。抄一份的
+那個版本當場紅，而那正是「一個主題一個家」在測試裡的樣子。
 
 外加一支不必跑資料的：`test_the_patch_recipe_asks_about_numbers_its_own_cards_measure`
 —— 樹問的每一個名字，都要有一張卡在**宣告層**寫得出來。它抓的正是
@@ -141,5 +152,5 @@ an image, it cannot be typed in」。所以這份 recipe 載進去有**兩條** 
 - 全新：`d4t/core/export/boxplot.py`、`OutputBoxPlotStep`、
   `decide_tree.features_used`、`tests/test_output_boxplot.py`（16）、
   `recipes/patch-dsnr-by-class.json`。
-- `tests/test_shipped_recipes.py` 12 → 21。
+- `tests/test_shipped_recipes.py` 12 → 22。
 - 核心全套 + UI 逐檔 + `freeze_golden --check` 三份全綠（沒碰演算法）。

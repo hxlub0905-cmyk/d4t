@@ -82,7 +82,7 @@ Load images ──test,ref──> Denoise (gaussian, k=3) ─┬─test──> R
 ```
 ① focus_lapvar  >= focus_min (150) ?   否 → bin 99  garbage (out of focus)
 ② cmp_snr_mean_outlier > snr_min (4) ? 否 → bin 3   no signal
-③ cmp_delta_mean_outlier > delta_min (40) ?  是 → bin 1 strong / 否 → bin 2 weak
+③ cmp_abs_delta_mean_outlier > delta_min (40) ? 是 → bin 1 strong / 否 → bin 2 weak
 ```
 
 三個門檻是判定段的 **working number**（`focus_min` / `snr_min` / `delta_min`），
@@ -96,18 +96,21 @@ Load images ──test,ref──> Denoise (gaussian, k=3) ─┬─test──> R
 一條紅字指名那顆按鈕：選那張卡 → **`Edit template & regions…`** → 在你自己的
 一格上圈一次。圈完紅字就沒了。
 
-**② `cmp_delta_mean_outlier > 40` 只抓得到亮缺陷。** `_outlier` 挑的是「離典型
-最遠」的那一格，**兩個方向都算**，而 `delta` 帶正負號 —— 暗缺陷是負的，
-`> 40` 對它永遠不成立（合成資料上實測 −18.6）。這是照你指定的走。兩種都要數
-的話，樹上第三題把 `cmp_delta_mean_outlier` 換成 **`cmp_abs_delta_mean_outlier`**
-即可 —— 那個數字**已經一起量了**，不必重跑影像段。
+**② 第三刀是 `abs_delta`，不是帶正負號的 `delta`。** `_outlier` 挑的是
+「離典型最遠」的那一格，**兩個方向都算**，而 `delta` 帶正負號 —— 暗缺陷是負的，
+`> 40` 對它**永遠不成立**（合成資料上實測 −18.6）。用 `delta` 等於一條
+「只抓亮缺陷」的規則。
+
+`delta` **仍然一起量**：它是那個差的**方向**（亮還是暗），進 CSV 也進得了
+box plot。只要抓亮的話，樹上第三題把 `cmp_abs_delta_mean_outlier` 換回
+`cmp_delta_mean_outlier` 就好 —— **不必重跑影像段**。
 
 ### 輸出
 
 | 檔案 | 什麼 |
 |---|---|
 | `patch_report/report.html` ＋ `images/` ＋ `defects.csv` | 一顆一列，點一列換圖 |
-| `patch_report/spread.html` | **box plot**：一個盒子一類，畫的是判定問過的那三個數字 |
+| `patch_report/spread.html` | **box plot**：一個盒子一類，畫的是判定問過的那三個數字（`focus_lapvar` / `cmp_snr_mean_outlier` / `cmp_abs_delta_mean_outlier`）|
 
 盒子＝中間一半的 defect，鬚伸到 1.5×IQR 之內最遠的那一顆，超出的畫成小圈。
 **四類的盒子不重疊 = 那個數字分得開它們。**

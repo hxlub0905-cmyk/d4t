@@ -172,7 +172,7 @@
       "yes": {
         "when": "cmp_snr_mean_outlier > snr_min",
         "yes": {
-          "when": "cmp_delta_mean_outlier > delta_min",
+          "when": "cmp_abs_delta_mean_outlier > delta_min",
           "yes": {
             "bin": 1,
             "label": "strong"
