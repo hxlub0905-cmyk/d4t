@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import heapq
 import json
+import os
 import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional, Set, Tuple, Type
@@ -631,26 +632,38 @@ def _decide_unknown(decide: "DecideSpec", feats: Set[str],
     out: List[Issue] = []
     seen = set(feats) | {"score"}
 
-    def check(where: str, text: str) -> None:
+    def check(where: str, text: str, fill: str = "", name: str = "") -> None:
         try:
             e = parse_expression(str(text))
         except ExpressionError:
             return                      # 語法錯已經由 `_decide_issues` 講過了
         unknown = sorted(e.variables - seen)
-        if unknown:
-            out.append(Issue(
-                code="unknown-feature", level="warning", node_id=None,
-                title="The decision uses a number nobody produces",
-                detail="route '%s': %s uses %s, but no card in this route "
-                       "writes those out (available here: %s). Check the "
-                       "spelling, or add the card that measures it - every "
-                       "defect will fail on this line at run time."
-                       % (kind, where, unknown, sorted(seen) or "none")))
+        if not unknown:
+            return
+        # **「missing ⇒ 用 __」的那幾行不會失敗** —— 而這句話以前照樣對它們
+        # 講「every defect will fail on this line at run time」。那是**假的**，
+        # 而且它剛好只在 `fill` 真的派上用場的時候出現：使用者寫這一行的意思
+        # 正是「這個數字可能不在」。這支 lint 本來就看得見 `fill`（下面那個
+        # 迴圈拿它來登記 `<name>_missing`），只是沒有拿來講話。
+        if str(fill or ""):
+            tail = ("That is not a failure here: this line says “missing ⇒ "
+                    "use %s”, so a defect without that number gets %s and "
+                    "“%s_missing = 1”. Add the card that measures it if you "
+                    "did mean to measure it." % (fill, fill, name or "it"))
+        else:
+            tail = ("Check the spelling, or add the card that measures it - "
+                    "every defect will fail on this line at run time.")
+        out.append(Issue(
+            code="unknown-feature", level="warning", node_id=None,
+            title="The decision uses a number nobody produces",
+            detail="route '%s': %s uses %s, but no card in this route "
+                   "writes those out (available here: %s). %s"
+                   % (kind, where, unknown, sorted(seen) or "none", tail)))
 
     for i, item in enumerate(decide.let):
-        check("working number '%s'" % (str(item.name).strip() or "#%d" % i),
-              item.expr)
         name = str(item.name).strip()
+        check("working number '%s'" % (name or "#%d" % i), item.expr,
+              fill=str(getattr(item, "fill", "") or ""), name=name)
         if name:
             seen.add(name)
             if str(getattr(item, "fill", "") or ""):
@@ -1349,19 +1362,68 @@ def _migrate_compare_method_into_reference(nodes: Dict[str, "RecipeNode"]) -> No
                                 enabled=node.enabled)
 
 
-def _rename_in_expr(score: "ScoreSpec", table: Dict[str, str]) -> "ScoreSpec":
-    """把分數表達式裡的**整個識別字**照 ``table`` 換掉（子字串不算）。
+def _renamed_idents(expr: str, table: Dict[str, str]) -> str:
+    """一條表達式裡的**整個識別字**照 ``table`` 換掉（子字串不算）。
 
     ``str.replace`` 會把 ``my_delta_ratio`` 這種自訂名字打斷 —— 所以用邊界比對，
     而且**長的先比**：``epi_delta`` 與 ``delta`` 同時在表裡時，前者要先中。
     """
-    expr = str(getattr(score, "expr", "") or "")
     if not expr or not table:
-        return score
+        return expr
     keys = sorted(table, key=len, reverse=True)
-    new_expr = re.sub(r"\b(%s)\b" % "|".join(map(re.escape, keys)),
-                      lambda m: table[m.group(1)], expr)
+    return re.sub(r"\b(%s)\b" % "|".join(map(re.escape, keys)),
+                  lambda m: table[m.group(1)], expr)
+
+
+def _rename_in_expr(score: "ScoreSpec", table: Dict[str, str]) -> "ScoreSpec":
+    """分數表達式裡的舊 feature 名換成新的（見 :func:`_renamed_idents`）。"""
+    expr = str(getattr(score, "expr", "") or "")
+    new_expr = _renamed_idents(expr, table)
     return score if new_expr == expr else replace(score, expr=new_expr)
+
+
+def _rename_in_tree(node: Any, table: Dict[str, str]) -> Any:
+    """判定樹每一步的 ``when`` 照 ``table`` 換名（葉子沒有表達式）。"""
+    if node is None or isinstance(node, TreeLeaf):
+        return node
+    when = _renamed_idents(str(getattr(node, "when", "") or ""), table)
+    yes = _rename_in_tree(node.yes, table)
+    no = _rename_in_tree(node.no, table)
+    if when == node.when and yes is node.yes and no is node.no:
+        return node
+    return TreeStep(when=when, yes=yes, no=no)
+
+
+def _rename_in_decide(decide: Optional["DecideSpec"],
+                      table: Dict[str, str]) -> Optional["DecideSpec"]:
+    """判定段裡的舊 feature 名換成新的（F33，2026-08-25）。
+
+    **這一支是補上來的**：改名遷移本來只走 `score.expr`
+    （:func:`_rename_in_expr`），而判定段的 ``let`` / ``rules`` / ``tree``
+    裡的表達式一個都沒人改寫。F30 之後那裡才是問問題的地方 ——
+    樹上的 ``pair_found < 1`` 沒跟著換，開起來就是一題**永遠答「否」**的問題
+    （問不到的特徵算否），而畫面上它長得跟一條正常的規則一模一樣：
+    跑得完、有數字、而且是錯的。
+
+    **判準仍然是「舊東西在不在」**（鐵則 9）：表達式裡真的出現舊名字才動它，
+    換完留下的新名字不在表的左邊 → 第二次跑是 no-op，
+    ``to_json_dict → from_json_dict`` 仍然是 identity。
+    """
+    if decide is None or not table:
+        return decide
+    score = _renamed_idents(str(decide.score or ""), table)
+    lets = [replace(l, expr=_renamed_idents(str(l.expr or ""), table))
+            for l in decide.let]
+    rules = [replace(r, when=_renamed_idents(str(r.when or ""), table))
+             for r in decide.rules]
+    tree = _rename_in_tree(decide.tree, table)
+    unchanged = (score == decide.score
+                 and all(a.expr == b.expr for a, b in zip(lets, decide.let))
+                 and all(a.when == b.when for a, b in zip(rules, decide.rules))
+                 and tree is decide.tree)
+    if unchanged:
+        return decide
+    return replace(decide, let=lets, rules=rules, score=score, tree=tree)
 
 
 def _migrate_renamed_features(score: "ScoreSpec") -> "ScoreSpec":
@@ -1702,7 +1764,11 @@ class Recipe:
         score = _migrate_renamed_features(score)
         # 相對量改叫 `cmp_*` 之後，舊表達式裡的 `epi_delta` 要跟著換
         # （順序要緊：上面兩道遷移跑完，節點的參數才是新的形狀）。
-        score = _rename_in_expr(score, _compare_feature_renames(nodes))
+        renames = _compare_feature_renames(nodes)
+        score = _rename_in_expr(score, renames)
+        # **判定段吃同一張表**（F33）：F30 之後問問題的地方在這裡，
+        # 改名只換 `score.expr` 的話樹上那一題會安靜地永遠答「否」。
+        decide = _rename_in_decide(decide, renames)
         # ⚠ **撞名前綴那一道遷移不在這裡**（`_migrate_rescued_feature_names`）。
         # 它住在 :meth:`load` —— 理由見那一支的說明：這裡是「重建一個物件」，
         # 而那是 `run_batch` 送 recipe 進 worker 走的路。
@@ -1719,6 +1785,50 @@ class Recipe:
             decide=decide,
             route_by=route_by,
         )
+
+    def save(self, path: Any) -> None:
+        """寫成一份 recipe JSON（utf-8、``indent=2``、**atomic**，鐵則 5）。
+
+        2026-08-26 做回來（2026-08-16 拿掉，理由是「先把整個 engine 用好，
+        再來支援」）。使用者這一輪的話是「接下來幫我做一個重要的功能，
+        存 recipe」—— Phase 1 已於 2026-08-16 收斂，那個前提到期了。
+
+        **這一支跟 :meth:`load` 不是對稱的一對**，而那個不對稱是刻意的：
+
+        * ``save`` 寫的永遠是 **現在這一版的形狀**（:meth:`to_json_dict` 會把
+          ``app_version`` 蓋成現在這一版）—— 它回答的是「這個檔案是誰寫的」。
+        * ``load`` 會多跑一道**只在讀檔案時才成立**的遷移
+          （`_migrate_rescued_feature_names`，見那支的說明）。
+
+        合起來的後果值得寫下來，因為它是這個功能真正的行為改變：**打開一份
+        舊檔案再存回去，磁碟上的東西會被換成新形狀**（遷移過的名字、
+        Studio 把門檻翻成的那棵樹）。那是對的 —— 使用者看到的就是新形狀，
+        存出跟畫面不一樣的東西才是說謊 —— 但它不是 no-op，所以
+        `StudioWindow._on_save_recipe` 會在覆寫別人的檔案時講一句話。
+
+        ⚠ **不做驗證**。一份還在調、`validate` 有紅字的 pipeline 必須存得下來
+        —— 存檔是「別弄丟我的工作」，不是「你做完了嗎」。健檢在畫布上一直都在
+        講話，不必在這裡再擋一次。
+        """
+        path = str(path)
+        tmp = path + ".tmp"
+        parent = os.path.dirname(os.path.abspath(path))
+        if parent and not os.path.isdir(parent):
+            os.makedirs(parent, exist_ok=True)
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self.to_json_dict(), f, ensure_ascii=False, indent=2)
+                f.write("\n")
+            os.replace(tmp, path)
+        except BaseException:
+            # ``json.dump`` 是**邊算邊寫**的，所以中途失敗會留下半份檔案。
+            # 原檔沒事（還沒 replace），但那個 ``.tmp`` 會留在使用者的資料夾
+            # 裡 —— 而它跟他要的檔案只差三個字元，看起來像是「存出來了」。
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
 
     @classmethod
     def load(cls, path: Any) -> "Recipe":
@@ -2041,7 +2151,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
              registry: Optional[Dict[str, Type[Step]]] = None) -> List[Issue]:
     """lint 式驗證：收集**所有**問題後一次回傳（不會 raise）。
 
-    檢查項（code）：unknown-step / bad-param / not-configured / unknown-node /
+    檢查項（code）：unknown-step / bad-param / not-configured（error）/
+    half-configured（warning）/ unknown-node /
     unknown-route / cycle / missing-image / unknown-region / requires-ref /
     ambiguous-input / score-expr / unknown-feature（warning）/
     feature-collision（warning）/ bad-bins /
@@ -2124,6 +2235,20 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             issues.append(Issue(
                 code="not-configured", level="error", node_id=nid,
                 title=f"{step_cls.label} is not set up yet", detail=str(msg)))
+
+        # **跑得起來、但八成不是他要的**（F35）—— warning，不擋 CLI。
+        # 分成兩支而不是在同一支上加一個級別欄位：級別是**呼叫端**的事
+        # （lint 決定怎麼呈現），而卡片要回答的是一個它自己答得出來的問題
+        # 「這會不會跑不起來」。見 `Step.configuration_hints`。
+        try:
+            hints = list(step_cls.configuration_hints(clean_params[nid]))
+        except Exception:                       # noqa: BLE001 — 卡片自己的程式
+            hints = []
+        for msg in hints:
+            issues.append(Issue(
+                code="half-configured", level="warning", node_id=nid,
+                title=f"{step_cls.label} will run, but check this",
+                detail=str(msg)))
 
     # ---- 一個輸入埠只能有一條線（F9-7）----
     # 引擎查資料從哪來的 key 是 ``(下游節點, 流名)``，所以兩條線落在同一個 key

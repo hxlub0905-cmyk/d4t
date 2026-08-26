@@ -58,7 +58,8 @@ def _ctx(main_item, sources):
 
 def _run(ctx, **over):
     p = {"source": "ebi", "match": "position", "tol_nm": 500.0,
-         "candidates": 1, "carry": "", "channel": "", "out": "paired"}
+         "candidates": 1, "carry": "", "channel": "", "out": "paired",
+         "rank_within": "", "rank_by": "", "rank_desc": True}
     p.update(over)
     get_step("pair_source")().run(ctx, p)
     return ctx
@@ -73,19 +74,28 @@ def test_the_nearest_defect_within_the_tolerance_wins():
     ctx = _ctx(main, {"ebi": others})
     with pytest.raises(StepError):
         _run(ctx)                      # 沒有影像 → 配到了但載不出圖
-    assert ctx.features["paired"] == 1.0
+    assert ctx.features["pair_found"] == 1.0
     assert ctx.features["match_dist_nm"] == pytest.approx(126.49, abs=0.1)
     assert ctx.meta["pair_match"]["defect_id"] == "ebi_near"
 
 
 def test_nothing_within_the_tolerance_is_recorded_not_guessed():
-    """配不到**不是**「取最近的那顆」——EBI 根本沒偵測到，就是這個結論本身。"""
+    """配不到**不是**「取最近的那顆」——EBI 根本沒偵測到，就是這個結論本身。
+
+    而那個結論要**留得下來**（F33）：這一顆不吐流、不炸，繼續走到判定樹。
+    以前這裡是 raise，於是「根本沒偵測到」那一整類都變成 `ok=False`
+    —— characterization 要數的正是那一類。
+    """
     ctx = _ctx(_item("gt1", 0, 0), {"ebi": _lot([("ebi", 9000, 0)]).items})
-    with pytest.raises(StepError) as e:
-        _run(ctx)
-    assert "within" in str(e.value) and "rest of the batch" in str(e.value)
-    assert ctx.features["paired"] == 0.0
-    assert np.isnan(ctx.features["match_dist_nm"])
+    _run(ctx)                                   # 不再 raise
+    assert ctx.features["pair_found"] == 0.0
+    assert "paired" not in ctx.images           # 不吐流
+    # **算不出來的不寫**：NaN 更糟 —— 判定樹問 `expr != 0`，而 `NaN != 0` 是真，
+    # 於是 `match_dist_nm > X` 會對一顆根本沒配到的 defect 答「是」。
+    assert "match_dist_nm" not in ctx.features
+    assert "match_ambiguous" not in ctx.features
+    assert ctx.meta["pair_match"]["index"] == -1
+    assert any("pair_found = 0" in w for w in ctx.meta.get("warnings", []))
 
 
 def test_a_second_defect_inside_the_tolerance_is_flagged():
@@ -102,9 +112,9 @@ def test_a_defect_with_no_coordinates_does_not_pair_with_everything():
     ctx = _ctx(DefectItem(defect_id="no_xy", die=(1, 1), xrel_nm=None,
                           yrel_nm=None),
                {"ebi": _lot([("a", 0, 0)]).items})
-    with pytest.raises(StepError):
-        _run(ctx)
-    assert ctx.features["paired"] == 0.0
+    _run(ctx)
+    assert ctx.features["pair_found"] == 0.0
+    assert "match_dist_nm" not in ctx.features
 
 
 def test_matching_by_order_and_by_id():
@@ -249,7 +259,7 @@ def test_the_declared_features_include_the_carried_ones():
     """lint 與畫布靠宣告，而使用者要在分數表達式的下拉裡看到它們。"""
     card = get_step("pair_source")
     names = card.resolve_features(card.validate_params({"carry": "SCORE"}))
-    assert "pair_SCORE" in names and "paired" in names
+    assert "pair_SCORE" in names and "pair_found" in names
 
 
 def test_carry_reads_the_columns_ingest_filled_in():
@@ -453,7 +463,7 @@ def _paired_recipe():
         "glv": RecipeNode("glv", "glv_stats", {"source": "aligned"}),
     }
     return Recipe(recipe_id="f15", routes={"ebi_patch": list(nodes)}, nodes=nodes,
-                  score=ScoreSpec(expr="paired", threshold=0.5,
+                  score=ScoreSpec(expr="pair_found", threshold=0.5,
                                   bins={"below": 0, "above": 1}))
 
 
@@ -478,7 +488,7 @@ def test_the_second_lot_reaches_the_workers(tmp_path):
 
     one = features(1)
     assert len(one) == 6 and all(ok for _d, ok, _f in one)
-    assert dict(one[0][2])["paired"] == 1.0
+    assert dict(one[0][2])["pair_found"] == 1.0
     assert dict(one[0][2])["pair_DEFECTID"] > 0
     assert dict(one[0][2])["ncc_score"] > 0.9
     assert features(2) == one
@@ -651,3 +661,649 @@ def test_a_repeating_pattern_shows_up_as_a_peak_ratio_near_one():
     plain = _fov(seed=9)
     ctx2, err2 = _align(plain, _cut(plain, 200, 200), search_within=0.0)
     assert ctx2.features["align_peak_ratio"] < 0.5   # 這種才是真的對到
+
+
+# --------------------------------------------------------------------------- #
+# 9. F33：配不到的那一顆要**留下來**（③「根本沒偵測到」是一個結論，不是錯誤）
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("wiring", [
+    # 配對卡的圖接在哪一個埠是**使用者拉的線**決定的，兩種都要成立
+    {"template": "test", "search": "paired"},      # 大圖來自第二份
+    {"template": "paired", "search": "single"},    # ← characterization 那條
+])
+def test_align_to_lets_an_unpaired_defect_through_quietly(wiring):
+    """上游沒配到 → 這張卡沒有東西可比，**安靜讓路**而不是炸。
+
+    炸掉的話那一顆 `ok=False`、沒有 bin，於是 ③ 那一類從輸出裡整個消失 ——
+    而 CSV 上看不出來（少了幾列，跟「本來就沒那幾顆」長得一模一樣）。
+
+    ⚠ **兩個輸入埠都要問。** characterization 那條 recipe 把第二份接在
+    ``template`` 上（小圖是 EBI 的 patch、大圖是 RSEM 空拍），所以只問
+    ``search`` 的版本在真的跑的時候，八顆裡的三顆照樣 `ok=False` ——
+    而那三顆正是要數的那一類。這一條是端對端跑出來的，不是想出來的。
+    """
+    ctx = Context(images={"test": _noise(64, 64, 3),
+                          "single": _noise(64, 64, 4)})
+    ctx.meta["pair_match"] = {"source": "ebi", "defect_id": "", "index": -1,
+                              "dist_nm": float("nan"), "candidates": 1,
+                              "out": "paired"}
+    p = dict(wiring, min_score=0.3, out="aligned")
+    get_step("align_to")().run(ctx, p)
+    # 一個數字都不寫（算不出來的不寫），也不吐流
+    assert "ncc_score" not in ctx.features and "align_ok" not in ctx.features
+    assert "aligned" not in ctx.images
+    assert any("no match" in w for w in ctx.meta.get("warnings", []))
+
+
+def test_align_to_still_errors_when_the_line_is_just_wrong():
+    """讓路與**接錯線**不可以長得一樣。
+
+    少了「那張卡的 out 就是我要的這條流」這個條件，打錯流名的 recipe 會被當成
+    「沒配到」而安靜跳過 —— 每一顆都沒有數字，而畫面上沒有一句話說為什麼。
+    """
+    # ① 完全沒有配對卡：照舊炸
+    ctx = Context(images={"test": _noise(64, 64, 3)})
+    with pytest.raises(Exception) as e1:
+        get_step("align_to")().run(ctx, {"template": "test", "search": "paired",
+                                         "min_score": 0.3, "out": "aligned"})
+    assert "paired" in str(e1.value)
+
+    # ② 有配對卡、也沒配到，但它吐的是**另一條**流 → 這裡要的那條是接錯的
+    ctx2 = Context(images={"test": _noise(64, 64, 3)})
+    ctx2.meta["pair_match"] = {"source": "ebi", "index": -1, "out": "second"}
+    with pytest.raises(Exception):
+        get_step("align_to")().run(ctx2, {"template": "test", "search": "typo",
+                                          "min_score": 0.3, "out": "aligned"})
+
+
+def _tree_recipe():
+    """characterization 的樹：先問「有沒有配到」，才分得出 ②③。"""
+    from d4t.core.pipeline.recipe import (
+        DecideSpec, Recipe, RecipeNode, ScoreSpec, TreeLeaf, TreeStep,
+    )
+
+    nodes = {
+        "load": RecipeNode("load", "load_patch", {}),
+        "pair": RecipeNode("pair", "pair_source",
+                           {"source": "gt", "match": "position",
+                            "tol_nm": 100000.0, "carry": "DEFECTID"}),
+    }
+    tree = TreeStep(
+        when="pair_found < 1",
+        yes=TreeLeaf(bin=3, label="not detected"),
+        no=TreeStep(when="pair_DEFECTID > 0",
+                    yes=TreeLeaf(bin=1, label="caught"),
+                    no=TreeLeaf(bin=2, label="detected, not sampled")))
+    return Recipe(recipe_id="f33", routes={"ebi_patch": list(nodes)},
+                  nodes=nodes,
+                  score=ScoreSpec(expr="", threshold=0.5,
+                                  bins={"below": 0, "above": 1}),
+                  decide=DecideSpec(tree=tree))
+
+
+def test_an_unmatched_defect_still_reaches_the_third_verdict(tmp_path):
+    """③ 那一類要**數得出來**：它是輸出裡的一列、有 bin、進得了判定樹。
+
+    這是整個 characterization 的地基 —— ③ 的顆數就是這份分析的結論。
+    """
+    from d4t.core.ingest.dataset import load_dataset
+    from d4t.core.pipeline import run_batch
+    from d4t.core.pipeline import decide_tree
+
+    main_paths, gt_paths = _two_lots(tmp_path)
+    ds = load_dataset(main_paths["klarf"])
+    second = load_dataset(gt_paths["klarf"])
+    # 第二份少一顆 → 那一顆在 main 裡配不到，就是「EBI 根本沒偵測到」
+    missing_id = second.items[0].defect_id
+    second.items = second.items[1:]
+    pair_ingest.attach(ds, second, "gt", columns=["DEFECTID"])
+
+    rec = _tree_recipe()
+    rows = run_batch(rec, ds, workers=1)
+    lost = [r for r in rows if r["defect_id"] == missing_id]
+    assert len(lost) == 1, "配不到的那一顆必須仍然是輸出裡的一列"
+    row = lost[0]
+    assert row["ok"] is True and row["bin"] == 3
+    assert row["features"]["pair_found"] == 0.0
+    # 樹只評走得到的那條路 → 第三類那一支不會累積「問不到」
+    assert row["features"].get("decide_unanswered", 0.0) == 0.0
+    # Results 面板的顆數加總對得起來
+    entries = decide_tree.verdict_rows(rec.decide, rows)
+    not_detected = [e for e in entries if e["name"] == "not detected"]
+    assert not_detected and missing_id in not_detected[0]["ids"]
+    assert sum(e["count"] for e in entries) == len(rows)
+
+
+def test_an_old_recipe_that_says_paired_is_migrated_everywhere():
+    """改名要**連同它被寫進去的每一個地方**一起遷移。
+
+    以前遷移只換 `score.expr` —— F30 之後問問題的地方是判定樹，而樹上沒跟著
+    換的那一題會安靜地永遠答「否」（問不到的特徵算否），畫面上它跟一條正常的
+    規則長得一模一樣。
+    """
+    from d4t.core.pipeline.recipe import Recipe
+
+    raw = {
+        "recipe_id": "old",
+        "routes": {"ebi_patch": ["pair"]},
+        "nodes": {"pair": {"step": "pair_source",
+                           "params": {"source": "gt", "carry": "DEFECTID"}}},
+        "score": {"expr": "paired * 10", "threshold": 0.5,
+                  "bins": {"below": 0, "above": 1}},
+        "decide": {
+            "let": [{"name": "hit", "expr": "paired"}],
+            "rules": [{"when": "paired < 1", "bin": 3, "label": "missed"}],
+            "score": "paired",
+            "tree": {"when": "paired < 1",
+                     "yes": {"bin": 3, "label": "missed"},
+                     "no": {"bin": 1, "label": "caught"}},
+        },
+    }
+    rec = Recipe.from_json_dict(raw)
+    assert rec.score.expr == "pair_found * 10"
+    assert rec.decide.let[0].expr == "pair_found"
+    assert rec.decide.rules[0].when == "pair_found < 1"
+    assert rec.decide.score == "pair_found"
+    assert rec.decide.tree.when == "pair_found < 1"
+
+    # 冪等 —— 第二趟是 no-op，`to_json_dict → from_json_dict` 仍是 identity
+    # （鐵則 9：那是 `run_batch` 送 recipe 進 worker 的路）。
+    again = Recipe.from_json_dict(rec.to_json_dict())
+    assert again.to_json_dict() == rec.to_json_dict()
+
+
+def test_a_name_that_merely_contains_paired_is_left_alone():
+    """換的是**整個識別字**：`my_paired_ratio` 不是 `paired`。"""
+    from d4t.core.pipeline.recipe import Recipe
+
+    raw = {
+        "recipe_id": "old",
+        "routes": {"ebi_patch": ["pair"]},
+        "nodes": {"pair": {"step": "pair_source", "params": {"source": "gt"}}},
+        "score": {"expr": "my_paired_ratio", "threshold": 0.5,
+                  "bins": {"below": 0, "above": 1}},
+    }
+    assert Recipe.from_json_dict(raw).score.expr == "my_paired_ratio"
+
+
+# --------------------------------------------------------------------------- #
+# 10. F33：die 內排名 —— 母體是**那一份的完整清單**，不是這一批
+# --------------------------------------------------------------------------- #
+def _ranked_lot():
+    """三個 die、各若干筆，分數刻意跨 die 交錯（排錯母體就會看得出來）。"""
+    rows = [
+        # (id,  x,     y,  XINDEX, YINDEX, SCORE)
+        ("a1", 0, 0, "1", "1", "90"),
+        ("a2", 1000, 0, "1", "1", "70"),
+        ("a3", 2000, 0, "1", "1", "50"),
+        ("b1", 0, 1000, "2", "1", "95"),
+        ("b2", 1000, 1000, "2", "1", "20"),
+        ("c1", 0, 2000, "3", "7", "80"),
+        ("c2", 1000, 2000, "3", "7", "85"),
+        ("c3", 2000, 2000, "3", "7", "60"),
+        ("c4", 3000, 2000, "3", "7", "10"),
+    ]
+    return [_item(did, x, y, die=(int(xi), int(yi)),
+                  fields={"XINDEX": xi, "YINDEX": yi, "SCORE": sc})
+            for did, x, y, xi, yi, sc in rows]
+
+
+def _rank_of(target_id, others, **over):
+    """把 ``target_id`` 那一顆當成 main 的配對對象，跑一次拿排名。"""
+    hit = next(o for o in others if o.defect_id == target_id)
+    ctx = _ctx(_item("gt", hit.xrel_nm, hit.yrel_nm, die=hit.die),
+               {"ebi": others})
+    p = dict(rank_within="XINDEX,YINDEX", rank_by="SCORE")
+    p.update(over)
+    with pytest.raises(StepError):        # 沒有影像 → 配到了但載不出圖
+        _run(ctx, tol_nm=10.0, **p)
+    return ctx.features
+
+
+def test_the_rank_is_worked_out_inside_each_die_over_the_whole_lot():
+    """名次的母體是**那一份的完整清單**，不是跑過 pipeline 的那幾顆。
+
+    分數刻意跨 die 交錯：`c1`（80 分）在整份裡排第 3，但在它自己的 die 裡
+    是第 2 —— 兩個數字不一樣，所以這條測試分得出母體有沒有搞錯。
+    """
+    others = _ranked_lot()
+    f = _rank_of("c1", others)
+    assert f["pair_die_rank"] == 2.0        # 自己 die 內：85 > 80 > 60 > 10
+    assert f["pair_die_total"] == 4.0       # 而那個 die 有四筆
+
+    assert _rank_of("a1", others)["pair_die_rank"] == 1.0
+    assert _rank_of("a3", others)["pair_die_total"] == 3.0
+    assert _rank_of("b2", others)["pair_die_rank"] == 2.0
+
+
+def test_the_total_is_there_because_seventh_of_ten_is_not_seventh_of_3000():
+    """`pair_die_rank` 那一格在 10 筆裡跟在 3000 筆裡看起來一模一樣。"""
+    others = _ranked_lot()
+    assert _rank_of("a2", others)["pair_die_total"] == 3.0
+    assert _rank_of("c3", others)["pair_die_total"] == 4.0
+
+
+def test_no_grouping_ranks_the_whole_lot_as_one():
+    """分組欄留空 = 整份排一組。
+
+    ⚠ **卡片的預設仍然是空的**，而那跟出貨的 recipe 是兩件事：一張卡不知道
+    使用者會拿什麼 KLARF 餵它（`XINDEX`/`YINDEX` 不保證在），所以它不能預設；
+    `recipes/ebi-to-api-characterization.json` **知道**它讀的是一份 wafer 的
+    KLARF，所以它填 `XINDEX,YINDEX`（見 `tests/test_shipped_recipes.py`）。
+    """
+    others = _ranked_lot()
+    f = _rank_of("c1", others, rank_within="")
+    # 整份九筆：95 > 90 > 85 > **80** —— 而它在自己的 die 裡是第 2（見上一條）
+    assert f["pair_die_rank"] == 4.0
+    assert f["pair_die_total"] == 9.0
+
+    card = get_step("pair_source")
+    spec = next(p for p in card.params if p.name == "rank_within")
+    assert spec.default == ""
+
+
+def _two_rows_of_dies():
+    """同一個 `XINDEX`、兩個不同的 `YINDEX` —— 兩顆 die，各三筆。
+
+    `_ranked_lot` 的每個 XINDEX 只對到一個 YINDEX，所以在它上面「只勾
+    XINDEX」跟「勾兩欄」是同一個答案 —— 那正好蓋掉了這一條要問的事。
+    """
+    rows = [
+        # (id,   XINDEX, YINDEX, SCORE)
+        ("d1", "5", "1", "90"),
+        ("d2", "5", "1", "70"),
+        ("d3", "5", "1", "50"),
+        ("e1", "5", "2", "95"),
+        ("e2", "5", "2", "85"),
+        ("e3", "5", "2", "60"),
+    ]
+    return [_item(did, i * 1000, 0, die=(int(xi), int(yi)),
+                  fields={"XINDEX": xi, "YINDEX": yi, "SCORE": sc})
+            for i, (did, xi, yi, sc) in enumerate(rows)]
+
+
+def test_ticking_only_xindex_pools_a_whole_row_of_dies():
+    """**只勾一欄 = 整整一行 die 併成一組**，而它不會報錯也不會有警告。
+
+    使用者問的正是這個（2026-08-26：「但如果只勾 XINDEX 會發生什麼事?」）。
+    答案：跑得完、數字看起來正常、而排名的母體大了一整個數量級。
+
+    這條測試把那個差別釘住，因為**它在畫面上看不出來**：唯一的線索是
+    `pair_die_total`（一顆 die 的筆數 vs 一整行的筆數），而那也正是報表上
+    要放這一欄的理由。
+
+    後果的方向是必然的：組變大 → 名次拉開 → 過得了「前 N 名」的變少 →
+    ①「抓到了」被低估、②「排名太低」被高估。實測 4×3 顆 die、每 die 取前
+    2 名：① 從 24 顆掉到 8 顆。
+    """
+    others = _two_rows_of_dies()
+
+    per_die = _rank_of("e3", others, rank_within="XINDEX,YINDEX")
+    assert (per_die["pair_die_rank"], per_die["pair_die_total"]) == (3.0, 3.0)
+
+    pooled = _rank_of("e3", others, rank_within="XINDEX")
+    # 六筆一起排：95 > 90 > 85 > 70 > **60** > 50
+    assert (pooled["pair_die_rank"], pooled["pair_die_total"]) == (5.0, 6.0)
+
+    # ⚠ 而且**沒有任何人講話** —— 兩種設定都是完全合法的。
+    card = get_step("pair_source")
+    for within in ("XINDEX", "XINDEX,YINDEX"):
+        p = {"source": "ebi", "rank_within": within, "rank_by": "SCORE"}
+        assert card.configuration_issues(p) == []
+        assert card.configuration_hints(p) == []
+
+
+def test_half_filled_ranking_is_a_hint_not_a_blocker():
+    """填了分組、沒填排序欄：那張卡**跑得起來**，所以它是 warning（F35）。
+
+    F33 把這一條放在 `configuration_issues`，而那一支的契約寫的是「那張卡
+    跑起來每一顆都會失敗」—— 這裡不符合。後果是真的：出貨的 recipe 只要把
+    `Rank within` 預先填對，就會被自己的 lint 擋在 CLI 門外。
+    """
+    card = get_step("pair_source")
+    half = {"source": "ebi", "rank_within": "XINDEX,YINDEX", "rank_by": ""}
+    assert card.configuration_issues(half) == [], "跑得起來就不是 error"
+    said = card.configuration_hints(half)
+    assert len(said) == 1 and "Rank by" in said[0]
+
+    # 沒有第二份仍然是 error —— 那張卡真的會拋。
+    none = {"source": "", "rank_within": "", "rank_by": ""}
+    assert card.configuration_issues(none) and not card.configuration_hints(none)
+
+
+def test_ties_break_by_defect_id_so_two_runs_agree():
+    """同分的兩筆誰在前面必須是確定的 —— 不然同一份資料跑兩次名次會變。"""
+    def lot():
+        return [_item("z_later", 0, 0, die=(1, 1),
+                      fields={"XINDEX": "1", "YINDEX": "1", "SCORE": "50"}),
+                _item("a_first", 1000, 0, die=(1, 1),
+                      fields={"XINDEX": "1", "YINDEX": "1", "SCORE": "50"})]
+
+    first = [_rank_of(d, lot())["pair_die_rank"] for d in ("a_first", "z_later")]
+    # 反過來擺一次：名次不可以跟著 list 的順序跑
+    reversed_lot = list(reversed(lot()))
+    second = [_rank_of(d, list(reversed_lot))["pair_die_rank"]
+              for d in ("a_first", "z_later")]
+    assert first == second == [1.0, 2.0]
+
+
+def test_lowest_first_when_highest_first_is_off():
+    others = _ranked_lot()
+    assert _rank_of("c4", others, rank_desc=False)["pair_die_rank"] == 1.0
+    assert _rank_of("c2", others, rank_desc=False)["pair_die_rank"] == 4.0
+
+
+def test_no_rank_columns_means_no_rank_features():
+    """排名參數沒填 → 那兩格**一格都不寫**（不是 0、不是 -1）。"""
+    others = _ranked_lot()
+    hit = others[0]
+    ctx = _ctx(_item("gt", hit.xrel_nm, hit.yrel_nm, die=hit.die),
+               {"ebi": others})
+    with pytest.raises(StepError):
+        _run(ctx, tol_nm=10.0)
+    assert "pair_die_rank" not in ctx.features
+    assert "pair_die_total" not in ctx.features
+
+    # 宣告也一樣：沒填就不宣告，CSV 上不會多出兩欄空的
+    card = get_step("pair_source")
+    plain = card.resolve_features(card.validate_params({}))
+    assert "pair_die_rank" not in plain
+    ranked = card.resolve_features(card.validate_params({"rank_by": "SCORE"}))
+    assert "pair_die_rank" in ranked and "pair_die_total" in ranked
+
+
+def test_a_defect_with_no_match_gets_no_rank_either():
+    """沒配到就沒有「它在那份裡排第幾」可言 —— `pair_found = 0` 說明了為什麼。"""
+    ctx = _ctx(_item("gt", 999999, 999999), {"ebi": _ranked_lot()})
+    _run(ctx, rank_within="XINDEX,YINDEX", rank_by="SCORE")
+    assert ctx.features["pair_found"] == 0.0
+    assert "pair_die_rank" not in ctx.features
+    assert "pair_die_total" not in ctx.features
+
+
+def test_a_rank_column_that_is_not_a_number_names_the_column_and_the_value():
+    """**不可以安靜地全部並列第一** —— 那樣每一顆都拿到 rank 1，而它跟
+    「真的是第一名」在報表上長得一模一樣。"""
+    others = _ranked_lot()
+    others[2].fields["SCORE"] = "n/a"
+    hit = others[0]
+    ctx = _ctx(_item("gt", hit.xrel_nm, hit.yrel_nm, die=hit.die),
+               {"ebi": others})
+    with pytest.raises(StepError) as e:
+        _run(ctx, tol_nm=10.0, rank_within="XINDEX,YINDEX", rank_by="SCORE")
+    msg = str(e.value)
+    assert "SCORE" in msg and "n/a" in msg and "a3" in msg
+
+
+def test_a_rank_column_that_never_came_over_is_said_out_loud():
+    """排名讀的是整份的那一欄 —— 沒複製過去的話它讀到的是一片空白。"""
+    others = _ranked_lot()
+    hit = others[0]
+    ctx = _ctx(_item("gt", hit.xrel_nm, hit.yrel_nm, die=hit.die),
+               {"ebi": others})
+    with pytest.raises(StepError) as e:
+        _run(ctx, tol_nm=10.0, rank_by="PMSCORE")
+    assert "PMSCORE" in str(e.value) and "SCORE" in str(e.value)
+
+
+def test_the_rank_columns_join_the_carry_union():
+    """掛第二份時要複製的欄位 = carry ∪ 排名欄位（少一個就讀不到）。"""
+    from d4t.core.steps.pair_source import columns_for_source
+
+    class _N:
+        def __init__(self, step, params):
+            self.step, self.params = step, params
+
+    nodes = [_N("pair_source", {"source": "ebi", "carry": "DEFECTID",
+                                "rank_within": "XINDEX,YINDEX",
+                                "rank_by": "SCORE"})]
+    cols = columns_for_source(nodes, "ebi")
+    assert set(cols) == {"DEFECTID", "XINDEX", "YINDEX", "SCORE"}
+
+    # 沒填排序欄 → 分組欄也不必帶（排名根本不會算）
+    nodes2 = [_N("pair_source", {"source": "ebi", "carry": "DEFECTID",
+                                 "rank_within": "XINDEX,YINDEX"})]
+    assert columns_for_source(nodes2, "ebi") == ["DEFECTID"]
+
+
+def test_two_cards_ranking_the_same_lot_differently_do_not_collide():
+    """同一份第二 source 可以被兩張卡指著、各自排各自的。"""
+    others = _ranked_lot()
+    high = _rank_of("c4", others)                        # 照分數，大的第一
+    low = _rank_of("c4", others, rank_desc=False)        # 同一份，反過來
+    assert high["pair_die_rank"] == 4.0 and low["pair_die_rank"] == 1.0
+    # 兩組設定的備忘同時掛在同一顆 item 上，互不覆蓋
+    memo = getattr(next(o for o in others if o.defect_id == "c4"), "_d4t_rank")
+    assert len(memo) == 2
+
+
+def test_ranking_the_whole_lot_happens_once_not_once_per_defect():
+    """整份本來就在記憶體裡，分組排序是一次 O(N log N) —— 攤到每一顆是零。"""
+    from d4t.core.steps import pair_source as card_mod
+
+    others = _ranked_lot()
+    calls = []
+    real = card_mod._rank_all
+
+    def counted(*a, **kw):
+        calls.append(1)
+        return real(*a, **kw)
+
+    card_mod._rank_all = counted
+    try:
+        for did in ("a1", "a2", "a3", "b1", "c1"):
+            _rank_of(did, others)
+    finally:
+        card_mod._rank_all = real
+    assert len(calls) == 1
+
+
+def test_rank_features_survive_the_worker_boundary(tmp_path):
+    """`workers=1` 與 `workers=2` 的排名要**逐項相同**（鐵則 9 的形狀）。
+
+    備忘掛在 item 物件上，而 worker 拿到的是另一份 pickle —— 每個 process
+    自己算一次，而算出來的必須是同一個答案（tie-break 是 DEFECTID）。
+    """
+    from d4t.core.ingest.dataset import load_dataset
+    from d4t.core.pipeline import run_batch
+    from d4t.core.pipeline.recipe import Recipe, RecipeNode, ScoreSpec
+
+    main_paths, gt_paths = _two_lots(tmp_path)
+    ds = load_dataset(main_paths["klarf"])
+    pair_ingest.attach(ds, load_dataset(gt_paths["klarf"]), "gt",
+                       columns=["DEFECTID", "XINDEX", "YINDEX"])
+
+    nodes = {
+        "load": RecipeNode("load", "load_patch", {}),
+        "pair": RecipeNode("pair", "pair_source",
+                           {"source": "gt", "match": "position",
+                            "tol_nm": 100000.0, "carry": "DEFECTID",
+                            "rank_within": "XINDEX,YINDEX",
+                            "rank_by": "DEFECTID"}),
+    }
+    rec = Recipe(recipe_id="f33-rank", routes={"ebi_patch": list(nodes)},
+                 nodes=nodes,
+                 score=ScoreSpec(expr="pair_die_rank", threshold=0.5,
+                                 bins={"below": 0, "above": 1}))
+
+    def ranks(workers):
+        return [(r["defect_id"],
+                 r.get("features", {}).get("pair_die_rank"),
+                 r.get("features", {}).get("pair_die_total"))
+                for r in run_batch(rec, ds, workers=workers)]
+
+    one = ranks(1)
+    assert any(r is not None for _d, r, _t in one)
+    assert ranks(2) == one
+
+
+def test_a_defect_that_is_not_in_the_middle_needs_the_whole_image_searched():
+    """空拍那種圖**不是以這一顆為中心拍的** —— defect 落在它剛好在的地方。
+
+    F33 實測（1000×1000 空拍、100×100 patch）：預設的 15% 框對偏離中心的那幾顆
+    **不會失敗**，它回一個**錯的位置**加一個過得了 `min_score` 的分數
+    （實測 NCC 0.30–0.43，而預設門檻是 0.3）—— 跑得完、有數字、而且是錯的。
+
+    這條測試鎖的是那條出路：`search_within=0`（整張搜）位置精確。
+    卡片的 help 上寫著什麼時候要設 0。
+    """
+    big = _noise(600, 600, 5)
+    # defect 在左上角那一帶，離中心很遠（> 15% FOV）
+    px, py = 90, 120
+    tmpl = big[py:py + 64, px:px + 64].copy()
+
+    # ① 整張搜：位置精確
+    ctx, err = _align(big, tmpl, search_within=0.0)
+    assert err is None
+    assert ctx.features["ncc_score"] > 0.99
+    assert ctx.features["align_dx_px"] == pytest.approx(px, abs=2)
+    assert ctx.features["align_dy_px"] == pytest.approx(py, abs=2)
+
+    # ② 預設的 15% 框：**對的那一塊根本不在搜尋範圍裡**，所以它不可能對到。
+    #    擋下來（好）或給一個錯的位置（就是這條測試在講的那個坑）都算數 ——
+    #    這裡鎖的是「它沒有安靜地給出正確答案」這件事本身。
+    ctx2, err2 = _align(big, tmpl, search_within=15.0)
+    if err2 is None:
+        landed = (ctx2.features["align_dx_px"], ctx2.features["align_dy_px"])
+        assert abs(landed[0] - px) > 2 or abs(landed[1] - py) > 2
+
+
+# --------------------------------------------------------------------------- #
+# 11. F33：H2H 在預覽上指出「對到哪、瞄準哪」
+# --------------------------------------------------------------------------- #
+def _aligned_ctx():
+    """跑過一次 H2H 的 context（大圖 200²、模板 40²、對到 (120,60)）。"""
+    ctx = Context()
+    ctx.meta["align_to"] = {"x": 120.0, "y": 60.0, "score": 0.9, "second": 0.1,
+                            "candidate": 0, "expected": [80.0, 80.0],
+                            "search": "single", "size": [40, 40],
+                            "shape": [200, 200], "window": None}
+    return ctx
+
+
+def test_h2h_marks_the_match_and_the_aim_on_the_preview():
+    """這張卡的產物是一個**位置**，而它以前在預覽上什麼都不畫。
+
+    框＝對到哪、十字＝機台瞄準哪，**兩者的間距就是這一顆的 stage 偏移**。
+    """
+    lines, points, focus, labels = get_step("align_to").overlay_marks(
+        _aligned_ctx(), {}, "single")
+    assert len(lines) == 6                       # 4 條框 + 2 條十字
+    assert len(points) == len(lines)             # 長度對不上就整組不畫
+    assert focus == -1
+    # `labels` 帶的是**角色**（`!` 開頭 = 不是區域名），UI 據此分色：
+    # 紅框＝對到哪、綠十字＝瞄準哪。顏色住在 UI（core 不得 import Qt）。
+    assert len(labels) == len(lines)
+    assert all(v.startswith("!") for v in labels)
+    assert len(set(labels)) == 2
+
+    # 框：正規化到大圖上 → x 從 120/200 到 160/200
+    xs = sorted({round(pt[0], 4) for seg in lines[:4] for pt in seg})
+    ys = sorted({round(pt[1], 4) for seg in lines[:4] for pt in seg})
+    assert xs == [0.6, 0.8] and ys == [0.3, 0.5]
+
+    # 十字：畫在 expected 的**中心**（80+20, 80+20）/200 = (0.5, 0.5)
+    cross = lines[4:]
+    assert cross[0][0][1] == pytest.approx(0.5)   # 橫的那一條在 y=0.5
+    assert cross[1][0][0] == pytest.approx(0.5)   # 直的那一條在 x=0.5
+
+
+def test_h2h_does_not_mark_a_stream_it_never_searched():
+    """⚠ 座標是**大圖**的。畫到模板或裁出來的那一塊上就指著錯的地方 ——
+    而正規化座標會讓它看起來像個正常的框。"""
+    card = get_step("align_to")
+    ctx = _aligned_ctx()
+    assert card.overlay_marks(ctx, {}, "aligned")[0] == []
+    assert card.overlay_marks(ctx, {}, "test")[0] == []
+    # 不知道是哪一條時**不過濾** —— 過濾要根據知道的事，不是猜的（同 CD）
+    assert len(card.overlay_marks(ctx, {}, None)[0]) == 6
+
+
+def test_h2h_draws_nothing_before_it_has_run():
+    """沒跑過就沒有位置可言（配不到的那一顆也走這條 —— 那張卡讓路了）。"""
+    assert get_step("align_to").overlay_marks(Context(), {}, "single")[0] == []
+
+
+def test_matching_by_position_needs_no_carried_columns():
+    """**座標配對跟 `carry` 是兩條路**（使用者 2026-08-26：「不用帶 XREL YREL 嗎」）。
+
+    `XREL` / `YREL` / `XINDEX` / `YINDEX` 在**載檔那一刻**就被讀成
+    `DefectItem` 的 `xrel_nm` / `yrel_nm` / `die` 了（`ingest/dataset._base_item`）
+    —— `fields`（`carry` 填的那些）是另一份東西，給報表與判定樹看的。
+
+    這條測試鎖的是那個分界：`fields` 全空，`position` 照樣配得到、距離照樣對。
+    哪天有人把座標改成「從 fields 讀」，這裡會紅。
+    """
+    others = [_item("far", 900, 0, fields={}),
+              _item("near", 120, 40, fields={})]
+    ctx = _ctx(_item("gt", 0, 0), {"ebi": others})
+    with pytest.raises(StepError):        # 配到了，只是沒有影像可載
+        _run(ctx, carry="")               # ← 一欄都不 carry
+    assert ctx.features["pair_found"] == 1.0
+    assert ctx.features["match_dist_nm"] == pytest.approx(126.49, abs=0.1)
+    assert ctx.meta["pair_match"]["defect_id"] == "near"
+
+
+def test_the_rank_columns_come_over_without_being_carried():
+    """排名指名的欄位**自動**進複製清單 —— 不必再手動 carry 一次。"""
+    from d4t.core.steps.pair_source import columns_for_source
+
+    class _N:
+        def __init__(self, step, params):
+            self.step, self.params = step, params
+
+    only_rank = [_N("pair_source", {"source": "ebi", "carry": "",
+                                    "rank_within": "XINDEX,YINDEX",
+                                    "rank_by": "PMSCORE"})]
+    assert set(columns_for_source(only_rank, "ebi")) == {
+        "XINDEX", "YINDEX", "PMSCORE"}
+
+    # 重複填也不會帶兩次
+    both = [_N("pair_source", {"source": "ebi", "carry": "XINDEX,PMSCORE",
+                               "rank_within": "XINDEX,YINDEX",
+                               "rank_by": "PMSCORE"})]
+    got = columns_for_source(both, "ebi")
+    assert sorted(got) == ["PMSCORE", "XINDEX", "YINDEX"]
+    assert len(got) == len(set(got))
+
+
+def test_a_tight_search_window_does_not_fake_a_confident_peak_ratio():
+    """⚠ **看不夠遠 ≠ 第一名遙遙領先**（F33，2026-08-26）。
+
+    `align_peak_ratio` 的第二名是「把最高峰周圍蓋掉之後剩下的最大值」，遮罩半徑
+    是模板的一半。窗縮到比遮罩還小的時候**整張回應圖都被蓋掉** —— 以前那裡回
+    0.0，讀起來是「完全不含糊」。
+
+    而它最容易發生的時機正好是**最不該樂觀**的那一個：陣列區裡把
+    `search_within` 縮到半個晶格週期以內（那是對的做法）之後。實測模板 96 px、
+    窗 ±32 px 時回應圖 65×65 而遮罩半徑 48。
+
+    所以現在**那一格不寫**（算不出來的不寫）。
+    """
+    big = _noise(400, 400, 5)
+    tmpl = big[150:246, 150:246].copy()          # 96×96 模板
+
+    # 窗夠大 → 放得下第二個峰 → 有數字
+    wide, err = _align(big, tmpl, search_within=0.0)
+    assert err is None
+    assert "align_peak_ratio" in wide.features
+
+    # 窗比遮罩半徑還小 → 答不出來 → **不寫**（而不是寫一個假的 0）
+    tight, err2 = _align(big, tmpl, search_within=3.0)
+    assert err2 is None
+    assert "ncc_score" in tight.features          # 位置照樣找得到
+    assert "align_peak_ratio" not in tight.features
+
+
+def test_the_second_peak_says_nan_when_it_cannot_tell():
+    """演算法那一層回 NaN，讓呼叫端自己決定要不要寫。"""
+    import math
+
+    from d4t.core.algo.align import locate_template_peaks
+
+    big = _noise(400, 400, 7)
+    tmpl = big[150:246, 150:246].copy()
+    # 搜尋範圍只比模板大一點點 → 遮罩蓋掉整張
+    _x, _y, score, second = locate_template_peaks(big[140:256, 140:256], tmpl)
+    assert score > 0.99
+    assert math.isnan(second)

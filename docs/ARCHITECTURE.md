@@ -167,3 +167,9 @@ d4t/
 > 拿掉」，整個目錄移除；連帶「用範例資料試一次」與「Templates…」兩個入口
 > 也收起來了（`ui/scope.py` 的 `SHOW_SAMPLE_ENTRIES`）。要放回去：JSON 丟回
 > `examples/recipes/`、常數改 `True`。加卡片時**不必**再同步維護五份範例。
+>
+> **出貨的 recipe 現在住在 [`recipes/`](../recipes/)**（2026-08-26），走
+> `Open recipe…` 而不是範本庫。跟舊的 `examples/` 差一件事，而那件事就是它們
+> 爛掉的原因：`tests/test_shipped_recipes.py` 會**真的把每一份跑一次**
+> （載得進來、`validate` 沒有 error、線在該在的埠上、跑得出它承諾的那幾類）。
+> 加一份新的就在那支測試裡加一段。

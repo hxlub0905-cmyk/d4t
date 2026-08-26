@@ -70,6 +70,22 @@ from ..core.algo import glv as algo_glv
 from . import theme
 from .theme import TOKENS, region_hex
 
+#: 標記的**角色** → 主題的哪一個顏色權杖（F33）。
+#:
+#: `Step.overlay_marks` 的 ``labels`` 平常是**具名區域**的名字（顏色因此跟影像
+#: 上那個區域的框一模一樣）。``!`` 開頭的是**角色**而不是名字 —— 沿用
+#: `decide_tree` 的 ``!failed`` / ``!unbinned`` 那個慣例，而區域名是識別字，
+#: 不可能撞到。
+#:
+#: **卡片說角色，這裡挑顏色**：core 不得 import Qt，而「紅色是什麼紅」是主題的
+#: 事（light / dark 兩套值）。報表用的是同一組語言 —— 框紅、十字綠
+#: （`core/export/overlay.py` 的 `BOX_COLOR` / `AIM_COLOR`），所以同一顆 defect
+#: 在畫面上與在報表上，**紅的永遠是「對到哪」、綠的永遠是「瞄準哪」**。
+MARK_ROLE_TOKENS = {
+    "!match": "danger",      # 小圖真的對到的那一塊
+    "!aim": "success",       # 機台瞄準的那一點
+}
+
 __all__ = [
     "ImageView",
     "ParamForm",
@@ -1250,6 +1266,8 @@ class ImageView(QWidget):
         self._overlay_order: List[str] = []
         #: 量測標記（F19）：線段、每條線上的點、要畫粗的那一條。見 :meth:`set_marks`。
         self._marks: List[Any] = []
+        #: 這一組標記要不要畫滿（`Step.marks_solid`）。
+        self._marks_solid = False
         self._mark_points: List[Any] = []
         self._mark_focus = -1
         #: 每一條標記屬於哪一個具名區域（跟 ``_marks`` 等長；空字串 = 不分色）。
@@ -1403,7 +1421,8 @@ class ImageView(QWidget):
     def set_marks(self, lines: Optional[Sequence[Any]] = None,
                   points: Optional[Sequence[Any]] = None,
                   focus: int = -1,
-                  labels: Optional[Sequence[str]] = None) -> None:
+                  labels: Optional[Sequence[str]] = None,
+                  solid: bool = False) -> None:
         """把**量測標記**疊在影像上（正規化座標）。
 
         ``lines`` 是 ``[[(x0, y0), (x1, y1)], …]``，``points[i]`` 是第 i 條線段
@@ -1417,6 +1436,10 @@ class ImageView(QWidget):
 
         資料由**卡片自己**交出來（`Step.overlay_marks`）：meta 的形狀是那張卡的
         事，UI 只負責畫。所以下一張量測卡不必再發明一套。
+
+        ``solid`` 是**那張卡說的**（`Step.marks_solid`）：交出來的是少少幾條
+        結構線（一個框、一個十字）而不是幾十條掃描線時，淡化不是在減少雜訊，
+        是在藏起唯一的資訊。預設 False —— CD 與 GLV 都**刻意**靠淡化。
 
         ``labels`` 是每一條標記屬於**哪一個具名區域**，而顏色**沿用框那一組的
         順序**（:meth:`set_overlay` 已經排好的 ``_overlay_order``）—— 各自從
@@ -1433,6 +1456,7 @@ class ImageView(QWidget):
                for grp in (points or [])]
         names = [str(v) for v in (labels or [])]
         self._marks = segs
+        self._marks_solid = bool(solid)
         self._mark_points = pts if len(pts) == len(segs) else []
         self._mark_labels = (names if len(names) == len(segs)
                              else [""] * len(segs))
@@ -1634,22 +1658,26 @@ class ImageView(QWidget):
 
         def colour_of(i: int) -> QColor:
             name = (self._mark_labels[i] if i < len(self._mark_labels) else "")
+            token = MARK_ROLE_TOKENS.get(name)
+            if token:
+                return QColor(TOKENS[token])
             return (QColor(region_hex(index_of[name])) if name in index_of
                     else plain)
 
+        strong = self._marks_solid
         for i, (a, b) in enumerate(self._marks):
-            focused = (i == self._mark_focus)
+            focused = (i == self._mark_focus) or strong
             col = colour_of(i)
             if not focused:
                 col = QColor(col)
                 col.setAlpha(70)
-            pen = QPen(col, 1.6 if focused else 1.0)
+            pen = QPen(col, 2.2 if strong else (1.6 if focused else 1.0))
             pen.setCosmetic(True)
             p.setPen(pen)
             p.drawLine(at(a), at(b))
         p.setPen(Qt.NoPen)
         for i, grp in enumerate(self._mark_points):
-            focused = (i == self._mark_focus)
+            focused = (i == self._mark_focus) or strong
             col = colour_of(i)
             if not focused:
                 col = QColor(col)

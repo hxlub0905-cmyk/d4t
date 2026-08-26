@@ -1,0 +1,126 @@
+{
+  "recipe_id": "ebi_to_api_characterization",
+  "version": 1,
+  "app_version": "0.1.0.dev0",
+  "author": "d4t",
+  "description": "EBI ↔ API characterization. Open the API (RSEM blanket-scan) lot as the main lot, then fill in the two site-specific boxes: “Rank by” on the Pair card (your tool's own score column) and “Write to” on the output card - plus “Open data…” to point the Pair card at your EBI lot. Ranking is already grouped per die (XINDEX + YINDEX). Everything else is already wired, and it runs as-is: without a ranking column every matched defect lands in the “no ranking column picked yet” leaf, which is the report telling you which box is still empty. See docs/USING-CHARACTERIZATION.md.",
+  "routes": {
+    "rsem": [
+      "load",
+      "pair",
+      "h2h",
+      "report"
+    ]
+  },
+  "nodes": {
+    "load": {
+      "step": "load_single",
+      "params": {
+        "out": "single"
+      },
+      "enabled": true
+    },
+    "pair": {
+      "step": "pair_source",
+      "params": {
+        "source": "ebi",
+        "match": "position",
+        "tol_nm": 500.0,
+        "candidates": 1,
+        "carry": "DEFECTID,XINDEX,YINDEX",
+        "rank_within": "XINDEX,YINDEX",
+        "rank_by": "",
+        "rank_desc": true,
+        "channel": "",
+        "out": "paired"
+      },
+      "enabled": true
+    },
+    "h2h": {
+      "step": "align_to",
+      "params": {
+        "template": "paired",
+        "search": "single",
+        "min_score": 0.3,
+        "search_within": 15.0,
+        "expect_dx_px": 0.0,
+        "expect_dy_px": 0.0,
+        "scale": 0.0,
+        "out": "aligned"
+      },
+      "enabled": true
+    },
+    "report": {
+      "step": "output_char",
+      "params": {
+        "folder": "char_report",
+        "limit": 200,
+        "main_stream": "single",
+        "pair_stream": "paired",
+        "columns": "ncc_score,align_peak_ratio,match_dist_nm,pair_die_rank,pair_die_total",
+        "mark_defect": true,
+        "rank_by": "pair_die_rank",
+        "jpeg_quality": 85
+      },
+      "enabled": true
+    }
+  },
+  "edges": [
+    [
+      "load",
+      "single",
+      "h2h",
+      "search"
+    ],
+    [
+      "pair",
+      "paired",
+      "h2h",
+      "template"
+    ]
+  ],
+  "score": {
+    "expr": "",
+    "threshold": 0.5,
+    "bins": {}
+  },
+  "decide": {
+    "let": [
+      {
+        "name": "sample_top",
+        "expr": "200"
+      },
+      {
+        "name": "die_rank",
+        "expr": "pair_die_rank",
+        "fill": "-1"
+      }
+    ],
+    "tree": {
+      "when": "pair_found < 1",
+      "yes": {
+        "bin": 3,
+        "label": "EBI never detected it"
+      },
+      "no": {
+        "when": "die_rank_missing > 0",
+        "yes": {
+          "bin": 9,
+          "label": "no ranking column picked yet"
+        },
+        "no": {
+          "when": "die_rank <= sample_top",
+          "yes": {
+            "bin": 1,
+            "label": "caught"
+          },
+          "no": {
+            "bin": 2,
+            "label": "detected, ranked too low to sample"
+          }
+        }
+      }
+    },
+    "score": ""
+  }
+}

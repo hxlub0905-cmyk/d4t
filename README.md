@@ -79,10 +79,13 @@ Phase 1（讓數字可信）已於 2026-08-16 收斂，現階段依
 **先把引擎做對，再回頭做產品化**，因此以下兩件事**目前刻意不支援**，
 不是遺漏：
 
-- **未附範例 recipe**，Studio 的「用範例資料試一次」與「Templates…」入口一併收起。
-- **不提供 recipe 存檔** —— 無 Save Recipe…、無 Ctrl+S。**讀取仍在**，CLI 不受影響。
+- **Studio 的「用範例資料試一次」與「Templates…」入口收起來**（範本庫還是空的）。
+  出貨的 recipe 走 [`recipes/`](recipes/) ＋ `Open recipe…` 那條路，不走範本庫。
 
 開關集中在 `d4t/ui/scope.py`，這也是「暫時不給看」的唯一去處。
+
+> **存檔 recipe 2026-08-26 做回來了**（F34）：工具列的「Save recipe…」、
+> `Ctrl+S`（存回原檔）、`Ctrl+Shift+S`（另存）。這一行以前寫的是「不提供」。
 
 ---
 

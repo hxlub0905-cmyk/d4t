@@ -45,16 +45,19 @@ Studio 的 Run trial 是調參數的迴圈 —— 每拖一下門檻就覆寫一
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
+from ..export import boxplot as export_boxplot
 from ..export import html as export_html
 from ..export import klarf_out, overlay
 from ..export import report as export_report
+from ..pipeline import decide_tree
 from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_BATCH, GROUP_OUTPUT, SCALE_LOT, ParamSpec, Step, StepError,
     register_step,
 )
+from ._util import parse_key_list
 
 
 
@@ -414,6 +417,82 @@ def _warn_if_unranked(key: str, bctx: Any, rows: Any,
                   "want the worst at the top." % (key, what))
 
 
+def _defect_marks(ctx: Any, pix: Dict[str, Any],
+                  main_key: str) -> Dict[str, Any]:
+    """左邊那張圖上要畫的兩個記號（F33）→ ``{"box": …, "aim": …}``。
+
+    使用者問的那件事：「名義上 defect 會在 FOV 正中央（機台就是照 KLARF 座標
+    移過去拍），但實際可能會拍歪一點點 —— **可是這樣就沒有明確在圖上指出
+    defect 位置**。」
+
+    兩個記號各自回答一半：
+
+    * **十字（aim）**＝機台瞄準的那一點。H2H 算過它（``meta["align_to"]``
+      的 ``expected``，那正是 ``align_off_*`` 的分母）；沒跑過 H2H 的那一顆
+      （配不到 → 那張卡讓路）就是**影像正中央** —— 名義位置本來就是那裡，
+      而「該在這裡、而另一份什麼都沒有」正是第三類要講的話。
+    * **框（box）**＝小圖真的對到哪。
+
+    ⚠ **框只畫在 H2H 真的搜過的那條流上**（``meta["align_to"]["search"]``）。
+    換一條流當左圖時座標的意思就變了，而一個指著錯地方的框比沒有框糟得多
+    （同 `_draw_roi_boxes` 的「不猜」）。這也是 `align_to` 要把 ``search``
+    記進 meta 的理由。
+    """
+    arr = pix.get(main_key) if main_key else None
+    if arr is None and pix:
+        try:
+            arr = overlay.pick_base(pix)[1]
+        except Exception:              # noqa: BLE001 — 沒圖就沒有記號
+            return {}
+    if arr is None:
+        return {}
+    h, w = arr.shape[:2]
+    note = dict((getattr(ctx, "meta", None) or {}).get("align_to") or {})
+    same = bool(note) and str(note.get("search", "")) == str(main_key or "")
+    out: Dict[str, Any] = {}
+    if same:
+        size = list(note.get("size") or [])
+        exp = list(note.get("expected") or [])
+        if len(size) == 2:
+            out["box"] = (int(round(float(note["x"]))),
+                          int(round(float(note["y"]))),
+                          int(size[0]), int(size[1]))
+        if len(exp) == 2 and len(size) == 2:
+            # `expected` 是框的**左上角** —— 十字要畫在它的中心
+            out["aim"] = (float(exp[0]) + size[0] / 2.0,
+                          float(exp[1]) + size[1] / 2.0)
+    if "aim" not in out:
+        # 沒有對位（配不到，或左圖不是被搜的那一條）→ **名義位置＝正中央**
+        out["aim"] = (w / 2.0, h / 2.0)
+    return out
+
+
+def write_recipe_json(bctx: Any, path: str) -> None:
+    """把 recipe 原樣寫進輸出資料夾（atomic，鐵則 5）。
+
+    **沒有它，半年後沒人重現得出這份報表。** 那不是保險，是這份東西有沒有用
+    的分界：一疊數字沒有配方，等於一句「我們那時候量到這樣」。
+
+    走 ``to_json_dict`` 而不是「複製使用者那個檔案」—— 使用者可能在 Studio
+    裡改過還沒存，而**報表要對得上真的跑出這些數字的那一份**。
+
+    兩張寫資料夾的卡共用這一支（同 `rank_by_spec` 的理由）。
+    """
+    import json
+
+    recipe = getattr(bctx, "recipe", None)
+    to_dict = getattr(recipe, "to_json_dict", None)
+    if to_dict is None:
+        return
+    parent = os.path.dirname(os.path.abspath(path))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(to_dict(), f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
 def rank_by_spec() -> ParamSpec:
     """出圖那兩張卡共用的「照什麼排」（F30，2026-08-25）。
 
@@ -767,24 +846,344 @@ class OutputBundleStep(_OutputStep):
                       % int(p["draw_boxes_cap"]))
 
     def _write_recipe(self, bctx: Any, path: str) -> None:
-        """把 recipe 原樣寫進 bundle（atomic，同鐵則 5）。
+        """見 :func:`write_recipe_json` —— 這裡只是它的舊名字。"""
+        write_recipe_json(bctx, path)
 
-        走 ``to_json_dict`` 而不是「複製使用者那個檔案」—— 使用者可能在
-        Studio 裡改過還沒存，而**報表要對得上真的跑出這些數字的那一份**。
+
+@register_step
+class OutputCharStep(_OutputStep):
+    """characterization 的點對點報表：**一顆一列，兩張圖跟數字在同一列上**。
+
+    為什麼是第二張卡，不是 `output_bundle` 的一格參數
+    --------------------------------------------------
+    那張卡的每一個取捨都是為 6000 顆做的 —— 表格裡不放縮圖（DOM 會鈍）、
+    點一列換圖（整份只有一個 ``<img>``）。characterization 是三十顆，而使用者
+    要的是「**我可以一一對應**」：那三項在這個規模全部反過來。
+
+    用一格參數在同一張卡上切換兩種版面的話，「這張卡長什麼樣」就有兩個答案，
+    而說明書、help、測試都得同時描述兩種 —— 那正是這個 repo 一再避開的形狀。
+    做成第二張卡，**底層共用**（`export/html.py` 的 CSS／跳脫／判定那一段、
+    `write_recipe_json`、`overlay` 的檔名消毒與 JPEG）。
+    """
+
+    key = "output_char"
+    label = "Write characterization report"
+    PATH = "folder"
+    WHAT = "folder"
+    help = ("Write a folder that puts the two lots side by side, one defect "
+            "per row: the ground-truth picture, the matching picture from the "
+            "second lot, the numbers you pick, and what the recipe decided. "
+            "Made for a characterization run of a few dozen defects, where "
+            "you want to check every row by eye - for a whole lot use “Write "
+            "report folder” instead.")
+    params = [
+        ParamSpec(
+            name="folder", type="str", default="",
+            label="Write to",
+            help=("Folder to write everything into. It is created if it does "
+                  "not exist; files with the same names are overwritten."),
+        ),
+        ParamSpec(
+            name="limit", type="int", default=200, min=1, max=100000,
+            label="At most this many rows with pictures",
+            help=("This report puts a picture on every row, which is what "
+                  "makes it readable at a glance and also what stops it "
+                  "scaling. Above this many defects the extra rows are still "
+                  "listed, without pictures, and the card says so."),
+        ),
+        ParamSpec(
+            name="main_stream", type="str", default="",
+            label="Left picture",
+            help=("Which image stream to show on the left - the lot you are "
+                  "running (the ground truth, in a characterization). Leave "
+                  "it empty to use whichever image the run started from."),
+        ),
+        ParamSpec(
+            name="pair_stream", type="str", default="paired",
+            label="Right picture",
+            help=("Which image stream to show on the right - what the Pair "
+                  "card brought over from the second lot (\"paired\"), or the "
+                  "cut-out the H2H card aligned (\"aligned\"). A defect with "
+                  "no match has no such image, and that cell is left empty - "
+                  "which is the point: it is one of the answers."),
+        ),
+        ParamSpec(
+            name="columns", type="feature_keys",
+            default="ncc_score,align_peak_ratio,pair_die_rank,pair_die_total",
+            label="Numbers to show",
+            help=("Which measured numbers get a column, in this order. The "
+                  "first two are here on purpose - they are how a wrong "
+                  "pairing shows up. ncc_score is how alike the two pictures "
+                  "are. align_peak_ratio is the one that catches a repeating "
+                  "pattern: in an array area the second-best position scores "
+                  "as well as the best, so a near-1 ratio means the position "
+                  "was a guess even when ncc_score looks perfect. Everything "
+                  "else is in the spreadsheet beside this report."),
+        ),
+        ParamSpec(
+            name="mark_defect", type="bool", default=True,
+            label="Mark where the defect is",
+            help=("Draw two marks on the left picture: a green cross where "
+                  "the tool aimed (it moved to this defect's coordinate, so "
+                  "nominally the defect is right there) and a red box where "
+                  "the H2H card actually matched the second lot's picture. "
+                  "The gap between them is this defect's stage error - and "
+                  "the two sitting on top of each other is what \"these are "
+                  "the same defect\" looks like. A defect with no match gets "
+                  "the cross only: that is still where it should have been."),
+        ),
+        rank_by_spec(),
+        ParamSpec(
+            name="jpeg_quality", type="int",
+            default=overlay.DEFAULT_JPEG_QUALITY, min=40, max=100,
+            label="Picture quality", advanced=True,
+            help=("How much detail to keep in the pictures, from 40 (small "
+                  "files) to 100 (biggest). The pictures are for looking at, "
+                  "not for measuring."),
+        ),
+    ]
+
+    #: 資料夾裡那幾個名字 —— **跟 bundle 逐字相同**（換一台機器打開還是同一個
+    #: 形狀，而兩份東西長得一樣就不必記兩套）。
+    REPORT_NAME = "report.html"
+    CSV_NAME = "defects.csv"
+    RECIPE_NAME = "recipe.json"
+    IMAGE_DIR = "images"
+
+    def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
+        p = self.validate_params(params)
+        folder = str(p["folder"]).strip()
+        if not folder:
+            raise StepError(self.key, "nowhere to write - fill in “Write to”.")
+        if os.path.isfile(folder):
+            raise StepError(
+                self.key,
+                "“%s” is a file, not a folder. This card writes several files, "
+                "so it needs a folder to put them in." % folder)
+
+        rows = list(bctx.rows)
+        items = list(getattr(bctx.dataset, "items", None) or [])
+        by_id = {str(getattr(it, "defect_id", "")): it for it in items}
+        sources = dict(getattr(bctx.dataset, "sources", None) or {})
+        shots = os.path.join(folder, self.IMAGE_DIR)
+
+        # ---- ① 順序：最值得看的在上面（同兩張出圖卡）-----------------------
+        rank_by = str(p["rank_by"]).strip() or overlay.RANK_BY_SCORE
+        limit = int(p["limit"])
+        ordered = overlay.pick_overlay_results(rows, 0, rank_by)
+        _warn_if_unranked(self.key, bctx, rows, rank_by, limit)
+        if len(ordered) > limit:
+            # **講出來，不要自動換版面**：使用者要知道他拿到的是哪一種報表。
+            bctx.warn(
+                "Characterization report: %d defects, but this report puts a "
+                "picture on every row and is made for a few dozen - only the "
+                "first %d rows have pictures. For a whole lot use “Write "
+                "report folder”, which lists every defect and shows one "
+                "picture at a time." % (len(ordered), limit))
+
+        # ---- ② 圖（一顆兩張：跑的這一份 ＋ 第二份帶過來的那一張）-----------
+        main_key = str(p["main_stream"]).strip()
+        pair_key = str(p["pair_stream"]).strip()
+        thumbs: Dict[str, Dict[str, Optional[str]]] = {}
+        skipped = 0
+        for row in ordered[:limit]:
+            did = str(row.get("defect_id", ""))
+            item = by_id.get(did)
+            if item is None:
+                skipped += 1
+                continue
+            try:
+                r = bctx.rerun(item, sources={k: getattr(v, "items", v)
+                                              for k, v in sources.items()})
+                pix = dict(getattr(getattr(r, "context", None), "images", {})
+                           or {})
+                if not pix:
+                    skipped += 1
+                    continue
+                stem = os.path.splitext(overlay.overlay_filename(did))[0]
+                marks = (_defect_marks(getattr(r, "context", None), pix,
+                                       main_key)
+                         if bool(p["mark_defect"]) else {})
+                pair = {}
+                for side, key in (("main", main_key), ("pair", pair_key)):
+                    arr = (pix.get(key) if key
+                           else (overlay.pick_base(pix)[1] if pix else None))
+                    if arr is None:
+                        # 配不到的那一顆沒有第二張圖 —— 那一格留白，
+                        # 而留白正是它要講的話（不是破圖、不是 0×0 的框）。
+                        continue
+                    if side == "main" and marks:
+                        panel = overlay.render_overlay(
+                            {"_": arr}, {}, base_key="_", montage=False,
+                            box=marks.get("box"), aim=marks.get("aim"))
+                    else:
+                        panel = overlay.to_display_rgb(arr)
+                    name = "%s_%s.jpg" % (stem, side)
+                    overlay.write_jpeg(panel, os.path.join(shots, name),
+                                       int(p["jpeg_quality"]))
+                    # **相對路徑**：整個資料夾寄給別人的時候連結還是通的。
+                    pair[side] = "%s/%s" % (self.IMAGE_DIR, name)
+                if pair:
+                    thumbs[did] = pair
+            except Exception:       # noqa: BLE001 — 一顆畫不出來不該殺掉整批
+                skipped += 1
+
+        # ---- ③ 判定：葉子的名字**不在 rows 裡**，要反查一次 ----------------
+        decide = getattr(bctx.recipe, "decide", None)
+        verdicts: Dict[str, Dict[str, Any]] = {}
+        for entry in decide_tree.verdict_rows(decide, rows):
+            for did in entry.get("ids") or []:
+                verdicts[str(did)] = entry
+
+        title = str(getattr(bctx.recipe, "recipe_id", "") or
+                    "d4t characterization")
+        try:
+            export_html.write_html(
+                export_html.build_char_report(
+                    ordered, title, parse_key_list(p["columns"]),
+                    thumbs, verdicts, decide=decide),
+                os.path.join(folder, self.REPORT_NAME))
+            export_report.write_csv(rows, os.path.join(folder, self.CSV_NAME))
+            write_recipe_json(bctx, os.path.join(folder, self.RECIPE_NAME))
+        except OSError as e:
+            raise StepError(self.key,
+                            "could not write into %s: %s" % (folder, e)) from e
+        bctx.add_output(folder)
+        if skipped:
+            # **講出來**：少幾張圖的報表跟完整的長得一模一樣。
+            bctx.warn("Characterization report: %d defect(s) got no picture "
+                      "(no image, or the pipeline did not run for them)."
+                      % skipped)
+
+
+@register_step
+class OutputBoxPlotStep(_OutputStep):
+    """整批的分布 → 一張 box plot（**一片葉子一個盒子**，F36）。
+
+    為什麼是自己一張卡，不是報表裡的一個區塊
+    ----------------------------------------
+    使用者要的是「report **然後還有一張** box plot」—— 兩個交付物。而它們回答
+    的也是兩個問題：報表是「這一顆長什麼樣」（一顆一列），這張圖是「**這一批**
+    的這個數字散得多開，四類分不分得開」。
+
+    合成一張卡的話，「這張卡寫出什麼」就有兩個答案 —— 那是 `output_char` 當初
+    沒有做成 `output_bundle` 一格參數的同一個理由。底層仍然共用
+    （`export/boxplot.py`、`decide_tree.verdict_rows`）。
+
+    ⚠ **一個盒子是一片葉子，不是一個 bin。** 兩片葉子共用一個 bin 是合法的，
+    而它們是使用者眼中兩個不同的類別（`verdict_rows` 的說明）。順序與顏色跟
+    畫布上的樹一樣 —— 三個地方講同一件事的時候，長相也該是同一個。
+    """
+
+    key = "output_boxplot"
+    label = "Write a box plot"
+    WHAT = "HTML file"
+    help = ("Write one box plot per number you pick, when the whole lot has "
+            "run: one box for each class the decision came up with, so you "
+            "can see at a glance whether the classes actually separate. It is "
+            "a single HTML page that opens in any browser.")
+    params = [
+        ParamSpec(
+            name="path", type="str", default="",
+            label="Write to",
+            help=("Full path of the .html file to write, including the file "
+                  "name. Folders that do not exist yet are created."),
+        ),
+        ParamSpec(
+            name="features", type="feature_keys", default="",
+            label="Numbers to plot",
+            help=("One chart per number, in this order. Leave it empty and "
+                  "the card plots whatever the decision itself asked about - "
+                  "which is usually exactly what you want to see spread out."),
+        ),
+        ParamSpec(
+            name="title", type="str", default="",
+            label="Title", advanced=True,
+            help="Heading on the page. Empty uses the recipe name.",
+        ),
+    ]
+
+    #: 判定沒有給出類別時（一份沒有 `decide` 的 recipe），全部畫成一個盒子。
+    ALL_LABEL = "the whole lot"
+
+    def _charts(self, bctx: Any, names: List[str],
+                groups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """``names`` × ``groups`` → 每個特徵一張圖。
+
+        **一顆都沒量到那個數字的特徵整張圖不畫**，而且要在 warn 裡說出來 ——
+        一張每一格都寫著「no data」的圖比沒有那張圖更糟（推廣鐵則）。
         """
-        import json
+        by_id: Dict[str, Dict[str, Any]] = {}
+        for row in bctx.rows:
+            by_id[str(row.get("defect_id", ""))] = dict(
+                row.get("features") or {})
+        charts: List[Dict[str, Any]] = []
+        empty: List[str] = []
+        for name in names:
+            series = []
+            for g in groups:
+                vals = [by_id.get(str(d), {}).get(name)
+                        for d in (g.get("ids") or [])]
+                series.append({"name": g.get("name") or "?",
+                               "colour": g.get("colour"),
+                               "values": [v for v in vals if v is not None]})
+            if not any(s["values"] for s in series):
+                empty.append(name)
+                continue
+            charts.append({"title": name, "series": series,
+                           "subtitle": "one box per class - the line is the "
+                                       "median, the box is the middle half"})
+        if empty:
+            bctx.warn(
+                "Box plot: no defect has a number called %s, so %s not "
+                "plotted. Check the spelling in “Numbers to plot”, or leave "
+                "that box empty to plot whatever the decision asks about."
+                % (", ".join("“%s”" % n for n in empty),
+                   "it was" if len(empty) == 1 else "they were"))
+        return charts
 
-        recipe = getattr(bctx, "recipe", None)
-        to_dict = getattr(recipe, "to_json_dict", None)
-        if to_dict is None:
-            return
-        parent = os.path.dirname(os.path.abspath(path))
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(to_dict(), f, ensure_ascii=False, indent=2)
-        os.replace(tmp, path)
+    def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
+        p = self.validate_params(params)
+        path = self._path_of(p)
+        decide = getattr(bctx.recipe, "decide", None)
+
+        # ---- ① 哪幾個數字 ----------------------------------------------
+        names = parse_key_list(p["features"])
+        if not names:
+            # **判定問過的那幾個** —— 使用者想看的散布，九成是他拿來分類的那些。
+            names = decide_tree.features_used(decide) if decide else []
+        if not names:
+            raise StepError(
+                self.key,
+                "nothing to plot: “Numbers to plot” is empty and this recipe "
+                "has no decision to borrow the numbers from. Put the name of "
+                "at least one measured number in that box.")
+
+        # ---- ② 哪幾個盒子（一片葉子一個）--------------------------------
+        groups = [g for g in decide_tree.verdict_rows(decide, bctx.rows)
+                  if g.get("kind") not in ("failed", "unbinned")
+                  and (g.get("ids") or [])]
+        if not groups:
+            groups = [{"name": self.ALL_LABEL,
+                       "ids": [str(r.get("defect_id", ""))
+                               for r in bctx.rows if r.get("ok")],
+                       "colour": export_boxplot.FALLBACK_COLOUR}]
+
+        charts = self._charts(bctx, names, groups)
+        title = (str(p["title"]).strip()
+                 or str(getattr(bctx.recipe, "recipe_id", "") or "d4t"))
+        export_html.write_html(
+            export_boxplot.build_boxplot_page(
+                charts, title,
+                subtitle="%d defect(s), %d class(es)"
+                         % (len(bctx.rows), len(groups)),
+                note=("Each box covers the middle half of the defects in that "
+                      "class; the whiskers reach the furthest defect within "
+                      "1.5 x that spread, and anything beyond is drawn as a "
+                      "ring. Classes that do not overlap are classes this "
+                      "number can tell apart.")),
+            path)
+        bctx.add_output(path)
 
 
 @register_step

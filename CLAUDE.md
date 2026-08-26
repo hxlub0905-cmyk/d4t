@@ -17,6 +17,7 @@
 |---|---|---|
 | **環境限制**：兩台機器、剪貼簿是唯一通道、為什麼工具都 stdlib-only | [`AGENTS.md`](AGENTS.md) | **動手之前**（不知道會把必要設計當成過度設計刪掉）|
 | 怎麼加卡片、鐵則、開發流程 | 這一份 | 一直 |
+| **怎麼做 EBI ↔ API characterization**（給使用者的操作手冊：線接哪、每格填什麼、報表怎麼讀、出事了照什麼順序查）| [`docs/USING-CHARACTERIZATION.md`](docs/USING-CHARACTERIZATION.md) | 要動 `pair_source` / `H2H` / `output_char` 的參數或說明之前 |
 | **怎麼用 CD 那張卡**（給使用者的操作手冊：每一格什麼時候動、數字會往哪走）| [`docs/USING-CD.md`](docs/USING-CD.md) | 要動 CD 卡的參數、help 文字或輸出名字之前 |
 | **架構**：三段式心智模型、資料模型（影像流 vs 具名區域）、目錄結構 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 動到 pipeline／資料流之前 |
 | **已知的坑**（30+ 條，只增不減）| [`docs/PITFALLS.md`](docs/PITFALLS.md) | 動到 Qt 繪圖／快取／批次平行／KLARF 寫回／recipe 遷移之前，**先搜關鍵字** |
@@ -47,16 +48,32 @@
 【影像段】把圖變乾淨可比 → 【算法段】從圖量出數字 → 【ADC 判定】score → bin → 寫回 KLARF
 ```
 
-### 目前不支援的兩件事（不是漏掉的）
+### 目前收起來的一件事（不是漏掉的）
 
 engine 還在做（**Phase 1「讓數字可信」已於 2026-08-16 收斂**，下一步是
 Phase 2），使用者定調**先把引擎做對，再回頭做產品化**（見
 [`docs/ROADMAP.md`](docs/ROADMAP.md)）：
 
-- **沒有範例 recipe**（`examples/` 已移除），Studio 的「用範例資料試一次」與
+- **範本庫是空的**（`examples/` 已移除），Studio 的「用範例資料試一次」與
   「Templates…」兩個入口收起來了 —— 開關在 `ui/scope.py`。
-- **不能存檔 recipe**（2026-08-16 移除）：沒有 Save Recipe…、沒有 Ctrl+S、
-  沒有 `Recipe.save()`。**讀取仍然在**，CLI 照跑。
+
+**出貨的 recipe 在 [`recipes/`](recipes/)**（2026-08-26），走 `Open recipe…`
+不走範本庫，而且**每一份都有測試真的跑一次**
+（`tests/test_shipped_recipes.py`）—— 舊的 `examples/` 就是因為沒人測而爛掉的。
+加一份新的就在那支測試裡加一段。目前兩份：EBI↔API characterization、
+patch 的 dSNR 分布（F36）。
+
+⚠ 那支測試有一張 **`ALLOWED_ERRORS`**（哪一份 recipe 允許哪一條 lint error
+—— 目前只有「模板是一張影像、塞不進 JSON」那一種），而它配著一支**反向的**
+測試：例外修好了卻沒從表上拿掉的話，那份 recipe 從此少一條防線而測試照樣綠。
+**任何「例外清單」都要有那支反向測試**，不然它就是一張只會變長的紙。
+
+**存檔 recipe 2026-08-26 做回來了**（F34，[`docs/history/plans/F34-save-recipe.md`](docs/history/plans/F34-save-recipe.md)）。
+`Recipe.save()`、工具列的「Save recipe…」、`Ctrl+S`（存回原檔）與
+`Ctrl+Shift+S`（另存）都在。⚠ 它帶來一個**以前不存在的後果**：Studio 載入時做的
+UI 層遷移（門檻 → 判定樹）現在會被存回磁碟。那是對的（存出跟畫面不一樣的東西
+才是說謊），但寫在 `_adopt_threshold_as_a_tree` 裡的「反正存不了檔」那句話
+已經作廢 —— 見 `Recipe.save` 的說明。
 
 ---
 
@@ -302,11 +319,13 @@ F30 的 `ui/output_band.py` 已經都是這樣做的 —— 這一段只是把�
 後兩種沒有 KLARF → 沒有座標、**寫不回 KLARF**，而那句話**常駐在資料集標籤上**
 （`tiff_stack · defect 1 / 3 · no KLARF`）—— 不是等使用者按了 Export 才發現。
 
-**第二份 lot 走另一條路**（F15，2026-08-19）—— ⏸ **這一段停在原地，不要接著做**
-（使用者 2026-08-20：「太快了」）。引擎那一半做完且有測試，缺的是「對得對不對」
-的證據與那份點對點 report，而它要等 Compare 段做完才有形狀。詳見
-[`docs/plans/F15-pair-sources.md`](docs/plans/F15-pair-sources.md) §16 與
-[`docs/ROADMAP.md`](docs/ROADMAP.md)。以下是它現在的樣子：
+**第二份 lot 走另一條路**（F15，2026-08-19；**F33 於 2026-08-25 續完**）。
+那份缺的「點對點包含圖的 report」現在是 `output_char` 那張卡，而它需要的兩個
+資料缺口也補了：**配不到的那一顆會留下來**（`pair_found = 0`，繼續走到判定樹
+—— 「EBI 根本沒偵測到」是 characterization 要數的一類，不是一個錯誤）與
+**die 內排名**（`pair_die_rank` / `pair_die_total`，母體是第二份的完整清單）。
+詳見 [`docs/history/plans/F33-ebi-characterization.md`](docs/history/plans/F33-ebi-characterization.md)。
+以下是它現在的樣子：
 
 `pair_source` 這張卡上的
 `Open data…` 掛的是「拿來對照的那一份」（EBI ↔ RSEM(API) characterization），

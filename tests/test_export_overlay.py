@@ -529,3 +529,86 @@ def test_a_missing_source_stream_marks_nothing():
     out = overlay.render_overlay({"test": img}, {}, montage=False,
                                  odd_pixels=_odd(None))
     assert out.tobytes() == plain.tobytes()
+
+
+# ---------------------------------------------------------------------------
+# 指名哪幾條流、橫排還是直疊（F33）
+# ---------------------------------------------------------------------------
+def test_the_default_path_is_untouched_by_the_new_parameters():
+    """**預設的每一顆圖不准動一個位元。** 這兩個參數是加上去的，不是改掉的。"""
+    images = {"test": flat(100), "diff": flat(30)}
+    plain = overlay.render_overlay(images, {})
+    spelled_out = overlay.render_overlay(images, {}, panes=None,
+                                         stack=overlay.STACK_H)
+    assert np.array_equal(plain, spelled_out)
+    # 而指名同一組流也要得到同一張圖（兩條路共用 `_pane`／`_stack_panes`）
+    named = overlay.render_overlay(images, {}, panes=["test", "diff"])
+    assert np.array_equal(plain, named)
+
+
+def test_panes_choose_which_streams_and_in_what_order():
+    images = {"test": flat(10), "ref": flat(120), "diff": flat(240)}
+    out = overlay.render_overlay(images, {}, panes=["ref", "diff"])
+    assert out.shape == (H, 2 * W, 3)
+    assert int(out[H // 2, 2, 0]) == 120            # 第一格是 ref
+    assert int(out[H // 2, W + 5, 0]) == 240        # 第二格是 diff
+
+
+def test_three_panes_fit_side_by_side():
+    images = {"test": flat(10), "ref": flat(120), "diff": flat(240)}
+    out = overlay.render_overlay(images, {}, panes=["test", "ref", "diff"])
+    assert out.shape == (H, 3 * W, 3)
+    assert int(out[H // 2, 2, 0]) == 10
+    assert int(out[H // 2, W + 5, 0]) == 120
+    assert int(out[H // 2, 2 * W + 5, 0]) == 240
+
+
+def test_stacking_puts_the_first_pane_on_top():
+    """直疊是 characterization 要的方向：上面 ground truth、下面第二份 ——
+    它要對得上報表由上往下讀的順序。"""
+    images = {"single": flat(60), "paired": flat(200)}
+    out = overlay.render_overlay(images, {}, panes=["single", "paired"],
+                                 stack=overlay.STACK_V)
+    assert out.shape == (2 * H, W, 3)
+    assert int(out[2, W // 2, 0]) == 60             # 上面那一格
+    assert int(out[H + 5, W // 2, 0]) == 200        # 下面那一格
+    assert int(out[H, W // 2, 0]) == overlay.SEAM_GRAY      # 接縫那一列
+
+
+def test_the_seam_does_not_change_the_total_size():
+    """分隔線是**覆寫**接縫後的第一列／行，不是插進去一條。"""
+    images = {"test": flat(100), "diff": flat(30)}
+    across = overlay.render_overlay(images, {}, panes=["test", "diff"])
+    down = overlay.render_overlay(images, {}, panes=["test", "diff"],
+                                  stack=overlay.STACK_V)
+    assert across.shape == (H, 2 * W, 3) and down.shape == (2 * H, W, 3)
+
+
+def test_a_pane_that_is_not_there_is_skipped_not_fatal():
+    """缺一格不值得讓整張圖畫不出來 —— 而缺的那一格本身常常就是答案
+    （配不到的那一顆沒有第二張圖）。"""
+    images = {"single": flat(60)}
+    out = overlay.render_overlay(images, {}, panes=["single", "paired"])
+    assert out.shape == (H, W, 3)
+
+
+def test_an_empty_pane_list_or_a_bad_stack_says_so():
+    images = {"test": flat(100)}
+    with pytest.raises(ExportError) as e1:
+        overlay.render_overlay(images, {}, panes=[])
+    assert "panes" in str(e1.value)
+    with pytest.raises(ExportError) as e2:
+        overlay.render_overlay(images, {}, panes=["test"], stack="sideways")
+    assert "stack" in str(e2.value)
+
+
+def test_the_boxes_are_drawn_on_every_pane():
+    """框畫在哪幾格是**兩條路共用的那一支**決定的（`_pane`）—— 各寫一份的話
+    會在其中一條路上安靜地漂掉。"""
+    images = {"test": flat(100), "ref": flat(100), "diff": flat(100)}
+    boxes = [(0.25, 0.25, 0.5, 0.5)]
+    out = overlay.render_overlay(images, {}, panes=["test", "ref", "diff"],
+                                 roi_boxes=boxes, roi_winner=0)
+    for pane in range(3):
+        cut = out[:, pane * W:(pane + 1) * W]
+        assert not np.array_equal(cut, overlay.to_display_rgb(flat(100))), pane

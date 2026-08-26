@@ -209,11 +209,67 @@ def test_the_inspector_says_it_when_there_was_no_match(qapp):
     assert "no match" in ins.summary()
 
 
-def test_the_align_card_has_the_spread_panel(qapp):
-    """0.62 是高是低要看其他顆長什麼樣 —— 對圖的分數只有跟整批比才讀得懂。"""
-    from d4t.ui.inspectors import MeasureInspector, inspector_for
+def test_the_align_card_keeps_the_spread_panel_and_gains_a_headline(qapp):
+    """0.62 是高是低要看其他顆長什麼樣 —— 對圖的分數只有跟整批比才讀得懂，
+    所以**分布留著**。
 
-    assert inspector_for("align_to") is MeasureInspector
+    F33 在它上面多一行：這張卡的產物是一個**位置**，而「對到哪、歪了多少、
+    可不可信」分布答不出來。所以是 `MeasureInspector` 的**子類**，不是換掉它。
+    """
+    from d4t.ui.inspectors import H2HInspector, MeasureInspector, inspector_for
+
+    panel = inspector_for("align_to")
+    assert panel is H2HInspector
+    assert issubclass(panel, MeasureInspector)      # 分布沒有被拿掉
+
+
+def test_the_h2h_headline_says_where_it_matched_and_how_far_off(qapp):
+    """這張卡的產物是一個**位置**：對到哪、歪了多少、可不可信。"""
+    from d4t.ui.inspectors import H2HInspector
+
+    ins = H2HInspector()
+    feats = {"ncc_score": 0.94, "align_peak_ratio": 0.12,
+             "align_off_x_px": -22.6, "align_off_y_px": 33.8}
+    ins.set_context(
+        "n1", params={"template": "paired", "search": "single"},
+        result={"features": feats}, batch=[{"features": feats}],
+        meta={"align_to": {"x": 120.0, "y": 60.0, "search": "single",
+                           "size": [40, 40], "shape": [200, 200],
+                           "expected": [80.0, 80.0]}},
+        feature_names=list(feats))
+    text = ins.summary()
+    assert "(120, 60)" in text                 # 對到哪
+    assert "-23" in text and "+34" in text     # 歪了多少（stage 偏移）
+    assert "0.94" in text                      # 分數
+
+
+def test_a_repeating_pattern_is_called_out_even_when_the_score_looks_great(qapp):
+    """⚠ **`ncc_score` 一個不夠。** 陣列區裡 NCC 0.98 而位置每一顆都錯 ——
+    只看分數的人會被騙，所以那一行要**兩個數字一起講**。"""
+    from d4t.ui.inspectors import H2HInspector
+
+    ins = H2HInspector()
+    feats = {"ncc_score": 0.98, "align_peak_ratio": 1.0,
+             "align_off_x_px": 3.0, "align_off_y_px": -1.0}
+    ins.set_context(
+        "n1", params={}, result={"features": feats},
+        batch=[{"features": feats}],
+        meta={"align_to": {"x": 10.0, "y": 10.0, "search": "single",
+                           "size": [40, 40], "shape": [200, 200],
+                           "expected": [80.0, 80.0]}},
+        feature_names=list(feats))
+    text = ins.summary()
+    assert "guess" in text and "0.98" in text
+
+
+def test_the_h2h_panel_tells_run_it_from_matched_apart(qapp):
+    """**對到了**跟**還沒跑**是兩句不同的話（同 `PairInspector`）。"""
+    from d4t.ui.inspectors import H2HInspector
+
+    ins = H2HInspector()
+    ins.set_context("n1", params={}, result=None, batch=[], meta={},
+                    feature_names=[])
+    assert "wired up" in ins.empty_reason()
 
 
 # --------------------------------------------------------------------------- #
@@ -524,3 +580,82 @@ def test_the_aligned_image_needs_the_align_card_selected(qapp, window, lots):
     window.select_node(align)
     assert _pump(qapp, lambda: "aligned" in names()), names()
     assert window.stream_combo.currentText() == "aligned"
+
+
+def test_h2h_marks_are_drawn_solid_but_the_scan_line_cards_are_not(qapp):
+    """「線畫到幾乎看不見」是為 **CD 的幾十條掃描線**寫的規矩 —— 線只是說那個
+    判斷在哪一列上做的，點才是答案。
+
+    H2H 交的是**結構**：少少幾條，而線本身就是答案（一個框、一個十字）。
+    那時候淡化不是在減少雜訊，是在**藏起唯一的資訊**（使用者：「預覽框太不
+    明顯了」）。所以是**卡片自己宣告**的一格，而不是把畫法改掉 ——
+    CD 與 GLV 都刻意靠淡化（GLV：描邊會跟區域框重疊，等於沒畫）。
+    """
+    from d4t.core.pipeline.step import REGISTRY
+
+    assert REGISTRY["align_to"].marks_solid is True
+    for key in ("cd_measure", "glv_stats"):
+        assert REGISTRY[key].marks_solid is False, key
+
+
+def test_the_view_remembers_whether_to_draw_them_solid(qapp):
+    from d4t.ui.widgets import ImageView
+
+    v = ImageView()
+    v.set_marks([[(0.1, 0.1), (0.9, 0.1)]], [[]], -1, [])
+    assert v._marks_solid is False              # 預設不變
+    v.set_marks([[(0.1, 0.1), (0.9, 0.1)]], [[]], -1, [], solid=True)
+    assert v._marks_solid is True
+    v.clear_marks()
+    assert v._marks_solid is False
+
+
+def test_studio_asks_the_card_not_itself(window):
+    """「幾條線算少」是卡片自己才知道的事。"""
+    h2h = window.model.add_step("align_to")
+    window.select_node(h2h)
+    assert window._marks_solid() is True
+    glv = window.model.add_step("glv_stats")
+    window.select_node(glv)
+    assert window._marks_solid() is False
+
+
+def test_the_two_marks_are_different_colours(qapp):
+    """紅框＝對到哪、綠十字＝瞄準哪 —— 兩個同色的話，畫面上分不出哪個是哪個
+    （使用者：「預覽也分」）。"""
+    from d4t.core.steps.align_to import MARK_AIM, MARK_MATCH
+    from d4t.ui.widgets import MARK_ROLE_TOKENS
+
+    # 卡片只說**角色**，顏色是 UI 挑的（core 不得 import Qt）
+    assert MARK_ROLE_TOKENS[MARK_MATCH] != MARK_ROLE_TOKENS[MARK_AIM]
+    # 角色名以 `!` 開頭 —— 那不是一個區域名（沿用 decide_tree 的慣例）
+    for role in (MARK_MATCH, MARK_AIM):
+        assert role.startswith("!"), role
+
+
+def test_both_themes_have_the_colours_the_roles_ask_for(qapp):
+    """角色指的是**權杖**不是色碼，所以 light / dark 兩套都要有。"""
+    from d4t.ui import theme as theme_mod
+    from d4t.ui.widgets import MARK_ROLE_TOKENS
+
+    for name in ("light", "dark"):
+        theme_mod.apply_theme(qapp, name)
+        for token in MARK_ROLE_TOKENS.values():
+            assert theme_mod.TOKENS.get(token), (name, token)
+    theme_mod.apply_theme(qapp, "light")        # 收拾乾淨
+
+
+def test_the_card_labels_every_mark_with_its_role(qapp):
+    from d4t.core.pipeline import get_step
+    from d4t.core.pipeline.context import Context
+    from d4t.core.steps.align_to import MARK_AIM, MARK_MATCH
+
+    ctx = Context()
+    ctx.meta["align_to"] = {"x": 120.0, "y": 60.0, "search": "single",
+                            "size": [40, 40], "shape": [200, 200],
+                            "expected": [80.0, 80.0]}
+    lines, points, _focus, labels = get_step("align_to").overlay_marks(
+        ctx, {}, "single")
+    assert len(labels) == len(lines) == len(points)   # 三串要等長
+    assert labels[:4] == [MARK_MATCH] * 4             # 框
+    assert set(labels[4:]) == {MARK_AIM}              # 十字

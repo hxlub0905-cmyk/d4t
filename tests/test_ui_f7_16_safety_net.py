@@ -186,16 +186,20 @@ def test_the_shortcut_is_written_where_it_will_be_found(window):
     """按鍵存在還不夠 —— 要發現得到。而且 ``_update_action_states`` 每次
     refresh 都會重寫這幾顆的 tooltip，設一次的話第一次 refresh 就沒了。
 
-    （以前拿 ``Ctrl+S`` / Save Recipe 當例子。存檔功能還沒支援，改用
-    ``Ctrl+O`` —— 它同樣走 ``_set_tip``，而且 refresh 也會重寫它。
     F14-1 之後 ``Ctrl+O`` 那顆鈕在**空白狀態**上：工具列那幾顆資料入口拿掉了，
-    而快捷鍵要在**還看得到的**那顆鈕上講出來，不然它就只活在原始碼裡。）
+    而快捷鍵要在**還看得到的**那顆鈕上講出來，不然它就只活在原始碼裡。
+
+    ``Ctrl+S`` 這一條 2026-08-26 回來了 —— 它是原本這支測試的例子，而且它
+    正好踩在同一個坑上：``_update_action_states`` 會重寫存檔鈕的 tooltip
+    （它要講「存回哪一個檔案」），所以設一次的話第一次 refresh 就沒了。
     """
     assert "Ctrl+O" in window.btn_empty_open.toolTip()
     assert "Ctrl+R" in window.btn_trial.toolTip()
+    assert "Ctrl+S" in window.btn_save_recipe.toolTip()
     window.model.add_step("align")
     window._refresh_all()
     assert "Ctrl+O" in window.btn_empty_open.toolTip(), "refresh 之後不見了"
+    assert "Ctrl+S" in window.btn_save_recipe.toolTip(), "refresh 之後不見了"
 
 
 def test_ctrl_f_opens_the_card_search(window):
@@ -232,21 +236,36 @@ def test_the_three_answers_do_what_they_say(window, answer, expected):
         window.PROMPT_ON_CLOSE = False
 
 
-def test_the_prompt_no_longer_offers_a_save_it_cannot_do(window):
-    """存檔功能還沒支援，所以關窗提示只剩「丟掉 / 先別關」兩個答案。
+def test_saving_from_the_close_prompt_really_saves(window, tmp_path):
+    """第三個答案 2026-08-26 回來了 —— 而它要**真的存下去**才算可以關。
 
-    以前有第三個「存檔」。留著它會是一顆做不到自己承諾的鈕 —— 而且預設答案
-    是它，使用者按 Enter 就會撞牆。現在預設答案是 **Cancel**（先別關），
-    因為關掉之後真的沒有任何辦法把這份 pipeline 找回來。
+    2026-08-16 到 2026-08-26 之間這裡只有兩個答案（存檔功能拿掉了），
+    這支測試那時候斷言的是「``_on_save_recipe`` 不存在」。
     """
-    assert not hasattr(window, "_on_save_recipe")
-    assert not hasattr(window, "save_recipe_path")
+    path = tmp_path / "kept.json"
     window.model.add_step("align")
-    window._ask_unsaved = lambda: "save"     # 舊答案，現在不該有任何效果
+    window.recipe_path = str(path)          # 已經有原檔 → Ctrl+S 不會問路徑
+    window._ask_unsaved = lambda: "save"
     window.PROMPT_ON_CLOSE = True
     try:
-        assert window.confirm_close() is False, \
-            "只有 discard 算「可以關」——認不得的答案一律當成先別關"
+        assert window.confirm_close() is True
+    finally:
+        window.PROMPT_ON_CLOSE = False
+    assert path.is_file(), "答「存」之後檔案要真的在磁碟上"
+    assert window.unsaved_changes() is False
+
+
+def test_a_save_that_did_not_happen_is_not_permission_to_close(window):
+    """**存檔失敗（或使用者在另存對話框按取消）不算可以關。**
+
+    那是「我改變主意了」，不是「丟掉吧」—— 而這兩者的差別是一整份 pipeline。
+    """
+    window.model.add_step("align")
+    window._ask_unsaved = lambda: "save"
+    window._on_save_recipe = lambda: False   # 使用者在另存對話框按了取消
+    window.PROMPT_ON_CLOSE = True
+    try:
+        assert window.confirm_close() is False
     finally:
         window.PROMPT_ON_CLOSE = False
 

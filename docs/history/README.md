@@ -24,10 +24,13 @@
 | [`plans/F25-adc-usable.md`](plans/F25-adc-usable.md) | 判定段要**有人會用** ✅（二元門檻的 UI 整支拿掉，舊 recipe 一打開就是樹）|
 | [`plans/F28-canvas-and-measure.md`](plans/F28-canvas-and-measure.md) | ADC 判定區拖得動拿得掉、Measure 段改名重排、Z-map 走人 ✅ |
 | [`plans/F29-detect-and-report.md`](plans/F29-detect-and-report.md) | 把已經量到的位置說出來 ＋ 報表 bundle ✅（A／B／C／D 全數完成）|
+| [`plans/F15-pair-sources.md`](plans/F15-pair-sources.md) | 配對分析：兩筆資料逐顆對起來。2026-08-20 使用者叫停（「太快了」），**2026-08-25 由 F33 續完** ✅ —— 留著是為了「當時為什麼那樣設計」|
+| [`plans/F33-ebi-characterization.md`](plans/F33-ebi-characterization.md) | EBI ↔ API characterization ✅ —— 把①抓到了／②排名太低／③沒偵測到三類分開。使用者的操作手冊在 [`../USING-CHARACTERIZATION.md`](../USING-CHARACTERIZATION.md) |
+| [`plans/F34-save-recipe.md`](plans/F34-save-recipe.md) | 存檔 recipe 做回來 ＋ 第一份出貨的 recipe ✅。**F35 住在同一份**（§5：`configuration_issues` 與 `configuration_hints` 是兩件事）|
+| [`plans/F36-boxplot-and-patch-recipe.md`](plans/F36-boxplot-and-patch-recipe.md) | 整批的分布畫得出來（`output_boxplot`，手寫 SVG）＋ patch 的 dSNR recipe ✅ |
 
 **還在寫的計畫書留在 [`../plans/`](../plans/)**：`F0`（原始總計畫）、
-`F11`（Phase 2 的議程）、`F15`（⏸ 配對分析，使用者叫停）、
-`F26`／`F27`（各有一條等使用者定調的版面決定）。
+`F11`（Phase 2 的議程）、`F26`／`F27`（各有一條等使用者定調的版面決定）。
 
 ## 為什麼要有這個目錄
 

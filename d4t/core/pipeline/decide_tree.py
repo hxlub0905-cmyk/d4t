@@ -41,7 +41,7 @@ __all__ = [
     "OPS", "parse_simple_condition", "format_condition", "rows_reaching",
     "count_yes", "suggest_condition", "display_tree", "layout_cells",
     "flow_counts", "leaf_stats", "decision_info", "path_text",
-    "answer", "walk",
+    "answer", "walk", "features_used",
     "LEAF_PALETTE", "leaf_color", "verdict_rows", "NUISANCE_HEX",
     "DANGER_HEX", "FAILED_KEY", "UNBINNED_KEY",
 ]
@@ -401,6 +401,55 @@ DANGER_HEX = "#d05a4c"
 #: 「算不出來」那兩列的 key（不可能跟樹的路徑撞名 —— 路徑只有 y/n）。
 FAILED_KEY = "!failed"
 UNBINNED_KEY = "!unbinned"
+
+
+def features_used(decide: Any) -> List[str]:
+    """這份判定**問了哪幾個量出來的數字**（順序＝樹上問到的順序）。
+
+    ``let`` 的名字**不算**：它們是判定自己算出來的，不是量出來的 ——
+    把 ``sample_top`` 這種常數畫成一個盒子只會得到一條平線。但它們的**算式裡
+    用到的**要算，否則一份全部用 working number 判定的 recipe 會答「什麼都
+    沒問」，而它其實問了 ``pair_die_rank``。
+
+    F36 建它是給 `output_boxplot` 用的（「Numbers to plot 留空 = 判定問過的
+    那幾個」）。住在這裡而不是那張卡上：它問的是 :class:`DecideSpec` 的形狀，
+    而那是這個模組的地盤 —— 下一個要問同一件事的人（例如「這個數字沒有人
+    產出」那條 lint）就不必再寫一次。
+    """
+    if decide is None:
+        return []
+    lets = [str(getattr(x, "name", "") or "").strip()
+            for x in (getattr(decide, "let", None) or [])]
+    own = set(n for n in lets if n)
+    for n in list(own):
+        own.add(n + "_missing")
+        own.add(n + "_raw")
+
+    order: List[str] = []
+
+    def take(text: Any) -> None:
+        try:
+            e = parse_expression(str(text or ""))
+        except Exception:              # noqa: BLE001 — 壞算式已經有人講過了
+            return
+        for v in sorted(e.variables):
+            if v not in own and v not in order:
+                order.append(v)
+
+    tree = display_tree(decide)
+    if tree is not None:
+        stack = [tree]
+        while stack:                   # 廣度優先＝畫布上由上往下的順序
+            node = stack.pop(0)
+            if isinstance(node, TreeStep):
+                take(node.when)
+                stack.extend([node.yes, node.no])
+    for rule in (getattr(decide, "rules", None) or []):
+        take(getattr(rule, "when", ""))
+    for x in (getattr(decide, "let", None) or []):
+        take(getattr(x, "expr", ""))
+    take(getattr(decide, "score", ""))
+    return order
 
 
 def leaf_color(bin_: int, nuisance: str = NUISANCE_HEX) -> str:

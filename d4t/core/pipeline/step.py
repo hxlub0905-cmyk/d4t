@@ -766,6 +766,21 @@ class Step(ABC):
         return out
 
     # ---- 影像上的量測標記（F19）--------------------------------------------
+    #: 這張卡的標記是**結構**還是**掃描線**（F33，2026-08-26）。
+    #:
+    #: `ImageView._paint_marks` 預設「線畫到幾乎看不見（alpha 70）、點畫滿」，
+    #: 而那條規矩是為 **CD 的幾十條掃描線**寫的：線只是說「那個判斷是在哪一列
+    #: 上做的」，點才是答案，所以線要退到背景去。GLV 也**刻意**靠它 ——
+    #: 它的上緣線本來就該看不見（描邊會跟區域框重疊，等於沒畫）。
+    #:
+    #: 但有些卡交出來的是**少少幾條、而且線本身就是答案**（H2H 的「對到這一塊」
+    #: 是一個框、「瞄準這裡」是一個十字）。那時候淡化不是在減少雜訊，
+    #: 是在**藏起唯一的資訊** —— 實測就是「看不太出來」。
+    #:
+    #: 設成 True 的卡，它的標記畫滿（不透明、線粗一點）。預設 False，
+    #: 所以既有的卡一張都不用動。
+    marks_solid: ClassVar[bool] = False
+
     @classmethod
     def overlay_marks(cls, ctx: Any, params: Dict[str, Any],
                       stream: Optional[str] = None) -> Any:
@@ -851,7 +866,33 @@ class Step(ABC):
     #: lint error，畫布上那張卡也會因此掛上警示標記。
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
-        """這張卡還缺哪些設定才跑得起來（空 list = 沒問題）。"""
+        """這張卡還缺哪些設定**才跑得起來**（空 list = 沒問題）。
+
+        ⚠ **判準是「這張卡會不會拋 / 會不會什麼都不產出」**，不是「使用者有沒有
+        填完」。跑得起來、只是設定得不完整的那種，放 :meth:`configuration_hints`
+        —— 它是 warning，不會擋住整份 recipe。
+        """
+        return []
+
+    # ---- 「跑得起來，但你八成不是這個意思」（F35，2026-08-26）--------------
+    #: `configuration_issues` 的**另一半**。上面那一支的契約寫得很明白：
+    #: 「那張卡跑起來每一顆都會失敗」—— 而 error 這個級別正是踩在那句話上。
+    #:
+    #: 有一種設定不符合那個契約：**卡片跑得完，只是它做的事跟使用者想的不一樣。**
+    #: F33 的 `pair_source` 就把這種訊息放進了 `configuration_issues`
+    #: （「填了 Rank within 但 Rank by 是空的」），於是一份完全跑得動的 recipe
+    #: 被 error 擋在 CLI 門外 —— 而那張卡其實只是少寫兩個特徵。
+    #:
+    #: 兩支分開之後判準是一句話：
+    #:
+    #: * **error（`configuration_issues`）** —— 這張卡會拋，或什麼都不產出。
+    #: * **warning（這一支）** —— 它會跑，但你八成不是這個意思。
+    #:
+    #: 而 warning 這一級**要講得出使用者接下來看得到什麼**（不然它只是一句
+    #: 沒有後果的碎念）。
+    @classmethod
+    def configuration_hints(cls, params: Dict[str, Any]) -> List[str]:
+        """設定得不完整、但**跑得起來**的那些（空 list = 沒問題）。"""
         return []
 
     # ---- 跨顆那一層（F16）--------------------------------------------------
