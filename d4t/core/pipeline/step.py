@@ -866,7 +866,33 @@ class Step(ABC):
     #: lint error，畫布上那張卡也會因此掛上警示標記。
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
-        """這張卡還缺哪些設定才跑得起來（空 list = 沒問題）。"""
+        """這張卡還缺哪些設定**才跑得起來**（空 list = 沒問題）。
+
+        ⚠ **判準是「這張卡會不會拋 / 會不會什麼都不產出」**，不是「使用者有沒有
+        填完」。跑得起來、只是設定得不完整的那種，放 :meth:`configuration_hints`
+        —— 它是 warning，不會擋住整份 recipe。
+        """
+        return []
+
+    # ---- 「跑得起來，但你八成不是這個意思」（F35，2026-08-26）--------------
+    #: `configuration_issues` 的**另一半**。上面那一支的契約寫得很明白：
+    #: 「那張卡跑起來每一顆都會失敗」—— 而 error 這個級別正是踩在那句話上。
+    #:
+    #: 有一種設定不符合那個契約：**卡片跑得完，只是它做的事跟使用者想的不一樣。**
+    #: F33 的 `pair_source` 就把這種訊息放進了 `configuration_issues`
+    #: （「填了 Rank within 但 Rank by 是空的」），於是一份完全跑得動的 recipe
+    #: 被 error 擋在 CLI 門外 —— 而那張卡其實只是少寫兩個特徵。
+    #:
+    #: 兩支分開之後判準是一句話：
+    #:
+    #: * **error（`configuration_issues`）** —— 這張卡會拋，或什麼都不產出。
+    #: * **warning（這一支）** —— 它會跑，但你八成不是這個意思。
+    #:
+    #: 而 warning 這一級**要講得出使用者接下來看得到什麼**（不然它只是一句
+    #: 沒有後果的碎念）。
+    @classmethod
+    def configuration_hints(cls, params: Dict[str, Any]) -> List[str]:
+        """設定得不完整、但**跑得起來**的那些（空 list = 沒問題）。"""
         return []
 
     # ---- 跨顆那一層（F16）--------------------------------------------------

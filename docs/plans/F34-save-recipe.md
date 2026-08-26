@@ -1,9 +1,17 @@
 # F34 — 存檔 recipe ＋ 一份出貨的 characterization recipe
 
+> **F35 也住在這一份**（§5：「跑不起來」與「你八成不是這個意思」是兩件事）。
+> 它是同一輪、被同一個問題逼出來的 —— 拆成兩份文件的話，§3.2 的「為什麼第一版
+> 那樣寫」就跟「後來怎麼修」分家了，而那正是這個 repo 最怕的形狀。
+
 > **d4t — defect**　·　2026-08-26
 > 使用者：「接下來幫我做一個重要的功能，存 recipe，做完之後幫我建一隻
 > Characterization recipe（讓我開啟後載入檔案能直接跑）。另外問一下 output
 > 段要怎麼接」
+>
+> 同一輪的三個追問把 §3.2 整個翻掉了：「Rank within 的意思是?」→
+> 「但如果只勾 XINDEX 會發生什麼事?」→「照你建議的做」。**F35（§5）是那三句
+> 逼出來的** —— 第一版為了繞開一條放錯地方的 lint，把一個猜得到的設定留空了。
 
 ---
 
@@ -101,15 +109,24 @@
 | **`Rank by`**（機台自己的分數欄）| 每一台機台那一欄叫的名字不一樣 = 站點資料 | 見 §3.2 |
 | 輸出**資料夾** | 同上 | 預設 `char_report`（相對路徑）—— 給一個值而不是留空，`configuration_issues` 才不會判 error |
 
-### 3.2 為什麼 `rank_within` 也留空（被否決的方案）
+### 3.2 `rank_within` 預先填好、`rank_by` 留空（**F35 修正了第一版**）
 
-第一版填了 `rank_within = "XINDEX,YINDEX"`、`rank_by = ""`。
-結果是 `pair_source.configuration_issues` 判成 **error**（「填了 Rank within
-但 Rank by 是空的」），而 CLI 看到 error 就整個不跑 —— **跟這份 recipe 要做的事
-正好相反**。
+第一版把**兩格都留空**，理由是 `pair_source.configuration_issues` 會把
+「填了 Rank within 但 Rank by 是空的」判成 **error**，而 CLI 看到 error 就整個
+不跑 —— 一份為了「打開就能跑」而做的 recipe，打開就跑不動。
 
-改成兩格都留空。填一格 `Rank by` 就開始有排名（整份排一組），再填
-`Rank within` 才變成每個 die 各自排 —— 那也是比較好的上手順序。
+那個處置是**繞路，不是修**。使用者當天追問「`Rank within` 的意思是？」與
+「但如果只勾 XINDEX 會發生什麼事?」之後，真正的形狀才清楚：
+
+* `rank_within` **猜得到**（`XINDEX`+`YINDEX` 是絕大多數站點的 sample 規則），
+  而且**填錯不會有任何人講話** —— 只勾一欄就是把整整一行 die 併成一組，
+  跑得完、數字看起來正常。實測 4×3 顆 die、每 die 取前 2 名：只勾 `XINDEX`
+  讓「① 抓到了」從 24 顆掉到 8 顆，全部灌進「② 排名太低」，**整份報告的結論
+  反過來**。唯一的線索是 `pair_die_total`。
+* `rank_by` **猜不到**（每台機台的分數欄名字不一樣）。
+
+所以：**猜得到而且猜錯很貴的那一格要預先填好**，猜不到的那一格留空。
+擋路的那條 lint 在 F35 修掉了（見 §5）—— 它一開始就放錯地方。
 
 **而「還沒設定」不是安靜的**，靠的是 `Let.fill`（F24 ⑤）：
 
@@ -134,7 +151,8 @@ let  die_rank   = pair_die_rank        missing ⇒ 用 -1     → 每顆都有 d
 | 方案 | 為什麼不 |
 |---|---|
 | `rank_by` 填一個常見欄位（`DEFECTAREA` / `DEFECTID`）| 那是**替使用者決定他的 sample 準則**，而且欄位不存在時是掛載當下的硬錯 |
-| 把 `configuration_issues` 降成 warning | 對 `output_char` 的空資料夾那一條是**對的**（那張卡真的會拋）。為了一張卡把整個機制降級，就是為了省事把擋板拆掉 |
+| ~~兩格都留空~~ | **第一版就是這樣，F35 改掉了** —— 見 §3.2。`rank_within` 猜得到，而且猜錯是安靜的 |
+| 把 `configuration_issues` **整支**降成 warning | 對 `output_char` 的空資料夾那一條是**對的**（那張卡真的會拋）。F35 的做法是**分成兩支**，不是降級 —— 見 §5 |
 | 樹上不問「有沒有排名」，讓缺值答「否」| 缺值走 no 的話全部落在 bin 1 或 bin 2 —— 一份看起來正常的錯結論，正是這個 repo 最怕的形狀 |
 | 放回 `examples/` 並打開 `SHOW_SAMPLE_ENTRIES` | 範本庫是另一件事（一個列表 UI）。使用者要的是「一個檔案，打開就能跑」|
 
@@ -181,10 +199,40 @@ class _OutputStep(Step):
 
 ---
 
-## 5. 驗收
+## 5. F35：那條擋路的 lint 一開始就放錯地方（2026-08-26 同一輪）
 
-- `tests/test_recipe_save.py`（11）、`tests/test_ui_save_recipe.py`（12）、
-  `tests/test_shipped_recipes.py`（11）全新。
+`Step.configuration_issues` 的契約寫得很明白（F7-13 的註解）：
+
+> 「空字串的模板是完全合法的 str —— **但那張卡跑起來每一顆都會失敗**」
+
+**error 這個級別就是踩在那句話上。** 而 F33 放進去的那條訊息不符合它：
+「填了 Rank within 但 Rank by 是空的」的卡片跑得完，只是少寫兩個特徵。
+
+於是分成兩支，判準是一句話：
+
+| | 契約 | 級別 | lint code |
+|---|---|---|---|
+| `configuration_issues` | 這張卡**會拋**，或什麼都不產出 | error | `not-configured` |
+| **`configuration_hints`** | 它**會跑**，但你八成不是這個意思 | warning | `half-configured` |
+
+而 warning 這一級**要講得出使用者接下來看得到什麼**，不然它只是一句沒有後果
+的碎念。`pair_source` 的那句因此多了一段：「Until then every matched defect
+answers “no rank” in the decision.」—— 指的正是判定樹上第 9 類那片葉子。
+
+為什麼是兩支方法，不是在同一支上加一個級別欄位：**級別是呼叫端的事**
+（lint 決定怎麼呈現），而卡片要回答的是一個它自己答得出來的問題 ——
+「這會不會跑不起來」。
+
+⚠ 這是一個**新的擴充點**（`Step` 上多一個 classmethod）。既有的十來張卡一個字
+都不用改：預設回空 list。
+
+## 6. 驗收
+
+- 全新：`tests/test_recipe_save.py`（11）、`tests/test_ui_save_recipe.py`（12）、
+  `tests/test_shipped_recipes.py`（12）。
+- `tests/test_pair_source.py` 加兩條：
+  `test_ticking_only_xindex_pools_a_whole_row_of_dies`（分組的語意，
+  **而且沒有任何人講話**）與 `test_half_filled_ranking_is_a_hint_not_a_blocker`。
 - `tests/test_ui_f7_16_safety_net.py` 的反向斷言（「`_on_save_recipe` 不存在」）
   換成兩支正向的：存得下去才算可以關、存不下去不算可以關。
 - 核心全套 + UI 逐檔 + `tools/freeze_golden.py --check` 三份全綠

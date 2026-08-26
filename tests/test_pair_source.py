@@ -884,8 +884,13 @@ def test_the_total_is_there_because_seventh_of_ten_is_not_seventh_of_3000():
 
 
 def test_no_grouping_ranks_the_whole_lot_as_one():
-    """分組欄留空 = 整份排一組。**不預設 XINDEX/YINDEX** —— 那是這個 lot
-    剛好有，不是通則。"""
+    """分組欄留空 = 整份排一組。
+
+    ⚠ **卡片的預設仍然是空的**，而那跟出貨的 recipe 是兩件事：一張卡不知道
+    使用者會拿什麼 KLARF 餵它（`XINDEX`/`YINDEX` 不保證在），所以它不能預設；
+    `recipes/ebi-to-api-characterization.json` **知道**它讀的是一份 wafer 的
+    KLARF，所以它填 `XINDEX,YINDEX`（見 `tests/test_shipped_recipes.py`）。
+    """
     others = _ranked_lot()
     f = _rank_of("c1", others, rank_within="")
     # 整份九筆：95 > 90 > 85 > **80** —— 而它在自己的 die 裡是第 2（見上一條）
@@ -895,6 +900,75 @@ def test_no_grouping_ranks_the_whole_lot_as_one():
     card = get_step("pair_source")
     spec = next(p for p in card.params if p.name == "rank_within")
     assert spec.default == ""
+
+
+def _two_rows_of_dies():
+    """同一個 `XINDEX`、兩個不同的 `YINDEX` —— 兩顆 die，各三筆。
+
+    `_ranked_lot` 的每個 XINDEX 只對到一個 YINDEX，所以在它上面「只勾
+    XINDEX」跟「勾兩欄」是同一個答案 —— 那正好蓋掉了這一條要問的事。
+    """
+    rows = [
+        # (id,   XINDEX, YINDEX, SCORE)
+        ("d1", "5", "1", "90"),
+        ("d2", "5", "1", "70"),
+        ("d3", "5", "1", "50"),
+        ("e1", "5", "2", "95"),
+        ("e2", "5", "2", "85"),
+        ("e3", "5", "2", "60"),
+    ]
+    return [_item(did, i * 1000, 0, die=(int(xi), int(yi)),
+                  fields={"XINDEX": xi, "YINDEX": yi, "SCORE": sc})
+            for i, (did, xi, yi, sc) in enumerate(rows)]
+
+
+def test_ticking_only_xindex_pools_a_whole_row_of_dies():
+    """**只勾一欄 = 整整一行 die 併成一組**，而它不會報錯也不會有警告。
+
+    使用者問的正是這個（2026-08-26：「但如果只勾 XINDEX 會發生什麼事?」）。
+    答案：跑得完、數字看起來正常、而排名的母體大了一整個數量級。
+
+    這條測試把那個差別釘住，因為**它在畫面上看不出來**：唯一的線索是
+    `pair_die_total`（一顆 die 的筆數 vs 一整行的筆數），而那也正是報表上
+    要放這一欄的理由。
+
+    後果的方向是必然的：組變大 → 名次拉開 → 過得了「前 N 名」的變少 →
+    ①「抓到了」被低估、②「排名太低」被高估。實測 4×3 顆 die、每 die 取前
+    2 名：① 從 24 顆掉到 8 顆。
+    """
+    others = _two_rows_of_dies()
+
+    per_die = _rank_of("e3", others, rank_within="XINDEX,YINDEX")
+    assert (per_die["pair_die_rank"], per_die["pair_die_total"]) == (3.0, 3.0)
+
+    pooled = _rank_of("e3", others, rank_within="XINDEX")
+    # 六筆一起排：95 > 90 > 85 > 70 > **60** > 50
+    assert (pooled["pair_die_rank"], pooled["pair_die_total"]) == (5.0, 6.0)
+
+    # ⚠ 而且**沒有任何人講話** —— 兩種設定都是完全合法的。
+    card = get_step("pair_source")
+    for within in ("XINDEX", "XINDEX,YINDEX"):
+        p = {"source": "ebi", "rank_within": within, "rank_by": "SCORE"}
+        assert card.configuration_issues(p) == []
+        assert card.configuration_hints(p) == []
+
+
+def test_half_filled_ranking_is_a_hint_not_a_blocker():
+    """填了分組、沒填排序欄：那張卡**跑得起來**，所以它是 warning（F35）。
+
+    F33 把這一條放在 `configuration_issues`，而那一支的契約寫的是「那張卡
+    跑起來每一顆都會失敗」—— 這裡不符合。後果是真的：出貨的 recipe 只要把
+    `Rank within` 預先填對，就會被自己的 lint 擋在 CLI 門外。
+    """
+    card = get_step("pair_source")
+    half = {"source": "ebi", "rank_within": "XINDEX,YINDEX", "rank_by": ""}
+    assert card.configuration_issues(half) == [], "跑得起來就不是 error"
+    said = card.configuration_hints(half)
+    assert len(said) == 1 and "Rank by" in said[0]
+
+    # 沒有第二份仍然是 error —— 那張卡真的會拋。
+    none = {"source": "", "rank_within": "", "rank_by": ""}
+    assert card.configuration_issues(none) and not card.configuration_hints(none)
 
 
 def test_ties_break_by_defect_id_so_two_runs_agree():

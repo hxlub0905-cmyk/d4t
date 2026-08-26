@@ -126,23 +126,44 @@ def test_the_first_question_is_pair_found():
     assert tree.yes.bin == 3, "yes 那一邊就是「EBI 沒偵測到」"
 
 
-def test_the_ranking_boxes_ship_empty_and_the_tree_says_so():
-    """排名欄位的名字是**站點資料**，不進出貨的 recipe。
+def test_the_grouping_ships_filled_in_and_the_score_column_does_not():
+    """**分組預先填好，排序欄留空** —— 兩格的性質不一樣。
 
-    而「還沒選」不是安靜的：`die_rank` 這一行帶 `fill`，所以每一顆都拿得到
-    `die_rank_missing`，樹上第二問就是它 —— 使用者會在報表上看到一片叫
-    「no ranking column picked yet」的葉子，而不是一份看起來很正常、
-    其實每一顆都判錯的結果。
+    `XINDEX` + `YINDEX`（每顆 die 各自排）是絕大多數站點的 sample 規則，
+    而**填錯它不會有任何人講話**：只勾一欄就是把整整一行 die 併成一組，
+    跑得完、數字看起來正常，只有 `pair_die_total` 看得出來。實測 4×3 顆 die、
+    每 die 取前 2 名：只勾 `XINDEX` 讓「① 抓到了」從 24 顆掉到 8 顆，全部灌進
+    「② 排名太低」—— 整份報告的結論反過來。所以它不留給使用者猜。
+
+    `rank_by` 相反：每一台機台的分數欄叫的名字不一樣，猜不到。而「還沒選」
+    不是安靜的 —— `die_rank` 這一行帶 `fill`，所以每一顆都拿得到
+    `die_rank_missing`，樹上第二問就是它。
     """
     recipe = Recipe.load(CHAR)
     pair = recipe.nodes["pair"].params
+    assert pair["rank_within"] == "XINDEX,YINDEX"
     assert pair["rank_by"] == ""
-    assert pair["rank_within"] == ""
 
     lets = {x.name: x for x in recipe.decide.let}
     assert lets["die_rank"].expr == "pair_die_rank"
     assert lets["die_rank"].fill, "沒有 fill 的話那一顆會整個失敗，不是分一類"
     assert "die_rank_missing" in recipe.decide.tree.no.when
+
+
+def test_the_half_filled_ranking_is_a_warning_not_a_blocker():
+    """填了分組、還沒填排序欄 —— 那張卡**跑得起來**，所以它是 warning。
+
+    F33 把這一條放在 `configuration_issues`（error），於是這份 recipe 只要把
+    “Rank within” 預先填對，就會被自己的 lint 擋在 CLI 門外。分成兩支之後
+    判準是一句話：error ＝ 這張卡會拋或什麼都不產出；warning ＝ 它會跑，
+    但你八成不是這個意思。
+    """
+    recipe = Recipe.load(CHAR)
+    issues = [i for i in validate(recipe, kind="rsem") if i.node_id == "pair"]
+    assert not [i for i in issues if i.level == "error"]
+    hint = [i for i in issues if i.code == "half-configured"]
+    assert len(hint) == 1
+    assert "Rank by" in hint[0].detail
 
 
 def test_it_runs_as_it_ships_without_any_editing(tmp_path):
@@ -239,8 +260,12 @@ def _configured(recipe, folder):
     recipe = _with_folder(recipe, folder)
     recipe.nodes["pair"].params["rank_by"] = "EBISCORE"
     recipe.nodes["pair"].params["carry"] = "DEFECTID"
-    # 合成 lot 沒有 XINDEX/YINDEX，所以這裡不分 die —— 「整份排一組」也是
-    # 一個合法的設定（`Rank within` 留空就是它）。
+    # ⚠ **這裡把出貨的 `XINDEX,YINDEX` 清掉**，而理由值得寫下來：合成 lot
+    # 一顆 die 只有一兩顆 defect，所以照 die 分組之後每一組都只有一個成員 ——
+    # 每一顆都是 rank 1，② 那一類就永遠是空的。那不是 bug（那份資料上的
+    # 答案本來就是這樣），是**這份合成資料撐不起分組**。分組本身的語意
+    # 在 `test_pair_source.py`（手造的 die 佈局，看得見組的大小）。
+    recipe.nodes["pair"].params["rank_within"] = ""
     lets = list(recipe.decide.let)
     for i, x in enumerate(lets):
         if x.name == "sample_top":

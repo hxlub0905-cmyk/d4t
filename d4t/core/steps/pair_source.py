@@ -357,13 +357,28 @@ class PairSourceStep(Step):
 
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
+        # **只有真的跑不起來的才放這裡**（error）—— 沒有第二份，`run` 會拋。
         if not str(params.get("source", "") or "").strip():
             return ["This card has no second lot yet. Use “Open data…” on this "
                     "card - the name you give it is what “Source name” holds."]
+        return []
+
+    @classmethod
+    def configuration_hints(cls, params: Dict[str, Any]) -> List[str]:
+        """跑得起來、但排名那一半沒設完（F35）。
+
+        ⚠ 這一條 F33 放在 `configuration_issues` 裡，於是它是 **error** ——
+        而一份出貨的 recipe 只要預先填好 “Rank within”（`XINDEX`+`YINDEX` 是
+        絕大多數站點要的），就會被自己的 lint 擋在 CLI 門外，即使它完全跑得動。
+        那不符合 `configuration_issues` 的契約（「那張卡跑起來每一顆都會失敗」）
+        —— 這張卡只是少寫兩個特徵。
+        """
         if _rank_within(params) and not _rank_by(params):
             return ["“Rank within” says which defects to rank against each "
-                    "other, but “Rank by” is empty - pick the column that "
-                    "orders them (the other tool's score, usually)."]
+                    "other, but “Rank by” is empty, so no rank is worked out - "
+                    "pick the column that orders them (the other tool's own "
+                    "score, usually). Until then every matched defect answers "
+                    "“no rank” in the decision."]
         return []
 
     # ---- 挑哪一顆 --------------------------------------------------------

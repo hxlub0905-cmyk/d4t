@@ -2151,7 +2151,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
              registry: Optional[Dict[str, Type[Step]]] = None) -> List[Issue]:
     """lint 式驗證：收集**所有**問題後一次回傳（不會 raise）。
 
-    檢查項（code）：unknown-step / bad-param / not-configured / unknown-node /
+    檢查項（code）：unknown-step / bad-param / not-configured（error）/
+    half-configured（warning）/ unknown-node /
     unknown-route / cycle / missing-image / unknown-region / requires-ref /
     ambiguous-input / score-expr / unknown-feature（warning）/
     feature-collision（warning）/ bad-bins /
@@ -2234,6 +2235,20 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             issues.append(Issue(
                 code="not-configured", level="error", node_id=nid,
                 title=f"{step_cls.label} is not set up yet", detail=str(msg)))
+
+        # **跑得起來、但八成不是他要的**（F35）—— warning，不擋 CLI。
+        # 分成兩支而不是在同一支上加一個級別欄位：級別是**呼叫端**的事
+        # （lint 決定怎麼呈現），而卡片要回答的是一個它自己答得出來的問題
+        # 「這會不會跑不起來」。見 `Step.configuration_hints`。
+        try:
+            hints = list(step_cls.configuration_hints(clean_params[nid]))
+        except Exception:                       # noqa: BLE001 — 卡片自己的程式
+            hints = []
+        for msg in hints:
+            issues.append(Issue(
+                code="half-configured", level="warning", node_id=nid,
+                title=f"{step_cls.label} will run, but check this",
+                detail=str(msg)))
 
     # ---- 一個輸入埠只能有一條線（F9-7）----
     # 引擎查資料從哪來的 key 是 ``(下游節點, 流名)``，所以兩條線落在同一個 key

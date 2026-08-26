@@ -3,7 +3,7 @@
   "version": 1,
   "app_version": "0.1.0.dev0",
   "author": "d4t",
-  "description": "EBI ↔ API characterization. Open the API (RSEM blanket-scan) lot as the main lot, then fill in the site-specific boxes: “Open data…” on the Pair card (your EBI lot), “Rank by” on the same card (your tool's own score column), and “Write to” on the output card. Everything else is already wired, and it runs as-is: without a ranking column every matched defect lands in the “no ranking column picked yet” leaf, which is the report telling you which box is still empty. See docs/USING-CHARACTERIZATION.md.",
+  "description": "EBI ↔ API characterization. Open the API (RSEM blanket-scan) lot as the main lot, then fill in the two site-specific boxes: “Rank by” on the Pair card (your tool's own score column) and “Write to” on the output card - plus “Open data…” to point the Pair card at your EBI lot. Ranking is already grouped per die (XINDEX + YINDEX). Everything else is already wired, and it runs as-is: without a ranking column every matched defect lands in the “no ranking column picked yet” leaf, which is the report telling you which box is still empty. See docs/USING-CHARACTERIZATION.md.",
   "routes": {
     "rsem": [
       "load",
@@ -28,7 +28,7 @@
         "tol_nm": 500.0,
         "candidates": 1,
         "carry": "DEFECTID,XINDEX,YINDEX",
-        "rank_within": "",
+        "rank_within": "XINDEX,YINDEX",
         "rank_by": "",
         "rank_desc": true,
         "channel": "",
