@@ -47,6 +47,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional
 
+from ..export import boxplot as export_boxplot
 from ..export import html as export_html
 from ..export import klarf_out, overlay
 from ..export import report as export_report
@@ -1053,6 +1054,136 @@ class OutputCharStep(_OutputStep):
             bctx.warn("Characterization report: %d defect(s) got no picture "
                       "(no image, or the pipeline did not run for them)."
                       % skipped)
+
+
+@register_step
+class OutputBoxPlotStep(_OutputStep):
+    """整批的分布 → 一張 box plot（**一片葉子一個盒子**，F36）。
+
+    為什麼是自己一張卡，不是報表裡的一個區塊
+    ----------------------------------------
+    使用者要的是「report **然後還有一張** box plot」—— 兩個交付物。而它們回答
+    的也是兩個問題：報表是「這一顆長什麼樣」（一顆一列），這張圖是「**這一批**
+    的這個數字散得多開，四類分不分得開」。
+
+    合成一張卡的話，「這張卡寫出什麼」就有兩個答案 —— 那是 `output_char` 當初
+    沒有做成 `output_bundle` 一格參數的同一個理由。底層仍然共用
+    （`export/boxplot.py`、`decide_tree.verdict_rows`）。
+
+    ⚠ **一個盒子是一片葉子，不是一個 bin。** 兩片葉子共用一個 bin 是合法的，
+    而它們是使用者眼中兩個不同的類別（`verdict_rows` 的說明）。順序與顏色跟
+    畫布上的樹一樣 —— 三個地方講同一件事的時候，長相也該是同一個。
+    """
+
+    key = "output_boxplot"
+    label = "Write a box plot"
+    WHAT = "HTML file"
+    help = ("Write one box plot per number you pick, when the whole lot has "
+            "run: one box for each class the decision came up with, so you "
+            "can see at a glance whether the classes actually separate. It is "
+            "a single HTML page that opens in any browser.")
+    params = [
+        ParamSpec(
+            name="path", type="str", default="",
+            label="Write to",
+            help=("Full path of the .html file to write, including the file "
+                  "name. Folders that do not exist yet are created."),
+        ),
+        ParamSpec(
+            name="features", type="feature_keys", default="",
+            label="Numbers to plot",
+            help=("One chart per number, in this order. Leave it empty and "
+                  "the card plots whatever the decision itself asked about - "
+                  "which is usually exactly what you want to see spread out."),
+        ),
+        ParamSpec(
+            name="title", type="str", default="",
+            label="Title", advanced=True,
+            help="Heading on the page. Empty uses the recipe name.",
+        ),
+    ]
+
+    #: 判定沒有給出類別時（一份沒有 `decide` 的 recipe），全部畫成一個盒子。
+    ALL_LABEL = "the whole lot"
+
+    def _charts(self, bctx: Any, names: List[str],
+                groups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """``names`` × ``groups`` → 每個特徵一張圖。
+
+        **一顆都沒量到那個數字的特徵整張圖不畫**，而且要在 warn 裡說出來 ——
+        一張每一格都寫著「no data」的圖比沒有那張圖更糟（推廣鐵則）。
+        """
+        by_id: Dict[str, Dict[str, Any]] = {}
+        for row in bctx.rows:
+            by_id[str(row.get("defect_id", ""))] = dict(
+                row.get("features") or {})
+        charts: List[Dict[str, Any]] = []
+        empty: List[str] = []
+        for name in names:
+            series = []
+            for g in groups:
+                vals = [by_id.get(str(d), {}).get(name)
+                        for d in (g.get("ids") or [])]
+                series.append({"name": g.get("name") or "?",
+                               "colour": g.get("colour"),
+                               "values": [v for v in vals if v is not None]})
+            if not any(s["values"] for s in series):
+                empty.append(name)
+                continue
+            charts.append({"title": name, "series": series,
+                           "subtitle": "one box per class - the line is the "
+                                       "median, the box is the middle half"})
+        if empty:
+            bctx.warn(
+                "Box plot: no defect has a number called %s, so %s not "
+                "plotted. Check the spelling in “Numbers to plot”, or leave "
+                "that box empty to plot whatever the decision asks about."
+                % (", ".join("“%s”" % n for n in empty),
+                   "it was" if len(empty) == 1 else "they were"))
+        return charts
+
+    def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
+        p = self.validate_params(params)
+        path = self._path_of(p)
+        decide = getattr(bctx.recipe, "decide", None)
+
+        # ---- ① 哪幾個數字 ----------------------------------------------
+        names = parse_key_list(p["features"])
+        if not names:
+            # **判定問過的那幾個** —— 使用者想看的散布，九成是他拿來分類的那些。
+            names = decide_tree.features_used(decide) if decide else []
+        if not names:
+            raise StepError(
+                self.key,
+                "nothing to plot: “Numbers to plot” is empty and this recipe "
+                "has no decision to borrow the numbers from. Put the name of "
+                "at least one measured number in that box.")
+
+        # ---- ② 哪幾個盒子（一片葉子一個）--------------------------------
+        groups = [g for g in decide_tree.verdict_rows(decide, bctx.rows)
+                  if g.get("kind") not in ("failed", "unbinned")
+                  and (g.get("ids") or [])]
+        if not groups:
+            groups = [{"name": self.ALL_LABEL,
+                       "ids": [str(r.get("defect_id", ""))
+                               for r in bctx.rows if r.get("ok")],
+                       "colour": export_boxplot.FALLBACK_COLOUR}]
+
+        charts = self._charts(bctx, names, groups)
+        title = (str(p["title"]).strip()
+                 or str(getattr(bctx.recipe, "recipe_id", "") or "d4t"))
+        export_html.write_html(
+            export_boxplot.build_boxplot_page(
+                charts, title,
+                subtitle="%d defect(s), %d class(es)"
+                         % (len(bctx.rows), len(groups)),
+                note=("Each box covers the middle half of the defects in that "
+                      "class; the whiskers reach the furthest defect within "
+                      "1.5 x that spread, and anything beyond is drawn as a "
+                      "ring. Classes that do not overlap are classes this "
+                      "number can tell apart.")),
+            path)
+        bctx.add_output(path)
 
 
 @register_step

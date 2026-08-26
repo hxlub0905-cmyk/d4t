@@ -34,11 +34,32 @@ sys.path.insert(0, str(REPO / "tools"))
 import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 from d4t.core.ingest import pair_source as pair_ingest       # noqa: E402
 from d4t.core.ingest.dataset import load_dataset             # noqa: E402
+import numpy as np                                           # noqa: E402
 from d4t.core.pipeline import Recipe, run_batch, validate    # noqa: E402
+from d4t.core.pipeline import decide_tree                    # noqa: E402
 from d4t.core.pipeline.batch import run_batch_steps          # noqa: E402
 
 RECIPES = REPO / "recipes"
 CHAR = RECIPES / "ebi-to-api-characterization.json"
+PATCH = RECIPES / "patch-dsnr-by-class.json"
+
+#: **允許出現的 error，一份 recipe 一張表**（``{檔名: {(節點, code)}}``）。
+#:
+#: 預設是「一條都不准」。這裡的例外只給一種東西：**那一格的值根本不是文字，
+#: 塞不進 JSON**。目前只有一個 —— `roi_reference` 的 templateGC 要一張模板
+#: **影像**與畫在它上面的框（卡片自己的話：「a template is an image, it cannot
+#: be typed in」）。使用者要按一次「Edit template & regions…」。
+#:
+#: 寫成一張明列的表而不是「這份 recipe 跳過檢查」：長出**別的** error 的時候
+#: 這支測試照樣要紅。
+ALLOWED_ERRORS = {
+    "patch-dsnr-by-class.json": {
+        ("roi", "not-configured"),
+        # 上一條的連鎖：沒有模板就產不出區域名，於是量測卡說「沒有人定義
+        # gc」。同一個原因、兩句話 —— 而第一句已經指名了那顆按鈕。
+        ("glv", "unknown-region"),
+    },
+}
 
 
 def _shipped():
@@ -55,18 +76,40 @@ def test_there_is_at_least_one_shipped_recipe():
 
 @pytest.mark.parametrize("path", _shipped(), ids=lambda p: p.name)
 def test_a_shipped_recipe_loads_and_passes_its_own_lint(path):
-    """**沒有 error**（warning 可以）。
+    """**沒有 error**，除了 `ALLOWED_ERRORS` 明列的那幾條（warning 一律可以）。
 
-    warning 放行是刻意的：這份 characterization recipe 有一條
-    `unknown-feature`（排名欄位還沒選，所以沒有人產 `pair_die_rank`），
-    而那正是它要講的話 —— 它連帶著一片叫「no ranking column picked yet」的
-    葉子。擋掉 warning 等於逼一份誠實的 recipe 說謊。
+    warning 放行是刻意的：characterization 那一份有一條 `unknown-feature`
+    （排名欄位還沒選，所以沒有人產 `pair_die_rank`），而那正是它要講的話 ——
+    它連帶著一片叫「no ranking column picked yet」的葉子。擋掉 warning 等於逼
+    一份誠實的 recipe 說謊。
     """
+    allowed = ALLOWED_ERRORS.get(path.name, set())
     recipe = Recipe.load(path)
     for kind in recipe.routes:
-        errors = [i for i in validate(recipe, kind=kind) if i.level == "error"]
+        errors = [i for i in validate(recipe, kind=kind)
+                  if i.level == "error"
+                  and (str(i.node_id), i.code) not in allowed]
         assert not errors, "\n".join(
             "%s @%s: %s" % (i.code, i.node_id, i.detail) for i in errors)
+
+
+@pytest.mark.parametrize("path", _shipped(), ids=lambda p: p.name)
+def test_the_allowed_errors_are_all_still_happening(path):
+    """**表上的例外要真的還在。**
+
+    修好了卻沒把它從表上拿掉的話，這份 recipe 從此少一條防線 —— 而畫面上
+    看不出來（測試照樣綠）。這是「例外表」這種東西唯一會爛的方式。
+    """
+    allowed = ALLOWED_ERRORS.get(path.name, set())
+    if not allowed:
+        return
+    recipe = Recipe.load(path)
+    seen = set()
+    for kind in recipe.routes:
+        seen |= {(str(i.node_id), i.code) for i in validate(recipe, kind=kind)
+                 if i.level == "error"}
+    assert allowed <= seen, "已經不會發生了，請從 ALLOWED_ERRORS 拿掉：%s" % (
+        sorted(allowed - seen),)
 
 
 @pytest.mark.parametrize("path", _shipped(), ids=lambda p: p.name)
@@ -224,6 +267,116 @@ def test_the_report_it_writes_has_a_row_for_every_defect(tmp_path):
         assert name in html, "三類的名字都要出現在報表上"
     # 配不到的那一顆**沒有第二張圖**，而那一格是空的不是破圖。
     assert "<td class='none'>" in html
+
+
+# --------------------------------------------------------------------------- #
+# 3. patch dSNR：那三個門檻問的數字，真的量得出來嗎
+# --------------------------------------------------------------------------- #
+def test_the_patch_recipe_asks_about_numbers_its_own_cards_measure():
+    """判定樹問的每一個數字，都要有一張卡真的寫得出來。
+
+    這一條是**不跑資料也答得出來**的那一半（宣告層），而它抓的是最常見的
+    打錯：`focus_laplacian` vs `focus_lapvar`、`cmp_snr_mean` vs
+    `cmp_snr_mean_outlier`。跑起來才發現的話，症狀是「每一顆都判成同一類」
+    —— 因為問不到的題目一律答「否」（F30）。
+    """
+    from d4t.core.pipeline import get_step
+
+    recipe = Recipe.load(PATCH)
+    produced = set()
+    for nid in recipe.routes["ebi_patch"]:
+        node = recipe.nodes[nid]
+        step = get_step(node.step)
+        produced |= set(step.resolve_features(step.validate_params(node.params)))
+    asked = set(decide_tree.features_used(recipe.decide))
+    assert asked <= produced, sorted(asked - produced)
+
+
+def test_the_patch_recipe_measures_and_classifies_end_to_end(tmp_path):
+    """整條路真的跑一次 —— **連模板一起**。
+
+    模板塞不進出貨的 recipe（它是一張影像），但**測試造得出來**：合成 lot
+    的圖案就是一個週期性晶格，切一格出來 `encode_cell` 就是模板。所以「這份
+    recipe 到底跑不跑得出那三個數字」這件事沒有藉口不驗。
+    """
+    from _synth import rounded_square_tile
+    from d4t.core.algo.template import encode_cell
+    from make_sample import generate
+
+    pitch = 16
+    lot = generate(str(tmp_path / "lot"), n=12, seed=5, size=128, pitch=pitch)
+    ds = load_dataset(lot["klarf"])
+
+    tile = np.asarray(rounded_square_tile(pitch), dtype=np.float64)
+    recipe = Recipe.load(PATCH)
+    recipe.nodes["roi"].params["template"] = encode_cell(
+        np.clip(tile, 0, 255).astype(np.uint8))
+    recipe.nodes["roi"].params["regions"] = "gc:0.2,0.2,0.6,0.6"
+    folder = tmp_path / "out"
+    recipe.nodes["report"].params["folder"] = str(folder)
+    recipe.nodes["spread"].params["path"] = str(folder / "spread.html")
+
+    assert not [i for i in validate(recipe, kind="ebi_patch")
+                if i.level == "error"], "補上模板之後就不該有紅字了"
+
+    rows = run_batch(recipe, ds, workers=1)
+    assert all(r.get("ok") for r in rows), \
+        [r.get("error") for r in rows if not r.get("ok")]
+
+    feats = rows[0]["features"]
+    assert feats["boxes"] > 1, "templateGC 要在 patch 上鋪出好幾格才有得比"
+    for name in ("focus_lapvar", "cmp_snr_mean_outlier",
+                 "cmp_delta_mean_outlier"):
+        assert name in feats, name
+    assert all(r.get("bin") is not None for r in rows)
+
+    bctx = run_batch_steps(recipe, ds, rows, kind="ebi_patch")
+    assert not bctx.errors, bctx.errors
+    assert (folder / "report.html").is_file()
+    assert (folder / "spread.html").is_file()
+    plot = (folder / "spread.html").read_text(encoding="utf-8")
+    assert "<svg" in plot
+    # box plot 畫的就是樹問過的那三個 —— 「留空 = 判定問過的那幾個」。
+    for name in ("focus_lapvar", "cmp_snr_mean_outlier",
+                 "cmp_delta_mean_outlier"):
+        assert name in plot, name
+
+
+def test_the_signed_delta_is_a_bright_defect_rule_and_abs_is_measured_too():
+    """`cmp_delta_mean_outlier > 40` **只抓得到亮缺陷**，而那是使用者指定的。
+
+    `_outlier` 挑的是「離典型最遠」的那一格 —— 兩個方向都算 —— 而 `delta`
+    帶正負號，所以暗缺陷是負的（合成資料上實測 −18.6），`> 40` 對它永遠不
+    成立。這支測試不是在說那樣不對，是**把那件事釘在有人會看的地方**，並且
+    保證逃生口一直在：`abs_delta` 也量了，換一個名字就是兩種都抓。
+    """
+    recipe = Recipe.load(PATCH)
+    metrics = recipe.nodes["glv"].params["compare_metrics"]
+    assert "abs_delta" in metrics, "逃生口要一直在（換名字不必重跑影像段）"
+    whens = " ".join(w for w in _whens(recipe.decide.tree))
+    assert "cmp_delta_mean_outlier" in whens
+
+
+def _whens(node):
+    from d4t.core.pipeline.recipe import TreeStep
+    if isinstance(node, TreeStep):
+        yield node.when
+        for child in (node.yes, node.no):
+            for w in _whens(child):
+                yield w
+
+
+def test_the_patch_recipe_denoises_both_streams_with_one_card():
+    """**一張卡吃兩條流** —— test 與 ref 吃同一組設定。
+
+    分成兩張卡的話它們各自有機會被設得不一樣，而「兩張圖還比得起來」正是
+    整份 recipe 的前提（CLAUDE.md §3）。
+    """
+    recipe = Recipe.load(PATCH)
+    dn = recipe.nodes["dn"].params
+    assert dn["method"] == "gaussian" and int(dn["ksize"]) == 3
+    into_dn = {e.src_out for e in recipe.edges if e.dst == "dn"}
+    assert into_dn == {"test", "ref"}
 
 
 # --------------------------------------------------------------------------- #

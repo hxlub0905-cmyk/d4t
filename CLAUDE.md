@@ -60,7 +60,13 @@ Phase 2），使用者定調**先把引擎做對，再回頭做產品化**（見
 **出貨的 recipe 在 [`recipes/`](recipes/)**（2026-08-26），走 `Open recipe…`
 不走範本庫，而且**每一份都有測試真的跑一次**
 （`tests/test_shipped_recipes.py`）—— 舊的 `examples/` 就是因為沒人測而爛掉的。
-加一份新的就在那支測試裡加一段。
+加一份新的就在那支測試裡加一段。目前兩份：EBI↔API characterization、
+patch 的 dSNR 分布（F36）。
+
+⚠ 那支測試有一張 **`ALLOWED_ERRORS`**（哪一份 recipe 允許哪一條 lint error
+—— 目前只有「模板是一張影像、塞不進 JSON」那一種），而它配著一支**反向的**
+測試：例外修好了卻沒從表上拿掉的話，那份 recipe 從此少一條防線而測試照樣綠。
+**任何「例外清單」都要有那支反向測試**，不然它就是一張只會變長的紙。
 
 **存檔 recipe 2026-08-26 做回來了**（F34，[`docs/plans/F34-save-recipe.md`](docs/plans/F34-save-recipe.md)）。
 `Recipe.save()`、工具列的「Save recipe…」、`Ctrl+S`（存回原檔）與

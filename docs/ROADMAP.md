@@ -371,6 +371,7 @@ engine 與功能收斂之後才有意義。
 | 項目 | 說明 |
 |---|---|
 | ground truth **標注介面** | 讀答案卷與即時準確率已經在（Phase 1），缺的是**在 Studio 裡標**：現在還是要人另外準備一份 JSON／CSV |
+| ~~整批的分布畫得出來~~ | ✅ **2026-08-26（F36）** `output_boxplot`「Write a box plot」：一片葉子一個盒子，手寫 SVG（零新相依 —— 公司機是用複製檔案更新的）。`Numbers to plot` 留空 = 判定問過的那幾個（`decide_tree.features_used`）|
 | ~~存檔 recipe 做回來~~ | ✅ **2026-08-26（F34）**。`app_version` 那條相容策略本來就在（`version_skew`），這一輪只是把寫檔那一半接回來 |
 | 範例 recipe 庫 | 使用者的原話是「等 APP 完成再給範例」。`recipes/` 已經有出貨的 recipe（2026-08-26），缺的是**庫的入口**（`SHOW_SAMPLE_ENTRIES`）|
 | 使用者手冊 | 目前所有文件都是寫給開發者的。目標使用者是不寫 code 的製程／設備工程師 |

@@ -54,3 +54,63 @@ python -m d4t run recipes/ebi-to-api-characterization.json <API的.001> \
 ```
 
 `--source 代號=路徑` 的**代號要跟卡片上的 `Source name` 一樣**（預設 `ebi`）。
+
+---
+
+## `patch-dsnr-by-class.json`
+
+一整批 patch 的 **dSNR 分布**：去雜訊 → 找重複的那一格（templateGC）→
+量 focus 與灰階 → 三刀分四類 → 出**報表**與**一張 box plot**。
+
+```
+Load images ──test,ref──> Denoise (gaussian, k=3) ─┬─test──> Reference regions (templateGC) → gc / gc_center / gc_others
+                                                    ├─test──> Focus index
+                                                    ├─test──> GLV  (source)
+                                                    └─ref───> GLV  (reference source)
+
+        ┌ OUTPUT ─────────────────────────────────┐
+        │ Write report folder  ·  Write a box plot │   ← 兩張都不接線
+        └──────────────────────────────────────────┘
+```
+
+**SNR 是這樣量的**：GLV 卡開 `each box`（一格一格量，`pooled` 會把幾百格平均
+起來、正好把缺陷抹掉），`_outlier` 就是「test 內離典型最遠的那一格」＝ **T**；
+參照選「另一塊 @ 另一條流」，區域 `gc_others`、流 `ref` ＝ **R**。
+
+### 判定（三刀）
+
+```
+① focus_lapvar  >= focus_min (150) ?   否 → bin 99  garbage (out of focus)
+② cmp_snr_mean_outlier > snr_min (4) ? 否 → bin 3   no signal
+③ cmp_delta_mean_outlier > delta_min (40) ?  是 → bin 1 strong / 否 → bin 2 weak
+```
+
+三個門檻是判定段的 **working number**（`focus_min` / `snr_min` / `delta_min`），
+改一個數字改一行，不必動樹。**問不到的題目一律答「否」**，所以量不到 focus
+的那一顆會落在 bin 99 —— 方向是安全的那一邊。
+
+### ⚠ 兩件要先知道的
+
+**① 模板要自己畫一次（沒得繞）。** `Reference regions` 卡的 templateGC 需要
+一張**模板影像**加上畫在它上面的框，而模板是一張圖、塞不進 JSON。載進去會有
+一條紅字指名那顆按鈕：選那張卡 → **`Edit template & regions…`** → 在你自己的
+一格上圈一次。圈完紅字就沒了。
+
+**② `cmp_delta_mean_outlier > 40` 只抓得到亮缺陷。** `_outlier` 挑的是「離典型
+最遠」的那一格，**兩個方向都算**，而 `delta` 帶正負號 —— 暗缺陷是負的，
+`> 40` 對它永遠不成立（合成資料上實測 −18.6）。這是照你指定的走。兩種都要數
+的話，樹上第三題把 `cmp_delta_mean_outlier` 換成 **`cmp_abs_delta_mean_outlier`**
+即可 —— 那個數字**已經一起量了**，不必重跑影像段。
+
+### 輸出
+
+| 檔案 | 什麼 |
+|---|---|
+| `patch_report/report.html` ＋ `images/` ＋ `defects.csv` | 一顆一列，點一列換圖 |
+| `patch_report/spread.html` | **box plot**：一個盒子一類，畫的是判定問過的那三個數字 |
+
+盒子＝中間一半的 defect，鬚伸到 1.5×IQR 之內最遠的那一顆，超出的畫成小圈。
+**四類的盒子不重疊 = 那個數字分得開它們。**
+
+> `Write a box plot` 的 `Numbers to plot` 留空 = **判定問過的那幾個**。
+> 寫死一份清單的話，樹改了而清單沒改的那一天，圖上畫的就不是在判的東西了。

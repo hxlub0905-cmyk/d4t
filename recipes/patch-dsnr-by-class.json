@@ -1,0 +1,197 @@
+{
+  "recipe_id": "patch_dsnr_by_class",
+  "version": 1,
+  "app_version": "0.1.0.dev0",
+  "author": "d4t",
+  "description": "Patch lot: denoise, find the repeating cell, then measure focus and the gray-level SNR of the odd cell against the same cells on the reference image. Three questions in order: focus, then SNR, then how many gray levels the difference is worth. Writes a report folder and a box plot of every number the decision asks about, one box per class. ONE thing has to be set up by hand: the Reference regions card needs a template and the regions drawn on it - a template is an image, it cannot be written into a recipe. Select that card and use “Edit template & regions…” once on your own data.",
+  "routes": {
+    "ebi_patch": [
+      "load",
+      "dn",
+      "roi",
+      "focus",
+      "glv",
+      "report",
+      "spread"
+    ]
+  },
+  "nodes": {
+    "load": {
+      "step": "load_patch",
+      "params": {
+        "channel_map": "1:test, 2:ref",
+        "channels": "auto",
+        "nm_per_px": 0.0,
+        "carry": ""
+      },
+      "enabled": true
+    },
+    "dn": {
+      "step": "denoise",
+      "params": {
+        "streams": "test,ref",
+        "method": "gaussian",
+        "ksize": 3,
+        "strength": 1.0,
+        "threshold": 4.0
+      },
+      "enabled": true
+    },
+    "roi": {
+      "step": "roi_reference",
+      "params": {
+        "method": "a cell I mark myself",
+        "source": "test",
+        "roi_out": "gc",
+        "template": "",
+        "regions": "",
+        "locate_axis": "both",
+        "min_score": 0.3,
+        "min_margin": 0.0,
+        "min_structure": 5.0,
+        "pick": "centre",
+        "drop_edge": true,
+        "edge_margin": 4.0,
+        "max_boxes": 8192,
+        "output_prefix": ""
+      },
+      "enabled": true
+    },
+    "focus": {
+      "step": "focus_quality",
+      "params": {
+        "source": "test",
+        "output_prefix": ""
+      },
+      "enabled": true
+    },
+    "glv": {
+      "step": "glv_stats",
+      "params": {
+        "source": "test",
+        "roi": "gc",
+        "metrics": "glv_mean,glv_median,glv_std",
+        "across_boxes": "each box",
+        "judge": "glv_mean",
+        "reference": "another region on another stream",
+        "reference_region": "gc_others",
+        "reference_source": "ref",
+        "stat": "glv_mean",
+        "compare_metrics": "delta,abs_delta,snr",
+        "exclude_saturated": false,
+        "trim_percent": 0.0,
+        "min_pixels": 0,
+        "output_prefix": ""
+      },
+      "enabled": true
+    },
+    "report": {
+      "step": "output_bundle",
+      "params": {
+        "folder": "patch_report",
+        "limit": 0,
+        "jpeg_quality": 80,
+        "rank_by": "cmp_snr_mean_outlier",
+        "montage": true,
+        "draw_boxes": "all",
+        "draw_boxes_cap": 300,
+        "mark_pixels_k": 3.0
+      },
+      "enabled": true
+    },
+    "spread": {
+      "step": "output_boxplot",
+      "params": {
+        "path": "patch_report/spread.html",
+        "features": "",
+        "title": ""
+      },
+      "enabled": true
+    }
+  },
+  "edges": [
+    [
+      "load",
+      "test",
+      "dn",
+      "streams"
+    ],
+    [
+      "load",
+      "ref",
+      "dn",
+      "streams"
+    ],
+    [
+      "dn",
+      "test",
+      "roi",
+      "source"
+    ],
+    [
+      "dn",
+      "test",
+      "focus",
+      "source"
+    ],
+    [
+      "dn",
+      "test",
+      "glv",
+      "source"
+    ],
+    [
+      "dn",
+      "ref",
+      "glv",
+      "reference_source"
+    ]
+  ],
+  "score": {
+    "expr": "",
+    "threshold": 0.5,
+    "bins": {}
+  },
+  "decide": {
+    "let": [
+      {
+        "name": "focus_min",
+        "expr": "150"
+      },
+      {
+        "name": "snr_min",
+        "expr": "4"
+      },
+      {
+        "name": "delta_min",
+        "expr": "40"
+      }
+    ],
+    "tree": {
+      "when": "focus_lapvar >= focus_min",
+      "yes": {
+        "when": "cmp_snr_mean_outlier > snr_min",
+        "yes": {
+          "when": "cmp_delta_mean_outlier > delta_min",
+          "yes": {
+            "bin": 1,
+            "label": "strong"
+          },
+          "no": {
+            "bin": 2,
+            "label": "weak"
+          }
+        },
+        "no": {
+          "bin": 3,
+          "label": "no signal"
+        }
+      },
+      "no": {
+        "bin": 99,
+        "label": "garbage (out of focus)"
+      }
+    },
+    "score": ""
+  }
+}

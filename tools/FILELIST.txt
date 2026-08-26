@@ -3,9 +3,9 @@
 85ba76deb9e3e0de7fab20cbf4a2bb69e2c89d85 .github/workflows/ci.yml
 32effd36c2614b3378219e38d064dfcbb4ef38e4 .gitignore
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
-7ffeb482f042472209a803f6858732c389b97481 CLAUDE.md
+37e5dbb63343727ee270dadffba519fb3a523192 CLAUDE.md
 2a88de1f46350abacaceaa0ac065279f42f9fc2a README.md
-d6fed165348509dccd8f07289c7ea925368c42f9 SESSION_LOG.md
+4322529927ed4167fafc98e630b299f008d3f7ac SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -32,6 +32,7 @@ e1f7a95ad976983aa0f1f16b7bd52cdcc67494dd d4t/core/algo/subpixel.py
 82791f0e16286d803ddba7220ac56aec5548f6d4 d4t/core/algo/template.py
 5f93cfe3c9daa7b50b5efa3dd329c847e5c26c91 d4t/core/calibration.py
 78924f0edd38b3d96346542c63372c7fee679a91 d4t/core/export/__init__.py
+9c183f1e91a70b09ace6aa37356a68a0fc30ed8a d4t/core/export/boxplot.py
 90858356add79c0250430552cd10505fc0b3eea9 d4t/core/export/html.py
 a4a93fb5fc256c767f2c31f387f7ab4962b5868d d4t/core/export/klarf_out.py
 51e022a0c7e2159f91b51d8ad36e6e5f92d03305 d4t/core/export/overlay.py
@@ -50,7 +51,7 @@ ec7bdb58e7da611ac74f16b53e218f9a65476bdc d4t/core/pipeline/cellrois.py
 750feb625403c2d28566797d541ea2eab2aa22ce d4t/core/pipeline/channels.py
 43a6d8d2f81aece00d00ba3e3c901187f2a721d8 d4t/core/pipeline/context.py
 fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
-9455c722f43d9cf19f6e6e3c5d8f9caf3ff70dbb d4t/core/pipeline/decide_tree.py
+e8b99d43334b020fc97620cb8383c0b4b7dd126b d4t/core/pipeline/decide_tree.py
 606216762745f16cd739a8323cf532888d85e3be d4t/core/pipeline/engine.py
 7e2797dce8253240fcf45a27f57f28d2c246e272 d4t/core/pipeline/expression.py
 edad3cc3deae994b02680b2b58811674fc289724 d4t/core/pipeline/recipe.py
@@ -69,7 +70,7 @@ c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
-02021edc97759cf471e724b42e2b1952ec231cfb d4t/core/steps/output.py
+78553d4a79d6ac059183dc59099004f673e76475 d4t/core/steps/output.py
 8174f2b776a9b6398bd64660aff3a8506256c1fd d4t/core/steps/pair_source.py
 46e24cde47cccae307704861c349c75887a27da4 d4t/core/steps/quality.py
 93c34393be2ee09fb4f4c137a722a047a5dd1e2d d4t/core/steps/roi_cross.py
@@ -115,7 +116,7 @@ cb5ec1e3cc74cbfc6f03fe2edb526c0993465c6e docs/GLAS-INTERFACE.md
 15c2bb25a9b655500c0706d899826872abbc425f docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
 5add754408a8324566ed29c95f855d9a0c429655 docs/PITFALLS.md
-86596130d791f72a9c86adfe8844a61e6371cb6d docs/ROADMAP.md
+c08c2971533a1f6df7f7a9363bfd54074938dcb8 docs/ROADMAP.md
 c1cfb82e71df1d178b5f70766fcabf52d623476a docs/USING-CD.md
 63bc53e224f82efd540f7e8c785a750b4d006bf3 docs/USING-CHARACTERIZATION.md
 6885e5767660656a9cc2ffda538b1fd0defd232c docs/plans/F0-master-plan.md
@@ -125,13 +126,15 @@ d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 4b55069e016b2ca16b4ff7e9e929d7454db52172 docs/plans/F27-results-panel.md
 af2ffd6e2b76f3c6801caa6a5174cd33077093fb docs/plans/F33-ebi-characterization.md
 334c0c38a9b9007886cf5016df56b83c0786dec9 docs/plans/F34-save-recipe.md
+82c3c08f263c1c1ce65db37f4f7f3bd895d74178 docs/plans/F36-boxplot-and-patch-recipe.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
 e55de398362c0a42f564176a63ff00a84bdf1667 fab_probe/probe_tiff.py
 6cac7120663bf2abb399bdf9eaa9109488c58ed8 pyproject.toml
-68d2fce3c2e5f4d4ce5586258bf14403407a0f4b recipes/README.md
+1a7cc3eaca1dfaa65bb1c732554e640b577a5fe9 recipes/README.md
 1fb83c4e64d5525aaff8e59a60dbd4be484e61b5 recipes/ebi-to-api-characterization.json
+f5fa179e33b2cd87a231e3a2e61d526b4461f8b0 recipes/patch-dsnr-by-class.json
 cf5284f96a1d071e240ef88199e54d580b48c57c requirements.txt
 aa32b005cf383544e680b73449d7ef4818abb811 tests/conftest.py
 2f91aee241cdd8dd9aac07f0f663d3175b53ad7f tests/fixtures/golden/die_to_die_basic__make_sample.json
@@ -204,6 +207,7 @@ f74d5228a3ab2e7c1ce81b65b0edeebb470b624d tests/test_make_mgext.py
 33071fd9690ad145172ab6a178471283523e3c75 tests/test_no_real_fab_data.py
 3103276cac06035f1a18a7d18cb90bdafd7d2f26 tests/test_normalize.py
 637f52a992403f3403b5942019aed2c048059554 tests/test_offline_tools.py
+b004ab50b918ff9fdd31827f26c8171d0afd4bdc tests/test_output_boxplot.py
 77430b0b34d24773cbfe804119416ce5c2a40708 tests/test_output_bundle.py
 cdf46298db296a2d05e8fd42efcce246d971c55f tests/test_output_char.py
 760493e6e43124ec37e48463773e51291e595c9c tests/test_pair_probe.py
@@ -233,7 +237,7 @@ c99f6b6166a2f25986a65c6eba2e019401e4ed7d tests/test_roi_cross_phase.py
 1a47e4aa72f0f6b5d12127f97ee3d97a6e5b65c5 tests/test_route_by.py
 5c7e5402d90dc7d10602c93d8e8e87feb96ba1ec tests/test_rsem_ingest.py
 08b433ef14d96c7cca7c28279e5a8c7d7ccc3cf9 tests/test_scale.py
-a5718440f7162e8351bf56149c44e91cc1b4689f tests/test_shipped_recipes.py
+e768b03fd73786777cb2f48c2433b6330a47c4ae tests/test_shipped_recipes.py
 b916e62bdadbb86a8bcec464b3c5dc3669db66be tests/test_snr.py
 9e08e1242c29baae95073fe7f1ae35a07f8267a1 tests/test_steps.py
 8205dbdf48a2b5cd1a111738039020b6ddb65cc9 tests/test_subpixel.py
