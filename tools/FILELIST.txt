@@ -5,7 +5,7 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 964da8bce181f83e209fb5d6cce033b1c780ec3b CLAUDE.md
 2a88de1f46350abacaceaa0ac065279f42f9fc2a README.md
-f0def084d83cfe2cc93f983db1416e9c49992bf7 SESSION_LOG.md
+9b6779d923e3481adef6c0474434ec71dcc222e6 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -123,7 +123,7 @@ c1cfb82e71df1d178b5f70766fcabf52d623476a docs/USING-CD.md
 d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 655f8cf83bfe142b0952aa2769fd420aec2698d3 docs/plans/F26-decide-panel-ux.md
 4b55069e016b2ca16b4ff7e9e929d7454db52172 docs/plans/F27-results-panel.md
-1574d571edd369fca35412d476ea0138570ed067 docs/plans/F37-glv-roi-names-and-output.md
+61207549e366ed5bbe743a7f27817e1d0cabb05c docs/plans/F37-glv-roi-names-and-output.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
