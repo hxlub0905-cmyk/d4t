@@ -1,5 +1,9 @@
 # F34 — 存檔 recipe ＋ 一份出貨的 characterization recipe
 
+**狀態**：✅ 收斂（2026-08-26）。存檔（`Recipe.save` / `Ctrl+S` / `Ctrl+Shift+S`）
+與 `recipes/ebi-to-api-characterization.json` 都上線了；**F35** 的兩支
+`configuration_issues` / `configuration_hints` 見 §5。
+
 > **F35 也住在這一份**（§5：「跑不起來」與「你八成不是這個意思」是兩件事）。
 > 它是同一輪、被同一個問題逼出來的 —— 拆成兩份文件的話，§3.2 的「為什麼第一版
 > 那樣寫」就跟「後來怎麼修」分家了，而那正是這個 repo 最怕的形狀。

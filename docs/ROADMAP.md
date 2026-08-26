@@ -25,7 +25,7 @@
   **2026-08-26 做回來了**（F34）。`Recipe.save()`、工具列的「Save recipe…」、
   `Ctrl+S`（存回原檔）與 `Ctrl+Shift+S`（另存）都在，標題列的星號是「還沒存」
   的常駐訊號。拿掉的理由是「先把整個 engine 用好」，而 Phase 1 同一天就收斂了
-  —— 那個前提到期。計畫書：[`docs/plans/F34-save-recipe.md`](plans/F34-save-recipe.md)。
+  —— 那個前提到期。計畫書：[`docs/history/plans/F34-save-recipe.md`](history/plans/F34-save-recipe.md)。
 
 ---
 
@@ -344,7 +344,7 @@ Output 卡同理**不需要埠**：它吃的是「這一次跑的全部」，沒
 ### F15 停在哪裡（2026-08-20）—— **✅ 2026-08-25 由 F33 續完**
 
 > 停下來的兩件事都補上了：**證據**那一份是
-> [`plans/F33-ebi-characterization.md`](plans/F33-ebi-characterization.md) 的
+> [`history/plans/F33-ebi-characterization.md`](history/plans/F33-ebi-characterization.md) 的
 > C3（`output_char`，一顆一列、兩張圖跟數字在同一列上），而它需要的兩個資料
 > 缺口是 C2（配不到的那一顆留下來，`pair_found = 0` 走得到判定樹）與 C1
 > （die 內排名，母體是第二份的完整清單）。下面留的是當時停下來的理由。

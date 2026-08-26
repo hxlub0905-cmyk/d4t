@@ -262,7 +262,7 @@ class AlignToStep(Step):
         的當下就看得到框往哪裡跑，而不是跑完一整批才知道。
 
         兩個記號各自回答一半，而**它們的間距就是這一顆的 stage 偏移**
-        （＝`align_off_*`，見 `docs/plans/F33-ebi-characterization.md` §8.6）：
+        （＝`align_off_*`，見 `docs/history/plans/F33-ebi-characterization.md` §8.6）：
 
         * **框** —— 小圖真的對到的那一塊（``x/y`` ＋ 模板尺寸）；
         * **十字** —— 機台瞄準的那一點（``expected`` 的中心）。

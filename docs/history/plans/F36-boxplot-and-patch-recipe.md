@@ -1,5 +1,8 @@
 # F36 — 整批的分布（box plot）＋ 一份 patch dSNR 的 recipe
 
+**狀態**：✅ 收斂（2026-08-26）。`output_boxplot`「Write a box plot」與
+`recipes/patch-dsnr-by-class.json` 都上線了。
+
 > **d4t — defect**　·　2026-08-26
 > 使用者：「幫我建一份 recipe 是 for patch 專用，要用來比較這一整筆 patch 內
 > 的 dSNR 分布 … 輸出預期要有 report 然後還有一張 box plot。

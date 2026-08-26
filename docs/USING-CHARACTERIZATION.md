@@ -4,7 +4,7 @@
 > `Write characterization report`
 > 這一份是**給使用者的操作手冊**：每一格填什麼、線接在哪、報表怎麼讀。
 > 設計上的來龍去脈在
-> [`docs/plans/F33-ebi-characterization.md`](plans/F33-ebi-characterization.md)，
+> [`docs/history/plans/F33-ebi-characterization.md`](history/plans/F33-ebi-characterization.md)，
 > 那一份不必讀。
 
 ---

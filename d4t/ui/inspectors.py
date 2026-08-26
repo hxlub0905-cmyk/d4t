@@ -2800,7 +2800,7 @@ class H2HInspector(MeasureInspector):
       填回 `expect_dx_px` 就能把搜尋框縮小（F15 §14.3 的調校迴圈）；
     * **可不可信** —— `align_peak_ratio`。⚠ **`ncc_score` 一個不夠**：陣列區
       裡實測 NCC 0.98 而位置每一顆都錯，因為第二名跟第一名一樣好
-      （`docs/plans/F33-ebi-characterization.md` §8.5）。所以這一行**兩個數字
+      （`docs/history/plans/F33-ebi-characterization.md` §8.5）。所以這一行**兩個數字
       一起講**，不讓使用者只看到漂亮的那一個。
 
     影像上的框與十字走的是另一條路（`AlignToStep.overlay_marks`）——

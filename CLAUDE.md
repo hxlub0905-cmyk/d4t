@@ -68,7 +68,7 @@ patch 的 dSNR 分布（F36）。
 測試：例外修好了卻沒從表上拿掉的話，那份 recipe 從此少一條防線而測試照樣綠。
 **任何「例外清單」都要有那支反向測試**，不然它就是一張只會變長的紙。
 
-**存檔 recipe 2026-08-26 做回來了**（F34，[`docs/plans/F34-save-recipe.md`](docs/plans/F34-save-recipe.md)）。
+**存檔 recipe 2026-08-26 做回來了**（F34，[`docs/history/plans/F34-save-recipe.md`](docs/history/plans/F34-save-recipe.md)）。
 `Recipe.save()`、工具列的「Save recipe…」、`Ctrl+S`（存回原檔）與
 `Ctrl+Shift+S`（另存）都在。⚠ 它帶來一個**以前不存在的後果**：Studio 載入時做的
 UI 層遷移（門檻 → 判定樹）現在會被存回磁碟。那是對的（存出跟畫面不一樣的東西
@@ -324,7 +324,7 @@ F30 的 `ui/output_band.py` 已經都是這樣做的 —— 這一段只是把�
 資料缺口也補了：**配不到的那一顆會留下來**（`pair_found = 0`，繼續走到判定樹
 —— 「EBI 根本沒偵測到」是 characterization 要數的一類，不是一個錯誤）與
 **die 內排名**（`pair_die_rank` / `pair_die_total`，母體是第二份的完整清單）。
-詳見 [`docs/plans/F33-ebi-characterization.md`](docs/plans/F33-ebi-characterization.md)。
+詳見 [`docs/history/plans/F33-ebi-characterization.md`](docs/history/plans/F33-ebi-characterization.md)。
 以下是它現在的樣子：
 
 `pair_source` 這張卡上的

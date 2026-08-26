@@ -6,7 +6,7 @@
 
 | 期間 | 在哪 |
 |---|---|
-| **2026-08-19 起**（第十六輪～）| 這個檔案（下面）—— 改名 d4t、F12 區域線、F13 UI、F14 入口搬進卡片、F15 配對分析、F16 畫布的八段、F17 純 DAG 引擎、F18 GLV、F19 CD、F20–F25 多類別 ADC 與判定樹、F26/F27 判定與 Results 面板、F28–F30 位置／報表／Region 收卡、F31/F32 逐框比較 |
+| **2026-08-19 起**（第十六輪～）| 這個檔案（下面）—— 改名 d4t、F12 區域線、F13 UI、F14 入口搬進卡片、F15 配對分析、F16 畫布的八段、F17 純 DAG 引擎、F18 GLV、F19 CD、F20–F25 多類別 ADC 與判定樹、F26/F27 判定與 Results 面板、F28–F30 位置／報表／Region 收卡、F31/F32 逐框比較、**F33 EBI↔API characterization、F34/F35 存檔 recipe 與出貨的 recipe、F36 box plot** |
 | 2026-08-07 ～ 08-18（第十五輪以前）| [`docs/history/2026-08.md`](docs/history/2026-08.md) —— F8 純規則 ROI、畫布 n8n 化、Phase 1 收斂、F10、Phase 2 的 Input／Enhance／Region 三段 |
 | 2026-07 | [`docs/history/2026-07.md`](docs/history/2026-07.md) —— M0–M7、F7-9…F7-24 前半、兩台機器與搬運通道的成形 |
 
@@ -25,7 +25,7 @@
 dSNR 分布 …… 輸出預期要有 report 然後還有一張 box plot。**如果需要新增功能
 (請通知我~) 看不懂得也問我**」
 
-計畫書：[`docs/plans/F36-boxplot-and-patch-recipe.md`](docs/plans/F36-boxplot-and-patch-recipe.md)。
+計畫書：[`docs/history/plans/F36-boxplot-and-patch-recipe.md`](docs/history/plans/F36-boxplot-and-patch-recipe.md)。
 
 ### ① 「照字面實作」會做出一個永遠不成立的門檻
 
@@ -112,7 +112,7 @@ error（同一個原因、兩句話），而不是「這份 recipe 跳過檢查�
 Characterization recipe（讓我開啟後載入檔案能直接跑）。另外問一下 output 段
 要怎麼接」
 
-計畫書：[`docs/plans/F34-save-recipe.md`](docs/plans/F34-save-recipe.md)。
+計畫書：[`docs/history/plans/F34-save-recipe.md`](docs/history/plans/F34-save-recipe.md)。
 這裡記三件計畫書裝不下的。
 
 ### ① 拿掉一個功能的理由，會比那個功能活得久
@@ -251,7 +251,7 @@ time」。對帶 `fill` 的 `let` 那是**假的** —— 那一行的意思正�
 
 C1–C4 做完之後，使用者連續問了四個問題。**每一個都不是要求，是懷疑** ——
 而三個懷疑底下真的有東西。這一段記的是那個過程，因為結論本身在
-[`docs/plans/F33-ebi-characterization.md`](docs/plans/F33-ebi-characterization.md)
+[`docs/history/plans/F33-ebi-characterization.md`](docs/history/plans/F33-ebi-characterization.md)
 §8.5–§8.7，而**「為什麼沒被測試抓到」只有這裡寫得下**。
 
 操作手冊另立一家：[`docs/USING-CHARACTERIZATION.md`](docs/USING-CHARACTERIZATION.md)
@@ -428,7 +428,7 @@ Qt，而「紅色是什麼紅」是主題的事（light/dark 兩套）。報表�
 
 ## F33：EBI ↔ API characterization —— 把三類分開，並且看得見（2026-08-25）
 
-計畫書：[`docs/plans/F33-ebi-characterization.md`](docs/plans/F33-ebi-characterization.md)。
+計畫書：[`docs/history/plans/F33-ebi-characterization.md`](docs/history/plans/F33-ebi-characterization.md)。
 接的是 F15 §16 停下來的那一段（使用者 2026-08-20：「太快了」）—— 這一輪把它
 **停下來的理由滿足掉**再續做：缺的那份「點對點包含圖的 report」就是 C3，
 而它需要的兩個資料缺口是 C2 與 C1。
@@ -3475,7 +3475,7 @@ load_dataset（整段）         4.8 s
 
 ## 配對卡拿真實資料用了一次（F15-2，2026-08-19，第二十一輪）
 
-使用者回報六件事，這一輪做**前兩件**（其餘排進 `docs/plans/F15-pair-sources.md`
+使用者回報六件事，這一輪做**前兩件**（其餘排進 `docs/history/plans/F15-pair-sources.md`
 §12）：「用 Pair 開 EBI raw data 應用程式會無法回應一陣子」與「卡片太不方便，
 要自己填（希望可以自動帶出來用選的）」。
 
@@ -3532,7 +3532,7 @@ A, B, C」，卡片跑起來只講「帶過來的是哪幾欄」。CLI 也改成
 定調的那句話是：**「我只想把它做成一個小功能 card，這張 card 會 load 自己的
 source」** —— 主流程什麼 ROI／GLV／measure 都照舊，要做配對分析才放這張卡。
 
-計畫書：[`docs/plans/F15-pair-sources.md`](docs/plans/F15-pair-sources.md)。
+計畫書：[`docs/history/plans/F15-pair-sources.md`](docs/history/plans/F15-pair-sources.md)。
 A／B／C 一次做完。
 
 ### 兩張卡，不是一張
