@@ -3,9 +3,9 @@
 85ba76deb9e3e0de7fab20cbf4a2bb69e2c89d85 .github/workflows/ci.yml
 32effd36c2614b3378219e38d064dfcbb4ef38e4 .gitignore
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
-b88644a879324595818db749d7a547577beab211 CLAUDE.md
+876266a7bfceb5ec0228cfed98d8ee9cc2da4c54 CLAUDE.md
 6adcf70fd5d443f757d78b4d337e1866a9af3ed7 README.md
-61b0458af7b4befdf6d17fc9875b1333f4c2ce22 SESSION_LOG.md
+3258a67546236137f6d06b0b611d22fdbecadd8e SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -117,6 +117,7 @@ cb5ec1e3cc74cbfc6f03fe2edb526c0993465c6e docs/GLAS-INTERFACE.md
 5add754408a8324566ed29c95f855d9a0c429655 docs/PITFALLS.md
 a6fd53c3e010ee9c7335def49ff3952e10511ba9 docs/ROADMAP.md
 c1cfb82e71df1d178b5f70766fcabf52d623476a docs/USING-CD.md
+7362f871c0b2e4d9efeefab93ae39f55a7cda2c3 docs/USING-CHARACTERIZATION.md
 6885e5767660656a9cc2ffda538b1fd0defd232c docs/plans/F0-master-plan.md
 d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 636ffca672050aefd5bdc5628b5c9f335018c41b docs/plans/F15-pair-sources.md
