@@ -34,7 +34,7 @@ e1f7a95ad976983aa0f1f16b7bd52cdcc67494dd d4t/core/algo/subpixel.py
 78924f0edd38b3d96346542c63372c7fee679a91 d4t/core/export/__init__.py
 90858356add79c0250430552cd10505fc0b3eea9 d4t/core/export/html.py
 a4a93fb5fc256c767f2c31f387f7ab4962b5868d d4t/core/export/klarf_out.py
-af4f4bf098c3087bf064f56c50597e64425af7f0 d4t/core/export/overlay.py
+51e022a0c7e2159f91b51d8ad36e6e5f92d03305 d4t/core/export/overlay.py
 ab5031e7056134aa94c5551aba9b80a774b6397a d4t/core/export/report.py
 4599be07de9d76b7a008bdc400e22cfaa0c7acd2 d4t/core/ingest/__init__.py
 987ec64e2830c1e9e7ee535c3aa91e020f5bd0be d4t/core/ingest/dataset.py
@@ -58,7 +58,7 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 458bc40837b773fdbfbf9d9675d23020e2903853 d4t/core/steps/__init__.py
 44ada36e81965cddff165fa32c598f0e94861d4e d4t/core/steps/_util.py
 c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
-5ef0fc26d2042ade2c01b779b4cff9eb537d017e d4t/core/steps/align_to.py
+cf128151f6052e9e160571a61e95a588d77e90b1 d4t/core/steps/align_to.py
 2c48cd738d30003227a9aad3f34e5c8565a9c6ab d4t/core/steps/arith.py
 4d91da90d6ed3dbfc1c6d26e9c18072fc84e91cd d4t/core/steps/cd.py
 39bbc384b66e024f67200a76598d4f6f255e5100 d4t/core/steps/denoise.py
@@ -69,7 +69,7 @@ c8fae43f115919ed246b9f56e0b3157c35fb7e38 d4t/core/steps/align.py
 c23a7522a52ca8ac55afd43955fda3e59d50dade d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
-42272c0db163512c5a702d25b24528e870433472 d4t/core/steps/output.py
+02021edc97759cf471e724b42e2b1952ec231cfb d4t/core/steps/output.py
 7a0e6629754f1cba9fc627c540c33f0cb1318e26 d4t/core/steps/pair_source.py
 46e24cde47cccae307704861c349c75887a27da4 d4t/core/steps/quality.py
 93c34393be2ee09fb4f4c137a722a047a5dd1e2d d4t/core/steps/roi_cross.py
@@ -109,7 +109,7 @@ db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
 08772be389f8fe4c8e35a5a0183d62caf1904cd8 d4t/ui/widgets.py
 2eb7813f6dbd6c7d0beff0496ed0d1e6dc87d484 d4t/ui/workers.py
 991b2b3b4ff0da1b085f1828c38dbbc14891d4b4 docs/ARCHITECTURE.md
-e91e2809486e7306a360421877c50b667c01df64 docs/FAB-VALIDATION.md
+0240f4ebee4c1c3a72342cc8fcaff9e039632d8f docs/FAB-VALIDATION.md
 cb5ec1e3cc74cbfc6f03fe2edb526c0993465c6e docs/GLAS-INTERFACE.md
 98db709267e7d0f5dcfa835cbcb09e67b7d1ae51 docs/HANDOVER.md
 15c2bb25a9b655500c0706d899826872abbc425f docs/NO-GIT-SETUP.md
@@ -122,7 +122,7 @@ d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 636ffca672050aefd5bdc5628b5c9f335018c41b docs/plans/F15-pair-sources.md
 655f8cf83bfe142b0952aa2769fd420aec2698d3 docs/plans/F26-decide-panel-ux.md
 4b55069e016b2ca16b4ff7e9e929d7454db52172 docs/plans/F27-results-panel.md
-3065a3fa786f676982679f6bc4970184cef97ac5 docs/plans/F33-ebi-characterization.md
+646b7fd8f2d8c3f22e7058d728e0495c7660d567 docs/plans/F33-ebi-characterization.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -201,7 +201,7 @@ f74d5228a3ab2e7c1ce81b65b0edeebb470b624d tests/test_make_mgext.py
 3103276cac06035f1a18a7d18cb90bdafd7d2f26 tests/test_normalize.py
 637f52a992403f3403b5942019aed2c048059554 tests/test_offline_tools.py
 77430b0b34d24773cbfe804119416ce5c2a40708 tests/test_output_bundle.py
-8fe12ef9d04024ddf7a77f211eee2206846ebc37 tests/test_output_char.py
+cdf46298db296a2d05e8fd42efcce246d971c55f tests/test_output_char.py
 760493e6e43124ec37e48463773e51291e595c9c tests/test_pair_probe.py
 dc6fd92e0c814cc527cc991b3b7a63f9190bbddd tests/test_pair_source.py
 34f1bcdbffc5c85f790e98e5bd1c4b1f10fe795f tests/test_period_golden.py

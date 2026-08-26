@@ -46,6 +46,8 @@ OVERLAY_PREFIX = "overlay_"
 
 #: 主 blob 外框的顏色（RGB）。
 BOX_COLOR = (255, 32, 32)
+#: 「機台瞄準這裡」的十字（RGB）。跟量測框的紅分開 —— 見 `_draw_crosshair`。
+AIM_COLOR = (80, 220, 120)
 #: 標籤文字顏色（RGB）與底條顏色。
 TEXT_COLOR = (255, 255, 255)
 BANNER_COLOR = (0, 0, 0)
@@ -302,6 +304,30 @@ def _draw_box(panel: np.ndarray, box: Tuple[int, int, int, int],
                   int(thick))
 
 
+def _draw_crosshair(panel: np.ndarray, at: Tuple[float, float],
+                    color: Tuple[int, int, int] = AIM_COLOR,
+                    arm: int = 0) -> None:
+    """在 ``at`` 畫一個**中空的十字**（中間留一個缺口，不遮住那一點本身）。
+
+    跟量測框（紅）分開顏色：一張圖上兩個記號各自講的是「機台瞄準這裡」與
+    「小圖真的對到這裡」，而**兩者的距離就是這一顆的 stage 偏移** ——
+    那正是使用者要一眼看出來的東西。
+    """
+    h, w = panel.shape[:2]
+    cx, cy = int(round(at[0])), int(round(at[1]))
+    if arm <= 0:
+        arm = max(6, int(round(min(h, w) * 0.05)))
+    gap = max(2, arm // 3)
+    c = tuple(int(v) for v in color)
+    t = 1 if min(h, w) < 192 else 2
+    for x0, y0, x1, y1 in ((cx - arm, cy, cx - gap, cy),
+                           (cx + gap, cy, cx + arm, cy),
+                           (cx, cy - arm, cx, cy - gap),
+                           (cx, cy + gap, cx, cy + arm)):
+        cv2.line(panel, (max(0, min(x0, w - 1)), max(0, min(y0, h - 1))),
+                 (max(0, min(x1, w - 1)), max(0, min(y1, h - 1))), c, t)
+
+
 def _draw_roi_boxes(panel: np.ndarray, roi_boxes, roi_winner: int) -> None:
     """畫逐框比較的 ROI 框（**正規化座標** 0..1）：其餘細、贏家粗。
 
@@ -539,6 +565,7 @@ def render_overlay(images: Dict[str, Any],
                    montage: bool = True,
                    panes: Optional[Sequence[str]] = None,
                    stack: str = STACK_H,
+                   aim: Optional[Sequence[float]] = None,
                    roi_boxes: Optional[Sequence[Any]] = None,
                    roi_winner: int = -1,
                    odd_pixels: Optional[Dict[str, Any]] = None) -> np.ndarray:
@@ -569,6 +596,11 @@ def render_overlay(images: Dict[str, Any],
         直疊是 characterization 要的方向：上面 ground truth、下面第二份 ——
         它要對得上報表由上往下讀的順序。``panes=None``（預設）時整條路徑
         跟這兩個參數出現之前**逐位元組相同**。
+    aim
+        **「機台瞄準的那一點」**（F33）：影像座標 ``(x, y)``，畫一個綠色的
+        中空十字。它跟 ``box``（小圖真的對到哪）的距離就是這一顆的 stage
+        偏移 —— review 機台移到 KLARF 座標才拍，名義上 defect 在正中央，
+        而實際會歪一點點。預設 ``None``：不畫，跟這個參數出現之前逐位元組相同。
     roi_boxes / roi_winner
         逐框比較的 ROI 框（F31）：**正規化** 0..1 的 ``(x, y, w, h)`` 清單與
         贏家的索引。其餘畫細的鋼青色、贏家畫粗的琥珀色；索引是 -1 就全部
@@ -626,6 +658,8 @@ def render_overlay(images: Dict[str, Any],
     the_box = _blob_box(box) if box is not None else primary_blob_box(features)
     if the_box is not None:
         _draw_box(left, the_box)
+    if aim is not None and len(aim) >= 2:
+        _draw_crosshair(left, (float(aim[0]), float(aim[1])))
 
     if names is not None:
         # 指名了哪幾條流：第一格就是底圖（上面已經畫好），其餘照順序接上去。

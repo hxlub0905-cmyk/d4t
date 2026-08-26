@@ -300,10 +300,16 @@ class AlignToStep(Step):
         ctx.add_feature("align_peak_ratio", float(min(max(ratio, 0.0), 1.0)))
         ok = score >= float(p["min_score"])
         ctx.add_feature("align_ok", 1.0 if ok else 0.0)
+        # ``search`` / ``size`` 是給**報表畫標記**用的（F33）：框要畫在
+        # 「這張卡真的搜過的那條流」上，不是隨便一張圖。少了這兩個，出圖那邊
+        # 只能用流名去猜，而猜錯的那一次是「圖上有一個框、指著錯的地方」——
+        # 比沒有框糟得多（同 `_draw_roi_boxes` 的「不猜」）。
         ctx.meta["align_to"] = {"x": float(x), "y": float(y),
                                 "score": float(score), "second": float(second),
                                 "candidate": int(which),
                                 "expected": [float(ex), float(ey)],
+                                "search": str(p["search"]),
+                                "size": [int(tw), int(th)],
                                 "window": list(window) if window else None}
         if not ok:
             raise StepError(

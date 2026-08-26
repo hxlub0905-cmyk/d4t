@@ -416,6 +416,56 @@ def _warn_if_unranked(key: str, bctx: Any, rows: Any,
                   "want the worst at the top." % (key, what))
 
 
+def _defect_marks(ctx: Any, pix: Dict[str, Any],
+                  main_key: str) -> Dict[str, Any]:
+    """左邊那張圖上要畫的兩個記號（F33）→ ``{"box": …, "aim": …}``。
+
+    使用者問的那件事：「名義上 defect 會在 FOV 正中央（機台就是照 KLARF 座標
+    移過去拍），但實際可能會拍歪一點點 —— **可是這樣就沒有明確在圖上指出
+    defect 位置**。」
+
+    兩個記號各自回答一半：
+
+    * **十字（aim）**＝機台瞄準的那一點。H2H 算過它（``meta["align_to"]``
+      的 ``expected``，那正是 ``align_off_*`` 的分母）；沒跑過 H2H 的那一顆
+      （配不到 → 那張卡讓路）就是**影像正中央** —— 名義位置本來就是那裡，
+      而「該在這裡、而另一份什麼都沒有」正是第三類要講的話。
+    * **框（box）**＝小圖真的對到哪。
+
+    ⚠ **框只畫在 H2H 真的搜過的那條流上**（``meta["align_to"]["search"]``）。
+    換一條流當左圖時座標的意思就變了，而一個指著錯地方的框比沒有框糟得多
+    （同 `_draw_roi_boxes` 的「不猜」）。這也是 `align_to` 要把 ``search``
+    記進 meta 的理由。
+    """
+    arr = pix.get(main_key) if main_key else None
+    if arr is None and pix:
+        try:
+            arr = overlay.pick_base(pix)[1]
+        except Exception:              # noqa: BLE001 — 沒圖就沒有記號
+            return {}
+    if arr is None:
+        return {}
+    h, w = arr.shape[:2]
+    note = dict((getattr(ctx, "meta", None) or {}).get("align_to") or {})
+    same = bool(note) and str(note.get("search", "")) == str(main_key or "")
+    out: Dict[str, Any] = {}
+    if same:
+        size = list(note.get("size") or [])
+        exp = list(note.get("expected") or [])
+        if len(size) == 2:
+            out["box"] = (int(round(float(note["x"]))),
+                          int(round(float(note["y"]))),
+                          int(size[0]), int(size[1]))
+        if len(exp) == 2 and len(size) == 2:
+            # `expected` 是框的**左上角** —— 十字要畫在它的中心
+            out["aim"] = (float(exp[0]) + size[0] / 2.0,
+                          float(exp[1]) + size[1] / 2.0)
+    if "aim" not in out:
+        # 沒有對位（配不到，或左圖不是被搜的那一條）→ **名義位置＝正中央**
+        out["aim"] = (w / 2.0, h / 2.0)
+    return out
+
+
 def write_recipe_json(bctx: Any, path: str) -> None:
     """把 recipe 原樣寫進輸出資料夾（atomic，鐵則 5）。
 
@@ -869,6 +919,18 @@ class OutputCharStep(_OutputStep):
                   "was a guess even when ncc_score looks perfect. Everything "
                   "else is in the spreadsheet beside this report."),
         ),
+        ParamSpec(
+            name="mark_defect", type="bool", default=True,
+            label="Mark where the defect is",
+            help=("Draw two marks on the left picture: a green cross where "
+                  "the tool aimed (it moved to this defect's coordinate, so "
+                  "nominally the defect is right there) and a red box where "
+                  "the H2H card actually matched the second lot's picture. "
+                  "The gap between them is this defect's stage error - and "
+                  "the two sitting on top of each other is what \"these are "
+                  "the same defect\" looks like. A defect with no match gets "
+                  "the cross only: that is still where it should have been."),
+        ),
         rank_by_spec(),
         ParamSpec(
             name="jpeg_quality", type="int",
@@ -938,6 +1000,9 @@ class OutputCharStep(_OutputStep):
                     skipped += 1
                     continue
                 stem = os.path.splitext(overlay.overlay_filename(did))[0]
+                marks = (_defect_marks(getattr(r, "context", None), pix,
+                                       main_key)
+                         if bool(p["mark_defect"]) else {})
                 pair = {}
                 for side, key in (("main", main_key), ("pair", pair_key)):
                     arr = (pix.get(key) if key
@@ -946,9 +1011,14 @@ class OutputCharStep(_OutputStep):
                         # 配不到的那一顆沒有第二張圖 —— 那一格留白，
                         # 而留白正是它要講的話（不是破圖、不是 0×0 的框）。
                         continue
+                    if side == "main" and marks:
+                        panel = overlay.render_overlay(
+                            {"_": arr}, {}, base_key="_", montage=False,
+                            box=marks.get("box"), aim=marks.get("aim"))
+                    else:
+                        panel = overlay.to_display_rgb(arr)
                     name = "%s_%s.jpg" % (stem, side)
-                    overlay.write_jpeg(overlay.to_display_rgb(arr),
-                                       os.path.join(shots, name),
+                    overlay.write_jpeg(panel, os.path.join(shots, name),
                                        int(p["jpeg_quality"]))
                     # **相對路徑**：整個資料夾寄給別人的時候連結還是通的。
                     pair[side] = "%s/%s" % (self.IMAGE_DIR, name)

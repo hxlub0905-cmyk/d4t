@@ -301,3 +301,108 @@ def test_pointing_it_at_a_file_says_so(dataset, tmp_path):
     rows = run_batch(r, dataset, workers=1)
     bctx = run_batch_steps(r, dataset, rows)
     assert bctx.errors and "folder" in str(bctx.errors).lower()
+
+
+# --------------------------------------------------------------------------- #
+# 7. 圖上指出 defect 在哪（F33，使用者：「沒有明確在圖上指出 defect 位置」）
+# --------------------------------------------------------------------------- #
+def _marks(ctx_meta, pix, main_key):
+    from d4t.core.steps.output import _defect_marks
+
+    class _C:
+        meta = ctx_meta
+    return _defect_marks(_C(), pix, main_key)
+
+
+def _fake_pix(size=200):
+    return {"single": np.zeros((size, size), np.uint8)}
+
+
+def test_a_matched_defect_gets_both_marks():
+    """十字＝機台瞄準哪，框＝小圖真的對到哪。**兩者的距離就是 stage 偏移**。"""
+    meta = {"align_to": {"x": 120.0, "y": 60.0, "search": "single",
+                         "size": [40, 40], "expected": [80.0, 80.0]}}
+    m = _marks(meta, _fake_pix(), "single")
+    assert m["box"] == (120, 60, 40, 40)
+    # `expected` 是框的左上角 → 十字畫在它的中心
+    assert m["aim"] == (100.0, 100.0)
+
+
+def test_a_defect_with_no_match_gets_the_cross_only():
+    """配不到 → 沒有框，但**十字還在**：那仍然是它該在的地方，而
+    「該在這裡、另一份卻什麼都沒有」正是第三類要講的話。"""
+    m = _marks({}, _fake_pix(200), "single")      # align_to 讓路了，沒有 meta
+    assert "box" not in m
+    assert m["aim"] == (100.0, 100.0)             # 影像正中央
+
+
+def test_the_box_is_not_drawn_on_a_stream_h2h_never_searched():
+    """⚠ **不猜**：換一條流當左圖，那組座標的意思就變了。
+
+    一個指著錯地方的框比沒有框糟得多（同 `_draw_roi_boxes` 的規矩）——
+    所以只有 `main_stream` 就是 H2H 搜過的那一條時才畫框。
+    """
+    meta = {"align_to": {"x": 120.0, "y": 60.0, "search": "single",
+                         "size": [40, 40], "expected": [80.0, 80.0]}}
+    pix = {"single": np.zeros((200, 200), np.uint8),
+           "other": np.zeros((200, 200), np.uint8)}
+    m = _marks(meta, pix, "other")
+    assert "box" not in m                          # 不是被搜的那一條 → 不畫框
+    assert m["aim"] == (100.0, 100.0)              # 十字退回正中央
+
+
+def _red_green(path):
+    """(紅框像素數, 綠十字像素數)。"""
+    from PIL import Image
+    a = np.asarray(Image.open(path).convert("RGB")).astype(int)
+    red = int(((a[:, :, 0] > 170) & (a[:, :, 1] < 90) & (a[:, :, 2] < 90)).sum())
+    green = int(((a[:, :, 1] > 170) & (a[:, :, 0] < 130)
+                 & (a[:, :, 2] < 150)).sum())
+    return red, green
+
+
+def test_the_marks_really_land_on_the_written_picture(dataset, tmp_path):
+    """一路走到 JPEG：開著跟關掉必須是**不一樣的圖**。
+
+    （比「數綠色像素」穩：這裡的 patch 只有 128²，十字才 20 px，JPEG 壓過
+    之後顏色會糊掉 —— 而糊掉的是**測試的判準**，不是功能。真的要看顏色的話
+    `_red_green` 那一支在下面那條大圖的測試上用。）
+    """
+    on, off = tmp_path / "on", tmp_path / "off"
+    run(dataset, on, columns="glv_max")
+    run(dataset, off, columns="glv_max", mark_defect=False)
+
+    a = sorted((on / "images").glob("*_main.jpg"))
+    b = sorted((off / "images").glob("*_main.jpg"))
+    assert a and len(a) == len(b)
+    assert a[0].read_bytes() != b[0].read_bytes(), "開著的時候圖上要多點東西"
+
+    # 右邊那一張（第二來源）**不畫記號** —— 記號講的是「在大圖的哪裡」，
+    # 而小圖本身就是那一塊。
+    pa = sorted((on / "images").glob("*_pair.jpg"))
+    pb = sorted((off / "images").glob("*_pair.jpg"))
+    if pa and pb:
+        assert pa[0].read_bytes() == pb[0].read_bytes()
+
+
+def test_the_cross_and_the_box_are_really_drawn_on_a_big_enough_picture():
+    """直接畫一張夠大的圖來數顏色（不經 JPEG）：十字綠、框紅。"""
+    from d4t.core.export import overlay
+
+    img = np.full((400, 400), 200, np.uint8)
+    panel = overlay.render_overlay({"_": img}, {}, base_key="_", montage=False,
+                                   box=(120, 60, 80, 80), aim=(200.0, 200.0))
+    a = panel.astype(int)
+    green = int(((a[:, :, 1] > 170) & (a[:, :, 0] < 130)).sum())
+    red = int(((a[:, :, 0] > 170) & (a[:, :, 1] < 90)).sum())
+    assert green > 0 and red > 0
+
+    # 預設不畫 —— 這兩個參數是加上去的，不是改掉的
+    plain = overlay.render_overlay({"_": img}, {}, base_key="_", montage=False)
+    assert np.array_equal(plain, overlay.to_display_rgb(img))
+
+
+def test_marking_is_on_by_default():
+    spec = next(p for p in REGISTRY["output_char"].params
+                if p.name == "mark_defect")
+    assert spec.default is True
