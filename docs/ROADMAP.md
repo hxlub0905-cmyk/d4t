@@ -66,7 +66,7 @@
 刪卡＝連同線一起刪、改輸出名下游跟著走、`write result to` 打得進去。
 
 真正換來的是一句可驗證的話：**畫布上看得到的，就是引擎真的會做的。**
-驗收 `tests/test_ui_f10_canvas_reality.py`（20 條，全部對 registry 裡每一張卡
+驗收 `tests/test_ui_canvas_invariants.py`（20 條，全部對 registry 裡每一張卡
 自動套用）＋ 兩支稽核腳本（11 項不變量）。詳見
 [`history/plans/F10-canvas-tells-the-truth.md`](history/plans/F10-canvas-tells-the-truth.md)。
 

@@ -5,7 +5,7 @@ Studio 關窗時會問「還沒存要不要存」（F7-16）。那在真的使�
 headless 測試裡，一個 modal 對話框不會讓測試失敗 —— 它會讓測試**永遠停在那裡**，
 而且沒有任何訊息。那種卡住是最難查的一種，所以在這裡一次關掉。
 
-要驗那個對話框本身的測試（`test_ui_f7_16_safety_net.py`）自己把它打開，
+要驗那個對話框本身的測試（`test_ui_undo_close_and_stop.py`）自己把它打開，
 驗完再關回去。
 
 刻意**不**在這裡 import Qt：core 的測試不該因為一個 conftest 就把 PySide6 拉

@@ -2671,7 +2671,7 @@ Phase 1 立起來的安全網**全部自動套用到新卡**：
 |---|---|
 | 黃金值（`tools/freeze_golden.py --check`）| 新增卡片不得改變既有三組 22 顆的任何一項。**除了 §7.1 選 B**，那要重新定錨 |
 | 六條卡片不變量（`tests/test_card_invariants.py`）| 對 registry 裡每一張卡自動跑 |
-| F10 的畫布不變量（`tests/test_ui_f10_canvas_reality.py`，20 條）| 同上 |
+| F10 的畫布不變量（`tests/test_ui_canvas_invariants.py`，20 條）| 同上 |
 | 兩支稽核腳本（11 項）| 每一段做完跑一次 |
 
 ---

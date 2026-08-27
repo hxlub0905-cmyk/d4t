@@ -19,6 +19,44 @@
 
 ---
 
+## F39-B1：六支常駐測試改掉 F 編號的檔名（2026-08-27）
+
+F39 清單的第一批。A 組那六支**不是**當初那一輪的驗收快照，是常駐的不變量套件
+（逐張套用到 registry、`inspectors.py` 唯一的守門人、`ambiguous-input` 全 repo
+獨家……），只是檔名帶著 F 編號 —— 於是每一次「這支還要嗎」的判斷都要重讀一次
+檔案。改名把「哪些是常駐」變成**看得出來的**。
+
+| 舊 | 新 |
+|---|---|
+| `test_ui_f10_canvas_reality.py` | `test_ui_canvas_invariants.py` |
+| `test_ui_f7_17_inspectors.py` | `test_ui_inspectors.py` |
+| `test_ui_f7_16_safety_net.py` | `test_ui_undo_close_and_stop.py` |
+| `test_ui_f16_run_all.py` | `test_ui_write_only_on_run_all.py` |
+| `test_ui_f20_panel_truth.py` | `test_ui_panel_truth.py` |
+| `test_ui_f9_7_user_draws_the_lines.py` | `test_ui_canvas_one_line_per_input.py` |
+
+測試程式碼一行沒動（113 條逐檔全過）。動的是每一支開頭那行 F 編號註記 ——
+換成「常駐 ＋ 從哪個舊名改來的」，這樣 `SESSION_LOG` 裡那些用舊名寫的紀錄還
+grep 得回來。使用者定調「改名時一起改文件」，所以 `docs/PITFALLS.md:41`、
+`docs/ROADMAP.md:69`、`docs/plans/F11-phase2-features.md:2674` 與
+`tests/conftest.py`／`tests/test_ui_save_recipe.py` 兩處 docstring 交叉引用同一
+批改掉。
+
+### ⚠ 清單上有兩個新名字是錯的，而錯法只有動手時看得到
+
+F39 §3 A 寫的是 `test_canvas_invariants.py` 與 `test_canvas_one_line_per_input.py`
+—— **少了 `test_ui_` 前綴**。那兩支都 `QApplication()` ＋ `StudioWindow()`，
+而 **CI 就是照那個前綴分批的**（`ci.yml:72` 核心批 `--ignore-glob="*test_ui_*"`、
+`:82` UI 批 `tests/test_ui_*.py` 逐檔一個行程）。照清單改下去，它們會同時掉出
+UI 批、掉進那個跑 2,400 條的核心行程 —— 正是 `AGENTS.md` §5 量過的 Qt 記憶體
+累積（整套一個行程 1:39:09 vs 逐檔 7 分鐘）。
+
+> **在這個 repo 裡「只是改個名字」不是零風險的操作，因為檔名是 CI 的分批依據。**
+> 而這條約束沒有任何測試在守 —— B1 之後也還是沒有，它靠的是動手的人知道那個
+> glob。清單上寫「風險 0」的那一批，風險不是 0。
+
+---
+
 ## F40：把「疊得準不準」量對 —— 一支空測試底下的演算法問題（2026-08-27）
 
 F39 的清單裡有一支恆綠、零斷言的測試，使用者定調「現在修」。**動手量之後，

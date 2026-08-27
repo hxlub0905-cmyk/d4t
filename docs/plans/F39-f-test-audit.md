@@ -36,7 +36,8 @@ F 編號佔全部測試的 24.4%、佔 UI **牆鐘時間的 66%**；36 支裡 **
 ### 2.1 「F 編號」不是可靠的訊號
 
 `docs/plans/F11-phase2-features.md:50` 已經寫著「**F10 的 20 條畫布不變量**會
-自動套用到新註冊的卡」。`test_ui_f10_canvas_reality.py` 是逐張套用到 registry
+自動套用到新註冊的卡」。`test_ui_f10_canvas_reality.py`（B1 已改名，見 §3 A）
+是逐張套用到 registry
 的性質測試，只是檔名帶 F 編號。`f7_16`（undo／關窗／停止）、`f7_17`
 （inspector）、`f16_run_all`（試跑不寫）、`f20`（面板不能說謊）、`f9_7`
 （一個輸入埠一條線）同樣如此。**對這六支，正確的動作是改名，不是刪。**
@@ -89,12 +90,23 @@ F9／F10 的驗收檔**並沒有真的守住**那條不變量 —— 它們只�
 
 | 檔 | 條 | 留 | 為什麼不是驗收快照 | 新名 |
 |---|---:|---:|---|---|
-| `f10_canvas_reality` | 21 | 15 | 7 條逐張套用到 registry；文件已稱它「F10 的 20 條畫布不變量」 | `test_canvas_invariants.py` |
+| `f10_canvas_reality` | 21 | 15 | 7 條逐張套用到 registry；文件已稱它「F10 的 20 條畫布不變量」 | `test_ui_canvas_invariants.py` |
 | `f7_17_inspectors` | 41 | 33 | inspector 機制的行為套件；`inspectors.py` 幾乎只有它在守 | `test_ui_inspectors.py` |
 | `f7_16_safety_net` | 21 | 18 | undo／關窗／停止；`test_ui_save_recipe.py` 的 docstring 自己指過來 | `test_ui_undo_close_and_stop.py` |
 | `f16_run_all` | 12 | 12 | 「試跑不寫、只有整批才寫」是使用者定調的規則，唯一守門人 | `test_ui_write_only_on_run_all.py` |
 | `f20_panel_truth` | 8 | 8 | 面板不能說謊；`row_labels` / `_focus_box_index` 別處沒有 | `test_ui_panel_truth.py` |
-| `f9_7_user_draws...` | 7 | 6 | 鐵則 10 的正典；`ambiguous-input` 獨家 | `test_canvas_one_line_per_input.py` |
+| `f9_7_user_draws...` | 7 | 6 | 鐵則 10 的正典；`ambiguous-input` 獨家 | `test_ui_canvas_one_line_per_input.py` |
+
+> ⚠ **上面兩個名字在 B1 動手時修正過**（2026-08-27）。清單第一版寫的是
+> `test_canvas_invariants.py` 與 `test_canvas_one_line_per_input.py` —— **少了
+> `test_ui_` 前綴**。這兩支都會 `QApplication()` ＋ `StudioWindow()`，而 CI 就
+> 是照那個前綴分批的（`ci.yml:72` 核心批跑 `--ignore-glob="*test_ui_*"`、`:82`
+> 的 UI 批跑 `tests/test_ui_*.py` 逐檔一個行程）。照第一版的名字改下去，這兩支
+> 會**同時**掉出 UI 批、掉進核心批那個跑 2,400 條的行程 —— 那正是
+> `AGENTS.md` §5 量過的 Qt 記憶體累積（整套一個行程 1:39:09 vs 逐檔 7 分鐘）。
+>
+> **「改個名字」在這個 repo 裡不是零風險的操作，因為檔名是 CI 的分批依據。**
+> 這一條沒有測試在守（B1 之後也還是沒有）—— 它靠的是動手的人知道那個 glob。
 
 ### B. 大部分留下（5 支，61 條 → 留 45）
 
@@ -243,7 +255,7 @@ Phase 3 要刪 `feature_math` / `feature_fill`：
 | 批 | 內容 | 條數 | 風險 |
 |---|---|---:|---|
 | **B0** | ⚠ **卡住了，等 §4.4 的決定** | — | — |
-| **B1** | A 組六支**改名 ＋ 一起改文件**（`PITFALLS.md` 六條、`ARCHITECTURE.md`、`ROADMAP.md`）。程式碼一行不動 | 0 | 低。先做，它把「哪些是常駐」變成看得出來的 |
+| **B1** | ✅ **2026-08-27 做完。** A 組六支改名 ＋ 一起改文件。測試程式碼一行不動（只有每一支開頭那行 F 編號註記換成「常駐 ＋ 從哪個舊名改來的」）。動手時修正了兩個少了 `test_ui_` 前綴的新名（見 §3 A 底下那一段）| 0 | 低。先做，它把「哪些是常駐」變成看得出來的 |
 | **B2** | E 組整支刪（`f7_10`、`f7_14`）＋ D 組裡純重複的 | ~40 | 低（每一條都指名了蓋掉它的那支）|
 | **B3** | C 組的「搬進 `test_card_invariants.py`／`test_ui_widgets.py`／`test_ui_canvas.py`」 | ~30 搬 | 中 |
 | **B4** | C 組新開的三個常駐檔 ＋ 對應刪除 | ~120 | 中高（碰到四個零覆蓋模組）|
