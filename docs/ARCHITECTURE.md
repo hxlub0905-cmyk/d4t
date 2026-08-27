@@ -103,15 +103,30 @@ Context 有三層資料：**影像流 images**（名字 → 像素陣列，綁�
                                                               ├─→ 量測卡 ─→ 特徵 ─→ score
 區域通道（哪裡）    roi_reference（三個 method）                  │   source='diff'（流）
                       └╌→ 具名區域 'cross' ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┘   roi='cross'（名字，
-                          （畫布上是虛線）                            畫布上有線）
+                          （畫布上是虛線 + 菱形埠）                  由那條線水合出來）
                             └─→ roi_mask ─→ 'mask' 流 ─→ Normalize 的 use_within（影像段）
 ```
 
 **規則一句話：量測卡吃區域「名字」，影像卡吃 mask「影像流」。**
-（**F12，2026-08-19**：那個「名字」在畫布上是**一條虛線 + 菱形埠** ——
-參數仍然只存名字，線是從它推導出來的，不進 `recipe.edges`。
-沒有線的話畫布會說謊：拿掉上游那張 Region 卡，量測卡不報錯，
-它會安靜地改量整張圖。見 `docs/history/plans/F12-region-edges.md`。）
+
+那個「名字」在畫布上是**一條虛線 + 菱形埠**，而**線就是儲存**
+（F42，2026-08-27）：區域依賴跟影像流一樣住在 `recipe.edges` 裡
+（`[來源, 區域名, 這張卡, 參數名]`），`roi="cross"` 那一格是從線**水合**出來
+的值，不寫進 JSON。判準只有一支：`recipe.is_region_edge`。
+
+* **兩套機制對齊**了 —— 以前影像走線、區域走參數，每次改動都要多想一次。
+* **順序因此是對的**：`execution_order` 只看線（F17-①），所以把 Region 卡
+  拖到量測卡右邊不再讓量測卡先跑（那個 bug 是 F42 的起點）。
+* 舊檔案由 `version < RECIPE_VERSION` 的遷移補線；`recipes/` 裡出貨的兩份
+  已經是新格式。**手寫 recipe 從此要寫那條線**，而 `tools/doctor.py` 的
+  「recipe 格式」那一項會提醒。
+* 同一條 route 上兩張卡不准定義同名區域（`duplicate-region`，error）——
+  引擎的 `ctx.set_roi` 是同名覆寫，名字唯一才讓「線指的那張卡」＝
+  「引擎真的給的那個框」恆成立。
+
+計畫書：[`plans/F42-region-edges-plan-b.md`](plans/F42-region-edges-plan-b.md)
+（它推翻的是 [`history/plans/F12-region-edges.md`](history/plans/F12-region-edges.md)
+§3，其他部分 —— 埠、虛線、唯讀參數格、同進同出 —— 全部保留）。
 量測卡要「哪裡」的**結構**（框數、邊界、框外背景圈、哪框靠中心）——
 0/255 的 mask 圖把結構壓扁丟光，所以量測卡的 `roi` 填名字、引擎量測當下
 才換成像素。影像卡（Normalize 的 `use_within`）只要「哪些像素參與統計」，

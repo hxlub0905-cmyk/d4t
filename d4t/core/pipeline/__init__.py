@@ -26,12 +26,14 @@ from .expression import Expression, ExpressionError, parse_expression
 from .recipe import (
     Issue,
     Edge,
+    RECIPE_VERSION,
     Recipe,
     RecipeError,
     RecipeNode,
     RouteBy,
     ScoreSpec,
     execution_order,
+    is_region_edge,
     resolve_route,
     route_miss_message,
     validate,
@@ -58,7 +60,8 @@ __all__ = [
     "SCALE_DEFECT", "SCALE_LOT",
     # recipe
     "Edge", "Recipe", "RecipeNode", "ScoreSpec", "Issue",
-    "validate", "execution_order", "RecipeError",
+    "validate", "execution_order", "RecipeError", "is_region_edge",
+    "RECIPE_VERSION",
     # 分流（F23）
     "RouteBy", "resolve_route", "route_miss_message",
     # expression

@@ -19,9 +19,10 @@ from d4t.core.pipeline import (
     Edge, ParamError, Recipe, RecipeNode, RouteBy, ScoreSpec, get_step,
     validate,
 )
-from d4t.core.pipeline.recipe import (DecideSpec, Let, Rule, TreeLeaf,
-                                      TreeStep, _tree_from_json, _tree_to_json,
-                                      feature_referrers, rules_to_tree)
+from d4t.core.pipeline.recipe import (RECIPE_VERSION, DecideSpec, Let, Rule,
+                                      TreeLeaf, TreeStep, _tree_from_json,
+                                      _tree_to_json, feature_referrers,
+                                      region_edge_values, rules_to_tree)
 
 #: bin 編號的上限。**它的用途是「別讓數字框變成一格自由文字」，不是「分類碼
 #: 應該多大」** —— 後者是廠決定的，不是我們。
@@ -106,7 +107,9 @@ class RecipeModel:
         self.recipe_id = "untitled"
         self.author = ""
         self.description = ""
-        self.version = 1
+        #: 新建的 recipe 就是**這一版**寫的（F42 B3）。留在 1 的話，Studio 存出
+        #: 去的每一份檔案都會宣稱自己是舊格式，於是下次打開再跑一次遷移。
+        self.version = RECIPE_VERSION
         self.node_order: List[str] = []            # route 順序（= 拓撲順序）
         self.nodes: Dict[str, RecipeNode] = {}
         #: 顯式的節點連線（F7-6 畫布）。``node_order`` 仍然是執行順序，
@@ -201,8 +204,39 @@ class RecipeModel:
 
     def _changed(self) -> None:
         self.dirty = True
+        if self.CHECK_REGION_INVARIANT:
+            self._assert_regions_match_edges()
         for fn in list(self._listeners):
             fn()
+
+    #: **測試期自我檢查**：每一次 :meth:`_changed` 都重新問一次「每一格區域參數
+    #: 是不是正好等於線說的」（F42 B2）。`tests/conftest.py` 一律打開它。
+    #:
+    #: 為什麼要一條常開的斷言，而不是幾條測試：方案 B 的整個安全性建立在
+    #: 「參數只有一個家」上，而**破壞它的方式是加一條新路徑**（一個忘了水合的
+    #: 新入口），不是改壞既有的那五條。既有測試不會走那條新路徑，所以只有
+    #: 「每一次改動都問一次」抓得到 —— 那正是這個 repo 記過六次的形狀。
+    #:
+    #: 正式執行時是關的：它會在每一次改動上再掃一次整份 recipe。
+    CHECK_REGION_INVARIANT = False
+
+    def _assert_regions_match_edges(self) -> None:
+        """有線的那幾格，值 ≠ 線說的 → 當場 ``AssertionError``。
+
+        **沒有線的那一格不問** —— 那個狀態是合法的，而且有兩種來歷，兩種都要
+        留著：B3 之前的舊檔案（參數是唯一的儲存），以及打錯字的名字
+        （`unknown-region` 那條 lint 守著的東西）。見 :meth:`_hydrate_regions`。
+
+        真正危險的是**兩邊都有、而且說的不一樣**：畫布指著一張卡，引擎給的是
+        另一張卡的框，而兩邊都跑得完。這一條問的正好只有那個。
+        """
+        for (nid, pname), expect in region_edge_values(
+                self.nodes, self.edges).items():
+            got = str(self.nodes[nid].params.get(pname, "") or "")
+            assert got == expect, (
+                "region parameter %r on %r is %r but the lines say %r — "
+                "something changed a region parameter without going through "
+                "RecipeModel._hydrate_regions()" % (pname, nid, got, expect))
 
     # ---- 復原 / 重做（F7-16）-----------------------------------------------
     def snapshot(self) -> Dict[str, Any]:
@@ -316,6 +350,11 @@ class RecipeModel:
             return False
         self._redo.append(self.snapshot())
         self.restore(self._undo.pop())
+        # **不信任快照裡的區域參數**（F42 B2）。快照存的是兩份東西（線與參數），
+        # 而它們講的是同一件事 —— 只要有一條路徑寫錯了一邊，復原就會把那個
+        # 不一致原樣端回畫面上，而且從此活下去。線是唯一的儲存，所以復原之後
+        # 重算一次；一致的時候這是 no-op。
+        self._hydrate_regions()
         self.end_coalescing()
         self._changed()
         return True
@@ -325,6 +364,7 @@ class RecipeModel:
             return False
         self._undo.append(self.snapshot())
         self.restore(self._redo.pop())
+        self._hydrate_regions()            # 同 :meth:`undo`
         self.end_coalescing()
         self._changed()
         return True
@@ -385,11 +425,17 @@ class RecipeModel:
             self._push_undo()
             del self.nodes[node_id]
             self.node_order = [n for n in self.node_order if n != node_id]
+            gone = [(e.dst, e.dst_in) for e in self.edges
+                    if e.src == node_id and e.dst_in]
             self.edges = [e for e in self.edges
                           if e.src != node_id and e.dst != node_id]
             order = self._topological_order(self.edges)
             if order is not None:
                 self.node_order = order
+            # 這張卡定義的區域，下游那幾格要跟著空出來（F42 B2）——
+            # 線都拿掉了，水合自然做到。以前區域線是從參數推導的，所以
+            # `studio._on_remove_requested` 非得自己再清一次不可。
+            self._hydrate_regions(emptied=gone)
             self._changed()
 
     def move(self, node_id: str, delta: int) -> None:
@@ -1007,6 +1053,11 @@ class RecipeModel:
         self._push_undo()
         self.edges.append(new)
         self.node_order = order
+        # 區域線也在這裡（F42 B2）——「用哪個區域」現在是線說的，參數跟著走。
+        # ⚠ ``node_order`` 上面那一行已經重排過了：區域線進了 edges，所以它
+        # **會影響排版**（以前不會，因為它根本不在 edges 裡）。那是對的 ——
+        # 它一直都是一條真的依賴，只是以前畫布看得到、引擎看不到。
+        self._hydrate_regions()
         self._changed()
         return True
 
@@ -1063,10 +1114,16 @@ class RecipeModel:
         if len(keep) == len(self.edges):
             return False
         self._push_undo()
+        gone = [(e.dst, e.dst_in) for e in self.edges
+                if hit(e) and e.dst_in]
         self.edges = keep
         order = self._topological_order(self.edges)
         if order is not None:
             self.node_order = order
+        # **剪掉線就是拿掉來源**（F10）：剛剪掉線的那幾格由剩下的線說了算，
+        # 沒有剩下的就空掉。以前這件事由 `studio._unpoint_stream` 做，
+        # 現在區域線是一條真的 Edge，所以它是水合的自然結果（F42 B2）。
+        self._hydrate_regions(emptied=gone)
         self._changed()
         return True
 
@@ -1094,7 +1151,59 @@ class RecipeModel:
         """
         return [(e.src, e.dst, e.src_out, e.dst_in) for e in self.edges]
 
-    # ---- 區域線（F12）-----------------------------------------------------
+    # ---- 區域線（F12；F42 B2 起存進 edges）--------------------------------
+    def _hydrate_regions(self, emptied: Sequence[Tuple[str, str]] = ()) -> None:
+        """區域參數的值 **＝ 落在它身上的線說的**（F42 B2）。
+
+        **全程式只有這一支做這件事。** 方案 B 之後「用哪個區域」的儲存是那條
+        線的 ``src_out``，參數是它的呈現 —— 兩份各存一次的話它們會漂，而 F9
+        記過的六個「跑得完、有數字、而且是錯的」有一半是這個形狀。
+        五個入口都走它：載檔、拉線、剪線、undo／redo、刪卡。
+
+        ``emptied`` 是**這一次剛被拿掉線的那幾格** ``(節點, 參數)``。
+        沒列進來的格子**只填不清**，而那個不對稱是刻意的：
+
+        * 一格「有值、但沒有線」是 B3 之前**每一份既有 recipe** 的樣子 ——
+          那時候參數是它唯一的儲存。在這裡清掉等於載入舊檔案就安靜地少量一塊。
+        * 同一個狀態也是**打錯字**的樣子（``roi="epi_"``，沒有人定義它）。
+          清掉的話 `unknown-region` 那條 lint 就永遠問不到了，而它守的正是
+          「量測卡安靜地改量整張圖」（F7-9）—— 這一輪不該把它換成一句更差的話。
+        * 但**剪掉線就是拿掉來源**（F10）：那一格要跟著空掉，不然畫面上線沒了、
+          卡片還在量那一塊。剪的時候我們知道是哪一格，所以那幾格由線說了算。
+
+        兩種講法在 B3 之後會合而為一：那時候每一格**指得到來源**的區域參數都
+        有線，只剩打錯字的那種留著一個沒有線的值 —— 而那正是我們要它留著的。
+        """
+        want: Dict[Tuple[str, str], str] = dict(
+            region_edge_values(self.nodes, self.edges))
+        for key in emptied:
+            # **只有區域那幾格**。剪掉的線大多是影像線，而影像那一格由
+            # `studio._unpoint_stream` 管（它還要判斷剪掉的是一串裡的哪一條）
+            # —— 在這裡一併清空的話，剪一條 `subtract.b` 的線會讓那一格空掉
+            # **兩次**，其中一次繞過了那支判斷。實測會斷：畫布上有線、那一格
+            # 是空的（`test_ui_canvas_truth` 抓到）。
+            nid, pname = str(key[0]), str(key[1])
+            node = self.nodes.get(nid)
+            if node is None:
+                continue
+            try:
+                specs = get_step(node.step).region_input_specs()
+            except Exception:                  # noqa: BLE001 — 認不得的卡不管
+                continue
+            if any(sp.name == pname for sp in specs):
+                want.setdefault((nid, pname), "")
+        for (nid, pname), value in want.items():
+            node = self.nodes.get(nid)
+            if node is None:
+                continue
+            if str(node.params.get(pname, "") or "") == value:
+                continue
+            try:
+                node.params = get_step(node.step).validate_params(
+                    dict(node.params, **{pname: value}))
+            except (ParamError, KeyError):     # pragma: no cover — 值就是區域名
+                continue
+
     def region_outputs(self, node_id: str) -> List[str]:
         """這張卡右邊有哪些**區域埠**：自己定義的 ＋ **原樣送出的**。
 
@@ -1123,9 +1232,25 @@ class RecipeModel:
                         before_node: Optional[str] = None) -> str:
         """誰定義了區域 ``name``（沒有人回空字串）。
 
+        ⚠ **F42 B4 起這一支在 `d4t/` 底下沒有呼叫者了**，而它是刻意留著的
+        （工作單指名保留）。它原本的消費者 `region_lines()` 在 B4 刪掉 ——
+        區域線現在是真的 Edge，畫布直接讀 `edge_lines()`。
+
+        留著的理由是它回答的問題還在，而且**核心那一份還在用同一個語意**：
+        `recipe._region_producer` 是遷移補線時找來源的那一支，兩邊逐字相同
+        （「上游最後一個」）。這一支是它在 UI 側的對照 ——
+        要動那個語意的時候，兩邊要一起動。
+
+        便利貼：`tests/test_ui_region_hydration.py::
+        test_the_ui_and_the_core_agree_on_who_defines_a_region`。
+
         **取上游最後一個**，跟引擎一致：``Context.set_roi`` 明文同名覆寫，所以
-        兩張卡都叫 ``epi`` 時，量測卡量到的是後面那張寫的框
-        （而那個撞名本身有 lint 在講 —— 區域的 fact 特徵會撞）。
+        兩張卡都叫 ``epi`` 時，量測卡量到的是後面那張寫的框。
+
+        ⚠ **那個撞名本身現在是 error**（F42 B0 的 ``duplicate-region``）——
+        所以在一份健檢乾淨的 recipe 上「最後一個」＝「唯一一個」，這一支跟
+        引擎不可能給出不同的答案。以前它只是「區域的 fact 特徵會撞」那一條
+        warning，而 warning 擋不住一條指著第一張卡、卻拿到第二張卡的框的線。
 
         「最後一個」也涵蓋**原樣送出**的卡（見 :meth:`region_outputs`）——
         三張卡串著量同一個區域時，線是一段一段接的，不是三條都從最前面那張
@@ -1146,40 +1271,6 @@ class RecipeModel:
             if name in self.region_outputs(nid):
                 owner = nid
         return owner
-
-    def region_lines(self) -> List[Tuple[str, str, str, str]]:
-        """畫布要畫的**區域線**：``(定義它的卡, 用它的卡, 區域名, 落在哪一格)``。
-
-        **推導出來的，不是存起來的**（F12 的關鍵決定，理由見
-        ``docs/history/plans/F12-region-edges.md`` §3）：``roi="epi"`` 那個參數就是唯一
-        的儲存，這裡只是把「誰定義了 epi」查出來。所以：
-
-        * 舊 recipe 打開就有線，不必遷移；
-        * recipe JSON 的格式一個欄位都沒有變；
-        * 「用哪個區域」永遠只有一個家 —— 存第二份的話兩份會漂，而那正是 F9
-          花很大力氣拆掉的東西。
-
-        指到一個上游沒有人定義的區域時**不畫線**（那條 lint 是
-        ``unknown-region``，error 級）—— 畫一條無中生有的線比沒有線更糟。
-        """
-        out: List[Tuple[str, str, str, str]] = []
-        for nid in self.node_order:
-            node = self.nodes.get(nid)
-            if node is None:
-                continue
-            try:
-                specs = get_step(node.step).region_input_specs()
-            except Exception:              # noqa: BLE001
-                continue
-            for spec in specs:
-                if not spec.visible_for(node.params):
-                    continue
-                raw = str(node.params.get(spec.name, "") or "")
-                for name in [x.strip() for x in raw.split(",") if x.strip()]:
-                    src = self.region_producer(name, before_node=nid)
-                    if src:
-                        out.append((src, nid, name, spec.name))
-        return out
 
     # ---- Recipe 互轉 -------------------------------------------------------
     def to_recipe(self) -> Recipe:
@@ -1240,6 +1331,9 @@ class RecipeModel:
         m._other_edges = [e for e in (recipe.edges or [])
                           if not (e.src in in_route and e.dst in in_route)]
         m.bins = dict(recipe.score.bins)
+        # 區域線推回它落在的那一格（F42 B2）。**只填不清** —— 舊檔案的區域
+        # 參數還沒有線，那一格是它唯一的儲存（見 :meth:`_hydrate_regions`）。
+        m._hydrate_regions()
         m.dirty = False
         m.clear_history()
         return m

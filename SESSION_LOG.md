@@ -19,6 +19,281 @@
 
 ---
 
+## F42 B4：拆舊路 ＋ 收尾（2026-08-27，方案 B 完成）
+
+計畫書：[`docs/plans/F42-region-edges-plan-b.md`](docs/plans/F42-region-edges-plan-b.md)。
+
+### `region_lines()` 刪掉
+
+`studio` 那一行以前是**兩份相加**（`edge_lines()` ＋ `region_lines()`）——
+B2 到 B3 之間第二份收的已經是同一批東西，每一條區域線都被畫了兩次
+（同一組座標，所以看不出來）。現在只剩一份：畫布直接讀 `edges`。
+
+`region_producer()` 保留（工作單指名），但它在 `d4t/` 底下**沒有呼叫者了**。
+留著的理由寫在 docstring 上，而且有一條便利貼測試守著 —— 核心的
+`recipe._region_producer` 用的是同一個語意，兩邊要動就一起動。
+（`algo/period.py` 只剩一個呼叫者的那一小時就差一步被當成死碼清掉：
+**沒有呼叫者的東西要嘛刪掉，要嘛留一張便利貼。**）
+
+### `doctor.py` 多一項「recipe 格式」
+
+`version < 2` 的檔案提示「用 Studio 開起來按一次 Ctrl+S」，並告訴手寫 recipe
+的人區域現在要寫成一條線。非必要項（△），舊檔案照樣跑得動。
+
+判準是版本號 —— 那也是唯一做得到的：doctor 是 stdlib-only，問不到「哪一格是
+區域」。`RECIPE_VERSION` 因此抄了一份字面值，而一條測試付那份代價。
+
+### 文件：改掉舊句子，不疊刪除線
+
+`CLAUDE.md` 鐵則 10、`docs/ARCHITECTURE.md`、`docs/ROADMAP.md` 全部改成現況；
+`F12-region-edges.md` **一個字都沒改**（它是歷史）。
+`docs/USING-*.md` 查過沒有手寫 recipe 的 JSON 範例，那一項沒有東西要改。
+
+### `docs/PITFALLS.md` 加的那一條，通則值得單獨記
+
+> **一個決定寫下理由的時候，要順便寫下它踩在哪個前提上。**
+
+F12 §3 的理由是「route 相鄰對已經保證了順序」，而那個前提在 **F17-①**
+（`execution_order` 收成只看線）就失效了 —— 中間隔了八天，沒有人回頭重讀那個
+決定。第七個「跑得完、有數字、而且是錯的」就是那八天的利息。
+
+### 方案 B 最終驗收
+
+核心 **2430** 綠、**62 支 UI 測試逐檔綠**、黃金值三份**逐項相同**。
+`freeze_golden.py --check` 從 B0 到 B4 **每一段都跑過，沒有一次有差異** ——
+「整個方案 B 是純重構」是逐段證明的，不是最後才驗的。CI 時間沒有變差。
+
+## F42 B3：遷移（2026-08-27）
+
+`_migrate_region_params_into_edges`，判準是 **`version < RECIPE_VERSION`**
+（=2），跑完寫成 2。計畫書：
+[`docs/plans/F42-region-edges-plan-b.md`](docs/plans/F42-region-edges-plan-b.md)。
+
+### `Recipe.version` 的預設值跟著改成 2 —— 那不是裝飾
+
+留在 1 的話，一份記憶體裡組出來的 recipe（Studio 的 `to_recipe()`）走
+`to_json_dict → from_json_dict`（`run_batch` 送進 worker 的路）時會**再跑一次
+遷移**，而遷移改了版本號 —— 那一對就不再是 identity（鐵則 9）。
+改之前 `test_json_defaults_filled` 立刻變紅。
+
+### 四種情形，兩個跟工作單不一樣的決定
+
+① 上游找得到 → 補線。③ 產出它的卡排在**下游** → **補線**，順序因此被排對
+（**刻意的行為改變**，也是這一輪存在的理由）。
+
+② 指到沒有人產出的名字 → **那個字留著**（工作單寫的是「讓埠空著、錯誤變
+`not-connected`」）。理由是同一句話還寫著「訊息不得變差」，而 `glv_stats` 長不
+出 `not-connected` —— 空的 `roi` 是完全合法的「量整張圖」，清掉之後那條路的終點
+是**安靜地算錯**。`unknown-region` 的訊息重寫過：現在講「拉一條線」，
+不講「把 roi 那一格清掉」（那一格從 F12 起就是唯讀的）。
+
+④ 補上去會成環 → 不補。**查下來這是一道「不可能發生、但必須擋」的檢查**：
+
+> 要讓那條區域線成環，就得先有一條 consumer → producer 的線；而那條線會把
+> consumer 排在 producer 前面 —— 於是 consumer 跑的時候那個區域還不存在。
+> **「今天跑得動、補了線就成環」的 recipe 不存在。**
+
+它的用處是**讓一份壞的 recipe 維持壞得一樣**：沒有它的話 `execution_order`
+會 raise，一條講得出話的 lint error 變成「這個檔案打不開」。遷移沒有資格把
+病情升級。測試比對的因此是**遷移前後的 issue 清單逐項相同**。
+
+### 新 lint：`region-has-no-line`（warning）
+
+「有名字、上游也真的定義了它、但畫布上沒有那條線。」真正的客群是**手寫 recipe
+的 CLI 使用者** —— 工作單那句「CLI 手寫 recipe 從此要寫 edges」的安全網。
+warning 不是 error（它跑起來是對的），但不可以安靜。
+② 與 ④ **不准同時報**：一句話講兩次，使用者會以為有兩個問題。
+
+### 出貨的 recipe
+
+兩份都重存成 v2，diff 只有一行。證明過重存前後每一張卡的每一個參數、每一條線、
+每一條 route 都逐項相同。`recipes/README.md` 沒有版本欄位、`0822test/` 的產生器
+不產 recipe，兩者都不必改。
+
+### 驗收
+
+`tests/test_region_edges_migration.py` 12 條，三個突變各驗過會紅（拿掉環的檢查、
+判準換成「沒有線就補」、把沒有人產出的名字清掉）。核心 2428 綠、
+62 支 UI 測試逐檔綠、黃金值三份逐項相同。
+
+## F42 B2：拉線走真的 `add_edge`，參數是水合出來的（2026-08-27）
+
+**F12 §3 在這裡真的被推翻。** 計畫書：
+[`docs/plans/F42-region-edges-plan-b.md`](docs/plans/F42-region-edges-plan-b.md)。
+
+### 一支水合，五個入口
+
+`RecipeModel._hydrate_regions()` —— 載檔、拉線、剪線、undo／redo、刪卡。
+換算住在核心的 `recipe.region_edge_values()`（**唯一一份**），序列化、還原、
+UI 三邊都問它。
+
+### 那個不對稱：只填不清，除了剛被剪掉線的那幾格
+
+沒有線的那一格**不動**，而那個狀態有兩種來歷，兩種都必須留著：
+① B3 之前的舊檔案（參數是它唯一的儲存）；② **打錯字的名字** —— 清掉的話
+`unknown-region` 就永遠問不到它，而 `glv_stats` 的空 `roi` 是完全合法的
+「量整張圖」。**看不到就被靜靜刪掉是最糟的一種「幫忙」。**
+
+> ⚠ 這一點跟工作單 B3-② 寫的不一樣（那裡說讓那一格空著、錯誤變 `not-connected`）。
+> 實作選了「把名字留著」，因為同一句話還寫著「**訊息不得變差**」——
+> 而 `glv_stats` 長不出 `not-connected`，那條路的終點是安靜地量整張圖。
+
+**但剪掉線就是拿掉來源**（F10）：`remove_edge` / `remove` 把剛剪掉線的那幾格
+交給水合，由剩下的線說了算。剪的時候我們知道是哪一格 —— 那正是「只填不清」
+缺的那個資訊。
+
+### 常開的斷言當場抓到兩個 bug
+
+`CHECK_REGION_INVARIANT`（`conftest` 在每一條測試上打開）：每一次 `_changed()`
+都問「有線的那幾格是不是正好等於線說的」。它在這一輪抓到：
+
+1. **刪卡時 `_unpoint_stream` 先清了參數** —— 區域線現在也住在 `model.edges`
+   裡，而那個迴圈假設每一條都是影像線。線還在的時候先清掉那一格，不變量當場破。
+2. **`emptied` 沒有過濾區域參數** —— 剪一條 `subtract.b` 的影像線會讓那一格
+   空掉兩次，其中一次繞過了 `_unpoint_stream`（它還要判斷剪掉的是一串裡的
+   哪一條）。症狀是「畫布上有線、那一格是空的」，`test_ui_canvas_truth` 抓到。
+
+**兩個都不是既有測試走得到的路徑** —— 那正是要一條常開斷言而不是幾條測試的理由。
+
+### 拿掉了一道守門（工作單沒點名）
+
+F12 §4 的第四條「來源排在下游的區域也擋」。那句話在 F12 當時是真的（區域線不進
+`edges`，順序只能靠卡片的左右位置）。方案 B 之後**那條線自己就是順序**，
+擋下來等於不讓使用者做那個唯一能修好順序的動作 —— 而那正是這一輪的起點。
+`test_a_region_defined_later_cannot_be_measured_earlier` 因此**翻面**。
+
+### 接受的代價：排版會動
+
+`add_edge` 重排 `node_order`，所以拉一條區域線之後卡片會移位。那是對的 ——
+它一直都是一條真的依賴，只是以前引擎看不到。釘成一條測試，免得被當成 bug。
+
+### 「the other regions」：答案是「本來就對」
+
+它沒有自己的那一格，所以沒有埠。`epi_others` 從 `roi` 算出來，而它跟 `epi`
+出自**同一張 Region 卡** —— 接進 `roi` 的那條線已經指著它了。B3 不必補第二條，
+而且補不出來（線的 `dst_in` 是參數名，那個依賴沒有參數）。
+
+### 驗收
+
+`tests/test_ui_region_hydration.py` 18 條，三個突變各驗過會紅（undo 不重新水合、
+`to_json_dict` 照寫所有參數、`remove_edge` 不交出那一格）。`region_lines()`
+一個字沒改 —— 它現在是一份**對照的預言**。核心 2415 綠、62 支 UI 測試逐檔綠、
+黃金值三份逐項相同。
+
+## F42 B1：引擎認得區域線（2026-08-27）
+
+計畫書：[`docs/plans/F42-region-edges-plan-b.md`](docs/plans/F42-region-edges-plan-b.md)。
+
+### 判準只有一支：`recipe.is_region_edge`
+
+`dst_in` 那一格的型別是不是 `region_key` / `region_keys`（`step.REGION_TYPES`
+是那張表唯一的家）。畫布、排版、引擎、健檢四個地方之後都走它 —— 抄四份的話，
+改動其中一份不會讓任何測試變紅，而長歪的那一份會讓畫布跟引擎說出不同的話。
+
+**簽章跟工作單建議的不一樣**：`is_region_edge(edge, nodes, registry=None)`。
+一條 `Edge` 身上只有節點 **id**，而型別住在**下游那張卡**上，節點表非進來不可。
+收 `nodes` 而不是整份 `Recipe` 是為了 B2／B4 —— `RecipeModel.nodes` 與
+`Recipe.nodes` 都是 `Dict[str, RecipeNode]`，畫布不必為了呼叫它先組一份 Recipe。
+
+**不看 `src_out`**（那是「哪一個區域」，不是「這是不是區域線」）。
+**`dst_in` 沒填就一律不是區域線** —— 那是舊語意（埠空著只表達先後順序），
+判成區域線的話每一條舊格式的兩欄邊都會變成區域線。
+
+### 引擎與 `execution_order` 都一行沒改，改的是證據
+
+* `engine._explicit_bindings` 那段 `else: continue` 本來就跳過區域線。
+  **補測試釘住**，並把註解改成明說這是區域線唯一會走到的分支。
+  驗過會紅：把 `region_key` / `region_keys` 加進那個 `if`，兩條測試同時變紅。
+* `execution_order` 只看 `src`/`dst`（F9-1 的註解就寫著「不看埠」），
+  所以區域線進了 `edges` **自然生效**。這是方案 B 幾乎不用動引擎的原因。
+
+### 那個 bug 的完整形狀，現在是一條測試
+
+假卡片、左半 200 右半 100 的一張圖，route 排成 load → glv → **roi**
+（Region 卡在量測卡右邊）：
+
+| | `glv_mean` |
+|---|---|
+| 有區域線 | **200**（量左半） |
+| 沒有區域線 | **150**（量測卡先跑，`ctx.rois` 是空的 → 退回整張圖）|
+
+兩邊都 `ok=True`、都有數字。第七個「跑得完、有數字、而且是錯的」。
+
+> 用假卡片不用真的 `roi_reference`：真的那張要在影像上**找**得到條紋才吐得出
+> 區域，測試會同時測到「找得準不準」—— 而這裡要問的是順序。
+
+### 新 lint：`region-edge-no-port`（warning）
+
+`src_out` 空著的區域線排得出順序，所以它跑得完 —— 它只是沒講出量的是哪一塊。
+畫布上看得到一條接好的線，而那張卡實際上退回量整張圖。**warning 不是 error**：
+「那一格是空的」由 `not-connected` 講，這一條講的是**線本身沒講完**。
+埠空著的**影像**線不在範圍內（那是 F9-1 之前每一份檔案的常態）。
+
+### 一個誠實的註腳
+
+`is_region_edge` 裡那句 `if not edge.dst_in: return False` 是**規則寫出來**，
+不是最佳化 —— 底下的迴圈也找不到叫 `""` 的參數，所以拿掉它一條測試都不會紅。
+留著是因為讓契約只是「剛好沒有參數叫空字串」是一種靠巧合的正確。
+對應的那條測試因此在 docstring 裡明說它釘的是契約，不是那兩行。
+
+### 驗收
+
+`tests/test_region_edges_engine.py` 16 條，含一條掃**整個卡片庫**的
+（`region_input_specs()` 說是區域的那幾格，`is_region_edge` 一格都不准漏）。
+核心 2414 綠、62 支 UI 測試逐檔綠、黃金值三份逐項相同。
+
+## F42 B0：同名區域變成 error（2026-08-27）
+
+方案 B 的第一段。計畫書：
+[`docs/plans/F42-region-edges-plan-b.md`](docs/plans/F42-region-edges-plan-b.md)。
+
+### 這一輪要推翻 F12 §3，起點是第七個「跑得完、有數字、而且是錯的」
+
+Region 卡放在量測卡**右邊**（route 上排在後面）時，`execution_order` 讓量測卡
+先跑，於是它安靜地量整張圖 —— 畫布上明明有一條區域線指著那張 Region 卡。
+
+病根：**區域線是唯一一種不存進 `recipe.edges` 的線**。F12 §3 當時的理由是
+「route 相鄰對已經保證了順序」，而**那個前提在 F17-① 就失效了** ——
+執行順序從此只看使用者拉的線，route 的排列是排版不是語意。
+
+使用者定調採**方案 B**：區域依賴存進 `edges`，跟影像線同一套機制
+（「對齊比較安全」）。F12 的畫法全部保留 —— 改的是儲存，不是畫面。
+
+### B0：`duplicate-region`（error）
+
+B 的線指著**一個特定的節點**，而引擎那一頭 `ctx.set_roi` 是**同名覆寫**。
+名字唯一的時候「線指的那張卡」＝「引擎真的給的那個框」恆成立；撞名的時候
+畫布可以指著第一張、引擎給第二張的框。**擋掉撞名，引擎一行都不用改**
+（使用者的 P1-a；P1-b 明確不做）。
+
+三個邊界各有一條測試，每一條都是「這支 lint 會被學會忽略」的形狀：
+
+* **「原樣送出」不算。** 只看 `resolve_regions_out`（引擎的宣告），不看
+  `viewmodel.region_outputs`（畫布的埠，含同進同出）。混為一談的話，每一份
+  「一張 Region 卡 ＋ 兩張量測卡」的正常 recipe 都會冒紅字。
+* **`_center` / `_others` 自動在範圍內** —— 它們本來就在
+  `resolve_regions_out` 的回傳裡（`_util.region_family` 是唯一那一份），
+  所以兩張都吐 `epi` 的卡撞的是三個名字。
+* **一條 route 一張表** —— 兩條 route 各有一張 `epi` 是常態。
+
+### 為什麼是 error，而特徵撞名只是 warning
+
+**差別不是嚴重程度，是有沒有救援。** 特徵被蓋掉時引擎把前一份救成
+`<節點名>_<特徵>`，所以那句話是「你可能不是故意的」；區域沒有那條路，
+前一張卡畫的框就是不見了。
+
+順手改掉一句因此作廢的話：`viewmodel.region_producer` 的 docstring 原本寫
+「那個撞名本身有 lint 在講 —— 區域的 fact 特徵會撞」。**warning 擋不住一條
+指著第一張卡、卻拿到第二張卡的框的線**，而現在它是 error，所以在一份健檢
+乾淨的 recipe 上「上游最後一個」＝「唯一一個」。
+
+### 驗收
+
+`tests/test_region_names_are_unique.py` 10 條，四條正面斷言**驗過把 lint
+拿掉會紅**。核心 2397 綠、62 支 UI 測試逐檔綠、黃金值三份逐項相同。
+兩份出貨 recipe 與兩份 fixture recipe 一個撞名都沒有（明著測一次 ——
+`test_shipped_recipes` 也抓得到，但它的訊息是「有一條 error」）。
+
 ## F41（Phase 3）：刪掉 `feature_math` / `feature_fill`（2026-08-27）
 
 使用者：「功能已經被 `decide.let` 取代了，刪掉。」計畫書：

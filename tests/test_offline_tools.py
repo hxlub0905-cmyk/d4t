@@ -130,6 +130,44 @@ def test_doctor_detects_wrong_folder(tmp_path):
     assert out.strip().splitlines()[-1].startswith("（想看完整錯誤") or "結論" in out
 
 
+def test_the_doctor_and_the_engine_agree_on_the_recipe_version():
+    """`doctor.RECIPE_VERSION` **抄了一份字面值**（doctor 是 stdlib-only，
+    import 不得 d4t —— 它要在「套件還沒裝好」的機器上跑）。
+
+    抄一份的代價由這一條付：兩邊漂掉的話，doctor 會對一份新格式的 recipe 說
+    「這是舊格式，請重存」，或者更糟 —— 對舊的那些一句話都不說。
+    """
+    sys.path.insert(0, TOOLS)
+    import doctor as doctor_mod
+    from d4t.core.pipeline.recipe import RECIPE_VERSION
+
+    assert doctor_mod.RECIPE_VERSION == RECIPE_VERSION
+
+
+def test_doctor_flags_an_old_format_recipe(tmp_path):
+    """F42 B4：舊格式的 recipe 要提示「用 Studio 開起來存一次」。
+
+    這一項是**非必要**的（△，不是 ✗）：舊檔案照樣跑得動，載入時會自動轉。
+    它要修的是「磁碟上那一份還是舊的，而手寫 recipe 的人不知道格式換了」。
+    """
+    old = tmp_path / "old.json"
+    old.write_text('{"recipe_id": "x", "version": 1, "routes": {}, '
+                   '"nodes": {}, "score": {"expr": "1", "threshold": 0}}',
+                   encoding="utf-8")
+    rc, out = _run([DOCTOR, "--skip-smoke", str(tmp_path)])
+    assert rc == 0, out                     # 非必要 → 不擋
+    assert "old.json" in out
+    assert "Ctrl+S" in out                  # 講得出可以照做的下一句話
+
+    new = tmp_path / "new.json"
+    new.write_text('{"recipe_id": "x", "version": 2, "routes": {}, '
+                   '"nodes": {}, "score": {"expr": "1", "threshold": 0}}',
+                   encoding="utf-8")
+    old.unlink()
+    rc, out = _run([DOCTOR, "--skip-smoke", str(tmp_path)])
+    assert rc == 0 and "new.json" not in out, out
+
+
 def test_doctor_help():
     rc, out = _run([DOCTOR, "--help"])
     assert rc == 0
