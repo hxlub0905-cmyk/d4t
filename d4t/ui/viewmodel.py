@@ -1232,6 +1232,18 @@ class RecipeModel:
                         before_node: Optional[str] = None) -> str:
         """誰定義了區域 ``name``（沒有人回空字串）。
 
+        ⚠ **F42 B4 起這一支在 `d4t/` 底下沒有呼叫者了**，而它是刻意留著的
+        （工作單指名保留）。它原本的消費者 `region_lines()` 在 B4 刪掉 ——
+        區域線現在是真的 Edge，畫布直接讀 `edge_lines()`。
+
+        留著的理由是它回答的問題還在，而且**核心那一份還在用同一個語意**：
+        `recipe._region_producer` 是遷移補線時找來源的那一支，兩邊逐字相同
+        （「上游最後一個」）。這一支是它在 UI 側的對照 ——
+        要動那個語意的時候，兩邊要一起動。
+
+        便利貼：`tests/test_ui_region_hydration.py::
+        test_the_ui_and_the_core_agree_on_who_defines_a_region`。
+
         **取上游最後一個**，跟引擎一致：``Context.set_roi`` 明文同名覆寫，所以
         兩張卡都叫 ``epi`` 時，量測卡量到的是後面那張寫的框。
 
@@ -1259,40 +1271,6 @@ class RecipeModel:
             if name in self.region_outputs(nid):
                 owner = nid
         return owner
-
-    def region_lines(self) -> List[Tuple[str, str, str, str]]:
-        """畫布要畫的**區域線**：``(定義它的卡, 用它的卡, 區域名, 落在哪一格)``。
-
-        **推導出來的，不是存起來的**（F12 的關鍵決定，理由見
-        ``docs/history/plans/F12-region-edges.md`` §3）：``roi="epi"`` 那個參數就是唯一
-        的儲存，這裡只是把「誰定義了 epi」查出來。所以：
-
-        * 舊 recipe 打開就有線，不必遷移；
-        * recipe JSON 的格式一個欄位都沒有變；
-        * 「用哪個區域」永遠只有一個家 —— 存第二份的話兩份會漂，而那正是 F9
-          花很大力氣拆掉的東西。
-
-        指到一個上游沒有人定義的區域時**不畫線**（那條 lint 是
-        ``unknown-region``，error 級）—— 畫一條無中生有的線比沒有線更糟。
-        """
-        out: List[Tuple[str, str, str, str]] = []
-        for nid in self.node_order:
-            node = self.nodes.get(nid)
-            if node is None:
-                continue
-            try:
-                specs = get_step(node.step).region_input_specs()
-            except Exception:              # noqa: BLE001
-                continue
-            for spec in specs:
-                if not spec.visible_for(node.params):
-                    continue
-                raw = str(node.params.get(spec.name, "") or "")
-                for name in [x.strip() for x in raw.split(",") if x.strip()]:
-                    src = self.region_producer(name, before_node=nid)
-                    if src:
-                        out.append((src, nid, name, spec.name))
-        return out
 
     # ---- Recipe 互轉 -------------------------------------------------------
     def to_recipe(self) -> Recipe:

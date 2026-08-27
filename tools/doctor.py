@@ -381,6 +381,65 @@ def check_smoke(rep: Report, skip: bool = False, reason: str = "") -> None:
                 extra=raw)
 
 
+#: 現在這一版 recipe 的形狀。**跟 `d4t.core.pipeline.recipe.RECIPE_VERSION`
+#: 是同一個數字**，而這裡刻意抄一份字面值：doctor 是 stdlib-only 的
+#: （`AGENTS.md` §3 —— 它要在「套件還沒裝好」的機器上跑），import 不得。
+#: 兩邊漂掉的代價是這一項給出一個錯的提示，不是算錯數字；
+#: `tests/test_offline_tools.py` 會比對它們相等。
+RECIPE_VERSION = 2
+
+
+def check_recipes(rep: Report, paths: Sequence[str] = ()) -> None:
+    """recipe 檔是不是舊格式 —— 舊的話提示「用 Studio 開起來存一次」。
+
+    F42（2026-08-27）把**區域依賴**從卡片的參數搬進 `recipe.edges`。舊檔案
+    照樣打得開（`Recipe.from_json_dict` 會遷移），但**磁碟上那一份還是舊的**
+    —— 每開一次就遷移一次，而手寫 recipe 的人不會知道格式換了。
+
+    判準跟遷移本身一樣是**版本號**，不是「有沒有舊式的區域參數」：後者要
+    知道每一張卡有哪幾格是區域，而 doctor 不能 import d4t（stdlib-only）。
+    版本號是同一個判準的投影，而且它答得出這一題 —— 版本舊就重存一次，
+    沒有區域參數的檔案重存也只是把版本號寫新，不痛不癢。
+    """
+    files: List[str] = []
+    for raw in (list(paths) or [os.path.join(REPO_ROOT, "recipes")]):
+        if os.path.isdir(raw):
+            files.extend(sorted(os.path.join(raw, n) for n in os.listdir(raw)
+                                if n.lower().endswith(".json")))
+        elif os.path.isfile(raw):
+            files.append(raw)
+    if not files:
+        rep.add(OK, "recipe 格式", "沒有找到 recipe 檔（這一項沒事做）",
+                essential=False)
+        return
+    old: List[str] = []
+    unreadable: List[str] = []
+    for path in files:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                doc = json.load(f)
+            version = int(doc.get("version", 1))
+        except Exception:                     # noqa: BLE001 — 壞檔案不是這一項的事
+            unreadable.append(os.path.basename(path))
+            continue
+        if version < RECIPE_VERSION:
+            old.append(os.path.basename(path))
+    if old:
+        rep.add(WARN, "recipe 格式",
+                "%d 份是舊格式（%s）" % (len(old), "、".join(old[:5])),
+                essential=False,
+                hint="這些檔案照樣跑得動（載入時會自動轉），但磁碟上那一份還是舊的。"
+                     "用 Studio 開起來按一次 Ctrl+S 就轉好了。"
+                     "手寫 recipe 的話：區域現在跟影像一樣要在 edges 裡寫一條線"
+                     "（[來源, 區域名, 這張卡, 參數名]），寫完把 version 改成 %d。"
+                     % RECIPE_VERSION)
+        return
+    note = "%d 份都是新格式" % len(files)
+    if unreadable:
+        note += "（%d 份讀不出來，跳過）" % len(unreadable)
+    rep.add(OK, "recipe 格式", note, essential=False)
+
+
 # ---------------------------------------------------------------- 主流程
 
 def _soften_stdout() -> None:
@@ -399,6 +458,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         description="d4t 環境自檢：一次檢查 Python、相依套件、Qt、權限與端到端試跑。")
     ap.add_argument("--verbose", action="store_true", help="連錯誤細節（完整訊息）一起印出來")
     ap.add_argument("--skip-smoke", action="store_true", help="不跑最後的端到端試跑（省約 10 秒）")
+    ap.add_argument("recipes", nargs="*", metavar="RECIPE",
+                    help="要檢查格式的 recipe 檔或資料夾（預設：repo 的 recipes\\）")
     args = ap.parse_args(list(argv) if argv is not None else None)
 
     print("d4t 環境自檢（doctor）")
@@ -411,6 +472,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     d4t_ok = check_d4t_importable(rep)
     check_qt(rep)
     check_write_permissions(rep)
+    check_recipes(rep, args.recipes)
 
     skip_reason = ""
     if args.skip_smoke:

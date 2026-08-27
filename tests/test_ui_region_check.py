@@ -25,6 +25,8 @@ from conftest import first_source, wire_up  # noqa: E402  —— F10：加完卡
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
+from d4t.core.pipeline.recipe import is_region_edge  # noqa: E402
+
 W = H = 128
 
 
@@ -367,7 +369,9 @@ def test_the_mask_card_offers_the_regions_defined_upstream(window):
     window._on_edge_added(tpl, mask, "epi", "regions")
     window._on_edge_added(tpl, mask, "mg", "regions")
     assert window.model.nodes[mask].params["regions"] == "epi,mg"
-    assert (tpl, mask, "epi", "regions") in window.model.region_lines()
+    assert (tpl, mask, "epi", "regions") in [
+        (e.src, e.dst, e.src_out, e.dst_in) for e in window.model.edges
+        if is_region_edge(e, window.model.nodes)]
 
 
 def test_a_region_name_from_the_recipe_survives_even_if_upstream_changed(window):
@@ -386,4 +390,5 @@ def test_a_region_name_from_the_recipe_survives_even_if_upstream_changed(window)
     editor = window.param_form.editor("regions")
     assert isinstance(editor, QLineEdit) and editor.isReadOnly()
     assert editor.text() == "gone"
-    assert [ln for ln in window.model.region_lines() if ln[1] == mask] == []
+    assert [e for e in window.model.edges
+            if e.dst == mask and is_region_edge(e, window.model.nodes)] == []

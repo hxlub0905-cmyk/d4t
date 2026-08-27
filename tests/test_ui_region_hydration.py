@@ -378,3 +378,27 @@ def test_a_region_line_now_moves_the_layout(window):
     moved = list(window.model.node_order)
     assert moved.index(gds) < moved.index(glv), \
         "區域線是一條真的依賴 —— 排版跟著它走"
+
+
+def test_the_ui_and_the_core_agree_on_who_defines_a_region(window):
+    """便利貼（F42 B4）：``RecipeModel.region_producer`` 在 `d4t/` 底下**沒有
+    呼叫者了** —— 它的消費者 `region_lines()` 在 B4 刪掉。
+
+    它是刻意留著的（工作單指名保留），而留著的理由是它回答的問題還在，
+    **而且核心那一份還在用同一個語意**：`recipe._region_producer` 是遷移補線
+    時找來源的那一支。兩邊逐字相同（「上游最後一個」），要動那個語意的時候
+    兩邊要一起動。
+
+    沒有這一條的話，下一個人會把它當死碼順手清掉 —— 這個 repo 對
+    `algo/period.py` 差一步就做過同一件事（`CLAUDE.md` §5 那張便利貼）。
+    """
+    from d4t.core.pipeline.recipe import _region_producer
+    from d4t.core.pipeline.step import REGISTRY
+
+    _src, gds, glv = _gds(window, layers="1:epi")
+    model = window.model
+    assert model.region_producer("epi", before_node=glv) == gds
+
+    route = list(model.node_order)
+    assert _region_producer("epi", route, route.index(glv),
+                            model.nodes, REGISTRY) == gds

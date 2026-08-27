@@ -19,6 +19,50 @@
 
 ---
 
+## F42 B4：拆舊路 ＋ 收尾（2026-08-27，方案 B 完成）
+
+計畫書：[`docs/plans/F42-region-edges-plan-b.md`](docs/plans/F42-region-edges-plan-b.md)。
+
+### `region_lines()` 刪掉
+
+`studio` 那一行以前是**兩份相加**（`edge_lines()` ＋ `region_lines()`）——
+B2 到 B3 之間第二份收的已經是同一批東西，每一條區域線都被畫了兩次
+（同一組座標，所以看不出來）。現在只剩一份：畫布直接讀 `edges`。
+
+`region_producer()` 保留（工作單指名），但它在 `d4t/` 底下**沒有呼叫者了**。
+留著的理由寫在 docstring 上，而且有一條便利貼測試守著 —— 核心的
+`recipe._region_producer` 用的是同一個語意，兩邊要動就一起動。
+（`algo/period.py` 只剩一個呼叫者的那一小時就差一步被當成死碼清掉：
+**沒有呼叫者的東西要嘛刪掉，要嘛留一張便利貼。**）
+
+### `doctor.py` 多一項「recipe 格式」
+
+`version < 2` 的檔案提示「用 Studio 開起來按一次 Ctrl+S」，並告訴手寫 recipe
+的人區域現在要寫成一條線。非必要項（△），舊檔案照樣跑得動。
+
+判準是版本號 —— 那也是唯一做得到的：doctor 是 stdlib-only，問不到「哪一格是
+區域」。`RECIPE_VERSION` 因此抄了一份字面值，而一條測試付那份代價。
+
+### 文件：改掉舊句子，不疊刪除線
+
+`CLAUDE.md` 鐵則 10、`docs/ARCHITECTURE.md`、`docs/ROADMAP.md` 全部改成現況；
+`F12-region-edges.md` **一個字都沒改**（它是歷史）。
+`docs/USING-*.md` 查過沒有手寫 recipe 的 JSON 範例，那一項沒有東西要改。
+
+### `docs/PITFALLS.md` 加的那一條，通則值得單獨記
+
+> **一個決定寫下理由的時候，要順便寫下它踩在哪個前提上。**
+
+F12 §3 的理由是「route 相鄰對已經保證了順序」，而那個前提在 **F17-①**
+（`execution_order` 收成只看線）就失效了 —— 中間隔了八天，沒有人回頭重讀那個
+決定。第七個「跑得完、有數字、而且是錯的」就是那八天的利息。
+
+### 方案 B 最終驗收
+
+核心 **2430** 綠、**62 支 UI 測試逐檔綠**、黃金值三份**逐項相同**。
+`freeze_golden.py --check` 從 B0 到 B4 **每一段都跑過，沒有一次有差異** ——
+「整個方案 B 是純重構」是逐段證明的，不是最後才驗的。CI 時間沒有變差。
+
 ## F42 B3：遷移（2026-08-27）
 
 `_migrate_region_params_into_edges`，判準是 **`version < RECIPE_VERSION`**

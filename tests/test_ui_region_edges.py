@@ -35,7 +35,9 @@ from PySide6.QtWidgets import QApplication, QLineEdit   # noqa: E402
 
 import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 from d4t.core.pipeline import get_step, list_steps      # noqa: E402
-from d4t.core.pipeline.recipe import Recipe             # noqa: E402
+from d4t.core.pipeline.recipe import (                  # noqa: E402
+    RECIPE_VERSION, Recipe, is_region_edge,
+)
 from d4t.core.pipeline.step import REGION_TYPES         # noqa: E402
 from d4t.ui import canvas as canvas_mod                 # noqa: E402
 from d4t.ui import studio as studio_mod                 # noqa: E402
@@ -55,6 +57,17 @@ def window(qapp):
     win = studio_mod.StudioWindow(show_welcome_on_start=False)
     yield win
     win.close()
+
+
+def region_lines(model) -> list:
+    """畫布上的區域線 ``(來源, 目的, 區域名, 落在哪一格)``。
+
+    F42 B4 之前這是 `RecipeModel.region_lines()`（從**參數**推導）。方案 B 之後
+    區域線是一條真的 ``Edge``，所以「畫布上有哪些區域線」的答案就在 ``edges``
+    裡 —— 這個 helper 只是把它翻成同樣的四欄，好讓底下的斷言逐字不變。
+    """
+    return [(e.src, e.dst, e.src_out, e.dst_in) for e in model.edges
+            if is_region_edge(e, model.nodes)]
 
 
 def _gds_route(model: RecipeModel):
@@ -128,33 +141,48 @@ def test_the_region_field_is_read_only_in_the_panel(window):
 
 
 # --------------------------------------------------------------------------- #
-# 2. 線是推導出來的，不進 recipe
+# 2. 線**就是**儲存（F42 B2 起；在此之前是「從參數推導、不進 recipe」）
 # --------------------------------------------------------------------------- #
-def test_the_line_is_derived_from_the_parameter():
+def test_the_line_is_the_store_not_the_parameter():
+    """**這一條翻面了**（F42 B2／B4，2026-08-27）。
+
+    原本它鎖的是 F12 §3：``roi="epi"`` 是唯一的儲存，線是它的呈現，
+    而且「**不進 recipe.edges** —— 值只有一個家」。
+
+    方案 B 把方向倒過來：線進 ``edges``，那一格是水合出來的。**一個家那句話
+    一個字都沒變**，換的是哪一邊是家 —— 理由是 F12 §3 的前提（route 相鄰對
+    保證順序）在 F17-① 就失效了。
+    """
     model = RecipeModel(kind="rsem")
     _img, _lbl, gds, glv = _gds_route(model)
-    assert model.region_lines() == []
+    assert region_lines(model) == []
 
-    model.set_param(glv, "roi", "epi")
-    assert model.region_lines() == [(gds, glv, "epi", "roi")]
-    # **不進 recipe.edges** —— 值只有一個家，兩份會漂（F9 的教訓）。
-    assert model.edge_lines() == []
+    model.add_edge(gds, glv, src_out="epi", dst_in="roi")
+    assert region_lines(model) == [(gds, glv, "epi", "roi")]
+    assert model.nodes[glv].params["roi"] == "epi", "那一格由線水合出來"
 
 
-def test_an_old_recipe_gets_its_lines_without_any_migration(tmp_path):
-    """``roi="epi"`` 的舊檔打開就有線 —— 檔案格式一個欄位都沒有變。"""
+def test_an_old_recipe_gets_its_lines_from_the_migration(tmp_path):
+    """**這一條也翻面了。** ``roi="epi"`` 的舊檔打開就有線 —— 而現在那條線是
+    **遷移**補的（F42 B3），不再是每次要畫的時候從參數推。
+
+    檔案格式因此真的變了，所以版本號也跟著變（`RECIPE_VERSION`）。
+    """
     model = RecipeModel(kind="rsem")
     _img, _lbl, gds, glv = _gds_route(model)
     model.set_param(glv, "roi", "epi")
 
+    doc = json.loads(json.dumps(model.to_recipe().to_json_dict()))
+    doc["version"] = 1                     # 假裝這是一份 F42 之前的檔案
     path = tmp_path / "r.json"
-    path.write_text(json.dumps(model.to_recipe().to_json_dict()),
-                    encoding="utf-8")
+    path.write_text(json.dumps(doc), encoding="utf-8")
     doc = json.loads(path.read_text(encoding="utf-8"))
-    assert doc["edges"] == [], "區域線不該被存進 edges"
+    assert doc["edges"] == [], "舊檔案裡本來就沒有區域線"
 
-    again = RecipeModel.from_recipe(Recipe.from_json_dict(doc), kind="rsem")
-    assert again.region_lines() == [(gds, glv, "epi", "roi")]
+    rec = Recipe.from_json_dict(doc)
+    assert rec.version == RECIPE_VERSION
+    again = RecipeModel.from_recipe(rec, kind="rsem")
+    assert region_lines(again) == [(gds, glv, "epi", "roi")]
 
 
 def test_a_region_nobody_defines_draws_no_line():
@@ -162,7 +190,7 @@ def test_a_region_nobody_defines_draws_no_line():
     model = RecipeModel(kind="rsem")
     _img, _lbl, _gds, glv = _gds_route(model)
     model.set_param(glv, "roi", "nope")
-    assert model.region_lines() == []
+    assert region_lines(model) == []
     assert "unknown-region" in [i.code for i in model.validate()]
 
 
@@ -206,7 +234,7 @@ def test_a_measure_card_takes_more_than_one_region(window):
     window._on_edge_added(gds, glv, "mg", "roi")
     assert window.model.nodes[glv].params["roi"] == "epi,mg"
 
-    lines = {ln for ln in window.model.region_lines() if ln[1] == glv}
+    lines = {ln for ln in region_lines(window.model) if ln[1] == glv}
     assert lines == {(gds, glv, "epi", "roi"), (gds, glv, "mg", "roi")}, \
         "兩個區域就要有兩條線"
 
@@ -263,7 +291,7 @@ def test_a_role_region_port_is_still_replaced(window):
     window._on_edge_added(gds, cmp_, "epi", "reference_region")
     window._on_edge_added(gds, cmp_, "mg", "reference_region")
     assert window.model.nodes[cmp_].params["reference_region"] == "mg"
-    lines = [ln for ln in window.model.region_lines()
+    lines = [ln for ln in region_lines(window.model)
              if ln[1] == cmp_ and ln[3] == "reference_region"]
     assert lines == [(gds, cmp_, "mg", "reference_region")], "舊線沒有跟著消失"
 
@@ -295,7 +323,7 @@ def test_a_region_goes_in_one_side_and_out_the_other(window):
     # 從**那一顆**埠接下去：線一段一段接，不是每一條都從 Region 卡拉出來。
     window._on_edge_added(a, b, "epi", "roi")
     assert window.model.nodes[b].params["roi"] == "epi"
-    assert (a, b, "epi", "roi") in window.model.region_lines()
+    assert (a, b, "epi", "roi") in region_lines(window.model)
 
 
 def test_cutting_the_line_clears_the_field(window):
@@ -310,7 +338,7 @@ def test_cutting_the_line_clears_the_field(window):
 
     window._on_edge_removed(gds, glv, "epi", "roi")
     assert window.model.nodes[glv].params["roi"] == ""
-    assert window.model.region_lines() == []
+    assert region_lines(window.model) == []
 
 
 def test_removing_the_region_card_empties_the_field(window):

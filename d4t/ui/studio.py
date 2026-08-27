@@ -1862,10 +1862,12 @@ class StudioWindow(QMainWindow):
         decision = self._decision_info()
         prefilter = self._prefilter_info()
         for view in self._canvases():
-            # 影像線（存在 recipe 裡）＋ 區域線（從參數推導；F12）。畫布不分
-            # 兩份收 —— 一條線就是一條線，它是哪一種由它出發的那顆埠決定。
-            view.set_nodes(nodes, list(self.model.edge_lines())
-                           + list(self.model.region_lines()))
+            # **每一條線都在 `recipe.edges` 裡**（F42 B4）。以前這裡是兩份相加
+            # ——影像線來自 `edge_lines()`、區域線從參數推導（`region_lines()`）
+            # ——而方案 B 之後區域線也是一條真的 Edge，所以第二份收的是同一批
+            # 東西（B2 到 B3 之間它畫的每一條都跟第一份重複）。
+            # 一條線就是一條線，它是哪一種由它出發的那顆埠決定。
+            view.set_nodes(nodes, list(self.model.edge_lines()))
             # 判定區（F24 ②）：多類別的 recipe，判定樹住在畫布上。
             view.set_decision(decision)
             # 分流徽章（F25-B）：有 route_by 才有 —— 畫布因此講得出
