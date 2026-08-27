@@ -390,16 +390,31 @@ def cmp_feature_name(metric: str, stat: str) -> str:
     return "%s%s_%s" % (CMP_PREFIX, metric, short)
 
 
-def cmp_feature_names(params: Dict[str, Any]) -> List[str]:
-    """這組參數會寫出哪幾個 ``cmp_*``（順序＝勾選的順序，去重）。"""
+def cmp_feature_specs(params: Dict[str, Any]) -> List[Tuple[str, str, str]]:
+    """這組參數會寫出哪幾個 ``cmp_*`` → ``[(名字, metric, stat), …]``。
+
+    metric/stat 在**組名字的這幾行**手上就有（PR-3 的「誕生處」）——
+    `widgets._split_cmp` 以前用最長比對把它們**猜**回來，現在不必了。
+    stat-free 的那兩個 stat 記空字串。順序＝勾選的順序，去重。
+    """
     stats = _stats_of(params)
-    out: List[str] = []
+    out: List[Tuple[str, str, str]] = []
+    seen = set()
     for metric in _compare_metrics_of(params):
         for stat in stats:
             name = cmp_feature_name(metric, stat)
-            if name not in out:
-                out.append(name)
+            if name in seen:
+                continue
+            seen.add(name)
+            short = "" if metric in algo_glv.STAT_FREE_METRICS else (
+                stat[4:] if stat.startswith("glv_") else stat)
+            out.append((name, metric, short))
     return out
+
+
+def cmp_feature_names(params: Dict[str, Any]) -> List[str]:
+    """這組參數會寫出哪幾個 ``cmp_*``（順序＝勾選的順序，去重）。"""
+    return [n for n, _m, _s in cmp_feature_specs(params)]
 
 
 @register_step
@@ -573,29 +588,44 @@ class GlvStatsStep(MultiSourceStep):
     # 一個關於軟體架構的問題才能開始量。
 
     @classmethod
-    def feature_names(cls, params: Dict[str, Any]) -> List[str]:
+    def base_specs(cls, params: Dict[str, Any]) -> List[Tuple[str, str, str, str, str]]:
+        """基本名＋身分（PR-3；`feature_names` 是它的投影）。
+
+        metric 就是統計量 id 本人（`METRIC_GROUPS` 的鍵那一層）；each-box 的
+        三個後綴在**加後綴的同一行**記 variant（typical/outlier/outlier_box），
+        metric 剝回本尊；``glv_worst_*`` 那一族是 metric 不是 variant
+        （2026-08-27 使用者定調的 variant 文法）。
+        """
         mids = parse_key_list(params.get("metrics", DEFAULT_METRICS))
-        base = mids or list(cls.features_out)
+        base = [(str(m), str(m), "", "", "glv")
+                for m in (mids or list(cls.features_out))]
         # 「這塊還能不能信」的那兩個跟著每一塊走（見 `_quality_features`）。
-        extra = ["glv_pixels"]
+        extra = [("glv_pixels", "glv_pixels", "", "", "glv")]
         if int(params.get("min_pixels") or 0):
-            extra.append("glv_ok")
+            extra.append(("glv_ok", "glv_ok", "", "", "glv"))
         # 相對值疊在絕對值上（不是取代它）—— 那正是這一刀的重點。
         # ⚠ 宣告是「**可能**會產出的」：``snr`` / ``tstat`` 在參照只有一格的
         # defect 上算不出來，那一顆就不會有那一格（同 nm 孿生的理由）。
         if _reference_of(params) != REF_NONE:
-            base = base + (cmp_feature_names(params)
-                           or [cmp_feature_name("delta", DEFAULT_COMPARE_STAT),
-                               cmp_feature_name("snr", DEFAULT_COMPARE_STAT)])
+            pairs = cmp_feature_specs(params) or [
+                (cmp_feature_name("delta", DEFAULT_COMPARE_STAT), "delta",
+                 DEFAULT_COMPARE_STAT[4:]),
+                (cmp_feature_name("snr", DEFAULT_COMPARE_STAT), "snr",
+                 DEFAULT_COMPARE_STAT[4:])]
+            base = base + [(n, m, s, "", "cmp") for n, m, s in pairs]
         if str(params.get("across_boxes", POOLED)) == EACH_BOX:
             # 一格一格量：每個數字變成「典型 / 最不一樣的那一格 / 那是第幾格」。
             # ⚠ 宣告是「**可能**會產出的」（同上面 snr/tstat 那行）：worst 那
             # 一組在只剩一格可量的 defect 上算不出來，那一顆就不會有那幾格。
-            spread = [n + suffix for n in base
-                      for suffix in (TYPICAL_SUFFIX, OUTLIER_SUFFIX,
-                                     OUTLIER_BOX_SUFFIX)]
-            return (spread + [BOX_COUNT] + list(WORST_FEATURES)
-                    + list(SCORE_FEATURES) + extra)
+            spread = [(n + suffix, m, s, var, fam)
+                      for n, m, s, _v, fam in base
+                      for suffix, var in ((TYPICAL_SUFFIX, "typical"),
+                                          (OUTLIER_SUFFIX, "outlier"),
+                                          (OUTLIER_BOX_SUFFIX, "outlier_box"))]
+            worst = [(str(n), str(n), "", "", "glv")
+                     for n in [BOX_COUNT] + list(WORST_FEATURES)
+                     + list(SCORE_FEATURES)]
+            return spread + worst + extra
         return base + extra
 
     @classmethod

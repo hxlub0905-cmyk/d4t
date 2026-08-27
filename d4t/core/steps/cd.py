@@ -505,6 +505,13 @@ class CdMeasureStep(MultiSourceStep):
         return list(ALWAYS) + want
 
     @classmethod
+    def base_specs(cls, params: Dict[str, object]):
+        """基本名＋身分（PR-3）：每個基本名就是它自己的統計量 id
+        （`METRIC_GROUPS` 的鍵），家族 "cd"。名字的分支照 `feature_names`。"""
+        return [(str(n), str(n), "", "", "cd")
+                for n in cls.feature_names(params)]
+
+    @classmethod
     def diagnostic_names(cls, params: Dict[str, object]) -> List[str]:
         """「量得準不準」那幾個（``ALWAYS`` 註解裡的前兩個 ＋ 團那支的對應者）。
 

@@ -413,3 +413,62 @@ def test_output_cards_declare_nothing():
     for key in ("output_report", "output_klarf", "output_char"):
         assert REGISTRY[key].resolve_feature_specs(
             REGISTRY[key].validate_params(None)) == []
+
+
+# --------------------------------------------------------------------------- #
+# C 半：反空洞 —— 身分欄真的有人填
+# --------------------------------------------------------------------------- #
+def _specs(cid):
+    key, params = CASES[cid]
+    cls = REGISTRY[key]
+    return {s.name: s for s in
+            cls.resolve_feature_specs(cls.validate_params(dict(params)))}
+
+
+def test_the_autofill_trap_is_reproduced_exactly():
+    """`epi_glv_median` 的身分是 **own="epi"、region=""**（單區域時區域前綴
+    是空的、Studio 把區域名填進 output_prefix）—— 拆字串猜的話這裡必錯。"""
+    s = _specs("glv_autofill")["epi_glv_median"]
+    assert s.own == "epi" and s.region == "" and s.region_index == -1
+    assert s.metric == "glv_median" and s.family == "glv"
+
+
+def test_center_wired_regions_carry_their_role():
+    by = _specs("glv_center_ref")
+    s = by["epi_center_glv_median"]
+    assert s.region == "epi_center" and s.region_role == "center"
+    assert by["epi_others_glv_median"].region_role == "others"
+    # cmp 名帶 metric 與 stat —— `_split_cmp` 以前用最長比對猜的那兩格。
+    cmp_names = [n for n in by if "cmp_delta" in n]
+    assert cmp_names, "反空洞：這組真的有 cmp 名"
+    c = by[cmp_names[0]]
+    assert c.family == "cmp" and c.metric == "delta" and c.stat == "median"
+
+
+def test_eachbox_suffixes_are_variants_with_the_metric_stripped_back():
+    by = _specs("glv_eachbox")
+    s = by["glv_median_outlier_box"]
+    assert s.variant == "outlier_box" and s.metric == "glv_median"
+    assert by["glv_median_typical"].variant == "typical"
+    # worst 那一族是 metric，不是 variant（2026-08-27 使用者定調）。
+    w = by["glv_worst_score"]
+    assert w.metric == "glv_worst_score" and w.variant == ""
+    # stat-free 的 cmp 名 stat 記空（each-box 下也帶盒後綴，variant 照記）。
+    c = by["cmp_overlap_typical"]
+    assert c.stat == "" and c.metric == "overlap" and c.variant == "typical"
+
+
+def test_nm_twins_are_variants_that_inherit_the_metric():
+    by = _specs("cd_target")
+    s = by["cd_median_nm"]
+    assert s.variant == "nm" and s.metric == "cd_median" and s.family == "cd"
+    by_blob = _specs("cd_blob_size")
+    assert by_blob["cd_area_nm2"].variant == "nm2"
+    assert by_blob["cd_area_nm2"].metric == "cd_area_px"
+
+
+def test_enhance_pair_features_have_no_stream_on_purpose():
+    by = _specs("enhance_two")
+    assert by["test_clip_frac"].stream == "test"
+    assert by["pair_level_delta"].stream == "", \
+        "它講的是「這兩條之間」，掛在流名下面會是錯的"

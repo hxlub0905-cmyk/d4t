@@ -33,6 +33,11 @@ class FocusQualityStep(MultiSourceStep):
     writes: List[str] = []
     features_out = ["focus_lapvar", "focus_tenengrad", "focus_fft"]
 
+    @classmethod
+    def base_specs(cls, params: Dict[str, Any]):
+        """基本名＋身分（PR-3）：三個銳利度值，metric = 名字本人。"""
+        return [(str(n), str(n), "", "", "") for n in cls.features_out]
+
     def measure(self, ctx: Context, img, p: Dict[str, Any]):
         q = algo_quality.compute_quality(img)
         if q.get("error"):
