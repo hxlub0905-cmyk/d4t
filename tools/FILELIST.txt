@@ -5,7 +5,7 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 712d17a24ea9afafe35c2d92cfe668af2c81df70 CLAUDE.md
 7bddb3ce6ded46f4baaa8f030cc3c851653cc23c README.md
-67af416d6065eff63a7b6c29548a6cf3b6f063a1 SESSION_LOG.md
+e82dde49c2fdb9640271948cd340cc396dd2105b SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -54,7 +54,7 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 e8b99d43334b020fc97620cb8383c0b4b7dd126b d4t/core/pipeline/decide_tree.py
 ed5bf4124d958905db9ef8b7ce01a5168140fcb0 d4t/core/pipeline/engine.py
 7e2797dce8253240fcf45a27f57f28d2c246e272 d4t/core/pipeline/expression.py
-48f5332427d9de01c011587818d21411cb081f40 d4t/core/pipeline/recipe.py
+e18bccc239c9238dbfb8e53163c9cc42c0e09fcf d4t/core/pipeline/recipe.py
 c8d0548bb636b3fa29443fc4224d98f37eb685db d4t/core/pipeline/step.py
 3c0a96b02dc53ed3bc0fe827e453dac2ddd58b7b d4t/core/steps/__init__.py
 57a047c5f5e0e8e16522ca5a99f429923172c0ff d4t/core/steps/_util.py
@@ -96,14 +96,14 @@ a108febbe68c248b3cc2c8b05bd5cd079984772c d4t/ui/output_band.py
 1d1ca0ee2e4ebbedfa11b027bb9e7d735500ad2d d4t/ui/route_badge.py
 11a38b9e760697b23510805b56706f1eb8f6c85e d4t/ui/route_panel.py
 86c726f2a5d9698b70d6e0a191809e8480715d35 d4t/ui/scope.py
-fa797f5eabf07e49c82f9b04d9fb9c5fcff58b64 d4t/ui/studio.py
+2d21d312e0ed124fb67a27d84261e66488bf15f3 d4t/ui/studio.py
 0a1d057639f34635416673d9dc38a3daf999530e d4t/ui/template_dialog.py
 44f3712558bc51d6e32e76b2f85eb0e07b016328 d4t/ui/theme.py
 3cc7d61199e03eaba0eb61f5a749b9f6cfca9ba5 d4t/ui/threshold_view.py
 460ce5e5207486254f1bd5cd4701454a46b9e5ca d4t/ui/tree_panel.py
 87c66567b75b45a5b8c32e771826ee3417ceb2bc d4t/ui/tree_scene.py
 c894b98548a3a06f98ed531901518a429768879f d4t/ui/verdict_band.py
-4f3d3fd5c87a06a3f5dc60a006add2e99c43997f d4t/ui/viewmodel.py
+9e684751b3f5c3f2ace6e15c41bf9e08c6d7f8f1 d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
 281df3cd4ba33d3ec71f1fef3c692481066b6cd3 d4t/ui/widgets.py
 e02cb1ea64a7ed413716379b9da789937729f3e3 d4t/ui/workers.py
@@ -125,7 +125,7 @@ f265bee418c00c58c1f1b1ca5916cba6929d9ffe docs/USING-CHARACTERIZATION.md
 0bf08282aa8b157016df4177eedf2ba8c328ef66 docs/plans/F39-f-test-audit.md
 85bdd915d65cea34657713d9e11804991616693f docs/plans/F40-stack-agreement.md
 4114c38479c435bdeed0da03512a20b21c1ecd08 docs/plans/F41-phase3-delete-algo-cards.md
-e59cae92c42fd7ab786d0cb9509ca939019270d3 docs/plans/F42-region-edges-plan-b.md
+6efa8d097c7c1b4d2ab64dad66fc27b6b5d89891 docs/plans/F42-region-edges-plan-b.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -135,7 +135,7 @@ d1b11b40774e2215e34a2c695a54ee3263a4932f recipes/README.md
 1fb83c4e64d5525aaff8e59a60dbd4be484e61b5 recipes/ebi-to-api-characterization.json
 13a74e5356d902cb8f120ece70854856a96c8ac9 recipes/patch-dsnr-by-class.json
 cf5284f96a1d071e240ef88199e54d580b48c57c requirements.txt
-cb2c49f6e9c46310d0274516fb18f78788194f46 tests/conftest.py
+608c5d1adceade0d2f17647501c7a34ab767ff08 tests/conftest.py
 2f91aee241cdd8dd9aac07f0f663d3175b53ad7f tests/fixtures/golden/die_to_die_basic__make_sample.json
 19436c9de7f44db899312fc87db94a6be79a47aa tests/fixtures/golden/dual_route_basic__make_sample.json
 0b644c48a7df4d6652c59db3e608f3c297c38dca tests/fixtures/golden/dual_route_basic__make_sample_rsem.json
@@ -289,7 +289,8 @@ ffb68dce180b2172b787233bab9650f54ca18ae9 tests/test_ui_inspectors.py
 a680bb6794bf0acd50b3d680d42f8c76710f9ef3 tests/test_ui_output_band.py
 519da91e01b237bd776fe7e45828064348bf403a tests/test_ui_panel_truth.py
 1ce522529fbd40596587b6147aac9fb29d42942f tests/test_ui_region_check.py
-a8ece3542ff939d54833c5ccd72cd6936cbef2a7 tests/test_ui_region_edges.py
+ca68e9b0878233b64868c82ba4503c7082ccbf9e tests/test_ui_region_edges.py
+36e56f11d36c7abb371a325a88f10c2dfd8e520d tests/test_ui_region_hydration.py
 eb8862021b4a0c7920ff9a697510ddcc43a10b1b tests/test_ui_region_overlay_truth.py
 f35854d42e3a131d727f21a57e761f4d4ec87bc4 tests/test_ui_results.py
 a1b67be14f6e990a9ef7434a8ff9a567f94f4c12 tests/test_ui_results_table.py

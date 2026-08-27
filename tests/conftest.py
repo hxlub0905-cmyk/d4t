@@ -29,6 +29,30 @@ def _no_modal_dialogs_in_tests():
 
 
 @pytest.fixture(autouse=True)
+def _regions_always_match_their_lines():
+    """**方案 B 的常開斷言**（F42 B2）：每一次 model 改動都問一次
+    「每一格區域參數是不是正好等於線說的」。
+
+    為什麼是一條常開的斷言而不是幾條測試：方案 B 的整個安全性建立在
+    「用哪個區域只有一個家（那條線）」上，而破壞它的方式是**加一條新路徑**
+    —— 一個忘了水合的新入口 —— 不是改壞既有的那五條。既有測試不會走那條還
+    不存在的路徑，所以只有「每一次改動都問一次」抓得到。
+
+    跟上面那一支同一個理由不 import Qt：`d4t.ui.viewmodel` 進不進來由測試
+    自己決定（核心那一輪不該因為一個 conftest 就把 UI 拉進來）。
+    """
+    mod = sys.modules.get("d4t.ui.viewmodel")
+    before = None if mod is None else mod.RecipeModel.CHECK_REGION_INVARIANT
+    if mod is not None:
+        mod.RecipeModel.CHECK_REGION_INVARIANT = True
+    yield
+    mod = sys.modules.get("d4t.ui.viewmodel")
+    if mod is not None:
+        mod.RecipeModel.CHECK_REGION_INVARIANT = (
+            True if before is None else before)
+
+
+@pytest.fixture(autouse=True)
 def _the_theme_does_not_leak_into_the_next_test():
     """一條測試切換過的主題，收工時要收回來。
 

@@ -364,8 +364,20 @@ def test_an_image_line_cannot_land_on_a_region_port(window):
     assert "region" in window.status_text().lower()
 
 
-def test_a_region_defined_later_cannot_be_measured_earlier(window):
-    """那個區域在這張卡跑到的時候還不存在。"""
+def test_a_region_defined_later_is_now_allowed_and_reorders(window):
+    """**這一條翻面了**（F42 B2，2026-08-27）。
+
+    原本它鎖的是 F12 §4 的第四道守門：「來源排在下游 → 擋下來，叫使用者把
+    Region 卡往前搬」。那句話在 F12 當時是真的 —— 區域線不進 `recipe.edges`，
+    所以順序只能靠卡片的左右位置。
+
+    方案 B 把線存進去了，於是**那條線自己就是順序**（`execution_order` 只看
+    線）。擋下來等於不讓使用者做那個唯一能修好順序的動作 —— 而「Region 卡排在
+    量測卡右邊，量測卡先跑、安靜地量整張圖」正是這一輪要修的 bug。
+
+    所以現在它接得起來，而且排版跟著線走。真正會壞的那一種（成環）由
+    `add_edge` 擋，那擋的是事實不是排版。
+    """
     src = first_source(window, "load_single")
     glv = window.add_card_after(src, "glv_stats")
     window._on_edge_added(src, glv, "single", "source")
@@ -375,8 +387,9 @@ def test_a_region_defined_later_cannot_be_measured_earlier(window):
     window.model.set_param(gds, "layers", "1:epi")
 
     window._on_edge_added(gds, glv, "epi", "roi")
-    assert window.model.nodes[glv].params["roi"] == ""
-    assert "defined after" in window.status_text()
+    assert window.model.nodes[glv].params["roi"] == "epi"
+    order = window.model.node_order
+    assert order.index(gds) < order.index(glv), "線說了算 —— 排版跟著它走"
 
 
 # --------------------------------------------------------------------------- #

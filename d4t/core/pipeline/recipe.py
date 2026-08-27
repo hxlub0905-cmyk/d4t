@@ -47,6 +47,7 @@ __all__ = [
     "RecipeError", "RecipeNode", "ScoreSpec", "Edge", "Recipe",
     "RouteBy", "resolve_route", "route_miss_message",
     "Issue", "execution_order", "validate", "is_region_edge",
+    "region_edge_values", "hydrate_regions",
 ]
 
 
@@ -523,6 +524,74 @@ def is_region_edge(edge: "Edge", nodes: Dict[str, "RecipeNode"],
         if spec.name == edge.dst_in:
             return spec.type in REGION_TYPES
     return False
+
+
+def region_edge_values(nodes: Dict[str, "RecipeNode"],
+                       edges: List["Edge"],
+                       registry: Optional[Dict[str, Type[Step]]] = None
+                       ) -> Dict[Tuple[str, str], str]:
+    """每一格區域參數**線說它是什麼**：``(節點, 參數) → 值``（F42 B2）。
+
+    方案 B 之後「用哪個區域」的唯一儲存是**線**（``src_out`` 那一欄），
+    參數只是那條線的呈現 —— 跟 F12 §3 的方向正好相反，理由見那一輪的計畫書。
+    這一支是那個換算的**唯一一份**：序列化（:meth:`Recipe.to_json_dict` 要知道
+    哪幾格不必寫）、還原（:func:`hydrate_regions`）與 UI 的水合都問它。
+
+    ``region_keys``（一串）**照 ``edges`` 的順序接起來**，``region_key``
+    （單一角色）取**最後一條**——跟引擎的 ``ctx.set_roi`` 同名覆寫一字不差。
+    順序取自 ``edges`` 而不是排序過的集合，因為那個順序要**穩定**：
+    ``to_json_dict`` 丟掉那一格、``from_json_dict`` 再算回來，兩次算出來的
+    字必須逐位元組相同，不然 ``run_batch`` 的 worker 拿到的 recipe 跟主行程
+    的不一樣（鐵則 9）。
+    """
+    if registry is None:
+        registry = REGISTRY
+    order: List[Tuple[str, str]] = []
+    got: Dict[Tuple[str, str], List[str]] = {}
+    for e in edges:
+        if not e.src_out or not is_region_edge(e, nodes, registry):
+            continue
+        key = (e.dst, e.dst_in)
+        if key not in got:
+            got[key] = []
+            order.append(key)
+        if e.src_out not in got[key]:
+            got[key].append(e.src_out)
+    out: Dict[Tuple[str, str], str] = {}
+    for key in order:
+        nid, pname = key
+        step_cls = registry.get(nodes[nid].step)
+        spec = next((sp for sp in step_cls.params if sp.name == pname), None)
+        names = got[key]
+        out[key] = ",".join(names) if (spec is not None
+                                       and spec.type == "region_keys") \
+            else names[-1]
+    return out
+
+
+def hydrate_regions(nodes: Dict[str, "RecipeNode"], edges: List["Edge"],
+                    registry: Optional[Dict[str, Type[Step]]] = None
+                    ) -> List[Tuple[str, str]]:
+    """把區域線推回它落在的那一格參數（**就地**）；回傳被線管著的那幾格。
+
+    這是 :meth:`Recipe.to_json_dict` 丟掉區域參數之後的**還原**那一半 ——
+    兩邊算的是同一件事（:func:`region_edge_values`），所以
+    ``to_json_dict → from_json_dict`` 仍然是 identity（鐵則 9）。
+
+    ⚠ **只填有線的那幾格，不清空沒有線的。** 兩個理由：
+
+    1. B3 之前的舊檔案，區域參數還沒有線 —— 那一格是它**唯一**的儲存。
+       在這裡清掉等於每一份既有 recipe 安靜地改量整張圖。
+    2. 「剪掉線＝那一格空掉」是**編輯**動作，住在畫布那一層
+       （`studio._unpoint_stream` 與 `RecipeModel._hydrate_regions`）——
+       那裡才知道「使用者剛剪了一條線」與「這份檔案還沒遷移」的差別。
+
+    B3 之後每一格區域參數都有線，兩種講法就合而為一了。
+    """
+    values = region_edge_values(nodes, edges, registry)
+    for (nid, pname), value in values.items():
+        nodes[nid].params[pname] = value
+    return list(values)
 
 
 # ---------------------------------------------------------------------------
@@ -1874,6 +1943,17 @@ def _migrate_rescued_feature_names(nodes: Dict[str, "RecipeNode"],
     return score if new_expr == expr else replace(score, expr=new_expr)
 
 
+#: ``to_json_dict`` 問「這一格是不是線管的、而且值就是線說的」的那一句。
+#: 抽出來只是為了讓上面那個 dict comprehension 讀得完；判斷本身仍然只有一份
+#: （:func:`region_edge_values`）。找不到就回一個**不可能等於任何參數值**的
+#: 哨兵，於是那一格照常寫出去。
+_NOT_A_LINE = object()
+
+
+def _region_line_says(recipe: "Recipe", nid: str, param: str) -> Any:
+    return recipe._region_values().get((nid, param), _NOT_A_LINE)
+
+
 @dataclass
 class Recipe:
     """一份完整 recipe（單一 JSON 檔可互傳）。"""
@@ -1903,6 +1983,18 @@ class Recipe:
     route_by: Optional["RouteBy"] = None
 
     # ---- JSON serde -------------------------------------------------------
+    def _region_values(self) -> Dict[Tuple[str, str], str]:
+        """這份 recipe 上每一格區域參數**線說它是什麼**（F42 B2）。
+
+        壞掉的 recipe（認不得的卡、參數對不上）不准讓存檔爆掉 —— 存檔是
+        「別弄丟我的工作」，不是「你做完了嗎」（見 :meth:`save`）。
+        算不出來就當成一格都沒有線管，那一格照常寫出去。
+        """
+        try:
+            return region_edge_values(self.nodes, self.edges)
+        except Exception:              # noqa: BLE001 — 存檔不准因為健檢而失敗
+            return {}
+
     def to_json_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {
             "recipe_id": self.recipe_id,
@@ -1913,10 +2005,19 @@ class Recipe:
             "author": self.author,
             "description": self.description,
             "routes": {k: list(v) for k, v in self.routes.items()},
+            # **線管著的區域參數不寫**（F42 B2）。「用哪個區域」的唯一儲存是
+            # 那條線（``src_out``），而寫第二份的話兩份會漂 —— F9 記過的六個
+            # 「跑得完、有數字、而且是錯的」有一半是這個形狀。
+            #
+            # 讀回來由 :func:`hydrate_regions` 算同一件事補回去，所以
+            # ``to_json_dict → from_json_dict`` 仍然是 identity（鐵則 9）。
+            # ⚠ 只丟**值跟線說的一模一樣**的那幾格：不一樣的時候丟掉就是改了
+            # 使用者的 recipe，而那種不一致本身有斷言在畫布那一層擋。
             "nodes": {
                 nid: {
                     "step": n.step,
-                    "params": dict(n.params),
+                    "params": {k: v for k, v in n.params.items()
+                               if _region_line_says(self, nid, k) != v},
                     "enabled": bool(n.enabled),
                 }
                 for nid, n in self.nodes.items()
@@ -2093,6 +2194,15 @@ class Recipe:
         # ⚠ **撞名前綴那一道遷移不在這裡**（`_migrate_rescued_feature_names`）。
         # 它住在 :meth:`load` —— 理由見那一支的說明：這裡是「重建一個物件」，
         # 而那是 `run_batch` 送 recipe 進 worker 走的路。
+        #
+        # 區域線推回參數（F42 B2）。**排在所有遷移的最後**：遷移會換卡、拆卡、
+        # 改參數名，而「這條線落在哪一格」的答案跟著那些一起變 —— 而且 B3 那道
+        # 遷移會**加線**，算在它前面就看不到那幾條。
+        #
+        # 這一步是 :meth:`to_json_dict` 丟掉區域參數的**還原**那一半，兩邊算的
+        # 是同一件事，所以這一對仍然是 identity（鐵則 9）。它不是遷移：
+        # 它對新舊檔案做完全一樣的事，而且跑第二次是 no-op。
+        hydrate_regions(nodes, edges)
         return cls(
             recipe_id=str(d["recipe_id"]),
             routes=routes,

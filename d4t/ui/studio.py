@@ -112,8 +112,8 @@ from d4t.core.pipeline.cellrois import region_names
 from d4t.core.pipeline.engine import (
     FEATURE_OWNER_KEY, feature_prefixes, qualified_feature_name,
 )
-from d4t.core.pipeline.step import REGISTRY
-from d4t.core.pipeline.recipe import version_skew
+from d4t.core.pipeline.step import REGION_TYPES, REGISTRY
+from d4t.core.pipeline.recipe import is_region_edge, version_skew
 
 from .canvas import SUMMARY_SEP, PipelineCanvas
 from .inspectors import inspector_for
@@ -2535,7 +2535,10 @@ class StudioWindow(QMainWindow):
         #    使用者照著那句話再加一張卡，就多了一張沒有用的卡。
         have = set(self.model.available_streams(before_node=str(node_id)))
         have |= {e.src_out for e in self.model.edges
-                 if e.dst == str(node_id) and e.src_out}
+                 if e.dst == str(node_id) and e.src_out
+                 # 區域線帶的是**區域名**，不是影像流（F42 B2）。算進來的話
+                 # 一張接了 `epi` 的卡會被當成「它已經有一條叫 epi 的流」。
+                 and not is_region_edge(e, self.model.nodes)}
         missing = [s for s in needs if s and s not in have]
         if not missing:
             return ""
@@ -2652,10 +2655,12 @@ class StudioWindow(QMainWindow):
         # 那在「一張卡只有一個輸入在用」的年代猜得中，但 ``subtract`` 的
         # a / b 兩顆輸入永遠只挑得到同一個，於是畫布上接哪一顆都一樣。
         param = dst_in or self._param_for_stream(dst)
-        # **區域線走另一條路**（F12）：它不存進 recipe.edges，因為 ``roi="epi"``
-        # 那個參數就是唯一的儲存 —— 存第二份的話兩份會漂（F9 的那六個坑有一半
-        # 是這個形狀）。這裡只把參數設好，線由 `RecipeModel.region_lines()`
-        # 從參數推回來。
+        # **區域線走的是同一條路，只是守門的話不一樣**（F42 B2）。
+        # F12 當時它不存進 `recipe.edges`（``roi="epi"`` 那個參數是唯一的
+        # 儲存），而這一輪反過來：線才是儲存，參數是它的呈現 —— 理由是那個
+        # 決定的前提在 F17-① 就失效了（`docs/plans/F42-region-edges-plan-b.md`）。
+        # `_connect_region` 現在也走 `model.add_edge`，差別只在它擋得住的
+        # 那三件事（型別不合、來源在下游、這張卡沒有區域可接）。
         if self._is_region_param(dst, param) or self._line_kind(src, stream) == "region":
             self._connect_region(src, dst, stream, param)
             return
@@ -2726,8 +2731,11 @@ class StudioWindow(QMainWindow):
         1. **型別不合**（把影像線拉進區域埠，或反過來）。放行的話那一格會變成
            一個沒有人定義的區域名 —— 跑起來是 `unknown-region`，而畫面上那條線
            看起來完全正常。
-        2. **來源排在下游**：那個區域在這張卡跑到的時候還不存在。
-        3. **這張卡沒有區域可接**：講出它吃的是什麼，不要靜靜地什麼都不做。
+        2. **這張卡沒有區域可接**：講出它吃的是什麼，不要靜靜地什麼都不做。
+        3. **會成環**（`add_edge` 擋的）—— 那是事實，不是排版。
+
+        F12 還擋第四件事：「來源排在下游」。**F42 B2 拿掉了**，理由見下面
+        那段註解 —— 它現在擋的是使用者唯一修得好順序的那個動作。
         """
         if not param or not self._is_region_param(dst, param):
             self._status("“%s” has no region input — that line carries a "
@@ -2739,46 +2747,57 @@ class StudioWindow(QMainWindow):
                          "Region card's diamond port instead." % (name or "that "
                          "port"), "error")
             return
-        order = list(self.model.node_order)
-        if src in order and dst in order and order.index(src) >= order.index(dst):
-            self._status("“%s” is defined after “%s” runs, so it cannot be "
-                         "measured there. Move the Region card earlier."
-                         % (name, dst), "error")
-            return
+        # ⚠ **「來源排在下游就擋下來」那一條拿掉了**（F42 B2）。
+        # F12 §4 擋它的理由是「那個區域在這張卡跑到的時候還不存在」，而那句話
+        # 在當時是真的：區域線不進 `recipe.edges`，所以順序只能靠卡片的左右
+        # 位置。**這一輪它進去了**，於是那條線自己就是順序（`execution_order`
+        # 只看線）—— 擋下來等於不讓使用者做那個唯一能修好順序的動作，而那正是
+        # 這一輪要修的 bug（`docs/plans/F42-region-edges-plan-b.md` §1）。
+        # 真正會壞的那一種（成環）由 `add_edge` 擋，而且它擋的是事實不是排版。
         node = self.model.nodes.get(dst)
         spec = next((sp for sp in get_step(node.step).region_input_specs()
                      if sp.name == param), None)
         current = str(node.params.get(param, "") or "")
-        if spec is not None and spec.type == "region_keys":
-            keys = [k.strip() for k in current.split(",") if k.strip()]
-            if name in keys:
-                self._status("“%s” already measures %s." % (dst, name))
-                return
-            keys.append(name)
-            value = ",".join(keys)
-            # **從一個變成兩個時，把自動填的那個名字收回**（F13-⑥）。
-            # 接第一條線時 `_autofill_output_prefix` 會把輸出名填成那個區域
-            # （F7-11），而第二條線一來，每個數字本來就會帶自己的區域名 ——
-            # 兩個加起來是 `epi_epi_glv_mean`。判準是「它正好等於原本那一個
-            # 區域的名字」＝ 那正是自動填會寫的值；使用者自己打過的字不動。
-            if len(keys) == 2 and str(node.params.get("output_prefix", "")) == keys[0]:
-                try:
-                    self.model.set_param(dst, "output_prefix", "")
-                except ParamError:             # pragma: no cover
-                    pass
-        else:
-            if current == name:
-                self._status("“%s” already measures %s." % (dst, name))
-                return
-            value = name
-        try:
-            says = self.model.set_param(dst, param, value)
-        except ParamError as e:
-            self._status(str(e), "error")
+        keys = [k.strip() for k in current.split(",") if k.strip()]
+        if name in keys:
+            self._status("“%s” already measures %s." % (dst, name))
             return
+        # **從一個變成兩個時，把自動填的那個名字收回**（F13-⑥）。
+        # 接第一條線時 `_autofill_output_prefix` 會把輸出名填成那個區域
+        # （F7-11），而第二條線一來，每個數字本來就會帶自己的區域名 ——
+        # 兩個加起來是 `epi_epi_glv_mean`。判準是「它正好等於原本那一個
+        # 區域的名字」＝ 那正是自動填會寫的值；使用者自己打過的字不動。
+        multi = spec is not None and spec.type == "region_keys"
+        if multi and len(keys) == 1 and \
+                str(node.params.get("output_prefix", "")) == keys[0]:
+            try:
+                self.model.set_param(dst, "output_prefix", "")
+            except ParamError:                 # pragma: no cover
+                pass
+        # **改名的連帶影響要在值變之前先記下來**（F37 A2）。以前它是
+        # `set_param` 的回傳值，而 F42 B2 之後值是**水合**出來的 —— 那一格不再
+        # 由這裡寫，所以「動之前長什麼樣」也要由這裡自己抱著。
+        before = dict(node.params)
+        if not self.model.add_edge(src, dst, src_out=name, dst_in=param):
+            self._status("Cannot connect %s → %s — that would make the "
+                         "pipeline loop back on itself." % (src, dst), "error")
+            return
+        # **單一角色的區域埠一條線**（F12 §7-②）：`region_key` 那一格只放得下
+        # 一個名字，所以第二條線是「改接別的」不是「這個也算」。影像那邊同一條
+        # 規矩由 `_drop_conflicting_edges` 執行，區域這邊的判準更簡單 ——
+        # 同一格上的舊線全部讓位。（`region_keys` 是清單，第二條是累加。）
+        if not multi:
+            for e in [e for e in self.model.edges
+                      if e.dst == dst and e.dst_in == param
+                      and not (e.src == src and e.src_out == name)]:
+                self.model.remove_edge(e.src, dst, src_out=e.src_out,
+                                       dst_in=param)
+        value = str(self.model.nodes[dst].params.get(param, "") or "")
         # 挑了區域就順手把輸出名填成區域的名字（F7-11）—— 拉線跟在設定區挑
         # 是同一個動作，所以走同一條路。
         self._autofill_output_prefix(dst, param, value)
+        says = self.model.rename_fallout(dst, before,
+                                         self.model.nodes[dst].params)
         self._say_fallout(says, "“%s” now measures %s (defined by “%s”)."
                           % (dst, value.replace(",", " and "), src))
 
@@ -2845,21 +2864,38 @@ class StudioWindow(QMainWindow):
         """
         src, dst, stream = str(src), str(dst), str(stream or "")
         dst_in = str(dst_in or "")
-        # **區域線沒有 Edge 可以刪**（F12）：它是從參數推導出來的，所以剪掉它
-        # 就是把那一格空掉 —— 空掉之後 `region_lines()` 自然就不再產出這條線。
-        if self._is_region_param(dst, dst_in):
-            with self.model.compound("disconnect"):
-                note = self._unpoint_stream(dst, stream, dst_in)
-            self._status("Disconnected %s → %s on %s%s"
-                         % (src, dst, stream or "that region", note))
-            return
         # 剪之前先問清楚這條線落在哪一格 —— 剪完就查不到了。
+        # **這一段要排在區域那條岔路前面**（F42 B2）：區域線現在也是一條真的
+        # Edge，所以「這是不是區域線」的答案就藏在剛問出來的那個 ``dst_in`` 裡。
         if not dst_in:
             for e in self.model.edges:
                 if (e.src == src and e.dst == dst
                         and (not stream or e.src_out == stream)):
                     dst_in = e.dst_in
                     break
+        # **區域線現在是一條真的 Edge**（F42 B2）：剪它跟剪影像線一樣，
+        # 而「那一格跟著空掉」是水合的自然結果（`RecipeModel._hydrate_regions`）
+        # —— 不必在這裡另外清一次。以前它沒有 Edge 可刪，所以清參數就是全部。
+        if self._is_region_param(dst, dst_in):
+            node = self.model.nodes.get(dst)
+            before = dict(node.params) if node is not None else {}
+            with self.model.compound("disconnect"):
+                gone = self.model.remove_edge(
+                    src, dst, src_out=stream or None, dst_in=dst_in)
+            if not gone:
+                self._status("%s → %s is not connected on %s."
+                             % (src, dst, stream or "that region"))
+                return
+            says = self.model.rename_fallout(
+                dst, before, self.model.nodes[dst].params)
+            left = str(self.model.nodes[dst].params.get(dst_in, "") or "")
+            note = ((" — “%s” has no region on “%s” now" % (dst, dst_in))
+                    if not left else
+                    " — “%s” now measures %s" % (dst, left.replace(",", " and ")))
+            note += ("  " + " ".join(says)) if says else ""
+            self._status("Disconnected %s → %s on %s%s"
+                         % (src, dst, stream or "that region", note))
+            return
         with self.model.compound("disconnect"):
             one = stream and self.model.remove_edge(
                 src, dst, src_out=stream, dst_in=dst_in or None)
@@ -2914,7 +2950,12 @@ class StudioWindow(QMainWindow):
         spec = specs.get(param)
         if spec is None or not spec.is_input():
             return ""
-        if spec.type in ("image_keys", "region_keys"):
+        # **區域那一格不歸這裡管**（F42 B2）。它的值是從線水合出來的，所以
+        # 在這裡動它 = 在線還在的時候讓參數跟線說不同的話。剪區域線走
+        # `remove_edge`，那一格由 `RecipeModel._hydrate_regions` 空出來。
+        if spec.type in REGION_TYPES:
+            return ""
+        if spec.type == "image_keys":
             keys = [k.strip() for k
                     in str(node.params.get(param, "") or "").split(",")
                     if k.strip()]
@@ -2950,13 +2991,17 @@ class StudioWindow(QMainWindow):
         # 所以走同一條路（`_unpoint_stream`），不要在這裡另寫一份。
         with self.model.compound("remove-card"):
             for e in [e for e in self.model.edges if e.src == node_id]:
+                # **區域線跳過**（F42 B2）：它現在也住在 `model.edges` 裡，而
+                # 它那一格是**水合**出來的 —— 在線還在的時候先把它清掉，
+                # 「參數 ＝ 線說的」那條不變量就當場破了（而它是常開的斷言）。
+                # `model.remove` 拿掉線之後水合會把它空出來，這裡不必動它。
+                if is_region_edge(e, self.model.nodes):
+                    continue
                 self._unpoint_stream(e.dst, e.src_out, e.dst_in)
-            # 區域線同理（F12）：這張卡定義的區域，下游那幾格也要空出來。
-            # 不空的話畫面上線沒了、卡片卻還指著一個再也沒有人定義的區域 ——
-            # 而那正是這一輪要修掉的那種說謊。
-            for a, b, name, param in self.model.region_lines():
-                if a == node_id:
-                    self._unpoint_stream(b, name, param)
+            # 區域線**不必**在這裡處理了（F42 B2）：它現在是一條真的 Edge，
+            # 而 `RecipeModel.remove` 刪卡時本來就會把它兩端的線一起拿掉 ——
+            # 拿掉之後水合就把下游那幾格空出來。以前它是從參數推導的，
+            # 所以「把那一格空掉」非得在這裡自己做一次不可。
             self.model.remove(node_id)
         if self.selected_node == node_id:
             self.selected_node = None
