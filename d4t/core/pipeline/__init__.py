@@ -26,6 +26,7 @@ from .expression import Expression, ExpressionError, parse_expression
 from .recipe import (
     Issue,
     Edge,
+    RECIPE_VERSION,
     Recipe,
     RecipeError,
     RecipeNode,
@@ -60,6 +61,7 @@ __all__ = [
     # recipe
     "Edge", "Recipe", "RecipeNode", "ScoreSpec", "Issue",
     "validate", "execution_order", "RecipeError", "is_region_edge",
+    "RECIPE_VERSION",
     # 分流（F23）
     "RouteBy", "resolve_route", "route_miss_message",
     # expression

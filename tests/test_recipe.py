@@ -17,6 +17,7 @@ from d4t.core.pipeline import (
     Recipe,
     RecipeError,
     RecipeNode,
+    RECIPE_VERSION,
     ScoreSpec,
     Step,
     execution_order,
@@ -134,7 +135,10 @@ def test_json_defaults_filled():
         "score": {"expr": "1", "threshold": 0.5, "bins": {"below": 0, "above": 1}},
     }
     r = Recipe.from_json_dict(d)
-    assert r.version == 1
+    # 沒寫 ``version`` = 舊檔案（F42 B3 之前的每一份都是），所以它會走一次
+    # 區域遷移，然後被標成**現在這一版** —— 不然每一次送進 worker 都會再遷移
+    # 一次，而遷移改了版本號，那一對就不再是 identity（鐵則 9）。
+    assert r.version == RECIPE_VERSION
     assert r.author == ""
     assert r.description == ""
     assert r.edges == []

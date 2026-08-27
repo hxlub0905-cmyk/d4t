@@ -47,7 +47,7 @@ __all__ = [
     "RecipeError", "RecipeNode", "ScoreSpec", "Edge", "Recipe",
     "RouteBy", "resolve_route", "route_miss_message",
     "Issue", "execution_order", "validate", "is_region_edge",
-    "region_edge_values", "hydrate_regions",
+    "region_edge_values", "hydrate_regions", "RECIPE_VERSION",
 ]
 
 
@@ -524,6 +524,151 @@ def is_region_edge(edge: "Edge", nodes: Dict[str, "RecipeNode"],
         if spec.name == edge.dst_in:
             return spec.type in REGION_TYPES
     return False
+
+
+#: 目前這一版 recipe 的形狀（F42 B3，2026-08-27）。
+#:
+#: 1 = 區域依賴存在**參數**裡（F12 §3）；
+#: 2 = 存在**線**裡（方案 B）。
+#:
+#: 新建的 recipe 就是「這一版寫的」，所以 :class:`Recipe` 的預設值是它 ——
+#: 那不是裝飾：遷移以 ``version < RECIPE_VERSION`` 為判準，而一份記憶體裡組出來
+#: 的 recipe（Studio 的 ``to_recipe()``）也會走
+#: ``to_json_dict → from_json_dict``（`run_batch` 送進 worker 的路）。
+#: 預設留在 1 的話，**每一次送進 worker 都會再跑一次遷移**，而遷移會把版本號
+#: 改成 2 —— 那一對就不再是 identity 了（鐵則 9）。
+RECIPE_VERSION = 2
+
+
+def _cycles_with(edges: List["Edge"], extra: "Edge",
+                 nodes: Set[str]) -> bool:
+    """``extra`` 加進去會讓 ``nodes`` 這組節點成環嗎（只看 src/dst）。
+
+    遷移補線之前問這一句。真實的踩法只有一種形狀，而它是真的存在的：
+    **Profile 吃 roi_mask 吐的 mask 影像，而 roi_mask 又吃 Profile 定義的區域。**
+    在 F12 的世界裡它跑得動 —— 順序由那條影像線決定，而區域那一半根本不在圖上。
+    補上去就成環，`execution_order` 會 raise，一份今天跑得動的 recipe 明天打不開。
+
+    所以那條線**不補**，而且不能安靜地不補（`region-has-no-line` 那條 lint）。
+    """
+    adj: Dict[str, List[str]] = {}
+    indeg: Dict[str, int] = {n: 0 for n in nodes}
+    seen: Set[Tuple[str, str]] = set()
+    for e in list(edges) + [extra]:
+        if e.src not in nodes or e.dst not in nodes:
+            continue
+        if (e.src, e.dst) in seen:
+            continue
+        seen.add((e.src, e.dst))
+        adj.setdefault(e.src, []).append(e.dst)
+        indeg[e.dst] = indeg.get(e.dst, 0) + 1
+    queue = [n for n in nodes if indeg.get(n, 0) == 0]
+    done = 0
+    while queue:
+        n = queue.pop()
+        done += 1
+        for m in adj.get(n, ()):
+            indeg[m] -= 1
+            if indeg[m] == 0:
+                queue.append(m)
+    return done != len(nodes)
+
+
+def _region_producer(name: str, route: List[str], upto: int,
+                     nodes: Dict[str, "RecipeNode"],
+                     registry: Dict[str, Type[Step]]) -> str:
+    """誰定義了區域 ``name``（沒有人回空字串）—— 遷移補線用。
+
+    語意跟 UI 的 ``RecipeModel.region_producer`` 一字不差：**取上游最後一個**
+    （``ctx.set_roi`` 同名覆寫），而 B0 之後「最後一個」＝「唯一一個」。
+
+    找不到就往**整條 route** 再找一次 —— 那是「參數指到排在下游的那張卡」
+    的情形，而補了線之後 `execution_order` 會把順序排對。
+    見 :func:`_migrate_region_params_into_edges` 的說明。
+    """
+    def owner_in(seq: List[str]) -> str:
+        found = ""
+        for nid in seq:
+            node = nodes.get(nid)
+            if node is None or not node.enabled:
+                continue
+            step_cls = registry.get(node.step)
+            if step_cls is None:
+                continue
+            try:
+                if name in step_cls.resolve_regions_out(
+                        step_cls.validate_params(node.params)):
+                    found = nid
+            except Exception:              # noqa: BLE001 — 壞參數交給 validate
+                continue
+        return found
+
+    return owner_in(route[:upto]) or owner_in(route)
+
+
+def _migrate_region_params_into_edges(
+        nodes: Dict[str, "RecipeNode"], routes: Dict[str, List[str]],
+        edges: List["Edge"],
+        registry: Optional[Dict[str, Type[Step]]] = None) -> None:
+    """v1（區域存在**參數**裡）→ v2（存在**線**裡）。F42 B3，2026-08-27。
+
+    判準是**版本號**（``version < RECIPE_VERSION``），不是「有參數但沒有線」
+    —— 後者是鐵則 9 明文禁止的「靠新東西不在判斷」，而這個 repo 為它付過一次
+    ``workers=1`` 與 ``workers=2`` 算出不同分數的錢。
+
+    補線的來源用 :func:`_region_producer`（＝ UI 的 ``region_producer``，
+    「上游最後一個」；B0 之後「最後一個」＝「唯一一個」）。三種情形：
+
+    ① **上游找得到** —— 補一條線，畫布跟以前長得一樣。
+
+    ② **指到一個沒有人產出的名字** —— 不補線，而且**那個字留著**。
+       壞的 recipe 遷移完仍然要壞，訊息也不准變差：留著它，
+       `unknown-region` 才問得到；清掉的話 `glv_stats` 的空 ``roi`` 是完全
+       合法的「量整張圖」，症狀會從一句紅字變成安靜地算錯。
+
+    ③ **產出它的那張卡排在下游** —— **補線**。這是一個**刻意的行為改變**：
+       補完之後 `execution_order` 會把 Region 卡排到前面，於是一份原本
+       「量測卡先跑、安靜地量整張圖」的 recipe 開始算對的數字。
+       那正是這一輪存在的理由（見 `docs/plans/F42-region-edges-plan-b.md` §1）。
+
+    ④ **補上去會成環** —— 不補（見 :func:`_cycles_with`），而且由
+       `validate` 的 `region-has-no-line` 講出來。一份今天跑得動的 recipe
+       不可以因為遷移而打不開。
+
+    **不做「順手接線」**：只補參數已經指名的那幾條。使用者從來沒有表達過的
+    連線，遷移沒有資格代他畫（鐵則 10）。
+    """
+    if registry is None:
+        registry = REGISTRY
+    have = {(e.dst, e.dst_in, e.src_out) for e in edges}
+    for kind, route in routes.items():
+        route = list(route)
+        in_route = set(route)
+        for i, nid in enumerate(route):
+            node = nodes.get(nid)
+            if node is None:
+                continue
+            step_cls = registry.get(node.step)
+            if step_cls is None:
+                continue
+            try:
+                params = step_cls.validate_params(node.params)
+            except Exception:              # noqa: BLE001 — 壞參數交給 validate
+                params = dict(node.params)
+            for spec in step_cls.region_input_specs():
+                raw = str(params.get(spec.name, "") or "")
+                for name in [x.strip() for x in raw.split(",") if x.strip()]:
+                    if (nid, spec.name, name) in have:
+                        continue           # 已經有線了（跑第二次是 no-op）
+                    src = _region_producer(name, route, i, nodes, registry)
+                    if not src or src == nid or src not in in_route:
+                        continue           # ② 沒有人產出它 —— 那個字留著
+                    new = Edge(src=src, dst=nid, src_out=name,
+                               dst_in=spec.name)
+                    if _cycles_with(edges, new, in_route):
+                        continue           # ④ 補上去會成環
+                    edges.append(new)
+                    have.add((nid, spec.name, name))
 
 
 def region_edge_values(nodes: Dict[str, "RecipeNode"],
@@ -1961,7 +2106,10 @@ class Recipe:
     routes: Dict[str, List[str]]      # dataset kind → 依序的節點 id（v1 線性）
     nodes: Dict[str, RecipeNode]
     score: ScoreSpec
-    version: int = 1
+    #: 這份 recipe 的形狀版本（見 :data:`RECIPE_VERSION`）。**預設是現在這一版**
+    #: —— 新建的 recipe 就是這一版寫的，而遷移以 ``version < RECIPE_VERSION``
+    #: 為判準：留在 1 的話，每一次送進 worker 都會再跑一次遷移（鐵則 9）。
+    version: int = RECIPE_VERSION
     author: str = ""
     description: str = ""
     edges: List[Edge] = field(default_factory=list)   # 畫布上的線（見 Edge）
@@ -2202,6 +2350,12 @@ class Recipe:
         # 這一步是 :meth:`to_json_dict` 丟掉區域參數的**還原**那一半，兩邊算的
         # 是同一件事，所以這一對仍然是 identity（鐵則 9）。它不是遷移：
         # 它對新舊檔案做完全一樣的事，而且跑第二次是 no-op。
+        # 區域參數 → 線（F42 B3）。**以版本號為判準**，而且要排在
+        # `hydrate_regions` **前面** —— 它補的線正是下一行要讀的東西。
+        version = _as_int(d.get("version", 1), "recipe 'version'")
+        if version < RECIPE_VERSION:
+            _migrate_region_params_into_edges(nodes, routes, edges)
+            version = RECIPE_VERSION
         hydrate_regions(nodes, edges)
         return cls(
             recipe_id=str(d["recipe_id"]),
@@ -2209,7 +2363,7 @@ class Recipe:
             nodes=nodes,
             score=score,
             app_version=str(d.get("app_version", "") or ""),
-            version=_as_int(d.get("version", 1), "recipe 'version'"),
+            version=version,
             author=str(d.get("author", "")),
             description=str(d.get("description", "")),
             edges=edges,
@@ -2631,7 +2785,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     檢查項（code）：unknown-step / bad-param / not-configured（error）/
     half-configured（warning）/ unknown-node /
     unknown-route / cycle / missing-image / unknown-region /
-    duplicate-region（error）/ region-edge-no-port（warning）/ requires-ref /
+    duplicate-region（error）/ region-edge-no-port（warning）/
+    region-has-no-line（warning）/ requires-ref /
     ambiguous-input / score-expr / unknown-feature（warning）/
     stale-feature-ref（warning）/ feature-collision（warning）/ bad-bins /
     uneven-treatment（warning）/ card-order（warning）。
@@ -2914,8 +3069,46 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                     detail=f"route '{k}': it measures region(s) {missing_roi}, "
                            f"but no upstream card defines them (currently "
                            f"defined: {sorted(regions)}). Add a Region card "
-                           f"upstream, or clear the roi parameter to measure "
-                           f"the whole image."))
+                           f"upstream and drag a line from its diamond port "
+                           f"into this card; cut the line to measure the "
+                           f"whole image instead."))
+            # **有名字、卻沒有線**（F42 B3）。B2 之後那一格的值是線推出來的，
+            # 所以這個狀態只剩兩種來歷，而上面那一條只講得出其中一種：
+            #
+            # * 指到一個沒有人定義的名字 → `unknown-region`（上面，error）；
+            # * 產出它的那張卡**在**，但那條線補不上去 —— 補了會成環
+            #   （`_migrate_region_params_into_edges` 的第 ④ 種）。
+            #
+            # 第二種今天跑得動（順序由影像線決定），所以是 warning 不是 error。
+            # 但它不能安靜：畫布上兩張卡看起來互不相干，而其中一張真的在量
+            # 另一張畫的框 —— 那正是 F12 一開始要修的那句「畫布不能說謊」。
+            wired = {e.dst_in for e in recipe.edges
+                     if e.dst == nid and e.src_out
+                     and is_region_edge(e, recipe.nodes, registry)}
+            for spec in step_cls.region_input_specs():
+                value = str(p.get(spec.name, "") or "")
+                if not value or spec.name in wired:
+                    continue
+                known = [x for x in
+                         (y.strip() for y in value.split(",")) if x in regions]
+                if not known:
+                    continue           # 沒有人定義它 —— 上面那一條已經講了
+                issues.append(Issue(
+                    code="region-has-no-line", level="warning", node_id=nid,
+                    title=f"step '{nid}' measures {known} with no line to "
+                          f"say where it comes from",
+                    detail=f"route '{k}': “{spec.label or spec.name}” is set "
+                           f"to {value}, and an upstream card does define "
+                           f"{known} - but there is no line on the canvas "
+                           f"between them, so two cards that depend on each "
+                           f"other look unrelated. This usually means the "
+                           f"line could not be drawn without making the "
+                           f"pipeline loop back on itself (a Region card "
+                           f"feeding an image into the very card that "
+                           f"defines its regions). It still runs - the order "
+                           f"comes from the image lines - but check that the "
+                           f"two cards really are meant to depend on each "
+                           f"other that way."))
 
             # 吃**特徵**的卡（F16，Algo 段）：指到一個沒人算出來的數字，在跑
             # 之前就講。沒有這一段的話它要等**每一顆 defect 都失敗**才看得出來

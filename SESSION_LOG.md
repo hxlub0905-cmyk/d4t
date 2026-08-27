@@ -19,6 +19,59 @@
 
 ---
 
+## F42 B3：遷移（2026-08-27）
+
+`_migrate_region_params_into_edges`，判準是 **`version < RECIPE_VERSION`**
+（=2），跑完寫成 2。計畫書：
+[`docs/plans/F42-region-edges-plan-b.md`](docs/plans/F42-region-edges-plan-b.md)。
+
+### `Recipe.version` 的預設值跟著改成 2 —— 那不是裝飾
+
+留在 1 的話，一份記憶體裡組出來的 recipe（Studio 的 `to_recipe()`）走
+`to_json_dict → from_json_dict`（`run_batch` 送進 worker 的路）時會**再跑一次
+遷移**，而遷移改了版本號 —— 那一對就不再是 identity（鐵則 9）。
+改之前 `test_json_defaults_filled` 立刻變紅。
+
+### 四種情形，兩個跟工作單不一樣的決定
+
+① 上游找得到 → 補線。③ 產出它的卡排在**下游** → **補線**，順序因此被排對
+（**刻意的行為改變**，也是這一輪存在的理由）。
+
+② 指到沒有人產出的名字 → **那個字留著**（工作單寫的是「讓埠空著、錯誤變
+`not-connected`」）。理由是同一句話還寫著「訊息不得變差」，而 `glv_stats` 長不
+出 `not-connected` —— 空的 `roi` 是完全合法的「量整張圖」，清掉之後那條路的終點
+是**安靜地算錯**。`unknown-region` 的訊息重寫過：現在講「拉一條線」，
+不講「把 roi 那一格清掉」（那一格從 F12 起就是唯讀的）。
+
+④ 補上去會成環 → 不補。**查下來這是一道「不可能發生、但必須擋」的檢查**：
+
+> 要讓那條區域線成環，就得先有一條 consumer → producer 的線；而那條線會把
+> consumer 排在 producer 前面 —— 於是 consumer 跑的時候那個區域還不存在。
+> **「今天跑得動、補了線就成環」的 recipe 不存在。**
+
+它的用處是**讓一份壞的 recipe 維持壞得一樣**：沒有它的話 `execution_order`
+會 raise，一條講得出話的 lint error 變成「這個檔案打不開」。遷移沒有資格把
+病情升級。測試比對的因此是**遷移前後的 issue 清單逐項相同**。
+
+### 新 lint：`region-has-no-line`（warning）
+
+「有名字、上游也真的定義了它、但畫布上沒有那條線。」真正的客群是**手寫 recipe
+的 CLI 使用者** —— 工作單那句「CLI 手寫 recipe 從此要寫 edges」的安全網。
+warning 不是 error（它跑起來是對的），但不可以安靜。
+② 與 ④ **不准同時報**：一句話講兩次，使用者會以為有兩個問題。
+
+### 出貨的 recipe
+
+兩份都重存成 v2，diff 只有一行。證明過重存前後每一張卡的每一個參數、每一條線、
+每一條 route 都逐項相同。`recipes/README.md` 沒有版本欄位、`0822test/` 的產生器
+不產 recipe，兩者都不必改。
+
+### 驗收
+
+`tests/test_region_edges_migration.py` 12 條，三個突變各驗過會紅（拿掉環的檢查、
+判準換成「沒有線就補」、把沒有人產出的名字清掉）。核心 2428 綠、
+62 支 UI 測試逐檔綠、黃金值三份逐項相同。
+
 ## F42 B2：拉線走真的 `add_edge`，參數是水合出來的（2026-08-27）
 
 **F12 §3 在這裡真的被推翻。** 計畫書：

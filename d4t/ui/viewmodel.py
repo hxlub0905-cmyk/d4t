@@ -19,10 +19,10 @@ from d4t.core.pipeline import (
     Edge, ParamError, Recipe, RecipeNode, RouteBy, ScoreSpec, get_step,
     validate,
 )
-from d4t.core.pipeline.recipe import (DecideSpec, Let, Rule, TreeLeaf,
-                                      TreeStep, _tree_from_json, _tree_to_json,
-                                      feature_referrers, region_edge_values,
-                                      rules_to_tree)
+from d4t.core.pipeline.recipe import (RECIPE_VERSION, DecideSpec, Let, Rule,
+                                      TreeLeaf, TreeStep, _tree_from_json,
+                                      _tree_to_json, feature_referrers,
+                                      region_edge_values, rules_to_tree)
 
 #: bin 編號的上限。**它的用途是「別讓數字框變成一格自由文字」，不是「分類碼
 #: 應該多大」** —— 後者是廠決定的，不是我們。
@@ -107,7 +107,9 @@ class RecipeModel:
         self.recipe_id = "untitled"
         self.author = ""
         self.description = ""
-        self.version = 1
+        #: 新建的 recipe 就是**這一版**寫的（F42 B3）。留在 1 的話，Studio 存出
+        #: 去的每一份檔案都會宣稱自己是舊格式，於是下次打開再跑一次遷移。
+        self.version = RECIPE_VERSION
         self.node_order: List[str] = []            # route 順序（= 拓撲順序）
         self.nodes: Dict[str, RecipeNode] = {}
         #: 顯式的節點連線（F7-6 畫布）。``node_order`` 仍然是執行順序，

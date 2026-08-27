@@ -1,6 +1,6 @@
 # F42 — 區域線改存進 `recipe.edges`（方案 B）
 
-**狀態**：進行中（B0／B1／B2 完成 2026-08-27）
+**狀態**：進行中（B0／B1／B2／B3 完成 2026-08-27）
 **起點**：一個排序 bug —— 把 Region 卡放在量測卡**右邊**（route 上排在後面）
 的時候，`execution_order` 讓量測卡先跑，於是它量的是整張圖。畫布上有一條
 區域線指著那張 Region 卡，而那條線**不影響執行順序** —— 因為它根本不在
@@ -57,7 +57,7 @@ B 的線指著**一個特定的節點**。引擎那一頭沒有節點的概念 �
 | **B0** | 同名區域 → `duplicate-region` error | ✅ 2026-08-27 |
 | **B1** | 引擎認得區域線（`is_region_edge`；排序 bug 即修復） | ✅ 2026-08-27 |
 | **B2** | UI 拉線走真的 `add_edge` ＋ 水合 | ✅ 2026-08-27 |
-| **B3** | 遷移（`version < N` 為判準） | ⏳ |
+| **B3** | 遷移（`version < N` 為判準） | ✅ 2026-08-27 |
 | **B4** | 拆舊路（刪 `region_lines()`）＋ 文件收尾 | ⏳ |
 
 **每一個階段的驗收都含「黃金值逐項相同」，無例外。**
@@ -300,3 +300,87 @@ F12 §4 的第四條：「來源排在下游的區域**也擋**」。那句話�
 * `region_lines()` **一個字都沒改**（B4 才拆），畫布仍然讀它 ——
   所以它現在是一份**對照的預言**：線推導出來的與參數推導出來的必須一致。
 * 核心 2415 綠、62 支 UI 測試逐檔綠、黃金值三份逐項相同。
+
+
+---
+
+## B3 — 遷移（2026-08-27）
+
+`_migrate_region_params_into_edges`，判準是 **`version < RECIPE_VERSION`**
+（`RECIPE_VERSION = 2`），跑完寫成 2。
+
+**不是**「有參數但沒有線」—— 那是鐵則 9 明文禁止的「靠新東西不在判斷」，
+而這個 repo 為它付過一次 `workers=1` 與 `workers=2` 算出不同分數的錢。
+
+### ⚠ `Recipe.version` 的預設值跟著改成 2，而那是必要的
+
+留在 1 的話，一份**記憶體裡組出來**的 recipe（Studio 的 `to_recipe()`）走
+`to_json_dict → from_json_dict`（`run_batch` 送進 worker 的路）時會**再跑一次
+遷移**，而遷移把版本號改成 2 —— 那一對就不再是 identity 了（鐵則 9）。
+`RecipeModel.version` 一起改。
+
+這一條是實際踩到的：改之前 `test_json_defaults_filled` 立刻變紅。
+
+### 四種情形
+
+| | 情形 | 處置 |
+|---|---|---|
+| ① | 上游找得到 | 補線 |
+| ② | 指到沒有人產出的名字 | **不補線，那個字留著** |
+| ③ | 產出它的卡排在**下游** | **補線** —— 順序因此被排對 |
+| ④ | 補上去會**成環** | 不補，由 `region-has-no-line` 講 |
+
+**③ 是一個刻意的行為改變**，而且是這一輪存在的理由：遷移之前那兩張卡在引擎
+眼裡毫無關係，量測卡先跑、`ctx.rois` 是空的，於是安靜地量整張圖。遷移之後線
+把順序排對，一份原本算錯的 recipe 開始算對的數字。寫進遷移的 docstring，
+釘成 `test_a_region_card_to_the_right_gets_wired_and_the_order_is_fixed`。
+
+**② 跟工作單寫的不一樣**（工作單：讓埠空著、錯誤變 `not-connected`）。
+實作選了把名字留著，因為同一句話還寫著「**訊息不得變差**」—— 而 `glv_stats`
+根本長不出 `not-connected`：空的 `roi` 是完全合法的「量整張圖」，
+清掉之後那條路的終點是**安靜地算錯**。所以錯誤仍然是 `unknown-region`，
+而訊息重寫過（B3-⑥）：現在講的是「拉一條線」，不是「把 roi 那一格清掉」——
+那一格從 F12 起就是唯讀的了。
+
+### ④ 查下來是一道「不可能發生、但必須擋」的檢查
+
+工作單點名的路徑是「Profile 吃 roi_mask 的 mask 流、roi_mask 又吃 Profile 的
+區域」。查下來**這個形狀今天就是壞的**，而且不可能不壞：
+
+> 要讓那條區域線成環，就得先有一條 `consumer → producer` 的線；而那條線會把
+> consumer 排在 producer 前面 —— 於是 consumer 跑的時候那個區域還不存在。
+> 所以「今天跑得動、補了線就成環」的 recipe **不存在**。
+
+那這道檢查還有什麼用：**讓一份壞的 recipe 維持壞得一樣**。沒有它的話
+`execution_order` 會 raise，於是一條講得出話的 lint error 變成「這個檔案打不
+開」—— 遷移沒有資格把病情升級。測試因此比對的是**遷移前後的 issue 清單逐項
+相同**，不是「有沒有那條線」。
+
+### 新 lint：`region-has-no-line`（warning）
+
+「有名字、上游也真的定義了它、但畫布上沒有那條線。」B2 之後這個狀態只剩兩種
+來歷，而 `unknown-region` 只講得出另一種。它的真正客群是**手寫 recipe 的
+CLI 使用者** —— 工作單那句「CLI 手寫 recipe 從此要寫 edges」的安全網。
+
+warning 不是 error：它跑起來是對的（`ctx.rois` 是全域的，順序由 route 的排列
+決定）。但它不可以安靜 —— 畫布上兩張卡看起來互不相干，而其中一張真的在量另一
+張畫的框。
+
+⚠ ② 與 ④ 是**兩種不同的病，不准同時報**（一句話講兩次，使用者會以為有兩個
+問題）—— `test_a_name_nobody_produces_gets_only_the_error_not_both`。
+
+### 出貨的 recipe
+
+兩份都重存成 v2。diff 只有一行（`"version": 1` → `2`）——
+`ebi-to-api-characterization` 沒有區域參數；`patch-dsnr-by-class` 的 `roi="gc"`
+沒有補線，因為 templateGC 沒有模板就產不出區域名（那本來就是
+`ALLOWED_ERRORS` 裡的那條 `unknown-region`）。**證明過**：重存前後每一張卡的
+每一個參數、每一條線、每一條 route 都逐項相同。
+
+`recipes/README.md` 沒有版本欄位、`0822test/` 的產生器不產 recipe，兩者都不必改。
+
+### 驗收
+
+* 新測試 `tests/test_region_edges_migration.py`（12 條）。三個突變各驗過會紅：
+  ① 拿掉環的檢查、② 判準換成「沒有線就補」、③ 把沒有人產出的名字清掉。
+* 核心 2428 綠、62 支 UI 測試逐檔綠、黃金值三份逐項相同。
