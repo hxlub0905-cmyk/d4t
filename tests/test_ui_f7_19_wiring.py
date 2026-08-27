@@ -16,6 +16,23 @@ F7-20 讓一張卡吃 N 條流之後，那個語意就變成擋路的了：畫�
 * ``image_keys``（一串流）→ **累加**。先拉 test 再拉 ref = 兩張都做。
 * ``image_key``（單一具名角色，``subtract`` 的 a / b）→ **取代**。
   往 a 再拉一條是「改接別的」，不是「a 有兩條」。
+
+⚠ F39-B2b（2026-08-27）刪了四條**純重複**的，每一條都指名蓋掉它的那支：
+
+* ``the_second_line_actually_appears_on_the_canvas``
+  → ``test_ui_f9_9_two_lines_side_by_side::test_the_canvas_draws_one_line_per_edge``
+  （那支還多問了每一條線的 ``out_name()``）
+* ``wiring_the_same_stream_twice_changes_nothing``
+  → ``f9_9::test_the_same_line_twice_is_still_a_no_op``（還多問了狀態列那句話）
+* ``route_order_has_no_lines_at_all``
+  → ``test_ui_canvas_truth::test_the_canvas_never_lies_about_where_a_card_gets_its_data``
+  （400 組隨機接／剪的性質測試，比這裡的單一情境強）
+* ``a_line_can_be_cut_where_it_is``
+  → ``test_ui_canvas_cut_button.py`` 整支八條（命中區、boundingRect、被卡片
+  蓋住、埠還抓得到）
+
+留下來的那幾條是**這一檔獨有的**：累加的語意（使用者第八輪的原話）、角色埠
+仍然是取代、工具列那三條（尤其「建了鈕卻沒 addWidget」——Qt 不會報錯）。
 """
 from __future__ import annotations
 
@@ -72,33 +89,6 @@ def test_wiring_a_second_stream_adds_it_instead_of_replacing(window):
     window.pipeline.link_to(src, nid, port=1)          # ref —— 以前這裡會蓋掉
     assert window.model.nodes[nid].params["streams"] == "test,ref"
     assert "test" in window.status_text() and "ref" in window.status_text()
-
-
-def test_the_second_line_actually_appears_on_the_canvas(window):
-    """接上去要看得見。畫布不能說謊 —— 那是 F7-18 起就在守的東西。
-
-    線的數量是從「兩端共用的影像流」推出來的（``_ports_between``），所以
-    ``streams`` 一多一條，那條線就自己出現了，不必另外記。
-    """
-    src = first_source(window)
-    nid = window.add_card_after(src, "normalize")
-    window.pipeline.link_to(src, nid, port=0)
-    a, b = window.pipeline.card(src), window.pipeline.card(nid)
-    assert window.pipeline._ports_between(a, b) == [0]
-
-    window.pipeline.link_to(src, nid, port=1)
-    a, b = window.pipeline.card(src), window.pipeline.card(nid)
-    assert window.pipeline._ports_between(a, b) == [0, 1], \
-        "兩條流都接上了，畫布上就要有兩條線"
-
-
-def test_wiring_the_same_stream_twice_changes_nothing(window):
-    """重複拉同一條不該把它加兩次（``test,test`` 會讓那張卡做兩遍）。"""
-    src = first_source(window)
-    nid = window.add_card_after(src, "normalize")
-    window.pipeline.link_to(src, nid, port=0)
-    window.pipeline.link_to(src, nid, port=0)
-    assert window.model.nodes[nid].params["streams"] == "test"
 
 
 def test_both_streams_then_get_the_same_settings(window):
@@ -366,36 +356,6 @@ class _FakeDouble:
 
     def accept(self):
         pass
-
-
-def test_a_line_can_be_cut_where_it_is(window):
-    """接錯線的人要看得到怎麼斷開。
-
-    選起來按 Delete 本來就做得到，但畫面上沒有任何東西講出這件事 —— 刪除的
-    入口要長在被刪的那條線上面。
-    """
-    src = first_source(window)
-    nid = window.add_card_after(src, "denoise")
-    window._on_edge_added(src, nid, "test")        # F9-7：線由使用者拉
-    assert window.model.has_edge(src, nid) is True
-
-    edge = next(e for e in window.pipeline._edges
-                if e.pair() == (src, nid))
-    assert edge.acceptHoverEvents() is True
-    # × 畫在線的中點，而 boundingRect 一定要蓋得住它（不然移開會留殘影）
-    assert edge.boundingRect().contains(edge.cut_center())
-    assert edge.cut_hit(edge.cut_center()) is True
-    assert edge.cut_hit(edge.cut_center() + QPointF(40, 40)) is False
-
-
-def test_route_order_has_no_lines_at_all(window):
-    """route 順序的金色虛線 2026-08-14 退役（使用者：「會混淆」）——
-    畫布上只有使用者拉的線，每一條都有 ×。"""
-    src = first_source(window)
-    nid = window.add_card_after(src, "denoise")
-    pairs = {e.pair() for e in window.pipeline._edges}
-    assert pairs == set(window.model.edge_pairs()), \
-        "畫布上的線要恰好等於使用者拉的 edges"
 
 
 def test_tidy_puts_the_cards_back_on_the_grid(window):

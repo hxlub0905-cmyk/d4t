@@ -11,6 +11,11 @@
   「這一欄是什麼」。
 
 顏色那一條**逐個階段、逐個主題**驗 —— 下一次調色盤的人不必記得回來算。
+
+⚠ F39-B2b（2026-08-27）刪了 ``the_data_entries_are_not_on_the_toolbar_any_more``
+—— 它整組斷言都在 ``test_ui_f14_input_on_the_card.py`` 裡：
+``test_the_toolbar_carries_no_data_entry``（而且多問了附加檔與「Open recipe…
+要留著」）＋ ``test_the_empty_state_still_offers_every_source``。
 """
 from __future__ import annotations
 
@@ -119,24 +124,6 @@ def test_the_toolbar_has_three_weights(window):
         assert b.property("variant") == "ghost"
         assert b.text() == "", \
             "第三級是**純圖示**：一排沒有框的字讀起來是選單列（theme.py 的規矩）"
-
-
-def test_the_data_entries_are_not_on_the_toolbar_any_more(window):
-    """F14-1（使用者：「工具列拿掉吧（會混淆）」）—— 資料的入口搬到卡片上。
-
-    **入口沒有變少，只是搬家**：這一條同時驗兩件事，因為只驗前半的話，
-    「拿掉了」跟「弄丟了」在測試上長得一樣。
-    """
-    from PySide6.QtWidgets import QToolButton
-
-    on_bar = {w.text() for a in window.toolbar.actions()
-              if (w := window.toolbar.widgetForAction(a)) is not None
-              and isinstance(w, QToolButton)}
-    for src in scope.INPUT_SOURCES:
-        assert src.title not in on_bar and src.short not in on_bar, src.title
-        # 沒有資料時，畫面最大的那一塊仍然一種 source 一列
-        assert window.empty_source_buttons[src.key].text() == src.title
-    assert "Open GDS export…" not in on_bar
 
 
 # --------------------------------------------------------------------------- #

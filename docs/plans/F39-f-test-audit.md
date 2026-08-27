@@ -267,7 +267,7 @@ Phase 3 要刪 `feature_math` / `feature_fill`：
 | **B0** | ⚠ **卡住了，等 §4.4 的決定** | — | — |
 | **B1** | ✅ **2026-08-27 做完。** A 組六支改名 ＋ 一起改文件。測試程式碼一行不動（只有每一支開頭那行 F 編號註記換成「常駐 ＋ 從哪個舊名改來的」）。動手時修正了兩個少了 `test_ui_` 前綴的新名（見 §3 A 底下那一段）| 0 | 低。先做，它把「哪些是常駐」變成看得出來的 |
 | **B2** | ✅ **2026-08-27 做完 E 組那一半**：`f7_10`（6 條）與 `f7_14`（9 條）整支刪，救兩條進 `test_ui_canvas.py`。**D 組那一半退回去了** —— 見下 | 15 刪、2 救 | 低（逐條驗過「把 bug 放回去誰紅」）|
-| **B2b** | D 組裡純重複的 | ~25 | 低 |
+| **B2b** | ✅ **2026-08-27 做完。** D 組裡**純重複**的 —— 逐條找到蓋掉它的那一支才刪。實得 **8 條，不是 ~25**（見 §8）| 8 | 低 |
 | **B3** | C 組的「搬進 `test_card_invariants.py`／`test_ui_widgets.py`／`test_ui_canvas.py`」 | ~30 搬 | 中 |
 | **B4** | C 組新開的三個常駐檔 ＋ 對應刪除 | ~120 | 中高（碰到四個零覆蓋模組）|
 | **B5** | D 組其餘刪除 ＋ 文件收尾 | ~80 | 中 |
@@ -294,3 +294,65 @@ Phase 3 要刪 `feature_math` / `feature_fill`：
 - 刪掉一條之前，確認它保護的行為**沒有**被別的測試蓋到
 - **每一批都要跑一次「把 bug 放回去會紅」** —— 搬過去的不變量要在新家證明
   它還在守
+
+---
+
+## 8. B2b 的結果：「純重複」只有 8 條，不是 ~25
+
+§6 估 D 組裡有 ~25 條純重複的。**逐條找蓋掉它的那一支之後，實得 8 條。**
+
+| 刪掉的 | 蓋掉它的（都是會活下來的檔） |
+|---|---|
+| `f7_19::the_second_line_actually_appears_on_the_canvas` | `f9_9::the_canvas_draws_one_line_per_edge`（多問了每條線的 `out_name()`）|
+| `f7_19::wiring_the_same_stream_twice_changes_nothing` | `f9_9::the_same_line_twice_is_still_a_no_op`（多問了狀態列）|
+| `f7_19::route_order_has_no_lines_at_all` | `canvas_truth::the_canvas_never_lies_about_where_a_card_gets_its_data`（400 組隨機接／剪的性質測試）|
+| `f7_19::a_line_can_be_cut_where_it_is` | `test_ui_canvas_cut_button.py` 整支八條 |
+| `f7_18::dragging_from_the_ref_port_wires_ref_into_the_card` | `f7_19::wiring_a_second_stream_adds_it_instead_of_replacing`（它的 docstring 自己指過去）|
+| `f7_18::a_second_line_between_the_same_two_cards_is_not_refused` | 同上 |
+| `f7_18::adding_from_the_library_lands_after_the_selected_card` | `canvas_one_line_per_input::the_new_card_still_lands_after_the_selected_one` |
+| `f13_chrome::the_data_entries_are_not_on_the_toolbar_any_more` | `f14::the_toolbar_carries_no_data_entry` ＋ `f14::the_empty_state_still_offers_every_source` |
+
+四個「把 bug 放回去」都驗過，而且**紅的是活下來的那一支**：
+
+| 放回去的 bug | 誰紅 |
+|---|---|
+| `cut_hit` 永遠回 False | `canvas_cut_button` 4 條 |
+| `add_card_after` 排到最後面 | `canvas_one_line_per_input` 1 條 |
+| `image_keys` 的第二條線改成取代 | `f9_9` 2 條、`f7_19` 5 條 |
+| 副標的 id 前綴關掉（B2 那條）| `test_ui_canvas` 1 條 |
+
+### 為什麼差這麼多
+
+**D 組的共同形狀是「釘住一輪設計的像素／文字／widget 存在性」，而那種斷言多半
+是獨一無二的** —— 它該走是因為它是**驗收快照**，不是因為有人重複。「重複」與
+「快照」是兩個不同的理由，B2b 只做得了第一種。剩下的 ~70 條屬於 B5，而那一批
+要一條一條回答「這是不變量還是那一輪交付了」，不是找對照。
+
+### ⚠ 留給 B3／B5 的一個地雷
+
+`f13_layout::selecting_a_card_opens_it_again` 與
+`f13_layout::the_settings_pane_gives_the_space_back_when_nothing_is_selected`
+的斷言**整組**在 `f8_ui_polish::the_canvas_is_the_top_block_and_settings_get_the_rest`
+裡。三條都不在 B2b 裡刪，因為 `f8_ui_polish` 是 C 組、而它那一條不在 §3 C 的
+救援清單上 —— **兩邊各自照自己的清單刪，這個行為就一起消失了。**
+B3／B5 動到這兩支任何一支時，先確認另一邊還在。
+
+### 方法：逐條測試的行覆蓋（B3–B5 可以再用）
+
+`pip install coverage pytest-cov`（**家用機的開發工具，不進 `requirements.txt`**
+—— 公司機那條 stdlib-only 的線不動），然後逐檔一個行程收：
+
+```bash
+for f in tests/test_ui_*.py; do
+  COVERAGE_FILE=cov/.coverage.$(basename $f .py) QT_QPA_PLATFORM=offscreen \
+    python -m pytest -q "$f" --cov=d4t --cov-context=test --cov-report=
+done
+python -m pytest -q --ignore-glob="*test_ui_*" --cov=d4t --cov-context=test  # 核心批也要
+coverage combine        # 合起來之後 CoverageData.contexts_by_lineno() 問「這一行誰踏過」
+```
+
+**只有一條測試踏過的行 = 刪掉就沒人踏了**，那是「先看一眼」的清單。
+
+⚠ **行覆蓋不是斷言覆蓋。** 跑到那一行不代表有問它對不對 —— 這個 repo 有過一支
+恆綠零斷言的測試（§4.1），它的行覆蓋很漂亮。所以覆蓋只當篩子，判決仍然是
+「把 bug 放回去誰紅」。
