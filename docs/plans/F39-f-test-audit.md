@@ -187,32 +187,36 @@ usually means the period was measured wrong」這句話。分數其實在量**�
 > 這正是這個 repo 一直在獵的那個形狀：**跑得完、有數字、而且是錯的**。
 > 而那支空轉的測試就是沒有人發現它的原因。
 
-### 4.3 為什麼不自己修
+### 4.3 ⚠ 這一節原本寫錯了兩處 —— F40 量完之後改寫
 
-那個分數餵兩個地方：
+**原文說「`period.py:445` 是週期候選的排序，所以週期估測本身照銳利度在挑」。
+那是錯的**，而且錯在兩個方向。留著原本的判斷會做出一個範圍太大的改動，
+所以把量到的東西寫在這裡（完整版見
+[`F40-stack-agreement.md`](F40-stack-agreement.md)）：
 
-1. `template_dialog.py:760` —— 使用者看得到的那句警示。
-2. **`period.py:445`** —— 週期候選的排序（`ghosting_score(...)[1]` 的原始
-   lap_var）。也就是說**週期估測本身是照「哪個看起來最銳利」在挑**，不是照
-   「哪個對得最齊」。`golden.refine_period` 的 docstring 明寫它照 lap_var 排序。
+| 原本寫的 | 實測 |
+|---|---|
+| `period.py:445` 排的是**週期** | **不是。** 那一行在 `choose_origin` 裡，週期是呼叫端固定的，它排的是**相位**。`estimate_period` 走自相關，`golden.py` 一行都沒碰 —— 擬真圖上實測它給的 px=28 是對的 |
+| 所以「`estimate_period` 的行為會變」 | **不會。** 兩者沒有呼叫關係 |
+| （沒提到）| `refine_period` / `candidate_periods` **零個 production 呼叫者**。而 `refine_period` 實測會從 26 走到 20（真值 28）—— 真的壞，但是死碼 |
+| （沒提到）| `choose_origin` 的目標函數**構造上就近乎平的**：週期固定時換相位＝疊出來的圖循環位移，而 Laplacian 變異數對循環位移幾乎不變。`template.py:18-23` 早就寫著，而 `anchor_cell` 事後用地標重新決定相位 |
 
-修法要換成**跨格子的一致性**（疊之前先看那幾格彼此的變異），那是演算法改動，
-會動到 `estimate_period` —— 而出貨的 `patch-dsnr-by-class.json` 走 templateGC。
+所以真正活著的缺陷**只有** `template_dialog.py:760` 那個絕對門檻。
 
-黃金值**不受影響**（三份 fixture recipe 都沒有 `roi_template`），但這已經遠遠
-超出「審測試」與「修一支空轉的測試」。**工作單：拿不準的就問。**
+### 4.4 結論（原本的三個選項有兩個是錯的）
 
-### 4.4 三個選項
+原本列了 (a) 連 `period.py` 一起改／(b) 只修對話框／(c) 只記錄，並建議 (b)
+「因為 `period.py` 風險大」。**範圍的結論對，理由是錯的** —— `period.py` 那一半
+根本不在週期估測的路徑上，而該放過 `choose_origin` 的真正理由是它的目標函數
+本來就近乎平的。
 
-| | 做什麼 | 代價 |
-|---|---|---|
-| **(a)** | 換成跨格子一致性（疊之前算那幾格的變異／相關）。`ghosting_score` 多回一個值，`template_dialog` 的門檻改用它，`period.py` 的排序也跟著換 | 演算法改動；`estimate_period` 的行為會變，要重新驗週期估測那一組測試 |
-| **(b)** | 只修使用者看得到的那一句：`template_dialog` 改用一個新的、正確的一致性指標，**`period.py` 的排序不動** | 小得多，而且立刻讓那句警示是真的。代價：同一個名字在兩個地方意思不同 |
-| **(c)** | 現在只把發現寫進 `docs/PITFALLS.md`，測試改成 `xfail` 並指向這一段 | 零風險，但那個「跑得完而且是錯的」會繼續活著 |
+實際做的（F40）：新增 `golden.stack_agreement`（無量綱、扣掉 `1/n` 地板），
+對話框的警示改掛在它上面，`ghosting_score` / `choose_origin` /
+`estimate_period` **一行都沒動** —— 所以 `test_period_golden` 與
+`test_roi_template:91` 一條都沒紅。
 
-**我的建議是 (b)**：那句警示是使用者唯一看得到的線索，而它現在會對著正確的
-模板喊狼來了。`period.py` 那一半風險大得多（會動到出貨 recipe 的行為），值得
-單獨一輪、單獨驗週期估測。
+> **一個「先問再做」的判斷，理由錯了照樣會得到對的範圍 —— 但下一次就不會了。**
+> 寫下來的是量出來的東西，不是當時的直覺。
 
 ---
 

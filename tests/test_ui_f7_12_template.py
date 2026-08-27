@@ -159,7 +159,18 @@ def test_an_empty_image_is_refused_instead_of_crashing(qapp):
 
 def test_a_blurred_stack_is_called_out_not_just_scored(qapp):
     """週期估錯 -> 疊出來糊掉 -> 每一顆都對錯，而且畫面上不會有錯誤訊息。
-    所以糊掉這件事要用**白話**講，不能只丟一個分數。"""
+    所以糊掉這件事要用**白話**講，不能只丟一個分數。
+
+    ⚠ **這一支從 F7-12 到 F40 之間什麼都沒有斷言。** 原本三行斷言全包在
+    ``if dlg.cell.ghosting < 40.0:`` 裡，而那個 +7 的錯週期實測 ghosting
+    是 **90.27** —— 條件恆為 False，整支恆綠。它守的正好是這個檔案開頭點名的
+    那個災難，而它一次都沒有守過。
+
+    為什麼那個 ``if`` 當初是必要的：``ghosting`` 量的是「疊完那張圖有多少邊緣
+    能量」，不是「那幾格有沒有對齊」—— 錯開的兩份各帶一組邊，反而更「銳利」。
+    F40 換成 ``agreement``（`golden.stack_agreement`）之後，斷言才**站得住而且
+    跑得到**。把 ``gc.agreement`` 換回 ``gc.ghosting < 40`` 這一支會紅。
+    """
     from d4t.core.algo import template as algo_template
 
     dlg = tpl_mod.TemplateDialog()
@@ -167,9 +178,26 @@ def test_a_blurred_stack_is_called_out_not_just_scored(qapp):
     # 故意用一個錯的週期疊（+7 px），模擬「週期估錯」
     dlg.cell = algo_template.build_golden_cell(big_image(), px=PERIOD + 7,
                                                py=240)
-    if dlg.cell.ghosting < 40.0:
-        assert "blurred" in dlg.summary()
-        assert "mis-place" in dlg.summary()
+    assert dlg.cell.agreement < tpl_mod.BLURRED_BELOW, \
+        "前提：+7 的週期真的疊不起來（agreement=%.3f）" % dlg.cell.agreement
+    said = dlg.summary()
+    assert "did not land on top of each other" in said
+    assert "mis-place" in said
+
+
+def test_a_correct_stack_is_not_called_blurred(qapp):
+    """上面那支的另一半 —— 少了它，「永遠喊狼來了」也會是綠的。
+
+    而那**正是舊門檻的行為**：`ghosting` 跟著對比走，所以一張低對比但週期正確
+    的圖會被說成 blurred（實測對比 0.25 時正確的週期只拿 6.8 / 100）。
+    """
+    from d4t.core.algo import template as algo_template
+
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(big_image(), "ok.tif")
+    dlg.cell = algo_template.build_golden_cell(big_image(), px=PERIOD, py=240)
+    assert dlg.cell.agreement >= tpl_mod.BLURRED_BELOW
+    assert "did not land on top of each other" not in dlg.summary()
 
 
 def test_the_canvas_paints_with_and_without_a_template(qapp):

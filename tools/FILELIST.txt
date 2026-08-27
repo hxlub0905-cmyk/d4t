@@ -5,7 +5,7 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 9f3cae8676c97aef534b20a4c2b3616c9241248a CLAUDE.md
 7bddb3ce6ded46f4baaa8f030cc3c851653cc23c README.md
-e3f55c26b71ef2b6e92c7154c771d80c9ba5d88c SESSION_LOG.md
+6bc11a19c72b32a7fe9012078731aaf04b4acad6 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -16,7 +16,7 @@ ee35d3a74a03161fd795cb83d72d5aca0622273a d4t/core/algo/curve.py
 17e03ca94f0dd599c67258b0aff775147b9a10f2 d4t/core/algo/edge.py
 d2f7e50ff4920fefc608e7d83117c771276104b7 d4t/core/algo/enhance.py
 a34f817e1f231f6dce7708011a19a70c8054941c d4t/core/algo/glv.py
-0cab7d03486a6ca498b9aa2831f34e02dc273d11 d4t/core/algo/golden.py
+92ceb171f3c5fa9b1035d3ee188ec4aae0896cdb d4t/core/algo/golden.py
 36dba0cb2492842918d64a6c855214bad2266b7b d4t/core/algo/grid.py
 01246b411a141df2e3d1281d272275ea709d8935 d4t/core/algo/histmatch.py
 d5770fe80aaeab0a470557e4ae85aef37b74ebd9 d4t/core/algo/mask.py
@@ -29,7 +29,7 @@ c1049c4ae6c2505db6e37b7edeaf364e1244b026 d4t/core/algo/quality.py
 1a921c40045dd66301dba24ef8676a216fbf2c1b d4t/core/algo/shape.py
 0f0727a89f62065c799e7c8fe234fc7b5c3545f9 d4t/core/algo/snr.py
 e1f7a95ad976983aa0f1f16b7bd52cdcc67494dd d4t/core/algo/subpixel.py
-82791f0e16286d803ddba7220ac56aec5548f6d4 d4t/core/algo/template.py
+d427eb5b2f42579b595059d20440a8c9aee464be d4t/core/algo/template.py
 5f93cfe3c9daa7b50b5efa3dd329c847e5c26c91 d4t/core/calibration.py
 78924f0edd38b3d96346542c63372c7fee679a91 d4t/core/export/__init__.py
 9c183f1e91a70b09ace6aa37356a68a0fc30ed8a d4t/core/export/boxplot.py
@@ -99,7 +99,7 @@ a108febbe68c248b3cc2c8b05bd5cd079984772c d4t/ui/output_band.py
 11a38b9e760697b23510805b56706f1eb8f6c85e d4t/ui/route_panel.py
 dee39628f8ce1af0cf87d9edee3ed1c6074db962 d4t/ui/scope.py
 fa797f5eabf07e49c82f9b04d9fb9c5fcff58b64 d4t/ui/studio.py
-b5a942d3adc4a3293cbb427677d3fd76bd876fde d4t/ui/template_dialog.py
+0a1d057639f34635416673d9dc38a3daf999530e d4t/ui/template_dialog.py
 44f3712558bc51d6e32e76b2f85eb0e07b016328 d4t/ui/theme.py
 3cc7d61199e03eaba0eb61f5a749b9f6cfca9ba5 d4t/ui/threshold_view.py
 460ce5e5207486254f1bd5cd4701454a46b9e5ca d4t/ui/tree_panel.py
@@ -115,7 +115,7 @@ cb5ec1e3cc74cbfc6f03fe2edb526c0993465c6e docs/GLAS-INTERFACE.md
 98db709267e7d0f5dcfa835cbcb09e67b7d1ae51 docs/HANDOVER.md
 15c2bb25a9b655500c0706d899826872abbc425f docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
-5add754408a8324566ed29c95f855d9a0c429655 docs/PITFALLS.md
+8716a322b4b32fc4c5167761a314b7a420c52002 docs/PITFALLS.md
 62840962ae903a3faa78b883456c23b54ef04f18 docs/ROADMAP.md
 c1cfb82e71df1d178b5f70766fcabf52d623476a docs/USING-CD.md
 f265bee418c00c58c1f1b1ca5916cba6929d9ffe docs/USING-CHARACTERIZATION.md
@@ -124,7 +124,8 @@ d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 655f8cf83bfe142b0952aa2769fd420aec2698d3 docs/plans/F26-decide-panel-ux.md
 4b55069e016b2ca16b4ff7e9e929d7454db52172 docs/plans/F27-results-panel.md
 95e1c9f1bee66ba5f2f545a665f2e5550b751b82 docs/plans/F38-output-three-cards.md
-ead9e54220f903c711f60f9633a6171eacb3e4e5 docs/plans/F39-f-test-audit.md
+57e6eba6e87061ca5ce33c7c89c80b86f32f1aa2 docs/plans/F39-f-test-audit.md
+3e9123afae269803c431a5fc4f1cafc3454c46ee docs/plans/F40-stack-agreement.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -212,7 +213,7 @@ f74d5228a3ab2e7c1ce81b65b0edeebb470b624d tests/test_make_mgext.py
 e84e37dde39527c6f3ccfc940b8fadf7a6002a32 tests/test_output_fold.py
 760493e6e43124ec37e48463773e51291e595c9c tests/test_pair_probe.py
 9a088ee43eb4186246abd49dfa59f51007fa80c6 tests/test_pair_source.py
-34f1bcdbffc5c85f790e98e5bd1c4b1f10fe795f tests/test_period_golden.py
+34feb7b3ac5ebd0ee52b0f480f2b25c254108388 tests/test_period_golden.py
 37fe3291f5eb15938ef1e8097b3a955e106be9f4 tests/test_phase_origin.py
 b50c831bcb56f33b701995f750409a06b054aa33 tests/test_pick_defect_box.py
 d3bf372a8505a94d5d189082b01b566b036bc87c tests/test_quality.py
@@ -271,7 +272,7 @@ bf6a2c02e3d4303ccd3b04e8ec2595af1ccabdb3 tests/test_ui_f20_panel_truth.py
 a0ab40773d758603412eb5db8466561f8cd2b48b tests/test_ui_f22_decide_panel.py
 96614052cb62c64c136380faaa466cdba0a4d759 tests/test_ui_f7_10_route_edges.py
 46aaf9832b3f29d0f2fcebb385842a71bd329afb tests/test_ui_f7_11_roi.py
-06c6297ddffd34e069f2bb6f97d039701f73acf3 tests/test_ui_f7_12_template.py
+4579beec538be582984c3a77a7201802baccf3c4 tests/test_ui_f7_12_template.py
 d576e0ec6f71b4eb90fe3a6b40a6907614f250cf tests/test_ui_f7_14_canvas_flow.py
 0012830b003a9ddefbecbf5b710b62c6e41e6d5a tests/test_ui_f7_15_reading_load.py
 3bde308dc46cbf6a4d6b87228f86650b4998d72a tests/test_ui_f7_16_safety_net.py
