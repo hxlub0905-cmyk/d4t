@@ -2304,6 +2304,52 @@ def _feature_collisions(step_cls, p: Dict[str, Any], nid: str, k: str,
     return out
 
 
+def _region_collisions(step_cls, p: Dict[str, Any], nid: str, k: str,
+                       region_owner: Dict[str, str]) -> List["Issue"]:
+    """這張卡定義的具名區域有沒有跟同一條 route 上別張卡撞名（就地更新表）。
+
+    **這一條是 error，而特徵撞名（:func:`_feature_collisions`）只是 warning。**
+    差別不是嚴重程度，是「有沒有第二條路拿得到被蓋掉的那一份」：特徵被蓋掉時
+    引擎會把前一份救成 ``<節點名>_<特徵>``，所以那句話是「你可能不是故意的」；
+    ``Context.set_roi`` **同名直接覆寫**，沒有救援，前一張卡畫的框就是不見了。
+
+    真正逼它變成 error 的是**線**（F42 方案 B）：區域依賴從此存進
+    ``recipe.edges``，而一條線指著一個特定的節點。名字唯一的時候
+    「線指的那張卡」＝「引擎真的給的那個框」恆成立；名字撞了就不是 ——
+    畫布會指著第一張，引擎會給第二張的框。那正是這個 repo 記過六次的
+    「跑得完、有數字、而且是錯的」，而擋掉撞名就讓引擎一行都不用改
+    （身分模型不動，見 F42 計畫書 §2）。
+
+    只看 ``resolve_regions_out``（**這張卡真的定義了什麼**）。畫布上那種
+    「接進來、原樣送出去」的區域埠不算 —— 它送出去的是別人的框，不是第二份
+    定義（`viewmodel.region_outputs` 才是那一份，而它刻意跟這裡分家：
+    F12 §7-①「副標仍然只印真的產出什麼」）。
+
+    ``_center`` / ``_others`` 不必特別處理：它們本來就在
+    ``resolve_regions_out`` 的回傳裡（`_util.region_family` 是唯一那一份），
+    所以兩張都吐 ``epi`` 的 Region 卡在這裡撞的是三個名字，不是一個。
+    """
+    out: List[Issue] = []
+    for name in step_cls.resolve_regions_out(p):
+        if not name:
+            continue
+        owner = region_owner.get(name)
+        if owner is not None and owner != nid:
+            out.append(Issue(
+                code="duplicate-region", level="error", node_id=nid,
+                title=f"two cards both define the region '{name}'",
+                detail=f"route '{k}': '{owner}' already defines a region "
+                       f"called '{name}', and '{nid}' defines one with the "
+                       f"same name. The later card's box replaces the "
+                       f"earlier one, so every card that measures '{name}' "
+                       f"quietly gets '{nid}'s box - and the canvas still "
+                       f"draws the line to '{owner}'. Give one of the two "
+                       f"cards a different region name."))
+        else:
+            region_owner.setdefault(name, nid)
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # 兩支「跑得完、有數字、而且是錯的」的 lint（F11 Enhance-3）
 # --------------------------------------------------------------------------- #
@@ -2432,7 +2478,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
 
     檢查項（code）：unknown-step / bad-param / not-configured（error）/
     half-configured（warning）/ unknown-node /
-    unknown-route / cycle / missing-image / unknown-region / requires-ref /
+    unknown-route / cycle / missing-image / unknown-region /
+    duplicate-region（error）/ requires-ref /
     ambiguous-input / score-expr / unknown-feature（warning）/
     stale-feature-ref（warning）/ feature-collision（warning）/ bad-bins /
     uneven-treatment（warning）/ card-order（warning）。
@@ -2610,6 +2657,11 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
         #: 的 glv_stats）會寫同一組名字，後面那張安靜地蓋掉前面那張 ——
         #: 跑得完、有數字、少一半。診斷數字那一半見 `Step.diagnostic_features`。
         feat_owner: Dict[str, Any] = {}
+        #: 區域名 -> 第一個定義它的節點。特徵那張表是 warning 級的「誰蓋掉誰」，
+        #: 這一張是 error 級的「不准有第二個」—— 理由見 `_region_collisions`。
+        #: **一條 route 一張表**：兩條 route 各有一張 Region 卡叫 `epi` 是常態
+        #: （`ebi_patch` 與 `rsem` 各走各的），它們永遠不會在同一次執行裡碰面。
+        region_owner: Dict[str, str] = {}
         #: 每一條流被哪幾張 Enhance 卡動過（照順序）。兩支 lint 都讀它 ——
         #: 「兩條流受到一樣的處理嗎」與「自動的排在手動的後面嗎」問的都是這段歷史。
         history: Dict[str, List[Any]] = {}
@@ -2635,6 +2687,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                 # 因為「入口」只有一張所以撞不起來 —— 現在兩張 load 卡都寫
                 # n_channels，後面那張會安靜地蓋掉前面那張。
                 issues.extend(_feature_collisions(step_cls, p, nid, k, feat_owner))
+                issues.extend(_region_collisions(step_cls, p, nid, k,
+                                                 region_owner))
                 feats |= set(step_cls.resolve_features(p))
                 regions |= set(step_cls.resolve_regions_out(p))
                 continue
@@ -2755,6 +2809,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                 for key in step_cls.resolve_writes(p):
                     history.setdefault(key, []).append(sig)
 
+            issues.extend(_region_collisions(step_cls, p, nid, k,
+                                             region_owner))
             avail |= set(step_cls.resolve_writes(p))
             feats |= set(step_cls.resolve_features(p))
             regions |= set(step_cls.resolve_regions_out(p))

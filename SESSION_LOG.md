@@ -19,6 +19,58 @@
 
 ---
 
+## F42 B0：同名區域變成 error（2026-08-27）
+
+方案 B 的第一段。計畫書：
+[`docs/plans/F42-region-edges-plan-b.md`](docs/plans/F42-region-edges-plan-b.md)。
+
+### 這一輪要推翻 F12 §3，起點是第七個「跑得完、有數字、而且是錯的」
+
+Region 卡放在量測卡**右邊**（route 上排在後面）時，`execution_order` 讓量測卡
+先跑，於是它安靜地量整張圖 —— 畫布上明明有一條區域線指著那張 Region 卡。
+
+病根：**區域線是唯一一種不存進 `recipe.edges` 的線**。F12 §3 當時的理由是
+「route 相鄰對已經保證了順序」，而**那個前提在 F17-① 就失效了** ——
+執行順序從此只看使用者拉的線，route 的排列是排版不是語意。
+
+使用者定調採**方案 B**：區域依賴存進 `edges`，跟影像線同一套機制
+（「對齊比較安全」）。F12 的畫法全部保留 —— 改的是儲存，不是畫面。
+
+### B0：`duplicate-region`（error）
+
+B 的線指著**一個特定的節點**，而引擎那一頭 `ctx.set_roi` 是**同名覆寫**。
+名字唯一的時候「線指的那張卡」＝「引擎真的給的那個框」恆成立；撞名的時候
+畫布可以指著第一張、引擎給第二張的框。**擋掉撞名，引擎一行都不用改**
+（使用者的 P1-a；P1-b 明確不做）。
+
+三個邊界各有一條測試，每一條都是「這支 lint 會被學會忽略」的形狀：
+
+* **「原樣送出」不算。** 只看 `resolve_regions_out`（引擎的宣告），不看
+  `viewmodel.region_outputs`（畫布的埠，含同進同出）。混為一談的話，每一份
+  「一張 Region 卡 ＋ 兩張量測卡」的正常 recipe 都會冒紅字。
+* **`_center` / `_others` 自動在範圍內** —— 它們本來就在
+  `resolve_regions_out` 的回傳裡（`_util.region_family` 是唯一那一份），
+  所以兩張都吐 `epi` 的卡撞的是三個名字。
+* **一條 route 一張表** —— 兩條 route 各有一張 `epi` 是常態。
+
+### 為什麼是 error，而特徵撞名只是 warning
+
+**差別不是嚴重程度，是有沒有救援。** 特徵被蓋掉時引擎把前一份救成
+`<節點名>_<特徵>`，所以那句話是「你可能不是故意的」；區域沒有那條路，
+前一張卡畫的框就是不見了。
+
+順手改掉一句因此作廢的話：`viewmodel.region_producer` 的 docstring 原本寫
+「那個撞名本身有 lint 在講 —— 區域的 fact 特徵會撞」。**warning 擋不住一條
+指著第一張卡、卻拿到第二張卡的框的線**，而現在它是 error，所以在一份健檢
+乾淨的 recipe 上「上游最後一個」＝「唯一一個」。
+
+### 驗收
+
+`tests/test_region_names_are_unique.py` 10 條，四條正面斷言**驗過把 lint
+拿掉會紅**。核心 2397 綠、62 支 UI 測試逐檔綠、黃金值三份逐項相同。
+兩份出貨 recipe 與兩份 fixture recipe 一個撞名都沒有（明著測一次 ——
+`test_shipped_recipes` 也抓得到，但它的訊息是「有一條 error」）。
+
 ## F41（Phase 3）：刪掉 `feature_math` / `feature_fill`（2026-08-27）
 
 使用者：「功能已經被 `decide.let` 取代了，刪掉。」計畫書：
