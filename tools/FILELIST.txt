@@ -5,7 +5,7 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 712d17a24ea9afafe35c2d92cfe668af2c81df70 CLAUDE.md
 7bddb3ce6ded46f4baaa8f030cc3c851653cc23c README.md
-5de217ef279803bce43777260e39d9402898e985 SESSION_LOG.md
+1771451775d5d0dd2bf03be9509ad2b67b464b80 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -124,7 +124,7 @@ f265bee418c00c58c1f1b1ca5916cba6929d9ffe docs/USING-CHARACTERIZATION.md
 95e1c9f1bee66ba5f2f545a665f2e5550b751b82 docs/plans/F38-output-three-cards.md
 0bf08282aa8b157016df4177eedf2ba8c328ef66 docs/plans/F39-f-test-audit.md
 85bdd915d65cea34657713d9e11804991616693f docs/plans/F40-stack-agreement.md
-4114c38479c435bdeed0da03512a20b21c1ecd08 docs/plans/F41-phase3-delete-algo-cards.md
+39f4759ccf31f5e24052698380bf84cb9c108334 docs/plans/F41-phase3-delete-algo-cards.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
