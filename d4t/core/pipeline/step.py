@@ -72,7 +72,7 @@ CATEGORY_BATCH = "batch"
 #: enhance        影像 → 影像                normalize / gamma / denoise
 #: region         找出「要看哪裡」            roi_cross / roi_template
 #: measure        影像＋區域 → 數字           glv_stats / cd_measure
-#: algo           **數字 → 數字**（不碰影像）  feature_math
+#: algo           **數字 → 數字**（不碰影像）  （留給外掛；repo 裡零張卡）
 #: compare        影像＋影像 → 影像           align / subtract
 #: adc            數字 → score → bin         （固定尾節點）
 #: output         （固定尾節點，什麼都不吐）   output_csv / output_klarf
@@ -158,10 +158,11 @@ _CATEGORIES = (CATEGORY_IMAGE, CATEGORY_ALGO, CATEGORY_ADC, CATEGORY_BATCH)
 #: 話說）。儲存格式就是一個字串，差別只在 UI：一排單選的膠囊，
 #: 「+ Percentile…」照樣長得出自訂值。
 #: ``"feature_key"``（F37）：值是**一個**特徵名（``feature_keys`` 的單數）。
-#: 儲存格式一樣是 ``"str"``，加它的理由是**改名遷移**：特徵名住在四種地方
-#: （分數表達式、判定樹、`feature_math` 的算式、以及 Output 卡的
-#: ``rank_by`` / ``columns`` / ``size_feature`` 這種參數值），而前三種都已經
-#: 有人改寫，第四種以前沒有 —— 因為那一格從型別上看就是一個普通字串，
+#: 儲存格式一樣是 ``"str"``，加它的理由是**改名遷移**：特徵名住在幾種地方
+#: （分數表達式、判定樹、以及 Output 卡的 ``rank_by`` / ``columns`` /
+#: ``size_feature`` 這種參數值；`feature_math` 的算式曾經是第三種，那張卡
+#: 2026-08-27 刪了），而最後那一種以前沒有人改寫 —— 因為那一格從型別上看
+#: 就是一個普通字串，
 #: 遷移認不出它裝著一個特徵名。
 #:
 #: **宣告式的標記，不是一張卡片清單**：加到 :data:`FEATURE_TYPES` 之後，

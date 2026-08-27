@@ -104,12 +104,13 @@ SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder")
 #:
 #: 所以「不確定的時候先收起來」那句話沒有被推翻 —— 這一次是使用者確定了。
 #:
-#: 2026-08-24（F24 ④）：`feature_math` 與 `feature_fill` 收起來 ——
-#: 算式住進了判定的 working numbers（`let`，同一個引擎、進 CSV），補值那件事
-#: 是判定樹第一步的天然形狀（`cd_deq_missing > 0` 就是它）。**收不是刪**：
-#: 兩張卡引擎照認、舊 recipe 照跑、`tests/test_ui_f21_expr_picker.py` 直接從
-#: registry 拿它們測。使用者用過樹之後確認夠了再談刪（CLAUDE.md 那張對照表）。
-HIDDEN_STEPS: Sequence[str] = ("align", "feature_math", "feature_fill")
+#: ⚠ `feature_math` / `feature_fill` **2026-08-27 刪掉了**（Phase 3，使用者：
+#: 「功能已經被 `decide.let` 取代了，刪掉」）。它們 2026-08-24 先收在這裡，
+#: 走完了 `CLAUDE.md` §5 那張對照表的「不確定就先收起來，使用者確定之後再刪」
+#: —— **這是那條規矩第一次跑完全程**。舊 recipe 用到它們的話開起來是一條
+#: `unknown-step`（那就是刪掉要付的錢），沒有遷移：那兩張卡的功能在判定的
+#: working numbers 裡，而算式怎麼搬進去是使用者的決定，不是一道機械遷移。
+HIDDEN_STEPS: Sequence[str] = ("align",)
 
 #: 沒有資料集時 ``RecipeModel`` 用的 route 名稱。
 DEFAULT_KIND: str = SUPPORTED_KINDS[0]

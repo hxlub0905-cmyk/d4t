@@ -365,8 +365,11 @@ F30 的 `ui/output_band.py` 已經都是這樣做的 —— 這一段只是把�
 
 ```python
 SUPPORTED_KINDS = ("ebi_patch", "tiff_stack", "rsem", "folder")
-HIDDEN_STEPS = ("align", "feature_math", "feature_fill")
-                                 # 收起來（引擎照認、舊 recipe 照跑）
+HIDDEN_STEPS = ("align",)        # 收起來（引擎照認、舊 recipe 照跑）
+                                 # ⚠ `feature_math` / `feature_fill` 2026-08-27
+                                 # **刪掉**了（功能進了 `decide.let`）——
+                                 # 先收起來、使用者確定之後再刪，那張對照表
+                                 # 第一次跑完全程
 SHOW_SAMPLE_ENTRIES = False      # 範例入口（見下）
 INPUT_SOURCES = (...)            # 三顆 Open 的字、圖示、一句白話說明
 ATTACHMENTS = (...)              # 掛在已載入 lot 上的附加檔（GLAS 匯出）

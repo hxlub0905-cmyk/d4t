@@ -1535,9 +1535,10 @@ def feature_referrers(name: str, nodes: Dict[str, "RecipeNode"],
                       registry: Optional[Dict[str, Any]] = None) -> List[str]:
     """誰還指著 ``name`` —— 回一串**給人看的位置**（F37 A2）。
 
-    四個地方跟改名遷移走的**同一份清單**（`_rename_in_node_params` 的說明）：
-    分數表達式、判定段、`feature_math` 的算式、以及型別在
-    `step.FEATURE_TYPES` 裡的參數值。兩支要一起看 —— 遷移是「自動搬」，
+    每一個地方跟改名遷移走的**同一份清單**（`_rename_in_node_params` 的說明）：
+    分數表達式、判定段、以及型別在 `step.FEATURE_TYPES` 裡的參數值
+    （`feature_math` 的算式曾經是第三種，那張卡 2026-08-27 刪了）。
+    兩支要一起看 —— 遷移是「自動搬」，
     這一支是「搬不動的時候說出搬不動的是哪幾個」。
 
     ``skip`` 是**改名的那張卡自己**：它不算引用者（它是來源）。
@@ -1600,8 +1601,8 @@ def _rename_in_node_params(nodes: Dict[str, "RecipeNode"],
                            registry: Optional[Dict[str, Any]] = None) -> None:
     """節點參數裡的舊 feature 名換成新的（**就地改**，F37）。
 
-    以前改名遷移只走三條路：分數表達式、判定段、以及 `feature_math` 的算式
-    （後者還只在 `_migrate_rescued_feature_names` 那一道裡）。第四條沒有人走
+    以前改名遷移只走兩條路：分數表達式與判定段（曾經還有第三條 ——
+    `feature_math` 的算式，而那張卡 2026-08-27 刪了）。還有一條沒有人走
     —— **參數值**：Output 卡的 ``rank_by`` / ``columns``、`output_boxplot` 的
     ``features``、`output_klarf` 的 ``size_feature`` 每一格都裝著特徵名。
 
@@ -1822,9 +1823,10 @@ def _migrate_rescued_feature_names(nodes: Dict[str, "RecipeNode"],
     def swap(text: str) -> str:
         return pattern.sub(lambda m: renames[m.group(1)], str(text or ""))
 
-    for node in nodes.values():
-        if node.step == "feature_math" and node.params.get("expr"):
-            node.params["expr"] = swap(node.params["expr"])
+    # ⚠ 這裡以前還有一條「改寫 `feature_math` 節點的算式」。那張卡 2026-08-27
+    # 刪掉了（Phase 3），而帶著它的舊 recipe 開起來是一條 `unknown-step` ——
+    # **跑不起來的 recipe 沒有必要幫它改名**。判定段的算式（`let` / 樹）走
+    # `_migrate_decide_renames`，那一條還在。
     expr = str(getattr(score, "expr", "") or "")
     new_expr = swap(expr)
     return score if new_expr == expr else replace(score, expr=new_expr)

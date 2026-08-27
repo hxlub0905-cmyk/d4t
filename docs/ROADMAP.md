@@ -207,7 +207,10 @@ Input → Enhance → ROI → Measure → Compare → ADC → Output
 
 * **Algo** —— 使用者：「measure 是量出數值來，但 **Algo 是拿這些 feature 內去做
   更 custom 的處理**」。寫成不變量：**Algo 段的卡 `resolve_reads()` 恆為空**
-  （不吃影像流）。第一張卡是 `feature_math`。
+  （不吃影像流）。⚠ **這一段 2026-08-24 解散、唯二兩張卡 2026-08-27 刪掉了**
+  （`feature_math` / `feature_fill` → 判定的 working numbers）。`GROUP_ALGO`
+  這個常數留著給外掛卡相容，但 repo 裡零張卡 —— 而那條不變量因此**沒有東西
+  可以套用**，守它的測試同一天拿掉了（一條永遠不會執行的斷言比沒有斷言更糟）。
 * **Output** —— 使用者：「**他就是個 end point**」，而且「可以產出多種 style
   （分 card）：Report / CSV / KLARF / HTML，要單純 output image 也可」。
   寫成不變量：**`resolve_writes()` 與 `resolve_features()` 都是空的**。

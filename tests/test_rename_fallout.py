@@ -43,8 +43,12 @@ def test_a_name_inside_a_longer_name_is_not_a_reference():
     assert not mentions_feature("", "glv_median")
 
 
-def test_it_finds_all_four_places_a_feature_name_can_live():
-    """四個地方跟改名遷移走的**同一份清單**。
+def test_it_finds_every_place_a_feature_name_can_live():
+    """每一個地方跟改名遷移走的**同一份清單**。
+
+    ⚠ 以前叫「四個地方」，第四個是 `feature_math` 的算式 —— 那張卡 2026-08-27
+    刪掉了（Phase 3）。剩下三種：分數表達式、判定段、以及卡片參數裡的特徵名
+    （單獨一格的 `feature_key` 與一串的 `feature_keys`）。
 
     ⚠ 兩支要一起看：遷移是「自動搬」，這一支是「搬不動的時候說出搬不動的是
     哪幾個」。少一個地方的話，那個地方就是安靜失效的那一個。
@@ -54,8 +58,6 @@ def test_it_finds_all_four_places_a_feature_name_can_live():
     nodes = {
         "glv": RecipeNode("glv", "glv_stats",
                           {"source": "test", "metrics": "glv_median"}),
-        "math": RecipeNode("math", "feature_math",
-                           {"expr": "glv_median * 2", "out": "twice"}),
         "img": RecipeNode("img", "output_report",
                           {"folder": "/tmp/x", "rank_by": "glv_median"}),
         # 同一張卡的第二個節點，這一次是 box plot 那一格（F38 併進來的，
@@ -73,7 +75,6 @@ def test_it_finds_all_four_places_a_feature_name_can_live():
     joined = " | ".join(where)
     assert "the score expression" in joined
     assert "the decision" in joined
-    assert "math" in joined          # feature_math 的算式
     assert "img" in joined           # 單獨一格特徵名（feature_key）
     assert "bp" in joined            # 一串特徵名（feature_keys）
 

@@ -19,6 +19,55 @@
 
 ---
 
+## F41（Phase 3）：刪掉 `feature_math` / `feature_fill`（2026-08-27）
+
+使用者：「功能已經被 `decide.let` 取代了，刪掉。」計畫書：
+[`docs/plans/F41-phase3-delete-algo-cards.md`](docs/plans/F41-phase3-delete-algo-cards.md)。
+
+### 這是那張對照表第一次跑完全程
+
+`CLAUDE.md` §5：「**不確定的時候先收起來**：成本是零……使用者確定之後再刪。」
+這兩張卡 2026-08-24 先收起來、2026-08-27 使用者確定之後刪掉 —— 中間隔了三天，
+而那三天裡使用者真的用了判定樹。**那正是「收起來」要買到的東西。**
+
+代價：353 行卡片、5 支測試改、3 支測試刪，**黃金值零變動**（三份 fixture recipe
+都沒用到）。`align` 一個字都沒動。
+
+**沒有寫遷移**：那兩張卡的功能在判定的 working numbers 裡，而**算式怎麼搬進去是
+使用者的決定，不是一道機械遷移**。舊 recipe 開起來拿到一條講得出來的
+`unknown-step` —— 那就是刪掉要付的錢（`CLAUDE.md` §5 那張表寫著的那個）。
+
+### 兩條測試要跟著翻面，不是跟著刪
+
+* `test_ui_tree_edit::algo_cards_are_shelved_not_deleted` → **翻面**成
+  `the_algo_cards_are_gone_for_good`。「收起來」與「刪掉」的證據**剛好相反**：
+  翻面之後它守的是「舊 recipe 帶著那兩張卡開起來要拿到一條 `unknown-step`，
+  不是一個 `KeyError`」。
+* `test_ui_f16_stages::the_absorbed_algo_cards_never_read_an_image_stream` →
+  **刪掉**。它掃「那兩張卡，以及任何掛在 `GROUP_ALGO` 上的卡」，而 `GROUP_ALGO`
+  本來就零張卡 —— 兩張卡一走，那個迴圈的本體**再也不會執行一次，而測試照樣綠**。
+
+> 第二條正是 F40 那支恆綠零斷言測試的形狀，只是這一次是**我們自己親手做出來
+> 的**。刪一張卡的時候，要順著問一句「有沒有哪條測試因此變成空轉」。
+
+`test_ui_f21_expr_picker` 整支刪掉之前，先把
+`test_a_card_does_not_offer_its_own_output` 救進 `test_viewmodel.py`
+（`include_upto=False` 全 repo 唯一的守門人），並驗過它在新家會紅。
+
+### ⚠ 兩個問題等使用者定調（工作單指名不要自己決定）
+
+1. **`GROUP_ALGO`** —— 不在 `GROUP_ORDER` 裡、卡片庫看不到、留著給外掛相容，
+   而 repo 裡**零張卡**、守它的測試也刪了。留著還是連 `resolve_group` 一起清掉？
+2. **`adc` 段** —— 那兩張卡的 group **是 `adc`**（不是 `algo`），所以刪掉之後
+   **卡片庫上的 ADC 是一個永遠空白的抽屜**（標題底下寫 `(no cards in this
+   section)`）。F24 §5 把 Algo 那一列拿掉時的註解就是「這一段清空之後留著只是
+   一個永遠空白的抽屜」—— 但 ADC 不一樣：**那件事本身沒有消失**，只是不由卡片
+   表達（score / bin / 判定樹住在下方的判定面板）。
+
+兩個選項都寫在計畫書 §4。
+
+---
+
 ## F39-B5：慢的不是測試條數，是一個視窗洩漏（2026-08-27）
 
 B5 原本是「D 組其餘刪除（~80 條）」。動手前先問了一個清單從來沒問過的問題：

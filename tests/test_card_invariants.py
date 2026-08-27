@@ -88,18 +88,10 @@ NEEDS_MORE_SETUP = {
     # 所以 `glv_stats` 不在這張表上，compare 那一半的專屬驗收在
     # tests/test_glv_compare.py。
     #
-    # 它的表達式預設是空的 —— 而那是對的（F7-13：卡片一開始就該說「我還沒設定
-    # 完」，不是猜一個式子）。空的時候它正確的行為就是擋下來並講出要填哪一格。
-    # 專屬驗收在 tests/test_feature_math.py。
-    "feature_math": "要填一個表達式（預設空的，那是刻意的）",
-    # 同上：守哪幾個數字預設是空的（F7-13），空的時候正確的行為就是擋下來。
-    #
-    # ⚠ 它另外有一個**刻意的宣告不對稱**：`run()` 會寫 `<name>`（補進去的值），
-    # 而 `resolve_features` 只宣告 `<name>_missing`。理由與驗收都在
-    # tests/test_feature_fill.py::test_it_does_not_declare_the_number_it_fills
-    # 與 ::test_it_writes_nothing_else_beyond_that（那一條是 I3 的專屬版本，
-    # 用**設定好的**參數跑，比這個 harness 問得更嚴）。
-    "feature_fill": "要填守哪幾個數字（預設空的，那是刻意的）",
+    # ⚠ `feature_math` / `feature_fill` 兩列 2026-08-27 拿掉了 —— 那兩張卡刪了
+    # （Phase 3）。**這張表上留一個不存在的 key 沒有任何測試會叫**，而它會讓
+    # 下一個讀的人以為那張卡還在（`CLAUDE.md`：任何「例外清單」都要有一支反向
+    # 的測試，而這一張目前沒有）。
     # 它要的是**第二份 lot**（`Dataset.sources`），而這個 harness 只載了一份。
     # 沒掛的時候它正確的行為就是擋下來並講出「用這張卡上的 Open data…」。
     # 專屬驗收在 tests/test_pair_source.py。
