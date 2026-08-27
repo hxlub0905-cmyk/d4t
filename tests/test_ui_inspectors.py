@@ -86,7 +86,7 @@ def test_a_card_without_a_panel_falls_back_to_the_feature_table(window):
     # 預設值）。
     window._on_edge_added(src, a, "ref", "moving")
     window._on_edge_added(src, a, "test", "fixed")
-    window.add_card_after(a, "subtract")        # subtract 還沒有自己的儀表
+    window.add_card_after(a, "roi_mask")        # roi_mask 明文不給儀表（PR-2）
     assert window.inspector() is None
     assert window.bottom_page() == 1
     assert window.btn_tab_card.isEnabled() is False
@@ -103,11 +103,16 @@ def test_you_can_still_get_to_the_features(window):
 
 
 def test_adding_a_new_card_does_not_need_this_module_touched():
-    """約定 1：沒登記的卡就沒有儀表，不是壞掉。"""
-    assert insp_mod.inspector_for("subtract") is None
-    assert insp_mod.inspector_for("subtract") is None
+    """約定 1：沒登記的卡就沒有儀表，不是壞掉。
+
+    證據卡以前是 ``subtract`` —— PR-2 給了它面板，換成兩張**明文不補**的
+    （工作單：roi_mask 與 load_sidecar 價值低，真有人要再開）。
+    """
+    assert insp_mod.inspector_for("roi_mask") is None
+    assert insp_mod.inspector_for("load_sidecar") is None
     assert insp_mod.inspector_for("") is None
     assert insp_mod.inspector_for("align") is insp_mod.AlignInspector
+    assert insp_mod.inspector_for("subtract") is insp_mod.SubtractInspector
 
 
 def test_an_empty_panel_says_why_it_is_empty(qapp):
