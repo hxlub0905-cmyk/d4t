@@ -107,7 +107,7 @@ def test_choose_origin_without_pixels_is_zero():
 # 形狀在 F40 之前完全沒有測試碰過（這個檔案用 2D 方格、`test_phase_origin`
 # 用圓角方格、`test_roi_template` 的條紋圖只斷言 `ghosting > 50` 從不比較）。
 #
-# 真正發現它的路徑：`test_ui_f7_12_template.py` 有一支測試的斷言全在
+# 真正發現它的路徑：`test_ui_template_dialog.py` 有一支測試的斷言全在
 # `if gc.ghosting < 40` 裡，而那個條件恆為 False —— 整支恆綠、零斷言。
 # --------------------------------------------------------------------------- #
 def test_a_perfect_stack_agrees_completely():

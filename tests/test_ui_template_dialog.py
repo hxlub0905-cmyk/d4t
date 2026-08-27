@@ -5,6 +5,17 @@
 而整條路唯一會**安靜壞掉**的地方是「週期估錯」：估錯了疊出來的 cell 會糊掉，
 糊掉的模板會讓後面每一顆都對錯，但畫面上不會有錯誤訊息，只會有一批看起來很正常、
 其實量錯位置的數字。所以測試盯的是**判斷材料有沒有被攤開給人看**。
+
+⚠ **2026-08-27（F39-B4）從 `test_ui_f7_12_template.py` 改名為常駐檔。**
+
+為什麼不是「留 19 條、刪 37 條」（清單原本的計畫）：量過了 ——
+`template_dialog.py` 有 670 行被測試踏過，其中 **575 行只有這一檔踏得到**；
+`cell_canvas.py` 是 598 行裡的 **485 行**。其他 30 幾支測試踏到的那 95 / 112 行
+是 import 與類別定義。**這一檔就是那兩個模組唯一的執行覆蓋**，照數字砍掉三分之二
+等於把一個 1,047 行的模組交還給運氣。
+
+搬走的只有三條**一行 Qt 都沒有**的自週期測試（k× cell），它們去了
+`tests/test_roi_template.py` 的核心批。
 """
 from __future__ import annotations
 
@@ -750,69 +761,6 @@ def test_undo_is_disabled_when_there_is_nothing_to_undo(qapp):
 # --------------------------------------------------------------------------- #
 # 5. 第五輪：k× cell 的確定度、等距的 pitch、還沒按下去的預覽
 # --------------------------------------------------------------------------- #
-def _alt_image(seed: int = 0) -> np.ndarray:
-    """跟 big_image 一樣，但**每隔一格**的 MG 比較暗 —— 2× 才是真正的週期。"""
-    img = big_image(seed)
-    for k in range(0, 8, 2):
-        img[:, k * PERIOD:k * PERIOD + 12] -= 35.0
-    return img
-
-
-def test_a_double_cell_no_longer_kills_the_certainty(qapp):
-    """使用者：「假設我是 2x cell 大，certainty 可能會被壓很低，有解嗎？」
-
-    實測不是壓很低，是**歸零**：margin 摺在「一個 cell」上，而 2× cell 的一個
-    週期裡有兩個一模一樣的峰 → 最高 ＝ 次高 → 0.000，score 仍然 1.00。
-    現在確定度摺在**自週期**上，位置仍然摺在整個 cell 上。
-    """
-    from d4t.core.algo import template as at
-
-    img = big_image()
-    got = {}
-    for label, px in (("1x", None), ("2x", 2 * PERIOD), ("3x", 3 * PERIOD)):
-        gc = at.build_golden_cell(img, px=px)
-        sp = at.cell_self_period(gc.cell)
-        assert sp[0] == PERIOD, (label, sp)      # 自週期一直都是真正的那一個
-        margins = []
-        for phase in range(0, PERIOD, 5):
-            patch = img[100:132, 3 * PERIOD + phase:3 * PERIOD + phase + 32]
-            m = at.match_patch(gc.cell, patch, periodic=gc.periodic,
-                               self_period=sp)
-            margins.append(m.margin)
-        got[label] = (min(margins), max(margins))
-
-    assert got["1x"][0] > 0.3
-    for label in ("2x", "3x"):
-        assert got[label][0] > 0.3, (label, got)
-        assert abs(got[label][0] - got["1x"][0]) < 0.05, got
-
-
-def test_a_flat_axis_is_not_a_self_period(qapp):
-    """平的那一軸對**任何**位移都相似 —— 那不是週期，是沒有結構。"""
-    from d4t.core.algo import template as at
-
-    gc = at.build_golden_cell(big_image())
-    sx, sy = at.cell_self_period(gc.cell)
-    assert (sx, sy) == (PERIOD, gc.cell.shape[0])
-
-
-def test_the_template_string_carries_the_self_period(qapp):
-    """自週期是**模板的性質**（一份模板一個答案），所以存進字串、不是每顆重算。"""
-    from d4t.core.algo import template as at
-
-    gc = at.build_golden_cell(big_image(), px=2 * PERIOD)
-    text = at.encode_cell(gc.cell)
-    assert text.startswith("gc2:")
-    cell, sp = at.decode_template(text)
-    assert sp == (PERIOD, gc.cell.shape[0])
-    assert np.array_equal(cell, gc.cell)
-
-    # 舊的 gc1 照讀，而且**行為與以前逐位元組相同**（自週期視同 cell 尺寸）
-    parts = text.split(":")
-    old = "gc1:%s:%s" % (parts[1], parts[3])
-    cell1, sp1 = at.decode_template(old)
-    assert np.array_equal(cell1, gc.cell)
-    assert sp1 == (gc.cell.shape[1], gc.cell.shape[0])
 
 
 def test_the_dialog_says_the_cell_holds_two_copies(qapp):

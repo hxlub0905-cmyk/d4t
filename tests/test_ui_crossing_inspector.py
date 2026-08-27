@@ -6,6 +6,11 @@
    橫的條紋）。只給一條曲線或一個信心值，使用者只知道「失敗了」。
 2. **區域檢視要畫出每一個框。** 一個名字底下有八個框、畫面上只出現一個的話，
    使用者會以為量的是那一塊 —— 而畫面上沒有任何東西透露這件事。
+
+⚠ **2026-08-27（F39-B4）從 `test_ui_f8_cross.py` 改名。** 同時把十一條
+「疊在影像上的框不能說謊」切出去成 `tests/test_ui_region_overlay_truth.py`
+—— 那十一條問的是**每一張 Region 卡**都要成立的事，跟交會定位這張卡無關。
+留在這裡的是交會定位自己的儀表：兩條曲線、量給我填、點條紋挑材質、方向。
 """
 from __future__ import annotations
 
@@ -186,96 +191,6 @@ def _shaded_columns(panel, data) -> int:
     bg = QColor(insp_mod.TOKENS["bg_surface"]).rgb()
     return sum(1 for x in range(12, 228)
                if QImage.pixelColor(img, x, 100).rgb() != bg)
-
-
-# --------------------------------------------------------------------------- #
-# 2. 區域檢視不能說謊
-# --------------------------------------------------------------------------- #
-def test_every_box_is_drawn_not_just_the_first(qapp, cross_window):
-    """畫面上出現一個框、實際上量了八個 —— 這種落差沒有任何提示。"""
-    win = cross_window
-    results = rc_mod.check_regions(win.model.to_recipe(), win._items()[:6],
-                                   win.model.kind, win.selected_node,
-                                   ["xing"], 120, "ref")
-    drawn = [r for r in results if r["located"] and r["boxes"]]
-    assert drawn, "這批應該定位得出來"
-    for r in drawn:
-        assert len(r["boxes"]) > 4, (
-            "只畫了 %d 個框 —— 多框區域被畫成一個了" % len(r["boxes"]))
-
-
-# --------------------------------------------------------------------------- #
-# 3. 框要**即時**疊在預覽影像上
-# --------------------------------------------------------------------------- #
-def test_the_boxes_show_up_on_the_preview_without_opening_another_window(
-        qapp, cross_window):
-    """使用者原話：「不然都一定按 Check this region across defects… 跑完才能看，
-    不能實時調整」。
-
-    定位卡的參數是**一邊拖一邊看**決定的（F7-8）。框只出現在另一個要按鈕、
-    要跑完一批的視窗裡，等於把「調敏感度」變成改一次跑一次 —— 而那要試十幾次。
-    """
-    win = cross_window
-    win.refresh_preview(sync=True)
-
-    n = win.image_view.overlay_count()
-    assert n > 4, "預覽影像上沒有框（只有 %d 個）" % n
-    assert len(win.region_overlay()) == n
-
-
-def test_the_overlay_follows_the_parameters_live(qapp, cross_window):
-    """改一個參數，框當場就要不一樣 —— 這是「即時」的定義。"""
-    win = cross_window
-    nid = win.selected_node
-    win.refresh_preview(sync=True)
-    before = list(win.region_overlay())
-
-    win.model.set_param(nid, "place", "between_vertical")
-    win.refresh_preview(sync=True)
-    after = list(win.region_overlay())
-
-    assert before and after
-    assert before != after, "換了放法，畫面上的框卻沒變"
-
-
-def test_the_box_the_defect_sits_in_is_marked_out(qapp, cross_window):
-    """一堆一模一樣的框裡看不出哪個是「這一顆」的。缺陷永遠在 patch 正中心，
-    所以離中心最近的那個要畫得不一樣。"""
-    win = cross_window
-    win.refresh_preview(sync=True)
-    boxes = win.region_overlay()
-    focus = win._focus_box_index(boxes)
-
-    assert 0 <= focus < len(boxes)
-    nx, ny, nw, nh = boxes[focus]
-    d = (nx + nw / 2.0 - 0.5) ** 2 + (ny + nh / 2.0 - 0.5) ** 2
-    assert all(d <= (b[0] + b[2] / 2.0 - 0.5) ** 2
-               + (b[1] + b[3] / 2.0 - 0.5) ** 2 + 1e-9 for b in boxes)
-    assert win.image_view._overlay_focus == focus
-
-
-def test_only_the_selected_card_draws_its_boxes(qapp, cross_window):
-    """一份 recipe 常有好幾張 ROI 卡，全部畫出來會變成一團分不清誰是誰的線。
-    使用者現在在調的就是手上那一張。"""
-    win = cross_window
-    first = win.selected_node
-    win.refresh_preview(sync=True)
-    mine = list(win.region_overlay())
-    assert len(mine) > 4
-
-    other = wire_up(win.model, add_region_step(win.model, "roi_cross"))
-    win.model.set_param(other, "roi_out", "second")
-    win.model.set_param(other, "place", "crossing")
-    win.select_node(other)
-    win.refresh_preview(sync=True)
-    theirs = list(win.region_overlay())
-
-    assert theirs, "選著第二張卡，畫的該是它自己的框"
-    assert theirs != mine, "兩張卡的框應該不一樣（放法不同）"
-
-    win.select_node(first)
-    win.refresh_preview(sync=True)
-    assert win.region_overlay() == mine, "切回第一張，畫的要是第一張的框"
 
 
 # --------------------------------------------------------------------------- #
@@ -607,81 +522,3 @@ def test_the_three_direction_icons_are_drawable_and_different(qapp):
     assert len(set(seen.values())) == 3, "三顆圖示不能長得一樣"
 
 
-# --------------------------------------------------------------------------- #
-# 疊框分色（F11 Region 第八輪）—— 使用者：「顏色 overlay 重疊會同個顏色（藍色）」
-# --------------------------------------------------------------------------- #
-"""Region-1 之後**一張卡可以標好幾個區域**，而 `region_overlay()` 把它們全部攤
-平成一串框、全部畫成 accent 藍。兩個區域疊在一起的時候畫面上就只是一團藍線 ——
-而使用者要判斷的正是「哪一塊是 ROI1、哪一塊是 ROI2」。
-
-顏色跟模板編輯器**同一組**（`theme.REGION_COLORS`）：他在對話框裡把 ROI1 畫成
-綠色的，到了 patch 上它就要還是綠色的。
-"""
-
-
-def _view_with(labels, focus=-1):
-    from d4t.ui.widgets import ImageView
-
-    v = ImageView()
-    v.set_image(np.full((32, 32), 128, np.uint8))
-    boxes = [(0.1 * i, 0.1, 0.2, 0.2) for i in range(len(labels))]
-    v.set_overlay(boxes, focus, labels)
-    return v
-
-
-def test_each_region_gets_its_own_colour(qapp):
-    from d4t.ui.theme import REGION_COLORS
-
-    v = _view_with(["epi", "mg", "epi", "poly"])
-    legend = v.overlay_legend()
-    assert [n for n, _c in legend] == ["epi", "mg", "poly"], "順序照第一次出現"
-    assert [c for _n, c in legend] == list(REGION_COLORS[:3])
-    assert len({c for _n, c in legend}) == 3
-
-
-def test_the_colours_are_the_ones_the_template_editor_uses(qapp):
-    """使用者在對話框裡認得的綠色 ROI1，到了 patch 上不能變成別的顏色。"""
-    from d4t.ui.cell_canvas import region_color
-    from d4t.ui.theme import region_hex
-
-    for i in range(4):
-        assert region_color(i).name().lower() == region_hex(i).lower()
-
-
-def test_labels_that_do_not_line_up_switch_colouring_off(qapp):
-    """錯位的顏色比沒有顏色糟得多 —— 它會**指錯**區域，而畫面上不會說。"""
-    from d4t.ui.widgets import ImageView
-
-    v = ImageView()
-    v.set_image(np.full((32, 32), 128, np.uint8))
-    v.set_overlay([(0.1, 0.1, 0.2, 0.2), (0.5, 0.1, 0.2, 0.2)], -1, ["epi"])
-    assert v.overlay_legend() == []
-    assert v.overlay_count() == 2
-
-
-def test_one_region_gets_no_legend(qapp):
-    """只有一個區域的時候那個顏色沒有在跟誰對比，一行字只是擋住影像。"""
-    assert _view_with(["epi", "epi", "epi"]).legend_visible() is False
-    assert _view_with(["epi", "mg"]).legend_visible() is True
-    assert _view_with(["epi", "epi"]).overlay_legend() == [("epi", "#5fd0a0")]
-
-
-def test_the_names_line_up_with_the_boxes_in_the_studio(qapp, cross_window):
-    """框與名字走**同一個清單**（`_overlay_region_names`）。兩份各自算的話，
-    區域一多顏色就會指到隔壁那個 —— 而畫面上沒有任何東西透露這件事。"""
-    win = cross_window
-    nid = win.selected_node
-    win.refresh_preview(sync=True)
-
-    boxes = win.region_overlay()
-    names = win.region_overlay_names()
-    assert boxes and len(names) == len(boxes)
-    assert set(names) <= set(win._overlay_region_names(win.model.nodes[nid]))
-    assert win.image_view.overlay_count() == len(boxes)
-
-
-def test_a_card_with_two_regions_shows_two_colours_on_the_patch(qapp):
-    """這是使用者回報的那個畫面：兩個區域，以前兩個都是藍的。"""
-    v = _view_with(["epi", "mg"])
-    assert len(v.overlay_legend()) == 2
-    assert v.overlay_legend()[0][1] != v.overlay_legend()[1][1]
