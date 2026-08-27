@@ -19,6 +19,36 @@
 
 ---
 
+## F43：結果表分層 + 診斷徽章（2026-08-27，總工作單 PR-1）
+
+計畫書：[`docs/plans/F43-results-layers.md`](docs/plans/F43-results-layers.md)。
+總工作單三個 PR 的第一個；PR-2（區域接線可讀性）、PR-3（FeatureSpec 與分數
+回溯）還沒動。
+
+結果表五六十欄平鋪 → 分兩層：**判定層**（徽章 + base + class + 判定引用的
+特徵，照引用順序）預設可見，其餘按產出卡分組摺疊（「All measurements (N)」
+展開、搜尋框叫欄）。分層自動由 recipe 推導，唯一出處是新模組
+`core/pipeline/verdict_features.py`（放新模組是因為 `decide_tree` 反向
+import `recipe`，塞 recipe.py 會循環）。診斷欄離開表格，每列一格警示徽章 ——
+警示**只**來自 `error` 與卡宣告的布林（新 hook `Step.diagnostic_alarms`，
+極性是資料），數值型診斷 UI 不發明門檻；明細由 `traces` 歸戶。
+
+三筆偏離工作單（詳見計畫書 §3）：沿用既有的 `diagnostic_features` 不另開
+`resolve_diagnostics`；GLV 的 sat 族**不**宣告成診斷（使用者拍板 —— 那是勾了
+才產出的統計量）；Focus 沒有 error/trust 名可宣告。另一條拍板：**判定引用 >
+診斷隱藏**（樹裡比了 `glv_ok` 就照樣顯示那一欄）。
+
+順手收下的 lint 行為變化：兩張 GLV 撞 `glv_pixels` 不再警告（兩邊都是宣告過
+的診斷，同 `clip_frac` 那條路；`glv_median` 照講）——
+`test_card_invariants.py` 的那條測試改鎖新行為。
+
+驗收：黃金值三份逐項相同、`test_export_parity.py` 全綠（`report.py` 一個
+位元組沒動）、核心 + UI 兩批全綠。新測試 `tests/test_verdict_features.py`
+（36 條，含 registry 全掃「診斷 ⊆ 產出」與反空洞）、
+`tests/test_ui_results_layers.py`（12 條不變量）。
+
+---
+
 ## F42 B4：拆舊路 ＋ 收尾（2026-08-27，方案 B 完成）
 
 計畫書：[`docs/plans/F42-region-edges-plan-b.md`](docs/plans/F42-region-edges-plan-b.md)。

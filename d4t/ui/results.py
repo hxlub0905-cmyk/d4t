@@ -52,7 +52,7 @@ from PySide6.QtWidgets import (
 )
 
 from .gallery import GalleryPanel
-from .results_table import ResultsTable
+from .results_table import ResultsTablePane
 from .verdict_band import VerdictBand, verdict_rows
 from .widgets import HistogramWidget, apply_button_cursors
 
@@ -118,7 +118,11 @@ class ResultsWindow(QMainWindow):
         # ⚠ **同一份資料兩種看法，而不是兩個地方各存一份**（R7，2026-08-24）：
         # 縮圖回答「這一顆長什麼樣」，表格回答「照這個數字排一下、哪幾顆算不
         # 出來、為什麼」。兩邊都由 `set_results` 從同一批結果餵。
-        self.table = ResultsTable(self)
+        # PR-1：表格外面包一層 Pane（欄位搜尋框 + 「All measurements (N)」）。
+        # ``self.table`` 沿用同一個名字 —— 它把 `ResultsTable` 的介面
+        # （set_results / select_defect / cell_text / defect_activated…）
+        # 原封轉出來，宿主與測試都不用改。
+        self.table = ResultsTablePane(self)
         self.table.defect_activated.connect(self.defect_activated)
         self.gallery.defect_activated.connect(self.defect_activated)
         self.view_stack = QStackedWidget(self)
@@ -314,9 +318,16 @@ class ResultsWindow(QMainWindow):
     def selected_class(self) -> str:
         return self.verdict.selected()
 
-    def set_table(self, results: Any, class_names: Any = None) -> None:
-        """表格那一半（跟 Gallery 吃同一批結果）。"""
-        self.table.set_results(list(results or []), dict(class_names or {}))
+    def set_table(self, results: Any, class_names: Any = None,
+                  layout: Any = None, alarms: Any = None) -> None:
+        """表格那一半（跟 Gallery 吃同一批結果）。
+
+        ``layout``/``alarms`` 是分層與徽章的描述（`results_table.column_layout`
+        / `verdict_features.diagnostic_alarm_map`），由 Studio 從 recipe 推導；
+        不給就是平鋪 —— 這裡只轉手，不算。
+        """
+        self.table.set_results(list(results or []), dict(class_names or {}),
+                               layout, alarms)
 
     def set_summary(self, text: str) -> None:
         """工具列左側的一句話（「跑了幾顆、成功幾顆、花多久」）。"""

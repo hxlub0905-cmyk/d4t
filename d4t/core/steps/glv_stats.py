@@ -91,7 +91,7 @@ compare 算什麼（`algo/glv.compare_pixels`）
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -596,6 +596,29 @@ class GlvStatsStep(MultiSourceStep):
             return (spread + [BOX_COUNT] + list(WORST_FEATURES)
                     + list(SCORE_FEATURES) + extra)
         return base + extra
+
+    @classmethod
+    def diagnostic_names(cls, params: Dict[str, Any]) -> List[str]:
+        """品質／信任族：「這塊還能不能信」，不是量測值。
+
+        跟 :meth:`feature_names` 用同一套條件（``min_pixels`` / ``across_boxes``），
+        所以宣告的每一個名字都真的會產出（有 registry 全掃的測試守著）。
+        ⚠ ``glv_sat_frac`` / ``glv_above128`` **不在這裡**：它們是使用者在
+        ``metrics`` 勾選才產出的統計量 —— 勾了通常就是要拿去判定或看分布的，
+        宣告成診斷會讓它從結果表上消失（2026-08-27 使用者定調）。
+        """
+        out = ["glv_pixels"]
+        if int(params.get("min_pixels") or 0):
+            out.append("glv_ok")
+        if str(params.get("across_boxes", POOLED)) == EACH_BOX:
+            out.append(BOX_COUNT)
+        return out
+
+    @classmethod
+    def diagnostic_alarm_names(cls, params: Dict[str, Any]) -> List[Tuple[str, bool]]:
+        if int(params.get("min_pixels") or 0):
+            return [("glv_ok", False)]  # 0 = 像素太少，這一塊的數字不能信
+        return []
 
     @classmethod
     def legacy_feature_renames(cls, params: Dict[str, Any]) -> Dict[str, str]:

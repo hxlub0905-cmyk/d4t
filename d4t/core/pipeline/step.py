@@ -25,7 +25,7 @@ from __future__ import annotations
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, ClassVar, Dict, List, Optional, Type
+from typing import Any, ClassVar, Dict, List, Optional, Tuple, Type
 
 from .context import Context
 from .cellrois import CellRoiError, format_cell_rois, parse_cell_rois
@@ -695,6 +695,19 @@ class Step(ABC):
         撞名的**資訊沒有丟**：engine 的 `_rescue_overwritten_features` 會把前一張
         的值留成 ``<節點名>_clip_frac``（黃金值裡的 `norm_clip_frac` 就是它）。
         所以這裡跳過的只是那句話，不是那個值。
+        """
+        return []
+
+    @classmethod
+    def diagnostic_alarms(cls, params: Dict[str, Any]) -> List[Tuple[str, bool]]:
+        """(完整特徵名, 出事時的布林值) —— 這張卡的哪幾個診斷值得亮警示。
+
+        只有列在這裡的名字才可能亮結果表的警示徽章 —— UI **永遠不對數值型
+        診斷發明門檻**（``glv_sat_frac`` 多少算高是製程的事，不是軟體的事）。
+        極性是明講的資料：``("glv_ok", False)`` 是「0 就出事」、
+        ``("cd_touches_edge", True)`` 是「1 就出事」—— 不靠名字後綴猜。
+
+        不變量（有測試守）：這裡的名字 ⊆ :meth:`diagnostic_features`。
         """
         return []
 

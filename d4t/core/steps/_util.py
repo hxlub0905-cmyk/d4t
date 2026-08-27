@@ -9,7 +9,7 @@
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -1112,6 +1112,36 @@ class MultiSourceStep(Step):
         base = base + nm_twin_names(base)
         return [n for k in keys for r in cls.region_list(params)
                 for n in prefix_names(cls.full_prefix(params, k, r), base)]
+
+    @classmethod
+    def diagnostic_names(cls, params: Dict[str, object]) -> List[str]:
+        """:meth:`feature_names` 裡屬於「量得準不準／卡自己做了什麼」的那幾個
+        **基本名**（不含前綴）。子類宣告基本名，前綴交給下面兩支 —— 跟
+        :meth:`resolve_features` 走同一條 ``full_prefix`` 迴圈，所以宣告出來的
+        名字跟真的產出的名字不可能對不上。"""
+        return []
+
+    @classmethod
+    def diagnostic_alarm_names(cls, params: Dict[str, object]) -> List[Tuple[str, bool]]:
+        """(基本名, 出事時的布林值) —— 見 `Step.diagnostic_alarms`。"""
+        return []
+
+    @classmethod
+    def diagnostic_features(cls, params: Dict[str, object]) -> List[str]:
+        keys = cls.source_list(params) or [""]
+        base = cls.diagnostic_names(params)
+        return [n for k in keys for r in cls.region_list(params)
+                for n in prefix_names(cls.full_prefix(params, k, r), base)]
+
+    @classmethod
+    def diagnostic_alarms(cls, params: Dict[str, object]) -> List[Tuple[str, bool]]:
+        keys = cls.source_list(params) or [""]
+        pairs = cls.diagnostic_alarm_names(params)
+        base = [n for n, _ in pairs]
+        return [(n, bad)
+                for k in keys for r in cls.region_list(params)
+                for n, (_, bad) in zip(
+                    prefix_names(cls.full_prefix(params, k, r), base), pairs)]
 
     @classmethod
     def feature_parts(cls, params: Dict[str, object]) -> Dict[str, Dict[str, object]]:

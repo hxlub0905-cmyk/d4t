@@ -114,6 +114,7 @@ from d4t.core.pipeline.engine import (
 )
 from d4t.core.pipeline.step import REGION_TYPES, REGISTRY
 from d4t.core.pipeline.recipe import is_region_edge, version_skew
+from d4t.core.pipeline import verdict_features
 
 from .canvas import SUMMARY_SEP, PipelineCanvas
 from .inspectors import inspector_for
@@ -121,6 +122,7 @@ from .gallery import make_thumb
 from .region_check import MAX_CHECK, RegionCheckWindow, regions_of_node
 from .template_dialog import TemplateDialog
 from .results import ResultsWindow, extra_only, summarize_run
+from . import results_table
 from . import scope
 from .scope import (
     is_supported_kind, no_klarf_message, recipe_is_supported,
@@ -5601,7 +5603,22 @@ class StudioWindow(QMainWindow):
         # 名字從判定段那一份算出來（`verdict_rows`），所以整個 Results 視窗
         # 講的是同一份東西，不是兩份各自數出來的。
         names = self._class_names(results)
-        self.results.set_table(results, names)   # 表格那一半（R7）
+        # 表格的分層與徽章（PR-1）：判定層、按卡分組、診斷欄、警示布林 ——
+        # 全部由 recipe 推導（`core/pipeline/verdict_features.py` 是唯一出處）。
+        # 顯示層：推不出來就退回平鋪，不准因此沒有表。
+        layout = alarms = None
+        try:
+            recipe = self.model.to_recipe()
+            kind = self.model.kind
+            layout = results_table.column_layout(
+                results,
+                verdict_features.features_in_verdict(recipe, kind),
+                verdict_features.feature_groups_by_card(recipe, kind),
+                verdict_features.diagnostic_columns(recipe, kind))
+            alarms = verdict_features.diagnostic_alarm_map(recipe, kind)
+        except Exception:              # noqa: BLE001 — 顯示層，見上
+            layout = alarms = None
+        self.results.set_table(results, names, layout, alarms)  # 表格那一半（R7）
         self.gallery.set_items([
             {
                 "defect_id": str(r.get("defect_id", "")),

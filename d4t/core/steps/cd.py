@@ -95,7 +95,7 @@ contour」問軟體，後者不該出現在卡片上。
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -503,6 +503,24 @@ class CdMeasureStep(MultiSourceStep):
         if _target_cd(params) <= 0.0:
             want = [m for m in want if m not in _NEEDS_TARGET]
         return list(ALWAYS) + want
+
+    @classmethod
+    def diagnostic_names(cls, params: Dict[str, object]) -> List[str]:
+        """「量得準不準」那幾個（``ALWAYS`` 註解裡的前兩個 ＋ 團那支的對應者）。
+
+        ⚠ ``cd_axis_deg`` / ``cd_bright`` **不在這裡**：它們是「卡片自動做的
+        決定要變成畫得出分布的數字」那一族（F19）—— 使用者本來就該在表上
+        看到它們的分布，收進診斷等於把那條規矩收回去。
+        """
+        if _shape_of(params) == SHAPE_BLOB:
+            return ["cd_touches_edge", "cd_edge_score"]
+        return ["cd_n", "cd_lines", "cd_edge_score"]
+
+    @classmethod
+    def diagnostic_alarm_names(cls, params: Dict[str, object]) -> List[Tuple[str, bool]]:
+        if _shape_of(params) == SHAPE_BLOB:
+            return [("cd_touches_edge", True)]  # 1 = 貼著邊，面積只是下限
+        return []
 
     # ---- 量一個區域 -------------------------------------------------------- #
     def measure(self, ctx: Context, img, p: Dict[str, Any]):
