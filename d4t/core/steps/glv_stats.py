@@ -1363,6 +1363,10 @@ class GlvStatsStep(MultiSourceStep):
             "names": [prefix_names(str(p.get(self.CURRENT_PREFIX, "") or ""),
                                    [n])[0] for n in out],
             "values": dict(out),
+            # **每個 cmp 名的 metric/stat**（PR-3）——在組名字的地方記下來，
+            # 面板（`_compare_caption`）以前用最長比對把它們猜回來。
+            "metrics": {n: {"metric": m, "stat": s}
+                        for n, m, s in cmp_feature_specs(p)},
         }
         # 面板要**把參照那條分布疊上去**（使用者 2026-08-21：「疊上參照那條
         # 分布」）。算式與畫面的數字因此出自同一次計算 —— UI 不自己再跑一次。
@@ -1383,6 +1387,9 @@ class GlvStatsStep(MultiSourceStep):
                 _canonical(stat) or DEFAULT_COMPARE_STAT))
                 for stat in _stats_of(p)},
             "values": dict(out),
+            # 同 `compares` 那份的理由（PR-3）：metric/stat 在誕生處記。
+            "metrics": {n: {"metric": m, "stat": s}
+                        for n, m, s in cmp_feature_specs(p)},
         }
         return out, note
 

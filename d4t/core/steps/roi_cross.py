@@ -39,13 +39,15 @@ from typing import Any, Dict, List
 from ..algo import grid as algo_grid
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, GROUP_REGION, ParamSpec, Step, StepError, register_step,
+    CATEGORY_ALGO, GROUP_REGION, FeatureSpec, ParamSpec, Step, StepError,
+    register_step,
 )
 from ._util import (
     FEATURE_PREFIX_PATTERN, drop_edge_boxes, drop_edge_specs,
     PICK_NONE, output_prefix_spec, pick_defect_box, pick_rule_of,
     pick_rule_specs, prefix_features, prefix_names, region_family,
-    region_fact_names, region_facts, require_image, set_region_family,
+    region_fact_names, region_fact_specs, region_facts, region_role_of,
+    require_image, set_region_family,
     LIMIT_MAX_BOXES,
 )
 
@@ -422,18 +424,36 @@ class RoiCrossStep(Step):
                              pick_rule_of(params) != PICK_NONE)
 
     @classmethod
-    def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
+    def resolve_feature_specs(cls, params: Dict[str, Any]) -> List[FeatureSpec]:
         # 卡自己的診斷 ＋ **每個區域那五個**（F11 Region-4：三張 ROI 卡同一組，
         # 見 `_util.REGION_FACTS`）。這張卡以前一個區域數字都沒有 —— 下游要問
         # 「這一顆上到底有沒有 cross_center」只能去看 `locate_ok`，而那是**整張
         # 卡**的旗標，不是那個區域的。
+        # ⚠ 這一族的名字文法跟量測卡**相反**：`output_prefix` 在最外、區域名
+        # 在 base 裡（`gds_epi_center_present`）——身分因此只有這裡答得出來。
+        own = str(params.get("output_prefix", "") or "").strip()
+
+        def spec(base, region="", metric=""):
+            regions = cls.resolve_regions_out(params)
+            return FeatureSpec(
+                name=prefix_names(own, [base])[0], card=cls.key, base=base,
+                region=region,
+                region_index=(regions.index(region) if region in regions
+                              else -1),
+                region_role=(region_role_of(region) if region else ""),
+                own=own, metric=metric or base, family="region")
+
         names = list(cls.features_out)
         if pick_rule_of(params) == PICK_NONE:
             # ``none`` 之下「挑中的那一塊離中心多遠」問的東西不存在。
             names.remove("cross_dist_px")
-        return prefix_names(
-            params.get("output_prefix", ""),
-            names + region_fact_names(cls.resolve_regions_out(params)))
+        return ([spec(n) for n in names]
+                + [spec(n, region=r, metric=f) for n, r, f in
+                   region_fact_specs(cls.resolve_regions_out(params))])
+
+    @classmethod
+    def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
+        return [s.name for s in cls.resolve_feature_specs(params)]
 
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:

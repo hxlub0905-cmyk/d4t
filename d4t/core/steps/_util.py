@@ -893,14 +893,24 @@ def region_role_of(name: str) -> str:
 REGION_FACTS = ("present", "boxes", "area_px", "clipped", "edge_dropped")
 
 
-def region_fact_names(names) -> List[str]:
-    """``["epi", "epi_center"]`` → 這些區域會寫出來的 feature 名（供 lint／UI）。"""
-    out: List[str] = []
+def region_fact_specs(names) -> List[Tuple[str, str, str]]:
+    """``["epi", …]`` → ``[(feature 名, 區域名, 哪個 fact), …]``（PR-3）。
+
+    Region 卡的名字文法跟量測卡**相反**：區域名在 base 裡、`output_prefix`
+    在最外 —— 所以「這個名字屬於哪個區域」只有組名字的這一行答得出來。
+    `region_fact_names` 是它的投影。
+    """
+    out: List[Tuple[str, str, str]] = []
     for name in names or ():
         n = str(name or "").strip()
         if n:
-            out.extend("%s_%s" % (n, f) for f in REGION_FACTS)
+            out.extend(("%s_%s" % (n, f), n, f) for f in REGION_FACTS)
     return out
+
+
+def region_fact_names(names) -> List[str]:
+    """``["epi", "epi_center"]`` → 這些區域會寫出來的 feature 名（供 lint／UI）。"""
+    return [n for n, _r, _f in region_fact_specs(names)]
 
 
 def region_facts(ctx, names, shape, clipped: bool = False,
