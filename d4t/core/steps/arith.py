@@ -13,11 +13,27 @@ from typing import Any, Dict, List
 
 import numpy as np
 
+from ..algo import glv as algo_glv
 from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_COMPARE,
 )
 from ._util import require_image
+
+#: 行/列平均曲線最多留幾個點。條紋殘留（半像素對位）在預覽上肉眼看不出、
+#: 在行列平均上一眼看得出方向與強度 —— 但整張 RSEM 大圖一列一個 float 會把
+#: meta 撐肥（同 `cd.MAX_CONTOUR_POINTS` 只存摘要的理由）。128 點對「有沒有
+#: 條紋、往哪個方向」綽綽有餘。
+MAX_CURVE_POINTS = 128
+
+
+def _thin_curve(vals: "np.ndarray", limit: int = MAX_CURVE_POINTS) -> List[float]:
+    """等距抽稀到 ≤ ``limit`` 點（同 `cd._thin_out` 的 stride 做法）。"""
+    n = int(vals.size)
+    if n <= limit:
+        return [float(v) for v in vals]
+    step = int(np.ceil(n / float(limit)))
+    return [float(v) for v in vals[::step]]
 
 
 @register_step
@@ -108,5 +124,47 @@ class SubtractStep(Step):
             out = fa - fb
             if p["absolute"]:
                 out = np.abs(out)
-        ctx.set_image(p["out"], out.astype(np.float32))
+        out = out.astype(np.float32)
+        if ctx.track_changes:
+            # 儀表用（PR-2）。`diff` 是**新**流，`set_image` 的 stream_change
+            # 只在覆寫時記（context.py），所以這張卡自己 note —— 跟 Enhance
+            # 面板同一個生命週期：預覽（track_changes）才記，批次零成本。
+            # 記錄永遠不准弄壞跑（同 `Context._record_change` 的形狀）。
+            try:
+                self._note_diagnostics(ctx, out, p)
+            except Exception:  # noqa: BLE001
+                pass
+        ctx.set_image(p["out"], out)
         return ctx
+
+    def _note_diagnostics(self, ctx: Context, out: "np.ndarray",
+                          p: Dict[str, Any]) -> None:
+        """差影像是 D2D 的心臟，而它以前一格儀表都沒有。留三樣東西：
+
+        * **有號直方圖**（`algo_glv.signed_hist`，0 置中）—— 差影像的中心是
+          0 不是 128，0/255 的 `sat` 診斷對它不適用；
+        * **殘留數字**：median、MAD、超出 ±3×MAD 的像素比例；
+        * **行/列平均曲線**（各 ≤ 128 點）—— 抓半像素對位殘留的主角：條紋
+          在預覽上肉眼看不出，行列平均一眼看出方向與強度。
+
+        面板畫的就是這一份（`ui/inspectors.py` 檔頭第 2 條），全部 cast 成
+        int/float/list —— 快取 payload 的 `_meta_snapshot` 只留 JSON-safe。
+        """
+        v = out.astype(np.float64).ravel()
+        counts, edges, clipped = algo_glv.signed_hist(out)
+        med = float(np.median(v)) if v.size else 0.0
+        mad = float(np.median(np.abs(v - med))) if v.size else 0.0
+        beyond3 = (float((np.abs(v - med) > 3.0 * mad).mean())
+                   if v.size and mad > 0.0 else 0.0)
+        ctx.meta.setdefault("subtract", {})[str(p["out"])] = {
+            "a": str(p["a"]), "b": str(p["b"]),
+            "op": str(p["op"]), "absolute": bool(p["absolute"]),
+            "bins": [int(c) for c in counts],
+            "hi": float(edges[-1]),
+            "clipped": float(clipped),
+            "n": int(out.size),
+            "median": med, "mad": mad, "beyond3": beyond3,
+            "rows": _thin_curve(out.mean(axis=1)),
+            "cols": _thin_curve(out.mean(axis=0)),
+            "rows_n": int(out.shape[0]), "cols_n": int(out.shape[1]),
+        }
