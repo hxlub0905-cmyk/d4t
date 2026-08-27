@@ -13,7 +13,7 @@ from d4t.core.pipeline.recipe import (
 )
 from d4t.core.pipeline.step import REGISTRY
 from d4t.core.pipeline.verdict_features import (
-    diagnostic_alarm_map, diagnostic_columns, feature_groups_by_card,
+    ENGINE_LABEL, bound_specs, diagnostic_alarm_map, diagnostic_columns,
     features_in_verdict,
 )
 import d4t.core.steps  # noqa: F401 - 註冊卡片
@@ -172,15 +172,14 @@ def test_rescued_names_count_as_diagnostics_too():
     assert "n1_clip_frac" in cols and "n2_clip_frac" in cols
 
 
-def test_groups_follow_the_producing_card_in_execution_order():
+def test_bound_specs_follow_the_producing_card_in_execution_order():
     r = _recipe([LOAD,
                  ("m1", "glv_stats", {"source": "test"}),
                  ("m2", "cd_measure", {"source": "test"})])
-    groups = feature_groups_by_card(r, "ebi_patch")
-    by_id = {nid: names for nid, _, names in groups}
-    assert "glv_median" in by_id["m1"]
-    assert "cd_n" in by_id["m2"]
-    order = [nid for nid, _, _ in groups]
+    by = {b.spec.name: b for b in bound_specs(r, "ebi_patch")}
+    assert by["glv_median"].node_id == "m1"
+    assert by["cd_n"].node_id == "m2"
+    order = [b.node_id for b in bound_specs(r, "ebi_patch") if b.node_id]
     assert order.index("m1") < order.index("m2")
 
 
@@ -188,16 +187,50 @@ def test_a_colliding_name_belongs_to_its_first_producer():
     r = _recipe([LOAD,
                  ("m1", "glv_stats", {"source": "test"}),
                  ("m2", "glv_stats", {"source": "ref"})])
-    groups = {nid: names for nid, _, names in
-              feature_groups_by_card(r, "ebi_patch")}
-    assert "glv_median" in groups["m1"]
-    assert "glv_median" not in groups.get("m2", [])
+    by = {b.spec.name: b for b in bound_specs(r, "ebi_patch")}
+    assert by["glv_median"].node_id == "m1"
 
 
 def test_duplicate_card_labels_carry_the_node_id():
     r = _recipe([LOAD,
                  ("m1", "glv_stats", {"source": "test"}),
                  ("m2", "glv_stats", {"source": "ref"})])
-    labels = [label for _, label, _ in feature_groups_by_card(r, "ebi_patch")]
-    glv_labels = [x for x in labels if "GLV" in x]
-    assert len(glv_labels) == len(set(glv_labels)), "同名卡要帶 id 才分得開"
+    pairs = {(b.node_id, b.label) for b in bound_specs(r, "ebi_patch")
+             if b.node_id in ("m1", "m2")}
+    labels = [label for _nid, label in pairs]
+    assert len(labels) == len(set(labels)), "同名卡要帶 id 才分得開"
+
+
+def test_the_engine_group_declares_the_verdicts_own_names():
+    r = _recipe([LOAD], decide=DecideSpec(
+        let=[Let(name="bright", expr="glv_median", fill="-1"),
+             Let(name="z", expr="bright", scale="z")],
+        rules=[Rule(when="bright > 1", bin=1, label="odd")]))
+    by = {b.spec.name: b for b in bound_specs(r, "ebi_patch")}
+    for name in ("decide_unanswered", "bright", "bright_missing",
+                 "z", "z_raw"):
+        assert name in by, name
+        assert by[name].node_id == "" and by[name].label == ENGINE_LABEL
+        assert by[name].spec.family == "engine"
+    assert by["bright_missing"].spec.variant == "missing"
+    assert by["z_raw"].spec.variant == "raw"
+    # score **有算式才宣告** —— 這份 decide 沒填 score，引擎不會寫那一格。
+    assert "score" not in by
+
+
+def test_score_is_declared_only_when_an_expression_exists():
+    r = _recipe([LOAD], score="glv_median + 1")
+    by = {b.spec.name: b for b in bound_specs(r, "ebi_patch")}
+    assert by["score"].label == ENGINE_LABEL, "有算式就宣告（反空洞）"
+
+
+def test_rescued_diagnostic_names_get_a_spec_too():
+    """跟 `diagnostic_columns` 報的是同一個名字、variant='rescued'。"""
+    r = _recipe([LOAD,
+                 ("n1", "normalize", {"streams": "test"}),
+                 ("n2", "normalize", {"streams": "test"})])
+    by = {b.spec.name: b for b in bound_specs(r, "ebi_patch")}
+    cols = set(diagnostic_columns(r, "ebi_patch"))
+    assert "n1_clip_frac" in by and "n1_clip_frac" in cols
+    assert by["n1_clip_frac"].spec.variant == "rescued"
+    assert by["n1_clip_frac"].node_id == "n1"

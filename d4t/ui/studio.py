@@ -5644,10 +5644,19 @@ class StudioWindow(QMainWindow):
         try:
             recipe = self.model.to_recipe()
             kind = self.model.kind
+            bound = verdict_features.bound_specs(recipe, kind)
+            groups: List[Tuple[str, str, List[str]]] = []
+            for b in bound:
+                if not b.node_id:
+                    continue
+                if groups and groups[-1][0] == b.node_id:
+                    groups[-1][2].append(b.spec.name)
+                else:
+                    groups.append((b.node_id, b.label, [b.spec.name]))
             layout = results_table.column_layout(
                 results,
                 verdict_features.features_in_verdict(recipe, kind),
-                verdict_features.feature_groups_by_card(recipe, kind),
+                groups,
                 verdict_features.diagnostic_columns(recipe, kind))
             alarms = verdict_features.diagnostic_alarm_map(recipe, kind)
         except Exception:              # noqa: BLE001 — 顯示層，見上

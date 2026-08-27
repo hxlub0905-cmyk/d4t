@@ -19,19 +19,22 @@
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Type
 
 from .decide_tree import features_used
 from .engine import feature_prefixes, qualified_feature_name
 from .expression import ExpressionError, parse_expression
 from .recipe import Recipe, RecipeError, execution_order
-from .step import REGISTRY, Step
+from .step import FeatureSpec, REGISTRY, Step
 
 __all__ = [
     "features_in_verdict",
     "diagnostic_columns",
     "diagnostic_alarm_map",
-    "feature_groups_by_card",
+    "BoundSpec",
+    "bound_specs",
+    "ENGINE_LABEL",
 ]
 
 
@@ -152,34 +155,103 @@ def diagnostic_alarm_map(recipe: Recipe, kind: str,
     return out
 
 
-def feature_groups_by_card(recipe: Recipe, kind: str,
-                           registry: Optional[Dict[str, Type[Step]]] = None,
-                           ) -> List[Tuple[str, str, List[str]]]:
-    """摺疊區的分組：``(node_id, 卡片名, 這張卡宣告的特徵名)``，執行順序。
+@dataclass(frozen=True)
+class BoundSpec:
+    """一個特徵的**完整**身分：spec ＋ 它掛在哪個節點上（PR-3）。
 
-    名字歸**第一個**產出者（跟 ``_feature_collisions`` 的 setdefault 同一個
-    語意）；同名卡片出現兩次以上時才把 node id 帶進標題（跟特徵面板
-    ``_feature_sections`` 同一條規則 —— 每一組都掛 id 是在正常 recipe 上加
-    噪音）。分組只到卡層級：區域層級的結構等 PR-3 的 FeatureSpec，
-    **不拆字串猜**。
+    ``node_id == ""`` 是**引擎/判定段**（score / decide_unanswered /
+    route_taken / let 那些）—— UI 對映到「Score / Bin」那張偽卡。
+    """
+    node_id: str
+    label: str
+    spec: FeatureSpec
+
+
+#: 引擎/判定段那一組在 UI 上的名字 —— 跟 `studio._SCORE_LIBRARY_ENTRY` 的
+#: label 同一個字（那邊是它的別名，這裡是家）。
+ENGINE_LABEL = "Score / Bin"
+
+
+def bound_specs(recipe: Recipe, kind: str,
+                registry: Optional[Dict[str, Type[Step]]] = None,
+                ) -> List[BoundSpec]:
+    """這條 route 上**每一個會出現的特徵名**的完整身分，執行順序。
+
+    取代 PR-1 的 `feature_groups_by_card`（卡層分組）：卡 → 區域 → 統計量
+    的樹、維度過濾、回溯面板的「點項找來源卡」全部從這一份長出來 ——
+    分組結構只有一個家。三個來源：
+
+    * route 上啟用卡片的 `resolve_feature_specs`（名字歸**第一個**產出者，
+      同 ``_feature_collisions`` 的 setdefault 語意）；
+    * 撞名時的**救援名**（`FeatureSpec.qualified`，前綴跟引擎同一支
+      `feature_prefixes` —— 這裡收斂了 `diagnostic_columns` 與
+      `studio._feature_sections` 以前各自手組的那兩份）；
+    * 引擎/判定段：``score``（**有算式才宣告** —— 引擎沒算式就不寫那一格）、
+      ``decide_unanswered``（有 decide 恆有）、``route_taken``（有
+      route_by 才有）、每個 let（＋ fill → ``_missing``、scale → ``_raw``）。
+
+    同名卡片出現兩次以上才把 node id 帶進 label（每一組都掛 id 是在正常
+    recipe 上加噪音）。
     """
     if registry is None:
         registry = REGISTRY
-    groups: List[Tuple[str, str, List[str]]] = []
+    steps = list(_route_steps(recipe, kind, registry))
+    try:
+        prefixes = feature_prefixes([nid for nid, _, _ in steps],
+                                    recipe, registry)
+    except Exception:  # noqa: BLE001 — 顯示層，退回節點 id
+        prefixes = {}
+    out: List[BoundSpec] = []
     owned = set()
-    for nid, step_cls, p in _route_steps(recipe, kind, registry):
+    for nid, step_cls, p in steps:
         try:
-            names = [str(n) for n in step_cls.resolve_features(p)]
+            specs = list(step_cls.resolve_feature_specs(p))
+            diag = set(step_cls.diagnostic_features(p))
         except Exception:  # noqa: BLE001 — 顯示層
-            names = []
-        mine = []
-        for n in names:
-            if n not in owned:
-                owned.add(n)
-                mine.append(n)
-        if mine:
-            groups.append((nid, str(step_cls.label), mine))
-    titles = [g[1] for g in groups]
-    return [(nid, ("%s · %s" % (label, nid)
-                   if titles.count(label) > 1 else label), names)
-            for nid, label, names in groups]
+            specs, diag = [], set()
+        pfx = prefixes.get(nid, nid)
+        for s in specs:
+            if s.name not in owned:
+                owned.add(s.name)
+                out.append(BoundSpec(nid, str(step_cls.label), s))
+            if s.name in diag:
+                # 診斷數字撞名時引擎救成 `<前綴>_<名>` —— 那一份也要有身分。
+                q = s.qualified(pfx)
+                if q.name not in owned:
+                    owned.add(q.name)
+                    out.append(BoundSpec(nid, str(step_cls.label), q))
+
+    def engine(name: str, **kw: Any) -> None:
+        if name not in owned:
+            owned.add(name)
+            out.append(BoundSpec("", ENGINE_LABEL,
+                                 FeatureSpec(name=name, family="engine", **kw)))
+
+    decide = recipe.decide
+    has_score = bool((decide.score if decide is not None
+                      else recipe.score.expr).strip())
+    if has_score:
+        engine("score", base="score", metric="score")
+    if decide is not None:
+        engine("decide_unanswered", base="decide_unanswered",
+               metric="decide_unanswered")
+        for item in decide.let:
+            name = str(item.name).strip()
+            if not name:
+                continue
+            engine(name, base=name)
+            if str(getattr(item, "fill", "") or ""):
+                engine(name + "_missing", base=name, variant="missing")
+            if str(getattr(item, "scale", "") or ""):
+                engine(name + "_raw", base=name, variant="raw")
+    if getattr(recipe, "route_by", None) is not None:
+        engine("route_taken", base="route_taken", metric="route_taken")
+
+    labels = [b.label for b in out]
+    return [BoundSpec(b.node_id,
+                      ("%s · %s" % (b.label, b.node_id)
+                       if b.node_id and labels.count(b.label) > 1
+                       and len({x.node_id for x in out
+                                if x.label == b.label}) > 1
+                       else b.label), b.spec)
+            for b in out]

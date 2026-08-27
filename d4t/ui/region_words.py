@@ -10,7 +10,7 @@ Profile 檢視器的斜線圖例都從這裡拿字。三個地方各寫一份的
 """
 from __future__ import annotations
 
-from ..core.steps._util import CENTRE_SUFFIX, OTHERS_SUFFIX
+from ..core.steps._util import region_role_of
 
 __all__ = ["ROLE_ALL", "ROLE_CENTER", "ROLE_OTHERS", "role_of",
            "PORT_HOVER", "INTENT_PHRASE", "LEFT_OUT_LEGEND"]
@@ -21,13 +21,9 @@ ROLE_OTHERS = "others"
 
 
 def role_of(name: str) -> str:
-    """區域（埠）名 → 角色。認不得的後綴一律當 `<n>`（全部的框）。"""
-    n = str(name or "")
-    if n.endswith(CENTRE_SUFFIX):
-        return ROLE_CENTER
-    if n.endswith(OTHERS_SUFFIX):
-        return ROLE_OTHERS
-    return ROLE_ALL
+    """區域（埠）名 → 角色。PR-3 起**委派 core 的 `region_role_of`**
+    （後綴契約的家在 `_util.region_family` 旁邊）—— 這裡只剩顯示的字。"""
+    return region_role_of(name)
 
 
 #: 菱形埠 hover 的一句話（畫布用；GLV tab_tooltip 也引用同一句）。
