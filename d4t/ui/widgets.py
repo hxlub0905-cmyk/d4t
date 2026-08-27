@@ -3736,6 +3736,9 @@ class ParamForm(QWidget):
     #: **入口卡的「資料從哪來」**（F14-1）：按下去要開檔案對話框。
     #: 同樣地，表單不知道那是哪一種來源 —— 它送出去，Studio 決定開什麼。
     source_requested = Signal()
+    #: 「我要量什麼」三選（PR-2 2a）：使用者按了哪個 preset 的 id。
+    #: 表單不知道 preset 會動什麼 —— 動線動格的腦袋在 model。
+    intent_chosen = Signal(str)
 
     _EMPTY_TEXT = "(Pick a card from the library, or select a step in the pipeline)"
 
@@ -3806,6 +3809,31 @@ class ParamForm(QWidget):
         self._source_row.setVisible(False)
         outer.addWidget(self._source_row)
 
+        # 「我要量什麼」三選（PR-2 2a；目前只有 GLV 用）。跟 `_source_row`
+        # 同一個位置學（scroll 區上方 —— 意圖在參數之前）。**preset 不是
+        # 參數**：這裡只畫鈕、發 id，動線動格的腦袋在 `RecipeModel
+        # .apply_glv_intent`。表單保持不認識 model。
+        self._intent_row = QWidget(self)
+        self._intent_row.setObjectName("intentRow")
+        irow = QVBoxLayout(self._intent_row)
+        irow.setContentsMargins(2, 0, 8, 4)
+        irow.setSpacing(2)
+        self._intent_title = QLabel("", self._intent_row)
+        self._intent_title.setObjectName("paramTitle")
+        irow.addWidget(self._intent_title)
+        btns = QHBoxLayout()
+        btns.setSpacing(6)
+        self._intent_btns: Dict[str, QPushButton] = {}
+        self._intent_btn_row = btns
+        irow.addLayout(btns)
+        self._intent_note = QLabel("", self._intent_row)
+        self._intent_note.setObjectName("paramHint")
+        self._intent_note.setWordWrap(True)
+        irow.addWidget(self._intent_note)
+        self._intent_shown = False           # 追明確狀態（PITFALLS：isVisible
+        self._intent_row.setVisible(False)   # 在視窗 show 之前恆為 False）
+        outer.addWidget(self._intent_row)
+
         self._scroll = QScrollArea(self)
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.NoFrame)
@@ -3852,6 +3880,48 @@ class ParamForm(QWidget):
     def has_source_action(self) -> bool:
         """這張卡有沒有那一排「資料從哪來」。"""
         return bool(getattr(self, "_source_shown", False))
+
+    def set_intent_row(self, title: str = "",
+                       options: Sequence[Tuple[str, str, str]] = (),
+                       current_id: str = "", note: str = "",
+                       enabled: bool = True) -> None:
+        """卡最上面的「我要量什麼」三選（PR-2 2a）。``title=""`` = 沒有這排。
+
+        ``options`` 是 ``(id, 顯示字, 一句話)``；``current_id`` 對不上任何
+        id（例 ``"custom"``）就一顆都不勾 —— **不強制改**，自訂是一個合法
+        的狀態。``enabled=False``（roi 還沒接線）時鈕全部灰掉，note 講原因。
+        """
+        title = str(title or "")
+        # 重建鈕（選項是呼叫端給的，張數可能變）。
+        for btn in self._intent_btns.values():
+            self._intent_btn_row.removeWidget(btn)
+            btn.deleteLater()
+        self._intent_btns = {}
+        self._intent_title.setText(title)
+        if title:
+            for iid, label, help_line in options:
+                btn = QPushButton(str(label), self._intent_row)
+                btn.setObjectName("intentChoice")
+                btn.setCheckable(True)
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.setToolTip(str(help_line))
+                btn.setChecked(str(iid) == str(current_id))
+                btn.setEnabled(bool(enabled))
+                btn.clicked.connect(
+                    lambda _=False, i=str(iid): self.intent_chosen.emit(i))
+                self._intent_btn_row.addWidget(btn)
+                self._intent_btns[str(iid)] = btn
+        self._intent_note.setText(str(note or ""))
+        self._intent_note.setVisible(bool(note))
+        self._intent_shown = bool(title)
+        self._intent_row.setVisible(self._intent_shown)
+
+    def has_intent_row(self) -> bool:
+        return bool(getattr(self, "_intent_shown", False))
+
+    def intent_buttons(self) -> Dict[str, QPushButton]:
+        """測試 API：id → 鈕。"""
+        return dict(self._intent_btns)
 
     def source_button(self) -> QPushButton:
         """那顆鈕本身（訊息裡引到的名字要跟它一字不差 —— 有測試在擋）。"""
@@ -3925,6 +3995,10 @@ class ParamForm(QWidget):
         從這裡傳進來，而不是讓元件自己去問（`widgets` 不認得 `Dataset`）。
         """
         current_params = dict(current_params or {})
+        # 換卡先把「我要量什麼」那排清掉（同 `set_source_action` 的規矩：
+        # 這排是**這張卡**的，別張卡不出現）—— 要顯示的話 Studio 在
+        # `set_step` 之後自己 set 回來。
+        self.set_intent_row("")
         # **沒填的那幾格用預設值補上**（F30）。`show_when` 問的是「另外那一格
         # 現在是什麼」，而引擎那一邊看到的永遠是 `validate_params` 補完的一份
         # —— 這裡不補的話，一張剛加進來、參數還是空的卡，它的 `method` 在

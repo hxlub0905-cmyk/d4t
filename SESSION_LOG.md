@@ -19,6 +19,33 @@
 
 ---
 
+## F44：區域接線可讀性 + 儀表補洞（2026-08-27，總工作單 PR-2）
+
+計畫書：[`docs/plans/F44-region-wiring-and-panels.md`](docs/plans/F44-region-wiring-and-panels.md)。
+六個子項一次收工；PR-3（FeatureSpec 與分數回溯）還沒動。
+
+- **GLV「我要量什麼」三選**（preset 不是參數）：腦袋在 `RecipeModel`
+  （roi 是線水合的 → preset 動的是**線**），存出 JSON 與手拉線者逐位元組
+  相同、一次 Ctrl+Z 全還原。使用者拍板 preset (1) 用現行正確寫法兩條線
+  （工作單字面的 REF_OTHERS+_center 是已知壞組合）。
+- **兩條 kind 感知 lint**（新 hook `Step.kind_issues`；kind 分群搬進
+  step.py）＋ **Issue 多了 `info` 級**（徽章不畫、tooltip/CLI 可見）。
+- **一份字典 `ui/region_words.py`**：菱形埠 hover（掛在 view，node 不收
+  hover）、GLV 標題意圖語言、ProfilePanel 斜線圖例三方同源。
+- **GLV worst 直方圖 + judge 值帶**：同一次計算、擴充 `glv_hist` meta；
+  >512 格取樣記 `sampled`、worst 必留。
+- **Subtract 面板**：新 `signed_hist`（`pixel_hist` 0-255 不動、有絆線
+  測試）；卡片在預覽下自己 note（diff 是新流，stream_change 不會記）；
+  行/列平均曲線抓對位條紋（測試證明直方圖看不見、曲線看得見）。
+- **輸出預覽**：`planned_files` 是 run_batch 那張表本人（不會漂）；
+  選到卡就列檔、永不寫檔。**focus 單顆即時**（meta note）。
+- **共用 header**（`note_header`/`paint_note_header`）＋ empty_reason
+  巡檢（registry 全掃逼每個面板自己講）。
+
+黃金值逐項相同、export parity 全綠、核心 + UI 逐檔全綠。
+
+---
+
 ## F43：結果表分層 + 診斷徽章（2026-08-27，總工作單 PR-1）
 
 計畫書：[`docs/plans/F43-results-layers.md`](docs/plans/F43-results-layers.md)。

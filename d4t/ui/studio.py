@@ -129,7 +129,9 @@ from .scope import (
     unsupported_kind_message, visible_steps,
 )
 from .decide_panel import DecidePanel
-from .viewmodel import RecipeModel, is_a_constant_expression, accuracy_at, histogram, rebin
+from .viewmodel import (GLV_INTENT_CUSTOM, GLV_INTENTS, RecipeModel,
+                        is_a_constant_expression, accuracy_at, histogram,
+                        rebin)
 from . import theme
 from .theme import DEFAULT_THEME, THEMES, apply_theme, current_theme
 from .welcome import (
@@ -1400,6 +1402,7 @@ class StudioWindow(QMainWindow):
         self.btn_empty_sample.clicked.connect(self._on_demo_requested)
         self.param_form.action_requested.connect(self._on_param_action)
         self.param_form.source_requested.connect(self._on_source_requested)
+        self.param_form.intent_chosen.connect(self._on_intent_chosen)
         self.stream_combo.currentTextChanged.connect(self._on_stream_changed)
         self.stream_combo_b.currentTextChanged.connect(self._on_stream_b_changed)
         self.compare_check.toggled.connect(self.set_compare)
@@ -3039,6 +3042,7 @@ class StudioWindow(QMainWindow):
             self.model.available_regions(before_node=node_id),
             self._dynamic_choices_for(node))
         self._sync_source_action(node)
+        self._sync_glv_intent(node_id, node)
         self.stack.setCurrentWidget(self.param_form)
         self._sync_params_pane()
         self._refresh_region_button()
@@ -3124,6 +3128,34 @@ class StudioWindow(QMainWindow):
 
     def _sync_source_action(self, node: Any) -> None:
         self.param_form.set_source_action(*self._source_action_for(node))
+
+    # ---- GLV「我要量什麼」三選（PR-2 2a）----------------------------------
+    def _sync_glv_intent(self, node_id: str, node: Any) -> None:
+        """GLV 卡才有這一排；其他卡 `set_step` 已經清掉了。"""
+        if node is None or getattr(node, "step", "") != "glv_stats":
+            return
+        wired = bool(self.model._glv_region_edges(node_id, "roi"))
+        current = self.model.glv_intent(node_id)
+        note = ""
+        if not wired:
+            note = "Wire a Region card into “Region” first."
+        elif current == GLV_INTENT_CUSTOM:
+            note = "custom - the settings match none of the three."
+        self.param_form.set_intent_row(
+            "What do I want to measure?", GLV_INTENTS,
+            current, note=note, enabled=wired)
+
+    def _on_intent_chosen(self, intent: str) -> None:
+        nid = self.selected_node
+        if not nid:
+            return
+        if self.model.apply_glv_intent(nid, str(intent)):
+            # 重新走一次 select_node：表單（roi/reference 那幾格）、preset
+            # 列的勾選、儀表、畫布的線一次到位 —— 不各自手動刷新。
+            self.select_node(nid)
+        else:
+            node = self.model.nodes.get(nid)
+            self._sync_glv_intent(nid, node)   # 套不上：勾選擺回真實狀態
 
     def _on_source_requested(self) -> None:
         """入口卡上那顆鈕：附加檔直接開，資料那幾張開一張選單。

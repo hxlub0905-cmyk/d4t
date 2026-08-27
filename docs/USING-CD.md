@@ -71,6 +71,14 @@
 ⚠ **拿掉上游那張 Region 卡，這張卡不會報錯** —— 它會安靜地改量整張圖。
 所以畫面上那條虛線是你唯一的線索，它在就代表有在框。
 
+Region 卡右邊的**三顆菱形埠**各是什麼（滑鼠停上去也會講同一句；GLV 卡同）：
+
+| 埠 | 一句話（畫面上的原文）|
+|---|---|
+| `<名字>` | all the boxes —— 全部的框 |
+| `<名字>_center` | the defect's box (a patch is guaranteed centred on it) —— 缺陷那格（patch 置中保證）|
+| `<名字>_others` | the other boxes = the reference —— 其餘格 = 參照 |
+
 ---
 
 ## 3. ② 方向與極性
