@@ -110,20 +110,9 @@ def _finish(defect_id: str, ctx: Context, traces: List[StepTrace],
 #: 這裡保留這個名字，因為它是公開的（`store` / UI / 測試都用它）。
 
 
-def qualified_feature_name(node_id: str, name: str) -> str:
-    """被蓋掉的特徵改用這個名字保存：``<前綴>_<原名>``。
-
-    D1（使用者 2026-08-16 同意）：**特徵掛在產出它的東西上**，所以「這個數字
-    從哪來」永遠答得出來 —— 包括那些不屬於任何一條影像流的（``n_channels`` 是
-    這顆 defect 的、``align_dx`` 是兩條流之間的關係、``cross_*`` 是具名區域的）。
-
-    D2：**沒撞名就用原名**，撞名才加前綴。所以使用者平常看到的名字跟以前
-    一模一樣，不必學新語法（寫 score 的是不會寫 code 的工程師）。
-
-    ``node_id`` 是**退路**：呼叫端算得出流名時請用 :func:`feature_prefix`
-    的結果（見那一支的說明）。
-    """
-    return "%s_%s" % (node_id, name)
+# 定義 PR-3 起搬到 `step.py`（`FeatureSpec.qualified` 要用，而 engine
+# import step —— 反向就循環）。這裡是公開名字的家，re-export 不改呼叫端。
+from .step import qualified_feature_name  # noqa: F401,E402 — re-export
 
 
 def feature_prefix(node_id: str, step_cls: Optional[Type[Step]],

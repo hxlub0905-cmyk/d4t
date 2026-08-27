@@ -638,6 +638,72 @@ class ParamSpec:
         return v
 
 
+def qualified_feature_name(prefix: str, name: str) -> str:
+    """被蓋掉的特徵改用這個名字保存：``<前綴>_<原名>``。
+
+    定義住在這裡（PR-3 起）：`FeatureSpec.qualified` 要用它，而 engine
+    import step —— 反過來就循環了。`engine.qualified_feature_name` 是它的
+    re-export，公開名字不變（store / UI / 測試都用那個名字）。
+
+    D1（使用者 2026-08-16 同意）：**特徵掛在產出它的東西上**，所以「這個數字
+    從哪來」永遠答得出來。D2：**沒撞名就用原名**，撞名才加前綴 —— 使用者平常
+    看到的名字跟以前一模一樣。``prefix`` 優先是流名（`engine.feature_prefix`
+    算的），退路是節點 id。
+    """
+    return "%s_%s" % (prefix, name)
+
+
+@dataclass(frozen=True)
+class FeatureSpec:
+    """一個特徵名的**結構化身分**（PR-3）—— 在名字誕生的地方組出來。
+
+    ``name`` 是完整特徵名，**與 `resolve_features` 逐位元組相同**（鐵測試
+    守著）：字串仍然是分數表達式的變數、CSV 的欄名、KLARF 的來源 —— 結構是
+    補上去的 metadata，不是改名。其餘欄位空字串／-1 = 「這一段不存在」。
+
+    variant 裝的是**名字裡真正存在的變體後綴**（2026-08-27 使用者定調）：
+    nm/nm2 孿生、each-box 的 typical/outlier/outlier_box、引擎寫的
+    missing/raw、撞名救援名（rescued）。``epi_center`` 那種是**區域名**
+    （region + region_role），``glv_worst_score`` 那種是**統計量 id**
+    （metric）—— 不是 variant。
+
+    為什麼住在 step.py：命名契約（`resolve_features` / `feature_parts` /
+    `full_prefix`）的家在這裡，拆與合只能有一個家（CLAUDE.md §0）。
+    """
+
+    name: str
+    card: str = ""            #: step key（class 層級）；node_id 由 binder 掛
+    base: str = ""            #: 去前綴後的那段（== feature_parts 的 base）
+    stream: str = ""          #: 流名前綴（單流 = ""）
+    region: str = ""          #: 區域名前綴（單區域 = ""；含後綴全名如 epi_center）
+    region_index: int = -1    #: 第幾個區域 —— 決定顏色；無區域 = -1
+    region_role: str = ""     #: "" | "all" | "center" | "others"
+    own: str = ""             #: 使用者填的 output_prefix
+    variant: str = ""         #: "" | nm | nm2 | typical | outlier | outlier_box
+                              #:    | missing | raw | rescued
+    metric: str = ""          #: 統計量 id（METRIC_GROUPS 的鍵那一層）；無 = ""
+    stat: str = ""            #: 只有 cmp_* 用：比的是哪個統計量（stat-free = ""）
+    family: str = ""          #: "glv" | "cmp" | "cd" | "region" | "engine" | ""
+
+    def qualified(self, prefix: str) -> "FeatureSpec":
+        """撞名救援名的 spec（`engine._rescue_overwritten_features` 那一份）。"""
+        from dataclasses import replace
+        return replace(self, name=qualified_feature_name(prefix, self.name),
+                       variant="rescued")
+
+    def parts(self) -> Dict[str, Any]:
+        """`Step.feature_parts` 形狀的相容 dict（`feature_html` 吃這個）。"""
+        out: Dict[str, Any] = {"base": self.base or self.name}
+        if self.stream:
+            out["stream"] = self.stream
+        if self.region:
+            out["region"] = self.region
+            out["region_index"] = int(self.region_index)
+        if self.own:
+            out["own"] = self.own
+        return out
+
+
 class Step(ABC):
     """所有卡片的基底。子類別必須設定 key/label/category 並實作 run()。"""
 
@@ -949,6 +1015,32 @@ class Step(ABC):
         少一點資訊，不會是錯的資訊。
         """
         return {}
+
+    @classmethod
+    def resolve_feature_specs(cls, params: Dict[str, Any]) -> List["FeatureSpec"]:
+        """`resolve_features` 的結構化版本（PR-3）：一個名字一個 `FeatureSpec`。
+
+        預設從 `resolve_features` + `feature_parts` 組退化版 —— 未遷移／
+        第三方卡自動拿到 name+card（＋parts 拆得出的欄位）。同 `feature_parts`
+        的退化原則：少一點資訊，不會是錯的資訊。
+
+        鐵測試（`tests/test_feature_specs.py`）：每張註冊卡、每組代表參數下
+        ``[s.name for s in specs]`` 與 `resolve_features` **逐位元組相同**
+        （順序也相同）。`resolve_features` 是相容介面，簽名語意不變。
+        """
+        parts = cls.feature_parts(params)
+        out: List[FeatureSpec] = []
+        for n in cls.resolve_features(params):
+            p = parts.get(n, {})
+            out.append(FeatureSpec(
+                name=str(n), card=cls.key,
+                base=str(p.get("base", "") or ""),
+                stream=str(p.get("stream", "") or ""),
+                region=str(p.get("region", "") or ""),
+                region_index=(int(p["region_index"])
+                              if "region_index" in p else -1),
+                own=str(p.get("own", "") or "")))
+        return out
 
     @classmethod
     def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:
