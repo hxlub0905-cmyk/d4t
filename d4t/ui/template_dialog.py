@@ -16,8 +16,22 @@ Region left/top/width/height 滑桿把區域標在 cell 上」，叫使用者去
 只會有一批看起來很正常、其實量錯位置的數字。
 
 所以這裡把判斷材料**全部攤開**：量到的週期、疊了幾格、疊出來長什麼樣，
-以及一個銳利度分數（``ghosting_score``）。使用者不需要懂那個分數怎麼算 ——
-他只要看得到「疊出來的圖是清楚的還是糊的」。
+以及兩個數字。使用者不需要懂它們怎麼算 —— 他只要看得到「疊出來的圖是清楚的
+還是糊的」。
+
+⚠ **那兩個數字問的是兩件事，而搞混它們讓這條警示白掛了好幾個月**（F40，
+2026-08-26 發現）：
+
+``sharpness``（``golden.ghosting_score``）
+    疊完那張圖有多少邊緣能量。跟著對比、雜訊、格子大小一起動 —— 純雜訊在
+    σ=60 拿 **99.4 / 100**。只能比同一張圖的兩個 stack。
+``cells agree``（``golden.stack_agreement``）
+    那幾格**彼此**對得多齊。無量綱、跨影像可比。
+
+以前那句「the stack looks blurred」掛在 ``sharpness < 40`` 上，於是它
+**對著正確的低對比模板喊狼來了**（對比 0.25 時正確的週期只拿 6.8 分），
+而**放過高雜訊下錯掉的**（錯的 76.1 分比正確的 68.4 還高）。現在掛在
+``agreement`` 上，門檻 :data:`BLURRED_BELOW`。
 
 大圖不進 recipe，模板才進
 -------------------------
@@ -82,7 +96,36 @@ from .cell_canvas import (
 from .theme import TOKENS
 from .widgets import IconButton, apply_button_cursors, restyle
 
-__all__ = ["TemplateDialog"]
+__all__ = ["TemplateDialog", "BLURRED_BELOW"]
+
+#: 一致性低於這個值就講「疊出來是糊的」（`golden.stack_agreement`，0–1）。
+#:
+#: **這個數字是量出來的，不是挑的**（F40）。正確的週期在 repo 自己的擬真產生器
+#: （`tools/make_mgepi_real.render_die`）上落在 0.89–0.97；條紋圖上六種對比／
+#: 雜訊組合落在 0.24–0.99。不成比例的錯週期（47、42、38）是 0.00–0.08，
+#: 純雜訊 0.003。0.5 因此放行全部擬真的，唯一擋下的正確案例是「對比 0.25 ＋
+#: 雜訊 20」的 0.243 —— 那個 stack 本來就不該被信任。
+#:
+#: ⚠ **這一條抓的是「格子對不上」，不是「週期挑錯了」——三種壞法有三個機制，
+#: 不要指望一個數字全包**（量過的，方波條紋、真值 40）：
+#:
+#: =====================  ==========  =========================================
+#: 壞法                   agreement   誰抓它
+#: =====================  ==========  =========================================
+#: 不成比例的週期（47）    0.000       **這一條**
+#: 完全沒有東西可疊        0.003       **這一條**
+#: cell 是 k 倍（80）      0.995       `cell_self_period` 的 k× 提示（而且 2×
+#:                                    的 cell 是**合法的**，使用者要得到）
+#: 一半／1.5 倍（20、60）  0.69–0.93   `estimate_period` 的諧波修正（自相關那
+#:                                    一層），以及 60 也會觸發 k× 提示
+#: =====================  ==========  =========================================
+#:
+#: 對稱性高的圖案上，半週期的格子彼此**真的**蠻像的 —— 0.93 是誠實的回答，
+#: 不是漏抓。那一題屬於上游。
+#:
+#: ⚠ 這個門檻**只能**跟 `agreement` 比。以前它掛在 `ghosting`（銳利度）上，
+#: 而那個量沒有正規化 —— 見模組說明。
+BLURRED_BELOW = 0.5
 
 #: 新區域的預設名（ROI1、ROI2…）—— 使用者的原話就是這個命名。
 _NAME_STEM = "ROI"
@@ -755,12 +798,16 @@ class TemplateDialog(QDialog):
         bits = ["cell %d x %d px" % (gc.px, gc.py),
                 "repeats %s" % axis,
                 "stacked from %d cells" % gc.n_cells,
+                # 兩個數字問的是兩件事，所以兩個都列（F40）。以前只有前者，
+                # 而那一句警示掛在它上面 —— 見底下 `BLURRED_BELOW`。
+                "cells agree %.0f%%" % (100.0 * gc.agreement),
                 "sharpness %.0f / 100" % gc.ghosting]
         bits.extend(self._self_repeat_note())
-        if gc.ghosting < 40.0:
-            bits.append("- the stack looks blurred, which usually means the "
-                        "period was measured wrong; a blurred template will "
-                        "mis-place the region on every defect")
+        if gc.agreement < BLURRED_BELOW:
+            bits.append("- the cells did not land on top of each other, which "
+                        "usually means the period was measured wrong; a "
+                        "blurred template will mis-place the region on every "
+                        "defect")
         for w in gc.warnings:
             if "arbitrary" in w:
                 bits.append("- " + w)

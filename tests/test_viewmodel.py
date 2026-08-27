@@ -101,3 +101,33 @@ def test_the_nm_numbers_are_only_offered_when_someone_says_how_big_a_pixel_is():
 
     m.set_param(load, "nm_per_px", 0.0)            # 清掉就收回去
     assert "cd_median_nm" not in m.available_features()
+
+
+# --------------------------------------------------------------------------- #
+# 一張卡不能吃自己還沒寫的東西
+#
+# 2026-08-27（Phase 3）從 `test_ui_f21_expr_picker.py` 搬過來。原本用
+# `feature_math` 觸發（那張卡刪掉了），改用 `glv_stats` 的 `judge` —— 那一格
+# 問的是同一件事：**清單裡不可以出現這張卡自己要寫出去的名字。**
+# 它是 `include_upto=False` 全 repo 唯一的守門人。
+# --------------------------------------------------------------------------- #
+def test_a_card_does_not_offer_its_own_output():
+    """點下去就是 `x = x`。引擎擋得住（`unknown-feature-input`），但**讓使用者
+    點一個保證壞掉的選項本身就是 bug**（推廣鐵則）。
+
+    這是把 Studio 跑起來、把選單印出來才看到的 —— 元件測試看不到，因為清單是
+    Studio 填的。
+    """
+    m = RecipeModel()
+    m.add_step("glv_stats")
+    second = m.add_step("glv_stats")
+    m.set_param(second, "output_prefix", "mine")
+    inclusive = [x.split("\t", 1)[0]
+                 for x in m.labelled_features(upto_node=second)]
+    exclusive = [x.split("\t", 1)[0]
+                 for x in m.labelled_features(upto_node=second,
+                                              include_upto=False)]
+    mine = [x for x in inclusive if x.startswith("mine_")]
+    assert mine, "前提：第二張卡真的會寫出 mine_* 這幾個名字"
+    assert not [x for x in exclusive if x.startswith("mine_")], exclusive
+    assert set(exclusive) < set(inclusive), "上游的那些還是要在"

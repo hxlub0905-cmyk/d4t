@@ -8,6 +8,15 @@
 
 這個 repo 記過好幾次同一個形狀（同一件事有兩個地方存，抄第二份出來的那份會漂）。
 所以這裡不是「檢查一下」，是把兩份綁在一起。
+
+⚠ **2026-08-27（Phase 3）刪了 ``the_absorbed_algo_cards_never_read_an_image_stream``。**
+它掃的是「`feature_math` / `feature_fill`，以及任何掛在 ``GROUP_ALGO`` 上的卡，
+都不准讀影像流」。那兩張卡刪掉之後 —— 而 ``GROUP_ALGO`` **本來就零張卡** ——
+那個迴圈的本體**再也不會執行一次**，而測試照樣綠。
+
+那正是 F40 那支恆綠零斷言測試的形狀（`docs/plans/F40-stack-agreement.md` §1），
+只是這一次是我們自己親手做出來的。**一條永遠不會執行的斷言比沒有斷言更糟**：
+它會讓下一個人以為那條規矩有人在守。
 """
 from __future__ import annotations
 
@@ -66,26 +75,6 @@ def test_the_stages_are_in_the_order(qapp):
     assert GROUP_ALGO not in order and GROUP_OUTPUT in order
     assert order == ["input", "enhance", "region", "measure",
                      "compare", "adc", "output"], order
-
-
-def test_the_absorbed_algo_cards_never_read_an_image_stream():
-    """Algo 與 Measure 的界線（使用者定調）：
-
-    > measure 是量出數值來，但 Algo 是拿這些 feature 去做更 custom 的處理
-
-    Algo 段解散之後這條界線仍然成立 —— 被吸收的那兩張卡（收在
-    `HIDDEN_STEPS`，只服務舊 recipe）不吃影像流；`GROUP_ALGO` 留給外掛
-    相容，掛在那上面的卡也一樣。
-    """
-    for key, cls in sorted(REGISTRY.items()):
-        if key not in ("feature_math", "feature_fill") \
-                and cls.resolve_group() != GROUP_ALGO:
-            continue
-        params = {p.name: p.default for p in cls.params}
-        reads = cls.resolve_reads(params)
-        assert not reads, (
-            "卡片 %r 只吃數字，卻要讀影像流 %s。"
-            "吃影像的卡屬於 Measure（影像＋區域 → 數字）。" % (key, reads))
 
 
 def test_output_cards_are_the_end_of_the_line():

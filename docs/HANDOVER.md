@@ -112,7 +112,7 @@ vendoring 過來的。那六個專案在使用者的桌面上（`Desktop\hxlub09
 | **GLAS** | GDS/OASIS layout 與 SEM 對位工具 | `fine_align_one`、`_parabola_subpx`、`sem_loader`、ROI label map 契約（`gray[label==k]`）、DAG 拓撲排序概念（`recipe_dependency_order`）、boolean 運算式的 AST 架構 | **整套 OASIS/GDS 解析與渲染**（`oasis_streamer.py` 就 125KB、`gds_align_tool.py` 398KB）、multiprocessing pool harness |
 | **MMH** | SEM 大量量測工具 | recipe 架構原型（一般化成 Step/DAG）、批次引擎模式（ProcessPool + as_completed + per-defect try/except）、次像素邊緣定位（CD 用）、影像品質三指標、calibration profile、KLARF 寫回與 exporter 模式 | CMG 專用的 recipe（54KB）、GUI workspaces |
 | **PEAR** | Pre-EBI 屬性排序工具 | GLV 統計 metric bank、Tukey IQR 離群、Cohen's d / η²、**CJK-safe 影像讀寫**（`np.fromfile` + `imdecode`，Windows 中文路徑必備） | Qt UI、wafer map |
-| **cell-period-estimator (CPE)** | 週期陣列的 cell 週期估測 | `estimate_period`、`stack_cells`、`ghosting_score`、`refine_period`；UI 主題 token 系統（d4t 的配色延續自這裡） | — |
+| **cell-period-estimator (CPE)** | 週期陣列的 cell 週期估測 | `estimate_period`、`stack_cells`、`ghosting_score`；UI 主題 token 系統（d4t 的配色延續自這裡） | `refine_period` / `candidate_periods`（2026-08-27 刪掉，見下）|
 | **Perspective-Combination (Fusi³)** | 多視角 E-beam 影像融合 | 正規化、直方圖匹配、**5-backend 對位**、SNR map、blob 分割、`MultiROISet`（正規化座標、可隨對位平移） | 557KB 的 `dialog.py` UI、PCA fusion（v1 移出）、quadrant 多通道融合（v2 backlog）|
 
 ### 在來源專案裡發現、但**尚未回報給原專案**的問題
@@ -125,6 +125,12 @@ vendoring 過來的。那六個專案在使用者的桌面上（`Desktop\hxlub09
 2. **CPE `choose_origin` 是 stub**（永遠回 `(0,0)`）。d4t 在 M4 補完了相位搜尋。
 3. **MMH 次像素 batch 版比 scalar 版低約 1.5 px 的系統性偏移。**
    d4t 照「行為不變」原則保留原行為並在檔頭記錄；要精確值請用 scalar 版。
+4. **CPE `refine_period` 會走離真值**（2026-08-27 量的）。它照「疊完那張圖的
+   Laplacian 變異數」排候選週期，而**銳利不等於對得準** —— 相位錯開的疊圖是
+   兩份輪廓疊在一起，邊緣能量反而更高。實測真值 28、從 26 出發，它挑 20。
+   d4t 這一版**直接刪掉**（vendored 進來之後一個 production 呼叫者都沒有），
+   並改用 `golden.stack_agreement`（無量綱、量的是「那幾格彼此有多一致」）。
+   原專案若還在用它排週期，這是一個安靜的錯誤。
 
 ### 還沒挖、但可以挖的（v2 backlog）
 

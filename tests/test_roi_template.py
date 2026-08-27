@@ -712,3 +712,62 @@ def test_the_dropped_count_is_declared_per_region():
 def test_the_panel_sees_the_same_boxes_that_were_measured():
     ctx, _ = _tiled_ctx(drop_edge=True, edge_margin=4.0)
     assert len(ctx.meta["templates"]["epi"]["boxes"]) == ctx.roi_count("epi")
+
+
+# --------------------------------------------------------------------------- #
+# 自週期（k× cell）—— 2026-08-27／F39-B4 從 `test_ui_template_dialog.py` 搬過來
+#
+# 三條都只碰 `d4t.core.algo.template`，**一行 Qt 都沒有**（原本掛在對話框那一檔
+# 上只是因為它們是那一輪的驗收）。搬過來之後它們回到核心批，跟這個檔案其他問
+# 「模板定得準不準」的測試住在一起。
+# --------------------------------------------------------------------------- #
+
+def test_a_double_cell_no_longer_kills_the_certainty():
+    """使用者：「假設我是 2x cell 大，certainty 可能會被壓很低，有解嗎？」
+
+    實測不是壓很低，是**歸零**：margin 摺在「一個 cell」上，而 2× cell 的一個
+    週期裡有兩個一模一樣的峰 → 最高 ＝ 次高 → 0.000，score 仍然 1.00。
+    現在確定度摺在**自週期**上，位置仍然摺在整個 cell 上。
+    """
+    img = big_image()
+    got = {}
+    for label, px in (("1x", None), ("2x", 2 * PERIOD), ("3x", 3 * PERIOD)):
+        gc = algo_template.build_golden_cell(img, px=px)
+        sp = algo_template.cell_self_period(gc.cell)
+        assert sp[0] == PERIOD, (label, sp)      # 自週期一直都是真正的那一個
+        margins = []
+        for phase in range(0, PERIOD, 5):
+            patch = img[100:132, 3 * PERIOD + phase:3 * PERIOD + phase + 32]
+            m = algo_template.match_patch(gc.cell, patch, periodic=gc.periodic,
+                               self_period=sp)
+            margins.append(m.margin)
+        got[label] = (min(margins), max(margins))
+
+    assert got["1x"][0] > 0.3
+    for label in ("2x", "3x"):
+        assert got[label][0] > 0.3, (label, got)
+        assert abs(got[label][0] - got["1x"][0]) < 0.05, got
+
+
+def test_a_flat_axis_is_not_a_self_period():
+    """平的那一軸對**任何**位移都相似 —— 那不是週期，是沒有結構。"""
+    gc = algo_template.build_golden_cell(big_image())
+    sx, sy = algo_template.cell_self_period(gc.cell)
+    assert (sx, sy) == (PERIOD, gc.cell.shape[0])
+
+
+def test_the_template_string_carries_the_self_period():
+    """自週期是**模板的性質**（一份模板一個答案），所以存進字串、不是每顆重算。"""
+    gc = algo_template.build_golden_cell(big_image(), px=2 * PERIOD)
+    text = algo_template.encode_cell(gc.cell)
+    assert text.startswith("gc2:")
+    cell, sp = algo_template.decode_template(text)
+    assert sp == (PERIOD, gc.cell.shape[0])
+    assert np.array_equal(cell, gc.cell)
+
+    # 舊的 gc1 照讀，而且**行為與以前逐位元組相同**（自週期視同 cell 尺寸）
+    parts = text.split(":")
+    old = "gc1:%s:%s" % (parts[1], parts[3])
+    cell1, sp1 = algo_template.decode_template(old)
+    assert np.array_equal(cell1, gc.cell)
+    assert sp1 == (gc.cell.shape[1], gc.cell.shape[0])

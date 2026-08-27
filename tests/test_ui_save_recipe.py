@@ -3,7 +3,7 @@
 
 引擎那一半在 `tests/test_recipe_save.py`。這一份問的是**畫面上的那件事**：
 按了會不會存、存的是不是使用者看到的那一份、標題列的星號會不會說謊、
-關窗時第三個答案接得對不對（那一支在 `test_ui_f7_16_safety_net.py`）。
+關窗時第三個答案接得對不對（那一支在 `test_ui_undo_close_and_stop.py`）。
 
 ⚠ 一律走 :meth:`StudioWindow.save_recipe_path`，**不開檔案對話框** ——
 headless 測試碰到 modal 對話框會永遠停在那裡（不是失敗），那種卡住最難查。

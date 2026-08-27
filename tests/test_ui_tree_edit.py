@@ -129,19 +129,41 @@ def test_feature_owners_maps_lets_to_the_entry_card():
     assert owners.get("contrast") == ""      # let 中間值 → 入口卡
 
 
-def test_algo_cards_are_shelved_not_deleted():
-    """F24 ④：`feature_math` / `feature_fill` 收進 `HIDDEN_STEPS` ——
-    卡片庫看不到、registry 照拿得到（舊 recipe 照跑）。"""
-    import d4t.core.steps  # noqa: F401 — 觸發卡片註冊
-    from d4t.core.pipeline import get_step
-    from d4t.ui.scope import HIDDEN_STEPS, visible_steps
+def test_the_algo_cards_are_gone_for_good():
+    """F24 ④ 先把 `feature_math` / `feature_fill` **收起來**，
+    Phase 3（2026-08-27）**刪掉**它們 —— 使用者：「功能已經被 `decide.let`
+    取代了，刪掉」。
 
-    assert "feature_math" in HIDDEN_STEPS and "feature_fill" in HIDDEN_STEPS
-    shown = {d["key"] for d in visible_steps(
-        [{"key": k} for k in ("feature_math", "feature_fill", "glv_stats")])}
-    assert shown == {"glv_stats"}
-    assert get_step("feature_math") is not None
-    assert get_step("feature_fill") is not None
+    ⚠ 這一條原本叫 ``algo_cards_are_shelved_not_deleted``，斷言的是「收起來但
+    還在」。**收起來與刪掉是兩件不同的事，而它們的證據剛好相反** —— 所以這一條
+    要跟著翻面，不是跟著刪：舊 recipe 帶著那兩張卡開起來，要拿到一條講得出來的
+    `unknown-step`，不是一個 KeyError。
+
+    這是 `CLAUDE.md` §5 那張對照表**第一次跑完全程**：不確定 → 先收起來（成本
+    是一個字串）→ 使用者確定 → 再刪。
+    """
+    import d4t.core.steps  # noqa: F401 — 觸發卡片註冊
+    from d4t.core.pipeline.recipe import (
+        Recipe, RecipeNode, ScoreSpec, validate,
+    )
+    from d4t.core.pipeline.step import REGISTRY
+    from d4t.ui.scope import HIDDEN_STEPS
+
+    for key in ("feature_math", "feature_fill"):
+        assert key not in HIDDEN_STEPS, "刪掉的卡不該還留在「收起來」那張表上"
+        assert key not in REGISTRY, key
+
+    # 舊 recipe：載得進來（不炸），而 lint 講得出是哪一張卡不認得
+    old = Recipe(recipe_id="legacy",
+                 routes={"ebi_patch": ["load", "fm"]},
+                 nodes={"load": RecipeNode("load", "load_patch", {}),
+                        "fm": RecipeNode("fm", "feature_math",
+                                         {"expr": "glv_mean * 2", "out": "v"})},
+                 score=ScoreSpec(expr="v", threshold=1.0,
+                                 bins={"below": 0, "above": 1}))
+    issues = [i for i in validate(old, kind="ebi_patch") if i.level == "error"]
+    assert [i.code for i in issues] == ["unknown-step"]
+    assert "feature_math" in issues[0].title
 
 
 # --------------------------------------------------------------------------- #

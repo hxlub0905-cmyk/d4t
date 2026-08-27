@@ -107,8 +107,18 @@ class GoldenCell:
     cell: np.ndarray                    # (py, px) uint8
     px: int
     py: int
-    ghosting: float = 0.0               # 0–100，越高越銳利（疊得越準）
+    #: 疊完那張圖有多**銳利**，0–100。
+    #:
+    #: ⚠ **它不是「疊得多準」**（F40 改掉了這句話）。它只看疊完的那一張圖，
+    #: 看不到疊進去的那幾格，所以分不出「因為對齊了所以銳利」與「因為兩個
+    #: 鬼影各帶一組邊所以銳利」；而且它跟著對比、雜訊、格子大小一起動 ——
+    #: 純雜訊在 σ=60 拿 99.4。**只能拿來比同一張圖的兩個 stack，不准跟固定
+    #: 門檻比。** 要問「疊得準不準」看 :attr:`agreement`。
+    ghosting: float = 0.0
     lap_var: float = 0.0                # 未飽和的原始值（要比較大小時用這個）
+    #: 那幾格**彼此**對得多齊，0–1（`golden.stack_agreement`，F40）。
+    #: 無量綱、跨影像可比，所以**這一個**才是拿去跟門檻比的那個。
+    agreement: float = 0.0
     confidence_x: float = 0.0
     confidence_y: float = 0.0
     anchor: Tuple[int, int] = (0, 0)    # 為了錨定地標捲動了多少
@@ -274,8 +284,14 @@ def build_golden_cell(image: Any, px: Optional[int] = None,
                 "if the cell is rebuilt from different data")
 
     score, lap_var, _edge = algo_golden.ghosting_score(cell)
+    # ⚠ **一致性要用原圖算，不是用疊完的那一張**（F40）：問的是「那幾格彼此
+    # 對得齊嗎」，而疊完之後那幾格已經不在了。用 `choose_origin` 挑的那個
+    # origin —— 也就是真正被疊起來的那一組格子；`anchor_cell` 之後的捲動是
+    # 整張一起移，不影響格子之間的一致性。
+    agreement = algo_golden.stack_agreement(gray, px, py, origin=origin)
     return GoldenCell(cell=cell, px=px, py=py, ghosting=float(score),
-                      lap_var=float(lap_var), confidence_x=conf_x,
+                      lap_var=float(lap_var), agreement=float(agreement),
+                      confidence_x=conf_x,
                       confidence_y=conf_y, anchor=roll, n_cells=int(n_cells),
                       periodic_x=periodic_x, periodic_y=periodic_y,
                       warnings=warnings)

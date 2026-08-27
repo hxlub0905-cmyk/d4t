@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import first_source, wire_up  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
@@ -261,3 +263,219 @@ def test_canvas_repaints_on_a_theme_switch(window):
         assert window.pipeline.node_ids() == window.model.node_order
     finally:
         window.set_theme("light")
+
+
+# --------------------------------------------------------------------------- #
+# 6. 縮放與重複的卡（2026-08-27 從 `test_ui_f7_14_canvas_flow.py` 救過來）
+#
+# F39-B2 把那一支整支刪掉（它驗收的「輸出埠上的 +」在 F7-18 就撤了，剩下的
+# 斷言是「再宣告一次它不在」）。下面兩條不是那種 —— 兩條都**逐一驗過「把
+# bug 放回去，全 UI 測試只有它會紅」**，所以它們是這兩件事僅有的守門人。
+# --------------------------------------------------------------------------- #
+def test_zoom_is_clamped_at_both_ends(window):
+    """沒有下限，滾兩下就把整張圖縮成一個點，而且點陣底每一格都長得一樣 ——
+    使用者不知道自己在哪裡，也不知道有哪顆鈕救得回來。
+
+    最後兩行是「回得去」：`reset_zoom` 要真的回到 100%，那是滾到底之後唯一
+    不用猜要滾幾下的路。
+    """
+    view = window.pipeline
+    # 明確從 100% 出發：開一份 recipe 現在會自動 fit（見 canvas.fit_later），
+    # 所以「起點一定是 100%」已經不成立 —— 而這條測的是兩端的夾制，不是起點。
+    view.reset_zoom()
+    assert view.zoom_percent() == 100
+    for _ in range(30):
+        view.zoom_by(1 / 1.25)
+    assert view.zoom_percent() == int(round(view.MIN_SCALE * 100))
+    for _ in range(60):
+        view.zoom_by(1.25)
+    assert view.zoom_percent() == int(round(view.MAX_SCALE * 100))
+    view.reset_zoom()
+    assert view.zoom_percent() == 100
+
+
+def test_a_repeated_card_shows_which_one_it_is(window):
+    """同一張卡加第二次，副標要把 node_id 帶出來（`denoise2 · …`）。
+
+    ⚠ 副標平常**刻意不印 node_id**（那是 recipe JSON 的鍵，而卡片名字就在
+    上面一行）—— 唯一的例外就是這裡：兩張 Denoise 並排時，「是哪一張」才真的
+    是使用者需要知道的事，而它也是 lint 訊息與特徵前綴指的那個字。
+
+    F39-B2 量過：把 `canvas.py` 那個 `if step_key and self.node_id != step_key`
+    關掉，**64 支 UI 測試裡只有這一條會紅**。
+    """
+    src = first_source(window)
+    window.add_card_after(src, "denoise")
+    second = window.add_card_after(src, "denoise")
+    assert window.pipeline.card(second).subtitle().startswith("denoise2 · ")
+
+
+# --------------------------------------------------------------------------- #
+# 7. 埠的座標系、換行、拖過的位置
+#    （2026-08-27／F39-B3 搬過來：埠幾何與換行來自 `test_ui_f7_9_feedback.py`，
+#     拖曳位置與 sceneRect 來自 `test_ui_f8_ui_polish.py`）
+#
+# 為什麼它們該住在這裡而不是那兩支驗收檔：它們問的不是「F7-9／F8 那一輪交付了
+# 什麼」，是**畫布這個東西的性質** —— 畫的座標系等於宣告的座標系、每張卡都有
+# 埠可以拉、九張卡不會排成一條 2500px 的橫列、使用者拖過的位置不會被自動排版
+# 吃掉。那條 `paint()` 用場景座標的坑（`docs/PITFALLS.md`）就是這裡守的。
+# --------------------------------------------------------------------------- #
+def _canvas_with_two_nodes(qapp):
+    canvas = canvas_mod.PipelineCanvas()
+    canvas.set_nodes([
+        {"node_id": "load", "label": "Load images", "group": "input",
+         "enabled": True, "summary": "", "reads": [], "writes": ["test", "ref"]},
+        {"node_id": "sub", "label": "Subtract", "group": "compare",
+         "enabled": True, "summary": "", "reads": ["test", "ref"],
+         "writes": ["diff"]},
+    ], [("load", "sub")])
+    return canvas
+
+
+def test_every_port_is_drawn_inside_the_nodes_bounding_rect(qapp):
+    """``paint()`` 只准畫在 ``boundingRect`` 裡面，否則就是殘影。
+
+    埠與埠標籤都畫在**本地座標**；``boundingRect`` 也是本地座標。把節點拖到
+    任何地方，這個關係都不可以變 —— 這正是「移動 Load images 會留下 test /
+    ref 殘點」與「後面的節點沒有圓框」的共同成因。
+    """
+    from PySide6.QtCore import QPointF
+
+    canvas = _canvas_with_two_nodes(qapp)
+    for pos in (QPointF(0, 0), QPointF(240, 130), QPointF(-90, 55)):
+        for item in (canvas.card("load"), canvas.card("sub")):
+            item.setPos(pos)
+            rect = item.boundingRect()
+            assert rect.contains(item.in_port_local()), "輸入埠畫到框外"
+            for anchor, name in zip(item.out_anchors_local(), item.out_names()):
+                assert rect.contains(anchor), \
+                    "%s 的輸出埠 %r 畫到 boundingRect 外面" % (item.node_id, name)
+                # 埠標籤畫在埠右邊 _PORT_LABEL_W 之內，也必須在框裡
+                label_right = anchor.x() + canvas_mod._PORT_LABEL_W - 1
+                assert label_right <= rect.right(), "埠標籤畫到框外（= 殘影）"
+
+
+def test_scene_anchors_track_the_node_position(qapp):
+    """場景座標 = 本地座標 + ``scenePos()``。連線用前者，繪製用後者。"""
+    from PySide6.QtCore import QPointF
+
+    canvas = _canvas_with_two_nodes(qapp)
+    item = canvas.card("load")
+    item.setPos(QPointF(311, 47))
+    for local, scene in zip(item.out_anchors_local(), item.out_anchors()):
+        assert scene == item.scenePos() + local
+    assert item.in_port() == item.scenePos() + item.in_port_local()
+    # 命中判定吃的是本地座標，拖走之後仍然要打得到
+    assert item.out_port_at(item.out_anchors_local()[1]) == 1
+
+
+def test_every_node_has_an_output_port_to_drag_from(qapp):
+    """回饋原話：「新增的節點只有前面有圓框，後面沒有圓框讓人可以連」。"""
+    canvas = _canvas_with_two_nodes(qapp)
+    for nid in ("load", "sub"):
+        item = canvas.card(nid)
+        assert len(item.out_anchors_local()) >= 1
+        for anchor in item.out_anchors_local():
+            assert anchor.x() == canvas_mod.NODE_W, "輸出埠必須貼在節點右緣"
+
+
+def test_output_ports_are_labelled_with_the_stream_they_carry(qapp):
+    """埠標籤就是 ``target`` / ``also apply`` 下拉裡的那些名字（回饋 3）。"""
+    canvas = _canvas_with_two_nodes(qapp)
+    assert canvas.card("load").out_names() == ["test", "ref"]
+    assert canvas.card("sub").out_names() == ["diff"]
+
+
+def test_an_unwired_recipe_wraps_instead_of_running_off_the_screen(qapp):
+    """九張還沒拉線的卡排成一列會超過 2500px，``fit()`` 只能縮到看不出字。
+
+    （而且它有下限 —— 縮成小方塊比留捲軸更糟，所以結果是「一排讀不出來的
+    小方塊 **加上** 一條捲軸」，兩邊都輸。）
+    """
+    ids = ["n%d" % i for i in range(9)]
+    pos = canvas_mod.layout_columns(ids, [])
+    assert max(c for c, _r in pos.values()) < canvas_mod.WRAP
+    assert max(r for _c, r in pos.values()) == (len(ids) - 1) // canvas_mod.WRAP
+    # 閱讀順序仍然是左到右、上到下
+    assert pos["n0"] == (0, 0) and pos["n3"] == (3, 0) and pos["n4"] == (0, 1)
+
+    # 「塞得進去」算的是 n 張卡 + **(n−1)** 個欄距 —— 欄距是欄與欄之間的，
+    # 最後一欄後面沒有。（以前這裡乘的是 n 個，於是 F13-⑤ 把卡片放大一號之後
+    # 它多算了 116px 而紅掉，但畫面其實是塞得下的。）
+    cols = max(c for c, _r in pos.values()) + 1
+    width = cols * canvas_mod.NODE_W + (cols - 1) * canvas_mod.COL_GAP
+    assert width < 1200, "換行之後整張圖要塞得進一般的工作區寬度"
+
+    # F13-1 之後換行點是**跟著實際寬度走**的，所以這條不變量對每一種寬度都
+    # 要成立，不只對寫死的 WRAP。
+    for view_w in (400, 700, 1000, 1400):
+        n = canvas_mod.wrap_for_width(view_w)
+        need = n * canvas_mod.NODE_W + (n - 1) * canvas_mod.COL_GAP
+        assert need <= view_w * 1.2, (
+            "%dpx 寬的畫布排了 %d 欄（要 %dpx）—— 縮完會讀不出字"
+            % (view_w, n, need))
+
+
+def test_dragged_positions_survive_edits_and_popout(window, qapp):
+    """使用者拖好的佈局，改一個參數／開彈出視窗之後**不可以**跳回自動排版
+    （使用者原話：「不要幫我自動整理節點」）。要整批排回去有「排整齊」。"""
+    from PySide6.QtCore import QPointF
+
+    window.show()
+    qapp.processEvents()
+    nid = window.pipeline.node_ids()[1]
+    item = window.pipeline.node_item(nid)
+    item.setPos(QPointF(333.0, 444.0))
+
+    window.model.set_param(nid, list(window.model.nodes[nid].params)[0],
+                           window.model.nodes[nid].params[
+                               list(window.model.nodes[nid].params)[0]])
+    wire_up(window.model, window.model.add_step("denoise"))        # 觸發整張畫布重建
+    qapp.processEvents()
+    moved = window.pipeline.node_item(nid).pos()
+    assert (round(moved.x()), round(moved.y())) == (333, 444), \
+        "重建畫布把手動位置整理掉了：%s" % moved
+
+    window.open_canvas_window()
+    qapp.processEvents()
+    twin = window._popout_view.node_item(nid).pos()
+    assert (round(twin.x()), round(twin.y())) == (333, 444), \
+        "彈出視窗沒有沿用主視窗的位置"
+    window._canvas_popout.close()
+    qapp.processEvents()
+
+    # tidy 仍然是明確的「排回去」
+    window.pipeline.tidy()
+    back = window.pipeline.node_item(nid).pos()
+    assert (round(back.x()), round(back.y())) != (333, 444)
+
+
+def test_loading_another_recipe_forgets_old_positions(window, qapp):
+    """位置保留只在「同一份 recipe 一直編」的前提下成立 —— 換檔案之後，
+    上一份剛好同名的節點（load 幾乎每份都有）不該繼承拖過的位置。"""
+    from PySide6.QtCore import QPointF
+
+    window.show()
+    qapp.processEvents()
+    nid = window.pipeline.node_ids()[0]
+    window.pipeline.node_item(nid).setPos(QPointF(555.0, 555.0))
+    assert window.load_recipe_path(str(EXAMPLE), sync=True) is True
+    qapp.processEvents()
+    pos = window.pipeline.node_item(window.pipeline.node_ids()[0]).pos()
+    assert (round(pos.x()), round(pos.y())) != (555, 555), \
+        "換了一份 recipe 還繼承舊位置"
+
+
+def test_a_card_dragged_past_the_edge_stays_reachable(window, qapp):
+    """卡片拖出 sceneRect 之外，那一塊是捲不到的 —— 埠與標籤就這樣
+    「不見」（使用者回報）。sceneRect 要跟著拖曳長大。"""
+    window.show()
+    qapp.processEvents()
+    view = window.pipeline
+    nid = view.node_ids()[-1]
+    item = view.node_item(nid)
+    far_x = view.scene().sceneRect().right() + 400
+    item.setPos(far_x, item.scenePos().y())    # itemChange → refresh_edges
+    qapp.processEvents()
+    assert view.scene().sceneRect().right() >= far_x + canvas_mod.NODE_W, \
+        "sceneRect 沒有跟著長大，拖出去的卡捲不到"

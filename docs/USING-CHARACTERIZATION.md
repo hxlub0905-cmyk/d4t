@@ -1,7 +1,7 @@
 # 怎麼做 EBI ↔ API characterization
 
 > **d4t — defect**　·　`Pair with another source` ＋ `H2H` ＋ 判定樹 ＋
-> `Write characterization report`
+> `Write comparison`
 > 這一份是**給使用者的操作手冊**：每一格填什麼、線接在哪、報表怎麼讀。
 > 設計上的來龍去脈在
 > [`docs/history/plans/F33-ebi-characterization.md`](history/plans/F33-ebi-characterization.md)，
@@ -54,7 +54,7 @@
 2. 卡片庫 → Compare 段 → **`H2H`**。
 3. **拉兩條線**（見 §3）。
 4. 判定段畫那棵樹（見 §5）。
-5. 卡片庫 → Output 段 → **`Write characterization report`**，填資料夾
+5. 卡片庫 → Output 段 → **`Write comparison`**，填資料夾
    （**不用接線**，見 §3）。
 
 ---
@@ -78,7 +78,7 @@ Load one image ──single──────────────┐
 Pair with another source ──paired────┘
 
          ┌ OUTPUT ────────────────────────────────┐
-         │  Write characterization report          │   ← 沒有線（見 §3.1）
+         │  Write comparison          │   ← 沒有線（見 §3.1）
          │  (not connected) · once per lot         │
          └─────────────────────────────────────────┘
 ```
@@ -193,12 +193,12 @@ die **全部併成一組**（整整一行 die），而它：
 | **Expected shift across / down** | 進階。跑一批取 `align_off_*` 的**中位數**填回來，搜尋框就能再縮小 |
 | **Size ratio** | 進階。0 = 自動（從兩張讀資料的卡上的 `Pixel size` 相除）。**兩台機台的像素大小不一樣時一定要有**，差幾個百分比就對不起來了 |
 
-### 4.3 `Write characterization report`（⚠ 只有 `Run all` 會跑到它）
+### 4.3 `Write comparison`（⚠ 只有 `Run all` 會跑到它）
 
 | 格子 | 填什麼 |
 |---|---|
 | **Write to** | 輸出資料夾（會產 `report.html` / `defects.csv` / `recipe.json` / `images/`）|
-| **At most this many rows with pictures** | 預設 200。超過會**講出來**並建議改用 `Write report folder`，但版面不會自動換 |
+| **At most this many rows with pictures** | 預設 200。超過會**講出來**並建議改用 `Write report`，但版面不會自動換 |
 | **Left picture** | 留空 = 自動挑（rsem 那條路就是 `single`）。要看整片 FOV 就留空或填 `single`；要「兩張圖同一塊區域」填 `aligned` |
 | **Right picture** | `paired`（EBI 帶過來那一張）|
 | **Numbers to show** | 預設已含兩個擋板 —— **`ncc_score` 與 `align_peak_ratio`**。再加上你 carry 的分數欄與 `pair_die_rank` / `pair_die_total` |

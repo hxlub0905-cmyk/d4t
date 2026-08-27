@@ -392,8 +392,8 @@ def choose_origin(shape: Tuple[int, ...], px: Optional[int], py: Optional[int],
     (sharper stack = the cells landed on top of each other; a mis-phased
     lattice smears structure across the cell border and the stack loses
     contrast).  Ranking by the raw variance rather than the saturating
-    0..100 score matches :func:`golden.refine_period`; the 0..100 score
-    clips near the top and would lose the ordering.
+    0..100 score is deliberate: the 0..100 score clips near the top and
+    would lose the ordering.
 
     ``method="mean"`` is used for scoring by default because the mean is
     deliberately the phase-sensitive stack (the median hides small

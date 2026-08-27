@@ -1510,3 +1510,136 @@ def test_the_judge_row_renders_as_a_metric_pick(qapp):
     assert row is not None
     assert isinstance(row.editor, widgets_mod.MetricPick)
     assert row.editor.text() == "glv_median"
+
+
+# --------------------------------------------------------------------------- #
+# 階段色與 metric 的「臉」（2026-08-27／F39-B3 搬過來）
+#
+# 三條階段色來自 `test_ui_f7_9_feedback.py`、兩條 metric-face 來自
+# `test_ui_f19_cd.py`。它們問的都是**這個模組的性質**，不是那一輪交付了什麼：
+# 每一段都有自己看得出來的顏色、色票是一套不是六個、卡片庫與畫布用同一個顏色、
+# 每一個卡片宣告得出來的 metric 在 UI 都登記得到一張臉。
+#
+# ⚠ 這幾條**逐一套用到 registry / 卡片自己宣告的清單**（`GROUP_ORDER`、
+# `REPORT_CHOICES`、`SIZE_CHOICES`），所以加一段、加一顆 metric 的人會自動被
+# 納管 —— 那正是它們不該待在驗收檔裡的理由。
+# --------------------------------------------------------------------------- #
+#: **從 `GROUP_ORDER` 拿，不要在這裡再抄一份**（F16）。
+#: 原本寫死六個字串，於是加一段的人要記得回來補 —— 忘了的話那條測試會
+#: 「檢查了六個顏色」然後綠燈通過，而新那一段的顏色從來沒有被驗過。
+def _stage_groups():
+    from d4t.core.pipeline.step import GROUP_ORDER
+    return tuple(GROUP_ORDER)
+
+
+def _lab(hex_str):
+    """sRGB hex -> CIE L*a*b*（D65）。用感知距離判「看不看得出不一樣」。
+
+    RGB 的算術距離跟眼睛看到的差異對不上（藍色差 40 看得出來，綠色差 40
+    看不太出來），所以不要拿 RGB 距離當「顏色夠不夠分得開」的標準。
+    """
+    s = hex_str.lstrip("#")
+    r, g, b = [int(s[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
+
+    def lin(c):
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = lin(r), lin(g), lin(b)
+    x = (r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047
+    y = (r * 0.2126 + g * 0.7152 + b * 0.0722)
+    z = (r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883
+
+    def f(c):
+        return c ** (1.0 / 3.0) if c > 0.008856 else 7.787 * c + 16.0 / 116.0
+
+    fx, fy, fz = f(x), f(y), f(z)
+    return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
+
+
+def _delta_e(a, b):
+    import math
+    return math.sqrt(sum((x - y) ** 2 for x, y in zip(_lab(a), _lab(b))))
+
+
+def test_every_stage_has_its_own_colour(qapp):
+    """回饋原話：「太多都同個顏色（input enhance 跟 compare 都是藍色）」。
+
+    以前是 ``group -> category -> 顏色``，六個階段只有三種色。這裡鎖的是
+    **性質**（兩兩感知上分得開），不是寫死色碼 —— 色票還可以再調。
+    ΔE ≥ 25 大約是「一眼看得出是兩個顏色」而不只是「同色的深淺」。
+    """
+    for name in ("light", "dark"):
+        theme_mod.set_theme(name)
+        GROUPS = _stage_groups()
+        colours = {g: theme_mod.group_hex(g) for g in GROUPS}
+        assert len(set(colours.values())) == len(GROUPS), \
+            "%s 主題有階段共用顏色：%s" % (name, colours)
+        for i, a in enumerate(GROUPS):
+            for b in GROUPS[i + 1:]:
+                d = _delta_e(colours[a], colours[b])
+                assert d >= 25, "%s 的 %s 與 %s 太接近（%s vs %s, ΔE=%.1f）" % (
+                    name, a, b, colours[a], colours[b], d)
+    theme_mod.apply_theme(qapp, "light")
+
+
+def test_the_stage_colours_stay_one_family(qapp):
+    """分得開之外還要**看起來像一套**：同一主題內明度不可以亂跳。
+
+    六個顏色如果亮度差很多，rail 上就會有幾個特別跳、幾個特別悶 ——
+    那是「六個顏色」，不是「一套色票」。
+    """
+    for name in ("light", "dark"):
+        theme_mod.set_theme(name)
+        GROUPS = _stage_groups()
+        lums = [_lab(theme_mod.group_hex(g))[0] for g in GROUPS]
+        assert max(lums) - min(lums) <= 15, \
+            "%s 主題的階段色明度差太多：%s" % (name, [round(x) for x in lums])
+    theme_mod.apply_theme(qapp, "light")
+
+
+def test_the_library_and_the_canvas_use_the_same_stage_colour(qapp):
+    """rail 上看到的顏色，跟畫布節點上的必須是同一個 —— 不然顏色不是語言。"""
+    from d4t.core.pipeline import list_steps
+
+    panel = widgets_mod.LibraryPanel()
+    panel.set_steps([s.describe() for s in list_steps()])
+    for gid in _stage_groups():
+        btn = panel.stage_buttons[gid]
+        assert theme_mod.group_hex(gid) in btn.styleSheet() \
+            or btn.icon.color == theme_mod.group_hex(gid)
+
+
+def test_every_report_metric_the_cd_card_offers_has_a_face(qapp):
+    """卡片多宣告一顆而 UI 沒登記，畫出來是一顆沒有分群、標籤是原始 id 的膠囊
+    —— 跑得完、看得到、而且醜，也就是不會有人回報（同 F18 的規矩）。"""
+    from d4t.core.steps.cd import REPORT_CHOICES
+    from d4t.ui import widgets as widgets_mod
+
+    groups = set()
+    for mid in REPORT_CHOICES:
+        group, label, glyph = widgets_mod.metric_face(mid)
+        assert group in widgets_mod.METRIC_GROUP_ORDER, mid
+        assert group != "Other", "%s 沒有登記在 METRIC_GROUPS" % mid
+        assert label and not label.startswith("cd_"), mid
+        assert glyph in widgets_mod.METRIC_GLYPHS, mid
+        groups.add(group)
+    # **粗糙度那一群要分得出來** —— 它只有在量測線夠多時才有意義，而那是
+    # 「為什麼我的 LER 是 0」的答案。
+    assert groups == {"Width", "Roughness", "Vs target"}
+
+
+def test_every_size_metric_the_card_offers_has_a_face(qapp):
+    from d4t.core.steps.cd import SIZE_CHOICES
+    from d4t.ui import widgets as widgets_mod
+
+    groups = set()
+    for mid in SIZE_CHOICES:
+        group, label, glyph = widgets_mod.metric_face(mid)
+        assert group in widgets_mod.METRIC_GROUP_ORDER, mid
+        assert group != "Other", "%s 沒有登記在 METRIC_GROUPS" % mid
+        assert label and not label.startswith("cd_"), mid
+        assert glyph in widgets_mod.METRIC_GLYPHS, mid
+        groups.add(group)
+    # **不要用 ``Shape``** —— 那個字在 GLV 那邊已經是偏度那一群了。
+    assert groups == {"Size", "Outline"}
+    assert "Shape" not in groups

@@ -15,6 +15,13 @@
 
 沒有動預覽欄的寬度 —— 「影像大一點」是使用者自己要求的（見
 `test_ui_results.test_preview_gets_the_widest_column`），不拿它的空間去補。
+
+⚠ **F39-B5（2026-08-27）刪了兩條純重複的**：
+``selecting_a_card_opens_it_again`` 與
+``the_settings_pane_gives_the_space_back_when_nothing_is_selected``
+的斷言**整組**在 ``test_ui_f8_ui_polish.py::test_the_canvas_is_the_top_block_and_settings_get_the_rest``
+裡（那一條還多驗了「畫布在上、設定在下」）。驗過：把 ``set_params_open`` 收起
+來的那一半改成不還空間給畫布，兩邊都紅 —— 所以留一邊就夠。
 """
 from __future__ import annotations
 
@@ -62,18 +69,6 @@ def window(qapp):
 # --------------------------------------------------------------------------- #
 # 1. 設定區跟著「有沒有東西可以設定」走
 # --------------------------------------------------------------------------- #
-def test_the_settings_pane_gives_the_space_back_when_nothing_is_selected(window):
-    assert window.selected_node is None
-    assert window.params_open() is False
-    assert window.canvas_column.sizes()[1] == 0, "那一塊要整個還給畫布"
-
-
-def test_selecting_a_card_opens_it_again(window, qapp):
-    window.select_node(first_source(window))
-    qapp.processEvents()
-    assert window.params_open() is True
-    top, bottom = window.canvas_column.sizes()
-    assert bottom > top, "設定拿大頭（D 案的比例沒有變）"
 
 
 def test_editing_a_parameter_does_not_reset_a_split_the_user_dragged(window, qapp):

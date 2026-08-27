@@ -59,7 +59,7 @@ def recipe_for(folder, **over):
             "load": RecipeNode("load", "load_patch", {}),
             "glv": RecipeNode("glv", "glv_stats",
                               {"source": "test", "metrics": "glv_max"}),
-            "out": RecipeNode("out", "output_bundle", params),
+            "out": RecipeNode("out", "output_report", params),
         },
         score=ScoreSpec(expr="glv_max", threshold=1.0,
                         bins={"below": 0, "above": 1}))
@@ -189,7 +189,7 @@ def test_the_limit_caps_the_pictures_not_the_rows(dataset, tmp_path):
 def test_zero_means_every_defect(dataset, tmp_path):
     """使用者定調 2026-08-25：「參數化，**預設全部**」。"""
     from d4t.core.pipeline.step import REGISTRY
-    spec = {p.name: p for p in REGISTRY["output_bundle"].params}["limit"]
+    spec = {p.name: p for p in REGISTRY["output_report"].params}["limit"]
     assert spec.default == 0
 
     out = tmp_path / "bundle"
@@ -360,9 +360,9 @@ def test_pointing_at_a_file_says_so(dataset, tmp_path):
 
 def test_an_empty_path_is_a_configuration_issue_not_a_crash():
     from d4t.core.pipeline.step import REGISTRY
-    says = REGISTRY["output_bundle"].configuration_issues({"folder": ""})
+    says = REGISTRY["output_report"].configuration_issues({"folder": ""})
     assert says and "Write to" in says[0]
-    assert REGISTRY["output_bundle"].configuration_issues(
+    assert REGISTRY["output_report"].configuration_issues(
         {"folder": "/tmp/x"}) == []
 
 
@@ -381,7 +381,7 @@ def test_the_box_settings_come_from_the_one_shared_spec():
     from d4t.core.steps.output import roi_draw_specs
 
     shared = {sp.name: sp for sp in roi_draw_specs()}
-    on_card = {p.name: p for p in REGISTRY["output_bundle"].params}
+    on_card = {p.name: p for p in REGISTRY["output_report"].params}
     for name, sp in shared.items():
         assert name in on_card, "%s 不在卡片上" % name
         got = on_card[name]
@@ -537,7 +537,7 @@ def test_an_old_write_images_recipe_still_writes_the_same_files(tmp_path):
     path.write_text(json.dumps(d), encoding="utf-8")
 
     node = Recipe.load(str(path)).nodes["img"]
-    assert node.step == "output_bundle"
+    assert node.step == "output_report"
     assert node.params["contents"] == "pictures"      # 只有圖
     assert node.params["picture_format"] == "png"     # 不是 JPEG
     assert node.params["limit"] == 7 and node.params["montage"] is False
@@ -551,6 +551,6 @@ def test_an_empty_tick_list_is_caught_before_it_makes_an_empty_folder():
     """
     from d4t.core.pipeline.step import REGISTRY
 
-    card = REGISTRY["output_bundle"]
+    card = REGISTRY["output_report"]
     assert card.configuration_issues({"folder": "/tmp/x", "contents": ""})
     assert card.configuration_issues({"folder": "/tmp/x"}) == []

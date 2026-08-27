@@ -37,16 +37,22 @@
 
 | 寫成 | 是什麼 | 住哪 | 誰在用 |
 |---|---|---|---|
-| `output_bundle` | **一張 Output 卡**，畫面上叫 **“Write report folder”**。整批跑完寫出一個資料夾：`report.html` ＋ `defects.csv` ＋ `recipe.json` ＋ `images/` | `d4t/core/steps/output.py` | 製程工程師跑完一批之後 |
+| ~~`output_bundle`~~ | **一張 Output 卡**（“Write report folder”）。**F38 於 2026-08-26 折進 `output_report` 了** —— 那個 key 不存在了，舊 recipe 走 `_migrate_folded_output_cards` | ~~`d4t/core/steps/output.py`~~ | — |
 | `bundle/d4t_bundle.py` | **整個 repo 打包成的一個純文字檔**，公司機拿程式碼的唯一路徑（政策擋 .zip、proxy 不讓逐檔抓）。`tools/release.py` 產它 | `bundle/` | 開發者搬程式碼 |
 
-**兩個都不改名**（2026-08-26 量過代價）：前者是 **recipe 的鍵**，改它要一道
-遷移（§5 那張表：改 key 要付遷移，而那個錢只在使用者要求時才付）；後者是
-**公司機的操作步驟**（`docs/NO-GIT-SETUP.md` 寫著那個檔名，而那台機器不能跑
-git —— 改檔名等於讓一份寫下來的程序在一台救不了的機器上失效）。兩邊改名對
-使用者的好處都是零：他在畫面上只看得到「Write report folder」。
+**所以現在這個字只剩一個意思，而這一段留著是為了下一次。** 兩件事要記住：
 
-**講的時候不要用裸的「bundle」** —— 講「報表資料夾那張卡」或「搬運用的單檔包」。
+**① `bundle/d4t_bundle.py` 仍然不改名。** 它是**公司機的操作步驟**
+（`docs/NO-GIT-SETUP.md` 寫著那個檔名，而那台機器不能跑 git —— 改檔名等於讓
+一份寫下來的程序在一台救不了的機器上失效）。
+
+**② 不要再造第二個 `bundle`。** 上一次兩個意思並存的代價是實際發生過的：
+2026-08-26 一整輪對話裡兩個意思交替使用，使用者問「bundle 在這邊是什麼」。
+那一輪量過代價、決定兩個都不改名（因為改 key 要付一道遷移，而那個錢只在
+使用者要求時才付）—— 而錢在 F38 因為別的理由付掉了，混淆才跟著消失。
+**下一個含糊的名字不會這麼剛好。**
+
+**講的時候不要用裸的「bundle」** —— 講「報表那張卡」或「搬運用的單檔包」。
 
 ---
 
@@ -359,8 +365,11 @@ F30 的 `ui/output_band.py` 已經都是這樣做的 —— 這一段只是把�
 
 ```python
 SUPPORTED_KINDS = ("ebi_patch", "tiff_stack", "rsem", "folder")
-HIDDEN_STEPS = ("align", "feature_math", "feature_fill")
-                                 # 收起來（引擎照認、舊 recipe 照跑）
+HIDDEN_STEPS = ("align",)        # 收起來（引擎照認、舊 recipe 照跑）
+                                 # ⚠ `feature_math` / `feature_fill` 2026-08-27
+                                 # **刪掉**了（功能進了 `decide.let`）——
+                                 # 先收起來、使用者確定之後再刪，那張對照表
+                                 # 第一次跑完全程
 SHOW_SAMPLE_ENTRIES = False      # 範例入口（見下）
 INPUT_SOURCES = (...)            # 三顆 Open 的字、圖示、一句白話說明
 ATTACHMENTS = (...)              # 掛在已載入 lot 上的附加檔（GLAS 匯出）

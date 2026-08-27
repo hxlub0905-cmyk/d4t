@@ -135,7 +135,7 @@ def test_every_card_that_ranks_says_it_the_same_way_word_for_word():
 
 def test_the_help_says_what_to_do_when_there_is_no_score():
     """推廣鐵則：使用者不會寫 code，那一格的說明要自己講得完。"""
-    spec = {p.name: p for p in REGISTRY["output_bundle"].params}["rank_by"]
+    spec = {p.name: p for p in REGISTRY["output_report"].params}["rank_by"]
     assert "decision tree" in spec.help
     assert "file order" in spec.help
 

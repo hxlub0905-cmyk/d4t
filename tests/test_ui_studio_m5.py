@@ -389,9 +389,10 @@ def test_the_write_action_runs_the_whole_lot(qapp, synlot, tmp_path):
         assert win.act_run_all.isEnabled() is True, "有資料、有流程就按得下去"
 
         # 加一張 Output 卡 → 按下去真的寫出東西
-        out = tmp_path / "m5.csv"
-        node = win.model.add_step("output_csv")
-        win.model.set_param(node, "path", str(out))
+        out = tmp_path / "m5"
+        node = win.model.add_step("output_report")
+        win.model.set_param(node, "folder", str(out))
+        win.model.set_param(node, "contents", "table")
         assert win.run_all(sync=True) is True
         assert out.exists()
         assert win.gallery.total_count() == N

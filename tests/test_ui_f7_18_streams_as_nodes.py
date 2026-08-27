@@ -6,6 +6,19 @@
 2. 虛線（隱含順序）跟實線同一個顏色 → 給它自己的色相。
 3. 很多卡片把 ref 當附帶（``also_apply``），而且兩個節點之間只拉得動一條線
    → 一張卡一條流；從哪個埠拉線就決定那張卡做在哪一條流上。
+
+⚠ F39-B2b（2026-08-27）刪了三條**純重複**的：
+
+* ``dragging_from_the_ref_port_wires_ref_into_the_card`` 與
+  ``a_second_line_between_the_same_two_cards_is_not_refused``
+  → ``test_ui_f7_19_wiring::test_wiring_a_second_stream_adds_it_instead_of_replacing``
+  （F7-19 改了第二條線的意思，那一檔才是正典 —— 這兩條的 docstring 自己就
+  指過去了）
+* ``adding_from_the_library_lands_after_the_selected_card``
+  → ``test_ui_canvas_one_line_per_input::test_the_new_card_still_lands_after_the_selected_one``
+
+``a_line_that_would_loop_leaves_no_trace`` **沒有刪**：``test_ui_canvas`` 的
+成環那條只問「線沒落地」，這一條多問了「那張卡沒有被安靜地改成做 ref」。
 """
 from __future__ import annotations
 
@@ -199,46 +212,6 @@ def test_the_shipped_examples_are_already_in_the_new_shape():
 # --------------------------------------------------------------------------- #
 # 2. 連線說出「這張卡做在哪一條流上」
 # --------------------------------------------------------------------------- #
-def test_dragging_from_the_ref_port_wires_ref_into_the_card(window):
-    """從哪個埠拉線，就決定那張卡碰哪一條流 —— 這一點沒變。
-
-    **變的是第二條線的意思**（F7-19，使用者第八輪回饋）。F7-18 當時定成
-    「取代」（我改變主意了，這張卡改做 ref），因為那時一張卡本來就只做得了
-    一條流。F7-20 之後一張卡吃 N 條，取代就變成擋路的：畫布上做得出來的最多
-    一條，第二條得回控制列去勾 —— 而那正是 F7-18 想拿掉的東西。
-
-    所以現在是**累加**：先 test 再 ref = 兩條都做。詳見
-    ``test_ui_f7_19_wiring.py``。
-    """
-    src = first_source(window)
-    nid = window.add_card_after(src, "denoise")
-    window._on_edge_added(src, nid, "test")
-    assert window.model.nodes[nid].params["streams"] == "test"
-
-    # 從 Input 的第二個輸出埠（ref）拉一條線過去
-    window.pipeline.link_to(src, nid, port=1)
-    assert window.model.nodes[nid].params["streams"] == "test,ref"
-    assert "ref" in window.status_text()
-
-
-def test_a_second_line_between_the_same_two_cards_is_not_refused(window):
-    """使用者原話：「很多張卡片都會限制或阻撓」。
-
-    先從 test 拉、再從 ref 拉是很正常的操作，而以前那第二條線只會得到一句
-    already connected 然後什麼都沒發生 —— 畫面上看起來就像這張卡不准你碰 ref。
-    **這條測試守的是「第二條線一定要有反應」**，那件事沒變。
-
-    變的是那個反應是什麼：F7-18 是取代，F7-19 起是累加（兩條都做）。
-    """
-    src = first_source(window)
-    nid = window.add_card_after(src, "tone")
-    window._on_edge_added(src, nid, "test")
-    window.pipeline.link_to(src, nid, port=0)
-    assert window.model.has_edge(src, nid) is True
-
-    window.pipeline.link_to(src, nid, port=1)      # 同一對節點，另一個埠
-    assert window.model.nodes[nid].params["streams"] == "test,ref"
-    assert "ref" in window.status_text()
 
 
 def test_a_line_that_would_loop_leaves_no_trace(window):
@@ -278,31 +251,6 @@ def test_wiring_a_card_lands_on_the_input_you_dropped_it_on(window):
     # 兩條線各自落在自己的埠上，畫布上不會疊在一起
     lines = {(e.src_out, e.dst_in) for e in window.model.edges if e.dst == sub}
     assert lines == {("test", "a"), ("ref", "b")}
-
-
-def test_adding_from_the_library_lands_after_the_selected_card(window):
-    """卡片庫加的卡排在選著的那張後面，**但線不會自己出現**（F9-7）。
-
-    F7-18 時這裡連流也一起跟著（「接在做 ref 的卡後面就也做 ref」）。
-    2026-08-16 使用者退掉了那件事 —— 自動接的線與他自己拉的線會落在同一個
-    輸入埠，而只有一條算數。現在流是**拉線**決定的，加卡只決定順序。
-    """
-    src = first_source(window)
-    on_ref = window.add_card_after(src, "denoise")
-    window._on_edge_added(src, on_ref, "ref")
-    window.select_node(on_ref)
-
-    window._on_add_requested("tone")
-    nid = window.selected_node
-    assert nid != on_ref
-    order = window.model.node_order
-    assert order.index(on_ref) < order.index(nid)
-    assert (on_ref, nid) not in window.model.edge_pairs(), \
-        "加卡自己接了一條線 —— 線要留給使用者拉"
-
-    # 拉過去之後才做在 ref 上，而且輸出埠也跟著是 ref（同進同出）
-    window._on_edge_added(on_ref, nid, "ref")
-    assert window.model.nodes[nid].params["streams"] == "ref"
 
 
 # --------------------------------------------------------------------------- #

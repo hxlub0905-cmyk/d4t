@@ -315,7 +315,9 @@ def test_the_patch_recipe_measures_and_classifies_end_to_end(tmp_path):
     recipe.nodes["roi"].params["regions"] = "gc:0.2,0.2,0.6,0.6"
     folder = tmp_path / "out"
     recipe.nodes["report"].params["folder"] = str(folder)
-    recipe.nodes["spread"].params["path"] = str(folder / "spread.html")
+    # F38：box plot 是同一張卡的一個勾，所以它也填資料夾 —— 圖仍然落在
+    # `<folder>/spread.html`，跟合併之前逐字同一個路徑。
+    recipe.nodes["spread"].params["folder"] = str(folder)
 
     assert not [i for i in validate(recipe, kind="ebi_patch")
                 if i.level == "error"], "補上模板之後就不該有紅字了"

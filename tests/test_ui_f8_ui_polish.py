@@ -9,6 +9,10 @@
   （它會 zoom），設定拿大頭；看全貌用 zoom bar 的**彈出視窗**，彈出時
   主視窗的設定自動補滿、關窗還原。
 * 3-4 右欄與參數區的間距走 8px 節奏。
+
+⚠ **F39-B3（2026-08-27）搬走了三條**到 ``tests/test_ui_canvas.py``：使用者拖過
+的位置在重建畫布／彈出視窗之後還在、換一份 recipe 之後不繼承、卡片拖出邊界
+``sceneRect`` 要跟著長大。那三條問的是畫布的性質，不是這一輪的打磨。
 """
 from __future__ import annotations
 
@@ -244,59 +248,6 @@ def test_the_canvas_pops_out_into_its_own_window(window, qapp):
 
 
 # --------------------------------------------------------------------------- #
-# 第六輪：手動排的位置不准被「自動整理」掉
-# --------------------------------------------------------------------------- #
-def test_dragged_positions_survive_edits_and_popout(window, qapp):
-    """使用者拖好的佈局，改一個參數／開彈出視窗之後**不可以**跳回自動排版
-    （使用者原話：「不要幫我自動整理節點」）。要整批排回去有「排整齊」。"""
-    from PySide6.QtCore import QPointF
-
-    window.show()
-    qapp.processEvents()
-    nid = window.pipeline.node_ids()[1]
-    item = window.pipeline.node_item(nid)
-    item.setPos(QPointF(333.0, 444.0))
-
-    window.model.set_param(nid, list(window.model.nodes[nid].params)[0],
-                           window.model.nodes[nid].params[
-                               list(window.model.nodes[nid].params)[0]])
-    wire_up(window.model, window.model.add_step("denoise"))        # 觸發整張畫布重建
-    qapp.processEvents()
-    moved = window.pipeline.node_item(nid).pos()
-    assert (round(moved.x()), round(moved.y())) == (333, 444), \
-        "重建畫布把手動位置整理掉了：%s" % moved
-
-    window.open_canvas_window()
-    qapp.processEvents()
-    twin = window._popout_view.node_item(nid).pos()
-    assert (round(twin.x()), round(twin.y())) == (333, 444), \
-        "彈出視窗沒有沿用主視窗的位置"
-    window._canvas_popout.close()
-    qapp.processEvents()
-
-    # tidy 仍然是明確的「排回去」
-    window.pipeline.tidy()
-    back = window.pipeline.node_item(nid).pos()
-    assert (round(back.x()), round(back.y())) != (333, 444)
-
-
-def test_loading_another_recipe_forgets_old_positions(window, qapp):
-    """位置保留只在「同一份 recipe 一直編」的前提下成立 —— 換檔案之後，
-    上一份剛好同名的節點（load 幾乎每份都有）不該繼承拖過的位置。"""
-    from PySide6.QtCore import QPointF
-
-    window.show()
-    qapp.processEvents()
-    nid = window.pipeline.node_ids()[0]
-    window.pipeline.node_item(nid).setPos(QPointF(555.0, 555.0))
-    assert window.load_recipe_path(str(EXAMPLE), sync=True) is True
-    qapp.processEvents()
-    pos = window.pipeline.node_item(window.pipeline.node_ids()[0]).pos()
-    assert (round(pos.x()), round(pos.y())) != (555, 555), \
-        "換了一份 recipe 還繼承舊位置"
-
-
-# --------------------------------------------------------------------------- #
 # 第五輪：量測卡的 overlay 與勾選的統計量
 # --------------------------------------------------------------------------- #
 def test_a_measure_card_draws_the_region_it_reads(window, qapp):
@@ -381,21 +332,6 @@ def test_right_drag_pans_the_canvas(window, qapp):
         canvas_mod.Qt.RightButton, canvas_mod.Qt.NoButton))
     assert view._pan_last is None
     assert not opened, "拖曳之後放開不可以彈出右鍵選單"
-
-
-def test_a_card_dragged_past_the_edge_stays_reachable(window, qapp):
-    """卡片拖出 sceneRect 之外，那一塊是捲不到的 —— 埠與標籤就這樣
-    「不見」（使用者回報）。sceneRect 要跟著拖曳長大。"""
-    window.show()
-    qapp.processEvents()
-    view = window.pipeline
-    nid = view.node_ids()[-1]
-    item = view.node_item(nid)
-    far_x = view.scene().sceneRect().right() + 400
-    item.setPos(far_x, item.scenePos().y())    # itemChange → refresh_edges
-    qapp.processEvents()
-    assert view.scene().sceneRect().right() >= far_x + canvas_mod.NODE_W, \
-        "sceneRect 沒有跟著長大，拖出去的卡捲不到"
 
 
 def test_a_new_mask_card_takes_its_regions_from_a_line_not_from_typing(window, qapp):

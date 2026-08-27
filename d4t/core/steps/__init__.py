@@ -10,9 +10,7 @@
   align, subtract, align_to, pair_source,
   roi_reference, roi_mask,
   glv_stats, cd_measure, focus_quality,
-  feature_math, feature_fill,
-  output_csv, output_report, output_klarf, output_bundle, output_char,
-  output_boxplot, output_html
+  output_report, output_klarf, output_char
 
 **2026-08-25（F31 T5）：``find_defect`` 刪掉了。** 使用者：「我覺得 find
 defect 不需要。」它 2026-08-25 早上才進來（F29），零 recipe、零 fixture、
@@ -84,12 +82,10 @@ from . import roi_mask       # roi_mask（區域 → 0/255 mask 影像流，F8c�
 from . import glv_stats      # glv_stats（GLV：stats / compare）
 from . import cd             # cd_measure（CD）
 from . import quality        # focus_quality（Focus index）
-from . import feature_math   # feature_math（Algo 段：數字 → 數字）
-from . import feature_fill   # feature_fill（Algo 段：量不到的那一格）
 from . import output         # Output 段（csv / report / klarf / image）
 
 __all__ = [
     "load", "load_sidecar", "normalize", "denoise", "tone", "flatten", "align", "arith",
-    "quality", "glv_stats", "feature_math", "feature_fill",
+    "quality", "glv_stats",
     "output",
 ]

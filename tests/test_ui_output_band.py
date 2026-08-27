@@ -53,7 +53,7 @@ def canvas(window):
     return window.pipeline
 
 
-def add_output(window, key="output_csv"):
+def add_output(window, key="output_report"):
     return window.add_card_after(first_source(window), key)
 
 
@@ -67,7 +67,7 @@ def test_the_band_appears_once_there_is_an_output_card(window):
 
 
 def test_the_band_covers_every_output_card(window):
-    a = add_output(window, "output_csv")
+    a = add_output(window, "output_report")
     b = add_output(window, "output_klarf")
     cv = canvas(window)
     rect = cv.output_items()[0].sceneBoundingRect()
@@ -83,7 +83,7 @@ def test_a_stranger_inside_the_frame_means_no_frame_at_all(window):
     框進去，而那句話就變成假的。一個消失的框只是少了一個提示，一個說謊的框
     是錯的。
     """
-    a = add_output(window, "output_csv")
+    a = add_output(window, "output_report")
     b = add_output(window, "output_klarf")
     cv = canvas(window)
     assert cv.output_items(), "前提：兩張擺在一起時本來有框"
@@ -102,7 +102,9 @@ def test_which_cards_count_comes_from_the_card_not_a_hardcoded_list(window):
     from d4t.core.pipeline.step import list_steps
     keys = [s.key for s in list_steps()
             if str(getattr(s, "group", "")) == "output"]
-    assert len(keys) >= 4, keys
+    # ⚠ **防空轉的下限，不是規格。** F38 把七張收成三張，所以它從 4 改成 3
+    # —— 下修並寫下為什麼，同 `test_batch_steps` 那一條。
+    assert len(keys) >= 3, keys
     for key in keys:
         add_output(window, key)
     cv = canvas(window)

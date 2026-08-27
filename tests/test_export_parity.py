@@ -74,12 +74,17 @@ def _both(lot, tmp_path, step, name, **params):
     wiz_dir, card_dir = tmp_path / "wizard", tmp_path / "card"
     wiz_dir.mkdir(exist_ok=True)
     card_dir.mkdir(exist_ok=True)
-    key = "folder" if step in ("output_bundle", "output_char") else "path"
-    recipe = _recipe(step, dict(params, **{key: str(card_dir / name)}))
+    # F38：報表那幾樣全部走資料夾那張卡，只有 KLARF 還是「一格路徑＝一個
+    # 檔案」。`name` 因此是**資料夾裡那個寫死的檔名**，不是使用者取的名字。
+    if step == "output_klarf":
+        where, folder = {"path": str(card_dir / name)}, card_dir
+    else:
+        where, folder = {"folder": str(card_dir)}, card_dir
+    recipe = _recipe(step, dict(params, **where))
     dataset = load_dataset(lot["klarf"])
     rows = run_batch(recipe, dataset, workers=1)
     assert len(rows) == N and all(r["ok"] for r in rows)
-    return recipe, rows, dataset, wiz_dir / name, card_dir / name
+    return recipe, rows, dataset, wiz_dir / name, folder / name
 
 
 def _run_card(recipe, dataset, rows):
@@ -92,8 +97,9 @@ def _run_card(recipe, dataset, rows):
 # 1. CSV
 # --------------------------------------------------------------------------- #
 def test_the_csv_card_writes_the_same_bytes_as_the_wizard(lot, tmp_path):
-    recipe, rows, dataset, wiz, card = _both(lot, tmp_path, "output_csv",
-                                             "defects.csv")
+    recipe, rows, dataset, wiz, card = _both(lot, tmp_path, "output_report",
+                                             "defects.csv",
+                                             contents="table")
     write_csv(rows, str(wiz))                       # 精靈那一行
     _run_card(recipe, dataset, rows)
     assert card.read_bytes() == wiz.read_bytes()
@@ -112,7 +118,8 @@ def _sheets(path):
 
 def test_the_report_card_writes_the_same_workbook_as_the_wizard(lot, tmp_path):
     recipe, rows, dataset, wiz, card = _both(lot, tmp_path, "output_report",
-                                             "report.xlsx")
+                                             "report.xlsx",
+                                             contents="excel")
     pytest.importorskip("openpyxl")
     write_excel(rows, str(wiz), recipe=recipe, ground_truth=None)
     _run_card(recipe, dataset, rows)
@@ -182,8 +189,10 @@ def test_the_image_card_writes_the_same_pngs_as_the_wizard(lot, tmp_path):
     兩件都搬進了 `core/export/overlay.py`，所以這一條比得起來。
     """
     recipe, rows, dataset, wiz, card = _both(
-        lot, tmp_path, "output_bundle", "png", limit=3,
+        lot, tmp_path, "output_report", "png", limit=3,
         contents="pictures", picture_format="png")
+    # 只勾「圖」＝圖直接躺在資料夾裡（沒有報表就沒有 `images/` 那一層）。
+    card = card.parent
     wiz.mkdir(parents=True, exist_ok=True)
     by_id = {str(it.defect_id): it for it in dataset.items}
     for row in pick_overlay_results(rows, 3):       # 精靈那幾行

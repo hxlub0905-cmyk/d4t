@@ -29,6 +29,12 @@
    而那一道遷移住在 `Recipe.load`（讀檔案）**不是** `from_json_dict`（重建物件），
    因為它不冪等而重建那條路是 worker 走的（鐵則 9）。整條性質見
    `tests/test_recipe_roundtrip.py`。
+
+⚠ **`feature_math` / `feature_fill` 2026-08-27 刪掉了**（Phase 3）。這一檔跟著
+少了一條：``the_migration_also_reaches_the_algo_card``（改名遷移會不會走進那張
+卡的算式）。**帶著那張卡的舊 recipe 現在是一條 `unknown-step`，跑不起來** ——
+跑不起來的 recipe 不需要有人幫它改名。判定段的算式（`let` / 樹）走
+``_migrate_decide_renames``，那條路還在，由 ``test_rename_fallout.py`` 守。
 """
 from __future__ import annotations
 
@@ -176,8 +182,8 @@ def test_the_prefix_prefers_the_stream_the_card_writes():
 
 def test_the_prefix_falls_back_to_the_node_id():
     """退路一定要在：不吃影像的卡、以及一張卡吃好幾條流的時候。"""
-    assert feature_prefix("fm", get_step("feature_math"),
-                          {"expr": "a+b", "out": "v"}) == "fm"
+    assert feature_prefix("rep", get_step("output_report"),
+                          {"folder": "/tmp/x"}) == "rep"
     assert feature_prefix("glv", get_step("glv_stats"),
                           {"source": "test,ref"}) == "glv"
     assert feature_prefix("x", None, {}) == "x"
@@ -254,21 +260,3 @@ def test_the_migration_leaves_a_users_own_name_alone(tmp_path):
     assert _loaded(tmp_path, old).score.expr == "norm_my_own_number + 1"
 
 
-def test_the_migration_also_reaches_the_algo_card(tmp_path):
-    """分數表達式不是唯一吃特徵名的地方 —— Algo 卡的算式也是。"""
-    old = {
-        "recipe_id": "old", "version": 3,
-        "routes": {KIND: ["load", "norm_ref", "norm", "fm"]},
-        "nodes": {
-            "load": {"id": "load", "step": "load_patch", "params": {}},
-            "norm_ref": {"id": "norm_ref", "step": "normalize",
-                         "params": {"streams": "ref", "range_from": "test"}},
-            "norm": {"id": "norm", "step": "normalize",
-                     "params": {"streams": "test"}},
-            "fm": {"id": "fm", "step": "feature_math",
-                   "params": {"expr": "norm_clip_frac * 100", "out": "pct"}}},
-        "score": {"expr": "pct", "threshold": 1.0,
-                  "bins": {"below": 0, "above": 1}},
-    }
-    r = _loaded(tmp_path, old)
-    assert r.nodes["fm"].params["expr"] == "test_clip_frac * 100"
