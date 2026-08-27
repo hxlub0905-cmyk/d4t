@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import first_source  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
@@ -261,3 +263,48 @@ def test_canvas_repaints_on_a_theme_switch(window):
         assert window.pipeline.node_ids() == window.model.node_order
     finally:
         window.set_theme("light")
+
+
+# --------------------------------------------------------------------------- #
+# 6. 縮放與重複的卡（2026-08-27 從 `test_ui_f7_14_canvas_flow.py` 救過來）
+#
+# F39-B2 把那一支整支刪掉（它驗收的「輸出埠上的 +」在 F7-18 就撤了，剩下的
+# 斷言是「再宣告一次它不在」）。下面兩條不是那種 —— 兩條都**逐一驗過「把
+# bug 放回去，全 UI 測試只有它會紅」**，所以它們是這兩件事僅有的守門人。
+# --------------------------------------------------------------------------- #
+def test_zoom_is_clamped_at_both_ends(window):
+    """沒有下限，滾兩下就把整張圖縮成一個點，而且點陣底每一格都長得一樣 ——
+    使用者不知道自己在哪裡，也不知道有哪顆鈕救得回來。
+
+    最後兩行是「回得去」：`reset_zoom` 要真的回到 100%，那是滾到底之後唯一
+    不用猜要滾幾下的路。
+    """
+    view = window.pipeline
+    # 明確從 100% 出發：開一份 recipe 現在會自動 fit（見 canvas.fit_later），
+    # 所以「起點一定是 100%」已經不成立 —— 而這條測的是兩端的夾制，不是起點。
+    view.reset_zoom()
+    assert view.zoom_percent() == 100
+    for _ in range(30):
+        view.zoom_by(1 / 1.25)
+    assert view.zoom_percent() == int(round(view.MIN_SCALE * 100))
+    for _ in range(60):
+        view.zoom_by(1.25)
+    assert view.zoom_percent() == int(round(view.MAX_SCALE * 100))
+    view.reset_zoom()
+    assert view.zoom_percent() == 100
+
+
+def test_a_repeated_card_shows_which_one_it_is(window):
+    """同一張卡加第二次，副標要把 node_id 帶出來（`denoise2 · …`）。
+
+    ⚠ 副標平常**刻意不印 node_id**（那是 recipe JSON 的鍵，而卡片名字就在
+    上面一行）—— 唯一的例外就是這裡：兩張 Denoise 並排時，「是哪一張」才真的
+    是使用者需要知道的事，而它也是 lint 訊息與特徵前綴指的那個字。
+
+    F39-B2 量過：把 `canvas.py` 那個 `if step_key and self.node_id != step_key`
+    關掉，**64 支 UI 測試裡只有這一條會紅**。
+    """
+    src = first_source(window)
+    window.add_card_after(src, "denoise")
+    second = window.add_card_after(src, "denoise")
+    assert window.pipeline.card(second).subtitle().startswith("denoise2 · ")
