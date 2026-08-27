@@ -20,7 +20,7 @@ from .snr import (
 from .roi import NamedROI, ROIStats, MultiROISet, pixel_rect_to_norm
 from .glv import glv_value, glv_stats, default_metrics, roi_patch, group_snr, pixel_hist, summarize
 from .period import estimate_period, PeriodResult
-from .golden import tile_coords, stack_cells, ghosting_score, refine_period, candidate_periods
+from .golden import tile_coords, stack_cells, ghosting_score, stack_agreement
 from .quality import check_lap_quality, compute_quality, DEFAULT_LAP_THRESHOLD
 from .edge import (
     EdgePoint, ScanLine, ScanResult, CRITERIA, TARGETS, AXES,

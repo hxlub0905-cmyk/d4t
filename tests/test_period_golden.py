@@ -6,9 +6,7 @@ import numpy as np
 import pytest
 
 from d4t.core.algo.golden import (
-    candidate_periods,
     ghosting_score,
-    refine_period,
     stack_agreement,
     stack_cells,
     tile_coords,
@@ -78,12 +76,6 @@ def test_correct_period_stacks_sharper(grid_image):
     assert score_good > score_bad
 
 
-def test_refine_period_recovers_truth(grid_image):
-    bpx, bpy, blv = refine_period(grid_image, PX - 2, PY - 2, search=4)
-    assert (bpx, bpy) == (PX, PY)
-    assert blv > 0
-
-
 def test_tile_coords_complete_cells_only(grid_image):
     coords = tile_coords(grid_image.shape, PX, PY)
     h, w = grid_image.shape
@@ -98,13 +90,12 @@ def test_stack_cells_deterministic_sampling(grid_image):
     assert np.array_equal(a, b)
 
 
-def test_candidate_periods_and_origin():
-    cands = candidate_periods(PX, PY, lo=4, hi=128)
-    assert cands[0] == (PX, PY)
-    assert len(cands) == len(set(cands))
-    assert all(4 <= a <= 128 and 4 <= b <= 128 for a, b in cands)
-    assert (PX // 2, PY // 2) in cands and (2 * PX, 2 * PY) in cands
-    # choose_origin is the documented (0, 0) stub until the M4 phase search
+def test_choose_origin_without_pixels_is_zero():
+    """沒有給影像就沒有相位可搜 —— 回 ``(0, 0)``，不是猜一個。
+
+    `choose_origin` 的相位搜尋要看畫素（M4 補完的）；`image=None` 是呼叫端
+    只知道形狀時的那條路。真正的搜尋由 `tests/test_phase_origin.py` 守。
+    """
     assert choose_origin((320, 288), PX, PY) == (0, 0)
 
 

@@ -93,7 +93,7 @@ agreement = clip((a - 1/n) / (1 - 1/n), 0, 1)
 | `ghosting_score` | 它量的是銳利度，而它就叫 sharpness。只改 docstring 講清楚它**不是**什麼 |
 | `choose_origin` | 目標函數近乎平（見上），`anchor_cell` 在它後面接手。動它會踩 `test_phase_origin` 的 ±1px 等變性與 2 秒預算，而使用者看不到好處 |
 | `estimate_period` | 不在這條路上 |
-| `refine_period` / `candidate_periods` | **零個 production 呼叫者**（只有 `test_period_golden` 在叫）。實測 `refine_period` 從 26 會走到 20（真值 28）—— 真的壞，但是死碼。收起來／刪掉是**使用者的決定**（`CLAUDE.md` §5），寫進回報不動手 |
+| ~~`refine_period` / `candidate_periods`~~ | **使用者說「刪掉」，2026-08-27 刪了**（見 §8）|
 
 ## 7. 驗收
 
@@ -105,3 +105,26 @@ agreement = clip((a - 1/n) / (1 - 1/n), 0, 1)
   1. 警示改回掛 `ghosting < 40` → `f7_12` 那支紅
   2. 拿掉 `1/n` 地板校正 → 純雜訊那條與地板那條紅
   3. 「格子不足回 0」改成回 1.0 → 「沒有證據不是完全一致」那條紅
+
+---
+
+## 8. 後記：`refine_period` / `candidate_periods` 刪了（2026-08-27）
+
+§6 把它們列進「不動的」，理由是「收起來／刪掉是使用者的決定」（`CLAUDE.md` §5）。
+回報之後使用者說**「刪掉」**，所以刪了 —— 連同 `algo/__init__.py` 的匯出、
+`test_period_golden` 裡唯一在叫它們的兩支測試、`period.py` 那句已經指不到東西的
+`:func:` 交叉引用，以及 `docs/HANDOVER.md` 的 vendoring 對照表。
+
+**代價這次是零**：`CLAUDE.md` §5 那張表說刪掉要付「依賴它的 fixture／黃金值」，
+而這兩支從來沒有 production 呼叫者，所以沒有 fixture、沒有黃金值、沒有 recipe
+會變成 `unknown-step` —— 這正是「刪掉」在這個 repo 裡少見地便宜的那一種。
+
+⚠ 但**留下了兩樣東西**，因為它們比程式碼有用：
+
+1. `golden.py` 原地一段註解，寫著它為什麼壞（**照銳利度排週期候選，而銳利不等於
+   對得準**）。沒有這一段，下一個人會從 CPE 再 vendor 一次同一支函式。
+2. `docs/HANDOVER.md`「在來源專案裡發現、但尚未回報給原專案的問題」多了第 4 條。
+   上游 CPE 大概還在用它排週期，而那是一個安靜的錯誤。
+
+`algo/__init__.py` 那一行順手補上了 `stack_agreement`：把它漏在外面、卻匯出兩個
+死的名字，是這一輪之前那行的實際狀態。

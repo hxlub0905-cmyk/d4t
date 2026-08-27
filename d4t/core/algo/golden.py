@@ -182,59 +182,11 @@ def stack_agreement(image: np.ndarray, px: int, py: int,
     return float(np.clip((raw - floor) / (1.0 - floor), 0.0, 1.0))
 
 
-def refine_period(image: np.ndarray, px: int, py: int, search: int = 6,
-                  method: str = "mean") -> Tuple[int, int, float]:
-    """Neighbourhood scan around ``(px, py)`` for the sharpest stack.
-
-    Candidates are ranked by the **raw** Laplacian variance (not the
-    saturating 0..100 score, which would clip and lose ordering near the
-    top).  Returns ``(best_px, best_py, best_lap_var)``.
-    """
-    gray = _to_gray(image)
-    px, py = int(px), int(py)
-    search = int(search)
-
-    best_px, best_py, best_lv = px, py, -1.0
-    for dy in range(-search, search + 1):
-        for dx in range(-search, search + 1):
-            cpx, cpy = px + dx, py + dy
-            if cpx < 2 or cpy < 2:
-                continue
-            coords = tile_coords(gray.shape, cpx, cpy)
-            if len(coords) < 4:
-                continue
-            stacked = stack_cells(gray, cpx, cpy, method=method)
-            lv = float(cv2.Laplacian(stacked.astype(np.float64),
-                                     cv2.CV_64F).var())
-            if lv > best_lv:
-                best_lv, best_px, best_py = lv, cpx, cpy
-    return best_px, best_py, best_lv
-
-
-def candidate_periods(px: int, py: int, lo: int, hi: int
-                      ) -> List[Tuple[int, int]]:
-    """Period candidates around the primary ``(px, py)``.
-
-    Includes the primary plus per-axis and combined half/double
-    harmonics, filtering out-of-range and duplicate entries.
-    """
-    out: List[Tuple[int, int]] = []
-    seen = set()
-
-    def add(a, b):
-        a, b = int(a), int(b)
-        if not (lo <= a <= hi and lo <= b <= hi):
-            return
-        if (a, b) in seen:
-            return
-        seen.add((a, b))
-        out.append((a, b))
-
-    add(px, py)             # primary
-    add(px // 2, py)        # px/2
-    add(2 * px, py)         # 2px
-    add(px, py // 2)        # py/2
-    add(px, 2 * py)         # 2py
-    add(px // 2, py // 2)   # half
-    add(2 * px, 2 * py)     # double
-    return out
+# ``refine_period`` / ``candidate_periods`` were deleted on 2026-08-27 (F40).
+# They came in with the vendored module and never gained a production caller —
+# ``estimate_period`` finds the period by autocorrelation and never asks this
+# module anything.  Measured before deleting: ``refine_period`` starting from
+# 26 walks to 20 when the truth is 28, because it ranks candidates by the
+# sharpness of the stack, and sharpness is not alignment (see the module
+# docstring above).  Keeping a broken helper alive for its own test is how a
+# wrong answer waits for a first caller.
