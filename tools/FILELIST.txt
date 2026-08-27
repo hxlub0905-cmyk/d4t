@@ -5,7 +5,7 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 9f3cae8676c97aef534b20a4c2b3616c9241248a CLAUDE.md
 7bddb3ce6ded46f4baaa8f030cc3c851653cc23c README.md
-574e2485411f90d78df20136e850ce83841d6ec2 SESSION_LOG.md
+e3f55c26b71ef2b6e92c7154c771d80c9ba5d88c SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -124,6 +124,7 @@ d08b372f8fcb8e5156c77eab4b6b554b6cb4cc2e docs/plans/F11-phase2-features.md
 655f8cf83bfe142b0952aa2769fd420aec2698d3 docs/plans/F26-decide-panel-ux.md
 4b55069e016b2ca16b4ff7e9e929d7454db52172 docs/plans/F27-results-panel.md
 95e1c9f1bee66ba5f2f545a665f2e5550b751b82 docs/plans/F38-output-three-cards.md
+ead9e54220f903c711f60f9633a6171eacb3e4e5 docs/plans/F39-f-test-audit.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py

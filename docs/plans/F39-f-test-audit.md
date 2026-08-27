@@ -1,0 +1,258 @@
+# F39 — F 編號測試審一輪（清單）
+
+**狀態：清單完成，等使用者確認。B0 撞到一個比測試大的東西，見 §4。**
+
+工作單 Phase 2。規矩：
+
+> **不要直接動手刪。** 先產出一份清單交給使用者……清單確認之後再分批改，
+> 一批一個 PR。
+
+**所以這一份就是產物。** 36 支 F 檔、605 條測試逐條看過。
+
+---
+
+## 1. 量出來的規模
+
+| | 檔 | 條 | 行 | 逐檔跑的秒數 |
+|---|---:|---:|---:|---:|
+| UI 測試全部 | 64 | 1,020 | 22,960 | 244 |
+| **其中 F 編號** | **36** | **605** | **13,128** | **162** |
+| 非 F 編號（常駐） | 28 | 415 | 9,832 | 83 |
+
+F 編號佔全部測試的 24.4%、佔 UI **牆鐘時間的 66%**；36 支裡 **30 支要建
+`StudioWindow`**，那才是時間的來源（`f19_cd` 40 條純 API 只要 0.9 秒，
+`f7_15` 8 條要 12.7 秒）。
+
+**判定：605 條 → 留 ~323、刪 ~282。**
+
+---
+
+## 2. 判準與三個先撞到的事實
+
+逐條問工作單那一句：
+
+> 這條斷言講的是「不管怎麼改，這件事都必須成立」，還是「當初那一輪交付了」？
+
+### 2.1 「F 編號」不是可靠的訊號
+
+`docs/plans/F11-phase2-features.md:50` 已經寫著「**F10 的 20 條畫布不變量**會
+自動套用到新註冊的卡」。`test_ui_f10_canvas_reality.py` 是逐張套用到 registry
+的性質測試，只是檔名帶 F 編號。`f7_16`（undo／關窗／停止）、`f7_17`
+（inspector）、`f16_run_all`（試跑不寫）、`f20`（面板不能說謊）、`f9_7`
+（一個輸入埠一條線）同樣如此。**對這六支，正確的動作是改名，不是刪。**
+
+### 2.2 這件事做過一次，而且留下了做法
+
+`tests/test_ui_canvas_truth.py` 開頭：
+
+> **這是 F9／F10 那兩輪換來的東西，而在這一份之前沒有任何測試在守它。**
+
+F9／F10 的驗收檔**並沒有真的守住**那條不變量 —— 它們只測了想得到的那幾個
+組合，真正的守門人是後來寫的那支**隨機接線／剪線的性質測試**（400 組序列，
+第一輪就抓到 B1）。
+
+> **樣板**：救出來的不變量不一定是「把那幾條搬過去」，有時候是「把它重寫成
+> 一條機器撞得到的性質」，然後那一整批寫死的案例才真的可以刪。
+
+### 2.3 三種硬約束
+
+**(a) 六條 pitfall 指名了它的守門人**（`docs/history/` 是檔案館可以過期，
+這幾份是活的）：
+
+| 活文件 | 指名的測試 | 守的是什麼 |
+|---|---|---|
+| `PITFALLS.md:43,45,46` | `f7_23_buttons` | **三條** Qt 坑：QSS 特異性讓 `:focus` 被安靜蓋掉、小圖示不能照比例縮、Qt 不夾 `border-radius` |
+| `PITFALLS.md:16` | `f15_pair_source` | 第二份 lot 只送進一半的路 |
+| `PITFALLS.md:27,28` | `f7_9` / `f7_14` | `boundingRect()` 沒涵蓋畫到節點外的東西；`paint()` 用場景座標 |
+| `PITFALLS.md:41` | `f7_16` | `_update_action_states` 蓋掉 tooltip |
+| `PITFALLS.md:56` | `f7_18` | 拆卡片時的順序陷阱 |
+| `ARCHITECTURE.md:71`、`ROADMAP.md:199` | `f16_stages` | `GROUP_ORDER` 與 `LibraryPanel.GROUPS` 綁在一起 |
+
+**一條 pitfall 指名了守門人，那就是一個契約。**
+
+**(b) 四個 UI 模組只有 F 檔碰得到**（常駐測試零覆蓋）：
+`cell_canvas.py`（1,086 行，只有 `f7_12`／`f8_cross`）、
+`region_check.py`（341 行，只有 `f7_11`／`f7_12`／`f8_calibrate`／`f8_cross`）、
+`template_dialog.py`（1,047 行，只有 `f7_12`）、
+`inspectors.py`（2,917 行，12 支 F ＋ 2 支常駐）。
+
+**(c) grep 過的獨家覆蓋**（刪掉就零覆蓋）：
+`ambiguous-input` → 只有 `f9_7`；`_explicit_bindings` / `_unmet_needs` → 只有
+`f9_9`；`"advanced" in spec` → 只有 `f8_advanced`；`_migrate_also_apply` →
+只有 `f7_18`（＋`f7_9`）。
+
+---
+
+## 3. 清單
+
+### A. 改名留下（6 支，110 條 → 留 92）
+
+| 檔 | 條 | 留 | 為什麼不是驗收快照 | 新名 |
+|---|---:|---:|---|---|
+| `f10_canvas_reality` | 21 | 15 | 7 條逐張套用到 registry；文件已稱它「F10 的 20 條畫布不變量」 | `test_canvas_invariants.py` |
+| `f7_17_inspectors` | 41 | 33 | inspector 機制的行為套件；`inspectors.py` 幾乎只有它在守 | `test_ui_inspectors.py` |
+| `f7_16_safety_net` | 21 | 18 | undo／關窗／停止；`test_ui_save_recipe.py` 的 docstring 自己指過來 | `test_ui_undo_close_and_stop.py` |
+| `f16_run_all` | 12 | 12 | 「試跑不寫、只有整批才寫」是使用者定調的規則，唯一守門人 | `test_ui_write_only_on_run_all.py` |
+| `f20_panel_truth` | 8 | 8 | 面板不能說謊；`row_labels` / `_focus_box_index` 別處沒有 | `test_ui_panel_truth.py` |
+| `f9_7_user_draws...` | 7 | 6 | 鐵則 10 的正典；`ambiguous-input` 獨家 | `test_canvas_one_line_per_input.py` |
+
+### B. 大部分留下（5 支，61 條 → 留 45）
+
+| 檔 | 條 | 留 | 說明 |
+|---|---:|---:|---|
+| `f7_23_buttons` | 22 | 14 | ⚠ **真的不變量檔**：三條 pitfall 說「規則寫了但畫面沒變」，量畫素是唯一看得見的儀器。刪的是「釘住哪一個顏色」那幾條 → `test_ui_button_contract.py` |
+| `f11_canvas_truth` | 15 | 13 | 一條被 f10 的 registry 版蓋掉 |
+| `f13_features` | 9 | 8 | → `test_ui_feature_table_truth.py` |
+| `f9_9_two_lines...` | 10 | 7 | 三條被 f10 的 registry 版蓋掉 |
+| `f16_stages` | 5 | 3 | ⚠ **Phase 3 才動**（見 §5）|
+
+### C. 分家：救出不變量再刪其餘（12 支，301 條 → 留 ~150）
+
+| 檔 | 條 | 留 | 救出來要去哪 |
+|---|---:|---:|---|
+| `f7_12_template` | 56 | ~19 | **不可整支刪**（`template_dialog`／`cell_canvas` 唯一覆蓋）→ 新 `test_ui_template_dialog.py`；三條 algo 測試 → `test_roi_template.py` |
+| `f19_cd` | 40 | ~26 | 面板↔疊圖一致 8 條 → `test_ui_panel_truth.py`；metric-face 2 條 → `test_ui_widgets.py` |
+| `f15_pair_source` | 35 | ~26 | §8／§9 → `test_ui_canvas_truth.py` ＋ 新 `test_ui_marks_truth.py` |
+| `f8_cross` | 35 | 12 | 「畫面要顯示卡片真的用到的每一個東西」9 條 → 新 `test_ui_region_overlay_truth.py` |
+| `f7_9_feedback` | 25 | 13 | 階段色 3 → `test_ui_widgets.py`；埠幾何 3 → `test_ui_canvas.py`；lint 5 → `test_card_invariants.py` |
+| `f11_card_aids` | 21 | 11 | 「背景分布來自引擎不是 UI 重算」→ `f7_17` |
+| `f8_ruler` | 17 | 5 | 與 `f8_advanced`／`f8_calibrate` 的「切換卡片要清乾淨」合成一支參數化的 `test_ui_stale_state.py` |
+| `f7_11_roi` | 16 | 9 | region-check 一組 → 新 `test_ui_region_check.py` |
+| `f11_enhance_panel` | 16 | 7 | 七條「面板不能捏造數字」→ `f7_17` |
+| `f22_decide_panel` | 16 | 11 | 四條純 `summarize()`（`bin_purity` 別處沒有）→ `test_export_report.py` |
+| `f8_ui_polish` | 14 | 6 | 拖動位置存活 2、場景長大 1 → `test_ui_canvas.py` |
+| `f8_advanced` | 10 | 5 | `test_every_card_can_declare_advanced_rows` → **`test_card_invariants.py`** |
+
+### D. 大部分刪（10 支，106 條 → 留 33）
+
+`f7_19_wiring`(22→5)、`f7_18_streams_as_nodes`(14→5)、`f7_24_layout`(12→2)、
+`f13_layout`(11→4)、`f11_channel_map`(10→2)、`f13_chrome`(7→3)、
+`f11_tiff_stack`(7→2)、`f14_input_on_the_card`(8→3)、`f7_15_reading_load`(8→3)、
+`f8_calibrate`(7→4)。
+
+共同形狀：釘住一輪設計的像素／文字／widget 存在性。`f13_layout` 的 docstring
+自己就是驗收紀錄（「起點是實測（1600×1000 的視窗）：中欄只有 551px 寬」）。
+
+⚠ `f13_layout` 有一條**測試衛生**的不變量必須留：
+`test_saved_sizes_are_never_restored_inside_the_tests` —— 少了它，一次手動拖過
+的分隔線會漏進 CI，版面斷言從此時好時壞。
+
+### E. 整支刪（3 支，27 條 → 留 3）
+
+| 檔 | 條 | 為什麼 |
+|---|---:|---|
+| `f7_10_route_edges` | 6 | **它驗收的功能已經被撤掉了**（docstring：「使用者實測半個月後退掉它：『會混淆』」）。剩下六條只是再宣告一次它不在，而另外三個檔案也都這麼做 |
+| `f7_14_canvas_flow` | 9 | 同上：F7-18 拿掉了輸出埠的「+」，而 `plus_at`／`plus_anchors_local` **在 `d4t/` 裡根本不存在** —— 那條斷言不可證偽。留 1 條（zoom 夾住上下界）搬去 `test_ui_canvas.py` |
+| `f21_expr_picker` | 12 | 12 條裡 10 條會隨 Phase 3 死掉（見 §5）|
+
+---
+
+## 4. ⚠ B0：那支空轉的測試背後是一個**演算法**問題
+
+使用者定調「現在修（獨立一個小 PR）」。動手之後發現**修不動**，理由要寫下來。
+
+### 4.1 症狀：一支恆綠、零斷言的測試
+
+`f7_12::test_a_blurred_stack_is_called_out_not_just_scored`：
+
+```python
+    dlg.cell = algo_template.build_golden_cell(big_image(), px=PERIOD + 7, py=240)
+    if dlg.cell.ghosting < 40.0:          # ← 實測 ghosting = 90.27
+        assert "blurred" in dlg.summary()  # ← 從來沒執行過
+```
+
+它守的正是那個檔案 docstring 點名的災難：**週期估錯 → 疊出來糊掉 → 每一顆都
+對錯，而畫面上不會有錯誤訊息**。
+
+### 4.2 修不動的原因：那個分數量的不是「疊得準不準」
+
+`template.py:110` 的註解說 `ghosting` 是「0–100，越高越銳利（**疊得越準**）」。
+但 `golden.ghosting_score` 算的是**疊完那張圖的 Laplacian 變異數** —— 也就是
+「這張圖銳不銳利」，跟「那些格子有沒有對齊」是兩件事。
+
+實測（合成條紋圖，週期 40）：
+
+| 對比 | 正確 px=40 | **半週期錯 px=60** | 38–61 全掃的最低分 |
+|---:|---:|---:|---:|
+| 1.00 | 99.99 | **100.00** | 65.40 |
+| 0.50 | 92.91 | **96.67** | 36.55 |
+| 0.25 | 56.76 | **78.35** | 25.74 |
+| 0.12 | **31.54** ← 會被說「blurred」 | 48.97 ← 被說沒事 | 22.30 |
+| 純雜訊（完全沒結構）| — | — | **22.21** |
+
+**它不只是不敏感，在這份內容上是反過來的**：錯得最離譜的半週期偏移分數**比
+正確的高**；而對比低的正確模板反而會拿到「the stack looks blurred, which
+usually means the period was measured wrong」這句話。分數其實在量**對比**。
+
+> 這正是這個 repo 一直在獵的那個形狀：**跑得完、有數字、而且是錯的**。
+> 而那支空轉的測試就是沒有人發現它的原因。
+
+### 4.3 為什麼不自己修
+
+那個分數餵兩個地方：
+
+1. `template_dialog.py:760` —— 使用者看得到的那句警示。
+2. **`period.py:445`** —— 週期候選的排序（`ghosting_score(...)[1]` 的原始
+   lap_var）。也就是說**週期估測本身是照「哪個看起來最銳利」在挑**，不是照
+   「哪個對得最齊」。`golden.refine_period` 的 docstring 明寫它照 lap_var 排序。
+
+修法要換成**跨格子的一致性**（疊之前先看那幾格彼此的變異），那是演算法改動，
+會動到 `estimate_period` —— 而出貨的 `patch-dsnr-by-class.json` 走 templateGC。
+
+黃金值**不受影響**（三份 fixture recipe 都沒有 `roi_template`），但這已經遠遠
+超出「審測試」與「修一支空轉的測試」。**工作單：拿不準的就問。**
+
+### 4.4 三個選項
+
+| | 做什麼 | 代價 |
+|---|---|---|
+| **(a)** | 換成跨格子一致性（疊之前算那幾格的變異／相關）。`ghosting_score` 多回一個值，`template_dialog` 的門檻改用它，`period.py` 的排序也跟著換 | 演算法改動；`estimate_period` 的行為會變，要重新驗週期估測那一組測試 |
+| **(b)** | 只修使用者看得到的那一句：`template_dialog` 改用一個新的、正確的一致性指標，**`period.py` 的排序不動** | 小得多，而且立刻讓那句警示是真的。代價：同一個名字在兩個地方意思不同 |
+| **(c)** | 現在只把發現寫進 `docs/PITFALLS.md`，測試改成 `xfail` 並指向這一段 | 零風險，但那個「跑得完而且是錯的」會繼續活著 |
+
+**我的建議是 (b)**：那句警示是使用者唯一看得到的線索，而它現在會對著正確的
+模板喊狼來了。`period.py` 那一半風險大得多（會動到出貨 recipe 的行為），值得
+單獨一輪、單獨驗週期估測。
+
+---
+
+## 5. 與 Phase 3 的相依
+
+Phase 3 要刪 `feature_math` / `feature_fill`：
+
+1. **`f21_expr_picker` 12 條裡 10 條會死**（`_form()`／`_fill_form()` 直接
+   `get_step("feature_math")`）。先把
+   `test_a_card_does_not_offer_its_own_output`（`include_upto=False` 的唯一
+   守門人）救去 `test_viewmodel.py`。
+2. **`f16_stages::test_the_absorbed_algo_cards_never_read_an_image_stream`
+   會變成安靜的空轉。** 實測：`GROUP_ALGO` **現在已經零張卡**，整個迴圈只靠
+   `key in ("feature_math","feature_fill")` 在跑；那兩張刪掉之後迴圈本體再也
+   不會執行，而測試照樣綠。**跟 §4.1 同一個形狀，要在 Phase 3 一起刪。**
+3. `f16_stages::test_the_stages_are_in_the_order` 把 `"adc"` 釘在七段清單裡，
+   而 Phase 3 之後那一段零張卡。**留不留目前只有這條斷言寫著答案** ——
+   使用者 2026-08-27 定調：**Phase 3 開始時再決定**，跟 `GROUP_ALGO` 一起問。
+
+---
+
+## 6. 批次（一批一個 PR）
+
+| 批 | 內容 | 條數 | 風險 |
+|---|---|---:|---|
+| **B0** | ⚠ **卡住了，等 §4.4 的決定** | — | — |
+| **B1** | A 組六支**改名 ＋ 一起改文件**（`PITFALLS.md` 六條、`ARCHITECTURE.md`、`ROADMAP.md`）。程式碼一行不動 | 0 | 低。先做，它把「哪些是常駐」變成看得出來的 |
+| **B2** | E 組整支刪（`f7_10`、`f7_14`）＋ D 組裡純重複的 | ~40 | 低（每一條都指名了蓋掉它的那支）|
+| **B3** | C 組的「搬進 `test_card_invariants.py`／`test_ui_widgets.py`／`test_ui_canvas.py`」 | ~30 搬 | 中 |
+| **B4** | C 組新開的三個常駐檔 ＋ 對應刪除 | ~120 | 中高（碰到四個零覆蓋模組）|
+| **B5** | D 組其餘刪除 ＋ 文件收尾 | ~80 | 中 |
+
+**B4 之前不要動 `f7_12`／`f8_cross`**：它們是 `cell_canvas`／`region_check`
+的唯一覆蓋。
+
+## 7. 驗收
+
+- **清單先過使用者** ← 這個 PR 停在這裡
+- 之後每一批：核心＋UI 兩批測試全綠
+- CI 時間不變差（目前 UI 逐檔 244 秒）
+- 刪掉一條之前，確認它保護的行為**沒有**被別的測試蓋到
+- **每一批都要跑一次「把 bug 放回去會紅」** —— 搬過去的不變量要在新家證明
+  它還在守
