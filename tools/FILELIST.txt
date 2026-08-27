@@ -5,7 +5,7 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 9f3cae8676c97aef534b20a4c2b3616c9241248a CLAUDE.md
 7bddb3ce6ded46f4baaa8f030cc3c851653cc23c README.md
-5ff90f6412fd5a704133cd3ee0fe5d91d0811696 SESSION_LOG.md
+c78b047dff17300d026ddc4bb0413b7173a5cf7e SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -115,7 +115,7 @@ cb5ec1e3cc74cbfc6f03fe2edb526c0993465c6e docs/GLAS-INTERFACE.md
 0413902a6343a2a35fbd056b7a53173b9372d455 docs/HANDOVER.md
 15c2bb25a9b655500c0706d899826872abbc425f docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
-c223fb11ed843bdce57af96c870a0fe625d0c98a docs/PITFALLS.md
+3a290c2db141e175e4ed22b216b2e40d15ad6c1a docs/PITFALLS.md
 89ff17dab83b91e115530a9da89adf16a1030522 docs/ROADMAP.md
 c1cfb82e71df1d178b5f70766fcabf52d623476a docs/USING-CD.md
 f265bee418c00c58c1f1b1ca5916cba6929d9ffe docs/USING-CHARACTERIZATION.md
@@ -124,7 +124,7 @@ f265bee418c00c58c1f1b1ca5916cba6929d9ffe docs/USING-CHARACTERIZATION.md
 655f8cf83bfe142b0952aa2769fd420aec2698d3 docs/plans/F26-decide-panel-ux.md
 4b55069e016b2ca16b4ff7e9e929d7454db52172 docs/plans/F27-results-panel.md
 95e1c9f1bee66ba5f2f545a665f2e5550b751b82 docs/plans/F38-output-three-cards.md
-55dd87ec6d5d929c31233f88fdded95ce3c2671b docs/plans/F39-f-test-audit.md
+0bf08282aa8b157016df4177eedf2ba8c328ef66 docs/plans/F39-f-test-audit.md
 85bdd915d65cea34657713d9e11804991616693f docs/plans/F40-stack-agreement.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
@@ -263,7 +263,7 @@ d595cf5c04bb93605984e0f64242b95af05bed58 tests/test_ui_f11_channel_map.py
 843de9e8db33ed0be727adcbb0091e2972d45a6c tests/test_ui_f11_tiff_stack.py
 fa822b7c0fe84fecb8b8463ae4233ea1f49947df tests/test_ui_f13_chrome.py
 4423c2bd51647ab5b39a872cbcc89f97aeab21d8 tests/test_ui_f13_features.py
-fcd1e48c4e17fa1ec6699b9ef3efc16298adedf8 tests/test_ui_f13_layout.py
+586e67fd9b19d53ffa5f3a518ad2e751629a1571 tests/test_ui_f13_layout.py
 1a71270eeb961ea4b067dfc8fa028b0a229421fd tests/test_ui_f14_input_on_the_card.py
 a6c5ab656be3574a0afafa77761d7ba9f550b8e4 tests/test_ui_f15_pair_source.py
 a567d5f4542cc7354618483705f30e5dc14fb124 tests/test_ui_f16_stages.py
