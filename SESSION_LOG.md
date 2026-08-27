@@ -19,6 +19,68 @@
 
 ---
 
+## F42 B1：引擎認得區域線（2026-08-27）
+
+計畫書：[`docs/plans/F42-region-edges-plan-b.md`](docs/plans/F42-region-edges-plan-b.md)。
+
+### 判準只有一支：`recipe.is_region_edge`
+
+`dst_in` 那一格的型別是不是 `region_key` / `region_keys`（`step.REGION_TYPES`
+是那張表唯一的家）。畫布、排版、引擎、健檢四個地方之後都走它 —— 抄四份的話，
+改動其中一份不會讓任何測試變紅，而長歪的那一份會讓畫布跟引擎說出不同的話。
+
+**簽章跟工作單建議的不一樣**：`is_region_edge(edge, nodes, registry=None)`。
+一條 `Edge` 身上只有節點 **id**，而型別住在**下游那張卡**上，節點表非進來不可。
+收 `nodes` 而不是整份 `Recipe` 是為了 B2／B4 —— `RecipeModel.nodes` 與
+`Recipe.nodes` 都是 `Dict[str, RecipeNode]`，畫布不必為了呼叫它先組一份 Recipe。
+
+**不看 `src_out`**（那是「哪一個區域」，不是「這是不是區域線」）。
+**`dst_in` 沒填就一律不是區域線** —— 那是舊語意（埠空著只表達先後順序），
+判成區域線的話每一條舊格式的兩欄邊都會變成區域線。
+
+### 引擎與 `execution_order` 都一行沒改，改的是證據
+
+* `engine._explicit_bindings` 那段 `else: continue` 本來就跳過區域線。
+  **補測試釘住**，並把註解改成明說這是區域線唯一會走到的分支。
+  驗過會紅：把 `region_key` / `region_keys` 加進那個 `if`，兩條測試同時變紅。
+* `execution_order` 只看 `src`/`dst`（F9-1 的註解就寫著「不看埠」），
+  所以區域線進了 `edges` **自然生效**。這是方案 B 幾乎不用動引擎的原因。
+
+### 那個 bug 的完整形狀，現在是一條測試
+
+假卡片、左半 200 右半 100 的一張圖，route 排成 load → glv → **roi**
+（Region 卡在量測卡右邊）：
+
+| | `glv_mean` |
+|---|---|
+| 有區域線 | **200**（量左半） |
+| 沒有區域線 | **150**（量測卡先跑，`ctx.rois` 是空的 → 退回整張圖）|
+
+兩邊都 `ok=True`、都有數字。第七個「跑得完、有數字、而且是錯的」。
+
+> 用假卡片不用真的 `roi_reference`：真的那張要在影像上**找**得到條紋才吐得出
+> 區域，測試會同時測到「找得準不準」—— 而這裡要問的是順序。
+
+### 新 lint：`region-edge-no-port`（warning）
+
+`src_out` 空著的區域線排得出順序，所以它跑得完 —— 它只是沒講出量的是哪一塊。
+畫布上看得到一條接好的線，而那張卡實際上退回量整張圖。**warning 不是 error**：
+「那一格是空的」由 `not-connected` 講，這一條講的是**線本身沒講完**。
+埠空著的**影像**線不在範圍內（那是 F9-1 之前每一份檔案的常態）。
+
+### 一個誠實的註腳
+
+`is_region_edge` 裡那句 `if not edge.dst_in: return False` 是**規則寫出來**，
+不是最佳化 —— 底下的迴圈也找不到叫 `""` 的參數，所以拿掉它一條測試都不會紅。
+留著是因為讓契約只是「剛好沒有參數叫空字串」是一種靠巧合的正確。
+對應的那條測試因此在 docstring 裡明說它釘的是契約，不是那兩行。
+
+### 驗收
+
+`tests/test_region_edges_engine.py` 16 條，含一條掃**整個卡片庫**的
+（`region_input_specs()` 說是區域的那幾格，`is_region_edge` 一格都不准漏）。
+核心 2414 綠、62 支 UI 測試逐檔綠、黃金值三份逐項相同。
+
 ## F42 B0：同名區域變成 error（2026-08-27）
 
 方案 B 的第一段。計畫書：

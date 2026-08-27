@@ -327,7 +327,15 @@ def _explicit_bindings(recipe: Recipe, registry: Dict[str, Type[Step]]
         elif ptype == "image_key":
             local_name = str(params.get(e.dst_in, "") or "")
         else:
-            continue                   # 那個參數不是影像流，這條線不是資料流
+            # 那個參數不是影像流，這條線不是**影像**資料流。
+            #
+            # F42 B1 起這一條也是**區域線**唯一會走到的分支：區域依賴從此存進
+            # ``recipe.edges``（方案 B），而區域走的是 ``ctx.rois`` 那一套，
+            # 不是這張 ``(節點, 流名)`` 的影像表。放它進來的話這條線會被當成
+            # 一條指向不存在的流的影像線 —— 而那正是「跑得完、有數字、
+            # 而且是錯的」。判準是 :func:`recipe.is_region_edge`，
+            # 釘住這個行為的是 `tests/test_region_edges_engine.py`。
+            continue
         if local_name:
             out[(e.dst, local_name)] = (e.src, e.src_out)
     return out

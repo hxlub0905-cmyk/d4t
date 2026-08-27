@@ -39,14 +39,14 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
 from .expression import ExpressionError, parse_expression
 from .step import (
-    FEATURE_TYPES, GROUP_COMPARE, GROUP_ENHANCE, SCALE_LOT, ParamError, Step,
-    REGISTRY,
+    FEATURE_TYPES, GROUP_COMPARE, GROUP_ENHANCE, REGION_TYPES, SCALE_LOT,
+    ParamError, Step, REGISTRY,
 )
 
 __all__ = [
     "RecipeError", "RecipeNode", "ScoreSpec", "Edge", "Recipe",
     "RouteBy", "resolve_route", "route_miss_message",
-    "Issue", "execution_order", "validate",
+    "Issue", "execution_order", "validate", "is_region_edge",
 ]
 
 
@@ -481,6 +481,48 @@ class Edge:
         raise RecipeError(
             "an edge must be [from, to] or [from, from_port, to, to_param] — "
             "got %d item(s): %r" % (len(e), e))
+
+
+def is_region_edge(edge: "Edge", nodes: Dict[str, "RecipeNode"],
+                   registry: Optional[Dict[str, Type[Step]]] = None) -> bool:
+    """這條線是**區域線**嗎（F42 B1）——「``dst_in`` 指到的參數是不是區域」。
+
+    **全 repo 只准用這一支判斷。** 方案 B 之後區域依賴跟影像流住在同一個
+    ``recipe.edges`` 裡，而畫布、排版、引擎、健檢四個地方都要分得出兩種線。
+    這種「同一個判斷抄四份」的形狀，這個 repo 記過三次 ——
+    改動其中一份不會讓任何測試變紅，而長歪的那一份會讓畫布跟引擎說出不同的話。
+
+    判準只有一件事：``dst_in`` 那一格的型別是不是 ``region_key`` /
+    ``region_keys``（``step.REGION_TYPES`` 是那張表唯一的家）。**不看
+    ``src_out``**，因為 ``src_out`` 是「哪一個區域」，而這裡問的是「這是不是
+    區域線」—— 兩件事分開，一條還沒填來源的區域線才講得出它是什麼
+    （那條線由 ``region-edge-no-port`` 講話）。
+
+    **``dst_in`` 沒填就一律不是區域線。** 那不是漏判，是舊語意：埠空著的邊
+    「只表達先後順序」（見 :class:`Edge` 與 :func:`execution_order`），
+    分不出型別也就沒有區域可言。方案 B 因此規定區域線的 ``dst_in`` **必填**。
+
+    參數用 ``nodes`` 而不是整份 :class:`Recipe`：一條 :class:`Edge` 身上只有
+    節點 **id**，而型別住在下游那張**卡**上，所以節點表非進來不可 ——
+    而收 ``nodes`` 讓 UI 的 ``RecipeModel.nodes`` 原樣就餵得進來
+    （兩邊都是 ``Dict[str, RecipeNode]``），畫布才不必為了呼叫它先組一份
+    ``Recipe``。
+    """
+    if registry is None:
+        registry = REGISTRY
+    # 這一行是**規則寫出來**，不是最佳化：下面那個迴圈也找不到叫 "" 的參數，
+    # 所以拿掉它一條測試都不會紅。留著是因為「埠空著 = 只表達先後順序」是
+    # 契約的一部分，而讓它只是「剛好沒有參數叫空字串」是一種靠巧合的正確。
+    if not edge.dst_in:
+        return False
+    node = nodes.get(edge.dst)
+    step_cls = registry.get(node.step) if node is not None else None
+    if step_cls is None:
+        return False
+    for spec in step_cls.params:
+        if spec.name == edge.dst_in:
+            return spec.type in REGION_TYPES
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -2479,7 +2521,7 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     檢查項（code）：unknown-step / bad-param / not-configured（error）/
     half-configured（warning）/ unknown-node /
     unknown-route / cycle / missing-image / unknown-region /
-    duplicate-region（error）/ requires-ref /
+    duplicate-region（error）/ region-edge-no-port（warning）/ requires-ref /
     ambiguous-input / score-expr / unknown-feature（warning）/
     stale-feature-ref（warning）/ feature-collision（warning）/ bad-bins /
     uneven-treatment（warning）/ card-order（warning）。
@@ -2575,6 +2617,30 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                 code="half-configured", level="warning", node_id=nid,
                 title=f"{step_cls.label} will run, but check this",
                 detail=str(msg)))
+
+    # ---- 區域線的來源埠要填（F42 B1）----
+    # 方案 B 之後區域線跟影像線住在同一個 ``edges`` 裡，而它們**兩個埠的分工
+    # 不一樣**：``dst_in`` 說「落在哪一格」（沒有它連是不是區域線都判不出來，
+    # 見 :func:`is_region_edge`），``src_out`` 說「是哪一個區域」。
+    #
+    # ``src_out`` 空著的區域線**仍然排得出順序**（`execution_order` 只看
+    # src/dst），所以它跑得完 —— 它只是沒有講出量的是哪一塊。那正是這裡要
+    # 出聲的理由：畫布上看得到一條接好的線，而那張卡實際上退回量整張圖。
+    # warning 不是 error：真正「那一格是空的」由 `not-connected` / 卡片自己的
+    # `configuration_issues` 講，這一條講的是**線本身沒講完**。
+    for e in recipe.edges:
+        if e.src_out or not is_region_edge(e, recipe.nodes, registry):
+            continue
+        step_cls = registry.get(recipe.nodes[e.dst].step)
+        labels = {sp.name: (sp.label or sp.name) for sp in step_cls.params}
+        issues.append(Issue(
+            code="region-edge-no-port", level="warning", node_id=e.dst,
+            title=f"the region line into '{e.dst}' does not say which region",
+            detail=f"the line from '{e.src}' lands on "
+                   f"“{labels.get(e.dst_in, e.dst_in)}”, but it does "
+                   f"not name a region, so '{e.dst}' does not know which one "
+                   f"to use. Drag the line again from the region port (the "
+                   f"diamond) on '{e.src}' that has the name you want."))
 
     # ---- 一個輸入埠只能有一條線（F9-7）----
     # 引擎查資料從哪來的 key 是 ``(下游節點, 流名)``，所以兩條線落在同一個 key

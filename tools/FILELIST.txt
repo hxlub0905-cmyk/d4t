@@ -5,7 +5,7 @@
 7f8fbb1d62db846facd566719b5ad00ae1899ed1 AGENTS.md
 712d17a24ea9afafe35c2d92cfe668af2c81df70 CLAUDE.md
 7bddb3ce6ded46f4baaa8f030cc3c851653cc23c README.md
-1cc147df12f65308f843a244117a98db28f0df4c SESSION_LOG.md
+67af416d6065eff63a7b6c29548a6cf3b6f063a1 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 dd070bf096873de44432584d45772fb3d86ba8bb d4t/__main__.py
@@ -44,7 +44,7 @@ ab5031e7056134aa94c5551aba9b80a774b6397a d4t/core/export/report.py
 96efada1daef15d800ed3a38130b67f580e96cb0 d4t/core/ingest/klarf_core.py
 8853dcc140c1f95a6221e4205e318f8b0db6c68c d4t/core/ingest/pair_source.py
 44c4730891305a9d9ddecc14c48b8b67c9c4289e d4t/core/ingest/tiff_index.py
-0046c757bea0aab0d9276599d71424998ed8125b d4t/core/pipeline/__init__.py
+4811c803833a94c0a6a5dd48296842109f980300 d4t/core/pipeline/__init__.py
 3d748bab9c9744013f6f4996dedecc07dff7ab78 d4t/core/pipeline/batch.py
 3698713c994f58366c00d703c16182e16259b4a6 d4t/core/pipeline/cache.py
 ec7bdb58e7da611ac74f16b53e218f9a65476bdc d4t/core/pipeline/cellrois.py
@@ -52,9 +52,9 @@ ec7bdb58e7da611ac74f16b53e218f9a65476bdc d4t/core/pipeline/cellrois.py
 43a6d8d2f81aece00d00ba3e3c901187f2a721d8 d4t/core/pipeline/context.py
 fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 e8b99d43334b020fc97620cb8383c0b4b7dd126b d4t/core/pipeline/decide_tree.py
-606216762745f16cd739a8323cf532888d85e3be d4t/core/pipeline/engine.py
+ed5bf4124d958905db9ef8b7ce01a5168140fcb0 d4t/core/pipeline/engine.py
 7e2797dce8253240fcf45a27f57f28d2c246e272 d4t/core/pipeline/expression.py
-f3b009a11db91cb458f2cd0160bc1c0124f1ea43 d4t/core/pipeline/recipe.py
+48f5332427d9de01c011587818d21411cb081f40 d4t/core/pipeline/recipe.py
 c8d0548bb636b3fa29443fc4224d98f37eb685db d4t/core/pipeline/step.py
 3c0a96b02dc53ed3bc0fe827e453dac2ddd58b7b d4t/core/steps/__init__.py
 57a047c5f5e0e8e16522ca5a99f429923172c0ff d4t/core/steps/_util.py
@@ -125,7 +125,7 @@ f265bee418c00c58c1f1b1ca5916cba6929d9ffe docs/USING-CHARACTERIZATION.md
 0bf08282aa8b157016df4177eedf2ba8c328ef66 docs/plans/F39-f-test-audit.md
 85bdd915d65cea34657713d9e11804991616693f docs/plans/F40-stack-agreement.md
 4114c38479c435bdeed0da03512a20b21c1ecd08 docs/plans/F41-phase3-delete-algo-cards.md
-11e96b889d04aa49a10acc62117c1f0df24a05f5 docs/plans/F42-region-edges-plan-b.md
+e59cae92c42fd7ab786d0cb9509ca939019270d3 docs/plans/F42-region-edges-plan-b.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -220,6 +220,7 @@ b117748ce4f15a27917a8f63a4df92fb526d8525 tests/test_recipe.py
 8575b77bd20f56793446e1b16f856d1467da1fb5 tests/test_recipe_broken_files.py
 106e471baea9a64133ad8a0fd2dd0922e860d513 tests/test_recipe_roundtrip.py
 5c57bbf2e178c95f8e7890241bfcc5d20db2d889 tests/test_recipe_save.py
+27a3af567ff10b3dca99082b738e41b688a97a31 tests/test_region_edges_engine.py
 6bed1cf494394322eac820a8e78eff2733b68bf1 tests/test_region_facts.py
 d3fa83732570c833b01c2ec3c3f0dc6e2a98492b tests/test_region_names_are_unique.py
 a0683a2546cc8144d8b00ab9c4578daf519c12a0 tests/test_rename_fallout.py

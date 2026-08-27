@@ -32,6 +32,7 @@ from .recipe import (
     RouteBy,
     ScoreSpec,
     execution_order,
+    is_region_edge,
     resolve_route,
     route_miss_message,
     validate,
@@ -58,7 +59,7 @@ __all__ = [
     "SCALE_DEFECT", "SCALE_LOT",
     # recipe
     "Edge", "Recipe", "RecipeNode", "ScoreSpec", "Issue",
-    "validate", "execution_order", "RecipeError",
+    "validate", "execution_order", "RecipeError", "is_region_edge",
     # 分流（F23）
     "RouteBy", "resolve_route", "route_miss_message",
     # expression
