@@ -56,7 +56,9 @@ sys.path.insert(0, str(REPO / "tools"))
 
 import d4t.core.steps                                    # noqa: E402,F401
 from d4t.core.ingest.dataset import load_dataset          # noqa: E402
-from d4t.core.pipeline import Recipe, run_defect          # noqa: E402
+from d4t.core.pipeline import (                           # noqa: E402
+    Recipe, get_step, list_steps, run_defect, validate,
+)
 from d4t.core.pipeline.recipe import RecipeNode, ScoreSpec  # noqa: E402
 from d4t.core.pipeline.step import REGISTRY               # noqa: E402
 
@@ -832,3 +834,237 @@ def test_a_card_name_fits_on_one_line(key):
         "%s 的名字 %r 有 %d 個字元，超過現況的天花板 %d —— 卡片庫是一列一張卡"
         "讀下去的。把前提／細節搬進 help，名字只留「這張卡做什麼」。"
         % (key, label, len(label), MAX_LABEL_CHARS))
+
+
+# --------------------------------------------------------------------------- #
+# I7 每一張卡都要**接得起來**，而接不起來的組合要在 lint 就被講出來
+#
+# 2026-08-27（F39-B3）從 `test_ui_f7_9_feedback.py` 搬過來的四條。它們問的正是
+# 這個檔的問題 ——「不管哪一張卡，這件事都成立嗎」—— 而且**一條 Qt 都沒有用到**
+# （原本掛在 UI 檔上只是因為它們是那一輪的驗收）。搬過來換到兩件事：
+#
+# * 它們回到**核心批**（`--ignore-glob="*test_ui_*"`），不再吃 Qt 那 20 秒
+#   —— 四條合起來從 UI 批搬走，核心批只多 0.6 秒；
+# * 加第 N 張卡的人會在這裡被擋下 —— 這個檔就是「自動套用到 registry 裡每一
+#   張卡」的家。
+#
+# ⚠ `test_every_visible_card_can_be_wired_up_without_a_dead_end` 讀
+# `d4t.ui.scope.visible_steps`。`scope.py` 是一份**純資料模組**（只 import
+# typing），所以核心批 import 它不會把 Qt 拖進來 —— `test_no_qt_after_import`
+# 仍然是那條線的守門人。
+# --------------------------------------------------------------------------- #
+def _lint_recipe(seq):
+    """一串 step key -> 一份照順序接起來的 recipe（給下面兩條掃描用）。"""
+    nodes, order = {}, []
+    for i, key in enumerate(seq):
+        nid = "n%d" % i
+        nodes[nid] = RecipeNode(id=nid, step=key,
+                                params=get_step(key).validate_params({}))
+        order.append(nid)
+    return Recipe(recipe_id="combo", routes={"ebi_patch": order}, nodes=nodes,
+                  score=ScoreSpec(expr="0", threshold=0.0,
+                                  bins={"below": 0, "above": 1}))
+
+
+#: repo 裡**現在**還在出貨的 fixture recipe 全部住在這裡。
+#:
+#: 以前指的是 examples/recipes/（教學範例）。那個目錄 2026-08-16 移除了，
+#: 而 glob 對不存在的資料夾**回空清單、不丟例外** —— 下面那條測試會因此
+#: 「檢查了 0 份 recipe」然後綠燈通過。指到 fixtures 才有東西可檢查。
+FIXTURE_RECIPES = Path(__file__).resolve().parent / "fixtures" / "recipes"
+
+
+def test_a_measure_card_that_needs_a_region_nobody_defines_is_caught():
+    """以前這件事只有兩種下場，兩種都不好。
+
+    名字打錯 → 每顆 defect 跑到一半 StepError；而且以前有一個保留字 ``blob``，
+    上游沒有那張卡時會**安靜地改量整張圖** —— 跑得完、有數字、而且是錯的。
+    （那個保留字隨著 ROI 收斂成 Profile / Template / GDS 一起拿掉了。）
+    """
+    nodes = {
+        "load": RecipeNode("load", "load_patch", {}),
+        "glv": RecipeNode("glv", "glv_stats", {"roi": "nobody_defines_this"}),
+    }
+    recipe = Recipe(recipe_id="r", routes={"ebi_patch": ["load", "glv"]},
+                    nodes=nodes,
+                    score=ScoreSpec(expr="1", threshold=0.5,
+                                    bins={"below": 0, "above": 1}))
+    codes = [i.code for i in validate(recipe, kind="ebi_patch")
+             if i.level == "error"]
+    assert "unknown-region" in codes
+
+    # 補上一張 ROI 卡（Profile 定義 'nobody_defines_this'）之後就乾淨了
+    nodes["roi"] = RecipeNode("roi", "roi_reference",
+                              {"method": "stripes in the image",
+                               "roi_out": "nobody_defines_this"})
+    ok = validate(Recipe(recipe_id="r",
+                         routes={"ebi_patch": ["load", "roi", "glv"]},
+                         nodes=nodes,
+                         score=ScoreSpec(expr="1", threshold=0.5,
+                                         bins={"below": 0, "above": 1})),
+                  kind="ebi_patch")
+    assert [i.code for i in ok if i.level == "error"] == []
+
+
+def test_measuring_two_regions_warns_instead_of_silently_losing_one():
+    """特徵是**扁平的全域命名空間**，所以兩張同型別的量測卡會寫同一組名字。
+
+    「量中心 vs 量整片」是使用者一定會做的事，而以前的下場是：跑得完、
+    lint 全綠、後面那張把前面那張蓋掉，分數表達式**完全沒有辦法**指到前面
+    那個值。這是 warning 不是 error（同名覆寫有時是刻意的），但它必須看得見。
+    """
+    nodes = {
+        "load": RecipeNode("load", "load_patch", {}),
+        # 兩張 ROI 卡各給自己的 output_prefix —— 不然它們**自己**的特徵就先撞
+        # 起來了，而這條測的是下面那兩張量測卡的撞名。
+        "roiA": RecipeNode("roiA", "roi_reference",
+                           {"method": "stripes in the image",
+                            "roi_out": "center", "output_prefix": "a"}),
+        "roiB": RecipeNode("roiB", "roi_reference",
+                           {"method": "stripes in the image",
+                            "roi_out": "wide", "place": "crossing",
+                            "output_prefix": "b"}),
+        "glvA": RecipeNode("glvA", "glv_stats",
+                           {"roi": "center", "metrics": "glv_mean"}),
+        "glvB": RecipeNode("glvB", "glv_stats",
+                           {"roi": "wide", "metrics": "glv_mean"}),
+    }
+    recipe = Recipe(
+        recipe_id="two_roi",
+        routes={"ebi_patch": ["load", "roiA", "roiB", "glvA", "glvB"]},
+        nodes=nodes, score=ScoreSpec(expr="glv_mean", threshold=0.0,
+                                     bins={"below": 0, "above": 1}))
+    issues = validate(recipe, kind="ebi_patch")
+    collisions = [i for i in issues if i.code == "feature-collision"]
+    # 兩張卡都吐 `glv_mean` **與** `glv_pixels`（F18 第 4 步：樣本數跟著每一塊
+    # 走），所以撞的是兩個名字。多報一個不是雜訊 —— 兩個名字都真的被蓋掉。
+    assert len(collisions) == 2
+    assert all(i.level == "warning" for i in collisions), "撞名不擋執行，但要講出來"
+    assert all(i.node_id == "glvB" for i in collisions)
+    assert {"glv_mean", "glv_pixels"} == {
+        n for i in collisions for n in ("glv_mean", "glv_pixels")
+        if n in i.title}
+    assert not [i for i in issues if i.level == "error"]
+
+
+def test_every_recipe_that_ships_in_the_repo_passes_lint():
+    """repo 裡出貨的 recipe 自己必須全部過 lint。
+
+    以前掃的是 ``examples/recipes/``（教學範例，使用者的起點）。那些 2026-08-16
+    全部拿掉了，現在 repo 裡的 recipe 只剩 ``tests/fixtures/recipes/`` ——
+    它們是 e2e 的地基，接錯了的話一整批 e2e 會用「跑得完但每顆都失敗」的方式
+    壞掉。所以這條測試改了對象，要擋的事沒變。
+    """
+    paths = sorted(FIXTURE_RECIPES.glob("*.json"))
+    assert paths, "%s 是空的 —— 這條測試會變成什麼都沒檢查" % FIXTURE_RECIPES
+    bad = {}
+    for path in paths:
+        recipe = Recipe.load(str(path))
+        errs = [i for i in validate(recipe) if i.level == "error"]
+        if errs:
+            bad[path.name] = [(i.code, i.node_id) for i in errs]
+    assert not bad, bad
+
+
+def test_every_visible_card_can_be_wired_up_without_a_dead_end():
+    """每一張卡都要有一條「照著加就會通」的路，否則它在 UI 上就是死路。
+
+    這是回饋 5（「卡片操作與組合是否相互會有問題」）的機械化版本：對每張卡
+    找一組前置卡，驗證整條 route 過得了 lint。找不到 = 那張卡沒有人用得起來。
+    """
+    from d4t.ui.scope import visible_steps
+
+    # 前置鏈：能滿足所有 reads / regions 的最短已知順序
+    PREREQ = {
+        "subtract": ["align"],
+        "glv_stats": ["align", "subtract"],
+        "cd_measure": ["align", "subtract", "glv_stats"],
+        # GDS 那條路的上游不是影像處理，是**另一張 Input 卡**：label map 那條流
+        # 由 `load_sidecar` 產（配對在 ingest 層做，見 F11 Region-3 第 2 步）。
+        "roi_reference": ["load_sidecar"],
+        # 比較卡吃的是**區域**，所以上游要有一張出得了區域的 Region 卡。
+        # `roi_reference` 預設那一支（重複晶格）不需要任何外部資料。
+        "roi_compare": ["roi_reference"],
+        # 配對卡吐的那條流（配到的那顆的圖）—— 上游一樣是**另一張 Input 卡**。
+        "align_to": ["pair_source"],
+    }
+    keys = [d["key"] for d in visible_steps([s.describe() for s in list_steps()])]
+    dead_ends = {}
+    needs_setup = {}
+    for key in keys:
+        if key == "load_patch":
+            continue
+        seq = ["load_patch"] + PREREQ.get(key, []) + [key]
+        errs = [i for i in validate(_lint_recipe(seq), kind="ebi_patch")
+                if i.level == "error"]
+        # ``not-configured`` 不是接線問題（F7-13）：那張卡缺的是一份要另外匯入
+        # 的東西（模板是一張影像），不是缺上游。它的路是通的，只是還沒設定完 ——
+        # 所以這裡不算死路，但**訊息必須指得出路在哪**，否則它就真的是死路了。
+        needs = [i for i in errs if i.code == "not-configured"]
+        rest = [i for i in errs if i.code != "not-configured"]
+        # 「還沒設定完」歸給**發出它的那張卡**，不是這一輪的主角 —— 前置鏈裡的
+        # 卡也會講這句話（`align_to` 的上游 `pair_source` 就是），而下面要拿
+        # 「引號裡的字是不是這張卡的欄位」去驗它。歸錯卡等於拿 A 的欄位表去驗
+        # B 的訊息。
+        for i in needs:
+            nid = str(i.node_id or "")
+            owner = seq[int(nid[1:])] if nid[1:].isdigit() else key
+            if i.detail not in needs_setup.setdefault(owner, []):
+                needs_setup[owner].append(i.detail)
+        if rest:
+            dead_ends[key] = [(i.code, i.detail) for i in rest]
+    assert not dead_ends, "這些卡片沒有可行的組合：%s" % sorted(dead_ends)
+
+    # 「還沒設定完」的訊息**必須指向一個使用者按得到／填得到的東西**。
+    # 那有**兩種**形狀，兩種都算數（F11 Measure 的比較卡逼出了第二種）：
+    #
+    # * 一顆**鈕**（`…` 結尾）—— 缺的是要另外匯入的東西（模板是一張影像）；
+    # * 這張卡**自己的一格**（“引號”起來的欄位名）—— 缺的只是一個要挑的值，
+    #   而那一格就在旁邊。這種卡沒有鈕可以指，只認第一種的話它剩兩條路：
+    #   湊一個不存在的鈕，或者乾脆不講。
+    #
+    # 用「或」不是「改成」：舊的那條沒有錯，只是不完整 —— 換掉它會讓
+    # `roi_mask` 那種本來講得很好的訊息突然變成違規。
+    #
+    # 而**引號那一種要驗**：引號裡的字必須真的是這張卡的欄位名，或工具列上真的
+    # 有那顆鈕。不然「指向一個東西」會退化成「寫一句看起來像樣的話」。
+    import re as _re
+
+    studio_src = (Path(__file__).resolve().parent.parent
+                  / "d4t" / "ui" / "studio.py").read_text(encoding="utf-8")
+    # **第三種形狀：另一張卡的名字**（F14-1）。入口從工具列搬到卡片上之後，
+    # 「去哪裡做那件事」的答案是一張卡 —— 而卡名是使用者找得到的東西
+    # （卡片庫裡有、畫布上也有）。它跟前兩種一樣要驗：引的必須是**真的**
+    # 有那張卡，不然「指向一個東西」又退化成「寫一句看起來像樣的話」。
+    card_labels = {str(c.label) for c in list_steps()}
+    for key, details in needs_setup.items():
+        labels = {str(p.get("label") or p["name"])
+                  for p in get_step(key).describe()["params"]}
+        for detail in details:
+            quoted = _re.findall(r"“([^”]+)”", detail)
+            real = [q for q in quoted
+                    if q in labels or q in card_labels
+                    or ('"%s"' % q) in studio_src]
+            assert ("…" in detail or "..." in detail) or real, (
+                "%s 說它還沒設定完，但沒有指向任何一個按得到／填得到的東西"
+                "（要嘛一顆 `…` 結尾的鈕，要嘛“引號”起來的欄位名）：%s"
+                % (key, detail))
+            fake = [q for q in quoted if q not in real and not q.endswith("…")]
+            assert not fake, (
+                "%s 的訊息引了一個不存在的欄位／鈕：%s（這張卡的欄位：%s）"
+                % (key, fake, sorted(labels)))
+
+
+# --------------------------------------------------------------------------- #
+# I8 每一張卡都答得出「哪幾格是進階的」
+#
+# 2026-08-27（F39-B3）從 `test_ui_f8_advanced.py` 搬過來。它是那一檔裡唯一
+# 逐張套用到 registry 的一條，而且不碰 Qt —— 其餘十條問的是那個表單長什麼樣。
+# --------------------------------------------------------------------------- #
+def test_every_card_can_declare_advanced_rows():
+    """``describe()`` 一定要帶這個鍵 —— UI 讀不到就整批當成非進階，
+    而那是「安靜地失效」而不是「壞掉」。"""
+    for step in list_steps():
+        for spec in step().describe()["params"]:
+            assert "advanced" in spec, "%s.%s" % (step.key, spec["name"])
+            assert isinstance(spec["advanced"], bool)

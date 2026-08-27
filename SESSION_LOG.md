@@ -19,6 +19,41 @@
 
 ---
 
+## F39-B3：18 條不變量搬回性質住的地方（2026-08-27）
+
+判準是那一句：**它問的是「這個東西的性質」，還是「那一輪交付了什麼」。**
+
+| 從 | 幾條 | 搬到 |
+|---|---:|---|
+| `f7_9_feedback` | 4 | `test_card_invariants.py`（lint：指到沒人定義的區域、兩張量測卡撞名、出貨 recipe 過 lint、每張卡都接得起來）|
+| `f8_advanced` | 1 | `test_card_invariants.py`（`describe()` 一定帶 `advanced`）|
+| `f7_9_feedback` | 5 | `test_ui_canvas.py`（埠的座標系、每張卡都有埠可拉、沒接線的 recipe 會換行）|
+| `f8_ui_polish` | 3 | `test_ui_canvas.py`（拖過的位置存活、換 recipe 不繼承、`sceneRect` 跟著長大）|
+| `f7_9_feedback` | 3 | `test_ui_widgets.py`（每段自己的顏色 ΔE ≥ 25、色票是一套、卡片庫與畫布同色）|
+| `f19_cd` | 2 | `test_ui_widgets.py`（每顆 metric 都登記得到一張臉）|
+
+`f7_9_feedback` 25 → 13，跟清單估的一字不差。**七個「把 bug 放回去」都驗過，
+而且紅的都是新家**：`out_anchors_local` 回頭吐場景座標（`PITFALLS.md` 那條老
+坑）、不換行、拖過的位置被整理掉、六個階段又同一個顏色、一顆 metric 沒登記、
+`describe()` 不帶 `advanced`、`unknown-region` 那條 lint 拿掉。
+
+### 那四條 lint 一條 Qt 都沒用到
+
+它們掛在 UI 檔上**只是因為它們是那一輪的驗收**。搬進核心批之後四條合起來
+0.3 秒；`f7_9_feedback` 逐檔跑從 13 秒掉到 4.3 秒。
+
+> **「這條測試需要 Qt 嗎」跟「它是在哪一輪寫的」沒有關係。** 而檔名決定它跑在
+> 哪一批（B1 那一課），所以放錯地方的代價是每一次 CI 都在付。
+
+### ⚠ 搬家會製造孤兒 helper
+
+`f7_9` 搬走 12 條之後，五個 helper（`_lab`／`_delta_e`／`GROUPS`／
+`_canvas_with_two_nodes`／`_recipe`）與五個 import 一個呼叫者都沒有了，
+而**沒有任何測試會因為它們留著而紅**。一起清掉了 —— 那正是搬家之後最容易留在
+原地的東西。
+
+---
+
 ## F39-B2b：「純重複」只有 8 條，不是 25 條（2026-08-27）
 
 D 組裡真的**被別人整組蓋掉**的測試，逐條找到蓋掉它的那一支才刪。清單估 ~25，

@@ -13,6 +13,10 @@
 **收起來不是貶低它們。** ``smooth`` / ``sensitivity`` 在調不出來的那一天是唯一
 的出路，而那一天使用者最需要它們就在手邊 —— 所以是摺疊，不是刪掉，而且按鈕上
 要講清楚**還有幾格**。
+
+⚠ **F39-B3（2026-08-27）把 ``test_every_card_can_declare_advanced_rows`` 搬到
+``tests/test_card_invariants.py``** —— 它是這一檔裡唯一逐張套用到 registry 的
+一條（而且不碰 Qt）。其餘問的是那個表單長什麼樣，留在這裡。
 """
 from __future__ import annotations
 
@@ -138,13 +142,6 @@ def test_the_count_only_counts_rows_that_apply_right_now(qapp):
 # --------------------------------------------------------------------------- #
 # 3. 這是每張卡都用得到的機制，不是 roi_cross 的私有補丁
 # --------------------------------------------------------------------------- #
-def test_every_card_can_declare_advanced_rows(qapp):
-    """``describe()`` 一定要帶這個鍵 —— UI 讀不到就整批當成非進階，
-    而那是「安靜地失效」而不是「壞掉」。"""
-    for step in list_steps():
-        for spec in step().describe()["params"]:
-            assert "advanced" in spec, "%s.%s" % (step.key, spec["name"])
-            assert isinstance(spec["advanced"], bool)
 
 
 def test_advanced_rows_still_have_their_value(form):

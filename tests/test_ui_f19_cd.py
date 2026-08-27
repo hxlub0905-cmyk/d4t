@@ -2,6 +2,11 @@
 
 **一律讀 API，不讀畫素**（`summary()` / `mark_count()` / `metric_face()`）——
 畫素比對在這個 repo 只用在「兩顆圖示長得一不一樣」那種地方。
+
+⚠ **F39-B3（2026-08-27）把兩條 metric-face 搬到 ``tests/test_ui_widgets.py``**
+（``every_report_metric_…_has_a_face`` / ``every_size_metric_…_has_a_face``）。
+它們逐一套用到卡片自己宣告的 ``REPORT_CHOICES`` / ``SIZE_CHOICES``，所以加一顆
+metric 的人會自動被納管 —— 那是 ``widgets`` 的性質，不是 CD 那一輪的驗收。
 """
 from __future__ import annotations
 
@@ -120,7 +125,6 @@ def make_panel(qapp, ctx, params, batch=None):
     return insp
 
 
-
 def paint_calls(insp):
     """把面板畫進一張離屏圖，回它畫了幾列（`_paint_one` 被呼叫幾次）。
 
@@ -211,22 +215,6 @@ def test_a_panel_with_no_data_says_what_to_do(qapp):
 # --------------------------------------------------------------------------- #
 # 膠囊：引擎說有哪些，UI 說長什麼樣
 # --------------------------------------------------------------------------- #
-def test_every_report_metric_the_cd_card_offers_has_a_face(qapp):
-    """卡片多宣告一顆而 UI 沒登記，畫出來是一顆沒有分群、標籤是原始 id 的膠囊
-    —— 跑得完、看得到、而且醜，也就是不會有人回報（同 F18 的規矩）。"""
-    from d4t.ui import widgets as widgets_mod
-
-    groups = set()
-    for mid in REPORT_CHOICES:
-        group, label, glyph = widgets_mod.metric_face(mid)
-        assert group in widgets_mod.METRIC_GROUP_ORDER, mid
-        assert group != "Other", "%s 沒有登記在 METRIC_GROUPS" % mid
-        assert label and not label.startswith("cd_"), mid
-        assert glyph in widgets_mod.METRIC_GLYPHS, mid
-        groups.add(group)
-    # **粗糙度那一群要分得出來** —— 它只有在量測線夠多時才有意義，而那是
-    # 「為什麼我的 LER 是 0」的答案。
-    assert groups == {"Width", "Roughness", "Vs target"}
 
 
 def test_the_direction_and_target_rows_are_buttons_not_english(qapp):
@@ -329,22 +317,6 @@ def test_the_blob_panel_draws_without_blowing_up(qapp):
                                  for i in range(30)])
         insp.resize(560, 190)
         insp.render(QPixmap(560, 190))
-
-
-def test_every_size_metric_the_card_offers_has_a_face(qapp):
-    from d4t.ui import widgets as widgets_mod
-
-    groups = set()
-    for mid in SIZE_CHOICES:
-        group, label, glyph = widgets_mod.metric_face(mid)
-        assert group in widgets_mod.METRIC_GROUP_ORDER, mid
-        assert group != "Other", "%s 沒有登記在 METRIC_GROUPS" % mid
-        assert label and not label.startswith("cd_"), mid
-        assert glyph in widgets_mod.METRIC_GLYPHS, mid
-        groups.add(group)
-    # **不要用 ``Shape``** —— 那個字在 GLV 那邊已經是偏度那一群了。
-    assert groups == {"Size", "Outline"}
-    assert "Shape" not in groups
 
 
 def test_the_shape_fork_is_two_buttons_not_a_dropdown(qapp):

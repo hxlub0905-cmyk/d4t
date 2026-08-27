@@ -268,7 +268,7 @@ Phase 3 要刪 `feature_math` / `feature_fill`：
 | **B1** | ✅ **2026-08-27 做完。** A 組六支改名 ＋ 一起改文件。測試程式碼一行不動（只有每一支開頭那行 F 編號註記換成「常駐 ＋ 從哪個舊名改來的」）。動手時修正了兩個少了 `test_ui_` 前綴的新名（見 §3 A 底下那一段）| 0 | 低。先做，它把「哪些是常駐」變成看得出來的 |
 | **B2** | ✅ **2026-08-27 做完 E 組那一半**：`f7_10`（6 條）與 `f7_14`（9 條）整支刪，救兩條進 `test_ui_canvas.py`。**D 組那一半退回去了** —— 見下 | 15 刪、2 救 | 低（逐條驗過「把 bug 放回去誰紅」）|
 | **B2b** | ✅ **2026-08-27 做完。** D 組裡**純重複**的 —— 逐條找到蓋掉它的那一支才刪。實得 **8 條，不是 ~25**（見 §8）| 8 | 低 |
-| **B3** | C 組的「搬進 `test_card_invariants.py`／`test_ui_widgets.py`／`test_ui_canvas.py`」 | ~30 搬 | 中 |
+| **B3** | ✅ **2026-08-27 做完。** C 組的「搬進 `test_card_invariants.py`／`test_ui_widgets.py`／`test_ui_canvas.py`」。實得 **18 條搬**（見 §9）| 18 搬 | 中 |
 | **B4** | C 組新開的三個常駐檔 ＋ 對應刪除 | ~120 | 中高（碰到四個零覆蓋模組）|
 | **B5** | D 組其餘刪除 ＋ 文件收尾 | ~80 | 中 |
 
@@ -356,3 +356,48 @@ coverage combine        # 合起來之後 CoverageData.contexts_by_lineno() 問�
 ⚠ **行覆蓋不是斷言覆蓋。** 跑到那一行不代表有問它對不對 —— 這個 repo 有過一支
 恆綠零斷言的測試（§4.1），它的行覆蓋很漂亮。所以覆蓋只當篩子，判決仍然是
 「把 bug 放回去誰紅」。
+
+---
+
+## 9. B3 的結果：18 條搬家，7 個「把 bug 放回去」
+
+搬的判準是那一句：**它問的是「這個東西的性質」，還是「那一輪交付了什麼」。**
+
+| 從 | 幾條 | 搬到 | 搬的是什麼 |
+|---|---:|---|---|
+| `f7_9_feedback` | 4 | **`test_card_invariants.py`** | lint：指到沒人定義的區域、兩張量測卡撞名、出貨 recipe 過 lint、每張卡都接得起來 |
+| `f8_advanced` | 1 | **`test_card_invariants.py`** | `describe()` 一定帶 `advanced` 這個鍵 |
+| `f7_9_feedback` | 5 | **`test_ui_canvas.py`** | 埠畫在 `boundingRect` 裡、場景／本地座標的關係、每張卡都有埠可拉、埠標籤＝流名、沒接線的 recipe 會換行 |
+| `f8_ui_polish` | 3 | **`test_ui_canvas.py`** | 拖過的位置在重建／彈出視窗後還在、換 recipe 不繼承、拖出邊界 `sceneRect` 跟著長大 |
+| `f7_9_feedback` | 3 | **`test_ui_widgets.py`** | 每一段自己的顏色（ΔE ≥ 25）、色票是一套（明度差 ≤ 15）、卡片庫與畫布同色 |
+| `f19_cd` | 2 | **`test_ui_widgets.py`** | 卡片宣告得出來的每一顆 metric，UI 都登記得到一張臉 |
+
+`f7_9_feedback` 25 → 13（跟 §3 C 估的一字不差）。
+
+### 七個「把 bug 放回去」，紅的都是**新家**
+
+| 放回去的 bug | 誰紅 |
+|---|---|
+| `out_anchors_local()` 回頭吐場景座標（`PITFALLS.md` 那條老坑）| `test_ui_canvas` |
+| 沒接線的 recipe 不換行（排成一條 2500px 的橫列）| `test_ui_canvas` |
+| 重建畫布時把拖過的位置整理掉 | `test_ui_canvas` |
+| 六個階段又退回同一個顏色（回饋原話的那個 bug）| `test_ui_widgets` |
+| CD 卡的一顆 metric 忘了在 `METRIC_GROUPS` 登記 | `test_ui_widgets` |
+| `describe()` 不再帶 `advanced` 這個鍵 | `test_card_invariants` |
+| `unknown-region` 那條 lint 拿掉 | `test_card_invariants` |
+
+### 順帶量到的：那四條 lint 一條 Qt 都沒用到
+
+它們掛在 UI 檔上**只是因為它們是那一輪的驗收**。搬進核心批之後四條合起來
+0.3 秒；留在原地時它們跟著 `f7_9` 那個 `StudioWindow` 行程一起算。
+`f7_9_feedback` 逐檔跑從 13 秒掉到 4.3 秒。
+
+> **「這條測試需要 Qt 嗎」跟「它是在哪一輪寫的」沒有關係。** 而檔名決定它跑在
+> 哪一批（B1 那一課），所以放錯地方的代價是每一次 CI 都在付。
+
+### ⚠ 搬家會製造孤兒 helper
+
+`f7_9` 搬走 12 條之後，`_lab` / `_delta_e` / `GROUPS` / `_canvas_with_two_nodes`
+/ `_recipe` 五個 helper 一個呼叫者都沒有了，`Recipe` / `RecipeNode` / `ScoreSpec`
+/ `validate` / `GROUP_ORDER` 五個 import 也是。**沒有任何測試會因為它們留著而
+紅** —— 那正是搬家之後最容易留下的東西。這一輪一起清掉了。
