@@ -40,7 +40,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Type
 from .expression import ExpressionError, parse_expression
 from .step import (
     FEATURE_TYPES, GROUP_COMPARE, GROUP_ENHANCE, REGION_TYPES, SCALE_LOT,
-    ParamError, Step, REGISTRY,
+    SINGLE_IMAGE_KINDS, ParamError, Step, REGISTRY,
 )
 
 __all__ = [
@@ -1296,7 +1296,9 @@ def _migrate_template_regions(nodes: Dict[str, "RecipeNode"]) -> None:
 
 
 #: 單張影像的 route（一顆一張圖）—— 這幾條上的 `load_patch` 要換成 `load_single`。
-_SINGLE_IMAGE_KINDS = ("rsem", "folder")
+#: PR-2 起定義搬到 `step.SINGLE_IMAGE_KINDS`（`Step.kind_issues` 的判準要
+#: 從卡片那邊 import 得到，而卡片不 import recipe）；這裡留舊名給遷移用。
+_SINGLE_IMAGE_KINDS = SINGLE_IMAGE_KINDS
 
 
 def _migrate_split_load_cards(nodes: Dict[str, "RecipeNode"],
@@ -2539,7 +2541,13 @@ def execution_order(recipe: Recipe, kind: str) -> List[str]:
 # ---------------------------------------------------------------------------
 @dataclass
 class Issue:
-    """一條驗證發現：``level`` 為 "error" 或 "warning"。"""
+    """一條驗證發現：``level`` 為 "error"、"warning" 或 "info"。
+
+    ``info``（PR-2）是「值得知道、但連 warning 都算不上」的那一級：畫布
+    **不**為它畫徽章（只進卡片的 tooltip 與 CLI 的清單）、run 之前的提示
+    也不攔 —— 一條常駐的 warning 會被學會忽略，而真的那一條也跟著被忽略
+    （推廣鐵則）。
+    """
     code: str
     level: str
     node_id: Optional[str]
@@ -2789,7 +2797,9 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     region-has-no-line（warning）/ requires-ref /
     ambiguous-input / score-expr / unknown-feature（warning）/
     stale-feature-ref（warning）/ feature-collision（warning）/ bad-bins /
-    uneven-treatment（warning）/ card-order（warning）。
+    uneven-treatment（warning）/ card-order（warning），加上各卡
+    `Step.kind_issues` 宣告的 kind 條件項（PR-2；GLV 的
+    center-on-big-image（warning）/ each-box-on-patch（info））。
     """
     if registry is None:
         registry = REGISTRY
@@ -3109,6 +3119,16 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                            f"comes from the image lines - but check that the "
                            f"two cards really are meant to depend on each "
                            f"other that way."))
+
+            # 只在某種資料型別上成立的發現（PR-2）—— 判準在卡片上
+            # （`Step.kind_issues`）：`configuration_issues` 看不到 kind，
+            # 而「這組設定對不對」有時取決於一顆 defect 拿到的是置中的
+            # patch 還是一張大圖。
+            for code, level, title, detail in step_cls.kind_issues(p, str(k)):
+                issues.append(Issue(
+                    code=str(code), level=str(level), node_id=nid,
+                    title=str(title),
+                    detail="route '%s': %s" % (k, detail)))
 
             # 吃**特徵**的卡（F16，Algo 段）：指到一個沒人算出來的數字，在跑
             # 之前就講。沒有這一段的話它要等**每一顆 defect 都失敗**才看得出來

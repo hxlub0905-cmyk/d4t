@@ -276,6 +276,16 @@ def region_color() -> QColor:
     return QColor(theme.group_hex("region"))
 
 
+def badge_paints(level: str) -> bool:
+    """這一級 lint 發現在卡片右上角畫不畫圓標（PR-2）。
+
+    ``info`` 不畫：那一級是「值得知道、但連 warning 都算不上」——
+    畫了琥珀點，它跟 warning 就分不開，而一顆常駐的點會被學會忽略
+    （推廣鐵則）。info 只住在卡片的 tooltip 與 CLI 的清單裡。
+    """
+    return str(level) in ("error", "warning")
+
+
 def _diamond(centre: QPointF, r: float) -> QPainterPath:
     """以 ``centre`` 為心、半徑 ``r`` 的菱形（區域埠的形狀）。"""
     path = QPainterPath(centre + QPointF(0.0, -r))
@@ -800,7 +810,7 @@ class _NodeItem(QGraphicsItem):
         return str(self.info.get("problem", "") or "")
 
     def _paint_badge(self, p: QPainter, body: QRectF) -> None:
-        """右上角一個小圓標。錯誤紅、警告琥珀。
+        """右上角一個小圓標。錯誤紅、警告琥珀、**info 不畫**。
 
         文字用 ``!`` 而不是圖形：這個標記只有 14 px，任何再細一點的形狀在
         100% 縮放下都會糊成一個點。
@@ -809,6 +819,8 @@ class _NodeItem(QGraphicsItem):
         if not why:
             return
         level = str(self.info.get("problem_level", "error"))
+        if not badge_paints(level):
+            return
         col = QColor(TOKENS["danger_text"] if level == "error"
                      else TOKENS["warning"])
         r = 7.0

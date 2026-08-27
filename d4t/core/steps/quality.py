@@ -37,6 +37,16 @@ class FocusQualityStep(MultiSourceStep):
         q = algo_quality.compute_quality(img)
         if q.get("error"):
             raise StepError(self.key, f"image quality computation failed: {q['error']}")
+        # 儀表用（PR-2）：同一份數字順手留在 meta，面板**選到卡就有**（單顆
+        # 立即顯示），不必等跑完一批 —— 跟 `glv_stats._note_distribution` 同
+        # 一條路。批次的分布照舊由 trial_results 補。
+        ctx.meta.setdefault("focus", []).append({
+            "stream": str(p.get(self.CURRENT_STREAM, "") or ""),
+            "prefix": str(p.get(self.CURRENT_PREFIX, "") or ""),
+            "lapvar": float(q["laplacian_var"]),
+            "tenengrad": float(q["tenengrad"]),
+            "fft": float(q["fft_hf_ratio"]),
+        })
         return {
             "focus_lapvar": q["laplacian_var"],
             "focus_tenengrad": q["tenengrad"],

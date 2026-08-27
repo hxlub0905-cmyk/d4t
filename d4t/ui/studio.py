@@ -1734,14 +1734,16 @@ class StudioWindow(QMainWindow):
             issues = self.model.validate()
         except Exception:                        # noqa: BLE001 — 顯示用，壞了就沒標記
             return out
+        rank = {"error": 0, "warning": 1, "info": 2}
         for issue in issues:
             nid = getattr(issue, "node_id", None)
             if not nid:
                 continue
             prev = out.get(nid)
-            # error 蓋過 warning；同級的取先出現的那則
-            if prev is not None and not (prev[1] == "warning"
-                                         and issue.level == "error"):
+            # error > warning > info；同級的取先出現的那則。info 也進表
+            # （tooltip 要看得到），只是畫布不為它畫點（`canvas.badge_paints`）。
+            if prev is not None and (rank.get(str(issue.level), 1)
+                                     >= rank.get(prev[1], 1)):
                 continue
             out[nid] = (str(issue.detail or issue.title), str(issue.level))
         return out

@@ -54,6 +54,15 @@ _SCALES = (SCALE_DEFECT, SCALE_LOT)
 #: 讓它們落在快取 checkpoint 之後。現在那件事由宣告推導，這個值可以講實話了。
 CATEGORY_BATCH = "batch"
 
+#: 資料型別（route 的 kind）按「一顆 defect 拿到什麼」分兩群（PR-2）：
+#: patch 形＝機台以 defect 為中心裁切的小圖（`_center` 有幾何意義）；
+#: 單張形＝一顆一張大圖，缺陷可能在任何位置。`Step.kind_issues` 的判準用
+#: 這兩張表。⚠ 跟 `ui/scope.py` 的 `SUPPORTED_KINDS` 要合起來剛好蓋滿 ——
+#: core 不能 import ui，所以由一條 UI 測試 cross-check（第五種 kind 出現時
+#: 兩邊一起紅，而不是安靜地漏掉分群）。
+PATCH_KINDS = ("ebi_patch", "tiff_stack")
+SINGLE_IMAGE_KINDS = ("rsem", "folder")
+
 # --------------------------------------------------------------------------- #
 # 流程階段（F7-3）—— 卡片庫的分組依據
 # --------------------------------------------------------------------------- #
@@ -1003,6 +1012,19 @@ class Step(ABC):
     @classmethod
     def configuration_hints(cls, params: Dict[str, Any]) -> List[str]:
         """設定得不完整、但**跑得起來**的那些（空 list = 沒問題）。"""
+        return []
+
+    @classmethod
+    def kind_issues(cls, params: Dict[str, Any],
+                    kind: str) -> List[Tuple[str, str, str, str]]:
+        """只在某種資料型別上才成立的發現：``(code, level, title, detail)``。
+
+        `configuration_issues` / `configuration_hints` 看不到 route 的 kind
+        —— 「這組設定對不對」有時取決於「一顆 defect 拿到的是置中的 patch
+        還是一張大圖」（`PATCH_KINDS` / `SINGLE_IMAGE_KINDS`）。這是那一半。
+        ``level`` 用 "error" / "warning" / "info"；`validate` 逐 route 呼叫，
+        detail 會被冠上 route 名。
+        """
         return []
 
     # ---- 跨顆那一層（F16）--------------------------------------------------

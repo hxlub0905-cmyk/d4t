@@ -98,11 +98,12 @@ import numpy as np
 from ..algo import glv as algo_glv
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, ParamSpec, Step, StepError, register_step, GROUP_MEASURE,
+    CATEGORY_ALGO, PATCH_KINDS, SINGLE_IMAGE_KINDS, ParamSpec, Step,
+    StepError, register_step, GROUP_MEASURE,
 )
 from ._util import (
-    MultiSourceStep, OTHERS_SUFFIX, output_prefix_spec, parse_key_list,
-    prefix_features, prefix_names, roi_pixels,
+    CENTRE_SUFFIX, MultiSourceStep, OTHERS_SUFFIX, output_prefix_spec,
+    parse_key_list, prefix_features, prefix_names, roi_pixels,
 )
 
 _P_ALIAS = re.compile(r"^glv_p(\d+)$")
@@ -619,6 +620,44 @@ class GlvStatsStep(MultiSourceStep):
         if int(params.get("min_pixels") or 0):
             return [("glv_ok", False)]  # 0 = 像素太少，這一塊的數字不能信
         return []
+
+    @classmethod
+    def kind_issues(cls, params: Dict[str, Any],
+                    kind: str) -> List[Tuple[str, str, str, str]]:
+        """只在某種資料型別上成立的兩條（PR-2；判準見 `Step.kind_issues`）。
+
+        `_center` 的幾何意義來自「patch 是機台以 defect 為中心裁切的」——
+        一顆一張大圖的 route（rsem / folder）沒有這個保證，中央那格只是
+        剛好在中間的格。反過來，patch 上缺陷位置是已知的，開 each box 去
+        「找」最異常的格，worst 可能被髒污的參照格帶走。
+        """
+        out: List[Tuple[str, str, str, str]] = []
+        rois = [r.strip() for r in
+                str(params.get(cls.REGION) or "").split(",") if r.strip()]
+        centred = [r for r in rois if r.endswith(CENTRE_SUFFIX)]
+        if kind in SINGLE_IMAGE_KINDS and centred:
+            base = centred[0][:-len(CENTRE_SUFFIX)]
+            out.append((
+                "center-on-big-image", "warning",
+                "'_center' has no meaning on a whole-image route",
+                "“Region” is wired to '%s', but on this route one defect is "
+                "one big image - nothing guarantees the defect sits in the "
+                "centre box, so '_center' is just whichever box happens to "
+                "be in the middle. Wire the plain '%s' port instead and set "
+                "“Boxes in the region” to 'each box' so the card finds the "
+                "odd box for you." % (centred[0], base)))
+        if (kind in PATCH_KINDS
+                and str(params.get("across_boxes", POOLED)) == EACH_BOX
+                and not centred):
+            out.append((
+                "each-box-on-patch", "info",
+                "on a patch the defect's box is already known",
+                "“Boxes in the region” is 'each box', which hunts for the "
+                "most unusual box - but a patch is cut centred on the "
+                "defect, so the '_center' port already is the defect's box. "
+                "A dirty box among the others can drag the hunt somewhere "
+                "else. Are you sure you do not want the '_center' port?"))
+        return out
 
     @classmethod
     def legacy_feature_renames(cls, params: Dict[str, Any]) -> Dict[str, str]:
