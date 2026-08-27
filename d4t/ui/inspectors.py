@@ -48,6 +48,7 @@ from ..core.steps._util import CLIP_FRAC, PAIR_FEATURES
 from ..core.steps.cd import _BLOB_REASONS as _CD_BLOB_REASONS
 from ..core.steps.cd import reasons_in_words as _cd_reasons_in_words
 from ..core.steps.denoise import HOT_FRAC, REMOVED_OVER_NOISE
+from . import region_words
 from . import theme
 from .theme import TOKENS, region_hex
 
@@ -1418,6 +1419,14 @@ class GlvInspector(Inspector):
                 out[str(rec.get("target") or "")] = str(rec.get("reference") or "")
         return out
 
+    @staticmethod
+    def _intent_name(region: str) -> str:
+        """接了 ``_center`` 時用意圖語言講那一塊（PR-2；字典住 `region_words`，
+        跟畫布的埠 hover 同一份）。原名括號保留 —— 意圖語言是翻譯不是改名，
+        使用者要對得回畫布上那顆埠。"""
+        phrase = region_words.INTENT_PHRASE.get(region_words.role_of(region))
+        return "%s (%s)" % (phrase, region) if phrase else region
+
     def tab_title(self) -> str:                # noqa: D102
         rows = self.rows()
         if not rows:
@@ -1431,8 +1440,9 @@ class GlvInspector(Inspector):
         if versus:
             # 「誰跟誰比」比「在哪條流上」重要 —— 兩個都塞得下的話字會太長，
             # 而流名在比較的那一邊已經寫出來了（`epi_others @ ref`）。
-            return "%s · %s vs %s" % (self.title, who, versus)
-        return "%s · %s on %s" % (self.title, who,
+            return "%s · %s vs %s" % (self.title, self._intent_name(who),
+                                      versus)
+        return "%s · %s on %s" % (self.title, self._intent_name(who),
                                   str(first.get("stream") or "?"))
 
     def tab_tooltip(self) -> str:              # noqa: D102
@@ -1442,10 +1452,11 @@ class GlvInspector(Inspector):
         pairs = self._pairs()
         bits = []
         for r in rows:
-            who = str(r.get("region") or "the whole image")
-            line = "%s on %s" % (who, r.get("stream") or "?")
-            if pairs.get(who):
-                line += "  compared against %s" % pairs[who]
+            raw = str(r.get("region") or "the whole image")
+            line = "%s on %s" % (self._intent_name(raw),
+                                 r.get("stream") or "?")
+            if pairs.get(raw):
+                line += "  compared against %s" % pairs[raw]
             if int(r.get("boxes") or 0) > 1:
                 line += "  (%d boxes, one at a time)" % int(r.get("boxes") or 0)
             bits.append(line)

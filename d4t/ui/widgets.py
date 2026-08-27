@@ -71,6 +71,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.algo import glv as algo_glv
+from . import region_words
 from . import theme
 from .theme import TOKENS, region_hex
 
@@ -2587,8 +2588,35 @@ class ProfilePanel(QWidget):
         f = p.font()
         f.setPointSizeF(max(7.0, f.pointSizeF() - 1.0))
         p.setFont(f)
-        p.drawText(QRectF(rect.left() + 6, rect.top() + 2, rect.width() - 12, 14),
-                   Qt.AlignVCenter | Qt.AlignLeft, self.summary())
+        strip = QRectF(rect.left() + 6, rect.top() + 2, rect.width() - 12, 14)
+        p.drawText(strip, Qt.AlignVCenter | Qt.AlignLeft, self.summary())
+        # 斜線的圖例（PR-2）：畫在同一條 14px 摘要帶的**右側**（那裡是空的，
+        # 零幾何改動）。畫一小塊真的斜線 —— 「▨」那種字元在不同字型上長不
+        # 一樣，而畫的這一塊跟圖上的斜線是**同一支筆**。會撞到左邊的摘要字
+        # 就整組不畫（圖例是輔助，摘要是主角）。
+        if self._data.get("blocked"):
+            legend = region_words.LEFT_OUT_LEGEND
+            fm = QFontMetricsF(p.font())
+            need = 12.0 + 4.0 + fm.horizontalAdvance(legend)
+            used = fm.horizontalAdvance(self.summary())
+            if used + 12.0 + need <= strip.width():
+                sw = QRectF(strip.right() - need, strip.top() + 3.0, 12.0, 8.0)
+                hatch = QColor(TOKENS["text_secondary"])
+                hatch.setAlpha(90)
+                p.save()
+                p.setPen(QPen(hatch, 1.0))
+                p.setClipRect(sw)
+                x = sw.left() - sw.height()
+                while x < sw.right():
+                    p.drawLine(QPointF(x, sw.bottom()),
+                               QPointF(x + sw.height(), sw.top()))
+                    x += 4.0
+                p.restore()
+                p.setPen(QColor(TOKENS["text_secondary"]))
+                p.drawText(
+                    QRectF(sw.right() + 4.0, strip.top(),
+                           strip.right() - sw.right() - 4.0, strip.height()),
+                    Qt.AlignVCenter | Qt.AlignLeft, legend)
         p.end()
 
     def _paint_ruler(self, p: QPainter, plot: QRectF, to_x) -> None:

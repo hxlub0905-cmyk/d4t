@@ -49,9 +49,11 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMenu,
+    QToolTip,
     QWidget,
 )
 
+from . import region_words
 from . import theme
 from .theme import TOKENS
 from .widgets import CARD_MIME, IconButton, draw_group_icon, small_button
@@ -1881,6 +1883,45 @@ class PipelineCanvas(QGraphicsView):
                 str(src_id), str(dst_id), self.stream_of(src, int(port)),
                 str(specs[i].get("name", "")) if specs else "")
 
+    def _port_tip_at(self, view_pos) -> str:
+        """游標下那顆**區域埠**（菱形）的一句話（不在埠上／影像埠回 ``""``）。
+
+        字典住在 `region_words`（跟 GLV 面板標題、Profile 圖例同一份）。
+        掛在 view 而不是節點上：`_NodeItem` 故意不收 hover 事件（收了會把
+        邊的 × 鈕吃掉，`test_ui_canvas_cut_button` 守著），而 view 的
+        mouse-move 本來就在追 hover（`_sync_hover_node`）。純函式好測 ——
+        測試打這一支，不必真的擠出一顆 QToolTip。
+        """
+        top = None
+        for item in self.items(view_pos):
+            if isinstance(item, _NodeItem):
+                top = item
+                break
+        if top is None:
+            return ""
+        local = top.mapFromScene(self.mapToScene(view_pos))
+
+        def tip(name: str) -> str:
+            name = str(name or "")
+            if not name:
+                return ""
+            return "%s — %s" % (
+                name, region_words.PORT_HOVER[region_words.role_of(name)])
+
+        i = top.out_port_at(local)
+        if i is not None:
+            specs = top.out_specs()
+            if 0 <= i < len(specs) and specs[i].get("kind") == "region":
+                return tip(specs[i].get("name"))
+            return ""
+        i = top.in_port_at(local)
+        if i is not None:
+            specs = top.in_specs()
+            if 0 <= i < len(specs) and specs[i].get("kind") == "region":
+                # 輸入埠講**接進來的那個名字**（有線才有名字；沒接就沒話講）。
+                return tip(specs[i].get("stream"))
+        return ""
+
     # ---- Qt hooks ---------------------------------------------------------
     def _sync_hover_node(self, view_pos) -> None:
         """讓游標下最上面那張卡亮起 hover 邊框。"""
@@ -1930,6 +1971,17 @@ class PipelineCanvas(QGraphicsView):
             e.accept()
             return
         self._sync_hover_node(self._view_pos(e))
+        # 區域埠的一句話（PR-2）：只在真的落在菱形上時出現，離開就收 ——
+        # 一顆黏著不走的 tooltip 比沒有 tooltip 更煩。
+        port_tip = self._port_tip_at(self._view_pos(e))
+        if port_tip:
+            at = (e.globalPosition().toPoint()
+                  if hasattr(e, "globalPosition") else e.globalPos())
+            QToolTip.showText(at, port_tip, self)
+            self._port_tip_shown = True
+        elif getattr(self, "_port_tip_shown", False):
+            QToolTip.hideText()
+            self._port_tip_shown = False
         if self._link_from is not None and self._link_line is not None:
             a = self._link_from.out_port(getattr(self, "_link_port", 0))
             b = self.mapToScene(self._view_pos(e))

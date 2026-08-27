@@ -825,6 +825,23 @@ def test_the_gray_level_tab_says_what_it_is_showing(qapp):
     assert "compared against mg @ ref" in across.tab_tooltip()
     assert "glv_median" in across.tab_tooltip(), "tooltip 要說出在顯示哪幾個"
 
+    # 接 `_center` 時用意圖語言（PR-2）：字典住 `region_words`，跟畫布的
+    # 埠 hover 同一份；原名括號保留（對得回畫布上那顆埠）。
+    def run_center():
+        ctx = Context(images={"test": img})
+        ctx.set_roi_boxes("epi_center", [(0.25, 0.25, 0.5, 0.5)])
+        get_step("glv_stats")().run(ctx, {
+            "source": "test", "roi": "epi_center", "metrics": "glv_median"})
+        insp = insp_mod.GlvInspector()
+        insp.set_context("glv_stats", meta=dict(ctx.meta))
+        return insp
+
+    from d4t.ui import region_words
+    centred = run_center()
+    phrase = region_words.INTENT_PHRASE[region_words.ROLE_CENTER]
+    assert centred.tab_title() == "GLV · %s (epi_center) on test" % phrase
+    assert phrase in centred.tab_tooltip()
+
     # 沒資料的時候退回類別的名字（分頁鈕不能是空的）
     empty = insp_mod.GlvInspector()
     assert empty.tab_title() == "GLV"
