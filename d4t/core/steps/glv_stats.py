@@ -989,6 +989,39 @@ class GlvStatsStep(MultiSourceStep):
                 "baseline": float(baselines[k]), "spread": float(spreads[k]),
                 "judge": judge,
             }
+            # worst 那一格的分布也留給面板（PR-2）—— **同一次計算、同一個
+            # rect**（`rects[wi]` 逐位元組就是 `ctx.roi_rects()[worst_i]`
+            # 那一格）、同一組像素過濾。面板把它疊在 typical 那條上，
+            # 「最不一樣的那格差在哪」才看得見，不只是一個 σ 數。
+            wraw = arr[int(wy):int(wy) + int(wh),
+                       int(wx):int(wx) + int(ww)].reshape(-1).astype(np.float64)
+            wpx, w_raw_n = self._pixels_that_count(wraw, p)
+            wcounts, _ = algo_glv.pixel_hist(wpx, bins=self.HIST_BINS)
+            worst_note.update({"bins": [int(c) for c in wcounts],
+                               "n": int(wpx.size), "n_raw": int(w_raw_n)})
+
+        # 逐框的判準值帶（PR-2）：一格一點的那條帶畫的就是 worst 選拔時
+        # 真的比過的那串數字 —— 不是面板自己重量一次。幾百格塞不進一條帶，
+        # >512 格等距取樣並記 `sampled`（worst 那一格**必留**，不然帶上圈
+        # 不到它）。單格沒有「其他格」可比，跟 worst 一樣整組不吐。
+        judge_note: Optional[Dict[str, Any]] = None
+        if len(per_box) >= 2:
+            vals, idxs, sampled = judge_vals, kept_index, False
+            if len(vals) > 512:
+                keep = sorted(set(
+                    np.linspace(0, len(vals) - 1, 512).astype(int).tolist())
+                    | {k})
+                vals = [judge_vals[i] for i in keep]
+                idxs = [kept_index[i] for i in keep]
+                sampled = True
+            judge_note = {
+                "stat": judge,
+                "values": [float(v) for v in vals],
+                "boxes": [int(i) for i in idxs],
+                "median": float(np.median(judge_vals)),
+                "worst_box": int(kept_index[k]),
+                "sampled": bool(sampled),
+            }
 
         # 面板畫的是**典型那一格**的分布（把幾百格疊起來畫等於畫了一張
         # 什麼都看不出來的圖）。
@@ -1000,7 +1033,8 @@ class GlvStatsStep(MultiSourceStep):
         self._note_distribution(
             ctx, typical_px, p,
             {n: out[n + TYPICAL_SUFFIX] for n in mids}, n_raw=n_raw,
-            box=mid_box, boxes=len(per_box), worst=worst_note)
+            box=mid_box, boxes=len(per_box), worst=worst_note,
+            judge=judge_note)
         return out
 
     # ---- 量得準不準（F18 第 4 步）------------------------------------------
@@ -1155,7 +1189,8 @@ class GlvStatsStep(MultiSourceStep):
                            thin: bool = False, box: int = -1,
                            boxes: int = 0,
                            ref: Optional[Dict[str, Any]] = None,
-                           worst: Optional[Dict[str, Any]] = None) -> None:
+                           worst: Optional[Dict[str, Any]] = None,
+                           judge: Optional[Dict[str, Any]] = None) -> None:
         """把這一塊的灰階分布留給儀表（F18 第 2 步）。
 
         **畫面上的那張圖就是引擎算的這一份** —— UI 不自己再跑一次統計，不然
@@ -1192,10 +1227,15 @@ class GlvStatsStep(MultiSourceStep):
             # 雜訊裡」；兩條分布疊起來一眼就看得出來。
             "ref": dict(ref) if ref else None,
             # 逐框比較的總冠軍（F31）：`{i, rect, score, value, baseline,
-            # spread, judge}`。疊圖畫 ROI 框、標框內像素讀的是**這一份** ——
-            # 跟 `worst_*` 特徵同一次計算，不是第二份（會漂的那種）。
-            # 沒有逐框比較（pooled、單框）時是 None。
+            # spread, judge}`，PR-2 起多帶 `bins`/`n`/`n_raw`（worst 那一格
+            # 自己的分布，跟 typical 疊著畫）。疊圖畫 ROI 框、標框內像素讀的
+            # 是**這一份** —— 跟 `worst_*` 特徵同一次計算，不是第二份
+            # （會漂的那種）。沒有逐框比較（pooled、單框）時是 None。
             "worst": dict(worst) if worst else None,
+            # 逐框判準值帶（PR-2）：`{stat, values, boxes, median, worst_box,
+            # sampled}` —— worst 選拔真的比過的那串數字，>512 格取樣。
+            # 同上，沒有逐框比較時是 None。
+            "judge": dict(judge) if judge else None,
         })
 
     # ---- 跟誰比（F18 第 5 步）----------------------------------------------

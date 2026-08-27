@@ -1212,3 +1212,96 @@ def test_every_number_this_card_writes_says_who_wrote_it():
     stray = [n for n in names
              if not (n.startswith("glv_") or n.startswith("cmp_"))]
     assert not stray, "沒有家族記號的名字：%s" % stray
+
+
+# --------------------------------------------------------------------------- #
+# PR-2（2c）：worst 直方圖與 judge 值帶 —— 跟特徵**同一次計算**
+# --------------------------------------------------------------------------- #
+def test_worst_histogram_is_the_same_computation_as_the_worst_features():
+    """`glv_hist` 的 worst 欄畫的框與分布 == `glv_worst_*` 特徵那一格。
+
+    面板疊圖讀的是這一份 —— 各算一份的那天，「圖上標紅、數字說正常」遲早來。
+    """
+    ctx = _grid_ctx()
+    img = ctx.images["test"]
+    get_step("glv_stats")().run(ctx, {
+        "source": "test", "roi": "cells", "metrics": "glv_median",
+        "across_boxes": "each box"})
+    note = ctx.meta["glv_hist"][0]
+    worst = note["worst"]
+    assert worst is not None
+    wi = int(ctx.features["glv_worst_i"])
+    rects = ctx.roi_rects("cells", img.shape[:2])
+    assert worst["rect"] == [int(v) for v in rects[wi]], \
+        "worst 的框要逐位元組是 ctx.roi_rects()[worst_i] 那一格"
+    assert worst["rect"] == [int(ctx.features["glv_worst_x"]),
+                             int(ctx.features["glv_worst_y"]),
+                             int(ctx.features["glv_worst_w"]),
+                             int(ctx.features["glv_worst_h"])]
+    # bins 用同一格像素、同一支 pixel_hist 重算要逐項相同（預設旋鈕全關）。
+    x, y, w, h = rects[wi]
+    px = np.asarray(img[y:y + h, x:x + w], np.float64).ravel()
+    counts, _ = algo_glv.pixel_hist(px, bins=get_step("glv_stats").HIST_BINS)
+    assert worst["bins"] == [int(c) for c in counts]
+    assert worst["n"] == int(px.size) and worst["n_raw"] == int(px.size)
+
+
+def test_judge_band_holds_the_values_the_worst_was_judged_by():
+    ctx = _grid_ctx(n=5)
+    get_step("glv_stats")().run(ctx, {
+        "source": "test", "roi": "cells", "metrics": "glv_median",
+        "across_boxes": "each box"})
+    judge = ctx.meta["glv_hist"][0]["judge"]
+    assert judge is not None
+    assert judge["stat"] == "glv_median"
+    assert len(judge["values"]) == len(judge["boxes"]) == 25
+    assert judge["sampled"] is False
+    assert judge["worst_box"] == int(ctx.features["glv_worst_i"])
+    assert judge["median"] == pytest.approx(float(np.median(judge["values"])))
+    # 反空洞：worst 那一格的值真的坐在帶上（照 boxes 找得到）。
+    at = judge["boxes"].index(judge["worst_box"])
+    assert judge["values"][at] == pytest.approx(
+        float(ctx.features["glv_worst_value"]))
+
+
+def test_judge_band_samples_beyond_512_boxes_and_keeps_the_worst():
+    """幾百格塞不進一條帶：>512 等距取樣、記 `sampled`、worst **必留**。"""
+    n_cols, n_rows = 25, 24                      # 600 格
+    img = np.full((240, 250), 100.0, np.float32)
+    img[5:10, 5:10] = 200.0                      # 第 0 格是異常的那格
+    ctx = Context(images={"test": img})
+    ctx.set_roi_boxes("cells", [
+        (c / n_cols, r / n_rows, 1.0 / n_cols, 1.0 / n_rows)
+        for r in range(n_rows) for c in range(n_cols)])
+    get_step("glv_stats")().run(ctx, {
+        "source": "test", "roi": "cells", "metrics": "glv_median",
+        "across_boxes": "each box"})
+    judge = ctx.meta["glv_hist"][0]["judge"]
+    assert judge["sampled"] is True
+    assert len(judge["values"]) <= 512
+    assert judge["worst_box"] in judge["boxes"], "取樣不准把 worst 丟掉"
+    assert judge["worst_box"] == int(ctx.features["glv_worst_i"])
+
+
+def test_single_box_emits_no_worst_and_no_judge_band():
+    """一格沒有「其他格」可比 —— worst 與 judge 整組不出現，不是 0。"""
+    ctx = _grid_ctx()
+    ctx.set_roi_boxes("one", [(0.1, 0.1, 0.3, 0.3)])
+    get_step("glv_stats")().run(ctx, {
+        "source": "test", "roi": "one", "metrics": "glv_median",
+        "across_boxes": "each box"})
+    note = ctx.meta["glv_hist"][0]
+    assert note["worst"] is None and note["judge"] is None
+    assert "glv_worst_i" not in ctx.features
+
+
+def test_glv_hist_meta_is_json_serializable():
+    """快取 payload 走 `_meta_snapshot`（JSON-safe 才留得住）—— numpy 標量
+    混進來的話，快取熱跑會**安靜地**少這一份。"""
+    import json
+
+    ctx = _grid_ctx()
+    get_step("glv_stats")().run(ctx, {
+        "source": "test", "roi": "cells", "metrics": "glv_median",
+        "across_boxes": "each box"})
+    json.dumps(ctx.meta["glv_hist"])   # 丟得進 JSON 就是過了
