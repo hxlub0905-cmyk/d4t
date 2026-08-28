@@ -23,7 +23,7 @@
 | **已知的坑**（30+ 條，只增不減）| [`docs/PITFALLS.md`](docs/PITFALLS.md) | 動到 Qt 繪圖／快取／批次平行／KLARF 寫回／recipe 遷移之前，**先搜關鍵字** |
 | **進度與 phase 計畫** | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 想知道「接下來做什麼」 |
 | **為什麼長成這樣**：需求訪談結論、六個來源專案的脈絡 | [`docs/HANDOVER.md`](docs/HANDOVER.md) | 第一次接手；想改一個「看起來多餘」的設計之前 |
-| **授權**：d4t 自己的授權狀態、vendoring 來源的授權、第三方相依（PySide6 的 LGPL）| [`docs/LICENSING.md`](docs/LICENSING.md) | 要加相依套件、要 vendor 新東西、或有人問「這能不能給別人用」之前 |
+| **授權**：d4t 是專有／內部使用（[`LICENSE`](LICENSE)）、vendoring 來源的授權、第三方相依（PySide6 的 LGPL）| [`docs/LICENSING.md`](docs/LICENSING.md) | **加相依套件之前**（`LICENSE` 的 carve-out 與 §4 的表**兩邊都要加**，測試會擋）、要 vendor 新東西、或有人問「這能不能給別人用」之前 |
 | 廠內待驗證的假設、受限機器的部署 | [`docs/FAB-VALIDATION.md`](docs/FAB-VALIDATION.md) | 要動 KLARF／單位／搬運時 |
 | **上游 GLAS 的介面**（label map／合成 gray／alignment；d4t 不解析 layout）| [`docs/GLAS-INTERFACE.md`](docs/GLAS-INTERFACE.md) | 要動 ROI 第三條路、或要請 GLAS 改東西時 |
 | 逐輪的決策與理由 | [`SESSION_LOG.md`](SESSION_LOG.md)（近期）＋ [`docs/history/`](docs/history/) | 查「這個決定當初為什麼這樣下」|

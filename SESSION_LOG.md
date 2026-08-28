@@ -19,6 +19,34 @@
 
 ---
 
+## F47：授權定案 —— 專有／內部使用（2026-08-28）
+
+使用者：「專有 內部license加進去」。F46 把三條路的代價列出來、沒有代下決定，
+這一輪決定下來了。
+
+- **`LICENSE`（repo 根，新增）**：`PROPRIETARY — INTERNAL USE ONLY`，
+  措辭對齊 KLIP 那份 —— d4t 裡放著它的 `klarf_core.py` 整檔，兩份文件不該
+  互相打臉。**刻意沒抄的一句**：KLIP 寫著「registered for internal Trade Secret
+  Registration purposes」，那是一個**可查證的事實主張**，d4t 有沒有登記我不
+  知道，所以不替它宣告。真的有登記就自己加回去。
+- **`LICENSE` 明講不涵蓋第三方相依。** 少了那一句，一份「保留所有權利」會把
+  LGPL 的 PySide6 一起蓋進去 —— 而那正是不能做的事。
+- **`pyproject.toml` 補 `license = {file = "LICENSE"}`**。用舊寫法不用 PEP 639
+  的 `LicenseRef-…`：後者要 `setuptools>=77`，而 `build-system` 的底線是 `>=61`
+  （廠內機器可能是舊版）。**實際建了一個 wheel 驗過**：METADATA 帶
+  `License: PROPRIETARY — INTERNAL USE ONLY`，全文進 `dist-info/licenses/`。
+- **測試多守三條**：`LICENSE` 真的在且內容跟 `LICENSING.md` §1 說的一致、
+  `pyproject.toml` 有宣告、**carve-out 要點名每一個相依套件**。
+  最後那條看起來多餘 —— 它不是：漏掉第六個 LGPL 套件，就等於把它蓋進了自己的
+  專有聲明裡。反向驗過（假裝加 `scipy` → 會紅）。
+
+**沒關掉的一件（所有權人決定，不是工程決定）：repo 還是 public。**
+授權寫「內部使用」不會讓一份公開的檔案變成未公開 —— 營業秘密缺的是**未公開
+這個事實狀態**，那由可見性決定，不由 LICENSE 的文字決定。寫進
+`LICENSING.md` §1 與 §5 的待辦，沒有代動。
+
+---
+
 ## F46：檔案架構重整 + 授權文件（2026-08-28）
 
 使用者：「重新整理檔案架構(需與事實相符)更新license 相關.md檔案」。兩件事。

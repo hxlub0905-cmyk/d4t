@@ -11,6 +11,12 @@
 套件，程式碼都跑得好好的，只有那份文件安靜地少一列。而一份少一列的授權清單
 **比沒有那份清單更糟** —— 它看起來完整。
 
+2026-08-28 授權定案（專有／內部使用）之後又多守兩條，都是**同一個形狀**：
+`LICENSE` 要真的在（一份說「已經加了授權」的文件配上不存在的檔案，比沒有那份
+文件更糟），而 `LICENSE` 的第三方 carve-out 要蓋到每一個相依套件 ——
+一份「保留所有權利」的聲明只點名五個套件、漏掉第六個 LGPL 的，就是把那一個
+蓋進了自己的專有聲明裡。
+
 這一份守的是**涵蓋範圍**，不是內容。「表上有這一列」跟「那一列寫對了」是兩件
 事，後者只有人回來看才知道 —— 所以 `LICENSING.md` 頂上寫著查證日期。
 """
@@ -21,6 +27,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 DOC = REPO / "docs" / "LICENSING.md"
+LICENSE = REPO / "LICENSE"
 PKG = REPO / "d4t"
 
 #: 檔頭「這一支是 vendored 的」怎麼寫 —— 前三行、`#` 開頭、``vendored into/from``。
@@ -134,3 +141,53 @@ def test_the_doc_says_when_it_was_checked():
     text = DOC.read_text(encoding="utf-8")
     assert re.search(r"20\d\d-\d\d-\d\d", text), (
         "docs/LICENSING.md 沒有任何查證日期 —— 那張表就沒有保存期限了")
+
+
+# --------------------------------------------------------------------------- #
+# 2026-08-28 授權定案之後：LICENSE 這個檔案本身
+# --------------------------------------------------------------------------- #
+def test_the_license_file_exists_and_matches_what_the_doc_claims():
+    """`LICENSING.md` §1 說授權是「專有／內部使用」—— 那個檔案要真的在，
+    而且真的那樣寫。
+
+    這一條防的是最蠢也最容易發生的一種：文件先寫好了，檔案忘了加（或後來被
+    誰刪了），而**沒有任何測試會注意到** —— 讀的人以為有授權，`pip` 裝出來的
+    套件中繼資料卻是空的。
+    """
+    assert LICENSE.is_file(), "repo 根沒有 LICENSE —— 但 docs/LICENSING.md 說有"
+    text = LICENSE.read_text(encoding="utf-8")
+    assert "PROPRIETARY" in text and "INTERNAL USE ONLY" in text, (
+        "LICENSE 的內容不是 docs/LICENSING.md §1 說的那一種（專有／內部使用）")
+    assert "PROPRIETARY" in DOC.read_text(encoding="utf-8"), (
+        "docs/LICENSING.md 沒有引到 LICENSE 實際寫的字 —— 兩邊會各說各話")
+
+
+def test_pyproject_points_at_the_license_file():
+    """`pyproject.toml` 要宣告授權，否則 `pip install` 出來的中繼資料是空的。
+
+    ⚠ 這裡**不管**用的是 `{file = ...}` 還是 PEP 639 的 `LicenseRef-…`
+    —— 那是 setuptools 版本底線的取捨（見 `docs/LICENSING.md` §1），
+    換寫法不該讓這一條紅。要守的只有「有宣告」。
+    """
+    text = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    assert re.search(r"^license\s*=", text, re.M), (
+        "pyproject.toml 沒有 license 欄位 —— 打包出來的東西不會帶授權資訊")
+
+
+def test_the_license_carve_out_covers_every_dependency():
+    """`LICENSE` 的第三方 carve-out 要點名每一個相依套件。
+
+    **這一條看起來多餘，它不是。** 那份聲明是「保留所有權利」，而它底下跑著
+    LGPL 的 PySide6 —— carve-out 漏掉哪一個，就等於把那一個蓋進了自己的專有
+    聲明裡。加相依套件的時候 `LICENSE` 與 `docs/LICENSING.md` §4 **兩邊都要加**，
+    而紅的那一條會告訴你漏了哪一邊。
+
+    （`shiboken6` 不算：它是 PySide6 拖進來的，沒有人直接宣告它 ——
+    `LICENSE` 寫的 "PySide6 and its dependencies" 就是在講它。）
+    """
+    text = LICENSE.read_text(encoding="utf-8").lower()
+    missing = sorted(p for p in _declared_packages()
+                     if p.lower() not in text and p.lower() != "pytest")
+    assert not missing, (
+        "LICENSE 的第三方 carve-out 沒有點名這幾個相依套件：%s\n"
+        "（漏掉的那一個，等於被蓋進了 d4t 自己的專有聲明裡）" % "、".join(missing))

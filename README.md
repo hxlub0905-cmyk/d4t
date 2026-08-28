@@ -218,12 +218,16 @@ CD 在用。逐支模組的來源清單在 [`docs/LICENSING.md`](docs/LICENSING.
 
 ## 授權
 
-**d4t 目前沒有 `LICENSE` 檔，而 repo 是 public。**
-沒有授權聲明不等於「隨便用」—— 著作權的預設是**保留所有權利**，
-任何人都沒有被授予重製、修改或散布的權利。
+**[`LICENSE`](LICENSE) —— 專有，僅限組織內部使用**（2026-08-28）。
+未經所有權人書面同意，不得於組織外重製、散布、公開或再授權。
 
-這是**還沒決定**，不是決定了不寫。現況、六個來源專案各自的授權狀態、
-執行時相依套件的授權（含 **PySide6 的 LGPL** 與離線安裝那條搬 wheel 的路），
-以及要下決定時三條路各自的代價，全部寫在
-**[`docs/LICENSING.md`](docs/LICENSING.md)** —— 那一份是授權的唯一出處，
-而且有 `tests/test_licensing_doc.py` 守著它的兩張表不漂。
+那份聲明**不涵蓋執行時的相依套件**：numpy／OpenCV／tifffile／openpyxl／
+PySide6 各自照自己的授權走。其中 **PySide6 是 LGPL**，而離線安裝那條路
+（`tools/fetch_wheels.py` → `tools/install_offline.py`）會把 wheel 搬到另一台
+機器 —— 那件事標成**待法務確認**，沒有自己下結論。
+
+d4t 的演算法從六個既有專案 vendoring 而來，**六個都是同一個作者自己的**，
+所以 vendoring 本身沒有第三方授權義務。逐支模組的來源、六個專案各自的授權
+狀態、相依套件的授權表，全部在 **[`docs/LICENSING.md`](docs/LICENSING.md)**
+—— 那一份是授權的唯一出處，而且有 `tests/test_licensing_doc.py`
+守著它的表不漂（包含「加了新相依卻忘了寫進 `LICENSE` 的 carve-out」那一種）。

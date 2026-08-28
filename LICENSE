@@ -1,0 +1,23 @@
+PROPRIETARY — INTERNAL USE ONLY
+
+Copyright (c) 2026. All rights reserved.
+
+This software (d4t — defect) and its source code are proprietary.
+
+No part of this repository may be copied, distributed, published,
+sublicensed, or used outside the owner's organization without prior
+written permission from the owner.
+
+Portions of this software were vendored from the owner's own other
+projects (KLIP, GLAS, MMH, PEAR, cell-period-estimator,
+Perspective-Combination). Those portions are covered by this notice as
+well; docs/LICENSING.md lists which module came from where.
+
+This notice does NOT cover the third-party packages this software
+depends on at run time (numpy, opencv-python, tifffile, openpyxl,
+PySide6 and its dependencies). Those remain under their own licenses —
+see docs/LICENSING.md.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.

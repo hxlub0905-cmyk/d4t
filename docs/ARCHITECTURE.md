@@ -213,6 +213,7 @@ Path 行都建在它上面。
 ├── conftest.py               # 讓 `pytest` 在 repo 根跑得起來
 ├── pyproject.toml            # 套件中繼資料；`gui` extra ＝ PySide6（CLI 那條路不需要 Qt）
 ├── requirements.txt          # 開發環境（含 PySide6 —— 跟 pyproject 的用途不一樣）
+├── LICENSE                   # **專有／內部使用**（2026-08-28 定案）—— 條款與來由見 `docs/LICENSING.md`
 ├── README.md                 # 對外的第一頁
 ├── AGENTS.md                 # 環境限制（兩台機器、剪貼簿是唯一通道）—— **動手前先讀**
 ├── CLAUDE.md                 # 開發手冊（每個 session 都會被讀進去）

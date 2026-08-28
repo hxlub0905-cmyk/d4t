@@ -7,6 +7,14 @@ name = "d4t"
 version = "0.1.0.dev0"
 description = "d4t: flexible multi-step ADC for semiconductor inspection (EBI patch / RSEM + KLARF)"
 requires-python = ">=3.9"
+# 授權：**專有／內部使用**（2026-08-28 使用者定案）。全文在 repo 根的 `LICENSE`，
+# 來龍去脈、vendoring 來源與第三方相依的授權在 `docs/LICENSING.md`。
+#
+# ⚠ 用 `{file = ...}` 這個舊寫法，不是 PEP 639 的 `license = "LicenseRef-…"`：
+# 後者要 setuptools>=77，而上面 `build-system` 的底線是 >=61 —— 廠內機器可能是
+# 舊版，那正是這個 repo 到處在防的事。新版 setuptools 對這個寫法發 deprecation
+# warning，那是警告不是錯誤；等底線抬到 77 再換。
+license = {file = "LICENSE"}
 dependencies = ["numpy>=1.24", "opencv-python>=4.8", "tifffile>=2023.7", "openpyxl>=3.1"]
 
 [project.optional-dependencies]
