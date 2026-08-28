@@ -136,6 +136,7 @@ c76b8e397907416ab97ce84f5cc45fcbe8995f6b docs/plans/F41-phase3-delete-algo-cards
 b51eb44b468105a83e7f223db94eb438c68a27d3 docs/plans/F44-region-wiring-and-panels.md
 df9b95e62f80bd81d55d534c75acd8080bc0bc25 docs/plans/F45-feature-specs-and-verdict-trace.md
 1c08e7d726051d50c8957768f0cd442a57d3a161 docs/plans/F48-six-decisions.md
+af2a0ffc8331813f1fb674e4c4293457921c7161 docs/plans/F49-features-on-wires.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
