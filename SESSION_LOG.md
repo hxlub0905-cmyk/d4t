@@ -19,6 +19,85 @@
 
 ---
 
+## F47：授權定案 —— 專有／內部使用（2026-08-28）
+
+使用者：「專有 內部license加進去」。F46 把三條路的代價列出來、沒有代下決定，
+這一輪決定下來了。
+
+- **`LICENSE`（repo 根，新增）**：`PROPRIETARY — INTERNAL USE ONLY`，
+  措辭對齊 KLIP 那份 —— d4t 裡放著它的 `klarf_core.py` 整檔，兩份文件不該
+  互相打臉。**刻意沒抄的一句**：KLIP 寫著「registered for internal Trade Secret
+  Registration purposes」，那是一個**可查證的事實主張**，d4t 有沒有登記我不
+  知道，所以不替它宣告。真的有登記就自己加回去。
+- **`LICENSE` 明講不涵蓋第三方相依。** 少了那一句，一份「保留所有權利」會把
+  LGPL 的 PySide6 一起蓋進去 —— 而那正是不能做的事。
+- **`pyproject.toml` 補 `license = {file = "LICENSE"}`**。用舊寫法不用 PEP 639
+  的 `LicenseRef-…`：後者要 `setuptools>=77`，而 `build-system` 的底線是 `>=61`
+  （廠內機器可能是舊版）。**實際建了一個 wheel 驗過**：METADATA 帶
+  `License: PROPRIETARY — INTERNAL USE ONLY`，全文進 `dist-info/licenses/`。
+- **測試多守三條**：`LICENSE` 真的在且內容跟 `LICENSING.md` §1 說的一致、
+  `pyproject.toml` 有宣告、**carve-out 要點名每一個相依套件**。
+  最後那條看起來多餘 —— 它不是：漏掉第六個 LGPL 套件，就等於把它蓋進了自己的
+  專有聲明裡。反向驗過（假裝加 `scipy` → 會紅）。
+
+**沒關掉的一件（所有權人決定，不是工程決定）：repo 還是 public。**
+授權寫「內部使用」不會讓一份公開的檔案變成未公開 —— 營業秘密缺的是**未公開
+這個事實狀態**，那由可見性決定，不由 LICENSE 的文字決定。寫進
+`LICENSING.md` §1 與 §5 的待辦，沒有代動。
+
+---
+
+## F46：檔案架構重整 + 授權文件（2026-08-28）
+
+使用者：「重新整理檔案架構(需與事實相符)更新license 相關.md檔案」。兩件事。
+
+**① `docs/ARCHITECTURE.md` §目錄結構 重寫。** 那一份自稱「架構的唯一出處」，
+而它畫的樹**沒有人在守** —— 掃出來的漂移：
+
+- `tests/`、`tools/`、`fab_probe/`、`docs/` 被畫成 `d4t/` 的**子目錄**（同層）；
+- `recipes/`、`bundle/`、`.github/`、根目錄那七個檔案一個都沒畫；
+- 漏掉十五支模組：`pipeline/` 少六支（`decide_tree`、`verdict_features`、
+  `verdict_trace`、`channels`、`cellrois`、`curve`）、`ingest/` 少兩支、
+  `ui/` 少十三支 —— **「新面板一律開新模組」那條規矩本身就保證這張圖會落後**。
+
+現在分三棵畫（repo 根 / `d4t/` 套件 / `docs/`），而且有
+`tests/test_doc_file_tree.py` 守著**兩個方向**：畫了不存在的會紅、
+`d4t/` 底下漏畫的也會紅。只守第一個方向的話，上面那十五支永遠不會紅
+—— 它們是漏畫，不是畫錯。
+
+**② `docs/LICENSING.md` 新增**（授權的唯一出處）。以前 repo 裡**一個字都沒有**：
+沒有 `LICENSE`、`pyproject.toml` 沒有 `license` 欄位、README 沒有授權段落。
+
+查證（2026-08-28，GitHub API ＋ PyPI）：
+
+- **d4t 是 public 而且沒有 LICENSE** → 法律預設是保留所有權利。
+  這一份把它寫成「還沒決定」，**沒有替使用者挑授權** —— 三條路的代價列在 §5。
+- **六個來源專案都是同一個作者自己的**（使用者確認）→ vendoring **沒有**
+  第三方授權義務。原本以為的衝突（KLIP 的 LICENSE 寫著
+  「PROPRIETARY — INTERNAL USE ONLY，營業秘密登記素材」，而 d4t public 裡放著
+  它的 `klarf_core.py` 整檔）因此不是授權問題 —— 但**營業秘密的保護要件包含
+  未公開**，那一句留在 §2 給所有權人自己決定。
+- **真正有外部義務的是相依套件**，尤其 **PySide6 ＝ LGPL-3.0 / GPL-2.0 /
+  GPL-3.0**。d4t 不打包它（`gui` extra），但
+  `fetch_wheels.py` → `install_offline.py` 那條離線路徑**會把 wheel 搬到另一台
+  機器**。標成待法務確認，不自己下結論。
+
+`tests/test_licensing_doc.py` 守兩張表的**涵蓋範圍**：vendored 模組清單
+（檔頭是正典，17 支）、相依套件授權表（`pyproject.toml` ＋ `requirements.txt`
+是正典）。兩支都配了**反向測試**（掃不到東西時要紅）—— 那是
+`test_shipped_recipes.py` 的 `ALLOWED_ERRORS` 學到的同一課。寫的時候真的踩到
+一次：相依 parser 掃全檔的 `= [...]`，抓到 `package-data` 的 `assets/*.svg`，
+然後要求授權表上有一列叫「assets」。
+
+**順手修掉的不符事實**：README 寫「24 張步驟卡片（可見 21 張）」——
+實際註冊 19 張、可見 18 張（`align` 收起來）；README 的來源表還列著 Fusi³ 的
+「SNR map、blob 分割」，那兩樣 2026-08-25 就移除了。文件索引補上四份漏掉的。
+
+指標：`CLAUDE.md` §0 與 §6、`README.md`、`docs/HANDOVER.md` §3 都連過去，
+**內容只有一份**。
+
+---
+
 ## F45：FeatureSpec 結構化身分 + 分數回溯（2026-08-27～28，總工作單 PR-3）
 
 計畫書：[`docs/plans/F45-feature-specs-and-verdict-trace.md`](docs/plans/F45-feature-specs-and-verdict-trace.md)。
