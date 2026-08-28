@@ -110,10 +110,12 @@ import d4t.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
 from d4t.core.pipeline import ParamError, Recipe, get_step, list_steps
 from d4t.core.pipeline.cellrois import region_names
 from d4t.core.pipeline.engine import (
-    FEATURE_OWNER_KEY, feature_prefixes, qualified_feature_name,
+    FEATURE_OWNER_KEY, feature_prefixes,
 )
 from d4t.core.pipeline.step import REGION_TYPES, REGISTRY
 from d4t.core.pipeline.recipe import is_region_edge, version_skew
+from d4t.core.pipeline import verdict_features
+from d4t.core.pipeline.verdict_trace import verdict_trace
 
 from .canvas import SUMMARY_SEP, PipelineCanvas
 from .inspectors import inspector_for
@@ -121,13 +123,16 @@ from .gallery import make_thumb
 from .region_check import MAX_CHECK, RegionCheckWindow, regions_of_node
 from .template_dialog import TemplateDialog
 from .results import ResultsWindow, extra_only, summarize_run
+from . import results_table
 from . import scope
 from .scope import (
     is_supported_kind, no_klarf_message, recipe_is_supported,
     unsupported_kind_message, visible_steps,
 )
 from .decide_panel import DecidePanel
-from .viewmodel import RecipeModel, is_a_constant_expression, accuracy_at, histogram, rebin
+from .viewmodel import (GLV_INTENT_CUSTOM, GLV_INTENTS, RecipeModel,
+                        is_a_constant_expression, accuracy_at, histogram,
+                        rebin)
 from . import theme
 from .theme import DEFAULT_THEME, THEMES, apply_theme, current_theme
 from .welcome import (
@@ -1398,6 +1403,7 @@ class StudioWindow(QMainWindow):
         self.btn_empty_sample.clicked.connect(self._on_demo_requested)
         self.param_form.action_requested.connect(self._on_param_action)
         self.param_form.source_requested.connect(self._on_source_requested)
+        self.param_form.intent_chosen.connect(self._on_intent_chosen)
         self.stream_combo.currentTextChanged.connect(self._on_stream_changed)
         self.stream_combo_b.currentTextChanged.connect(self._on_stream_b_changed)
         self.compare_check.toggled.connect(self.set_compare)
@@ -1419,6 +1425,10 @@ class StudioWindow(QMainWindow):
         # 表格上雙擊一列跟縮圖上雙擊一張是同一件事（R7）—— 同一支處理常式。
         self.results.table.defect_activated.connect(self._on_defect_activated)
         self.gallery.selection_changed.connect(self._on_gallery_selection)
+        # 回溯（PR-3）：點 score/bin/class → 算 trace 開面板；點面板上一項 →
+        # 跳到產出它的卡（有區域就把那一塊亮起來）。
+        self.results.trace_requested.connect(self._on_trace_requested)
+        self.results.why_item_activated.connect(self._on_why_item)
 
     def _wire_workers(self) -> None:
         self.dataset_worker.loaded.connect(self._on_dataset_loaded)
@@ -1732,14 +1742,16 @@ class StudioWindow(QMainWindow):
             issues = self.model.validate()
         except Exception:                        # noqa: BLE001 — 顯示用，壞了就沒標記
             return out
+        rank = {"error": 0, "warning": 1, "info": 2}
         for issue in issues:
             nid = getattr(issue, "node_id", None)
             if not nid:
                 continue
             prev = out.get(nid)
-            # error 蓋過 warning；同級的取先出現的那則
-            if prev is not None and not (prev[1] == "warning"
-                                         and issue.level == "error"):
+            # error > warning > info；同級的取先出現的那則。info 也進表
+            # （tooltip 要看得到），只是畫布不為它畫點（`canvas.badge_paints`）。
+            if prev is not None and (rank.get(str(issue.level), 1)
+                                     >= rank.get(prev[1], 1)):
                 continue
             out[nid] = (str(issue.detail or issue.title), str(issue.level))
         return out
@@ -3035,6 +3047,7 @@ class StudioWindow(QMainWindow):
             self.model.available_regions(before_node=node_id),
             self._dynamic_choices_for(node))
         self._sync_source_action(node)
+        self._sync_glv_intent(node_id, node)
         self.stack.setCurrentWidget(self.param_form)
         self._sync_params_pane()
         self._refresh_region_button()
@@ -3120,6 +3133,34 @@ class StudioWindow(QMainWindow):
 
     def _sync_source_action(self, node: Any) -> None:
         self.param_form.set_source_action(*self._source_action_for(node))
+
+    # ---- GLV「我要量什麼」三選（PR-2 2a）----------------------------------
+    def _sync_glv_intent(self, node_id: str, node: Any) -> None:
+        """GLV 卡才有這一排；其他卡 `set_step` 已經清掉了。"""
+        if node is None or getattr(node, "step", "") != "glv_stats":
+            return
+        wired = bool(self.model._glv_region_edges(node_id, "roi"))
+        current = self.model.glv_intent(node_id)
+        note = ""
+        if not wired:
+            note = "Wire a Region card into “Region” first."
+        elif current == GLV_INTENT_CUSTOM:
+            note = "custom - the settings match none of the three."
+        self.param_form.set_intent_row(
+            "What do I want to measure?", GLV_INTENTS,
+            current, note=note, enabled=wired)
+
+    def _on_intent_chosen(self, intent: str) -> None:
+        nid = self.selected_node
+        if not nid:
+            return
+        if self.model.apply_glv_intent(nid, str(intent)):
+            # 重新走一次 select_node：表單（roi/reference 那幾格）、preset
+            # 列的勾選、儀表、畫布的線一次到位 —— 不各自手動刷新。
+            self.select_node(nid)
+        else:
+            node = self.model.nodes.get(nid)
+            self._sync_glv_intent(nid, node)   # 套不上：勾選擺回真實狀態
 
     def _on_source_requested(self) -> None:
         """入口卡上那顆鈕：附加檔直接開，資料那幾張開一張選單。
@@ -4235,7 +4276,7 @@ class StudioWindow(QMainWindow):
                                         highlight=highlight,
                                         sections=self._feature_sections(result),
                                         about=self._feature_about(result),
-                                        parts=self._feature_parts())
+                                        specs=self._feature_specs())
         score = getattr(result, "score", None)
         self.verdict.set_verdict(getattr(result, "bin", None)
                                  if score is not None else None)
@@ -4272,28 +4313,36 @@ class StudioWindow(QMainWindow):
     def _show_decide_path(self, result: Any) -> None:
         """Preview 的 Path（F24 §8）：這一顆走過的路，一句話＋樹上亮起來。
 
-        資料是引擎記的 ``ctx.meta["decide"]["path"]``（一串 yes/no）——
-        判定樹模式才有；`rules` 模式講「第幾條規則對上」；沒有判定（或這一顆
-        沒跑到判定）就清空，**不寫 N/A**。
+        PR-3 起建在 `verdict_trace` 上 —— **跟引擎走同一支**
+        （`decide_tree.walk_steps`），所以重放出的路跟引擎記在
+        ``meta["decide"]["path"]`` 的必然相同，這裡不再讀 meta。
+        判定樹模式亮路徑；`rules` 模式講「第幾條規則對上」；沒有判定
+        （或這一顆沒跑到判定 —— ``bin`` 還是空的）就清空，**不寫 N/A**。
         """
         from .tree_scene import display_tree, path_text
 
-        ctx = getattr(result, "context", None)
-        meta = (getattr(ctx, "meta", None) or {}).get("decide") \
-            if ctx is not None else None
+        decide = getattr(self.model, "decide", None)
         text, hl = "", None
-        if isinstance(meta, dict):
-            steps = [str(s) for s in (meta.get("path") or [])]
-            if steps:
-                hl = "".join("y" if s == "yes" else "n" for s in steps)
-                tree = display_tree(getattr(self.model, "decide", None))
+        feats = dict(getattr(result, "features", {}) or {})
+        ran = (decide is not None and getattr(result, "ok", False)
+               and getattr(result, "bin", None) is not None)
+        if ran:
+            try:
+                trace = verdict_trace(self.model.to_recipe(),
+                                      self.model.kind, feats)
+            except Exception:              # noqa: BLE001 — 顯示層
+                trace = None
+            if trace is not None and trace.mode == "tree" and trace.path:
+                hl = trace.path
+                tree = display_tree(decide)
                 text = path_text(tree, hl) if tree is not None else ""
                 if text:
                     text = "Path:  " + text
-            elif meta.get("rule", -1) is not None and int(meta.get("rule", -1)) >= 0:
-                text = "Path:  rule %d matched" % (int(meta["rule"]) + 1)
-                if meta.get("label"):
-                    text += " (%s)" % meta["label"]
+            elif trace is not None and trace.mode == "rules" \
+                    and trace.rule_index >= 0:
+                text = "Path:  rule %d matched" % (trace.rule_index + 1)
+                if trace.leaf_label:
+                    text += " (%s)" % trace.leaf_label
         self.decide_path.setText(text)
         for view in self._canvases():
             view.set_tree_highlight(hl)
@@ -4819,14 +4868,15 @@ class StudioWindow(QMainWindow):
                 out[str(name)] = ref
         return out
 
-    def _feature_parts(self) -> Dict[str, Any]:
-        """特徵名 → 它是怎麼組出來的（F37 A4）。
+    def _feature_specs(self) -> Dict[str, Any]:
+        """特徵名 → 誕生處宣告的身分（`FeatureSpec`，PR-3；前身 F37 A4 的
+        `_feature_parts`）。
 
         **問每一張卡，不自己拆字串**：``test_epi_hot_glv_median`` 這一串裡哪
         一段是流、哪一段是區域、哪一段是使用者自己取的名字，三者都是任意識別
         字，UI 只能猜 —— 而猜錯會把區域畫成流，顏色跟著錯，而顏色正是這件事的
-        重點。組名字的規則住在卡片上，拆的規則就住在同一個地方
-        （`Step.feature_parts`）。
+        重點。組名字的規則住在卡片上，身分就宣告在同一個地方
+        （`Step.resolve_feature_specs`；上下標的拆解 = ``spec.parts()``）。
 
         先出現的贏（同 `feature_owners`）：撞名的時候引擎留的是先寫那一份的
         救援名，而畫面上那一格顯示的是後寫的值 —— 兩邊都指同一個人比較不會錯。
@@ -4837,11 +4887,11 @@ class StudioWindow(QMainWindow):
             if node is None or not node.enabled:
                 continue
             try:
-                got = get_step(node.step).feature_parts(node.params)
+                got = get_step(node.step).resolve_feature_specs(node.params)
             except Exception:              # noqa: BLE001 — 顯示用，壞了就不拆
                 continue
-            for name, parts in (got or {}).items():
-                out.setdefault(str(name), parts)
+            for s in got:
+                out.setdefault(str(s.name), s)
         return out
 
     def _feature_sections(self, result: Any) -> List[Dict[str, Any]]:
@@ -4893,11 +4943,12 @@ class StudioWindow(QMainWindow):
                 colour = theme.group_hex(step_cls.resolve_group())
                 diag = set(step_cls.diagnostic_features(node.params))
                 # **救回來的那一份也是診斷數字**：兩張 Enhance 卡都寫
-                # `clip_frac`，engine 把先寫的留成 `<那條流>_clip_frac`
-                # （`qualified_feature_name` + `feature_prefixes`）。不算進來的話，那個值會以
-                # 「量測值」的身分排在最上面，而它量的是這張卡自己。
+                # `clip_frac`，engine 把先寫的留成 `<那條流>_clip_frac`。
+                # 救援名用 `FeatureSpec.qualified`（跟引擎、binder 同一支）。
                 pfx = prefixes.get(nid, nid)
-                diag |= {qualified_feature_name(pfx, f) for f in list(diag)}
+                diag |= {s.qualified(pfx).name
+                         for s in step_cls.resolve_feature_specs(node.params)
+                         if s.name in diag}
             except Exception:              # noqa: BLE001 — 顯示用，壞了就當一般的
                 label, colour, diag = node.step, "", set()
             measured = [f for f in mine if f not in diag]
@@ -5601,7 +5652,22 @@ class StudioWindow(QMainWindow):
         # 名字從判定段那一份算出來（`verdict_rows`），所以整個 Results 視窗
         # 講的是同一份東西，不是兩份各自數出來的。
         names = self._class_names(results)
-        self.results.set_table(results, names)   # 表格那一半（R7）
+        # 表格的分層與徽章（PR-1）：判定層、按卡分組、診斷欄、警示布林 ——
+        # 全部由 recipe 推導（`core/pipeline/verdict_features.py` 是唯一出處）。
+        # 顯示層：推不出來就退回平鋪，不准因此沒有表。
+        layout = alarms = None
+        try:
+            recipe = self.model.to_recipe()
+            kind = self.model.kind
+            layout = results_table.column_tree(
+                results,
+                verdict_features.features_in_verdict(recipe, kind),
+                verdict_features.bound_specs(recipe, kind),
+                verdict_features.diagnostic_columns(recipe, kind))
+            alarms = verdict_features.diagnostic_alarm_map(recipe, kind)
+        except Exception:              # noqa: BLE001 — 顯示層，見上
+            layout = alarms = None
+        self.results.set_table(results, names, layout, alarms)  # 表格那一半（R7）
         self.gallery.set_items([
             {
                 "defect_id": str(r.get("defect_id", "")),
@@ -5696,6 +5762,86 @@ class StudioWindow(QMainWindow):
 
     def _on_gallery_selection(self, ids: Any) -> None:
         self._status("%d selected" % len(list(ids or [])))
+
+    # ---- 回溯面板（PR-3）：這一顆為什麼判成這樣 ---------------------------
+    def _on_trace_requested(self, defect_id: str) -> None:
+        """結果表點了 score / bin / class → 重放那一顆的判定並開面板。
+
+        trace 吃**那一列的 features**（引擎判定後的快照，let 值都在）——
+        不重跑影像、不重算任何值（`verdict_trace` 的立身規矩）。
+        """
+        did = str(defect_id)
+        row = next((r for r in (self.trial_results or [])
+                    if str(r.get("defect_id", "")) == did), None)
+        if row is None:
+            return
+        if not row.get("ok"):
+            self._status("Defect “%s” failed before the decision — the error "
+                         "column says why." % did, "error")
+            return
+        feats = dict(row.get("features") or {})
+        # score-only 的 recipe：bin 只在列上（引擎不寫進 features）——
+        # 補給 trace 顯示；decide 模式的 leaf_bin 是重放樹算的，不看這一格。
+        if row.get("bin") is not None:
+            feats.setdefault("bin", float(row["bin"]))
+        try:
+            trace = verdict_trace(self.model.to_recipe(), self.model.kind,
+                                  feats)
+        except Exception as e:              # noqa: BLE001 — 顯示層
+            self._status("Could not replay the decision: %s" % e, "error")
+            return
+        if trace.mode == "none":
+            self._status("This recipe has no score and no decision — "
+                         "there is nothing to replay.")
+            return
+        self.results.show_why(did, trace)
+
+    def _on_why_item(self, defect_id: str, name: str) -> None:
+        """面板上點了一項 → 跳到產出那個數字的卡。
+
+        身分查 `bound_specs`（跟結果表的分組同一份）：有區域的項把那一塊
+        **亮**在影像上（`highlight_region`），引擎的項（let / score）對映
+        Score / Bin 偽卡＝打開判定區。
+        """
+        try:
+            bound = {b.spec.name: b for b in verdict_features.bound_specs(
+                self.model.to_recipe(), self.model.kind)}
+        except Exception:                   # noqa: BLE001 — 顯示層
+            return
+        b = bound.get(str(name))
+        if b is None:
+            return
+        if not b.node_id:
+            # 引擎的名字（let、score、decide_unanswered）：去編判定區 ——
+            # 跟畫布上點 ADC 那一格走同一條。
+            self._on_tree_step_clicked("")
+            return
+        if b.spec.region:
+            self.highlight_region(defect_id, b.node_id, b.spec.region)
+        else:
+            self.select_node(b.node_id)
+
+    def highlight_region(self, defect_id: str, node_id: str,
+                         region: str) -> bool:
+        """跳到那一顆、選產出的卡，並把**那一塊區域**亮在影像上。
+
+        亮法住在 `ImageView.set_overlay_emphasis`：命中的框全強度、其餘降
+        alpha —— 顏色仍然說「哪一塊」、粗細仍然說「缺陷格」，**不 overload
+        focus**。`set_overlay` 會清掉強調，所以先刷新預覽再點亮。
+        """
+        did = str(defect_id)
+        items = list(getattr(self.dataset, "items", []) or []) \
+            if self.dataset else []
+        index = next((i for i, it in enumerate(items)
+                      if str(getattr(it, "defect_id", "")) == did), None)
+        if index is not None:
+            self.set_defect_index(index)
+        if not self.select_node(str(node_id)):
+            return False
+        self.refresh_preview(sync=True)
+        for view in (self.image_view, self.image_view_b):
+            view.set_overlay_emphasis([str(region)])
+        return True
 
     # ---- 直方圖點長條 → Gallery 篩選 --------------------------------------
     def _on_bar_clicked(self, lo: float, hi: float) -> None:

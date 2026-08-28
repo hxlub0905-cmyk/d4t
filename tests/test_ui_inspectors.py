@@ -86,7 +86,7 @@ def test_a_card_without_a_panel_falls_back_to_the_feature_table(window):
     # 預設值）。
     window._on_edge_added(src, a, "ref", "moving")
     window._on_edge_added(src, a, "test", "fixed")
-    window.add_card_after(a, "subtract")        # subtract 還沒有自己的儀表
+    window.add_card_after(a, "roi_mask")        # roi_mask 明文不給儀表（PR-2）
     assert window.inspector() is None
     assert window.bottom_page() == 1
     assert window.btn_tab_card.isEnabled() is False
@@ -103,11 +103,16 @@ def test_you_can_still_get_to_the_features(window):
 
 
 def test_adding_a_new_card_does_not_need_this_module_touched():
-    """約定 1：沒登記的卡就沒有儀表，不是壞掉。"""
-    assert insp_mod.inspector_for("subtract") is None
-    assert insp_mod.inspector_for("subtract") is None
+    """約定 1：沒登記的卡就沒有儀表，不是壞掉。
+
+    證據卡以前是 ``subtract`` —— PR-2 給了它面板，換成兩張**明文不補**的
+    （工作單：roi_mask 與 load_sidecar 價值低，真有人要再開）。
+    """
+    assert insp_mod.inspector_for("roi_mask") is None
+    assert insp_mod.inspector_for("load_sidecar") is None
     assert insp_mod.inspector_for("") is None
     assert insp_mod.inspector_for("align") is insp_mod.AlignInspector
+    assert insp_mod.inspector_for("subtract") is insp_mod.SubtractInspector
 
 
 def test_an_empty_panel_says_why_it_is_empty(qapp):
@@ -745,24 +750,45 @@ def test_the_numbers_on_the_plot_are_short_and_keep_their_direction(qapp):
     而 `snr` 照定義不帶方向（使用者：「SNR 不會有負值」）。
     """
     caption = insp_mod.GlvInspector._compare_caption
+
+    def metrics_table(compare_metrics, stat="glv_median,glv_q90"):
+        """哪個名字是哪個 metric，**問真的那張卡**（`cmp_feature_specs` ——
+        note 裡那張表的產地；PR-3 起面板讀表、不猜字串）。"""
+        from d4t.core.pipeline import get_step
+        from d4t.core.steps.glv_stats import cmp_feature_specs
+
+        glv = get_step("glv_stats")
+        p = glv.validate_params({
+            "source": "test", "metrics": "glv_median",
+            "reference": "another region", "reference_region": "mg",
+            "compare_metrics": compare_metrics, "stat": stat})
+        return {n: {"metric": m, "stat": s}
+                for n, m, s in cmp_feature_specs(p)}
+
+    table = metrics_table("delta,snr,overlap")
     text = caption({"values": {"cmp_delta_median": 26.138,
                                "cmp_snr_median": 66.116,
-                               "cmp_overlap": 0.0604}})
+                               "cmp_overlap": 0.0604},
+                    "metrics": table})
     assert text == "Δ +26  ·  SNR 66  ·  overlap 0.06"
 
     # 方向反過來 -> 減號（真的減號，不是 hyphen）
-    dark = caption({"values": {"cmp_delta_median": -26.138}})
+    dark = caption({"values": {"cmp_delta_median": -26.138},
+                    "metrics": table})
     assert dark == "Δ \u221226"
 
     # 同一個 metric 勾了好幾個統計量 -> 圖上只寫第一個（其餘在特徵表上）
     many = caption({"values": {"cmp_delta_median": 26.0, "cmp_delta_q90": 25.0,
                                "cmp_snr_median": 66.0, "cmp_ratio_median": 1.2,
-                               "cmp_overlap": 0.06}})
+                               "cmp_overlap": 0.06},
+                    "metrics": metrics_table("delta,snr,ratio,overlap")})
     assert many.count("Δ") == 1
     assert len(many.split("  ·  ")) == insp_mod.GlvInspector.CMP_MAX
 
     # 不是這張卡寫的名字不要瞎猜
-    assert caption({"values": {"blob_area": 3.0}}) == ""
+    assert caption({"values": {"blob_area": 3.0}, "metrics": table}) == ""
+    # 舊 meta（沒有 metrics 那張表）→ 整行留白，**不回頭猜字串**
+    assert caption({"values": {"cmp_delta_median": 26.0}}) == ""
 
 
 def test_it_says_when_the_region_is_too_thin_to_trust(qapp):
@@ -824,6 +850,23 @@ def test_the_gray_level_tab_says_what_it_is_showing(qapp):
     assert across.tab_title() == "GLV · epi vs mg @ ref"
     assert "compared against mg @ ref" in across.tab_tooltip()
     assert "glv_median" in across.tab_tooltip(), "tooltip 要說出在顯示哪幾個"
+
+    # 接 `_center` 時用意圖語言（PR-2）：字典住 `region_words`，跟畫布的
+    # 埠 hover 同一份；原名括號保留（對得回畫布上那顆埠）。
+    def run_center():
+        ctx = Context(images={"test": img})
+        ctx.set_roi_boxes("epi_center", [(0.25, 0.25, 0.5, 0.5)])
+        get_step("glv_stats")().run(ctx, {
+            "source": "test", "roi": "epi_center", "metrics": "glv_median"})
+        insp = insp_mod.GlvInspector()
+        insp.set_context("glv_stats", meta=dict(ctx.meta))
+        return insp
+
+    from d4t.ui import region_words
+    centred = run_center()
+    phrase = region_words.INTENT_PHRASE[region_words.ROLE_CENTER]
+    assert centred.tab_title() == "GLV · %s (epi_center) on test" % phrase
+    assert phrase in centred.tab_tooltip()
 
     # 沒資料的時候退回類別的名字（分頁鈕不能是空的）
     empty = insp_mod.GlvInspector()

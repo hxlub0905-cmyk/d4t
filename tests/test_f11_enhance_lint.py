@@ -251,5 +251,9 @@ def test_enhance_cards_declare_which_of_their_numbers_are_diagnostics():
     cls = get_step("denoise")
     p = {"streams": "test", "method": "median"}
     assert set(cls.diagnostic_features(p)) == set(cls.resolve_features(p))
-    # 量測卡沒有診斷數字：它報的每一個都是量出來的
-    assert get_step("glv_stats").diagnostic_features({"source": "test"}) == []
+    # 量測卡的診斷是「量得準不準」那一小族，不是它量出來的值 ——
+    # 量測值（glv_median 那些）一個都不在裡面
+    glv = get_step("glv_stats")
+    assert glv.diagnostic_features({"source": "test"}) == ["glv_pixels"]
+    assert set(glv.diagnostic_features({"source": "test", "min_pixels": 10})) \
+        == {"glv_pixels", "glv_ok"}

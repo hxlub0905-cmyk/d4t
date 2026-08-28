@@ -52,8 +52,9 @@ from PySide6.QtWidgets import (
 )
 
 from .gallery import GalleryPanel
-from .results_table import ResultsTable
+from .results_table import ResultsTablePane
 from .verdict_band import VerdictBand, verdict_rows
+from .why_panel import WhyPanel
 from .widgets import HistogramWidget, apply_button_cursors
 
 __all__ = ["ResultsWindow"]
@@ -75,6 +76,11 @@ class ResultsWindow(QMainWindow):
     class_selected = Signal(str)
     #: 表格上雙擊一列 = 去看那一顆（跟 Gallery 的 `defect_activated` 同一個約定）。
     defect_activated = Signal(str)
+    #: 表格上點了 score / bin / class 欄 = 「這一顆為什麼判成這樣」（PR-3）。
+    #: Studio 接了算 trace 再回頭餵 :meth:`show_why` —— 本視窗不碰 recipe。
+    trace_requested = Signal(str)
+    #: 回溯面板點了一項：``(defect_id, 特徵名)``。跳去哪由 Studio 決定。
+    why_item_activated = Signal(str, str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -118,12 +124,24 @@ class ResultsWindow(QMainWindow):
         # ⚠ **同一份資料兩種看法，而不是兩個地方各存一份**（R7，2026-08-24）：
         # 縮圖回答「這一顆長什麼樣」，表格回答「照這個數字排一下、哪幾顆算不
         # 出來、為什麼」。兩邊都由 `set_results` 從同一批結果餵。
-        self.table = ResultsTable(self)
+        # PR-1：表格外面包一層 Pane（欄位搜尋框 + 「All measurements (N)」）。
+        # ``self.table`` 沿用同一個名字 —— 它把 `ResultsTable` 的介面
+        # （set_results / select_defect / cell_text / defect_activated…）
+        # 原封轉出來，宿主與測試都不用改。
+        self.table = ResultsTablePane(self)
         self.table.defect_activated.connect(self.defect_activated)
         self.gallery.defect_activated.connect(self.defect_activated)
+        self.table.trace_requested.connect(self.trace_requested)
         self.view_stack = QStackedWidget(self)
         self.view_stack.addWidget(self.gallery)
         self.view_stack.addWidget(self.table)
+        # 回溯面板（PR-3）：住在縮圖/表格旁邊的水平 splitter，預設藏著 ——
+        # 點了 score/bin/class 才出現，Esc 收回去。不搶焦點、不擋列選取。
+        self.why = WhyPanel(self)
+        self.why.hide()
+        self.why.item_activated.connect(
+            lambda name: self.why_item_activated.emit(self.why.defect_id(),
+                                                      str(name)))
         self.histogram = HistogramWidget(self)
         self.histogram.setMinimumHeight(150)
         spread = self._build_spread()
@@ -190,7 +208,14 @@ class ResultsWindow(QMainWindow):
                                   "why the failed ones failed")
         rl.addStretch(1)
         lay.addWidget(row)
-        lay.addWidget(self.view_stack, 1)
+        why_split = QSplitter(Qt.Horizontal, host)
+        why_split.addWidget(self.view_stack)
+        why_split.addWidget(self.why)
+        why_split.setStretchFactor(0, 3)
+        why_split.setStretchFactor(1, 1)
+        why_split.setCollapsible(0, False)
+        self.why_splitter = why_split
+        lay.addWidget(why_split, 1)
         return host
 
     def show_view(self, index: int) -> None:
@@ -314,9 +339,24 @@ class ResultsWindow(QMainWindow):
     def selected_class(self) -> str:
         return self.verdict.selected()
 
-    def set_table(self, results: Any, class_names: Any = None) -> None:
-        """表格那一半（跟 Gallery 吃同一批結果）。"""
-        self.table.set_results(list(results or []), dict(class_names or {}))
+    def show_why(self, defect_id: str, trace: Any) -> None:
+        """開回溯面板（trace 由 Studio 用 `verdict_trace` 算好交進來）。"""
+        self.why.set_trace(str(defect_id), trace)
+        self.why.present()
+
+    def hide_why(self) -> None:
+        self.why.hide()
+
+    def set_table(self, results: Any, class_names: Any = None,
+                  layout: Any = None, alarms: Any = None) -> None:
+        """表格那一半（跟 Gallery 吃同一批結果）。
+
+        ``layout``/``alarms`` 是分層與徽章的描述（`results_table.column_tree`
+        / `verdict_features.diagnostic_alarm_map`），由 Studio 從 recipe 推導；
+        不給就是平鋪 —— 這裡只轉手，不算。
+        """
+        self.table.set_results(list(results or []), dict(class_names or {}),
+                               layout, alarms)
 
     def set_summary(self, text: str) -> None:
         """工具列左側的一句話（「跑了幾顆、成功幾顆、花多久」）。"""

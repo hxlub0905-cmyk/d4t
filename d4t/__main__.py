@@ -49,7 +49,8 @@ def _print_issues(issues) -> bool:
     """列印 lint 結果；回傳是否有 error 等級。"""
     has_error = False
     for it in issues:
-        mark = "✗" if it.level == "error" else "△"
+        # info 印 ·（「值得知道」那一級，PR-2）—— 跟 KLARF 匯出那邊同一套記號。
+        mark = {"error": "✗", "warning": "△"}.get(it.level, "·")
         has_error = has_error or it.level == "error"
         node = f" @{it.node_id}" if it.node_id else ""
         print(f"  {mark} [{it.code}]{node} {it.title} — {it.detail}")

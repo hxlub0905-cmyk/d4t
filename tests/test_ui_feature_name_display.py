@@ -124,10 +124,13 @@ def test_the_plain_name_is_still_what_the_cell_says(qapp=None):
 
     app = QApplication.instance() or QApplication([])
     table = FeatureTable()
+    from d4t.core.pipeline.step import FeatureSpec
+
     table.set_features(
         {"test_epi_glv_median": 12.5},
-        parts={"test_epi_glv_median": {"base": "glv_median", "stream": "test",
-                                       "region": "epi", "region_index": 0}})
+        specs={"test_epi_glv_median": FeatureSpec(
+            name="test_epi_glv_median", card="glv_stats", base="glv_median",
+            stream="test", region="epi", region_index=0, family="glv")})
     item = table.item(0, 0)
     assert item.text() == "test_epi_glv_median"          # 打得進表達式的那一串
     html = item.data(_FeatureNameDelegate.HTML_ROLE)

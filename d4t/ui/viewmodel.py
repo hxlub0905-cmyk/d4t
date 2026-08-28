@@ -23,6 +23,24 @@ from d4t.core.pipeline.recipe import (RECIPE_VERSION, DecideSpec, Let, Rule,
                                       TreeLeaf, TreeStep, _tree_from_json,
                                       _tree_to_json, feature_referrers,
                                       region_edge_values, rules_to_tree)
+from d4t.core.steps._util import centre_name, others_name
+from d4t.core.steps.glv_stats import EACH_BOX, POOLED, REF_NONE, REF_REGION
+
+#: GLV 卡最上面那三顆「我要量什麼」（PR-2 2a）。**preset 不是參數**：recipe
+#: 沒有新欄位，選了只動 roi / reference_region 兩條線與 reference /
+#: across_boxes 兩格 —— 存出來的 JSON 跟手拉線、手填格的逐位元組相同。
+#: （id, 顯示字, 一句話）；字在這裡一份，ParamForm 只負責畫。
+GLV_INTENTS: Tuple[Tuple[str, str, str], ...] = (
+    ("defect_box", "The defect's box",
+     "Measure the centred box, judged against the other boxes."),
+    ("oddest_box", "The most unusual box",
+     "Measure every box and report the odd one out."),
+    ("region_stats", "The whole region",
+     "Pool every box into one pile of pixels."),
+)
+
+#: 比對不上任何 preset 時顯示的狀態 id。
+GLV_INTENT_CUSTOM = "custom"
 
 #: bin 編號的上限。**它的用途是「別讓數字框變成一格自由文字」，不是「分類碼
 #: 應該多大」** —— 後者是廠決定的，不是我們。
@@ -845,19 +863,41 @@ class RecipeModel:
         """
         feats: List[str] = []
         known = self.nm_per_px_is_known()
+        for _nid, _cls, s in self._declared_specs(upto_node):
+            # PR-3 起 nm 的孿生看**宣告的身分**（``variant``），不再拆字尾
+            # —— 使用者自己取的 ``output_prefix`` 以 ``_nm`` 結尾時，
+            # 字尾判斷會把真的量砍掉。
+            if not known and s.variant in ("nm", "nm2"):
+                continue
+            if s.name not in feats:
+                feats.append(s.name)
+        return feats
+
+    def _declared_specs(self, upto_node: Optional[str] = None,
+                        include_upto: bool = True):
+        """route 上啟用卡片宣告的 spec（`resolve_feature_specs`），執行序逐個。
+
+        三份清單（`available_features` / `labelled_features` /
+        `feature_owners`）共用**這一個**迴圈 —— 「哪些名字、歸誰」的答案
+        只能有一份，以前是三段手抄。
+        """
         for nid in self.node_order:
             node = self.nodes[nid]
             if not node.enabled:
                 continue
+            if nid == upto_node and not include_upto:
+                # **這張卡自己的輸出不能列進來**（F21-B，實跑截圖抓到）：
+                # `Feature math` 的清單裡出現 `defect_score`，而那正是它自己
+                # 要寫出去的名字 —— 點下去就是 `defect_score = defect_score`。
+                # 引擎擋得住（`unknown-feature-input`），但**讓使用者點一個
+                # 保證壞掉的選項，本身就是 bug**（推廣鐵則）。
+                return
             step_cls = get_step(node.step)
-            for f in step_cls.resolve_features(node.params):
-                if not known and (f.endswith("_nm") or f.endswith("_nm2")):
-                    continue
-                if f not in feats:
-                    feats.append(f)
+            for s in step_cls.resolve_feature_specs(node.params):
+                yield nid, step_cls, s
             if nid == upto_node:
-                break
-        return feats
+                return
+
 
     #: 「數字 → 誰算的」清單裡，名字與來源之間的分隔（F21-B）。
     #: 一個字串裝兩件事是刻意的：``ParamForm`` 的執行期選單是
@@ -881,27 +921,14 @@ class RecipeModel:
         """
         out: List[str] = []
         known = self.nm_per_px_is_known()
-        for nid in self.node_order:
-            node = self.nodes[nid]
-            if not node.enabled:
+        for nid, step_cls, s in self._declared_specs(upto_node, include_upto):
+            if not known and s.variant in ("nm", "nm2"):
                 continue
-            if nid == upto_node and not include_upto:
-                # **這張卡自己的輸出不能列進來**（F21-B，實跑截圖抓到）：
-                # `Feature math` 的清單裡出現 `defect_score`，而那正是它自己
-                # 要寫出去的名字 —— 點下去就是 `defect_score = defect_score`。
-                # 引擎擋得住（`unknown-feature-input`），但**讓使用者點一個
-                # 保證壞掉的選項，本身就是 bug**（推廣鐵則）。
-                break
-            step_cls = get_step(node.step)
-            label = str(getattr(step_cls, "label", "") or node.step)
-            for f in step_cls.resolve_features(node.params):
-                if not known and (f.endswith("_nm") or f.endswith("_nm2")):
-                    continue
-                if not any(x.split(self.FEATURE_LABEL_SEP, 1)[0] == f
-                           for x in out):
-                    out.append(f + self.FEATURE_LABEL_SEP + label)
-            if nid == upto_node:
-                break
+            label = str(getattr(step_cls, "label", "") or
+                        self.nodes[nid].step)
+            if not any(x.split(self.FEATURE_LABEL_SEP, 1)[0] == s.name
+                       for x in out):
+                out.append(s.name + self.FEATURE_LABEL_SEP + label)
         return out
 
     def feature_owners(self) -> Dict[str, str]:
@@ -913,13 +940,8 @@ class RecipeModel:
         值是**空字串**（畫布上那張卡沒有 node id）。
         """
         out: Dict[str, str] = {}
-        for nid in self.node_order:
-            node = self.nodes[nid]
-            if not node.enabled:
-                continue
-            step_cls = get_step(node.step)
-            for f in step_cls.resolve_features(node.params):
-                out.setdefault(str(f), nid)
+        for nid, _cls, s in self._declared_specs():
+            out.setdefault(str(s.name), nid)
         if self.decide is not None:
             for x in self.decide.let:
                 name = str(x.name).strip()
@@ -1227,6 +1249,103 @@ class RecipeModel:
         except Exception:                  # noqa: BLE001 — 顯示用，壞了就空著
             return []
         return out + [r for r in passed if r not in out]
+
+    # ---- GLV「我要量什麼」三選（PR-2 2a）----------------------------------
+    #
+    # 為什麼腦袋在 model 不在表單：``roi`` 是**線水合**的（`to_json_dict`
+    # 還會把跟線一致的值省略），所以 preset 填 roi ＝ 改區域線的埠 ——
+    # 而線、參數、undo 都住在這裡。表單只畫三顆鈕、發一個 id。
+    def _glv_region_edges(self, node_id: str, param: str) -> List[Edge]:
+        nid = str(node_id)
+        return [e for e in self.edges
+                if e.dst == nid and e.dst_in == str(param)]
+
+    def glv_intent(self, node_id: str) -> str:
+        """這張 GLV 卡現在對得上哪個 preset（對不上回 ``"custom"``）。
+
+        **偵測永不改 recipe** —— 「自訂」是一個顯示狀態，不是要被修正的錯。
+        """
+        node = self.nodes.get(str(node_id))
+        if node is None or node.step != "glv_stats":
+            return GLV_INTENT_CUSTOM
+        roi_edges = self._glv_region_edges(node_id, "roi")
+        if len(roi_edges) != 1:
+            return GLV_INTENT_CUSTOM         # 沒接（或接了好幾條）都是自訂
+        wired = str(roi_edges[0].src_out)
+        base = wired
+        for suffix in ("_center", "_others"):
+            if base.endswith(suffix):
+                base = base[:-len(suffix)]
+        producer = str(roi_edges[0].src)
+        ref = str(node.params.get("reference", REF_NONE) or REF_NONE)
+        boxes = str(node.params.get("across_boxes", POOLED) or POOLED)
+        ref_edges = self._glv_region_edges(node_id, "reference_region")
+        if (wired == centre_name(base) and ref == REF_REGION
+                and boxes == POOLED and len(ref_edges) == 1
+                and ref_edges[0].src == producer
+                and str(ref_edges[0].src_out) == others_name(base)):
+            return "defect_box"
+        if wired == base and not ref_edges:
+            if ref == REF_NONE and boxes == EACH_BOX:
+                return "oddest_box"
+            if ref == REF_NONE and boxes == POOLED:
+                return "region_stats"
+        return GLV_INTENT_CUSTOM
+
+    def apply_glv_intent(self, node_id: str, intent: str) -> bool:
+        """套一個 preset：只動 roi / reference_region 的線與 reference /
+        across_boxes 兩格，**一次 Ctrl+Z 全還原**（compound）。
+
+        preset (1) 是使用者 2026-08-27 拍板的**現行正確寫法**：roi 接
+        `<n>_center`、reference="another region"、reference_region 接
+        `<n>_others`（兩條虛線、同一個 producer）—— 工作單字面的
+        REF_OTHERS+_center 會派生出沒人產的 `<n>_center_others`，不用。
+        套不上（沒有 roi 線、producer 沒那顆埠）回 False，什麼都不動。
+        """
+        nid = str(node_id)
+        node = self.nodes.get(nid)
+        if node is None or node.step != "glv_stats":
+            return False
+        roi_edges = self._glv_region_edges(nid, "roi")
+        if len(roi_edges) != 1:
+            return False
+        producer = str(roi_edges[0].src)
+        base = str(roi_edges[0].src_out)
+        for suffix in ("_center", "_others"):
+            if base.endswith(suffix):
+                base = base[:-len(suffix)]
+        ports = set(self.region_outputs(producer))
+
+        want_roi = {"defect_box": centre_name(base),
+                    "oddest_box": base, "region_stats": None}
+        if str(intent) not in want_roi:
+            return False
+        roi_port = want_roi[str(intent)]
+        if roi_port is not None and roi_port not in ports:
+            return False
+        if str(intent) == "defect_box" and others_name(base) not in ports:
+            return False
+
+        with self.compound("glv-intent:%s" % nid):
+            if roi_port is not None:
+                for e in list(self._glv_region_edges(nid, "roi")):
+                    self.remove_edge(e.src, nid, e.src_out, "roi")
+                self.add_edge(producer, nid, roi_port, "roi")
+            # 藏起來的參數掛著線＝畫布說謊 —— 不是 defect_box 就把參照線清掉。
+            for e in list(self._glv_region_edges(nid, "reference_region")):
+                self.remove_edge(e.src, nid, e.src_out, "reference_region")
+            if str(intent) == "defect_box":
+                self.add_edge(producer, nid, others_name(base),
+                              "reference_region")
+                self.set_param(nid, "reference", REF_REGION)
+                self.set_param(nid, "across_boxes", POOLED)
+            elif str(intent) == "oddest_box":
+                self.set_param(nid, "reference", REF_NONE)
+                self.set_param(nid, "across_boxes", EACH_BOX)
+            else:
+                self.set_param(nid, "reference", REF_NONE)
+                self.set_param(nid, "across_boxes", POOLED)
+        return True
 
     def region_producer(self, name: str,
                         before_node: Optional[str] = None) -> str:

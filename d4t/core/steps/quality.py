@@ -33,10 +33,25 @@ class FocusQualityStep(MultiSourceStep):
     writes: List[str] = []
     features_out = ["focus_lapvar", "focus_tenengrad", "focus_fft"]
 
+    @classmethod
+    def base_specs(cls, params: Dict[str, Any]):
+        """基本名＋身分（PR-3）：三個銳利度值，metric = 名字本人。"""
+        return [(str(n), str(n), "", "", "") for n in cls.features_out]
+
     def measure(self, ctx: Context, img, p: Dict[str, Any]):
         q = algo_quality.compute_quality(img)
         if q.get("error"):
             raise StepError(self.key, f"image quality computation failed: {q['error']}")
+        # 儀表用（PR-2）：同一份數字順手留在 meta，面板**選到卡就有**（單顆
+        # 立即顯示），不必等跑完一批 —— 跟 `glv_stats._note_distribution` 同
+        # 一條路。批次的分布照舊由 trial_results 補。
+        ctx.meta.setdefault("focus", []).append({
+            "stream": str(p.get(self.CURRENT_STREAM, "") or ""),
+            "prefix": str(p.get(self.CURRENT_PREFIX, "") or ""),
+            "lapvar": float(q["laplacian_var"]),
+            "tenengrad": float(q["tenengrad"]),
+            "fft": float(q["fft_hf_ratio"]),
+        })
         return {
             "focus_lapvar": q["laplacian_var"],
             "focus_tenengrad": q["tenengrad"],

@@ -25,7 +25,7 @@ from __future__ import annotations
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, ClassVar, Dict, List, Optional, Type
+from typing import Any, ClassVar, Dict, List, Optional, Tuple, Type
 
 from .context import Context
 from .cellrois import CellRoiError, format_cell_rois, parse_cell_rois
@@ -53,6 +53,15 @@ _SCALES = (SCALE_DEFECT, SCALE_LOT)
 #: 它們以前借用 ``CATEGORY_ADC`` —— 不是因為它們在做 ADC，而是因為那個值剛好
 #: 讓它們落在快取 checkpoint 之後。現在那件事由宣告推導，這個值可以講實話了。
 CATEGORY_BATCH = "batch"
+
+#: 資料型別（route 的 kind）按「一顆 defect 拿到什麼」分兩群（PR-2）：
+#: patch 形＝機台以 defect 為中心裁切的小圖（`_center` 有幾何意義）；
+#: 單張形＝一顆一張大圖，缺陷可能在任何位置。`Step.kind_issues` 的判準用
+#: 這兩張表。⚠ 跟 `ui/scope.py` 的 `SUPPORTED_KINDS` 要合起來剛好蓋滿 ——
+#: core 不能 import ui，所以由一條 UI 測試 cross-check（第五種 kind 出現時
+#: 兩邊一起紅，而不是安靜地漏掉分群）。
+PATCH_KINDS = ("ebi_patch", "tiff_stack")
+SINGLE_IMAGE_KINDS = ("rsem", "folder")
 
 # --------------------------------------------------------------------------- #
 # 流程階段（F7-3）—— 卡片庫的分組依據
@@ -629,6 +638,72 @@ class ParamSpec:
         return v
 
 
+def qualified_feature_name(prefix: str, name: str) -> str:
+    """被蓋掉的特徵改用這個名字保存：``<前綴>_<原名>``。
+
+    定義住在這裡（PR-3 起）：`FeatureSpec.qualified` 要用它，而 engine
+    import step —— 反過來就循環了。`engine.qualified_feature_name` 是它的
+    re-export，公開名字不變（store / UI / 測試都用那個名字）。
+
+    D1（使用者 2026-08-16 同意）：**特徵掛在產出它的東西上**，所以「這個數字
+    從哪來」永遠答得出來。D2：**沒撞名就用原名**，撞名才加前綴 —— 使用者平常
+    看到的名字跟以前一模一樣。``prefix`` 優先是流名（`engine.feature_prefix`
+    算的），退路是節點 id。
+    """
+    return "%s_%s" % (prefix, name)
+
+
+@dataclass(frozen=True)
+class FeatureSpec:
+    """一個特徵名的**結構化身分**（PR-3）—— 在名字誕生的地方組出來。
+
+    ``name`` 是完整特徵名，**與 `resolve_features` 逐位元組相同**（鐵測試
+    守著）：字串仍然是分數表達式的變數、CSV 的欄名、KLARF 的來源 —— 結構是
+    補上去的 metadata，不是改名。其餘欄位空字串／-1 = 「這一段不存在」。
+
+    variant 裝的是**名字裡真正存在的變體後綴**（2026-08-27 使用者定調）：
+    nm/nm2 孿生、each-box 的 typical/outlier/outlier_box、引擎寫的
+    missing/raw、撞名救援名（rescued）。``epi_center`` 那種是**區域名**
+    （region + region_role），``glv_worst_score`` 那種是**統計量 id**
+    （metric）—— 不是 variant。
+
+    為什麼住在 step.py：命名契約（`resolve_features` / `feature_parts` /
+    `full_prefix`）的家在這裡，拆與合只能有一個家（CLAUDE.md §0）。
+    """
+
+    name: str
+    card: str = ""            #: step key（class 層級）；node_id 由 binder 掛
+    base: str = ""            #: 去前綴後的那段（== feature_parts 的 base）
+    stream: str = ""          #: 流名前綴（單流 = ""）
+    region: str = ""          #: 區域名前綴（單區域 = ""；含後綴全名如 epi_center）
+    region_index: int = -1    #: 第幾個區域 —— 決定顏色；無區域 = -1
+    region_role: str = ""     #: "" | "all" | "center" | "others"
+    own: str = ""             #: 使用者填的 output_prefix
+    variant: str = ""         #: "" | nm | nm2 | typical | outlier | outlier_box
+                              #:    | missing | raw | rescued
+    metric: str = ""          #: 統計量 id（METRIC_GROUPS 的鍵那一層）；無 = ""
+    stat: str = ""            #: 只有 cmp_* 用：比的是哪個統計量（stat-free = ""）
+    family: str = ""          #: "glv" | "cmp" | "cd" | "region" | "engine" | ""
+
+    def qualified(self, prefix: str) -> "FeatureSpec":
+        """撞名救援名的 spec（`engine._rescue_overwritten_features` 那一份）。"""
+        from dataclasses import replace
+        return replace(self, name=qualified_feature_name(prefix, self.name),
+                       variant="rescued")
+
+    def parts(self) -> Dict[str, Any]:
+        """`Step.feature_parts` 形狀的相容 dict（`feature_html` 吃這個）。"""
+        out: Dict[str, Any] = {"base": self.base or self.name}
+        if self.stream:
+            out["stream"] = self.stream
+        if self.region:
+            out["region"] = self.region
+            out["region_index"] = int(self.region_index)
+        if self.own:
+            out["own"] = self.own
+        return out
+
+
 class Step(ABC):
     """所有卡片的基底。子類別必須設定 key/label/category 並實作 run()。"""
 
@@ -695,6 +770,19 @@ class Step(ABC):
         撞名的**資訊沒有丟**：engine 的 `_rescue_overwritten_features` 會把前一張
         的值留成 ``<節點名>_clip_frac``（黃金值裡的 `norm_clip_frac` 就是它）。
         所以這裡跳過的只是那句話，不是那個值。
+        """
+        return []
+
+    @classmethod
+    def diagnostic_alarms(cls, params: Dict[str, Any]) -> List[Tuple[str, bool]]:
+        """(完整特徵名, 出事時的布林值) —— 這張卡的哪幾個診斷值得亮警示。
+
+        只有列在這裡的名字才可能亮結果表的警示徽章 —— UI **永遠不對數值型
+        診斷發明門檻**（``glv_sat_frac`` 多少算高是製程的事，不是軟體的事）。
+        極性是明講的資料：``("glv_ok", False)`` 是「0 就出事」、
+        ``("cd_touches_edge", True)`` 是「1 就出事」—— 不靠名字後綴猜。
+
+        不變量（有測試守）：這裡的名字 ⊆ :meth:`diagnostic_features`。
         """
         return []
 
@@ -886,11 +974,13 @@ class Step(ABC):
     #: 具名區域做過一次的事（F7-9 的 unknown-region）。
     #:
     #: ⚠ **這個宣告目前在畫布上沒有對應的線。** 特徵是扁平的全域命名空間
-    #: （見 docs/ARCHITECTURE.md），而 d4t 從來沒有「特徵從哪一張卡來」的埠 ——
-    #: 分數表達式也是這樣。所以 Algo 卡的相依性靠的是 route 上的先後順序，
-    #: 而 ``validate`` 的 ``unknown-feature-input`` 是目前唯一擋得住它的東西。
-    #: 要讓它變成畫布上的一條線，得先決定第三種埠長什麼樣（見 ROADMAP 的
-    #: 「跨顆那一層」——那一段有同一個問題）。
+    #: （見 docs/ARCHITECTURE.md「特徵的身分」——名字仍是字串，PR-3 起結構
+    #: 身分由 `resolve_feature_specs` 在誕生處宣告），而 d4t 從來沒有
+    #: 「特徵從哪一張卡來」的**埠** —— 分數表達式也是這樣。顯示層「這個數字
+    #: 是誰的」由 `verdict_features.bound_specs` 回答；執行相依性仍靠 route
+    #: 上的先後順序，``validate`` 的 ``unknown-feature-input`` 是目前唯一
+    #: 擋得住它的東西。要讓它變成畫布上的一條線，得先決定第三種埠長什麼樣
+    #: （見 ROADMAP 的「跨顆那一層」——那一段有同一個問題）。
     @classmethod
     def resolve_features_in(cls, params: Dict[str, Any]) -> List[str]:
         """這張卡會讀哪些**已經算出來的特徵**（Algo 段用）。
@@ -927,6 +1017,32 @@ class Step(ABC):
         少一點資訊，不會是錯的資訊。
         """
         return {}
+
+    @classmethod
+    def resolve_feature_specs(cls, params: Dict[str, Any]) -> List["FeatureSpec"]:
+        """`resolve_features` 的結構化版本（PR-3）：一個名字一個 `FeatureSpec`。
+
+        預設從 `resolve_features` + `feature_parts` 組退化版 —— 未遷移／
+        第三方卡自動拿到 name+card（＋parts 拆得出的欄位）。同 `feature_parts`
+        的退化原則：少一點資訊，不會是錯的資訊。
+
+        鐵測試（`tests/test_feature_specs.py`）：每張註冊卡、每組代表參數下
+        ``[s.name for s in specs]`` 與 `resolve_features` **逐位元組相同**
+        （順序也相同）。`resolve_features` 是相容介面，簽名語意不變。
+        """
+        parts = cls.feature_parts(params)
+        out: List[FeatureSpec] = []
+        for n in cls.resolve_features(params):
+            p = parts.get(n, {})
+            out.append(FeatureSpec(
+                name=str(n), card=cls.key,
+                base=str(p.get("base", "") or ""),
+                stream=str(p.get("stream", "") or ""),
+                region=str(p.get("region", "") or ""),
+                region_index=(int(p["region_index"])
+                              if "region_index" in p else -1),
+                own=str(p.get("own", "") or "")))
+        return out
 
     @classmethod
     def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:
@@ -990,6 +1106,19 @@ class Step(ABC):
     @classmethod
     def configuration_hints(cls, params: Dict[str, Any]) -> List[str]:
         """設定得不完整、但**跑得起來**的那些（空 list = 沒問題）。"""
+        return []
+
+    @classmethod
+    def kind_issues(cls, params: Dict[str, Any],
+                    kind: str) -> List[Tuple[str, str, str, str]]:
+        """只在某種資料型別上才成立的發現：``(code, level, title, detail)``。
+
+        `configuration_issues` / `configuration_hints` 看不到 route 的 kind
+        —— 「這組設定對不對」有時取決於「一顆 defect 拿到的是置中的 patch
+        還是一張大圖」（`PATCH_KINDS` / `SINGLE_IMAGE_KINDS`）。這是那一半。
+        ``level`` 用 "error" / "warning" / "info"；`validate` 逐 route 呼叫，
+        detail 會被冠上 route 名。
+        """
         return []
 
     # ---- 跨顆那一層（F16）--------------------------------------------------

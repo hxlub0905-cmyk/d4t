@@ -41,13 +41,14 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QBrush, QColor, QFont, QFontMetricsF, QPainter, QPen, QPolygonF,
 )
-from PySide6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from ..core.algo import glv as algo_glv
 from ..core.steps._util import CLIP_FRAC, PAIR_FEATURES
 from ..core.steps.cd import _BLOB_REASONS as _CD_BLOB_REASONS
 from ..core.steps.cd import reasons_in_words as _cd_reasons_in_words
 from ..core.steps.denoise import HOT_FRAC, REMOVED_OVER_NOISE
+from . import region_words
 from . import theme
 from .theme import TOKENS, region_hex
 
@@ -121,8 +122,14 @@ class Inspector(QWidget):
         return False
 
     def empty_reason(self) -> str:
-        """沒有資料時要說的話 —— 空白面板本身不是訊息。"""
-        return "Run a trial to fill this in."
+        """沒有資料時要說的話 —— 空白面板本身不是訊息。
+
+        這一句是**退路**，不是家：每個註冊過的面板都要自己講（有 registry
+        全掃的測試守著）—— 泛用的一句話答不出「所以我現在該做什麼」
+        （推廣鐵則）。
+        """
+        return ("Nothing to show for this card yet - select a defect, or "
+                "run a trial.")
 
     # -- 共用小工具 ---------------------------------------------------------
     def feature_values(self, name: str) -> List[float]:
@@ -596,6 +603,17 @@ class EnhanceInspector(Inspector):
         panes = self.panes()
         if not panes:
             return
+        # 共用 header（PR-2 2f）：來源流 · n · 這張卡壓掉多少（可信度旗標）。
+        rec = self.record(panes[0]) or {}
+        clip = (float(rec.get("clipped_low") or 0.0)
+                + float(rec.get("clipped_high") or 0.0))
+        head_h = paint_note_header(
+            p, rect, {"stream": panes[0],
+                      "n": int(sum(rec.get("after") or []))},
+            colour=QColor(TOKENS["text_primary"]),
+            trust="%.1f%% clipped" % (100.0 * clip) if clip else "")
+        rect = QRectF(rect.left(), rect.top() + head_h + 1, rect.width(),
+                      rect.height() - head_h - 1)
         # 整批的走勢圖佔底下一條，**只有真的有整批資料時才佔位子**（跑過一次
         # trial 之前它是空的，而一條空的軸線只是雜訊）。
         body = rect
@@ -826,6 +844,12 @@ class CrossInspector(Inspector):
         self.calibrate_btn.clicked.connect(self.calibrate_requested)
         head = QVBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
+        # 共用 header（PR-2 2f）：這個面板是 widget 容器（paintEvent 是
+        # no-op，兩張 ProfilePanel 自己畫），所以標題是一個 QLabel ——
+        # 字照樣走 `note_header`，跟其他面板同一份。
+        self.header = QLabel("", self)
+        self.header.setObjectName("inspectorHeader")
+        head.addWidget(self.header, 0)
         head.addWidget(self.calibrate_btn, 0, Qt.AlignLeft)
         lay.addLayout(head)
 
@@ -864,6 +888,12 @@ class CrossInspector(Inspector):
     def set_context(self, *a, **kw) -> None:   # noqa: D102
         super().set_context(*a, **kw)
         rec = self.record()
+        left, right = note_header(
+            {"stream": str(self.params.get("source", "") or ""),
+             "n": len(rec.get("boxes") or [])},
+            self.region(), unit="box(es)")
+        self.header.setText("%s    %s" % (left, right) if rec else "")
+        self.header.setVisible(bool(rec))
         self.across.set_data("upright stripes", rec.get("x"))
         self.down.set_data("flat stripes", rec.get("y"))
         # **沒在看的方向不畫。**（F11 Region-2c）那個方向的曲線是一條平的線，
@@ -1171,6 +1201,15 @@ class MeasureInspector(Inspector):
             # 就是它，而症狀是「圖載不出來」。
             self._say_empty(p, rect)
             return
+        # 共用 header（PR-2 2f）：來源流 · n（這裡的 n 是整批的顆數 ——
+        # Spread 的資料本來就是 batch）。
+        src = str(self.params.get("source", "") or "").split(",")[0].strip()
+        head_h = paint_note_header(
+            p, rect, {"stream": src,
+                      "n": len(self.feature_values(names[0]))},
+            colour=QColor(TOKENS["text_primary"]), unit="defect(s)")
+        rect = QRectF(rect.left(), rect.top() + head_h + 1, rect.width(),
+                      rect.height() - head_h - 1)
         # 圖例畫一次就好（每一排都畫是噪音），而且**放得下才畫** ——
         # 面板可以被拖到很矮，那時候長條本身比圖例重要。
         body = rect
@@ -1418,6 +1457,14 @@ class GlvInspector(Inspector):
                 out[str(rec.get("target") or "")] = str(rec.get("reference") or "")
         return out
 
+    @staticmethod
+    def _intent_name(region: str) -> str:
+        """接了 ``_center`` 時用意圖語言講那一塊（PR-2；字典住 `region_words`，
+        跟畫布的埠 hover 同一份）。原名括號保留 —— 意圖語言是翻譯不是改名，
+        使用者要對得回畫布上那顆埠。"""
+        phrase = region_words.INTENT_PHRASE.get(region_words.role_of(region))
+        return "%s (%s)" % (phrase, region) if phrase else region
+
     def tab_title(self) -> str:                # noqa: D102
         rows = self.rows()
         if not rows:
@@ -1431,8 +1478,9 @@ class GlvInspector(Inspector):
         if versus:
             # 「誰跟誰比」比「在哪條流上」重要 —— 兩個都塞得下的話字會太長，
             # 而流名在比較的那一邊已經寫出來了（`epi_others @ ref`）。
-            return "%s · %s vs %s" % (self.title, who, versus)
-        return "%s · %s on %s" % (self.title, who,
+            return "%s · %s vs %s" % (self.title, self._intent_name(who),
+                                      versus)
+        return "%s · %s on %s" % (self.title, self._intent_name(who),
                                   str(first.get("stream") or "?"))
 
     def tab_tooltip(self) -> str:              # noqa: D102
@@ -1442,10 +1490,11 @@ class GlvInspector(Inspector):
         pairs = self._pairs()
         bits = []
         for r in rows:
-            who = str(r.get("region") or "the whole image")
-            line = "%s on %s" % (who, r.get("stream") or "?")
-            if pairs.get(who):
-                line += "  compared against %s" % pairs[who]
+            raw = str(r.get("region") or "the whole image")
+            line = "%s on %s" % (self._intent_name(raw),
+                                 r.get("stream") or "?")
+            if pairs.get(raw):
+                line += "  compared against %s" % pairs[raw]
             if int(r.get("boxes") or 0) > 1:
                 line += "  (%d boxes, one at a time)" % int(r.get("boxes") or 0)
             bits.append(line)
@@ -1499,41 +1548,36 @@ class GlvInspector(Inspector):
             # **虛線那條就是它** —— 標題上的這一段用同一個顏色寫（見下面
             # 那個兩段式的 drawText），不然畫面上沒有任何東西說得出那條線是誰。
             tail = "  vs  " + versus
+        worst = row.get("worst") if isinstance(row.get("worst"), dict) else {}
+        judge_note = (row.get("judge")
+                      if isinstance(row.get("judge"), dict) else {})
         if int(row.get("boxes") or 0) > 1:
             # 一格一格量的時候畫的是**典型那一格**，而畫面必須說出這件事 ——
             # 不說的話這條分布看起來像整個區域的，那是兩個不同的東西。
-            label += "  ·  typical box #%d of %d" % (int(row.get("box") or 0),
-                                                     int(row.get("boxes") or 0))
-            worst = row.get("worst") or {}
-            if isinstance(worst, dict) and worst:
-                # 贏家（F32）：影像上描四邊的那一格，這裡講「第幾格、幾個 σ、
-                # 照什麼挑」—— 跟 `worst_*` 特徵同一份 meta，不重算。
+            if worst:
+                # 贏家（F32/PR-2）：影像上描四邊的那一格。「typical #N vs
+                # odd #K (X.Xσ) of M」—— 跟 `worst_*` 特徵同一份 meta，不重算。
                 judge = str(worst.get("judge") or "")
-                label += "  ·  worst #%d at %.1fσ%s" % (
-                    int(worst.get("i", -1)), float(worst.get("score") or 0.0),
-                    (" (%s)" % judge[4:] if judge.startswith("glv_")
-                     else (" (%s)" % judge if judge else "")))
-        head = QRectF(band.left(), band.top(), band.width(), 13)
-        p.setPen(colour)
-        p.drawText(head, Qt.AlignLeft | Qt.AlignVCenter, label)
-        if tail:
-            w = QFontMetricsF(p.font()).horizontalAdvance(label)
-            p.setPen(QColor(TOKENS[self.REF_TOKEN]))
-            p.drawText(QRectF(head.left() + w, head.top(),
-                              head.width() - w, head.height()),
-                       Qt.AlignLeft | Qt.AlignVCenter, tail)
-        p.setPen(QColor(TOKENS["text_hint"]))
-        # 三個旋鈕丟掉了像素的時候要講出來（F18 第 4 步）：畫面上這條分布是
-        # **留下來的那些**，而使用者需要知道那不是整塊。
-        n, n_raw = int(row.get("n") or 0), int(row.get("n_raw") or 0)
-        count = ("n=%d of %d px" % (n, n_raw)) if n_raw and n_raw != n \
-            else ("n=%d px" % n)
-        p.drawText(head, Qt.AlignRight | Qt.AlignVCenter,
-                   "%s · %.1f%% saturated"
-                   % (count, 100.0 * float(row.get("sat") or 0.0)))
+                label += "  ·  typical #%d vs odd #%d (%.1fσ) of %d%s" % (
+                    int(row.get("box") or 0), int(worst.get("i", -1)),
+                    float(worst.get("score") or 0.0),
+                    int(row.get("boxes") or 0),
+                    (" by %s" % judge[4:] if judge.startswith("glv_")
+                     else (" by %s" % judge if judge else "")))
+            else:
+                label += "  ·  typical box #%d of %d" % (
+                    int(row.get("box") or 0), int(row.get("boxes") or 0))
+        # 共用 header（PR-2 2f）：來源流 · 區域 · n · 可信度旗標。
+        head_h = paint_note_header(
+            p, band, row, colour=colour, label=label, tail=tail,
+            tail_colour=QColor(TOKENS[self.REF_TOKEN]),
+            trust="%.1f%% saturated" % (100.0 * float(row.get("sat") or 0.0)))
 
-        plot = QRectF(band.left(), head.bottom() + 1, band.width(),
-                      max(8.0, band.bottom() - head.bottom() - 12))
+        # 逐框判準值帶（PR-2 2c）要一條自己的高度 —— 從 plot 那裡分。
+        judge_h = (self.BAND_H + 2.0
+                   if judge_note and judge_note.get("values") else 0.0)
+        plot = QRectF(band.left(), band.top() + head_h + 1, band.width(),
+                      max(8.0, band.height() - head_h - 12 - judge_h))
         top = max(counts) or 1
         bw = plot.width() / float(len(counts))
         fill = QColor(colour)
@@ -1557,7 +1601,88 @@ class GlvInspector(Inspector):
         p.drawText(axis, Qt.AlignRight | Qt.AlignVCenter, "255")
 
         self._paint_reference(p, plot, row)
+        self._paint_worst_overlay(p, plot, worst)
         self._paint_marks(p, plot, row, colour)
+        if judge_h:
+            self._paint_judge_band(
+                p, QRectF(band.left(), axis.bottom() + 2, band.width(),
+                          self.BAND_H),
+                judge_note)
+
+    def _paint_worst_overlay(self, p: QPainter, plot: QRectF,
+                             worst: Dict[str, Any]) -> None:
+        """worst 那一格的分布**疊在 typical 上**（PR-2 2c）。
+
+        同一把 0–255 的尺、各自正規化到自己的峰（同 `_paint_reference` 的
+        理由：兩塊像素數常差幾十倍）。實線、danger 色 —— worst 是**嫌疑人**
+        不是背景，背景（虛線、次要色）留給參照。資料是引擎在挑 worst 的那
+        一次計算裡順手留的（`glv_stats._measure_each_box`），這裡不重算。
+        """
+        counts = [max(0, int(c)) for c in ((worst or {}).get("bins") or [])]
+        if not counts or plot.height() < 10:
+            return
+        ink = QColor(TOKENS.get("danger_text", "#a83f33"))
+        top = max(counts) or 1
+        bw = plot.width() / float(len(counts))
+        pts = [QPointF(plot.left() + (k + 0.5) * bw,
+                       plot.bottom() - (c / float(top)) * plot.height())
+               for k, c in enumerate(counts)]
+        pen = QPen(ink, 1.2)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawPolyline(QPolygonF(pts))
+
+    def _paint_judge_band(self, p: QPainter, band: QRectF,
+                          judge: Dict[str, Any]) -> None:
+        """逐框判準值帶（PR-2 2c）：一格一點、基準虛線、worst 加圈。
+
+        畫的是 worst 選拔**真的比過的那串數字**（`judge_note`，>512 格時
+        引擎已取樣並記 `sampled`）—— 不是面板自己再量一次。
+        """
+        vals = [float(v) for v in (judge.get("values") or [])]
+        boxes = [int(b) for b in (judge.get("boxes") or [])]
+        if not vals or band.height() < 8:
+            return
+        lo, hi = min(vals), max(vals)
+        span = (hi - lo) or 1.0
+        pad = 6.0
+        mid = band.center().y() + 2.0
+
+        def to_x(v: float) -> float:
+            return band.left() + pad + (v - lo) / span * (band.width() - 2 * pad)
+
+        stat = str(judge.get("stat") or "")
+        caption = "each box by %s%s" % (
+            stat[4:] if stat.startswith("glv_") else stat,
+            " (sampled)" if judge.get("sampled") else "")
+        p.setPen(QColor(TOKENS["text_hint"]))
+        f = p.font()
+        f.setPointSizeF(max(7.0, f.pointSizeF() - 1.0))
+        p.setFont(f)
+        p.drawText(band, Qt.AlignLeft | Qt.AlignTop, caption)
+
+        base = QColor(TOKENS["text_secondary"])
+        p.setPen(QPen(base, 1.0, Qt.DashLine))
+        bx = to_x(float(judge.get("median") or 0.0))
+        p.drawLine(QPointF(bx, band.top() + 1), QPointF(bx, band.bottom() - 1))
+
+        dot = QColor(TOKENS["text_secondary"])
+        dot.setAlpha(170)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(dot))
+        worst_box = int(judge.get("worst_box", -1))
+        worst_at = None
+        for v, b in zip(vals, boxes):
+            x = to_x(v)
+            p.drawEllipse(QPointF(x, mid), 1.6, 1.6)
+            if b == worst_box:
+                worst_at = x
+        if worst_at is not None:
+            ring = QColor(TOKENS.get("danger_text", "#a83f33"))
+            p.setPen(QPen(ring, 1.2))
+            p.setBrush(Qt.NoBrush)
+            p.drawEllipse(QPointF(worst_at, mid), 4.0, 4.0)
 
     #: 參照那條分布用什麼顏色（虛線、次要色）—— 它是**背景**，量的那一塊才是
     #: 主角，所以不搶顏色。
@@ -1668,13 +1793,14 @@ class GlvInspector(Inspector):
         面板不自己再算一次，不然畫面上的數字跟寫出去的有機會不一樣。
         """
         values = ref.get("values") or {}
+        # 哪個名字是哪個 metric，**卡片寫 note 的時候一起講了**
+        # （`glv_stats.cmp_feature_specs` → ``ref["metrics"]``，PR-3）。
+        # 舊 meta 沒有那張表就整行跳過 —— 不回頭猜字串。
+        metrics = ref.get("metrics") or {}
         rows: List[Tuple[int, str, float]] = []
         for name, value in values.items():
-            rest = str(name).split("cmp_", 1)[-1]
-            metric = next((m for m in sorted(cls.CMP_SHORT, key=len,
-                                             reverse=True)
-                           if rest == m or rest.startswith(m + "_")), "")
-            if not metric:
+            metric = str((metrics.get(str(name)) or {}).get("metric") or "")
+            if metric not in cls.CMP_SHORT:
                 continue
             try:
                 rows.append((cls.CMP_ORDER.index(metric)
@@ -1852,6 +1978,58 @@ def row_labels(notes: Sequence[Dict[str, Any]]) -> List[str]:
         else:
             out.append(who)
     return out
+
+
+def note_header(note: Dict[str, Any], label: str = "",
+                unit: str = "px") -> Tuple[str, str]:
+    """共用 header 的兩半（PR-2 2f）：``(左, 右)``。
+
+    左＝**來源流永遠在**（`row_labels` 只在流是分辨軸時印它，而共用 header
+    的約定是「每個面板都講得出來源流」）＋ 分辨用的那一半（``label``，仍由
+    `row_labels` / `_row_label` 產 —— 分辨邏輯只有那一份）。已含流名就不
+    重複。右＝ ``n=… px``（旋鈕丟過像素時 ``n=… of … px``）。
+    """
+    stream = str(note.get("stream") or "")
+    label = str(label or "")
+    if stream and stream not in label:
+        left = "%s · %s" % (stream, label) if label else stream
+    else:
+        left = label or "the image"
+    n = int(note.get("n") or 0)
+    n_raw = int(note.get("n_raw") or 0)
+    right = ("n=%d of %d %s" % (n, n_raw, unit)) if n_raw and n_raw != n \
+        else ("n=%d %s" % (n, unit))
+    return left, right
+
+
+def paint_note_header(p: QPainter, band: QRectF, note: Dict[str, Any], *,
+                      colour: QColor, label: str = "", tail: str = "",
+                      tail_colour: Optional[QColor] = None,
+                      trust: str = "", unit: str = "px") -> float:
+    """畫共用 header 一列，回它的高度。
+
+    「來源流 · 區域（有才顯示）· n · 可信度旗標」：左半 `note_header`、
+    ``tail``（GLV 的「vs 參照」那一段）接在左半後面用自己的顏色、右半 =
+    n ＋（有的話）``trust``（GLV 傳 sat%、Subtract 傳 clipped%）。
+    高度是 ``max(13, 字高)`` —— 13 是老的寫死值，字高不夠時 ``band_a_center``
+    的底線會被切掉（CD 那邊踩過，教訓收進這裡一次）。
+    """
+    left, right = note_header(note, label, unit)
+    head_h = max(13.0, QFontMetricsF(p.font()).height())
+    head = QRectF(band.left(), band.top(), band.width(), head_h)
+    p.setPen(colour)
+    p.drawText(head, Qt.AlignLeft | Qt.AlignVCenter, left)
+    if tail:
+        w = QFontMetricsF(p.font()).horizontalAdvance(left)
+        p.setPen(tail_colour if tail_colour is not None
+                 else QColor(TOKENS["text_secondary"]))
+        p.drawText(QRectF(head.left() + w, head.top(),
+                          head.width() - w, head.height()),
+                   Qt.AlignLeft | Qt.AlignVCenter, tail)
+    p.setPen(QColor(TOKENS["text_hint"]))
+    p.drawText(head, Qt.AlignRight | Qt.AlignVCenter,
+               "%s · %s" % (right, trust) if trust else right)
+    return head_h
 
 
 class CdInspector(Inspector):
@@ -2047,6 +2225,21 @@ class CdInspector(Inspector):
             self._say_empty(p, rect)
             return
         shown = notes[:self.MAX_ROWS]
+        # 共用 header（PR-2 2f）：來源流 · 區域 · n · 可信度旗標。整個面板
+        # 一條（多列時每列自己的名字照舊在第一格上）——只加標題，主體不動。
+        first = shown[0]
+        blob = self.is_blob(first)
+        head_h = paint_note_header(
+            p, rect, {"stream": first.get("stream", ""),
+                      "n": (int(first.get("area") or 0) if blob
+                            else int(first.get("n") or 0))},
+            colour=QColor(self.colour(first)),
+            label=self._row_label(first),
+            trust=("" if first.get("ok", True)
+                   else str(first.get("reason") or "not measured")),
+            unit="px" if blob else "line(s)")
+        rect = QRectF(rect.left(), rect.top() + head_h + 1, rect.width(),
+                      rect.height() - head_h - 1)
         row_h = rect.height() / float(len(shown))
         for i, note in enumerate(shown):
             body = QRectF(rect.left(), rect.top() + i * row_h, rect.width(),
@@ -2379,9 +2572,13 @@ class CdInspector(Inspector):
     def _paint_batch(self, p: QPainter, rect: QRectF, note: Dict[str, Any],
                      name: str = "cd_median",
                      caption: str = "Across the batch") -> None:
-        """整批的分布 ＋ 這一顆在哪 —— 跑過才有東西（同 `MeasureInspector`）。"""
-        if note.get("prefix"):
-            name = "%s_%s" % (note["prefix"], name)
+        """整批的分布 ＋ 這一顆在哪 —— 跑過才有東西（同 `MeasureInspector`）。
+
+        ``name`` 是裸的 base；完整特徵名查卡片寫在 note 裡的
+        ``feature_names``（`cd.py` 在**組名字的同一個迴圈**記的，PR-3）——
+        面板不再自己把 prefix 拼回去。舊 meta 沒有那張表就退回裸 base。
+        """
+        name = str((note.get("feature_names") or {}).get(name) or name)
         values = self.feature_values(name)
         # 右邊留一點：分布是雙峰的時候最右邊那一根會貼著外框，讀起來像被切掉。
         body = self._caption(p, QRectF(rect.left(), rect.top(),
@@ -2858,6 +3055,286 @@ class H2HInspector(MeasureInspector):
 
 
 
+class SubtractInspector(Inspector):
+    """Image Combination：**差影像是什麼做的**（PR-2 2d）。
+
+    `diff` 是 D2D 的心臟，而它以前一格儀表都沒有。三樣東西，全部來自卡片
+    自己 note 的那一份（`arith._note_diagnostics`，預覽就有 —— 跟 Enhance
+    的 `stream_change` 同一個生命週期）：
+
+    * **有號直方圖**（0 置中）—— 差影像的中心是 0 不是 128；
+    * **殘留數字**：median / MAD / 超出 ±3×MAD 的比例；
+    * **行/列平均曲線** —— 抓半像素對位殘留的主角：條紋在預覽上肉眼看不出，
+      行列平均一眼看出方向與強度。
+    """
+
+    title = "Difference"
+
+    def record(self) -> Dict[str, Any]:
+        out = str(self.params.get("out", "diff") or "diff")
+        return dict((self.meta.get("subtract") or {}).get(out) or {})
+
+    def has_data(self) -> bool:
+        return bool(self.record().get("bins"))
+
+    def empty_reason(self) -> str:
+        return ("Select a defect and this panel shows what the difference "
+                "image is made of - the signed histogram around zero, the "
+                "residual level, and the row/column means that reveal "
+                "alignment stripes the preview cannot show.")
+
+    def summary(self) -> str:
+        r = self.record()
+        if not r:
+            return ""
+        op = {"subtract": "−", "ratio": "÷", "max": "max", "min": "min",
+              "mean": "mean"}.get(str(r.get("op") or ""), str(r.get("op")))
+        return ("%s = %s %s %s · median %+.2f · MAD %.2f · %.1f%% beyond "
+                "±3×MAD · %.1f%% clipped"
+                % (self.params.get("out", "diff"), r.get("a", "?"), op,
+                   r.get("b", "?"), float(r.get("median") or 0.0),
+                   float(r.get("mad") or 0.0),
+                   100.0 * float(r.get("beyond3") or 0.0),
+                   100.0 * float(r.get("clipped") or 0.0)))
+
+    def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
+        r = self.record()
+        if not r.get("bins"):
+            self._say_empty(p, rect)
+            return
+        op = {"subtract": "−", "ratio": "÷"}.get(str(r.get("op") or ""),
+                                                 str(r.get("op") or ""))
+        note = {"stream": str(self.params.get("out", "diff") or "diff"),
+                "n": int(r.get("n") or 0)}
+        head_h = paint_note_header(
+            p, rect, note, colour=QColor(TOKENS["text_primary"]),
+            tail="  = %s %s %s" % (r.get("a", "?"), op, r.get("b", "?")),
+            trust="%.1f%% clipped" % (100.0 * float(r.get("clipped") or 0.0)))
+        body = QRectF(rect.left(), rect.top() + head_h + 2, rect.width(),
+                      rect.height() - head_h - 2)
+        if body.height() < 20:
+            return
+        left = QRectF(body.left(), body.top(), body.width() * 0.54,
+                      body.height())
+        right = QRectF(left.right() + 8, body.top(),
+                       body.right() - left.right() - 8, body.height())
+        self._paint_signed_hist(p, left, r)
+        self._paint_curves(p, right, r)
+
+    def _paint_signed_hist(self, p: QPainter, rect: QRectF,
+                           r: Dict[str, Any]) -> None:
+        counts = [max(0, int(c)) for c in (r.get("bins") or [])]
+        if not counts:
+            return
+        cap = QRectF(rect.left(), rect.bottom() - 11, rect.width(), 11)
+        plot = QRectF(rect.left(), rect.top(), rect.width(),
+                      max(8.0, rect.height() - 12))
+        top = max(counts) or 1
+        bw = plot.width() / float(len(counts))
+        fill = QColor(TOKENS["accent"])
+        fill.setAlpha(90)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(fill))
+        for k, c in enumerate(counts):
+            h = (c / float(top)) * plot.height()
+            p.drawRect(QRectF(plot.left() + k * bw, plot.bottom() - h,
+                              max(1.0, bw - 0.4), h))
+        # 0 的中線 —— 這張圖的主角刻度（有號分布對稱於它）。
+        p.setPen(QPen(QColor(TOKENS["text_secondary"]), 1.0, Qt.DashLine))
+        mid = plot.left() + plot.width() / 2.0
+        p.drawLine(QPointF(mid, plot.top()), QPointF(mid, plot.bottom()))
+        p.setPen(QColor(TOKENS["border_default"]))
+        p.drawLine(QPointF(plot.left(), plot.bottom()),
+                   QPointF(plot.right(), plot.bottom()))
+        hi = float(r.get("hi") or 0.0)
+        p.setPen(QColor(TOKENS["text_hint"]))
+        p.drawText(cap, Qt.AlignLeft | Qt.AlignVCenter, "%+.3g" % -hi)
+        p.drawText(cap, Qt.AlignHCenter | Qt.AlignVCenter, "0")
+        p.drawText(cap, Qt.AlignRight | Qt.AlignVCenter, "%+.3g" % hi)
+
+    def _paint_curves(self, p: QPainter, rect: QRectF,
+                      r: Dict[str, Any]) -> None:
+        """行/列平均（各 ≤128 點，引擎抽稀過）—— 各自縮放、各配一條中線。"""
+        halves = ((QRectF(rect.left(), rect.top(), rect.width(),
+                          rect.height() / 2 - 2), "row means",
+                   [float(v) for v in (r.get("rows") or [])]),
+                  (QRectF(rect.left(), rect.center().y() + 2, rect.width(),
+                          rect.height() / 2 - 2), "column means",
+                   [float(v) for v in (r.get("cols") or [])]))
+        for box, name, vals in halves:
+            if len(vals) < 2 or box.height() < 14:
+                continue
+            p.setPen(QColor(TOKENS["text_hint"]))
+            f = p.font()
+            f.setPointSizeF(max(7.0, f.pointSizeF() - 1.0))
+            p.setFont(f)
+            p.drawText(box, Qt.AlignLeft | Qt.AlignTop, name)
+            plot = QRectF(box.left(), box.top() + 11, box.width(),
+                          max(6.0, box.height() - 12))
+            lo, hi = min(vals), max(vals)
+            span = (hi - lo) or 1.0
+            mid_y = plot.top() + (hi - (lo + hi) / 2.0) / span * plot.height()
+            p.setPen(QPen(QColor(TOKENS["border_default"]), 1.0, Qt.DashLine))
+            p.drawLine(QPointF(plot.left(), mid_y),
+                       QPointF(plot.right(), mid_y))
+            step = plot.width() / float(len(vals) - 1)
+            pts = [QPointF(plot.left() + i * step,
+                           plot.top() + (hi - v) / span * plot.height())
+                   for i, v in enumerate(vals)]
+            p.setPen(QPen(QColor(TOKENS["text_primary"]), 1.2))
+            p.setBrush(Qt.NoBrush)
+            p.drawPolyline(QPolygonF(pts))
+
+
+class OutputPreviewInspector(Inspector):
+    """輸出卡共用：**按下 Run 會寫出哪幾個檔**（PR-2 2e）。
+
+    援引 Write KLARF 的那條硬規則（寫出前一定先預覽）：計畫來自 core 的
+    `planned_files`（**跟 `run_batch` 同一張表**，各寫一份會漂），這裡只
+    列出來 —— 不真的寫、**不猜檔案大小**。選到卡就有（未跑就看得到），
+    勾選一變清單跟著變。
+    """
+
+    STEP_KEY = ""
+    title = "Will write"
+
+    def plan(self) -> List[Dict[str, str]]:
+        try:
+            from ..core.pipeline.step import get_step
+            return list(get_step(self.STEP_KEY).planned_files(self.params))
+        except Exception:              # noqa: BLE001 — 提示不准擋路
+            return []
+
+    def path(self) -> str:
+        return str(self.params.get("folder", "") or "").strip()
+
+    def has_data(self) -> bool:
+        return bool(self.params)
+
+    def empty_reason(self) -> str:
+        return ("Select this card to see which files it would write - "
+                "nothing is written until you run the whole batch.")
+
+    def _count_line(self) -> str:
+        if self.batch:
+            return "%d defect(s) from the last run" % len(self.batch)
+        return "run a trial to count the defects"
+
+    def summary(self) -> str:
+        plan = self.plan()
+        return "%d file kind(s) into %s" % (
+            len(plan), self.path() or "(folder not set yet)")
+
+    def _lines(self) -> List[Tuple[str, str]]:
+        lines = [("Writes into", self.path() or "(not set yet)")]
+        for f in self.plan():
+            lines.append((f.get("name", "?"), f.get("what", "")))
+        if not self.plan():
+            lines.append(("(nothing ticked)", "the folder would be empty"))
+        lines.append(("Defects", self._count_line()))
+        return lines
+
+    def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
+        lines = self._lines()
+        row_h = max(15.0, min(20.0, rect.height() / max(1, len(lines))))
+        y = rect.top()
+        for label, value in lines:
+            p.setPen(QColor(TOKENS["text_secondary"]))
+            p.drawText(QRectF(rect.left(), y, rect.width() * 0.42, row_h),
+                       Qt.AlignLeft | Qt.AlignVCenter, label)
+            p.setPen(QColor(TOKENS["text_primary"]))
+            p.drawText(QRectF(rect.left() + rect.width() * 0.44, y,
+                              rect.width() * 0.56, row_h),
+                       Qt.AlignLeft | Qt.AlignVCenter, str(value))
+            y += row_h
+            if y > rect.bottom():
+                break
+
+
+class ReportPreviewInspector(OutputPreviewInspector):
+    STEP_KEY = "output_report"
+    title = "Report folder"
+
+
+class CharPreviewInspector(OutputPreviewInspector):
+    STEP_KEY = "output_char"
+    title = "Comparison folder"
+
+    def _lines(self) -> List[Tuple[str, str]]:
+        lines = super()._lines()
+        cols = [c for c in str(self.params.get("columns", "") or "").split(",")
+                if c.strip()]
+        lines.append(("Columns", "%d ticked" % len(cols) if cols
+                      else "(none - just id, class and the pictures)"))
+        return lines
+
+
+class FocusInspector(MeasureInspector):
+    """Focus index：**這一顆的三個銳利度值，選到就有**（PR-2 2e）。
+
+    以前它掛在泛用的 Spread 上 —— 跑完一批才有東西。可是這張卡逐顆量、
+    數字早就在（`quality.measure` note 進 meta 的那一份），單顆該立即
+    顯示；整批的分布照舊由下半（繼承 `MeasureInspector`）補。
+    """
+
+    title = "Focus"
+
+    #: 顯示用的一句話（dtype 檢查歸值域/dtype 那張 bug 單，這裡只講）。
+    HINT = "sharpness only means anything on an 8-bit stream"
+
+    def notes(self) -> List[Dict[str, Any]]:
+        return [n for n in (self.meta.get("focus") or [])
+                if isinstance(n, dict)]
+
+    def has_data(self) -> bool:
+        return bool(self.notes()) or bool(self.rows())
+
+    def empty_reason(self) -> str:
+        return ("Select a defect to see its three sharpness numbers; run a "
+                "trial to see how they spread across the batch.")
+
+    def summary(self) -> str:
+        notes = self.notes()
+        if not notes:
+            return super().summary()
+        n = notes[0]
+        return ("lapvar %.4g · tenengrad %.4g · fft %.4g — higher is sharper"
+                % (float(n.get("lapvar") or 0.0),
+                   float(n.get("tenengrad") or 0.0),
+                   float(n.get("fft") or 0.0)))
+
+    #: 單顆那一段的高度：一列 header + 一列數字 + 一列提示。
+    NOTE_H = 46.0
+
+    def paint_body(self, p: QPainter, rect: QRectF) -> None:   # noqa: D102
+        notes = self.notes()
+        if not notes:
+            super().paint_body(p, rect)
+            return
+        note = notes[0]
+        head_h = paint_note_header(
+            p, rect, {"stream": note.get("stream", ""),
+                      "n": len(self.batch or [])},
+            colour=QColor(TOKENS["text_primary"]),
+            label="this defect", unit="defect(s) run")
+        line = QRectF(rect.left(), rect.top() + head_h + 1, rect.width(), 15)
+        p.setPen(QColor(TOKENS["text_primary"]))
+        p.drawText(line, Qt.AlignLeft | Qt.AlignVCenter,
+                   "lapvar %.4g    tenengrad %.4g    fft %.4g"
+                   % (float(note.get("lapvar") or 0.0),
+                      float(note.get("tenengrad") or 0.0),
+                      float(note.get("fft") or 0.0)))
+        hint = QRectF(rect.left(), line.bottom() + 1, rect.width(), 13)
+        p.setPen(QColor(TOKENS["text_hint"]))
+        p.drawText(hint, Qt.AlignLeft | Qt.AlignVCenter, self.HINT)
+        rest = QRectF(rect.left(), hint.bottom() + 4, rect.width(),
+                      rect.bottom() - hint.bottom() - 4)
+        # 批次的分布（繼承的下半）：跑過才有；沒跑不畫（單顆那三行就是答案，
+        # 再畫一句「跑一批」是把主角擠掉）。
+        if self.rows() and rest.height() >= 40:
+            super().paint_body(p, rest)
+
+
 INSPECTORS: Dict[str, type] = {
     "load_patch": InputInspector,
     # 同一個面板：它讀的是 meta["input"]，兩張 Input 卡都會寫（F11 Input-4）。
@@ -2875,7 +3352,14 @@ INSPECTORS: Dict[str, type] = {
     "glv_stats": GlvInspector,
     # F19：CD 有自己的面板了（剖面圖是它唯一講得清楚自己的方式）。
     "cd_measure": CdInspector,
-    "focus_quality": MeasureInspector,
+    # PR-2：單顆的三個銳利度值選到就有，批次分布（繼承 Spread）跑完再補。
+    "focus_quality": FocusInspector,
+    # PR-2：diff 是 D2D 的心臟 —— 有號直方圖、殘留數字、行列平均曲線。
+    "subtract": SubtractInspector,
+    # PR-2：輸出卡援引 Write KLARF 的硬規則（寫出前一定先預覽）——
+    # 選到卡就列出會寫哪幾個檔，跟 `run_batch` 讀同一張 `planned_files` 表。
+    "output_report": ReportPreviewInspector,
+    "output_char": CharPreviewInspector,
     # ⚠ ``roi_reference`` **一個 key、三種面板**（F30）—— 見 :data:`BY_METHOD`。
     # 這裡放的是「沒有 method 可看時的那一個」。
     "roi_reference": GdsInspector,

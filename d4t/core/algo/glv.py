@@ -479,6 +479,38 @@ def summarize(values: np.ndarray) -> Dict[str, float]:
 
 
 # ---------------------------------------------------------------------------
+# Signed-difference histogram (d4t-native, 2026-08-27; not part of the PEAR
+# vendoring above).  Serves the Subtract card's diagnostics panel.
+# ---------------------------------------------------------------------------
+
+def signed_hist(diff, bins: int = 64, clip_q: float = 99.5):
+    """**有號**差影像的直方圖，對稱於 0。
+
+    跟 :func:`pixel_hist` 的分工：`pixel_hist` 是灰階直方圖，0–255 寫死 ——
+    對影像流那是對的（bin 寬跨顆可比才餵得進分數表達式），**不要動它**。
+    這一支給差影像流（float32、可以是負的）：它有意義的中心是 0 不是 128，
+    而 0/255 的飽和診斷（`sat` 那類）對它不適用。
+
+    範圍 = ±(|diff| 的第 ``clip_q`` 百分位)，地板 1e-6（全零的 diff 也回
+    一份合法的直方圖）。``bins`` 取偶數讓 0 正好落在 bin 邊（0 置中）。
+    超出範圍的像素**計入最外側的 bin**（它們是真的像素 —— 丟掉會讓重尾的
+    diff 看起來很乾淨），並以 ``clipped`` 回報需要這樣收編的比例。
+
+    回傳 ``(counts, edges, clipped)``：counts 長 ``bins``、edges 長
+    ``bins + 1``、clipped ∈ [0, 1]。
+    """
+    p = np.asarray(diff, dtype=np.float64).ravel()
+    if p.size == 0:
+        return (np.zeros(bins, dtype=int), np.linspace(-1.0, 1.0, bins + 1),
+                0.0)
+    hi = max(float(np.percentile(np.abs(p), clip_q)), 1e-6)
+    clipped = float(((p < -hi) | (p > hi)).mean())
+    counts, edges = np.histogram(np.clip(p, -hi, hi), bins=bins,
+                                 range=(-hi, hi))
+    return counts, edges, clipped
+
+
+# ---------------------------------------------------------------------------
 # Odd-one-out across boxes (d4t-native, 2026-08-25; not part of the PEAR
 # vendoring above).  Serves glv_stats' "each box" mode: which of the N boxes
 # of one region deviates most from the rest.

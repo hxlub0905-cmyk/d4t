@@ -71,6 +71,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.algo import glv as algo_glv
+from . import region_words
 from . import theme
 from .theme import TOKENS, region_hex
 
@@ -110,6 +111,8 @@ __all__ = [
     "METRIC_GLYPHS",
     "METRIC_GROUPS",
     "MetricChips",
+    "FilterChip",
+    "metric_face",
 ]
 
 
@@ -135,6 +138,26 @@ def small_button(text: str, tip: str = "", parent: Optional[QWidget] = None,
     if tip:
         b.setToolTip(str(tip))
     return b
+
+
+class FilterChip(QPushButton):
+    """一顆可移除的條件 chip：``排序：score ↓  ✕``。點一下就把該條件拿掉。
+
+    PR-3 從 `gallery._Chip` 升格搬來（結果表的維度過濾也要 chip，而同一種
+    視覺語言只能有一份）。objectName 沿用 ``galleryChip`` —— 外觀的家在 QSS 的
+    ``QPushButton#galleryChip``（F7-23 第三輪），名字跟著搬會讓兩邊各長一份
+    樣式。
+    """
+
+    def __init__(self, text: str, tip: str, parent: Optional[QWidget] = None):
+        # ``×`` 是 U+00D7（Latin-1），不是 U+2715 那個 Dingbats 的 ``✕`` ——
+        # 後者在 Windows 上要退到 Segoe UI Symbol（F7-23 第四輪）。
+        super().__init__("%s  ×" % text, parent)
+        self.setObjectName("galleryChip")
+        self.label_text = text
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(tip)
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
 
 
 def clear_layout_parked(layout, graveyard: list) -> None:
@@ -1269,6 +1292,9 @@ class ImageView(QWidget):
         self._overlay_labels: List[str] = []
         #: 區域名 -> 顏色索引，依**第一次出現**的順序。畫圖例時也走這一份。
         self._overlay_order: List[str] = []
+        #: 回溯面板點了哪個區域（PR-3）：命中的框全強度、其餘降 alpha。
+        #: **不 overload focus** —— 顏色=哪塊、粗細=缺陷格、alpha=你問的那塊。
+        self._overlay_emphasis: List[str] = []
         #: 量測標記（F19）：線段、每條線上的點、要畫粗的那一條。見 :meth:`set_marks`。
         self._marks: List[Any] = []
         #: 這一組標記要不要畫滿（`Step.marks_solid`）。
@@ -1421,7 +1447,20 @@ class ImageView(QWidget):
             if n and n not in order:
                 order.append(n)
         self._overlay_order = order
+        # 換一組框＝上一個「你問的那塊」不再成立（框可能已經是別張卡的）。
+        self._overlay_emphasis = []
         self.update()
+
+    def set_overlay_emphasis(self, names: Optional[Sequence[str]]) -> None:
+        """把某幾個區域**點亮**（其餘的框降 alpha）—— 回溯面板「點一項亮那
+        一塊」用（PR-3）。`set_overlay` 會清掉它：換一組框之後舊的強調指的
+        可能已經是別張卡的區域。"""
+        self._overlay_emphasis = [str(n) for n in (names or []) if str(n)]
+        self.update()
+
+    def overlay_emphasis(self) -> List[str]:
+        """現在點亮的區域名（測試讀這個，不去讀畫素）。"""
+        return list(self._overlay_emphasis)
 
     def set_marks(self, lines: Optional[Sequence[Any]] = None,
                   points: Optional[Sequence[Any]] = None,
@@ -1584,6 +1623,9 @@ class ImageView(QWidget):
         for i, (nx, ny, nw, nh) in enumerate(self._overlay):
             name = self._overlay_labels[i] if i < len(self._overlay_labels) else ""
             col = QColor(region_hex(index_of[name])) if name in index_of else plain
+            if self._overlay_emphasis and name not in self._overlay_emphasis:
+                # 沒被問到的框退到背景 —— 淡，但還在（它們是脈絡，不是雜訊）。
+                col.setAlphaF(0.28)
             r = QRectF(self._offset.x() + nx * iw * s,
                        self._offset.y() + ny * ih * s,
                        max(1.0, nw * iw * s), max(1.0, nh * ih * s))
@@ -2587,8 +2629,35 @@ class ProfilePanel(QWidget):
         f = p.font()
         f.setPointSizeF(max(7.0, f.pointSizeF() - 1.0))
         p.setFont(f)
-        p.drawText(QRectF(rect.left() + 6, rect.top() + 2, rect.width() - 12, 14),
-                   Qt.AlignVCenter | Qt.AlignLeft, self.summary())
+        strip = QRectF(rect.left() + 6, rect.top() + 2, rect.width() - 12, 14)
+        p.drawText(strip, Qt.AlignVCenter | Qt.AlignLeft, self.summary())
+        # 斜線的圖例（PR-2）：畫在同一條 14px 摘要帶的**右側**（那裡是空的，
+        # 零幾何改動）。畫一小塊真的斜線 —— 「▨」那種字元在不同字型上長不
+        # 一樣，而畫的這一塊跟圖上的斜線是**同一支筆**。會撞到左邊的摘要字
+        # 就整組不畫（圖例是輔助，摘要是主角）。
+        if self._data.get("blocked"):
+            legend = region_words.LEFT_OUT_LEGEND
+            fm = QFontMetricsF(p.font())
+            need = 12.0 + 4.0 + fm.horizontalAdvance(legend)
+            used = fm.horizontalAdvance(self.summary())
+            if used + 12.0 + need <= strip.width():
+                sw = QRectF(strip.right() - need, strip.top() + 3.0, 12.0, 8.0)
+                hatch = QColor(TOKENS["text_secondary"])
+                hatch.setAlpha(90)
+                p.save()
+                p.setPen(QPen(hatch, 1.0))
+                p.setClipRect(sw)
+                x = sw.left() - sw.height()
+                while x < sw.right():
+                    p.drawLine(QPointF(x, sw.bottom()),
+                               QPointF(x + sw.height(), sw.top()))
+                    x += 4.0
+                p.restore()
+                p.setPen(QColor(TOKENS["text_secondary"]))
+                p.drawText(
+                    QRectF(sw.right() + 4.0, strip.top(),
+                           strip.right() - sw.right() - 4.0, strip.height()),
+                    Qt.AlignVCenter | Qt.AlignLeft, legend)
         p.end()
 
     def _paint_ruler(self, p: QPainter, plot: QRectF, to_x) -> None:
@@ -3708,6 +3777,9 @@ class ParamForm(QWidget):
     #: **入口卡的「資料從哪來」**（F14-1）：按下去要開檔案對話框。
     #: 同樣地，表單不知道那是哪一種來源 —— 它送出去，Studio 決定開什麼。
     source_requested = Signal()
+    #: 「我要量什麼」三選（PR-2 2a）：使用者按了哪個 preset 的 id。
+    #: 表單不知道 preset 會動什麼 —— 動線動格的腦袋在 model。
+    intent_chosen = Signal(str)
 
     _EMPTY_TEXT = "(Pick a card from the library, or select a step in the pipeline)"
 
@@ -3778,6 +3850,31 @@ class ParamForm(QWidget):
         self._source_row.setVisible(False)
         outer.addWidget(self._source_row)
 
+        # 「我要量什麼」三選（PR-2 2a；目前只有 GLV 用）。跟 `_source_row`
+        # 同一個位置學（scroll 區上方 —— 意圖在參數之前）。**preset 不是
+        # 參數**：這裡只畫鈕、發 id，動線動格的腦袋在 `RecipeModel
+        # .apply_glv_intent`。表單保持不認識 model。
+        self._intent_row = QWidget(self)
+        self._intent_row.setObjectName("intentRow")
+        irow = QVBoxLayout(self._intent_row)
+        irow.setContentsMargins(2, 0, 8, 4)
+        irow.setSpacing(2)
+        self._intent_title = QLabel("", self._intent_row)
+        self._intent_title.setObjectName("paramTitle")
+        irow.addWidget(self._intent_title)
+        btns = QHBoxLayout()
+        btns.setSpacing(6)
+        self._intent_btns: Dict[str, QPushButton] = {}
+        self._intent_btn_row = btns
+        irow.addLayout(btns)
+        self._intent_note = QLabel("", self._intent_row)
+        self._intent_note.setObjectName("paramHint")
+        self._intent_note.setWordWrap(True)
+        irow.addWidget(self._intent_note)
+        self._intent_shown = False           # 追明確狀態（PITFALLS：isVisible
+        self._intent_row.setVisible(False)   # 在視窗 show 之前恆為 False）
+        outer.addWidget(self._intent_row)
+
         self._scroll = QScrollArea(self)
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.NoFrame)
@@ -3824,6 +3921,48 @@ class ParamForm(QWidget):
     def has_source_action(self) -> bool:
         """這張卡有沒有那一排「資料從哪來」。"""
         return bool(getattr(self, "_source_shown", False))
+
+    def set_intent_row(self, title: str = "",
+                       options: Sequence[Tuple[str, str, str]] = (),
+                       current_id: str = "", note: str = "",
+                       enabled: bool = True) -> None:
+        """卡最上面的「我要量什麼」三選（PR-2 2a）。``title=""`` = 沒有這排。
+
+        ``options`` 是 ``(id, 顯示字, 一句話)``；``current_id`` 對不上任何
+        id（例 ``"custom"``）就一顆都不勾 —— **不強制改**，自訂是一個合法
+        的狀態。``enabled=False``（roi 還沒接線）時鈕全部灰掉，note 講原因。
+        """
+        title = str(title or "")
+        # 重建鈕（選項是呼叫端給的，張數可能變）。
+        for btn in self._intent_btns.values():
+            self._intent_btn_row.removeWidget(btn)
+            btn.deleteLater()
+        self._intent_btns = {}
+        self._intent_title.setText(title)
+        if title:
+            for iid, label, help_line in options:
+                btn = QPushButton(str(label), self._intent_row)
+                btn.setObjectName("intentChoice")
+                btn.setCheckable(True)
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.setToolTip(str(help_line))
+                btn.setChecked(str(iid) == str(current_id))
+                btn.setEnabled(bool(enabled))
+                btn.clicked.connect(
+                    lambda _=False, i=str(iid): self.intent_chosen.emit(i))
+                self._intent_btn_row.addWidget(btn)
+                self._intent_btns[str(iid)] = btn
+        self._intent_note.setText(str(note or ""))
+        self._intent_note.setVisible(bool(note))
+        self._intent_shown = bool(title)
+        self._intent_row.setVisible(self._intent_shown)
+
+    def has_intent_row(self) -> bool:
+        return bool(getattr(self, "_intent_shown", False))
+
+    def intent_buttons(self) -> Dict[str, QPushButton]:
+        """測試 API：id → 鈕。"""
+        return dict(self._intent_btns)
 
     def source_button(self) -> QPushButton:
         """那顆鈕本身（訊息裡引到的名字要跟它一字不差 —— 有測試在擋）。"""
@@ -3897,6 +4036,10 @@ class ParamForm(QWidget):
         從這裡傳進來，而不是讓元件自己去問（`widgets` 不認得 `Dataset`）。
         """
         current_params = dict(current_params or {})
+        # 換卡先把「我要量什麼」那排清掉（同 `set_source_action` 的規矩：
+        # 這排是**這張卡**的，別張卡不出現）—— 要顯示的話 Studio 在
+        # `set_step` 之後自己 set 回來。
+        self.set_intent_row("")
         # **沒填的那幾格用預設值補上**（F30）。`show_when` 問的是「另外那一格
         # 現在是什麼」，而引擎那一邊看到的永遠是 `validate_params` 補完的一份
         # —— 這裡不補的話，一張剛加進來、參數還是空的卡，它的 `method` 在
@@ -5967,14 +6110,18 @@ FEATURE_ABSOLUTE = "absolute"
 FEATURE_RELATIVE = "relative"
 
 
-def feature_gloss(name: str, about: Optional[Dict[str, str]] = None
-                  ) -> Tuple[str, str]:
+def feature_gloss(name: str, about: Optional[Dict[str, str]] = None,
+                  spec: Optional[Any] = None) -> Tuple[str, str]:
     """一個特徵名 →（絕對量／相對量／空的, 一句話說它是什麼）。
 
     F18 補課第三輪（使用者 2026-08-21）：「我認為 feature 中絕對量的跟相對量
     的還是要分類好（不然不清楚命名規則會很痛苦），或者 Feature 的功能 UI
-    顯示需要再優化」。**兩件都做**：名字本身有規則（`glv_` / `cmp_`），
-    而這一支把那個規則**翻成畫面上讀得懂的一句話** —— 使用者不必先背規則。
+    顯示需要再優化」。
+
+    PR-3 起吃 ``spec``（`FeatureSpec` —— 名字誕生處宣告的身分）：相對／絕對
+    看 ``family``、統計量是 ``metric``、cmp 比的是哪個統計量在 ``stat``。
+    **沒有 spec 就留白，不猜** —— 以前這裡拆 ``cmp_``/``glv_`` 字串用最長
+    比對把 metric 猜回來，而那正是「拆特徵字串猜語意」禁令要清掉的一處。
 
     說明的內容不是在這裡發明的：絕對量走 `algo.glv.metric_formula`（公式的
     家），相對量走 :data:`METRIC_GROUPS` 的短標籤（膠囊的家）。抄第二份出來
@@ -5983,48 +6130,30 @@ def feature_gloss(name: str, about: Optional[Dict[str, str]] = None
     ``about`` 是「跟誰比」——名字裡沒有那件事（``epi_cmp_delta_median`` 不講
     mg），所以由呼叫端從引擎的 ``meta["compares"]`` 帶進來。
     """
+    if spec is None:
+        return "", ""
     text = str(name or "")
     ref = str((about or {}).get(text, "") or "")
-    body, kind = "", ""
-    if text.startswith(CMP_TAG) or ("_" + CMP_TAG) in text:
-        kind = FEATURE_RELATIVE
-        rest = text.split(CMP_TAG, 1)[1]
-        metric, stat = _split_cmp(rest)
-        label = metric_face(metric)[1] if metric else rest
-        body = label if not stat else "%s of %s" % (label, stat)
-        body += " vs %s" % (ref or "the reference")
-    elif text.startswith(GLV_TAG) or ("_" + GLV_TAG) in text:
-        kind = FEATURE_ABSOLUTE
-        mid = GLV_TAG + text.split(GLV_TAG, 1)[1]
+    family = str(getattr(spec, "family", "") or "")
+    if family == "cmp":
+        label = metric_face(spec.metric)[1] if spec.metric \
+            else (spec.base or text)
+        body = label if not spec.stat else "%s of %s" % (label, spec.stat)
+        return FEATURE_RELATIVE, body + " vs %s" % (ref or "the reference")
+    if family == "glv":
+        mid = str(spec.metric or spec.base or "")
         body = _ABS_GLOSS.get(mid) or algo_glv.metric_formula(mid)
         if body == "—":
             body = metric_face(mid)[1]
-    return kind, body
+        return FEATURE_ABSOLUTE, body
+    return "", ""
 
-
-#: 名字裡的那兩個家族標記（引擎那邊的 `glv_stats.CMP_PREFIX`）。
-GLV_TAG = "glv_"
-CMP_TAG = "cmp_"
 
 #: 這幾個不是統計量，`metric_formula` 答不出來 —— 而它們每一顆都在。
 _ABS_GLOSS = {
     "glv_pixels": "how many pixels counted",
     "glv_ok": "1 when there were enough pixels",
 }
-
-
-def _split_cmp(rest: str) -> Tuple[str, str]:
-    """``delta_median`` → ``("delta", "median")``；``overlap`` → ``("overlap", "")``。
-
-    **比對真的存在的 metric id，不是切最後一個底線**：``spread_ratio`` 本身
-    就帶一個底線，切法會把它變成「spread 這個 metric 的 ratio 統計量」。
-    """
-    for metric in sorted(algo_glv.COMPARE_METRICS, key=len, reverse=True):
-        if rest == metric:
-            return metric, ""
-        if rest.startswith(metric + "_"):
-            return metric, rest[len(metric) + 1:]
-    return rest, ""
 
 
 #: 一個特徵名拆好之後，畫在畫面上要用哪些角色（F37 A4，2026-08-26）。
@@ -6164,7 +6293,7 @@ class FeatureTable(QTableWidget):
         # 值那一欄要保持等寬對齊，說明那一欄本來就是一句話。
         self._name_delegate = _FeatureNameDelegate(self)
         self.setItemDelegateForColumn(0, self._name_delegate)
-        self._parts: Dict[str, Any] = {}
+        self._specs: Dict[str, Any] = {}
 
     #: 一個分組（F13-1 的 ①）：``title`` 是**哪張卡產出的**、``color`` 是那張卡
     #: 的階段色、``names`` 是這一組裡的特徵、``collapsed`` 決定一開始收不收。
@@ -6175,7 +6304,7 @@ class FeatureTable(QTableWidget):
                      highlight: Iterable[str] = (),
                      sections: Optional[Sequence[Dict[str, Any]]] = None,
                      about: Optional[Dict[str, str]] = None,
-                     parts: Optional[Dict[str, Any]] = None) -> None:
+                     specs: Optional[Dict[str, Any]] = None) -> None:
         """填表。``highlight`` 內的特徵名會用 accent 底色標出（例：分數用到的）。
 
         ``sections`` 是**分組**（F13-1 ①，2026-08-19 使用者：「feature 的顯示
@@ -6193,9 +6322,9 @@ class FeatureTable(QTableWidget):
         features = dict(features or {})
         hi = set(highlight or ())
         self._about = dict(about or {})
-        # 名字怎麼拆是**卡片答的**（`Step.feature_parts`）—— 沒給就照原樣顯示
-        # 整串。少一點資訊，不會是錯的資訊。
-        self._parts = dict(parts or {})
+        # 名字的身分是**卡片宣告的**（`resolve_feature_specs`，PR-3）——
+        # 沒給就照原樣顯示整串、說明留白。少一點資訊，不會是錯的資訊。
+        self._specs = dict(specs or {})
         rows: List[Tuple[str, Any]] = []          # ("head"/"row", 內容)
         if sections:
             seen = set()
@@ -6204,8 +6333,9 @@ class FeatureTable(QTableWidget):
                          if n in features and n != self._SCORE and n not in seen]
                 # 同一張卡底下**絕對量在前、相對量在後**（其餘保持原順序）。
                 # 兩者交錯的話，那一段要一行一行讀才知道自己在看哪一種。
-                names.sort(key=lambda n: 1 if feature_gloss(n)[0]
-                           == FEATURE_RELATIVE else 0)
+                # 「哪個是相對量」看宣告的 ``family``，不再拆名字。
+                names.sort(key=lambda n: 1 if getattr(
+                    self._specs.get(n), "family", "") == "cmp" else 0)
                 if not names:
                     continue
                 seen.update(names)
@@ -6265,13 +6395,16 @@ class FeatureTable(QTableWidget):
     def _fill_row(self, row: int, name: str, value: Any,
                   highlighted: bool, is_score: bool) -> None:
         key_item = QTableWidgetItem(str(name))
+        spec = (getattr(self, "_specs", None) or {}).get(str(name))
         # **純文字仍然是 DisplayRole** —— 複製、搜尋、測試讀到的都還是那一串
-        # 打得進分數表達式的字。HTML 只是它的長相。
-        html = feature_html(str(name),
-                            (getattr(self, "_parts", None) or {}).get(str(name)))
+        # 打得進分數表達式的字。HTML 只是它的長相（拆解 = ``spec.parts()``，
+        # 跟 `Step.feature_parts` 同一個形狀、同一個產地）。
+        html = feature_html(str(name), spec.parts() if spec is not None
+                            else None)
         if html != _escape(str(name)):
             key_item.setData(_FeatureNameDelegate.HTML_ROLE, html)
-        kind, gloss = feature_gloss(str(name), getattr(self, "_about", None))
+        kind, gloss = feature_gloss(str(name), getattr(self, "_about", None),
+                                    spec)
         about_item = QTableWidgetItem(gloss)
         # **絕對量與相對量用顏色分**（使用者要的第二種分類）：相對量走強調色，
         # 絕對量走次要色。文字本身也講得出來（`… vs mg`），所以不是只靠顏色。

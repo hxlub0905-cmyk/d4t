@@ -262,6 +262,25 @@ def test_a_patch_with_no_structure_is_marked_not_guessed(mixed_window):
         assert r["boxes"], "退回之後區域仍然存在（就是整張圖）"
 
 
+def test_locate_flags_come_from_declared_specs_not_suffixes(mixed_window):
+    """填了 ``output_prefix`` 之後旗標叫 ``x_locate_ok``。身分由**宣告**來
+    （``spec.metric == "locate_ok"``，PR-3）—— 舊的 ``endswith`` 只是碰巧對，
+    而 specs 必須也對（這條就是在釘那件事）。"""
+    from d4t.ui.region_check import _locate_flag_names, check_regions
+
+    nid = mixed_window.selected_node
+    mixed_window.model.set_param(nid, "output_prefix", "x")
+    recipe = mixed_window.model.to_recipe()
+    names = _locate_flag_names(recipe, nid)
+    assert names == ["x_locate_ok"], "前綴要跟著宣告走"
+    results = check_regions(recipe, mixed_window._items()[:12],
+                            mixed_window.model.kind, nid, ["epi"], 120, "ref")
+    got = {bool(r["located"]) for r in results if r["error"] is None}
+    assert got == {True, False}, \
+        "反空洞：旗標真的讀到了 —— 這批刻意混了定位得出與定位不出的 patch"
+    mixed_window.model.set_param(nid, "output_prefix", "")
+
+
 def test_check_regions_never_raises_on_a_broken_pipeline(mixed_window):
     """跟引擎「單顆爆不殺整批」同一個契約 —— 一顆壞掉只是一格壞掉。"""
     from d4t.ui.region_check import check_regions

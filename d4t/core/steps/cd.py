@@ -95,7 +95,7 @@ contour」問軟體，後者不該出現在卡片上。
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -107,7 +107,7 @@ from ..pipeline.step import (
 )
 from ._util import (
     MultiSourceStep, ensure_gray, output_prefix_spec, parse_key_list,
-    roi_rect_or_none,
+    prefix_names, roi_rect_or_none,
 )
 
 #: ``report`` 膠囊列得出來的東西。分三群（UI 那邊登記在
@@ -504,6 +504,31 @@ class CdMeasureStep(MultiSourceStep):
             want = [m for m in want if m not in _NEEDS_TARGET]
         return list(ALWAYS) + want
 
+    @classmethod
+    def base_specs(cls, params: Dict[str, object]):
+        """基本名＋身分（PR-3）：每個基本名就是它自己的統計量 id
+        （`METRIC_GROUPS` 的鍵），家族 "cd"。名字的分支照 `feature_names`。"""
+        return [(str(n), str(n), "", "", "cd")
+                for n in cls.feature_names(params)]
+
+    @classmethod
+    def diagnostic_names(cls, params: Dict[str, object]) -> List[str]:
+        """「量得準不準」那幾個（``ALWAYS`` 註解裡的前兩個 ＋ 團那支的對應者）。
+
+        ⚠ ``cd_axis_deg`` / ``cd_bright`` **不在這裡**：它們是「卡片自動做的
+        決定要變成畫得出分布的數字」那一族（F19）—— 使用者本來就該在表上
+        看到它們的分布，收進診斷等於把那條規矩收回去。
+        """
+        if _shape_of(params) == SHAPE_BLOB:
+            return ["cd_touches_edge", "cd_edge_score"]
+        return ["cd_n", "cd_lines", "cd_edge_score"]
+
+    @classmethod
+    def diagnostic_alarm_names(cls, params: Dict[str, object]) -> List[Tuple[str, bool]]:
+        if _shape_of(params) == SHAPE_BLOB:
+            return [("cd_touches_edge", True)]  # 1 = 貼著邊，面積只是下限
+        return []
+
     # ---- 量一個區域 -------------------------------------------------------- #
     def measure(self, ctx: Context, img, p: Dict[str, Any]):
         gray = ensure_gray(np.asarray(img))
@@ -673,6 +698,9 @@ class CdMeasureStep(MultiSourceStep):
             "feret_min": round(float(res.feret_min), 4),
             "feret_angle": round(float(res.feret_angle), 2),
             "outline": outline, "chord": chord,
+            # 同線那一支的理由（PR-3）：基本名 → 完整特徵名，面板不再重組。
+            "feature_names": {b: prefix_names(prefix, [b])[0]
+                              for b in self.feature_names(p)},
             "hist": {"counts": list(res.hist[0]),
                      "lo": round(float(res.hist[1]), 3),
                      "hi": round(float(res.hist[2]), 3)},
@@ -789,6 +817,11 @@ class CdMeasureStep(MultiSourceStep):
             "median_index": median_index,
             "widths": [round(float(v), 4) for v in res.widths],
             "offsets": [round(float(v), 4) for v in res.offsets],
+            # **基本名 → 完整特徵名**（PR-3）：面板要拿這一列的數字對整批
+            # 的分布時，以前是自己拼 `prefix + "_cd_median"` —— 名字的組法
+            # 只住這張卡上，重組出來的那份會漂。
+            "feature_names": {b: prefix_names(prefix, [b])[0]
+                              for b in self.feature_names(p)},
         }
         if res.median_line >= 0 and res.profile is not None:
             pick = res.lines[res.median_line]

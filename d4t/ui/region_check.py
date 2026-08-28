@@ -104,6 +104,7 @@ def check_regions(recipe: Any, items: Sequence[Any], kind: str, node_id: str,
     """
     out: List[Dict[str, Any]] = []
     wanted = [str(r) for r in regions]
+    flag_names = _locate_flag_names(recipe, node_id)
 
     for item in list(items)[:MAX_CHECK]:
         defect_id = str(getattr(item, "defect_id", ""))
@@ -152,11 +153,28 @@ def check_regions(recipe: Any, items: Sequence[Any], kind: str, node_id: str,
         # ``locate_ok`` 是投影定位卡吐的旗標；沒有這個特徵的 Region 卡
         # （例如手畫的框）一律當成定位成功 —— 它本來就不需要定位。
         feats = dict(getattr(res, "features", {}) or {})
-        flags = [v for k, v in feats.items() if k.endswith("locate_ok")]
+        flags = [feats[n] for n in flag_names if n in feats]
         entry["located"] = all(float(v) > 0.5 for v in flags) if flags else True
         out.append(entry)
 
     return out
+
+
+def _locate_flag_names(recipe: Any, node_id: str) -> List[str]:
+    """**這張卡**宣告的定位旗標（``spec.metric == "locate_ok"``，PR-3）。
+
+    以前用 ``endswith("locate_ok")`` 掃整份 features —— 那是拆字串猜語意：
+    ``output_prefix`` 取得不巧的名字會誤中，上游別張 Region 卡的旗標也會被
+    算成這張卡的失敗。身分由宣告來，字尾不再是判準。
+    """
+    try:
+        node = recipe.nodes[str(node_id)]
+        step_cls = get_step(node.step)
+        p = step_cls.validate_params(dict(node.params))
+        return [s.name for s in step_cls.resolve_feature_specs(p)
+                if s.metric == "locate_ok"]
+    except Exception:                       # noqa: BLE001 — 顯示用
+        return []
 
 
 def summarize(results: Sequence[Dict[str, Any]]) -> str:

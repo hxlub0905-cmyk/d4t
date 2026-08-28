@@ -717,6 +717,41 @@ class OutputReportStep(_OutputStep):
                        "one thing.")
         return out
 
+    @classmethod
+    def planned_files(cls, params: Dict[str, Any]) -> List[Dict[str, str]]:
+        """按下 Run 這張卡會寫哪幾個檔（**乾跑**：不碰磁碟、不猜大小）。
+
+        照寫入順序回 ``[{"tick", "what", "name"}, …]``。它是 `run_batch` 的
+        那張表本人（run_batch 用它決定要寫什麼）—— 跟 Write KLARF 的
+        `plan_writeback` 同一條硬規則：寫出前一定先預覽，而預覽跟真跑共用
+        同一份計畫才不會漂。圖那一列給的是 pattern（一顆一張，名字跑了才
+        知道）；圖放不放進 ``images/`` 由「有沒有報表」決定（F37 的規則，
+        跟 run_batch 同一個式子）。
+        """
+        try:
+            p = cls.validate_params(dict(params or {}))
+        except Exception:  # noqa: BLE001 — 預覽要容錯，壞參數 validate 會講
+            p = dict(params or {})
+        want = set(parse_key_list(str(
+            p.get("contents") or ",".join(DEFAULT_CONTENTS))))
+        out: List[Dict[str, str]] = []
+        if CONTENT_PICTURES in want:
+            ext = (".png" if str(p.get("picture_format", PIC_JPEG)) == PIC_PNG
+                   else ".jpg")
+            nested = CONTENT_REPORT in want
+            out.append({"tick": CONTENT_PICTURES, "what": "the pictures",
+                        "name": ("%s/<defect>%s" % (cls.IMAGE_DIR, ext)
+                                 if nested else "<defect>%s" % ext)})
+        for tick, what, name in (
+                (CONTENT_REPORT, "the report", cls.REPORT_NAME),
+                (CONTENT_TABLE, "the spreadsheet", cls.CSV_NAME),
+                (CONTENT_EXCEL, "the Excel report", cls.EXCEL_NAME),
+                (CONTENT_BOXPLOT, "the box plot", cls.PLOT_NAME),
+                (CONTENT_RECIPE, "the recipe", cls.RECIPE_NAME)):
+            if tick in want:
+                out.append({"tick": tick, "what": what, "name": name})
+        return out
+
     # ----------------------------------------------------------------- #
     # box plot（併進來的 `output_boxplot`，F38）
     # ----------------------------------------------------------------- #
@@ -870,33 +905,33 @@ class OutputReportStep(_OutputStep):
         # 而「跑完了但資料夾是空的」比一個錯誤訊息糟得多）。
         title = (str(p["title"]).strip()
                  or str(getattr(bctx.recipe, "recipe_id", "") or "d4t results"))
-        jobs = [
-            (CONTENT_REPORT, "the report", self.REPORT_NAME,
-             lambda path: export_html.write_html(
-                 export_html.build_report(
-                     rows, title, export_report.feature_keys(rows),
-                     decide=getattr(bctx.recipe, "decide", None),
-                     images=images),
-                 path)),
-            (CONTENT_TABLE, "the spreadsheet", self.CSV_NAME,
-             lambda path: export_report.write_csv(
-                 rows, path, include_features=bool(p["include_features"]))),
-            (CONTENT_EXCEL, "the Excel report", self.EXCEL_NAME,
-             lambda path: export_report.write_excel(rows, path,
-                                                    recipe=bctx.recipe)),
-            (CONTENT_BOXPLOT, "the box plot", self.PLOT_NAME,
-             lambda path: self._write_boxplot(bctx, p, path)),
+        # tick → 寫入器。「哪一勾寫哪一個檔、叫什麼」住在 `planned_files`
+        # （儀表的預覽跟這裡讀**同一張表** —— 各寫一份的那份會漂，儀表列的
+        # 檔名跟真的寫出來的對不上）。這裡只補上寫入的動作。
+        writers = {
+            CONTENT_REPORT: lambda path: export_html.write_html(
+                export_html.build_report(
+                    rows, title, export_report.feature_keys(rows),
+                    decide=getattr(bctx.recipe, "decide", None),
+                    images=images),
+                path),
+            CONTENT_TABLE: lambda path: export_report.write_csv(
+                rows, path, include_features=bool(p["include_features"])),
+            CONTENT_EXCEL: lambda path: export_report.write_excel(
+                rows, path, recipe=bctx.recipe),
+            CONTENT_BOXPLOT: lambda path: self._write_boxplot(bctx, p, path),
             # **沒有它，半年後沒人重現得出這份報表。** 那不是保險，是這份東西
             # 有沒有用的分界：一疊數字沒有配方，等於一句「我們那時候量到這樣」。
-            (CONTENT_RECIPE, "the recipe", self.RECIPE_NAME,
-             lambda path: write_recipe_json(bctx, path)),
-        ]
+            CONTENT_RECIPE: lambda path: write_recipe_json(bctx, path),
+        }
         asked = 0
         done = 0
         why: List[str] = []
-        for tick, what, name, write in jobs:
-            if tick not in want:
-                continue
+        for planned in self.planned_files(p):
+            tick, what, name = planned["tick"], planned["what"], planned["name"]
+            write = writers.get(tick)
+            if write is None:
+                continue        # 圖那一列（上面 ① 已經寫了，不在這個迴圈）
             asked += 1
             try:
                 write(os.path.join(folder, name))
@@ -1243,6 +1278,22 @@ class OutputCharStep(_OutputStep):
     CSV_NAME = "defects.csv"
     RECIPE_NAME = "recipe.json"
     IMAGE_DIR = "images"
+
+    @classmethod
+    def planned_files(cls, params: Dict[str, Any]) -> List[Dict[str, str]]:
+        """會寫哪幾個檔（乾跑）—— 這張卡沒有勾選，**固定四樣**。
+
+        同 `OutputReportStep.planned_files` 的契約：不碰磁碟、不猜大小；
+        圖那一列是 pattern（一顆兩張：main / pair）。
+        """
+        return [
+            {"tick": "pictures", "what": "the pictures",
+             "name": "%s/<defect>_main.jpg + _pair.jpg" % cls.IMAGE_DIR},
+            {"tick": "report", "what": "the report", "name": cls.REPORT_NAME},
+            {"tick": "table", "what": "the spreadsheet",
+             "name": cls.CSV_NAME},
+            {"tick": "recipe", "what": "the recipe", "name": cls.RECIPE_NAME},
+        ]
 
     def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
         p = self.validate_params(params)

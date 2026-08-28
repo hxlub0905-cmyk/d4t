@@ -244,6 +244,32 @@ die_rank = pair_die_rank        missing ⇒ 用 -1
 > **配不到的那一顆不會失敗**：`pair_found = 0`、其餘 `pair_*` 一格都不寫、
 > 下游的 H2H 安靜讓路，而這一顆照樣走到判定樹。**那正是要數的東西。**
 
+### 5.5 怎麼看「這一顆為什麼被判成這樣」
+
+Results 的表格上**點那一列的 score / bin / class 任何一格**，右邊滑出回溯
+面板 —— 上面那棵樹在**這一顆**身上是怎麼走的，一步一問帶著實值：
+
+```
+Working numbers
+  sample_top = 200   (= 200)
+  die_rank   = 37    (= 37)        ← 有 missing ⇒ 用 -1；這一顆真的量到了
+The path it took
+  0 < 1 ? no                       ← pair_found = 0 的顆會在這裡答 yes
+  0 > 0 ? no                       ← die_rank_missing
+  37 <= 200 ? yes
+⇒ 抓到了 · bin 1
+```
+
+* `Rank by` 沒填的那種跑法，`die_rank` 那一行會寫著
+  **if missing ⇒ -1 — used on this defect**：你看得到那一片
+  「還沒選排名欄位」的葉子是怎麼來的。
+* 配不到的那一顆：第一題 `pair_found < 1 ? yes` 直接落到「沒偵測到」——
+  後面的題目根本沒問（`decide_unanswered` 維持 0，跟 §5 那條規矩對得上）。
+* 點面板上的 `pair_die_rank` 會跳到產出它的 `pair_source` 卡；點某個區域的
+  數字會把那一塊亮在影像上。Esc 關。
+* 面板上**沒有任何數字是重算的** —— 值全部來自這一顆的那一列，跟 CSV、
+  報表、KLARF 寫回的必然一致。
+
 ---
 
 ## 6. 報表怎麼讀

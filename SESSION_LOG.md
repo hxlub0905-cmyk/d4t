@@ -19,6 +19,88 @@
 
 ---
 
+## F45：FeatureSpec 結構化身分 + 分數回溯（2026-08-27～28，總工作單 PR-3）
+
+計畫書：[`docs/plans/F45-feature-specs-and-verdict-trace.md`](docs/plans/F45-feature-specs-and-verdict-trace.md)。
+總工作單三個 PR 的最後一個收工。
+
+- **`FeatureSpec` 在名字誕生處**（`step.py`）：唯一產地
+  `resolve_feature_specs`，`resolve_features`/`feature_parts` 變投影；
+  使用者拍板 variant 照真實文法（nm/nm2/typical/outlier/outlier_box/
+  missing/raw/rescued）。鐵測試三半，B 半是**改碼前抓的字面快照** ——
+  特徵字串名一個位元組沒改。
+- **`verdict_trace`**：判定重放的純函式（不重算、scale let 不重放、缺值
+  標名字）；`decide_tree.walk` 重構成 `walk_steps` 的投影 —— 引擎、畫布、
+  重放器走**同一個**迴圈。
+- **結果表卡→區域→統計量**（`column_tree` 一棵樹三處共用）、雙層表頭
+  （區域跨欄同疊框色；無區域單層不變）、維度過濾（chips 限縮、
+  搜尋命中 > 限縮）。PR-1 的卡層分組刪了（不留兩套）。
+- **「拆字串猜語意」六處全刪**（`_split_cmp`、nm/locate_ok 字尾、cmp 拆解、
+  CD prefix 重組）—— 替案全部讀宣告或卡片自己 note 的表；grep-proof 只剩
+  docstring 的歷史敘述。
+- **WhyPanel 三次點擊**：點 score/bin/class → 面板重放（帶實值）→ 點項跳
+  產出卡；區域項亮那一塊（`set_overlay_emphasis`，alpha 一軸不搶 focus）。
+  Preview Path 行改建在 trace 上（刪 meta 讀）。
+- 黃金值三份逐項相同（每個 core commit 後查）；匯出零改動；出貨 recipe
+  加回溯煙霧（疊在既有 e2e 裡，CI 時間不變差）。
+
+## F44：區域接線可讀性 + 儀表補洞（2026-08-27，總工作單 PR-2）
+
+計畫書：[`docs/plans/F44-region-wiring-and-panels.md`](docs/plans/F44-region-wiring-and-panels.md)。
+六個子項一次收工；PR-3（FeatureSpec 與分數回溯）還沒動。
+
+- **GLV「我要量什麼」三選**（preset 不是參數）：腦袋在 `RecipeModel`
+  （roi 是線水合的 → preset 動的是**線**），存出 JSON 與手拉線者逐位元組
+  相同、一次 Ctrl+Z 全還原。使用者拍板 preset (1) 用現行正確寫法兩條線
+  （工作單字面的 REF_OTHERS+_center 是已知壞組合）。
+- **兩條 kind 感知 lint**（新 hook `Step.kind_issues`；kind 分群搬進
+  step.py）＋ **Issue 多了 `info` 級**（徽章不畫、tooltip/CLI 可見）。
+- **一份字典 `ui/region_words.py`**：菱形埠 hover（掛在 view，node 不收
+  hover）、GLV 標題意圖語言、ProfilePanel 斜線圖例三方同源。
+- **GLV worst 直方圖 + judge 值帶**：同一次計算、擴充 `glv_hist` meta；
+  >512 格取樣記 `sampled`、worst 必留。
+- **Subtract 面板**：新 `signed_hist`（`pixel_hist` 0-255 不動、有絆線
+  測試）；卡片在預覽下自己 note（diff 是新流，stream_change 不會記）；
+  行/列平均曲線抓對位條紋（測試證明直方圖看不見、曲線看得見）。
+- **輸出預覽**：`planned_files` 是 run_batch 那張表本人（不會漂）；
+  選到卡就列檔、永不寫檔。**focus 單顆即時**（meta note）。
+- **共用 header**（`note_header`/`paint_note_header`）＋ empty_reason
+  巡檢（registry 全掃逼每個面板自己講）。
+
+黃金值逐項相同、export parity 全綠、核心 + UI 逐檔全綠。
+
+---
+
+## F43：結果表分層 + 診斷徽章（2026-08-27，總工作單 PR-1）
+
+計畫書：[`docs/plans/F43-results-layers.md`](docs/plans/F43-results-layers.md)。
+總工作單三個 PR 的第一個；PR-2（區域接線可讀性）、PR-3（FeatureSpec 與分數
+回溯）還沒動。
+
+結果表五六十欄平鋪 → 分兩層：**判定層**（徽章 + base + class + 判定引用的
+特徵，照引用順序）預設可見，其餘按產出卡分組摺疊（「All measurements (N)」
+展開、搜尋框叫欄）。分層自動由 recipe 推導，唯一出處是新模組
+`core/pipeline/verdict_features.py`（放新模組是因為 `decide_tree` 反向
+import `recipe`，塞 recipe.py 會循環）。診斷欄離開表格，每列一格警示徽章 ——
+警示**只**來自 `error` 與卡宣告的布林（新 hook `Step.diagnostic_alarms`，
+極性是資料），數值型診斷 UI 不發明門檻；明細由 `traces` 歸戶。
+
+三筆偏離工作單（詳見計畫書 §3）：沿用既有的 `diagnostic_features` 不另開
+`resolve_diagnostics`；GLV 的 sat 族**不**宣告成診斷（使用者拍板 —— 那是勾了
+才產出的統計量）；Focus 沒有 error/trust 名可宣告。另一條拍板：**判定引用 >
+診斷隱藏**（樹裡比了 `glv_ok` 就照樣顯示那一欄）。
+
+順手收下的 lint 行為變化：兩張 GLV 撞 `glv_pixels` 不再警告（兩邊都是宣告過
+的診斷，同 `clip_frac` 那條路；`glv_median` 照講）——
+`test_card_invariants.py` 的那條測試改鎖新行為。
+
+驗收：黃金值三份逐項相同、`test_export_parity.py` 全綠（`report.py` 一個
+位元組沒動）、核心 + UI 兩批全綠。新測試 `tests/test_verdict_features.py`
+（36 條，含 registry 全掃「診斷 ⊆ 產出」與反空洞）、
+`tests/test_ui_results_layers.py`（12 條不變量）。
+
+---
+
 ## F42 B4：拆舊路 ＋ 收尾（2026-08-27，方案 B 完成）
 
 計畫書：[`docs/plans/F42-region-edges-plan-b.md`](docs/plans/F42-region-edges-plan-b.md)。

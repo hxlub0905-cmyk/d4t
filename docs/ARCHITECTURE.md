@@ -143,6 +143,42 @@ Context 有三層資料：**影像流 images**（名字 → 像素陣列，綁�
 新 image source 進來的 checklist：Load 層吐具名流 → 挑一個定位法吐具名區域 →
 下游（量測/mask/overlay/region check）不用動。
 
+### 特徵的身分：名字是字串，結構是宣告（F45，2026-08-28）
+
+特徵仍然是**扁平的全域命名空間**（名字 → 數字）：名字是分數表達式的變數、
+CSV 的欄名、KLARF 寫回的來源 —— **一個位元組都不改**，這一條是鐵測試守的
+（`tests/test_feature_specs.py` 的字面快照）。
+
+改變的是：每個名字**在誕生的地方**多了一份結構化身分 ——
+`FeatureSpec`（`pipeline/step.py`）：這個名字屬於哪張卡（`card`）、哪條流
+（`stream`）、哪個區域與角色（`region` / `region_role`）、使用者取的前綴
+（`own`）、是哪個統計量（`metric`）、比的是哪個統計量（`stat`）、以及名字裡
+真正存在的變體後綴（`variant`：nm/nm2 孿生、each-box 的
+typical/outlier/outlier_box、引擎的 missing/raw、撞名救援的 rescued）。
+
+- **唯一產地是 `Step.resolve_feature_specs`**：組名字的那個迴圈同時宣告身分
+  （`MultiSourceStep` 一個雙迴圈），`resolve_features` 與 `feature_parts`
+  都是它的投影 —— 拆與合只有一個家。
+- **UI 不拆字串猜語意**（總工作單的禁令，PR-3 之後不准存在）：結果表的
+  卡→區域→統計量分組、雙層表頭、維度過濾、特徵表的說明與上下標、
+  region check 的定位旗標，讀的全部是 spec。沒有 spec 的名字照原樣顯示、
+  說明留白 —— 少一點資訊，不會是錯的資訊。
+- `verdict_features.bound_specs` 把 spec 綁上節點 id（route 上第一個產出者
+  贏，跟引擎的撞名語意一致），是顯示層「這個數字是誰的」的唯一出處。
+
+### 判定可以重放：`verdict_trace`（F45）
+
+「這顆為什麼判 NG」是一支純函式：
+`verdict_trace(recipe, route, features) → Trace`
+（`pipeline/verdict_trace.py`）。吃批次列的 features dict（引擎在判定後
+快照，let 值都在），重放出帶實值的算式（`valued_text`，pos 定位替換）、
+逐步的路徑與每一步缺了什麼、落在哪片葉子。三條立身規矩：**不重算任何值**
+（SAFE 語意因此不可能跟引擎不一致）、**有 `scale` 的 let 不重放**（鏡射
+`batch.redecide` 丟掉 scale let 的規則）、**缺值明白標名字**（答「否」照走，
+F30）。樹的走訪跟引擎是**同一支** `decide_tree.walk_steps` —— 重放出的路
+不可能跟引擎走的漂移。Studio 的回溯面板（`ui/why_panel.py`）與 Preview 的
+Path 行都建在它上面。
+
 ---
 
 ## 目錄結構

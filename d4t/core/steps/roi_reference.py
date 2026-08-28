@@ -92,14 +92,16 @@ from ..ingest.glas_export import SIDECAR_LABEL
 from ..pipeline.channels import ChannelMapError, parse_channel_map
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, GROUP_REGION, ParamSpec, Step, StepError, register_step,
+    CATEGORY_ALGO, GROUP_REGION, FeatureSpec, ParamSpec, Step, StepError,
+    register_step,
     show_when_conditions,
 )
 from ._util import (
     FEATURE_PREFIX_PATTERN, drop_edge_boxes, drop_edge_specs, ensure_gray,
     PICK_NONE, output_prefix_spec, pick_defect_box, pick_rule_of,
     pick_rule_specs, prefix_features, prefix_names, region_family,
-    region_fact_names, region_facts, require_image, set_region_family,
+    region_fact_names, region_fact_specs, region_facts, region_role_of,
+    require_image, set_region_family,
     LIMIT_MAX_BOXES,
 )
 
@@ -399,20 +401,44 @@ class RoiReferenceStep(Step):
         return out
 
     @classmethod
-    def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
+    def resolve_feature_specs(cls, params: Dict[str, Any]) -> List[FeatureSpec]:
+        from dataclasses import replace as _replace
+
         impl = _impl(_method_of(params))
         if impl is not None:
-            return impl.resolve_features(
-                _params_for(_method_of(params), params))
+            # ``card`` 要寫**註冊的這張卡**（binder 與鐵測試都以 registry 的
+            # key 為準）—— impl 類別自己的 key 是折進來之前的舊名。
+            return [_replace(s, card=cls.key)
+                    for s in impl.resolve_feature_specs(
+                        _params_for(_method_of(params), params))]
+        own = str(params.get("output_prefix", "") or "").strip()
         regions = cls.resolve_regions_out(params)
+
+        def spec(base, region="", metric=""):
+            return FeatureSpec(
+                name=prefix_names(own, [base])[0], card=cls.key, base=base,
+                region=region,
+                region_index=(regions.index(region) if region in regions
+                              else -1),
+                region_role=(region_role_of(region) if region else ""),
+                own=own, metric=metric or base, family="region")
+
+        out: List[FeatureSpec] = []
         if _method_of(params) == METHOD_GDS:
-            names = list(_GDS_FEATURES) + region_fact_names(regions)
+            out.extend(spec(n) for n in _GDS_FEATURES)
+            out.extend(spec(n, region=r, metric=f)
+                       for n, r, f in region_fact_specs(regions))
             for _lid, name in _layers_of(params):
-                names.extend("%s_%s" % (name, f)
-                             for f in _EXTRA_REGION_FEATURES)
+                out.extend(spec("%s_%s" % (name, f), region=name, metric=f)
+                           for f in _EXTRA_REGION_FEATURES)
         else:
-            names = region_fact_names(regions)
-        return prefix_names(params.get("output_prefix", ""), names)
+            out.extend(spec(n, region=r, metric=f)
+                       for n, r, f in region_fact_specs(regions))
+        return out
+
+    @classmethod
+    def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
+        return [s.name for s in cls.resolve_feature_specs(params)]
 
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:

@@ -110,13 +110,14 @@ from ..pipeline.cellrois import (
 )
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, GROUP_REGION, ParamSpec, Step, StepError, register_step,
+    CATEGORY_ALGO, GROUP_REGION, FeatureSpec, ParamSpec, Step, StepError,
+    register_step,
 )
 from ._util import (
     PICK_NONE, drop_edge_boxes, drop_edge_specs, output_prefix_spec,
     pick_defect_box, pick_rule_of, pick_rule_specs, prefix_features,
-    prefix_names, region_fact_names, region_facts, region_family,
-    require_image, set_region_family,
+    prefix_names, region_fact_names, region_fact_specs, region_facts,
+    region_family, region_role_of, require_image, set_region_family,
 )
 
 #: ``locate_axis`` -> 哪幾軸要做定位。一維的 layout（垂直條紋）只有 X 有相位，
@@ -292,11 +293,27 @@ class RoiTemplateStep(Step):
         return out
 
     @classmethod
+    def resolve_feature_specs(cls, params: Dict[str, Any]) -> List[FeatureSpec]:
+        """同 `roi_cross`：own 最外、區域名在 base 裡（PR-3 的誕生處宣告）。"""
+        own = str(params.get("output_prefix", "") or "").strip()
+        regions = cls.resolve_regions_out(params)
+
+        def spec(base, region="", metric=""):
+            return FeatureSpec(
+                name=prefix_names(own, [base])[0], card=cls.key, base=base,
+                region=region,
+                region_index=(regions.index(region) if region in regions
+                              else -1),
+                region_role=(region_role_of(region) if region else ""),
+                own=own, metric=metric or base, family="region")
+
+        return ([spec(n) for n in _MATCH_FEATURES]
+                + [spec(n, region=r, metric=f)
+                   for n, r, f in region_fact_specs(regions)])
+
+    @classmethod
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
-        return prefix_names(
-            params.get("output_prefix", ""),
-            list(_MATCH_FEATURES)
-            + region_fact_names(cls.resolve_regions_out(params)))
+        return [s.name for s in cls.resolve_feature_specs(params)]
 
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:

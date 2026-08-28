@@ -269,22 +269,36 @@ def answer(when: str, feats: Any) -> Tuple[bool, List[str]]:
     return expr.eval(feats) != 0.0, []
 
 
+def walk_steps(tree: Any, feats: Any
+               ) -> Tuple[Any, List[Tuple[Any, bool, List[str]]]]:
+    """逐步版的 :func:`walk`：``(葉子, [(那一步, 答案, 缺了哪些), …])``。
+
+    回溯面板（PR-3 的 `verdict_trace`）要的是**每一步**問了什麼、答了什麼、
+    缺了什麼 —— 而那個迴圈只能有一份（`walk` 是它的三行投影，引擎與畫布
+    照舊走 `walk`）。
+    """
+    node = tree
+    steps: List[Tuple[Any, bool, List[str]]] = []
+    while not isinstance(node, TreeLeaf):
+        yes, gaps = answer(node.when, feats)
+        steps.append((node, yes, gaps))
+        node = node.yes if yes else node.no
+    return node, steps
+
+
 def walk(tree: Any, feats: Any) -> Tuple[Any, str, List[str]]:
     """把這一顆的特徵餵進樹裡走一遍：``(落在哪片葉子, 路徑, 問不出來的名字)``。
 
     **引擎與畫布走的是這一支** —— `engine._eval_decision` 與 :func:`_path_of`
     都叫它。以前那兩邊是各自寫的兩段迴圈，而 `_path_of` 的說明寫著「判準跟
     引擎一字不差」：只改一邊的那一天，畫布上的顆數與引擎判的類別會對不起來，
-    而畫面上沒有任何東西看得出來。
+    而畫面上沒有任何東西看得出來。PR-3 起它是 :func:`walk_steps` 的投影 ——
+    同一個理由再走一層：回溯面板逐步重放的也必須是**同一個**迴圈。
     """
-    node, path = tree, ""
-    missing: List[str] = []
-    while not isinstance(node, TreeLeaf):
-        yes, gaps = answer(node.when, feats)
-        missing.extend(gaps)
-        node = node.yes if yes else node.no
-        path += "y" if yes else "n"
-    return node, path, missing
+    leaf, steps = walk_steps(tree, feats)
+    path = "".join("y" if yes else "n" for _n, yes, _g in steps)
+    missing = [name for _n, _y, gaps in steps for name in gaps]
+    return leaf, path, missing
 
 
 def _path_of(tree: Any, feats: Dict[str, Any]) -> str:

@@ -9,13 +9,13 @@
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
 
 from ..pipeline.context import Context, ContextError
-from ..pipeline.step import ParamSpec, Step, StepError
+from ..pipeline.step import FeatureSpec, ParamSpec, Step, StepError
 
 # --------------------------------------------------------------------------- #
 # 輸出名前綴（F7-11）—— 讓同一張量測卡可以用在好幾個區域上
@@ -192,22 +192,30 @@ class MultiStreamStep(Step):
         return list(cls.features_out) + [CLIP_FRAC]
 
     @classmethod
-    def resolve_features(cls, params: Dict[str, object]) -> List[str]:
-        """這張卡吐的診斷特徵（F11 Enhance-1）。
+    def resolve_feature_specs(cls, params: Dict[str, object]) -> List[FeatureSpec]:
+        """這張卡吐的診斷特徵（F11 Enhance-1），PR-3 起帶身分。
 
         **一條流時逐字是 `clip_frac`**、多條流時加流名前綴 —— 跟量測卡同一條
         規則（F10-3），所以使用者只要學一次。
 
         兩條以上再多兩個**不帶前綴**的：那一對流處理完之後還有多像
         （:data:`PAIR_FEATURES`）。它們講的是「這兩條之間」，不是「其中某一條」，
-        所以掛在流名下面會是錯的。
+        所以掛在流名下面會是錯的 —— spec 的 ``stream`` 因此刻意留空。
         """
         keys = cls.stream_list(params)
         base = cls.stream_features(params)
         if len(keys) > 1:
-            out = [n for k in keys for n in prefix_names(k, base)]
-            return out + list(PAIR_FEATURES)
-        return base
+            out = [FeatureSpec(name=prefix_names(k, [n])[0], card=cls.key,
+                               base=str(n), stream=str(k))
+                   for k in keys for n in base]
+            return out + [FeatureSpec(name=str(n), card=cls.key, base=str(n))
+                          for n in PAIR_FEATURES]
+        return [FeatureSpec(name=str(n), card=cls.key, base=str(n))
+                for n in base]
+
+    @classmethod
+    def resolve_features(cls, params: Dict[str, object]) -> List[str]:
+        return [s.name for s in cls.resolve_feature_specs(params)]
 
     @classmethod
     def diagnostic_features(cls, params: Dict[str, object]) -> List[str]:
@@ -657,17 +665,26 @@ def nm_twins(feats: Dict[str, float],
     return out
 
 
-def nm_twin_names(names: Sequence[str]) -> List[str]:
-    """:func:`nm_twins` 會配出哪幾個名字（宣告用；跟值無關）。"""
-    out: List[str] = []
+def nm_twin_specs(names: Sequence[str]) -> List[Tuple[str, str]]:
+    """:func:`nm_twins` 會配出哪幾個名字 → ``[(孿生名, variant), …]``。
+
+    variant 是 ``"nm"`` 或 ``"nm2"``（`FeatureSpec.variant` 的值）——
+    宣告與變體標記在同一張表上出生（PR-3），`nm_twin_names` 是它的投影。
+    """
+    out: List[Tuple[str, str]] = []
     for name in names or ():
         if name in AREA_FEATURES:
-            out.append(name[:-3] + "_nm2")
+            out.append((name[:-3] + "_nm2", "nm2"))
         elif name in LENGTH_FEATURES:
-            out.append(str(name) + "_nm")
+            out.append((str(name) + "_nm", "nm"))
         elif str(name).endswith("_px"):
-            out.append(name[:-3] + "_nm")
+            out.append((name[:-3] + "_nm", "nm"))
     return out
+
+
+def nm_twin_names(names: Sequence[str]) -> List[str]:
+    """:func:`nm_twins` 會配出哪幾個名字（宣告用；跟值無關）。"""
+    return [n for n, _v in nm_twin_specs(names)]
 
 
 def resize_to(img: np.ndarray, shape) -> np.ndarray:
@@ -832,6 +849,21 @@ def others_name(name: str) -> str:
     return "%s%s" % (name, OTHERS_SUFFIX)
 
 
+def region_role_of(name: str) -> str:
+    """區域名 → 角色（PR-3）：``"all" | "center" | "others"``。
+
+    後綴的**唯一產地**是 :func:`region_family`，所以翻譯也住在這裡 ——
+    `ui/region_words.role_of` 從 PR-3 起委派這一支（那邊只剩顯示的字）。
+    認不得的後綴一律當「全部的框」。
+    """
+    n = str(name or "")
+    if n.endswith(CENTRE_SUFFIX):
+        return "center"
+    if n.endswith(OTHERS_SUFFIX):
+        return "others"
+    return "all"
+
+
 #: **每一張「找 ROI」的卡，對它吐的每一個區域，都寫這五個數字**（F11 Region-4）。
 #:
 #: 使用者 2026-08-18：「我認為各種找／給定 ROI 的方法，理想上輸出的東西要接近
@@ -861,14 +893,24 @@ def others_name(name: str) -> str:
 REGION_FACTS = ("present", "boxes", "area_px", "clipped", "edge_dropped")
 
 
-def region_fact_names(names) -> List[str]:
-    """``["epi", "epi_center"]`` → 這些區域會寫出來的 feature 名（供 lint／UI）。"""
-    out: List[str] = []
+def region_fact_specs(names) -> List[Tuple[str, str, str]]:
+    """``["epi", …]`` → ``[(feature 名, 區域名, 哪個 fact), …]``（PR-3）。
+
+    Region 卡的名字文法跟量測卡**相反**：區域名在 base 裡、`output_prefix`
+    在最外 —— 所以「這個名字屬於哪個區域」只有組名字的這一行答得出來。
+    `region_fact_names` 是它的投影。
+    """
+    out: List[Tuple[str, str, str]] = []
     for name in names or ():
         n = str(name or "").strip()
         if n:
-            out.extend("%s_%s" % (n, f) for f in REGION_FACTS)
+            out.extend(("%s_%s" % (n, f), n, f) for f in REGION_FACTS)
     return out
+
+
+def region_fact_names(names) -> List[str]:
+    """``["epi", "epi_center"]`` → 這些區域會寫出來的 feature 名（供 lint／UI）。"""
+    return [n for n, _r, _f in region_fact_specs(names)]
 
 
 def region_facts(ctx, names, shape, clipped: bool = False,
@@ -1098,51 +1140,111 @@ class MultiSourceStep(Step):
 
     @classmethod
     def feature_names(cls, params: Dict[str, object]) -> List[str]:
-        """這張卡**在這組參數下**會產出的特徵基本名（不含任何前綴）。"""
-        return list(cls.features_out)
+        """這張卡**在這組參數下**會產出的特徵基本名（不含任何前綴）。
+
+        PR-3 起是 :meth:`base_specs` 的投影 —— 名字與它的結構身分同一張表
+        出生。既有覆寫（GLV/CD）已改覆寫 `base_specs`；還覆寫這一支的第三方
+        卡照樣可用（`base_specs` 的預設讀它）。
+        """
+        return [e[0] for e in cls.base_specs(params)]
 
     @classmethod
-    def resolve_features(cls, params: Dict[str, object]) -> List[str]:
-        keys = cls.source_list(params) or [""]
-        # nm 的那一份**一律宣告**（`nm_twins` 只在 nm/px 填了的時候才產出）。
-        # 宣告是「可能會碰到的」，而這張卡看不到 Load 卡上填了什麼 —— 那個數字
-        # 是整份 recipe 的事。畫面上要不要列它由 `RecipeModel.available_features`
-        # 決定（那裡看得到每一張卡）。
-        base = cls.feature_names(params)
-        base = base + nm_twin_names(base)
-        return [n for k in keys for r in cls.region_list(params)
-                for n in prefix_names(cls.full_prefix(params, k, r), base)]
+    def base_specs(cls, params: Dict[str, object]
+                   ) -> List[Tuple[str, str, str, str, str]]:
+        """基本名 ＋ 它的身分：``[(base, metric, stat, variant, family)]``。
+
+        子類在**組名字的那幾行**同時給身分（PR-3 的「誕生處」）；預設從
+        `features_out` 來、身分空白（退化不是錯）。⚠ 順序就是宣告順序 ——
+        `resolve_features` 由此投影，動順序就是動宣告。
+        """
+        if cls.feature_names.__func__ is not MultiSourceStep.feature_names.__func__:
+            # 第三方卡只覆寫了 feature_names：以它為準（相容退路）。
+            return [(str(n), "", "", "", "") for n in cls.feature_names(params)]
+        return [(str(n), "", "", "", "") for n in cls.features_out]
 
     @classmethod
-    def feature_parts(cls, params: Dict[str, object]) -> Dict[str, Dict[str, object]]:
-        """見 `Step.feature_parts` —— **`resolve_features` 的反向**。
+    def resolve_feature_specs(cls, params: Dict[str, object]) -> List[FeatureSpec]:
+        """一個雙迴圈產出**帶身分的**宣告（PR-3）。
 
-        兩支走**同一個雙層迴圈、同一組 `*_prefix` 呼叫**，所以它們不可能對
-        不上。各寫一份的話，「這個名字有沒有區域那一段」會有兩個答案，而畫面
-        用的是錯的那一個。
+        `resolve_features` 與 `feature_parts` 都是它的投影 —— 以前那兩支是
+        同一個迴圈的兩份手抄，現在只剩一份。名字仍由同一組
+        `full_prefix`/`prefix_names` 組出（鐵測試 B 半的字面快照守著）。
+
+        nm 的那一份**一律宣告**（`nm_twins` 只在 nm/px 填了的時候才產出）。
+        宣告是「可能會碰到的」，而這張卡看不到 Load 卡上填了什麼 —— 那個數字
+        是整份 recipe 的事。畫面上要不要列它由 `RecipeModel.available_features`
+        決定（那裡看得到每一張卡）。
         """
         keys = cls.source_list(params) or [""]
         regions = cls.region_list(params)
-        base = cls.feature_names(params)
-        base = base + nm_twin_names(base)
+        entries = [(str(b), str(m), str(s), str(v), str(f))
+                   for b, m, s, v, f in cls.base_specs(params)]
+        # 孿生接在**整串後面**（同舊 `base + nm_twin_names(base)` 的順序），
+        # metric/family 繼承本尊、variant 換成 nm/nm2。
+        block = entries + [
+            (twin, m, s, var, f)
+            for (b, m, s, _v, f) in entries
+            for twin, var in nm_twin_specs([b])]
         own = str(params.get("output_prefix", "") or "").strip()
-        out: Dict[str, Dict[str, object]] = {}
+        out: List[FeatureSpec] = []
         for key in keys:
             stream = cls.stream_prefix(params, key)
             for region in regions:
                 pfx = cls.full_prefix(params, key, region)
                 tag = cls.region_prefix(params, region)
-                for short, full in zip(base, prefix_names(pfx, base)):
-                    one: Dict[str, object] = {"base": short}
-                    if stream:
-                        one["stream"] = stream
-                    if tag:
-                        one["region"] = tag
-                        one["region_index"] = regions.index(region)
-                    if own:
-                        one["own"] = own
-                    out[full] = one
+                for base, metric, stat, variant, family in block:
+                    out.append(FeatureSpec(
+                        name=prefix_names(pfx, [base])[0], card=cls.key,
+                        base=base, stream=stream, region=tag,
+                        region_index=(regions.index(region) if tag else -1),
+                        region_role=(region_role_of(tag) if tag else ""),
+                        own=own, variant=variant, metric=metric, stat=stat,
+                        family=family))
         return out
+
+    @classmethod
+    def resolve_features(cls, params: Dict[str, object]) -> List[str]:
+        return [s.name for s in cls.resolve_feature_specs(params)]
+
+    @classmethod
+    def diagnostic_names(cls, params: Dict[str, object]) -> List[str]:
+        """:meth:`feature_names` 裡屬於「量得準不準／卡自己做了什麼」的那幾個
+        **基本名**（不含前綴）。子類宣告基本名，前綴交給下面兩支 —— 跟
+        :meth:`resolve_features` 走同一條 ``full_prefix`` 迴圈，所以宣告出來的
+        名字跟真的產出的名字不可能對不上。"""
+        return []
+
+    @classmethod
+    def diagnostic_alarm_names(cls, params: Dict[str, object]) -> List[Tuple[str, bool]]:
+        """(基本名, 出事時的布林值) —— 見 `Step.diagnostic_alarms`。"""
+        return []
+
+    @classmethod
+    def diagnostic_features(cls, params: Dict[str, object]) -> List[str]:
+        keys = cls.source_list(params) or [""]
+        base = cls.diagnostic_names(params)
+        return [n for k in keys for r in cls.region_list(params)
+                for n in prefix_names(cls.full_prefix(params, k, r), base)]
+
+    @classmethod
+    def diagnostic_alarms(cls, params: Dict[str, object]) -> List[Tuple[str, bool]]:
+        keys = cls.source_list(params) or [""]
+        pairs = cls.diagnostic_alarm_names(params)
+        base = [n for n, _ in pairs]
+        return [(n, bad)
+                for k in keys for r in cls.region_list(params)
+                for n, (_, bad) in zip(
+                    prefix_names(cls.full_prefix(params, k, r), base), pairs)]
+
+    @classmethod
+    def feature_parts(cls, params: Dict[str, object]) -> Dict[str, Dict[str, object]]:
+        """見 `Step.feature_parts` —— **`resolve_features` 的反向**。
+
+        PR-3 起兩支都是 :meth:`resolve_feature_specs` 的投影 —— 以前是同一個
+        雙迴圈的兩份手抄（各寫一份的話，「這個名字有沒有區域那一段」會有兩個
+        答案，而畫面用的是錯的那一個），現在迴圈只剩一份。
+        """
+        return {s.name: s.parts() for s in cls.resolve_feature_specs(params)}
 
     @classmethod
     def resolve_regions_in(cls, params: Dict[str, object]) -> List[str]:

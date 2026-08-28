@@ -91,18 +91,19 @@ compare 算什麼（`algo/glv.compare_pixels`）
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from ..algo import glv as algo_glv
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, ParamSpec, Step, StepError, register_step, GROUP_MEASURE,
+    CATEGORY_ALGO, PATCH_KINDS, SINGLE_IMAGE_KINDS, ParamSpec, Step,
+    StepError, register_step, GROUP_MEASURE,
 )
 from ._util import (
-    MultiSourceStep, OTHERS_SUFFIX, output_prefix_spec, parse_key_list,
-    prefix_features, prefix_names, roi_pixels,
+    CENTRE_SUFFIX, MultiSourceStep, OTHERS_SUFFIX, output_prefix_spec,
+    parse_key_list, prefix_features, prefix_names, roi_pixels,
 )
 
 _P_ALIAS = re.compile(r"^glv_p(\d+)$")
@@ -389,16 +390,31 @@ def cmp_feature_name(metric: str, stat: str) -> str:
     return "%s%s_%s" % (CMP_PREFIX, metric, short)
 
 
-def cmp_feature_names(params: Dict[str, Any]) -> List[str]:
-    """這組參數會寫出哪幾個 ``cmp_*``（順序＝勾選的順序，去重）。"""
+def cmp_feature_specs(params: Dict[str, Any]) -> List[Tuple[str, str, str]]:
+    """這組參數會寫出哪幾個 ``cmp_*`` → ``[(名字, metric, stat), …]``。
+
+    metric/stat 在**組名字的這幾行**手上就有（PR-3 的「誕生處」）——
+    `widgets._split_cmp` 以前用最長比對把它們**猜**回來，現在不必了。
+    stat-free 的那兩個 stat 記空字串。順序＝勾選的順序，去重。
+    """
     stats = _stats_of(params)
-    out: List[str] = []
+    out: List[Tuple[str, str, str]] = []
+    seen = set()
     for metric in _compare_metrics_of(params):
         for stat in stats:
             name = cmp_feature_name(metric, stat)
-            if name not in out:
-                out.append(name)
+            if name in seen:
+                continue
+            seen.add(name)
+            short = "" if metric in algo_glv.STAT_FREE_METRICS else (
+                stat[4:] if stat.startswith("glv_") else stat)
+            out.append((name, metric, short))
     return out
+
+
+def cmp_feature_names(params: Dict[str, Any]) -> List[str]:
+    """這組參數會寫出哪幾個 ``cmp_*``（順序＝勾選的順序，去重）。"""
+    return [n for n, _m, _s in cmp_feature_specs(params)]
 
 
 @register_step
@@ -572,30 +588,106 @@ class GlvStatsStep(MultiSourceStep):
     # 一個關於軟體架構的問題才能開始量。
 
     @classmethod
-    def feature_names(cls, params: Dict[str, Any]) -> List[str]:
+    def base_specs(cls, params: Dict[str, Any]) -> List[Tuple[str, str, str, str, str]]:
+        """基本名＋身分（PR-3；`feature_names` 是它的投影）。
+
+        metric 就是統計量 id 本人（`METRIC_GROUPS` 的鍵那一層）；each-box 的
+        三個後綴在**加後綴的同一行**記 variant（typical/outlier/outlier_box），
+        metric 剝回本尊；``glv_worst_*`` 那一族是 metric 不是 variant
+        （2026-08-27 使用者定調的 variant 文法）。
+        """
         mids = parse_key_list(params.get("metrics", DEFAULT_METRICS))
-        base = mids or list(cls.features_out)
+        base = [(str(m), str(m), "", "", "glv")
+                for m in (mids or list(cls.features_out))]
         # 「這塊還能不能信」的那兩個跟著每一塊走（見 `_quality_features`）。
-        extra = ["glv_pixels"]
+        extra = [("glv_pixels", "glv_pixels", "", "", "glv")]
         if int(params.get("min_pixels") or 0):
-            extra.append("glv_ok")
+            extra.append(("glv_ok", "glv_ok", "", "", "glv"))
         # 相對值疊在絕對值上（不是取代它）—— 那正是這一刀的重點。
         # ⚠ 宣告是「**可能**會產出的」：``snr`` / ``tstat`` 在參照只有一格的
         # defect 上算不出來，那一顆就不會有那一格（同 nm 孿生的理由）。
         if _reference_of(params) != REF_NONE:
-            base = base + (cmp_feature_names(params)
-                           or [cmp_feature_name("delta", DEFAULT_COMPARE_STAT),
-                               cmp_feature_name("snr", DEFAULT_COMPARE_STAT)])
+            pairs = cmp_feature_specs(params) or [
+                (cmp_feature_name("delta", DEFAULT_COMPARE_STAT), "delta",
+                 DEFAULT_COMPARE_STAT[4:]),
+                (cmp_feature_name("snr", DEFAULT_COMPARE_STAT), "snr",
+                 DEFAULT_COMPARE_STAT[4:])]
+            base = base + [(n, m, s, "", "cmp") for n, m, s in pairs]
         if str(params.get("across_boxes", POOLED)) == EACH_BOX:
             # 一格一格量：每個數字變成「典型 / 最不一樣的那一格 / 那是第幾格」。
             # ⚠ 宣告是「**可能**會產出的」（同上面 snr/tstat 那行）：worst 那
             # 一組在只剩一格可量的 defect 上算不出來，那一顆就不會有那幾格。
-            spread = [n + suffix for n in base
-                      for suffix in (TYPICAL_SUFFIX, OUTLIER_SUFFIX,
-                                     OUTLIER_BOX_SUFFIX)]
-            return (spread + [BOX_COUNT] + list(WORST_FEATURES)
-                    + list(SCORE_FEATURES) + extra)
+            spread = [(n + suffix, m, s, var, fam)
+                      for n, m, s, _v, fam in base
+                      for suffix, var in ((TYPICAL_SUFFIX, "typical"),
+                                          (OUTLIER_SUFFIX, "outlier"),
+                                          (OUTLIER_BOX_SUFFIX, "outlier_box"))]
+            worst = [(str(n), str(n), "", "", "glv")
+                     for n in [BOX_COUNT] + list(WORST_FEATURES)
+                     + list(SCORE_FEATURES)]
+            return spread + worst + extra
         return base + extra
+
+    @classmethod
+    def diagnostic_names(cls, params: Dict[str, Any]) -> List[str]:
+        """品質／信任族：「這塊還能不能信」，不是量測值。
+
+        跟 :meth:`feature_names` 用同一套條件（``min_pixels`` / ``across_boxes``），
+        所以宣告的每一個名字都真的會產出（有 registry 全掃的測試守著）。
+        ⚠ ``glv_sat_frac`` / ``glv_above128`` **不在這裡**：它們是使用者在
+        ``metrics`` 勾選才產出的統計量 —— 勾了通常就是要拿去判定或看分布的，
+        宣告成診斷會讓它從結果表上消失（2026-08-27 使用者定調）。
+        """
+        out = ["glv_pixels"]
+        if int(params.get("min_pixels") or 0):
+            out.append("glv_ok")
+        if str(params.get("across_boxes", POOLED)) == EACH_BOX:
+            out.append(BOX_COUNT)
+        return out
+
+    @classmethod
+    def diagnostic_alarm_names(cls, params: Dict[str, Any]) -> List[Tuple[str, bool]]:
+        if int(params.get("min_pixels") or 0):
+            return [("glv_ok", False)]  # 0 = 像素太少，這一塊的數字不能信
+        return []
+
+    @classmethod
+    def kind_issues(cls, params: Dict[str, Any],
+                    kind: str) -> List[Tuple[str, str, str, str]]:
+        """只在某種資料型別上成立的兩條（PR-2；判準見 `Step.kind_issues`）。
+
+        `_center` 的幾何意義來自「patch 是機台以 defect 為中心裁切的」——
+        一顆一張大圖的 route（rsem / folder）沒有這個保證，中央那格只是
+        剛好在中間的格。反過來，patch 上缺陷位置是已知的，開 each box 去
+        「找」最異常的格，worst 可能被髒污的參照格帶走。
+        """
+        out: List[Tuple[str, str, str, str]] = []
+        rois = [r.strip() for r in
+                str(params.get(cls.REGION) or "").split(",") if r.strip()]
+        centred = [r for r in rois if r.endswith(CENTRE_SUFFIX)]
+        if kind in SINGLE_IMAGE_KINDS and centred:
+            base = centred[0][:-len(CENTRE_SUFFIX)]
+            out.append((
+                "center-on-big-image", "warning",
+                "'_center' has no meaning on a whole-image route",
+                "“Region” is wired to '%s', but on this route one defect is "
+                "one big image - nothing guarantees the defect sits in the "
+                "centre box, so '_center' is just whichever box happens to "
+                "be in the middle. Wire the plain '%s' port instead and set "
+                "“Boxes in the region” to 'each box' so the card finds the "
+                "odd box for you." % (centred[0], base)))
+        if (kind in PATCH_KINDS
+                and str(params.get("across_boxes", POOLED)) == EACH_BOX
+                and not centred):
+            out.append((
+                "each-box-on-patch", "info",
+                "on a patch the defect's box is already known",
+                "“Boxes in the region” is 'each box', which hunts for the "
+                "most unusual box - but a patch is cut centred on the "
+                "defect, so the '_center' port already is the defect's box. "
+                "A dirty box among the others can drag the hunt somewhere "
+                "else. Are you sure you do not want the '_center' port?"))
+        return out
 
     @classmethod
     def legacy_feature_renames(cls, params: Dict[str, Any]) -> Dict[str, str]:
@@ -966,6 +1058,39 @@ class GlvStatsStep(MultiSourceStep):
                 "baseline": float(baselines[k]), "spread": float(spreads[k]),
                 "judge": judge,
             }
+            # worst 那一格的分布也留給面板（PR-2）—— **同一次計算、同一個
+            # rect**（`rects[wi]` 逐位元組就是 `ctx.roi_rects()[worst_i]`
+            # 那一格）、同一組像素過濾。面板把它疊在 typical 那條上，
+            # 「最不一樣的那格差在哪」才看得見，不只是一個 σ 數。
+            wraw = arr[int(wy):int(wy) + int(wh),
+                       int(wx):int(wx) + int(ww)].reshape(-1).astype(np.float64)
+            wpx, w_raw_n = self._pixels_that_count(wraw, p)
+            wcounts, _ = algo_glv.pixel_hist(wpx, bins=self.HIST_BINS)
+            worst_note.update({"bins": [int(c) for c in wcounts],
+                               "n": int(wpx.size), "n_raw": int(w_raw_n)})
+
+        # 逐框的判準值帶（PR-2）：一格一點的那條帶畫的就是 worst 選拔時
+        # 真的比過的那串數字 —— 不是面板自己重量一次。幾百格塞不進一條帶，
+        # >512 格等距取樣並記 `sampled`（worst 那一格**必留**，不然帶上圈
+        # 不到它）。單格沒有「其他格」可比，跟 worst 一樣整組不吐。
+        judge_note: Optional[Dict[str, Any]] = None
+        if len(per_box) >= 2:
+            vals, idxs, sampled = judge_vals, kept_index, False
+            if len(vals) > 512:
+                keep = sorted(set(
+                    np.linspace(0, len(vals) - 1, 512).astype(int).tolist())
+                    | {k})
+                vals = [judge_vals[i] for i in keep]
+                idxs = [kept_index[i] for i in keep]
+                sampled = True
+            judge_note = {
+                "stat": judge,
+                "values": [float(v) for v in vals],
+                "boxes": [int(i) for i in idxs],
+                "median": float(np.median(judge_vals)),
+                "worst_box": int(kept_index[k]),
+                "sampled": bool(sampled),
+            }
 
         # 面板畫的是**典型那一格**的分布（把幾百格疊起來畫等於畫了一張
         # 什麼都看不出來的圖）。
@@ -977,7 +1102,8 @@ class GlvStatsStep(MultiSourceStep):
         self._note_distribution(
             ctx, typical_px, p,
             {n: out[n + TYPICAL_SUFFIX] for n in mids}, n_raw=n_raw,
-            box=mid_box, boxes=len(per_box), worst=worst_note)
+            box=mid_box, boxes=len(per_box), worst=worst_note,
+            judge=judge_note)
         return out
 
     # ---- 量得準不準（F18 第 4 步）------------------------------------------
@@ -1132,7 +1258,8 @@ class GlvStatsStep(MultiSourceStep):
                            thin: bool = False, box: int = -1,
                            boxes: int = 0,
                            ref: Optional[Dict[str, Any]] = None,
-                           worst: Optional[Dict[str, Any]] = None) -> None:
+                           worst: Optional[Dict[str, Any]] = None,
+                           judge: Optional[Dict[str, Any]] = None) -> None:
         """把這一塊的灰階分布留給儀表（F18 第 2 步）。
 
         **畫面上的那張圖就是引擎算的這一份** —— UI 不自己再跑一次統計，不然
@@ -1169,10 +1296,15 @@ class GlvStatsStep(MultiSourceStep):
             # 雜訊裡」；兩條分布疊起來一眼就看得出來。
             "ref": dict(ref) if ref else None,
             # 逐框比較的總冠軍（F31）：`{i, rect, score, value, baseline,
-            # spread, judge}`。疊圖畫 ROI 框、標框內像素讀的是**這一份** ——
-            # 跟 `worst_*` 特徵同一次計算，不是第二份（會漂的那種）。
-            # 沒有逐框比較（pooled、單框）時是 None。
+            # spread, judge}`，PR-2 起多帶 `bins`/`n`/`n_raw`（worst 那一格
+            # 自己的分布，跟 typical 疊著畫）。疊圖畫 ROI 框、標框內像素讀的
+            # 是**這一份** —— 跟 `worst_*` 特徵同一次計算，不是第二份
+            # （會漂的那種）。沒有逐框比較（pooled、單框）時是 None。
             "worst": dict(worst) if worst else None,
+            # 逐框判準值帶（PR-2）：`{stat, values, boxes, median, worst_box,
+            # sampled}` —— worst 選拔真的比過的那串數字，>512 格取樣。
+            # 同上，沒有逐框比較時是 None。
+            "judge": dict(judge) if judge else None,
         })
 
     # ---- 跟誰比（F18 第 5 步）----------------------------------------------
@@ -1231,6 +1363,10 @@ class GlvStatsStep(MultiSourceStep):
             "names": [prefix_names(str(p.get(self.CURRENT_PREFIX, "") or ""),
                                    [n])[0] for n in out],
             "values": dict(out),
+            # **每個 cmp 名的 metric/stat**（PR-3）——在組名字的地方記下來，
+            # 面板（`_compare_caption`）以前用最長比對把它們猜回來。
+            "metrics": {n: {"metric": m, "stat": s}
+                        for n, m, s in cmp_feature_specs(p)},
         }
         # 面板要**把參照那條分布疊上去**（使用者 2026-08-21：「疊上參照那條
         # 分布」）。算式與畫面的數字因此出自同一次計算 —— UI 不自己再跑一次。
@@ -1251,6 +1387,9 @@ class GlvStatsStep(MultiSourceStep):
                 _canonical(stat) or DEFAULT_COMPARE_STAT))
                 for stat in _stats_of(p)},
             "values": dict(out),
+            # 同 `compares` 那份的理由（PR-3）：metric/stat 在誕生處記。
+            "metrics": {n: {"metric": m, "stat": s}
+                        for n, m, s in cmp_feature_specs(p)},
         }
         return out, note
 
