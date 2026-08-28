@@ -281,7 +281,9 @@ d4t/
     ├── cell_canvas.py        #   一格 cell 鋪成一片，區域的框畫在上面、拖得動
     ├── tree_scene.py tree_panel.py     #   判定樹住在畫布上／點一步就編輯那一步（F24）
     ├── decide_panel.py route_panel.py route_badge.py  #   判定段編輯器／`route_by` 編輯器與徽章
-    ├── verdict_band.py output_band.py  #   判定段的橫幅（一列一類）／Output 段的框（整批只跑一次）
+    ├── verdict_band.py       #   判定段的橫幅（一列一類）
+    │                         #   ⚠ 這裡以前還有 output_band.py（Output 段的虛線框），
+    │                         #     F50 拿掉了：「整批跑一次」變成卡片自己的一條腳帶
     ├── threshold_view.py     #   在挑門檻，就要看得到分布
     ├── results.py results_table.py why_panel.py  #   Results 視窗／結果表／三次點擊回溯（F45）
     ├── gallery.py region_check.py      #   縮圖網格（虛擬捲動，撐 10k+）／區域畫在很多顆上

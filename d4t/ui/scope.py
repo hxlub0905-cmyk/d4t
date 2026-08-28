@@ -39,6 +39,7 @@ from typing import Any, Dict, List, NamedTuple, Sequence, Tuple
 
 __all__ = [
     "SUPPORTED_KINDS", "HIDDEN_STEPS", "DEFAULT_KIND", "SHOW_SAMPLE_ENTRIES",
+    "SHOW_ROUTE_BY",
     "INPUT_SOURCES", "ATTACHMENTS", "InputSource",
     "is_supported_kind", "visible_steps", "recipe_is_supported",
     "unsupported_kind_message",
@@ -129,6 +130,24 @@ DEFAULT_KIND: str = SUPPORTED_KINDS[0]
 #: 一行都沒動，測試照樣直接呼叫得到。範例 recipe 庫回來的那一天，
 #: 把這個常數改成 ``True`` 就整組回來 —— 跟 ``SUPPORTED_KINDS`` 同一套辦法。
 SHOW_SAMPLE_ENTRIES: bool = False
+
+#: `route_by`（「分流／pre-filter」）的畫布徽章與編輯器入口要不要出現。
+#:
+#: 2026-08-28（F50）：使用者要把「只跑某幾個 code」做進 Input 卡，並問能不能
+#: 順便拿掉 pre-filter。**收起來而不是刪掉，因為那兩件事不是同一件**：
+#:
+#: * `route_by`：不同的 code 走**不同的卡片組**（全部都跑，走不同路）；
+#: * Input 的篩選：**只有指定 code 的才跑**，其他的根本不進來。
+#:
+#: 新的蓋不掉舊的。而「不同的 Classnumber 走不同的卡片」是使用者
+#: 2026-08-24 自己定調的需求（`SESSION_LOG.md` F23 那一段）—— `CLAUDE.md`
+#: §5 那張表因此適用：**不確定的時候先收起來**，成本是一個字串。
+#:
+#: 收起來的是**入口，不是能力**：`recipe.route_by`、`resolve_route`、
+#: `route_taken` 特徵、三條 route lint、`ui/route_panel.py` 與
+#: `ui/route_badge.py` 一行都沒動 —— 帶著 `route_by` 的 recipe 照樣跑得出
+#: 一模一樣的數字（黃金值不動），CLI 照樣認。改回 ``True`` 就整組回來。
+SHOW_ROUTE_BY: bool = False
 
 
 class InputSource(NamedTuple):

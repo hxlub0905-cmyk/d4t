@@ -112,7 +112,7 @@ from d4t.core.pipeline.cellrois import region_names
 from d4t.core.pipeline.engine import (
     FEATURE_OWNER_KEY, feature_prefixes,
 )
-from d4t.core.pipeline.step import REGION_TYPES, REGISTRY
+from d4t.core.pipeline.step import REGION_TYPES, REGISTRY, SCALE_DEFECT
 from d4t.core.pipeline.recipe import is_region_edge, version_skew
 from d4t.core.pipeline import verdict_features
 from d4t.core.pipeline.verdict_trace import verdict_trace
@@ -505,6 +505,7 @@ class StudioWindow(QMainWindow):
         self._items_by_id: Dict[str, Any] = {}    # defect_id -> DefectItem（縮圖用）
         self._score_filter: Optional[Any] = None  # 直方圖點出來的 (lo, hi)
         self._pending_warnings: List[Any] = []    # 跑前 lint 的警告（跑完才講）
+        self._filtered_note: str = ""             # 「只跑這幾個 code」篩掉多少（F50）
         self._preview_epoch = 0                   # 預覽的世代（丟掉過期結果用）
         self._async_epoch = 0                     # 背景那筆出發時的世代
         self.welcome_dialog: Optional[Any] = None
@@ -1124,6 +1125,13 @@ class StudioWindow(QMainWindow):
 
         self.route_box = RouteByBox(self)
         self.route_box.set_model(self.model)
+        # ⚠ **建出來再藏，不是不建**（同 `btn_examples` 那一顆）：版面量測、
+        # 既有測試、`_refresh_*` 都還指得到它，回復只要改一個字串。
+        #
+        # ⚠ 而且**它跟畫布上的徽章要同進同出**（`scope.SHOW_ROUTE_BY`）。
+        # 只藏徽章的話，使用者仍然編得出一份會分流的 recipe，而畫布上一個字
+        # 都不會說 —— 那正是這個 repo 一直在消滅的「畫布說謊」。
+        self.route_box.setVisible(bool(scope.SHOW_ROUTE_BY))
         pane = QWidget(self)
         lay = QVBoxLayout(pane)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -1899,6 +1907,12 @@ class StudioWindow(QMainWindow):
                 "regions_out": regions_out,
                 "regions_produced": regions_made,
                 "group": step_cls.resolve_group() if step_cls else "",
+                # **這張卡什麼時候跑**（F50）。以前這件事畫在卡片外面的一個
+                # 虛線框上（`ui/output_band.py`）—— 而框的意思是「這幾個是
+                # 一組」，真相卻是「跑的時間不一樣」。編碼錯了，於是 Output
+                # 卡在畫布上是唯一一種被框起來的卡，而那個框每一個拖曳 frame
+                # 重建一次、留下殘影。現在它是卡片自己的一個屬性。
+                "scale": step_cls.scale if step_cls else SCALE_DEFECT,
                 "problem": problems.get(nid, ("", ""))[0],
                 "problem_level": problems.get(nid, ("", "error"))[1],
             })
@@ -1947,8 +1961,17 @@ class StudioWindow(QMainWindow):
 
         「現在這一顆走哪一條」跟資料集標籤是**同一支** `resolve_route`
         算的 —— 兩個地方各算一次的話，遲早會有一個說錯。
+
+        ⚠ **`scope.SHOW_ROUTE_BY` 關著的時候一律回 None**（F50）——
+        徽章因此不畫，而**引擎那一頭一個位元都沒動**：帶著 `route_by` 的
+        recipe 照樣分流、照樣算出一樣的數字。收起來的是入口，不是能力。
+        擋在這裡而不是擋在畫布，理由跟 `visible_steps` 一樣：一個地方決定
+        「給不給看」，畫布只管畫它收到的東西。
         """
         from .route_badge import route_badge_info
+
+        if not scope.SHOW_ROUTE_BY:
+            return None
 
         current = None
         rb = getattr(self.model, "route_by", None)
@@ -5419,8 +5442,34 @@ class StudioWindow(QMainWindow):
             return False
         self._pending_warnings = [i for i in issues if i.level == "warning"]
 
-        limit = max(1, min(int(n), len(items)))
         recipe = self.model.to_recipe()
+        # 「只跑這幾個 code」（F50）：**篩掉零顆的時候不可以安靜地跑完**。
+        #
+        # 引擎那一頭篩得很乾淨（`batch.select_items`），而乾淨的下場正是危險
+        # 的：一個打錯的欄名或一個不存在的 code，跑出來是「0 defects」與一張
+        # 空的結果表 —— 使用者要去猜是資料沒載到、pipeline 壞了，還是篩選太緊。
+        # 那三件事的下一步完全不同，所以這裡要講出**是哪一個**。
+        from d4t.core.pipeline.batch import item_filters, select_items
+
+        picks = item_filters(recipe)
+        if picks:
+            kept = select_items(recipe, self.dataset, items)
+            if not kept:
+                where = ", ".join("%s = %s" % (col, ", ".join(vals))
+                                  for _nid, col, vals in picks)
+                self._status(
+                    "Nothing to run — the input filter (%s) matches none of "
+                    "the %d defects in this dataset. Check the column and the "
+                    "values, or clear the filter to run everything."
+                    % (where, len(items)), "error")
+                return False
+            self._filtered_note = ("%d of %d defects match the input filter"
+                                   % (len(kept), len(items)))
+            items = kept
+        else:
+            self._filtered_note = ""
+
+        limit = max(1, min(int(n), len(items)))
         cdir = None if cache_dir is None else str(cache_dir)
         # **跟著這一次執行走**，不是讀當下的 UI 狀態：使用者按了 Run all 之後
         # 可以馬上去改別的東西，而這一批的結果仍然是「他叫我整批跑」的那一批。
@@ -5633,6 +5682,13 @@ class StudioWindow(QMainWindow):
         # 跑之前的 lint 警告在這裡才講：跑之前講會被「Running: 3 / 200」洗掉。
         # 警告不擋執行，但它描述的是「跑得完、數字卻不是你以為的那個」——
         # 例如兩張量測卡撞名，後面那張把前面那張蓋掉了。
+        # 篩選講一次：**跑了幾顆是使用者第一眼要對的數字**，而「37」在一份
+        # 200 顆的 lot 上看起來像出了什麼事。
+        note = str(getattr(self, "_filtered_note", "") or "")
+        if note:
+            msg = "%s  ·  %s (the rest were not processed, and their KLARF " \
+                  "rows are untouched)" % (msg, note)
+
         warns = list(getattr(self, "_pending_warnings", []) or [])
         if warns:
             more = ("  (and %d more warning%s)"

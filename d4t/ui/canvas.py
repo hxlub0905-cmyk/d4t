@@ -63,6 +63,23 @@ __all__ = ["PipelineCanvas", "NODE_W", "NODE_H", "COL_GAP", "ROW_GAP"]
 #: 一個節點最多畫幾個**影像**輸出埠（再多就擠不下，退回單一埠）。
 _MAX_PORTS = 4
 
+#: 「整批跑一次」那條腳帶有多高（`Step.scale == SCALE_LOT` 的卡才有）。
+_LOT_STRIP = 15.0
+
+#: 腳帶上那句話。**講的是「什麼時候跑」**，而那正是這個標記存在的理由 ——
+#: 段名畫布上已經有了（卡片的顏色與圖示），「整批跑完之後跑一次」沒有。
+#:
+#: ⚠ 這句話 2026-08-25 到 2026-08-28 之間住在 `ui/output_band.py`（F30），
+#: 畫在卡片**外面**一個虛線框的左緣。使用者定調拿掉那個框，理由是編碼錯了：
+#: **框的意思是「這幾個是一組」，而真相是「跑的時間不一樣」** —— 而那是一張
+#: 卡自己的屬性，不是一群卡的關係。順帶治好一個 bug：那個框從卡片位置算出來，
+#: 所以每一個拖曳 frame 都被銷毀重建一次，而畫布用 Qt 預設的
+#: `MinimalViewportUpdate` —— 抗鋸齒的虛線每 frame 溢出 boundingRect 一點點，
+#: 累積起來就是使用者回報的「拖曳留下殘影」。
+#:
+#: **用字不用顏色**：一條色帶對不會寫 code 的使用者不是一句話（推廣鐵則）。
+LOT_STRIP_TEXT = "once per lot"
+
 #: 最多畫幾個**區域**輸出埠（F12）。跟影像的上限分開數，因為它們是兩排不同
 #: 的東西：一張 GDS 卡吐三層區域的同時，還原樣送出它吃進來的那條流。
 #: 卡片會為了容納埠**長高**（見 ``_NodeItem.height``），所以這個數字管的是
@@ -350,7 +367,30 @@ class _NodeItem(QGraphicsItem):
         看不到它們就是說謊。
         """
         n = max(len(self.in_specs()), len(self.out_specs()), 1)
-        return max(NODE_H, self._PORT_PITCH * n + 10.0)
+        base = max(NODE_H, self._PORT_PITCH * n + 10.0)
+        # 腳帶佔的是**真的高度**，不是畫在卡片外面 —— 畫在外面的東西正是
+        # 上一版那個框，而它會跟下一列的卡片打架（`output_band` 的 PAD 那段
+        # 記過一次：上下各留 26 的話相鄰兩列疊了 42px）。
+        return base + (_LOT_STRIP if self.is_lot() else 0.0)
+
+    def body_height(self) -> float:
+        """卡片**本體**多高（不含腳帶）。
+
+        埠要均分的是本體，不是本體加腳帶 —— 用整個高度算的話，一張有腳帶的卡
+        埠會整體往下偏，而它對面那張沒有腳帶的卡不會，兩條線於是一高一低。
+        （目前 Output 段沒有埠，所以這件事看不出來 —— 這一支是**為了那個
+        看不出來**才存在的：下一張宣告 `SCALE_LOT` 又有埠的卡不該去發現它。）
+        """
+        return self.height() - (_LOT_STRIP if self.is_lot() else 0.0)
+
+    def is_lot(self) -> bool:
+        """這張卡是**整批跑一次**嗎（`Step.scale == SCALE_LOT`）。
+
+        讀的是 studio 放進 info 的 ``scale`` —— **卡片自己宣告的**，不是一份
+        寫死在 UI 的 Output 卡清單。以前那件事由 `output_band` 問
+        ``step_cls.scale``，同一個出處，只是換了一個地方問。
+        """
+        return str(self.info.get("scale", "")) == "lot"
 
     def boundingRect(self) -> QRectF:
         """**要涵蓋所有畫得出去的東西**，否則拖動節點會留下殘影。
@@ -463,7 +503,7 @@ class _NodeItem(QGraphicsItem):
         n = len(self.in_specs())
         if n == 0:
             return []
-        h = self.height()
+        h = self.body_height()
         if n == 1:
             return [QPointF(0.0, h / 2.0)]
         step = h / (n + 1)
@@ -574,7 +614,7 @@ class _NodeItem(QGraphicsItem):
         n = len(self.out_names())
         if n == 0:
             return []
-        h = self.height()
+        h = self.body_height()
         if n == 1:
             return [QPointF(NODE_W, h / 2.0)]
         step = h / (n + 1)
@@ -623,7 +663,9 @@ class _NodeItem(QGraphicsItem):
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         enabled = bool(self.info.get("enabled", True))
         selected = self.isSelected()
-        body = QRectF(0, 0, NODE_W, self.height())
+        # 卡片本體不含腳帶 —— 邊框、光暈、投影都照本體畫，腳帶是接在它下面
+        # 的一條，不是把卡片變高。
+        body = QRectF(0, 0, NODE_W, self.body_height())
 
         p.setRenderHint(QPainter.Antialiasing, True)
 
@@ -665,8 +707,12 @@ class _NodeItem(QGraphicsItem):
         p.setBrush(QColor(TOKENS["bg_surface"] if enabled else TOKENS["disabled_bg"]))
         p.drawRoundedRect(body, 7, 7)
 
+        # 「整批跑一次」的腳帶（F50）。畫在本體**下面**，同一個圓角收邊。
+        if self.is_lot():
+            self._paint_lot_strip(p, body, tile_col, enabled)
+
         # 左邊的圖示磚：淡色底 + 與左側 rail 完全相同的圖形（F7-8）。
-        tile = QRectF(8, (min(NODE_H, self.height()) - _TILE) / 2.0,
+        tile = QRectF(8, (min(NODE_H, self.body_height()) - _TILE) / 2.0,
                       _TILE, _TILE)
         wash = QColor(tile_col)
         wash.setAlpha(46 if enabled else 24)
@@ -748,6 +794,33 @@ class _NodeItem(QGraphicsItem):
             # `layout_`，讀起來像一條真的叫那個名字的流）。
             _draw_elided(p, QRectF(anchor.x() + 4, anchor.y() - 7,
                                    _PORT_LABEL_W - 10, 14), name)
+
+    def _paint_lot_strip(self, p: QPainter, body: QRectF,
+                         col: QColor, enabled: bool) -> None:
+        """卡片底下那條「once per lot」。
+
+        **只用字，不只用顏色**（推廣鐵則）：一條色帶對不會寫 code 的使用者
+        不是一句話，而這個標記存在的全部理由就是要講出那句話。顏色跟著段色，
+        所以它讀起來是這張卡的一部分，不是貼上去的東西。
+        """
+        strip = QRectF(0, body.bottom() - 7.0, NODE_W, _LOT_STRIP + 7.0)
+        p.save()
+        p.setClipRect(QRectF(0, body.bottom(), NODE_W, _LOT_STRIP + 1.0))
+        wash = QColor(col if enabled else QColor(TOKENS["seg_disabled"]))
+        wash.setAlpha(38 if enabled else 20)
+        p.setPen(QPen(QColor(TOKENS["border_default"]), 1.0))
+        p.setBrush(wash)
+        p.drawRoundedRect(strip, 7, 7)
+        p.restore()
+
+        f = p.font()
+        f.setBold(False)
+        f.setPointSizeF(max(6.0, f.pointSizeF() - 1.0))
+        f.setLetterSpacing(f.SpacingType.AbsoluteSpacing, 0.6)
+        p.setFont(f)
+        p.setPen(QColor(col if enabled else TOKENS["text_disabled"]))
+        p.drawText(QRectF(8, body.bottom(), NODE_W - 16, _LOT_STRIP),
+                   int(Qt.AlignLeft | Qt.AlignVCenter), LOT_STRIP_TEXT)
 
     def subtitle(self) -> str:
         """副標：**這張卡吃什麼、吐什麼**（F7-14）。
@@ -1395,38 +1468,22 @@ class PipelineCanvas(QGraphicsView):
         self._prefilter_items = []
         self._rebuild_prefilter()
         # Output 段那一塊（F30 Phase D）：它站在所有卡片的**後面**。
-        self._output_items = []
-        self._rebuild_output_band()
 
         self.set_selected(self._selected)
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self._scene.setSceneRect(rect)
 
-    # ---- Output 段那一塊（F30 Phase D）------------------------------------
-    def output_items(self) -> List[Any]:
-        """Output 段那個框現在的圖元（測試與外部檢查用）。"""
-        return list(getattr(self, "_output_items", []) or [])
+    # ---- 整批跑一次的那幾張卡（F50，原 F30 Phase D 的框）-------------------
+    def lot_nodes(self) -> List[Any]:
+        """哪幾張卡是**整批跑一次**的。
 
-    def _output_nodes(self) -> List[Any]:
-        """哪幾張卡是 Output 段的。
-
-        看的是**卡片自己宣告的 group**（`Step.resolve_group`），不是一份寫死的
-        key 清單 —— 加一張新的 Output 卡不必動這裡（同卡片庫的分組）。
+        判準是**卡片自己宣告的 `Step.scale`**，不是一份寫死的 key 清單，也
+        不是 group ——「Output 段」與「整批跑一次」今天剛好是同一組卡，而那是
+        巧合不是定義（`step.py` 的 `SCALE_LOT` 說明就寫著 Output 卡以前借用
+        `CATEGORY_ADC` 只是因為那個值剛好讓它們落在快取 checkpoint 之後）。
+        腳帶講的是時間，所以判準也要是時間。
         """
-        return [it for it in self._items.values()
-                if str(it.info.get("group", "") or "") == "output"]
-
-    def _rebuild_output_band(self) -> None:
-        from . import output_band
-
-        for it in getattr(self, "_output_items", []) or []:
-            try:
-                self._scene.removeItem(it)
-            except Exception:              # noqa: BLE001 — clear() 先銷毀過就算了
-                pass
-        mine = self._output_nodes()
-        rest = [it for it in self._items.values() if it not in mine]
-        self._output_items = output_band.build_band(self._scene, mine, rest)
+        return [it for it in self._items.values() if it.is_lot()]
 
     # ---- 判定區（F24 ②）---------------------------------------------------
     def set_decision(self, info: Optional[Dict[str, Any]]) -> None:
@@ -1827,9 +1884,12 @@ class PipelineCanvas(QGraphicsView):
         for e in self._edges:
             e.prepareGeometryChange()
             e.update()
-        # Output 段那個框是**從卡片的位置算出來的**，所以卡片一動它就得重算
-        # —— 不然拖走一張 Output 卡之後，框會留在原地框著空氣（F30）。
-        self._rebuild_output_band()
+        # ⚠ **這裡以前還有一句 `self._rebuild_output_band()`**（F30）——
+        # Output 段那個框從卡片位置算出來，所以卡片一動就得整個重算。它因此
+        # 在**每一個拖曳 frame** 銷毀重建一次，而畫布用 Qt 預設的
+        # `MinimalViewportUpdate`：抗鋸齒的虛線每 frame 溢出 boundingRect
+        # 一點點，累積起來就是使用者回報的殘影。F50 把那件事改成卡片自己的
+        # 一條腳帶（`_NodeItem._paint_lot_strip`），跟著卡片走，不用重算。
         # 卡片拖到 sceneRect 外面，那一塊是**捲不到的** —— 埠與標籤就這樣
         # 「不見」（使用者回報的）。所以 sceneRect 跟著拖曳長大（只長不縮：
         # 拖曳中一直重算縮小的話畫面會跳；縮回來由 set_nodes / tidy 做）。

@@ -122,7 +122,26 @@ def lot(tmp_path_factory):
 
 
 @pytest.fixture()
-def window(qapp, lot, tmp_path):
+def shown(qapp):
+    """把 `route_by` 的入口**打開**來測（F50）。
+
+    2026-08-28 使用者把分流收起來了（`scope.SHOW_ROUTE_BY = False`）——
+    收起來的是入口，不是能力，所以下面那幾條徽章／編輯器的測試**留著**，
+    只是要先把開關扳開。這正是 `SHOW_SAMPLE_ENTRIES` 那套辦法的重點：
+    **機制還在，而且證明得出來還在。**（開關現在是什麼值由
+    `test_the_route_by_entries_are_shelved_not_deleted` 守著。）
+    """
+    from d4t.ui import scope as scope_mod
+    was = scope_mod.SHOW_ROUTE_BY
+    scope_mod.SHOW_ROUTE_BY = True
+    try:
+        yield
+    finally:
+        scope_mod.SHOW_ROUTE_BY = was
+
+
+@pytest.fixture()
+def window(qapp, lot, tmp_path, shown):
     w = StudioWindow()
     assert w.load_dataset_path(lot["klarf"], sync=True)
     path = tmp_path / "split.json"
@@ -284,3 +303,51 @@ def test_turning_the_toggle_off_clears_route_by(window):
     assert window.model.route_by is None
     window.model.undo()
     assert window.model.route_by is not None
+
+
+# --------------------------------------------------------------------------- #
+# 5. 收起來（F50，2026-08-28）
+# --------------------------------------------------------------------------- #
+def test_the_route_by_entries_are_shelved_not_deleted(qapp):
+    """**開關現在是關的，而且兩個入口同進同出。**
+
+    使用者要把「只跑某幾個 code」做進 Input 卡，並問能不能順便拿掉
+    pre-filter。收起來而不是刪掉，因為那兩件事不是同一件：`route_by` 是
+    「不同 code 走**不同卡片組**」，Input 的篩選是「只有指定 code 才跑」——
+    新的蓋不掉舊的，而「不同的 Classnumber 走不同的卡片」是使用者
+    2026-08-24 自己定調的需求。
+
+    ⚠ **兩個入口一定要同進同出。** 只藏畫布徽章的話，使用者仍然編得出一份
+    會分流的 recipe，而畫布上一個字都不會說 —— 那正是這個 repo 一直在消滅的
+    「畫布說謊」。
+    """
+    from d4t.ui import scope as scope_mod
+
+    assert scope_mod.SHOW_ROUTE_BY is False, \
+        "分流的入口打開了 —— 這一條的前提要重寫"
+
+    w = StudioWindow(show_welcome_on_start=False)
+    try:
+        assert w.route_box.isHidden(), "編輯區塊還看得見"
+        assert w._prefilter_info() is None, "畫布徽章還畫得出來"
+    finally:
+        w.close()
+
+
+def test_shelving_it_does_not_touch_the_engine(qapp, tmp_path):
+    """收起來的是入口，不是能力 —— 帶著 `route_by` 的 recipe 一個位元都沒變。
+
+    這是「收起來」與「刪掉」的分界線本身（`CLAUDE.md` §5 那張表）：
+    刪掉要付的錢是舊 recipe 開起來變成一條錯誤，而收起來一毛都不用付。
+    """
+    r = _route_recipe()
+    path = tmp_path / "split.json"
+    path.write_text(json.dumps(r.to_json_dict()), encoding="utf-8")
+
+    w = StudioWindow(show_welcome_on_start=False)
+    try:
+        assert w.load_recipe_path(str(path), sync=True)
+        assert w.model.route_by is not None, "route_by 被載入路徑吃掉了"
+        assert w.model.to_recipe().to_json_dict() == r.to_json_dict()
+    finally:
+        w.close()
