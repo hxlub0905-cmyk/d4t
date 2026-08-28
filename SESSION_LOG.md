@@ -6,7 +6,7 @@
 
 | 期間 | 在哪 |
 |---|---|
-| **2026-08-19 起**（第十六輪～）| 這個檔案（下面）—— 改名 d4t、F12 區域線、F13 UI、F14 入口搬進卡片、F15 配對分析、F16 畫布的八段、F17 純 DAG 引擎、F18 GLV、F19 CD、F20–F25 多類別 ADC 與判定樹、F26/F27 判定與 Results 面板、F28–F30 位置／報表／Region 收卡、F31/F32 逐框比較、F33 EBI↔API characterization、F34/F35 存檔 recipe 與出貨的 recipe、F36 box plot、F37/F38 GLV↔ROI 命名與 Output 收卡、F39/F40 測試審計與 stack agreement、F41 刪 algo 卡、F42 區域線走 edges、**F43–F45 結果表分層／區域接線／FeatureSpec 與分數回溯、F46/F47 檔案架構與授權、F48 六個決定、F49 特徵走線的範圍評估、F50 畫布上只剩卡片和線、F51 特徵名只有一個真相、F52 一個特徵值一種寫法、F53 空白 let 當成沒填、F54 模板存成 PNG** |
+| **2026-08-19 起**（第十六輪～）| 這個檔案（下面）—— 改名 d4t、F12 區域線、F13 UI、F14 入口搬進卡片、F15 配對分析、F16 畫布的八段、F17 純 DAG 引擎、F18 GLV、F19 CD、F20–F25 多類別 ADC 與判定樹、F26/F27 判定與 Results 面板、F28–F30 位置／報表／Region 收卡、F31/F32 逐框比較、F33 EBI↔API characterization、F34/F35 存檔 recipe 與出貨的 recipe、F36 box plot、F37/F38 GLV↔ROI 命名與 Output 收卡、F39/F40 測試審計與 stack agreement、F41 刪 algo 卡、F42 區域線走 edges、**F43–F45 結果表分層／區域接線／FeatureSpec 與分數回溯、F46/F47 檔案架構與授權、F48 六個決定、F49 特徵走線的範圍評估、F50 畫布上只剩卡片和線、F51 特徵名只有一個真相、F52 一個特徵值一種寫法、F53 空白 let 當成沒填、F54 模板存成 PNG、F55 埠存不存在（含一個假警報與它的訂正）、F56 排版跟著線走、F57 撞名那句話看得見誰在讀** |
 | 2026-08-07 ～ 08-18（第十五輪以前）| [`docs/history/2026-08.md`](docs/history/2026-08.md) —— F8 純規則 ROI、畫布 n8n 化、Phase 1 收斂、F10、Phase 2 的 Input／Enhance／Region 三段 |
 | 2026-07 | [`docs/history/2026-07.md`](docs/history/2026-07.md) —— M0–M7、F7-9…F7-24 前半、兩台機器與搬運通道的成形 |
 
