@@ -264,6 +264,11 @@ def bound_specs(recipe: Recipe, kind: str,
         engine("decide_unanswered", base="decide_unanswered",
                metric="decide_unanswered")
         for item in decide.let:
+            # 空白行不存在（`Let.is_blank`）；有算式沒名字的也產不出特徵，
+            # 兩種都跳過，而**跳的理由不一樣**：前者是「使用者還沒填」，
+            # 後者是一條 lint error。
+            if item.is_blank:
+                continue
             name = str(item.name).strip()
             if not name:
                 continue

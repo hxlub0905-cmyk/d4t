@@ -195,6 +195,28 @@ class Let:
     scale: str = ""
     fill: str = ""
 
+    @property
+    def is_blank(self) -> bool:
+        """**整行都是空的** —— 每一格都沒填（F53，2026-08-28）。
+
+        判定面板上按一下「+ Add a line」就會多一列空的，而在這之前那一列
+        **立刻讓整份 recipe 跑不動**：`_decide_issues` 對它報兩條 error
+        （沒有名字 ＋ 算式空的）。使用者按了三次就是六條，而工具列只講
+        「and 5 more problems」—— 看起來像六個不同的毛病，其實是同一個東西
+        的三份。真實案例：使用者 2026-08-28 拿一份 recipe 來問為什麼跑不動。
+
+        所以空白的那一行**當成沒填**（同載入卡那兩格篩選的處理）。
+        ⚠ **填了一半仍然要講話**：寫了算式沒取名字是真的錯（那個值誰都指不
+        到），取了名字算式空的也是（每一顆都會失敗）。忽略的只有「什麼都
+        沒填」那一種。
+
+        **定義只有一個家。** 走 `decide.let` 的地方有四個（引擎、兩支 lint、
+        `bound_specs`），而「什麼叫空白」抄四份的話，遲早有一個說引擎跳過
+        了、lint 卻還在報。`tests/test_blank_let_lines.py` 掃那四處。
+        """
+        return not any(str(getattr(self, f, "") or "").strip()
+                       for f in ("name", "expr", "scale", "fill"))
+
 
 @dataclass(frozen=True)
 class TreeLeaf:
@@ -818,6 +840,8 @@ def _decide_issues(recipe: "Recipe", decide: "DecideSpec") -> List["Issue"]:
                    % int(decide.otherwise_bin)))
     seen: Set[str] = set()
     for i, item in enumerate(decide.let):
+        if item.is_blank:
+            continue                      # 整行空白＝當成沒填（見 `Let.is_blank`）
         name = str(item.name).strip()
         if not name:
             out.append(Issue(
@@ -943,6 +967,8 @@ def _decide_unknown(decide: "DecideSpec", feats: Set[str],
                    % (kind, where, unknown, sorted(seen) or "none", tail)))
 
     for i, item in enumerate(decide.let):
+        if item.is_blank:
+            continue                      # 同 `_decide_issues`：空白行不存在
         name = str(item.name).strip()
         check("working number '%s'" % (name or "#%d" % i), item.expr,
               fill=str(getattr(item, "fill", "") or ""), name=name)

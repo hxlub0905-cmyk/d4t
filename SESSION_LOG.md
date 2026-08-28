@@ -6,7 +6,7 @@
 
 | 期間 | 在哪 |
 |---|---|
-| **2026-08-19 起**（第十六輪～）| 這個檔案（下面）—— 改名 d4t、F12 區域線、F13 UI、F14 入口搬進卡片、F15 配對分析、F16 畫布的八段、F17 純 DAG 引擎、F18 GLV、F19 CD、F20–F25 多類別 ADC 與判定樹、F26/F27 判定與 Results 面板、F28–F30 位置／報表／Region 收卡、F31/F32 逐框比較、F33 EBI↔API characterization、F34/F35 存檔 recipe 與出貨的 recipe、F36 box plot、F37/F38 GLV↔ROI 命名與 Output 收卡、F39/F40 測試審計與 stack agreement、F41 刪 algo 卡、F42 區域線走 edges、**F43–F45 結果表分層／區域接線／FeatureSpec 與分數回溯、F46/F47 檔案架構與授權、F48 六個決定、F49 特徵走線的範圍評估、F50 畫布上只剩卡片和線、F51 特徵名只有一個真相、F52 一個特徵值一種寫法** |
+| **2026-08-19 起**（第十六輪～）| 這個檔案（下面）—— 改名 d4t、F12 區域線、F13 UI、F14 入口搬進卡片、F15 配對分析、F16 畫布的八段、F17 純 DAG 引擎、F18 GLV、F19 CD、F20–F25 多類別 ADC 與判定樹、F26/F27 判定與 Results 面板、F28–F30 位置／報表／Region 收卡、F31/F32 逐框比較、F33 EBI↔API characterization、F34/F35 存檔 recipe 與出貨的 recipe、F36 box plot、F37/F38 GLV↔ROI 命名與 Output 收卡、F39/F40 測試審計與 stack agreement、F41 刪 algo 卡、F42 區域線走 edges、**F43–F45 結果表分層／區域接線／FeatureSpec 與分數回溯、F46/F47 檔案架構與授權、F48 六個決定、F49 特徵走線的範圍評估、F50 畫布上只剩卡片和線、F51 特徵名只有一個真相、F52 一個特徵值一種寫法、F53 空白 let 當成沒填** |
 | 2026-08-07 ～ 08-18（第十五輪以前）| [`docs/history/2026-08.md`](docs/history/2026-08.md) —— F8 純規則 ROI、畫布 n8n 化、Phase 1 收斂、F10、Phase 2 的 Input／Enhance／Region 三段 |
 | 2026-07 | [`docs/history/2026-07.md`](docs/history/2026-07.md) —— M0–M7、F7-9…F7-24 前半、兩台機器與搬運通道的成形 |
 
@@ -16,6 +16,36 @@
 封存不是整理癖：這個檔案**只增不減**，而它跟著整包被複製進公司機。
 包的大小**不是限制**（2026-08-17 使用者確認直接複製 raw，見 `AGENTS.md` §2）——
 封存現在是為了 diff 乾淨與公司機用不到的東西不佔體積，不再是為了那道 1 MB 的線。
+
+---
+
+## F53：空白的 working number 當成沒填（2026-08-28）
+
+使用者拿一份真的 recipe 來問為什麼跑不動：
+
+```
+Cannot run — A 'let' line has no name: decide.let[0] must have a name
+- that name is what the rules below refer to. (and 5 more problems)
+```
+
+**六條 error 全部是同一件事**：三列空白的 `let`，每列各報兩條（沒有名字 ＋
+算式空的）。而判定面板上按一下「+ Add a line」就會多一列空的 —— 也就是說
+**按一下那顆鈕，整份 recipe 立刻跑不動**，而工具列只講「and 5 more
+problems」，看起來像六個不同的毛病。
+
+那份 recipe 其餘的部分（八條線、兩條區域線、樹裡的每一個特徵名）**一條警告
+都沒有** —— 使用者被六條同一個東西的錯誤擋在門外，而真正該做的只是刪三列。
+
+**修法**：整行都沒填的當成沒填（同載入卡那兩格篩選的處理）。判準是
+`Let.is_blank`，**而它只有一個家** —— 走 `decide.let` 的有四個地方（引擎、
+兩支 lint、`bound_specs`），抄四份的話遲早有一個說「引擎跳過了、lint 還在
+報」，那比原本的錯誤訊息更難查。
+
+⚠ **填了一半仍然要講話**：寫了算式沒取名字是真的錯（那個值誰都指不到），
+取了名字算式空的也是（每一顆都會失敗）。忽略的只有「什麼都沒填」那一種。
+
+驗收：使用者那份 recipe 一個字都不改 → **error 0 / warning 0**。
+核心 2789 綠、UI 逐檔全綠、黃金值三份逐項相同。新測試 8 條。
 
 ---
 

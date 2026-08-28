@@ -581,6 +581,10 @@ def _eval_decision(recipe: Recipe,
     都是合法的規則，而使用者不必學第二套語法。
     """
     for item in recipe.decide.let:
+        if item.is_blank:
+            # 整行空白＝當成沒填（`Let.is_blank`）。**引擎跟 lint 要同一句話**
+            # —— 只改 lint 的話，畫面上綠燈而每一顆在這裡失敗。
+            continue
         name = str(item.name).strip()
         if not name:
             raise ExpressionError("a 'let' line has no name", "", 0)
