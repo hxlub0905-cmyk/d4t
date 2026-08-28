@@ -229,6 +229,17 @@ def test_it_runs_as_it_ships_without_any_editing(tmp_path):
     assert all(int(r["features"].get("decide_unanswered", 0)) == 0
                for r in rows), "每一題都答得出來 —— 那正是 fill 與樹的順序在做的事"
 
+    # 回溯煙霧（F45）：還沒配置的跑法，重放要說得出「die_rank 是補的」——
+    # 那正是使用者在面板上要看到的那一行「if missing ⇒」。
+    from d4t.core.pipeline.verdict_trace import verdict_trace
+
+    row = next(r for r in rows if int(r["bin"]) == 9)
+    t = verdict_trace(recipe, "rsem", row["features"])
+    assert t.leaf_bin == 9
+    let = {x.name: x for x in t.lets}["die_rank"]
+    assert let.filled and let.fill == "-1", \
+        "重放要看得出這一顆的 die_rank 用了 fill"
+
 
 def test_all_three_classes_come_out_once_the_ranking_column_is_picked(tmp_path):
     """填上那一格之後，① ② ③ 三類都要真的數得出來。
@@ -249,6 +260,22 @@ def test_all_three_classes_come_out_once_the_ranking_column_is_picked(tmp_path):
     assert missed and all(r["features"]["pair_found"] == 0.0 for r in missed)
     assert all("match_dist_nm" not in r["features"] for r in missed), \
         "配不到就不寫那幾格（算不出來的不寫）"
+
+    # 回溯煙霧（F45）：三類各取一顆，重放要跟引擎**逐項相同** ——
+    # leaf 就是那一列的 bin、路徑就是引擎走的路、逐步缺值的總數就是
+    # `decide_unanswered`。這是「這顆為什麼判成這樣」那塊面板的地基。
+    from d4t.core.pipeline.verdict_trace import verdict_trace
+
+    tree = decide_tree.display_tree(recipe.decide)
+    by_bin = {}
+    for r in rows:
+        by_bin.setdefault(int(r["bin"]), r)
+    for r in by_bin.values():
+        t = verdict_trace(recipe, "rsem", r["features"])
+        assert t.leaf_bin == int(r["bin"])
+        assert t.path == decide_tree._path_of(tree, dict(r["features"]))
+        assert sum(len(s.missing) for s in t.steps) \
+            == r["features"]["decide_unanswered"]
 
 
 def test_the_report_it_writes_has_a_row_for_every_defect(tmp_path):
@@ -334,6 +361,15 @@ def test_the_patch_recipe_measures_and_classifies_end_to_end(tmp_path):
     for name in asked:
         assert name in feats, name
     assert all(r.get("bin") is not None for r in rows)
+
+    # 回溯煙霧（F45）：三個門檻在這一顆身上**每一題都帶得出實值** ——
+    # 面板上不該有任何一格是「?」（量得到，正是上面那三行斷言保證的）。
+    from d4t.core.pipeline.verdict_trace import verdict_trace
+
+    t = verdict_trace(recipe, "ebi_patch", feats)
+    assert t.leaf_bin == rows[0]["bin"]
+    assert t.steps and all("?" not in s.valued for s in t.steps), \
+        [s.valued for s in t.steps]
 
     bctx = run_batch_steps(recipe, ds, rows, kind="ebi_patch")
     assert not bctx.errors, bctx.errors

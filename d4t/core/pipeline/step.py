@@ -974,11 +974,13 @@ class Step(ABC):
     #: 具名區域做過一次的事（F7-9 的 unknown-region）。
     #:
     #: ⚠ **這個宣告目前在畫布上沒有對應的線。** 特徵是扁平的全域命名空間
-    #: （見 docs/ARCHITECTURE.md），而 d4t 從來沒有「特徵從哪一張卡來」的埠 ——
-    #: 分數表達式也是這樣。所以 Algo 卡的相依性靠的是 route 上的先後順序，
-    #: 而 ``validate`` 的 ``unknown-feature-input`` 是目前唯一擋得住它的東西。
-    #: 要讓它變成畫布上的一條線，得先決定第三種埠長什麼樣（見 ROADMAP 的
-    #: 「跨顆那一層」——那一段有同一個問題）。
+    #: （見 docs/ARCHITECTURE.md「特徵的身分」——名字仍是字串，PR-3 起結構
+    #: 身分由 `resolve_feature_specs` 在誕生處宣告），而 d4t 從來沒有
+    #: 「特徵從哪一張卡來」的**埠** —— 分數表達式也是這樣。顯示層「這個數字
+    #: 是誰的」由 `verdict_features.bound_specs` 回答；執行相依性仍靠 route
+    #: 上的先後順序，``validate`` 的 ``unknown-feature-input`` 是目前唯一
+    #: 擋得住它的東西。要讓它變成畫布上的一條線，得先決定第三種埠長什麼樣
+    #: （見 ROADMAP 的「跨顆那一層」——那一段有同一個問題）。
     @classmethod
     def resolve_features_in(cls, params: Dict[str, Any]) -> List[str]:
         """這張卡會讀哪些**已經算出來的特徵**（Algo 段用）。

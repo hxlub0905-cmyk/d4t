@@ -19,6 +19,31 @@
 
 ---
 
+## F45：FeatureSpec 結構化身分 + 分數回溯（2026-08-27～28，總工作單 PR-3）
+
+計畫書：[`docs/plans/F45-feature-specs-and-verdict-trace.md`](docs/plans/F45-feature-specs-and-verdict-trace.md)。
+總工作單三個 PR 的最後一個收工。
+
+- **`FeatureSpec` 在名字誕生處**（`step.py`）：唯一產地
+  `resolve_feature_specs`，`resolve_features`/`feature_parts` 變投影；
+  使用者拍板 variant 照真實文法（nm/nm2/typical/outlier/outlier_box/
+  missing/raw/rescued）。鐵測試三半，B 半是**改碼前抓的字面快照** ——
+  特徵字串名一個位元組沒改。
+- **`verdict_trace`**：判定重放的純函式（不重算、scale let 不重放、缺值
+  標名字）；`decide_tree.walk` 重構成 `walk_steps` 的投影 —— 引擎、畫布、
+  重放器走**同一個**迴圈。
+- **結果表卡→區域→統計量**（`column_tree` 一棵樹三處共用）、雙層表頭
+  （區域跨欄同疊框色；無區域單層不變）、維度過濾（chips 限縮、
+  搜尋命中 > 限縮）。PR-1 的卡層分組刪了（不留兩套）。
+- **「拆字串猜語意」六處全刪**（`_split_cmp`、nm/locate_ok 字尾、cmp 拆解、
+  CD prefix 重組）—— 替案全部讀宣告或卡片自己 note 的表；grep-proof 只剩
+  docstring 的歷史敘述。
+- **WhyPanel 三次點擊**：點 score/bin/class → 面板重放（帶實值）→ 點項跳
+  產出卡；區域項亮那一塊（`set_overlay_emphasis`，alpha 一軸不搶 focus）。
+  Preview Path 行改建在 trace 上（刪 meta 讀）。
+- 黃金值三份逐項相同（每個 core commit 後查）；匯出零改動；出貨 recipe
+  加回溯煙霧（疊在既有 e2e 裡，CI 時間不變差）。
+
 ## F44：區域接線可讀性 + 儀表補洞（2026-08-27，總工作單 PR-2）
 
 計畫書：[`docs/plans/F44-region-wiring-and-panels.md`](docs/plans/F44-region-wiring-and-panels.md)。
