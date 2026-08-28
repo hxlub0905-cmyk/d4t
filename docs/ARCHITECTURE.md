@@ -183,49 +183,139 @@ Path 行都建在它上面。
 
 ## 目錄結構
 
+⚠ **這一段有測試守著**（`tests/test_doc_file_tree.py`）：下面每一個條目要真的存在，
+而 `d4t/` 底下每一支模組都要在下面被提到。以前沒有 —— 於是它漂到把 `tests/`、
+`tools/`、`docs/` 畫成 `d4t/` 的**子目錄**（它們是同層），還漏掉了近一個月新增的
+十幾支模組。加一支新模組就在這裡加一行，那支測試會提醒你。
+
+### repo 根
+
+```
+<repo>/
+├── d4t/                      # 套件本體（下一段展開）
+├── tests/                    # 179 個測試檔、2,700+ 支 test function，全部用合成資料
+│   ├── conftest.py           #   （根目錄另有一份 conftest.py —— 那份負責 sys.path）
+│   ├── region_cards.py       #   測試共用的小工具（不是測試檔）
+│   └── fixtures/
+│       ├── recipes/          #     e2e 用的最小 recipe（**測試用，不是教學範例**）
+│       ├── golden/           #     黃金值三份，`tools/freeze_golden.py` 產與驗
+│       └── sample_real.klarf #     遮蔽過的 KLARF 結構樣本（鐵則 8：值遮蔽、結構保留）
+├── recipes/                  # **出貨的 recipe**：走 `Open recipe…`，不走範本庫
+│                             #   每一份都被 `tests/test_shipped_recipes.py` 真的跑一次
+├── tools/                    # 開發／搬運／診斷腳本（bootstrap 那幾支 stdlib-only）
+├── fab_probe/                # 廠內格式探測腳本（stdlib-only、純文字輸出、單檔可貼）
+├── bundle/
+│   └── d4t_bundle.py         #   整個 repo 打成的單檔純文字包 —— 公司機拿程式碼的唯一路徑
+│                             #   **不要改名**（`docs/NO-GIT-SETUP.md` 寫著這個檔名，
+│                             #   而那台機器不能跑 git）
+├── docs/                     # 文件（下一段展開）
+├── .github/workflows/ci.yml  # CI
+├── conftest.py               # 讓 `pytest` 在 repo 根跑得起來
+├── pyproject.toml            # 套件中繼資料；`gui` extra ＝ PySide6（CLI 那條路不需要 Qt）
+├── requirements.txt          # 開發環境（含 PySide6 —— 跟 pyproject 的用途不一樣）
+├── README.md                 # 對外的第一頁
+├── AGENTS.md                 # 環境限制（兩台機器、剪貼簿是唯一通道）—— **動手前先讀**
+├── CLAUDE.md                 # 開發手冊（每個 session 都會被讀進去）
+└── SESSION_LOG.md            # 逐輪決策（近期；舊的按月封存進 `docs/history/`）
+```
+
+**`bundle/` 與 `docs/history/` 不進搬運包。** 唯一出處是
+`tools/make_filelist.py` 的 `EXCLUDE_DIRS`，`make_text_bundle.py` 直接 import 它
+（兩份定義會漂，一份不會）。
+
+### `d4t/` 套件
+
 ```
 d4t/
-├── core/                    # 純運算，**禁止任何 Qt import**（tests/test_no_qt.py 守門）
-│   ├── ingest/              # KLARF + 影像載入
-│   │   ├── klarf_core.py    #   KLARF 1.2/1.8 無損讀寫引擎（vendored from KLIP，最重要的資產）
-│   │   ├── tiff_index.py    #   免解碼 TIFF/BigTIFF 盤點 + tifffile 讀 page
-│   │   ├── imageio.py       #   CJK-safe 影像讀寫（np.fromfile + cv2.imdecode）
-│   │   └── dataset.py       #   ebi_patch / rsem / folder 自動判別 + tiff_stack（多頁無 KLARF）→ DefectItem
-│   ├── algo/                # 純 numpy/cv2 演算法（step 卡片包這些，不要在卡片裡重寫數學）
-│   ├── pipeline/            # 引擎
-│   │   ├── context.py       #   Context（images/features/meta）—— 步驟間的唯一介面
-│   │   ├── step.py          #   Step 介面 + ParamSpec + registry
-│   │   ├── recipe.py        #   Recipe(DAG) + lint 式 validate
-│   │   ├── expression.py    #   score 表達式引擎（自寫 parser，不用 eval）
-│   │   ├── engine.py        #   單顆執行 + checkpoint 快取版
-│   │   ├── batch.py         #   ProcessPool 平行批次
-│   │   └── cache.py         #   影像段 checkpoint 快取（npz）
-│   ├── steps/               # 步驟卡片（每檔一類）
-│   ├── store/               # SQLite 批次歷史 + rescore
-│   ├── export/              # KLARF 三種寫回模式 + CSV/Excel 報表 + overlay
-│   └── calibration.py       # nm/px 校正 profile
-├── ui/                      # PySide6 Studio（**唯一允許 Qt 的地方**）
-│   ├── scope.py             #   產品範圍開關：四種輸入（patch/rsem/stack/folder，F11 Input-3）
-│   ├── viewmodel.py         #   RecipeModel（Qt-free，可 headless 測；含 edges）
-│   ├── canvas.py            #   節點畫布（n8n 式；F7-6，純 UI，引擎零改動）
-│   ├── results.py           #   Results 視窗：直方圖 + Gallery + 整批入口（F7-5）
-│   ├── region_check.py      #   區域跨顆檢視：框畫在 N 顆縮圖上（F7-11）
-│   ├── template_dialog.py   #   從大圖疊 Golden Cell 模板（F7-12；模板存進 recipe）
-│   ├── inspectors.py        #   每張卡自己的儀表（F7-17；依 Step.key 註冊）
-│   ├── theme.py widgets.py  #   主題 token + 資料驅動元件 + 自繪圖示
-│   ├── gallery.py           #   同屏比多顆（虛擬捲動，撐 10k+）
-│   ├── welcome.py           #   首啟導覽 + 範例 recipe 庫對話框
-│   ├── workers.py           #   載入/預覽(請求合併)/試跑/寫出 背景執行緒
-│   └── studio.py app.py     #   主視窗 + 進入點
-├── tests/                   # 2900+ 個測試，全部用合成資料
-│   └── fixtures/recipes/    #   e2e 用的最小 recipe（**測試用，不是教學範例**）
-├── tools/                   # make_sample(_rsem).py 合成資料；離線安裝三件套：
-│                            #   fetch_wheels.py（有網路的機器抓）→ install_offline.py
-│                            #   （air-gapped 機器裝）→ doctor.py（環境自檢）
-├── fab_probe/               # 廠內格式探測腳本（stdlib-only、純文字輸出）
-├── docs/plans/              # 進行中的開發計畫（F0 = master plan、F8）
-└── docs/history/            # 封存：按月的 SESSION_LOG、做完的計畫書（**不進搬運包**）
+├── __main__.py               # CLI：run / steps / validate / runs / rescore / export / gui
+├── core/                     # 純運算，**禁止任何 Qt import**（`tests/test_no_qt.py` 守門）
+│   ├── ingest/               # 讀進來：KLARF、TIFF、影像檔、掛在 lot 上的第二份資料
+│   │   ├── klarf_core.py     #   KLARF 1.2/1.8 無損讀寫引擎（vendored from KLIP，最重要的資產）
+│   │   ├── tiff_index.py     #   免解碼 TIFF/BigTIFF 盤點 ＋ tifffile 讀 page
+│   │   ├── imageio.py        #   CJK-safe 影像讀寫（`np.fromfile` ＋ `cv2.imdecode`）
+│   │   ├── dataset.py        #   四種 source → 統一的 `DefectItem` 清單
+│   │   ├── pair_source.py    #   **另一份 lot** 掛上來（`Dataset.sources[代號]`，F15）
+│   │   └── glas_export.py    #   GLAS 匯出（`<id>_label.png`）掛上來 → 一條影像流
+│   ├── algo/                 # 純 numpy/cv2 數學（卡片包這些，**不要在卡片裡重寫數學**）
+│   │   ├── align.py normalize.py histmatch.py       #   對位／正規化／直方圖匹配
+│   │   ├── enhance.py curve.py                      #   局部對比、去背景、去噪；tone curve 求值
+│   │   ├── glv.py snr.py quality.py                 #   GLV metric bank／SNR 正負號正典／對焦指標
+│   │   ├── edge.py subpixel.py shape.py profile.py  #   CD 的四塊：剖面、次像素、團塊、投影
+│   │   ├── grid.py mask.py roi.py                   #   條紋→框／label map→框／MultiROISet
+│   │   ├── period.py golden.py template.py          #   週期估測／Golden Cell 疊圖／模板定位
+│   │   └── pairing.py                               #   兩批 defect 的座標配對（容差內、一對一）
+│   ├── pipeline/             # 引擎
+│   │   ├── context.py        #   Context（images／features／regions／meta）—— 步驟間的唯一介面
+│   │   ├── step.py           #   Step 介面 ＋ ParamSpec ＋ registry ＋ `GROUP_ORDER`（七段的唯一出處）
+│   │   ├── recipe.py         #   Recipe(DAG) ＋ lint 式 validate ＋ 版本遷移
+│   │   ├── expression.py     #   score 表達式引擎（自寫 parser，**不用 eval**）
+│   │   ├── decide_tree.py    #   判定樹怎麼走 —— 引擎與 UI 共用同一支
+│   │   ├── verdict_features.py verdict_trace.py  #   判定問了哪幾個數字／重放一顆的判定（F45）
+│   │   ├── engine.py batch.py cache.py  #   單顆執行／ProcessPool 批次／影像段 checkpoint 快取
+│   │   ├── channels.py       #   這一顆的第幾張圖 → 叫什麼流名
+│   │   ├── cellrois.py       #   標在 Golden Cell 上的具名區域（一個名字、好幾個矩形）
+│   │   └── curve.py          #   tone curve 控制點的字串編碼（parse／format）
+│   ├── steps/                # 步驟卡片 —— **註冊 19 張，卡片庫可見 18 張**（`align` 收起來）
+│   │                         #   ⚠ 卡片庫由上而下的順序 ＝ `__init__.py` 的 import 順序
+│   │   ├── load.py           #   load_patch／load_single（**一種 source 一張卡**）
+│   │   ├── load_sidecar.py pair_source.py               #   別的程式產的圖／另一份 lot 的那一顆
+│   │   ├── normalize.py tone.py denoise.py flatten.py   #   Enhance 段
+│   │   ├── align.py arith.py align_to.py                #   Compare 段（`align` 目前收起來）
+│   │   ├── roi_reference.py roi_mask.py                 #   Region 段：四種找法 → 具名區域／區域 → mask 流
+│   │   ├── roi_cross.py roi_template.py  #   ⚠ **不是卡片**：折進 `roi_reference` 的兩個 method（F30）
+│   │   ├── glv_stats.py cd.py quality.py #   Measure 段：GLV → CD → Focus index（**順序有意義**）
+│   │   ├── output.py         #   Output 段三張：output_report／output_klarf／output_char
+│   │   └── _util.py          #   卡片共用小工具（不註冊任何 step）
+│   ├── export/               # 寫出去
+│   │   ├── klarf_out.py      #   KLARF 三種寫回模式：inplace／annotate／topn
+│   │   ├── report.py html.py boxplot.py  #   CSV／Excel／HTML 報表／box plot（手寫 SVG，零新相依）
+│   │   └── overlay.py        #   缺陷疊圖：把「機器看到什麼」畫成人看得懂的圖
+│   ├── store/results.py      # SQLite 批次歷史 ＋ rescore
+│   └── calibration.py        # nm/px 校正 profile
+└── ui/                       # PySide6 Studio（**唯一允許 Qt 的地方**）
+    ├── scope.py              #   產品範圍開關：支援哪些輸入、哪些卡片收起來、入口長什麼樣
+    ├── viewmodel.py          #   RecipeModel（Qt-free、可 headless 測；含 edges）
+    ├── studio.py app.py      #   主視窗（**只做接線**）＋ 進入點
+    ├── canvas.py             #   節點畫布（n8n 式；純 UI，引擎零改動）
+    ├── cell_canvas.py        #   一格 cell 鋪成一片，區域的框畫在上面、拖得動
+    ├── tree_scene.py tree_panel.py     #   判定樹住在畫布上／點一步就編輯那一步（F24）
+    ├── decide_panel.py route_panel.py route_badge.py  #   判定段編輯器／`route_by` 編輯器與徽章
+    ├── verdict_band.py output_band.py  #   判定段的橫幅（一列一類）／Output 段的框（整批只跑一次）
+    ├── threshold_view.py     #   在挑門檻，就要看得到分布
+    ├── results.py results_table.py why_panel.py  #   Results 視窗／結果表／三次點擊回溯（F45）
+    ├── gallery.py region_check.py      #   縮圖網格（虛擬捲動，撐 10k+）／區域畫在很多顆上
+    ├── inspectors.py         #   每張卡自己的儀表（依 `Step.key` 註冊）
+    ├── template_dialog.py    #   從大圖疊 Golden Cell 模板（模板存進 recipe）
+    ├── welcome.py            #   首啟導覽 ＋ 範例 recipe 庫對話框（兩個入口目前收起來）
+    ├── workers.py            #   載入／預覽（請求合併）／試跑／寫出 背景執行緒
+    ├── theme.py widgets.py branding.py region_words.py  #   主題 token／資料驅動元件／圖示字標／
+    │                         #   區域那三個埠的白話字
+    └── assets/               #   `d4t.svg` 與兩份字標（pyproject 的 package-data 帶著它們走）
 ```
+
+⚠ **新的 UI 面板一律開新模組**，不要塞進 `studio.py`（6,000 行以上）——
+`studio.py` 留給接線，不留給內容。理由與現況見 [`../CLAUDE.md`](../CLAUDE.md) §4。
+
+### `docs/`
+
+```
+docs/
+├── ARCHITECTURE.md           # 這一份 —— 架構的唯一出處
+├── LICENSING.md              # 授權與來源：d4t 自己的授權狀態、vendoring 來源、第三方相依
+├── ROADMAP.md                # 進度與 phase 計畫
+├── PITFALLS.md               # 已知的坑（只增不減）
+├── HANDOVER.md               # 為什麼長成這樣：需求訪談結論、六個來源專案的脈絡
+├── FAB-VALIDATION.md         # 廠內待驗證的假設
+├── GLAS-INTERFACE.md         # 上游 GLAS 的介面契約（d4t 不解析 layout）
+├── USING-CD.md               # 給使用者：CD 那張卡每一格什麼時候動
+├── USING-CHARACTERIZATION.md # 給使用者：EBI ↔ API characterization 怎麼做
+├── NO-GIT-SETUP.md           # 受限機器：怎麼把程式碼弄上去
+├── OFFLINE-INSTALL.md        # 受限機器：怎麼離線裝相依套件
+├── plans/                    # **進行中**的計畫書（`F0-master-plan.md` 是總表）
+└── history/                  # 封存（**不進搬運包**）：按月的 SESSION_LOG、做完的計畫書
+```
+
+---
 
 > **`examples/` 不見了不是漏掉的。** 2026-08-16 使用者定調「範例 recipe 都先全部
 > 拿掉」，整個目錄移除；連帶「用範例資料試一次」與「Templates…」兩個入口

@@ -33,7 +33,7 @@ d4t 的第一原則是：
 | | |
 |---|---|
 | **輸入** | 四種 source，各有各的入口：`ebi_patch`（KLARF ＋ 多頁 patch TIFF）、`rsem`（KLARF ＋ 每顆一個影像檔）、`tiff_stack`（多頁 TIFF，無 KLARF）、`folder`（單張影像資料夾，無 KLARF） |
-| **組裝** | 24 張步驟卡片（卡片庫現行可見 21 張，其餘收在 `ui/scope.py` 的 `HIDDEN_STEPS`）；節點畫布拉線接卡，recipe 即 DAG |
+| **組裝** | 19 張步驟卡片（卡片庫現行可見 18 張 —— `align` 收在 `ui/scope.py` 的 `HIDDEN_STEPS`）；節點畫布拉線接卡，recipe 即 DAG |
 | **量測** | GLV 統計與區域對比（含 SNR）、逐框比較找出最異常的那一格（`worst_*`，框即 ROI 自己）、CD 次像素邊緣定位（同一趟給 LWR／LER）、對焦品質指標 |
 | **輸出** | 三張 Output 卡（整批跑完只跑一次）：**報表資料夾**（`Write report` —— 勾選決定裡面有什麼：`report.html`／`defects.csv`／`report.xlsx`／`spread.html` box plot／`images/*.jpg`／`recipe.json`，6000 顆量級一次出得完）、**寫回 KLARF**（class／bin／DSIZE，或 Top-N 新檔）、**點對點比較報表**（`Write comparison`，一顆一列兩張圖）|
 | **介面** | PySide6 桌面編輯器（Studio）＋ CLI（可排程、可腳本化） |
@@ -183,24 +183,47 @@ git add -A && python tools/release.py && git add -A
 | 架構：心智模型、資料模型、目錄結構 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
 | 進度與 phase 計畫 | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
 | 給使用者的操作手冊：CD 那張卡每一格什麼時候動 | [`docs/USING-CD.md`](docs/USING-CD.md) |
+| 給使用者的操作手冊：EBI ↔ API characterization 怎麼做 | [`docs/USING-CHARACTERIZATION.md`](docs/USING-CHARACTERIZATION.md) |
 | 已知的坑（30 條以上，只增不減） | [`docs/PITFALLS.md`](docs/PITFALLS.md) |
 | 設計緣由：需求訪談結論、名稱由來、六個來源專案 | [`docs/HANDOVER.md`](docs/HANDOVER.md) |
+| **授權與來源**：d4t 的授權狀態、vendoring 來源、第三方相依 | [`docs/LICENSING.md`](docs/LICENSING.md) |
 | 廠內待驗證假設、受限機器部署 | [`docs/FAB-VALIDATION.md`](docs/FAB-VALIDATION.md) |
 | 上游 GLAS 的介面契約 | [`docs/GLAS-INTERFACE.md`](docs/GLAS-INTERFACE.md) |
+| 受限機器：怎麼拿程式碼／怎麼離線裝套件 | [`docs/NO-GIT-SETUP.md`](docs/NO-GIT-SETUP.md)、[`docs/OFFLINE-INSTALL.md`](docs/OFFLINE-INSTALL.md) |
 | 逐輪決策與理由 | [`SESSION_LOG.md`](SESSION_LOG.md)、[`docs/history/`](docs/history/) |
 
 ---
 
 ## 來源
 
-d4t 的演算法多數自六個既有專案 vendoring 而來，各自提供的內容如下
-（完整脈絡見 [`CLAUDE.md`](CLAUDE.md) §6 與 [`docs/HANDOVER.md`](docs/HANDOVER.md) §3）：
+d4t 的演算法多數自六個既有專案 vendoring 而來 —— **六個都是同一個作者自己的專案**。
+各自提供的內容如下（完整脈絡見 [`CLAUDE.md`](CLAUDE.md) §6 與
+[`docs/HANDOVER.md`](docs/HANDOVER.md) §3；**授權那一面見
+[`docs/LICENSING.md`](docs/LICENSING.md)**）：
 
 | 來源 | 提供了什麼 |
 |---|---|
 | **KLIP** | KLARF 1.2／1.8 無損引擎、TIFF page 對應、健檢 lint |
 | **GLAS** | fine align、SEM loader、DAG 拓撲排序、ROI label map 契約 |
 | **MMH** | recipe 架構原型、批次引擎模式、次像素邊緣定位、品質指標、KLARF 寫回 |
-| **PEAR** | GLV 統計 metric bank、Tukey 離群、η²／Cohen's d、CJK-safe 影像載入 |
-| **cell-period-estimator** | 週期估測、Golden Cell 堆疊、ghosting 分數 |
-| **Perspective-Combination (Fusi³)** | 正規化、直方圖匹配、多後端對位、SNR map、blob 分割 |
+| **PEAR** | GLV 統計 metric bank、Tukey 離群、η²／Cohen's d、CJK-safe 影像載入、SNR 正負號正典 |
+| **cell-period-estimator** | 週期估測、Golden Cell 堆疊、ghosting 分數、UI 主題 token |
+| **Perspective-Combination (Fusi³)** | 正規化、直方圖匹配、5-backend 對位、`MultiROISet` |
+
+（Fusi³ 的 **SNR map** 與 **blob 分割**曾在這張表上：`snr_map`／Z-map 那張卡
+2026-08-25 移除，`find_blobs` 同日隨 `find_defect` 移除 —— `measure_blob` 留著，
+CD 在用。逐支模組的來源清單在 [`docs/LICENSING.md`](docs/LICENSING.md) §3。）
+
+---
+
+## 授權
+
+**d4t 目前沒有 `LICENSE` 檔，而 repo 是 public。**
+沒有授權聲明不等於「隨便用」—— 著作權的預設是**保留所有權利**，
+任何人都沒有被授予重製、修改或散布的權利。
+
+這是**還沒決定**，不是決定了不寫。現況、六個來源專案各自的授權狀態、
+執行時相依套件的授權（含 **PySide6 的 LGPL** 與離線安裝那條搬 wheel 的路），
+以及要下決定時三條路各自的代價，全部寫在
+**[`docs/LICENSING.md`](docs/LICENSING.md)** —— 那一份是授權的唯一出處，
+而且有 `tests/test_licensing_doc.py` 守著它的兩張表不漂。

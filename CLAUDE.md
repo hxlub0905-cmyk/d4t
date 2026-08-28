@@ -23,6 +23,7 @@
 | **已知的坑**（30+ 條，只增不減）| [`docs/PITFALLS.md`](docs/PITFALLS.md) | 動到 Qt 繪圖／快取／批次平行／KLARF 寫回／recipe 遷移之前，**先搜關鍵字** |
 | **進度與 phase 計畫** | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 想知道「接下來做什麼」 |
 | **為什麼長成這樣**：需求訪談結論、六個來源專案的脈絡 | [`docs/HANDOVER.md`](docs/HANDOVER.md) | 第一次接手；想改一個「看起來多餘」的設計之前 |
+| **授權**：d4t 自己的授權狀態、vendoring 來源的授權、第三方相依（PySide6 的 LGPL）| [`docs/LICENSING.md`](docs/LICENSING.md) | 要加相依套件、要 vendor 新東西、或有人問「這能不能給別人用」之前 |
 | 廠內待驗證的假設、受限機器的部署 | [`docs/FAB-VALIDATION.md`](docs/FAB-VALIDATION.md) | 要動 KLARF／單位／搬運時 |
 | **上游 GLAS 的介面**（label map／合成 gray／alignment；d4t 不解析 layout）| [`docs/GLAS-INTERFACE.md`](docs/GLAS-INTERFACE.md) | 要動 ROI 第三條路、或要請 GLAS 改東西時 |
 | 逐輪的決策與理由 | [`SESSION_LOG.md`](SESSION_LOG.md)（近期）＋ [`docs/history/`](docs/history/) | 查「這個決定當初為什麼這樣下」|
@@ -440,6 +441,12 @@ CLI 不受影響：`python -m d4t run` 照樣跑得動 rsem recipe。
 ## 6. 來源專案對照（vendoring）
 
 每個 vendored 模組檔頭都註明來源與改動。原始專案：
+
+> **授權那一面不在這裡** —— 逐支模組的來源清單、六個專案各自的授權狀態、
+> 第三方相依的授權，全部住在 [`docs/LICENSING.md`](docs/LICENSING.md)
+> （有測試守著兩張表不漂）。下面這張表講的是**技術脈絡**：誰提供了什麼。
+> 六個專案都是同一個作者自己的，所以 vendoring 這件事沒有第三方授權義務；
+> 真正有義務的是執行時的相依套件。
 
 | 來源 | 提供了什麼 |
 |---|---|
