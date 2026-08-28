@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
 )
 
 from .theme import TOKENS
-from .widgets import apply_button_cursors, to_uint8
+from .widgets import FilterChip, apply_button_cursors, to_uint8
 
 __all__ = ["GalleryPanel", "make_thumb", "THUMB_SIZES", "CACHE_CAP"]
 
@@ -271,21 +271,9 @@ def make_filter(spec: Any) -> Tuple[Optional[Callable[[Dict[str, Any]], bool]], 
 # --------------------------------------------------------------------------- #
 # 條件 chip（可移除）
 # --------------------------------------------------------------------------- #
-class _Chip(QPushButton):
-    """標頭上的一顆條件 chip：``排序：score ↓  ✕``。點一下就把該條件拿掉。"""
-
-    def __init__(self, text: str, tip: str, parent: Optional[QWidget] = None):
-        # ``×`` 是 U+00D7（Latin-1），不是 U+2715 那個 Dingbats 的 ``✕`` ——
-        # 後者在 Windows 上要退到 Segoe UI Symbol（F7-23 第四輪）。
-        super().__init__("%s  ×" % text, parent)
-        self.setObjectName("galleryChip")
-        self.label_text = text
-        self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip(tip)
-        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        # 外觀全在 QSS 的 ``QPushButton#galleryChip``（F7-23 第三輪）。以前每顆
-        # chip 自己帶一份 stylesheet 字串，換主題得靠 GalleryPanel 記得逐顆
-        # 重套 —— 而 chip 是**跑完才長出來的**，那條路很容易漏。
+#: PR-3 升格成 `widgets.FilterChip`（結果表的維度過濾也要 chip）——
+#: 這裡只剩別名，外觀仍在 QSS 的 ``QPushButton#galleryChip``（F7-23 第三輪）。
+_Chip = FilterChip
 
 
 # --------------------------------------------------------------------------- #

@@ -111,6 +111,8 @@ __all__ = [
     "METRIC_GLYPHS",
     "METRIC_GROUPS",
     "MetricChips",
+    "FilterChip",
+    "metric_face",
 ]
 
 
@@ -136,6 +138,26 @@ def small_button(text: str, tip: str = "", parent: Optional[QWidget] = None,
     if tip:
         b.setToolTip(str(tip))
     return b
+
+
+class FilterChip(QPushButton):
+    """一顆可移除的條件 chip：``排序：score ↓  ✕``。點一下就把該條件拿掉。
+
+    PR-3 從 `gallery._Chip` 升格搬來（結果表的維度過濾也要 chip，而同一種
+    視覺語言只能有一份）。objectName 沿用 ``galleryChip`` —— 外觀的家在 QSS 的
+    ``QPushButton#galleryChip``（F7-23 第三輪），名字跟著搬會讓兩邊各長一份
+    樣式。
+    """
+
+    def __init__(self, text: str, tip: str, parent: Optional[QWidget] = None):
+        # ``×`` 是 U+00D7（Latin-1），不是 U+2715 那個 Dingbats 的 ``✕`` ——
+        # 後者在 Windows 上要退到 Segoe UI Symbol（F7-23 第四輪）。
+        super().__init__("%s  ×" % text, parent)
+        self.setObjectName("galleryChip")
+        self.label_text = text
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(tip)
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
 
 
 def clear_layout_parked(layout, graveyard: list) -> None:

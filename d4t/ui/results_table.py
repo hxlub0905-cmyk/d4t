@@ -44,25 +44,43 @@ CLI 的 ``--csv`` 早就吐得出這張表了。這一份是把它搬到畫面�
 * 警示**只**來自卡片宣告的布林（`diagnostic_alarms`）與整列的 ``error`` ——
   UI 不對數值型診斷發明門檻。
 
-分組只到卡層級（區域層級等 PR-3 的 FeatureSpec）——**不拆特徵字串猜語意**。
+卡 → 區域 → 統計量（PR-3，2026-08-27）
+--------------------------------------
+分組吃的是 `verdict_features.bound_specs`（每個特徵名的**結構化身分**，
+`FeatureSpec` 在名字誕生的地方組出來）——**不拆特徵字串猜語意**：
+
+* :func:`column_tree` 把欄位排成卡 → 區域 → 統計量的樹，**只算一次**，
+  摺疊順序、雙層表頭、維度過濾共用同一份（表頭不自己推＝不留第二套）；
+* 表頭兩層：上半是**區域**（同一張卡同一個區域的欄相鄰，跨欄一次、
+  用疊框同一組顏色 `theme.region_hex`），下半是**統計量**的短標籤
+  （`widgets.metric_face` —— metric id 的天然落點）。懸停看得到原始欄名 ——
+  字串仍是分數表達式的變數名，永不改；
+* 維度過濾（Region / Statistic / Card 三顆下拉 + chips）：chip **限縮**
+  兩層（固定欄與命中欄留下；同維 OR、跨維 AND），欄位搜尋照舊是**現身**
+  （子字串把摺疊的欄叫出來，搜尋命中 > 維度限縮 —— 指名要看的贏過大範圍
+  的篩子）。
 """
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
+from PySide6.QtCore import (
+    QAbstractTableModel, QModelIndex, QRect, QSize, Qt, Signal,
+)
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHBoxLayout, QHeaderView, QLineEdit, QTableView,
-    QToolButton, QToolTip, QVBoxLayout, QWidget,
+    QAbstractItemView, QHBoxLayout, QHeaderView, QLineEdit, QMenu,
+    QTableView, QToolButton, QToolTip, QVBoxLayout, QWidget,
 )
 
 from ..core.export.report import BASE_COLUMNS, feature_keys
-from .theme import TOKENS
+from .theme import TOKENS, region_hex
+from .widgets import FilterChip, metric_face
 
 __all__ = [
-    "ResultsTable", "ResultsTableModel", "ResultsTablePane",
-    "table_columns", "column_layout", "visible_columns", "row_warnings",
+    "ResultsTable", "ResultsTableModel", "ResultsTablePane", "TwoLevelHeader",
+    "table_columns", "column_tree", "visible_columns", "row_warnings",
+    "header_spans",
 ]
 
 #: 類別名那一欄插在哪（``defect_id`` 之後）——**它是這一顆判成了什麼**，
@@ -85,79 +103,174 @@ def _fixed_columns() -> List[str]:
     return [BADGE_COLUMN] + base[:i] + [CLASS_COLUMN] + base[i:]
 
 
-def _layout_columns(results: Sequence[Dict[str, Any]],
-                    verdict_features: Sequence[str],
-                    groups: Sequence[Tuple[str, str, Sequence[str]]],
-                    hidden: Sequence[str],
-                    ) -> Tuple[List[str], List[str]]:
-    """(判定層的欄, 摺疊區的欄)。`table_columns` 與 `column_layout` 都走這裡
-    —— 判定層是哪幾欄只能有一個答案。"""
-    drop = set(hidden)
+def _stat_label(bound: Any) -> str:
+    """下層表頭的短標籤。metric id 查 `widgets.metric_face`（那張表**認不得
+    的也答得出來**），沒有 metric 的（引擎名、load 的座標那些）用 base ——
+    **不猜**，原始欄名永遠在懸停上。"""
+    spec = bound.spec
+    if spec.metric:
+        return metric_face(spec.metric)[1]
+    return spec.base or spec.name
+
+
+def column_tree(results: Sequence[Dict[str, Any]],
+                verdict_features: Sequence[str] = (),
+                specs: Sequence[Any] = (),
+                diagnostics: Sequence[str] = ()) -> Dict[str, Any]:
+    """`ResultsTableModel.set_results` 吃的分層描述 —— **卡 → 區域 → 統計量
+    的樹只算一次**，摺疊順序、雙層表頭、維度過濾共用這一份。
+
+    ``specs`` 是 `verdict_features.bound_specs` 的回傳（BoundSpec 序列）。
+    「判定引用 > 診斷隱藏」那條規矩住在這裡：被判定引用的診斷特徵**不**藏
+    （使用者 2026-08-27 定調 —— 「這顆為什麼判 NG」要看得到比的那個值），
+    其餘的診斷欄兩層都不出現。
+
+    舊鍵（``columns`` / ``verdict_columns`` / ``n_more`` / ``diagnostics``）
+    一個不少；PR-3 加 ``spec_of``（欄名 → BoundSpec）與 ``groups``
+    （``[{node_id, label, regions: [{region, role, columns:
+    [{name, stat_label}]}]}]``）。
+    """
+    verdict = [str(f) for f in verdict_features]
+    drop = {d for d in map(str, diagnostics) if d not in set(verdict)}
+    spec_of: Dict[str, Any] = {}
+    for b in specs:
+        spec_of.setdefault(str(b.spec.name), b)
+
     vcols = list(_fixed_columns())
     placed = set(vcols)
-    for f in verdict_features:
-        f = str(f)
+    for f in verdict:
         # 判定引用了沒人產出的名字 → **照樣是一欄**（整欄留白）。
         if f and f not in placed and f not in drop:
             placed.add(f)
             vcols.append(f)
+
+    # 卡 → 區域 → 統計量。specs 已是執行序，而量測卡的宣告迴圈是
+    # 流 → 區域 → 統計量（`MultiSourceStep.resolve_feature_specs`），
+    # 所以照原序分段就保證**同區域的欄相鄰** —— 表頭的跨欄靠它。
+    groups: List[Dict[str, Any]] = []
+    for name, b in spec_of.items():
+        if name in drop:
+            continue
+        col = {"name": name, "stat_label": _stat_label(b)}
+        if not (groups and groups[-1]["node_id"] == b.node_id
+                and groups[-1]["label"] == b.label):
+            groups.append({"node_id": b.node_id, "label": b.label,
+                           "regions": []})
+        regs = groups[-1]["regions"]
+        if not (regs and regs[-1]["region"] == b.spec.region):
+            regs.append({"region": b.spec.region,
+                         "role": b.spec.region_role, "columns": []})
+        regs[-1]["columns"].append(col)
+
     rest: List[str] = []
-    for _nid, _label, names in groups:
-        for n in names:
-            n = str(n)
-            if n and n not in placed and n not in drop:
-                placed.add(n)
-                rest.append(n)
-    # 歸不到任何一張卡的放最後（`route_taken`、let 產物、救援名那些）。
+    for g in groups:
+        for reg in g["regions"]:
+            for col in reg["columns"]:
+                n = col["name"]
+                if n and n not in placed:
+                    placed.add(n)
+                    rest.append(n)
+    # 歸不到任何一張卡的放最後（fixture 造的名字、宣告漏掉的那些）。
     for n in feature_keys(results):
         if n not in placed and n not in drop:
             placed.add(n)
             rest.append(n)
-    return vcols, rest
+    return {"columns": vcols + rest, "verdict_columns": vcols,
+            "n_more": len(rest), "diagnostics": [str(d) for d in diagnostics],
+            "spec_of": spec_of, "groups": groups}
 
 
 def table_columns(results: Sequence[Dict[str, Any]],
                   verdict_features: Sequence[str] = (),
-                  groups: Sequence[Tuple[str, str, Sequence[str]]] = (),
-                  hidden: Sequence[str] = ()) -> List[str]:
+                  specs: Sequence[Any] = (),
+                  diagnostics: Sequence[str] = ()) -> List[str]:
     """這張表有哪幾欄（順序就是顯示順序）。
 
     不帶引數＝以前的平鋪行為（base + class + 特徵照字母序）加上徽章欄。
-    ``hidden``（診斷欄）**完全不在**回傳裡 —— 值走徽章明細與匯出，不走表格。
+    診斷欄（沒被判定引用的）**完全不在**回傳裡 —— 值走徽章明細與匯出，
+    不走表格。
     """
-    vcols, rest = _layout_columns(results, verdict_features, groups, hidden)
-    return vcols + rest
+    return list(column_tree(results, verdict_features, specs,
+                            diagnostics)["columns"])
 
 
-def column_layout(results: Sequence[Dict[str, Any]],
-                  verdict_features: Sequence[str] = (),
-                  groups: Sequence[Tuple[str, str, Sequence[str]]] = (),
-                  diagnostics: Sequence[str] = ()) -> Dict[str, Any]:
-    """`ResultsTableModel.set_results` 吃的分層描述。
+def _stat_menu_text(metric_id: str) -> str:
+    """Statistic 下拉／chip 上的字：``分群 · 短標籤``。只給短標籤的話
+    GLV 的 Median 與 CD 的 Median 在選單裡是兩條一模一樣的字。"""
+    group, label, _glyph = metric_face(metric_id)
+    return "%s · %s" % (group, label)
 
-    「判定引用 > 診斷隱藏」那條規矩住在這裡：被判定引用的診斷特徵**不**藏
-    （使用者 2026-08-27 定調 —— 「這顆為什麼判 NG」要看得到比的那個值），
-    其餘的診斷欄兩層都不出現。
-    """
-    verdict = [str(f) for f in verdict_features]
-    hidden = [d for d in diagnostics if d not in set(verdict)]
-    vcols, rest = _layout_columns(results, verdict, groups, hidden)
-    return {"columns": vcols + rest, "verdict_columns": vcols,
-            "n_more": len(rest), "diagnostics": [str(d) for d in diagnostics]}
+
+def _dim_value(bound: Any, kind: str) -> str:
+    """一欄在某個維度上的值。``region`` 是區域名前綴（含 ``_center`` 那種
+    後綴全名）、``stat`` 是 metric id、``card`` 是（消歧後的）卡片 label。"""
+    if kind == "region":
+        return str(bound.spec.region)
+    if kind == "stat":
+        return str(bound.spec.metric)
+    return str(bound.label)
 
 
 def visible_columns(columns: Sequence[str], verdict_columns: Sequence[str],
-                    expanded: bool, search: str) -> List[str]:
+                    expanded: bool, search: str,
+                    spec_of: Optional[Dict[str, Any]] = None,
+                    dims: Sequence[Tuple[str, str]] = ()) -> List[str]:
     """現在看得到哪幾欄 —— 分層的**全部**邏輯，純函式（不變量測試打這裡）。
 
     展開＝全部；收合＝判定層 ∪ 搜尋命中的欄（子字串、不分大小寫）。
     清空搜尋就還原 —— 搜尋不改展開狀態。
+
+    ``dims``（PR-3 的維度 chips，``[(維度, 值), …]``，維度 ∈ region / stat
+    / card）是**限縮**：兩層都只留固定欄（沒有 spec 的）與命中欄 —— 同維
+    OR、跨維 AND。搜尋命中的欄**不受限縮**（指名要看的贏過大範圍的篩子）。
+    不給 ``dims`` / ``spec_of`` ＝ PR-1 的行為逐字不變。
     """
-    if expanded:
-        return list(columns)
     keep = set(verdict_columns)
     s = str(search or "").strip().lower()
-    return [c for c in columns if c in keep or (s and s in c.lower())]
+
+    def layer_ok(c: str) -> bool:
+        return expanded or c in keep or bool(s and s in c.lower())
+
+    wanted: Dict[str, set] = {}
+    for kind, value in dims or ():
+        wanted.setdefault(str(kind), set()).add(str(value))
+
+    def dim_ok(c: str) -> bool:
+        if not wanted or not spec_of:
+            return True
+        b = spec_of.get(c)
+        if b is None:
+            return True                       # 固定欄／沒人產出的判定欄
+        if s and s in c.lower():
+            return True                       # 搜尋命中 > 維度限縮
+        return all(_dim_value(b, kind) in values
+                   for kind, values in wanted.items())
+
+    return [c for c in columns if layer_ok(c) and dim_ok(c)]
+
+
+def header_spans(visible: Sequence[str],
+                 spec_of: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """上層表頭的跨欄段：可見欄序列 → ``[{start, count, region,
+    region_index, node_id}, …]``（start 是可見序的索引）。
+
+    同一張卡（node_id）同一個區域的**連續**欄合成一段；沒有區域的欄不成段。
+    畫的跟測的都走這一支 —— 表頭不自己推一份。
+    """
+    spans: List[Dict[str, Any]] = []
+    prev = None
+    for i, name in enumerate(visible):
+        b = (spec_of or {}).get(str(name))
+        region = str(b.spec.region) if b is not None else ""
+        key = (b.node_id, region) if (b is not None and region) else None
+        if key is not None and key == prev:
+            spans[-1]["count"] += 1
+        elif key is not None:
+            spans.append({"start": i, "count": 1, "region": region,
+                          "region_index": int(b.spec.region_index),
+                          "node_id": str(b.node_id)})
+        prev = key
+    return spans
 
 
 def row_warnings(row: Dict[str, Any],
@@ -204,13 +317,14 @@ class ResultsTableModel(QAbstractTableModel):
         self._verdict_columns: List[str] = []
         self._diagnostics: List[str] = []
         self._alarms: Dict[str, bool] = {}
+        self._spec_of: Dict[str, Any] = {}
 
     # ---- 資料 --------------------------------------------------------------
     def set_results(self, results: Sequence[Dict[str, Any]],
                     class_names: Optional[Dict[str, str]] = None,
                     layout: Optional[Dict[str, Any]] = None,
                     alarms: Optional[Dict[str, bool]] = None) -> None:
-        """``layout`` 來自 :func:`column_layout`；不給＝平鋪（每一欄都是判定層，
+        """``layout`` 來自 :func:`column_tree`；不給＝平鋪（每一欄都是判定層，
         沒有摺疊區）。``alarms`` 來自 `verdict_features.diagnostic_alarm_map`。"""
         names = dict(class_names or {})
         self.beginResetModel()
@@ -218,10 +332,12 @@ class ResultsTableModel(QAbstractTableModel):
             self._columns = table_columns(results)
             self._verdict_columns = list(self._columns)
             self._diagnostics = []
+            self._spec_of = {}
         else:
             self._columns = list(layout.get("columns") or [])
             self._verdict_columns = list(layout.get("verdict_columns") or [])
             self._diagnostics = list(layout.get("diagnostics") or [])
+            self._spec_of = dict(layout.get("spec_of") or {})
         self._alarms = dict(alarms or {})
         self._rows = []
         for r in results or []:
@@ -297,13 +413,29 @@ class ResultsTableModel(QAbstractTableModel):
     def columnCount(self, parent=QModelIndex()) -> int:   # noqa: N802 — Qt
         return 0 if parent.isValid() else len(self._columns)
 
+    def spec_of(self) -> Dict[str, Any]:
+        """欄名 → BoundSpec（`TwoLevelHeader` 的跨欄段吃這個）。"""
+        return self._spec_of
+
     def headerData(self, section, orientation, role=Qt.DisplayRole):  # noqa: N802
-        if role != Qt.DisplayRole or orientation != Qt.Horizontal:
+        if orientation != Qt.Horizontal or \
+                not (0 <= section < len(self._columns)):
             return None
-        if 0 <= section < len(self._columns):
-            name = self._columns[section]
+        name = self._columns[section]
+        bound = self._spec_of.get(name)
+        if role == Qt.DisplayRole:
             # 徽章欄的表頭留白 —— ``!warn`` 是程式的哨兵，不是給人看的字。
-            return "" if name == BADGE_COLUMN else name
+            if name == BADGE_COLUMN:
+                return ""
+            # 有身分的欄顯示統計量短標籤（區域在上層表頭）；沒有的照舊
+            # 顯示欄名 —— 不猜。
+            return _stat_label(bound) if bound is not None else name
+        if role == Qt.ToolTipRole and bound is not None:
+            # 第一行**永遠是原始欄名** —— 它是分數表達式的變數名、CSV 的
+            # 欄名，短標籤再漂亮也不能把它藏死。
+            bits = [x for x in (bound.label, bound.spec.region,
+                                _stat_label(bound)) if x]
+            return "%s\n%s" % (name, " · ".join(bits))
         return None
 
     def data(self, index, role=Qt.DisplayRole):           # noqa: N802 — Qt
@@ -379,6 +511,83 @@ class ResultsTableModel(QAbstractTableModel):
         self.layoutChanged.emit()
 
 
+class TwoLevelHeader(QHeaderView):
+    """雙層表頭：上半是**區域**（同卡同區域的欄跨欄一次、顏色跟影像上的
+    疊框同源 `theme.region_hex`），下半是 Qt 原生畫的節區（統計量短標籤
+    來自 model 的 DisplayRole，排序箭頭是預設行為）。
+
+    沒有任何欄帶區域時退回**單層** —— 平鋪與舊 recipe 的表一個像素都不變。
+    上半的點擊不特殊處理（預設 QHeaderView 行為＝排序該欄 —— 上下兩半是
+    同一個節區）。跨欄段由 :func:`header_spans`（純函式）算 —— 畫的跟測的
+    是同一份，表頭不自己推第二套。
+    """
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(Qt.Horizontal, parent)
+
+    # ---- 資料（都來自 model —— 表頭自己不存一份） --------------------------
+    def _spec_of(self) -> Dict[str, Any]:
+        get = getattr(self.model(), "spec_of", None)
+        return get() if callable(get) else {}
+
+    def _column_names(self) -> List[str]:
+        get = getattr(self.model(), "columns", None)
+        return get() if callable(get) else []
+
+    def _has_region_row(self) -> bool:
+        return any(getattr(b.spec, "region", "")
+                   for b in self._spec_of().values())
+
+    # ---- Qt ----------------------------------------------------------------
+    def sizeHint(self) -> QSize:  # noqa: N802 — Qt
+        sz = super().sizeHint()
+        if self._has_region_row():
+            sz.setHeight(sz.height() * 2)
+        return sz
+
+    def paintSection(self, painter, rect, logicalIndex) -> None:  # noqa: N802
+        if not self._has_region_row():
+            super().paintSection(painter, rect, logicalIndex)
+            return
+        top_h = rect.height() // 2
+        painter.save()
+        super().paintSection(painter, rect.adjusted(0, top_h, 0, 0),
+                             logicalIndex)
+        painter.restore()
+
+        top = rect.adjusted(0, 0, 0, -(rect.height() - top_h))
+        painter.save()
+        painter.setClipRect(top)
+        painter.fillRect(top, QColor(TOKENS.get("bg_panel", "#fafbfc")))
+        names = self._column_names()
+        vis = [(i, c) for i, c in enumerate(names)
+               if not self.isSectionHidden(i)]
+        spans = header_spans([c for _i, c in vis], self._spec_of())
+        pos = next((p for p, (li, _c) in enumerate(vis)
+                    if li == logicalIndex), -1)
+        span = next((s for s in spans
+                     if s["start"] <= pos < s["start"] + s["count"]), None)
+        if span is not None:
+            band = QColor(region_hex(span["region_index"]))
+            band.setAlphaF(0.30)
+            painter.fillRect(top, band)
+            # 字畫在**整段**的座標上、剪在自己這一節 —— 局部重繪（只髒中間
+            # 一節）也不會把跨欄的字畫掉一半。
+            first_li = vis[span["start"]][0]
+            last_li = vis[span["start"] + span["count"] - 1][0]
+            x0 = self.sectionViewportPosition(first_li)
+            x1 = (self.sectionViewportPosition(last_li)
+                  + self.sectionSize(last_li))
+            span_rect = QRect(x0 + 6, top.y(), max(0, x1 - x0 - 12),
+                              top.height())
+            painter.setPen(QColor(TOKENS.get("text_primary", "#1f2430")))
+            painter.drawText(
+                span_rect, int(Qt.AlignLeft | Qt.AlignVCenter),
+                painter.fontMetrics().elidedText(
+                    str(span["region"]), Qt.ElideRight, span_rect.width()))
+        painter.restore()
+
+
 class ResultsTable(QTableView):
     """逐顆的表。**唯讀**（見模組說明），雙擊一列 = 去看那一顆。"""
 
@@ -389,6 +598,9 @@ class ResultsTable(QTableView):
         super().__init__(parent)
         self._model = ResultsTableModel(self)
         self.setModel(self._model)
+        # 換表頭要在 setSortingEnabled **之前** —— 排序把「可點、有箭頭」
+        # 接在呼叫當下的那顆表頭上。
+        self.setHorizontalHeader(TwoLevelHeader(self))
         self.setObjectName("resultsTable")
         self.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -411,6 +623,8 @@ class ResultsTable(QTableView):
                     layout: Optional[Dict[str, Any]] = None,
                     alarms: Optional[Dict[str, bool]] = None) -> None:
         self._model.set_results(results, class_names, layout, alarms)
+        # 表頭可能在單層/雙層之間切換（有沒有欄帶區域）—— 高度要重新量。
+        self.horizontalHeader().updateGeometry()
         self.resizeColumnsToContents()
         for i in range(self._model.columnCount()):
             # 一個很長的錯誤訊息會把那一欄撐到整張表都看不到別的東西。
@@ -490,6 +704,28 @@ class ResultsTablePane(QWidget):
             "uses. This shows every measured number as well.")
         self.more.toggled.connect(self._on_toggled)
 
+        # 維度過濾（PR-3）：三顆下拉，值只列 spec 裡**真的存在**的。
+        # chip 是限縮（同維 OR、跨維 AND），跟搜尋框的「現身」互不侵犯 ——
+        # 語意都在 :func:`visible_columns`（純函式）。
+        self._dims: List[Tuple[str, str]] = []
+        self._chips: List[FilterChip] = []
+        self.dim_buttons: Dict[str, QToolButton] = {}
+        for kind, text, tip in (
+                ("region", "Region",
+                 "Show only the columns measured on one region."),
+                ("stat", "Statistic",
+                 "Show only one statistic across every card and region."),
+                ("card", "Card",
+                 "Show only the columns one card produced.")):
+            b = QToolButton(self)
+            b.setObjectName("resultsDim_%s" % kind)
+            b.setText(text)
+            b.setToolTip(tip)
+            b.setPopupMode(QToolButton.InstantPopup)
+            b.setMenu(QMenu(b))
+            b.setVisible(False)            # set_results 有維度值才現身
+            self.dim_buttons[kind] = b
+
         self.table = ResultsTable(self)
         #: 轉出去給宿主接的訊號（跟以前 `ResultsTable` 的約定一字不變）。
         self.defect_activated = self.table.defect_activated
@@ -497,11 +733,18 @@ class ResultsTablePane(QWidget):
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 0, 0, 0)
         bar.addWidget(self.search, 1)
+        for b in self.dim_buttons.values():
+            bar.addWidget(b, 0)
         bar.addWidget(self.more, 0)
+        self._chip_bar = QHBoxLayout()
+        self._chip_bar.setContentsMargins(0, 0, 0, 0)
+        self._chip_bar.setSpacing(4)
+        self._chip_bar.addStretch(1)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
         lay.addLayout(bar)
+        lay.addLayout(self._chip_bar)
         lay.addWidget(self.table, 1)
 
     # ---- 外部（沿用 ResultsTable 的介面，宿主換上來不用改） ---------------
@@ -514,6 +757,10 @@ class ResultsTablePane(QWidget):
         self.more.setText("All measurements (%d)" % n)
         # 沒有摺疊區（平鋪模式、或判定引用了每一欄）就不擺一顆沒事做的鈕。
         self.more.setVisible(n > 0)
+        # 新的一批＝欄位變了：舊 chip 可能指著不存在的值，全部清掉
+        # （跟 Gallery 換批清分數篩選同一條規矩）。
+        self._clear_dims()
+        self._rebuild_dim_menus()
         self._apply_visibility()
 
     def columns(self) -> List[str]:
@@ -542,6 +789,65 @@ class ResultsTablePane(QWidget):
     def is_expanded(self) -> bool:
         return self._expanded
 
+    # ---- 維度過濾（PR-3） --------------------------------------------------
+    def dims(self) -> List[Tuple[str, str]]:
+        return list(self._dims)
+
+    def add_dim(self, kind: str, value: str) -> None:
+        """加一顆維度 chip（下拉選單也走這裡）。重複加是 no-op。"""
+        pair = (str(kind), str(value))
+        if pair in self._dims:
+            return
+        self._dims.append(pair)
+        shown = _stat_menu_text(value) if kind == "stat" else value
+        chip = FilterChip("%s: %s" % (self.dim_buttons[kind].text(), shown),
+                          "Click to remove this filter.", self)
+        chip.clicked.connect(lambda _=False, p=pair: self.remove_dim(*p))
+        self._chips.append(chip)
+        self._chip_bar.insertWidget(self._chip_bar.count() - 1, chip)
+        self._apply_visibility()
+
+    def remove_dim(self, kind: str, value: str) -> None:
+        pair = (str(kind), str(value))
+        if pair not in self._dims:
+            return
+        i = self._dims.index(pair)
+        self._dims.pop(i)
+        chip = self._chips.pop(i)
+        chip.setParent(None)
+        chip.deleteLater()
+        self._apply_visibility()
+
+    def _clear_dims(self) -> None:
+        self._dims = []
+        for chip in self._chips:
+            chip.setParent(None)
+            chip.deleteLater()
+        self._chips = []
+
+    def _rebuild_dim_menus(self) -> None:
+        """三顆下拉只列**存在的**值（region 照出現序、stat 用短標籤顯示、
+        card 用消歧後的 label）。一個值都沒有的維度整顆鈕收起來。"""
+        spec_of = self.table._model.spec_of()
+        values: Dict[str, List[Tuple[str, str]]] = {
+            "region": [], "stat": [], "card": []}
+        seen: Dict[str, set] = {k: set() for k in values}
+        for b in spec_of.values():
+            for kind in values:
+                v = _dim_value(b, kind)
+                if not v or v in seen[kind]:
+                    continue
+                seen[kind].add(v)
+                shown = _stat_menu_text(v) if kind == "stat" else v
+                values[kind].append((v, shown))
+        for kind, button in self.dim_buttons.items():
+            menu = button.menu()
+            menu.clear()
+            for v, shown in values[kind]:
+                menu.addAction(shown).triggered.connect(
+                    lambda _=False, k=kind, val=v: self.add_dim(k, val))
+            button.setVisible(bool(values[kind]))
+
     # ---- 內部 --------------------------------------------------------------
     def _on_toggled(self, checked: bool) -> None:
         self._expanded = bool(checked)
@@ -550,6 +856,7 @@ class ResultsTablePane(QWidget):
     def _apply_visibility(self) -> None:
         cols = self.table.columns()
         vis = set(visible_columns(cols, self.table._model.verdict_columns(),
-                                  self._expanded, self.search.text()))
+                                  self._expanded, self.search.text(),
+                                  self.table._model.spec_of(), self._dims))
         for i, c in enumerate(cols):
             self.table.setColumnHidden(i, c not in vis)

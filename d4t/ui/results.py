@@ -322,7 +322,7 @@ class ResultsWindow(QMainWindow):
                   layout: Any = None, alarms: Any = None) -> None:
         """表格那一半（跟 Gallery 吃同一批結果）。
 
-        ``layout``/``alarms`` 是分層與徽章的描述（`results_table.column_layout`
+        ``layout``/``alarms`` 是分層與徽章的描述（`results_table.column_tree`
         / `verdict_features.diagnostic_alarm_map`），由 Studio 從 recipe 推導；
         不給就是平鋪 —— 這裡只轉手，不算。
         """

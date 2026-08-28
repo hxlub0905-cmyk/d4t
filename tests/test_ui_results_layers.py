@@ -28,10 +28,12 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from d4t.core.export.report import BASE_COLUMNS, feature_keys  # noqa: E402
+from d4t.core.pipeline.step import FeatureSpec  # noqa: E402
+from d4t.core.pipeline.verdict_features import BoundSpec  # noqa: E402
 from d4t.ui import theme as theme_mod  # noqa: E402
 from d4t.ui.results_table import (  # noqa: E402
-    BADGE_COLUMN, CLASS_COLUMN, ResultsTablePane, column_layout, row_warnings,
-    visible_columns,
+    BADGE_COLUMN, CLASS_COLUMN, ResultsTablePane, column_tree, header_spans,
+    row_warnings, visible_columns,
 )
 
 
@@ -65,18 +67,33 @@ def _results():
 
 #: 判定引用了 `glv_median`（量測）、`ghost`（沒人產出 —— 要是一個空欄）。
 VERDICT = ("glv_median", "ghost")
-GROUPS = (("m1", "GLV", ("glv_median", "glv_pixels", "glv_ok")),
-          ("m2", "CD", ("cd_median",)))
+
+
+def _spec(name, node, label, **kw):
+    return BoundSpec(node, label, FeatureSpec(name=name, **kw))
+
+
+#: PR-3 起分組吃 BoundSpec（`verdict_features.bound_specs` 的形狀）。
+SPECS = (
+    _spec("glv_median", "m1", "GLV", base="glv_median",
+          metric="glv_median", family="glv"),
+    _spec("glv_pixels", "m1", "GLV", base="glv_pixels"),
+    _spec("glv_ok", "m1", "GLV", base="glv_ok"),
+    _spec("cd_median", "m2", "CD", base="cd_median",
+          metric="cd_median", family="cd"),
+)
 #: 卡片宣告的診斷。`glv_ok`/`glv_pixels` 沒被判定引用 → 兩層都不出現。
 DIAGNOSTICS = ("glv_pixels", "glv_ok")
 ALARMS = {"glv_ok": False}
 
 
-def _pane(qapp, verdict=VERDICT, diagnostics=DIAGNOSTICS, alarms=ALARMS):
+def _pane(qapp, verdict=VERDICT, diagnostics=DIAGNOSTICS, alarms=ALARMS,
+          specs=SPECS, results=None):
+    rows = _results() if results is None else results
     pane = ResultsTablePane()
     pane.set_results(
-        _results(), {"1": "bright", "2": "nuisance"},
-        layout=column_layout(_results(), verdict, GROUPS, diagnostics),
+        rows, {"1": "bright", "2": "nuisance"},
+        layout=column_tree(rows, verdict, specs, diagnostics),
         alarms=alarms)
     return pane
 
@@ -219,3 +236,141 @@ def test_visible_columns_is_a_pure_function():
     assert visible_columns(cols, verdict, False, "B") == \
         ["!warn", "defect_id", "a", "b"], "搜尋不分大小寫"
     assert visible_columns(cols, verdict, False, "zzz") == verdict
+
+
+# --------------------------------------------------------------------------- #
+# PR-3：卡 → 區域 → 統計量、雙層表頭、維度過濾
+# --------------------------------------------------------------------------- #
+REGION_SPECS = (
+    _spec("epi_glv_median", "m1", "GLV", base="glv_median", region="epi",
+          region_index=0, region_role="all", metric="glv_median",
+          family="glv"),
+    _spec("epi_glv_mad", "m1", "GLV", base="glv_mad", region="epi",
+          region_index=0, region_role="all", metric="glv_mad", family="glv"),
+    _spec("mg_glv_median", "m1", "GLV", base="glv_median", region="mg",
+          region_index=1, region_role="all", metric="glv_median",
+          family="glv"),
+    _spec("mg_glv_mad", "m1", "GLV", base="glv_mad", region="mg",
+          region_index=1, region_role="all", metric="glv_mad", family="glv"),
+    _spec("cd_median", "m2", "CD", base="cd_median", metric="cd_median",
+          family="cd"),
+)
+
+
+def _region_pane(qapp, verdict=("epi_glv_median", "mg_glv_median")):
+    return _pane(qapp, verdict=verdict, diagnostics=(), specs=REGION_SPECS)
+
+
+def test_the_tree_is_card_then_region_then_statistic(qapp):
+    """`column_tree` 只算一次的那棵樹：卡 → 區域 → 統計量，摺疊區照它排
+    （同區域的欄相鄰 —— 表頭的跨欄靠這一條）。"""
+    tree = column_tree(_results(), (), REGION_SPECS, ())
+    g = next(x for x in tree["groups"] if x["label"] == "GLV")
+    assert [r["region"] for r in g["regions"]] == ["epi", "mg"]
+    assert [c["name"] for c in g["regions"][0]["columns"]] == \
+        ["epi_glv_median", "epi_glv_mad"]
+    assert [c["stat_label"] for c in g["regions"][0]["columns"]] == \
+        ["Median", "MAD"]
+    cols = tree["columns"]
+    assert cols.index("epi_glv_mad") == cols.index("epi_glv_median") + 1
+    assert cols.index("mg_glv_mad") == cols.index("mg_glv_median") + 1
+
+
+def test_header_spans_merge_contiguous_same_region_columns():
+    """跨欄段是純函式：同卡同區域的連續欄一段；固定欄（沒 spec）不成段。"""
+    tree = column_tree(_results(), (), REGION_SPECS, ())
+    spans = header_spans(tree["columns"], tree["spec_of"])
+    assert [(s["region"], s["count"], s["region_index"]) for s in spans] == \
+        [("epi", 2, 0), ("mg", 2, 1)]
+    assert [tree["columns"][s["start"]] for s in spans] == \
+        ["epi_glv_median", "mg_glv_median"]
+
+
+def test_the_header_shows_the_statistic_and_the_tooltip_the_raw_name(qapp):
+    """下層表頭是統計量短標籤，但**原始欄名永遠在懸停第一行** ——
+    它是分數表達式的變數名、CSV 的欄名，短標籤不能把它藏死。"""
+    pane = _region_pane(qapp)
+    m = pane.table._model
+    col = pane.columns().index("epi_glv_median")
+    assert m.headerData(col, Qt.Horizontal, Qt.DisplayRole) == "Median"
+    tip = str(m.headerData(col, Qt.Horizontal, Qt.ToolTipRole))
+    assert tip.splitlines()[0] == "epi_glv_median"
+    assert "epi" in tip and "GLV" in tip
+
+
+def test_a_region_chip_narrows_both_layers(qapp):
+    pane = _region_pane(qapp)
+    assert "mg_glv_median" in pane.visible_column_names()
+    pane.add_dim("region", "epi")
+    vis = pane.visible_column_names()
+    assert "mg_glv_median" not in vis, "判定層的非 epi 欄也要藏（反空洞）"
+    assert "epi_glv_median" in vis
+    assert "defect_id" in vis and CLASS_COLUMN in vis, "固定欄不受限縮"
+
+
+def test_removing_the_chip_restores(qapp):
+    pane = _region_pane(qapp)
+    before = pane.visible_column_names()
+    pane.add_dim("region", "epi")
+    assert pane.visible_column_names() != before
+    assert len(pane._chips) == 1
+    pane.remove_dim("region", "epi")
+    assert pane.visible_column_names() == before
+    assert pane._chips == [] and pane.dims() == []
+
+
+def test_a_chip_and_the_search_box_coexist(qapp):
+    """搜尋命中 > 維度限縮：指名要看的欄就算不符合 chip 也要現身。"""
+    pane = _region_pane(qapp, verdict=("epi_glv_median",))
+    pane.add_dim("region", "epi")
+    assert "mg_glv_mad" not in pane.visible_column_names()
+    pane.search.setText("mg_glv")
+    vis = pane.visible_column_names()
+    assert "mg_glv_mad" in vis and "mg_glv_median" in vis
+    pane.search.setText("")
+    assert "mg_glv_mad" not in pane.visible_column_names(), "清空要還原"
+
+
+def test_dim_menus_offer_only_existing_values(qapp):
+    pane = _region_pane(qapp)
+    region = [a.text() for a in pane.dim_buttons["region"].menu().actions()]
+    assert region == ["epi", "mg"]
+    stat = [a.text() for a in pane.dim_buttons["stat"].menu().actions()]
+    assert stat == ["Center · Median", "Spread · MAD", "Width · Median"], \
+        "metric id 去重、分群消歧（GLV 與 CD 的 Median 是兩個 id）"
+    card = [a.text() for a in pane.dim_buttons["card"].menu().actions()]
+    assert card == ["GLV", "CD"]
+    # 沒有區域值的表（平鋪那組 spec）整顆 Region 鈕收起來。
+    flat = _pane(qapp)
+    assert not flat.dim_buttons["region"].isVisibleTo(flat)
+    assert flat.dim_buttons["stat"].isVisibleTo(flat)
+
+
+def test_flat_specs_keep_a_single_row_header(qapp):
+    """沒有任何欄帶區域 → 表頭退回單層（平鋪與舊 recipe 一個像素不變）。"""
+    flat = _pane(qapp)
+    tall = _region_pane(qapp)
+    assert not flat.table.horizontalHeader()._has_region_row()
+    assert tall.table.horizontalHeader()._has_region_row()
+    assert tall.table.horizontalHeader().sizeHint().height() > \
+        flat.table.horizontalHeader().sizeHint().height()
+
+
+def test_visible_columns_dims_are_pure_too():
+    spec_of = {b.spec.name: b for b in REGION_SPECS}
+    cols = ["!warn", "defect_id", "epi_glv_median", "mg_glv_median",
+            "cd_median"]
+    verdict = ["!warn", "defect_id", "epi_glv_median", "mg_glv_median"]
+    dims = [("region", "epi")]
+    assert visible_columns(cols, verdict, False, "", spec_of, dims) == \
+        ["!warn", "defect_id", "epi_glv_median"]
+    # 同維 OR：兩顆 region chip = 兩個區域都留
+    both = [("region", "epi"), ("region", "mg")]
+    assert visible_columns(cols, verdict, False, "", spec_of, both) == verdict
+    # 跨維 AND：epi ∩ CD 卡 = 交集是空的（固定欄照留）
+    cross = [("region", "epi"), ("card", "CD")]
+    assert visible_columns(cols, verdict, False, "", spec_of, cross) == \
+        ["!warn", "defect_id"]
+    # 搜尋命中 > 維度限縮
+    assert visible_columns(cols, verdict, False, "mg", spec_of, dims) == \
+        ["!warn", "defect_id", "epi_glv_median", "mg_glv_median"]
