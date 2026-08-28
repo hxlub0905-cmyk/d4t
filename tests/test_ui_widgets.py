@@ -1145,11 +1145,21 @@ def test_the_middle_column_says_what_each_feature_is(qapp):
     Value 還到最右邊）」＋「絕對量的跟相對量的還是要分類好」。所以中間那一欄
     是「這是什麼」，而**兩種量用顏色分**。
     """
+    # 身分從**真的那張卡**宣告出來（資料同源）—— gloss 不再拆字串猜。
+    from d4t.core.pipeline import get_step
+    glv = get_step("glv_stats")
+    p = glv.validate_params({
+        "source": "test", "roi": "epi", "output_prefix": "epi",
+        "metrics": "glv_median", "reference": "another region",
+        "reference_region": "mg", "compare_metrics": "delta,overlap",
+        "stat": "glv_median"})
+    specs = {s.name: s for s in glv.resolve_feature_specs(p)}
     table = widgets_mod.FeatureTable()
     table.set_features(
         {"epi_glv_median": 128.0, "epi_cmp_delta_median": 23.4,
          "epi_cmp_overlap": 0.02, "epi_glv_pixels": 812.0},
-        about={"epi_cmp_delta_median": "mg", "epi_cmp_overlap": "mg"})
+        about={"epi_cmp_delta_median": "mg", "epi_cmp_overlap": "mg"},
+        specs=specs)
 
     assert table.about_text("epi_glv_median") == "median(gray)"
     assert table.about_text("epi_glv_pixels") == "how many pixels counted"
@@ -1169,21 +1179,33 @@ def test_the_middle_column_says_what_each_feature_is(qapp):
     table.deleteLater()
 
 
-def test_a_feature_nobody_can_decode_gets_no_gloss(qapp):
-    """別張卡寫的數字沒有這套命名規則 —— 那一格留白，不要瞎猜一句話。"""
+def test_a_feature_without_a_spec_gets_no_gloss(qapp):
+    """沒有宣告身分的名字 —— 那一格留白，**不猜**（PR-3 起連 `glv_` 開頭
+    的字串都不猜：說明只跟著 spec 走）。"""
     assert widgets_mod.feature_gloss("blob_area") == ("", "")
     assert widgets_mod.feature_gloss("score") == ("", "")
+    assert widgets_mod.feature_gloss("glv_median") == ("", ""), \
+        "名字長得像也不猜 —— 身分要卡片宣告"
 
 
 def test_absolute_comes_before_relative_inside_a_card(qapp):
-    """交錯的話，那一段要一行一行讀才知道自己在看哪一種。"""
+    """交錯的話，那一段要一行一行讀才知道自己在看哪一種。
+    「哪個是相對量」看宣告的 ``family``，不再拆名字。"""
+    from d4t.core.pipeline import get_step
+    glv = get_step("glv_stats")
+    p = glv.validate_params({
+        "source": "test", "metrics": "glv_median,glv_mad",
+        "reference": "another region", "reference_region": "mg",
+        "compare_metrics": "delta,snr", "stat": "glv_mean"})
+    specs = {s.name: s for s in glv.resolve_feature_specs(p)}
     table = widgets_mod.FeatureTable()
     table.set_features(
         {"cmp_delta_mean": 1.0, "glv_median": 2.0, "cmp_snr_mean": 3.0,
          "glv_mad": 4.0},
         sections=[{"title": "Gray level", "color": "#bf7030",
                    "names": ["cmp_delta_mean", "glv_median", "cmp_snr_mean",
-                             "glv_mad"]}])
+                             "glv_mad"]}],
+        specs=specs)
     assert table.feature_names() == ["glv_median", "glv_mad",
                                      "cmp_delta_mean", "cmp_snr_mean"]
     table.deleteLater()

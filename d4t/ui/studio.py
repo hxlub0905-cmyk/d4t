@@ -110,7 +110,7 @@ import d4t.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
 from d4t.core.pipeline import ParamError, Recipe, get_step, list_steps
 from d4t.core.pipeline.cellrois import region_names
 from d4t.core.pipeline.engine import (
-    FEATURE_OWNER_KEY, feature_prefixes, qualified_feature_name,
+    FEATURE_OWNER_KEY, feature_prefixes,
 )
 from d4t.core.pipeline.step import REGION_TYPES, REGISTRY
 from d4t.core.pipeline.recipe import is_region_edge, version_skew
@@ -4271,7 +4271,7 @@ class StudioWindow(QMainWindow):
                                         highlight=highlight,
                                         sections=self._feature_sections(result),
                                         about=self._feature_about(result),
-                                        parts=self._feature_parts())
+                                        specs=self._feature_specs())
         score = getattr(result, "score", None)
         self.verdict.set_verdict(getattr(result, "bin", None)
                                  if score is not None else None)
@@ -4855,14 +4855,15 @@ class StudioWindow(QMainWindow):
                 out[str(name)] = ref
         return out
 
-    def _feature_parts(self) -> Dict[str, Any]:
-        """特徵名 → 它是怎麼組出來的（F37 A4）。
+    def _feature_specs(self) -> Dict[str, Any]:
+        """特徵名 → 誕生處宣告的身分（`FeatureSpec`，PR-3；前身 F37 A4 的
+        `_feature_parts`）。
 
         **問每一張卡，不自己拆字串**：``test_epi_hot_glv_median`` 這一串裡哪
         一段是流、哪一段是區域、哪一段是使用者自己取的名字，三者都是任意識別
         字，UI 只能猜 —— 而猜錯會把區域畫成流，顏色跟著錯，而顏色正是這件事的
-        重點。組名字的規則住在卡片上，拆的規則就住在同一個地方
-        （`Step.feature_parts`）。
+        重點。組名字的規則住在卡片上，身分就宣告在同一個地方
+        （`Step.resolve_feature_specs`；上下標的拆解 = ``spec.parts()``）。
 
         先出現的贏（同 `feature_owners`）：撞名的時候引擎留的是先寫那一份的
         救援名，而畫面上那一格顯示的是後寫的值 —— 兩邊都指同一個人比較不會錯。
@@ -4873,11 +4874,11 @@ class StudioWindow(QMainWindow):
             if node is None or not node.enabled:
                 continue
             try:
-                got = get_step(node.step).feature_parts(node.params)
+                got = get_step(node.step).resolve_feature_specs(node.params)
             except Exception:              # noqa: BLE001 — 顯示用，壞了就不拆
                 continue
-            for name, parts in (got or {}).items():
-                out.setdefault(str(name), parts)
+            for s in got:
+                out.setdefault(str(s.name), s)
         return out
 
     def _feature_sections(self, result: Any) -> List[Dict[str, Any]]:
@@ -4929,11 +4930,12 @@ class StudioWindow(QMainWindow):
                 colour = theme.group_hex(step_cls.resolve_group())
                 diag = set(step_cls.diagnostic_features(node.params))
                 # **救回來的那一份也是診斷數字**：兩張 Enhance 卡都寫
-                # `clip_frac`，engine 把先寫的留成 `<那條流>_clip_frac`
-                # （`qualified_feature_name` + `feature_prefixes`）。不算進來的話，那個值會以
-                # 「量測值」的身分排在最上面，而它量的是這張卡自己。
+                # `clip_frac`，engine 把先寫的留成 `<那條流>_clip_frac`。
+                # 救援名用 `FeatureSpec.qualified`（跟引擎、binder 同一支）。
                 pfx = prefixes.get(nid, nid)
-                diag |= {qualified_feature_name(pfx, f) for f in list(diag)}
+                diag |= {s.qualified(pfx).name
+                         for s in step_cls.resolve_feature_specs(node.params)
+                         if s.name in diag}
             except Exception:              # noqa: BLE001 — 顯示用，壞了就當一般的
                 label, colour, diag = node.step, "", set()
             measured = [f for f in mine if f not in diag]

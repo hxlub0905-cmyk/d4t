@@ -6091,14 +6091,18 @@ FEATURE_ABSOLUTE = "absolute"
 FEATURE_RELATIVE = "relative"
 
 
-def feature_gloss(name: str, about: Optional[Dict[str, str]] = None
-                  ) -> Tuple[str, str]:
+def feature_gloss(name: str, about: Optional[Dict[str, str]] = None,
+                  spec: Optional[Any] = None) -> Tuple[str, str]:
     """一個特徵名 →（絕對量／相對量／空的, 一句話說它是什麼）。
 
     F18 補課第三輪（使用者 2026-08-21）：「我認為 feature 中絕對量的跟相對量
     的還是要分類好（不然不清楚命名規則會很痛苦），或者 Feature 的功能 UI
-    顯示需要再優化」。**兩件都做**：名字本身有規則（`glv_` / `cmp_`），
-    而這一支把那個規則**翻成畫面上讀得懂的一句話** —— 使用者不必先背規則。
+    顯示需要再優化」。
+
+    PR-3 起吃 ``spec``（`FeatureSpec` —— 名字誕生處宣告的身分）：相對／絕對
+    看 ``family``、統計量是 ``metric``、cmp 比的是哪個統計量在 ``stat``。
+    **沒有 spec 就留白，不猜** —— 以前這裡拆 ``cmp_``/``glv_`` 字串用最長
+    比對把 metric 猜回來，而那正是「拆特徵字串猜語意」禁令要清掉的一處。
 
     說明的內容不是在這裡發明的：絕對量走 `algo.glv.metric_formula`（公式的
     家），相對量走 :data:`METRIC_GROUPS` 的短標籤（膠囊的家）。抄第二份出來
@@ -6107,48 +6111,30 @@ def feature_gloss(name: str, about: Optional[Dict[str, str]] = None
     ``about`` 是「跟誰比」——名字裡沒有那件事（``epi_cmp_delta_median`` 不講
     mg），所以由呼叫端從引擎的 ``meta["compares"]`` 帶進來。
     """
+    if spec is None:
+        return "", ""
     text = str(name or "")
     ref = str((about or {}).get(text, "") or "")
-    body, kind = "", ""
-    if text.startswith(CMP_TAG) or ("_" + CMP_TAG) in text:
-        kind = FEATURE_RELATIVE
-        rest = text.split(CMP_TAG, 1)[1]
-        metric, stat = _split_cmp(rest)
-        label = metric_face(metric)[1] if metric else rest
-        body = label if not stat else "%s of %s" % (label, stat)
-        body += " vs %s" % (ref or "the reference")
-    elif text.startswith(GLV_TAG) or ("_" + GLV_TAG) in text:
-        kind = FEATURE_ABSOLUTE
-        mid = GLV_TAG + text.split(GLV_TAG, 1)[1]
+    family = str(getattr(spec, "family", "") or "")
+    if family == "cmp":
+        label = metric_face(spec.metric)[1] if spec.metric \
+            else (spec.base or text)
+        body = label if not spec.stat else "%s of %s" % (label, spec.stat)
+        return FEATURE_RELATIVE, body + " vs %s" % (ref or "the reference")
+    if family == "glv":
+        mid = str(spec.metric or spec.base or "")
         body = _ABS_GLOSS.get(mid) or algo_glv.metric_formula(mid)
         if body == "—":
             body = metric_face(mid)[1]
-    return kind, body
+        return FEATURE_ABSOLUTE, body
+    return "", ""
 
-
-#: 名字裡的那兩個家族標記（引擎那邊的 `glv_stats.CMP_PREFIX`）。
-GLV_TAG = "glv_"
-CMP_TAG = "cmp_"
 
 #: 這幾個不是統計量，`metric_formula` 答不出來 —— 而它們每一顆都在。
 _ABS_GLOSS = {
     "glv_pixels": "how many pixels counted",
     "glv_ok": "1 when there were enough pixels",
 }
-
-
-def _split_cmp(rest: str) -> Tuple[str, str]:
-    """``delta_median`` → ``("delta", "median")``；``overlap`` → ``("overlap", "")``。
-
-    **比對真的存在的 metric id，不是切最後一個底線**：``spread_ratio`` 本身
-    就帶一個底線，切法會把它變成「spread 這個 metric 的 ratio 統計量」。
-    """
-    for metric in sorted(algo_glv.COMPARE_METRICS, key=len, reverse=True):
-        if rest == metric:
-            return metric, ""
-        if rest.startswith(metric + "_"):
-            return metric, rest[len(metric) + 1:]
-    return rest, ""
 
 
 #: 一個特徵名拆好之後，畫在畫面上要用哪些角色（F37 A4，2026-08-26）。
@@ -6288,7 +6274,7 @@ class FeatureTable(QTableWidget):
         # 值那一欄要保持等寬對齊，說明那一欄本來就是一句話。
         self._name_delegate = _FeatureNameDelegate(self)
         self.setItemDelegateForColumn(0, self._name_delegate)
-        self._parts: Dict[str, Any] = {}
+        self._specs: Dict[str, Any] = {}
 
     #: 一個分組（F13-1 的 ①）：``title`` 是**哪張卡產出的**、``color`` 是那張卡
     #: 的階段色、``names`` 是這一組裡的特徵、``collapsed`` 決定一開始收不收。
@@ -6299,7 +6285,7 @@ class FeatureTable(QTableWidget):
                      highlight: Iterable[str] = (),
                      sections: Optional[Sequence[Dict[str, Any]]] = None,
                      about: Optional[Dict[str, str]] = None,
-                     parts: Optional[Dict[str, Any]] = None) -> None:
+                     specs: Optional[Dict[str, Any]] = None) -> None:
         """填表。``highlight`` 內的特徵名會用 accent 底色標出（例：分數用到的）。
 
         ``sections`` 是**分組**（F13-1 ①，2026-08-19 使用者：「feature 的顯示
@@ -6317,9 +6303,9 @@ class FeatureTable(QTableWidget):
         features = dict(features or {})
         hi = set(highlight or ())
         self._about = dict(about or {})
-        # 名字怎麼拆是**卡片答的**（`Step.feature_parts`）—— 沒給就照原樣顯示
-        # 整串。少一點資訊，不會是錯的資訊。
-        self._parts = dict(parts or {})
+        # 名字的身分是**卡片宣告的**（`resolve_feature_specs`，PR-3）——
+        # 沒給就照原樣顯示整串、說明留白。少一點資訊，不會是錯的資訊。
+        self._specs = dict(specs or {})
         rows: List[Tuple[str, Any]] = []          # ("head"/"row", 內容)
         if sections:
             seen = set()
@@ -6328,8 +6314,9 @@ class FeatureTable(QTableWidget):
                          if n in features and n != self._SCORE and n not in seen]
                 # 同一張卡底下**絕對量在前、相對量在後**（其餘保持原順序）。
                 # 兩者交錯的話，那一段要一行一行讀才知道自己在看哪一種。
-                names.sort(key=lambda n: 1 if feature_gloss(n)[0]
-                           == FEATURE_RELATIVE else 0)
+                # 「哪個是相對量」看宣告的 ``family``，不再拆名字。
+                names.sort(key=lambda n: 1 if getattr(
+                    self._specs.get(n), "family", "") == "cmp" else 0)
                 if not names:
                     continue
                 seen.update(names)
@@ -6389,13 +6376,16 @@ class FeatureTable(QTableWidget):
     def _fill_row(self, row: int, name: str, value: Any,
                   highlighted: bool, is_score: bool) -> None:
         key_item = QTableWidgetItem(str(name))
+        spec = (getattr(self, "_specs", None) or {}).get(str(name))
         # **純文字仍然是 DisplayRole** —— 複製、搜尋、測試讀到的都還是那一串
-        # 打得進分數表達式的字。HTML 只是它的長相。
-        html = feature_html(str(name),
-                            (getattr(self, "_parts", None) or {}).get(str(name)))
+        # 打得進分數表達式的字。HTML 只是它的長相（拆解 = ``spec.parts()``，
+        # 跟 `Step.feature_parts` 同一個形狀、同一個產地）。
+        html = feature_html(str(name), spec.parts() if spec is not None
+                            else None)
         if html != _escape(str(name)):
             key_item.setData(_FeatureNameDelegate.HTML_ROLE, html)
-        kind, gloss = feature_gloss(str(name), getattr(self, "_about", None))
+        kind, gloss = feature_gloss(str(name), getattr(self, "_about", None),
+                                    spec)
         about_item = QTableWidgetItem(gloss)
         # **絕對量與相對量用顏色分**（使用者要的第二種分類）：相對量走強調色，
         # 絕對量走次要色。文字本身也講得出來（`… vs mg`），所以不是只靠顏色。

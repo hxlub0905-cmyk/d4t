@@ -863,19 +863,41 @@ class RecipeModel:
         """
         feats: List[str] = []
         known = self.nm_per_px_is_known()
+        for _nid, _cls, s in self._declared_specs(upto_node):
+            # PR-3 起 nm 的孿生看**宣告的身分**（``variant``），不再拆字尾
+            # —— 使用者自己取的 ``output_prefix`` 以 ``_nm`` 結尾時，
+            # 字尾判斷會把真的量砍掉。
+            if not known and s.variant in ("nm", "nm2"):
+                continue
+            if s.name not in feats:
+                feats.append(s.name)
+        return feats
+
+    def _declared_specs(self, upto_node: Optional[str] = None,
+                        include_upto: bool = True):
+        """route 上啟用卡片宣告的 spec（`resolve_feature_specs`），執行序逐個。
+
+        三份清單（`available_features` / `labelled_features` /
+        `feature_owners`）共用**這一個**迴圈 —— 「哪些名字、歸誰」的答案
+        只能有一份，以前是三段手抄。
+        """
         for nid in self.node_order:
             node = self.nodes[nid]
             if not node.enabled:
                 continue
+            if nid == upto_node and not include_upto:
+                # **這張卡自己的輸出不能列進來**（F21-B，實跑截圖抓到）：
+                # `Feature math` 的清單裡出現 `defect_score`，而那正是它自己
+                # 要寫出去的名字 —— 點下去就是 `defect_score = defect_score`。
+                # 引擎擋得住（`unknown-feature-input`），但**讓使用者點一個
+                # 保證壞掉的選項，本身就是 bug**（推廣鐵則）。
+                return
             step_cls = get_step(node.step)
-            for f in step_cls.resolve_features(node.params):
-                if not known and (f.endswith("_nm") or f.endswith("_nm2")):
-                    continue
-                if f not in feats:
-                    feats.append(f)
+            for s in step_cls.resolve_feature_specs(node.params):
+                yield nid, step_cls, s
             if nid == upto_node:
-                break
-        return feats
+                return
+
 
     #: 「數字 → 誰算的」清單裡，名字與來源之間的分隔（F21-B）。
     #: 一個字串裝兩件事是刻意的：``ParamForm`` 的執行期選單是
@@ -899,27 +921,14 @@ class RecipeModel:
         """
         out: List[str] = []
         known = self.nm_per_px_is_known()
-        for nid in self.node_order:
-            node = self.nodes[nid]
-            if not node.enabled:
+        for nid, step_cls, s in self._declared_specs(upto_node, include_upto):
+            if not known and s.variant in ("nm", "nm2"):
                 continue
-            if nid == upto_node and not include_upto:
-                # **這張卡自己的輸出不能列進來**（F21-B，實跑截圖抓到）：
-                # `Feature math` 的清單裡出現 `defect_score`，而那正是它自己
-                # 要寫出去的名字 —— 點下去就是 `defect_score = defect_score`。
-                # 引擎擋得住（`unknown-feature-input`），但**讓使用者點一個
-                # 保證壞掉的選項，本身就是 bug**（推廣鐵則）。
-                break
-            step_cls = get_step(node.step)
-            label = str(getattr(step_cls, "label", "") or node.step)
-            for f in step_cls.resolve_features(node.params):
-                if not known and (f.endswith("_nm") or f.endswith("_nm2")):
-                    continue
-                if not any(x.split(self.FEATURE_LABEL_SEP, 1)[0] == f
-                           for x in out):
-                    out.append(f + self.FEATURE_LABEL_SEP + label)
-            if nid == upto_node:
-                break
+            label = str(getattr(step_cls, "label", "") or
+                        self.nodes[nid].step)
+            if not any(x.split(self.FEATURE_LABEL_SEP, 1)[0] == s.name
+                       for x in out):
+                out.append(s.name + self.FEATURE_LABEL_SEP + label)
         return out
 
     def feature_owners(self) -> Dict[str, str]:
@@ -931,13 +940,8 @@ class RecipeModel:
         值是**空字串**（畫布上那張卡沒有 node id）。
         """
         out: Dict[str, str] = {}
-        for nid in self.node_order:
-            node = self.nodes[nid]
-            if not node.enabled:
-                continue
-            step_cls = get_step(node.step)
-            for f in step_cls.resolve_features(node.params):
-                out.setdefault(str(f), nid)
+        for nid, _cls, s in self._declared_specs():
+            out.setdefault(str(s.name), nid)
         if self.decide is not None:
             for x in self.decide.let:
                 name = str(x.name).strip()

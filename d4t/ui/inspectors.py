@@ -1793,13 +1793,14 @@ class GlvInspector(Inspector):
         面板不自己再算一次，不然畫面上的數字跟寫出去的有機會不一樣。
         """
         values = ref.get("values") or {}
+        # 哪個名字是哪個 metric，**卡片寫 note 的時候一起講了**
+        # （`glv_stats.cmp_feature_specs` → ``ref["metrics"]``，PR-3）。
+        # 舊 meta 沒有那張表就整行跳過 —— 不回頭猜字串。
+        metrics = ref.get("metrics") or {}
         rows: List[Tuple[int, str, float]] = []
         for name, value in values.items():
-            rest = str(name).split("cmp_", 1)[-1]
-            metric = next((m for m in sorted(cls.CMP_SHORT, key=len,
-                                             reverse=True)
-                           if rest == m or rest.startswith(m + "_")), "")
-            if not metric:
+            metric = str((metrics.get(str(name)) or {}).get("metric") or "")
+            if metric not in cls.CMP_SHORT:
                 continue
             try:
                 rows.append((cls.CMP_ORDER.index(metric)
@@ -2571,9 +2572,13 @@ class CdInspector(Inspector):
     def _paint_batch(self, p: QPainter, rect: QRectF, note: Dict[str, Any],
                      name: str = "cd_median",
                      caption: str = "Across the batch") -> None:
-        """整批的分布 ＋ 這一顆在哪 —— 跑過才有東西（同 `MeasureInspector`）。"""
-        if note.get("prefix"):
-            name = "%s_%s" % (note["prefix"], name)
+        """整批的分布 ＋ 這一顆在哪 —— 跑過才有東西（同 `MeasureInspector`）。
+
+        ``name`` 是裸的 base；完整特徵名查卡片寫在 note 裡的
+        ``feature_names``（`cd.py` 在**組名字的同一個迴圈**記的，PR-3）——
+        面板不再自己把 prefix 拼回去。舊 meta 沒有那張表就退回裸 base。
+        """
+        name = str((note.get("feature_names") or {}).get(name) or name)
         values = self.feature_values(name)
         # 右邊留一點：分布是雙峰的時候最右邊那一根會貼著外框，讀起來像被切掉。
         body = self._caption(p, QRectF(rect.left(), rect.top(),
