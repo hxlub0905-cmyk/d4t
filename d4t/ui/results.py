@@ -54,6 +54,7 @@ from PySide6.QtWidgets import (
 from .gallery import GalleryPanel
 from .results_table import ResultsTablePane
 from .verdict_band import VerdictBand, verdict_rows
+from .why_panel import WhyPanel
 from .widgets import HistogramWidget, apply_button_cursors
 
 __all__ = ["ResultsWindow"]
@@ -75,6 +76,11 @@ class ResultsWindow(QMainWindow):
     class_selected = Signal(str)
     #: 表格上雙擊一列 = 去看那一顆（跟 Gallery 的 `defect_activated` 同一個約定）。
     defect_activated = Signal(str)
+    #: 表格上點了 score / bin / class 欄 = 「這一顆為什麼判成這樣」（PR-3）。
+    #: Studio 接了算 trace 再回頭餵 :meth:`show_why` —— 本視窗不碰 recipe。
+    trace_requested = Signal(str)
+    #: 回溯面板點了一項：``(defect_id, 特徵名)``。跳去哪由 Studio 決定。
+    why_item_activated = Signal(str, str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -125,9 +131,17 @@ class ResultsWindow(QMainWindow):
         self.table = ResultsTablePane(self)
         self.table.defect_activated.connect(self.defect_activated)
         self.gallery.defect_activated.connect(self.defect_activated)
+        self.table.trace_requested.connect(self.trace_requested)
         self.view_stack = QStackedWidget(self)
         self.view_stack.addWidget(self.gallery)
         self.view_stack.addWidget(self.table)
+        # 回溯面板（PR-3）：住在縮圖/表格旁邊的水平 splitter，預設藏著 ——
+        # 點了 score/bin/class 才出現，Esc 收回去。不搶焦點、不擋列選取。
+        self.why = WhyPanel(self)
+        self.why.hide()
+        self.why.item_activated.connect(
+            lambda name: self.why_item_activated.emit(self.why.defect_id(),
+                                                      str(name)))
         self.histogram = HistogramWidget(self)
         self.histogram.setMinimumHeight(150)
         spread = self._build_spread()
@@ -194,7 +208,14 @@ class ResultsWindow(QMainWindow):
                                   "why the failed ones failed")
         rl.addStretch(1)
         lay.addWidget(row)
-        lay.addWidget(self.view_stack, 1)
+        why_split = QSplitter(Qt.Horizontal, host)
+        why_split.addWidget(self.view_stack)
+        why_split.addWidget(self.why)
+        why_split.setStretchFactor(0, 3)
+        why_split.setStretchFactor(1, 1)
+        why_split.setCollapsible(0, False)
+        self.why_splitter = why_split
+        lay.addWidget(why_split, 1)
         return host
 
     def show_view(self, index: int) -> None:
@@ -317,6 +338,14 @@ class ResultsWindow(QMainWindow):
 
     def selected_class(self) -> str:
         return self.verdict.selected()
+
+    def show_why(self, defect_id: str, trace: Any) -> None:
+        """開回溯面板（trace 由 Studio 用 `verdict_trace` 算好交進來）。"""
+        self.why.set_trace(str(defect_id), trace)
+        self.why.present()
+
+    def hide_why(self) -> None:
+        self.why.hide()
 
     def set_table(self, results: Any, class_names: Any = None,
                   layout: Any = None, alarms: Any = None) -> None:

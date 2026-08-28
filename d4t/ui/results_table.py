@@ -593,6 +593,9 @@ class ResultsTable(QTableView):
 
     #: 使用者要去看某一顆（跟 `GalleryPanel.defect_activated` 同一個約定）。
     defect_activated = Signal(str)
+    #: 使用者點了判定欄（score / bin / class）＝「這一顆**為什麼**判成這樣」
+    #: —— 回溯面板（PR-3）。值是 defect_id；面板開不開由宿主決定。
+    trace_requested = Signal(str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -662,11 +665,19 @@ class ResultsTable(QTableView):
             self.defect_activated.emit(did)
 
     def _on_click(self, index) -> None:
-        """點徽章＝把明細攤開來看（跟懸停同一份字 —— 資料只有一份）。"""
+        """點徽章＝把明細攤開來看（跟懸停同一份字 —— 資料只有一份）。
+        點判定欄（score / bin / class）＝問「為什麼」（PR-3 的回溯面板）。
+        ``clicked`` 在 selection 更新**之後**發，所以兩者都不擋列選取。"""
         cols = self._model.columns()
         if not (0 <= index.column() < len(cols)):
             return
-        if cols[index.column()] != BADGE_COLUMN:
+        name = cols[index.column()]
+        if name in ("score", "bin", CLASS_COLUMN):
+            did = self._model.defect_id_at(index.row())
+            if did:
+                self.trace_requested.emit(did)
+            return
+        if name != BADGE_COLUMN:
             return
         tip = self._model.data(index, Qt.ToolTipRole)
         if tip:
@@ -729,6 +740,7 @@ class ResultsTablePane(QWidget):
         self.table = ResultsTable(self)
         #: 轉出去給宿主接的訊號（跟以前 `ResultsTable` 的約定一字不變）。
         self.defect_activated = self.table.defect_activated
+        self.trace_requested = self.table.trace_requested
 
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 0, 0, 0)

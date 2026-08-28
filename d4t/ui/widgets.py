@@ -1292,6 +1292,9 @@ class ImageView(QWidget):
         self._overlay_labels: List[str] = []
         #: 區域名 -> 顏色索引，依**第一次出現**的順序。畫圖例時也走這一份。
         self._overlay_order: List[str] = []
+        #: 回溯面板點了哪個區域（PR-3）：命中的框全強度、其餘降 alpha。
+        #: **不 overload focus** —— 顏色=哪塊、粗細=缺陷格、alpha=你問的那塊。
+        self._overlay_emphasis: List[str] = []
         #: 量測標記（F19）：線段、每條線上的點、要畫粗的那一條。見 :meth:`set_marks`。
         self._marks: List[Any] = []
         #: 這一組標記要不要畫滿（`Step.marks_solid`）。
@@ -1444,7 +1447,20 @@ class ImageView(QWidget):
             if n and n not in order:
                 order.append(n)
         self._overlay_order = order
+        # 換一組框＝上一個「你問的那塊」不再成立（框可能已經是別張卡的）。
+        self._overlay_emphasis = []
         self.update()
+
+    def set_overlay_emphasis(self, names: Optional[Sequence[str]]) -> None:
+        """把某幾個區域**點亮**（其餘的框降 alpha）—— 回溯面板「點一項亮那
+        一塊」用（PR-3）。`set_overlay` 會清掉它：換一組框之後舊的強調指的
+        可能已經是別張卡的區域。"""
+        self._overlay_emphasis = [str(n) for n in (names or []) if str(n)]
+        self.update()
+
+    def overlay_emphasis(self) -> List[str]:
+        """現在點亮的區域名（測試讀這個，不去讀畫素）。"""
+        return list(self._overlay_emphasis)
 
     def set_marks(self, lines: Optional[Sequence[Any]] = None,
                   points: Optional[Sequence[Any]] = None,
@@ -1607,6 +1623,9 @@ class ImageView(QWidget):
         for i, (nx, ny, nw, nh) in enumerate(self._overlay):
             name = self._overlay_labels[i] if i < len(self._overlay_labels) else ""
             col = QColor(region_hex(index_of[name])) if name in index_of else plain
+            if self._overlay_emphasis and name not in self._overlay_emphasis:
+                # 沒被問到的框退到背景 —— 淡，但還在（它們是脈絡，不是雜訊）。
+                col.setAlphaF(0.28)
             r = QRectF(self._offset.x() + nx * iw * s,
                        self._offset.y() + ny * ih * s,
                        max(1.0, nw * iw * s), max(1.0, nh * ih * s))

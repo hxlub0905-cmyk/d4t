@@ -115,6 +115,7 @@ from d4t.core.pipeline.engine import (
 from d4t.core.pipeline.step import REGION_TYPES, REGISTRY
 from d4t.core.pipeline.recipe import is_region_edge, version_skew
 from d4t.core.pipeline import verdict_features
+from d4t.core.pipeline.verdict_trace import verdict_trace
 
 from .canvas import SUMMARY_SEP, PipelineCanvas
 from .inspectors import inspector_for
@@ -1424,6 +1425,10 @@ class StudioWindow(QMainWindow):
         # 表格上雙擊一列跟縮圖上雙擊一張是同一件事（R7）—— 同一支處理常式。
         self.results.table.defect_activated.connect(self._on_defect_activated)
         self.gallery.selection_changed.connect(self._on_gallery_selection)
+        # 回溯（PR-3）：點 score/bin/class → 算 trace 開面板；點面板上一項 →
+        # 跳到產出它的卡（有區域就把那一塊亮起來）。
+        self.results.trace_requested.connect(self._on_trace_requested)
+        self.results.why_item_activated.connect(self._on_why_item)
 
     def _wire_workers(self) -> None:
         self.dataset_worker.loaded.connect(self._on_dataset_loaded)
@@ -4308,28 +4313,36 @@ class StudioWindow(QMainWindow):
     def _show_decide_path(self, result: Any) -> None:
         """Preview 的 Path（F24 §8）：這一顆走過的路，一句話＋樹上亮起來。
 
-        資料是引擎記的 ``ctx.meta["decide"]["path"]``（一串 yes/no）——
-        判定樹模式才有；`rules` 模式講「第幾條規則對上」；沒有判定（或這一顆
-        沒跑到判定）就清空，**不寫 N/A**。
+        PR-3 起建在 `verdict_trace` 上 —— **跟引擎走同一支**
+        （`decide_tree.walk_steps`），所以重放出的路跟引擎記在
+        ``meta["decide"]["path"]`` 的必然相同，這裡不再讀 meta。
+        判定樹模式亮路徑；`rules` 模式講「第幾條規則對上」；沒有判定
+        （或這一顆沒跑到判定 —— ``bin`` 還是空的）就清空，**不寫 N/A**。
         """
         from .tree_scene import display_tree, path_text
 
-        ctx = getattr(result, "context", None)
-        meta = (getattr(ctx, "meta", None) or {}).get("decide") \
-            if ctx is not None else None
+        decide = getattr(self.model, "decide", None)
         text, hl = "", None
-        if isinstance(meta, dict):
-            steps = [str(s) for s in (meta.get("path") or [])]
-            if steps:
-                hl = "".join("y" if s == "yes" else "n" for s in steps)
-                tree = display_tree(getattr(self.model, "decide", None))
+        feats = dict(getattr(result, "features", {}) or {})
+        ran = (decide is not None and getattr(result, "ok", False)
+               and getattr(result, "bin", None) is not None)
+        if ran:
+            try:
+                trace = verdict_trace(self.model.to_recipe(),
+                                      self.model.kind, feats)
+            except Exception:              # noqa: BLE001 — 顯示層
+                trace = None
+            if trace is not None and trace.mode == "tree" and trace.path:
+                hl = trace.path
+                tree = display_tree(decide)
                 text = path_text(tree, hl) if tree is not None else ""
                 if text:
                     text = "Path:  " + text
-            elif meta.get("rule", -1) is not None and int(meta.get("rule", -1)) >= 0:
-                text = "Path:  rule %d matched" % (int(meta["rule"]) + 1)
-                if meta.get("label"):
-                    text += " (%s)" % meta["label"]
+            elif trace is not None and trace.mode == "rules" \
+                    and trace.rule_index >= 0:
+                text = "Path:  rule %d matched" % (trace.rule_index + 1)
+                if trace.leaf_label:
+                    text += " (%s)" % trace.leaf_label
         self.decide_path.setText(text)
         for view in self._canvases():
             view.set_tree_highlight(hl)
@@ -5749,6 +5762,86 @@ class StudioWindow(QMainWindow):
 
     def _on_gallery_selection(self, ids: Any) -> None:
         self._status("%d selected" % len(list(ids or [])))
+
+    # ---- 回溯面板（PR-3）：這一顆為什麼判成這樣 ---------------------------
+    def _on_trace_requested(self, defect_id: str) -> None:
+        """結果表點了 score / bin / class → 重放那一顆的判定並開面板。
+
+        trace 吃**那一列的 features**（引擎判定後的快照，let 值都在）——
+        不重跑影像、不重算任何值（`verdict_trace` 的立身規矩）。
+        """
+        did = str(defect_id)
+        row = next((r for r in (self.trial_results or [])
+                    if str(r.get("defect_id", "")) == did), None)
+        if row is None:
+            return
+        if not row.get("ok"):
+            self._status("Defect “%s” failed before the decision — the error "
+                         "column says why." % did, "error")
+            return
+        feats = dict(row.get("features") or {})
+        # score-only 的 recipe：bin 只在列上（引擎不寫進 features）——
+        # 補給 trace 顯示；decide 模式的 leaf_bin 是重放樹算的，不看這一格。
+        if row.get("bin") is not None:
+            feats.setdefault("bin", float(row["bin"]))
+        try:
+            trace = verdict_trace(self.model.to_recipe(), self.model.kind,
+                                  feats)
+        except Exception as e:              # noqa: BLE001 — 顯示層
+            self._status("Could not replay the decision: %s" % e, "error")
+            return
+        if trace.mode == "none":
+            self._status("This recipe has no score and no decision — "
+                         "there is nothing to replay.")
+            return
+        self.results.show_why(did, trace)
+
+    def _on_why_item(self, defect_id: str, name: str) -> None:
+        """面板上點了一項 → 跳到產出那個數字的卡。
+
+        身分查 `bound_specs`（跟結果表的分組同一份）：有區域的項把那一塊
+        **亮**在影像上（`highlight_region`），引擎的項（let / score）對映
+        Score / Bin 偽卡＝打開判定區。
+        """
+        try:
+            bound = {b.spec.name: b for b in verdict_features.bound_specs(
+                self.model.to_recipe(), self.model.kind)}
+        except Exception:                   # noqa: BLE001 — 顯示層
+            return
+        b = bound.get(str(name))
+        if b is None:
+            return
+        if not b.node_id:
+            # 引擎的名字（let、score、decide_unanswered）：去編判定區 ——
+            # 跟畫布上點 ADC 那一格走同一條。
+            self._on_tree_step_clicked("")
+            return
+        if b.spec.region:
+            self.highlight_region(defect_id, b.node_id, b.spec.region)
+        else:
+            self.select_node(b.node_id)
+
+    def highlight_region(self, defect_id: str, node_id: str,
+                         region: str) -> bool:
+        """跳到那一顆、選產出的卡，並把**那一塊區域**亮在影像上。
+
+        亮法住在 `ImageView.set_overlay_emphasis`：命中的框全強度、其餘降
+        alpha —— 顏色仍然說「哪一塊」、粗細仍然說「缺陷格」，**不 overload
+        focus**。`set_overlay` 會清掉強調，所以先刷新預覽再點亮。
+        """
+        did = str(defect_id)
+        items = list(getattr(self.dataset, "items", []) or []) \
+            if self.dataset else []
+        index = next((i for i, it in enumerate(items)
+                      if str(getattr(it, "defect_id", "")) == did), None)
+        if index is not None:
+            self.set_defect_index(index)
+        if not self.select_node(str(node_id)):
+            return False
+        self.refresh_preview(sync=True)
+        for view in (self.image_view, self.image_view_b):
+            view.set_overlay_emphasis([str(region)])
+        return True
 
     # ---- 直方圖點長條 → Gallery 篩選 --------------------------------------
     def _on_bar_clicked(self, lo: float, hi: float) -> None:
