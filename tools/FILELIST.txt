@@ -6,7 +6,7 @@
 988aa4655c507ed44e9065ea6238e7f55502ca3c CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 5b750fd2b09c4ced476be65c84f41d45231f9070 README.md
-7e6711fddffab2c55360db5f70bd00838e01d96c SESSION_LOG.md
+5fd28cf288fa568f2dbedfdbb1072efcac5a086b SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 61c8e7e8e41df159ff1b6230e093fa58a68b661c d4t/__main__.py
@@ -87,7 +87,7 @@ bcea66e1a82ee590f997bbf319fea696277be9f6 d4t/ui/app.py
 f8cbf586f20a72eb7dbeae1b04aaf0d47f3cbe6a d4t/ui/assets/d4t-wordmark.svg
 a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
 87bce11608d08f4302947e917b2b24d076571775 d4t/ui/branding.py
-075353c1d7e2307ae39d444da7c9d22a3b66525f d4t/ui/canvas.py
+75b92fbce9c8e9ac74f8efebda5b9a5a6eaeeac6 d4t/ui/canvas.py
 3b58b7e078d58ad84a8939734b65952a75a029f3 d4t/ui/cell_canvas.py
 ba56fb546fe526adff22b670501f0eecf322cfde d4t/ui/decide_panel.py
 9c9230407197225a3143a3cd8e08854ca8ae452c d4t/ui/gallery.py
@@ -119,7 +119,7 @@ cb5ec1e3cc74cbfc6f03fe2edb526c0993465c6e docs/GLAS-INTERFACE.md
 6181b7d19b2ddba28cf4bf0dd1d4163f9face1f6 docs/LICENSING.md
 15c2bb25a9b655500c0706d899826872abbc425f docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
-12646d499c8d7270c66c4d882704037101e6a78c docs/PITFALLS.md
+e6a7b75c968c5b5b990fb80da54e8f0862bb1918 docs/PITFALLS.md
 8ef827cf11c924e4a1f7dd7ec63d9531c3cf3c43 docs/ROADMAP.md
 27022c8f2b8f70a300fd35629304b5427d3a7de7 docs/USING-CD.md
 58181d5bf43c935303eed95df90778e3c2ced841 docs/USING-CHARACTERIZATION.md
@@ -319,6 +319,7 @@ f480eedce6d10f8e192050bdbe65d03676911df0 tests/test_ui_ground_truth.py
 46b4c2bc498be5f3641b2d66d44117424d375bed tests/test_ui_info_level.py
 f6a8f5fde90667317b98ab75b71f1ed5f10d68ef tests/test_ui_input_kinds.py
 c666715f54f97238cafbf8bac3321053336c26f6 tests/test_ui_inspectors.py
+e080d7615bf2f2b8df2c17b6bd0d9b4e4c1b9107 tests/test_ui_layout_follows_the_wires.py
 26e65c59a96f1b4eb97e59b6647752e5c9f388fc tests/test_ui_lot_strip.py
 519da91e01b237bd776fe7e45828064348bf403a tests/test_ui_panel_truth.py
 e7c3c7bd209f7d886af59ef7a53a1bf767f58f7f tests/test_ui_panels_pr2.py

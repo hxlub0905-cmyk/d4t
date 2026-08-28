@@ -1430,8 +1430,23 @@ class PipelineCanvas(QGraphicsView):
         # 所以照排列由左往右擺，畫面上的先後跟真正跑的先後仍然一致。
         # 2026-08-14 起不畫成金色虛線（使用者：「會混淆」）—— 畫布上只畫使用者
         # 拉的線，排列本身就是那句話。
+        #
+        # ⚠ **「沒有線的卡片」那五個字要當真**（F56，2026-08-28）。這一行以前
+        # 只問「這一對在不在 `_pairs` 裡」，而該問的是「**下游那張卡**有沒有
+        # 真正的入線」—— 有線的話，它排在哪裡該由那條線決定，route 的排列在
+        # 它身上沒有發言權。
+        #
+        # 代價是實際發生過的：一份 route 排成
+        # `… → glv_stats → focus_quality → output_report`、而 `focus_quality`
+        # 真正的來源是前面的 `denoise` 的 recipe，多出來的那條
+        # `glv_stats → focus_quality` 把它推到深度 4；WRAP 是 4，於是它換行
+        # 落回**第 0 欄** —— 也就是它來源的**左邊**。畫面上那條線因此由右往左
+        # 畫，而在一張由左往右讀的畫布上，那讀起來是「它先跑」。
+        # `docs/PITFALLS.md` 上「Region 卡排在量測卡右邊」那一條記的是同一種
+        # 誤讀造成的真 bug。
+        wired = {b for _a, b in self._pairs}
         self._implicit = [pair for pair in zip(self._order, self._order[1:])
-                          if pair not in set(self._pairs)]
+                          if pair not in set(self._pairs) and pair[1] not in wired]
 
         self._laid_wrap = self.wrap()
         pos = layout_columns(self._order, self._pairs + self._implicit,
