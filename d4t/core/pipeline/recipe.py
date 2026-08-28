@@ -526,6 +526,31 @@ def is_region_edge(edge: "Edge", nodes: Dict[str, "RecipeNode"],
     return False
 
 
+#: 哪幾種 lint 講的是**判定段**（F50，2026-08-28）。
+#:
+#: 為什麼需要這張表：`Issue.node_id` 是「哪一張卡」，而判定不是一張卡 ——
+#: 它是 recipe 的頂層鍵，所以它的 issue 一律 ``node_id=None``。而 UI 的
+#: `studio._node_problems()` 第一件事就是把沒有節點的 issue 丟掉
+#: （`if not nid: continue`）—— 於是**判定的警告畫不出徽章**，只在跑完之後
+#: 的狀態列尾巴出現一次，而跑一次是好幾分鐘。
+#:
+#: ⚠ **不能用「``node_id`` 是 None」當判準。** 那一組裡還有三條講分流
+#: （`bad-route-by` / `route-not-reachable` / `unknown-route`）與一條講整張
+#: 圖（`cycle`）—— 把它們掛到判定的入口卡上，那張卡就會替別人的問題背鍋。
+#: 所以列出來，而 `tests/test_decision_issue_codes.py` 反過來守：**每一條
+#: 沒有節點的 lint 都要被分類到**，新加一條而忘了分類會紅（不然它會安靜地
+#: 掉回地上，也就是這一輪在修的那個洞）。
+DECISION_ISSUE_CODES = frozenset({
+    "ambiguous-decision", "bad-bins", "bad-let", "bad-rule",
+    "deep-tree", "no-rules", "score-expr", "unknown-feature",
+})
+
+#: 沒有節點、但**不是**判定的那幾條（見上）。兩張表合起來要蓋滿。
+NON_DECISION_NODELESS_CODES = frozenset({
+    "bad-route-by", "route-not-reachable", "unknown-route",   # 分流
+    "cycle",                                                  # 整張圖
+})
+
 #: 目前這一版 recipe 的形狀（F42 B3，2026-08-27）。
 #:
 #: 1 = 區域依賴存在**參數**裡（F12 §3）；

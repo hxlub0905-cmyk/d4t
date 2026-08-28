@@ -63,6 +63,18 @@ __all__ = ["PipelineCanvas", "NODE_W", "NODE_H", "COL_GAP", "ROW_GAP"]
 #: 一個節點最多畫幾個**影像**輸出埠（再多就擠不下，退回單一埠）。
 _MAX_PORTS = 4
 
+#: 判定區**一開始是收起來的**（F50，2026-08-28，使用者定調：「ADC 他一樣是
+#: 張卡片，可以，但把它點開可以看到 decision tree」）。
+#:
+#: 收合這個能力 F24 §4 就做好了，只是預設是展開 —— 於是畫布右邊常駐一整片
+#: 菱形，而它跟左邊那一排卡片是**兩種長得不一樣的東西**。使用者要的是：
+#: 畫布上一律是卡片，判定就是其中一張，**要看細節才點開**。
+#:
+#: ⚠ **這是檢視狀態，不是 recipe 的內容** —— 存檔存不到它，開檔也不會帶著
+#: 它回來（同縮放平移）。所以「預設」的意思是「每次開窗」，那正是使用者
+#: 講的那句話。
+TREE_COLLAPSED_DEFAULT = True
+
 #: 「整批跑一次」那條腳帶有多高（`Step.scale == SCALE_LOT` 的卡才有）。
 _LOT_STRIP = 15.0
 
@@ -1524,7 +1536,7 @@ class PipelineCanvas(QGraphicsView):
         origin = QPointF(right + COL_GAP * 1.8 + off.x(), top + off.y())
         self._tree_items = tree_scene.build_zone(
             self._scene, self, info, origin,
-            collapsed=bool(getattr(self, "_tree_collapsed", False)),
+            collapsed=bool(getattr(self, "_tree_collapsed", TREE_COLLAPSED_DEFAULT)),
             selected_path=getattr(self, "_tree_selected", None),
             highlight_path=getattr(self, "_tree_highlight", None))
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
@@ -1609,15 +1621,15 @@ class PipelineCanvas(QGraphicsView):
         return getattr(self, "_tree_selected", None)
 
     def toggle_tree_collapsed(self) -> None:
-        """雙擊入口卡＝收合整棵樹成那一張小卡（嫌佔位的出口，F24 §4）。
+        """雙擊入口卡＝收合／展開整棵樹（F24 §4）。
 
         收合是**這一份畫布的檢視狀態**，不進 recipe —— 跟縮放平移同一類。
         """
-        self._tree_collapsed = not bool(getattr(self, "_tree_collapsed", False))
+        self._tree_collapsed = not self.tree_collapsed()
         self._rebuild_decision()
 
     def tree_collapsed(self) -> bool:
-        return bool(getattr(self, "_tree_collapsed", False))
+        return bool(getattr(self, "_tree_collapsed", TREE_COLLAPSED_DEFAULT))
 
     def set_tree_highlight(self, path: Optional[str]) -> None:
         """亮起「現在預覽那一顆走過的路」（F24 §8）。``None`` = 清掉。"""
@@ -1627,7 +1639,39 @@ class PipelineCanvas(QGraphicsView):
         self._tree_highlight = new
         self._rebuild_decision()
 
-    # ---- 幽靈線（F24 ④）---------------------------------------------------
+    # ---- 幽靈線（F24 ④；F50 起卡片也有）------------------------------------
+    def set_feature_owners(self, owners: Optional[Dict[str, str]]) -> None:
+        """特徵名 → 產出它的節點 id（`RecipeModel.feature_owners`）。
+
+        ⚠ **跟判定分開送。** 以前這張表只搭 `_decision_info` 的便車，而
+        Output 卡沒有判定也照樣用名字吃數字 —— 搭便車的話「這份 recipe 沒有
+        判定」就等於「淡線畫不出來」，而那兩件事不相干。
+        """
+        self._feature_owners = dict(owners or {})
+
+    def show_card_ghosts(self, item: Any) -> None:
+        """滑鼠停在一張卡上：**它用名字吃的那幾個數字**各亮一條線回來源卡。
+
+        跟菱形的幽靈線是**同一支**（`tree_scene.ghost_wires`）與同一個手勢
+        —— 使用者定調「不一致會有兩套準則」，而「判定看得到來源、Output
+        看不到」正是兩套。
+
+        ⚠ **它不是一條邊。** 不進 `recipe.edges`、不影響 `execution_order`、
+        不進快取簽章、拉不動也剪不掉 —— 它是**視圖**：唯一的真相是那張卡的
+        參數，這條線是它的投影。（F42 B4 拆掉的那條推導路是「兩份相加、每條
+        線畫兩次」，不是這個形狀 —— 那裡有兩個出處，這裡只有一個。）
+        """
+        from . import tree_scene
+
+        self.clear_tree_ghosts()
+        names = [str(x) for x in (item.info.get("feature_reads") or [])]
+        if not names:
+            return
+        target = item.pos() + QPointF(0.0, item.body_height() / 2.0)
+        owners = dict(getattr(self, "_feature_owners", None) or {})
+        self._ghost_items, self._ghost_cards = tree_scene.ghost_wires(
+            self._scene, self, target, names, owners)
+
     def show_tree_ghosts(self, diamond: Any) -> None:
         """滑鼠停在一個菱形上：它用到的數字各自亮出來源卡＋一條臨時點線。"""
         from . import tree_scene
@@ -1994,13 +2038,19 @@ class PipelineCanvas(QGraphicsView):
             if self._hover_node is not None:
                 self._hover_node.set_hovered(False)
             self._hover_node = top
+            # 幽靈線跟著 hover 走（F50）—— 跟菱形同一個手勢。
+            # ⚠ 清在設定之前：`show_card_ghosts` 會把來源卡設成 hovered，
+            # 而那幾張卡不是 `_hover_node`，所以上面那一行清不到它們。
+            self.clear_tree_ghosts()
             if top is not None:
                 top.set_hovered(True)
+                self.show_card_ghosts(top)
 
     def leaveEvent(self, e) -> None:           # noqa: D102
         if self._hover_node is not None:
             self._hover_node.set_hovered(False)
             self._hover_node = None
+        self.clear_tree_ghosts()
         super().leaveEvent(e)
 
     @staticmethod

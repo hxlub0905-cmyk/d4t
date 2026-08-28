@@ -1913,6 +1913,15 @@ class StudioWindow(QMainWindow):
                 # 卡在畫布上是唯一一種被框起來的卡，而那個框每一個拖曳 frame
                 # 重建一次、留下殘影。現在它是卡片自己的一個屬性。
                 "scale": step_cls.scale if step_cls else SCALE_DEFECT,
+                # **這張卡用名字吃哪些數字**（F50）。Output 那三張的
+                # `rank_by` / `size_feature` / `columns` 都是名字，畫布上
+                # 因此沒有任何一條線指向它們 —— 淡線就是畫這件事。
+                # 兩支都問：會失敗的（`resolve_features_in`）與少了只會退化
+                # 的（`optional_features_in`）在畫面上是同一件事「它讀這個」。
+                "feature_reads": (
+                    sorted(set(step_cls.resolve_features_in(node.params))
+                           | set(step_cls.optional_features_in(node.params)))
+                    if step_cls else []),
                 "problem": problems.get(nid, ("", ""))[0],
                 "problem_level": problems.get(nid, ("", "error"))[1],
             })
@@ -1921,7 +1930,11 @@ class StudioWindow(QMainWindow):
         self._sync_params_pane()
         decision = self._decision_info()
         prefilter = self._prefilter_info()
+        # 淡線要問「這個數字是誰算的」，而那張表跟判定在不在無關（Output 卡
+        # 沒有判定也照樣吃數字）—— 所以它自己送一份，不搭 `decision` 的便車。
+        owners = dict(self.model.feature_owners())
         for view in self._canvases():
+            view.set_feature_owners(owners)
             # **每一條線都在 `recipe.edges` 裡**（F42 B4）。以前這裡是兩份相加
             # ——影像線來自 `edge_lines()`、區域線從參數推導（`region_lines()`）
             # ——而方案 B 之後區域線也是一條真的 Edge，所以第二份收的是同一批
@@ -1955,6 +1968,37 @@ class StudioWindow(QMainWindow):
                                                       "" if steps == 1 else "s")
         return "decision · %d rule%s" % (len(d.rules),
                                          "" if len(d.rules) == 1 else "s")
+
+    def _decision_problem(self) -> tuple:
+        """判定段的 lint（最嚴重的那一條）→ ``(訊息, 級別)``；沒有就 ``("","")``。
+
+        **這一支存在的理由是一個真的洞**（F50）：`Issue.node_id` 是「哪一張
+        卡」，而判定不是一張卡 —— 它的 issue 一律 `node_id=None`，而
+        `_node_problems()` 第一件事就是把沒有節點的丟掉。於是同樣是「指到一個
+        沒人算得出來的數字」，卡片那邊一改就看得到徽章，判定那邊只在**跑完
+        之後**的狀態列尾巴出現一次 —— 而跑一次是好幾分鐘。
+
+        ⚠ **判準是那張表，不是「node_id 是 None」**（`DECISION_ISSUE_CODES`）：
+        沒有節點的 lint 裡還有三條講分流、一條講整張圖，掛上來就是讓入口卡
+        替別人的問題背鍋。
+        """
+        from d4t.core.pipeline.recipe import DECISION_ISSUE_CODES
+
+        try:
+            issues = self.model.validate()
+        except Exception:                        # noqa: BLE001 — 顯示用
+            return ("", "")
+        rank = {"error": 0, "warning": 1, "info": 2}
+        best = None
+        for issue in issues:
+            if getattr(issue, "node_id", None):
+                continue
+            if str(getattr(issue, "code", "")) not in DECISION_ISSUE_CODES:
+                continue
+            lvl = str(issue.level)
+            if best is None or rank.get(lvl, 1) < rank.get(best[1], 1):
+                best = (str(issue.detail or issue.title), lvl)
+        return best or ("", "")
 
     def _prefilter_info(self) -> Optional[Dict[str, Any]]:
         """畫布上的分流徽章要畫的東西（F25-B）；沒有 route_by 回 None。
@@ -1999,6 +2043,9 @@ class StudioWindow(QMainWindow):
         if info is not None:
             # 幽靈線（F24 ④）：菱形上的數字 → 產出它的卡。宣告層的答案。
             info["feat_owner"] = self.model.feature_owners()
+            # 判定的 lint 掛到入口卡上（F50）—— 見 `_decision_problem`。
+            why, level = self._decision_problem()
+            info["problem"], info["problem_level"] = why, level
         return info
 
     def _sync_score_widgets(self) -> None:
