@@ -1,0 +1,192 @@
+# -*- coding: utf-8 -*-
+"""F58：拿一張 Golden Cell 鋪成整批資料 —— **週期量對了嗎**。
+
+這支工具的一切都踩在一個數字上：**GC 的週期**。量錯的話每一格都錯位，
+而鋪出來的圖看起來仍然像那個圖案 —— 跑得完、有資料、而且是錯的。
+
+⚠ 這一輪為了這個數字改了三版，兩版都會鋪出錯位的圖。兩個坑各有一條測試：
+
+* **固定寬度的比對視窗**（為了消掉「位移越大重疊越少越容易對上」的偏差）
+  —— 那個視窗裝不下「哪一根缺席」這個地標，於是量到三根當成一個週期。
+* **「第一個夠好的位移」當基頻** —— 五根的位移在重疊區裡也對得上
+  （缺席的那一根剛好落在窗外），而它不是週期。
+
+最後的判準是：**取最深的那一個，再問它是不是某個更小週期的整數倍**。
+
+測試用的 GC 是**合成的**（`_synth_mgepi`）—— 真的那張是廠內圖案，
+不進版控（鐵則 8）。合成那張的性質一樣：六根一個週期、第三根缺席。
+"""
+from __future__ import annotations
+
+import os
+import sys
+
+import numpy as np
+import pytest
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+for _p in (REPO, os.path.join(REPO, "tools")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+import _synth_mgepi as mgepi  # noqa: E402
+import make_lot_from_gc as gcl  # noqa: E402
+
+
+G = mgepi.GEOMETRY
+_SPAN = G.mg_pitch * G.period
+
+
+def _gc_of(periods_x: float, periods_y: float = 2.15) -> np.ndarray:
+    w = int(round(_SPAN * periods_x))
+    h = int(round(G.epi_pitch * periods_y))
+    return np.clip(mgepi.frame(h, w, G), 0, 255).astype(np.uint8)
+
+
+@pytest.fixture(scope="module")
+def gc():
+    """兩個多週期寬 —— **看得到兩個「缺席的位置」**，週期才定得下來。"""
+    return _gc_of(2.4)
+
+
+@pytest.fixture(scope="module")
+def narrow_gc():
+    """一個多週期寬 —— 跟使用者那張一樣的處境（205 px ≈ 1.16 個週期）。"""
+    return _gc_of(1.16)
+
+
+# --------------------------------------------------------------------------- #
+# 1. 週期
+# --------------------------------------------------------------------------- #
+def test_it_finds_the_six_line_period_not_a_harmonic(gc):
+    px, py = gcl.periods(gc)
+    assert abs(px - _SPAN) < 1.0, "水平週期量成 %.2f，期望 %.2f" % (px, _SPAN)
+    assert abs(py - G.epi_pitch) < 1.0
+
+
+def test_it_does_not_settle_for_a_near_match_at_five_lines(gc):
+    """⚠ 五根的位移在重疊區裡對得起來（缺席那一根落在窗外）—— 但它不是週期。
+
+    量真的那張 GC：lag 147（五根）的平均差 8.00、176（六根）6.00，
+    而「第一個夠好的」會挑 147。
+    """
+    px, _ = gcl.periods(gc)
+    five = G.mg_pitch * 5
+    assert abs(px - five) > 2.0, "挑到了五根（%.2f）" % px
+
+
+def test_a_narrow_gc_cannot_pin_the_period_which_is_why_the_override_exists(
+        narrow_gc):
+    """⚠ **這一條記的是一個原理上的限制，不是一個 bug。**
+
+    這個 layout 的週期靠「哪一根缺席」定義。位移五根的時候，缺席的那一根
+    剛好落在重疊區外面 —— 兩個窗口都只有正常的根，**逐點相同**，量到的
+    「週期」因此是五根。要分得出來得看到**兩個**缺席的位置。
+
+    使用者那張真的 GC（205 px = 1.16 個週期）量出 175.96 是對的，但那是
+    **真實影像的雜訊打破了平手**，不是因為資訊夠。所以 `generate` 收得下
+    明講的週期，而這一條測的正是「明講的那個會贏」。
+    """
+    px, _ = gcl.periods(narrow_gc)
+    assert abs(px - _SPAN) > 2.0, (
+        "這張窄 GC 居然量對了（%.2f）—— 那表示這條測試的前提變了，"
+        "回去看 `periods` 的說明還成不成立" % px)
+
+
+def test_a_clean_multi_period_gc_gives_the_fundamental():
+    """GC 裡裝三個完整週期時，要回**一個**週期，不是三個。
+
+    ⚠ 這一條曾經被拿來論證一段「檢查它是不是某個更小週期的倍數」的程式碼，
+    而突變測試證明**那段程式碼拿掉它照樣綠** —— 位移一個週期與三個週期的
+    平均差都是 0，而取最小值本來就會回到前者。那段程式碼因此刪掉了：
+    **一個做不出反例的防護，是一個沒有被驗證過的防護。**
+    """
+    w = int(round(_SPAN * 3))
+    img = np.clip(mgepi.frame(int(G.epi_pitch * 3), w, G), 0, 255).astype(np.uint8)
+    px, _ = gcl.periods(img)
+    assert abs(px - _SPAN) < 1.5, "回了 %.2f，期望一個週期 %.2f" % (px, _SPAN)
+
+
+def test_tiling_with_the_measured_period_has_no_seam(gc):
+    """量對了的話，鋪出來的圖跟自己位移一個週期**逐點幾乎相同**。"""
+    px, py = gcl.periods(gc)
+    big = gcl.tile(gc, 400, 700, px, py)
+    s = int(round(px))
+    assert float(np.abs(big[:, :700 - s] - big[:, s:]).mean()) < 3.0
+
+
+# --------------------------------------------------------------------------- #
+# 2. 缺陷落點是量出來的，不是寫死的
+# --------------------------------------------------------------------------- #
+def test_the_inner_space_sites_sit_on_bright_epi_bands(gc):
+    sites = gcl.inner_space_sites(gc)
+    assert sites, "量不到任何 inner space"
+    rows = gc.astype(np.float32).mean(axis=1)
+    hi = float(rows.max())
+    for _x, y in sites:
+        assert rows[y] > 0.9 * hi, "y=%d 落在暗帶上（%.0f / %.0f）" % (y, rows[y], hi)
+
+
+def test_the_sites_straddle_an_edge_not_a_flat_area(gc):
+    """交界的意思是「兩邊不一樣」—— 落在一片均勻的地方就不是交界。"""
+    g = gc.astype(np.float32)
+    for x, y in gcl.inner_space_sites(gc):
+        x0, x1 = max(0, x - 3), min(g.shape[1], x + 4)
+        strip = g[max(0, y - 3):y + 4, x0:x1]
+        assert float(strip.max() - strip.min()) > 20.0
+
+
+# --------------------------------------------------------------------------- #
+# 3. 兩份 lot 都要讀得回來
+# --------------------------------------------------------------------------- #
+def test_both_lots_load_back_through_ingest(tmp_path, gc):
+    from d4t.core.ingest.dataset import load_dataset
+    out = gcl.generate(str(tmp_path / "lot"), gc, images=2, size=900,
+                       defects=12, patch=81, seed=3)
+    rsem = load_dataset(out["rsem_klarf"])
+    assert rsem.kind == "rsem" and len(rsem.items) == 2
+    assert rsem.items[0].load("single").shape == (900, 900)
+    patch = load_dataset(out["patch_klarf"])
+    assert patch.kind == "ebi_patch" and len(patch.items) == 12
+    first = patch.items[0]
+    assert first.load("test").shape == (81, 81)
+    assert first.load("ref").shape == (81, 81)
+
+
+def test_the_reference_crop_is_not_the_same_pixels_as_the_test_crop(tmp_path, gc):
+    """ref 取「往旁邊一個完整週期」—— 同樣的圖案、沒有這顆缺陷。
+
+    取成同一塊的話 `subtract` 恆為零，而整條 pipeline 照樣跑得完。
+    """
+    from d4t.core.ingest.dataset import load_dataset
+    out = gcl.generate(str(tmp_path / "lot"), gc, images=1, size=900,
+                       defects=8, patch=81, real_frac=1.0, seed=4)
+    ds = load_dataset(out["patch_klarf"])
+    same = sum(1 for it in ds.items
+               if np.array_equal(it.load("test"), it.load("ref")))
+    assert same == 0, "%d 顆的 ref 跟 test 是同一塊" % same
+
+
+def test_the_same_seed_gives_the_same_bytes(tmp_path, gc):
+    import hashlib
+
+    def sha(p):
+        with open(p, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+
+    a = gcl.generate(str(tmp_path / "a"), gc, images=2, size=900, defects=10,
+                     patch=81, seed=9)
+    b = gcl.generate(str(tmp_path / "b"), gc, images=2, size=900, defects=10,
+                     patch=81, seed=9)
+    assert sha(a["patch_tiff"]) == sha(b["patch_tiff"])
+    assert [sha(p) for p in a["rsem_images"]] == [sha(p) for p in b["rsem_images"]]
+
+
+def test_every_defect_type_is_planted_on_an_inner_space(gc):
+    """使用者：「defect 都在這邊」。"""
+    px, py = gcl.periods(gc)
+    big = gcl.tile(gc, 300, 400, px, py)
+    for kind in gcl.REAL_TYPES:
+        img = big.copy()
+        gcl.plant(img, kind, 200.0, 150.0, np.random.default_rng(1), px)
+        assert float(np.abs(img - big).max()) >= 50.0, kind
