@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .numbers import format_feature_value
 from .theme import TOKENS
 from .widgets import FilterChip, apply_button_cursors, to_uint8
 
@@ -156,26 +157,16 @@ def _qimage_from_uint8(arr: np.ndarray) -> QImage:
 
 
 def _fmt_score(value: Any) -> str:
-    """分數 → 說明文字用的短字串（3 位有效數字，整數不拖小數）。
+    """分數／特徵 → 縮圖說明列上的字。
 
-    ⚠ **沒有值就留白**（F30）。以前這裡走 `str(value)`，於是 ``None`` 會在縮圖
-    的說明列上畫出 **``None``** 那四個字。判定樹是一個分類器，多數樹沒有分數
-    表達式 —— 那時候**每一格**都會是它。
+    ⚠ **F52 起它只是 `numbers.format_feature_value` 的別名。** 以前這裡是
+    自己一份（整數捷徑 ＋ ``%.3g``），而 `widgets._fmt_number` 是**同一份抄
+    第二次然後漂開的** —— 前六行一字不差，第七行開始分岔，於是同一個
+    ``1234.5`` 在縮圖上是 ``1.23e+03``、在特徵表上是 ``1234.500``。
+
+    名字留著是因為既有測試與呼叫端指著它（`test_rank_without_a_score`）。
     """
-    if value is None:
-        return ""
-    try:
-        f = float(value)
-    except (TypeError, ValueError):
-        return str(value)
-    if math.isnan(f):
-        return "NaN"
-    if math.isinf(f):
-        return "∞" if f > 0 else "-∞"
-    if f == int(f) and abs(f) < 1e12:
-        return str(int(f))
-    return "%.3g" % f
-
+    return format_feature_value(value)
 
 # --------------------------------------------------------------------------- #
 # 排序 / 篩選（Qt-free 的純邏輯，方便單獨測）

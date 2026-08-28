@@ -49,6 +49,7 @@ from ..core.steps.cd import _BLOB_REASONS as _CD_BLOB_REASONS
 from ..core.steps.cd import reasons_in_words as _cd_reasons_in_words
 from ..core.steps.denoise import HOT_FRAC, REMOVED_OVER_NOISE
 from . import region_words
+from .numbers import format_feature_value, format_feature_value_short
 from . import theme
 from .theme import TOKENS, region_hex
 
@@ -1329,23 +1330,26 @@ class MeasureInspector(Inspector):
 
 
 def _short_number(v: float, signed: bool = False) -> str:
-    """圖上那一行用的短數字：`26.1` / `66` / `0.06`（`_fmt` 給的是 3 位小數）。
+    """畫**在影像上**的短數字：`26.1` / `66` / `0.06`。
 
-    圖上的字只有 10 px 高，而 `SNR 66.116` 裡真正在講事情的是 `66`。
+    ⚠ **F52 起它是 `numbers.format_feature_value_short` 的別名**，而那一支
+    修好了一個 bug：舊版把 ``0.000312`` 印成 ``0.00`` —— 讀起來是**零**，
+    而這個標記畫在影像上，正是使用者盯著看的地方。
+
+    圖上的字只有 10 px 高，`SNR 66` 比 `SNR 66.116` 好讀 —— 所以短版是**刻意
+    的例外**，而例外的邊界寫在那一支上：只有畫在影像上的標記用它。
     """
-    a = abs(float(v))
-    text = ("%.0f" % v) if a >= 10 else (("%.1f" % v) if a >= 1
-                                         else ("%.2f" % v))
-    if signed and float(v) > 0:
-        text = "+" + text
-    return text.replace("-", "\u2212")     # 真的減號，跟畫面其他地方一致
+    return format_feature_value_short(v, signed=signed)
 
 
 def _fmt(v: float) -> str:
-    a = abs(v)
-    if a >= 1000 or (a and a < 0.01):
-        return "%.3g" % v
-    return "%.3f" % v if a < 100 else "%.1f" % v
+    """儀表面板上的數字。
+
+    ⚠ **F52 起它是 `numbers.format_feature_value` 的別名。** 以前是自己一份
+    （``%.3g`` / ``%.3f`` / ``%.1f`` 三段），於是同一顆的同一個數字在儀表上
+    與在結果表上不一樣。
+    """
+    return format_feature_value(v)
 
 
 class GlvInspector(Inspector):

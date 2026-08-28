@@ -6,7 +6,7 @@
 988aa4655c507ed44e9065ea6238e7f55502ca3c CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 5b750fd2b09c4ced476be65c84f41d45231f9070 README.md
-31a7649733d35e8f1f9dabcb648253ca56a4f108 SESSION_LOG.md
+a468e9d74c418572b63b4cc0ae4b86432ef65717 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 61c8e7e8e41df159ff1b6230e093fa58a68b661c d4t/__main__.py
@@ -90,12 +90,13 @@ a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
 075353c1d7e2307ae39d444da7c9d22a3b66525f d4t/ui/canvas.py
 3b58b7e078d58ad84a8939734b65952a75a029f3 d4t/ui/cell_canvas.py
 ba56fb546fe526adff22b670501f0eecf322cfde d4t/ui/decide_panel.py
-6dbfeb8148b200e62e1230e34f5af37b9a0203d1 d4t/ui/gallery.py
-70e3bd83b29f265fa9b4c9bffd6365118010132a d4t/ui/inspectors.py
+9c9230407197225a3143a3cd8e08854ca8ae452c d4t/ui/gallery.py
+b84bf1bc094c091fd59540687dab0984b7a6e4b2 d4t/ui/inspectors.py
+99b8d619c884e776014c33948df97d22e6579ef8 d4t/ui/numbers.py
 f7b64cc639cd51ab158c6750bde3fa4d670dbfc5 d4t/ui/region_check.py
 9bcae50b6478688608568c6c8242688343af9d38 d4t/ui/region_words.py
 3b45bbcea148f536122db2453a539dcd3991259d d4t/ui/results.py
-7cb1362e4da95bc47eb5c0147649048a8459344a d4t/ui/results_table.py
+41187819772e2cb44ed0f3bdda308ad291850dfb d4t/ui/results_table.py
 1d1ca0ee2e4ebbedfa11b027bb9e7d735500ad2d d4t/ui/route_badge.py
 11a38b9e760697b23510805b56706f1eb8f6c85e d4t/ui/route_panel.py
 17f32cd41d9d65e33782a09532b84e38a6d048c4 d4t/ui/scope.py
@@ -108,10 +109,10 @@ e933e8dcc43f5a3b73e8a46db4df0e980dfe99fb d4t/ui/tree_scene.py
 c894b98548a3a06f98ed531901518a429768879f d4t/ui/verdict_band.py
 d9366a860bda3c0d845a0cfe710ce33bd7739be1 d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
-2af7ba8c5c090acfe0caed05a713b83201cdec90 d4t/ui/why_panel.py
-ab6d9b04fdd108d8063687ff5829463a8cdb1984 d4t/ui/widgets.py
+34b6365ad97cc503caf8390297720e538dc26f6e d4t/ui/why_panel.py
+289ac7c8285ab1d1a75f0c38a86f21a35b13049c d4t/ui/widgets.py
 e02cb1ea64a7ed413716379b9da789937729f3e3 d4t/ui/workers.py
-4daa1d8a11e7614212cb4b0fb576ffedafcb65a3 docs/ARCHITECTURE.md
+050e811fa55f17ff2fe608bfd29d40fd86846b4c docs/ARCHITECTURE.md
 7618e6d754adc64a230481481ec805bde52d6f5f docs/FAB-VALIDATION.md
 cb5ec1e3cc74cbfc6f03fe2edb526c0993465c6e docs/GLAS-INTERFACE.md
 19d601d765ae34b494c08ba6eef81815b67e0d4b docs/HANDOVER.md
@@ -138,6 +139,7 @@ df9b95e62f80bd81d55d534c75acd8080bc0bc25 docs/plans/F45-feature-specs-and-verdic
 af2a0ffc8331813f1fb674e4c4293457921c7161 docs/plans/F49-features-on-wires.md
 9b5377891f8e86a52f32a1e546f4aad6175e5bdf docs/plans/F50-canvas-is-cards.md
 bea3726b45a3dbdb343b2f08d008d190387d5990 docs/plans/F51-feature-names-one-truth.md
+49d28af403671958a1292959ecf5bb03ad423842 docs/plans/F52-one-way-to-print-a-number.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -306,6 +308,7 @@ e343ee4e93441411c3cc8d06c7a4be696c4aaebb tests/test_ui_f8_calibrate.py
 36ad8dc34a864d032fe5b55b4b16ed13a726a83d tests/test_ui_f9_9_two_lines_side_by_side.py
 7db2cab97ffe3b38bcd3da9cb0562f2d3b48f928 tests/test_ui_feature_ghosts.py
 548f3f330cf2c44aaa2634e9864c39d869b05efa tests/test_ui_feature_name_display.py
+97e9fb59235c8b5f0ace11fd2fe70eb23906b455 tests/test_ui_feature_value_format.py
 0a897154b902c066f1452d066aa02ccf7e47e0ff tests/test_ui_gallery.py
 27ef08cb9dc2af26a29276d7775bfebf63a7a199 tests/test_ui_gds_panel.py
 65639740264e826c1da57c3c564c0768c798d241 tests/test_ui_glv_intent.py
@@ -336,7 +339,7 @@ af6f3263d94b0fc1b7e78c58cc86d2d6c9dda57d tests/test_ui_tree_edit.py
 3ff2e7c8a9d2c87f730e7b733b9a1017bda4f23c tests/test_ui_verdict_band.py
 f6714258293363ce472b166d0afed030cb7c8f8f tests/test_ui_welcome.py
 957bee5d677405fc028ce51bd38a005e33225f97 tests/test_ui_why_panel.py
-1b26b647822ba87c3aa5bcc162bb5dd4c6b14460 tests/test_ui_widgets.py
+2a4918fd08830f2bef74ce9303f91d94bc84ffac tests/test_ui_widgets.py
 d8b2329e90e524b0600781a641019718516a0d9f tests/test_ui_workers.py
 db0e9bfba8c7ae39e3502d474709f8135a10cbfa tests/test_ui_write_only_on_run_all.py
 a1c3efb7a59b60821d09eb9a3525d91b946b32ed tests/test_verdict_features.py

@@ -87,6 +87,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.export.report import BASE_COLUMNS, feature_keys
+from .numbers import format_feature_value
 from .theme import TOKENS, region_hex
 from .widgets import FilterChip, metric_face
 
@@ -402,8 +403,7 @@ class ResultsTableModel(QAbstractTableModel):
 
     def _badge_tip(self, row: int, warns: List[Tuple[str, Any]]) -> str:
         """徽章的懸停文字：先講為什麼亮，再列這一顆的全部診斷明細。"""
-        def fmt(v: Any) -> str:
-            return "%.4g" % v if isinstance(v, float) else str(v)
+        fmt = format_feature_value
 
         lines = ["%s = %s" % (n, fmt(v)) for n, v in warns]
         flagged = {n for n, _ in warns}
@@ -499,12 +499,9 @@ class ResultsTableModel(QAbstractTableModel):
                 return QColor(TOKENS.get("accent", "#2f6fb2"))
 
         if role == Qt.DisplayRole:
-            if value is None:
-                # ⚠ **算不出來的那一格留白，不是 0、也不是 NaN**（F19 那一條）。
-                return ""
-            if isinstance(value, float):
-                return "%.4g" % value
-            return str(value)
+            # ⚠ **算不出來的那一格留白，不是 0、也不是 NaN**（F19 那一條）——
+            # `format_feature_value(None)` 就是空字串。
+            return format_feature_value(value)
         if role == Qt.EditRole:
             return value                       # 排序吃這個（保留原型別）
         if role == Qt.TextAlignmentRole:
