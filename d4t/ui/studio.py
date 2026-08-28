@@ -1918,10 +1918,12 @@ class StudioWindow(QMainWindow):
                 # 因此沒有任何一條線指向它們 —— 淡線就是畫這件事。
                 # 兩支都問：會失敗的（`resolve_features_in`）與少了只會退化
                 # 的（`optional_features_in`）在畫面上是同一件事「它讀這個」。
-                "feature_reads": (
-                    sorted(set(step_cls.resolve_features_in(node.params))
-                           | set(step_cls.optional_features_in(node.params)))
-                    if step_cls else []),
+                # ⚠ 走 `feature_names_in`（F51），**不是** `optional_features_in`：
+                # 後者問的是「少了會不會退化」，而 `score` 永遠不會缺，所以它
+                # 被刻意排除 —— 於是「報表照分數排序」那條最常見的線畫不出來。
+                # 畫線問的是「設定上寫著哪些名字」，那是另一個問題。
+                "feature_reads": (step_cls.feature_names_in(node.params)
+                                  if step_cls else []),
                 "problem": problems.get(nid, ("", ""))[0],
                 "problem_level": problems.get(nid, ("", "error"))[1],
             })

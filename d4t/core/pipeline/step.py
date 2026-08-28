@@ -1184,6 +1184,45 @@ class Step(ABC):
 
     # ---- UI 描述 ----------------------------------------------------------
     @classmethod
+    def feature_names_in(cls, params: Dict[str, Any]) -> List[str]:
+        """這張卡在設定上**指名了哪些數字**（F51）—— 給畫線用，不給 lint 用。
+
+        跟既有那兩支是**三個不同的問題**，而分開的理由很具體：
+
+        =========================  =====================================
+        :meth:`resolve_features_in`  少了這張卡會**失敗**（lint: error）
+        :meth:`optional_features_in` 少了會**退化**（lint: warning）
+        這一支                        這張卡的設定上**寫著**哪些名字
+        =========================  =====================================
+
+        差別看 ``score``：`output_report` 的 `ranked_feature` 刻意把它排除在
+        `optional_features_in` 外面 —— 對那支是**對的**（`score` 不是任何一
+        張卡算出來的，lint 一開始就把它種進可用名單，永遠不會缺）。但畫線問
+        的是別的事：`score` 在畫布上**有一個看得見的產出者**（判定那張卡），
+        而「報表照分數排序」是整個工具最常見的一條連結。用 `optional` 那一份
+        來畫線的話，那條線一條都畫不出來（實測過）。
+
+        實作是**機械的**：掃每一個 :data:`FEATURE_TYPES` 的參數，把值裡的名
+        字拿出來。所以新卡片不必覆寫它 —— 只要那一格宣告成 ``feature_key`` /
+        ``feature_keys``（本來就該宣告，不然設定區長不出挑選器），線就有了。
+        ``expr`` 不掃：一條算式裡的識別字要 parse 才分得出來，而那是判定段
+        自己的事（`bound_specs` 那一頭處理）。
+        """
+        out: List[str] = []
+        for spec in cls.params:
+            if spec.type not in ("feature_key", "feature_keys"):
+                continue
+            raw = str((params or {}).get(spec.name, spec.default) or "").strip()
+            if not raw:
+                continue
+            for tok in (raw.split(",") if spec.type == "feature_keys"
+                        else [raw]):
+                name = tok.strip()
+                if name and name not in out:
+                    out.append(name)
+        return out
+
+    @classmethod
     def item_filter(cls, params: Dict[str, Any]) -> Optional[Tuple[str, Tuple[str, ...]]]:
         """這張卡要不要**限制哪些 defect 進得來**（F50）。
 

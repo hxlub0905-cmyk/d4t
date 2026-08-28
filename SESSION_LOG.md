@@ -6,7 +6,7 @@
 
 | 期間 | 在哪 |
 |---|---|
-| **2026-08-19 起**（第十六輪～）| 這個檔案（下面）—— 改名 d4t、F12 區域線、F13 UI、F14 入口搬進卡片、F15 配對分析、F16 畫布的八段、F17 純 DAG 引擎、F18 GLV、F19 CD、F20–F25 多類別 ADC 與判定樹、F26/F27 判定與 Results 面板、F28–F30 位置／報表／Region 收卡、F31/F32 逐框比較、F33 EBI↔API characterization、F34/F35 存檔 recipe 與出貨的 recipe、F36 box plot、F37/F38 GLV↔ROI 命名與 Output 收卡、F39/F40 測試審計與 stack agreement、F41 刪 algo 卡、F42 區域線走 edges、**F43–F45 結果表分層／區域接線／FeatureSpec 與分數回溯、F46/F47 檔案架構與授權、F48 六個決定、F49 特徵走線的範圍評估、F50 畫布上只剩卡片和線** |
+| **2026-08-19 起**（第十六輪～）| 這個檔案（下面）—— 改名 d4t、F12 區域線、F13 UI、F14 入口搬進卡片、F15 配對分析、F16 畫布的八段、F17 純 DAG 引擎、F18 GLV、F19 CD、F20–F25 多類別 ADC 與判定樹、F26/F27 判定與 Results 面板、F28–F30 位置／報表／Region 收卡、F31/F32 逐框比較、F33 EBI↔API characterization、F34/F35 存檔 recipe 與出貨的 recipe、F36 box plot、F37/F38 GLV↔ROI 命名與 Output 收卡、F39/F40 測試審計與 stack agreement、F41 刪 algo 卡、F42 區域線走 edges、**F43–F45 結果表分層／區域接線／FeatureSpec 與分數回溯、F46/F47 檔案架構與授權、F48 六個決定、F49 特徵走線的範圍評估、F50 畫布上只剩卡片和線、F51 特徵名只有一個真相** |
 | 2026-08-07 ～ 08-18（第十五輪以前）| [`docs/history/2026-08.md`](docs/history/2026-08.md) —— F8 純規則 ROI、畫布 n8n 化、Phase 1 收斂、F10、Phase 2 的 Input／Enhance／Region 三段 |
 | 2026-07 | [`docs/history/2026-07.md`](docs/history/2026-07.md) —— M0–M7、F7-9…F7-24 前半、兩台機器與搬運通道的成形 |
 
@@ -16,6 +16,55 @@
 封存不是整理癖：這個檔案**只增不減**，而它跟著整包被複製進公司機。
 包的大小**不是限制**（2026-08-17 使用者確認直接複製 raw，見 `AGENTS.md` §2）——
 封存現在是為了 diff 乾淨與公司機用不到的東西不佔體積，不再是為了那道 1 MB 的線。
+
+---
+
+## F51：特徵名只有一個真相（2026-08-28）
+
+計畫書：[`docs/plans/F51-feature-names-one-truth.md`](docs/plans/F51-feature-names-one-truth.md)。
+使用者問「Feature 部分有什麼可以改善」，查下去找到一個**真的 bug** ——
+而其中一半是 F50 那一輪自己種的。
+
+### 「誰產出這個特徵」有三份實作，而兩份預測跟真相都對不上
+
+引擎（真相）／`bound_specs`（結果表用）／`feature_owners`（淡線用）。
+實測放兩張 GLV 卡跑一次：
+
+* UI 說會有 `glv2_glv_pixels` —— **引擎從來不寫**（結果表一欄永遠是空的）；
+* 引擎寫出 `glv_glv_max` / `glv_glv_mean` / `glv_glv_q99` —— **UI 完全不
+  知道**（分不了組、篩不到、回溯面板指不到）；
+* **裸名掛錯卡** —— `glv_max` 算在第一張卡上，而值來自最後一張。
+
+**方向反了。** 引擎是後寫的贏、被蓋掉的那一張被救成 `<前綴>_<原名>`；
+`bound_specs` 讓第一張拿裸名、後面的拿救援名，而且只對診斷數字加、還是無條件
+加（沒撞名也加）。
+
+### 修法：三份收成一份 ＋ 一把對照引擎的尺
+
+`bound_specs` 的規則改成跟引擎逐字一致，`feature_owners` 變成它的投影
+（自己那個迴圈刪掉）。而這一輪真正的產出是那把尺：
+`test_feature_names_match_the_engine.py` —— **真的跑一次引擎**，拿 keys 當
+基準，三個案例逐項相同。兩個舊行為各突變驗過會紅。
+
+⚠ **尺一開始定太嚴，而放寬的方式很重要。** `cd_*_nm` 這種「宣告了、但這批
+算不出來」的名字合法地只在 UI 那邊（F19）。第一版把尺放寬成「多出來的可以是
+宣告過的」—— 而那條放寬**也會放過真的發明出來的名字**。改成把落差的來源拿掉
+（fixture 填 nm/px），尺就回到逐項相同。
+
+> **放寬一把尺之前，先問能不能改掉讓它量不準的那個條件。**
+
+### 順帶修好整個工具最常見的一條線
+
+`output_report.rank_by = "score"` 以前**畫不出淡線** —— 兩個原因疊在一起：
+`feature_owners` 不知道 `score`（A 修了），而 `optional_features_in` 刻意排除
+它（對 lint 是對的，`score` 永遠不會缺）。所以多一支 `Step.feature_names_in`
+問第三個問題：**這張卡的設定上寫著哪些名字**。實作是機械的（掃
+`feature_key` / `feature_keys` 參數），新卡片不必覆寫。
+
+驗收：**黃金值三份逐項相同**（只動預測、沒動引擎，那正是要證明的事）、
+核心 2773 綠、UI 逐檔全綠。
+
+**沒做的是 C**（讓 `feature-collision` 變吵）—— 那是產品決定，等定調。
 
 ---
 

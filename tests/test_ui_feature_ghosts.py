@@ -151,3 +151,66 @@ def test_leaving_clears_the_wires_and_the_lit_up_cards(wired):
     view.clear_tree_ghosts()
     assert view.ghost_items() == []
     assert _item(w, glv)._hover is False, "來源卡還亮著"
+
+
+# --------------------------------------------------------------------------- #
+# 5. 最常見的那一條線（F51，2026-08-28）
+# --------------------------------------------------------------------------- #
+def test_ranking_a_report_by_the_score_draws_a_line_from_the_decision(qapp):
+    """**「報表照分數排序」是整個工具最常見的一條連結，而它以前畫不出來。**
+
+    兩個原因疊在一起，各修一個：
+
+    * `ranked_feature` 刻意把 ``score`` 排除在 `optional_features_in` 外面
+      —— 對 lint 是**對的**（`score` 不是任何一張卡算的，永遠不會缺），
+      但畫線問的是「設定上寫著哪些名字」。→ 改走 `Step.feature_names_in`。
+    * `feature_owners` 是第三份「誰產出這個特徵」的實作，而它不知道 ``score``。
+      → 改成 `bound_specs` 的投影。
+    """
+    w = studio_mod.StudioWindow(show_welcome_on_start=False)
+    try:
+        assert w.load_recipe_path(
+            str(REPO / "tests" / "fixtures" / "recipes"
+                / "die_to_die_basic.json"), sync=True)
+        w.add_decision()
+        rep = w.model.add_step("output_report")
+        w.model.set_param(rep, "rank_by", "score")
+        w._refresh_pipeline()
+
+        assert _item(w, rep).info.get("feature_reads") == ["score"]
+        assert "score" in w.model.feature_owners()
+        w.pipeline.show_card_ghosts(_item(w, rep))
+        assert len(w.pipeline.ghost_items()) == 1
+    finally:
+        w.close()
+
+
+def test_a_rescued_name_still_finds_its_card(qapp):
+    """撞名被救起來的那份（``glv_glv_max``）也要畫得出線。
+
+    它是引擎真的寫進 CSV 的一個數字，而使用者拿它去 `rank_by` 是完全合理的
+    ——「我要看**前面那張** GLV 卡量到的最大值」。
+    """
+    import json
+
+    raw = json.loads((REPO / "tests" / "fixtures" / "recipes"
+                      / "die_to_die_basic.json").read_text(encoding="utf-8"))
+    raw["nodes"]["glv_2"] = dict(raw["nodes"]["glv"])
+    raw["routes"]["ebi_patch"] = list(raw["routes"]["ebi_patch"]) + ["glv_2"]
+    for e in list(raw.get("edges", [])):
+        if e[2] == "glv":
+            raw["edges"].append([e[0], e[1], "glv_2", e[3]])
+
+    w = studio_mod.StudioWindow(show_welcome_on_start=False)
+    try:
+        from d4t.core.pipeline.recipe import Recipe
+        from d4t.ui.viewmodel import RecipeModel
+
+        w.model = RecipeModel.from_recipe(Recipe.from_json_dict(raw),
+                                          kind="ebi_patch")
+        rescued = [n for n in w.model.feature_owners() if n.startswith("glv_glv")]
+        assert rescued, "前提：這份 recipe 真的救起了一個名字"
+        assert w.model.feature_owners()[rescued[0]] == "glv", \
+            "救起來的那份要掛在**被蓋掉**的那張卡上"
+    finally:
+        w.close()
