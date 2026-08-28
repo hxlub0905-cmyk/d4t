@@ -48,6 +48,7 @@ __all__ = [
     "RouteBy", "resolve_route", "route_miss_message",
     "Issue", "execution_order", "validate", "is_region_edge",
     "region_edge_values", "hydrate_regions", "RECIPE_VERSION",
+    "referenced_features",
 ]
 
 
@@ -988,6 +989,48 @@ def _decide_unknown(decide: "DecideSpec", feats: Set[str],
 
     if str(decide.score or "").strip():
         check("the score", decide.score)
+    return out
+
+
+def referenced_features(recipe: "Recipe") -> Set[str]:
+    """判定段與分數表達式**讀了**哪些名字（F57）。
+
+    「這個名字被誰讀」跟「這個名字被誰寫」是兩件事，而只有前者決定一次撞名
+    痛不痛：兩張卡都寫 `glv_pixels` 而沒有人讀它，那是雜訊；兩張卡都寫
+    `glv_max` **而判定樹正拿它問問題**，那是「這個答案取決於哪一張卡排在
+    後面」，而使用者沒有辦法用那個名字表達他要哪一張。
+
+    ⚠ **壞掉的表達式回空的，不 raise。** 語法錯有自己那條 lint
+    （`score-expr` / `_decide_issues`），在這裡再炸一次只會讓一個打錯的括號
+    連帶蓋掉別的檢查。
+    """
+    out: Set[str] = set()
+
+    def add(text: Any) -> None:
+        t = str(text or "").strip()
+        if not t:
+            return
+        try:
+            out.update(parse_expression(t).variables)
+        except ExpressionError:
+            pass                        # 語法錯有自己那條 lint
+
+    decide = getattr(recipe, "decide", None)
+    if decide is None:
+        add(getattr(recipe.score, "expr", ""))
+        return out
+    for item in decide.let:
+        if getattr(item, "is_blank", False):
+            continue
+        add(item.expr)
+        add(getattr(item, "scale", ""))
+    if decide.tree is not None:
+        for when in _tree_whens(decide.tree):
+            add(when)
+    else:
+        for rule in decide.rules:
+            add(rule.when)
+    add(decide.score)
     return out
 
 
@@ -2630,42 +2673,85 @@ def _clean_params_for(step_cls: Type[Step], raw: Dict[str, Any],
 
 
 def _feature_collisions(step_cls, p: Dict[str, Any], nid: str, k: str,
-                        feat_owner: Dict[str, Any]) -> List["Issue"]:
+                        feat_owner: Dict[str, Any],
+                        used: Optional[Set[str]] = None) -> List["Issue"]:
     """這張卡寫的特徵有沒有蓋掉別張卡的（就地更新 ``feat_owner``）。
 
     後面的卡會**安靜地**蓋掉前面的（``Context.add_feature`` 允許覆寫，只在 meta
     留紀錄）。最典型的踩法是「量兩個 ROI」—— 兩張 glv_stats 都寫 glv_mean，
     跑完只剩後面那張的值，而分數表達式完全沒有辦法指到前面那一個。
-    這是**警告**不是 error：同名覆寫有時是刻意的（例如重跑一次 normalize），
-    但它必須看得見。
+
+    F57 改了兩件事，而**級別一件都沒有改**
+    --------------------------------------
+    ① **句子看得見「有沒有人在讀這個名字」**（``used`` = 判定段與分數表達式
+    讀到的名字，見 :func:`referenced_features`）。同樣一次撞名，
+    「判定樹正拿 ``glv_max`` 問問題」跟「沒有人讀它」是兩種不同的處境，而以前
+    那一句話對兩種**逐字相同** —— 它甚至在沒有人讀的時候也宣稱「``glv_max``
+    在分數表達式裡指的是這張卡」。
+
+    ② **被蓋掉的那一張卡也要講**（`feature-renamed`，`info`）。以前只有**後**
+    面那張拿得到訊息，而畫面上真正說不通的是**前**面那張：它的
+    ``glv_median`` 從此叫 ``a_glv_median``，而它自己那張卡上一個字都沒有。
+    級別是 `info` 所以不畫第二顆琥珀點 —— 一次撞名畫兩顆點是把同一件事數成
+    兩件（`canvas.badge_paints` 只畫 error 與 warning）。
+
+    ⚠ **就算判定正在讀也不升成 error。** 判準寫在 :func:`_region_collisions`
+    上：差別不是嚴重程度，是**有沒有第二條路拿得到被蓋掉的那一份**。特徵有
+    （引擎救成 ``<節點名>_<特徵>``），區域沒有。擋掉一份跑得出數字、而且那個
+    數字使用者換個名字就指得到的 recipe，比講一句更糟（推廣鐵則）。
 
     抽成函式是因為 F11 Input-0 之後**入口卡也要跑這一段** —— 兩張 load 卡都寫
     `n_channels`。同一段判斷抄兩份的話，總有一份會長歪（這個 repo 記過三次）。
     """
     out: List[Issue] = []
+    used = used or set()
     diag = set(step_cls.diagnostic_features(p))
     for f in step_cls.resolve_features(p):
         prev = feat_owner.get(f)
         owner, owner_diag = (prev if isinstance(prev, tuple) else (prev, False))
-        # **兩邊都是診斷數字就不講**（F11 Enhance-3）：`clip_frac` 是每一張
-        # Enhance 卡都會產出的，所以兩張 Enhance 卡必然撞名 —— 在每一份正常的
-        # recipe 上都出現的警告會被學會忽略，而真的那一條也一起被忽略。
-        # 值沒有丟（engine 救成 `<節點名>_clip_frac`），跳掉的只是那句話。
-        if owner is not None and owner != nid and f in diag and owner_diag:
+        if owner is None or owner == nid:
+            feat_owner.setdefault(f, (nid, f in diag))
+            continue
+        # **兩邊都是診斷數字就不講**（F11 Enhance-3，F57 量過之後保留）：
+        # `clip_frac` 是每一張 Enhance 卡都會產出的，所以兩張 Enhance 卡必然
+        # 撞名 —— 在每一份正常的 recipe 上都出現的訊息會被學會忽略，而真的
+        # 那一條也一起被忽略。值沒有丟（engine 救成 `<節點名>_clip_frac`）。
+        #
+        # ⚠ F57 想過把它降成 `info`（「不畫琥珀點，但寫下來」），**而那是錯
+        # 的**：`info` 一樣進卡片的 tooltip，而且
+        # `test_the_reference_recipes_stay_completely_clean` 鎖的是**一條都
+        # 沒有**。「每一份正常的 recipe 都乾淨」是一個有人選過的不變量，
+        # 換成「每一份都有兩行不痛不癢的話」就是把它丟掉。
+        if f in diag and owner_diag:
             feat_owner[f] = (nid, True)
             continue
-        if owner is not None and owner != nid:
-            out.append(Issue(
-                code="feature-collision", level="warning", node_id=nid,
-                title=f"step '{nid}' overwrites the feature '{f}'",
-                detail=f"route '{k}': '{f}' is already produced by "
-                       f"'{owner}'; the later value wins, so '{f}' in "
-                       f"the score expression means this card's value. "
-                       f"The earlier one is still available as "
-                       f"'{owner}_{f}'. Give one of the two cards a "
-                       f"different output name if that is clearer."))
+        if f in used:
+            detail = (f"route '{k}': the decision reads '{f}', and two cards "
+                      f"write it - '{owner}' first, then '{nid}'. The later "
+                      f"one wins, so the decision is reading '{nid}'s value. "
+                      f"Say which one you mean: '{owner}_{f}' is still there "
+                      f"for the first, and '{f}' means the second. Or give "
+                      f"one of the two cards a different output name.")
         else:
-            feat_owner.setdefault(f, (nid, f in diag))
+            detail = (f"route '{k}': '{f}' is already produced by '{owner}', "
+                      f"and the later card wins - so a plain '{f}' anywhere "
+                      f"means this card's value, and '{owner}'s is called "
+                      f"'{owner}_{f}'. Nothing reads '{f}' at the moment; "
+                      f"give one of the two cards a different output name if "
+                      f"that is clearer.")
+        out.append(Issue(
+            code="feature-collision", level="warning", node_id=nid,
+            title=f"step '{nid}' overwrites the feature '{f}'",
+            detail=detail))
+        # 被蓋掉的那一張也要知道它的數字改叫什麼了（見上面的說明）。
+        out.append(Issue(
+            code="feature-renamed", level="info", node_id=owner,
+            title=f"'{owner}' now writes '{f}' as '{owner}_{f}'",
+            detail=(f"route '{k}': '{nid}' also writes '{f}', and it runs "
+                    f"later, so it keeps the plain name. This card's value "
+                    f"is still measured - it is called '{owner}_{f}' in the "
+                    f"results, in the CSV, and in the decision.")))
+        feat_owner[f] = (nid, f in diag)
     return out
 
 
@@ -2849,7 +2935,9 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     requires-ref /
     ambiguous-input / score-expr / unknown-feature（warning）/
     stale-feature-ref（warning）/ feature-collision（warning）/ bad-bins /
-    uneven-treatment（warning）/ card-order（warning），加上各卡
+    uneven-treatment（warning）/ card-order（warning）/
+    feature-renamed（info，F57：被蓋掉的那一張卡也要知道它的數字改叫什麼）/
+    port-not-produced（warning），加上各卡
     `Step.kind_issues` 宣告的 kind 條件項（PR-2；GLV 的
     center-on-big-image（warning）/ each-box-on-patch（info））。
     """
@@ -3096,6 +3184,11 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                 code="score-expr", level="error", node_id=None,
                 title="Score expression failed to parse", detail=str(e)))
 
+    # 判定段與分數表達式**讀了**哪些名字（F57）。撞名分級要看這一份 ——
+    # 一次撞名痛不痛，取決於有沒有人在讀那個名字，不取決於直覺。
+    # 一份算一次（它跟 route 無關），而不是每張卡算一次。
+    used_features = referenced_features(recipe)
+
     # ---- 每條 route：unknown-node / cycle / reads 模擬 / requires_ref ----
     for k in kinds:
         route = recipe.routes[k]
@@ -3155,7 +3248,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                 # **撞名檢查對入口卡也要跑**（F11 Input-0）。以前這一段沒有它，
                 # 因為「入口」只有一張所以撞不起來 —— 現在兩張 load 卡都寫
                 # n_channels，後面那張會安靜地蓋掉前面那張。
-                issues.extend(_feature_collisions(step_cls, p, nid, k, feat_owner))
+                issues.extend(_feature_collisions(step_cls, p, nid, k,
+                                                  feat_owner, used_features))
                 issues.extend(_region_collisions(step_cls, p, nid, k,
                                                  region_owner))
                 feats |= set(step_cls.resolve_features(p))
@@ -3316,7 +3410,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                                f"— those cards would never receive anything. "
                                f"Remove the connection."))
 
-            issues.extend(_feature_collisions(step_cls, p, nid, k, feat_owner))
+            issues.extend(_feature_collisions(step_cls, p, nid, k,
+                                              feat_owner, used_features))
             # 順序那一支看的是**這張卡之前**的歷史，所以要排在記錄之前。
             issues.extend(_late_normalize(step_cls, p, nid, k, history))
             issues.extend(_uneven_treatment(step_cls, p, nid, k, history,

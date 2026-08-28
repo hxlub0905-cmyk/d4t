@@ -6,7 +6,7 @@
 988aa4655c507ed44e9065ea6238e7f55502ca3c CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 5b750fd2b09c4ced476be65c84f41d45231f9070 README.md
-5fd28cf288fa568f2dbedfdbb1072efcac5a086b SESSION_LOG.md
+a08ea2b2352737b74a4596e014c9a4c178b14e5f SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 61c8e7e8e41df159ff1b6230e093fa58a68b661c d4t/__main__.py
@@ -55,7 +55,7 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 724b55ee696bc3a0f4928d453ed3a5bdae1643ad d4t/core/pipeline/decide_tree.py
 a3cd39735b6f5e9ee498051d710b0a3a9848d36b d4t/core/pipeline/engine.py
 7e2797dce8253240fcf45a27f57f28d2c246e272 d4t/core/pipeline/expression.py
-23b01438af3fb5296f961f217642addcefd527c4 d4t/core/pipeline/recipe.py
+8ba992625f0ca171bda64db15e67b1c5cdcfc046 d4t/core/pipeline/recipe.py
 7c711f4003957c95543c551a4259983527375332 d4t/core/pipeline/step.py
 b052c76f56f4fae3aca461628976727850e1b39f d4t/core/pipeline/verdict_features.py
 168c2e3811844d0267a24f4a69963848bd594e60 d4t/core/pipeline/verdict_trace.py
@@ -119,7 +119,7 @@ cb5ec1e3cc74cbfc6f03fe2edb526c0993465c6e docs/GLAS-INTERFACE.md
 6181b7d19b2ddba28cf4bf0dd1d4163f9face1f6 docs/LICENSING.md
 15c2bb25a9b655500c0706d899826872abbc425f docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
-e6a7b75c968c5b5b990fb80da54e8f0862bb1918 docs/PITFALLS.md
+b20a667da5e4e110c27f270ac8905e08a335787a docs/PITFALLS.md
 8ef827cf11c924e4a1f7dd7ec63d9531c3cf3c43 docs/ROADMAP.md
 27022c8f2b8f70a300fd35629304b5427d3a7de7 docs/USING-CD.md
 58181d5bf43c935303eed95df90778e3c2ced841 docs/USING-CHARACTERIZATION.md
@@ -138,7 +138,7 @@ df9b95e62f80bd81d55d534c75acd8080bc0bc25 docs/plans/F45-feature-specs-and-verdic
 1c08e7d726051d50c8957768f0cd442a57d3a161 docs/plans/F48-six-decisions.md
 af2a0ffc8331813f1fb674e4c4293457921c7161 docs/plans/F49-features-on-wires.md
 9b5377891f8e86a52f32a1e546f4aad6175e5bdf docs/plans/F50-canvas-is-cards.md
-bea3726b45a3dbdb343b2f08d008d190387d5990 docs/plans/F51-feature-names-one-truth.md
+9822a762879030cad132c0d8a0f07c2762c24dbd docs/plans/F51-feature-names-one-truth.md
 49d28af403671958a1292959ecf5bb03ad423842 docs/plans/F52-one-way-to-print-a-number.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
@@ -204,6 +204,7 @@ af91354855f9f11d953dfd45857bb779eb4c55dd tests/test_f11_split_load_cards.py
 42a0e3cb1c544bf6a7b012f82c18428b860ad7de tests/test_f11_tiff_stack.py
 7c7df6c7c646d40764b53a5dbb45747562c7f66f tests/test_f9_8_cache_and_disabled.py
 63d8348237ca965585064db004191a9cd8b4d03d tests/test_fab_probe.py
+199e82d5867b24d870e2314c808207bee634f810 tests/test_feature_collision_speaks_up.py
 374a06dc0a98d0fe1114aacbb0d3b87895835c5a tests/test_feature_names_match_the_engine.py
 09384d6c25dce024e5894657c50a95b393f2f7ac tests/test_feature_owner_prefix.py
 cbde57dc407a1d66cf4a25b8e6e76e74633adced tests/test_feature_specs.py
