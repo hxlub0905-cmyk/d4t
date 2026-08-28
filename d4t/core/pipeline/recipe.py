@@ -39,8 +39,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
 from .expression import ExpressionError, parse_expression
 from .step import (
-    FEATURE_TYPES, GROUP_COMPARE, GROUP_ENHANCE, REGION_TYPES, SCALE_LOT,
-    SINGLE_IMAGE_KINDS, ParamError, Step, REGISTRY,
+    FEATURE_TYPES, GROUP_COMPARE, GROUP_ENHANCE, IMAGE_TYPES, REGION_TYPES,
+    SCALE_LOT, SINGLE_IMAGE_KINDS, ParamError, Step, REGISTRY,
 )
 
 __all__ = [
@@ -2845,7 +2845,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     half-configured（warning）/ unknown-node /
     unknown-route / cycle / missing-image / unknown-region /
     duplicate-region（error）/ region-edge-no-port（warning）/
-    region-has-no-line（warning）/ requires-ref /
+    region-has-no-line（warning）/ port-not-produced（warning）/
+    requires-ref /
     ambiguous-input / score-expr / unknown-feature（warning）/
     stale-feature-ref（warning）/ feature-collision（warning）/ bad-bins /
     uneven-treatment（warning）/ card-order（warning），加上各卡
@@ -2967,6 +2968,72 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                    f"not name a region, so '{e.dst}' does not know which one "
                    f"to use. Drag the line again from the region port (the "
                    f"diamond) on '{e.src}' that has the name you want."))
+
+    # ---- 線的**來源埠**要真的存在（F55）----
+    #
+    # 這一條補的是一個十天沒人看見的洞：健檢一直只問「這個名字上游有沒有人
+    # 產出」，從來沒問過「**這條線指的那張卡**產不產出它」。而那兩句話不一樣
+    # —— 影像流在 `Context` 裡是照名字查的，所以一條從「不產出任何影像的卡」
+    # 拉出來、標著 `ref` 的線，執行期會安靜地拿到**別張卡**的 `ref`：
+    # 跑得完、有數字、而且數字是對的，只有畫布在說謊。
+    #
+    # 2026-08-28 在一份真實的 recipe 上實測過這個形狀：
+    # `["roi_reference", "ref", "glv_stats", "reference_source"]` ——
+    # `roi_reference` 的 `resolve_writes` 是空的（它只產出區域），而把來源改
+    # 成真正產出 `ref` 的 `denoise` 之後，兩份 CSV **逐位元組相同**。
+    # 也就是說：今天不痛，但畫面上那條線指著錯的地方，而**下一個人**（或明天
+    # 的自己）會照著那條線去理解資料從哪來。這正是鐵則 9 講的那件事。
+    #
+    # 為什麼是 warning 不是 error：結果現在是對的，擋掉一份跑得出正確數字的
+    # recipe 比讓它跑更糟（推廣鐵則）。它要說的是「把線重拉一次」。
+    #
+    # ⚠ **埠空著的線不算**（只表達先後順序，見 :class:`Edge`），而
+    # ``dst_in`` 指到的參數不是影像／區域的線也不算 —— 那種線這裡沒有立場
+    # 判斷它的 ``src_out`` 該長什麼樣。
+    for e in recipe.edges:
+        if not (e.src_out and e.dst_in):
+            continue
+        src_node = recipe.nodes.get(e.src)
+        dst_node = recipe.nodes.get(e.dst)
+        if src_node is None or dst_node is None or not src_node.enabled:
+            continue
+        src_cls = registry.get(src_node.step)
+        dst_cls = registry.get(dst_node.step)
+        if src_cls is None or dst_cls is None:
+            continue                            # 已記 unknown-step
+        want = {sp.name: sp.type for sp in dst_cls.params}.get(e.dst_in, "")
+        sp = clean_params.get(e.src, {})
+        if want in REGION_TYPES:
+            produced = set(src_cls.resolve_regions_out(sp))
+            what, a_what, port = "region", "a region", "diamond"
+        elif want in IMAGE_TYPES:
+            # **kind 相依的宣告要取聯集**：load 卡會依資料型別決定產出哪幾條
+            # 流，而這一段不在 per-route 的迴圈裡。取聯集是保守的方向 ——
+            # 寧可漏報一條，也不要對一份在別條 route 上完全正確的線報錯。
+            produced = set()
+            for k in kinds:
+                produced |= set(src_cls.resolve_writes_for_kind(sp, k))
+            if not kinds:
+                produced |= set(src_cls.resolve_writes(sp))
+            what, a_what, port = "image stream", "an image stream", "dot"
+        else:
+            continue
+        if e.src_out in produced:
+            continue
+        has = ("it produces %s" % ", ".join("“%s”" % n for n in sorted(produced))
+               if produced else "it produces none at all")
+        issues.append(Issue(
+            code="port-not-produced", level="warning", node_id=e.dst,
+            title=f"the line into '{e.dst}' comes from a port '{e.src}' "
+                  f"does not have",
+            detail=(f"the line says “{e.src_out}” comes from '{e.src}', but "
+                    f"'{e.src}' does not produce that {what} ({has}). It "
+                    f"still runs — the engine looks {a_what} up by its "
+                    f"name alone, so "
+                    f"'{e.dst}' gets whichever card really made "
+                    f"“{e.src_out}” — but the canvas is pointing at the wrong "
+                    f"card. Drag the line again from the {port} on the card "
+                    f"that really produces it.")))
 
     # ---- 一個輸入埠只能有一條線（F9-7）----
     # 引擎查資料從哪來的 key 是 ``(下游節點, 流名)``，所以兩條線落在同一個 key
