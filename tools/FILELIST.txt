@@ -6,7 +6,7 @@
 988aa4655c507ed44e9065ea6238e7f55502ca3c CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 5b750fd2b09c4ced476be65c84f41d45231f9070 README.md
-957c9a56753340323151470909dc6368383db0db SESSION_LOG.md
+7e6711fddffab2c55360db5f70bd00838e01d96c SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 61c8e7e8e41df159ff1b6230e093fa58a68b661c d4t/__main__.py
@@ -55,7 +55,7 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 724b55ee696bc3a0f4928d453ed3a5bdae1643ad d4t/core/pipeline/decide_tree.py
 a3cd39735b6f5e9ee498051d710b0a3a9848d36b d4t/core/pipeline/engine.py
 7e2797dce8253240fcf45a27f57f28d2c246e272 d4t/core/pipeline/expression.py
-29571f6e0ec3810b4a26bd9321224a287af97933 d4t/core/pipeline/recipe.py
+23b01438af3fb5296f961f217642addcefd527c4 d4t/core/pipeline/recipe.py
 7c711f4003957c95543c551a4259983527375332 d4t/core/pipeline/step.py
 b052c76f56f4fae3aca461628976727850e1b39f d4t/core/pipeline/verdict_features.py
 168c2e3811844d0267a24f4a69963848bd594e60 d4t/core/pipeline/verdict_trace.py
@@ -119,7 +119,7 @@ cb5ec1e3cc74cbfc6f03fe2edb526c0993465c6e docs/GLAS-INTERFACE.md
 6181b7d19b2ddba28cf4bf0dd1d4163f9face1f6 docs/LICENSING.md
 15c2bb25a9b655500c0706d899826872abbc425f docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
-8a17bc1c4f1557d7f3328d71ee24f4283c41f4e7 docs/PITFALLS.md
+12646d499c8d7270c66c4d882704037101e6a78c docs/PITFALLS.md
 8ef827cf11c924e4a1f7dd7ec63d9531c3cf3c43 docs/ROADMAP.md
 27022c8f2b8f70a300fd35629304b5427d3a7de7 docs/USING-CD.md
 58181d5bf43c935303eed95df90778e3c2ced841 docs/USING-CHARACTERIZATION.md
@@ -237,7 +237,7 @@ e84e37dde39527c6f3ccfc940b8fadf7a6002a32 tests/test_output_fold.py
 e822f193eeb309f01aa896946dfc50b123036b1e tests/test_period_golden.py
 37fe3291f5eb15938ef1e8097b3a955e106be9f4 tests/test_phase_origin.py
 b50c831bcb56f33b701995f750409a06b054aa33 tests/test_pick_defect_box.py
-feedc89ab7d8fa2bd7bde81f283b2f1b3ccc4b69 tests/test_port_not_produced.py
+ba50763ee8d055850471da4dce3a816e71c73641 tests/test_port_not_produced.py
 d3bf372a8505a94d5d189082b01b566b036bc87c tests/test_quality.py
 6918bfb1ebb566e3b83f253ec762f73a48e553ba tests/test_rank_without_a_score.py
 8d363d68e9a5e7f35d4fa45beba6d808897c3dd7 tests/test_recipe.py
