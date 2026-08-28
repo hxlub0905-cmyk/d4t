@@ -190,3 +190,42 @@ def test_every_defect_type_is_planted_on_an_inner_space(gc):
         img = big.copy()
         gcl.plant(img, kind, 200.0, 150.0, np.random.default_rng(1), px)
         assert float(np.abs(img - big).max()) >= 50.0, kind
+
+
+def test_whatever_it_returns_tiles_seamlessly():
+    """⚠ **這才是這支工具真正要的性質** —— 不是「數字最小」，是「鋪得準」。
+
+    次像素位移要線性插值，而插值本身在高對比的圖上就要付約 1 GLV —— 於是
+    **整數**位移（不必插值）永遠比非整數的漂亮一點。實測一張 1000² 的乾淨圖
+    垂直真週期 34.0，量出來是 170（五倍）：34 要插值、170 剛好整數。
+
+    那**沒有修**，因為倍數也是週期，鋪出來的圖一模一樣。所以這裡斷言的是
+    性質不是數值 —— 拿它回的那個數字去鋪，接縫要對得起來。
+    """
+    G2 = mgepi.GEOMETRY
+    img = np.clip(mgepi.frame(1000, 1000, G2), 0, 255).astype(np.uint8)
+    px, py = gcl.periods(img)
+    big = gcl.tile(img, 600, 600, px, py)
+    sx, sy = int(round(px)), int(round(py))
+    assert float(np.abs(big[:, :600 - sx] - big[:, sx:]).mean()) < 3.0
+    assert float(np.abs(big[:600 - sy, :] - big[sy:, :]).mean()) < 3.0
+
+
+def test_a_thin_bright_stripe_inside_the_space_is_not_an_mg_line(gc):
+    """⚠ **這一條是突變測試逼出來的。**
+
+    「交界要跨在兩種東西之間」那條測試**擋不住這件事** —— space 正中央那條
+    細亮芯的左右緣也是貨真價實的交界，只是它不是 MG↔space 的交界。拿掉寬度
+    篩選，那條測試照樣綠，而缺陷會有一半種在 space 中間。
+
+    所以這裡鎖**數量**：一個週期上 MG 有 `period` 根、缺席一根，每根兩個
+    交界 → 2 × (period − 1)。亮芯若也算進來會多一倍。
+    """
+    G2 = mgepi.GEOMETRY
+    xs = sorted({x for x, _ in gcl.inner_space_sites(gc)})
+    span = G2.mg_pitch * G2.period
+    per_period = len([x for x in xs if x < span])
+    want = 2 * (G2.period - 1)
+    assert per_period <= want + 2, (
+        "一個週期量到 %d 個交界，期望 ~%d —— 細亮芯大概也被當成 MG 了"
+        % (per_period, want))

@@ -42,7 +42,7 @@ import argparse
 import json
 import os
 import sys
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -119,9 +119,11 @@ def _period_1d(g: np.ndarray, axis: int, step: float = 0.02) -> float:
     29/59/88/117/147 是 38/41/24/37/17，而 176 是 **6.01** —— 真正的週期贏得
     非常明顯，那個偏差根本不是問題。
 
-    ⚠ **也試過「第一個好得跟最好的差不多的位移」**（怕挑到週期的倍數）——
-    那更糟：真 GC 上 lag 147（五根）是 8.00、176（六根）是 6.00，於是它挑
-    147，而 147 不是週期。挑最小值就對了。
+    ⚠ **「第一個夠好的位移」對不對，全看容差有多緊。** 1.6 倍的時候真 GC 上
+    lag 147（五根，不是週期）是 8.00、176 是 6.00，它挑 147 —— 那一版是錯的。
+    但改成純粹取最小值也錯：乾淨的週期圖上一個週期與三個週期的平均差**都是
+    0**，誰贏由浮點誤差決定（實測一張 1000² 的圖回了五個週期）。
+    1.15 倍 ＋ 絕對下限 0.5 兩種情況都對。
 
     ⚠ **不到兩個週期寬的 GC 量不準是原理上的事** —— 見 :func:`periods`。
     知道答案就用 ``period_x`` 明講，不要賭。
@@ -131,7 +133,19 @@ def _period_1d(g: np.ndarray, axis: int, step: float = 0.02) -> float:
     lags = list(range(8, hi + 1))
     if not lags:
         return float(n)
-    coarse = float(min(lags, key=lambda s: _mismatch(g, float(s), axis)))
+    ms = [_mismatch(g, float(s), axis) for s in lags]
+    best = min(ms)
+    # **基頻 = 好得跟最好的一樣的那些位移裡最小的那一個。**
+    #
+    # 只取最小值不行：一張乾淨的週期圖上，位移一個週期與位移三個週期的平均差
+    # **都是 0**，誰贏由浮點誤差決定（實測一張 1000² 的圖回了 5 個週期）。
+    #
+    # 而容差不能鬆：真 GC 上 lag 147（五根，**不是**週期）是 8.00、176 是
+    # 6.00，容差 1.6 倍的話 147 會贏。1.15 倍剛好把它擋在外面，而乾淨圖上
+    # 那些真的倍數差在 0.0x，靠 +0.5 的絕對下限一起進來。
+    tol = max(best * 1.15, best + 0.5)
+    coarse = float(next(s for s, m in zip(lags, ms) if m <= tol))
+
     fine = np.arange(max(8.0, coarse - 1.0), coarse + 1.0 + step, step)
     return float(min(fine, key=lambda s: _mismatch(g, float(s), axis)))
 
@@ -147,9 +161,41 @@ def periods(gc: np.ndarray, step: float = 0.02) -> Tuple[float, float]:
     使用者那張 205 px（1.16 個週期）量出 175.96 是對的，但那是**真實影像的
     雜訊打破了平手**，不是因為資訊夠。所以 :func:`generate` 收得下明講的
     ``period_x`` / ``period_y`` —— 知道答案的時候就不要賭。
+
+    ⚠ **回的可能是真正週期的整數倍，而那不影響鋪圖。** 次像素位移要靠線性
+    插值，插值本身在高對比的圖上就要付約 1 GLV —— 於是**整數**位移（不必
+    插值）永遠比非整數的漂亮一點。實測一張 1000² 的乾淨圖，垂直真週期 34.0，
+    而它回 170（五倍）：34 要插值、170 剛好整數。
+
+    這件事**沒有修**，因為對這支工具而言它不是問題：**倍數也是週期，鋪出來
+    的圖一模一樣**（`test_whatever_it_returns_tiles_seamlessly` 守的就是這一
+    句）。真正該保證的是「鋪得準」，不是「數字最小」。要那個數字好看就用
+    ``period_x`` 明講。
     """
     g = gc.astype(np.float32)
-    return _period_1d(g, 1, step), _period_1d(g, 0, step)
+    # **大圖先抽樣再量。** 粗掃是「每一個候選位移都比一次整張圖」，成本
+    # 隨邊長平方成長 —— 一張貼進來的 1000² GC 要跑幾十秒，而使用者按下
+    # 「貼上」之後只會看到畫面卡住。抽樣到 ~400 px 量完再乘回去，最後在
+    # 原解析度上細修 ±k，答案一樣是次像素的。
+    if max(g.shape) <= 400:
+        return _period_1d(g, 1, step), _period_1d(g, 0, step)
+    # ⚠ **縮小要用面積平均，不能用抽樣（``g[::k, ::k]``）。** 抽樣會把
+    # 非整數的週期**別名**掉：34 px 的週期抽樣 3 倍之後，位移 11 列對不齊
+    # （相位每次差 0.33），對得齊的最小整數位移是 34 列 —— 也就是**三個**
+    # 週期。實測一張 1000² 的圖因此量到 102。面積平均之後圖案仍然連續，
+    # 週期就照著縮放比例縮，非整數也活得下來。
+    f = 400.0 / float(max(g.shape))
+    small = cv2.resize(g, None, fx=f, fy=f, interpolation=cv2.INTER_AREA)
+    out = []
+    for axis in (1, 0):
+        # ⚠ 這裡**不要**放寬 step：候選的除數（``coarse / k``）是靠次像素
+        # 細修才對得上的，step 0.25 落不到 13.6 那種值上，於是它被容差
+        # 擋掉、粗掃的倍數就贏了（實測 1000² 的圖回 5 個週期）。
+        coarse = _period_1d(small, axis, step) / f
+        pad = 2.0 / f
+        fine = np.arange(max(8.0, coarse - pad), coarse + pad + step, step)
+        out.append(float(min(fine, key=lambda s: _mismatch(g, float(s), axis))))
+    return out[0], out[1]
 
 
 # --------------------------------------------------------------------------- #
@@ -195,10 +241,28 @@ def inner_space_sites(gc: np.ndarray) -> List[Tuple[int, int]]:
     band = g[max(0, bands[0] - 3):bands[0] + 4, :].mean(axis=0)
     lo, hi = float(band.min()), float(band.max())
     bright = band > lo + 0.66 * (hi - lo)          # MG 亮條
-    edges: List[int] = []
-    for x in range(1, len(bright)):
-        if bright[x] != bright[x - 1]:
-            edges.append(x)
+
+    # 亮的**連續段**，而且要夠寬才算一根 MG。
+    #
+    # ⚠ 不篩寬度的話 space 正中央那條細亮芯也會被當成一根線，它的左右緣
+    # 因此各生一個「交界」—— 使用者那張 GC 上量到 50 個而不是 14 個，
+    # 而多出來的那些**落在 space 中間**，不是 MG↔space 的交界。
+    runs: List[Tuple[int, int]] = []
+    x0 = None
+    for x in range(len(bright)):
+        if bright[x] and x0 is None:
+            x0 = x
+        elif not bright[x] and x0 is not None:
+            runs.append((x0, x))
+            x0 = None
+    if x0 is not None:
+        runs.append((x0, len(bright)))
+    # 判準用**最寬的那一段**當尺，不是中位數：亮條與亮芯的數量差不多
+    # （一個週期各六段），所以中位數落在兩者中間，篩不掉細的那一半。
+    widest = max([b - a for a, b in runs] or [4])
+    wide = max(4.0, 0.45 * float(widest))
+    keep = [r for r in runs if (r[1] - r[0]) >= wide] or runs
+    edges = sorted({e for a, b in keep for e in (a, b)})
     return [(x, y) for x in edges for y in bands]
 
 
@@ -235,11 +299,17 @@ def plant(img: np.ndarray, kind: str, cx: float, cy: float,
 def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
              defects: int = 3000, patch: int = 81, real_frac: float = 0.5,
              noise: float = 6.0, seed: int = 11, fmt: str = "png",
-             period_x: float = 0.0, period_y: float = 0.0) -> Dict[str, Any]:
+             period_x: float = 0.0, period_y: float = 0.0,
+             progress: Optional[Callable[[int, int], bool]] = None
+             ) -> Dict[str, Any]:
     """產 RSEM 大圖 lot ＋ 從大圖切下來的 patch lot。回傳路徑 dict。
 
     ``period_x`` / ``period_y`` 給 0 就自己量（:func:`periods`）。**知道答案
     的時候請填** —— 見那一支的說明：不到兩個週期寬的 GC 量不準是原理上的事。
+
+    ``progress(做完幾張, 總共幾張)`` 每張大圖叫一次；**回 False 就停下來**
+    （UI 的「停止」）。停下來的時候**兩份 lot 都不寫** —— 半份 KLARF 配著
+    半份影像比什麼都不產更糟（同 `run_all` 的老規矩：中途停止就不寫）。
     """
     if images < 1 or defects < 1:
         raise ValueError("images 與 defects 都至少要 1")
@@ -336,6 +406,8 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
                                "1", "1", "0", "2",
                                f"{len(pages) - 1} {len(pages)}"])
             patch_truth[did] = {"is_real": kind != NUISANCE_TYPE, "type": kind}
+        if progress is not None and not progress(i + 1, int(images)):
+            raise KeyboardInterrupt("使用者停止")
         if made >= defects:
             break
 
