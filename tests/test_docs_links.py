@@ -144,10 +144,14 @@ def test_the_docs_agree_with_group_order_on_how_many_stages_there_are():
     唯一出處」）與 `ROADMAP.md` 兩份都還畫著含 Algo 的八段。
     """
     import d4t.core.steps  # noqa: F401 — 觸發卡片註冊
-    from d4t.core.pipeline.step import GROUP_ALGO, GROUP_ORDER
+    from d4t.core.pipeline import step as step_mod
+    from d4t.core.pipeline.step import GROUP_ORDER
 
-    assert GROUP_ALGO not in GROUP_ORDER, (
-        "Algo 回到 GROUP_ORDER 了 —— 這一條的前提要重寫")
+    # F48（2026-08-28）：`GROUP_ALGO` 整個常數刪掉了，所以這裡問的從
+    # 「它不在順序裡」變成「它不存在」。守的仍然是同一件事：文件不可以還畫著
+    # 含 Algo 的八段。
+    assert not hasattr(step_mod, "GROUP_ALGO"), (
+        "Algo 回來了 —— 這一條的前提要重寫")
     for name in ("docs/ARCHITECTURE.md", "docs/ROADMAP.md"):
         text = (REPO / name).read_text(encoding="utf-8")
         assert "Measure → Algo → Compare" not in text, (

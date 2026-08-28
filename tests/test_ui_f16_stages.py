@@ -27,8 +27,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from d4t.core.pipeline import step as step_mod   # noqa: E402 — Qt-free
 from d4t.core.pipeline.step import (      # noqa: E402 — Qt-free
-    GROUP_ALGO, GROUP_ORDER, GROUP_OUTPUT, REGISTRY,
+    GROUP_ORDER, GROUP_OUTPUT, REGISTRY,
 )
 import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 
@@ -72,9 +73,32 @@ def test_the_stages_are_in_the_order(qapp):
     「那三件事接著做」）。
     """
     order = list(GROUP_ORDER)
-    assert GROUP_ALGO not in order and GROUP_OUTPUT in order
+    assert GROUP_OUTPUT in order
     assert order == ["input", "enhance", "region", "measure",
                      "compare", "adc", "output"], order
+
+
+def test_the_algo_group_is_gone_for_good(qapp):
+    """``GROUP_ALGO`` 這個常數 2026-08-28 刪掉了（F48，使用者定調）。
+
+    **這一條是翻面來的，不是新加的。** 以前它寫的是
+    ``assert GROUP_ALGO not in GROUP_ORDER`` —— 那是「收起來」的證據
+    （常數還在，只是不在順序裡）。「刪掉」的證據剛好相反：那個名字要問不到。
+    F41 §3 為了同一個理由翻過兩條測試，這是第三條。
+
+    順便守住那個**很容易誤刪的鄰居**：`CATEGORY_ALGO` 是另一個軸（「這張卡
+    吐數字」，每一張量測卡都是它），三段式心智模型裡的 ``"algo"`` 段
+    （`welcome._SEG_LINES`、`theme.seg_color`）也還活著。兩個都不准跟著走。
+    """
+    assert not hasattr(step_mod, "GROUP_ALGO"), (
+        "GROUP_ALGO 回來了 —— 它 2026-08-28 刪掉了（外掛卡宣告 group=\"algo\" "
+        "的話卡片庫列不出來，改宣告 GROUP_MEASURE）")
+    assert step_mod.CATEGORY_ALGO == "algo", (
+        "CATEGORY_ALGO 是另一個軸，不該跟著 GROUP_ALGO 一起被刪")
+
+    from d4t.ui import welcome as welcome_mod
+    assert "algo" in [seg for seg, _line in welcome_mod._SEG_LINES], (
+        "三段式心智模型的算法段不見了 —— 那跟卡片庫的 Algo 分區不是同一個東西")
 
 
 def test_output_cards_are_the_end_of_the_line():

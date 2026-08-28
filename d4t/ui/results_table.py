@@ -21,8 +21,20 @@ CLI 的 ``--csv`` 早就吐得出這張表了。這一份是把它搬到畫面�
 ⚠ 多一欄 ``class``，而 CSV 沒有：那是使用者在樹上取的名字，加進 CSV 會動到
 檔案格式（黃金值、下游腳本）。這裡加得起來是因為它只影響畫面。
 
-⚠ **唯讀。** 「看到判錯的那一顆就地改掉」很自然，但那會讓這一頁從「看結果」
-變成「編結果」——而那是兩件事，還沒定調（見 `docs/plans/F27-results-panel.md`）。
+⚠ **只有 ``bin`` 那一欄改得動，而且只改在畫面上**（F48，2026-08-28）。
+F27 §5 把「看到判錯的那一顆就地改掉」列為待定調，理由是那會讓這一頁從
+「看結果」變成「編結果」；使用者 2026-08-28 定調「**只在畫面上，標成手動
+改過**」——所以兩件事仍然是兩件事，改的那個值一個位元組都不會流出這張表：
+
+* 它住在 model 自己那份 row 副本的 ``bin_override`` 鍵上（`set_results` 收到
+  的 dict 是 `dict(r)` 淺拷貝，原本那份 result 不會被動到）；
+* CSV、KLARF、SQLite 全部走 `core.export` 讀原本的 result —— 那條路看不到
+  這個鍵。`tests/test_ui_results_bin_override.py` 拿匯出的位元組守著；
+* **再跑一批就沒了**（`set_results` 重建 rows）。那是刻意的：那些記號講的是
+  上一批的數字，留到下一批會變成一句沒有主詞的話。
+
+改的方式有兩條（都不動既有的滑鼠手勢 —— 單擊 ``bin`` 仍然是問「為什麼」、
+雙擊仍然是去看那一顆）：選起來按 ``F2``／``Enter``，或右鍵選 “Set bin…”。
 
 為什麼是 `QTableView` 而不是 `QTableWidget`
 --------------------------------------------
@@ -69,8 +81,9 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHBoxLayout, QHeaderView, QLineEdit, QMenu,
-    QTableView, QToolButton, QToolTip, QVBoxLayout, QWidget,
+    QAbstractItemView, QHBoxLayout, QHeaderView, QInputDialog, QLineEdit,
+    QMenu, QSpinBox, QStyledItemDelegate, QTableView, QToolButton, QToolTip,
+    QVBoxLayout, QWidget,
 )
 
 from ..core.export.report import BASE_COLUMNS, feature_keys
@@ -90,6 +103,10 @@ CLASS_COLUMN = "class"
 #: CSV 有、但畫面上沒有用的欄。``ok`` 的資訊已經在 ``error`` 與整列的顏色上，
 #: 而一欄 0/1 在一張要用眼睛掃的表上只是雜訊。
 _HIDDEN = ("ok",)
+
+#: 手動改過的 bin 住在 row 副本的這個鍵上（F48）。**不是 result 的欄位** ——
+#: 引擎判的那個值仍然原封不動留在 ``bin``，兩個都要留得住才講得出「從 5 改成 3」。
+OVERRIDE_KEY = "bin_override"
 
 #: 警示徽章那一欄（永遠在最左）。名字帶 ``!`` 所以撞不到任何特徵名 ——
 #: 特徵名都是 Python 識別字。它跟 ``class`` 一樣只存在於畫面上，CSV 沒有。
@@ -302,7 +319,11 @@ def _cell(row: Dict[str, Any], column: str) -> Any:
         return str(row.get("cls") or "")
     if column == "error":
         return "" if row.get("error") is None else str(row.get("error"))
-    if column in ("defect_id", "score", "bin", "ok"):
+    if column == "bin":
+        # 手動改過的話**排序也要跟著它走** —— `sort` 跟 `data` 都走這一支，
+        # 所以「畫面上寫 3」與「排在 3 那一群」不可能各說各話。
+        return row.get(OVERRIDE_KEY, row.get("bin"))
+    if column in ("defect_id", "score", "ok"):
         return row.get(column)
     return (row.get("features") or {}).get(column)
 
@@ -458,6 +479,25 @@ class ResultsTableModel(QAbstractTableModel):
             return None
         value = _cell(row, column)
 
+        if column == "bin" and OVERRIDE_KEY in row:
+            was = row.get("bin")
+            if role == Qt.DisplayRole:
+                # **兩個數字都寫在格子裡。** 只顯示新的值再配一個記號的話，
+                # 使用者要把滑鼠停上去才知道原本是幾 —— 而「引擎判 5，我說是
+                # 3」正是這一欄現在在講的整句話。沒有原值時（那一顆engine
+                # 根本沒判出來）寫 manual，不要寫一個假的 was。
+                return ("%d (was %d)" % (int(value), int(was))
+                        if isinstance(was, int) else "%d (manual)" % int(value))
+            if role == Qt.ToolTipRole:
+                return ("Bin changed by hand on this screen.\n"
+                        "The engine says %s. Exports (CSV, KLARF, the run "
+                        "database) still get the engine's value — this mark "
+                        "is a note for you, and a new run clears it."
+                        % ("bin %d" % int(was) if isinstance(was, int)
+                           else "it could not bin this defect"))
+            if role == Qt.ForegroundRole:
+                return QColor(TOKENS.get("accent", "#2f6fb2"))
+
         if role == Qt.DisplayRole:
             if value is None:
                 # ⚠ **算不出來的那一格留白，不是 0、也不是 NaN**（F19 那一條）。
@@ -478,6 +518,50 @@ class ResultsTableModel(QAbstractTableModel):
         if role == Qt.ToolTipRole and column == "error" and value:
             return str(value)
         return None
+
+    def flags(self, index):                               # noqa: N802 — Qt
+        base = super().flags(index)
+        if index.isValid() and self._columns[index.column()] == "bin":
+            return base | Qt.ItemIsEditable
+        return base
+
+    def setData(self, index, value, role=Qt.EditRole) -> bool:  # noqa: N802
+        """``bin`` 那一欄改得動 —— **只改這份 row 副本**（F48）。
+
+        改回引擎判的那個值＝把記號拿掉（不是再蓋一層「手動改成跟原本一樣」）：
+        使用者要反悔的時候，唯一想得到的動作就是把原本那個數字打回去。
+        """
+        if role != Qt.EditRole or not index.isValid():
+            return False
+        if self._columns[index.column()] != "bin":
+            return False
+        row = self._rows[index.row()]
+        try:
+            new = int(value)
+        except (TypeError, ValueError):
+            return False
+        if new == row.get("bin"):
+            row.pop(OVERRIDE_KEY, None)
+        else:
+            row[OVERRIDE_KEY] = new
+        self.dataChanged.emit(index, index)
+        return True
+
+    def bin_overrides(self) -> Dict[str, int]:
+        """``defect_id`` → 手動改成的 bin（沒改過的不在裡面）。"""
+        return {str(r.get("defect_id", "")): int(r[OVERRIDE_KEY])
+                for r in self._rows if OVERRIDE_KEY in r}
+
+    def clear_bin_overrides(self) -> int:
+        """把所有手動記號拿掉，回傳拿掉幾個。"""
+        n = 0
+        for i, r in enumerate(self._rows):
+            if r.pop(OVERRIDE_KEY, None) is not None:
+                n += 1
+                if "bin" in self._columns:
+                    idx = self.index(i, self._columns.index("bin"))
+                    self.dataChanged.emit(idx, idx)
+        return n
 
     def sort(self, column: int, order=Qt.AscendingOrder) -> None:  # noqa: N802
         """``None`` 一律排到最後（不管升冪降冪）—— 跟 Gallery 同一條規矩。
@@ -588,14 +672,33 @@ class TwoLevelHeader(QHeaderView):
         painter.restore()
 
 
+class _BinDelegate(QStyledItemDelegate):
+    """``bin`` 那一格的編輯器：一個上下界擋好的 QSpinBox（鐵則 4 的精神）。
+
+    上界 999 不是猜的 —— bin 最後會寫進 KLARF 的 ``CLASSNUMBER``，那是一個
+    整數欄；這裡要擋的是「打了一個字母」與「打了一個負數」，不是替使用者
+    決定他的廠內編號要編到幾號。
+    """
+
+    def createEditor(self, parent, option, index):        # noqa: N802 — Qt
+        box = QSpinBox(parent)
+        box.setRange(0, 999)
+        box.setAccelerated(True)
+        return box
+
+
 class ResultsTable(QTableView):
-    """逐顆的表。**唯讀**（見模組說明），雙擊一列 = 去看那一顆。"""
+    """逐顆的表。``bin`` **改得動但只改在畫面上**（見模組說明），
+    雙擊一列 = 去看那一顆。"""
 
     #: 使用者要去看某一顆（跟 `GalleryPanel.defect_activated` 同一個約定）。
     defect_activated = Signal(str)
     #: 使用者點了判定欄（score / bin / class）＝「這一顆**為什麼**判成這樣」
     #: —— 回溯面板（PR-3）。值是 defect_id；面板開不開由宿主決定。
     trace_requested = Signal(str)
+    #: 手動改過的 bin 變了（改了、改回去、或整批清掉）。帶的是**現在還有
+    #: 幾顆是手動的** —— 宿主用它講那句「這只在畫面上」。
+    bin_overrides_changed = Signal(int)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -605,7 +708,15 @@ class ResultsTable(QTableView):
         # 接在呼叫當下的那顆表頭上。
         self.setHorizontalHeader(TwoLevelHeader(self))
         self.setObjectName("resultsTable")
-        self.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        # ⚠ **不要加 `DoubleClicked` 或 `SelectedClicked`**（F48）：這張表的
+        # 單擊（判定欄 = 問「為什麼」）與雙擊（= 去看那一顆）都已經有人用了，
+        # 而 Qt 的 edit trigger 是**整張表**的設定 —— 加上去的話同一個手勢會
+        # 同時開回溯面板跟一個編輯框。`EditKeyPressed` 是 F2／Enter，
+        # 一個還沒有人用的手勢；發現得到那條路走右鍵選單。
+        self.setEditTriggers(QAbstractItemView.EditKeyPressed)
+        self.setItemDelegate(_BinDelegate(self))
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setAlternatingRowColors(True)
@@ -658,6 +769,70 @@ class ResultsTable(QTableView):
     def selected_ids(self) -> List[str]:
         return [self._model.defect_id_at(i.row())
                 for i in self.selectionModel().selectedRows()]
+
+    def bin_overrides(self) -> Dict[str, int]:
+        """``defect_id`` → 手動改成的 bin。"""
+        return self._model.bin_overrides()
+
+    def clear_bin_overrides(self) -> int:
+        n = self._model.clear_bin_overrides()
+        if n:
+            self.bin_overrides_changed.emit(len(self.bin_overrides()))
+        return n
+
+    def set_bin_override(self, row: int, value: Optional[int]) -> bool:
+        """改（或用 ``None`` 改回引擎判的那個）—— 右鍵選單與測試走這一支。"""
+        cols = self._model.columns()
+        if "bin" not in cols or not (0 <= row < self._model.rowCount()):
+            return False
+        idx = self._model.index(row, cols.index("bin"))
+        if value is None:
+            value = self._model._rows[row].get("bin")
+            if value is None:                  # 引擎也沒判 → 只能整個拿掉
+                self._model._rows[row].pop(OVERRIDE_KEY, None)
+                self._model.dataChanged.emit(idx, idx)
+                self.bin_overrides_changed.emit(len(self.bin_overrides()))
+                return True
+        ok = self._model.setData(idx, int(value), Qt.EditRole)
+        if ok:
+            self.bin_overrides_changed.emit(len(self.bin_overrides()))
+        return ok
+
+    # ---- 右鍵：改 bin ------------------------------------------------------
+    def _on_context_menu(self, pos) -> None:
+        """選了幾列就改幾列 —— **複審是一次看一群，不是一顆一顆**。
+
+        右鍵的位置那一列如果不在選取範圍裡，就以它為準（Qt 各處的慣例：
+        右鍵不會偷偷把你選好的那一群換掉，但點在別的地方就以那裡為準）。
+        """
+        index = self.indexAt(pos)
+        rows = sorted({i.row() for i in self.selectionModel().selectedRows()})
+        if index.isValid() and index.row() not in rows:
+            rows = [index.row()]
+        if not rows:
+            return
+        menu = QMenu(self)
+        act_set = menu.addAction("Set bin… (%d selected)" % len(rows)
+                                 if len(rows) > 1 else "Set bin…")
+        marked = [r for r in rows if OVERRIDE_KEY in self._model._rows[r]]
+        act_clear = menu.addAction("Undo the manual bin")
+        act_clear.setEnabled(bool(marked))
+        act_set.setToolTip("On screen only - exports keep the engine's bin")
+        chosen = menu.exec(self.viewport().mapToGlobal(pos))
+        if chosen is act_set:
+            first = self._model._rows[rows[0]]
+            start = int(first.get(OVERRIDE_KEY, first.get("bin") or 0))
+            value, ok = QInputDialog.getInt(
+                self, "Set bin",
+                "Bin for %d defect(s) — on screen only; exports and KLARF "
+                "keep the engine's value." % len(rows),
+                start, 0, 999)
+            if ok:
+                for r in rows:
+                    self.set_bin_override(r, int(value))
+        elif chosen is act_clear:
+            for r in marked:
+                self.set_bin_override(r, None)
 
     def _on_double_click(self, index) -> None:
         did = self._model.defect_id_at(index.row())
@@ -741,6 +916,7 @@ class ResultsTablePane(QWidget):
         #: 轉出去給宿主接的訊號（跟以前 `ResultsTable` 的約定一字不變）。
         self.defect_activated = self.table.defect_activated
         self.trace_requested = self.table.trace_requested
+        self.bin_overrides_changed = self.table.bin_overrides_changed
 
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 0, 0, 0)

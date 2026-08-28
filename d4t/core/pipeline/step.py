@@ -96,18 +96,21 @@ GROUP_ENHANCE = "enhance"
 GROUP_REGION = "region"
 GROUP_COMPARE = "compare"
 GROUP_MEASURE = "measure"
-#: ⚠ 字串跟 :data:`CATEGORY_ALGO` 一模一樣，**但它們是兩個不同的軸**
-#: （見這一段開頭）：``CATEGORY_ALGO`` 說的是「這張卡吐數字」——
-#: 每一張量測卡都是 ``CATEGORY_ALGO``，而它們的 ``group`` 是 ``measure``。
-#: ``GROUP_ALGO`` 說的是「這張卡**只**吃數字、不碰影像」（F16，使用者定調：
-#: 「measure 是量出數值來，Algo 是拿這些 feature 去做更 custom 的處理」）。
+#: ⚠ **這裡以前還有一個 ``GROUP_ALGO = "algo"``，2026-08-28 刪掉了**（F48）。
+#: 它說的是「這張卡**只**吃數字、不碰影像」（F16），而那一段 F24 §5 解散進了
+#: 判定：算式住進 working numbers（`decide.let`）、補值變成那一行的
+#: 「missing ⇒」屬性、跨顆換算變成「跟整批比」（`Let.scale`）。F41 刪掉最後
+#: 兩張卡之後它掛著 0 張卡、不在 :data:`GROUP_ORDER` 裡、也沒有任何一條測試
+#: 守它 —— 留著的唯一理由是「外掛卡可能宣告它」，而使用者 2026-08-28 定調
+#: 刪掉。**代價寫在這裡**：外掛卡若宣告 ``group = "algo"``，
+#: :meth:`Step.resolve_group` 會照樣回那個字串，而卡片庫沒有那一段 ——
+#: 那張卡會列不出來。要救就是把它改宣告成 :data:`GROUP_MEASURE`。
 #:
-#: ⚠ **這一段已解散**（F24 §5，使用者 2026-08-24 點頭）：算式住進判定的
-#: working numbers（`decide.let`）、補值變成那一行的「missing ⇒」屬性、
-#: 跨顆換算變成「跟整批比」（`Let.scale`）—— 三件事都比一張卡更靠近它們
-#: 服務的判定。這個常數留著給外掛卡相容（`resolve_group` 照認），但它不在
-#: :data:`GROUP_ORDER` 裡：卡片庫與 rail 上沒有這一段。
-GROUP_ALGO = "algo"
+#: ⚠ 別把它跟 :data:`CATEGORY_ALGO` 搞混 —— **那是另一個軸，而且還活著**：
+#: ``CATEGORY_ALGO`` 說的是「這張卡吐數字」，每一張量測卡都是它，而它們的
+#: ``group`` 是 ``measure``。同樣還活著的是**三段式心智模型**裡的 ``"algo"``
+#: 那一段（``ui/welcome.py`` 的 `_SEG_LINES`、``theme.seg_color``）——
+#: 那是「影像段／算法段／判定段」的算法段，跟卡片庫的分區不是同一個東西。
 GROUP_ADC = "adc"
 #: 這一段的卡是 **end point**：不吐影像流、不吐特徵，只把東西寫出去。
 #: 同樣有測試守著（``resolve_writes()`` 與 ``resolve_features()`` 都是空的）。
@@ -117,8 +120,8 @@ GROUP_OUTPUT = "output"
 #: Input → Enhance → ROI → Measure → Compare → ADC → Output）。
 #:
 #: **七段**（F24 §5，2026-08-24）：F16 定的八段少了 Algo —— 那一段解散進
-#: 判定（見 :data:`GROUP_ALGO` 的說明），而「段落是使用者 2026-08-20 定的、
-#: 動之前要再點一次頭」那條規矩履行過了（使用者：「那三件事接著做」）。
+#: 判定（見上面那段刪掉 ``GROUP_ALGO`` 的說明），而「段落是使用者 2026-08-20
+#: 定的、動之前要再點一次頭」那條規矩履行過了（使用者：「那三件事接著做」）。
 #:
 #: **這個順序不決定執行順序。** 執行是 :func:`recipe.execution_order` 的 DAG
 #: 拓撲排序 —— 線怎麼拉就怎麼跑。這裡排的是**卡片庫的分區順序**（連帶 rail 的

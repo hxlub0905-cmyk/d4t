@@ -571,6 +571,22 @@ class StudioWindow(QMainWindow):
         self._status("Ready — press “Help” for a guided start, or “Open KLARF…” "
                      "to load your data.")
 
+        # **開窗要寬到工具列放得下**（F48，2026-08-28）。
+        #
+        # 以前這裡一行都沒有，視窗大小是 Qt 從版面的 size hint 湊出來的
+        # ——實測 948 px，而工具列的內容那時正好要 916 px：**它是滿的**。
+        # 加「Results」那顆鈕（100 px）的第一版因此在預設大小下**看不見**：
+        # Qt 把放不下的最後一顆收進右邊那個 » 溢位選單，而使用者要的正是
+        # 「按一顆鈕就叫得出 Results」——一顆藏在兩層選單底下的鈕不算數。
+        # 抓到它的是既有的 `test_no_separator_fences_off_an_empty_stretch_of_toolbar`
+        # （分隔線後面空無一物 = 那一段被收走了）。
+        #
+        # 所以預設大小改成**由工具列決定**，而不是反過來讓工具列去遷就一個
+        # 沒有人選過的數字。`+ 24` 是視窗左右的邊框餘裕。螢幕比這個小的時候
+        # 由視窗管理員裁掉（Qt 本來就會做），那時 » 溢位選單是誠實的退路。
+        want_w = max(self.toolbar.sizeHint().width() + 24, 1000)
+        self.resize(max(want_w, self.width()), max(760, self.height()))
+
         if show_welcome_on_start is None:
             show_welcome_on_start = _welcome_on_start_default()
         if show_welcome_on_start:
@@ -670,6 +686,22 @@ class StudioWindow(QMainWindow):
         # 搶同一級的視覺重量：它們是隨時在旁邊的工具，不是流程上的一步。
         for b in (self.btn_undo, self.btn_redo):
             b.setProperty("variant", "ghost")
+        # **Results 視窗的入口**（F48，2026-08-28，使用者：「可以改成加一個
+        # 按鈕獨立呼叫一個視窗嗎（目前是跑完才會出來）」）。
+        #
+        # 以前只有兩條路會開它：跑完自動彈出、或在直方圖上點一根長條 ——
+        # 兩條都要**先跑過一批**。關掉之後想再看一次，唯一的辦法是再跑一次
+        # （而 `results.py` 的檔頭一直寫著「關掉它不會丟掉結果」：結果確實
+        # 還在，只是沒有一顆鈕叫得出來，所以那句話描述著一個不存在的入口）。
+        #
+        # **跟 Help／主題同一段**，而不是接在 `Run trial` 右邊。動線上「跑 →
+        # 看結果」確實是那個順序，但工具列的最後一格是留給那顆藍鈕的
+        # （`test_the_toolbar_is_grouped_not_one_long_row` 守著：試跑在最後
+        # 面）—— 而這一段的定義正好就是它：**不屬於流程、但要隨時找得到**。
+        self.btn_results = self._tool_button(
+            "Results", "Open the Results window - score distribution, "
+                       "thumbnails and the per-defect table (Ctrl+Shift+R)",
+            self.show_gallery, icon="popout")
         self.btn_help = self._tool_button(
             "Help", "Reopen the getting-started tour (includes “Try it with "
                     "sample data”)",
@@ -730,7 +762,8 @@ class StudioWindow(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(spacer)
 
-        # 右邊：不屬於流程、但要隨時找得到的兩顆。
+        # 右邊：不屬於流程、但要隨時找得到的那幾顆。
+        bar.addWidget(self.btn_results)
         bar.addWidget(self.btn_help)
         bar.addWidget(self.btn_theme)
         bar.addSeparator()
@@ -813,7 +846,7 @@ class StudioWindow(QMainWindow):
     SHORTCUTS = (
         ("Ctrl+O", "open_klarf"), ("Ctrl+Shift+O", "open_recipe"),
         ("Ctrl+S", "save_recipe"), ("Ctrl+Shift+S", "save_recipe_as"),
-        ("Ctrl+R", "run"),
+        ("Ctrl+R", "run"), ("Ctrl+Shift+R", "results"),
         ("Ctrl+Z", "undo"), ("Ctrl+Shift+Z", "redo"), ("Ctrl+Y", "redo"),
         ("Ctrl+0", "zoom_reset"), ("Ctrl++", "zoom_in"), ("Ctrl+=", "zoom_in"),
         ("Ctrl+-", "zoom_out"), ("Ctrl+Shift+F", "zoom_fit"),
@@ -828,6 +861,7 @@ class StudioWindow(QMainWindow):
             "save_recipe": self._on_save_recipe,
             "save_recipe_as": self._on_save_recipe_as,
             "run": self._on_trial_clicked,
+            "results": self.show_gallery,
             "undo": self.undo,
             "redo": self.redo,
             "zoom_reset": self.pipeline.reset_zoom,
@@ -5705,7 +5739,20 @@ class StudioWindow(QMainWindow):
         return out
 
     def show_gallery(self) -> None:
-        """把 Results 視窗叫出來（Gallery 與分數分佈都在那裡）。"""
+        """把 Results 視窗叫出來（Gallery 與分數分佈都在那裡）。
+
+        **還沒跑過也叫得出來**（F48，2026-08-28）：工具列那顆「Results」與
+        `Ctrl+Shift+R` 走的是這一支，而它們不要求先跑一批。空的時候視窗自己
+        要講得出為什麼是空的 —— 那是 F44 的 empty_reason 巡檢同一條規矩：
+        **一塊空白要嘛有東西，要嘛有一句話說它在等什麼。**
+
+        工具列左邊的摘要本來就寫著 `No results yet.`，但那句話回答不了
+        「所以我現在該做什麼」，而狀態列是這個視窗唯一會講整句話的地方。
+        """
+        if not self.trial_results:
+            self.results.status(
+                "Nothing to show yet — press “Run trial” in the main window "
+                "and the score distribution, thumbnails and table fill in here.")
         self.results.present()
 
     def show_preview(self) -> None:

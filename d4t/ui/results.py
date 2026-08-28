@@ -132,6 +132,7 @@ class ResultsWindow(QMainWindow):
         self.table.defect_activated.connect(self.defect_activated)
         self.gallery.defect_activated.connect(self.defect_activated)
         self.table.trace_requested.connect(self.trace_requested)
+        self.table.bin_overrides_changed.connect(self._on_bin_overrides_changed)
         self.view_stack = QStackedWidget(self)
         self.view_stack.addWidget(self.gallery)
         self.view_stack.addWidget(self.table)
@@ -357,6 +358,22 @@ class ResultsWindow(QMainWindow):
         """
         self.table.set_results(list(results or []), dict(class_names or {}),
                                layout, alarms)
+
+    def _on_bin_overrides_changed(self, n: int) -> None:
+        """手動改過的 bin 變了 → 狀態列講清楚它會不會被寫出去（F48）。
+
+        **這句話要主動講**：使用者剛把一格數字改掉，這一刻他心裡的問題正是
+        「那我按 Run all 會寫哪一個」。等他去把滑鼠停在那一格上才回答，
+        等於賭他會問。
+        """
+        if not n:
+            self.status("Manual bins cleared - the table shows what the "
+                        "engine decided.")
+            return
+        self.status(
+            "%d defect(s) marked by hand. This is a note on screen only - "
+            "CSV, KLARF and the run database still get the engine's bin, "
+            "and a new run clears the marks." % int(n))
 
     def set_summary(self, text: str) -> None:
         """工具列左側的一句話（「跑了幾顆、成功幾顆、花多久」）。"""
