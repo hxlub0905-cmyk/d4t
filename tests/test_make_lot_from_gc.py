@@ -445,3 +445,151 @@ def test_without_the_flag_nothing_extra_is_written(tmp_path, gc):
                        patch=41, seed=1)
     assert "rsem_clean_dir" not in out and "patch_clean_tiff" not in out
     assert not os.path.isdir(os.path.join(str(tmp_path), "rsem", "clean"))
+
+
+# --------------------------------------------------------------------------- #
+# 擬真：實際不會這麼好看（F64）
+# --------------------------------------------------------------------------- #
+def test_two_repeats_are_no_longer_identical(gc):
+    """**這就是使用者要的那一句。**
+
+    「GLV 也不會每區每個 layout 都一樣」—— 而在 F63 之前，鋪出來的兩個重複
+    是**逐位元組相同**的（GC 是疊出來的平均臉，複製一百次）。
+    """
+    px, py = 175.96, 34.0
+    rng = np.random.default_rng(5)
+    flat = gcl.tile(gc, 400, 400, px, py)
+
+    def block_means(img):
+        n = int(img.shape[1] / px)
+        return [float(img[:, int(i * px):int((i + 1) * px)].mean())
+                for i in range(n)]
+
+    # ⚠ 比的是**每一格的平均**，不是逐畫素。週期是 175.96 —— 用整數切出來的
+    # 兩塊本來就差 0.96 px 的相位，逐畫素比會比到「切歪了」而不是「不一樣」。
+    a = block_means(flat)
+    assert max(a) - min(a) < 0.5, "沒有擬真的時候每一格本來就該一樣：%s" % a
+
+    b = block_means(gcl.roughen(flat, px, py, 0.0, 0.0, rng, gcl.REALISM))
+    assert max(b) - min(b) > 1.5, (
+        "每一格的平均只差 %.2f GLV —— 還是太像了：%s" % (max(b) - min(b), b))
+
+
+def test_the_warp_makes_a_line_wander_a_little_not_a_lot(gc):
+    """⚠ **量的是位移場本身，不是產出來的影像。**
+
+    第一版拿影像去估線的位置，量到 0.88 px，而場的真值是 3–4 px —— 那個估計量
+    在窗口邊界會夾住。場是沒有歧義的那一份，所以斷言對著它下。
+    """
+    rng = np.random.default_rng(5)
+    dx, dy = gcl.warp_field(800, 800, 175.96, rng, gcl.REALISM)
+    assert not dy.any(), "直的是 MG，它扭的是左右 —— y 不該動"
+    # 一根線沿著自己的長度走過的距離：要看得出來，又不能變成波浪
+    for x in (100, 400, 700):
+        pp = float(dx[:, x].max() - dx[:, x].min())
+        assert 0.6 < pp < 4.0, "x=%d 的線 p-p %.2f px" % (x, pp)
+
+
+def test_the_warp_is_smooth_not_speckle(gc):
+    """扭是**連續**的：相鄰的兩列不會差一整個畫素。"""
+    rng = np.random.default_rng(5)
+    dx, _ = gcl.warp_field(400, 400, 175.96, rng, gcl.REALISM)
+    step = np.abs(np.diff(dx, axis=0))
+    assert step.max() < 0.35, "相鄰列差 %.2f px —— 那是雜訊不是彎曲" % step.max()
+
+
+def _period_residual(out, path):
+    """相隔正好一個週期的兩個畫素差多少（平均，GLV）。
+
+    完美鋪出來的圖上它們一樣 —— 那正是使用者說的那句話（「GLV 不會每區每個
+    layout 都一樣」）。**不必知道相位**，也不受切格子的影響。
+
+    ⚠ 第一版比的是「每一格的平均」，而那個數字在不同 seed 之間從 0.41 跳到
+    2.80（週期 175.96，用整數切出來的每一格捕捉到的相位都不一樣）——
+    一條會自己抖的斷言不是斷言。
+    """
+    import cv2
+    img = cv2.imread(path, cv2.IMREAD_GRAYSCALE).astype(float)
+    k = int(round(out["period"][0]))
+    return float(np.abs(img[:, :-k] - img[:, k:]).mean())
+
+
+def _gen(tmp_path, gc, tag, spec):
+    out = gcl.generate(str(tmp_path / tag), gc=gc, images=1, size=900,
+                       defects=2, patch=41, seed=6, noise=0.0, realism=spec)
+    return _period_residual(out, out["rsem_images"][0])
+
+
+#: 只有幾何（線扭），沒有明暗變化。
+_WARP_ONLY = gcl.Realism(cell_gain=0.0, cell_bias=0.0, shade=0.0, shot=0.0)
+
+
+def test_the_generated_image_really_gets_the_warp(tmp_path, gc):
+    """⚠ **突變測試逼出來的第一半。**
+
+    單元測試直接呼叫 `warp_field` / `roughen` 驗過了 —— 但那回答不了
+    「`generate` 那條路上有沒有真的走過去」。把那一行拿掉，35 條全綠。
+    """
+    flat = _gen(tmp_path, gc, "flat", gcl.FLAT)
+    warp = _gen(tmp_path, gc, "warp", _WARP_ONLY)
+    assert flat < 1.0, "完美鋪圖上相隔一週期本來就該一樣，量到 %.2f" % flat
+    assert warp > 3.0, "套了 warp 卻只差 %.2f GLV" % warp
+
+
+def test_the_generated_image_really_gets_the_per_repeat_glv(tmp_path, gc):
+    """⚠ **第二半，而它需要一個對照組。**
+
+    「相隔一週期差多少」這個數字**warp 自己就撐得起來**（5.8），所以拿它跟
+    `FLAT` 比抓不到「`roughen` 沒被呼叫」。要抓，對照組得是**只有 warp**
+    的那一份 —— 多出來的那一截才是明暗變化的貢獻。
+    """
+    warp = _gen(tmp_path, gc, "w2", _WARP_ONLY)
+    full = _gen(tmp_path, gc, "full", gcl.Realism(shot=0.0))
+    assert full > warp * 1.3, (
+        "只有 warp %.2f，全部 %.2f —— 每個重複的 GLV 大概沒有套上"
+        % (warp, full))
+
+
+def test_shot_noise_is_louder_where_the_signal_is(gc):
+    """SEM 的雜訊是訊號相依的（電子數的 Poisson）—— 亮的地方比暗的地方吵。
+
+    只加固定 σ 的話暗區會比真的乾淨，而那正是「量得準不準」最容易被高估的
+    地方。
+    """
+    rng = np.random.default_rng(3)
+    dark = np.full((300, 300), 20.0, np.float32)
+    bright = np.full((300, 300), 220.0, np.float32)
+    sd_dark = float(gcl.grain(dark, 0.0, rng, gcl.REALISM).std())
+    sd_bright = float(gcl.grain(bright, 0.0, rng, gcl.REALISM).std())
+    assert sd_bright > 2.5 * sd_dark, (
+        "亮 %.2f vs 暗 %.2f —— 沒有訊號相依" % (sd_bright, sd_dark))
+    # 固定 σ 的讀出雜訊仍然在（兩者都有底）
+    assert float(gcl.grain(dark, 6.0, rng, gcl.FLAT).std()) > 5.0
+
+
+def test_flat_really_turns_everything_off(gc):
+    """`FLAT` 要能回到 F59–F63 的完美鋪圖 —— 想比較的時候有個對照組。"""
+    rng = np.random.default_rng(1)
+    dx, dy = gcl.warp_field(200, 200, 100.0, rng, gcl.FLAT)
+    assert not dx.any() and not dy.any()
+    flat = gcl.tile(gc, 200, 200, 175.96, 34.0)
+    assert np.array_equal(
+        gcl.roughen(flat, 175.96, 34.0, 0.0, 0.0, rng, gcl.FLAT), flat)
+    assert not gcl.grain(flat, 0.0, rng, gcl.FLAT).any()
+
+
+def test_the_clean_pair_survives_the_realism(tmp_path, gc):
+    """⚠ **擬真不可以把 F63 的那條不變量弄壞。**
+
+    shot noise 的 σ 取自**乾淨版**的訊號 —— 取自缺陷版的話，缺陷那幾個畫素
+    會因為更亮而更吵，於是「乾淨版與缺陷版只差在缺陷」就不再成立，而那是
+    整個配對輸出唯一要保證的事。
+    """
+    import cv2
+    out = gcl.generate(str(tmp_path), gc=gc, images=1, size=900, defects=6,
+                       patch=41, seed=4, real_frac=1.0, pairs=True)
+    d = cv2.imread(out["rsem_images"][0], cv2.IMREAD_GRAYSCALE).astype(int)
+    c = cv2.imread(os.path.join(out["rsem_clean_dir"], "DEF_0001.png"),
+                   cv2.IMREAD_GRAYSCALE).astype(int)
+    same = float((np.abs(d - c) == 0).mean())
+    assert same > 0.99, "只有 %.2f%% 相同 —— 擬真把配對弄壞了" % (100 * same)

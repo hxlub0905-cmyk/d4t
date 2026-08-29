@@ -204,11 +204,20 @@ def periods(gc: np.ndarray, step: float = 0.02) -> Tuple[float, float]:
 # 鋪
 # --------------------------------------------------------------------------- #
 def tile(gc: np.ndarray, h: int, w: int, px: float, py: float,
-         phase_x: float = 0.0, phase_y: float = 0.0) -> np.ndarray:
-    """把 GC 鋪成 ``h × w``（雙線性取樣，float32）。"""
+         phase_x: float = 0.0, phase_y: float = 0.0,
+         warp: Optional[Tuple[np.ndarray, np.ndarray]] = None) -> np.ndarray:
+    """把 GC 鋪成 ``h × w``（雙線性取樣，float32）。
+
+    ``warp``（``(dx, dy)``，跟輸出同尺寸）在**取樣的時候**加進座標，不是先鋪
+    好再 remap 一次 —— 兩次插值會把邊緣糊掉，而這份資料的重點正是邊緣
+    （`algo/edge` 的次像素定位靠它）。
+    """
     g = gc.astype(np.float32)
     gh, gw = g.shape
     yy, xx = np.mgrid[0:int(h), 0:int(w)].astype(np.float64)
+    if warp is not None:
+        xx = xx + np.asarray(warp[0], dtype=np.float64)
+        yy = yy + np.asarray(warp[1], dtype=np.float64)
     u = np.clip(np.mod(xx + float(phase_x), px), 0, gw - 1.001)
     v = np.clip(np.mod(yy + float(phase_y), py), 0, gh - 1.001)
     x0 = u.astype(np.int32)
@@ -302,6 +311,133 @@ def _into_range(v: int, period: float, lo: int, hi: int) -> int:
     while v > hi:
         v -= step
     return int(min(max(v, lo), hi))
+
+
+class Realism(NamedTuple):
+    """**把鋪出來的完美圖案弄回像真的**（F64）。
+
+    使用者 2026-08-28：「GC 合成的那張大圖，我覺得還是要有點雜訊…因為實際不會
+    這麼好看（想想 GC 是如何被做出來的），MG 可能會扭一點點，GLV 也不會每區
+    每個 layout 都一樣。」
+
+    **他說的那句括號是關鍵**：GC 是**疊出來的**（很多個 cell 平均），所以它比
+    任何一個真的 cell 都乾淨 —— 直接鋪開等於把一張「平均臉」複製一百次。真的
+    影像跟它差在三件事，而三件都不是加高斯雜訊能補的：
+
+    ============  ==================================  =======================
+    差在哪          真實世界的原因                        這裡怎麼做
+    ============  ==================================  =======================
+    線會扭          LER ＋ 曝寫/蝕刻的低頻彎曲              取樣座標上加一個平滑的隨機位移場
+    每格不一樣       每個 cell 的線寬／材質厚度都有分布        **每一個重複**自己的 gain/bias
+    大範圍明暗       照明不均、充電、掃描漂移                很低頻的乘法場
+    ============  ==================================  =======================
+
+    ⚠ **能獨立變化的最小單位是「一個重複」**，不是「一根線」—— 因為從一張 GC
+    只看得出週期，看不出裡面哪一塊是哪一根線的。想要更細的話那是另一件事
+    （`make_mgepi_real.py` 那條路是**參數化**畫出來的，它知道每一根線在哪）。
+
+    ``shot`` 是**訊號相依**的雜訊（σ ∝ √訊號）—— SEM 的雜訊本來就是這樣，
+    亮的地方比暗的地方吵。跟 `generate` 的 ``noise``（固定 σ 的讀出雜訊）是
+    兩回事，兩個都留著。
+    """
+    # ⚠ ``bend`` 是位移場的**標準差**，而一根線沿著它自己的長度會走過好幾個
+    # 相關長度 —— 所以線看起來扭多少大約是 3.5–4 倍。0.45 → 一根線 p-p 約
+    # 1.6 px，也就是使用者要的「扭一點點」；第一版寫 0.9，量出來一根線
+    # p-p 3–4 px，那是明顯的波浪不是一點點。
+    #
+    # ⚠ 而**量的時候要量場本身**。第一版拿產出來的影像去估線的位置，量到
+    # 0.88 px —— 那個估計量在窗口邊界會夾住，於是把 4 px 說成 0.9 px。
+    # 場是沒有歧義的那一份。
+    bend: float = 0.45         # 低頻彎曲的振幅（位移場的 σ，px）
+    bend_len: float = 140.0    # 彎曲的相關長度（px）
+    ler: float = 0.35          # 邊緣抖動的振幅（px）
+    ler_len: float = 9.0       # 抖動沿線的相關長度（px）
+    cell_gain: float = 0.035   # 每個重複的對比差異（比例）
+    cell_bias: float = 3.0     # 每個重複的亮度差異（GLV）
+    shade: float = 0.06        # 大範圍照明不均（比例）
+    shot: float = 0.55         # 訊號相依雜訊的係數（σ = shot·√訊號）
+
+
+#: 預設的「不那麼好看」。全部設 0 就回到 F59–F63 的完美鋪圖。
+REALISM = Realism()
+FLAT = Realism(bend=0.0, bend_len=1.0, ler=0.0, ler_len=1.0, cell_gain=0.0,
+               cell_bias=0.0, shade=0.0, shot=0.0)
+
+
+def _smooth_field(h: int, w: int, length: float,
+                  rng: "np.random.Generator") -> np.ndarray:
+    """一張平滑的隨機場（單位變異數），相關長度約 ``length`` 個畫素。
+
+    做法是「低解析度的白雜訊 → 三次內插放大」。直接對整張圖模糊的話，模糊
+    半徑一大就慢得離譜（1000² 要好幾秒），而先在小圖上生成再放大是等價的。
+
+    ⚠ **放大之後不再多模糊一次。** 原本這裡跟 `make_mgepi_real._mottle` 一樣
+    接了一個 `GaussianBlur`，而量過之後它只把相鄰畫素的最大落差從 0.86 壓到
+    0.70（三次內插從粗網格放大本來就是帶限的）—— 而那個差距寫不出一條不靠
+    seed 運氣的測試。**寫不出測試的守衛就是沒有被驗過的守衛**，所以拿掉。
+    振幅由下面那個 std 正規化自動補回來。
+    """
+    n = max(2, int(round(max(h, w) / max(2.0, float(length)))))
+    small = rng.normal(0.0, 1.0, (n, n)).astype(np.float32)
+    big = cv2.resize(small, (int(w), int(h)), interpolation=cv2.INTER_CUBIC)
+    sd = float(big.std())
+    return big / sd if sd > 1e-6 else big
+
+
+def warp_field(h: int, w: int, px: float, rng: "np.random.Generator",
+               spec: Realism = REALISM):
+    """``(dx, dy)`` —— 取樣座標要偏多少（見 :class:`Realism`）。
+
+    ⚠ **只偏 x。** 直的是 MG，它扭的是左右；把 y 也偏一樣多的話整張圖會像
+    水波，那不是這個 layout 會發生的事。橫的 EPI 由 ``bend`` 那一項的低頻
+    成分順帶帶到（位移場本來就兩個方向都連續）。
+    """
+    dx = np.zeros((int(h), int(w)), dtype=np.float32)
+    if spec.bend > 0.0:
+        dx += float(spec.bend) * _smooth_field(h, w, spec.bend_len, rng)
+    if spec.ler > 0.0:
+        dx += float(spec.ler) * _smooth_field(h, w, spec.ler_len, rng)
+    return dx, np.zeros_like(dx)
+
+
+def roughen(img: np.ndarray, px: float, py: float, phase_x: float,
+            phase_y: float, rng: "np.random.Generator",
+            spec: Realism = REALISM) -> np.ndarray:
+    """鋪好之後的明暗變化：**每個重複自己的 GLV** ＋ 大範圍照明不均。
+
+    幾何（線扭）不在這裡 —— 它在 :func:`warp_field`，因為要在取樣的時候做。
+    """
+    h, w = img.shape
+    out = img
+    if spec.cell_gain > 0.0 or spec.cell_bias > 0.0:
+        # 每一個**重複**一個值：先算每個畫素落在第幾格，再照格子查表。
+        ix = np.floor((np.arange(w) + phase_x) / px).astype(np.int64)
+        iy = np.floor((np.arange(h) + phase_y) / py).astype(np.int64)
+        ix -= ix.min()
+        iy -= iy.min()
+        gain = rng.normal(1.0, float(spec.cell_gain),
+                          (int(iy.max()) + 1, int(ix.max()) + 1))
+        bias = rng.normal(0.0, float(spec.cell_bias), gain.shape)
+        out = (out - 128.0) * gain[np.ix_(iy, ix)] + 128.0 + bias[np.ix_(iy, ix)]
+    if spec.shade > 0.0:
+        out = out * (1.0 + float(spec.shade)
+                     * _smooth_field(h, w, max(h, w) / 2.5, rng))
+    return out.astype(np.float32)
+
+
+def grain(img: np.ndarray, read_sigma: float, rng: "np.random.Generator",
+          spec: Realism = REALISM) -> np.ndarray:
+    """雜訊：固定 σ 的讀出雜訊 ＋ **訊號相依**的 shot noise。
+
+    SEM 的雜訊本來就是亮的地方比暗的地方吵（電子數的 Poisson 統計）。
+    只加固定 σ 的話，暗區看起來會比真的乾淨，而那正是「量得準不準」最容易
+    被高估的地方。
+    """
+    out = rng.normal(0.0, float(read_sigma), img.shape)
+    if spec.shot > 0.0:
+        out = out + rng.normal(0.0, 1.0, img.shape) * (
+            float(spec.shot) * np.sqrt(np.clip(img, 0.0, None)))
+    return out.astype(np.float32)
 
 
 # --------------------------------------------------------------------------- #
@@ -402,6 +538,7 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
              period_x: float = 0.0, period_y: float = 0.0,
              sites: Optional[List[Tuple[int, int]]] = None,
              defect: DefectSpec = DEFECT, pairs: bool = False,
+             realism: Realism = REALISM,
              progress: Optional[Callable[[int, int], bool]] = None
              ) -> Dict[str, Any]:
     """產 RSEM 大圖 lot ＋ 從大圖切下來的 patch lot。回傳路徑 dict。
@@ -467,7 +604,11 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
     for i in range(int(images)):
         ph_x = float(rng.uniform(0.0, px))
         ph_y = float(rng.uniform(0.0, py))
-        big = tile(gc, size, size, px, py, ph_x, ph_y)
+        # **線會扭**（F64）：位移場加在取樣座標上，不是鋪好再 remap。
+        big = tile(gc, size, size, px, py, ph_x, ph_y,
+                   warp=warp_field(size, size, px, rng, realism))
+        # **每個重複自己的 GLV ＋ 大範圍照明不均**（F64）。
+        big = roughen(big, px, py, ph_x, ph_y, rng, realism)
         # 每張圖自己的亮度／對比微擾（模擬每次取像的條件差異）
         big = (big - 128.0) * float(rng.uniform(0.93, 1.07)) + 128.0 \
             + float(rng.uniform(-8.0, 8.0))
@@ -477,7 +618,9 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
         # ⚠ 所以雜訊要**產一次、兩邊都加**。各自 `rng.normal` 一次的話兩張圖
         # 每一個畫素都不一樣，而那種資料訓出來的模型學的是「去雜訊」，
         # 不是「把缺陷拿掉」—— 看起來完全正常，量出來的 loss 也會下降。
-        clean = big.copy() if pairs else None
+        # ⚠ **不論有沒有 `pairs` 都留一份乾淨的**：shot noise 的 σ 要取自
+        # 乾淨版的訊號（見下面），而不是取自已經種了缺陷的那一張。
+        clean = big.copy()
         dmask = (np.zeros((size, size), dtype=bool) if pairs else None)
 
         # 這張圖上要種幾顆、種在哪（一律落在 inner space 上）
@@ -513,11 +656,20 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
             spots.append((cx, cy, kind))
             marks.append(info)
 
-        grain = rng.normal(0.0, noise, big.shape)
-        big = big + grain
+        # ⚠ 雜訊仍然**產一次、兩邊都加**（F63 的那條不變量）——`speckle` 是
+        # 同一個陣列，兩邊都加它。
+        #
+        # σ 取自**乾淨版**的訊號。⚠ 這一行原本的註解說「取自缺陷版的話配對就
+        # 壞了」，而那是**假的**：兩邊加的是同一個 speckle，所以配對怎麼樣都
+        # 成立（突變測試證實了 —— 換成缺陷版，35 條測試全綠）。真正的理由小
+        # 得多：取自乾淨版，雜訊的分布就跟「這裡有沒有缺陷」無關，於是
+        # 遮罩之外的統計量對兩張圖是同一份。物理上取缺陷版也說得通（更亮 =
+        # 更多電子 = 更吵），兩種都不算錯。
+        speckle = grain(clean, noise, rng, realism)
+        big = big + speckle
         u8 = np.clip(big, 0, 255).astype(np.uint8)
         if pairs:
-            clean_u8 = np.clip(clean + grain, 0, 255).astype(np.uint8)
+            clean_u8 = np.clip(clean + speckle, 0, 255).astype(np.uint8)
             _mr._write_image(os.path.join(clean_dir, f"DEF_{i + 1:04d}.{fmt}"),
                          clean_u8)
             _mr._write_image(os.path.join(mask_dir, f"DEF_{i + 1:04d}.png"),
@@ -634,6 +786,8 @@ def main(argv=None) -> int:
     ap.add_argument("--patch", type=int, default=81, help="patch 邊長")
     ap.add_argument("--real-frac", type=float, default=0.5)
     ap.add_argument("--noise", type=float, default=6.0)
+    ap.add_argument("--flat", action="store_true",
+                    help="關掉擬真（線不扭、每格 GLV 一樣）—— 回到 F63 的完美鋪圖")
     ap.add_argument("--pairs", action="store_true",
                     help="也寫出乾淨版與缺陷足跡（配對資料，給訓練用）")
     ap.add_argument("--seed", type=int, default=11)
@@ -655,7 +809,8 @@ def main(argv=None) -> int:
                    real_frac=args.real_frac, noise=args.noise,
                    seed=args.seed, fmt=args.fmt,
                    period_x=args.period_x, period_y=args.period_y,
-                   pairs=bool(args.pairs))
+                   pairs=bool(args.pairs),
+                   realism=FLAT if args.flat else REALISM)
     note = ("" if (args.period_x or args.period_y)
             else "（量的；不到兩個週期寬的 GC 請用 --period-x 明講）")
     print("週期 x=%.2f y=%.2f%s，量到 %d 個 inner space"
