@@ -42,7 +42,9 @@ import argparse
 import json
 import os
 import sys
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import (
+    Any, Callable, Dict, List, NamedTuple, Optional, Tuple,
+)
 
 import numpy as np
 
@@ -305,11 +307,46 @@ def _into_range(v: int, period: float, lo: int, hi: int) -> int:
 # --------------------------------------------------------------------------- #
 # 種缺陷
 # --------------------------------------------------------------------------- #
+class DefectSpec(NamedTuple):
+    """**缺陷長什麼樣**（F62）。使用者：「可以選 defect size、亮、暗、隨機」。
+
+    三個旋鈕，各自是一個**範圍** —— 因為真實的一批缺陷不會長得一模一樣，
+    而一批一模一樣的合成缺陷會讓任何門檻都好調得不真實。
+
+    * ``diameter`` —— **半高全寬**（FWHM，px）。內部轉成高斯的 σ
+      （= 直徑 / 2.355），所以**填的是量得到的東西**，不是一個統計參數。
+      「寬度＝FWHM」是這個 repo 既有的定義（見 `make_mgepi_real.py` 檔頭）。
+    * ``contrast`` —— 比周圍亮／暗多少 GLV。
+    * ``polarity`` —— ``bright`` / ``dark`` / ``both``（每顆各自擲）。
+    * ``bridge`` —— 要不要也做「把兩根 MG 接起來」那一種。它不是一個點，
+      所以任何只看局部對比的做法都抓不到 —— 留著這個開關是為了那條路測得到。
+    """
+    diameter: Tuple[float, float] = (4.0, 9.0)
+    contrast: Tuple[float, float] = (55.0, 95.0)
+    polarity: str = "both"
+    bridge: bool = True
+
+    def kinds(self) -> Tuple[str, ...]:
+        """這組設定會產出哪幾種缺陷。"""
+        pol = str(self.polarity)
+        out = (("bright_blob",) if pol == "bright" else
+               ("dark_blob",) if pol == "dark" else
+               ("bright_blob", "dark_blob"))
+        return out + (("bridge",) if self.bridge else ())
+
+
+#: 預設的樣子。⚠ **缺陷比 F59/F60 略大**：那時候 σ 寫死 1.4–2.6，現在
+#: 直徑 4–9 換算是 σ 1.70–3.82。故意不去湊回原值 —— 這批資料不進版控、
+#: 也不是黃金值，而「4–9 px 的點」比「σ 1.4–2.6」對使用者是一句話。
+DEFECT = DefectSpec()
+
+
 def plant(img: np.ndarray, kind: str, cx: float, cy: float,
-          rng: np.random.Generator, px: float) -> None:
-    """在 ``(cx, cy)`` 種一個缺陷（就地）。振幅 >= 50。"""
+          rng: np.random.Generator, px: float,
+          spec: DefectSpec = DEFECT) -> None:
+    """在 ``(cx, cy)`` 種一個缺陷（就地），樣子由 ``spec`` 決定。"""
     h, w = img.shape
-    amp = float(rng.uniform(55.0, 95.0))
+    amp = float(rng.uniform(*spec.contrast))
     y0, y1 = max(0, int(cy) - 20), min(h, int(cy) + 21)
     x0, x1 = max(0, int(cx) - 20), min(w, int(cx) + 21)
     if y1 <= y0 or x1 <= x0:
@@ -324,7 +361,15 @@ def plant(img: np.ndarray, kind: str, cx: float, cy: float,
         dist = np.hypot(along, np.abs(yy - cy))
         img[y0:y1, x0:x1] += amp * np.clip(1.0 - (dist - 1.2), 0.0, 1.0)
         return
-    sigma = float(rng.uniform(1.4, 2.6))
+    # **填的是直徑，用的是 σ，而換算走 FWHM。**
+    #
+    # ⚠ 第一版寫 σ = 直徑 / 4（「看得到的大約是 ±2σ」）—— 那條測試當場紅：
+    # 填 12 量到 7。±2σ 那一圈只剩峰值的 13%，量不到；**半高**才是量得到的
+    # 地方，而 FWHM = 2.355σ。
+    #
+    # 這也不是這一輪自己挑的定義：`make_mgepi_real.py` 的檔頭早就寫著
+    # 「線寬是 **FWHM** 定義」。同一個 repo 裡「寬度」只能有一個意思。
+    sigma = float(rng.uniform(*spec.diameter)) / 2.355
     bump = np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2.0 * sigma ** 2))
     img[y0:y1, x0:x1] += (amp if kind == "bright_blob" else -amp) * bump
 
@@ -337,6 +382,7 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
              noise: float = 6.0, seed: int = 11, fmt: str = "png",
              period_x: float = 0.0, period_y: float = 0.0,
              sites: Optional[List[Tuple[int, int]]] = None,
+             defect: DefectSpec = DEFECT,
              progress: Optional[Callable[[int, int], bool]] = None
              ) -> Dict[str, Any]:
     """產 RSEM 大圖 lot ＋ 從大圖切下來的 patch lot。回傳路徑 dict。
@@ -418,10 +464,11 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
             cx = _into_range(cx, px, half + 2, size - half - 3)
             cy = _into_range(cy, py, half + 2, size - half - 3)
             is_real = rng.random() < real_frac
-            kind = (str(REAL_TYPES[int(rng.integers(0, len(REAL_TYPES)))])
+            pool = defect.kinds()
+            kind = (str(pool[int(rng.integers(0, len(pool)))])
                     if is_real else NUISANCE_TYPE)
             if is_real:
-                plant(big, kind, cx, cy, rng, px)
+                plant(big, kind, cx, cy, rng, px, defect)
             spots.append((cx, cy, kind))
 
         big = big + rng.normal(0.0, noise, big.shape)

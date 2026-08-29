@@ -283,3 +283,79 @@ def test_the_painted_area_is_the_only_thing_that_moves_the_defects(tmp_path, gc)
     shift = (b[0] - a[0]) % px
     assert min(abs(shift - 40.0), abs(shift - 40.0 + px)) < 2.0, (
         "畫的位置移了 40 px，缺陷卻移了 %.1f" % shift)
+
+
+# --------------------------------------------------------------------------- #
+# 缺陷長什麼樣（F62）
+# --------------------------------------------------------------------------- #
+def _planted(gc, spec, kind, seed=3):
+    """在一塊乾淨的圖案上種一顆，回 (加上去的東西, 乾淨的底)。"""
+    px, py = gcl.periods(gc)
+    clean = gcl.tile(gc, 80, 80, px, py)
+    dirty = clean.copy()
+    gcl.plant(dirty, kind, 40.0, 40.0, np.random.default_rng(seed), px, spec)
+    return dirty - clean, clean
+
+
+def test_the_size_you_type_is_the_size_you_measure(gc):
+    """填的是**直徑**不是 σ —— 使用者量得到的東西才填得下去。"""
+    for want in (4.0, 12.0):
+        spec = gcl.DefectSpec(diameter=(want, want), contrast=(80.0, 80.0))
+        delta, _ = _planted(gc, spec, "bright_blob")
+        # 半高全寬那一圈：> 一半的峰值
+        wide = int((delta[40, :] > delta.max() * 0.5).sum())
+        assert abs(wide - want) <= max(2.0, want * 0.35), (
+            "填 %.0f px，量到 %d px" % (want, wide))
+
+
+def test_a_bigger_size_really_is_bigger(gc):
+    small, _ = _planted(gc, gcl.DefectSpec(diameter=(4.0, 4.0)), "bright_blob")
+    big, _ = _planted(gc, gcl.DefectSpec(diameter=(14.0, 14.0)), "bright_blob")
+    assert (big > 5).sum() > 3 * (small > 5).sum()
+
+
+def test_contrast_is_in_grey_levels(gc):
+    delta, _ = _planted(gc, gcl.DefectSpec(contrast=(70.0, 70.0)),
+                        "bright_blob")
+    assert abs(float(delta.max()) - 70.0) < 6.0
+
+
+@pytest.mark.parametrize("pol,want", [("bright", ("bright_blob",)),
+                                      ("dark", ("dark_blob",)),
+                                      ("both", ("bright_blob", "dark_blob"))])
+def test_the_polarity_picker_decides_which_kinds_exist(pol, want):
+    spec = gcl.DefectSpec(polarity=pol, bridge=False)
+    assert spec.kinds() == want
+    assert gcl.DefectSpec(polarity=pol).kinds() == want + ("bridge",)
+
+
+def test_dark_only_never_makes_a_bright_defect(tmp_path, gc):
+    """**整條路**都要照設定走，不只 `kinds()` 那一格。"""
+    out = gcl.generate(str(tmp_path), gc=gc, images=2, size=900, defects=20,
+                       patch=41, seed=7, real_frac=1.0,
+                       defect=gcl.DefectSpec(polarity="dark", bridge=False))
+    import json
+    truth = json.load(open(out["patch_ground_truth"], encoding="utf-8"))
+    kinds = {v["type"] for v in truth.values()}
+    assert kinds == {"dark_blob"}, kinds
+
+
+def test_a_dark_defect_goes_down_and_a_bright_one_goes_up(gc):
+    up, _ = _planted(gc, gcl.DEFECT, "bright_blob")
+    down, _ = _planted(gc, gcl.DEFECT, "dark_blob")
+    assert up.max() > 40 and abs(up.min()) < 1
+    assert down.min() < -40 and abs(down.max()) < 1
+
+
+def test_the_width_convention_is_fwhm_like_everywhere_else(gc):
+    """⚠ 「寬度」在這個 repo 只有一個意思：**FWHM**。
+
+    第一版用「±2σ」換算，於是填 12 量到 7 —— ±2σ 那一圈只剩峰值的 13%，
+    量不到。`make_mgepi_real.py` 的檔頭早就寫著線寬是 FWHM 定義，
+    而同一個 repo 裡同一個字不能有兩種意思。
+    """
+    for want in (5.0, 11.0):
+        spec = gcl.DefectSpec(diameter=(want, want), contrast=(80.0, 80.0))
+        delta, _ = _planted(gc, spec, "bright_blob")
+        wide = int((delta[40, :] > delta.max() * 0.5).sum())
+        assert abs(wide - want) <= 1.5, "填 %.0f，半高量到 %d" % (want, wide)

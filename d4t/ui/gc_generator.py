@@ -36,7 +36,7 @@ import numpy as np
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QGuiApplication, QImage, QPixmap
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGridLayout,
+    QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGridLayout,
     QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox,
     QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSlider,
     QSpinBox, QVBoxLayout, QWidget,
@@ -148,12 +148,13 @@ class GcGeneratorWindow(QMainWindow):
 
         grid.addWidget(self._source_box(), 0, 0)
         grid.addWidget(self._period_box(), 1, 0)
-        grid.addWidget(self._preview_box(), 0, 1, 2, 1)
-        grid.addWidget(self._params_box(), 2, 0)
-        grid.addWidget(self._run_box(), 2, 1)
+        grid.addWidget(self._preview_box(), 0, 1, 3, 1)
+        grid.addWidget(self._defect_box(), 2, 0)
+        grid.addWidget(self._params_box(), 3, 0)
+        grid.addWidget(self._run_box(), 3, 1)
         grid.setColumnStretch(1, 1)
-        grid.setRowStretch(1, 1)
-        self.resize(980, 760)
+        grid.setRowStretch(0, 1)
+        self.resize(1060, 900)
         self._sync()
 
     # -- 版面 ---------------------------------------------------------------
@@ -281,8 +282,119 @@ class GcGeneratorWindow(QMainWindow):
         self.paint.seed_from_sites(self._be().inner_space_sites(self._gc),
                                    radius=max(1, self.sl_brush.value()))
 
+    def _defect_box(self) -> QWidget:
+        """**缺陷長什麼樣**（F62）。使用者：「可以選 defect size、亮、暗、隨機」。
+
+        每一格旁邊那一條樣本是即時畫的 —— 改一個旋鈕就重畫。這一段是整個
+        視窗最像「模擬器」的地方：使用者調的不是抽象參數，是**他等一下會
+        拿到的那張圖**。
+        """
+        box = QGroupBox("4 · What a defect looks like", self)
+        lay = QVBoxLayout(box)
+        form = QFormLayout()
+
+        size = QHBoxLayout()
+        self.sp_dmin = QDoubleSpinBox(box); self.sp_dmin.setRange(1.0, 60.0)
+        self.sp_dmin.setValue(4.0); self.sp_dmin.setSingleStep(0.5)
+        self.sp_dmax = QDoubleSpinBox(box); self.sp_dmax.setRange(1.0, 60.0)
+        self.sp_dmax.setValue(9.0); self.sp_dmax.setSingleStep(0.5)
+        size.addWidget(self.sp_dmin); size.addWidget(QLabel("to", box))
+        size.addWidget(self.sp_dmax); size.addWidget(QLabel("px", box))
+        size.addStretch(1)
+        form.addRow("Size (across)", size)
+
+        con = QHBoxLayout()
+        self.sp_cmin = QSpinBox(box); self.sp_cmin.setRange(5, 200)
+        self.sp_cmin.setValue(55)
+        self.sp_cmax = QSpinBox(box); self.sp_cmax.setRange(5, 200)
+        self.sp_cmax.setValue(95)
+        con.addWidget(self.sp_cmin); con.addWidget(QLabel("to", box))
+        con.addWidget(self.sp_cmax); con.addWidget(QLabel("grey levels", box))
+        con.addStretch(1)
+        form.addRow("Contrast", con)
+
+        pol = QHBoxLayout()
+        self.cmb_pol = QComboBox(box)
+        self.cmb_pol.addItem("Either, at random", "both")
+        self.cmb_pol.addItem("Bright only", "bright")
+        self.cmb_pol.addItem("Dark only", "dark")
+        pol.addWidget(self.cmb_pol, 1)
+        self.chk_bridge = QCheckBox("also bridges", box)
+        self.chk_bridge.setChecked(True)
+        self.chk_bridge.setToolTip(
+            "A short line joining two neighbouring lines — not a dot, so "
+            "anything that only looks at local contrast will miss it")
+        pol.addWidget(self.chk_bridge)
+        form.addRow("Bright or dark", pol)
+        lay.addLayout(form)
+
+        self.lbl_samples = QLabel(box)
+        self.lbl_samples.setAlignment(Qt.AlignCenter)
+        self.lbl_samples.setMinimumHeight(96)
+        self.lbl_samples.setFrameShape(QFrame.StyledPanel)
+        lay.addWidget(self.lbl_samples)
+        self.lbl_sample_note = QLabel(
+            "Six of them, drawn with these settings", box)
+        self.lbl_sample_note.setObjectName("hint")
+        lay.addWidget(self.lbl_sample_note)
+
+        for wgt in (self.sp_dmin, self.sp_dmax, self.sp_cmin, self.sp_cmax):
+            wgt.valueChanged.connect(self._refresh_samples)
+        self.cmb_pol.currentIndexChanged.connect(self._refresh_samples)
+        self.chk_bridge.toggled.connect(self._refresh_samples)
+        return box
+
+    def defect_spec(self):
+        """畫面上那幾格 → backend 的 `DefectSpec`。**只有這一支在翻譯。**"""
+        be = self._be()
+        lo, hi = float(self.sp_dmin.value()), float(self.sp_dmax.value())
+        clo, chi = float(self.sp_cmin.value()), float(self.sp_cmax.value())
+        return be.DefectSpec(
+            diameter=(min(lo, hi), max(lo, hi)),
+            contrast=(min(clo, chi), max(clo, chi)),
+            polarity=str(self.cmb_pol.currentData()),
+            bridge=bool(self.chk_bridge.isChecked()))
+
+    def _refresh_samples(self) -> None:
+        """畫六顆**用目前設定種出來的**缺陷，就在真的圖案上。
+
+        ⚠ 樣本用**固定的 seed**：使用者是一格一格微調的，而每動一次就換一批
+        隨機的話，他分不出「數字變了」與「剛好抽到不一樣的」。
+        """
+        # 建構期間就可能被叫到（`_defect_box` 的訊號接在 `_params_box` 之前），
+        # 所以兩個都要問 —— 少一個就是一個只在「還沒載入」時炸的 AttributeError。
+        if self._gc is None or not hasattr(self, "sp_noise"):
+            return
+        be = self._be()
+        spec = self.defect_spec()
+        px, py = float(self.sp_px.value()), float(self.sp_py.value())
+        n, side = 6, 56
+        rng = np.random.default_rng(4)
+        strip = np.zeros((side, n * side + (n - 1) * 4), dtype=np.float32)
+        strip[:] = 255.0
+        pool = spec.kinds()
+        mask = self.paint.mask()
+        sites = be.sites_from_mask(mask) if mask is not None and mask.any()             else be.inner_space_sites(self._gc)
+        for i in range(n):
+            sx, sy = (sites[int(rng.integers(0, len(sites)))] if sites
+                      else (self._gc.shape[1] // 2, self._gc.shape[0] // 2))
+            # 把那個 GC 座標擺到小圖的正中央 —— 使用者要看的是「缺陷長怎樣」，
+            # 不是「它在哪」（在哪是上面那一段的事）。
+            ph_x = (sx - side / 2.0) % px
+            ph_y = (sy - side / 2.0) % py
+            tileimg = be.tile(self._gc, side, side, px, py, ph_x, ph_y)
+            kind = str(pool[int(rng.integers(0, len(pool)))]) if pool else ""
+            if kind:
+                be.plant(tileimg, kind, side / 2.0, side / 2.0, rng, px, spec)
+            tileimg = tileimg + rng.normal(0.0, float(self.sp_noise.value()),
+                                           tileimg.shape)
+            x0 = i * (side + 4)
+            strip[:, x0:x0 + side] = np.clip(tileimg, 0, 255)
+        self.lbl_samples.setPixmap(_pixmap(strip, 10 ** 4).scaledToHeight(
+            96, Qt.SmoothTransformation))
+
     def _params_box(self) -> QWidget:
-        box = QGroupBox("4 · How much to make", self)
+        box = QGroupBox("5 · How many", self)
         form = QFormLayout(box)
         self.sp_images = QSpinBox(box); self.sp_images.setRange(1, 5000)
         self.sp_images.setValue(50)
@@ -308,7 +420,7 @@ class GcGeneratorWindow(QMainWindow):
         return box
 
     def _run_box(self) -> QWidget:
-        box = QGroupBox("5 · Write it out", self)
+        box = QGroupBox("6 · Write it out", self)
         lay = QVBoxLayout(box)
         row = QHBoxLayout()
         self.ed_out = QLineEdit(box)
@@ -420,6 +532,7 @@ class GcGeneratorWindow(QMainWindow):
                                        int(self._gc.min()), int(self._gc.max())))
         self._measure()
         self._seed_auto()
+        self._refresh_samples()
         return True
 
     # -- 週期 ---------------------------------------------------------------
@@ -479,6 +592,7 @@ class GcGeneratorWindow(QMainWindow):
             shown[tiled] = np.clip(shown[tiled].astype(np.int16) + 70, 0, 255
                                    ).astype(np.uint8)
         self.lbl_prev.setPixmap(_pixmap(shown, PREVIEW))
+        self._refresh_samples()
         self.lbl_sites.setText(
             "%d pixels painted — that is where defects can land"
             % n_px if n_px else
@@ -504,7 +618,8 @@ class GcGeneratorWindow(QMainWindow):
             noise=float(self.sp_noise.value()), seed=int(self.sp_seed.value()),
             period_x=float(self.sp_px.value()),
             period_y=float(self.sp_py.value()),
-            sites=self._be().sites_from_mask(self.paint.mask()))
+            sites=self._be().sites_from_mask(self.paint.mask()),
+            defect=self.defect_spec())
         self.bar.setRange(0, int(self.sp_images.value()))
         self.bar.setValue(0)
         self.bar.setVisible(True)

@@ -186,3 +186,58 @@ def test_the_result_line_warns_that_the_data_is_as_sensitive_as_the_gc(
     win._worker.wait(120000)
     QApplication.instance().processEvents()
     assert "do not commit" in win.lbl_result.text()
+
+
+# --------------------------------------------------------------------------- #
+# 5. 缺陷長什麼樣（F62）
+# --------------------------------------------------------------------------- #
+def test_the_defect_boxes_translate_into_a_spec(win, gc_arr):
+    win.set_gc(gc_arr)
+    win.sp_dmin.setValue(9.0)
+    win.sp_dmax.setValue(3.0)          # 故意填反
+    win.sp_cmin.setValue(90)
+    win.sp_cmax.setValue(30)
+    win.cmb_pol.setCurrentIndex(win.cmb_pol.findData("dark"))
+    win.chk_bridge.setChecked(False)
+    spec = win.defect_spec()
+    # 填反了要**自己排好**，不是拿去產一批空的
+    assert spec.diameter == (3.0, 9.0)
+    assert spec.contrast == (30.0, 90.0)
+    assert spec.polarity == "dark" and spec.bridge is False
+    assert spec.kinds() == ("dark_blob",)
+
+
+def test_the_sample_strip_redraws_when_a_knob_moves(win, gc_arr):
+    """調的是一格數字，看到的是**等一下會拿到的那張圖** —— 那是這個視窗
+    最像模擬器的地方，所以它必須真的跟著動。"""
+    win.set_gc(gc_arr)
+    before = win.lbl_samples.pixmap().toImage()
+    win.sp_dmax.setValue(20.0)
+    after = win.lbl_samples.pixmap().toImage()
+    assert before != after
+
+
+def test_the_sample_strip_is_stable_between_edits(win, gc_arr):
+    """⚠ 樣本用**固定的 seed**：使用者一格一格微調，每動一次就換一批隨機的
+    話，他分不出「數字變了」與「剛好抽到不一樣的」。"""
+    win.set_gc(gc_arr)
+    a = win.lbl_samples.pixmap().toImage()
+    win._refresh_samples()
+    b = win.lbl_samples.pixmap().toImage()
+    assert a == b
+
+
+def test_dark_only_really_reaches_the_written_lot(win, gc_arr, tmp_path):
+    import json
+    win.set_gc(gc_arr)
+    win.cmb_pol.setCurrentIndex(win.cmb_pol.findData("dark"))
+    win.chk_bridge.setChecked(False)
+    win.sp_real.setValue(100)
+    win.ed_out.setText(str(tmp_path / "dark"))
+    win.sp_images.setValue(1); win.sp_size.setValue(900); win.sp_defects.setValue(8)
+    win._go()
+    win._worker.wait(120000)
+    QApplication.instance().processEvents()
+    truth = json.load(open(str(tmp_path / "dark" / "patch" / "ground_truth.json"),
+                           encoding="utf-8"))
+    assert {v["type"] for v in truth.values()} == {"dark_blob"}
