@@ -31,6 +31,7 @@ for _p in (REPO, os.path.join(REPO, "tools")):
 
 import _synth_mgepi as mgepi  # noqa: E402
 import make_lot_from_gc as gcl  # noqa: E402
+from d4t.core.ingest.dataset import load_dataset  # noqa: E402
 
 
 G = mgepi.GEOMETRY
@@ -229,3 +230,56 @@ def test_a_thin_bright_stripe_inside_the_space_is_not_an_mg_line(gc):
     assert per_period <= want + 2, (
         "一個週期量到 %d 個交界，期望 ~%d —— 細亮芯大概也被當成 MG 了"
         % (per_period, want))
+
+
+def test_defects_only_land_where_the_mask_says(tmp_path, gc):
+    """⚠ **這是「畫在 GC 上」整件事的驗收**（F61）。
+
+    使用者畫的那一塊會照週期鋪到大圖的每一個重複上。要驗那個「回推」對不對，
+    麻煩的地方是每張大圖有自己的隨機相位，而相位沒有被記下來 —— 折回去就少
+    一個未知數。
+
+    **繞過它的方法是把未知數變成常數**：遮罩只留**一個**畫素、只產**一張**
+    大圖。那麼所有缺陷都來自同一個 GC 座標、同一個相位，於是它們的 x 座標
+    必須**兩兩相差週期的整數倍**。相位是多少完全不必知道。
+
+    鋪錯的話（少乘一次週期、把 GC 座標當成大圖座標…）這一條立刻紅，
+    而畫面上完全看不出來。
+    """
+    mask = np.zeros(gc.shape, dtype=bool)
+    mask[11, 34] = True                      # 只准這一個點
+    out = gcl.generate(str(tmp_path), gc=gc, images=1, size=900, defects=12,
+                       patch=41, seed=5, sites=gcl.sites_from_mask(mask))
+    px, py = out["period"]
+    ds = load_dataset(out["patch_klarf"])
+    assert len(ds.items) == 12
+    xs = [float(d.xrel_nm) for d in ds.items]   # 1 nm = 1 px（見 KLARF 那一段）
+    ys = [float(d.yrel_nm) for d in ds.items]
+
+    def off_grid(vals, period):
+        base = vals[0]
+        return [v for v in vals
+                if min((v - base) % period, period - (v - base) % period) > 1.5]
+
+    assert not off_grid(xs, px), (
+        "同一個 GC 座標種出來的缺陷，x 不是差週期的整數倍：%s（週期 %.2f）"
+        % (sorted(xs), px))
+    assert not off_grid(ys, py), (
+        "y 不是差週期的整數倍：%s（週期 %.2f）" % (sorted(ys), py))
+
+
+def test_the_painted_area_is_the_only_thing_that_moves_the_defects(tmp_path, gc):
+    """畫在**別的地方**，缺陷就跟著搬家 —— 而且搬的距離對得上。"""
+    px, py = gcl.periods(gc)
+    outs = []
+    for gx in (20, 60):
+        mask = np.zeros(gc.shape, dtype=bool)
+        mask[11, gx] = True
+        outs.append(gcl.generate(str(tmp_path / str(gx)), gc=gc, images=1,
+                                 size=900, defects=6, patch=41, seed=5,
+                                 sites=gcl.sites_from_mask(mask)))
+    a = [float(d.xrel_nm) for d in load_dataset(outs[0]["patch_klarf"]).items]
+    b = [float(d.xrel_nm) for d in load_dataset(outs[1]["patch_klarf"]).items]
+    shift = (b[0] - a[0]) % px
+    assert min(abs(shift - 40.0), abs(shift - 40.0 + px)) < 2.0, (
+        "畫的位置移了 40 px，缺陷卻移了 %.1f" % shift)

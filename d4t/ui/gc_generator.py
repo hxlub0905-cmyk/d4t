@@ -36,12 +36,16 @@ import numpy as np
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QGuiApplication, QImage, QPixmap
 from PySide6.QtWidgets import (
-    QCheckBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGridLayout,
+    QButtonGroup, QCheckBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGridLayout,
     QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox,
-    QPlainTextEdit, QProgressBar, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSlider,
+    QSpinBox, QVBoxLayout, QWidget,
 )
 
 from . import theme
+from .gc_paint import (
+    MODE_BRUSH, MODE_ERASE, MODE_RECT, GcPaintView,
+)
 from .widgets import to_uint8
 
 __all__ = ["GcGeneratorWindow", "load_backend", "qimage_to_gray"]
@@ -212,20 +216,70 @@ class GcGeneratorWindow(QMainWindow):
         return box
 
     def _preview_box(self) -> QWidget:
-        box = QGroupBox("3 · What it tiles into", self)
+        """畫「缺陷可能在哪」的那一塊 ＋ 鋪出來的預覽（F61）。
+
+        **畫在一個週期上就等於畫在每一個重複上**（使用者：「反正都是回推」），
+        所以塗的是 GC 那張小圖，而下面的預覽即時顯示它鋪開之後的樣子。
+        """
+        box = QGroupBox("3 · Where defects can appear", self)
         lay = QVBoxLayout(box)
+
+        tools = QHBoxLayout()
+        self.grp_mode = QButtonGroup(box)
+        self.rb_brush = QRadioButton("Brush", box)
+        self.rb_rect = QRadioButton("Rectangle", box)
+        self.rb_erase = QRadioButton("Erase", box)
+        self.rb_brush.setChecked(True)
+        for rb, mode in ((self.rb_brush, MODE_BRUSH), (self.rb_rect, MODE_RECT),
+                         (self.rb_erase, MODE_ERASE)):
+            self.grp_mode.addButton(rb)
+            rb.toggled.connect(
+                lambda on, m=mode: on and self.paint.set_mode(m))
+            tools.addWidget(rb)
+        tools.addSpacing(12)
+        tools.addWidget(QLabel("Size", box))
+        self.sl_brush = QSlider(Qt.Horizontal, box)
+        self.sl_brush.setRange(0, 12)
+        self.sl_brush.setValue(2)
+        self.sl_brush.setMaximumWidth(110)
+        self.sl_brush.valueChanged.connect(
+            lambda v: self.paint.set_radius(int(v)))
+        tools.addWidget(self.sl_brush)
+        tools.addStretch(1)
+        lay.addLayout(tools)
+
+        self.paint = GcPaintView(box)
+        self.paint.setMinimumHeight(150)
+        self.paint.changed.connect(self._refresh_preview)
+        lay.addWidget(self.paint, 1)
+
+        row = QHBoxLayout()
+        self.btn_auto = QPushButton("Fill the inner spaces", box)
+        self.btn_auto.setToolTip(
+            "Start from the boundaries it found by itself, then edit")
+        self.btn_auto.clicked.connect(self._seed_auto)
+        self.btn_clear = QPushButton("Clear", box)
+        self.btn_clear.clicked.connect(self.paint.clear)
+        row.addWidget(self.btn_auto)
+        row.addWidget(self.btn_clear)
+        row.addStretch(1)
+        lay.addLayout(row)
+
         self.lbl_prev = QLabel("Paste a Golden Cell to see this", box)
         self.lbl_prev.setAlignment(Qt.AlignCenter)
-        self.lbl_prev.setMinimumSize(PREVIEW, PREVIEW)
+        self.lbl_prev.setMinimumSize(PREVIEW, 210)
         self.lbl_prev.setFrameShape(QFrame.StyledPanel)
         lay.addWidget(self.lbl_prev, 1)
-        self.chk_sites = QCheckBox("Mark the inner spaces (defects go there)", box)
-        self.chk_sites.setChecked(True)
-        self.chk_sites.toggled.connect(self._refresh_preview)
-        lay.addWidget(self.chk_sites)
         self.lbl_sites = QLabel("", box)
         lay.addWidget(self.lbl_sites)
         return box
+
+    def _seed_auto(self) -> None:
+        """把自動量到的 inner space 塗進去 —— 從一張白紙開始畫太難。"""
+        if self._gc is None:
+            return
+        self.paint.seed_from_sites(self._be().inner_space_sites(self._gc),
+                                   radius=max(1, self.sl_brush.value()))
 
     def _params_box(self) -> QWidget:
         box = QGroupBox("4 · How much to make", self)
@@ -356,11 +410,16 @@ class GcGeneratorWindow(QMainWindow):
             return False
         self._gc = np.ascontiguousarray(arr.astype(np.uint8))
         self.lbl_gc.setPixmap(_pixmap(self._gc, 260))
+        # 畫布跟著換（它會把遮罩清掉 —— 換了圖案，畫在舊圖案上的位置沒有意義），
+        # 然後**預先塗上自動量到的那些**：從一張白紙開始畫太難，使用者要改的
+        # 是一份已經接近的東西。
+        self.paint.set_gc(self._gc)
         h, w = self._gc.shape
         self.lbl_gc_info.setText(
             "%s — %d×%d, grey %d–%d" % (where or "GC", w, h,
                                        int(self._gc.min()), int(self._gc.max())))
         self._measure()
+        self._seed_auto()
         return True
 
     # -- 週期 ---------------------------------------------------------------
@@ -394,21 +453,37 @@ class GcGeneratorWindow(QMainWindow):
         px, py = float(self.sp_px.value()), float(self.sp_py.value())
         big = be.tile(self._gc, PREVIEW, PREVIEW, px, py)
         shown = to_uint8(big)
-        sites = be.inner_space_sites(self._gc)
-        if self.chk_sites.isChecked() and sites:
+        # **使用者塗的那一塊也照同一個週期鋪開** —— 那正是「回推」：他在一個
+        # 週期上畫一筆，大圖上每一個重複都會有。用的是跟 `tile` 同一組
+        # (px, py)，所以畫面上看到的就是 `generate` 會種的地方。
+        mask = self.paint.mask()
+        n_px = 0
+        if mask is not None and mask.any():
+            n_px = int(mask.sum())
+            gh, gw = mask.shape
+            tiled = np.zeros((PREVIEW, PREVIEW), dtype=bool)
+            gy = 0.0
+            while gy < PREVIEW:
+                gx = 0.0
+                while gx < PREVIEW:
+                    y0, x0 = int(round(gy)), int(round(gx))
+                    hh = min(gh, PREVIEW - y0)
+                    ww = min(gw, PREVIEW - x0)
+                    if hh > 0 and ww > 0:
+                        tiled[y0:y0 + hh, x0:x0 + ww] |= mask[:hh, :ww]
+                    gx += px
+                gy += py
             shown = shown.copy()
-            for sx, sy in sites:
-                # 把 GC 上的位置照週期鋪到整張預覽上（同 `generate` 的算法）
-                x = sx
-                while x < PREVIEW:
-                    y = sy
-                    while y < PREVIEW:
-                        # 短一點的記號：長的會把整張預覽蓋掉
-                        shown[max(0, y - 2):y + 3, x:x + 1] = 255
-                        y += int(round(py))
-                    x += int(round(px))
+            # 塗到的地方提亮而不是塗白：底下的圖案要看得見，使用者是**對著
+            # 圖案**在判斷自己塗對了沒有。
+            shown[tiled] = np.clip(shown[tiled].astype(np.int16) + 70, 0, 255
+                                   ).astype(np.uint8)
         self.lbl_prev.setPixmap(_pixmap(shown, PREVIEW))
-        self.lbl_sites.setText("%d inner spaces found (within one period)" % len(sites))
+        self.lbl_sites.setText(
+            "%d pixels painted — that is where defects can land"
+            % n_px if n_px else
+            "Nothing painted yet — draw where defects can appear, "
+            "or press “Fill the inner spaces”")
         self._sync()
 
     # -- 產生 ---------------------------------------------------------------
@@ -428,7 +503,8 @@ class GcGeneratorWindow(QMainWindow):
             real_frac=float(self.sp_real.value()) / 100.0,
             noise=float(self.sp_noise.value()), seed=int(self.sp_seed.value()),
             period_x=float(self.sp_px.value()),
-            period_y=float(self.sp_py.value()))
+            period_y=float(self.sp_py.value()),
+            sites=self._be().sites_from_mask(self.paint.mask()))
         self.bar.setRange(0, int(self.sp_images.value()))
         self.bar.setValue(0)
         self.bar.setVisible(True)
@@ -472,12 +548,14 @@ class GcGeneratorWindow(QMainWindow):
     def _sync(self) -> None:
         """按鈕的狀態只從**明確的狀態**推導（不問 widget，見 `PITFALLS.md`）。"""
         busy = self._worker is not None
-        ready = self._gc is not None and bool(self.ed_out.text().strip())
+        ready = (self._gc is not None and bool(self.ed_out.text().strip())
+                 and self.paint.painted_pixels() > 0)
         self.btn_go.setEnabled(ready and not busy)
         self.btn_stop.setEnabled(busy)
         for b in (self.btn_paste, self.btn_open, self.btn_recipe,
-                  self.btn_measure):
+                  self.btn_measure, self.btn_auto, self.btn_clear):
             b.setEnabled(not busy)
+        self.paint.setEnabled(not busy)
 
     def closeEvent(self, e) -> None:         # noqa: D102 - Qt hook
         if self._worker is not None:

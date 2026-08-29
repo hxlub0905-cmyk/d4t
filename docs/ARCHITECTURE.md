@@ -289,7 +289,9 @@ d4t/
     ├── gallery.py region_check.py      #   縮圖網格（虛擬捲動，撐 10k+）／區域畫在很多顆上
     ├── inspectors.py         #   每張卡自己的儀表（依 `Step.key` 註冊）
     ├── template_dialog.py    #   從大圖疊 Golden Cell 模板（模板存進 recipe）
-    ├── gc_generator.py       #   **反過來**：貼一張 GC 進來，鋪成整批擬真資料（F60）
+    ├── gc_generator.py gc_paint.py  #   **反過來**：貼一張 GC 進來，鋪成整批擬真
+    │                         #     資料（F60）＋ 在那一張上畫出「缺陷可能在哪」
+    │                         #     （F61 —— 畫一個週期＝畫每一個重複）
     │                         #     `python -m d4t simgen`；只做介面，邏輯在
     │                         #     `tools/make_lot_from_gc.py`
     ├── welcome.py            #   首啟導覽 ＋ 範例 recipe 庫對話框（兩個入口目前收起來）

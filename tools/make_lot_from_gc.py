@@ -266,6 +266,42 @@ def inner_space_sites(gc: np.ndarray) -> List[Tuple[int, int]]:
     return [(x, y) for x in edges for y in bands]
 
 
+def sites_from_mask(mask: np.ndarray) -> List[Tuple[int, int]]:
+    """一張**畫在 GC 上**的遮罩 → 候選落點 ``[(x, y), …]``（F61）。
+
+    使用者 2026-08-28：「使用者可以利用 GC 的方式（反正都是回推），畫出
+    defect 可能在的位置，UI 去隨機產生。」
+
+    ⚠ **這一支存在的理由是它讓後面完全不用改。** `generate` 本來就是
+    「從一串 GC 座標裡隨機挑一個，再隨機挑一格 tile」——
+    :func:`inner_space_sites` 量出來的清單與這裡畫出來的遮罩，
+    對它來說是同一種東西。所以「自動找」與「手畫」不是兩條路，是同一條路的
+    兩個入口，而**畫布上的一個點會出現在每一個重複上**（回推）。
+
+    塗到的每一個畫素都是一個候選，所以塗得越大那一塊被抽中的機會越高 ——
+    那正是「這一帶比較容易出事」該有的行為，不必另外做權重。
+    """
+    m = np.asarray(mask)
+    if m.ndim != 2 or not m.any():
+        return []
+    ys, xs = np.nonzero(m.astype(bool))
+    return [(int(x), int(y)) for x, y in zip(xs, ys)]
+
+
+def _into_range(v: int, period: float, lo: int, hi: int) -> int:
+    """把 ``v`` 沿著週期搬進 ``[lo, hi]``，**不離開晶格**。
+
+    搬不進去（週期比可用的範圍還大）才退回夾住 —— 那時候本來就沒有第二個
+    選擇，而它會發生只可能是 patch 幾乎跟大圖一樣大。
+    """
+    step = max(1, int(round(period)))
+    while v < lo:
+        v += step
+    while v > hi:
+        v -= step
+    return int(min(max(v, lo), hi))
+
+
 # --------------------------------------------------------------------------- #
 # 種缺陷
 # --------------------------------------------------------------------------- #
@@ -300,9 +336,13 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
              defects: int = 3000, patch: int = 81, real_frac: float = 0.5,
              noise: float = 6.0, seed: int = 11, fmt: str = "png",
              period_x: float = 0.0, period_y: float = 0.0,
+             sites: Optional[List[Tuple[int, int]]] = None,
              progress: Optional[Callable[[int, int], bool]] = None
              ) -> Dict[str, Any]:
     """產 RSEM 大圖 lot ＋ 從大圖切下來的 patch lot。回傳路徑 dict。
+
+    ``sites``（GC 座標的一串點）給了就照它種缺陷 —— 那是 UI 上畫出來的
+    那一塊（:func:`sites_from_mask`）。沒給就自己量 inner space。
 
     ``period_x`` / ``period_y`` 給 0 就自己量（:func:`periods`）。**知道答案
     的時候請填** —— 見那一支的說明：不到兩個週期寬的 GC 量不準是原理上的事。
@@ -328,9 +368,12 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
     mx, my = periods(gc)
     px = float(period_x) if period_x else mx
     py = float(period_y) if period_y else my
-    sites = inner_space_sites(gc)
+    # ``sites`` 給了就用給的（UI 上畫出來的那一塊，見 :func:`sites_from_mask`）；
+    # 沒給就自己量。兩者對下面那個迴圈**完全一樣** —— 它只需要一串 GC 座標。
+    sites = list(sites) if sites else inner_space_sites(gc)
     if not sites:
-        raise ValueError("在這張 GC 上量不到 inner space（亮條找不到邊）")
+        raise ValueError("在這張 GC 上量不到 inner space（亮條找不到邊），"
+                         "而且也沒有畫出任何可能的位置")
 
     rng = np.random.default_rng(int(seed))
     half = patch // 2
@@ -359,10 +402,21 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
             sx, sy = sites[int(rng.integers(0, len(sites)))]
             gx = int(rng.integers(0, max(1, int((size - patch) / px))))
             gy = int(rng.integers(0, max(1, int((size - patch) / py))))
-            cx = int(round(gx * px + sx - ph_x)) % size
-            cy = int(round(gy * py + sy - ph_y)) % size
-            cx = int(np.clip(cx, half + 2, size - half - 3))
-            cy = int(np.clip(cy, half + 2, size - half - 3))
+            # ⚠ **不要 ``% size``。** 大圖的邊長不是週期的整數倍（900 / 34 =
+            # 26.47），所以那個取餘數會把位置甩到晶格外 —— 一批裡剛好繞回來的
+            # 那幾顆就不在使用者畫的地方了。往內搬交給 `_into_range`，
+            # 它走的是**週期**。
+            cx = int(round(gx * px + sx - ph_x))
+            cy = int(round(gy * py + sy - ph_y))
+            # 太靠邊就**整個週期整個週期地往內搬**，不要 clip。
+            #
+            # ⚠ 這一段本來是 `np.clip`，而那是錯的：clip 把缺陷推到一個
+            # **不在晶格上**的位置，也就是使用者根本沒有畫的地方。一批裡只有
+            # 貼邊的那幾顆會這樣，每一顆看起來都正常，而「缺陷都在 inner
+            # space 上」這個前提被安靜地打破。抓到它的是
+            # `test_defects_only_land_where_the_mask_says`。
+            cx = _into_range(cx, px, half + 2, size - half - 3)
+            cy = _into_range(cy, py, half + 2, size - half - 3)
             is_real = rng.random() < real_frac
             kind = (str(REAL_TYPES[int(rng.integers(0, len(REAL_TYPES)))])
                     if is_real else NUISANCE_TYPE)
