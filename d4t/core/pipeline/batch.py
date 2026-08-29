@@ -20,7 +20,7 @@ import os
 import sys
 import threading
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from dataclasses import replace as _replace
 
@@ -36,6 +36,7 @@ from .engine import (
 from .recipe import Recipe, execution_order
 
 __all__ = ["run_batch", "apply_lot_scaling", "redecide",
+           "item_filters", "select_items",
            "pin_cv2_deterministic"]
 
 # d4t/core/pipeline/batch.py → 上四層 = repo root（spawn 模式 sys.path 保險）
@@ -235,6 +236,76 @@ def _pool_context():
     return _mp.get_context("spawn")
 
 
+def item_filters(recipe: Recipe,
+                 registry: Optional[Dict[str, Any]] = None,
+                 ) -> List[Tuple[str, str, Tuple[str, ...]]]:
+    """整份 recipe 宣告了哪些「只跑這幾個 code」（F50）。
+
+    回 ``[(節點 id, 欄名, (值, …)), …]`` —— **問的是卡片**
+    （`Step.item_filter`），不是一份寫死的載入卡清單。
+
+    ⚠ **不分 route。** 篩選決定的是「哪幾顆進得來」，而那是整批一次的決定；
+    route 是每一顆各自走哪條路，晚一步發生。兩張卡在不同 route 上宣告不同的
+    篩選是一個**講不通**的狀態，由 lint 講話（`only-code-conflict`），
+    這裡照宣告順序全部回，交給呼叫端。
+    """
+    if registry is None:
+        registry = REGISTRY
+    out: List[Tuple[str, str, Tuple[str, ...]]] = []
+    for nid, node in (getattr(recipe, "nodes", None) or {}).items():
+        step_cls = registry.get(node.step)
+        if step_cls is None or not getattr(node, "enabled", True):
+            continue
+        try:
+            got = step_cls.item_filter(dict(node.params or {}))
+        except Exception:              # noqa: BLE001 — 壞參數由 validate 講
+            continue
+        if got:
+            out.append((str(nid), str(got[0]), tuple(got[1])))
+    return out
+
+
+def select_items(recipe: Recipe, dataset: Any, items: Sequence[Any],
+                 registry: Optional[Dict[str, Any]] = None) -> List[Any]:
+    """把 ``items`` 篩成「該跑的那幾顆」（沒有人宣告篩選就原樣回）。
+
+    比對**不分大小寫、去頭尾空白**，而且是字串比對 —— KLARF 的欄值進來是
+    字串，而使用者填的 ``2`` 與檔案裡的 ``2`` 要對得上，不必猜型別。
+
+    ⚠ **欄位不在就自動補**（同 `route_by` 的做法）：使用者不必記得先 carry。
+    """
+    got = item_filters(recipe, registry)
+    if not got:
+        return list(items)
+
+    cols = {col for _nid, col, _vals in got}
+    want = [(col.strip().upper(), {v.strip().upper() for v in vals})
+            for _nid, col, vals in got]
+
+    missing = [c.strip().upper() for c in cols]
+    if any(c not in (getattr(it, "fields", None) or {})
+           for it in items for c in missing):
+        from ..ingest.dataset import fill_fields
+        have: set = set()
+        for it in getattr(dataset, "items", []) or []:
+            have.update((getattr(it, "fields", None) or {}).keys())
+        try:
+            fill_fields(dataset, sorted(have | set(missing)))
+        except Exception:              # noqa: BLE001 — 補不到就照原值比
+            pass
+
+    def keep(it: Any) -> bool:
+        fields = getattr(it, "fields", None) or {}
+        # 好幾個篩選一起 = **每一個都要成立**（AND）。那是唯一講得通的讀法：
+        # 兩張載入卡各自說「只跑這些」，兩句話都是真的。
+        for col, vals in want:
+            if str(fields.get(col, "")).strip().upper() not in vals:
+                return False
+        return True
+
+    return [it for it in items if keep(it)]
+
+
 def run_batch(recipe: Recipe, dataset: Any, *,
               workers: Optional[int] = None,
               cache_dir: Optional[str] = None,
@@ -252,7 +323,19 @@ def run_batch(recipe: Recipe, dataset: Any, *,
     - 回傳順序 = 原始 item 順序（被 abort 略過的顆不在清單裡）。
     - 單顆失敗（含 worker 層意外）→ 該顆 ``ok=False`` dict，不殺整批。
     """
-    items = list(dataset.items) if limit is None else list(dataset.items)[:limit]
+    items = list(dataset.items)
+    # ---- 只跑某幾個 code（F50）：**在任何一張卡跑之前** -------------------
+    # 使用者定調「只在畫面上加一個可選的篩選」，而「不跑」的意思是**根本不
+    # 進來**，不是跑了再跳過 —— 所以它套在這裡，早於 `run_defect`。
+    # 那個選擇買到三件事，寫在 `Step.item_filter` 的說明上（不需要第三種結果
+    # 狀態、被篩掉的 KLARF 不會被改寫、不進快取簽章）。
+    #
+    # ⚠ **篩在 `limit` 前面。** 反過來的話「First 200」會先切掉一批，
+    # 然後再從那 200 顆裡挑符合的 —— 使用者看到的是「我明明有 37 顆 code 2，
+    # 怎麼只跑了 3 顆」。他要的是「符合的前 N 顆」。
+    items = select_items(recipe, dataset, items)
+    if limit is not None:
+        items = items[:int(limit)]
     n = len(items)
     kind = str(getattr(dataset, "kind", ""))
     # ---- 分流（F23）：route_by 的那一欄要在每一顆的 `fields` 裡 ----

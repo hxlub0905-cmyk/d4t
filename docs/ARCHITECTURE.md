@@ -281,16 +281,24 @@ d4t/
     ├── cell_canvas.py        #   一格 cell 鋪成一片，區域的框畫在上面、拖得動
     ├── tree_scene.py tree_panel.py     #   判定樹住在畫布上／點一步就編輯那一步（F24）
     ├── decide_panel.py route_panel.py route_badge.py  #   判定段編輯器／`route_by` 編輯器與徽章
-    ├── verdict_band.py output_band.py  #   判定段的橫幅（一列一類）／Output 段的框（整批只跑一次）
+    ├── verdict_band.py       #   判定段的橫幅（一列一類）
+    │                         #   ⚠ 這裡以前還有 output_band.py（Output 段的虛線框），
+    │                         #     F50 拿掉了：「整批跑一次」變成卡片自己的一條腳帶
     ├── threshold_view.py     #   在挑門檻，就要看得到分布
     ├── results.py results_table.py why_panel.py  #   Results 視窗／結果表／三次點擊回溯（F45）
     ├── gallery.py region_check.py      #   縮圖網格（虛擬捲動，撐 10k+）／區域畫在很多顆上
     ├── inspectors.py         #   每張卡自己的儀表（依 `Step.key` 註冊）
     ├── template_dialog.py    #   從大圖疊 Golden Cell 模板（模板存進 recipe）
+    ├── gc_generator.py gc_paint.py  #   **反過來**：貼一張 GC 進來，鋪成整批擬真
+    │                         #     資料（F60）＋ 在那一張上畫出「缺陷可能在哪」
+    │                         #     （F61 —— 畫一個週期＝畫每一個重複）
+    │                         #     `python -m d4t simgen`；只做介面，邏輯在
+    │                         #     `tools/make_lot_from_gc.py`
     ├── welcome.py            #   首啟導覽 ＋ 範例 recipe 庫對話框（兩個入口目前收起來）
     ├── workers.py            #   載入／預覽（請求合併）／試跑／寫出 背景執行緒
     ├── theme.py widgets.py branding.py region_words.py  #   主題 token／資料驅動元件／圖示字標／
     │                         #   區域那三個埠的白話字
+    ├── numbers.py            #   一個特徵值印成字 —— **全 UI 只有這一支**（F52）
     └── assets/               #   `d4t.svg` 與兩份字標（pyproject 的 package-data 帶著它們走）
 ```
 

@@ -319,8 +319,14 @@ git add -A && python tools/release.py && git add -A
 所以規矩寫下來：**一塊新的面板／畫布元件＝一個新模組**。F22 的
 `ui/decide_panel.py`、F24 的 `ui/tree_panel.py`／`ui/tree_scene.py`、F25 的
 `ui/route_badge.py`、F27 的 `ui/verdict_band.py`／`ui/results_table.py`、
-F30 的 `ui/output_band.py` 已經都是這樣做的 —— 這一段只是把它從「這次剛好這樣
-做」變成「本來就這樣做」。`studio.py` 留給**接線**（建 widget、接訊號、轉呼叫），
+F44 的 `ui/region_words.py` 已經都是這樣做的 —— 這一段只是把它從「這次剛好這樣
+做」變成「本來就這樣做」。
+
+> ⚠ 這張清單上以前還有 **F30 的 `ui/output_band.py`**，而它 2026-08-28 被
+> **刪掉**了（F50）。規矩沒有變 —— 變的是那一塊該不該存在：那個框畫的是
+> 「Output 這幾張卡整批跑一次」，而**框的意思是「這幾個是一組」，真相卻是
+> 「跑的時間不一樣」**。編碼錯了，所以那件事現在是卡片自己的一條腳帶。
+> **一塊新元件開一個新模組是對的；先問那一塊該不該是一塊。**`studio.py` 留給**接線**（建 widget、接訊號、轉呼叫），
 不留給內容。
 
 ⚠ **現在不要動 `studio.py` 本身**，但**理由已經換了一個**。

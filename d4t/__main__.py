@@ -473,6 +473,20 @@ def _cmd_gui(_args: argparse.Namespace) -> int:
     return gui_main([])
 
 
+def _cmd_simgen(_args: argparse.Namespace) -> int:
+    """開「從一張 Golden Cell 產一整批資料」的視窗（F60）。
+
+    跟 `gui` 一樣 lazy import Qt —— core/CLI 本身不依賴它（鐵則 1）。
+    """
+    try:
+        from d4t.ui.gc_generator import run as simgen_run
+    except ImportError as exc:
+        print(f"[錯誤] 無法載入圖形介面（需要 PySide6）：{exc}\n"
+              f"       安裝：pip install PySide6", file=sys.stderr)
+        return 2
+    return simgen_run([])
+
+
 def _pct(value: Any) -> str:
     """比率 → ``"25.0%"``，**沒有定義的時候是 `—` 不是 0%**。
 
@@ -535,6 +549,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("gui", help="開啟 Studio 視覺化介面").set_defaults(func=_cmd_gui)
+    sub.add_parser("simgen",
+                   help="從一張 Golden Cell 產一整批擬真資料（貼上就能用）"
+                   ).set_defaults(func=_cmd_simgen)
     sub.add_parser("steps", help="列出所有已註冊卡片").set_defaults(func=_cmd_steps)
 
     p_val = sub.add_parser("validate", help="Recipe 健檢（lint）")

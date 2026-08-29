@@ -23,12 +23,19 @@ from PySide6.QtWidgets import (
 
 from ..core.pipeline.expression import ExpressionError, parse_expression
 from ..core.pipeline.verdict_trace import _collect_var_spans
+from .numbers import format_feature_value
 
 __all__ = ["WhyPanel", "why_rows"]
 
 
 def _fmt(value: Any) -> str:
-    return "?" if value is None else ("%.4g" % float(value))
+    """**沒有值印 `?` 是這裡刻意的**（其他地方留白）。
+
+    回溯面板一列講的是「這一題問了什麼、答案是幾」—— 一個空格讀起來像
+    「這一題沒問」，而真相是「問了，但那個數字這一顆沒量到」。
+    值本身走 `format_feature_value`（F52，全 UI 只有那一支）。
+    """
+    return "?" if value is None else format_feature_value(value)
 
 
 def _first_var(expr_text: str) -> str:

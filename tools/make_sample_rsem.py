@@ -50,6 +50,7 @@ if _TOOLS not in sys.path:
 from d4t.core.ingest import dataset, klarf_core  # noqa: E402
 
 # 圖案／缺陷合成的共用零件（與 make_sample.py 共用同一組數值行為）
+import _synth_mgepi as _mgepi  # noqa: E402
 from _synth import (  # noqa: E402
     NUISANCE_TYPE, REAL_TYPES, pattern, plant_anomaly, rounded_square_tile,
 )
@@ -145,15 +146,28 @@ def _defect_row(defect_id: str, xrel: int, yrel: int, xindex: int, yindex: int,
 
 def generate(out_dir, n: int = 24, real_frac: float = 0.5, size: int = 256,
              pitch: int = 24, noise: float = 5.0, seed: int = 11,
-             fmt: str = "png") -> Dict[str, Any]:
-    """產生合成 rSEM lot 並自我驗證 ingest 層讀得回來。回傳輸出檔路徑 dict。"""
+             fmt: str = "png", pattern_name: str = "cells") -> Dict[str, Any]:
+    """產生合成 rSEM lot 並自我驗證 ingest 層讀得回來。回傳輸出檔路徑 dict。
+
+    ``pattern_name="mg_epi"``（F58）換成真的那種 layout：直的 MG 壓在橫的
+    EPI 上、**六根一個週期而第三根缺席**（見 `_synth_mgepi.py`）。RSEM 的
+    大圖（``--size 1000``）上一個週期只佔 180 px，所以一張圖裡有五個多週期
+    —— 那正是 Golden Cell 的相位搜尋與「用重複結構鋪 ROI」要練的情況。
+    預設 ``"cells"`` 那條路的位元組一個都沒有變。"""
     if n < 1:
         raise ValueError(f"n 至少要 1（收到 {n}）")
     if not (0.0 <= real_frac <= 1.0):
         raise ValueError(f"real_frac 必須在 0–1 之間（收到 {real_frac}）")
     if pitch < 4:
         raise ValueError(f"pitch 至少要 4（收到 {pitch}），否則疊不出 cell")
-    if size < 4 * pitch:
+    if str(pattern_name) == "mg_epi":
+        need = int(round(_mgepi.GEOMETRY.mg_pitch * _mgepi.GEOMETRY.period))
+        if size < need:
+            raise ValueError(
+                f"size（{size}）對 mg_epi 至少要 {need}（一個完整週期＝"
+                f"{_mgepi.GEOMETRY.period} 根 MG），否則大圖上看不到"
+                f"「第三根缺席」這件事")
+    elif size < 4 * pitch:
         raise ValueError(f"size（{size}）至少要是 pitch（{pitch}）的 4 倍，圖案才有週期性")
     if noise < 0:
         raise ValueError(f"noise 不可為負（收到 {noise}）")
@@ -166,6 +180,14 @@ def generate(out_dir, n: int = 24, real_frac: float = 0.5, size: int = 256,
     os.makedirs(img_dir, exist_ok=True)
     klarf_path = os.path.join(out_dir, LOT_NAME + ".001")
     gt_path = os.path.join(out_dir, "ground_truth.json")
+    gc_path = ""
+    if str(pattern_name) == "mg_epi":
+        # 見 `make_sample.py::_write_gc` 的理由 —— 這種 layout 的資料一定附
+        # 一張 Golden Cell，它就是這個圖案的一個週期。
+        gc_path = os.path.join(out_dir, "golden_cell.png")
+        _tmp = gc_path + ".tmp.png"
+        _write_image(_tmp, _mgepi.golden_cell())
+        os.replace(_tmp, gc_path)
 
     rng = np.random.default_rng(int(seed))
     tile = rounded_square_tile(pitch)
@@ -182,7 +204,13 @@ def generate(out_dir, n: int = 24, real_frac: float = 0.5, size: int = 256,
         # 每張圖自己的晶格相位（裁切位移 → 仍然嚴格週期）
         ox = int(rng.integers(0, pitch))
         oy = int(rng.integers(0, pitch))
-        img = pattern(size, pitch, ox, oy, tile)
+        if str(pattern_name) == "mg_epi":
+            geo = _mgepi.GEOMETRY
+            px_ = float(rng.integers(0, int(round(geo.mg_pitch * geo.period))))
+            py_ = float(rng.integers(0, int(round(geo.epi_pitch))))
+            img = _mgepi.frame(size, size, geo, px_, py_)
+        else:
+            img = pattern(size, pitch, ox, oy, tile)
 
         # 每張圖的亮度／對比微擾（在種缺陷之前做，缺陷振幅才不會被 gain 縮掉）
         gain = float(rng.uniform(0.90, 1.10))
@@ -190,7 +218,11 @@ def generate(out_dir, n: int = 24, real_frac: float = 0.5, size: int = 256,
         img = (img - 128.0) * gain + 128.0 + bias
 
         is_real = i in real_idx
-        if is_real:
+        if is_real and str(pattern_name) == "mg_epi":
+            kinds = _mgepi.REAL_TYPES
+            kind = str(kinds[int(rng.integers(0, len(kinds)))])
+            _mgepi.plant_inner_space_defect(img, kind, rng, geo, px_, py_)
+        elif is_real:
             kind = str(REAL_TYPES[int(rng.integers(0, len(REAL_TYPES)))])
             plant_anomaly(img, kind, rng, pitch)
         else:
@@ -262,8 +294,11 @@ def generate(out_dir, n: int = 24, real_frac: float = 0.5, size: int = 256,
         assert arr.shape == (size, size) and arr.dtype == np.uint8, \
             f"defect {it.defect_id} 像素讀回來是 {arr.shape}/{arr.dtype}（應為 {(size, size)}/uint8）"
 
-    return {"out_dir": out_dir, "klarf": klarf_path, "images_dir": img_dir,
-            "images": img_paths, "ground_truth": gt_path}
+    out = {"out_dir": out_dir, "klarf": klarf_path, "images_dir": img_dir,
+           "images": img_paths, "ground_truth": gt_path}
+    if gc_path:
+        out["golden_cell"] = gc_path
+    return out
 
 
 # ---------------------------------------------------------------- CLI
@@ -281,13 +316,20 @@ def main(argv=None) -> int:
     ap.add_argument("--seed", type=int, default=11, help="隨機種子（同 seed 產出相同位元組）")
     ap.add_argument("--format", dest="fmt", default="png", choices=list(FORMATS),
                     help="影像檔格式（預設 png）")
+    ap.add_argument("--pattern", dest="pattern_name", default="cells",
+                    choices=("cells", "mg_epi"),
+                    help=("圖案：cells = 圓角方塊晶格（預設）；mg_epi = 真的"
+                          "那種 layout（直 MG × 橫 EPI，六根一個週期、第三根"
+                          "缺席，缺陷在 inner space 上）"))
     args = ap.parse_args(argv)
     paths = generate(args.out_dir, n=args.n, real_frac=args.real_frac,
                      size=args.size, pitch=args.pitch, noise=args.noise,
-                     seed=args.seed, fmt=args.fmt)
+                     seed=args.seed, fmt=args.fmt,
+                     pattern_name=args.pattern_name)
     print("Generated synthetic rSEM lot:")
-    for k in ("klarf", "images_dir", "ground_truth"):
-        print(f"  {k:12s} {paths[k]}")
+    for k in ("klarf", "images_dir", "ground_truth", "golden_cell"):
+        if k in paths:
+            print(f"  {k:12s} {paths[k]}")
     print(f"  {'images':12s} {len(paths['images'])} files")
     return 0
 

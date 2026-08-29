@@ -433,6 +433,92 @@ def carry_spec() -> ParamSpec:
     )
 
 
+#: 兩張載入卡共用的「只跑這幾個 code」（F50，2026-08-28，使用者：「直接在
+#: Input 內加入 input code 的功能（可選，選擇 KLARF 內哪個 column code 的
+#: image 才要跑運算）」）。
+#:
+#: **兩張卡同一組參數名**，理由同 `drop_edge_specs`：使用者心裡這是一件事，
+#: 而它在 recipe 裡長什麼樣會被讀、被 diff、被抄。
+#:
+#: 為什麼是**兩格**而不是一格 ``COLUMN=1,2``：欄名要能從 KLARF 現有的欄
+#: 長成一個下拉（`choices_from="main_columns"`），而一格自由文字就得自己
+#: 打對欄名 —— 打錯只會安靜地一顆都不符合。
+ONLY_CODE_HELP_COL = (
+    "Optional. Only run the defects whose value in this KLARF column is in "
+    "the list below - everything else is left out of the run entirely. "
+    "Leave empty to run every defect."
+)
+ONLY_CODE_HELP_VAL = (
+    "Which values to keep, comma separated (for example '2, 5'). Matching "
+    "ignores case and surrounding spaces. Defects that are left out are not "
+    "processed at all, and their KLARF rows are never rewritten."
+)
+
+
+def only_code_specs() -> List[ParamSpec]:
+    """``only_column`` ＋ ``only_codes`` —— 讀資料那幾張卡共用。
+
+    **兩格都空 = 不篩**（嚴格附加，同 `route_by`）：既有的每一份 recipe
+    一個位元都沒變。
+    """
+    return [
+        ParamSpec(
+            name="only_column", type="str", default="",
+            label="Only run this column",
+            choices_from="main_columns",
+            advanced=True,
+            help=ONLY_CODE_HELP_COL,
+        ),
+        # ⚠ **沒有 `show_when`，兩格永遠都在。** 想寫的是「填了欄名才顯示
+        # 值那一格」，而 `show_when` 比對的是**一組允許的值**，沒有「非空」
+        # 這個述詞 —— 欄名是執行期才知道的（`choices_from`），列舉不出來。
+        # 兩格一起出現也比較誠實：它們讀起來就是一句話的兩半，而兩格都是
+        # `advanced`，本來就收在進階區。
+        ParamSpec(
+            name="only_codes", type="str", default="",
+            label="…with these values",
+            advanced=True,
+            help=ONLY_CODE_HELP_VAL,
+        ),
+    ]
+
+
+def parse_only_codes(params: Dict[str, Any]
+                     ) -> Optional[Tuple[str, Tuple[str, ...]]]:
+    """`Step.item_filter` 的共用實作：把那兩格讀成 ``(欄名, (值, …))``。
+
+    **任一格空的就回 None**（＝不篩）。只填欄名沒填值的話，字面上的意思是
+    「這一欄的值要在一個空清單裡」＝一顆都不跑 —— 那絕對不是使用者的意思，
+    而一份跑出零顆的 recipe 看起來就像壞掉。那個狀態由 lint 講話
+    （`only-code-no-values`），引擎這邊當成沒填。
+    """
+    col = str(params.get("only_column", "") or "").strip()
+    raw = str(params.get("only_codes", "") or "").strip()
+    if not col or not raw:
+        return None
+    vals = tuple(t.strip() for t in raw.split(",") if t.strip())
+    return (col, vals) if vals else None
+
+
+def only_code_hints(params: Dict[str, Any]) -> List[str]:
+    """那兩格填了一半的時候講一句（`Step.configuration_hints` 用）。
+
+    **warning 不是 error**：這張卡照樣跑得完，只是那個篩選沒有作用 ——
+    正是 `configuration_hints` 的契約（「跑得起來，但你八成不是這個意思」）。
+
+    只講**填了欄名沒填值**那一邊。反過來（填了值沒填欄名）也是沒作用，而那
+    句話比較沒用：使用者八成是打算填欄名的下一步，而下拉就在旁邊。
+    """
+    col = str(params.get("only_column", "") or "").strip()
+    raw = str(params.get("only_codes", "") or "").strip()
+    if col and not raw:
+        return ["“Only run this column” is set to %r but no values are "
+                "listed, so nothing is filtered and every defect runs. "
+                "Add the values you want to keep (for example '2, 5'), or "
+                "clear the column." % col]
+    return []
+
+
 #: 兩張 Region 卡共用的「靠邊的框不要」開關（F11 Region 第八輪，使用者要求）。
 #:
 #: 為什麼兩張卡要**同一組參數名**：使用者心裡這是**一件事**（「靠邊的不要」），

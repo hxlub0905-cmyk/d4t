@@ -471,3 +471,60 @@ def test_the_colours_follow_this_run_not_the_last_one(window):
 
     assert after != before, "換了 bin，圖上的顏色卻沒變 —— 它染的是上一批"
     assert after <= band, (after, band)
+
+
+# --------------------------------------------------------------------------- #
+# 6. Results 有自己的入口（F48，2026-08-28）
+# --------------------------------------------------------------------------- #
+def test_results_has_a_button_of_its_own(qapp):
+    """**還沒跑過也叫得出 Results 視窗。**
+
+    使用者 2026-08-28：「可以改成加一個按鈕獨立呼叫一個視窗嗎（目前是跑完
+    才會出來）」。在這之前只有兩條路會開它：跑完自動彈出、或在直方圖上點一根
+    長條 —— 兩條都要先跑過一批，所以關掉之後想再看一次就只能再跑一次。
+    （而 `results.py` 的檔頭一直寫著「關掉它不會丟掉結果」：結果確實還在，
+    只是沒有一顆鈕叫得出來。）
+
+    ⚠ 這一條用**自己的視窗**，不用 module 級的 `window` fixture ——
+    它問的正是「一顆都還沒跑的時候」，而那個 fixture 已經載過資料了。
+    """
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    try:
+        assert not win.trial_results, "這一條要的是還沒跑過的狀態"
+        assert win.results_visible() is False
+        win.btn_results.click()
+        assert win.results_visible() is True, "按了 Results 卻沒有視窗出來"
+
+        # 空的時候要講得出**在等什麼**（F44 的 empty_reason 同一條規矩）。
+        # 工具列上那句 `No results yet.` 答得出「是空的」，答不出「所以呢」。
+        said = win.results.status_text()
+        assert "Run trial" in said, said
+    finally:
+        win.close()
+
+
+def test_the_results_button_is_actually_visible_at_the_default_size(qapp):
+    """**放不下 = 沒有這顆鈕。**
+
+    第一版把它加在工具列最右邊，而工具列在預設視窗大小下**已經是滿的**
+    （內容 916 px / 視窗 948 px）—— Qt 於是把它收進右邊那個 ``»`` 溢位選單，
+    `isVisible()` 是 False。一顆藏在兩層選單底下的鈕答不了使用者的要求。
+
+    所以預設視窗大小改成由工具列的 `sizeHint` 決定。這一條守的是那個結論
+    本身，而不是那個數字：**下一顆鈕加上去而放不下的時候，紅的是這裡。**
+    """
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    try:
+        win.show()
+        QApplication.instance().processEvents()
+        assert win.btn_results.isVisible(), (
+            "Results 掉進工具列的溢位選單了 —— 視窗預設 %d px，工具列要 %d px"
+            % (win.width(), win.toolbar.sizeHint().width()))
+        for act in win.toolbar.actions():
+            if win.toolbar.widgetForAction(act) is win.btn_results:
+                break
+        else:
+            raise AssertionError("btn_results 建了，但沒有加到工具列上")
+    finally:
+        win.hide()
+        win.close()

@@ -21,7 +21,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
@@ -257,21 +257,59 @@ class _EntryItem(QGraphicsItem):
     """
 
     def __init__(self, canvas: Any, lets: List[str], n_in: Optional[int],
-                 collapsed: bool = False):
+                 collapsed: bool = False, problem: str = "",
+                 problem_level: str = "error"):
         super().__init__()
         self._canvas = canvas
         self._lets = list(lets)
         self._n_in = n_in
         self._collapsed = bool(collapsed)
+        self._problem = str(problem or "")
+        self._problem_level = str(problem_level or "error")
         tip = ("The decision tree sorts every defect into a class."
                "\nDouble-click to %s the tree."
                % ("show" if collapsed else "collapse"))
         if lets:
             tip += "\n\nWorking numbers:\n" + "\n".join(self._lets)
+        if self._problem:
+            # 標記說「有問題」，滑鼠停上去說「是什麼問題」—— 同卡片
+            # （`_NodeItem.__init__`）：一個紅點而不知道為什麼比沒有更焦慮。
+            tip += "\n\n⚠ %s" % self._problem
         self.setToolTip(tip)
 
     def boundingRect(self) -> QRectF:
         return QRectF(-2, -2, _ENTRY_W + 4, _ENTRY_H + 4)
+
+    def problem(self) -> str:
+        """判定段的 lint 訊息（測試與外部檢查用）；沒有就是空字串。"""
+        return self._problem
+
+    def _paint_badge(self, p: QPainter, body: QRectF) -> None:
+        """右上角一個小圓標 —— **跟卡片上那顆逐像素一樣**。
+
+        `_NodeItem._paint_badge` 是同一個東西的另一份，而兩份會漂。抄過來
+        而不是共用一支，是因為兩邊的 body 幾何與 import 方向不同
+        （`tree_scene` 不 import `canvas` 的私有方法）—— 所以這裡留一張
+        便利貼：**動一邊就要動另一邊**，`test_ui_decision_badge` 逐項比。
+        """
+        from .canvas import badge_paints          # 延後：canvas import 這裡
+
+        if not self._problem or not badge_paints(self._problem_level):
+            return
+        col = QColor(TOKENS["danger_text"] if self._problem_level == "error"
+                     else TOKENS["warning"])
+        r = 7.0
+        centre = QPointF(body.right() - r - 3.0, body.top() + r + 3.0)
+        p.setPen(QPen(QColor(TOKENS["bg_surface"]), 1.5))
+        p.setBrush(QBrush(col))
+        p.drawEllipse(centre, r, r)
+        p.setPen(QPen(QColor("#ffffff"), 1.0))
+        f = p.font()
+        f.setBold(True)
+        f.setPointSizeF(8.0)
+        p.setFont(f)
+        p.drawText(QRectF(centre.x() - r, centre.y() - r, 2 * r, 2 * r),
+                   Qt.AlignCenter, "!")
 
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         p.setRenderHint(QPainter.Antialiasing, True)
@@ -298,6 +336,8 @@ class _EntryItem(QGraphicsItem):
         p.setBrush(col)
         p.setPen(Qt.NoPen)
         p.drawPath(fun)
+
+        self._paint_badge(p, body)
 
         text_x = tile.right() + 9
         p.setPen(QColor(TOKENS["text_primary"]))
@@ -607,7 +647,9 @@ def build_zone(scene: Any, canvas: Any,
 
     entry = _EntryItem(canvas, list(info.get("lets") or []),
                        None if counts is None else int(counts.get("", 0)),
-                       collapsed=collapsed)
+                       collapsed=collapsed,
+                       problem=str(info.get("problem") or ""),
+                       problem_level=str(info.get("problem_level") or "error"))
     entry.setPos(origin)
     scene.addItem(entry)
     items.append(entry)
@@ -742,15 +784,36 @@ def build_ghosts(scene: Any, canvas: Any, diamond: "_DiamondItem",
     卡片宣告會寫出那個數字，線才畫得出來。`let` 的中間值（owner 是空字串）
     指回入口卡。回 ``(幽靈線圖元, 被點亮的卡片)`` —— 清場的人要各清各的。
     """
-    from .canvas import NODE_W
-
     try:
         variables = sorted(parse_expression(str(diamond.when)).variables)
     except Exception:              # noqa: BLE001 — 打到一半的算式沒有變數
         variables = []
+    target = diamond.pos() + QPointF(0.0, _DIA_H / 2.0)
+    return ghost_wires(scene, canvas, target, variables, feat_owner)
+
+
+def ghost_wires(scene: Any, canvas: Any, target: QPointF,
+                variables: Sequence[str],
+                feat_owner: Dict[str, str]) -> Tuple[List[QGraphicsItem],
+                                                     List[Any]]:
+    """``variables`` 這幾個數字各畫一條幽靈線，從它的來源卡回到 ``target``。
+
+    ⚠ **這一支是 F50 從 :func:`build_ghosts` 抽出來的**，因為 Output 卡要用
+    同一套：它們也是用**名字**吃數字的（`rank_by` / `size_feature` /
+    `columns`），而畫布上因此沒有任何一條線指向它們。使用者定調「不一致會有
+    兩套準則」—— 那句話對「判定看得到來源、Output 看不到」一樣成立。
+
+    抽成一支而不是抄第二份：這個 repo 記過三次「同一個判斷抄兩份，長歪的那
+    一份會讓畫布跟引擎說出不同的話」。
+
+    來源從**宣告**推（`RecipeModel.feature_owners`）—— 所以它不說謊：
+    卡片宣告會寫出那個數字，線才畫得出來。`let` 的中間值（owner 是空字串）
+    指回判定的入口卡。回 ``(幽靈線圖元, 被點亮的卡片)``。
+    """
+    from .canvas import NODE_W
+
     items: List[QGraphicsItem] = []
     cards: List[Any] = []
-    target = diamond.pos() + QPointF(0.0, _DIA_H / 2.0)
     entry = next((it for it in canvas.decision_items()
                   if isinstance(it, _EntryItem)), None)
     for var in variables:

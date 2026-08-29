@@ -96,18 +96,21 @@ GROUP_ENHANCE = "enhance"
 GROUP_REGION = "region"
 GROUP_COMPARE = "compare"
 GROUP_MEASURE = "measure"
-#: ⚠ 字串跟 :data:`CATEGORY_ALGO` 一模一樣，**但它們是兩個不同的軸**
-#: （見這一段開頭）：``CATEGORY_ALGO`` 說的是「這張卡吐數字」——
-#: 每一張量測卡都是 ``CATEGORY_ALGO``，而它們的 ``group`` 是 ``measure``。
-#: ``GROUP_ALGO`` 說的是「這張卡**只**吃數字、不碰影像」（F16，使用者定調：
-#: 「measure 是量出數值來，Algo 是拿這些 feature 去做更 custom 的處理」）。
+#: ⚠ **這裡以前還有一個 ``GROUP_ALGO = "algo"``，2026-08-28 刪掉了**（F48）。
+#: 它說的是「這張卡**只**吃數字、不碰影像」（F16），而那一段 F24 §5 解散進了
+#: 判定：算式住進 working numbers（`decide.let`）、補值變成那一行的
+#: 「missing ⇒」屬性、跨顆換算變成「跟整批比」（`Let.scale`）。F41 刪掉最後
+#: 兩張卡之後它掛著 0 張卡、不在 :data:`GROUP_ORDER` 裡、也沒有任何一條測試
+#: 守它 —— 留著的唯一理由是「外掛卡可能宣告它」，而使用者 2026-08-28 定調
+#: 刪掉。**代價寫在這裡**：外掛卡若宣告 ``group = "algo"``，
+#: :meth:`Step.resolve_group` 會照樣回那個字串，而卡片庫沒有那一段 ——
+#: 那張卡會列不出來。要救就是把它改宣告成 :data:`GROUP_MEASURE`。
 #:
-#: ⚠ **這一段已解散**（F24 §5，使用者 2026-08-24 點頭）：算式住進判定的
-#: working numbers（`decide.let`）、補值變成那一行的「missing ⇒」屬性、
-#: 跨顆換算變成「跟整批比」（`Let.scale`）—— 三件事都比一張卡更靠近它們
-#: 服務的判定。這個常數留著給外掛卡相容（`resolve_group` 照認），但它不在
-#: :data:`GROUP_ORDER` 裡：卡片庫與 rail 上沒有這一段。
-GROUP_ALGO = "algo"
+#: ⚠ 別把它跟 :data:`CATEGORY_ALGO` 搞混 —— **那是另一個軸，而且還活著**：
+#: ``CATEGORY_ALGO`` 說的是「這張卡吐數字」，每一張量測卡都是它，而它們的
+#: ``group`` 是 ``measure``。同樣還活著的是**三段式心智模型**裡的 ``"algo"``
+#: 那一段（``ui/welcome.py`` 的 `_SEG_LINES`、``theme.seg_color``）——
+#: 那是「影像段／算法段／判定段」的算法段，跟卡片庫的分區不是同一個東西。
 GROUP_ADC = "adc"
 #: 這一段的卡是 **end point**：不吐影像流、不吐特徵，只把東西寫出去。
 #: 同樣有測試守著（``resolve_writes()`` 與 ``resolve_features()`` 都是空的）。
@@ -117,8 +120,8 @@ GROUP_OUTPUT = "output"
 #: Input → Enhance → ROI → Measure → Compare → ADC → Output）。
 #:
 #: **七段**（F24 §5，2026-08-24）：F16 定的八段少了 Algo —— 那一段解散進
-#: 判定（見 :data:`GROUP_ALGO` 的說明），而「段落是使用者 2026-08-20 定的、
-#: 動之前要再點一次頭」那條規矩履行過了（使用者：「那三件事接著做」）。
+#: 判定（見上面那段刪掉 ``GROUP_ALGO`` 的說明），而「段落是使用者 2026-08-20
+#: 定的、動之前要再點一次頭」那條規矩履行過了（使用者：「那三件事接著做」）。
 #:
 #: **這個順序不決定執行順序。** 執行是 :func:`recipe.execution_order` 的 DAG
 #: 拓撲排序 —— 線怎麼拉就怎麼跑。這裡排的是**卡片庫的分區順序**（連帶 rail 的
@@ -1180,6 +1183,73 @@ class Step(ABC):
         """執行本步驟。可就地修改 ctx 並回傳它。失敗請 raise StepError。"""
 
     # ---- UI 描述 ----------------------------------------------------------
+    @classmethod
+    def feature_names_in(cls, params: Dict[str, Any]) -> List[str]:
+        """這張卡在設定上**指名了哪些數字**（F51）—— 給畫線用，不給 lint 用。
+
+        跟既有那兩支是**三個不同的問題**，而分開的理由很具體：
+
+        =========================  =====================================
+        :meth:`resolve_features_in`  少了這張卡會**失敗**（lint: error）
+        :meth:`optional_features_in` 少了會**退化**（lint: warning）
+        這一支                        這張卡的設定上**寫著**哪些名字
+        =========================  =====================================
+
+        差別看 ``score``：`output_report` 的 `ranked_feature` 刻意把它排除在
+        `optional_features_in` 外面 —— 對那支是**對的**（`score` 不是任何一
+        張卡算出來的，lint 一開始就把它種進可用名單，永遠不會缺）。但畫線問
+        的是別的事：`score` 在畫布上**有一個看得見的產出者**（判定那張卡），
+        而「報表照分數排序」是整個工具最常見的一條連結。用 `optional` 那一份
+        來畫線的話，那條線一條都畫不出來（實測過）。
+
+        實作是**機械的**：掃每一個 :data:`FEATURE_TYPES` 的參數，把值裡的名
+        字拿出來。所以新卡片不必覆寫它 —— 只要那一格宣告成 ``feature_key`` /
+        ``feature_keys``（本來就該宣告，不然設定區長不出挑選器），線就有了。
+        ``expr`` 不掃：一條算式裡的識別字要 parse 才分得出來，而那是判定段
+        自己的事（`bound_specs` 那一頭處理）。
+        """
+        out: List[str] = []
+        for spec in cls.params:
+            if spec.type not in ("feature_key", "feature_keys"):
+                continue
+            raw = str((params or {}).get(spec.name, spec.default) or "").strip()
+            if not raw:
+                continue
+            for tok in (raw.split(",") if spec.type == "feature_keys"
+                        else [raw]):
+                name = tok.strip()
+                if name and name not in out:
+                    out.append(name)
+        return out
+
+    @classmethod
+    def item_filter(cls, params: Dict[str, Any]) -> Optional[Tuple[str, Tuple[str, ...]]]:
+        """這張卡要不要**限制哪些 defect 進得來**（F50）。
+
+        回 ``None`` = 不限制（預設，所以既有的每一張卡一個位元都沒變）；
+        回 ``(欄名, (值, …))`` = 只有那一欄的值在清單裡的 defect 才跑。
+
+        **為什麼是一個 hook 而不是一份寫死的載入卡清單**：跟
+        :attr:`scale` / `resolve_group` 同一個理由 —— 下一張讀資料的卡不必回來
+        改引擎。判準住在卡片上，引擎只問。
+
+        ⚠ **它不是「跑了再跳過」，是「根本不進來」**（使用者 2026-08-28 定調）。
+        套用的地方在 `batch.run_batch` 挑 items 的那一行，早於任何一張卡的
+        `run()`。所以：
+
+        * 不需要第三種結果狀態（不是 ok、也不是 error）—— CSV 的欄、bin 的
+          統計、黃金值一個位元組都不用動；
+        * **被篩掉的那幾顆 KLARF 完全不會被改寫**（它們沒有結果，寫回那一支
+          自然碰不到它們）—— 那是對的行為，而且要在畫面上講出來；
+        * ⚠ **它照樣進快取簽章，而那是刻意的。** 它影響的是「哪幾顆跑」不是
+          「怎麼跑」，所以理論上不必進；但簽章收的是那張卡的**每一個參數**
+          （`carry` 也一樣，它也不改影像），而要把某一格排除掉就得發明一個
+          「這一格不影響結果」的標記 —— 標錯的下場是拿到上一次設定算出來的
+          影像，也就是這個 repo 踩過七次的形狀。**代價不對等**：進去最壞是
+          改完篩選第一次跑比較慢，漏標最壞是跑得完、有數字、而且是錯的。
+        """
+        return None
+
     @classmethod
     def resolve_group(cls) -> str:
         """這張卡屬於哪個流程階段。

@@ -932,22 +932,33 @@ class RecipeModel:
         return out
 
     def feature_owners(self) -> Dict[str, str]:
-        """特徵名 → 產出它的**節點 id**（幽靈線用，F24 ④）。
+        """特徵名 → 產出它的**節點 id**（幽靈線／淡線用，F24 ④）。
 
-        宣告層的答案（`resolve_features`，第一個宣告的人贏）—— 跟
-        `labelled_features` 同一個迴圈同一個規則，只是那份給人看（label）、
-        這份給畫布找卡片（node id）。判定段 `let` 的中間值屬於入口卡，
-        值是**空字串**（畫布上那張卡沒有 node id）。
+        ⚠ **它是 `verdict_features.bound_specs` 的投影，不是第三份實作**
+        （F51，2026-08-28）。
+
+        以前這裡有自己的迴圈（`_declared_specs`，第一個宣告的人贏），而
+        「誰產出這個特徵」因此有**三份**答案：引擎（真相）、`bound_specs`
+        （結果表用）、這一支（淡線用）。實測那三份對不上：這一支知道 23 個
+        名字、`bound_specs` 知道 34 個，差的 11 個是**救援名與引擎特徵**
+        （`score`、`decide_unanswered`）。後果很具體 —— 整個工具最常見的那
+        一條淡線「報表照 `score` 排序」**一條都畫不出來**，因為這張表裡沒有
+        `score`。
+
+        `bound_specs` 住在 core、比較完整，而且有一把對照引擎的尺
+        （`tests/test_feature_names_match_the_engine.py`）。所以留它、
+        刪這一支的迴圈。**判定段 `let` 與引擎特徵的 node id 仍然是空字串**
+        （畫布上那張入口卡沒有 node id）—— 那個約定 `bound_specs` 本來就
+        一模一樣，所以呼叫端一個字都不用改。
         """
-        out: Dict[str, str] = {}
-        for nid, _cls, s in self._declared_specs():
-            out.setdefault(str(s.name), nid)
-        if self.decide is not None:
-            for x in self.decide.let:
-                name = str(x.name).strip()
-                if name:
-                    out.setdefault(name, "")
-        return out
+        from d4t.core.pipeline.verdict_features import bound_specs
+
+        try:
+            recipe = self.to_recipe()
+        except Exception:              # noqa: BLE001 — 顯示層，壞了就不畫線
+            return {}
+        return {b.spec.name: b.node_id
+                for b in bound_specs(recipe, self.kind)}
 
     def nm_per_px_is_known(self) -> bool:
         """有沒有任何一張卡填了 nm/px（`_util.nm_per_px_spec`）。"""

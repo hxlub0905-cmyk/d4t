@@ -142,15 +142,32 @@ def test_a_failed_row_is_coloured(qapp):
 
 
 # --------------------------------------------------------------------------- #
-# 這張表是唯讀的
+# 這張表是唯讀的 —— 只有 bin 例外，而那個例外只活在畫面上
 # --------------------------------------------------------------------------- #
-def test_the_table_is_read_only(qapp):
-    """「看到判錯的那一顆就地改掉」很自然，但那會讓這一頁從**看結果**變成
-    **編結果** —— 而那是兩件事，還沒定調。"""
+def test_the_table_is_read_only_apart_from_the_bin_column(qapp):
+    """**這一條 2026-08-28 翻面了**（F48），而翻面的方向值得記。
+
+    原本它寫的是「整張表唯讀」，理由是「看到判錯的那一顆就地改掉」會讓這一頁
+    從**看結果**變成**編結果**，而那是兩件事、**還沒定調**。使用者 2026-08-28
+    定調了，而他選的正是那個折中：`bin` 改得動，但**只改在畫面上**。
+
+    所以現在守的是兩半：其餘每一欄仍然一格都改不動（下面），而「改的那個值
+    去不了任何地方」（匯出、原本那份 result、再跑一批）在
+    `tests/test_ui_results_bin_override.py` —— 那才是這個折中真正的內容，
+    一份就好。
+    """
     t = _table(qapp)
-    assert t.editTriggers() == QAbstractItemView.NoEditTriggers
-    idx = t._model.index(0, t.columns().index("bin"))
-    assert not (t._model.flags(idx) & Qt.ItemIsEditable)
+    # `NoEditTriggers` 不能再要求了（要不然 F2 也開不了編輯器），但
+    # **滑鼠的那幾個 trigger 一個都不准有** —— 單擊與雙擊都已經有人用了。
+    triggers = t.editTriggers()
+    for mouse in (QAbstractItemView.DoubleClicked,
+                  QAbstractItemView.SelectedClicked,
+                  QAbstractItemView.CurrentChanged):
+        assert not (triggers & mouse), triggers
+
+    for i, name in enumerate(t.columns()):
+        editable = bool(t._model.flags(t._model.index(0, i)) & Qt.ItemIsEditable)
+        assert editable == (name == "bin"), name
 
 
 def test_double_clicking_a_row_asks_to_go_and_look_at_that_defect(qapp):

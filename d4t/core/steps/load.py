@@ -41,7 +41,8 @@ from ..pipeline.step import (
     CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_INPUT,
 )
 from ._util import (
-    carry_spec, ensure_gray, nm_per_px_spec, parse_key_list, to_uint8,
+    carry_spec, ensure_gray, nm_per_px_spec, only_code_hints, only_code_specs,
+    parse_key_list, parse_only_codes, to_uint8,
 )
 
 # "auto" 模式下 channel 的優先順序（其餘 channel 依名稱排序附加在後）
@@ -100,10 +101,19 @@ class LoadPatchStep(Step):
         ),
         nm_per_px_spec(),
         carry_spec(),
-    ]
+    ] + only_code_specs()
     reads: List[str] = []
     writes = ["test", "ref"]     # ＝ DEFAULT_CHANNEL_MAP 的名字（靜態備援）
     features_out = ["n_channels"]
+
+    @classmethod
+    def item_filter(cls, params):
+        """只跑 KLARF 某一欄符合的那幾顆（F50）—— 見 `Step.item_filter`。"""
+        return parse_only_codes(params)
+
+    @classmethod
+    def configuration_hints(cls, params: Dict[str, Any]) -> List[str]:
+        return only_code_hints(params)
 
     @classmethod
     def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:
@@ -246,13 +256,22 @@ class LoadSingleStep(Step):
         ),
         nm_per_px_spec(),
         carry_spec(),
-    ]
+    ] + only_code_specs()
     reads: List[str] = []
     writes = ["single"]
     #: 永遠是 1。留著它是為了**特徵表的名字不因為換一張卡而消失** —— 舊的 rsem
     #: recipe 匯出過含 `n_channels` 的 CSV，而分數表達式指得到它。一個常數特徵
     #: 的資訊量是零，但「同一份資料換一張卡就少一欄」的代價不是零。
     features_out = ["n_channels"]
+
+    @classmethod
+    def item_filter(cls, params):
+        """只跑 KLARF 某一欄符合的那幾顆（F50）—— 見 `Step.item_filter`。"""
+        return parse_only_codes(params)
+
+    @classmethod
+    def configuration_hints(cls, params: Dict[str, Any]) -> List[str]:
+        return only_code_hints(params)
 
     @classmethod
     def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:

@@ -112,7 +112,7 @@ from d4t.core.pipeline.cellrois import region_names
 from d4t.core.pipeline.engine import (
     FEATURE_OWNER_KEY, feature_prefixes,
 )
-from d4t.core.pipeline.step import REGION_TYPES, REGISTRY
+from d4t.core.pipeline.step import REGION_TYPES, REGISTRY, SCALE_DEFECT
 from d4t.core.pipeline.recipe import is_region_edge, version_skew
 from d4t.core.pipeline import verdict_features
 from d4t.core.pipeline.verdict_trace import verdict_trace
@@ -505,6 +505,7 @@ class StudioWindow(QMainWindow):
         self._items_by_id: Dict[str, Any] = {}    # defect_id -> DefectItem（縮圖用）
         self._score_filter: Optional[Any] = None  # 直方圖點出來的 (lo, hi)
         self._pending_warnings: List[Any] = []    # 跑前 lint 的警告（跑完才講）
+        self._filtered_note: str = ""             # 「只跑這幾個 code」篩掉多少（F50）
         self._preview_epoch = 0                   # 預覽的世代（丟掉過期結果用）
         self._async_epoch = 0                     # 背景那筆出發時的世代
         self.welcome_dialog: Optional[Any] = None
@@ -570,6 +571,22 @@ class StudioWindow(QMainWindow):
             self.select_node(self.model.node_order[0])
         self._status("Ready — press “Help” for a guided start, or “Open KLARF…” "
                      "to load your data.")
+
+        # **開窗要寬到工具列放得下**（F48，2026-08-28）。
+        #
+        # 以前這裡一行都沒有，視窗大小是 Qt 從版面的 size hint 湊出來的
+        # ——實測 948 px，而工具列的內容那時正好要 916 px：**它是滿的**。
+        # 加「Results」那顆鈕（100 px）的第一版因此在預設大小下**看不見**：
+        # Qt 把放不下的最後一顆收進右邊那個 » 溢位選單，而使用者要的正是
+        # 「按一顆鈕就叫得出 Results」——一顆藏在兩層選單底下的鈕不算數。
+        # 抓到它的是既有的 `test_no_separator_fences_off_an_empty_stretch_of_toolbar`
+        # （分隔線後面空無一物 = 那一段被收走了）。
+        #
+        # 所以預設大小改成**由工具列決定**，而不是反過來讓工具列去遷就一個
+        # 沒有人選過的數字。`+ 24` 是視窗左右的邊框餘裕。螢幕比這個小的時候
+        # 由視窗管理員裁掉（Qt 本來就會做），那時 » 溢位選單是誠實的退路。
+        want_w = max(self.toolbar.sizeHint().width() + 24, 1000)
+        self.resize(max(want_w, self.width()), max(760, self.height()))
 
         if show_welcome_on_start is None:
             show_welcome_on_start = _welcome_on_start_default()
@@ -670,6 +687,22 @@ class StudioWindow(QMainWindow):
         # 搶同一級的視覺重量：它們是隨時在旁邊的工具，不是流程上的一步。
         for b in (self.btn_undo, self.btn_redo):
             b.setProperty("variant", "ghost")
+        # **Results 視窗的入口**（F48，2026-08-28，使用者：「可以改成加一個
+        # 按鈕獨立呼叫一個視窗嗎（目前是跑完才會出來）」）。
+        #
+        # 以前只有兩條路會開它：跑完自動彈出、或在直方圖上點一根長條 ——
+        # 兩條都要**先跑過一批**。關掉之後想再看一次，唯一的辦法是再跑一次
+        # （而 `results.py` 的檔頭一直寫著「關掉它不會丟掉結果」：結果確實
+        # 還在，只是沒有一顆鈕叫得出來，所以那句話描述著一個不存在的入口）。
+        #
+        # **跟 Help／主題同一段**，而不是接在 `Run trial` 右邊。動線上「跑 →
+        # 看結果」確實是那個順序，但工具列的最後一格是留給那顆藍鈕的
+        # （`test_the_toolbar_is_grouped_not_one_long_row` 守著：試跑在最後
+        # 面）—— 而這一段的定義正好就是它：**不屬於流程、但要隨時找得到**。
+        self.btn_results = self._tool_button(
+            "Results", "Open the Results window - score distribution, "
+                       "thumbnails and the per-defect table (Ctrl+Shift+R)",
+            self.show_gallery, icon="popout")
         self.btn_help = self._tool_button(
             "Help", "Reopen the getting-started tour (includes “Try it with "
                     "sample data”)",
@@ -730,7 +763,8 @@ class StudioWindow(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(spacer)
 
-        # 右邊：不屬於流程、但要隨時找得到的兩顆。
+        # 右邊：不屬於流程、但要隨時找得到的那幾顆。
+        bar.addWidget(self.btn_results)
         bar.addWidget(self.btn_help)
         bar.addWidget(self.btn_theme)
         bar.addSeparator()
@@ -813,7 +847,7 @@ class StudioWindow(QMainWindow):
     SHORTCUTS = (
         ("Ctrl+O", "open_klarf"), ("Ctrl+Shift+O", "open_recipe"),
         ("Ctrl+S", "save_recipe"), ("Ctrl+Shift+S", "save_recipe_as"),
-        ("Ctrl+R", "run"),
+        ("Ctrl+R", "run"), ("Ctrl+Shift+R", "results"),
         ("Ctrl+Z", "undo"), ("Ctrl+Shift+Z", "redo"), ("Ctrl+Y", "redo"),
         ("Ctrl+0", "zoom_reset"), ("Ctrl++", "zoom_in"), ("Ctrl+=", "zoom_in"),
         ("Ctrl+-", "zoom_out"), ("Ctrl+Shift+F", "zoom_fit"),
@@ -828,6 +862,7 @@ class StudioWindow(QMainWindow):
             "save_recipe": self._on_save_recipe,
             "save_recipe_as": self._on_save_recipe_as,
             "run": self._on_trial_clicked,
+            "results": self.show_gallery,
             "undo": self.undo,
             "redo": self.redo,
             "zoom_reset": self.pipeline.reset_zoom,
@@ -1090,6 +1125,13 @@ class StudioWindow(QMainWindow):
 
         self.route_box = RouteByBox(self)
         self.route_box.set_model(self.model)
+        # ⚠ **建出來再藏，不是不建**（同 `btn_examples` 那一顆）：版面量測、
+        # 既有測試、`_refresh_*` 都還指得到它，回復只要改一個字串。
+        #
+        # ⚠ 而且**它跟畫布上的徽章要同進同出**（`scope.SHOW_ROUTE_BY`）。
+        # 只藏徽章的話，使用者仍然編得出一份會分流的 recipe，而畫布上一個字
+        # 都不會說 —— 那正是這個 repo 一直在消滅的「畫布說謊」。
+        self.route_box.setVisible(bool(scope.SHOW_ROUTE_BY))
         pane = QWidget(self)
         lay = QVBoxLayout(pane)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -1865,6 +1907,23 @@ class StudioWindow(QMainWindow):
                 "regions_out": regions_out,
                 "regions_produced": regions_made,
                 "group": step_cls.resolve_group() if step_cls else "",
+                # **這張卡什麼時候跑**（F50）。以前這件事畫在卡片外面的一個
+                # 虛線框上（`ui/output_band.py`）—— 而框的意思是「這幾個是
+                # 一組」，真相卻是「跑的時間不一樣」。編碼錯了，於是 Output
+                # 卡在畫布上是唯一一種被框起來的卡，而那個框每一個拖曳 frame
+                # 重建一次、留下殘影。現在它是卡片自己的一個屬性。
+                "scale": step_cls.scale if step_cls else SCALE_DEFECT,
+                # **這張卡用名字吃哪些數字**（F50）。Output 那三張的
+                # `rank_by` / `size_feature` / `columns` 都是名字，畫布上
+                # 因此沒有任何一條線指向它們 —— 淡線就是畫這件事。
+                # 兩支都問：會失敗的（`resolve_features_in`）與少了只會退化
+                # 的（`optional_features_in`）在畫面上是同一件事「它讀這個」。
+                # ⚠ 走 `feature_names_in`（F51），**不是** `optional_features_in`：
+                # 後者問的是「少了會不會退化」，而 `score` 永遠不會缺，所以它
+                # 被刻意排除 —— 於是「報表照分數排序」那條最常見的線畫不出來。
+                # 畫線問的是「設定上寫著哪些名字」，那是另一個問題。
+                "feature_reads": (step_cls.feature_names_in(node.params)
+                                  if step_cls else []),
                 "problem": problems.get(nid, ("", ""))[0],
                 "problem_level": problems.get(nid, ("", "error"))[1],
             })
@@ -1873,7 +1932,11 @@ class StudioWindow(QMainWindow):
         self._sync_params_pane()
         decision = self._decision_info()
         prefilter = self._prefilter_info()
+        # 淡線要問「這個數字是誰算的」，而那張表跟判定在不在無關（Output 卡
+        # 沒有判定也照樣吃數字）—— 所以它自己送一份，不搭 `decision` 的便車。
+        owners = dict(self.model.feature_owners())
         for view in self._canvases():
+            view.set_feature_owners(owners)
             # **每一條線都在 `recipe.edges` 裡**（F42 B4）。以前這裡是兩份相加
             # ——影像線來自 `edge_lines()`、區域線從參數推導（`region_lines()`）
             # ——而方案 B 之後區域線也是一條真的 Edge，所以第二份收的是同一批
@@ -1908,13 +1971,53 @@ class StudioWindow(QMainWindow):
         return "decision · %d rule%s" % (len(d.rules),
                                          "" if len(d.rules) == 1 else "s")
 
+    def _decision_problem(self) -> tuple:
+        """判定段的 lint（最嚴重的那一條）→ ``(訊息, 級別)``；沒有就 ``("","")``。
+
+        **這一支存在的理由是一個真的洞**（F50）：`Issue.node_id` 是「哪一張
+        卡」，而判定不是一張卡 —— 它的 issue 一律 `node_id=None`，而
+        `_node_problems()` 第一件事就是把沒有節點的丟掉。於是同樣是「指到一個
+        沒人算得出來的數字」，卡片那邊一改就看得到徽章，判定那邊只在**跑完
+        之後**的狀態列尾巴出現一次 —— 而跑一次是好幾分鐘。
+
+        ⚠ **判準是那張表，不是「node_id 是 None」**（`DECISION_ISSUE_CODES`）：
+        沒有節點的 lint 裡還有三條講分流、一條講整張圖，掛上來就是讓入口卡
+        替別人的問題背鍋。
+        """
+        from d4t.core.pipeline.recipe import DECISION_ISSUE_CODES
+
+        try:
+            issues = self.model.validate()
+        except Exception:                        # noqa: BLE001 — 顯示用
+            return ("", "")
+        rank = {"error": 0, "warning": 1, "info": 2}
+        best = None
+        for issue in issues:
+            if getattr(issue, "node_id", None):
+                continue
+            if str(getattr(issue, "code", "")) not in DECISION_ISSUE_CODES:
+                continue
+            lvl = str(issue.level)
+            if best is None or rank.get(lvl, 1) < rank.get(best[1], 1):
+                best = (str(issue.detail or issue.title), lvl)
+        return best or ("", "")
+
     def _prefilter_info(self) -> Optional[Dict[str, Any]]:
         """畫布上的分流徽章要畫的東西（F25-B）；沒有 route_by 回 None。
 
         「現在這一顆走哪一條」跟資料集標籤是**同一支** `resolve_route`
         算的 —— 兩個地方各算一次的話，遲早會有一個說錯。
+
+        ⚠ **`scope.SHOW_ROUTE_BY` 關著的時候一律回 None**（F50）——
+        徽章因此不畫，而**引擎那一頭一個位元都沒動**：帶著 `route_by` 的
+        recipe 照樣分流、照樣算出一樣的數字。收起來的是入口，不是能力。
+        擋在這裡而不是擋在畫布，理由跟 `visible_steps` 一樣：一個地方決定
+        「給不給看」，畫布只管畫它收到的東西。
         """
         from .route_badge import route_badge_info
+
+        if not scope.SHOW_ROUTE_BY:
+            return None
 
         current = None
         rb = getattr(self.model, "route_by", None)
@@ -1942,6 +2045,9 @@ class StudioWindow(QMainWindow):
         if info is not None:
             # 幽靈線（F24 ④）：菱形上的數字 → 產出它的卡。宣告層的答案。
             info["feat_owner"] = self.model.feature_owners()
+            # 判定的 lint 掛到入口卡上（F50）—— 見 `_decision_problem`。
+            why, level = self._decision_problem()
+            info["problem"], info["problem_level"] = why, level
         return info
 
     def _sync_score_widgets(self) -> None:
@@ -5385,8 +5491,34 @@ class StudioWindow(QMainWindow):
             return False
         self._pending_warnings = [i for i in issues if i.level == "warning"]
 
-        limit = max(1, min(int(n), len(items)))
         recipe = self.model.to_recipe()
+        # 「只跑這幾個 code」（F50）：**篩掉零顆的時候不可以安靜地跑完**。
+        #
+        # 引擎那一頭篩得很乾淨（`batch.select_items`），而乾淨的下場正是危險
+        # 的：一個打錯的欄名或一個不存在的 code，跑出來是「0 defects」與一張
+        # 空的結果表 —— 使用者要去猜是資料沒載到、pipeline 壞了，還是篩選太緊。
+        # 那三件事的下一步完全不同，所以這裡要講出**是哪一個**。
+        from d4t.core.pipeline.batch import item_filters, select_items
+
+        picks = item_filters(recipe)
+        if picks:
+            kept = select_items(recipe, self.dataset, items)
+            if not kept:
+                where = ", ".join("%s = %s" % (col, ", ".join(vals))
+                                  for _nid, col, vals in picks)
+                self._status(
+                    "Nothing to run — the input filter (%s) matches none of "
+                    "the %d defects in this dataset. Check the column and the "
+                    "values, or clear the filter to run everything."
+                    % (where, len(items)), "error")
+                return False
+            self._filtered_note = ("%d of %d defects match the input filter"
+                                   % (len(kept), len(items)))
+            items = kept
+        else:
+            self._filtered_note = ""
+
+        limit = max(1, min(int(n), len(items)))
         cdir = None if cache_dir is None else str(cache_dir)
         # **跟著這一次執行走**，不是讀當下的 UI 狀態：使用者按了 Run all 之後
         # 可以馬上去改別的東西，而這一批的結果仍然是「他叫我整批跑」的那一批。
@@ -5599,6 +5731,13 @@ class StudioWindow(QMainWindow):
         # 跑之前的 lint 警告在這裡才講：跑之前講會被「Running: 3 / 200」洗掉。
         # 警告不擋執行，但它描述的是「跑得完、數字卻不是你以為的那個」——
         # 例如兩張量測卡撞名，後面那張把前面那張蓋掉了。
+        # 篩選講一次：**跑了幾顆是使用者第一眼要對的數字**，而「37」在一份
+        # 200 顆的 lot 上看起來像出了什麼事。
+        note = str(getattr(self, "_filtered_note", "") or "")
+        if note:
+            msg = "%s  ·  %s (the rest were not processed, and their KLARF " \
+                  "rows are untouched)" % (msg, note)
+
         warns = list(getattr(self, "_pending_warnings", []) or [])
         if warns:
             more = ("  (and %d more warning%s)"
@@ -5705,7 +5844,20 @@ class StudioWindow(QMainWindow):
         return out
 
     def show_gallery(self) -> None:
-        """把 Results 視窗叫出來（Gallery 與分數分佈都在那裡）。"""
+        """把 Results 視窗叫出來（Gallery 與分數分佈都在那裡）。
+
+        **還沒跑過也叫得出來**（F48，2026-08-28）：工具列那顆「Results」與
+        `Ctrl+Shift+R` 走的是這一支，而它們不要求先跑一批。空的時候視窗自己
+        要講得出為什麼是空的 —— 那是 F44 的 empty_reason 巡檢同一條規矩：
+        **一塊空白要嘛有東西，要嘛有一句話說它在等什麼。**
+
+        工具列左邊的摘要本來就寫著 `No results yet.`，但那句話回答不了
+        「所以我現在該做什麼」，而狀態列是這個視窗唯一會講整句話的地方。
+        """
+        if not self.trial_results:
+            self.results.status(
+                "Nothing to show yet — press “Run trial” in the main window "
+                "and the score distribution, thumbnails and table fill in here.")
         self.results.present()
 
     def show_preview(self) -> None:

@@ -73,6 +73,7 @@ from PySide6.QtWidgets import (
 from ..core.algo import glv as algo_glv
 from . import region_words
 from . import theme
+from .numbers import format_feature_value
 from .theme import TOKENS, region_hex
 
 #: 標記的**角色** → 主題的哪一個顏色權杖（F33）。
@@ -5020,15 +5021,12 @@ def draw_group_icon(p: QPainter, group: str, color: str, size: float) -> None:
         p.drawEllipse(QRectF(m, m, 2 * r, 2 * r))
         p.drawLine(QPointF(m + 2 * r * 0.86, m + 2 * r * 0.86),
                    QPointF(w - m, h - m))
-    elif g == "algo":                   # Σ：數字進、數字出的算式
-        # 這一段一張影像都不碰（`GROUP_ALGO` 的說明），所以圖示裡刻意**沒有
-        # 任何方框** —— 其他七顆全都是某種框或版圖，一眼就分得出「這一段不是
-        # 在處理圖」。Σ 是試算表裡「這一格是算出來的」那顆鈕，而 feature_math
-        # 做的正好是那件事。
-        p.drawPolyline(QPolygonF([
-            QPointF(w - m, h * 0.14), QPointF(m, h * 0.14),
-            QPointF(w * 0.56, h / 2), QPointF(m, h - h * 0.14),
-            QPointF(w - m, h - h * 0.14)]))
+    # ⚠ **這裡以前還有一顆 ``g == "algo"`` 的 Σ 圖示，2026-08-28 刪掉了**（F48）。
+    # 它畫的是卡片庫的 Algo 那一段，而那一段 F24 §5 就從 `GROUPS` 拿掉、
+    # F48 連 `GROUP_ALGO` 這個常數一起刪了 —— `GroupIcon` 只被兩個地方叫
+    # （rail 的 StageButton 與區塊標題），兩邊的 gid 都來自 `LibraryPanel.GROUPS`，
+    # 所以那一支 `elif` 再也走不到。**不是把它留成便利貼**：這個檔案裡的
+    # 圖示是一段一顆，而「有圖示、沒有那一段」正好是下一個人會照著加卡的形狀。
     elif g == "adc":                    # 標籤：給這顆 defect 一個 bin
         # ADC 這一段的產物是 score + **bin**，而「貼上一個分類」就是標籤。
         # 尖的那一頭讓輪廓在 15 px 下仍然不像任何一個方框（region 是四個角、
@@ -6087,23 +6085,17 @@ class HistogramWidget(QWidget):
 # 6. FeatureTable / VerdictChip
 # --------------------------------------------------------------------------- #
 def _fmt_number(value: Any) -> str:
-    """數值 -> 好讀字串：整數不拖小數點、一般值 3 位、極小值退回有效位數。"""
-    if isinstance(value, bool):
-        return "Yes" if value else "No"
-    try:
-        f = float(value)
-    except (TypeError, ValueError):
-        return str(value)
-    if math.isnan(f):
-        return "NaN"
-    if math.isinf(f):
-        return "∞" if f > 0 else "-∞"
-    if f == int(f) and abs(f) < 1e12:
-        return str(int(f))
-    if 0 < abs(f) < 5e-4:
-        return "%.3g" % f
-    return "%.3f" % f
+    """數值 → 好讀字串。
 
+    ⚠ **F52 起它只是 `numbers.format_feature_value` 的別名。** 以前這裡是
+    自己一份（整數捷徑 ＋ ``%.3f`` ＋極小值 ``%.3g``），而
+    `gallery._fmt_score` 是**同一份抄第二次然後漂開的**。實測的下場：
+    ``99.995`` 在結果表上是 ``100``、在這張單顆特徵表上是 ``99.995`` ——
+    使用者在 Results 看到一顆是 100，點進去變成 99.995，會以為自己點錯顆。
+
+    名字留著是因為這個檔案裡有好幾個呼叫端（門檻標籤、特徵表）。
+    """
+    return format_feature_value(value)
 
 #: 絕對量 / 相對量 —— :func:`feature_gloss` 回的第一個值。
 FEATURE_ABSOLUTE = "absolute"

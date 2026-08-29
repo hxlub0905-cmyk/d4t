@@ -1120,11 +1120,26 @@ def test_feature_table_formatting_and_score_pinned_last(qapp):
     assert names[-1] == "score"                          # score 釘最後
     assert set(names) == {"score", "snr_peak", "blob_area", "glv_mean", "tiny"}
 
+    # ⚠ **這幾條 2026-08-28 跟著改了（F52），而理由不是「數字剛好變了」。**
+    #
+    # 這張表以前走 `widgets._fmt_number` 自己那一份（整數捷徑 ＋ 3 位小數），
+    # 而畫面上還有五個地方各自寫了一份 —— 同一個值印出來六種寫法。最傷的
+    # 兩個：`99.995` 在結果表是 `100`、在這張表是 `99.995`（使用者會以為自己
+    # 點錯顆）；`8.5` 在這裡是 `8.500`，那三位小數是**發明出來的精度**。
+    #
+    # 現在全 UI 走 `numbers.format_feature_value`：**有效位數**（5 位）＋
+    # 整數不拖小數。所以 `8.5` 就是 `8.5`，`4.23456` 是 `4.2346`。
+    from d4t.ui.numbers import format_feature_value
+
     assert table.value_text("blob_area") == "12"         # 乾淨整數
     assert table.value_text("glv_mean") == "128"
-    assert table.value_text("snr_peak") == "4.235"       # 3 位小數
+    assert table.value_text("snr_peak") == "4.2346"      # 5 位有效數字
     assert table.value_text("tiny") == "2e-05"           # 極小值不要變成 0.000
-    assert table.value_text("score") == "8.500"
+    assert table.value_text("score") == "8.5"            # 不再是 8.500
+    # 而且是**同一支**印的 —— 值一樣可能只是巧合，這一行問的是出處。
+    for name, value in (("snr_peak", 4.23456), ("score", 8.5),
+                        ("tiny", 0.00002)):
+        assert table.value_text(name) == format_feature_value(value)
 
     score_row = names.index("score")
     assert table.item(score_row, 0).font().bold() is True

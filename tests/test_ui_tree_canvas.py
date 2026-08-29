@@ -11,12 +11,14 @@
 from __future__ import annotations
 
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "tools"))
 
 from d4t.core.pipeline.recipe import (  # noqa: E402
     DecideSpec, Let, Rule, TreeLeaf, TreeStep,
@@ -133,8 +135,19 @@ def test_decision_info_has_no_counts_before_a_run(qapp):
 # --------------------------------------------------------------------------- #
 # 畫布
 # --------------------------------------------------------------------------- #
-def _canvas():
+def _canvas(collapsed: bool = False):
+    """一份畫布。**預設把樹展開**（`collapsed=False`）——
+
+    ⚠ 2026-08-28（F50）起判定區**開窗是收起來的**
+    （`canvas.TREE_COLLAPSED_DEFAULT`，使用者：「ADC 他一樣是張卡片，
+    可以，但把它點開可以看到 decision tree」）。下面那幾條問的是**樹裡面**
+    有什麼（菱形、托盤、顆數、幽靈線、走過的路），所以它們要先點開 ——
+    收起來的時候那些東西本來就不該存在。
+
+    「預設是收起來的」本身由 `test_the_tree_starts_collapsed` 守著。
+    """
     view = canvas_mod.PipelineCanvas(popout_button=False)
+    view._tree_collapsed = bool(collapsed)
     view.set_nodes([{"node_id": "load", "step_key": "load_patch",
                      "label": "Load images", "enabled": True,
                      "writes": ["test"], "reads": [], "group": "input"}], [])
@@ -309,3 +322,69 @@ def test_opening_a_threshold_recipe_puts_a_tree_on_the_canvas(qapp, tmp_path):
         assert not w.model.dirty, "只是打開一個檔案，不該算成使用者改過"
     finally:
         w.close()
+
+
+# --------------------------------------------------------------------------- #
+# 開窗是收起來的（F50，2026-08-28）
+# --------------------------------------------------------------------------- #
+def test_the_tree_starts_collapsed(qapp):
+    """**畫布上一律是卡片，判定就是其中一張，要看細節才點開。**
+
+    收合這個能力 F24 §4 就做好了，只是預設是展開 —— 於是畫布右邊常駐一整片
+    菱形，而它跟左邊那一排卡片是兩種長得不一樣的東西。使用者 2026-08-28
+    定調把預設翻過來。
+    """
+    view = canvas_mod.PipelineCanvas(popout_button=False)
+    view.set_nodes([{"node_id": "load", "step_key": "load_patch",
+                     "label": "Load images", "enabled": True,
+                     "writes": ["test"], "reads": [], "group": "input"}], [])
+    assert view.tree_collapsed() is True
+
+    view.set_decision(tree_mod.decision_info(_decide_rules(), [], None))
+    assert len(_entries(view)) == 1, "收起來也要有那一張入口卡"
+    assert not [it for it in view.decision_items()
+                if isinstance(it, tree_mod._DiamondItem)], \
+        "收起來卻畫了菱形"
+
+
+def test_it_opens_and_closes_again(qapp):
+    """點開看得到樹，再點一次收回去 —— 一個手勢兩個方向。"""
+    view = canvas_mod.PipelineCanvas(popout_button=False)
+    view.set_nodes([{"node_id": "load", "step_key": "load_patch",
+                     "label": "Load images", "enabled": True,
+                     "writes": ["test"], "reads": [], "group": "input"}], [])
+    view.set_decision(tree_mod.decision_info(_decide_rules(), [], None))
+
+    def diamonds():
+        return [it for it in view.decision_items()
+                if isinstance(it, tree_mod._DiamondItem)]
+
+    assert not diamonds()
+    view.toggle_tree_collapsed()
+    assert view.tree_collapsed() is False and len(diamonds()) == 2
+    view.toggle_tree_collapsed()
+    assert view.tree_collapsed() is True and not diamonds()
+
+
+def test_collapsing_is_a_view_state_not_recipe_content(qapp):
+    """存檔存不到它，開檔也不會帶著它回來（同縮放平移）。
+
+    這一條擋的是「順手把它存進 recipe」—— 那會讓兩台機器打開同一份檔案看到
+    不一樣的畫面，而畫面狀態不是 recipe 的內容。
+    """
+    import ast
+    import inspect
+
+    from d4t.ui import canvas as cm
+
+    # ⚠ **只看會執行的那幾行。** 第一版直接掃函式的原始碼，而它的 docstring
+    # 裡就寫著「不進 recipe」—— 那一條抓到的是自己的說明。
+    src = inspect.getsource(cm.PipelineCanvas.toggle_tree_collapsed)
+    tree = ast.parse(textwrap.dedent(src))
+    fn = tree.body[0]
+    if (fn.body and isinstance(fn.body[0], ast.Expr)
+            and isinstance(fn.body[0].value, ast.Constant)):
+        fn.body = fn.body[1:]                       # 丟掉 docstring
+    code = ast.dump(ast.Module(body=fn.body, type_ignores=[]))
+    for leak in ("recipe", "set_param", "to_json", "model"):
+        assert leak not in code, leak

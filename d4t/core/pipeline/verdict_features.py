@@ -201,25 +201,53 @@ def bound_specs(recipe: Recipe, kind: str,
                                     recipe, registry)
     except Exception:  # noqa: BLE001 — 顯示層，退回節點 id
         prefixes = {}
-    out: List[BoundSpec] = []
-    owned = set()
+    # ---- 先問「每個名字有哪幾張卡宣告」（執行順序）------------------------
+    #
+    # ⚠ **這一段 2026-08-28 整個重寫（F51）**，因為舊的跟引擎講的是相反的話。
+    # 引擎（`engine._rescue_overwritten_features`）是這樣的：後寫的贏，
+    # **被蓋掉的那一張**被救成 `<它的前綴>_<原名>`。所以撞名的時候：
+    #
+    # * **裸名歸最後一張**（它的值才是 `ctx.features[name]` 裡的那個）；
+    # * 前面每一張各拿一個救援名。
+    #
+    # 舊的寫法剛好相反（第一張拿裸名、後面的拿救援名），而且**只對診斷數字**
+    # 加救援名、還是**無條件**加（沒撞名也加）。實測的下場：
+    #
+    # * `glv2_glv_pixels` 這種欄位在結果表上出現，而引擎從來不寫（幽靈欄）；
+    # * `glv_glv_max` / `glv_glv_mean` 這些引擎真的寫進 CSV 的數字，UI 完全
+    #   不知道 —— 分不了組、篩不到、回溯面板指不到；
+    # * 裸名掛在第一張卡上，而值來自最後一張 —— 回溯面板會跳到錯的卡。
+    #
+    # 尺在 `tests/test_feature_names_match_the_engine.py`：**真的跑一次引擎**，
+    # 拿它的 keys 當基準。兩份預測要再漂，那裡會紅。
+    declared: List[Tuple[str, Any, List[Any]]] = []
+    producers: Dict[str, List[str]] = {}
     for nid, step_cls, p in steps:
         try:
             specs = list(step_cls.resolve_feature_specs(p))
-            diag = set(step_cls.diagnostic_features(p))
         except Exception:  # noqa: BLE001 — 顯示層
-            specs, diag = [], set()
+            specs = []
+        declared.append((nid, step_cls, specs))
+        for s in specs:
+            producers.setdefault(str(s.name), []).append(nid)
+
+    out: List[BoundSpec] = []
+    owned = set()
+    for nid, step_cls, specs in declared:
         pfx = prefixes.get(nid, nid)
         for s in specs:
-            if s.name not in owned:
-                owned.add(s.name)
-                out.append(BoundSpec(nid, str(step_cls.label), s))
-            if s.name in diag:
-                # 診斷數字撞名時引擎救成 `<前綴>_<名>` —— 那一份也要有身分。
-                q = s.qualified(pfx)
-                if q.name not in owned:
-                    owned.add(q.name)
-                    out.append(BoundSpec(nid, str(step_cls.label), q))
+            who = producers.get(str(s.name)) or [nid]
+            if who[-1] == nid:
+                # 最後一張 —— 裸名是它的（引擎後寫的贏）。
+                bound = s
+            else:
+                # 被蓋掉的那一張：引擎把它救成 `<前綴>_<原名>`。
+                # `feature_prefixes` 已經替撞在一起的前綴退回節點 id 了，
+                # 所以這裡不必再抄引擎那一層 runtime 的去重。
+                bound = s.qualified(pfx)
+            if bound.name not in owned:
+                owned.add(bound.name)
+                out.append(BoundSpec(nid, str(step_cls.label), bound))
 
     def engine(name: str, **kw: Any) -> None:
         if name not in owned:
@@ -236,6 +264,11 @@ def bound_specs(recipe: Recipe, kind: str,
         engine("decide_unanswered", base="decide_unanswered",
                metric="decide_unanswered")
         for item in decide.let:
+            # 空白行不存在（`Let.is_blank`）；有算式沒名字的也產不出特徵，
+            # 兩種都跳過，而**跳的理由不一樣**：前者是「使用者還沒填」，
+            # 後者是一條 lint error。
+            if item.is_blank:
+                continue
             name = str(item.name).strip()
             if not name:
                 continue

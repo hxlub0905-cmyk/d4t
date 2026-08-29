@@ -183,12 +183,27 @@ def test_bound_specs_follow_the_producing_card_in_execution_order():
     assert order.index("m1") < order.index("m2")
 
 
-def test_a_colliding_name_belongs_to_its_first_producer():
+def test_a_colliding_name_belongs_to_the_card_whose_value_wins():
+    """**這一條 2026-08-28 翻面了（F51），而翻面的方向就是那個 bug。**
+
+    原本寫的是「撞名的裸名歸**第一個**產出者」。那句話跟引擎相反 ——
+    `engine._rescue_overwritten_features` 是**後寫的贏**：最後一張卡的值留在
+    ``glv_median``，被蓋掉的那幾張各被救成 ``<前綴>_glv_median``。
+
+    照舊的說法，結果表會把 ``glv_median`` 分到 m1 底下、回溯面板點下去跳到
+    m1 —— 而畫面上那個數字是 m2 算的。**跑得完、有數字、而且是錯的。**
+
+    尺在 `tests/test_feature_names_match_the_engine.py`：真的跑一次引擎，
+    拿它的 keys 當基準。
+    """
     r = _recipe([LOAD,
                  ("m1", "glv_stats", {"source": "test"}),
                  ("m2", "glv_stats", {"source": "ref"})])
     by = {b.spec.name: b for b in bound_specs(r, "ebi_patch")}
-    assert by["glv_median"].node_id == "m1"
+    assert by["glv_median"].node_id == "m2", "裸名要歸最後寫它的那張卡"
+    # 被蓋掉的那一張沒有消失 —— 它有一個帶前綴的身分（同引擎的救援）。
+    rescued = [n for n in by if n.endswith("glv_median") and n != "glv_median"]
+    assert rescued and by[rescued[0]].node_id == "m1", rescued
 
 
 def test_duplicate_card_labels_carry_the_node_id():

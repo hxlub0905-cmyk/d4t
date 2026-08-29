@@ -219,6 +219,7 @@ python tools/make_text_bundle.py --out bundle/d4t.py --split 400
 | `make_filelist.py` / `make_text_bundle.py` | **家用機** | ✅ 要 | `release.py` 底下的兩支，通常不直接叫 |
 | `fetch_wheels.py` | **家用機** | ❌ | 抓 Windows wheels，帶 `wheels\` 過去 |
 | `make_mgepi_real.py` / `validate_mgepi.py` | **家用機** | ❌ | 擬真 BSE 合成 lot（MG×EPI×spacer）＋可分性驗證（要 numpy/cv2）|
+| `make_lot_from_gc.py`（CLI）／`python -m d4t simgen`（UI）| **家用機** | ❌ | **拿一張 Golden Cell 鋪成整批擬真資料**：RSEM 大圖（1000²）＋ 從大圖切下來的 patch（81²，test/ref 成對）＋ 兩份 KLARF ＋ ground truth。跟其他產生器的差別是**它不畫圖案，它鋪你給的那一張** —— 圖案是輸入不是參數，所以換 layer 換世代都不用改程式（最高指導原則）。週期用次像素量、缺陷落點從 GC 量出來。⚠ GC 可能是廠內圖案，**吃的跟吐的都不進版控**（鐵則 8）。UI 版（F60）多的只有「貼上就能用」：剪貼簿 `Ctrl+V`／影像檔／recipe／`gc2:` 字串四條路，週期看得到也改得動 |
 | `make_glas_export.py` | **家用機** | ❌ | 合成一份 **GLAS 匯出**（`<id>_label.png` + v4 manifest）掛在 RSEM lot 上 —— Region-3 在家用機唯一的資料來源（要 numpy/cv2）|
 | `freeze_golden.py` | **家用機** | ❌ | 把現在算出來的 feature 表凍成黃金值（重構的安全網，見 `docs/history/plans/F9-dag-streams.md`）|
 | `check_files.py` | **公司機** | ❌ | 哪幾個檔案跟 GitHub 上不一樣（要先複製 `FILELIST.txt`）|
@@ -227,6 +228,7 @@ python tools/make_text_bundle.py --out bundle/d4t.py --split 400
 | `fab_probe/probe_*.py` | **公司機** | ❌ | 探測真實資料的格式（單檔，不需要整個 repo）|
 | `pair_probe.py` | **公司機** | ❌ | 拿**真的兩份 lot** 跑一次配對＋對圖，印出分布與**建議值**（容差、nm/px、stage offset、搜尋框）—— F15 那條鏈猜不出來的四個數字全在這一張表上，輸出預設遮蔽可以貼 |
 | `load_probe.py` | **公司機** | ❌ | 量一份真實 lot 的**載入時間花在哪一段**（KLARF／IFD 走訪／對應／讀一顆），輸出預設遮蔽可以貼；`--copy` 回答「慢的是網路碟還是我們的程式」 |
+| `show_template.py` | **兩台都可以** | ❌ | 把 recipe 裡的模板（`gc2:` 那一串）存成 PNG —— **一張影像塞在 JSON 的一格裡，打不出來也讀不出來**。Studio 裡看得到（「Edit template & regions…」），這一支是給**沒有 GUI 的時候**用的：檢查一份 recipe、把模板寄給別人看、兩份對照。stdlib-only（自己寫 PNG），所以公司機也跑得動。⚠ 存出來的 PNG 跟原始影像一樣敏感，**不要 commit**（鐵則 8）|
 | `check_glas_export.py` | **公司機** | ❌ | 看一份 GLAS 匯出（`*_label.png` + manifest）合不合 d4t 的假設，**印出可以貼出來的遮蔽報告**（同 `fab_probe` 那條路；`--reveal` 那一份不要貼）|
 | `get_code.py` / `.ps1` | 公司機（**目前用不了**）| ❌ | 網路通的時候才逐檔抓 |
 
