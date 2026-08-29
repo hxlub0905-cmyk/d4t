@@ -454,21 +454,42 @@ class DefectSpec(NamedTuple):
       「寬度＝FWHM」是這個 repo 既有的定義（見 `make_mgepi_real.py` 檔頭）。
     * ``contrast`` —— 比周圍亮／暗多少 GLV。
     * ``polarity`` —— ``bright`` / ``dark`` / ``both``（每顆各自擲）。
-    * ``bridge`` —— 要不要也做「把兩根 MG 接起來」那一種。它不是一個點，
-      所以任何只看局部對比的做法都抓不到 —— 留著這個開關是為了那條路測得到。
+    * ``bridge`` —— 「把兩根 MG 接起來」那一種**佔幾成**（0–1）。它不是一個
+      點，所以任何只看局部對比的做法都抓不到 —— 留著它是為了那條路測得到。
+
+    ⚠ **``bridge`` 是比例不是開關**（F65）。原本是 `True`／`False`，而
+    `True` 的時候三種等機率抽 —— 於是 bridge 佔了 **1/3**。實跑 60 顆量到
+    16/35 是 bridge，比 blob 還多，而真實世界通常反過來。使用者：
+    「改成可以調的」。
     """
     diameter: Tuple[float, float] = (4.0, 9.0)
     contrast: Tuple[float, float] = (55.0, 95.0)
     polarity: str = "both"
-    bridge: bool = True
+    bridge: float = 0.15       # bridge 佔幾成（0 = 不做）
 
     def kinds(self) -> Tuple[str, ...]:
-        """這組設定會產出哪幾種缺陷。"""
+        """這組設定**可能**產出哪幾種缺陷（不含比例）。"""
         pol = str(self.polarity)
         out = (("bright_blob",) if pol == "bright" else
                ("dark_blob",) if pol == "dark" else
                ("bright_blob", "dark_blob"))
-        return out + (("bridge",) if self.bridge else ())
+        return out + (("bridge",) if float(self.bridge) > 0.0 else ())
+
+    def pick(self, rng: "np.random.Generator") -> str:
+        """擲一顆出來 —— **比例照 ``bridge`` 走**，剩下的按極性分。
+
+        ⚠ 不要用「把 bridge 塞進清單再等機率抽」那個寫法：那正是 F62 的
+        做法，而它讓 bridge 佔了 1/3（`both` 的時候清單是三個）。比例要是
+        比例，就得自己擲。
+        """
+        if float(self.bridge) > 0.0 and float(rng.random()) < float(self.bridge):
+            return "bridge"
+        pol = str(self.polarity)
+        if pol == "bright":
+            return "bright_blob"
+        if pol == "dark":
+            return "dark_blob"
+        return "bright_blob" if float(rng.random()) < 0.5 else "dark_blob"
 
 
 #: 預設的樣子。⚠ **缺陷比 F59/F60 略大**：那時候 σ 寫死 1.4–2.6，現在
@@ -647,9 +668,7 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
             cx = _into_range(cx, px, half + 2, size - half - 3)
             cy = _into_range(cy, py, half + 2, size - half - 3)
             is_real = rng.random() < real_frac
-            pool = defect.kinds()
-            kind = (str(pool[int(rng.integers(0, len(pool)))])
-                    if is_real else NUISANCE_TYPE)
+            kind = defect.pick(rng) if is_real else NUISANCE_TYPE
             info: Dict[str, float] = {}
             if is_real:
                 info = plant(big, kind, cx, cy, rng, px, defect, dmask)
@@ -786,6 +805,12 @@ def main(argv=None) -> int:
     ap.add_argument("--patch", type=int, default=81, help="patch 邊長")
     ap.add_argument("--real-frac", type=float, default=0.5)
     ap.add_argument("--noise", type=float, default=6.0)
+    ap.add_argument("--bridge-frac", type=float, default=None,
+                    help="bridge 佔幾成（0–1，預設 %.2f）"
+                         % DEFECT.bridge)
+    ap.add_argument("--polarity", default=None,
+                    choices=("both", "bright", "dark"),
+                    help="缺陷是亮的、暗的、還是隨機（預設 %s）" % DEFECT.polarity)
     ap.add_argument("--flat", action="store_true",
                     help="關掉擬真（線不扭、每格 GLV 一樣）—— 回到 F63 的完美鋪圖")
     ap.add_argument("--pairs", action="store_true",
@@ -810,7 +835,12 @@ def main(argv=None) -> int:
                    seed=args.seed, fmt=args.fmt,
                    period_x=args.period_x, period_y=args.period_y,
                    pairs=bool(args.pairs),
-                   realism=FLAT if args.flat else REALISM)
+                   realism=FLAT if args.flat else REALISM,
+                   defect=DEFECT._replace(
+                       bridge=(DEFECT.bridge if args.bridge_frac is None
+                               else float(args.bridge_frac)),
+                       polarity=(DEFECT.polarity if args.polarity is None
+                                 else str(args.polarity))))
     note = ("" if (args.period_x or args.period_y)
             else "（量的；不到兩個週期寬的 GC 請用 --period-x 明講）")
     print("週期 x=%.2f y=%.2f%s，量到 %d 個 inner space"

@@ -198,12 +198,12 @@ def test_the_defect_boxes_translate_into_a_spec(win, gc_arr):
     win.sp_cmin.setValue(90)
     win.sp_cmax.setValue(30)
     win.cmb_pol.setCurrentIndex(win.cmb_pol.findData("dark"))
-    win.chk_bridge.setChecked(False)
+    win.sp_bridge.setValue(0)
     spec = win.defect_spec()
     # 填反了要**自己排好**，不是拿去產一批空的
     assert spec.diameter == (3.0, 9.0)
     assert spec.contrast == (30.0, 90.0)
-    assert spec.polarity == "dark" and spec.bridge is False
+    assert spec.polarity == "dark" and spec.bridge == 0.0
     assert spec.kinds() == ("dark_blob",)
 
 
@@ -231,7 +231,7 @@ def test_dark_only_really_reaches_the_written_lot(win, gc_arr, tmp_path):
     import json
     win.set_gc(gc_arr)
     win.cmb_pol.setCurrentIndex(win.cmb_pol.findData("dark"))
-    win.chk_bridge.setChecked(False)
+    win.sp_bridge.setValue(0)
     win.sp_real.setValue(100)
     win.ed_out.setText(str(tmp_path / "dark"))
     win.sp_images.setValue(1); win.sp_size.setValue(900); win.sp_defects.setValue(8)
@@ -274,3 +274,18 @@ def test_the_result_line_still_names_the_two_lots_when_paired(win, gc_arr,
     text = win.lbl_result.text()
     assert "%s" not in text and "%d" not in text
     assert "RSEM images" in text and "patches" in text
+
+
+def test_the_sample_strip_follows_the_bridge_share(win, gc_arr):
+    """⚠ **樣本騙人比沒有樣本更糟。**
+
+    樣本條若用 `kinds()` 等機率抽，畫面上 bridge 永遠佔 1/3，而實際產出來是
+    使用者設的那個比例。分得出來的測法：15% 與 95% 的 `kinds()` **完全相同**
+    （兩者都含 bridge），所以等機率抽的話兩張樣本會**逐位元組一樣**。
+    """
+    win.set_gc(gc_arr)
+    win.sp_bridge.setValue(15)
+    a = win.lbl_samples.pixmap().toImage()
+    win.sp_bridge.setValue(95)
+    b = win.lbl_samples.pixmap().toImage()
+    assert a != b, "改了比例而樣本沒變 —— 它大概沒有走 pick()"

@@ -593,3 +593,66 @@ def test_the_clean_pair_survives_the_realism(tmp_path, gc):
                    cv2.IMREAD_GRAYSCALE).astype(int)
     same = float((np.abs(d - c) == 0).mean())
     assert same > 0.99, "只有 %.2f%% 相同 —— 擬真把配對弄壞了" % (100 * same)
+
+
+# --------------------------------------------------------------------------- #
+# 種類的比例（F65）
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("frac", [0.0, 0.15, 0.5, 1.0])
+def test_the_bridge_share_is_the_share_you_asked_for(frac):
+    """⚠ **這一條是實跑資料看出來的。**
+
+    原本 `bridge` 是 `True`／`False`，而 `True` 的時候三種**等機率**抽 ——
+    於是 bridge 佔了 1/3。60 顆裡量到 16/35 是 bridge，比 blob 還多，
+    而真實世界通常反過來。
+    """
+    spec = gcl.DefectSpec(bridge=frac)
+    rng = np.random.default_rng(5)
+    got = [spec.pick(rng) for _ in range(4000)]
+    share = got.count("bridge") / float(len(got))
+    assert abs(share - frac) < 0.03, "要 %.2f，抽出來 %.3f" % (frac, share)
+
+
+def test_turning_bridges_off_leaves_only_blobs():
+    spec = gcl.DefectSpec(bridge=0.0)
+    assert "bridge" not in spec.kinds()
+    rng = np.random.default_rng(1)
+    assert "bridge" not in {spec.pick(rng) for _ in range(500)}
+
+
+def test_bright_and_dark_split_the_rest_evenly():
+    """比例只管 bridge —— 剩下的照極性分，`both` 是一半一半。"""
+    spec = gcl.DefectSpec(bridge=0.2, polarity="both")
+    rng = np.random.default_rng(2)
+    got = [spec.pick(rng) for _ in range(4000)]
+    b, d = got.count("bright_blob"), got.count("dark_blob")
+    assert abs(b - d) / float(b + d) < 0.06, "亮 %d 暗 %d" % (b, d)
+
+
+def test_the_share_reaches_the_written_lot(tmp_path, gc):
+    """**整條路**都要照比例走，不只 `pick()` 那一格。
+
+    ⚠ 第一版拿 ``bridge=0`` 來驗，而那**抓不到**「`generate` 回去等機率抽」
+    —— `kinds()` 在 0 的時候本來就不含 bridge，兩種寫法都產不出 bridge。
+    要分得出來，比例就得是一個**不平凡**的值：0.06 對上等機率的 1/3。
+    """
+    import json
+    out = gcl.generate(str(tmp_path), gc=gc, images=4, size=900, defects=200,
+                       patch=41, seed=3, real_frac=1.0,
+                       defect=gcl.DefectSpec(bridge=0.06))
+    truth = json.load(open(out["patch_ground_truth"], encoding="utf-8"))
+    kinds = [v["type"] for v in truth.values()]
+    share = kinds.count("bridge") / float(len(kinds))
+    assert len(kinds) > 100
+    assert share < 0.15, (
+        "要 6%%，寫出去的是 %.1f%% —— 大概還是等機率抽（那會是 33%%）"
+        % (100 * share))
+
+
+def test_turning_the_share_to_zero_reaches_the_written_lot(tmp_path, gc):
+    import json
+    out = gcl.generate(str(tmp_path), gc=gc, images=3, size=900, defects=90,
+                       patch=41, seed=3, real_frac=1.0,
+                       defect=gcl.DefectSpec(bridge=0.0))
+    truth = json.load(open(out["patch_ground_truth"], encoding="utf-8"))
+    assert "bridge" not in {v["type"] for v in truth.values()}

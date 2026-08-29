@@ -319,12 +319,17 @@ class GcGeneratorWindow(QMainWindow):
         self.cmb_pol.addItem("Bright only", "bright")
         self.cmb_pol.addItem("Dark only", "dark")
         pol.addWidget(self.cmb_pol, 1)
-        self.chk_bridge = QCheckBox("also bridges", box)
-        self.chk_bridge.setChecked(True)
-        self.chk_bridge.setToolTip(
-            "A short line joining two neighbouring lines — not a dot, so "
-            "anything that only looks at local contrast will miss it")
-        pol.addWidget(self.chk_bridge)
+        pol.addSpacing(10)
+        pol.addWidget(QLabel("Bridges", box))
+        self.sp_bridge = QSpinBox(box)
+        self.sp_bridge.setRange(0, 100)
+        self.sp_bridge.setValue(15)
+        self.sp_bridge.setSuffix(" %")
+        self.sp_bridge.setToolTip(
+            "How often a defect is a bridge — a short line joining two "
+            "neighbouring lines. Not a dot, so anything that only looks at "
+            "local contrast will miss it. 0 turns them off.")
+        pol.addWidget(self.sp_bridge)
         form.addRow("Bright or dark", pol)
         lay.addLayout(form)
 
@@ -338,10 +343,10 @@ class GcGeneratorWindow(QMainWindow):
         self.lbl_sample_note.setObjectName("hint")
         lay.addWidget(self.lbl_sample_note)
 
-        for wgt in (self.sp_dmin, self.sp_dmax, self.sp_cmin, self.sp_cmax):
+        for wgt in (self.sp_dmin, self.sp_dmax, self.sp_cmin, self.sp_cmax,
+                    self.sp_bridge):
             wgt.valueChanged.connect(self._refresh_samples)
         self.cmb_pol.currentIndexChanged.connect(self._refresh_samples)
-        self.chk_bridge.toggled.connect(self._refresh_samples)
         return box
 
     def defect_spec(self):
@@ -353,7 +358,7 @@ class GcGeneratorWindow(QMainWindow):
             diameter=(min(lo, hi), max(lo, hi)),
             contrast=(min(clo, chi), max(clo, chi)),
             polarity=str(self.cmb_pol.currentData()),
-            bridge=bool(self.chk_bridge.isChecked()))
+            bridge=float(self.sp_bridge.value()) / 100.0)
 
     def _refresh_samples(self) -> None:
         """畫六顆**用目前設定種出來的**缺陷，就在真的圖案上。
@@ -372,7 +377,7 @@ class GcGeneratorWindow(QMainWindow):
         rng = np.random.default_rng(4)
         strip = np.zeros((side, n * side + (n - 1) * 4), dtype=np.float32)
         strip[:] = 255.0
-        pool = spec.kinds()
+        pool = spec.kinds()   # 只用來判斷「有沒有東西可種」
         mask = self.paint.mask()
         sites = be.sites_from_mask(mask) if mask is not None and mask.any()             else be.inner_space_sites(self._gc)
         for i in range(n):
@@ -383,7 +388,10 @@ class GcGeneratorWindow(QMainWindow):
             ph_x = (sx - side / 2.0) % px
             ph_y = (sy - side / 2.0) % py
             tileimg = be.tile(self._gc, side, side, px, py, ph_x, ph_y)
-            kind = str(pool[int(rng.integers(0, len(pool)))]) if pool else ""
+            # ⚠ 樣本也要走 `pick` —— 用 `kinds()` 等機率抽的話，畫面上
+            # bridge 佔 1/3，而實際產出來是使用者設的那個比例。**樣本騙人
+            # 比沒有樣本更糟。**
+            kind = spec.pick(rng) if pool else ""
             if kind:
                 be.plant(tileimg, kind, side / 2.0, side / 2.0, rng, px, spec)
             tileimg = tileimg + rng.normal(0.0, float(self.sp_noise.value()),
