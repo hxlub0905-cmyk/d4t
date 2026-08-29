@@ -536,18 +536,66 @@ def test_the_generated_image_really_gets_the_warp(tmp_path, gc):
     assert warp > 3.0, "套了 warp 卻只差 %.2f GLV" % warp
 
 
-def test_the_generated_image_really_gets_the_per_repeat_glv(tmp_path, gc):
-    """⚠ **第二半，而它需要一個對照組。**
+def _brightness_swing(out, path):
+    """**只剩亮度**的那一份：低通到一個週期，再跟自己相隔一週期比。
 
-    「相隔一週期差多少」這個數字**warp 自己就撐得起來**（5.8），所以拿它跟
-    `FLAT` 比抓不到「`roughen` 沒被呼叫」。要抓，對照組得是**只有 warp**
-    的那一份 —— 多出來的那一截才是明暗變化的貢獻。
+    ⚠ 兩件事都是必要的，而且各擋掉一個東西：
+
+    * **低通**把幾何擋掉 —— warp 的位移不到 1 px，一個週期寬的方框把它平掉；
+    * **跟自己相隔一週期比**把**圖案本身**擋掉 —— 那張 GC 不是均勻的
+      （缺席的那一根就是一條暗帶），直接取 max−min 的話，`FLAT` 也會量到
+      5.9 GLV，而那全是圖案不是亮度變化。
+
+    邊界要切掉：方框模糊在圖的邊上有邊界效應，不切的話 `FLAT` 量到 2.1
+    而不是 0。
     """
-    warp = _gen(tmp_path, gc, "w2", _WARP_ONLY)
-    full = _gen(tmp_path, gc, "full", gcl.Realism(shot=0.0))
-    assert full > warp * 1.3, (
+    import cv2
+    img = cv2.imread(path, cv2.IMREAD_GRAYSCALE).astype(float)
+    k = int(round(out["period"][0]))
+    lp = cv2.blur(img, (k, k))[k:-k, k:-k]
+    return float(np.abs(lp[:, :-k] - lp[:, k:]).mean())
+
+
+def _gen_swing(tmp_path, gc, tag, spec):
+    out = gcl.generate(str(tmp_path / tag), gc=gc, images=1, size=900,
+                       defects=2, patch=41, seed=6, noise=0.0, realism=spec)
+    return _brightness_swing(out, out["rsem_images"][0])
+
+
+def test_the_generated_image_really_gets_the_per_repeat_glv(tmp_path, gc):
+    """⚠ **第二半，而它需要一個對照組 ＋ 一個只看得到亮度的量法。**
+
+    F64 那一版拿「原圖相隔一週期差多少」比，而 F66 把亮度變化調小之後
+    （使用者：「不是忽亮忽暗」）那個數字**幾乎全部由 warp 撐著** ——
+    warp-only 5.77、全部 5.68，比值 0.98，測試對著正確的程式碼變紅。
+
+    量法換成 :func:`_brightness_swing` 之後：FLAT 0.00、只有 warp 0.25、
+    全部 0.68 —— 分得開，而且是**因為量對了東西**，不是因為把門檻放鬆。
+    """
+    flat = _gen_swing(tmp_path, gc, "s_flat", gcl.FLAT)
+    warp = _gen_swing(tmp_path, gc, "s_warp", _WARP_ONLY)
+    full = _gen_swing(tmp_path, gc, "s_full", gcl.Realism(shot=0.0))
+    assert flat < 0.1, "完美鋪圖不該有亮度變化，量到 %.2f" % flat
+    assert full > warp * 2.0, (
         "只有 warp %.2f，全部 %.2f —— 每個重複的 GLV 大概沒有套上"
         % (warp, full))
+
+
+def test_the_brightness_does_not_swing_like_a_flickering_lamp(tmp_path, gc):
+    """⚠ **使用者回報的那一件事**（F66）。
+
+    「影像大圖不是忽亮忽暗（真實機台不會這樣，電流差這麼多），有 GLV
+    difference 但不是這麼明顯的。」
+
+    量過確實過頭：一張 1000² 上低頻亮度的擺幅是 **32.7 GLV**（約 25%），
+    其中 22 來自 `shade` —— 真實機台一個 frame 內的照明不均是個位數。
+
+    這一條**兩邊都夾**：太小就不是擬真了（上面那條在守），太大就是忽亮忽暗。
+    F64 的舊值在這個量法下是 3.75，現在是 0.68。
+    """
+    full = _gen_swing(tmp_path, gc, "quiet", gcl.Realism(shot=0.0))
+    assert full < 1.5, (
+        "亮度擺幅 %.2f —— 真實機台的電流不會差這麼多" % full)
 
 
 def test_shot_noise_is_louder_where_the_signal_is(gc):

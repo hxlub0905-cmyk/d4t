@@ -352,9 +352,18 @@ class Realism(NamedTuple):
     bend_len: float = 140.0    # 彎曲的相關長度（px）
     ler: float = 0.35          # 邊緣抖動的振幅（px）
     ler_len: float = 9.0       # 抖動沿線的相關長度（px）
-    cell_gain: float = 0.035   # 每個重複的對比差異（比例）
-    cell_bias: float = 3.0     # 每個重複的亮度差異（GLV）
-    shade: float = 0.06        # 大範圍照明不均（比例）
+    # ⚠ **這三個第一版都太大了**（F66）。使用者：「影像大圖不是忽亮忽暗
+    # （真實機台不會這樣，電流差這麼多），有 GLV difference 但不是這麼明顯
+    # 的。」量出來確實過頭：一張 1000² 上低頻亮度的擺幅是 **32.7 GLV**
+    # （約 25%），而其中 22 來自 `shade` —— 真實機台一個 frame 內的照明不均
+    # 大約是個位數 GLV。現在整體約 5–7 GLV：看得出來，但不是忽亮忽暗。
+    #
+    # ⚠ 調小之後「相隔一週期不一樣」**主要由 warp 撐著**（幾何位移），
+    # 亮度只貢獻一小部分 —— 所以驗它的測試要換一個量法（見
+    # `test_the_generated_image_really_gets_the_per_repeat_glv`）。
+    cell_gain: float = 0.008   # 每個重複的對比差異（比例）
+    cell_bias: float = 0.6     # 每個重複的亮度差異（GLV）
+    shade: float = 0.010       # 大範圍照明不均（比例）
     shot: float = 0.55         # 訊號相依雜訊的係數（σ = shot·√訊號）
 
 
