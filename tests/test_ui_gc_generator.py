@@ -241,3 +241,36 @@ def test_dark_only_really_reaches_the_written_lot(win, gc_arr, tmp_path):
     truth = json.load(open(str(tmp_path / "dark" / "patch" / "ground_truth.json"),
                            encoding="utf-8"))
     assert {v["type"] for v in truth.values()} == {"dark_blob"}
+
+
+# --------------------------------------------------------------------------- #
+# 6. 配對輸出（F63）
+# --------------------------------------------------------------------------- #
+def test_the_pairs_checkbox_reaches_the_written_lot(win, gc_arr, tmp_path):
+    win.set_gc(gc_arr)
+    win.chk_pairs.setChecked(True)
+    win.ed_out.setText(str(tmp_path / "gan"))
+    win.sp_images.setValue(1); win.sp_size.setValue(900); win.sp_defects.setValue(4)
+    win._go()
+    win._worker.wait(120000)
+    QApplication.instance().processEvents()
+    assert os.path.isdir(str(tmp_path / "gan" / "rsem" / "clean"))
+    assert os.path.isdir(str(tmp_path / "gan" / "rsem" / "masks"))
+    assert os.path.isfile(str(tmp_path / "gan" / "patch" / "clean.tif"))
+    assert "clean copies + masks" in win.lbl_result.text()
+
+
+def test_the_result_line_still_names_the_two_lots_when_paired(win, gc_arr,
+                                                              tmp_path):
+    """⚠ `"a %s" + extra + "b" % (…)` 的話 `%` 綁得比 `+` 緊 —— 只有最後那段
+    會被代入，而它沒有 `%s`，所以整句話會炸成 TypeError。"""
+    win.set_gc(gc_arr)
+    win.chk_pairs.setChecked(True)
+    win.ed_out.setText(str(tmp_path / "g2"))
+    win.sp_images.setValue(1); win.sp_size.setValue(900); win.sp_defects.setValue(2)
+    win._go()
+    win._worker.wait(120000)
+    QApplication.instance().processEvents()
+    text = win.lbl_result.text()
+    assert "%s" not in text and "%d" not in text
+    assert "RSEM images" in text and "patches" in text

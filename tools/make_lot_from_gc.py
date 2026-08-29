@@ -343,15 +343,33 @@ DEFECT = DefectSpec()
 
 def plant(img: np.ndarray, kind: str, cx: float, cy: float,
           rng: np.random.Generator, px: float,
-          spec: DefectSpec = DEFECT) -> None:
-    """在 ``(cx, cy)`` 種一個缺陷（就地），樣子由 ``spec`` 決定。"""
+          spec: DefectSpec = DEFECT,
+          mask: Optional[np.ndarray] = None) -> Dict[str, float]:
+    """在 ``(cx, cy)`` 種一個缺陷（就地），樣子由 ``spec`` 決定。
+
+    回傳**這一顆實際上長什麼樣**（種類、位置、對比、尺寸）—— 那是訓練用的
+    regression target，也是「這一顆為什麼沒被抓到」查得下去的唯一依據。
+
+    ``mask`` 給了的話，把這一顆的**足跡**蓋進去（就地 ``|=``）。足跡的判準是
+    **半高**，跟 `DefectSpec.diameter` 是同一個定義 —— 兩邊用不同判準的話，
+    「填 6 px」與「mask 裡有幾個畫素」會對不起來，而那正是拿去訓練的人第一個
+    會去對的東西。
+    """
     h, w = img.shape
     amp = float(rng.uniform(*spec.contrast))
     y0, y1 = max(0, int(cy) - 20), min(h, int(cy) + 21)
     x0, x1 = max(0, int(cx) - 20), min(w, int(cx) + 21)
     if y1 <= y0 or x1 <= x0:
-        return
+        return {}
     yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
+
+    def _apply(contrib: np.ndarray, size: float) -> Dict[str, float]:
+        img[y0:y1, x0:x1] += contrib
+        if mask is not None:
+            mask[y0:y1, x0:x1] |= np.abs(contrib) >= amp * 0.5
+        return {"kind": kind, "x": float(cx), "y": float(cy),
+                "contrast": float(amp), "size": float(size)}
+
     if kind == "bridge":
         # 橫跨 space 把兩根 MG 接起來 —— 所以長度是**半個 space**，不是半個
         # 週期。第一版寫 ``px / 12``（≈ 一整根的 pitch），畫出來是一條 29 px
@@ -359,8 +377,8 @@ def plant(img: np.ndarray, kind: str, cx: float, cy: float,
         length = max(2.0, px / 24.0)
         along = np.clip(np.abs(xx - cx) - length, 0.0, None)
         dist = np.hypot(along, np.abs(yy - cy))
-        img[y0:y1, x0:x1] += amp * np.clip(1.0 - (dist - 1.2), 0.0, 1.0)
-        return
+        return _apply(amp * np.clip(1.0 - (dist - 1.2), 0.0, 1.0),
+                      2.0 * length + 2.4)
     # **填的是直徑，用的是 σ，而換算走 FWHM。**
     #
     # ⚠ 第一版寫 σ = 直徑 / 4（「看得到的大約是 ±2σ」）—— 那條測試當場紅：
@@ -369,9 +387,10 @@ def plant(img: np.ndarray, kind: str, cx: float, cy: float,
     #
     # 這也不是這一輪自己挑的定義：`make_mgepi_real.py` 的檔頭早就寫著
     # 「線寬是 **FWHM** 定義」。同一個 repo 裡「寬度」只能有一個意思。
-    sigma = float(rng.uniform(*spec.diameter)) / 2.355
+    d = float(rng.uniform(*spec.diameter))
+    sigma = d / 2.355
     bump = np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2.0 * sigma ** 2))
-    img[y0:y1, x0:x1] += (amp if kind == "bright_blob" else -amp) * bump
+    return _apply((amp if kind == "bright_blob" else -amp) * bump, d)
 
 
 # --------------------------------------------------------------------------- #
@@ -382,10 +401,14 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
              noise: float = 6.0, seed: int = 11, fmt: str = "png",
              period_x: float = 0.0, period_y: float = 0.0,
              sites: Optional[List[Tuple[int, int]]] = None,
-             defect: DefectSpec = DEFECT,
+             defect: DefectSpec = DEFECT, pairs: bool = False,
              progress: Optional[Callable[[int, int], bool]] = None
              ) -> Dict[str, Any]:
     """產 RSEM 大圖 lot ＋ 從大圖切下來的 patch lot。回傳路徑 dict。
+
+    ``pairs=True``（F63）多寫三份**配對**資料：同一張圖的乾淨版、缺陷足跡的
+    遮罩、以及每一顆實際的位置／對比／尺寸。⚠ 乾淨版與缺陷版**只差在缺陷**
+    —— 雜訊產一次兩邊都加，各自抽一次的話訓出來的模型學的是「去雜訊」。
 
     ``sites``（GC 座標的一串點）給了就照它種缺陷 —— 那是 UI 上畫出來的
     那一塊（:func:`sites_from_mask`）。沒給就自己量 inner space。
@@ -410,6 +433,14 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
     img_dir = os.path.join(rsem_dir, _mr.IMAGES_DIRNAME)
     os.makedirs(img_dir, exist_ok=True)
     os.makedirs(patch_dir, exist_ok=True)
+    # 配對輸出（F63）：同一張圖的**乾淨版**與**缺陷足跡**。
+    clean_dir = os.path.join(rsem_dir, "clean")
+    mask_dir = os.path.join(rsem_dir, "masks")
+    clean_pages: List[np.ndarray] = []
+    mask_pages: List[np.ndarray] = []
+    if pairs:
+        os.makedirs(clean_dir, exist_ok=True)
+        os.makedirs(mask_dir, exist_ok=True)
 
     mx, my = periods(gc)
     px = float(period_x) if period_x else mx
@@ -441,9 +472,18 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
         big = (big - 128.0) * float(rng.uniform(0.93, 1.07)) + 128.0 \
             + float(rng.uniform(-8.0, 8.0))
 
+        # **配對輸出（F63）：乾淨版與缺陷版只能差在缺陷。**
+        #
+        # ⚠ 所以雜訊要**產一次、兩邊都加**。各自 `rng.normal` 一次的話兩張圖
+        # 每一個畫素都不一樣，而那種資料訓出來的模型學的是「去雜訊」，
+        # 不是「把缺陷拿掉」—— 看起來完全正常，量出來的 loss 也會下降。
+        clean = big.copy() if pairs else None
+        dmask = (np.zeros((size, size), dtype=bool) if pairs else None)
+
         # 這張圖上要種幾顆、種在哪（一律落在 inner space 上）
         k = min(per_img, int(defects) - made)
         spots: List[Tuple[int, int, str]] = []
+        marks: List[Dict[str, float]] = []
         for _ in range(k):
             sx, sy = sites[int(rng.integers(0, len(sites)))]
             gx = int(rng.integers(0, max(1, int((size - patch) / px))))
@@ -467,12 +507,21 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
             pool = defect.kinds()
             kind = (str(pool[int(rng.integers(0, len(pool)))])
                     if is_real else NUISANCE_TYPE)
+            info: Dict[str, float] = {}
             if is_real:
-                plant(big, kind, cx, cy, rng, px, defect)
+                info = plant(big, kind, cx, cy, rng, px, defect, dmask)
             spots.append((cx, cy, kind))
+            marks.append(info)
 
-        big = big + rng.normal(0.0, noise, big.shape)
+        grain = rng.normal(0.0, noise, big.shape)
+        big = big + grain
         u8 = np.clip(big, 0, 255).astype(np.uint8)
+        if pairs:
+            clean_u8 = np.clip(clean + grain, 0, 255).astype(np.uint8)
+            _mr._write_image(os.path.join(clean_dir, f"DEF_{i + 1:04d}.{fmt}"),
+                         clean_u8)
+            _mr._write_image(os.path.join(mask_dir, f"DEF_{i + 1:04d}.png"),
+                         (dmask.astype(np.uint8) * 255))
 
         # ---- RSEM 那一份：一張圖一顆代表 defect ----
         name = f"IMG_{i + 1:04d}.{fmt}"
@@ -484,12 +533,13 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
             rid, int(spots[0][0]) * 1000, int(spots[0][1]) * 1000, 1, 1,
             f"{_mr.IMAGES_DIRNAME}/{name}", fmt))
         rsem_truth[rid] = {"is_real": spots[0][2] != NUISANCE_TYPE,
-                           "type": spots[0][2]}
+                           "type": spots[0][2],
+                           "defects": [dict(m) for m in marks if m]}
 
         # ---- patch 那一份：從**同一張大圖**切下來 ----
         # ref 取「往旁邊一個完整週期」的同一個位置 —— 那正是 die-to-die /
         # cell-to-cell 的做法：同樣的圖案、沒有這顆缺陷。
-        for cx, cy, kind in spots:
+        for (cx, cy, kind), info in zip(spots, marks):
             made += 1
             rx = cx - int(round(px))
             if rx - half < 0:
@@ -502,11 +552,31 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
                 continue
             pages.append(test)
             pages.append(ref)
+            if pairs:
+                # **頁序跟主檔逐頁對齊**：主檔一顆兩頁（test, ref），所以這裡
+                # 也是兩頁。ref 那一頁本來就沒有缺陷，所以它的乾淨版等於它
+                # 自己、遮罩全黑 —— 寫下來不是浪費，是讓「第 n 頁對第 n 頁」
+                # 這句話**沒有例外**。少寫那一頁的話兩邊差一倍，而拿去訓練的
+                # 人會照著 index 取，取到的是別顆。
+                clean_pages.append(
+                    clean_u8[cy - half:cy + half + 1, cx - half:cx + half + 1])
+                clean_pages.append(
+                    clean_u8[cy - half:cy + half + 1, rx - half:rx + half + 1])
+                mask_pages.append(
+                    (dmask[cy - half:cy + half + 1,
+                           cx - half:cx + half + 1].astype(np.uint8) * 255))
+                mask_pages.append(np.zeros((patch, patch), dtype=np.uint8))
             did = str(len(patch_rows) + 1)
             patch_rows.append([did, f"{cx * 0.001:.4f}", f"{cy * 0.001:.4f}",
                                "1", "1", "0", "2",
                                f"{len(pages) - 1} {len(pages)}"])
-            patch_truth[did] = {"is_real": kind != NUISANCE_TYPE, "type": kind}
+            # **每一顆實際上長什麼樣**（F63）：位置、對比、尺寸。分類標籤之外
+            # 還有 regression target，而「這顆為什麼沒被抓到」查得下去。
+            patch_truth[did] = {"is_real": kind != NUISANCE_TYPE, "type": kind,
+                                "x": int(cx), "y": int(cy)}
+            if info:
+                patch_truth[did]["contrast"] = round(float(info["contrast"]), 2)
+                patch_truth[did]["size"] = round(float(info["size"]), 2)
         if progress is not None and not progress(i + 1, int(images)):
             raise KeyboardInterrupt("使用者停止")
         if made >= defects:
@@ -530,12 +600,26 @@ def generate(out_dir: str, gc: np.ndarray, images: int = 50, size: int = 1000,
     with open(patch_gt, "w", encoding="utf-8") as f:
         json.dump(patch_truth, f, indent=2, sort_keys=True)
 
-    return {"out_dir": out_dir, "period": (px, py),
-            "measured": (mx, my), "sites": len(sites),
-            "rsem_klarf": rsem_klarf, "rsem_images": rsem_paths,
-            "rsem_ground_truth": rsem_gt,
-            "patch_klarf": patch_klarf, "patch_tiff": patch_tif,
-            "patch_ground_truth": patch_gt, "patch_count": len(patch_rows)}
+    out = {"out_dir": out_dir, "period": (px, py),
+           "measured": (mx, my), "sites": len(sites),
+           "rsem_klarf": rsem_klarf, "rsem_images": rsem_paths,
+           "rsem_ground_truth": rsem_gt,
+           "patch_klarf": patch_klarf, "patch_tiff": patch_tif,
+           "patch_ground_truth": patch_gt, "patch_count": len(patch_rows)}
+    if pairs:
+        # patch 的配對走**另外兩份 TIFF**，頁序跟主檔**逐頁**對齊
+        # （第 n 頁對第 n 頁，含 ref 那幾頁）。塞進主檔的話 KLARF 的
+        # `IMAGELIST` 就得跟著改，而那會讓這批資料在 d4t 自己的 ingest 上
+        # 變成「一顆四張」。
+        out["patch_clean_tiff"] = os.path.join(patch_dir, "clean.tif")
+        out["patch_mask_tiff"] = os.path.join(patch_dir, "masks.tif")
+        tifffile.imwrite(out["patch_clean_tiff"], np.stack(clean_pages),
+                         photometric="minisblack")
+        tifffile.imwrite(out["patch_mask_tiff"], np.stack(mask_pages),
+                         photometric="minisblack")
+        out["rsem_clean_dir"] = clean_dir
+        out["rsem_mask_dir"] = mask_dir
+    return out
 
 
 def main(argv=None) -> int:
@@ -550,6 +634,8 @@ def main(argv=None) -> int:
     ap.add_argument("--patch", type=int, default=81, help="patch 邊長")
     ap.add_argument("--real-frac", type=float, default=0.5)
     ap.add_argument("--noise", type=float, default=6.0)
+    ap.add_argument("--pairs", action="store_true",
+                    help="也寫出乾淨版與缺陷足跡（配對資料，給訓練用）")
     ap.add_argument("--seed", type=int, default=11)
     ap.add_argument("--format", dest="fmt", default="png",
                     choices=list(_mr.FORMATS))
@@ -568,7 +654,8 @@ def main(argv=None) -> int:
                    defects=args.defects, patch=args.patch,
                    real_frac=args.real_frac, noise=args.noise,
                    seed=args.seed, fmt=args.fmt,
-                   period_x=args.period_x, period_y=args.period_y)
+                   period_x=args.period_x, period_y=args.period_y,
+                   pairs=bool(args.pairs))
     note = ("" if (args.period_x or args.period_y)
             else "（量的；不到兩個週期寬的 GC 請用 --period-x 明講）")
     print("週期 x=%.2f y=%.2f%s，量到 %d 個 inner space"

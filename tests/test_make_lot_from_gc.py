@@ -359,3 +359,89 @@ def test_the_width_convention_is_fwhm_like_everywhere_else(gc):
         delta, _ = _planted(gc, spec, "bright_blob")
         wide = int((delta[40, :] > delta.max() * 0.5).sum())
         assert abs(wide - want) <= 1.5, "填 %.0f，半高量到 %d" % (want, wide)
+
+
+# --------------------------------------------------------------------------- #
+# 配對輸出（F63）—— 給訓練用的乾淨版 ＋ 缺陷足跡
+# --------------------------------------------------------------------------- #
+@pytest.fixture(scope="module")
+def paired(tmp_path_factory, gc):
+    d = tmp_path_factory.mktemp("pairs")
+    return gcl.generate(str(d), gc=gc, images=2, size=900, defects=10,
+                        patch=41, seed=9, real_frac=1.0, pairs=True)
+
+
+def test_the_clean_copy_differs_only_where_the_defects_are(paired):
+    """⚠ **這是整個配對輸出唯一真正要保證的事。**
+
+    雜訊必須**產一次、兩邊都加**。各自 `rng.normal` 一次的話兩張圖每一個
+    畫素都不一樣，而那種資料訓出來的模型學的是「去雜訊」，不是「把缺陷拿掉」
+    —— 看起來完全正常，loss 也會乖乖下降。
+
+    所以斷言的是：**離缺陷遠的地方要逐位元組相同**。
+    """
+    import cv2
+    for i, dirty_path in enumerate(paired["rsem_images"], start=1):
+        dirty = cv2.imread(dirty_path, cv2.IMREAD_GRAYSCALE).astype(int)
+        clean = cv2.imread(os.path.join(paired["rsem_clean_dir"],
+                                        "DEF_%04d.png" % i),
+                           cv2.IMREAD_GRAYSCALE).astype(int)
+        diff = np.abs(dirty - clean)
+        assert diff.size and (diff == 0).mean() > 0.99, (
+            "只有 %.2f%% 的畫素相同 —— 雜訊大概是各抽各的"
+            % (100 * (diff == 0).mean()))
+        # 有差的那些要**擠在一起**（缺陷），不是撒滿整張
+        ys, xs = np.nonzero(diff)
+        assert len(ys) < 0.01 * diff.size
+
+
+def test_the_mask_marks_the_defects_and_nothing_else(paired):
+    import cv2
+    for i, dirty_path in enumerate(paired["rsem_images"], start=1):
+        dirty = cv2.imread(dirty_path, cv2.IMREAD_GRAYSCALE).astype(int)
+        clean = cv2.imread(os.path.join(paired["rsem_clean_dir"],
+                                        "DEF_%04d.png" % i),
+                           cv2.IMREAD_GRAYSCALE).astype(int)
+        mask = cv2.imread(os.path.join(paired["rsem_mask_dir"],
+                                       "DEF_%04d.png" % i),
+                          cv2.IMREAD_GRAYSCALE) > 0
+        assert mask.any(), "整張沒有標到任何東西"
+        diff = np.abs(dirty - clean)
+        # 標到的地方一定有差（不能標在沒事的地方）
+        assert diff[mask].min() > 0
+        # ⚠ 標的是**半高**那一圈，跟 `DefectSpec.diameter` 同一個定義，
+        # 所以高斯的尾巴會落在遮罩外面 —— 那不是錯，是這個定義的意思。
+        assert diff[~mask].max() <= diff[mask].max()
+
+
+def test_the_paired_pages_line_up_with_the_main_tiff(paired):
+    """第 n 頁對第 n 頁，**沒有例外** —— 拿去訓練的人會照著 index 取。"""
+    import tifffile
+    main = tifffile.imread(paired["patch_tiff"])
+    clean = tifffile.imread(paired["patch_clean_tiff"])
+    mask = tifffile.imread(paired["patch_mask_tiff"])
+    assert len(main) == len(clean) == len(mask)
+    # 奇數頁是 ref（沒有缺陷）：遮罩全黑、乾淨版就是它自己
+    for i in range(1, len(main), 2):
+        assert not mask[i].any()
+        assert (clean[i] == main[i]).all()
+
+
+def test_every_defect_records_what_it_actually_looked_like(paired):
+    """分類標籤之外還有 regression target（位置／對比／尺寸）。"""
+    import json
+    truth = json.load(open(paired["patch_ground_truth"], encoding="utf-8"))
+    assert truth
+    for v in truth.values():
+        assert {"is_real", "type", "x", "y"} <= set(v)
+        if v["is_real"]:
+            assert 5.0 <= v["contrast"] <= 200.0
+            assert 0.5 <= v["size"] <= 80.0
+
+
+def test_without_the_flag_nothing_extra_is_written(tmp_path, gc):
+    """**預設不寫** —— 配對資料是主檔的兩倍大，不要讓沒要的人付這個錢。"""
+    out = gcl.generate(str(tmp_path), gc=gc, images=1, size=900, defects=4,
+                       patch=41, seed=1)
+    assert "rsem_clean_dir" not in out and "patch_clean_tiff" not in out
+    assert not os.path.isdir(os.path.join(str(tmp_path), "rsem", "clean"))

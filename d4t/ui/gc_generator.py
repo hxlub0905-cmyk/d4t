@@ -417,6 +417,12 @@ class GcGeneratorWindow(QMainWindow):
         form.addRow("Real defects", self.sp_real)
         form.addRow("Noise σ", self.sp_noise)
         form.addRow("Seed", self.sp_seed)
+        self.chk_pairs = QCheckBox("Also write a clean copy and a mask", box)
+        self.chk_pairs.setToolTip(
+            "Paired data for training: the same image without the defects "
+            "(same noise), where each defect is, and how big and how strong "
+            "it was. Roughly doubles the output size.")
+        form.addRow("", self.chk_pairs)
         return box
 
     def _run_box(self) -> QWidget:
@@ -619,7 +625,8 @@ class GcGeneratorWindow(QMainWindow):
             period_x=float(self.sp_px.value()),
             period_y=float(self.sp_py.value()),
             sites=self._be().sites_from_mask(self.paint.mask()),
-            defect=self.defect_spec())
+            defect=self.defect_spec(),
+            pairs=bool(self.chk_pairs.isChecked()))
         self.bar.setRange(0, int(self.sp_images.value()))
         self.bar.setValue(0)
         self.bar.setVisible(True)
@@ -643,12 +650,19 @@ class GcGeneratorWindow(QMainWindow):
         if out is None:
             self.lbl_result.setText(msg)
         else:
-            self.lbl_result.setText(
-                "✓ %d RSEM images (%s)\n✓ %d patches (%s)\n\n"
-                "⚠ A Golden Cell may be fab pattern, so this data is as "
-                "sensitive as the original images — do not commit it."
-                % (len(out["rsem_images"]), out["rsem_klarf"],
-                   out["patch_count"], out["patch_klarf"]))
+            # ⚠ 先 format 再串。`"a %s" + extra + "b" % (…)` 的話 `%` 綁得比
+            # `+` 緊，只有**最後那一段**會被代入 —— 而它剛好是沒有 `%s` 的
+            # 那一段，所以錯誤訊息是 "not all arguments converted"。
+            lines = ["✓ %d RSEM images (%s)"
+                     % (len(out["rsem_images"]), out["rsem_klarf"]),
+                     "✓ %d patches (%s)"
+                     % (out["patch_count"], out["patch_klarf"])]
+            if "rsem_clean_dir" in out:
+                lines.append("✓ clean copies + masks (paired, for training)")
+            lines += ["", "⚠ A Golden Cell may be fab pattern, so this data "
+                          "is as sensitive as the original images — do not "
+                          "commit it."]
+            self.lbl_result.setText("\n".join(lines))
         self._sync()
 
     # -- 雜項 ---------------------------------------------------------------
