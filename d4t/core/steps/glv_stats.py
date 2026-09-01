@@ -796,7 +796,11 @@ class GlvStatsStep(MultiSourceStep):
 
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
-        """挑了「跟誰比」卻沒挑到東西，或挑到自己 —— 兩個都在跑之前擋。"""
+        """**跑起來每一顆都會出事**的那些（error，擋在跑之前）。
+
+        「跑得起來、但八成不是他要的」在 :meth:`configuration_hints`（warning）
+        —— 兩支的判準是同一句話：**這會不會跑不起來**。
+        """
         # 兩格清單的值互斥，而**填錯格是安靜的**：把 `delta,snr` 打進
         # Statistics 那一格的人會得到一張跑得完、吐著別的數字的卡。
         wrong = cls._metrics_in_the_wrong_box(params)
@@ -828,18 +832,6 @@ class GlvStatsStep(MultiSourceStep):
                        "zero no matter what the defect looks like. Pick a "
                        "different region, or compare against another "
                        "image stream instead.")
-        elif len(mine) > 1 and other in [r + OTHERS_SUFFIX for r in mine]:
-            # **一條線只指得到一塊**（F67）。以前的 ``the other regions`` 是
-            # 逐塊配對的（epi 跟 epi_others 比、mg 跟 mg_others 比），而一條線
-            # 表達不出那件事 —— 它現在的意思是「這幾塊**全部**跟 %s 比」。
-            # 那不是錯的設定（有時候正是要的），但它跟舊寫法**同名不同義**，
-            # 所以不准安靜：舊 recipe 走 `_migrate_reference_into_ports` 遷移
-            # 過來的正好是這個形狀。
-            out.append("This card measures %d regions and every one of them "
-                       "is compared against “%s”. If you meant each region "
-                       "against its own other boxes, use one GLV card per "
-                       "region - a single line can only point at one area."
-                       % (len(mine), other))
         if ref in (REF_STREAM, REF_BOTH):
             stream = str(params.get("reference_source", "") or "").strip()
             if (ref == REF_STREAM and stream in cls.source_list(params)
@@ -849,6 +841,32 @@ class GlvStatsStep(MultiSourceStep):
                            "comparison this card produces is zero no matter "
                            "what the defect looks like.")
         return out
+
+    @classmethod
+    def configuration_hints(cls, params: Dict[str, Any]) -> List[str]:
+        """**跑得起來、但八成不是他要的**（F35 的那一支，warning，不擋跑）。
+
+        目前只有一句：量好幾塊、而參照接的是其中一塊的 ``_others``。
+
+        ⚠ **它一開始被寫在 `configuration_issues` 裡，那是錯的**（F67 當天
+        訂正）。那一支是 error，會擋住整批跑 —— 而「這兩塊都跟 epi_others 比」
+        是一個**完全合法、有時候正是要的**設定，擋掉它等於用一條 lint 否決
+        使用者的意思。這裡要的是提醒不是否決：舊的 ``the other regions``
+        是**逐塊配對**（epi 跟 epi_others、mg 跟 mg_others），一條線表達不出
+        那件事，所以 `recipe._migrate_reference_into_ports` 遷移過來的正好是
+        這個形狀 —— 同名不同義，不准安靜，但也不該變成一道路障。
+
+        判準是那一句：**這會不會跑不起來**（不會 → 這裡；會 → 上面那一支）。
+        """
+        other = str(params.get("reference_region", "") or "").strip()
+        mine = [r for r in cls.region_list(params) if r]
+        if len(mine) > 1 and other in [r + OTHERS_SUFFIX for r in mine]:
+            return ["This card measures %d regions and every one of them is "
+                    "compared against “%s”. If you meant each region against "
+                    "its own other boxes, use one GLV card per region - a "
+                    "single line can only point at one area."
+                    % (len(mine), other)]
+        return []
 
     @classmethod
     def _metrics_in_the_wrong_box(cls, params: Dict[str, Any]) -> List[str]:

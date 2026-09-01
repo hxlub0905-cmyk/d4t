@@ -172,11 +172,14 @@ def test_the_note_appears_exactly_when_the_buttons_are_not_the_whole_truth(combo
 # 4. 健檢：哪幾格會講話（**每一句都要有人講得出理由**）
 # --------------------------------------------------------------------------- #
 def test_the_lints_of_every_combination_are_the_table(combo):
-    """三條，而且**只有**這三條：
+    """**擋跑的那一支**（error）只有兩條，而且只有這兩條：
 
     * each box 卻沒接區域 —— 整張圖只有一格，那個設定沒有作用
     * 量的那一塊跟參照那一塊是同一塊、同一條流 —— 每個數字恆為 0
-    * 量好幾塊、參照接其中一塊的 ``_others`` —— 那不是逐塊配對（F67）
+
+    兩條都是「跑起來每一顆都會出事或什麼都沒說」。**提醒**那一條在下面
+    那支測試（warning，不擋跑）—— 兩支分開才擋得住「用一條 lint 否決
+    使用者的意思」。
     """
     m, glv, (roi, boxes, ref_region, ref_source) = combo
     says = get_step("glv_stats").configuration_issues(m.nodes[glv].params)
@@ -187,12 +190,32 @@ def test_the_lints_of_every_combination_are_the_table(combo):
         want.append("does nothing")
     if not ref_source and ref_region and ref_region in mine:
         want.append("zero no matter what")
-    elif len(mine) > 1 and ref_region in ["%s_others" % r for r in mine]:
-        want.append("one GLV card per region")
 
     assert len(says) == len(want), says
     for said, fragment in zip(says, want):
         assert fragment in said
+
+
+def test_measuring_several_regions_against_one_others_is_a_hint_not_a_block(combo):
+    """**提醒，不是路障**（F67 當天訂正）。
+
+    「這兩塊都跟 epi_others 比」是合法的、有時候正是要的設定 —— 它一開始被
+    寫進 `configuration_issues`（error），而那一支會擋住整批跑。同名不同義
+    的東西不准安靜，但也不該變成一道路障。
+    """
+    m, glv, (roi, _boxes, ref_region, _ref_source) = combo
+    mine = [r for r in roi.split(",") if r]
+    card = get_step("glv_stats")
+    hints = card.configuration_hints(m.nodes[glv].params)
+    want = len(mine) > 1 and ref_region in ["%s_others" % r for r in mine]
+    assert bool(hints) == want
+    if want:
+        assert "one GLV card per region" in hints[0]
+        # 而且**不在**擋跑的那一支裡
+        assert not [s for s in card.configuration_issues(m.nodes[glv].params)
+                    if "one GLV card per region" in s]
+        assert [i.level for i in m.validate()
+                if i.code == "half-configured"] == ["warning"]
 
 
 def test_the_same_block_on_another_image_is_not_flagged(combo):

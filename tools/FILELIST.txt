@@ -6,7 +6,7 @@ aa17fbfb8202ee9790fc89736938834df2fef53a AGENTS.md
 988aa4655c507ed44e9065ea6238e7f55502ca3c CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 5b750fd2b09c4ced476be65c84f41d45231f9070 README.md
-96919873f8769bafb2d08f5b9ce0fa2a6caa1e82 SESSION_LOG.md
+8a843228e20159a650fa50f7829b820a4a98dc5c SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 cf8fe09ad592a80d3dfaf96412e906035cb83b48 d4t/__main__.py
@@ -67,7 +67,7 @@ e0a563e40733bef4b2c3f91cba8913a5d969afa3 d4t/core/steps/arith.py
 aad17165ec7ced8430675d1c65abcdb998e00d7b d4t/core/steps/cd.py
 39bbc384b66e024f67200a76598d4f6f255e5100 d4t/core/steps/denoise.py
 00f877fe38f316bc2a74cb2659a2e5ac63b7055c d4t/core/steps/flatten.py
-381c58ad51f3dfed1d826cff97954f7c5f81343e d4t/core/steps/glv_stats.py
+3466a0cbba43022b691a3c3dd298ba3f39c21466 d4t/core/steps/glv_stats.py
 40ead15a1186df4faba7131c03a683dc667d1339 d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
@@ -142,7 +142,7 @@ af2a0ffc8331813f1fb674e4c4293457921c7161 docs/plans/F49-features-on-wires.md
 9b5377891f8e86a52f32a1e546f4aad6175e5bdf docs/plans/F50-canvas-is-cards.md
 9822a762879030cad132c0d8a0f07c2762c24dbd docs/plans/F51-feature-names-one-truth.md
 49d28af403671958a1292959ecf5bb03ad423842 docs/plans/F52-one-way-to-print-a-number.md
-e740ff8fc264e7a1a3014801d80aaaded41eeaa0 docs/plans/F67-glv-compare-by-wire.md
+8558f88c4890064d0940ece6d9d616f15765e853 docs/plans/F67-glv-compare-by-wire.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -213,8 +213,8 @@ af91354855f9f11d953dfd45857bb779eb4c55dd tests/test_f11_split_load_cards.py
 9aa1cf6e8406d2a229ab2661ae97904fa35a888b tests/test_feature_specs.py
 21b2046491056e3656ad2f7905951a6e5902b0fa tests/test_glas_sidecar.py
 306625aa08ded107633669f205bc09ad021e41fe tests/test_glv.py
-097609d06de956962ba502999897c458787a75f7 tests/test_glv_combinations.py
-730a701ecab8f6019442b9d332cd955b0bc4de10 tests/test_glv_compare.py
+c49a5e5b9d18c823819b77b64d1f76bf534b74e7 tests/test_glv_combinations.py
+ff06073808acd0d66a3358b3e8d658f06f0973c1 tests/test_glv_compare.py
 c214e16d65e4b5d5a95c657d48643bc6160e711b tests/test_glv_kind_lints.py
 675878e5aa5eb58645f91f8b7645f13c81995a5a tests/test_golden_features.py
 d644e6c465d92bf9bee29d6fb9e1c2905ceab9d4 tests/test_guided_condition.py

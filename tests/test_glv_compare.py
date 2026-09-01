@@ -1437,9 +1437,12 @@ def test_every_region_against_one_others_line_says_so():
     比），而遷移只補得出第一條線。同名不同義的東西不准安靜。
     """
     card = get_step("glv_stats")
-    says = card.configuration_issues(
-        dict(BASE, roi="hot,cold", reference_region="hot_others"))
+    p = dict(BASE, roi="hot,cold", reference_region="hot_others")
+    says = card.configuration_hints(p)
     assert says and "one GLV card per region" in says[0]
+    # **提醒，不是路障**：那個設定完全合法（有時候正是要的），所以它不可以
+    # 出現在擋跑的那一支裡（F67 當天訂正 —— 它一開始寫錯了地方）。
+    assert card.configuration_issues(p) == []
     # 一塊的時候什麼都不必說（那是 F44 的 preset①，最常見的那一種）
-    assert card.configuration_issues(
+    assert card.configuration_hints(
         dict(BASE, roi="hot", reference_region="hot_others")) == []

@@ -44,7 +44,11 @@ on another stream」）、動的是同兩條線的埠在不在。而那一格的
 `_migrate_reference_into_ports` 對每一種情況都明寫哪一顆留、哪一顆剪。
 `the other regions` 是唯一要補線的：一塊的那種**數字與特徵名逐字不變**；
 好幾塊的那種以前是逐塊配對，一條線表達不出來 —— 補第一條，而新的一條 lint
-對那個形狀講話（同名不同義不准安靜）。
+對那個形狀講話（同名不同義不准安靜）。**那條 lint 當天訂正過一次**：
+它一開始寫在 `configuration_issues`（error，擋住整批跑），而「這兩塊都跟
+epi_others 比」是完全合法、有時候正是要的設定 —— 用一條 lint 否決使用者的
+意思比不講還糟，所以搬去 `configuration_hints`（warning）。判準是那一句：
+**這會不會跑不起來**。
 
 順手做的兩件：`show_when` 多了 `ANY_VALUE`（有值就算數 —— 接線型的參數列不出
 允許值）與「一條條件裡的一串名字＝ or」；`ctx.meta["compares"]` 的
