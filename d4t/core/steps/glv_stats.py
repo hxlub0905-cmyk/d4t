@@ -6,10 +6,11 @@
 ======================  ==================================================
 ① 在哪量？              ``source``（流）× ``roi``（區域）—— 畫布上的線
 ② 量什麼？              ``metrics`` —— **絕對值，永遠吐**
-③ 跟誰比？              ``reference`` —— 相對值，疊在絕對值上（可以不比）
+③ 跟誰比？              ``reference_region`` / ``reference_source``
+                        兩顆埠 —— 相對值，疊在絕對值上（可以不比）
 ======================  ==================================================
 
-**`compare` 不是另一個 method，是 `reference ≠ none` 的情況。**
+**`compare` 不是另一個 method，是「參照那兩顆埠接了線」的情況。**
 
 以前這裡是 ``method = stats | compare`` 的二選一，而那兩種的**接線方式不同**
 （清單埠 vs 角色埠）—— 對製程工程師，那是「還沒開始量，就先被問了一個關於
@@ -17,27 +18,34 @@
 「這塊 EPI 的平均灰階是 120」跟「它比隔壁亮 12」不能在同一張卡上同時得到，
 使用者得放兩張卡、接兩次線，而那兩張卡各自有機會設得不一樣。
 
-``reference`` 的五個答案（:data:`REFERENCES`）—— 前面四個是一張真值表
-（**流一不一樣 × 區域一不一樣**），最後一個是它的自動版：
+「跟誰比」的四種情況是一張真值表（**流一不一樣 × 區域一不一樣**），而
+**那張表就是那兩顆埠**（F67，2026-09-01 —— 使用者：「GLV card 這邊的 ROI
+接線我覺得對 user 來說還是會有點混淆」）：
 
-===============================  ==============================  ==============
-值                               跟誰比                          誰在用
-===============================  ==============================  ==============
-``none``                         不比，只要絕對值                兩種資料
-``another region``               另一塊 @ 同一條流                RSEM 大圖
-``another stream``               同一塊 @ 另一條流                patch
-``another region on another      另一塊 @ 另一條流                EBI↔RSEM 對照
-stream``
-``the other regions``            ``<name>_others`` @ 同一條流     patch
-===============================  ==============================  ==============
+=================  =================  ==============================  =========
+參照區域那顆埠     參照流那顆埠       跟誰比                          誰在用
+=================  =================  ==============================  =========
+－                 －                 不比，只要絕對值                兩種資料
+有                 －                 另一塊 @ 同一條流               RSEM 大圖
+－                 有                 同一塊 @ 另一條流               patch
+有                 有                 另一塊 @ 另一條流               EBI↔RSEM
+=================  =================  ==============================  =========
 
-五個都只吃「現在這一顆」的資料 —— 所以儀表在預覽時就畫得出來（那是
+F67 之前這張表另外**寫成一格 `reference` 下拉**，於是同一件事在卡上有兩個
+說法，而它們可以不一致（引擎讀那一格，使用者看的是線）—— 見
+:func:`_reference_of`。第五個答案 ``the other regions`` 也一起走了：它就是把
+``<n>_others`` 接進參照那顆埠，而 F44 的 preset①「量缺陷那格」教的已經是
+接線那一種。
+
+四種都只吃「現在這一顆」的資料 —— 所以儀表在預覽時就畫得出來（那是
 `ui/inspectors.GlvInspector` 成立的前提）。
 
-舊 recipe 由 `recipe._migrate_compare_method_into_reference` 接住，
+舊 recipe 走一條三段的遷移鏈：``roi_compare`` 節點先被
+`recipe._migrate_roi_compare_into_glv_stats` 變成 ``method="compare"``，
+再由 `_migrate_compare_method_into_reference` 變成 ``reference`` 那一格，
+最後由 `_migrate_reference_into_ports`（F67）變成那兩顆埠上的線。
 **相對值的特徵名逐字不變**（``<prefix>_delta``）—— 那是舊分數表達式不必改寫
-的前提。更舊的 ``roi_compare`` 節點先被 `_migrate_roi_compare_into_glv_stats`
-變成 ``method="compare"``，再走同一道。
+的前提。
 
 ``key`` 仍然是 ``glv_stats``（recipe 的鍵）—— 留它而不是留 ``roi_compare``，
 理由是黃金值：兩份 fixture recipe 與 `tests/fixtures/golden/` 都指著它。
@@ -52,9 +60,9 @@ target、在另一個裡是 reference —— 角色寫進區域的話，每一�
 而區域是**畫**出來的。
 
 GDS 那條路兩種比較都成立（F29 之後）：`roi_reference` 的 ``layout layers``
-現在也吐 ``_center`` / ``_others``，所以既可以比**層 vs 層**（``another
-region``，例如 EPI vs MG），也可以比**同一層裡那一塊 vs 其餘那些**
-（``the other regions``）。後者是區域級 detect 的形狀。
+現在也吐 ``_center`` / ``_others``，所以既可以比**層 vs 層**（參照埠接
+另一層，例如 EPI vs MG），也可以比**同一層裡那一塊 vs 其餘那些**
+（參照埠接 ``<n>_others``）。後者是區域級 detect 的形狀。
 （F32 起「去找哪一塊最異常」整件事歸這張卡的 **each box 逐框比較**
 （``worst_*``）—— Region 卡在大圖上選 ``pick="none"`` 只放框；
 ``strongest`` 那個挑框選項刪掉了，見 `_util.PICK_RULES`。）
@@ -98,7 +106,7 @@ import numpy as np
 from ..algo import glv as algo_glv
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, PATCH_KINDS, SINGLE_IMAGE_KINDS, ParamSpec, Step,
+    ANY_VALUE, CATEGORY_ALGO, PATCH_KINDS, SINGLE_IMAGE_KINDS, ParamSpec, Step,
     StepError, register_step, GROUP_MEASURE,
 )
 from ._util import (
@@ -177,18 +185,25 @@ COMPARE_CHOICES = (
 )
 HIDDEN_COMPARE_METRICS = ("percent",)
 
-#: 「跟誰比」的四個答案（F18 第 5 步，2026-08-21）。順序＝下拉的順序。
+#: 「跟誰比」的四種情況（F18 第 5 步，2026-08-21；**F67 起是算出來的**）。
 #:
-#: **這不是 `method` 換個名字。** 舊的 `method` 是二選一：``stats`` 吐絕對值、
-#: ``compare`` 吐差異，而且**從不吐絕對值** —— 所以「這塊 EPI 的平均灰階是 120」
-#: 跟「它比隔壁亮 12」不能在同一張卡上同時得到，使用者得放兩張卡、接兩次線，
-#: 而那兩張卡各自有機會設得不一樣。
+#: 它們**不再是一格參數的值**（2026-09-01，使用者：「GLV card 這邊的 ROI
+#: 接線……(Compare against) 跟最上方 What do I want to measure 相關」）。
+#: 那一格下拉的五個答案其實是一張真值表 —— **參照區域那顆埠有沒有線 ×
+#: 參照影像流那顆埠有沒有線** —— 也就是把線複述了一遍。複述的下場有三個，
+#: 三個都實際存在過：
 #:
-#: 現在絕對值**永遠**吐，相對值疊在它上面。三個問題因此互相獨立：
-#: 在哪量（線）× 量什麼（metrics）× 跟誰比（這一格）。
+#: * 同一個決定在卡上被問兩次（上排的 preset 動線，這一格也動線），
+#:   而兩份說法可以不一致 —— 那正是鐵則 10 擋的東西。
+#: * 「跟誰比」選回 ``none`` 的時候，參照那條線**不會跟著剪掉**，
+#:   於是畫布上留著一條指向不存在的埠的線。
+#: * 五個答案的字是拓樸（``another region on another stream``），
+#:   而使用者問的是樣品 —— 這張卡自己的 docstring 罵過舊 `method` 的
+#:   同一句話（「還沒開始量，就先被問了一個關於軟體架構的問題」）。
 #:
-#: 值是給人看的字（下拉直接顯示它們）。它們是穩定的字串 id，除了相等比較
-#: 之外沒有人解析它們。
+#: 現在唯一的儲存是那兩顆埠，:func:`_reference_of` 是那張真值表的唯一出處。
+#: 這幾個常數留下來當**角色名**（引擎內部分岔用），不再有人拿它們去比對
+#: 一格參數的值。
 REF_NONE = "none"
 REF_REGION = "another region"
 REF_STREAM = "another stream"
@@ -197,19 +212,22 @@ REF_STREAM = "another stream"
 #: ``another stream`` 那條路把 `reference_region` **安靜地忽略掉**，於是那份
 #: 設定跑得完、有數字，而那個數字是「同一塊在另一條流上」的答案。
 #:
-#: 舊的 `method="compare"` 有四個獨立的角色參數，所以它表達得出這一種；
-#: 是我把二選一拆成「跟誰比」的時候把它弄丟的。
+#: F67 之後這一種不必再被誰記得：兩顆埠都接了線就是它。
 REF_BOTH = "another region on another stream"
-REF_OTHERS = "the other regions"
-REFERENCES = (REF_NONE, REF_REGION, REF_STREAM, REF_BOTH, REF_OTHERS)
 
-#: ``the other regions`` 靠的是 Region 卡的家族慣例：``epi`` 這一塊的「其他同類」
-#: 叫 ``epi_others``。**名字怎麼拼住在 `_util`**（`others_name`）—— 這裡以前
-#: 自己拼了一份，而 Region 卡那邊拼了另外三份（F37 收成一個家）。
+#: ⚠ ``REF_OTHERS``（``the other regions``）**F67 拿掉了**。
 #:
-#: 不必多接一條**線**：那個名字跟 ``epi`` 出自同一張卡。但它現在會被
-#: `resolve_regions_in` **宣告**出來，所以畫布上有埠、健檢也看得到它
-#: —— 見那一支的說明。
+#: 它是那張真值表的「自動版」：不接線，由 ``<roi>_others`` 這個家族慣例推出
+#: 參照。而 F44 讓使用者拍板的 preset①「量缺陷那格」走的**已經**是明著接一條
+#: ``<n>_others`` 的線（工作單字面的 REF_OTHERS ＋ ``_center`` 是已知的壞
+#: 組合，會派生出沒有人產出的 ``<n>_center_others``）—— 也就是說同一件事
+#: 早就有兩種寫法，而使用者被教的是接線那一種。
+#:
+#: 舊 recipe 由 `recipe._migrate_reference_into_ports` 接住：一個區域的那種
+#: 補一條 ``<roi>_others`` 的線，**數字與特徵名逐字不變**。
+#: 多個區域的那種以前是「每一塊各自跟自己的其餘同類比」，一條線表達不出來
+#: —— 遷移補第一塊的線，而 :meth:`GlvStatsStep.configuration_issues`
+#: 從此對那個形狀講一句話（見那一支）。
 
 #: 一個區域底下**好幾個框**的時候，要把它們當成一個像素母體，還是一格一格量
 #: （F18 第 6 步，2026-08-21）。
@@ -320,13 +338,34 @@ def _canonical(mid: str) -> str:
 
 
 def _reference_of(params: Dict[str, Any]) -> str:
-    """這組參數要跟誰比（不認得的字、沒填的一律當「不比」）。
+    """這組參數要跟誰比 —— **兩顆埠有沒有接線**（F67，2026-09-01）。
 
-    **不要在別處直接讀 `params["reference"]`**：這一段是那個判斷的唯一出處，
-    而「缺席」的意思是舊 recipe（那時候只有絕對值）。
+    ================================  ==============================
+    參照區域那顆埠  參照影像流那顆埠  結果
+    ================================  ==============================
+    －              －                :data:`REF_NONE`（只要絕對值）
+    有              －                :data:`REF_REGION`
+    －              有                :data:`REF_STREAM`
+    有              有                :data:`REF_BOTH`
+    ================================  ==============================
+
+    以前這是一格下拉（``params["reference"]``），而那一格是這張表的複述 ——
+    複述得對的時候它沒有用，複述得不對的時候它會贏（引擎讀的是那一格，
+    使用者看到的是線）。真的發生過的那一種：選「另一條流」而 `reference_region`
+    仍然掛著一條線，畫布上兩條虛線都在，引擎**安靜地忽略**其中一條。
+
+    **不要在別處自己判斷「有沒有在比」**：這一段是唯一出處。兩格都由線水合
+    （`region_edge_values` / 影像線），所以問它們就是問線。
     """
-    got = str(params.get("reference", REF_NONE) or REF_NONE).strip()
-    return got if got in REFERENCES else REF_NONE
+    region = str(params.get("reference_region", "") or "").strip()
+    stream = str(params.get("reference_source", "") or "").strip()
+    if region and stream:
+        return REF_BOTH
+    if region:
+        return REF_REGION
+    if stream:
+        return REF_STREAM
+    return REF_NONE
 
 
 def _prefix_in_output_section() -> ParamSpec:
@@ -483,35 +522,33 @@ class GlvStatsStep(MultiSourceStep):
                   "you like (hand-written recipes may also use glv_q<0-100>, "
                   "glv_trim<0-49> or glv_above<0-255>)."),
         ),
-        # ---- 跟誰比（F18 第 5 步）------------------------------------------
+        # ---- 跟誰比（F18 第 5 步；F67 起**由線決定**）----------------------
+        #
+        # 這一段以前的第一列是一格 `reference` 下拉，而它是下面兩顆埠的複述
+        # （見 :func:`_reference_of`）。拿掉它之後這一段只剩三件事：
+        # **跟哪一塊比**（埠）、**拿哪個數字比**、**要報什麼**。
         ParamSpec(
-            name="reference", type="choice", default=REF_NONE,
-            choices=list(REFERENCES), section="3 · Compare against",
-            label="Compare against",
-            help=("Leave it at none to just report the gray levels above. "
-                  "Pick something else and the card also reports how far the "
-                  "region is from it - and the ports change to match what you "
-                  "picked."),
-        ),
-        ParamSpec(
-            name="reference_region", type="region_key", direction="in", default="",
-            section="3 · Compare against", label="That region",
-            show_when=("reference", (REF_REGION, REF_BOTH)),
-            help=("The region to judge against - the background, the "
-                  "neighbouring cell, another layer. Drag a line from the "
-                  "Region card that defines it."),
+            name="reference_region", type="region_key", direction="in",
+            default="", section="3 · Compare with", label="Another area",
+            help=("Leave it alone and this card just reports the gray levels "
+                  "above. Drag a line from the Region card that defines the "
+                  "area to judge against - the background, the neighbouring "
+                  "cell, the other boxes of this same region - and the card "
+                  "also reports how far this one is from it."),
         ),
         ParamSpec(
             name="reference_source", type="image_key", direction="in",
-            default="ref", section="3 · Compare against", label="That stream",
-            show_when=("reference", (REF_STREAM, REF_BOTH)),
-            help=("The image stream to judge against - normally ref, so the "
-                  "same block is compared across the pair."),
+            default="", section="3 · Compare with", label="Another image",
+            help=("Drag an image stream in here to judge the same area "
+                  "across two images - normally ref, so the block is compared "
+                  "against its counterpart in the reference image. Wire this "
+                  "and the area above together to compare another area on "
+                  "another image."),
         ),
         ParamSpec(
             name="stat", type="metric_chips", default=DEFAULT_COMPARE_STAT,
-            section="3 · Compare against",
-            show_when=("reference", tuple(r for r in REFERENCES if r != REF_NONE)),
+            section="3 · Compare with",
+            show_when=((("reference_region", "reference_source"), (ANY_VALUE,)),),
             choices=list(COMPARE_STAT_CHOICES),
             label="Compare their",
             help=("Which number stands for each block. The mean is the usual "
@@ -525,8 +562,8 @@ class GlvStatsStep(MultiSourceStep):
         ),
         ParamSpec(
             name="compare_metrics", type="metric_chips",
-            default=DEFAULT_COMPARE_METRICS, section="3 · Compare against",
-            show_when=("reference", tuple(r for r in REFERENCES if r != REF_NONE)),
+            default=DEFAULT_COMPARE_METRICS, section="3 · Compare with",
+            show_when=((("reference_region", "reference_source"), (ANY_VALUE,)),),
             choices=list(COMPARE_CHOICES),
             label="Report",
             help=("Three families. Difference is plain arithmetic on the two "
@@ -741,42 +778,20 @@ class GlvStatsStep(MultiSourceStep):
 
     @classmethod
     def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
-        """這張卡吃哪幾個區域 —— **含 ``the other regions`` 那一個**（F37）。
+        """這張卡吃哪幾個區域 —— 量的那幾個 ＋ **參照那一個**。
 
-        以前 ``the other regions`` 刻意不宣告，理由是「``epi_others`` 跟 ``epi``
-        出自同一張 Region 卡，畫布上那條線已經在了」。那句話對線是對的，
-        **對埠是錯的**，而代價是實測出來的：
-
-        =====================================  ==================================
-        ``roi="epi_center"`` ＋ the other       `configuration_issues()` 回空的、
-        regions                                `unknown-region` 也看不到它 ——
-                                               因為沒有人宣告過那個名字
-        跑起來                                 每一顆 defect 各失敗一次：
-                                               ``'epi_center_others' is not on
-                                               this defect``
-        =====================================  ==================================
-
-        錯誤訊息本身是好的，但它出現在**跑完一批之後**。宣告出來之後，同一件事
-        由既有的 `unknown-region` 在按下去之前就講完。
-
-        **derive，不存第二份**（F12）：``<roi>_others`` 是從 ``roi`` 算出來的，
-        存進參數的話改了 ``roi`` 而那一格沒跟上，兩份就漂了 —— 而漂掉的症狀
-        正好是這一段要修的東西。
+        參照那一個 F67 之前有兩種寫法（一格 `reference_region` 的線，或者
+        ``the other regions`` 那個由 ``<roi>_others`` 慣例推出來的隱形參照），
+        現在只剩線那一種。宣告它的理由沒有變，而那個理由是實測出來的（F37）：
+        沒有宣告的名字 `configuration_issues()` 看不到、`unknown-region`
+        也看不到，於是「這一顆沒有那一塊」要等到**跑完一批之後**才由每一顆
+        defect 各講一次 ``'epi_center_others' is not on this defect``。
+        宣告出來之後，同一件事在按下去之前就講完。
         """
         out = list(super().resolve_regions_in(params))
-        ref = _reference_of(params)
-        if ref in (REF_REGION, REF_BOTH):
-            name = str(params.get("reference_region", "") or "").strip()
-            if name and name not in out:
-                out.append(name)
-        elif ref == REF_OTHERS:
-            for region in cls.region_list(params):
-                name = str(region or "").strip()
-                if not name:
-                    continue        # 量整張圖時沒有「其餘那些」可言
-                name += OTHERS_SUFFIX
-                if name not in out:
-                    out.append(name)
+        name = str(params.get("reference_region", "") or "").strip()
+        if name and name not in out:
+            out.append(name)
         return out
 
     @classmethod
@@ -800,39 +815,39 @@ class GlvStatsStep(MultiSourceStep):
         ref = _reference_of(params)
         if ref == REF_NONE:
             return out
+        # 「挑了跟誰比卻沒挑到東西」那兩句 F67 刪掉了 —— 在「有沒有在比」由
+        # 埠決定之後，那個狀態**構造上不存在**（沒接線就是不比）。
         mine = [r for r in cls.region_list(params) if r]
-        if ref in (REF_REGION, REF_BOTH):
-            other = str(params.get("reference_region", "") or "").strip()
-            if not other:
-                out.append("This card is set to compare against another "
-                           "region, but no region is picked yet. Drag a line "
-                           "from the Region card that defines it into “That "
-                           "region”.")
-            elif ref == REF_REGION and mine and other in mine:
-                # 同一塊比自己 = delta 恆為 0、snr 恆為 0。跑得完、有數字、
-                # 而且那些數字不會因為任何缺陷而改變。
-                out.append("The region being measured and the one it is "
-                           "compared against are the same region on the same "
-                           "image, so every comparison this card produces is "
-                           "zero no matter what the defect looks like. Pick a "
-                           "different region, or compare against another "
-                           "image stream instead.")
+        other = str(params.get("reference_region", "") or "").strip()
+        if ref == REF_REGION and mine and other in mine:
+            # 同一塊比自己 = delta 恆為 0、snr 恆為 0。跑得完、有數字、
+            # 而且那些數字不會因為任何缺陷而改變。
+            out.append("The region being measured and the one it is "
+                       "compared against are the same region on the same "
+                       "image, so every comparison this card produces is "
+                       "zero no matter what the defect looks like. Pick a "
+                       "different region, or compare against another "
+                       "image stream instead.")
+        elif len(mine) > 1 and other in [r + OTHERS_SUFFIX for r in mine]:
+            # **一條線只指得到一塊**（F67）。以前的 ``the other regions`` 是
+            # 逐塊配對的（epi 跟 epi_others 比、mg 跟 mg_others 比），而一條線
+            # 表達不出那件事 —— 它現在的意思是「這幾塊**全部**跟 %s 比」。
+            # 那不是錯的設定（有時候正是要的），但它跟舊寫法**同名不同義**，
+            # 所以不准安靜：舊 recipe 走 `_migrate_reference_into_ports` 遷移
+            # 過來的正好是這個形狀。
+            out.append("This card measures %d regions and every one of them "
+                       "is compared against “%s”. If you meant each region "
+                       "against its own other boxes, use one GLV card per "
+                       "region - a single line can only point at one area."
+                       % (len(mine), other))
         if ref in (REF_STREAM, REF_BOTH):
-            other = str(params.get("reference_source", "") or "").strip()
-            if not other:
-                out.append("This card is set to compare against another image "
-                           "stream, but none is wired into “That stream” yet.")
-            elif (ref == REF_STREAM and other in cls.source_list(params)
+            stream = str(params.get("reference_source", "") or "").strip()
+            if (ref == REF_STREAM and stream in cls.source_list(params)
                     and len(cls.source_list(params)) == 1):
                 out.append("The stream being measured and the one it is "
                            "compared against are the same stream, so every "
                            "comparison this card produces is zero no matter "
                            "what the defect looks like.")
-        elif ref == REF_OTHERS and not mine:
-            out.append("“The other regions” needs a region to start from - "
-                       "there is nothing for the rest to be the others of. "
-                       "Wire a Region card in, or compare against a named "
-                       "region instead.")
         return out
 
     @classmethod
@@ -1352,8 +1367,12 @@ class GlvStatsStep(MultiSourceStep):
             "target": here,
             "reference": self._ref_label(p, ref),
             "target_source": str(p.get(self.CURRENT_STREAM, "")),
+            # ⚠ ``REF_BOTH`` 也在這裡（F67 訂正）：參照那一塊住在另一條流上
+            # 的兩種情況都要講出**那一條**的名字。以前只認 ``REF_STREAM``，
+            # 於是「另一塊 @ 另一條流」在面板上被寫成量測那一條 —— 數字是對的，
+            # 而它旁邊那行字說錯了它是跟哪一張圖比出來的。
             "reference_source": (str(p.get("reference_source", ""))
-                                 if ref == REF_STREAM
+                                 if ref in (REF_STREAM, REF_BOTH)
                                  else str(p.get(self.CURRENT_STREAM, ""))),
             "stat": ",".join(_stats_of(p)),
             "target_px": int(np.asarray(patch).size),
@@ -1444,9 +1463,7 @@ class GlvStatsStep(MultiSourceStep):
             return region
         if ref == REF_STREAM:
             return "%s @ %s" % (str(p.get(cls.REGION) or "the image"), stream)
-        if ref == REF_BOTH:
-            return "%s @ %s" % (region, stream)
-        return str(p.get(cls.REGION) or "") + OTHERS_SUFFIX
+        return "%s @ %s" % (region, stream)          # REF_BOTH
 
     def _reference_block(self, ctx: Context, img, p: Dict[str, Any], ref: str):
         """參照那一塊 → ``(全部像素, 它住的那張影像, 它的區域名)``。
@@ -1475,15 +1492,14 @@ class GlvStatsStep(MultiSourceStep):
                     "the stream to compare against ('%s') does not exist "
                     "here; available: %s."
                     % (name, ", ".join(sorted(ctx.images)) or "none"))
-        want = region if ref == REF_STREAM else (
-            str(p.get("reference_region", "") or "").strip()
-            if ref in (REF_REGION, REF_BOTH) else region + OTHERS_SUFFIX)
+        # 「同一塊、另一條流」＝ 參照區域那顆埠沒接線，所以量的那一塊自己就是
+        # 參照的那一塊（在另一張影像上）。
+        want = (region if ref == REF_STREAM
+                else str(p.get("reference_region", "") or "").strip())
         if not want:
-            raise StepError(
-                self.key,
-                "this card is set to compare against another region, but "
-                "none is picked - drag a line from the Region card that "
-                "defines it.")
+            # 到得了這裡只有一種：接了流、而量的那一格沒有區域（量整張圖）。
+            # 那是合法的 —— 整張圖對整張圖，`roi_pixels` 吃得下空名字。
+            return (roi_pixels(ctx, self.key, image, ""), image, "")
         if want not in ctx.roi_names():
             why = dict(ctx.meta.get("regions_absent") or {}).get(want, "")
             raise StepError(

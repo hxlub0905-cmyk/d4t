@@ -24,7 +24,7 @@ from d4t.core.pipeline.recipe import (RECIPE_VERSION, DecideSpec, Let, Rule,
                                       _tree_to_json, feature_referrers,
                                       region_edge_values, rules_to_tree)
 from d4t.core.steps._util import centre_name, others_name
-from d4t.core.steps.glv_stats import EACH_BOX, POOLED, REF_NONE, REF_REGION
+from d4t.core.steps.glv_stats import EACH_BOX, POOLED
 
 #: GLV 卡最上面那三顆「我要量什麼」（PR-2 2a）。**preset 不是參數**：recipe
 #: 沒有新欄位，選了只動 roi / reference_region 兩條線與 reference /
@@ -1288,18 +1288,20 @@ class RecipeModel:
             if base.endswith(suffix):
                 base = base[:-len(suffix)]
         producer = str(roi_edges[0].src)
-        ref = str(node.params.get("reference", REF_NONE) or REF_NONE)
+        # **F67：三顆鈕現在只看線與 `across_boxes`。** 「有沒有在比」以前另外
+        # 存在 `reference` 那一格，所以這裡要同時比對線**與**那一格 —— 而它們
+        # 可以不一致，於是 preset 的勾選跟畫布上的線也可以不一致。
         boxes = str(node.params.get("across_boxes", POOLED) or POOLED)
         ref_edges = self._glv_region_edges(node_id, "reference_region")
-        if (wired == centre_name(base) and ref == REF_REGION
+        if (wired == centre_name(base)
                 and boxes == POOLED and len(ref_edges) == 1
                 and ref_edges[0].src == producer
                 and str(ref_edges[0].src_out) == others_name(base)):
             return "defect_box"
         if wired == base and not ref_edges:
-            if ref == REF_NONE and boxes == EACH_BOX:
+            if boxes == EACH_BOX:
                 return "oddest_box"
-            if ref == REF_NONE and boxes == POOLED:
+            if boxes == POOLED:
                 return "region_stats"
         return GLV_INTENT_CUSTOM
 
@@ -1308,9 +1310,9 @@ class RecipeModel:
         across_boxes 兩格，**一次 Ctrl+Z 全還原**（compound）。
 
         preset (1) 是使用者 2026-08-27 拍板的**現行正確寫法**：roi 接
-        `<n>_center`、reference="another region"、reference_region 接
-        `<n>_others`（兩條虛線、同一個 producer）—— 工作單字面的
-        REF_OTHERS+_center 會派生出沒人產的 `<n>_center_others`，不用。
+        `<n>_center`、reference_region 接 `<n>_others`（兩條虛線、同一個
+        producer）。F67 之後那就是全部 —— 「跟誰比」那一格沒有了，
+        **接了那條線就是在比**。
         套不上（沒有 roi 線、producer 沒那顆埠）回 False，什麼都不動。
         """
         nid = str(node_id)
@@ -1342,19 +1344,17 @@ class RecipeModel:
                 for e in list(self._glv_region_edges(nid, "roi")):
                     self.remove_edge(e.src, nid, e.src_out, "roi")
                 self.add_edge(producer, nid, roi_port, "roi")
-            # 藏起來的參數掛著線＝畫布說謊 —— 不是 defect_box 就把參照線清掉。
+            # 不是 defect_box 就把參照線清掉 —— F67 之後那條線**就是**
+            # 「在跟誰比」，留著它等於 preset 講一句話、卡片做另一件事。
             for e in list(self._glv_region_edges(nid, "reference_region")):
                 self.remove_edge(e.src, nid, e.src_out, "reference_region")
             if str(intent) == "defect_box":
                 self.add_edge(producer, nid, others_name(base),
                               "reference_region")
-                self.set_param(nid, "reference", REF_REGION)
                 self.set_param(nid, "across_boxes", POOLED)
             elif str(intent) == "oddest_box":
-                self.set_param(nid, "reference", REF_NONE)
                 self.set_param(nid, "across_boxes", EACH_BOX)
             else:
-                self.set_param(nid, "reference", REF_NONE)
                 self.set_param(nid, "across_boxes", POOLED)
         return True
 

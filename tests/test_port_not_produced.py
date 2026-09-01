@@ -57,7 +57,7 @@ def _issues(recipe, code="port-not-produced"):
 LOAD = ("load", "load_patch", {"channel_map": "1:test, 2:ref"})
 DENOISE = ("den", "denoise", {"streams": "test,ref", "method": "gaussian"})
 FOCUS = ("focus", "focus_quality", {"source": "test"})
-GLV_REF = ("glv", "glv_stats", {"source": "test", "reference": "another stream",
+GLV_REF = ("glv", "glv_stats", {"source": "test",
                                 "reference_source": "ref"})
 WIRED = [("load", "den", "test", "streams"),
          ("load", "den", "ref", "streams"),
@@ -114,7 +114,7 @@ def test_a_pass_through_port_is_a_real_port():
         [LOAD, DENOISE,
          ("roi", "roi_reference", {"source": "ref", "roi_out": "region",
                                    "method": "a cell I mark myself"}),
-         ("glv", "glv_stats", {"source": "test", "reference": "another stream",
+         ("glv", "glv_stats", {"source": "test",
                                "reference_source": "ref"})],
         [("load", "den", "test", "streams"),
          ("load", "den", "ref", "streams"),

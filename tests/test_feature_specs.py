@@ -29,8 +29,8 @@ CASES = {
     # ⚠ autofill 陷阱：單區域時 region 前綴是空的，Studio 把區域名填進
     # output_prefix —— `epi_glv_median` 的身分是 own="epi"、region=""。
     "glv_autofill": ("glv_stats", {"source": "test", "roi": "epi", "output_prefix": "epi", "metrics": "glv_median"}),
-    "glv_center_ref": ("glv_stats", {"source": "test", "roi": "epi_center,epi_others", "metrics": "glv_median", "reference": "another region", "reference_region": "mg", "compare_metrics": "delta", "stat": "glv_median"}),
-    "glv_eachbox": ("glv_stats", {"source": "test", "metrics": "glv_median", "across_boxes": "each box", "min_pixels": 5, "reference": "another region", "reference_region": "bg", "compare_metrics": "delta,snr,overlap,spread_ratio", "stat": "glv_median,glv_q90"}),
+    "glv_center_ref": ("glv_stats", {"source": "test", "roi": "epi_center,epi_others", "metrics": "glv_median", "reference_region": "mg", "compare_metrics": "delta", "stat": "glv_median"}),
+    "glv_eachbox": ("glv_stats", {"source": "test", "metrics": "glv_median", "across_boxes": "each box", "min_pixels": 5, "reference_region": "bg", "compare_metrics": "delta,snr,overlap,spread_ratio", "stat": "glv_median,glv_q90"}),
     "cd_line": ("cd_measure", {"source": "test"}),
     "cd_blob": ("cd_measure", {"source": "test", "shape": "blob"}),
     "cd_blob_size": ("cd_measure", {"source": "test", "shape": "blob", "size_report": "cd_area_px,cd_roundness"}),

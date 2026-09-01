@@ -579,3 +579,45 @@ def test_gray_level_is_the_only_card_that_makes_an_snr_number():
 
     # 搜尋「snr」要找得到現在真的產出它的那張卡
     assert "SNR" in REGISTRY["glv_stats"].help
+
+
+# --------------------------------------------------------------------------- #
+# `show_when` 的兩個新寫法（F67）—— UI 與引擎共用的那一份規則
+# --------------------------------------------------------------------------- #
+def test_any_value_means_that_field_has_something_in_it():
+    """接線型的參數（`image_key` / `region_key`）列不出「允許值」——
+    它的值是使用者拉了哪一條線，每一份 recipe 都不一樣。"""
+    from d4t.core.pipeline.step import ANY_VALUE, param_visible
+
+    rule = ("reference_region", (ANY_VALUE,))
+    assert param_visible(rule, {"reference_region": "mg"})
+    assert not param_visible(rule, {"reference_region": ""})
+    assert not param_visible(rule, {})
+    assert not param_visible(rule, {"reference_region": "   "})
+
+
+def test_a_list_of_names_in_one_condition_is_or():
+    """條件與條件之間是 and，**一條條件裡的那串名字之間是 or**。
+
+    存在的理由：GLV 的「Compare their / Report」問的是「有沒有在比」，而那件事
+    F67 之後由兩顆埠決定 —— 問其中任何一顆都答不完整。
+    """
+    from d4t.core.pipeline.step import ANY_VALUE, param_visible
+
+    either = ((("a", "b"), (ANY_VALUE,)),)
+    assert param_visible(either, {"a": "x", "b": ""})
+    assert param_visible(either, {"a": "", "b": "y"})
+    assert not param_visible(either, {"a": "", "b": ""})
+
+    # 兩條條件仍然是 and（原本的語意一個字都沒變）
+    both = (("m", ("go",)), ("n", ("yes",)))
+    assert param_visible(both, {"m": "go", "n": "yes"})
+    assert not param_visible(both, {"m": "go", "n": "no"})
+
+
+def test_the_glv_report_rows_follow_the_two_ports():
+    """那個寫法真的被用著（規則對了但沒人用，跟沒有規則一樣）。"""
+    rows = {sp.name: sp for sp in REGISTRY["glv_stats"].params}
+    for name in ("stat", "compare_metrics"):
+        assert not rows[name].visible_for({})
+        assert rows[name].visible_for({"reference_source": "ref"})

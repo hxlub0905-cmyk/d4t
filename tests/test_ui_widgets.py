@@ -970,7 +970,7 @@ def test_all_three_metric_fields_on_the_gray_level_card_are_chips(qapp):
     form = widgets_mod.ParamForm()
     form.set_step(_describe("glv_stats"),
                   {"metrics": "glv_median,glv_mad",
-                   "reference": "another region",
+                   "reference_region": "mg",
                    "stat": "glv_median,glv_q90",
                    "compare_metrics": "delta,snr"},
                   ["test", "ref"])
@@ -1165,7 +1165,7 @@ def test_the_middle_column_says_what_each_feature_is(qapp):
     glv = get_step("glv_stats")
     p = glv.validate_params({
         "source": "test", "roi": "epi", "output_prefix": "epi",
-        "metrics": "glv_median", "reference": "another region",
+        "metrics": "glv_median",
         "reference_region": "mg", "compare_metrics": "delta,overlap",
         "stat": "glv_median"})
     specs = {s.name: s for s in glv.resolve_feature_specs(p)}
@@ -1210,7 +1210,7 @@ def test_absolute_comes_before_relative_inside_a_card(qapp):
     glv = get_step("glv_stats")
     p = glv.validate_params({
         "source": "test", "metrics": "glv_median,glv_mad",
-        "reference": "another region", "reference_region": "mg",
+        "reference_region": "mg",
         "compare_metrics": "delta,snr", "stat": "glv_mean"})
     specs = {s.name: s for s in glv.resolve_feature_specs(p)}
     table = widgets_mod.FeatureTable()

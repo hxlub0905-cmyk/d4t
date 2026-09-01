@@ -232,6 +232,20 @@ FEATURE_TYPES = ("expr", "feature_key", "feature_keys")
 #: 所以擋在打字的當下（鐵則 4：壞值不准跑到演算法裡）。
 STREAM_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
 
+#: ``show_when`` 裡代表「**這一格有值就算數**」的萬用值（F67，2026-09-01）。
+#:
+#: 一般的 ``show_when`` 問的是「那一格等於哪幾個值」，而接線型的參數
+#: （``image_key`` / ``region_key``）答不出那種問題：它們的值是**使用者拉了
+#: 哪一條線**，名字每一份 recipe 都不一樣。GLV 的「跟誰比」因此曾經需要一格
+#: 下拉，把「有沒有接線」複述一遍 —— 而複述出來的那一份會跟線不一致
+#: （鐵則 10：資料從哪來由線決定）。
+#:
+#: 寫法：``show_when=("reference_region", (ANY_VALUE,))``
+#: ＝ 那一格接了東西（非空）才顯示這一列。要「兩格任一有值」就分成兩條
+#: ``show_when`` 是不行的（多條是 and）—— 那種情形請在卡片上開一個
+#: 衍生的唯讀參數，或者兩列各自跟著自己那一格。
+ANY_VALUE = "*"
+
 
 
 def cls_name(obj: Any) -> str:
@@ -269,13 +283,36 @@ def show_when_conditions(show_when: Any) -> List[Tuple[str, Tuple[Any, ...]]]:
     一張之後，``vertical_width`` 那幾格同時屬於「``method`` 是 profile」與
     「``directions`` 含直的」兩個條件。少了 and 的話只剩兩條路 —— 把條件揉進
     卡片自己的程式碼（於是 UI 與引擎各有一份「這一格算不算數」），或者不合併。
+
+    **一條條件的「參數名」可以是一串名字**（F67）—— 那一串是 **or**：
+
+        show_when=((("reference_region", "reference_source"), (ANY_VALUE,)),)
+
+    ＝「那兩顆埠**隨便哪一顆**接了線」。同樣是被逼出來的：GLV 的「跟誰比」
+    在 F67 之後由兩顆埠決定（見 `glv_stats._reference_of`），而
+    「Compare their / Report」那兩列問的是**有沒有在比**，不是問其中某一顆。
+    少了 or 的話又只剩那兩條老路（把規則抄一份進 UI，或者留著那格複述線的
+    下拉）。條件與條件之間仍然是 and，名字與名字之間才是 or。
     """
     if not show_when:
         return []
-    # ``("method", ("a", "b"))`` 的第一格是字串；多條的第一格是一個 tuple。
+    # ``("method", ("a", "b"))`` 的第一格是字串；多條的第一格是一串名字
+    # （單一名字的 tuple ＝ or 那種寫法，見上）或一個 ``(名字, 值)`` 對。
     if isinstance(show_when[0], str):
         return [(str(show_when[0]), tuple(show_when[1]))]
-    return [(str(name), tuple(values)) for name, values in show_when]
+    return [(_condition_names(name), tuple(values))
+            for name, values in show_when]
+
+
+def _condition_names(name: Any) -> Any:
+    """一條條件的參數名 —— 字串原樣、一串名字收成 tuple（F67 的 or）。
+
+    **字串留成字串**：`tests/region_cards.py` 與其他讀這張表的人用
+    ``name == "method"`` 篩，全部改成 tuple 等於為了一個新寫法去動所有舊的。
+    """
+    if isinstance(name, str):
+        return str(name)
+    return tuple(str(n) for n in name)
 
 
 def param_visible(show_when: Any, params: Optional[Dict[str, Any]]) -> bool:
@@ -289,7 +326,10 @@ def param_visible(show_when: Any, params: Optional[Dict[str, Any]]) -> bool:
     values = params or {}
     for name, allowed in show_when_conditions(show_when):
         want = {str(v) for v in allowed}
-        got = str(values.get(name, ""))
+        # 一串名字＝**or**（F67）：其中一個成立這條就成立。逐格取值再併起來，
+        # 因為判斷本身（成員比對／`ANY_VALUE`）對兩種寫法要一字不差。
+        names = (name,) if isinstance(name, str) else tuple(name)
+        got = ",".join(str(values.get(n, "")) for n in names)
         # **成員比對，不是整串相等**（F37）。多選那幾個型別
         # （`multi_choice` / `metric_chips` / `image_keys` / `region_keys`）
         # 的值是一個逗號清單，而「勾了 pictures 才顯示這一格」問的是
@@ -300,7 +340,14 @@ def param_visible(show_when: Any, params: Optional[Dict[str, Any]]) -> bool:
         # 對單值型別（`choice` / `icon_choice` / `bool`）**逐位元組等價**：
         # 沒有逗號的字串切出來就是它自己。2026-08-26 稽核過 registry 裡每一個
         # `show_when`，目標全部是單值型別。
-        if not ({tok.strip() for tok in got.split(",")} & want):
+        toks = {tok.strip() for tok in got.split(",")}
+        # ``ANY_VALUE``＝「有值就算數」（F67）。接線型的參數（``image_key`` /
+        # ``region_key``）的值是使用者拉了哪一條線，列不出允許值。
+        if ANY_VALUE in want:
+            if any(toks):
+                continue
+            return False
+        if not (toks & want):
             return False
     return True
 

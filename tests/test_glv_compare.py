@@ -34,15 +34,17 @@ from d4t.core.pipeline.step import ParamError, ParamSpec, StepError  # noqa: E40
 
 #: F16 把這張卡併進 `glv_stats`（label `Gray level`）當它的
 #: ``method="compare"``；**F18 第 5 步再把那個二選一拆成「跟誰比」的一格**
-#: （`reference`）—— 絕對值永遠吐，相對值疊在上面。舊 recipe 由
-#: `recipe._migrate_compare_method_into_reference` 接住（見
+#: （`reference`）；**F67 連那一格都拿掉了** —— 有沒有在比、跟誰比，
+#: 一律由 ``reference_region`` / ``reference_source`` 那兩顆埠有沒有接線決定
+#: （見 `steps.glv_stats._reference_of`）。舊 recipe 由
+#: `recipe._migrate_reference_into_ports` 接住（見
 #: `test_an_old_roi_compare_recipe_still_opens`）。
 #:
 #: 這一份的每一條測的東西**都沒有變**，只有參數名跟著卡片走：
 #: ``target_source/target_region`` 就是這張卡本來就在量的 ``source``/``roi``。
 BASE = {"source": "test", "roi": "hot",
         "metrics": "glv_mean",
-        "reference": "another region", "reference_region": "cold",
+        "reference_region": "cold", "reference_source": "",
         "stat": "glv_mean",
         "compare_metrics": "delta,snr,tstat,ratio,percent",
         "output_prefix": ""}
@@ -98,14 +100,14 @@ def test_the_same_region_on_two_streams():
     """
     ctx = _ctx()
     ctx.set_image("ref", np.asarray(ctx.images["test"]) - 25.0)
-    _run(ctx, roi="hot", reference="another stream", reference_source="ref")
+    _run(ctx, roi="hot", reference_region="", reference_source="ref")
     assert ctx.features["cmp_delta_mean"] == pytest.approx(25.0, abs=1.0)
 
 
 def test_it_declares_both_streams_and_both_regions():
     """畫布上要有**兩個**輸入埠，lint 要看得到兩個區域。"""
     card = get_step("glv_stats")
-    across = dict(BASE, reference="another stream", reference_source="ref")
+    across = dict(BASE, reference_region="", reference_source="ref")
     assert card.resolve_reads(across) == ["test", "ref"]
     # 跟另一條流比 = **同一塊**在兩張圖上，所以區域只有一個
     assert card.resolve_regions_in(across) == ["hot"]
@@ -163,23 +165,22 @@ def test_comparing_a_region_with_itself_is_caught_before_the_run():
 def test_the_same_region_on_two_different_streams_is_fine():
     """那正是情況 2 —— 不可以連它一起擋掉。"""
     assert get_step("glv_stats").configuration_issues(
-        dict(BASE, reference="another stream", reference_source="ref")) == []
+        dict(BASE, reference_region="", reference_source="ref")) == []
 
 
-def test_nothing_picked_yet_points_at_the_field():
-    """訊息要指向**填得到的東西**（`test_ui_f7_9_feedback` 的不變量）。"""
-    says = get_step("glv_stats").configuration_issues(
-        dict(BASE, reference_region=""))
-    assert says
-    labels = {p.label for p in get_step("glv_stats").params}
-    assert "“That region”" in says[0]
-    assert "That region" in labels
+def test_not_wiring_anything_is_not_an_error_it_is_no_comparison():
+    """F67：「挑了跟誰比卻沒挑到東西」這個狀態**構造上不存在**了。
 
-
-def test_running_with_nothing_picked_says_so():
-    with pytest.raises(StepError) as e:
-        _run(_ctx(), reference_region="")
-    assert "none is picked" in str(e.value)
+    以前那是一格下拉配兩顆埠，所以「選了另一塊、但沒接線」是個講得出來的
+    半成品狀態（一條 lint ＋ 一條跑起來的錯）。現在沒接線**就是**不比 ——
+    卡片照樣吐絕對值，一句話都不必說。
+    """
+    card = get_step("glv_stats")
+    idle = dict(BASE, reference_region="", reference_source="")
+    assert card.configuration_issues(idle) == []
+    ctx = _run(_ctx(), reference_region="", reference_source="")
+    assert ctx.features["glv_mean"] > 0                  # 絕對值照樣有
+    assert not [n for n in ctx.features if n.startswith("cmp_")]
 
 
 # --------------------------------------------------------------------------- #
@@ -207,7 +208,7 @@ def test_a_region_nobody_produced_says_that_instead():
 
 def test_a_missing_stream_names_what_is_there():
     with pytest.raises(StepError) as e:
-        _run(_ctx(), reference="another stream", reference_source="diff")
+        _run(_ctx(), reference_region="", reference_source="diff")
     assert "does not exist here" in str(e.value) and "test" in str(e.value)
 
 
@@ -518,7 +519,7 @@ def test_the_panel_gets_the_reference_distribution_too():
                              if k.startswith("cmp_")}
 
     # 不比的時候那一格是 None（面板據此決定畫不畫）
-    plain = _run(_ctx(), reference="none")
+    plain = _run(_ctx(), reference_region="", reference_source="")
     assert plain.meta["glv_hist"][0]["ref"] is None
 
 
@@ -625,11 +626,11 @@ def test_streams_and_regions_multiply():
 # 8. F16：兩張卡收成一張（`glv_stats` 的兩個 method）
 # --------------------------------------------------------------------------- #
 def test_an_old_roi_compare_recipe_still_opens(tmp_path):
-    """舊 recipe 裡的 `roi_compare` 節點要**走完兩道遷移**（F16 → F18），
+    """舊 recipe 裡的 `roi_compare` 節點要**走完三道遷移**（F16 → F18 → F67），
     **而且相對值的特徵名逐字不變** —— 那些名字會被打進分數表達式。
 
-    兩道：`roi_compare` → ``method="compare"`` → ``reference``。順序要緊，
-    第一道產生的東西正是第二道的輸入。
+    三道：`roi_compare` → ``method="compare"`` → ``reference`` → 兩顆埠。
+    順序要緊，每一道產生的東西正是下一道的輸入。
     """
     import json
     from d4t.core.pipeline import Recipe
@@ -656,9 +657,11 @@ def test_an_old_roi_compare_recipe_still_opens(tmp_path):
     node = r.nodes["cmp"]
     assert node.step == "glv_stats"
     assert "method" not in node.params, "第二道遷移做完要把舊鍵拿掉（idempotent）"
-    assert node.params["reference"] == "another stream", \
-        "兩邊的流不同 → 跟另一條流比"
-    assert node.params["reference_source"] == "ref"
+    assert "reference" not in node.params, "第三道（F67）做完也要把那一格拿掉"
+    assert node.params["reference_source"] == "ref", \
+        "兩邊的流不同 → 參照那顆流埠接著 ref"
+    assert node.params["reference_region"] == "", \
+        "同一塊在兩張圖上 —— 參照區域那顆埠**不接**，不然就變成第四種了"
     assert node.params["source"] == "test" and node.params["roi"] == "epi"
     # `compare_metrics` 是 F16 換的名字（兩格清單的值互斥，共用一格會留下對方
     # 不認得的值）；`metrics` 補成 `stat` —— 舊卡片用那個統計量代表每一塊，
@@ -724,14 +727,15 @@ def test_the_absolute_numbers_come_out_even_when_it_compares():
     assert ctx.features["cmp_delta_mean"] == pytest.approx(40.0, abs=1.0)
 
 
-def test_the_other_regions_needs_no_second_line():
-    """``the other regions`` 用的是 Region 卡的家族慣例（`<name>_others`）。
+def test_comparing_against_the_other_boxes_is_one_more_line():
+    """「跟其餘那些比」F67 起就是把 ``<name>_others`` 接進參照那顆埠。
 
-    使用者**不必自己接第二條線**：那個名字跟 `<name>` 出自同一張卡。
-    但它**要被宣告出來**（F37）—— 見下面那一支。
+    以前它是下拉的第五個答案（``the other regions``），靠 Region 卡的家族慣例
+    自己推出那個名字 —— 兩種寫法同時存在，而使用者被教的是接線那一種
+    （F44 的 preset①）。現在只剩一種。
     """
     card = get_step("glv_stats")
-    p = dict(BASE, reference="the other regions")
+    p = dict(BASE, reference_region="hot_others")
     assert card.resolve_regions_in(p) == ["hot", "hot_others"]
 
     ctx = _ctx()
@@ -758,25 +762,24 @@ def test_the_other_regions_is_declared_so_the_lint_can_see_it():
 
     宣告出來之後，同一件事由既有的 `unknown-region` 在按下去之前講完。
 
-    ⚠ **把 `resolve_regions_in` 那一段的 `elif ref == REF_OTHERS` 拿掉，
+    ⚠ **把 `resolve_regions_in` 裡那一段「參照那一個也要宣告」拿掉，
     這支測試會紅** —— 那就是它守著的東西。
     """
     card = get_step("glv_stats")
 
     # 上游那張 Region 卡吐的是 hot / hot_center / hot_others（`region_family`）。
-    # 接家族的主名字 → 要的 `hot_others` 在裡面。
-    assert set(card.resolve_regions_in(dict(BASE, reference="the other regions"))
+    assert set(card.resolve_regions_in(dict(BASE, reference_region="hot_others"))
                ) <= {"hot", "hot_center", "hot_others"}
 
-    # 接 `_center` → 它要的是 `hot_center_others`，而那個名字**不存在**。
+    # 接到一個沒有人產出的名字（例如 `_center` 的「其餘那些」）——
     # 宣告出來，`unknown-region` 才問得到。
     got = card.resolve_regions_in(
-        dict(BASE, roi="hot_center", reference="the other regions"))
+        dict(BASE, roi="hot_center", reference_region="hot_center_others"))
     assert "hot_center_others" in got
 
-    # 量整張圖時沒有「其餘那些」可言 —— 不要憑空宣告一個 `_others`。
+    # 什麼都沒接 = 不比，別憑空宣告一個參照區域。
     assert card.resolve_regions_in(
-        dict(BASE, roi="", reference="the other regions")) == []
+        dict(BASE, roi="", reference_region="")) == []
 
 
 def test_putting_the_metrics_in_the_wrong_box_is_caught():
@@ -869,7 +872,7 @@ def test_each_box_compares_each_box_too():
     ctx.set_roi_boxes("background", [(0.0, 0.9, 1.0, 0.1)])
     get_step("glv_stats")().run(ctx, {
         "source": "test", "roi": "cells", "metrics": "glv_median",
-        "across_boxes": "each box", "reference": "another region",
+        "across_boxes": "each box",
         "reference_region": "background", "compare_metrics": "delta"})
     assert ctx.features["cmp_delta_mean_typical"] == pytest.approx(0.0, abs=1.0)
     assert ctx.features["cmp_delta_mean_outlier"] == pytest.approx(60.0, abs=1.0)
@@ -919,22 +922,22 @@ def test_another_region_on_another_stream():
     """
     ctx = _ctx()                                   # hot=140, cold=100
     ctx.set_image("ref", np.asarray(ctx.images["test"]) - 25.0)
-    _run(ctx, roi="hot", reference="another region on another stream",
-         reference_source="ref", reference_region="cold",
+    _run(ctx, roi="hot", reference_source="ref", reference_region="cold",
          compare_metrics="delta")
     # 140 (hot @ test) − 75 (cold @ ref) = 65，**不是** 25（那是同一塊的答案）
     assert ctx.features["cmp_delta_mean"] == pytest.approx(65.0, abs=1.5)
 
     card = get_step("glv_stats")
-    p = dict(BASE, reference="another region on another stream",
-             reference_source="ref", reference_region="cold")
+    p = dict(BASE, reference_source="ref", reference_region="cold")
     assert card.resolve_reads(p) == ["test", "ref"], "兩個影像埠"
     assert card.resolve_regions_in(p) == ["hot", "cold"], "兩個區域埠"
-
-    # 兩格都要填 —— 少一格在跑之前就講
-    assert card.configuration_issues(dict(p, reference_region=""))
-    assert card.configuration_issues(dict(p, reference_source=""))
     assert card.configuration_issues(p) == []
+
+    # F67：**這一種不必再被誰記得**。兩顆埠都接了線就是它，所以「第一版漏了
+    # 一格」那種錯在構造上不可能再發生 —— 少接一條線就是真值表上的另一格，
+    # 而那一格照樣算得出東西（下面兩條）。
+    assert card.resolve_regions_in(dict(p, reference_region="")) == ["hot"]
+    assert card.resolve_reads(dict(p, reference_source="")) == ["test"]
 
 
 def test_the_migration_covers_the_whole_truth_table(tmp_path):
@@ -964,16 +967,20 @@ def test_the_migration_covers_the_whole_truth_table(tmp_path):
         path.write_text(json.dumps(doc), encoding="utf-8")
         return Recipe.load(str(path)).nodes["cmp"].params
 
+    # F67 起真值表的四格**就是那兩顆埠的四種接法**，所以每一格斷言的是
+    # 「哪一顆接著、哪一顆是空的」——「接著」與「空的」兩邊都要斷言：
+    # 舊那一格選回去的時候另一顆埠的線不會自己剪掉，而照抄過來的線在 F67
+    # 之後**就是答案**（見 `_migrate_reference_into_ports`）。
     same_stream = migrated()
-    assert same_stream["reference"] == "another region"
     assert same_stream["reference_region"] == "mg"
+    assert same_stream["reference_source"] == ""
+    assert "reference" not in same_stream
 
     same_region = migrated(reference_source="ref", reference_region="epi")
-    assert same_region["reference"] == "another stream"
     assert same_region["reference_source"] == "ref"
+    assert same_region["reference_region"] == ""
 
     both = migrated(reference_source="ref", reference_region="epi_others")
-    assert both["reference"] == "another region on another stream"
     assert both["reference_source"] == "ref"
     assert both["reference_region"] == "epi_others"
 
@@ -1305,3 +1312,134 @@ def test_glv_hist_meta_is_json_serializable():
         "source": "test", "roi": "cells", "metrics": "glv_median",
         "across_boxes": "each box"})
     json.dumps(ctx.meta["glv_hist"])   # 丟得進 JSON 就是過了
+
+
+# --------------------------------------------------------------------------- #
+# 12. F67：「跟誰比」就是那兩顆埠（那一格下拉沒有了）
+# --------------------------------------------------------------------------- #
+def test_the_truth_table_is_the_two_ports():
+    """真值表的四格 = **兩顆埠的四種接法**（`_reference_of` 的唯一出處）。
+
+    以前它另外寫成一格 `reference`，於是同一件事在卡上有兩個說法，而它們可以
+    不一致（引擎讀那一格，使用者看的是線）。
+    """
+    from d4t.core.steps.glv_stats import (REF_BOTH, REF_NONE, REF_REGION,
+                                          REF_STREAM, _reference_of)
+    assert _reference_of({}) == REF_NONE
+    assert _reference_of({"reference_region": "mg"}) == REF_REGION
+    assert _reference_of({"reference_source": "ref"}) == REF_STREAM
+    assert _reference_of({"reference_region": "mg",
+                          "reference_source": "ref"}) == REF_BOTH
+    # 空字串不是「有接」—— 那一格沒填跟沒有那一格是同一件事
+    assert _reference_of({"reference_region": "  ", "reference_source": ""}) \
+        == REF_NONE
+
+
+def test_that_one_field_is_gone_for_good():
+    """`reference` **不是被藏起來，是不存在了** —— 手寫 recipe 打進去會被擋。
+
+    留一格「還認得、但不顯示」的話，一份舊 recipe 沒走遷移也照樣打得開，
+    而它會安靜地贏過線（`CLAUDE.md` §5 那張表：收起來／刪掉是兩件事，
+    而這一格的意思整個被線取代了，沒有「之後可能還要」的那一面）。
+    """
+    card = get_step("glv_stats")
+    assert "reference" not in {p.name for p in card.params}
+    with pytest.raises(ParamError):
+        card.validate_params(dict(BASE, reference="another region"))
+
+
+def test_a_leftover_reference_line_does_not_quietly_start_comparing(tmp_path):
+    """遷移的**剪線那一半**（`_migrate_reference_into_ports`）。
+
+    舊的 `reference` 選回 ``none`` 的時候，`reference_region` 上的線不會跟著
+    剪掉 —— 以前無害（引擎讀的是那一格），F67 之後那條線**就是答案**。
+    照抄過來的話，一份只報絕對值的 recipe 會安靜地開始吐 ``cmp_*``。
+    """
+    import json
+    from d4t.core.pipeline import Recipe
+
+    def loaded(reference):
+        doc = {"recipe_id": "old", "version": 2,
+               "routes": {"ebi_patch": ["roi", "glv"]},
+               "nodes": {
+                   "roi": {"step": "roi_reference", "enabled": True,
+                           "params": {"method": "layout layers",
+                                      "layers": "1:epi, 2:mg"}},
+                   "glv": {"step": "glv_stats", "enabled": True, "params": {
+                       "source": "test", "roi": "epi",
+                       "reference": reference,
+                       "reference_region": "mg", "reference_source": "ref",
+                       "metrics": "glv_median", "stat": "glv_median",
+                       "compare_metrics": "delta"}}},
+               "edges": [["roi", "epi", "glv", "roi"],
+                         ["roi", "mg", "glv", "reference_region"]],
+               "score": {"expr": "glv_median", "threshold": 1.0,
+                         "bins": {"below": 0, "above": 1}}}
+        path = tmp_path / ("%s.json" % abs(hash(reference)))
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        return Recipe.load(str(path))
+
+    idle = loaded("none")
+    assert idle.nodes["glv"].params["reference_region"] == ""
+    assert idle.nodes["glv"].params["reference_source"] == ""
+    assert not [e for e in idle.edges if e.dst_in == "reference_region"], \
+        "線留著的話，那份 recipe 會安靜地開始比"
+    assert not [n for n in get_step("glv_stats").resolve_features(
+        idle.nodes["glv"].params) if n.startswith("cmp_")]
+
+    # 反面：真的在比的那一份，線與值都要留著（連同**另一顆**埠該不該留）
+    region = loaded("another region")
+    assert region.nodes["glv"].params["reference_region"] == "mg"
+    assert region.nodes["glv"].params["reference_source"] == ""
+    assert [e.src_out for e in region.edges if e.dst_in == "reference_region"] \
+        == ["mg"]
+
+
+def test_the_other_regions_migrates_into_a_line_of_its_own(tmp_path):
+    """``the other regions`` 以前不接線（靠 ``<roi>_others`` 的家族慣例）——
+    遷移要**補出那條線**，而且來源是產出 ``<roi>`` 的同一張卡。"""
+    import json
+    from d4t.core.pipeline import Recipe
+
+    doc = {"recipe_id": "old", "version": 2,
+           "routes": {"ebi_patch": ["roi", "glv"]},
+           "nodes": {
+               "roi": {"step": "roi_reference", "enabled": True,
+                       "params": {"method": "layout layers",
+                                  "layers": "1:epi, 2:mg"}},
+               "glv": {"step": "glv_stats", "enabled": True, "params": {
+                   "source": "test", "roi": "epi",
+                   "reference": "the other regions",
+                   "metrics": "glv_median", "stat": "glv_median",
+                   "compare_metrics": "delta"}}},
+           "edges": [["roi", "epi", "glv", "roi"]],
+           "score": {"expr": "glv_median", "threshold": 1.0,
+                     "bins": {"below": 0, "above": 1}}}
+    path = tmp_path / "others.json"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    r = Recipe.load(str(path))
+
+    assert r.nodes["glv"].params["reference_region"] == "epi_others"
+    assert [(e.src, e.src_out) for e in r.edges
+            if e.dst_in == "reference_region"] == [("roi", "epi_others")]
+    # 特徵名逐字不變 —— 那是舊分數表達式不必改寫的前提
+    assert "cmp_delta_median" in get_step("glv_stats").resolve_features(
+        r.nodes["glv"].params)
+    # 走第二次不能再動它（`run_batch` 送 recipe 進 worker 走的正是那條路）
+    again = Recipe.from_json_dict(r.to_json_dict())
+    assert again.to_json_dict() == r.to_json_dict()
+
+
+def test_every_region_against_one_others_line_says_so():
+    """一條線只指得到一塊 —— 量好幾塊的時候那**不是**逐塊配對（F67 的 lint）。
+
+    舊的 ``the other regions`` 是逐塊的（epi 跟 epi_others 比、mg 跟 mg_others
+    比），而遷移只補得出第一條線。同名不同義的東西不准安靜。
+    """
+    card = get_step("glv_stats")
+    says = card.configuration_issues(
+        dict(BASE, roi="hot,cold", reference_region="hot_others"))
+    assert says and "one GLV card per region" in says[0]
+    # 一塊的時候什麼都不必說（那是 F44 的 preset①，最常見的那一種）
+    assert card.configuration_issues(
+        dict(BASE, roi="hot", reference_region="hot_others")) == []

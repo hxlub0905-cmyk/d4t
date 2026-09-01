@@ -2015,9 +2015,9 @@ class _ParamRow(QFrame):
         # `section` 都是 "Report"，於是畫面上同一個字出現兩次 —— 而下面那條
         # 對齊的規矩會讓它落在群組區塊的**中間那一列**旁邊，讀起來像是一個叫
         # 「Report」的群（截圖出來才看到：Size 的第二排看起來屬於它）。
-        # 比對前先剝掉小標題的編號（"3 · Compare against" → "Compare
-        # against"，F32）：編號是段落的座標不是名字，留著比的話「段標題正下方
-        # 再寫一次同名列標籤」這種重複只有沒編號的段抓得到。
+        # 比對前先剝掉小標題的編號（"3 · Compare with" → "Compare with"，
+        # F32）：編號是段落的座標不是名字，留著比的話「段標題正下方再寫一次
+        # 同名列標籤」這種重複只有沒編號的段抓得到。
         label_txt = str(spec.get("label") or "").strip()
         section_txt = re.sub(r"^\d+\s*·\s*", "",
                              str(spec.get("section") or "").strip())

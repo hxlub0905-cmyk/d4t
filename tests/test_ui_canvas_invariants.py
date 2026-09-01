@@ -320,18 +320,18 @@ def test_every_measure_card_can_take_more_than_one_source(window):
             "%s.%s 還是單一來源的型別" % (cls.key, spec.name)
 
 
-def test_the_reference_ports_are_singular_and_only_show_when_asked(window):
+def test_the_reference_ports_are_singular_and_always_there(window):
     """「跟誰比」是**另一個問題**，所以它有自己的埠 —— 而那個埠是單數。
 
     單數／複數的意思跟影像流一字不差（F13-⑥）：複數的第二條線是**累加**
     （同一件事量在好幾條流／好幾塊上），單數的第二條線是**取代**。
     而「跟誰比」一次只有一個答案。
 
-    「只在說要比的時候才長出來」是 F18 這一刀的重點：主埠永遠在，使用者不必
-    先回答一個關於軟體架構的問題（舊的 `method` 一切換，整組埠就換一套）。
+    **F67 起那兩顆埠永遠在**（以前只在 `reference` 那一格說要比的時候才長
+    出來）。理由是它們現在**就是**那個問題的答案：沒接線＝不比。埠跟著一格
+    下拉出現的話，使用者得先在設定區選一個拓樸的字，才有東西可以拉線 ——
+    而那正是這一輪要拿掉的那個問題。
     """
-    from d4t.core.steps.glv_stats import REF_NONE, REF_REGION, REF_STREAM
-
     cls = get_step("glv_stats")
     # 影像埠與區域埠是兩份（圓埠 / 菱形埠），所以兩邊都要問
     ports = cls.input_specs() + cls.region_input_specs()
@@ -341,14 +341,27 @@ def test_the_reference_ports_are_singular_and_only_show_when_asked(window):
     assert specs["reference_source"].type == "image_key"
     assert specs["reference_region"].type == "region_key"
 
-    def shown(reference):
-        return [sp.name for sp in ports if sp.visible_for({"reference": reference})]
+    for params in ({}, {"reference_region": "mg"}, {"reference_source": "ref"}):
+        assert [sp.name for sp in ports if sp.visible_for(params)] == [
+            "source", "reference_source", "roi", "reference_region"]
 
-    assert shown(REF_NONE) == ["source", "roi"], "沒說要比的時候不該有參照埠"
-    assert "reference_source" in shown(REF_STREAM)
-    assert "reference_region" not in shown(REF_STREAM)
-    assert "reference_region" in shown(REF_REGION)
-    assert "reference_source" not in shown(REF_REGION)
+    # 而**參照那兩顆是選配**：沒接線不算「這張卡還跑不起來」（`missing_inputs`
+    # 的下游語意是「所以它後面不長東西」）。
+    assert "reference_source" not in cls.missing_inputs({"source": "test"})
+
+
+def test_what_to_report_appears_only_once_something_is_wired(window):
+    """跟著埠走的是**下面那兩列**，不是埠本身（F67）。
+
+    「Compare their / Report」問的是「有沒有在比」—— 兩顆埠隨便哪一顆接了線
+    都算，所以它們吃的是 `show_when` 的 or ＋ `ANY_VALUE`（`step.param_visible`）。
+    """
+    rows = {sp.name: sp for sp in get_step("glv_stats").params}
+    for name in ("stat", "compare_metrics"):
+        assert not rows[name].visible_for({"reference_region": "",
+                                           "reference_source": ""})
+        assert rows[name].visible_for({"reference_region": "mg"})
+        assert rows[name].visible_for({"reference_source": "ref"})
 
 
 # --------------------------------------------------------------------------- #

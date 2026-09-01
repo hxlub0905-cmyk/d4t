@@ -1798,6 +1798,11 @@ def _migrate_compare_method_into_reference(nodes: Dict[str, "RecipeNode"]) -> No
     ``compare``。做完把它刪掉，所以 ``to_json_dict → from_json_dict`` 走第二次
     時什麼都不會發生（identity）—— `run_batch` 送 recipe 進 worker 走的正是那
     條路，它一旦不是 identity，``workers=1`` 與 ``workers=2`` 會算出不同的分數。
+
+    ⚠ **這一道不是終點**：它產出的 ``reference`` 由
+    :func:`_migrate_reference_into_ports`（F67）再變成兩顆埠上的線。這裡繼續
+    寫那一格是對的 —— 遷移鏈要一段一段接，寫一條直達的捷徑只有舊檔案會走到，
+    永遠不會有人在上面測試。
     """
     for nid, node in list(nodes.items()):
         if node.step != "glv_stats":
@@ -1834,6 +1839,85 @@ def _migrate_compare_method_into_reference(nodes: Dict[str, "RecipeNode"]) -> No
             params["reference"] = "another region"
             params["reference_region"] = ref_region
         params.setdefault("metrics", str(params.get("stat", "") or "glv_mean"))
+        nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
+                                enabled=node.enabled)
+
+
+def _migrate_reference_into_ports(nodes: Dict[str, "RecipeNode"],
+                                  edges: List["Edge"]) -> None:
+    """``glv_stats`` 的 ``reference`` 那一格 → **兩顆埠上的線**（F67，2026-09-01）。
+
+    使用者 2026-09-01：「GLV card 這邊的 ROI 接線我覺得對 user 來說還是會有點
+    混淆 (Compare against) 跟最上方 What do I want to measure 相關」。那一格
+    下拉的五個答案是一張真值表 —— **參照區域那顆埠有沒有線 × 參照流那顆埠有
+    沒有線** —— 也就是把線複述了一遍（見 `steps.glv_stats._reference_of`）。
+
+    對照：
+
+    ================================  ==========================================
+    舊 ``reference``                  新（兩顆埠）
+    ================================  ==========================================
+    ``none``                          兩顆都不接 —— **而且要把線剪掉**（見下）
+    ``another region``                只接 ``reference_region``
+    ``another stream``                只接 ``reference_source``
+    ``another region on another       兩顆都接
+    stream``
+    ``the other regions``             ``reference_region`` 接 ``<roi>_others``
+    ================================  ==========================================
+
+    **剪線那一半才是這道遷移的重點。** 舊的 ``reference`` 一旦選回 ``none``
+    （或從「兩邊都不一樣」改成「另一條流」），另一顆埠上的線**不會跟著剪掉**
+    —— 引擎讀的是那一格所以沒事，但線還在檔案裡。照抄過來的話，那些線在
+    F67 之後**就是答案**：一份原本只報絕對值的 recipe 會開始吐 ``cmp_*``，
+    而且是安靜地吐。所以這裡對每一種情況都明確地寫下**哪一顆埠該留、哪一顆
+    該剪**，兩邊都做。
+
+    ``the other regions`` 是唯一要補東西的一種（它以前不接線，靠
+    ``<roi>_others`` 這個家族慣例）。一個區域的那種補完**數字與特徵名逐字
+    不變**；量好幾個區域的那種以前是「每一塊各自跟自己的其餘同類比」，一條線
+    表達不出來 —— 補第一塊的，而 `GlvStatsStep.configuration_issues` 從此對
+    那個形狀講一句話（那是 F67 新加的一條 lint，見那一支）。
+
+    判準是「**舊東西在不在**」（鐵則 9）：``reference`` 這個鍵還在。做完把它
+    刪掉，所以 ``to_json_dict → from_json_dict`` 走第二次什麼都不會發生
+    （identity）—— `run_batch` 送 recipe 進 worker 走的正是那條路。
+    """
+    keep_region = {"another region", "another region on another stream",
+                   "the other regions"}
+    keep_stream = {"another stream", "another region on another stream"}
+    for nid, node in list(nodes.items()):
+        if node.step != "glv_stats" or "reference" not in node.params:
+            continue
+        params = dict(node.params)
+        ref = str(params.pop("reference", "") or "").strip()
+        if ref == "the other regions":
+            # 量的是哪一塊 —— 參數或線，兩種檔案都要認得（v1 的值在參數裡，
+            # v2 的在線上，而 `to_json_dict` 會把跟線一致的那一格丟掉）。
+            roi_edges = [e for e in edges
+                         if e.dst == nid and e.dst_in == "roi" and e.src_out]
+            names = [x.strip() for x
+                     in str(params.get("roi", "") or "").split(",") if x.strip()]
+            names = names or [e.src_out for e in roi_edges]
+            if names:
+                params["reference_region"] = names[0] + "_others"
+                # 線在的話**這裡就補**：那條 ``<roi>_others`` 跟 ``roi`` 出自
+                # 同一張卡（家族慣例），而 `_migrate_region_params_into_edges`
+                # 只對 ``version < RECIPE_VERSION`` 的檔案跑。
+                src = next((e.src for e in roi_edges
+                            if e.src_out == names[0]), "")
+                have = {(e.dst, e.dst_in, e.src_out) for e in edges}
+                if src and (nid, "reference_region",
+                            params["reference_region"]) not in have:
+                    edges.append(Edge(src=src, dst=nid,
+                                      src_out=params["reference_region"],
+                                      dst_in="reference_region"))
+        for pname, keep in (("reference_region", ref in keep_region),
+                            ("reference_source", ref in keep_stream)):
+            if keep:
+                continue
+            params[pname] = ""
+            edges[:] = [e for e in edges
+                        if not (e.dst == nid and e.dst_in == pname)]
         nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
                                 enabled=node.enabled)
 
@@ -2423,6 +2507,11 @@ class Recipe:
         # 順序要緊：上面那一道會產生 ``method="compare"``，這一道再把它變成
         # ``reference``。反過來的話 roi_compare 的節點會漏掉第二段。
         _migrate_compare_method_into_reference(nodes)
+        # 「跟誰比」那一格 → 兩顆埠上的線（F67）。**順序要緊**：上面那一道會
+        # 產生 ``reference``，而這一道是它的最後一段；而且要排在
+        # `_compare_feature_renames` **前面** —— 那張改名表問的是「這張卡有沒有
+        # 在比」，而 F67 之後那個問題的答案由這裡整理好的埠決定。
+        _migrate_reference_into_ports(nodes, edges)
         score = _migrate_renamed_features(score)
         # 相對量改叫 `cmp_*` 之後，舊表達式裡的 `epi_delta` 要跟著換
         # （順序要緊：上面兩道遷移跑完，節點的參數才是新的形狀）。

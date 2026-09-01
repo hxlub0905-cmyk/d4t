@@ -73,7 +73,6 @@
         "metrics": "glv_mean,glv_median,glv_std",
         "across_boxes": "each box",
         "judge": "glv_mean",
-        "reference": "another region on another stream",
         "reference_region": "gc_others",
         "reference_source": "ref",
         "stat": "glv_mean",

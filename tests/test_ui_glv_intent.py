@@ -69,9 +69,10 @@ def test_each_preset_touches_only_the_three_things(qapp):
             if nid != glv:
                 assert not diff, "preset 動到別張卡：%s %s" % (nid, diff)
             else:
-                allowed = {"roi", "reference", "across_boxes",
-                           "reference_region"}
-                assert diff <= allowed, "preset 動了三格之外的：%s" % diff
+                # F67：`reference` 那一格沒有了 —— preset 動的是**線**加
+                # 一格 `across_boxes`（`reference_region` 是線水合出來的值）。
+                allowed = {"roi", "across_boxes", "reference_region"}
+                assert diff <= allowed, "preset 動了那幾格之外的：%s" % diff
         # 線 diff：只有進 glv 的 roi / reference_region 兩格。
         changed = set(edges_before) ^ set(edges_after)
         assert all(dst == glv and dst_in in ("roi", "reference_region")
@@ -85,7 +86,8 @@ def test_defect_box_wires_both_dashed_lines_to_the_same_producer(qapp):
            if e.dst == glv and e.dst_in in ("roi", "reference_region")}
     assert got["roi"] == (roi, "cells_center")
     assert got["reference_region"] == (roi, "cells_others")
-    assert m.nodes[glv].params["reference"] == "another region"
+    # F67：**那條線就是「在比」**（以前還要 `reference` 那一格一起說一次）。
+    assert "reference" not in m.nodes[glv].params
     assert m.nodes[glv].params["across_boxes"] == "pooled"
     assert m.glv_intent(glv) == "defect_box", "套完要偵測得回自己"
 
@@ -103,7 +105,6 @@ def test_preset_json_is_byte_identical_to_a_hand_built_recipe(qapp):
     h.remove_edge(hroi, hglv, "cells", "roi")
     h.add_edge(hroi, hglv, "cells_center", "roi")
     h.add_edge(hroi, hglv, "cells_others", "reference_region")
-    h.set_param(hglv, "reference", "another region")
     h.set_param(hglv, "across_boxes", "pooled")
     by_hand = json.dumps(h.to_recipe().to_json_dict(), sort_keys=True,
                          ensure_ascii=False, indent=1)
@@ -119,7 +120,10 @@ def test_all_presets_round_trip_through_detection(qapp):
 
 def test_no_match_shows_custom_and_detection_never_mutates(qapp):
     m, roi, glv = _model(qapp)
-    m.set_param(glv, "reference", "another stream")   # 三選都對不上
+    # 三選都對不上：接了 `_center` 卻**沒有**那條參照線（F67 之後「跟誰比」
+    # 只有線這一種說法，所以對不上 preset 的方式也只剩動線）。
+    m.remove_edge(roi, glv, "cells", "roi")
+    m.add_edge(roi, glv, "cells_center", "roi")
     before = _snapshot(m)
     assert m.glv_intent(glv) == GLV_INTENT_CUSTOM
     assert _snapshot(m) == before, "偵測永不改 recipe"
