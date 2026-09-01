@@ -16,7 +16,7 @@ e75a08b69155620720f17d638c3b8e14489091f3 d4t/core/__init__.py
 ee35d3a74a03161fd795cb83d72d5aca0622273a d4t/core/algo/curve.py
 17e03ca94f0dd599c67258b0aff775147b9a10f2 d4t/core/algo/edge.py
 d2f7e50ff4920fefc608e7d83117c771276104b7 d4t/core/algo/enhance.py
-cf876f40648185dc2bcf3b5a12082a75d708184d d4t/core/algo/glv.py
+450216942b6315c83ee817e954980b8ad33fe836 d4t/core/algo/glv.py
 4367cf0d934ae4b16f38b9d08caffd3abd54b17f d4t/core/algo/golden.py
 36dba0cb2492842918d64a6c855214bad2266b7b d4t/core/algo/grid.py
 01246b411a141df2e3d1281d272275ea709d8935 d4t/core/algo/histmatch.py
@@ -67,7 +67,7 @@ e0a563e40733bef4b2c3f91cba8913a5d969afa3 d4t/core/steps/arith.py
 aad17165ec7ced8430675d1c65abcdb998e00d7b d4t/core/steps/cd.py
 39bbc384b66e024f67200a76598d4f6f255e5100 d4t/core/steps/denoise.py
 00f877fe38f316bc2a74cb2659a2e5ac63b7055c d4t/core/steps/flatten.py
-3466a0cbba43022b691a3c3dd298ba3f39c21466 d4t/core/steps/glv_stats.py
+79a7ef4a339f2fdfc311253c7e1b5bea4bf599e1 d4t/core/steps/glv_stats.py
 40ead15a1186df4faba7131c03a683dc667d1339 d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
@@ -210,11 +210,11 @@ af91354855f9f11d953dfd45857bb779eb4c55dd tests/test_f11_split_load_cards.py
 199e82d5867b24d870e2314c808207bee634f810 tests/test_feature_collision_speaks_up.py
 374a06dc0a98d0fe1114aacbb0d3b87895835c5a tests/test_feature_names_match_the_engine.py
 09384d6c25dce024e5894657c50a95b393f2f7ac tests/test_feature_owner_prefix.py
-9aa1cf6e8406d2a229ab2661ae97904fa35a888b tests/test_feature_specs.py
+d61d4a0fd182765031dc287bbf416865821d31e1 tests/test_feature_specs.py
 21b2046491056e3656ad2f7905951a6e5902b0fa tests/test_glas_sidecar.py
 306625aa08ded107633669f205bc09ad021e41fe tests/test_glv.py
 c49a5e5b9d18c823819b77b64d1f76bf534b74e7 tests/test_glv_combinations.py
-ff06073808acd0d66a3358b3e8d658f06f0973c1 tests/test_glv_compare.py
+38edaa60e4b0252d141d3301cfd0434ee5af48f2 tests/test_glv_compare.py
 c214e16d65e4b5d5a95c657d48643bc6160e711b tests/test_glv_kind_lints.py
 675878e5aa5eb58645f91f8b7645f13c81995a5a tests/test_golden_features.py
 d644e6c465d92bf9bee29d6fb9e1c2905ceab9d4 tests/test_guided_condition.py

@@ -852,6 +852,9 @@ def test_each_box_declares_exactly_what_it_writes():
     assert set(card.resolve_features(p)) == {
         "glv_median_typical", "glv_median_outlier", "glv_median_outlier_box",
         "glv_mad_typical", "glv_mad_outlier", "glv_mad_outlier_box",
+        # F68：贏家那一格的每一個量（`_outlier` 是「這個量自己最極端的那格」，
+        # `_worst` 是「judge 挑的那格」—— 兩者不一定是同一格）。
+        "glv_median_worst", "glv_mad_worst",
         "glv_boxes", "glv_pixels",
         # F31：總冠軍那一組（照 `judge` 挑）＋ score 的分布。
         "glv_worst_i", "glv_worst_x", "glv_worst_y", "glv_worst_w",
@@ -1446,3 +1449,169 @@ def test_every_region_against_one_others_line_says_so():
     # 一塊的時候什麼都不必說（那是 F44 的 preset①，最常見的那一種）
     assert card.configuration_hints(
         dict(BASE, roi="hot", reference_region="hot_others")) == []
+
+
+# --------------------------------------------------------------------------- #
+# 13. F68：方向、判準可以是「跟參照差多少」、贏家那格的全套統計量、幾格越線
+# --------------------------------------------------------------------------- #
+def _dir_ctx(vals=(100, 100, 100, 130, 70, 100)):
+    """一列 n 個框，值由 `vals` 指定 —— 第 3 格亮、第 4 格暗。"""
+    n = len(vals)
+    img = np.zeros((20, 20 * n), np.float32)
+    for i, v in enumerate(vals):
+        img[:, i * 20:(i + 1) * 20] = float(v)
+    ctx = Context(images={"test": img, "ref": np.full_like(img, 100.0)})
+    ctx.set_roi_boxes("cells", [(i / n, 0.0, 1.0 / n, 1.0) for i in range(n)])
+    return ctx
+
+
+def _each_box(ctx, **over):
+    p = {"source": "test", "roi": "cells", "metrics": "glv_median",
+         "across_boxes": "each box"}
+    p.update(over)
+    get_step("glv_stats")().run(ctx, p)
+    return ctx
+
+
+def test_direction_decides_which_box_wins():
+    """`both` 底下最亮的格跟最黑的格**平起平坐** —— 而使用者要的是其中一種。
+
+    這一條刻意用「一亮一暗、離基準一樣遠」的資料：三個方向各挑到不同的格，
+    所以它證明的是方向真的在作用，不是碰巧。
+    """
+    assert _each_box(_dir_ctx()).features["glv_worst_i"] == 3.0        # 亮的
+    assert _each_box(_dir_ctx(), direction="brighter"
+                     ).features["glv_worst_i"] == 3.0
+    assert _each_box(_dir_ctx(), direction="darker"
+                     ).features["glv_worst_i"] == 4.0                  # 暗的
+
+
+def test_the_default_direction_is_exactly_what_it_did_before():
+    """`both` ＝ F68 之前的**唯一**行為 —— 既有 recipe 的數字一個都不准動。"""
+    a = _each_box(_dir_ctx(), direction="both").features
+    b = _each_box(_dir_ctx()).features                 # 沒填 = 預設
+    assert a == b
+    # 而且 `both` 真的是絕對值：離基準一樣遠的一亮一暗分數相同
+    assert a["glv_worst_score"] == pytest.approx(
+        _each_box(_dir_ctx(), direction="darker").features["glv_worst_score"])
+
+
+def test_the_outlier_family_follows_the_direction_too():
+    """同一張卡上兩族名字不可以用兩種「極端」的定義。"""
+    dark = _each_box(_dir_ctx(), direction="darker").features
+    assert dark["glv_median_outlier"] == pytest.approx(70.0)
+    assert dark["glv_median_outlier_box"] == 4.0
+    bright = _each_box(_dir_ctx(), direction="brighter").features
+    assert bright["glv_median_outlier"] == pytest.approx(130.0)
+
+
+def _rough_ctx():
+    """六個框：第 5 格比較亮，第 1 格一樣亮**但很粗糙**。"""
+    rng = np.random.default_rng(0)
+    n = 6
+    img = np.zeros((30, 30 * n), np.float32)
+    for i, v in enumerate((100, 100, 100, 100, 100, 160)):
+        img[:, i * 30:(i + 1) * 30] = v + rng.normal(0, 3, (30, 30))
+    img[:, 30:60] += rng.normal(0, 18, (30, 30))
+    ctx = Context(images={"test": img, "ref": np.full_like(img, 100.0)})
+    ctx.set_roi_boxes("cells", [(i / n, 0.0, 1.0 / n, 1.0) for i in range(n)])
+    ctx.set_roi_boxes("bg", [(0.0, 0.0, 1.0 / n, 1.0)])
+    return ctx
+
+
+def _judged_by(judge):
+    ctx = _rough_ctx()
+    get_step("glv_stats")().run(ctx, {
+        "source": "test", "roi": "cells", "metrics": "glv_median",
+        "across_boxes": "each box", "judge": judge,
+        "reference_region": "bg", "stat": "glv_median",
+        "compare_metrics": "delta,abs_delta,ratio,contrast,overlap,"
+                           "spread_ratio"})
+    return int(ctx.features["glv_worst_i"])
+
+
+def test_judging_by_a_comparison_really_uses_that_number():
+    """F68：判準可以是「跟參照比出來的量」（使用者：「這才是正確的挑法」）。
+
+    證明它真的在用另一個量，而不是名字換了而已：``spread_ratio`` 問的是
+    「這一格比參照粗糙多少」，於是它挑中**一樣亮但很粗糙**的那一格，
+    而不是最亮的那一格。
+    """
+    assert _judged_by("glv_median") == 5, "照絕對灰階挑 → 最亮的那格"
+    assert _judged_by("spread_ratio") == 1, "照粗糙度挑 → 另一格"
+
+
+def test_a_shared_reference_makes_most_comparisons_pick_the_same_box():
+    """⚠ **這一條記的是一個限制，不是一個功能**（F68 實測發現）。
+
+    參照是**一整塊、每一格共用**的（`_reference_block` 回一份 ``ref_px``），
+    所以 ``delta`` = 這一格的統計量 − 一個常數、``ratio`` = 除以一個常數……
+    而 `odd_box_scores` 是 leave-one-out 的偏離量除以偏離量的散布 ——
+    **對這種單調變換免疫**。於是照它們挑，挑到的跟照絕對統計量挑**一模一樣**：
+
+        照 glv_median 挑 → 第 5 格
+        照 delta / abs_delta / ratio / contrast / overlap 挑 → 也是第 5 格
+
+    差別要出現，參照必須**逐格不同**（第 i 格對上參照影像的第 i 格）——
+    那是另一件事，見 `docs/plans/F68-*.md`。這支測試守著「不要以為已經做到了」。
+    """
+    same = [j for j in ("delta", "abs_delta", "ratio", "contrast", "overlap")
+            if _judged_by(j) != _judged_by("glv_median")]
+    assert same == [], (
+        "有比較量開始挑到不同的格了 —— 如果那是因為做了逐格配對，"
+        "請把這支測試改寫成它的正面版本：%s" % same)
+
+
+def test_judging_by_a_comparison_without_a_reference_is_caught_before_the_run():
+    """每一顆都會失敗的設定要擋在跑之前（`configuration_issues` 的判準）。"""
+    card = get_step("glv_stats")
+    says = card.configuration_issues(
+        {"source": "test", "roi": "cells", "across_boxes": "each box",
+         "judge": "snr"})
+    assert says and "Pick the odd one by" in says[0]
+    # 而手寫 recipe 硬跑的話，錯誤訊息要講得出原因
+    with pytest.raises(StepError) as e:
+        _each_box(_dir_ctx(), judge="snr")
+    assert "no reference is wired" in str(e.value)
+
+
+def test_the_winner_box_reports_every_statistic_that_was_ticked():
+    """「最黑那格的 Q25」—— F68 之前只能把 judge 改成 q25 才拿得到。"""
+    ctx = _each_box(_dir_ctx(), metrics="glv_median,glv_q25,glv_max",
+                    direction="darker")
+    f = ctx.features
+    assert f["glv_worst_i"] == 4.0
+    # 贏家那一格的每一個量都在，而且真的是**那一格**的值（第 4 格整片 70）
+    for name in ("glv_median_worst", "glv_q25_worst", "glv_max_worst"):
+        assert f[name] == pytest.approx(70.0), name
+    # ⚠ 而 `_outlier` 那一族答的是另一個問題 —— 同一份資料上它們相等只是
+    # 因為 judge 就是 median；把 judge 換掉就分家（下一條）。
+    assert f["glv_median_outlier"] == pytest.approx(70.0)
+
+
+def test_worst_and_outlier_are_not_the_same_box():
+    """兩族名字的差別要**看得出來**，不然 `_worst` 只是 `_outlier` 的別名。"""
+    # 值：max 最極端的是第 1 格（有一個亮點），median 最極端的是第 4 格
+    n = 5
+    img = np.full((20, 20 * n), 100.0, np.float32)
+    img[:, 80:100] = 60.0                 # 第 4 格整片暗 → median 最極端
+    img[0, 20:22] = 255.0                 # 第 1 格一個亮點 → max 最極端
+    ctx = Context(images={"test": img})
+    ctx.set_roi_boxes("cells", [(i / n, 0.0, 1.0 / n, 1.0) for i in range(n)])
+    f = _each_box(ctx, metrics="glv_median,glv_max", judge="glv_median").features
+    assert f["glv_worst_i"] == 4.0, "judge 是 median → 贏家是整片暗的那格"
+    assert f["glv_max_outlier_box"] == 1.0, "max 自己最極端的是有亮點那格"
+    assert f["glv_max_worst"] == pytest.approx(60.0), "贏家那格的 max"
+    assert f["glv_max_outlier"] == pytest.approx(255.0), "另一格的 max"
+
+
+def test_counting_the_boxes_over_the_line():
+    """「一顆髒點」與「整片都不對」—— 現在特徵表上分得出來了。"""
+    one_bad = _each_box(_dir_ctx((100, 100, 100, 100, 100, 40)),
+                        over_k=3.0).features
+    assert one_bad["glv_boxes_over_k"] == 1.0
+    assert one_bad["glv_boxes_over_k_frac"] == pytest.approx(1 / 6)
+    # 不填就整組不吐（不是 0）—— 0 讀起來像「數過了，沒有」
+    assert "glv_boxes_over_k" not in _each_box(_dir_ctx()).features
+    assert "glv_boxes_over_k" not in get_step("glv_stats").resolve_features(
+        {"source": "test", "roi": "cells", "across_boxes": "each box"})

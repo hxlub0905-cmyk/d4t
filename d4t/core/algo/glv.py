@@ -547,7 +547,18 @@ def _median_of_sorted_without(s, r: int) -> float:
     return (float(va) + float(vb)) / 2.0
 
 
-def odd_box_scores(values, floor: float = _MIN_BOX_SPREAD):
+#: :func:`odd_box_scores` 的方向。**看的是使用者的樣品**（缺陷是暗點還是
+#: 亮點），不是軟體的事 —— 所以它是一格 recipe 參數，不是一個常數。
+#:
+#: 2026-09-01 使用者：極性「看層別／配方而定」。而在這之前這一支**只有
+#: 絕對值**一種行為，於是「找最黑的那一格」找出來的可能是最亮的那一格 ——
+#: 跑得完、有數字、而且答的是另一個問題。
+BOTH, DARKER, BRIGHTER = "both", "darker", "brighter"
+ODD_BOX_DIRECTIONS = (BOTH, DARKER, BRIGHTER)
+
+
+def odd_box_scores(values, floor: float = _MIN_BOX_SPREAD,
+                   direction: str = BOTH):
     """每一格跟「其他所有格」比 → ``(score, baseline, spread)`` 三個等長陣列。
 
     對第 ``i`` 格::
@@ -555,6 +566,15 @@ def odd_box_scores(values, floor: float = _MIN_BOX_SPREAD):
         baseline_i = median(其他所有格的值)
         spread_i   = 1.4826 × MAD(其他所有格的值)     # MAD 對 baseline_i 算
         score_i    = |v_i − baseline_i| / max(spread_i, floor)
+
+    ``direction``（F68）換掉分子那個絕對值：``darker`` 用
+    ``baseline_i − v_i``、``brighter`` 用 ``v_i − baseline_i``，**另一邊夾到 0**
+    （比基準亮的格在 darker 底下拿 0 分，不是負分）。夾到 0 而不是留負數，
+    是為了讓 ``argmax`` 與「超過 k σ 的有幾格」兩邊都不必知道方向的存在，
+    而 ``score`` 仍然逐位元組是「幾個 σ」。
+
+    ``baseline`` 與 ``spread`` **不受方向影響** —— 它們是那一格的鄰居長什麼樣，
+    跟我們在找哪一邊無關（疊圖的像素判準讀的正是這兩個）。
 
     **基準用 median 不用 mean**：平均數會被異常格自己拉走 —— 而我們正在找的
     就是那個異常格。用 median 的話，一個異常格對基準的影響趨近於零；散布用
@@ -597,8 +617,14 @@ def odd_box_scores(values, floor: float = _MIN_BOX_SPREAD):
             spread[i] = _MAD_TO_SIGMA * _median_of_sorted_without(ds, r)
 
     spread = np.maximum(spread, float(floor))
-    score = np.abs(v - baseline) / spread
-    return score, baseline, spread
+    dev = v - baseline
+    if direction == DARKER:
+        dev = np.maximum(-dev, 0.0)
+    elif direction == BRIGHTER:
+        dev = np.maximum(dev, 0.0)
+    else:
+        dev = np.abs(dev)
+    return dev / spread, baseline, spread
 
 
 def robust_spread(values) -> float:
