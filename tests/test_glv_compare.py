@@ -1136,13 +1136,19 @@ def test_the_preview_outlines_the_worst_box_before_any_batch():
 
     形狀：典型那一格 1 條淡線＋4 角點，贏家**一個 X（兩條對角線）**——
     描邊會跟區域框完全重疊、同一個顏色，等於沒畫（實測截圖抓到的，
-    典型格用角點的理由一字不差）。`focus` 指著 X 的第一條（滿 alpha）。
+    典型格用角點的理由一字不差）。
+
+    ⚠ `focus` 是**兩條都指**。這一條以前寫的是 ``assert focus == 1``
+    （「X 的第一條」）—— 而 UI 只把 focus 那一條畫滿，第二條落在 alpha 70、
+    1 px，**於是畫出來是一格中間一條斜線，不是一個 X**（2026-09-01 使用者
+    看著截圖問「框中間有一條斜線?」）。那個斷言守住的是 bug 的形狀，不是
+    「畫一個 X」這句話 —— 現在守的是後者。
     """
     ctx = _run_each_box(_grid_ctx(hot_cell=12))
     card = get_step("glv_stats")
     lines, points, focus, labels = card.overlay_marks(ctx, {}, "test")
     assert len(lines) == len(points) == len(labels) == 3    # 1 典型 + 2 對角
-    assert focus == 1                                        # X 的第一條
+    assert sorted(focus) == [1, 2], "X 的兩條都要畫滿，不然它不是一個 X"
     wi = int(ctx.features["glv_worst_i"])
     wx, wy, ww, wh = ctx.roi_norm_rects("cells")[wi]
     xs = {round(pt[0], 6) for seg in lines[1:] for pt in seg}
@@ -1162,7 +1168,7 @@ def test_no_worst_keeps_the_typical_focus():
                              "box": 2, "boxes": 3}]
     lines, _points, focus, _labels = get_step("glv_stats").overlay_marks(
         ctx, {}, "test")
-    assert len(lines) == 1 and focus == 0
+    assert len(lines) == 1 and list(focus) == [0]
 
 
 # --------------------------------------------------------------------------- #

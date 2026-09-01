@@ -6,7 +6,7 @@ aa17fbfb8202ee9790fc89736938834df2fef53a AGENTS.md
 7db8a949e32e2381840ac4de68a88af5fb49e9d0 CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 5b750fd2b09c4ced476be65c84f41d45231f9070 README.md
-98371fa968ed6cfd0c35ddc7ce3f38349e755274 SESSION_LOG.md
+418730e295ad6fb83d047b9f5c638491ae0a859a SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 cf8fe09ad592a80d3dfaf96412e906035cb83b48 d4t/__main__.py
@@ -67,7 +67,7 @@ c3a31470230b71385285b55d509fa24ec187d1f0 d4t/core/steps/_util.py
 c9a27a0826599f9c750b5097c90a4a491ccc8b37 d4t/core/steps/cd.py
 e0254fe003446bbf79ee6817c51917fc1ce9d0c7 d4t/core/steps/denoise.py
 5b2ebf848b75b5af81dc09eb580d131b75fcc51f d4t/core/steps/flatten.py
-967bb464c027c4f2f821f269353fead121551096 d4t/core/steps/glv_stats.py
+d75313a354acd0678b0237dd1c07311028d2d6fe d4t/core/steps/glv_stats.py
 40ead15a1186df4faba7131c03a683dc667d1339 d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 63a6def63864922b468c8338fd24fe14523201ca d4t/core/steps/normalize.py
@@ -103,7 +103,7 @@ f7b64cc639cd51ab158c6750bde3fa4d670dbfc5 d4t/ui/region_check.py
 1d1ca0ee2e4ebbedfa11b027bb9e7d735500ad2d d4t/ui/route_badge.py
 11a38b9e760697b23510805b56706f1eb8f6c85e d4t/ui/route_panel.py
 17f32cd41d9d65e33782a09532b84e38a6d048c4 d4t/ui/scope.py
-3b39cfca6c034354cd9a7e67d6acc47c9ecfe634 d4t/ui/studio.py
+48c309471a2444e34a2e36a012b555893d5bb592 d4t/ui/studio.py
 0a1d057639f34635416673d9dc38a3daf999530e d4t/ui/template_dialog.py
 1d52072de1d0559b9aa466859945748fafba09db d4t/ui/theme.py
 3cc7d61199e03eaba0eb61f5a749b9f6cfca9ba5 d4t/ui/threshold_view.py
@@ -113,7 +113,7 @@ c894b98548a3a06f98ed531901518a429768879f d4t/ui/verdict_band.py
 3dfbb12f4fa2b2154f12117dd1e1d16c795bfe45 d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
 34b6365ad97cc503caf8390297720e538dc26f6e d4t/ui/why_panel.py
-4fd357f9f87def7a3464c93915c816570d353fc4 d4t/ui/widgets.py
+012456d3e8512d87950cfd1282a57fe092f5ef1d d4t/ui/widgets.py
 768dbb379b84127e9cbb7ec62df8d51c34dd0100 d4t/ui/wiring_slot.py
 e02cb1ea64a7ed413716379b9da789937729f3e3 d4t/ui/workers.py
 4cc4c19347ac50aec8a227c966830aba2c9128d9 docs/ARCHITECTURE.md
@@ -145,7 +145,7 @@ af2a0ffc8331813f1fb674e4c4293457921c7161 docs/plans/F49-features-on-wires.md
 9822a762879030cad132c0d8a0f07c2762c24dbd docs/plans/F51-feature-names-one-truth.md
 49d28af403671958a1292959ecf5bb03ad423842 docs/plans/F52-one-way-to-print-a-number.md
 8558f88c4890064d0940ece6d9d616f15765e853 docs/plans/F67-glv-compare-by-wire.md
-000373cbf6128da6a537a48e8b28c283326231f3 docs/plans/F68-glv-defect-hunting.md
+1f815c5bd19c41c8e6886c4c9f0a78a1a22a1448 docs/plans/F68-glv-defect-hunting.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -217,7 +217,7 @@ d61d4a0fd182765031dc287bbf416865821d31e1 tests/test_feature_specs.py
 21b2046491056e3656ad2f7905951a6e5902b0fa tests/test_glas_sidecar.py
 306625aa08ded107633669f205bc09ad021e41fe tests/test_glv.py
 4bef693a4db60665d2ca13afe10d249cfb41cc2d tests/test_glv_combinations.py
-5216a134db65bb9368dd2cd504c853fec43a16c6 tests/test_glv_compare.py
+eaeb0069dbcaf6e613cf9b98814dc7181ffff740 tests/test_glv_compare.py
 c214e16d65e4b5d5a95c657d48643bc6160e711b tests/test_glv_kind_lints.py
 675878e5aa5eb58645f91f8b7645f13c81995a5a tests/test_golden_features.py
 d644e6c465d92bf9bee29d6fb9e1c2905ceab9d4 tests/test_guided_condition.py
@@ -355,7 +355,7 @@ af6f3263d94b0fc1b7e78c58cc86d2d6c9dda57d tests/test_ui_tree_edit.py
 3ff2e7c8a9d2c87f730e7b733b9a1017bda4f23c tests/test_ui_verdict_band.py
 f6714258293363ce472b166d0afed030cb7c8f8f tests/test_ui_welcome.py
 957bee5d677405fc028ce51bd38a005e33225f97 tests/test_ui_why_panel.py
-42b043e1a36a48a748543dda79c1af57630c11e5 tests/test_ui_widgets.py
+2cf713ae0092618e2b2b8a2dbf3c7444f52eb2e3 tests/test_ui_widgets.py
 fadf376f7cac48a5d8ee99a7795beb7c924404ee tests/test_ui_wiring_slot.py
 d8b2329e90e524b0600781a641019718516a0d9f tests/test_ui_workers.py
 db0e9bfba8c7ae39e3502d474709f8135a10cbfa tests/test_ui_write_only_on_run_all.py

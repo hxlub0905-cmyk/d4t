@@ -1261,6 +1261,23 @@ def _qimage_from_uint8(arr: np.ndarray) -> QImage:
 # --------------------------------------------------------------------------- #
 # 1. ImageView
 # --------------------------------------------------------------------------- #
+def _focus_set(focus: Any) -> frozenset:
+    """``focus`` → 要畫滿的那幾條線的 index。
+
+    吃一個 index（大多數卡片：一條代表線）或**一串** index（一個記號不只一條
+    線 —— GLV 的贏家格是一個 X）。``-1`` / 空的 = 一條都不特別畫。
+    """
+    if focus is None:
+        return frozenset()
+    if isinstance(focus, (int, float)) and not isinstance(focus, bool):
+        i = int(focus)
+        return frozenset() if i < 0 else frozenset((i,))
+    try:
+        return frozenset(int(v) for v in focus if int(v) >= 0)
+    except (TypeError, ValueError):      # noqa: BLE001 — 顯示用，不能擋畫面
+        return frozenset()
+
+
 class ImageView(QWidget):
     """ndarray 檢視器：滾輪對游標縮放、拖曳平移、雙擊 fit。
 
@@ -1309,7 +1326,7 @@ class ImageView(QWidget):
         #: 這一組標記要不要畫滿（`Step.marks_solid`）。
         self._marks_solid = False
         self._mark_points: List[Any] = []
-        self._mark_focus = -1
+        self._mark_focus: frozenset = frozenset()
         #: 每一條標記屬於哪一個具名區域（跟 ``_marks`` 等長；空字串 = 不分色）。
         self._mark_labels: List[str] = []
         #: 量測尺按著時的那一條帶（axis, 起, 迄；影像像素）。見 :meth:`set_measure`。
@@ -1473,13 +1490,21 @@ class ImageView(QWidget):
 
     def set_marks(self, lines: Optional[Sequence[Any]] = None,
                   points: Optional[Sequence[Any]] = None,
-                  focus: int = -1,
+                  focus: Any = -1,
                   labels: Optional[Sequence[str]] = None,
                   solid: bool = False) -> None:
         """把**量測標記**疊在影像上（正規化座標）。
 
         ``lines`` 是 ``[[(x0, y0), (x1, y1)], …]``，``points[i]`` 是第 i 條線段
-        上的點。``focus`` 是要畫粗的那一條（代表值那一條）。
+        上的點。``focus`` 是要畫粗的那一條（代表值那一條）—— **也可以是一串**
+        （一個記號本來就可能不只一條線）。
+
+        ⚠ **不只一條那件事是踩出來的**：GLV 的贏家格畫的是一個 **X**，而 X 是
+        兩條線；`focus` 只認得一個 index 的時候，第二條落在 alpha 70、1px 那
+        一組 —— 於是畫面上那一格中間是**一條斜線**，不是一個 X。使用者
+        2026-09-01 看著截圖問「框中間有一條斜線?」。而當時的測試**把那個形狀
+        寫死了**（`assert focus == 1  # X 的第一條`）：測試守住的是 bug 的形狀，
+        不是那句「畫一個 X」的意圖。
 
         為什麼跟 :meth:`set_overlay` 分開
         ---------------------------------
@@ -1516,7 +1541,7 @@ class ImageView(QWidget):
         for n in self._mark_labels:
             if n and n not in self._overlay_order:
                 self._overlay_order.append(n)
-        self._mark_focus = int(focus)
+        self._mark_focus = _focus_set(focus)
         self.update()
 
     def clear_marks(self) -> None:
@@ -1722,7 +1747,7 @@ class ImageView(QWidget):
 
         strong = self._marks_solid
         for i, (a, b) in enumerate(self._marks):
-            focused = (i == self._mark_focus) or strong
+            focused = (i in self._mark_focus) or strong
             col = colour_of(i)
             if not focused:
                 col = QColor(col)
@@ -1733,7 +1758,7 @@ class ImageView(QWidget):
             p.drawLine(at(a), at(b))
         p.setPen(Qt.NoPen)
         for i, grp in enumerate(self._mark_points):
-            focused = (i == self._mark_focus) or strong
+            focused = (i in self._mark_focus) or strong
             col = colour_of(i)
             if not focused:
                 col = QColor(col)

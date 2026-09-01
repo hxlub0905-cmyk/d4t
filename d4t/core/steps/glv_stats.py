@@ -1480,7 +1480,9 @@ class GlvStatsStep(MultiSourceStep):
 
         **贏家那一格另外畫**（F32）：worst note 在的時候，最異常的那一格畫
         **一個 X（兩條對角線）**＋角點，``focus`` 指著它（滿的 alpha ——
-        它才是主角，典型那一格退成淡的）。使用者一按試跑、甚至只是切到下一顆
+        它才是主角，典型那一格退成淡的）。``focus`` 因此是**一串** index：
+        X 是兩條線，只指第一條的話第二條會退成淡的，而畫出來就變成一格中間
+        一條斜線（2026-09-01 使用者看著截圖問「框中間有一條斜線?」）。使用者一按試跑、甚至只是切到下一顆
         （預覽每顆都會跑），影像上當場看得到「挑到哪一格」—— 不用等 batch。
         為什麼是 X 不是描邊：**描邊跟區域框完全重疊、同一個顏色，等於沒畫**
         —— 上面典型格用角點的理由一字不差，而第一版真的畫了四邊、真的在
@@ -1492,7 +1494,7 @@ class GlvStatsStep(MultiSourceStep):
         lines: List[Any] = []
         points: List[Any] = []
         labels: List[str] = []
-        focus = -1
+        focus: List[int] = []
         for note in notes:
             if not isinstance(note, dict):
                 continue
@@ -1533,9 +1535,17 @@ class GlvStatsStep(MultiSourceStep):
                     lines.append([a, b])
                     points.append([a, b])
                     labels.append(name)
-            if focus < 0:
-                focus = worst_at if worst_at >= 0 else typical_at
-        return lines, points, focus, labels
+            if not focus:
+                # **X 的兩條都要**（F68 收尾，2026-09-01）：只指第一條的話，
+                # 第二條落在「不是焦點」那一組（alpha 70、1 px），於是畫面上
+                # 那一格中間是**一條斜線**而不是一個 X —— 使用者看著截圖問
+                # 「框中間有一條斜線?」。
+                focus = ([worst_at, worst_at + 1] if worst_at >= 0
+                         else [typical_at])
+        # 什麼都沒畫的時候回 ``-1``（而不是空 list）—— 「沒有焦點」在每一張
+        # 卡上都是同一個哨兵，`test_every_card_answers_the_marks_question`
+        # 對整個 REGISTRY 問的就是這一句。
+        return lines, points, (focus if focus else -1), labels
 
     def _note_distribution(self, ctx: Context, patch, p: Dict[str, Any],
                            feats: Dict[str, float], n_raw: int = 0,

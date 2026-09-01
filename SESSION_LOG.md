@@ -83,6 +83,14 @@ measure 也是，而且我覺得他有一點太口語」）：三顆鈕變成同
 就在**的 bug：重建那一排只做 `deleteLater()`，而在事件圈跑到之前舊的那幾顆
 還在畫面上 —— 以前是按鈕、每次寬度一樣所以完美重疊，看不出來。
 
+**最後使用者從截圖裡揪出一條斜線**（「我看到預覽圖上有 overlay，是框中間有
+一條斜線?」）：那本來應該是一個 **X**。`overlay_marks` 從 F32 起就交出兩條
+對角線，但 `ImageView` 的 `focus` 只認得一個 index —— 第二條落進 alpha 70、
+1 px 那一組，16px 的格子上等於不存在。**而測試把那個形狀寫死了**
+（`assert focus == 1  # X 的第一條`）：守的是 bug 的形狀，不是「畫一個 X」
+那句話。`focus` 因此放寬成「一個 index 或一串」（一個記號本來就可能不只一條
+線），`-1` 仍是「什麼都不畫」的哨兵。
+
 黃金值三份逐項相同。計畫書：
 [`docs/plans/F68-glv-defect-hunting.md`](docs/plans/F68-glv-defect-hunting.md)。
 

@@ -5320,7 +5320,10 @@ class StudioWindow(QMainWindow):
                 ctx, node.params, stream)
         except Exception:                  # noqa: BLE001 — 顯示用，不能擋畫面
             return [], [], -1, []
-        return (list(lines or []), list(points or []), int(focus),
+        # ``focus`` 可以是一個 index 或**一串**（一個記號不只一條線 ——
+        # GLV 的贏家格是一個 X）。這裡不收窄成 int：收窄過的那一版，X 的第二
+        # 條會掉進「不是焦點」那一組，畫出來只剩一條斜線。
+        return (list(lines or []), list(points or []), focus,
                 [str(v) for v in (labels or [])])
 
     def _refresh_measure_marks(self) -> None:

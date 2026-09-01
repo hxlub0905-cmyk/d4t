@@ -280,6 +280,32 @@ def test_seg_color_mapping(qapp):
 # --------------------------------------------------------------------------- #
 # 1. ImageView
 # --------------------------------------------------------------------------- #
+def test_a_mark_may_be_more_than_one_line(qapp):
+    """**這一條是那條斜線本身**（2026-09-01）。
+
+    GLV 的贏家格畫的是一個 **X** —— 而 X 是兩條線。`focus` 只認得一個 index
+    的時候，第二條落在「不是焦點」那一組（alpha 70、1 px），於是畫面上那一格
+    中間是一條斜線。使用者看著截圖問「框中間有一條斜線?」。
+
+    這裡不看畫素（抗鋸齒之下數畫素很脆），看的是**兩條都算焦點**。
+    """
+    from PySide6.QtGui import QPixmap
+
+    view = widgets_mod.ImageView()
+    view.set_image(np.zeros((64, 64), np.uint8))
+    view.resize(200, 200)
+    x = [[(0.2, 0.2), (0.8, 0.8)], [(0.8, 0.2), (0.2, 0.8)]]
+    view.set_marks(x, [[a, b] for a, b in x], [0, 1], ["", ""])
+    assert view._mark_focus == frozenset((0, 1))
+    view.render(QPixmap(200, 200))              # 畫得出來、不丟例外
+
+    view.set_marks(x, [[a, b] for a, b in x], 0, ["", ""])
+    assert view._mark_focus == frozenset((0,)), "一個 index 照樣要能用"
+    for none_ in (-1, None, (), [-1]):
+        view.set_marks(x, [[a, b] for a, b in x], none_, ["", ""])
+        assert view._mark_focus == frozenset(), none_
+
+
 def test_image_view_uint8_float_and_none(qapp):
     view = widgets_mod.ImageView()
     view.resize(320, 240)
