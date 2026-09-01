@@ -86,12 +86,39 @@ from .theme import TOKENS, region_hex
 #: 不可能撞到。
 #:
 #: **卡片說角色，這裡挑顏色**：core 不得 import Qt，而「紅色是什麼紅」是主題的
-#: 事（light / dark 兩套值）。報表用的是同一組語言 —— 框紅、十字綠
-#: （`core/export/overlay.py` 的 `BOX_COLOR` / `AIM_COLOR`），所以同一顆 defect
-#: 在畫面上與在報表上，**紅的永遠是「對到哪」、綠的永遠是「瞄準哪」**。
+#: 事。報表用的是同一組語言 —— 框紅、十字綠（`core/export/overlay.py` 的
+#: `BOX_COLOR` / `AIM_COLOR`），所以同一顆 defect 在畫面上與在報表上，
+#: **紅的永遠是「對到哪」、綠的永遠是「瞄準哪」**，而 `mark_alert` /
+#: `mark_aim` 兩個權杖的值跟那兩個常數逐位元組相同。
+#:
+#: ⚠ **不要用介面的 `danger` / `success`**：那兩個是放在面板上的顏色（要跟白底
+#: 相處，所以偏暗偏濁），而這些記號畫在**使用者的影像**上，還要跟
+#: `REGION_COLORS` 分得開 —— 疊圖上其餘的框穿的正是那一組。`danger`（#d05a4c）
+#: 跟第 8 個區域色（#f08a5f）只差 ΔE 19.9，一整排橘框裡它認不出來。
+#: 這條有測試守著（`test_a_mark_role_never_wears_a_region_colour`）。
 MARK_ROLE_TOKENS = {
-    "!match": "danger",      # 小圖真的對到的那一塊
-    "!aim": "success",       # 機台瞄準的那一點
+    "!match": "mark_alert",  # 小圖真的對到的那一塊
+    "!aim": "mark_aim",      # 機台瞄準的那一點
+    "!worst": "mark_alert",  # 逐框比較挑出來的那一格（紅粗框，見下）
+}
+
+#: 有些角色要**畫粗**（預設 1.6）。角色 → 線寬。
+#:
+#: `!worst` 是使用者 2026-09-01 定的：「我傾向異常的那格用**紅框**（或不同
+#: 顏色）的**加粗框**把它框出來」。
+#:
+#: ⚠ **第一版畫琥珀（照抄報表的 `ROI_WINNER_COLOR`），而它在畫面上幾乎看不
+#: 出來** —— render 出來才發現：`theme.REGION_COLORS` 裡有 ``#f0b429``（琥珀）
+#: 與 ``#f08a5f``（橘），而區域框穿的正是那一組。報表沒有這個問題，因為那張圖
+#: 上其餘的框是鋼青色、紅色被「量到的那一塊」佔著。
+#:
+#: 所以規矩不是「跟報表同一個顏色」，是**在自己這張圖上不會跟旁邊撞**：
+#: 螢幕上其餘的框穿區域色（含琥珀橘），紅色沒有人用；報表上紅色有人用，
+#: 其餘的框是鋼青，琥珀沒有人用。兩張圖各自挑得出最響的那一個。
+#: 加粗那一半兩邊一致（報表 2–3 px、這裡 2.6 px）—— 那是這個記號真正的
+#: 共同語言：**最異常的那一格是唯一一個粗框**。
+MARK_ROLE_WEIGHTS = {
+    "!worst": 2.6,
 }
 
 __all__ = [
@@ -1737,8 +1764,11 @@ class ImageView(QWidget):
         index_of = {n: i for i, n in enumerate(self._overlay_order)}
         plain = QColor(TOKENS["accent"])
 
+        def role_of(i: int) -> str:
+            return (self._mark_labels[i] if i < len(self._mark_labels) else "")
+
         def colour_of(i: int) -> QColor:
-            name = (self._mark_labels[i] if i < len(self._mark_labels) else "")
+            name = role_of(i)
             token = MARK_ROLE_TOKENS.get(name)
             if token:
                 return QColor(TOKENS[token])
@@ -1752,7 +1782,9 @@ class ImageView(QWidget):
             if not focused:
                 col = QColor(col)
                 col.setAlpha(70)
-            pen = QPen(col, 2.2 if strong else (1.6 if focused else 1.0))
+            heavy = MARK_ROLE_WEIGHTS.get(role_of(i))
+            pen = QPen(col, heavy if (heavy and focused)
+                       else (2.2 if strong else (1.6 if focused else 1.0)))
             pen.setCosmetic(True)
             p.setPen(pen)
             p.drawLine(at(a), at(b))

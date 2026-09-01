@@ -274,6 +274,11 @@ OUTLIER_BOX_SUFFIX = "_outlier_box"
 #: 別的統計量，只能把 judge 改成它，於是「照什麼挑」與「要報什麼」被綁死。
 WORST_SUFFIX = "_worst"
 
+#: 疊圖上「贏家那一格」的**角色**（不是區域名 —— `!` 開頭是慣例，見
+#: `ui.widgets.MARK_ROLE_TOKENS`）。UI 據此畫琥珀色粗框，跟報表同一個語言。
+#: core 不得 import Qt，所以這裡說的是角色，顏色由 UI／報表各自挑。
+WORST_ROLE = "!worst"
+
 #: 「超過 k σ 的有幾格」（F68）。使用者 2026-09-01：要。
 #:
 #: 為什麼值得一個特徵：**「一顆髒點」與「整片都不對」在特徵表上長得一樣**
@@ -1478,11 +1483,23 @@ class GlvStatsStep(MultiSourceStep):
 
         ``labels`` 給區域名，顏色因此跟影像上那個區域的框一模一樣。
 
-        **贏家那一格另外畫**（F32）：worst note 在的時候，最異常的那一格畫
-        **一個 X（兩條對角線）**＋角點，``focus`` 指著它（滿的 alpha ——
-        它才是主角，典型那一格退成淡的）。``focus`` 因此是**一串** index：
-        X 是兩條線，只指第一條的話第二條會退成淡的，而畫出來就變成一格中間
-        一條斜線（2026-09-01 使用者看著截圖問「框中間有一條斜線?」）。使用者一按試跑、甚至只是切到下一顆
+        **贏家那一格另外畫**：worst note 在的時候，最異常的那一格畫一個
+        **粗框**，角色是 ``!worst``（UI 因此畫**琥珀色、加粗**），``focus``
+        指著它的四條邊（滿的 alpha —— 它才是主角，典型那一格退成淡的）。
+
+        為什麼是粗框（2026-09-01，使用者：「我覺得不要畫叉耶，我傾向異常的那格
+        用紅框（或不同顏色）的加粗框把它框出來」）
+        ------------------------------------------------------------------
+        F32 當初畫 X 的理由是「描邊會跟區域框完全重疊、同一個顏色，等於沒畫」
+        —— 而那句話的重點是**同一個顏色**。換一個顏色 ＋ 加粗，描邊就看得見了，
+        而且它跟報表講的是同一句話：報表早就把贏家畫成**粗的琥珀框**
+        （`core/export/overlay.py` 的 `ROI_WINNER_COLOR`）。同一顆 defect 在
+        畫面上與在報表上長得一樣，才不用學兩次。
+
+        顏色用琥珀不用紅也是報表定的：紅色在那張圖上已經是「量到的那一塊」
+        （`BOX_COLOR`），兩個都紅就分不出「哪一格異常」與「量到的東西在哪」。
+
+        贏家那一格**不畫角點**：框自己已經夠響，再加四顆點只是把邊界說第二次。使用者一按試跑、甚至只是切到下一顆
         （預覽每顆都會跑），影像上當場看得到「挑到哪一格」—— 不用等 batch。
         為什麼是 X 不是描邊：**描邊跟區域框完全重疊、同一個顏色，等於沒畫**
         —— 上面典型格用角點的理由一字不差，而第一版真的畫了四邊、真的在
@@ -1520,9 +1537,9 @@ class GlvStatsStep(MultiSourceStep):
             points.append(corners)
             labels.append(name)
 
-            # 贏家那一格（F32）：一個 X（兩條對角線）+ 角點 —— 描邊會跟
-            # 區域框重疊到看不見（見 docstring）。focus 給贏家（它才是
-            # 主角）；沒有 worst（單框、還沒比出來）就照舊給典型那一格。
+            # 贏家那一格（F32；2026-09-01 使用者改成粗框）：**四條邊**，
+            # 角色 `!worst` —— 琥珀色、加粗。focus 給贏家（它才是主角）；
+            # 沒有 worst（單框、還沒比出來）就照舊給典型那一格。
             worst = note.get("worst") or {}
             wi = int(worst.get("i", -1)) if isinstance(worst, dict) else -1
             worst_at = -1
@@ -1531,16 +1548,15 @@ class GlvStatsStep(MultiSourceStep):
                 wc = [(wx, wy), (wx + ww, wy), (wx + ww, wy + wh),
                       (wx, wy + wh)]
                 worst_at = len(lines)
-                for a, b in ((wc[0], wc[2]), (wc[1], wc[3])):
-                    lines.append([a, b])
-                    points.append([a, b])
-                    labels.append(name)
+                for k in range(4):
+                    lines.append([wc[k], wc[(k + 1) % 4]])
+                    points.append([])      # 框自己夠響了，不再加角點
+                    labels.append(WORST_ROLE)
             if not focus:
-                # **X 的兩條都要**（F68 收尾，2026-09-01）：只指第一條的話，
-                # 第二條落在「不是焦點」那一組（alpha 70、1 px），於是畫面上
-                # 那一格中間是**一條斜線**而不是一個 X —— 使用者看著截圖問
-                # 「框中間有一條斜線?」。
-                focus = ([worst_at, worst_at + 1] if worst_at >= 0
+                # **框的四條邊都要**：只指第一條的話，其餘三條落在「不是焦點」
+                # 那一組（alpha 70、1 px）—— 上一版畫 X 的時候就是這樣少了一
+                # 條，而使用者看著截圖問「框中間有一條斜線?」。
+                focus = (list(range(worst_at, worst_at + 4)) if worst_at >= 0
                          else [typical_at])
         # 什麼都沒畫的時候回 ``-1``（而不是空 list）—— 「沒有焦點」在每一張
         # 卡上都是同一個哨兵，`test_every_card_answers_the_marks_question`

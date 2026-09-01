@@ -1756,6 +1756,70 @@ def test_every_stage_has_its_own_colour(qapp):
     theme_mod.apply_theme(qapp, "light")
 
 
+def test_a_mark_role_never_wears_a_region_colour(qapp):
+    """**這一條踩過兩次。**
+
+    疊圖上有兩種東西：區域框（穿 `REGION_COLORS`，使用者接了幾個區域就用前
+    幾個）與**角色記號**（`MARK_ROLE_TOKENS` —— 「最異常的那一格」、「小圖對到
+    這裡」）。角色記號的用處是**從那堆框裡跳出來**，所以它一旦落在區域色那一
+    族裡，它就等於沒畫：
+
+    * F32：贏家格用**同一個顏色**描邊 → 完全重疊，看不見。改畫 X。
+    * 2026-09-01：使用者要粗框，我照抄報表的琥珀 → 而 `REGION_COLORS` 裡就有
+      ``#f0b429``（琥珀）與 ``#f08a5f``（橘）。render 出來才看到，一整排黃框中
+      間那個琥珀框認不出來。
+
+    報表沒有這個問題（那張圖上其餘的框是鋼青色），所以規矩不是「跟報表同色」，
+    是**在自己這張圖上不會跟旁邊撞**。ΔE ≥ 25 ≈「一眼看得出是兩個顏色」。
+    """
+    from d4t.ui.widgets import MARK_ROLE_TOKENS
+
+    for name in ("light", "dark"):
+        theme_mod.set_theme(name)
+        for role, token in MARK_ROLE_TOKENS.items():
+            mark = theme_mod.TOKENS[token]
+            for i, region in enumerate(theme_mod.REGION_COLORS):
+                d = _delta_e(mark, region)
+                assert d >= 25, (
+                    "%s 主題：角色 %s（%s）跟第 %d 個區域色（%s）太接近 "
+                    "—— 疊圖上它跳不出來（ΔE=%.1f）"
+                    % (name, role, mark, i, region, d))
+    theme_mod.apply_theme(qapp, "light")
+
+
+def test_the_screen_and_the_report_use_the_same_red(qapp):
+    """兩張圖上「紅的是什麼意思」要一樣 —— 而值住在兩個檔案裡。
+
+    `MARK_ROLE_TOKENS` 說角色 → 權杖（core 不得 import Qt），報表那邊是自己的
+    RGB 常數。兩份漂開的那一天，同一顆 defect 在畫面上與在報表上是兩個紅，
+    而畫面上沒有任何東西透露那件事。
+    """
+    from d4t.core.export.overlay import AIM_COLOR, BOX_COLOR
+
+    def hexof(rgb):
+        return "#%02x%02x%02x" % tuple(int(c) for c in rgb)
+
+    for name in ("light", "dark"):
+        theme_mod.set_theme(name)
+        assert theme_mod.TOKENS["mark_alert"] == hexof(BOX_COLOR), name
+        assert theme_mod.TOKENS["mark_aim"] == hexof(AIM_COLOR), name
+    theme_mod.apply_theme(qapp, "light")
+
+
+def test_the_odd_box_is_the_only_heavy_frame(qapp):
+    """使用者 2026-09-01：「異常的那格用紅框（或不同顏色）的**加粗框**。」
+
+    粗細是這個記號**跨畫面與報表**的共同語言（報表 2–3 px、這裡 2.6 px）：
+    顏色兩邊各挑各的（各自的圖上誰沒被佔走），但**最異常的那一格永遠是唯一
+    一個粗框**。
+    """
+    from d4t.ui.widgets import MARK_ROLE_WEIGHTS
+    from d4t.core.steps.glv_stats import WORST_ROLE
+
+    assert MARK_ROLE_WEIGHTS.get(WORST_ROLE, 0) > 1.6, \
+        "焦點線本來就 1.6 —— 沒有比它粗就不叫加粗"
+
+
 def test_the_stage_colours_stay_one_family(qapp):
     """分得開之外還要**看起來像一套**：同一主題內明度不可以亂跳。
 

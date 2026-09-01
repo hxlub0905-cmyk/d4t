@@ -1134,31 +1134,42 @@ def test_judge_takes_one_id_not_a_list():
 def test_the_preview_outlines_the_worst_box_before_any_batch():
     """試跑（甚至只是預覽）當下就看得到贏家 —— `overlay_marks` 讀 worst note。
 
-    形狀：典型那一格 1 條淡線＋4 角點，贏家**一個 X（兩條對角線）**——
-    描邊會跟區域框完全重疊、同一個顏色，等於沒畫（實測截圖抓到的，
-    典型格用角點的理由一字不差）。
+    形狀：典型那一格 1 條淡線＋4 角點，贏家**一個粗框**（四條邊，角色
+    ``!worst`` → UI 畫琥珀色加粗），而且**四條邊都在 focus 裡**。
 
-    ⚠ `focus` 是**兩條都指**。這一條以前寫的是 ``assert focus == 1``
-    （「X 的第一條」）—— 而 UI 只把 focus 那一條畫滿，第二條落在 alpha 70、
-    1 px，**於是畫出來是一格中間一條斜線，不是一個 X**（2026-09-01 使用者
-    看著截圖問「框中間有一條斜線?」）。那個斷言守住的是 bug 的形狀，不是
-    「畫一個 X」這句話 —— 現在守的是後者。
+    ⚠ 這一條走過三個形狀，值得留著理由：
+    F32 畫 **X** 是因為「描邊會跟區域框完全重疊、同一個顏色，等於沒畫」——
+    重點在**同一個顏色**。2026-09-01 使用者：「我覺得不要畫叉耶，我傾向異常的
+    那格用紅框（或不同顏色）的加粗框把它框出來」——換色＋加粗，描邊就看得見，
+    而且**報表早就是這樣畫的**（`ROI_WINNER_COLOR` 的粗琥珀框）。
+
+    ⚠ 而 focus 這一段以前寫的是 ``assert focus == 1``（「X 的第一條」）——
+    UI 只把 focus 那幾條畫滿，其餘落在 alpha 70、1px，**於是那個 X 畫出來是
+    一條斜線**（使用者看著截圖問「框中間有一條斜線?」）。那個斷言守住的是
+    bug 的形狀，不是那句「畫一個記號」的意圖。
     """
+    from d4t.core.steps.glv_stats import WORST_ROLE
+
     ctx = _run_each_box(_grid_ctx(hot_cell=12))
     card = get_step("glv_stats")
     lines, points, focus, labels = card.overlay_marks(ctx, {}, "test")
-    assert len(lines) == len(points) == len(labels) == 3    # 1 典型 + 2 對角
-    assert sorted(focus) == [1, 2], "X 的兩條都要畫滿，不然它不是一個 X"
+    assert len(lines) == len(points) == len(labels) == 5    # 1 典型 + 4 條邊
+    assert labels == ["cells"] + [WORST_ROLE] * 4
+    assert sorted(focus) == [1, 2, 3, 4], "四條邊都要畫滿，不然它不是一個框"
     wi = int(ctx.features["glv_worst_i"])
     wx, wy, ww, wh = ctx.roi_norm_rects("cells")[wi]
     xs = {round(pt[0], 6) for seg in lines[1:] for pt in seg}
     ys = {round(pt[1], 6) for seg in lines[1:] for pt in seg}
     assert xs == {round(wx, 6), round(wx + ww, 6)}
     assert ys == {round(wy, 6), round(wy + wh, 6)}
-    # 對角線：每一條的兩端 x 不同、y 也不同（描邊的水平/垂直線做不到）
+    # 四條邊：每一條要嘛水平要嘛垂直，而且首尾相接繞一圈
     for seg in lines[1:]:
-        assert seg[0][0] != seg[1][0] and seg[0][1] != seg[1][1]
-    assert set(labels) == {"cells"}
+        assert (seg[0][0] == seg[1][0]) != (seg[0][1] == seg[1][1])
+    for a, b in zip(lines[1:], lines[2:]):
+        assert a[1] == b[0], "四條邊要接得起來"
+    assert lines[-1][1] == lines[1][0]
+    assert points[1:] == [[], [], [], []], \
+        "贏家不畫角點 —— 框自己已經夠響，再加四顆點只是把邊界說第二次"
 
 
 def test_no_worst_keeps_the_typical_focus():

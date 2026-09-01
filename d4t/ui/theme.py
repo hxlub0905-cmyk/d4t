@@ -116,6 +116,19 @@ _LIGHT: Dict[str, Any] = {
     "danger_border": "#f0bdb5",
     "danger_text": "#a83f33",
     "warning": "#c2871f",
+    #: **疊在影像上的記號**用的紅／綠（不是介面的 danger／success）。
+    #:
+    #: 為什麼另外一組：介面的紅是**放在面板上**的（要跟白底相處，所以偏暗、
+    #: 偏濁），而這兩個是**畫在別人的照片上**的 —— 底色是使用者的影像，
+    #: 不是主題。而且它們要跟 `REGION_COLORS` 分得開：疊圖上其餘的框穿的正是
+    #: 那一組，記號的用處就是從那堆框裡跳出來（`danger` 的 #d05a4c 跟區域色
+    #: 第 8 個 #f08a5f 只差 ΔE 19.9 —— 一整排橘框裡它認不出來）。
+    #:
+    #: 值跟報表逐位元組相同（`core/export/overlay.py` 的 `BOX_COLOR` /
+    #: `AIM_COLOR`）：同一顆 defect 在畫面上與在報表上是同一個紅。
+    #: 兩套主題同一個值 —— 底色是影像，不是主題。
+    "mark_alert": "#ff2020",
+    "mark_aim": "#50dc78",
     "min_accent": "#c2731f",
     "min_accent_bg": "#fdf3e6",
     "min_accent_border": "#eed3ad",
@@ -264,6 +277,9 @@ _DARK: Dict[str, Any] = dict(_LIGHT, **{
     "danger_border": "#5c3630",
     "danger_text": "#f0958a",
     "warning": "#d8a145",
+    #: 見亮色那一份：疊在影像上的記號，兩套主題同一個值。
+    "mark_alert": "#ff2020",
+    "mark_aim": "#50dc78",
     "min_accent": "#d8934a",
     "min_accent_bg": "#2b2219",
     "min_accent_border": "#5a4630",
