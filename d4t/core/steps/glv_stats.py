@@ -279,6 +279,24 @@ WORST_SUFFIX = "_worst"
 #: —— 兩者都吐得出一個很高的 ``glv_worst_score``，而處置完全相反（後者通常
 #: 是製程漂移或框放錯）。``glv_worst_score_median`` / ``_spread`` 講的是分布的
 #: 中心與寬度，答不出「有幾格越線」。
+#: 逐框比較時，參照那一塊**怎麼取**（F68，2026-09-01）。
+#:
+#: ``pooled`` 是 F68 之前的唯一行為：參照那一塊的像素**全部混成一堆**算一個
+#: 基準，每一格都跟同一個基準比。而那讓「照跟參照差多少挑最異常的格」變成
+#: 一個空包彈 —— ``delta`` = 這一格的統計量 − **一個常數**，而挑贏家用的是
+#: leave-one-out 的偏離量，**對整排減同一個數完全免疫**。實測：照
+#: ``delta`` / ``abs_delta`` / ``ratio`` / ``contrast`` / ``overlap`` 挑，
+#: 挑到的格跟照絕對統計量挑**一模一樣**（`tests/test_glv_compare.py` 釘著）。
+#:
+#: ``per box`` 是使用者 2026-09-01 定調的做法：**test 的第 i 格對上 ref 影像
+#: 的第 i 格**。ROI 那組矩形本來就同時套在兩張圖上，所以這個對應是天然的，
+#: 只是以前被混掉了。圖案（線、洞）因此互相抵消，剩下的才是真的不一樣的地方。
+#:
+#: ⚠ **只在「參照是同一塊、只是在另一張圖上」時定義得出來**（`REF_STREAM`）。
+#: 接的是另一塊區域的話，兩邊的框數不一樣，第 i 格對不到第 i 格。
+POOLED_REF, PER_BOX_REF = "pooled", "per box"
+REF_PAIRINGS = (PER_BOX_REF, POOLED_REF)
+
 BOXES_OVER_K = "glv_boxes_over_k"
 BOXES_OVER_K_FRAC = "glv_boxes_over_k_frac"
 
@@ -416,6 +434,20 @@ def _judge_key(params: Dict[str, Any]) -> str:
     if judge in algo_glv.COMPARE_METRICS:
         return cmp_feature_name(judge, _stats_of(params)[0])
     return judge
+
+
+def _pairs_per_box(params: Dict[str, Any]) -> bool:
+    """逐框比較時要不要**第 i 格對第 i 格**（F68）。
+
+    只有 `REF_STREAM`（同一塊、另一張圖）配得起來：接的是另一塊區域的話，
+    兩邊的框數不一樣，第 i 格對不到第 i 格。**不要在別處自己判斷**。
+    """
+    if _reference_of(params) != REF_STREAM:
+        return False
+    if str(params.get("across_boxes", POOLED) or POOLED) != EACH_BOX:
+        return False
+    got = str(params.get("ref_pairing", PER_BOX_REF) or PER_BOX_REF).strip()
+    return (got if got in REF_PAIRINGS else PER_BOX_REF) == PER_BOX_REF
 
 
 def _direction_of(params: Dict[str, Any]) -> str:
@@ -612,6 +644,30 @@ class GlvStatsStep(MultiSourceStep):
                   "darkest box compete on equal terms - and the winner may "
                   "be the wrong kind, on every defect, without anything "
                   "looking wrong."),
+        ),
+        ParamSpec(
+            name="ref_pairing", type="choice", default=PER_BOX_REF,
+            choices=list(REF_PAIRINGS), label="Take the reference",
+            section="2 · Boxes in the region",
+            show_when=((("reference_source",), (ANY_VALUE,)),
+                       ("reference_region", ("",)),
+                       ("across_boxes", (EACH_BOX,))),
+            choice_help={
+                PER_BOX_REF: "Box i against box i on the other image. The "
+                             "pattern cancels out, so a box that is bright "
+                             "because the pattern is bright there does not "
+                             "look like a defect.",
+                POOLED_REF: "Every box against one number, made from all of "
+                            "the reference region's pixels at once. What this "
+                            "card did before - keep it when you need a "
+                            "recipe's numbers to stay exactly as they were.",
+            },
+            help=("The same boxes sit on both images, so each box has a "
+                  "counterpart. Pairing them up is what makes “compare with "
+                  "the reference” mean anything box by box: pooled into one "
+                  "number, the difference is just this box's own value minus "
+                  "a constant, and picking the odd box by it gives the same "
+                  "answer as picking by the plain statistic."),
         ),
         ParamSpec(
             name="over_k", type="float", default=0.0, min=0.0, max=99.0,
@@ -1106,10 +1162,15 @@ class GlvStatsStep(MultiSourceStep):
         region = str(p.get(self.REGION) or "")
         arr = np.asarray(img)
         rects = ctx.roi_rects(region, arr.shape[:2])
-        ref_px, boxes_by_stat = None, {}
+        ref_px, boxes_by_stat, ref_arr = None, {}, None
         if _reference_of(p) != REF_NONE:
             ref_px, ref_image, ref_region = self._reference_block(
                 ctx, img, p, _reference_of(p))
+            if _pairs_per_box(p):
+                # **第 i 格對第 i 格**（F68）：同一組矩形，另一張影像。
+                # 這裡只是把那張影像留著，實際的裁切在迴圈裡 —— 每一格的
+                # 參照像素不一樣，那正是這個模式存在的理由。
+                ref_arr = np.asarray(ref_image)
             # **參照的每一格算一次就好**：它對每一顆 target 的格子都一樣，
             # 而 RSEM 的大圖上「每一格都重算一次」是幾百倍的工。
             boxes_by_stat = self._reference_boxes(ctx, ref_image, p, ref_region)
@@ -1164,7 +1225,16 @@ class GlvStatsStep(MultiSourceStep):
                 one[mid] = algo_glv.glv_value(
                     raw if canon == "glv_sat_frac" else patch, canon)
             if ref_px is not None:
-                one.update(self._compare_values(patch, ref_px, p, boxes_by_stat))
+                mine = ref_px
+                if ref_arr is not None:
+                    # 同一個矩形、同一組像素過濾 —— 兩邊要用同一把尺，
+                    # 不然「差多少」裡混進了「過濾方式不一樣」。
+                    rraw = ref_arr[y:y + h, x:x + w].reshape(-1).astype(
+                        np.float64)
+                    mine, _n = self._pixels_that_count(rraw, p)
+                    if mine.size == 0:
+                        mine = ref_px          # 那一格在 ref 上沒東西可比
+                one.update(self._compare_values(patch, mine, p, boxes_by_stat))
             # 判準統計量獨立於 Statistics 那一格（使用者挑 max 當判準時不必
             # 為此多勾一顆膠囊）；已經算過就不重算。
             # ⚠ **順序要緊**（F68）：判準可以是比出來的量，而那些值是上面那一行

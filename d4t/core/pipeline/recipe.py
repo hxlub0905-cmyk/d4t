@@ -585,7 +585,7 @@ NON_DECISION_NODELESS_CODES = frozenset({
 #: ``to_json_dict → from_json_dict``（`run_batch` 送進 worker 的路）。
 #: 預設留在 1 的話，**每一次送進 worker 都會再跑一次遷移**，而遷移會把版本號
 #: 改成 2 —— 那一對就不再是 identity 了（鐵則 9）。
-RECIPE_VERSION = 2
+RECIPE_VERSION = 3
 
 
 def _cycles_with(edges: List["Edge"], extra: "Edge",
@@ -1922,6 +1922,36 @@ def _migrate_reference_into_ports(nodes: Dict[str, "RecipeNode"],
                                 enabled=node.enabled)
 
 
+def _migrate_glv_ref_pairing(nodes: Dict[str, "RecipeNode"]) -> None:
+    """v<3 的 `glv_stats`：把逐框比較的參照**釘回 ``pooled``**（F68）。
+
+    F68 讓「逐框比較 ＋ 參照在另一張影像」預設**第 i 格對第 i 格**
+    （使用者 2026-09-01：「patch 預設就用逐格配對」，因為混成一堆的那種
+    讓「照跟參照差多少挑」變成空包彈 —— 見 `steps.glv_stats.REF_PAIRINGS`）。
+
+    但**一個會動的預設等於安靜地改掉每一份舊 recipe 的數字**（`CLAUDE.md` §3
+    那句話）。所以舊檔案在這裡把當時的行為寫明：跑出來的數字逐位元組不變，
+    而畫面上那一格會顯示 ``pooled`` —— 使用者看得到自己在用哪一種，也改得動。
+
+    判準是**版本號**（`version < RECIPE_VERSION`），不是「有參數但沒有值」
+    —— 後者分不出「舊檔案」與「新 recipe 剛好選了 pooled」（鐵則 9）。
+    只補**用得到它**的那幾張卡（逐框 ＋ 只接了參照流），其餘一個字不動。
+    """
+    for nid, node in list(nodes.items()):
+        if node.step != "glv_stats" or "ref_pairing" in node.params:
+            continue
+        params = dict(node.params)
+        if str(params.get("across_boxes", "") or "").strip() != "each box":
+            continue
+        if not str(params.get("reference_source", "") or "").strip():
+            continue
+        if str(params.get("reference_region", "") or "").strip():
+            continue                    # 另一塊區域 —— 本來就配不起來
+        params["ref_pairing"] = "pooled"
+        nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
+                                enabled=node.enabled)
+
+
 def _renamed_idents(expr: str, table: Dict[str, str]) -> str:
     """一條表達式裡的**整個識別字**照 ``table`` 換掉（子字串不算）。
 
@@ -2540,6 +2570,8 @@ class Recipe:
         version = _as_int(d.get("version", 1), "recipe 'version'")
         if version < RECIPE_VERSION:
             _migrate_region_params_into_edges(nodes, routes, edges)
+            # 逐框比較的參照怎麼取（F68）—— 舊檔案釘回當時的行為。
+            _migrate_glv_ref_pairing(nodes)
             version = RECIPE_VERSION
         hydrate_regions(nodes, edges)
         return cls(

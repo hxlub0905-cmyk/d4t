@@ -159,10 +159,14 @@ def test_doctor_flags_an_old_format_recipe(tmp_path):
     assert "old.json" in out
     assert "Ctrl+S" in out                  # 講得出可以照做的下一句話
 
+    # **現在這一版**，不是寫死的數字 —— 寫死的話，下一次 RECIPE_VERSION 一動，
+    # 這支測試就會宣稱一份新檔案是舊的（2026-09-01 F68 撞到過）。
+    from d4t.core.pipeline.recipe import RECIPE_VERSION
+
     new = tmp_path / "new.json"
-    new.write_text('{"recipe_id": "x", "version": 2, "routes": {}, '
-                   '"nodes": {}, "score": {"expr": "1", "threshold": 0}}',
-                   encoding="utf-8")
+    new.write_text('{"recipe_id": "x", "version": %d, "routes": {}, '
+                   '"nodes": {}, "score": {"expr": "1", "threshold": 0}}'
+                   % RECIPE_VERSION, encoding="utf-8")
     old.unlink()
     rc, out = _run([DOCTOR, "--skip-smoke", str(tmp_path)])
     assert rc == 0 and "new.json" not in out, out

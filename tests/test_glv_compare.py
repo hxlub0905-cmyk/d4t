@@ -1615,3 +1615,97 @@ def test_counting_the_boxes_over_the_line():
     assert "glv_boxes_over_k" not in _each_box(_dir_ctx()).features
     assert "glv_boxes_over_k" not in get_step("glv_stats").resolve_features(
         {"source": "test", "roi": "cells", "across_boxes": "each box"})
+
+
+# --------------------------------------------------------------------------- #
+# 14. F68：第 i 格對第 i 格（patch 的參照）
+# --------------------------------------------------------------------------- #
+def _patterned_pair():
+    """test 與 ref 上是**同一個圖案**（一亮一暗交替），而 test 的第 3 格有缺陷。
+
+    重點在第 2 格：它很亮，**但 ref 的第 2 格也很亮** —— 那是圖案不是缺陷。
+    混成一堆的參照分不出第 2 格與第 3 格，逐格配對分得出來。
+    """
+    n = 6
+    pattern = [60, 60, 150, 60, 150, 60]
+    test = np.zeros((30, 30 * n), np.float32)
+    ref = np.zeros((30, 30 * n), np.float32)
+    for i, v in enumerate(pattern):
+        test[:, i * 30:(i + 1) * 30] = float(v)
+        ref[:, i * 30:(i + 1) * 30] = float(v)
+    test[:, 90:120] = 150.0            # 第 3 格：ref 說該暗，它卻是亮的 ← 缺陷
+    ctx = Context(images={"test": test, "ref": ref})
+    ctx.set_roi_boxes("cells", [(i / n, 0.0, 1.0 / n, 1.0) for i in range(n)])
+    return ctx
+
+
+def _pair_run(pairing, judge="delta"):
+    ctx = _patterned_pair()
+    get_step("glv_stats")().run(ctx, {
+        "source": "test", "roi": "cells", "metrics": "glv_median",
+        "across_boxes": "each box", "judge": judge,
+        "reference_source": "ref", "stat": "glv_median",
+        "compare_metrics": "delta,abs_delta", "ref_pairing": pairing})
+    return ctx.features
+
+
+def test_pairing_box_to_box_finds_the_defect_that_pooling_hides():
+    """F68 的主線（使用者：「patch 預設就用逐格配對」）。
+
+    圖案上有亮有暗。混成一堆的參照 → 每一格都跟同一個數字比 → 挑到的是
+    「本來就該亮」的那一格；逐格配對 → 圖案抵消 → 挑到真的不一樣的那一格。
+    """
+    per_box = _pair_run("per box")
+    assert per_box["glv_worst_i"] == 3.0, "ref 說該暗、它卻是亮的那一格"
+    # 那一格的 delta 是 +90（150 對上 ref 的 60）；其餘格都是 0
+    assert per_box["cmp_delta_median_worst"] == pytest.approx(90.0)
+
+    pooled = _pair_run("pooled")
+    assert pooled["glv_worst_i"] != 3.0, \
+        "混成一堆的參照挑不出它（這一條是上面那條的對照組）"
+
+
+def test_the_pairing_default_is_per_box_but_old_recipes_keep_pooled(tmp_path):
+    """**一個會動的預設等於安靜地改掉每一份舊 recipe 的數字**（CLAUDE.md §3）。
+
+    新卡預設逐格配對（那才是對的），舊檔案由 `_migrate_glv_ref_pairing`
+    釘回 ``pooled`` —— 數字逐位元組不變，而且畫面上看得到自己在用哪一種。
+    """
+    import json
+    from d4t.core.pipeline import Recipe
+
+    card = get_step("glv_stats")
+    fresh = card.validate_params({"source": "test", "roi": "cells",
+                                  "across_boxes": "each box",
+                                  "reference_source": "ref"})
+    assert fresh["ref_pairing"] == "per box", "新卡用對的那一種"
+
+    doc = {"recipe_id": "old", "version": 2,
+           "routes": {"ebi_patch": ["glv"]},
+           "nodes": {"glv": {"step": "glv_stats", "enabled": True, "params": {
+               "source": "test", "roi": "cells", "across_boxes": "each box",
+               "reference_source": "ref", "metrics": "glv_median",
+               "stat": "glv_median", "compare_metrics": "delta"}}},
+           "edges": [], "score": {"expr": "glv_median_typical",
+                                  "threshold": 1.0,
+                                  "bins": {"below": 0, "above": 1}}}
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    got = Recipe.load(str(path)).nodes["glv"].params
+    assert got["ref_pairing"] == "pooled", "舊檔案的數字不准因為打開它而改變"
+
+    # 走第二次不能再動它（`run_batch` 送 recipe 進 worker 走的正是那條路）
+    r = Recipe.load(str(path))
+    again = Recipe.from_json_dict(r.to_json_dict())
+    assert again.to_json_dict() == r.to_json_dict()
+
+
+def test_pairing_is_only_offered_where_it_is_defined():
+    """接了**另一塊區域**的話兩邊框數不同，第 i 格對不到第 i 格。"""
+    spec = {p.name: p for p in get_step("glv_stats").params}["ref_pairing"]
+    same_block = {"reference_source": "ref", "reference_region": "",
+                  "across_boxes": "each box"}
+    assert spec.visible_for(same_block)
+    assert not spec.visible_for(dict(same_block, reference_region="mg"))
+    assert not spec.visible_for(dict(same_block, across_boxes="pooled"))
+    assert not spec.visible_for(dict(same_block, reference_source=""))
