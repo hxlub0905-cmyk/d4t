@@ -77,6 +77,7 @@ class DenoiseStep(MultiStreamStep):
                   icons=["op_median", "dn_hot", "op_gaussian", "dn_bilateral",
                          "dn_nlm"],
                   choice_labels={"nlm": "NLM"},
+                  label="How to clean it up",
                   help=("median = suppress isolated bright/dark specks (common "
                         "for SEM); hot_pixels = replace ONLY the few pixels "
                         "that are wildly different from their neighbours and "

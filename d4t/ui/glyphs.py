@@ -549,18 +549,21 @@ def _fmt_png(g: _Pad) -> None:
 
 
 def _drawn(g: _Pad, mode: str) -> None:
-    # 中間那一格永遠是**贏的那一格**（畫粗）；差別在**其他格畫不畫**。
+    """中間那一格永遠是**贏的那一格**；差別在**其他格畫不畫**。
+
+    ⚠ 其他格畫成**淡的實心塊**而不是細框：19 px 下 1 px 的框幾乎看不見，
+    於是三顆長得一樣（render 出來才看到 —— 同 `fill_*` 那一族踩過的坑）。
+    """
     for i in range(3):
         for j in range(3):
-            near = abs(i - 1) + abs(j - 1) <= 1
             if i == 1 and j == 1:
                 continue
+            near = abs(i - 1) + abs(j - 1) <= 1
             if mode == "none" or (mode == "near" and not near):
                 continue
-            g.frame(0.06 + i * 0.30, 0.06 + j * 0.30,
-                    0.06 + i * 0.30 + 0.24, 0.06 + j * 0.30 + 0.24,
-                    False, 0.05)
-    g.frame(0.36, 0.36, 0.60, 0.60, True, 0.10)
+            g.blk(0.04 + i * 0.32, 0.04 + j * 0.32,
+                  0.04 + i * 0.32 + 0.24, 0.04 + j * 0.32 + 0.24, False)
+    g.blk(0.36, 0.36, 0.60, 0.60, True)
 
 
 def _klarf_inplace(g: _Pad) -> None:
