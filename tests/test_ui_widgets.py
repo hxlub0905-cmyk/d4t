@@ -1501,6 +1501,103 @@ def test_the_profile_card_lost_three_dropdowns_of_english(qapp):
 
 
 # ---------------------------------------------------------------------------
+# ChoiceChips：`chip_choice` 的膠囊（F68 第二輪 —— 設定欄那幾個下拉）
+#
+# 使用者 2026-09-01：「我希望設定欄這邊也是能像下方一樣膠囊 icon 配文字，
+# 這樣 user 比較會有感覺。」
+# ---------------------------------------------------------------------------
+def test_the_settings_column_has_no_bare_dropdown_left_on_the_glv_card(qapp):
+    """**這一條是那句話本身。** 加一個 `type="choice"` 的參數回去就會紅。"""
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import get_step
+
+    plain = [p["name"] for p in get_step("glv_stats").describe()["params"]
+             if p["type"] == "choice"]
+    assert not plain, (
+        "GLV 的設定欄又出現純下拉：%s —— 這張卡上的選項是膠囊（圖 + 字）"
+        % ", ".join(plain))
+
+
+def test_a_chip_choice_row_is_chips_not_a_dropdown(qapp):
+    """而且**圖與字都在** —— 那正是它跟 `icon_choice` 的差別。"""
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import get_step
+
+    form = widgets_mod.ParamForm()
+    form.set_step(get_step("glv_stats").describe(),
+                  {"across_boxes": "each box"}, ["test"], [], {})
+    row = form._rows.get("across_boxes")
+    assert row is not None
+    assert isinstance(row.editor, widgets_mod.ChoiceChips)
+    assert not row.editor.findChildren(QComboBox), "下拉不該還在"
+    assert row.editor.text() == "each box"
+
+    chips = [row.editor.chip(v) for v in ("pooled", "each box")]
+    assert all(c is not None for c in chips)
+    assert [c.label for c in chips] == ["Pooled", "Each box"], \
+        "字要留著：`each box` 是一個做法，圖只能當錨點"
+    assert all(c.icon in widgets_mod.GLYPH_ICONS for c in chips)
+    assert [c.is_checked() for c in chips] == [False, True]
+
+
+def test_picking_a_chip_writes_exactly_what_the_dropdown_wrote(qapp):
+    """值的格式跟 `choice` **一字不差** —— recipe JSON 不因為換了長相而變。"""
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import get_step
+
+    form = widgets_mod.ParamForm()
+    form.set_step(get_step("glv_stats").describe(),
+                  {"across_boxes": "pooled"}, ["test"], [], {})
+    seen = []
+    form.param_edited.connect(lambda n, v: seen.append((n, v)))
+    form._rows["across_boxes"].editor.chip("each box").click()
+    assert seen == [("across_boxes", "each box")]
+
+
+def test_a_chip_row_never_ends_up_empty(qapp):
+    """再點選中的那一顆不會把它關掉（同 MetricPick）：空值會被換回預設，
+    看起來像「我點了但沒有反應」。"""
+    seen = []
+    w = widgets_mod.ChoiceChips(["a", "b"], ["fit", "tidy"], "a")
+    w.changed.connect(seen.append)
+    w.chip("a").click()
+    assert w.text() == "a"
+    assert w.chip("a").is_checked()
+    assert seen == []
+
+
+def test_a_chip_value_nobody_recognises_lights_nothing(qapp):
+    """手寫 recipe 打錯字：**亮錯一顆比一顆都不亮更糟**（同 IconChoice）。"""
+    w = widgets_mod.ChoiceChips(["a", "b"], ["fit", "tidy"], "zzz")
+    assert w.text() == "zzz"                    # 不偷偷改掉他的值
+    assert not any(c.is_checked() for c in (w.chip("a"), w.chip("b")))
+
+
+def test_both_chip_families_are_the_same_pill(qapp):
+    """統計量那一族與設定欄那一族**共用同一個外觀**。
+
+    使用者要的是「像下方一樣」—— 兩份各畫各的話，第二份會慢慢漂走，而漂走的
+    症狀是同一張卡上兩種高度、兩種字級的膠囊（這個 repo 記過三次抄第二份的
+    代價）。
+    """
+    metrics = widgets_mod.MetricChips(["glv_median"], "glv_median")
+    choices = widgets_mod.ChoiceChips(["a"], ["fit"], "a")
+    a, b = metrics.chip("glv_median"), choices.chip("a")
+    assert isinstance(a, widgets_mod._ChipBase)
+    assert isinstance(b, widgets_mod._ChipBase)
+    assert a.height() == b.height() == widgets_mod._ChipBase.H
+
+
+def test_a_chip_choice_needs_one_icon_per_option(qapp):
+    """少一個圖示 = 少一顆膠囊，而它不會叫 —— 所以擋在註冊的當下。"""
+    from d4t.core.pipeline.step import ParamError, ParamSpec
+
+    with pytest.raises(ParamError):
+        ParamSpec(name="x", type="chip_choice", default="a",
+                  choices=["a", "b"], icons=["fit"], help="h")
+
+
+# ---------------------------------------------------------------------------
 # MetricPick：`metric_choice` 的單選膠囊（F32 —— judge 那一格）
 # ---------------------------------------------------------------------------
 def test_metric_pick_is_single_select(qapp):

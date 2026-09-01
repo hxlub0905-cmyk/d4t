@@ -186,7 +186,7 @@ PARAM_TYPES = ("int", "float", "bool", "str", "expr",
                "choice", "image_key",
                "image_keys", "curve", "template", "multi_choice",
                "metric_chips", "metric_choice", "channel_map", "cell_rois",
-               "region_key", "region_keys", "icon_choice")
+               "region_key", "region_keys", "icon_choice", "chip_choice")
 
 #: ``ParamSpec.choices_from`` 認得的鍵：**執行期才知道的選單**（F15-2）。
 #:
@@ -377,7 +377,8 @@ class ParamSpec:
     min: Optional[float] = None
     max: Optional[float] = None
     choices: Optional[List[str]] = None
-    #: ``icon_choice`` 專用：每一個 choice 配一個圖示名（一一對應）。
+    #: ``icon_choice`` / ``chip_choice`` 專用：每一個 choice 配一個圖示名
+    #: （一一對應）。
     #:
     #: 為什麼要一個新型別而不是「choice 加一個旗標」（F11 Region-2）：
     #: 使用者的話是「我不希望 profile 設定頁面那麼多**文字**，能用圖就用圖」。
@@ -389,11 +390,18 @@ class ParamSpec:
     #: 那一組是哪一組）看的是這張影像，畫不出通用的圖示 —— 那種要畫在影像上，
     #: 不是畫在按鈕上。
     #:
+    #: **``chip_choice`` 是同一組圖，但字留著**（F68 第二輪，使用者：「我希望
+    #: 設定欄這邊也是能像下方一樣膠囊 icon 配文字，這樣 user 比較會有感覺」）。
+    #: 判準是**意思在圖裡還是在字裡**：``beside_vertical`` 那個詞講的就是一個
+    #: 形狀，圖給完了就不必再寫字（``icon_choice``）；``each box`` / ``per box``
+    #: 是**做法**，圖只能當掃視時的錨點，拿掉字就沒有人看得懂（``chip_choice``）。
+    #:
     #: 圖示名要在 ``ui.widgets.GLYPH_ICONS`` 裡（``core`` 不 import Qt，所以那條
     #: 檢查在 UI 那一側的測試，見 `test_card_invariants`）。
     icons: Optional[List[str]] = None
-    #: ``icon_choice`` 專用：每一個 choice 一句 tooltip。圖示看得懂形狀，
-    #: 但「為什麼要選它」還是要有地方講 —— 只是那個地方不該佔畫面。
+    #: ``icon_choice`` / ``chip_choice`` 專用：每一個 choice 一句 tooltip。
+    #: 圖示看得懂形狀，但「為什麼要選它」還是要有地方講 —— 只是那個地方不該
+    #: 佔畫面。
     choice_help: Optional[Dict[str, str]] = None
     unit: str = ""
     label: str = ""
@@ -508,17 +516,17 @@ class ParamSpec:
         if not str(self.help).strip():
             raise ParamError(f"parameter '{self.name}': help (a plain-language "
                              f"description) must not be empty")
-        if self.type == "icon_choice":
+        if self.type in ("icon_choice", "chip_choice"):
             if len(self.icons or []) != len(self.choices or []):
                 raise ParamError(
-                    f"parameter '{self.name}': icon_choice needs one icon per "
+                    f"parameter '{self.name}': {self.type} needs one icon per "
                     f"choice ({len(self.choices or [])} choices, "
                     f"{len(self.icons or [])} icons)")
         elif self.icons:
-            raise ParamError(f"parameter '{self.name}': only icon_choice takes "
-                             f"icons")
-        if (self.type in ("choice", "icon_choice", "multi_choice",
-                          "metric_chips", "metric_choice")
+            raise ParamError(f"parameter '{self.name}': only icon_choice and "
+                             f"chip_choice take icons")
+        if (self.type in ("choice", "icon_choice", "chip_choice",
+                          "multi_choice", "metric_chips", "metric_choice")
                 and not self.choices and not self.choices_from):
             raise ParamError(f"parameter '{self.name}': type '{self.type}' "
                              f"requires choices (or choices_from)")
@@ -668,7 +676,7 @@ class ParamSpec:
                         f"not a list (got {v!r})")
                 if not v:
                     v = str(self.default)
-            elif self.type in ("choice", "icon_choice"):
+            elif self.type in ("choice", "icon_choice", "chip_choice"):
                 v = str(value)
                 if v not in (self.choices or []):
                     raise ParamError(

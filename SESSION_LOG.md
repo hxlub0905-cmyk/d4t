@@ -56,6 +56,13 @@ ratio／contrast／overlap 挑，挑到的格跟照絕對統計量挑**一模一
 埠會亮起來（以前完全沒有回饋）、埠距 13→17px。⚠ 要守的不是「抓取圈不重疊」
 （就近吸附之下重疊無害），是**瞄得準**。
 
+**設定欄的選項也變成膠囊**（第二輪，使用者：「我希望設定欄這邊也是能像下方
+一樣膠囊 icon 配文字，這樣 user 比較會有感覺」）：新型別 `chip_choice`，
+這張卡最後三個純下拉沒了。外觀**只有一份**——`_MetricChip` 抽出 `_ChipBase`，
+兩族各自只實作「小圖怎麼畫」。判準寫進 `ParamSpec.icons`：意思在圖裡的用
+`icon_choice`（字退到 tooltip），意思在字裡的用 `chip_choice`（圖只是錨點）
+——所以 CD 那三格一格都不動。值的格式跟 `choice` 一字不差。
+
 黃金值三份逐項相同。計畫書：
 [`docs/plans/F68-glv-defect-hunting.md`](docs/plans/F68-glv-defect-hunting.md)。
 

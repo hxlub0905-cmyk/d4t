@@ -609,9 +609,19 @@ class GlvStatsStep(MultiSourceStep):
                   "another image."),
         ),
         ParamSpec(
-            name="across_boxes", type="choice", default=POOLED,
-            choices=list(BOX_MODES), label="Boxes in the region",
+            name="across_boxes", type="chip_choice", default=POOLED,
+            choices=list(BOX_MODES), icons=["boxes_pooled", "boxes_each"],
+            label="Boxes in the region",
             section="3 · How to find it",
+            choice_help={
+                POOLED: "One pile of pixels. Every box's pixels go into the "
+                        "same statistics - use it when the region is one "
+                        "area that happens to be drawn as several boxes.",
+                EACH_BOX: "Measure every box on its own, then report the "
+                          "typical one, the odd one out, and which box that "
+                          "was. This is how you hunt a defect that sits in "
+                          "one box.",
+            },
             help=("A region can be many boxes at once (a Golden Cell template "
                   "lays hundreds of them across a big image). pooled treats "
                   "them as one pile of pixels; each box measures every box on "
@@ -641,8 +651,9 @@ class GlvStatsStep(MultiSourceStep):
                   "want."),
         ),
         ParamSpec(
-            name="direction", type="choice", default=algo_glv.BOTH,
+            name="direction", type="chip_choice", default=algo_glv.BOTH,
             choices=list(algo_glv.ODD_BOX_DIRECTIONS),
+            icons=["odd_either", "odd_darker", "odd_brighter"],
             label="Looking for boxes that are",
             section="3 · How to find it",
             show_when=("across_boxes", (EACH_BOX,)),
@@ -663,8 +674,9 @@ class GlvStatsStep(MultiSourceStep):
                   "looking wrong."),
         ),
         ParamSpec(
-            name="ref_pairing", type="choice", default=PER_BOX_REF,
-            choices=list(REF_PAIRINGS), label="Take the reference",
+            name="ref_pairing", type="chip_choice", default=PER_BOX_REF,
+            choices=list(REF_PAIRINGS), icons=["pair_each", "pair_pooled"],
+            label="Take the reference",
             section="3 · How to find it",
             show_when=((("reference_source",), (ANY_VALUE,)),
                        ("reference_region", ("",)),

@@ -6,7 +6,7 @@ aa17fbfb8202ee9790fc89736938834df2fef53a AGENTS.md
 988aa4655c507ed44e9065ea6238e7f55502ca3c CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 5b750fd2b09c4ced476be65c84f41d45231f9070 README.md
-72a9d49001c7bbcc62aa725f0d0628ec4ad4ce76 SESSION_LOG.md
+99dc762f36b673ef67bc0a4d0b2ca0420bdac734 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 cf8fe09ad592a80d3dfaf96412e906035cb83b48 d4t/__main__.py
@@ -56,7 +56,7 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 a3cd39735b6f5e9ee498051d710b0a3a9848d36b d4t/core/pipeline/engine.py
 7e2797dce8253240fcf45a27f57f28d2c246e272 d4t/core/pipeline/expression.py
 3ffb160e41e85c783d36725af60e4ee9462c5048 d4t/core/pipeline/recipe.py
-8f8fec214a094b56120657a2d5ce1c57c57af3ff d4t/core/pipeline/step.py
+cc1853ba43c1e980c1db70c12606f6c7bbf24d6e d4t/core/pipeline/step.py
 b052c76f56f4fae3aca461628976727850e1b39f d4t/core/pipeline/verdict_features.py
 168c2e3811844d0267a24f4a69963848bd594e60 d4t/core/pipeline/verdict_trace.py
 3c0a96b02dc53ed3bc0fe827e453dac2ddd58b7b d4t/core/steps/__init__.py
@@ -67,7 +67,7 @@ e0a563e40733bef4b2c3f91cba8913a5d969afa3 d4t/core/steps/arith.py
 aad17165ec7ced8430675d1c65abcdb998e00d7b d4t/core/steps/cd.py
 39bbc384b66e024f67200a76598d4f6f255e5100 d4t/core/steps/denoise.py
 00f877fe38f316bc2a74cb2659a2e5ac63b7055c d4t/core/steps/flatten.py
-bb5778a338ab88ead4716d6bc35ce86320aac08f d4t/core/steps/glv_stats.py
+967bb464c027c4f2f821f269353fead121551096 d4t/core/steps/glv_stats.py
 40ead15a1186df4faba7131c03a683dc667d1339 d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 ae62f5bef3a04257b0bde2caa4a3af627c0839bd d4t/core/steps/normalize.py
@@ -112,7 +112,7 @@ c894b98548a3a06f98ed531901518a429768879f d4t/ui/verdict_band.py
 164625d18731d4032569afd7e1b769eac5e5816b d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
 34b6365ad97cc503caf8390297720e538dc26f6e d4t/ui/why_panel.py
-1b60e09971017a07fe121dcb63182212d7dd086a d4t/ui/widgets.py
+7e3747085a6b3ff129d6c3c3ee20c1399b2c112b d4t/ui/widgets.py
 768dbb379b84127e9cbb7ec62df8d51c34dd0100 d4t/ui/wiring_slot.py
 e02cb1ea64a7ed413716379b9da789937729f3e3 d4t/ui/workers.py
 25013b9f99df588a61a7fb205be4c7088f0effc2 docs/ARCHITECTURE.md
@@ -144,7 +144,7 @@ af2a0ffc8331813f1fb674e4c4293457921c7161 docs/plans/F49-features-on-wires.md
 9822a762879030cad132c0d8a0f07c2762c24dbd docs/plans/F51-feature-names-one-truth.md
 49d28af403671958a1292959ecf5bb03ad423842 docs/plans/F52-one-way-to-print-a-number.md
 8558f88c4890064d0940ece6d9d616f15765e853 docs/plans/F67-glv-compare-by-wire.md
-9f0dda8fe2d958d55f2bbf1ec7031e9c16da1547 docs/plans/F68-glv-defect-hunting.md
+9792dd88c4d2b8009822e4e67e6b46bea86e1362 docs/plans/F68-glv-defect-hunting.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -354,7 +354,7 @@ af6f3263d94b0fc1b7e78c58cc86d2d6c9dda57d tests/test_ui_tree_edit.py
 3ff2e7c8a9d2c87f730e7b733b9a1017bda4f23c tests/test_ui_verdict_band.py
 f6714258293363ce472b166d0afed030cb7c8f8f tests/test_ui_welcome.py
 957bee5d677405fc028ce51bd38a005e33225f97 tests/test_ui_why_panel.py
-78377547fc1d46c3688e9b8f583f9dc3d8ef59ad tests/test_ui_widgets.py
+6b07c32897829f34be8bc822a7260b1d13744841 tests/test_ui_widgets.py
 fadf376f7cac48a5d8ee99a7795beb7c924404ee tests/test_ui_wiring_slot.py
 d8b2329e90e524b0600781a641019718516a0d9f tests/test_ui_workers.py
 db0e9bfba8c7ae39e3502d474709f8135a10cbfa tests/test_ui_write_only_on_run_all.py
