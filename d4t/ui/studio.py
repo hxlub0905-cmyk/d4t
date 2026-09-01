@@ -2823,6 +2823,7 @@ class StudioWindow(QMainWindow):
         # 加卡的時候也跑過一次，但那時候還沒有線 —— 而「接上 layout labels」
         # 正是使用者期待畫面上出現東西的那一刻。
         self._autofill_new_card(dst)
+        self._resync_params(dst)
         self._status("Connected %s → %s%s%s" % (src, dst, note, dropped))
 
     # ---- 區域線（F12）-----------------------------------------------------
@@ -2925,6 +2926,7 @@ class StudioWindow(QMainWindow):
         self._autofill_output_prefix(dst, param, value)
         says = self.model.rename_fallout(dst, before,
                                          self.model.nodes[dst].params)
+        self._resync_params(dst)
         self._say_fallout(says, "“%s” now measures %s (defined by “%s”)."
                           % (dst, value.replace(",", " and "), src))
 
@@ -2978,6 +2980,19 @@ class StudioWindow(QMainWindow):
 
     def _on_edge_removed(self, src: str, dst: str, stream: str = "",
                          dst_in: str = "") -> None:
+        """剪掉一條線 —— **收尾一定要重讀設定欄**（見 :meth:`_resync_params`）。
+
+        用一層外殼而不是在每個 ``return`` 前面加一行：這支底下有五條分支
+        （區域線／瞄得到那一條／退回整對／舊格式…），而漏掉其中一條的症狀是
+        「大部分時候會跟上」—— 那種 bug 查起來最貴。
+        """
+        try:
+            self._apply_edge_removed(src, dst, stream, dst_in)
+        finally:
+            self._resync_params(dst)
+
+    def _apply_edge_removed(self, src: str, dst: str, stream: str = "",
+                            dst_in: str = "") -> None:
         """剪掉一條線。``stream`` 是剪刀瞄的那一條（F9-9），``dst_in`` 是它
         進到下游的哪一格（F10）。
 
@@ -3150,6 +3165,30 @@ class StudioWindow(QMainWindow):
         for view in self._canvases():
             view.set_selected(node_id)
             view.set_tree_selected(None)   # 一次只編一個東西（卡片或樹的一步）
+        self._fill_param_form(node_id)
+        self.stack.setCurrentWidget(self.param_form)
+        self._sync_params_pane()
+        self._refresh_region_button()
+        # 右下角換成這張卡的儀表（F7-17）。**參數要一起給**：`roi_reference`
+        # 一個 key 有四種面板，由 ``method`` 決定（F30）。
+        self._install_inspector(node.step, node.params)
+        self._refresh_inspector(self._last_result)
+        self._refresh_kernel_hint()            # 核心大小畫在影像上（F11 UI-A）
+        self._schedule_preview()
+        return True
+
+    def _fill_param_form(self, node_id: str) -> None:
+        """把某一張卡的參數畫進設定欄（`select_node` 與 :meth:`_resync_params`
+        共用的那一段）。
+
+        **抽出來是因為它有第二個呼叫端。** 線動了之後也要重畫一次，而在這之前
+        那件事只能靠 `select_node`（會連帶把預覽的影像流選擇歸零）或者「剛好有
+        一次預覽跑完順手重建了表單」—— 後者正是這個 bug 難查的原因：**同一個
+        動作有時候會跟上、有時候不會。**
+        """
+        node = self.model.nodes.get(str(node_id))
+        if node is None:
+            return
         try:
             describe = get_step(node.step).describe()
         except KeyError:
@@ -3165,16 +3204,24 @@ class StudioWindow(QMainWindow):
         self.param_form.set_wiring_choices(regions=regions, streams=streams)
         self._sync_source_action(node)
         self._sync_glv_intent(node_id, node)
-        self.stack.setCurrentWidget(self.param_form)
-        self._sync_params_pane()
-        self._refresh_region_button()
-        # 右下角換成這張卡的儀表（F7-17）。**參數要一起給**：`roi_reference`
-        # 一個 key 有四種面板，由 ``method`` 決定（F30）。
-        self._install_inspector(node.step, node.params)
-        self._refresh_inspector(self._last_result)
-        self._refresh_kernel_hint()            # 核心大小畫在影像上（F11 UI-A）
-        self._schedule_preview()
-        return True
+
+    def _resync_params(self, *node_ids: str) -> None:
+        """線動了 → **選著的那張卡的設定欄要跟著動**（2026-09-01）。
+
+        使用者回報：「在 canvas 上把線切斷時，理論上設定頁也要同步取消
+        （他們是同步的）；同理，在 canvas 上把線連接時，也要同步設定。」
+
+        model 那一層本來就同步（剪線 → 那一格真的空掉，`_hydrate_regions`
+        與 `_unpoint_stream` 各自負責）—— 壞的是**畫面沒有人叫它重讀**。四條
+        路裡只有一條會跟上，而那一條是**碰巧**的：它剛好排在一次預覽前面，
+        而預覽跑完會重建表單。於是同一個動作有時候跟得上、有時候不跟，
+        看起來像是隨機的。
+
+        這條規矩跟 F9／F10 的「畫布不能說謊」是同一句話的鏡像：**畫布與設定欄
+        講的必須是同一件事**，因為線是唯一的儲存，那一格只是它的另一個長相。
+        """
+        if any(str(n) and str(n) == str(self.selected_node) for n in node_ids):
+            self._fill_param_form(str(self.selected_node))
 
     # ---- 入口卡的「資料從哪來」（F14-1）------------------------------------
     #: 附加檔那張卡（`load_sidecar`）→ 它要開哪一個 `scope.ATTACHMENTS`。

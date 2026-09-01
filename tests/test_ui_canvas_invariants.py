@@ -614,3 +614,81 @@ def test_a_cleared_input_is_never_reported_as_a_stream(window):
         reads = [r for r in cls.resolve_reads(cleared) if str(r).strip()]
         assert reads == [], \
             "%s：輸入都清空了，卻還宣告讀 %s" % (cls.key, reads)
+
+
+# --------------------------------------------------------------------------- #
+# 4. 畫布動了，設定欄就要跟著（2026-09-01）
+#
+# 使用者：「在 canvas 上把線切斷時，理論上設定頁也要同步取消（他們是同步的）；
+# 同理，在 canvas 上把線連接時，也要同步設定。」
+#
+# 這是 F9／F10「畫布不能說謊」的**鏡像**：線是唯一的儲存，設定欄那一格只是它
+# 的另一個長相 —— 兩邊講的必須是同一件事。
+# --------------------------------------------------------------------------- #
+def _slot_values(window, names):
+    """設定欄現在**顯示**的值（不是 model 的值）。"""
+    out = {}
+    for name in names:
+        row = window.param_form._rows.get(name)
+        editor = getattr(row, "editor", None) if row is not None else None
+        out[name] = (editor.text_value()
+                     if hasattr(editor, "text_value") else None)
+    return out
+
+
+def _model_values(window, nid, names):
+    node = window.model.nodes[nid]
+    return {n: str(node.params.get(n, "") or "") for n in names}
+
+
+def test_the_settings_column_follows_every_wire_the_canvas_draws(window):
+    """接線與剪線的**四條路**，設定欄都要當場跟上。
+
+    ⚠ **中間刻意不跑 `processEvents`。** 這個 bug 在人手上是「有時候會跟上、
+    有時候不會」—— 因為四條路裡只有一條碰巧排在一次預覽前面，而預覽跑完會
+    順手重建表單。讓事件圈跑起來的話，這條測試會跟著碰巧變綠。
+    """
+    from region_cards import add_region_step
+
+    src = first_source(window)
+    roi = add_region_step(window.model, "roi_cross")
+    window.model.set_param(roi, "roi_out", "cells")
+    window._on_edge_added(src, roi, "test", "source")
+    glv = window.add_card_after(roi, "glv_stats")
+    window._refresh_pipeline()
+    window.select_node(glv)
+
+    names = ("source", "roi", "reference_source", "reference_region")
+    moves = [
+        ("connect the image", lambda: window._on_edge_added(
+            src, glv, "test", "source")),
+        ("connect the region", lambda: window._on_edge_added(
+            roi, glv, "cells", "roi")),
+        ("connect the ref image", lambda: window._on_edge_added(
+            src, glv, "ref", "reference_source")),
+        ("cut the region", lambda: window._on_edge_removed(
+            roi, glv, "cells", "roi")),
+        ("cut the ref image", lambda: window._on_edge_removed(
+            src, glv, "ref", "reference_source")),
+        ("cut the image", lambda: window._on_edge_removed(
+            src, glv, "test", "source")),
+    ]
+    for what, do in moves:
+        do()
+        shown = _slot_values(window, names)
+        real = _model_values(window, glv, names)
+        assert shown == real, (
+            "%s 之後，設定欄說 %s 而線說 %s" % (what, shown, real))
+
+
+def test_a_wire_on_another_card_does_not_rebuild_this_one(window):
+    """只有**選著的那一張**要重畫 —— 重建表單會丟掉滑桿的拖曳與游標位置。"""
+    src = first_source(window)
+    a = window.add_card_after(src, "normalize")
+    b = window.add_card_after(a, "denoise")
+    window._refresh_pipeline()
+    window.select_node(a)
+    before = window.param_form._rows.get("streams")
+    window._on_edge_added(a, b, "test", "streams")       # 動的是**別張卡**
+    assert window.param_form._rows.get("streams") is before, \
+        "別張卡的線動了，這一張的設定欄被重建了"
