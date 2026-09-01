@@ -601,8 +601,9 @@ def pick_rule_specs(section: str) -> List[ParamSpec]:
     """
     return [
         ParamSpec(
-            name="pick", type="choice", default="centre",
+            name="pick", type="chip_choice", default="centre",
             choices=list(PICK_RULES), section=section,
+            icons=["pick_centre", "pick_none"],
             label="Which box is the defect in",
             choice_help={
                 "centre": "The one nearest the middle of the image. Patches "

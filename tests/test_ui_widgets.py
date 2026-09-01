@@ -546,16 +546,17 @@ def test_param_form_bool_choice_and_str(qapp):
     assert edits[-1] == ("absolute", False)
     assert isinstance(edits[-1][1], bool)
 
-    # choice -> 非可編輯 QComboBox，選項 = spec.choices
+    # chip_choice -> 一排膠囊，值就是 spec.choices 裡那個字
+    # （F68 第二輪之前這裡是 QComboBox —— 值的格式一字不差，換掉的只有長相）
     edits.clear()
     desc = _describe("align")
     form.set_step(desc, {}, ["test", "ref"])
     method = form.editor("method")
     choices = [p for p in desc["params"] if p["name"] == "method"][0]["choices"]
-    assert isinstance(method, QComboBox) and not method.isEditable()
-    assert [method.itemText(i) for i in range(method.count())] == choices
-    assert method.currentText() == "phase"
-    method.setCurrentText("ncc")
+    assert isinstance(method, widgets_mod.ChoiceChips)
+    assert [c.mid for c in method._chips] == choices
+    assert method.text() == "phase"
+    method.chip("ncc").click()
     assert edits[-1] == ("method", "ncc")
 
     # int 有下限：search_radius 1..64
@@ -1429,12 +1430,12 @@ def test_rows_appear_and_disappear_with_the_method(qapp):
 
 
 # --------------------------------------------------------------------------- #
-# icon_choice —— 用圖取代下拉的英文句子（F11 Region-2）
+# 選項上的圖（F11 Region-2 起；F68 第二輪之後只剩膠囊這一種長相）
 # --------------------------------------------------------------------------- #
 def test_every_icon_a_card_declares_really_exists(qapp):
     """`core` 不 import Qt，所以圖示名對不對只有**這一側**驗得了。
 
-    對不上的症狀是 `IconButton` 直接 `ValueError: unknown icon` —— 那張卡整個
+    對不上的症狀是那顆膠囊直接 `ValueError: unknown icon` —— 那張卡整個
     打不開，而且是在使用者點下去的時候才炸。
     """
     import d4t.core.steps  # noqa: F401 — 觸發卡片註冊
@@ -1447,57 +1448,63 @@ def test_every_icon_a_card_declares_really_exists(qapp):
             for icon in (spec.get("icons") or []):
                 seen += 1
                 assert icon in GLYPH_ICONS, (step.key, spec["name"], icon)
-    assert seen >= 11, "應該至少有 Profile 那三排（5+3+3）"
-
-
-def test_an_icon_choice_row_is_buttons_not_a_dropdown(qapp):
-    """使用者：「我不希望 profile 設定頁面那麼多文字，能用圖就用圖。」"""
-    from d4t.core.pipeline import get_step
-    from d4t.ui.widgets import IconButton, IconChoice, ParamForm
-
-    form = ParamForm()
-    form.set_step(region_card("roi_cross").describe(),
-                  {"place": "crossing"}, ["ref", "test"])
-    editor = form.editor("place")
-    assert isinstance(editor, IconChoice)
-    assert editor.text() == "crossing"
-
-    buttons = editor.findChildren(IconButton)
-    assert len(buttons) == 5                    # place 有五個選項
-    for b in buttons:
-        assert b.text() == ""                   # 一顆字都不放
-        assert b.toolTip()                      # 說明退到 tooltip
-    assert sum(1 for b in buttons if b.isChecked()) == 1
-
-
-def test_picking_an_icon_emits_the_value(qapp):
-    from d4t.ui.widgets import IconChoice
-
-    got = []
-    w = IconChoice(["a", "b"], ["fit", "tidy"], "a")
-    w.changed.connect(got.append)
-    w._pick("b")
-    assert got == ["b"]
-    assert w.text() == "b"
-
-
-def test_a_value_nobody_recognises_lights_nothing(qapp):
-    """手寫 recipe 打錯字的時候，**亮錯一顆比一顆都不亮更糟**。"""
-    from d4t.ui.widgets import IconButton, IconChoice
-
-    w = IconChoice(["a", "b"], ["fit", "tidy"], "zzz")
-    assert w.text() == "zzz"                    # 不偷偷改掉他的值
-    assert not any(b.isChecked() for b in w.findChildren(IconButton))
+    assert seen >= 60, "每一格選項都要有圖（F68 第二輪把所有的下拉換掉了）"
 
 
 def test_the_profile_card_lost_three_dropdowns_of_english(qapp):
-    from d4t.core.pipeline import get_step
-
     kinds = {p["name"]: p["type"]
              for p in region_card("roi_cross").describe()["params"]}
-    assert kinds["place"] == "icon_choice"
-    assert kinds["side"] == "icon_choice"
-    assert kinds["fill_rule"] == "icon_choice"
+    assert kinds["place"] == "chip_choice"
+    assert kinds["side"] == "chip_choice"
+    assert kinds["fill_rule"] == "chip_choice"
+
+
+def test_no_card_anywhere_still_shows_a_bare_dropdown(qapp):
+    """使用者 2026-09-01：「我認為**設定區都要變成這樣** icon 膠囊 + 文字。」
+
+    這一條蓋的是**每一張卡**，不是這一輪動到的那幾張 —— 新加的卡也躲不掉。
+    """
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import list_steps
+
+    plain = ["%s.%s" % (st.key, sp.name) for st in list_steps()
+             for sp in st.params if sp.type in ("choice", "icon_choice")]
+    assert not plain, "這幾格還是純下拉（或只有圖）：" + ", ".join(plain)
+
+
+def test_a_spelled_out_value_keeps_the_words_the_card_wrote(qapp):
+    """``a cell I mark myself`` 不可以被拼字函式改成「a cell **i** mark…」。
+
+    `str.capitalize()` 會把其餘的字全部轉小寫 —— 而那是使用者看得到的一句話。
+    """
+    from d4t.ui.widgets import _spell
+
+    assert _spell("a cell I mark myself") == "A cell I mark myself"
+    assert _spell("beside_vertical") == "Beside vertical"
+
+
+def test_a_value_that_spells_badly_gets_a_written_name(qapp):
+    """``zscore`` / ``nlm`` / ``topn`` 是 recipe 的鍵，不是給人看的字。"""
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import get_step
+
+    form = widgets_mod.ParamForm()
+    step = get_step("normalize")
+    form.set_step(step.describe(),
+                  {p.name: p.default for p in step.params}, ["test", "ref"])
+    chips = form._rows["method"].editor
+    assert chips.chip("zscore").label == "Z-score"
+    assert chips.chip("glv_band").label == "GLV band"
+
+
+def test_a_name_nobody_declared_is_caught_at_registration(qapp):
+    """`choice_labels` 打錯一個值**不會叫**，它只是安靜地不生效。"""
+    from d4t.core.pipeline.step import ParamError, ParamSpec
+
+    with pytest.raises(ParamError):
+        ParamSpec(name="x", type="chip_choice", default="a",
+                  choices=["a", "b"], icons=["fit", "tidy"],
+                  choice_labels={"c": "See"}, help="h")
 
 
 # ---------------------------------------------------------------------------

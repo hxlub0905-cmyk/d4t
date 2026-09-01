@@ -71,9 +71,12 @@ class DenoiseStep(MultiStreamStep):
             "flat areas and leaving edges (and small defects) intact.")
     params = [
         streams_spec("test"),
-        ParamSpec(name="method", type="choice", default="median",
+        ParamSpec(name="method", type="chip_choice", default="median",
                   choices=["median", "hot_pixels", "gaussian", "bilateral",
                            "nlm"],
+                  icons=["op_median", "dn_hot", "op_gaussian", "dn_bilateral",
+                         "dn_nlm"],
+                  choice_labels={"nlm": "NLM"},
                   help=("median = suppress isolated bright/dark specks (common "
                         "for SEM); hot_pixels = replace ONLY the few pixels "
                         "that are wildly different from their neighbours and "

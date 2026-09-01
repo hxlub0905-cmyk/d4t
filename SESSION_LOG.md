@@ -63,6 +63,17 @@ ratio／contrast／overlap 挑，挑到的格跟照絕對統計量挑**一模一
 `icon_choice`（字退到 tooltip），意思在字裡的用 `chip_choice`（圖只是錨點）
 ——所以 CD 那三格一格都不動。值的格式跟 `choice` 一字不差。
 
+**然後套到整張卡片庫**（第三輪，使用者：「同時請整理所有卡片，我認為設定區
+都要變成這樣 icon 膠囊 + 文字，並且視覺模型可能要接近會比較好」）：25 格選項
+全部變成 `chip_choice`、**61 張新的小圖**住在新模組 `ui/glyphs.py`，共通文法
+寫在那份的檔頭（淡的是原本就在那裡的東西、實心的才是這個選項在講的那件事；
+一排裡的每一顆共用同一個底）。`icon_choice` **刪掉**；`choice` 留著當退路，
+但有一條測試擋著每一張卡。順手修掉兩個 render 出來才看到的：`_spell` 的
+`capitalize()` 把「a cell **I** mark myself」改成小寫的 i、長列名把七顆膠囊
+擠成五排參差不齊的東西。**而一條既有的測試因此紅了，它是對的** ——
+`test_card_invariants` 的「改參數要讓快取失效」只認得 `choice`，
+`icon_choice` 從來沒被蓋到；現在三種都算，覆蓋率比這一輪之前還高。
+
 黃金值三份逐項相同。計畫書：
 [`docs/plans/F68-glv-defect-hunting.md`](docs/plans/F68-glv-defect-hunting.md)。
 

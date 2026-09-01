@@ -119,7 +119,7 @@ class RoiCrossStep(Step):
                   "defect."),
         ),
         ParamSpec(
-            name="directions", type="icon_choice", default="both",
+            name="directions", type="chip_choice", default="both",
             choices=list(_DIRECTIONS),
             icons=["dir_both", "dir_upright", "dir_flat"],
             choice_help={
@@ -152,9 +152,12 @@ class RoiCrossStep(Step):
         ),
         # ---- 直的那組條紋 -------------------------------------------------
         ParamSpec(
-            name="vertical_select", type="choice", default="brightest",
+            name="vertical_select", type="chip_choice", default="brightest",
             section="2 · The up-and-down stripes",
             choices=list(algo_grid.SELECT_RULES),
+            icons=["rank_bright1", "rank_bright2", "rank_bright3",
+                   "rank_dark1", "rank_dark2", "rank_dark3",
+                   "rank_all"],
             label="Take the up-and-down stripes that are",
             help=("Which of the up-and-down stripes to use, by rank: brightest "
                   "= the brightest group in this image, second_brightest = the "
@@ -230,9 +233,12 @@ class RoiCrossStep(Step):
         ),
         # ---- 橫的那組條紋 -------------------------------------------------
         ParamSpec(
-            name="horizontal_select", type="choice", default="brightest",
+            name="horizontal_select", type="chip_choice", default="brightest",
             section="3 · The left-to-right stripes",
             choices=list(algo_grid.SELECT_RULES),
+            icons=["rank_bright1", "rank_bright2", "rank_bright3",
+                   "rank_dark1", "rank_dark2", "rank_dark3",
+                   "rank_all"],
             label="Take the left-to-right stripes that are",
             help="Same as above, for the stripes that run left to right.",
             show_when=("directions", _USES_FLAT),
@@ -279,7 +285,7 @@ class RoiCrossStep(Step):
         ),
         # ---- 框放哪 --------------------------------------------------------
         ParamSpec(
-            name="place", type="icon_choice", default="beside_vertical",
+            name="place", type="chip_choice", default="beside_vertical",
             choices=list(_PLACE),
             icons=["place_crossing", "place_beside_v", "place_beside_h",
                    "place_between_v", "place_between_h"],
@@ -301,7 +307,7 @@ class RoiCrossStep(Step):
                   "solid ones are where the box goes."),
         ),
         ParamSpec(
-            name="fill_rule", type="icon_choice", default="skip",
+            name="fill_rule", type="chip_choice", default="skip",
             choices=["fill", "skip", "skip_clear"],
             icons=["fill_fill", "fill_skip", "fill_skip_clear"],
             choice_help={
@@ -333,7 +339,7 @@ class RoiCrossStep(Step):
                   "are actually interested in."),
         ),
         ParamSpec(
-            name="side", type="icon_choice", default="both",
+            name="side", type="chip_choice", default="both",
             choices=["both", "start", "end"],
             icons=["side_both", "side_start", "side_end"],
             choice_help={

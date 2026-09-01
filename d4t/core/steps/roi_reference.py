@@ -248,8 +248,9 @@ class RoiReferenceStep(Step):
             "other one as the baseline to compare it against.")
     params = [
         ParamSpec(
-            name="method", type="choice", default=METHOD_PROFILE,
+            name="method", type="chip_choice", default=METHOD_PROFILE,
             choices=list(METHODS), section="1 · How to find them",
+            icons=["src_stripes", "src_cell", "src_layout"],
             label="Find them by",
             choice_help={
                 METHOD_GDS: "One layer of the layout, from a GDS export. Use "

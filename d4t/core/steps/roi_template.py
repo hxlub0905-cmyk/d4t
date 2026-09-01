@@ -201,8 +201,9 @@ class RoiTemplateStep(Step):
                   "Studio - there is nothing useful to type here by hand."),
         ),
         ParamSpec(
-            name="locate_axis", type="choice", default="x",
+            name="locate_axis", type="chip_choice", default="x",
             choices=["x", "y", "both"],
+            icons=["dir_upright", "dir_flat", "dir_both"],
             section="2 · The repeating cell",
             label="Locate across",
             help=("Which direction the layout repeats in. x = vertical stripes "

@@ -207,7 +207,7 @@ class CdMeasureStep(MultiSourceStep):
             "the pixel size on the card that loaded the images.")
     params = [
         # ⓪ 量的是什麼形狀 ----------------------------------------------------
-        ParamSpec(name="shape", type="icon_choice", default=SHAPE_LINE,
+        ParamSpec(name="shape", type="chip_choice", default=SHAPE_LINE,
                   label="Measuring", choices=list(SHAPES),
                   icons=["shape_line", "shape_blob"],
                   choice_help={
@@ -239,7 +239,7 @@ class CdMeasureStep(MultiSourceStep):
                         "gets its region's name in front of it. No line means "
                         "the whole image.")),
         # ② 沿哪個方向 --------------------------------------------------------
-        ParamSpec(name="axis", type="icon_choice", default="auto",
+        ParamSpec(name="axis", type="chip_choice", default="auto",
                   label="Direction", show_when=("shape", (SHAPE_LINE,)),
                   choices=["auto", "x", "y"],
                   icons=["dir_both", "dir_upright", "dir_flat"],
@@ -253,7 +253,7 @@ class CdMeasureStep(MultiSourceStep):
                   help=("Which way to measure across the structure. Pick it "
                         "yourself if the whole lot looks the same - then every "
                         "defect is measured the same way.")),
-        ParamSpec(name="target", type="icon_choice", default="auto",
+        ParamSpec(name="target", type="chip_choice", default="auto",
                   label="Measure the",
                   choices=["auto", "bright", "dark"],
                   icons=["target_auto", "target_bright", "target_dark"],
@@ -267,7 +267,8 @@ class CdMeasureStep(MultiSourceStep):
                         "the dark one? This is a question about your sample, "
                         "not about the software.")),
         # ③ 邊界怎麼定義 ------------------------------------------------------
-        ParamSpec(name="criterion", type="choice", default="threshold",
+        ParamSpec(name="criterion", type="chip_choice", default="threshold",
+                  icons=["crit_threshold", "crit_gradient", "crit_fit"],
                   section="Where the edge is",
                   label="Edge is at", show_when=("shape", (SHAPE_LINE,)),
                   choices=list(algo_edge.CRITERIA),

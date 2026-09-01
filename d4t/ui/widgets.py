@@ -71,6 +71,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.algo import glv as algo_glv
+from . import glyphs
 from . import region_words
 from . import theme
 from .numbers import format_feature_value
@@ -235,17 +236,11 @@ GLYPH_ICONS = (
     # 「量的是一條線還是一團東西」（F19 第二批）。這兩顆**不是**同一套小版圖：
     # 它們畫的就是那兩種樣品本身，而那正是這個岔路在問的事。
     "shape_line", "shape_blob",
-    # 設定區裡那幾個「膠囊 + 字」的選項（F68 第二輪）。使用者：「我希望設定欄
-    # 這邊也是能像下方一樣膠囊 icon 配文字，這樣 user 比較會有感覺。」
-    #
-    # 三組，各自畫的是**這一格在問的那件事**：
-    #   boxes_* 一個區域裡的那些格子 —— 併成一堆，還是一格一格看
-    #   odd_*   偏到哪一邊才算數 —— 往下（比較暗）／往上（比較亮）／兩邊
-    #   pair_*  參照怎麼取 —— 一格對一格，還是全部對一個數
-    "boxes_pooled", "boxes_each",
-    "odd_darker", "odd_brighter", "odd_either",
-    "pair_each", "pair_pooled",
-)
+# ⚠ 上面這一族是**按鈕**上的圖；設定區那些**膠囊**上的圖住在 `ui/glyphs.py`
+# （F68 第二輪，五十幾張 —— 塞回這裡只會讓這個檔案更難動，而 CLAUDE.md §4
+# 早就指名這幾群自繪圖示最好拆）。兩族由這張表接起來，所以呼叫端（與那條
+# 「每一顆都要畫得出東西」的測試）只認得 `GLYPH_ICONS` 一個名字。
+) + glyphs.CHIP_ICONS
 
 
 def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
@@ -407,8 +402,8 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         p.setBrush(Qt.NoBrush)
     elif n.startswith(("place_", "side_", "fill_", "dir_", "target_")):
         _draw_profile_glyph(p, n, w, h, color, pen)
-    elif n.startswith(("boxes_", "odd_", "pair_")):
-        _draw_box_glyph(p, n, w, h, color, pen)
+    elif n in glyphs.CHIP_ICONS:
+        glyphs.draw_chip_icon(p, n, w, color)
     elif n == "roi_cursor":
         # 一支箭頭游標：**選**已經有的框（不是畫新的）。
         p.setPen(Qt.NoPen)
@@ -677,78 +672,6 @@ def _draw_profile_glyph(p: QPainter, name: str, w: float, h: float,
             blk(0.08, 0.05, 0.19, 0.95, True)
             ghost(0.39, 0.61)
             blk(0.81, 0.05, 0.92, 0.95, True)
-    p.setPen(pen)
-    p.setBrush(Qt.NoBrush)
-
-
-def _draw_box_glyph(p: QPainter, name: str, w: float, h: float,
-                    color: str, pen: QPen) -> None:
-    """GLV 設定區那三格的圖示：畫的是**一個區域裡的那些格子**（F68 第二輪）。
-
-    跟 :func:`_draw_profile_glyph` 同一套畫法（淡的是背景、實心的才是這個選項
-    在講的東西），但畫的是**格子**而不是條紋 —— 那三格問的都是「那些格子怎麼
-    處理」，而條紋是另一張卡（Profile）的語彙。
-
-    ⚠ 這裡的每一顆都要在 **19 px** 下讀得出來（膠囊上的小圖比按鈕上的還小），
-    所以差別一律做在**位置**，不做在粗細：``odd_*`` 那三顆是「偏出去的那一根
-    往哪跑」，``pair_*`` 那兩顆是「下面接的是三個還是一個」。
-    """
-    faint = QColor(color)
-    faint.setAlpha(58)
-    solid = QColor(color)
-
-    def blk(x0, y0, x1, y1, on):
-        p.setPen(Qt.NoPen)
-        p.setBrush(solid if on else faint)
-        p.drawRect(QRectF(x0 * w, y0 * h, (x1 - x0) * w, (y1 - y0) * h))
-
-    if name == "boxes_pooled":
-        # 四格**擠成一塊**：格子還在（縫是背景色，所以在任何底色上都成立），
-        # 但四格長得一模一樣 —— 「它們被當成同一堆像素」。
-        for x0 in (0.08, 0.51):
-            for y0 in (0.08, 0.51):
-                blk(x0, y0, x0 + 0.41, y0 + 0.41, True)
-    elif name == "boxes_each":
-        # 四格**分開**，其中一格是實心的 —— 那就是「挑出來的那一格」。
-        blk(0.08, 0.08, 0.45, 0.45, False)
-        blk(0.55, 0.08, 0.92, 0.45, True)
-        blk(0.08, 0.55, 0.45, 0.92, False)
-        blk(0.55, 0.55, 0.92, 0.92, False)
-    elif name.startswith("odd_"):
-        # 一條基準線 ＋ 幾根從線上長出來的柱子。**偏出去的那一根往哪跑**就是
-        # 這一顆在講的事：往下＝比較暗、往上＝比較亮、兩根＝兩邊都算。
-        base = h * 0.5
-        p.setPen(QPen(faint, max(1.0, h / 16.0)))
-        p.setBrush(Qt.NoBrush)
-        p.drawLine(QPointF(w * 0.04, base), QPointF(w * 0.96, base))
-        blk(0.10, 0.44, 0.28, 0.56, False)               # 沒有偏出去的那一根
-        if name == "odd_either":
-            blk(0.36, 0.50, 0.54, 0.92, True)            # 一根往下
-            blk(0.62, 0.08, 0.80, 0.50, True)            # 一根往上
-        else:
-            blk(0.36, 0.44, 0.54, 0.56, False)
-            if name == "odd_darker":
-                blk(0.62, 0.50, 0.80, 0.92, True)
-            else:                                        # odd_brighter
-                blk(0.62, 0.08, 0.80, 0.50, True)
-    elif name == "pair_each":
-        # 上面三格、下面三格，**中間那一對用一條線牽起來** ——
-        # 「第 i 格對第 i 格」。
-        for x0, on in ((0.06, False), (0.41, True), (0.76, False)):
-            blk(x0, 0.06, x0 + 0.18, 0.34, on)
-            blk(x0, 0.66, x0 + 0.18, 0.94, on)
-        p.setPen(QPen(solid, max(1.0, w / 16.0)))
-        p.setBrush(Qt.NoBrush)
-        p.drawLine(QPointF(w * 0.50, h * 0.34), QPointF(w * 0.50, h * 0.66))
-    else:                                                # pair_pooled
-        # 上面三格，下面**一整條** —— 每一格對的都是同一個數字。
-        for x0 in (0.06, 0.41, 0.76):
-            blk(x0, 0.06, x0 + 0.18, 0.34, False)
-            p.setPen(QPen(faint, max(1.0, w / 18.0)))
-            p.setBrush(Qt.NoBrush)
-            p.drawLine(QPointF(w * (x0 + 0.09), h * 0.34),
-                       QPointF(w * (x0 + 0.09), h * 0.66))
-        blk(0.06, 0.66, 0.94, 0.94, True)
     p.setPen(pen)
     p.setBrush(Qt.NoBrush)
 
@@ -2050,7 +1973,7 @@ class _HintLabel(QLabel):
 #: 為什麼要列出來而不是量 widget 的高度：``sizeHint`` 在建構的當下還沒定案
 #: （膠囊要排版完才知道會不會換行），量到的會是一個還沒長好的數字。
 _BLOCK_EDITORS = ("metric_chips", "metric_choice", "multi_choice",
-                  "curve", "template",
+                  "chip_choice", "curve", "template",
                   "channel_map", "cell_rois")
 
 
@@ -2115,6 +2038,13 @@ class _ParamRow(QFrame):
         if str(spec.get("type") or "") in _BLOCK_EDITORS:
             top.setAlignment(self.name_label, Qt.AlignTop)
             self.name_label.setContentsMargins(0, 6, 0, 0)
+        if str(spec.get("type") or "") == "chip_choice":
+            # **長的列名要換行，不要把膠囊擠扁**（F68 第二輪）。
+            # 「Take the up-and-down stripes that are」把那一列的名字撐到
+            # 三百多 px，剩給七顆膠囊的寬度不到一半 —— 它們於是排成五排
+            # 參差不齊的東西（render 出來才看到）。名字是一欄，膠囊是一塊。
+            self.name_label.setWordWrap(True)
+            self.name_label.setMaximumWidth(152)
 
         self.slider = _make_slider(spec, editor)
         if self.slider is not None:
@@ -3210,8 +3140,9 @@ class _ChoiceChip(_ChipBase):
 
     def __init__(self, value: str, icon: str, colour: str,
                  checked: bool = False, parent: Optional[QWidget] = None,
-                 tip: str = ""):
-        super().__init__(value, _spell(value), colour, checked, parent)
+                 tip: str = "", label: str = ""):
+        super().__init__(value, str(label or "") or _spell(value), colour,
+                         checked, parent)
         self.icon = str(icon)
         self.setToolTip(str(tip or ""))
 
@@ -3542,11 +3473,14 @@ class ChoiceChips(QWidget):
     幾格問的是「這張卡要怎麼找缺陷」—— 那是他每一次調參數都要重看一遍的事。
     攤成一排膠囊之後，選項本身就是畫面，而選中的那一顆帶著階段色。
 
-    為什麼不是 :class:`IconChoice`（只有圖、名字退到 tooltip）
-    ------------------------------------------------------
-    那一族適用於「**那個詞講的就是一個畫得出來的形狀**」（`beside_vertical`、
-    CD 的一條線／一團東西）—— 圖給完了，字是多的。這幾格不是：``each box``
-    ／``per box`` 是**做法**，圖只能當錨點，字才是意思。所以圖與字都留著。
+    為什麼不是「只有圖、名字退到 tooltip」（F11 Region-2 的 ``IconChoice``，
+    2026-09-01 拿掉）
+    ------------------------------------------------------------------
+    那一族的理由是「那個詞講的就是一個畫得出來的形狀」（``beside_vertical``、
+    CD 的一條線／一團東西）—— 圖給完了，字是多的。而使用者看了整個設定區之後
+    的判斷相反：「**我認為設定區都要變成這樣 icon 膠囊 + 文字，並且視覺模型
+    可能要接近會比較好**」。同一個面板上兩種長相，使用者要學兩次；
+    **圖是掃視時的錨點，字才是意思**。所以現在只有這一種。
 
     值的格式跟 ``choice`` **一字不差**（就是那個字），所以 recipe JSON 沒有變。
     """
@@ -3555,9 +3489,11 @@ class ChoiceChips(QWidget):
 
     def __init__(self, choices: Sequence[str], icons: Sequence[str],
                  value: str = "", helps: Optional[Dict[str, str]] = None,
-                 parent: Optional[QWidget] = None):
+                 parent: Optional[QWidget] = None,
+                 labels: Optional[Dict[str, str]] = None):
         super().__init__(parent)
         helps = dict(helps or {})
+        labels = dict(labels or {})
         colour = theme.group_hex("measure")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -3570,7 +3506,8 @@ class ChoiceChips(QWidget):
         for name, icon in zip([str(c) for c in choices],
                               [str(i) for i in icons]):
             c = _ChoiceChip(name, icon, colour, name == self._value,
-                            self._flow, tip=helps.get(name) or "")
+                            self._flow, tip=helps.get(name) or "",
+                            label=labels.get(name) or "")
             c.toggled.connect(self._on_toggled)
             self._flow.add(c)
             self._chips.append(c)
@@ -3581,7 +3518,7 @@ class ChoiceChips(QWidget):
 
     def set_text(self, value: str) -> None:
         # 認不得的值（手寫 recipe）**不要偷偷改掉**：一顆都不亮，比亮錯一顆
-        # 誠實（同 :class:`IconChoice`）。
+        # 誠實（這一條是從 `IconChoice` 帶過來的，那個 widget 已經不在了）。
         self._value = str(value or "")
         for c in self._chips:
             c.set_checked(c.mid == self._value)
@@ -3827,67 +3764,18 @@ class TemplateField(QWidget):
                 % (w, h, len(self._value) / 1024.0))
 
 
-class IconChoice(QWidget):
-    """``icon_choice`` 參數的編輯器：一排圖示鈕，選中的那顆亮著（F11 Region-2）。
-
-    為什麼不是下拉選單
-    ------------------
-    使用者的話：「我不希望 profile 設定頁面那麼多**文字**，能用圖就用圖。」
-    而 ``place`` 的五個值（``crossing`` / ``beside_vertical`` /
-    ``between_horizontal`` …）講的是**五個畫得出來的形狀** —— 下拉選單要求
-    使用者先把那個英文詞翻譯成一張圖，再選；一排小圖是直接把那張圖給他。
-
-    每顆鈕的**名字**退到 tooltip：說明還在，只是不佔畫面（同模板編輯器那一列
-    工具鈕的做法）。
-    """
-
-    changed = Signal(str)
-
-    def __init__(self, choices: Sequence[str], icons: Sequence[str],
-                 value: str = "", helps: Optional[Dict[str, str]] = None,
-                 parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(3)
-
-        self._buttons: Dict[str, IconButton] = {}
-        helps = dict(helps or {})
-        for name, icon in zip(list(choices), list(icons)):
-            name, icon = str(name), str(icon)
-            b = IconButton(icon, helps.get(name) or _spell(name), self,
-                           kind="ghost")
-            b.setCheckable(True)
-            b.setProperty("shape", "tool")
-            b.clicked.connect(lambda _c=False, n=name: self._pick(n))
-            row.addWidget(b)
-            self._buttons[name] = b
-        row.addStretch(1)
-
-        self._value = ""
-        self.set_text(value)
-
-    def text(self) -> str:
-        return self._value
-
-    def set_text(self, value: str) -> None:
-        v = str(value or "")
-        # 認不得的值（手寫 recipe）**不要偷偷改掉** —— 一顆都不亮，比亮錯一顆
-        # 誠實（使用者至少看得出這裡有問題）。
-        self._value = v
-        for name, b in self._buttons.items():
-            b.setChecked(name == v)
-            b.setProperty("active", "true" if name == v else "false")
-            restyle(b)
-
-    def _pick(self, name: str) -> None:
-        self.set_text(name)
-        self.changed.emit(name)
-
-
 def _spell(value: str) -> str:
-    """``beside_vertical`` → ``Beside vertical``（沒有 help 時的備援名字）。"""
-    return str(value).replace("_", " ").strip().capitalize()
+    """``beside_vertical`` → ``Beside vertical``（沒有指定顯示名時的拼法）。
+
+    ⚠ **只動第一個字母**，不要用 ``str.capitalize()`` —— 它會把**其餘的字全部
+    轉小寫**，於是 ``a cell I mark myself`` 在畫面上變成「a cell **i** mark
+    myself」。那是使用者自己寫的一句話，被一支拼字函式改掉了。
+
+    拼不對的那幾個（``zscore`` / ``nlm`` / ``topn``…）走 `ParamSpec.choice_labels`
+    —— 那張表**只放例外**，不是把整排值再抄一份。
+    """
+    text = str(value).replace("_", " ").strip()
+    return text[:1].upper() + text[1:]
 
 
 class CellRoisField(QWidget):
@@ -4728,6 +4616,12 @@ class ParamForm(QWidget):
             return w
 
         if ptype == "choice":
+            # ⚠ **現在沒有任何一張卡走這一支**（F68 第二輪把每一格選項都換成
+            # `chip_choice`，使用者：「設定區都要變成這樣 icon 膠囊 + 文字」）。
+            # 型別留著，因為「這一排的選項畫不出圖」是有可能的 —— 那時候硬畫
+            # 一張圖是裝飾，而裝飾會讓使用者以為那裡有意思可以讀。
+            # 真的要用的人會先撞到 `test_no_card_anywhere_still_shows_a_bare_dropdown`，
+            # 那正是停下來想一下的地方。
             w = QComboBox()
             choices = [str(c) for c in (spec.get("choices") or [])]
             w.addItems(choices)
@@ -4806,15 +4700,8 @@ class ParamForm(QWidget):
             w = ChoiceChips([str(c) for c in (spec.get("choices") or [])],
                             [str(i) for i in (spec.get("icons") or [])],
                             "" if value is None else str(value),
-                            spec.get("choice_help") or {})
-            w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
-            return w
-
-        if ptype == "icon_choice":
-            w = IconChoice([str(c) for c in (spec.get("choices") or [])],
-                           [str(i) for i in (spec.get("icons") or [])],
-                           "" if value is None else str(value),
-                           spec.get("choice_help") or {})
+                            spec.get("choice_help") or {},
+                            labels=spec.get("choice_labels") or {})
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 

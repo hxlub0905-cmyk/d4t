@@ -123,7 +123,7 @@ def test_the_line_branch_is_untouched_by_the_new_fork():
 
 
 def test_an_unknown_shape_is_rejected_rather_than_guessed():
-    """``icon_choice`` 的驗證擋在前面（鐵則 4）—— 壞值進不到演算法裡。"""
+    """``chip_choice`` 的驗證擋在前面（鐵則 4）—— 壞值進不到演算法裡。"""
     from d4t.core.pipeline.step import ParamError
 
     cls = REGISTRY[CARD]

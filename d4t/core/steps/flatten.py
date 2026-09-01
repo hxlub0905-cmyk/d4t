@@ -48,9 +48,13 @@ class FlattenStep(MultiStreamStep):
     params = [
         streams_spec("test"),
         ParamSpec(
-            name="method", type="choice", default="background",
+            name="method", type="chip_choice", default="background",
             choices=["background", "stripes_h", "stripes_v",
                      "bright_spots", "dark_spots"],
+            icons=["fl_background", "fl_stripes_h", "fl_stripes_v",
+                   "fl_bright_spots", "fl_dark_spots"],
+            choice_labels={"stripes_h": "Stripes across",
+                           "stripes_v": "Stripes down"},
             label="Remove",
             help=("background = a smooth brightness gradient (charging); "
                   "stripes_h / stripes_v = scan-line stripes running across "
@@ -68,8 +72,9 @@ class FlattenStep(MultiStreamStep):
                   "of the patch width is a good starting point."),
         ),
         ParamSpec(
-            name="estimator", type="choice", default="gaussian",
+            name="estimator", type="chip_choice", default="gaussian",
             choices=list(algo_enhance.BG_ESTIMATORS),
+            icons=["op_gaussian", "op_median"],
             label="Estimate the background with",
             show_when=("method", ("background",)),
             help=("How the background under your defect is estimated before "

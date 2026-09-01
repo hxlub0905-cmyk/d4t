@@ -251,6 +251,20 @@ param 相依 I/O（例如輸出流名稱由參數決定）覆寫 `resolve_reads/
 > 任何一條測試問過「使用者看到的第一張是哪一張」。現在有了：
 > `tests/test_card_library_order.py`。
 
+> **一格選項＝一排膠囊（圖 + 字），不是下拉**（F68 第二輪，2026-09-01，
+> 使用者：「我認為設定區都要變成這樣 icon 膠囊 + 文字，並且視覺模型可能要
+> 接近會比較好」）。型別是 `chip_choice`：`choices` 每一個值配一個
+> `icons`（畫它的那支住在 `d4t/ui/glyphs.py`，共通文法寫在那份的檔頭）、
+> 一句 `choice_help`（tooltip），拼不對的值再補一格 `choice_labels`
+> （`zscore` → `Z-score`；那張表**只放例外**）。值的格式跟 `choice`
+> 一字不差，所以 recipe JSON 不受影響。
+>
+> `type="choice"`（純下拉）與 `icon_choice`（只有圖、名字退到 tooltip）
+> 這一輪都退場了：前者留著當「這一排真的畫不出圖」的退路，但
+> `tests/test_ui_widgets.py::test_no_card_anywhere_still_shows_a_bare_dropdown`
+> 會擋 —— 那正是停下來想一下的地方；後者**刪掉**了（同一個面板上兩種長相，
+> 使用者要學兩次，而圖是掃視時的錨點、字才是意思）。
+
 > **把 `min`/`max` 填好，滑桿是免費的**（F7-8）。ParamForm 看到有上下界的
 > `int`/`float` 就自動配一支跟數字框雙向綁定的滑桿。這不只是好看 ——
 > 使用者是一邊拖一邊看影像決定值的，「先想好一個數字再輸入」那個順序是反的。

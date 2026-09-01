@@ -568,7 +568,10 @@ def _another_value(spec):
     default = spec.default
     if spec.type == "bool":
         return not bool(default)
-    if spec.type == "choice" and spec.choices:
+    # ⚠ **三種下拉／膠囊都要算**：`icon_choice` 從來沒有被這條測試蓋到，而
+    # F68 第二輪把所有的 `choice` 換成 `chip_choice` 之後，漏掉的那一族就從
+    # 七個變成二十一個 —— 那一輪它真的紅了（56 < 60），也就是這一行的來歷。
+    if spec.type in ("choice", "icon_choice", "chip_choice") and spec.choices:
         for choice in spec.choices:
             if choice != default:
                 return choice

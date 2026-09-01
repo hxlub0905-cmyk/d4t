@@ -186,7 +186,7 @@ PARAM_TYPES = ("int", "float", "bool", "str", "expr",
                "choice", "image_key",
                "image_keys", "curve", "template", "multi_choice",
                "metric_chips", "metric_choice", "channel_map", "cell_rois",
-               "region_key", "region_keys", "icon_choice", "chip_choice")
+               "region_key", "region_keys", "chip_choice")
 
 #: ``ParamSpec.choices_from`` 認得的鍵：**執行期才知道的選單**（F15-2）。
 #:
@@ -341,7 +341,7 @@ def param_visible(show_when: Any, params: Optional[Dict[str, Any]]) -> bool:
         # ``"pictures"``，那一格就永遠不出現 —— 而它會有一個預設值照樣生效，
         # 也就是一個使用者看不到卻在作用的設定。
         #
-        # 對單值型別（`choice` / `icon_choice` / `bool`）**逐位元組等價**：
+        # 對單值型別（`choice` / `chip_choice` / `bool`）**逐位元組等價**：
         # 沒有逗號的字串切出來就是它自己。2026-08-26 稽核過 registry 裡每一個
         # `show_when`，目標全部是單值型別。
         toks = {tok.strip() for tok in got.split(",")}
@@ -377,29 +377,37 @@ class ParamSpec:
     min: Optional[float] = None
     max: Optional[float] = None
     choices: Optional[List[str]] = None
-    #: ``icon_choice`` / ``chip_choice`` 專用：每一個 choice 配一個圖示名
-    #: （一一對應）。
+    #: ``chip_choice`` 專用：每一個 choice 配一個圖示名（一一對應）。
     #:
-    #: 為什麼要一個新型別而不是「choice 加一個旗標」（F11 Region-2）：
-    #: 使用者的話是「我不希望 profile 設定頁面那麼多**文字**，能用圖就用圖」。
-    #: 而 ``place`` 的五個選項是 ``crossing`` / ``beside_vertical`` /
-    #: ``between_horizontal`` … —— 那五個英文詞講的是**五個畫得出來的形狀**，
-    #: 用一排小圖就答完了，下拉選單則要求使用者先把詞翻譯成圖再選。
+    #: 為什麼一格選項要有圖（F11 Region-2 起）：使用者的話是「我不希望 profile
+    #: 設定頁面那麼多**文字**，能用圖就用圖」。``place`` 的五個值
+    #: （``crossing`` / ``beside_vertical`` / ``between_horizontal`` …）講的是
+    #: **五個畫得出來的形狀** —— 下拉選單要求使用者先把那個英文詞翻譯成一張圖
+    #: 再選，一排小圖是直接把那張圖給他。
+    #:
+    #: **字要留著**（F68 第二輪，使用者：「我希望設定欄這邊也是能像下方一樣
+    #: 膠囊 icon 配文字，這樣 user 比較會有感覺」）。這一輪之前有兩種長相：
+    #: ``icon_choice`` 只有圖、名字退到 tooltip。它現在沒有了 —— 同一個面板上
+    #: 兩種長相，使用者要學兩次，而**圖是掃視時的錨點，字才是意思**。
     #:
     #: **只有「不看資料就畫得出來」的選項適用。** ``vertical_select``（最亮的
-    #: 那一組是哪一組）看的是這張影像，畫不出通用的圖示 —— 那種要畫在影像上，
-    #: 不是畫在按鈕上。
-    #:
-    #: **``chip_choice`` 是同一組圖，但字留著**（F68 第二輪，使用者：「我希望
-    #: 設定欄這邊也是能像下方一樣膠囊 icon 配文字，這樣 user 比較會有感覺」）。
-    #: 判準是**意思在圖裡還是在字裡**：``beside_vertical`` 那個詞講的就是一個
-    #: 形狀，圖給完了就不必再寫字（``icon_choice``）；``each box`` / ``per box``
-    #: 是**做法**，圖只能當掃視時的錨點，拿掉字就沒有人看得懂（``chip_choice``）。
+    #: 那一組是哪一組）看的是這張影像 —— 那一排的圖畫的因此是**排名本身**
+    #: （一把由亮到暗的梯子，選中的那一階伸出去），不是某一張影像。
+    #: 圖真的畫不出來的時候不要硬畫：裝飾會讓使用者以為那裡有意思可以讀。
     #:
     #: 圖示名要在 ``ui.widgets.GLYPH_ICONS`` 裡（``core`` 不 import Qt，所以那條
     #: 檢查在 UI 那一側的測試，見 `test_card_invariants`）。
     icons: Optional[List[str]] = None
-    #: ``icon_choice`` / ``chip_choice`` 專用：每一個 choice 一句 tooltip。
+    #: ``chip_choice`` 專用：**值 → 顯示出來的字**，只填 `_spell` 拼錯的那幾個。
+    #:
+    #: 理由跟 :attr:`label` 一字不差（「參數名是 recipe 的鍵，不是給人看的字」
+    #: ——F7-9），只是換到**值**上：``zscore`` / ``glv_band`` / ``nlm`` /
+    #: ``topn`` 是 recipe 的鍵，而膠囊上要寫的是 ``Z-score`` / ``GLV band`` /
+    #: ``NLM`` / ``Top N``。沒填的值照 ``value.replace("_", " ").capitalize()``
+    #: 拼 —— **所以這張表只放例外**，不要把整排值再抄一份（抄出來的那一份會
+    #: 漂走，而漂走的症狀是改了 choices 卻沒人發現字還是舊的）。
+    choice_labels: Optional[Dict[str, str]] = None
+    #: ``chip_choice`` 專用：每一個 choice 一句 tooltip。
     #: 圖示看得懂形狀，但「為什麼要選它」還是要有地方講 —— 只是那個地方不該
     #: 佔畫面。
     choice_help: Optional[Dict[str, str]] = None
@@ -516,16 +524,28 @@ class ParamSpec:
         if not str(self.help).strip():
             raise ParamError(f"parameter '{self.name}': help (a plain-language "
                              f"description) must not be empty")
-        if self.type in ("icon_choice", "chip_choice"):
+        if self.type == "chip_choice":
             if len(self.icons or []) != len(self.choices or []):
                 raise ParamError(
-                    f"parameter '{self.name}': {self.type} needs one icon per "
+                    f"parameter '{self.name}': chip_choice needs one icon per "
                     f"choice ({len(self.choices or [])} choices, "
                     f"{len(self.icons or [])} icons)")
         elif self.icons:
-            raise ParamError(f"parameter '{self.name}': only icon_choice and "
-                             f"chip_choice take icons")
-        if (self.type in ("choice", "icon_choice", "chip_choice",
+            raise ParamError(f"parameter '{self.name}': only chip_choice "
+                             f"takes icons")
+        if self.choice_labels:
+            if self.type != "chip_choice":
+                raise ParamError(f"parameter '{self.name}': only chip_choice "
+                                 f"takes choice_labels")
+            unknown = [v for v in self.choice_labels
+                       if v not in (self.choices or [])]
+            if unknown:
+                # 打錯的那一個**不會叫**，它只是安靜地不生效 —— 而畫面上那顆
+                # 膠囊寫的是拼出來的字，看起來完全正常。
+                raise ParamError(
+                    f"parameter '{self.name}': choice_labels names values that "
+                    f"are not choices: {unknown}")
+        if (self.type in ("choice", "chip_choice",
                           "multi_choice", "metric_chips", "metric_choice")
                 and not self.choices and not self.choices_from):
             raise ParamError(f"parameter '{self.name}': type '{self.type}' "
@@ -536,7 +556,7 @@ class ParamSpec:
                     f"parameter '{self.name}': choices_from="
                     f"'{self.choices_from}' is not one of {RUNTIME_CHOICES}")
             if self.type not in ("str", "multi_choice"):
-                # `choice` / `icon_choice` 的 validate 會擋掉不在清單裡的值，
+                # `choice` / `chip_choice` 的 validate 會擋掉不在清單裡的值，
                 # 而執行期的清單在讀 recipe 的當下是空的 —— 見 choices_from。
                 raise ParamError(
                     f"parameter '{self.name}': choices_from only applies to "
@@ -676,7 +696,7 @@ class ParamSpec:
                         f"not a list (got {v!r})")
                 if not v:
                     v = str(self.default)
-            elif self.type in ("choice", "icon_choice", "chip_choice"):
+            elif self.type in ("choice", "chip_choice"):
                 v = str(value)
                 if v not in (self.choices or []):
                     raise ParamError(
@@ -1366,7 +1386,8 @@ class Step(ABC):
                     "name": p.name, "type": p.type, "default": p.default,
                     "help": p.help, "min": p.min, "max": p.max,
                     "choices": p.choices, "icons": p.icons,
-                    "choice_help": p.choice_help, "unit": p.unit,
+                    "choice_help": p.choice_help,
+                    "choice_labels": p.choice_labels, "unit": p.unit,
                     "label": p.label or p.name,
                     "pattern": p.pattern,
                     # ``("method", ("percentile",))`` → JSON-safe 的**一串

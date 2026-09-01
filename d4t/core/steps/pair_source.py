@@ -247,7 +247,10 @@ class PairSourceStep(Step):
                   "stored in the recipe, so the same recipe runs on the next "
                   "lot.")),
         ParamSpec(
-            name="match", type="choice", default="position", choices=list(MATCHES),
+            name="match", type="chip_choice", default="position",
+            choices=list(MATCHES),
+            icons=["match_position", "match_id", "match_order"],
+            choice_labels={"id": "Defect ID"},
             label="Match by",
             help=("position = nearest defect within the tolerance, in wafer "
                   "coordinates (the usual choice). id = same DEFECTID on both "

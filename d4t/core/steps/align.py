@@ -33,8 +33,11 @@ class AlignStep(Step):
                   help="Image stream to be moved into alignment (usually ref)."),
         ParamSpec(name="fixed", type="image_key", direction="in", default="test",
                   help="Reference stream that stays put (usually test)."),
-        ParamSpec(name="method", type="choice", default="phase",
+        ParamSpec(name="method", type="chip_choice", default="phase",
                   choices=["phase", "hybrid", "ncc", "ecc", "template"],
+                  icons=["al_phase", "al_hybrid", "al_ncc", "al_ecc",
+                         "al_template"],
+                  choice_labels={"ncc": "NCC", "ecc": "ECC"},
                   help=("Alignment backend: phase = fast and robust (default); "
                         "ncc = exhaustive correlation; ecc = iterative refinement; "
                         "template = central template match; hybrid behaves like phase.")),
