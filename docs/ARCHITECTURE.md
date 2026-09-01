@@ -298,6 +298,8 @@ d4t/
     ├── workers.py            #   載入／預覽（請求合併）／試跑／寫出 背景執行緒
     ├── theme.py widgets.py branding.py region_words.py  #   主題 token／資料驅動元件／圖示字標／
     │                         #   區域那三個埠的白話字
+    ├── wiring_slot.py        #   設定區的一格接線：符號＋現在接的是什麼＋一顆「換」
+    │                         #     （F68；挑了走的是跟畫布拉線同一條路）
     ├── numbers.py            #   一個特徵值印成字 —— **全 UI 只有這一支**（F52）
     └── assets/               #   `d4t.svg` 與兩份字標（pyproject 的 package-data 帶著它們走）
 ```

@@ -143,6 +143,9 @@ _PORT_R = 5.0
 #: ``out_port_at`` 與 ``_NodeItem.shape`` 都讀它：命中範圍只能有一個定義，
 #: 分成兩份遲早會對不起來，而「對不起來」的症狀是「點了沒反應」。
 _PORT_GRAB = _PORT_R * 3.0
+#: 相鄰兩顆埠至少要離多遠（F68）。埠畫出來 11px 寬，所以這是「兩顆埠之間看得
+#: 出空隙、而且瞄得準」的下限。`_NodeItem._PORT_PITCH` 由它決定。
+_PORT_MIN_GAP = 15.0
 
 #: 連線中點的方向箭頭大小。畫布可以縮放平移，光看曲線不一定分得出資料往哪流。
 _ARROW = 5.0
@@ -327,18 +330,47 @@ def _diamond(centre: QPointF, r: float) -> QPainterPath:
     return path
 
 
-def _draw_port(p: QPainter, anchor: QPointF, kind: str, filled: bool) -> None:
-    """畫一顆埠。影像是圓、區域是菱形；輸入空心、輸出實心。"""
+def _port_label_text(spec: Dict[str, Any]) -> str:
+    """一顆輸入埠旁邊寫什麼字（F68）。
+
+    **接上線之後也要說得出角色**。以前這裡是 ``stream or label``，於是一接上
+    線，``Region`` / ``Ref region`` 就變成區域名字 —— 分辨兩顆菱形的唯一線索，
+    在最需要它的時候消失。現在參照那一顆前面掛著 ``ref``，而放不下的時候
+    `_draw_elided` 從後面切，所以**先被切掉的是名字，不是角色**。
+    """
+    text = str(spec.get("stream") or spec.get("label") or "")
+    if text and str(spec.get("role", "")) == "reference" and spec.get("stream"):
+        text = "ref " + text
+    return text
+
+
+def _draw_port(p: QPainter, anchor: QPointF, kind: str, filled: bool,
+               role: str = "", lit: bool = False) -> None:
+    """畫一顆埠。影像是圓、區域是菱形；輸入空心、輸出實心。
+
+    ``role``（F68）：``"reference"`` 的埠畫**虛線邊**。理由是量出來的 ——
+    ``roi`` 與 ``reference_region`` 在這之前是**逐位元組相同的兩顆菱形**，
+    而唯一的線索（左邊那 52px 的標籤）**接上線之後就變成區域名字**，角色的字
+    消失。於是使用者要拖線的時候，正好沒有東西告訴他該拖哪一顆 —— 而拖歪了
+    兩個都是合法的區域參數，`_connect_region` 攔不到。
+    虛線是**跟區域線同一個語彙**（那條線也是虛的），不是新發明的記號。
+
+    ``lit``（F68）：拖線拖到一半時，接得上的埠會亮起來、放大一點。
+    """
+    col = region_color() if kind == "region" else QColor(TOKENS["canvas_edge"])
+    if lit:
+        col = QColor(TOKENS["canvas_edge_active"])
+    pen = QPen(col, 2.0 if lit else 1.2)
+    if role == "reference":
+        pen.setStyle(Qt.DashLine)
+    p.setPen(pen)
+    grow = 1.6 if lit else 0.0
     if kind == "region":
-        col = region_color()
-        p.setPen(QPen(col, 1.2))
         p.setBrush(QBrush(col if filled else QColor(TOKENS["bg_surface"])))
-        p.drawPath(_diamond(anchor, _REGION_PORT_R))
+        p.drawPath(_diamond(anchor, _REGION_PORT_R + grow))
         return
-    p.setPen(QPen(QColor(TOKENS["canvas_edge"]), 1.2))
-    p.setBrush(QBrush(QColor(TOKENS["canvas_edge"] if filled
-                             else TOKENS["bg_surface"])))
-    p.drawEllipse(anchor, _PORT_R, _PORT_R)
+    p.setBrush(QBrush(col if filled else QColor(TOKENS["bg_surface"])))
+    p.drawEllipse(anchor, _PORT_R + grow, _PORT_R + grow)
 
 
 class _NodeItem(QGraphicsItem):
@@ -365,7 +397,17 @@ class _NodeItem(QGraphicsItem):
 
     # -- 幾何 ---------------------------------------------------------------
     #: 一顆埠至少要佔幾 px 才點得到（埠的直徑是 10–11）。
-    _PORT_PITCH = 13.0
+    #: 兩顆埠之間留多高（F68 從 13 提到 17）。
+    #:
+    #: 13 的時候，四顆埠的卡片上相鄰兩顆相距 **12.8px** —— 而埠本身畫出來就
+    #: 有 11px 寬。瞄準的餘裕只剩一個像素多，而 `in_param_at` 是就近吸附：
+    #: 拖歪一點就落在隔壁那一顆上，**兩顆都是合法的區域參數**，
+    #: `_connect_region` 攔不到，於是那條線安靜地接錯。
+    #:
+    #: ⚠ 這不是說「抓取圈不可以重疊」—— 就近吸附之下重疊是無害的（每顆埠
+    #: 拿走離自己比較近的那一半）。要守的是**瞄得準**，所以下限是
+    #: :data:`_PORT_MIN_GAP`，`tests/test_ui_canvas_ports.py` 釘著。
+    _PORT_PITCH = 17.0
 
     def height(self) -> float:
         """這張卡多高 —— **埠多就長高**（F12）。
@@ -499,6 +541,28 @@ class _NodeItem(QGraphicsItem):
 
     def in_kinds(self) -> List[str]:
         return [str(d.get("kind") or "image") for d in self.in_specs()]
+
+    def _ports_to_light(self) -> set:
+        """拖線拖到一半時，**這張卡上哪幾顆埠接得上**（F68）。
+
+        存在的理由是量出來的：兩顆同型別的埠現在**畫得一樣、抓取圈重疊、
+        而 `in_param_at` 就近吸附** —— 拖歪了會安靜地接到隔壁那一顆，而兩顆都是
+        合法的區域參數，`_connect_region` 攔不到。拖的當下把接得上的埠亮起來，
+        使用者在放手**之前**就看得到自己要接到哪一顆。
+
+        只看**型別**（影像線只接得上圓埠、區域線只接得上菱形埠）—— 那正是
+        `studio._connect` / `_connect_region` 真的會擋的那一條，兩邊要一致。
+        """
+        view = getattr(self, "canvas", None)
+        src = getattr(view, "_link_from", None) if view is not None else None
+        if src is None or src is self:
+            return set()
+        try:
+            kind = src.out_kind(int(getattr(view, "_link_port", 0)))
+        except Exception:                  # noqa: BLE001 — 畫圖用，壞了就不亮
+            return set()
+        return {str(sp.get("name") or "") for sp in self.in_specs()
+                if str(sp.get("kind") or "image") == str(kind)}
 
     def in_anchors_local(self) -> List[QPointF]:
         """每個輸入埠在本地座標的位置（由上而下均分節點左緣）。
@@ -770,17 +834,20 @@ class _NodeItem(QGraphicsItem):
         # 輸入是空心圈、輸出是實心點：一眼看得出線該從哪邊拉到哪邊。
         ins = self.in_specs()
         in_anchors = self.in_anchors_local()
+        lit_names = self._ports_to_light()
         for i, anchor in enumerate(in_anchors):
             kind = str(ins[i].get("kind") or "image") if i < len(ins) else "image"
-            _draw_port(p, anchor, kind, filled=False)
+            role = str(ins[i].get("role") or "") if i < len(ins) else ""
+            name = str(ins[i].get("name") or "") if i < len(ins) else ""
+            _draw_port(p, anchor, kind, filled=False, role=role,
+                       lit=name in lit_names)
             if len(ins) < 2 or i >= len(ins):
                 continue
             # 兩個以上的輸入才標名字：一顆埠的時候「這條線接到哪」沒有歧義，
             # 標了只是多一個字；兩顆以上不標的話，使用者要去猜上面那顆是
             # `First stream` 還是 `Second stream` —— 而猜錯了畫面上完全看不
             # 出來（兩張圖相減，a 與 b 反過來就是整張圖的正負號反過來）。
-            spec = ins[i]
-            text = str(spec.get("stream") or spec.get("label") or "")
+            text = _port_label_text(ins[i])
             if not text:
                 continue
             p.setPen(QColor(TOKENS["text_secondary"] if kind != "region"
@@ -1962,9 +2029,21 @@ class PipelineCanvas(QGraphicsView):
         self._link_line = self._scene.addPath(
             QPainterPath(src.out_port(port)),
             QPen(QColor(TOKENS["canvas_edge_active"]), 1.6, Qt.DashLine))
+        self._repaint_ports()   # 接得上的埠要亮起來（F68）
+
+    def _repaint_ports(self) -> None:
+        """每一張卡重畫一次埠 —— 拖線**開始與結束**時各一次。
+
+        只在這兩個時刻重畫（不是每次滑鼠移動），因為亮不亮只跟「現在拖的是
+        哪一種線」有關，跟游標在哪裡無關。
+        """
+        for item in self._scene.items():
+            if isinstance(item, _NodeItem):
+                item.update()
 
     def _drop_link(self, scene_pos: QPointF) -> None:
         src, self._link_from = self._link_from, None
+        self._repaint_ports()                       # 亮起來的埠要熄掉（F68）
         port = int(getattr(self, "_link_port", 0))
         if self._link_line is not None:
             self._scene.removeItem(self._link_line)

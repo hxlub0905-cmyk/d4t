@@ -1080,6 +1080,18 @@ QWidget#verdictRow:hover { background: $bg_elevated; }
 QWidget#verdictRow[picked="true"] { background: $accent_bg; }
 
 QLabel#paramLabel { color: $text_primary; font-weight: 600; }
+/* One wired input (F68). It must NOT look like a text box: the thing it
+   replaced was a read-only QLineEdit with no style of its own, so it picked up
+   the ordinary input look - complete with a focus ring - and every user who
+   clicked it found out the hard way that it does not take typing. A sunken
+   strip with no border reads as "a display with a control on it", which is
+   what it is. */
+QWidget#wiringSlot {
+    background: $bg_elevated;
+    border: none;
+    border-radius: $radius_md;
+}
+QLabel#wiringValue { color: $text_primary; }
 QLabel#paramHint { color: $text_hint; font-size: 11px; }
 QLabel#paramHint[error="true"] { color: $danger_text; font-size: 11px; font-weight: 600; }
 QLabel#placeholder { color: $text_disabled; font-size: 12px; }

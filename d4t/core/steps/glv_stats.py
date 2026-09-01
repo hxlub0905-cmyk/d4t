@@ -106,8 +106,9 @@ import numpy as np
 from ..algo import glv as algo_glv
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    ANY_VALUE, CATEGORY_ALGO, PATCH_KINDS, SINGLE_IMAGE_KINDS, ParamSpec, Step,
-    StepError, register_step, GROUP_MEASURE,
+    ANY_VALUE, CATEGORY_ALGO, MEASURE, PATCH_KINDS, REFERENCE,
+    SINGLE_IMAGE_KINDS, ParamSpec, Step, StepError, register_step,
+    GROUP_MEASURE,
 )
 from ._util import (
     CENTRE_SUFFIX, MultiSourceStep, OTHERS_SUFFIX, output_prefix_spec,
@@ -414,7 +415,7 @@ def _prefix_in_output_section() -> ParamSpec:
     """``output_prefix`` 是共用的那一顆，只差掛在哪個小標題底下（F32 —— 它
     以前沒有段，於是在畫面上黏在「4 · Which pixels count」裡）。"""
     spec = output_prefix_spec("center")
-    spec.section = "5 · Output"
+    spec.section = "6 · Output"
     return spec
 
 
@@ -571,30 +572,46 @@ class GlvStatsStep(MultiSourceStep):
             "numbers come out either way.")
     params = [
         ParamSpec(name="source", type="image_keys", direction="in", default="test",
-                  label="Measure on",
+                  label="Measure on", role=MEASURE,
+                  section="1 · Where to measure",
                   help="Image stream to compute statistics on."),
         ParamSpec(name="roi", type="region_keys", direction="in", default="",
-                  label="Region",
+                  label="Region", role=MEASURE,
+                  section="1 · Where to measure",
                   help=("Which region(s) to measure in - drag a line from the "
                         "Region card that defines each one. Two regions here "
                         "means the same statistics measured in both, and every "
                         "number gets its region's name in front of it. "
                         "No line means the whole image.")),
-        # 勾選而不是用打的（2026-08-14 使用者要求）。清單是常用的那幾個；
-        # 手寫 recipe 仍可以放任何 glv_q<0-100>（清單外的值會列出來並勾著）。
-        ParamSpec(name="metrics", type="metric_chips",
-                  default=DEFAULT_METRICS,
-                  label="Statistics", section="1 · What to measure",
-                  choices=list(METRIC_CHOICES),
-                  help=("Pick the statistics to output - each becomes a "
-                        "feature with the same name. Hand-written recipes may "
-                        "also use any percentile (glv_q37), any trimmed mean "
-                        "(glv_trim05) and any brightness share "
-                        "(glv_above200).")),
+        # ---- 跟誰比（F18 第 5 步；F67 起**由線決定**）----------------------
+        #
+        # 這一段以前的第一列是一格 `reference` 下拉，而它是下面兩顆埠的複述
+        # （見 :func:`_reference_of`）。拿掉它之後這一段只剩三件事：
+        # **跟哪一塊比**（埠）、**拿哪個數字比**、**要報什麼**。
+        ParamSpec(
+            name="reference_region", type="region_key", direction="in",
+            default="", section="2 · Compare with", label="Ref region",
+            role=REFERENCE,
+            help=("Leave it alone and this card just reports the gray levels "
+                  "above. Drag a line from the Region card that defines the "
+                  "area to judge against - the background, the neighbouring "
+                  "cell, the other boxes of this same region - and the card "
+                  "also reports how far this one is from it."),
+        ),
+        ParamSpec(
+            name="reference_source", type="image_key", direction="in",
+            default="", section="2 · Compare with", label="Ref image",
+            role=REFERENCE,
+            help=("Drag an image stream in here to judge the same area "
+                  "across two images - normally ref, so the block is compared "
+                  "against its counterpart in the reference image. Wire this "
+                  "and the area above together to compare another area on "
+                  "another image."),
+        ),
         ParamSpec(
             name="across_boxes", type="choice", default=POOLED,
             choices=list(BOX_MODES), label="Boxes in the region",
-            section="2 · Boxes in the region",
+            section="3 · How to find it",
             help=("A region can be many boxes at once (a Golden Cell template "
                   "lays hundreds of them across a big image). pooled treats "
                   "them as one pile of pixels; each box measures every box on "
@@ -605,7 +622,7 @@ class GlvStatsStep(MultiSourceStep):
             name="judge", type="metric_choice", default=JUDGE_DEFAULT,
             choices=list(METRIC_CHOICES) + list(COMPARE_CHOICES),
             label="Pick the odd one by",
-            section="2 · Boxes in the region",
+            section="3 · How to find it",
             show_when=("across_boxes", (EACH_BOX,)),
             help=("Which number decides the odd box out. Every box is "
                   "compared against the middle of all the other boxes, in "
@@ -627,7 +644,7 @@ class GlvStatsStep(MultiSourceStep):
             name="direction", type="choice", default=algo_glv.BOTH,
             choices=list(algo_glv.ODD_BOX_DIRECTIONS),
             label="Looking for boxes that are",
-            section="2 · Boxes in the region",
+            section="3 · How to find it",
             show_when=("across_boxes", (EACH_BOX,)),
             choice_help={
                 algo_glv.BOTH: "Either way - the box furthest from the others, "
@@ -648,7 +665,7 @@ class GlvStatsStep(MultiSourceStep):
         ParamSpec(
             name="ref_pairing", type="choice", default=PER_BOX_REF,
             choices=list(REF_PAIRINGS), label="Take the reference",
-            section="2 · Boxes in the region",
+            section="3 · How to find it",
             show_when=((("reference_source",), (ANY_VALUE,)),
                        ("reference_region", ("",)),
                        ("across_boxes", (EACH_BOX,))),
@@ -672,7 +689,7 @@ class GlvStatsStep(MultiSourceStep):
         ParamSpec(
             name="over_k", type="float", default=0.0, min=0.0, max=99.0,
             unit="σ", label="Also count boxes beyond",
-            section="2 · Boxes in the region",
+            section="3 · How to find it",
             show_when=("across_boxes", (EACH_BOX,)),
             help=("Count how many boxes are further than this many robust "
                   "sigmas from the others, as glv_boxes_over_k (and the same "
@@ -681,32 +698,20 @@ class GlvStatsStep(MultiSourceStep):
                   "score, and they need opposite treatment - this number is "
                   "what tells them apart. 0 = do not count."),
         ),
-        # ---- 跟誰比（F18 第 5 步；F67 起**由線決定**）----------------------
-        #
-        # 這一段以前的第一列是一格 `reference` 下拉，而它是下面兩顆埠的複述
-        # （見 :func:`_reference_of`）。拿掉它之後這一段只剩三件事：
-        # **跟哪一塊比**（埠）、**拿哪個數字比**、**要報什麼**。
-        ParamSpec(
-            name="reference_region", type="region_key", direction="in",
-            default="", section="3 · Compare with", label="Another area",
-            help=("Leave it alone and this card just reports the gray levels "
-                  "above. Drag a line from the Region card that defines the "
-                  "area to judge against - the background, the neighbouring "
-                  "cell, the other boxes of this same region - and the card "
-                  "also reports how far this one is from it."),
-        ),
-        ParamSpec(
-            name="reference_source", type="image_key", direction="in",
-            default="", section="3 · Compare with", label="Another image",
-            help=("Drag an image stream in here to judge the same area "
-                  "across two images - normally ref, so the block is compared "
-                  "against its counterpart in the reference image. Wire this "
-                  "and the area above together to compare another area on "
-                  "another image."),
-        ),
+        # 勾選而不是用打的（2026-08-14 使用者要求）。清單是常用的那幾個；
+        # 手寫 recipe 仍可以放任何 glv_q<0-100>（清單外的值會列出來並勾著）。
+        ParamSpec(name="metrics", type="metric_chips",
+                  default=DEFAULT_METRICS,
+                  label="Statistics", section="4 · What to report",
+                  choices=list(METRIC_CHOICES),
+                  help=("Pick the statistics to output - each becomes a "
+                        "feature with the same name. Hand-written recipes may "
+                        "also use any percentile (glv_q37), any trimmed mean "
+                        "(glv_trim05) and any brightness share "
+                        "(glv_above200).")),
         ParamSpec(
             name="stat", type="metric_chips", default=DEFAULT_COMPARE_STAT,
-            section="3 · Compare with",
+            section="4 · What to report",
             show_when=((("reference_region", "reference_source"), (ANY_VALUE,)),),
             choices=list(COMPARE_STAT_CHOICES),
             label="Compare their",
@@ -721,7 +726,7 @@ class GlvStatsStep(MultiSourceStep):
         ),
         ParamSpec(
             name="compare_metrics", type="metric_chips",
-            default=DEFAULT_COMPARE_METRICS, section="3 · Compare with",
+            default=DEFAULT_COMPARE_METRICS, section="4 · What to report",
             show_when=((("reference_region", "reference_source"), (ANY_VALUE,)),),
             choices=list(COMPARE_CHOICES),
             label="Report",
@@ -744,7 +749,7 @@ class GlvStatsStep(MultiSourceStep):
         # 舊 recipe 的數字。
         ParamSpec(
             name="exclude_saturated", type="bool", default=False,
-            section="4 · Which pixels count",
+            section="5 · Which pixels count",
             label="Ignore pixels at 0 or 255",
             help=("Pixels stuck at pure black or pure white have already lost "
                   "whatever was in them. Leaving them in pulls the average "
@@ -752,7 +757,7 @@ class GlvStatsStep(MultiSourceStep):
         ),
         ParamSpec(
             name="trim_percent", type="float", default=0.0, min=0.0, max=49.0,
-            unit="%", section="4 · Which pixels count",
+            unit="%", section="5 · Which pixels count",
             label="Trim each end by",
             help=("Throw away this share of the darkest and the brightest "
                   "pixels before measuring. A couple of hot pixels can move "
@@ -761,15 +766,14 @@ class GlvStatsStep(MultiSourceStep):
         ),
         ParamSpec(
             name="min_pixels", type="int", default=0, min=0, max=100000,
-            unit="px", section="4 · Which pixels count",
+            unit="px", section="5 · Which pixels count",
             label="Need at least",
             help=("Below this many pixels the card writes blanks instead of "
                   "numbers, and says so. A spread measured on 20 pixels is "
                   "not wrong so much as meaningless - and it looks exactly "
                   "like a good one. 0 = always measure."),
         ),
-        _prefix_in_output_section(),
-    ]
+        _prefix_in_output_section(),]
     reads = ["test"]
     writes: List[str] = []
     features_out = ["glv_median", "glv_mad", "glv_min", "glv_max"]

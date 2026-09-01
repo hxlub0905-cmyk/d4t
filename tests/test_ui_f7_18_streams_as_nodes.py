@@ -313,12 +313,17 @@ def test_the_source_cannot_be_changed_from_the_card_settings(window):
     以前同一件事有兩個入口 —— 拉線會改它、設定區的下拉也會改它 —— 而兩邊很容易
     對不起來。這條測試同時鎖住「不能改」與「看得到」：唯讀不等於藏起來。
     """
-    from PySide6.QtWidgets import QLineEdit
+    from d4t.ui.wiring_slot import WiringSlot
 
     nid = wire_up(window.model, window.model.add_step("denoise"))
     window.select_node(nid)
     editor = window.param_form.editor("streams")
-    assert isinstance(editor, QLineEdit), "來源欄位還是可編輯的控制項"
-    assert editor.isReadOnly() is True
-    assert editor.text(), "看不到現在接的是哪一條 —— 唯讀不等於藏起來"
-    assert editor.toolTip().strip(), "要講得出去哪裡改（推廣鐵則）"
+    # F68：那一格是**插槽**——挑得動，但挑了是發訊號給 Studio 去動線，
+    # 它自己一個字都不改。要守的那句話沒有變：設定區不是第二個真相。
+    assert isinstance(editor, WiringSlot), "來源欄位還是一個打得進去的文字框"
+    edits = []
+    window.param_form.param_edited.connect(lambda n, v: edits.append(n))
+    editor.wire_requested.emit("ref")
+    assert edits == [], "插槽不可以自己改參數"
+    assert editor.text_value(), "看不到現在接的是哪一條 —— 唯讀不等於藏起來"
+    assert editor.toolTip().strip(), "要講得出這一格是什麼（推廣鐵則）"

@@ -137,7 +137,9 @@ def test_the_region_field_is_read_only_in_the_panel(window):
     window._on_edge_added(src, glv, "single", "source")
     window.select_node(glv)
     editor = window.param_form.editor("roi")
-    assert isinstance(editor, QLineEdit) and editor.isReadOnly()
+    from d4t.ui.wiring_slot import WiringSlot
+    assert isinstance(editor, WiringSlot)
+    assert editor.text_value() == "", "沒接線 —— 那一格要說「量整張圖」"
 
 
 # --------------------------------------------------------------------------- #

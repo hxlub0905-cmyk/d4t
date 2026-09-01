@@ -990,6 +990,34 @@ class RecipeModel:
                     streams.append(w)
         return streams
 
+    def stream_producer(self, name: str,
+                        before_node: Optional[str] = None) -> str:
+        """誰產出影像流 ``name``（沒有人回空字串）—— F68 的插槽用。
+
+        跟 :meth:`region_producer` 是同一個形狀、同一個語意（**上游最後一個**
+        —— 同名的流跟同名的區域一樣是後面那張蓋掉前面那張）。存在的理由也一樣：
+        設定區那一格挑了一個名字之後，要走**跟畫布拉線同一條路**，而那條路
+        需要知道線是從哪一張卡拉出來的。
+        """
+        want = str(name or "").strip()
+        if not want:
+            return ""
+        found = ""
+        for nid in self.node_order:
+            if nid == before_node:
+                break
+            node = self.nodes.get(nid)
+            if node is None or not node.enabled:
+                continue
+            try:
+                step_cls = get_step(node.step)
+                ws = step_cls.resolve_writes_for_kind(node.params, self.kind)
+            except Exception:              # noqa: BLE001 — 顯示用，壞了就跳過
+                continue
+            if want in [str(w) for w in ws]:
+                found = nid
+        return found
+
     def available_regions(self, before_node: Optional[str] = None) -> List[str]:
         """到 before_node（不含）為止定義了哪些具名區域，供下拉用（F11 Region-1）。
 

@@ -205,6 +205,10 @@ RUNTIME_CHOICES = ("sources", "source_images", "source_columns",
                    "main_columns")
 
 #: 值是**影像流名**的型別（畫布上的圓埠 + 實線）。
+#: 一顆輸入埠的**角色**（F68）—— 見 :attr:`ParamSpec.role`。
+MEASURE, REFERENCE = "measure", "reference"
+PORT_ROLES = (MEASURE, REFERENCE)
+
 IMAGE_TYPES = ("image_key", "image_keys")
 
 #: 值是**具名區域名**的型別（畫布上的菱形埠 + 虛線；F12）。
@@ -436,6 +440,19 @@ class ParamSpec:
     #: （新卡的輸入本來就該是空的）—— 一清空就推不回來了。宣告看的是**事實**，
     #: 跟值無關。沒宣告的卡直接註冊失敗，所以之後加的每一張卡都躲不掉。
     direction: str = ""
+    #: 這顆埠在這張卡上**扮演什麼角色**（F68，2026-09-01）：``"measure"``
+    #: （要量的那一個）／``"reference"``（拿來比的那一個）／``""``（沒有角色
+    #: 之分的卡）。只有輸入埠用得到。
+    #:
+    #: 為什麼要一個欄位，而不是從參數名推：``roi`` 與 ``reference_region``
+    #: 在畫布上是**逐位元組相同的兩顆菱形**（`canvas._draw_port` 只拿得到
+    #: `kind`），而唯一的線索——左邊那 52px 的標籤——**接上線之後就變成區域
+    #: 名字**，角色的字消失。於是使用者要拖線的時候，正好沒有任何東西告訴他
+    #: 該拖哪一顆；拖歪了兩個都是合法的區域參數，`_connect_region` 攔不到。
+    #:
+    #: 宣告不推導，跟 :attr:`direction` 同一個理由：推導看的是**值**，而值是
+    #: 會被清空的（剛加進來的卡輸入本來就是空的）—— 一清空就推不回來了。
+    role: str = ""
     #: 這一列預設收起來，按「Show advanced settings」才出現（F8 第六輪）。
     #:
     #: 跟 ``section`` 的差別是**軸不一樣**：``section`` 講「這一列在回答哪個
@@ -517,6 +534,15 @@ class ParamSpec:
                     f"parameter '{self.name}': choices_from only applies to "
                     f"'str' and 'multi_choice' parameters (this one is "
                     f"'{self.type}')")
+        if self.role and self.role not in PORT_ROLES:
+            raise ParamError(
+                f"parameter '{self.name}': unknown role '{self.role}' "
+                f"(allowed: {PORT_ROLES}, or leave it empty)")
+        if self.role and self.direction != "in":
+            raise ParamError(
+                f"parameter '{self.name}': role only applies to input ports - "
+                f"it says which of this card's ports this one is, and only "
+                f"inputs get confused with each other")
         if self.type in IMAGE_TYPES:
             if self.direction not in ("in", "out"):
                 raise ParamError(
@@ -1346,6 +1372,7 @@ class Step(ABC):
                     "section": p.section,
                     "advanced": p.advanced,
                     "direction": p.direction,
+                    "role": p.role,
                     "extent": p.extent,
                     "row_kind": p.row_kind,
                     "choices_from": p.choices_from,

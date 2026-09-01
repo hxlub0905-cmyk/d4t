@@ -547,13 +547,19 @@ def test_renaming_a_stream_on_a_multi_source_card_only_touches_that_one(window):
 # 7. 輸出流的名字是使用者的（F10-7）
 # --------------------------------------------------------------------------- #
 def test_the_result_stream_name_is_editable_but_the_sources_are_not(window):
-    """`write result to` 要打得進去；`a` / `b` 這種**來源**維持唯讀。
+    """`write result to` 要打得進去；`a` / `b` 這種**來源**不是文字框。
 
     使用者回報：「Write result to 沒辦法改名（不給輸入）。」病根是 F9-6 那條
     「來源只在畫布上決定」的規則按**型別**（image_key）套，而輸出名的型別
     一模一樣 —— 那時候還沒有 `direction`，只能連輸出一起鎖住。
+
+    F68 之後來源那幾格是**插槽**（挑得動，但挑了是發訊號給 Studio 去動線，
+    線仍然是唯一的儲存）；輸出名仍然是一個真的文字框，因為那是使用者自己
+    取的名字，不是接線的結果。
     """
     from PySide6.QtWidgets import QLineEdit
+
+    from d4t.ui.wiring_slot import WiringSlot
 
     src = first_source(window)
     sub = window.add_card_after(src, "subtract")
@@ -563,8 +569,9 @@ def test_the_result_stream_name_is_editable_but_the_sources_are_not(window):
 
     for name in ("a", "b"):
         ed = window.param_form.editor(name)
-        assert isinstance(ed, QLineEdit) and ed.isReadOnly(), \
-            "%s 是來源，應該只在畫布上決定" % name
+        assert isinstance(ed, WiringSlot), \
+            "%s 是來源，不該是一個打得進去的文字框" % name
+        assert not isinstance(ed, QLineEdit)
     out = window.param_form.editor("out")
     assert isinstance(out, QLineEdit) and not out.isReadOnly(), \
         "輸出流的名字是使用者自己取的，不該唯讀"

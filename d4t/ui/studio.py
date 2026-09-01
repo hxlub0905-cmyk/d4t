@@ -1446,6 +1446,9 @@ class StudioWindow(QMainWindow):
         self.param_form.action_requested.connect(self._on_param_action)
         self.param_form.source_requested.connect(self._on_source_requested)
         self.param_form.intent_chosen.connect(self._on_intent_chosen)
+        # 設定區的插槽（F68）—— 走的是跟畫布拉線**完全同一條路**。
+        self.param_form.wire_requested.connect(self._on_slot_wire)
+        self.param_form.wire_show_requested.connect(self._on_slot_show)
         self.stream_combo.currentTextChanged.connect(self._on_stream_changed)
         self.stream_combo_b.currentTextChanged.connect(self._on_stream_b_changed)
         self.compare_check.toggled.connect(self.set_compare)
@@ -1869,6 +1872,9 @@ class StudioWindow(QMainWindow):
                         "name": spec.name,
                         "label": spec.label or spec.name,
                         "stream": str(node.params.get(spec.name, "") or ""),
+                        # 這顆埠是「要量的」還是「拿來比的」（F68）——
+                        # 畫布靠它把兩顆同型別的埠分開，見 `canvas._draw_port`。
+                        "role": spec.role,
                     })
                 # 區域也是輸入埠（F12）—— 一張卡用到的每一個具名區域，畫布上
                 # 都要有一條線指到定義它的那張卡。以前這件事只在參數裡，於是
@@ -1881,6 +1887,7 @@ class StudioWindow(QMainWindow):
                         "name": spec.name,
                         "label": spec.label or spec.name,
                         "stream": str(node.params.get(spec.name, "") or ""),
+                        "role": spec.role,          # F68（同上）
                     })
             nodes.append({
                 "node_id": nid,
@@ -3148,10 +3155,14 @@ class StudioWindow(QMainWindow):
         except KeyError:
             describe = None
         streams = self.model.available_streams(before_node=node_id)
+        regions = self.model.available_regions(before_node=node_id)
         self.param_form.set_step(
-            describe, node.params, streams,
-            self.model.available_regions(before_node=node_id),
+            describe, node.params, streams, regions,
             self._dynamic_choices_for(node))
+        # 接線插槽的選單（F68）：**到這張卡為止**上游真的產得出來的那些 ——
+        # 列一個排在自己後面才算出來的東西，選下去就是一份跑不動的 recipe
+        # （同 `_dynamic_choices_for` 裡「插入數字 ▾」那一句的理由）。
+        self.param_form.set_wiring_choices(regions=regions, streams=streams)
         self._sync_source_action(node)
         self._sync_glv_intent(node_id, node)
         self.stack.setCurrentWidget(self.param_form)
@@ -3265,6 +3276,39 @@ class StudioWindow(QMainWindow):
         else:
             node = self.model.nodes.get(nid)
             self._sync_glv_intent(nid, node)   # 套不上：勾選擺回真實狀態
+
+    # ---- 設定區的接線插槽（F68）--------------------------------------------
+    def _on_slot_wire(self, param: str, name: str) -> None:
+        """使用者在插槽的選單裡挑了一個上游的區域／影像流。
+
+        **一行都不自己動 model**：找出誰產出那個名字，然後呼叫畫布拉線走的
+        那兩支（`_connect_region` / `_connect`）—— 於是型別檢查、單一角色埠的
+        「舊線讓位」、`rename_fallout` 那句話、undo、健檢，全部原樣繼承。
+        找不到產出者就什麼都不做（選單本來就只列得出上游有的東西）。
+        """
+        nid = self.selected_node
+        node = self.model.nodes.get(nid) if nid else None
+        if node is None or not name:
+            return
+        try:
+            spec = next(sp for sp in get_step(node.step).params
+                        if sp.name == str(param))
+        except (KeyError, StopIteration):
+            return
+        if spec.is_region_input():
+            src = self.model.region_producer(name, before_node=nid)
+            if src:
+                self._connect_region(src, nid, name, str(param))
+            return
+        src = self.model.stream_producer(name, before_node=nid)
+        if src:
+            self._connect(src, nid, name, str(param))
+
+    def _on_slot_show(self, param: str) -> None:
+        """「在畫布上指給我看」—— 重用既有的 ghost 高亮（不改任何東西）。"""
+        nid = self.selected_node
+        if nid:
+            self.canvas.show_card_ghosts(nid)
 
     def _on_source_requested(self) -> None:
         """入口卡上那顆鈕：附加檔直接開，資料那幾張開一張選單。

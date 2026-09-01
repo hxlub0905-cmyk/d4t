@@ -3775,6 +3775,12 @@ class ParamForm(QWidget):
     #: 「這個參數的值要用別的方式產生」（目前只有 template）。表單不知道那是
     #: 什麼對話框 —— 它只負責把請求送上去，由 Studio 決定要開什麼。
     action_requested = Signal(str)
+    #: 使用者在一格接線插槽上挑了一個上游的區域／影像流：``(參數名, 名字)``。
+    #: **這裡不改任何東西** —— `StudioWindow` 接到之後走跟畫布拉線同一條路
+    #: （F68；線仍然是唯一的儲存）。
+    wire_requested = Signal(str, str)
+    #: 「在畫布上指給我看」：``(參數名,)``。
+    wire_show_requested = Signal(str)
     #: **入口卡的「資料從哪來」**（F14-1）：按下去要開檔案對話框。
     #: 同樣地，表單不知道那是哪一種來源 —— 它送出去，Studio 決定開什麼。
     source_requested = Signal()
@@ -3810,6 +3816,8 @@ class ParamForm(QWidget):
         self._dynamic: Dict[str, List[str]] = {}
         #: 上游定義了哪些具名區域（F11 Region-1）。
         self._regions: List[str] = []
+        #: 插槽選單的內容（F68）：``{"region": [...], "image": [...]}``。
+        self._wiring: Dict[str, List[str]] = {}
         self._describe: Optional[Dict[str, Any]] = None
         self._building = False
         #: 進階參數收起來了嗎（**追明確狀態**，不問 widget —— docs/PITFALLS.md）。
@@ -4320,6 +4328,52 @@ class ParamForm(QWidget):
         "source_columns": "Open the second lot to see its KLARF columns.",
     }
 
+    def _wiring_slot(self, name: str, spec: Dict[str, Any],
+                     value: Any) -> QWidget:
+        """一格接線（F68）—— 見 `d4t/ui/wiring_slot.py`。
+
+        「非接不可」看的是 `ParamSpec.required_input` 的同一個判準（預設值指得
+        出一條流的就是主要輸入）—— 這裡拿 describe 過的 dict，所以自己算一次
+        同一句話：**有預設值的影像輸入**才是紅字的那一種。
+        """
+        from .wiring_slot import IMAGE, REGION, WiringSlot
+
+        ptype = str(spec.get("type", ""))
+        kind = REGION if ptype in ("region_key", "region_keys") else IMAGE
+        required = (kind == IMAGE
+                    and bool(str(spec.get("default", "") or "").strip()))
+        w = WiringSlot(kind, "" if value is None else str(value),
+                       is_reference=str(spec.get("role", "")) == "reference",
+                       required=required)
+        w.set_choices(self._wiring_choices(kind))
+        w.wire_requested.connect(
+            lambda picked, n=name: self.wire_requested.emit(n, picked))
+        w.show_requested.connect(
+            lambda n=name: self.wire_show_requested.emit(n))
+        return w
+
+    def _wiring_choices(self, kind: str) -> List[str]:
+        """插槽選單裡有哪些（Studio 用 :meth:`set_wiring_choices` 餵）。"""
+        return list(self._wiring.get(str(kind), ()))
+
+    def set_wiring_choices(self, regions: Sequence[str] = (),
+                           streams: Sequence[str] = ()) -> None:
+        """告訴表單「**到這張卡為止**上游產得出哪些區域／影像流」（F68）。
+
+        跟 `set_dynamic_choices` 一樣，這是**執行期才知道**的東西，所以由
+        Studio 餵；差別是它不必等使用者打字，換一張卡就算一次。
+        """
+        from .wiring_slot import IMAGE, REGION
+
+        self._wiring = {REGION: [str(r) for r in regions],
+                        IMAGE: [str(x) for x in streams]}
+        for row in self._rows.values():
+            w = row.editor
+            if hasattr(w, "set_choices") and hasattr(w, "wire_requested"):
+                ptype = str(row.spec.get("type", ""))
+                w.set_choices(self._wiring[
+                    REGION if ptype in ("region_key", "region_keys") else IMAGE])
+
     def _runtime_choices(self, spec: Dict[str, Any]) -> Optional[List[str]]:
         """這一格的選項是**執行期來的**嗎（F15-2）。不是就回 None。
 
@@ -4480,8 +4534,10 @@ class ParamForm(QWidget):
             # F9-6：**來源只在畫布上決定**（使用者定調）。以前這裡是一排勾選框，
             # 於是同一件事有兩個入口 —— 拉線會改它、勾選框也會改它 —— 而畫布上
             # 那條線與這裡的勾選很容易對不起來（使用者的原話是「他會很亂連」）。
-            # 現在這一格只**顯示**目前接進來的是哪幾條，改要回畫布上拉線。
-            return _wiring_display("" if value is None else str(value))
+            # F68：那一格從「假的輸入框」變成**插槽**——同一顆埠的形狀、
+            # 沒接線時講後果、而且可以直接挑一個上游的流（挑了之後由 Studio
+            # 走跟拉線同一條路，線仍然是唯一的儲存）。
+            return self._wiring_slot(name, spec, value)
 
         if ptype in ("region_key", "region_keys"):
             # F12：**區域的來源也只在畫布上決定**，跟影像流一模一樣。
@@ -4493,7 +4549,8 @@ class ParamForm(QWidget):
             #
             # 現在區域在畫布上是一顆菱形埠 + 一條虛線，這一格只顯示接的是什麼。
             # 理由與 F9-6 對 image_keys 做的事逐字相同（「他會很亂連」）。
-            return _wiring_display("" if value is None else str(value))
+            # F68：改成插槽（見上面那一格的說明）。
+            return self._wiring_slot(name, spec, value)
 
         if ptype == "multi_choice":
             choices = (runtime if runtime is not None
@@ -4551,6 +4608,7 @@ class ParamForm(QWidget):
             return w
 
         if ptype == "image_key" and spec.get("direction") != "out":
+            # F68：同上（單一角色的影像埠，例如「Ref image」）。
             # 同上（F9-6）：來源是接線的結果，不是這裡填的。
             #
             # ⚠ **只有輸入是唯讀的**（F10-7）。`write result to`（`out`）型別
@@ -4558,7 +4616,7 @@ class ParamForm(QWidget):
             # 使用者自己取的名字，不是接線的結果，唯讀等於「不給改」。
             # F9-6 那時候還沒有 `direction`，所以只能連輸出一起鎖住；使用者
             # 回報「Write result to 沒辦法改名（不給輸入）」就是這個。
-            return _wiring_display("" if value is None else str(value))
+            return self._wiring_slot(name, spec, value)
 
         w = QLineEdit()
         w.setText("" if value is None else str(value))
@@ -4569,7 +4627,7 @@ class ParamForm(QWidget):
 # --------------------------------------------------------------------------- #
 # 2b. CurveEditor —— 自己拉的色調曲線（F7-8）
 # --------------------------------------------------------------------------- #
-def _wiring_display(text: str) -> QWidget:
+def _wiring_display(text: str) -> QWidget:      # pragma: no cover - F68 之後沒人叫
     """「這條流從哪來」的**唯讀**顯示（F9-6）。
 
     為什麼是唯讀：來源改成**只在畫布上決定**。以前參數表單也能改，於是同一件事
