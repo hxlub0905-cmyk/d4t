@@ -1687,3 +1687,54 @@ def test_every_size_metric_the_card_offers_has_a_face(qapp):
     # **不要用 ``Shape``** —— 那個字在 GLV 那邊已經是偏度那一群了。
     assert groups == {"Size", "Outline"}
     assert "Shape" not in groups
+
+
+# --------------------------------------------------------------------------- #
+# F68 收尾：浮點欄位的小數位跟著範圍走
+# --------------------------------------------------------------------------- #
+def test_a_sigma_threshold_is_not_printed_with_three_decimals(qapp):
+    """`0.000 σ` 的三位小數不是精度，是雜訊 —— 而且讓人以為那格要填那麼細。"""
+    from d4t.ui.widgets import _float_decimals
+
+    # px / % / σ / 灰階 那一族：一位就夠
+    assert _float_decimals(0.0, 99.0, 0.0) == 1        # over_k、mark_pixels_k
+    assert _float_decimals(0.0, 49.0, 0.0) == 1        # trim_percent
+    assert _float_decimals(-255.0, 510.0, 0.0) == 1    # tone.brightness
+
+    # 本來就在細部的那一族**不准變粗**（砍掉小數位它就填不進去了）
+    assert _float_decimals(0.01, 999999.99, 1.0) == 3  # nm_per_px
+    assert _float_decimals(0.1, 4.9, 1.0) == 3         # gamma
+    assert _float_decimals(-1.0, 2.0, 0.0) == 3        # min_score
+    assert _float_decimals(0.0, 1.0, 0.5) == 3         # flatten.strength
+
+
+def test_the_field_never_shows_a_coarser_number_than_the_recipe_holds(qapp):
+    """**顯示不准比 recipe 裡的值粗。**
+
+    QDoubleSpinBox 會把值捨進它的位數 —— 手寫 recipe 填了 2.55 而欄位只有一位
+    的話，畫面上是 2.6，而使用者不會知道自己看到的不是檔案裡的東西。
+    """
+    from d4t.ui.widgets import _float_decimals
+
+    assert _float_decimals(0.0, 49.0, 2.55) == 2
+    assert _float_decimals(0.0, 99.0, 4.125) == 3
+    assert _float_decimals(0.0, 99.0, 3.0) == 1, "整數不必為此加位數"
+
+
+def test_the_real_form_shows_the_value_it_was_given(qapp):
+    """走真的那條路（describe → 表單 → 讀回來），不是只打那支純函式。"""
+    from PySide6.QtWidgets import QDoubleSpinBox
+
+    from d4t.core.pipeline import get_step
+    import d4t.core.steps  # noqa: F401
+
+    form = widgets_mod.ParamForm()
+    card = get_step("glv_stats")
+    form.set_step(card.describe(),
+                  card.validate_params({"source": "test", "across_boxes":
+                                        "each box", "over_k": 2.55}),
+                  ["test"])
+    box = form.editor("over_k")
+    assert isinstance(box, QDoubleSpinBox)
+    assert box.value() == pytest.approx(2.55), "值不可以被欄位捨掉"
+    assert "0.000" not in box.text()

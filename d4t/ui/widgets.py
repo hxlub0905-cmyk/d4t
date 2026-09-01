@@ -3866,7 +3866,9 @@ class ParamForm(QWidget):
         self._intent_row = QWidget(self)
         self._intent_row.setObjectName("intentRow")
         irow = QVBoxLayout(self._intent_row)
-        irow.setContentsMargins(2, 0, 8, 4)
+        # 上緣留白：卡片那句說明的下緣與這一排的標題（14px/700）之間原本只有
+        # 版面的 8px，兩行字擠在一起（F68 截圖上看得到）。
+        irow.setContentsMargins(2, 6, 8, 4)
         irow.setSpacing(2)
         self._intent_title = QLabel("", self._intent_row)
         self._intent_title.setObjectName("paramTitle")
@@ -4496,10 +4498,10 @@ class ParamForm(QWidget):
 
         if ptype == "float":
             w = QDoubleSpinBox()
-            w.setDecimals(3)
+            span = None if (lo is None or hi is None) else float(hi) - float(lo)
+            w.setDecimals(_float_decimals(lo, span, value))
             w.setRange(float(lo) if lo is not None else -1e9,
                        float(hi) if hi is not None else 1e9)
-            span = None if (lo is None or hi is None) else float(hi) - float(lo)
             w.setSingleStep(0.01 if (span is not None and span <= 2.0) else 0.1)
             if unit:
                 w.setSuffix(" " + unit)
@@ -4627,6 +4629,38 @@ class ParamForm(QWidget):
 # --------------------------------------------------------------------------- #
 # 2b. CurveEditor —— 自己拉的色調曲線（F7-8）
 # --------------------------------------------------------------------------- #
+def _float_decimals(lo: Any, span: Optional[float], value: Any) -> int:
+    """一個浮點欄位要顯示幾位小數（F68）。
+
+    以前一律 3 位，於是「超過幾 σ」印成 ``0.000 σ``、「靠邊幾 px」印成
+    ``0.000 px`` —— 三位小數在那些欄位上不是精度，是雜訊（而且讓人以為
+    那一格需要那麼細）。
+
+    規矩跟**已經存在的** step 一樣看範圍（`setSingleStep` 那一行）：
+
+    * 下界是一個**小於 1 的正數** → 3 位。那種欄位本來就在細部
+      （``nm_per_px`` 的 0.01、``gamma`` 的 0.1），砍掉小數位會讓它填不進去。
+    * 範圍 ≤ 2 → 3 位（``min_score`` 的 −1…1 那種）。
+    * 其餘 → 1 位（px、%、σ、灰階）。
+
+    ⚠ **但顯示不准比 recipe 裡的值粗**：手寫 recipe 填了 ``2.55`` 的話，
+    位數要夠寫得出它 —— 不然畫面上是 ``2.6``，而那是一個安靜的謊
+    （QDoubleSpinBox 會把值捨進它的位數）。
+    """
+    if lo is not None and 0.0 < abs(float(lo)) < 1.0:
+        want = 3
+    elif span is not None and span <= 2.0:
+        want = 3
+    else:
+        want = 1
+    try:
+        text = ("%.6f" % float(value)).rstrip("0")
+        have = len(text.split(".")[1]) if "." in text else 0
+    except (TypeError, ValueError):
+        have = 0
+    return max(want, min(have, 6))
+
+
 def _wiring_display(text: str) -> QWidget:      # pragma: no cover - F68 之後沒人叫
     """「這條流從哪來」的**唯讀**顯示（F9-6）。
 
