@@ -26,17 +26,29 @@ from d4t.core.pipeline.recipe import (RECIPE_VERSION, DecideSpec, Let, Rule,
 from d4t.core.steps._util import centre_name, others_name
 from d4t.core.steps.glv_stats import EACH_BOX, POOLED
 
-#: GLV 卡最上面那三顆「我要量什麼」（PR-2 2a）。**preset 不是參數**：recipe
-#: 沒有新欄位，選了只動 roi / reference_region 兩條線與 reference /
-#: across_boxes 兩格 —— 存出來的 JSON 跟手拉線、手填格的逐位元組相同。
-#: （id, 顯示字, 一句話）；字在這裡一份，ParamForm 只負責畫。
-GLV_INTENTS: Tuple[Tuple[str, str, str], ...] = (
-    ("defect_box", "The defect's box",
-     "Measure the centred box, judged against the other boxes."),
-    ("oddest_box", "The most unusual box",
-     "Measure every box and report the odd one out."),
-    ("region_stats", "The whole region",
-     "Pool every box into one pile of pixels."),
+#: GLV 卡最上面那三顆「要量什麼」（PR-2 2a）。**preset 不是參數**：recipe
+#: 沒有新欄位，選了只動 roi / reference_region 兩條線與 across_boxes 那一格
+#: —— 存出來的 JSON 跟手拉線、手填格的逐位元組相同。
+#: （id, 顯示字, 一句話, 圖示名）；字在這裡一份，ParamForm 只負責畫。
+#:
+#: **用字**（F68 第三輪，使用者：「我覺得他有一點太口語」）：三顆鈕原本是
+#: 「The defect's box」／「The most unusual box」／「The whole region」——
+#: 帶冠詞的口語短句，跟底下每一格的膠囊（``Pooled`` / ``Each box`` /
+#: ``Brightest``）不是同一種語氣。現在是名詞片語，而且用的是這張卡自己的詞
+#: （``odd box out`` 就是 ``Pick the odd one by`` 那一格在挑的東西）。
+#:
+#: **圖示是底下那幾格的圖**（不是另外畫三張）：這一排是那幾格的捷徑，
+#: 圖一樣才看得出「按這一顆＝把那幾格設成這樣」。
+GLV_INTENTS: Tuple[Tuple[str, str, str, str], ...] = (
+    ("defect_box", "Defect box",
+     "Measure the centred box, judged against the other boxes.",
+     "pick_centre"),
+    ("oddest_box", "Odd box out",
+     "Measure every box and report the odd one out.",
+     "boxes_each"),
+    ("region_stats", "Whole region",
+     "Pool every box into one pile of pixels.",
+     "boxes_pooled"),
 )
 
 #: 比對不上任何 preset 時顯示的狀態 id。

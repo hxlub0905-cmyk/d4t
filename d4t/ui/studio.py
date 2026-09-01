@@ -3262,7 +3262,7 @@ class StudioWindow(QMainWindow):
         # （`glv_intent_note`）—— 這裡只負責畫。
         note = self.model.glv_intent_note(node_id)
         self.param_form.set_intent_row(
-            "What do I want to measure?", GLV_INTENTS,
+            "What to measure", GLV_INTENTS,
             current, note=note, enabled=wired)
 
     def _on_intent_chosen(self, intent: str) -> None:

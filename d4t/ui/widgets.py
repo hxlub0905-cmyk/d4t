@@ -26,7 +26,8 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
-from PySide6.QtCore import QMimeData, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import (QEvent, QMimeData, QPointF, QRectF, QSize, Qt,
+                            Signal)
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -3007,6 +3008,12 @@ class _ChipBase(QFrame):
     #: 虛線框（「這裡還沒有東西」）—— 只有「再加一顆」那種膠囊會打開。
     dashed = False
 
+    #: **按了不自己改狀態**：發出訊號，勾不勾由呼叫端下一次重畫時決定。
+    #: 用在 preset 那一排（「照這個意思把線接好」）—— 那一排再按一次不該把它
+    #: 取消（取消要回到哪個狀態？沒有答案），而套不上的時候畫面要停在真實
+    #: 狀態上，不是停在使用者按下去的那一顆。
+    momentary = False
+
     def __init__(self, mid: str, label: str, colour: str,
                  checked: bool = False, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -3057,17 +3064,47 @@ class _ChipBase(QFrame):
             self.click()
 
     def click(self) -> None:
-        """切換這一顆（測試直接呼叫這支，不模擬滑鼠）。"""
+        """切換這一顆（測試直接呼叫這支，不模擬滑鼠）。
+
+        **灰掉的時候什麼都不做。** Qt 只擋得住滑鼠事件；直接呼叫這支的路
+        （測試、鍵盤）擋不到，而「按了灰的鈕居然生效」是最難查的那種。
+        """
+        if not self.isEnabled():
+            return
+        if self.momentary:
+            self.toggled.emit(self.mid, True)
+            return
         self._checked = not self._checked
         self.update()
         self.toggled.emit(self.mid, self._checked)
+
+    def changeEvent(self, e) -> None:      # noqa: D102 - Qt hook
+        if e.type() == QEvent.EnabledChange:
+            self.setCursor(Qt.PointingHandCursor if self.isEnabled()
+                           else Qt.ArrowCursor)
+            self.update()
+        super().changeEvent(e)
 
     def paintEvent(self, _e) -> None:      # noqa: D102 - Qt hook
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         rad = r.height() / 2.0
-        if self._checked:
+        if not self.isEnabled():
+            # 灰掉 = **這一格現在還不能答**（例：roi 那條線還沒接）。
+            # 選中的那一顆**照樣看得出是選中的**（它是現在的狀態，不是一個
+            # 待選項）—— 只是整顆退色。
+            bg = QColor(self.colour if self._checked else TOKENS["bg_surface"])
+            if self._checked:
+                bg.setAlpha(16)
+            border = QColor(self.colour if self._checked
+                            else TOKENS["border_default"])
+            if self._checked:
+                border.setAlpha(110)
+            ink = QColor(TOKENS["text_disabled"])
+            dim = QColor(ink)
+            dim.setAlpha(90)
+        elif self._checked:
             bg = QColor(self.colour)
             bg.setAlpha(42 if self._hover else 30)
             border = QColor(self.colour)
@@ -3082,7 +3119,7 @@ class _ChipBase(QFrame):
             ink = QColor(TOKENS["text_secondary"])
             dim = QColor(TOKENS["text_hint"])
             dim.setAlpha(110)
-        pen = QPen(border, 1.4 if self._checked else 1.0)
+        pen = QPen(border, 1.4 if (self._checked and self.isEnabled()) else 1.0)
         if self.dashed:
             pen.setStyle(Qt.DashLine)     # 虛線 = 這裡還沒有東西，按了才長出來
         p.setBrush(QBrush(bg))
@@ -3975,7 +4012,11 @@ class ParamForm(QWidget):
         irow.addWidget(self._intent_title)
         btns = QHBoxLayout()
         btns.setSpacing(6)
-        self._intent_btns: Dict[str, QPushButton] = {}
+        # 最後那一格彈簧**建一次就好**：膠囊靠左排（跟設定區每一排一樣），
+        # 沒有它的話 QHBoxLayout 會把多出來的寬度攤在膠囊之間 —— 三顆固定寬度
+        # 的東西被推得老遠，看起來不像同一排。
+        btns.addStretch(1)
+        self._intent_btns: Dict[str, "_ChoiceChip"] = {}
         self._intent_btn_row = btns
         irow.addLayout(btns)
         self._intent_note = QLabel("", self._intent_row)
@@ -4039,30 +4080,47 @@ class ParamForm(QWidget):
                        enabled: bool = True) -> None:
         """卡最上面的「我要量什麼」三選（PR-2 2a）。``title=""`` = 沒有這排。
 
-        ``options`` 是 ``(id, 顯示字, 一句話)``；``current_id`` 對不上任何
-        id（例 ``"custom"``）就一顆都不勾 —— **不強制改**，自訂是一個合法
-        的狀態。``enabled=False``（roi 還沒接線）時鈕全部灰掉，note 講原因。
+        ``options`` 是 ``(id, 顯示字, 一句話, 圖示名)``；``current_id`` 對不上
+        任何 id（例 ``"custom"``）就一顆都不勾 —— **不強制改**，自訂是一個合法
+        的狀態。``enabled=False``（roi 還沒接線）時整排灰掉，note 講原因。
+
+        **長相跟設定區的膠囊一模一樣**（F68 第三輪，使用者：「最上方的
+        What do I want to measure 也是」）。它問的是同一種問題（幾個答案挑
+        一個），長成另一種東西只會讓人以為那是別的機制 —— 而它其實正是底下
+        那幾格的捷徑：三顆膠囊的圖就是它們會設成的那幾格的圖。
         """
         title = str(title or "")
-        # 重建鈕（選項是呼叫端給的，張數可能變）。
+        # 重建（選項是呼叫端給的，張數可能變）。
+        #
+        # ⚠ **`deleteLater()` 不夠，要先 `setParent(None)`。** 延遲刪除要等
+        # 事件圈的 DeferredDelete 那一趟，而在那之前那幾顆**還在畫面上**，
+        # 停在上一次版面給它們的位置 —— 這一排是有 stretch 的，面板一換寬度
+        # 位置就變，於是舊的那幾顆變成疊在標題與新膠囊上的鬼影
+        # （F68 第三輪 render 出來才看到；以前是 QPushButton 時同一個 bug，
+        # 只是每次寬度都一樣所以完美重疊，看不出來）。
         for btn in self._intent_btns.values():
             self._intent_btn_row.removeWidget(btn)
+            btn.setParent(None)
             btn.deleteLater()
         self._intent_btns = {}
         self._intent_title.setText(title)
+        colour = theme.group_hex("measure")
         if title:
-            for iid, label, help_line in options:
-                btn = QPushButton(str(label), self._intent_row)
-                btn.setObjectName("intentChoice")
-                btn.setCheckable(True)
-                btn.setCursor(Qt.PointingHandCursor)
-                btn.setToolTip(str(help_line))
-                btn.setChecked(str(iid) == str(current_id))
-                btn.setEnabled(bool(enabled))
-                btn.clicked.connect(
-                    lambda _=False, i=str(iid): self.intent_chosen.emit(i))
-                self._intent_btn_row.addWidget(btn)
-                self._intent_btns[str(iid)] = btn
+            for iid, label, help_line, icon in options:
+                chip = _ChoiceChip(str(iid), str(icon), colour,
+                                   str(iid) == str(current_id),
+                                   self._intent_row, tip=str(help_line),
+                                   label=str(label))
+                chip.momentary = True          # 見 `_ChipBase.momentary`
+                chip.setEnabled(bool(enabled))
+                # **不是 toggle**：這一排是 preset，按下去等於「照這個意思
+                # 把線接好」，而**再按一次不該把它取消**（取消要回到哪個狀態？
+                # 沒有答案）。所以只接「按了」，勾不勾由 `current_id` 決定。
+                chip.toggled.connect(
+                    lambda _v, _on, i=str(iid): self.intent_chosen.emit(i))
+                self._intent_btn_row.insertWidget(len(self._intent_btns),
+                                                  chip)   # 彈簧留在最後
+                self._intent_btns[str(iid)] = chip
         self._intent_note.setText(str(note or ""))
         self._intent_note.setVisible(bool(note))
         self._intent_shown = bool(title)
@@ -4071,8 +4129,8 @@ class ParamForm(QWidget):
     def has_intent_row(self) -> bool:
         return bool(getattr(self, "_intent_shown", False))
 
-    def intent_buttons(self) -> Dict[str, QPushButton]:
-        """測試 API：id → 鈕。"""
+    def intent_buttons(self) -> Dict[str, "_ChoiceChip"]:
+        """測試 API：id → 那一顆膠囊。"""
         return dict(self._intent_btns)
 
     def source_button(self) -> QPushButton:

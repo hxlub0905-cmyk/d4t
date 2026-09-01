@@ -74,6 +74,15 @@ ratio／contrast／overlap 挑，挑到的格跟照絕對統計量挑**一模一
 `test_card_invariants` 的「改參數要讓快取失效」只認得 `choice`，
 `icon_choice` 從來沒被蓋到；現在三種都算，覆蓋率比這一輪之前還高。
 
+**最上面那一排 preset 也一起**（第四輪，使用者：「最上方的 What do I want to
+measure 也是，而且我覺得他有一點太口語」）：三顆鈕變成同一種膠囊，而**圖就是
+它們會設成的那幾格的圖**（那一排是捷徑，圖一樣才看得出來；兩張表由一支測試
+對起來）。字從帶冠詞的口語短句改成名詞片語，用的是這張卡自己的詞
+（`Odd box out` ＝ `Pick the odd one by` 在挑的東西）。膠囊多兩個狀態：灰掉
+（線還沒接）與 momentary（preset 不是開關）。⚠ 換過來的時候掉出一個**以前
+就在**的 bug：重建那一排只做 `deleteLater()`，而在事件圈跑到之前舊的那幾顆
+還在畫面上 —— 以前是按鈕、每次寬度一樣所以完美重疊，看不出來。
+
 黃金值三份逐項相同。計畫書：
 [`docs/plans/F68-glv-defect-hunting.md`](docs/plans/F68-glv-defect-hunting.md)。
 

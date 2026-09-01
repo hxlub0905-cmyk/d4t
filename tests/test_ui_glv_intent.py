@@ -150,19 +150,116 @@ def test_without_a_roi_wire_the_preset_refuses(qapp):
     assert m.glv_intent(glv) == GLV_INTENT_CUSTOM
 
 
-def test_the_form_row_shows_the_three_choices(qapp):
-    """表單那一排：三顆鈕、當前的那顆勾著、custom 一顆都不勾。"""
+# --------------------------------------------------------------------------- #
+# F68 第三輪：這一排也是膠囊（使用者：「最上方的 What do I want to measure
+# 也是，而且我覺得他有一點太口語」）
+# --------------------------------------------------------------------------- #
+def test_the_preset_row_is_the_same_pill_as_everything_else(qapp):
+    """一排選項在這張卡上只有一種長相 —— 兩種的話使用者要學兩次。"""
+    from d4t.ui import widgets as widgets_mod
+
+    form = widgets_mod.ParamForm()
+    form.set_intent_row("What to measure", GLV_INTENTS, "oddest_box")
+    chips = list(form.intent_buttons().values())
+    assert chips and all(isinstance(c, widgets_mod._ChipBase) for c in chips)
+    assert all(c.icon in widgets_mod.GLYPH_ICONS for c in chips)
+
+
+def test_a_preset_wears_the_picture_of_the_row_it_sets(qapp):
+    """三顆的圖**就是底下那幾格的圖**，不是另外畫的三張。
+
+    這一排是那幾格的捷徑，圖一樣才看得出「按這一顆＝把那幾格設成這樣」。
+    兩張表因此要對得起來 —— 各畫各的那天，同一件事在同一張卡上有兩張圖。
+    """
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import get_step
+    from d4t.core.steps.glv_stats import EACH_BOX, POOLED
+
+    icons = {row[0]: row[3] for row in GLV_INTENTS}
+    spec = {p.name: p for p in get_step("glv_stats").params}["across_boxes"]
+    by_value = dict(zip(spec.choices, spec.icons))
+    assert icons["oddest_box"] == by_value[EACH_BOX]
+    assert icons["region_stats"] == by_value[POOLED]
+
+
+def test_the_words_are_not_chatty(qapp):
+    """使用者：「我覺得他有一點太口語。」
+
+    帶冠詞的口語短句（「The most unusual box」）跟底下每一格的膠囊
+    （`Pooled` / `Each box` / `Brightest`）不是同一種語氣，而它們就排在
+    上下兩公分內。
+    """
+    labels = {row[0]: row[1] for row in GLV_INTENTS}
+    assert labels == {"defect_box": "Defect box",
+                      "oddest_box": "Odd box out",
+                      "region_stats": "Whole region"}
+    for text in labels.values():
+        assert not text.lower().startswith(("the ", "a ", "my ")), text
+
+
+def test_pressing_the_one_already_picked_does_not_unpick_it(qapp):
+    """preset 不是開關：再按一次要**回到哪個狀態**沒有答案。"""
     from d4t.ui.widgets import ParamForm
 
     form = ParamForm()
-    form.set_intent_row("What do I want to measure?", GLV_INTENTS,
-                        "oddest_box")
+    seen = []
+    form.intent_chosen.connect(seen.append)
+    form.set_intent_row("What to measure", GLV_INTENTS, "oddest_box")
+    form.intent_buttons()["oddest_box"].click()
+    assert seen == ["oddest_box"], "照樣要發訊號（套一次是冪等的）"
+    assert form.intent_buttons()["oddest_box"].is_checked(), \
+        "畫面要停在真實狀態上，不是停在使用者按下去的那一顆"
+
+
+def test_a_greyed_out_preset_does_nothing(qapp):
+    """roi 那條線還沒接的時候整排灰掉 —— 而灰掉的東西按了不可以生效。
+
+    Qt 只擋得住滑鼠事件；直接呼叫的路（鍵盤、測試）擋不到。
+    """
+    from d4t.ui.widgets import ParamForm
+
+    form = ParamForm()
+    seen = []
+    form.intent_chosen.connect(seen.append)
+    form.set_intent_row("What to measure", GLV_INTENTS, "defect_box",
+                        note="wire a region in first", enabled=False)
+    form.intent_buttons()["oddest_box"].click()
+    assert seen == []
+
+
+def test_rebuilding_the_row_leaves_no_ghosts(qapp):
+    """**這一條是那個 bug 本身。**
+
+    `deleteLater()` 要等事件圈的 DeferredDelete 那一趟，而在那之前舊的那幾顆
+    還在畫面上、停在上一次版面給它們的位置。這一排有彈簧，面板一換寬度位置
+    就變 —— 於是舊的疊在標題與新膠囊上（render 出來才看到）。
+    """
+    from d4t.ui import widgets as widgets_mod
+
+    form = widgets_mod.ParamForm()
+    form.resize(520, 300)
+    form.set_intent_row("What to measure", GLV_INTENTS, "oddest_box")
+    qapp.processEvents()
+    form.resize(760, 300)
+    form.set_intent_row("What to measure", GLV_INTENTS, "defect_box")
+    qapp.processEvents()
+    alive = form._intent_row.findChildren(widgets_mod._ChipBase)
+    assert len(alive) == len(GLV_INTENTS), \
+        "上一批膠囊還掛在那一排上（%d 顆）" % len(alive)
+
+
+def test_the_form_row_shows_the_three_choices(qapp):
+    """表單那一排：三顆膠囊、當前的那顆勾著、custom 一顆都不勾。"""
+    from d4t.ui.widgets import ParamForm
+
+    form = ParamForm()
+    form.set_intent_row("What to measure", GLV_INTENTS, "oddest_box")
     btns = form.intent_buttons()
-    assert set(btns) == {i for i, _l, _h in GLV_INTENTS}
-    assert btns["oddest_box"].isChecked()
-    assert not btns["defect_box"].isChecked()
-    form.set_intent_row("What do I want to measure?", GLV_INTENTS,
+    assert set(btns) == {row[0] for row in GLV_INTENTS}
+    assert btns["oddest_box"].is_checked()
+    assert not btns["defect_box"].is_checked()
+    form.set_intent_row("What to measure", GLV_INTENTS,
                         GLV_INTENT_CUSTOM, note="custom")
-    assert not any(b.isChecked() for b in form.intent_buttons().values())
+    assert not any(b.is_checked() for b in form.intent_buttons().values())
     form.set_step(None, {}, [])
     assert form.has_intent_row() is False, "換卡要清掉 —— 別張卡不出現這排"

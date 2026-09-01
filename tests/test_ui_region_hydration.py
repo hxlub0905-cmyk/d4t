@@ -364,13 +364,13 @@ def test_the_intent_row_says_what_the_buttons_leave_out(window):
     window.select_node(glv)
     form = window.param_form
     assert form.has_intent_row()
-    assert form.intent_buttons()["region_stats"].isChecked()
+    assert form.intent_buttons()["region_stats"].is_checked()
     assert window.model.glv_intent_note(glv) == "", "三顆鈕已經說完了"
 
     # 接一條參照**流** —— 鈕不覆蓋那一軸，所以那行字要補上它
     window.model.set_param(glv, "reference_source", "ref")
     window.select_node(glv)
-    assert form.intent_buttons()["region_stats"].isChecked(), \
+    assert form.intent_buttons()["region_stats"].is_checked(), \
         "跟另一張圖比是疊上去的第二個問題，不是第四種形狀"
     assert window.model.glv_intent_note(glv) == \
         "measuring epi, compared against epi @ ref."
@@ -378,7 +378,7 @@ def test_the_intent_row_says_what_the_buttons_leave_out(window):
     # 接一條參照**區域**（不是 `_center` 那組）—— 三顆都對不上
     window._on_edge_added(gds, glv, "mg", "reference_region")
     window.select_node(glv)
-    assert not any(b.isChecked() for b in form.intent_buttons().values())
+    assert not any(b.is_checked() for b in form.intent_buttons().values())
     assert window.model.glv_intent_note(glv) == \
         "custom - measuring epi, compared against mg @ ref."
 

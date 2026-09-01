@@ -99,7 +99,7 @@ def test_the_preset_of_every_combination_is_the_table(combo):
 
 def test_the_table_really_covers_all_three_presets():
     """反向：表上少了一顆鈕的話，上面那支會全綠而它什麼都沒證明。"""
-    assert set(PRESET_ROWS.values()) == {i for i, _l, _h in GLV_INTENTS}
+    assert set(PRESET_ROWS.values()) == {row[0] for row in GLV_INTENTS}
 
 
 # --------------------------------------------------------------------------- #
