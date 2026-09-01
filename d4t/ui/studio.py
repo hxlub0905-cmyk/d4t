@@ -130,7 +130,7 @@ from .scope import (
     unsupported_kind_message, visible_steps,
 )
 from .decide_panel import DecidePanel
-from .viewmodel import (GLV_INTENT_CUSTOM, GLV_INTENTS, RecipeModel,
+from .viewmodel import (GLV_INTENTS, RecipeModel,
                         is_a_constant_expression, accuracy_at, histogram,
                         rebin)
 from . import theme
@@ -3247,11 +3247,9 @@ class StudioWindow(QMainWindow):
             return
         wired = bool(self.model._glv_region_edges(node_id, "roi"))
         current = self.model.glv_intent(node_id)
-        note = ""
-        if not wired:
-            note = "Wire a Region card into “Region” first."
-        elif current == GLV_INTENT_CUSTOM:
-            note = "custom - the settings match none of the three."
+        # **鈕 ＋ 這句話 = 這張卡真的在做的事**（F67 續）。要說什麼住在 model
+        # （`glv_intent_note`）—— 這裡只負責畫。
+        note = self.model.glv_intent_note(node_id)
         self.param_form.set_intent_row(
             "What do I want to measure?", GLV_INTENTS,
             current, note=note, enabled=wired)

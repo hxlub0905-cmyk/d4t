@@ -1305,6 +1305,83 @@ class RecipeModel:
                 return "region_stats"
         return GLV_INTENT_CUSTOM
 
+    def glv_wiring_words(self, node_id: str) -> str:
+        """這張 GLV 卡**現在真的在做什麼**，一句話（F67 續，2026-09-01）。
+
+        三顆 preset 鈕講的是**形狀**（量哪一格、比不比另一塊），而卡片上還有
+        兩件事它們不講：量的是哪一塊（名字）、以及**跟哪一張圖比**。所以
+        「custom」那個狀態以前只說得出「三個都對不上」—— 使用者要自己回頭看
+        線才知道差在哪，而那正是這一輪在收的那種「畫面說一半」。
+
+        句子由**線**組出來（`roi` / `reference_region` 是線水合的值，
+        `reference_source` 是那顆圓埠），所以它不可能跟畫布不一致。參照那一塊
+        怎麼稱呼問卡片自己（`GlvStatsStep.reference_label`）—— 面板、
+        `ctx.meta`、這句話三個地方同一份字。
+
+        例：``measuring epi_center, compared against epi_others``、
+        ``measuring epi, box by box``、
+        ``measuring the image, compared against the image @ ref``。
+        """
+        node = self.nodes.get(str(node_id))
+        if node is None or node.step != "glv_stats":
+            return ""
+        params = dict(node.params)
+        rois = [r.strip() for r in str(params.get("roi", "") or "").split(",")
+                if r.strip()]
+        # **沒挑區域講「the image」**，跟卡片自己那幾句話一字不差
+        # （`glv_stats` 的 warn、`compares` 的鍵、`cd` 的訊息都用這個字）。
+        # 這句話裡它會跟參照那半邊並排出現，兩種寫法會讀起來像兩件事。
+        parts = ["measuring %s" % (" and ".join(rois) if rois else "the image")]
+        if str(params.get("across_boxes", POOLED) or POOLED) == EACH_BOX:
+            parts.append("box by box")
+        label = get_step("glv_stats").reference_label(params)
+        if label:
+            parts.append("compared against %s" % label)
+        return ", ".join(parts)
+
+    def glv_compares_across_images(self, node_id: str) -> bool:
+        """參照那顆**流**埠接了線嗎 —— 三顆 preset 鈕不覆蓋的那一軸（F67 續）。
+
+        為什麼它不進 :meth:`glv_intent`：跟另一張圖比是**疊在**那三種形狀上的
+        第二個問題（同一塊 patch vs ref 的那一塊），不是第四種形狀 —— 把它算進
+        去的話，最常見的一種設定會顯示成「custom」，而 custom 應該留給真的對不
+        上的東西。但畫面不能因此少講一件事，所以 note 會把整句話說出來。
+        """
+        node = self.nodes.get(str(node_id))
+        if node is None or node.step != "glv_stats":
+            return False
+        return bool(str(node.params.get("reference_source", "") or "").strip())
+
+    def glv_intent_note(self, node_id: str) -> str:
+        """那排 preset 底下那一行字（沒有話要說就是空字串）—— F67 續。
+
+        規則只有三句，而它們合起來是一條不變量：**鈕 ＋ 這句話 ＝ 這張卡真的
+        在做的事**。
+
+        =============================  ========================================
+        還沒接 ``roi``                 講怎麼開始（三顆鈕這時是灰的）
+        對不上任何一顆（custom）       ``custom - <現在真的在做什麼>``
+        對得上、但接了參照**流**       整句話 —— 那一軸三顆鈕不覆蓋
+        =============================  ========================================
+
+        住在 model 而不是 `StudioWindow`：這是**內容**（要說什麼），而
+        `studio.py` 留給接線（`CLAUDE.md` §4）。順帶讓它測得起來 —— 80 種
+        排列組合各斷言一次，不必為了讀一行字開 80 次視窗。
+        """
+        node = self.nodes.get(str(node_id))
+        if node is None or node.step != "glv_stats":
+            return ""
+        if not self._glv_region_edges(node_id, "roi"):
+            return "Wire a Region card into “Region” first."
+        words = self.glv_wiring_words(node_id)
+        if self.glv_intent(node_id) == GLV_INTENT_CUSTOM:
+            return "custom - %s." % words
+        if self.glv_compares_across_images(node_id):
+            # 對得上某一顆鈕，但那顆鈕不覆蓋「跟哪一張圖比」——
+            # 少講一件事跟講錯一件事一樣糟。
+            return "%s." % words
+        return ""
+
     def apply_glv_intent(self, node_id: str, intent: str) -> bool:
         """套一個 preset：只動 roi / reference_region 的線與 reference /
         across_boxes 兩格，**一次 Ctrl+Z 全還原**（compound）。

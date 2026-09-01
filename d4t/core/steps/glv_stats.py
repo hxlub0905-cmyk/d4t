@@ -1359,13 +1359,13 @@ class GlvStatsStep(MultiSourceStep):
                 "pct_rank are blank for this defect. Point it at a region "
                 "that is laid "
                 "out as repeated boxes (a Golden Cell template, for example)."
-                % (self.key, self._ref_label(p, ref)))
+                % (self.key, self.reference_label(p)))
 
         # 儀表用（同其他卡的慣例）：**畫面上的數字就是引擎算的這一份**。
         here = str(p.get(self.REGION) or "the image")
-        ctx.meta.setdefault("compares", {})["%s_vs_%s" % (here, self._ref_label(p, ref))] = {
+        ctx.meta.setdefault("compares", {})["%s_vs_%s" % (here, self.reference_label(p))] = {
             "target": here,
-            "reference": self._ref_label(p, ref),
+            "reference": self.reference_label(p),
             "target_source": str(p.get(self.CURRENT_STREAM, "")),
             # ⚠ ``REF_BOTH`` 也在這裡（F67 訂正）：參照那一塊住在另一條流上
             # 的兩種情況都要講出**那一條**的名字。以前只認 ``REF_STREAM``，
@@ -1392,7 +1392,7 @@ class GlvStatsStep(MultiSourceStep):
         ref_counts, _e = algo_glv.pixel_hist(
             np.asarray(ref_px, dtype=np.float64).ravel(), bins=self.HIST_BINS)
         note = {
-            "label": self._ref_label(p, ref),
+            "label": self.reference_label(p),
             "bins": [int(c) for c in ref_counts],
             "n": int(np.asarray(ref_px).size),
             "boxes": len(ref_boxes),
@@ -1455,14 +1455,34 @@ class GlvStatsStep(MultiSourceStep):
         return out
 
     @classmethod
-    def _ref_label(cls, p: Dict[str, Any], ref: str) -> str:
-        """參照那一塊叫什麼（面板與 `ctx.meta` 用）—— **講得出流與區域**。"""
+    def reference_label(cls, p: Dict[str, Any]) -> str:
+        """參照那一塊叫什麼 —— **講得出流與區域**（不比的時候是空字串）。
+
+        面板、`ctx.meta`、以及 Studio 那排 preset 底下那句話都問這一支
+        （F67）。三個地方各拼一份的話，同一塊在畫面上會有兩三種叫法 ——
+        而那正是這一輪在收的那種重複（`CLAUDE.md` §0）。
+
+        ⚠ **公開的**（F67 之前叫 `_ref_label`、而且要呼叫端先算好 ``ref``）：
+        算 ``ref`` 是 :func:`_reference_of` 的事，多一個參數就多一個可以傳錯
+        的東西。
+        """
+        ref = _reference_of(p)
+        if ref == REF_NONE:
+            return ""
         region = str(p.get("reference_region", "") or "?")
         stream = str(p.get("reference_source", "") or "?")
         if ref == REF_REGION:
             return region
         if ref == REF_STREAM:
-            return "%s @ %s" % (str(p.get(cls.REGION) or "the image"), stream)
+            # 同一塊在另一張圖上 —— 所以「那一塊」就是**現在量的這一塊**。
+            # ⚠ 引擎跑到這裡時 ``roi`` 已經是**這一輪的那一個**（迴圈在
+            # `MultiSourceStep`），所以逗號只會在設定期出現（Studio 那句話問
+            # 的是整張卡）。那時候逐一列出來會讀成一個怪名字（``epi,mg @
+            # ref``），而它真正的意思是「每一塊各自跟自己在另一張圖上的那一塊」。
+            mine = str(p.get(cls.REGION) or "")
+            if "," in mine:
+                return "the same areas @ %s" % stream
+            return "%s @ %s" % (mine or "the image", stream)
         return "%s @ %s" % (region, stream)          # REF_BOTH
 
     def _reference_block(self, ctx: Context, img, p: Dict[str, Any], ref: str):

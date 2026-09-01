@@ -353,6 +353,36 @@ def test_comparing_against_the_other_boxes_is_a_second_line(window):
     assert "unknown-region" not in [i.code for i in window.model.validate()]
 
 
+def test_the_intent_row_says_what_the_buttons_leave_out(window):
+    """**鈕 ＋ note ＝ 這張卡真的在做的事**（F67 續）。
+
+    走的是真的那條路（選卡 → `_sync_glv_intent` → 表單那一排），因為這一條
+    要守的正是**畫面上**那行字 —— model 算得對而沒有人畫出來是同一種說謊。
+    """
+    _src, gds, glv = _gds(window, layers="1:epi, 2:mg")
+    window._on_edge_added(gds, glv, "epi", "roi")
+    window.select_node(glv)
+    form = window.param_form
+    assert form.has_intent_row()
+    assert form.intent_buttons()["region_stats"].isChecked()
+    assert window.model.glv_intent_note(glv) == "", "三顆鈕已經說完了"
+
+    # 接一條參照**流** —— 鈕不覆蓋那一軸，所以那行字要補上它
+    window.model.set_param(glv, "reference_source", "ref")
+    window.select_node(glv)
+    assert form.intent_buttons()["region_stats"].isChecked(), \
+        "跟另一張圖比是疊上去的第二個問題，不是第四種形狀"
+    assert window.model.glv_intent_note(glv) == \
+        "measuring epi, compared against epi @ ref."
+
+    # 接一條參照**區域**（不是 `_center` 那組）—— 三顆都對不上
+    window._on_edge_added(gds, glv, "mg", "reference_region")
+    window.select_node(glv)
+    assert not any(b.isChecked() for b in form.intent_buttons().values())
+    assert window.model.glv_intent_note(glv) == \
+        "custom - measuring epi, compared against mg @ ref."
+
+
 def test_a_region_line_now_moves_the_layout(window):
     """**接受的代價**（工作單 B2-6）：`add_edge` 會重排 ``node_order``，
     所以拉一條區域線之後排版會動 —— 以前不會，因為它根本不在 `edges` 裡。

@@ -52,6 +52,21 @@ on another stream」）、動的是同兩條線的埠在不在。而那一格的
 被寫成量測那一條（數字是對的，那行字說錯了它跟哪一張圖比）。
 
 特徵名一個字都沒變、黃金值三份都沒有用到 compare，所以數字不動。
+**同一輪的續集：那排 preset 底下那一行字。** 三顆鈕講的是形狀，而卡片上有
+兩件事它們不講 —— 量的是哪一塊、以及跟哪一張圖比。所以規矩收成一句不變量：
+**鈕 ＋ 那行字 ＝ 這張卡真的在做的事**。對不上時是
+`custom - measuring epi_center, compared against mg.`；對得上但接了參照流時，
+那行字把整句話說出來（`reference_source` 刻意不進 preset 的偵測 —— 跟另一張圖
+比是疊上去的第二個問題，算進去的話最常見的設定會顯示成 custom）。
+句子由線組出來，參照那一塊怎麼稱呼問卡片自己（`reference_label`，
+從 `_ref_label` 轉正）；**要說什麼住在 model**（`glv_intent_note`），
+`studio.py` 只負責畫。
+
+順帶把使用者要的那張排列組合表做成**跑得動的**那一種：四個軸的完整乘積
+**80 種**（`tests/test_glv_combinations.py`），逐格斷言鈕、`cmp_*` 出不出來、
+參照那一塊叫什麼、那行字、健檢講哪一句。**只有 6 種對得上鈕**，
+其餘 74 種是 custom —— 那正是那行字存在的理由。表本身在計畫書裡。
+
 計畫書：[`docs/plans/F67-glv-compare-by-wire.md`](docs/plans/F67-glv-compare-by-wire.md)。
 
 ---
