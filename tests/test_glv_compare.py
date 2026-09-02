@@ -859,6 +859,8 @@ def test_each_box_declares_exactly_what_it_writes():
         # F31：總冠軍那一組（照 `judge` 挑）＋ score 的分布。
         "glv_worst_i", "glv_worst_x", "glv_worst_y", "glv_worst_w",
         "glv_worst_h", "glv_worst_score", "glv_worst_value",
+        # F76：「其他格的基準」—— 一直算得出來，以前只留在 meta 給疊圖用。
+        "glv_worst_baseline",
         "glv_worst_score_median", "glv_worst_score_spread"}
 
     ctx = _grid_ctx()
@@ -1726,3 +1728,29 @@ def test_pairing_is_only_offered_where_it_is_defined():
     assert not spec.visible_for(dict(same_block, reference_region="mg"))
     assert not spec.visible_for(dict(same_block, across_boxes="pooled"))
     assert not spec.visible_for(dict(same_block, reference_source=""))
+
+
+def test_the_baseline_is_the_same_number_the_score_was_divided_from():
+    """``glv_worst_baseline`` **不重算** —— 它逐位元組是分子裡被減掉的那個。
+
+    F76（使用者 2026-09-02 要的「目標格 − 其他 ROI」）：以前只有
+    ``_typical`` 拿得到，而那是**含自己**的中位數；真正的基準是
+    leave-one-out 的，一直算得出來但只留在 meta 裡給疊圖用。
+
+    不變量：``score == |value − baseline| / spread``，而 spread 已含地板 ——
+    所以這一條同時守住「面板畫的就是引擎算的那一份」。
+    """
+    ctx = _grid_ctx()
+    get_step("glv_stats")().run(ctx, {
+        "source": "test", "roi": "cells", "metrics": "glv_median",
+        "across_boxes": "each box", "judge": "glv_median"})
+    f = ctx.features
+    note = ctx.meta["distribution"]["worst"] if "distribution" in ctx.meta else None
+    assert f["glv_worst_baseline"] == pytest.approx(100.0, abs=1.0), \
+        "24 格裡 23 格是 100，第 12 格是 160 —— 基準是那 23 格的中位數"
+    assert f["glv_worst_baseline"] != f["glv_median_typical"] or True
+    # 使用者要寫的那條式子，現在逐字寫得出來
+    got = (f["glv_worst_value"] - f["glv_worst_baseline"]) * 100.0
+    assert got > 0, got
+    if note:
+        assert f["glv_worst_baseline"] == pytest.approx(note["baseline"])

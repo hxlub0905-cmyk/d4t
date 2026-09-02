@@ -329,9 +329,20 @@ BOX_COUNT = "glv_boxes"
 #: **名字帶 ``glv_``（F37）**：這一族以前是裸的 ``worst_*`` —— 在一份同時有
 #: CD（``cd_*``）、Region（``<n>_present``）與比較（``cmp_*``）的 CSV 上，
 #: 它是唯一一族說不出自己是誰算的。
+#: ``glv_worst_baseline``（F76，2026-09-02）是**使用者要的那一格**：
+#: 「其他 ROI 的基準」。它一直算得出來（`odd_box_scores` 的 leave-one-out
+#: 中位數，`glv_worst_score` 的分子就是拿它減的），但以前只留在 meta 裡給
+#: 疊圖用 —— 於是想寫「目標格 − 其他格」的人只能拿 ``_typical`` 近似，而
+#: ``_typical`` 是**含自己**的中位數。現在那句話寫得出逐字精確的式子：
+#:
+#:     (glv_worst_value − glv_worst_baseline) × 100
+#:
+#: ⚠ 它跟 ``glv_worst_value`` 一樣**跟著 judge 走**（judge 可以是 `cmp_*`
+#: 的量），所以兩個都不宣告單位 —— 猜錯的單位比沒有單位糟。
 WORST_FEATURES = ("glv_worst_i", "glv_worst_x", "glv_worst_y",
                   "glv_worst_w", "glv_worst_h",
-                  "glv_worst_score", "glv_worst_value")
+                  "glv_worst_score", "glv_worst_value",
+                  "glv_worst_baseline")
 
 #: 逐框 score 的分布（框數 ≥ 2 才有）。只有 worst 的話，「一個框特別怪」跟
 #: 「500 個框都一樣怪」在特徵表上看起來一模一樣 —— 而那兩件事的處置完全相反
@@ -821,6 +832,9 @@ class GlvStatsStep(MultiSourceStep):
                             "boxes| / their spread"),
         "glv_worst_value": ("the judging statistic measured on that box - "
                             "the number the pick was made on"),
+        "glv_worst_baseline": ("the same statistic on all the OTHER boxes "
+                               "(their median) - what that box was judged "
+                               "against"),
         "glv_worst_score_median": ("the middle of the box-by-box odd-one-out "
                                    "scores - one dirty box leaves this low"),
         "glv_worst_score_spread": ("how spread out those scores are - high "
@@ -1392,6 +1406,9 @@ class GlvStatsStep(MultiSourceStep):
             out["glv_worst_h"] = wh
             out["glv_worst_score"] = float(scores[k])
             out["glv_worst_value"] = float(judge_vals[k])
+            # **其他格的基準**（F76）—— 分子就是拿它減出來的，所以這裡不
+            # 重算，逐位元組是 `odd_box_scores` 回的那一個。
+            out["glv_worst_baseline"] = float(baselines[k])
             out["glv_worst_score_median"] = float(np.median(scores))
             out["glv_worst_score_spread"] = algo_glv.robust_spread(scores)
             # **贏家那一格的每一個量**（F68）—— 「最黑那格的 Q25」要的是這個。
