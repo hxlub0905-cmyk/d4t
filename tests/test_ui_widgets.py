@@ -1137,64 +1137,14 @@ def test_histogram_bin_summary_tooltip_and_empty(qapp):
 
 
 # --------------------------------------------------------------------------- #
-# 6. FeatureTable / VerdictChip
+# 6. 特徵名／說明／單位 ＋ VerdictChip（`FeatureTable` 2026-09-02 刪了）
 # --------------------------------------------------------------------------- #
-def test_feature_table_formatting_and_score_pinned_last(qapp):
-    table = widgets_mod.FeatureTable()
-    table.set_features(
-        {"score": 8.5, "snr_peak": 4.23456, "blob_area": 12.0,
-         "glv_mean": 128.0, "tiny": 0.00002},
-        highlight={"snr_peak"},
-    )
-    assert table.columnCount() == 3
-    assert [table.horizontalHeaderItem(i).text() for i in range(3)] == [
-        "Feature", "What it is", "Value"]
+def test_what_each_feature_is_comes_from_the_spec(qapp):
+    """「它是什麼」那一句話 —— **純函式**，不必開一張表。
 
-    names = table.feature_names()
-    assert names[-1] == "score"                          # score 釘最後
-    assert set(names) == {"score", "snr_peak", "blob_area", "glv_mean", "tiny"}
-
-    # ⚠ **這幾條 2026-08-28 跟著改了（F52），而理由不是「數字剛好變了」。**
-    #
-    # 這張表以前走 `widgets._fmt_number` 自己那一份（整數捷徑 ＋ 3 位小數），
-    # 而畫面上還有五個地方各自寫了一份 —— 同一個值印出來六種寫法。最傷的
-    # 兩個：`99.995` 在結果表是 `100`、在這張表是 `99.995`（使用者會以為自己
-    # 點錯顆）；`8.5` 在這裡是 `8.500`，那三位小數是**發明出來的精度**。
-    #
-    # 現在全 UI 走 `numbers.format_feature_value`：**有效位數**（5 位）＋
-    # 整數不拖小數。所以 `8.5` 就是 `8.5`，`4.23456` 是 `4.2346`。
-    from d4t.ui.numbers import format_feature_value
-
-    assert table.value_text("blob_area") == "12"         # 乾淨整數
-    assert table.value_text("glv_mean") == "128"
-    assert table.value_text("snr_peak") == "4.2346"      # 5 位有效數字
-    assert table.value_text("tiny") == "2e-05"           # 極小值不要變成 0.000
-    assert table.value_text("score") == "8.5"            # 不再是 8.500
-    # 而且是**同一支**印的 —— 值一樣可能只是巧合，這一行問的是出處。
-    for name, value in (("snr_peak", 4.23456), ("score", 8.5),
-                        ("tiny", 0.00002)):
-        assert table.value_text(name) == format_feature_value(value)
-
-    score_row = names.index("score")
-    assert table.item(score_row, 0).font().bold() is True
-    assert table.item(score_row, 2).font().bold() is True
-
-    hi_row = names.index("snr_peak")
-    assert table.item(hi_row, 0).background().color().name() == \
-        theme_mod.TOKENS["accent_bg"]
-
-    table.set_features({})                               # 清空不該炸
-    assert table.rowCount() == 0
-
-
-def test_the_middle_column_says_what_each_feature_is(qapp):
-    """橫向空間拿來**解釋名字**（F18 補課第三輪，2026-08-21）。
-
-    使用者：「目前只有縱向空間被用到（橫向空間幾乎沒有：Feature 右側就只有
-    Value 還到最右邊）」＋「絕對量的跟相對量的還是要分類好」。所以中間那一欄
-    是「這是什麼」，而**兩種量用顏色分**。
+    這一條是從 `FeatureTable` 那三支搬過來的（F76 刪掉那張表時）：測的一直
+    是 `feature_gloss`，widget 只是當時的載體。
     """
-    # 身分從**真的那張卡**宣告出來（資料同源）—— gloss 不再拆字串猜。
     from d4t.core.pipeline import get_step
     glv = get_step("glv_stats")
     p = glv.validate_params({
@@ -1203,29 +1153,20 @@ def test_the_middle_column_says_what_each_feature_is(qapp):
         "reference_region": "mg", "compare_metrics": "delta,overlap",
         "stat": "glv_median"})
     specs = {s.name: s for s in glv.resolve_feature_specs(p)}
-    table = widgets_mod.FeatureTable()
-    table.set_features(
-        {"epi_glv_median": 128.0, "epi_cmp_delta_median": 23.4,
-         "epi_cmp_overlap": 0.02, "epi_glv_pixels": 812.0},
-        about={"epi_cmp_delta_median": "mg", "epi_cmp_overlap": "mg"},
-        specs=specs)
+    about = {"epi_cmp_delta_median": "mg", "epi_cmp_overlap": "mg"}
 
-    assert table.about_text("epi_glv_median") == "median(gray)"
-    assert table.about_text("epi_glv_pixels") == "how many pixels counted"
-    assert table.about_text("epi_cmp_delta_median") == \
-        "Difference of median vs mg"
+    def say(name):
+        return widgets_mod.feature_gloss(name, about, specs[name])
+
+    assert say("epi_glv_median")[1] == "median(gray)"
+    assert say("epi_glv_pixels")[1] == "how many pixels counted"
+    assert say("epi_cmp_delta_median")[1] == "Difference of median vs mg"
     # 不看 stat 的那兩個沒有「of …」那一段（`spread_ratio` 自己就帶底線 ——
     # 切最後一個底線的寫法會把它變成「spread 的 ratio」）
-    assert table.about_text("epi_cmp_overlap") == "Overlap vs mg"
-
-    names = table.feature_names()
-    rel = names.index("epi_cmp_delta_median")
-    abs_ = names.index("epi_glv_median")
-    assert table.item(rel, 1).foreground().color().name() == \
-        theme_mod.TOKENS["accent_active"]
-    assert table.item(abs_, 1).foreground().color().name() == \
-        theme_mod.TOKENS["text_hint"]
-    table.deleteLater()
+    assert say("epi_cmp_overlap")[1] == "Overlap vs mg"
+    # 而**絕對量與相對量分得開**（面板據此上色）
+    assert say("epi_glv_median")[0] == widgets_mod.FEATURE_ABSOLUTE
+    assert say("epi_cmp_delta_median")[0] == widgets_mod.FEATURE_RELATIVE
 
 
 def test_a_feature_without_a_spec_gets_no_gloss(qapp):
@@ -1235,29 +1176,6 @@ def test_a_feature_without_a_spec_gets_no_gloss(qapp):
     assert widgets_mod.feature_gloss("score") == ("", "")
     assert widgets_mod.feature_gloss("glv_median") == ("", ""), \
         "名字長得像也不猜 —— 身分要卡片宣告"
-
-
-def test_absolute_comes_before_relative_inside_a_card(qapp):
-    """交錯的話，那一段要一行一行讀才知道自己在看哪一種。
-    「哪個是相對量」看宣告的 ``family``，不再拆名字。"""
-    from d4t.core.pipeline import get_step
-    glv = get_step("glv_stats")
-    p = glv.validate_params({
-        "source": "test", "metrics": "glv_median,glv_mad",
-        "reference_region": "mg",
-        "compare_metrics": "delta,snr", "stat": "glv_mean"})
-    specs = {s.name: s for s in glv.resolve_feature_specs(p)}
-    table = widgets_mod.FeatureTable()
-    table.set_features(
-        {"cmp_delta_mean": 1.0, "glv_median": 2.0, "cmp_snr_mean": 3.0,
-         "glv_mad": 4.0},
-        sections=[{"title": "Gray level", "color": "#bf7030",
-                   "names": ["cmp_delta_mean", "glv_median", "cmp_snr_mean",
-                             "glv_mad"]}],
-        specs=specs)
-    assert table.feature_names() == ["glv_median", "glv_mad",
-                                     "cmp_delta_mean", "cmp_snr_mean"]
-    table.deleteLater()
 
 
 def test_verdict_chip(qapp):
@@ -1932,3 +1850,146 @@ def test_the_real_form_shows_the_value_it_was_given(qapp):
     assert isinstance(box, QDoubleSpinBox)
     assert box.value() == pytest.approx(2.55), "值不可以被欄位捨掉"
     assert "0.000" not in box.text()
+
+
+# --------------------------------------------------------------------------- #
+# F76 刀 2：說明欄不准把 id 抄一遍，而變體要說得出自己是誰
+# --------------------------------------------------------------------------- #
+def _every_declared_spec():
+    """整個 registry 會產出的 `FeatureSpec` —— 每張卡兩組參數。
+
+    兩組是因為 GLV 的四胞胎只有 ``across_boxes='each box'`` 才存在，而那正是
+    這一條要守的東西（F76 量到的 36 個「說明只是把 id 抄一遍」全在那一組）。
+    """
+    import d4t.core.steps  # noqa: F401 — 觸發註冊
+    from d4t.core.pipeline.step import REGISTRY
+
+    out = []
+    for key, cls in REGISTRY.items():
+        for over in ({}, {"across_boxes": "each box", "roi": "cell",
+                          "judge": "glv_q75", "over_k": 3.0,
+                          "metrics": "glv_median,glv_q75"}):
+            try:
+                p = cls.validate_params(
+                    {k: v for k, v in over.items()
+                     if k in {s.name for s in cls.params}})
+                out.extend(cls.resolve_feature_specs(p))
+            except Exception:                      # noqa: BLE001
+                continue
+    return out
+
+
+def test_no_feature_explains_itself_by_repeating_its_own_id():
+    """**說明欄不得等於那個特徵自己的 id。**
+
+    2026-09-02 量出貨的 `rsem-worst-box`：118 個特徵裡有 **36 個**的
+    「What it is」只是把 id 抄一遍（``glv_worst_score`` 的說明是
+    ``glv_worst_score``）—— 而那正好是使用者當時在問的那幾個字。
+
+    `metric_formula` 只認得統計量，而 `glv_worst_*` / `glv_boxes*` 不是；
+    它們落到最後的 `metric_face`，印出來就是自己的名字。修法是那句話由**卡片**
+    自己說（`Step.FEATURE_HELP`），這一條守著它不再回來。
+
+    ⚠ 空白仍然可以（`feature_gloss` 的退化原則：少一點資訊，不會是錯的資訊）
+    —— 擋的是「有寫，但寫的是它自己」。
+    """
+    from d4t.ui.widgets import feature_gloss
+
+    bad = []
+    for spec in _every_declared_spec():
+        _kind, gloss = feature_gloss(spec.name, {}, spec)
+        if not gloss:
+            continue
+        for echo in (spec.name, spec.metric, spec.base):
+            if echo and gloss.strip() == str(echo):
+                bad.append("%s → %r" % (spec.name, gloss))
+                break
+    assert not bad, "說明欄只是把 id 抄一遍：\n  " + "\n  ".join(sorted(set(bad)))
+
+
+def test_the_four_variants_of_one_statistic_do_not_share_one_sentence():
+    """``_typical`` / ``_outlier`` / ``_outlier_box`` / ``_worst`` 四胞胎。
+
+    改之前這四列的說明**一字不差**（都寫 ``median(gray)``），而
+    ``_outlier_box`` 的值根本不是灰階 —— 它是一個框號。使用者 2026-09-02：
+    「outliner 完全沒有用 或者我看不懂? 反而這樣會誤導別人以為他是最 worst 的」。
+    """
+    from d4t.core.pipeline import get_step
+    from d4t.ui.widgets import feature_gloss, feature_unit
+
+    card = get_step("glv_stats")
+    p = card.validate_params({"roi": "cell", "across_boxes": "each box",
+                              "judge": "glv_q75", "metrics": "glv_median"})
+    by_name = {s.name: s for s in card.resolve_feature_specs(p)}
+    said = {n: feature_gloss(n, {}, by_name[n])[1]
+            for n in ("glv_median_typical", "glv_median_outlier",
+                      "glv_median_outlier_box", "glv_median_worst")}
+    assert len(set(said.values())) == 4, said
+    # 而「這是另一格」那句話要真的在 `_outlier` 上（名字上唯一沒有的資訊）
+    assert "not the one the judge picked" in said["glv_median_outlier"]
+    # 框號的單位是框，不是灰階
+    assert feature_unit(by_name["glv_median_outlier_box"]) == "box"
+    assert feature_unit(by_name["glv_median_worst"]) == "gray"
+
+
+def test_the_unit_comes_from_the_card_and_is_never_invented():
+    """單位查不到就**留白** —— 一個猜錯的單位比沒有單位糟得多。"""
+    from d4t.core.pipeline import get_step
+    from d4t.ui.widgets import feature_unit
+
+    card = get_step("glv_stats")
+    p = card.validate_params({"roi": "cell", "across_boxes": "each box"})
+    by_name = {s.name: s for s in card.resolve_feature_specs(p)}
+    assert feature_unit(by_name["glv_worst_score"]) == "σ"
+    assert feature_unit(by_name["glv_worst_x"]) == "px"
+    assert feature_unit(by_name["glv_boxes"]) == "count"
+    # judge 可以是 cmp_* 的量，所以贏家那個值的單位**不知道** —— 不准編一個
+    assert feature_unit(by_name["glv_worst_value"]) == ""
+    assert feature_unit(None) == ""
+
+
+def test_every_metric_group_can_actually_be_drawn(qapp):
+    """**`METRIC_GROUPS` 裡的每一個群名都要在 `METRIC_GROUP_ORDER` 上。**
+
+    `MetricChips._build` 是照 `METRIC_GROUP_ORDER` 逐群畫的，所以漏一個群 =
+    那一群的膠囊**一顆都不會出現**。而畫面上不會空白 —— 它會寫
+    「nothing picked yet · 0 picked」，同時引擎照樣拿 `validate_params` 補出來
+    的預設值在算。
+
+    2026-09-02 真的發生過（F77 加 Focus 那一族時漏了 "Sharpness"）：設定區說
+    一個都沒選，而底下的特徵表列著三個值 —— **畫面在說謊**，而它跑得完、
+    有數字，看起來完全正常。
+    """
+    groups = {g for g, _label, _glyph in widgets_mod.METRIC_GROUPS.values()}
+    missing = sorted(groups - set(widgets_mod.METRIC_GROUP_ORDER))
+    assert not missing, (
+        "這幾個群名畫不出來（膠囊會安靜地消失）：%s" % missing)
+
+
+def test_a_metric_chip_row_can_show_every_id_a_card_offers(qapp):
+    """整個 registry 掃一遍：卡片列得出來的 metric，膠囊都畫得出來。
+
+    上一條守的是資料表，這一條守的是**真的建一次 widget**（群名對了但畫的
+    時候被別的條件濾掉，上一條抓不到）。
+    """
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline.step import REGISTRY
+
+    for key, cls in REGISTRY.items():
+        for spec in cls.params:
+            if spec.type != "metric_chips" or not spec.choices:
+                continue
+            row = widgets_mod.MetricChips(list(spec.choices))
+            row.set_text(str(spec.default or ""))
+            assert row.choice_names() == list(spec.choices), \
+                "%s.%s 有膠囊畫不出來" % (key, spec.name)
+            if spec.default:
+                # ⚠ **比集合不比字串**：`MetricChips.text()` 刻意回**畫面上的
+                # 順序**（同一組勾選每次都要產生同一個字串，因為它進得了快取
+                # 簽章），而卡片宣告的預設不一定照那個序寫 —— cd 的 report
+                # 就是這樣。這裡問的是「勾得回來嗎」，不是「順序一不一樣」。
+                want = {t.strip() for t in str(spec.default).split(",")
+                        if t.strip()}
+                assert {t.strip() for t in row.text().split(",") if t.strip()} \
+                    == want, "%s.%s 的預設值勾不回來" % (key, spec.name)
+            row.deleteLater()

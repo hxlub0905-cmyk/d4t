@@ -77,12 +77,15 @@ Phase 2），使用者定調**先把引擎做對，再回頭做產品化**（見
 **出貨的 recipe 在 [`recipes/`](recipes/)**（2026-08-26），走 `Open recipe…`
 不走範本庫，而且**每一份都有測試真的跑一次**
 （`tests/test_shipped_recipes.py`）—— 舊的 `examples/` 就是因為沒人測而爛掉的。
-加一份新的就在那支測試裡加一段。目前三份：EBI↔API characterization、
-patch 的 dSNR 分布（F36）、RSEM 逐框挑最異常的那一格（F73）。
+加一份新的就在那支測試裡加一段。**目前只有一份**：RSEM 逐框挑最異常的那一格
+（F73）。EBI↔API characterization 與 patch 的 dSNR 分布（F36）2026-09-02 由
+使用者指定刪掉 —— 卡片（`pair_source` / `output_char` / GLV 的 compare）
+一個都沒有動，走的是那條路的人自己拉線。
 
-⚠ 那支測試有一張 **`ALLOWED_ERRORS`**（哪一份 recipe 允許哪一條 lint error
-—— 目前只有「模板是一張影像、塞不進 JSON」那一種），而它配著一支**反向的**
-測試：例外修好了卻沒從表上拿掉的話，那份 recipe 從此少一條防線而測試照樣綠。
+⚠ 那支測試有一張 **`ALLOWED_ERRORS`**（哪一份 recipe 允許哪一條 lint error），
+而它配著一支**反向的**測試：例外修好了卻沒從表上拿掉的話，那份 recipe 從此少
+一條防線而測試照樣綠。**表現在是空的**（唯一那條「模板是一張影像、塞不進
+JSON」隨 patch 那份一起走了），但機制留著 ——
 **任何「例外清單」都要有那支反向測試**，不然它就是一張只會變長的紙。
 
 **存檔 recipe 2026-08-26 做回來了**（F34，[`docs/history/plans/F34-save-recipe.md`](docs/history/plans/F34-save-recipe.md)）。
@@ -315,8 +318,8 @@ git add -A && python tools/release.py && git add -A
 
 ### 新的 UI 面板一律開新模組（不要塞進 `studio.py`）
 
-`StudioWindow` 現在是 **6,667 行、258 個方法、382 個 `self.*` 名字**的一個類別
-（2026-09-02 量的。寫下這一段時是 5,244 行 / 229 個方法，三天後 6,017 —— **一週多長了 1,423 行，而中間沒有任何一輪是在動它**）。
+`StudioWindow` 現在是 **6,761 行、261 個方法、386 個 `self.*` 名字**的一個類別
+（2026-09-02 量的。寫下這一段時是 5,244 行 / 229 個方法，三天後 6,017 —— **一週多長了 1,517 行，而中間沒有任何一輪是在動它**。F76 那一輪從它手上拿走了兩支方法（`_feature_sections` / `_feature_specs`），而它同一輪又多了判定那一塊的三支 —— 淨值仍然是往上。）
 它還沒到「非拆不可」，但**拆分壓力已經在影響新功能該放哪裡**了 —— F22 的 commit
 訊息裡就寫著「不塞進已經 5000 多行的 `studio.py`」，那是一個人在替一個結構問題
 繞路。

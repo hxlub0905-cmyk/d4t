@@ -124,6 +124,9 @@ EXPECTED = {
         "glv_worst_h",
         "glv_worst_score",
         "glv_worst_value",
+        # F76 新增（**加名字不是改名字** —— 這張表守的是既有的每一個字串一個
+        # 位元組不動，而它們全都還在原本的位置上）。
+        "glv_worst_baseline",
         "glv_worst_score_median",
         "glv_worst_score_spread",
         "glv_pixels",

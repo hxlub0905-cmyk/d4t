@@ -329,9 +329,20 @@ BOX_COUNT = "glv_boxes"
 #: **名字帶 ``glv_``（F37）**：這一族以前是裸的 ``worst_*`` —— 在一份同時有
 #: CD（``cd_*``）、Region（``<n>_present``）與比較（``cmp_*``）的 CSV 上，
 #: 它是唯一一族說不出自己是誰算的。
+#: ``glv_worst_baseline``（F76，2026-09-02）是**使用者要的那一格**：
+#: 「其他 ROI 的基準」。它一直算得出來（`odd_box_scores` 的 leave-one-out
+#: 中位數，`glv_worst_score` 的分子就是拿它減的），但以前只留在 meta 裡給
+#: 疊圖用 —— 於是想寫「目標格 − 其他格」的人只能拿 ``_typical`` 近似，而
+#: ``_typical`` 是**含自己**的中位數。現在那句話寫得出逐字精確的式子：
+#:
+#:     (glv_worst_value − glv_worst_baseline) × 100
+#:
+#: ⚠ 它跟 ``glv_worst_value`` 一樣**跟著 judge 走**（judge 可以是 `cmp_*`
+#: 的量），所以兩個都不宣告單位 —— 猜錯的單位比沒有單位糟。
 WORST_FEATURES = ("glv_worst_i", "glv_worst_x", "glv_worst_y",
                   "glv_worst_w", "glv_worst_h",
-                  "glv_worst_score", "glv_worst_value")
+                  "glv_worst_score", "glv_worst_value",
+                  "glv_worst_baseline")
 
 #: 逐框 score 的分布（框數 ≥ 2 才有）。只有 worst 的話，「一個框特別怪」跟
 #: 「500 個框都一樣怪」在特徵表上看起來一模一樣 —— 而那兩件事的處置完全相反
@@ -797,6 +808,106 @@ class GlvStatsStep(MultiSourceStep):
 
     #: 留給儀表的直方圖有幾個 bin（見 :meth:`_note_distribution`）。
     HIST_BINS = 64
+
+    #: 這張卡寫出來的每個數字**一句話是什麼**（F76，2026-09-02）。
+    #:
+    #: ⚠ **統計量本身不寫在這裡** —— ``glv_median`` 那一族的說明由
+    #: `algo.glv.metric_formula` 答（公式的家只有一份）。這裡放的是
+    #: **`metric_formula` 答不出來的那些**，而 2026-09-02 量過：出貨的
+    #: `rsem-worst-box` 上有 **36 個特徵的說明欄只是把自己的 id 抄一遍**，
+    #: 整族都在下面這張表裡 —— 而它們正好是使用者當時在問的那幾個字
+    #: （「typical 跟 outliner、worst、score 是指什麼」）。
+    #:
+    #: 那句話為什麼不寫在 `ui.widgets` 裡：它會跟卡片本人的說明漂開，而漂開
+    #: 的時候畫面上看起來完全正常（`CLAUDE.md` §0）。
+    FEATURE_HELP = {
+        # ---- 逐框比較的「贏家」那一族（F31／F68）------------------------
+        "glv_worst_i": "which box the judge picked as the odd one out",
+        "glv_worst_x": "where that box is, left edge",
+        "glv_worst_y": "where that box is, top edge",
+        "glv_worst_w": "how wide that box is",
+        "glv_worst_h": "how tall that box is",
+        "glv_worst_score": ("how far that box is from all the others, in "
+                            "robust sigmas - |value - median of the other "
+                            "boxes| / their spread"),
+        "glv_worst_value": ("the judging statistic measured on that box - "
+                            "the number the pick was made on"),
+        "glv_worst_baseline": ("the same statistic on all the OTHER boxes "
+                               "(their median) - what that box was judged "
+                               "against"),
+        "glv_worst_score_median": ("the middle of the box-by-box odd-one-out "
+                                   "scores - one dirty box leaves this low"),
+        "glv_worst_score_spread": ("how spread out those scores are - high "
+                                   "means many boxes are off, not just one"),
+        "glv_boxes_over_k": "how many boxes are further out than the sigma you set",
+        "glv_boxes_over_k_frac": "the same, as a share of all the boxes",
+        # ---- 量了幾格／幾個像素 -----------------------------------------
+        "glv_boxes": "how many boxes had enough pixels to measure",
+        "glv_pixels": "how many pixels counted",
+        "glv_ok": "1 when there were enough pixels",
+    }
+
+    #: 每個數字的**單位**（F76）—— 見 `Step.feature_units`。
+    #:
+    #: 鍵是 metric 那一層，所以 ``glv_median`` 一個鍵服務 ``_typical`` /
+    #: ``_outlier`` / ``_worst`` 三個名字；``_outlier_box`` 由
+    #: `step.VARIANT_UNITS` 覆寫成 ``box``（它的值是框號，不是灰階）。
+    #:
+    #: 形狀那幾個（skew / kurt / bimodality）**刻意留白**：它們是無量綱的，
+    #: 而編一個單位比沒有單位糟。
+    FEATURE_UNITS = {
+        # 灰階本身與灰階的散布
+        "glv_median": "gray", "glv_mean": "gray", "glv_trim10": "gray",
+        "glv_min": "gray", "glv_max": "gray",
+        "glv_q25": "gray", "glv_q75": "gray",
+        "glv_mad": "gray", "glv_std": "gray", "glv_iqr": "gray",
+        # 比例
+        "glv_sat_frac": "ratio", "glv_above128": "ratio",
+        "glv_entropy": "bits",
+        # 逐框比較
+        "glv_worst_i": "box",
+        "glv_worst_x": "px", "glv_worst_y": "px",
+        "glv_worst_w": "px", "glv_worst_h": "px",
+        "glv_worst_score": "\u03c3",
+        "glv_worst_score_median": "\u03c3", "glv_worst_score_spread": "\u03c3",
+        "glv_boxes_over_k": "count", "glv_boxes_over_k_frac": "ratio",
+        "glv_boxes": "count", "glv_pixels": "px",
+        # 相對量（`cmp_*`）—— metric 那一層
+        "delta": "gray", "abs_delta": "gray",
+        "ratio": "\u00d7", "spread_ratio": "\u00d7",
+        "snr": "\u03c3", "tstat": "\u03c3",
+        "pct_rank": "%", "overlap": "ratio", "percent": "%",
+        # ⚠ `glv_worst_value` 跟著 judge 走（judge 可以是 cmp_* 的量），
+        # 所以**這裡不寫** —— 一個猜錯的單位比沒有單位糟。
+    }
+
+    # ---- 面板上的一句結論（F76 刀 4）--------------------------------------
+    @classmethod
+    def panel_headline(cls, features, specs=()):
+        """「最異常的一格 #21 · 1.35 σ · 100 boxes · 2 格超過門檻」。
+
+        這幾個數字以前是**十三列**（`glv_worst_i/x/y/w/h/score/value/…`），
+        而它們回答的是同一個問題：「這一區的結論是什麼」—— 那正是打開這一段
+        的第一個問題。x/y/w/h 不進來：它們是給疊圖用的座標，不是給人讀的。
+
+        ⚠ **只讀 features，不重算**（見 `Step.panel_headline`）。
+        """
+        from ..pipeline.step import pick_feature
+
+        out = []
+        box = pick_feature(features, specs, "glv_worst_i")
+        if box is not None:
+            out.append(("odd one out", "#%d" % int(box), ""))
+        score = pick_feature(features, specs, "glv_worst_score")
+        if score is not None:
+            out.append(("", score, "\u03c3"))
+        boxes = pick_feature(features, specs, "glv_boxes")
+        if boxes is not None:
+            out.append(("", int(boxes), "boxes"))
+        over = pick_feature(features, specs, "glv_boxes_over_k")
+        if over is not None:
+            out.append(("", int(over), "beyond the cut"))
+        return out
 
     # ---- 宣告 ---------------------------------------------------------------
     # **只有一條路**（F18 第 5 步）：整張卡都走 MultiSourceStep 的迴圈，
@@ -1323,6 +1434,9 @@ class GlvStatsStep(MultiSourceStep):
             out["glv_worst_h"] = wh
             out["glv_worst_score"] = float(scores[k])
             out["glv_worst_value"] = float(judge_vals[k])
+            # **其他格的基準**（F76）—— 分子就是拿它減出來的，所以這裡不
+            # 重算，逐位元組是 `odd_box_scores` 回的那一個。
+            out["glv_worst_baseline"] = float(baselines[k])
             out["glv_worst_score_median"] = float(np.median(scores))
             out["glv_worst_score_spread"] = algo_glv.robust_spread(scores)
             # **贏家那一格的每一個量**（F68）—— 「最黑那格的 Q25」要的是這個。

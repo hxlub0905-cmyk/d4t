@@ -29,7 +29,6 @@ import d4t.core.steps  # noqa: F401,E402
 from d4t.core.pipeline import get_step              # noqa: E402
 from d4t.ui import studio as studio_mod             # noqa: E402
 from d4t.ui import theme as theme_mod               # noqa: E402
-from d4t.ui.widgets import FeatureTable             # noqa: E402
 
 EXAMPLE = REPO / "tests" / "fixtures" / "recipes" / "die_to_die_basic.json"
 
@@ -143,71 +142,22 @@ def test_two_cards_with_the_same_name_get_their_id(qapp, lot):
 def test_a_group_header_is_not_a_feature(ran):
     """`feature_names()` 有一堆呼叫端（報表、測試）—— 標題混進去的話，
     它們會拿到一個叫 `▾ GLV · 1` 的「特徵」。"""
-    names = ran.feature_table.feature_names()
+    names = ran.feature_panel.feature_names()
     assert names, "表上要有東西"
     assert not any(n.startswith("▾") or n.startswith("▸") for n in names)
     assert set(names) <= set(ran._last_result.features)
 
 
-def test_clicking_a_header_folds_that_group_only():
-    table = FeatureTable()
-    try:
-        table.set_features(
-            {"a": 1.0, "b": 2.0, "c": 3.0, "score": 9.0},
-            sections=[{"title": "One", "color": "#5f8f3f", "names": ["a", "b"]},
-                      {"title": "Two", "color": "#bf7030", "names": ["c"]}])
-        assert table.section_titles() == ["One", "Two"]
-        rows = {table.item(r, 0).text(): r for r in range(table.rowCount())}
-        assert not table.isRowHidden(rows["a"])
-
-        head = rows["▾ One  ·  2"]
-        table.toggle_section(head)
-        assert table.isRowHidden(rows["a"]) and table.isRowHidden(rows["b"])
-        assert not table.isRowHidden(rows["c"]), "只收自己那一組"
-        assert not table.isRowHidden(rows["score"])
-        assert table.item(head, 0).text().startswith("▸"), "箭頭要跟著翻面"
-
-        table.toggle_section(head)
-        assert not table.isRowHidden(rows["a"])
-        assert table.item(head, 0).text().startswith("▾")
-    finally:
-        table.deleteLater()
-
-
-def test_the_score_is_never_folded_away():
-    """它是這張表的結論 —— 收在某一組底下就找不到了。"""
-    table = FeatureTable()
-    try:
-        table.set_features({"a": 1.0, "score": 4.0},
-                           sections=[{"title": "One", "color": "",
-                                      "names": ["a", "score"],
-                                      "collapsed": True}])
-        rows = {table.item(r, 0).text(): r for r in range(table.rowCount())}
-        assert table.isRowHidden(rows["a"])
-        assert not table.isRowHidden(rows["score"])
-    finally:
-        table.deleteLater()
-
-
-def test_a_feature_nobody_claims_still_shows_up():
-    """漏掉一個 = 那個數字從畫面上消失，而使用者不會知道它存在過。"""
-    table = FeatureTable()
-    try:
-        table.set_features({"a": 1.0, "orphan": 2.0},
-                           sections=[{"title": "One", "color": "",
-                                      "names": ["a"]}])
-        assert "orphan" in table.feature_names()
-        assert "Other" in table.section_titles()
-    finally:
-        table.deleteLater()
-
-
-def test_without_sections_it_is_the_old_flat_list():
-    """CLI／報表／既有測試都還走這條路。"""
-    table = FeatureTable()
-    try:
-        table.set_features({"a": 1.0, "b": 2.0, "score": 3.0})
-        assert table.section_titles() == []
-        assert table.feature_names() == ["a", "b", "score"]
-    finally:
-        table.deleteLater()
+# ⚠ 這一節底下原本還有四支，測的是 `widgets.FeatureTable`（F13-1 的分組）。
+# **那張表 2026-09-02 刪掉了**（F76：被 `ui/feature_panel.FeaturePanel` 取代），
+# 而它守的四條不變量**一條都沒有丟** —— 它們搬到
+# `tests/test_ui_feature_panel.py`，改成問新面板：
+#
+#   標題不是一個特徵          → 上面那一支（它問的一直是 `feature_names()`）
+#   收合只收自己那一組        → test_folding_one_section_leaves_the_others_alone
+#   結論永遠看得到            → test_the_score_is_always_visible_next_to_the_verdict
+#                               （score 現在跟 bin 同一行，不再是表的最後一列）
+#   沒人認領的特徵仍然要出現  → test_a_feature_nobody_declared_still_shows_up
+#
+# 最後那一條在搬的過程裡**救回一個真的 bug**：`panel_model` 第一版把
+# `bound_specs` 沒宣告的名字安靜地丟掉了。

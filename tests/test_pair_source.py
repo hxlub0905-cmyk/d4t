@@ -887,9 +887,10 @@ def test_no_grouping_ranks_the_whole_lot_as_one():
     """分組欄留空 = 整份排一組。
 
     ⚠ **卡片的預設仍然是空的**，而那跟出貨的 recipe 是兩件事：一張卡不知道
-    使用者會拿什麼 KLARF 餵它（`XINDEX`/`YINDEX` 不保證在），所以它不能預設；
-    `recipes/ebi-to-api-characterization.json` **知道**它讀的是一份 wafer 的
-    KLARF，所以它填 `XINDEX,YINDEX`（見 `tests/test_shipped_recipes.py`）。
+    使用者會拿什麼 KLARF 餵它（`XINDEX`/`YINDEX` 不保證在），所以它不能預設。
+    一份**具體的** recipe 知道它讀的是一份 wafer 的 KLARF，所以那一格填
+    `XINDEX,YINDEX` —— 那是 recipe 的事，不是卡片的事
+    （`docs/USING-CHARACTERIZATION.md` §1 第 5 步）。
     """
     others = _ranked_lot()
     f = _rank_of("c1", others, rank_within="")

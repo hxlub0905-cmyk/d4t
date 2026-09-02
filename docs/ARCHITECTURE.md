@@ -250,6 +250,7 @@ d4t/
 │   │   ├── align.py normalize.py histmatch.py       #   對位／正規化／直方圖匹配
 │   │   ├── enhance.py curve.py                      #   局部對比、去背景、去噪；tone curve 求值
 │   │   ├── glv.py snr.py quality.py                 #   GLV metric bank／SNR 正負號正典／對焦指標
+│   │   ├── iqi.py                                   #   OP-301 的對焦分數（切 64 塊 → 去背景 → 前 30% 平均，F77）
 │   │   ├── edge.py subpixel.py shape.py profile.py  #   CD 的四塊：剖面、次像素、團塊、投影
 │   │   ├── grid.py mask.py roi.py                   #   條紋→框／label map→框／MultiROISet
 │   │   ├── period.py golden.py template.py          #   週期估測／Golden Cell 疊圖／模板定位
@@ -295,6 +296,8 @@ d4t/
     │                         #     F50 拿掉了：「整批跑一次」變成卡片自己的一條腳帶
     ├── threshold_view.py     #   在挑門檻，就要看得到分布
     ├── results.py results_table.py why_panel.py  #   Results 視窗／結果表／三次點擊回溯（F45）
+    ├── feature_tree.py       #   卡 › 區域 › 統計量那棵樹 —— **結果表與 Preview 共用一份**（F76）
+    ├── feature_panel.py      #   Preview 的特徵面板：四胞胎橫過來（一列一個統計量、一欄一個 variant）
     ├── gallery.py region_check.py      #   縮圖網格（虛擬捲動，撐 10k+）／區域畫在很多顆上
     ├── inspectors.py         #   每張卡自己的儀表（依 `Step.key` 註冊）
     ├── template_dialog.py    #   從大圖疊 Golden Cell 模板（模板存進 recipe）

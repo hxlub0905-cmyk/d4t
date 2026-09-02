@@ -22,6 +22,181 @@
 
 ---
 
+## F77：Focus index 多一個 IQI (OP-301) —— 而三份規格互相矛盾（2026-09-02）
+
+使用者要在 FI 卡加機台的對焦分數，並且說「如果你覺得這算法有問題也可以提出來」。
+提出來了三條，**每一條都用實測講**，而其中兩條改變了實作。
+
+### ① 濾波方向：兩份說明看起來相反，其實不是在吵同一件事
+
+* 詳細版：「把**低頻**壓掉（光暈、底色漸變）」→ 高通。
+* 投影片／英文版：「filter out **high-frequency noise** in unpatterned areas」→ 低通。
+
+前者要拿掉**背景**（頻譜最低端），後者要拿掉**雜訊**（最高端）—— 唯一讓兩句話
+同時成立的是**帶通**，而那也正是對焦指標該有的形狀（邊緣落在中頻）。
+
+而後者指的是一個**真的失效模式**。實測 512×512，空背景 ＋ σ=8 雜訊 vs 銳利
+pattern：
+
+| | 純高通 | 帶通（noise=40%）|
+|---|---|---|
+| 空背景 ＋ 雜訊 | **64.19** | 7.00 |
+| 銳利 pattern | 7465.63 | 4167.45 |
+| 訊號 ÷ 背景 | 116× | **595×** |
+
+純高通把**雜訊當成清晰度**。預設仍是純高通（詳細版明確描述的行為，先能對上
+機台的數字），帶通是一格參數 —— **站點差異封裝進 recipe，不封裝進程式碼**。
+
+### ② 梯度圖：詳細版裡它是一段空轉的程式碼
+
+詳細版把梯度列成獨立的 Step 2、說它「讓你知道哪些塊落在 pattern 區域」，而
+Step 4 選前 30% 是照 **energy** 選的 —— **梯度圖沒有任何下游**。四個步驟裡有
+一個是空轉的，而它會通過驗收、看起來完全正常。投影片把它放進 Step 1
+（「篩選出高圖案密度的區域」），那一份它真的在篩。
+
+兩條路都留（``min_pattern``，預設不篩），而**無論走哪一條，梯度密度都變成一個
+看得見的數字**（``focus_iqi_pattern``）—— F19 的規矩：卡片自動做的每一個決定，
+都要變成一個使用者畫得出分布的數字。
+
+### ③ iFFT 省得掉（Parseval），而「虛部」是浮點雜訊
+
+``Σ|iFFT(X)|² = (1/N)·Σ|X|²``，所以 Step 3 對最終數字沒有貢獻；而輸入是實數
+影像，iFFT 之後虛部 ~1e-16 —— 規格說的「由實部與虛部求得」逐字就是 ``real²``。
+仍然做（驗收要四個步驟、空間域那張圖之後要畫在儀表上），但
+``test_parseval_says_the_ifft_is_optional`` 把兩條路釘在一起：**哪天嫌慢，
+那條測試就是刪掉 Step 3 的許可證**。
+
+### 放在哪
+
+Focus index 卡多一格 ``metrics``（**勾選，不是四選一** —— 這幾個可以同時要，
+`CLAUDE.md` §3）。預設仍是原本三個，**既有 recipe 與黃金值一個位元組都不動**；
+IQI 勾了才算（一顆 defect 64 次 FFT，不該無條件付這筆錢）。
+
+驗收五條各一支測試（`tests/test_iqi.py`）：單一 scalar、blur 單調下降
+（7465 → 2.07）、全灰 = 0、512/1024/2000 差 <5%、四個步驟各自組得回同一個答案。
+
+### ⚠ 使用者跑起來截了圖，三個 bug —— 其中一個是畫面在說謊
+
+**設定區寫「nothing picked yet · 0 picked」，而底下的特徵表列著三個值。**
+病根：`METRIC_GROUPS` 加了 `"Sharpness"` 這個群名，但 `METRIC_GROUP_ORDER`
+**沒加** —— `MetricChips._build` 是照那張表逐群畫的，漏一個群 = 那一群的膠囊
+一顆都不會出現。而引擎照樣拿 `validate_params` 補出來的預設值在算，所以它
+**跑得完、有數字、看起來完全正常**。
+
+守著它的有兩支：群名對照（資料層）＋ **掃 registry 真的建一次 widget**
+（群名對了但畫的時候被別的條件濾掉，第一支抓不到）。
+
+另外兩個：IQI 根本沒勾、它的滑桿卻擺在畫面上（我在卡片註解裡寫的「`show_when`
+用不了，因為 `metrics` 是一串」**是錯的** —— `param_visible` 對逗號清單做的
+本來就是成員比對，F37 就是為這件事改的）；以及「Name these results」出現在
+「2 · IQI (OP-301)」的標題底下（共用的 `output_prefix_spec` 沒有 section，
+掉進了前一格的分節，而那個標題正在說謊）。
+
+### 待 owner 核對
+
+``Also wash out noise above`` 預設 0（＝純高通）。空背景區也會被評分的站點
+應該開到 30–40，而那是上面那張表的用途。
+
+---
+
+## F76：Feature 面板要大改版 —— 而那塊面板已經存在了（2026-09-02）
+
+使用者：「目前 feature 顯示面板跟後面帶的數值我覺得好亂」→「我建議大改版，
+你可以先瀏覽整個 studio 架構」。**五刀全部做完**，而第一版提案在瀏覽之後
+作廢了一刀 —— 我要蓋的那塊面板已經存在。
+
+### ① 第一版提議開一塊新面板。瀏覽完之後那一刀作廢
+
+我要蓋的東西（卡 › 區域 › 統計量的樹、雙層表頭、維度過濾）**`ui/results_table.py`
+兩星期前就寫好了**（PR-1／PR-3，`column_tree()` ＋ `verdict_features.bound_specs()`）。
+Preview 那一塊走的是另一條弱得多的路（`studio._feature_sections()` 只分到卡）。
+
+兩份說法**已經漂開了**，而症狀是可以量的：同一個區域 `between_columns`，
+ROI 卡寫的特徵 `region_index=0`（綠）、GLV 卡寫的 `region_index=1`（琥珀），
+**同一張表上兩種顏色**，而影像上那個框只有一種。`CLAUDE.md` §3 的
+「顏色指錯區域比沒有顏色糟得多」現在就是這個狀態 —— 鐵則 10。
+
+所以這一輪不是加一塊面板，是**把 Preview 接到已經在跑的那一份上**：
+Results 是 *N 顆 × M 特徵*，Preview 是 *一顆*，也就是同一棵樹的轉置。
+
+### ② 量出來的病（`recipes/rsem-worst-box.json`，118 個特徵）
+
+* **36 個**特徵的「What it is」只是把 id 抄一遍（`glv_worst_*` 整族 ——
+  正好是使用者當下在問的那幾個字）。`Step.feature_help()` 這條路已經存在，
+  GLV 卡沒填而已。
+* **97 個**的說明跟別的特徵一字不差：`feature_gloss` 只讀 `spec.metric`、
+  **不讀 `spec.variant`**，所以 `_typical` / `_outlier` / `_outlier_box` /
+  `_worst` 四胞胎四行相同 —— 而 `_outlier_box` 的值是一個**框號**，說明欄
+  卻寫「75th percentile」。
+* **四胞胎在畫面上不相鄰**：`glv_q75_worst` 跟 `glv_q75_typical` 差 13 列。
+  列序 = `features` dict 的插入序，而 `_worst` 是迴圈最後才寫的 ——
+  **排版跟著計算順序走，不是跟著意思走**。
+* 沒有判定時 Verdict chip 永遠是 `—`，佔著量測卡最需要的那塊面積。
+
+### ③ `_outlier` 不是沒用，是沒把「那是另一格」講出來
+
+使用者：「outliner 完全沒有用 或者我看不懂? 反而這樣會誤導別人以為他是最
+worst 的」。量了 24 顆（judge = `glv_q75`）：
+
+| metric | `<m>_outlier_box == glv_worst_i` |
+|---|---|
+| `glv_q75`（＝ judge）| **24/24** |
+| 其他四個 | 2–5 / 24 |
+
+兩件事同時成立：**judge 那個量的 `_outlier` 是 `_worst` 的重複**（這個 repo
+已經為同一種情形立過規矩 —— `WORST_FEATURES` 的註解拒絕開 `score_max`），
+而**其他量的 `_outlier` 指的是另一格**。五格的最小例子（judge=median）：
+`glv_std_worst = 6.2`（贏家 #4 的 std）vs `glv_std_outlier = 29.8`（#3 的），
+兩個不同的格，名字上沒有任何線索。
+
+### ④ 兩份出貨 recipe 刪掉（使用者指定）
+
+留 `rsem-worst-box.json`，刪 `ebi-to-api-characterization.json` 與
+`patch-dsnr-by-class.json`。**卡片一張都沒動** —— `pair_source` / `H2H` /
+`output_char` / GLV 的 compare 全在。
+
+⚠ 真正要小心的是**文件的連帶**：`docs/USING-CHARACTERIZATION.md` §1 以前寫
+「不要自己從零蓋，用 `recipes/ebi-to-api-characterization.json`」，而那份不在了
+—— **一份指著不存在檔案的操作手冊，就是文件版的「按了撞牆的鈕」**（推廣鐵則）。
+改成「從零蓋」是主路（步驟本來就寫在 §1.1），並在頂上講明白那份檔案什麼時候、
+為什麼走的。
+
+`ALLOWED_ERRORS` 隨之變成空的（唯一那條「模板是一張影像、塞不進 JSON」跟著
+patch 那份走了），但**機制與那支反向測試留著** —— 下一份 recipe 還要用。
+
+### 做了什麼
+
+| 刀 | |
+|---|---|
+| 1 | **區域顏色的序由「線」給**（`verdict_features._regions_in_wiring_order`）—— 修掉上面那個 bug |
+| 2 | 說明欄看得見 `variant`、數字有單位（`Step.FEATURE_UNITS` / `step.VARIANT_UNITS` / `widgets.VARIANT_GLOSS`）|
+| 3 | 卡 › 區域 › 統計量那棵樹搬進 `ui/feature_tree.py`，結果表與 Preview 吃同一份 |
+| 4 | 新的 `ui/feature_panel.py`：四胞胎橫過來（GLV 那段 19 列 → 1 標題 + 2 列），`studio._feature_sections/_feature_specs` 退場 |
+| 5 | 沒有判定就不畫 Verdict 那一塊，換成一句可以照做的話 ＋ 那顆鈕 |
+
+決定：`<judge>_outlier` **不停產**（先只改顯示）、**開** `glv_worst_baseline`
+（「目標格 − 其他格」從此寫得出逐字精確的式子）。
+`widgets.FeatureTable` 走完「收起來 → 量代價 → 刪」全程，同一天刪掉。
+
+### 而收工之後還抓到一個
+
+使用者叫我自己造一份 recipe 測（GLV 逐框 ＋ IQI ＋ 兩題判定樹，24 顆跑完）。
+跑出來：引擎寫了 52 個特徵，`FeaturePanel.feature_names()` 只回 39 個 ——
+少掉的 13 個**全部都在畫面上**，只是刀 4 把它們升格成標題行、或變成
+「← #46」那個地址。於是 `value_text("glv_worst_i")` 回 `None`，而那個數字
+明明就寫在標題上：**取用口跟畫面說的是兩件事**，而報表、測試、之後的匯出
+都走取用口。
+
+（同一天截圖抓到的另外三個在 F77 那一段 —— 它們是 Focus index 卡的事。）
+
+### 留下什麼
+
+* [`docs/history/plans/F76-feature-panel.md`](docs/history/plans/F76-feature-panel.md)
+  —— 病的量測、studio 版面全圖、四刀的形狀、收工後那四個。
+* 一份可以點的 HTML mock（現在 ⇄ 改版後、有 ⇄ 沒有 ADC，欄名可編可拖）。
+
+---
+
 ## F75：文件對齊現況 —— 而最大的問題是「哪些是活的」（2026-09-02）
 
 使用者：「詳細整理一下目前的所有相關 MD 檔案，對齊現況，若可以縮減內容請縮減」。

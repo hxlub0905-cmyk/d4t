@@ -130,6 +130,8 @@ from .scope import (
     unsupported_kind_message, visible_steps,
 )
 from .decide_panel import DecidePanel
+from .feature_panel import FeaturePanel
+from .numbers import format_feature_value
 from .viewmodel import (GLV_INTENTS, RecipeModel,
                         is_a_constant_expression, accuracy_at, histogram,
                         rebin)
@@ -140,7 +142,6 @@ from .welcome import (
     welcome_disabled,
 )
 from .widgets import (
-    FeatureTable,
     IconButton,
     ImageView,
     LibraryPanel,
@@ -1349,8 +1350,11 @@ class StudioWindow(QMainWindow):
         # 原本固定是一張「特徵 / 數值」表 —— 問題不是它佔位子，是那些數字沒有
         # 辦法判讀（`glv_snr 11.170` 是大還是小？），而且使用者在問的
         # 問題**每張卡都不一樣**。特徵表仍然留著，用切換列回去。
-        self.feature_table = FeatureTable(pane)
-        self.feature_table.setMinimumHeight(120)
+        # F76 刀 4：這一塊從 `widgets.FeatureTable`（一條平的清單）換成
+        # `feature_panel.FeaturePanel`（卡 › 區域 分段、四胞胎橫過來）。
+        # 名字仍叫 `feature_panel`，取用口跟舊的那張表同名同義。
+        self.feature_panel = FeaturePanel(pane)
+        self.feature_panel.setMinimumHeight(120)
 
         self.inspector_host = QWidget(pane)
         ihost = QVBoxLayout(self.inspector_host)
@@ -1367,7 +1371,7 @@ class StudioWindow(QMainWindow):
 
         self.bottom_stack = QStackedWidget(pane)
         self.bottom_stack.addWidget(self.inspector_host)      # index 0
-        self.bottom_stack.addWidget(self.feature_table)       # index 1
+        self.bottom_stack.addWidget(self.feature_panel)       # index 1
 
         tabs = QHBoxLayout()
         tabs.setContentsMargins(0, 0, 0, 0)
@@ -1382,20 +1386,81 @@ class StudioWindow(QMainWindow):
         lay.addLayout(tabs)
         lay.addWidget(self.bottom_stack, 2)
 
-        vrow = QHBoxLayout()
+        # ---- 判定那一塊（F76 刀 5，2026-09-02）----------------------------
+        #
+        # **沒有判定就不畫它。** 使用者 2026-09-02：「大部分人應該建立
+        # Pipeline 時 ADC 不會放到第一個」—— 而在那段時間裡，這一塊永遠是一個
+        # 寫著 `—` 的 chip 加一片空白。它不是壞的，它是**什麼都沒說**，而那塊
+        # 面積正好是量測卡最需要的地方（同 F7-15「空白狀態要說得出下一步」、
+        # 以及 scope.SHOW_SAMPLE_ENTRIES 那條「按了撞牆的鈕比沒有那顆鈕更糟」
+        # 的鏡像 —— 這裡是「說不出話的那一格比沒有那一格更佔位」）。
+        self.verdict_live = QWidget(pane)
+        vrow = QHBoxLayout(self.verdict_live)
+        vrow.setContentsMargins(0, 0, 0, 0)
         vrow.setSpacing(8)
-        self.verdict = VerdictChip(pane)
-        vrow.addWidget(QLabel("Verdict", pane))
+        self.verdict = VerdictChip(self.verdict_live)
+        vrow.addWidget(QLabel("Verdict", self.verdict_live))
         vrow.addWidget(self.verdict)
         # 這一顆走過的路（F24 §8）：`missing? no → contrast > 120 ? yes`。
         # 沒有判定樹（或還沒預覽）就是空字串 —— 不佔位、不寫 N/A。
-        self.decide_path = QLabel("", pane)
+        # **score 那個數字跟 bin 一起常駐**（F76 刀 4 之後）。以前它是特徵表
+        # 最後一列、粗體、永遠不被收合走的那一格 —— 理由是「它是這張表的
+        # 結論」。新面板把它歸進 `Score / Bin` 那一段，而那一段收得起來，
+        # 所以那條不變量搬到這裡：結論跟判定在同一行，永遠看得到。
+        self.verdict_score = QLabel("", self.verdict_live)
+        self.verdict_score.setStyleSheet("font-weight:700;")
+        vrow.addWidget(self.verdict_score)
+        self.decide_path = QLabel("", self.verdict_live)
         self.decide_path.setObjectName("paramHint")
         self.decide_path.setWordWrap(False)
         vrow.addWidget(self.decide_path, 1)
-        lay.addLayout(vrow)
+        lay.addWidget(self.verdict_live)
+
+        # 還沒有判定的時候換成**一句可以照做的話 ＋ 那顆鈕**（推廣鐵則：
+        # 講得出下一步，而那一步就在旁邊）。
+        self.verdict_empty = QWidget(pane)
+        erow = QHBoxLayout(self.verdict_empty)
+        erow.setContentsMargins(0, 0, 0, 0)
+        erow.setSpacing(8)
+        hint = QLabel("No decision yet — these numbers are measured, but "
+                      "nothing is drawing a conclusion from them.",
+                      self.verdict_empty)
+        hint.setObjectName("paramHint")
+        hint.setWordWrap(True)
+        erow.addWidget(hint, 1)
+        self.btn_add_decision = QPushButton("Add a decision…",
+                                            self.verdict_empty)
+        self.btn_add_decision.setProperty("variant", "secondary")
+        self.btn_add_decision.clicked.connect(self.show_score_page)
+        erow.addWidget(self.btn_add_decision)
+        lay.addWidget(self.verdict_empty)
+        self._sync_verdict_block()
 
         return pane
+
+    def _sync_verdict_block(self) -> None:
+        """有判定才畫 Verdict 那一塊，沒有就畫「怎麼加一個」（F76 刀 5）。
+
+        判準用 model（**recipe 有沒有判定**），不用「這一顆有沒有 bin」——
+        後者在還沒預覽、或這一顆量不出來的時候也是空的，而那兩件事的下一步
+        完全不同（一個是「去加一棵樹」，另一個是「先跑一次」）。
+        """
+        decide = getattr(self.model, "decide", None)
+        has = bool(
+            (decide is not None
+             and (getattr(decide, "tree", None) is not None
+                  or list(getattr(decide, "rules", ()) or [])))
+            or str(getattr(getattr(self.model, "score", None), "expr", "")
+                   or "").strip())
+        if getattr(self, "verdict_live", None) is None:
+            return
+        self.verdict_live.setVisible(has)
+        self.verdict_empty.setVisible(not has)
+
+    def has_decision(self) -> bool:
+        """畫面上那一塊現在是 Verdict 還是「加一個判定」（測試讀得到）。"""
+        return bool(getattr(self, "verdict_live", None) is not None
+                    and self.verdict_live.isVisibleTo(self))
 
     # ==================================================================== #
     # 訊號接線
@@ -1558,6 +1623,7 @@ class StudioWindow(QMainWindow):
     def _refresh_all(self) -> None:
         self._refresh_pipeline()
         self._sync_score_widgets()
+        self._sync_verdict_block()      # F76 刀 5：有判定才畫 Verdict 那一塊
         self._refresh_feature_combo()
         self._sync_threshold_line()
         self._update_action_states()
@@ -3584,7 +3650,7 @@ class StudioWindow(QMainWindow):
         self._refresh_pipeline()
         self.gallery.refresh_styles()
         for w in (self.histogram, self.image_view, self.verdict,
-                  self.feature_table, self.library, self.pipeline, self.gallery):
+                  self.feature_panel, self.library, self.pipeline, self.gallery):
             w.update()
 
     def remove_decision(self) -> bool:
@@ -4467,14 +4533,12 @@ class StudioWindow(QMainWindow):
 
         self._refresh_inspector(result)
         highlight = self._highlight_features(result)
-        self.feature_table.set_features(getattr(result, "features", {}) or {},
-                                        highlight=highlight,
-                                        sections=self._feature_sections(result),
-                                        about=self._feature_about(result),
-                                        specs=self._feature_specs())
+        self.feature_panel.set_model(self._feature_model(result, highlight))
         score = getattr(result, "score", None)
         self.verdict.set_verdict(getattr(result, "bin", None)
                                  if score is not None else None)
+        self.verdict_score.setText("" if score is None
+                                   else "score %s" % format_feature_value(score))
         self._show_decide_path(result)
 
         if not ran:
@@ -5062,6 +5126,36 @@ class StudioWindow(QMainWindow):
             for name in (rec or {}).get("names") or []:
                 out[str(name)] = ref
         return out
+
+    def _feature_model(self, result: Any,
+                       highlight: Sequence[str] = ()) -> List[Dict[str, Any]]:
+        """特徵面板要畫的那幾段（F76 刀 4）—— **跟結果表同一棵樹**。
+
+        分組不是在這裡發明的：`verdict_features.bound_specs` 給每個名字的
+        結構化身分（卡、區域、統計量、變體），`feature_panel.panel_model`
+        把它排成「一張卡 × 一個區域」的段。Results 是 *N 顆 × M 特徵*，
+        這裡是 *一顆* —— 同一棵樹的轉置。
+
+        ⚠ 這一支取代了 `_feature_sections()` 與 `_feature_specs()`：那兩支
+        各自從 `meta["feature_owner"]` 與逐張卡的 `resolve_feature_specs`
+        重建了一次分組，而**那份說法跟結果表那份已經漂開了** —— 區域顏色
+        在同一張表上出現兩種就是漂出來的第一個症狀（F76 刀 1）。
+        """
+        from .feature_panel import panel_model
+        from ..core.pipeline.verdict_features import (
+            bound_specs, diagnostic_columns,
+        )
+
+        try:
+            recipe = self.model.to_recipe()
+            bounds = bound_specs(recipe, self.model.kind)
+            diags = diagnostic_columns(recipe, self.model.kind)
+        except Exception:              # noqa: BLE001 — 顯示層，壞了就不分組
+            bounds, diags = [], []
+        return panel_model(getattr(result, "features", {}) or {}, bounds,
+                           highlight=highlight,
+                           about=self._feature_about(result),
+                           diagnostics=diags)
 
     def _feature_specs(self) -> Dict[str, Any]:
         """特徵名 → 誕生處宣告的身分（`FeatureSpec`，PR-3；前身 F37 A4 的

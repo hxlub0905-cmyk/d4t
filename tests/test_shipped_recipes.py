@@ -21,8 +21,6 @@
 from __future__ import annotations
 
 import json
-import os
-import re
 import sys
 from pathlib import Path
 
@@ -33,35 +31,23 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tools"))
 
 import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from d4t.core.ingest import pair_source as pair_ingest       # noqa: E402
 from d4t.core.ingest.dataset import load_dataset             # noqa: E402
-import numpy as np                                           # noqa: E402
 from d4t.core.pipeline import Recipe, run_batch, validate    # noqa: E402
-from d4t.core.pipeline import decide_tree                    # noqa: E402
 from d4t.core.pipeline.batch import run_batch_steps          # noqa: E402
 
 RECIPES = REPO / "recipes"
-CHAR = RECIPES / "ebi-to-api-characterization.json"
-PATCH = RECIPES / "patch-dsnr-by-class.json"
 RSEM = RECIPES / "rsem-worst-box.json"
 
 #: **允許出現的 error，一份 recipe 一張表**（``{檔名: {(節點, code)}}``）。
 #:
-#: 預設是「一條都不准」。這裡的例外只給一種東西：**那一格的值根本不是文字，
-#: 塞不進 JSON**。目前只有一個 —— `roi_reference` 的 templateGC 要一張模板
-#: **影像**與畫在它上面的框（卡片自己的話：「a template is an image, it cannot
-#: be typed in」）。使用者要按一次「Edit template & regions…」。
+#: 預設是「一條都不准」，而**現在這張表是空的** ——
+#: 2026-09-02 刪掉 `patch-dsnr-by-class.json` 之後唯一的例外跟著走了
+#: （那一條是「模板是一張影像，塞不進 JSON」）。
 #:
-#: 寫成一張明列的表而不是「這份 recipe 跳過檢查」：長出**別的** error 的時候
-#: 這支測試照樣要紅。
-ALLOWED_ERRORS = {
-    "patch-dsnr-by-class.json": {
-        ("roi", "not-configured"),
-        # 上一條的連鎖：沒有模板就產不出區域名，於是量測卡說「沒有人定義
-        # gc」。同一個原因、兩句話 —— 而第一句已經指名了那顆按鈕。
-        ("glv", "unknown-region"),
-    },
-}
+#: 表空著但**機制留著**，因為它配著下面那支反向測試：例外只給一種東西 ——
+#: 那一格的值根本不是文字。寫成一張明列的表而不是「這份 recipe 跳過檢查」，
+#: 是為了讓它長出**別的** error 的時候這支測試照樣要紅。
+ALLOWED_ERRORS = {}
 
 
 def _shipped():
@@ -80,10 +66,8 @@ def test_there_is_at_least_one_shipped_recipe():
 def test_a_shipped_recipe_loads_and_passes_its_own_lint(path):
     """**沒有 error**，除了 `ALLOWED_ERRORS` 明列的那幾條（warning 一律可以）。
 
-    warning 放行是刻意的：characterization 那一份有一條 `unknown-feature`
-    （排名欄位還沒選，所以沒有人產 `pair_die_rank`），而那正是它要講的話 ——
-    它連帶著一片叫「no ranking column picked yet」的葉子。擋掉 warning 等於逼
-    一份誠實的 recipe 說謊。
+    warning 放行是刻意的：一份 recipe 可以誠實地留著「這一格要你填」的欄位，
+    而 lint 對那件事講的是 warning。擋掉 warning 等於逼一份誠實的 recipe 說謊。
     """
     allowed = ALLOWED_ERRORS.get(path.name, set())
     recipe = Recipe.load(path)
@@ -128,310 +112,6 @@ def test_a_shipped_recipe_says_which_version_wrote_it(path):
     而不是「這份檔案壞了」（`docs/PITFALLS.md`）。"""
     raw = json.loads(path.read_text(encoding="utf-8"))
     assert str(raw.get("app_version", "")).strip()
-
-
-# --------------------------------------------------------------------------- #
-# 2. characterization：接線與那三片葉子
-# --------------------------------------------------------------------------- #
-def test_the_characterization_recipe_is_wired_the_way_the_manual_says():
-    """**小圖接 Small image、大圖接 Search inside** —— 反過來接就是拿大圖去
-    小圖裡找，而 `docs/USING-CHARACTERIZATION.md` §3 就是這張表。"""
-    recipe = Recipe.load(CHAR)
-    wires = {(e.src, e.src_out, e.dst, e.dst_in) for e in recipe.edges}
-    assert ("load", "single", "h2h", "search") in wires
-    assert ("pair", "paired", "h2h", "template") in wires
-
-
-def test_the_output_card_is_wired_to_nothing_on_purpose():
-    """**Output 段沒有輸入埠** —— 它不接線，在 route 上就會跑。
-
-    使用者這一輪問的正是這件事（「output 段要怎麼接」）。答案是「不接」，
-    而那不是漏掉的：`_OutputStep.resolve_reads` 回空清單，`run_batch_steps`
-    是整批跑完之後照 route 的順序各跑一次。拉一條線進去的話那條線落在一個
-    不存在的埠上 —— 畫布會說謊。
-    """
-    from d4t.core.pipeline import get_step
-
-    recipe = Recipe.load(CHAR)
-    assert "report" in recipe.routes["rsem"], "沒在 route 上就永遠不會跑"
-    assert not [e for e in recipe.edges if e.dst == "report"]
-    step = get_step(recipe.nodes["report"].step)
-    assert step.resolve_reads(recipe.nodes["report"].params) == []
-
-
-def test_the_first_question_is_pair_found():
-    """判定樹**第一步一定要問 `pair_found`**。
-
-    樹只會評走得到的那條路，所以先問它，③ 那一支就永遠問不到 ncc /
-    排名那幾題，`decide_unanswered` 維持 0。反過來排的話那幾顆會累積一堆
-    「問不出來」，而那是 recipe 的錯不是資料的錯。
-    """
-    tree = Recipe.load(CHAR).decide.tree
-    assert "pair_found" in tree.when
-    assert tree.yes.bin == 3, "yes 那一邊就是「EBI 沒偵測到」"
-
-
-def test_the_grouping_ships_filled_in_and_the_score_column_does_not():
-    """**分組預先填好，排序欄留空** —— 兩格的性質不一樣。
-
-    `XINDEX` + `YINDEX`（每顆 die 各自排）是絕大多數站點的 sample 規則，
-    而**填錯它不會有任何人講話**：只勾一欄就是把整整一行 die 併成一組，
-    跑得完、數字看起來正常，只有 `pair_die_total` 看得出來。實測 4×3 顆 die、
-    每 die 取前 2 名：只勾 `XINDEX` 讓「① 抓到了」從 24 顆掉到 8 顆，全部灌進
-    「② 排名太低」—— 整份報告的結論反過來。所以它不留給使用者猜。
-
-    `rank_by` 相反：每一台機台的分數欄叫的名字不一樣，猜不到。而「還沒選」
-    不是安靜的 —— `die_rank` 這一行帶 `fill`，所以每一顆都拿得到
-    `die_rank_missing`，樹上第二問就是它。
-    """
-    recipe = Recipe.load(CHAR)
-    pair = recipe.nodes["pair"].params
-    assert pair["rank_within"] == "XINDEX,YINDEX"
-    assert pair["rank_by"] == ""
-
-    lets = {x.name: x for x in recipe.decide.let}
-    assert lets["die_rank"].expr == "pair_die_rank"
-    assert lets["die_rank"].fill, "沒有 fill 的話那一顆會整個失敗，不是分一類"
-    assert "die_rank_missing" in recipe.decide.tree.no.when
-
-
-def test_the_half_filled_ranking_is_a_warning_not_a_blocker():
-    """填了分組、還沒填排序欄 —— 那張卡**跑得起來**，所以它是 warning。
-
-    F33 把這一條放在 `configuration_issues`（error），於是這份 recipe 只要把
-    “Rank within” 預先填對，就會被自己的 lint 擋在 CLI 門外。分成兩支之後
-    判準是一句話：error ＝ 這張卡會拋或什麼都不產出；warning ＝ 它會跑，
-    但你八成不是這個意思。
-    """
-    recipe = Recipe.load(CHAR)
-    issues = [i for i in validate(recipe, kind="rsem") if i.node_id == "pair"]
-    assert not [i for i in issues if i.level == "error"]
-    hint = [i for i in issues if i.code == "half-configured"]
-    assert len(hint) == 1
-    assert "Rank by" in hint[0].detail
-
-
-def test_it_runs_as_it_ships_without_any_editing(tmp_path):
-    """**下載下來、載進去、按跑，不改一個字** —— 這是使用者這一輪要的東西。
-
-    唯一的條件是「有第二份資料」，而那本來就不可能寫進 recipe（路徑不進
-    recipe，F15）。沒有排名欄位的時候每一顆落在第 9 類 —— 那是報表在告訴他
-    還有哪一格沒填。
-    """
-    main, second = _two_lots(tmp_path)
-    recipe = _with_folder(Recipe.load(CHAR), tmp_path / "out")
-    rows = run_batch(recipe, main, workers=1)
-
-    assert all(r.get("ok") for r in rows), \
-        [r.get("error") for r in rows if not r.get("ok")]
-    bins = {int(r.get("bin", -1)) for r in rows}
-    assert bins <= {1, 2, 3, 9}
-    assert 9 in bins, "沒選排名欄位就該落在那一片說得出原因的葉子上"
-    assert all(int(r["features"].get("decide_unanswered", 0)) == 0
-               for r in rows), "每一題都答得出來 —— 那正是 fill 與樹的順序在做的事"
-
-    # 回溯煙霧（F45）：還沒配置的跑法，重放要說得出「die_rank 是補的」——
-    # 那正是使用者在面板上要看到的那一行「if missing ⇒」。
-    from d4t.core.pipeline.verdict_trace import verdict_trace
-
-    row = next(r for r in rows if int(r["bin"]) == 9)
-    t = verdict_trace(recipe, "rsem", row["features"])
-    assert t.leaf_bin == 9
-    let = {x.name: x for x in t.lets}["die_rank"]
-    assert let.filled and let.fill == "-1", \
-        "重放要看得出這一顆的 die_rank 用了 fill"
-
-
-def test_all_three_classes_come_out_once_the_ranking_column_is_picked(tmp_path):
-    """填上那一格之後，① ② ③ 三類都要真的數得出來。
-
-    這是整份 recipe 唯一的驗收條件 —— 它存在的理由就是把 ② 跟 ③ 分開。
-    """
-    main, second = _two_lots(tmp_path)
-    recipe = _configured(Recipe.load(CHAR), tmp_path / "out")
-
-    rows = run_batch(recipe, main, workers=1)
-    assert all(r.get("ok") for r in rows), \
-        [r.get("error") for r in rows if not r.get("ok")]
-    bins = sorted({int(r.get("bin", -1)) for r in rows})
-    assert bins == [1, 2, 3], "① 抓到了 / ② 排名太低 / ③ 沒偵測到，一類都不能少"
-
-    # ③ 那幾顆是**第二份裡沒有的那幾顆**，而且它們沒有失敗。
-    missed = [r for r in rows if int(r["bin"]) == 3]
-    assert missed and all(r["features"]["pair_found"] == 0.0 for r in missed)
-    assert all("match_dist_nm" not in r["features"] for r in missed), \
-        "配不到就不寫那幾格（算不出來的不寫）"
-
-    # 回溯煙霧（F45）：三類各取一顆，重放要跟引擎**逐項相同** ——
-    # leaf 就是那一列的 bin、路徑就是引擎走的路、逐步缺值的總數就是
-    # `decide_unanswered`。這是「這顆為什麼判成這樣」那塊面板的地基。
-    from d4t.core.pipeline.verdict_trace import verdict_trace
-
-    tree = decide_tree.display_tree(recipe.decide)
-    by_bin = {}
-    for r in rows:
-        by_bin.setdefault(int(r["bin"]), r)
-    for r in by_bin.values():
-        t = verdict_trace(recipe, "rsem", r["features"])
-        assert t.leaf_bin == int(r["bin"])
-        assert t.path == decide_tree._path_of(tree, dict(r["features"]))
-        assert sum(len(s.missing) for s in t.steps) \
-            == r["features"]["decide_unanswered"]
-
-
-def test_the_report_it_writes_has_a_row_for_every_defect(tmp_path):
-    """整條路走到底：報表、CSV、圖、還有那份 recipe 的複本。"""
-    main, second = _two_lots(tmp_path)
-    folder = tmp_path / "out"
-    recipe = _configured(Recipe.load(CHAR), folder)
-
-    rows = run_batch(recipe, main, workers=1)
-    bctx = run_batch_steps(recipe, main, rows, kind="rsem")
-    assert not bctx.errors, bctx.errors
-
-    html = (folder / "report.html").read_text(encoding="utf-8")
-    assert (folder / "defects.csv").is_file()
-    assert (folder / "recipe.json").is_file()
-    for name in ("caught", "ranked too low", "never detected"):
-        assert name in html, "三類的名字都要出現在報表上"
-    # 配不到的那一顆**沒有第二張圖**，而那一格是空的不是破圖。
-    assert "<td class='none'>" in html
-
-
-# --------------------------------------------------------------------------- #
-# 3. patch dSNR：那三個門檻問的數字，真的量得出來嗎
-# --------------------------------------------------------------------------- #
-def test_the_patch_recipe_asks_about_numbers_its_own_cards_measure():
-    """判定樹問的每一個數字，都要有一張卡真的寫得出來。
-
-    這一條是**不跑資料也答得出來**的那一半（宣告層），而它抓的是最常見的
-    打錯：`focus_laplacian` vs `focus_lapvar`、`cmp_snr_mean` vs
-    `cmp_snr_mean_outlier`。跑起來才發現的話，症狀是「每一顆都判成同一類」
-    —— 因為問不到的題目一律答「否」（F30）。
-    """
-    from d4t.core.pipeline import get_step
-
-    recipe = Recipe.load(PATCH)
-    produced = set()
-    for nid in recipe.routes["ebi_patch"]:
-        node = recipe.nodes[nid]
-        step = get_step(node.step)
-        produced |= set(step.resolve_features(step.validate_params(node.params)))
-    asked = set(decide_tree.features_used(recipe.decide))
-    assert asked <= produced, sorted(asked - produced)
-
-
-def test_the_patch_recipe_measures_and_classifies_end_to_end(tmp_path):
-    """整條路真的跑一次 —— **連模板一起**。
-
-    模板塞不進出貨的 recipe（它是一張影像），但**測試造得出來**：合成 lot
-    的圖案就是一個週期性晶格，切一格出來 `encode_cell` 就是模板。所以「這份
-    recipe 到底跑不跑得出那三個數字」這件事沒有藉口不驗。
-    """
-    from _synth import rounded_square_tile
-    from d4t.core.algo.template import encode_cell
-    from make_sample import generate
-
-    pitch = 16
-    lot = generate(str(tmp_path / "lot"), n=12, seed=5, size=128, pitch=pitch)
-    ds = load_dataset(lot["klarf"])
-
-    tile = np.asarray(rounded_square_tile(pitch), dtype=np.float64)
-    recipe = Recipe.load(PATCH)
-    recipe.nodes["roi"].params["template"] = encode_cell(
-        np.clip(tile, 0, 255).astype(np.uint8))
-    recipe.nodes["roi"].params["regions"] = "gc:0.2,0.2,0.6,0.6"
-    folder = tmp_path / "out"
-    recipe.nodes["report"].params["folder"] = str(folder)
-    # F38：box plot 是同一張卡的一個勾，所以它也填資料夾 —— 圖仍然落在
-    # `<folder>/spread.html`，跟合併之前逐字同一個路徑。
-    recipe.nodes["spread"].params["folder"] = str(folder)
-
-    assert not [i for i in validate(recipe, kind="ebi_patch")
-                if i.level == "error"], "補上模板之後就不該有紅字了"
-
-    rows = run_batch(recipe, ds, workers=1)
-    assert all(r.get("ok") for r in rows), \
-        [r.get("error") for r in rows if not r.get("ok")]
-
-    feats = rows[0]["features"]
-    assert feats["glv_boxes"] > 1, "templateGC 要在 patch 上鋪出好幾格才有得比"
-    # **問樹要哪幾個，不要抄一份**（同一個理由：抄出來的那份會漂）。
-    asked = decide_tree.features_used(recipe.decide)
-    assert len(asked) == 3, asked
-    for name in asked:
-        assert name in feats, name
-    assert all(r.get("bin") is not None for r in rows)
-
-    # 回溯煙霧（F45）：三個門檻在這一顆身上**每一題都帶得出實值** ——
-    # 面板上不該有任何一格是「?」（量得到，正是上面那三行斷言保證的）。
-    from d4t.core.pipeline.verdict_trace import verdict_trace
-
-    t = verdict_trace(recipe, "ebi_patch", feats)
-    assert t.leaf_bin == rows[0]["bin"]
-    assert t.steps and all("?" not in s.valued for s in t.steps), \
-        [s.valued for s in t.steps]
-
-    bctx = run_batch_steps(recipe, ds, rows, kind="ebi_patch")
-    assert not bctx.errors, bctx.errors
-    assert (folder / "report.html").is_file()
-    assert (folder / "spread.html").is_file()
-    plot = (folder / "spread.html").read_text(encoding="utf-8")
-    assert "<svg" in plot
-    # box plot 畫的就是樹問過的那幾個 —— 「留空 = 判定問過的那幾個」。
-    for name in asked:
-        assert name in plot, name
-
-
-def test_the_third_cut_is_unsigned_so_dark_defects_count_too():
-    """第三刀問的是 **`cmp_abs_delta_mean_outlier`**，不是帶正負號的那個。
-
-    `_outlier` 挑的是「離典型最遠」的那一格 —— **兩個方向都算** —— 而 `delta`
-    帶正負號，所以暗缺陷是負的（合成資料上實測 −18.6），`> 40` 對它**永遠不
-    成立**。用 `delta` 等於一條「只抓亮缺陷」的規則，而那不是這份 recipe 在問
-    的問題（使用者 2026-08-26：「把 abs_delta 換上去」）。
-
-    ⚠ 反向那一半用的是**整字比對**：`"cmp_delta_mean_outlier" in whens` 對
-    `cmp_abs_delta_mean_outlier` 是 False（子字串不同），但這種比對很容易在
-    下一次改名時變成一支永遠綠的測試 —— 所以寫成邊界比對。
-    """
-    recipe = Recipe.load(PATCH)
-    whens = " ".join(w for w in _whens(recipe.decide.tree))
-    assert "cmp_abs_delta_mean_outlier" in whens
-    assert not re.search(r"\bcmp_delta_mean_outlier\b", whens), \
-        "帶正負號的那個只抓得到亮缺陷"
-
-
-def test_the_signed_delta_is_still_measured_as_the_direction():
-    """`delta` 仍然一起量 —— 它是那個差的**方向**（亮還是暗）。
-
-    而且它是退回「只抓亮的」時的逃生口：樹上換一個名字就好，**不必重跑
-    影像段**。只量其中一個的話，那個選擇就變成一次重跑。
-    """
-    metrics = Recipe.load(PATCH).nodes["glv"].params["compare_metrics"]
-    assert "abs_delta" in metrics and "delta" in metrics
-
-
-def _whens(node):
-    from d4t.core.pipeline.recipe import TreeStep
-    if isinstance(node, TreeStep):
-        yield node.when
-        for child in (node.yes, node.no):
-            for w in _whens(child):
-                yield w
-
-
-def test_the_patch_recipe_denoises_both_streams_with_one_card():
-    """**一張卡吃兩條流** —— test 與 ref 吃同一組設定。
-
-    分成兩張卡的話它們各自有機會被設得不一樣，而「兩張圖還比得起來」正是
-    整份 recipe 的前提（CLAUDE.md §3）。
-    """
-    recipe = Recipe.load(PATCH)
-    dn = recipe.nodes["dn"].params
-    assert dn["method"] == "gaussian" and int(dn["ksize"]) == 3
-    into_dn = {e.src_out for e in recipe.edges if e.dst == "dn"}
-    assert into_dn == {"test", "ref"}
 
 
 # --------------------------------------------------------------------------- #
@@ -607,51 +287,3 @@ def test_the_report_it_writes_has_a_picture_for_every_defect(tmp_path):
         "有一列點下去沒有圖 —— 報表跟圖是同一件事的兩半"
 
 
-# --------------------------------------------------------------------------- #
-# 工具
-# --------------------------------------------------------------------------- #
-def _two_lots(tmp_path):
-    """main = API 那一份（8 顆）；第二份 = 少了兩顆的「EBI」，帶一個分數欄。
-
-    第二份用**同一個 seed** 產，所以兩邊座標對得起來（真實情況是兩台機台量
-    同一片 wafer）。少掉的那兩顆就是 ③。
-    """
-    from make_sample_rsem import generate
-
-    main = load_dataset(generate(str(tmp_path / "api"), n=8, seed=11)["klarf"])
-    other = load_dataset(
-        generate(str(tmp_path / "ebi"), n=8, seed=11)["klarf"])
-    # **少兩顆** —— 那兩顆在 API 上有、EBI 上沒有，就是「根本沒偵測到」。
-    other.items = [it for it in other.items if it.index not in (2, 5)]
-    pair_ingest.attach(main, other, "ebi")
-    # 機台自己的分數欄。真的 KLARF 上它叫什麼由站點決定（所以 recipe 裡是
-    # 空的）—— 這裡塞一個，讓排名那一半也跑得到。
-    for i, it in enumerate(main.sources["ebi"].items):
-        it.fields["EBISCORE"] = float(100 - i * 7)
-    return main, other
-
-
-def _with_folder(recipe, folder):
-    recipe.nodes["report"].params["folder"] = str(folder)
-    return recipe
-
-
-def _configured(recipe, folder):
-    """把使用者本來就要填的那幾格填好（站點資料，不進出貨的檔案）。"""
-    recipe = _with_folder(recipe, folder)
-    recipe.nodes["pair"].params["rank_by"] = "EBISCORE"
-    recipe.nodes["pair"].params["carry"] = "DEFECTID"
-    # ⚠ **這裡把出貨的 `XINDEX,YINDEX` 清掉**，而理由值得寫下來：合成 lot
-    # 一顆 die 只有一兩顆 defect，所以照 die 分組之後每一組都只有一個成員 ——
-    # 每一顆都是 rank 1，② 那一類就永遠是空的。那不是 bug（那份資料上的
-    # 答案本來就是這樣），是**這份合成資料撐不起分組**。分組本身的語意
-    # 在 `test_pair_source.py`（手造的 die 佈局，看得見組的大小）。
-    recipe.nodes["pair"].params["rank_within"] = ""
-    lets = list(recipe.decide.let)
-    for i, x in enumerate(lets):
-        if x.name == "sample_top":
-            lets[i] = type(x)(name=x.name, expr="3", scale=x.scale,
-                              fill=x.fill)
-    from dataclasses import replace
-    recipe.decide = replace(recipe.decide, let=lets)
-    return recipe

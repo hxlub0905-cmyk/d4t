@@ -574,8 +574,9 @@ class OutputReportStep(_OutputStep):
     * ``output_csv`` / ``output_bundle`` / ``output_char`` 三張走同一支
       `export_report.write_csv`，欄位逐字相同；
     * Excel 的 ``Details`` 分頁就是 CSV 那張表（`export/report.py`）；
-    * 出貨的 `recipes/patch-dsnr-by-class.json` 裡，box plot 的路徑本來就寫著
+    * 當時出貨的 patch recipe 裡，box plot 的路徑本來就寫著
       ``patch_report/spread.html`` —— 它**早就寫進報表資料夾裡**。
+      （那份 recipe 2026-09-02 刪了；這裡留著的是當時查帳的依據。）
 
     所以在使用者眼裡它們不是五件事，是「我要一份報表，裡面要有什麼」的五個
     程度（`CLAUDE.md` §3 的「同一個家族的做法收成一張卡」，前例 F19 的 CD、
