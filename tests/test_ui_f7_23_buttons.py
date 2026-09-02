@@ -573,6 +573,92 @@ def test_pressed_is_a_step_you_can_actually_see(qapp, theme_name):
         "%s：pressed 與 hover 只差 ΔL* %.1f，按下去看不出來" % (theme_name, d)
 
 
+def _border_colour(button):
+    """按鈕**邊框**的顏色 —— 最左那一格（圓角只影響四個角，中線那一列是直的）。
+
+    配 :func:`_fill_colour` 用：這一輪問的正好是「這兩個一不一樣」。
+
+    ⚠ **這顆按鈕不能是有焦點的那一顆。** 焦點框是畫在按鈕**自己的填色上面**
+    的 2px 環（見本檔開頭 A1 那一組），於是最外面兩格會是
+    ``focus_ring_inverse``（primary 上是白色），第 3 格才是填色 —— 邊框整個被
+    蓋掉，量到的東西跟這一輪要問的無關。第一版就是這樣寫的，而它**沒有焦點框
+    以外的任何症狀**：測試照樣綠，只是問錯了問題。
+    """
+    assert not button.hasFocus(), \
+        "量邊框之前要先把焦點移開，不然量到的是焦點環"
+    button.resize(140, 30)
+    pm = QPixmap(button.size())
+    pm.fill(QColor(BACKDROP))
+    button.render(pm)
+    return pm.toImage().pixelColor(0, 15)
+
+
+@pytest.mark.parametrize("theme_name", ("light", "dark"))
+def test_the_primary_border_moves_with_its_fill(qapp, theme_name):
+    """按下去的時候，邊框要跟著填色走（F78）。
+
+    ``#primary`` 只在一般狀態寫了一次 ``border: 1px solid $accent``，而
+    ``:hover`` / ``:pressed`` 只換了 ``background`` —— 於是按住的那一刻，邊框
+    （``accent``）比填色（``accent_active``）**亮**了一圈，看起來像一圈光暈；
+    hover 則相反，邊框比填色暗，看起來像凹進去。兩個都是與該狀態相反的意思，
+    而全平面設計沒有陰影可以蓋過去。
+
+    量的是 ``:pressed``（``setDown`` 在離屏平台上真的生效）；``:hover`` 在離屏
+    render 不出來，由下一條用 QSS 的結構去守。
+    """
+    theme_mod.apply_theme(qapp, theme_name)
+    host = QWidget()
+    lay = QVBoxLayout(host)
+    # 焦點得有地方去：留在這顆按鈕上的話，量到的是焦點環不是邊框。
+    decoy = QPushButton("elsewhere", host)
+    lay.addWidget(decoy)
+    b = QPushButton("Run trial", host)
+    b.setObjectName("primary")
+    lay.addWidget(b)
+    host.show()
+    qapp.processEvents()
+    host.activateWindow()
+    decoy.setFocus(Qt.TabFocusReason)
+    qapp.processEvents()
+
+    b.setDown(True)
+    qapp.processEvents()
+    fill, border = _fill_colour(b), _border_colour(b)
+    host.hide()
+    theme_mod.apply_theme(qapp, "light")
+
+    assert fill == QColor(theme_mod.PALETTES[theme_name]["accent_active"]), \
+        "%s：按下去的填色不是 accent_active（%s）" % (theme_name, fill.name())
+    assert border == fill, \
+        "%s：按下去邊框 %s、填色 %s —— 那一圈看起來像光暈" \
+        % (theme_name, border.name(), fill.name())
+
+
+def test_no_primary_state_changes_its_fill_and_leaves_the_border_behind(qapp):
+    """**結構**上守住同一件事，因為 ``:hover`` 在離屏平台畫不出來。
+
+    這不是「QSS 裡有沒有那一行」的字串比對（這個檔案的開頭講過那種測試沒有
+    用）—— 問的是一條規則自己的完整性：**只要一條 ``#primary`` 的狀態規則動了
+    ``background``，它就必須同時講出邊框。** 下一個人加 ``:focus:hover`` 或別的
+    狀態時，這條會替他問一次。
+    """
+    import re
+
+    qss = re.sub(r"/\*.*?\*/", "", theme_mod.build_stylesheet(), flags=re.S)
+    guilty = []
+    for sel, decls in re.findall(r"([^{}]+)\{([^{}]*)\}", qss):
+        sel = " ".join(sel.split())
+        if "#primary" not in sel or not re.search(r":(hover|pressed|checked)", sel):
+            continue
+        if not re.search(r"(^|[;\s])background\s*:", decls):
+            continue
+        if not re.search(r"border(-color)?\s*:", decls):
+            guilty.append(sel)
+
+    assert guilty == [], \
+        "這幾條規則換了填色卻沒換邊框：%s" % guilty
+
+
 def test_a_checkable_button_looks_checked(qapp):
     """``QPushButton`` 以前完全沒有 ``:checked`` 規則。
 

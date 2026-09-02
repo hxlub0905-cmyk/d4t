@@ -156,6 +156,18 @@ _CUT_R = 8.0
 #: 卡片才是主角）；滑鼠移上來的那一條抬到卡片之上 —— 見 ``hoverEnterEvent``。
 _Z_EDGE, _Z_EDGE_HOVER = -1.0, 1.0
 
+#: 縮到這個比例以下，卡片只畫「認得出是哪一張」需要的東西（F78）。
+#:
+#: 背景的點陣底早就有這條線了（`drawBackground` 在 0.45 以下不畫點，理由是
+#: 「會糊成一片灰」），但**卡片沒有** —— 於是 `fit()` 到 40% 的時候，每張卡
+#: 上那兩行 6–7pt 的副標與設定摘要、加上左右各一排埠標籤，全部變成糊在卡片
+#: 上的灰噪點，而且每張卡還照跑一次 `_draw_elided` 的 elide 計算。
+#:
+#: 值取 0.55 而不是跟著背景的 0.45：字比點更早糊。`MIN_FIT_SCALE` 那裡量過
+#: 「副標要到 70% 才讀得回來」—— 0.55 是「已經讀不到了，別再畫」的位置，
+#: 中間那段留給還看得出輪廓的模糊字。
+_LOD_TERSE = 0.55
+
 #: 還沒拉線時，一列最多排幾張卡（見 :func:`layout_columns`）。
 WRAP = 4
 
@@ -736,6 +748,15 @@ class _NodeItem(QGraphicsItem):
         return best
 
     # -- 繪製 ---------------------------------------------------------------
+    @staticmethod
+    def terse_at(scale: float) -> bool:
+        """縮到這個比例時，這張卡要不要收掉小字（F78）。
+
+        跟 :meth:`_EdgeItem.line_pen` 同一個理由拉出來：判斷寫在 paint 裡就
+        只有數像素才驗得到。
+        """
+        return float(scale) < _LOD_TERSE
+
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         enabled = bool(self.info.get("enabled", True))
         selected = self.isSelected()
@@ -744,6 +765,11 @@ class _NodeItem(QGraphicsItem):
         body = QRectF(0, 0, NODE_W, self.body_height())
 
         p.setRenderHint(QPainter.Antialiasing, True)
+
+        # 這張卡現在被縮到多小（F78）。讀 painter 的 world transform 而不是
+        # `_opt.levelOfDetailFromTransform`：節點沒有自己的 transform，兩者
+        # 同值，而這一支不必去信一個平常被丟掉的參數。
+        terse = self.terse_at(p.worldTransform().m11())
 
         # 投影：讓節點浮在網格之上。用畫的而不是 QGraphicsDropShadowEffect ——
         # effect 會強迫 Qt 額外開一層離屏 buffer，為了 2px 的陰影不值得。
@@ -819,16 +845,26 @@ class _NodeItem(QGraphicsItem):
         f.setBold(True)
         f.setPointSizeF(max(7.0, f.pointSizeF()))
         p.setFont(f)
-        _draw_elided(p, QRectF(text_x, 11, text_w, 16),
-                     str(self.info.get("label", self.node_id)))
-        f.setBold(False)
-        f.setPointSizeF(max(6.0, f.pointSizeF() - 1.0))
-        p.setFont(f)
-        p.setPen(QColor(TOKENS["text_secondary"] if enabled else TOKENS["text_disabled"]))
-        _draw_elided(p, QRectF(text_x, 28, text_w, 14), self.subtitle())
-        parts = self.summary_parts()
-        if parts:
-            _draw_parts(p, QRectF(text_x, 43, text_w, 14), parts)
+        # 縮很小的時候**標題留著**（那是這張卡的身分，也是唯一還讀得出輪廓的
+        # 一行），副標與設定摘要收掉 —— 見 `_LOD_TERSE`。
+        if terse:
+            # 只剩一行的時候把它擺到卡片中線上，不然標題會孤零零貼在上緣、
+            # 底下空一大塊，看起來像沒畫完。
+            _draw_elided(p, QRectF(text_x, (min(NODE_H, self.body_height()) - 16) / 2.0,
+                                   text_w, 16),
+                         str(self.info.get("label", self.node_id)))
+        else:
+            _draw_elided(p, QRectF(text_x, 11, text_w, 16),
+                         str(self.info.get("label", self.node_id)))
+            f.setBold(False)
+            f.setPointSizeF(max(6.0, f.pointSizeF() - 1.0))
+            p.setFont(f)
+            p.setPen(QColor(TOKENS["text_secondary"] if enabled
+                            else TOKENS["text_disabled"]))
+            _draw_elided(p, QRectF(text_x, 28, text_w, 14), self.subtitle())
+            parts = self.summary_parts()
+            if parts:
+                _draw_parts(p, QRectF(text_x, 43, text_w, 14), parts)
 
         # 連接埠（**本地座標** —— 見 out_anchors_local 的說明）。
         # 輸入是空心圈、輸出是實心點：一眼看得出線該從哪邊拉到哪邊。
@@ -841,7 +877,7 @@ class _NodeItem(QGraphicsItem):
             name = str(ins[i].get("name") or "") if i < len(ins) else ""
             _draw_port(p, anchor, kind, filled=False, role=role,
                        lit=name in lit_names)
-            if len(ins) < 2 or i >= len(ins):
+            if terse or len(ins) < 2 or i >= len(ins):
                 continue
             # 兩個以上的輸入才標名字：一顆埠的時候「這條線接到哪」沒有歧義，
             # 標了只是多一個字；兩顆以上不標的話，使用者要去猜上面那顆是
@@ -862,7 +898,7 @@ class _NodeItem(QGraphicsItem):
         for spec, anchor in zip(self.out_specs(), self.out_anchors_local()):
             name, kind = spec["name"], spec["kind"]
             _draw_port(p, anchor, kind, filled=True)
-            if not name:
+            if terse or not name:
                 continue
             # 每個輸出埠都標上它吐的名字（F7-9；F12 起也含具名區域）。以前
             # 只有多埠才標，於是「這張卡到底做在哪一條流上」在畫布上是看不到
@@ -1082,7 +1118,7 @@ class _EdgeItem(QGraphicsItem):
         """
         return self.src.out_kind(self.port)
 
-    def line_color(self) -> QColor:
+    def line_color(self, strength: float = 0.5) -> QColor:
         """這條線的顏色 —— **來源那張卡的階段色，但調淡一半**（F13-⑤）。
 
         全部畫成灰的時候，一張擠了十條線的畫布上「這條是從哪裡出來的」只能
@@ -1092,13 +1128,33 @@ class _EdgeItem(QGraphicsItem):
         **調淡一半**是重點：原色會讓畫布變成一團彩虹，而線是背景不是主角
         （它們平常畫在卡片**底下**，見 `_Z_EDGE`）。混一半灰之後，同一條線
         仍然分得出色系，但整張圖的重量還在卡片上。
+
+        ``strength`` 是那個「一半」（F78）。選中一張卡的時候，接著它的線要
+        **把同一個顏色調回來**而不是換成另一個顏色 —— 換色的話使用者得學
+        「藍色 = 被選中的線」這第二層意思，而調濃只是把原本就在那裡的線索
+        講大聲一點。
         """
         base = QColor(TOKENS["canvas_edge"])
         gid = str(self.src.info.get("group", "") or "")
         if not gid:
             return base
         return QColor(theme.mix_hex(theme.group_hex(gid),
-                                    TOKENS["canvas_edge"], 0.5))
+                                    TOKENS["canvas_edge"], float(strength)))
+
+    # ---- 選中一張卡時，它的線要跟著講話（F78）-----------------------------
+    def focus_state(self) -> str:
+        """這條線相對於**目前選中的那張卡**是什麼身分。
+
+        ``"flat"``（沒有選任何卡）／``"near"``（接著選中的卡）／
+        ``"far"``（有選，但跟它無關）。
+
+        為什麼要有這件事：選一張卡以前只有那張卡自己有反應，而使用者點它
+        的理由通常正是「它接了誰」—— 那個問題在畫面上要用眼睛沿著線走才答
+        得出來，一張擠了十條線的畫布上根本走不完。
+        """
+        if not self.canvas.has_node_selection():
+            return "flat"
+        return "near" if (self.src.isSelected() or self.dst.isSelected()) else "far"
 
     # ---- 斷開鈕（F7-22）---------------------------------------------------
     #: 斷開鈕的命中半徑。畫出來的圓是 ``_CUT_R``，多給 2px 是因為使用者瞄的是
@@ -1214,23 +1270,59 @@ class _EdgeItem(QGraphicsItem):
         path = path.united(disc)
         return path
 
-    def paint(self, p: QPainter, _opt, _widget=None) -> None:
-        p.setRenderHint(QPainter.Antialiasing, True)
+    #: 三種身分各自的（濃度, 線寬）。``near`` 把 :meth:`line_color` 的「一半」
+    #: 調回九成（同一個色相、講大聲一點）；``far`` 則是把線往畫布底色混掉
+    #: 過半 —— **壓下去的那些不能消失**，它們仍然是這張圖的骨架，只是這一刻
+    #: 不是使用者在問的東西。
+    _FOCUS = {"flat": (0.50, 1.6), "near": (0.90, 2.2), "far": (0.50, 1.6)}
+    #: ``far`` 的線往 ``canvas_bg`` 混多少（0 = 不動，1 = 完全消失）。
+    _FADE = 0.55
+
+    def line_pen(self) -> QPen:
+        """這條線現在要用哪一支筆 —— **顏色、粗細、虛實的唯一定義**。
+
+        獨立成一支而不是寫在 :meth:`paint` 裡，理由跟 :meth:`shape` 與
+        ``cut_hit`` 讀同一個 ``CUT_GRAB`` 一模一樣：**看得到的與測得到的必須是
+        同一個定義**。寫在 paint 裡的話，要驗「選中一張卡，它的線有沒有真的
+        亮起來」只能去數像素 —— 而那種測試會在任何一次改字體、改抗鋸齒的時候
+        變紅，於是很快就沒有人相信它。
+        """
         region = self.kind() == "region"
+        state = self.focus_state()
+        strength, width = self._FOCUS[state]
         if self.isSelected():
             col = QColor(TOKENS["canvas_edge_active"])
+            width = 2.2
+        elif self._hover:
+            # 滑鼠移上來時**線本身**也要動（F78）。以前只有中點長出那顆紅 ×，
+            # 而線可以很長 —— × 離兩端各一百多 px，餘光裡「我現在瞄到的是哪
+            # 一條」沒有答案。抬 z 值（見 hoverEnterEvent）解的是「看不看得
+            # 到」，這一行解的是「認不認得出」。
+            col = QColor(TOKENS["canvas_edge_active"])
+            width = 2.4
         elif region:
+            # 區域線本來就畫原色（它是虛線，已經跟影像流分得開），所以 ``near``
+            # 在這一支只剩加粗 —— 濃度沒有可以再調的空間。
             col = region_color()
         else:
-            col = self.line_color()
-        path = self.path()
+            col = self.line_color(strength)
+        if state == "far" and not (self.isSelected() or self._hover):
+            col = QColor(theme.mix_hex(col.name(), TOKENS["canvas_bg"],
+                                       1.0 - self._FADE))
         # 區域線畫**虛線**：它搬的不是像素，而使用者要在餘光裡就分得出這兩種
         # 線（它們接不到彼此）。顏色是 Region 段的階段色，跟卡片上那顆圖示磚
         # 同一個 —— 不必再學一組新的意思。
-        pen = QPen(col, 2.2 if self.isSelected() else 1.6)
+        pen = QPen(col, width)
         if region:
             pen.setStyle(Qt.DashLine)
             pen.setDashPattern([4.0, 3.0])
+        return pen
+
+    def paint(self, p: QPainter, _opt, _widget=None) -> None:
+        p.setRenderHint(QPainter.Antialiasing, True)
+        path = self.path()
+        pen = self.line_pen()
+        col = pen.color()
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
         p.drawPath(path)
@@ -1322,6 +1414,9 @@ class PipelineCanvas(QGraphicsView):
         self._popout_button = bool(popout_button)
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
+        #: 現在有沒有選中任何一張卡（F78）。線在 paint 裡要問這件事，而每一條
+        #: 線問一次「掃過所有節點」是 O(線 × 卡)；存一個旗標就是 O(1)。
+        self._sel_nodes = False
         # 節點 hover（_sync_hover_node）與線上的 × 都吃「沒按鍵也送 move」。
         # QGraphicsView 建構時本來就會把 viewport 的 mouseTracking 打開
         # （item hover 靠它），這行是把**依賴講明**：哪天換了 viewport 或
@@ -1336,6 +1431,12 @@ class PipelineCanvas(QGraphicsView):
 
         self._items: Dict[str, _NodeItem] = {}
         self._edges: List[_EdgeItem] = []
+        # **接 scene 的訊號，不是接 set_selected**：選取有三條路（點卡片、
+        # 框選、程式呼叫 set_selected），只補其中一條的話，另外兩條選出來的
+        # 卡片線不會亮 —— 而那正是「有時候會亮有時候不會」這種找不到的 bug。
+        # 接在 `_items` / `_edges` **之後**：handler 讀這兩個，而場景這時是空的
+        # （訊號不會提早響），但那件事不值得靠它撐著。
+        self._scene.selectionChanged.connect(self._on_selection_changed)
         self._order: List[str] = []
         self._pairs: List[Tuple[str, str]] = []      # 使用者拉的線
         self._implicit: List[Tuple[str, str]] = []   # route 順序帶來的依賴
@@ -1840,6 +1941,25 @@ class PipelineCanvas(QGraphicsView):
         for nid, item in self._items.items():
             item.setSelected(nid == self._selected)
             item.update()
+
+    # ---- 選中一張卡 → 它的線跟著講話（F78）--------------------------------
+    def has_node_selection(self) -> bool:
+        """現在有沒有選中任何一張卡（`_EdgeItem.focus_state` 問的就是這個）。
+
+        問的是**卡片**不是 `scene().selectedItems()` —— 線自己也是可選的，
+        而「選了一條線」不該讓其他所有線都黯下去。
+        """
+        return self._sel_nodes
+
+    def _on_selection_changed(self) -> None:
+        """選取一變就把所有線重畫一次。
+
+        無條件重畫（而不是只在旗標翻轉時）：從卡 A 點到卡 B 的時候旗標兩次
+        都是 True，但該亮的線整組換了一批。
+        """
+        self._sel_nodes = any(it.isSelected() for it in self._items.values())
+        for edge in self._edges:
+            edge.update()
 
     def selected_node(self) -> Optional[str]:
         return self._selected

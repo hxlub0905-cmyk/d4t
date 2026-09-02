@@ -674,8 +674,17 @@ QToolBar QToolButton#primary[seg="right"] {
 }
 QToolBar QToolButton#primary[seg="right"]:focus { padding-left: 6px; padding-right: 6px; }
 QWidget#toolbarGroup { background: transparent; border: 0; }
-QToolBar QToolButton#primary:hover { background: $accent_hover; }
-QToolBar QToolButton#primary:pressed { background: $accent_active; }
+/* The fill moves on hover/press, so the border has to move with it (F78).
+ * `#primary` sets `border: 1px solid $accent` once and neither state rule
+ * restated it, so hovering left a border darker than its own fill - a ring
+ * that reads as "pressed in", which is the opposite of what hover means - and
+ * pressing left one lighter than the fill, which reads as a halo. A flat
+ * design has no shadow to carry those two states, so the fill and its edge
+ * have to stay the same colour. */
+QToolBar QToolButton#primary:hover { background: $accent_hover;
+                                     border-color: $accent_hover; }
+QToolBar QToolButton#primary:pressed { background: $accent_active;
+                                       border-color: $accent_active; }
 /* Disabled, but still recognisably the main action (F7-23).
  *
  * This used to be the same grey-on-grey as every other disabled button, so with
@@ -745,8 +754,11 @@ QPushButton#primary {
     background: $accent; color: #ffffff; border: 1px solid $accent;
     padding: 5px 18px; font-weight: 600;
 }
-QPushButton#primary:hover { background: $accent_hover; }
-QPushButton#primary:pressed { background: $accent_active; }
+/* Same as the toolbar copy above: the border follows the fill. */
+QPushButton#primary:hover { background: $accent_hover;
+                            border-color: $accent_hover; }
+QPushButton#primary:pressed { background: $accent_active;
+                              border-color: $accent_active; }
 /* See the toolbar copy above for why disabled-primary keeps the accent plate. */
 QPushButton#primary:disabled {
     background: $accent_bg; color: $text_disabled; border: 1px solid $accent_border;
