@@ -972,6 +972,28 @@ class RecipeModel:
         return {b.spec.name: b.node_id
                 for b in bound_specs(recipe, self.kind)}
 
+    def feature_regions(self) -> Dict[str, int]:
+        """特徵名 → **它屬於第幾個具名區域**（-1 = 不屬於任何一個）。
+
+        判定段的兩個下拉（「插入數字 ▾」與導引式問題的第一格）用它在每一項
+        前面點一個顏色 —— **跟 Feature 表的上標、影像上那個框同一個顏色**，
+        所以「這個數字是哪一塊的」在三個畫面上是同一個線索
+        （2026-09-01，使用者：「ADC 的設定頁面是不是也加入一些 icon 會比較好」）。
+
+        ⚠ 跟 :meth:`feature_owners` 一樣是 `verdict_features.bound_specs` 的
+        **投影**，不是第四份實作 —— 那一份住在 core、比較完整，而且有一把對照
+        引擎的尺（F51 的教訓）。
+        """
+        from d4t.core.pipeline.verdict_features import bound_specs
+
+        try:
+            recipe = self.to_recipe()
+        except Exception:              # noqa: BLE001 — 顯示層，壞了就不上色
+            return {}
+        return {b.spec.name: int(getattr(b.spec, "region_index", -1))
+                for b in bound_specs(recipe, self.kind)
+                if getattr(b.spec, "region", "")}
+
     def nm_per_px_is_known(self) -> bool:
         """有沒有任何一張卡填了 nm/px（`_util.nm_per_px_spec`）。"""
         for node in self.nodes.values():

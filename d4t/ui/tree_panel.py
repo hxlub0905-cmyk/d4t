@@ -33,10 +33,22 @@ from .tree_scene import (
     rows_reaching, suggest_condition,
 )
 from .threshold_view import SplitBar, ThresholdHistogram
-from .widgets import clear_layout_parked, small_button, split_labelled
+from .widgets import (clear_layout_parked, glyph_icon, region_dot_icon,
+                      small_button, split_labelled)
 from .viewmodel import MAX_BIN, is_a_constant_expression
 
 __all__ = ["TreePanel"]
+
+#: 比較運算子 → 那張小圖（`ui.glyphs` 的 ``cmp_*`` 一族）。
+#:
+#: **住在 UI 而不是 `decide_tree.OPS` 旁邊**：core 不 import Qt，而「這個運算子
+#: 畫起來長什麼樣」是畫面的事。少一個鍵不會壞（退回 ``cmp_eq``），但那一項
+#: 的圖會說錯話 —— 所以有一支測試逐一比對 `OPS` 與這張表。
+OP_ICONS = {
+    ">": "cmp_gt", ">=": "cmp_ge",
+    "<": "cmp_lt", "<=": "cmp_le",
+    "==": "cmp_eq", "!=": "cmp_ne",
+}
 
 #: 導引式問題那一格數字框的上下界。**它的用途是「別讓 Qt 溢位」，不是
 #: 「這個門檻應該多大」** —— 後者沒有通用答案（見 `_build_guided` 的說明）。
@@ -319,8 +331,22 @@ class TreePanel(QWidget):
 
         which = QComboBox()
         which.addItem("(pick a number…)", "")
+        # 每一項前面一顆**那個區域的顏色**（2026-09-01）—— 跟 Feature 表的
+        # 上標、影像上那個框同一個顏色。接了兩三個區域之後這張清單上一半的
+        # 名字只差前綴那一段，而顏色比字先被看到。
+        regions = {}
+        getter = getattr(self._model, "feature_regions", None)
+        if callable(getter):
+            try:
+                regions = dict(getter())
+            except Exception:          # noqa: BLE001 — 上色而已，不能擋畫面
+                regions = {}
         for n in names:
-            which.addItem(n, n)
+            idx = int(regions.get(n, -1))
+            if idx >= 0:
+                which.addItem(region_dot_icon(idx), n, n)
+            else:
+                which.addItem(n, n)
         i = which.findData(name)
         which.setCurrentIndex(max(0, i))
         which.setToolTip("Which of the measured numbers this step asks about.")
@@ -337,9 +363,12 @@ class TreePanel(QWidget):
                 name=str(c.itemData(j) or ""), rebuild=True))
 
         opbox = QComboBox()
-        opbox.setFixedWidth(118)
+        opbox.setFixedWidth(132)
         for sym, text in OPS:
-            opbox.addItem(text, sym)
+            # 每一項一張小圖（2026-09-01）：**同一條數線，箭頭往哪、端點實不
+            # 實心** —— 六個英文詞（greater than / at least…）要讀完才分得出
+            # 「含不含等於」，那張圖一眼就答完。收起來時看得到的也是它。
+            opbox.addItem(glyph_icon(OP_ICONS.get(sym, "cmp_eq")), text, sym)
         j = opbox.findData(op)
         opbox.setCurrentIndex(max(0, j))
         opbox.activated.connect(

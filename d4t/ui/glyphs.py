@@ -72,6 +72,13 @@ CHIP_ICONS = (
     "klarf_inplace", "klarf_annotate", "klarf_topn",
     # Align（收起來的那張卡）：兩張圖是怎麼對上的
     "al_phase", "al_hybrid", "al_ncc", "al_ecc", "al_template",
+    # 判定：這個數字要怎麼用（照原值／跟整批比）
+    "scale_raw", "scale_z", "scale_pct",
+    # 判定：比較運算子。同一條數線，差別在**箭頭往哪、端點實不實心**
+    "cmp_gt", "cmp_ge", "cmp_lt", "cmp_le", "cmp_eq", "cmp_ne",
+    # 判定還沒設定時那一塊：**畫的是畫布上真的長那樣的東西**
+    # （菱形＝一個問題、托盤＝一個類別）
+    "adc_number", "adc_question", "adc_tray",
 )
 
 #: 「原本就在那裡的東西」的透明度。跟 `widgets._draw_profile_glyph` 同一個值
@@ -629,6 +636,106 @@ def _al_template(g: _Pad) -> None:
     g.blk(0.34, 0.34, 0.66, 0.66, True)
 
 
+# --------------------------------------------------------------------------- #
+# 判定：這個數字要怎麼用
+#
+# 三顆共用同一個底（**一批 defect 的分布**），差別在「這一顆被放在哪一把尺
+# 上」—— 那正是這一格在問的事。
+# --------------------------------------------------------------------------- #
+_BATCH = [(0.06, 0.74), (0.20, 0.66), (0.34, 0.30), (0.50, 0.22),
+          (0.66, 0.42), (0.82, 0.66), (0.94, 0.74)]
+
+
+def _scale_raw(g: _Pad) -> None:
+    # 照原值：一條刻度尺，這一顆站在上面。
+    g.line(0.04, 0.62, 0.96, 0.62, False, 0.07)
+    for x in (0.12, 0.30, 0.48, 0.66, 0.84):
+        g.line(x, 0.62, x, 0.76, False, 0.05)
+    g.blk(0.56, 0.24, 0.70, 0.62, True)
+
+
+def _scale_z(g: _Pad) -> None:
+    # 跟整批比：分布畫出來，這一顆離中心幾個 σ。
+    g.poly(_BATCH, False, 0.08)
+    g.line(0.50, 0.16, 0.50, 0.94, False, 0.06)
+    g.blk(0.74, 0.34, 0.86, 0.94, True)
+
+
+def _scale_pct(g: _Pad) -> None:
+    # 排名：一疊由低到高，選中的那一階實心。
+    for i, y in enumerate((0.74, 0.54, 0.34, 0.14)):
+        g.blk(0.10, y, 0.34 + i * 0.18, y + 0.14, i == 2)
+
+
+# --------------------------------------------------------------------------- #
+# 判定：比較運算子
+#
+# 同一條數線 ＋ 一個門檻點。**箭頭往哪 = 哪一邊算過**，
+# **端點實不實心 = 含不含等於** —— 數學課本上就是這麼畫的，不必再學一次。
+# --------------------------------------------------------------------------- #
+def _cmp(g: _Pad, arrows: str, filled: bool) -> None:
+    """一條數線 ＋ 一個門檻點。
+
+    ``arrows`` 是**哪一邊算過**（``right`` / ``left`` / ``both`` / ``""``），
+    ``filled`` 是**含不含等於**（實心＝含）。數學課本上就是這麼畫的，所以
+    這六顆不必再學一次；而它們並排時唯一的差別正好就是那兩件事。
+    """
+    y, x0 = 0.54, 0.50
+    g.line(0.04, y, 0.96, y, False, 0.07)
+    ends = {"right": ((0.94, -0.13),), "left": ((0.06, 0.13),),
+            "both": ((0.94, -0.13), (0.06, 0.13))}.get(arrows, ())
+    for tip, d in ends:
+        g.line(x0, y, tip, y, True, 0.11)
+        g.line(tip, y, tip + d, y - 0.17, True, 0.09)
+        g.line(tip, y, tip + d, y + 0.17, True, 0.09)
+    # 空心那顆畫大一點、線細一點 —— 19 px 下 0.11 半徑配 0.09 的筆幾乎沒有
+    # 洞，於是「含不含等於」這個唯一的差別看不出來（render 出來才看到）。
+    g.p.setPen(QPen(g.solid, max(1.0, (0.09 if filled else 0.07) * g.w)))
+    g.p.setBrush(g.solid if filled else QColor(255, 255, 255, 0))
+    r = 0.115 if filled else 0.145
+    if not filled:
+        g.p.setBrush(Qt.NoBrush)
+    g.p.drawEllipse(QPointF(x0 * g.w, y * g.h), r * g.w, r * g.w)
+
+
+# --------------------------------------------------------------------------- #
+# 判定：還沒設定時那一塊在講什麼
+#
+# ⚠ 這三顆畫的是**畫布上真的長那樣的東西**：判定樹的一步是一個菱形、一個類別
+# 是一個托盤（`ui/tree_scene.py`）。空狀態教的是那個畫面，不是另一套比喻 ——
+# 教錯的比喻要學兩次。
+# --------------------------------------------------------------------------- #
+def _adc_number(g: _Pad) -> None:
+    # 一疊量出來的數字，挑其中一個。
+    for i, y in enumerate((0.10, 0.34, 0.58, 0.82)):
+        g.blk(0.10, y, 0.90 if i == 1 else 0.66, y + 0.14, i == 1)
+
+
+def _adc_question(g: _Pad) -> None:
+    # 一個菱形，兩條路出去。
+    path = QPainterPath()
+    c, r = 0.42, 0.30
+    pts = [(c, c - r), (c + r, c), (c, c + r), (c - r, c)]
+    path.moveTo(pts[0][0] * g.w, pts[0][1] * g.h)
+    for x, y in pts[1:]:
+        path.lineTo(x * g.w, y * g.h)
+    path.closeSubpath()
+    g.p.setPen(QPen(g.solid, max(1.0, 0.09 * g.w)))
+    g.p.setBrush(Qt.NoBrush)
+    g.p.drawPath(path)
+    g.line(c, c + r, c, 0.88, False, 0.07)
+    g.line(c + r, c, 0.90, c, False, 0.07)
+
+
+def _adc_tray(g: _Pad) -> None:
+    # 三個托盤，缺陷掉進其中一個。
+    g.blk(0.04, 0.60, 0.32, 0.94, False)
+    g.blk(0.36, 0.60, 0.64, 0.94, True)
+    g.blk(0.68, 0.60, 0.96, 0.94, False)
+    g.dot(0.50, 0.24, 0.11, True)
+    g.line(0.50, 0.36, 0.50, 0.56, True, 0.07)
+
+
 #: 名字 → 畫它的那支。**這張表就是 `CHIP_ICONS` 的實作**，兩邊由
 #: `test_ui_chip_icons` 對得起來（少一支的症狀是那顆膠囊直接 ValueError）。
 _DRAW = {
@@ -693,4 +800,16 @@ _DRAW = {
     "al_ncc": _al_ncc,
     "al_ecc": _al_ecc,
     "al_template": _al_template,
+    "scale_raw": _scale_raw,
+    "scale_z": _scale_z,
+    "scale_pct": _scale_pct,
+    "cmp_gt": lambda g: _cmp(g, "right", False),
+    "cmp_ge": lambda g: _cmp(g, "right", True),
+    "cmp_lt": lambda g: _cmp(g, "left", False),
+    "cmp_le": lambda g: _cmp(g, "left", True),
+    "cmp_eq": lambda g: _cmp(g, "", True),
+    "cmp_ne": lambda g: _cmp(g, "both", False),
+    "adc_number": _adc_number,
+    "adc_question": _adc_question,
+    "adc_tray": _adc_tray,
 }

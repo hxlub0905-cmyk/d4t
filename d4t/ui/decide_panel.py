@@ -41,29 +41,58 @@ from PySide6.QtWidgets import (
     QLineEdit, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
 
-from .widgets import clear_layout_parked, small_button, split_labelled
+from .widgets import (ChoiceChips, clear_layout_parked, glyph_icon,
+                      region_dot_icon, small_button, split_labelled)
 from .viewmodel import MAX_BIN
 
 __all__ = ["DecidePanel"]
+
+#: 「這個數字要怎麼用」的三把尺：``(recipe 存的值, 顯示名, 圖示, 一句話)``。
+#:
+#: **值 ``""`` 就是「照原值」**（不是「沒填」）—— 它是 `DecideSpec.let` 的
+#: 預設，換一個哨兵要付一道遷移，而那筆錢沒有理由付。膠囊那一格認得它：
+#: `ChoiceChips` 比對的是「哪一顆的 id 等於現在的值」，空字串照樣比得中。
+SCALES = (
+    ("", "As measured", "scale_raw",
+     "Each defect keeps its own value."),
+    ("z", "Z vs the batch", "scale_z",
+     "(value - batch median) / spread - “how unusual is this defect”. "
+     "Needs a run over the batch; the preview shows the raw value."),
+    ("percentile", "Percentile in batch", "scale_pct",
+     "Where it ranks against the batch, 0 to 100. Needs a run over the "
+     "batch; the preview shows the raw value."),
+)
 
 #: 「插入數字 ▾」那一列的標題（沒有東西可插的時候換一句話）。
 _PICK_PLACEHOLDER = "Insert a number…"
 _PICK_EMPTY = "No numbers upstream yet"
 
 
-def _feature_combo(items: Sequence[str], on_pick) -> QComboBox:
+def _feature_combo(items: Sequence[str], on_pick,
+                   regions: Optional[Dict[str, int]] = None) -> QComboBox:
     """共用的「插入數字 ▾」（F21-B 的那一支，這裡是它的第三個使用者）。
 
     顯示的是「名字 — 誰算的」，**送出去的只有名字** —— 插錯半邊的話使用者會
     得到一個永遠指不到的變數名，而錯誤要等跑起來才出現。
+
+    ``regions`` 有的名字前面點一顆**那個區域的顏色**（2026-09-01）——
+    跟 Feature 表的上標、影像上那個框同一個顏色。一份 recipe 接了兩三個區域
+    之後，這張清單上一半的名字只差前綴那一段，而顏色比字先被看到。
     """
+    regions = dict(regions or {})
     combo = QComboBox()
     combo.addItem(_PICK_PLACEHOLDER if items else _PICK_EMPTY, "")
     combo.setEnabled(bool(items))
     for it in items:
         name, owner = split_labelled(it)
-        if name:
-            combo.addItem("%s   —   %s" % (name, owner) if owner else name, name)
+        if not name:
+            continue
+        text = "%s   —   %s" % (name, owner) if owner else name
+        idx = regions.get(name, -1)
+        if idx >= 0:
+            combo.addItem(region_dot_icon(idx), text, name)
+        else:
+            combo.addItem(text, name)
     combo.setToolTip("Pick one of the numbers the cards above work out - "
                      "it is put in at the cursor.")
 
@@ -77,6 +106,46 @@ def _feature_combo(items: Sequence[str], on_pick) -> QComboBox:
 
     combo.activated.connect(_picked)
     return combo
+
+
+#: 還沒有判定時那一塊講的三句話（2026-09-01，使用者：「ADC 的設定頁面是不是也
+#: 加入一些 icon 會比較好（目前的如果沒設定好空）」）。
+#:
+#: 以前這裡只有一行「Nothing sorts the defects yet.」＋一顆鈕 —— 而那顆鈕會在
+#: 畫布上長出一棵樹，使用者按之前沒有任何線索知道會發生什麼。
+#:
+#: ⚠ **不要在這裡列「幾種判定方式」**：二元門檻那個編輯器 2026-08-24 整個
+#: 拿掉了（使用者：「UI 完全拿掉」），判定就是一棵樹。列出不存在的選擇比沒有
+#: 說明更糟。三張圖畫的因此是**畫布上真的長那樣的東西**（菱形＝一個問題、
+#: 托盤＝一個類別）。
+_EMPTY_STEPS = (
+    ("adc_number", "It reads the numbers the cards above measured."),
+    ("adc_question", "Each step asks one of them a question - the answer "
+                     "sends the defect left or right."),
+    ("adc_tray", "Where it stops is its class, and that is what gets "
+                 "written into the KLARF."),
+)
+
+
+def _empty_step(icon: str, line: str) -> QWidget:
+    """空狀態的一列：一張小圖 ＋ 一句話。"""
+    row = QWidget()
+    row.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+    lay = QHBoxLayout(row)
+    lay.setContentsMargins(2, 0, 2, 0)
+    lay.setSpacing(8)
+    dot = QLabel()
+    dot.setPixmap(glyph_icon(icon, 20).pixmap(20, 20))
+    dot.setFixedSize(22, 22)
+    lay.addWidget(dot, 0, Qt.AlignTop)
+    text = QLabel(str(line))
+    text.setObjectName("paramHint")
+    text.setWordWrap(True)
+    # ⚠ 圖跟字要**齊頭**：不指定的話 `QLabel` 在一整列的高度裡置中，而
+    # 那一列被 `body_lay` 撐開 —— 於是圖在上面、字在下面，看起來是兩件事。
+    text.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+    lay.addWidget(text, 1, Qt.AlignTop)
+    return row
 
 
 def _tight(w: QWidget, width: int = 0) -> QWidget:
@@ -129,6 +198,8 @@ class DecidePanel(QWidget):
         super().__init__(parent)
         self._model: Any = None
         self._features: List[str] = []
+        #: 特徵名 → 第幾個區域（下拉上那顆顏色點）。`refresh` 更新。
+        self._regions: Dict[str, int] = {}
         self._counts: Dict[int, int] = {}
         self._purity: Dict[int, Any] = {}
         self._building = False
@@ -239,6 +310,10 @@ class DecidePanel(QWidget):
         m = self._model
         if m is None:
             return
+        # 顏色點的來源（`RecipeModel.feature_regions`）—— 每次重建問一次，
+        # 因為接了／剪了一條區域線之後那張表就變了。
+        getter = getattr(m, "feature_regions", None)
+        self._regions = dict(getter()) if callable(getter) else {}
         on = getattr(m, "decide", None) is not None
         if on:
             tree = getattr(m.decide, "tree", None) is not None
@@ -254,7 +329,10 @@ class DecidePanel(QWidget):
             # 2026-08-24 整個拿掉了（使用者：「UI 完全拿掉」；舊 recipe 一打開
             # 就自動轉成樹，見 `StudioWindow.load_recipe_path`）—— 所以這裡
             # 不是「另一種判定」，是「還沒有判定」。
-            self.head.setText("Nothing sorts the defects yet.")
+            self.head.setText("Nothing sorts the defects yet - every one "
+                              "comes out unclassified.")
+            for icon, line in _EMPTY_STEPS:
+                self.body_lay.addWidget(_empty_step(icon, line))
             go = small_button("Add the decision", shape="wide")
             go.setToolTip("Put a decision tree on the canvas and start with "
                           "its first question.")
@@ -314,7 +392,8 @@ class DecidePanel(QWidget):
         self.body_lay.addWidget(self._labelled(
             "", sc, _feature_combo(self._features,
                                    lambda tok: m.set_decide_score(
-                                       _insert_at_cursor(sc, tok)))))
+                                       _insert_at_cursor(sc, tok)),
+                                   regions=self._regions)))
 
     def _let_row(self, i: int, item: Any) -> QWidget:
         """一行 working number ＝ 面板上的**兩行**。
@@ -346,7 +425,8 @@ class DecidePanel(QWidget):
         expr.textEdited.connect(lambda t, k=i: m.set_let(k, expr=str(t)))
         pick = _feature_combo(self._features,
                               lambda tok, e=expr, k=i:
-                              m.set_let(k, expr=_insert_at_cursor(e, tok)))
+                              m.set_let(k, expr=_insert_at_cursor(e, tok)),
+                              regions=self._regions)
         pick.setFixedWidth(140)
         rm = _tight(small_button("✕"), 24)
         rm.setToolTip("Take this line out")
@@ -372,30 +452,35 @@ class DecidePanel(QWidget):
         fill.textEdited.connect(lambda t, k=i: m.set_let(k, fill=str(t)))
         # 「跟整批比」（F23 期3）：跨顆的數字在單顆的 run 裡根本不存在 ——
         # 所以它是這一行的屬性，不是另一張卡（F24 §5 定的家）。
-        scale = QComboBox()
-        for text, val in (("as measured", ""),
-                          ("z vs the batch", "z"),
-                          ("percentile in batch", "percentile")):
-            scale.addItem(text, val)
-        j = scale.findData(str(getattr(item, "scale", "") or ""))
-        scale.setCurrentIndex(max(0, j))
-        scale.setToolTip(
-            "How this number is used by the rules:\n"
-            "as measured - each defect keeps its own value;\n"
-            "z vs the batch - (value - batch median) / spread, so 'how "
-            "unusual is this defect';\n"
-            "percentile in batch - where it ranks, 0 to 100.\n"
-            "Batch scaling needs a run over the batch - the preview shows "
-            "the raw value.")
-        scale.activated.connect(
-            lambda j2, c=scale, k=i:
-            m.set_let(k, scale=str(c.itemData(int(j2)) or "")))
-        for w in (miss_tag, fill, scale):
+        #
+        # **膠囊不是下拉**（2026-09-01，使用者：「ADC 的設定頁面是不是也加入
+        # 一些 icon 會比較好」）：三個選項是三把不同的尺，而卡片設定區早就用
+        # 同一種膠囊在問這種問題 —— 同一個面板兩種長相，使用者要學兩次。
+        scale = ChoiceChips(
+            [v for v, _l, _g, _h in SCALES],
+            [g for _v, _l, g, _h in SCALES],
+            str(getattr(item, "scale", "") or ""),
+            {v: h for v, _l, _g, h in SCALES},
+            labels={v: l for v, l, _g, _h in SCALES})
+        scale.changed.connect(
+            lambda text, k=i: m.set_let(k, scale=str(text or "")))
+        for w in (miss_tag, fill):
             bottom.addWidget(w)
         bottom.addStretch(1)
 
+        # 三顆膠囊**自己一行**：這一欄的寬度是使用者拖的（實測預設 437 px），
+        # 而三顆加起來要四百多 —— 擠在「if missing」那一行只會折成三排。
+        # 同一個教訓在 `_rule_row` 的檔頭已經寫過一次。
+        use = QHBoxLayout()
+        use.setSpacing(6)
+        tag = QLabel("use it")
+        tag.setObjectName("paramHint")
+        use.addWidget(tag)
+        use.addWidget(scale, 1)
+
         vlay.addLayout(top)
         vlay.addLayout(bottom)
+        vlay.addLayout(use)
         row.lay.addWidget(col, 1)
         return row
 

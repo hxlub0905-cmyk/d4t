@@ -422,3 +422,107 @@ def test_the_threshold_box_is_wide_enough_for_what_it_shows(qapp, rows):
     p.hide()
     assert need <= field.width(), (
         "%r 要 %dpx，框裡的文字區只有 %dpx" % (text, need, field.width()))
+
+
+# --------------------------------------------------------------------------- #
+# ③ ADC 那一頁的圖示與空狀態（2026-09-01）
+#
+# 使用者：「ADC 的設定頁面是不是也加入一些 icon 會比較好（目前的如果沒設定好
+# 空）」。**icon 與空狀態是兩件事**，這一段兩件都守。
+# --------------------------------------------------------------------------- #
+def test_the_scale_row_is_chips_not_a_dropdown(qapp):
+    """「這個數字要怎麼用」是三把尺 —— 卡片設定區早就用膠囊在問這種問題。"""
+    from d4t.ui.decide_panel import SCALES, DecidePanel
+    from d4t.ui.widgets import ChoiceChips
+
+    m = RecipeModel()
+    m.use_decide(True)
+    m.add_let()
+    p = DecidePanel()
+    p.set_model(m)
+    p.refresh(force=True)
+
+    chips = p.findChildren(ChoiceChips)
+    assert len(chips) == 1, "每一行 working number 一排膠囊"
+    got = chips[0]
+    assert [c.mid for c in got._chips] == [v for v, _l, _g, _h in SCALES]
+    # **空字串是「照原值」的真值，不是「沒填」** —— 它必須勾得起來
+    assert got.chip("").is_checked(), "預設那一顆要亮著"
+    assert got.chip("").label == "As measured"
+
+
+def test_picking_a_scale_chip_writes_the_same_value_the_dropdown_wrote(qapp):
+    """換掉的只有長相：recipe 存的字一模一樣。"""
+    from d4t.ui.decide_panel import DecidePanel
+    from d4t.ui.widgets import ChoiceChips
+
+    m = RecipeModel()
+    m.use_decide(True)
+    m.add_let()
+    p = DecidePanel()
+    p.set_model(m)
+    p.refresh(force=True)
+    p.findChildren(ChoiceChips)[0].chip("z").click()
+    assert str(getattr(m.decide.let[0], "scale", "")) == "z"
+
+
+def test_every_operator_has_its_own_picture(qapp):
+    """六個運算子的差別是「箭頭往哪、含不含等於」—— 六個英文詞要讀完才分得出。
+
+    ⚠ 這一條同時擋住**漏掉一個**：`OPS` 多一個運算子而 `OP_ICONS` 沒跟上，
+    那一項會退回 `cmp_eq` 的圖 —— 一張**說錯話**的圖比沒有圖更糟。
+    """
+    from d4t.ui.tree_panel import OP_ICONS
+    from d4t.ui.widgets import GLYPH_ICONS
+
+    for sym, _text in OPS:
+        assert sym in OP_ICONS, sym
+        assert OP_ICONS[sym] in GLYPH_ICONS, (sym, OP_ICONS[sym])
+    assert len(set(OP_ICONS.values())) == len(OP_ICONS), "六個要各長各的"
+
+
+def test_the_empty_decision_page_teaches_instead_of_being_blank(qapp):
+    """使用者：「目前的如果沒設定好空。」
+
+    ⚠ **不准在這裡列「幾種判定方式」**：二元門檻那個編輯器 2026-08-24 整個
+    拿掉了（使用者：「UI 完全拿掉」），判定就是一棵樹 —— 列出不存在的選擇比
+    沒有說明更糟。所以這裡只驗「有沒有把那一顆鈕會做的事講出來」。
+    """
+    from PySide6.QtWidgets import QLabel
+
+    from d4t.ui.decide_panel import _EMPTY_STEPS, DecidePanel
+
+    p = DecidePanel()
+    p.set_model(RecipeModel())          # 沒有判定的新 recipe
+    p.refresh(force=True)
+
+    said = " ".join(w.text() for w in p.findChildren(QLabel) if w.text())
+    for _icon, line in _EMPTY_STEPS:
+        assert line in said, line
+    assert len(_EMPTY_STEPS) == 3
+    # 每一句都配一張真的畫得出來的圖
+    from d4t.ui.widgets import GLYPH_ICONS
+    for icon, _line in _EMPTY_STEPS:
+        assert icon in GLYPH_ICONS, icon
+
+
+def test_a_number_from_a_region_carries_that_region_colour(qapp):
+    """同一塊區域在三個畫面上是同一個顏色：影像上的框、Feature 表的上標、
+    判定段下拉的那一點。"""
+    import d4t.core.steps  # noqa: F401
+    from d4t.ui.widgets import region_dot_icon
+
+    m = RecipeModel()
+    load = m.add_step("load_patch")
+    roi = m.add_step("roi_reference")
+    m.set_param(roi, "method", "stripes in the image")
+    m.set_param(roi, "roi_out", "epi")
+    m.add_edge(load, roi, "test", "source")
+    glv = m.add_step("glv_stats")
+    m.add_edge(load, glv, "test", "source")
+    m.add_edge(roi, glv, "epi", "roi")
+
+    regions = m.feature_regions()
+    assert regions, "接了區域的 recipe 至少要有一個帶區域的數字"
+    assert all(i >= 0 for i in regions.values())
+    assert not region_dot_icon(list(regions.values())[0]).isNull()

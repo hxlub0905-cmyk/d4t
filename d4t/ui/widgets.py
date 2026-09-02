@@ -39,6 +39,7 @@ from PySide6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
+    QIcon,
     QPixmap,
     QPolygonF,
 )
@@ -3278,6 +3279,19 @@ class _ChipFlow(QWidget):
         self._relayout(e.size().width())
         super().resizeEvent(e)
 
+    #: ⚠ **要自己講寬度。** 這一族的高度是排完版才知道的，所以 `_relayout`
+    #: 只設了 `setFixedHeight` —— 而寬度沒有人講的話 `sizeHint` 是 0，
+    #: 於是放進一個沒有 stretch 的 layout（判定面板那一列）時整塊被壓成 0 px
+    #: 寬：膠囊都在、也都 `isVisible()`，但畫面上什麼都沒有（2026-09-01
+    #: render 出來才看到）。ParamForm 那邊看不出來，因為它是 `addWidget(w, 1)`。
+    def sizeHint(self) -> QSize:           # noqa: D102 - Qt hook
+        return QSize(max([c.width() for c in self._items] or [0]) or 120,
+                     max(self.height(), _ChipBase.H))
+
+    def minimumSizeHint(self) -> QSize:    # noqa: D102 - Qt hook
+        return QSize(max([c.width() for c in self._items] or [0]),
+                     _ChipBase.H)
+
 
 class MetricChips(QWidget):
     """``metric_chips`` 參數的編輯器：分群的膠囊 + 「會變成哪幾個 feature」。
@@ -3856,6 +3870,49 @@ class TemplateField(QWidget):
         return ("Stored in this recipe: one cell of %d × %d px (%.1f kB of "
                 "text). The regions below are drawn on it." 
                 % (w, h, len(self._value) / 1024.0))
+
+
+def glyph_icon(name: str, size: int = 16, color: str = "") -> QIcon:
+    """自繪圖示 → 一個 `QIcon`（給 `QComboBox` 的每一項用，2026-09-01）。
+
+    為什麼下拉的項目要圖而不是換成一排膠囊（使用者：「ADC 的設定頁面是不是也
+    加入一些 icon 會比較好」）：判定樹那一列是 ``[數字 ▾][運算子 ▾][值]``，
+    而那一欄的寬度是使用者拖的（實測預設 437 px）。六顆比較運算子的膠囊擠不
+    進去 —— 但**收起來的下拉照樣看得到現在選的那一顆的圖**，這是下拉唯一比
+    膠囊強的地方。
+
+    顏色預設吃主題的主要文字色；面板重建時會重畫，所以換主題跟得上。
+    """
+    px = QPixmap(int(size), int(size))
+    px.fill(Qt.transparent)
+    p = QPainter(px)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    try:
+        draw_glyph_icon(p, str(name), float(size),
+                        str(color or TOKENS["text_primary"]))
+    finally:
+        p.end()
+    return QIcon(px)
+
+
+def region_dot_icon(index: int, size: int = 12) -> QIcon:
+    """第 ``index`` 個具名區域的**顏色點**（下拉的每一項前面那一顆）。
+
+    同一個顏色在三個畫面上講同一件事：影像上那個框、Feature 表名字的上標、
+    判定段下拉的這一點。各自從自己那邊挑顏色的話，同一塊區域在三個地方是三
+    個顏色 —— 而顏色指錯區域比沒有顏色糟得多（`_util.CURRENT_REGION_INDEX`
+    的註解寫過同一句）。
+    """
+    px = QPixmap(int(size), int(size))
+    px.fill(Qt.transparent)
+    p = QPainter(px)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(region_hex(int(index))))
+    r = size * 0.34
+    p.drawEllipse(QPointF(size / 2.0, size / 2.0), r, r)
+    p.end()
+    return QIcon(px)
 
 
 def _spell(value: str) -> str:
