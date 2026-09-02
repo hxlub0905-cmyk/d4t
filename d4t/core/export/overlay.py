@@ -24,7 +24,7 @@ Gallery、CLI 的批次出圖、報表的插圖都能共用同一支渲染函式
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -203,7 +203,7 @@ def overlay_label(result: Dict[str, Any]) -> str:
     b = result.get("bin")
     if b is not None:
         parts.append("bin=%d" % int(b))
-    return "  ".join(parts)
+    return LABEL_SEP.join(parts)
 
 
 #: 排序用的預設欄位。``"score"`` 讀的是每一顆結果最上層的那一格，其他名字
@@ -356,22 +356,87 @@ def _draw_roi_boxes(panel: np.ndarray, roi_boxes, roi_winner: int) -> None:
         _draw_box(panel, px, color=ROI_WINNER_COLOR, thick=thick)
 
 
+#: 字級由大到小試，第一個塞得下的就用。下限 0.3 是 cv2 這套字型還讀得出來的
+#: 最小值（再小筆畫會黏在一起）。
+_LABEL_SCALES = (0.6, 0.55, 0.5, 0.45, 0.4, 0.35, 0.3)
+
+#: `overlay_label` 用來接那幾段的分隔字串 —— **塞不下的時候要拆回去丟**，
+#: 所以它是一個常數而不是字面量。
+LABEL_SEP = "  "
+
+_LABEL_PAD = 3
+
+
+def _label_variants(text: str) -> List[str]:
+    """由完整到最精簡的幾種寫法 —— **丟東西有優先序**。
+
+    ``#12345  score=4.210  bin=3`` → 先丟 ``score``（它在圖上最不識別），
+    再只留 ``#id``（「這是哪一顆」是這行字存在的理由）。最後一步是截字，
+    由 :func:`_fit_label` 做。
+    """
+    parts = [p for p in str(text).split(LABEL_SEP) if p]
+    if not parts:
+        return []
+    out = [LABEL_SEP.join(parts)]
+    lean = [p for p in parts if not p.lower().startswith("score")]
+    for cand in (LABEL_SEP.join(lean), parts[0]):
+        if cand and cand not in out:
+            out.append(cand)
+    return out
+
+
+def _fit_label(text: str, width: int) -> Tuple[str, float]:
+    """挑一個**塞得進 ``width``** 的（字, 字級）。
+
+    以前這裡只看影像寬度（``scale = w / 320``），完全不看字有多長 ——
+    而字級跟著寬度線性長，於是字長得比圖還快：實測 64 px 的 patch 超出
+    53 px、160 px 的超出 34 px，**每一種 patch 尺寸都超**，只是超多少不同。
+    使用者 2026-09-01：「patch 上標註的 bin 黑邊會因為 patch 不同 size 導致
+    上方的字彙超出去。」
+
+    現在反過來：**先問字有多長**，由大到小挑第一個裝得下的字級；全部字級都
+    裝不下就換一個更短的寫法（見 :func:`_label_variants`）；再不行就截字。
+    """
+    room = max(8, int(width) - 2 * _LABEL_PAD)
+    variants = _label_variants(text) or [str(text)]
+    for cand in variants:
+        for scale in _LABEL_SCALES:
+            if cv2.getTextSize(cand, _FONT, scale, 1)[0][0] <= room:
+                return cand, scale
+    # 連 ``#id`` 都塞不下（非常窄的 patch）—— 截字，並且**講出來被截了**。
+    cand, scale = variants[-1], _LABEL_SCALES[-1]
+    while len(cand) > 1:
+        cand = cand[:-1]
+        trimmed = cand + ".."
+        if cv2.getTextSize(trimmed, _FONT, scale, 1)[0][0] <= room:
+            return trimmed, scale
+    return cand, scale
+
+
 def _draw_label(panel: np.ndarray, label: str) -> None:
-    """左上角一行標籤（深色底條 + 白字）。非 ASCII 會變成 '?'。"""
+    """左上角一行標籤（壓暗的底條 + 白字）。非 ASCII 會變成 '?'。
+
+    **底條是滿版的**（2026-09-01）。以前它只有字那麼寬，而字**沒有**被裁 ——
+    於是超出去那一段是白字直接壓在樣品上，看不清也讀不完。現在字一定塞得下
+    （:func:`_fit_label`），而滿版的底條讓那一行在任何底圖上都讀得出來。
+
+    ⚠ **不要把影像變高。** 2026-09-01 有一版把標籤畫在影像下面新加的一條
+    字幕條上（樣品一個像素都不會被蓋到），使用者看過之後定調「算了，不要改變
+    原尺寸好了」—— 輸出尺寸要跟輸入一致。所以蓋回去，但蓋的那一條現在**字
+    一定在裡面**。
+    """
     text = _ascii_only(label).strip()
     if not text:
         return
     h, w = panel.shape[:2]
-    scale = max(0.35, min(0.6, w / 320.0))
-    thick = 1
-    (tw, th), base = cv2.getTextSize(text, _FONT, scale, thick)
-    pad = 3
-    bh = min(h, th + base + 2 * pad)
-    band = panel[0:bh, 0:min(w, tw + 2 * pad)]
+    text, scale = _fit_label(text, w)
+    (_tw, th), base = cv2.getTextSize(text, _FONT, scale, 1)
+    bh = min(h, th + base + 2 * _LABEL_PAD)
+    band = panel[0:bh, 0:w]
     if band.size:
         band[:] = (band.astype(np.uint16) * 1 // 4).astype(np.uint8)  # 壓暗當底
-    cv2.putText(panel, text, (pad, pad + th), _FONT, scale,
-                tuple(int(c) for c in TEXT_COLOR), thick, cv2.LINE_AA)
+    cv2.putText(panel, text, (_LABEL_PAD, _LABEL_PAD + th), _FONT, scale,
+                tuple(int(c) for c in TEXT_COLOR), 1, cv2.LINE_AA)
 
 
 # ---------------------------------------------------------------------------
@@ -382,17 +447,34 @@ def worst_note_for_overlay(ctx: Any) -> Tuple[list, int, Optional[Dict[str, Any]
 
     來源是 GLV 卡留在 ``ctx.meta["glv_hist"]`` 的 note（``boxes >= 1`` 的那些
     是 each box 模式跑出來的）—— **跟 `worst_*` 特徵同一次計算**，不在這裡
-    重新挑一次贏家。回傳的第三個值是那條 note 本身（贏家的 ``worst`` 帶著
+    重新挑一次贏家。回傳的第三個值是贏家那條 note 本身（它的 ``worst`` 帶著
     baseline / spread —— 像素標記的分母，見 :func:`_mark_odd_pixels`）；
     沒有逐框比較（pooled、沒接區域、根本沒跑 GLV）就回 ``([], -1, None)``，
     疊圖照舊 —— 沒接 ROI 的 recipe 一個位元不變。
 
-    好幾條 note 都有框時取**第一條**（＝接線順序的第一個區域）：兩個區域各
-    畫一組框、各有各的贏家，要等疊圖說得清「哪組框是誰的」再說 —— 挑一組畫
-    而畫面上不說是哪一組，正是這個 repo 最怕的形狀，所以先只畫第一組，而
-    「第一」是穩定的。
+    好幾個區域接進同一張 GLV 的時候（2026-09-02 改）
+    ------------------------------------------------
+    **每一組的框都畫，粗框給分數最高的那一格。**
+
+    上一版取**第一條 note**（＝接線順序的第一個區域），理由寫著「挑一組畫而
+    畫面上不說是哪一組，正是這個 repo 最怕的形狀」。那個顧慮是對的，但它挑
+    的解法製造了更糟的東西：**報表那一行印的是整顆的分數，而粗框指著另一個
+    區域裡一個一點都不異常的框**。F68 的驗收上實測到了 —— 一顆暗點缺陷
+    （`rsem-worst-box.json`，三個區域鋪滿整張圖）標題寫 ``score=27.753``，
+    那個數字來自 ``between_columns`` 正中央那一格，而琥珀框畫在
+    ``on_pattern`` 左上角一個 1.3σ 的框上。跑得完、有數字、而且是錯的。
+
+    畫全部就沒有「哪一組是誰的」這個問題了：細框的意思是「我量過的框」，
+    三組長得一樣是因為它們**就是同一件事**；粗框的意思是「分數說的那一格」，
+    而它只有一個。一個區域的時候逐位元組跟以前相同（清單只有一組、贏家索引
+    就是它自己的）。
     """
     meta = getattr(ctx, "meta", None) or {}
+    rects_all: list = []
+    best_score = float("-inf")
+    best_i = -1
+    best_note: Optional[Dict[str, Any]] = None
+    first_note: Optional[Dict[str, Any]] = None
     for note in meta.get("glv_hist") or []:
         region = str(note.get("region") or "")
         if not region or int(note.get("boxes") or 0) < 1:
@@ -403,10 +485,24 @@ def worst_note_for_overlay(ctx: Any) -> Tuple[list, int, Optional[Dict[str, Any]
             continue
         if not rects:
             continue
+        base = len(rects_all)
+        rects_all.extend(rects)
+        if first_note is None:
+            first_note = dict(note)
         worst = note.get("worst") or {}
-        i = int(worst.get("i", -1)) if isinstance(worst, dict) else -1
-        return rects, (i if 0 <= i < len(rects) else -1), dict(note)
-    return [], -1, None
+        if not isinstance(worst, dict):
+            continue
+        try:
+            i = int(worst.get("i", -1))
+            score = float(worst.get("score"))
+        except (TypeError, ValueError):
+            continue        # note 半殘（沒挑出贏家）—— 它的框照畫，只是不當主角
+        # NaN 不會大於任何東西，所以它自己就出局了（不必另外擋）。
+        if 0 <= i < len(rects) and score > best_score:
+            best_score, best_i, best_note = score, base + i, dict(note)
+    if not rects_all:
+        return [], -1, None
+    return rects_all, best_i, (best_note if best_note is not None else first_note)
 
 
 def roi_boxes_for_overlay(ctx: Any) -> Tuple[list, int]:
@@ -688,6 +784,7 @@ def render_overlay(images: Dict[str, Any],
             except (TypeError, ValueError):
                 label = None
     if label:
+        panel = panel.astype(np.uint8)
         _draw_label(panel, str(label))
 
     return np.ascontiguousarray(panel.astype(np.uint8))

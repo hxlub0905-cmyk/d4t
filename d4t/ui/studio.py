@@ -130,7 +130,7 @@ from .scope import (
     unsupported_kind_message, visible_steps,
 )
 from .decide_panel import DecidePanel
-from .viewmodel import (GLV_INTENT_CUSTOM, GLV_INTENTS, RecipeModel,
+from .viewmodel import (GLV_INTENTS, RecipeModel,
                         is_a_constant_expression, accuracy_at, histogram,
                         rebin)
 from . import theme
@@ -1446,6 +1446,9 @@ class StudioWindow(QMainWindow):
         self.param_form.action_requested.connect(self._on_param_action)
         self.param_form.source_requested.connect(self._on_source_requested)
         self.param_form.intent_chosen.connect(self._on_intent_chosen)
+        # 設定區的插槽（F68）—— 走的是跟畫布拉線**完全同一條路**。
+        self.param_form.wire_requested.connect(self._on_slot_wire)
+        self.param_form.wire_show_requested.connect(self._on_slot_show)
         self.stream_combo.currentTextChanged.connect(self._on_stream_changed)
         self.stream_combo_b.currentTextChanged.connect(self._on_stream_b_changed)
         self.compare_check.toggled.connect(self.set_compare)
@@ -1869,6 +1872,9 @@ class StudioWindow(QMainWindow):
                         "name": spec.name,
                         "label": spec.label or spec.name,
                         "stream": str(node.params.get(spec.name, "") or ""),
+                        # 這顆埠是「要量的」還是「拿來比的」（F68）——
+                        # 畫布靠它把兩顆同型別的埠分開，見 `canvas._draw_port`。
+                        "role": spec.role,
                     })
                 # 區域也是輸入埠（F12）—— 一張卡用到的每一個具名區域，畫布上
                 # 都要有一條線指到定義它的那張卡。以前這件事只在參數裡，於是
@@ -1881,6 +1887,7 @@ class StudioWindow(QMainWindow):
                         "name": spec.name,
                         "label": spec.label or spec.name,
                         "stream": str(node.params.get(spec.name, "") or ""),
+                        "role": spec.role,          # F68（同上）
                     })
             nodes.append({
                 "node_id": nid,
@@ -2816,6 +2823,7 @@ class StudioWindow(QMainWindow):
         # 加卡的時候也跑過一次，但那時候還沒有線 —— 而「接上 layout labels」
         # 正是使用者期待畫面上出現東西的那一刻。
         self._autofill_new_card(dst)
+        self._resync_params(dst)
         self._status("Connected %s → %s%s%s" % (src, dst, note, dropped))
 
     # ---- 區域線（F12）-----------------------------------------------------
@@ -2918,6 +2926,7 @@ class StudioWindow(QMainWindow):
         self._autofill_output_prefix(dst, param, value)
         says = self.model.rename_fallout(dst, before,
                                          self.model.nodes[dst].params)
+        self._resync_params(dst)
         self._say_fallout(says, "“%s” now measures %s (defined by “%s”)."
                           % (dst, value.replace(",", " and "), src))
 
@@ -2971,6 +2980,19 @@ class StudioWindow(QMainWindow):
 
     def _on_edge_removed(self, src: str, dst: str, stream: str = "",
                          dst_in: str = "") -> None:
+        """剪掉一條線 —— **收尾一定要重讀設定欄**（見 :meth:`_resync_params`）。
+
+        用一層外殼而不是在每個 ``return`` 前面加一行：這支底下有五條分支
+        （區域線／瞄得到那一條／退回整對／舊格式…），而漏掉其中一條的症狀是
+        「大部分時候會跟上」—— 那種 bug 查起來最貴。
+        """
+        try:
+            self._apply_edge_removed(src, dst, stream, dst_in)
+        finally:
+            self._resync_params(dst)
+
+    def _apply_edge_removed(self, src: str, dst: str, stream: str = "",
+                            dst_in: str = "") -> None:
         """剪掉一條線。``stream`` 是剪刀瞄的那一條（F9-9），``dst_in`` 是它
         進到下游的哪一格（F10）。
 
@@ -3143,17 +3165,7 @@ class StudioWindow(QMainWindow):
         for view in self._canvases():
             view.set_selected(node_id)
             view.set_tree_selected(None)   # 一次只編一個東西（卡片或樹的一步）
-        try:
-            describe = get_step(node.step).describe()
-        except KeyError:
-            describe = None
-        streams = self.model.available_streams(before_node=node_id)
-        self.param_form.set_step(
-            describe, node.params, streams,
-            self.model.available_regions(before_node=node_id),
-            self._dynamic_choices_for(node))
-        self._sync_source_action(node)
-        self._sync_glv_intent(node_id, node)
+        self._fill_param_form(node_id)
         self.stack.setCurrentWidget(self.param_form)
         self._sync_params_pane()
         self._refresh_region_button()
@@ -3164,6 +3176,52 @@ class StudioWindow(QMainWindow):
         self._refresh_kernel_hint()            # 核心大小畫在影像上（F11 UI-A）
         self._schedule_preview()
         return True
+
+    def _fill_param_form(self, node_id: str) -> None:
+        """把某一張卡的參數畫進設定欄（`select_node` 與 :meth:`_resync_params`
+        共用的那一段）。
+
+        **抽出來是因為它有第二個呼叫端。** 線動了之後也要重畫一次，而在這之前
+        那件事只能靠 `select_node`（會連帶把預覽的影像流選擇歸零）或者「剛好有
+        一次預覽跑完順手重建了表單」—— 後者正是這個 bug 難查的原因：**同一個
+        動作有時候會跟上、有時候不會。**
+        """
+        node = self.model.nodes.get(str(node_id))
+        if node is None:
+            return
+        try:
+            describe = get_step(node.step).describe()
+        except KeyError:
+            describe = None
+        streams = self.model.available_streams(before_node=node_id)
+        regions = self.model.available_regions(before_node=node_id)
+        self.param_form.set_step(
+            describe, node.params, streams, regions,
+            self._dynamic_choices_for(node))
+        # 接線插槽的選單（F68）：**到這張卡為止**上游真的產得出來的那些 ——
+        # 列一個排在自己後面才算出來的東西，選下去就是一份跑不動的 recipe
+        # （同 `_dynamic_choices_for` 裡「插入數字 ▾」那一句的理由）。
+        self.param_form.set_wiring_choices(regions=regions, streams=streams)
+        self._sync_source_action(node)
+        self._sync_glv_intent(node_id, node)
+
+    def _resync_params(self, *node_ids: str) -> None:
+        """線動了 → **選著的那張卡的設定欄要跟著動**（2026-09-01）。
+
+        使用者回報：「在 canvas 上把線切斷時，理論上設定頁也要同步取消
+        （他們是同步的）；同理，在 canvas 上把線連接時，也要同步設定。」
+
+        model 那一層本來就同步（剪線 → 那一格真的空掉，`_hydrate_regions`
+        與 `_unpoint_stream` 各自負責）—— 壞的是**畫面沒有人叫它重讀**。四條
+        路裡只有一條會跟上，而那一條是**碰巧**的：它剛好排在一次預覽前面，
+        而預覽跑完會重建表單。於是同一個動作有時候跟得上、有時候不跟，
+        看起來像是隨機的。
+
+        這條規矩跟 F9／F10 的「畫布不能說謊」是同一句話的鏡像：**畫布與設定欄
+        講的必須是同一件事**，因為線是唯一的儲存，那一格只是它的另一個長相。
+        """
+        if any(str(n) and str(n) == str(self.selected_node) for n in node_ids):
+            self._fill_param_form(str(self.selected_node))
 
     # ---- 入口卡的「資料從哪來」（F14-1）------------------------------------
     #: 附加檔那張卡（`load_sidecar`）→ 它要開哪一個 `scope.ATTACHMENTS`。
@@ -3247,13 +3305,11 @@ class StudioWindow(QMainWindow):
             return
         wired = bool(self.model._glv_region_edges(node_id, "roi"))
         current = self.model.glv_intent(node_id)
-        note = ""
-        if not wired:
-            note = "Wire a Region card into “Region” first."
-        elif current == GLV_INTENT_CUSTOM:
-            note = "custom - the settings match none of the three."
+        # **鈕 ＋ 這句話 = 這張卡真的在做的事**（F67 續）。要說什麼住在 model
+        # （`glv_intent_note`）—— 這裡只負責畫。
+        note = self.model.glv_intent_note(node_id)
         self.param_form.set_intent_row(
-            "What do I want to measure?", GLV_INTENTS,
+            "What to measure", GLV_INTENTS,
             current, note=note, enabled=wired)
 
     def _on_intent_chosen(self, intent: str) -> None:
@@ -3267,6 +3323,39 @@ class StudioWindow(QMainWindow):
         else:
             node = self.model.nodes.get(nid)
             self._sync_glv_intent(nid, node)   # 套不上：勾選擺回真實狀態
+
+    # ---- 設定區的接線插槽（F68）--------------------------------------------
+    def _on_slot_wire(self, param: str, name: str) -> None:
+        """使用者在插槽的選單裡挑了一個上游的區域／影像流。
+
+        **一行都不自己動 model**：找出誰產出那個名字，然後呼叫畫布拉線走的
+        那兩支（`_connect_region` / `_connect`）—— 於是型別檢查、單一角色埠的
+        「舊線讓位」、`rename_fallout` 那句話、undo、健檢，全部原樣繼承。
+        找不到產出者就什麼都不做（選單本來就只列得出上游有的東西）。
+        """
+        nid = self.selected_node
+        node = self.model.nodes.get(nid) if nid else None
+        if node is None or not name:
+            return
+        try:
+            spec = next(sp for sp in get_step(node.step).params
+                        if sp.name == str(param))
+        except (KeyError, StopIteration):
+            return
+        if spec.is_region_input():
+            src = self.model.region_producer(name, before_node=nid)
+            if src:
+                self._connect_region(src, nid, name, str(param))
+            return
+        src = self.model.stream_producer(name, before_node=nid)
+        if src:
+            self._connect(src, nid, name, str(param))
+
+    def _on_slot_show(self, param: str) -> None:
+        """「在畫布上指給我看」—— 重用既有的 ghost 高亮（不改任何東西）。"""
+        nid = self.selected_node
+        if nid:
+            self.canvas.show_card_ghosts(nid)
 
     def _on_source_requested(self) -> None:
         """入口卡上那顆鈕：附加檔直接開，資料那幾張開一張選單。
@@ -5278,7 +5367,10 @@ class StudioWindow(QMainWindow):
                 ctx, node.params, stream)
         except Exception:                  # noqa: BLE001 — 顯示用，不能擋畫面
             return [], [], -1, []
-        return (list(lines or []), list(points or []), int(focus),
+        # ``focus`` 可以是一個 index 或**一串**（一個記號不只一條線 ——
+        # GLV 的贏家格是一個 X）。這裡不收窄成 int：收窄過的那一版，X 的第二
+        # 條會掉進「不是焦點」那一組，畫出來只剩一條斜線。
+        return (list(lines or []), list(points or []), focus,
                 [str(v) for v in (labels or [])])
 
     def _refresh_measure_marks(self) -> None:

@@ -6,10 +6,11 @@
 ======================  ==================================================
 ① 在哪量？              ``source``（流）× ``roi``（區域）—— 畫布上的線
 ② 量什麼？              ``metrics`` —— **絕對值，永遠吐**
-③ 跟誰比？              ``reference`` —— 相對值，疊在絕對值上（可以不比）
+③ 跟誰比？              ``reference_region`` / ``reference_source``
+                        兩顆埠 —— 相對值，疊在絕對值上（可以不比）
 ======================  ==================================================
 
-**`compare` 不是另一個 method，是 `reference ≠ none` 的情況。**
+**`compare` 不是另一個 method，是「參照那兩顆埠接了線」的情況。**
 
 以前這裡是 ``method = stats | compare`` 的二選一，而那兩種的**接線方式不同**
 （清單埠 vs 角色埠）—— 對製程工程師，那是「還沒開始量，就先被問了一個關於
@@ -17,27 +18,34 @@
 「這塊 EPI 的平均灰階是 120」跟「它比隔壁亮 12」不能在同一張卡上同時得到，
 使用者得放兩張卡、接兩次線，而那兩張卡各自有機會設得不一樣。
 
-``reference`` 的五個答案（:data:`REFERENCES`）—— 前面四個是一張真值表
-（**流一不一樣 × 區域一不一樣**），最後一個是它的自動版：
+「跟誰比」的四種情況是一張真值表（**流一不一樣 × 區域一不一樣**），而
+**那張表就是那兩顆埠**（F67，2026-09-01 —— 使用者：「GLV card 這邊的 ROI
+接線我覺得對 user 來說還是會有點混淆」）：
 
-===============================  ==============================  ==============
-值                               跟誰比                          誰在用
-===============================  ==============================  ==============
-``none``                         不比，只要絕對值                兩種資料
-``another region``               另一塊 @ 同一條流                RSEM 大圖
-``another stream``               同一塊 @ 另一條流                patch
-``another region on another      另一塊 @ 另一條流                EBI↔RSEM 對照
-stream``
-``the other regions``            ``<name>_others`` @ 同一條流     patch
-===============================  ==============================  ==============
+=================  =================  ==============================  =========
+參照區域那顆埠     參照流那顆埠       跟誰比                          誰在用
+=================  =================  ==============================  =========
+－                 －                 不比，只要絕對值                兩種資料
+有                 －                 另一塊 @ 同一條流               RSEM 大圖
+－                 有                 同一塊 @ 另一條流               patch
+有                 有                 另一塊 @ 另一條流               EBI↔RSEM
+=================  =================  ==============================  =========
 
-五個都只吃「現在這一顆」的資料 —— 所以儀表在預覽時就畫得出來（那是
+F67 之前這張表另外**寫成一格 `reference` 下拉**，於是同一件事在卡上有兩個
+說法，而它們可以不一致（引擎讀那一格，使用者看的是線）—— 見
+:func:`_reference_of`。第五個答案 ``the other regions`` 也一起走了：它就是把
+``<n>_others`` 接進參照那顆埠，而 F44 的 preset①「量缺陷那格」教的已經是
+接線那一種。
+
+四種都只吃「現在這一顆」的資料 —— 所以儀表在預覽時就畫得出來（那是
 `ui/inspectors.GlvInspector` 成立的前提）。
 
-舊 recipe 由 `recipe._migrate_compare_method_into_reference` 接住，
+舊 recipe 走一條三段的遷移鏈：``roi_compare`` 節點先被
+`recipe._migrate_roi_compare_into_glv_stats` 變成 ``method="compare"``，
+再由 `_migrate_compare_method_into_reference` 變成 ``reference`` 那一格，
+最後由 `_migrate_reference_into_ports`（F67）變成那兩顆埠上的線。
 **相對值的特徵名逐字不變**（``<prefix>_delta``）—— 那是舊分數表達式不必改寫
-的前提。更舊的 ``roi_compare`` 節點先被 `_migrate_roi_compare_into_glv_stats`
-變成 ``method="compare"``，再走同一道。
+的前提。
 
 ``key`` 仍然是 ``glv_stats``（recipe 的鍵）—— 留它而不是留 ``roi_compare``，
 理由是黃金值：兩份 fixture recipe 與 `tests/fixtures/golden/` 都指著它。
@@ -52,9 +60,9 @@ target、在另一個裡是 reference —— 角色寫進區域的話，每一�
 而區域是**畫**出來的。
 
 GDS 那條路兩種比較都成立（F29 之後）：`roi_reference` 的 ``layout layers``
-現在也吐 ``_center`` / ``_others``，所以既可以比**層 vs 層**（``another
-region``，例如 EPI vs MG），也可以比**同一層裡那一塊 vs 其餘那些**
-（``the other regions``）。後者是區域級 detect 的形狀。
+現在也吐 ``_center`` / ``_others``，所以既可以比**層 vs 層**（參照埠接
+另一層，例如 EPI vs MG），也可以比**同一層裡那一塊 vs 其餘那些**
+（參照埠接 ``<n>_others``）。後者是區域級 detect 的形狀。
 （F32 起「去找哪一塊最異常」整件事歸這張卡的 **each box 逐框比較**
 （``worst_*``）—— Region 卡在大圖上選 ``pick="none"`` 只放框；
 ``strongest`` 那個挑框選項刪掉了，見 `_util.PICK_RULES`。）
@@ -98,8 +106,9 @@ import numpy as np
 from ..algo import glv as algo_glv
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, PATCH_KINDS, SINGLE_IMAGE_KINDS, ParamSpec, Step,
-    StepError, register_step, GROUP_MEASURE,
+    ANY_VALUE, CATEGORY_ALGO, MEASURE, PATCH_KINDS, REFERENCE,
+    SINGLE_IMAGE_KINDS, ParamSpec, Step, StepError, register_step,
+    GROUP_MEASURE,
 )
 from ._util import (
     CENTRE_SUFFIX, MultiSourceStep, OTHERS_SUFFIX, output_prefix_spec,
@@ -177,18 +186,25 @@ COMPARE_CHOICES = (
 )
 HIDDEN_COMPARE_METRICS = ("percent",)
 
-#: 「跟誰比」的四個答案（F18 第 5 步，2026-08-21）。順序＝下拉的順序。
+#: 「跟誰比」的四種情況（F18 第 5 步，2026-08-21；**F67 起是算出來的**）。
 #:
-#: **這不是 `method` 換個名字。** 舊的 `method` 是二選一：``stats`` 吐絕對值、
-#: ``compare`` 吐差異，而且**從不吐絕對值** —— 所以「這塊 EPI 的平均灰階是 120」
-#: 跟「它比隔壁亮 12」不能在同一張卡上同時得到，使用者得放兩張卡、接兩次線，
-#: 而那兩張卡各自有機會設得不一樣。
+#: 它們**不再是一格參數的值**（2026-09-01，使用者：「GLV card 這邊的 ROI
+#: 接線……(Compare against) 跟最上方 What do I want to measure 相關」）。
+#: 那一格下拉的五個答案其實是一張真值表 —— **參照區域那顆埠有沒有線 ×
+#: 參照影像流那顆埠有沒有線** —— 也就是把線複述了一遍。複述的下場有三個，
+#: 三個都實際存在過：
 #:
-#: 現在絕對值**永遠**吐，相對值疊在它上面。三個問題因此互相獨立：
-#: 在哪量（線）× 量什麼（metrics）× 跟誰比（這一格）。
+#: * 同一個決定在卡上被問兩次（上排的 preset 動線，這一格也動線），
+#:   而兩份說法可以不一致 —— 那正是鐵則 10 擋的東西。
+#: * 「跟誰比」選回 ``none`` 的時候，參照那條線**不會跟著剪掉**，
+#:   於是畫布上留著一條指向不存在的埠的線。
+#: * 五個答案的字是拓樸（``another region on another stream``），
+#:   而使用者問的是樣品 —— 這張卡自己的 docstring 罵過舊 `method` 的
+#:   同一句話（「還沒開始量，就先被問了一個關於軟體架構的問題」）。
 #:
-#: 值是給人看的字（下拉直接顯示它們）。它們是穩定的字串 id，除了相等比較
-#: 之外沒有人解析它們。
+#: 現在唯一的儲存是那兩顆埠，:func:`_reference_of` 是那張真值表的唯一出處。
+#: 這幾個常數留下來當**角色名**（引擎內部分岔用），不再有人拿它們去比對
+#: 一格參數的值。
 REF_NONE = "none"
 REF_REGION = "another region"
 REF_STREAM = "another stream"
@@ -197,19 +213,22 @@ REF_STREAM = "another stream"
 #: ``another stream`` 那條路把 `reference_region` **安靜地忽略掉**，於是那份
 #: 設定跑得完、有數字，而那個數字是「同一塊在另一條流上」的答案。
 #:
-#: 舊的 `method="compare"` 有四個獨立的角色參數，所以它表達得出這一種；
-#: 是我把二選一拆成「跟誰比」的時候把它弄丟的。
+#: F67 之後這一種不必再被誰記得：兩顆埠都接了線就是它。
 REF_BOTH = "another region on another stream"
-REF_OTHERS = "the other regions"
-REFERENCES = (REF_NONE, REF_REGION, REF_STREAM, REF_BOTH, REF_OTHERS)
 
-#: ``the other regions`` 靠的是 Region 卡的家族慣例：``epi`` 這一塊的「其他同類」
-#: 叫 ``epi_others``。**名字怎麼拼住在 `_util`**（`others_name`）—— 這裡以前
-#: 自己拼了一份，而 Region 卡那邊拼了另外三份（F37 收成一個家）。
+#: ⚠ ``REF_OTHERS``（``the other regions``）**F67 拿掉了**。
 #:
-#: 不必多接一條**線**：那個名字跟 ``epi`` 出自同一張卡。但它現在會被
-#: `resolve_regions_in` **宣告**出來，所以畫布上有埠、健檢也看得到它
-#: —— 見那一支的說明。
+#: 它是那張真值表的「自動版」：不接線，由 ``<roi>_others`` 這個家族慣例推出
+#: 參照。而 F44 讓使用者拍板的 preset①「量缺陷那格」走的**已經**是明著接一條
+#: ``<n>_others`` 的線（工作單字面的 REF_OTHERS ＋ ``_center`` 是已知的壞
+#: 組合，會派生出沒有人產出的 ``<n>_center_others``）—— 也就是說同一件事
+#: 早就有兩種寫法，而使用者被教的是接線那一種。
+#:
+#: 舊 recipe 由 `recipe._migrate_reference_into_ports` 接住：一個區域的那種
+#: 補一條 ``<roi>_others`` 的線，**數字與特徵名逐字不變**。
+#: 多個區域的那種以前是「每一塊各自跟自己的其餘同類比」，一條線表達不出來
+#: —— 遷移補第一塊的線，而 :meth:`GlvStatsStep.configuration_issues`
+#: 從此對那個形狀講一句話（見那一支）。
 
 #: 一個區域底下**好幾個框**的時候，要把它們當成一個像素母體，還是一格一格量
 #: （F18 第 6 步，2026-08-21）。
@@ -239,6 +258,53 @@ BOX_MODES = (POOLED, EACH_BOX)
 TYPICAL_SUFFIX = "_typical"
 OUTLIER_SUFFIX = "_outlier"
 OUTLIER_BOX_SUFFIX = "_outlier_box"
+
+#: **贏家那一格**的每一個量（F68，2026-09-01）。
+#:
+#: 跟 ``_outlier`` 是**一對，答的是兩個不同的問題** —— 而那正是它做成後綴、
+#: 跟 ``_outlier`` 排在一起的理由：
+#:
+#: ===================  ==================================================
+#: ``<量>_outlier``     照**這個量自己**算，最極端的那一格的值
+#: ``<量>_worst``       照 **judge**（「挑的依據」）挑出來的那一格的這個量
+#: ===================  ==================================================
+#:
+#: 兩者**不一定是同一格**。使用者 2026-09-01 要的「最黑那格的 Q25」是後者，
+#: 而在這之前只有 ``glv_worst_value``（judge 那一個量）拿得到 —— 想要那一格的
+#: 別的統計量，只能把 judge 改成它，於是「照什麼挑」與「要報什麼」被綁死。
+WORST_SUFFIX = "_worst"
+
+#: 疊圖上「贏家那一格」的**角色**（不是區域名 —— `!` 開頭是慣例，見
+#: `ui.widgets.MARK_ROLE_TOKENS`）。UI 據此畫琥珀色粗框，跟報表同一個語言。
+#: core 不得 import Qt，所以這裡說的是角色，顏色由 UI／報表各自挑。
+WORST_ROLE = "!worst"
+
+#: 「超過 k σ 的有幾格」（F68）。使用者 2026-09-01：要。
+#:
+#: 為什麼值得一個特徵：**「一顆髒點」與「整片都不對」在特徵表上長得一樣**
+#: —— 兩者都吐得出一個很高的 ``glv_worst_score``，而處置完全相反（後者通常
+#: 是製程漂移或框放錯）。``glv_worst_score_median`` / ``_spread`` 講的是分布的
+#: 中心與寬度，答不出「有幾格越線」。
+#: 逐框比較時，參照那一塊**怎麼取**（F68，2026-09-01）。
+#:
+#: ``pooled`` 是 F68 之前的唯一行為：參照那一塊的像素**全部混成一堆**算一個
+#: 基準，每一格都跟同一個基準比。而那讓「照跟參照差多少挑最異常的格」變成
+#: 一個空包彈 —— ``delta`` = 這一格的統計量 − **一個常數**，而挑贏家用的是
+#: leave-one-out 的偏離量，**對整排減同一個數完全免疫**。實測：照
+#: ``delta`` / ``abs_delta`` / ``ratio`` / ``contrast`` / ``overlap`` 挑，
+#: 挑到的格跟照絕對統計量挑**一模一樣**（`tests/test_glv_compare.py` 釘著）。
+#:
+#: ``per box`` 是使用者 2026-09-01 定調的做法：**test 的第 i 格對上 ref 影像
+#: 的第 i 格**。ROI 那組矩形本來就同時套在兩張圖上，所以這個對應是天然的，
+#: 只是以前被混掉了。圖案（線、洞）因此互相抵消，剩下的才是真的不一樣的地方。
+#:
+#: ⚠ **只在「參照是同一塊、只是在另一張圖上」時定義得出來**（`REF_STREAM`）。
+#: 接的是另一塊區域的話，兩邊的框數不一樣，第 i 格對不到第 i 格。
+POOLED_REF, PER_BOX_REF = "pooled", "per box"
+REF_PAIRINGS = (PER_BOX_REF, POOLED_REF)
+
+BOXES_OVER_K = "glv_boxes_over_k"
+BOXES_OVER_K_FRAC = "glv_boxes_over_k_frac"
 
 #: 量了幾格。**名字帶 ``glv_``（F37，2026-08-26）** —— 以前它是裸的 ``boxes``，
 #: 而那撞到 Region 卡對每一個區域寫的 ``<name>_boxes``
@@ -320,21 +386,95 @@ def _canonical(mid: str) -> str:
 
 
 def _reference_of(params: Dict[str, Any]) -> str:
-    """這組參數要跟誰比（不認得的字、沒填的一律當「不比」）。
+    """這組參數要跟誰比 —— **兩顆埠有沒有接線**（F67，2026-09-01）。
 
-    **不要在別處直接讀 `params["reference"]`**：這一段是那個判斷的唯一出處，
-    而「缺席」的意思是舊 recipe（那時候只有絕對值）。
+    ================================  ==============================
+    參照區域那顆埠  參照影像流那顆埠  結果
+    ================================  ==============================
+    －              －                :data:`REF_NONE`（只要絕對值）
+    有              －                :data:`REF_REGION`
+    －              有                :data:`REF_STREAM`
+    有              有                :data:`REF_BOTH`
+    ================================  ==============================
+
+    以前這是一格下拉（``params["reference"]``），而那一格是這張表的複述 ——
+    複述得對的時候它沒有用，複述得不對的時候它會贏（引擎讀的是那一格，
+    使用者看到的是線）。真的發生過的那一種：選「另一條流」而 `reference_region`
+    仍然掛著一條線，畫布上兩條虛線都在，引擎**安靜地忽略**其中一條。
+
+    **不要在別處自己判斷「有沒有在比」**：這一段是唯一出處。兩格都由線水合
+    （`region_edge_values` / 影像線），所以問它們就是問線。
     """
-    got = str(params.get("reference", REF_NONE) or REF_NONE).strip()
-    return got if got in REFERENCES else REF_NONE
+    region = str(params.get("reference_region", "") or "").strip()
+    stream = str(params.get("reference_source", "") or "").strip()
+    if region and stream:
+        return REF_BOTH
+    if region:
+        return REF_REGION
+    if stream:
+        return REF_STREAM
+    return REF_NONE
 
 
 def _prefix_in_output_section() -> ParamSpec:
     """``output_prefix`` 是共用的那一顆，只差掛在哪個小標題底下（F32 —— 它
     以前沒有段，於是在畫面上黏在「4 · Which pixels count」裡）。"""
     spec = output_prefix_spec("center")
-    spec.section = "5 · Output"
+    spec.section = "6 · Output"
     return spec
+
+
+def _judge_key(params: Dict[str, Any]) -> str:
+    """「挑的依據」在**每一格那本字典裡**的鍵（F68）。
+
+    絕對統計量就是它自己（``glv_median``）；比出來的量要補上統計量後綴
+    —— ``delta`` → ``cmp_delta_mean``（``stat`` 勾了好幾個時取第一個，
+    同 `legacy_feature_renames` 的慣例）。
+
+    為什麼判準可以是比出來的量（使用者 2026-09-01：「要，這才是正確的挑法」）：
+    「哪一格跟**其他格**不一樣」與「哪一格跟**參照**差最多」是兩個不同的問題，
+    而有 ref 影像的時候後者才是使用者要的那一個。每一格的 ``cmp_*``
+    在逐框迴圈裡**本來就算過了**（見 `_measure_each_box`），只是選不到。
+    """
+    judge = _judge_of(params)
+    if judge in algo_glv.COMPARE_METRICS:
+        return cmp_feature_name(judge, _stats_of(params)[0])
+    return judge
+
+
+def _pairs_per_box(params: Dict[str, Any]) -> bool:
+    """逐框比較時要不要**第 i 格對第 i 格**（F68）。
+
+    只有 `REF_STREAM`（同一塊、另一張圖）配得起來：接的是另一塊區域的話，
+    兩邊的框數不一樣，第 i 格對不到第 i 格。**不要在別處自己判斷**。
+    """
+    if _reference_of(params) != REF_STREAM:
+        return False
+    if str(params.get("across_boxes", POOLED) or POOLED) != EACH_BOX:
+        return False
+    got = str(params.get("ref_pairing", PER_BOX_REF) or PER_BOX_REF).strip()
+    return (got if got in REF_PAIRINGS else PER_BOX_REF) == PER_BOX_REF
+
+
+def _direction_of(params: Dict[str, Any]) -> str:
+    """往哪一邊找（F68）。不認得的字當 ``both``（＝ F68 之前的唯一行為）。"""
+    got = str(params.get("direction", algo_glv.BOTH) or algo_glv.BOTH).strip()
+    return got if got in algo_glv.ODD_BOX_DIRECTIONS else algo_glv.BOTH
+
+
+def _pick_odd(values: List[float], typical: float, direction: str) -> int:
+    """一串值裡「最極端」的那一個的位置 —— **跟著方向走**（F68）。
+
+    ``_outlier`` 那一族以前寫死絕對值，而 worst 那一族有方向的話，同一張卡上
+    兩族名字會用兩種「極端」的定義 —— 那是最難發現的那種不一致。
+    """
+    if direction == algo_glv.DARKER:
+        devs = [typical - v for v in values]
+    elif direction == algo_glv.BRIGHTER:
+        devs = [v - typical for v in values]
+    else:
+        devs = [abs(v - typical) for v in values]
+    return int(np.argmax(devs))
 
 
 def _judge_of(params: Dict[str, Any]) -> str:
@@ -437,30 +577,56 @@ class GlvStatsStep(MultiSourceStep):
             "numbers come out either way.")
     params = [
         ParamSpec(name="source", type="image_keys", direction="in", default="test",
-                  label="Measure on",
+                  label="Measure on", role=MEASURE,
+                  section="1 · Where to measure",
                   help="Image stream to compute statistics on."),
         ParamSpec(name="roi", type="region_keys", direction="in", default="",
-                  label="Region",
+                  label="Region", role=MEASURE,
+                  section="1 · Where to measure",
                   help=("Which region(s) to measure in - drag a line from the "
                         "Region card that defines each one. Two regions here "
                         "means the same statistics measured in both, and every "
                         "number gets its region's name in front of it. "
                         "No line means the whole image.")),
-        # 勾選而不是用打的（2026-08-14 使用者要求）。清單是常用的那幾個；
-        # 手寫 recipe 仍可以放任何 glv_q<0-100>（清單外的值會列出來並勾著）。
-        ParamSpec(name="metrics", type="metric_chips",
-                  default=DEFAULT_METRICS,
-                  label="Statistics", section="1 · What to measure",
-                  choices=list(METRIC_CHOICES),
-                  help=("Pick the statistics to output - each becomes a "
-                        "feature with the same name. Hand-written recipes may "
-                        "also use any percentile (glv_q37), any trimmed mean "
-                        "(glv_trim05) and any brightness share "
-                        "(glv_above200).")),
+        # ---- 跟誰比（F18 第 5 步；F67 起**由線決定**）----------------------
+        #
+        # 這一段以前的第一列是一格 `reference` 下拉，而它是下面兩顆埠的複述
+        # （見 :func:`_reference_of`）。拿掉它之後這一段只剩三件事：
+        # **跟哪一塊比**（埠）、**拿哪個數字比**、**要報什麼**。
         ParamSpec(
-            name="across_boxes", type="choice", default=POOLED,
-            choices=list(BOX_MODES), label="Boxes in the region",
-            section="2 · Boxes in the region",
+            name="reference_region", type="region_key", direction="in",
+            default="", section="2 · Compare with", label="Ref region",
+            role=REFERENCE,
+            help=("Leave it alone and this card just reports the gray levels "
+                  "above. Drag a line from the Region card that defines the "
+                  "area to judge against - the background, the neighbouring "
+                  "cell, the other boxes of this same region - and the card "
+                  "also reports how far this one is from it."),
+        ),
+        ParamSpec(
+            name="reference_source", type="image_key", direction="in",
+            default="", section="2 · Compare with", label="Ref image",
+            role=REFERENCE,
+            help=("Drag an image stream in here to judge the same area "
+                  "across two images - normally ref, so the block is compared "
+                  "against its counterpart in the reference image. Wire this "
+                  "and the area above together to compare another area on "
+                  "another image."),
+        ),
+        ParamSpec(
+            name="across_boxes", type="chip_choice", default=POOLED,
+            choices=list(BOX_MODES), icons=["boxes_pooled", "boxes_each"],
+            label="Boxes in the region",
+            section="3 · How to find it",
+            choice_help={
+                POOLED: "One pile of pixels. Every box's pixels go into the "
+                        "same statistics - use it when the region is one "
+                        "area that happens to be drawn as several boxes.",
+                EACH_BOX: "Measure every box on its own, then report the "
+                          "typical one, the odd one out, and which box that "
+                          "was. This is how you hunt a defect that sits in "
+                          "one box.",
+            },
             help=("A region can be many boxes at once (a Golden Cell template "
                   "lays hundreds of them across a big image). pooled treats "
                   "them as one pile of pixels; each box measures every box on "
@@ -469,10 +635,11 @@ class GlvStatsStep(MultiSourceStep):
         ),
         ParamSpec(
             name="judge", type="metric_choice", default=JUDGE_DEFAULT,
-            choices=list(METRIC_CHOICES), label="Pick the odd one by",
-            section="2 · Boxes in the region",
+            choices=list(METRIC_CHOICES) + list(COMPARE_CHOICES),
+            label="Pick the odd one by",
+            section="3 · How to find it",
             show_when=("across_boxes", (EACH_BOX,)),
-            help=("Which statistic decides the odd box out. Every box is "
+            help=("Which number decides the odd box out. Every box is "
                   "compared against the middle of all the other boxes, in "
                   "robust sigmas - the winner's box and score come out as "
                   "glv_worst_x/y/w/h and glv_worst_score, ready to rank a "
@@ -481,37 +648,88 @@ class GlvStatsStep(MultiSourceStep):
                   "pixels inside a box; use the max to hunt for a single "
                   "bright speck instead. “+ Percentile…” adds any percentile "
                   "you like (hand-written recipes may also use glv_q<0-100>, "
-                  "glv_trim<0-49> or glv_above<0-255>)."),
-        ),
-        # ---- 跟誰比（F18 第 5 步）------------------------------------------
-        ParamSpec(
-            name="reference", type="choice", default=REF_NONE,
-            choices=list(REFERENCES), section="3 · Compare against",
-            label="Compare against",
-            help=("Leave it at none to just report the gray levels above. "
-                  "Pick something else and the card also reports how far the "
-                  "region is from it - and the ports change to match what you "
-                  "picked."),
+                  "glv_trim<0-49> or glv_above<0-255>).\n\n"
+                  "The second group (delta, snr, …) needs a reference wired "
+                  "in below: those pick the box that differs most from the "
+                  "reference, rather than the box that differs most from the "
+                  "other boxes. With a ref image that is usually the one you "
+                  "want."),
         ),
         ParamSpec(
-            name="reference_region", type="region_key", direction="in", default="",
-            section="3 · Compare against", label="That region",
-            show_when=("reference", (REF_REGION, REF_BOTH)),
-            help=("The region to judge against - the background, the "
-                  "neighbouring cell, another layer. Drag a line from the "
-                  "Region card that defines it."),
+            name="direction", type="chip_choice", default=algo_glv.BOTH,
+            choices=list(algo_glv.ODD_BOX_DIRECTIONS),
+            icons=["odd_either", "odd_darker", "odd_brighter"],
+            label="Looking for boxes that are",
+            section="3 · How to find it",
+            show_when=("across_boxes", (EACH_BOX,)),
+            choice_help={
+                algo_glv.BOTH: "Either way - the box furthest from the others, "
+                               "brighter or darker. Leave it here when you do "
+                               "not know, or when a layer has both kinds.",
+                algo_glv.DARKER: "Only boxes darker than the others. A box "
+                                 "brighter than its neighbours scores zero, "
+                                 "so it can never win.",
+                algo_glv.BRIGHTER: "Only boxes brighter than the others.",
+            },
+            help=("Is the defect you are hunting darker or brighter than the "
+                  "rest? This is a fact about your sample, so it belongs in "
+                  "the recipe. Left at “both”, the brightest box and the "
+                  "darkest box compete on equal terms - and the winner may "
+                  "be the wrong kind, on every defect, without anything "
+                  "looking wrong."),
         ),
         ParamSpec(
-            name="reference_source", type="image_key", direction="in",
-            default="ref", section="3 · Compare against", label="That stream",
-            show_when=("reference", (REF_STREAM, REF_BOTH)),
-            help=("The image stream to judge against - normally ref, so the "
-                  "same block is compared across the pair."),
+            name="ref_pairing", type="chip_choice", default=PER_BOX_REF,
+            choices=list(REF_PAIRINGS), icons=["pair_each", "pair_pooled"],
+            label="Take the reference",
+            section="3 · How to find it",
+            show_when=((("reference_source",), (ANY_VALUE,)),
+                       ("reference_region", ("",)),
+                       ("across_boxes", (EACH_BOX,))),
+            choice_help={
+                PER_BOX_REF: "Box i against box i on the other image. The "
+                             "pattern cancels out, so a box that is bright "
+                             "because the pattern is bright there does not "
+                             "look like a defect.",
+                POOLED_REF: "Every box against one number, made from all of "
+                            "the reference region's pixels at once. What this "
+                            "card did before - keep it when you need a "
+                            "recipe's numbers to stay exactly as they were.",
+            },
+            help=("The same boxes sit on both images, so each box has a "
+                  "counterpart. Pairing them up is what makes “compare with "
+                  "the reference” mean anything box by box: pooled into one "
+                  "number, the difference is just this box's own value minus "
+                  "a constant, and picking the odd box by it gives the same "
+                  "answer as picking by the plain statistic."),
         ),
+        ParamSpec(
+            name="over_k", type="float", default=0.0, min=0.0, max=99.0,
+            unit="σ", label="Also count boxes beyond",
+            section="3 · How to find it",
+            show_when=("across_boxes", (EACH_BOX,)),
+            help=("Count how many boxes are further than this many robust "
+                  "sigmas from the others, as glv_boxes_over_k (and the same "
+                  "as a share, glv_boxes_over_k_frac). One dirty box and a "
+                  "whole region that has drifted both produce a high worst "
+                  "score, and they need opposite treatment - this number is "
+                  "what tells them apart. 0 = do not count."),
+        ),
+        # 勾選而不是用打的（2026-08-14 使用者要求）。清單是常用的那幾個；
+        # 手寫 recipe 仍可以放任何 glv_q<0-100>（清單外的值會列出來並勾著）。
+        ParamSpec(name="metrics", type="metric_chips",
+                  default=DEFAULT_METRICS,
+                  label="Statistics", section="4 · What to report",
+                  choices=list(METRIC_CHOICES),
+                  help=("Pick the statistics to output - each becomes a "
+                        "feature with the same name. Hand-written recipes may "
+                        "also use any percentile (glv_q37), any trimmed mean "
+                        "(glv_trim05) and any brightness share "
+                        "(glv_above200).")),
         ParamSpec(
             name="stat", type="metric_chips", default=DEFAULT_COMPARE_STAT,
-            section="3 · Compare against",
-            show_when=("reference", tuple(r for r in REFERENCES if r != REF_NONE)),
+            section="4 · What to report",
+            show_when=((("reference_region", "reference_source"), (ANY_VALUE,)),),
             choices=list(COMPARE_STAT_CHOICES),
             label="Compare their",
             help=("Which number stands for each block. The mean is the usual "
@@ -525,8 +743,8 @@ class GlvStatsStep(MultiSourceStep):
         ),
         ParamSpec(
             name="compare_metrics", type="metric_chips",
-            default=DEFAULT_COMPARE_METRICS, section="3 · Compare against",
-            show_when=("reference", tuple(r for r in REFERENCES if r != REF_NONE)),
+            default=DEFAULT_COMPARE_METRICS, section="4 · What to report",
+            show_when=((("reference_region", "reference_source"), (ANY_VALUE,)),),
             choices=list(COMPARE_CHOICES),
             label="Report",
             help=("Three families. Difference is plain arithmetic on the two "
@@ -548,7 +766,7 @@ class GlvStatsStep(MultiSourceStep):
         # 舊 recipe 的數字。
         ParamSpec(
             name="exclude_saturated", type="bool", default=False,
-            section="4 · Which pixels count",
+            section="5 · Which pixels count",
             label="Ignore pixels at 0 or 255",
             help=("Pixels stuck at pure black or pure white have already lost "
                   "whatever was in them. Leaving them in pulls the average "
@@ -556,7 +774,7 @@ class GlvStatsStep(MultiSourceStep):
         ),
         ParamSpec(
             name="trim_percent", type="float", default=0.0, min=0.0, max=49.0,
-            unit="%", section="4 · Which pixels count",
+            unit="%", section="5 · Which pixels count",
             label="Trim each end by",
             help=("Throw away this share of the darkest and the brightest "
                   "pixels before measuring. A couple of hot pixels can move "
@@ -565,15 +783,14 @@ class GlvStatsStep(MultiSourceStep):
         ),
         ParamSpec(
             name="min_pixels", type="int", default=0, min=0, max=100000,
-            unit="px", section="4 · Which pixels count",
+            unit="px", section="5 · Which pixels count",
             label="Need at least",
             help=("Below this many pixels the card writes blanks instead of "
                   "numbers, and says so. A spread measured on 20 pixels is "
                   "not wrong so much as meaningless - and it looks exactly "
                   "like a good one. 0 = always measure."),
         ),
-        _prefix_in_output_section(),
-    ]
+        _prefix_in_output_section(),]
     reads = ["test"]
     writes: List[str] = []
     features_out = ["glv_median", "glv_mad", "glv_min", "glv_max"]
@@ -617,14 +834,21 @@ class GlvStatsStep(MultiSourceStep):
             # 一格一格量：每個數字變成「典型 / 最不一樣的那一格 / 那是第幾格」。
             # ⚠ 宣告是「**可能**會產出的」（同上面 snr/tstat 那行）：worst 那
             # 一組在只剩一格可量的 defect 上算不出來，那一顆就不會有那幾格。
+            # ``_worst``（F68）跟另外三個並排：同一個量、第四種身分
+            # 「**judge 挑的那一格**的這個量」（``_outlier`` 是「這個量自己
+            # 最極端的那一格」—— 兩者不一定是同一格）。
             spread = [(n + suffix, m, s, var, fam)
                       for n, m, s, _v, fam in base
                       for suffix, var in ((TYPICAL_SUFFIX, "typical"),
                                           (OUTLIER_SUFFIX, "outlier"),
-                                          (OUTLIER_BOX_SUFFIX, "outlier_box"))]
+                                          (OUTLIER_BOX_SUFFIX, "outlier_box"),
+                                          (WORST_SUFFIX, "worst"))]
             worst = [(str(n), str(n), "", "", "glv")
                      for n in [BOX_COUNT] + list(WORST_FEATURES)
                      + list(SCORE_FEATURES)]
+            if float(params.get("over_k") or 0.0) > 0:
+                worst += [(n, n, "", "", "glv")
+                          for n in (BOXES_OVER_K, BOXES_OVER_K_FRAC)]
             return spread + worst + extra
         return base + extra
 
@@ -741,47 +965,29 @@ class GlvStatsStep(MultiSourceStep):
 
     @classmethod
     def resolve_regions_in(cls, params: Dict[str, Any]) -> List[str]:
-        """這張卡吃哪幾個區域 —— **含 ``the other regions`` 那一個**（F37）。
+        """這張卡吃哪幾個區域 —— 量的那幾個 ＋ **參照那一個**。
 
-        以前 ``the other regions`` 刻意不宣告，理由是「``epi_others`` 跟 ``epi``
-        出自同一張 Region 卡，畫布上那條線已經在了」。那句話對線是對的，
-        **對埠是錯的**，而代價是實測出來的：
-
-        =====================================  ==================================
-        ``roi="epi_center"`` ＋ the other       `configuration_issues()` 回空的、
-        regions                                `unknown-region` 也看不到它 ——
-                                               因為沒有人宣告過那個名字
-        跑起來                                 每一顆 defect 各失敗一次：
-                                               ``'epi_center_others' is not on
-                                               this defect``
-        =====================================  ==================================
-
-        錯誤訊息本身是好的，但它出現在**跑完一批之後**。宣告出來之後，同一件事
-        由既有的 `unknown-region` 在按下去之前就講完。
-
-        **derive，不存第二份**（F12）：``<roi>_others`` 是從 ``roi`` 算出來的，
-        存進參數的話改了 ``roi`` 而那一格沒跟上，兩份就漂了 —— 而漂掉的症狀
-        正好是這一段要修的東西。
+        參照那一個 F67 之前有兩種寫法（一格 `reference_region` 的線，或者
+        ``the other regions`` 那個由 ``<roi>_others`` 慣例推出來的隱形參照），
+        現在只剩線那一種。宣告它的理由沒有變，而那個理由是實測出來的（F37）：
+        沒有宣告的名字 `configuration_issues()` 看不到、`unknown-region`
+        也看不到，於是「這一顆沒有那一塊」要等到**跑完一批之後**才由每一顆
+        defect 各講一次 ``'epi_center_others' is not on this defect``。
+        宣告出來之後，同一件事在按下去之前就講完。
         """
         out = list(super().resolve_regions_in(params))
-        ref = _reference_of(params)
-        if ref in (REF_REGION, REF_BOTH):
-            name = str(params.get("reference_region", "") or "").strip()
-            if name and name not in out:
-                out.append(name)
-        elif ref == REF_OTHERS:
-            for region in cls.region_list(params):
-                name = str(region or "").strip()
-                if not name:
-                    continue        # 量整張圖時沒有「其餘那些」可言
-                name += OTHERS_SUFFIX
-                if name not in out:
-                    out.append(name)
+        name = str(params.get("reference_region", "") or "").strip()
+        if name and name not in out:
+            out.append(name)
         return out
 
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
-        """挑了「跟誰比」卻沒挑到東西，或挑到自己 —— 兩個都在跑之前擋。"""
+        """**跑起來每一顆都會出事**的那些（error，擋在跑之前）。
+
+        「跑得起來、但八成不是他要的」在 :meth:`configuration_hints`（warning）
+        —— 兩支的判準是同一句話：**這會不會跑不起來**。
+        """
         # 兩格清單的值互斥，而**填錯格是安靜的**：把 `delta,snr` 打進
         # Statistics 那一格的人會得到一張跑得完、吐著別的數字的卡。
         wrong = cls._metrics_in_the_wrong_box(params)
@@ -797,43 +1003,68 @@ class GlvStatsStep(MultiSourceStep):
                        "no region is wired in - the whole image is a single "
                        "box, so this setting does nothing. Wire a Region card "
                        "in, or set it back to pooled.")
+        # 判準是「跟參照差多少」卻沒有參照 —— **每一顆都會失敗**，所以擋在
+        # 跑之前（跑起來那一道在 `_measure_each_box`，那是手寫 recipe 的最後
+        # 一道防線）。
+        if (str(params.get("across_boxes", POOLED)) == EACH_BOX
+                and _judge_of(params) in algo_glv.COMPARE_METRICS
+                and _reference_of(params) == REF_NONE):
+            out.append("“Pick the odd one by” is set to “%s”, which compares "
+                       "each box against a reference - but nothing is wired "
+                       "into “Compare with”. Wire a reference in, or pick one "
+                       "of the plain gray-level statistics instead."
+                       % _judge_of(params))
         ref = _reference_of(params)
         if ref == REF_NONE:
             return out
+        # 「挑了跟誰比卻沒挑到東西」那兩句 F67 刪掉了 —— 在「有沒有在比」由
+        # 埠決定之後，那個狀態**構造上不存在**（沒接線就是不比）。
         mine = [r for r in cls.region_list(params) if r]
-        if ref in (REF_REGION, REF_BOTH):
-            other = str(params.get("reference_region", "") or "").strip()
-            if not other:
-                out.append("This card is set to compare against another "
-                           "region, but no region is picked yet. Drag a line "
-                           "from the Region card that defines it into “That "
-                           "region”.")
-            elif ref == REF_REGION and mine and other in mine:
-                # 同一塊比自己 = delta 恆為 0、snr 恆為 0。跑得完、有數字、
-                # 而且那些數字不會因為任何缺陷而改變。
-                out.append("The region being measured and the one it is "
-                           "compared against are the same region on the same "
-                           "image, so every comparison this card produces is "
-                           "zero no matter what the defect looks like. Pick a "
-                           "different region, or compare against another "
-                           "image stream instead.")
+        other = str(params.get("reference_region", "") or "").strip()
+        if ref == REF_REGION and mine and other in mine:
+            # 同一塊比自己 = delta 恆為 0、snr 恆為 0。跑得完、有數字、
+            # 而且那些數字不會因為任何缺陷而改變。
+            out.append("The region being measured and the one it is "
+                       "compared against are the same region on the same "
+                       "image, so every comparison this card produces is "
+                       "zero no matter what the defect looks like. Pick a "
+                       "different region, or compare against another "
+                       "image stream instead.")
         if ref in (REF_STREAM, REF_BOTH):
-            other = str(params.get("reference_source", "") or "").strip()
-            if not other:
-                out.append("This card is set to compare against another image "
-                           "stream, but none is wired into “That stream” yet.")
-            elif (ref == REF_STREAM and other in cls.source_list(params)
+            stream = str(params.get("reference_source", "") or "").strip()
+            if (ref == REF_STREAM and stream in cls.source_list(params)
                     and len(cls.source_list(params)) == 1):
                 out.append("The stream being measured and the one it is "
                            "compared against are the same stream, so every "
                            "comparison this card produces is zero no matter "
                            "what the defect looks like.")
-        elif ref == REF_OTHERS and not mine:
-            out.append("“The other regions” needs a region to start from - "
-                       "there is nothing for the rest to be the others of. "
-                       "Wire a Region card in, or compare against a named "
-                       "region instead.")
         return out
+
+    @classmethod
+    def configuration_hints(cls, params: Dict[str, Any]) -> List[str]:
+        """**跑得起來、但八成不是他要的**（F35 的那一支，warning，不擋跑）。
+
+        目前只有一句：量好幾塊、而參照接的是其中一塊的 ``_others``。
+
+        ⚠ **它一開始被寫在 `configuration_issues` 裡，那是錯的**（F67 當天
+        訂正）。那一支是 error，會擋住整批跑 —— 而「這兩塊都跟 epi_others 比」
+        是一個**完全合法、有時候正是要的**設定，擋掉它等於用一條 lint 否決
+        使用者的意思。這裡要的是提醒不是否決：舊的 ``the other regions``
+        是**逐塊配對**（epi 跟 epi_others、mg 跟 mg_others），一條線表達不出
+        那件事，所以 `recipe._migrate_reference_into_ports` 遷移過來的正好是
+        這個形狀 —— 同名不同義，不准安靜，但也不該變成一道路障。
+
+        判準是那一句：**這會不會跑不起來**（不會 → 這裡；會 → 上面那一支）。
+        """
+        other = str(params.get("reference_region", "") or "").strip()
+        mine = [r for r in cls.region_list(params) if r]
+        if len(mine) > 1 and other in [r + OTHERS_SUFFIX for r in mine]:
+            return ["This card measures %d regions and every one of them is "
+                    "compared against “%s”. If you meant each region against "
+                    "its own other boxes, use one GLV card per region - a "
+                    "single line can only point at one area."
+                    % (len(mine), other)]
+        return []
 
     @classmethod
     def _metrics_in_the_wrong_box(cls, params: Dict[str, Any]) -> List[str]:
@@ -952,23 +1183,42 @@ class GlvStatsStep(MultiSourceStep):
         region = str(p.get(self.REGION) or "")
         arr = np.asarray(img)
         rects = ctx.roi_rects(region, arr.shape[:2])
-        ref_px, boxes_by_stat = None, {}
+        ref_px, boxes_by_stat, ref_arr = None, {}, None
         if _reference_of(p) != REF_NONE:
             ref_px, ref_image, ref_region = self._reference_block(
                 ctx, img, p, _reference_of(p))
+            if _pairs_per_box(p):
+                # **第 i 格對第 i 格**（F68）：同一組矩形，另一張影像。
+                # 這裡只是把那張影像留著，實際的裁切在迴圈裡 —— 每一格的
+                # 參照像素不一樣，那正是這個模式存在的理由。
+                ref_arr = np.asarray(ref_image)
             # **參照的每一格算一次就好**：它對每一顆 target 的格子都一樣，
             # 而 RSEM 的大圖上「每一格都重算一次」是幾百倍的工。
             boxes_by_stat = self._reference_boxes(ctx, ref_image, p, ref_region)
         compare_names = (cmp_feature_names(p) if ref_px is not None else [])
 
+        direction = _direction_of(p)
         judge = _judge_of(p)
-        judge_canon = _canonical(judge)
-        if not judge_canon:
+        judge_key = _judge_key(p)
+        by_compare = judge in algo_glv.COMPARE_METRICS      # F68
+        judge_canon = "" if by_compare else _canonical(judge)
+        if by_compare and ref_px is None:
+            # 挑的依據是「跟參照差多少」，而沒有參照 —— 每一顆都會失敗，
+            # 所以 `configuration_issues` 在跑之前就擋（這裡是手寫 recipe 的
+            # 最後一道）。
+            raise StepError(
+                self.key,
+                f"“Pick the odd one by” is set to '{judge}', which compares "
+                f"each box against a reference - but no reference is wired "
+                f"into this card. Wire one in, or pick an absolute statistic "
+                f"instead.")
+        if not by_compare and not judge_canon:
             # 同 `metrics` 那一句 —— 打錯的 id 要當場講，不是安靜換成預設。
             raise StepError(
                 self.key,
                 f"unknown statistic '{judge}' in “Pick the odd one by”; "
-                f"available: {sorted(algo_glv.GLV_STATS)} or glv_q<0-100> / "
+                f"available: {sorted(algo_glv.GLV_STATS)}, "
+                f"{sorted(algo_glv.COMPARE_METRICS)} or glv_q<0-100> / "
                 f"glv_p<0-100>.")
         per_box: List[Dict[str, float]] = []
         kept_index: List[int] = []
@@ -995,12 +1245,39 @@ class GlvStatsStep(MultiSourceStep):
                         f"glv_p<0-100>.")
                 one[mid] = algo_glv.glv_value(
                     raw if canon == "glv_sat_frac" else patch, canon)
+            if ref_px is not None:
+                mine = ref_px
+                if ref_arr is not None:
+                    # 同一個矩形、同一組像素過濾 —— 兩邊要用同一把尺，
+                    # 不然「差多少」裡混進了「過濾方式不一樣」。
+                    rraw = ref_arr[y:y + h, x:x + w].reshape(-1).astype(
+                        np.float64)
+                    mine, _n = self._pixels_that_count(rraw, p)
+                    if mine.size == 0:
+                        mine = ref_px          # 那一格在 ref 上沒東西可比
+                one.update(self._compare_values(patch, mine, p, boxes_by_stat))
             # 判準統計量獨立於 Statistics 那一格（使用者挑 max 當判準時不必
             # 為此多勾一顆膠囊）；已經算過就不重算。
-            judge_vals.append(one[judge] if judge in one else algo_glv.glv_value(
-                raw if judge_canon == "glv_sat_frac" else patch, judge_canon))
-            if ref_px is not None:
-                one.update(self._compare_values(patch, ref_px, p, boxes_by_stat))
+            # ⚠ **順序要緊**（F68）：判準可以是比出來的量，而那些值是上面那一行
+            # 才寫進 `one` 的。以前這一段在 compare 之前，所以 `judge in one`
+            # 對 `cmp_*` 永遠是 False。
+            if judge_key in one:
+                judge_vals.append(one[judge_key])
+            elif by_compare:
+                # 這一格算不出那個比較量（例：參照只有一格 → snr 不寫）。
+                # 沒有判準就選不出贏家 —— 講出真正的原因，不要安靜換一個。
+                raise StepError(
+                    self.key,
+                    f"“Pick the odd one by” is set to '{judge}', but it "
+                    f"cannot be computed on this defect (a reference of a "
+                    f"single box has no box-to-box spread, so snr, tstat and "
+                    f"pct_rank are blank). Pick delta or abs_delta, or point "
+                    f"the reference at a region laid out as repeated boxes. "
+                    f"The rest of the batch is unaffected.")
+            else:
+                judge_vals.append(algo_glv.glv_value(
+                    raw if judge_canon == "glv_sat_frac" else patch,
+                    judge_canon))
             per_box.append(one)
             kept_index.append(i)
 
@@ -1022,7 +1299,7 @@ class GlvStatsStep(MultiSourceStep):
             if not values:
                 continue            # 每一格都算不出來（例：參照只有一格）
             typical = float(np.median(values))
-            k = int(np.argmax([abs(v - typical) for v in values]))
+            k = _pick_odd(values, typical, direction)          # F68：跟著方向
             out[name + TYPICAL_SUFFIX] = typical
             out[name + OUTLIER_SUFFIX] = float(values[k])
             out[name + OUTLIER_BOX_SUFFIX] = float(kept_index[k])
@@ -1032,7 +1309,8 @@ class GlvStatsStep(MultiSourceStep):
         # 分的 worst 讀起來像「量了而且很正常」，而真相是「沒得比」。
         worst_note: Optional[Dict[str, Any]] = None
         if len(per_box) >= 2:
-            scores, baselines, spreads = algo_glv.odd_box_scores(judge_vals)
+            scores, baselines, spreads = algo_glv.odd_box_scores(
+                judge_vals, direction=direction)
             k = int(np.argmax(scores))      # 平手取第一個（照框的順序，決定性）
             wi = int(kept_index[k])
             wx, wy, ww, wh = (float(v) for v in rects[wi])
@@ -1047,6 +1325,17 @@ class GlvStatsStep(MultiSourceStep):
             out["glv_worst_value"] = float(judge_vals[k])
             out["glv_worst_score_median"] = float(np.median(scores))
             out["glv_worst_score_spread"] = algo_glv.robust_spread(scores)
+            # **贏家那一格的每一個量**（F68）—— 「最黑那格的 Q25」要的是這個。
+            # 值全部來自 `per_box[k]`，也就是**同一趟迴圈裡已經算好的**：
+            # 影像更大、批次更多，所以「不多一趟」是這張卡的硬規矩。
+            for name, value in per_box[k].items():
+                out[name + WORST_SUFFIX] = float(value)
+            # 有幾格越線（F68）—— 分數已經在手上，這裡只是數一數。
+            over_k = float(p.get("over_k") or 0.0)
+            if over_k > 0:
+                n_over = int(np.count_nonzero(scores >= over_k))
+                out[BOXES_OVER_K] = float(n_over)
+                out[BOXES_OVER_K_FRAC] = float(n_over) / float(len(scores))
             # 疊圖讀的那一份（畫 ROI 框、標框內像素）—— **跟上面的特徵同一次
             # 計算**：baseline / spread 是像素判準的分母，各自再算一次的話，
             # 圖上標紅而數字說正常的那一天遲早會來（Results R1 的形狀）。
@@ -1194,21 +1483,39 @@ class GlvStatsStep(MultiSourceStep):
 
         ``labels`` 給區域名，顏色因此跟影像上那個區域的框一模一樣。
 
-        **贏家那一格另外畫**（F32）：worst note 在的時候，最異常的那一格畫
-        **一個 X（兩條對角線）**＋角點，``focus`` 指著它（滿的 alpha ——
-        它才是主角，典型那一格退成淡的）。使用者一按試跑、甚至只是切到下一顆
-        （預覽每顆都會跑），影像上當場看得到「挑到哪一格」—— 不用等 batch。
-        為什麼是 X 不是描邊：**描邊跟區域框完全重疊、同一個顏色，等於沒畫**
-        —— 上面典型格用角點的理由一字不差，而第一版真的畫了四邊、真的在
-        527 個框裡看不見（實測截圖抓到的）。對角線不跟任何框的邊重合，
-        再小的格子也認得出。
+        **贏家那一格另外畫**：worst note 在的時候，最異常的那一格畫一個
+        **粗框**，角色是 ``!worst``（UI 因此畫**琥珀色、加粗**），``focus``
+        指著它的四條邊（滿的 alpha —— 它才是主角，典型那一格退成淡的）。
+
+        為什麼是粗框（2026-09-01，使用者：「我覺得不要畫叉耶，我傾向異常的那格
+        用紅框（或不同顏色）的加粗框把它框出來」）
+        ------------------------------------------------------------------
+        F32 當初畫 X 的理由是「描邊會跟區域框完全重疊、同一個顏色，等於沒畫」
+        —— 而那句話的重點是**同一個顏色**。換一個顏色 ＋ 加粗，描邊就看得見了，
+        而且它跟報表講的是同一句話：報表早就把贏家畫成**粗的琥珀框**
+        （`core/export/overlay.py` 的 `ROI_WINNER_COLOR`）。同一顆 defect 在
+        畫面上與在報表上長得一樣，才不用學兩次。
+
+        顏色用琥珀不用紅也是報表定的：紅色在那張圖上已經是「量到的那一塊」
+        （`BOX_COLOR`），兩個都紅就分不出「哪一格異常」與「量到的東西在哪」。
+
+        贏家那一格**不畫角點**：框自己已經夠響，再加四顆點只是把邊界說第二次。
+
+        使用者一按試跑、甚至只是切到下一顆（預覽每顆都會跑），影像上當場看得到
+        「挑到哪一格」—— 不用等 batch。
+
+        ⚠ **接了好幾個區域的時候，這裡每一個區域各畫一個粗框**（各自的贏家）。
+        那跟報表不一樣：報表只有**一個**粗框，畫的是分數最高的那一格
+        （`core/export/overlay.worst_note_for_overlay`）。兩邊都對，因為問的
+        不是同一件事 —— 這裡是「每一塊各自最不一樣的是哪一格」，報表那一行印
+        的是整顆的分數，所以它的粗框必須是那個分數來的地方。
         """
         notes = (getattr(ctx, "meta", None) or {}).get("glv_hist") or []
         want = str(stream or "").strip()
         lines: List[Any] = []
         points: List[Any] = []
         labels: List[str] = []
-        focus = -1
+        focus: List[int] = []
         for note in notes:
             if not isinstance(note, dict):
                 continue
@@ -1234,9 +1541,9 @@ class GlvStatsStep(MultiSourceStep):
             points.append(corners)
             labels.append(name)
 
-            # 贏家那一格（F32）：一個 X（兩條對角線）+ 角點 —— 描邊會跟
-            # 區域框重疊到看不見（見 docstring）。focus 給贏家（它才是
-            # 主角）；沒有 worst（單框、還沒比出來）就照舊給典型那一格。
+            # 贏家那一格（F32；2026-09-01 使用者改成粗框）：**四條邊**，
+            # 角色 `!worst` —— 琥珀色、加粗。focus 給贏家（它才是主角）；
+            # 沒有 worst（單框、還沒比出來）就照舊給典型那一格。
             worst = note.get("worst") or {}
             wi = int(worst.get("i", -1)) if isinstance(worst, dict) else -1
             worst_at = -1
@@ -1245,13 +1552,20 @@ class GlvStatsStep(MultiSourceStep):
                 wc = [(wx, wy), (wx + ww, wy), (wx + ww, wy + wh),
                       (wx, wy + wh)]
                 worst_at = len(lines)
-                for a, b in ((wc[0], wc[2]), (wc[1], wc[3])):
-                    lines.append([a, b])
-                    points.append([a, b])
-                    labels.append(name)
-            if focus < 0:
-                focus = worst_at if worst_at >= 0 else typical_at
-        return lines, points, focus, labels
+                for k in range(4):
+                    lines.append([wc[k], wc[(k + 1) % 4]])
+                    points.append([])      # 框自己夠響了，不再加角點
+                    labels.append(WORST_ROLE)
+            if not focus:
+                # **框的四條邊都要**：只指第一條的話，其餘三條落在「不是焦點」
+                # 那一組（alpha 70、1 px）—— 上一版畫 X 的時候就是這樣少了一
+                # 條，而使用者看著截圖問「框中間有一條斜線?」。
+                focus = (list(range(worst_at, worst_at + 4)) if worst_at >= 0
+                         else [typical_at])
+        # 什麼都沒畫的時候回 ``-1``（而不是空 list）—— 「沒有焦點」在每一張
+        # 卡上都是同一個哨兵，`test_every_card_answers_the_marks_question`
+        # 對整個 REGISTRY 問的就是這一句。
+        return lines, points, (focus if focus else -1), labels
 
     def _note_distribution(self, ctx: Context, patch, p: Dict[str, Any],
                            feats: Dict[str, float], n_raw: int = 0,
@@ -1344,16 +1658,20 @@ class GlvStatsStep(MultiSourceStep):
                 "pct_rank are blank for this defect. Point it at a region "
                 "that is laid "
                 "out as repeated boxes (a Golden Cell template, for example)."
-                % (self.key, self._ref_label(p, ref)))
+                % (self.key, self.reference_label(p)))
 
         # 儀表用（同其他卡的慣例）：**畫面上的數字就是引擎算的這一份**。
         here = str(p.get(self.REGION) or "the image")
-        ctx.meta.setdefault("compares", {})["%s_vs_%s" % (here, self._ref_label(p, ref))] = {
+        ctx.meta.setdefault("compares", {})["%s_vs_%s" % (here, self.reference_label(p))] = {
             "target": here,
-            "reference": self._ref_label(p, ref),
+            "reference": self.reference_label(p),
             "target_source": str(p.get(self.CURRENT_STREAM, "")),
+            # ⚠ ``REF_BOTH`` 也在這裡（F67 訂正）：參照那一塊住在另一條流上
+            # 的兩種情況都要講出**那一條**的名字。以前只認 ``REF_STREAM``，
+            # 於是「另一塊 @ 另一條流」在面板上被寫成量測那一條 —— 數字是對的，
+            # 而它旁邊那行字說錯了它是跟哪一張圖比出來的。
             "reference_source": (str(p.get("reference_source", ""))
-                                 if ref == REF_STREAM
+                                 if ref in (REF_STREAM, REF_BOTH)
                                  else str(p.get(self.CURRENT_STREAM, ""))),
             "stat": ",".join(_stats_of(p)),
             "target_px": int(np.asarray(patch).size),
@@ -1373,7 +1691,7 @@ class GlvStatsStep(MultiSourceStep):
         ref_counts, _e = algo_glv.pixel_hist(
             np.asarray(ref_px, dtype=np.float64).ravel(), bins=self.HIST_BINS)
         note = {
-            "label": self._ref_label(p, ref),
+            "label": self.reference_label(p),
             "bins": [int(c) for c in ref_counts],
             "n": int(np.asarray(ref_px).size),
             "boxes": len(ref_boxes),
@@ -1436,17 +1754,35 @@ class GlvStatsStep(MultiSourceStep):
         return out
 
     @classmethod
-    def _ref_label(cls, p: Dict[str, Any], ref: str) -> str:
-        """參照那一塊叫什麼（面板與 `ctx.meta` 用）—— **講得出流與區域**。"""
+    def reference_label(cls, p: Dict[str, Any]) -> str:
+        """參照那一塊叫什麼 —— **講得出流與區域**（不比的時候是空字串）。
+
+        面板、`ctx.meta`、以及 Studio 那排 preset 底下那句話都問這一支
+        （F67）。三個地方各拼一份的話，同一塊在畫面上會有兩三種叫法 ——
+        而那正是這一輪在收的那種重複（`CLAUDE.md` §0）。
+
+        ⚠ **公開的**（F67 之前叫 `_ref_label`、而且要呼叫端先算好 ``ref``）：
+        算 ``ref`` 是 :func:`_reference_of` 的事，多一個參數就多一個可以傳錯
+        的東西。
+        """
+        ref = _reference_of(p)
+        if ref == REF_NONE:
+            return ""
         region = str(p.get("reference_region", "") or "?")
         stream = str(p.get("reference_source", "") or "?")
         if ref == REF_REGION:
             return region
         if ref == REF_STREAM:
-            return "%s @ %s" % (str(p.get(cls.REGION) or "the image"), stream)
-        if ref == REF_BOTH:
-            return "%s @ %s" % (region, stream)
-        return str(p.get(cls.REGION) or "") + OTHERS_SUFFIX
+            # 同一塊在另一張圖上 —— 所以「那一塊」就是**現在量的這一塊**。
+            # ⚠ 引擎跑到這裡時 ``roi`` 已經是**這一輪的那一個**（迴圈在
+            # `MultiSourceStep`），所以逗號只會在設定期出現（Studio 那句話問
+            # 的是整張卡）。那時候逐一列出來會讀成一個怪名字（``epi,mg @
+            # ref``），而它真正的意思是「每一塊各自跟自己在另一張圖上的那一塊」。
+            mine = str(p.get(cls.REGION) or "")
+            if "," in mine:
+                return "the same areas @ %s" % stream
+            return "%s @ %s" % (mine or "the image", stream)
+        return "%s @ %s" % (region, stream)          # REF_BOTH
 
     def _reference_block(self, ctx: Context, img, p: Dict[str, Any], ref: str):
         """參照那一塊 → ``(全部像素, 它住的那張影像, 它的區域名)``。
@@ -1475,15 +1811,14 @@ class GlvStatsStep(MultiSourceStep):
                     "the stream to compare against ('%s') does not exist "
                     "here; available: %s."
                     % (name, ", ".join(sorted(ctx.images)) or "none"))
-        want = region if ref == REF_STREAM else (
-            str(p.get("reference_region", "") or "").strip()
-            if ref in (REF_REGION, REF_BOTH) else region + OTHERS_SUFFIX)
+        # 「同一塊、另一條流」＝ 參照區域那顆埠沒接線，所以量的那一塊自己就是
+        # 參照的那一塊（在另一張影像上）。
+        want = (region if ref == REF_STREAM
+                else str(p.get("reference_region", "") or "").strip())
         if not want:
-            raise StepError(
-                self.key,
-                "this card is set to compare against another region, but "
-                "none is picked - drag a line from the Region card that "
-                "defines it.")
+            # 到得了這裡只有一種：接了流、而量的那一格沒有區域（量整張圖）。
+            # 那是合法的 —— 整張圖對整張圖，`roi_pixels` 吃得下空名字。
+            return (roi_pixels(ctx, self.key, image, ""), image, "")
         if want not in ctx.roi_names():
             why = dict(ctx.meta.get("regions_absent") or {}).get(want, "")
             raise StepError(

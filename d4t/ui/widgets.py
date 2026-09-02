@@ -26,7 +26,8 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
-from PySide6.QtCore import QMimeData, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import (QEvent, QMimeData, QPointF, QRectF, QSize, Qt,
+                            Signal)
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -38,6 +39,7 @@ from PySide6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
+    QIcon,
     QPixmap,
     QPolygonF,
 )
@@ -71,6 +73,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.algo import glv as algo_glv
+from . import glyphs
 from . import region_words
 from . import theme
 from .numbers import format_feature_value
@@ -84,12 +87,39 @@ from .theme import TOKENS, region_hex
 #: 不可能撞到。
 #:
 #: **卡片說角色，這裡挑顏色**：core 不得 import Qt，而「紅色是什麼紅」是主題的
-#: 事（light / dark 兩套值）。報表用的是同一組語言 —— 框紅、十字綠
-#: （`core/export/overlay.py` 的 `BOX_COLOR` / `AIM_COLOR`），所以同一顆 defect
-#: 在畫面上與在報表上，**紅的永遠是「對到哪」、綠的永遠是「瞄準哪」**。
+#: 事。報表用的是同一組語言 —— 框紅、十字綠（`core/export/overlay.py` 的
+#: `BOX_COLOR` / `AIM_COLOR`），所以同一顆 defect 在畫面上與在報表上，
+#: **紅的永遠是「對到哪」、綠的永遠是「瞄準哪」**，而 `mark_alert` /
+#: `mark_aim` 兩個權杖的值跟那兩個常數逐位元組相同。
+#:
+#: ⚠ **不要用介面的 `danger` / `success`**：那兩個是放在面板上的顏色（要跟白底
+#: 相處，所以偏暗偏濁），而這些記號畫在**使用者的影像**上，還要跟
+#: `REGION_COLORS` 分得開 —— 疊圖上其餘的框穿的正是那一組。`danger`（#d05a4c）
+#: 跟第 8 個區域色（#f08a5f）只差 ΔE 19.9，一整排橘框裡它認不出來。
+#: 這條有測試守著（`test_a_mark_role_never_wears_a_region_colour`）。
 MARK_ROLE_TOKENS = {
-    "!match": "danger",      # 小圖真的對到的那一塊
-    "!aim": "success",       # 機台瞄準的那一點
+    "!match": "mark_alert",  # 小圖真的對到的那一塊
+    "!aim": "mark_aim",      # 機台瞄準的那一點
+    "!worst": "mark_alert",  # 逐框比較挑出來的那一格（紅粗框，見下）
+}
+
+#: 有些角色要**畫粗**（預設 1.6）。角色 → 線寬。
+#:
+#: `!worst` 是使用者 2026-09-01 定的：「我傾向異常的那格用**紅框**（或不同
+#: 顏色）的**加粗框**把它框出來」。
+#:
+#: ⚠ **第一版畫琥珀（照抄報表的 `ROI_WINNER_COLOR`），而它在畫面上幾乎看不
+#: 出來** —— render 出來才發現：`theme.REGION_COLORS` 裡有 ``#f0b429``（琥珀）
+#: 與 ``#f08a5f``（橘），而區域框穿的正是那一組。報表沒有這個問題，因為那張圖
+#: 上其餘的框是鋼青色、紅色被「量到的那一塊」佔著。
+#:
+#: 所以規矩不是「跟報表同一個顏色」，是**在自己這張圖上不會跟旁邊撞**：
+#: 螢幕上其餘的框穿區域色（含琥珀橘），紅色沒有人用；報表上紅色有人用，
+#: 其餘的框是鋼青，琥珀沒有人用。兩張圖各自挑得出最響的那一個。
+#: 加粗那一半兩邊一致（報表 2–3 px、這裡 2.6 px）—— 那是這個記號真正的
+#: 共同語言：**最異常的那一格是唯一一個粗框**。
+MARK_ROLE_WEIGHTS = {
+    "!worst": 2.6,
 }
 
 __all__ = [
@@ -235,7 +265,11 @@ GLYPH_ICONS = (
     # 「量的是一條線還是一團東西」（F19 第二批）。這兩顆**不是**同一套小版圖：
     # 它們畫的就是那兩種樣品本身，而那正是這個岔路在問的事。
     "shape_line", "shape_blob",
-)
+# ⚠ 上面這一族是**按鈕**上的圖；設定區那些**膠囊**上的圖住在 `ui/glyphs.py`
+# （F68 第二輪，五十幾張 —— 塞回這裡只會讓這個檔案更難動，而 CLAUDE.md §4
+# 早就指名這幾群自繪圖示最好拆）。兩族由這張表接起來，所以呼叫端（與那條
+# 「每一顆都要畫得出東西」的測試）只認得 `GLYPH_ICONS` 一個名字。
+) + glyphs.CHIP_ICONS
 
 
 def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
@@ -397,6 +431,8 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         p.setBrush(Qt.NoBrush)
     elif n.startswith(("place_", "side_", "fill_", "dir_", "target_")):
         _draw_profile_glyph(p, n, w, h, color, pen)
+    elif n in glyphs.CHIP_ICONS:
+        glyphs.draw_chip_icon(p, n, w, color)
     elif n == "roi_cursor":
         # 一支箭頭游標：**選**已經有的框（不是畫新的）。
         p.setPen(Qt.NoPen)
@@ -1253,6 +1289,23 @@ def _qimage_from_uint8(arr: np.ndarray) -> QImage:
 # --------------------------------------------------------------------------- #
 # 1. ImageView
 # --------------------------------------------------------------------------- #
+def _focus_set(focus: Any) -> frozenset:
+    """``focus`` → 要畫滿的那幾條線的 index。
+
+    吃一個 index（大多數卡片：一條代表線）或**一串** index（一個記號不只一條
+    線 —— GLV 的贏家格是一個 X）。``-1`` / 空的 = 一條都不特別畫。
+    """
+    if focus is None:
+        return frozenset()
+    if isinstance(focus, (int, float)) and not isinstance(focus, bool):
+        i = int(focus)
+        return frozenset() if i < 0 else frozenset((i,))
+    try:
+        return frozenset(int(v) for v in focus if int(v) >= 0)
+    except (TypeError, ValueError):      # noqa: BLE001 — 顯示用，不能擋畫面
+        return frozenset()
+
+
 class ImageView(QWidget):
     """ndarray 檢視器：滾輪對游標縮放、拖曳平移、雙擊 fit。
 
@@ -1301,7 +1354,7 @@ class ImageView(QWidget):
         #: 這一組標記要不要畫滿（`Step.marks_solid`）。
         self._marks_solid = False
         self._mark_points: List[Any] = []
-        self._mark_focus = -1
+        self._mark_focus: frozenset = frozenset()
         #: 每一條標記屬於哪一個具名區域（跟 ``_marks`` 等長；空字串 = 不分色）。
         self._mark_labels: List[str] = []
         #: 量測尺按著時的那一條帶（axis, 起, 迄；影像像素）。見 :meth:`set_measure`。
@@ -1465,13 +1518,21 @@ class ImageView(QWidget):
 
     def set_marks(self, lines: Optional[Sequence[Any]] = None,
                   points: Optional[Sequence[Any]] = None,
-                  focus: int = -1,
+                  focus: Any = -1,
                   labels: Optional[Sequence[str]] = None,
                   solid: bool = False) -> None:
         """把**量測標記**疊在影像上（正規化座標）。
 
         ``lines`` 是 ``[[(x0, y0), (x1, y1)], …]``，``points[i]`` 是第 i 條線段
-        上的點。``focus`` 是要畫粗的那一條（代表值那一條）。
+        上的點。``focus`` 是要畫粗的那一條（代表值那一條）—— **也可以是一串**
+        （一個記號本來就可能不只一條線）。
+
+        ⚠ **不只一條那件事是踩出來的**：GLV 的贏家格畫的是一個 **X**，而 X 是
+        兩條線；`focus` 只認得一個 index 的時候，第二條落在 alpha 70、1px 那
+        一組 —— 於是畫面上那一格中間是**一條斜線**，不是一個 X。使用者
+        2026-09-01 看著截圖問「框中間有一條斜線?」。而當時的測試**把那個形狀
+        寫死了**（`assert focus == 1  # X 的第一條`）：測試守住的是 bug 的形狀，
+        不是那句「畫一個 X」的意圖。
 
         為什麼跟 :meth:`set_overlay` 分開
         ---------------------------------
@@ -1508,7 +1569,7 @@ class ImageView(QWidget):
         for n in self._mark_labels:
             if n and n not in self._overlay_order:
                 self._overlay_order.append(n)
-        self._mark_focus = int(focus)
+        self._mark_focus = _focus_set(focus)
         self.update()
 
     def clear_marks(self) -> None:
@@ -1704,8 +1765,11 @@ class ImageView(QWidget):
         index_of = {n: i for i, n in enumerate(self._overlay_order)}
         plain = QColor(TOKENS["accent"])
 
+        def role_of(i: int) -> str:
+            return (self._mark_labels[i] if i < len(self._mark_labels) else "")
+
         def colour_of(i: int) -> QColor:
-            name = (self._mark_labels[i] if i < len(self._mark_labels) else "")
+            name = role_of(i)
             token = MARK_ROLE_TOKENS.get(name)
             if token:
                 return QColor(TOKENS[token])
@@ -1714,18 +1778,20 @@ class ImageView(QWidget):
 
         strong = self._marks_solid
         for i, (a, b) in enumerate(self._marks):
-            focused = (i == self._mark_focus) or strong
+            focused = (i in self._mark_focus) or strong
             col = colour_of(i)
             if not focused:
                 col = QColor(col)
                 col.setAlpha(70)
-            pen = QPen(col, 2.2 if strong else (1.6 if focused else 1.0))
+            heavy = MARK_ROLE_WEIGHTS.get(role_of(i))
+            pen = QPen(col, heavy if (heavy and focused)
+                       else (2.2 if strong else (1.6 if focused else 1.0)))
             pen.setCosmetic(True)
             p.setPen(pen)
             p.drawLine(at(a), at(b))
         p.setPen(Qt.NoPen)
         for i, grp in enumerate(self._mark_points):
-            focused = (i == self._mark_focus) or strong
+            focused = (i in self._mark_focus) or strong
             col = colour_of(i)
             if not focused:
                 col = QColor(col)
@@ -1966,7 +2032,7 @@ class _HintLabel(QLabel):
 #: 為什麼要列出來而不是量 widget 的高度：``sizeHint`` 在建構的當下還沒定案
 #: （膠囊要排版完才知道會不會換行），量到的會是一個還沒長好的數字。
 _BLOCK_EDITORS = ("metric_chips", "metric_choice", "multi_choice",
-                  "curve", "template",
+                  "chip_choice", "curve", "template",
                   "channel_map", "cell_rois")
 
 
@@ -2015,9 +2081,9 @@ class _ParamRow(QFrame):
         # `section` 都是 "Report"，於是畫面上同一個字出現兩次 —— 而下面那條
         # 對齊的規矩會讓它落在群組區塊的**中間那一列**旁邊，讀起來像是一個叫
         # 「Report」的群（截圖出來才看到：Size 的第二排看起來屬於它）。
-        # 比對前先剝掉小標題的編號（"3 · Compare against" → "Compare
-        # against"，F32）：編號是段落的座標不是名字，留著比的話「段標題正下方
-        # 再寫一次同名列標籤」這種重複只有沒編號的段抓得到。
+        # 比對前先剝掉小標題的編號（"3 · Compare with" → "Compare with"，
+        # F32）：編號是段落的座標不是名字，留著比的話「段標題正下方再寫一次
+        # 同名列標籤」這種重複只有沒編號的段抓得到。
         label_txt = str(spec.get("label") or "").strip()
         section_txt = re.sub(r"^\d+\s*·\s*", "",
                              str(spec.get("section") or "").strip())
@@ -2031,6 +2097,13 @@ class _ParamRow(QFrame):
         if str(spec.get("type") or "") in _BLOCK_EDITORS:
             top.setAlignment(self.name_label, Qt.AlignTop)
             self.name_label.setContentsMargins(0, 6, 0, 0)
+        if str(spec.get("type") or "") == "chip_choice":
+            # **長的列名要換行，不要把膠囊擠扁**（F68 第二輪）。
+            # 「Take the up-and-down stripes that are」把那一列的名字撐到
+            # 三百多 px，剩給七顆膠囊的寬度不到一半 —— 它們於是排成五排
+            # 參差不齊的東西（render 出來才看到）。名字是一欄，膠囊是一塊。
+            self.name_label.setWordWrap(True)
+            self.name_label.setMaximumWidth(152)
 
         self.slider = _make_slider(spec, editor)
         if self.slider is not None:
@@ -2965,17 +3038,23 @@ def metric_face(mid: str) -> Tuple[str, str, str]:
     return ("Other", mid, "percentile")
 
 
-class _MetricChip(QFrame):
+class _ChipBase(QFrame):
     """一顆膠囊：小圖 + 短標籤，點一下切換選/不選。
 
     為什麼是自繪而不是 QCheckBox + QSS：選中的狀態要用**階段色**（量測段的
     橙），而那個顏色是算出來的（`theme.group_hex` / `readable_on`），不是主題
     的一個 token —— 走 QSS 的話每換一次主題都要重寫一次樣式表字串。
+
+    這個基底只認得**一顆膠囊長什麼樣**（尺寸、字級、選中的畫法）。「小圖是
+    哪一張、字寫什麼、tooltip 講什麼」由子類決定：統計量那一族
+    （:class:`_MetricChip`）畫的是分布上的一筆，設定區那一族
+    （:class:`_ChoiceChip`）畫的是按鈕圖示。**兩族共用同一個外觀是刻意的**
+    —— 使用者 2026-09-01：「我希望設定欄這邊也是能像下方一樣膠囊 icon 配文字，
+    這樣 user 比較會有感覺。」抄第二份出來的那份會漂移（這個 repo 記過三次），
+    所以外觀只有這一份。
     """
 
     toggled = Signal(str, bool)
-    #: 「再加一顆」的那種膠囊被按了（``adder_label`` 有值時才會發）。
-    add_clicked = Signal(str)
 
     H = 30
     GLYPH = 19
@@ -2984,17 +3063,20 @@ class _MetricChip(QFrame):
     #: 症狀是膠囊右邊被切掉（第一版的 “Trimmed mean” 少了半個 n）。
     FONT_PX = 11
 
-    def __init__(self, mid: str, colour: str, checked: bool = False,
-                 parent: Optional[QWidget] = None,
-                 adder_label: str = ""):
+    #: 虛線框（「這裡還沒有東西」）—— 只有「再加一顆」那種膠囊會打開。
+    dashed = False
+
+    #: **按了不自己改狀態**：發出訊號，勾不勾由呼叫端下一次重畫時決定。
+    #: 用在 preset 那一排（「照這個意思把線接好」）—— 那一排再按一次不該把它
+    #: 取消（取消要回到哪個狀態？沒有答案），而套不上的時候畫面要停在真實
+    #: 狀態上，不是停在使用者按下去的那一顆。
+    momentary = False
+
+    def __init__(self, mid: str, label: str, colour: str,
+                 checked: bool = False, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.mid = str(mid)
-        if adder_label:
-            # 這一顆是**動作**不是統計量：虛線框、永遠不是「選中」。
-            self.group, self.label, self.glyph = "", str(adder_label), "plus"
-        else:
-            self.group, self.label, self.glyph = metric_face(self.mid)
-        self.adder = bool(adder_label)
+        self.label = str(label)
         self.colour = str(colour)
         self._checked = bool(checked)
         self._hover = False
@@ -3008,11 +3090,11 @@ class _MetricChip(QFrame):
         self.setFixedWidth(int(11 + self.GLYPH + 7
                                + QFontMetricsF(f).horizontalAdvance(self.label)
                                + 15))
-        # tooltip = 這個統計量到底算什麼（引擎那一份公式，不要再寫第二份）。
-        self.setToolTip("Add one and pick the number" if self.adder else
-                        "%s — %s" % (algo_glv.metric_label(self.mid),
-                                     algo_glv.metric_formula(self.mid)))
         self.setAccessibleName(self.label)
+
+    def draw_glyph(self, p: QPainter, ink: QColor, dim: QColor) -> None:
+        """畫這一顆的小圖（子類實作）。"""
+        raise NotImplementedError
 
     # -- 狀態 ---------------------------------------------------------------
     def is_checked(self) -> bool:
@@ -3040,20 +3122,47 @@ class _MetricChip(QFrame):
             self.click()
 
     def click(self) -> None:
-        """切換這一顆（測試直接呼叫這支，不模擬滑鼠）。"""
-        if self.adder:
-            self.add_clicked.emit(self.mid)
+        """切換這一顆（測試直接呼叫這支，不模擬滑鼠）。
+
+        **灰掉的時候什麼都不做。** Qt 只擋得住滑鼠事件；直接呼叫這支的路
+        （測試、鍵盤）擋不到，而「按了灰的鈕居然生效」是最難查的那種。
+        """
+        if not self.isEnabled():
+            return
+        if self.momentary:
+            self.toggled.emit(self.mid, True)
             return
         self._checked = not self._checked
         self.update()
         self.toggled.emit(self.mid, self._checked)
+
+    def changeEvent(self, e) -> None:      # noqa: D102 - Qt hook
+        if e.type() == QEvent.EnabledChange:
+            self.setCursor(Qt.PointingHandCursor if self.isEnabled()
+                           else Qt.ArrowCursor)
+            self.update()
+        super().changeEvent(e)
 
     def paintEvent(self, _e) -> None:      # noqa: D102 - Qt hook
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         rad = r.height() / 2.0
-        if self._checked:
+        if not self.isEnabled():
+            # 灰掉 = **這一格現在還不能答**（例：roi 那條線還沒接）。
+            # 選中的那一顆**照樣看得出是選中的**（它是現在的狀態，不是一個
+            # 待選項）—— 只是整顆退色。
+            bg = QColor(self.colour if self._checked else TOKENS["bg_surface"])
+            if self._checked:
+                bg.setAlpha(16)
+            border = QColor(self.colour if self._checked
+                            else TOKENS["border_default"])
+            if self._checked:
+                border.setAlpha(110)
+            ink = QColor(TOKENS["text_disabled"])
+            dim = QColor(ink)
+            dim.setAlpha(90)
+        elif self._checked:
             bg = QColor(self.colour)
             bg.setAlpha(42 if self._hover else 30)
             border = QColor(self.colour)
@@ -3068,21 +3177,72 @@ class _MetricChip(QFrame):
             ink = QColor(TOKENS["text_secondary"])
             dim = QColor(TOKENS["text_hint"])
             dim.setAlpha(110)
-        pen = QPen(border, 1.4 if self._checked else 1.0)
-        if self.adder:
+        pen = QPen(border, 1.4 if (self._checked and self.isEnabled()) else 1.0)
+        if self.dashed:
             pen.setStyle(Qt.DashLine)     # 虛線 = 這裡還沒有東西，按了才長出來
         p.setBrush(QBrush(bg))
         p.setPen(pen)
         p.drawRoundedRect(r, rad, rad)
         p.save()
         p.translate(11, (self.height() - self.GLYPH) / 2.0)
-        draw_metric_glyph(p, self.glyph, float(self.GLYPH), ink.name(),
-                          dim.name())
+        self.draw_glyph(p, ink, dim)
         p.restore()
         p.setPen(ink)
         p.drawText(QRectF(11 + self.GLYPH + 7, 0, self.width(), self.height()),
                    Qt.AlignLeft | Qt.AlignVCenter, self.label)
         p.end()
+
+
+class _MetricChip(_ChipBase):
+    """統計量那一族的膠囊：小圖是**這個統計量標在分布上的哪一筆**。"""
+
+    #: 「再加一顆」的那種膠囊被按了（``adder_label`` 有值時才會發）。
+    add_clicked = Signal(str)
+
+    def __init__(self, mid: str, colour: str, checked: bool = False,
+                 parent: Optional[QWidget] = None,
+                 adder_label: str = ""):
+        if adder_label:
+            # 這一顆是**動作**不是統計量：虛線框、永遠不是「選中」。
+            group, label, glyph = "", str(adder_label), "plus"
+        else:
+            group, label, glyph = metric_face(str(mid))
+        super().__init__(mid, label, colour, checked, parent)
+        self.group, self.glyph = group, glyph
+        self.adder = self.dashed = bool(adder_label)
+        # tooltip = 這個統計量到底算什麼（引擎那一份公式，不要再寫第二份）。
+        self.setToolTip("Add one and pick the number" if self.adder else
+                        "%s — %s" % (algo_glv.metric_label(self.mid),
+                                     algo_glv.metric_formula(self.mid)))
+
+    def click(self) -> None:               # noqa: D102 - 見基底
+        if self.adder:
+            self.add_clicked.emit(self.mid)
+            return
+        super().click()
+
+    def draw_glyph(self, p: QPainter, ink: QColor, dim: QColor) -> None:
+        draw_metric_glyph(p, self.glyph, float(self.GLYPH), ink.name(),
+                          dim.name())
+
+
+class _ChoiceChip(_ChipBase):
+    """設定區那一族的膠囊：小圖是**這個選項在做什麼**（`GLYPH_ICONS`）。
+
+    值就是 ``mid``（recipe 裡那個字），字是 :func:`_spell` 拼出來的 ——
+    所以加一個選項不必再維護第二張「值 → 顯示名」的表。
+    """
+
+    def __init__(self, value: str, icon: str, colour: str,
+                 checked: bool = False, parent: Optional[QWidget] = None,
+                 tip: str = "", label: str = ""):
+        super().__init__(value, str(label or "") or _spell(value), colour,
+                         checked, parent)
+        self.icon = str(icon)
+        self.setToolTip(str(tip or ""))
+
+    def draw_glyph(self, p: QPainter, ink: QColor, dim: QColor) -> None:
+        draw_glyph_icon(p, self.icon, float(self.GLYPH), ink.name())
 
 
 class _ChipFlow(QWidget):
@@ -3101,8 +3261,8 @@ class _ChipFlow(QWidget):
         self._items.append(item)
         self._relayout()
 
-    def chips(self) -> List["_MetricChip"]:
-        return [c for c in self._items if isinstance(c, _MetricChip)]
+    def chips(self) -> List["_ChipBase"]:
+        return [c for c in self._items if isinstance(c, _ChipBase)]
 
     def _relayout(self, width: Optional[int] = None) -> None:
         w = int(width or self.width() or 320)
@@ -3110,14 +3270,27 @@ class _ChipFlow(QWidget):
         for c in self._items:
             if x and x + c.width() > w:
                 x = 0
-                y += _MetricChip.H + 5
+                y += _ChipBase.H + 5
             c.move(x, y)
             x += c.width() + 5
-        self.setFixedHeight(y + _MetricChip.H if self._items else 0)
+        self.setFixedHeight(y + _ChipBase.H if self._items else 0)
 
     def resizeEvent(self, e) -> None:      # noqa: D102 - Qt hook
         self._relayout(e.size().width())
         super().resizeEvent(e)
+
+    #: ⚠ **要自己講寬度。** 這一族的高度是排完版才知道的，所以 `_relayout`
+    #: 只設了 `setFixedHeight` —— 而寬度沒有人講的話 `sizeHint` 是 0，
+    #: 於是放進一個沒有 stretch 的 layout（判定面板那一列）時整塊被壓成 0 px
+    #: 寬：膠囊都在、也都 `isVisible()`，但畫面上什麼都沒有（2026-09-01
+    #: render 出來才看到）。ParamForm 那邊看不出來，因為它是 `addWidget(w, 1)`。
+    def sizeHint(self) -> QSize:           # noqa: D102 - Qt hook
+        return QSize(max([c.width() for c in self._items] or [0]) or 120,
+                     max(self.height(), _ChipBase.H))
+
+    def minimumSizeHint(self) -> QSize:    # noqa: D102 - Qt hook
+        return QSize(max([c.width() for c in self._items] or [0]),
+                     _ChipBase.H)
 
 
 class MetricChips(QWidget):
@@ -3396,6 +3569,90 @@ class MetricPick(MetricChips):
                          % (got or "nothing yet"))
 
 
+class ChoiceChips(QWidget):
+    """``chip_choice`` 參數的編輯器：**一排膠囊，選一顆**（F68 第二輪）。
+
+    使用者 2026-09-01：「我希望設定欄這邊也是能像下方一樣膠囊 icon 配文字，
+    這樣 user 比較會有感覺。」
+
+    為什麼不是下拉選單（跟 :class:`MetricChips` 同一個理由，只是換一格）
+    ------------------------------------------------------------------
+    下拉選單把選項**藏起來**：使用者要先按開才知道有幾個、分別是什麼，而這
+    幾格問的是「這張卡要怎麼找缺陷」—— 那是他每一次調參數都要重看一遍的事。
+    攤成一排膠囊之後，選項本身就是畫面，而選中的那一顆帶著階段色。
+
+    為什麼不是「只有圖、名字退到 tooltip」（F11 Region-2 的 ``IconChoice``，
+    2026-09-01 拿掉）
+    ------------------------------------------------------------------
+    那一族的理由是「那個詞講的就是一個畫得出來的形狀」（``beside_vertical``、
+    CD 的一條線／一團東西）—— 圖給完了，字是多的。而使用者看了整個設定區之後
+    的判斷相反：「**我認為設定區都要變成這樣 icon 膠囊 + 文字，並且視覺模型
+    可能要接近會比較好**」。同一個面板上兩種長相，使用者要學兩次；
+    **圖是掃視時的錨點，字才是意思**。所以現在只有這一種。
+
+    值的格式跟 ``choice`` **一字不差**（就是那個字），所以 recipe JSON 沒有變。
+    """
+
+    changed = Signal(str)
+
+    def __init__(self, choices: Sequence[str], icons: Sequence[str],
+                 value: str = "", helps: Optional[Dict[str, str]] = None,
+                 parent: Optional[QWidget] = None,
+                 labels: Optional[Dict[str, str]] = None):
+        super().__init__(parent)
+        helps = dict(helps or {})
+        labels = dict(labels or {})
+        colour = theme.group_hex("measure")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self._flow = _ChipFlow(self)
+        lay.addWidget(self._flow)
+
+        self._chips: List[_ChoiceChip] = []
+        self._value = str(value or "")
+        for name, icon in zip([str(c) for c in choices],
+                              [str(i) for i in icons]):
+            c = _ChoiceChip(name, icon, colour, name == self._value,
+                            self._flow, tip=helps.get(name) or "",
+                            label=labels.get(name) or "")
+            c.toggled.connect(self._on_toggled)
+            self._flow.add(c)
+            self._chips.append(c)
+
+    # -- ParamForm 那一側看到的介面（跟其他編輯器一樣是 text/set_text）------
+    def text(self) -> str:
+        return self._value
+
+    def set_text(self, value: str) -> None:
+        # 認不得的值（手寫 recipe）**不要偷偷改掉**：一顆都不亮，比亮錯一顆
+        # 誠實（這一條是從 `IconChoice` 帶過來的，那個 widget 已經不在了）。
+        self._value = str(value or "")
+        for c in self._chips:
+            c.set_checked(c.mid == self._value)
+
+    def chip(self, value: str) -> Optional[_ChoiceChip]:
+        """某一顆膠囊（測試點它用）。"""
+        for c in self._chips:
+            if c.mid == str(value):
+                return c
+        return None
+
+    def _on_toggled(self, mid: str, on: bool) -> None:
+        """**恆有一顆選著**：再點選中的那一顆不會把它關掉。
+
+        取消最後一顆等於留下一個空值，而空值在 ``validate_params`` 會被換回
+        預設 —— 看起來像「我點了但沒有反應」（同 :class:`MetricPick`）。
+        """
+        if not on:
+            got = self.chip(mid)
+            if got is not None:
+                got.set_checked(True)
+            return
+        self.set_text(mid)
+        self.changed.emit(self._value)
+
+
 class ChannelMapField(QWidget):
     """``channel_map`` 參數的編輯器：一張「第幾張圖 → 叫什麼」的小表（F11 Input-1）。
 
@@ -3615,67 +3872,61 @@ class TemplateField(QWidget):
                 % (w, h, len(self._value) / 1024.0))
 
 
-class IconChoice(QWidget):
-    """``icon_choice`` 參數的編輯器：一排圖示鈕，選中的那顆亮著（F11 Region-2）。
+def glyph_icon(name: str, size: int = 16, color: str = "") -> QIcon:
+    """自繪圖示 → 一個 `QIcon`（給 `QComboBox` 的每一項用，2026-09-01）。
 
-    為什麼不是下拉選單
-    ------------------
-    使用者的話：「我不希望 profile 設定頁面那麼多**文字**，能用圖就用圖。」
-    而 ``place`` 的五個值（``crossing`` / ``beside_vertical`` /
-    ``between_horizontal`` …）講的是**五個畫得出來的形狀** —— 下拉選單要求
-    使用者先把那個英文詞翻譯成一張圖，再選；一排小圖是直接把那張圖給他。
+    為什麼下拉的項目要圖而不是換成一排膠囊（使用者：「ADC 的設定頁面是不是也
+    加入一些 icon 會比較好」）：判定樹那一列是 ``[數字 ▾][運算子 ▾][值]``，
+    而那一欄的寬度是使用者拖的（實測預設 437 px）。六顆比較運算子的膠囊擠不
+    進去 —— 但**收起來的下拉照樣看得到現在選的那一顆的圖**，這是下拉唯一比
+    膠囊強的地方。
 
-    每顆鈕的**名字**退到 tooltip：說明還在，只是不佔畫面（同模板編輯器那一列
-    工具鈕的做法）。
+    顏色預設吃主題的主要文字色；面板重建時會重畫，所以換主題跟得上。
     """
+    px = QPixmap(int(size), int(size))
+    px.fill(Qt.transparent)
+    p = QPainter(px)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    try:
+        draw_glyph_icon(p, str(name), float(size),
+                        str(color or TOKENS["text_primary"]))
+    finally:
+        p.end()
+    return QIcon(px)
 
-    changed = Signal(str)
 
-    def __init__(self, choices: Sequence[str], icons: Sequence[str],
-                 value: str = "", helps: Optional[Dict[str, str]] = None,
-                 parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(3)
+def region_dot_icon(index: int, size: int = 12) -> QIcon:
+    """第 ``index`` 個具名區域的**顏色點**（下拉的每一項前面那一顆）。
 
-        self._buttons: Dict[str, IconButton] = {}
-        helps = dict(helps or {})
-        for name, icon in zip(list(choices), list(icons)):
-            name, icon = str(name), str(icon)
-            b = IconButton(icon, helps.get(name) or _spell(name), self,
-                           kind="ghost")
-            b.setCheckable(True)
-            b.setProperty("shape", "tool")
-            b.clicked.connect(lambda _c=False, n=name: self._pick(n))
-            row.addWidget(b)
-            self._buttons[name] = b
-        row.addStretch(1)
-
-        self._value = ""
-        self.set_text(value)
-
-    def text(self) -> str:
-        return self._value
-
-    def set_text(self, value: str) -> None:
-        v = str(value or "")
-        # 認不得的值（手寫 recipe）**不要偷偷改掉** —— 一顆都不亮，比亮錯一顆
-        # 誠實（使用者至少看得出這裡有問題）。
-        self._value = v
-        for name, b in self._buttons.items():
-            b.setChecked(name == v)
-            b.setProperty("active", "true" if name == v else "false")
-            restyle(b)
-
-    def _pick(self, name: str) -> None:
-        self.set_text(name)
-        self.changed.emit(name)
+    同一個顏色在三個畫面上講同一件事：影像上那個框、Feature 表名字的上標、
+    判定段下拉的這一點。各自從自己那邊挑顏色的話，同一塊區域在三個地方是三
+    個顏色 —— 而顏色指錯區域比沒有顏色糟得多（`_util.CURRENT_REGION_INDEX`
+    的註解寫過同一句）。
+    """
+    px = QPixmap(int(size), int(size))
+    px.fill(Qt.transparent)
+    p = QPainter(px)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(region_hex(int(index))))
+    r = size * 0.34
+    p.drawEllipse(QPointF(size / 2.0, size / 2.0), r, r)
+    p.end()
+    return QIcon(px)
 
 
 def _spell(value: str) -> str:
-    """``beside_vertical`` → ``Beside vertical``（沒有 help 時的備援名字）。"""
-    return str(value).replace("_", " ").strip().capitalize()
+    """``beside_vertical`` → ``Beside vertical``（沒有指定顯示名時的拼法）。
+
+    ⚠ **只動第一個字母**，不要用 ``str.capitalize()`` —— 它會把**其餘的字全部
+    轉小寫**，於是 ``a cell I mark myself`` 在畫面上變成「a cell **i** mark
+    myself」。那是使用者自己寫的一句話，被一支拼字函式改掉了。
+
+    拼不對的那幾個（``zscore`` / ``nlm`` / ``topn``…）走 `ParamSpec.choice_labels`
+    —— 那張表**只放例外**，不是把整排值再抄一份。
+    """
+    text = str(value).replace("_", " ").strip()
+    return text[:1].upper() + text[1:]
 
 
 class CellRoisField(QWidget):
@@ -3775,6 +4026,12 @@ class ParamForm(QWidget):
     #: 「這個參數的值要用別的方式產生」（目前只有 template）。表單不知道那是
     #: 什麼對話框 —— 它只負責把請求送上去，由 Studio 決定要開什麼。
     action_requested = Signal(str)
+    #: 使用者在一格接線插槽上挑了一個上游的區域／影像流：``(參數名, 名字)``。
+    #: **這裡不改任何東西** —— `StudioWindow` 接到之後走跟畫布拉線同一條路
+    #: （F68；線仍然是唯一的儲存）。
+    wire_requested = Signal(str, str)
+    #: 「在畫布上指給我看」：``(參數名,)``。
+    wire_show_requested = Signal(str)
     #: **入口卡的「資料從哪來」**（F14-1）：按下去要開檔案對話框。
     #: 同樣地，表單不知道那是哪一種來源 —— 它送出去，Studio 決定開什麼。
     source_requested = Signal()
@@ -3810,6 +4067,8 @@ class ParamForm(QWidget):
         self._dynamic: Dict[str, List[str]] = {}
         #: 上游定義了哪些具名區域（F11 Region-1）。
         self._regions: List[str] = []
+        #: 插槽選單的內容（F68）：``{"region": [...], "image": [...]}``。
+        self._wiring: Dict[str, List[str]] = {}
         self._describe: Optional[Dict[str, Any]] = None
         self._building = False
         #: 進階參數收起來了嗎（**追明確狀態**，不問 widget —— docs/PITFALLS.md）。
@@ -3858,14 +4117,20 @@ class ParamForm(QWidget):
         self._intent_row = QWidget(self)
         self._intent_row.setObjectName("intentRow")
         irow = QVBoxLayout(self._intent_row)
-        irow.setContentsMargins(2, 0, 8, 4)
+        # 上緣留白：卡片那句說明的下緣與這一排的標題（14px/700）之間原本只有
+        # 版面的 8px，兩行字擠在一起（F68 截圖上看得到）。
+        irow.setContentsMargins(2, 6, 8, 4)
         irow.setSpacing(2)
         self._intent_title = QLabel("", self._intent_row)
         self._intent_title.setObjectName("paramTitle")
         irow.addWidget(self._intent_title)
         btns = QHBoxLayout()
         btns.setSpacing(6)
-        self._intent_btns: Dict[str, QPushButton] = {}
+        # 最後那一格彈簧**建一次就好**：膠囊靠左排（跟設定區每一排一樣），
+        # 沒有它的話 QHBoxLayout 會把多出來的寬度攤在膠囊之間 —— 三顆固定寬度
+        # 的東西被推得老遠，看起來不像同一排。
+        btns.addStretch(1)
+        self._intent_btns: Dict[str, "_ChoiceChip"] = {}
         self._intent_btn_row = btns
         irow.addLayout(btns)
         self._intent_note = QLabel("", self._intent_row)
@@ -3929,30 +4194,47 @@ class ParamForm(QWidget):
                        enabled: bool = True) -> None:
         """卡最上面的「我要量什麼」三選（PR-2 2a）。``title=""`` = 沒有這排。
 
-        ``options`` 是 ``(id, 顯示字, 一句話)``；``current_id`` 對不上任何
-        id（例 ``"custom"``）就一顆都不勾 —— **不強制改**，自訂是一個合法
-        的狀態。``enabled=False``（roi 還沒接線）時鈕全部灰掉，note 講原因。
+        ``options`` 是 ``(id, 顯示字, 一句話, 圖示名)``；``current_id`` 對不上
+        任何 id（例 ``"custom"``）就一顆都不勾 —— **不強制改**，自訂是一個合法
+        的狀態。``enabled=False``（roi 還沒接線）時整排灰掉，note 講原因。
+
+        **長相跟設定區的膠囊一模一樣**（F68 第三輪，使用者：「最上方的
+        What do I want to measure 也是」）。它問的是同一種問題（幾個答案挑
+        一個），長成另一種東西只會讓人以為那是別的機制 —— 而它其實正是底下
+        那幾格的捷徑：三顆膠囊的圖就是它們會設成的那幾格的圖。
         """
         title = str(title or "")
-        # 重建鈕（選項是呼叫端給的，張數可能變）。
+        # 重建（選項是呼叫端給的，張數可能變）。
+        #
+        # ⚠ **`deleteLater()` 不夠，要先 `setParent(None)`。** 延遲刪除要等
+        # 事件圈的 DeferredDelete 那一趟，而在那之前那幾顆**還在畫面上**，
+        # 停在上一次版面給它們的位置 —— 這一排是有 stretch 的，面板一換寬度
+        # 位置就變，於是舊的那幾顆變成疊在標題與新膠囊上的鬼影
+        # （F68 第三輪 render 出來才看到；以前是 QPushButton 時同一個 bug，
+        # 只是每次寬度都一樣所以完美重疊，看不出來）。
         for btn in self._intent_btns.values():
             self._intent_btn_row.removeWidget(btn)
+            btn.setParent(None)
             btn.deleteLater()
         self._intent_btns = {}
         self._intent_title.setText(title)
+        colour = theme.group_hex("measure")
         if title:
-            for iid, label, help_line in options:
-                btn = QPushButton(str(label), self._intent_row)
-                btn.setObjectName("intentChoice")
-                btn.setCheckable(True)
-                btn.setCursor(Qt.PointingHandCursor)
-                btn.setToolTip(str(help_line))
-                btn.setChecked(str(iid) == str(current_id))
-                btn.setEnabled(bool(enabled))
-                btn.clicked.connect(
-                    lambda _=False, i=str(iid): self.intent_chosen.emit(i))
-                self._intent_btn_row.addWidget(btn)
-                self._intent_btns[str(iid)] = btn
+            for iid, label, help_line, icon in options:
+                chip = _ChoiceChip(str(iid), str(icon), colour,
+                                   str(iid) == str(current_id),
+                                   self._intent_row, tip=str(help_line),
+                                   label=str(label))
+                chip.momentary = True          # 見 `_ChipBase.momentary`
+                chip.setEnabled(bool(enabled))
+                # **不是 toggle**：這一排是 preset，按下去等於「照這個意思
+                # 把線接好」，而**再按一次不該把它取消**（取消要回到哪個狀態？
+                # 沒有答案）。所以只接「按了」，勾不勾由 `current_id` 決定。
+                chip.toggled.connect(
+                    lambda _v, _on, i=str(iid): self.intent_chosen.emit(i))
+                self._intent_btn_row.insertWidget(len(self._intent_btns),
+                                                  chip)   # 彈簧留在最後
+                self._intent_btns[str(iid)] = chip
         self._intent_note.setText(str(note or ""))
         self._intent_note.setVisible(bool(note))
         self._intent_shown = bool(title)
@@ -3961,8 +4243,8 @@ class ParamForm(QWidget):
     def has_intent_row(self) -> bool:
         return bool(getattr(self, "_intent_shown", False))
 
-    def intent_buttons(self) -> Dict[str, QPushButton]:
-        """測試 API：id → 鈕。"""
+    def intent_buttons(self) -> Dict[str, "_ChoiceChip"]:
+        """測試 API：id → 那一顆膠囊。"""
         return dict(self._intent_btns)
 
     def source_button(self) -> QPushButton:
@@ -4320,6 +4602,52 @@ class ParamForm(QWidget):
         "source_columns": "Open the second lot to see its KLARF columns.",
     }
 
+    def _wiring_slot(self, name: str, spec: Dict[str, Any],
+                     value: Any) -> QWidget:
+        """一格接線（F68）—— 見 `d4t/ui/wiring_slot.py`。
+
+        「非接不可」看的是 `ParamSpec.required_input` 的同一個判準（預設值指得
+        出一條流的就是主要輸入）—— 這裡拿 describe 過的 dict，所以自己算一次
+        同一句話：**有預設值的影像輸入**才是紅字的那一種。
+        """
+        from .wiring_slot import IMAGE, REGION, WiringSlot
+
+        ptype = str(spec.get("type", ""))
+        kind = REGION if ptype in ("region_key", "region_keys") else IMAGE
+        required = (kind == IMAGE
+                    and bool(str(spec.get("default", "") or "").strip()))
+        w = WiringSlot(kind, "" if value is None else str(value),
+                       is_reference=str(spec.get("role", "")) == "reference",
+                       required=required)
+        w.set_choices(self._wiring_choices(kind))
+        w.wire_requested.connect(
+            lambda picked, n=name: self.wire_requested.emit(n, picked))
+        w.show_requested.connect(
+            lambda n=name: self.wire_show_requested.emit(n))
+        return w
+
+    def _wiring_choices(self, kind: str) -> List[str]:
+        """插槽選單裡有哪些（Studio 用 :meth:`set_wiring_choices` 餵）。"""
+        return list(self._wiring.get(str(kind), ()))
+
+    def set_wiring_choices(self, regions: Sequence[str] = (),
+                           streams: Sequence[str] = ()) -> None:
+        """告訴表單「**到這張卡為止**上游產得出哪些區域／影像流」（F68）。
+
+        跟 `set_dynamic_choices` 一樣，這是**執行期才知道**的東西，所以由
+        Studio 餵；差別是它不必等使用者打字，換一張卡就算一次。
+        """
+        from .wiring_slot import IMAGE, REGION
+
+        self._wiring = {REGION: [str(r) for r in regions],
+                        IMAGE: [str(x) for x in streams]}
+        for row in self._rows.values():
+            w = row.editor
+            if hasattr(w, "set_choices") and hasattr(w, "wire_requested"):
+                ptype = str(row.spec.get("type", ""))
+                w.set_choices(self._wiring[
+                    REGION if ptype in ("region_key", "region_keys") else IMAGE])
+
     def _runtime_choices(self, spec: Dict[str, Any]) -> Optional[List[str]]:
         """這一格的選項是**執行期來的**嗎（F15-2）。不是就回 None。
 
@@ -4442,10 +4770,10 @@ class ParamForm(QWidget):
 
         if ptype == "float":
             w = QDoubleSpinBox()
-            w.setDecimals(3)
+            span = None if (lo is None or hi is None) else float(hi) - float(lo)
+            w.setDecimals(_float_decimals(lo, span, value))
             w.setRange(float(lo) if lo is not None else -1e9,
                        float(hi) if hi is not None else 1e9)
-            span = None if (lo is None or hi is None) else float(hi) - float(lo)
             w.setSingleStep(0.01 if (span is not None and span <= 2.0) else 0.1)
             if unit:
                 w.setSuffix(" " + unit)
@@ -4460,6 +4788,12 @@ class ParamForm(QWidget):
             return w
 
         if ptype == "choice":
+            # ⚠ **現在沒有任何一張卡走這一支**（F68 第二輪把每一格選項都換成
+            # `chip_choice`，使用者：「設定區都要變成這樣 icon 膠囊 + 文字」）。
+            # 型別留著，因為「這一排的選項畫不出圖」是有可能的 —— 那時候硬畫
+            # 一張圖是裝飾，而裝飾會讓使用者以為那裡有意思可以讀。
+            # 真的要用的人會先撞到 `test_no_card_anywhere_still_shows_a_bare_dropdown`，
+            # 那正是停下來想一下的地方。
             w = QComboBox()
             choices = [str(c) for c in (spec.get("choices") or [])]
             w.addItems(choices)
@@ -4480,8 +4814,10 @@ class ParamForm(QWidget):
             # F9-6：**來源只在畫布上決定**（使用者定調）。以前這裡是一排勾選框，
             # 於是同一件事有兩個入口 —— 拉線會改它、勾選框也會改它 —— 而畫布上
             # 那條線與這裡的勾選很容易對不起來（使用者的原話是「他會很亂連」）。
-            # 現在這一格只**顯示**目前接進來的是哪幾條，改要回畫布上拉線。
-            return _wiring_display("" if value is None else str(value))
+            # F68：那一格從「假的輸入框」變成**插槽**——同一顆埠的形狀、
+            # 沒接線時講後果、而且可以直接挑一個上游的流（挑了之後由 Studio
+            # 走跟拉線同一條路，線仍然是唯一的儲存）。
+            return self._wiring_slot(name, spec, value)
 
         if ptype in ("region_key", "region_keys"):
             # F12：**區域的來源也只在畫布上決定**，跟影像流一模一樣。
@@ -4493,7 +4829,8 @@ class ParamForm(QWidget):
             #
             # 現在區域在畫布上是一顆菱形埠 + 一條虛線，這一格只顯示接的是什麼。
             # 理由與 F9-6 對 image_keys 做的事逐字相同（「他會很亂連」）。
-            return _wiring_display("" if value is None else str(value))
+            # F68：改成插槽（見上面那一格的說明）。
+            return self._wiring_slot(name, spec, value)
 
         if ptype == "multi_choice":
             choices = (runtime if runtime is not None
@@ -4529,11 +4866,14 @@ class ParamForm(QWidget):
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 
-        if ptype == "icon_choice":
-            w = IconChoice([str(c) for c in (spec.get("choices") or [])],
-                           [str(i) for i in (spec.get("icons") or [])],
-                           "" if value is None else str(value),
-                           spec.get("choice_help") or {})
+        if ptype == "chip_choice":
+            # `choice` 的第二種長相（F68 第二輪）—— **值的格式一字不差**，
+            # 換掉的只有長相（同 metric_chips 對 multi_choice 做的事）。
+            w = ChoiceChips([str(c) for c in (spec.get("choices") or [])],
+                            [str(i) for i in (spec.get("icons") or [])],
+                            "" if value is None else str(value),
+                            spec.get("choice_help") or {},
+                            labels=spec.get("choice_labels") or {})
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 
@@ -4551,6 +4891,7 @@ class ParamForm(QWidget):
             return w
 
         if ptype == "image_key" and spec.get("direction") != "out":
+            # F68：同上（單一角色的影像埠，例如「Ref image」）。
             # 同上（F9-6）：來源是接線的結果，不是這裡填的。
             #
             # ⚠ **只有輸入是唯讀的**（F10-7）。`write result to`（`out`）型別
@@ -4558,7 +4899,7 @@ class ParamForm(QWidget):
             # 使用者自己取的名字，不是接線的結果，唯讀等於「不給改」。
             # F9-6 那時候還沒有 `direction`，所以只能連輸出一起鎖住；使用者
             # 回報「Write result to 沒辦法改名（不給輸入）」就是這個。
-            return _wiring_display("" if value is None else str(value))
+            return self._wiring_slot(name, spec, value)
 
         w = QLineEdit()
         w.setText("" if value is None else str(value))
@@ -4569,7 +4910,39 @@ class ParamForm(QWidget):
 # --------------------------------------------------------------------------- #
 # 2b. CurveEditor —— 自己拉的色調曲線（F7-8）
 # --------------------------------------------------------------------------- #
-def _wiring_display(text: str) -> QWidget:
+def _float_decimals(lo: Any, span: Optional[float], value: Any) -> int:
+    """一個浮點欄位要顯示幾位小數（F68）。
+
+    以前一律 3 位，於是「超過幾 σ」印成 ``0.000 σ``、「靠邊幾 px」印成
+    ``0.000 px`` —— 三位小數在那些欄位上不是精度，是雜訊（而且讓人以為
+    那一格需要那麼細）。
+
+    規矩跟**已經存在的** step 一樣看範圍（`setSingleStep` 那一行）：
+
+    * 下界是一個**小於 1 的正數** → 3 位。那種欄位本來就在細部
+      （``nm_per_px`` 的 0.01、``gamma`` 的 0.1），砍掉小數位會讓它填不進去。
+    * 範圍 ≤ 2 → 3 位（``min_score`` 的 −1…1 那種）。
+    * 其餘 → 1 位（px、%、σ、灰階）。
+
+    ⚠ **但顯示不准比 recipe 裡的值粗**：手寫 recipe 填了 ``2.55`` 的話，
+    位數要夠寫得出它 —— 不然畫面上是 ``2.6``，而那是一個安靜的謊
+    （QDoubleSpinBox 會把值捨進它的位數）。
+    """
+    if lo is not None and 0.0 < abs(float(lo)) < 1.0:
+        want = 3
+    elif span is not None and span <= 2.0:
+        want = 3
+    else:
+        want = 1
+    try:
+        text = ("%.6f" % float(value)).rstrip("0")
+        have = len(text.split(".")[1]) if "." in text else 0
+    except (TypeError, ValueError):
+        have = 0
+    return max(want, min(have, 6))
+
+
+def _wiring_display(text: str) -> QWidget:      # pragma: no cover - F68 之後沒人叫
     """「這條流從哪來」的**唯讀**顯示（F9-6）。
 
     為什麼是唯讀：來源改成**只在畫布上決定**。以前參數表單也能改，於是同一件事
@@ -6138,7 +6511,27 @@ def feature_gloss(name: str, about: Optional[Dict[str, str]] = None,
         if body == "—":
             body = metric_face(mid)[1]
         return FEATURE_ABSOLUTE, body
-    return "", ""
+    # 其餘的一句話**由卡片自己說**（`Step.FEATURE_HELP`，2026-09-01）。
+    # 在這裡補一張表是最快的做法，也是最錯的：那句話會跟卡片本人的說明漂開，
+    # 而漂開的時候畫面上看起來完全正常（`CLAUDE.md` §0）。
+    said = _card_says(spec)
+    return (FEATURE_ABSOLUTE, said) if said else ("", "")
+
+
+def _card_says(spec: Any) -> str:
+    """``spec`` 的那張卡怎麼形容這個數字（查不到就空字串）。"""
+    try:
+        from ..core.pipeline import get_step
+
+        table = get_step(str(getattr(spec, "card", "") or "")).feature_help()
+    except Exception:                      # noqa: BLE001 — 顯示用，不能擋畫面
+        return ""
+    for key in (getattr(spec, "base", ""), getattr(spec, "metric", ""),
+                getattr(spec, "name", "")):
+        got = str(table.get(str(key or ""), "") or "")
+        if got:
+            return got
+    return ""
 
 
 #: 這幾個不是統計量，`metric_formula` 答不出來 —— 而它們每一顆都在。

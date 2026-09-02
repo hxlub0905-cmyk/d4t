@@ -95,7 +95,11 @@ class NormalizeStep(MultiStreamStep):
     params = [
         streams_spec("test"),
         ParamSpec(
-            name="method", type="choice", default="percentile", choices=list(METHODS),
+            name="method", type="chip_choice", default="percentile",
+            choices=list(METHODS),
+            icons=["norm_percentile", "norm_zscore", "norm_band", "norm_match",
+                   "norm_local"],
+            choice_labels={"zscore": "Z-score", "glv_band": "GLV band"},
             label="How to rescale",
             help=("percentile = stretch the P-low to P-high range of the whole "
                   "image to 0-255 (the usual choice); zscore = put the average "
@@ -170,8 +174,9 @@ class NormalizeStep(MultiStreamStep):
                   help=("Brightness reference stream (never modified). If this "
                         "stream is also in the list above it is left alone - "
                         "matching it to itself would do nothing.")),
-        ParamSpec(name="match_method", type="choice", default="linear",
+        ParamSpec(name="match_method", type="chip_choice", default="linear",
                   choices=["exact", "linear", "percentile"],
+                  icons=["hist_exact", "hist_linear", "hist_pct"],
                   label="Matching", show_when=("method", ("match",)),
                   help=("linear = align mean and standard deviation (most "
                         "natural); exact = make the histograms identical; "

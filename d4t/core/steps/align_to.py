@@ -125,6 +125,16 @@ class AlignToStep(Step):
     features_out = ["ncc_score", "align_peak_ratio",
                     "align_off_x_px", "align_off_y_px",
                     "align_ok", "align_dx_px", "align_dy_px", "align_scale"]
+    FEATURE_HELP = {
+        "ncc_score": "how well the small image matched, -1 to 1",
+        "align_peak_ratio": "best match over the runner-up (near 1 = not sure)",
+        "align_off_x_px": "where it landed inside the big image, px",
+        "align_off_y_px": "where it landed inside the big image, px",
+        "align_ok": "1 when the match was good enough to use",
+        "align_dx_px": "how far it moved, px (left/right)",
+        "align_dy_px": "how far it moved, px (up/down)",
+        "align_scale": "size ratio between the two images",
+    }
 
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:

@@ -421,8 +421,10 @@ def picture_specs() -> List[ParamSpec]:
     """圖的格式與品質（見 :data:`PIC_FORMATS`）。"""
     return [
         ParamSpec(
-            name="picture_format", type="choice", default=PIC_JPEG,
-            choices=list(PIC_FORMATS), label="Picture files",
+            name="picture_format", type="chip_choice", default=PIC_JPEG,
+            choices=list(PIC_FORMATS), icons=["fmt_jpeg", "fmt_png"],
+            choice_labels={PIC_JPEG: "JPEG", PIC_PNG: "PNG"},
+            label="Picture files",
             show_when=("contents", (CONTENT_PICTURES,)),
             choice_help={
                 PIC_JPEG: "Smaller files. Right for a report you send to "
@@ -476,8 +478,10 @@ def roi_draw_specs() -> List[ParamSpec]:
     """
     return [
         ParamSpec(
-            name="draw_boxes", type="choice", default=overlay.DRAW_ALL,
-            choices=list(overlay.DRAW_MODES), label="Draw the other boxes",
+            name="draw_boxes", type="chip_choice", default=overlay.DRAW_ALL,
+            choices=list(overlay.DRAW_MODES),
+            icons=["drawn_all", "drawn_none", "drawn_near"],
+            label="Draw the other boxes",
             help=("When a GLV card compared the region box by box, each "
                   "picture gets the winning box drawn thick - and this "
                   "decides what happens to all the other boxes. all shows "
@@ -990,8 +994,10 @@ class OutputKlarfStep(_OutputStep):
             "file holding just the highest scoring defects.")
     params = [
         ParamSpec(
-            name="mode", type="choice", default="annotate",
+            name="mode", type="chip_choice", default="annotate",
             choices=list(klarf_out.MODES),
+            icons=["klarf_inplace", "klarf_annotate", "klarf_topn"],
+            choice_labels={"inplace": "In place", "topn": "Top N"},
             label="How to write it",
             help=("annotate = a new file with ADCSCORE and ADCCLASS added "
                   "(the original is untouched - start here). inplace = edit "

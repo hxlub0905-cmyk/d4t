@@ -33,8 +33,11 @@ class AlignStep(Step):
                   help="Image stream to be moved into alignment (usually ref)."),
         ParamSpec(name="fixed", type="image_key", direction="in", default="test",
                   help="Reference stream that stays put (usually test)."),
-        ParamSpec(name="method", type="choice", default="phase",
+        ParamSpec(name="method", type="chip_choice", default="phase",
                   choices=["phase", "hybrid", "ncc", "ecc", "template"],
+                  icons=["al_phase", "al_hybrid", "al_ncc", "al_ecc",
+                         "al_template"],
+                  choice_labels={"ncc": "NCC", "ecc": "ECC"},
                   help=("Alignment backend: phase = fast and robust (default); "
                         "ncc = exhaustive correlation; ecc = iterative refinement; "
                         "template = central template match; hybrid behaves like phase.")),
@@ -48,6 +51,11 @@ class AlignStep(Step):
     reads = ["test", "ref"]
     writes = ["ref_aligned"]
     features_out = ["align_dx", "align_dy", "align_score"]
+    FEATURE_HELP = {
+        "align_dx": "how far it moved, px (left/right)",
+        "align_dy": "how far it moved, px (up/down)",
+        "align_score": "how sure the match was, 0 to 1",
+    }
 
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:

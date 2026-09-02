@@ -107,10 +107,7 @@ def test_a_role_port_replaces_instead_of_accumulating(window):
     影像那邊同一條規矩由 `_drop_conflicting_edges` 執行；區域這邊更簡單 ——
     同一格上的舊線全部讓位，所以那一格只放得下一個名字這件事是**結構性**的。
     """
-    from d4t.core.steps.glv_stats import REF_REGION
-
     _src, gds, glv = _gds(window)
-    window.model.set_param(glv, "reference", REF_REGION)
     window._on_edge_added(gds, glv, "epi", "reference_region")
     window._on_edge_added(gds, glv, "mg", "reference_region")
 
@@ -327,34 +324,63 @@ def test_the_region_edge_orders_the_route_after_a_round_trip(window):
 # --------------------------------------------------------------------------- #
 # 7. 兩件工作單點名、而答案是「本來就對」的事
 # --------------------------------------------------------------------------- #
-def test_the_other_regions_needs_no_port_of_its_own(window):
-    """``reference="the other regions"`` **沒有**自己的那一格，所以沒有埠。
+def test_comparing_against_the_other_boxes_is_a_second_line(window):
+    """「跟其餘那些比」F67 起就是把 ``epi_others`` 接進參照那顆埠。
 
-    ``epi_others`` 是從 ``roi`` 算出來的（`glv_stats.resolve_regions_in`
-    的「derive，不存第二份」），而它跟 ``epi`` 出自**同一張 Region 卡**
-    （`_util.region_family` 一次吐三個名字）—— 所以接進 ``roi`` 的那條線
-    已經指著定義它的那張卡了。
+    以前它是 ``reference="the other regions"``：**沒有**自己的那一格，所以
+    沒有埠 —— ``epi_others`` 從 ``roi`` 算出來，而它跟 ``epi`` 出自同一張
+    Region 卡（`_util.region_family` 一次吐三個名字），所以接進 ``roi`` 的
+    那條線「已經指著定義它的那張卡了」。
 
-    這一條記下來是因為它是「要不要補第二條線」的答案：**不必**，
-    而且補不出來 —— 一條線的 ``dst_in`` 是參數名，而那個依賴沒有參數。
+    那句話對**引擎**是對的，對**使用者**不是：畫面上兩張卡之間只有一條線，
+    而那條線講不出「這張卡在跟其餘那些比」。同一件事因此有兩種寫法（一種看
+    得見、一種看不見），而 F44 教使用者的是看得見那一種。F67 收成一種。
     """
-    from d4t.core.steps.glv_stats import REF_OTHERS
     from d4t.core.pipeline import get_step
 
     _src, gds, glv = _gds(window, layers="1:epi")
     window._on_edge_added(gds, glv, "epi", "roi")
-    window.model.set_param(glv, "reference", REF_OTHERS)
+    window._on_edge_added(gds, glv, "epi_others", "reference_region")
 
     cls = get_step("glv_stats")
     params = window.model.nodes[glv].params
     assert "epi_others" in cls.resolve_regions_in(params)
-    # 它不是一格參數，所以沒有埠可以接。
-    assert "epi_others" not in [
-        str(params.get(sp.name, "") or "") for sp in cls.region_input_specs()]
-    # 而唯一那條線指的正是定義整個家族的那張卡 —— 健檢因此沉默。
+    assert params["reference_region"] == "epi_others"
+    # 兩條線，同一張 Region 卡 —— 而**兩條都畫得出來**（那是重點）。
     assert _region_edges(window.model) == [
-        Edge(src=gds, dst=glv, src_out="epi", dst_in="roi")]
+        Edge(src=gds, dst=glv, src_out="epi", dst_in="roi"),
+        Edge(src=gds, dst=glv, src_out="epi_others", dst_in="reference_region")]
     assert "unknown-region" not in [i.code for i in window.model.validate()]
+
+
+def test_the_intent_row_says_what_the_buttons_leave_out(window):
+    """**鈕 ＋ note ＝ 這張卡真的在做的事**（F67 續）。
+
+    走的是真的那條路（選卡 → `_sync_glv_intent` → 表單那一排），因為這一條
+    要守的正是**畫面上**那行字 —— model 算得對而沒有人畫出來是同一種說謊。
+    """
+    _src, gds, glv = _gds(window, layers="1:epi, 2:mg")
+    window._on_edge_added(gds, glv, "epi", "roi")
+    window.select_node(glv)
+    form = window.param_form
+    assert form.has_intent_row()
+    assert form.intent_buttons()["region_stats"].is_checked()
+    assert window.model.glv_intent_note(glv) == "", "三顆鈕已經說完了"
+
+    # 接一條參照**流** —— 鈕不覆蓋那一軸，所以那行字要補上它
+    window.model.set_param(glv, "reference_source", "ref")
+    window.select_node(glv)
+    assert form.intent_buttons()["region_stats"].is_checked(), \
+        "跟另一張圖比是疊上去的第二個問題，不是第四種形狀"
+    assert window.model.glv_intent_note(glv) == \
+        "measuring epi, compared against epi @ ref."
+
+    # 接一條參照**區域**（不是 `_center` 那組）—— 三顆都對不上
+    window._on_edge_added(gds, glv, "mg", "reference_region")
+    window.select_node(glv)
+    assert not any(b.is_checked() for b in form.intent_buttons().values())
+    assert window.model.glv_intent_note(glv) == \
+        "custom - measuring epi, compared against mg @ ref."
 
 
 def test_a_region_line_now_moves_the_layout(window):

@@ -320,18 +320,18 @@ def test_every_measure_card_can_take_more_than_one_source(window):
             "%s.%s 還是單一來源的型別" % (cls.key, spec.name)
 
 
-def test_the_reference_ports_are_singular_and_only_show_when_asked(window):
+def test_the_reference_ports_are_singular_and_always_there(window):
     """「跟誰比」是**另一個問題**，所以它有自己的埠 —— 而那個埠是單數。
 
     單數／複數的意思跟影像流一字不差（F13-⑥）：複數的第二條線是**累加**
     （同一件事量在好幾條流／好幾塊上），單數的第二條線是**取代**。
     而「跟誰比」一次只有一個答案。
 
-    「只在說要比的時候才長出來」是 F18 這一刀的重點：主埠永遠在，使用者不必
-    先回答一個關於軟體架構的問題（舊的 `method` 一切換，整組埠就換一套）。
+    **F67 起那兩顆埠永遠在**（以前只在 `reference` 那一格說要比的時候才長
+    出來）。理由是它們現在**就是**那個問題的答案：沒接線＝不比。埠跟著一格
+    下拉出現的話，使用者得先在設定區選一個拓樸的字，才有東西可以拉線 ——
+    而那正是這一輪要拿掉的那個問題。
     """
-    from d4t.core.steps.glv_stats import REF_NONE, REF_REGION, REF_STREAM
-
     cls = get_step("glv_stats")
     # 影像埠與區域埠是兩份（圓埠 / 菱形埠），所以兩邊都要問
     ports = cls.input_specs() + cls.region_input_specs()
@@ -341,14 +341,27 @@ def test_the_reference_ports_are_singular_and_only_show_when_asked(window):
     assert specs["reference_source"].type == "image_key"
     assert specs["reference_region"].type == "region_key"
 
-    def shown(reference):
-        return [sp.name for sp in ports if sp.visible_for({"reference": reference})]
+    for params in ({}, {"reference_region": "mg"}, {"reference_source": "ref"}):
+        assert [sp.name for sp in ports if sp.visible_for(params)] == [
+            "source", "reference_source", "roi", "reference_region"]
 
-    assert shown(REF_NONE) == ["source", "roi"], "沒說要比的時候不該有參照埠"
-    assert "reference_source" in shown(REF_STREAM)
-    assert "reference_region" not in shown(REF_STREAM)
-    assert "reference_region" in shown(REF_REGION)
-    assert "reference_source" not in shown(REF_REGION)
+    # 而**參照那兩顆是選配**：沒接線不算「這張卡還跑不起來」（`missing_inputs`
+    # 的下游語意是「所以它後面不長東西」）。
+    assert "reference_source" not in cls.missing_inputs({"source": "test"})
+
+
+def test_what_to_report_appears_only_once_something_is_wired(window):
+    """跟著埠走的是**下面那兩列**，不是埠本身（F67）。
+
+    「Compare their / Report」問的是「有沒有在比」—— 兩顆埠隨便哪一顆接了線
+    都算，所以它們吃的是 `show_when` 的 or ＋ `ANY_VALUE`（`step.param_visible`）。
+    """
+    rows = {sp.name: sp for sp in get_step("glv_stats").params}
+    for name in ("stat", "compare_metrics"):
+        assert not rows[name].visible_for({"reference_region": "",
+                                           "reference_source": ""})
+        assert rows[name].visible_for({"reference_region": "mg"})
+        assert rows[name].visible_for({"reference_source": "ref"})
 
 
 # --------------------------------------------------------------------------- #
@@ -534,13 +547,19 @@ def test_renaming_a_stream_on_a_multi_source_card_only_touches_that_one(window):
 # 7. 輸出流的名字是使用者的（F10-7）
 # --------------------------------------------------------------------------- #
 def test_the_result_stream_name_is_editable_but_the_sources_are_not(window):
-    """`write result to` 要打得進去；`a` / `b` 這種**來源**維持唯讀。
+    """`write result to` 要打得進去；`a` / `b` 這種**來源**不是文字框。
 
     使用者回報：「Write result to 沒辦法改名（不給輸入）。」病根是 F9-6 那條
     「來源只在畫布上決定」的規則按**型別**（image_key）套，而輸出名的型別
     一模一樣 —— 那時候還沒有 `direction`，只能連輸出一起鎖住。
+
+    F68 之後來源那幾格是**插槽**（挑得動，但挑了是發訊號給 Studio 去動線，
+    線仍然是唯一的儲存）；輸出名仍然是一個真的文字框，因為那是使用者自己
+    取的名字，不是接線的結果。
     """
     from PySide6.QtWidgets import QLineEdit
+
+    from d4t.ui.wiring_slot import WiringSlot
 
     src = first_source(window)
     sub = window.add_card_after(src, "subtract")
@@ -550,8 +569,9 @@ def test_the_result_stream_name_is_editable_but_the_sources_are_not(window):
 
     for name in ("a", "b"):
         ed = window.param_form.editor(name)
-        assert isinstance(ed, QLineEdit) and ed.isReadOnly(), \
-            "%s 是來源，應該只在畫布上決定" % name
+        assert isinstance(ed, WiringSlot), \
+            "%s 是來源，不該是一個打得進去的文字框" % name
+        assert not isinstance(ed, QLineEdit)
     out = window.param_form.editor("out")
     assert isinstance(out, QLineEdit) and not out.isReadOnly(), \
         "輸出流的名字是使用者自己取的，不該唯讀"
@@ -594,3 +614,81 @@ def test_a_cleared_input_is_never_reported_as_a_stream(window):
         reads = [r for r in cls.resolve_reads(cleared) if str(r).strip()]
         assert reads == [], \
             "%s：輸入都清空了，卻還宣告讀 %s" % (cls.key, reads)
+
+
+# --------------------------------------------------------------------------- #
+# 4. 畫布動了，設定欄就要跟著（2026-09-01）
+#
+# 使用者：「在 canvas 上把線切斷時，理論上設定頁也要同步取消（他們是同步的）；
+# 同理，在 canvas 上把線連接時，也要同步設定。」
+#
+# 這是 F9／F10「畫布不能說謊」的**鏡像**：線是唯一的儲存，設定欄那一格只是它
+# 的另一個長相 —— 兩邊講的必須是同一件事。
+# --------------------------------------------------------------------------- #
+def _slot_values(window, names):
+    """設定欄現在**顯示**的值（不是 model 的值）。"""
+    out = {}
+    for name in names:
+        row = window.param_form._rows.get(name)
+        editor = getattr(row, "editor", None) if row is not None else None
+        out[name] = (editor.text_value()
+                     if hasattr(editor, "text_value") else None)
+    return out
+
+
+def _model_values(window, nid, names):
+    node = window.model.nodes[nid]
+    return {n: str(node.params.get(n, "") or "") for n in names}
+
+
+def test_the_settings_column_follows_every_wire_the_canvas_draws(window):
+    """接線與剪線的**四條路**，設定欄都要當場跟上。
+
+    ⚠ **中間刻意不跑 `processEvents`。** 這個 bug 在人手上是「有時候會跟上、
+    有時候不會」—— 因為四條路裡只有一條碰巧排在一次預覽前面，而預覽跑完會
+    順手重建表單。讓事件圈跑起來的話，這條測試會跟著碰巧變綠。
+    """
+    from region_cards import add_region_step
+
+    src = first_source(window)
+    roi = add_region_step(window.model, "roi_cross")
+    window.model.set_param(roi, "roi_out", "cells")
+    window._on_edge_added(src, roi, "test", "source")
+    glv = window.add_card_after(roi, "glv_stats")
+    window._refresh_pipeline()
+    window.select_node(glv)
+
+    names = ("source", "roi", "reference_source", "reference_region")
+    moves = [
+        ("connect the image", lambda: window._on_edge_added(
+            src, glv, "test", "source")),
+        ("connect the region", lambda: window._on_edge_added(
+            roi, glv, "cells", "roi")),
+        ("connect the ref image", lambda: window._on_edge_added(
+            src, glv, "ref", "reference_source")),
+        ("cut the region", lambda: window._on_edge_removed(
+            roi, glv, "cells", "roi")),
+        ("cut the ref image", lambda: window._on_edge_removed(
+            src, glv, "ref", "reference_source")),
+        ("cut the image", lambda: window._on_edge_removed(
+            src, glv, "test", "source")),
+    ]
+    for what, do in moves:
+        do()
+        shown = _slot_values(window, names)
+        real = _model_values(window, glv, names)
+        assert shown == real, (
+            "%s 之後，設定欄說 %s 而線說 %s" % (what, shown, real))
+
+
+def test_a_wire_on_another_card_does_not_rebuild_this_one(window):
+    """只有**選著的那一張**要重畫 —— 重建表單會丟掉滑桿的拖曳與游標位置。"""
+    src = first_source(window)
+    a = window.add_card_after(src, "normalize")
+    b = window.add_card_after(a, "denoise")
+    window._refresh_pipeline()
+    window.select_node(a)
+    before = window.param_form._rows.get("streams")
+    window._on_edge_added(a, b, "test", "streams")       # 動的是**別張卡**
+    assert window.param_form._rows.get("streams") is before, \
+        "別張卡的線動了，這一張的設定欄被重建了"

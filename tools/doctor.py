@@ -146,7 +146,7 @@ sys.stdout.write("D4T_DOCTOR_JSON:" + json.dumps(out) + "\n")
 #: 「引擎從頭到尾跑得完」的最小證據，而那正是這一項要回答的問題。
 _SMOKE_RECIPE = {
     "recipe_id": "doctor_smoke",
-    "version": 2,
+    "version": 3,
     "description": "doctor 內建的最小 pipeline（不是給使用者看的範例）。",
     "routes": {"ebi_patch": ["load", "sub", "glv"]},
     "nodes": {
@@ -386,7 +386,7 @@ def check_smoke(rep: Report, skip: bool = False, reason: str = "") -> None:
 #: （`AGENTS.md` §3 —— 它要在「套件還沒裝好」的機器上跑），import 不得。
 #: 兩邊漂掉的代價是這一項給出一個錯的提示，不是算錯數字；
 #: `tests/test_offline_tools.py` 會比對它們相等。
-RECIPE_VERSION = 2
+RECIPE_VERSION = 3
 
 
 def check_recipes(rep: Report, paths: Sequence[str] = ()) -> None:

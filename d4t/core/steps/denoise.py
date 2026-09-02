@@ -64,6 +64,10 @@ class DenoiseStep(MultiStreamStep):
 
     key = "denoise"
     label = "Denoise"
+    FEATURE_HELP = dict(
+        MultiStreamStep.FEATURE_HELP,
+        removed_over_noise="how many sigmas of signal this card smoothed "
+                           "away (about 1 = only noise)")
     category = CATEGORY_IMAGE
     group = GROUP_ENHANCE
     help = ("Suppress image noise so the measurements that follow are "
@@ -71,9 +75,13 @@ class DenoiseStep(MultiStreamStep):
             "flat areas and leaving edges (and small defects) intact.")
     params = [
         streams_spec("test"),
-        ParamSpec(name="method", type="choice", default="median",
+        ParamSpec(name="method", type="chip_choice", default="median",
                   choices=["median", "hot_pixels", "gaussian", "bilateral",
                            "nlm"],
+                  icons=["op_median", "dn_hot", "op_gaussian", "dn_bilateral",
+                         "dn_nlm"],
+                  choice_labels={"nlm": "NLM"},
+                  label="How to clean it up",
                   help=("median = suppress isolated bright/dark specks (common "
                         "for SEM); hot_pixels = replace ONLY the few pixels "
                         "that are wildly different from their neighbours and "

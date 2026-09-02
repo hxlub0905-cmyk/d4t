@@ -218,14 +218,18 @@ def test_a_panel_with_no_data_says_what_to_do(qapp):
 
 
 def test_the_direction_and_target_rows_are_buttons_not_english(qapp):
-    """使用者定調「能用圖就用圖」（F11 Region-2）—— 這兩排各自是四個畫得出來
-    的形狀，所以它們是圖示不是下拉。"""
+    """使用者定調「能用圖就用圖」（F11 Region-2）—— 這兩排各自是幾個畫得出來
+    的形狀，所以它們是**帶圖的膠囊**不是下拉。
+
+    F68 第二輪把 `icon_choice`（只有圖）併進 `chip_choice`（圖 + 字），
+    使用者：「我認為設定區都要變成這樣 icon 膠囊 + 文字。」形狀還在，
+    只是旁邊多了那個詞。"""
     from d4t.ui import widgets as widgets_mod
 
     specs = {s.name: s for s in REGISTRY["cd_measure"].params}
     for name in ("axis", "target"):
         spec = specs[name]
-        assert spec.type == "icon_choice", name
+        assert spec.type == "chip_choice", name
         assert len(spec.icons or []) == len(spec.choices or [])
         for icon in spec.icons:
             assert icon in widgets_mod.GLYPH_ICONS, icon
@@ -323,7 +327,7 @@ def test_the_shape_fork_is_two_buttons_not_a_dropdown(qapp):
     from d4t.ui import widgets as widgets_mod
 
     spec = {s.name: s for s in REGISTRY["cd_measure"].params}["shape"]
-    assert spec.type == "icon_choice"
+    assert spec.type == "chip_choice"
     assert list(spec.choices) == [SHAPE_LINE, SHAPE_BLOB]
     for icon in spec.icons:
         assert icon in widgets_mod.GLYPH_ICONS, icon

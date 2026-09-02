@@ -280,6 +280,32 @@ def test_seg_color_mapping(qapp):
 # --------------------------------------------------------------------------- #
 # 1. ImageView
 # --------------------------------------------------------------------------- #
+def test_a_mark_may_be_more_than_one_line(qapp):
+    """**這一條是那條斜線本身**（2026-09-01）。
+
+    GLV 的贏家格畫的是一個 **X** —— 而 X 是兩條線。`focus` 只認得一個 index
+    的時候，第二條落在「不是焦點」那一組（alpha 70、1 px），於是畫面上那一格
+    中間是一條斜線。使用者看著截圖問「框中間有一條斜線?」。
+
+    這裡不看畫素（抗鋸齒之下數畫素很脆），看的是**兩條都算焦點**。
+    """
+    from PySide6.QtGui import QPixmap
+
+    view = widgets_mod.ImageView()
+    view.set_image(np.zeros((64, 64), np.uint8))
+    view.resize(200, 200)
+    x = [[(0.2, 0.2), (0.8, 0.8)], [(0.8, 0.2), (0.2, 0.8)]]
+    view.set_marks(x, [[a, b] for a, b in x], [0, 1], ["", ""])
+    assert view._mark_focus == frozenset((0, 1))
+    view.render(QPixmap(200, 200))              # 畫得出來、不丟例外
+
+    view.set_marks(x, [[a, b] for a, b in x], 0, ["", ""])
+    assert view._mark_focus == frozenset((0,)), "一個 index 照樣要能用"
+    for none_ in (-1, None, (), [-1]):
+        view.set_marks(x, [[a, b] for a, b in x], none_, ["", ""])
+        assert view._mark_focus == frozenset(), none_
+
+
 def test_image_view_uint8_float_and_none(qapp):
     view = widgets_mod.ImageView()
     view.resize(320, 240)
@@ -371,19 +397,26 @@ def test_param_form_int_float_and_image_key(qapp):
     assert edits[-1] == ("box_size", pytest.approx(4.5))
     assert isinstance(edits[-1][1], float)
 
-    # image_key -> **唯讀顯示**（F9-6：來源只在畫布上決定）。
+    # image_key -> **接線插槽**（F9-6 的「來源只在畫布上決定」＋ F68 的插槽）。
     #
     # 以前這裡是可編輯的下拉，於是同一件事有兩個入口 —— 拉線會改它、下拉也會
-    # 改它 —— 而兩邊很容易對不起來（使用者的原話是「他會很亂連」）。現在這一格
-    # 只顯示現在接的是什麼，改要回畫布上拉線。
+    # 改它 —— 而兩邊很容易對不起來（使用者的原話是「他會很亂連」）。F9-6 把它
+    # 變成唯讀顯示；F68 把它變成插槽：看得到現在接的是什麼、也挑得動，但**挑
+    # 了之後走的是跟畫布拉線同一條路**（發訊號給 Studio），所以線仍然是唯一
+    # 的儲存 —— 那格自己一個字都不改。
+    from d4t.ui.wiring_slot import WiringSlot
+
     source = form.editor("source")
-    assert isinstance(source, QLineEdit)
-    assert source.isReadOnly() is True, "來源不該在參數表單裡改得動"
-    assert source.text() == "ref", "要看得到現在接的是哪一條"
-    assert source.toolTip().strip(), "唯讀就要講得出去哪裡改（推廣鐵則）"
+    assert isinstance(source, WiringSlot)
+    assert source.text_value() == "ref", "要看得到現在接的是哪一條"
+    assert source.toolTip().strip(), "講得出這一格是什麼（推廣鐵則）"
     n_before = len(edits)
-    source.setText("ref_aligned")          # 程式硬設也不該當成使用者編輯
-    assert len(edits) == n_before, "唯讀欄位不可以發出參數變更"
+    picked = []
+    form.wire_requested.connect(lambda n, v: picked.append((n, v)))
+    source.set_choices(["test", "ref"])
+    source.wire_requested.emit("test")     # 就是選單那一下
+    assert len(edits) == n_before, "插槽不可以自己發出參數變更（線才是真相）"
+    assert picked == [("source", "test")], "要往上送給 Studio 去動線"
 
     # 每一列都看得見白話 help（推廣鐵則）
     for spec in desc["params"]:
@@ -539,16 +572,17 @@ def test_param_form_bool_choice_and_str(qapp):
     assert edits[-1] == ("absolute", False)
     assert isinstance(edits[-1][1], bool)
 
-    # choice -> 非可編輯 QComboBox，選項 = spec.choices
+    # chip_choice -> 一排膠囊，值就是 spec.choices 裡那個字
+    # （F68 第二輪之前這裡是 QComboBox —— 值的格式一字不差，換掉的只有長相）
     edits.clear()
     desc = _describe("align")
     form.set_step(desc, {}, ["test", "ref"])
     method = form.editor("method")
     choices = [p for p in desc["params"] if p["name"] == "method"][0]["choices"]
-    assert isinstance(method, QComboBox) and not method.isEditable()
-    assert [method.itemText(i) for i in range(method.count())] == choices
-    assert method.currentText() == "phase"
-    method.setCurrentText("ncc")
+    assert isinstance(method, widgets_mod.ChoiceChips)
+    assert [c.mid for c in method._chips] == choices
+    assert method.text() == "phase"
+    method.chip("ncc").click()
     assert edits[-1] == ("method", "ncc")
 
     # int 有下限：search_radius 1..64
@@ -970,7 +1004,7 @@ def test_all_three_metric_fields_on_the_gray_level_card_are_chips(qapp):
     form = widgets_mod.ParamForm()
     form.set_step(_describe("glv_stats"),
                   {"metrics": "glv_median,glv_mad",
-                   "reference": "another region",
+                   "reference_region": "mg",
                    "stat": "glv_median,glv_q90",
                    "compare_metrics": "delta,snr"},
                   ["test", "ref"])
@@ -1165,7 +1199,7 @@ def test_the_middle_column_says_what_each_feature_is(qapp):
     glv = get_step("glv_stats")
     p = glv.validate_params({
         "source": "test", "roi": "epi", "output_prefix": "epi",
-        "metrics": "glv_median", "reference": "another region",
+        "metrics": "glv_median",
         "reference_region": "mg", "compare_metrics": "delta,overlap",
         "stat": "glv_median"})
     specs = {s.name: s for s in glv.resolve_feature_specs(p)}
@@ -1210,7 +1244,7 @@ def test_absolute_comes_before_relative_inside_a_card(qapp):
     glv = get_step("glv_stats")
     p = glv.validate_params({
         "source": "test", "metrics": "glv_median,glv_mad",
-        "reference": "another region", "reference_region": "mg",
+        "reference_region": "mg",
         "compare_metrics": "delta,snr", "stat": "glv_mean"})
     specs = {s.name: s for s in glv.resolve_feature_specs(p)}
     table = widgets_mod.FeatureTable()
@@ -1422,12 +1456,12 @@ def test_rows_appear_and_disappear_with_the_method(qapp):
 
 
 # --------------------------------------------------------------------------- #
-# icon_choice —— 用圖取代下拉的英文句子（F11 Region-2）
+# 選項上的圖（F11 Region-2 起；F68 第二輪之後只剩膠囊這一種長相）
 # --------------------------------------------------------------------------- #
 def test_every_icon_a_card_declares_really_exists(qapp):
     """`core` 不 import Qt，所以圖示名對不對只有**這一側**驗得了。
 
-    對不上的症狀是 `IconButton` 直接 `ValueError: unknown icon` —— 那張卡整個
+    對不上的症狀是那顆膠囊直接 `ValueError: unknown icon` —— 那張卡整個
     打不開，而且是在使用者點下去的時候才炸。
     """
     import d4t.core.steps  # noqa: F401 — 觸發卡片註冊
@@ -1440,57 +1474,160 @@ def test_every_icon_a_card_declares_really_exists(qapp):
             for icon in (spec.get("icons") or []):
                 seen += 1
                 assert icon in GLYPH_ICONS, (step.key, spec["name"], icon)
-    assert seen >= 11, "應該至少有 Profile 那三排（5+3+3）"
-
-
-def test_an_icon_choice_row_is_buttons_not_a_dropdown(qapp):
-    """使用者：「我不希望 profile 設定頁面那麼多文字，能用圖就用圖。」"""
-    from d4t.core.pipeline import get_step
-    from d4t.ui.widgets import IconButton, IconChoice, ParamForm
-
-    form = ParamForm()
-    form.set_step(region_card("roi_cross").describe(),
-                  {"place": "crossing"}, ["ref", "test"])
-    editor = form.editor("place")
-    assert isinstance(editor, IconChoice)
-    assert editor.text() == "crossing"
-
-    buttons = editor.findChildren(IconButton)
-    assert len(buttons) == 5                    # place 有五個選項
-    for b in buttons:
-        assert b.text() == ""                   # 一顆字都不放
-        assert b.toolTip()                      # 說明退到 tooltip
-    assert sum(1 for b in buttons if b.isChecked()) == 1
-
-
-def test_picking_an_icon_emits_the_value(qapp):
-    from d4t.ui.widgets import IconChoice
-
-    got = []
-    w = IconChoice(["a", "b"], ["fit", "tidy"], "a")
-    w.changed.connect(got.append)
-    w._pick("b")
-    assert got == ["b"]
-    assert w.text() == "b"
-
-
-def test_a_value_nobody_recognises_lights_nothing(qapp):
-    """手寫 recipe 打錯字的時候，**亮錯一顆比一顆都不亮更糟**。"""
-    from d4t.ui.widgets import IconButton, IconChoice
-
-    w = IconChoice(["a", "b"], ["fit", "tidy"], "zzz")
-    assert w.text() == "zzz"                    # 不偷偷改掉他的值
-    assert not any(b.isChecked() for b in w.findChildren(IconButton))
+    assert seen >= 60, "每一格選項都要有圖（F68 第二輪把所有的下拉換掉了）"
 
 
 def test_the_profile_card_lost_three_dropdowns_of_english(qapp):
-    from d4t.core.pipeline import get_step
-
     kinds = {p["name"]: p["type"]
              for p in region_card("roi_cross").describe()["params"]}
-    assert kinds["place"] == "icon_choice"
-    assert kinds["side"] == "icon_choice"
-    assert kinds["fill_rule"] == "icon_choice"
+    assert kinds["place"] == "chip_choice"
+    assert kinds["side"] == "chip_choice"
+    assert kinds["fill_rule"] == "chip_choice"
+
+
+def test_no_card_anywhere_still_shows_a_bare_dropdown(qapp):
+    """使用者 2026-09-01：「我認為**設定區都要變成這樣** icon 膠囊 + 文字。」
+
+    這一條蓋的是**每一張卡**，不是這一輪動到的那幾張 —— 新加的卡也躲不掉。
+    """
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import list_steps
+
+    plain = ["%s.%s" % (st.key, sp.name) for st in list_steps()
+             for sp in st.params if sp.type in ("choice", "icon_choice")]
+    assert not plain, "這幾格還是純下拉（或只有圖）：" + ", ".join(plain)
+
+
+def test_a_spelled_out_value_keeps_the_words_the_card_wrote(qapp):
+    """``a cell I mark myself`` 不可以被拼字函式改成「a cell **i** mark…」。
+
+    `str.capitalize()` 會把其餘的字全部轉小寫 —— 而那是使用者看得到的一句話。
+    """
+    from d4t.ui.widgets import _spell
+
+    assert _spell("a cell I mark myself") == "A cell I mark myself"
+    assert _spell("beside_vertical") == "Beside vertical"
+
+
+def test_a_value_that_spells_badly_gets_a_written_name(qapp):
+    """``zscore`` / ``nlm`` / ``topn`` 是 recipe 的鍵，不是給人看的字。"""
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import get_step
+
+    form = widgets_mod.ParamForm()
+    step = get_step("normalize")
+    form.set_step(step.describe(),
+                  {p.name: p.default for p in step.params}, ["test", "ref"])
+    chips = form._rows["method"].editor
+    assert chips.chip("zscore").label == "Z-score"
+    assert chips.chip("glv_band").label == "GLV band"
+
+
+def test_a_name_nobody_declared_is_caught_at_registration(qapp):
+    """`choice_labels` 打錯一個值**不會叫**，它只是安靜地不生效。"""
+    from d4t.core.pipeline.step import ParamError, ParamSpec
+
+    with pytest.raises(ParamError):
+        ParamSpec(name="x", type="chip_choice", default="a",
+                  choices=["a", "b"], icons=["fit", "tidy"],
+                  choice_labels={"c": "See"}, help="h")
+
+
+# ---------------------------------------------------------------------------
+# ChoiceChips：`chip_choice` 的膠囊（F68 第二輪 —— 設定欄那幾個下拉）
+#
+# 使用者 2026-09-01：「我希望設定欄這邊也是能像下方一樣膠囊 icon 配文字，
+# 這樣 user 比較會有感覺。」
+# ---------------------------------------------------------------------------
+def test_the_settings_column_has_no_bare_dropdown_left_on_the_glv_card(qapp):
+    """**這一條是那句話本身。** 加一個 `type="choice"` 的參數回去就會紅。"""
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import get_step
+
+    plain = [p["name"] for p in get_step("glv_stats").describe()["params"]
+             if p["type"] == "choice"]
+    assert not plain, (
+        "GLV 的設定欄又出現純下拉：%s —— 這張卡上的選項是膠囊（圖 + 字）"
+        % ", ".join(plain))
+
+
+def test_a_chip_choice_row_is_chips_not_a_dropdown(qapp):
+    """而且**圖與字都在** —— 那正是它跟 `icon_choice` 的差別。"""
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import get_step
+
+    form = widgets_mod.ParamForm()
+    form.set_step(get_step("glv_stats").describe(),
+                  {"across_boxes": "each box"}, ["test"], [], {})
+    row = form._rows.get("across_boxes")
+    assert row is not None
+    assert isinstance(row.editor, widgets_mod.ChoiceChips)
+    assert not row.editor.findChildren(QComboBox), "下拉不該還在"
+    assert row.editor.text() == "each box"
+
+    chips = [row.editor.chip(v) for v in ("pooled", "each box")]
+    assert all(c is not None for c in chips)
+    assert [c.label for c in chips] == ["Pooled", "Each box"], \
+        "字要留著：`each box` 是一個做法，圖只能當錨點"
+    assert all(c.icon in widgets_mod.GLYPH_ICONS for c in chips)
+    assert [c.is_checked() for c in chips] == [False, True]
+
+
+def test_picking_a_chip_writes_exactly_what_the_dropdown_wrote(qapp):
+    """值的格式跟 `choice` **一字不差** —— recipe JSON 不因為換了長相而變。"""
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import get_step
+
+    form = widgets_mod.ParamForm()
+    form.set_step(get_step("glv_stats").describe(),
+                  {"across_boxes": "pooled"}, ["test"], [], {})
+    seen = []
+    form.param_edited.connect(lambda n, v: seen.append((n, v)))
+    form._rows["across_boxes"].editor.chip("each box").click()
+    assert seen == [("across_boxes", "each box")]
+
+
+def test_a_chip_row_never_ends_up_empty(qapp):
+    """再點選中的那一顆不會把它關掉（同 MetricPick）：空值會被換回預設，
+    看起來像「我點了但沒有反應」。"""
+    seen = []
+    w = widgets_mod.ChoiceChips(["a", "b"], ["fit", "tidy"], "a")
+    w.changed.connect(seen.append)
+    w.chip("a").click()
+    assert w.text() == "a"
+    assert w.chip("a").is_checked()
+    assert seen == []
+
+
+def test_a_chip_value_nobody_recognises_lights_nothing(qapp):
+    """手寫 recipe 打錯字：**亮錯一顆比一顆都不亮更糟**（同 IconChoice）。"""
+    w = widgets_mod.ChoiceChips(["a", "b"], ["fit", "tidy"], "zzz")
+    assert w.text() == "zzz"                    # 不偷偷改掉他的值
+    assert not any(c.is_checked() for c in (w.chip("a"), w.chip("b")))
+
+
+def test_both_chip_families_are_the_same_pill(qapp):
+    """統計量那一族與設定欄那一族**共用同一個外觀**。
+
+    使用者要的是「像下方一樣」—— 兩份各畫各的話，第二份會慢慢漂走，而漂走的
+    症狀是同一張卡上兩種高度、兩種字級的膠囊（這個 repo 記過三次抄第二份的
+    代價）。
+    """
+    metrics = widgets_mod.MetricChips(["glv_median"], "glv_median")
+    choices = widgets_mod.ChoiceChips(["a"], ["fit"], "a")
+    a, b = metrics.chip("glv_median"), choices.chip("a")
+    assert isinstance(a, widgets_mod._ChipBase)
+    assert isinstance(b, widgets_mod._ChipBase)
+    assert a.height() == b.height() == widgets_mod._ChipBase.H
+
+
+def test_a_chip_choice_needs_one_icon_per_option(qapp):
+    """少一個圖示 = 少一顆膠囊，而它不會叫 —— 所以擋在註冊的當下。"""
+    from d4t.core.pipeline.step import ParamError, ParamSpec
+
+    with pytest.raises(ParamError):
+        ParamSpec(name="x", type="chip_choice", default="a",
+                  choices=["a", "b"], icons=["fit"], help="h")
 
 
 # ---------------------------------------------------------------------------
@@ -1619,6 +1756,70 @@ def test_every_stage_has_its_own_colour(qapp):
     theme_mod.apply_theme(qapp, "light")
 
 
+def test_a_mark_role_never_wears_a_region_colour(qapp):
+    """**這一條踩過兩次。**
+
+    疊圖上有兩種東西：區域框（穿 `REGION_COLORS`，使用者接了幾個區域就用前
+    幾個）與**角色記號**（`MARK_ROLE_TOKENS` —— 「最異常的那一格」、「小圖對到
+    這裡」）。角色記號的用處是**從那堆框裡跳出來**，所以它一旦落在區域色那一
+    族裡，它就等於沒畫：
+
+    * F32：贏家格用**同一個顏色**描邊 → 完全重疊，看不見。改畫 X。
+    * 2026-09-01：使用者要粗框，我照抄報表的琥珀 → 而 `REGION_COLORS` 裡就有
+      ``#f0b429``（琥珀）與 ``#f08a5f``（橘）。render 出來才看到，一整排黃框中
+      間那個琥珀框認不出來。
+
+    報表沒有這個問題（那張圖上其餘的框是鋼青色），所以規矩不是「跟報表同色」，
+    是**在自己這張圖上不會跟旁邊撞**。ΔE ≥ 25 ≈「一眼看得出是兩個顏色」。
+    """
+    from d4t.ui.widgets import MARK_ROLE_TOKENS
+
+    for name in ("light", "dark"):
+        theme_mod.set_theme(name)
+        for role, token in MARK_ROLE_TOKENS.items():
+            mark = theme_mod.TOKENS[token]
+            for i, region in enumerate(theme_mod.REGION_COLORS):
+                d = _delta_e(mark, region)
+                assert d >= 25, (
+                    "%s 主題：角色 %s（%s）跟第 %d 個區域色（%s）太接近 "
+                    "—— 疊圖上它跳不出來（ΔE=%.1f）"
+                    % (name, role, mark, i, region, d))
+    theme_mod.apply_theme(qapp, "light")
+
+
+def test_the_screen_and_the_report_use_the_same_red(qapp):
+    """兩張圖上「紅的是什麼意思」要一樣 —— 而值住在兩個檔案裡。
+
+    `MARK_ROLE_TOKENS` 說角色 → 權杖（core 不得 import Qt），報表那邊是自己的
+    RGB 常數。兩份漂開的那一天，同一顆 defect 在畫面上與在報表上是兩個紅，
+    而畫面上沒有任何東西透露那件事。
+    """
+    from d4t.core.export.overlay import AIM_COLOR, BOX_COLOR
+
+    def hexof(rgb):
+        return "#%02x%02x%02x" % tuple(int(c) for c in rgb)
+
+    for name in ("light", "dark"):
+        theme_mod.set_theme(name)
+        assert theme_mod.TOKENS["mark_alert"] == hexof(BOX_COLOR), name
+        assert theme_mod.TOKENS["mark_aim"] == hexof(AIM_COLOR), name
+    theme_mod.apply_theme(qapp, "light")
+
+
+def test_the_odd_box_is_the_only_heavy_frame(qapp):
+    """使用者 2026-09-01：「異常的那格用紅框（或不同顏色）的**加粗框**。」
+
+    粗細是這個記號**跨畫面與報表**的共同語言（報表 2–3 px、這裡 2.6 px）：
+    顏色兩邊各挑各的（各自的圖上誰沒被佔走），但**最異常的那一格永遠是唯一
+    一個粗框**。
+    """
+    from d4t.ui.widgets import MARK_ROLE_WEIGHTS
+    from d4t.core.steps.glv_stats import WORST_ROLE
+
+    assert MARK_ROLE_WEIGHTS.get(WORST_ROLE, 0) > 1.6, \
+        "焦點線本來就 1.6 —— 沒有比它粗就不叫加粗"
+
+
 def test_the_stage_colours_stay_one_family(qapp):
     """分得開之外還要**看起來像一套**：同一主題內明度不可以亂跳。
 
@@ -1680,3 +1881,54 @@ def test_every_size_metric_the_card_offers_has_a_face(qapp):
     # **不要用 ``Shape``** —— 那個字在 GLV 那邊已經是偏度那一群了。
     assert groups == {"Size", "Outline"}
     assert "Shape" not in groups
+
+
+# --------------------------------------------------------------------------- #
+# F68 收尾：浮點欄位的小數位跟著範圍走
+# --------------------------------------------------------------------------- #
+def test_a_sigma_threshold_is_not_printed_with_three_decimals(qapp):
+    """`0.000 σ` 的三位小數不是精度，是雜訊 —— 而且讓人以為那格要填那麼細。"""
+    from d4t.ui.widgets import _float_decimals
+
+    # px / % / σ / 灰階 那一族：一位就夠
+    assert _float_decimals(0.0, 99.0, 0.0) == 1        # over_k、mark_pixels_k
+    assert _float_decimals(0.0, 49.0, 0.0) == 1        # trim_percent
+    assert _float_decimals(-255.0, 510.0, 0.0) == 1    # tone.brightness
+
+    # 本來就在細部的那一族**不准變粗**（砍掉小數位它就填不進去了）
+    assert _float_decimals(0.01, 999999.99, 1.0) == 3  # nm_per_px
+    assert _float_decimals(0.1, 4.9, 1.0) == 3         # gamma
+    assert _float_decimals(-1.0, 2.0, 0.0) == 3        # min_score
+    assert _float_decimals(0.0, 1.0, 0.5) == 3         # flatten.strength
+
+
+def test_the_field_never_shows_a_coarser_number_than_the_recipe_holds(qapp):
+    """**顯示不准比 recipe 裡的值粗。**
+
+    QDoubleSpinBox 會把值捨進它的位數 —— 手寫 recipe 填了 2.55 而欄位只有一位
+    的話，畫面上是 2.6，而使用者不會知道自己看到的不是檔案裡的東西。
+    """
+    from d4t.ui.widgets import _float_decimals
+
+    assert _float_decimals(0.0, 49.0, 2.55) == 2
+    assert _float_decimals(0.0, 99.0, 4.125) == 3
+    assert _float_decimals(0.0, 99.0, 3.0) == 1, "整數不必為此加位數"
+
+
+def test_the_real_form_shows_the_value_it_was_given(qapp):
+    """走真的那條路（describe → 表單 → 讀回來），不是只打那支純函式。"""
+    from PySide6.QtWidgets import QDoubleSpinBox
+
+    from d4t.core.pipeline import get_step
+    import d4t.core.steps  # noqa: F401
+
+    form = widgets_mod.ParamForm()
+    card = get_step("glv_stats")
+    form.set_step(card.describe(),
+                  card.validate_params({"source": "test", "across_boxes":
+                                        "each box", "over_k": 2.55}),
+                  ["test"])
+    box = form.editor("over_k")
+    assert isinstance(box, QDoubleSpinBox)
+    assert box.value() == pytest.approx(2.55), "值不可以被欄位捨掉"
+    assert "0.000" not in box.text()

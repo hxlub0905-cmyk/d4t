@@ -137,7 +137,9 @@ def test_the_region_field_is_read_only_in_the_panel(window):
     window._on_edge_added(src, glv, "single", "source")
     window.select_node(glv)
     editor = window.param_form.editor("roi")
-    assert isinstance(editor, QLineEdit) and editor.isReadOnly()
+    from d4t.ui.wiring_slot import WiringSlot
+    assert isinstance(editor, WiringSlot)
+    assert editor.text_value() == "", "沒接線 —— 那一格要說「量整張圖」"
 
 
 # --------------------------------------------------------------------------- #
@@ -274,16 +276,13 @@ def test_a_role_region_port_is_still_replaced(window):
     往它再拉一條的意思是「改跟別的比」，不是「參照有兩個」。
 
     （F16 之前這是獨立的 `roi_compare` 卡，F16 併成 `method="compare"`，
-    F18 再變成 `reference` 那一格。這條測的東西一路上一個字都沒變 ——
-    變的只是那個角色埠現在叫什麼、以及它什麼時候才長出來。）
+    F18 再變成 `reference` 那一格，F67 連那一格都拿掉了 —— 接了這顆埠就是
+    在比。這條測的東西一路上一個字都沒變。）
     """
-    from d4t.core.steps.glv_stats import REF_REGION
-
     src = first_source(window, "load_single")
     gds = window.add_card_after(src, "roi_reference")
     window.model.set_param(gds, "method", "layout layers")
     cmp_ = window.add_card_after(gds, "glv_stats")
-    window.model.set_param(cmp_, "reference", REF_REGION)
     window._on_edge_added(src, gds, "single", "label_source")
     window.model.set_param(gds, "layers", "1:epi, 2:mg")
     window._on_edge_added(src, cmp_, "single", "source")

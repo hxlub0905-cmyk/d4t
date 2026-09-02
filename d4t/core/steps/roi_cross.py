@@ -46,12 +46,25 @@ from ._util import (
     FEATURE_PREFIX_PATTERN, drop_edge_boxes, drop_edge_specs,
     PICK_NONE, output_prefix_spec, pick_defect_box, pick_rule_of,
     pick_rule_specs, prefix_features, prefix_names, region_family,
-    region_fact_names, region_fact_specs, region_facts, region_role_of,
+    REGION_FACT_HELP, SHARED_FEATURE_HELP, region_fact_names,
+    region_fact_specs, region_facts,
+    region_role_of,
+    region_spec_maker,
     require_image, set_region_family,
     LIMIT_MAX_BOXES,
 )
 
 _BESIDE = ("beside_vertical", "beside_horizontal")
+
+#: 會用到 ``gap``（「離邊界多遠」）的那幾種放法 —— **``crossing`` 不在裡面**。
+#:
+#: ``crossing`` 是「整個交會矩形」：兩軸都只當界線，所以只有 ``inset`` 算數
+#: （`algo.grid._spans_for` 的最後一段）。以前這一格對它照樣顯示得出來，
+#: 而轉它一整圈**畫面上與數字上都不會有任何變化** —— 2026-09-02 端到端跑一次
+#: RSEM 才發現：``gap`` 掃 0/1/3 三個值，24 顆的分數逐位元組相同。
+#: `box_size` 與 `side` 早就用 `show_when` 藏對了，漏的只有這一格。
+_USES_GAP = ("beside_vertical", "beside_horizontal",
+             "between_vertical", "between_horizontal")
 
 #: ``directions`` 的三個值 —— 順序就是圖示列由左到右。
 _DIRECTIONS = ("both", "upright", "flat")
@@ -119,7 +132,7 @@ class RoiCrossStep(Step):
                   "defect."),
         ),
         ParamSpec(
-            name="directions", type="icon_choice", default="both",
+            name="directions", type="chip_choice", default="both",
             choices=list(_DIRECTIONS),
             icons=["dir_both", "dir_upright", "dir_flat"],
             choice_help={
@@ -152,9 +165,12 @@ class RoiCrossStep(Step):
         ),
         # ---- 直的那組條紋 -------------------------------------------------
         ParamSpec(
-            name="vertical_select", type="choice", default="brightest",
+            name="vertical_select", type="chip_choice", default="brightest",
             section="2 · The up-and-down stripes",
             choices=list(algo_grid.SELECT_RULES),
+            icons=["rank_bright1", "rank_bright2", "rank_bright3",
+                   "rank_dark1", "rank_dark2", "rank_dark3",
+                   "rank_all"],
             label="Take the up-and-down stripes that are",
             help=("Which of the up-and-down stripes to use, by rank: brightest "
                   "= the brightest group in this image, second_brightest = the "
@@ -230,9 +246,12 @@ class RoiCrossStep(Step):
         ),
         # ---- 橫的那組條紋 -------------------------------------------------
         ParamSpec(
-            name="horizontal_select", type="choice", default="brightest",
+            name="horizontal_select", type="chip_choice", default="brightest",
             section="3 · The left-to-right stripes",
             choices=list(algo_grid.SELECT_RULES),
+            icons=["rank_bright1", "rank_bright2", "rank_bright3",
+                   "rank_dark1", "rank_dark2", "rank_dark3",
+                   "rank_all"],
             label="Take the left-to-right stripes that are",
             help="Same as above, for the stripes that run left to right.",
             show_when=("directions", _USES_FLAT),
@@ -279,7 +298,7 @@ class RoiCrossStep(Step):
         ),
         # ---- 框放哪 --------------------------------------------------------
         ParamSpec(
-            name="place", type="icon_choice", default="beside_vertical",
+            name="place", type="chip_choice", default="beside_vertical",
             choices=list(_PLACE),
             icons=["place_crossing", "place_beside_v", "place_beside_h",
                    "place_between_v", "place_between_h"],
@@ -301,7 +320,7 @@ class RoiCrossStep(Step):
                   "solid ones are where the box goes."),
         ),
         ParamSpec(
-            name="fill_rule", type="icon_choice", default="skip",
+            name="fill_rule", type="chip_choice", default="skip",
             choices=["fill", "skip", "skip_clear"],
             icons=["fill_fill", "fill_skip", "fill_skip_clear"],
             choice_help={
@@ -333,7 +352,7 @@ class RoiCrossStep(Step):
                   "are actually interested in."),
         ),
         ParamSpec(
-            name="side", type="icon_choice", default="both",
+            name="side", type="chip_choice", default="both",
             choices=["both", "start", "end"],
             icons=["side_both", "side_start", "side_end"],
             choice_help={
@@ -350,6 +369,7 @@ class RoiCrossStep(Step):
         ParamSpec(
             name="gap", type="float", default=1.0, min=0.0, max=100.0,
             section="4 · Where the box goes",
+            show_when=("place", _USES_GAP),
             unit="px", label="Keep clear of the edge",
             help=("How far to stay away from the edge itself. An edge is "
                   "blurred over a few pixels and the gray level there belongs "
@@ -412,6 +432,17 @@ class RoiCrossStep(Step):
                     "cross_filled", "cross_dist_px", "cross_pitch_ratio_x",
                     "cross_pitch_ratio_y", "cross_edge_dropped",
                     "locate_conf", "locate_ok"]
+    FEATURE_HELP = dict(
+        REGION_FACT_HELP,
+        cross_count="how many crossings were found",
+        cross_pitch_x_px="spacing of the up-and-down stripes, px",
+        cross_pitch_y_px="spacing of the left-to-right stripes, px",
+        cross_filled="how many boxes were added where a stripe was missing",
+        cross_dist_px="how far the picked crossing is from the middle, px",
+        cross_pitch_ratio_x="measured spacing over the one you typed",
+        cross_pitch_ratio_y="measured spacing over the one you typed",
+        cross_edge_dropped="how many boxes were dropped for touching the edge",
+        **SHARED_FEATURE_HELP)
 
     # ---- 宣告（給 lint / UI）------------------------------------------------
     @classmethod
@@ -433,15 +464,8 @@ class RoiCrossStep(Step):
         # 在 base 裡（`gds_epi_center_present`）——身分因此只有這裡答得出來。
         own = str(params.get("output_prefix", "") or "").strip()
 
-        def spec(base, region="", metric=""):
-            regions = cls.resolve_regions_out(params)
-            return FeatureSpec(
-                name=prefix_names(own, [base])[0], card=cls.key, base=base,
-                region=region,
-                region_index=(regions.index(region) if region in regions
-                              else -1),
-                region_role=(region_role_of(region) if region else ""),
-                own=own, metric=metric or base, family="region")
+        spec = region_spec_maker(cls.key, own,
+                                 cls.resolve_regions_out(params))
 
         names = list(cls.features_out)
         if pick_rule_of(params) == PICK_NONE:

@@ -70,8 +70,9 @@ class SubtractStep(Step):
         # 相減是同一個問題的不同答案（「這兩張哪裡不一樣」），所以是同一張卡的
         # 一個下拉 —— 不是四張新卡片。
         ParamSpec(
-            name="op", type="choice", default="subtract",
+            name="op", type="chip_choice", default="subtract",
             choices=["subtract", "ratio", "max", "min", "mean"],
+            icons=["op_subtract", "op_ratio", "op_max", "op_min", "op_mean"],
             label="How to combine",
             help=("subtract = a minus b, the normal die-to-die difference; "
                   "ratio = a divided by b, which stays meaningful when the "

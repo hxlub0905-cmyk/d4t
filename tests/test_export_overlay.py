@@ -206,12 +206,59 @@ def test_diff_only_context_does_not_montage_itself():
 # ---------------------------------------------------------------------------
 # 標籤
 # ---------------------------------------------------------------------------
-def test_label_is_drawn_top_left():
+def test_the_label_never_changes_the_picture_size():
+    """**輸出尺寸跟輸入一樣**（2026-09-01 使用者定調：「不要改變原尺寸好了」）。
+
+    那一天先做過另一版：標籤畫在影像下面新加的一條字幕條上，樣品一個像素都
+    不會被蓋到。使用者看過之後選了原尺寸 —— 所以標籤蓋回左上角，而「字塞不
+    塞得下」由 :func:`overlay._fit_label` 保證（見下一條）。
+    """
     plain = overlay.render_overlay({"test": flat(200)}, {})
-    labelled = overlay.render_overlay({"test": flat(200)}, {}, label="score=3.21")
+    labelled = overlay.render_overlay({"test": flat(200)}, {},
+                                      label="score=3.21")
     assert labelled.shape == plain.shape
     assert not np.array_equal(plain[:16], labelled[:16])   # 左上角有變化
     assert np.array_equal(plain[40:], labelled[40:])       # 下半部沒被動到
+
+
+def test_the_label_band_covers_the_whole_width():
+    """底條**滿版**：以前它只有字那麼寬，而字沒有被裁 —— 超出去那一段是白字
+    直接壓在樣品上。字現在一定塞得下，而滿版的底條讓它在任何底圖上都讀得出。
+    """
+    labelled = overlay.render_overlay({"test": flat(200)}, {}, label="bin=1")
+    top = labelled[0]                     # 最上面那一列
+    assert int(top.max()) < 200, "整條都要壓暗，不是只有字底下那一段"
+
+
+def test_the_caption_always_fits_the_picture_it_sits_under():
+    """**這一條是那個 bug 本身**（使用者：「patch 上標註的 bin 黑邊會因為
+    patch 不同 size 導致上方的字彙超出去」）。
+
+    以前字級只看影像寬度（``w / 320``），完全不看字有多長 —— 於是字長得比圖
+    還快：64 px 超出 53 px、128 px 超出 27 px、160 px 超出 34 px，**每一種
+    尺寸都超**。現在先問字有多長再挑字級，塞不下就換更短的寫法、最後截字。
+    """
+    import cv2
+
+    label = "#12345  score=4.210  bin=3"
+    for w in (32, 40, 48, 64, 96, 128, 160, 200, 256, 512):
+        text, scale = overlay._fit_label(label, w)
+        tw = cv2.getTextSize(text, overlay._FONT, scale, 1)[0][0]
+        assert tw <= w - 2 * overlay._LABEL_PAD, (w, text, tw)
+        assert text, w
+        # **識別的那一段永遠留著**：丟得掉的是 score，不是 #id
+        assert text.startswith("#12345") or text.startswith("#1"), (w, text)
+
+
+def test_the_caption_drops_the_score_before_the_id():
+    """塞不下的時候有優先序：`score` 最先被丟（它在圖上最不識別）。"""
+    label = "#12345  score=4.210  bin=3"
+    wide, _ = overlay._fit_label(label, 400)
+    mid, _ = overlay._fit_label(label, 64)
+    tiny, _ = overlay._fit_label(label, 40)
+    assert "score" in wide and "bin" in wide
+    assert "score" not in mid and "bin" in mid
+    assert tiny == "#12345"
 
 
 def test_unicode_label_does_not_crash():
@@ -237,7 +284,8 @@ def test_label_defaults_to_score_from_features():
 def test_label_on_tiny_image_does_not_crash():
     out = overlay.render_overlay({"test": flat(100, h=8, w=8)}, {},
                                  label="score=1.0")
-    assert out.shape == (8, 8, 3)
+    assert out.shape == (8, 8, 3)                   # 8px 寬照樣不改尺寸
+    assert out.dtype == np.uint8
 
 
 # ---------------------------------------------------------------------------
@@ -410,6 +458,66 @@ def test_the_boxes_come_from_the_glv_note_not_a_second_pick():
     assert len(rects) == 25
     assert win == int(ctx.features["glv_worst_i"]) == 12
     assert rects == ctx.roi_norm_rects("cells")
+
+
+def _two_region_ctx():
+    """兩個區域接進同一張 GLV：**第二個**裡面才有真的缺陷。
+
+    第一個區域（``quiet``）鋪在一片平坦的背景上 —— 它照樣挑得出一個「最不
+    一樣」的框，只是那一格的分數很小。第二個（``hot``）有一格是亮的。
+    """
+    import d4t.core.steps  # noqa: F401 — 觸發卡片註冊
+    from d4t.core.pipeline import get_step
+    from d4t.core.pipeline.context import Context
+
+    rng = np.random.default_rng(3)
+    img = np.full((100, 100), 100, np.float32)
+    img += rng.normal(0, 0.5, img.shape).astype(np.float32)
+    img[8:16, 60:68] = 190.0                       # hot 的第 2 格
+    ctx = Context(images={"test": img})
+    ctx.set_roi_boxes("quiet", [(0.05 + 0.2 * i, 0.55, 0.08, 0.08)
+                                for i in range(4)])
+    ctx.set_roi_boxes("hot", [(0.2 + 0.2 * i, 0.08, 0.08, 0.08)
+                              for i in range(4)])
+    get_step("glv_stats")().run(ctx, {
+        "source": "test", "roi": "quiet,hot", "metrics": "glv_mean",
+        "judge": "glv_mean", "across_boxes": "each box"})
+    return ctx
+
+
+def test_the_thick_box_is_the_one_the_score_came_from():
+    """**分數說哪一格，粗框就畫哪一格** —— 跨區域也一樣。
+
+    這一條是把 bug 放回去的形狀。以前這支函式取的是**接線順序第一條 note**
+    （＝第一個區域）的框與**它自己的**贏家，所以兩個區域的時候，報表標題印
+    的分數來自 B、粗框卻畫在 A 上面一個一點都不異常的框。F68 的驗收上實測到
+    （`recipes/rsem-worst-box.json`，三個區域鋪滿整張圖）：標題 27.753、
+    琥珀框畫在另一個區域一個 1.3σ 的框上。跑得完、有圖、而且是錯的。
+    """
+    ctx = _two_region_ctx()
+    quiet = list(ctx.roi_norm_rects("quiet"))
+    hot = list(ctx.roi_norm_rects("hot"))
+    rects, win, note = overlay.worst_note_for_overlay(ctx)
+
+    # **每一組的框都畫**：細框的意思是「我量過的框」，兩組是同一件事。
+    assert rects == quiet + hot
+    # 贏家是分數高的那一組裡的那一格 —— 索引是接起來之後的全域索引。
+    assert str(note["region"]) == "hot"
+    assert win == len(quiet) + int(ctx.features["hot_glv_worst_i"])
+    assert rects[win] == hot[int(ctx.features["hot_glv_worst_i"])]
+    # 這一條才是重點：贏家不在第一組裡。
+    assert win >= len(quiet)
+    assert float(ctx.features["hot_glv_worst_score"]) \
+        > float(ctx.features["quiet_glv_worst_score"])
+
+
+def test_one_region_draws_exactly_what_it_used_to():
+    """一個區域的時候逐位元組跟以前相同 —— 那是上面那個改動的邊界。"""
+    ctx = _each_box_ctx()
+    rects, win, note = overlay.worst_note_for_overlay(ctx)
+    assert rects == ctx.roi_norm_rects("cells")
+    assert win == int(ctx.features["glv_worst_i"])
+    assert str(note["region"]) == "cells"
 
 
 def test_a_pooled_run_yields_no_roi_boxes():

@@ -1,0 +1,199 @@
+{
+  "recipe_id": "rsem_worst_box",
+  "version": 3,
+  "app_version": "0.1.0.dev0",
+  "author": "d4t",
+  "description": "RSEM lot, one image per defect and no reference image: tile the whole picture with boxes, then let GLV pick the box whose gray level is furthest from all the other boxes. Three Reference regions cards lay the boxes down - on the pattern where the stripes cross, and in the gap between the columns and between the rows - and all three wire into the one GLV card, so every part of the image is covered. That matters: a dark defect lands in the gap, and boxes drawn only on the pattern step right over it. The decision asks two questions in order: is the worst box far enough out to be anything at all, and is more than one box out - one dirty box and a whole area that has drifted need opposite treatment. Nothing has to be set up by hand; the report folder is the one thing you will want to change.",
+  "routes": {
+    "rsem": [
+      "load",
+      "roi_on_pattern",
+      "roi_between_columns",
+      "roi_between_rows",
+      "glv",
+      "report"
+    ]
+  },
+  "nodes": {
+    "load": {
+      "step": "load_single",
+      "params": {
+        "out": "single",
+        "nm_per_px": 0.0,
+        "carry": ""
+      },
+      "enabled": true
+    },
+    "roi_on_pattern": {
+      "step": "roi_reference",
+      "params": {
+        "method": "stripes in the image",
+        "source": "single",
+        "roi_out": "on_pattern",
+        "directions": "both",
+        "place": "crossing",
+        "inset": 2.0,
+        "pick": "none",
+        "drop_edge": true,
+        "edge_margin": 4.0,
+        "max_boxes": 8192,
+        "output_prefix": "on_pattern"
+      },
+      "enabled": true
+    },
+    "roi_between_columns": {
+      "step": "roi_reference",
+      "params": {
+        "method": "stripes in the image",
+        "source": "single",
+        "roi_out": "between_columns",
+        "directions": "both",
+        "place": "between_vertical",
+        "inset": 2.0,
+        "pick": "none",
+        "drop_edge": true,
+        "edge_margin": 4.0,
+        "max_boxes": 8192,
+        "output_prefix": "between_columns"
+      },
+      "enabled": true
+    },
+    "roi_between_rows": {
+      "step": "roi_reference",
+      "params": {
+        "method": "stripes in the image",
+        "source": "single",
+        "roi_out": "between_rows",
+        "directions": "both",
+        "place": "between_horizontal",
+        "inset": 2.0,
+        "pick": "none",
+        "drop_edge": true,
+        "edge_margin": 4.0,
+        "max_boxes": 8192,
+        "output_prefix": "between_rows"
+      },
+      "enabled": true
+    },
+    "glv": {
+      "step": "glv_stats",
+      "params": {
+        "source": "single",
+        "across_boxes": "each box",
+        "judge": "glv_mean",
+        "direction": "both",
+        "over_k": 3.0,
+        "metrics": "glv_mean,glv_median,glv_std",
+        "stat": "glv_mean"
+      },
+      "enabled": true
+    },
+    "report": {
+      "step": "output_report",
+      "params": {
+        "folder": "rsem_report",
+        "contents": "report,table,pictures,recipe",
+        "rank_by": "score",
+        "montage": true,
+        "draw_boxes": "near the winner",
+        "draw_boxes_cap": 25,
+        "limit": 0,
+        "jpeg_quality": 80
+      },
+      "enabled": true
+    }
+  },
+  "edges": [
+    [
+      "load",
+      "single",
+      "roi_on_pattern",
+      "source"
+    ],
+    [
+      "roi_on_pattern",
+      "on_pattern",
+      "glv",
+      "roi"
+    ],
+    [
+      "load",
+      "single",
+      "roi_between_columns",
+      "source"
+    ],
+    [
+      "roi_between_columns",
+      "between_columns",
+      "glv",
+      "roi"
+    ],
+    [
+      "load",
+      "single",
+      "roi_between_rows",
+      "source"
+    ],
+    [
+      "roi_between_rows",
+      "between_rows",
+      "glv",
+      "roi"
+    ],
+    [
+      "load",
+      "single",
+      "glv",
+      "source"
+    ]
+  ],
+  "score": {
+    "expr": "",
+    "threshold": 0.0,
+    "bins": {}
+  },
+  "decide": {
+    "let": [
+      {
+        "name": "worst",
+        "expr": "max(on_pattern_glv_worst_score, between_columns_glv_worst_score, between_rows_glv_worst_score)",
+        "fill": "-1"
+      },
+      {
+        "name": "boxes_off",
+        "expr": "on_pattern_glv_boxes_over_k + between_columns_glv_boxes_over_k + between_rows_glv_boxes_over_k",
+        "fill": "0"
+      },
+      {
+        "name": "quiet",
+        "expr": "2.5"
+      }
+    ],
+    "tree": {
+      "when": "worst < 0",
+      "yes": {
+        "bin": 9,
+        "label": "nothing to measure"
+      },
+      "no": {
+        "when": "worst < quiet",
+        "yes": {
+          "bin": 0,
+          "label": "nothing stands out"
+        },
+        "no": {
+          "when": "boxes_off >= 2",
+          "yes": {
+            "bin": 2,
+            "label": "more than one box is off"
+          },
+          "no": {
+            "bin": 1,
+            "label": "one box stands out"
+          }
+        }
+      }
+    },
+    "score": "worst"
+  }
+}

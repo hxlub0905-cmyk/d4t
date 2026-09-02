@@ -102,7 +102,7 @@ def make_recipe(**kw):
         },
         score=ScoreSpec(expr="snr_max * 2", threshold=3.0,
                         bins={"below": 0, "above": 1}),
-        version=2,
+        version=RECIPE_VERSION,
         author="unit",
         description="單元測試 recipe",
         edges=[],
@@ -439,7 +439,7 @@ def _two_entry_recipe(**kw):
         },
         score=ScoreSpec(expr="masked_mean", threshold=1.0,
                         bins={"below": 0, "above": 1}),
-        version=2, author="unit", description="兩個入口", edges=[],
+        version=RECIPE_VERSION, author="unit", description="兩個入口", edges=[],
     )
     base.update(kw)
     return Recipe(**base)

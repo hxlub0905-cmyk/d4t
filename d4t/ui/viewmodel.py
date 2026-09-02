@@ -24,19 +24,31 @@ from d4t.core.pipeline.recipe import (RECIPE_VERSION, DecideSpec, Let, Rule,
                                       _tree_to_json, feature_referrers,
                                       region_edge_values, rules_to_tree)
 from d4t.core.steps._util import centre_name, others_name
-from d4t.core.steps.glv_stats import EACH_BOX, POOLED, REF_NONE, REF_REGION
+from d4t.core.steps.glv_stats import EACH_BOX, POOLED
 
-#: GLV 卡最上面那三顆「我要量什麼」（PR-2 2a）。**preset 不是參數**：recipe
-#: 沒有新欄位，選了只動 roi / reference_region 兩條線與 reference /
-#: across_boxes 兩格 —— 存出來的 JSON 跟手拉線、手填格的逐位元組相同。
-#: （id, 顯示字, 一句話）；字在這裡一份，ParamForm 只負責畫。
-GLV_INTENTS: Tuple[Tuple[str, str, str], ...] = (
-    ("defect_box", "The defect's box",
-     "Measure the centred box, judged against the other boxes."),
-    ("oddest_box", "The most unusual box",
-     "Measure every box and report the odd one out."),
-    ("region_stats", "The whole region",
-     "Pool every box into one pile of pixels."),
+#: GLV 卡最上面那三顆「要量什麼」（PR-2 2a）。**preset 不是參數**：recipe
+#: 沒有新欄位，選了只動 roi / reference_region 兩條線與 across_boxes 那一格
+#: —— 存出來的 JSON 跟手拉線、手填格的逐位元組相同。
+#: （id, 顯示字, 一句話, 圖示名）；字在這裡一份，ParamForm 只負責畫。
+#:
+#: **用字**（F68 第三輪，使用者：「我覺得他有一點太口語」）：三顆鈕原本是
+#: 「The defect's box」／「The most unusual box」／「The whole region」——
+#: 帶冠詞的口語短句，跟底下每一格的膠囊（``Pooled`` / ``Each box`` /
+#: ``Brightest``）不是同一種語氣。現在是名詞片語，而且用的是這張卡自己的詞
+#: （``odd box out`` 就是 ``Pick the odd one by`` 那一格在挑的東西）。
+#:
+#: **圖示是底下那幾格的圖**（不是另外畫三張）：這一排是那幾格的捷徑，
+#: 圖一樣才看得出「按這一顆＝把那幾格設成這樣」。
+GLV_INTENTS: Tuple[Tuple[str, str, str, str], ...] = (
+    ("defect_box", "Defect box",
+     "Measure the centred box, judged against the other boxes.",
+     "pick_centre"),
+    ("oddest_box", "Odd box out",
+     "Measure every box and report the odd one out.",
+     "boxes_each"),
+    ("region_stats", "Whole region",
+     "Pool every box into one pile of pixels.",
+     "boxes_pooled"),
 )
 
 #: 比對不上任何 preset 時顯示的狀態 id。
@@ -960,6 +972,28 @@ class RecipeModel:
         return {b.spec.name: b.node_id
                 for b in bound_specs(recipe, self.kind)}
 
+    def feature_regions(self) -> Dict[str, int]:
+        """特徵名 → **它屬於第幾個具名區域**（-1 = 不屬於任何一個）。
+
+        判定段的兩個下拉（「插入數字 ▾」與導引式問題的第一格）用它在每一項
+        前面點一個顏色 —— **跟 Feature 表的上標、影像上那個框同一個顏色**，
+        所以「這個數字是哪一塊的」在三個畫面上是同一個線索
+        （2026-09-01，使用者：「ADC 的設定頁面是不是也加入一些 icon 會比較好」）。
+
+        ⚠ 跟 :meth:`feature_owners` 一樣是 `verdict_features.bound_specs` 的
+        **投影**，不是第四份實作 —— 那一份住在 core、比較完整，而且有一把對照
+        引擎的尺（F51 的教訓）。
+        """
+        from d4t.core.pipeline.verdict_features import bound_specs
+
+        try:
+            recipe = self.to_recipe()
+        except Exception:              # noqa: BLE001 — 顯示層，壞了就不上色
+            return {}
+        return {b.spec.name: int(getattr(b.spec, "region_index", -1))
+                for b in bound_specs(recipe, self.kind)
+                if getattr(b.spec, "region", "")}
+
     def nm_per_px_is_known(self) -> bool:
         """有沒有任何一張卡填了 nm/px（`_util.nm_per_px_spec`）。"""
         for node in self.nodes.values():
@@ -989,6 +1023,34 @@ class RecipeModel:
                 if w not in streams:
                     streams.append(w)
         return streams
+
+    def stream_producer(self, name: str,
+                        before_node: Optional[str] = None) -> str:
+        """誰產出影像流 ``name``（沒有人回空字串）—— F68 的插槽用。
+
+        跟 :meth:`region_producer` 是同一個形狀、同一個語意（**上游最後一個**
+        —— 同名的流跟同名的區域一樣是後面那張蓋掉前面那張）。存在的理由也一樣：
+        設定區那一格挑了一個名字之後，要走**跟畫布拉線同一條路**，而那條路
+        需要知道線是從哪一張卡拉出來的。
+        """
+        want = str(name or "").strip()
+        if not want:
+            return ""
+        found = ""
+        for nid in self.node_order:
+            if nid == before_node:
+                break
+            node = self.nodes.get(nid)
+            if node is None or not node.enabled:
+                continue
+            try:
+                step_cls = get_step(node.step)
+                ws = step_cls.resolve_writes_for_kind(node.params, self.kind)
+            except Exception:              # noqa: BLE001 — 顯示用，壞了就跳過
+                continue
+            if want in [str(w) for w in ws]:
+                found = nid
+        return found
 
     def available_regions(self, before_node: Optional[str] = None) -> List[str]:
         """到 before_node（不含）為止定義了哪些具名區域，供下拉用（F11 Region-1）。
@@ -1288,29 +1350,108 @@ class RecipeModel:
             if base.endswith(suffix):
                 base = base[:-len(suffix)]
         producer = str(roi_edges[0].src)
-        ref = str(node.params.get("reference", REF_NONE) or REF_NONE)
+        # **F67：三顆鈕現在只看線與 `across_boxes`。** 「有沒有在比」以前另外
+        # 存在 `reference` 那一格，所以這裡要同時比對線**與**那一格 —— 而它們
+        # 可以不一致，於是 preset 的勾選跟畫布上的線也可以不一致。
         boxes = str(node.params.get("across_boxes", POOLED) or POOLED)
         ref_edges = self._glv_region_edges(node_id, "reference_region")
-        if (wired == centre_name(base) and ref == REF_REGION
+        if (wired == centre_name(base)
                 and boxes == POOLED and len(ref_edges) == 1
                 and ref_edges[0].src == producer
                 and str(ref_edges[0].src_out) == others_name(base)):
             return "defect_box"
         if wired == base and not ref_edges:
-            if ref == REF_NONE and boxes == EACH_BOX:
+            if boxes == EACH_BOX:
                 return "oddest_box"
-            if ref == REF_NONE and boxes == POOLED:
+            if boxes == POOLED:
                 return "region_stats"
         return GLV_INTENT_CUSTOM
+
+    def glv_wiring_words(self, node_id: str) -> str:
+        """這張 GLV 卡**現在真的在做什麼**，一句話（F67 續，2026-09-01）。
+
+        三顆 preset 鈕講的是**形狀**（量哪一格、比不比另一塊），而卡片上還有
+        兩件事它們不講：量的是哪一塊（名字）、以及**跟哪一張圖比**。所以
+        「custom」那個狀態以前只說得出「三個都對不上」—— 使用者要自己回頭看
+        線才知道差在哪，而那正是這一輪在收的那種「畫面說一半」。
+
+        句子由**線**組出來（`roi` / `reference_region` 是線水合的值，
+        `reference_source` 是那顆圓埠），所以它不可能跟畫布不一致。參照那一塊
+        怎麼稱呼問卡片自己（`GlvStatsStep.reference_label`）—— 面板、
+        `ctx.meta`、這句話三個地方同一份字。
+
+        例：``measuring epi_center, compared against epi_others``、
+        ``measuring epi, box by box``、
+        ``measuring the image, compared against the image @ ref``。
+        """
+        node = self.nodes.get(str(node_id))
+        if node is None or node.step != "glv_stats":
+            return ""
+        params = dict(node.params)
+        rois = [r.strip() for r in str(params.get("roi", "") or "").split(",")
+                if r.strip()]
+        # **沒挑區域講「the image」**，跟卡片自己那幾句話一字不差
+        # （`glv_stats` 的 warn、`compares` 的鍵、`cd` 的訊息都用這個字）。
+        # 這句話裡它會跟參照那半邊並排出現，兩種寫法會讀起來像兩件事。
+        parts = ["measuring %s" % (" and ".join(rois) if rois else "the image")]
+        if str(params.get("across_boxes", POOLED) or POOLED) == EACH_BOX:
+            parts.append("box by box")
+        label = get_step("glv_stats").reference_label(params)
+        if label:
+            parts.append("compared against %s" % label)
+        return ", ".join(parts)
+
+    def glv_compares_across_images(self, node_id: str) -> bool:
+        """參照那顆**流**埠接了線嗎 —— 三顆 preset 鈕不覆蓋的那一軸（F67 續）。
+
+        為什麼它不進 :meth:`glv_intent`：跟另一張圖比是**疊在**那三種形狀上的
+        第二個問題（同一塊 patch vs ref 的那一塊），不是第四種形狀 —— 把它算進
+        去的話，最常見的一種設定會顯示成「custom」，而 custom 應該留給真的對不
+        上的東西。但畫面不能因此少講一件事，所以 note 會把整句話說出來。
+        """
+        node = self.nodes.get(str(node_id))
+        if node is None or node.step != "glv_stats":
+            return False
+        return bool(str(node.params.get("reference_source", "") or "").strip())
+
+    def glv_intent_note(self, node_id: str) -> str:
+        """那排 preset 底下那一行字（沒有話要說就是空字串）—— F67 續。
+
+        規則只有三句，而它們合起來是一條不變量：**鈕 ＋ 這句話 ＝ 這張卡真的
+        在做的事**。
+
+        =============================  ========================================
+        還沒接 ``roi``                 講怎麼開始（三顆鈕這時是灰的）
+        對不上任何一顆（custom）       ``custom - <現在真的在做什麼>``
+        對得上、但接了參照**流**       整句話 —— 那一軸三顆鈕不覆蓋
+        =============================  ========================================
+
+        住在 model 而不是 `StudioWindow`：這是**內容**（要說什麼），而
+        `studio.py` 留給接線（`CLAUDE.md` §4）。順帶讓它測得起來 —— 80 種
+        排列組合各斷言一次，不必為了讀一行字開 80 次視窗。
+        """
+        node = self.nodes.get(str(node_id))
+        if node is None or node.step != "glv_stats":
+            return ""
+        if not self._glv_region_edges(node_id, "roi"):
+            return "Wire a Region card into “Region” first."
+        words = self.glv_wiring_words(node_id)
+        if self.glv_intent(node_id) == GLV_INTENT_CUSTOM:
+            return "custom - %s." % words
+        if self.glv_compares_across_images(node_id):
+            # 對得上某一顆鈕，但那顆鈕不覆蓋「跟哪一張圖比」——
+            # 少講一件事跟講錯一件事一樣糟。
+            return "%s." % words
+        return ""
 
     def apply_glv_intent(self, node_id: str, intent: str) -> bool:
         """套一個 preset：只動 roi / reference_region 的線與 reference /
         across_boxes 兩格，**一次 Ctrl+Z 全還原**（compound）。
 
         preset (1) 是使用者 2026-08-27 拍板的**現行正確寫法**：roi 接
-        `<n>_center`、reference="another region"、reference_region 接
-        `<n>_others`（兩條虛線、同一個 producer）—— 工作單字面的
-        REF_OTHERS+_center 會派生出沒人產的 `<n>_center_others`，不用。
+        `<n>_center`、reference_region 接 `<n>_others`（兩條虛線、同一個
+        producer）。F67 之後那就是全部 —— 「跟誰比」那一格沒有了，
+        **接了那條線就是在比**。
         套不上（沒有 roi 線、producer 沒那顆埠）回 False，什麼都不動。
         """
         nid = str(node_id)
@@ -1342,19 +1483,17 @@ class RecipeModel:
                 for e in list(self._glv_region_edges(nid, "roi")):
                     self.remove_edge(e.src, nid, e.src_out, "roi")
                 self.add_edge(producer, nid, roi_port, "roi")
-            # 藏起來的參數掛著線＝畫布說謊 —— 不是 defect_box 就把參照線清掉。
+            # 不是 defect_box 就把參照線清掉 —— F67 之後那條線**就是**
+            # 「在跟誰比」，留著它等於 preset 講一句話、卡片做另一件事。
             for e in list(self._glv_region_edges(nid, "reference_region")):
                 self.remove_edge(e.src, nid, e.src_out, "reference_region")
             if str(intent) == "defect_box":
                 self.add_edge(producer, nid, others_name(base),
                               "reference_region")
-                self.set_param(nid, "reference", REF_REGION)
                 self.set_param(nid, "across_boxes", POOLED)
             elif str(intent) == "oddest_box":
-                self.set_param(nid, "reference", REF_NONE)
                 self.set_param(nid, "across_boxes", EACH_BOX)
             else:
-                self.set_param(nid, "reference", REF_NONE)
                 self.set_param(nid, "across_boxes", POOLED)
         return True
 

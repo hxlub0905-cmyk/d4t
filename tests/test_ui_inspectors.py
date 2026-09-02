@@ -760,7 +760,7 @@ def test_the_numbers_on_the_plot_are_short_and_keep_their_direction(qapp):
         glv = get_step("glv_stats")
         p = glv.validate_params({
             "source": "test", "metrics": "glv_median",
-            "reference": "another region", "reference_region": "mg",
+            "reference_region": "mg",
             "compare_metrics": compare_metrics, "stat": stat})
         return {n: {"metric": m, "stat": s}
                 for n, m, s in cmp_feature_specs(p)}
@@ -840,12 +840,10 @@ def test_the_gray_level_tab_says_what_it_is_showing(qapp):
     plain = run()
     assert plain.tab_title() == "GLV · epi on test"
 
-    beside = run(reference="another region", reference_region="mg",
-                 compare_metrics="delta")
+    beside = run(reference_region="mg", compare_metrics="delta")
     assert beside.tab_title() == "GLV · epi vs mg"
 
-    across = run(reference="another region on another stream",
-                 reference_source="ref", reference_region="mg",
+    across = run(reference_source="ref", reference_region="mg",
                  compare_metrics="delta")
     assert across.tab_title() == "GLV · epi vs mg @ ref"
     assert "compared against mg @ ref" in across.tab_tooltip()

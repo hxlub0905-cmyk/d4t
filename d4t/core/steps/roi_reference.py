@@ -100,7 +100,9 @@ from ._util import (
     FEATURE_PREFIX_PATTERN, drop_edge_boxes, drop_edge_specs, ensure_gray,
     PICK_NONE, output_prefix_spec, pick_defect_box, pick_rule_of,
     pick_rule_specs, prefix_features, prefix_names, region_family,
-    region_fact_names, region_fact_specs, region_facts, region_role_of,
+    REGION_FACT_HELP, region_fact_names, region_fact_specs, region_facts,
+    region_role_of,
+    region_spec_maker,
     require_image, set_region_family,
     LIMIT_MAX_BOXES,
 )
@@ -248,8 +250,9 @@ class RoiReferenceStep(Step):
             "other one as the baseline to compare it against.")
     params = [
         ParamSpec(
-            name="method", type="choice", default=METHOD_PROFILE,
+            name="method", type="chip_choice", default=METHOD_PROFILE,
             choices=list(METHODS), section="1 · How to find them",
+            icons=["src_stripes", "src_cell", "src_layout"],
             label="Find them by",
             choice_help={
                 METHOD_GDS: "One layer of the layout, from a GDS export. Use "
@@ -363,6 +366,28 @@ class RoiReferenceStep(Step):
     reads = ["test"]
     writes: List[str] = []
     features_out = list(_GDS_FEATURES)
+    #: 只有 GDS 那一支自己的兩個 —— 另外兩支折進來的由 :meth:`feature_help`
+    #: **問實作類別**，不在這裡抄第二份（抄的那一份會漂，而漂了畫面上看起來
+    #: 完全正常）。
+    FEATURE_HELP = dict(
+        REGION_FACT_HELP,
+        layout_ok="1 when the layout export had something for this defect",
+        layout_layers="how many layers it carried")
+
+    @classmethod
+    def feature_help(cls):
+        """三個 method 的**聯集** —— 這張卡是它們共同的門面（F29）。
+
+        使用者在畫面上看到的卡是「Reference regions」，而寫出 ``cross_count``
+        的是折進來的那一支。少了這一段，同一張表上就有幾列永遠空著 ——
+        而它們正是使用者最需要一句話的那幾個診斷數字。
+        """
+        out = dict(cls.FEATURE_HELP)
+        for method in METHODS:
+            impl = _impl(method)
+            if impl is not None:
+                out.update(impl.feature_help())
+        return out
 
     # ---- 宣告 ---------------------------------------------------------------
     @classmethod
@@ -414,14 +439,7 @@ class RoiReferenceStep(Step):
         own = str(params.get("output_prefix", "") or "").strip()
         regions = cls.resolve_regions_out(params)
 
-        def spec(base, region="", metric=""):
-            return FeatureSpec(
-                name=prefix_names(own, [base])[0], card=cls.key, base=base,
-                region=region,
-                region_index=(regions.index(region) if region in regions
-                              else -1),
-                region_role=(region_role_of(region) if region else ""),
-                own=own, metric=metric or base, family="region")
+        spec = region_spec_maker(cls.key, own, regions)
 
         out: List[FeatureSpec] = []
         if _method_of(params) == METHOD_GDS:

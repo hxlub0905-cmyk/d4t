@@ -186,7 +186,7 @@ PARAM_TYPES = ("int", "float", "bool", "str", "expr",
                "choice", "image_key",
                "image_keys", "curve", "template", "multi_choice",
                "metric_chips", "metric_choice", "channel_map", "cell_rois",
-               "region_key", "region_keys", "icon_choice")
+               "region_key", "region_keys", "chip_choice")
 
 #: ``ParamSpec.choices_from`` 認得的鍵：**執行期才知道的選單**（F15-2）。
 #:
@@ -205,6 +205,10 @@ RUNTIME_CHOICES = ("sources", "source_images", "source_columns",
                    "main_columns")
 
 #: 值是**影像流名**的型別（畫布上的圓埠 + 實線）。
+#: 一顆輸入埠的**角色**（F68）—— 見 :attr:`ParamSpec.role`。
+MEASURE, REFERENCE = "measure", "reference"
+PORT_ROLES = (MEASURE, REFERENCE)
+
 IMAGE_TYPES = ("image_key", "image_keys")
 
 #: 值是**具名區域名**的型別（畫布上的菱形埠 + 虛線；F12）。
@@ -231,6 +235,20 @@ FEATURE_TYPES = ("expr", "feature_key", "feature_keys")
 #: 分數的時候才會發現，那時候他已經不記得問題出在三張卡以前的一個命名。
 #: 所以擋在打字的當下（鐵則 4：壞值不准跑到演算法裡）。
 STREAM_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
+
+#: ``show_when`` 裡代表「**這一格有值就算數**」的萬用值（F67，2026-09-01）。
+#:
+#: 一般的 ``show_when`` 問的是「那一格等於哪幾個值」，而接線型的參數
+#: （``image_key`` / ``region_key``）答不出那種問題：它們的值是**使用者拉了
+#: 哪一條線**，名字每一份 recipe 都不一樣。GLV 的「跟誰比」因此曾經需要一格
+#: 下拉，把「有沒有接線」複述一遍 —— 而複述出來的那一份會跟線不一致
+#: （鐵則 10：資料從哪來由線決定）。
+#:
+#: 寫法：``show_when=("reference_region", (ANY_VALUE,))``
+#: ＝ 那一格接了東西（非空）才顯示這一列。要「兩格任一有值」就分成兩條
+#: ``show_when`` 是不行的（多條是 and）—— 那種情形請在卡片上開一個
+#: 衍生的唯讀參數，或者兩列各自跟著自己那一格。
+ANY_VALUE = "*"
 
 
 
@@ -269,13 +287,36 @@ def show_when_conditions(show_when: Any) -> List[Tuple[str, Tuple[Any, ...]]]:
     一張之後，``vertical_width`` 那幾格同時屬於「``method`` 是 profile」與
     「``directions`` 含直的」兩個條件。少了 and 的話只剩兩條路 —— 把條件揉進
     卡片自己的程式碼（於是 UI 與引擎各有一份「這一格算不算數」），或者不合併。
+
+    **一條條件的「參數名」可以是一串名字**（F67）—— 那一串是 **or**：
+
+        show_when=((("reference_region", "reference_source"), (ANY_VALUE,)),)
+
+    ＝「那兩顆埠**隨便哪一顆**接了線」。同樣是被逼出來的：GLV 的「跟誰比」
+    在 F67 之後由兩顆埠決定（見 `glv_stats._reference_of`），而
+    「Compare their / Report」那兩列問的是**有沒有在比**，不是問其中某一顆。
+    少了 or 的話又只剩那兩條老路（把規則抄一份進 UI，或者留著那格複述線的
+    下拉）。條件與條件之間仍然是 and，名字與名字之間才是 or。
     """
     if not show_when:
         return []
-    # ``("method", ("a", "b"))`` 的第一格是字串；多條的第一格是一個 tuple。
+    # ``("method", ("a", "b"))`` 的第一格是字串；多條的第一格是一串名字
+    # （單一名字的 tuple ＝ or 那種寫法，見上）或一個 ``(名字, 值)`` 對。
     if isinstance(show_when[0], str):
         return [(str(show_when[0]), tuple(show_when[1]))]
-    return [(str(name), tuple(values)) for name, values in show_when]
+    return [(_condition_names(name), tuple(values))
+            for name, values in show_when]
+
+
+def _condition_names(name: Any) -> Any:
+    """一條條件的參數名 —— 字串原樣、一串名字收成 tuple（F67 的 or）。
+
+    **字串留成字串**：`tests/region_cards.py` 與其他讀這張表的人用
+    ``name == "method"`` 篩，全部改成 tuple 等於為了一個新寫法去動所有舊的。
+    """
+    if isinstance(name, str):
+        return str(name)
+    return tuple(str(n) for n in name)
 
 
 def param_visible(show_when: Any, params: Optional[Dict[str, Any]]) -> bool:
@@ -289,7 +330,10 @@ def param_visible(show_when: Any, params: Optional[Dict[str, Any]]) -> bool:
     values = params or {}
     for name, allowed in show_when_conditions(show_when):
         want = {str(v) for v in allowed}
-        got = str(values.get(name, ""))
+        # 一串名字＝**or**（F67）：其中一個成立這條就成立。逐格取值再併起來，
+        # 因為判斷本身（成員比對／`ANY_VALUE`）對兩種寫法要一字不差。
+        names = (name,) if isinstance(name, str) else tuple(name)
+        got = ",".join(str(values.get(n, "")) for n in names)
         # **成員比對，不是整串相等**（F37）。多選那幾個型別
         # （`multi_choice` / `metric_chips` / `image_keys` / `region_keys`）
         # 的值是一個逗號清單，而「勾了 pictures 才顯示這一格」問的是
@@ -297,10 +341,17 @@ def param_visible(show_when: Any, params: Optional[Dict[str, Any]]) -> bool:
         # ``"pictures"``，那一格就永遠不出現 —— 而它會有一個預設值照樣生效，
         # 也就是一個使用者看不到卻在作用的設定。
         #
-        # 對單值型別（`choice` / `icon_choice` / `bool`）**逐位元組等價**：
+        # 對單值型別（`choice` / `chip_choice` / `bool`）**逐位元組等價**：
         # 沒有逗號的字串切出來就是它自己。2026-08-26 稽核過 registry 裡每一個
         # `show_when`，目標全部是單值型別。
-        if not ({tok.strip() for tok in got.split(",")} & want):
+        toks = {tok.strip() for tok in got.split(",")}
+        # ``ANY_VALUE``＝「有值就算數」（F67）。接線型的參數（``image_key`` /
+        # ``region_key``）的值是使用者拉了哪一條線，列不出允許值。
+        if ANY_VALUE in want:
+            if any(toks):
+                continue
+            return False
+        if not (toks & want):
             return False
     return True
 
@@ -326,23 +377,39 @@ class ParamSpec:
     min: Optional[float] = None
     max: Optional[float] = None
     choices: Optional[List[str]] = None
-    #: ``icon_choice`` 專用：每一個 choice 配一個圖示名（一一對應）。
+    #: ``chip_choice`` 專用：每一個 choice 配一個圖示名（一一對應）。
     #:
-    #: 為什麼要一個新型別而不是「choice 加一個旗標」（F11 Region-2）：
-    #: 使用者的話是「我不希望 profile 設定頁面那麼多**文字**，能用圖就用圖」。
-    #: 而 ``place`` 的五個選項是 ``crossing`` / ``beside_vertical`` /
-    #: ``between_horizontal`` … —— 那五個英文詞講的是**五個畫得出來的形狀**，
-    #: 用一排小圖就答完了，下拉選單則要求使用者先把詞翻譯成圖再選。
+    #: 為什麼一格選項要有圖（F11 Region-2 起）：使用者的話是「我不希望 profile
+    #: 設定頁面那麼多**文字**，能用圖就用圖」。``place`` 的五個值
+    #: （``crossing`` / ``beside_vertical`` / ``between_horizontal`` …）講的是
+    #: **五個畫得出來的形狀** —— 下拉選單要求使用者先把那個英文詞翻譯成一張圖
+    #: 再選，一排小圖是直接把那張圖給他。
+    #:
+    #: **字要留著**（F68 第二輪，使用者：「我希望設定欄這邊也是能像下方一樣
+    #: 膠囊 icon 配文字，這樣 user 比較會有感覺」）。這一輪之前有兩種長相：
+    #: ``icon_choice`` 只有圖、名字退到 tooltip。它現在沒有了 —— 同一個面板上
+    #: 兩種長相，使用者要學兩次，而**圖是掃視時的錨點，字才是意思**。
     #:
     #: **只有「不看資料就畫得出來」的選項適用。** ``vertical_select``（最亮的
-    #: 那一組是哪一組）看的是這張影像，畫不出通用的圖示 —— 那種要畫在影像上，
-    #: 不是畫在按鈕上。
+    #: 那一組是哪一組）看的是這張影像 —— 那一排的圖畫的因此是**排名本身**
+    #: （一把由亮到暗的梯子，選中的那一階伸出去），不是某一張影像。
+    #: 圖真的畫不出來的時候不要硬畫：裝飾會讓使用者以為那裡有意思可以讀。
     #:
     #: 圖示名要在 ``ui.widgets.GLYPH_ICONS`` 裡（``core`` 不 import Qt，所以那條
     #: 檢查在 UI 那一側的測試，見 `test_card_invariants`）。
     icons: Optional[List[str]] = None
-    #: ``icon_choice`` 專用：每一個 choice 一句 tooltip。圖示看得懂形狀，
-    #: 但「為什麼要選它」還是要有地方講 —— 只是那個地方不該佔畫面。
+    #: ``chip_choice`` 專用：**值 → 顯示出來的字**，只填 `_spell` 拼錯的那幾個。
+    #:
+    #: 理由跟 :attr:`label` 一字不差（「參數名是 recipe 的鍵，不是給人看的字」
+    #: ——F7-9），只是換到**值**上：``zscore`` / ``glv_band`` / ``nlm`` /
+    #: ``topn`` 是 recipe 的鍵，而膠囊上要寫的是 ``Z-score`` / ``GLV band`` /
+    #: ``NLM`` / ``Top N``。沒填的值照 ``value.replace("_", " ").capitalize()``
+    #: 拼 —— **所以這張表只放例外**，不要把整排值再抄一份（抄出來的那一份會
+    #: 漂走，而漂走的症狀是改了 choices 卻沒人發現字還是舊的）。
+    choice_labels: Optional[Dict[str, str]] = None
+    #: ``chip_choice`` 專用：每一個 choice 一句 tooltip。
+    #: 圖示看得懂形狀，但「為什麼要選它」還是要有地方講 —— 只是那個地方不該
+    #: 佔畫面。
     choice_help: Optional[Dict[str, str]] = None
     unit: str = ""
     label: str = ""
@@ -389,6 +456,19 @@ class ParamSpec:
     #: （新卡的輸入本來就該是空的）—— 一清空就推不回來了。宣告看的是**事實**，
     #: 跟值無關。沒宣告的卡直接註冊失敗，所以之後加的每一張卡都躲不掉。
     direction: str = ""
+    #: 這顆埠在這張卡上**扮演什麼角色**（F68，2026-09-01）：``"measure"``
+    #: （要量的那一個）／``"reference"``（拿來比的那一個）／``""``（沒有角色
+    #: 之分的卡）。只有輸入埠用得到。
+    #:
+    #: 為什麼要一個欄位，而不是從參數名推：``roi`` 與 ``reference_region``
+    #: 在畫布上是**逐位元組相同的兩顆菱形**（`canvas._draw_port` 只拿得到
+    #: `kind`），而唯一的線索——左邊那 52px 的標籤——**接上線之後就變成區域
+    #: 名字**，角色的字消失。於是使用者要拖線的時候，正好沒有任何東西告訴他
+    #: 該拖哪一顆；拖歪了兩個都是合法的區域參數，`_connect_region` 攔不到。
+    #:
+    #: 宣告不推導，跟 :attr:`direction` 同一個理由：推導看的是**值**，而值是
+    #: 會被清空的（剛加進來的卡輸入本來就是空的）—— 一清空就推不回來了。
+    role: str = ""
     #: 這一列預設收起來，按「Show advanced settings」才出現（F8 第六輪）。
     #:
     #: 跟 ``section`` 的差別是**軸不一樣**：``section`` 講「這一列在回答哪個
@@ -444,17 +524,29 @@ class ParamSpec:
         if not str(self.help).strip():
             raise ParamError(f"parameter '{self.name}': help (a plain-language "
                              f"description) must not be empty")
-        if self.type == "icon_choice":
+        if self.type == "chip_choice":
             if len(self.icons or []) != len(self.choices or []):
                 raise ParamError(
-                    f"parameter '{self.name}': icon_choice needs one icon per "
+                    f"parameter '{self.name}': chip_choice needs one icon per "
                     f"choice ({len(self.choices or [])} choices, "
                     f"{len(self.icons or [])} icons)")
         elif self.icons:
-            raise ParamError(f"parameter '{self.name}': only icon_choice takes "
-                             f"icons")
-        if (self.type in ("choice", "icon_choice", "multi_choice",
-                          "metric_chips", "metric_choice")
+            raise ParamError(f"parameter '{self.name}': only chip_choice "
+                             f"takes icons")
+        if self.choice_labels:
+            if self.type != "chip_choice":
+                raise ParamError(f"parameter '{self.name}': only chip_choice "
+                                 f"takes choice_labels")
+            unknown = [v for v in self.choice_labels
+                       if v not in (self.choices or [])]
+            if unknown:
+                # 打錯的那一個**不會叫**，它只是安靜地不生效 —— 而畫面上那顆
+                # 膠囊寫的是拼出來的字，看起來完全正常。
+                raise ParamError(
+                    f"parameter '{self.name}': choice_labels names values that "
+                    f"are not choices: {unknown}")
+        if (self.type in ("choice", "chip_choice",
+                          "multi_choice", "metric_chips", "metric_choice")
                 and not self.choices and not self.choices_from):
             raise ParamError(f"parameter '{self.name}': type '{self.type}' "
                              f"requires choices (or choices_from)")
@@ -464,12 +556,21 @@ class ParamSpec:
                     f"parameter '{self.name}': choices_from="
                     f"'{self.choices_from}' is not one of {RUNTIME_CHOICES}")
             if self.type not in ("str", "multi_choice"):
-                # `choice` / `icon_choice` 的 validate 會擋掉不在清單裡的值，
+                # `choice` / `chip_choice` 的 validate 會擋掉不在清單裡的值，
                 # 而執行期的清單在讀 recipe 的當下是空的 —— 見 choices_from。
                 raise ParamError(
                     f"parameter '{self.name}': choices_from only applies to "
                     f"'str' and 'multi_choice' parameters (this one is "
                     f"'{self.type}')")
+        if self.role and self.role not in PORT_ROLES:
+            raise ParamError(
+                f"parameter '{self.name}': unknown role '{self.role}' "
+                f"(allowed: {PORT_ROLES}, or leave it empty)")
+        if self.role and self.direction != "in":
+            raise ParamError(
+                f"parameter '{self.name}': role only applies to input ports - "
+                f"it says which of this card's ports this one is, and only "
+                f"inputs get confused with each other")
         if self.type in IMAGE_TYPES:
             if self.direction not in ("in", "out"):
                 raise ParamError(
@@ -595,7 +696,7 @@ class ParamSpec:
                         f"not a list (got {v!r})")
                 if not v:
                     v = str(self.default)
-            elif self.type in ("choice", "icon_choice"):
+            elif self.type in ("choice", "chip_choice"):
                 v = str(value)
                 if v not in (self.choices or []):
                     raise ParamError(
@@ -994,6 +1095,30 @@ class Step(ABC):
         """
         return []
 
+    #: 這張卡寫出來的每個數字**一句話是什麼** —— 見 :meth:`feature_help`。
+    #: 卡片只要多一個類別屬性，不必寫一支方法。
+    FEATURE_HELP: ClassVar[Dict[str, str]] = {}
+
+    @classmethod
+    def feature_help(cls) -> Dict[str, str]:
+        """:data:`FEATURE_HELP` 的取用口（2026-09-01）。
+
+        鍵是**去掉前綴的那一段**（`FeatureSpec.base`／`metric`，例 ``boxes``、
+        ``cross_pitch_x_px``），值是一句白話。UI 的「What it is」那一欄讀它。
+
+        為什麼由卡片答
+        --------------
+        以前只有 GLV 那一族的名字有解釋（`ui.widgets.feature_gloss` 只認得
+        ``glv`` / ``cmp`` 兩個 family），所以同一張表上有些列有一句話、有些
+        整格空白 —— 使用者 2026-09-01 的原話是「Feature 這邊顯示有點亂……有些
+        解釋在中間」。在 UI 那邊補一張表是最快的做法，也是最錯的：那句話會跟
+        卡片本人的說明漂開，而漂開的時候畫面上看起來完全正常。
+
+        沒寫的照舊留白 —— **少一點資訊，不會是錯的資訊**（同 `feature_parts`
+        的退化原則）。
+        """
+        return dict(cls.FEATURE_HELP)
+
     @classmethod
     def feature_parts(cls, params: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         """每個宣告出來的名字 → **它是怎麼組出來的**（F37 A4）。
@@ -1285,7 +1410,8 @@ class Step(ABC):
                     "name": p.name, "type": p.type, "default": p.default,
                     "help": p.help, "min": p.min, "max": p.max,
                     "choices": p.choices, "icons": p.icons,
-                    "choice_help": p.choice_help, "unit": p.unit,
+                    "choice_help": p.choice_help,
+                    "choice_labels": p.choice_labels, "unit": p.unit,
                     "label": p.label or p.name,
                     "pattern": p.pattern,
                     # ``("method", ("percentile",))`` → JSON-safe 的**一串
@@ -1299,6 +1425,7 @@ class Step(ABC):
                     "section": p.section,
                     "advanced": p.advanced,
                     "direction": p.direction,
+                    "role": p.role,
                     "extent": p.extent,
                     "row_kind": p.row_kind,
                     "choices_from": p.choices_from,

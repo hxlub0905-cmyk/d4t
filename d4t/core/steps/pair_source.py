@@ -247,7 +247,10 @@ class PairSourceStep(Step):
                   "stored in the recipe, so the same recipe runs on the next "
                   "lot.")),
         ParamSpec(
-            name="match", type="choice", default="position", choices=list(MATCHES),
+            name="match", type="chip_choice", default="position",
+            choices=list(MATCHES),
+            icons=["match_position", "match_id", "match_order"],
+            choice_labels={"id": "Defect ID"},
             label="Match by",
             help=("position = nearest defect within the tolerance, in wafer "
                   "coordinates (the usual choice). id = same DEFECTID on both "
@@ -324,6 +327,13 @@ class PairSourceStep(Step):
     reads: List[str] = []
     writes = ["paired"]
     features_out = ["pair_found", "match_dist_nm", "match_ambiguous"]
+    FEATURE_HELP = {
+        "pair_found": "1 when the other lot had a partner for this defect",
+        "match_dist_nm": "how far away that partner was, nm",
+        "match_ambiguous": "1 when a second candidate was almost as close",
+        "pair_die_rank": "where it ranks inside its die, by score",
+        "pair_die_total": "how many defects that die has",
+    }
 
     @classmethod
     def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:

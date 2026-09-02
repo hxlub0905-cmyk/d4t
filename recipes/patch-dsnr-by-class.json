@@ -1,6 +1,6 @@
 {
   "recipe_id": "patch_dsnr_by_class",
-  "version": 2,
+  "version": 3,
   "app_version": "0.1.0.dev0",
   "author": "d4t",
   "description": "Patch lot: denoise, find the repeating cell, then measure focus and the gray-level SNR of the odd cell against the same cells on the reference image. Three questions in order: focus, then SNR, then how many gray levels the difference is worth. Writes a report folder and a box plot of every number the decision asks about, one box per class. ONE thing has to be set up by hand: the Reference regions card needs a template and the regions drawn on it - a template is an image, it cannot be written into a recipe. Select that card and use “Edit template & regions…” once on your own data.",
@@ -73,7 +73,6 @@
         "metrics": "glv_mean,glv_median,glv_std",
         "across_boxes": "each box",
         "judge": "glv_mean",
-        "reference": "another region on another stream",
         "reference_region": "gc_others",
         "reference_source": "ref",
         "stat": "glv_mean",

@@ -67,12 +67,18 @@ class Shim:
 
     只有兩樣東西是假的：`_status`（把狀態列的話收進 list）與 `_gds_layers`
     （`_autofill_new_card` 會讀它，真的視窗上是掛上來的 GLAS 匯出）。
+
+    ⚠ ``selected_node`` 是**一個值不是一支方法**，所以 `__getattr__` 借不到它
+    —— 這裡明講「這個殼上沒有選著任何卡」。接線那幾支收尾會問一次
+    （`_resync_params`：動到的是不是選著的那一張），而在這裡答案永遠是「不是」，
+    於是它什麼都不做 —— 這個殼本來就沒有設定欄可以重畫。
     """
 
     def __init__(self, model: RecipeModel) -> None:
         self.model = model
         self.messages: list = []
         self._gds_layers: list = []
+        self.selected_node = ""
 
     def _status(self, text: str, level: str = "info") -> None:
         self.messages.append(str(text))

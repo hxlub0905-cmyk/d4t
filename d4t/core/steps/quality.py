@@ -32,6 +32,11 @@ class FocusQualityStep(MultiSourceStep):
     reads = ["test"]
     writes: List[str] = []
     features_out = ["focus_lapvar", "focus_tenengrad", "focus_fft"]
+    FEATURE_HELP = {
+        "focus_lapvar": "sharpness: variance of the Laplacian",
+        "focus_tenengrad": "sharpness: mean gradient energy",
+        "focus_fft": "sharpness: share of high frequencies",
+    }
 
     @classmethod
     def base_specs(cls, params: Dict[str, Any]):

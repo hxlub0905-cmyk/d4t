@@ -381,8 +381,9 @@ def test_the_mask_card_offers_the_regions_defined_upstream(window):
 
     window.select_node(mask)
     editor = window.param_form.editor("regions")
-    assert isinstance(editor, QLineEdit) and editor.isReadOnly(), \
-        "區域的來源只在畫布上決定（F12）"
+    from d4t.ui.wiring_slot import WiringSlot
+    assert isinstance(editor, WiringSlot), \
+        "區域的來源不是一個打得進去的文字框（F12 ＋ F68 的插槽）"
 
     # 拉一條線過去 = 挑了那個區域，而那件事在參數上留下的字一模一樣。
     window._on_edge_added(tpl, mask, "epi", "regions")
@@ -407,7 +408,8 @@ def test_a_region_name_from_the_recipe_survives_even_if_upstream_changed(window)
     window.select_node(mask)
 
     editor = window.param_form.editor("regions")
-    assert isinstance(editor, QLineEdit) and editor.isReadOnly()
-    assert editor.text() == "gone"
+    from d4t.ui.wiring_slot import WiringSlot
+    assert isinstance(editor, WiringSlot)
+    assert editor.text_value() == "gone"
     assert [e for e in window.model.edges
             if e.dst == mask and is_region_edge(e, window.model.nodes)] == []
