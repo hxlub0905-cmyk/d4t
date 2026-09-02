@@ -6454,7 +6454,27 @@ def feature_gloss(name: str, about: Optional[Dict[str, str]] = None,
         if body == "—":
             body = metric_face(mid)[1]
         return FEATURE_ABSOLUTE, body
-    return "", ""
+    # 其餘的一句話**由卡片自己說**（`Step.FEATURE_HELP`，2026-09-01）。
+    # 在這裡補一張表是最快的做法，也是最錯的：那句話會跟卡片本人的說明漂開，
+    # 而漂開的時候畫面上看起來完全正常（`CLAUDE.md` §0）。
+    said = _card_says(spec)
+    return (FEATURE_ABSOLUTE, said) if said else ("", "")
+
+
+def _card_says(spec: Any) -> str:
+    """``spec`` 的那張卡怎麼形容這個數字（查不到就空字串）。"""
+    try:
+        from ..core.pipeline import get_step
+
+        table = get_step(str(getattr(spec, "card", "") or "")).feature_help()
+    except Exception:                      # noqa: BLE001 — 顯示用，不能擋畫面
+        return ""
+    for key in (getattr(spec, "base", ""), getattr(spec, "metric", ""),
+                getattr(spec, "name", "")):
+        got = str(table.get(str(key or ""), "") or "")
+        if got:
+            return got
+    return ""
 
 
 #: 這幾個不是統計量，`metric_formula` 答不出來 —— 而它們每一顆都在。

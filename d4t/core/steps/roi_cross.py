@@ -46,7 +46,10 @@ from ._util import (
     FEATURE_PREFIX_PATTERN, drop_edge_boxes, drop_edge_specs,
     PICK_NONE, output_prefix_spec, pick_defect_box, pick_rule_of,
     pick_rule_specs, prefix_features, prefix_names, region_family,
-    region_fact_names, region_fact_specs, region_facts, region_role_of,
+    REGION_FACT_HELP, SHARED_FEATURE_HELP, region_fact_names,
+    region_fact_specs, region_facts,
+    region_role_of,
+    region_spec_maker,
     require_image, set_region_family,
     LIMIT_MAX_BOXES,
 )
@@ -418,6 +421,17 @@ class RoiCrossStep(Step):
                     "cross_filled", "cross_dist_px", "cross_pitch_ratio_x",
                     "cross_pitch_ratio_y", "cross_edge_dropped",
                     "locate_conf", "locate_ok"]
+    FEATURE_HELP = dict(
+        REGION_FACT_HELP,
+        cross_count="how many crossings were found",
+        cross_pitch_x_px="spacing of the up-and-down stripes, px",
+        cross_pitch_y_px="spacing of the left-to-right stripes, px",
+        cross_filled="how many boxes were added where a stripe was missing",
+        cross_dist_px="how far the picked crossing is from the middle, px",
+        cross_pitch_ratio_x="measured spacing over the one you typed",
+        cross_pitch_ratio_y="measured spacing over the one you typed",
+        cross_edge_dropped="how many boxes were dropped for touching the edge",
+        **SHARED_FEATURE_HELP)
 
     # ---- 宣告（給 lint / UI）------------------------------------------------
     @classmethod
@@ -439,15 +453,8 @@ class RoiCrossStep(Step):
         # 在 base 裡（`gds_epi_center_present`）——身分因此只有這裡答得出來。
         own = str(params.get("output_prefix", "") or "").strip()
 
-        def spec(base, region="", metric=""):
-            regions = cls.resolve_regions_out(params)
-            return FeatureSpec(
-                name=prefix_names(own, [base])[0], card=cls.key, base=base,
-                region=region,
-                region_index=(regions.index(region) if region in regions
-                              else -1),
-                region_role=(region_role_of(region) if region else ""),
-                own=own, metric=metric or base, family="region")
+        spec = region_spec_maker(cls.key, own,
+                                 cls.resolve_regions_out(params))
 
         names = list(cls.features_out)
         if pick_rule_of(params) == PICK_NONE:

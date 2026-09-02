@@ -124,6 +124,33 @@ measure 也是，而且我覺得他有一點太口語」）：三顆鈕變成同
 
 ---
 
+## F70：Feature 表上每一列長得一樣（2026-09-01）
+
+使用者：「Feature 這邊顯示有點亂，有些有上綴，有些解釋在中間」＋
+「記得就算是不同張 card 得到的 feature 寫法也要一致（增加可閱讀性）」。
+
+**亂在兩件量得出來的事**：
+
+1. **區域名印了兩次**：`region_others_present` 的 base 是**整串**、``region``
+   又是 `region_others`，於是畫面上是 `region_others_present`ᵣᵉᵍᶦᵒⁿ_ᵒᵗʰᵉʳˢ。
+   量測卡那邊早就是對的（`epi_glv_median` → base `glv_median` ＋ 上標 `epi`）
+   —— 同一件事在同一張表上有兩種長相。病根是那個 spec 工廠在三張 Region 卡裡
+   **各抄了一份**，三份裡有同一個 bug。收成 `_util.region_spec_maker` 一支，
+   規則一句話：**帶區域前綴的名字，base 是前綴後面那一段**。
+2. **中間那欄只有 GLV 有字**（`feature_gloss` 只認得 `glv` / `cmp` 兩個
+   family），所以 Region 卡那十五列、`cross_*`、`locate_*` 全部空白 ——
+   看起來像壞掉，其實是沒人寫過。新的 `Step.FEATURE_HELP` 讓**卡片自己說**
+   （在 UI 補一張表最快也最錯：那句話會跟卡片本人的說明漂開，而漂開時畫面
+   看起來完全正常）。現在 registry 裡**每一個特徵都答得出那一句**（67/67）。
+
+**跨卡一致**是使用者當場加的第三件事，而它是實際踩到的：`locate_ok` 一張卡寫
+「located the pattern」、另一張寫「located the cell」—— 而那兩張正是折進
+`roi_reference` 的同兩支，所以兩句話會排在**同一張表上**。同名的一句話因此
+住在 `_util.SHARED_FEATURE_HELP`（一份），並補兩支測試：同名不同句就紅、
+體例（小寫開頭、不加句號）不一致也紅。
+
+---
+
 ## F67：GLV 的「跟誰比」由線決定（2026-09-01）
 
 使用者：「GLV card 這邊的 ROI 接線 我覺得對 user 來說 還是會有點混淆

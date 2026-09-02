@@ -391,6 +391,22 @@ class CdMeasureStep(MultiSourceStep):
     ]
     reads = ["test"]
     writes: List[str] = []
+    FEATURE_HELP = {
+        "cd_median": "the CD itself: middle of all the measured widths",
+        "cd_mean": "average of the measured widths",
+        "cd_std": "line width roughness (LWR): spread of those widths",
+        "cd_min": "narrowest place - a necking",
+        "cd_max": "widest place - a bridge",
+        "cd_n": "how many lines were actually measured",
+        "cd_lines": "how many lines it tried",
+        "cd_edge_score": "how clean the edges were, 0 to 1",
+        "cd_axis_deg": "which way the card decided to measure, degrees",
+        "cd_bright": "1 when it measured the bright side, 0 the dark one",
+        "cd_median_nm": "the CD in nm (needs the pixel size)",
+        "cd_min_nm": "the narrowest place in nm",
+        "cd_max_nm": "the widest place in nm",
+        "cd_std_nm": "the roughness in nm",
+    }
     features_out = (list(ALWAYS) + list(REPORT_CHOICES)
                     + list(ALWAYS_BLOB) + list(SIZE_CHOICES))
 

@@ -116,7 +116,10 @@ from ..pipeline.step import (
 from ._util import (
     PICK_NONE, drop_edge_boxes, drop_edge_specs, output_prefix_spec,
     pick_defect_box, pick_rule_of, pick_rule_specs, prefix_features,
-    prefix_names, region_fact_names, region_fact_specs, region_facts,
+    prefix_names, REGION_FACT_HELP, SHARED_FEATURE_HELP,
+    region_fact_names, region_fact_specs,
+    region_facts,
+    region_spec_maker,
     region_family, region_role_of, require_image, set_region_family,
 )
 
@@ -275,6 +278,14 @@ class RoiTemplateStep(Step):
     reads = ["ref"]
     writes: List[str] = []
     features_out = list(_MATCH_FEATURES)
+    FEATURE_HELP = dict(
+        REGION_FACT_HELP,
+        match_score="how well the cell matched here, 0 to 1",
+        match_margin="best match over the runner-up (near 1 = not sure)",
+        match_structure="how much repeating structure this image has",
+        phase_x="where the grid starts, px (left/right)",
+        phase_y="where the grid starts, px (up/down)",
+        **SHARED_FEATURE_HELP)
 
     # ---- 宣告 ---------------------------------------------------------------
     @classmethod
@@ -299,14 +310,7 @@ class RoiTemplateStep(Step):
         own = str(params.get("output_prefix", "") or "").strip()
         regions = cls.resolve_regions_out(params)
 
-        def spec(base, region="", metric=""):
-            return FeatureSpec(
-                name=prefix_names(own, [base])[0], card=cls.key, base=base,
-                region=region,
-                region_index=(regions.index(region) if region in regions
-                              else -1),
-                region_role=(region_role_of(region) if region else ""),
-                own=own, metric=metric or base, family="region")
+        spec = region_spec_maker(cls.key, own, regions)
 
         return ([spec(n) for n in _MATCH_FEATURES]
                 + [spec(n, region=r, metric=f)

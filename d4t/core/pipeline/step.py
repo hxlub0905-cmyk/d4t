@@ -1095,6 +1095,30 @@ class Step(ABC):
         """
         return []
 
+    #: 這張卡寫出來的每個數字**一句話是什麼** —— 見 :meth:`feature_help`。
+    #: 卡片只要多一個類別屬性，不必寫一支方法。
+    FEATURE_HELP: ClassVar[Dict[str, str]] = {}
+
+    @classmethod
+    def feature_help(cls) -> Dict[str, str]:
+        """:data:`FEATURE_HELP` 的取用口（2026-09-01）。
+
+        鍵是**去掉前綴的那一段**（`FeatureSpec.base`／`metric`，例 ``boxes``、
+        ``cross_pitch_x_px``），值是一句白話。UI 的「What it is」那一欄讀它。
+
+        為什麼由卡片答
+        --------------
+        以前只有 GLV 那一族的名字有解釋（`ui.widgets.feature_gloss` 只認得
+        ``glv`` / ``cmp`` 兩個 family），所以同一張表上有些列有一句話、有些
+        整格空白 —— 使用者 2026-09-01 的原話是「Feature 這邊顯示有點亂……有些
+        解釋在中間」。在 UI 那邊補一張表是最快的做法，也是最錯的：那句話會跟
+        卡片本人的說明漂開，而漂開的時候畫面上看起來完全正常。
+
+        沒寫的照舊留白 —— **少一點資訊，不會是錯的資訊**（同 `feature_parts`
+        的退化原則）。
+        """
+        return dict(cls.FEATURE_HELP)
+
     @classmethod
     def feature_parts(cls, params: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         """每個宣告出來的名字 → **它是怎麼組出來的**（F37 A4）。

@@ -51,6 +51,11 @@ class AlignStep(Step):
     reads = ["test", "ref"]
     writes = ["ref_aligned"]
     features_out = ["align_dx", "align_dy", "align_score"]
+    FEATURE_HELP = {
+        "align_dx": "how far it moved, px (left/right)",
+        "align_dy": "how far it moved, px (up/down)",
+        "align_score": "how sure the match was, 0 to 1",
+    }
 
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:

@@ -64,6 +64,10 @@ class DenoiseStep(MultiStreamStep):
 
     key = "denoise"
     label = "Denoise"
+    FEATURE_HELP = dict(
+        MultiStreamStep.FEATURE_HELP,
+        removed_over_noise="how many sigmas of signal this card smoothed "
+                           "away (about 1 = only noise)")
     category = CATEGORY_IMAGE
     group = GROUP_ENHANCE
     help = ("Suppress image noise so the measurements that follow are "

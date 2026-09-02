@@ -105,6 +105,7 @@ class LoadPatchStep(Step):
     reads: List[str] = []
     writes = ["test", "ref"]     # ＝ DEFAULT_CHANNEL_MAP 的名字（靜態備援）
     features_out = ["n_channels"]
+    FEATURE_HELP = {"n_channels": "how many images this defect had"}
 
     @classmethod
     def item_filter(cls, params):
@@ -263,6 +264,7 @@ class LoadSingleStep(Step):
     #: recipe 匯出過含 `n_channels` 的 CSV，而分數表達式指得到它。一個常數特徵
     #: 的資訊量是零，但「同一份資料換一張卡就少一欄」的代價不是零。
     features_out = ["n_channels"]
+    FEATURE_HELP = {"n_channels": "how many images this defect had"}
 
     @classmethod
     def item_filter(cls, params):

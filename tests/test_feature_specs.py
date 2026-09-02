@@ -479,3 +479,119 @@ def test_enhance_pair_features_have_no_stream_on_purpose():
     assert by["test_clip_frac"].stream == "test"
     assert by["pair_level_delta"].stream == "", \
         "它講的是「這兩條之間」，掛在流名下面會是錯的"
+
+
+# --------------------------------------------------------------------------- #
+# 名字的長相與那一句話（①A，2026-09-01）
+#
+# 使用者：「Feature 這邊顯示有點亂，有些有上綴，有些解釋在中間。」
+# --------------------------------------------------------------------------- #
+def test_a_region_name_is_never_printed_twice():
+    """``region_others_present`` 的 base 是 **``present``**，不是整串。
+
+    以前 Region 那三張卡各抄了一份 spec 工廠，而三份裡有同一個 bug：base 是
+    整串、``region`` 又是區域名 —— 畫面上因此是
+    ``region_others_present``ᵣᵉᵍᶦᵒⁿ_ᵒᵗʰᵉʳˢ。量測卡那邊早就是對的
+    （``epi_glv_median`` → base ``glv_median`` ＋ 上標 ``epi``），所以同一件事
+    在同一張表上有兩種長相。
+    """
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import list_steps
+
+    bad = []
+    for cls in list_steps():
+        params = {p.name: p.default for p in cls.params}
+        try:
+            specs = cls.resolve_feature_specs(params)
+        except Exception:                      # noqa: BLE001 — 這條不管跑不跑得動
+            continue
+        for spec in specs:
+            if spec.region and spec.base.startswith(spec.region):
+                bad.append("%s: %s (base=%r, region=%r)"
+                           % (cls.key, spec.name, spec.base, spec.region))
+    assert not bad, "區域名印了兩次：\n  " + "\n  ".join(bad)
+
+
+def test_every_number_a_card_writes_can_say_what_it_is():
+    """**每一列都要有那一句話** —— 有些有、有些空白就是使用者說的「亂」。
+
+    以前只有 GLV 那一族答得出來（UI 的 `feature_gloss` 只認得 ``glv`` /
+    ``cmp``），所以 Region 卡那十幾列、`cross_*`、`locate_*` 全部空著。
+
+    ⚠ 那句話由**卡片**說（`Step.FEATURE_HELP`），不是 UI 自己維護一張表：
+    抄第二份的那一份會跟卡片本人的說明漂開，而漂開的時候畫面看起來完全正常。
+    """
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import list_steps
+
+    missing = []
+    for cls in list_steps():
+        params = {p.name: p.default for p in cls.params}
+        try:
+            specs = cls.resolve_feature_specs(params)
+        except Exception:                      # noqa: BLE001
+            continue
+        table = cls.feature_help()
+        for spec in specs:
+            if spec.family in ("glv", "cmp"):
+                continue                       # 那一族的公式住在 algo.glv
+            if not any(table.get(k) for k in (spec.base, spec.metric,
+                                              spec.name)):
+                missing.append("%s: %s" % (cls.key, spec.name))
+    assert not missing, ("這些數字說不出自己是什麼（補 `FEATURE_HELP`）：\n  "
+                         + "\n  ".join(missing))
+
+
+def _all_step_classes():
+    """**每一個** Step 子類 —— 含折進 `roi_reference` 的那兩支（它們不在
+    registry 裡，而它們寫的名字照樣會排進同一張表）。"""
+    import importlib
+    import pkgutil
+
+    import d4t.core.steps as pkg
+    from d4t.core.pipeline.step import Step
+
+    for mod in pkgutil.iter_modules(pkg.__path__):
+        importlib.import_module("d4t.core.steps." + mod.name)
+
+    def walk(cls):
+        for sub in cls.__subclasses__():
+            yield sub
+            for deeper in walk(sub):
+                yield deeper
+
+    return set(walk(Step))
+
+
+def test_the_same_number_is_described_the_same_way_everywhere():
+    """使用者 2026-09-01：「記得就算是不同張 card 得到的 feature 寫法也要一致
+    （增加可閱讀性）。」
+
+    這條是**實際發生過**才寫下來的：`locate_ok` 在一張卡上寫「located the
+    pattern」、另一張寫「located the cell」—— 而那兩張正是折進
+    `roi_reference` 的同兩支，所以那兩句話會排在**同一張表上**。
+
+    同名的一句話要住在 `_util.SHARED_FEATURE_HELP`（一份），不要兩張卡各寫。
+    """
+    import collections
+
+    said = collections.defaultdict(dict)
+    for cls in _all_step_classes():
+        for name, line in (cls.__dict__.get("FEATURE_HELP") or {}).items():
+            said[name][cls.__name__] = line
+    clashes = {n: by for n, by in said.items() if len(set(by.values())) > 1}
+    assert not clashes, "同一個名字兩種說法：%s" % clashes
+
+
+def test_the_one_liners_read_like_one_voice():
+    """一句話的**體例**也要一致 —— 小寫開頭、不加句號。
+
+    幾十列排在一起的時候，大小寫與句號的不一致比字本身還顯眼（那正是使用者
+    說的「顯示有點亂」的另一半）。
+    """
+    odd = []
+    for cls in _all_step_classes():
+        for name, line in (cls.__dict__.get("FEATURE_HELP") or {}).items():
+            if line[:1].isupper() or line.endswith("."):
+                odd.append("%s.%s: %r" % (cls.__name__, name, line))
+    assert not odd, "體例不一致：\n  " + "\n  ".join(odd)

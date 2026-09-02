@@ -91,6 +91,18 @@ def streams_spec(default: str = "test") -> ParamSpec:
                      label="Image streams", help=STREAMS_HELP)
 
 
+#: 「這張卡把多少比例的像素壓回值域」的特徵名（F11 Enhance-1）。
+CLIP_FRAC = "clip_frac"
+
+#: Enhance 那幾張卡共用的一句話（`Step.FEATURE_HELP`，2026-09-01）。
+ENHANCE_FEATURE_HELP = {
+    CLIP_FRAC: "share of pixels flattened onto 0 or 255 by this card",
+    "pair_level_delta": "how far apart the two streams' backgrounds are, "
+                        "in gray levels",
+    "pair_spread_ratio": "which stream varies more, and by how much",
+}
+
+
 class MultiStreamStep(Step):
     """共用基底：對 ``streams`` 裡的每一條流各做一次同樣的處理。
 
@@ -103,6 +115,10 @@ class MultiStreamStep(Step):
     （§22.7 第三條）就是這樣消失的：量與套用發生在同一次執行裡，中間插不進
     別的卡。
     """
+
+    #: 這一族共用的四個數字（`clip_frac` 與兩個 pair 指標）——
+    #: 卡片自己再加自己的（例 `denoise` 的 `removed_over_noise`）。
+    FEATURE_HELP = ENHANCE_FEATURE_HELP
 
     category = None          # 子類指定（CATEGORY_IMAGE）
     reads = ["test"]
@@ -257,9 +273,6 @@ class MultiStreamStep(Step):
                                              ctx.images.get(keys[1])))
         return ctx
 
-
-#: 「這張卡把多少比例的像素壓回值域」的特徵名（F11 Enhance-1）。
-CLIP_FRAC = "clip_frac"
 
 #: 兩條流處理完之後**還有多像**（F11 Enhance-UI-B）。
 #:
@@ -979,6 +992,40 @@ def region_role_of(name: str) -> str:
 #: 可以量，但它不是你要的那個」。一個數字答不了這件事。
 REGION_FACTS = ("present", "boxes", "area_px", "clipped", "edge_dropped")
 
+#: 那五個數字**一句話版**（給 UI 的「What it is」那一欄，2026-09-01）。
+#:
+#: 使用者：「Feature 這邊顯示有點亂……有些解釋在中間。」以前只有 GLV 那一族
+#: 答得出那一句（`ui.widgets.feature_gloss` 只認得 ``glv`` / ``cmp``），所以
+#: 同一張表上有些列有解釋、有些空白 —— 看起來像壞掉，其實是沒人寫過。
+#:
+#: **住在這裡而不是 UI**：上面那段長註解才是這五個字的家，抄第二份到 UI 的
+#: 那一份一定會漂（`CLAUDE.md` §0）。core 不 import Qt，一句英文字串沒問題。
+#: **同一個名字在不同卡上要有同一句話**（使用者 2026-09-01：「記得就算是不同張
+#: card 得到的 feature 寫法也要一致（增加可閱讀性）」）。
+#:
+#: 這張表放的是**好幾張卡都會寫的那些名字**；卡片自己的名字寫在自己的
+#: `FEATURE_HELP` 裡。兩張卡各寫一句的下場實際發生過：`locate_ok` 一張說
+#: 「located the pattern」、另一張說「located the cell」—— 而它們是同一件事，
+#: 而且會**排在同一張表上**（`roi_reference` 是那兩支折進來的門面）。
+#:
+#: 有一支測試逐一比對每一個 Step 子類，同名不同句就紅
+#: （`tests/test_feature_specs.py`）。
+SHARED_FEATURE_HELP = {
+    "locate_ok": "1 when it locked onto the pattern "
+                 "(0 = fell back to the whole image)",
+    "locate_conf": "how much of this image is structure rather than noise "
+                   "(about 0.7 = flat, 20+ = clear stripes)",
+    "edge_dropped": "how many boxes were dropped for touching the edge",
+}
+
+REGION_FACT_HELP = {
+    "present": "1 when this region was really located on this defect",
+    "boxes": "how many boxes it has here",
+    "area_px": "how many pixels they cover",
+    "clipped": "1 when the box limit silently cut some off",
+    "edge_dropped": SHARED_FEATURE_HELP["edge_dropped"],
+}
+
 
 def region_fact_specs(names) -> List[Tuple[str, str, str]]:
     """``["epi", …]`` → ``[(feature 名, 區域名, 哪個 fact), …]``（PR-3）。
@@ -993,6 +1040,38 @@ def region_fact_specs(names) -> List[Tuple[str, str, str]]:
         if n:
             out.extend(("%s_%s" % (n, f), n, f) for f in REGION_FACTS)
     return out
+
+
+def region_spec_maker(card_key: str, own: str, regions):
+    """三張 Region 卡共用的 `FeatureSpec` 工廠（2026-09-01）。
+
+    以前這支 closure 在 `roi_cross` / `roi_template` / `roi_reference` 裡各抄
+    了一份 —— **而三份裡有同一個 bug**：區域那幾個名字的 ``base`` 是**整串**
+    （``region_others_present``），而 ``region`` 又是 ``region_others``，於是
+    UI 把區域名印兩次（``region_others_present``ᵣᵉᵍᶦᵒⁿ_ᵒᵗʰᵉʳˢ）。量測卡那邊
+    早就是對的（``epi_glv_median`` → base ``glv_median`` ＋ 上標 ``epi``），
+    所以同一件事在同一張表上有兩種長相。使用者 2026-09-01：「Feature 這邊顯示
+    有點亂，有些有上綴。」
+
+    規則一句話：**帶區域前綴的名字，``base`` 是前綴後面那一段**（也就是
+    ``metric``）；不帶的（``cross_count``、``locate_ok``…）整串就是 base。
+
+    ⚠ Region 卡的名字文法跟量測卡**相反**：區域名在裡面、``output_prefix``
+    在最外（``gds_epi_center_present``）—— 所以身分只有組名字的這一支答得出來。
+    """
+    regions = list(regions or [])
+
+    def spec(name, region="", metric="", family="region"):
+        region, metric = str(region or ""), str(metric or "")
+        return FeatureSpec(
+            name=prefix_names(own, [str(name)])[0], card=str(card_key),
+            base=(metric if (region and metric) else str(name)),
+            region=region,
+            region_index=(regions.index(region) if region in regions else -1),
+            region_role=(region_role_of(region) if region else ""),
+            own=own, metric=metric or str(name), family=family)
+
+    return spec
 
 
 def region_fact_names(names) -> List[str]:
