@@ -56,7 +56,7 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 a3cd39735b6f5e9ee498051d710b0a3a9848d36b d4t/core/pipeline/engine.py
 26b348a8525cbd923e325fe0b6d75413317a3e69 d4t/core/pipeline/expression.py
 41196e68bae618f0675fc4a912950692578eae7e d4t/core/pipeline/recipe.py
-6b50b3eab57030d3d6f211e6579ee249e14d2cdc d4t/core/pipeline/step.py
+bdee96333c6d99b68d41bf5c511d72e737185a95 d4t/core/pipeline/step.py
 b052c76f56f4fae3aca461628976727850e1b39f d4t/core/pipeline/verdict_features.py
 168c2e3811844d0267a24f4a69963848bd594e60 d4t/core/pipeline/verdict_trace.py
 8ccad3c929207a8e57e417dfe240d23e3054bfd1 d4t/core/steps/__init__.py
@@ -67,7 +67,7 @@ f9673175527bd8d56eacf6c30f247eab15e388cd d4t/core/steps/align_to.py
 9d1754f3a9d847d3ffd5fd7be4b09a6596358437 d4t/core/steps/cd.py
 5fe458ce8a19f9c603b50e9b40175b1cc4d4a07d d4t/core/steps/denoise.py
 5b2ebf848b75b5af81dc09eb580d131b75fcc51f d4t/core/steps/flatten.py
-c57aaa2502003c7b83b66143ecb5130f7aed77ab d4t/core/steps/glv_stats.py
+fe0cabd6c7d2ea3a5c1d26a914b5af7bd4620db1 d4t/core/steps/glv_stats.py
 a776e192067df83cb88099ed6b82bb70c6f5a66d d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 281f288a9a33b7819c5d74fb1179a97a5b49d39a d4t/core/steps/normalize.py
@@ -112,7 +112,7 @@ c894b98548a3a06f98ed531901518a429768879f d4t/ui/verdict_band.py
 c0f5928483d34f8f02ec26358ffb3312e1c8465c d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
 34b6365ad97cc503caf8390297720e538dc26f6e d4t/ui/why_panel.py
-b8204da79498b4e409cde00818d35ab2cd8f80a3 d4t/ui/widgets.py
+8a28e5d0362d77a8f60d409c66f7a25fa96ec3b3 d4t/ui/widgets.py
 768dbb379b84127e9cbb7ec62df8d51c34dd0100 d4t/ui/wiring_slot.py
 e02cb1ea64a7ed413716379b9da789937729f3e3 d4t/ui/workers.py
 b4cbf9266bb1a18a4125ed422343cafb96e13315 docs/ARCHITECTURE.md
@@ -335,7 +335,7 @@ af6f3263d94b0fc1b7e78c58cc86d2d6c9dda57d tests/test_ui_tree_edit.py
 3ff2e7c8a9d2c87f730e7b733b9a1017bda4f23c tests/test_ui_verdict_band.py
 f6714258293363ce472b166d0afed030cb7c8f8f tests/test_ui_welcome.py
 957bee5d677405fc028ce51bd38a005e33225f97 tests/test_ui_why_panel.py
-89604652d0a633af9b9ad56b86cd0f00deea1be2 tests/test_ui_widgets.py
+59744e902ac1a719e58925bf38d0aba739079070 tests/test_ui_widgets.py
 fadf376f7cac48a5d8ee99a7795beb7c924404ee tests/test_ui_wiring_slot.py
 d8b2329e90e524b0600781a641019718516a0d9f tests/test_ui_workers.py
 db0e9bfba8c7ae39e3502d474709f8135a10cbfa tests/test_ui_write_only_on_run_all.py

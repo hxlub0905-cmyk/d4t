@@ -144,6 +144,8 @@ __all__ = [
     "MetricChips",
     "FilterChip",
     "metric_face",
+    "feature_unit",
+    "VARIANT_GLOSS",
 ]
 
 
@@ -6504,18 +6506,83 @@ def feature_gloss(name: str, about: Optional[Dict[str, str]] = None,
         label = metric_face(spec.metric)[1] if spec.metric \
             else (spec.base or text)
         body = label if not spec.stat else "%s of %s" % (label, spec.stat)
-        return FEATURE_RELATIVE, body + " vs %s" % (ref or "the reference")
+        return FEATURE_RELATIVE, _with_variant(
+            spec, body + " vs %s" % (ref or "the reference"))
     if family == "glv":
         mid = str(spec.metric or spec.base or "")
-        body = _ABS_GLOSS.get(mid) or algo_glv.metric_formula(mid)
+        # **先問卡片**（F76）：`metric_formula` 只認得統計量，而這一族裡有
+        # 一整批不是統計量（`glv_worst_*` / `glv_boxes*`）—— 它們以前落到
+        # 最後那個 `metric_face`，印出來就是自己的 id。
+        body = _card_says(spec) or algo_glv.metric_formula(mid)
         if body == "—":
             body = metric_face(mid)[1]
-        return FEATURE_ABSOLUTE, body
+        return FEATURE_ABSOLUTE, _with_variant(spec, body)
     # 其餘的一句話**由卡片自己說**（`Step.FEATURE_HELP`，2026-09-01）。
     # 在這裡補一張表是最快的做法，也是最錯的：那句話會跟卡片本人的說明漂開，
     # 而漂開的時候畫面上看起來完全正常（`CLAUDE.md` §0）。
     said = _card_says(spec)
-    return (FEATURE_ABSOLUTE, said) if said else ("", "")
+    return (FEATURE_ABSOLUTE, _with_variant(spec, said)) if said else ("", "")
+
+
+#: 變體怎麼**改寫**那個量的說明（F76，2026-09-02）。``%s`` 是那個量自己的
+#: 那一句（`metric_formula` 或卡片的 `FEATURE_HELP`）。
+#:
+#: 為什麼一定要有這一層：`feature_gloss` 以前只讀 `spec.metric`，於是
+#: ``glv_median_typical`` / ``_outlier`` / ``_outlier_box`` / ``_worst``
+#: 四列的說明**一字不差**（都寫 ``median(gray)``）—— 而 ``_outlier_box``
+#: 的值根本不是灰階，它是一個框號。實測：出貨的 `rsem-worst-box` 上有 97 個
+#: 特徵的說明跟別的特徵完全相同。
+#:
+#: ⚠ **`_outlier` 跟 `_worst` 常常不是同一格**（實測 24 顆：judge 那個量
+#: 24/24 相同，其他量只有 2–5/24）。使用者 2026-09-02 的原話是「反而這樣會
+#: 誤導別人以為他是最 worst 的」—— 所以這兩句話要**明講它們在挑哪一格**，
+#: 那是名字上唯一沒有的資訊。
+VARIANT_GLOSS = {
+    "typical": "%s - the middle one across all the boxes",
+    "outlier": "%s - on the box furthest out on this statistic alone, "
+               "which is often not the one the judge picked",
+    "outlier_box": "which box was furthest out on this statistic alone "
+                   "(%s)",
+    "worst": "%s - on the box the judge picked as the odd one out",
+    "nm": "%s, in nanometres",
+    "nm2": "%s, in square nanometres",
+    "raw": "%s, before it was scaled against the batch",
+    "rescued": "%s - kept under this name because a later card wrote over it",
+}
+
+
+def _with_variant(spec: Any, body: str) -> str:
+    """把變體那句話套上去（沒有變體、或不認得的變體就原樣回）。"""
+    pattern = VARIANT_GLOSS.get(str(getattr(spec, "variant", "") or ""))
+    return (pattern % body) if (pattern and body) else body
+
+
+def feature_unit(spec: Any) -> str:
+    """這個數字的單位 —— **問卡片，不猜**（F76，2026-09-02）。
+
+    先看變體（`step.VARIANT_UNITS`：``_outlier_box`` 的值是框號，不是那個
+    量），再看那張卡的 `Step.feature_units`。查不到就**留白** —— 一個猜錯的
+    單位比沒有單位糟得多（同 `feature_gloss` 的退化原則）。
+    """
+    if spec is None:
+        return ""
+    from ..core.pipeline.step import VARIANT_UNITS
+
+    var = str(getattr(spec, "variant", "") or "")
+    if var in VARIANT_UNITS:
+        return VARIANT_UNITS[var]
+    try:
+        from ..core.pipeline import get_step
+
+        table = get_step(str(getattr(spec, "card", "") or "")).feature_units()
+    except Exception:                      # noqa: BLE001 — 顯示用，不能擋畫面
+        return ""
+    for key in (getattr(spec, "metric", ""), getattr(spec, "base", ""),
+                getattr(spec, "name", "")):
+        got = str(table.get(str(key or ""), "") or "")
+        if got:
+            return got
+    return ""
 
 
 def _card_says(spec: Any) -> str:
@@ -6534,11 +6601,9 @@ def _card_says(spec: Any) -> str:
     return ""
 
 
-#: 這幾個不是統計量，`metric_formula` 答不出來 —— 而它們每一顆都在。
-_ABS_GLOSS = {
-    "glv_pixels": "how many pixels counted",
-    "glv_ok": "1 when there were enough pixels",
-}
+#: ⚠ 這裡以前有一張 `_ABS_GLOSS`（`glv_pixels` / `glv_ok` 兩條）。
+#: **F76 刪掉了** —— 那兩句話現在住在 GLV 卡的 `FEATURE_HELP` 上，跟同一族
+#: 其他十二句在一起。留兩份的話它們會漂，而漂開的時候畫面上看起來完全正常。
 
 
 #: 一個特徵名拆好之後，畫在畫面上要用哪些角色（F37 A4，2026-08-26）。
@@ -6801,6 +6866,14 @@ class FeatureTable(QTableWidget):
         about_item.setFont(small)
         val_item = QTableWidgetItem(_fmt_number(value))
         val_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        # **單位在懸停上**（F76 刀 2）。這一欄同時裝著灰階 0–255、幾個 σ、
+        # 像素座標、框號與布林旗標，而它們長得一模一樣 —— 那正是使用者
+        # 2026-09-02 的「後面帶的數值好亂」。⚠ 這裡刻意**不改顯示字串**：
+        # 值那一欄要保持等寬對齊，而單位該有的位置是列尾的一格
+        # （F76 刀 4 的新面板）。這一輪先讓它有得問。
+        unit = feature_unit(spec)
+        if unit:
+            val_item.setToolTip("unit: %s" % unit)
         if is_score:
             font = key_item.font()
             font.setBold(True)

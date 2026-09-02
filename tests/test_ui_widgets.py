@@ -1932,3 +1932,99 @@ def test_the_real_form_shows_the_value_it_was_given(qapp):
     assert isinstance(box, QDoubleSpinBox)
     assert box.value() == pytest.approx(2.55), "值不可以被欄位捨掉"
     assert "0.000" not in box.text()
+
+
+# --------------------------------------------------------------------------- #
+# F76 刀 2：說明欄不准把 id 抄一遍，而變體要說得出自己是誰
+# --------------------------------------------------------------------------- #
+def _every_declared_spec():
+    """整個 registry 會產出的 `FeatureSpec` —— 每張卡兩組參數。
+
+    兩組是因為 GLV 的四胞胎只有 ``across_boxes='each box'`` 才存在，而那正是
+    這一條要守的東西（F76 量到的 36 個「說明只是把 id 抄一遍」全在那一組）。
+    """
+    import d4t.core.steps  # noqa: F401 — 觸發註冊
+    from d4t.core.pipeline.step import REGISTRY
+
+    out = []
+    for key, cls in REGISTRY.items():
+        for over in ({}, {"across_boxes": "each box", "roi": "cell",
+                          "judge": "glv_q75", "over_k": 3.0,
+                          "metrics": "glv_median,glv_q75"}):
+            try:
+                p = cls.validate_params(
+                    {k: v for k, v in over.items()
+                     if k in {s.name for s in cls.params}})
+                out.extend(cls.resolve_feature_specs(p))
+            except Exception:                      # noqa: BLE001
+                continue
+    return out
+
+
+def test_no_feature_explains_itself_by_repeating_its_own_id():
+    """**說明欄不得等於那個特徵自己的 id。**
+
+    2026-09-02 量出貨的 `rsem-worst-box`：118 個特徵裡有 **36 個**的
+    「What it is」只是把 id 抄一遍（``glv_worst_score`` 的說明是
+    ``glv_worst_score``）—— 而那正好是使用者當時在問的那幾個字。
+
+    `metric_formula` 只認得統計量，而 `glv_worst_*` / `glv_boxes*` 不是；
+    它們落到最後的 `metric_face`，印出來就是自己的名字。修法是那句話由**卡片**
+    自己說（`Step.FEATURE_HELP`），這一條守著它不再回來。
+
+    ⚠ 空白仍然可以（`feature_gloss` 的退化原則：少一點資訊，不會是錯的資訊）
+    —— 擋的是「有寫，但寫的是它自己」。
+    """
+    from d4t.ui.widgets import feature_gloss
+
+    bad = []
+    for spec in _every_declared_spec():
+        _kind, gloss = feature_gloss(spec.name, {}, spec)
+        if not gloss:
+            continue
+        for echo in (spec.name, spec.metric, spec.base):
+            if echo and gloss.strip() == str(echo):
+                bad.append("%s → %r" % (spec.name, gloss))
+                break
+    assert not bad, "說明欄只是把 id 抄一遍：\n  " + "\n  ".join(sorted(set(bad)))
+
+
+def test_the_four_variants_of_one_statistic_do_not_share_one_sentence():
+    """``_typical`` / ``_outlier`` / ``_outlier_box`` / ``_worst`` 四胞胎。
+
+    改之前這四列的說明**一字不差**（都寫 ``median(gray)``），而
+    ``_outlier_box`` 的值根本不是灰階 —— 它是一個框號。使用者 2026-09-02：
+    「outliner 完全沒有用 或者我看不懂? 反而這樣會誤導別人以為他是最 worst 的」。
+    """
+    from d4t.core.pipeline import get_step
+    from d4t.ui.widgets import feature_gloss, feature_unit
+
+    card = get_step("glv_stats")
+    p = card.validate_params({"roi": "cell", "across_boxes": "each box",
+                              "judge": "glv_q75", "metrics": "glv_median"})
+    by_name = {s.name: s for s in card.resolve_feature_specs(p)}
+    said = {n: feature_gloss(n, {}, by_name[n])[1]
+            for n in ("glv_median_typical", "glv_median_outlier",
+                      "glv_median_outlier_box", "glv_median_worst")}
+    assert len(set(said.values())) == 4, said
+    # 而「這是另一格」那句話要真的在 `_outlier` 上（名字上唯一沒有的資訊）
+    assert "not the one the judge picked" in said["glv_median_outlier"]
+    # 框號的單位是框，不是灰階
+    assert feature_unit(by_name["glv_median_outlier_box"]) == "box"
+    assert feature_unit(by_name["glv_median_worst"]) == "gray"
+
+
+def test_the_unit_comes_from_the_card_and_is_never_invented():
+    """單位查不到就**留白** —— 一個猜錯的單位比沒有單位糟得多。"""
+    from d4t.core.pipeline import get_step
+    from d4t.ui.widgets import feature_unit
+
+    card = get_step("glv_stats")
+    p = card.validate_params({"roi": "cell", "across_boxes": "each box"})
+    by_name = {s.name: s for s in card.resolve_feature_specs(p)}
+    assert feature_unit(by_name["glv_worst_score"]) == "σ"
+    assert feature_unit(by_name["glv_worst_x"]) == "px"
+    assert feature_unit(by_name["glv_boxes"]) == "count"
+    # judge 可以是 cmp_* 的量，所以贏家那個值的單位**不知道** —— 不准編一個
+    assert feature_unit(by_name["glv_worst_value"]) == ""
+    assert feature_unit(None) == ""

@@ -757,6 +757,21 @@ def qualified_feature_name(prefix: str, name: str) -> str:
     return "%s_%s" % (prefix, name)
 
 
+#: **變體自己換掉單位的那幾種**（F76，2026-09-02）。
+#:
+#: `Step.feature_units` 的鍵是 metric 那一層，因為單位跟著「量」走 ——
+#: ``glv_median`` 一個鍵服務 ``_typical`` / ``_outlier`` / ``_worst``。
+#: 但有一種變體**換掉了被量的東西本身**：``<量>_outlier_box`` 的值是一個
+#: **框號**，不是那個量。實測的下場是說明欄寫「75th percentile」而值是 21
+#: —— 一個框的序號被當成灰階讀。
+#:
+#: 住在這裡而不是某張卡上，因為它是**命名文法**的一部分（同 variant 本身的
+#: 定義）：任何一張卡宣告 ``variant="outlier_box"``，那個數字就是一個框號。
+VARIANT_UNITS: Dict[str, str] = {
+    "outlier_box": "box",
+}
+
+
 @dataclass(frozen=True)
 class FeatureSpec:
     """一個特徵名的**結構化身分**（PR-3）—— 在名字誕生的地方組出來。
@@ -1125,6 +1140,37 @@ class Step(ABC):
         的退化原則）。
         """
         return dict(cls.FEATURE_HELP)
+
+    #: 這張卡寫出來的每個數字**單位是什麼** —— 見 :meth:`feature_units`。
+    FEATURE_UNITS: ClassVar[Dict[str, str]] = {}
+
+    @classmethod
+    def feature_units(cls) -> Dict[str, str]:
+        """:data:`FEATURE_UNITS` 的取用口（F76，2026-09-02）。
+
+        鍵跟 :meth:`feature_help` 一模一樣（`FeatureSpec.base`／`metric`），
+        值是一個**短到可以擺在數字右邊**的單位：``gray`` / ``px`` / ``px²`` /
+        ``σ`` / ``box`` / ``count`` / ``ratio`` / ``%`` / ``×`` / ``bits``。
+
+        為什麼要有這一份
+        ----------------
+        使用者 2026-09-02：「feature 顯示面板跟**後面帶的數值**我覺得好亂」。
+        量過之後那句話是精確的：同一欄、同一個 ``%.5g``、同一種右對齊，裝的是
+        灰階 0–255、幾個 σ、像素座標、框號、布林旗標、比值與計數 —— 所以
+        「27.753 是大是小」讀不出來。
+
+        `ParamSpec` **早就有 `unit`**（`glv_stats` 的 ``over_k`` 那格寫著
+        ``unit="σ"``），特徵沒有。這一份補的就是那個對稱。
+
+        ⚠ **單位跟著「量」走，不跟著「名字」走**，所以鍵是 metric 那一層：
+        ``glv_median`` 一個鍵服務 ``_typical`` / ``_outlier`` / ``_worst``
+        三個名字。唯一的例外是變體本身換掉單位的那種
+        （``_outlier_box`` 的值是一個框號，不是灰階）—— 那條規則住在
+        :data:`VARIANT_UNITS`，因為它是**命名文法**的一部分，不是某張卡的事。
+
+        沒寫的留白（同 `feature_help`）—— 一個猜錯的單位比沒有單位糟得多。
+        """
+        return dict(cls.FEATURE_UNITS)
 
     @classmethod
     def feature_parts(cls, params: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:

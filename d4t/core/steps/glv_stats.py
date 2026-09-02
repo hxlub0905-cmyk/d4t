@@ -798,6 +798,75 @@ class GlvStatsStep(MultiSourceStep):
     #: 留給儀表的直方圖有幾個 bin（見 :meth:`_note_distribution`）。
     HIST_BINS = 64
 
+    #: 這張卡寫出來的每個數字**一句話是什麼**（F76，2026-09-02）。
+    #:
+    #: ⚠ **統計量本身不寫在這裡** —— ``glv_median`` 那一族的說明由
+    #: `algo.glv.metric_formula` 答（公式的家只有一份）。這裡放的是
+    #: **`metric_formula` 答不出來的那些**，而 2026-09-02 量過：出貨的
+    #: `rsem-worst-box` 上有 **36 個特徵的說明欄只是把自己的 id 抄一遍**，
+    #: 整族都在下面這張表裡 —— 而它們正好是使用者當時在問的那幾個字
+    #: （「typical 跟 outliner、worst、score 是指什麼」）。
+    #:
+    #: 那句話為什麼不寫在 `ui.widgets` 裡：它會跟卡片本人的說明漂開，而漂開
+    #: 的時候畫面上看起來完全正常（`CLAUDE.md` §0）。
+    FEATURE_HELP = {
+        # ---- 逐框比較的「贏家」那一族（F31／F68）------------------------
+        "glv_worst_i": "which box the judge picked as the odd one out",
+        "glv_worst_x": "where that box is, left edge",
+        "glv_worst_y": "where that box is, top edge",
+        "glv_worst_w": "how wide that box is",
+        "glv_worst_h": "how tall that box is",
+        "glv_worst_score": ("how far that box is from all the others, in "
+                            "robust sigmas - |value - median of the other "
+                            "boxes| / their spread"),
+        "glv_worst_value": ("the judging statistic measured on that box - "
+                            "the number the pick was made on"),
+        "glv_worst_score_median": ("the middle of the box-by-box odd-one-out "
+                                   "scores - one dirty box leaves this low"),
+        "glv_worst_score_spread": ("how spread out those scores are - high "
+                                   "means many boxes are off, not just one"),
+        "glv_boxes_over_k": "how many boxes are further out than the sigma you set",
+        "glv_boxes_over_k_frac": "the same, as a share of all the boxes",
+        # ---- 量了幾格／幾個像素 -----------------------------------------
+        "glv_boxes": "how many boxes had enough pixels to measure",
+        "glv_pixels": "how many pixels counted",
+        "glv_ok": "1 when there were enough pixels",
+    }
+
+    #: 每個數字的**單位**（F76）—— 見 `Step.feature_units`。
+    #:
+    #: 鍵是 metric 那一層，所以 ``glv_median`` 一個鍵服務 ``_typical`` /
+    #: ``_outlier`` / ``_worst`` 三個名字；``_outlier_box`` 由
+    #: `step.VARIANT_UNITS` 覆寫成 ``box``（它的值是框號，不是灰階）。
+    #:
+    #: 形狀那幾個（skew / kurt / bimodality）**刻意留白**：它們是無量綱的，
+    #: 而編一個單位比沒有單位糟。
+    FEATURE_UNITS = {
+        # 灰階本身與灰階的散布
+        "glv_median": "gray", "glv_mean": "gray", "glv_trim10": "gray",
+        "glv_min": "gray", "glv_max": "gray",
+        "glv_q25": "gray", "glv_q75": "gray",
+        "glv_mad": "gray", "glv_std": "gray", "glv_iqr": "gray",
+        # 比例
+        "glv_sat_frac": "ratio", "glv_above128": "ratio",
+        "glv_entropy": "bits",
+        # 逐框比較
+        "glv_worst_i": "box",
+        "glv_worst_x": "px", "glv_worst_y": "px",
+        "glv_worst_w": "px", "glv_worst_h": "px",
+        "glv_worst_score": "\u03c3",
+        "glv_worst_score_median": "\u03c3", "glv_worst_score_spread": "\u03c3",
+        "glv_boxes_over_k": "count", "glv_boxes_over_k_frac": "ratio",
+        "glv_boxes": "count", "glv_pixels": "px",
+        # 相對量（`cmp_*`）—— metric 那一層
+        "delta": "gray", "abs_delta": "gray",
+        "ratio": "\u00d7", "spread_ratio": "\u00d7",
+        "snr": "\u03c3", "tstat": "\u03c3",
+        "pct_rank": "%", "overlap": "ratio", "percent": "%",
+        # ⚠ `glv_worst_value` 跟著 judge 走（judge 可以是 cmp_* 的量），
+        # 所以**這裡不寫** —— 一個猜錯的單位比沒有單位糟。
+    }
+
     # ---- 宣告 ---------------------------------------------------------------
     # **只有一條路**（F18 第 5 步）：整張卡都走 MultiSourceStep 的迴圈，
     # 「跟誰比」只是多接一個埠、多吐幾個數字。舊的 `method` 有兩種接線方式
