@@ -1,6 +1,6 @@
 # F76 — Feature 面板大改版
 
-**狀態：五刀與決定 B 全部做完（2026-09-02）。PR [#32](https://github.com/hxlub0905-cmyk/d4t/pull/32)。**
+**狀態：做完，合併回 `main`（2026-09-02）。這一份是紀錄，不再改。**
 
 | 刀 | 狀態 |
 |---|---|
@@ -13,10 +13,27 @@
 | B `glv_worst_baseline` | ✅ 開了 |
 | C 欄名 | 暫定 `typical of them all` / `the odd one out` / `furthest on this stat`（`feature_panel.VARIANT_COLUMN_LABELS` 一處改字） |
 
-⚠ **`widgets.FeatureTable` 這一輪沒有刪**（Preview 已經不用它了）。
-理由是 `CLAUDE.md` §5 那張價目表：**不確定的時候先收起來**，而它帶著自己的
-一整組測試 —— 新面板在真資料上用過幾輪、確定不必退回去之後再刪，代價是
-拿掉一個 import。
+`widgets.FeatureTable` **同一天刪掉了**（使用者定調）。它走完了 §5 那張價目表
+的全程：先收起來（Preview 換成新面板、舊表沒有呼叫端）→ 量代價（零個生產
+呼叫端、零份 recipe、零個黃金值）→ 刪。
+
+⚠ **刪的過程救回一個真的 bug**：那張表守著四條不變量，其中「沒人認領的特徵
+仍然要出現」在 `panel_model` 第一版被違反了 —— `bound_specs` 沒宣告的名字被
+安靜地丟掉。四條全部搬到 `tests/test_ui_feature_panel.py`。
+
+### 收工之後又抓到的四個（都在同一天）
+
+使用者跑起來截了圖、又叫我自己造一份 recipe 測 —— 兩件事各抓到東西：
+
+| # | 病 | 病根 |
+|---|---|---|
+| 1 | 設定區寫「nothing picked yet · 0 picked」，特徵表卻列著三個值 | `METRIC_GROUPS` 加了 `"Sharpness"`，`METRIC_GROUP_ORDER` 沒加 → 那一群的膠囊一顆都不畫，而引擎照樣拿預設值在算 |
+| 2 | IQI 沒勾，它的滑桿還擺在那 | 我以為 `show_when` 對逗號清單用不了 —— **是錯的**，`param_visible` 本來就做成員比對（F37）|
+| 3 | 「Name these results」出現在 IQI 的標題底下 | 共用的 `output_prefix_spec` 沒有 section，掉進前一格的分節 |
+| 4 | `value_text("glv_worst_i")` 回 `None`，而那個數字就寫在標題行上 | 升格到標題／變成「← #46」地址的 13 個名字沒有進 `_values` —— **取用口跟畫面說的是兩件事** |
+
+四個都配了測試。第 1 個尤其值得記：它**跑得完、有數字、看起來完全正常**，
+而畫面說 0 個、引擎算 3 個。
 
 ---
 

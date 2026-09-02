@@ -75,6 +75,23 @@ IQI 勾了才算（一顆 defect 64 次 FFT，不該無條件付這筆錢）。
 驗收五條各一支測試（`tests/test_iqi.py`）：單一 scalar、blur 單調下降
 （7465 → 2.07）、全灰 = 0、512/1024/2000 差 <5%、四個步驟各自組得回同一個答案。
 
+### ⚠ 使用者跑起來截了圖，三個 bug —— 其中一個是畫面在說謊
+
+**設定區寫「nothing picked yet · 0 picked」，而底下的特徵表列著三個值。**
+病根：`METRIC_GROUPS` 加了 `"Sharpness"` 這個群名，但 `METRIC_GROUP_ORDER`
+**沒加** —— `MetricChips._build` 是照那張表逐群畫的，漏一個群 = 那一群的膠囊
+一顆都不會出現。而引擎照樣拿 `validate_params` 補出來的預設值在算，所以它
+**跑得完、有數字、看起來完全正常**。
+
+守著它的有兩支：群名對照（資料層）＋ **掃 registry 真的建一次 widget**
+（群名對了但畫的時候被別的條件濾掉，第一支抓不到）。
+
+另外兩個：IQI 根本沒勾、它的滑桿卻擺在畫面上（我在卡片註解裡寫的「`show_when`
+用不了，因為 `metrics` 是一串」**是錯的** —— `param_visible` 對逗號清單做的
+本來就是成員比對，F37 就是為這件事改的）；以及「Name these results」出現在
+「2 · IQI (OP-301)」的標題底下（共用的 `output_prefix_spec` 沒有 section，
+掉進了前一格的分節，而那個標題正在說謊）。
+
 ### 待 owner 核對
 
 ``Also wash out noise above`` 預設 0（＝純高通）。空背景區也會被評分的站點
@@ -85,8 +102,8 @@ IQI 勾了才算（一顆 defect 64 次 FFT，不該無條件付這筆錢）。
 ## F76：Feature 面板要大改版 —— 而那塊面板已經存在了（2026-09-02）
 
 使用者：「目前 feature 顯示面板跟後面帶的數值我覺得好亂」→「我建議大改版，
-你可以先瀏覽整個 studio 架構」。**這一輪只出計畫書與可以點的 mock，一行 UI
-程式碼都沒有動** —— 因為瀏覽的結果推翻了第一版提案。
+你可以先瀏覽整個 studio 架構」。**五刀全部做完**，而第一版提案在瀏覽之後
+作廢了一刀 —— 我要蓋的那塊面板已經存在。
 
 ### ① 第一版提議開一塊新面板。瀏覽完之後那一刀作廢
 
@@ -147,12 +164,36 @@ worst 的」。量了 24 顆（judge = `glv_q75`）：
 `ALLOWED_ERRORS` 隨之變成空的（唯一那條「模板是一張影像、塞不進 JSON」跟著
 patch 那份走了），但**機制與那支反向測試留著** —— 下一份 recipe 還要用。
 
+### 做了什麼
+
+| 刀 | |
+|---|---|
+| 1 | **區域顏色的序由「線」給**（`verdict_features._regions_in_wiring_order`）—— 修掉上面那個 bug |
+| 2 | 說明欄看得見 `variant`、數字有單位（`Step.FEATURE_UNITS` / `step.VARIANT_UNITS` / `widgets.VARIANT_GLOSS`）|
+| 3 | 卡 › 區域 › 統計量那棵樹搬進 `ui/feature_tree.py`，結果表與 Preview 吃同一份 |
+| 4 | 新的 `ui/feature_panel.py`：四胞胎橫過來（GLV 那段 19 列 → 1 標題 + 2 列），`studio._feature_sections/_feature_specs` 退場 |
+| 5 | 沒有判定就不畫 Verdict 那一塊，換成一句可以照做的話 ＋ 那顆鈕 |
+
+決定：`<judge>_outlier` **不停產**（先只改顯示）、**開** `glv_worst_baseline`
+（「目標格 − 其他格」從此寫得出逐字精確的式子）。
+`widgets.FeatureTable` 走完「收起來 → 量代價 → 刪」全程，同一天刪掉。
+
+### 而收工之後還抓到一個
+
+使用者叫我自己造一份 recipe 測（GLV 逐框 ＋ IQI ＋ 兩題判定樹，24 顆跑完）。
+跑出來：引擎寫了 52 個特徵，`FeaturePanel.feature_names()` 只回 39 個 ——
+少掉的 13 個**全部都在畫面上**，只是刀 4 把它們升格成標題行、或變成
+「← #46」那個地址。於是 `value_text("glv_worst_i")` 回 `None`，而那個數字
+明明就寫在標題上：**取用口跟畫面說的是兩件事**，而報表、測試、之後的匯出
+都走取用口。
+
+（同一天截圖抓到的另外三個在 F77 那一段 —— 它們是 Focus index 卡的事。）
+
 ### 留下什麼
 
-* [`docs/plans/F76-feature-panel.md`](docs/plans/F76-feature-panel.md) ——
-  病的量測、studio 版面全圖、要拍板的形狀、三件待決定的事。
+* [`docs/history/plans/F76-feature-panel.md`](docs/history/plans/F76-feature-panel.md)
+  —— 病的量測、studio 版面全圖、四刀的形狀、收工後那四個。
 * 一份可以點的 HTML mock（現在 ⇄ 改版後、有 ⇄ 沒有 ADC，欄名可編可拖）。
-* 黃金值三份全綠（動工前的閘門，這一輪確認過）。
 
 ---
 
