@@ -206,21 +206,28 @@ def test_diff_only_context_does_not_montage_itself():
 # ---------------------------------------------------------------------------
 # 標籤
 # ---------------------------------------------------------------------------
-def test_the_caption_goes_under_the_picture():
-    """標籤畫在影像**下面**，一個像素都不蓋到樣品（2026-09-01，使用者選的）。
+def test_the_label_never_changes_the_picture_size():
+    """**輸出尺寸跟輸入一樣**（2026-09-01 使用者定調：「不要改變原尺寸好了」）。
 
-    以前它是左上角一條 banner —— 而 64 px 的 patch 上那條蓋掉四分之一，
-    左上角正是缺陷可能在的地方。這行字的用途是「這疊圖拿出報表單獨看的時候
-    還講得出 score 與 bin」，蓋住樣品就違反了它存在的理由。
+    那一天先做過另一版：標籤畫在影像下面新加的一條字幕條上，樣品一個像素都
+    不會被蓋到。使用者看過之後選了原尺寸 —— 所以標籤蓋回左上角，而「字塞不
+    塞得下」由 :func:`overlay._fit_label` 保證（見下一條）。
     """
     plain = overlay.render_overlay({"test": flat(200)}, {})
     labelled = overlay.render_overlay({"test": flat(200)}, {},
                                       label="score=3.21")
-    assert labelled.shape[1] == plain.shape[1], "寬度不變"
-    assert labelled.shape[0] > plain.shape[0], "下面多一條字幕條"
-    assert np.array_equal(labelled[:plain.shape[0]], plain), \
-        "影像本身一個像素都不准動"
-    assert labelled[plain.shape[0]:].max() > 0        # 字幕條上真的有東西
+    assert labelled.shape == plain.shape
+    assert not np.array_equal(plain[:16], labelled[:16])   # 左上角有變化
+    assert np.array_equal(plain[40:], labelled[40:])       # 下半部沒被動到
+
+
+def test_the_label_band_covers_the_whole_width():
+    """底條**滿版**：以前它只有字那麼寬，而字沒有被裁 —— 超出去那一段是白字
+    直接壓在樣品上。字現在一定塞得下，而滿版的底條讓它在任何底圖上都讀得出。
+    """
+    labelled = overlay.render_overlay({"test": flat(200)}, {}, label="bin=1")
+    top = labelled[0]                     # 最上面那一列
+    assert int(top.max()) < 200, "整條都要壓暗，不是只有字底下那一段"
 
 
 def test_the_caption_always_fits_the_picture_it_sits_under():
@@ -258,7 +265,7 @@ def test_unicode_label_does_not_crash():
     """cv2 的字型沒有中日韓字元 —— 換成 '?' 畫出來，不准丟例外。"""
     for text in ("分數 3.21 / bin 1 真缺陷", "スコア", "점수", "α β γ", "🙂"):
         out = overlay.render_overlay({"test": flat()}, {}, label=text)
-        assert out.shape[1] == W and out.shape[0] > H
+        assert out.shape == (H, W, 3)
         assert out.dtype == np.uint8
 
 
@@ -277,7 +284,7 @@ def test_label_defaults_to_score_from_features():
 def test_label_on_tiny_image_does_not_crash():
     out = overlay.render_overlay({"test": flat(100, h=8, w=8)}, {},
                                  label="score=1.0")
-    assert out.shape[1] == 8 and out.shape[0] > 8   # 8px 寬照樣有字幕條
+    assert out.shape == (8, 8, 3)                   # 8px 寬照樣不改尺寸
     assert out.dtype == np.uint8
 
 
@@ -326,8 +333,7 @@ def test_renders_from_a_real_context_images_dict():
     ctx.add_feature("cd_box_h", 12.0)
 
     out = overlay.render_overlay(ctx.images, ctx.features, label="bin=1")
-    # 並排兩張 ＋ 底下一條字幕條（2026-09-01：標籤不再蓋在影像上）
-    assert out.shape[1] == 2 * W and out.shape[0] > H
+    assert out.shape == (H, 2 * W, 3)
     assert out.dtype == np.uint8
 
 

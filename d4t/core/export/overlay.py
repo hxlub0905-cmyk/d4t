@@ -356,10 +356,6 @@ def _draw_roi_boxes(panel: np.ndarray, roi_boxes, roi_winner: int) -> None:
         _draw_box(panel, px, color=ROI_WINNER_COLOR, thick=thick)
 
 
-#: 字幕條的底色（RGB）。**不是把影像壓暗** —— 那條底以前是半透明的，
-#: 於是字的可讀性取決於底下那塊樣品有多亮。
-CAPTION_BG = (24, 24, 24)
-
 #: 字級由大到小試，第一個塞得下的就用。下限 0.3 是 cv2 這套字型還讀得出來的
 #: 最小值（再小筆畫會黏在一起）。
 _LABEL_SCALES = (0.6, 0.55, 0.5, 0.45, 0.4, 0.35, 0.3)
@@ -417,31 +413,30 @@ def _fit_label(text: str, width: int) -> Tuple[str, float]:
     return cand, scale
 
 
-def _with_caption(panel: np.ndarray, label: str) -> np.ndarray:
-    """標籤畫在影像**下面**的一條字幕條上，回一張新的（比較高的）圖。
+def _draw_label(panel: np.ndarray, label: str) -> None:
+    """左上角一行標籤（壓暗的底條 + 白字）。非 ASCII 會變成 '?'。
 
-    為什麼不畫在圖上（2026-09-01，使用者選的 B 案）
-    ----------------------------------------------
-    以前那條 banner 蓋住左上角 —— 而 **64 px 的 patch 上它蓋掉四分之一**，
-    左上角正是缺陷可能在的地方。這行字的用途是「這疊圖拿出報表單獨看的時候，
-    還講得出 score 與 bin」（見 :func:`overlay_label`）—— 蓋住樣品就違反了它
-    存在的理由。
+    **底條是滿版的**（2026-09-01）。以前它只有字那麼寬，而字**沒有**被裁 ——
+    於是超出去那一段是白字直接壓在樣品上，看不清也讀不完。現在字一定塞得下
+    （:func:`_fit_label`），而滿版的底條讓那一行在任何底圖上都讀得出來。
 
-    空標籤照舊什麼都不做（**不長出一條空的黑邊**）。
+    ⚠ **不要把影像變高。** 2026-09-01 有一版把標籤畫在影像下面新加的一條
+    字幕條上（樣品一個像素都不會被蓋到），使用者看過之後定調「算了，不要改變
+    原尺寸好了」—— 輸出尺寸要跟輸入一致。所以蓋回去，但蓋的那一條現在**字
+    一定在裡面**。
     """
     text = _ascii_only(label).strip()
     if not text:
-        return panel
+        return
     h, w = panel.shape[:2]
     text, scale = _fit_label(text, w)
     (_tw, th), base = cv2.getTextSize(text, _FONT, scale, 1)
-    strip = max(12, th + base + 2 * _LABEL_PAD)
-    out = np.empty((h + strip, w, 3), dtype=panel.dtype)
-    out[:h] = panel
-    out[h:] = np.asarray(CAPTION_BG, dtype=panel.dtype)
-    cv2.putText(out, text, (_LABEL_PAD, h + _LABEL_PAD + th), _FONT, scale,
+    bh = min(h, th + base + 2 * _LABEL_PAD)
+    band = panel[0:bh, 0:w]
+    if band.size:
+        band[:] = (band.astype(np.uint16) * 1 // 4).astype(np.uint8)  # 壓暗當底
+    cv2.putText(panel, text, (_LABEL_PAD, _LABEL_PAD + th), _FONT, scale,
                 tuple(int(c) for c in TEXT_COLOR), 1, cv2.LINE_AA)
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -758,7 +753,8 @@ def render_overlay(images: Dict[str, Any],
             except (TypeError, ValueError):
                 label = None
     if label:
-        panel = _with_caption(panel.astype(np.uint8), str(label))
+        panel = panel.astype(np.uint8)
+        _draw_label(panel, str(label))
 
     return np.ascontiguousarray(panel.astype(np.uint8))
 
