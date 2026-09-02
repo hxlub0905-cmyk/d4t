@@ -113,9 +113,8 @@ python -m d4t export  <run_id> --db /tmp/runs.db --mode annotate \
     --klarf-out out.001 --csv feat.csv --excel report.xlsx
 ```
 
-> **repo 內附三份出貨的 recipe**（[`recipes/`](recipes/)，每一份都有測試真的跑
-> 一次）：EBI↔API characterization、patch 的 dSNR 分布、RSEM 逐框挑最異常的
-> 那一格。收起來的是**範本庫那個入口**，不是 recipe 本身。
+> **repo 內附一份出貨的 recipe**（[`recipes/`](recipes/)，有測試真的跑一次）：
+> RSEM 逐框挑最異常的那一格。收起來的是**範本庫那個入口**，不是 recipe 本身。
 > 若僅需確認引擎可運作，`python tools/doctor.py` 會以內建的最小 pipeline
 > 端到端跑完一顆並自檢環境。
 

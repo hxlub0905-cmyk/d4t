@@ -103,10 +103,31 @@ between_columns  由 GLV 卡寫的特徵 → region_index 1 → 琥珀
   而名字讀起來像「最糟的那個」。使用者原話：「反而這樣會誤導別人以為他是最
   worst 的」。
 
-⚠ **不能直接刪**：`recipes/patch-dsnr-by-class.json` 的判定樹用著
-`cmp_snr_mean_outlier` 與 `cmp_abs_delta_mean_outlier`（judge 是 `glv_mean`
-—— 正是「另一格」那一種，而那正是它要問的）。所以 `_outlier` 有它的用途，
-病在**它沒有把「另一格」講出來**。
+⚠ **它有真的用途**：`_outlier` 回答的是「**這一欄自己**最極端的是哪一格」，
+而那跟 judge 挑的贏家常常不同格。五格的最小例子（judge = `glv_median`）：
+
+```
+      第 i 格   median   std
+        #0        100      5
+        #1        101      5
+        #2         99      5
+        #3        100     30   ← std 這一欄最極端
+        #4        160      6   ← median 這一欄最極端 → judge 挑它當贏家
+
+judge 是 median  →  glv_worst_i = 4（整張卡只有一個贏家）
+
+glv_median_worst    = 159.9   #4 的 median
+glv_median_outlier  = 159.9   median 這欄最極端 → 也是 #4（同一格）
+glv_std_worst       =   6.2   #4 的 std          ← 贏家的身分證
+glv_std_outlier     =  29.8   std 這欄最極端 → #3  ← 另一個人
+glv_std_outlier_box =     3
+```
+
+`6.2` 與 `29.8` 是**兩個不同的格**，而名字上沒有任何線索。
+
+（2026-09-02 起連唯一用它的那份出貨 recipe 也走了 —— `patch-dsnr-by-class`
+的判定樹用著 `cmp_snr_mean_outlier`，而那份被使用者刪掉了。所以停產它的代價
+比 §7 A 寫的時候更低，只剩使用者自己手上的 recipe。）
 
 ### ⑥ ADC 那一塊在還沒有 ADC 的時候佔著位子
 
@@ -274,7 +295,7 @@ Results 是 *N 顆 × M 特徵*，Preview 是 *一顆*，所以 Preview 是那�
 | 名字 | 一句話 | 單位 |
 |---|---|---|
 | `<量>_typical` | 每格各自算完之後**取中位數** —— 這批單元長什麼樣 | 同該統計量 |
-| `<量>_outlier` | 離 typical **最遠**那格的值，**照這個量自己算** —— 跟 judge 挑的那格常常不是同一格 | 同上 |
+| `<量>_outlier` | **這一欄自己**最極端那格的值 —— 每一欄各自一格，跟 judge 挑的贏家常常不同格 | 同上 |
 | `<量>_outlier_box` | 上一格是**第幾格**（0 起算） | box |
 | `<量>_worst` | **judge 挑的那一格**的這個量 | 同上 |
 | `glv_worst_score` | 贏家那格的異常度，**單位是 σ**：`\|v − 鄰居中位數\| ÷ (1.4826 × 鄰居 MAD)`，鄰居 = 除自己外所有格（leave-one-out）| σ |
@@ -291,7 +312,9 @@ Results 是 *N 顆 × M 特徵*，Preview 是 *一顆*，所以 Preview 是那�
 
 1. **`<judge>_outlier` 要不要停止產出？** 實測 24/24 跟 `<judge>_worst` 相同，
    但**數學上不保證**，所以停產是行為改變、要一道遷移。
-   §4 決定 2 的顯示修法不必付這筆錢 —— 先做顯示，之後再看還會不會混。
+   ⚠ **注意這一格 2026-09-02 變便宜了**：唯一用 `_outlier` 的出貨 recipe
+   （`patch-dsnr-by-class`）當天被刪掉，所以現在只剩使用者手上的 recipe。
+   §4 決定 2 的顯示修法仍然不必付這筆錢 —— 先做顯示，之後再看還會不會混。
 2. **要不要開 `glv_worst_baseline`？**（leave-one-out 的基準值本身）
    現在算了、留在 meta、沒變成特徵。開了之後
    「目標格 − 其他格」的分數可以寫成

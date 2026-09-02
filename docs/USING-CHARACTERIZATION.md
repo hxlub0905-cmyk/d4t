@@ -23,32 +23,37 @@
 
 ---
 
-## 1. 一分鐘上手（用現成的那一份）
+## 1. 從零蓋一份（五分鐘）
 
-**不要自己從零蓋。** `recipes/ebi-to-api-characterization.json` 已經接好線、
-判定樹也寫好了：
+> ⚠ **以前這裡寫的是「不要自己從零蓋，用 `recipes/ebi-to-api-characterization.json`」。
+> 那份 recipe 2026-09-02 由使用者指定刪掉了** —— 卡片一張都沒有動
+> （`pair_source` / `H2H` / `output_char` 全在，測試也全在），走這條路的人
+> 自己拉線。下面就是那份 recipe 當初的組法。
 
 1. **`Open KLARF…`** 載 **API（RSEM）那一份**當 main。⚠ 不是 EBI —— 理由見 §2。
-2. **`Open recipe…`**（`Ctrl+Shift+O`）→ 選
-   `recipes/ebi-to-api-characterization.json`。
-3. 畫布上那張 **`Pair with another source`** → 按 **`Open data…`** 選
+2. 卡片庫 → Input 段 → **`Pair with another source`** → 按 **`Open data…`** 選
    **EBI 那一份**。
-4. 同一張卡的 **`Rank by`** → 挑 **EBI 自己的分數欄**（下拉裡就是那一份真的
-   有的欄位）。這一格是 ① 與 ② 分得開的唯一條件 —— 見 §5。
-5. 輸出卡的 **`Write to`** → 你要的資料夾（預設 `char_report` 是**相對於你啟動
-   程式的位置**）。
-6. **`Run all`**（⚠ 不是 `Run trial` —— **試跑不寫檔**，見 §4.3）。
+3. 卡片庫 → Compare 段 → **`H2H`**。
+4. **拉兩條線**（哪一條接哪個埠見 §3）。
+5. 同一張 Pair 卡的 **`Rank by`** → 挑 **EBI 自己的分數欄**（下拉裡就是那一份
+   真的有的欄位）。這一格是 ① 與 ② 分得開的唯一條件 —— 見 §5。
+   **`Rank within`** 填 `XINDEX,YINDEX`（照 die 分組排名）。
+6. 判定段畫那棵樹（見 §5）—— 第一題永遠是 `pair_found`。
+7. 卡片庫 → Output 段 → **`Write comparison`**，填 **`Write to`** 資料夾
+   （**不用接線**，見 §3）。
+8. **`Run all`**（⚠ 不是 `Run trial` —— **試跑不寫檔**，見 §4.3）。
 
-第 3～5 步是**站點資料**，本來就不可能寫在 recipe 裡（路徑、你們機台那一欄的
-名字、你要的輸出位置）。其他都不用動。
+第 2、5、7 步是**站點資料**，本來就不可能寫死（路徑、你們機台那一欄的名字、
+你要的輸出位置）。
 
-> **第 4 步沒做也跑得動**：每一顆會落在一片叫 `no ranking column picked yet`
-> 的葉子上 —— 那是報表在告訴你還有哪一格沒填。填了之後 ① 與 ② 才分得開。
+> **第 5 步的 `Rank by` 沒填也跑得動**：每一顆會落在一片叫
+> `no ranking column picked yet` 的葉子上 —— 那是報表在告訴你還有哪一格沒填。
+> 填了之後 ① 與 ② 才分得開。
 
-> **調完之後 `Ctrl+S` 存起來**（2026-08-26 起有存檔）。存回原檔用 `Ctrl+S`、
-> 另存一份用 `Ctrl+Shift+S`；標題列有 `*` 就代表還沒存。
+> **蓋完 `Ctrl+Shift+S` 另存一份**（2026-08-26 起有存檔），下次直接
+> `Open recipe…` 就好。標題列有 `*` 就代表還沒存。
 
-### 1.1 從零蓋（想知道那份 recipe 是怎麼組出來的）
+### 1.1 卡片的順序（上面那幾步的摘要）
 
 1. 卡片庫 → Input 段 → **`Pair with another source`** → `Open data…`。
 2. 卡片庫 → Compare 段 → **`H2H`**。
