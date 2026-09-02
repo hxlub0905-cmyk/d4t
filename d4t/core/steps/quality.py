@@ -24,6 +24,20 @@ DEFAULT_METRICS = "focus_lapvar,focus_tenengrad,focus_fft"
 IQI_EXTRA = ("focus_iqi_pattern", "focus_iqi_blocks")
 
 
+#: IQI 那幾格的顯示條件 —— 勾了 ``focus_iqi`` 才出現。
+IQI_WHEN = ("metrics", ("focus_iqi",))
+
+
+def _named(spec, section: str):
+    """把共用的 `output_prefix_spec` 放進這張卡自己的分節。
+
+    不放的話它會掉進**前一格的分節**（畫面上「Name these results」出現在
+    「2 · IQI (OP-301)」的標題底下）—— 而那個標題正在說謊。
+    """
+    from dataclasses import replace
+    return replace(spec, section=str(section))
+
+
 def _metrics_of(params) -> list:
     got = parse_key_list((params or {}).get("metrics", DEFAULT_METRICS))
     return got or list(parse_key_list(DEFAULT_METRICS))
@@ -55,13 +69,14 @@ class FocusQualityStep(MultiSourceStep):
                         "out of each one and averages the sharpest 30% - "
                         "slower, but it does not get fooled by an empty "
                         "corner.")),
-        # ---- IQI 的三個旋鈕（F77）------------------------------------------
-        # ⚠ 它們**沒有** `show_when`：`metrics` 是一串（勾選），而 show_when
-        # 比的是一格的值 —— 用它會變成「勾了三個就藏起來」那種錯得很安靜的
-        # 條件。分節標題已經說得出這一段是誰的。
+        # ---- IQI 的旋鈕（F77）—— **勾了才出現** ----------------------------
+        # `param_visible` 對逗號清單做的是**成員比對**（F37），所以
+        # ``metrics`` 這種多選格拿來當條件是成立的：問的是「focus_iqi 在不在
+        # 裡面」，不是「整串等不等於 focus_iqi」。
+        # 沒有這一條的下場實測過：IQI 根本沒勾，畫面上卻擺著它的兩支滑桿。
         ParamSpec(name="iqi_blocks", type="int", default=algo_iqi.DEFAULT_BLOCKS,
                   min=2, max=32, label="Blocks per side",
-                  section="2 · IQI (OP-301)",
+                  section="2 · IQI (OP-301)", show_when=IQI_WHEN,
                   help=("How many blocks to cut each side into - 8 means the "
                         "64 blocks OP-301 uses. It is deliberately fixed "
                         "rather than tied to the image size, so a 1024 image "
@@ -69,6 +84,7 @@ class FocusQualityStep(MultiSourceStep):
         ParamSpec(name="iqi_keep_percent", type="float",
                   default=algo_iqi.DEFAULT_KEEP_PERCENT, min=1.0, max=100.0,
                   unit="%", label="Average the sharpest",
+                  show_when=IQI_WHEN,
                   section="2 · IQI (OP-301)",
                   help=("How many of the blocks go into the final average. "
                         "30% of 64 is 19. Averaging all of them would let the "
@@ -78,6 +94,7 @@ class FocusQualityStep(MultiSourceStep):
         ParamSpec(name="iqi_cutoff_percent", type="float",
                   default=algo_iqi.DEFAULT_CUTOFF_PERCENT, min=0.0, max=50.0,
                   unit="%", label="Wash out background below",
+                  show_when=IQI_WHEN,
                   section="2 · IQI (OP-301)", advanced=True,
                   help=("Slow shading - uneven lighting, a bright corner - is "
                         "not sharpness, so it is removed before the score is "
@@ -87,6 +104,7 @@ class FocusQualityStep(MultiSourceStep):
         ParamSpec(name="iqi_noise_percent", type="float",
                   default=algo_iqi.DEFAULT_NOISE_PERCENT, min=0.0, max=100.0,
                   unit="%", label="Also wash out noise above",
+                  show_when=IQI_WHEN,
                   section="2 · IQI (OP-301)", advanced=True,
                   help=("Grain in an empty area is not sharpness either, but "
                         "it does carry energy - measured on a blank noisy "
@@ -96,13 +114,14 @@ class FocusQualityStep(MultiSourceStep):
                         "the OP-301 write-up describes.")),
         ParamSpec(name="iqi_min_pattern", type="float", default=0.0,
                   min=0.0, max=1.0, label="Skip blocks with less pattern than",
+                  show_when=IQI_WHEN,
                   section="2 · IQI (OP-301)", advanced=True,
                   help=("Blocks whose edges cover less than this share of "
                         "their pixels are left out before the sharpest ones "
                         "are averaged. 0 keeps every block - the sharpest-30% "
                         "cut already pushes empty blocks out on its own. "
                         "Raise it when a lot of the image is blank.")),
-        output_prefix_spec("test"),
+        _named(output_prefix_spec("test"), "3 · Output"),
     ]
     reads = ["test"]
     writes: List[str] = []

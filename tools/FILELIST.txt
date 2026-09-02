@@ -74,7 +74,7 @@ a776e192067df83cb88099ed6b82bb70c6f5a66d d4t/core/steps/load.py
 281f288a9a33b7819c5d74fb1179a97a5b49d39a d4t/core/steps/normalize.py
 32aa27e77937e9b2667bab16a4fb37745ad511fd d4t/core/steps/output.py
 712fb3646eceb513727e23871100291df8848387 d4t/core/steps/pair_source.py
-ee0d5a92b7ad6fd7ac6c588214dd3d3c0d29df8e d4t/core/steps/quality.py
+3862da4a530aadebdd10792bf6629b5273139cb5 d4t/core/steps/quality.py
 1cac40140c6e9143c4054fd01c56a4f88e8cd346 d4t/core/steps/roi_cross.py
 7eb7be4325d45f1985fec2e61a850206a245450c d4t/core/steps/roi_reference.py
 3bc9ee184e8148e15b813d8e4c688a2bfc6d8ee3 d4t/core/steps/roi_template.py
@@ -115,7 +115,7 @@ c894b98548a3a06f98ed531901518a429768879f d4t/ui/verdict_band.py
 c0f5928483d34f8f02ec26358ffb3312e1c8465c d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
 34b6365ad97cc503caf8390297720e538dc26f6e d4t/ui/why_panel.py
-102e64a787a994546e2b2d40ad1e5db857918f6b d4t/ui/widgets.py
+427c1360e4f670bf95658cca00d8461a22931b63 d4t/ui/widgets.py
 768dbb379b84127e9cbb7ec62df8d51c34dd0100 d4t/ui/wiring_slot.py
 e02cb1ea64a7ed413716379b9da789937729f3e3 d4t/ui/workers.py
 338803f1e33892d102b7e5430abae5f40f7df8ba docs/ARCHITECTURE.md
@@ -340,7 +340,7 @@ af6f3263d94b0fc1b7e78c58cc86d2d6c9dda57d tests/test_ui_tree_edit.py
 3ff2e7c8a9d2c87f730e7b733b9a1017bda4f23c tests/test_ui_verdict_band.py
 f6714258293363ce472b166d0afed030cb7c8f8f tests/test_ui_welcome.py
 957bee5d677405fc028ce51bd38a005e33225f97 tests/test_ui_why_panel.py
-d2a8113911aa7fd88eb4920e50ac7dc7c5a00e26 tests/test_ui_widgets.py
+904d4a9f27d572db4205401ece58fde6c87b8b0f tests/test_ui_widgets.py
 fadf376f7cac48a5d8ee99a7795beb7c924404ee tests/test_ui_wiring_slot.py
 d8b2329e90e524b0600781a641019718516a0d9f tests/test_ui_workers.py
 db0e9bfba8c7ae39e3502d474709f8135a10cbfa tests/test_ui_write_only_on_run_all.py

@@ -1946,3 +1946,50 @@ def test_the_unit_comes_from_the_card_and_is_never_invented():
     # judge 可以是 cmp_* 的量，所以贏家那個值的單位**不知道** —— 不准編一個
     assert feature_unit(by_name["glv_worst_value"]) == ""
     assert feature_unit(None) == ""
+
+
+def test_every_metric_group_can_actually_be_drawn(qapp):
+    """**`METRIC_GROUPS` 裡的每一個群名都要在 `METRIC_GROUP_ORDER` 上。**
+
+    `MetricChips._build` 是照 `METRIC_GROUP_ORDER` 逐群畫的，所以漏一個群 =
+    那一群的膠囊**一顆都不會出現**。而畫面上不會空白 —— 它會寫
+    「nothing picked yet · 0 picked」，同時引擎照樣拿 `validate_params` 補出來
+    的預設值在算。
+
+    2026-09-02 真的發生過（F77 加 Focus 那一族時漏了 "Sharpness"）：設定區說
+    一個都沒選，而底下的特徵表列著三個值 —— **畫面在說謊**，而它跑得完、
+    有數字，看起來完全正常。
+    """
+    groups = {g for g, _label, _glyph in widgets_mod.METRIC_GROUPS.values()}
+    missing = sorted(groups - set(widgets_mod.METRIC_GROUP_ORDER))
+    assert not missing, (
+        "這幾個群名畫不出來（膠囊會安靜地消失）：%s" % missing)
+
+
+def test_a_metric_chip_row_can_show_every_id_a_card_offers(qapp):
+    """整個 registry 掃一遍：卡片列得出來的 metric，膠囊都畫得出來。
+
+    上一條守的是資料表，這一條守的是**真的建一次 widget**（群名對了但畫的
+    時候被別的條件濾掉，上一條抓不到）。
+    """
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline.step import REGISTRY
+
+    for key, cls in REGISTRY.items():
+        for spec in cls.params:
+            if spec.type != "metric_chips" or not spec.choices:
+                continue
+            row = widgets_mod.MetricChips(list(spec.choices))
+            row.set_text(str(spec.default or ""))
+            assert row.choice_names() == list(spec.choices), \
+                "%s.%s 有膠囊畫不出來" % (key, spec.name)
+            if spec.default:
+                # ⚠ **比集合不比字串**：`MetricChips.text()` 刻意回**畫面上的
+                # 順序**（同一組勾選每次都要產生同一個字串，因為它進得了快取
+                # 簽章），而卡片宣告的預設不一定照那個序寫 —— cd 的 report
+                # 就是這樣。這裡問的是「勾得回來嗎」，不是「順序一不一樣」。
+                want = {t.strip() for t in str(spec.default).split(",")
+                        if t.strip()}
+                assert {t.strip() for t in row.text().split(",") if t.strip()} \
+                    == want, "%s.%s 的預設值勾不回來" % (key, spec.name)
+            row.deleteLater()

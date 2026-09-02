@@ -3024,10 +3024,17 @@ METRIC_GROUPS: Dict[str, Tuple[str, str, str]] = {
 #: 分群的顯示順序。不在 :data:`METRIC_GROUPS` 裡的 id（手寫 recipe 的
 #: ``glv_q37``、``glv_trim05``…）落在最後一群 —— **列出來並且勾著**，因為
 #: 「看不到就被靜靜刪掉」是最糟的一種幫忙（同 `MultiChoicePicker` 的老規矩）。
+#: ⚠ **`METRIC_GROUPS` 裡出現的每一個群名都要在這張表上。**
+#: `MetricChips._build` 是照這張表逐群畫的，所以漏一個群 = 那一群的膠囊
+#: **一顆都不會出現**，而畫面上寫的是「nothing picked yet · 0 picked」——
+#: 同時引擎照樣拿 `validate_params` 補出來的預設值在算。實際發生過
+#: （2026-09-02，F77 加 Focus 那一族時漏了 "Sharpness"）：設定區說一個都沒選，
+#: 底下的特徵表列出三個值。守著它的是
+#: `tests/test_ui_widgets.py::test_every_metric_group_can_actually_be_drawn`。
 METRIC_GROUP_ORDER = ("Center", "Spread", "Ends", "Shape", "Counts",
                       "Difference", "Vs boxes", "Distributions",
                       "Width", "Roughness", "Vs target",
-                      "Size", "Outline", "Other")
+                      "Size", "Outline", "Sharpness", "Other")
 
 
 def metric_face(mid: str) -> Tuple[str, str, str]:
