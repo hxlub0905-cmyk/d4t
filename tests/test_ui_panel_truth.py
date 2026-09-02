@@ -132,7 +132,12 @@ def test_the_glv_card_outlines_the_box_its_panel_is_describing():
     # 一條線段 ＋ **四個角點**（線畫得很淡、點畫滿 —— 見那支的說明）
     assert len(lines) == len(points) == 1
     assert len(points[0]) == 4
-    assert focus == 0 and set(labels) == {"sp"}
+    # ⚠ **問的是「哪幾條畫粗」，不是「focus 長什麼樣」。** ``focus`` 的契約是
+    # 「一個索引**或一串**」（見 `Step.overlay_marks`），所以拿 UI 真正在用的
+    # 那支去解讀它 —— 寫死 ``focus == 0`` 的那一版，在 GLV 改成回一串的那天
+    # 就紅了，而畫面上一個像素都沒有變。
+    from d4t.ui.widgets import _focus_set
+    assert _focus_set(focus) == {0} and set(labels) == {"sp"}
     xs = [pt[0] for pt in points[0]]
     ys = [pt[1] for pt in points[0]]
     assert min(xs) == pytest.approx(0.1) and max(xs) == pytest.approx(0.3)

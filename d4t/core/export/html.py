@@ -181,6 +181,15 @@ FIRST_ROWS = 300
 
 #: 捲到底就再接一批。**一次接多少**：300 列 ≈ 5000 個節點，在一般機器上
 #: 一幀之內做得完。
+#:
+#: ⚠ **下面那段 JS 裡的引號用「單引號包雙引號」，一個反斜線都不要。**
+#: 這一段是 Python 的三引號字串，``\"`` 在那裡會先被 Python 吃掉一層，送到
+#: 瀏覽器的是 ``""``（第一版就是這樣壞的：``SyntaxError: Unexpected string``）。
+#:
+#: 這句話**寫在這裡而不是寫進那段 JS 裡**：`tests/test_ui_english_only.py`
+#: 是對**字串常數**問「有沒有中文」的，而它問對了 —— 這份 JS 會原樣進到寄出去
+#: 的那個 HTML 檔，讀原始碼的人看到的就是這幾行。註解對他沒有用，對我們有用，
+#: 所以它屬於 Python 這一側。
 _CHUNK_JS = """
 (function(){
   var tag=document.getElementById('rows'); if(!tag) return;
@@ -188,9 +197,6 @@ _CHUNK_JS = """
   var wrap=document.querySelector('.tablewrap'), note=document.getElementById('more');
   var at=0, CHUNK=300, first=tb.rows.length;
   function html(r){
-    /* 引號用「單引號包雙引號」，一個反斜線都不要 —— 這一段是 Python 的
-       三引號字串，``\"`` 在那裡會先被 Python 吃掉一層，送到瀏覽器的是
-       ``""``（第一版就是這樣壞的：SyntaxError: Unexpected string）。*/
     var s = '<tr' + (r[3] ? '' : " class='bad'")
           + (r[1] ? ' data-img="' + r[1] + '" data-cap="' + r[2] + '"' : '')
           + '>';

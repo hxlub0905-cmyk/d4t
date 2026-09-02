@@ -384,6 +384,50 @@ def test_the_two_ways_of_drawing_a_row_agree():
     assert parts[0][0] == "7" and parts[0][-1] == "bad &lt;thing&gt;"
 
 
+def test_the_chunk_script_carries_no_backslash_and_no_chinese():
+    """兩條規矩，都住在 `_CHUNK_JS` 上，而**兩條都被踩過**。
+
+    ① **一個反斜線都不要。** 那段 JS 是一個 Python 三引號字串，``\\"`` 在那裡
+       會先被 Python 吃掉一層，送到瀏覽器的是 ``""`` —— 第一版就是這樣壞的
+       （``SyntaxError: Unexpected string``），而那是**執行期**才炸的：報表產得
+       出來、打得開、只是捲到底之後什麼都不會發生。所以引號一律「單引號包
+       雙引號」。
+
+    ② **不准有中文。** 這段 JS 會原樣進到寄出去的那個 HTML 檔，讀原始碼的人
+       看到的就是它 —— 而 `test_ui_english_only` 對 `d4t/ui` 以外的地方問不到
+       這一句（它掃的是 `d4t/ui`）。開發者要看的話寫在 Python 那一側的註解裡
+       （`_CHUNK_JS` 上面就有一段）。
+
+    ⚠ 這支測試 2026-09-02 才補：在此之前那兩條規矩只寫在一段 JS 註解裡，而
+    **寫在被守的東西自己身上的規矩，改它的人剛好就是會把它一起改掉的人**。
+    """
+    import ast
+    import pathlib
+
+    from d4t.core.export import html as html_mod
+    from d4t.core.export.html import _CHUNK_JS
+
+    # ① 反斜線只看得到**原始碼**。試著對執行期的字串問這一句是抓不到的 ——
+    #    被吃掉的正是它自己（實測：把 ``\\"`` 放回去，值裡一個反斜線都沒有，
+    #    而瀏覽器收到的已經是壞的）。所以問 AST 拿到那個字面量的原文。
+    src = pathlib.Path(html_mod.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    literal = None
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == "_CHUNK_JS"):
+            literal = ast.get_source_segment(src, node.value)
+    assert literal is not None, "找不到 _CHUNK_JS 的字面量（重構過就把這裡跟上）"
+    assert "\\" not in literal, (
+        "那段 JS 的原始碼裡有反斜線 —— Python 會吃掉一層，瀏覽器收到的是壞的"
+        "字串，而它是執行期才炸：報表產得出來、打得開，捲到底什麼都不會發生")
+
+    # ② 中文兩邊問都一樣（它不會被吃掉），問值就好。
+    bad = [c for c in _CHUNK_JS if ord(c) > 0x2E7F]
+    assert not bad, "那段 JS 會寄給使用者，不准有中文：%r" % ("".join(bad)[:40],)
+
+
 def test_the_json_payload_cannot_close_the_script_tag():
     """一列裡有 ``</script>`` 就會把那個 script 提早關掉，後面整段 JSON
     會被當成 HTML 印出來 —— 而那是使用者打的字（error 欄）。"""
