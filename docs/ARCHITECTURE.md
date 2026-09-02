@@ -250,6 +250,7 @@ d4t/
 │   │   ├── align.py normalize.py histmatch.py       #   對位／正規化／直方圖匹配
 │   │   ├── enhance.py curve.py                      #   局部對比、去背景、去噪；tone curve 求值
 │   │   ├── glv.py snr.py quality.py                 #   GLV metric bank／SNR 正負號正典／對焦指標
+│   │   ├── iqi.py                                   #   OP-301 的對焦分數（切 64 塊 → 去背景 → 前 30% 平均，F77）
 │   │   ├── edge.py subpixel.py shape.py profile.py  #   CD 的四塊：剖面、次像素、團塊、投影
 │   │   ├── grid.py mask.py roi.py                   #   條紋→框／label map→框／MultiROISet
 │   │   ├── period.py golden.py template.py          #   週期估測／Golden Cell 疊圖／模板定位
