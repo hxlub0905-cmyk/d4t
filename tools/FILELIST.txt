@@ -20,6 +20,7 @@ d2f7e50ff4920fefc608e7d83117c771276104b7 d4t/core/algo/enhance.py
 4367cf0d934ae4b16f38b9d08caffd3abd54b17f d4t/core/algo/golden.py
 36dba0cb2492842918d64a6c855214bad2266b7b d4t/core/algo/grid.py
 b1a09a48d4ae47dde5c94cafc4304e91e9c8dd60 d4t/core/algo/histmatch.py
+4324f637001fb68257d5add14a893819671465c7 d4t/core/algo/iqi.py
 d5770fe80aaeab0a470557e4ae85aef37b74ebd9 d4t/core/algo/mask.py
 3a9c1ca9dbdd84f60766714ffac9445380356bcc d4t/core/algo/normalize.py
 d090bc2eefc1fe45c48d60848280ba323b0ef4a7 d4t/core/algo/pairing.py
@@ -73,7 +74,7 @@ a776e192067df83cb88099ed6b82bb70c6f5a66d d4t/core/steps/load.py
 281f288a9a33b7819c5d74fb1179a97a5b49d39a d4t/core/steps/normalize.py
 32aa27e77937e9b2667bab16a4fb37745ad511fd d4t/core/steps/output.py
 712fb3646eceb513727e23871100291df8848387 d4t/core/steps/pair_source.py
-6cb1173e2d53221138d27b5d30f389ffa95158f3 d4t/core/steps/quality.py
+ee0d5a92b7ad6fd7ac6c588214dd3d3c0d29df8e d4t/core/steps/quality.py
 1cac40140c6e9143c4054fd01c56a4f88e8cd346 d4t/core/steps/roi_cross.py
 7eb7be4325d45f1985fec2e61a850206a245450c d4t/core/steps/roi_reference.py
 3bc9ee184e8148e15b813d8e4c688a2bfc6d8ee3 d4t/core/steps/roi_template.py
@@ -114,7 +115,7 @@ c894b98548a3a06f98ed531901518a429768879f d4t/ui/verdict_band.py
 c0f5928483d34f8f02ec26358ffb3312e1c8465c d4t/ui/viewmodel.py
 db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
 34b6365ad97cc503caf8390297720e538dc26f6e d4t/ui/why_panel.py
-ea7dad2640f375dfb2d2cb5b50a934d86c055536 d4t/ui/widgets.py
+102e64a787a994546e2b2d40ad1e5db857918f6b d4t/ui/widgets.py
 768dbb379b84127e9cbb7ec62df8d51c34dd0100 d4t/ui/wiring_slot.py
 e02cb1ea64a7ed413716379b9da789937729f3e3 d4t/ui/workers.py
 4579e684597a15f11acf1958efcc4ecab55baff3 docs/ARCHITECTURE.md
@@ -206,6 +207,7 @@ c214e16d65e4b5d5a95c657d48643bc6160e711b tests/test_glv_kind_lints.py
 d644e6c465d92bf9bee29d6fb9e1c2905ceab9d4 tests/test_guided_condition.py
 68f4c1d0784f125b13994a5fc576da6ac9270279 tests/test_histmatch.py
 01cdfb6a5ce7316f3c3272cfec4f6cb8520b3050 tests/test_input_code_filter.py
+0b110de4d5a7613ac766f208691ef25f0c81d8f0 tests/test_iqi.py
 285184f2a87157aa2a1848722f4104d20bfe5f36 tests/test_klarf_core.py
 b9641759599b4584c733275281fe3b252e8b66c5 tests/test_klarf_variant_d.py
 39d6c513e693d0c2b066dacf7edcc33d27c144a1 tests/test_let_fill.py

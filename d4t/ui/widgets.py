@@ -2993,6 +2993,12 @@ METRIC_GROUPS: Dict[str, Tuple[str, str, str]] = {
     # CD 的 Report（F19）。**分三群不是分成一群**，理由跟上面那一段一字不差：
     # Roughness 那一群只有在量測線夠多的時候才有意義，而那件事在一排攤平的
     # 膠囊上看不出來 —— 它正是「為什麼我的 LER 是 0」的答案。
+    # Focus index 那張卡（F77，2026-09-02）。**沿用既有的圖示**，不畫新的 ——
+    # 這一族講的是「銳不銳利」，而分布那套語言對它剛好成立（能量／變異數）。
+    "focus_lapvar": ("Sharpness", "Laplacian var", "std"),
+    "focus_tenengrad": ("Sharpness", "Gradient energy", "delta"),
+    "focus_fft": ("Sharpness", "High-freq share", "percent"),
+    "focus_iqi": ("Sharpness", "IQI (OP-301)", "range"),
     "cd_median": ("Width", "Median", "median"),
     "cd_mean": ("Width", "Mean", "mean"),
     "cd_min": ("Width", "Narrowest", "min"),
