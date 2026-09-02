@@ -13,9 +13,14 @@
 #   - ADDED (F11 Enhance-1): every method takes an optional `mask`. The
 #     statistics (mean/std, percentiles, histograms) are then measured from
 #     the masked pixels only, while the resulting mapping is still applied to
-#     the WHOLE image -- same split as normalize's `use_within`, and for the
-#     same reason (see `_masked` below). Passing mask=None reproduces the
+#     the WHOLE image -- the same split as normalize's `range_from`, and for
+#     the same reason (see `_masked` below). Passing mask=None reproduces the
 #     vendored behaviour byte for byte.
+#     NOTE (2026-09-02): normalize's `use_within` -- the card-level box that
+#     fed this `mask` -- was removed together with the `roi_mask` card. This
+#     parameter stays: it is where the "measure here, apply everywhere" rule
+#     is written down, and `range_from` is the same rule seen from the other
+#     side. Same standing rule as `algo/snr.py` and `algo/period.py`.
 #   - Algorithm behavior otherwise unchanged.
 # ---------------------------------------------------------------------------
 """Histogram matching of grayscale SEM images (8-bit and 16-bit).
@@ -37,7 +42,7 @@ import numpy as np
 def _masked(img: np.ndarray, mask: Optional[np.ndarray]) -> np.ndarray:
     """量統計用的那群像素（``mask`` 為 None＝整張圖）。
 
-    為什麼「量」與「套用」要分開（跟 ``normalize`` 的 ``use_within`` 同一個理由）
+    為什麼「量」與「套用」要分開（跟 ``normalize`` 的 ``range_from`` 同一個理由）
     ------------------------------------------------------------------------
     一張 patch 上「背景」的面積是隨裁切浮動的 —— 64px 的 patch 裡一根 Metal Gate
     進出畫面就是 12% 的面積差。拿整張圖的統計去對齊亮度，同一片 EPI 只因為隔壁

@@ -185,20 +185,27 @@ def test_a_line_into_a_card_or_parameter_that_does_not_exist_is_not_one():
 
 
 def test_it_agrees_with_the_real_cards_in_the_registry():
-    """假卡片測完之後對真的問一次 —— 兩張型別各不同的真卡。
+    """假卡片測完之後對真的問一次 —— 兩種型別各一格的真卡。
 
-    `roi_mask` 的 ``regions`` 是 ``region_keys``（一串），`glv_stats` 的
-    ``roi`` 是 ``region_key``（單一）。**兩種都要算區域線**，不然「多連一」
-    那條路上的線會被當成影像線。
+    `cd_measure` 的 ``roi`` 與 `glv_stats` 的 ``roi`` 是 ``region_keys``
+    （一串，第二條線**累加**），`glv_stats` 的 ``reference_region`` 是
+    ``region_key``（單一角色，第二條線**取代**）。**兩種都要算區域線**，
+    不然「多連一」那條路上的線會被當成影像線。
+
+    ⚠ 這一條以前拿 ``roi_mask`` 當複數那一邊的證人，而它 2026-09-02 刪掉了。
+    換成 ``cd_measure`` 不是隨手挑的：證人要是**真的在 registry 裡**的卡
+    （這一條的整個意義就是「對真的問一次」），而且兩格的型別要真的不同。
     """
     nodes = {
-        "m": RecipeNode("m", "roi_mask",
-                        {"regions": "epi", "source": "test", "out": "mask"}),
-        "g": RecipeNode("g", "glv_stats", {"source": "test", "roi": "epi"}),
+        "c": RecipeNode("c", "cd_measure", {"source": "test", "roi": "epi"}),
+        "g": RecipeNode("g", "glv_stats",
+                        {"source": "test", "roi": "epi",
+                         "reference_region": "mg"}),
     }
-    assert is_region_edge(Edge("r", "m", "epi", "regions"), nodes) is True
+    assert is_region_edge(Edge("r", "c", "epi", "roi"), nodes) is True
     assert is_region_edge(Edge("r", "g", "epi", "roi"), nodes) is True
-    assert is_region_edge(Edge("r", "m", "test", "source"), nodes) is False
+    assert is_region_edge(Edge("r", "g", "mg", "reference_region"), nodes) is True
+    assert is_region_edge(Edge("r", "c", "test", "source"), nodes) is False
 
 
 def test_every_region_parameter_in_the_card_library_is_recognised():

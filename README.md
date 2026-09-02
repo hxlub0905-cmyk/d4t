@@ -33,7 +33,7 @@ d4t 的第一原則是：
 | | |
 |---|---|
 | **輸入** | 四種 source，各有各的入口：`ebi_patch`（KLARF ＋ 多頁 patch TIFF）、`rsem`（KLARF ＋ 每顆一個影像檔）、`tiff_stack`（多頁 TIFF，無 KLARF）、`folder`（單張影像資料夾，無 KLARF） |
-| **組裝** | 19 張步驟卡片（卡片庫現行可見 18 張 —— `align` 收在 `ui/scope.py` 的 `HIDDEN_STEPS`）；節點畫布拉線接卡，recipe 即 DAG |
+| **組裝** | 18 張步驟卡片（卡片庫現行可見 17 張 —— `align` 收在 `ui/scope.py` 的 `HIDDEN_STEPS`）；節點畫布拉線接卡，recipe 即 DAG |
 | **量測** | GLV 統計與區域對比（含 SNR）、逐框比較找出最異常的那一格（`worst_*`，框即 ROI 自己）、CD 次像素邊緣定位（同一趟給 LWR／LER）、對焦品質指標 |
 | **輸出** | 三張 Output 卡（整批跑完只跑一次）：**報表資料夾**（`Write report` —— 勾選決定裡面有什麼：`report.html`／`defects.csv`／`report.xlsx`／`spread.html` box plot／`images/*.jpg`／`recipe.json`，6000 顆量級一次出得完）、**寫回 KLARF**（class／bin／DSIZE，或 Top-N 新檔）、**點對點比較報表**（`Write comparison`，一顆一列兩張圖）|
 | **介面** | PySide6 桌面編輯器（Studio）＋ CLI（可排程、可腳本化） |
@@ -76,7 +76,7 @@ ADC 判定不是一張卡片，而是 recipe 頂層的 `decide` 區塊 —— �
 
 Phase 1（讓數字可信）已於 2026-08-16 收斂，現階段依
 [`docs/ROADMAP.md`](docs/ROADMAP.md) 推進 Phase 2。使用者定調的順序是
-**先把引擎做對，再回頭做產品化**，因此以下兩件事**目前刻意不支援**，
+**先把引擎做對，再回頭做產品化**，因此以下這件事**目前刻意不支援**，
 不是遺漏：
 
 - **Studio 的「用範例資料試一次」與「Templates…」入口收起來**（範本庫還是空的）。
@@ -84,8 +84,9 @@ Phase 1（讓數字可信）已於 2026-08-16 收斂，現階段依
 
 開關集中在 `d4t/ui/scope.py`，這也是「暫時不給看」的唯一去處。
 
-> **存檔 recipe 2026-08-26 做回來了**（F34）：工具列的「Save recipe…」、
-> `Ctrl+S`（存回原檔）、`Ctrl+Shift+S`（另存）。這一行以前寫的是「不提供」。
+> 這一段以前列的是**兩**件，另一件是「不提供存檔 recipe」——
+> **2026-08-26 做回來了**（F34）：工具列的「Save recipe…」、`Ctrl+S`（存回原檔）、
+> `Ctrl+Shift+S`（另存）。
 
 ---
 
@@ -112,8 +113,11 @@ python -m d4t export  <run_id> --db /tmp/runs.db --mode annotate \
     --klarf-out out.001 --csv feat.csv --excel report.xlsx
 ```
 
-> repo 內未附現成 recipe（見上）。若僅需確認引擎可運作，
-> `python tools/doctor.py` 會以內建的最小 pipeline 端到端跑完一顆並自檢環境。
+> **repo 內附三份出貨的 recipe**（[`recipes/`](recipes/)，每一份都有測試真的跑
+> 一次）：EBI↔API characterization、patch 的 dSNR 分布、RSEM 逐框挑最異常的
+> 那一格。收起來的是**範本庫那個入口**，不是 recipe 本身。
+> 若僅需確認引擎可運作，`python tools/doctor.py` 會以內建的最小 pipeline
+> 端到端跑完一顆並自檢環境。
 
 **受限環境**：目標機器可能無網路、無 git。取得程式碼見
 [`docs/NO-GIT-SETUP.md`](docs/NO-GIT-SETUP.md)，離線安裝相依套件見
@@ -168,6 +172,10 @@ git add -A && python tools/release.py && git add -A
   primitive（`algo/snr.py`）；GLV 卡的 `snr` 統計量照它做。
   （`roi_snr` 那張卡與函式已於 2026-08-21 移除，`snr_map`／Z-map 於 2026-08-25 移除；
   `algo/snr.py` 保留，因為它是這個正負號慣例的規範出處。）
+- **「量哪些像素」與「套用到哪裡」是兩件事**：`algo/histmatch.py` 的 `mask=`
+  與 `normalize` 的 `range_from` 是同一條規矩的兩面。
+  （吐 mask 影像流的 `roi_mask` 那張卡已於 2026-09-02 移除，連同它唯一的消費者
+  `normalize.use_within`；`algo/histmatch.py` 保留，理由與 `algo/snr.py` 逐字相同。）
 - **Vendoring**：每個 vendored 模組於檔頭註明來源專案、原始檔案與改動清單。
 
 ---
@@ -184,7 +192,7 @@ git add -A && python tools/release.py && git add -A
 | 進度與 phase 計畫 | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
 | 給使用者的操作手冊：CD 那張卡每一格什麼時候動 | [`docs/USING-CD.md`](docs/USING-CD.md) |
 | 給使用者的操作手冊：EBI ↔ API characterization 怎麼做 | [`docs/USING-CHARACTERIZATION.md`](docs/USING-CHARACTERIZATION.md) |
-| 已知的坑（30 條以上，只增不減） | [`docs/PITFALLS.md`](docs/PITFALLS.md) |
+| 已知的坑（80 條以上，只增不減） | [`docs/PITFALLS.md`](docs/PITFALLS.md) |
 | 設計緣由：需求訪談結論、名稱由來、六個來源專案 | [`docs/HANDOVER.md`](docs/HANDOVER.md) |
 | **授權與來源**：d4t 的授權狀態、vendoring 來源、第三方相依 | [`docs/LICENSING.md`](docs/LICENSING.md) |
 | 廠內待驗證假設、受限機器部署 | [`docs/FAB-VALIDATION.md`](docs/FAB-VALIDATION.md) |

@@ -55,7 +55,7 @@ Region-3（GDS mode）要吃 GLAS 匯出的 ``<id>_label.png`` + manifest。使�
 --------------------------
 把抽樣的那張 label 拆一次，印出每一層的 **pieces（連通元件）** 與
 **rectangles（精確矩形分解）**。那不是健康檢查，是 Region-3 的設計輸入：
-rectangles 是 d4t 真的要存幾個框（比的是「Reference regions」卡（``layout layers`` 那一支）自己的上限
+rectangles 是 d4t 真的要存幾個框（比的是「ROI」卡（``layout layers`` 那一支）自己的上限
 :data:`GDS_BOX_CAP`，不是 Profile／Template 那個給幾個重複用的 64），
 pieces 是「一份」有幾個。**兩者相等 = 每一塊形狀本來就是一個矩形**；
 差很大時，意思是那一層正被後面畫的層切碎，或者它本來就不是矩形。
@@ -113,7 +113,7 @@ SAFE_KEYS = frozenset((
 ))
 
 
-#: 「Reference regions」卡（`d4t/core/steps/roi_reference.py`）``max_boxes`` 的預設。
+#: 「ROI」卡（`d4t/core/steps/roi_reference.py`）``max_boxes`` 的預設。
 #: 這支比的是**這一個**，不是 Profile／Template 的 64 —— 見 `check_label_images`。
 GDS_BOX_CAP = 8192
 
@@ -663,7 +663,7 @@ def read_manifest(export_dir: str, rep: Report, m: Masker) -> Dict[str, object]:
                   "(%d layers → %d distinct names). d4t will suffix the "
                   "later ones (_2, _3…), so one of your layers shows up under "
                   "a name nobody recognises — rename those regions on the "
-                  "“Reference regions” card." % (len(dupes), len(rewritten),
+                  "“ROI” card." % (len(dupes), len(rewritten),
                                           len(set(rewritten))))
     return {"rows": rows, "columns": cols, "label_map": label_map}
 
@@ -878,13 +878,13 @@ def check_label_images(export_dir: str, man: Dict[str, object], images_dir:
         # 而那件事當時已經做完了（`roi_reference` 的預設就是 8192）。
         # 一條講著已完成工作的 WARN，讀起來跟一個待辦一模一樣。
         rep.check("PASS" if worst <= GDS_BOX_CAP else "WARN",
-                  "the biggest layer fits under the Reference regions card's box cap",
+                  "the biggest layer fits under the ROI card's box cap",
                   ("biggest layer %d rectangles, cap %d (%.0fx headroom)"
                    % (worst, GDS_BOX_CAP, GDS_BOX_CAP / max(worst, 1)))
                   if worst <= GDS_BOX_CAP else
                   "the biggest layer is %d rectangles and the cap is %d — the "
                   "boxes furthest from the middle get dropped. Raise “At most "
-                  "this many boxes” on the “Reference regions” card, or raise "
+                  "this many boxes” on the “ROI” card, or raise "
                   "“Ignore pieces smaller than”." % (worst, GDS_BOX_CAP))
         # pieces vs rectangles 的**意思**要寫出來，不要留給讀報告的人自己推。
         cut = [i for i in sorted(shapes_of) if shapes_of[i][1] > shapes_of[i][0]]

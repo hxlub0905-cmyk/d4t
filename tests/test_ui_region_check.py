@@ -362,7 +362,7 @@ def test_every_cell_paints(qapp, mixed_window):
 # --------------------------------------------------------------------------- #
 # F11 Region-1：區域名是**選**的，不是打的
 # --------------------------------------------------------------------------- #
-def test_the_mask_card_offers_the_regions_defined_upstream(window):
+def test_a_card_offers_the_regions_defined_upstream(window):
     """上游定義了哪些區域，程式本來就知道 —— 使用者不必（也不能）用打的。
 
     F11 Region-1 時這一格是勾選框；**F12 起它是畫布上的一條線**，這一格只顯示
@@ -374,22 +374,24 @@ def test_the_mask_card_offers_the_regions_defined_upstream(window):
     tpl = wire_up(window.model, add_region_step(window.model, "roi_template"))
     window.model.set_param(tpl, "regions", "epi: 0.1,0,0.3,1 | mg: 0.5,0,0.2,1")
 
-    mask = wire_up(window.model, window.model.add_step("roi_mask"))
-    assert window.model.available_regions(before_node=mask) == [
+    # ⚠ 下游那張卡以前是 ``roi_mask``（2026-09-02 刪掉）。``glv_stats`` 的
+    # ``roi`` 是同一個型別（``region_keys``），這一條問的事一個字都沒變。
+    glv = wire_up(window.model, window.model.add_step("glv_stats"))
+    assert window.model.available_regions(before_node=glv) == [
         "epi", "epi_center", "epi_others",
         "mg", "mg_center", "mg_others"]
 
-    window.select_node(mask)
-    editor = window.param_form.editor("regions")
+    window.select_node(glv)
+    editor = window.param_form.editor("roi")
     from d4t.ui.wiring_slot import WiringSlot
     assert isinstance(editor, WiringSlot), \
         "區域的來源不是一個打得進去的文字框（F12 ＋ F68 的插槽）"
 
     # 拉一條線過去 = 挑了那個區域，而那件事在參數上留下的字一模一樣。
-    window._on_edge_added(tpl, mask, "epi", "regions")
-    window._on_edge_added(tpl, mask, "mg", "regions")
-    assert window.model.nodes[mask].params["regions"] == "epi,mg"
-    assert (tpl, mask, "epi", "regions") in [
+    window._on_edge_added(tpl, glv, "epi", "roi")
+    window._on_edge_added(tpl, glv, "mg", "roi")
+    assert window.model.nodes[glv].params["roi"] == "epi,mg"
+    assert (tpl, glv, "epi", "roi") in [
         (e.src, e.dst, e.src_out, e.dst_in) for e in window.model.edges
         if is_region_edge(e, window.model.nodes)]
 
@@ -403,13 +405,13 @@ def test_a_region_name_from_the_recipe_survives_even_if_upstream_changed(window)
     """
     from PySide6.QtWidgets import QLineEdit
 
-    mask = wire_up(window.model, window.model.add_step("roi_mask"))
-    window.model.set_param(mask, "regions", "gone")
-    window.select_node(mask)
+    glv = wire_up(window.model, window.model.add_step("glv_stats"))
+    window.model.set_param(glv, "roi", "gone")
+    window.select_node(glv)
 
-    editor = window.param_form.editor("regions")
+    editor = window.param_form.editor("roi")
     from d4t.ui.wiring_slot import WiringSlot
     assert isinstance(editor, WiringSlot)
     assert editor.text_value() == "gone"
     assert [e for e in window.model.edges
-            if e.dst == mask and is_region_edge(e, window.model.nodes)] == []
+            if e.dst == glv and is_region_edge(e, window.model.nodes)] == []

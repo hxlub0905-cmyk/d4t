@@ -101,13 +101,18 @@ Context 有三層資料：**影像流 images**（名字 → 像素陣列，綁�
 ```
 影像流通道（像素）  Load ─→ Enhance ─→ Compare ─→ 'diff' ──────┐
                                                               ├─→ 量測卡 ─→ 特徵 ─→ score
-區域通道（哪裡）    roi_reference（三個 method）                  │   source='diff'（流）
+區域通道（哪裡）    roi_reference「ROI」（三個 method）           │   source='diff'（流）
                       └╌→ 具名區域 'cross' ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┘   roi='cross'（名字，
                           （畫布上是虛線 + 菱形埠）                  由那條線水合出來）
-                            └─→ roi_mask ─→ 'mask' 流 ─→ Normalize 的 use_within（影像段）
 ```
 
-**規則一句話：量測卡吃區域「名字」，影像卡吃 mask「影像流」。**
+**規則一句話：量測卡吃區域「名字」，影像卡吃「影像流」。**
+
+⚠ **這張圖以前還有第三條路**：`roi_mask`（Mask from regions）把具名區域畫成
+一條 0/255 的影像流，餵給 Normalize 的 `use_within`。**2026-09-02 兩邊一起
+拿掉了**（使用者：「看不到此功能 card 用處」）。它擋的那個問題仍然存在
+（「MG 佔多少面積隨 crop 變，整張圖的統計因此逐顆漂」），而今天的答案是
+**量測段的區域**：GLV 吃具名區域，所以量的本來就只有該看的那一塊。
 
 那個「名字」在畫布上是**一條虛線 + 菱形埠**，而**線就是儲存**
 （F42，2026-08-27）：區域依賴跟影像流一樣住在 `recipe.edges` 裡
@@ -124,15 +129,19 @@ Context 有三層資料：**影像流 images**（名字 → 像素陣列，綁�
   引擎的 `ctx.set_roi` 是同名覆寫，名字唯一才讓「線指的那張卡」＝
   「引擎真的給的那個框」恆成立。
 
-計畫書：[`plans/F42-region-edges-plan-b.md`](plans/F42-region-edges-plan-b.md)
+計畫書：[`history/plans/F42-region-edges-plan-b.md`](history/plans/F42-region-edges-plan-b.md)
 （它推翻的是 [`history/plans/F12-region-edges.md`](history/plans/F12-region-edges.md)
 §3，其他部分 —— 埠、虛線、唯讀參數格、同進同出 —— 全部保留）。
 量測卡要「哪裡」的**結構**（框數、邊界、框外背景圈、哪框靠中心）——
 0/255 的 mask 圖把結構壓扁丟光，所以量測卡的 `roi` 填名字、引擎量測當下
-才換成像素。影像卡（Normalize 的 `use_within`）只要「哪些像素參與統計」，
-那正是 mask 流的全部內容。兩條路同源（`Context.rois`），不會分家 ——
-**不要**幫量測卡加 mask 流輸入、也**不要**讓區域卡直接吐 mask，
-兩條平行的路會腐爛（F7-17 的教訓，F8c 落地時明確重申過）。
+才換成像素。
+
+⚠ **這裡以前還有第二條路**：影像卡只要「哪些像素參與統計」，而那正是 mask 流的
+全部內容（`roi_mask` → Normalize 的 `use_within`）。**2026-09-02 那條路整條拿掉
+了**（F74）—— 所以現在**只有一條**：區域是名字，不是像素流。
+規矩因此更簡單，而且沒有變：**不要**幫量測卡加 mask 流輸入、也**不要**讓區域卡
+直接吐 mask —— 兩條平行的路會腐爛（F7-17 的教訓，F8c 落地時明確重申過，而 F74
+是把已經腐爛的那一條收掉：卡在，但一份 recipe 都沒有用它）。
 
 為什麼存「名字 + 正規化座標」不存 mask 圖：(1) patch 以 defect 為中心裁切、
 晶格相位逐顆不同 —— recipe 存「怎麼找」，定位卡**每顆重新定位**；
@@ -256,13 +265,13 @@ d4t/
 │   │   ├── channels.py       #   這一顆的第幾張圖 → 叫什麼流名
 │   │   ├── cellrois.py       #   標在 Golden Cell 上的具名區域（一個名字、好幾個矩形）
 │   │   └── curve.py          #   tone curve 控制點的字串編碼（parse／format）
-│   ├── steps/                # 步驟卡片 —— **註冊 19 張，卡片庫可見 18 張**（`align` 收起來）
+│   ├── steps/                # 步驟卡片 —— **註冊 18 張，卡片庫可見 17 張**（`align` 收起來）
 │   │                         #   ⚠ 卡片庫由上而下的順序 ＝ `__init__.py` 的 import 順序
 │   │   ├── load.py           #   load_patch／load_single（**一種 source 一張卡**）
 │   │   ├── load_sidecar.py pair_source.py               #   別的程式產的圖／另一份 lot 的那一顆
 │   │   ├── normalize.py tone.py denoise.py flatten.py   #   Enhance 段
 │   │   ├── align.py arith.py align_to.py                #   Compare 段（`align` 目前收起來）
-│   │   ├── roi_reference.py roi_mask.py                 #   Region 段：四種找法 → 具名區域／區域 → mask 流
+│   │   ├── roi_reference.py   #   Region 段（**只有這一張**，畫面上叫「ROI」）：四種找法 → 具名區域
 │   │   ├── roi_cross.py roi_template.py  #   ⚠ **不是卡片**：折進 `roi_reference` 的兩個 method（F30）
 │   │   ├── glv_stats.py cd.py quality.py #   Measure 段：GLV → CD → Focus index（**順序有意義**）
 │   │   ├── output.py         #   Output 段三張：output_report／output_klarf／output_char

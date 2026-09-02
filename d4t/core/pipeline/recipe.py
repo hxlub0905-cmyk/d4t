@@ -1,7 +1,7 @@
 # d4t pipeline engine — authored 2026-07-28 (M1).
 """Recipe 模型：DAG JSON serde、執行順序（拓撲排序）、lint 式驗證。
 
-Recipe JSON 形狀（見 docs/plans/F0-master-plan.md §3.4）：
+Recipe JSON 形狀（見 docs/history/plans/F0-master-plan.md §3.4）：
 
 .. code-block:: json
 
@@ -592,8 +592,13 @@ def _cycles_with(edges: List["Edge"], extra: "Edge",
                  nodes: Set[str]) -> bool:
     """``extra`` 加進去會讓 ``nodes`` 這組節點成環嗎（只看 src/dst）。
 
-    遷移補線之前問這一句。真實的踩法只有一種形狀，而它是真的存在的：
+    遷移補線之前問這一句。真實的踩法只有一種形狀，而它**曾經**是真的存在的：
     **Profile 吃 roi_mask 吐的 mask 影像，而 roi_mask 又吃 Profile 定義的區域。**
+    ⚠ ``roi_mask`` 2026-09-02 刪掉了，所以今天沒有一張卡組得出這個形狀（吃區域
+    的只剩量測卡，而它們不吐影像流）。這道檢查**留著**：它是圖層級的規矩，而
+    下一張「吃區域、吐影像流」的卡會讓那個形狀立刻回來。測試跟著搬到它真正住
+    的那一層（``test_region_edges_migration::test_the_cycle_guard_is_graph_level``）
+    —— 沒有那一步的話，證人一走，防線就跟著安靜消失。
     在 F12 的世界裡它跑得動 —— 順序由那條影像線決定，而區域那一半根本不在圖上。
     補上去就成環，`execution_order` 會 raise，一份今天跑得動的 recipe 明天打不開。
 
@@ -677,7 +682,7 @@ def _migrate_region_params_into_edges(
     ③ **產出它的那張卡排在下游** —— **補線**。這是一個**刻意的行為改變**：
        補完之後 `execution_order` 會把 Region 卡排到前面，於是一份原本
        「量測卡先跑、安靜地量整張圖」的 recipe 開始算對的數字。
-       那正是這一輪存在的理由（見 `docs/plans/F42-region-edges-plan-b.md` §1）。
+       那正是這一輪存在的理由（見 `docs/history/plans/F42-region-edges-plan-b.md` §1）。
 
     ④ **補上去會成環** —— 不補（見 :func:`_cycles_with`），而且由
        `validate` 的 `region-has-no-line` 講出來。一份今天跑得動的 recipe
@@ -1513,6 +1518,30 @@ def _migrate_renamed_cards(nodes: Dict[str, "RecipeNode"]) -> None:
         nodes[nid] = RecipeNode(id=node.id, step=new_key,
                                 params=dict(node.params),
                                 enabled=node.enabled)
+
+
+def _migrate_drop_use_within(nodes: Dict[str, "RecipeNode"]) -> None:
+    """``normalize`` 的 ``use_within`` 那一格拿掉（2026-09-02）。
+
+    產得出 mask 影像流的那張卡（``roi_mask``「Mask from regions」）刪了，所以
+    這一格再也接不到東西 —— 而它是 ``image_key``，設定區唯讀、只能靠拉線填。
+
+    **不拿掉的話舊檔案打不開**：``validate_params`` 對認不得的 key 是
+    ``unknown parameters`` 的硬錯，而那句話的意思是「這份檔案壞了」——
+    真正的情況是「這一格不存在了」（同 :data:`Recipe.app_version` 那一段）。
+
+    判準是**「舊東西在不在」**（鐵則 9）：這一格在就拿掉，不在就什麼都不做。
+    所以它跑第二次是 no-op，``to_json_dict → from_json_dict`` 仍然是 identity
+    —— 那是 ``run_batch`` 送 recipe 進 worker 的路。
+
+    ⚠ **值不是空字串的那些不必額外處理**：那種 recipe 必然還有一個
+    ``roi_mask`` 節點（沒有別的卡產得出那條流），而它開起來是一條
+    ``unknown-step``。跑不起來的 recipe 沒有必要幫它接線（同
+    :func:`_migrate_rescued_feature_names` 裡那段 ``feature_math`` 的說明）。
+    """
+    for node in nodes.values():
+        if node.step == "normalize" and "use_within" in node.params:
+            node.params.pop("use_within", None)
 
 
 def _migrate_roi_from_mask_into_roi_reference(nodes: Dict[str, "RecipeNode"]
@@ -2517,6 +2546,11 @@ class Recipe:
         _migrate_template_regions(nodes)
         # 只改了名字的卡（＋分數表達式裡它寫出來的 feature 名）。
         _migrate_renamed_cards(nodes)
+        # `roi_mask` 走了之後 normalize 的 `use_within` 那一格不存在了
+        # （2026-09-02）。**要排在下面那幾道換卡的遷移之前**：它問的是
+        # `node.step == "normalize"`，而那個 key 從來沒有被改過名，所以早跑
+        # 晚跑都對 —— 排在這裡只是讓「拿掉一格」跟「換一張卡」讀起來分得開。
+        _migrate_drop_use_within(nodes)
         # GDS 那張卡收成「參照區域」的一個 method（F29）。
         _migrate_roi_from_mask_into_roi_reference(nodes)
         # Profile / Template 也折進去（F30）—— 四張 Region 卡變一張。

@@ -241,7 +241,7 @@ def test_two_layers_that_collapse_onto_one_region_name_are_caught(tmp_path):
 
 
 def test_the_box_cap_is_the_one_that_actually_applies(tmp_path):
-    """比的是「Reference regions」卡自己的上限，不是 Profile／Template 的 64。
+    """比的是「ROI」卡自己的上限，不是 Profile／Template 的 64。
 
     第一版比 64，於是 2026-08-18 對真實匯出（最大 275 個矩形）跑出一條 WARN
     加一句「roi_reference 需要自己的上限」—— 而那件事當時已經做完了。
@@ -255,7 +255,7 @@ def test_the_box_cap_is_the_one_that_actually_applies(tmp_path):
         "報告比的上限跟卡片的預設值不同 —— 那份報告會對使用者說錯話"
 
     text, v = _run(_export(tmp_path), samples=1)
-    assert v["the biggest layer fits under the Reference regions card's box cap"] \
+    assert v["the biggest layer fits under the ROI card's box cap"] \
         == "PASS"
     assert "headroom" in text
 
@@ -487,4 +487,4 @@ def test_the_decomposition_is_reported_for_a_real_sized_layer(tmp_path):
     d = _export(tmp_path, ids=("1",), layers=("A", "B"))
     text, v = _run(d)
     assert "rectangles" in text
-    assert "the biggest layer fits under the Reference regions card's box cap" in v
+    assert "the biggest layer fits under the ROI card's box cap" in v

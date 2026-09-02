@@ -63,7 +63,7 @@ python -m d4t run recipes/ebi-to-api-characterization.json <API的.001> \
 量 focus 與灰階 → 三刀分四類 → 出**報表**與**一張 box plot**。
 
 ```
-Load images ──test,ref──> Denoise (gaussian, k=3) ─┬─test──> Reference regions (templateGC) → gc / gc_center / gc_others
+Load images ──test,ref──> Denoise (gaussian, k=3) ─┬─test──> ROI (templateGC) → gc / gc_center / gc_others
                                                     ├─test──> Focus index
                                                     ├─test──> GLV  (source)
                                                     └─ref───> GLV  (reference source)
@@ -92,7 +92,7 @@ Load images ──test,ref──> Denoise (gaussian, k=3) ─┬─test──> R
 
 ### ⚠ 兩件要先知道的
 
-**① 模板要自己畫一次（沒得繞）。** `Reference regions` 卡的 templateGC 需要
+**① 模板要自己畫一次（沒得繞）。** `ROI` 卡的 templateGC 需要
 一張**模板影像**加上畫在它上面的框，而模板是一張圖、塞不進 JSON。載進去會有
 一條紅字指名那顆按鈕：選那張卡 → **`Edit template & regions…`** → 在你自己的
 一格上圈一次。圈完紅字就沒了。
@@ -128,9 +128,9 @@ box plot。只要抓亮的話，樹上第三題把 `cmp_abs_delta_mean_outlier` 
 **沒有第二張圖可以比的時候，同一張圖上的其他框就是參照**。
 
 ```
-Load one image ──single─┬──> Reference regions (stripes, crossing)          → on_pattern ──┐
-                        ├──> Reference regions (stripes, between_vertical)   → between_columns ─┤
-                        ├──> Reference regions (stripes, between_horizontal) → between_rows ──┤
+Load one image ──single─┬──> ROI (stripes, crossing)          → on_pattern ───────┐
+                        ├──> ROI (stripes, between_vertical)   → between_columns ─┤
+                        ├──> ROI (stripes, between_horizontal) → between_rows ────┤
                         └──single──────────────────────────────────> GLV (each box) <─────────┘
                                                                        ▲ 三條虛線都接在同一個 Region 埠
 

@@ -8,9 +8,31 @@
 已註冊的 key（影像段 → 算法段）：
   load_patch, load_single, load_sidecar, normalize, tone, denoise, flatten,
   align, subtract, align_to, pair_source,
-  roi_reference, roi_mask,
+  roi_reference,
   glv_stats, cd_measure, focus_quality,
   output_report, output_klarf, output_char
+
+**2026-09-02：``roi_mask``（Mask from regions）刪掉了。** 使用者：「請幫我拿掉
+（看不到此功能 card 用處）」。連同它唯一的消費者 —— ``normalize`` 的
+``use_within``（畫面上的「Use only」）—— 一起拿掉：那一格只吃得下這張卡吐的
+mask 流，卡走了就沒有任何一張卡產得出它，而那一格是 ``image_key``（設定區
+唯讀、只能靠拉線填），於是它會變成**一個接不到東西的埠**。
+
+代價量過而且很小：**沒有任何一份 recipe 用它** —— `recipes/` 三份、
+`tests/fixtures/recipes/` 兩份、三份黃金值全部沒有 ``roi_mask`` 節點，也沒有
+一格 ``use_within``（黃金值三份逐項相同）。`algo/histmatch.py` 的 ``_masked``
+**不刪**（同 ``algo/snr.py`` 那條規矩）：它是「量與套用分開」那個慣例的規範
+出處，而 ``range_from`` 走的是同一套。
+
+舊 recipe：帶 ``roi_mask`` 節點的開起來是一條 ``unknown-step``（同
+``pattern_ref`` / ``feature_math`` 的先例）；``normalize`` 上那一格由
+``recipe._migrate_drop_use_within`` 拿掉 —— 不拿的話它是
+「unknown parameters」，而那句話的意思是「這份檔案壞了」。
+
+**Region 段因此只剩一張卡，而它的 label 從「Reference regions」改成「ROI」**
+（使用者同一句話）。``key`` 仍然是 ``roi_reference``（recipe 的鍵）、
+feature 名一個都沒動 —— 改的只有畫面上那幾個字（CLAUDE.md §5 那張價目表的
+最後一列：「名字剪短一點」＝零代價）。
 
 **2026-08-25（F31 T5）：``find_defect`` 刪掉了。** 使用者：「我覺得 find
 defect 不需要。」它 2026-08-25 早上才進來（F29），零 recipe、零 fixture、
@@ -69,11 +91,11 @@ from . import align          # align
 from . import arith          # subtract / invert
 from . import align_to       # 小圖在大圖裡的位置（F15-C）
 from . import pair_source    # 另一份資料的對應那一顆（F15）
-# Region 段只剩兩張（F30）。`roi_cross`（Profile）與 `roi_template`（Template）
-# 折進 `roi_reference` 變成它的兩個 method，所以那兩個模組**不在這裡 import**
-# —— 它們不再自己註冊，是被 `roi_reference` 取用的實作。
+# Region 段只剩**一張**（F30 收成兩張，2026-09-02 再收成一張）。
+# `roi_cross`（Profile）與 `roi_template`（Template）折進 `roi_reference` 變成
+# 它的兩個 method，所以那兩個模組**不在這裡 import** —— 它們不再自己註冊，
+# 是被 `roi_reference` 取用的實作。
 from . import roi_reference  # roi_reference（四種找法 → 具名區域）
-from . import roi_mask       # roi_mask（區域 → 0/255 mask 影像流，F8c）
 # ⚠ **Measure 段的順序就是這幾行的順序**（使用者 2026-08-25：「Measure 的 card
 # 順序幫我改命名&重排：GLV → CD → Focus index」）。`list_steps` 照 REGISTRY 的
 # 插入序回，而 REGISTRY 的插入序就是這裡的 import 序 —— 卡片庫裡看到的先後

@@ -1,7 +1,7 @@
 # d4t pipeline contract — authored 2026-07-27 (M1).
 """Context — pipeline 步驟間傳遞的執行狀態。
 
-設計原則（見 docs/plans/F0-master-plan.md §3.2）：
+設計原則（見 docs/history/plans/F0-master-plan.md §3.2）：
 - ``images``   命名影像流（"test"、"ref"、"ref_aligned"、"diff"、"snr_map"…）。
 - ``rois``     MultiROISet（正規化座標；M3 起由 ROI 卡填入）。
 - ``labels``   整數 ROI label map（0=背景, 1..N；GLAS 契約 gray[labels==k]）。
