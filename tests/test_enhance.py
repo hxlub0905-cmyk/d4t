@@ -325,14 +325,13 @@ def test_normalize_is_one_card_with_every_method_in_the_family():
 
 @pytest.mark.parametrize("method,shown,hidden", [
     ("percentile", ("p_low", "p_high", "range_from"), ("glv_low", "tiles", "reference")),
-    ("zscore", ("target_level", "target_spread", "range_from", "use_within"),
+    ("zscore", ("target_level", "target_spread", "range_from"),
      ("p_low", "glv_low", "tiles", "reference")),
     ("glv_band", ("glv_low", "glv_high", "range_from"), ("p_low", "tiles", "reference")),
-    ("match", ("reference", "match_method", "use_within"),
+    ("match", ("reference", "match_method"),
      ("p_low", "glv_low", "tiles", "range_from", "target_level")),
     ("local", ("clip_limit", "tiles"),
-     ("p_low", "glv_low", "reference", "range_from", "use_within",
-      "target_spread")),
+     ("p_low", "glv_low", "reference", "range_from", "target_spread")),
 ])
 def test_only_the_parameters_that_apply_are_shown(method, shown, hidden):
     """``show_when``：選了 CLAHE 的時候 ``p_low`` 根本不是這張卡的一部分。

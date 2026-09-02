@@ -7,7 +7,11 @@
    的地方飽和。現在：壓回 0–255 是明講的契約，而「壓了多少」變成一個特徵。
 2. 削平從「直方圖上看得到」升級成「數字 + 超過 1% 就講一句話」。
 3. Denoise 的 ``strength`` 單位（這張圖自己的雜訊 σ）以前只活在演算法內部。
-4. ``normalize`` 的 ``match`` 吃不到 ``use_within`` —— 另外三個方法都吃得到。
+4. ~~``normalize`` 的 ``match`` 吃不到 ``use_within``~~ —— **那一格 2026-09-02
+   拿掉了**（`roi_mask` 刪了，沒有卡產得出 mask 流）。這一節現在守的是**下面
+   那一層**：``algo/histmatch`` 的 ``mask=`` 參數留著，而它的兩條性質
+   （``mask=None`` ＝ vendor 原樣、全 0 的 mask 退回整張圖）仍然是「量與套用
+   分開」那個慣例的規範出處。
 """
 from __future__ import annotations
 
@@ -205,64 +209,31 @@ def test_sigma_is_meta_not_a_feature():
 
 
 # --------------------------------------------------------------------------- #
-# 4. match 也吃 use_within
+# 4. use_within 那一格不在了，而下面那一層還在
 # --------------------------------------------------------------------------- #
-def _two_patterns():
-    """左半亮、右半暗的兩張圖 —— 但右半的**面積**在 test 與 ref 上不一樣。
+def test_normalize_has_no_use_within_box_any_more():
+    """卡上那一格拿掉了（2026-09-02），而**它不能只是藏起來**。
 
-    那正是 mask 存在的理由：整張圖的統計會被「這一顆剛好切到多少背景」帶著跑。
+    ⚠ 這一條問的是兩件事，而第二件才是重點：
+
+    1. ``params`` 裡沒有 ``use_within``；
+    2. **沒有任何一個方法宣告讀得到一條 mask 流** —— ``resolve_reads`` 是畫布
+       畫線的依據，留一條沒有埠的線在宣告裡，畫布就會說謊（F9）。
+
+    為什麼整格拿掉而不是收起來：產得出 mask 流的卡只有 ``roi_mask`` 一張，而它
+    刪了。這一格的型別是 ``image_key``（設定區唯讀、只能靠拉線填），所以留著
+    就是一個**接不到東西的埠** —— 使用者看得到、按得到、而且永遠填不進去。
     """
-    a = np.full((32, 32), 60, np.uint8)
-    a[:, :16] = 200
-    b = np.full((32, 32), 90, np.uint8)
-    b[:, :8] = 210                      # 亮的那塊只有一半寬
-    mask = np.zeros((32, 32), np.uint8)
-    mask[:, :8] = 255                   # 只用兩張圖上都是亮的那一塊
-    return a, b, mask
-
-
-def test_match_measures_inside_the_mask_when_asked():
-    a, b, mask = _two_patterns()
-    step = get_step("normalize")()
-    plain = step.run(_ctx(test=a, ref=b),
-                     {"streams": "test", "method": "match",
-                      "match_method": "linear"}).images["test"]
-    masked = step.run(_ctx(test=a, ref=b, m=mask),
-                      {"streams": "test", "method": "match",
-                       "match_method": "linear",
-                       "use_within": "m"}).images["test"]
-    assert not np.array_equal(plain, masked), "mask 沒有生效"
-
-
-def test_match_applies_the_mapping_to_the_whole_image():
-    """量在 mask 內，**套用是整張圖** —— 不然 mask 邊界會出現一道人工階梯，
-    而那道階梯會被下游當成邊緣訊號。"""
-    a, b, mask = _two_patterns()
-    out = get_step("normalize")().run(
-        _ctx(test=a, ref=b, m=mask),
-        {"streams": "test", "method": "match", "match_method": "linear",
-         "use_within": "m"}).images["test"]
-    # 原圖只有兩個灰階值 → 線性映射之後也只有兩個（mask 內外各自被搬走了，
-    # 但搬的是同一個映射）。
-    assert len(np.unique(out)) == 2
-
-
-def test_the_mask_is_declared_as_a_line_on_the_canvas():
-    """宣告漏了 mask，畫布上就沒有那條線 —— 使用者看不出兩張卡有關係（F9）。"""
     cls = get_step("normalize")
-    reads = cls.resolve_reads({"streams": "test", "method": "match",
-                               "reference": "ref", "use_within": "m"})
-    assert reads == ["test", "ref", "m"]
-
-
-def test_a_mask_of_the_wrong_size_is_a_plain_sentence_not_a_crash():
-    a, b, _ = _two_patterns()
-    with pytest.raises(StepError) as e:
-        get_step("normalize")().run(
-            _ctx(test=a, ref=b, m=np.ones((8, 8), np.uint8)),
-            {"streams": "test", "method": "match", "match_method": "linear",
-             "use_within": "m"})
-    assert "Same size as" in str(e.value)
+    assert "use_within" not in {sp.name for sp in cls.params}
+    for method in ("percentile", "zscore", "glv_band", "match", "local"):
+        reads = cls.resolve_reads({"streams": "test", "method": method,
+                                   "reference": "ref"})
+        assert "m" not in reads and "mask" not in reads, method
+    # 硬錯而不是安靜忽略 —— 舊檔案靠 `_migrate_drop_use_within` 不撞上它。
+    with pytest.raises(Exception):
+        cls().validate_params({"streams": "test", "method": "match",
+                               "use_within": "m"})
 
 
 @pytest.mark.parametrize("method", ["exact", "linear", "percentile"])
@@ -285,12 +256,3 @@ def test_an_all_zero_mask_falls_back_to_the_whole_image():
     out = algo_histmatch.match_histogram_linear(src, ref, mask=zeros)
     assert np.array_equal(out, algo_histmatch.match_histogram_linear(src, ref))
 
-
-def test_use_within_shows_up_for_match_in_the_form():
-    """``show_when`` 是使用者看得到的那一半：用得到的方法要全部列進去。
-
-    `local`（CLAHE）是唯一用不到的 —— 它根本不量一組全域統計。
-    """
-    spec = [s for s in get_step("normalize").params if s.name == "use_within"][0]
-    assert spec.visible_for({"method": "match"}) is True
-    assert spec.visible_for({"method": "local"}) is False

@@ -93,7 +93,7 @@ def _run_gds():
 
 
 RUNNERS = {"Profile": _run_profile, "Template": _run_template,
-           "Reference regions · GDS": _run_gds}
+           "ROI · GDS": _run_gds}
 
 
 # --------------------------------------------------------------------------- #

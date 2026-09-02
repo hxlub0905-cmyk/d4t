@@ -240,7 +240,12 @@ class RoiReferenceStep(Step):
     """把「應該長得一樣」的地方全部標出來 —— 重複的晶格，或 GDS 的一層。"""
 
     key = "roi_reference"
-    label = "Reference regions"
+    #: ``key`` 不動（recipe 的鍵）、寫出來的 feature 名一個都不動（那些會被打進
+    #: 分數表達式與判定樹）—— 改的只有畫面上這幾個字。2026-09-02 使用者：
+    #: 「ROI card 內剩下那一張就改名叫 ROI」。``roi_mask`` 走了之後 Region 段
+    #: 只剩這一張，「Reference regions」那個名字是拿來跟它區分的，而現在沒有
+    #: 第二張要區分（CLAUDE.md §5 那張價目表的最後一列：只改 label ＝零代價）。
+    label = "ROI"
     category = CATEGORY_ALGO
     group = GROUP_REGION
     help = ("Mark every place on the image that should look the same, so the "
@@ -378,7 +383,7 @@ class RoiReferenceStep(Step):
     def feature_help(cls):
         """三個 method 的**聯集** —— 這張卡是它們共同的門面（F29）。
 
-        使用者在畫面上看到的卡是「Reference regions」，而寫出 ``cross_count``
+        使用者在畫面上看到的卡是「ROI」，而寫出 ``cross_count``
         的是折進來的那一支。少了這一段，同一張表上就有幾列永遠空著 ——
         而它們正是使用者最需要一句話的那幾個診斷數字。
         """

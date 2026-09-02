@@ -86,7 +86,11 @@ def test_a_card_without_a_panel_falls_back_to_the_feature_table(window):
     # 預設值）。
     window._on_edge_added(src, a, "ref", "moving")
     window._on_edge_added(src, a, "test", "fixed")
-    window.add_card_after(a, "roi_mask")        # roi_mask 明文不給儀表（PR-2）
+    # ⚠ 證人以前是 ``roi_mask``，而它 2026-09-02 刪掉了。換成 ``load_sidecar``
+    # —— 另一張**明文不補**儀表的卡（PR-2 的工作單）。證人要是真的在 registry
+    # 裡的卡：對一個不存在的 key 問 `inspector_for` 當然回 None，而那證明不了
+    # 「沒登記的卡不會壞掉」。
+    window.add_card_after(a, "load_sidecar")
     assert window.inspector() is None
     assert window.bottom_page() == 1
     assert window.btn_tab_card.isEnabled() is False
@@ -106,9 +110,15 @@ def test_adding_a_new_card_does_not_need_this_module_touched():
     """約定 1：沒登記的卡就沒有儀表，不是壞掉。
 
     證據卡以前是 ``subtract`` —— PR-2 給了它面板，換成兩張**明文不補**的
-    （工作單：roi_mask 與 load_sidecar 價值低，真有人要再開）。
+    （工作單：roi_mask 與 load_sidecar 價值低，真有人要再開）。⚠ 那兩張
+    2026-09-02 剩下一張（``roi_mask`` 刪掉了）。
+
+    **證人要真的在 registry 裡**，所以下面第一行是那條反向的：對一個不存在的
+    key 問 ``inspector_for`` 本來就回 None，少了那一行，這條測試會在最後一張
+    沒有儀表的卡也消失的那天**照樣全綠**，而它守的事已經不見了。
     """
-    assert insp_mod.inspector_for("roi_mask") is None
+    from d4t.core.pipeline.step import REGISTRY
+    assert "load_sidecar" in REGISTRY, "證人不在卡片庫裡，這條測試等於沒測"
     assert insp_mod.inspector_for("load_sidecar") is None
     assert insp_mod.inspector_for("") is None
     assert insp_mod.inspector_for("align") is insp_mod.AlignInspector

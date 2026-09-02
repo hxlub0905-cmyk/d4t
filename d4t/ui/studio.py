@@ -5274,7 +5274,7 @@ class StudioWindow(QMainWindow):
         - 這張卡**定義**的區域（``resolve_regions_out``，F7-11 起）——
           調 Region 卡時看框跟著參數動；
         - 這張卡**引用**的區域（``resolve_regions_in``，2026-08-14 使用者
-          要求）—— 選 Gray-level stats / Mask from regions 時，畫面直接回答
+          要求）—— 選 Gray-level stats 那種量測卡時，畫面直接回答
           「我到底在量哪裡」。以前量測卡選起來預覽上什麼都沒有，roi 填錯
           只能用數字猜。
 

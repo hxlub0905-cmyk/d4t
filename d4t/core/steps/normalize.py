@@ -158,16 +158,6 @@ class NormalizeStep(MultiStreamStep):
                   label="Borrow range from",
                   show_when=("method", _MEASURED),
                   help=_RANGE_FROM_HELP),
-        ParamSpec(name="use_within", type="image_key", direction="in", default="",
-                  label="Use only",
-                  show_when=("method", _MEASURED + ("match",)),
-                  help=("Leave empty to measure from every pixel. Name a mask "
-                        "stream (from a Mask-from-regions card) and only the "
-                        "pixels inside the mask are measured - the result is "
-                        "still applied to the whole image. Use it when how much "
-                        "of each pattern is in the crop changes from patch to "
-                        "patch. (With Match to another stream, the brightness "
-                        "statistics are taken inside the mask on both images.)")),
         # ---- match --------------------------------------------------------
         ParamSpec(name="reference", type="image_key", direction="in", default="ref",
                   label="Match it to", show_when=("method", ("match",)),
@@ -206,13 +196,12 @@ class NormalizeStep(MultiStreamStep):
     def extra_reads(cls, params: Dict[str, Any]) -> List[str]:
         method = str(params.get("method", "percentile"))
         if method in _MEASURED:
-            return [str(params.get("range_from", "") or "").strip(),
-                    str(params.get("use_within", "") or "").strip()]
+            return [str(params.get("range_from", "") or "").strip()]
         if method == "match":
-            # mask 也是一條**接進來的線**（F11 Enhance-1）：宣告漏了它，
-            # 畫布上就不會有那條線，而使用者看不出這兩張卡有關係。
-            return [str(params.get("reference", "ref")),
-                    str(params.get("use_within", "") or "").strip()]
+            # ⚠ 這裡以前還有 ``use_within``（一條 mask 流）。**2026-09-02 拿掉**
+            # —— 產得出 mask 流的那張卡（``roi_mask``）刪了，留著那一格就是一個
+            # 接不到東西的埠。宣告與參數同進同出，所以這裡也跟著少一項。
+            return [str(params.get("reference", "ref"))]
         return []
 
     @classmethod
@@ -236,30 +225,25 @@ class NormalizeStep(MultiStreamStep):
         if method == "match":
             ref = to_uint8(require_image(ctx, self.key, p["reference"]))
             fn = algo_histmatch.MATCH_FN[p["match_method"]]
-            within = str(p.get("use_within", "") or "").strip()
-            if not within:
-                return lambda img: fn(to_uint8(img), ref)
-            # 只用 mask 內的像素量亮度統計，**套用仍是整張圖**（見
-            # `algo/histmatch.py::_masked`：不然 mask 邊界會出現一道人工階梯）。
-            mask = require_image(ctx, self.key, within)
-            if mask.shape[:2] != ref.shape[:2]:
-                raise StepError(
-                    self.key,
-                    "the mask '%s' is %dx%d but '%s' is %dx%d - point the "
-                    "Mask-from-regions card's 'Same size as' at the same "
-                    "stream this card processes."
-                    % (within, mask.shape[1], mask.shape[0],
-                       p["reference"], ref.shape[1], ref.shape[0]))
-            return lambda img: fn(to_uint8(img), ref, mask=mask)
+            # ⚠ 這裡以前有一條 mask 的路（``use_within``），2026-09-02 隨
+            # ``roi_mask`` 一起拿掉。``algo/histmatch`` 的 ``mask=`` 參數**留著**
+            # —— 它是「量與套用分開」那個慣例的規範出處（同 ``algo/snr.py``）。
+            return lambda img: fn(to_uint8(img), ref)
         clip, tiles = float(p["clip_limit"]), int(p["tiles"])
         return lambda img: algo_enhance.clahe(img, clip, tiles)
 
     def _measure_from(self, ctx: Context, p: Dict[str, Any]):
-        """「先量再套」三個方法共用的兩件事：**量哪一張**、**量哪些畫素**。
+        """「先量再套」三個方法共用的一件事：**量哪一張**。
 
         回傳 ``(basis, pixels_for)``：``basis`` 是 ``range_from`` 指的那張圖
-        （沒填就是 None＝每條流量自己），``pixels_for(src)`` 是把 ``use_within``
-        的 mask 套上去之後、真正拿來量的那群畫素。
+        （沒填就是 None＝每條流量自己），``pixels_for(src)`` 是真正拿來量的那群
+        畫素。
+
+        ⚠ **這裡以前還有第二件事：量哪些畫素**（``use_within`` 的 mask）。
+        2026-09-02 隨 ``roi_mask`` 一起拿掉 —— 沒有卡產得出 mask 流了。
+        ``pixels_for`` 這一層**留著**：三個方法都走它，而它是「量與套用是兩件
+        事」那句話在這張卡上的形狀（``range_from`` 仍然靠它）。收掉這一層等於
+        把那句話拆成三份各自寫一次。
 
         兩件事都在**迴圈之前**發生（`build_op` 只呼叫一次），所以量到的一定是
         這張卡還沒改過的原始值 —— F7-18 那個「借範圍的卡要排在前面」的陷阱
@@ -267,28 +251,10 @@ class NormalizeStep(MultiStreamStep):
         """
         borrow = str(p.get("range_from", "") or "").strip()
         basis = (require_image(ctx, self.key, borrow) if borrow else None)
-        within = str(p.get("use_within", "") or "").strip()
-        mask = (require_image(ctx, self.key, within) if within else None)
 
         def pixels_for(src: np.ndarray) -> np.ndarray:
             """量用的那群畫素（套用永遠是整張 ``img``，不在這裡）。"""
-            if mask is None:
-                return src
-            if mask.shape[:2] != np.asarray(src).shape[:2]:
-                raise StepError(
-                    self.key,
-                    f"the mask '{within}' is {mask.shape[1]}x{mask.shape[0]} "
-                    f"but the image is {src.shape[1]}x{src.shape[0]} - point "
-                    f"the Mask-from-regions card's 'Same size as' at the same "
-                    f"stream this card processes.")
-            sel = np.asarray(src)[np.asarray(mask) > 0]
-            if sel.size == 0:
-                # 全 0 的 mask（區域落在影像外）：退回整張圖，但要講 ——
-                # 安靜地退回去，使用者會以為「只用 EPI」一直在生效。
-                ctx.warn(f"normalize: mask '{within}' selects no pixels; "
-                         f"measuring from the whole image instead.")
-                return src
-            return sel
+            return src
 
         return basis, pixels_for
 
@@ -334,14 +300,14 @@ class NormalizeStep(MultiStreamStep):
         改過任何東西，所以借到的一定是原始值。留空的話 basis 是 None，
         每一條流各自量自己（那是 F7-18 之前就有的行為，沒有變）。
 
-        ``use_within``（F8c）：範圍只從 mask 內的像素量，**套用仍是整張圖**。
-        動機：MG 佔多少面積是隨 crop 變的（64px 的 patch 一根 MG 進出畫面就是
-        12%），整張圖的 percentile 因此逐顆漂 —— 同一片 EPI，隔壁多一根 MG，
-        正規化完就變一個值。mask 讓「拿來定範圍的那群像素」跨 patch 是同一種
-        圖案。
+        ⚠ **這裡以前還有 ``use_within``（F8c）**：範圍只從一條 mask 流內的像素
+        量、套用仍是整張圖，用來擋掉「MG 佔多少面積隨 crop 變」造成的逐顆漂移。
+        2026-09-02 隨 ``roi_mask`` 一起拿掉（使用者：「看不到此功能 card 用處」）
+        —— 那個問題**仍然存在**，而今天的答案是量測段的區域：GLV 卡吃具名區域，
+        所以量的本來就只有 EPI 那一塊。
 
-        兩件事都由 :meth:`_measure_from` 提供，跟 ``zscore`` 共用同一份 ——
-        「量哪一張、量哪些畫素」的規則寫兩次就會有兩種意思。
+        由 :meth:`_measure_from` 提供，跟 ``zscore`` 共用同一份 ——
+        「量哪一張」的規則寫兩次就會有兩種意思。
         """
         if glv:
             if p["glv_low"] > p["glv_high"]:

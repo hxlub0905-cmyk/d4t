@@ -334,36 +334,39 @@ def test_right_drag_pans_the_canvas(window, qapp):
     assert not opened, "拖曳之後放開不可以彈出右鍵選單"
 
 
-def test_a_new_mask_card_takes_its_regions_from_a_line_not_from_typing(window, qapp):
-    """使用者的直覺：「Profile / Template 應該直接吐 mask」。名字不該要他
-    重打一次 —— **而 F12 起那件事由一條線做，不是由自動填**。
+def test_a_new_card_takes_its_regions_from_a_line_not_from_typing(window, qapp):
+    """區域名不該要使用者重打一次 —— **而 F12 起那件事由一條線做，不是由
+    自動填**。
 
-    F8 當時的做法是加卡時把上游每一個區域名都填進 ``regions``。區域變成畫布上
-    的埠之後，那等於**自動幫他畫了好幾條他沒有拉過的線** —— 正是鐵則 10 擋的
+    F8 當時的做法是加卡時把上游每一個區域名都填進那一格。區域變成畫布上的埠
+    之後，那等於**自動幫他畫了好幾條他沒有拉過的線** —— 正是鐵則 10 擋的
     那件事。他仍然不必打字：埠就在上游那張卡的右邊，拉過去就是了。
+
+    ⚠ **下游那張卡以前是 ``roi_mask``，而它 2026-09-02 刪掉了。** 換成
+    ``glv_stats`` —— 它的 ``roi`` 同樣是 ``region_keys``（一串），走的是同一條
+    路（``_autofill_new_card`` 那一支）。規矩沒有跟著那張卡走。
     """
     window.show()
     qapp.processEvents()
     with_regions = wire_up(window.model, add_region_step(window.model, "roi_cross"))
     qapp.processEvents()
     window.select_node(with_regions)
-    window._on_add_requested("roi_mask")
+    window._on_add_requested("glv_stats")
     qapp.processEvents()
     nid = window.selected_node
     node = window.model.nodes[nid]
-    assert node.step == "roi_mask"
-    assert str(node.params.get("regions", "")) == "", \
+    assert node.step == "glv_stats"
+    assert str(node.params.get("roi", "")) == "", \
         "加卡不准順手接線（鐵則 10）"
 
-    from d4t.core.pipeline.step import get_step as _get
     outs = region_card("roi_cross").resolve_regions_out(
         window.model.nodes[with_regions].params)
     # 名字在上游那張卡的埠上（不必用抄的），拉一條線就填好了。
     assert outs
     item = window.pipeline.node_item(with_regions)
     assert set(outs) <= {d["name"] for d in item.out_specs()}
-    window._on_edge_added(with_regions, nid, outs[0], "regions")
-    assert window.model.nodes[nid].params["regions"] == outs[0]
+    window._on_edge_added(with_regions, nid, outs[0], "roi")
+    assert window.model.nodes[nid].params["roi"] == outs[0]
 
 
 # --------------------------------------------------------------------------- #

@@ -356,24 +356,30 @@ def test_removing_the_region_card_empties_the_field(window):
 
 
 def test_several_regions_accumulate_on_a_region_keys_field(window):
-    """``roi_mask`` 吃一串區域 —— 第二條線是「這個也算」，不是「改成這個」。"""
+    """``glv_stats`` 的 ``roi`` 吃一串區域 —— 第二條線是「這個也算」，
+    不是「改成這個」。
+
+    ⚠ 這一條的證人以前是 ``roi_mask``（它的 ``regions``），而那張卡
+    2026-09-02 刪掉了。``roi`` 是同一個型別（``region_keys``）、走同一條路，
+    所以規矩一個字都沒有變 —— 換的只是誰站在那裡。
+    """
     src = first_source(window, "load_single")
     tpl = window.add_card_after(src, "roi_reference")
     # F30：一張卡四個 method，而 `regions` 只在「我自己標的那一格」上算數。
     window.model.set_param(tpl, "method", "a cell I mark myself")
     window._on_edge_added(src, tpl, "single", "source")
     window.model.set_param(tpl, "regions", "epi: 0.1,0,0.3,1 | mg: 0.5,0,0.2,1")
-    mask = window.add_card_after(tpl, "roi_mask")
-    window._on_edge_added(src, mask, "single", "source")
+    glv = window.add_card_after(tpl, "glv_stats")
+    window._on_edge_added(src, glv, "single", "source")
     # 加進來的卡**不帶區域**：自動填等於自動畫了六條他沒拉過的線（鐵則 10）。
-    assert window.model.nodes[mask].params["regions"] == ""
+    assert window.model.nodes[glv].params["roi"] == ""
 
-    window._on_edge_added(tpl, mask, "epi", "regions")
-    window._on_edge_added(tpl, mask, "mg", "regions")
-    assert window.model.nodes[mask].params["regions"] == "epi,mg"
+    window._on_edge_added(tpl, glv, "epi", "roi")
+    window._on_edge_added(tpl, glv, "mg", "roi")
+    assert window.model.nodes[glv].params["roi"] == "epi,mg"
 
-    window._on_edge_removed(tpl, mask, "epi", "regions")
-    assert window.model.nodes[mask].params["regions"] == "mg"
+    window._on_edge_removed(tpl, glv, "epi", "roi")
+    assert window.model.nodes[glv].params["roi"] == "mg"
 
 
 # --------------------------------------------------------------------------- #

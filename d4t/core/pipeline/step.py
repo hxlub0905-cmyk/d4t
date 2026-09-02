@@ -611,7 +611,7 @@ class ParamSpec:
 
         判準是 ``default``：預設值指得出一條流的（``source="diff"``）是這張卡
         的主要輸入，沒有它就跑不起來；預設是空字串的（``normalize`` 的
-        ``range_from`` / ``use_within``）本來就是「要用再接」的選配。
+        ``range_from``）本來就是「要用再接」的選配。
 
         ``show_when`` 藏起來的那幾格不算 —— ``normalize`` 的 ``reference``
         只有選了 *Match to another stream* 才用得到，方法是 percentile 的時候
@@ -1503,6 +1503,11 @@ def list_steps(category: Optional[str] = None) -> List[Type[Step]]:
     （category=image）會跳到 ``roi_cross``（category=algo）前面，而那件事在
     import 那幾行上完全看不出來。一個規矩比兩個對，而這裡要的那個規矩是
     「照 import 的順序」。
+
+    ⚠ 上面那個例子裡的兩張卡**今天都不在 REGISTRY 裡了**（``roi_cross`` 折進
+    ``roi_reference``、``roi_mask`` 2026-09-02 刪掉）。例子留著是因為它講的是
+    **為什麼是這個規矩**，而那個理由跟哪幾張卡碰巧存在無關 —— 下一次有人想
+    「順便照 category 排一下」時，這一段就是答案。
     """
     return [s for s in REGISTRY.values()
             if category is None or s.category == category]

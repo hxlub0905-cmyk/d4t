@@ -258,13 +258,16 @@ def test_two_images_with_different_brightness_become_comparable():
     assert diff < raw / 2.0, (diff, raw)
 
 
-def test_zscore_borrows_the_basis_and_the_mask_like_the_others():
-    """`range_from` / `use_within` 那條路是共用的一份，不是每個方法各寫一次。"""
+def test_zscore_borrows_the_basis_like_the_others():
+    """`range_from` 那條路是共用的一份，不是每個方法各寫一次。
+
+    ⚠ 這一條以前還問 ``use_within``（一條 mask 流）。**2026-09-02 那一格拿掉了**
+    —— 產得出 mask 流的 ``roi_mask`` 刪了，留著就是一個接不到東西的埠。
+    共用的那一份（``_measure_from``）**還在**，它現在共用的是「量哪一張」。
+    """
     rng = np.random.default_rng(8)
     a = np.clip(90.0 + rng.normal(0.0, 4.0, (32, 32)), 0, 255).astype(np.uint8)
     b = np.clip(180.0 + rng.normal(0.0, 4.0, (32, 32)), 0, 255).astype(np.uint8)
-    mask = np.zeros((32, 32), np.uint8)
-    mask[:, :16] = 255
 
     own, _ = _zs(a)
     borrowed = np.asarray(_run("normalize", _ctx(test=a.copy(), other=b),
@@ -273,15 +276,13 @@ def test_zscore_borrows_the_basis_and_the_mask_like_the_others():
                           dtype=np.float32)
     assert not np.array_equal(own, borrowed), "借來的基準沒有生效"
 
-    masked = np.asarray(_run("normalize", _ctx(test=a.copy(), m=mask),
-                             streams="test", method="zscore",
-                             use_within="m").images["test"], dtype=np.float32)
-    assert masked.shape == a.shape
-
     cls = get_step("normalize")
     assert cls.resolve_reads({"streams": "test", "method": "zscore",
-                              "range_from": "other", "use_within": "m"}) == [
-        "test", "other", "m"]
+                              "range_from": "other"}) == ["test", "other"]
+    # 那一格真的不在了 —— 塞進去是硬錯，而遷移正是為了讓舊檔不撞上它。
+    with pytest.raises(Exception):
+        cls().validate_params({"streams": "test", "method": "zscore",
+                               "use_within": "m"})
 
 
 def test_a_completely_flat_image_is_not_a_division_by_zero():

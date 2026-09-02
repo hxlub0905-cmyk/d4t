@@ -101,13 +101,18 @@ Context 有三層資料：**影像流 images**（名字 → 像素陣列，綁�
 ```
 影像流通道（像素）  Load ─→ Enhance ─→ Compare ─→ 'diff' ──────┐
                                                               ├─→ 量測卡 ─→ 特徵 ─→ score
-區域通道（哪裡）    roi_reference（三個 method）                  │   source='diff'（流）
+區域通道（哪裡）    roi_reference「ROI」（三個 method）           │   source='diff'（流）
                       └╌→ 具名區域 'cross' ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┘   roi='cross'（名字，
                           （畫布上是虛線 + 菱形埠）                  由那條線水合出來）
-                            └─→ roi_mask ─→ 'mask' 流 ─→ Normalize 的 use_within（影像段）
 ```
 
-**規則一句話：量測卡吃區域「名字」，影像卡吃 mask「影像流」。**
+**規則一句話：量測卡吃區域「名字」，影像卡吃「影像流」。**
+
+⚠ **這張圖以前還有第三條路**：`roi_mask`（Mask from regions）把具名區域畫成
+一條 0/255 的影像流，餵給 Normalize 的 `use_within`。**2026-09-02 兩邊一起
+拿掉了**（使用者：「看不到此功能 card 用處」）。它擋的那個問題仍然存在
+（「MG 佔多少面積隨 crop 變，整張圖的統計因此逐顆漂」），而今天的答案是
+**量測段的區域**：GLV 吃具名區域，所以量的本來就只有該看的那一塊。
 
 那個「名字」在畫布上是**一條虛線 + 菱形埠**，而**線就是儲存**
 （F42，2026-08-27）：區域依賴跟影像流一樣住在 `recipe.edges` 裡
@@ -262,7 +267,7 @@ d4t/
 │   │   ├── load_sidecar.py pair_source.py               #   別的程式產的圖／另一份 lot 的那一顆
 │   │   ├── normalize.py tone.py denoise.py flatten.py   #   Enhance 段
 │   │   ├── align.py arith.py align_to.py                #   Compare 段（`align` 目前收起來）
-│   │   ├── roi_reference.py roi_mask.py                 #   Region 段：四種找法 → 具名區域／區域 → mask 流
+│   │   ├── roi_reference.py   #   Region 段（**只有這一張**，畫面上叫「ROI」）：四種找法 → 具名區域
 │   │   ├── roi_cross.py roi_template.py  #   ⚠ **不是卡片**：折進 `roi_reference` 的兩個 method（F30）
 │   │   ├── glv_stats.py cd.py quality.py #   Measure 段：GLV → CD → Focus index（**順序有意義**）
 │   │   ├── output.py         #   Output 段三張：output_report／output_klarf／output_char

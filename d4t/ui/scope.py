@@ -239,7 +239,7 @@ ATTACHMENTS: Tuple[Attachment, ...] = (
     Attachment(
         key="gds", title="Open GDS export…",
         what=("Layout labels that GLAS exported for this lot: every defect "
-              "gets a label map, and the “Reference regions” card turns each layer "
+              "gets a label map, and the “ROI” card turns each layer "
               "into a named region."),
         # **這一顆不縮寫**：它的名字被三張卡的訊息逐字引用（「Use “Open GDS
         # export…”」），而那條不變量要求引號裡的字跟畫面上的鈕**一字不差**

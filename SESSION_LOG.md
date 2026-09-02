@@ -19,6 +19,78 @@
 
 ---
 
+## F74：Region 段只剩一張卡，而它就叫 ROI（2026-09-02）
+
+使用者兩句話：「**Mask from regions 這張 card 以及其相關功能請幫我拿掉（看不到
+此功能 card 用處）**，同時 **ROI card 內剩下那一張就改名叫 ROI**」。
+
+**「相關功能」是哪些 —— 量出來只有一個。** `roi_mask` 吐的那條 0/255 mask 影像
+流，全 repo 只有一個消費者：`normalize` 的 `use_within`（畫面上「Use only」）。
+卡走了就沒有任何一張卡產得出那條流，而那一格的型別是 `image_key` ——
+**設定區唯讀、只能靠拉線填**。留著它不是「多一個選配」，是**一個接不到東西的
+埠**：使用者看得到、按得到、永遠填不進去。所以兩個一起拿掉（使用者點頭）。
+
+**代價付得起，而這一次真的量了**（CLAUDE.md §5 那張價目表的用法）：
+
+| | 量到什麼 |
+|---|---|
+| 出貨 recipe（3 份）| 零個 `roi_mask` 節點、零格 `use_within` |
+| fixture recipe（2 份）| 同上 |
+| **黃金值（3 份）** | **逐項相同** —— 刪之前綠、刪之後綠 |
+| 卡片庫 | 18 張 → 17 張 |
+
+跟 `pattern_ref` 那次（rsem route 從 24/24 掉到 12/24）完全不同：那張卡是一條
+route 唯一的 ref 來源，這一張沒有任何人在用。
+
+**留下來的三件事，每一件都有理由**
+
+* **`algo/histmatch.py` 的 `mask=` 不刪。** 呼叫者只剩測試 —— 而那正是這種模組
+  被當成死碼順手清掉的時候。它是「**量與套用分開**」那個慣例的規範出處，而
+  `range_from` 走的是同一套。同一條規矩 `algo/snr.py`、`algo/period.py`、
+  `algo/golden.py` 已經寫過三次。
+* **`_measure_from` 那一層不收掉。** 三個方法都走它，它是那句話在這張卡上的
+  形狀。收掉等於把同一句話拆成三份各自寫一次。
+* **`_cycles_with` 那道環的檢查不刪，但**它的證人換了地方（見下）。
+
+**路上撿到一件事：刪一張卡會讓一條防線安靜地消失。**
+
+`test_region_edges_migration` 有一條測「補區域線會成環就不補」。它的證人是
+「Profile 吃 roi_mask 吐的 mask，roi_mask 又吃 Profile 定義的區域」—— 而
+`roi_mask` 一刪，**能組出那個環的真卡就一張都沒有了**（吃區域的只剩量測卡，
+而它們不吐影像流）。那條測試不會紅，它會繼續測「一份壞檔案壞得一樣」然後
+**全綠**，而環的那一半已經不見了。
+
+所以把環的那一半移到它真正住的那一層：`_cycles_with` 只看 `src`/`dst`，跟卡片、
+參數、型別完全無關（`test_the_cycle_guard_is_graph_level`）。同一個形狀在
+`test_ui_inspectors` 也修了一次 —— 「沒登記儀表的卡不會壞掉」那條的證人剩一張，
+所以補了一行**反向的**：證人要真的在 `REGISTRY` 裡，不然對一個不存在的 key 問
+`inspector_for` 當然回 None，而那證明不了任何事。
+
+**兩個下限跟著降**（`test_card_invariants`：12→11、11→10）。降下限是唯一誠實的
+改法 —— 這兩條問的是「這組測試有沒有真的測到東西」，不是「卡片有幾張」。
+2026-08-25 刪 `snr_map` 時降過一次，寫法照抄。
+
+**改名的代價是零**：`key` 仍然是 `roi_reference`（recipe 的鍵）、寫出來的 feature
+名一個都沒動（那些會被打進分數表達式與判定樹）—— 改的只有畫面上那幾個字，
+連同引用它的 `tools/check_glas_export.py` 報告、`scope.py` 的入口說明、
+`recipes/README.md` 的三張圖與兩份出貨 recipe 的說明文字。
+
+**舊檔案**：帶 `roi_mask` 節點的開起來是一條 `unknown-step`（同 `pattern_ref` /
+`feature_math` 的先例 —— 跑不起來的 recipe 沒有必要幫它接線）；`use_within`
+那一格由 `_migrate_drop_use_within` 拿掉。**那一道非做不可**：`validate_params`
+對認不得的 key 是硬錯，而使用者看到的會是「unknown parameters」——
+那句話的意思是「這份檔案壞了」，真正的情況是「這一格不存在了」。
+
+核心 3496 passed、UI 逐檔全綠、黃金值三份逐項相同。
+
+⚠ **兩條既有的紅**（HEAD 上就紅，與這一輪無關，用 `git stash` 確認過）：
+`test_ui_english_only::test_no_cjk_in_user_facing_strings`（`core/export/html.py`
+的一段 JS 字串裡有中文）與
+`test_ui_panel_truth::test_the_glv_card_outlines_the_box_its_panel_is_describing`
+（`focus` 回 `[0]` 而測試等 `0`）。
+
+---
+
 ## F73：把 F68 的驗收真的跑完（2026-09-02）
 
 F68 的計畫書最後一行寫著「**真的開起來走一次使用者的情境**」，而那一步一直

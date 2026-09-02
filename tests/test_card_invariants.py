@@ -307,13 +307,16 @@ def test_the_cross_process_check_is_not_vacuous(dataset, lot):
     這條是這個 repo 踩過三次的教訓：**測試會通過，只是什麼都沒測**
     （glob 到不存在的資料夾、回傳值沒人檢查、藏起來的鈕文字沒變）。
     """
+    # ⚠ **下限 2026-09-02 從 12 降到 11**（`roi_mask` 刪掉了）——
+    # 理由與下面 `test_the_declaration_check_is_not_vacuous` 那一段逐字相同：
+    # 這一條問的是「這組測試有沒有真的測到東西」，不是「卡片有幾張」。
     ran = [k for k in CARDS if k not in NEEDS_MORE_SETUP]
-    assert len(ran) >= 12, ran
+    assert len(ran) >= 11, ran
     ok = 0
     for key in ran:
         if run_defect(recipe_for(key), dataset.items[0], dataset.kind).ok:
             ok += 1
-    assert ok >= 12, "只有 %d 張卡真的跑得起來，這組測試等於沒測到什麼" % ok
+    assert ok >= 11, "只有 %d 張卡真的跑得起來，這組測試等於沒測到什麼" % ok
 
 
 # --------------------------------------------------------------------------- #
@@ -447,11 +450,12 @@ def test_the_declaration_check_is_not_vacuous(dataset):
         step.run(ctx, step.validate_params(params))
         if rec.reads:
             checked += 1
-    # ⚠ **這個下限 2026-08-25 從 12 降到 11，因為卡片庫少了一張**
-    #（`snr_map` / Z-map 刪掉了）。降下限是**唯一**誠實的改法：這一條問的是
-    # 「這組測試有沒有真的測到東西」，而不是「卡片有幾張」——
-    # 把它留在 12 只會逼出「找一張卡湊數」，而那時它就不再擋得住任何事。
-    assert checked >= 11, "只有 %d 張卡真的讀了影像流，這組測試沒測到什麼" % checked
+    # ⚠ **這個下限降過兩次**：2026-08-25 從 12 降到 11（`snr_map` / Z-map 刪
+    # 掉了）、2026-09-02 從 11 降到 10（`roi_mask` 刪掉了）。降下限是**唯一**
+    # 誠實的改法：這一條問的是「這組測試有沒有真的測到東西」，而不是「卡片有
+    # 幾張」—— 留在原本的數字只會逼出「找一張卡湊數」，而那時它就不再擋得住
+    # 任何事。
+    assert checked >= 10, "只有 %d 張卡真的讀了影像流，這組測試沒測到什麼" % checked
 
 
 # --------------------------------------------------------------------------- #

@@ -31,7 +31,8 @@ sys.path.insert(0, str(REPO))
 
 import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 from d4t.core.pipeline.recipe import (  # noqa: E402
-    RECIPE_VERSION, Recipe, execution_order, is_region_edge, validate,
+    RECIPE_VERSION, Edge, Recipe, _cycles_with, execution_order,
+    is_region_edge, validate,
 )
 
 KIND = "rsem"
@@ -173,6 +174,13 @@ def _looping_doc(version=1):
     那這道環的檢查還有什麼用：讓一份**壞的** recipe 維持**壞得一樣**。
     沒有它的話 `execution_order` 會 raise，於是一條講得出話的 lint error
     變成「這個檔案打不開」—— 而遷移沒有資格把病情升級。
+
+    ⚠ **2026-09-02 起 ``roi_mask`` 不在 registry 裡了**（刪掉了），所以這一份
+    現在**多壞了一層**：``mask`` 那個節點是一條 ``unknown-step``。這份 doc
+    因此不再是「環」的證人（見下面 :func:`test_the_cycle_guard_is_graph_level`
+    接手那一半），而是**另一件同樣要守的事**的證人 —— 一份磁碟上的舊檔案帶著
+    一張已經刪掉的卡，遷移仍然不准把它變成「打不開」。這是真的會發生的情形：
+    使用者手上的 recipe 檔不會因為我們刪了一張卡而跟著改。
     """
     return {
         "recipe_id": "loop", "version": version,
@@ -192,21 +200,50 @@ def _looping_doc(version=1):
                   "bins": {"below": 0, "above": 1}}}
 
 
-def test_a_line_that_would_loop_is_not_added_and_loading_does_not_raise():
+def test_a_file_with_a_deleted_card_still_opens_and_stays_broken_the_same_way():
     """**遷移沒有資格把病情升級。**
 
-    補上去就成環，而成環的 recipe `execution_order` 會 raise —— 一條講得出話
-    的 lint error 於是變成「這個檔案打不開」。所以那條線不補，而這一份 recipe
-    遷移前後**壞得一模一樣**（同一條 `unknown-region`，同一個節點）。
+    這一份帶著一張 2026-09-02 刪掉的卡（``roi_mask``）。遷移不補那條區域線
+    （補了會成環），而整份檔案仍然**打得開**：``execution_order`` 不准 raise，
+    而 lint 講的話遷移前後**逐項相同** —— 一條講得出話的 error（「這張卡不
+    認得」）不可以變成「這個檔案打不開」。
+
+    ⚠ 這裡刻意**不寫死** lint 的清單。以前寫死的是 ``[("unknown-region",
+    "mask")]``，而刪一張卡就讓它變成三條、測試紅在一個跟這條測試的意思無關的
+    地方。這一條問的是「新舊兩條路**看到的是不是同一份病歷**」，不是「病歷上
+    有哪幾條」—— 所以它比對的是兩者相等，並只釘住那件真的要守的事：
+    有話講、而且打得開。
     """
     old = Recipe.from_json_dict(_looping_doc(version=RECIPE_VERSION))
     rec = Recipe.from_json_dict(_looping_doc())      # 不准炸
     assert _region_edges(rec) == []
     assert rec.nodes["mask"].params["regions"] == "epi", "那個字要留著"
     assert execution_order(rec, KIND) == execution_order(old, KIND)
-    assert [(i.code, i.node_id) for i in validate(rec, kind=KIND)] \
-        == [(i.code, i.node_id) for i in validate(old, kind=KIND)] \
-        == [("unknown-region", "mask")]
+    issues = [(i.code, i.node_id) for i in validate(rec, kind=KIND)]
+    assert issues == [(i.code, i.node_id) for i in validate(old, kind=KIND)]
+    assert ("unknown-step", "mask") in issues, issues
+
+
+def test_the_cycle_guard_is_graph_level():
+    """④ 那條規矩本身 —— **不靠任何一張卡存在**。
+
+    ⚠ 為什麼要有這一條：上面那份 doc 以前同時是兩件事的證人（「成環不補線」
+    與「壞得一樣」），而 ``roi_mask`` 一刪，能組出那個環的真卡就一張都沒有了
+    （量測卡吃區域，但它們不吐影像流）。**證人沒了而規矩還在**，那正是這個
+    repo 最怕的形狀：測試照樣綠，防線卻已經不見。
+
+    所以把環的那一半移到它真正住的那一層 —— :func:`_cycles_with` 只看
+    ``src``/``dst``，跟卡片、參數、型別完全無關。之後有人再加一張「吃區域、
+    吐影像流」的卡時，這條規矩仍然被守著。
+    """
+    nodes = {"a", "b"}
+    back = Edge("b", "a", "img", "source")          # consumer → producer
+    # 補一條 producer → consumer 的區域線就成環 —— 不准補。
+    assert _cycles_with([back], Edge("a", "b", "epi", "roi"), nodes) is True
+    # 沒有那條回頭線就不成環 —— 照補。
+    assert _cycles_with([], Edge("a", "b", "epi", "roi"), nodes) is False
+    # 圈外的節點不算數（``nodes`` 是這條 route 上的那幾個）。
+    assert _cycles_with([back], Edge("a", "b", "epi", "roi"), {"a"}) is False
 
 
 def test_a_hand_written_recipe_with_a_box_but_no_line_is_reported():
