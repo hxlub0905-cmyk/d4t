@@ -127,7 +127,7 @@ af9331dec62346a5677b6b84bda54d28eb900bcb docs/ROADMAP.md
 7d6e3d3a6e7ca55d6c61bd7d218efe51f9d4fa38 docs/USING-CD.md
 58181d5bf43c935303eed95df90778e3c2ced841 docs/USING-CHARACTERIZATION.md
 31b8d2fb5550439e7b2007bb58ddc7b4c955dc19 docs/plans/F11-phase2-features.md
-abe927224a468d79c60f4489e869e3865b5d0e9c docs/plans/F76-feature-panel.md
+dd23f30d165b1b35807326fc42e6a7653dd5936a docs/plans/F76-feature-panel.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
