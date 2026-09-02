@@ -1137,64 +1137,14 @@ def test_histogram_bin_summary_tooltip_and_empty(qapp):
 
 
 # --------------------------------------------------------------------------- #
-# 6. FeatureTable / VerdictChip
+# 6. 特徵名／說明／單位 ＋ VerdictChip（`FeatureTable` 2026-09-02 刪了）
 # --------------------------------------------------------------------------- #
-def test_feature_table_formatting_and_score_pinned_last(qapp):
-    table = widgets_mod.FeatureTable()
-    table.set_features(
-        {"score": 8.5, "snr_peak": 4.23456, "blob_area": 12.0,
-         "glv_mean": 128.0, "tiny": 0.00002},
-        highlight={"snr_peak"},
-    )
-    assert table.columnCount() == 3
-    assert [table.horizontalHeaderItem(i).text() for i in range(3)] == [
-        "Feature", "What it is", "Value"]
+def test_what_each_feature_is_comes_from_the_spec(qapp):
+    """「它是什麼」那一句話 —— **純函式**，不必開一張表。
 
-    names = table.feature_names()
-    assert names[-1] == "score"                          # score 釘最後
-    assert set(names) == {"score", "snr_peak", "blob_area", "glv_mean", "tiny"}
-
-    # ⚠ **這幾條 2026-08-28 跟著改了（F52），而理由不是「數字剛好變了」。**
-    #
-    # 這張表以前走 `widgets._fmt_number` 自己那一份（整數捷徑 ＋ 3 位小數），
-    # 而畫面上還有五個地方各自寫了一份 —— 同一個值印出來六種寫法。最傷的
-    # 兩個：`99.995` 在結果表是 `100`、在這張表是 `99.995`（使用者會以為自己
-    # 點錯顆）；`8.5` 在這裡是 `8.500`，那三位小數是**發明出來的精度**。
-    #
-    # 現在全 UI 走 `numbers.format_feature_value`：**有效位數**（5 位）＋
-    # 整數不拖小數。所以 `8.5` 就是 `8.5`，`4.23456` 是 `4.2346`。
-    from d4t.ui.numbers import format_feature_value
-
-    assert table.value_text("blob_area") == "12"         # 乾淨整數
-    assert table.value_text("glv_mean") == "128"
-    assert table.value_text("snr_peak") == "4.2346"      # 5 位有效數字
-    assert table.value_text("tiny") == "2e-05"           # 極小值不要變成 0.000
-    assert table.value_text("score") == "8.5"            # 不再是 8.500
-    # 而且是**同一支**印的 —— 值一樣可能只是巧合，這一行問的是出處。
-    for name, value in (("snr_peak", 4.23456), ("score", 8.5),
-                        ("tiny", 0.00002)):
-        assert table.value_text(name) == format_feature_value(value)
-
-    score_row = names.index("score")
-    assert table.item(score_row, 0).font().bold() is True
-    assert table.item(score_row, 2).font().bold() is True
-
-    hi_row = names.index("snr_peak")
-    assert table.item(hi_row, 0).background().color().name() == \
-        theme_mod.TOKENS["accent_bg"]
-
-    table.set_features({})                               # 清空不該炸
-    assert table.rowCount() == 0
-
-
-def test_the_middle_column_says_what_each_feature_is(qapp):
-    """橫向空間拿來**解釋名字**（F18 補課第三輪，2026-08-21）。
-
-    使用者：「目前只有縱向空間被用到（橫向空間幾乎沒有：Feature 右側就只有
-    Value 還到最右邊）」＋「絕對量的跟相對量的還是要分類好」。所以中間那一欄
-    是「這是什麼」，而**兩種量用顏色分**。
+    這一條是從 `FeatureTable` 那三支搬過來的（F76 刪掉那張表時）：測的一直
+    是 `feature_gloss`，widget 只是當時的載體。
     """
-    # 身分從**真的那張卡**宣告出來（資料同源）—— gloss 不再拆字串猜。
     from d4t.core.pipeline import get_step
     glv = get_step("glv_stats")
     p = glv.validate_params({
@@ -1203,29 +1153,20 @@ def test_the_middle_column_says_what_each_feature_is(qapp):
         "reference_region": "mg", "compare_metrics": "delta,overlap",
         "stat": "glv_median"})
     specs = {s.name: s for s in glv.resolve_feature_specs(p)}
-    table = widgets_mod.FeatureTable()
-    table.set_features(
-        {"epi_glv_median": 128.0, "epi_cmp_delta_median": 23.4,
-         "epi_cmp_overlap": 0.02, "epi_glv_pixels": 812.0},
-        about={"epi_cmp_delta_median": "mg", "epi_cmp_overlap": "mg"},
-        specs=specs)
+    about = {"epi_cmp_delta_median": "mg", "epi_cmp_overlap": "mg"}
 
-    assert table.about_text("epi_glv_median") == "median(gray)"
-    assert table.about_text("epi_glv_pixels") == "how many pixels counted"
-    assert table.about_text("epi_cmp_delta_median") == \
-        "Difference of median vs mg"
+    def say(name):
+        return widgets_mod.feature_gloss(name, about, specs[name])
+
+    assert say("epi_glv_median")[1] == "median(gray)"
+    assert say("epi_glv_pixels")[1] == "how many pixels counted"
+    assert say("epi_cmp_delta_median")[1] == "Difference of median vs mg"
     # 不看 stat 的那兩個沒有「of …」那一段（`spread_ratio` 自己就帶底線 ——
     # 切最後一個底線的寫法會把它變成「spread 的 ratio」）
-    assert table.about_text("epi_cmp_overlap") == "Overlap vs mg"
-
-    names = table.feature_names()
-    rel = names.index("epi_cmp_delta_median")
-    abs_ = names.index("epi_glv_median")
-    assert table.item(rel, 1).foreground().color().name() == \
-        theme_mod.TOKENS["accent_active"]
-    assert table.item(abs_, 1).foreground().color().name() == \
-        theme_mod.TOKENS["text_hint"]
-    table.deleteLater()
+    assert say("epi_cmp_overlap")[1] == "Overlap vs mg"
+    # 而**絕對量與相對量分得開**（面板據此上色）
+    assert say("epi_glv_median")[0] == widgets_mod.FEATURE_ABSOLUTE
+    assert say("epi_cmp_delta_median")[0] == widgets_mod.FEATURE_RELATIVE
 
 
 def test_a_feature_without_a_spec_gets_no_gloss(qapp):
@@ -1235,29 +1176,6 @@ def test_a_feature_without_a_spec_gets_no_gloss(qapp):
     assert widgets_mod.feature_gloss("score") == ("", "")
     assert widgets_mod.feature_gloss("glv_median") == ("", ""), \
         "名字長得像也不猜 —— 身分要卡片宣告"
-
-
-def test_absolute_comes_before_relative_inside_a_card(qapp):
-    """交錯的話，那一段要一行一行讀才知道自己在看哪一種。
-    「哪個是相對量」看宣告的 ``family``，不再拆名字。"""
-    from d4t.core.pipeline import get_step
-    glv = get_step("glv_stats")
-    p = glv.validate_params({
-        "source": "test", "metrics": "glv_median,glv_mad",
-        "reference_region": "mg",
-        "compare_metrics": "delta,snr", "stat": "glv_mean"})
-    specs = {s.name: s for s in glv.resolve_feature_specs(p)}
-    table = widgets_mod.FeatureTable()
-    table.set_features(
-        {"cmp_delta_mean": 1.0, "glv_median": 2.0, "cmp_snr_mean": 3.0,
-         "glv_mad": 4.0},
-        sections=[{"title": "Gray level", "color": "#bf7030",
-                   "names": ["cmp_delta_mean", "glv_median", "cmp_snr_mean",
-                             "glv_mad"]}],
-        specs=specs)
-    assert table.feature_names() == ["glv_median", "glv_mad",
-                                     "cmp_delta_mean", "cmp_snr_mean"]
-    table.deleteLater()
 
 
 def test_verdict_chip(qapp):

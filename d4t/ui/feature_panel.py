@@ -47,7 +47,9 @@ from PySide6.QtWidgets import (
 
 from .numbers import format_feature_value
 from .theme import TOKENS, region_hex
-from .widgets import feature_gloss, feature_unit, metric_face
+from .widgets import (
+    FEATURE_RELATIVE, feature_gloss, feature_html, feature_unit, metric_face,
+)
 
 __all__ = ["FeaturePanel", "panel_model", "VARIANT_COLUMNS",
            "VARIANT_COLUMN_LABELS"]
@@ -140,6 +142,20 @@ def panel_model(features: Optional[Dict[str, Any]],
                     "region_index": -1, "kind": "diagnostics", "headline": [],
                     "grid": {"columns": [], "rows": []},
                     "flat": _flat_of(diag_specs, feats, hi, about, set())})
+
+    # **沒人認領的仍然要出現**（F13-1 的老規矩，F76 刀 4 一度弄丟）。
+    # 漏掉一個 = 那個數字從畫面上消失，而使用者不會知道它存在過 —— 而
+    # `bound_specs` 漏宣告是會發生的（fixture 造的名字、宣告跟引擎漂開的那天）。
+    # 這一段就是那件事的警報器：它一長出來，就代表有人的宣告不完整。
+    claimed = {str(b.spec.name) for b in (bounds or ())}
+    orphans = [n for n in feats if n not in claimed]
+    if orphans:
+        out.append({"node_id": "", "label": "Other", "region": "",
+                    "region_index": -1, "kind": "other", "headline": [],
+                    "grid": {"columns": [], "rows": []},
+                    "flat": [{"name": n, "value": feats[n], "unit": "",
+                              "gloss": "", "kind": "",
+                              "verdict": n in hi} for n in orphans]})
     return out
 
 
@@ -244,6 +260,7 @@ def _flat_of(specs: Sequence[Any], feats: Dict[str, Any], hi: set,
                 or str(getattr(s, "variant", "") or "") == "outlier_box":
             continue
         out.append({"name": name, "value": feats.get(name),
+                    "html": feature_html(name, s.parts()),
                     "unit": feature_unit(s),
                     "gloss": feature_gloss(name, about, s)[1],
                     "kind": feature_gloss(name, about, s)[0],
@@ -449,7 +466,13 @@ def _flat_widget(row: Dict[str, Any], parent: QWidget) -> QWidget:
     lay = QHBoxLayout(host)
     lay.setContentsMargins(14, 0, 8, 0)
     lay.setSpacing(8)
-    name = QLabel(str(row["name"]), host)
+    # **名字用上下標畫**（F37 A4：區域是上標＋區域色、影像流是下標）——
+    # 那件事以前住在 `FeatureTable` 的 delegate 上，而 QLabel 本來就吃 rich
+    # text，所以搬過來只要換一個 setText。純文字仍然是 `row["name"]`，
+    # `feature_names()` / `value_text()` 讀到的都還是那一串打得進分數表達式的字。
+    name = QLabel(host)
+    name.setTextFormat(Qt.RichText)
+    name.setText(row.get("html") or str(row["name"]))
     name.setStyleSheet(
         "font-family:monospace;%s"
         % (" color:%s; font-weight:600;" % TOKENS["accent_active"]
@@ -458,6 +481,11 @@ def _flat_widget(row: Dict[str, Any], parent: QWidget) -> QWidget:
     lay.addWidget(name)
     gloss = QLabel(str(row["gloss"] or ""), host)
     gloss.setObjectName("paramHint")
+    # **絕對量與相對量用顏色分**（F18 補課第三輪，使用者：「絕對量的跟相對量的
+    # 還是要分類好，不然不清楚命名規則會很痛苦」）：相對量走強調色。文字本身
+    # 也講得出來（`… vs mg`），所以不是只靠顏色。
+    if row.get("kind") == FEATURE_RELATIVE:
+        gloss.setStyleSheet("color:%s;" % TOKENS["accent_active"])
     gloss.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     lay.addWidget(gloss, 1)
     value = QLabel(format_feature_value(row["value"]), host)

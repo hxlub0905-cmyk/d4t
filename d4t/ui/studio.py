@@ -131,6 +131,7 @@ from .scope import (
 )
 from .decide_panel import DecidePanel
 from .feature_panel import FeaturePanel
+from .numbers import format_feature_value
 from .viewmodel import (GLV_INTENTS, RecipeModel,
                         is_a_constant_expression, accuracy_at, histogram,
                         rebin)
@@ -1402,6 +1403,13 @@ class StudioWindow(QMainWindow):
         vrow.addWidget(self.verdict)
         # 這一顆走過的路（F24 §8）：`missing? no → contrast > 120 ? yes`。
         # 沒有判定樹（或還沒預覽）就是空字串 —— 不佔位、不寫 N/A。
+        # **score 那個數字跟 bin 一起常駐**（F76 刀 4 之後）。以前它是特徵表
+        # 最後一列、粗體、永遠不被收合走的那一格 —— 理由是「它是這張表的
+        # 結論」。新面板把它歸進 `Score / Bin` 那一段，而那一段收得起來，
+        # 所以那條不變量搬到這裡：結論跟判定在同一行，永遠看得到。
+        self.verdict_score = QLabel("", self.verdict_live)
+        self.verdict_score.setStyleSheet("font-weight:700;")
+        vrow.addWidget(self.verdict_score)
         self.decide_path = QLabel("", self.verdict_live)
         self.decide_path.setObjectName("paramHint")
         self.decide_path.setWordWrap(False)
@@ -4529,6 +4537,8 @@ class StudioWindow(QMainWindow):
         score = getattr(result, "score", None)
         self.verdict.set_verdict(getattr(result, "bin", None)
                                  if score is not None else None)
+        self.verdict_score.setText("" if score is None
+                                   else "score %s" % format_feature_value(score))
         self._show_decide_path(result)
 
         if not ran:

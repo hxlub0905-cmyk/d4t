@@ -113,26 +113,33 @@ def test_the_name_is_escaped_not_injected():
 # --------------------------------------------------------------------------- #
 # 3. 表格：長相變了，而「打得進表達式的那一串」沒變
 # --------------------------------------------------------------------------- #
-def test_the_plain_name_is_still_what_the_cell_says(qapp=None):
-    """HTML 只是長相 —— DisplayRole 仍然是那一串字。
+def test_the_plain_name_is_still_what_the_panel_reports(qapp=None):
+    """HTML 只是長相 —— **取用口回的仍然是那一串字**。
 
-    複製、搜尋、以及**使用者照著打進分數表達式**讀到的都是它。
+    複製、搜尋、以及使用者照著打進分數表達式讀到的都是它。
+    （2026-09-02 從 `FeatureTable` 搬到 `FeaturePanel`：那張表刪掉了，而它
+    守的這件事沒有變 —— 換的只是誰在畫。）
     """
     from PySide6.QtWidgets import QApplication
 
-    from d4t.ui.widgets import FeatureTable, _FeatureNameDelegate
+    from d4t.core.pipeline.step import FeatureSpec
+    from d4t.ui.feature_panel import FeaturePanel, panel_model
 
     app = QApplication.instance() or QApplication([])
-    table = FeatureTable()
-    from d4t.core.pipeline.step import FeatureSpec
+    spec = FeatureSpec(name="test_epi_glv_median", card="glv_stats",
+                       base="glv_median", stream="test", region="epi",
+                       region_index=0, family="glv")
+    bound = type("B", (), {"node_id": "glv", "label": "GLV", "spec": spec})()
+    model = panel_model({"test_epi_glv_median": 12.5}, [bound])
+    row = model[0]["flat"][0]
+    assert row["name"] == "test_epi_glv_median"       # 打得進表達式的那一串
+    assert "<sup" in row["html"]                       # 而長相是拆開的
 
-    table.set_features(
-        {"test_epi_glv_median": 12.5},
-        specs={"test_epi_glv_median": FeatureSpec(
-            name="test_epi_glv_median", card="glv_stats", base="glv_median",
-            stream="test", region="epi", region_index=0, family="glv")})
-    item = table.item(0, 0)
-    assert item.text() == "test_epi_glv_median"          # 打得進表達式的那一串
-    html = item.data(_FeatureNameDelegate.HTML_ROLE)
-    assert html and "<sup" in html                        # 而長相是拆開的
+    panel = FeaturePanel()
+    try:
+        panel.set_model(model)
+        assert panel.feature_names() == ["test_epi_glv_median"]
+        assert panel.value_text("test_epi_glv_median") == "12.5"
+    finally:
+        panel.deleteLater()
     del app

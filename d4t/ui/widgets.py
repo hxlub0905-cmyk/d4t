@@ -16,7 +16,9 @@
 - :class:`ParamForm`        由 ``Step.describe()`` 自動生成的參數表單
 - :class:`LibraryPanel`     三段式卡片庫（影像／算法／ADC）
 - :class:`HistogramWidget`  分數分佈 + 可拖曳門檻線 + 可點擊長條（``bar_clicked``）
-- :class:`FeatureTable` / :class:`VerdictChip`  特徵表與判定 chip
+- :func:`feature_html` / :func:`feature_gloss` / :func:`feature_unit`
+  特徵名怎麼畫、它是什麼、單位是什麼（`ui/feature_panel` 吃這三支）
+- :class:`VerdictChip`  判定 chip
 """
 
 from __future__ import annotations
@@ -127,8 +129,7 @@ __all__ = [
     "ParamForm",
     "LibraryPanel",
     "HistogramWidget",
-    "FeatureTable",
-    "feature_html",
+        "feature_html",
     "VerdictChip",
     "TemplateField",
     "to_uint8",
@@ -6457,7 +6458,7 @@ class HistogramWidget(QWidget):
 
 
 # --------------------------------------------------------------------------- #
-# 6. FeatureTable / VerdictChip
+# 6. 特徵名／說明／單位 ＋ VerdictChip
 # --------------------------------------------------------------------------- #
 def _fmt_number(value: Any) -> str:
     """數值 → 好讀字串。
@@ -6665,291 +6666,24 @@ def _escape(text: str) -> str:
             .replace(">", "&gt;"))
 
 
-class _FeatureNameDelegate(QStyledItemDelegate):
-    """第一欄用 rich text 畫（上下標＋顏色）。
-
-    為什麼要一個 delegate：``QTableWidgetItem`` 只吃純文字，而 Unicode 的上標
-    只有幾個字母有（``ᵃᵇᶜ``）—— 區域名是使用者取的任意識別字，湊不出來。
-    """
-
-    #: item 上放 HTML 的那個角色（純文字仍然放在 DisplayRole，所以複製、
-    #: 搜尋、測試讀到的都還是**打得進分數表達式的那一串**）。
-    HTML_ROLE = Qt.UserRole + 7
-
-    def paint(self, painter, option, index) -> None:
-        html = index.data(self.HTML_ROLE)
-        if not html:
-            super().paint(painter, option, index)
-            return
-        opt = QStyleOptionViewItem(option)
-        self.initStyleOption(opt, index)
-        opt.text = ""                       # 文字交給 QTextDocument 畫
-        style = opt.widget.style() if opt.widget else QApplication.style()
-        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)
-
-        doc = QTextDocument()
-        doc.setDefaultFont(opt.font)
-        doc.setDocumentMargin(0)
-        doc.setHtml('<span style="color:%s">%s</span>'
-                    % (opt.palette.text().color().name(), html))
-        rect = style.subElementRect(QStyle.SE_ItemViewItemText, opt, opt.widget)
-        painter.save()
-        painter.translate(rect.left(),
-                          rect.top() + max(0.0, (rect.height()
-                                                 - doc.size().height()) / 2.0))
-        doc.drawContents(painter)
-        painter.restore()
-
-    def sizeHint(self, option, index):
-        html = index.data(self.HTML_ROLE)
-        size = super().sizeHint(option, index)
-        if not html:
-            return size
-        doc = QTextDocument()
-        doc.setDefaultFont(option.font)
-        doc.setDocumentMargin(0)
-        doc.setHtml(html)
-        # 上下標會把行高撐高一點點 —— 讓欄寬跟著真的畫出來的寬度走，
-        # 否則名字會被截成 `test_epi_hot_glv_m…`（而那正是這一輪要治的病）。
-        return QSize(int(doc.idealWidth()) + 12, max(size.height(),
-                                                     int(doc.size().height())))
-
-
-class FeatureTable(QTableWidget):
-    """特徵 / 它是什麼 / 數值 三欄表；``score`` 永遠釘在最後一列且用粗體。
-
-    中間那一欄是 F18 補課第三輪加的（使用者：「目前只有縱向空間被用到，
-    橫向空間幾乎沒有 —— Feature 右側就只有 Value 還到最右邊」）。它放的是
-    :func:`feature_gloss` 翻出來的那一句話，而**絕對量與相對量用顏色分**：
-    相對量是強調色，絕對量是次要色。名字的規則因此不必先背。
-    """
-
-    _SCORE = "score"
-
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(0, 3, parent)
-        self.setHorizontalHeaderLabels(["Feature", "What it is", "Value"])
-        self.verticalHeader().setVisible(False)
-        self.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.setAlternatingRowColors(True)
-        self.setShowGrid(False)
-        head = self.horizontalHeader()
-        head.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        head.setSectionResizeMode(1, QHeaderView.Stretch)
-        head.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        # 第一欄用 rich text 畫（上下標＋顏色，F37 A4）。**只有第一欄** ——
-        # 值那一欄要保持等寬對齊，說明那一欄本來就是一句話。
-        self._name_delegate = _FeatureNameDelegate(self)
-        self.setItemDelegateForColumn(0, self._name_delegate)
-        self._specs: Dict[str, Any] = {}
-
-    #: 一個分組（F13-1 的 ①）：``title`` 是**哪張卡產出的**、``color`` 是那張卡
-    #: 的階段色、``names`` 是這一組裡的特徵、``collapsed`` 決定一開始收不收。
-    #: 呼叫端（Studio）算好再交過來 —— 這個 widget 不去問 model 也不去問引擎。
-    _HEADER_ROLE = Qt.UserRole + 1
-
-    def set_features(self, features: Optional[Dict[str, Any]],
-                     highlight: Iterable[str] = (),
-                     sections: Optional[Sequence[Dict[str, Any]]] = None,
-                     about: Optional[Dict[str, str]] = None,
-                     specs: Optional[Dict[str, Any]] = None) -> None:
-        """填表。``highlight`` 內的特徵名會用 accent 底色標出（例：分數用到的）。
-
-        ``sections`` 是**分組**（F13-1 ①，2026-08-19 使用者：「feature 的顯示
-        太陽春了不易閱讀」）。一條平的 name/value 清單裡，``n_channels`` 跟
-        ``snr_max`` 長得一模一樣 —— 而它們一個是「這張卡讀了幾頁」、一個是
-        會決定 bin 的量測值。
-
-        **分組不是我發明的規則**：引擎本來就記著每個特徵是哪張卡寫的
-        （`meta["feature_owner"]`），卡片也早就宣告了哪些是診斷數字
-        （`Step.diagnostic_features`）。這裡只是把已經知道的事顯示出來。
-
-        沒給 ``sections`` 就是舊行為（一條平的清單）—— CLI、報表、既有測試
-        都還走那條路。
-        """
-        features = dict(features or {})
-        hi = set(highlight or ())
-        self._about = dict(about or {})
-        # 名字的身分是**卡片宣告的**（`resolve_feature_specs`，PR-3）——
-        # 沒給就照原樣顯示整串、說明留白。少一點資訊，不會是錯的資訊。
-        self._specs = dict(specs or {})
-        rows: List[Tuple[str, Any]] = []          # ("head"/"row", 內容)
-        if sections:
-            seen = set()
-            for sec in sections:
-                names = [n for n in (sec.get("names") or [])
-                         if n in features and n != self._SCORE and n not in seen]
-                # 同一張卡底下**絕對量在前、相對量在後**（其餘保持原順序）。
-                # 兩者交錯的話，那一段要一行一行讀才知道自己在看哪一種。
-                # 「哪個是相對量」看宣告的 ``family``，不再拆名字。
-                names.sort(key=lambda n: 1 if getattr(
-                    self._specs.get(n), "family", "") == "cmp" else 0)
-                if not names:
-                    continue
-                seen.update(names)
-                rows.append(("head", sec))
-                rows.extend(("row", n) for n in names)
-            rest = [n for n in features
-                    if n not in seen and n != self._SCORE]
-            if rest:
-                rows.append(("head", {"title": "Other", "color": "",
-                                      "names": rest}))
-                rows.extend(("row", n) for n in rest)
-        else:
-            rows.extend(("row", n) for n in features if n != self._SCORE)
-        if self._SCORE in features:
-            rows.append(("row", self._SCORE))
-
-        self.clearSpans()
-        self.setRowCount(len(rows))
-        current: Optional[QTableWidgetItem] = None
-        collapsed = False
-        for row, (kind, payload) in enumerate(rows):
-            if kind == "head":
-                current = self._fill_header(row, payload)
-                collapsed = bool(payload.get("collapsed"))
-                self.setRowHidden(row, False)
-                continue
-            name = str(payload)
-            self._fill_row(row, name, features[name], name in hi,
-                           name == self._SCORE)
-            self.setRowHidden(row, collapsed and name != self._SCORE)
-        self._header_rows = [r for r, (k, _p) in enumerate(rows) if k == "head"]
-
-    def _fill_header(self, row: int, sec: Dict[str, Any]) -> QTableWidgetItem:
-        """一列分組標題（橫跨兩欄，點一下收合）。"""
-        title = str(sec.get("title") or "")
-        colour = str(sec.get("color") or "") or TOKENS["text_secondary"]
-        n = len([x for x in (sec.get("names") or [])])
-        item = QTableWidgetItem("%s%s  ·  %d" % (
-            "▸ " if sec.get("collapsed") else "▾ ", title, n))
-        font = item.font()
-        font.setBold(True)
-        font.setPointSizeF(max(7.0, font.pointSizeF() - 1.0))
-        item.setFont(font)
-        item.setData(self._HEADER_ROLE, True)
-        item.setForeground(QColor(theme.readable_on(
-            colour, theme.mix_hex(colour, TOKENS["bg_surface"], 0.14))))
-        item.setBackground(QColor(theme.mix_hex(
-            colour, TOKENS["bg_surface"], 0.14)))
-        self.setItem(row, 0, item)
-        for col in (1, 2):
-            self.setItem(row, col, QTableWidgetItem(""))
-            self.item(row, col).setBackground(QColor(theme.mix_hex(
-                colour, TOKENS["bg_surface"], 0.14)))
-        self.setSpan(row, 0, 1, 3)
-        return item
-
-    def _fill_row(self, row: int, name: str, value: Any,
-                  highlighted: bool, is_score: bool) -> None:
-        key_item = QTableWidgetItem(str(name))
-        spec = (getattr(self, "_specs", None) or {}).get(str(name))
-        # **純文字仍然是 DisplayRole** —— 複製、搜尋、測試讀到的都還是那一串
-        # 打得進分數表達式的字。HTML 只是它的長相（拆解 = ``spec.parts()``，
-        # 跟 `Step.feature_parts` 同一個形狀、同一個產地）。
-        html = feature_html(str(name), spec.parts() if spec is not None
-                            else None)
-        if html != _escape(str(name)):
-            key_item.setData(_FeatureNameDelegate.HTML_ROLE, html)
-        kind, gloss = feature_gloss(str(name), getattr(self, "_about", None),
-                                    spec)
-        about_item = QTableWidgetItem(gloss)
-        # **絕對量與相對量用顏色分**（使用者要的第二種分類）：相對量走強調色，
-        # 絕對量走次要色。文字本身也講得出來（`… vs mg`），所以不是只靠顏色。
-        about_item.setForeground(QColor(
-            TOKENS["accent_active"] if kind == FEATURE_RELATIVE
-            else TOKENS["text_hint"]))
-        small = about_item.font()
-        small.setPointSizeF(max(7.0, small.pointSizeF() - 1.0))
-        about_item.setFont(small)
-        val_item = QTableWidgetItem(_fmt_number(value))
-        val_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        # **單位在懸停上**（F76 刀 2）。這一欄同時裝著灰階 0–255、幾個 σ、
-        # 像素座標、框號與布林旗標，而它們長得一模一樣 —— 那正是使用者
-        # 2026-09-02 的「後面帶的數值好亂」。⚠ 這裡刻意**不改顯示字串**：
-        # 值那一欄要保持等寬對齊，而單位該有的位置是列尾的一格
-        # （F76 刀 4 的新面板）。這一輪先讓它有得問。
-        unit = feature_unit(spec)
-        if unit:
-            val_item.setToolTip("unit: %s" % unit)
-        if is_score:
-            font = key_item.font()
-            font.setBold(True)
-            key_item.setFont(font)
-            val_item.setFont(font)
-            key_item.setForeground(QColor(TOKENS["accent_active"]))
-            val_item.setForeground(QColor(TOKENS["accent_active"]))
-        if highlighted:
-            bg = QColor(TOKENS["accent_bg"])
-            key_item.setBackground(bg)
-            about_item.setBackground(bg)
-            val_item.setBackground(bg)
-        self.setItem(row, 0, key_item)
-        self.setItem(row, 1, about_item)
-        self.setItem(row, 2, val_item)
-
-    def about_text(self, name: str) -> Optional[str]:
-        """中間那一欄寫了什麼（測試與工具讀得到）。"""
-        for r in range(self.rowCount()):
-            key = self.item(r, 0)
-            if key is not None and not self.is_header_row(r) \
-                    and key.text() == name:
-                item = self.item(r, 1)
-                return None if item is None else item.text()
-        return None
-
-    def is_header_row(self, row: int) -> bool:
-        item = self.item(int(row), 0)
-        return bool(item is not None and item.data(self._HEADER_ROLE))
-
-    def toggle_section(self, row: int) -> None:
-        """收合／展開某一組（點標題那一列）。"""
-        if not self.is_header_row(row):
-            return
-        item = self.item(row, 0)
-        text = item.text()
-        opening = text.startswith("▸")
-        item.setText(("▾" if opening else "▸") + text[1:])
-        for r in range(row + 1, self.rowCount()):
-            if self.is_header_row(r):
-                break
-            key = self.item(r, 0)
-            if key is not None and key.text() == self._SCORE:
-                continue
-            self.setRowHidden(r, not opening)
-
-    def mousePressEvent(self, e) -> None:      # noqa: D102 - Qt hook
-        row = self.rowAt(int(e.position().y()) if hasattr(e, "position")
-                         else int(e.y()))
-        if row >= 0 and self.is_header_row(row):
-            self.toggle_section(row)
-            e.accept()
-            return
-        super().mousePressEvent(e)
-
-    def section_titles(self) -> List[str]:
-        """每一組的標題（測試與狀態列讀得到；不含那個 ▾ 與計數）。"""
-        out: List[str] = []
-        for r in range(self.rowCount()):
-            if self.is_header_row(r):
-                text = self.item(r, 0).text()
-                out.append(text[2:].split("  ·  ")[0])
-        return out
-
-    def feature_names(self) -> List[str]:
-        """表上的**特徵**（分組標題不算 —— 它不是一個特徵）。"""
-        return [self.item(r, 0).text() for r in range(self.rowCount())
-                if self.item(r, 0) is not None and not self.is_header_row(r)]
-
-    def value_text(self, name: str) -> Optional[str]:
-        for r in range(self.rowCount()):
-            key = self.item(r, 0)
-            if key is not None and key.text() == name:
-                val = self.item(r, 2)
-                return None if val is None else val.text()
-        return None
+# ⚠ **`_FeatureNameDelegate` 與 `FeatureTable` 2026-09-02 刪掉了**（F76）。
+#
+# 那張「特徵 / 它是什麼 / 數值」三欄表被 `ui/feature_panel.FeaturePanel` 取代
+# （四胞胎橫過來、卡 › 區域 分段），而它自 F76 刀 4 起就沒有任何呼叫端。
+# 使用者 2026-09-02 定調刪掉 —— `CLAUDE.md` §5 那張價目表的「刪掉」那一格，
+# 而這一次代價量過：零個生產呼叫端、零份 recipe、零個黃金值。
+#
+# **留下來的是它身上真正有價值的那幾支**，它們現在服務新面板：
+#
+#   `feature_html` ＋ `FEATURE_SUP` / `FEATURE_SUB` —— 名字的上下標與區域色
+#       （F37 A4，使用者「值可否用上下標　更清楚　配合顏色」）。新面板的
+#       flat 列直接把它餵進 QLabel 的 rich text，delegate 因此不必跟著搬。
+#   `feature_gloss` / `feature_unit` —— 「它是什麼」與單位。
+#   `_fmt_number` —— 門檻標籤還在用。
+#
+# 那張表帶著的四條不變量搬到 `tests/test_ui_feature_panel.py`：標題不是特徵、
+# 收合只收自己那一組、結論永遠看得到（score 現在跟 bin 同一行）、
+# **沒人認領的特徵仍然要出現**（最後這一條在搬的過程裡救回一個真的 bug）。
 
 
 class VerdictChip(QLabel):

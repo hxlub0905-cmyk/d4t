@@ -238,3 +238,79 @@ def test_the_verdict_block_is_not_there_until_there_is_a_decision(tmp_path):
         assert win.btn_add_decision.isEnabled()
     finally:
         win.close()
+
+
+# --------------------------------------------------------------------------- #
+# 5. 從 `widgets.FeatureTable` 搬過來的四條不變量（F76，2026-09-02 刪掉那張表）
+# --------------------------------------------------------------------------- #
+def test_a_feature_nobody_declared_still_shows_up(measured):
+    """**漏掉一個 = 那個數字從畫面上消失，而使用者不會知道它存在過。**
+
+    ⚠ 這一條在搬家的過程裡救回一個真的 bug：`panel_model` 第一版把
+    `bound_specs` 沒宣告的名字**安靜地丟掉了**。而宣告漏掉是會發生的
+    （fixture 造的名字、宣告跟引擎漂開的那天 —— F51 的教訓），所以
+    「Other」那一段同時是警報器：它一長出來就代表有人的宣告不完整。
+    """
+    from d4t.ui.feature_panel import panel_model
+
+    feats, specs = measured
+    feats = dict(feats)
+    feats["orphan_number"] = 42.0
+    model = panel_model(feats, [_Bound(s) for s in specs])
+    other = [s for s in model if s["label"] == "Other"]
+    assert other, "沒人認領的那一個要有自己的一段"
+    assert [r["name"] for r in other[0]["flat"]] == ["orphan_number"]
+
+
+def test_folding_one_section_leaves_the_others_alone(measured):
+    """收合只收自己那一組。"""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    from d4t.ui.feature_panel import FeaturePanel
+
+    app = QApplication.instance() or QApplication([])
+    panel = FeaturePanel()
+    try:
+        panel.set_model(_model(measured, diagnostics=["glv_pixels"]))
+        titles = panel.section_titles()
+        assert len(titles) >= 2, titles
+        assert not panel.is_section_collapsed(titles[0])
+        panel.toggle_section(titles[0])
+        assert panel.is_section_collapsed(titles[0])
+        assert not panel.is_section_collapsed(titles[-1]), "只收自己那一組"
+        panel.toggle_section(titles[0])
+        assert not panel.is_section_collapsed(titles[0])
+    finally:
+        panel.deleteLater()
+
+
+def test_the_score_is_always_visible_next_to_the_verdict(tmp_path):
+    """**結論永遠看得到。**
+
+    以前 score 是特徵表最後一列、粗體、不被收合走的那一格。新面板把它歸進
+    ``Score / Bin`` 那一段，而那一段收得起來 —— 所以這條不變量搬到判定那一行：
+    結論跟 bin 在同一行，永遠在。
+    """
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    from d4t.ui import studio as studio_mod, theme as theme_mod
+
+    app = QApplication.instance() or QApplication([])
+    theme_mod.apply_theme(app)
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    try:
+        win.show()
+        recipe = Recipe.load(REPO / "recipes" / "rsem-worst-box.json")
+        path = tmp_path / "r.json"
+        recipe.save(path)
+        assert win.load_recipe_path(path, sync=True)
+        app.processEvents()
+        # 有判定 → 那一行在（值要等跑過才有，形狀先在）
+        assert win.verdict_live.isVisibleTo(win)
+        assert win.verdict_score is not None
+        # 而它不是特徵面板的一列 —— 面板收起來也帶不走它
+        for title in win.feature_panel.section_titles():
+            win.feature_panel.toggle_section(title)
+        assert win.verdict_live.isVisibleTo(win)
+    finally:
+        win.close()
