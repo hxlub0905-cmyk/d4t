@@ -223,7 +223,7 @@ usually means the period was measured wrong」這句話。分數其實在量**�
 |---|---|
 | `period.py:445` 排的是**週期** | **不是。** 那一行在 `choose_origin` 裡，週期是呼叫端固定的，它排的是**相位**。`estimate_period` 走自相關，`golden.py` 一行都沒碰 —— 擬真圖上實測它給的 px=28 是對的 |
 | 所以「`estimate_period` 的行為會變」 | **不會。** 兩者沒有呼叫關係 |
-| （沒提到）| `refine_period` / `candidate_periods` **零個 production 呼叫者**。而 `refine_period` 實測會從 26 走到 20（真值 28）—— 真的壞，但是死碼。**使用者定調「刪掉」，2026-08-27 刪了**（`docs/plans/F40-stack-agreement.md` §8）|
+| （沒提到）| `refine_period` / `candidate_periods` **零個 production 呼叫者**。而 `refine_period` 實測會從 26 走到 20（真值 28）—— 真的壞，但是死碼。**使用者定調「刪掉」，2026-08-27 刪了**（`docs/history/plans/F40-stack-agreement.md` §8）|
 | （沒提到）| `choose_origin` 的目標函數**構造上就近乎平的**：週期固定時換相位＝疊出來的圖循環位移，而 Laplacian 變異數對循環位移幾乎不變。`template.py:18-23` 早就寫著，而 `anchor_cell` 事後用地標重新決定相位 |
 
 所以真正活著的缺陷**只有** `template_dialog.py:760` 那個絕對門檻。

@@ -12,7 +12,7 @@
 
 ## 1. 這一輪推翻 F12 §3
 
-[`docs/history/plans/F12-region-edges.md`](../history/plans/F12-region-edges.md)
+[`docs/history/plans/F12-region-edges.md`](F12-region-edges.md)
 §3 的標題是「區域線**不存進 recipe**，是推導出來的」，而它的代價那一段寫著：
 
 > 代價：區域線不進 `recipe.edges`，所以它不影響 `execution_order` ——

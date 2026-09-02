@@ -1,7 +1,7 @@
 # d4t pipeline engine — authored 2026-07-28 (M1).
 """Score 表達式引擎：手寫 tokenizer → 遞迴下降 parser → AST → evaluator。
 
-設計（見 docs/plans/F0-master-plan.md §4）：
+設計（見 docs/history/plans/F0-master-plan.md §4）：
 - 變數 = Context.features 的 key（snr_max、cd_median、glv_mean_roi1…）。
 - 運算元：``+ - * / **``、比較 ``> < >= <= == !=``、布林 ``and or not``、
   函數 ``sqrt log abs exp``（1 個參數）與 ``min max``（至少 1 個參數）。

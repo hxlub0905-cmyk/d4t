@@ -161,7 +161,7 @@ event loop。三個面板（判定、判定樹的一步、分流）共用同一�
   **有答案了**（F26，2026-08-24）：同一個「一邊拖一邊看」的能力搬到了導引式
   問題的**分布圖**上（`ui/threshold_view.py`）—— §2.2 講的那根滑桿本身也
   一起換掉了，因為它沒有刻度。舊的那條線仍然是遺跡。
-  見 [`F26-decide-panel-ux.md`](../../plans/F26-decide-panel-ux.md)。
+  見 [`F26-decide-panel-ux.md`](../../history/plans/F26-decide-panel-ux.md)。
 * `feature_fill` / `feature_math` 仍收在 `HIDDEN_STEPS`（F24 ④）：
   使用者用過樹之後確認夠了再刪。
 

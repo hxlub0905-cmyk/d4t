@@ -1,7 +1,7 @@
 # d4t result store — authored 2026-07-28 (M2).
 """批次結果儲存（SQLite）＋ rescore：MMH ``batch_run_store`` 模式的一般化。
 
-角色（見 docs/plans/F0-master-plan.md §6）：
+角色（見 docs/history/plans/F0-master-plan.md §6）：
 
 - **RunStore**：每次批次執行存成一個 run —— ``runs`` 一列（recipe 快照、
   KLARF 路徑、ok/fail 統計）＋ ``results`` 每顆一列（score/bin/features）。

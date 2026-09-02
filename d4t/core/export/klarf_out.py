@@ -1,7 +1,7 @@
 # d4t KLARF write-back — authored 2026-07-28 (M5-1).
 """KLARF 三種寫回模式：inplace / annotate / topn。
 
-角色（見 docs/plans/F0-master-plan.md §7）：pipeline 算完的
+角色（見 docs/history/plans/F0-master-plan.md §7）：pipeline 算完的
 ``result_to_json_dict`` 結果（``defect_id`` / ``ok`` / ``score`` / ``bin`` /
 ``features``）要回到 KLARF，讓下游（Klarity、review 站）看得到 ADC 的判定。
 

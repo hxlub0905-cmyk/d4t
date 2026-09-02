@@ -2785,7 +2785,7 @@ class StudioWindow(QMainWindow):
         # **區域線走的是同一條路，只是守門的話不一樣**（F42 B2）。
         # F12 當時它不存進 `recipe.edges`（``roi="epi"`` 那個參數是唯一的
         # 儲存），而這一輪反過來：線才是儲存，參數是它的呈現 —— 理由是那個
-        # 決定的前提在 F17-① 就失效了（`docs/plans/F42-region-edges-plan-b.md`）。
+        # 決定的前提在 F17-① 就失效了（`docs/history/plans/F42-region-edges-plan-b.md`）。
         # `_connect_region` 現在也走 `model.add_edge`，差別只在它擋得住的
         # 那三件事（型別不合、來源在下游、這張卡沒有區域可接）。
         if self._is_region_param(dst, param) or self._line_kind(src, stream) == "region":
@@ -2880,7 +2880,7 @@ class StudioWindow(QMainWindow):
         # 在當時是真的：區域線不進 `recipe.edges`，所以順序只能靠卡片的左右
         # 位置。**這一輪它進去了**，於是那條線自己就是順序（`execution_order`
         # 只看線）—— 擋下來等於不讓使用者做那個唯一能修好順序的動作，而那正是
-        # 這一輪要修的 bug（`docs/plans/F42-region-edges-plan-b.md` §1）。
+        # 這一輪要修的 bug（`docs/history/plans/F42-region-edges-plan-b.md` §1）。
         # 真正會壞的那一種（成環）由 `add_edge` 擋，而且它擋的是事實不是排版。
         node = self.model.nodes.get(dst)
         spec = next((sp for sp in get_step(node.step).region_input_specs()

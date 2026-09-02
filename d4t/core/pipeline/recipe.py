@@ -1,7 +1,7 @@
 # d4t pipeline engine — authored 2026-07-28 (M1).
 """Recipe 模型：DAG JSON serde、執行順序（拓撲排序）、lint 式驗證。
 
-Recipe JSON 形狀（見 docs/plans/F0-master-plan.md §3.4）：
+Recipe JSON 形狀（見 docs/history/plans/F0-master-plan.md §3.4）：
 
 .. code-block:: json
 
@@ -682,7 +682,7 @@ def _migrate_region_params_into_edges(
     ③ **產出它的那張卡排在下游** —— **補線**。這是一個**刻意的行為改變**：
        補完之後 `execution_order` 會把 Region 卡排到前面，於是一份原本
        「量測卡先跑、安靜地量整張圖」的 recipe 開始算對的數字。
-       那正是這一輪存在的理由（見 `docs/plans/F42-region-edges-plan-b.md` §1）。
+       那正是這一輪存在的理由（見 `docs/history/plans/F42-region-edges-plan-b.md` §1）。
 
     ④ **補上去會成環** —— 不補（見 :func:`_cycles_with`），而且由
        `validate` 的 `region-has-no-line` 講出來。一份今天跑得動的 recipe

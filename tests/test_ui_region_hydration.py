@@ -4,7 +4,7 @@
 F12 §3 定的是相反的方向：``roi="epi"`` 那個參數是唯一的儲存，線是它的呈現。
 這一輪反過來 —— 線進了 ``recipe.edges``，參數變成**水合**出來的值。理由是
 F12 §3 的前提（「route 相鄰對已經保證了順序」）在 F17-① 就失效了，
-見 `docs/plans/F42-region-edges-plan-b.md`。
+見 `docs/history/plans/F42-region-edges-plan-b.md`。
 
 這一份鎖住五個入口與那條不變量
 ------------------------------

@@ -20,7 +20,7 @@
 | **怎麼做 EBI ↔ API characterization**（給使用者的操作手冊：線接哪、每格填什麼、報表怎麼讀、出事了照什麼順序查）| [`docs/USING-CHARACTERIZATION.md`](docs/USING-CHARACTERIZATION.md) | 要動 `pair_source` / `H2H` / `output_char` 的參數或說明之前 |
 | **怎麼用 CD 那張卡**（給使用者的操作手冊：每一格什麼時候動、數字會往哪走）| [`docs/USING-CD.md`](docs/USING-CD.md) | 要動 CD 卡的參數、help 文字或輸出名字之前 |
 | **架構**：三段式心智模型、資料模型（影像流 vs 具名區域）、目錄結構 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 動到 pipeline／資料流之前 |
-| **已知的坑**（30+ 條，只增不減）| [`docs/PITFALLS.md`](docs/PITFALLS.md) | 動到 Qt 繪圖／快取／批次平行／KLARF 寫回／recipe 遷移之前，**先搜關鍵字** |
+| **已知的坑**（80+ 條，只增不減）| [`docs/PITFALLS.md`](docs/PITFALLS.md) | 動到 Qt 繪圖／快取／批次平行／KLARF 寫回／recipe 遷移之前，**先搜關鍵字** |
 | **進度與 phase 計畫** | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 想知道「接下來做什麼」 |
 | **為什麼長成這樣**：需求訪談結論、六個來源專案的脈絡 | [`docs/HANDOVER.md`](docs/HANDOVER.md) | 第一次接手；想改一個「看起來多餘」的設計之前 |
 | **授權**：d4t 是專有／內部使用（[`LICENSE`](LICENSE)）、vendoring 來源的授權、第三方相依（PySide6 的 LGPL）| [`docs/LICENSING.md`](docs/LICENSING.md) | **加相依套件之前**（`LICENSE` 的 carve-out 與 §4 的表**兩邊都要加**，測試會擋）、要 vendor 新東西、或有人問「這能不能給別人用」之前 |
@@ -30,30 +30,21 @@
 
 **加一份新文件之前先問：這個主題已經有家了嗎。** 有的話寫進那一份。
 
-### ⚠ 一個字，兩個東西：**bundle**
+### ⚠ 名字含糊的代價：**bundle**
 
-上面那條規矩的鏡像。這個 repo 裡 `bundle` 指**兩個完全不相干**的東西，而它們
-從來不會在同一段程式碼裡出現 —— 所以會混淆的是**人**（2026-08-26 真的發生過：
-一整輪對話裡兩個意思交替使用，使用者問「bundle 在這邊是什麼」）。
-
-| 寫成 | 是什麼 | 住哪 | 誰在用 |
-|---|---|---|---|
-| ~~`output_bundle`~~ | **一張 Output 卡**（“Write report folder”）。**F38 於 2026-08-26 折進 `output_report` 了** —— 那個 key 不存在了，舊 recipe 走 `_migrate_folded_output_cards` | ~~`d4t/core/steps/output.py`~~ | — |
-| `bundle/d4t_bundle.py` | **整個 repo 打包成的一個純文字檔**，公司機拿程式碼的唯一路徑（政策擋 .zip、proxy 不讓逐檔抓）。`tools/release.py` 產它 | `bundle/` | 開發者搬程式碼 |
-
-**所以現在這個字只剩一個意思，而這一段留著是為了下一次。** 兩件事要記住：
-
-**① `bundle/d4t_bundle.py` 仍然不改名。** 它是**公司機的操作步驟**
-（`docs/NO-GIT-SETUP.md` 寫著那個檔名，而那台機器不能跑 git —— 改檔名等於讓
-一份寫下來的程序在一台救不了的機器上失效）。
-
-**② 不要再造第二個 `bundle`。** 上一次兩個意思並存的代價是實際發生過的：
-2026-08-26 一整輪對話裡兩個意思交替使用，使用者問「bundle 在這邊是什麼」。
-那一輪量過代價、決定兩個都不改名（因為改 key 要付一道遷移，而那個錢只在
-使用者要求時才付）—— 而錢在 F38 因為別的理由付掉了，混淆才跟著消失。
+上面那條規矩的鏡像。`bundle` 曾經同時指兩個不相干的東西（一張 Output 卡、
+以及整個 repo 打包成的單檔），而它們從不出現在同一段程式碼裡 —— 所以會混淆的
+是**人**：2026-08-26 一整輪對話裡兩個意思交替使用，使用者問「bundle 在這邊是
+什麼」。那一輪量過代價、決定兩個都不改名（改 key 要付一道遷移）；錢後來在 F38
+因為別的理由付掉了（`output_bundle` 折進 `output_report`），混淆才跟著消失。
 **下一個含糊的名字不會這麼剛好。**
 
-**講的時候不要用裸的「bundle」** —— 講「報表那張卡」或「搬運用的單檔包」。
+現在這個字只剩一個意思 —— `bundle/d4t_bundle.py`，公司機拿程式碼的唯一路徑
+（政策擋 .zip、proxy 不讓逐檔抓；`tools/release.py` 產它）。兩條規矩：
+
+* **不改它的名字。** `docs/NO-GIT-SETUP.md` 寫著那個檔名，而那台機器不能跑
+  git —— 改名等於讓一份寫下來的程序在一台救不了的機器上失效。
+* **不要再造第二個 `bundle`。**
 
 ---
 
@@ -86,8 +77,8 @@ Phase 2），使用者定調**先把引擎做對，再回頭做產品化**（見
 **出貨的 recipe 在 [`recipes/`](recipes/)**（2026-08-26），走 `Open recipe…`
 不走範本庫，而且**每一份都有測試真的跑一次**
 （`tests/test_shipped_recipes.py`）—— 舊的 `examples/` 就是因為沒人測而爛掉的。
-加一份新的就在那支測試裡加一段。目前兩份：EBI↔API characterization、
-patch 的 dSNR 分布（F36）。
+加一份新的就在那支測試裡加一段。目前三份：EBI↔API characterization、
+patch 的 dSNR 分布（F36）、RSEM 逐框挑最異常的那一格（F73）。
 
 ⚠ 那支測試有一張 **`ALLOWED_ERRORS`**（哪一份 recipe 允許哪一條 lint error
 —— 目前只有「模板是一張影像、塞不進 JSON」那一種），而它配著一支**反向的**
@@ -144,7 +135,7 @@ UI 層遷移（門檻 → 判定樹）現在會被存回磁碟。那是對的（
     * **手寫 recipe 從此要寫那條線**；舊檔案由 `version < RECIPE_VERSION`
       的遷移補，`tools/doctor.py` 的「recipe 格式」那一項會提醒。
 
-    見 `docs/plans/F42-region-edges-plan-b.md`（F12 §3 於該輪推翻，
+    見 `docs/history/plans/F42-region-edges-plan-b.md`（F12 §3 於該輪推翻，
     其他部分 —— 埠、虛線、唯讀參數格、同進同出 —— 全部保留）。
 
 ---
@@ -229,7 +220,7 @@ param 相依 I/O（例如輸出流名稱由參數決定）覆寫 `resolve_reads/
 > **單數／複數的意思跟影像流一字不差**（F13-⑥）：`region_keys`（一串）是
 > 「同一件事做在好幾個區域上」，第二條線**累加**，而每個數字會自動帶上
 > 區域名前綴（`epi_glv_mean` / `mg_glv_mean`；只接一個時名字跟以前逐字相同）；
-> `region_key`（單一角色，例 `roi_compare` 的 target / reference）第二條線是
+> `region_key`（單一角色，例 `glv_stats` 的 `reference_region`「跟誰比」）第二條線是
 > **取代**。量測卡的迴圈在 `MultiSourceStep`，子類只實作 `measure` —— 它不必
 > 知道接了幾條流，也不必知道接了幾個區域。
 
@@ -324,8 +315,8 @@ git add -A && python tools/release.py && git add -A
 
 ### 新的 UI 面板一律開新模組（不要塞進 `studio.py`）
 
-`StudioWindow` 現在是 **6,017 行、246 個方法、363 個 `self.*` 名字**的一個類別
-（2026-08-25 量的；寫下這一段時是 5,244 行 / 229 個方法 —— **三天長了 773 行**）。
+`StudioWindow` 現在是 **6,667 行、258 個方法、382 個 `self.*` 名字**的一個類別
+（2026-09-02 量的。寫下這一段時是 5,244 行 / 229 個方法，三天後 6,017 —— **一週多長了 1,423 行，而中間沒有任何一輪是在動它**）。
 它還沒到「非拆不可」，但**拆分壓力已經在影響新功能該放哪裡**了 —— F22 的 commit
 訊息裡就寫著「不塞進已經 5000 多行的 `studio.py`」，那是一個人在替一個結構問題
 繞路。
@@ -433,6 +424,11 @@ ATTACHMENTS = (...)              # 掛在已載入 lot 上的附加檔（GLAS �
 同一張卡（`pattern_ref`）走完了**刪掉 → 量代價 → 要回來 → 改名 → 收起來 →
 刪掉**六步，最後一步是 2026-08-20（F16，使用者：「完全沒用，請直接拿掉」）。
 
+2026-09-02（F74）同一天用掉兩列：`roi_mask` **刪掉**、`roi_reference` 的 label
+從「Reference regions」**改成「ROI」**。⚠ **那次刪掉幾乎沒有代價** —— 零份
+recipe、零份 fixture、零個黃金值在用它。所以下面那張價目表講的不是「刪一定貴」，
+是**「先去量」**：貴不貴由「誰在用它」決定，而那件事 `grep` 得出來。
+
 **而這一次代價真的付了**，值得記住價差長什麼樣：
 
 | | 收起來（2026-08-18） | 刪掉（2026-08-20） |
@@ -444,14 +440,17 @@ ATTACHMENTS = (...)              # 掛在已載入 lot 上的附加檔（GLAS �
 **不確定的時候先收起來**：成本是零，回復的成本是拿掉一個字串。使用者確定之後
 再刪 —— 上面那張表就是「確定」值多少錢。
 
-> ⚠ **`d4t/core/algo/period.py` 與 `algo/golden.py` 都不要刪。**
-> `pattern_ref` 走了之後**呼叫者只剩 `algo/template.py` 一個**（疊 Golden Cell
-> 模板要 `stack_cells` 與 `estimate_period` / `choose_origin`）。2026-08-18
-> 有一小時它們一個呼叫者都沒有 —— 那正是這種模組被當成死碼順手清掉的時候，
-> 而「只剩一個」離那個狀態只有一步。
-> `estimate_period` / `choose_origin` 的相位搜尋是之後做 **pattern-frame ROI**
-> 的唯一工具（patch 是以 defect 為中心裁切的，晶格相位逐顆不同；見
-> `docs/history/plans/F7-canvas-and-taxonomy.md` §4）。
+> ⚠ **`d4t/core/algo/` 底下有四支「呼叫者很少、但不准刪」的模組。**
+> 每一次刪卡都會讓其中一支再少一個呼叫者，而那正是它被當成死碼順手清掉的時候。
+>
+> | 模組 | 為什麼留 | 誰還在呼叫 |
+> |---|---|---|
+> | `snr.py` | `snr_signed` 是**正負號慣例的規範出處**，GLV 的 `snr` 統計量照它做 | 只剩測試（`snr_map` 2026-08-25 刪） |
+> | `histmatch.py` | `mask=` 是**「量與套用分開」的規範出處**，`range_from` 走同一套 | `normalize` 的 match（`use_within` 2026-09-02 刪） |
+> | `period.py` | `estimate_period` / `choose_origin` 的相位搜尋是之後做 **pattern-frame ROI** 的唯一工具（patch 以 defect 為中心裁切，晶格相位逐顆不同）| `algo/template.py` 一個 |
+> | `golden.py` | 疊 Golden Cell 模板要 `stack_cells` / `tile_coords` | 同上 |
+>
+> 2026-08-18 有一小時 `period` / `golden` 一個呼叫者都沒有。
 > 便利貼：`tests/test_ui_input_kinds.py::test_period_module_is_not_orphaned`。
 
 CLI 不受影響：`python -m d4t run` 照樣跑得動 rsem recipe。
@@ -475,4 +474,4 @@ CLI 不受影響：`python -m d4t run` 照樣跑得動 rsem recipe。
 | **MMH** | recipe 架構原型、批次引擎模式、次像素邊緣定位、品質指標、KLARF 寫回 |
 | **PEAR** | GLV 統計 metric bank、Tukey 離群、η²/Cohen's d、CJK-safe 影像載入 |
 | **cell-period-estimator** | 週期估測、Golden Cell 堆疊、ghosting 分數 |
-| **Perspective-Combination (Fusi³)** | 正規化、直方圖匹配、5-backend 對位、SNR map、blob 分割、MultiROISet |
+| **Perspective-Combination (Fusi³)** | 正規化、直方圖匹配、5-backend 對位、MultiROISet（~~SNR map~~ 2026-08-25 刪、~~blob 分割~~ 同日隨 `find_defect` 刪）|
