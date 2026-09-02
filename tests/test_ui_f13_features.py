@@ -143,7 +143,7 @@ def test_two_cards_with_the_same_name_get_their_id(qapp, lot):
 def test_a_group_header_is_not_a_feature(ran):
     """`feature_names()` 有一堆呼叫端（報表、測試）—— 標題混進去的話，
     它們會拿到一個叫 `▾ GLV · 1` 的「特徵」。"""
-    names = ran.feature_table.feature_names()
+    names = ran.feature_panel.feature_names()
     assert names, "表上要有東西"
     assert not any(n.startswith("▾") or n.startswith("▸") for n in names)
     assert set(names) <= set(ran._last_result.features)

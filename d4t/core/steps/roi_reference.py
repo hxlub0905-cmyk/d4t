@@ -412,6 +412,29 @@ class RoiReferenceStep(Step):
         return [str(params.get("source", "test"))]
 
     @classmethod
+    def panel_headline(cls, features, specs=()):
+        """「located · 100 boxes · 10 dropped at the edge」（F76 刀 4）。
+
+        同一個掛鉤、同一個模板 —— 這一段的結論。``locate_ok`` 是 0 的時候那
+        句話最重要：**這一顆退回整張圖了**，而底下每一個灰階都還是算得出來的
+        正常數字（`CLAUDE.md` §3 的「安靜地改量整張圖」）。
+        """
+        from ..pipeline.step import pick_feature
+
+        out = []
+        ok = pick_feature(features, specs, "locate_ok")
+        if ok is not None:
+            out.append(("", "located" if float(ok) else
+                        "fell back to the whole image", ""))
+        boxes = pick_feature(features, specs, "boxes")
+        if boxes is not None:
+            out.append(("", int(boxes), "boxes"))
+        dropped = pick_feature(features, specs, "edge_dropped")
+        if dropped:
+            out.append(("", int(dropped), "dropped at the edge"))
+        return out
+
+    @classmethod
     def resolve_regions_out(cls, params: Dict[str, Any]) -> List[str]:
         """每一個區域都是**三個名字**（``<name>`` / ``_center`` / ``_others``）。
 

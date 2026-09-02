@@ -5,6 +5,9 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Dict
+
 import pytest
 
 from d4t.core.pipeline import get_step
@@ -249,3 +252,68 @@ def test_rescued_diagnostic_names_get_a_spec_too():
     assert "n1_clip_frac" in by and "n1_clip_frac" in cols
     assert by["n1_clip_frac"].spec.variant == "rescued"
     assert by["n1_clip_frac"].node_id == "n1"
+
+
+# --------------------------------------------------------------------------- #
+# F76 刀 1：一個區域一個顏色 —— 序由畫布上那幾條區域線給
+# --------------------------------------------------------------------------- #
+def test_one_region_gets_one_colour_no_matter_which_card_wrote_the_number():
+    """**同一個區域名，在任兩張卡底下都要拿到同一個 `region_index`。**
+
+    `region_index` 決定顏色，而顏色同時是影像上那個 ROI 框的顏色。改之前它由
+    每張卡各自算（`_util.region_spec_maker` 的 ``regions.index(region)``），
+    而那兩個序不是同一個序 —— 出貨的 rsem-worst-box 上實測：
+
+        between_columns  由 ROI 卡寫的特徵 → 0（綠）
+        between_columns  由 GLV 卡寫的特徵 → 1（琥珀）
+
+    ROI 卡一次只定義一個家族，自己那份的序永遠是 0；GLV 卡接了三條線是 0/1/2。
+    於是同一塊在同一張表上有兩種顏色，而影像上那個框只有一種
+    —— `CLAUDE.md` §3「顏色指錯區域比沒有顏色糟得多」、鐵則 10。
+    """
+    recipe = Recipe.load(Path(__file__).resolve().parent.parent
+                         / "recipes" / "rsem-worst-box.json")
+    by_region: Dict[str, set] = {}
+    for b in bound_specs(recipe, "rsem"):
+        if b.spec.region:
+            by_region.setdefault(str(b.spec.region), set()).add(
+                int(b.spec.region_index))
+    assert by_region, "這份 recipe 本來就有三個區域，抓不到就是這條測試空轉了"
+    bad = {r: sorted(v) for r, v in by_region.items() if len(v) != 1}
+    assert not bad, "同一個區域拿到不只一個顏色：%s" % bad
+
+
+def test_the_region_order_is_the_order_of_the_wires():
+    """序**由線給**，不是由執行順序、也不是由字母序。
+
+    量測卡的 ``roi`` 那一格是從線水合出來的，所以那張卡的迴圈序
+    （`MultiSourceStep.CURRENT_REGION_INDEX` —— 疊圖上框的顏色用的就是它）
+    逐字就是這幾條線在 ``recipe.edges`` 裡的順序。照線編，畫面跟影像才對得上。
+    """
+    from d4t.core.pipeline.verdict_features import _regions_in_wiring_order
+
+    recipe = Recipe.load(Path(__file__).resolve().parent.parent
+                         / "recipes" / "rsem-worst-box.json")
+    order = _regions_in_wiring_order(recipe)
+    assert order == {"on_pattern": 0, "between_columns": 1, "between_rows": 2}, \
+        order
+    # 而 bound_specs 用的就是它
+    seen = {str(b.spec.region): int(b.spec.region_index)
+            for b in bound_specs(recipe, "rsem") if b.spec.region}
+    assert seen == order
+
+
+def test_a_region_that_is_on_no_wire_still_gets_its_own_number():
+    """家族成員（``<n>_center`` / ``<n>_others``）不在線上，但仍然一名一號。
+
+    退化原則：線上沒有的名字接在後面照第一次出現的順序 —— **不可以**擠成
+    同一個號（那就是這一刀在修的病的鏡像）。
+    """
+    from d4t.core.pipeline.verdict_features import _regions_in_wiring_order
+
+    recipe = Recipe.load(Path(__file__).resolve().parent.parent
+                         / "recipes" / "rsem-worst-box.json")
+    order = dict(_regions_in_wiring_order(recipe))
+    for extra in ("on_pattern_center", "on_pattern_others"):
+        order.setdefault(extra, len(order))
+    assert len(set(order.values())) == len(order), order

@@ -742,6 +742,23 @@ class ParamSpec:
         return v
 
 
+def pick_feature(features: Dict[str, Any], specs: Sequence["FeatureSpec"],
+                 metric: str, variant: str = "") -> Any:
+    """在這一段裡找「metric 是 X 的那個數字」（F76 刀 4）。
+
+    :meth:`Step.panel_headline` 用它 —— **卡片不拆特徵字串**（前綴是區域名
+    還是 ``output_prefix`` 是別人的事，而 ``metric`` 在名字誕生的地方就宣告
+    好了）。找不到、或那一顆沒有寫出來，回 ``None``。
+    """
+    for spec in specs or ():
+        if str(spec.metric) == str(metric) \
+                and str(spec.variant or "") == str(variant or ""):
+            got = features.get(str(spec.name))
+            if got is not None:
+                return got
+    return None
+
+
 def qualified_feature_name(prefix: str, name: str) -> str:
     """被蓋掉的特徵改用這個名字保存：``<前綴>_<原名>``。
 
@@ -1140,6 +1157,40 @@ class Step(ABC):
         的退化原則）。
         """
         return dict(cls.FEATURE_HELP)
+
+    @classmethod
+    def panel_headline(cls, features: Dict[str, Any],
+                       specs: Sequence["FeatureSpec"] = ()
+                       ) -> List[Tuple[str, Any, str]]:
+        """這張卡在特徵面板上的**一句結論**（F76 刀 4，2026-09-02）。
+
+        回 ``[(標籤, 值, 單位), …]``，UI 把它畫成區段標題那一行；預設是空的
+        （什麼都不畫）。
+
+        ``specs`` 是**這一段**的 `FeatureSpec`（一張卡 × 一個區域），所以卡片
+        靠 ``spec.metric`` 找名字，**一個字串都不用拆**：``glv_worst_score``
+        那一格在畫面上叫什麼（前綴是區域名還是 ``output_prefix``）是別人的事，
+        而 ``metric`` 在名字誕生的地方就宣告好了。:func:`pick_feature` 是查
+        它的那一支。
+
+        為什麼要一個通用掛鉤而不是「GLV 專用的一塊」
+        --------------------------------------------
+        使用者 2026-09-02：「面板 for GLV card 改得這麼客製化，那是否所有 card
+        都需要類似（align 同個模板）」。答案是要 —— 而**面板本身早就是通用的**
+        （分組吃 `verdict_features.bound_specs`，欄數吃 `FeatureSpec.variant`，
+        所以 CD 的 px↔nm 孿生自動變成兩欄）。真正屬於某一張卡的只有這一句話：
+        「這一段的結論是什麼」。
+
+        所以它走 :meth:`overlay_marks` 那條路（F19 建的）：**讀 features 的
+        程式碼住在那張卡上，UI 只負責畫**。在 UI 補一張「哪張卡要顯示哪幾個
+        數字」的表是最快的做法，也是最錯的 —— 那張表會跟卡片漂開，而漂開的
+        時候畫面上看起來完全正常（`CLAUDE.md` §0）。
+
+        ⚠ **只讀 `features`，不重算。** 標題行說的必須跟底下那幾列是同一次
+        計算的同一個數字，否則「標題說 4.8σ、列上說 1.3σ」那一天遲早會來
+        （Results R1 的形狀）。
+        """
+        return []
 
     #: 這張卡寫出來的每個數字**單位是什麼** —— 見 :meth:`feature_units`。
     FEATURE_UNITS: ClassVar[Dict[str, str]] = {}

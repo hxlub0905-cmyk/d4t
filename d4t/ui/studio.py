@@ -130,6 +130,7 @@ from .scope import (
     unsupported_kind_message, visible_steps,
 )
 from .decide_panel import DecidePanel
+from .feature_panel import FeaturePanel
 from .viewmodel import (GLV_INTENTS, RecipeModel,
                         is_a_constant_expression, accuracy_at, histogram,
                         rebin)
@@ -140,7 +141,6 @@ from .welcome import (
     welcome_disabled,
 )
 from .widgets import (
-    FeatureTable,
     IconButton,
     ImageView,
     LibraryPanel,
@@ -1349,8 +1349,11 @@ class StudioWindow(QMainWindow):
         # 原本固定是一張「特徵 / 數值」表 —— 問題不是它佔位子，是那些數字沒有
         # 辦法判讀（`glv_snr 11.170` 是大還是小？），而且使用者在問的
         # 問題**每張卡都不一樣**。特徵表仍然留著，用切換列回去。
-        self.feature_table = FeatureTable(pane)
-        self.feature_table.setMinimumHeight(120)
+        # F76 刀 4：這一塊從 `widgets.FeatureTable`（一條平的清單）換成
+        # `feature_panel.FeaturePanel`（卡 › 區域 分段、四胞胎橫過來）。
+        # 名字仍叫 `feature_panel`，取用口跟舊的那張表同名同義。
+        self.feature_panel = FeaturePanel(pane)
+        self.feature_panel.setMinimumHeight(120)
 
         self.inspector_host = QWidget(pane)
         ihost = QVBoxLayout(self.inspector_host)
@@ -1367,7 +1370,7 @@ class StudioWindow(QMainWindow):
 
         self.bottom_stack = QStackedWidget(pane)
         self.bottom_stack.addWidget(self.inspector_host)      # index 0
-        self.bottom_stack.addWidget(self.feature_table)       # index 1
+        self.bottom_stack.addWidget(self.feature_panel)       # index 1
 
         tabs = QHBoxLayout()
         tabs.setContentsMargins(0, 0, 0, 0)
@@ -3584,7 +3587,7 @@ class StudioWindow(QMainWindow):
         self._refresh_pipeline()
         self.gallery.refresh_styles()
         for w in (self.histogram, self.image_view, self.verdict,
-                  self.feature_table, self.library, self.pipeline, self.gallery):
+                  self.feature_panel, self.library, self.pipeline, self.gallery):
             w.update()
 
     def remove_decision(self) -> bool:
@@ -4467,11 +4470,7 @@ class StudioWindow(QMainWindow):
 
         self._refresh_inspector(result)
         highlight = self._highlight_features(result)
-        self.feature_table.set_features(getattr(result, "features", {}) or {},
-                                        highlight=highlight,
-                                        sections=self._feature_sections(result),
-                                        about=self._feature_about(result),
-                                        specs=self._feature_specs())
+        self.feature_panel.set_model(self._feature_model(result, highlight))
         score = getattr(result, "score", None)
         self.verdict.set_verdict(getattr(result, "bin", None)
                                  if score is not None else None)
@@ -5062,6 +5061,36 @@ class StudioWindow(QMainWindow):
             for name in (rec or {}).get("names") or []:
                 out[str(name)] = ref
         return out
+
+    def _feature_model(self, result: Any,
+                       highlight: Sequence[str] = ()) -> List[Dict[str, Any]]:
+        """特徵面板要畫的那幾段（F76 刀 4）—— **跟結果表同一棵樹**。
+
+        分組不是在這裡發明的：`verdict_features.bound_specs` 給每個名字的
+        結構化身分（卡、區域、統計量、變體），`feature_panel.panel_model`
+        把它排成「一張卡 × 一個區域」的段。Results 是 *N 顆 × M 特徵*，
+        這裡是 *一顆* —— 同一棵樹的轉置。
+
+        ⚠ 這一支取代了 `_feature_sections()` 與 `_feature_specs()`：那兩支
+        各自從 `meta["feature_owner"]` 與逐張卡的 `resolve_feature_specs`
+        重建了一次分組，而**那份說法跟結果表那份已經漂開了** —— 區域顏色
+        在同一張表上出現兩種就是漂出來的第一個症狀（F76 刀 1）。
+        """
+        from .feature_panel import panel_model
+        from ..core.pipeline.verdict_features import (
+            bound_specs, diagnostic_columns,
+        )
+
+        try:
+            recipe = self.model.to_recipe()
+            bounds = bound_specs(recipe, self.model.kind)
+            diags = diagnostic_columns(recipe, self.model.kind)
+        except Exception:              # noqa: BLE001 — 顯示層，壞了就不分組
+            bounds, diags = [], []
+        return panel_model(getattr(result, "features", {}) or {}, bounds,
+                           highlight=highlight,
+                           about=self._feature_about(result),
+                           diagnostics=diags)
 
     def _feature_specs(self) -> Dict[str, Any]:
         """特徵名 → 誕生處宣告的身分（`FeatureSpec`，PR-3；前身 F37 A4 的

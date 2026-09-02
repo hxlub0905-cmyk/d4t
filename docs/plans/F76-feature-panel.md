@@ -1,6 +1,26 @@
 # F76 — Feature 面板大改版
 
-**狀態：提案第二版，等使用者拍板形狀。** 2026-09-02 開工。
+**狀態：刀 1／2／3／4 與決定 B 已經做完（2026-09-02）。刀 5 未動。**
+
+| 刀 | 狀態 |
+|---|---|
+| 1 區域顏色的序 | ✅ `verdict_features._regions_in_wiring_order` —— 序由區域線給 |
+| 2 說明欄 ＋ 單位 | ✅ `Step.FEATURE_UNITS` / `VARIANT_UNITS` / `VARIANT_GLOSS` |
+| 3 抽 `ui/feature_tree.py` | ✅ 純搬家，`results_table` 吃同一份 |
+| 4 新 `ui/feature_panel.py` | ✅ Preview 換過去，`studio._feature_sections/_feature_specs` 退場 |
+| 5 沒判定就不畫 ADC | ⬜ |
+| A `<judge>_outlier` 停產 | ❌ 不停產（使用者定調：先只改顯示） |
+| B `glv_worst_baseline` | ✅ 開了 |
+| C 欄名 | 暫定 `typical of them all` / `the odd one out` / `furthest on this stat`（`feature_panel.VARIANT_COLUMN_LABELS` 一處改字） |
+
+⚠ **`widgets.FeatureTable` 這一輪沒有刪**（Preview 已經不用它了）。
+理由是 `CLAUDE.md` §5 那張價目表：**不確定的時候先收起來**，而它帶著自己的
+一整組測試 —— 新面板在真資料上用過幾輪、確定不必退回去之後再刪，代價是
+拿掉一個 import。
+
+---
+
+**原始提案（2026-09-02 上午）。**
 
 使用者：「目前 feature 顯示面板跟後面帶的數值我覺得好亂」→
 「feature 面板我建議大改版，你可以先瀏覽整個 studio 架構 我們再來重新設計」。

@@ -170,10 +170,10 @@ def test_select_node_and_preview(window, synlot):
     # 選了 dn 節點 → 預設看它寫出來的那條流
     assert window.stream_combo.currentText() == "diff"
 
-    assert window.feature_table.rowCount() > 0
+    assert len(window.feature_panel.feature_names()) > 0
     # 特徵表看的是**跑到這一個節點為止**算出來的東西 —— `dn` 是影像段的卡，
     # 所以這裡該有的是它自己那一個，不是後面量測卡的 `glv_*`。
-    assert "removed_over_noise" in window.feature_table.feature_names()
+    assert "removed_over_noise" in window.feature_panel.feature_names()
 
     # 換一條影像流，畫面要跟著換（不用重跑 pipeline）
     window.stream_combo.setCurrentText("test")

@@ -881,6 +881,34 @@ class GlvStatsStep(MultiSourceStep):
         # 所以**這裡不寫** —— 一個猜錯的單位比沒有單位糟。
     }
 
+    # ---- 面板上的一句結論（F76 刀 4）--------------------------------------
+    @classmethod
+    def panel_headline(cls, features, specs=()):
+        """「最異常的一格 #21 · 1.35 σ · 100 boxes · 2 格超過門檻」。
+
+        這幾個數字以前是**十三列**（`glv_worst_i/x/y/w/h/score/value/…`），
+        而它們回答的是同一個問題：「這一區的結論是什麼」—— 那正是打開這一段
+        的第一個問題。x/y/w/h 不進來：它們是給疊圖用的座標，不是給人讀的。
+
+        ⚠ **只讀 features，不重算**（見 `Step.panel_headline`）。
+        """
+        from ..pipeline.step import pick_feature
+
+        out = []
+        box = pick_feature(features, specs, "glv_worst_i")
+        if box is not None:
+            out.append(("odd one out", "#%d" % int(box), ""))
+        score = pick_feature(features, specs, "glv_worst_score")
+        if score is not None:
+            out.append(("", score, "\u03c3"))
+        boxes = pick_feature(features, specs, "glv_boxes")
+        if boxes is not None:
+            out.append(("", int(boxes), "boxes"))
+        over = pick_feature(features, specs, "glv_boxes_over_k")
+        if over is not None:
+            out.append(("", int(over), "beyond the cut"))
+        return out
+
     # ---- 宣告 ---------------------------------------------------------------
     # **只有一條路**（F18 第 5 步）：整張卡都走 MultiSourceStep 的迴圈，
     # 「跟誰比」只是多接一個埠、多吐幾個數字。舊的 `method` 有兩種接線方式

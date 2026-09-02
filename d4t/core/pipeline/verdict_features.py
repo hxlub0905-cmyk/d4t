@@ -19,13 +19,13 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Type
 
 from .decide_tree import features_used
 from .engine import feature_prefixes, qualified_feature_name
 from .expression import ExpressionError, parse_expression
-from .recipe import Recipe, RecipeError, execution_order
+from .recipe import Recipe, RecipeError, execution_order, is_region_edge
 from .step import FeatureSpec, REGISTRY, Step
 
 __all__ = [
@@ -172,6 +172,55 @@ class BoundSpec:
 ENGINE_LABEL = "Score / Bin"
 
 
+def _regions_in_wiring_order(recipe: Recipe,
+                             registry: Optional[Dict[str, Type[Step]]] = None,
+                             ) -> Dict[str, int]:
+    """區域名 → 第幾個。**序由畫布上那幾條區域線給**（F76 刀 1，2026-09-02）。
+
+    修的是什麼
+    ----------
+    ``region_index`` 決定顏色，而顏色同時是影像上那個 ROI 框的顏色與畫布上
+    區域埠的顏色。以前它由**每張卡各自算**（`_util.region_spec_maker` 的
+    ``regions.index(region)``），而那兩個序不是同一個序：
+
+    ========================  =========================  ==========
+    出貨的 rsem-worst-box     ROI 卡寫的特徵             GLV 卡寫的
+    ========================  =========================  ==========
+    ``on_pattern``            0（綠）                    0（綠）
+    ``between_columns``       **0（綠）**                **1（琥珀）**
+    ``between_rows``          **0（綠）**                **2（藍）**
+    ========================  =========================  ==========
+
+    ROI 卡一次只定義一個家族，所以它自己那一份的序永遠是 0；GLV 卡接了三條線，
+    序是 0/1/2。於是**同一塊在同一張表上有兩種顏色**，而影像上那個框只有一種
+    —— `CLAUDE.md` §3：「顏色指錯區域比沒有顏色糟得多」。兩份說法，鐵則 10。
+
+    為什麼序是「線」而不是「執行順序」
+    ----------------------------------
+    量測卡的 ``roi`` 那一格是**從線水合出來的**（F42），所以那張卡的迴圈序
+    （`MultiSourceStep.CURRENT_REGION_INDEX` —— 疊圖上框的顏色用的就是它）
+    逐字就是這幾條線在 ``recipe.edges`` 裡的順序。照線編，畫面與影像才對得上。
+
+    ⚠ **一個名字一個序，不看家族**：``epi`` / ``epi_center`` / ``epi_others``
+    仍然各自一個顏色（跟 F76 之前逐格相同）。把家族收成同一個顏色是另一個
+    決定，不在這一刀裡 —— 這一刀只讓「同一個名字有兩種顏色」不可能發生。
+    """
+    order: Dict[str, int] = {}
+    nodes = getattr(recipe, "nodes", {}) or {}
+    for edge in (getattr(recipe, "edges", None) or []):
+        try:
+            if not is_region_edge(edge, nodes, registry):
+                continue
+        except Exception:              # noqa: BLE001 — 顯示層，壞了就跳過這條
+            continue
+        # 區域線的 ``src_out`` 就是**那個區域的名字**（單數 —— 一條線一個
+        # 區域；「一張卡吃好幾個區域」是好幾條線，不是一格逗號清單）。
+        name = str(getattr(edge, "src_out", "") or "").strip()
+        if name:
+            order.setdefault(name, len(order))
+    return order
+
+
 def bound_specs(recipe: Recipe, kind: str,
                 registry: Optional[Dict[str, Type[Step]]] = None,
                 ) -> List[BoundSpec]:
@@ -192,6 +241,9 @@ def bound_specs(recipe: Recipe, kind: str,
 
     同名卡片出現兩次以上才把 node id 帶進 label（每一組都掛 id 是在正常
     recipe 上加噪音）。
+
+    ⚠ **``region_index`` 在這裡重新編過**（F76 刀 1，2026-09-02）——
+    見 :func:`_regions_in_wiring_order`。卡片各自算的那個序是錯的。
     """
     if registry is None:
         registry = REGISTRY
@@ -279,6 +331,18 @@ def bound_specs(recipe: Recipe, kind: str,
                 engine(name + "_raw", base=name, variant="raw")
     if getattr(recipe, "route_by", None) is not None:
         engine("route_taken", base="route_taken", metric="route_taken")
+
+    # **區域顏色的序在這裡定案**（F76 刀 1）—— 卡片各自算的那個序丟掉。
+    # 線上沒有的名字（``epi_center`` 那種家族成員、手寫 recipe 的舊檔）接在
+    # 後面，照它們第一次出現的順序 —— 仍然是**一個名字一個序**。
+    order = _regions_in_wiring_order(recipe, registry)
+    for b in out:
+        if b.spec.region:
+            order.setdefault(str(b.spec.region), len(order))
+    out = [BoundSpec(b.node_id, b.label,
+                     replace(b.spec, region_index=order[str(b.spec.region)]))
+           if b.spec.region else b
+           for b in out]
 
     labels = [b.label for b in out]
     return [BoundSpec(b.node_id,
