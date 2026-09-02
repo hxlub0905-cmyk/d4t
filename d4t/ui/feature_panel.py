@@ -136,6 +136,12 @@ def panel_model(features: Optional[Dict[str, Any]],
             "kind": "card", "headline": headline,
             "grid": _grid_of(g["specs"], feats, hi, eaten),
             "flat": _flat_of(g["specs"], feats, hi, about, eaten),
+            # **畫在標題行的那些也還在畫面上**，只是不佔一列 —— 所以取用口
+            # 要查得到它們（`feature_names` / `value_text`）。少了這一份的
+            # 下場實測過：`glv_worst_i` 明明就寫在標題上，`value_text` 卻回
+            # None —— 取用口跟畫面說的是兩件事。
+            "elsewhere": [{"name": n, "value": feats.get(n)}
+                          for n in sorted(eaten) if n in feats],
         })
     if diag_specs:
         out.append({"node_id": "", "label": "Diagnostics", "region": "",
@@ -218,6 +224,9 @@ def _grid_of(specs: Sequence[Any], feats: Dict[str, Any],
         if var == "outlier_box":
             box = feats.get(str(s.name))
             row["outlier_box"] = None if box is None else int(box)
+            # 名字要留著 —— 那一格在畫面上是「← #46」那個地址，但
+            # `value_text("…_outlier_box")` 仍然要查得到（見 `set_model`）。
+            row["outlier_box_name"] = str(s.name)
             continue
         if var not in seen_cols:
             seen_cols.append(var)
@@ -310,6 +319,12 @@ class FeaturePanel(QScrollArea):
                 for cell in row["cells"].values():
                     self._values[cell["name"]] = cell["value"]
                     self._glosses[cell["name"]] = cell.get("gloss", "")
+                # 「← #46」那個地址也是一個特徵（`<量>_outlier_box`）。
+                if row.get("outlier_box_name"):
+                    self._values[row["outlier_box_name"]] = row["outlier_box"]
+            # 標題行上的那幾個（`glv_worst_i` / `locate_ok` / …）。
+            for got in sec.get("elsewhere") or ():
+                self._values[got["name"]] = got["value"]
         self._rebuild()
 
     def set_search(self, text: str) -> None:

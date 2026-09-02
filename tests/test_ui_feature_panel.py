@@ -314,3 +314,32 @@ def test_the_score_is_always_visible_next_to_the_verdict(tmp_path):
         assert win.verdict_live.isVisibleTo(win)
     finally:
         win.close()
+
+
+def test_the_panel_can_look_up_everything_it_shows(measured):
+    """**畫面上有的，取用口就要查得到。**
+
+    `glv_worst_i` 那一族被升格到區段標題、`<量>_outlier_box` 變成「← #46」
+    那個地址 —— 它們仍然在畫面上，只是不佔一列。而改之前
+    `value_text("glv_worst_i")` 回 `None`：**取用口跟畫面說的是兩件事**。
+
+    實測抓到的（一份接了 ROI ＋ GLV 逐框 ＋ Focus 的 recipe）：引擎寫了 52 個
+    特徵，面板只查得到 39 個 —— 少掉的 13 個全部都在畫面上。
+    """
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    from d4t.ui.feature_panel import FeaturePanel
+
+    app = QApplication.instance() or QApplication([])
+    feats, _specs = measured
+    panel = FeaturePanel()
+    try:
+        panel.set_model(_model(measured))
+        missing = sorted(set(feats) - set(panel.feature_names()))
+        assert not missing, "畫面上有、但查不到的：%s" % missing
+        # 而且查得到的是**值**，不是空字串
+        for name in ("glv_worst_i", "glv_worst_score",
+                     "glv_median_outlier_box"):
+            assert panel.value_text(name), name
+    finally:
+        panel.deleteLater()
