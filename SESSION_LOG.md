@@ -22,6 +22,80 @@
 
 ---
 
+## F76：Feature 面板要大改版 —— 而那塊面板已經存在了（2026-09-02）
+
+使用者：「目前 feature 顯示面板跟後面帶的數值我覺得好亂」→「我建議大改版，
+你可以先瀏覽整個 studio 架構」。**這一輪只出計畫書與可以點的 mock，一行 UI
+程式碼都沒有動** —— 因為瀏覽的結果推翻了第一版提案。
+
+### ① 第一版提議開一塊新面板。瀏覽完之後那一刀作廢
+
+我要蓋的東西（卡 › 區域 › 統計量的樹、雙層表頭、維度過濾）**`ui/results_table.py`
+兩星期前就寫好了**（PR-1／PR-3，`column_tree()` ＋ `verdict_features.bound_specs()`）。
+Preview 那一塊走的是另一條弱得多的路（`studio._feature_sections()` 只分到卡）。
+
+兩份說法**已經漂開了**，而症狀是可以量的：同一個區域 `between_columns`，
+ROI 卡寫的特徵 `region_index=0`（綠）、GLV 卡寫的 `region_index=1`（琥珀），
+**同一張表上兩種顏色**，而影像上那個框只有一種。`CLAUDE.md` §3 的
+「顏色指錯區域比沒有顏色糟得多」現在就是這個狀態 —— 鐵則 10。
+
+所以這一輪不是加一塊面板，是**把 Preview 接到已經在跑的那一份上**：
+Results 是 *N 顆 × M 特徵*，Preview 是 *一顆*，也就是同一棵樹的轉置。
+
+### ② 量出來的病（`recipes/rsem-worst-box.json`，118 個特徵）
+
+* **36 個**特徵的「What it is」只是把 id 抄一遍（`glv_worst_*` 整族 ——
+  正好是使用者當下在問的那幾個字）。`Step.feature_help()` 這條路已經存在，
+  GLV 卡沒填而已。
+* **97 個**的說明跟別的特徵一字不差：`feature_gloss` 只讀 `spec.metric`、
+  **不讀 `spec.variant`**，所以 `_typical` / `_outlier` / `_outlier_box` /
+  `_worst` 四胞胎四行相同 —— 而 `_outlier_box` 的值是一個**框號**，說明欄
+  卻寫「75th percentile」。
+* **四胞胎在畫面上不相鄰**：`glv_q75_worst` 跟 `glv_q75_typical` 差 13 列。
+  列序 = `features` dict 的插入序，而 `_worst` 是迴圈最後才寫的 ——
+  **排版跟著計算順序走，不是跟著意思走**。
+* 沒有判定時 Verdict chip 永遠是 `—`，佔著量測卡最需要的那塊面積。
+
+### ③ `_outlier` 不是沒用，是沒把「那是另一格」講出來
+
+使用者：「outliner 完全沒有用 或者我看不懂? 反而這樣會誤導別人以為他是最
+worst 的」。量了 24 顆（judge = `glv_q75`）：
+
+| metric | `<m>_outlier_box == glv_worst_i` |
+|---|---|
+| `glv_q75`（＝ judge）| **24/24** |
+| 其他四個 | 2–5 / 24 |
+
+兩件事同時成立：**judge 那個量的 `_outlier` 是 `_worst` 的重複**（這個 repo
+已經為同一種情形立過規矩 —— `WORST_FEATURES` 的註解拒絕開 `score_max`），
+而**其他量的 `_outlier` 指的是另一格**。五格的最小例子（judge=median）：
+`glv_std_worst = 6.2`（贏家 #4 的 std）vs `glv_std_outlier = 29.8`（#3 的），
+兩個不同的格，名字上沒有任何線索。
+
+### ④ 兩份出貨 recipe 刪掉（使用者指定）
+
+留 `rsem-worst-box.json`，刪 `ebi-to-api-characterization.json` 與
+`patch-dsnr-by-class.json`。**卡片一張都沒動** —— `pair_source` / `H2H` /
+`output_char` / GLV 的 compare 全在。
+
+⚠ 真正要小心的是**文件的連帶**：`docs/USING-CHARACTERIZATION.md` §1 以前寫
+「不要自己從零蓋，用 `recipes/ebi-to-api-characterization.json`」，而那份不在了
+—— **一份指著不存在檔案的操作手冊，就是文件版的「按了撞牆的鈕」**（推廣鐵則）。
+改成「從零蓋」是主路（步驟本來就寫在 §1.1），並在頂上講明白那份檔案什麼時候、
+為什麼走的。
+
+`ALLOWED_ERRORS` 隨之變成空的（唯一那條「模板是一張影像、塞不進 JSON」跟著
+patch 那份走了），但**機制與那支反向測試留著** —— 下一份 recipe 還要用。
+
+### 留下什麼
+
+* [`docs/plans/F76-feature-panel.md`](docs/plans/F76-feature-panel.md) ——
+  病的量測、studio 版面全圖、要拍板的形狀、三件待決定的事。
+* 一份可以點的 HTML mock（現在 ⇄ 改版後、有 ⇄ 沒有 ADC，欄名可編可拖）。
+* 黃金值三份全綠（動工前的閘門，這一輪確認過）。
+
+---
+
 ## F75：文件對齊現況 —— 而最大的問題是「哪些是活的」（2026-09-02）
 
 使用者：「詳細整理一下目前的所有相關 MD 檔案，對齊現況，若可以縮減內容請縮減」。
