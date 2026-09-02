@@ -189,3 +189,52 @@ def test_a_feature_this_defect_never_wrote_takes_no_row(measured):
     model = panel_model(thin, [_Bound(s) for s in specs])
     assert "glv_worst_value" not in {r["name"] for s in model
                                      for r in s["flat"]}
+
+
+# --------------------------------------------------------------------------- #
+# 4. F76 刀 5：沒有判定就不畫 Verdict 那一塊
+# --------------------------------------------------------------------------- #
+def test_the_verdict_block_is_not_there_until_there_is_a_decision(tmp_path):
+    """使用者 2026-09-02：「大部分人應該建立 Pipeline 時 ADC 不會放到第一個」。
+
+    在那段時間裡這一塊永遠是一個寫著 ``—`` 的 chip 加一片空白 —— 它不是壞的，
+    它是**什麼都沒說**，而那塊面積正好是量測卡最需要的地方。
+
+    判準用 **model**（recipe 有沒有判定），不用「這一顆有沒有 bin」：後者在
+    還沒預覽、或這一顆量不出來的時候也是空的，而那兩件事的下一步完全不同
+    （一個是「去加一棵樹」，另一個是「先跑一次」）。
+    """
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    from d4t.ui import studio as studio_mod, theme as theme_mod
+
+    app = QApplication.instance() or QApplication([])
+    theme_mod.apply_theme(app)
+    recipe = Recipe.load(REPO / "recipes" / "rsem-worst-box.json")
+
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    try:
+        win.show()
+        path = tmp_path / "with.json"
+        recipe.save(path)
+        assert win.load_recipe_path(path, sync=True)
+        app.processEvents()
+        assert win.has_decision(), "這份 recipe 有一棵樹"
+        assert not win.verdict_empty.isVisibleTo(win)
+
+        # 拿掉判定 → 那一塊換成「怎麼加一個」，而不是一個說不出話的 chip
+        from dataclasses import replace
+
+        naked = tmp_path / "without.json"
+        recipe.decide = replace(recipe.decide, tree=None, rules=(), score="")
+        recipe.score = type(recipe.score)(expr="", threshold=0.0, bins={})
+        recipe.save(naked)
+        assert win.load_recipe_path(naked, sync=True)
+        app.processEvents()
+        assert not win.has_decision()
+        assert win.verdict_empty.isVisibleTo(win)
+        assert not win.verdict_live.isVisibleTo(win)
+        # 而那句話要**講得出下一步**，並且那一步就在旁邊
+        assert win.btn_add_decision.isEnabled()
+    finally:
+        win.close()

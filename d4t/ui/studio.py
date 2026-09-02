@@ -1385,20 +1385,74 @@ class StudioWindow(QMainWindow):
         lay.addLayout(tabs)
         lay.addWidget(self.bottom_stack, 2)
 
-        vrow = QHBoxLayout()
+        # ---- 判定那一塊（F76 刀 5，2026-09-02）----------------------------
+        #
+        # **沒有判定就不畫它。** 使用者 2026-09-02：「大部分人應該建立
+        # Pipeline 時 ADC 不會放到第一個」—— 而在那段時間裡，這一塊永遠是一個
+        # 寫著 `—` 的 chip 加一片空白。它不是壞的，它是**什麼都沒說**，而那塊
+        # 面積正好是量測卡最需要的地方（同 F7-15「空白狀態要說得出下一步」、
+        # 以及 scope.SHOW_SAMPLE_ENTRIES 那條「按了撞牆的鈕比沒有那顆鈕更糟」
+        # 的鏡像 —— 這裡是「說不出話的那一格比沒有那一格更佔位」）。
+        self.verdict_live = QWidget(pane)
+        vrow = QHBoxLayout(self.verdict_live)
+        vrow.setContentsMargins(0, 0, 0, 0)
         vrow.setSpacing(8)
-        self.verdict = VerdictChip(pane)
-        vrow.addWidget(QLabel("Verdict", pane))
+        self.verdict = VerdictChip(self.verdict_live)
+        vrow.addWidget(QLabel("Verdict", self.verdict_live))
         vrow.addWidget(self.verdict)
         # 這一顆走過的路（F24 §8）：`missing? no → contrast > 120 ? yes`。
         # 沒有判定樹（或還沒預覽）就是空字串 —— 不佔位、不寫 N/A。
-        self.decide_path = QLabel("", pane)
+        self.decide_path = QLabel("", self.verdict_live)
         self.decide_path.setObjectName("paramHint")
         self.decide_path.setWordWrap(False)
         vrow.addWidget(self.decide_path, 1)
-        lay.addLayout(vrow)
+        lay.addWidget(self.verdict_live)
+
+        # 還沒有判定的時候換成**一句可以照做的話 ＋ 那顆鈕**（推廣鐵則：
+        # 講得出下一步，而那一步就在旁邊）。
+        self.verdict_empty = QWidget(pane)
+        erow = QHBoxLayout(self.verdict_empty)
+        erow.setContentsMargins(0, 0, 0, 0)
+        erow.setSpacing(8)
+        hint = QLabel("No decision yet — these numbers are measured, but "
+                      "nothing is drawing a conclusion from them.",
+                      self.verdict_empty)
+        hint.setObjectName("paramHint")
+        hint.setWordWrap(True)
+        erow.addWidget(hint, 1)
+        self.btn_add_decision = QPushButton("Add a decision…",
+                                            self.verdict_empty)
+        self.btn_add_decision.setProperty("variant", "secondary")
+        self.btn_add_decision.clicked.connect(self.show_score_page)
+        erow.addWidget(self.btn_add_decision)
+        lay.addWidget(self.verdict_empty)
+        self._sync_verdict_block()
 
         return pane
+
+    def _sync_verdict_block(self) -> None:
+        """有判定才畫 Verdict 那一塊，沒有就畫「怎麼加一個」（F76 刀 5）。
+
+        判準用 model（**recipe 有沒有判定**），不用「這一顆有沒有 bin」——
+        後者在還沒預覽、或這一顆量不出來的時候也是空的，而那兩件事的下一步
+        完全不同（一個是「去加一棵樹」，另一個是「先跑一次」）。
+        """
+        decide = getattr(self.model, "decide", None)
+        has = bool(
+            (decide is not None
+             and (getattr(decide, "tree", None) is not None
+                  or list(getattr(decide, "rules", ()) or [])))
+            or str(getattr(getattr(self.model, "score", None), "expr", "")
+                   or "").strip())
+        if getattr(self, "verdict_live", None) is None:
+            return
+        self.verdict_live.setVisible(has)
+        self.verdict_empty.setVisible(not has)
+
+    def has_decision(self) -> bool:
+        """畫面上那一塊現在是 Verdict 還是「加一個判定」（測試讀得到）。"""
+        return bool(getattr(self, "verdict_live", None) is not None
+                    and self.verdict_live.isVisibleTo(self))
 
     # ==================================================================== #
     # 訊號接線
@@ -1561,6 +1615,7 @@ class StudioWindow(QMainWindow):
     def _refresh_all(self) -> None:
         self._refresh_pipeline()
         self._sync_score_widgets()
+        self._sync_verdict_block()      # F76 刀 5：有判定才畫 Verdict 那一塊
         self._refresh_feature_combo()
         self._sync_threshold_line()
         self._update_action_states()

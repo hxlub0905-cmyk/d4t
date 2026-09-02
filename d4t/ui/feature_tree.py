@@ -95,7 +95,7 @@ def column_tree(results: Sequence[Dict[str, Any]],
     for name, b in spec_of.items():
         if name in drop:
             continue
-        col = {"name": name, "stat_label": _stat_label(b)}
+        col = {"name": name, "stat_label": stat_label(b)}
         if not (groups and groups[-1]["node_id"] == b.node_id
                 and groups[-1]["label"] == b.label):
             groups.append({"node_id": b.node_id, "label": b.label,

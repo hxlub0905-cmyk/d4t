@@ -90,7 +90,7 @@ c9d339f0bbeec70984a01ad6b4dddad94c3d2a36 d4t/ui/canvas.py
 3b58b7e078d58ad84a8939734b65952a75a029f3 d4t/ui/cell_canvas.py
 bb92c4ab8c186afa72f683a163d5ba4620c5dc3c d4t/ui/decide_panel.py
 9772a1a739c3dd90f3cdc9d02f446a559118a0b4 d4t/ui/feature_panel.py
-3e67e0dc964c7de91143856cf44571fa419e4f5a d4t/ui/feature_tree.py
+ccd233c8486ce68c52818e2a4cbc2a7613658f95 d4t/ui/feature_tree.py
 9c9230407197225a3143a3cd8e08854ca8ae452c d4t/ui/gallery.py
 8698ed28162cca708955f0f69684846ff46ba749 d4t/ui/gc_generator.py
 5a6ec4512b42156e985cecaebb53787e8125874e d4t/ui/gc_paint.py
@@ -104,7 +104,7 @@ f7b64cc639cd51ab158c6750bde3fa4d670dbfc5 d4t/ui/region_check.py
 1d1ca0ee2e4ebbedfa11b027bb9e7d735500ad2d d4t/ui/route_badge.py
 11a38b9e760697b23510805b56706f1eb8f6c85e d4t/ui/route_panel.py
 85bbff1c801c8f2e03a8003b39a376c1392757d1 d4t/ui/scope.py
-2fb9a7ce39ceddc6056f90e965fd94d5078948d6 d4t/ui/studio.py
+e5ed16d404fdc01e431fdc9568a29ede3df347ac d4t/ui/studio.py
 0a1d057639f34635416673d9dc38a3daf999530e d4t/ui/template_dialog.py
 8e34d809ea5f7cf8ca3c54491de7b19623b7047b d4t/ui/theme.py
 3cc7d61199e03eaba0eb61f5a749b9f6cfca9ba5 d4t/ui/threshold_view.py
@@ -117,7 +117,7 @@ db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
 8a28e5d0362d77a8f60d409c66f7a25fa96ec3b3 d4t/ui/widgets.py
 768dbb379b84127e9cbb7ec62df8d51c34dd0100 d4t/ui/wiring_slot.py
 e02cb1ea64a7ed413716379b9da789937729f3e3 d4t/ui/workers.py
-b4cbf9266bb1a18a4125ed422343cafb96e13315 docs/ARCHITECTURE.md
+4579e684597a15f11acf1958efcc4ecab55baff3 docs/ARCHITECTURE.md
 7618e6d754adc64a230481481ec805bde52d6f5f docs/FAB-VALIDATION.md
 1365e450a6a568fb0520113e40af42a87cb907df docs/GLAS-INTERFACE.md
 19d601d765ae34b494c08ba6eef81815b67e0d4b docs/HANDOVER.md
@@ -129,7 +129,7 @@ af9331dec62346a5677b6b84bda54d28eb900bcb docs/ROADMAP.md
 7d6e3d3a6e7ca55d6c61bd7d218efe51f9d4fa38 docs/USING-CD.md
 4474b1853758a2c83b397a0608be2a98b539dcbf docs/USING-CHARACTERIZATION.md
 31b8d2fb5550439e7b2007bb58ddc7b4c955dc19 docs/plans/F11-phase2-features.md
-6394f6c3b1739c6c68c330ab68359c3a665de248 docs/plans/F76-feature-panel.md
+7e2b338e6e7291d6b3eff4af2c4c665a3f0f987f docs/plans/F76-feature-panel.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -303,7 +303,7 @@ bd1e35d0ea522275700637b65068671a5402cfb6 tests/test_ui_f8_ui_polish.py
 36ad8dc34a864d032fe5b55b4b16ed13a726a83d tests/test_ui_f9_9_two_lines_side_by_side.py
 7db2cab97ffe3b38bcd3da9cb0562f2d3b48f928 tests/test_ui_feature_ghosts.py
 548f3f330cf2c44aaa2634e9864c39d869b05efa tests/test_ui_feature_name_display.py
-bad5e45ddd12b100a7e80fca03953794add9c0d4 tests/test_ui_feature_panel.py
+1f82afc2e10225a303ad07c34f64280599183b4e tests/test_ui_feature_panel.py
 97e9fb59235c8b5f0ace11fd2fe70eb23906b455 tests/test_ui_feature_value_format.py
 0a897154b902c066f1452d066aa02ccf7e47e0ff tests/test_ui_gallery.py
 a3a5c0ab3ec4243abb72f3b35e2d744697d7c9ac tests/test_ui_gc_generator.py

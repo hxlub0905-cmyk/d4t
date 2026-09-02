@@ -1,6 +1,6 @@
 # F76 — Feature 面板大改版
 
-**狀態：刀 1／2／3／4 與決定 B 已經做完（2026-09-02）。刀 5 未動。**
+**狀態：五刀與決定 B 全部做完（2026-09-02）。PR [#32](https://github.com/hxlub0905-cmyk/d4t/pull/32)。**
 
 | 刀 | 狀態 |
 |---|---|
@@ -8,7 +8,7 @@
 | 2 說明欄 ＋ 單位 | ✅ `Step.FEATURE_UNITS` / `VARIANT_UNITS` / `VARIANT_GLOSS` |
 | 3 抽 `ui/feature_tree.py` | ✅ 純搬家，`results_table` 吃同一份 |
 | 4 新 `ui/feature_panel.py` | ✅ Preview 換過去，`studio._feature_sections/_feature_specs` 退場 |
-| 5 沒判定就不畫 ADC | ⬜ |
+| 5 沒判定就不畫 ADC | ✅ `studio._sync_verdict_block` —— 換成一句話 ＋ 那顆鈕 |
 | A `<judge>_outlier` 停產 | ❌ 不停產（使用者定調：先只改顯示） |
 | B `glv_worst_baseline` | ✅ 開了 |
 | C 欄名 | 暫定 `typical of them all` / `the odd one out` / `furthest on this stat`（`feature_panel.VARIANT_COLUMN_LABELS` 一處改字） |

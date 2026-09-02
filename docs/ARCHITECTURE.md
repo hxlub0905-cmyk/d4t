@@ -295,6 +295,8 @@ d4t/
     │                         #     F50 拿掉了：「整批跑一次」變成卡片自己的一條腳帶
     ├── threshold_view.py     #   在挑門檻，就要看得到分布
     ├── results.py results_table.py why_panel.py  #   Results 視窗／結果表／三次點擊回溯（F45）
+    ├── feature_tree.py       #   卡 › 區域 › 統計量那棵樹 —— **結果表與 Preview 共用一份**（F76）
+    ├── feature_panel.py      #   Preview 的特徵面板：四胞胎橫過來（一列一個統計量、一欄一個 variant）
     ├── gallery.py region_check.py      #   縮圖網格（虛擬捲動，撐 10k+）／區域畫在很多顆上
     ├── inspectors.py         #   每張卡自己的儀表（依 `Step.key` 註冊）
     ├── template_dialog.py    #   從大圖疊 Golden Cell 模板（模板存進 recipe）
