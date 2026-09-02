@@ -309,3 +309,89 @@ def test_the_cli_prints_a_dash_instead_of_crashing_on_those():
     assert _pct(None) == "—"
     assert _pct(0.25) == "25.0%"
     assert _pct(0.0) == "0.0%"        # 真的是 0 跟沒有定義是兩件事
+
+
+# --------------------------------------------------------------------------- #
+# 打開來不卡（2026-09-01，使用者：「html 打開來瀏覽時很卡」）
+# --------------------------------------------------------------------------- #
+def _many(n, feats=6):
+    keys = ["f%d" % i for i in range(feats)]
+    rows = [{"defect_id": str(i), "ok": i % 50 != 0, "score": float(i),
+             "bin": i % 4, "error": "" if i % 50 else "boom",
+             "features": {k: float(i) for k in keys}} for i in range(n)]
+    return rows, keys
+
+
+def test_a_big_report_does_not_put_every_row_in_the_dom():
+    """**這一條是那個卡本身。**
+
+    兩萬顆全部寫成 ``<tr>`` 是 36 萬個 DOM 節點，實測 Chromium 從打開到可用
+    要 6.2 秒；只寫前 `FIRST_ROWS` 列、其餘走 JSON 之後是 0.42 秒。
+
+    ⚠ 便宜的做法量過都沒有用：`table-layout:fixed` 更慢、
+    `content-visibility:auto` 對 table-row 不生效。成本在**節點本身**。
+    """
+    from d4t.core.export.html import FIRST_ROWS, build_report
+
+    rows, keys = _many(2000)
+    page = build_report(rows, "T", keys, None,
+                        {str(i): "images/%d.jpg" % i for i in range(2000)})
+    # 一列一個 ``<td class='id'>`` —— 數 ``<tr`` 會連 JS 裡的字串一起數到
+    assert page.count("<td class='id'>") == FIRST_ROWS, "只寫前 N 列，不是兩千列"
+    assert "id='rows'" in page, "其餘的要帶在頁面裡（資料一顆都不能少）"
+
+
+def test_every_row_is_still_in_the_file():
+    """**沒有一顆被丟掉** —— 少寫的是節點，不是資料。"""
+    import json
+
+    from d4t.core.export.html import FIRST_ROWS, build_report
+
+    rows, keys = _many(FIRST_ROWS + 25)
+    page = build_report(rows, "T", keys, None, {})
+    blob = page.split("id='rows' type='application/json'>", 1)[1].split("</script>", 1)[0]
+    rest = json.loads(blob)
+    assert len(rest) == 25
+    assert rest[0][0][0] == str(FIRST_ROWS)          # 第 301 顆接在後面
+    assert rest[-1][0][0] == str(FIRST_ROWS + 24)
+
+
+def test_a_small_report_carries_no_javascript_payload():
+    """三百列以內的報表**一個位元組都不變** —— 那是絕大多數的情況。"""
+    from d4t.core.export.html import build_report
+
+    rows, keys = _many(12)
+    page = build_report(rows, "T", keys, None, {})
+    assert "id='rows'" not in page and "Show all" not in page
+    assert page.count("<td class='id'>") == 12
+
+
+def test_the_two_ways_of_drawing_a_row_agree():
+    """HTML 那條路與 JSON 那條路吃**同一份** `_row_parts`。
+
+    分成兩份的那天，前 300 列與第 301 列會長得不一樣，而畫面上看起來只是
+    「後面那些怪怪的」。
+    """
+    from d4t.core.export.html import _row_html, _row_parts
+
+    r = {"defect_id": "7", "ok": False, "score": 1.5, "bin": 2,
+         "error": "bad <thing>", "features": {"a": 3.25}}
+    parts = _row_parts(r, ["a"], {"7": "images/7.jpg"})
+    html = _row_html(*parts)
+    assert "class='bad'" in html                      # 跑不起來的那一列
+    assert 'data-img="images/7.jpg"' in html
+    assert "&lt;thing&gt;" in html                    # 跳脫過了
+    assert parts[0][0] == "7" and parts[0][-1] == "bad &lt;thing&gt;"
+
+
+def test_the_json_payload_cannot_close_the_script_tag():
+    """一列裡有 ``</script>`` 就會把那個 script 提早關掉，後面整段 JSON
+    會被當成 HTML 印出來 —— 而那是使用者打的字（error 欄）。"""
+    from d4t.core.export.html import FIRST_ROWS, build_report
+
+    rows, keys = _many(FIRST_ROWS + 2)
+    rows[-1]["error"] = "</script><b>oops</b>"
+    page = build_report(rows, "T", keys, None, {})
+    blob = page.split("id='rows' type='application/json'>", 1)[1].split("</script>", 1)[0]
+    assert "oops" in blob, "那一列要留在 JSON 裡（不是被切掉）"
+    assert "<" not in blob, "JSON 裡不准有裸的 <"

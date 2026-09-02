@@ -206,19 +206,59 @@ def test_diff_only_context_does_not_montage_itself():
 # ---------------------------------------------------------------------------
 # 標籤
 # ---------------------------------------------------------------------------
-def test_label_is_drawn_top_left():
+def test_the_caption_goes_under_the_picture():
+    """標籤畫在影像**下面**，一個像素都不蓋到樣品（2026-09-01，使用者選的）。
+
+    以前它是左上角一條 banner —— 而 64 px 的 patch 上那條蓋掉四分之一，
+    左上角正是缺陷可能在的地方。這行字的用途是「這疊圖拿出報表單獨看的時候
+    還講得出 score 與 bin」，蓋住樣品就違反了它存在的理由。
+    """
     plain = overlay.render_overlay({"test": flat(200)}, {})
-    labelled = overlay.render_overlay({"test": flat(200)}, {}, label="score=3.21")
-    assert labelled.shape == plain.shape
-    assert not np.array_equal(plain[:16], labelled[:16])   # 左上角有變化
-    assert np.array_equal(plain[40:], labelled[40:])       # 下半部沒被動到
+    labelled = overlay.render_overlay({"test": flat(200)}, {},
+                                      label="score=3.21")
+    assert labelled.shape[1] == plain.shape[1], "寬度不變"
+    assert labelled.shape[0] > plain.shape[0], "下面多一條字幕條"
+    assert np.array_equal(labelled[:plain.shape[0]], plain), \
+        "影像本身一個像素都不准動"
+    assert labelled[plain.shape[0]:].max() > 0        # 字幕條上真的有東西
+
+
+def test_the_caption_always_fits_the_picture_it_sits_under():
+    """**這一條是那個 bug 本身**（使用者：「patch 上標註的 bin 黑邊會因為
+    patch 不同 size 導致上方的字彙超出去」）。
+
+    以前字級只看影像寬度（``w / 320``），完全不看字有多長 —— 於是字長得比圖
+    還快：64 px 超出 53 px、128 px 超出 27 px、160 px 超出 34 px，**每一種
+    尺寸都超**。現在先問字有多長再挑字級，塞不下就換更短的寫法、最後截字。
+    """
+    import cv2
+
+    label = "#12345  score=4.210  bin=3"
+    for w in (32, 40, 48, 64, 96, 128, 160, 200, 256, 512):
+        text, scale = overlay._fit_label(label, w)
+        tw = cv2.getTextSize(text, overlay._FONT, scale, 1)[0][0]
+        assert tw <= w - 2 * overlay._LABEL_PAD, (w, text, tw)
+        assert text, w
+        # **識別的那一段永遠留著**：丟得掉的是 score，不是 #id
+        assert text.startswith("#12345") or text.startswith("#1"), (w, text)
+
+
+def test_the_caption_drops_the_score_before_the_id():
+    """塞不下的時候有優先序：`score` 最先被丟（它在圖上最不識別）。"""
+    label = "#12345  score=4.210  bin=3"
+    wide, _ = overlay._fit_label(label, 400)
+    mid, _ = overlay._fit_label(label, 64)
+    tiny, _ = overlay._fit_label(label, 40)
+    assert "score" in wide and "bin" in wide
+    assert "score" not in mid and "bin" in mid
+    assert tiny == "#12345"
 
 
 def test_unicode_label_does_not_crash():
     """cv2 的字型沒有中日韓字元 —— 換成 '?' 畫出來，不准丟例外。"""
     for text in ("分數 3.21 / bin 1 真缺陷", "スコア", "점수", "α β γ", "🙂"):
         out = overlay.render_overlay({"test": flat()}, {}, label=text)
-        assert out.shape == (H, W, 3)
+        assert out.shape[1] == W and out.shape[0] > H
         assert out.dtype == np.uint8
 
 
@@ -237,7 +277,8 @@ def test_label_defaults_to_score_from_features():
 def test_label_on_tiny_image_does_not_crash():
     out = overlay.render_overlay({"test": flat(100, h=8, w=8)}, {},
                                  label="score=1.0")
-    assert out.shape == (8, 8, 3)
+    assert out.shape[1] == 8 and out.shape[0] > 8   # 8px 寬照樣有字幕條
+    assert out.dtype == np.uint8
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +326,8 @@ def test_renders_from_a_real_context_images_dict():
     ctx.add_feature("cd_box_h", 12.0)
 
     out = overlay.render_overlay(ctx.images, ctx.features, label="bin=1")
-    assert out.shape == (H, 2 * W, 3)
+    # 並排兩張 ＋ 底下一條字幕條（2026-09-01：標籤不再蓋在影像上）
+    assert out.shape[1] == 2 * W and out.shape[0] > H
     assert out.dtype == np.uint8
 
 

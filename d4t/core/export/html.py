@@ -19,6 +19,18 @@
 load，光是 DOM 節點就會讓瀏覽器很鈍。改成**點一列 → 右邊那一格換圖**，
 整份報表從頭到尾只有**一個** ``<img>``。
 
+⚠ **而列本身也不全部寫進去**（2026-09-01，使用者：「html 打開來瀏覽時很卡」）。
+上面那條省掉了 6000 個 ``<img>``，但 6000 列 × 17 欄仍然是十萬個節點。實測
+兩萬顆：36 萬個節點、Chromium 從打開到可用 **6.2 秒**。現在只寫前
+:data:`FIRST_ROWS` 列，其餘當一段 JSON 帶著，捲到底再接 —— **0.42 秒**，
+而檔案還小了一半（6.4 MB → 3.6 MB：值不必再各自包一層標籤）。
+
+三個便宜的做法**量出來都沒有用**，留在這裡免得下一個人再試一次：
+``table-layout:fixed`` ＋ 每欄寬度是**更慢**的（11.2 秒）；
+``content-visibility:auto`` 掛在 ``tbody tr`` 上等於沒有（6.5 秒 vs 6.2 秒
+—— CSS Containment 不套用在表格內部元素上）；把 ``<img>`` 拿掉那一招前面
+已經用過了。成本在**節點本身**，所以只有「不要產生那些節點」有用。
+
 **而 characterization 那一份剛好相反**（:func:`build_char_report`，F33）：
 那種批次是三十顆，使用者要的是「一一對應」—— 圖跟數字在同一列上，一眼掃完。
 點一列換一張圖答不出那句話，因為任何一個時刻畫面上只有一顆。上面那個取捨的
@@ -40,6 +52,7 @@ load，光是 DOM 節點就會讓瀏覽器很鈍。改成**點一列 → 右邊�
 """
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -58,7 +71,9 @@ h1{font-size:18px;margin:0 0 4px} .sub{color:#666;font-size:12px;margin:0 0 18px
 h2{font-size:13px;margin:22px 0 8px;color:#444;font-weight:600}
 table{border-collapse:collapse;font-size:12px}
 th,td{border:1px solid #ddd;padding:4px 8px;text-align:right;white-space:nowrap}
-th{background:#f4f5f7;position:sticky;top:0;text-align:center;cursor:pointer}
+th{background:#f4f5f7;position:sticky;top:0;text-align:center}
+.more{font-size:12px;color:#666;margin:8px 0 0}
+.more button{font:inherit;margin-left:8px;padding:2px 10px;cursor:pointer}
 td.id,td.err{text-align:left} tr.bad td{background:#fdeeeb}
 tr.pick td{outline:2px solid #3574d6;outline-offset:-2px}
 .cards{margin:0 0 18px;font-size:12px;color:#444}
@@ -149,22 +164,84 @@ def _verdict_html(entries: Sequence[Dict[str, Any]]) -> List[str]:
     return out
 
 
+#: 一開始就寫進 HTML 的列數；其餘的當 JSON 帶著，捲到底再接上去。
+#:
+#: **這個數字是量出來的**（2026-09-01，使用者：「html 打開來瀏覽時很卡」）。
+#: 兩萬顆的報表把每一列都寫成 ``<tr>`` 是 **36 萬個 DOM 節點**，實測
+#: Chromium 從打開到可用要 **6.5 秒**；只寫前 300 列、其餘走 JSON 之後是
+#: **0.42 秒**（快 15 倍），而檔案還小了一半多（6.4 MB → 2.5 MB：值不必再
+#: 各自包一層標籤）。
+#:
+#: ⚠ **先試過便宜的做法，量出來沒有用**：`table-layout:fixed` ＋ 每欄寬度是
+#: **更慢**的（11.2 秒），`content-visibility:auto` 掛在 ``tbody tr`` 上等於
+#: 沒有（6.5 秒 vs 6.2 秒）—— 那條規則對 table-row 不生效（CSS Containment
+#: 不套用在表格內部元素上）。成本在**節點本身**，不在版面演算法，所以只有
+#: 「不要產生那些節點」有用。
+FIRST_ROWS = 300
+
+#: 捲到底就再接一批。**一次接多少**：300 列 ≈ 5000 個節點，在一般機器上
+#: 一幀之內做得完。
+_CHUNK_JS = """
+(function(){
+  var tag=document.getElementById('rows'); if(!tag) return;
+  var rest=JSON.parse(tag.textContent), tb=document.querySelector('tbody');
+  var wrap=document.querySelector('.tablewrap'), note=document.getElementById('more');
+  var at=0, CHUNK=300, first=tb.rows.length;
+  function html(r){
+    /* 引號用「單引號包雙引號」，一個反斜線都不要 —— 這一段是 Python 的
+       三引號字串，``\"`` 在那裡會先被 Python 吃掉一層，送到瀏覽器的是
+       ``""``（第一版就是這樣壞的：SyntaxError: Unexpected string）。*/
+    var s = '<tr' + (r[3] ? '' : " class='bad'")
+          + (r[1] ? ' data-img="' + r[1] + '" data-cap="' + r[2] + '"' : '')
+          + '>';
+    for(var j=0;j<r[0].length;j++){
+      var cls = j===0 ? " class='id'" : (j===r[0].length-1 ? " class='err'" : "");
+      s += '<td'+cls+'>'+r[0][j]+'</td>';
+    }
+    return s+'</tr>';
+  }
+  function more(n){
+    if(at>=rest.length) return;
+    var end=Math.min(at+(n||CHUNK), rest.length), buf='';
+    for(var i=at;i<end;i++) buf+=html(rest[i]);
+    tb.insertAdjacentHTML('beforeend', buf);
+    at=end;
+    if(note) note.firstChild.nodeValue='Showing '+(first+at)+' of '+(first+rest.length)+' rows - scroll the table for more.';
+    if(at>=rest.length && note) note.parentNode.removeChild(note);
+  }
+  var box = wrap || document.scrollingElement || document.documentElement;
+  (wrap || window).addEventListener('scroll', function(){
+    if(box.scrollTop + box.clientHeight > box.scrollHeight - 600) more();
+  });
+  var all=document.getElementById('showall');
+  if(all) all.addEventListener('click', function(){ more(rest.length); });
+})();
+"""
+
+
 #: 點一列換圖的那幾行。**整份報表只有一個 ``<img>``** —— 見模組說明。
+#:
+#: ⚠ **一個委派的 listener，不是一列一個**（2026-09-01）：六千列就是六千個
+#: listener，而它們在載入的當下就要全部掛上去 —— 那是「打開來很卡」的一部分。
+#: 委派之後不管幾列都只有一個，而且**之後才長出來的列也照樣有作用**。
 _VIEWER_JS = """
 (function(){
   var img=document.getElementById('shot'), cap=document.getElementById('shotcap');
   if(!img) return;
   var last=null;
-  document.querySelectorAll('tr[data-img]').forEach(function(tr){
-    tr.addEventListener('click', function(){
-      if(last) last.classList.remove('pick');
-      tr.classList.add('pick'); last=tr;
-      img.src=tr.getAttribute('data-img');
-      cap.textContent=tr.getAttribute('data-cap')||'';
-    });
+  function show(tr){
+    if(!tr || !tr.hasAttribute('data-img')) return;
+    if(last) last.classList.remove('pick');
+    tr.classList.add('pick'); last=tr;
+    img.src=tr.getAttribute('data-img');
+    cap.textContent=tr.getAttribute('data-cap')||'';
+  }
+  var table=document.querySelector('.tablewrap table')||document.querySelector('table');
+  if(table) table.addEventListener('click', function(e){
+    var tr=e.target && e.target.closest ? e.target.closest('tr') : null;
+    show(tr);
   });
-  var first=document.querySelector('tr[data-img]');
-  if(first) first.click();
+  show(document.querySelector('tr[data-img]'));
 })();
 """
 
@@ -200,6 +277,41 @@ def _page_head(title: str, rows: Sequence[Dict[str, Any]],
     return out
 
 
+def _row_parts(r: Dict[str, Any], keys: Sequence[str],
+               imgs: Dict[str, str]) -> List[Any]:
+    """一列 → ``[已跳脫的每一格, 圖的相對路徑, 圖說, 跑起來了沒]``。
+
+    **HTML 那條路與 JSON 那條路吃同一份** —— 分成兩份的那天，前 300 列與
+    第 301 列會長得不一樣，而畫面上看起來只是「後面那些怪怪的」。
+    """
+    did = str(r.get("defect_id", ""))
+    feats = r.get("features") or {}
+    cells = [escape(r.get("defect_id")),
+             "yes" if r.get("ok") else "no",
+             number(r.get("score")),
+             escape(r.get("bin"))]
+    cells += [number(feats.get(k)) for k in keys]
+    cells.append(escape(r.get("error")))
+    rel = imgs.get(did) or ""
+    cap = (escape("#%s  score=%s  bin=%s"
+                  % (did, number(r.get("score")), r.get("bin")))
+           if rel else "")
+    return [cells, escape(rel), cap, bool(r.get("ok"))]
+
+
+def _row_html(cells: Sequence[str], rel: str, cap: str, ok: bool) -> str:
+    """:func:`_row_parts` 的 HTML 版（JS 那一半是 `_CHUNK_JS` 裡的 ``html()``）。"""
+    attrs = "" if ok else " class='bad'"
+    if rel:
+        attrs += " data-img=\"%s\" data-cap=\"%s\"" % (rel, cap)
+    body = []
+    last = len(cells) - 1
+    for j, c in enumerate(cells):
+        cls = " class='id'" if j == 0 else (" class='err'" if j == last else "")
+        body.append("<td%s>%s</td>" % (cls, c))
+    return "<tr%s>%s</tr>" % (attrs, "".join(body))
+
+
 def build_report(rows: Sequence[Dict[str, Any]], title: str,
                  feature_keys: Sequence[str],
                  decide: Any = None,
@@ -220,31 +332,31 @@ def build_report(rows: Sequence[Dict[str, Any]], title: str,
                % (" (click a row to see it)" if imgs else ""))
     if imgs:
         out.append("<div class='split'><div class='tablewrap'>")
-    out.append("<table><tr><th>defect</th><th>ok</th><th>score</th>"
+    # `<thead>` / `<tbody>` 明講：底下那段 JS 往 `tbody` 接下一批列。
+    out.append("<table><thead><tr><th>defect</th>"
+               "<th>ok</th><th>score</th>"
                "<th>bin</th>")
     out += ["<th>%s</th>" % escape(k) for k in keys]
-    out.append("<th>error</th></tr>")
-    for r in rows:
-        did = str(r.get("defect_id", ""))
-        attrs = "" if r.get("ok") else " class='bad'"
-        rel = imgs.get(did)
-        if rel:
-            attrs += (" data-img=\"%s\" data-cap=\"%s\""
-                      % (escape(rel), escape("#%s  score=%s  bin=%s"
-                                             % (did, number(r.get("score")),
-                                                r.get("bin")))))
-        cells = ["<td class='id'>%s</td>" % escape(r.get("defect_id")),
-                 "<td>%s</td>" % ("yes" if r.get("ok") else "no"),
-                 "<td>%s</td>" % number(r.get("score")),
-                 "<td>%s</td>" % escape(r.get("bin"))]
-        feats = r.get("features") or {}
-        cells += ["<td>%s</td>" % number(feats.get(k)) for k in keys]
-        cells.append("<td class='err'>%s</td>" % escape(r.get("error")))
-        out.append("<tr%s>%s</tr>" % (attrs, "".join(cells)))
-    out.append("</table>")
+    out.append("<th>error</th></tr></thead><tbody>")
+    for r in rows[:FIRST_ROWS]:
+        out.append(_row_html(*_row_parts(r, keys, imgs)))
+    out.append("</tbody></table>")
+    rest = [_row_parts(r, keys, imgs) for r in rows[FIRST_ROWS:]]
     if imgs:
         out.append("</div><div class='viewer'><img id='shot' alt=''>"
                    "<p class='cap' id='shotcap'></p></div></div>")
+    if rest:
+        out.append("<p class='more' id='more'>Showing %d of %d rows - "
+                   "scroll the table for more.<button id='showall'>"
+                   "Show all %d</button></p>"
+                   % (FIRST_ROWS, len(rows), len(rows)))
+        # ⚠ **`</` 一定要跳脫**：一列裡只要有一個 ``</script>`` 就把這個
+        # ``<script>`` 提早關掉，而後面那一大段 JSON 會被當成 HTML 印出來。
+        out.append("<script id='rows' type='application/json'>%s</script>"
+                   % json.dumps(rest, separators=(",", ":"))
+                     .replace("<", "\\u003c"))
+        out.append("<script>%s</script>" % _CHUNK_JS)
+    if imgs:
         out.append("<script>%s</script>" % _VIEWER_JS)
     out.append("</body></html>")
     return "\n".join(out)
@@ -294,10 +406,12 @@ def build_char_report(rows: Sequence[Dict[str, Any]], title: str,
 
     out = _page_head(title, rows, decide, note)
     out.append("<h2>2 &middot; Defect by defect</h2>")
-    out.append("<div class='tablewrap'><table><tr><th>defect</th>"
-               "<th>%s</th><th>%s</th>" % (escape(left), escape(right)))
+    out.append("<div class='tablewrap'><table><thead><tr>"
+               "<th>defect</th>"
+               "<th>%s</th><th>%s</th>"
+               % (escape(left), escape(right)))
     out += ["<th>%s</th>" % escape(k) for k in keys]
-    out.append("<th>verdict</th></tr>")
+    out.append("<th>verdict</th></tr></thead><tbody>")
     for r in rows:
         did = str(r.get("defect_id", ""))
         pair = shots.get(did) or {}
@@ -318,7 +432,7 @@ def build_char_report(rows: Sequence[Dict[str, Any]], title: str,
                          % escape(r.get("error") or ""))
         out.append("<tr%s>%s</tr>"
                    % ("" if r.get("ok") else " class='bad'", "".join(cells)))
-    out.append("</table></div>")
+    out.append("</tbody></table></div>")
     out.append("</body></html>")
     return "\n".join(out)
 

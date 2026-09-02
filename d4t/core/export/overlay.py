@@ -24,7 +24,7 @@ Gallery、CLI 的批次出圖、報表的插圖都能共用同一支渲染函式
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -203,7 +203,7 @@ def overlay_label(result: Dict[str, Any]) -> str:
     b = result.get("bin")
     if b is not None:
         parts.append("bin=%d" % int(b))
-    return "  ".join(parts)
+    return LABEL_SEP.join(parts)
 
 
 #: 排序用的預設欄位。``"score"`` 讀的是每一顆結果最上層的那一格，其他名字
@@ -356,22 +356,92 @@ def _draw_roi_boxes(panel: np.ndarray, roi_boxes, roi_winner: int) -> None:
         _draw_box(panel, px, color=ROI_WINNER_COLOR, thick=thick)
 
 
-def _draw_label(panel: np.ndarray, label: str) -> None:
-    """左上角一行標籤（深色底條 + 白字）。非 ASCII 會變成 '?'。"""
+#: 字幕條的底色（RGB）。**不是把影像壓暗** —— 那條底以前是半透明的，
+#: 於是字的可讀性取決於底下那塊樣品有多亮。
+CAPTION_BG = (24, 24, 24)
+
+#: 字級由大到小試，第一個塞得下的就用。下限 0.3 是 cv2 這套字型還讀得出來的
+#: 最小值（再小筆畫會黏在一起）。
+_LABEL_SCALES = (0.6, 0.55, 0.5, 0.45, 0.4, 0.35, 0.3)
+
+#: `overlay_label` 用來接那幾段的分隔字串 —— **塞不下的時候要拆回去丟**，
+#: 所以它是一個常數而不是字面量。
+LABEL_SEP = "  "
+
+_LABEL_PAD = 3
+
+
+def _label_variants(text: str) -> List[str]:
+    """由完整到最精簡的幾種寫法 —— **丟東西有優先序**。
+
+    ``#12345  score=4.210  bin=3`` → 先丟 ``score``（它在圖上最不識別），
+    再只留 ``#id``（「這是哪一顆」是這行字存在的理由）。最後一步是截字，
+    由 :func:`_fit_label` 做。
+    """
+    parts = [p for p in str(text).split(LABEL_SEP) if p]
+    if not parts:
+        return []
+    out = [LABEL_SEP.join(parts)]
+    lean = [p for p in parts if not p.lower().startswith("score")]
+    for cand in (LABEL_SEP.join(lean), parts[0]):
+        if cand and cand not in out:
+            out.append(cand)
+    return out
+
+
+def _fit_label(text: str, width: int) -> Tuple[str, float]:
+    """挑一個**塞得進 ``width``** 的（字, 字級）。
+
+    以前這裡只看影像寬度（``scale = w / 320``），完全不看字有多長 ——
+    而字級跟著寬度線性長，於是字長得比圖還快：實測 64 px 的 patch 超出
+    53 px、160 px 的超出 34 px，**每一種 patch 尺寸都超**，只是超多少不同。
+    使用者 2026-09-01：「patch 上標註的 bin 黑邊會因為 patch 不同 size 導致
+    上方的字彙超出去。」
+
+    現在反過來：**先問字有多長**，由大到小挑第一個裝得下的字級；全部字級都
+    裝不下就換一個更短的寫法（見 :func:`_label_variants`）；再不行就截字。
+    """
+    room = max(8, int(width) - 2 * _LABEL_PAD)
+    variants = _label_variants(text) or [str(text)]
+    for cand in variants:
+        for scale in _LABEL_SCALES:
+            if cv2.getTextSize(cand, _FONT, scale, 1)[0][0] <= room:
+                return cand, scale
+    # 連 ``#id`` 都塞不下（非常窄的 patch）—— 截字，並且**講出來被截了**。
+    cand, scale = variants[-1], _LABEL_SCALES[-1]
+    while len(cand) > 1:
+        cand = cand[:-1]
+        trimmed = cand + ".."
+        if cv2.getTextSize(trimmed, _FONT, scale, 1)[0][0] <= room:
+            return trimmed, scale
+    return cand, scale
+
+
+def _with_caption(panel: np.ndarray, label: str) -> np.ndarray:
+    """標籤畫在影像**下面**的一條字幕條上，回一張新的（比較高的）圖。
+
+    為什麼不畫在圖上（2026-09-01，使用者選的 B 案）
+    ----------------------------------------------
+    以前那條 banner 蓋住左上角 —— 而 **64 px 的 patch 上它蓋掉四分之一**，
+    左上角正是缺陷可能在的地方。這行字的用途是「這疊圖拿出報表單獨看的時候，
+    還講得出 score 與 bin」（見 :func:`overlay_label`）—— 蓋住樣品就違反了它
+    存在的理由。
+
+    空標籤照舊什麼都不做（**不長出一條空的黑邊**）。
+    """
     text = _ascii_only(label).strip()
     if not text:
-        return
+        return panel
     h, w = panel.shape[:2]
-    scale = max(0.35, min(0.6, w / 320.0))
-    thick = 1
-    (tw, th), base = cv2.getTextSize(text, _FONT, scale, thick)
-    pad = 3
-    bh = min(h, th + base + 2 * pad)
-    band = panel[0:bh, 0:min(w, tw + 2 * pad)]
-    if band.size:
-        band[:] = (band.astype(np.uint16) * 1 // 4).astype(np.uint8)  # 壓暗當底
-    cv2.putText(panel, text, (pad, pad + th), _FONT, scale,
-                tuple(int(c) for c in TEXT_COLOR), thick, cv2.LINE_AA)
+    text, scale = _fit_label(text, w)
+    (_tw, th), base = cv2.getTextSize(text, _FONT, scale, 1)
+    strip = max(12, th + base + 2 * _LABEL_PAD)
+    out = np.empty((h + strip, w, 3), dtype=panel.dtype)
+    out[:h] = panel
+    out[h:] = np.asarray(CAPTION_BG, dtype=panel.dtype)
+    cv2.putText(out, text, (_LABEL_PAD, h + _LABEL_PAD + th), _FONT, scale,
+                tuple(int(c) for c in TEXT_COLOR), 1, cv2.LINE_AA)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -688,7 +758,7 @@ def render_overlay(images: Dict[str, Any],
             except (TypeError, ValueError):
                 label = None
     if label:
-        _draw_label(panel, str(label))
+        panel = _with_caption(panel.astype(np.uint8), str(label))
 
     return np.ascontiguousarray(panel.astype(np.uint8))
 
