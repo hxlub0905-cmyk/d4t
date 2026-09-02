@@ -100,6 +100,44 @@ def test_the_boxes_land_on_the_material_that_was_asked_for():
     assert float(np.std(lv)) < 3.0, "框跟框之間差太多，代表有幾個沒對準"
 
 
+def test_the_clearance_box_is_only_shown_where_it_changes_anything():
+    """**`gap` 對 ``crossing`` 沒有作用，所以它不准出現在那一格旁邊。**
+
+    ``crossing`` 是「整個交會矩形」：兩軸都只當界線，所以只有 ``inset`` 算數
+    （`algo.grid._spans_for` 的最後一段）。以前這一格對它照樣顯示得出來 ——
+    使用者拖那支滑桿，影像上一個 px 都不會動、特徵表一個數字都不會變，而
+    畫面上沒有任何線索說「這一格現在不算數」。2026-09-02 端到端跑一次 RSEM
+    才發現的（`box_size` 與 `side` 早就藏對了，漏的只有這一格）。
+
+    兩半都要：**藏起來的那一種真的沒有作用**（不然是藏錯了），**沒藏的那幾種
+    真的有作用**（不然下一次多藏一個沒有人會發現）。
+    """
+    from d4t.core.pipeline import get_step
+
+    spec = {p.name: p for p in get_step("roi_reference").params}["gap"]
+    # ``show_when`` 是一串 and 條件（``method`` 那一條是這張卡自己加的）——
+    # 挑出講 ``place`` 的那一條。
+    shown_for = set(dict(spec.show_when)["place"])
+    assert "crossing" not in shown_for
+    assert "beside_vertical" in shown_for and "between_vertical" in shown_for
+
+    img = _mg_epi()
+
+    def _boxes(placement, gap):
+        res = _locate(img, placement=placement, gap=gap)
+        assert res.ok is True, res.reason
+        return [tuple(b) for b in res.boxes]
+
+    same = _boxes("crossing", 0.0)
+    for gap in (1.0, 3.0, 7.0):
+        assert _boxes("crossing", gap) == same, \
+            "gap=%s 改變了 crossing 的框 —— 那就該讓使用者看得到它" % gap
+
+    for placement in sorted(shown_for):
+        assert _boxes(placement, 0.0) != _boxes(placement, 3.0), \
+            "%s 的 gap 沒有作用，卻還顯示著" % placement
+
+
 def test_leaving_no_clearance_quietly_poisons_the_numbers():
     """``gap`` 不是保險係數 —— 它擋掉一種安靜的錯。
 

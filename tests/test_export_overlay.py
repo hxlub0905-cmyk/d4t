@@ -460,6 +460,66 @@ def test_the_boxes_come_from_the_glv_note_not_a_second_pick():
     assert rects == ctx.roi_norm_rects("cells")
 
 
+def _two_region_ctx():
+    """兩個區域接進同一張 GLV：**第二個**裡面才有真的缺陷。
+
+    第一個區域（``quiet``）鋪在一片平坦的背景上 —— 它照樣挑得出一個「最不
+    一樣」的框，只是那一格的分數很小。第二個（``hot``）有一格是亮的。
+    """
+    import d4t.core.steps  # noqa: F401 — 觸發卡片註冊
+    from d4t.core.pipeline import get_step
+    from d4t.core.pipeline.context import Context
+
+    rng = np.random.default_rng(3)
+    img = np.full((100, 100), 100, np.float32)
+    img += rng.normal(0, 0.5, img.shape).astype(np.float32)
+    img[8:16, 60:68] = 190.0                       # hot 的第 2 格
+    ctx = Context(images={"test": img})
+    ctx.set_roi_boxes("quiet", [(0.05 + 0.2 * i, 0.55, 0.08, 0.08)
+                                for i in range(4)])
+    ctx.set_roi_boxes("hot", [(0.2 + 0.2 * i, 0.08, 0.08, 0.08)
+                              for i in range(4)])
+    get_step("glv_stats")().run(ctx, {
+        "source": "test", "roi": "quiet,hot", "metrics": "glv_mean",
+        "judge": "glv_mean", "across_boxes": "each box"})
+    return ctx
+
+
+def test_the_thick_box_is_the_one_the_score_came_from():
+    """**分數說哪一格，粗框就畫哪一格** —— 跨區域也一樣。
+
+    這一條是把 bug 放回去的形狀。以前這支函式取的是**接線順序第一條 note**
+    （＝第一個區域）的框與**它自己的**贏家，所以兩個區域的時候，報表標題印
+    的分數來自 B、粗框卻畫在 A 上面一個一點都不異常的框。F68 的驗收上實測到
+    （`recipes/rsem-worst-box.json`，三個區域鋪滿整張圖）：標題 27.753、
+    琥珀框畫在另一個區域一個 1.3σ 的框上。跑得完、有圖、而且是錯的。
+    """
+    ctx = _two_region_ctx()
+    quiet = list(ctx.roi_norm_rects("quiet"))
+    hot = list(ctx.roi_norm_rects("hot"))
+    rects, win, note = overlay.worst_note_for_overlay(ctx)
+
+    # **每一組的框都畫**：細框的意思是「我量過的框」，兩組是同一件事。
+    assert rects == quiet + hot
+    # 贏家是分數高的那一組裡的那一格 —— 索引是接起來之後的全域索引。
+    assert str(note["region"]) == "hot"
+    assert win == len(quiet) + int(ctx.features["hot_glv_worst_i"])
+    assert rects[win] == hot[int(ctx.features["hot_glv_worst_i"])]
+    # 這一條才是重點：贏家不在第一組裡。
+    assert win >= len(quiet)
+    assert float(ctx.features["hot_glv_worst_score"]) \
+        > float(ctx.features["quiet_glv_worst_score"])
+
+
+def test_one_region_draws_exactly_what_it_used_to():
+    """一個區域的時候逐位元組跟以前相同 —— 那是上面那個改動的邊界。"""
+    ctx = _each_box_ctx()
+    rects, win, note = overlay.worst_note_for_overlay(ctx)
+    assert rects == ctx.roi_norm_rects("cells")
+    assert win == int(ctx.features["glv_worst_i"])
+    assert str(note["region"]) == "cells"
+
+
 def test_a_pooled_run_yields_no_roi_boxes():
     import d4t.core.steps  # noqa: F401
     from d4t.core.pipeline import get_step

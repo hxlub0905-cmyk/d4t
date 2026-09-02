@@ -21,3 +21,12 @@ wheels/
 # 所以進版控的是「怎麼產」而不是幾 MB 的 TIFF。這個目錄底下也放跑實驗用的
 # recipe —— 那是草稿，不是範例（這個 repo 刻意沒有範例 recipe，見 CLAUDE.md §1）。
 0822test/
+
+# 出貨 recipe 的預設輸出資料夾（`recipes/*.json` 的 `Write to`）。路徑是
+# **相對於啟動程式的位置**，所以在 repo 根目錄跑一次 `python -m d4t run
+# recipes/…` 就會在工作目錄裡長出一份報表 —— 而 `tools/release.py` 是從
+# `git ls-files` 產的，那份報表一旦被 add 就會整包跟著搬進公司機。
+# 2026-09-02 真的發生過（而且它的 CSV 帶 CRLF，打包器當場擋下來）。
+/char_report/
+/patch_report/
+/rsem_report/

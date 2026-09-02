@@ -447,17 +447,34 @@ def worst_note_for_overlay(ctx: Any) -> Tuple[list, int, Optional[Dict[str, Any]
 
     來源是 GLV 卡留在 ``ctx.meta["glv_hist"]`` 的 note（``boxes >= 1`` 的那些
     是 each box 模式跑出來的）—— **跟 `worst_*` 特徵同一次計算**，不在這裡
-    重新挑一次贏家。回傳的第三個值是那條 note 本身（贏家的 ``worst`` 帶著
+    重新挑一次贏家。回傳的第三個值是贏家那條 note 本身（它的 ``worst`` 帶著
     baseline / spread —— 像素標記的分母，見 :func:`_mark_odd_pixels`）；
     沒有逐框比較（pooled、沒接區域、根本沒跑 GLV）就回 ``([], -1, None)``，
     疊圖照舊 —— 沒接 ROI 的 recipe 一個位元不變。
 
-    好幾條 note 都有框時取**第一條**（＝接線順序的第一個區域）：兩個區域各
-    畫一組框、各有各的贏家，要等疊圖說得清「哪組框是誰的」再說 —— 挑一組畫
-    而畫面上不說是哪一組，正是這個 repo 最怕的形狀，所以先只畫第一組，而
-    「第一」是穩定的。
+    好幾個區域接進同一張 GLV 的時候（2026-09-02 改）
+    ------------------------------------------------
+    **每一組的框都畫，粗框給分數最高的那一格。**
+
+    上一版取**第一條 note**（＝接線順序的第一個區域），理由寫著「挑一組畫而
+    畫面上不說是哪一組，正是這個 repo 最怕的形狀」。那個顧慮是對的，但它挑
+    的解法製造了更糟的東西：**報表那一行印的是整顆的分數，而粗框指著另一個
+    區域裡一個一點都不異常的框**。F68 的驗收上實測到了 —— 一顆暗點缺陷
+    （`rsem-worst-box.json`，三個區域鋪滿整張圖）標題寫 ``score=27.753``，
+    那個數字來自 ``between_columns`` 正中央那一格，而琥珀框畫在
+    ``on_pattern`` 左上角一個 1.3σ 的框上。跑得完、有數字、而且是錯的。
+
+    畫全部就沒有「哪一組是誰的」這個問題了：細框的意思是「我量過的框」，
+    三組長得一樣是因為它們**就是同一件事**；粗框的意思是「分數說的那一格」，
+    而它只有一個。一個區域的時候逐位元組跟以前相同（清單只有一組、贏家索引
+    就是它自己的）。
     """
     meta = getattr(ctx, "meta", None) or {}
+    rects_all: list = []
+    best_score = float("-inf")
+    best_i = -1
+    best_note: Optional[Dict[str, Any]] = None
+    first_note: Optional[Dict[str, Any]] = None
     for note in meta.get("glv_hist") or []:
         region = str(note.get("region") or "")
         if not region or int(note.get("boxes") or 0) < 1:
@@ -468,10 +485,24 @@ def worst_note_for_overlay(ctx: Any) -> Tuple[list, int, Optional[Dict[str, Any]
             continue
         if not rects:
             continue
+        base = len(rects_all)
+        rects_all.extend(rects)
+        if first_note is None:
+            first_note = dict(note)
         worst = note.get("worst") or {}
-        i = int(worst.get("i", -1)) if isinstance(worst, dict) else -1
-        return rects, (i if 0 <= i < len(rects) else -1), dict(note)
-    return [], -1, None
+        if not isinstance(worst, dict):
+            continue
+        try:
+            i = int(worst.get("i", -1))
+            score = float(worst.get("score"))
+        except (TypeError, ValueError):
+            continue        # note 半殘（沒挑出贏家）—— 它的框照畫，只是不當主角
+        # NaN 不會大於任何東西，所以它自己就出局了（不必另外擋）。
+        if 0 <= i < len(rects) and score > best_score:
+            best_score, best_i, best_note = score, base + i, dict(note)
+    if not rects_all:
+        return [], -1, None
+    return rects_all, best_i, (best_note if best_note is not None else first_note)
 
 
 def roi_boxes_for_overlay(ctx: Any) -> Tuple[list, int]:

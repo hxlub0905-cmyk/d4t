@@ -1,12 +1,12 @@
 # d4t 檔案清單 —— tools/get_code.py 用（每行：git blob SHA-1 + 路徑）。
 # 由 tools/make_filelist.py 產生；tests/test_offline_tools.py 會擋住它腐爛。
 85ba76deb9e3e0de7fab20cbf4a2bb69e2c89d85 .github/workflows/ci.yml
-32effd36c2614b3378219e38d064dfcbb4ef38e4 .gitignore
+68a59c98883d1b448c8bbe84dc129883207a341f .gitignore
 aa17fbfb8202ee9790fc89736938834df2fef53a AGENTS.md
 7db8a949e32e2381840ac4de68a88af5fb49e9d0 CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 5b750fd2b09c4ced476be65c84f41d45231f9070 README.md
-cdca281b0d6cd41e928364e201d79b03943dc48c SESSION_LOG.md
+fdce0ae56637cdfe95436e21386c2ea4f0442635 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 cf8fe09ad592a80d3dfaf96412e906035cb83b48 d4t/__main__.py
@@ -36,7 +36,7 @@ d427eb5b2f42579b595059d20440a8c9aee464be d4t/core/algo/template.py
 9c183f1e91a70b09ace6aa37356a68a0fc30ed8a d4t/core/export/boxplot.py
 5a07520d1af125045d0335bccf2ff4b2ebfc67ad d4t/core/export/html.py
 a4a93fb5fc256c767f2c31f387f7ab4962b5868d d4t/core/export/klarf_out.py
-307a1fcea42d74d888cfe134bd5def84974b3185 d4t/core/export/overlay.py
+fdc1943f600c67dbe0adc223dcb84690cedf9334 d4t/core/export/overlay.py
 ab5031e7056134aa94c5551aba9b80a774b6397a d4t/core/export/report.py
 4599be07de9d76b7a008bdc400e22cfaa0c7acd2 d4t/core/ingest/__init__.py
 987ec64e2830c1e9e7ee535c3aa91e020f5bd0be d4t/core/ingest/dataset.py
@@ -67,14 +67,14 @@ f9673175527bd8d56eacf6c30f247eab15e388cd d4t/core/steps/align_to.py
 9d1754f3a9d847d3ffd5fd7be4b09a6596358437 d4t/core/steps/cd.py
 5fe458ce8a19f9c603b50e9b40175b1cc4d4a07d d4t/core/steps/denoise.py
 5b2ebf848b75b5af81dc09eb580d131b75fcc51f d4t/core/steps/flatten.py
-43fab3182a1c7aa0cf3041e443d3a61bf2a6c48d d4t/core/steps/glv_stats.py
+c57aaa2502003c7b83b66143ecb5130f7aed77ab d4t/core/steps/glv_stats.py
 a776e192067df83cb88099ed6b82bb70c6f5a66d d4t/core/steps/load.py
 7b7e819770b0fe4589d12cdf23dc1bdad583c5fa d4t/core/steps/load_sidecar.py
 63a6def63864922b468c8338fd24fe14523201ca d4t/core/steps/normalize.py
 cb0c289afd700884f6837f8745f522c9d786117f d4t/core/steps/output.py
 712fb3646eceb513727e23871100291df8848387 d4t/core/steps/pair_source.py
 6cb1173e2d53221138d27b5d30f389ffa95158f3 d4t/core/steps/quality.py
-854ed2f233cdca81560c765c08d69a6b62626784 d4t/core/steps/roi_cross.py
+1cac40140c6e9143c4054fd01c56a4f88e8cd346 d4t/core/steps/roi_cross.py
 f9c9c80c5382b2d3a03602fb5be62b2c09abf81e d4t/core/steps/roi_mask.py
 4bfae3eaeaf8df271ff14efc71827fb62b2c34b3 d4t/core/steps/roi_reference.py
 3bc9ee184e8148e15b813d8e4c688a2bfc6d8ee3 d4t/core/steps/roi_template.py
@@ -145,15 +145,16 @@ af2a0ffc8331813f1fb674e4c4293457921c7161 docs/plans/F49-features-on-wires.md
 9822a762879030cad132c0d8a0f07c2762c24dbd docs/plans/F51-feature-names-one-truth.md
 49d28af403671958a1292959ecf5bb03ad423842 docs/plans/F52-one-way-to-print-a-number.md
 8558f88c4890064d0940ece6d9d616f15765e853 docs/plans/F67-glv-compare-by-wire.md
-18854574739eeb0b3d80c9b400b8968f720f3bc2 docs/plans/F68-glv-defect-hunting.md
+d5bb062f92ca4723c5faaa68ef7511518162362f docs/plans/F68-glv-defect-hunting.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
 e55de398362c0a42f564176a63ff00a84bdf1667 fab_probe/probe_tiff.py
 ec22e5f69b2e4da22f1ba47ad14b8560c163b195 pyproject.toml
-d1b11b40774e2215e34a2c695a54ee3263a4932f recipes/README.md
+51ddae8082c051ae3e8e63e5b78b6f025fe4eb3f recipes/README.md
 01881cd1005230d970b98028115624fb8e24e251 recipes/ebi-to-api-characterization.json
 7b042d15b5adab74522390ba041c5ab262880733 recipes/patch-dsnr-by-class.json
+3de1bc58c57d47e2dc6b44e36f4e9bc1e33c4f3c recipes/rsem-worst-box.json
 cf5284f96a1d071e240ef88199e54d580b48c57c requirements.txt
 608c5d1adceade0d2f17647501c7a34ab767ff08 tests/conftest.py
 2f91aee241cdd8dd9aac07f0f663d3175b53ad7f tests/fixtures/golden/die_to_die_basic__make_sample.json
@@ -196,7 +197,7 @@ c8ece3a6d5f3861df6bfb4b4baf6960d3c3aa4fb tests/test_decide_missing_feature.py
 8b0ab7fe7dae38c1494a5e162ccdbcaf1f4bf553 tests/test_engine.py
 418fc5470ce715a88c0c5983ae40a59b19600974 tests/test_enhance.py
 5bcbc5d88b74b990dac7d69874664cc9ca5617fe tests/test_export_klarf.py
-e83217ea636e01e450093066a83db26fb90e6bc6 tests/test_export_overlay.py
+76e33c29788bc9608c6b33cae469de4a2dd971c4 tests/test_export_overlay.py
 1534570199d2ef7ae5e6c58ff7760d724a2b0e85 tests/test_export_parity.py
 bd2a616b9a8b25b3ec7e2e014e97728b82f03f84 tests/test_export_report.py
 2415c6f4229d2d8ff5044b35cdde8560d3bcd8c2 tests/test_expression.py
@@ -261,7 +262,7 @@ a0683a2546cc8144d8b00ab9c4578daf519c12a0 tests/test_rename_fallout.py
 76c92e8a6e56d16307cdd73a83fd7d39dd1802d2 tests/test_rescore_decide.py
 3b5f5eec393a4bd203095e437572cd787b93c6ef tests/test_results_store.py
 b6ab82b338b5047b9d6ccec28d421beaadb74051 tests/test_roi.py
-b6d422dc16742cc1a896ec46236cf4d4494bc28c tests/test_roi_cross.py
+38052a9aa6be7d566020e83b8f02f8622c6d77c7 tests/test_roi_cross.py
 7049936021c3cdf3702ff926d0b24af963bedc9e tests/test_roi_cross_calibrate.py
 4305ce6a36f02178f39a690ebe1ad75cebe85c81 tests/test_roi_cross_lattice.py
 c99f6b6166a2f25986a65c6eba2e019401e4ed7d tests/test_roi_cross_phase.py
@@ -273,7 +274,7 @@ c99f6b6166a2f25986a65c6eba2e019401e4ed7d tests/test_roi_cross_phase.py
 762cc8614161161375315857e63739f46d026915 tests/test_route_by.py
 5c7e5402d90dc7d10602c93d8e8e87feb96ba1ec tests/test_rsem_ingest.py
 d4970b4251f7710ec2dc51413496330f07a1c2bf tests/test_scale.py
-9b5c0d9de5f663620e9262473df9977568fe87d9 tests/test_shipped_recipes.py
+a70779855bd7ea2dc5f54c699be48f704eb971d3 tests/test_shipped_recipes.py
 cfc99c167d84014f55bd0516ca45eb8704237d48 tests/test_show_template.py
 b916e62bdadbb86a8bcec464b3c5dc3669db66be tests/test_snr.py
 77d7c1c131126bc0c2205f77fbdf22caaa6f7a17 tests/test_steps.py

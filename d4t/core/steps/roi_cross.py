@@ -56,6 +56,16 @@ from ._util import (
 
 _BESIDE = ("beside_vertical", "beside_horizontal")
 
+#: 會用到 ``gap``（「離邊界多遠」）的那幾種放法 —— **``crossing`` 不在裡面**。
+#:
+#: ``crossing`` 是「整個交會矩形」：兩軸都只當界線，所以只有 ``inset`` 算數
+#: （`algo.grid._spans_for` 的最後一段）。以前這一格對它照樣顯示得出來，
+#: 而轉它一整圈**畫面上與數字上都不會有任何變化** —— 2026-09-02 端到端跑一次
+#: RSEM 才發現：``gap`` 掃 0/1/3 三個值，24 顆的分數逐位元組相同。
+#: `box_size` 與 `side` 早就用 `show_when` 藏對了，漏的只有這一格。
+_USES_GAP = ("beside_vertical", "beside_horizontal",
+             "between_vertical", "between_horizontal")
+
 #: ``directions`` 的三個值 —— 順序就是圖示列由左到右。
 _DIRECTIONS = ("both", "upright", "flat")
 
@@ -359,6 +369,7 @@ class RoiCrossStep(Step):
         ParamSpec(
             name="gap", type="float", default=1.0, min=0.0, max=100.0,
             section="4 · Where the box goes",
+            show_when=("place", _USES_GAP),
             unit="px", label="Keep clear of the edge",
             help=("How far to stay away from the edge itself. An edge is "
                   "blurred over a few pixels and the gray level there belongs "
