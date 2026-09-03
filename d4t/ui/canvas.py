@@ -834,15 +834,21 @@ class _NodeItem(QGraphicsItem):
         terse = self.terse_at(p.worldTransform().m11())
         radius = card_radius()
 
-        # 投影：讓節點浮在網格之上。用畫的而不是 QGraphicsDropShadowEffect ——
-        # effect 會強迫 Qt 額外開一層離屏 buffer，為了 2px 的陰影不值得。
-        # hover / 選中時深一階：跟按鈕的 hover 同一個語言 ——「這個東西回應你」。
-        lifted = (self._hover or selected) and enabled
-        shadow = QColor(0, 0, 0, (64 if lifted else 46) if enabled else 22)
-        p.setPen(Qt.NoPen)
-        p.setBrush(shadow)
-        p.drawRoundedRect(body.translated(1.5, 2.5 if not lifted else 3.0),
-                          radius, radius)
+        # **這裡以前有一塊投影，F81 拿掉了**（使用者在 A/B/C 三張圖裡選了 B）。
+        #
+        # 它畫的是一塊實心、單一 alpha、有硬邊的偏移方塊 —— 那不是陰影，是重影，
+        # 而且 `theme.py` 的檔頭從 F7-2 起就寫著「全平面 —— 沒有陰影、沒有漸層」。
+        # 兩者矛盾了很久。
+        #
+        # 量出來它其實**只在亮色主題上看得見**：alpha 46 的黑疊在亮色的畫布底
+        # 上是 ΔL* 15.7，疊在暗色的 #16181d 上只有 ΔL* 2.3。也就是說暗色的卡片
+        # 一直是靠明度差站著的（底比卡片暗 ΔL* 6.9），只有亮色靠這塊重影撐 ——
+        # 因為亮色的 `canvas_bg` 離白卡只有 ΔL* 4.9。
+        #
+        # 所以拿掉陰影的同時把亮色的 `canvas_bg` 壓深（ΔL* 4.9 → 7.7，比暗色的
+        # 6.9 還多一點）：**卡片改成靠自己的明度浮起來**，而那正是 flat 的做法。
+        # hover / 選中的回饋沒有跟著消失 —— 它們本來就同時在動邊框的顏色與粗細
+        # （見下面），陰影那一階只是重複講了一次。
 
         gid = str(self.info.get("group", "") or "enhance")
         tile_col = QColor(theme.group_hex(gid) if enabled else TOKENS["seg_disabled"])

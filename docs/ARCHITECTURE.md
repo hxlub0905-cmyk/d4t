@@ -316,6 +316,9 @@ d4t/
     │                         #     一套共通文法：淡的是原本就在那裡的東西、
     │                         #     實心的才是這個選項在講的那件事
     ├── numbers.py            #   一個特徵值印成字 —— **全 UI 只有這一支**（F52）
+    ├── focus_visible.py      #   焦點環只在鍵盤導覽時出現（F80）—— Qt 沒有
+    │                         #     `:focus-visible`，這支把 QFocusEvent.reason()
+    │                         #     翻成 `kbFocus` 屬性餵給 QSS
     └── assets/               #   `d4t.svg` 與兩份字標（pyproject 的 package-data 帶著它們走）
 ```
 
