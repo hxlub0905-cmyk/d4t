@@ -6,7 +6,7 @@
 
 | 期間 | 在哪 |
 |---|---|
-| **2026-09-01 起** | 這個檔案（下面）—— F67 GLV 的「跟誰比」由線決定、F68 GLV 是抓 defect 的主力卡、F69–F72 設定欄／Feature 表／ADC 那一頁／報表打得開、F73 把 F68 的驗收真的跑完、F74 Region 段只剩一張卡 |
+| **2026-09-01 起** | 這個檔案（下面）—— F67 GLV 的「跟誰比」由線決定、F68 GLV 是抓 defect 的主力卡、F69–F72 設定欄／Feature 表／ADC 那一頁／報表打得開、F73 把 F68 的驗收真的跑完、F74 Region 段只剩一張卡、F83 使用者回報的三個 UI bug |
 | 2026-08-19 ～ 08-28 | [`docs/history/2026-08b.md`](docs/history/2026-08b.md) —— F42 區域線走 edges、F43–F45 結果表分層／區域接線／FeatureSpec、F46/F47 檔案架構與授權、F48 六個決定、F50 畫布上只剩卡片和線、F51/F52 特徵名與數字只有一種寫法、F53–F57 五件小事、F58–F66 合成資料長成真的那種 layout |
 | 2026-08-07 ～ 08-18 | [`docs/history/2026-08.md`](docs/history/2026-08.md) —— F8 純規則 ROI、畫布 n8n 化、Phase 1 收斂、F10、Phase 2 的 Input／Enhance／Region 三段 |
 | 2026-07 | [`docs/history/2026-07.md`](docs/history/2026-07.md) —— M0–M7、F7-9…F7-24 前半、兩台機器與搬運通道的成形 |
@@ -19,6 +19,47 @@
 （`docs/history/` 不進搬運包）。包的大小**不是限制**（2026-08-17 使用者確認直接
 複製 raw，見 `AGENTS.md` §2）—— 封存是為了 diff 乾淨與公司機用不到的東西不佔
 體積，不是為了那道 1 MB 的線。
+
+---
+
+## F83：使用者回報的三個 UI bug（2026-09-03）
+
+使用者一次丟三件，而**三件都是「跑得完、看起來沒事、終端機在噴東西」**：
+
+**① 「Show it on the canvas」點了沒反應**（`AttributeError: 'StudioWindow'
+object has no attribute 'canvas'`）。那一支兩個名字都錯 —— 畫布叫
+`self.pipeline`（`self.canvas` 從來沒有存在過），而 `show_card_ghosts` 吃的是
+一個**圖元**不是節點 id。也就是 F68 加的那一列選單**一次都沒有成功過**，而
+那一輪的測試只問了「從插槽挑一個等不等於在畫布上拉那條線」。
+
+現在它走的是 `_on_slot_wire` 找來源的**同一支**（`stream_producer` /
+`region_producer`），所以「選單裡挑的那個名字」與「畫布上指的那張卡」永遠是
+同一個答案。指的方式是 `PipelineCanvas.reveal_cards`：**捲進視野 + 亮起
+hover**，不是選取 —— 選取會把右邊的設定換成那張卡，而使用者按這一條的時候正在
+編**下游**那一格。亮著的卡記在 `_ghost_cards` 上（跟幽靈線同一格），所以
+`clear_tree_ghosts` 就是它的清潔工：**滑鼠一碰畫布就自己熄掉**，不用計時器。
+
+**② 快速點兩下卡片跳出一張殘影。** 那是 `QDrag` 的 pixmap。`_LibraryItem`
+只在 `mousePressEvent` 記起點、**沒有 `mouseReleaseEvent`**，起點因此跨得過
+一次點擊；第二下 Qt 送的是 `MouseButtonDblClick`（不是 Press，起點不會更新），
+按著的那幾 px 抖動就跟**第一下**的起點湊出了拖曳門檻。放開就把起點作廢。
+
+**③ 拉線／刪卡跳 `RuntimeError: Internal C++ object (_NodeItem) already
+deleted`。** `set_nodes` 的 `scene.clear()` 會銷毀選著的那個圖元，Qt 當場送出
+`selectionChanged`，而 F78 那支 handler 問的正是 `self._items` 每一張卡選中
+沒有 —— 表裡握著的已經是殘骸。**先放掉表再 `clear()`**（空表答得出「沒有東西
+被選中」，而那一瞬間那句話剛好是真的），剩下沒有經過我們的拆除路徑（Qt 自己的
+teardown）由 `except RuntimeError` 收尾。
+
+**三條都先寫出會紅的測試才修**，而三支都真的重現了使用者貼的那一串：
+`test_ui_wiring_slot.py`（第 4 節，含「指給我看不等於換一張卡編」）、
+`test_ui_f7_19_wiring.py`（雙擊不拖曳／真的拖仍然拖得動）、
+`test_ui_canvas_focus.py`（第 4 節，一支問結構、一支直接抓終端機那一串）。
+`docs/PITFALLS.md` 加三列。
+
+⚠ 三件裡有兩件的共同形狀值得記下來：**UI 的路壞掉不會讓任何測試變紅**。
+①是一列從來沒被走過的選單，③是一串印在終端機、畫面上看起來沒事的 traceback
+—— 兩者都活了好幾輪。
 
 ---
 

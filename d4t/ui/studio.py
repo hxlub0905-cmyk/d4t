@@ -3418,10 +3418,40 @@ class StudioWindow(QMainWindow):
             self._connect(src, nid, name, str(param))
 
     def _on_slot_show(self, param: str) -> None:
-        """「在畫布上指給我看」—— 重用既有的 ghost 高亮（不改任何東西）。"""
+        """「在畫布上指給我看」—— 把**這一格接的那張卡**在畫布上亮起來。
+
+        走的是 `_on_slot_wire` 找來源的**同一支**（`stream_producer` /
+        `region_producer`），所以「選單裡挑的那個名字」與「畫布上指的那張卡」
+        永遠是同一個答案。一個字都不改 model。
+
+        ⚠ 這支以前寫的是 `self.canvas.show_card_ghosts(nid)`，而兩個名字都錯：
+        主視窗的畫布叫 `self.pipeline`（`self.canvas` 從來沒有存在過，所以
+        點下去只有一串 AttributeError），而 `show_card_ghosts` 吃的是一個
+        **圖元**、畫的是「用名字吃的那幾個數字」的淡線 —— 影像流與區域的線
+        是真的線，本來就畫在那裡，要指的是它的**另一端**。
+        """
         nid = self.selected_node
-        if nid:
-            self.canvas.show_card_ghosts(nid)
+        node = self.model.nodes.get(nid) if nid else None
+        if node is None:
+            return
+        try:
+            spec = next(sp for sp in get_step(node.step).params
+                        if sp.name == str(param))
+        except (KeyError, StopIteration):
+            return
+        names = [n.strip() for n in
+                 str(node.params.get(str(param), "") or "").split(",")]
+        find = (self.model.region_producer if spec.is_region_input()
+                else self.model.stream_producer)
+        srcs = []
+        for name in names:
+            src = find(name, before_node=nid) if name else ""
+            if src and src not in srcs:
+                srcs.append(src)
+        if not srcs:
+            return
+        for view in self._canvases():
+            view.reveal_cards(srcs)
 
     def _on_source_requested(self) -> None:
         """入口卡上那顆鈕：附加檔直接開，資料那幾張開一張選單。

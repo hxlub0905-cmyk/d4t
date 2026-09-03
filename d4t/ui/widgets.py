@@ -5562,6 +5562,10 @@ class _LibraryItem(QFrame):
 
     def mouseDoubleClickEvent(self, e) -> None:   # noqa: D102 - Qt hook
         if e.button() == Qt.LeftButton:
+            # 這一下不是要拖 —— 而第二次按下不會再進 `mousePressEvent`
+            # （Qt 送的是 DblClick），所以按下那一點得在這裡自己收掉，
+            # 不然它會留著當作起點（見 :meth:`mouseReleaseEvent`）。
+            self._press_at = None
             self.activated.emit(self.step_key)
 
     # -- 拖到畫布上（F7-22）-------------------------------------------------
@@ -5572,6 +5576,17 @@ class _LibraryItem(QFrame):
         if e.button() == Qt.LeftButton:
             self._press_at = e.pos()
         super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self, e) -> None:       # noqa: D102 - Qt hook
+        """放開＝那一下結束了，按下的位置跟著作廢。
+
+        ⚠ 這支以前不存在，而 `_press_at` 因此**跨得過一次點擊**：快速點兩下
+        的時候，第一次按下留下的起點還在，第二下（DblClick）按著的那幾 px 抖動
+        就湊得出拖曳的門檻 —— 畫面上是一張卡的殘影跳出來又消失
+        （`QDrag` 的 pixmap），使用者兩下想做的其實是「加這張卡」。
+        """
+        self._press_at = None
+        super().mouseReleaseEvent(e)
 
     def mouseMoveEvent(self, e) -> None:          # noqa: D102 - Qt hook
         start = getattr(self, "_press_at", None)
