@@ -3,10 +3,10 @@
 39ed648fab882e9826ffb2735c351b2dee36ced6 .github/workflows/ci.yml
 68a59c98883d1b448c8bbe84dc129883207a341f .gitignore
 04b21754a3cec381ea5601ec92f1612ca628d565 AGENTS.md
-94ed2d1aad6b66678a73dd0bad379c336668f480 CLAUDE.md
+e30366edec5091e915784ffe32718aa88132bf12 CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 95699cfe7ee391a84c3fcb33fe9d98a72bbdc337 README.md
-f44bab34c56219d1e7ed0ddaf7a944885c37e5ba SESSION_LOG.md
+ce994f605894020c402148af35c8d59dbe80166f SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 cf8fe09ad592a80d3dfaf96412e906035cb83b48 d4t/__main__.py
@@ -119,7 +119,7 @@ db2453e83e06e1bde6fdcbb000f1a38cc16b3dcd d4t/ui/welcome.py
 3a3b6e5c5308d5711781edb1fa927823b8e3fdf1 d4t/ui/widgets.py
 768dbb379b84127e9cbb7ec62df8d51c34dd0100 d4t/ui/wiring_slot.py
 e02cb1ea64a7ed413716379b9da789937729f3e3 d4t/ui/workers.py
-552948a8bffdd30dfad9f864c987d5770d3cc1ef docs/ARCHITECTURE.md
+e3a13ded16b79cc3dd711555bc71b85bd4c881ad docs/ARCHITECTURE.md
 5c5462254b7bbe61dbb28741f4a5feb034749315 docs/FAB-VALIDATION.md
 1365e450a6a568fb0520113e40af42a87cb907df docs/GLAS-INTERFACE.md
 19d601d765ae34b494c08ba6eef81815b67e0d4b docs/HANDOVER.md
@@ -130,6 +130,7 @@ ce3da357c8f42b73149cefd65dec44e872fc7f5a docs/NO-GIT-SETUP.md
 25a4b15b534cca9cd6185b87bae3f1d9dbce3b04 docs/ROADMAP.md
 7d6e3d3a6e7ca55d6c61bd7d218efe51f9d4fa38 docs/USING-CD.md
 4474b1853758a2c83b397a0608be2a98b539dcbf docs/USING-CHARACTERIZATION.md
+2d1b318a2e677cdefe00be01e02ca0c4f57765ae docs/USING-SIMGEN.md
 31b8d2fb5550439e7b2007bb58ddc7b4c955dc19 docs/plans/F11-phase2-features.md
 49fea2d50709f217e302a38748fee9ddc06b67ce docs/plans/F78-canvas-focus-and-lod.md
 cd9b6800b5941de35efed2464b7c0a0db05e4a49 docs/plans/F79-grid-tells-the-truth.md

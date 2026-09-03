@@ -19,6 +19,7 @@
 | 怎麼加卡片、鐵則、開發流程 | 這一份 | 一直 |
 | **怎麼做 EBI ↔ API characterization**（給使用者的操作手冊：線接哪、每格填什麼、報表怎麼讀、出事了照什麼順序查）| [`docs/USING-CHARACTERIZATION.md`](docs/USING-CHARACTERIZATION.md) | 要動 `pair_source` / `H2H` / `output_char` 的參數或說明之前 |
 | **怎麼用 CD 那張卡**（給使用者的操作手冊：每一格什麼時候動、數字會往哪走）| [`docs/USING-CD.md`](docs/USING-CD.md) | 要動 CD 卡的參數、help 文字或輸出名字之前 |
+| **怎麼用 Golden Cell 產一批模擬資料**（給使用者的操作手冊：每一格什麼意思、輸出長什麼樣、出事了照什麼順序查）| [`docs/USING-SIMGEN.md`](docs/USING-SIMGEN.md) | 要動 `simgen` 視窗（`ui/gc_generator.py` / `gc_paint.py`）或 `tools/make_lot_from_gc.py` 的參數之前 |
 | **架構**：三段式心智模型、資料模型（影像流 vs 具名區域）、目錄結構 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 動到 pipeline／資料流之前 |
 | **已知的坑**（80+ 條，只增不減）| [`docs/PITFALLS.md`](docs/PITFALLS.md) | 動到 Qt 繪圖／快取／批次平行／KLARF 寫回／recipe 遷移之前，**先搜關鍵字** |
 | **進度與 phase 計畫** | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 想知道「接下來做什麼」 |

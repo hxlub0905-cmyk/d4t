@@ -99,6 +99,20 @@ clone 的 `size-pack` 是 **385.58 MiB**，`filter-repo --path bundle/ --invert-
 不顯示內容、那顆鈕會消失 —— 這一包 08-19 就超過 1 MB 了。改成 raw 網址。
 **一份寫下來的程序，在一台救不了的機器上，可以安靜地失效。**
 
+### ④ 順手救回一份沒進 main 的操作手冊
+
+要跑 G 之前先查了分支，發現一件比 G 更該先處理的事（見下）。而在確認那 3 個
+未併入的分支能不能刪的時候，`docs/USING-SIMGEN.md`（215 行、`simgen` 的使用者
+操作手冊）**只存在於一個要被刪掉的分支上** —— main 從來沒有它，而 `simgen`
+是出貨的功能（`python -m d4t simgen`）。
+
+驗過才收：它引用的 16 個 CLI 旗標**一個不差**、`gc_generator` / `gc_paint` /
+`make_lot_from_gc` 都還在、兩個檔案路徑也都在。收進 `docs/`，並補進
+`CLAUDE.md` §0 的導覽表與 `ARCHITECTURE.md` 的目錄樹（那兩個地方有測試守著）。
+
+**教訓：刪分支之前要看裡面有什麼。** 32 個分支裡 29 個是完整併入的（零風險），
+而剩下 3 個裡有 1 個裝著唯一一份副本。
+
 ### ⏭ 還沒做的那一步：把 378 MB 拿回來（要在這個 PR 併進 main 之後）
 
 使用者選的是「E + G」。E（不壓縮）在這一輪；**G（改寫歷史）刻意留著沒做**，
@@ -107,7 +121,29 @@ clone 的 `size-pack` 是 **385.58 MiB**，`filter-repo --path bundle/ --invert-
 併進 main 之後，在家用機上跑（已在本地 clone 上實測過，440 個 commit、
 425 個檔案全部保留）：
 
+⚠ **而 G 有一個前提，漏掉的話它會白做。** repo 上有 33 個分支，其中 **29 個
+已經完整併進 main** —— 它們的歷史整段都是 main 舊歷史的子集，**包含全部 217 份
+bundle**。只改寫 main、把那些分支留著的話：`git clone` 預設抓所有分支，舊的
+commit graph 照樣被釘住，**重新 clone 還是 400 MB**。而 `filter-repo` 會跑完、
+會回報成功、本機 `count-objects` 也會顯示 7 MB —— 第八個「跑得完、有數字、
+而且是錯的」，只是這次發作在「你以為已經解決之後」。
+
+（`refs/pull/<n>/head` GitHub 會永久保留，所以那些 commit 之後仍然查得到 ——
+但一般 clone 不抓那些 ref，不影響 clone 大小。）
+
+所以順序是：**併 PR → 刪掉那 32 個分支 → 才跑 G**。
+
 ```bash
+# 1. 刪分支（⚠ 這一步從 Claude Code 的 session 做不到：push 新分支可以，
+#    刪 ref 被 GitHub 回 403，而 GitHub MCP 沒有刪分支的工具）
+git push origin --delete $(git branch -r --merged origin/main \
+    | sed 's|origin/||' | grep -vE 'main|project-pros-cons-3tot51')
+# 另外三個未併入的（USING-SIMGEN.md 已經救進來了，刪掉零損失）：
+#   claude/project-changes-summary-w9814v
+#   claude/project-review-kxxmd7            ← 還有 tools/run_tests.py，main 沒有
+#   claude/project-review-pros-cons-pyqsek
+
+# 2. 然後才改寫歷史
 pip install git-filter-repo
 git filter-repo --path bundle/ --invert-paths --force   # 385.58 MiB → 7.23 MiB
 python tools/release.py                                 # 現在這一份重新產出來
