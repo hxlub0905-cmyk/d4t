@@ -11,10 +11,38 @@
 
 1. ``tools/FILELIST.txt`` —— 全部檔案的 git blob SHA。公司機用它判斷
    「哪幾個檔案要重新複製」（`tools/check_files.py`）。
-2. ``bundle/d4t_bundle.py`` —— 整個 repo 壓成一個純文字 `.py`，
+2. ``bundle/d4t_bundle.py`` —— 整個 repo 串成一個純文字 `.py`，
    在 GitHub 上複製 raw 就能整包搬進公司機（見 `AGENTS.md` §2）。
    每次產完會報一句目前的大小（見 :func:`bundle_size_report`）——
    那是**資訊**，不是門檻：raw 那條路跟檔案多大無關。
+
+   ⚠ **逐檔 lzma + base64**（``#ENC lzma+base64/file``）。這個格式要同時滿足
+   三件事，而 2026-09-03 一天之內用兩個失敗換到了它：
+
+   ==========================  ==========  ==========  ==============
+   格式                        單份大小    非 ASCII    每改一次 pack
+   ==========================  ==========  ==========  ==============
+   整包 lzma+base64（更早）    2,264 KB    934         **1,711 KB**
+   純文字（那天早上）          7,664 KB    **812,303** 1 KB
+   **逐檔 lzma+base64（現在）**  3,447 KB    **0**       **94 KB**
+   ==========================  ==========  ==========  ==============
+
+   * **非 ASCII 必須是 0。** 公司機拿程式碼的方式是「瀏覽器複製 → 記事本
+     存檔」，而中文 Windows 的記事本會存成 ANSI（cp950）。那天早上的純文字版
+     有 31% 的位元組是中文，於是使用者拿到的是
+     ``SyntaxError: Non-UTF-8 code starting with '\xe5' ... line 78146``。
+     **這是那一輪最嚴重的錯**：為了 git 的 pack，弄壞了唯一那條搬運路徑。
+     連解包程式的檔頭與訊息都改成英文了 —— 那一段是最不能壞的。
+   * **git delta 壓得動。** 整包壓成一個流的話改一行就整份變樣，每個 commit
+     完整存一份（1,711 KB × 217 版 = 378 MB，pack 的 98%）。逐檔壓只有那一個
+     檔案那一段會變：**94 KB**。
+   * **夠小。** 7,664 KB 在瀏覽器上全選複製會卡到不能用（使用者原話：
+     「非常 lag 很卡」）。現在 3,447 KB，比原本的 2,264 KB 大一半，
+     但比那天早上小 55%。
+
+   搬運那一端一個字都沒有變：網址一樣、raw 一樣、`docs/NO-GIT-SETUP.md`
+   上那條程序一樣。解包程式**三種格式都認得**（``#ENC lzma+base64/file``、
+   ``#ENC text``、``#ENC lzma+base64``），所以已經搬進公司機的舊包照樣解得開。
 
 **先清單再打包**：包裡面含著那份清單，順序反了就會把舊清單封進新包裡，
 而那個包解出來之後 `check_files.py` 會報一堆不存在的差異。
@@ -49,22 +77,28 @@ BUNDLE = os.path.join("bundle", "d4t_bundle.py")
 #: （`raw.githubusercontent.com/.../bundle/d4t_bundle.py`），那條路跟檔案
 #: 多大無關。所以這個數字留在這裡只是為了**講得出現在多大**，
 #: 不是一個要閃避的門檻 —— 不要為了它去刪文件或分批。
+#:
+#: 2026-09-03 之後這件事更明顯了：包改成不壓縮（見模組說明），一口氣從
+#: 2.2 MB 變成 7.6 MB —— 而搬運那一端**什麼都沒有變**。這正是「1 MB 不是
+#: 限制」那句話的證明題。
 BUNDLE_LIMIT_BYTES = 1024 * 1024
 
 
 def bundle_size_report(nbytes: int) -> Tuple[str, str]:
     """包的大小 → ``(等級, 要印的話)``；等級恆為 ``ok``（這裡不擋任何事）。
 
-    切開成純函式是為了測得到 —— 產一個 1 MB 的包只為了驗這段訊息太貴。
+    切開成純函式是為了測得到 —— 產一個 7 MB 的包只為了驗這段訊息太貴。
 
     以前這裡分 ok / warn / over 三級，85% 就開始喊。那是「1 MB 是硬牆」年代
     的產物；使用者改用 raw 複製之後，喊了也沒有人需要做任何事，而**一句沒有
     對應動作的警告只會訓練人忽略警告**。現在它只報事實。
+
+    ⚠ **不要把「佔 1 MB 的百分之幾」印回來。** 包不壓縮之後那個數字是 745%，
+    而一個 745% 讀起來就是一句警報 —— 對著一件沒有人需要做任何事的事情。
     """
-    pct = 100.0 * nbytes / BUNDLE_LIMIT_BYTES
-    size = ("%.0f KB（GitHub 檔案頁的顯示上限是 1 MB，佔 %.0f%%；"
-            "搬運走 raw，不受這個數字影響）" % (nbytes / 1024.0, pct))
-    return "ok", "  %s" % size
+    return "ok", ("  %.1f MB（走 raw 複製，跟這個數字無關；GitHub 的檔案瀏覽頁"
+                  "在 1 MB 以上不顯示，那條路本來就沒在用）"
+                  % (nbytes / 1024.0 / 1024.0))
 
 
 def repo_root() -> str:
@@ -176,7 +210,12 @@ def write(root: str = "") -> None:
     # 2. 再打包
     bundle = os.path.join(root, BUNDLE.replace("/", os.sep))
     os.makedirs(os.path.dirname(bundle), exist_ok=True)
-    text = make_text_bundle.build(os.path.basename(bundle), root, compress=True)
+    # `compress=False` ＝ **逐檔** lzma+base64（見模組說明那張表）。
+    # **不要改成 True**：那是「整包壓成一個流」的舊格式，而它就是 pack 裡
+    # 那 378 MB 的全部原因。也**不要改成純文字**：那樣包裡會有中文，
+    # 而公司機的記事本會把它存成 cp950（2026-09-03 真的發生過）。
+    text = make_text_bundle.build(os.path.basename(bundle), root,
+                                  compress=False)
     tmp = bundle + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)

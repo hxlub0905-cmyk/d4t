@@ -21,7 +21,7 @@ Qt 的部分只負責把它算出來的東西畫出來。
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 from PySide6.QtCore import QRectF, Qt, Signal

@@ -9,7 +9,7 @@ import numpy as np
 
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_ENHANCE,
+    CATEGORY_IMAGE, ParamSpec, StepError, register_step, GROUP_ENHANCE,
 )
 from ..algo import enhance as algo_enhance
 from ._util import MultiStreamStep, streams_spec

@@ -66,7 +66,7 @@ from . import period as algo_period
 
 __all__ = [
     "GoldenCell", "MatchResult", "build_golden_cell", "anchor_cell",
-    "encode_cell", "decode_cell", "tile_cell", "match_patch", "roi_in_patch",
+    "encode_cell", "decode_cell", "tile_cell", "match_patch",
     "patch_structure", "MIN_PERIOD_CONFIDENCE",
     "CELL_ENCODING",
 ]

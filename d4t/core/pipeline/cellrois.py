@@ -320,7 +320,7 @@ def regions_repeat_at(regions: Sequence[Region], shift_x: float,
         return (round((x % 1.0) / tol), round((y % 1.0) / tol),
                 round(w / tol), round(h / tol))
 
-    for name, boxes in regions:
+    for _name, boxes in regions:
         here = {key(b) for b in boxes}
         moved = {key((b[0] + sx, b[1] + sy, b[2], b[3])) for b in boxes}
         if here != moved:

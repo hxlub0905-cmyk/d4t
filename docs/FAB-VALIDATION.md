@@ -13,7 +13,7 @@
 | 3. KLARF 變體 | `klarf_core` 已知四種（含 M5 修正的 variant D） | `probe_klarf.py` 的 image-layout 變體判定與證據 |
 | ~~4. 影像的位元深度~~ | ✅ **已確認（2026-08-17）：8-bit。** 所以下面那件事不會發生在現在的資料上 —— 但**程式不該把它當成保證**，要補一道「非 8-bit 就講一句話」的防呆（成本幾行，擋掉的是安靜算出垃圾）。原本的風險紀錄留著：兩條載入路徑都寫死 8-bit 假設：`ebi_patch` 走 `to_uint8` → 一張 12-bit 的圖 **93.8% 的像素飽和成 255**；`rsem`/`folder` 走 `imageio.load_gray` → **每張圖各自 MINMAX 拉伸**，於是亮度砍半的圖載進來平均值一模一樣（兩張圖之間不再可比，而那是 `test − ref` 的前提）。實測數字與三種修法見 [`plans/F11-phase2-features.md`](plans/F11-phase2-features.md) §3.1.8 | 待補（bit depth 在 TIFF 標頭裡，一支腳本讀得到；順手可一起回答壓縮方式與尺寸是否逐顆相同）|
 | ~~6. ROI 的形狀~~ | ✅ **已確認（2026-08-17）**：使用者原話「目前區域**基本上都只會是矩形**」。所以 `NamedROI` 只存矩形（一個名字可以對應好幾塊）**不是一個限制**，而是剛好對上站點的實情 —— 吃 GDS label map 時把每個 layer 切成一堆小矩形因此是**等價**而不是近似（見 [`plans/F11-phase2-features.md`](plans/F11-phase2-features.md) §3.3.2 第一題）。⚠ 這只對**這個**站點成立，所以「區域可以帶一張任意形狀的 mask」那條升級路要留著（入口是 NamedROI 多一個選填欄位）| — |
-| 7. **EBI patch 是不是以 defect 為中心裁的**（F33，2026-08-26）| ⏳ **未驗證，而且是承重的。** characterization 用 `align_off_x/y_px` 回答「這一顆離 FOV 中心多遠」（＝ RSEM 拍歪多少），而那個等式**只在 patch 以 defect 為中心時成立**：把 patch 的裁切中心平移 (+20,+15)，量出來就整整多那 (+20,+15)；**固定格線裁的話 `align_off` 恆為 0** —— 十字與框完美重合、報表看起來「每一顆都對得剛剛好」，而那個數字跟 defect 一點關係都沒有。實測三種裁法的數字見 [`history/plans/F33-ebi-characterization.md`](history/plans/F33-ebi-characterization.md) §8.6 | 拿一顆已知偏離中心的 defect：patch 中心的圖案應該對得上 KLARF 座標。最省事的確認是問機台工程師「patch 怎麼裁的」 |
+| 7. **EBI patch 是不是以 defect 為中心裁的**（F33，2026-08-26）| ⏳ **未驗證，而且是承重的。** characterization 用 `align_off_x/y_px` 回答「這一顆離 FOV 中心多遠」（＝ RSEM 拍歪多少），而那個等式**只在 patch 以 defect 為中心時成立**：把 patch 的裁切中心平移 (+20,+15)，量出來就整整多那 (+20,+15)；**固定格線裁的話 `align_off` 恆為 0** —— 十字與框完美重合、報表看起來「每一顆都對得剛剛好」，而那個數字跟 defect 一點關係都沒有。實測三種裁法的數字見 [`history/plans/F33-ebi-characterization.md`](history/plans/F33-ebi-characterization.md) §8.6 | **要問的那一句話（照抄）**：「EBI 出的 patch，每一張是以那顆 defect 為中心裁的，還是照固定格線切的？」—— 兩個答案分別對應上面那張表的第一列與第三列。自己驗的話：拿一顆已知偏離中心的 defect，patch 中心的圖案應該對得上 KLARF 座標。⚠ **2026-09-03 起這件事有一個症狀了**（以前完全沒有）：`output_char` 跑完會檢查整批的 `align_off_*` 是不是全部貼在 0 上，是的話在報表的 warnings 裡把上面那句話講出來（判準住 `steps/align_to.degenerate_offset_note`，測試在`tests/test_output_char.py` 第 5 節）。**那不是驗證，是把問題送到眼前** ——「機台每一顆都瞄得極準」跟「固定格線裁」在資料上長得一模一樣，分得開它們的只有機台工程師那一句話 |
 | 5. 一顆多於兩頁時的頁序 | ⏸ **擱置**（2026-08-17：「我決定我暫時不做 multi channel」）——假設本身留著，因為那種資料真的送進來時還是要知道。使用者口述：**1 BSE + 4 SE，BSE 固定在第 2 頁**，SE 順序無所謂，**沒有 ref**。假設 #1 只確認過「兩頁」的情形。`channel_map`（F11 Input-1）會讓這件事變成 recipe 裡的設定，而**頁數與宣告不符時要擋下來**，不准照順序硬套 | 待補（同上那支腳本：每顆幾頁、各頁尺寸與平均灰階）|
 
 ### 單位一律 pixel，換算在輸出那一刻由使用者填（2026-07-30）
@@ -62,7 +62,7 @@ warning 指名它 —— 那正是要看到的（它以前恆為 0，那份分�
 
 | 情況 | 用什麼 |
 |---|---|
-| 第一次搬整包 | `bundle/d4t_bundle.py`（單檔，lzma + base64）—— **1 次複製**就搬完。包的大小不是限制（使用者直接複製 raw；見 [`AGENTS.md`](../AGENTS.md) §2）|
+| 第一次搬整包 | `bundle/d4t_bundle.py`（單檔，純文字）—— **1 次複製**就搬完。包的大小不是限制（使用者直接複製 raw；見 [`AGENTS.md`](../AGENTS.md) §2）|
 | 之後更新 | 複製 `tools/FILELIST.txt`（12 KB）→ `python tools/check_files.py` → 它列出要重新複製哪幾個 |
 | 只想跑格式探測 | 直接複製 `fab_probe/probe_*.py`（stdlib-only 單檔，**不需要整個 repo**）|
 

@@ -107,12 +107,12 @@ from ..algo import glv as algo_glv
 from ..pipeline.context import Context
 from ..pipeline.step import (
     ANY_VALUE, CATEGORY_ALGO, MEASURE, PATCH_KINDS, REFERENCE,
-    SINGLE_IMAGE_KINDS, ParamSpec, Step, StepError, register_step,
+    SINGLE_IMAGE_KINDS, ParamSpec, StepError, register_step,
     GROUP_MEASURE,
 )
 from ._util import (
     CENTRE_SUFFIX, MultiSourceStep, OTHERS_SUFFIX, output_prefix_spec,
-    parse_key_list, prefix_features, prefix_names, roi_pixels,
+    parse_key_list, prefix_names, roi_pixels,
 )
 
 _P_ALIAS = re.compile(r"^glv_p(\d+)$")

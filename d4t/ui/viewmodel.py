@@ -89,7 +89,7 @@ def _decide_restore(snap: Optional[Dict[str, Any]]) -> Optional["DecideSpec"]:
     tree = snap.get("tree")
     return DecideSpec(
         let=[Let(*row) for row in snap.get("let") or []],
-        rules=[Rule(w, int(b), l) for w, b, l in snap.get("rules") or []],
+        rules=[Rule(w, int(b), lb) for w, b, lb in snap.get("rules") or []],
         otherwise_bin=int(ob), otherwise_label=str(ol),
         score=str(snap.get("score", "") or ""),
         tree=None if tree is None else _tree_from_json(tree))

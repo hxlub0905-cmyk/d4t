@@ -103,7 +103,7 @@ from ..algo import edge as algo_edge
 from ..algo import shape as algo_shape
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, ParamSpec, Step, StepError, register_step, GROUP_MEASURE,
+    CATEGORY_ALGO, ParamSpec, register_step, GROUP_MEASURE,
 )
 from ._util import (
     MultiSourceStep, ensure_gray, output_prefix_spec, parse_key_list,

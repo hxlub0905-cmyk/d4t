@@ -318,7 +318,6 @@ class TreePanel(QWidget):
 
     def _build_guided(self, simple) -> None:
         """``[哪個數字 ▾] [比什麼 ▾] [多少] + 滑桿`` —— 打不出算式也問得出問題。"""
-        m = self._model
         name, op, value = simple or ("", ">", 0.0)
         names = self._feature_names()
         if name and name not in names:

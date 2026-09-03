@@ -338,6 +338,7 @@ docs/
 ├── GLAS-INTERFACE.md         # 上游 GLAS 的介面契約（d4t 不解析 layout）
 ├── USING-CD.md               # 給使用者：CD 那張卡每一格什麼時候動
 ├── USING-CHARACTERIZATION.md # 給使用者：EBI ↔ API characterization 怎麼做
+├── USING-SIMGEN.md          # 給使用者：貼一張 Golden Cell 產一整批模擬資料
 ├── NO-GIT-SETUP.md           # 受限機器：怎麼把程式碼弄上去
 ├── OFFLINE-INSTALL.md        # 受限機器：怎麼離線裝相依套件
 ├── plans/                    # **進行中**的計畫書（`F0-master-plan.md` 是總表）

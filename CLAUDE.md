@@ -19,6 +19,7 @@
 | 怎麼加卡片、鐵則、開發流程 | 這一份 | 一直 |
 | **怎麼做 EBI ↔ API characterization**（給使用者的操作手冊：線接哪、每格填什麼、報表怎麼讀、出事了照什麼順序查）| [`docs/USING-CHARACTERIZATION.md`](docs/USING-CHARACTERIZATION.md) | 要動 `pair_source` / `H2H` / `output_char` 的參數或說明之前 |
 | **怎麼用 CD 那張卡**（給使用者的操作手冊：每一格什麼時候動、數字會往哪走）| [`docs/USING-CD.md`](docs/USING-CD.md) | 要動 CD 卡的參數、help 文字或輸出名字之前 |
+| **怎麼用 Golden Cell 產一批模擬資料**（給使用者的操作手冊：每一格什麼意思、輸出長什麼樣、出事了照什麼順序查）| [`docs/USING-SIMGEN.md`](docs/USING-SIMGEN.md) | 要動 `simgen` 視窗（`ui/gc_generator.py` / `gc_paint.py`）或 `tools/make_lot_from_gc.py` 的參數之前 |
 | **架構**：三段式心智模型、資料模型（影像流 vs 具名區域）、目錄結構 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 動到 pipeline／資料流之前 |
 | **已知的坑**（80+ 條，只增不減）| [`docs/PITFALLS.md`](docs/PITFALLS.md) | 動到 Qt 繪圖／快取／批次平行／KLARF 寫回／recipe 遷移之前，**先搜關鍵字** |
 | **進度與 phase 計畫** | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 想知道「接下來做什麼」 |
@@ -286,8 +287,9 @@ param 相依 I/O（例如輸出流名稱由參數決定）覆寫 `resolve_reads/
 
 ```bash
 python -m venv .venv && .venv\Scripts\activate      # Windows
-pip install -r requirements.txt && pip install pytest
+pip install -r requirements.txt && pip install pytest ruff
 
+ruff check                                         # 靜態檢查（幾秒，先跑這個）
 QT_QPA_PLATFORM=offscreen pytest -q                # 全部測試（Windows 不用設）
 python tools/make_sample.py /tmp/lot --n 100       # 產合成資料
 python -m d4t gui                                # 開 Studio
@@ -295,13 +297,37 @@ python -m d4t run <recipe>.json /tmp/lot/LOT_SYN.001 \
     --workers 4 --cache /tmp/cache --db /tmp/runs.db --csv features.csv
 ```
 
+**`ruff check` 先跑**（2026-09-03 加，設定在 `pyproject.toml` 的 `[tool.ruff]`，
+CI 有一個獨立的 lint job）。它幾秒就有答案，而測試要三分半 —— 一個打錯的名字
+不值得等那麼久。它掃的是 `d4t/` `tools/` `fab_probe/` `conftest.py`，**不掃
+`tests/`**（理由寫在設定裡：UI 測試刻意 lazy import Qt，ruff 在那裡會報 1,217
+條誤報）。
+
+⚠ **`--fix` 要看過再收。** 第一次跑的時候它自動刪掉了 `ingest/pair_source.py`
+一個「這個模組自己沒用到」的 import —— 而那是一個**轉出口**，`studio.py` 與
+`__main__.py` 都在用 `pair_ingest.columns_of(...)`。F401 問的是「這個檔案有沒有
+用到」，答不出「別人有沒有透過這個檔案用到」。轉出口請留 `# noqa: F401` 加一句
+為什麼（`__init__.py` 整份免除，那是設定裡的 per-file-ignores）。
+
 **跑測試的方式很重要**（不照做會浪費很多時間）：
 
 - 開發迴圈**只跑改到的測試檔**：`pytest -q tests/test_xxx.py`。
-- 核心（`--ignore-glob="*test_ui_*"`）約 20–30 秒，隨時可以跑。
-- **UI 測試不要用一個行程跑整套** —— Qt 記憶體會累積，在容器裡實測從 100 秒
-  變成跑不完。要跑就一個檔案一個檔案跑（每個 1–10 秒）：
-  `for f in tests/test_ui_*.py; do pytest -q "$f"; done`
+- 核心（`--ignore-glob="*test_ui_*"`）約 3 分半，隨時可以跑。
+- **UI 測試不要用一個行程跑整套** —— Qt 物件不會因為測試結束就消失，於是後面
+  每開一個視窗都要跟愈來愈多的殘留物一起做版面計算，時間是**超線性**的。
+  CI 上實測：一個行程 **1:39:09**，分兩批 **7 分鐘**。要跑就逐檔跑：
+
+  ```bash
+  python tools/run_tests.py            # 全套，逐檔一個行程 + 最慢的幾個
+  python tools/run_tests.py --fast     # 略過 UI（commit 前記得跑一次完整的）
+  ```
+
+  ⚠ **這裡以前寫的是 `for f in tests/test_ui_*.py; do pytest -q "$f"; done`，
+  而那是 bash —— 家用機是 Windows（上面那行 `.venv\Scripts\activate`），
+  PowerShell 不吃那個語法。** 也就是一份寫給某台機器的程序，在那台機器上跑
+  不動；跟 `docs/NO-GIT-SETUP.md` 那個「按 blob 頁的複製鈕」是同一類問題，
+  同一天（2026-09-03）一起修的。`run_tests.py` 是 stdlib-only 的 Python，
+  兩台都跑得動。
 
 **每次改完之後**（**家用機**，公司機不能執行 git）：
 

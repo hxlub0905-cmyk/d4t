@@ -143,8 +143,14 @@ d4t 是 **public**。
 | `openpyxl` | `>=3.1` | MIT |
 | `PySide6` ＋ `shiboken6` | `>=6.5` | **`LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`**（另有商業授權） |
 | `pytest`（開發用） | `>=7` | MIT |
+| `ruff`（開發用） | `==0.15.8` | MIT |
 
 前四個都是寬鬆授權，照著附上授權條款就沒事。**要注意的是 PySide6。**
+
+最後兩列（`pytest` / `ruff`）是 `dev` extra —— **只裝在開發機、不隨任何一條
+搬運路徑進廠**（bundle 裝的是原始碼、`fetch_wheels.py` 抓的是
+`requirements.txt` 那幾個）。所以它們不在 `LICENSE` 的第三方 carve-out 裡：
+那一段講的是「執行時相依」，而這兩個一次都不執行。
 
 ### PySide6 的 LGPL 值得看一眼
 

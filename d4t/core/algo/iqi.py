@@ -90,7 +90,7 @@ Step 3 的逆轉換**對最終數字沒有貢獻**（64 塊 × 一次多餘的�
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 

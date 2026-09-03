@@ -37,7 +37,7 @@ other SNR in this package derives from it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Tuple
 
 import cv2
 import numpy as np

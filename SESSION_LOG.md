@@ -6,7 +6,7 @@
 
 | 期間 | 在哪 |
 |---|---|
-| **2026-09-01 起** | 這個檔案（下面）—— F67 GLV 的「跟誰比」由線決定、F68 GLV 是抓 defect 的主力卡、F69–F72 設定欄／Feature 表／ADC 那一頁／報表打得開、F73 把 F68 的驗收真的跑完、F74 Region 段只剩一張卡、F83 使用者回報的三個 UI bug |
+| **2026-09-01 起** | 這個檔案（下面）—— F67 GLV 的「跟誰比」由線決定、F68 GLV 是抓 defect 的主力卡、F69–F72 設定欄／Feature 表／ADC 那一頁／報表打得開、F73 把 F68 的驗收真的跑完、F74 Region 段只剩一張卡、F83 使用者回報的三個 UI bug、F84 ruff 那道關／`align_off` 的症狀／bundle 不再壓縮／救回兩份沒併進來的東西 |
 | 2026-08-19 ～ 08-28 | [`docs/history/2026-08b.md`](docs/history/2026-08b.md) —— F42 區域線走 edges、F43–F45 結果表分層／區域接線／FeatureSpec、F46/F47 檔案架構與授權、F48 六個決定、F50 畫布上只剩卡片和線、F51/F52 特徵名與數字只有一種寫法、F53–F57 五件小事、F58–F66 合成資料長成真的那種 layout |
 | 2026-08-07 ～ 08-18 | [`docs/history/2026-08.md`](docs/history/2026-08.md) —— F8 純規則 ROI、畫布 n8n 化、Phase 1 收斂、F10、Phase 2 的 Input／Enhance／Region 三段 |
 | 2026-07 | [`docs/history/2026-07.md`](docs/history/2026-07.md) —— M0–M7、F7-9…F7-24 前半、兩台機器與搬運通道的成形 |
@@ -19,6 +19,235 @@
 （`docs/history/` 不進搬運包）。包的大小**不是限制**（2026-08-17 使用者確認直接
 複製 raw，見 `AGENTS.md` §2）—— 封存是為了 diff 乾淨與公司機用不到的東西不佔
 體積，不是為了那道 1 MB 的線。
+
+---
+
+## F84：一道 lint 關、一個承重假設的症狀、pack 裡的 378 MB，以及兩份沒併進來的東西（2026-09-03）
+
+使用者看完專案體檢之後說「做那 3 件事」。三件都做了，而**每一件都在做的過程中
+變成了另一件事**——
+
+### ① ruff：第一次跑就抓到六個真的
+
+這個 repo 有 3,126 支測試與三份黃金值，但**沒有任何東西看過「這個名字存不存在」**。
+`ruff check` 掃 `d4t/` `tools/` `fab_probe/` 的第一次就是：
+
+| 抓到什麼 | 為什麼沒有人發現 |
+|---|---|
+| `algo/template.py` 的 `__all__` 列了一個不存在的 `roi_in_patch` | 沒有人寫過 `import *` |
+| `klarf_core` / `step.py` / `_util.py` 三處用了**沒 import 的型別**（`Optional`／`Sequence`／`Any`）| `from __future__ import annotations` 讓它們在執行期不求值 —— 91% 的型別標註**從來沒有被驗證過**，它們是註解不是保證 |
+| `ui/tree_scene.py` 的 `leaf_hex` **被自己的舊版本遮蔽** | 兩份的調色盤**現在剛好一樣**。F29 C0 那句「畫面與報表的顏色必須是同一個」因此是死的 —— 而它會在有人動 `LEAF_PALETTE` 的那天才發作 |
+| 同一輪留下的 14 行 `OPS` 說明，掛在一個不相干的常數上 | F29 C0 搬了程式碼、沒搬理由。讀的人會以為那段在講顏色 |
+| `tests/` 裡一條 `%` 沒跳脫的 assert 訊息 | 那條 assert 一旦成立，使用者看到的是 `ValueError` 不是訊息 |
+
+**通則：搬家的時候，理由要跟著程式碼一起搬。** 留在原地的說明不會變成孤兒 ——
+它會變成一句**指著錯東西的說明**，那比沒有更糟。
+
+⚠ **`--fix` 不能盲收。** 它自動刪掉 `ingest/pair_source.py` 一個「這個模組自己
+沒用到」的 import，而那是**轉出口**：`studio.py` 與 `__main__.py` 都在用
+`pair_ingest.columns_of(...)`。F401 問的是「這個檔案有沒有用到」，答不出
+「別人有沒有透過這個檔案用到」。抓到它的是測試，不是我。
+
+設定在 `pyproject.toml` 的 `[tool.ruff]`（**刻意不開 E501 與 UP**，理由寫在那裡），
+CI 多一個獨立的 lint job（幾秒，不跟著 3×矩陣跑三次）。`tests/` 不掃 ——
+UI 測試刻意 lazy import Qt，ruff 在那裡報 1,217 條誤報，納進來只會得到一道
+大家學會忽略的關。
+
+### ② FAB-VALIDATION #7：問不到，但可以讓它出聲
+
+那條假設（EBI patch 是不是以 defect 為中心裁的）我問不到機台工程師。但它真正
+的問題不是「還沒問」，是**錯的時候完全沒有症狀** —— 固定格線裁的話
+`align_off` 恆為 0，十字與框完美重合，報表**看起來最漂亮**。
+
+所以做的是讓它出聲：`steps/align_to.degenerate_offset_note()` ——
+整批的 `align_off_*` 全部貼在 0 上就回一句話，`output_char` 跑完講出來。
+判準是**分布不是單顆**（一顆是 0 很正常，幾十顆全是 0 不是），而且那句話
+**刻意不說「你的資料壞了」**：同一個分布有兩個解釋（機台每顆都瞄得極準／
+固定格線裁），資料上分不開，分得開的只有那一句話。所以它做的事是**把問題
+送到使用者眼前**，不是替他猜一個答案。
+
+⚠ 那組測試的最後一條問的是**接線**（`run_batch` 之後那句話真的在
+`bctx.warnings` 裡），而不是只問那支純函式 —— F83 那三個 bug 全部是
+「model 對了、而那個動作從來沒有被接上去」。驗過它會紅。
+
+### ③ bundle：病根是壓縮，不是產得太勤
+
+08-24 記下的兩條路（① 移到 Releases ② 少產幾次）**一條走不通、一條不必要**。
+
+* **Releases 走不通，而且是測出來的**：`curl -I` 一個公開 repo 的 release 附件，
+  回的是 `Content-Disposition: attachment` + `application/octet-stream`，而且
+  302 轉去另一個網域。瀏覽器**直接下載**，看不到文字 —— 而下載正是公司機
+  擋掉的那件事。使用者的條件只有一句：「我只要能在 github 的網站可以複製
+  bundle 的文字就可以」。
+* **真正的病根是那個布林值。** 同一次「改一支模組再重產」實測：
+
+  | 格式 | 單份 | 存兩版後 pack | 第二版多花 |
+  |---|---|---|---|
+  | lzma+base64（舊） | 2,253 KB | 3,404 KB | **1,702 KB** |
+  | 純文字（現在） | 7,631 KB | **2,493 KB** | **1 KB** |
+
+  1700 倍，**而且純文字版存進 git 之後還更小** —— git 自己會 zlib 壓 blob，
+  「壓過再 base64」剛好把它能壓的都拿掉了。搬運那一端一個字都沒變。
+
+順手發現的第二件事：**AGENTS.md 那個「88 MB / 46%」已經嚴重過期**。直接量：
+clone 的 `size-pack` 是 **385.58 MiB**，`filter-repo --path bundle/ --invert-paths`
+之後剩 **7.23 MiB** —— **378 MB（98%）**是這一個檔案的歷史副本。曲線是指數的，
+所以「先記錄、之後再說」每拖一天都更貴。
+
+第三件：**`docs/NO-GIT-SETUP.md` 上那條公司機的程序已經壞了兩個星期而沒有人知道。**
+它寫著「打開 blob 頁 → 按右上角的複製鈕」，而 GitHub 的檔案瀏覽頁在 1 MB 以上
+不顯示內容、那顆鈕會消失 —— 這一包 08-19 就超過 1 MB 了。改成 raw 網址。
+**一份寫下來的程序，在一台救不了的機器上，可以安靜地失效。**
+
+### ④ 順手救回一份沒進 main 的操作手冊
+
+要跑 G 之前先查了分支，發現一件比 G 更該先處理的事（見下）。而在確認那 3 個
+未併入的分支能不能刪的時候，`docs/USING-SIMGEN.md`（215 行、`simgen` 的使用者
+操作手冊）**只存在於一個要被刪掉的分支上** —— main 從來沒有它，而 `simgen`
+是出貨的功能（`python -m d4t simgen`）。
+
+驗過才收：它引用的 16 個 CLI 旗標**一個不差**、`gc_generator` / `gc_paint` /
+`make_lot_from_gc` 都還在、兩個檔案路徑也都在。收進 `docs/`，並補進
+`CLAUDE.md` §0 的導覽表與 `ARCHITECTURE.md` 的目錄樹（那兩個地方有測試守著）。
+
+**教訓：刪分支之前要看裡面有什麼。** 32 個分支裡 29 個是完整併入的（零風險），
+而剩下 3 個裡有 1 個裝著唯一一份副本。
+
+### ⑤ 再救一支：`tools/run_tests.py`，而它牽出一張漂掉的例外清單
+
+同一批要刪的分支上還有 `tools/run_tests.py`（逐檔一個行程跑測試）。收它的理由
+**不是**它 docstring 上寫的那個效能數字，是這個：
+
+> `CLAUDE.md` §4 教的是 `for f in tests/test_ui_*.py; do pytest -q "$f"; done`
+> —— 而那是 **bash**，家用機是 Windows（同一節上面就寫著 `.venv\Scripts\activate`）。
+
+**一份寫給某台機器的程序，在那台機器上跑不動。** 跟 `docs/NO-GIT-SETUP.md` 那個
+「按 blob 頁的複製鈕」同一類，同一天一起修的。這支是 stdlib-only 的 Python，
+兩台都跑得動，而且比 for-loop 多給逐檔計時、最慢的幾個、失敗收集到最後一起印。
+
+它在分支上躺了三週，docstring 累積了**四個假話**（專案名還叫 ADEPT、「CI 跑不加
+參數的 `pytest -q`」在 08-24 就不成立了、「25 支 UI 測試檔」現在是 84、引用了一個
+已經不存在的 slow marker）—— 收進來時全部訂正。**一份沒併進來的檔案，會安靜地
+變成一份說謊的檔案。**
+
+⚠ **而把它接上守門測試的時候，發現 `ALL_TOOLS` 這張手寫名單早就漂了。**
+名單上 8 支，而 `tools/` 底下純 stdlib 的其實有 **14 支** —— 漏掉的六支裡有四支
+（`show_template.py` / `pair_probe.py` / `load_probe.py` / `check_glas_export.py`）
+在 `AGENTS.md` §4.5 上標著**公司機**，也就是「stdlib-only」對它們是**承重**的。
+`show_template.py` 的檔頭甚至直接寫著「stdlib-only，所以公司機也跑得動」——
+一句從來沒有被驗證過的話。
+
+改成**反過來列**：預設每一支都守，例外具名在 `NEEDS_THIRD_PARTY`（七支產合成
+資料的，吃 numpy/cv2），並照 `CLAUDE.md` §1 的規矩配一支**反向測試** ——
+某一支哪天不再需要 numpy 卻沒下架的話會紅（驗過會咬）。加新工具從此自動被納入，
+不需要有人記得回來改名單。那六支**全部一次通過**，也就是說這張防線本來就該蓋到
+它們，只是沒有人接上去。
+
+### ⑥ ③ 錯了，而使用者在公司機上撞到 —— 同一天改第二次
+
+**這一輪最嚴重的錯，值得完整記下來。** ③ 把包改成不壓縮的純文字，只看 git 的
+pack 那是對的。使用者拿去公司機，回報兩件事：
+
+> 「我複製 bundle 是可以 可是非常 lag 很卡」
+> `SyntaxError: Non-UTF-8 code starting with '\xe5' in file d4t.py on line 78146,
+> but no encoding declared`
+
+**同一個病根**：純文字版有 **31% 的位元組是中文**（2,435,014 / 7,848,397）。
+公司機拿程式碼的方式是「瀏覽器複製 → 記事本存檔」，而中文 Windows 的記事本
+會存成 **ANSI（cp950）** —— 中文變成 Big5 位元組，Python 用 UTF-8 讀就死。
+7.6 MB 的全選複製同時也卡到不能用。
+
+⚠ **舊的 base64 版是純 ASCII，所以記事本用什麼編碼都無所謂 —— 而那個保護是
+意外得來的，沒有人寫下來。** 於是它被弄丟的時候，沒有任何一條測試發現。
+**通則：搬運路徑上「意外成立」的性質，跟功能一樣要有測試。** 那條路上的每一個
+環節都在一台我們看不到、也不能除錯的機器上執行。
+
+量了四種格式才定案：
+
+| 格式 | 單份 | 非 ASCII | 每改一次 pack |
+|---|---|---|---|
+| 整包 lzma+base64（更早） | 2,264 KB | 934 | 1,711 KB |
+| 純文字（③，錯的那個） | 7,664 KB | **812,303** | 1 KB |
+| **逐檔 lzma+base64（現在）** | **3,447 KB** | **0** | **94 KB** |
+| 逐檔 base64（不壓） | 10,108 KB | 0 | 78 KB |
+
+「逐檔」是關鍵：整包壓成一個流的話改一行就整份變樣。三個限制一次滿足 ——
+純 ASCII、比 ③ 小 55%、git 每次只多 94 KB。**解包程式的檔頭與訊息也全部改成
+英文**（連 SENTINEL 那一行），因為那一段是最不能壞的：它就是解包本身。
+舊包照樣解得開（三種格式都認得）。
+
+守門人兩條：`test_the_bundle_is_pure_ascii`（問產出來的東西，不是問程式碼裡
+寫了什麼）與 `test_a_bundle_saved_as_ansi_still_unpacks`（**真的用 cp950 存
+一次再解**，順便驗 CRLF 與 UTF-8 BOM）。驗過：cp950 存的那份解出來 383 個
+檔案逐位元組相同。
+
+### ⑦ CI 的 3.9 job 抓到第三張漂掉的手寫清單
+
+⑤ 把 `ALL_TOOLS` 從手寫名單改成「反過來列例外」之後，**CI 的 3.9 job 紅了三條**
+（3.11 / 3.12 全綠）：`check_glas_export.py` 的 `csv` / `zlib`、
+`make_text_bundle.py` 的 `lzma`、`show_template.py` 的 `binascii` / `zlib`
+被判成「模組層 import 了非標準函式庫」—— 而那**全部都是標準函式庫**。
+
+病根在 `_stdlib_names()`：`sys.stdlib_module_names` 是 **3.10+** 才有的，
+而這個 repo 的底線是 3.9（鐵則 2），於是 3.9 退回一張**手抄的 23 個名字的表**
+—— `csv` / `zlib` / `lzma` / `binascii` 一個都不在上面。
+
+**今天第三次踩到同一個形狀**（`ALL_TOOLS`、`NEEDS_THIRD_PARTY` 的前身、
+這一張），所以這次不再手寫：3.9 那條路改成**問系統** ——
+`sys.builtin_module_names` 加上掃一次 stdlib 目錄（含 `lib-dynload` 的
+`.so`/`.pyd`）。探測到 **306 個名字**，手抄表是 23 個。
+
+⚠ **這條路在 3.11 的開發機上永遠不會被執行到**，所以它壞掉只有 CI 的 3.9
+job 會講，而那要等七分鐘。所以配一支測試：`force_probe=True` 強制在 3.10+ 上
+走 3.9 那條路，斷言它蓋得住所有工具真的用到的標準函式庫
+（`test_the_python39_stdlib_probe_agrees_with_the_real_list`）。
+
+**通則：一條「只在某個版本上才會執行」的分支，要有辦法在別的版本上被驗。**
+不然它的正確性就外包給了 CI 的一個 job，而那個 job 只在你推上去之後才說話。
+
+（順帶：這一輪的三個「手寫清單漂掉」全部是**紅的**才被發現的，算是運氣好 ——
+`ALL_TOOLS` 那一張漂了不知道多久，而它漂掉的症狀是**綠的**：少守四支工具。）
+
+### ⏭ 還沒做的那一步：把 378 MB 拿回來（要在這個 PR 併進 main 之後）
+
+使用者選的是「E + G」。E（不壓縮）在這一輪；**G（改寫歷史）刻意留著沒做**，
+因為順序不能反：現在改寫，這條分支併回來的時候舊 blob 又全部回來了。
+
+併進 main 之後，在家用機上跑（已在本地 clone 上實測過，440 個 commit、
+425 個檔案全部保留）：
+
+⚠ **而 G 有一個前提，漏掉的話它會白做。** repo 上有 33 個分支，其中 **29 個
+已經完整併進 main** —— 它們的歷史整段都是 main 舊歷史的子集，**包含全部 217 份
+bundle**。只改寫 main、把那些分支留著的話：`git clone` 預設抓所有分支，舊的
+commit graph 照樣被釘住，**重新 clone 還是 400 MB**。而 `filter-repo` 會跑完、
+會回報成功、本機 `count-objects` 也會顯示 7 MB —— 第八個「跑得完、有數字、
+而且是錯的」，只是這次發作在「你以為已經解決之後」。
+
+（`refs/pull/<n>/head` GitHub 會永久保留，所以那些 commit 之後仍然查得到 ——
+但一般 clone 不抓那些 ref，不影響 clone 大小。）
+
+所以順序是：**併 PR → 刪掉那 32 個分支 → 才跑 G**。
+
+```bash
+# 1. 刪分支（⚠ 這一步從 Claude Code 的 session 做不到：push 新分支可以，
+#    刪 ref 被 GitHub 回 403，而 GitHub MCP 沒有刪分支的工具）
+git push origin --delete $(git branch -r --merged origin/main \
+    | sed 's|origin/||' | grep -vE 'main|project-pros-cons-3tot51')
+# 另外三個未併入的（USING-SIMGEN.md 已經救進來了，刪掉零損失）：
+#   claude/project-changes-summary-w9814v
+#   claude/project-review-kxxmd7            ← 還有 tools/run_tests.py，main 沒有
+#   claude/project-review-pros-cons-pyqsek
+
+# 2. 然後才改寫歷史
+pip install git-filter-repo
+git filter-repo --path bundle/ --invert-paths --force   # 385.58 MiB → 7.23 MiB
+python tools/release.py                                 # 現在這一份重新產出來
+git add -A && git commit -m "bundle: 純文字版重新放回來（歷史已清）"
+git push --force origin main                            # ← 不可逆
+```
+
+跑完 **385.58 MiB → 7.84 MiB**。⚠ 所有 commit 的 SHA 都會變，既有的 clone
+要重新 clone；單人開發、一台開發機，代價就是這樣。
 
 ---
 

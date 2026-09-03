@@ -162,7 +162,7 @@ def _rank_all(others: List[Any], key: tuple, sid: str, step_key: str) -> None:
                 "cannot rank by '%s' in '%s': defect %s has %r there, which "
                 "is not a number. Pick the column that holds the tool's own "
                 "score in “Rank by”."
-                % (by, sid, getattr(item, "defect_id", "?"), raw))
+                % (by, sid, getattr(item, "defect_id", "?"), raw)) from None
         groups.setdefault(tuple(fields[c] for c in within), []).append(
             (value, str(getattr(item, "defect_id", "")), item))
 
@@ -173,7 +173,7 @@ def _rank_all(others: List[Any], key: tuple, sid: str, step_key: str) -> None:
             memo = getattr(item, "_d4t_rank", None)
             if memo is None:
                 memo = {}
-                setattr(item, "_d4t_rank", memo)
+                item._d4t_rank = memo
             memo[key] = (i, total)
 
 

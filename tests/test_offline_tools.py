@@ -30,11 +30,37 @@ FILELIST = os.path.join(TOOLS, "make_filelist.py")
 BUNDLE = os.path.join(TOOLS, "make_text_bundle.py")
 CHECK = os.path.join(TOOLS, "check_files.py")
 RELEASE = os.path.join(TOOLS, "release.py")
-#: 「在受限機器上、套件裝好之前就要能跑」的那幾支 —— 所以 stdlib-only + 3.9。
-#: get_code.py 是第四支（F7-18 之後補的）：它比其他三支更早跑，
-#: 因為它的工作是把程式碼弄上那台機器。
-ALL_TOOLS = (FETCH, INSTALL, DOCTOR, GETCODE, FILELIST, BUNDLE, CHECK,
-             RELEASE)
+#: **要第三方套件才跑得動的那幾支**（全部是產合成資料的）—— 它們吃 numpy/cv2，
+#: 所以下面兩條「stdlib-only」的測試不適用。
+#:
+#: ⚠ **這是一張例外清單，所以它配一支反向的測試**
+#: （:func:`test_every_listed_exception_is_still_an_exception`）——
+#: 某一支哪天不再需要 numpy 了卻沒從這裡拿掉的話，它會**從此少一條防線
+#: 而測試照樣綠**。這個 repo 對例外清單只有一條規矩：一定要有那支反向測試
+#: （`CLAUDE.md` §1）。
+NEEDS_THIRD_PARTY = frozenset({
+    "make_sample.py", "make_sample_rsem.py",      # 合成 lot（numpy/tifffile）
+    "make_mgepi_real.py", "make_mgext.py",        # 擬真 MG×EPI（cv2/numpy）
+    "make_lot_from_gc.py", "make_glas_export.py",  # GC 鋪圖／GLAS 匯出替身
+    "validate_mgepi.py",                          # 可分性驗證
+})
+
+#: 「在受限機器上、套件裝好之前就要能跑」的那些 —— 所以 stdlib-only + 3.9。
+#:
+#: ⚠ **這裡以前是一張手寫的名單，而它漂了**（2026-09-03 發現）：清單上有 8 支，
+#: 而 `tools/` 底下**純 stdlib 的其實有 14 支**。漏掉的那 6 支不是無關緊要的
+#: —— `show_template.py` / `pair_probe.py` / `load_probe.py` /
+#: `check_glas_export.py` 四支在 `AGENTS.md` §4.5 上都標著**公司機**，也就是
+#: 「stdlib-only」對它們是承重的，而那件事從來沒有被驗證過。
+#: （`show_template.py` 的檔頭甚至直接寫著「stdlib-only，所以公司機也跑得動」。）
+#:
+#: 所以改成**反過來列**：預設每一支都要守，例外要具名。加一支新工具會自動
+#: 被納入，不需要有人記得回來改名單。`_` 開頭的是給別人 import 的內部模組，
+#: 跟 `test_every_tool_is_assigned_to_a_machine_in_the_docs` 同一條規則。
+ALL_TOOLS = tuple(sorted(
+    os.path.join(TOOLS, n) for n in os.listdir(TOOLS)
+    if n.endswith(".py") and not n.startswith("_")
+    and n not in NEEDS_THIRD_PARTY))
 
 if TOOLS not in sys.path:
     sys.path.insert(0, TOOLS)
@@ -424,16 +450,47 @@ def test_explain_venv_failure_suggests_no_venv():
 
 # ---------------------------------------------------------------- bootstrap 鐵則：只用標準函式庫
 
-def _stdlib_names():
-    names = getattr(sys, "stdlib_module_names", None)
-    if names:
-        return set(names)
-    return {                                     # Python 3.9 沒有 stdlib_module_names
-        "__future__", "argparse", "ast", "base64", "datetime", "hashlib", "json",
-        "os", "platform", "re", "shutil", "struct", "subprocess", "sys",
-        "tempfile", "time", "typing", "unicodedata", "zipfile", "importlib",
-        "urllib", "ssl", "hashlib",
-    }
+def _stdlib_names(force_probe=False):
+    """標準函式庫的頂層模組名。
+
+    ``sys.stdlib_module_names`` 是 **Python 3.10+** 才有的，而這個 repo 的底線
+    是 3.9（鐵則 2）。3.9 走下面的**探測**：問直譯器自己「內建模組有哪些」
+    加上掃一次 stdlib 目錄。
+
+    ⚠ **這裡以前是一張手抄的 23 個名字的表**，而它當然不完整 ——
+    `csv` / `zlib` / `lzma` / `binascii` 一個都不在上面。症狀藏了很久，因為
+    當時被檢查的八支工具剛好沒有在模組層 import 到它們；2026-09-03 把檢查
+    範圍改成「`tools/` 底下全部」之後，**CI 的 3.9 job 當場紅三條**
+    （而 3.11 / 3.12 全綠，因為那兩版走的是上面那條路）。
+
+    今天第三次踩到同一個形狀：手寫的清單會漂，而漂掉的時候測試通常是**綠的**
+    （這一次比較幸運，它是紅的）。所以這裡不再手寫 —— 問系統。
+
+    ``force_probe`` 只給測試用：在 3.10+ 上也走 3.9 那條路，好驗它是對的。
+    """
+    if not force_probe:
+        names = getattr(sys, "stdlib_module_names", None)
+        if names:
+            return set(names)
+
+    import sysconfig
+
+    out = set(sys.builtin_module_names)           # zlib / binascii 常在這裡
+    stdlib = sysconfig.get_paths().get("stdlib") or ""
+    for base in (stdlib, os.path.join(stdlib, "lib-dynload")):
+        if not os.path.isdir(base):
+            continue
+        for entry in os.listdir(base):
+            full = os.path.join(base, entry)
+            if entry.endswith(".py"):
+                out.add(entry[:-3])
+            elif entry.endswith((".so", ".pyd")):
+                out.add(entry.split(".")[0])      # _lzma.cpython-39-x86_64...so
+            elif os.path.isdir(full) and os.path.isfile(
+                    os.path.join(full, "__init__.py")):
+                out.add(entry)
+    out.discard("")
+    return out
 
 
 def _module_level_imports(path):
@@ -456,6 +513,48 @@ def _sibling_tools():
     """``tools/`` 底下的其他工具。互相 import 是可以的 —— 這條規則要禁的是
     **第三方套件**（那台機器上可能一個都裝不起來），不是同一個資料夾裡的同伴。"""
     return {os.path.splitext(f)[0] for f in os.listdir(TOOLS) if f.endswith(".py")}
+
+
+def test_the_python39_stdlib_probe_agrees_with_the_real_list():
+    """3.9 那條**探測**的路，要跟 3.10+ 的 ``sys.stdlib_module_names`` 一致。
+
+    「一致」只問一個方向、而且只問**我們真的會用到的那些名字**：探測出來的
+    集合必須蓋住所有工具在模組層 import 到的東西。全等是問錯的問題 ——
+    探測會多撈到 `_ctypes` 那種底線開頭的內部模組，那不影響判斷。
+
+    這條測試存在，是因為 3.9 那條路**在 3.11 的開發機上永遠不會被執行到**，
+    所以它壞掉的時候只有 CI 的 3.9 job 會講 —— 而那要等七分鐘。
+    """
+    real = getattr(sys, "stdlib_module_names", None)
+    if not real:
+        pytest.skip("這個直譯器就是 3.9，兩條路是同一條")
+
+    probed = _stdlib_names(force_probe=True)
+    used = set()
+    for script in ALL_TOOLS:
+        used |= _module_level_imports(script)
+    missing = sorted((used & set(real)) - probed - _sibling_tools())
+    assert not missing, (
+        "3.9 的探測漏掉了這幾個標準函式庫：%s\n"
+        "（在 3.9 的 CI 上，用到它們的工具會被誤判成 import 了第三方套件）"
+        % missing)
+
+
+@pytest.mark.parametrize("name", sorted(NEEDS_THIRD_PARTY))
+def test_every_listed_exception_is_still_an_exception(name):
+    """`NEEDS_THIRD_PARTY` 上的每一支，**現在真的還在 import 第三方套件**。
+
+    這是 `CLAUDE.md` §1 那條規矩的實作：例外修好了卻沒從表上拿掉的話，那一支
+    從此少一條防線**而測試照樣綠**。少了這一條，上面那張表就是一張只會變長
+    的紙 —— 而這一輪發現的舊名單正是那樣漂掉的。
+    """
+    path = os.path.join(TOOLS, name)
+    assert os.path.isfile(path), "%s 不在了，請從 NEEDS_THIRD_PARTY 拿掉" % name
+    imports = _module_level_imports(path)
+    extra = imports - _stdlib_names() - _sibling_tools()
+    assert extra, (
+        "%s 已經不需要第三方套件了 —— 把它從 NEEDS_THIRD_PARTY 拿掉，"
+        "它就會被 stdlib-only 與 3.9 那兩條測試守著。" % name)
 
 
 @pytest.mark.parametrize("script", ALL_TOOLS)
@@ -1081,7 +1180,7 @@ def test_a_single_part_never_claims_the_tree_is_ready(tmp_path):
                        timeout=300)
     out = r.stdout.decode("utf-8", "replace")
     assert r.returncode == 0, out
-    assert "還沒到齊" in out, out
+    assert "NOT all here yet" in out, out
     assert "doctor" not in out, "少了一百多個檔案卻叫他去跑 doctor"
 
 
@@ -1217,11 +1316,127 @@ def test_a_truncated_compressed_bundle_says_so_instead_of_crashing(tmp_path):
     out = r.stdout.decode("utf-8", "replace")
     assert r.returncode == 2, out
     assert "Traceback" not in out, out
-    assert "重新複製" in out, out
+    # 訊息 2026-09-03 起是英文 —— 整個包必須是純 ASCII（見
+    # `test_the_bundle_is_pure_ascii`），而這些字串就住在包的檔頭裡。
+    assert "Copy it again" in out, out
     assert not (tmp_path / "d").exists() or not list((tmp_path / "d").rglob("*.py"))
 
 
 # ---------------------------------------------------------------- 每次更新都要重產
+
+def test_the_bundle_is_pure_ascii():
+    """出貨的那一包**一個非 ASCII 位元組都不准有**。
+
+    這是 2026-09-03 使用者在公司機上撞到的那個 bug 的守門人。那天早上把包改成
+    不壓縮的純文字（為了 git 的 pack），而那讓 **31% 的位元組變成中文** ——
+    公司機拿程式碼的方式是「在瀏覽器複製 → 記事本存檔」，而中文 Windows 的
+    記事本會存成 ANSI（cp950）。中文因此變成 Big5 位元組，Python 用 UTF-8 讀
+    就死在：
+
+        SyntaxError: Non-UTF-8 code starting with '\\xe5' in file d4t.py
+        on line 78146, but no encoding declared
+
+    **純 ASCII 的檔案不可能這樣壞**，不管記事本挑哪一種編碼。所以現在資料區是
+    逐檔 base64，而**解包程式的檔頭與訊息也全部改成英文** —— 那一段是最不能
+    壞的，它就是解包本身。
+
+    ⚠ 這一條要看**產出來的東西**，不是看程式碼裡寫了什麼：非 ASCII 可以從
+    任何一個地方溜進去（檔頭、SENTINEL、一句錯誤訊息）。
+    """
+    text = make_text_bundle.build("d4t_bundle.py", REPO)
+    bad = [(i, ln) for i, ln in enumerate(text.split("\n"), 1)
+           if any(ord(c) > 127 for c in ln)]
+    assert not bad, (
+        "包裡有 %d 行含非 ASCII 字元，第一行是第 %d 行：\n  %s\n\n"
+        "公司機的記事本會把它存成 cp950，然後 Python 讀不動整個檔案。"
+        % (len(bad), bad[0][0], bad[0][1][:120]))
+
+
+def test_a_bundle_saved_as_ansi_still_unpacks():
+    """把包**用 cp950 存一次**（＝中文 Windows 記事本的預設），照樣解得開。
+
+    上面那條測「沒有非 ASCII」，這一條測「所以它撐得住」—— 兩條問的是同一件
+    事的兩端，而只有這一條會在「某天有人加了一個中文字、而上面那條被改鬆」
+    的時候還抓得到。順便一起驗 CRLF 與 UTF-8 BOM（記事本的另外兩種存法）。
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    text = make_text_bundle.build("d4t_bundle.py", REPO)
+    for enc, newline in (("cp950", "\r\n"), ("utf-8-sig", "\r\n"),
+                         ("utf-8", "\n")):
+        d = tempfile.mkdtemp()
+        try:
+            path = os.path.join(d, "d4t_bundle.py")
+            with open(path, "w", encoding=enc, newline=newline) as f:
+                f.write(text)
+            r = subprocess.run([sys.executable, path, "--list"], cwd=d,
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               timeout=300)
+            out = r.stdout.decode("utf-8", "replace")
+            assert r.returncode == 0, "存成 %s 之後解不開：\n%s" % (enc, out)
+            assert "files." in out, out
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
+def test_the_shipped_bundle_is_not_compressed():
+    """出貨的那一包**不壓縮**，而這一條在守的是 git 的 pack，不是可讀性。
+
+    壓縮檔改一行就整份變樣，git 沒有辦法 delta 壓縮它 —— 於是每個 commit
+    都完整存一份。實測同一次「改一支模組再重產」：舊格式（lzma+base64）
+    第二版多花 **1,702 KB**，純文字多花 **1 KB**。舊做法在 217 個 commit 裡
+    累積了 88 MB，佔 pack 的 46%，而那些副本一份都沒有被讀過。
+
+    ⚠ **`compress=True` 的能力要留著**（底下幾條測試在測它）：解包程式兩種
+    格式都認得，而已經搬進公司機的舊包是壓縮的。這一條問的只有一件事：
+    **`release.py` 產出去的那一份**用哪一種。
+
+    這條測試存在，是因為那個決定的全部內容就是一個布林值 —— 而一個布林值
+    是這個 repo 裡最容易被「順手改回來」的東西，改回來的症狀要三個月後
+    才看得到（pack 又胖了）。
+    """
+    with open(os.path.join(REPO, "tools", "release.py"),
+              "r", encoding="utf-8") as f:
+        src = f.read()
+    # 用 ast 不用正則：`build(os.path.basename(bundle_path), …)` 裡面有巢狀
+    # 括號，非貪婪的正則會停在**內層**那個 `)` 上，然後對著
+    # `os.path.basename(bundle` 判斷有沒有 `compress=False` —— 永遠是「沒有」。
+    # （寫這條測試的時候真的踩了一次。）
+    calls = [n for n in ast.walk(ast.parse(src))
+             if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Attribute)
+             and n.func.attr == "build"
+             and getattr(n.func.value, "id", "") == "make_text_bundle"]
+    assert calls, "release.py 不再呼叫 make_text_bundle.build 了？"
+    for call in calls:
+        kw = {k.arg: k.value for k in call.keywords}
+        assert "compress" in kw and kw["compress"].value is False, (
+            "release.py 產出去的那一包又變成壓縮的了（第 %d 行）。那正是 pack 裡\n"
+            "88 MB 的原因（見 release.py 的模組說明）—— 要改回去請先重量一次那張表。"
+            % call.lineno)
+
+
+@needs_git
+def test_the_bundle_in_the_repo_uses_the_per_file_form():
+    """而且 repo 裡真的躺著的那一份也要是逐檔那一種（不是只有程式碼講對）。
+
+    ⚠ 這條測試 2026-09-03 一天之內改過兩次，而那正是它該存在的證明：早上是
+    `#ENC text`（純文字，為了 git 的 pack），下午使用者在公司機上撞到
+    `SyntaxError: Non-UTF-8 code` —— 純文字帶著 31% 的中文位元組，而記事本
+    存成 cp950。現在是 `#ENC lzma+base64/file`：純 ASCII、git 還是壓得動。
+    """
+    with open(os.path.join(REPO, "bundle", "d4t_bundle.py"),
+              "r", encoding="utf-8") as f:
+        lines = f.read().split("\n")
+    # **逐行**找那個分隔標記，不要 `split(SENTINEL)`：包裡裝著
+    # `tools/make_text_bundle.py` 自己，而那支的原始碼裡就寫著這個字串 ——
+    # 用子字串切會切在解包程式的中間。`release.py` 的 `_bundle_entries`
+    # 一直是逐行找的，這裡跟它同一個做法。
+    i = lines.index(make_text_bundle.SENTINEL)
+    assert lines[i + 1] == "#ENC lzma+base64/file", lines[i + 1]
+
 
 @needs_git
 def test_the_transfer_files_are_up_to_date():

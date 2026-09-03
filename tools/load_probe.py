@@ -85,7 +85,7 @@ class _Timer:
 
     def report(self):
         total = sum(dt for _l, dt, _e in self.rows)
-        width = max([self._cols(l) for l, _d, _e in self.rows] + [10])
+        width = max([self._cols(lb) for lb, _d, _e in self.rows] + [10])
         lines = ["", "秒數（總計 %.2f s）" % total, "-" * (width + 22)]
         for label, dt, err in self.rows:
             bar = "#" * min(30, int(round(30 * dt / total))) if total else ""
