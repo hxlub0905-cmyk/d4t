@@ -33,6 +33,7 @@ from ..core.pipeline.decide_tree import (          # noqa: F401 — 再匯出
     layout_cells, leaf_color, leaf_stats, parse_simple_condition, path_text,
     rows_reaching, suggest_condition,
 )
+from . import theme
 from .theme import TOKENS
 
 __all__ = [
@@ -317,14 +318,16 @@ class _EntryItem(QGraphicsItem):
         body = QRectF(0, 0, _ENTRY_W, _ENTRY_H)
         p.setPen(QPen(col, 1.4))
         p.setBrush(QColor(TOKENS["bg_surface"]))
-        p.drawRoundedRect(body, 7, 7)
+        # 判定的入口卡跟畫布上的節點卡是同一種東西 —— 圓角讀同一個 token（F80）
+        r = theme.radius("radius_md")
+        p.drawRoundedRect(body, r, r)
         # funnel（分揀槽）—— 手畫的小漏斗，跟 mockup 同一個記號。
         tile = QRectF(8, (_ENTRY_H - 32) / 2.0, 32, 32)
         wash = QColor(col)
         wash.setAlpha(42)
         p.setPen(QPen(col, 1.0))
         p.setBrush(wash)
-        p.drawRoundedRect(tile, 6, 6)
+        p.drawRoundedRect(tile, r, r)
         cx, cy = tile.center().x(), tile.center().y()
         fun = QPainterPath(QPointF(cx - 8, cy - 7))
         fun.lineTo(QPointF(cx + 8, cy - 7))

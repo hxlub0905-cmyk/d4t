@@ -74,6 +74,11 @@ def _make(kind, parent):
         b.setObjectName("primary")
     elif kind == "cardButton":
         b.setObjectName("cardButton")
+    elif kind.startswith("cardButton:"):        # #cardButton 的三種 shape
+        b.setObjectName("cardButton")
+        b.setProperty("shape", kind.split(":", 1)[1])
+    elif kind == "galleryChip":
+        b.setObjectName("galleryChip")
     elif kind in ("secondary", "danger", "ghost"):
         b.setProperty("variant", kind)
     return b, b
@@ -91,6 +96,12 @@ KINDS = (
     ("danger", "border_focus"),
     ("ghost", "border_focus"),
     ("cardButton", "border_focus"),
+    # F80：這三種 shape 與 galleryChip 以前**完全沒有被問過** —— 而
+    # #cardButton 與 #galleryChip 正是兩個忘了把 padding 講回來的變體。
+    ("cardButton:square", "border_focus"),
+    ("cardButton:tool", "border_focus"),
+    ("cardButton:wide", "border_focus"),
+    ("galleryChip", "border_focus"),
     ("tool_plain", "border_focus"),
     ("tool_primary", "focus_ring_inverse"),
 )
@@ -165,16 +176,23 @@ def test_every_button_variant_shows_that_it_has_focus(qapp, theme_name):
     theme_mod.apply_theme(qapp, "light")
 
 
-def test_the_focus_ring_does_not_move_the_label(qapp):
+def test_the_focus_ring_costs_no_space(qapp):
     """焦點框畫在按鈕**裡面**（Qt 的 outline 不生效），所以它會吃掉 1px。
 
-    那 1px 一定要從自己的 padding 還回去，否則每次 Tab 過去文字就跳一格 ——
-    比沒有焦點框更糟，因為畫面在動而使用者不知道為什麼。
+    那 1px 一定要從自己的 padding 還回去，否則每次 Tab 過去按鈕就長大一圈、
+    把版面上的鄰居推開 —— 比沒有焦點框更糟，因為畫面在動而使用者不知道為什麼。
 
-    ``contentsRect()`` 就是 Qt 依 border + padding 算出來的文字可用區，
-    直接問它，不必去猜文字的畫素落在哪。
+    ⚠ **這條測試以前是空轉的**（F80 抓到）。它原本比的是 ``contentsRect()``，
+    而 QSS 底下 ``QPushButton.contentsRect()`` 的邊界**恆為 (0,0,0,0)**
+    —— border 與 padding 一格都沒反映進去，所以那個比較永遠相等、永遠綠。
+    測法二版比「文字在按鈕裡的位置」也是空的：按鈕比 sizeHint 寬的時候
+    ``QPushButton`` 會把文字**置中**，padding 差 1px 完全不動它。
+
+    真正看得見那 1px 的地方是 :meth:`sizeHint` —— 環一出現按鈕就變大，
+    而按鈕在版面裡變大就是把別人推開。實測（拿掉 padding 補償）：
+    ``81×30 → 83×32``。
     """
-    moved = []
+    grew = []
     for kind, _token in KINDS:
         host = QWidget()
         lay = QVBoxLayout(host)
@@ -185,18 +203,19 @@ def test_the_focus_ring_does_not_move_the_label(qapp):
         host.show()
         qapp.processEvents()
         host.activateWindow()
-        button.resize(140, 30)
 
         decoy.setFocus(Qt.TabFocusReason)
         qapp.processEvents()
-        before = button.contentsRect()
+        before = button.sizeHint()
         button.setFocus(Qt.TabFocusReason)
         qapp.processEvents()
-        after = button.contentsRect()
+        after = button.sizeHint()
         host.hide()
         if before != after:
-            moved.append("%s: %s -> %s" % (kind, before, after))
-    assert not moved, "拿到焦點時文字區跟著移動了：\n  " + "\n  ".join(moved)
+            grew.append("%s: %dx%d -> %dx%d"
+                        % (kind, before.width(), before.height(),
+                           after.width(), after.height()))
+    assert not grew, "拿到焦點時按鈕變大了（會把版面上的鄰居推開）：\n  " + "\n  ".join(grew)
 
 
 # --------------------------------------------------------------------------- #
@@ -571,6 +590,92 @@ def test_pressed_is_a_step_you_can_actually_see(qapp, theme_name):
     d = abs(_lab_L(pal["pressed_bg"]) - _lab_L(pal["hover_warm"]))
     assert d >= 6.0, \
         "%s：pressed 與 hover 只差 ΔL* %.1f，按下去看不出來" % (theme_name, d)
+
+
+def _border_colour(button):
+    """按鈕**邊框**的顏色 —— 最左那一格（圓角只影響四個角，中線那一列是直的）。
+
+    配 :func:`_fill_colour` 用：這一輪問的正好是「這兩個一不一樣」。
+
+    ⚠ **這顆按鈕不能是有焦點的那一顆。** 焦點框是畫在按鈕**自己的填色上面**
+    的 2px 環（見本檔開頭 A1 那一組），於是最外面兩格會是
+    ``focus_ring_inverse``（primary 上是白色），第 3 格才是填色 —— 邊框整個被
+    蓋掉，量到的東西跟這一輪要問的無關。第一版就是這樣寫的，而它**沒有焦點框
+    以外的任何症狀**：測試照樣綠，只是問錯了問題。
+    """
+    assert not button.hasFocus(), \
+        "量邊框之前要先把焦點移開，不然量到的是焦點環"
+    button.resize(140, 30)
+    pm = QPixmap(button.size())
+    pm.fill(QColor(BACKDROP))
+    button.render(pm)
+    return pm.toImage().pixelColor(0, 15)
+
+
+@pytest.mark.parametrize("theme_name", ("light", "dark"))
+def test_the_primary_border_moves_with_its_fill(qapp, theme_name):
+    """按下去的時候，邊框要跟著填色走（F78）。
+
+    ``#primary`` 只在一般狀態寫了一次 ``border: 1px solid $accent``，而
+    ``:hover`` / ``:pressed`` 只換了 ``background`` —— 於是按住的那一刻，邊框
+    （``accent``）比填色（``accent_active``）**亮**了一圈，看起來像一圈光暈；
+    hover 則相反，邊框比填色暗，看起來像凹進去。兩個都是與該狀態相反的意思，
+    而全平面設計沒有陰影可以蓋過去。
+
+    量的是 ``:pressed``（``setDown`` 在離屏平台上真的生效）；``:hover`` 在離屏
+    render 不出來，由下一條用 QSS 的結構去守。
+    """
+    theme_mod.apply_theme(qapp, theme_name)
+    host = QWidget()
+    lay = QVBoxLayout(host)
+    # 焦點得有地方去：留在這顆按鈕上的話，量到的是焦點環不是邊框。
+    decoy = QPushButton("elsewhere", host)
+    lay.addWidget(decoy)
+    b = QPushButton("Run trial", host)
+    b.setObjectName("primary")
+    lay.addWidget(b)
+    host.show()
+    qapp.processEvents()
+    host.activateWindow()
+    decoy.setFocus(Qt.TabFocusReason)
+    qapp.processEvents()
+
+    b.setDown(True)
+    qapp.processEvents()
+    fill, border = _fill_colour(b), _border_colour(b)
+    host.hide()
+    theme_mod.apply_theme(qapp, "light")
+
+    assert fill == QColor(theme_mod.PALETTES[theme_name]["accent_active"]), \
+        "%s：按下去的填色不是 accent_active（%s）" % (theme_name, fill.name())
+    assert border == fill, \
+        "%s：按下去邊框 %s、填色 %s —— 那一圈看起來像光暈" \
+        % (theme_name, border.name(), fill.name())
+
+
+def test_no_primary_state_changes_its_fill_and_leaves_the_border_behind(qapp):
+    """**結構**上守住同一件事，因為 ``:hover`` 在離屏平台畫不出來。
+
+    這不是「QSS 裡有沒有那一行」的字串比對（這個檔案的開頭講過那種測試沒有
+    用）—— 問的是一條規則自己的完整性：**只要一條 ``#primary`` 的狀態規則動了
+    ``background``，它就必須同時講出邊框。** 下一個人加 ``:focus:hover`` 或別的
+    狀態時，這條會替他問一次。
+    """
+    import re
+
+    qss = re.sub(r"/\*.*?\*/", "", theme_mod.build_stylesheet(), flags=re.S)
+    guilty = []
+    for sel, decls in re.findall(r"([^{}]+)\{([^{}]*)\}", qss):
+        sel = " ".join(sel.split())
+        if "#primary" not in sel or not re.search(r":(hover|pressed|checked)", sel):
+            continue
+        if not re.search(r"(^|[;\s])background\s*:", decls):
+            continue
+        if not re.search(r"border(-color)?\s*:", decls):
+            guilty.append(sel)
+
+    assert guilty == [], \
+        "這幾條規則換了填色卻沒換邊框：%s" % guilty
 
 
 def test_a_checkable_button_looks_checked(qapp):

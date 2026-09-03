@@ -33,7 +33,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import (
+    QAbstractAnimation, QEasingCurve, QPointF, QRectF, Qt, QVariantAnimation,
+    Signal,
+)
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -155,6 +158,73 @@ _CUT_R = 8.0
 #: 連線的 z 值。節點是 0，所以線平常畫在卡片**底下**（n8n 也是這樣，
 #: 卡片才是主角）；滑鼠移上來的那一條抬到卡片之上 —— 見 ``hoverEnterEvent``。
 _Z_EDGE, _Z_EDGE_HOVER = -1.0, 1.0
+
+#: 縮到這個比例以下，卡片只畫「認得出是哪一張」需要的東西（F78）。
+#:
+#: 背景的點陣底早就有這條線了（`drawBackground` 在 0.45 以下不畫點，理由是
+#: 「會糊成一片灰」），但**卡片沒有** —— 於是 `fit()` 到 40% 的時候，每張卡
+#: 上那兩行 6–7pt 的副標與設定摘要、加上左右各一排埠標籤，全部變成糊在卡片
+#: 上的灰噪點，而且每張卡還照跑一次 `_draw_elided` 的 elide 計算。
+#:
+#: 值取 0.55 而不是跟著背景的 0.45：字比點更早糊。`MIN_FIT_SCALE` 那裡量過
+#: 「副標要到 70% 才讀得回來」—— 0.55 是「已經讀不到了，別再畫」的位置，
+#: 中間那段留給還看得出輪廓的模糊字。
+_LOD_TERSE = 0.55
+
+#: 「換一個視角」的動畫要不要跑（F80）。
+#:
+#: 這**不是裝飾**。`fit()` / `reset_zoom()` / `tidy()` 以前是瞬間跳的，而瞬間跳
+#: 會讓使用者**失去「我剛剛在看的是哪一塊」** —— 畫面前後兩張圖之間沒有任何線索
+#: 說「這兩張是同一份 pipeline」，他得重新找一次自己的位置。這叫空間連續性，
+#: 是節點畫布上少數幾個動畫真的有用的地方。
+#:
+#: ⚠ **測試裡要關掉**（`tests/conftest.py` 有一支 autouse fixture）。開著的話
+#: 「按了 fit 之後縮放是多少」會變成一個**跟時間有關**的問題，而那種測試會間歇性
+#: 變紅、然後被關掉。滾輪縮放刻意**不**走這條路：它本來就是一格一格的，加上動畫
+#: 只會變得黏手。
+ANIMATE = True
+#: 動畫長度（毫秒）。短到不擋路、長到看得出東西往哪裡去。
+ANIM_MS = 170
+
+
+def card_radius() -> float:
+    """節點卡的圓角 —— **讀 QSS 的同一個 token**（F80）。
+
+    以前這裡寫死 7，而 QSS 的 ``radius_md`` 是 6：畫布上的卡與面板上的卡
+    是同一種東西，圓角卻差 1px，而且沒有任何東西擋得住它繼續漂。
+    每次呼叫都重讀，因為換主題時 ``TOKENS`` 是**就地更新**的。
+    """
+    return theme.radius("radius_md")
+
+
+#: 背景點陣的間距 —— **同時是版面的格線**（F79）。
+#:
+#: 以前它是 22，而且**只**是背景的裝飾。版面用的是另外一組數字：欄距
+#: ``NODE_W + COL_GAP`` = 320（320 / 22 = 14.55）、列距「卡片高 + ``ROW_GAP``」
+#: = 90（90 / 22 = 4.09）。兩組都不整除，所以按了「排整齊」之後**卡片的角落落
+#: 在點與點之間，而且每一列偏移的量還不一樣** —— 那張點陣底看起來像對齊參考，
+#: 實際上對不齊任何東西。
+#:
+#: 20 是唯一不必動卡片尺寸就成立的值：``NODE_W + COL_GAP`` = 204 + 116 = 320
+#: 正好是 16 × 20。列距則由 :func:`on_grid` 進位（卡片高度是變動的 —— 有
+#: 「整批跑一次」腳帶的卡比較高）。
+#:
+#: ⚠ **卡片的右緣仍然不在點上**（204 不是 20 的倍數）。量過了：要讓它也落在點
+#: 上得把 ``NODE_W`` 收成 200，而那 4px 是 F13-⑤ 花錢買回來的標題寬度
+#: （190 → 204 的理由是 ``Compare two streams`` 被切）。左上角對齊才是「這一排
+#: 卡有沒有排好」的判準，右緣多出來的 4px 是同一個常數，不會讓卡片之間歪掉。
+GRID = 20.0
+
+
+def on_grid(value: float) -> float:
+    """把一段長度**往上**進位到 :data:`GRID` 的倍數。
+
+    往上不往下：列距是「這一列最高的卡 + 間距」，往下取整會讓最高的那張卡
+    貼到下一列去。
+    """
+    step = GRID
+    return float(int((float(value) + step - 1e-9) // step) * step)
+
 
 #: 還沒拉線時，一列最多排幾張卡（見 :func:`layout_columns`）。
 WRAP = 4
@@ -388,6 +458,9 @@ class _NodeItem(QGraphicsItem):
         # 卡片一收 hover，事件就不再穿過它，壓在線中點上的卡會把 × 悶死；
         # 見 shape() 的說明與 test_ui_canvas_cut_button）。
         self._hover = False
+        #: 現在這張卡是不是正被使用者的手拖著（F79）。只有這種時候位置才吸到
+        #: 格線上 —— 理由見 :meth:`_snapped`。
+        self._dragging = False
         tip = "%s — %s" % (self.node_id, info.get("label", ""))
         if info.get("problem"):
             # 標記說「有問題」，滑鼠停上去說「是什麼問題」。標記本身放不下一句話，
@@ -510,7 +583,8 @@ class _NodeItem(QGraphicsItem):
         """
         p = QPainterPath()
         p.setFillRule(Qt.WindingFill)
-        p.addRoundedRect(QRectF(0.0, -1.0, NODE_W, self.height() + 2.0), 7, 7)
+        r = card_radius()
+        p.addRoundedRect(QRectF(0.0, -1.0, NODE_W, self.height() + 2.0), r, r)
         for anchor in self.in_anchors_local() + self.out_anchors_local():
             p.addEllipse(anchor, _PORT_GRAB, _PORT_GRAB)
         return p
@@ -736,6 +810,15 @@ class _NodeItem(QGraphicsItem):
         return best
 
     # -- 繪製 ---------------------------------------------------------------
+    @staticmethod
+    def terse_at(scale: float) -> bool:
+        """縮到這個比例時，這張卡要不要收掉小字（F78）。
+
+        跟 :meth:`_EdgeItem.line_pen` 同一個理由拉出來：判斷寫在 paint 裡就
+        只有數像素才驗得到。
+        """
+        return float(scale) < _LOD_TERSE
+
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         enabled = bool(self.info.get("enabled", True))
         selected = self.isSelected()
@@ -745,14 +828,27 @@ class _NodeItem(QGraphicsItem):
 
         p.setRenderHint(QPainter.Antialiasing, True)
 
-        # 投影：讓節點浮在網格之上。用畫的而不是 QGraphicsDropShadowEffect ——
-        # effect 會強迫 Qt 額外開一層離屏 buffer，為了 2px 的陰影不值得。
-        # hover / 選中時深一階：跟按鈕的 hover 同一個語言 ——「這個東西回應你」。
-        lifted = (self._hover or selected) and enabled
-        shadow = QColor(0, 0, 0, (64 if lifted else 46) if enabled else 22)
-        p.setPen(Qt.NoPen)
-        p.setBrush(shadow)
-        p.drawRoundedRect(body.translated(1.5, 2.5 if not lifted else 3.0), 7, 7)
+        # 這張卡現在被縮到多小（F78）。讀 painter 的 world transform 而不是
+        # `_opt.levelOfDetailFromTransform`：節點沒有自己的 transform，兩者
+        # 同值，而這一支不必去信一個平常被丟掉的參數。
+        terse = self.terse_at(p.worldTransform().m11())
+        radius = card_radius()
+
+        # **這裡以前有一塊投影，F81 拿掉了**（使用者在 A/B/C 三張圖裡選了 B）。
+        #
+        # 它畫的是一塊實心、單一 alpha、有硬邊的偏移方塊 —— 那不是陰影，是重影，
+        # 而且 `theme.py` 的檔頭從 F7-2 起就寫著「全平面 —— 沒有陰影、沒有漸層」。
+        # 兩者矛盾了很久。
+        #
+        # 量出來它其實**只在亮色主題上看得見**：alpha 46 的黑疊在亮色的畫布底
+        # 上是 ΔL* 15.7，疊在暗色的 #16181d 上只有 ΔL* 2.3。也就是說暗色的卡片
+        # 一直是靠明度差站著的（底比卡片暗 ΔL* 6.9），只有亮色靠這塊重影撐 ——
+        # 因為亮色的 `canvas_bg` 離白卡只有 ΔL* 4.9。
+        #
+        # 所以拿掉陰影的同時把亮色的 `canvas_bg` 壓深（ΔL* 4.9 → 7.7，比暗色的
+        # 6.9 還多一點）：**卡片改成靠自己的明度浮起來**，而那正是 flat 的做法。
+        # hover / 選中的回饋沒有跟著消失 —— 它們本來就同時在動邊框的顏色與粗細
+        # （見下面），陰影那一階只是重複講了一次。
 
         gid = str(self.info.get("group", "") or "enhance")
         tile_col = QColor(theme.group_hex(gid) if enabled else TOKENS["seg_disabled"])
@@ -765,7 +861,7 @@ class _NodeItem(QGraphicsItem):
             halo.setAlpha(56)
             p.setPen(QPen(halo, 6.0))
             p.setBrush(Qt.NoBrush)
-            p.drawRoundedRect(body, 7, 7)
+            p.drawRoundedRect(body, radius, radius)
 
         if selected:
             border = QColor(TOKENS["accent"])
@@ -781,7 +877,7 @@ class _NodeItem(QGraphicsItem):
             pen.setStyle(Qt.DashLine)
         p.setPen(pen)
         p.setBrush(QColor(TOKENS["bg_surface"] if enabled else TOKENS["disabled_bg"]))
-        p.drawRoundedRect(body, 7, 7)
+        p.drawRoundedRect(body, radius, radius)
 
         # 「整批跑一次」的腳帶（F50）。畫在本體**下面**，同一個圓角收邊。
         if self.is_lot():
@@ -794,7 +890,7 @@ class _NodeItem(QGraphicsItem):
         wash.setAlpha(46 if enabled else 24)
         p.setPen(QPen(tile_col if enabled else QColor(TOKENS["border_default"]), 1.0))
         p.setBrush(wash)
-        p.drawRoundedRect(tile, 6, 6)
+        p.drawRoundedRect(tile, radius, radius)
 
         icon_rect = QRectF(tile.center().x() - _ICON / 2.0,
                            tile.center().y() - _ICON / 2.0, _ICON, _ICON)
@@ -819,16 +915,26 @@ class _NodeItem(QGraphicsItem):
         f.setBold(True)
         f.setPointSizeF(max(7.0, f.pointSizeF()))
         p.setFont(f)
-        _draw_elided(p, QRectF(text_x, 11, text_w, 16),
-                     str(self.info.get("label", self.node_id)))
-        f.setBold(False)
-        f.setPointSizeF(max(6.0, f.pointSizeF() - 1.0))
-        p.setFont(f)
-        p.setPen(QColor(TOKENS["text_secondary"] if enabled else TOKENS["text_disabled"]))
-        _draw_elided(p, QRectF(text_x, 28, text_w, 14), self.subtitle())
-        parts = self.summary_parts()
-        if parts:
-            _draw_parts(p, QRectF(text_x, 43, text_w, 14), parts)
+        # 縮很小的時候**標題留著**（那是這張卡的身分，也是唯一還讀得出輪廓的
+        # 一行），副標與設定摘要收掉 —— 見 `_LOD_TERSE`。
+        if terse:
+            # 只剩一行的時候把它擺到卡片中線上，不然標題會孤零零貼在上緣、
+            # 底下空一大塊，看起來像沒畫完。
+            _draw_elided(p, QRectF(text_x, (min(NODE_H, self.body_height()) - 16) / 2.0,
+                                   text_w, 16),
+                         str(self.info.get("label", self.node_id)))
+        else:
+            _draw_elided(p, QRectF(text_x, 11, text_w, 16),
+                         str(self.info.get("label", self.node_id)))
+            f.setBold(False)
+            f.setPointSizeF(max(6.0, f.pointSizeF() - 1.0))
+            p.setFont(f)
+            p.setPen(QColor(TOKENS["text_secondary"] if enabled
+                            else TOKENS["text_disabled"]))
+            _draw_elided(p, QRectF(text_x, 28, text_w, 14), self.subtitle())
+            parts = self.summary_parts()
+            if parts:
+                _draw_parts(p, QRectF(text_x, 43, text_w, 14), parts)
 
         # 連接埠（**本地座標** —— 見 out_anchors_local 的說明）。
         # 輸入是空心圈、輸出是實心點：一眼看得出線該從哪邊拉到哪邊。
@@ -841,7 +947,7 @@ class _NodeItem(QGraphicsItem):
             name = str(ins[i].get("name") or "") if i < len(ins) else ""
             _draw_port(p, anchor, kind, filled=False, role=role,
                        lit=name in lit_names)
-            if len(ins) < 2 or i >= len(ins):
+            if terse or len(ins) < 2 or i >= len(ins):
                 continue
             # 兩個以上的輸入才標名字：一顆埠的時候「這條線接到哪」沒有歧義，
             # 標了只是多一個字；兩顆以上不標的話，使用者要去猜上面那顆是
@@ -862,7 +968,7 @@ class _NodeItem(QGraphicsItem):
         for spec, anchor in zip(self.out_specs(), self.out_anchors_local()):
             name, kind = spec["name"], spec["kind"]
             _draw_port(p, anchor, kind, filled=True)
-            if not name:
+            if terse or not name:
                 continue
             # 每個輸出埠都標上它吐的名字（F7-9；F12 起也含具名區域）。以前
             # 只有多埠才標，於是「這張卡到底做在哪一條流上」在畫布上是看不到
@@ -882,14 +988,15 @@ class _NodeItem(QGraphicsItem):
         不是一句話，而這個標記存在的全部理由就是要講出那句話。顏色跟著段色，
         所以它讀起來是這張卡的一部分，不是貼上去的東西。
         """
-        strip = QRectF(0, body.bottom() - 7.0, NODE_W, _LOT_STRIP + 7.0)
+        radius = card_radius()
+        strip = QRectF(0, body.bottom() - radius, NODE_W, _LOT_STRIP + radius)
         p.save()
         p.setClipRect(QRectF(0, body.bottom(), NODE_W, _LOT_STRIP + 1.0))
         wash = QColor(col if enabled else QColor(TOKENS["seg_disabled"]))
         wash.setAlpha(38 if enabled else 20)
         p.setPen(QPen(QColor(TOKENS["border_default"]), 1.0))
         p.setBrush(wash)
-        p.drawRoundedRect(strip, 7, 7)
+        p.drawRoundedRect(strip, radius, radius)
         p.restore()
 
         f = p.font()
@@ -1005,7 +1112,13 @@ class _NodeItem(QGraphicsItem):
             e.accept()
             return
         self.canvas.node_selected.emit(self.node_id)
+        # 從這裡到放開為止，位置的改變都是**使用者的手**（見 itemChange）。
+        self._dragging = e.button() == Qt.LeftButton
         super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self, e) -> None:    # noqa: D102 - Qt hook
+        self._dragging = False
+        super().mouseReleaseEvent(e)
 
     def mouseDoubleClickEvent(self, e) -> None:  # noqa: D102 - Qt hook
         """雙擊 = 打開這張卡的設定（F7-22，n8n 的動作）。
@@ -1018,9 +1131,30 @@ class _NodeItem(QGraphicsItem):
         e.accept()
 
     def itemChange(self, change, value):        # noqa: D102 - Qt hook
+        if change == QGraphicsItem.ItemPositionChange and self._dragging:
+            return self._snapped(value)
         if change == QGraphicsItem.ItemPositionHasChanged:
             self.canvas.refresh_edges()
         return super().itemChange(change, value)
+
+    @staticmethod
+    def _snapped(pos: QPointF) -> QPointF:
+        """把拖到的位置吸到格線上（F79）。
+
+        ⚠ **只吸使用者拖的那一下，不吸 ``setPos``。** 兩個理由，第二個才是硬的：
+
+        1. 吸附是**手勢的一部分**（拖到附近就對齊），不是座標系的性質。
+        2. ``setPos`` 是別的程式碼**重現**一個位置的路：彈出視窗要跟主畫布擺
+           在一樣的地方、重建畫布要把使用者拖好的佈局放回去。那條路一旦量化
+           就不再是 identity —— 存 333 讀回 340、再存 340…… 每重建一次就漂一
+           格。這跟鐵則 9（``to_json_dict → from_json_dict`` 必須是 identity）
+           是同一種 bug，只是這裡漂的是像素不是分數。
+
+        所以判準是「這一下是不是從 ``mousePressEvent`` 來的」，見 ``_dragging``。
+        """
+        step = GRID
+        return QPointF(round(pos.x() / step) * step,
+                       round(pos.y() / step) * step)
 
     def show_context_menu(self, screen_pos) -> None:
         """這張卡的右鍵選單。
@@ -1082,7 +1216,7 @@ class _EdgeItem(QGraphicsItem):
         """
         return self.src.out_kind(self.port)
 
-    def line_color(self) -> QColor:
+    def line_color(self, strength: float = 0.5) -> QColor:
         """這條線的顏色 —— **來源那張卡的階段色，但調淡一半**（F13-⑤）。
 
         全部畫成灰的時候，一張擠了十條線的畫布上「這條是從哪裡出來的」只能
@@ -1092,13 +1226,33 @@ class _EdgeItem(QGraphicsItem):
         **調淡一半**是重點：原色會讓畫布變成一團彩虹，而線是背景不是主角
         （它們平常畫在卡片**底下**，見 `_Z_EDGE`）。混一半灰之後，同一條線
         仍然分得出色系，但整張圖的重量還在卡片上。
+
+        ``strength`` 是那個「一半」（F78）。選中一張卡的時候，接著它的線要
+        **把同一個顏色調回來**而不是換成另一個顏色 —— 換色的話使用者得學
+        「藍色 = 被選中的線」這第二層意思，而調濃只是把原本就在那裡的線索
+        講大聲一點。
         """
         base = QColor(TOKENS["canvas_edge"])
         gid = str(self.src.info.get("group", "") or "")
         if not gid:
             return base
         return QColor(theme.mix_hex(theme.group_hex(gid),
-                                    TOKENS["canvas_edge"], 0.5))
+                                    TOKENS["canvas_edge"], float(strength)))
+
+    # ---- 選中一張卡時，它的線要跟著講話（F78）-----------------------------
+    def focus_state(self) -> str:
+        """這條線相對於**目前選中的那張卡**是什麼身分。
+
+        ``"flat"``（沒有選任何卡）／``"near"``（接著選中的卡）／
+        ``"far"``（有選，但跟它無關）。
+
+        為什麼要有這件事：選一張卡以前只有那張卡自己有反應，而使用者點它
+        的理由通常正是「它接了誰」—— 那個問題在畫面上要用眼睛沿著線走才答
+        得出來，一張擠了十條線的畫布上根本走不完。
+        """
+        if not self.canvas.has_node_selection():
+            return "flat"
+        return "near" if (self.src.isSelected() or self.dst.isSelected()) else "far"
 
     # ---- 斷開鈕（F7-22）---------------------------------------------------
     #: 斷開鈕的命中半徑。畫出來的圓是 ``_CUT_R``，多給 2px 是因為使用者瞄的是
@@ -1214,23 +1368,59 @@ class _EdgeItem(QGraphicsItem):
         path = path.united(disc)
         return path
 
-    def paint(self, p: QPainter, _opt, _widget=None) -> None:
-        p.setRenderHint(QPainter.Antialiasing, True)
+    #: 三種身分各自的（濃度, 線寬）。``near`` 把 :meth:`line_color` 的「一半」
+    #: 調回九成（同一個色相、講大聲一點）；``far`` 則是把線往畫布底色混掉
+    #: 過半 —— **壓下去的那些不能消失**，它們仍然是這張圖的骨架，只是這一刻
+    #: 不是使用者在問的東西。
+    _FOCUS = {"flat": (0.50, 1.6), "near": (0.90, 2.2), "far": (0.50, 1.6)}
+    #: ``far`` 的線往 ``canvas_bg`` 混多少（0 = 不動，1 = 完全消失）。
+    _FADE = 0.55
+
+    def line_pen(self) -> QPen:
+        """這條線現在要用哪一支筆 —— **顏色、粗細、虛實的唯一定義**。
+
+        獨立成一支而不是寫在 :meth:`paint` 裡，理由跟 :meth:`shape` 與
+        ``cut_hit`` 讀同一個 ``CUT_GRAB`` 一模一樣：**看得到的與測得到的必須是
+        同一個定義**。寫在 paint 裡的話，要驗「選中一張卡，它的線有沒有真的
+        亮起來」只能去數像素 —— 而那種測試會在任何一次改字體、改抗鋸齒的時候
+        變紅，於是很快就沒有人相信它。
+        """
         region = self.kind() == "region"
+        state = self.focus_state()
+        strength, width = self._FOCUS[state]
         if self.isSelected():
             col = QColor(TOKENS["canvas_edge_active"])
+            width = 2.2
+        elif self._hover:
+            # 滑鼠移上來時**線本身**也要動（F78）。以前只有中點長出那顆紅 ×，
+            # 而線可以很長 —— × 離兩端各一百多 px，餘光裡「我現在瞄到的是哪
+            # 一條」沒有答案。抬 z 值（見 hoverEnterEvent）解的是「看不看得
+            # 到」，這一行解的是「認不認得出」。
+            col = QColor(TOKENS["canvas_edge_active"])
+            width = 2.4
         elif region:
+            # 區域線本來就畫原色（它是虛線，已經跟影像流分得開），所以 ``near``
+            # 在這一支只剩加粗 —— 濃度沒有可以再調的空間。
             col = region_color()
         else:
-            col = self.line_color()
-        path = self.path()
+            col = self.line_color(strength)
+        if state == "far" and not (self.isSelected() or self._hover):
+            col = QColor(theme.mix_hex(col.name(), TOKENS["canvas_bg"],
+                                       1.0 - self._FADE))
         # 區域線畫**虛線**：它搬的不是像素，而使用者要在餘光裡就分得出這兩種
         # 線（它們接不到彼此）。顏色是 Region 段的階段色，跟卡片上那顆圖示磚
         # 同一個 —— 不必再學一組新的意思。
-        pen = QPen(col, 2.2 if self.isSelected() else 1.6)
+        pen = QPen(col, width)
         if region:
             pen.setStyle(Qt.DashLine)
             pen.setDashPattern([4.0, 3.0])
+        return pen
+
+    def paint(self, p: QPainter, _opt, _widget=None) -> None:
+        p.setRenderHint(QPainter.Antialiasing, True)
+        path = self.path()
+        pen = self.line_pen()
+        col = pen.color()
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
         p.drawPath(path)
@@ -1322,6 +1512,9 @@ class PipelineCanvas(QGraphicsView):
         self._popout_button = bool(popout_button)
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
+        #: 現在有沒有選中任何一張卡（F78）。線在 paint 裡要問這件事，而每一條
+        #: 線問一次「掃過所有節點」是 O(線 × 卡)；存一個旗標就是 O(1)。
+        self._sel_nodes = False
         # 節點 hover（_sync_hover_node）與線上的 × 都吃「沒按鍵也送 move」。
         # QGraphicsView 建構時本來就會把 viewport 的 mouseTracking 打開
         # （item hover 靠它），這行是把**依賴講明**：哪天換了 viewport 或
@@ -1336,6 +1529,12 @@ class PipelineCanvas(QGraphicsView):
 
         self._items: Dict[str, _NodeItem] = {}
         self._edges: List[_EdgeItem] = []
+        # **接 scene 的訊號，不是接 set_selected**：選取有三條路（點卡片、
+        # 框選、程式呼叫 set_selected），只補其中一條的話，另外兩條選出來的
+        # 卡片線不會亮 —— 而那正是「有時候會亮有時候不會」這種找不到的 bug。
+        # 接在 `_items` / `_edges` **之後**：handler 讀這兩個，而場景這時是空的
+        # （訊號不會提早響），但那件事不值得靠它撐著。
+        self._scene.selectionChanged.connect(self._on_selection_changed)
         self._order: List[str] = []
         self._pairs: List[Tuple[str, str]] = []      # 使用者拉的線
         self._implicit: List[Tuple[str, str]] = []   # route 順序帶來的依賴
@@ -1521,7 +1720,10 @@ class PipelineCanvas(QGraphicsView):
         fresh = [_NodeItem(info, self) for info in nodes]
         # **列距要容得下最高的那張卡**（F12）：埠多的卡片會長高，用固定的
         # ``NODE_H + ROW_GAP`` 排的話它會壓到下一列。
-        self._pitch = max([it.height() for it in fresh] or [NODE_H]) + ROW_GAP
+        # 列距**進位到格線上**（F79）：卡片的左上角因此落在點上，而欄距
+        # （320 = 16 × 20）本來就是。卡片高度是變動的，所以這裡不能寫死。
+        self._pitch = on_grid(max([it.height() for it in fresh] or [NODE_H])
+                              + ROW_GAP)
         for item in fresh:
             if item.node_id in prev:
                 item.setPos(prev[item.node_id])
@@ -1841,6 +2043,25 @@ class PipelineCanvas(QGraphicsView):
             item.setSelected(nid == self._selected)
             item.update()
 
+    # ---- 選中一張卡 → 它的線跟著講話（F78）--------------------------------
+    def has_node_selection(self) -> bool:
+        """現在有沒有選中任何一張卡（`_EdgeItem.focus_state` 問的就是這個）。
+
+        問的是**卡片**不是 `scene().selectedItems()` —— 線自己也是可選的，
+        而「選了一條線」不該讓其他所有線都黯下去。
+        """
+        return self._sel_nodes
+
+    def _on_selection_changed(self) -> None:
+        """選取一變就把所有線重畫一次。
+
+        無條件重畫（而不是只在旗標翻轉時）：從卡 A 點到卡 B 的時候旗標兩次
+        都是 True，但該亮的線整組換了一批。
+        """
+        self._sel_nodes = any(it.isSelected() for it in self._items.values())
+        for edge in self._edges:
+            edge.update()
+
     def selected_node(self) -> Optional[str]:
         return self._selected
 
@@ -1886,11 +2107,77 @@ class PipelineCanvas(QGraphicsView):
     #: 0.5（見 _build_body），彈出視窗維持 0.7（它就是拿來讀的）。
     MIN_FIT_SCALE = 0.7
 
+    # ---- 換視角要看得出「這兩張是同一份 pipeline」（F80）------------------
+    def _view_state(self):
+        """現在看的是哪裡 —— ``(縮放, 水平捲軸, 垂直捲軸)``。"""
+        return (self.transform().m11(),
+                self.horizontalScrollBar().value(),
+                self.verticalScrollBar().value())
+
+    def _set_view_state(self, state) -> None:
+        from PySide6.QtGui import QTransform
+
+        scale, hval, vval = state
+        # 順序不能反：捲軸的**範圍**是從 transform 算出來的，先設值會被舊的範圍
+        # 夾掉，而夾掉的那一下看起來就是「動畫結束時彈了一下」。
+        self.setTransform(QTransform().scale(scale, scale))
+        self.horizontalScrollBar().setValue(int(round(hval)))
+        self.verticalScrollBar().setValue(int(round(vval)))
+        self._sync_zoom_label()
+
+    def _tween_view(self, apply_end) -> None:
+        """把 ``apply_end()`` 造成的視角改變演成一小段動畫。
+
+        **終點由 ``apply_end()`` 自己決定，這裡一個字都不算。** 做法是先讓它
+        跳到終點、把終點量下來，再回到起點動畫過去 —— 所以不管 ``fit`` 的規則
+        以後怎麼改（``MIN_FIT_SCALE``、只縮不放、靠開頭對齊…），動畫都不會跟
+        它分家。自己算一份終點的話，那份會漂。
+        """
+        start = self._view_state()
+        apply_end()
+        end = self._view_state()
+        anim = getattr(self, "_view_anim", None)
+        if anim is not None:
+            anim.stop()
+            self._view_anim = None
+        if not ANIMATE or not self.isVisible():
+            return
+        if (abs(end[0] - start[0]) < 1e-6
+                and end[1] == start[1] and end[2] == start[2]):
+            return                      # 沒動就不要演
+        s0, s1 = start[0], end[0]
+        if s0 <= 0 or s1 <= 0:
+            return
+
+        def step(t: float) -> None:
+            # 縮放用**幾何**內插：50% → 200% 的中點是 100%，不是 125%。
+            # 線性內插在放大時會前段太慢、後段暴衝。
+            scale = s0 * (s1 / s0) ** float(t)
+            self._set_view_state((scale,
+                                  start[1] + (end[1] - start[1]) * t,
+                                  start[2] + (end[2] - start[2]) * t))
+
+        anim = QVariantAnimation(self)
+        anim.setDuration(ANIM_MS)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.valueChanged.connect(lambda v: step(float(v)))
+        # 終點**照抄量到的那一組**，不靠動畫的最後一格算出來 —— 內插誤差與
+        # 捲軸夾值都會讓最後一格差個一兩 px，而那一兩 px 是會累積的。
+        anim.finished.connect(lambda: self._set_view_state(end))
+        self._view_anim = anim
+        step(0.0)                       # 先回到起點
+        anim.start(QAbstractAnimation.DeleteWhenStopped)
+
     def fit(self) -> None:
         """整張圖縮放到看得完（但不縮到看不懂、也不放大）。"""
         rect = self._scene.itemsBoundingRect()
         if not rect.isValid():
             return
+        self._tween_view(lambda: self._fit_now(rect))
+
+    def _fit_now(self, rect: QRectF) -> None:
         self.fitInView(rect.adjusted(-30, -30, 30, 30), Qt.KeepAspectRatio)
         s = self.transform().m11()
         if 0 < s < self.MIN_FIT_SCALE:
@@ -1994,10 +2281,13 @@ class PipelineCanvas(QGraphicsView):
         self._laid_wrap = self.wrap()
         pos = layout_columns(self._order, self._pairs + self._implicit,
                              self._laid_wrap)
-        pitch = getattr(self, "_pitch", NODE_H + ROW_GAP)
+        pitch = getattr(self, "_pitch", on_grid(NODE_H + ROW_GAP))
+        moves = {}
         for nid, item in self._items.items():
             col, row = pos.get(nid, (0, 0))
-            item.setPos(col * (NODE_W + COL_GAP), row * pitch)
+            moves[nid] = (item.pos(),
+                          QPointF(col * (NODE_W + COL_GAP), row * pitch))
+            item.setPos(moves[nid][1])
         # 判定區也是「拖得動的東西」，所以 Tidy up 也要把它排回去 ——
         # 只排一半的整理，下一次還是得自己搬。
         self._tree_offset = QPointF(0.0, 0.0)
@@ -2005,6 +2295,47 @@ class PipelineCanvas(QGraphicsView):
         self.refresh_edges()
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self._scene.setSceneRect(rect)
+        self._tween_nodes(moves)
+
+    def _tween_nodes(self, moves) -> None:
+        """讓卡片**滑**到新位置，而不是瞬間出現在那裡（F80）。
+
+        排整齊會同時搬動每一張卡。瞬間跳的話，使用者要重新認一次哪張是哪張
+        —— 而他按這顆鈕的理由通常是「我拖亂了」，也就是他心裡還有一份舊的
+        位置圖。看得到每張卡從哪裡去到哪裡，那份圖才接得上。
+
+        ``moves`` 是 ``{node_id: (起點, 終點)}``，而**終點已經設好了** ——
+        跟 :meth:`_tween_view` 同一個做法：先到終點、再回頭演。動畫被打斷
+        （再按一次、或畫布重建）時停在哪裡都無所謂，因為 model 那一邊早就是
+        終點了。
+        """
+        anim = getattr(self, "_node_anim", None)
+        if anim is not None:
+            anim.stop()
+            self._node_anim = None
+        if not ANIMATE or not self.isVisible():
+            return
+        live = {nid: (a, b) for nid, (a, b) in moves.items()
+                if (a - b).manhattanLength() > 0.5}
+        if not live:
+            return                      # 本來就整齊，不用演
+
+        def step(t: float) -> None:
+            for nid, (a, b) in live.items():
+                item = self._items.get(nid)
+                if item is not None:
+                    item.setPos(a + (b - a) * float(t))
+
+        anim = QVariantAnimation(self)
+        anim.setDuration(ANIM_MS)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.valueChanged.connect(lambda v: step(float(v)))
+        anim.finished.connect(lambda: step(1.0))
+        self._node_anim = anim
+        step(0.0)
+        anim.start(QAbstractAnimation.DeleteWhenStopped)
 
     def refresh_edges(self) -> None:
         for e in self._edges:
@@ -2253,24 +2584,28 @@ class PipelineCanvas(QGraphicsView):
 
     def reset_zoom(self) -> None:
         """回到 100%（`fit` 之後想看清楚字的時候要的就是這個）。"""
-        self.resetTransform()
-        self._sync_zoom_label()
+        def _now():
+            self.resetTransform()
+            self._sync_zoom_label()
+
+        self._tween_view(_now)
 
     def wheelEvent(self, e) -> None:           # noqa: D102
         self.zoom_by(1.15 if e.angleDelta().y() > 0 else 1 / 1.15)
         e.accept()
-
-    #: 背景點陣間距（畫布座標）。
-    GRID = 22.0
 
     def drawBackground(self, p: QPainter, rect: QRectF) -> None:  # noqa: D102
         """點陣底，不是格線底（F7-8）。
 
         格線會在整張畫布上鋪滿橫豎線，跟連線同一種筆觸，於是「哪條是資料流、
         哪條是背景」要看第二眼才分得出來。點只提供對齊的參考，不會跟線搶。
+
+        ⚠ **間距住在模組層的 :data:`GRID`，不是這裡的一個私有常數**（F79）——
+        排版與拖曳的吸附都讀同一個值。它以前是這個類別自己的 22，於是「背景
+        說的對齊」與「版面做的對齊」是兩套，而點陣底因此對不齊任何東西。
         """
         p.fillRect(rect, QColor(TOKENS["canvas_bg"]))
-        step = self.GRID
+        step = GRID
         # 縮太小的時候點會糊成一片灰 —— 那時候乾脆不畫
         if self.transform().m11() < 0.45:
             return
