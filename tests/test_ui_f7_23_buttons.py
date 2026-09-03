@@ -74,6 +74,11 @@ def _make(kind, parent):
         b.setObjectName("primary")
     elif kind == "cardButton":
         b.setObjectName("cardButton")
+    elif kind.startswith("cardButton:"):        # #cardButton 的三種 shape
+        b.setObjectName("cardButton")
+        b.setProperty("shape", kind.split(":", 1)[1])
+    elif kind == "galleryChip":
+        b.setObjectName("galleryChip")
     elif kind in ("secondary", "danger", "ghost"):
         b.setProperty("variant", kind)
     return b, b
@@ -91,6 +96,12 @@ KINDS = (
     ("danger", "border_focus"),
     ("ghost", "border_focus"),
     ("cardButton", "border_focus"),
+    # F80：這三種 shape 與 galleryChip 以前**完全沒有被問過** —— 而
+    # #cardButton 與 #galleryChip 正是兩個忘了把 padding 講回來的變體。
+    ("cardButton:square", "border_focus"),
+    ("cardButton:tool", "border_focus"),
+    ("cardButton:wide", "border_focus"),
+    ("galleryChip", "border_focus"),
     ("tool_plain", "border_focus"),
     ("tool_primary", "focus_ring_inverse"),
 )
@@ -165,16 +176,23 @@ def test_every_button_variant_shows_that_it_has_focus(qapp, theme_name):
     theme_mod.apply_theme(qapp, "light")
 
 
-def test_the_focus_ring_does_not_move_the_label(qapp):
+def test_the_focus_ring_costs_no_space(qapp):
     """焦點框畫在按鈕**裡面**（Qt 的 outline 不生效），所以它會吃掉 1px。
 
-    那 1px 一定要從自己的 padding 還回去，否則每次 Tab 過去文字就跳一格 ——
-    比沒有焦點框更糟，因為畫面在動而使用者不知道為什麼。
+    那 1px 一定要從自己的 padding 還回去，否則每次 Tab 過去按鈕就長大一圈、
+    把版面上的鄰居推開 —— 比沒有焦點框更糟，因為畫面在動而使用者不知道為什麼。
 
-    ``contentsRect()`` 就是 Qt 依 border + padding 算出來的文字可用區，
-    直接問它，不必去猜文字的畫素落在哪。
+    ⚠ **這條測試以前是空轉的**（F80 抓到）。它原本比的是 ``contentsRect()``，
+    而 QSS 底下 ``QPushButton.contentsRect()`` 的邊界**恆為 (0,0,0,0)**
+    —— border 與 padding 一格都沒反映進去，所以那個比較永遠相等、永遠綠。
+    測法二版比「文字在按鈕裡的位置」也是空的：按鈕比 sizeHint 寬的時候
+    ``QPushButton`` 會把文字**置中**，padding 差 1px 完全不動它。
+
+    真正看得見那 1px 的地方是 :meth:`sizeHint` —— 環一出現按鈕就變大，
+    而按鈕在版面裡變大就是把別人推開。實測（拿掉 padding 補償）：
+    ``81×30 → 83×32``。
     """
-    moved = []
+    grew = []
     for kind, _token in KINDS:
         host = QWidget()
         lay = QVBoxLayout(host)
@@ -185,18 +203,19 @@ def test_the_focus_ring_does_not_move_the_label(qapp):
         host.show()
         qapp.processEvents()
         host.activateWindow()
-        button.resize(140, 30)
 
         decoy.setFocus(Qt.TabFocusReason)
         qapp.processEvents()
-        before = button.contentsRect()
+        before = button.sizeHint()
         button.setFocus(Qt.TabFocusReason)
         qapp.processEvents()
-        after = button.contentsRect()
+        after = button.sizeHint()
         host.hide()
         if before != after:
-            moved.append("%s: %s -> %s" % (kind, before, after))
-    assert not moved, "拿到焦點時文字區跟著移動了：\n  " + "\n  ".join(moved)
+            grew.append("%s: %dx%d -> %dx%d"
+                        % (kind, before.width(), before.height(),
+                           after.width(), after.height()))
+    assert not grew, "拿到焦點時按鈕變大了（會把版面上的鄰居推開）：\n  " + "\n  ".join(grew)
 
 
 # --------------------------------------------------------------------------- #

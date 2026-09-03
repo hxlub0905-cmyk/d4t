@@ -33,7 +33,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import (
+    QAbstractAnimation, QEasingCurve, QPointF, QRectF, Qt, QVariantAnimation,
+    Signal,
+)
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -167,6 +170,32 @@ _Z_EDGE, _Z_EDGE_HOVER = -1.0, 1.0
 #: 「副標要到 70% 才讀得回來」—— 0.55 是「已經讀不到了，別再畫」的位置，
 #: 中間那段留給還看得出輪廓的模糊字。
 _LOD_TERSE = 0.55
+
+#: 「換一個視角」的動畫要不要跑（F80）。
+#:
+#: 這**不是裝飾**。`fit()` / `reset_zoom()` / `tidy()` 以前是瞬間跳的，而瞬間跳
+#: 會讓使用者**失去「我剛剛在看的是哪一塊」** —— 畫面前後兩張圖之間沒有任何線索
+#: 說「這兩張是同一份 pipeline」，他得重新找一次自己的位置。這叫空間連續性，
+#: 是節點畫布上少數幾個動畫真的有用的地方。
+#:
+#: ⚠ **測試裡要關掉**（`tests/conftest.py` 有一支 autouse fixture）。開著的話
+#: 「按了 fit 之後縮放是多少」會變成一個**跟時間有關**的問題，而那種測試會間歇性
+#: 變紅、然後被關掉。滾輪縮放刻意**不**走這條路：它本來就是一格一格的，加上動畫
+#: 只會變得黏手。
+ANIMATE = True
+#: 動畫長度（毫秒）。短到不擋路、長到看得出東西往哪裡去。
+ANIM_MS = 170
+
+
+def card_radius() -> float:
+    """節點卡的圓角 —— **讀 QSS 的同一個 token**（F80）。
+
+    以前這裡寫死 7，而 QSS 的 ``radius_md`` 是 6：畫布上的卡與面板上的卡
+    是同一種東西，圓角卻差 1px，而且沒有任何東西擋得住它繼續漂。
+    每次呼叫都重讀，因為換主題時 ``TOKENS`` 是**就地更新**的。
+    """
+    return theme.radius("radius_md")
+
 
 #: 背景點陣的間距 —— **同時是版面的格線**（F79）。
 #:
@@ -554,7 +583,8 @@ class _NodeItem(QGraphicsItem):
         """
         p = QPainterPath()
         p.setFillRule(Qt.WindingFill)
-        p.addRoundedRect(QRectF(0.0, -1.0, NODE_W, self.height() + 2.0), 7, 7)
+        r = card_radius()
+        p.addRoundedRect(QRectF(0.0, -1.0, NODE_W, self.height() + 2.0), r, r)
         for anchor in self.in_anchors_local() + self.out_anchors_local():
             p.addEllipse(anchor, _PORT_GRAB, _PORT_GRAB)
         return p
@@ -802,6 +832,7 @@ class _NodeItem(QGraphicsItem):
         # `_opt.levelOfDetailFromTransform`：節點沒有自己的 transform，兩者
         # 同值，而這一支不必去信一個平常被丟掉的參數。
         terse = self.terse_at(p.worldTransform().m11())
+        radius = card_radius()
 
         # 投影：讓節點浮在網格之上。用畫的而不是 QGraphicsDropShadowEffect ——
         # effect 會強迫 Qt 額外開一層離屏 buffer，為了 2px 的陰影不值得。
@@ -810,7 +841,8 @@ class _NodeItem(QGraphicsItem):
         shadow = QColor(0, 0, 0, (64 if lifted else 46) if enabled else 22)
         p.setPen(Qt.NoPen)
         p.setBrush(shadow)
-        p.drawRoundedRect(body.translated(1.5, 2.5 if not lifted else 3.0), 7, 7)
+        p.drawRoundedRect(body.translated(1.5, 2.5 if not lifted else 3.0),
+                          radius, radius)
 
         gid = str(self.info.get("group", "") or "enhance")
         tile_col = QColor(theme.group_hex(gid) if enabled else TOKENS["seg_disabled"])
@@ -823,7 +855,7 @@ class _NodeItem(QGraphicsItem):
             halo.setAlpha(56)
             p.setPen(QPen(halo, 6.0))
             p.setBrush(Qt.NoBrush)
-            p.drawRoundedRect(body, 7, 7)
+            p.drawRoundedRect(body, radius, radius)
 
         if selected:
             border = QColor(TOKENS["accent"])
@@ -839,7 +871,7 @@ class _NodeItem(QGraphicsItem):
             pen.setStyle(Qt.DashLine)
         p.setPen(pen)
         p.setBrush(QColor(TOKENS["bg_surface"] if enabled else TOKENS["disabled_bg"]))
-        p.drawRoundedRect(body, 7, 7)
+        p.drawRoundedRect(body, radius, radius)
 
         # 「整批跑一次」的腳帶（F50）。畫在本體**下面**，同一個圓角收邊。
         if self.is_lot():
@@ -852,7 +884,7 @@ class _NodeItem(QGraphicsItem):
         wash.setAlpha(46 if enabled else 24)
         p.setPen(QPen(tile_col if enabled else QColor(TOKENS["border_default"]), 1.0))
         p.setBrush(wash)
-        p.drawRoundedRect(tile, 6, 6)
+        p.drawRoundedRect(tile, radius, radius)
 
         icon_rect = QRectF(tile.center().x() - _ICON / 2.0,
                            tile.center().y() - _ICON / 2.0, _ICON, _ICON)
@@ -950,14 +982,15 @@ class _NodeItem(QGraphicsItem):
         不是一句話，而這個標記存在的全部理由就是要講出那句話。顏色跟著段色，
         所以它讀起來是這張卡的一部分，不是貼上去的東西。
         """
-        strip = QRectF(0, body.bottom() - 7.0, NODE_W, _LOT_STRIP + 7.0)
+        radius = card_radius()
+        strip = QRectF(0, body.bottom() - radius, NODE_W, _LOT_STRIP + radius)
         p.save()
         p.setClipRect(QRectF(0, body.bottom(), NODE_W, _LOT_STRIP + 1.0))
         wash = QColor(col if enabled else QColor(TOKENS["seg_disabled"]))
         wash.setAlpha(38 if enabled else 20)
         p.setPen(QPen(QColor(TOKENS["border_default"]), 1.0))
         p.setBrush(wash)
-        p.drawRoundedRect(strip, 7, 7)
+        p.drawRoundedRect(strip, radius, radius)
         p.restore()
 
         f = p.font()
@@ -2068,11 +2101,77 @@ class PipelineCanvas(QGraphicsView):
     #: 0.5（見 _build_body），彈出視窗維持 0.7（它就是拿來讀的）。
     MIN_FIT_SCALE = 0.7
 
+    # ---- 換視角要看得出「這兩張是同一份 pipeline」（F80）------------------
+    def _view_state(self):
+        """現在看的是哪裡 —— ``(縮放, 水平捲軸, 垂直捲軸)``。"""
+        return (self.transform().m11(),
+                self.horizontalScrollBar().value(),
+                self.verticalScrollBar().value())
+
+    def _set_view_state(self, state) -> None:
+        from PySide6.QtGui import QTransform
+
+        scale, hval, vval = state
+        # 順序不能反：捲軸的**範圍**是從 transform 算出來的，先設值會被舊的範圍
+        # 夾掉，而夾掉的那一下看起來就是「動畫結束時彈了一下」。
+        self.setTransform(QTransform().scale(scale, scale))
+        self.horizontalScrollBar().setValue(int(round(hval)))
+        self.verticalScrollBar().setValue(int(round(vval)))
+        self._sync_zoom_label()
+
+    def _tween_view(self, apply_end) -> None:
+        """把 ``apply_end()`` 造成的視角改變演成一小段動畫。
+
+        **終點由 ``apply_end()`` 自己決定，這裡一個字都不算。** 做法是先讓它
+        跳到終點、把終點量下來，再回到起點動畫過去 —— 所以不管 ``fit`` 的規則
+        以後怎麼改（``MIN_FIT_SCALE``、只縮不放、靠開頭對齊…），動畫都不會跟
+        它分家。自己算一份終點的話，那份會漂。
+        """
+        start = self._view_state()
+        apply_end()
+        end = self._view_state()
+        anim = getattr(self, "_view_anim", None)
+        if anim is not None:
+            anim.stop()
+            self._view_anim = None
+        if not ANIMATE or not self.isVisible():
+            return
+        if (abs(end[0] - start[0]) < 1e-6
+                and end[1] == start[1] and end[2] == start[2]):
+            return                      # 沒動就不要演
+        s0, s1 = start[0], end[0]
+        if s0 <= 0 or s1 <= 0:
+            return
+
+        def step(t: float) -> None:
+            # 縮放用**幾何**內插：50% → 200% 的中點是 100%，不是 125%。
+            # 線性內插在放大時會前段太慢、後段暴衝。
+            scale = s0 * (s1 / s0) ** float(t)
+            self._set_view_state((scale,
+                                  start[1] + (end[1] - start[1]) * t,
+                                  start[2] + (end[2] - start[2]) * t))
+
+        anim = QVariantAnimation(self)
+        anim.setDuration(ANIM_MS)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.valueChanged.connect(lambda v: step(float(v)))
+        # 終點**照抄量到的那一組**，不靠動畫的最後一格算出來 —— 內插誤差與
+        # 捲軸夾值都會讓最後一格差個一兩 px，而那一兩 px 是會累積的。
+        anim.finished.connect(lambda: self._set_view_state(end))
+        self._view_anim = anim
+        step(0.0)                       # 先回到起點
+        anim.start(QAbstractAnimation.DeleteWhenStopped)
+
     def fit(self) -> None:
         """整張圖縮放到看得完（但不縮到看不懂、也不放大）。"""
         rect = self._scene.itemsBoundingRect()
         if not rect.isValid():
             return
+        self._tween_view(lambda: self._fit_now(rect))
+
+    def _fit_now(self, rect: QRectF) -> None:
         self.fitInView(rect.adjusted(-30, -30, 30, 30), Qt.KeepAspectRatio)
         s = self.transform().m11()
         if 0 < s < self.MIN_FIT_SCALE:
@@ -2177,9 +2276,12 @@ class PipelineCanvas(QGraphicsView):
         pos = layout_columns(self._order, self._pairs + self._implicit,
                              self._laid_wrap)
         pitch = getattr(self, "_pitch", on_grid(NODE_H + ROW_GAP))
+        moves = {}
         for nid, item in self._items.items():
             col, row = pos.get(nid, (0, 0))
-            item.setPos(col * (NODE_W + COL_GAP), row * pitch)
+            moves[nid] = (item.pos(),
+                          QPointF(col * (NODE_W + COL_GAP), row * pitch))
+            item.setPos(moves[nid][1])
         # 判定區也是「拖得動的東西」，所以 Tidy up 也要把它排回去 ——
         # 只排一半的整理，下一次還是得自己搬。
         self._tree_offset = QPointF(0.0, 0.0)
@@ -2187,6 +2289,47 @@ class PipelineCanvas(QGraphicsView):
         self.refresh_edges()
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self._scene.setSceneRect(rect)
+        self._tween_nodes(moves)
+
+    def _tween_nodes(self, moves) -> None:
+        """讓卡片**滑**到新位置，而不是瞬間出現在那裡（F80）。
+
+        排整齊會同時搬動每一張卡。瞬間跳的話，使用者要重新認一次哪張是哪張
+        —— 而他按這顆鈕的理由通常是「我拖亂了」，也就是他心裡還有一份舊的
+        位置圖。看得到每張卡從哪裡去到哪裡，那份圖才接得上。
+
+        ``moves`` 是 ``{node_id: (起點, 終點)}``，而**終點已經設好了** ——
+        跟 :meth:`_tween_view` 同一個做法：先到終點、再回頭演。動畫被打斷
+        （再按一次、或畫布重建）時停在哪裡都無所謂，因為 model 那一邊早就是
+        終點了。
+        """
+        anim = getattr(self, "_node_anim", None)
+        if anim is not None:
+            anim.stop()
+            self._node_anim = None
+        if not ANIMATE or not self.isVisible():
+            return
+        live = {nid: (a, b) for nid, (a, b) in moves.items()
+                if (a - b).manhattanLength() > 0.5}
+        if not live:
+            return                      # 本來就整齊，不用演
+
+        def step(t: float) -> None:
+            for nid, (a, b) in live.items():
+                item = self._items.get(nid)
+                if item is not None:
+                    item.setPos(a + (b - a) * float(t))
+
+        anim = QVariantAnimation(self)
+        anim.setDuration(ANIM_MS)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.valueChanged.connect(lambda v: step(float(v)))
+        anim.finished.connect(lambda: step(1.0))
+        self._node_anim = anim
+        step(0.0)
+        anim.start(QAbstractAnimation.DeleteWhenStopped)
 
     def refresh_edges(self) -> None:
         for e in self._edges:
@@ -2435,8 +2578,11 @@ class PipelineCanvas(QGraphicsView):
 
     def reset_zoom(self) -> None:
         """回到 100%（`fit` 之後想看清楚字的時候要的就是這個）。"""
-        self.resetTransform()
-        self._sync_zoom_label()
+        def _now():
+            self.resetTransform()
+            self._sync_zoom_label()
+
+        self._tween_view(_now)
 
     def wheelEvent(self, e) -> None:           # noqa: D102
         self.zoom_by(1.15 if e.angleDelta().y() > 0 else 1 / 1.15)

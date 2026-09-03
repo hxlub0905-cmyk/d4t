@@ -51,7 +51,7 @@ from typing import Any, Dict, Tuple
 
 __all__ = [
     "REGION_COLORS", "region_hex",
-    "TOKENS", "PALETTES", "THEMES", "DEFAULT_THEME", "current_theme",
+    "TOKENS", "PALETTES", "THEMES", "DEFAULT_THEME", "current_theme", "radius",
     "set_theme", "SEG_LABELS", "seg_hex", "seg_color", "seg_bg",
     "group_hex", "group_color", "build_stylesheet", "apply_theme",
 ]
@@ -479,6 +479,23 @@ def contrast_ratio(a: str, b: str) -> float:
     return (hi + 0.05) / (lo + 0.05)
 
 
+def radius(name: str = "radius_md") -> float:
+    """圓角 token 的**數值**（QSS 寫的是 ``"6px"``，自繪要的是 ``6.0``）。
+
+    為什麼要有這一支（F80）
+    ----------------------
+    QSS 那一面早就吃 token 了（``border-radius: $radius_md``），但**自繪的
+    widget 沒有路可以讀它** —— 於是它們各自寫死一個數字。實際下場：畫布上的
+    節點卡是 7、面板上的卡是 ``radius_md`` 的 6，兩個看起來是同一種東西的
+    圓角差了 1px，而且沒有任何東西擋得住它繼續漂。
+
+    ⚠ **這一支只收「卡片本體」那一族。** 進度條、小圓點、迷你 chip 那些 2–4px
+    的圓角是**裝飾**，它們跟卡片不是同一個物件 —— 把它們也綁上來，等於宣稱
+    「改一次 radius_md 全 app 一起變」，而那件事沒有人想要。
+    """
+    return float(str(TOKENS[str(name)]).replace("px", "").strip())
+
+
 def mix_hex(fg: str, bg: str, alpha: float) -> str:
     """``fg`` 以 ``alpha`` 疊在 ``bg`` 上的結果（不透明的 hex）。
 
@@ -616,7 +633,7 @@ QToolBar QToolButton#primary {
 QToolBar QToolButton[glyph="true"] { padding: 5px 8px; }
 QToolBar QToolButton[hasGlyph="true"] { padding-left: 26px; }
 QToolBar QToolButton#primary[hasGlyph="true"] { padding-left: 30px; }
-QToolBar QToolButton#primary[hasGlyph="true"]:focus { padding-left: 29px; }
+QToolBar QToolButton#primary[hasGlyph="true"][kbFocus="true"]:focus { padding-left: 29px; }
 /* The second-most important action on the bar (Export) gets the accent as an
  * outline, not a fill - the fill belongs to Run trial. Two coloured buttons on
  * the whole bar, and they are the two the user actually came to press. */
@@ -627,7 +644,7 @@ QToolBar QToolButton[variant="secondary"] {
 QToolBar QToolButton[variant="secondary"]:hover { background: $accent_bg; }
 QToolBar QToolButton[variant="secondary"]:pressed { background: $accent_bg;
                                                     border-color: $accent_active; }
-QToolBar QToolButton[variant="secondary"]:focus {
+QToolBar QToolButton[variant="secondary"][kbFocus="true"]:focus {
     border: 2px solid $border_focus; padding: 4px 11px;
 }
 QToolBar QToolButton[variant="secondary"]:disabled {
@@ -672,7 +689,7 @@ QToolBar QToolButton#primary[seg="right"] {
     border-top-left-radius: 0; border-bottom-left-radius: 0;
     padding-left: 7px; padding-right: 7px;
 }
-QToolBar QToolButton#primary[seg="right"]:focus { padding-left: 6px; padding-right: 6px; }
+QToolBar QToolButton#primary[seg="right"][kbFocus="true"]:focus { padding-left: 6px; padding-right: 6px; }
 QWidget#toolbarGroup { background: transparent; border: 0; }
 /* The fill moves on hover/press, so the border has to move with it (F78).
  * `#primary` sets `border: 1px solid $accent` once and neither state rule
@@ -864,27 +881,56 @@ QPushButton#cardButton:checked {
  * big enough change on its own.
  *
  * This is the other half of F7-16: shortcuts made the keyboard path work,
- * this makes it visible. */
-QPushButton:focus, QPushButton[variant="secondary"]:focus,
-QPushButton[variant="danger"]:focus {
+ * this makes it visible.
+ *
+ * Every button rule below is gated on [kbFocus="true"] (F80). A QPushButton is
+ * StrongFocus, so a mouse click gives it focus too - and the ring then sat
+ * there afterwards looking like "still running", until you clicked somewhere
+ * else. The ring is a signpost for people navigating by keyboard; someone who
+ * just clicked the button knows where they are. Qt has no :focus-visible, so
+ * `focus_visible.py` writes that property from QFocusEvent.reason().
+ *
+ * TEXT INPUTS ARE DELIBERATELY NOT GATED (see the inputs section): clicking
+ * into a field and getting no border change is wrong - the caret is blinking
+ * there, and "which box am I typing into" needs saying. Browsers treat text
+ * inputs as always focus-visible for the same reason. */
+QPushButton[kbFocus="true"]:focus, QPushButton[variant="secondary"][kbFocus="true"]:focus,
+QPushButton[variant="danger"][kbFocus="true"]:focus {
     border: 2px solid $border_focus; padding: 4px 11px;
 }
-QToolBar QToolButton:focus { border: 2px solid $border_focus; padding: 4px 11px; }
-QPushButton#primary:focus {
+QToolBar QToolButton[kbFocus="true"]:focus { border: 2px solid $border_focus; padding: 4px 11px; }
+QPushButton#primary[kbFocus="true"]:focus {
     border: 2px solid $focus_ring_inverse; padding: 4px 17px;
 }
-QToolBar QToolButton#primary:focus {
+QToolBar QToolButton#primary[kbFocus="true"]:focus {
     border: 2px solid $focus_ring_inverse; padding: 4px 15px;
 }
 /* These two already have a 1px border (transparent), so the ring costs them
  * nothing - but they must restate their padding, or the blanket rule's
  * 1px-compensation above applies to them and the label shifts anyway. */
-QPushButton[variant="ghost"]:focus {
+QPushButton[variant="ghost"][kbFocus="true"]:focus {
     border: 1px solid $border_focus; padding: 5px 12px;
 }
-QPushButton#cardButton:focus {
+/* #cardButton forgot its padding, and the vacuous label-shift test never said
+ * so (F80): the blanket rule above gives back 1px for its 2px ring, and that
+ * padding lands here too - so Tabbing to the Card/Features switch SHRANK it by
+ * 2px (90x30 -> 88x28 measured).
+ *
+ * Why here and not on #galleryChip, which also has a 1px focus ring: the rule
+ * is not "every id rule needs this", it is "the blanket padding reaches you
+ * only if nothing more specific already declared padding". #galleryChip's base
+ * rule declares its own, and an id selector outranks [kbFocus]:focus per
+ * property, so it was never affected. #cardButton deliberately declares none
+ * (see the note above - geometry belongs to [shape]), which is exactly why the
+ * blanket value got in. The [shape] variants pin min/max on both axes so their
+ * size cannot move, but their content can, so they restate theirs too. */
+QPushButton#cardButton[kbFocus="true"]:focus {
     border: 1px solid $border_focus; background: $accent_bg; color: $accent_active;
+    padding: 5px 12px;
 }
+QPushButton#cardButton[shape="square"][kbFocus="true"]:focus,
+QPushButton#cardButton[shape="tool"][kbFocus="true"]:focus { padding: 0px; }
+QPushButton#cardButton[shape="wide"][kbFocus="true"]:focus { padding: 0px 8px; }
 
 /* -- library rows, stage rail, gallery chips (F7-23 round 3) ------------ *
  * These three used to carry a stylesheet string each, built in their own
@@ -925,7 +971,11 @@ QPushButton#galleryChip {
 }
 QPushButton#galleryChip:hover { background: $hover_warm_strong; }
 QPushButton#galleryChip:pressed { background: $pressed_bg; }
-QPushButton#galleryChip:focus { border: 1px solid $border_focus; }
+/* No padding restated here, and that is correct: unlike #cardButton, the
+ * #galleryChip BASE rule declares its own padding, and an id selector outranks
+ * the blanket [kbFocus]:focus rule per property - so the compensation never
+ * reaches it. Measured both ways: 67x22 either way. */
+QPushButton#galleryChip[kbFocus="true"]:focus { border: 1px solid $border_focus; }
 
 /* -- inputs ------------------------------------------------------------ */
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
@@ -941,6 +991,7 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
 QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover {
     border-color: $border_hover;
 }
+/* No [kbFocus="true"] here, on purpose - see the buttons section above. */
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
     border: 1px solid $border_focus; background: $focus_bg;
 }
@@ -1095,7 +1146,7 @@ QPushButton#advancedToggle {
     padding: 8px 2px 2px 2px; text-align: left;
 }
 QPushButton#advancedToggle:hover { color: $accent_hover; }
-QPushButton#advancedToggle:focus {
+QPushButton#advancedToggle[kbFocus="true"]:focus {
     border: 1px solid $border_focus; border-radius: $radius_sm;
     padding: 7px 1px 1px 1px;
 }
@@ -1143,8 +1194,14 @@ def apply_theme(app, theme: str = None) -> str:
     """
     from PySide6.QtGui import QColor, QFont, QPalette
 
+    from .focus_visible import install as _install_focus_visible
+
     name = set_theme(theme if theme is not None else current_theme())
     app.setStyle("Fusion")  # 跨平台一致的 QSS 底座
+    # 樣式表與**餵給它屬性的那支東西**一起到（F80）。分開的話會有一種很難查的
+    # 狀態：QSS 裡的 `[kbFocus="true"]:focus` 永遠沒有人把屬性設成 true，於是
+    # 焦點環從此不出現，而畫面上沒有任何錯誤。
+    _install_focus_visible(app)
 
     pal = app.palette()
     pal.setColor(QPalette.Window, QColor(TOKENS["bg_page"]))

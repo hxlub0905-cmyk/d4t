@@ -22,6 +22,54 @@
 
 ---
 
+## F80：焦點環、動畫、圓角的家，以及一條空轉的測試（2026-09-03）
+
+接 F78 §5 剩下的五條（使用者：「按照你說的繼續做」）。做了三條，**#7 量完之後
+折進 #6**，而 #6 需要使用者選一邊 —— 三個選項已經 render 成圖。
+計畫書：[`docs/plans/F80-focus-visible-and-motion.md`](docs/plans/F80-focus-visible-and-motion.md)。
+
+**① 焦點環只在鍵盤導覽時出現**（`d4t/ui/focus_visible.py`，新模組）。
+`QPushButton` 預設是 `StrongFocus`，滑鼠點一下就拿到焦點，而 QSS 的 `:focus` 對
+點擊一樣生效 —— 按完「Run trial」那顆鈕留著一圈藍框，看起來像「還在啟用中」。
+CSS 有 `:focus-visible`，Qt 沒有；一支裝在 `QApplication` 上的事件過濾器把
+`QFocusEvent.reason()` 寫成 `kbFocus` 屬性，QSS 改成 `[kbFocus="true"]:focus`。
+**文字輸入刻意不 gate**（點進輸入框卻沒有邊框變化是錯的），裝在 `apply_theme`
+裡（樣式表與餵它屬性的東西必須一起到，分開的話焦點環從此不出現而且不報錯），
+`ActiveWindowFocusReason` 維持原狀（切視窗不算使用者在移動焦點）。
+
+**② 換視角要看得出「這兩張是同一份 pipeline」**。`fit()` / `reset_zoom()` /
+`tidy()` 加了 170ms 的動畫。**終點由原本那支函式自己決定，動畫一個字都不算** ——
+先跳到終點量下來、再回起點演，所以 `fit` 的規則以後怎麼改動畫都不會跟它分家；
+順便讓「被打斷」變成不用處理的事（任何時刻的真相都已經是終點）。
+⚠ 測試裡一律關掉（conftest 多一支 autouse fixture，跟「不准跳 modal」同一種
+東西），只有 `test_ui_canvas_animation.py` 自己開著跑。
+
+**③ 圓角有家了**：`theme.radius()`。只收卡片本體那一族（畫布卡與判定樹的卡以前
+差 1px），repo 裡另外 20 幾個 2–4px 的裝飾性圓角**刻意不收** —— 綁上來等於宣稱
+「改一次 radius_md 全 app 一起變」，而那件事沒有人想要。
+
+**這一輪最值得記住的是①順手翻出來的東西。**
+`test_the_focus_ring_does_not_move_the_label` **從一開始就是空轉的**：它比的是
+`contentsRect()`，而 QSS 底下那個值的邊界**恆為 (0,0,0,0)**，所以比較永遠相等、
+永遠綠。（改成比「文字在按鈕裡的位置」也是空的 —— 按鈕比 sizeHint 寬的時候
+`QPushButton` 會把文字置中，padding 差 1px 完全不動它。）真正看得見那 1px 的是
+**`sizeHint()`**：環一出現按鈕就變大，而按鈕變大就是把版面上的鄰居推開。
+改成問它之後當場抓到一個**真的 bug**：`#cardButton`（Card/Features 那顆切換）
+一被 Tab 到就縮 2px。
+
+而修它的時候我又把規則講錯了一次：第一版連 `#galleryChip` 也一起補 padding，
+反向驗證那一輪它**不變紅**才發現那是 no-op —— 判準不是「每個 id 規則都要補」，
+是「blanket 的 padding 只有在**沒有更具體的規則宣告過 padding** 時才到得了你」。
+`#galleryChip` 的 base rule 有宣告，`#cardButton` 刻意沒有（幾何屬於 `[shape]`），
+所以只有後者中招。
+
+`tests/test_ui_focus_visible.py`（10 條）＋ `tests/test_ui_canvas_animation.py`
+（6 條），`test_ui_f7_23_buttons.py` 改寫一條並把 `#galleryChip` 與 `#cardButton`
+的三種 shape 補進 `KINDS`（那四個以前完全沒被問過）。
+全套測試綠，黃金值三份全綠（這一輪一個數字都沒動）。
+
+---
+
 ## F79：點陣底要說實話（2026-09-03）
 
 接 [F78](docs/plans/F78-canvas-focus-and-lod.md) §5 的第 5 條（使用者：「接著做」）。

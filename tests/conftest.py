@@ -29,6 +29,29 @@ def _no_modal_dialogs_in_tests():
 
 
 @pytest.fixture(autouse=True)
+def _no_view_animations_in_tests():
+    """**測試裡不准跑視角動畫**（F80）。
+
+    跟上面那支「不准跳 modal」是同一種東西：動畫不會讓測試失敗，它會讓
+    「按了 fit 之後縮放是多少」變成一個**跟時間有關**的問題 —— 於是那些測試開始
+    間歇性變紅，然後被關掉。
+
+    要驗動畫本身的測試（`test_ui_canvas_animation.py`）自己把它打開，驗完關回去。
+
+    刻意**不**在這裡 import Qt：core 的測試不該因為一個 conftest 就把 PySide6
+    拉進來（同上面兩支的理由）。
+    """
+    mod = sys.modules.get("d4t.ui.canvas")
+    before = None if mod is None else mod.ANIMATE
+    if mod is not None:
+        mod.ANIMATE = False
+    yield
+    mod = sys.modules.get("d4t.ui.canvas")
+    if mod is not None and before is not None:
+        mod.ANIMATE = before
+
+
+@pytest.fixture(autouse=True)
 def _regions_always_match_their_lines():
     """**方案 B 的常開斷言**（F42 B2）：每一次 model 改動都問一次
     「每一格區域參數是不是正好等於線說的」。
