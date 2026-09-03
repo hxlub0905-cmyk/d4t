@@ -101,6 +101,9 @@ from ..pipeline.step import (
     register_step,
 )
 from ._util import parse_key_list
+# `align_off_*` 是那張卡的產出，「它什麼時候不能讀」的判準因此也住在
+# 那張卡上 —— 這裡只負責把它講到使用者眼前（同 `overlay_marks` 的分工）。
+from .align_to import degenerate_offset_note
 
 
 
@@ -1317,6 +1320,12 @@ class OutputCharStep(_OutputStep):
         limit = int(p["limit"])
         ordered = overlay.pick_overlay_results(rows, 0, rank_by)
         _warn_if_unranked(self.key, bctx, rows, rank_by, limit)
+        # 這份報表的每一列都建在 `align_off_*` 上，而那一欄踩著一個廠內還沒
+        # 驗證過的前提（`docs/FAB-VALIDATION.md` 假設 #7）。前提不成立的時候
+        # 報表**看起來最漂亮**（每一顆都對得剛剛好）—— 所以這句話要在這裡講。
+        note = degenerate_offset_note(rows)
+        if note:
+            bctx.warn("Characterization report: %s" % note)
         # ``0`` ＝ 全部（見 :data:`LIMIT_ZERO_HELP`）。``ordered[:0]`` 會是
         # **一張圖都沒有**，而那正好是「不限」的相反 —— 所以要轉成 None。
         cut = limit if limit > 0 else None

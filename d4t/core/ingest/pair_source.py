@@ -15,12 +15,15 @@ ingest 只負責「把那一份讀進來、放好」。
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
 from .dataset import (
-    Dataset, columns_of, fill_fields, missing_columns_of,
+    # `columns_of` 這個模組自己沒有用到，但它是**轉出口**：`ui/studio.py` 與
+    # `__main__.py` 問「那一份第二 lot 有哪些欄」的時候問的是
+    # `pair_ingest.columns_of(...)` —— 掛第二份的那一層答得出來才合理。
+    # 拿掉它會變成一個 AttributeError，而它只在打錯欄名的那條錯誤路徑上爆。
+    Dataset, columns_of, fill_fields, missing_columns_of,   # noqa: F401
 )
 
 

@@ -116,7 +116,7 @@ def build_boxplot_svg(series: Sequence[Dict[str, Any]], title: str = "",
     plot_h = max(80, height - pad_t - pad_b)
 
     boxes = []
-    for i, s in enumerate(series or []):
+    for s in series or []:
         st = box_stats(s.get("values"))
         boxes.append({"name": str(s.get("name", "")),
                       "colour": str(s.get("colour") or FALLBACK_COLOUR),

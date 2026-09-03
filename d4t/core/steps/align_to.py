@@ -426,3 +426,60 @@ class AlignToStep(Step):
         # 下游在它身上量 CD 的時候，`_nm` 那一份才會是對的。
         ctx.set_stream_nm_per_px(out_key, ctx.stream_nm_per_px(str(p["search"])))
         return ctx
+
+
+# --------------------------------------------------------------------------- #
+# 那個承重假設的**症狀**（2026-09-03）
+# --------------------------------------------------------------------------- #
+#: `align_off_*` 之所以等於「這一顆離 FOV 中心多遠」，踩的是一個**廠內還沒
+#: 驗證過**的前提：EBI 的 patch 是以 defect 為中心裁的
+#: （`docs/FAB-VALIDATION.md` 假設 #7、`docs/history/plans/F33-ebi-characterization.md` §8.6）。
+#:
+#: 前提不成立的那一種形狀是這個 repo 最怕的那一種：**固定格線裁的話
+#: `align_off` 恆為 0** —— 十字與框完美重合、每一列看起來都對得剛剛好，
+#: 而那個數字跟 defect 一點關係都沒有。跑得完、有數字、而且是錯的。
+#:
+#: 一顆一顆看分不出來（0 本來就是合法的答案），但**整批一起看就很吵**：
+#: 一台真的機台不會在幾十顆上全部零偏移。所以判準是分布，不是單顆。
+DEGENERATE_OFF_PX = 0.5
+#: 幾顆以下不說話 —— 樣本太少的時候「全部都是 0」還可能只是剛好。
+DEGENERATE_MIN_N = 12
+
+
+def degenerate_offset_note(rows: Sequence[Dict[str, Any]]) -> Optional[str]:
+    """整批的 ``align_off_*`` 全部貼在 0 上嗎？是的話回一句話，否則回 ``None``。
+
+    **這句話刻意不是一個錯誤，也不是「你的資料壞了」** —— 因為同一個分布有
+    兩個解釋，而它們從資料上分不開：
+
+    * patch 是固定格線裁的 ⇒ 這一欄跟 defect 無關，**不能拿來讀**；
+    * patch 以 defect 為中心，而這台機台每一顆都瞄得極準 ⇒ 這一欄是對的。
+
+    分得開它們的只有一句話：**問機台工程師「patch 是怎麼裁的」**。所以這裡
+    要做的就是把那個問題送到使用者眼前，而不是替他猜一個答案。
+    """
+    vals = []
+    for row in rows or []:
+        feats = row.get("features") or {}
+        ox, oy = feats.get("align_off_x_px"), feats.get("align_off_y_px")
+        if ox is None or oy is None:
+            continue
+        try:
+            vals.append((abs(float(ox)), abs(float(oy))))
+        except (TypeError, ValueError):
+            continue
+    if len(vals) < DEGENERATE_MIN_N:
+        return None
+    worst = max(max(a, b) for a, b in vals)
+    if worst >= DEGENERATE_OFF_PX:
+        return None
+    return (
+        "Every one of these %d defects came out with align_off under %.2f px "
+        "(the largest was %.3f px). Two different things look exactly like "
+        "this, and the numbers cannot tell them apart: either the tool aimed "
+        "perfectly every single time, or the EBI patches are cut on a fixed "
+        "grid instead of around each defect - and in that second case "
+        "align_off_x_px / align_off_y_px say nothing about where the defect "
+        "is, however tidy the report looks. Ask the tool engineer how the "
+        "patches are cut before reading this column."
+        % (len(vals), DEGENERATE_OFF_PX, worst))

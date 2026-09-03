@@ -18,7 +18,9 @@ license = {file = "LICENSE"}
 dependencies = ["numpy>=1.24", "opencv-python>=4.8", "tifffile>=2023.7", "openpyxl>=3.1"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+# ruff 釘死版本，理由同 `.github/workflows/ci.yml` 的 lint job：
+# 浮動版本 = 某天 CI 自己紅了，而沒有人改過任何一行。
+dev = ["pytest>=7", "ruff==0.15.8"]
 # Studio（PySide6）**刻意不在 dependencies 裡**：CLI 那條路
 # （`python -m d4t run`）不需要 Qt，而公司機上有「只要跑批次」的情境。
 # 但這件事以前是隱性的 —— `pip install .` 裝出來的東西 CLI 跑得動、
@@ -37,3 +39,50 @@ testpaths = ["tests"]
 # 沒有 assets/，Studio 會安靜地開一個沒有圖示的視窗。
 [tool.setuptools.package-data]
 "d4t.ui" = ["assets/*.svg"]
+
+# --------------------------------------------------------------------------- #
+# ruff —— 靜態檢查（2026-09-03 加）
+# --------------------------------------------------------------------------- #
+# 為什麼現在才加：這個 repo 有 3,126 支測試與三份黃金值，但**沒有任何東西看過
+# 「這個名字存不存在」**。第一次跑就抓到六個真的：`__all__` 裡一個不存在的名字
+# （`import *` 會炸）、三處用了沒 import 的型別（`Optional` / `Sequence` /
+# `Any` —— 靠 `from __future__ import annotations` 才沒在執行期爆）、
+# 一支被自己的舊版本遮蔽掉的 `leaf_hex`（F29 C0「調色盤只有一份」因此是死的），
+# 以及一條 `%` 沒跳脫的 assert 訊息（那條 assert 一成立，使用者看到的是
+# `ValueError` 不是訊息）。
+#
+# ⚠ **ruff 只裝在開發機**（`dev` extra）。它不是執行時相依，所以廠內離線機
+# 那條路一個位元都沒有變 —— `docs/OFFLINE-INSTALL.md` 不受影響。
+[tool.ruff]
+target-version = "py39"          # 鐵則 2：廠內機器可能是舊版
+src = ["."]
+# **只掃出貨的程式碼。** `tests/` 現在不在裡面，而那是一個量過的決定，不是
+# 漏掉：UI 測試刻意用「在 fixture 裡 lazy import Qt 再注入 globals」的寫法
+# （`docs/PITFALLS.md`：收集期 import Qt 會讓 `test_no_qt_after_import` 紅），
+# 於是 ruff 在 `tests/` 上報 **1,217 條 F821**「這個名字不存在」—— 全部是誤報，
+# 而它們會把真的那幾條淹掉。要把 `tests/` 納進來，得先處理那個 import 模式；
+# 在那之前納進來只會得到一道大家學會忽略的關。
+include = ["d4t/**/*.py", "tools/**/*.py", "fab_probe/**/*.py", "conftest.py"]
+
+[tool.ruff.lint]
+# E4 import、E7 語句、E9 語法、F pyflakes、W 空白、B bugbear。
+# **刻意沒有 E501（行長）**：字元數上 79 欄以上只有 1,359 行（1.6%）、
+# 100 欄以上只有 45 行，而它們幾乎都是中文註解 —— 中文一個字佔兩個欄寬，
+# 所以「字元數」在這個 repo 量不到「看起來多寬」。要開之前先想清楚量的是什麼。
+# **刻意沒有 UP（pyupgrade）**：它會把 `Dict[str, int]` 改寫成 `dict[str, int]`
+# 那一族，5,062 條 —— 一個橫跨黃金值程式碼的巨大 diff，換來的只有寫法新舊。
+select = ["E4", "E7", "E9", "F", "W", "B"]
+# E702（一行兩個分號隔開的敘述）：48 條，全部在陣列數學裡成對出現
+# （`near_sp[1:, :] |= …; near_sp[:-1, :] |= …`）。那個排版讓「這兩件事是一對」
+# 看得出來，拆開反而更難讀 —— 而且那些檔案正是黃金值踩著的地方。
+ignore = ["E702"]
+
+[tool.ruff.lint.per-file-ignores]
+# 套件的 `__init__.py` 是純轉出口（`from .x import y` 給外面用），
+# F401「import 了沒用到」在那裡問錯了問題。
+"**/__init__.py" = ["F401"]
+
+[tool.ruff.lint.flake8-bugbear]
+# Qt 的 model API 簽章就是 `def rowCount(self, parent=QModelIndex())` ——
+# 那是 PySide6 要求的形狀，不是 B008 想抓的「可變預設值」。
+extend-immutable-calls = ["PySide6.QtCore.QModelIndex"]

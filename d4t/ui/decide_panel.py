@@ -36,7 +36,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFrame,
+    QApplication, QComboBox, QDoubleSpinBox, QFrame,
     QHBoxLayout, QLabel, QScrollArea,
     QLineEdit, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
@@ -460,8 +460,8 @@ class DecidePanel(QWidget):
             [v for v, _l, _g, _h in SCALES],
             [g for _v, _l, g, _h in SCALES],
             str(getattr(item, "scale", "") or ""),
-            {v: h for v, _l, _g, h in SCALES},
-            labels={v: l for v, l, _g, _h in SCALES})
+            {v: h for v, _lb, _g, h in SCALES},
+            labels={v: lb for v, lb, _g, _h in SCALES})
         scale.changed.connect(
             lambda text, k=i: m.set_let(k, scale=str(text or "")))
         for w in (miss_tag, fill):

@@ -1223,6 +1223,57 @@ def test_a_truncated_compressed_bundle_says_so_instead_of_crashing(tmp_path):
 
 # ---------------------------------------------------------------- 每次更新都要重產
 
+def test_the_shipped_bundle_is_not_compressed():
+    """出貨的那一包**不壓縮**，而這一條在守的是 git 的 pack，不是可讀性。
+
+    壓縮檔改一行就整份變樣，git 沒有辦法 delta 壓縮它 —— 於是每個 commit
+    都完整存一份。實測同一次「改一支模組再重產」：舊格式（lzma+base64）
+    第二版多花 **1,702 KB**，純文字多花 **1 KB**。舊做法在 217 個 commit 裡
+    累積了 88 MB，佔 pack 的 46%，而那些副本一份都沒有被讀過。
+
+    ⚠ **`compress=True` 的能力要留著**（底下幾條測試在測它）：解包程式兩種
+    格式都認得，而已經搬進公司機的舊包是壓縮的。這一條問的只有一件事：
+    **`release.py` 產出去的那一份**用哪一種。
+
+    這條測試存在，是因為那個決定的全部內容就是一個布林值 —— 而一個布林值
+    是這個 repo 裡最容易被「順手改回來」的東西，改回來的症狀要三個月後
+    才看得到（pack 又胖了）。
+    """
+    with open(os.path.join(REPO, "tools", "release.py"),
+              "r", encoding="utf-8") as f:
+        src = f.read()
+    # 用 ast 不用正則：`build(os.path.basename(bundle_path), …)` 裡面有巢狀
+    # 括號，非貪婪的正則會停在**內層**那個 `)` 上，然後對著
+    # `os.path.basename(bundle` 判斷有沒有 `compress=False` —— 永遠是「沒有」。
+    # （寫這條測試的時候真的踩了一次。）
+    calls = [n for n in ast.walk(ast.parse(src))
+             if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Attribute)
+             and n.func.attr == "build"
+             and getattr(n.func.value, "id", "") == "make_text_bundle"]
+    assert calls, "release.py 不再呼叫 make_text_bundle.build 了？"
+    for call in calls:
+        kw = {k.arg: k.value for k in call.keywords}
+        assert "compress" in kw and kw["compress"].value is False, (
+            "release.py 產出去的那一包又變成壓縮的了（第 %d 行）。那正是 pack 裡\n"
+            "88 MB 的原因（見 release.py 的模組說明）—— 要改回去請先重量一次那張表。"
+            % call.lineno)
+
+
+@needs_git
+def test_the_bundle_in_the_repo_is_the_uncompressed_one():
+    """而且 repo 裡真的躺著的那一份也要是純文字的（不是只有程式碼講對）。"""
+    with open(os.path.join(REPO, "bundle", "d4t_bundle.py"),
+              "r", encoding="utf-8") as f:
+        lines = f.read().split("\n")
+    # **逐行**找那個分隔標記，不要 `split(SENTINEL)`：包裡裝著
+    # `tools/make_text_bundle.py` 自己，而那支的原始碼裡就寫著這個字串 ——
+    # 用子字串切會切在解包程式的中間。`release.py` 的 `_bundle_entries`
+    # 一直是逐行找的，這裡跟它同一個做法。
+    i = lines.index(make_text_bundle.SENTINEL)
+    assert lines[i + 1] == "#ENC text", lines[i + 1]
+
+
 @needs_git
 def test_the_transfer_files_are_up_to_date():
     """``tools/FILELIST.txt`` 與 ``bundle/d4t_bundle.py`` 是**公司機唯一拿得到

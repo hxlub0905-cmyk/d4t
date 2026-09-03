@@ -22,14 +22,14 @@ CLAHE 以前放在這一檔（它不是「減掉什麼」而是「局部重新�
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import numpy as np
 
 from ..algo import enhance as algo_enhance
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_IMAGE, GROUP_ENHANCE, ParamSpec, Step, register_step,
+    CATEGORY_IMAGE, GROUP_ENHANCE, ParamSpec, register_step,
 )
 from ._util import MultiStreamStep, streams_spec
 

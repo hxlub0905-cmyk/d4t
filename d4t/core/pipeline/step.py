@@ -25,7 +25,8 @@ from __future__ import annotations
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, ClassVar, Dict, List, Optional, Tuple, Type
+from typing import (Any, ClassVar, Dict, List, Optional, Sequence, Tuple,
+                    Type)
 
 from .context import Context
 from .cellrois import CellRoiError, format_cell_rois, parse_cell_rois

@@ -45,7 +45,7 @@ from ..algo.curve import apply_curve_01
 from ..pipeline.context import Context
 from ..pipeline.curve import IDENTITY, is_identity, parse_curve
 from ..pipeline.step import (
-    CATEGORY_IMAGE, GROUP_ENHANCE, ParamSpec, Step, register_step,
+    CATEGORY_IMAGE, GROUP_ENHANCE, ParamSpec, register_step,
 )
 from ._util import MultiStreamStep, streams_spec
 

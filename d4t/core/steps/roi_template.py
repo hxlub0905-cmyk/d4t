@@ -111,16 +111,15 @@ from ..pipeline.cellrois import (
 from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_ALGO, GROUP_REGION, FeatureSpec, ParamSpec, Step, StepError,
-    register_step,
 )
 from ._util import (
     PICK_NONE, drop_edge_boxes, drop_edge_specs, output_prefix_spec,
     pick_defect_box, pick_rule_of, pick_rule_specs, prefix_features,
-    prefix_names, REGION_FACT_HELP, SHARED_FEATURE_HELP,
-    region_fact_names, region_fact_specs,
+    REGION_FACT_HELP, SHARED_FEATURE_HELP,
+    region_fact_specs,
     region_facts,
     region_spec_maker,
-    region_family, region_role_of, require_image, set_region_family,
+    region_family, require_image, set_region_family,
 )
 
 #: ``locate_axis`` -> 哪幾軸要做定位。一維的 layout（垂直條紋）只有 X 有相位，

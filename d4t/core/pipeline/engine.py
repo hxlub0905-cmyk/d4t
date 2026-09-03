@@ -549,7 +549,7 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
             {k: ctx.features[k] for k in
              _produced_feature_names(step_cls, params, ctx, added)},
             owner, prefix_of)
-        setattr(ctx, "_produced", produced)
+        ctx._produced = produced
         traces.append(StepTrace(
             node_id=nid, step_key=node.step, ok=True, ms=ms,
             error=None, features_added=added,
@@ -601,7 +601,7 @@ def _eval_decision(recipe: Recipe,
             except ValueError:
                 raise ExpressionError(
                     "the 'if missing' fallback of '%s' is not a number"
-                    % name, fill, 0)
+                    % name, fill, 0) from None
             missing = [v for v in expr_obj.variables
                        if v not in ctx.features]
             if missing:
@@ -1013,8 +1013,8 @@ def _restore_context(item: Any, kind: str, defect_id: str,
     # 某個節點的線在熱跑時查不到，會退回「最後一個寫這個名字的人」＝隔壁那支。
     prod = dict(snap.get("produced") or {})
     if prod:
-        setattr(ctx, "_produced", {(str(k[0]), str(k[1])): v
-                                   for k, v in prod.items()})
+        ctx._produced = {(str(k[0]), str(k[1])): v
+                         for k, v in prod.items()}
     return ctx
 
 

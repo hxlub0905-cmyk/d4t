@@ -67,13 +67,12 @@ find defect 不需要」）——「這張圖最異常的地方」改由 GLV 的
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, List, NamedTuple, Optional, Tuple
 
 import cv2
 import numpy as np
 
 from .edge import edge_quality, profile_noise, threshold_level
-from .snr import snr_signed
 
 __all__ = [
     "BlobResult", "MIN_AREA", "measure_blob",

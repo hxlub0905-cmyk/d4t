@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from PySide6.QtCore import (QEvent, QMimeData, QPointF, QRectF, QSize, Qt,
@@ -33,7 +33,6 @@ from PySide6.QtCore import (QEvent, QMimeData, QPointF, QRectF, QSize, Qt,
 from PySide6.QtGui import (
     QBrush,
     QColor,
-    QTextDocument,
     QDrag,
     QFont,
     QFontMetricsF,
@@ -46,18 +45,13 @@ from PySide6.QtGui import (
     QPolygonF,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QApplication,
-    QStyle,
-    QStyleOptionViewItem,
-    QStyledItemDelegate,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
     QGridLayout,
-    QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
@@ -68,8 +62,6 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSpinBox,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -3884,7 +3876,7 @@ class TemplateField(QWidget):
                     "Build it again.")
         h, w = cell.shape[:2]
         return ("Stored in this recipe: one cell of %d × %d px (%.1f kB of "
-                "text). The regions below are drawn on it." 
+                "text). The regions below are drawn on it."
                 % (w, h, len(self._value) / 1024.0))
 
 
@@ -4411,7 +4403,7 @@ class ParamForm(QWidget):
         見** —— 不然使用者會拉了曲線又去動 gamma，然後發現 gamma 沒有反應。
         """
         curve_row = None
-        for name, row in self._rows.items():
+        for _name, row in self._rows.items():
             if str(row.spec.get("type", "")) == "curve":
                 curve_row = row
                 break
@@ -4578,7 +4570,7 @@ class ParamForm(QWidget):
         """
         self._dynamic = {str(k): [str(v) for v in (vals or [])]
                          for k, vals in dict(dynamic or {}).items()}
-        for name, row in self._rows.items():
+        for _name, row in self._rows.items():
             choices = self._runtime_choices(row.spec)
             if choices is None:
                 continue
@@ -6061,7 +6053,7 @@ class LibraryPanel(QWidget):
 
     def _apply_badges(self) -> None:
         avail = set(self._available)
-        for key, item in self._items.items():
+        for _key, item in self._items.items():
             if not self._available:
                 item.set_missing(())
                 continue

@@ -49,7 +49,7 @@ Two refinement methods are provided:
 
 from __future__ import annotations
 
-from typing import List, NamedTuple, Optional, Union
+from typing import List, NamedTuple, Optional
 
 import cv2
 import numpy as np
@@ -389,7 +389,8 @@ def refine_yedge_subpixel(
     Returns SubpixelResult with fallback_reason="" on success, or a reason
     code string on failure (y_refined == y_guess in that case).
     """
-    _fallback = lambda reason: SubpixelResult(y_guess, reason, 0.0, 0.0, 0.0)
+    def _fallback(reason):
+        return SubpixelResult(y_guess, reason, 0.0, 0.0, 0.0)
 
     if image is None or image.ndim < 2:
         return _fallback("invalid_image")
@@ -514,7 +515,8 @@ def refine_yedge_threshold_crossing(
       "no_crossing"        – threshold not crossed anywhere in window
       "proximity_violation"– closest crossing too far from y_guess
     """
-    _fallback = lambda reason: SubpixelResult(y_guess, reason, 0.0, 0.0, 0.0)
+    def _fallback(reason):
+        return SubpixelResult(y_guess, reason, 0.0, 0.0, 0.0)
 
     if image is None or image.ndim < 2:
         return _fallback("invalid_image")

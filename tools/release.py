@@ -11,10 +11,31 @@
 
 1. ``tools/FILELIST.txt`` —— 全部檔案的 git blob SHA。公司機用它判斷
    「哪幾個檔案要重新複製」（`tools/check_files.py`）。
-2. ``bundle/d4t_bundle.py`` —— 整個 repo 壓成一個純文字 `.py`，
+2. ``bundle/d4t_bundle.py`` —— 整個 repo 串成一個純文字 `.py`，
    在 GitHub 上複製 raw 就能整包搬進公司機（見 `AGENTS.md` §2）。
    每次產完會報一句目前的大小（見 :func:`bundle_size_report`）——
    那是**資訊**，不是門檻：raw 那條路跟檔案多大無關。
+
+   ⚠ **不壓縮**（2026-09-03 改；以前是 lzma+base64）。理由不是可讀性，是
+   **git 的 pack**：壓縮檔改一行就整份變樣，git 沒辦法 delta 壓縮它，於是
+   每個 commit 都完整存一份。實測同一次「改一支模組再重產」：
+
+   =================  ==========  ==============  ==============
+   格式               單份大小    存兩版後 pack   **第二版多花**
+   =================  ==========  ==============  ==============
+   lzma+base64（舊）  2,253 KB    3,404 KB        **1,702 KB**
+   純文字（現在）     7,631 KB    2,493 KB        **1 KB**
+   =================  ==========  ==============  ==============
+
+   1,702 KB → 1 KB，**1700 倍**。而且純文字版**存進 git 之後還更小**
+   （2,493 vs 3,404 KB）—— git 自己會 zlib 壓 blob，而「壓過再 base64」
+   剛好把它能壓的東西都拿掉了。舊做法在 217 個 commit 裡累積了 88 MB，
+   佔整個 pack 的 46%，而那些副本**沒有一份被讀過**：被讀的永遠是最新那一份。
+
+   搬運那一端一個字都沒有變：網址一樣、複製鈕一樣、`docs/NO-GIT-SETUP.md`
+   上那條程序一樣。解包程式本身**兩種格式都認得**（``#ENC text`` 與
+   ``#ENC lzma+base64``），所以已經搬進公司機的舊包照樣解得開。
+   代價只有一個：那個檔案在瀏覽器上從 2.2 MB 變成 7.6 MB。
 
 **先清單再打包**：包裡面含著那份清單，順序反了就會把舊清單封進新包裡，
 而那個包解出來之後 `check_files.py` 會報一堆不存在的差異。
@@ -49,22 +70,28 @@ BUNDLE = os.path.join("bundle", "d4t_bundle.py")
 #: （`raw.githubusercontent.com/.../bundle/d4t_bundle.py`），那條路跟檔案
 #: 多大無關。所以這個數字留在這裡只是為了**講得出現在多大**，
 #: 不是一個要閃避的門檻 —— 不要為了它去刪文件或分批。
+#:
+#: 2026-09-03 之後這件事更明顯了：包改成不壓縮（見模組說明），一口氣從
+#: 2.2 MB 變成 7.6 MB —— 而搬運那一端**什麼都沒有變**。這正是「1 MB 不是
+#: 限制」那句話的證明題。
 BUNDLE_LIMIT_BYTES = 1024 * 1024
 
 
 def bundle_size_report(nbytes: int) -> Tuple[str, str]:
     """包的大小 → ``(等級, 要印的話)``；等級恆為 ``ok``（這裡不擋任何事）。
 
-    切開成純函式是為了測得到 —— 產一個 1 MB 的包只為了驗這段訊息太貴。
+    切開成純函式是為了測得到 —— 產一個 7 MB 的包只為了驗這段訊息太貴。
 
     以前這裡分 ok / warn / over 三級，85% 就開始喊。那是「1 MB 是硬牆」年代
     的產物；使用者改用 raw 複製之後，喊了也沒有人需要做任何事，而**一句沒有
     對應動作的警告只會訓練人忽略警告**。現在它只報事實。
+
+    ⚠ **不要把「佔 1 MB 的百分之幾」印回來。** 包不壓縮之後那個數字是 745%，
+    而一個 745% 讀起來就是一句警報 —— 對著一件沒有人需要做任何事的事情。
     """
-    pct = 100.0 * nbytes / BUNDLE_LIMIT_BYTES
-    size = ("%.0f KB（GitHub 檔案頁的顯示上限是 1 MB，佔 %.0f%%；"
-            "搬運走 raw，不受這個數字影響）" % (nbytes / 1024.0, pct))
-    return "ok", "  %s" % size
+    return "ok", ("  %.1f MB（走 raw 複製，跟這個數字無關；GitHub 的檔案瀏覽頁"
+                  "在 1 MB 以上不顯示，那條路本來就沒在用）"
+                  % (nbytes / 1024.0 / 1024.0))
 
 
 def repo_root() -> str:
@@ -176,7 +203,10 @@ def write(root: str = "") -> None:
     # 2. 再打包
     bundle = os.path.join(root, BUNDLE.replace("/", os.sep))
     os.makedirs(os.path.dirname(bundle), exist_ok=True)
-    text = make_text_bundle.build(os.path.basename(bundle), root, compress=True)
+    # `compress=False` —— 見模組說明的那張表。**不要改回 True**：
+    # 那一個布林值就是 pack 裡那 88 MB 的全部原因。
+    text = make_text_bundle.build(os.path.basename(bundle), root,
+                                  compress=False)
     tmp = bundle + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)

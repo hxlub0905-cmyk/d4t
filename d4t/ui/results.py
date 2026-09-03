@@ -38,7 +38,6 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QStackedWidget,
-    QToolButton,
     QHBoxLayout,
     QLabel,
     QMainWindow,

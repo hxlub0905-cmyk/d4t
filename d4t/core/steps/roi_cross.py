@@ -40,15 +40,12 @@ from ..algo import grid as algo_grid
 from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_ALGO, GROUP_REGION, FeatureSpec, ParamSpec, Step, StepError,
-    register_step,
 )
 from ._util import (
     FEATURE_PREFIX_PATTERN, drop_edge_boxes, drop_edge_specs,
     PICK_NONE, output_prefix_spec, pick_defect_box, pick_rule_of,
-    pick_rule_specs, prefix_features, prefix_names, region_family,
-    REGION_FACT_HELP, SHARED_FEATURE_HELP, region_fact_names,
-    region_fact_specs, region_facts,
-    region_role_of,
+    pick_rule_specs, prefix_features, region_family,
+    REGION_FACT_HELP, SHARED_FEATURE_HELP, region_fact_specs, region_facts,
     region_spec_maker,
     require_image, set_region_family,
     LIMIT_MAX_BOXES,

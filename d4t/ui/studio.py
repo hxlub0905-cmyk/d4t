@@ -83,12 +83,10 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
     QInputDialog,
     QLabel,
-    QLineEdit,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -99,7 +97,6 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QStatusBar,
-    QTabWidget,
     QToolBar,
     QToolButton,
     QVBoxLayout,
@@ -126,8 +123,7 @@ from .results import ResultsWindow, extra_only, summarize_run
 from . import results_table
 from . import scope
 from .scope import (
-    is_supported_kind, no_klarf_message, recipe_is_supported,
-    unsupported_kind_message, visible_steps,
+    is_supported_kind, no_klarf_message, unsupported_kind_message, visible_steps,
 )
 from .decide_panel import DecidePanel
 from .feature_panel import FeaturePanel
@@ -152,18 +148,18 @@ from .widgets import (
     apply_button_cursors,
     column_header,
     small_button,
-    split_labelled,
 )
-
-
-class _GlyphToolButton(_GlyphMixin, QToolButton):
-    """工具列上會自己畫圖示的 QToolButton（``_tool_button(icon=…)`` 用）。"""
 
 from .workers import (
     CalibrateWorker, DatasetLoadWorker, OutputWorker, PreviewWorker,
     RegionCheckWorker, TrialWorker,
     _ThreadedWorker,
 )
+
+
+class _GlyphToolButton(_GlyphMixin, QToolButton):
+    """工具列上會自己畫圖示的 QToolButton（``_tool_button(icon=…)`` 用）。"""
+
 
 __all__ = ["StudioWindow", "ThumbWorker", "TEMPLATE_RECIPE", "DEFAULT_CACHE_DIR",
            "THUMB_CHANNEL_PRIORITY", "TAB_PREVIEW", "TAB_GALLERY",
@@ -6423,7 +6419,7 @@ class StudioWindow(QMainWindow):
         self._pair_filled[sid] = tuple(cols)
         self._say_missing_columns(sid, cols)
         # 卡片旁邊那句話要講得出檔名 —— 它是使用者認得的東西。
-        setattr(ds, "_d4t_name", os.path.basename(str(klarf_path)))
+        ds._d4t_name = os.path.basename(str(klarf_path))
         self._sync_source_action(node)
         # 三格的選單（代號／哪張圖／哪些欄）現在才有答案（F15-2）。
         if self.selected_node == str(node_id):

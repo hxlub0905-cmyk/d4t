@@ -286,14 +286,27 @@ param 相依 I/O（例如輸出流名稱由參數決定）覆寫 `resolve_reads/
 
 ```bash
 python -m venv .venv && .venv\Scripts\activate      # Windows
-pip install -r requirements.txt && pip install pytest
+pip install -r requirements.txt && pip install pytest ruff
 
+ruff check                                         # 靜態檢查（幾秒，先跑這個）
 QT_QPA_PLATFORM=offscreen pytest -q                # 全部測試（Windows 不用設）
 python tools/make_sample.py /tmp/lot --n 100       # 產合成資料
 python -m d4t gui                                # 開 Studio
 python -m d4t run <recipe>.json /tmp/lot/LOT_SYN.001 \
     --workers 4 --cache /tmp/cache --db /tmp/runs.db --csv features.csv
 ```
+
+**`ruff check` 先跑**（2026-09-03 加，設定在 `pyproject.toml` 的 `[tool.ruff]`，
+CI 有一個獨立的 lint job）。它幾秒就有答案，而測試要三分半 —— 一個打錯的名字
+不值得等那麼久。它掃的是 `d4t/` `tools/` `fab_probe/` `conftest.py`，**不掃
+`tests/`**（理由寫在設定裡：UI 測試刻意 lazy import Qt，ruff 在那裡會報 1,217
+條誤報）。
+
+⚠ **`--fix` 要看過再收。** 第一次跑的時候它自動刪掉了 `ingest/pair_source.py`
+一個「這個模組自己沒用到」的 import —— 而那是一個**轉出口**，`studio.py` 與
+`__main__.py` 都在用 `pair_ingest.columns_of(...)`。F401 問的是「這個檔案有沒有
+用到」，答不出「別人有沒有透過這個檔案用到」。轉出口請留 `# noqa: F401` 加一句
+為什麼（`__init__.py` 整份免除，那是設定裡的 per-file-ignores）。
 
 **跑測試的方式很重要**（不照做會浪費很多時間）：
 

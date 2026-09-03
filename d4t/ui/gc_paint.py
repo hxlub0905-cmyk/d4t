@@ -18,7 +18,7 @@ GC 照週期鋪出來的，所以**GC 上的一個點就是大圖上那一整排
 """
 from __future__ import annotations
 
-from typing import Iterable, List, Optional, Tuple
+from typing import Iterable, Optional, Tuple
 
 import numpy as np
 from PySide6.QtCore import QPoint, QRect, Qt, Signal

@@ -8,7 +8,7 @@ from ..algo import iqi as algo_iqi
 from ..algo import quality as algo_quality
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, ParamSpec, Step, StepError, register_step, GROUP_MEASURE,
+    CATEGORY_ALGO, ParamSpec, StepError, register_step, GROUP_MEASURE,
 )
 from ._util import MultiSourceStep, output_prefix_spec, parse_key_list
 

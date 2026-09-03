@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 import re
+from typing import Optional
 
 
 # ---------------------------------------------------------------- 小工具
@@ -1866,7 +1867,10 @@ def compare_html(res):
         sts = sorted(st, key=STATUS_ORDER.index)
         ref = pa if pa is not None else pb
 
-        def side(p, which):
+        def side(p, which, chg=chg):
+            # ``chg`` 綁成預設值不是為了省字：這支函式定義在迴圈裡，而
+            # late binding 讓它讀到的是**迴圈結束後**的那個值。今天沒事
+            # （下一行就呼叫掉了），但它離「被搬到迴圈外一格」只有一次重構。
             if p is None:
                 return None
             oth = ('  '.join('%s %s' % (c, (va if which == 0 else vb))

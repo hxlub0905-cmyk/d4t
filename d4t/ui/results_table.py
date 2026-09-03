@@ -86,7 +86,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from ..core.export.report import BASE_COLUMNS, feature_keys
 from .numbers import format_feature_value
 from .theme import TOKENS, region_hex
 from .widgets import FilterChip, metric_face

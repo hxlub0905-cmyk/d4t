@@ -24,13 +24,21 @@
 
 ### 0a. 第一次搬整包：一個檔案（推薦）
 
-`bundle/d4t_bundle.py` —— **一次複製就搬完整個 repo**（2026-08-16 是 888 KB）。
+`bundle/d4t_bundle.py` —— **一次複製就搬完整個 repo**（2026-09-03 是 7.6 MB）。
 
-1. 在瀏覽器打開 `https://github.com/hxlub0905-cmyk/d4t/blob/main/bundle/d4t_bundle.py`
-2. 按檔案右上角的**複製鈕**
+1. 在瀏覽器打開
+   **`https://raw.githubusercontent.com/hxlub0905-cmyk/d4t/main/bundle/d4t_bundle.py`**
+2. **Ctrl+A 全選 → Ctrl+C**
 3. 貼進記事本，存成 `d4t_bundle.py`
 4. `python d4t_bundle.py --list`  ← 先看它會寫哪些檔案，**不寫任何東西**
 5. `python d4t_bundle.py`
+
+> ⚠ **為什麼是 `raw.githubusercontent.com` 而不是 `github.com/.../blob/...`。**
+> GitHub 的**檔案瀏覽頁**在 1 MB 以上不顯示內容，那顆右上角的複製鈕會跟著
+> 消失。這一包 2026-08-19 就超過 1 MB 了，而這份文件到 2026-09-03 都還寫著
+> 「按複製鈕」—— 也就是**一份寫下來的程序在一台救不了的機器上，安靜地失效
+> 了兩個星期**。raw 那條路跟檔案多大無關（`AGENTS.md` §2 的原話），
+> 所以步驟改成它。
 
 > ⚠ **記事本另存的時候會偷加 `.txt`。** 它的「存檔類型」預設是「文字文件
 > (\*.txt)」，所以你打 `d4t_bundle.py` 會被存成 `d4t_bundle.py.txt` ——
@@ -44,12 +52,16 @@
 >
 > 順帶建議把副檔名顯示打開：檔案總管 → 檢視 → 顯示 → 副檔名。
 
-它用 `lzma` + base64 壓過（stdlib，不需要裝東西）。為什麼是 lzma 而不是 gzip：
-同樣的內容 gzip 壓完會超過 GitHub 那個 1 MB 的顯示上限，lzma 才塞得下。
+**它沒有壓縮**（2026-09-03 起）—— 整份就是讀得懂的純文字：最前面約 90 行是
+解包程式（可讀的 Python），後面一個檔案接一個檔案。`--list` 讓你在它寫任何
+檔案之前就看得到清單，而想逐字讀過全部內容的話，**這一份本身就可以讀了**
+（以前要另外產下面那個分批版才行）。
 
-**代價**：內容是 base64，記事本打開看不懂。**解包程式本身仍然是可讀的 Python**
-（檔案最前面約 90 行），而 `--list` 讓你在它寫任何檔案之前就看得到清單。
-想逐字讀過全部內容的話用下面那個純文字版。
+⚠ 以前它是 `lzma` + base64 壓過的，代價是記事本打開看不懂。改掉的理由跟
+可讀性無關，是 git 的 pack —— 壓縮檔改一行就整份變樣，git 沒辦法 delta
+壓縮它（舊做法累積了 88 MB，佔 pack 的 46%）。數字見
+[`../AGENTS.md`](../AGENTS.md) §2。**已經搬進來的舊包不用重搬**：解包程式
+兩種格式都認得。
 
 ### 0a-2. 同一件事的純文字版：分批（要先在家用機產）
 
@@ -245,13 +257,20 @@ Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/hxlub0905-cmyk/d4t/mai
 `.ps1` 也要 proxy 通得過才行。能過的只剩「一個純文字檔」。
 
 `tools/make_text_bundle.py` 在**有網路的機器上**把整個 repo 打成一個
-`d4t_bundle.py`。預設會用 lzma + base64 壓（不然塞不進 GitHub 的 1 MB 顯示
-上限），**解包程式本身仍然是可讀的 Python**，`--list` 可以在寫任何檔案之前
-先列出它要寫什麼。想要每個檔案都逐字讀得到的話用 `--split 400`（見 §0a-2）——
-那個版本沒有壓縮也沒有 base64，記事本往下捲就看得到每一個檔案。
+`d4t_bundle.py`。**出貨的那一份不壓縮**（`tools/release.py` 產的那個，
+2026-09-03 起）—— 所以它本身就是讀得懂的純文字，記事本往下捲就看得到每一個
+檔案，`--list` 也可以在寫任何檔案之前先列出它要寫什麼。
+
+不壓縮的理由跟可讀性無關，是 **git 的 pack**：壓縮檔改一行就整份變樣，
+git 沒辦法 delta 壓縮它，於是每個 commit 都完整存一份（舊做法累積了 88 MB，
+佔 pack 的 46%）。數字見 [`../AGENTS.md`](../AGENTS.md) §2。
+
+`--compress` 這個選項還在（解包程式兩種格式都認得，舊包照樣解得開），
+但**除非你知道自己在做什麼，不要用它產出貨的那一份**。
 
 ```
-python tools/make_text_bundle.py        # 產 d4t_bundle.py（壓縮；太大會自動分批）
+python tools/make_text_bundle.py        # 產 d4t_bundle.py（純文字）
+python tools/release.py                 # ← 出貨走這支，它會一起更新 FILELIST
 ```
 
 把那個檔案帶到公司機（下載、郵件、隨身碟 —— 它就是一個 .py 檔），然後：

@@ -203,10 +203,12 @@ class ROIFullResult:
         return None
 
     def compare_labels(self) -> List[str]:
-        return [l.image_label for l in self.layers if l.layer_type == 'compare']
+        return [ly.image_label for ly in self.layers
+                if ly.layer_type == 'compare']
 
     def diff_labels(self) -> List[str]:
-        return [l.image_label for l in self.layers if l.layer_type == 'diff']
+        return [ly.image_label for ly in self.layers
+                if ly.layer_type == 'diff']
 
 
 # ---------------------------------------------------------------------------

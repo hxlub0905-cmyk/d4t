@@ -49,6 +49,24 @@ def _vendored_modules():
     return out
 
 
+def _dev_extra_packages():
+    """`[project.optional-dependencies]` 的 ``dev`` 那一項宣告了什麼。
+
+    只有這一項 —— `gui`（PySide6）是**執行時**相依，只是選配，所以它照樣
+    要進 `LICENSE` 的 carve-out。
+    """
+    text = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    extras = re.search(r"^\[project\.optional-dependencies\]\n(.*?)(?=^\[|\Z)",
+                       text, re.S | re.M)
+    if not extras:
+        return set()
+    block = re.search(r"^dev\s*=\s*\[(.*?)\]", extras.group(1), re.S | re.M)
+    if not block:
+        return set()
+    return {re.match(r"[A-Za-z0-9_.\-]+", item).group(0)
+            for item in re.findall(r'"([^"]+)"', block.group(1))}
+
+
 def _declared_packages():
     """`pyproject.toml` ＋ `requirements.txt` 宣告的套件名（去掉版本限制）。
 
@@ -184,10 +202,18 @@ def test_the_license_carve_out_covers_every_dependency():
 
     （`shiboken6` 不算：它是 PySide6 拖進來的，沒有人直接宣告它 ——
     `LICENSE` 寫的 "PySide6 and its dependencies" 就是在講它。）
+
+    **`dev` extra 裡的也不算**，而判準是讀出來的、不是寫死的名字：那一段
+    carve-out 的原文是「this software depends on **at run time**」，而 `dev`
+    裡的東西（`pytest`、`ruff`）一次都不執行、也不隨任何一條搬運路徑進廠。
+    這裡以前寫死一個 ``!= "pytest"``，於是 2026-09-03 加 `ruff` 的時候它紅了
+    —— 紅得對（有東西變了），但指的方向錯（它要人去改 `LICENSE`，而那是錯的
+    答案）。判準改成問 `dev` extra 本身之後，下一個開發工具不會再問一次。
     """
     text = LICENSE.read_text(encoding="utf-8").lower()
+    dev_only = {n.lower() for n in _dev_extra_packages()}
     missing = sorted(p for p in _declared_packages()
-                     if p.lower() not in text and p.lower() != "pytest")
+                     if p.lower() not in text and p.lower() not in dev_only)
     assert not missing, (
         "LICENSE 的第三方 carve-out 沒有點名這幾個相依套件：%s\n"
         "（漏掉的那一個，等於被蓋進了 d4t 自己的專有聲明裡）" % "、".join(missing))

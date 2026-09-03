@@ -85,9 +85,7 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 
-from ..algo import golden as algo_golden
 from ..algo import mask as algo_mask
-from ..algo import period as algo_period
 from ..ingest.glas_export import SIDECAR_LABEL
 from ..pipeline.channels import ChannelMapError, parse_channel_map
 from ..pipeline.context import Context
@@ -97,11 +95,9 @@ from ..pipeline.step import (
     show_when_conditions,
 )
 from ._util import (
-    FEATURE_PREFIX_PATTERN, drop_edge_boxes, drop_edge_specs, ensure_gray,
-    PICK_NONE, output_prefix_spec, pick_defect_box, pick_rule_of,
-    pick_rule_specs, prefix_features, prefix_names, region_family,
-    REGION_FACT_HELP, region_fact_names, region_fact_specs, region_facts,
-    region_role_of,
+    FEATURE_PREFIX_PATTERN, drop_edge_boxes, drop_edge_specs, PICK_NONE, output_prefix_spec, pick_defect_box, pick_rule_of,
+    pick_rule_specs, prefix_features, region_family,
+    REGION_FACT_HELP, region_fact_specs, region_facts,
     region_spec_maker,
     require_image, set_region_family,
     LIMIT_MAX_BOXES,

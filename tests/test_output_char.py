@@ -406,3 +406,77 @@ def test_marking_is_on_by_default():
     spec = next(p for p in REGISTRY["output_char"].params
                 if p.name == "mark_defect")
     assert spec.default is True
+
+
+# --------------------------------------------------------------------------- #
+# 5. 那個承重假設錯掉的時候，報表要說話（2026-09-03）
+# --------------------------------------------------------------------------- #
+# `docs/FAB-VALIDATION.md` 假設 #7：EBI patch 是不是以 defect 為中心裁的。
+# 不是的話（固定格線裁），`align_off_*` 恆為 0 —— 而那時候報表**看起來最漂亮**：
+# 每一顆的十字與框完美重合。這一組測試鎖的就是「漂亮」不再等於「沒事」。
+from d4t.core.steps.align_to import (                             # noqa: E402
+    DEGENERATE_MIN_N, degenerate_offset_note,
+)
+
+
+def _rows(offsets):
+    return [{"defect_id": str(i), "features": {"align_off_x_px": ox,
+                                               "align_off_y_px": oy}}
+            for i, (ox, oy) in enumerate(offsets)]
+
+
+def test_a_real_stage_wanders_so_nothing_is_said():
+    """有偏移就是這一欄在做它該做的事 —— 不要在這種時候吵。"""
+    rows = _rows([(0.0, 0.0), (18.0, -12.0), (-25.0, 30.0), (40.0, 5.0)]
+                 * DEGENERATE_MIN_N)
+    assert degenerate_offset_note(rows) is None
+
+
+def test_every_defect_at_zero_gets_the_question_asked():
+    """整批貼在 0 上 —— 這正是固定格線裁長的樣子，所以要講。"""
+    note = degenerate_offset_note(_rows([(0.0, 0.01)] * DEGENERATE_MIN_N))
+    assert note
+    # 講的必須是**下一步**，不是一句「有點怪」。
+    assert "fixed grid" in note and "tool engineer" in note
+    # 而且不能假裝資料是壞的 —— 另一個解釋要一起講出來。
+    assert "aimed perfectly" in note
+
+
+def test_one_defect_that_wanders_is_enough_to_stay_quiet():
+    """判準是**最大值**不是平均：一顆真的動過，就證明這一欄跟 defect 有關。"""
+    off = [(0.0, 0.0)] * (DEGENERATE_MIN_N * 2)
+    off[3] = (7.5, 0.0)
+    assert degenerate_offset_note(_rows(off)) is None
+
+
+def test_too_few_defects_is_not_evidence():
+    """三顆全部是 0 還可能只是剛好 —— 樣本不夠就不要下結論。"""
+    assert degenerate_offset_note(_rows([(0.0, 0.0)] * 3)) is None
+
+
+def test_a_run_without_h2h_says_nothing():
+    """沒跑過 `align_to` 的那一批根本沒有這一欄，不該因此得到一句警告。"""
+    assert degenerate_offset_note(
+        [{"defect_id": "1", "features": {"glv_mean": 12.0}}] * 50) is None
+    assert degenerate_offset_note([]) is None
+
+
+def test_the_card_says_it_on_the_batch_not_just_in_a_function(dataset,
+                                                              tmp_path):
+    """真的接上去了 —— `output_char` 跑完之後那句話在 `bctx.warnings` 裡。
+
+    上面五條測的是判準，這一條測的是**接線**：F83 那三個 bug 全部是
+    「model 對了、而那個動作從來沒有被接上去」（`SESSION_LOG.md`）。
+    """
+    from d4t.core.pipeline.context import BatchContext
+
+    step = REGISTRY["output_char"]()
+    bctx = BatchContext(rows=_rows([(0.0, 0.0)] * DEGENERATE_MIN_N),
+                        dataset=dataset, kind=KIND)
+    params = {ps.name: ps.default for ps in step.params}
+    params["folder"] = str(tmp_path / "char")
+    step.run_batch(bctx, params)
+
+    said = [w for w in bctx.warnings if "fixed grid" in w]
+    assert said, bctx.warnings
+    assert said[0].startswith("Characterization report:")

@@ -55,7 +55,7 @@ from ..algo import normalize as algo_normalize
 from ..algo import enhance as algo_enhance
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_IMAGE, GROUP_ENHANCE, ParamSpec, Step, StepError, register_step,
+    CATEGORY_IMAGE, GROUP_ENHANCE, ParamSpec, StepError, register_step,
 )
 from ._util import MultiStreamStep, require_image, streams_spec, to_uint8
 

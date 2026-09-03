@@ -251,7 +251,7 @@ def test_zoomed_out_a_card_keeps_its_title_and_drops_the_rest(window):
 
     assert label in seen[1.0] and label in seen[0.4], "縮小之後連標題都不見了"
     assert len(seen[0.4]) == 1, (
-        "縮到 40% 還在畫 %d 行字：%r" % (len(seen[0.4]), seen[0.4]))
+        "縮到 40%% 還在畫 %d 行字：%r" % (len(seen[0.4]), seen[0.4]))
     assert len(seen[1.0]) > len(seen[0.4]), (
         "100% 跟 40% 畫的東西一樣多 —— LOD 沒有生效")
 

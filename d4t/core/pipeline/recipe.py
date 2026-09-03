@@ -80,7 +80,8 @@ def _as_number(raw: Any, where: str, cast, kind: str):
     try:
         return cast(raw)
     except (TypeError, ValueError):
-        raise RecipeError("%s must be %s, got %r" % (where, kind, raw))
+        raise RecipeError(
+            "%s must be %s, got %r" % (where, kind, raw)) from None
 
 
 def _as_int(raw: Any, where: str) -> int:
@@ -694,7 +695,7 @@ def _migrate_region_params_into_edges(
     if registry is None:
         registry = REGISTRY
     have = {(e.dst, e.dst_in, e.src_out) for e in edges}
-    for kind, route in routes.items():
+    for _kind, route in routes.items():
         route = list(route)
         in_route = set(route)
         for i, nid in enumerate(route):
@@ -829,7 +830,7 @@ def _decide_issues(recipe: "Recipe", decide: "DecideSpec") -> List["Issue"]:
                        "but nobody can read a tree this tall - consider "
                        "combining conditions ((a > 5) * (b < 2) means both)."
                        % depth))
-        for i, when in enumerate(_tree_whens(decide.tree)):
+        for when in _tree_whens(decide.tree):
             try:
                 parse_expression(when)
             except ExpressionError as e:
@@ -2049,7 +2050,7 @@ def feature_referrers(name: str, nodes: Dict[str, "RecipeNode"],
         out.append("the score expression")
     if decide is not None:
         spots = [str(getattr(decide, "score", "") or "")]
-        spots += [str(getattr(l, "expr", "") or "") for l in decide.let]
+        spots += [str(getattr(lt, "expr", "") or "") for lt in decide.let]
         spots += [str(getattr(r, "when", "") or "") for r in decide.rules]
 
         def walk(node: Any) -> None:
@@ -2170,8 +2171,8 @@ def _rename_in_decide(decide: Optional["DecideSpec"],
     if decide is None or not table:
         return decide
     score = _renamed_idents(str(decide.score or ""), table)
-    lets = [replace(l, expr=_renamed_idents(str(l.expr or ""), table))
-            for l in decide.let]
+    lets = [replace(lt, expr=_renamed_idents(str(lt.expr or ""), table))
+            for lt in decide.let]
     rules = [replace(r, when=_renamed_idents(str(r.when or ""), table))
              for r in decide.rules]
     tree = _rename_in_tree(decide.tree, table)

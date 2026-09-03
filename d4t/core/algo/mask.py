@@ -38,7 +38,7 @@ N=50 000 約 280 ms **而且是每張量測卡每顆各一次**。卡片的預�
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 
@@ -190,7 +190,7 @@ def drop_small_pieces(rects, piece_of, min_area: int
     if min_area <= 0:
         return list(rects), list(piece_of), 0
     area: Dict[int, int] = {}
-    for (x, y, w, h), p in zip(rects, piece_of):
+    for (_x, _y, w, h), p in zip(rects, piece_of):
         area[p] = area.get(p, 0) + int(w) * int(h)
     keep = {p for p, a in area.items() if a >= int(min_area)}
     out_r, out_p = [], []

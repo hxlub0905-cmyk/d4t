@@ -227,7 +227,7 @@ def read_text(path):
         with open(path, "rb") as f:
             raw = f.read()
     except (IOError, OSError) as exc:
-        raise ProbeError("讀檔失敗：%s" % exc)
+        raise ProbeError("讀檔失敗：%s" % exc) from None
     if not raw:
         raise ProbeError("檔案是空的（0 bytes），沒有東西可以探測。")
     if raw.count(b"\x00") > max(4, len(raw) // 200):

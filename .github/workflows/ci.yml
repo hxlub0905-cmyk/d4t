@@ -7,6 +7,25 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ruff 是**一份**答案，跟 Python 版本無關 —— 所以它自己一個 job，不跟著
+  # 下面那個 3×矩陣跑三次。它也不依賴 numpy/Qt，所以幾秒就有結果：
+  # 一個打錯的名字不必等七分鐘的測試才被講出來。
+  #
+  # ⚠ **版本要釘住。** ruff 每一版都會多幾條規則，浮動版本的意思是
+  # 「某天早上 CI 自己紅了，而沒有人改過任何一行」。要升級就改這一行，
+  # 那一次的 diff 就是「新規則抓到什麼」。
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff==0.15.8
+      # 掃哪些路徑、開哪些規則、為什麼不開 E501/UP —— 全部在 pyproject.toml 的
+      # `[tool.ruff]` 那一段，這裡刻意不重複一份（會漂）。
+      - run: ruff check --output-format=github
+
   test:
     runs-on: ubuntu-latest
     strategy:

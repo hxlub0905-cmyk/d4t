@@ -270,7 +270,8 @@ def collect(root: str = "") -> List[Tuple[str, bytes]]:
         try:
             data.decode("utf-8")
         except UnicodeDecodeError:
-            raise SystemExit("%s 不是 UTF-8 —— 這個格式只裝純文字。" % rel)
+            raise SystemExit(
+                "%s 不是 UTF-8 —— 這個格式只裝純文字。" % rel) from None
         items.append((rel, data))
     return items
 
