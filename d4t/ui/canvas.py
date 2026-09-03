@@ -168,6 +168,35 @@ _Z_EDGE, _Z_EDGE_HOVER = -1.0, 1.0
 #: 中間那段留給還看得出輪廓的模糊字。
 _LOD_TERSE = 0.55
 
+#: 背景點陣的間距 —— **同時是版面的格線**（F79）。
+#:
+#: 以前它是 22，而且**只**是背景的裝飾。版面用的是另外一組數字：欄距
+#: ``NODE_W + COL_GAP`` = 320（320 / 22 = 14.55）、列距「卡片高 + ``ROW_GAP``」
+#: = 90（90 / 22 = 4.09）。兩組都不整除，所以按了「排整齊」之後**卡片的角落落
+#: 在點與點之間，而且每一列偏移的量還不一樣** —— 那張點陣底看起來像對齊參考，
+#: 實際上對不齊任何東西。
+#:
+#: 20 是唯一不必動卡片尺寸就成立的值：``NODE_W + COL_GAP`` = 204 + 116 = 320
+#: 正好是 16 × 20。列距則由 :func:`on_grid` 進位（卡片高度是變動的 —— 有
+#: 「整批跑一次」腳帶的卡比較高）。
+#:
+#: ⚠ **卡片的右緣仍然不在點上**（204 不是 20 的倍數）。量過了：要讓它也落在點
+#: 上得把 ``NODE_W`` 收成 200，而那 4px 是 F13-⑤ 花錢買回來的標題寬度
+#: （190 → 204 的理由是 ``Compare two streams`` 被切）。左上角對齊才是「這一排
+#: 卡有沒有排好」的判準，右緣多出來的 4px 是同一個常數，不會讓卡片之間歪掉。
+GRID = 20.0
+
+
+def on_grid(value: float) -> float:
+    """把一段長度**往上**進位到 :data:`GRID` 的倍數。
+
+    往上不往下：列距是「這一列最高的卡 + 間距」，往下取整會讓最高的那張卡
+    貼到下一列去。
+    """
+    step = GRID
+    return float(int((float(value) + step - 1e-9) // step) * step)
+
+
 #: 還沒拉線時，一列最多排幾張卡（見 :func:`layout_columns`）。
 WRAP = 4
 
@@ -400,6 +429,9 @@ class _NodeItem(QGraphicsItem):
         # 卡片一收 hover，事件就不再穿過它，壓在線中點上的卡會把 × 悶死；
         # 見 shape() 的說明與 test_ui_canvas_cut_button）。
         self._hover = False
+        #: 現在這張卡是不是正被使用者的手拖著（F79）。只有這種時候位置才吸到
+        #: 格線上 —— 理由見 :meth:`_snapped`。
+        self._dragging = False
         tip = "%s — %s" % (self.node_id, info.get("label", ""))
         if info.get("problem"):
             # 標記說「有問題」，滑鼠停上去說「是什麼問題」。標記本身放不下一句話，
@@ -1041,7 +1073,13 @@ class _NodeItem(QGraphicsItem):
             e.accept()
             return
         self.canvas.node_selected.emit(self.node_id)
+        # 從這裡到放開為止，位置的改變都是**使用者的手**（見 itemChange）。
+        self._dragging = e.button() == Qt.LeftButton
         super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self, e) -> None:    # noqa: D102 - Qt hook
+        self._dragging = False
+        super().mouseReleaseEvent(e)
 
     def mouseDoubleClickEvent(self, e) -> None:  # noqa: D102 - Qt hook
         """雙擊 = 打開這張卡的設定（F7-22，n8n 的動作）。
@@ -1054,9 +1092,30 @@ class _NodeItem(QGraphicsItem):
         e.accept()
 
     def itemChange(self, change, value):        # noqa: D102 - Qt hook
+        if change == QGraphicsItem.ItemPositionChange and self._dragging:
+            return self._snapped(value)
         if change == QGraphicsItem.ItemPositionHasChanged:
             self.canvas.refresh_edges()
         return super().itemChange(change, value)
+
+    @staticmethod
+    def _snapped(pos: QPointF) -> QPointF:
+        """把拖到的位置吸到格線上（F79）。
+
+        ⚠ **只吸使用者拖的那一下，不吸 ``setPos``。** 兩個理由，第二個才是硬的：
+
+        1. 吸附是**手勢的一部分**（拖到附近就對齊），不是座標系的性質。
+        2. ``setPos`` 是別的程式碼**重現**一個位置的路：彈出視窗要跟主畫布擺
+           在一樣的地方、重建畫布要把使用者拖好的佈局放回去。那條路一旦量化
+           就不再是 identity —— 存 333 讀回 340、再存 340…… 每重建一次就漂一
+           格。這跟鐵則 9（``to_json_dict → from_json_dict`` 必須是 identity）
+           是同一種 bug，只是這裡漂的是像素不是分數。
+
+        所以判準是「這一下是不是從 ``mousePressEvent`` 來的」，見 ``_dragging``。
+        """
+        step = GRID
+        return QPointF(round(pos.x() / step) * step,
+                       round(pos.y() / step) * step)
 
     def show_context_menu(self, screen_pos) -> None:
         """這張卡的右鍵選單。
@@ -1622,7 +1681,10 @@ class PipelineCanvas(QGraphicsView):
         fresh = [_NodeItem(info, self) for info in nodes]
         # **列距要容得下最高的那張卡**（F12）：埠多的卡片會長高，用固定的
         # ``NODE_H + ROW_GAP`` 排的話它會壓到下一列。
-        self._pitch = max([it.height() for it in fresh] or [NODE_H]) + ROW_GAP
+        # 列距**進位到格線上**（F79）：卡片的左上角因此落在點上，而欄距
+        # （320 = 16 × 20）本來就是。卡片高度是變動的，所以這裡不能寫死。
+        self._pitch = on_grid(max([it.height() for it in fresh] or [NODE_H])
+                              + ROW_GAP)
         for item in fresh:
             if item.node_id in prev:
                 item.setPos(prev[item.node_id])
@@ -2114,7 +2176,7 @@ class PipelineCanvas(QGraphicsView):
         self._laid_wrap = self.wrap()
         pos = layout_columns(self._order, self._pairs + self._implicit,
                              self._laid_wrap)
-        pitch = getattr(self, "_pitch", NODE_H + ROW_GAP)
+        pitch = getattr(self, "_pitch", on_grid(NODE_H + ROW_GAP))
         for nid, item in self._items.items():
             col, row = pos.get(nid, (0, 0))
             item.setPos(col * (NODE_W + COL_GAP), row * pitch)
@@ -2380,17 +2442,18 @@ class PipelineCanvas(QGraphicsView):
         self.zoom_by(1.15 if e.angleDelta().y() > 0 else 1 / 1.15)
         e.accept()
 
-    #: 背景點陣間距（畫布座標）。
-    GRID = 22.0
-
     def drawBackground(self, p: QPainter, rect: QRectF) -> None:  # noqa: D102
         """點陣底，不是格線底（F7-8）。
 
         格線會在整張畫布上鋪滿橫豎線，跟連線同一種筆觸，於是「哪條是資料流、
         哪條是背景」要看第二眼才分得出來。點只提供對齊的參考，不會跟線搶。
+
+        ⚠ **間距住在模組層的 :data:`GRID`，不是這裡的一個私有常數**（F79）——
+        排版與拖曳的吸附都讀同一個值。它以前是這個類別自己的 22，於是「背景
+        說的對齊」與「版面做的對齊」是兩套，而點陣底因此對不齊任何東西。
         """
         p.fillRect(rect, QColor(TOKENS["canvas_bg"]))
-        step = self.GRID
+        step = GRID
         # 縮太小的時候點會糊成一片灰 —— 那時候乾脆不畫
         if self.transform().m11() < 0.45:
             return
