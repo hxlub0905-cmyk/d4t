@@ -216,6 +216,14 @@ def card_radius() -> float:
 GRID = 20.0
 
 
+#: 磁吸半徑，**螢幕**像素（F82）。見 `_NodeItem._snap_reach`。
+#:
+#: 4 是量出來的：格是 20，所以磁區左右各 4 —— 一格裡有 8 被吸、12 是自由的，
+#: 六成的行程跟著游標走，而那正是「絲滑」的來源。再大就開始黏；再小等於沒有
+#: 磁吸（要剛好停在格點上才對得齊，那是碰運氣）。
+SNAP_REACH_PX = 4.0
+
+
 def on_grid(value: float) -> float:
     """把一段長度**往上**進位到 :data:`GRID` 的倍數。
 
@@ -1137,9 +1145,8 @@ class _NodeItem(QGraphicsItem):
             self.canvas.refresh_edges()
         return super().itemChange(change, value)
 
-    @staticmethod
-    def _snapped(pos: QPointF) -> QPointF:
-        """把拖到的位置吸到格線上（F79）。
+    def _snapped(self, pos: QPointF) -> QPointF:
+        """把拖到的位置吸到格線上 —— **但只有靠得夠近的時候**（F79，F82 改）。
 
         ⚠ **只吸使用者拖的那一下，不吸 ``setPos``。** 兩個理由，第二個才是硬的：
 
@@ -1151,10 +1158,44 @@ class _NodeItem(QGraphicsItem):
            是同一種 bug，只是這裡漂的是像素不是分數。
 
         所以判準是「這一下是不是從 ``mousePressEvent`` 來的」，見 ``_dragging``。
+
+        為什麼是磁吸而不是每一步都吸（F82）
+        ------------------------------------
+        F79 第一版是**無條件**量化：每一次滑鼠移動都被 round 到 20 的倍數。
+        使用者的評語是「沒有像之前那樣絲滑的感覺，有點是一格一格的」——
+        而那是準確的描述，因為那樣寫的話**卡片從頭到尾沒有一刻跟著游標走**，
+        它一直在一個晶格上跳。對齊買回來了，跟手賠掉了，而我當時沒有把這個
+        取捨講出來。
+
+        磁吸之後大部分的行程是 1:1 跟著游標的（那就是「絲滑」），只有離格點
+        很近的最後幾 px 才被吸過去 —— 兩件事都保得住。
+
+        **逐軸判斷**：x 對齊了而 y 還在中間是合法的狀態；用歐氏距離會把兩軸
+        綁在一起，於是「我只想對齊左邊」做不到。
         """
         step = GRID
-        return QPointF(round(pos.x() / step) * step,
-                       round(pos.y() / step) * step)
+        reach = self._snap_reach()
+        out = []
+        for value in (pos.x(), pos.y()):
+            nearest = round(value / step) * step
+            out.append(nearest if abs(value - nearest) <= reach else value)
+        return QPointF(out[0], out[1])
+
+    def _snap_reach(self) -> float:
+        """磁吸半徑，**畫布座標**。
+
+        來源是螢幕上的 :data:`SNAP_REACH_PX`，除以目前的縮放換算回畫布座標
+        —— 手感要跟縮放無關：不換算的話，放大到 200% 時磁區在螢幕上是兩倍寬
+        （黏），縮到 50% 只剩一半（形同沒有）。
+
+        ⚠ **上限一定要夾。** 縮到 40% 時 4 / 0.4 = 10 畫布 px，正好是半個格
+        —— 磁區把整條軸蓋滿，於是又退回無條件吸附，也就是使用者不要的那個。
+        夾在四分之一格，任何縮放下都留得下**一半以上**的自由行程。
+        """
+        scale = self.canvas.transform().m11() if self.canvas is not None else 1.0
+        if scale <= 0:
+            scale = 1.0
+        return min(SNAP_REACH_PX / scale, GRID * 0.25)
 
     def show_context_menu(self, screen_pos) -> None:
         """這張卡的右鍵選單。

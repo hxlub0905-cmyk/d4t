@@ -150,41 +150,121 @@ def test_tidy_up_puts_every_card_back_on_a_dot(window, qapp):
 # 3. 拖曳會吸附，setPos 不會
 # --------------------------------------------------------------------------- #
 def _drag(view, item, dx, dy):
-    """把一張卡從中心拖 ``(dx, dy)``（真的派送三顆滑鼠事件）。
+    """把一張卡從中心拖 ``(dx, dy)`` 畫布 px（真的派送三顆滑鼠事件）。
 
     不能只設 `_dragging` 再 `setPos` —— 那樣驗的是旗標，不是使用者的動作，
     而這一輪要問的正好是「這一下是不是從手來的」。
+
+    ⚠ **三顆事件的位置在 view 座標裡算一次就好，不要每顆都從場景座標換算。**
+    拖曳途中畫布會捲動（`itemChange` 會重算 sceneRect），於是同一個場景點在
+    放開時對應到**另一個** view 點 —— 實測一次 (30, 50) 的拖曳被拆成
+    30 → 59 → 44 三段。滑鼠本來就是在 view 座標裡動的，照著做就對了。
+    （第一版沒有這樣寫，而無條件吸附的時候看不出來：三段都被 round 掉了。）
     """
     vp = view.viewport()
+    scale = view.transform().m11() or 1.0
     centre = item.scenePos() + QPointF(canvas_mod.NODE_W / 2.0,
                                        canvas_mod.NODE_H / 2.0)
-    for etype, scene_pt, button, buttons in (
-            (QEvent.MouseButtonPress, centre, Qt.LeftButton, Qt.LeftButton),
-            (QEvent.MouseMove, centre + QPointF(dx, dy),
-             Qt.NoButton, Qt.LeftButton),
-            (QEvent.MouseButtonRelease, centre + QPointF(dx, dy),
-             Qt.LeftButton, Qt.NoButton)):
-        pt = QPointF(view.mapFromScene(scene_pt))
+
+    def send(etype, pt, button, buttons):
+        # **每一顆事件都用當下的對應關係現算 view 座標。**
+        # 拖曳途中 sceneRect 會長大（`test_a_card_dragged_past_the_edge_stays_
+        # reachable` 守的就是那件事），捲軸跟著位移，於是同一個場景點對應到
+        # 另一個 view 點 —— Qt 會用**新的**對應關係重算卡片位置。
         glob = QPointF(vp.mapToGlobal(pt.toPoint()))
         QApplication.sendEvent(
             vp, QMouseEvent(etype, pt, glob, button, buttons, Qt.NoModifier))
 
+    # ⚠ **分成多顆 move，不要一步跳過去。** 真實的滑鼠是連續移動的，每一顆
+    # move 都相對於當下的捲軸位置，所以捲動造成的偏移會被下一顆自己修回來。
+    # 一步跳的話那個偏移沒有機會收斂 —— 實測一次 (30, 50) 的拖曳會停在
+    # (44, 50)。第一版就是一步跳的，而無條件吸附的時候看不出來（被 round 掉了）。
+    STEPS = 12
+    send(QEvent.MouseButtonPress, QPointF(view.mapFromScene(centre)),
+         Qt.LeftButton, Qt.LeftButton)
+    for i in range(1, STEPS + 1):
+        goal = centre + QPointF(dx * i / STEPS, dy * i / STEPS)
+        send(QEvent.MouseMove, QPointF(view.mapFromScene(goal)),
+             Qt.NoButton, Qt.LeftButton)
+    last = QPointF(view.mapFromScene(centre + QPointF(dx, dy)))
+    send(QEvent.MouseButtonRelease, last, Qt.LeftButton, Qt.NoButton)
 
-def test_a_card_you_drag_lands_on_a_dot(window, qapp):
-    """拖到哪都會吸到最近的點上 —— 那是點陣底存在的理由。"""
+
+def _drag_from_grid(window, qapp, dx, dy):
+    """把第一張卡（在格點上）拖 ``(dx, dy)``，回 ``(起點, 終點)``。
+
+    縮放固定在 100%：磁吸半徑是**螢幕**座標換算來的，不釘住縮放的話這幾條
+    測試會變成在問「現在剛好縮到多少」。
+    """
     view = window.pipeline
-    nid = view.node_ids()[0]
-    item = view.node_item(nid)
-    before = item.pos()
-
-    _drag(view, item, 37.0, 23.0)          # 刻意挑一個不在格線上的位移
+    view.reset_zoom()
     qapp.processEvents()
+    item = view.node_item(view.node_ids()[0])
+    before = QPointF(item.pos())
+    assert _on_grid(before.x()) and _on_grid(before.y()), "起點就不在格上"
+    _drag(view, item, dx, dy)
+    qapp.processEvents()
+    return before, QPointF(item.pos())
 
-    after = item.pos()
-    assert (after.x(), after.y()) != (before.x(), before.y()), \
-        "卡片根本沒被拖動，這條測試沒有在測東西"
+
+def test_a_drag_that_ends_near_a_dot_snaps_to_it(window, qapp):
+    """磁吸：離格點幾 px 的時候幫他對齊，不必用手瞄。"""
+    before, after = _drag_from_grid(window, qapp, 41.0, 59.0)   # 差格點 1px / 1px
+
     assert _on_grid(after.x()) and _on_grid(after.y()), \
-        "拖完停在 (%g, %g)，不在點上" % (after.x(), after.y())
+        "停在 (%g, %g)，離格點只有 1px 卻沒有吸過去" % (after.x(), after.y())
+    assert abs(after.x() - (before.x() + 41.0)) <= canvas_mod.SNAP_REACH_PX
+    assert abs(after.y() - (before.y() + 59.0)) <= canvas_mod.SNAP_REACH_PX
+
+
+def test_a_drag_that_ends_between_dots_is_left_alone(window, qapp):
+    """**這條是「絲滑」的定義。**
+
+    F79 第一版是無條件量化，於是卡片從頭到尾沒有一刻跟著游標走 —— 它一直在
+    一個晶格上跳，而使用者的評語是「有點是一格一格的」。磁吸之後，離格點遠的
+    位置**必須逐 px 保留**：那才是「跟著手走」。
+    """
+    before, after = _drag_from_grid(window, qapp, 30.0, 50.0)   # 正好落在兩點中間
+
+    assert abs(after.x() - (before.x() + 30.0)) < 0.5, \
+        "x 被吸走了（%g，應該是 %g）" % (after.x(), before.x() + 30.0)
+    assert abs(after.y() - (before.y() + 50.0)) < 0.5, \
+        "y 被吸走了（%g，應該是 %g）" % (after.y(), before.y() + 50.0)
+
+
+def test_each_axis_snaps_on_its_own(window, qapp):
+    """x 對齊了而 y 還在中間是合法的狀態。
+
+    用歐氏距離會把兩軸綁在一起，於是「我只想對齊左邊」做不到。
+    """
+    before, after = _drag_from_grid(window, qapp, 41.0, 50.0)   # x 近、y 遠
+
+    assert _on_grid(after.x()), "x 離格點 1px 卻沒有吸"
+    assert abs(after.y() - (before.y() + 50.0)) < 0.5, "y 在中間卻被吸走了"
+
+
+def test_most_of_the_travel_is_free_at_every_zoom(window, qapp):
+    """磁區永遠**蓋不滿**一格 —— 不管縮到多少。
+
+    半徑是螢幕座標除以縮放換算回畫布座標的，所以縮小時它在畫布座標上會長大：
+    40% 時 4 / 0.4 = 10，正好半個格 —— 磁區左右各 10 就把整條軸蓋滿，於是又
+    退回無條件吸附，也就是使用者不要的那個。上限夾在四分之一格擋住這件事。
+
+    這條測試就是那個上限的理由，而它問的是**每一個縮放**，不是我挑的那一個。
+    """
+    view = window.pipeline
+    item = view.node_item(view.node_ids()[0])
+    tight = []
+    for scale in (0.3, 0.4, 0.5, 0.75, 1.0, 1.5, 2.0):
+        view.reset_zoom()
+        view.zoom_by(scale)
+        qapp.processEvents()
+        got = view.transform().m11()
+        reach = item._snap_reach()
+        free = (canvas_mod.GRID - 2.0 * reach) / canvas_mod.GRID
+        if free < 0.5:
+            tight.append("%.0f%%：只剩 %.0f%% 是自由的" % (got * 100, free * 100))
+    assert tight == [], "磁區太寬，拖起來會變回一格一格：%s" % tight
 
 
 def test_setting_a_position_in_code_is_kept_exactly(window):
