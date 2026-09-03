@@ -30,11 +30,37 @@ FILELIST = os.path.join(TOOLS, "make_filelist.py")
 BUNDLE = os.path.join(TOOLS, "make_text_bundle.py")
 CHECK = os.path.join(TOOLS, "check_files.py")
 RELEASE = os.path.join(TOOLS, "release.py")
-#: 「在受限機器上、套件裝好之前就要能跑」的那幾支 —— 所以 stdlib-only + 3.9。
-#: get_code.py 是第四支（F7-18 之後補的）：它比其他三支更早跑，
-#: 因為它的工作是把程式碼弄上那台機器。
-ALL_TOOLS = (FETCH, INSTALL, DOCTOR, GETCODE, FILELIST, BUNDLE, CHECK,
-             RELEASE)
+#: **要第三方套件才跑得動的那幾支**（全部是產合成資料的）—— 它們吃 numpy/cv2，
+#: 所以下面兩條「stdlib-only」的測試不適用。
+#:
+#: ⚠ **這是一張例外清單，所以它配一支反向的測試**
+#: （:func:`test_every_listed_exception_is_still_an_exception`）——
+#: 某一支哪天不再需要 numpy 了卻沒從這裡拿掉的話，它會**從此少一條防線
+#: 而測試照樣綠**。這個 repo 對例外清單只有一條規矩：一定要有那支反向測試
+#: （`CLAUDE.md` §1）。
+NEEDS_THIRD_PARTY = frozenset({
+    "make_sample.py", "make_sample_rsem.py",      # 合成 lot（numpy/tifffile）
+    "make_mgepi_real.py", "make_mgext.py",        # 擬真 MG×EPI（cv2/numpy）
+    "make_lot_from_gc.py", "make_glas_export.py",  # GC 鋪圖／GLAS 匯出替身
+    "validate_mgepi.py",                          # 可分性驗證
+})
+
+#: 「在受限機器上、套件裝好之前就要能跑」的那些 —— 所以 stdlib-only + 3.9。
+#:
+#: ⚠ **這裡以前是一張手寫的名單，而它漂了**（2026-09-03 發現）：清單上有 8 支，
+#: 而 `tools/` 底下**純 stdlib 的其實有 14 支**。漏掉的那 6 支不是無關緊要的
+#: —— `show_template.py` / `pair_probe.py` / `load_probe.py` /
+#: `check_glas_export.py` 四支在 `AGENTS.md` §4.5 上都標著**公司機**，也就是
+#: 「stdlib-only」對它們是承重的，而那件事從來沒有被驗證過。
+#: （`show_template.py` 的檔頭甚至直接寫著「stdlib-only，所以公司機也跑得動」。）
+#:
+#: 所以改成**反過來列**：預設每一支都要守，例外要具名。加一支新工具會自動
+#: 被納入，不需要有人記得回來改名單。`_` 開頭的是給別人 import 的內部模組，
+#: 跟 `test_every_tool_is_assigned_to_a_machine_in_the_docs` 同一條規則。
+ALL_TOOLS = tuple(sorted(
+    os.path.join(TOOLS, n) for n in os.listdir(TOOLS)
+    if n.endswith(".py") and not n.startswith("_")
+    and n not in NEEDS_THIRD_PARTY))
 
 if TOOLS not in sys.path:
     sys.path.insert(0, TOOLS)
@@ -456,6 +482,23 @@ def _sibling_tools():
     """``tools/`` 底下的其他工具。互相 import 是可以的 —— 這條規則要禁的是
     **第三方套件**（那台機器上可能一個都裝不起來），不是同一個資料夾裡的同伴。"""
     return {os.path.splitext(f)[0] for f in os.listdir(TOOLS) if f.endswith(".py")}
+
+
+@pytest.mark.parametrize("name", sorted(NEEDS_THIRD_PARTY))
+def test_every_listed_exception_is_still_an_exception(name):
+    """`NEEDS_THIRD_PARTY` 上的每一支，**現在真的還在 import 第三方套件**。
+
+    這是 `CLAUDE.md` §1 那條規矩的實作：例外修好了卻沒從表上拿掉的話，那一支
+    從此少一條防線**而測試照樣綠**。少了這一條，上面那張表就是一張只會變長
+    的紙 —— 而這一輪發現的舊名單正是那樣漂掉的。
+    """
+    path = os.path.join(TOOLS, name)
+    assert os.path.isfile(path), "%s 不在了，請從 NEEDS_THIRD_PARTY 拿掉" % name
+    imports = _module_level_imports(path)
+    extra = imports - _stdlib_names() - _sibling_tools()
+    assert extra, (
+        "%s 已經不需要第三方套件了 —— 把它從 NEEDS_THIRD_PARTY 拿掉，"
+        "它就會被 stdlib-only 與 3.9 那兩條測試守著。" % name)
 
 
 @pytest.mark.parametrize("script", ALL_TOOLS)
@@ -1081,7 +1124,7 @@ def test_a_single_part_never_claims_the_tree_is_ready(tmp_path):
                        timeout=300)
     out = r.stdout.decode("utf-8", "replace")
     assert r.returncode == 0, out
-    assert "還沒到齊" in out, out
+    assert "NOT all here yet" in out, out
     assert "doctor" not in out, "少了一百多個檔案卻叫他去跑 doctor"
 
 
@@ -1217,11 +1260,70 @@ def test_a_truncated_compressed_bundle_says_so_instead_of_crashing(tmp_path):
     out = r.stdout.decode("utf-8", "replace")
     assert r.returncode == 2, out
     assert "Traceback" not in out, out
-    assert "重新複製" in out, out
+    # 訊息 2026-09-03 起是英文 —— 整個包必須是純 ASCII（見
+    # `test_the_bundle_is_pure_ascii`），而這些字串就住在包的檔頭裡。
+    assert "Copy it again" in out, out
     assert not (tmp_path / "d").exists() or not list((tmp_path / "d").rglob("*.py"))
 
 
 # ---------------------------------------------------------------- 每次更新都要重產
+
+def test_the_bundle_is_pure_ascii():
+    """出貨的那一包**一個非 ASCII 位元組都不准有**。
+
+    這是 2026-09-03 使用者在公司機上撞到的那個 bug 的守門人。那天早上把包改成
+    不壓縮的純文字（為了 git 的 pack），而那讓 **31% 的位元組變成中文** ——
+    公司機拿程式碼的方式是「在瀏覽器複製 → 記事本存檔」，而中文 Windows 的
+    記事本會存成 ANSI（cp950）。中文因此變成 Big5 位元組，Python 用 UTF-8 讀
+    就死在：
+
+        SyntaxError: Non-UTF-8 code starting with '\\xe5' in file d4t.py
+        on line 78146, but no encoding declared
+
+    **純 ASCII 的檔案不可能這樣壞**，不管記事本挑哪一種編碼。所以現在資料區是
+    逐檔 base64，而**解包程式的檔頭與訊息也全部改成英文** —— 那一段是最不能
+    壞的，它就是解包本身。
+
+    ⚠ 這一條要看**產出來的東西**，不是看程式碼裡寫了什麼：非 ASCII 可以從
+    任何一個地方溜進去（檔頭、SENTINEL、一句錯誤訊息）。
+    """
+    text = make_text_bundle.build("d4t_bundle.py", REPO)
+    bad = [(i, ln) for i, ln in enumerate(text.split("\n"), 1)
+           if any(ord(c) > 127 for c in ln)]
+    assert not bad, (
+        "包裡有 %d 行含非 ASCII 字元，第一行是第 %d 行：\n  %s\n\n"
+        "公司機的記事本會把它存成 cp950，然後 Python 讀不動整個檔案。"
+        % (len(bad), bad[0][0], bad[0][1][:120]))
+
+
+def test_a_bundle_saved_as_ansi_still_unpacks():
+    """把包**用 cp950 存一次**（＝中文 Windows 記事本的預設），照樣解得開。
+
+    上面那條測「沒有非 ASCII」，這一條測「所以它撐得住」—— 兩條問的是同一件
+    事的兩端，而只有這一條會在「某天有人加了一個中文字、而上面那條被改鬆」
+    的時候還抓得到。順便一起驗 CRLF 與 UTF-8 BOM（記事本的另外兩種存法）。
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    text = make_text_bundle.build("d4t_bundle.py", REPO)
+    for enc, newline in (("cp950", "\r\n"), ("utf-8-sig", "\r\n"),
+                         ("utf-8", "\n")):
+        d = tempfile.mkdtemp()
+        try:
+            path = os.path.join(d, "d4t_bundle.py")
+            with open(path, "w", encoding=enc, newline=newline) as f:
+                f.write(text)
+            r = subprocess.run([sys.executable, path, "--list"], cwd=d,
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               timeout=300)
+            out = r.stdout.decode("utf-8", "replace")
+            assert r.returncode == 0, "存成 %s 之後解不開：\n%s" % (enc, out)
+            assert "files." in out, out
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
 
 def test_the_shipped_bundle_is_not_compressed():
     """出貨的那一包**不壓縮**，而這一條在守的是 git 的 pack，不是可讀性。
@@ -1261,8 +1363,14 @@ def test_the_shipped_bundle_is_not_compressed():
 
 
 @needs_git
-def test_the_bundle_in_the_repo_is_the_uncompressed_one():
-    """而且 repo 裡真的躺著的那一份也要是純文字的（不是只有程式碼講對）。"""
+def test_the_bundle_in_the_repo_uses_the_per_file_form():
+    """而且 repo 裡真的躺著的那一份也要是逐檔那一種（不是只有程式碼講對）。
+
+    ⚠ 這條測試 2026-09-03 一天之內改過兩次，而那正是它該存在的證明：早上是
+    `#ENC text`（純文字，為了 git 的 pack），下午使用者在公司機上撞到
+    `SyntaxError: Non-UTF-8 code` —— 純文字帶著 31% 的中文位元組，而記事本
+    存成 cp950。現在是 `#ENC lzma+base64/file`：純 ASCII、git 還是壓得動。
+    """
     with open(os.path.join(REPO, "bundle", "d4t_bundle.py"),
               "r", encoding="utf-8") as f:
         lines = f.read().split("\n")
@@ -1271,7 +1379,7 @@ def test_the_bundle_in_the_repo_is_the_uncompressed_one():
     # 用子字串切會切在解包程式的中間。`release.py` 的 `_bundle_entries`
     # 一直是逐行找的，這裡跟它同一個做法。
     i = lines.index(make_text_bundle.SENTINEL)
-    assert lines[i + 1] == "#ENC text", lines[i + 1]
+    assert lines[i + 1] == "#ENC lzma+base64/file", lines[i + 1]
 
 
 @needs_git

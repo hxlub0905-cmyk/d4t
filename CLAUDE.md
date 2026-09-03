@@ -312,10 +312,22 @@ CI 有一個獨立的 lint job）。它幾秒就有答案，而測試要三分�
 **跑測試的方式很重要**（不照做會浪費很多時間）：
 
 - 開發迴圈**只跑改到的測試檔**：`pytest -q tests/test_xxx.py`。
-- 核心（`--ignore-glob="*test_ui_*"`）約 20–30 秒，隨時可以跑。
-- **UI 測試不要用一個行程跑整套** —— Qt 記憶體會累積，在容器裡實測從 100 秒
-  變成跑不完。要跑就一個檔案一個檔案跑（每個 1–10 秒）：
-  `for f in tests/test_ui_*.py; do pytest -q "$f"; done`
+- 核心（`--ignore-glob="*test_ui_*"`）約 3 分半，隨時可以跑。
+- **UI 測試不要用一個行程跑整套** —— Qt 物件不會因為測試結束就消失，於是後面
+  每開一個視窗都要跟愈來愈多的殘留物一起做版面計算，時間是**超線性**的。
+  CI 上實測：一個行程 **1:39:09**，分兩批 **7 分鐘**。要跑就逐檔跑：
+
+  ```bash
+  python tools/run_tests.py            # 全套，逐檔一個行程 + 最慢的幾個
+  python tools/run_tests.py --fast     # 略過 UI（commit 前記得跑一次完整的）
+  ```
+
+  ⚠ **這裡以前寫的是 `for f in tests/test_ui_*.py; do pytest -q "$f"; done`，
+  而那是 bash —— 家用機是 Windows（上面那行 `.venv\Scripts\activate`），
+  PowerShell 不吃那個語法。** 也就是一份寫給某台機器的程序，在那台機器上跑
+  不動；跟 `docs/NO-GIT-SETUP.md` 那個「按 blob 頁的複製鈕」是同一類問題，
+  同一天（2026-09-03）一起修的。`run_tests.py` 是 stdlib-only 的 Python，
+  兩台都跑得動。
 
 **每次改完之後**（**家用機**，公司機不能執行 git）：
 

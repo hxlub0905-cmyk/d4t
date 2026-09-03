@@ -101,21 +101,45 @@
 > （`release-assets.githubusercontent.com`）—— 下載正是公司機擋掉的那件事。
 > 那條路 2026-09-03 用 `curl -I` 測掉了，不是猜的。
 >
-> 真正的病根是**壓縮**，不是產得太勤。同一次「改一支模組再重產」實測：
+> 真正的病根是**壓縮的粒度**，不是產得太勤。而這件事**當天連續錯了兩次**，
+> 值得完整記下來 —— 第二次是為了修第一次而造成的。
 >
-> | 格式 | 單份大小 | 存兩版後 pack | **第二版多花** |
+> **第一次（早上）：改成不壓縮的純文字。** 只看 git 的 pack，那是對的：
+>
+> | 格式 | 單份 | 非 ASCII | 每改一次 pack |
 > |---|---|---|---|
-> | lzma + base64（舊） | 2,253 KB | 3,404 KB | **1,702 KB** |
-> | 純文字（現在） | 7,631 KB | **2,493 KB** | **1 KB** |
+> | 整包 lzma+base64（更早） | 2,264 KB | 934 | **1,711 KB** |
+> | 純文字 | 7,664 KB | **812,303** | **1 KB** |
 >
-> 1,702 KB → 1 KB，**1700 倍**；而且純文字版**存進 git 之後還更小** ——
-> git 自己會 zlib 壓 blob，而「壓過再 base64」剛好把它能壓的都拿掉了。
+> **然後使用者在公司機上撞到這個：**
 >
-> 所以現在包**不壓縮**。搬運那一端一個字都沒有變（網址、複製鈕、
-> `docs/NO-GIT-SETUP.md` 的程序），代價只有「檔案從 2.2 MB 變 7.6 MB」——
-> 而那正好是「1 MB 不是限制」那句話的證明題。守門人：
-> `tests/test_offline_tools.py::test_the_shipped_bundle_is_not_compressed`
-> （那個決定的全部內容是一個布林值，而布林值最容易被順手改回來）。
+> ```
+> SyntaxError: Non-UTF-8 code starting with '\xe5' in file d4t.py
+> on line 78146, but no encoding declared
+> ```
+>
+> 純文字版有 **31% 的位元組是中文**，而公司機拿程式碼的方式是「瀏覽器複製 →
+> 記事本存檔」—— **中文 Windows 的記事本會存成 ANSI（cp950）**。舊的 base64
+> 版是純 ASCII，所以記事本用什麼編碼都無所謂；那個保護是**意外**得來的，
+> 沒有人寫下來，於是它被弄丟的時候也沒有人發現。同一件事還讓 7.6 MB 的全選
+> 複製卡到不能用（使用者原話：「非常 lag 很卡」）。
+>
+> **第二次（下午，現在）：逐檔 lzma + base64。**
+>
+> | 格式 | 單份 | 非 ASCII | 每改一次 pack |
+> |---|---|---|---|
+> | **逐檔 lzma+base64** | **3,447 KB** | **0** | **94 KB** |
+>
+> 三個限制一次滿足：純 ASCII（記事本弄不壞）、比早上那版小 55%（不卡）、
+> git 每次只多 94 KB（原本 1,711 KB）。**解包程式的檔頭與訊息也全部改成英文**
+> —— 那一段是最不能壞的，它就是解包本身。舊包照樣解得開（三種格式都認得）。
+>
+> 守門人是兩條測試，一條問「產出來的東西有沒有非 ASCII」，一條**真的用 cp950
+> 存一次再解**（`tests/test_offline_tools.py` 的 `test_the_bundle_is_pure_ascii`
+> 與 `test_a_bundle_saved_as_ansi_still_unpacks`）。
+>
+> ⚠ **教訓：搬運路徑上「意外成立」的性質，跟功能一樣要有測試。** 那條路上的
+> 每一個環節都在一台我們看不到、也不能除錯的機器上執行。
 >
 > 已經佔掉的 88 MB 要**改寫歷史**才拿得回來，那是另一件事（見 `SESSION_LOG.md`）。
 >
@@ -253,6 +277,7 @@ python tools/make_text_bundle.py --out bundle/d4t.py --split 400
 | `make_mgepi_real.py` / `validate_mgepi.py` | **家用機** | ❌ | 擬真 BSE 合成 lot（MG×EPI×spacer）＋可分性驗證（要 numpy/cv2）|
 | `make_lot_from_gc.py`（CLI）／`python -m d4t simgen`（UI）| **家用機** | ❌ | **拿一張 Golden Cell 鋪成整批擬真資料**：RSEM 大圖（1000²）＋ 從大圖切下來的 patch（81²，test/ref 成對）＋ 兩份 KLARF ＋ ground truth。跟其他產生器的差別是**它不畫圖案，它鋪你給的那一張** —— 圖案是輸入不是參數，所以換 layer 換世代都不用改程式（最高指導原則）。週期用次像素量、缺陷落點從 GC 量出來。⚠ GC 可能是廠內圖案，**吃的跟吐的都不進版控**（鐵則 8）。UI 版（F60）多的只有「貼上就能用」：剪貼簿 `Ctrl+V`／影像檔／recipe／`gc2:` 字串四條路，週期看得到也改得動 |
 | `make_glas_export.py` | **家用機** | ❌ | 合成一份 **GLAS 匯出**（`<id>_label.png` + v4 manifest）掛在 RSEM lot 上 —— Region-3 在家用機唯一的資料來源（要 numpy/cv2）|
+| `run_tests.py` | **兩台都可以** | ❌ | **每個測試檔各自一個行程**跑完全套，外加逐檔計時、「最慢的幾個」、失敗全部收集到最後一起印。`--fast` 略過 UI。stdlib-only，所以**Windows 上也跑得動** —— 那正是它存在的理由：`CLAUDE.md` 以前教的 `for f in …; do …; done` 是 bash，而家用機是 Windows |
 | `freeze_golden.py` | **家用機** | ❌ | 把現在算出來的 feature 表凍成黃金值（重構的安全網，見 `docs/history/plans/F9-dag-streams.md`）|
 | `check_files.py` | **公司機** | ❌ | 哪幾個檔案跟 GitHub 上不一樣（要先複製 `FILELIST.txt`）|
 | `install_offline.py` | **公司機** | ❌ | 用 `wheels\` 裝相依套件 |

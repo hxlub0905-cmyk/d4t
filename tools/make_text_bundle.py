@@ -41,7 +41,9 @@ Python 的文字模式讀（它會把 CRLF 讀成 LF），所以來回一趟仍�
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
+import lzma
 import os
 import subprocess
 import sys
@@ -61,23 +63,39 @@ import make_filelist                       # noqa: E402  （tools/ 裡的同伴�
 #: `check_files.py` 永遠報「還缺幾個」而那幾個永遠補不進來。
 EXCLUDE_DIRS = make_filelist.EXCLUDE_DIRS
 
-SENTINEL = "# ==== d4t-BUNDLE-DATA ==== 以下是資料，不要編輯 ===="
+#: 資料區的分隔行。**純 ASCII**（2026-09-03）—— 整個包裡不准有非 ASCII
+#: 字元，理由見 :func:`_data_lines_per_file`。舊的包帶著它自己那一行
+#: （解包程式讀的是 `%(sentinel)s` 填進去的那份），所以改這個字串
+#: **不會**讓已經搬進公司機的舊包失效。
+SENTINEL = "# ==== d4t-BUNDLE-DATA ==== data below, do not edit ===="
 
 #: 解包程式（放在產出檔案的最前面）。它自己也是這份 bundle 的一部分，
 #: 所以刻意寫短、只用標準函式庫、而且看得完 —— 使用者要能在跑之前先讀一遍。
 EXTRACTOR = '''#!/usr/bin/env python3
-# d4t 單檔純文字包（由 tools/make_text_bundle.py 產生）。
-"""整個 d4t repo 就在這個檔案裡，一行一行的純文字，沒有壓縮、沒有編碼。
+# d4t single-file text bundle (produced by tools/make_text_bundle.py).
+#
+# THIS FILE IS DELIBERATELY PURE ASCII - every byte is < 128. Do not put any
+# non-ASCII character in here, not in a comment and not in a message.
+# Reason (learned the hard way on 2026-09-03): the company machine gets this
+# file by copying it out of a browser and saving it with Notepad, and Notepad
+# on a Chinese Windows can write ANSI (cp950) instead of UTF-8. Any CJK byte
+# then comes back mangled and Python refuses the whole file with
+#   SyntaxError: Non-UTF-8 code starting with '\\\\xe5' ... no encoding declared
+# An all-ASCII file cannot be damaged that way, whatever encoding is chosen.
+# The payload below is base64 for the same reason.
+"""The whole d4t repo lives inside this one file, as plain ASCII text.
 
-為什麼是這種形式：公司政策擋掉 .zip 這個類別，而 proxy 也不讓 Python 逐檔抓 ——
-能過的只剩「一個純文字檔」。你可以用記事本打開它，往下捲就看得到每個檔案的內容。
+Why this shape: company policy blocks the .zip category outright, and the
+proxy will not let Python fetch files one by one -- the only thing that gets
+through is a single text file you can see in a browser and copy.
 
-    python %(name)s              # 解到 .\\\\d4t\\\\
+    python %(name)s              # unpack into .\\\\d4t\\\\
     python %(name)s --dest D:\\\\tools
-    python %(name)s --list       # 只看裡面有什麼，不寫任何檔案
+    python %(name)s --list       # just show what is inside, write nothing
 
-每個檔案都帶 git blob SHA-1，解開時逐檔驗過才落地 —— 傳輸途中被動到的話會當場
-講出來，不會讓你拿到一份安靜壞掉的程式碼。
+Every file carries its git blob SHA-1 and is verified before it lands, so a
+copy that got truncated or rewritten in transit says so instead of leaving
+you with quietly broken code.
 """
 from __future__ import annotations
 
@@ -87,20 +105,25 @@ import os
 import sys
 
 SENTINEL = "%(sentinel)s"
-PART, N_PARTS = %(part)d, %(n_parts)d   # 這是第幾批 / 共幾批（1/1 = 沒有分批）
-TOTAL = %(total)d                       # 整個 repo 有幾個檔案，不是這一批有幾個
+PART, N_PARTS = %(part)d, %(n_parts)d   # which batch / how many (1/1 = single)
+TOTAL = %(total)d                       # files in the whole repo, not this batch
 
 
 def blob_sha(data: bytes) -> str:
-    """git 算 blob SHA 的方式："blob <長度>\\\\0" + 內容。"""
+    """How git computes a blob SHA: "blob <length>\\\\0" + content."""
     h = hashlib.sha1()
     h.update(b"blob %%d\\0" %% len(data))
     h.update(data)
     return h.hexdigest()
 
 
-def entries(lines):
-    """走過資料區，一個一個吐出 (sha, 路徑, 內容位元組)。"""
+def entries(lines, per_file):
+    """Walk the data area, yielding (sha, path, content bytes).
+
+    ``per_file`` selects how each record's body is stored:
+      True  -- base64 of lzma-compressed bytes, on "#B" lines (current format)
+      False -- the file's own text, one line per line, each prefixed with "#"
+    """
     i = 0
     while i < len(lines):
         line = lines[i]
@@ -109,59 +132,86 @@ def entries(lines):
             continue
         _, sha, count, path = line.split(" ", 3)
         n = int(count)
-        # 資料區每一行前面有一個 '#'（那樣整個檔案才仍然是合法的 Python）。
-        body = [ln[1:] if ln[:1] == "#" else ln for ln in lines[i + 1:i + 1 + n]]
-        yield sha, path, "\\n".join(body).encode("utf-8")
+        chunk = lines[i + 1:i + 1 + n]
+        if per_file:
+            import base64
+            import lzma
+            b64 = "".join(ln[2:] for ln in chunk if ln.startswith("#B"))
+            yield sha, path, lzma.decompress(base64.b64decode(b64))
+        else:
+            # Every data line carries a leading '#' so the whole file stays
+            # valid Python. Strip it back off here.
+            body = [ln[1:] if ln[:1] == "#" else ln for ln in chunk]
+            yield sha, path, "\\n".join(body).encode("utf-8")
         i += 1 + n
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Unpack the d4t text bundle.")
-    ap.add_argument("--dest", default="d4t", help="解到哪個資料夾（預設 .\\\\d4t）")
-    ap.add_argument("--list", action="store_true", help="只列出內容，不寫檔")
+    ap.add_argument("--dest", default="d4t",
+                    help="folder to unpack into (default .\\\\d4t)")
+    ap.add_argument("--list", action="store_true",
+                    help="only list the contents, write nothing")
     a = ap.parse_args(argv)
 
-    # 用文字模式讀自己：Python 會把 CRLF 讀成 LF，所以這個檔案就算在傳輸途中
-    # 被換過行尾也解得開（格式用「行數」而不是「位元組數」正是為了這件事）。
+    # Read ourselves in text mode: Python turns CRLF into LF, so the file still
+    # unpacks after its line endings were changed in transit (the format counts
+    # lines, not bytes, for exactly that reason).
     with open(os.path.abspath(__file__), "r", encoding="utf-8") as f:
         lines = f.read().split("\\n")
     try:
         start = lines.index(SENTINEL) + 1
     except ValueError:
-        print("✗ 找不到資料區 —— 這個檔案被截斷了，或不是完整的 bundle。")
+        print("FAILED: no data section found -- this file was truncated, or")
+        print("        it is not a complete bundle. Copy it again.")
         return 2
 
     data = lines[start:]
-    # 分隔行的**下一行**宣告編碼。用「固定位置的宣告」而不是「掃某個開頭的樣式」
-    # ——「以 #B 開頭就是 base64」那種判斷會被內容咬到：資料區每一行都加了 '#'，
-    # 所以任何原本以 B 開頭的程式碼行（`BUNDLE_DIR = ...`）都會變成 `#B...`。
+    # The line right AFTER the separator declares the encoding. A fixed
+    # position, not a pattern scan: "a line starting with #B is base64" would
+    # be bitten by the content itself, because every data line gets a '#'
+    # prefix, so any source line starting with B (BUNDLE_DIR = ...) becomes
+    # "#B...".
     enc = data[0].strip() if data else ""
     data = data[1:]
-    if enc == "#ENC lzma+base64":
+    per_file = False
+    if enc == "#ENC lzma+base64/file":
+        per_file = True
+    elif enc == "#ENC lzma+base64":
+        # Legacy whole-archive form: one lzma stream for everything. Still
+        # read here so bundles already carried into the fab keep working.
         b64 = [ln[2:] for ln in data if ln.startswith("#B")]
         import base64
         import lzma
         try:
             raw = lzma.decompress(base64.b64decode("".join(b64)))
         except Exception as exc:                     # noqa: BLE001
-            print("✗ 資料區解不開：%%s" %% exc)
-            print("  這個檔案在複製／貼上的過程中被截斷或改掉了。請重新複製一次，")
-            print("  而且**不要**用編輯器打開後另存。")
+            print("FAILED: cannot decode the data section: %%s" %% exc)
+            print("        This file was truncated or altered while being")
+            print("        copied. Copy it again, and do NOT open it in an")
+            print("        editor and re-save it.")
             return 2
         data = raw.decode("utf-8").split("\\n")
 
-    items = list(entries(data))
-    if not items:
-        print("✗ 資料區是空的 —— 這個檔案被截斷了。")
+    try:
+        items = list(entries(data, per_file))
+    except Exception as exc:                         # noqa: BLE001
+        print("FAILED: cannot decode the data section: %%s" %% exc)
+        print("        This file was truncated or altered while being copied.")
+        print("        Copy it again, and do NOT open it in an editor and")
+        print("        re-save it.")
         return 2
-    print("這個包裡有 %%d 個檔案。" %% len(items))
+    if not items:
+        print("FAILED: the data section is empty -- this file was truncated.")
+        return 2
+    print("This bundle holds %%d files." %% len(items))
     if a.list:
         for _sha, path, data in items:
             print("  %%8d  %%s" %% (len(data), path))
         return 0
 
     dest = os.path.abspath(a.dest)
-    print("解到  : %%s" %% dest)
+    print("Unpacking into: %%s" %% dest)
     bad, done = [], 0
     for sha, path, data in items:
         if blob_sha(data) != sha:
@@ -169,7 +219,7 @@ def main(argv=None) -> int:
             continue
         full = os.path.join(dest, path.replace("/", os.sep))
         os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
-        tmp = full + ".tmp"                      # atomic：半個檔案不要留在磁碟上
+        tmp = full + ".tmp"                    # atomic: never leave half a file
         with open(tmp, "wb") as f:
             f.write(data)
         os.replace(tmp, full)
@@ -177,18 +227,21 @@ def main(argv=None) -> int:
 
     if bad:
         print("")
-        print("✗ %%d 個檔案的內容跟它自己的 SHA 對不上：" %% len(bad))
+        print("FAILED: %%d files do not match their own SHA:" %% len(bad))
         for path in bad[:12]:
             print("    %%s" %% path)
         print("")
-        print("  這個檔案在傳輸途中被動過（編輯器另存、郵件過濾器改寫都會這樣）。")
-        print("  請重新取得一份，不要用編輯器打開後另存。這份程式碼不完整，不要用。")
+        print("  This file was altered in transit (an editor re-saving it or a")
+        print("  mail filter rewriting it both do this). Get a fresh copy and")
+        print("  do not re-save it from an editor. This code is incomplete --")
+        print("  do not use it.")
         return 1
 
-    print("✓ %%d 個檔案都解開了，SHA 全部對得上。" %% done)
+    print("OK: %%d files unpacked, every SHA matches." %% done)
 
-    # 分批的時候要講「還缺幾個」—— 不然使用者不知道自己貼完了沒有。
-    # 判斷依據是 tools/FILELIST.txt（它固定在第一批），而不是這一批的數量。
+    # When the bundle is split we must say how many are still missing --
+    # otherwise the user cannot tell whether they are done pasting. The count
+    # comes from tools/FILELIST.txt (always in batch 1), not from this batch.
     listing = os.path.join(dest, "tools", "FILELIST.txt")
     have_listing = os.path.isfile(listing)
     missing = []
@@ -203,29 +256,31 @@ def main(argv=None) -> int:
                         missing.append(rel)
 
     if N_PARTS > 1 and not have_listing:
-        # 還沒拿到檔案清單，所以「缺幾個」算不出來。**這時候絕對不能印
-        # 「下一步：跑 doctor」** —— 那看起來就像整包已經到位了。
+        # No file list yet, so "how many are missing" cannot be computed.
+        # NEVER print "next step: run doctor" here -- that reads as if the
+        # whole repo had arrived.
         print("")
-        print("這是第 %%d 批 / 共 %%d 批，整個 repo 有 %%d 個檔案 —— **還沒到齊**。"
+        print("This is batch %%d of %%d; the repo has %%d files -- NOT all here yet."
               %% (PART, N_PARTS, TOTAL))
-        print("把其他批也貼進來執行（順序不重要，重複執行也沒關係）。")
-        print("第 1 批裡有檔案清單，貼過它之後每一批都會告訴你還缺哪些。")
+        print("Paste and run the other batches too (any order, re-running is safe).")
+        print("Batch 1 carries the file list; after it, each batch says what is left.")
         return 0
 
     if missing:
         print("")
-        print("這是第 %%d 批 / 共 %%d 批。整個 repo 還缺 %%d 個檔案 —— 在其他批裡。"
+        print("This is batch %%d of %%d. The repo is still missing %%d files --"
               %% (PART, N_PARTS, len(missing)))
-        print("把其他批也貼進來執行（順序不重要，重複執行也沒關係）。缺的例如：")
+        print("they are in the other batches. Paste and run those too (any")
+        print("order, re-running is safe). Missing for example:")
         for rel in missing[:6]:
             print("    %%s" %% rel)
         return 0
 
     print("")
-    print("下一步：")
+    print("Next:")
     print("  cd %%s" %% dest)
-    print("  python tools\\\\doctor.py        # 環境自檢（會告訴你還缺什麼）")
-    print("  相依套件裝不了的話走離線 wheels：docs\\\\OFFLINE-INSTALL.md")
+    print("  python tools\\\\doctor.py        # environment self-check")
+    print("  If the dependencies will not install: docs\\\\OFFLINE-INSTALL.md")
     return 0
 
 
@@ -318,6 +373,43 @@ def _data_lines(items: List[Tuple[str, bytes]]) -> List[str]:
     return out
 
 
+def _data_lines_per_file(items: List[Tuple[str, bytes]]) -> List[str]:
+    """資料區（**逐檔 lzma + base64**）——2026-09-03 起出貨走這一種。
+
+    一個檔案一段：``#F <sha> <幾行> <路徑>`` 之後接 ``#B<base64>`` 幾行。
+
+    三個性質，缺一不可，而這個 repo 每一個都是踩出來的：
+
+    1. **純 ASCII。** 公司機拿程式碼的方式是「在瀏覽器複製 → 記事本存檔」，
+       而中文 Windows 的記事本會存成 ANSI（cp950）。包裡只要有一個中文字，
+       存出來就是 Big5 位元組，Python 用 UTF-8 讀就死在
+       ``SyntaxError: Non-UTF-8 code starting with '\xe5'`` ——
+       **2026-09-03 使用者真的撞到這個**（那一輪把包改成不壓縮的純文字，
+       31% 的位元組是中文）。base64 沒有這個問題，而**解包程式的檔頭也一起
+       改成英文**了：那一段是最不能壞的，它就是解包本身。
+    2. **git delta 壓得動。** 整包壓成一個 lzma 流的話，改一支模組會讓整份
+       base64 從頭到尾變樣，git 只能每個 commit 完整存一份（實測每次 1,711 KB，
+       217 個版本累積 378 MB＝pack 的 98%）。逐檔壓的話只有那一個檔案的那一段
+       會變 —— 實測每次 **94 KB**。
+    3. **夠小。** 純文字版 7,664 KB 在瀏覽器上全選複製會卡到不能用
+       （使用者原話：「非常 lag 很卡」）。這一種 3,447 KB。
+
+    | 格式 | 大小 | 非 ASCII | 每改一次 pack |
+    |---|---|---|---|
+    | 整包 lzma+base64（更早） | 2,264 KB | 934 | 1,711 KB |
+    | 純文字（2026-09-03 早上） | 7,664 KB | 812,303 | 1 KB |
+    | **逐檔 lzma+base64（現在）** | **3,447 KB** | **0** | **94 KB** |
+    """
+    out: List[str] = []
+    for rel, data in items:
+        # preset=6 而不是 9：9 大概只小 1%，而逐檔壓 380 次的時間差很有感。
+        b64 = base64.b64encode(lzma.compress(data, preset=6)).decode("ascii")
+        chunks = [b64[i:i + _B64_WIDTH] for i in range(0, len(b64), _B64_WIDTH)]
+        out.append("#F %s %d %s" % (blob_sha(data), len(chunks), rel))
+        out.extend("#B" + c for c in chunks)
+    return out
+
+
 def build(out_name: str = "d4t_bundle.py", root: str = "",
           items: Optional[List[Tuple[str, bytes]]] = None,
           part: int = 1, n_parts: int = 1, total_files: int = 0,
@@ -326,6 +418,11 @@ def build(out_name: str = "d4t_bundle.py", root: str = "",
     parts = [EXTRACTOR % {"name": out_name, "sentinel": SENTINEL,
                           "part": part, "n_parts": n_parts,
                           "total": total_files or len(items)}, SENTINEL]
+    if not compress:
+        # **預設**：逐檔 lzma+base64（純 ASCII、git 壓得動、夠小）。
+        parts.append("#ENC lzma+base64/file")
+        parts.extend(_data_lines_per_file(items))
+        return "\n".join(parts) + "\n"
     body = _data_lines(items)
     if compress:
         parts.append("#ENC lzma+base64")
