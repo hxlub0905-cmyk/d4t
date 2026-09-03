@@ -137,3 +137,53 @@ def test_the_slot_menu_only_offers_what_upstream_really_produces(window):
     assert "epi_center" in slots["roi"]._choices, "家族的三個名字都要在"
     assert "single" in slots["source"]._choices
     assert "epi" not in slots["source"]._choices, "區域不可以出現在影像那一格"
+
+
+# --------------------------------------------------------------------------- #
+# 4. 「Show it on the canvas」真的指得出來（2026-09-03）
+# --------------------------------------------------------------------------- #
+# 使用者回報：按下去畫面上什麼都沒發生，終端機一串
+# `AttributeError: 'StudioWindow' object has no attribute 'canvas'`。
+# 選單這一列從來沒有被測過 —— 兩個名字都錯（畫布叫 `pipeline`，而
+# `show_card_ghosts` 吃的是圖元不是 id），所以它一次都沒有成功過。
+def test_show_it_on_the_canvas_points_at_the_card_that_feeds_the_slot(window):
+    gds, glv = _gds_card(window)
+    window.select_node(glv)
+    window.param_form.wire_requested.emit("roi", "epi")
+
+    window.param_form.wire_show_requested.emit("roi")
+
+    lit = window.pipeline.card(gds)
+    assert lit is not None and lit._hover, "指的是定義那個區域的那張卡"
+    assert window.pipeline.card(glv)._hover is False, "不是使用者正在編的這張"
+    assert window.selected_node == glv, "指給我看不等於換一張卡編"
+
+
+def test_showing_an_image_slot_points_at_the_card_that_produces_the_stream(window):
+    _gds, glv = _gds_card(window)
+    src = first_source(window, "load_single")
+    window.select_node(glv)
+
+    window.param_form.wire_show_requested.emit("source")
+
+    assert window.pipeline.card(src)._hover, "影像流走的是同一條路"
+
+
+def test_showing_an_unwired_slot_does_nothing_instead_of_raising(window):
+    _gds, glv = _gds_card(window)
+    window.select_node(glv)
+    window.param_form.wire_show_requested.emit("reference_region")
+    assert not window.pipeline.ghost_items()
+
+
+def test_the_light_goes_out_by_itself_when_the_mouse_touches_the_canvas(window):
+    """亮著的卡是**幽靈**（`_ghost_cards`）—— 使用者一動就清掉，不會留一張
+    永遠亮著的卡在畫布上。"""
+    gds, glv = _gds_card(window)
+    window.select_node(glv)
+    window.param_form.wire_requested.emit("roi", "epi")
+    window.param_form.wire_show_requested.emit("roi")
+    assert window.pipeline.card(gds)._hover
+
+    window.pipeline.clear_tree_ghosts()          # `_sync_hover_node` 做的第一件事
+    assert window.pipeline.card(gds)._hover is False

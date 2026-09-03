@@ -398,6 +398,58 @@ def test_a_card_can_be_dragged_from_the_library_onto_the_canvas(window):
     assert abs(item.pos().y() + canvas_mod.NODE_H / 2.0 - 320.0) < 1.0
 
 
+# 使用者回報（2026-09-03）：「快速點選任何一張卡片兩次會跳出視窗殘影後消失」
+# —— 那個殘影是 `QDrag` 的 pixmap。按下的那一點以前跨得過一次點擊
+# （`mouseReleaseEvent` 根本不存在），於是第二下按著的那幾 px 抖動就湊得出
+# 拖曳的門檻；使用者兩下想做的是「加這張卡」。
+def _click(widget, kind, pos, buttons):
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    QApplication.sendEvent(widget, QMouseEvent(kind, QPointF(pos), Qt.LeftButton,
+                                               buttons, Qt.NoModifier))
+
+
+def test_double_clicking_a_library_card_adds_it_without_a_drag_ghost(
+        window, monkeypatch):
+    from PySide6.QtCore import QEvent, QPoint, Qt
+
+    entry = window.library.entry("denoise")
+    assert entry is not None
+    dragged = []
+    monkeypatch.setattr(type(entry), "start_drag",
+                        lambda self: dragged.append(self.step_key))
+    added = []
+    entry.activated.connect(added.append)
+
+    at = QPoint(20, 10)
+    _click(entry, QEvent.MouseButtonPress, at, Qt.LeftButton)
+    _click(entry, QEvent.MouseButtonRelease, at, Qt.NoButton)
+    _click(entry, QEvent.MouseButtonDblClick, at, Qt.LeftButton)
+    jitter = at + QPoint(14, 3)          # 快速點兩下的手本來就不會停在原點
+    _click(entry, QEvent.MouseMove, jitter, Qt.LeftButton)
+    _click(entry, QEvent.MouseButtonRelease, jitter, Qt.NoButton)
+
+    assert added == ["denoise"], "兩下要的是「加這張卡」"
+    assert dragged == [], "點兩下不是拖曳 —— 殘影就是從這裡跳出來的"
+
+
+def test_a_press_and_drag_still_starts_a_drag(window, monkeypatch):
+    """上面那一條不准把拖曳一起關掉：真的按著移過去仍然要拖得動。"""
+    from PySide6.QtCore import QEvent, QPoint, Qt
+
+    entry = window.library.entry("denoise")
+    dragged = []
+    monkeypatch.setattr(type(entry), "start_drag",
+                        lambda self: dragged.append(self.step_key))
+
+    at = QPoint(20, 10)
+    _click(entry, QEvent.MouseButtonPress, at, Qt.LeftButton)
+    _click(entry, QEvent.MouseMove, at + QPoint(40, 6), Qt.LeftButton)
+
+    assert dragged == ["denoise"]
+
+
 def test_only_a_card_drag_is_accepted(window):
     """自訂 MIME 型別，不是純文字 —— 不然從別的視窗拖一段字進來也會變成新增卡片。"""
     from d4t.ui.widgets import CARD_MIME

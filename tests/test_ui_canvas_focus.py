@@ -254,3 +254,51 @@ def test_zoomed_out_a_card_keeps_its_title_and_drops_the_rest(window):
         "縮到 40% 還在畫 %d 行字：%r" % (len(seen[0.4]), seen[0.4]))
     assert len(seen[1.0]) > len(seen[0.4]), (
         "100% 跟 40% 畫的東西一樣多 —— LOD 沒有生效")
+
+
+# --------------------------------------------------------------------------- #
+# 4. 重建畫布的那一瞬間，選取問得出答案（2026-09-03）
+# --------------------------------------------------------------------------- #
+# 使用者回報：拉一條線就跳
+# `RuntimeError: Internal C++ object (_NodeItem) already deleted`，
+# 出處正是上面第 1 節那支 handler。`set_nodes` 的 `scene.clear()` 會銷毀選著
+# 的圖元，Qt 當場送出 `selectionChanged` —— 而那時候 `_items` 還握著剛被銷毀
+# 的那一批。不是「選取壞了」，是**問的時機在拆除的半路上**。
+def _selection_probe(canvas):
+    """每一次 `selectionChanged` 都問一次「表上的圖元還活著嗎」。"""
+    alive = []
+
+    def probe():
+        try:
+            [it.isSelected() for it in canvas._items.values()]
+            [e.isVisible() for e in canvas._edges]
+        except RuntimeError:
+            alive.append(False)
+        else:
+            alive.append(True)
+
+    canvas._scene.selectionChanged.connect(probe)
+    return alive
+
+
+def test_a_rebuild_never_asks_the_selection_about_dead_items(window):
+    (src, _a, b), _edges = _chain(window)
+    window.pipeline.set_selected(b)
+    alive = _selection_probe(window.pipeline)
+
+    window._on_edge_added(src, b, "test")      # 加一條線 = 整張畫布重建
+
+    assert alive, "重建過程真的送出了 selectionChanged（不然這支測試是空的）"
+    assert all(alive), "表上還留著被 clear() 銷毀的圖元"
+
+
+def test_wiring_a_line_while_a_card_is_selected_prints_no_traceback(window,
+                                                                    capfd):
+    """使用者看到的是**終端機那一串**，所以就照那個看。"""
+    (src, _a, b), _edges = _chain(window)
+    window.pipeline.set_selected(b)
+    capfd.readouterr()
+
+    window._on_edge_added(src, b, "test")
+
+    assert "already deleted" not in capfd.readouterr().err

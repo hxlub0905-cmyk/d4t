@@ -1706,9 +1706,17 @@ class PipelineCanvas(QGraphicsView):
         prev = ({nid: item.pos() for nid, item in self._items.items()}
                 if getattr(self, "_keep_positions", True) else {})
         self._keep_positions = True
-        self._scene.clear()
-        self._hover_node = None            # 舊的圖元剛被 clear() 銷毀
+        # ⚠ **先把手上的圖元放掉，再 clear()**。`clear()` 會銷毀選著的那個
+        # 圖元，於是 Qt 當場送出 `selectionChanged` —— 而那支 handler
+        # （`_on_selection_changed`）問的正是 `self._items` 每一張卡選中沒有。
+        # 表還握著剛被銷毀的 C++ 物件的話，那一問就是
+        # `RuntimeError: Internal C++ object (_NodeItem) already deleted`
+        # （使用者在拉線／刪卡的時候看到的那一串 traceback）。
+        # 空表回答得出「沒有東西被選中」，而那句話在這個瞬間剛好是真的。
         self._items, self._edges = {}, []
+        self._hover_node = None            # 舊的圖元剛被 clear() 銷毀
+        self._ghost_items, self._ghost_cards = [], []   # 同理：別留著殘骸
+        self._scene.clear()
         self._order = [str(n.get("node_id", "")) for n in nodes]
         # ``edges`` 收兩種形狀：``(來源, 目的)`` 與 ``(來源, 目的, 來源埠)``。
         # 帶埠的那種是 F9-9 —— 一對節點之間可以有好幾條線，每條各自從哪顆埠
@@ -2021,6 +2029,30 @@ class PipelineCanvas(QGraphicsView):
                 pass
         self._ghost_items, self._ghost_cards = [], []
 
+    def reveal_cards(self, node_ids: Sequence[str]) -> int:
+        """**在畫布上指給我看**：把這幾張卡捲進視野、亮起來（F68 的插槽選單）。
+
+        用的是 hover 那一套，不是選取 —— 選取會把右邊的設定換成那張卡，而
+        使用者按這一條的時候正在編**下游**那一格，他要的是眼睛找到來源，
+        不是換一張卡編。
+
+        亮起來的卡記在 `_ghost_cards` 上（跟幽靈線同一格）：`clear_tree_ghosts`
+        就是它的清潔工，而滑鼠一碰畫布或離開畫布都會叫到它 —— 也就是
+        **使用者一動就自己熄掉**，不用計時器，也不會有一張永遠亮著的卡。
+
+        回傳真的指到幾張（測試用；找不到就是 0，什麼都不動）。
+        """
+        items = [self._items[str(n)] for n in node_ids
+                 if str(n) in self._items]
+        if not items:
+            return 0
+        self.clear_tree_ghosts()
+        for item in items:
+            item.set_hovered(True)
+        self._ghost_cards = list(items)
+        self.ensureVisible(items[0], 80, 80)
+        return len(items)
+
     def ghost_items(self) -> List[Any]:
         """現在畫著的幽靈線（測試用）。"""
         return list(getattr(self, "_ghost_items", []) or [])
@@ -2098,10 +2130,20 @@ class PipelineCanvas(QGraphicsView):
 
         無條件重畫（而不是只在旗標翻轉時）：從卡 A 點到卡 B 的時候旗標兩次
         都是 True，但該亮的線整組換了一批。
+
+        ⚠ **這支是被 Qt 在拆東西的半路上叫進來的**：`scene.clear()`、關掉彈出
+        視窗、視窗收掉，都會在圖元剛被銷毀的瞬間送出 `selectionChanged`。
+        `set_nodes` 因此先放掉 `_items`／`_edges` 再 `clear()`；剩下那些**沒有
+        經過我們**的拆除路徑（Qt 自己的 teardown）由這裡的 try 收尾 ——
+        殘骸沒有選取狀態也不用重畫，那不是一個要往上報的錯。
         """
-        self._sel_nodes = any(it.isSelected() for it in self._items.values())
-        for edge in self._edges:
-            edge.update()
+        try:
+            self._sel_nodes = any(it.isSelected()
+                                  for it in self._items.values())
+            for edge in self._edges:
+                edge.update()
+        except RuntimeError:               # 圖元的 C++ 物件已經不在了
+            self._sel_nodes = False
 
     def selected_node(self) -> Optional[str]:
         return self._selected
