@@ -6,7 +6,7 @@
 d22c49264420a1f85dc1f99b784214f1fca9a74a CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 95699cfe7ee391a84c3fcb33fe9d98a72bbdc337 README.md
-16abb235b046752be197d74596fbf3c653a4187f SESSION_LOG.md
+7c030adfb0b24b6999c297e514fb4fe830b6925e SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 9597ad2e3abef8a3b9598e2c187e7b828c752f5c d4t/__init__.py
 cf8fe09ad592a80d3dfaf96412e906035cb83b48 d4t/__main__.py
@@ -87,7 +87,7 @@ bcea66e1a82ee590f997bbf319fea696277be9f6 d4t/ui/app.py
 f8cbf586f20a72eb7dbeae1b04aaf0d47f3cbe6a d4t/ui/assets/d4t-wordmark.svg
 a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
 87bce11608d08f4302947e917b2b24d076571775 d4t/ui/branding.py
-1010555df064b642e6d2021d52becddb0f0c482b d4t/ui/canvas.py
+c83b700f73eaef43c638572db99b8e6509977a07 d4t/ui/canvas.py
 3b58b7e078d58ad84a8939734b65952a75a029f3 d4t/ui/cell_canvas.py
 bb92c4ab8c186afa72f683a163d5ba4620c5dc3c d4t/ui/decide_panel.py
 8deaa6bc59894a0fb5cb04f3d7b2c5b2b2579c21 d4t/ui/feature_panel.py
@@ -135,6 +135,7 @@ b20a667da5e4e110c27f270ac8905e08a335787a docs/PITFALLS.md
 cd9b6800b5941de35efed2464b7c0a0db05e4a49 docs/plans/F79-grid-tells-the-truth.md
 3fdf5c58d00f59984d59c705c9d1516967c66766 docs/plans/F80-focus-visible-and-motion.md
 66963820c4b69d360394697ecd9d3ab2a8f2a46d docs/plans/F81-flat-for-real.md
+5f93bd942e201992944b1ba7359ffde449b14bbb docs/plans/F82-drag-magnet.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 70b9465e36dc922bf6908d8ec1e48265b515314e fab_probe/probe_klarf.py
 368cc8e63736446813cc47ccc1fcc49b11abeec6 fab_probe/probe_stats.py
@@ -277,7 +278,7 @@ a07082467008876726bf2f9c126139f5a9d0bcbc tests/test_ui_canvas_animation.py
 91f2a205111fef383dd8bd0d12d86f77affee113 tests/test_ui_canvas_cut_button.py
 fbe5cbca000fcac3a95ac34b5d69c1975c193f80 tests/test_ui_canvas_flat.py
 f2dc92b3288e2656e8fa77952456fb540f608b7f tests/test_ui_canvas_focus.py
-f8365e7a4202d4065a99572e6043b4ab5cc369e9 tests/test_ui_canvas_grid.py
+5ce1abe0940e54580cf1809822921fa1ee89a74d tests/test_ui_canvas_grid.py
 25112528f0f28b2929861c53c08f186b579d0999 tests/test_ui_canvas_invariants.py
 3af81196fa85db7008288cd3852607fe03718d65 tests/test_ui_canvas_one_line_per_input.py
 dd44172aed175c05a9dfca9295969a2470b404a7 tests/test_ui_canvas_ports.py
