@@ -450,16 +450,47 @@ def test_explain_venv_failure_suggests_no_venv():
 
 # ---------------------------------------------------------------- bootstrap 鐵則：只用標準函式庫
 
-def _stdlib_names():
-    names = getattr(sys, "stdlib_module_names", None)
-    if names:
-        return set(names)
-    return {                                     # Python 3.9 沒有 stdlib_module_names
-        "__future__", "argparse", "ast", "base64", "datetime", "hashlib", "json",
-        "os", "platform", "re", "shutil", "struct", "subprocess", "sys",
-        "tempfile", "time", "typing", "unicodedata", "zipfile", "importlib",
-        "urllib", "ssl", "hashlib",
-    }
+def _stdlib_names(force_probe=False):
+    """標準函式庫的頂層模組名。
+
+    ``sys.stdlib_module_names`` 是 **Python 3.10+** 才有的，而這個 repo 的底線
+    是 3.9（鐵則 2）。3.9 走下面的**探測**：問直譯器自己「內建模組有哪些」
+    加上掃一次 stdlib 目錄。
+
+    ⚠ **這裡以前是一張手抄的 23 個名字的表**，而它當然不完整 ——
+    `csv` / `zlib` / `lzma` / `binascii` 一個都不在上面。症狀藏了很久，因為
+    當時被檢查的八支工具剛好沒有在模組層 import 到它們；2026-09-03 把檢查
+    範圍改成「`tools/` 底下全部」之後，**CI 的 3.9 job 當場紅三條**
+    （而 3.11 / 3.12 全綠，因為那兩版走的是上面那條路）。
+
+    今天第三次踩到同一個形狀：手寫的清單會漂，而漂掉的時候測試通常是**綠的**
+    （這一次比較幸運，它是紅的）。所以這裡不再手寫 —— 問系統。
+
+    ``force_probe`` 只給測試用：在 3.10+ 上也走 3.9 那條路，好驗它是對的。
+    """
+    if not force_probe:
+        names = getattr(sys, "stdlib_module_names", None)
+        if names:
+            return set(names)
+
+    import sysconfig
+
+    out = set(sys.builtin_module_names)           # zlib / binascii 常在這裡
+    stdlib = sysconfig.get_paths().get("stdlib") or ""
+    for base in (stdlib, os.path.join(stdlib, "lib-dynload")):
+        if not os.path.isdir(base):
+            continue
+        for entry in os.listdir(base):
+            full = os.path.join(base, entry)
+            if entry.endswith(".py"):
+                out.add(entry[:-3])
+            elif entry.endswith((".so", ".pyd")):
+                out.add(entry.split(".")[0])      # _lzma.cpython-39-x86_64...so
+            elif os.path.isdir(full) and os.path.isfile(
+                    os.path.join(full, "__init__.py")):
+                out.add(entry)
+    out.discard("")
+    return out
 
 
 def _module_level_imports(path):
@@ -482,6 +513,31 @@ def _sibling_tools():
     """``tools/`` 底下的其他工具。互相 import 是可以的 —— 這條規則要禁的是
     **第三方套件**（那台機器上可能一個都裝不起來），不是同一個資料夾裡的同伴。"""
     return {os.path.splitext(f)[0] for f in os.listdir(TOOLS) if f.endswith(".py")}
+
+
+def test_the_python39_stdlib_probe_agrees_with_the_real_list():
+    """3.9 那條**探測**的路，要跟 3.10+ 的 ``sys.stdlib_module_names`` 一致。
+
+    「一致」只問一個方向、而且只問**我們真的會用到的那些名字**：探測出來的
+    集合必須蓋住所有工具在模組層 import 到的東西。全等是問錯的問題 ——
+    探測會多撈到 `_ctypes` 那種底線開頭的內部模組，那不影響判斷。
+
+    這條測試存在，是因為 3.9 那條路**在 3.11 的開發機上永遠不會被執行到**，
+    所以它壞掉的時候只有 CI 的 3.9 job 會講 —— 而那要等七分鐘。
+    """
+    real = getattr(sys, "stdlib_module_names", None)
+    if not real:
+        pytest.skip("這個直譯器就是 3.9，兩條路是同一條")
+
+    probed = _stdlib_names(force_probe=True)
+    used = set()
+    for script in ALL_TOOLS:
+        used |= _module_level_imports(script)
+    missing = sorted((used & set(real)) - probed - _sibling_tools())
+    assert not missing, (
+        "3.9 的探測漏掉了這幾個標準函式庫：%s\n"
+        "（在 3.9 的 CI 上，用到它們的工具會被誤判成 import 了第三方套件）"
+        % missing)
 
 
 @pytest.mark.parametrize("name", sorted(NEEDS_THIRD_PARTY))
