@@ -367,7 +367,7 @@ def _roi_then_image_recipe() -> Recipe:
     """
     nodes = {
         "load": RecipeNode("load", "load_patch", {}),
-        # ROI 卡 F30 起只剩一張（``roi_reference``，四個 method）—— 這裡用
+        # ROI 卡 F30 起只剩一張（``roi_reference``，好幾個 method）—— 這裡用
         # Profile 那一支，它跟被拿掉的 ``roi_define`` 一樣是 algo 段，一樣會
         # 落在快取段裡面，所以這條迴歸測的東西沒有變。
         #

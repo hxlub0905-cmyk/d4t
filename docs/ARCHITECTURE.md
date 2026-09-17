@@ -76,10 +76,12 @@ cycle 錯誤，現在照線跑。
 數值來，Algo 是拿這些 feature 去做更 custom 的處理」）、
 **Output 段的卡是 end point**（`resolve_writes()` 與 `resolve_features()` 都是空的）。
 
-Output 段是**三張卡**（F38，2026-08-26）：`output_report`「Write report」
-（一個資料夾，要哪幾樣是一格勾選：報表／表格／圖／Excel／box plot／recipe）、
-`output_klarf`「Write KLARF」、`output_char`「Write comparison」。
-以前是七張，而其中五張回答的是同一個問題 —— 收斂的理由與那四張的去向見
+Output 段是**四張卡**：`output_report`「Write report」（F38，2026-08-26 ——
+一個資料夾，要哪幾樣是一格勾選：報表／表格／圖／Excel／box plot／recipe）、
+`output_klarf`「Write KLARF」、`output_char`「Write comparison」，
+以及 `output_uniformity`「Write charts」（F85 加的均勻度四張圖 ——
+手冊在 [`USING-UNIFORMITY.md`](USING-UNIFORMITY.md)）。
+F38 之前是七張，而其中五張回答的是同一個問題 —— 收斂的理由與那四張的去向見
 `d4t/core/steps/output.py` 的模組說明。
 
 這個分類不是裝飾 —— 它同時是 `Step.category`、快取切點、recipe 驗證順序的依據。
@@ -236,7 +238,7 @@ Path 行都建在它上面。
 ```
 <repo>/
 ├── d4t/                      # 套件本體（下一段展開）
-├── tests/                    # 179 個測試檔、2,700+ 支 test function，全部用合成資料
+├── tests/                    # 測試，**全部用合成資料**（怎麼跑見 `../CLAUDE.md` §4）
 │   ├── conftest.py           #   （根目錄另有一份 conftest.py —— 那份負責 sys.path）
 │   ├── region_cards.py       #   測試共用的小工具（不是測試檔）
 │   └── fixtures/
@@ -272,7 +274,7 @@ Path 行都建在它上面。
 
 ```
 d4t/
-├── __main__.py               # CLI：run / steps / validate / runs / rescore / export / gui
+├── __main__.py               # CLI：run / steps / validate / runs / rescore / export / gui / simgen
 ├── core/                     # 純運算，**禁止任何 Qt import**（`tests/test_no_qt.py` 守門）
 │   ├── ingest/               # 讀進來：KLARF、TIFF、影像檔、掛在 lot 上的第二份資料
 │   │   ├── klarf_core.py     #   KLARF 1.2/1.8 無損讀寫引擎（vendored from KLIP，最重要的資產）
@@ -321,7 +323,7 @@ d4t/
 │   │   ├── load_sidecar.py pair_source.py               #   別的程式產的圖／另一份 lot 的那一顆
 │   │   ├── normalize.py tone.py denoise.py flatten.py   #   Enhance 段
 │   │   ├── align.py arith.py align_to.py                #   Compare 段（`align` 目前收起來）
-│   │   ├── roi_reference.py   #   Region 段（**只有這一張**，畫面上叫「ROI」）：四種找法 → 具名區域
+│   │   ├── roi_reference.py   #   Region 段（**只有這一張**，畫面上叫「ROI」）：三種找法 → 具名區域
 │   │   ├── roi_cross.py roi_template.py  #   ⚠ **不是卡片**：折進 `roi_reference` 的兩個 method（F30）
 │   │   ├── glv_stats.py cd.py quality.py #   Measure 段：GLV → CD → Focus index（**順序有意義**）
 │   │   ├── output.py         #   Output 段四張：output_report／output_klarf／output_char／output_uniformity
@@ -381,11 +383,12 @@ d4t/
     │                         #     （F61 —— 畫一個週期＝畫每一個重複）
     │                         #     `python -m d4t simgen`；只做介面，邏輯在
     │                         #     `tools/make_lot_from_gc.py`
-    ├── welcome.py            #   首啟導覽 ＋ 範例 recipe 庫對話框（兩個入口目前收起來）
+    ├── welcome.py            #   首啟導覽 ＋ 範例 recipe 庫對話框（兩個入口各一個旗標，
+    │                         #     開關狀態的唯一出處是 `ui/scope.py`）
     ├── workers.py            #   載入／預覽（請求合併）／試跑／寫出 背景執行緒
     ├── theme.py branding.py region_words.py  #   主題 token／圖示字標／區域那三個埠的白話字
     ├── widgets.py            #   **那道門**（F91 U7）：曾經是 7,140 行、24 個不相干
-    │                         #     的類別，現在只剩 123 行的轉出口 —— 四十幾個模組
+    │                         #     的類別，現在只剩一個轉出口 —— 四十幾個模組
     │                         #     寫的 `from .widgets import X` 一個字都沒改，而每
     │                         #     一塊搬去了它該在的地方（底下八支）。新程式碼請直
     │                         #     接 import 那幾支；這裡不准再有 class / def
@@ -445,7 +448,8 @@ d4t/
     └── assets/               #   `d4t.svg` 與兩份字標（pyproject 的 package-data 帶著它們走）
 ```
 
-⚠ **新的 UI 面板一律開新模組**，不要塞進 `studio.py`（6,000 行以上）——
+⚠ **新的 UI 面板一律開新模組**，不要塞進 `studio.py`（它是這個 repo 最大的一支，
+現在幾行看 `tests/test_size_ceilings.py` 的 `FILE_CEILINGS` / `HARD_CAPS`）——
 `studio.py` 留給接線，不留給內容。理由與現況見 [`../CLAUDE.md`](../CLAUDE.md) §4。
 
 ### `docs/`
@@ -472,8 +476,12 @@ docs/
 
 > **`examples/` 不見了不是漏掉的。** 2026-08-16 使用者定調「範例 recipe 都先全部
 > 拿掉」，整個目錄移除；連帶「用範例資料試一次」與「Templates…」兩個入口
-> 也收起來了（`ui/scope.py` 的 `SHOW_SAMPLE_ENTRIES`）。要放回去：JSON 丟回
-> `examples/recipes/`、常數改 `True`。加卡片時**不必**再同步維護五份範例。
+> 也收起來了。加卡片時**不必**再同步維護五份範例。
+>
+> **那兩個入口後來都回來了**（範本庫 2026-09-08、範例資料 2026-09-09），而且
+> 管它們的已經**不是同一個旗標** —— F91 X4 把當初那一個拆成兩個，因為它們的
+> 死法不一樣。今天叫什麼、開著還是關著，**唯一出處是 `d4t/ui/scope.py`**，
+> 這裡不抄第二份（上一版抄的那個名字後來被刪掉了，而這一段還留著它一整個月）。
 >
 > **出貨的 recipe 現在住在 [`recipes/`](../recipes/)**（2026-08-26），走
 > `Open recipe…` 而不是範本庫。跟舊的 `examples/` 差一件事，而那件事就是它們

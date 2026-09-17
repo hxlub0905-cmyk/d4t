@@ -652,7 +652,7 @@ def test_library_panel_groups_and_double_click(qapp):
         by_group.setdefault(s_["group"], set()).add(s_["key"])
     assert "load_patch" in by_group["input"]
     assert {"subtract", "align"} <= by_group["compare"]
-    # F30：四張 Region 卡收成一張（`roi_reference` 的四個 method）。
+    # F30：四張 Region 卡收成一張（`roi_reference` 的 method）。
     assert "roi_reference" in by_group["region"]
     assert {"glv_stats", "cd_measure"} <= by_group["measure"]
 

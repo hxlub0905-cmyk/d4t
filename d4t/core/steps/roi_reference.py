@@ -103,7 +103,7 @@ from ._util import (
     LIMIT_MAX_BOXES,
 )
 
-#: ``method`` 的兩個值 —— **地位相同**，順序就是下拉由上到下。
+#: ``method`` 的三個值 —— **地位相同**，順序就是下拉由上到下。
 #:
 #: 值本身會進 recipe JSON，所以它們是白話短句而不是縮寫（同 `glv_stats` 的
 #: ``reference``：``"another region"`` / ``"the other regions"``）。
@@ -245,7 +245,7 @@ class RoiReferenceStep(Step):
     category = CATEGORY_ALGO
     group = GROUP_REGION
     help = ("Mark every place on the image that should look the same, so the "
-            "one that does not stand out. Four ways to find them, and they "
+            "one that does not stand out. Three ways to find them, and they "
             "are equally good - pick whichever your sample gives you. Either "
             "way you get the whole set, the one the defect is in, and every "
             "other one as the baseline to compare it against.")

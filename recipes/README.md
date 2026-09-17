@@ -124,3 +124,51 @@ Load one image ──single─┬──> ROI (stripes, crossing)          → on
 ```bash
 python -m d4t run recipes/rsem-worst-box.json <你的.001> --workers 4
 ```
+
+---
+
+## `one-image-uniformity.json`
+
+**一張影像、沒有 KLARF、沒有參照**：用 `Open image…` 打開（或 `Open folder…`
+一整批），這一份把量測框鋪滿整個視野、**逐格量一次**，然後回答一句話 ——
+**這片區域的灰階均不均勻**：CV %，以及左右與上下各斜了多少（`slope_per_100px`）。
+
+```
+                                        ┌──→ Write charts    四張圖 + 一張自己配的
+Load one image ──single─┬──> ROI (stripes) ┄cells┄> GLV (across boxes)
+                        └──single──────────────────→ ┘   └──→ Write report   defects.csv + recipe
+```
+
+（`ROI` 到 `GLV` 那一條是**虛線** —— 區域走的是菱形埠，跟影像流不同埠。）
+
+**它刻意只給數字，不給判決。** 這裡沒有任何一個門檻說「這片算好還算壞」——
+那個數字是你的，而且每一層都不一樣。判定樹只分兩類：
+`spread < 0`（`glv_mean_cv_pct` 沒量到，`fill` 補 −1）→ bin 9「nothing to measure」，
+其餘 → bin 0「measured」。**「一張沒有圖案可找的圖」因此不會被當成「完美平坦」。**
+
+### 為什麼兩張 Output 卡都在
+
+`Write charts`（`output_uniformity`）畫的四張圖是**拿來看的**：box plot、
+直方圖、位置剖面、熱圖 —— **一個點是一格量測框，不是一顆 defect**，所以
+一道橫跨視野的梯度在圖上就長得像一道梯度，而且看得出它在哪。
+那張卡還有第五格讓你自己配（挑兩欄放到軸上），出貨的檔案裡沒有勾。
+
+`Write report`（`output_report`）把**同一批數字**寫進 `defects.csv`，並把這份
+recipe 複製一份進去 —— **圖是拿來看的，CSV 是拿來留的**。
+（F85 出貨的第一版只有圖，`tests/test_shipped_recipes.py` 為此加了一條。）
+
+### 要調的幾格
+
+| 卡 | 格 | 什麼時候動 |
+|---|---|---|
+| ROI | **Box inset** | 框往內縮幾個 px。條紋邊緣是糊的，縮太少會把邊緣的灰階算進來 |
+| GLV | **Pick the odd one by** | 預設 `glv_mean`（整格的平均）。要看「格子裡最亮的點」才換 |
+| 兩張輸出卡 | **Write to** | 站點資料。出貨的檔案填的是**相對路徑**，會落在你啟動程式的那個資料夾旁邊 |
+
+完整的一格一格說明在 [`../docs/USING-UNIFORMITY.md`](../docs/USING-UNIFORMITY.md)。
+
+### 命令列
+
+```bash
+python -m d4t run recipes/one-image-uniformity.json <一個放影像的資料夾> --workers 4
+```

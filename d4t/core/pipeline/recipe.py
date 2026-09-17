@@ -1918,10 +1918,10 @@ def _migrate_folded_output_cards(nodes: Dict[str, "RecipeNode"]) -> None:
 def _migrate_folded_region_cards(nodes: Dict[str, "RecipeNode"]) -> None:
     """``roi_cross`` / ``roi_template`` → ``roi_reference`` ＋ 對應的 ``method``（F30）。
 
-    使用者 2026-08-25：「把 Profile / Template 也折進 roi_reference」。四張
-    Region 卡回答的是同一句話（「哪些地方應該長得一樣」），所以它們是一張卡的
-    四個 method —— 跟 ``roi_from_mask``（F29）與 ``roi_compare``（F16）同一個
-    形狀，連遷移的寫法都照抄。
+    使用者 2026-08-25：「把 Profile / Template 也折進 roi_reference」。當時那四張
+    Region 卡回答的是同一句話（「哪些地方應該長得一樣」），所以它們折成了一張卡
+    的 method —— 跟 ``roi_from_mask``（F29）與 ``roi_compare``（F16）同一個形狀，
+    連遷移的寫法都照抄。（**今天幾個 method 看 ``roi_reference.METHODS``**。）
 
     判準是「**舊 step 名在不在**」（鐵則 9）。換完之後不再命中，所以
     ``to_json_dict → from_json_dict`` 走第二次什麼都不會發生（identity）——

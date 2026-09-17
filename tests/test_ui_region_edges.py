@@ -365,7 +365,7 @@ def test_several_regions_accumulate_on_a_region_keys_field(window):
     """
     src = first_source(window, "load_single")
     tpl = window.add_card_after(src, "roi_reference")
-    # F30：一張卡四個 method，而 `regions` 只在「我自己標的那一格」上算數。
+    # F30：一張卡好幾個 method，而 `regions` 只在「我自己標的那一格」上算數。
     window.model.set_param(tpl, "method", "a cell I mark myself")
     window._on_edge_added(src, tpl, "single", "source")
     window.model.set_param(tpl, "regions", "epi: 0.1,0,0.3,1 | mg: 0.5,0,0.2,1")

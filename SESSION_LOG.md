@@ -22,6 +22,55 @@
 
 ---
 
+## F107：文件稽核 —— 「名字對、說明錯」那個盲區，補七道守門（2026-09-17）
+
+使用者要求「瀏覽專案後，完整的整理專案內容」，順序定為**先稽核修正、再做總覽**。
+逐項驗證出 **20 條漂移**，而它們全部落在同一個盲區裡：
+`test_docs_links`（指標）、`test_doc_file_tree`（樹上的名字）、`test_docs_match_registry`
+（卡片數／recipe 份數）三支的檔頭**都自己寫著「抓不到『名字對、說明錯』」** ——
+這一輪量到的就是那一類。
+
+**最貴的一條不是文件，是使用者看得到的那句話**：`roi_reference` 的 `help` 對使用者說
+`"Four ways to find them"`，而 `METHODS` 只有三個（`repeating cells` 2026-08-25 就刪了）。
+照那句話去找第四個的人找不到 —— 第二原則說那是 bug，不是文件問題。
+同一支檔案的註解還寫著「``method`` 的**兩個**值」。一份文件、三個答案。
+
+其餘幾類（完整清單在這一輪的 diff）：
+
+* **同一份文件裡兩個答案**：`ARCHITECTURE.md` 的「Output 段是三張卡」對「Output 段四張」
+  （`output_uniformity` 是 F85 加的）、「三個 method」對「四種找法」；
+  CLI 清單漏 `simgen`，而同一份文件下面自己在教 `python -m d4t simgen`。
+* **事實已變而文件沒動**：`welcome.py` 那一行還寫著「兩個入口目前收起來」（09-08／09-09
+  都開了）；結尾那段還教人去改 `SHOW_SAMPLE_ENTRIES`，而 `test_ui_template_library.py`
+  有一條斷言那個名字**不存在** —— 兩邊隔著一個月各說各話。
+* **抄了第二份的數字**：`widgets.py`「123 行」抄在 `CLAUDE.md` 與 `ARCHITECTURE.md`
+  兩處，實際 137（而 `test_size_ceilings` 的 `FILE_CEILINGS` 早就是 137）——
+  那一支的設計規則 4 寫的就是「數字只住在這裡，不要在 `CLAUDE.md` 抄第二份」。
+  `studio.py`「6,000 行以上」（7,753）、`tests/` 的「179 檔／2,700+ 支」（252／3,832）、
+  `HANDOVER` 的「588 tests／30 秒」、`pyproject` 的「3,126 支」、`ci.yml` 的「2,989」同族。
+  **全部改成連結，不是改成新數字** —— 那正是 `CLAUDE.md` 給的退路。
+* **那張盯水位的表自己過期了**：`AGENTS.md` §2 停在 2026-09-02 / 2,172 KB，
+  實際 4,234 KB —— 兩週又翻一倍，而那張表存在的唯一理由就是盯這件事。
+* `recipes/README.md` 少了 `one-image-uniformity.json` 那一節（那份 recipe 有測試跑）；
+  `README.md` 的文件索引少了兩份 `docs/*.md`；`HANDOVER` 指「加卡片看 `CLAUDE.md` §5」
+  而那在 §3（§ 存在，所以 `test_docs_links` 綠 —— 它檔頭就說了自己抓不到這個）。
+
+**七道新守門全部住進 `tests/test_docs_match_registry.py`**（那一支就是這個主題的家）：
+Output 卡數（從 registry 的 `GROUP_OUTPUT` 數）、CLI 子命令（從 `__main__.py` 的
+`add_parser` 抽）、文件不得提到 `d4t/ui/` 裡不存在的 `SHOW_*`、`recipes/README.md`
+每份 recipe 一節、**`roi_reference` 的 help 宣稱的數量 = `len(METHODS)`**、
+README 要連到每一份 `docs/*.md`、bundle 水位不得超出 `AGENTS.md` 那張表 1.25 倍。
+既有的「目前 N 份」那條加進 `README.md`。
+**十條各自驗過「把錯誤放回去會紅」。**
+
+水位那一條**刻意不是相等**而是上限（×1.25，配一條反向 ×0.8）：bundle 每次 `release.py`
+都會長幾 KB，要求逐 KB 相符只會逼每個 commit 去改那張表 —— 那是劇場，不是煞車。
+
+⚠ 兩次撞到尺：`studio.py` 的註解改長了 2 行（`HARD_CAPS` 只准往下）、`recipe.py`
+多 1 行 —— 兩處都改回等長，**沒有調高任何一格上限**。
+
+---
+
 ## F105：交錯晶格＋粗亮線上的週期量測退化 —— 小數週期、半週期陷阱、第一峰規則（2026-09-17）
 
 外部沙盒拿一張真實大圖（交錯晶格、亮線 10 px、人工驗證 41 × 79.5）回報：投影法回 (41, 40)、

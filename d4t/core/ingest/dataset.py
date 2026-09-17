@@ -185,7 +185,7 @@ class DefectItem:
 
 @dataclass
 class Dataset:
-    kind: str                               # "ebi_patch" | "rsem" | "folder"
+    kind: str                   # "ebi_patch" | "rsem" | "tiff_stack" | "folder"
     klarf: Optional[KlarfDoc]
     items: List[DefectItem] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)

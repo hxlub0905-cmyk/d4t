@@ -5292,9 +5292,9 @@ class StudioWindow(QMainWindow):
 
     #: 會產生投影曲線的那一支（面板只在編輯它的時候出現）。
     #:
-    #: ⚠ **一張卡、四個 method**（F30）—— 所以判準是 ``(key, method)``，
-    #: 不是 key。只看 key 的話 Region 卡全部都會亮起那塊面板，而其中三支根本
-    #: 產不出投影曲線：使用者會看到一塊永遠是空的面板。
+    #: ⚠ **一張卡、好幾個 method**（F30；幾個看 ``roi_reference.METHODS``，
+    #: 這裡不抄）—— 判準因此是 ``(key, method)`` 不是 key。只看 key 的話 Region
+    #: 卡全部亮起那塊面板，而別的 method 產不出投影曲線：那是一塊永遠空的面板。
     PROFILE_STEP = "roi_reference"
     PROFILE_METHOD = "stripes in the image"
 

@@ -60,8 +60,8 @@ from d4t.core.pipeline.step import REGISTRY              # noqa: E402
 #: 掃哪幾個目錄。
 #:
 #: **`bundle/` 不在裡面**：`bundle/d4t_bundle.py` 是 `tools/release.py` 產出來
-#: 的（3.7 MB、32,000 行），它的大小是「repo 有多大」的鏡像，不是一個人寫出來
-#: 的檔案。對產出物設上限只會得到一道每次 commit 都要調的關。
+#: 的，它的大小是「repo 有多大」的鏡像，不是一個人寫出來的檔案（水位表在
+#: `AGENTS.md` §2，守它的是 `tests/test_docs_match_registry.py`）。對產出物設上限只會得到一道每次 commit 都要調的關。
 #:
 #: **`tests/` 也不在裡面**：測試檔變長通常是好事（多守一件事），而這一份要抓
 #: 的是「沒有人決定卻變大」，那件事發生在出貨的程式碼上。
