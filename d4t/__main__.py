@@ -606,7 +606,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_run.add_argument("klarf", metavar="INPUT",
                        help="KLARF 檔、一個資料夾（每張圖一顆）、"
                             "或單獨一張圖（F85）")
-    p_run.add_argument("--tiff", default=None, help="patch TIFF 路徑（預設自動尋找）")
+    p_run.add_argument("--tiff", default=None, help="patch 影像檔路徑（.tif 或 .I01，內容都是多頁 TIFF；預設在 KLARF 旁邊自動尋找）")
     p_run.add_argument("--gds", default="",
                        help="GLAS 匯出資料夾（`<id>_label.png` + "
                             "overlay_manifest.json）—— 掛上去之後 "

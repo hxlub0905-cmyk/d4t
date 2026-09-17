@@ -90,6 +90,8 @@ from d4t.core.pipeline.cellrois import (
 )
 
 from . import fit_screen
+from .crop_dialog import CropDialog, crop_array, describe_crop
+from .lattice_dialog import LatticeDialog
 from .splitters import HairlineSplitter
 from .cell_canvas import (
     TOOL_ARRAY, TOOL_CLICK, TOOL_CURSOR, TOOL_DRAG, TOOL_PAINT, CellCanvas,
@@ -132,6 +134,12 @@ BLURRED_BELOW = 0.5
 #: 新區域的預設名（ROI1、ROI2…）—— 使用者的原話就是這個命名。
 _NAME_STEM = "ROI"
 
+#: 載入大圖時要不要跳「哪一塊」的視窗（F104）。**它是 modal**，所以要有一個關得掉
+#: 的旗標（`CLAUDE.md` §4「三件會安靜做錯的事」）：headless 測試會永遠停在那裡。
+#: `tests/conftest.py` 把它關掉；要驗那個視窗的測試自己打開。關著＝整張，跟 F102
+#: 之前的行為逐位元組相同。
+ASK_WHERE = True
+
 
 class TemplateDialog(QDialog):
     """匯入大圖 → 疊模板 → 在 cell 上畫區域 → 寫回卡片。"""
@@ -151,6 +159,13 @@ class TemplateDialog(QDialog):
         self._syncing = False
         self._from_recipe = False
         self._source: Optional[np.ndarray] = None
+        #: 裁切之前的整張圖與那個框（F102）。``_source`` 是**疊進去的那一塊**
+        #: （re-stack 用它），這兩個是原料 —— 「Crop…」要重新拉框時得回到整張。
+        self._full: Optional[np.ndarray] = None
+        self._full_name = ""
+        self._crop: Optional[Tuple[int, int, int, int]] = None
+        #: 「Grid」開關的另一半（F104）：格線視窗，開過一次就留著重用。
+        self._lattice: Optional[LatticeDialog] = None
         #: 「畫面上那一張」（Studio 給的）—— 沒有的時候那顆鈕不出現。
         self._screen_image: Optional[np.ndarray] = None
         self._screen_name = ""
@@ -200,6 +215,12 @@ class TemplateDialog(QDialog):
 
     # ---- 版面 ---------------------------------------------------------------
     def _build_source_row(self) -> QWidget:
+        """最上面那一列：**圖從哪來、cell 多大、格線開關**。
+
+        F102／F103 一度長到兩列十一個東西；使用者 2026-09-17：「按鈕還是太多」。
+        crop 併進載入（每次載入都先問「哪一塊」），Mark one cell 刪掉，格線變成一顆
+        開關 —— 回到一列，比 F102 之前只多一顆。
+        """
         box = QWidget(self)
         lay = QVBoxLayout(box)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -214,15 +235,18 @@ class TemplateDialog(QDialog):
         self.btn_screen = QPushButton("Use the image on screen", box)
         self.btn_screen.setObjectName("primary")
         self.btn_screen.setToolTip(
-            "Stack the cell from the defect image you are looking at. This is "
-            "the usual way for a single full-size SEM image, where the cell "
-            "and the image come from the same place.")
+            "Stack the cell from the defect image you are looking at. You "
+            "first choose which part of it to measure from. This is the usual "
+            "way for a single full-size SEM image.")
         self.btn_screen.clicked.connect(self._on_use_screen)
         self.btn_screen.setVisible(False)
         row.addWidget(self.btn_screen)
 
         self.btn_pick = QPushButton("Rebuild from image…", box)
         self.btn_pick.setObjectName("primary")
+        self.btn_pick.setToolTip(
+            "Pick a full-size image, choose which part of it to measure the "
+            "cell from (or the whole image), then stack.")
         self.btn_pick.clicked.connect(self._on_pick)
         row.addWidget(self.btn_pick)
 
@@ -251,11 +275,26 @@ class TemplateDialog(QDialog):
         self.btn_restack = QPushButton("Re-stack", box)
         self.btn_restack.setProperty("variant", "secondary")
         self.btn_restack.setToolTip(
-            "Stack the cell again at this size. The regions you already drew "
-            "keep their fractions of a cell, so a 2× cell moves them - check "
-            "them afterwards.")
+            "Stack the cell again at this size, from the same part of the "
+            "image. The regions you already drew keep their fractions of a "
+            "cell, so a 2× cell moves them - check them afterwards.")
         self.btn_restack.clicked.connect(self.restack)
         row.addWidget(self.btn_restack)
+
+        # F104：格線**開關**（使用者：「改成類似格線的開關按鈕，可以開啟顯示或關閉
+        # 顯示格線」）。開＝把引擎真的用的格子鋪回原圖的視窗出現、跟著 re-stack
+        # 更新；關＝收起來。那是「算錯了怎麼知道」最快的一眼。
+        self.btn_grid = QPushButton("Grid", box)
+        self.btn_grid.setProperty("variant", "secondary")
+        self.btn_grid.setCheckable(True)
+        self.btn_grid.setToolTip(
+            "Show the cell grid the template uses on the image. If every box "
+            "frames the same structure, the period and phase are right; if "
+            "the boxes drift onto something else towards one side, the "
+            "period is off. Click again to hide.")
+        self.btn_grid.toggled.connect(self._on_grid)
+        self.btn_grid.setEnabled(False)
+        row.addWidget(self.btn_grid)
 
         row.addStretch(1)
         self.path_label = QLabel("(no image chosen)", box)
@@ -301,7 +340,9 @@ class TemplateDialog(QDialog):
         gc = self.cell
         px = self.spin_cell_w.value() if (gc is None or gc.periodic_x) else None
         py = self.spin_cell_h.value() if (gc is None or gc.periodic_y) else None
-        return self.load_image(self._source, self._source_path, px=px, py=py)
+        full = self._full if self._full is not None else self._source
+        return self.load_image(full, self._full_name or self._source_path,
+                               px=px, py=py, crop=self._crop)
 
     def _build_side_panel(self) -> QWidget:
         panel = QWidget(self)
@@ -680,19 +721,97 @@ class TemplateDialog(QDialog):
         img = getattr(self, "_screen_image", None)
         if img is None:
             return False
-        return self.load_image(img, self._screen_name or "(image on screen)")
+        return self.take_image(img, self._screen_name or "(image on screen)")
+
+    # ---- 裁切（F102）-----------------------------------------------------------
+    def take_image(self, image: Any, name: str = "") -> bool:
+        """一張新的大圖進來：先問「哪一塊」，再疊。
+
+        兩個入口（挑檔案、畫面上那一張）都走這裡，**每次都問**（F104，使用者：
+        「crop 相關功能請直接接進 Rebuild from image」）—— 整張是視窗裡的一顆鈕，
+        取消＝什麼都不動（同 `_build_with_progress` 的取消）。
+        """
+        arr = np.asarray(image)
+        if arr.size == 0:
+            self._fail("that image is empty")
+            return False
+        got = self._ask_crop(arr, name, None) if ASK_WHERE else None
+        if got is False:
+            self._status_cancelled()
+            return False
+        return self.load_image(arr, name, crop=got)
+
+    def _ask_crop(self, image: Any, name: str,
+                  initial: Optional[Tuple[int, int, int, int]]) -> Any:
+        """開「哪一塊」視窗。回 ``(x, y, w, h)``、``None``（整張）或 ``False``（取消）。
+
+        獨立成一支是為了測試能換掉它（modal 視窗在 headless 下會停住）。
+        """
+        dlg = CropDialog(image, name, initial=initial, parent=self)
+        if dlg.exec() != QDialog.Accepted:
+            return False
+        return dlg.box()
+
+    def crop(self) -> Optional[Tuple[int, int, int, int]]:
+        """目前疊進去的那一塊（影像像素）；整張就是 ``None``。"""
+        return self._crop
+
+    # ---- 格線開關（F104）-------------------------------------------------------
+    def _on_grid(self, checked: bool) -> None:
+        """開＝格線視窗出現（沒有就建）、關＝收起來。視窗自己被關掉時開關彈回。"""
+        if not checked:
+            if self._lattice is not None:
+                self._lattice.hide()
+            return
+        gc = self.cell
+        if self._source is None or gc is None or gc.cell.size == 0:
+            self._say("Stack a template from an image first - the grid is "
+                      "drawn on that image.")
+            self.btn_grid.setChecked(False)
+            return
+        if self._lattice is None:
+            self._lattice = LatticeDialog(self._source, gc.px, gc.py, gc.origin,
+                                          gc.periodic, self._source_path, self)
+            self._lattice.closed.connect(lambda: self.btn_grid.setChecked(False))
+        else:
+            self._lattice.set_lattice(self._source, gc.px, gc.py, gc.origin,
+                                      gc.periodic)
+        self._lattice.show()
+        self._lattice.raise_()
+
+    def _sync_grid(self) -> None:
+        """疊了新的 cell：開關開著就把格線換成新的，關著就什麼都不做。"""
+        if self.btn_grid.isChecked() and self._lattice is not None:
+            gc = self.cell
+            if self._source is not None and gc is not None and gc.cell.size > 0:
+                self._lattice.set_lattice(self._source, gc.px, gc.py, gc.origin,
+                                          gc.periodic)
+
+    def grid_window(self) -> Optional[LatticeDialog]:
+        """格線視窗（測試用）；還沒開過就是 ``None``。"""
+        return self._lattice
 
     def load_image(self, image: Any, name: str = "",
-                   px: Optional[int] = None, py: Optional[int] = None) -> bool:
+                   px: Optional[int] = None, py: Optional[int] = None,
+                   crop: Optional[Tuple[int, int, int, int]] = None) -> bool:
         """吃一張大圖，量週期、疊模板、把證據寫上畫面。
 
         ``px``/``py`` 留空 = 從影像自己量（第一次都是這樣）；填了就照使用者說的
         疊 —— 「有時候會需要 2× 大 cell」。明講的尺寸 ``build_golden_cell`` 一律
         相信，不做信心檢查（那是使用者說的，不是猜的）。
+
+        ``crop``（F102）：``(x, y, w, h)`` 影像像素 —— ``image`` 是**整張**，
+        只有這一塊會拿去量週期、疊 cell。``None`` ＝ 整張，跟以前逐位元組相同。
         """
-        arr = np.asarray(image)
-        if arr.size == 0:
+        full = np.asarray(image)
+        if full.size == 0:
             self._fail("that image is empty")
+            return False
+        arr = crop_array(full, crop)
+        if crop is not None and arr.shape[:2] == full.shape[:2]:
+            crop = None                      # 框蓋住整張＝沒裁
+        if arr.size == 0:
+            self._fail("the crop box holds no pixels")
             return False
 
         gc = self._build_with_progress(arr, px, py)
@@ -704,7 +823,14 @@ class TemplateDialog(QDialog):
         self._from_recipe = False
         self._source = arr
         self._source_path = str(name or "")
-        self.path_label.setText(self._source_path or "(image)")
+        self._full = full
+        self._full_name = self._source_path
+        self._crop = crop
+        self.btn_grid.setEnabled(gc.cell.size > 0)
+        shown = self._source_path or "(image)"
+        if crop is not None:
+            shown += " · " + describe_crop(crop)
+        self.path_label.setText(shown)
 
         if gc.cell.size == 0:
             self.canvas.set_cell(None)
@@ -719,6 +845,7 @@ class TemplateDialog(QDialog):
         if not self.canvas.regions():
             self.add_region()
         self._refresh_tool_ui()
+        self._sync_grid()
         return True
 
     # ---- 疊模板要多久（F86，2026-09-07）---------------------------------
@@ -820,6 +947,9 @@ class TemplateDialog(QDialog):
         self._from_recipe = True
         self._source = None
         self._source_path = ""
+        self._full, self._full_name, self._crop = None, "", None
+        self.btn_grid.setChecked(False)
+        self.btn_grid.setEnabled(False)
         self.path_label.setText("(the template stored in this recipe)")
         self.canvas.set_cell(cell)
         self._set_ready(True)
@@ -860,7 +990,11 @@ class TemplateDialog(QDialog):
                  "this batch looks different"] + self._self_repeat_note())
         bits = ["cell %d x %d px" % (gc.px, gc.py),
                 "repeats %s" % axis,
-                "stacked from %d cells" % gc.n_cells,
+                "stacked from %d cells" % gc.n_cells]
+        if self._crop is not None:
+            # 從哪一塊疊的是判斷材料：換一批資料重疊時要知道上次看的是哪裡。
+            bits.append(describe_crop(self._crop))
+        bits += [
                 # 兩個數字問的是兩件事，所以兩個都列（F40）。以前只有前者，
                 # 而那一句警示掛在它上面 —— 見底下 `BLURRED_BELOW`。
                 "cells agree %.0f%%" % (100.0 * gc.agreement),

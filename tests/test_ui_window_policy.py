@@ -29,13 +29,15 @@ _SIDE_BY_SIDE = {
     "ResultsWindow": "一邊看結果表、一邊在畫布上改參數 —— 調 recipe 的迴圈",
     "RegionCheckWindow": "一邊看區域畫在很多顆上、一邊改那張 Region 卡",
     "GcGeneratorWindow": "產模擬資料跟目前的 recipe 無關，它自己是一個小工具",
+    "LatticeDialog": "一邊看格線鋪在原圖上對不對、一邊在模板對話框改 cell 尺寸 ——"
+                     " 它是那顆「Grid」開關的另一半（F104）",
 }
 
 #: **進去做完一件事再出來的**（規則的反面）—— 這些必須是 modal 對話框。
 _MODAL = {
     "WelcomeDialog", "TemplateDialog", "ChartSettingsDialog",
     "GraphBuilderDialog", "CurveDialog", "StatusHistoryDialog",
-    "RecipeLibraryDialog",
+    "RecipeLibraryDialog", "CropDialog",
 }
 
 _TOP_LEVEL_BASES = ("QMainWindow", "QDialog")

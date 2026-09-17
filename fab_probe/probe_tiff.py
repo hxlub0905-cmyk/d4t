@@ -13,6 +13,11 @@ TYPE_SIZE / COMPRESSION / PHOTOMETRIC / TAGS）與 d4t/core/ingest/klarf_core.py
 
 用法：
     python probe_tiff.py FILE.tif [--pages 8] [--with-klarf FILE.klarf] [--include-ids]
+    python probe_tiff.py FILE.I01 --with-klarf FILE.001   # .I01 也是這樣探
+
+``.I01``（2026-09-17）：d4t 把它當成「副檔名不同的 patch TIFF」（docs/FAB-VALIDATION.md
+#8）。這支腳本**不看副檔名、只看檔頭**：開頭是 II/MM 就往下讀 IFD，不是的話會講
+它看起來像什麼（PNG／JPEG／ZIP…）—— 那句話就是 #8 要的答案，請照樣貼回來。
 
 本腳本**不讀任何像素**，只讀 IFD 標籤。要看灰階統計請用 probe_stats.py。
 """
@@ -821,7 +826,7 @@ def run(path, n_first=8, with_klarf=None, include_ids=False):
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description="d4t 廠內探測 #2：TIFF 結構（單檔、純標準函式庫、不解碼像素）")
-    ap.add_argument("tiff", help="要探測的 TIFF 檔（例：C:\\path\\to\\lot.tif）")
+    ap.add_argument("tiff", help="要探測的 TIFF 檔（例：C:\\path\\to\\lot.tif 或 lot.I01）")
     ap.add_argument("--pages", type=int, default=8,
                     help="細看前幾頁（另外自動加看中段與最後兩頁，預設 8）")
     ap.add_argument("--with-klarf", default=None,

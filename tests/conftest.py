@@ -25,6 +25,11 @@ def _no_modal_dialogs_in_tests():
     mod = sys.modules.get("d4t.ui.studio")
     if mod is not None:
         mod.StudioWindow.PROMPT_ON_CLOSE = False
+    # F104：載入大圖時的「哪一塊」視窗也是 modal —— 關掉＝整張（F102 之前的行為）。
+    # 要驗那個視窗的測試自己 monkeypatch 成 True。
+    tpl = sys.modules.get("d4t.ui.template_dialog")
+    if tpl is not None:
+        tpl.ASK_WHERE = False
     yield
 
 

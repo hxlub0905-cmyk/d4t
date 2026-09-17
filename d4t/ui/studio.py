@@ -7576,7 +7576,7 @@ class StudioWindow(QMainWindow):
     def _on_open_stack(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Open image stack", "",
-            "Multi-page TIFF (*.tif *.tiff);;All files (*)")
+            "Multi-page TIFF (*.tif *.tiff *.I01);;All files (*)")
         if not path:
             return
         # 「一顆幾張」問一次就好，而且**預設值要是這個檔案自己的頁數線索**：
@@ -7607,7 +7607,7 @@ class StudioWindow(QMainWindow):
     def _on_open_image(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Open image", "",
-            "Images (*.png *.tif *.tiff *.jpg *.jpeg *.bmp);;All files (*)")
+            "Images (*.png *.tif *.tiff *.I01 *.jpg *.jpeg *.bmp);;All files (*)")
         if not path:
             return
         self.load_image_path(path)

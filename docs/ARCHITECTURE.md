@@ -209,10 +209,11 @@ Path 行都建在它上面。
 | `ResultsWindow` | 一邊看結果表、一邊在畫布上改參數 —— 那正是調 recipe 的迴圈 |
 | `RegionCheckWindow` | 一邊看區域畫在很多顆上、一邊改那張 Region 卡 |
 | `GcGeneratorWindow` | 產模擬資料是一件**跟主視窗無關**的事（它自己是一個小工具，不吃目前的 recipe）|
+| `LatticeDialog` | 一邊看格線鋪在原圖上對不對、一邊在模板對話框改 cell 尺寸 —— 它是模板對話框那顆「Grid」開關的另一半（F104），開著它 re-stack 格線會跟著換 |
 
 其餘一律 modal（`WelcomeDialog`、`TemplateDialog`、`ChartSettingsDialog`、
 `GraphBuilderDialog`、`CurveDialog`、`StatusHistoryDialog`、
-`RecipeLibraryDialog`）—— 它們都是「進去做完一件事再出來」，而在那段時間裡
+`RecipeLibraryDialog`、`CropDialog`）—— 它們都是「進去做完一件事再出來」，而在那段時間裡
 主視窗沒有東西可看。
 
 ⚠ **`UniformityWindow` 不在上面兩張表裡**，因為它不是頂層視窗 —— 它是
@@ -289,6 +290,7 @@ d4t/
 │   │   ├── edge.py subpixel.py shape.py profile.py  #   CD 的四塊：剖面、次像素、團塊、投影
 │   │   ├── grid.py mask.py roi.py                   #   條紋→框／label map→框／MultiROISet
 │   │   ├── period.py golden.py template.py          #   週期估測／Golden Cell 疊圖／模板定位
+│   │   ├── period2d.py            #   二維自相關找峰：交錯 layout 的矩形重複單元（F104）
 │   │   └── pairing.py                               #   兩批 defect 的座標配對（容差內、一對一）
 │   ├── pipeline/             # 引擎
 │   │   ├── context.py        #   Context（images／features／regions／meta）—— 步驟間的唯一介面
@@ -363,6 +365,8 @@ d4t/
     ├── gallery.py region_check.py      #   縮圖網格（虛擬捲動，撐 10k+）／區域畫在很多顆上
     ├── inspectors.py         #   每張卡自己的儀表（依 `Step.key` 註冊）
     ├── template_dialog.py    #   從大圖疊 Golden Cell 模板（模板存進 recipe）
+    ├── crop_dialog.py        #   載入大圖時先框一塊（或整張）再疊（F102；F104 起每次都問）
+    ├── lattice_dialog.py     #   「Grid」開關：把引擎真的用的格線鋪回原圖看週期對不對（F103/F104）
     ├── uniformity_window.py  #   均勻度那四張圖**自己的視窗**（F87）—— 儀表太窄讀不動
     │                         #     ⚠ 這裡不畫圖：`core/export` 產的 SVG 交給 QSvgRenderer，
     │                         #     畫面上跟寫出去的逐位元組相同

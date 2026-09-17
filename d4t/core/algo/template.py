@@ -64,6 +64,7 @@ import numpy as np
 
 from . import golden as algo_golden
 from . import period as algo_period
+from . import period2d as algo_period2d
 
 __all__ = [
     "GoldenCell", "MatchResult", "build_golden_cell", "anchor_cell",
@@ -124,6 +125,11 @@ class GoldenCell:
     confidence_y: float = 0.0
     anchor: Tuple[int, int] = (0, 0)    # 為了錨定地標捲動了多少
     n_cells: int = 0
+    #: 格線的原點（影像像素，``0 <= ox < px``），**已經把錨定的捲動算進去**：
+    #: 從 ``origin`` 起每 ``px``／``py`` 一格，格子裡的東西就是 ``cell``。
+    #: 「把 cell 鋪回原圖」（F103 的格線檢視）與「使用者標的那一格就是原點」
+    #: 都靠它；沒有它，畫面上鋪的格線跟疊進去的格子會差一個錨定量。
+    origin: Tuple[int, int] = (0, 0)
     #: 這一軸上真的量到週期了嗎。**一維的 layout 是常態**（垂直條紋只有 X 有
     #: 週期），那時候另一軸不做定位 —— 它上面沒有東西可以定位。
     periodic_x: bool = True
@@ -216,6 +222,49 @@ def anchor_cell(cell: np.ndarray,
 # --------------------------------------------------------------------------- #
 # 建模板
 # --------------------------------------------------------------------------- #
+def _measure_period(gray: np.ndarray) -> Tuple[int, int, float, float, List[str]]:
+    """兩種量法對一次 → ``(px, py, conf_x, conf_y, notes)``（0 ＝ 那一軸量不到）。
+
+    投影法（`period.estimate_period`）是主：四個月的實測與諧波修正都在它身上。
+    二維自相關（`period2d.estimate_period_2d`，F104）只在兩種情況接手，
+    **兩個同意的時候什麼都不改**（黃金值不動）：
+
+    * 投影法那一軸量不到（信心不夠）、二維量得到 —— 交錯 layout 的 X 軸就是這樣
+      （相鄰列相位差半格，投影互相抵消）；
+    * 二維量到的是投影法的**整數倍**（±1 px）—— 投影看到的是半格的重複，
+      真正的矩形單元要兩列才重複一次。
+
+    每一次接手都在 notes 講一句：換了量法是使用者該知道的事。
+    """
+    est = algo_period.estimate_period(gray)
+    two = algo_period2d.estimate_period_2d(gray)
+    notes: List[str] = list(est.warnings or [])
+    out = []
+    for axis, p1, c1, p2, c2 in (("across", est.px, est.confidence_x,
+                                  two.px, two.confidence_x),
+                                 ("down", est.py, est.confidence_y,
+                                  two.py, two.confidence_y)):
+        p1i, c1f = int(p1 or 0), float(c1 or 0.0)
+        p2i, c2f = int(p2 or 0), float(c2 or 0.0)
+        ok1 = p1i >= 2 and c1f >= MIN_PERIOD_CONFIDENCE
+        ok2 = p2i >= 2 and c2f >= MIN_PERIOD_CONFIDENCE
+        if ok2 and not ok1:
+            out.append((p2i, c2f))
+            notes.append("period %s measured by 2-D autocorrelation (%d px); "
+                         "the projection found none - rows are probably "
+                         "staggered" % (axis, p2i))
+        elif ok2 and ok1 and p2i > p1i + 1 and \
+                min(abs(p2i - k * p1i) for k in range(2, 9)) <= 1:
+            out.append((p2i, c2f))
+            notes.append("the projection saw a repeat every %d px %s, but the "
+                         "layout only repeats every %d px (staggered rows); "
+                         "using %d" % (p1i, axis, p2i, p2i))
+        else:
+            out.append((p1i, c1f))
+    (px, cx), (py, cy) = out
+    return px, py, cx, cy, notes
+
+
 def build_golden_cell(image: Any, px: Optional[int] = None,
                       py: Optional[int] = None, method: str = "mean",
                       anchor: bool = True,
@@ -223,7 +272,8 @@ def build_golden_cell(image: Any, px: Optional[int] = None,
                       ) -> GoldenCell:
     """從大圖疊出一個 Golden Cell。
 
-    ``px`` / ``py`` 留空就從影像自己量（``period.estimate_period``）。
+    ``px`` / ``py`` 留空就從影像自己量（``period.estimate_period`` 投影法，再拿
+    ``period2d.estimate_period_2d`` 二維自相關對一次 —— 見 :func:`_measure_period`）。
     量不到週期時回一個空的 cell 並在 ``warnings`` 說明 —— 不猜。
 
     ``progress``（F86，2026-09-07）
@@ -254,12 +304,12 @@ def build_golden_cell(image: Any, px: Optional[int] = None,
     if not (given_x and given_y):
         if not _say("Measuring the period\u2026", 0, 1):
             return cancelled
-        est = algo_period.estimate_period(gray)
+        mpx, mpy, mcx, mcy, notes = _measure_period(gray)
         if not given_x:
-            px, conf_x = int(est.px or 0), float(est.confidence_x)
+            px, conf_x = mpx, mcx
         if not given_y:
-            py, conf_y = int(est.py or 0), float(est.confidence_y)
-        warnings.extend(list(est.warnings or []))
+            py, conf_y = mpy, mcy
+        warnings.extend(notes)
 
     px, py = int(px or 0), int(py or 0)
     h, w = gray.shape[:2]
@@ -321,12 +371,15 @@ def build_golden_cell(image: Any, px: Optional[int] = None,
     # origin —— 也就是真正被疊起來的那一組格子；`anchor_cell` 之後的捲動是
     # 整張一起移，不影響格子之間的一致性。
     agreement = algo_golden.stack_agreement(gray, px, py, origin=origin)
+    # 錨定把 cell 往左（上）捲了 roll，等於格線原點往右（下）移 roll。
+    eff = ((int(origin[0]) + int(roll[0])) % max(1, int(px or 0)),
+           (int(origin[1]) + int(roll[1])) % max(1, int(py or 0)))
     return GoldenCell(cell=cell, px=px, py=py, ghosting=float(score),
                       lap_var=float(lap_var), agreement=float(agreement),
                       confidence_x=conf_x,
                       confidence_y=conf_y, anchor=roll, n_cells=int(n_cells),
                       periodic_x=periodic_x, periodic_y=periodic_y,
-                      warnings=warnings)
+                      warnings=warnings, origin=eff)
 
 
 # --------------------------------------------------------------------------- #

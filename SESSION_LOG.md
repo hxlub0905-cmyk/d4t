@@ -22,6 +22,103 @@
 
 ---
 
+## F104：二維自相關找峰；模板對話框收回一列；Mark one cell 刪掉（2026-09-17）
+
+使用者看過 F102／F103 之後定的三件事（[`docs/history/plans/F104-period2d-and-fewer-buttons.md`](docs/history/plans/F104-period2d-and-fewer-buttons.md)）：
+
+* **二維自相關**（`core/algo/period2d.py`）：交錯 layout 上投影法 X 軸互相抵消（實測
+  回 None、Y 回一列的高度），二維自相關沿軸找離原點最近的峰 → 真正的矩形單元 32 × 48。
+  分工在 `template._measure_period`：投影法是主，同意就不改（黃金值不動），只在
+  「投影量不到而二維量得到」或「二維是投影的整數倍」時接手並講一句。
+* **按鈕收回一列**：crop 併進載入（每次載入都先問「哪一塊」，整張是一顆鈕）；
+  「Mark one cell」**刪掉**（使用者：不實用）—— `seed.py`、`origin=` 參數、seed 模式、
+  三十幾條測試一起拿掉，`GoldenCell.origin` 留著給格線用。
+* **Grid 開關**取代「Check on the image…」：開＝格線視窗出現、跟著 re-stack 更新；
+  關＝收起來；直接關視窗開關跟著彈回。
+
+---
+
+## F102：疊模板之前先框一塊；cell 週期怎麼算、算錯怎麼知道（2026-09-17）
+
+使用者：「幫我加入 crop 功能，載入 template 的大圖，可以選擇要不要 crop 想要的部分
+之後再進行計算。目前計算 cell 方式你覺得還可以添加什麼方法，假設算不對我該怎麼知道？」
+
+**Crop 做了**（[`docs/history/plans/F102-crop-before-stacking.md`](docs/history/plans/F102-crop-before-stacking.md)）：
+新模組 `ui/crop_dialog.py`（`CropView` 拉框、`CropDialog` 三選一），`TemplateDialog`
+多「Crop first」勾選（挑圖／用畫面上那一張之前先問）與「Crop…」鈕（事後換一塊，
+重新量週期）。裁的是原料不是結果：框不進 recipe，摘要講「cropped to W × H px at
+(x, y)」；`restack` 走整張＋框。從 recipe 讀回的模板沒有原料，「Crop…」講出來。
+`tests/test_ui_crop_dialog.py` 十一條。
+
+**F103 —— 使用者說「好 試試看」，當天做了清單裡的第 1 項與「鋪回原圖」**
+（[`docs/history/plans/F103-seed-cell-and-lattice-check.md`](docs/history/plans/F103-seed-cell-and-lattice-check.md)）：
+`algo/seed.period_from_seed`（框一格 → NCC 找複本 → 框那一列／那一行剖面的峰間距
+＝週期、框的左上角＝原點；平的軸靠「整條剖面都很像」擋掉）、`GoldenCell.origin`
+（含錨定捲動的格線原點；`build_golden_cell(origin=)` 不搜相位不錨定）、
+`ui/lattice_dialog.py`（`ImageView` 把引擎真的用的格子鋪回原圖）、`TemplateDialog`
+的「Mark one cell…」與「Check on the image…」。兩個第一版的坑都有測試：平的軸量到
+假週期、沒有週期的軸原點不是 0 就疊出全黑的 cell。
+
+**使用者拿去用回來的三件**（同一天）：① 「使用後跳出 error」——`CropView` 有一個叫
+`rect()` 的方法蓋掉了 `QWidget.rect()`，還沒拉框時 `paintEvent` 的 `fillRect(None)`
+炸在使用者面前；headless 測試沒抓到是因為視窗從沒真的畫過。改名 `box()`／`set_box()`，
+`tests/test_ui_crop_dialog.py` 現在 `grab()` 一次逼三個視窗真的畫。② 「上方按鈕變得
+有點多」——那一列有十一個東西，拆成兩列：圖從哪來（還沒有圖就有意義）／cell 怎麼定
+（每一顆都要先有圖），第二列排不下橫向捲。③ 「我該怎麼使用」寫在回覆裡。
+
+**cell 計算的替代方法與「算錯怎麼知道」** 寫在回覆裡（摘要）：現在是投影 FFT ＋
+自相關（`algo/period`），弱點是投影會把二維結構壓掉、對斜的／非曼哈頓 layout 與
+「兩種 cell 混在一張圖」無解。可加的：二維自相關直接找峰（不靠投影）、使用者拉
+一格當種子再用 NCC 找相鄰複本量週期（跟 crop 同一種手勢）、GDS 給的 pitch 直接
+填（`build_golden_cell` 本來就吃明講的 px/py）。算錯的訊號已經有四個（agreement、
+sharpness、k× 提示、諧波修正的 warning），缺的是「把 cell 鋪回去疊在原圖上看」與
+「換一塊 crop 重算、兩個答案要一樣」—— 後者現在用 Crop… 就做得到。
+
+---
+
+## `.I01`：副檔名不同的 patch TIFF；Load 卡要不要合回一張（2026-09-17）
+
+使用者：「我想將 load (input) 卡片整合，你覺得呢？同時我要能支援新的圖檔叫做
+I01，一樣是跟 klarf 一一配對的」。兩件事，一件做了、一件給了建議等定調。
+
+**`.I01` 做了（F101，[`docs/history/plans/F101-i01-companion.md`](docs/history/plans/F101-i01-companion.md)）**
+—— **不是新 kind、不是新卡**：一份 KLARF 配一個檔、裡面是多頁 TIFF，資料形狀跟
+`.tif` 逐項相同，所以副檔名只住在「去哪找檔」那一層：
+
+* `klarf_core.PATCH_IMAGE_EXTS = ('.tif', '.tiff', '.I01')`，`tiff_path()` 的同名候選
+  多找它（大小寫都試，Linux 分大小寫）；KLARF 的 `TiffFileName` 直接指到 `.I01`
+  本來就吃得下。找到之後 kind、卡片、快取簽章都看不到副檔名。
+* `dataset._TIFF_EXTS` 多 `.i01`（`Open image…`／`Open folder…` 的「這是多頁檔，去
+  開 stack」提醒一視同仁）；Studio 的 stack／image 兩個對話框過濾字串加 `*.I01`；
+  CLI `--tiff` 的 help 講明兩種副檔名。
+* **真檔當天就看到了**（使用者的另一個 agent 解析 `.001`＋`.I01`，只貼結構不貼
+  識別碼）：record 語法 1.8、`ImageFileName` 住在 `WaferRecord`、`.I01` 是 MM 多頁
+  TIFF 64×64 8-bit、列尾 `Images 2 {id "30", id "31"}` 的 **id 全檔連號、page = id − 1**
+  —— 正是 `defect_image_map` 既有的 imagelist 模式，對映零改動（`FAB-VALIDATION.md`
+  #8 當天開、當天結）。使用者接著確認 **`"30"` = test、`"31"` = ref，「以後 pair 的都預設
+  第一張為 test」** —— 跟 `Load images` 預設的 `1:test, 2:ref` 一致，零改動。順手補兩件：`defect_image_filename` 不再把 `"30"` 當檔名；
+  `.I01` 不在旁邊時 `load_dataset` 講出 KLARF 點名的那個檔名。
+* **假設錯的那一天**（`.I01` 內容不是 TIFF）：`load_dataset` 先
+  `tiff_index.check_header`（8 個位元組），不是就 warnings 講一次「哪個檔、為什麼、
+  跑哪支探測腳本」，defect 進來、沒有影像。以前 `bit_depths` 對非 TIFF 安靜回空
+  list（刻意的），後果是載入看起來正常、每一顆各自倒在 `Not a TIFF` 上。
+* `tools/make_sample.py --image-ext .I01`：家用機唯一能練這條路的資料；預設產出
+  逐位元組不變。兩支 fab_probe 跟著改（`sibling_tiff` 鏡射候選表、`probe_tiff`
+  的用法多一行）。守門 `tests/test_i01_companion.py`（十三條：同名找得到、KLARF
+  指名找得到、像素跟 `.tif` 那份一模一樣、內容不是 TIFF 時那句話、三處對得上、
+  兩支探測腳本讀得動、真檔形狀的三條）。
+
+**Load 卡合併：建議不併（等使用者定調）。** 理由寫在回覆裡，摘要：拆是使用者
+2026-08-17 自己定的（「畫布跟實際對不起來」），而拆完之後兩張卡都只看使用者看得到
+的值（`channel_map`／`out`）—— 合回一張的話單張資料要靠 `1:single` 這種對照表
+才不說謊，等於把「選哪張卡」換成「填對那張表」，沒有比較簡單；代價是一道遷移
+（`load_single` → `load_patch`）、兩份出貨 recipe、三十幾支測試、起手卡與 lint
+的 kind 分支、黃金值。**`.I01` 不需要它**：格式住 ingest，卡片只看「一顆幾張」。
+如果痛點是「不知道該選哪張」，便宜的做法是卡片庫依載入的資料只亮那一張
+（`scope` 的機制），不是合併。
+
+---
+
 ## 體檢與十四件待辦（2026-09-09 第五輪）
 
 使用者：「給這個專案一些建議（各方面）」→「把它整理成待處理事項，列出解決方法」
