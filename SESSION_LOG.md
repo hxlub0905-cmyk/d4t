@@ -22,6 +22,28 @@
 
 ---
 
+## F102：疊模板之前先框一塊；cell 週期怎麼算、算錯怎麼知道（2026-09-17）
+
+使用者：「幫我加入 crop 功能，載入 template 的大圖，可以選擇要不要 crop 想要的部分
+之後再進行計算。目前計算 cell 方式你覺得還可以添加什麼方法，假設算不對我該怎麼知道？」
+
+**Crop 做了**（[`docs/history/plans/F102-crop-before-stacking.md`](docs/history/plans/F102-crop-before-stacking.md)）：
+新模組 `ui/crop_dialog.py`（`CropView` 拉框、`CropDialog` 三選一），`TemplateDialog`
+多「Crop first」勾選（挑圖／用畫面上那一張之前先問）與「Crop…」鈕（事後換一塊，
+重新量週期）。裁的是原料不是結果：框不進 recipe，摘要講「cropped to W × H px at
+(x, y)」；`restack` 走整張＋框。從 recipe 讀回的模板沒有原料，「Crop…」講出來。
+`tests/test_ui_crop_dialog.py` 十一條。
+
+**cell 計算的替代方法與「算錯怎麼知道」** 寫在回覆裡（摘要）：現在是投影 FFT ＋
+自相關（`algo/period`），弱點是投影會把二維結構壓掉、對斜的／非曼哈頓 layout 與
+「兩種 cell 混在一張圖」無解。可加的：二維自相關直接找峰（不靠投影）、使用者拉
+一格當種子再用 NCC 找相鄰複本量週期（跟 crop 同一種手勢）、GDS 給的 pitch 直接
+填（`build_golden_cell` 本來就吃明講的 px/py）。算錯的訊號已經有四個（agreement、
+sharpness、k× 提示、諧波修正的 warning），缺的是「把 cell 鋪回去疊在原圖上看」與
+「換一塊 crop 重算、兩個答案要一樣」—— 後者現在用 Crop… 就做得到。
+
+---
+
 ## `.I01`：副檔名不同的 patch TIFF；Load 卡要不要合回一張（2026-09-17）
 
 使用者：「我想將 load (input) 卡片整合，你覺得呢？同時我要能支援新的圖檔叫做

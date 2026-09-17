@@ -90,6 +90,7 @@ from d4t.core.pipeline.cellrois import (
 )
 
 from . import fit_screen
+from .crop_dialog import CropDialog, crop_array, describe_crop
 from .splitters import HairlineSplitter
 from .cell_canvas import (
     TOOL_ARRAY, TOOL_CLICK, TOOL_CURSOR, TOOL_DRAG, TOOL_PAINT, CellCanvas,
@@ -151,6 +152,11 @@ class TemplateDialog(QDialog):
         self._syncing = False
         self._from_recipe = False
         self._source: Optional[np.ndarray] = None
+        #: 裁切之前的整張圖與那個框（F102）。``_source`` 是**疊進去的那一塊**
+        #: （re-stack 用它），這兩個是原料 —— 「Crop…」要重新拉框時得回到整張。
+        self._full: Optional[np.ndarray] = None
+        self._full_name = ""
+        self._crop: Optional[Tuple[int, int, int, int]] = None
         #: 「畫面上那一張」（Studio 給的）—— 沒有的時候那顆鈕不出現。
         self._screen_image: Optional[np.ndarray] = None
         self._screen_name = ""
@@ -225,6 +231,25 @@ class TemplateDialog(QDialog):
         self.btn_pick.setObjectName("primary")
         self.btn_pick.clicked.connect(self._on_pick)
         row.addWidget(self.btn_pick)
+
+        # F102：**疊之前先框一塊**。勾著的話，挑圖／用畫面上那一張之後先開
+        # 裁切視窗；沒勾就跟以前一樣整張疊。「Crop…」是事後再框（或換一塊）——
+        # 兩個都要有：第一次載一張 7680² 的圖不該先花 17 秒疊整張才能裁。
+        self.chk_crop = QCheckBox("Crop first", box)
+        self.chk_crop.setToolTip(
+            "Before stacking, draw a box around the part of the image to "
+            "measure the cell from - leave out the defect, scribe lines and "
+            "the scale bar. Unticked: the whole image is used.")
+        row.addWidget(self.chk_crop)
+        self.btn_crop = QPushButton("Crop…", box)
+        self.btn_crop.setProperty("variant", "secondary")
+        self.btn_crop.setToolTip(
+            "Draw (or change) the box the cell is measured from, then "
+            "re-stack. The period is measured again on that box; regions "
+            "keep their fractions of a cell - check them afterwards.")
+        self.btn_crop.clicked.connect(self._on_crop)
+        self.btn_crop.setEnabled(False)
+        row.addWidget(self.btn_crop)
 
         # cell 多大由使用者決定：量出來的週期是**預設值不是結論**
         for label, tip in (("Cell W", "One cell is this wide, in image pixels. "
@@ -301,7 +326,9 @@ class TemplateDialog(QDialog):
         gc = self.cell
         px = self.spin_cell_w.value() if (gc is None or gc.periodic_x) else None
         py = self.spin_cell_h.value() if (gc is None or gc.periodic_y) else None
-        return self.load_image(self._source, self._source_path, px=px, py=py)
+        full = self._full if self._full is not None else self._source
+        return self.load_image(full, self._full_name or self._source_path,
+                               px=px, py=py, crop=self._crop)
 
     def _build_side_panel(self) -> QWidget:
         panel = QWidget(self)
@@ -680,19 +707,77 @@ class TemplateDialog(QDialog):
         img = getattr(self, "_screen_image", None)
         if img is None:
             return False
-        return self.load_image(img, self._screen_name or "(image on screen)")
+        return self.take_image(img, self._screen_name or "(image on screen)")
+
+    # ---- 裁切（F102）-----------------------------------------------------------
+    def take_image(self, image: Any, name: str = "") -> bool:
+        """一張新的大圖進來：勾了「Crop first」就先框一塊，再疊。
+
+        兩個入口（挑檔案、畫面上那一張）都走這裡 —— 裁不裁只問一次、問在同一個
+        地方。取消裁切視窗＝**什麼都不動**（同 `_build_with_progress` 的取消）。
+        """
+        arr = np.asarray(image)
+        if arr.size == 0:
+            self._fail("that image is empty")
+            return False
+        crop = None
+        if self.chk_crop.isChecked():
+            got = self._ask_crop(arr, name, None)
+            if got is False:
+                self._status_cancelled()
+                return False
+            crop = got
+        return self.load_image(arr, name, crop=crop)
+
+    def _ask_crop(self, image: Any, name: str,
+                  initial: Optional[Tuple[int, int, int, int]]) -> Any:
+        """開裁切視窗。回 ``(x, y, w, h)``、``None``（整張）或 ``False``（取消）。
+
+        獨立成一支是為了測試能換掉它（modal 視窗在 headless 下會停住）。
+        """
+        dlg = CropDialog(image, name, initial=initial, parent=self)
+        if dlg.exec() != QDialog.Accepted:
+            return False
+        return dlg.rect()
+
+    def _on_crop(self) -> bool:
+        """事後再框（或換一塊）—— 要有整張原圖才做得到（同 `restack`）。"""
+        if self._full is None:
+            self._say("Pick a full-size image first - cropping needs the "
+                      "original image, and this template was read back from "
+                      "the recipe.")
+            return False
+        got = self._ask_crop(self._full, self._full_name, self._crop)
+        if got is False:
+            return False
+        # 重新量週期（不帶 px/py）：換了一塊，量出來的週期才是那一塊的。
+        return self.load_image(self._full, self._full_name, crop=got)
+
+    def crop(self) -> Optional[Tuple[int, int, int, int]]:
+        """目前疊進去的那一塊（影像像素）；整張就是 ``None``。"""
+        return self._crop
 
     def load_image(self, image: Any, name: str = "",
-                   px: Optional[int] = None, py: Optional[int] = None) -> bool:
+                   px: Optional[int] = None, py: Optional[int] = None,
+                   crop: Optional[Tuple[int, int, int, int]] = None) -> bool:
         """吃一張大圖，量週期、疊模板、把證據寫上畫面。
 
         ``px``/``py`` 留空 = 從影像自己量（第一次都是這樣）；填了就照使用者說的
         疊 —— 「有時候會需要 2× 大 cell」。明講的尺寸 ``build_golden_cell`` 一律
         相信，不做信心檢查（那是使用者說的，不是猜的）。
+
+        ``crop``（F102）：``(x, y, w, h)`` 影像像素 —— ``image`` 是**整張**，
+        只有這一塊會拿去量週期、疊 cell。``None`` ＝ 整張，跟以前逐位元組相同。
         """
-        arr = np.asarray(image)
-        if arr.size == 0:
+        full = np.asarray(image)
+        if full.size == 0:
             self._fail("that image is empty")
+            return False
+        arr = crop_array(full, crop)
+        if crop is not None and arr.shape[:2] == full.shape[:2]:
+            crop = None                      # 框蓋住整張＝沒裁
+        if arr.size == 0:
+            self._fail("the crop box holds no pixels")
             return False
 
         gc = self._build_with_progress(arr, px, py)
@@ -704,7 +789,14 @@ class TemplateDialog(QDialog):
         self._from_recipe = False
         self._source = arr
         self._source_path = str(name or "")
-        self.path_label.setText(self._source_path or "(image)")
+        self._full = full
+        self._full_name = self._source_path
+        self._crop = crop
+        self.btn_crop.setEnabled(True)
+        shown = self._source_path or "(image)"
+        if crop is not None:
+            shown += " · " + describe_crop(crop)
+        self.path_label.setText(shown)
 
         if gc.cell.size == 0:
             self.canvas.set_cell(None)
@@ -820,6 +912,8 @@ class TemplateDialog(QDialog):
         self._from_recipe = True
         self._source = None
         self._source_path = ""
+        self._full, self._full_name, self._crop = None, "", None
+        self.btn_crop.setEnabled(False)
         self.path_label.setText("(the template stored in this recipe)")
         self.canvas.set_cell(cell)
         self._set_ready(True)
@@ -860,7 +954,11 @@ class TemplateDialog(QDialog):
                  "this batch looks different"] + self._self_repeat_note())
         bits = ["cell %d x %d px" % (gc.px, gc.py),
                 "repeats %s" % axis,
-                "stacked from %d cells" % gc.n_cells,
+                "stacked from %d cells" % gc.n_cells]
+        if self._crop is not None:
+            # 從哪一塊疊的是判斷材料：換一批資料重疊時要知道上次看的是哪裡。
+            bits.append(describe_crop(self._crop))
+        bits += [
                 # 兩個數字問的是兩件事，所以兩個都列（F40）。以前只有前者，
                 # 而那一句警示掛在它上面 —— 見底下 `BLURRED_BELOW`。
                 "cells agree %.0f%%" % (100.0 * gc.agreement),
