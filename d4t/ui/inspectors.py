@@ -48,6 +48,7 @@ from ..core.algo import glv as algo_glv
 from ..core.steps._util import CLIP_FRAC, PAIR_FEATURES
 from ..core.steps.cd import _BLOB_REASONS as _CD_BLOB_REASONS
 from ..core.steps.cd import reasons_in_words as _cd_reasons_in_words
+from ..core.steps.align import shift_feature_names as _align_shift_names
 from ..core.steps.denoise import HOT_FRAC, REMOVED_OVER_NOISE
 from . import region_words
 from .numbers import format_feature_value, format_feature_value_short
@@ -236,6 +237,11 @@ class AlignInspector(Inspector):
 
     資料來自 ``trial_results`` 的 ``align_dx`` / ``align_dy``（引擎算的），
     方框來自這張卡的 ``search_radius`` 參數。UI 不自己算對位。
+
+    ⚠ **三條以上的流時特徵名帶著流名前綴**（F109，DOE 一次餵 N 個 condition
+    進來）。要畫哪幾組由**卡片自己**說（``shift_feature_names``），不是 UI 拼
+    出來的 —— 拼的那一份會在下一次改前綴規則時安靜地畫出一張空圖，而空圖上
+    寫的是「跑一次試跑就看得到」，那句話是假的。
     """
 
     title = "Alignment"
@@ -251,10 +257,13 @@ class AlignInspector(Inspector):
             return 0.0
 
     def points(self) -> List[Tuple[float, float]]:
-        xs = self.feature_values("align_dx")
-        ys = self.feature_values("align_dy")
-        n = min(len(xs), len(ys))
-        return list(zip(xs[:n], ys[:n]))
+        out: List[Tuple[float, float]] = []
+        for dx_name, dy_name in _align_shift_names(dict(self.params)):
+            xs = self.feature_values(dx_name)
+            ys = self.feature_values(dy_name)
+            n = min(len(xs), len(ys))
+            out.extend(zip(xs[:n], ys[:n]))
+        return out
 
     def at_the_limit(self) -> int:
         """有幾顆的位移貼在搜尋框的邊上（= 很可能根本沒對準）。"""

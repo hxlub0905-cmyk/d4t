@@ -1,164 +1,164 @@
 {
- "recipe_id": "ebi_die_to_die",
- "version": 3,
- "app_version": "0.1.0.dev0",
- "author": "d4t",
- "description": "EBI patch lot, two images per defect: the test patch and a reference patch of the same place on another die. Bring the two to the same brightness first - the reference is stretched to the test's own range so the pair stays comparable - then subtract them, quiet the difference image with a small median, and let GLV read the brightest spot left in it. A real defect is the one thing the two dies do not share, so it is what survives the subtraction; noise and slight pattern drift do not reach the same height. The decision asks one question: is that peak higher than the quiet level. Nothing has to be set up by hand; the report folder is the one thing you will want to change. This is also the recipe behind 'Try with sample data' in Studio.",
- "routes": {
-  "ebi_patch": [
-   "load",
-   "norm_ref",
-   "norm",
-   "sub",
-   "dn",
-   "glv",
-   "report"
-  ]
- },
- "nodes": {
-  "load": {
-   "step": "load_patch",
-   "params": {},
-   "enabled": true
+  "recipe_id": "ebi_die_to_die",
+  "version": 4,
+  "app_version": "0.1.0.dev0",
+  "author": "d4t",
+  "description": "EBI patch lot, two images per defect: the test patch and a reference patch of the same place on another die. Bring the two to the same brightness first - the reference is stretched to the test's own range so the pair stays comparable - then subtract them, quiet the difference image with a small median, and let GLV read the brightest spot left in it. A real defect is the one thing the two dies do not share, so it is what survives the subtraction; noise and slight pattern drift do not reach the same height. The decision asks one question: is that peak higher than the quiet level. Nothing has to be set up by hand; the report folder is the one thing you will want to change. This is also the recipe behind 'Try with sample data' in Studio.",
+  "routes": {
+    "ebi_patch": [
+      "load",
+      "norm_ref",
+      "norm",
+      "sub",
+      "dn",
+      "glv",
+      "report"
+    ]
   },
-  "norm_ref": {
-   "step": "normalize",
-   "params": {
-    "streams": "ref",
-    "method": "percentile",
-    "range_from": "test"
-   },
-   "enabled": true
-  },
-  "norm": {
-   "step": "normalize",
-   "params": {
-    "streams": "test",
-    "method": "percentile"
-   },
-   "enabled": true
-  },
-  "sub": {
-   "step": "subtract",
-   "params": {
-    "a": "test",
-    "b": "ref",
-    "op": "subtract",
-    "absolute": true,
-    "out": "diff"
-   },
-   "enabled": true
-  },
-  "dn": {
-   "step": "denoise",
-   "params": {
-    "streams": "diff",
-    "method": "median",
-    "ksize": 3
-   },
-   "enabled": true
-  },
-  "glv": {
-   "step": "glv_stats",
-   "params": {
-    "source": "diff",
-    "metrics": "glv_max,glv_mean,glv_std",
-    "stat": "glv_mean"
-   },
-   "enabled": true
-  },
-  "report": {
-   "step": "output_report",
-   "params": {
-    "folder": "ebi_report",
-    "contents": "report,table,pictures,recipe",
-    "rank_by": "score",
-    "montage": true,
-    "limit": 0,
-    "jpeg_quality": 80
-   },
-   "enabled": true
-  }
- },
- "edges": [
-  [
-   "load",
-   "test",
-   "norm",
-   "streams"
-  ],
-  [
-   "load",
-   "ref",
-   "norm_ref",
-   "streams"
-  ],
-  [
-   "load",
-   "test",
-   "norm_ref",
-   "range_from"
-  ],
-  [
-   "norm",
-   "test",
-   "sub",
-   "a"
-  ],
-  [
-   "norm_ref",
-   "ref",
-   "sub",
-   "b"
-  ],
-  [
-   "sub",
-   "diff",
-   "dn",
-   "streams"
-  ],
-  [
-   "dn",
-   "diff",
-   "glv",
-   "source"
-  ]
- ],
- "score": {
-  "expr": "",
-  "threshold": 0.0,
-  "bins": {}
- },
- "decide": {
-  "let": [
-   {
-    "name": "peak",
-    "expr": "glv_max",
-    "fill": "-1"
-   },
-   {
-    "name": "quiet",
-    "expr": "32"
-   }
-  ],
-  "tree": {
-   "when": "peak < 0",
-   "yes": {
-    "bin": 9,
-    "label": "nothing to measure"
-   },
-   "no": {
-    "when": "peak < quiet",
-    "yes": {
-     "bin": 0,
-     "label": "nothing stands out"
+  "nodes": {
+    "load": {
+      "step": "load_patch",
+      "params": {},
+      "enabled": true
     },
-    "no": {
-     "bin": 1,
-     "label": "a spot stands out"
+    "norm_ref": {
+      "step": "normalize",
+      "params": {
+        "streams": "ref",
+        "method": "percentile",
+        "range_from": "test"
+      },
+      "enabled": true
+    },
+    "norm": {
+      "step": "normalize",
+      "params": {
+        "streams": "test",
+        "method": "percentile"
+      },
+      "enabled": true
+    },
+    "sub": {
+      "step": "subtract",
+      "params": {
+        "a": "test",
+        "b": "ref",
+        "op": "subtract",
+        "absolute": true,
+        "out": "diff"
+      },
+      "enabled": true
+    },
+    "dn": {
+      "step": "denoise",
+      "params": {
+        "streams": "diff",
+        "method": "median",
+        "ksize": 3
+      },
+      "enabled": true
+    },
+    "glv": {
+      "step": "glv_stats",
+      "params": {
+        "source": "diff",
+        "metrics": "glv_max,glv_mean,glv_std",
+        "stat": "glv_mean"
+      },
+      "enabled": true
+    },
+    "report": {
+      "step": "output_report",
+      "params": {
+        "folder": "ebi_report",
+        "contents": "report,table,pictures,recipe",
+        "rank_by": "score",
+        "montage": true,
+        "limit": 0,
+        "jpeg_quality": 80
+      },
+      "enabled": true
     }
-   }
   },
-  "score": "peak"
- }
+  "edges": [
+    [
+      "load",
+      "test",
+      "norm",
+      "streams"
+    ],
+    [
+      "load",
+      "ref",
+      "norm_ref",
+      "streams"
+    ],
+    [
+      "load",
+      "test",
+      "norm_ref",
+      "range_from"
+    ],
+    [
+      "norm",
+      "test",
+      "sub",
+      "a"
+    ],
+    [
+      "norm_ref",
+      "ref",
+      "sub",
+      "b"
+    ],
+    [
+      "sub",
+      "diff",
+      "dn",
+      "streams"
+    ],
+    [
+      "dn",
+      "diff",
+      "glv",
+      "source"
+    ]
+  ],
+  "score": {
+    "expr": "",
+    "threshold": 0.0,
+    "bins": {}
+  },
+  "decide": {
+    "let": [
+      {
+        "name": "peak",
+        "expr": "glv_max",
+        "fill": "-1"
+      },
+      {
+        "name": "quiet",
+        "expr": "32"
+      }
+    ],
+    "tree": {
+      "when": "peak < 0",
+      "yes": {
+        "bin": 9,
+        "label": "nothing to measure"
+      },
+      "no": {
+        "when": "peak < quiet",
+        "yes": {
+          "bin": 0,
+          "label": "nothing stands out"
+        },
+        "no": {
+          "bin": 1,
+          "label": "a spot stands out"
+        }
+      }
+    },
+    "score": "peak"
+  }
 }

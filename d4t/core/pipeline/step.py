@@ -26,7 +26,7 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import (Any, ClassVar, Dict, List, Optional, Sequence, Tuple,
-                    Type)
+                    Type, Union)
 
 from .context import Context
 from .cellrois import CellRoiError, format_cell_rois, parse_cell_rois
@@ -538,7 +538,12 @@ class ParamSpec:
     #:
     #: 判準：這個數字是不是一個**鄰域的邊長**（濾波核、結構元素、搜尋窗）。
     #: 是就填，其他長度不要填。
-    extent: bool = False
+    #:
+    #: ⚠ 值是**半徑**的時候填 ``"radius"``，不是 ``True``（F109）。兩者都是
+    #: truthy，所以填錯不會爆 —— 畫面上那個框會**小一半**，而「一個小一半的
+    #: 搜尋窗」看起來完全正常。那正是「畫面說謊」最難抓的那一種。
+    #: 換算走 :meth:`extent_px`，UI 不自己乘。
+    extent: Union[bool, str] = False
     #: ``channel_map`` 的列**代表什麼**：``"images"``（預設，一列一張圖）或
     #: ``"labels"``（一列一個 GDS layer id）。F11 Region-3。
     #:
@@ -563,6 +568,16 @@ class ParamSpec:
     def visible_for(self, params: Optional[Dict[str, Any]]) -> bool:
         """在這組參數下，這一列該不該顯示（沒有 ``show_when`` 就永遠顯示）。"""
         return param_visible(self.show_when, params)
+
+    def extent_px(self, value: Any) -> float:
+        """這個值畫在影像上是**幾像素的邊長**（``extent`` 是半徑時 → ``2r+1``）。
+
+        換算住在這裡而不是在 UI：UI 只有一個地方畫那個框，但「半徑還是邊長」
+        是**參數自己的性質** —— 放在 UI 就變成一張要跟著 `ParamSpec` 走的對照表，
+        而那種表會漂（這個 repo 記過三次）。
+        """
+        n = float(value)
+        return 2.0 * n + 1.0 if self.extent == "radius" else n
 
     def __post_init__(self) -> None:
         if self.type not in PARAM_TYPES:

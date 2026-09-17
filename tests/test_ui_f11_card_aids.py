@@ -73,6 +73,29 @@ def test_the_flag_is_declared_not_guessed_from_the_unit():
     assert got["method"]["extent"] is False
 
 
+def test_a_radius_is_declared_as_a_radius_and_drawn_at_twice_the_size():
+    """**半徑要填 `"radius"`，不是 `True`**（F109）。
+
+    兩者都是 truthy，所以填錯不會爆 —— 畫面上那個框會**小一半**，而「一個小
+    一半的搜尋窗」看起來完全正常。那是「影像說謊」最難抓的一種：使用者照著
+    那個框把 `search_radius` 調到剛好蓋住他想找的位移，實際搜尋範圍卻是兩倍，
+    於是他永遠不知道自己其實可以調小一半。
+
+    換算住在 `ParamSpec.extent_px` 而不是 UI：「半徑還是邊長」是參數自己的
+    性質，放在 UI 就變成一張要跟著 `ParamSpec` 走的對照表，而那種表會漂。
+    """
+    from d4t.core.pipeline import get_step
+    import d4t.core.steps  # noqa: F401
+
+    spec = [s for s in get_step("align").params if s.name == "search_radius"][0]
+    assert spec.extent == "radius", (
+        "`search_radius` 是半徑，填 True 的話畫面上那個框只有真實搜尋範圍的一半")
+    assert spec.extent_px(8) == 17.0, "半徑 8 = 邊長 17 px（2r+1）"
+    # 邊長那一種不准被順手換算掉
+    size = [s for s in get_step("flatten").params if s.name == "size"][0]
+    assert size.extent_px(21) == 21.0
+
+
 def test_selecting_a_card_with_a_kernel_draws_it_on_the_image(window, tmp_path):
     from make_sample import generate
 

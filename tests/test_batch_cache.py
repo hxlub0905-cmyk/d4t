@@ -527,10 +527,20 @@ def test_feature_ownership_survives_a_cache_hit(ds, tmp_path):
         assert cold.ok and warm.ok, (cold.error, warm.error)
         # 遮蔽有效：align_dx 是後面那張卡的值
         assert cold.features["align_dx"] == 99.0
-        # 被蓋掉的那份救得回來，而且**熱跑也要有**
-        # 前綴是 align 卡寫出來的那條流（``ref_aligned``），不是節點 id
-        # （F17-②）。節點 id 是 `align`，所以以前這個名字叫 `align_align_dx`。
-        assert "ref_aligned_align_dx" in cold.features, sorted(cold.features)
+        # 被蓋掉的那份救得回來，而且**熱跑也要有**。
+        #
+        # ⚠ **名字 2026-09-17（F109）換回節點 id 了，而那是照規則走的。**
+        # align 以前寫出去**剛好一條流**（`ref_aligned`），所以 F17-② 的規則
+        # 給它流名當前綴。現在它是「N 條流就地對齊」——寫 N 條、讀 N 條，兩邊
+        # 都不是剛好一條，於是照 `feature_prefix` 自己寫著的那條退路退回節點 id。
+        #
+        # 那不是退步。兩條以上的時候**沒有任何一條流名說得出 `align_dx` 是誰的
+        # 位移**：它講的是被移動的那一條，不是基準，而卡片寫出去的兩條都在
+        # `resolve_writes` 裡。節點 id 至少指得到畫布上那張卡。
+        # F17-② 那條規則本身由 `tests/test_feature_owner_prefix.py` 守著
+        # （它不用 align，所以這一輪一個字都沒改）—— 這一支問的是**跨越
+        # checkpoint 的那份帳**，不是前綴長什麼樣。
+        assert "align_align_dx" in cold.features, sorted(cold.features)
         _assert_same_features(cold.features, warm.features)
         assert cold.score == warm.score and cold.bin == warm.bin
     finally:

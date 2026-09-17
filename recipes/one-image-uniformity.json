@@ -1,128 +1,128 @@
 {
- "recipe_id": "one-image-uniformity",
- "version": 3,
- "app_version": "0.1.0.dev0",
- "author": "",
- "description": "One image on its own - is the gray level even across the field? Open it with “Open image…” (no KLARF needed), and this recipe lays a grid of measurement boxes over the pattern, measures every box on its own, and reports how alike they are: CV %, and the tilt from left to right and top to bottom as a slope per 100 pixels. “Write charts” then draws four ready-made charts - a box plot, a histogram, a position profile and a heat map, one point per box, so a gradient across the field reads as a gradient and you can see where it is. There is a fifth slot on that card you can build yourself (pick which two columns go on the axes), left unticked here.\n\n“Write report” beside it puts the same numbers in a spreadsheet (defects.csv) and drops a copy of this recipe in, so the run can be reproduced later - the charts are for looking at, the CSV is for keeping.\n\nIt deliberately hands you numbers, not a verdict: there is no threshold in here that says a field is good or bad, because that number is yours and it is different on every layer. Put your own limit into the decision if you want one - the tree below only separates “nothing was measured” from “measured” so that a picture with no pattern to find cannot be mistaken for a perfectly flat one.",
- "routes": {
-  "folder": [
-   "load",
-   "roi",
-   "glv",
-   "charts",
-   "numbers"
-  ]
- },
- "nodes": {
-  "load": {
-   "step": "load_single",
-   "params": {
-    "out": "single",
-    "nm_per_px": 0.0,
-    "carry": ""
-   },
-   "enabled": true
+  "recipe_id": "one-image-uniformity",
+  "version": 4,
+  "app_version": "0.1.0.dev0",
+  "author": "",
+  "description": "One image on its own - is the gray level even across the field? Open it with “Open image…” (no KLARF needed), and this recipe lays a grid of measurement boxes over the pattern, measures every box on its own, and reports how alike they are: CV %, and the tilt from left to right and top to bottom as a slope per 100 pixels. “Write charts” then draws four ready-made charts - a box plot, a histogram, a position profile and a heat map, one point per box, so a gradient across the field reads as a gradient and you can see where it is. There is a fifth slot on that card you can build yourself (pick which two columns go on the axes), left unticked here.\n\n“Write report” beside it puts the same numbers in a spreadsheet (defects.csv) and drops a copy of this recipe in, so the run can be reproduced later - the charts are for looking at, the CSV is for keeping.\n\nIt deliberately hands you numbers, not a verdict: there is no threshold in here that says a field is good or bad, because that number is yours and it is different on every layer. Put your own limit into the decision if you want one - the tree below only separates “nothing was measured” from “measured” so that a picture with no pattern to find cannot be mistaken for a perfectly flat one.",
+  "routes": {
+    "folder": [
+      "load",
+      "roi",
+      "glv",
+      "charts",
+      "numbers"
+    ]
   },
-  "roi": {
-   "step": "roi_reference",
-   "params": {
-    "method": "stripes in the image",
-    "source": "single",
-    "roi_out": "cells",
-    "directions": "both",
-    "place": "crossing",
-    "inset": 2.0,
-    "pick": "none",
-    "drop_edge": true,
-    "edge_margin": 4.0,
-    "max_boxes": 8192,
-    "output_prefix": "cells"
-   },
-   "enabled": true
+  "nodes": {
+    "load": {
+      "step": "load_single",
+      "params": {
+        "out": "single",
+        "nm_per_px": 0.0,
+        "carry": ""
+      },
+      "enabled": true
+    },
+    "roi": {
+      "step": "roi_reference",
+      "params": {
+        "method": "stripes in the image",
+        "source": "single",
+        "roi_out": "cells",
+        "directions": "both",
+        "place": "crossing",
+        "inset": 2.0,
+        "pick": "none",
+        "drop_edge": true,
+        "edge_margin": 4.0,
+        "max_boxes": 8192,
+        "output_prefix": "cells"
+      },
+      "enabled": true
+    },
+    "glv": {
+      "step": "glv_stats",
+      "params": {
+        "source": "single",
+        "across_boxes": "each box",
+        "metrics": "glv_mean,glv_median",
+        "report": "cv_pct,slope_x,slope_y",
+        "judge": "glv_mean",
+        "direction": "both",
+        "over_k": 3.0,
+        "stat": "glv_mean"
+      },
+      "enabled": true
+    },
+    "charts": {
+      "step": "output_uniformity",
+      "params": {
+        "folder": "uniformity_charts",
+        "charts": "box,histogram,profile,map",
+        "metric": "glv_mean",
+        "axis": "x",
+        "limit": 0,
+        "rank_by": "score",
+        "look": "{\"value_name\":\"Gray level\"}"
+      },
+      "enabled": true
+    },
+    "numbers": {
+      "step": "output_report",
+      "params": {
+        "folder": "uniformity_charts",
+        "contents": "table,recipe",
+        "title": "Uniformity",
+        "include_features": true,
+        "rank_by": "score"
+      },
+      "enabled": true
+    }
   },
-  "glv": {
-   "step": "glv_stats",
-   "params": {
-    "source": "single",
-    "across_boxes": "each box",
-    "metrics": "glv_mean,glv_median",
-    "report": "cv_pct,slope_x,slope_y",
-    "judge": "glv_mean",
-    "direction": "both",
-    "over_k": 3.0,
-    "stat": "glv_mean"
-   },
-   "enabled": true
+  "edges": [
+    [
+      "load",
+      "single",
+      "roi",
+      "source"
+    ],
+    [
+      "roi",
+      "cells",
+      "glv",
+      "roi"
+    ],
+    [
+      "load",
+      "single",
+      "glv",
+      "source"
+    ]
+  ],
+  "score": {
+    "expr": "",
+    "threshold": 0.0,
+    "bins": {}
   },
-  "charts": {
-   "step": "output_uniformity",
-   "params": {
-    "folder": "uniformity_charts",
-    "charts": "box,histogram,profile,map",
-    "metric": "glv_mean",
-    "axis": "x",
-    "limit": 0,
-    "rank_by": "score",
-    "look": "{\"value_name\":\"Gray level\"}"
-   },
-   "enabled": true
-  },
-  "numbers": {
-   "step": "output_report",
-   "params": {
-    "folder": "uniformity_charts",
-    "contents": "table,recipe",
-    "title": "Uniformity",
-    "include_features": true,
-    "rank_by": "score"
-   },
-   "enabled": true
+  "decide": {
+    "let": [
+      {
+        "name": "spread",
+        "expr": "glv_mean_cv_pct",
+        "fill": "-1"
+      }
+    ],
+    "tree": {
+      "when": "spread < 0",
+      "yes": {
+        "bin": 9,
+        "label": "nothing to measure"
+      },
+      "no": {
+        "bin": 0,
+        "label": "measured"
+      }
+    },
+    "score": "spread"
   }
- },
- "edges": [
-  [
-   "load",
-   "single",
-   "roi",
-   "source"
-  ],
-  [
-   "roi",
-   "cells",
-   "glv",
-   "roi"
-  ],
-  [
-   "load",
-   "single",
-   "glv",
-   "source"
-  ]
- ],
- "score": {
-  "expr": "",
-  "threshold": 0.0,
-  "bins": {}
- },
- "decide": {
-  "let": [
-   {
-    "name": "spread",
-    "expr": "glv_mean_cv_pct",
-    "fill": "-1"
-   }
-  ],
-  "tree": {
-   "when": "spread < 0",
-   "yes": {
-    "bin": 9,
-    "label": "nothing to measure"
-   },
-   "no": {
-    "bin": 0,
-    "label": "measured"
-   }
-  },
-  "score": "spread"
- }
 }

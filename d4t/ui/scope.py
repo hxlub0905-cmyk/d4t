@@ -66,7 +66,7 @@ SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder")
 #:   「Reference from pattern」（使用者：「那可能要拿回來 不過要改名字
 #:   不然會誤會」），當晚收起來，**2026-08-20（F16）刪掉**（使用者：
 #:   「完全沒用，請直接拿掉」）。同一張卡走完了四種下場。
-#: * ``align`` —— **收起來**（使用者：「之後真需要我再回來」）。
+#: * ``align`` —— **收起來**（使用者：「之後真需要我再回來」），**2026-09-17（F109）拿回來了** —— DOE 就是那個「之後」。
 #:
 #: **三種處置，判準都是使用者說了哪一句話**，不是我覺得那張卡有沒有用。
 #: 收起來＝卡片庫看不到、引擎照認、舊 recipe 照跑；刪掉＝`REGISTRY` 裡沒有，
@@ -116,7 +116,11 @@ SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder")
 #: 廠內那一組收起來的卡。**「align 是收起來的」這句話只寫在這裡一次** ——
 #: `PROFILES` 那張表引用這個名字，不再各自打一遍字串。三個地方各寫一次的話，
 #: 打開其中一組而忘了另一組，症狀是「換了 profile 但那張卡還在／還是不在」。
-_DEFAULT_HIDDEN: Tuple[str, ...] = ("align",)
+#: ⚠ **2026-09-17（F109）起是空的** —— `align` 拿回來了。使用者當初說的是
+#: 「之後真需要我再回來」，而 DOE（同一顆 defect、不同 E-beam condition、比 SNR）
+#: 就是那個「之後」。它做錯的那件事（只有被移動的那一條被重採樣）同一輪修掉了：
+#: 現在整數平移、裁共同重疊區，灰階一個位元都不動。
+_DEFAULT_HIDDEN: Tuple[str, ...] = ()
 
 HIDDEN_STEPS: Sequence[str] = _DEFAULT_HIDDEN
 

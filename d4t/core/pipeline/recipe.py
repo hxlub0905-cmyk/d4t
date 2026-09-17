@@ -658,7 +658,12 @@ NON_DECISION_NODELESS_CODES = frozenset({
 #: 目前這一版 recipe 的形狀（F42 B3，2026-08-27）。
 #:
 #: 1 = 區域依賴存在**參數**裡（F12 §3）；
-#: 2 = 存在**線**裡（方案 B）。
+#: 2 = 存在**線**裡（方案 B）；
+#: 4 = ``align`` 從「一條 moving 對一條 fixed，吐一條新流」變成「一組 streams
+#:     就地對齊」（F109）。**這一道只能靠版本號判斷** —— 舊檔案的 `align`
+#:     多半一個舊參數都沒寫（靠 `moving="ref"` / `out="ref_aligned"` 那組預設），
+#:     而「舊檔案靠舊預設」跟「新 recipe 靠新預設」從缺一個 key 是分不出來的
+#:     （鐵則 9 那個坑的原文就在下面 `from_json_dict` 裡）。
 #:
 #: 新建的 recipe 就是「這一版寫的」，所以 :class:`Recipe` 的預設值是它 ——
 #: 那不是裝飾：遷移以 ``version < RECIPE_VERSION`` 為判準，而一份記憶體裡組出來
@@ -666,7 +671,7 @@ NON_DECISION_NODELESS_CODES = frozenset({
 #: ``to_json_dict → from_json_dict``（`run_batch` 送進 worker 的路）。
 #: 預設留在 1 的話，**每一次送進 worker 都會再跑一次遷移**，而遷移會把版本號
 #: 改成 2 —— 那一對就不再是 identity 了（鐵則 9）。
-RECIPE_VERSION = 3
+RECIPE_VERSION = 4
 
 
 def _cycles_with(edges: List["Edge"], extra: "Edge",
@@ -2133,6 +2138,71 @@ def _migrate_reference_into_ports(nodes: Dict[str, "RecipeNode"],
                                 enabled=node.enabled)
 
 
+def _migrate_align_into_streams(nodes: Dict[str, "RecipeNode"],
+                               edges: List["Edge"]) -> None:
+    """``align`` 換形狀：一條 moving 對一條 fixed → 一組 ``streams`` 就地對齊（F109）。
+
+    舊形狀是 ``moving`` / ``fixed`` / ``out``，只寫出**一條**新流（預設
+    ``ref_aligned``）。新形狀是 ``streams``（含基準）＋ ``fixed``，每條**寫回原名**
+    —— 因為新卡會把所有參與的流一起裁成共同重疊區，基準那一條不跟著裁的話，
+    出去的幾條尺寸就對不起來。
+
+    所以這一道要做兩件事，少做第二件的話**舊檔案會安靜地拿不同尺寸的兩張圖去相減**：
+
+    1. 把三個舊參數換成兩個新的；
+    2. **把下游指著 ``out`` 的地方改成指 ``moving``** —— 參數格與線上的埠名都要。
+
+    ⚠ **判準是版本號，不是「舊 key 在不在」。** 一般的遷移該看舊東西存不存在
+    （鐵則 9），但這一道不行：實測 ``tests/fixtures/recipes/dual_route_basic.json``
+    的 align 節點**三個舊參數一個都沒寫**，整個靠預設值跑 —— 而那正是鐵則 9 說
+    「分不出來」的那種訊號。版本號是這裡唯一看得見的差異，所以
+    ``RECIPE_VERSION`` 跟著升到 4。
+
+    ⚠ 第 2 件事要問 ``REGISTRY`` 「這一格是不是影像流」，所以它跟
+    :func:`_migrate_folded_output_cards` 一樣**要求卡片庫已經 import 過**
+    （CLI、Studio、worker 的 ``_init_worker`` 三個入口都會）。
+    只 import ``recipe`` 而不 import ``d4t.core.steps`` 的話，第 1 件照做、
+    第 2 件靜靜跳過 —— 那是既有的慣例，不是這一道新增的風險。
+    """
+    for nid, node in list(nodes.items()):
+        if node.step != "align":
+            continue
+        params = dict(node.params)
+        moving = str(params.pop("moving", "ref") or "ref").strip()
+        fixed = str(params.get("fixed", "test") or "test").strip()
+        out = str(params.pop("out", "ref_aligned") or "").strip()
+        params["fixed"] = fixed
+        params["streams"] = "%s,%s" % (fixed, moving) if fixed != moving else fixed
+        params["suffix"] = ""
+        nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
+                                enabled=node.enabled)
+        if not out or out == moving:
+            continue
+        # 下游別再指著那條不再存在的流。
+        for other_id, other in list(nodes.items()):
+            if other_id == nid:
+                continue
+            spec = REGISTRY.get(other.step)
+            if spec is None:
+                continue
+            changed = dict(other.params)
+            touched = False
+            for ps in spec.params:
+                if ps.type not in IMAGE_TYPES or ps.direction != "in":
+                    continue
+                if str(changed.get(ps.name, "") or "").strip() == out:
+                    changed[ps.name] = moving
+                    touched = True
+            if touched:
+                nodes[other_id] = RecipeNode(id=other.id, step=other.step,
+                                             params=changed,
+                                             enabled=other.enabled)
+        for i, e in enumerate(list(edges)):
+            if e.src == nid and e.src_out == out:
+                edges[i] = Edge(src=e.src, dst=e.dst, src_out=moving,
+                                dst_in=e.dst_in)
+
+
 def _migrate_glv_ref_pairing(nodes: Dict[str, "RecipeNode"]) -> None:
     """v<3 的 `glv_stats`：把逐框比較的參照**釘回 ``pooled``**（F68）。
 
@@ -2793,6 +2863,8 @@ class Recipe:
             _migrate_region_params_into_edges(nodes, routes, edges)
             # 逐框比較的參照怎麼取（F68）—— 舊檔案釘回當時的行為。
             _migrate_glv_ref_pairing(nodes)
+            # align 換形狀（F109）—— 連下游指著 `ref_aligned` 的地方一起改。
+            _migrate_align_into_streams(nodes, edges)
             version = RECIPE_VERSION
         hydrate_regions(nodes, edges)
         return cls(
@@ -3275,10 +3347,17 @@ def _uneven_treatment(step_cls, p: Dict[str, Any], nid: str, k: str,
         return []
     keys, seen = [], set()
     for spec in step_cls.input_specs():
-        v = str(p.get(spec.name, "") or "").strip()
-        if v and v in from_input and v not in seen:
-            seen.add(v)
-            keys.append(v)
+        raw = str(p.get(spec.name, "") or "").strip()
+        # ⚠ **複數的輸入格要拆開**（F109）：`align` 的 `streams` 是 `image_keys`，
+        # 值長得像 ``"test,ref"`` —— 整串去比對 `from_input` 永遠不會中，於是這條
+        # lint 對它一聲都不吭。這裡拆開之後，任何「一格吃好幾條流」的 Compare 卡
+        # 都回到這條檢查底下。
+        vals = ([x.strip() for x in raw.split(",")]
+                if spec.type in IMAGE_TYPES and spec.type.endswith("s") else [raw])
+        for v in vals:
+            if v and v in from_input and v not in seen:
+                seen.add(v)
+                keys.append(v)
     if len(keys) < 2:
         return []
     a, b = keys[0], keys[1]

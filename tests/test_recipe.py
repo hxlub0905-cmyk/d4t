@@ -665,6 +665,81 @@ def test_reading_a_recipe_never_invents_a_parameter():
 
 
 # --------------------------------------------------------------------------- #
+# F109：align 換形狀 —— 連同它寫出去的那個名字（2026-09-17）
+# --------------------------------------------------------------------------- #
+def _old_align_recipe(out="ref_aligned"):
+    return {"recipe_id": "old_align", "version": 3,
+            "routes": {"ebi_patch": ["load", "al", "sub"]},
+            "nodes": {"load": {"step": "load_patch", "params": {}},
+                      "al": {"step": "align",
+                             "params": {"moving": "ref", "fixed": "test",
+                                        "out": out, "search_radius": 6}},
+                      "sub": {"step": "subtract",
+                              "params": {"op": "subtract", "a": "test",
+                                         "b": out}}},
+            # JSON 的順序是 [src, src_out, dst, dst_in]（`Edge.to_json`）
+            "edges": [["al", out, "sub", "b"]],
+            "score": {"expr": "1", "threshold": 0.0,
+                      "bins": {"below": 0, "above": 1}}}
+
+
+def test_an_old_align_keeps_working_and_so_does_everything_downstream():
+    """**換掉一張卡寫出去的名字，就得換掉每一個指著那個名字的地方。**
+
+    舊 align 寫出**一條**新流（``ref_aligned``）。新的一張卡對 N 條流、就地
+    寫回原名，因為它會把所有參與的流一起裁成共同重疊區 —— 基準那一條不跟著裁
+    的話，出去的幾條尺寸就對不起來。
+
+    所以這道遷移要做兩件事，而**少做第二件的症狀是最糟的那一種**：
+    ``subtract.b`` 還指著一條不再存在的 ``ref_aligned``，畫布上因此有一條斷掉
+    的線，而使用者看到的是「我的 recipe 壞了」。
+    """
+    from d4t.core.pipeline.recipe import Recipe
+    import d4t.core.steps                     # noqa: F401 — 下游改寫要問 REGISTRY
+
+    rec = Recipe.from_json_dict(_old_align_recipe())
+    al = rec.nodes["al"].params
+    assert al["streams"] == "test,ref" and al["fixed"] == "test"
+    assert al["suffix"] == "", "空後綴 = 寫回原名，而下游因此指得到"
+    assert "moving" not in al and "out" not in al, "舊鍵要清掉，不然設定區會多出格子"
+    assert al["search_radius"] == 6, "沒被這道遷移碰到的參數要原封不動"
+    # 第 2 件：下游的參數格與線上的埠名
+    assert rec.nodes["sub"].params["b"] == "ref"
+    assert [(e.src, e.src_out, e.dst, e.dst_in) for e in rec.edges] \
+        == [("al", "ref", "sub", "b")]
+
+
+def test_the_migrated_align_survives_the_worker_round_trip():
+    """⚠ **``to_json_dict`` → ``from_json_dict`` 必須是 identity**（鐵則 9）。
+
+    那一對正是 ``run_batch`` 把 recipe 送進 worker 的路 —— 不是 identity 的話
+    ``workers=1`` 與 ``workers=2`` 會算出不同的分數，而兩邊都跑得完、都有數字
+    （這個 repo 真的踩過）。
+
+    這道遷移的閘是**版本號**而不是「舊鍵在不在」（fixture 那一份三個舊參數一個
+    都沒寫，整個靠預設值跑），所以這一條特別要驗：遷完之後 ``version`` 是
+    ``RECIPE_VERSION``，再讀一次就不會再被遷移一遍。
+    """
+    from d4t.core.pipeline.recipe import Recipe, RECIPE_VERSION
+    import d4t.core.steps                     # noqa: F401
+
+    once = Recipe.from_json_dict(_old_align_recipe())
+    assert once.version == RECIPE_VERSION
+    twice = Recipe.from_json_dict(once.to_json_dict())
+    assert twice.to_json_dict() == once.to_json_dict()
+
+
+def test_an_align_that_already_wrote_back_in_place_is_left_alone():
+    """``out`` 就是 ``moving`` 的舊檔案沒有下游要改 —— 不要順手改壞它的線。"""
+    from d4t.core.pipeline.recipe import Recipe
+    import d4t.core.steps                     # noqa: F401
+
+    rec = Recipe.from_json_dict(_old_align_recipe(out="ref"))
+    assert rec.nodes["sub"].params["b"] == "ref"
+    assert [(e.src, e.src_out) for e in rec.edges] == [("al", "ref")]
+
+
+# --------------------------------------------------------------------------- #
 # F37：改名遷移要走完四條路（2026-08-26）
 # --------------------------------------------------------------------------- #
 def _old_style_recipe(tmp_path):

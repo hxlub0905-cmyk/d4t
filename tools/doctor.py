@@ -414,7 +414,7 @@ def check_smoke(rep: Report, skip: bool = False, reason: str = "") -> None:
 #: （`AGENTS.md` §3 —— 它要在「套件還沒裝好」的機器上跑），import 不得。
 #: 兩邊漂掉的代價是這一項給出一個錯的提示，不是算錯數字；
 #: `tests/test_offline_tools.py` 會比對它們相等。
-RECIPE_VERSION = 3
+RECIPE_VERSION = 4
 
 
 def check_recipes(rep: Report, paths: Sequence[str] = ()) -> None:

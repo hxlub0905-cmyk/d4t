@@ -188,12 +188,25 @@ FILE_CEILINGS = {
     # 這條規則寫在自己的迴圈裡，而 `validate` 對 Output 卡的 `rank_by` 根本
     # 不知道 let 存在（指到 working number 被標成 nobody produces it）。
     # 2026-09-09（logger）：3,865 → 3,870。同上：五處 `except Exception:` 留痕。
-    "d4t/core/pipeline/recipe.py": 3870,
+    # 2026-09-17（F109）：3,870 → 3,949（+79）。第 20 道遷移
+    # （`_migrate_align_into_streams`，RECIPE_VERSION 3 → 4）。**它比前 19 道
+    # 都長，而那不是隨便寫的**：align 的舊 `out` 參數是一個**下游看得見的名字**
+    # （`ref_aligned`），所以換掉它的不是那一張卡自己的三個鍵，還有每一張指著
+    # 那個名字的 `image_key` 參數與 `recipe.edges` 上的 `src_out`。少改任何一邊，
+    # 舊 recipe 開起來就是一條斷掉的線 —— 而畫布會照實畫出來（F9），使用者看到
+    # 的是「我的 recipe 壞了」。
+    # 那 79 行裡有一半是說明：下一個要改「卡片寫出去的名字」的人得先讀到這件事。
+    "d4t/core/pipeline/recipe.py": 3949,
     # 逐卡儀表板。這一支變長**通常是健康的**（加一張卡就多一個面板），所以
     # 這一格比其他四格更常需要調高 —— 那沒關係，重點是調高時有人看見。
     # 2026-09-08（F99 P0-2）：3,622 → 3,660。`header_boxes` —— 共用 header 左右
     # 兩段以前畫進同一個矩形而沒有一方讓寬度，面板窄到 200 px 時疊在一起。
-    "d4t/ui/inspectors.py": 3660,
+    # 2026-09-17（F109）：3,660 → 3,669（+9）。`AlignInspector` 的散佈圖以前寫死
+    # `align_dx`／`align_dy` 兩個名字，而 align 現在對 N 條流、三條以上時特徵名
+    # **帶著流名前綴** —— 寫死的那一版在 DOE（一次 N 個 condition，正是這張圖最
+    # 有用的時候）會畫出一張**空圖**，而空圖上寫的是「跑一次試跑就看得到」。
+    # 多的幾行是「跟卡片要名字，不自己拼字串」與那句為什麼。
+    "d4t/ui/inspectors.py": 3669,
     # 節點畫布。沒有被點名，只是它超過一般上限，凍住免得它安靜地漂。
     #
     # 2026-09-08（U18/U19/U20）：2,705 → 2,887（+182）。三件都長在畫布上，
@@ -413,11 +426,18 @@ COUNT_CEILINGS = {
         "StudioWindow 的 self.* 名字數（2026-09-02 是 386）",
         lambda: _class_shape("d4t/ui/studio.py", "StudioWindow")[1],
     ),
-    # 19 道遷移撐 3 個 RECIPE_VERSION，而且**只增不減** —— 沒有任何一份文件說
-    # 過「舊到哪一版可以不再自動轉」。第 20 道要寫的時候，這一格會先問那句話。
+    # 20 道遷移撐 4 個 RECIPE_VERSION，而且**只增不減** —— 沒有任何一份文件說
+    # 過「舊到哪一版可以不再自動轉」。第 21 道要寫的時候，這一格會先問那句話。
+    #
+    # 2026-09-17（F109）：19 → 20。align 從 `moving`/`fixed`/`out` 改成
+    # `streams`/`fixed`/`suffix`（一張卡對 N 條流，DOE 要的形狀）。
+    # **這一格問的那句話這一次有答案**：`tests/fixtures/recipes/dual_route_basic.json`
+    # 用著 align 而且撐著三組黃金值裡的兩組，出貨的 recipe 也可能帶著舊參數 ——
+    # 不寫這道遷移，那些檔案開起來是一張參數全空的卡，跑出來的數字跟以前不一樣
+    # **而且不會報錯**。那正是這個 repo 最貴的失敗（「跑得完、有數字、而且是錯的」）。
     "recipe_migrations": (
-        19,
-        "recipe.py 裡 _migrate_* 的道數（RECIPE_VERSION 現在是 3）",
+        20,
+        "recipe.py 裡 _migrate_* 的道數（RECIPE_VERSION 現在是 4）",
         _migration_count,
     ),
 }

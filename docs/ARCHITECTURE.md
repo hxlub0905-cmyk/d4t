@@ -317,12 +317,12 @@ d4t/
 │   │                         #     `chart_style` 分家：畫什麼 vs 長什麼樣。
 │   │                         #     ⚠ 驗的是形狀，**不驗欄位存不存在**（存 recipe
 │   │                         #     的時候沒有資料）
-│   ├── steps/                # 步驟卡片 —— **註冊 19 張，卡片庫可見 18 張**（`align` 收起來）
+│   ├── steps/                # 步驟卡片 —— **註冊 19 張，卡片庫可見 19 張**（`HIDDEN_STEPS` 空著）
 │   │                         #   ⚠ 卡片庫由上而下的順序 ＝ `__init__.py` 的 import 順序
 │   │   ├── load.py           #   load_patch／load_single（**一種 source 一張卡**）
 │   │   ├── load_sidecar.py pair_source.py               #   別的程式產的圖／另一份 lot 的那一顆
 │   │   ├── normalize.py tone.py denoise.py flatten.py   #   Enhance 段
-│   │   ├── align.py arith.py align_to.py                #   Compare 段（`align` 目前收起來）
+│   │   ├── align.py arith.py align_to.py                #   Compare 段（align 整數平移、裁共同重疊區）
 │   │   ├── roi_reference.py   #   Region 段（**只有這一張**，畫面上叫「ROI」）：三種找法 → 具名區域
 │   │   ├── roi_cross.py roi_template.py  #   ⚠ **不是卡片**：折進 `roi_reference` 的兩個 method（F30）
 │   │   ├── glv_stats.py cd.py quality.py #   Measure 段：GLV → CD → Focus index（**順序有意義**）

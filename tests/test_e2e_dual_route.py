@@ -129,7 +129,20 @@ def test_same_recipe_scores_both_input_types(request, recipe, lot_name, expect_k
 
     gt = json.loads(Path(lot["ground_truth"]).read_text(encoding="utf-8"))
     correct = sum(1 for r in results if (r.bin == 1) == gt[r.defect_id]["is_real"])
-    # 實測 seed 7 為 24/24；跨 seed 平均 ~95%，門檻留餘裕。
+    # 實測 seed 7 為 24/24；跨 seed 平均 ~90%，門檻留餘裕。
+    #
+    # ⚠ **F109（2026-09-17）重新校準過一次，而過程值得記住。** align 從次像素
+    # 重採樣改成整數平移之後，這份 recipe 從 24/24 掉到 18/24 —— 而把 align
+    # **整張停用**也是 18/24。也就是說舊的 24/24 靠的是「ref 被一個雜訊驅動的
+    # 次像素重採樣過了一次」：`tools/make_sample.py` 的 `shift_max` 預設是 **0**
+    # （機台出的 patch 本來就對好了），所以量到的 0.1–0.36 px 全是雜訊，
+    # 那次重採樣沒有在修正任何東西 —— 它就是使用者 2026-08-18 回報的
+    # 「拉 align 反而會飄掉 shift」。
+    #
+    # 拿掉之後分數反而**變乾淨**：seed 7 上 nuisance 最高 5.38、真缺陷最低 5.81，
+    # 兩類完全分得開，而舊門檻 4.2 落在 nuisance 範圍**裡面**。跨四個 seed
+    # （7/3/11/21）掃門檻：4.2 → 73/96、5.4 → 87/96、6.0 → 88/96。
+    # 取 5.4（平台的左端，不是掃描的 argmax —— 取 argmax 是對掃描過擬合）。
     # 20 而不是原本的 21：這份測試用的 recipe 在 F8 第五輪失去了它的 ROI 卡
     # （``roi_define`` 隨著 ROI 收斂成 Profile / Template / GDS 被拿掉），
     # 現在量的是整張圖 —— 少了聚焦，準確率本來就會掉一點。

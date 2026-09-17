@@ -275,7 +275,7 @@ profile 設（`fab` 預設／`dev`／`demo`，看 `D4T_PROFILE`）。⚠ **旗�
 
 ```python
 SUPPORTED_KINDS = ("ebi_patch", "tiff_stack", "rsem", "folder")
-HIDDEN_STEPS = ("align",)        # 收起來（引擎照認、舊 recipe 照跑）
+HIDDEN_STEPS = ()                # 目前沒有收起來的卡（`align` F109 拿回來了）
 SHOW_TEMPLATE_LIBRARY = True     # 工具列的 Templates…（2026-09-08 打開）
 SHOW_SAMPLE_DATA = True          # 「用範例資料試一次」（2026-09-09 隨 ebi-die-to-die.json 打開）
 INPUT_SOURCES = (...)            # 三顆 Open 的字、圖示、一句白話說明

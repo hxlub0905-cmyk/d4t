@@ -219,20 +219,38 @@ def test_an_unknown_kind_is_still_refused_with_a_reason(window, patch_lot,
     assert window.dataset is before, "被擋下來時不該動到使用者手上的資料集"
 
 
-def test_align_is_hidden_but_still_runs(window):
-    """使用者 2026-08-18：「我不喜歡 align 卡……拉 align 反而會飄掉 shift」。
+def test_hiding_a_card_only_takes_it_out_of_the_library(window):
+    """**收起來、不刪掉**（`CLAUDE.md` §5 的判斷）：卡片庫看不到它，但已經在用它
+    的 recipe 照跑、CLI 照跑、黃金值一個字不動。
 
-    **收起來、不刪掉**（CLAUDE.md §5 的判斷）：卡片庫看不到它，但已經在用它的
-    recipe 照跑、CLI 照跑、黃金值一個字不動 —— 而
-    `tests/fixtures/recipes/dual_route_basic.json` 正好用了它，撐著三組黃金值裡
-    的兩組。刪掉的話那兩組要重新定錨，而使用者說的是「之後真需要我再回來」。
+    ⚠ **這一條 2026-09-17（F109）從「align 是收起來的」改寫成「收起來這件事是
+    怎麼運作的」。** 使用者 2026-08-18 說的是「我不喜歡 align 卡……拉 align 反而
+    會飄掉 shift……**之後真需要我再回來**」，而 DOE 就是那個「之後」—— align 回到
+    卡片庫了，`HIDDEN_STEPS` 現在是空的。
+
+    寫死那張卡的那一版在這一輪只會紅一次然後被改掉，而**壞掉的不是這條測試在問
+    的東西**：收起來只過濾卡片庫這件事一個字都沒變。所以這裡當場塞一張卡進
+    `HIDDEN_STEPS` 試給它看 —— 空的清單過濾不掉任何東西，那正是這種測試最危險
+    的時候。
     """
     from d4t.core.pipeline import get_step
 
-    assert "align" in scope_mod.HIDDEN_STEPS
-    assert window.library.entry("align") is None      # 卡片庫看不到
-    assert get_step("align") is not None              # 但引擎照樣認得
-    assert window.model.add_step("align")             # 舊 recipe 也放得進來
+    assert window.library.entry("align") is not None, \
+        "align 2026-09-17 拿回卡片庫了（F109）"
+
+    victim = "align"
+    before = scope_mod.HIDDEN_STEPS
+    try:
+        scope_mod.HIDDEN_STEPS = (victim,)
+        # 卡片庫是在建構時吃 `visible_steps()` 的；這一支會重吃一次
+        # （不另開一扇窗：Qt 物件在測試行程裡不會消失，時間是超線性的）。
+        window._repaint_for_theme()
+        assert window.library.entry(victim) is None       # 卡片庫看不到
+        assert get_step(victim) is not None               # 但引擎照樣認得
+        assert window.model.add_step(victim)              # 舊 recipe 也放得進來
+    finally:
+        scope_mod.HIDDEN_STEPS = before
+        window._repaint_for_theme()
 
 
 def test_pattern_ref_is_gone_and_nothing_quietly_replaced_it(window):

@@ -3941,7 +3941,7 @@ class StudioWindow(QMainWindow):
             if not spec.visible_for(node.params):
                 continue
             try:
-                n = float(node.params.get(spec.name, spec.default))
+                n = spec.extent_px(node.params.get(spec.name, spec.default))
             except (TypeError, ValueError):
                 continue
             # 1 = 不濾波（`denoise` 的 ksize=1 就是原樣回傳），畫一個 1px 的框
