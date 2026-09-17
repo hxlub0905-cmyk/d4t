@@ -31,7 +31,9 @@ import sys
 
 #: 錯誤數上限。**調高要說為什麼；降下去要跟著改。**
 #: 2026-09-09：第一次跑，136（pyright 1.1.408，basic，pythonVersion 3.9，只掃 d4t/core）。
-CEILING = 136
+#: 2026-09-17（F105）：128 —— `template._measure_period` 從 5-tuple 改成 dataclass、
+#: `GoldenCell.origin` 放寬成 float，順手把那一帶的 Optional 算術寫清楚了。
+CEILING = 128
 
 #: 反向門檻：掉到 ``上限 - SLACK`` 以下就要求把上限降下來（同 size_ceilings 的 2%）。
 SLACK = max(3, CEILING // 50)

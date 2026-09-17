@@ -290,7 +290,7 @@ d4t/
 │   │   ├── edge.py subpixel.py shape.py profile.py  #   CD 的四塊：剖面、次像素、團塊、投影
 │   │   ├── grid.py mask.py roi.py                   #   條紋→框／label map→框／MultiROISet
 │   │   ├── period.py golden.py template.py          #   週期估測／Golden Cell 疊圖／模板定位
-│   │   ├── period2d.py            #   二維自相關找峰：交錯 layout 的矩形重複單元（F104）
+│   │   ├── period2d.py            #   二維自相關找峰：交錯 layout 的矩形重複單元（F104）；小數週期、半週期第三票（F105）
 │   │   └── pairing.py                               #   兩批 defect 的座標配對（容差內、一對一）
 │   ├── pipeline/             # 引擎
 │   │   ├── context.py        #   Context（images／features／regions／meta）—— 步驟間的唯一介面

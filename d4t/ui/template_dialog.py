@@ -75,6 +75,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QDoubleSpinBox,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -260,8 +261,9 @@ class TemplateDialog(QDialog):
             lab.setObjectName("paramHint")
             lab.setToolTip(tip)
             row.addWidget(lab)
-        self.spin_cell_w = self._spin(box, 2, 8192, 40, "Cell width in image pixels")
-        self.spin_cell_h = self._spin(box, 2, 8192, 40, "Cell height in image pixels")
+        # 小數也收（F105）：量到 79.5 就要放得進去，不然 Re-stack 會安靜用 80。
+        self.spin_cell_w = self._dspin(box, 2.0, 8192.0, 40.0, "Cell width in image pixels")
+        self.spin_cell_h = self._dspin(box, 2.0, 8192.0, 40.0, "Cell height in image pixels")
         row.insertWidget(row.count() - 1, self.spin_cell_w)
         row.addWidget(self.spin_cell_h)
 
@@ -665,6 +667,18 @@ class TemplateDialog(QDialog):
         s.setMaximumWidth(78)
         return s
 
+    @staticmethod
+    def _dspin(parent, lo: float, hi: float, value: float, tip: str) -> QDoubleSpinBox:
+        """cell 尺寸那兩格：週期可以是 79.5（F105），兩位小數、半格一步。"""
+        s = QDoubleSpinBox(parent)
+        s.setDecimals(2)
+        s.setSingleStep(0.5)
+        s.setRange(lo, hi)
+        s.setValue(value)
+        s.setToolTip(tip)
+        s.setMaximumWidth(88)
+        return s
+
     def _build_view_row(self) -> QWidget:
         box = QWidget(self)
         row = QHBoxLayout(box)
@@ -770,11 +784,11 @@ class TemplateDialog(QDialog):
             self.btn_grid.setChecked(False)
             return
         if self._lattice is None:
-            self._lattice = LatticeDialog(self._source, gc.px, gc.py, gc.origin,
+            self._lattice = LatticeDialog(self._source, gc.period_x, gc.period_y, gc.origin,
                                           gc.periodic, self._source_path, self)
             self._lattice.closed.connect(lambda: self.btn_grid.setChecked(False))
         else:
-            self._lattice.set_lattice(self._source, gc.px, gc.py, gc.origin,
+            self._lattice.set_lattice(self._source, gc.period_x, gc.period_y, gc.origin,
                                       gc.periodic)
         self._lattice.show()
         self._lattice.raise_()
@@ -784,7 +798,7 @@ class TemplateDialog(QDialog):
         if self.btn_grid.isChecked() and self._lattice is not None:
             gc = self.cell
             if self._source is not None and gc is not None and gc.cell.size > 0:
-                self._lattice.set_lattice(self._source, gc.px, gc.py, gc.origin,
+                self._lattice.set_lattice(self._source, gc.period_x, gc.period_y, gc.origin,
                                           gc.periodic)
 
     def grid_window(self) -> Optional[LatticeDialog]:
@@ -908,8 +922,9 @@ class TemplateDialog(QDialog):
         if gc is None or gc.cell.size == 0:
             return
         self._syncing = True
-        self.spin_cell_w.setValue(int(gc.cell.shape[1]))
-        self.spin_cell_h.setValue(int(gc.cell.shape[0]))
+        # 放**真的**週期（79.5），不是陣列尺寸（80）—— 否則按 Re-stack 就換了答案。
+        self.spin_cell_w.setValue(float(gc.period_x))
+        self.spin_cell_h.setValue(float(gc.period_y))
         # 沒有週期的那一軸不給改：它的「一格」就是整張影像，那不是一個可以
         # 挑的尺寸。鎖起來並講出原因，比讓人改了發現沒反應好。
         for spin, ok, axis in ((self.spin_cell_w, gc.periodic_x, "across"),
@@ -985,10 +1000,11 @@ class TemplateDialog(QDialog):
                 (True, True): "both ways"}[gc.periodic]
         if self._from_recipe:
             return " · ".join(
-                ["cell %d x %d px" % (gc.px, gc.py), "repeats %s" % axis,
+                ["cell %s px" % algo_template.period_text(gc.period_x, gc.period_y),
+                 "repeats %s" % axis,
                  "read back from this recipe - rebuild it from an image if "
                  "this batch looks different"] + self._self_repeat_note())
-        bits = ["cell %d x %d px" % (gc.px, gc.py),
+        bits = ["cell %s px" % algo_template.period_text(gc.period_x, gc.period_y),
                 "repeats %s" % axis,
                 "stacked from %d cells" % gc.n_cells]
         if self._crop is not None:
@@ -1005,6 +1021,11 @@ class TemplateDialog(QDialog):
                         "usually means the period was measured wrong; a "
                         "blurred template will mis-place the region on every "
                         "defect")
+        # 量週期時自動做的每一個決定都要講（F105；F104 的「交錯」以前只留在
+        # warnings 裡，畫面上看不到）。其餘 warnings 裡只講「相位是任意的」那句：
+        # 一維 layout 的「no period down…」已經由 repeats across 講過了。
+        for n in gc.notes:
+            bits.append("- " + n)
         for w in gc.warnings:
             if "arbitrary" in w:
                 bits.append("- " + w)

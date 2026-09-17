@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from d4t.core.algo import golden as algo_golden
+from d4t.core.algo import period2d as algo_period2d
 
 from . import fit_screen
 from .image_view import ImageView
@@ -39,22 +40,26 @@ __all__ = ["LatticeDialog", "lattice_boxes", "MAX_BOXES"]
 MAX_BOXES = 4000
 
 
-def lattice_boxes(shape: Tuple[int, int], px: int, py: int,
-                  origin: Tuple[int, int], periodic: Tuple[bool, bool],
+def lattice_boxes(shape: Tuple[int, int], px: float, py: float,
+                  origin: Tuple[float, float], periodic: Tuple[bool, bool],
                   cap: int = MAX_BOXES) -> Tuple[List[Tuple[float, float, float, float]], int]:
     """格子的**正規化**矩形 ``(nx, ny, nw, nh)`` 與總格數（畫的可能比總數少）。
 
     沒有週期的那一軸一格就是整張影像 —— 那一軸不切，跟 `build_golden_cell`
     把 ``px`` 設成整張寬的做法一致。
+
+    週期與原點可以是小數（F105，`GoldenCell.period_x`／`origin`）：第 k 格在
+    ``origin + k·period``，不是整數步進 —— 79.5 對 79 在 4000 px 上差 25 px，
+    格線就是這樣「靠邊會滑」的。整數參數時跟 `tile_coords` 畫的一模一樣。
     """
     h, w = int(shape[0]), int(shape[1])
     if h < 1 or w < 1:
         return [], 0
-    px = int(px) if periodic[0] and int(px) >= 1 else w
-    py = int(py) if periodic[1] and int(py) >= 1 else h
-    ox = int(origin[0]) if periodic[0] else 0
-    oy = int(origin[1]) if periodic[1] else 0
-    coords = algo_golden.tile_coords((h, w), px, py, (ox, oy))
+    px = float(px) if periodic[0] and float(px) >= 1 else float(w)
+    py = float(py) if periodic[1] and float(py) >= 1 else float(h)
+    ox = float(origin[0]) if periodic[0] else 0.0
+    oy = float(origin[1]) if periodic[1] else 0.0
+    coords = algo_golden.cell_origins((h, w), px, py, (ox, oy))
     total = len(coords)
     if total > cap:
         cx, cy = w / 2.0, h / 2.0
@@ -107,8 +112,8 @@ class LatticeDialog(QDialog):
         super().closeEvent(e)
         self.closed.emit()
 
-    def set_lattice(self, image: Any, px: int, py: int,
-                    origin: Tuple[int, int], periodic: Tuple[bool, bool],
+    def set_lattice(self, image: Any, px: float, py: float,
+                    origin: Tuple[float, float], periodic: Tuple[bool, bool],
                     marks: Optional[Sequence[Tuple[int, int]]] = None) -> None:
         arr = np.asarray(image)
         if arr.size == 0 or arr.ndim < 2:
@@ -119,9 +124,10 @@ class LatticeDialog(QDialog):
         boxes, total = lattice_boxes(arr.shape[:2], px, py, origin, periodic)
         self.view.set_overlay(boxes)
         self.shown, self.total = len(boxes), total
-        axis = {(True, True): "%d x %d px" % (px, py),
-                (True, False): "%d px across (no period down)" % px,
-                (False, True): "%d px down (no period across)" % py,
+        fx, fy = algo_period2d.fmt_px(px), algo_period2d.fmt_px(py)
+        axis = {(True, True): "%s x %s px" % (fx, fy),
+                (True, False): "%s px across (no period down)" % fx,
+                (False, True): "%s px down (no period across)" % fy,
                 (False, False): "no period"}[(bool(periodic[0]), bool(periodic[1]))]
         text = ("Every box is one cell as the template sees it: %s, %d cells"
                 % (axis, total))
