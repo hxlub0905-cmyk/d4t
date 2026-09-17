@@ -638,8 +638,10 @@ def sibling_tiff(klarf_path, tiff_file_name):
         cands.append((os.path.join(base_dir, os.path.basename(nm)),
                       "TiffFileName 的檔名 + KLARF 同資料夾"))
     stem = os.path.splitext(klarf_path)[0]
+    # 鏡射 klarf_core.PATCH_IMAGE_EXTS（.tif / .tiff / .I01）：.I01 是 2026-09-17
+    # 加的，跟 .tif 一樣一份 KLARF 配一個；內容是不是 TIFF 由 probe_tiff.py 回答。
     for p, tag in ((stem, "KLARF 去副檔名"), (klarf_path, "KLARF 全名")):
-        for ext in (".tif", ".tiff", ".TIF", ".TIFF"):
+        for ext in (".tif", ".tiff", ".I01", ".TIF", ".TIFF", ".i01"):
             cands.append((p + ext, "%s + %s" % (tag, ext)))
     found, seen = None, set()
     for path, desc in cands:

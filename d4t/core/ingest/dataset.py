@@ -42,7 +42,11 @@ from . import imageio, tiff_index
 from . import klarf_core
 from .klarf_core import KlarfDoc
 
-_IMAGE_EXTS = {".png", ".tif", ".tiff", ".jpg", ".jpeg", ".bmp"}
+#: 「多頁 TIFF」家族的副檔名（小寫比對）。``.i01`` 是使用者點名的新檔名
+#: （2026-09-17）：內容是 TIFF、只是副檔名不同，所以它跟 ``.tif`` 走**同一條路**
+#: —— 這裡、`klarf_core.PATCH_IMAGE_EXTS`、Studio 的檔案對話框三處要對得上。
+_TIFF_EXTS = {".tif", ".tiff", ".i01"}
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp"} | _TIFF_EXTS
 
 #: 多頁 TIFF 走錯入口時說的那一句 —— **`load_folder` 與 `load_image_file`
 #: 共用一份**。這兩條路一樣只讀得到第 0 頁，而一個 15 頁的檔案安靜地變成
@@ -269,6 +273,21 @@ def _base_item(doc: KlarfDoc, row_idx: int, row: List[str],
     )
 
 
+def _not_a_tiff_message(path: str, err: Exception) -> str:
+    """KLARF 旁邊那個影像檔打不開時說的那一句。
+
+    以前是 ``Could not index TIFF <path>: Not a TIFF``。對 ``.tif`` 那句夠用；
+    對 ``.I01`` 不夠 —— 那個副檔名的內容是 TIFF 是**還沒在廠內驗過的假設**
+    （`docs/FAB-VALIDATION.md` #8），假設錯的那一天使用者看到的就是這一句，
+    所以它要講出下一步：拿 `fab_probe/probe_tiff.py` 探它，把報告貼回來。
+    """
+    return ("Could not read %s as a TIFF (%s). d4t only knows TIFF-format "
+            "image files next to a KLARF, whatever their extension. Run "
+            "fab_probe/probe_tiff.py on this file and send the report; the "
+            "defects are loaded without images for now."
+            % (os.path.basename(str(path)), err))
+
+
 def _bit_depth_warning(path: str) -> Optional[str]:
     """這個 TIFF 不是 8-bit 的話，回一句話（載入時就講，不必等跑到某一顆）。
 
@@ -309,9 +328,12 @@ def load_dataset(klarf_path, tiff_path=None,
     imap = None
     if tiff is not None:
         try:
+            # 先看 8 個位元組是不是 TIFF —— `bit_depths` 對非 TIFF 是安靜的
+            # （刻意的），而「不是 TIFF」要在**這裡**講一次，不是每一顆各講一次。
+            tiff_index.check_header(tiff)
             note = _bit_depth_warning(tiff)
         except (OSError, ValueError) as e:
-            warnings.append(f"Could not index TIFF {tiff}: {e}")
+            warnings.append(_not_a_tiff_message(tiff, e))
             tiff = None
         else:
             if note:
@@ -359,9 +381,17 @@ def load_dataset(klarf_path, tiff_path=None,
                 channel="single")
         items.append(item)
     if n_named == 0:
-        warnings.append(
-            "No patch TIFF and no per-defect image filenames; "
-            "dataset carries defect metadata only.")
+        if doc.tiff_file_name and tiff_path is None:
+            # KLARF 說了檔名、檔卻不在旁邊 —— 講那個檔名（2026-09-17：`.I01` 沒
+            # 一起搬過來的時候，「沒有 patch TIFF」這句對使用者是謎語）。
+            warnings.append(
+                "The KLARF names its image file (%s) but that file is not "
+                "next to the KLARF; defects are loaded without images."
+                % os.path.basename(doc.tiff_file_name.replace("\\", "/")))
+        else:
+            warnings.append(
+                "No patch TIFF and no per-defect image filenames; "
+                "dataset carries defect metadata only.")
     return Dataset(kind="rsem", klarf=doc, items=items, warnings=warnings)
 
 
@@ -470,7 +500,7 @@ def load_image_file(path) -> Dataset:
                        warnings=[f"Not an image file: {p} (expected one of "
                                  f"{', '.join(sorted(_IMAGE_EXTS))})"])
     warnings: List[str] = []
-    if ext.lower() in (".tif", ".tiff"):
+    if ext.lower() in _TIFF_EXTS:
         try:
             if int(tiff_index.n_pages(p)) > 1:
                 warnings.append(_MULTIPAGE_WARNING % (1, os.path.basename(p)))
@@ -497,7 +527,7 @@ def load_folder(folder) -> Dataset:
         path = os.path.join(d, name)
         stem, ext = os.path.splitext(name)
         if os.path.isfile(path) and ext.lower() in _IMAGE_EXTS:
-            if ext.lower() in (".tif", ".tiff"):
+            if ext.lower() in _TIFF_EXTS:
                 # 這條路是「一個檔案一顆、一顆一張圖」，所以多頁 TIFF **只讀得到
                 # 第 0 頁**（``imageio.load_gray`` 走 ``cv2.imdecode``）。
                 # 以前那件事完全沒有聲音：一個 15 頁的檔案安靜地變成一顆 defect。

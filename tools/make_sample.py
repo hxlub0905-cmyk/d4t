@@ -60,8 +60,11 @@ _DIE_PITCH_UM = 5000.0
 
 # ---------------------------------------------------------------- KLARF 產生
 
-def _make_klarf_text(n: int, rows) -> str:
-    """組出 KLARF 1.2 文字（LF 換行、固定 timestamp → 位元組可重現）。"""
+def _make_klarf_text(n: int, rows, image_ext: str = ".tif") -> str:
+    """組出 KLARF 1.2 文字（LF 換行、固定 timestamp → 位元組可重現）。
+
+    ``image_ext`` 只進 ``TiffFileName`` 那一行（預設 ``.tif``，位元組不變）。
+    """
     lines = [
         "FileVersion 1 2;",
         "FileTimestamp 07-28-26 00:00:00;",
@@ -79,7 +82,7 @@ def _make_klarf_text(n: int, rows) -> str:
         "DieOrigin 0.0 0.0;",
         'WaferID "W01";',
         "Slot 1;",
-        f"TiffFileName {LOT_NAME}.tif;",
+        f"TiffFileName {LOT_NAME}{image_ext};",
         'TiffSpec 6.1 1 "IMAGENUMBER";',
         "InspectionTest 1;",
         "DefectRecordSpec 8 DEFECTID XREL YREL XINDEX YINDEX CLASSNUMBER"
@@ -113,8 +116,14 @@ def _write_gc(out_dir: str) -> str:
 def generate(out_dir, n: int = 24, real_frac: float = 0.5, size: int = 128,
              pitch: int = 16, noise: float = 6.0, seed: int = 7,
              shift_max: int = 0, pattern: str = "cells",
-             class_by_truth: bool = False) -> Dict[str, str]:
+             class_by_truth: bool = False,
+             image_ext: str = ".tif") -> Dict[str, str]:
     """產生合成 lot 並自我驗證 ingest 層讀得回來。回傳輸出檔路徑 dict。
+
+    ``image_ext``（2026-09-17）：patch 影像檔的副檔名，預設 ``.tif``；給 ``.I01``
+    就產出 ``LOT_SYN.I01``（內容一模一樣是多頁 TIFF）而 KLARF 的 ``TiffFileName``
+    跟著指到它 —— 這是家用機上唯一能練 I01 那條路的資料。副檔名不進像素也不進
+    ground truth，所以 ``--image-ext`` 之外的產出逐位元組不變。
 
     ``pattern="cells"``（預設）是圓角方塊晶格 —— 兩軸同週期。
     ``pattern="lines"`` 是**直線壓在橫線上**、兩軸週期不同（F8 的交會定位要
@@ -148,10 +157,17 @@ def generate(out_dir, n: int = 24, real_frac: float = 0.5, size: int = 128,
         raise ValueError(f"size（{size}）至少要是 pitch（{pitch}）的 4 倍，圖案才有週期性")
     if shift_max < 0:
         raise ValueError(f"shift_max 不可為負（收到 {shift_max}）")
+    image_ext = str(image_ext or ".tif")
+    if not image_ext.startswith("."):
+        image_ext = "." + image_ext
+    if image_ext.lower() not in klarf_core.patch_image_ext_variants():
+        raise ValueError(
+            f"image_ext 必須是 {klarf_core.PATCH_IMAGE_EXTS} 之一（收到 {image_ext!r}）"
+            "—— ingest 只會在 KLARF 旁邊找這幾種")
 
     out_dir = str(out_dir)
     os.makedirs(out_dir, exist_ok=True)
-    tiff_path = os.path.join(out_dir, LOT_NAME + ".tif")
+    tiff_path = os.path.join(out_dir, LOT_NAME + image_ext)
     klarf_path = os.path.join(out_dir, LOT_NAME + ".001")
     gt_path = os.path.join(out_dir, "ground_truth.json")
     # **mg_epi 一定附一張 Golden Cell**（F58）。一份這種 layout 的資料沒有它
@@ -238,7 +254,7 @@ def generate(out_dir, n: int = 24, real_frac: float = 0.5, size: int = 128,
 
     # ---- 寫 KLARF 1.2 ----
     with open(klarf_path, "w", encoding="utf-8", newline="") as f:
-        f.write(_make_klarf_text(n, rows))
+        f.write(_make_klarf_text(n, rows, image_ext))
 
     # ---- 寫 ground truth ----
     with open(gt_path, "w", encoding="utf-8") as f:
@@ -297,11 +313,16 @@ def main(argv=None) -> int:
     ap.add_argument("--class-by-truth", action="store_true",
                     help=("CLASSNUMBER 照 ground truth 填（REAL=1、NUISANCE=2），"
                           "給分流（route_by）練習用；預設每一顆都是 0"))
+    ap.add_argument("--image-ext", default=".tif",
+                    help=("patch 影像檔的副檔名（預設 .tif）。給 .I01 就產出 "
+                          "LOT_SYN.I01 —— 內容一樣是多頁 TIFF，KLARF 的 "
+                          "TiffFileName 跟著指到它"))
     args = ap.parse_args(argv)
     paths = generate(args.out_dir, n=args.n, real_frac=args.real_frac,
                      size=args.size, pitch=args.pitch, noise=args.noise,
                      seed=args.seed, shift_max=args.shift_max,
-                     pattern=args.pattern, class_by_truth=args.class_by_truth)
+                     pattern=args.pattern, class_by_truth=args.class_by_truth,
+                     image_ext=args.image_ext)
     print("Generated synthetic lot:")
     for k in ("klarf", "tiff", "ground_truth", "golden_cell"):
         if k in paths:

@@ -268,6 +268,21 @@ def n_pages(path) -> int:
     return count_pages(path)
 
 
+def check_header(path) -> None:
+    """這個檔**開頭**是不是 TIFF／BigTIFF —— 只讀 8 個位元組，不是就 raise ValueError。
+
+    為什麼要有這一支（2026-09-17）：`load_dataset` 對 KLARF 旁邊那個影像檔的
+    載入時檢查以前只有 :func:`bit_depths`，而它對「根本不是 TIFF」的檔案是
+    **安靜地回空 list**（那是對的：位元深度的檢查不該讓載入失敗）。後果是一個
+    內容不是 TIFF 的檔案在按下 Open 的那一刻看起來完全正常，然後**每一顆**
+    defect 各自在跑的時候倒在同一句 ``Not a TIFF`` 上。副檔名開放給 ``.I01``
+    之後這件事從「幾乎不會發生」變成「假設 #8 錯了就一定發生」，所以要在載入
+    時講一次、講清楚。網路碟上這是一次 8 位元組的讀取，不是走 IFD 鏈。
+    """
+    with open(str(path), 'rb') as f:
+        _open_header(f)
+
+
 #: `bit_depths` 預設看幾頁。**一份 lot 的 TIFF 是同一台機台一次寫出來的**，
 #: 位元深度不會第 3 萬頁才變 —— 而為了那個假設走完整份檔案，在 4 萬頁的合成
 #: 資料上實測要 1.0 秒（整個 `load_dataset` 才 1.56 秒），在網路碟上是把整份

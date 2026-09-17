@@ -22,6 +22,48 @@
 
 ---
 
+## `.I01`：副檔名不同的 patch TIFF；Load 卡要不要合回一張（2026-09-17）
+
+使用者：「我想將 load (input) 卡片整合，你覺得呢？同時我要能支援新的圖檔叫做
+I01，一樣是跟 klarf 一一配對的」。兩件事，一件做了、一件給了建議等定調。
+
+**`.I01` 做了（F101，[`docs/history/plans/F101-i01-companion.md`](docs/history/plans/F101-i01-companion.md)）**
+—— **不是新 kind、不是新卡**：一份 KLARF 配一個檔、裡面是多頁 TIFF，資料形狀跟
+`.tif` 逐項相同，所以副檔名只住在「去哪找檔」那一層：
+
+* `klarf_core.PATCH_IMAGE_EXTS = ('.tif', '.tiff', '.I01')`，`tiff_path()` 的同名候選
+  多找它（大小寫都試，Linux 分大小寫）；KLARF 的 `TiffFileName` 直接指到 `.I01`
+  本來就吃得下。找到之後 kind、卡片、快取簽章都看不到副檔名。
+* `dataset._TIFF_EXTS` 多 `.i01`（`Open image…`／`Open folder…` 的「這是多頁檔，去
+  開 stack」提醒一視同仁）；Studio 的 stack／image 兩個對話框過濾字串加 `*.I01`；
+  CLI `--tiff` 的 help 講明兩種副檔名。
+* **真檔當天就看到了**（使用者的另一個 agent 解析 `.001`＋`.I01`，只貼結構不貼
+  識別碼）：record 語法 1.8、`ImageFileName` 住在 `WaferRecord`、`.I01` 是 MM 多頁
+  TIFF 64×64 8-bit、列尾 `Images 2 {id "30", id "31"}` 的 **id 全檔連號、page = id − 1**
+  —— 正是 `defect_image_map` 既有的 imagelist 模式，對映零改動（`FAB-VALIDATION.md`
+  #8 當天開、當天結）。順手補兩件：`defect_image_filename` 不再把 `"30"` 當檔名；
+  `.I01` 不在旁邊時 `load_dataset` 講出 KLARF 點名的那個檔名。
+* **假設錯的那一天**（`.I01` 內容不是 TIFF）：`load_dataset` 先
+  `tiff_index.check_header`（8 個位元組），不是就 warnings 講一次「哪個檔、為什麼、
+  跑哪支探測腳本」，defect 進來、沒有影像。以前 `bit_depths` 對非 TIFF 安靜回空
+  list（刻意的），後果是載入看起來正常、每一顆各自倒在 `Not a TIFF` 上。
+* `tools/make_sample.py --image-ext .I01`：家用機唯一能練這條路的資料；預設產出
+  逐位元組不變。兩支 fab_probe 跟著改（`sibling_tiff` 鏡射候選表、`probe_tiff`
+  的用法多一行）。守門 `tests/test_i01_companion.py`（十三條：同名找得到、KLARF
+  指名找得到、像素跟 `.tif` 那份一模一樣、內容不是 TIFF 時那句話、三處對得上、
+  兩支探測腳本讀得動、真檔形狀的三條）。
+
+**Load 卡合併：建議不併（等使用者定調）。** 理由寫在回覆裡，摘要：拆是使用者
+2026-08-17 自己定的（「畫布跟實際對不起來」），而拆完之後兩張卡都只看使用者看得到
+的值（`channel_map`／`out`）—— 合回一張的話單張資料要靠 `1:single` 這種對照表
+才不說謊，等於把「選哪張卡」換成「填對那張表」，沒有比較簡單；代價是一道遷移
+（`load_single` → `load_patch`）、兩份出貨 recipe、三十幾支測試、起手卡與 lint
+的 kind 分支、黃金值。**`.I01` 不需要它**：格式住 ingest，卡片只看「一顆幾張」。
+如果痛點是「不知道該選哪張」，便宜的做法是卡片庫依載入的資料只亮那一張
+（`scope` 的機制），不是合併。
+
+---
+
 ## 體檢與十四件待辦（2026-09-09 第五輪）
 
 使用者：「給這個專案一些建議（各方面）」→「把它整理成待處理事項，列出解決方法」

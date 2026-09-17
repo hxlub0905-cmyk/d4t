@@ -80,6 +80,26 @@ UNIT_INFO = {
 
 # ---------------------------------------------------------------- 主類別
 
+#: KLARF 旁邊那個「一份 KLARF 配一個」的 patch 影像檔可能的副檔名（2026-09-17）。
+#:
+#: ``.I01`` 是使用者點名的新檔名：跟 ``.tif`` 一樣一份 KLARF 配一個，裡面是
+#: 多頁 TIFF（**這一點還沒在廠內驗過**，見 `docs/FAB-VALIDATION.md` #8）。
+#: 它不是新的 kind：資料形狀跟 patch TIFF 逐項相同，所以 ingest 之後的每一層
+#: （kind、卡片、快取簽章）都看不到這個副檔名 —— 副檔名只住在「去哪找檔」。
+#: 這張表 `fab_probe/probe_klarf.py` 的 `sibling_tiff` 有一份鏡射，改這裡要跟著改。
+PATCH_IMAGE_EXTS = ('.tif', '.tiff', '.I01')
+
+
+def patch_image_ext_variants():
+    """`PATCH_IMAGE_EXTS` 的大小寫變體（Linux 的檔名分大小寫；Windows 不分）。"""
+    out = []
+    for ext in PATCH_IMAGE_EXTS:
+        for v in (ext.lower(), ext.upper(), ext):
+            if v not in out:
+                out.append(v)
+    return tuple(out)
+
+
 class KlarfDoc:
     """一份 KLARF 檔的可編輯模型。UI 對 1.2 / 1.8 用同一組介面操作。"""
 
@@ -401,9 +421,15 @@ class KlarfDoc:
 
         1.8（rSEM 類）KLARF 的列尾常帶
         `Image N { "file.jpg" "JPG" ... }` 或 `Images N { ... }` 子區塊；
-        取區塊內第一個帶引號的字串當檔名（概念移植自 GLAS klarf_parser 的
-        _map_row_tokens / _image_filename，改寫在 raw-token 列表示上）。
-        純唯讀查詢，不影響既有解析與無損寫回。"""
+        取區塊內第一個**像檔名**（帶 ``.``）的引號字串當檔名（概念移植自 GLAS
+        klarf_parser 的 _map_row_tokens / _image_filename，改寫在 raw-token 列表示上）。
+        純唯讀查詢，不影響既有解析與無損寫回。
+
+        為什麼要「像檔名」（2026-09-17）：patch 型的 1.8 檔列尾也是 ``Images``
+        子區塊，但裡面是 ``{101 "30", 102 "31"}`` —— id 加**影像類型名**，沒有
+        檔名。以前這裡會把 ``"30"`` 當成每顆一個檔的檔名回出去；patch TIFF 找得到
+        時沒事（那條路先走），找不到的那一天 `load_dataset` 會拿 ``30`` 去開檔，
+        錯誤訊息講的是一個不存在的檔而不是「你的 .I01 不在」。"""
         for k, tok in enumerate(row):
             if tok in ('Image', 'Images'):
                 tail = ' '.join(row[k:])
@@ -412,8 +438,10 @@ class KlarfDoc:
                     return None
                 b1 = _find_matching_brace(tail, b0)
                 block = tail[b0 + 1:b1] if b1 > b0 else tail[b0 + 1:]
-                m = re.search(r'"([^"]*)"', block)
-                return m.group(1) if m else None
+                for q in re.findall(r'"([^"]*)"', block):
+                    if '.' in q:
+                        return q
+                return None
         return None
 
     def total_image_count(self):
@@ -503,8 +531,13 @@ class KlarfDoc:
         return {"mode": "sequential", "base": None, "pages": pages, "notes": notes}
 
     def tiff_path(self):
-        """猜出對應的 TIFF 檔路徑（存在才回傳）。
-           依序嘗試：TiffFileName（含只取檔名放同資料夾）、KLARF 同名 .tif/.tiff。"""
+        """猜出對應的 patch 影像檔路徑（存在才回傳）。
+           依序嘗試：TiffFileName（含只取檔名放同資料夾）、KLARF 同名
+           ``PATCH_IMAGE_EXTS``（.tif / .tiff / .I01）。
+
+           **副檔名只決定去找哪些檔，不決定怎麼讀**：找到的那個檔一律用
+           TIFF 檔頭判斷（`tiff_index._open_header`），內容不是 TIFF 的話
+           `load_dataset` 會講出來。所以 ``.I01`` 跟 ``.tif`` 在這裡是同一件事。"""
         cands = []
         base_dir = os.path.dirname(self.source_path) if self.source_path else None
         if self.tiff_file_name:
@@ -515,7 +548,7 @@ class KlarfDoc:
         if self.source_path:
             stem = os.path.splitext(self.source_path)[0]
             for p in (stem, self.source_path):
-                for ext in ('.tif', '.tiff', '.TIF', '.TIFF'):
+                for ext in patch_image_ext_variants():
                     cands.append(p + ext)
         seen = set()
         for c in cands:
