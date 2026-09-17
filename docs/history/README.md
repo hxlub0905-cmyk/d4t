@@ -13,12 +13,16 @@
 
 | 檔案 | 涵蓋 |
 |---|---|
+| [`2026-09.md`](2026-09.md) | 09-01 ～ 09-08（**F67 ～ F100**）：GLV 的「跟誰比」由線決定與抓 defect 的主力卡、Region 段只剩一張卡、Feature 面板、IQI (OP-301)、畫布的視覺那一批、ruff 那道關與 pack 裡的 378 MB、PEAR 的均勻度、圖表那一塊（F87／F88 六刀）、**三把尺**、外部檢視那份清單的 P0 與 UI 評審 |
 | [`2026-08b.md`](2026-08b.md) | 08-19 ～ 08-28（**F42 ～ F66**）：區域線走 edges、結果表分層／FeatureSpec、檔案架構與授權、六個決定、畫布上只剩卡片和線、特徵名與數字只有一種寫法、合成資料長成真的那種 layout |
 | [`2026-08.md`](2026-08.md) | 08-07 ～ 08-18（第十五輪以前）：F8 純規則 ROI、畫布 n8n 化、Phase 1 收斂、F10、Phase 2 的 Input／Enhance／Region 三段 |
 | [`2026-07.md`](2026-07.md) | M0–M7、F7-9…F7-18、兩台機器與搬運通道的成形 |
 
-⚠ **切點換過一次。** 前兩份用的是「上一次合併進 `main` 的那一輪」；這條分支從
-08-19 起沒有再併回 main，那條線因此切不動任何東西，所以第三份改用**月份**。
+⚠ **切點換過一次，而第四份是在同一個月裡再切的。** 前兩份用的是「上一次合併進
+`main` 的那一輪」；這條分支從 08-19 起沒有再併回 main，那條線因此切不動任何東西，
+所以第三份改用**月份**。第四份沒有再換切點 —— 九月前八天的量本身就夠一份
+（封存前 `SESSION_LOG.md` 是 2,837 行 / 186 KB）。09-09 起留在原檔，
+因為那四輪定的是鐵則 11，還在被引用。
 
 ## 計畫書（做完的）
 
@@ -64,7 +68,7 @@
 | [`F51-feature-names-one-truth.md`](plans/F51-feature-names-one-truth.md) | 特徵名只有一個真相 ✅。⚠ §6 對 C 的描述有一句是錯的，那一節有訂正 |
 | [`F52-one-way-to-print-a-number.md`](plans/F52-one-way-to-print-a-number.md) | 一個特徵值，一種寫法 ✅（六種格式化函式收成一支）|
 | [`F67-glv-compare-by-wire.md`](plans/F67-glv-compare-by-wire.md) | GLV 的「跟誰比」由線決定 ✅ |
-| [`F68-glv-defect-hunting.md`](plans/F68-glv-defect-hunting.md) | GLV 是抓 defect 的主力卡 ✅（驗收由 F73 補跑完，見 [`../../SESSION_LOG.md`](../../SESSION_LOG.md)）|
+| [`F68-glv-defect-hunting.md`](plans/F68-glv-defect-hunting.md) | GLV 是抓 defect 的主力卡 ✅（驗收由 F73 補跑完，見 [`2026-09.md`](2026-09.md)）|
 
 ## 為什麼要有這個目錄
 
@@ -90,4 +94,7 @@
   `tests/test_docs_links.py` 會擋，但它擋不到「指得到、卻指錯地方」的那種。
 
 搬完記得 `git add -A && python tools/release.py && git add -A` —— 那一支會報
-目前的水位，超過 85% 就會叫。
+目前的水位。**它只報事實，不會叫** —— 以前分三級、85% 就開始喊，那是「1 MB 是
+硬牆」年代的產物；使用者改用 raw 複製之後，喊了也沒有人需要做任何事，而**一句
+沒有對應動作的警告只會訓練人忽略警告**（理由逐字在 `tools/release.py` 的
+`bundle_size_report`）。要看漲多快，去 [`../../AGENTS.md`](../../AGENTS.md) §2 那張水位表。
