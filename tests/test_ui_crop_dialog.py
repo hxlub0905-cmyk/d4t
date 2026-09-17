@@ -111,7 +111,6 @@ def test_the_crop_is_what_gets_stacked_and_the_summary_says_so(qapp):
     assert "cell %d" % PERIOD in dlg.summary()
     assert "cropped to %d x 240 px at (0, 0)" % (PERIOD * 4) in dlg.summary()
     assert "cropped" in dlg.path_label.text()
-    assert dlg.btn_crop.isEnabled() is True
 
 
 def test_a_box_covering_the_whole_image_is_no_crop(qapp):
@@ -131,35 +130,42 @@ def test_restacking_keeps_the_crop(qapp):
     assert "cell %d" % (PERIOD * 2) in dlg.summary()
 
 
-def test_crop_first_asks_before_stacking_and_cancel_changes_nothing(qapp, monkeypatch):
+def test_loading_an_image_always_asks_where_to_measure(qapp, monkeypatch):
+    """F104：每次載入都先問「哪一塊」——取消什麼都不動、整張＝不裁、框了＝疊那一塊。"""
+    monkeypatch.setattr(tpl_mod, "ASK_WHERE", True)
     dlg = tpl_mod.TemplateDialog()
     asked = []
-    answers = iter([False, (0, 0, PERIOD * 4, 240), None])
+    answers = iter([False, None, (0, 0, PERIOD * 4, 240)])
     monkeypatch.setattr(dlg, "_ask_crop",
-                        lambda img, name, initial: (asked.append(initial), next(answers))[1])
+                        lambda img, name, initial: (asked.append(name), next(answers))[1])
     img = _image_with_junk_on_the_right()
 
-    dlg.chk_crop.setChecked(False)
-    assert dlg.take_image(img, "x.tif") is True         # 沒勾：不問，整張疊
-    assert asked == [] and dlg.crop() is None
-
-    dlg.chk_crop.setChecked(True)
     assert dlg.take_image(img, "x.tif") is False        # 取消：什麼都不動
-    assert asked == [None] and dlg.crop() is None and "Cancelled" in dlg.report.text()
+    assert asked == ["x.tif"] and dlg.cell is None and "Cancelled" in dlg.report.text()
+    assert dlg.take_image(img, "x.tif") is True         # 整張
+    assert dlg.crop() is None and "cropped" not in dlg.summary()
     assert dlg.take_image(img, "x.tif") is True         # 框了：疊那一塊
     assert dlg.crop() == (0, 0, PERIOD * 4, 240)
-    # 事後再按 Crop…：帶著上一個框去問；回「整張」就回到整張
-    assert dlg._on_crop() is True
-    assert asked[-1] == (0, 0, PERIOD * 4, 240) and dlg.crop() is None
+    assert len(asked) == 3
 
 
-def test_a_template_read_back_from_the_recipe_cannot_be_cropped(qapp):
+def test_the_screen_image_goes_through_the_same_question(qapp, monkeypatch):
+    monkeypatch.setattr(tpl_mod, "ASK_WHERE", True)
+    dlg = tpl_mod.TemplateDialog()
+    dlg.set_screen_image(big_image(), "defect 7")
+    asked = []
+    monkeypatch.setattr(dlg, "_ask_crop", lambda img, name, initial: (asked.append(name), None)[1])
+    assert dlg._on_use_screen() is True
+    assert asked == ["defect 7"] and dlg.is_ready()
+
+
+def test_a_template_read_back_from_the_recipe_restacks_only_from_a_new_image(qapp):
     src = tpl_mod.TemplateDialog()
     src.load_image(big_image(), "x.tif")
     dlg = tpl_mod.TemplateDialog()
     assert dlg.load_encoded(src.encoded(), "x") is True
-    assert dlg.btn_crop.isEnabled() is False
-    assert dlg._on_crop() is False
+    assert dlg.crop() is None
+    assert dlg.restack() is False
     assert "Pick a full-size image first" in dlg.tool_hint.text()
 
 
@@ -185,8 +191,14 @@ def test_the_crop_view_paints_with_no_image_no_box_and_a_box(qapp):
 
 def test_the_dialogs_paint(qapp):
     _paints(crop_mod.CropDialog(np.zeros((240, 320), np.uint8), "x.tif"))
-    _paints(crop_mod.CropDialog(np.zeros((240, 320), np.uint8), "x.tif",
-                                mode=crop_mod.MODE_SEED))
     from d4t.ui import lattice_dialog as lat_mod
     _paints(lat_mod.LatticeDialog(np.zeros((240, 320), np.uint8), 40, 240, (7, 0),
                                   (True, False)))
+
+
+def test_the_modal_question_has_a_switch_and_tests_keep_it_off(qapp):
+    """`CLAUDE.md` §4：會跳 modal 的新東西要有關得掉的旗標。conftest 關著它。"""
+    assert tpl_mod.ASK_WHERE is False
+    dlg = tpl_mod.TemplateDialog()
+    assert dlg.take_image(big_image(), "x.tif") is True      # 沒有視窗、整張
+    assert dlg.crop() is None

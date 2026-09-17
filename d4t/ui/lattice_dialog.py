@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Any, List, Optional, Sequence, Tuple
 
 import numpy as np
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QLabel, QVBoxLayout, QWidget,
 )
@@ -66,7 +66,15 @@ def lattice_boxes(shape: Tuple[int, int], px: int, py: int,
 
 
 class LatticeDialog(QDialog):
-    """一張圖、一組格線、一句話。非 modal —— 開著它回去改 cell 尺寸再看。"""
+    """一張圖、一組格線、一句話。非 modal —— 開著它回去改 cell 尺寸再看。
+
+    它是模板對話框上那顆「Grid」開關的另一半（2026-09-17 使用者：「改成類似格線
+    的開關按鈕，可以開啟顯示或關閉顯示」）：開＝這個視窗出現，關＝收起來。使用者
+    直接把視窗關掉時要讓開關跟著彈回來，所以關閉會發 :attr:`closed`。
+    """
+
+    #: 使用者關掉了這個視窗（按 Close、按 ✕、按 Esc）。
+    closed = Signal()
 
     def __init__(self, image: Any, px: int, py: int,
                  origin: Tuple[int, int], periodic: Tuple[bool, bool],
@@ -89,10 +97,15 @@ class LatticeDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         self.buttons.clicked.connect(lambda _b: self.reject())
         lay.addWidget(self.buttons)
+        self.rejected.connect(self.closed.emit)
 
         self._name = str(name or "")
         self.set_lattice(image, px, py, origin, periodic, marks)
         apply_button_cursors(self)
+
+    def closeEvent(self, e) -> None:  # Qt hook
+        super().closeEvent(e)
+        self.closed.emit()
 
     def set_lattice(self, image: Any, px: int, py: int,
                     origin: Tuple[int, int], periodic: Tuple[bool, bool],

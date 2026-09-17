@@ -22,6 +22,22 @@
 
 ---
 
+## F104：二維自相關找峰；模板對話框收回一列；Mark one cell 刪掉（2026-09-17）
+
+使用者看過 F102／F103 之後定的三件事（[`docs/history/plans/F104-period2d-and-fewer-buttons.md`](docs/history/plans/F104-period2d-and-fewer-buttons.md)）：
+
+* **二維自相關**（`core/algo/period2d.py`）：交錯 layout 上投影法 X 軸互相抵消（實測
+  回 None、Y 回一列的高度），二維自相關沿軸找離原點最近的峰 → 真正的矩形單元 32 × 48。
+  分工在 `template._measure_period`：投影法是主，同意就不改（黃金值不動），只在
+  「投影量不到而二維量得到」或「二維是投影的整數倍」時接手並講一句。
+* **按鈕收回一列**：crop 併進載入（每次載入都先問「哪一塊」，整張是一顆鈕）；
+  「Mark one cell」**刪掉**（使用者：不實用）—— `seed.py`、`origin=` 參數、seed 模式、
+  三十幾條測試一起拿掉，`GoldenCell.origin` 留著給格線用。
+* **Grid 開關**取代「Check on the image…」：開＝格線視窗出現、跟著 re-stack 更新；
+  關＝收起來；直接關視窗開關跟著彈回。
+
+---
+
 ## F102：疊模板之前先框一塊；cell 週期怎麼算、算錯怎麼知道（2026-09-17）
 
 使用者：「幫我加入 crop 功能，載入 template 的大圖，可以選擇要不要 crop 想要的部分
