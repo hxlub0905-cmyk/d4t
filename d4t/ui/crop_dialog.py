@@ -156,11 +156,18 @@ class CropView(QWidget):
         return None if self._image is None else (int(self._image.shape[0]),
                                                   int(self._image.shape[1]))
 
-    def rect(self) -> Optional[Rect]:  # type: ignore[override]
-        """目前的框（影像像素），沒有就 ``None``。"""
+    def box(self) -> Optional[Rect]:
+        """目前的框（影像像素），沒有就 ``None``。
+
+        ⚠ **不能叫 ``rect()``**：那是 ``QWidget.rect()``（整個 widget 的矩形），
+        `paintEvent` 靠它填背景。第一版就叫 `rect`，於是還沒拉框的時候
+        `self.rect()` 回 ``None``，`fillRect(None, …)` 當場炸在使用者面前
+        （2026-09-17 回報）—— 而 headless 測試沒抓到，因為視窗從沒真的畫過。
+        現在 `tests/test_ui_crop_dialog.py` 會 ``grab()`` 一次逼它畫。
+        """
         return self._rect
 
-    def set_rect(self, rect: Optional[Rect]) -> None:
+    def set_box(self, rect: Optional[Rect]) -> None:
         if self._image is None:
             return
         new = clamp_rect(rect, self._image.shape[:2])
@@ -170,7 +177,7 @@ class CropView(QWidget):
         self.update()
 
     def clear(self) -> None:
-        self.set_rect(None)
+        self.set_box(None)
 
     # ---- 影像 ↔ 畫面 ----------------------------------------------------------
     def _fit(self) -> Tuple[float, int, int]:
@@ -218,7 +225,7 @@ class CropView(QWidget):
         y0, y1 = sorted((ay, cy))
         # 拉的中途太小的框也先畫出來（不然剛按下去畫面沒反應）；放開的時候
         # `clamp_rect` 會把不到 MIN_SIDE 的當成沒拉。
-        self.set_rect((x0, y0, x1 - x0, y1 - y0))
+        self.set_box((x0, y0, x1 - x0, y1 - y0))
 
     # ---- 畫 -----------------------------------------------------------------
     def paintEvent(self, _e) -> None:  # Qt hook
@@ -304,21 +311,22 @@ class CropDialog(QDialog):
 
         self._name = str(name or "")
         if initial is not None:
-            self.view.set_rect(initial)
+            self.view.set_box(initial)
         self._refresh()
         apply_button_cursors(self)
 
     # ---- 結果 ---------------------------------------------------------------
-    def rect(self) -> Optional[Rect]:  # type: ignore[override]
-        """接受之後：框（影像像素）；按了「整張」或沒拉框就是 ``None``。"""
-        return None if self._whole else self.view.rect()
+    def box(self) -> Optional[Rect]:
+        """接受之後：框（影像像素）；按了「整張」或沒拉框就是 ``None``。
+        （同 `CropView.box`：不能叫 ``rect``，那是 Qt 的。）"""
+        return None if self._whole else self.view.box()
 
     def _on_whole(self) -> None:
         self._whole = True
         self.accept()
 
     def _refresh(self) -> None:
-        r = self.view.rect()
+        r = self.view.box()
         shape = self.view.image_shape()
         ok = self.buttons.button(QDialogButtonBox.Ok)
         if r is None:

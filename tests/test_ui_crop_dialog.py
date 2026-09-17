@@ -62,20 +62,20 @@ def test_a_dragged_box_lands_on_those_image_pixels(qapp):
     got = []
     v.rect_changed.connect(got.append)
     _press(v, _pt(10, 20)); _move(v, _pt(60, 50)); _release(v, _pt(110, 80))
-    assert v.rect() == (10, 20, 100, 60)
+    assert v.box() == (10, 20, 100, 60)
     assert got[-1] == (10, 20, 100, 60)
 
 
 def test_dragging_backwards_and_off_the_edge_still_gives_a_box(qapp):
     v = _view(qapp)
     _press(v, _pt(300, 200)); _release(v, _pt(-40, -40))
-    assert v.rect() == (0, 0, 300, 200)
+    assert v.box() == (0, 0, 300, 200)
 
 
 def test_a_click_without_a_drag_is_not_a_box(qapp):
     v = _view(qapp)
     _press(v, _pt(50, 50)); _release(v, _pt(52, 51))
-    assert v.rect() is None
+    assert v.box() is None
 
 
 def test_the_dialog_answers_box_whole_or_nothing(qapp):
@@ -84,12 +84,12 @@ def test_the_dialog_answers_box_whole_or_nothing(qapp):
     ok = dlg.buttons.button(QDialogButtonBox.Ok)
     assert ok.isEnabled() is False                  # 沒框不能「從這一塊疊」
     assert "whole image" in dlg.size_label.text()
-    dlg.view.set_rect((10, 10, 100, 50))
+    dlg.view.set_box((10, 10, 100, 50))
     assert ok.isEnabled() is True
     assert dlg.size_label.text() == "Box 100 x 50 px at (10, 10)"
-    assert dlg.rect() == (10, 10, 100, 50)
+    assert dlg.box() == (10, 10, 100, 50)
     dlg._on_whole()
-    assert dlg.rect() is None and dlg.result() == QDialog.Accepted
+    assert dlg.box() is None and dlg.result() == QDialog.Accepted
 
 
 # ---------------------------------------------------------------------------
@@ -161,3 +161,32 @@ def test_a_template_read_back_from_the_recipe_cannot_be_cropped(qapp):
     assert dlg.btn_crop.isEnabled() is False
     assert dlg._on_crop() is False
     assert "Pick a full-size image first" in dlg.tool_hint.text()
+
+
+# ---------------------------------------------------------------------------
+# 6. 真的畫一次（2026-09-17 使用者回報：還沒拉框就 `fillRect(None)` 炸）
+# ---------------------------------------------------------------------------
+def _paints(widget) -> None:
+    """逼 Qt 走一次 `paintEvent`（headless 下 `show()` 不會畫，`grab()` 會）。"""
+    widget.resize(320, 240)
+    pm = widget.grab()
+    assert not pm.isNull()
+
+
+def test_the_crop_view_paints_with_no_image_no_box_and_a_box(qapp):
+    v = crop_mod.CropView()
+    _paints(v)                                       # 沒有圖
+    v.set_image(np.zeros((240, 320), np.uint8))
+    _paints(v)                                       # 有圖、還沒拉框（炸的那個情形）
+    v.set_box((10, 10, 50, 50))
+    _paints(v)                                       # 有框
+    assert v.rect().width() == 320                   # Qt 自己的 rect() 沒被蓋掉
+
+
+def test_the_dialogs_paint(qapp):
+    _paints(crop_mod.CropDialog(np.zeros((240, 320), np.uint8), "x.tif"))
+    _paints(crop_mod.CropDialog(np.zeros((240, 320), np.uint8), "x.tif",
+                                mode=crop_mod.MODE_SEED))
+    from d4t.ui import lattice_dialog as lat_mod
+    _paints(lat_mod.LatticeDialog(np.zeros((240, 320), np.uint8), 40, 240, (7, 0),
+                                  (True, False)))

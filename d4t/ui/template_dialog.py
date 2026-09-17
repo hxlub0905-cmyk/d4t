@@ -213,11 +213,18 @@ class TemplateDialog(QDialog):
 
     # ---- 版面 ---------------------------------------------------------------
     def _build_source_row(self) -> QWidget:
+        """最上面那兩列：**圖從哪來**（第一列）與**cell 怎麼定**（第二列）。
+
+        本來是一列。F102／F103 之後那一列有十一個東西，使用者：「上方按鈕變得
+        有點多」。拆成兩列的依據是它們回答的問題不同 —— 第一列在還沒有圖的時候
+        就有意義，第二列每一顆都要先有圖。
+        """
         box = QWidget(self)
         lay = QVBoxLayout(box)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
 
+        # ---- 第一列：圖從哪來 ---------------------------------------------------
         row = QHBoxLayout()
         # **畫面上那一張優先**（F11 Region-5）。單張 SEM 那條路要疊 cell 的圖，
         # 就是使用者現在正在看的那一張 —— 逼他去磁碟上找回同一個檔案，是一段
@@ -240,7 +247,7 @@ class TemplateDialog(QDialog):
         row.addWidget(self.btn_pick)
 
         # F102：**疊之前先框一塊**。勾著的話，挑圖／用畫面上那一張之後先開
-        # 裁切視窗；沒勾就跟以前一樣整張疊。「Crop…」是事後再框（或換一塊）——
+        # 裁切視窗；沒勾就跟以前一樣整張疊。「Crop…」（第二列）是事後再框 ——
         # 兩個都要有：第一次載一張 7680² 的圖不該先花 17 秒疊整張才能裁。
         self.chk_crop = QCheckBox("Crop first", box)
         self.chk_crop.setToolTip(
@@ -248,42 +255,15 @@ class TemplateDialog(QDialog):
             "measure the cell from - leave out the defect, scribe lines and "
             "the scale bar. Unticked: the whole image is used.")
         row.addWidget(self.chk_crop)
-        self.btn_crop = QPushButton("Crop…", box)
-        self.btn_crop.setProperty("variant", "secondary")
-        self.btn_crop.setToolTip(
-            "Draw (or change) the box the cell is measured from, then "
-            "re-stack. The period is measured again on that box; regions "
-            "keep their fractions of a cell - check them afterwards.")
-        self.btn_crop.clicked.connect(self._on_crop)
-        self.btn_crop.setEnabled(False)
-        row.addWidget(self.btn_crop)
 
-        # F103：第二種量法 —— 使用者框一格，找它的複本，間距就是週期、框的左上角
-        # 就是原點。投影法答錯的那幾種 layout（交錯、兩種 pitch 混、斜的）這裡
-        # 不受影響，因為它不假設任何東西。
-        self.btn_seed = QPushButton("Mark one cell…", box)
-        self.btn_seed.setProperty("variant", "secondary")
-        self.btn_seed.setToolTip(
-            "Measure the period a different way: draw a box around exactly "
-            "one cell, its copies are found across the image and the spacing "
-            "between them is the period. The cell is then stacked starting "
-            "from the box you drew, so it looks like what you marked.")
-        self.btn_seed.clicked.connect(self._on_seed)
-        self.btn_seed.setEnabled(False)
-        row.addWidget(self.btn_seed)
+        row.addStretch(1)
+        self.path_label = QLabel("(no image chosen)", box)
+        self.path_label.setObjectName("paramHint")
+        row.addWidget(self.path_label)
+        lay.addLayout(row)
 
-        # 「算錯了怎麼知道」的答案之一：把格線鋪回原圖看。
-        self.btn_lattice = QPushButton("Check on the image…", box)
-        self.btn_lattice.setProperty("variant", "secondary")
-        self.btn_lattice.setToolTip(
-            "Draw the cell grid the template uses back onto the image. If "
-            "every box frames the same structure, the period and phase are "
-            "right; if the boxes drift onto something else towards one side, "
-            "the period is off.")
-        self.btn_lattice.clicked.connect(self._on_lattice)
-        self.btn_lattice.setEnabled(False)
-        row.addWidget(self.btn_lattice)
-
+        # ---- 第二列：cell 怎麼定 -------------------------------------------------
+        row2 = QHBoxLayout()
         # cell 多大由使用者決定：量出來的週期是**預設值不是結論**
         for label, tip in (("Cell W", "One cell is this wide, in image pixels. "
                                       "Measured from the image, but you can "
@@ -293,18 +273,18 @@ class TemplateDialog(QDialog):
             lab = QLabel(label, box)
             lab.setObjectName("paramHint")
             lab.setToolTip(tip)
-            row.addWidget(lab)
+            row2.addWidget(lab)
         self.spin_cell_w = self._spin(box, 2, 8192, 40, "Cell width in image pixels")
         self.spin_cell_h = self._spin(box, 2, 8192, 40, "Cell height in image pixels")
-        row.insertWidget(row.count() - 1, self.spin_cell_w)
-        row.addWidget(self.spin_cell_h)
+        row2.insertWidget(row2.count() - 1, self.spin_cell_w)
+        row2.addWidget(self.spin_cell_h)
 
         self.btn_double = QPushButton("×2", box)
         self.btn_double.setProperty("variant", "secondary")
         self.btn_double.setMaximumWidth(44)
         self.btn_double.setToolTip("Double both, then re-stack — a 2× cell.")
         self.btn_double.clicked.connect(self._on_double)
-        row.addWidget(self.btn_double)
+        row2.addWidget(self.btn_double)
 
         self.btn_restack = QPushButton("Re-stack", box)
         self.btn_restack.setProperty("variant", "secondary")
@@ -313,13 +293,51 @@ class TemplateDialog(QDialog):
             "keep their fractions of a cell, so a 2× cell moves them - check "
             "them afterwards.")
         self.btn_restack.clicked.connect(self.restack)
-        row.addWidget(self.btn_restack)
+        row2.addWidget(self.btn_restack)
 
-        row.addStretch(1)
-        self.path_label = QLabel("(no image chosen)", box)
-        self.path_label.setObjectName("paramHint")
-        row.addWidget(self.path_label)
-        lay.addLayout(row)
+        row2.addSpacing(16)
+
+        self.btn_crop = QPushButton("Crop\u2026", box)
+        self.btn_crop.setProperty("variant", "secondary")
+        self.btn_crop.setToolTip(
+            "Draw (or change) the box the cell is measured from, then "
+            "re-stack. The period is measured again on that box; regions "
+            "keep their fractions of a cell - check them afterwards.")
+        self.btn_crop.clicked.connect(self._on_crop)
+        self.btn_crop.setEnabled(False)
+        row2.addWidget(self.btn_crop)
+
+        # F103：第二種量法 —— 使用者框一格，找它的複本，間距就是週期、框的左上角
+        # 就是原點。投影法答錯的那幾種 layout（交錯、兩種 pitch 混、斜的）這裡
+        # 不受影響，因為它不假設任何東西。
+        self.btn_seed = QPushButton("Mark one cell\u2026", box)
+        self.btn_seed.setProperty("variant", "secondary")
+        self.btn_seed.setToolTip(
+            "Measure the period a different way: draw a box around exactly "
+            "one cell, its copies are found across the image and the spacing "
+            "between them is the period. The cell is then stacked starting "
+            "from the box you drew, so it looks like what you marked.")
+        self.btn_seed.clicked.connect(self._on_seed)
+        self.btn_seed.setEnabled(False)
+        row2.addWidget(self.btn_seed)
+
+        # 「算錯了怎麼知道」的答案之一：把格線鋪回原圖看。
+        self.btn_lattice = QPushButton("Check on the image\u2026", box)
+        self.btn_lattice.setProperty("variant", "secondary")
+        self.btn_lattice.setToolTip(
+            "Draw the cell grid the template uses back onto the image. If "
+            "every box frames the same structure, the period and phase are "
+            "right; if the boxes drift onto something else towards one side, "
+            "the period is off.")
+        self.btn_lattice.clicked.connect(self._on_lattice)
+        self.btn_lattice.setEnabled(False)
+        row2.addWidget(self.btn_lattice)
+        row2.addStretch(1)
+        # 排不下的時候要橫向捲（同工具列那一排，U1）。
+        row2_host = QWidget(box)
+        row2_host.setLayout(row2)
+        row2.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(fit_screen.scroll_row(row2_host, box))
 
         self.report = QLabel("", box)
         self.report.setObjectName("paramHint")
@@ -771,7 +789,7 @@ class TemplateDialog(QDialog):
         dlg = CropDialog(image, name, initial=initial, parent=self)
         if dlg.exec() != QDialog.Accepted:
             return False
-        return dlg.rect()
+        return dlg.box()
 
     def _on_crop(self) -> bool:
         """事後再框（或換一塊）—— 要有整張原圖才做得到（同 `restack`）。"""
@@ -797,7 +815,7 @@ class TemplateDialog(QDialog):
         dlg = CropDialog(image, name, initial=initial, parent=self, mode=MODE_SEED)
         if dlg.exec() != QDialog.Accepted:
             return False
-        rect = dlg.rect()
+        rect = dlg.box()
         return rect if rect is not None else False
 
     def _on_seed(self) -> bool:
