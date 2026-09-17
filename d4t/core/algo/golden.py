@@ -68,13 +68,45 @@ def tile_coords(shape: Tuple[int, ...], px: int, py: int,
     period refinement.
     """
     h, w = shape[:2]
-    ox, oy = origin
+    # 原點也收成整數：`GoldenCell.origin` 從 F105 起可以是小數（原圖座標），
+    # 而 `range` 吃到 float 會炸。整數進來就是恆等，逐位元組不變。
+    ox, oy = int(origin[0]), int(origin[1])
     px, py = int(px), int(py)
     if px < 1 or py < 1:
         return []
     xs = range(ox, w - px + 1, px)
     ys = range(oy, h - py + 1, py)
     return [(x, y) for y in ys for x in xs]
+
+
+def cell_origins(shape: Tuple[int, ...], px: float, py: float,
+                 origin: Tuple[float, float] = (0.0, 0.0)
+                 ) -> List[Tuple[float, float]]:
+    """小數週期版的 :func:`tile_coords`：每一個**完整**格子的左上角 ``(x, y)``。
+
+    F105：週期可以是 79.5 這種數（見 `template.build_golden_cell`）。格子的
+    位置是 ``origin + (i·px, k·py)``，而不是整數步進 —— 79.5 對 79 在 4000 px
+    上差 25 px，格線就是這樣「靠邊會滑」的。
+
+    整數參數時逐元素等於 ``tile_coords``（測試釘著）；回傳的是 float，
+    **拿去切片之前要自己決定怎麼取整** —— 疊圖不走這裡（疊圖先把影像重採樣成
+    整數 pitch 再走 ``tile_coords``），這一支是給格線檢視與「幾格」用的。
+    """
+    h, w = int(shape[0]), int(shape[1])
+    fx, fy = float(px), float(py)
+    if not (fx >= 1.0 and fy >= 1.0) or h < 1 or w < 1:
+        return []
+    ox, oy = float(origin[0]), float(origin[1])
+    out: List[Tuple[float, float]] = []
+    # 跟 `tile_coords` 一樣：右／下超出影像的那一格不算。用 1e-9 吃掉
+    # 「i·px 剛好等於邊界」的浮點誤差，免得整數參數時少一格。
+    ny = int(np.floor((h - oy - fy) / fy + 1e-9)) + 1 if h - oy >= fy else 0
+    nx = int(np.floor((w - ox - fx) / fx + 1e-9)) + 1 if w - ox >= fx else 0
+    for k in range(max(0, ny)):
+        y = oy + k * fy
+        for i in range(max(0, nx)):
+            out.append((ox + i * fx, y))
+    return out
 
 
 def stack_cells(image: np.ndarray, px: int, py: int, method: str = "mean",

@@ -446,7 +446,9 @@ def choose_origin(shape: Tuple[int, ...], px: Optional[int], py: Optional[int],
     if image is None:
         return (0, 0)
     try:
-        px_i, py_i = int(px), int(py)   # type: ignore[arg-type]
+        # 小數週期**不在這裡處理**（F105）：`template.build_golden_cell` 先把影像
+        # 重採樣成整數 pitch 再來。這裡 round 只是不讓 79.5 被 int() 安靜截成 79。
+        px_i, py_i = int(round(float(px))), int(round(float(py)))   # type: ignore[arg-type]
     except (TypeError, ValueError):
         return (0, 0)
     if px_i < 2 or py_i < 2:

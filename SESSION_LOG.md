@@ -22,6 +22,28 @@
 
 ---
 
+## F105：交錯晶格＋粗亮線上的週期量測退化 —— 小數週期、半週期陷阱、第一峰規則（2026-09-17）
+
+外部沙盒拿一張真實大圖（交錯晶格、亮線 10 px、人工驗證 41 × 79.5）回報：投影法回 (41, 40)、
+F104 的二維回 (10, 30)、仲裁照抄投影、`build_golden_cell` 再把 79.5 截成 79 —— 格線「靠邊會滑」
+（[`docs/history/plans/F105-staggered-thick-lines-period.md`](docs/history/plans/F105-staggered-thick-lines-period.md)）。
+使用者定的範圍：小數週期**做到疊圖**、加交錯分數（旋轉角另開 F106）、摘要要顯示每一句量測決定。
+
+* **`period2d`**：第一峰門檻 0.5 → 0.85（線寬峰、交錯半格 0.6–0.67 對真週期 0.92）；諧波鏈擬合次像素
+  （`px_sub`）；`autocorr2d` 補零成**線性**自相關（環狀的在視窗不是週期整數倍時拉歪遠諧波，318.47 對 318）；
+  `half_period_check` 第三票（沿軸 `ac[2q]` 比 `ac[q]` 高 0.1 才加倍）＋交錯分數。
+* **`template`**：`_measure_period` → `MeasuredPeriod`（小數、notes、stagger、doubled）；snap 是**漂移界**
+  （整張圖 ≤ 0.5 px）不是絕對值；小數疊圖 = `cv2.resize` 成整數 pitch 再走今天的整數機器（一條路徑、F86
+  逐位元組照守、相位搜尋成本不變：tile 大小 3.6 s 對 3.7 s）。`GoldenCell` 加 `period_x/y`、`stagger`、
+  `doubled`、`notes`；`origin` 可以是小數（格子左上邊 `x'/s`，不是像素中心 —— 那會少畫一列）。
+* **UI**：Cell W／H 改 `QDoubleSpinBox` 餵真的週期（否則 Re-stack 安靜用 80）；格線用 `golden.cell_origins`；
+  摘要 `cell 41 x 79.5 px` 並列出每一句 notes（F104 的「交錯」以前畫面上看不到）。
+* **測試**：`test_period2d_staggered.py` 十九條（解析式 body-centred fixture、fixture 有牙齒、每條例外規則的反向、
+  小數疊得比截成 79 的齊 0.995 對 0.932）；F86 逐位元組測試加 float 型整數參數；一條 UI。`typecheck` 上限 136 → 128。
+* **PITFALLS 加兩列**：半週期／線寬陷阱；銳利度與鋪回去的 NCC 都不是週期的裁判（錯的反而更高）。
+
+---
+
 ## F104：二維自相關找峰；模板對話框收回一列；Mark one cell 刪掉（2026-09-17）
 
 使用者看過 F102／F103 之後定的三件事（[`docs/history/plans/F104-period2d-and-fewer-buttons.md`](docs/history/plans/F104-period2d-and-fewer-buttons.md)）：

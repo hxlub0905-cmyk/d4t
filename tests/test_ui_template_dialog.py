@@ -153,6 +153,34 @@ def test_the_dialog_lays_out_the_evidence_for_judging_the_template(qapp):
     assert dlg.canvas.has_cell() is True
 
 
+def test_a_fractional_period_is_measured_stacked_and_spoken(qapp):
+    """F105：交錯晶格上量到 41 × 79.5 —— 摘要要寫小數、要講「為什麼是 79.5」、
+    Cell H 那一格要放 79.5（不是陣列的 80，否則按 Re-stack 就安靜換成 80）。
+
+    F104 的「交錯」那一句以前只留在 `gc.warnings` 裡，畫面上看不到；
+    現在每一句量測決定都在摘要上。
+    """
+    from test_period2d_staggered import bc_lattice
+
+    dlg = tpl_mod.TemplateDialog()
+    assert dlg.load_image(bc_lattice(), "staggered.tif") is True
+    said = dlg.summary()
+    assert "cell 41 x 79.5 px" in said
+    assert "staggered" in said                       # 量測決定講出來了
+    assert dlg.cell.cell.shape == (80, 41)
+    assert dlg.spin_cell_h.value() == pytest.approx(79.5, abs=0.05)
+    assert dlg.spin_cell_w.value() == 41.0
+    # Re-stack 用的是那兩格的值 —— 小數要留得住
+    assert dlg.restack() is True
+    assert dlg.cell.period_y == pytest.approx(79.5, abs=0.05)
+    assert "cell 41 x 79.5 px" in dlg.summary()
+    # 整數 pitch 的圖摘要一個字都沒變
+    dlg2 = tpl_mod.TemplateDialog()
+    dlg2.load_image(big_image(), "ok.tif")
+    assert "cell %d x 240 px" % PERIOD in dlg2.summary()
+    assert "staggered" not in dlg2.summary()
+
+
 def test_an_image_without_a_repeat_is_refused_with_a_reason(qapp):
     dlg = tpl_mod.TemplateDialog()
     noise = np.random.default_rng(1).normal(120.0, 6.0, (128, 128))

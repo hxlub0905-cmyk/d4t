@@ -67,9 +67,9 @@ from . import period as algo_period
 from . import period2d as algo_period2d
 
 __all__ = [
-    "GoldenCell", "MatchResult", "build_golden_cell", "anchor_cell",
+    "GoldenCell", "MatchResult", "MeasuredPeriod", "build_golden_cell", "anchor_cell",
     "encode_cell", "decode_cell", "tile_cell", "match_patch",
-    "patch_structure", "MIN_PERIOD_CONFIDENCE",
+    "patch_structure", "period_text", "MIN_PERIOD_CONFIDENCE", "SNAP_DRIFT_PX",
     "CELL_ENCODING",
 ]
 
@@ -101,6 +101,13 @@ MAX_SELF_REPEAT = 8
 #: 呼叫端自己指定 ``px``/``py`` 時不套用（那是使用者明說的，不是猜的）。
 MIN_PERIOD_CONFIDENCE = 40.0
 
+#: 量到的週期離整數很近時回整數 —— 判準是**漂移**不是絕對值（F105）：
+#: ``|p − round(p)| × 這一軸有幾格 ≤ 0.5 px`` 才 snap。「snap 不會讓任何一格移超過
+#: 半個像素」是讀者驗得了的一句；絕對門檻 0.1 px 在 78 格上會漂 7.8 px，正是 F105
+#: 要拿掉的那種。合成 fixture（8–12 格、鏈誤差 ~0.01）都 snap，所以整數 pitch 的
+#: 影像走的每一個 byte 都跟 F104 一樣；真實大圖 79.5 × 50 列 = 25 px 不 snap。
+SNAP_DRIFT_PX = 0.5
+
 
 @dataclass
 class GoldenCell:
@@ -129,12 +136,33 @@ class GoldenCell:
     #: 從 ``origin`` 起每 ``px``／``py`` 一格，格子裡的東西就是 ``cell``。
     #: 「把 cell 鋪回原圖」（F103 的格線檢視）與「使用者標的那一格就是原點」
     #: 都靠它；沒有它，畫面上鋪的格線跟疊進去的格子會差一個錨定量。
-    origin: Tuple[int, int] = (0, 0)
+    #: 小數週期時它是**原圖座標的小數**（F105）；整數 pitch 時仍是整數。
+    origin: Tuple[float, float] = (0, 0)
     #: 這一軸上真的量到週期了嗎。**一維的 layout 是常態**（垂直條紋只有 X 有
     #: 週期），那時候另一軸不做定位 —— 它上面沒有東西可以定位。
     periodic_x: bool = True
     periodic_y: bool = True
     warnings: List[str] = field(default_factory=list)
+    #: **真正的**週期，可以是小數（F105：79.5 對 79 在 4000 px 上差 25 px）。
+    #: ``px``／``py`` 仍然是 cell 陣列的尺寸（= round）；整數 pitch 時兩者相等。
+    #: 格線檢視、Cell W／H 那兩格、摘要都要讀這一組，不是 ``px``／``py``。
+    period_x: float = 0.0
+    period_y: float = 0.0
+    #: 交錯分數 ``ac[q/2, p/2] / ac[q, p]``：交錯（body-centred）≈ 1、規則晶格 ≈ 0。
+    stagger: float = 0.0
+    #: 半週期檢查有沒有把那一軸加倍（`period2d.half_period_check`）。
+    doubled: Tuple[bool, bool] = (False, False)
+    #: 量週期時自動做的**決定**（換了量法、加倍了）—— 每一句都要讓使用者看到
+    #: （`ui/template_dialog.summary`）。它們同時也在 ``warnings`` 裡（F104 的相容）。
+    notes: List[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # 位置參數建出來的舊呼叫（`GoldenCell(cell=…, px=8, py=8)`）沒給週期：
+        # 那就是整數 pitch，週期 = 陣列尺寸。
+        if self.period_x <= 0.0:
+            self.period_x = float(self.px)
+        if self.period_y <= 0.0:
+            self.period_y = float(self.py)
 
     @property
     def shape(self) -> Tuple[int, int]:
@@ -222,51 +250,107 @@ def anchor_cell(cell: np.ndarray,
 # --------------------------------------------------------------------------- #
 # 建模板
 # --------------------------------------------------------------------------- #
-def _measure_period(gray: np.ndarray) -> Tuple[int, int, float, float, List[str]]:
-    """兩種量法對一次 → ``(px, py, conf_x, conf_y, notes)``（0 ＝ 那一軸量不到）。
+@dataclass
+class MeasuredPeriod:
+    """`_measure_period` 的答案：兩軸的週期（可以是小數）、信心、講給人聽的決定。"""
+
+    px: float = 0.0
+    py: float = 0.0
+    conf_x: float = 0.0
+    conf_y: float = 0.0
+    notes: List[str] = field(default_factory=list)
+    stagger: float = 0.0
+    doubled: Tuple[bool, bool] = (False, False)
+
+
+def period_text(px: float, py: float) -> str:
+    """``"40 x 240"`` 或 ``"41 x 79.5"``（``%d`` 對小數會安靜截斷，所以要有這一支）。"""
+    return "%s x %s" % (algo_period2d.fmt_px(px), algo_period2d.fmt_px(py))
+
+
+def _snap(p: float, span: int) -> float:
+    """離整數近到整張影像漂不到 ``SNAP_DRIFT_PX`` 就回整數（見常數說明）。"""
+    p = float(p)
+    r = float(round(p))
+    if p < 1.0 or r < 1.0:
+        return p
+    cells = float(span) / p
+    return r if abs(p - r) * cells <= SNAP_DRIFT_PX else p
+
+
+def _measure_period(gray: np.ndarray,
+                    given: Tuple[bool, bool] = (False, False)) -> MeasuredPeriod:
+    """三種量法對一次 → :class:`MeasuredPeriod`（0 ＝ 那一軸量不到）。
 
     投影法（`period.estimate_period`）是主：四個月的實測與諧波修正都在它身上。
-    二維自相關（`period2d.estimate_period_2d`，F104）只在兩種情況接手，
-    **兩個同意的時候什麼都不改**（黃金值不動）：
+    二維自相關（`period2d.estimate_period_2d`，F104）在兩種情況接手，
+    **兩個同意的時候整數不改**（黃金值不動）：
 
     * 投影法那一軸量不到（信心不夠）、二維量得到 —— 交錯 layout 的 X 軸就是這樣
       （相鄰列相位差半格，投影互相抵消）；
     * 二維量到的是投影法的**整數倍**（±1 px）—— 投影看到的是半格的重複，
       真正的矩形單元要兩列才重複一次。
 
-    每一次接手都在 notes 講一句：換了量法是使用者該知道的事。
+    F105 加的三件事：
+
+    * **次像素**：採用二維的軸拿它的諧波鏈擬合值；兩者同意的軸也拿它當小數修正
+      （投影法只出整數）。離整數近到整張圖漂不到半個像素就 snap 回整數（`_snap`）。
+    * **第三票**（`period2d.half_period_check`）：仲裁完的答案是不是真週期的一半 ——
+      投影法在交錯晶格上一定回半週期，而它自己的加倍規則在那裡永遠不會觸發。
+      ``given`` 標的軸（使用者明講的）不看。
+    * **交錯分數**進答案（一個可以畫分布的數字），加倍與否也進答案。
+
+    每一次接手或加倍都在 notes 講一句：換了量法、改了數字是使用者該知道的事。
     """
     est = algo_period.estimate_period(gray)
     two = algo_period2d.estimate_period_2d(gray)
     notes: List[str] = list(est.warnings or [])
-    out = []
-    for axis, p1, c1, p2, c2 in (("across", est.px, est.confidence_x,
-                                  two.px, two.confidence_x),
-                                 ("down", est.py, est.confidence_y,
-                                  two.py, two.confidence_y)):
+    if two.px is not None or two.py is not None:
+        notes.extend(two.warnings or [])       # 鏈不直那一句；「都量不到」由呼叫端講
+    h, w = gray.shape[:2]
+    out: List[Tuple[float, float]] = []
+    for axis, span, p1, c1, p2, p2s, c2 in (
+            ("across", w, est.px, est.confidence_x, two.px, two.px_sub, two.confidence_x),
+            ("down", h, est.py, est.confidence_y, two.py, two.py_sub, two.confidence_y)):
         p1i, c1f = int(p1 or 0), float(c1 or 0.0)
         p2i, c2f = int(p2 or 0), float(c2 or 0.0)
+        # 先 snap 再講：notes 裡的數字要跟最後用的那個一樣（48.01 → 48）。
+        p2f = _snap(float(p2s), span) if p2s else float(p2i)
         ok1 = p1i >= 2 and c1f >= MIN_PERIOD_CONFIDENCE
         ok2 = p2i >= 2 and c2f >= MIN_PERIOD_CONFIDENCE
         if ok2 and not ok1:
-            out.append((p2i, c2f))
-            notes.append("period %s measured by 2-D autocorrelation (%d px); "
+            out.append((p2f, c2f))
+            notes.append("period %s measured by 2-D autocorrelation (%s px); "
                          "the projection found none - rows are probably "
-                         "staggered" % (axis, p2i))
+                         "staggered" % (axis, algo_period2d.fmt_px(p2f)))
         elif ok2 and ok1 and p2i > p1i + 1 and \
                 min(abs(p2i - k * p1i) for k in range(2, 9)) <= 1:
-            out.append((p2i, c2f))
+            out.append((p2f, c2f))
             notes.append("the projection saw a repeat every %d px %s, but the "
-                         "layout only repeats every %d px (staggered rows); "
-                         "using %d" % (p1i, axis, p2i, p2i))
+                         "layout only repeats every %s px (staggered rows); "
+                         "using %s" % (p1i, axis, algo_period2d.fmt_px(p2f),
+                                       algo_period2d.fmt_px(p2f)))
+        elif ok2 and ok1 and abs(p2i - p1i) <= 1:
+            out.append((p2f, c1f))             # 同意：整數不變，小數從諧波鏈來
         else:
-            out.append((p1i, c1f))
+            out.append((float(p1i), c1f))
     (px, cx), (py, cy) = out
-    return px, py, cx, cy, notes
+    hp = algo_period2d.half_period_check(gray, px, py, ac=two.ac, skip=given)
+    fx, fy = _snap(hp.px, w), _snap(hp.py, h)
+    # 加倍那一句自己寫（不用 `hp.notes`）：數字要是 snap 之後真的用的那個。
+    for axis, was, doubled, now in (("across", px, hp.doubled_x, fx),
+                                    ("down", py, hp.doubled_y, fy)):
+        if doubled:
+            notes.append("the period %s was doubled after the half-period check "
+                         "(%s -> %s px); rows are probably staggered"
+                         % (axis, algo_period2d.fmt_px(was), algo_period2d.fmt_px(now)))
+    return MeasuredPeriod(px=fx, py=fy, conf_x=cx, conf_y=cy,
+                          notes=notes, stagger=float(hp.stagger),
+                          doubled=(bool(hp.doubled_x), bool(hp.doubled_y)))
 
 
-def build_golden_cell(image: Any, px: Optional[int] = None,
-                      py: Optional[int] = None, method: str = "mean",
+def build_golden_cell(image: Any, px: Optional[float] = None,
+                      py: Optional[float] = None, method: str = "mean",
                       anchor: bool = True,
                       progress: Optional[Callable[[str, int, int], Any]] = None
                       ) -> GoldenCell:
@@ -275,6 +359,20 @@ def build_golden_cell(image: Any, px: Optional[int] = None,
     ``px`` / ``py`` 留空就從影像自己量（``period.estimate_period`` 投影法，再拿
     ``period2d.estimate_period_2d`` 二維自相關對一次 —— 見 :func:`_measure_period`）。
     量不到週期時回一個空的 cell 並在 ``warnings`` 說明 —— 不猜。
+
+    小數週期（F105）
+    ----------------
+    週期可以是 79.5。疊圖的做法是**把影像重採樣一次成整數 pitch**（``cv2.resize``
+    雙線性，80/79.5 = 1.0063 倍），然後 `choose_origin`／`stack_cells`／
+    `stack_agreement` 在那張圖上**照整數的程式碼跑**：一條路徑、F86 的
+    「逐位元組相同」照守、相位搜尋的成本不變（自寫一個 remap 的小數疊圖器要
+    281 次 × 0.12 s ≈ 35 s，比今天慢十倍，而 `period.choose_origin` 的說明
+    明白寫過為了速度改搜尋答案的代價）。整數 pitch 時 ``resize`` 根本不叫，
+    每一個 byte 都跟以前一樣。
+
+    出來的 ``cell`` 是 round(週期) 個像素寬、代表一個真的週期；``period_x``／
+    ``period_y`` 記真的週期，``origin`` 換回**原圖座標**（``x = x' / s``，
+    格子的左上邊），格線檢視就是靠它們不滑。
 
     ``progress``（F86，2026-09-07）
     ------------------------------
@@ -301,17 +399,20 @@ def build_golden_cell(image: Any, px: Optional[int] = None,
     given_x, given_y = px is not None, py is not None
     conf_x = 100.0 if given_x else 0.0
     conf_y = 100.0 if given_y else 0.0
+    notes: List[str] = []
+    stagger, doubled = 0.0, (False, False)
     if not (given_x and given_y):
         if not _say("Measuring the period\u2026", 0, 1):
             return cancelled
-        mpx, mpy, mcx, mcy, notes = _measure_period(gray)
+        m = _measure_period(gray, given=(given_x, given_y))
         if not given_x:
-            px, conf_x = mpx, mcx
+            px, conf_x = m.px, m.conf_x
         if not given_y:
-            py, conf_y = mpy, mcy
+            py, conf_y = m.py, m.conf_y
+        notes, stagger, doubled = list(m.notes), m.stagger, m.doubled
         warnings.extend(notes)
 
-    px, py = int(px or 0), int(py or 0)
+    px, py = float(px or 0.0), float(py or 0.0)
     h, w = gray.shape[:2]
     # 一維的 layout 是常態：垂直條紋只有 X 有週期，Y 上量不到東西**是正確的**。
     # 那一軸就取整張影像的長度當「一格」——反正它上面沒有相位可言。
@@ -323,20 +424,31 @@ def build_golden_cell(image: Any, px: Optional[int] = None,
     periodic_x = px >= 2 and conf_x >= MIN_PERIOD_CONFIDENCE
     periodic_y = py >= 2 and conf_y >= MIN_PERIOD_CONFIDENCE
     if not periodic_x and not periodic_y:
-        return GoldenCell(cell=np.zeros((0, 0), np.uint8), px=px, py=py,
+        return GoldenCell(cell=np.zeros((0, 0), np.uint8),
+                          px=int(round(px)), py=int(round(py)),
                           confidence_x=conf_x, confidence_y=conf_y,
                           periodic_x=False, periodic_y=False,
                           warnings=warnings + [
                               "no repeating period could be measured in this "
-                              "image; a Golden Cell needs a periodic layout"])
+                              "image; a Golden Cell needs a periodic layout"],
+                          period_x=px, period_y=py, notes=notes)
     if not periodic_x:
-        px = w
+        px = float(w)
         warnings.append("no period across the image; the cell spans the full "
                         "width and no region is located along that direction")
     if not periodic_y:
-        py = h
+        py = float(h)
         warnings.append("no period down the image; the cell spans the full "
                         "height and no region is located along that direction")
+
+    # 小數週期 → 重採樣成整數 pitch（見 docstring）。整數時 `work is gray`。
+    ix, iy = int(round(px)), int(round(py))
+    sx, sy = ix / px, iy / py
+    fractional = not (px.is_integer() and py.is_integer())
+    work = gray
+    if fractional:
+        work = cv2.resize(gray, (int(round(w * sx)), int(round(h * sy))),
+                          interpolation=cv2.INTER_LINEAR)
 
     # **相位搜尋是這一支的全部成本**（281 個候選 × 整張圖）—— 進度就報它。
     stop = [False]
@@ -347,12 +459,12 @@ def build_golden_cell(image: Any, px: Optional[int] = None,
             return False
         return True
 
-    origin = algo_period.choose_origin(gray.shape, px, py, image=gray,
+    origin = algo_period.choose_origin(work.shape, ix, iy, image=work,
                                        progress=_phase)
     if stop[0]:
         return cancelled
-    cell = algo_golden.stack_cells(gray, px, py, method=method, origin=origin)
-    n_cells = len(algo_golden.tile_coords(gray.shape, px, py, origin))
+    cell = algo_golden.stack_cells(work, ix, iy, method=method, origin=origin)
+    n_cells = len(algo_golden.tile_coords(work.shape, ix, iy, origin))
 
     roll = (0, 0)
     if anchor:
@@ -370,16 +482,24 @@ def build_golden_cell(image: Any, px: Optional[int] = None,
     # 對得齊嗎」，而疊完之後那幾格已經不在了。用 `choose_origin` 挑的那個
     # origin —— 也就是真正被疊起來的那一組格子；`anchor_cell` 之後的捲動是
     # 整張一起移，不影響格子之間的一致性。
-    agreement = algo_golden.stack_agreement(gray, px, py, origin=origin)
+    agreement = algo_golden.stack_agreement(work, ix, iy, origin=origin)
     # 錨定把 cell 往左（上）捲了 roll，等於格線原點往右（下）移 roll。
-    eff = ((int(origin[0]) + int(roll[0])) % max(1, int(px or 0)),
-           (int(origin[1]) + int(roll[1])) % max(1, int(py or 0)))
-    return GoldenCell(cell=cell, px=px, py=py, ghosting=float(score),
+    eff_i = ((int(origin[0]) + int(roll[0])) % max(1, ix),
+             (int(origin[1]) + int(roll[1])) % max(1, iy))
+    eff: Tuple[float, float] = eff_i
+    if fractional:
+        # 重採樣座標 → 原圖座標。格線畫的是格子的**左上邊**，所以用像素邊的對應
+        # ``x = x' / s``（不是像素中心的 ``(x'+0.5)/s − 0.5``：那會把原點 0 換成
+        # −0.003，再 mod 週期就繞成 79.499 —— 整整少畫一列格子）。
+        eff = ((eff_i[0] / sx) % px, (eff_i[1] / sy) % py)
+    return GoldenCell(cell=cell, px=ix, py=iy, ghosting=float(score),
                       lap_var=float(lap_var), agreement=float(agreement),
                       confidence_x=conf_x,
                       confidence_y=conf_y, anchor=roll, n_cells=int(n_cells),
                       periodic_x=periodic_x, periodic_y=periodic_y,
-                      warnings=warnings, origin=eff)
+                      warnings=warnings, origin=eff,
+                      period_x=px, period_y=py, stagger=float(stagger),
+                      doubled=doubled, notes=notes)
 
 
 # --------------------------------------------------------------------------- #

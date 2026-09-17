@@ -117,8 +117,9 @@ def test_the_stack_is_unchanged_where_the_two_methods_agree():
 
 def test_the_measure_step_only_takes_over_for_integer_multiples():
     """投影 30、二維 45（不是整數倍）→ 照投影；投影 30、二維 60 → 接手。"""
-    px, py, cx, cy, notes = template._measure_period(np.asarray(squares(), np.uint8))
-    assert (px, py) == (32, 24) and notes == []
+    m = template._measure_period(np.asarray(squares(), np.uint8))
+    assert (m.px, m.py) == (32, 24) and m.notes == []
+    assert m.doubled == (False, False)
 
 
 # ---------------------------------------------------------------------------

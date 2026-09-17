@@ -247,6 +247,38 @@ def test_the_fast_stack_is_byte_for_byte_the_old_one(side, pitch):
         got = stack_cells(img, px, py, origin=origin)
         want = _stack_the_old_way(img, px, py, origin)
         assert np.array_equal(got, want), (side, pitch, origin)
+        # F105：週期與原點從此可以是 float 型別（`build_golden_cell` 回小數週期）。
+        # **值是整數的 float 要走同一條路、同一組 byte** —— 那是「整數 pitch 的
+        # 影像一個 byte 都不變」這條原則的實際檢查點。
+        got_f = stack_cells(img, float(px), float(py),
+                            origin=(float(origin[0]), float(origin[1])))
+        assert np.array_equal(got_f, want), (side, pitch, origin, "float args")
+
+
+def test_cell_origins_is_tile_coords_on_integer_periods():
+    """F105 的 `cell_origins`（小數週期的格子位置）在整數參數上要逐元素等於
+    `tile_coords` —— 格線檢視換了它之後，整數的圖畫出來的格子不准動。"""
+    from d4t.core.algo.golden import cell_origins, tile_coords
+    for shape, px, py, origin in (((288, 320), 24, 32, (0, 0)),
+                                  ((288, 320), 24, 32, (5, 7)),
+                                  ((100, 100), 7, 7, (6, 6)),
+                                  ((50, 50), 60, 10, (0, 0)),       # 一格都放不下
+                                  ((240, 320), 40, 240, (7, 0))):   # 一維 layout
+        want = tile_coords(shape, px, py, origin)
+        got = cell_origins(shape, float(px), float(py),
+                           (float(origin[0]), float(origin[1])))
+        assert [(int(x), int(y)) for x, y in got] == want, (shape, px, py, origin)
+        assert all(float(x).is_integer() and float(y).is_integer() for x, y in got)
+
+
+def test_cell_origins_steps_by_the_fractional_period():
+    """79.5 不是 79：第 k 格在 k·79.5，不是 k·79 —— 那 25 px 就是格線靠邊會滑的量。"""
+    from d4t.core.algo.golden import cell_origins
+    got = cell_origins((4000, 41), 41.0, 79.5, (0.0, 0.0))
+    ys = [y for _x, y in got]
+    assert ys[:3] == [0.0, 79.5, 159.0]
+    assert ys[-1] + 79.5 <= 4000 < ys[-1] + 2 * 79.5     # 最後一格是完整的、再一格就出界
+    assert len(got) == 50
 
 
 def test_the_median_path_is_untouched():
