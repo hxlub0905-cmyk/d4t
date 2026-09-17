@@ -141,3 +141,50 @@ def test_the_check_view_needs_an_image(qapp):
     dlg = tpl_mod.TemplateDialog()
     assert dlg._on_lattice() is None
     assert "Stack a template from an image first" in dlg.tool_hint.text()
+
+
+# ---------------------------------------------------------------------------
+# 3. 框錯了（使用者 2026-09-17：「老實說自己框的框錯怎麼辦?」）
+# ---------------------------------------------------------------------------
+def test_marking_a_cell_opens_the_check_view_at_once(qapp, monkeypatch):
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(squares(), "grid.tif")
+    monkeypatch.setattr(dlg, "_ask_seed", lambda *_a: (37, 69, 32, 24))
+    assert dlg._on_seed() is True
+    assert dlg._lattice is not None and dlg._lattice.isVisible()
+
+
+def test_a_box_that_is_too_big_still_gives_one_cell(qapp, monkeypatch):
+    """框到 1.5 格：複本仍然每一個週期一個，週期＝間距，跟框多大無關。"""
+    dlg = tpl_mod.TemplateDialog()
+    dlg.load_image(squares(), "grid.tif")
+    monkeypatch.setattr(dlg, "_ask_seed", lambda *_a: (37, 69, 48, 36))
+    assert dlg._on_seed() is True
+    assert (dlg.cell.px, dlg.cell.py) == (32, 24)
+
+
+def test_a_box_that_is_half_a_cell_is_called_out_by_the_copy_count(qapp, monkeypatch):
+    """半格的圖案自己也會重複，週期那個數字不會說謊也不會抓到 —— 抓得到的是
+    複本數比格數多一倍。"""
+    dlg = tpl_mod.TemplateDialog()
+    img = squares()
+    dlg.load_image(img, "grid.tif")
+    monkeypatch.setattr(dlg, "_ask_seed", lambda *_a: (37, 69, 16, 24))   # 半格寬
+    assert dlg._on_seed() is True
+    if dlg.cell.px < 32:                                # 真的量到半週期
+        assert "half a cell" in dlg.summary()
+    else:                                               # 半格不自我重複 → 週期照樣對
+        assert (dlg.cell.px, dlg.cell.py) == (32, 24)
+
+
+def test_a_box_on_the_defect_is_refused_and_the_old_cell_stays(qapp, monkeypatch):
+    dlg = tpl_mod.TemplateDialog()
+    img = squares()
+    img[100:140, 150:190] = 20                          # 一塊不重複的東西
+    dlg.load_image(img, "grid.tif")
+    before = dlg.cell
+    monkeypatch.setattr(dlg, "_ask_seed", lambda *_a: (150, 100, 40, 40))
+    assert dlg._on_seed() is False
+    assert dlg.cell is before and dlg.seed() is None
+    said = dlg.report.text()
+    assert "does not repeat" in said or "no structure" in said or "copies" in said

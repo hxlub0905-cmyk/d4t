@@ -828,8 +828,13 @@ class TemplateDialog(QDialog):
         if got is False:
             return False
         full = self._full if self._full is not None else self._source
-        return self.load_image(full, self._full_name or self._source_path,
-                               crop=self._crop, seed=got)
+        ok = self.load_image(full, self._full_name or self._source_path,
+                             crop=self._crop, seed=got)
+        if ok:
+            # 框錯了最快的發現方式是**看**：格線一鋪回去，框到半格、框到兩種
+            # 結構、原點落在奇怪的地方，一眼就看得出來。所以標完就直接打開。
+            self._on_lattice()
+        return ok
 
     def seed(self) -> Optional[Tuple[int, int, int, int]]:
         """使用者標的那一格（`_source` 像素）；沒有就是 ``None``（投影法量的）。"""
@@ -1117,6 +1122,13 @@ class TemplateDialog(QDialog):
         for w in r.warnings:
             if "uneven" in w:
                 text += " - " + w
+        # 框到半格的那種錯，週期本身不會說（半格圖案自己也重複）；說得出來的是
+        # **複本數對不上格數**：找到的複本比格線上的格子多一倍，就是框了半格。
+        gc = self.cell
+        if gc is not None and gc.n_cells > 0 and r.n_copies >= 2 * gc.n_cells:
+            text += (" - %d copies for %d cells in the grid: the box was "
+                     "probably half a cell (or less); mark one whole cell"
+                     % (r.n_copies, gc.n_cells))
         return text
 
     def self_period(self) -> Tuple[int, int]:
