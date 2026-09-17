@@ -44,7 +44,27 @@ from . import fit_screen
 from .theme import TOKENS
 from .widgets import apply_button_cursors
 
-__all__ = ["CropView", "CropDialog", "MIN_SIDE", "crop_array"]
+__all__ = ["CropView", "CropDialog", "MIN_SIDE", "MODE_CROP", "MODE_SEED",
+           "crop_array"]
+
+#: 兩種用法、同一個手勢（F103）：``crop`` 是「只看這一塊」，``seed`` 是「這一格
+#: 就是一個 cell」。差別只在標題、提示與那顆確定鈕的字 —— 座標、拉框、回傳
+#: 全部一樣，所以不是兩個對話框。
+MODE_CROP = "crop"
+MODE_SEED = "seed"
+_WORDING = {
+    MODE_CROP: ("Crop before stacking",
+                "Drag a box around the part of the image the cell should be "
+                "measured from. Leave out the defect, scribe lines, the scale "
+                "bar and anything that is not the repeating layout.",
+                "Stack from this box"),
+    MODE_SEED: ("Mark one cell",
+                "Drag a box around exactly one repeating cell - one period "
+                "across and one down. Its copies are then found across the "
+                "image, the spacing between them is the period, and the "
+                "box's top-left corner becomes the origin of the grid.",
+                "Use this as the cell"),
+}
 
 Rect = Tuple[int, int, int, int]
 
@@ -240,19 +260,19 @@ class CropDialog(QDialog):
 
     def __init__(self, image: Any, name: str = "",
                  initial: Optional[Rect] = None,
-                 parent: Optional[QWidget] = None):
+                 parent: Optional[QWidget] = None,
+                 mode: str = MODE_CROP):
         super().__init__(parent)
-        self.setWindowTitle("Crop before stacking")
+        self.mode = mode if mode in _WORDING else MODE_CROP
+        title, hint_text, ok_text = _WORDING[self.mode]
+        self.setWindowTitle(title)
         fit_screen.fit(self, 960, 720)
         self._whole = False
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 12, 12, 12)
         lay.setSpacing(8)
-        hint = QLabel(
-            "Drag a box around the part of the image the cell should be "
-            "measured from. Leave out the defect, scribe lines, the scale bar "
-            "and anything that is not the repeating layout.", self)
+        hint = QLabel(hint_text, self)
         hint.setObjectName("paramHint")
         hint.setWordWrap(True)
         lay.addWidget(hint)
@@ -270,12 +290,14 @@ class CropDialog(QDialog):
         self.btn_whole.setProperty("variant", "secondary")
         self.btn_whole.setToolTip("No crop - measure the cell from every pixel.")
         self.btn_whole.clicked.connect(self._on_whole)
+        # 「整張」在標一格的時候沒有意義（一格不可能是整張圖）。
+        self.btn_whole.setVisible(self.mode == MODE_CROP)
         row.addWidget(self.btn_whole)
         lay.addLayout(row)
 
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, self)
-        self.buttons.button(QDialogButtonBox.Ok).setText("Stack from this box")
+        self.buttons.button(QDialogButtonBox.Ok).setText(ok_text)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         lay.addWidget(self.buttons)
@@ -301,9 +323,12 @@ class CropDialog(QDialog):
         ok = self.buttons.button(QDialogButtonBox.Ok)
         if r is None:
             ok.setEnabled(False)
-            self.size_label.setText(
-                "No box yet - the whole image (%d x %d px) would be used."
-                % (shape[1], shape[0]) if shape else "")
+            if self.mode == MODE_SEED:
+                self.size_label.setText("No box yet - draw one around one cell.")
+            else:
+                self.size_label.setText(
+                    "No box yet - the whole image (%d x %d px) would be used."
+                    % (shape[1], shape[0]) if shape else "")
             return
         ok.setEnabled(True)
         self.size_label.setText("Box %d x %d px at (%d, %d)" % (r[2], r[3], r[0], r[1]))

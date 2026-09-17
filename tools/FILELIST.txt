@@ -7,7 +7,7 @@ e5722c68d4660d2667e8b5a239fc4d24d27ecd43 AGENTS.md
 f023c0e11cdbf4c034a29329a5b50fb35d736995 CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 3c9d9571ef29ee305143c832abd465e55d28051c README.md
-87a9415bb0fd91df97d007f57edef248b2790e99 SESSION_LOG.md
+f27231f4f0a6636efe08ed46a16b74568440562f SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 b6b460252efdafaf651c696f5e1c354c6d135479 d4t/__init__.py
 b96cb2977eccbe3c7c2b4cd5e1c44d37401128d5 d4t/__main__.py
@@ -29,10 +29,11 @@ fccc21aa7062843066a353149d50448a613098b7 d4t/core/algo/period.py
 acba11d258e8a4fb5250d478a59b2d02fe57fe35 d4t/core/algo/profile.py
 c1049c4ae6c2505db6e37b7edeaf364e1244b026 d4t/core/algo/quality.py
 5cce5bdd16ae3302b243ed606b5795ffb5e8ad59 d4t/core/algo/roi.py
+a8019c4fd491074d67edd0982e987ac960b74c47 d4t/core/algo/seed.py
 7ba9df9be2f85d10c0597f0bd64371269a051626 d4t/core/algo/shape.py
 68cc4103e16118ddd9b4a8effdf16a6e805c493a d4t/core/algo/snr.py
 37ca6111e8c24e5e39a05450e4e1ea2d7dd74039 d4t/core/algo/subpixel.py
-502d473a5250d126e267e00b392ff4973e2eba91 d4t/core/algo/template.py
+df824738746dc8e4129e501374d3cc47d974cae1 d4t/core/algo/template.py
 8f6dfdf253a710588b334e1c009e2521c3bf7e46 d4t/core/algo/uniformity.py
 b5fe256d267f2d487c83b8ac2c036102cbd6f1a4 d4t/core/calibration.py
 78924f0edd38b3d96346542c63372c7fee679a91 d4t/core/export/__init__.py
@@ -106,7 +107,7 @@ e78f82f7bc4f40733f8f34d3a690fd7b975320c0 d4t/ui/cell_canvas.py
 2bc3c0230f6cedcd99461f02c0607f92367ca77b d4t/ui/chips.py
 1456ca791afced0be73ecadb874afbdf0f5de7f0 d4t/ui/clipboard.py
 7935652b2c400dcfa78c66dccfd608b61de3b0e9 d4t/ui/crashlog.py
-15823174430bb403628a46ec936d563baec15e2c d4t/ui/crop_dialog.py
+88aee13bb7d48438a94776af892cdcb35bb0a4b7 d4t/ui/crop_dialog.py
 0b5b9bda40faab10def35e9e749c3cf7ef5f5d3f d4t/ui/decide_panel.py
 9475e553fa9c604e9d301b99c6c5e77bd828fc28 d4t/ui/edit_plan.py
 85971b010d882a877401905910c15f97c1ddcd50 d4t/ui/feature_panel.py
@@ -124,6 +125,7 @@ eba83449a5a176d987ec5b531c45b233ed2a5d47 d4t/ui/glyphs.py
 1e432a9779d8762722ac3320185862080af311af d4t/ui/icons.py
 5c366f8c72112db19328032d72efbed756463190 d4t/ui/image_view.py
 2d8479b68dd0ffe56cfc38282b03272894f1d0b1 d4t/ui/inspectors.py
+b5bb82fb3ff50b35ff0bac51908c2ae9763cc875 d4t/ui/lattice_dialog.py
 3ae460d9afe25a5db61b7e72389c30b3d059b05f d4t/ui/library.py
 d577ffb1139dedd58a91b63dc21ad922108098c9 d4t/ui/locales/zh_TW.json
 44ad3ba81e088264db8b20d551959b0ee3468fd4 d4t/ui/number_picker.py
@@ -142,7 +144,7 @@ f9e23c2e81ab4b7cb8769cdc447e8fbc3c58c861 d4t/ui/status_action.py
 bd45db6478fdf58b021de5a75a1d0a7ee82d7986 d4t/ui/status_log.py
 dc3964569d44161c7d910f0c4dea86feebc6e6d7 d4t/ui/strings.py
 238aae2e821ad147188a6a29f7140061350bfb1e d4t/ui/studio.py
-c85ffb268f8871d20d862af763d4f654cf384305 d4t/ui/template_dialog.py
+3109a9bce3bdb9e1d7b7683d808e5ba89300571d d4t/ui/template_dialog.py
 5232721acb297265ec27470063c3fdcdce1fae25 d4t/ui/theme.py
 e1372118c68717fe59c9a828760d8c50c0e23b77 d4t/ui/threshold_view.py
 fc022de0bcc322683dec3c171b5f0f24dfde33b2 d4t/ui/tree_panel.py
@@ -158,7 +160,7 @@ ac550736794fc97ac62439d943e30565aab97b91 d4t/ui/welcome.py
 5f55b48a2b3d2db3d39a950065209d804346f8af d4t/ui/wiring_slot.py
 c9417fddef0cb8c516cf8bafdeb240023f2f1341 d4t/ui/workbench.py
 93e2779f660fda218b0ebd8f056042aca6deeb4c d4t/ui/workers.py
-fef6f9665ba04d4ee595395fc037467053080e7d docs/ARCHITECTURE.md
+2128ab9037eb1caf28998dc1b431b57e14102969 docs/ARCHITECTURE.md
 a549839a9caa14319b2a80765e50ced6e2c2edf2 docs/FAB-VALIDATION.md
 1365e450a6a568fb0520113e40af42a87cb907df docs/GLAS-INTERFACE.md
 9853f981ac548f4c5ab8b92d6a144ac57b36c3a8 docs/HANDOVER.md
@@ -313,6 +315,7 @@ c99f6b6166a2f25986a65c6eba2e019401e4ed7d tests/test_roi_cross_phase.py
 5c7e5402d90dc7d10602c93d8e8e87feb96ba1ec tests/test_rsem_ingest.py
 bfca03c9af98af641b7618993299825d80b71092 tests/test_sampling.py
 d4970b4251f7710ec2dc51413496330f07a1c2bf tests/test_scale.py
+9d47160e10a5b23f40cdf4106bdc25edb9a049ca tests/test_seed_period.py
 b8c1847335f7a1e077e8eabb4ff2fedc8341d76e tests/test_shipped_recipes.py
 cfc99c167d84014f55bd0516ca45eb8704237d48 tests/test_show_template.py
 11dc4e05803a5223fd1a8f0b609285a029e182f0 tests/test_size_ceilings.py
@@ -415,6 +418,7 @@ dfcb8b4cae67f5759f0b2c9c9cb30e04eac73652 tests/test_ui_results_table.py
 57df409179f5a1b598488d870e3b81694ad2f08f tests/test_ui_route_by.py
 9e0c86e1fa202411d117cde077e9941452e1dacf tests/test_ui_save_recipe.py
 94a2753836077f2ec6aca34db7ad3e9c8fa49613 tests/test_ui_scope_profiles.py
+398a76999fd1c1a486a3705dbb90047fcf978c78 tests/test_ui_seed_and_lattice.py
 d5fd75bbc9b1b3b6874af2d0db2713ff7de57ed2 tests/test_ui_small_screen.py
 5d8ad3077c1ddf78a1848758217f51a710d8db98 tests/test_ui_splitters.py
 9e74f08478ccac523398487764e72763368ca078 tests/test_ui_strings.py

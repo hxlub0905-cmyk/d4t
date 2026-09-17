@@ -289,6 +289,7 @@ d4t/
 │   │   ├── edge.py subpixel.py shape.py profile.py  #   CD 的四塊：剖面、次像素、團塊、投影
 │   │   ├── grid.py mask.py roi.py                   #   條紋→框／label map→框／MultiROISet
 │   │   ├── period.py golden.py template.py          #   週期估測／Golden Cell 疊圖／模板定位
+│   │   ├── seed.py                #   從使用者標的一格量週期（複本間距）與原點（F103）
 │   │   └── pairing.py                               #   兩批 defect 的座標配對（容差內、一對一）
 │   ├── pipeline/             # 引擎
 │   │   ├── context.py        #   Context（images／features／regions／meta）—— 步驟間的唯一介面
@@ -363,6 +364,8 @@ d4t/
     ├── gallery.py region_check.py      #   縮圖網格（虛擬捲動，撐 10k+）／區域畫在很多顆上
     ├── inspectors.py         #   每張卡自己的儀表（依 `Step.key` 註冊）
     ├── template_dialog.py    #   從大圖疊 Golden Cell 模板（模板存進 recipe）
+    ├── crop_dialog.py        #   疊之前先框一塊（crop）／框一格當 cell（seed）—— 同一個手勢（F102/F103）
+    ├── lattice_dialog.py     #   把引擎真的用的格線鋪回原圖看週期對不對（F103）
     ├── uniformity_window.py  #   均勻度那四張圖**自己的視窗**（F87）—— 儀表太窄讀不動
     │                         #     ⚠ 這裡不畫圖：`core/export` 產的 SVG 交給 QSvgRenderer，
     │                         #     畫面上跟寫出去的逐位元組相同

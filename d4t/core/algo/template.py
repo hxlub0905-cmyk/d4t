@@ -124,6 +124,11 @@ class GoldenCell:
     confidence_y: float = 0.0
     anchor: Tuple[int, int] = (0, 0)    # 為了錨定地標捲動了多少
     n_cells: int = 0
+    #: 格線的原點（影像像素，``0 <= ox < px``），**已經把錨定的捲動算進去**：
+    #: 從 ``origin`` 起每 ``px``／``py`` 一格，格子裡的東西就是 ``cell``。
+    #: 「把 cell 鋪回原圖」（F103 的格線檢視）與「使用者標的那一格就是原點」
+    #: 都靠它；沒有它，畫面上鋪的格線跟疊進去的格子會差一個錨定量。
+    origin: Tuple[int, int] = (0, 0)
     #: 這一軸上真的量到週期了嗎。**一維的 layout 是常態**（垂直條紋只有 X 有
     #: 週期），那時候另一軸不做定位 —— 它上面沒有東西可以定位。
     periodic_x: bool = True
@@ -219,12 +224,18 @@ def anchor_cell(cell: np.ndarray,
 def build_golden_cell(image: Any, px: Optional[int] = None,
                       py: Optional[int] = None, method: str = "mean",
                       anchor: bool = True,
-                      progress: Optional[Callable[[str, int, int], Any]] = None
+                      progress: Optional[Callable[[str, int, int], Any]] = None,
+                      origin: Optional[Tuple[int, int]] = None,
                       ) -> GoldenCell:
     """從大圖疊出一個 Golden Cell。
 
     ``px`` / ``py`` 留空就從影像自己量（``period.estimate_period``）。
     量不到週期時回一個空的 cell 並在 ``warnings`` 說明 —— 不猜。
+
+    ``origin``（F103）：格線的起點（影像像素，任何一點都可以，這裡會對週期取
+    餘數）。給了就**不做相位搜尋**、也不做上升邊錨定 —— 那是使用者標的那一格的
+    左上角，地標是他選的，疊出來的 cell 要長得跟他框的那一塊一樣。留空＝照舊：
+    搜尋最銳利的相位，再錨到最強的上升邊。
 
     ``progress``（F86，2026-09-07）
     ------------------------------
@@ -297,8 +308,14 @@ def build_golden_cell(image: Any, px: Optional[int] = None,
             return False
         return True
 
-    origin = algo_period.choose_origin(gray.shape, px, py, image=gray,
-                                       progress=_phase)
+    if origin is not None:
+        # 沒有週期的那一軸「一格」就是整張影像，原點只能是 0（不然一格都放不下）。
+        origin = (int(origin[0]) % max(1, int(px or 0)) if periodic_x else 0,
+                  int(origin[1]) % max(1, int(py or 0)) if periodic_y else 0)
+        anchor = False
+    else:
+        origin = algo_period.choose_origin(gray.shape, px, py, image=gray,
+                                           progress=_phase)
     if stop[0]:
         return cancelled
     cell = algo_golden.stack_cells(gray, px, py, method=method, origin=origin)
@@ -321,12 +338,15 @@ def build_golden_cell(image: Any, px: Optional[int] = None,
     # origin —— 也就是真正被疊起來的那一組格子；`anchor_cell` 之後的捲動是
     # 整張一起移，不影響格子之間的一致性。
     agreement = algo_golden.stack_agreement(gray, px, py, origin=origin)
+    # 錨定把 cell 往左（上）捲了 roll，等於格線原點往右（下）移 roll。
+    eff = ((int(origin[0]) + int(roll[0])) % max(1, int(px or 0)),
+           (int(origin[1]) + int(roll[1])) % max(1, int(py or 0)))
     return GoldenCell(cell=cell, px=px, py=py, ghosting=float(score),
                       lap_var=float(lap_var), agreement=float(agreement),
                       confidence_x=conf_x,
                       confidence_y=conf_y, anchor=roll, n_cells=int(n_cells),
                       periodic_x=periodic_x, periodic_y=periodic_y,
-                      warnings=warnings)
+                      warnings=warnings, origin=eff)
 
 
 # --------------------------------------------------------------------------- #

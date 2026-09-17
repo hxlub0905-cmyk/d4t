@@ -82,6 +82,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from d4t.core.algo import seed as algo_seed
 from d4t.core.algo import template as algo_template
 from d4t.core.ingest.imageio import load_gray
 from d4t.core.pipeline.cellrois import (
@@ -90,7 +91,8 @@ from d4t.core.pipeline.cellrois import (
 )
 
 from . import fit_screen
-from .crop_dialog import CropDialog, crop_array, describe_crop
+from .crop_dialog import CropDialog, MODE_SEED, crop_array, describe_crop
+from .lattice_dialog import LatticeDialog
 from .splitters import HairlineSplitter
 from .cell_canvas import (
     TOOL_ARRAY, TOOL_CLICK, TOOL_CURSOR, TOOL_DRAG, TOOL_PAINT, CellCanvas,
@@ -157,6 +159,11 @@ class TemplateDialog(QDialog):
         self._full: Optional[np.ndarray] = None
         self._full_name = ""
         self._crop: Optional[Tuple[int, int, int, int]] = None
+        #: 使用者標的那一格（F103，`_source` 的像素座標）與它量出來的答案。
+        #: 有它的時候週期與原點都從它來，不走投影；re-stack 保留它。
+        self._seed: Optional[Tuple[int, int, int, int]] = None
+        self._seed_result: Optional[algo_seed.SeedResult] = None
+        self._lattice: Optional[LatticeDialog] = None
         #: 「畫面上那一張」（Studio 給的）—— 沒有的時候那顆鈕不出現。
         self._screen_image: Optional[np.ndarray] = None
         self._screen_name = ""
@@ -251,6 +258,32 @@ class TemplateDialog(QDialog):
         self.btn_crop.setEnabled(False)
         row.addWidget(self.btn_crop)
 
+        # F103：第二種量法 —— 使用者框一格，找它的複本，間距就是週期、框的左上角
+        # 就是原點。投影法答錯的那幾種 layout（交錯、兩種 pitch 混、斜的）這裡
+        # 不受影響，因為它不假設任何東西。
+        self.btn_seed = QPushButton("Mark one cell…", box)
+        self.btn_seed.setProperty("variant", "secondary")
+        self.btn_seed.setToolTip(
+            "Measure the period a different way: draw a box around exactly "
+            "one cell, its copies are found across the image and the spacing "
+            "between them is the period. The cell is then stacked starting "
+            "from the box you drew, so it looks like what you marked.")
+        self.btn_seed.clicked.connect(self._on_seed)
+        self.btn_seed.setEnabled(False)
+        row.addWidget(self.btn_seed)
+
+        # 「算錯了怎麼知道」的答案之一：把格線鋪回原圖看。
+        self.btn_lattice = QPushButton("Check on the image…", box)
+        self.btn_lattice.setProperty("variant", "secondary")
+        self.btn_lattice.setToolTip(
+            "Draw the cell grid the template uses back onto the image. If "
+            "every box frames the same structure, the period and phase are "
+            "right; if the boxes drift onto something else towards one side, "
+            "the period is off.")
+        self.btn_lattice.clicked.connect(self._on_lattice)
+        self.btn_lattice.setEnabled(False)
+        row.addWidget(self.btn_lattice)
+
         # cell 多大由使用者決定：量出來的週期是**預設值不是結論**
         for label, tip in (("Cell W", "One cell is this wide, in image pixels. "
                                       "Measured from the image, but you can "
@@ -328,7 +361,7 @@ class TemplateDialog(QDialog):
         py = self.spin_cell_h.value() if (gc is None or gc.periodic_y) else None
         full = self._full if self._full is not None else self._source
         return self.load_image(full, self._full_name or self._source_path,
-                               px=px, py=py, crop=self._crop)
+                               px=px, py=py, crop=self._crop, seed=self._seed)
 
     def _build_side_panel(self) -> QWidget:
         panel = QWidget(self)
@@ -757,9 +790,54 @@ class TemplateDialog(QDialog):
         """目前疊進去的那一塊（影像像素）；整張就是 ``None``。"""
         return self._crop
 
+    # ---- 標一格（F103）--------------------------------------------------------
+    def _ask_seed(self, image: Any, name: str,
+                  initial: Optional[Tuple[int, int, int, int]]) -> Any:
+        """開「標一格」視窗。回 ``(x, y, w, h)`` 或 ``False``（取消）。測試會換掉它。"""
+        dlg = CropDialog(image, name, initial=initial, parent=self, mode=MODE_SEED)
+        if dlg.exec() != QDialog.Accepted:
+            return False
+        rect = dlg.rect()
+        return rect if rect is not None else False
+
+    def _on_seed(self) -> bool:
+        """使用者框一格 → 週期與原點都從它來（在**目前疊的那一塊**上框）。"""
+        if self._source is None:
+            self._say("Pick a full-size image first - marking a cell needs the "
+                      "image, and this template was read back from the recipe.")
+            return False
+        got = self._ask_seed(self._source, self._source_path, self._seed)
+        if got is False:
+            return False
+        full = self._full if self._full is not None else self._source
+        return self.load_image(full, self._full_name or self._source_path,
+                               crop=self._crop, seed=got)
+
+    def seed(self) -> Optional[Tuple[int, int, int, int]]:
+        """使用者標的那一格（`_source` 像素）；沒有就是 ``None``（投影法量的）。"""
+        return self._seed
+
+    def _on_lattice(self) -> Optional[LatticeDialog]:
+        """把格線鋪回原圖（非 modal，開著它回來改尺寸再看）。"""
+        gc = self.cell
+        if self._source is None or gc is None or gc.cell.size == 0:
+            self._say("Stack a template from an image first - the grid is "
+                      "drawn on that image.")
+            return None
+        if self._lattice is None:
+            self._lattice = LatticeDialog(self._source, gc.px, gc.py, gc.origin,
+                                          gc.periodic, self._source_path, self)
+        else:
+            self._lattice.set_lattice(self._source, gc.px, gc.py, gc.origin,
+                                      gc.periodic)
+        self._lattice.show()
+        self._lattice.raise_()
+        return self._lattice
+
     def load_image(self, image: Any, name: str = "",
                    px: Optional[int] = None, py: Optional[int] = None,
-                   crop: Optional[Tuple[int, int, int, int]] = None) -> bool:
+                   crop: Optional[Tuple[int, int, int, int]] = None,
+                   seed: Optional[Tuple[int, int, int, int]] = None) -> bool:
         """吃一張大圖，量週期、疊模板、把證據寫上畫面。
 
         ``px``/``py`` 留空 = 從影像自己量（第一次都是這樣）；填了就照使用者說的
@@ -768,6 +846,10 @@ class TemplateDialog(QDialog):
 
         ``crop``（F102）：``(x, y, w, h)`` 影像像素 —— ``image`` 是**整張**，
         只有這一塊會拿去量週期、疊 cell。``None`` ＝ 整張，跟以前逐位元組相同。
+
+        ``seed``（F103）：使用者標的一格（裁切後的像素座標）。``px``/``py`` 都
+        留空時週期從它的複本量（`algo/seed`），不走投影；不管誰給的尺寸，格線
+        原點都是它的左上角（疊出來的 cell 就是他框的那一塊）。
         """
         full = np.asarray(image)
         if full.size == 0:
@@ -780,7 +862,19 @@ class TemplateDialog(QDialog):
             self._fail("the crop box holds no pixels")
             return False
 
-        gc = self._build_with_progress(arr, px, py)
+        origin = None
+        res: Optional[algo_seed.SeedResult] = None
+        if seed is not None:
+            if px is None and py is None:
+                res = algo_seed.period_from_seed(arr, seed)
+                if res.px is None and res.py is None:
+                    self._fail("; ".join(res.warnings) or
+                               "the marked cell does not repeat")
+                    return False
+                px, py = res.px, res.py
+            origin = (int(seed[0]), int(seed[1]))
+
+        gc = self._build_with_progress(arr, px, py, origin=origin)
         if gc is None:
             # 使用者按了取消 —— **什麼都不動**（上一張模板還在畫面上）。
             self._status_cancelled()
@@ -792,7 +886,12 @@ class TemplateDialog(QDialog):
         self._full = full
         self._full_name = self._source_path
         self._crop = crop
+        self._seed = seed
+        if seed is None or res is not None:
+            self._seed_result = res
         self.btn_crop.setEnabled(True)
+        self.btn_seed.setEnabled(True)
+        self.btn_lattice.setEnabled(gc.cell.size > 0)
         shown = self._source_path or "(image)"
         if crop is not None:
             shown += " · " + describe_crop(crop)
@@ -820,7 +919,8 @@ class TemplateDialog(QDialog):
     PROGRESS_AFTER_MS = 400
 
     def _build_with_progress(self, arr: Any, px: Optional[int],
-                             py: Optional[int]) -> Any:
+                             py: Optional[int],
+                             origin: Optional[Tuple[int, int]] = None) -> Any:
         """疊 Golden Cell，慢的時候給一條進度條。取消回 ``None``。
 
         為什麼是進度視窗而不是背景執行緒
@@ -854,8 +954,11 @@ class TemplateDialog(QDialog):
             return not dlg.wasCanceled()
 
         try:
+            # ``origin`` 只在有的時候才傳：既有測試用不吃這個參數的假函式換掉
+            # `build_golden_cell`，而它們測的是進度與取消，跟原點無關。
+            extra = {} if origin is None else {"origin": origin}
             gc = algo_template.build_golden_cell(
-                arr, px=px, py=py, progress=on_progress)
+                arr, px=px, py=py, progress=on_progress, **extra)
         finally:
             dlg.close()
             self._building = False
@@ -913,7 +1016,10 @@ class TemplateDialog(QDialog):
         self._source = None
         self._source_path = ""
         self._full, self._full_name, self._crop = None, "", None
+        self._seed, self._seed_result = None, None
         self.btn_crop.setEnabled(False)
+        self.btn_seed.setEnabled(False)
+        self.btn_lattice.setEnabled(False)
         self.path_label.setText("(the template stored in this recipe)")
         self.canvas.set_cell(cell)
         self._set_ready(True)
@@ -958,6 +1064,8 @@ class TemplateDialog(QDialog):
         if self._crop is not None:
             # 從哪一塊疊的是判斷材料：換一批資料重疊時要知道上次看的是哪裡。
             bits.append(describe_crop(self._crop))
+        if self._seed is not None:
+            bits.append(self._seed_note())
         bits += [
                 # 兩個數字問的是兩件事，所以兩個都列（F40）。以前只有前者，
                 # 而那一句警示掛在它上面 —— 見底下 `BLURRED_BELOW`。
@@ -973,6 +1081,25 @@ class TemplateDialog(QDialog):
             if "arbitrary" in w:
                 bits.append("- " + w)
         return " · ".join(bits)
+
+    def _seed_note(self) -> str:
+        """週期是從標的那一格量的 —— 講出找到幾個複本、間距多一致。"""
+        r = self._seed_result
+        if r is None:
+            return "period from the cell you marked"
+        parts = ["period from the cell you marked (%d copies found" % r.n_copies]
+        conf = []
+        if r.px is not None:
+            conf.append("across %.0f%%" % r.confidence_x)
+        if r.py is not None:
+            conf.append("down %.0f%%" % r.confidence_y)
+        if conf:
+            parts.append("spacing agrees " + ", ".join(conf))
+        text = ", ".join(parts) + ")"
+        for w in r.warnings:
+            if "uneven" in w:
+                text += " - " + w
+        return text
 
     def self_period(self) -> Tuple[int, int]:
         """這個 cell 自己重複的單元（cell 像素）—— 存進模板字串的那一組。"""
