@@ -41,7 +41,8 @@ I01，一樣是跟 klarf 一一配對的」。兩件事，一件做了、一件�
   識別碼）：record 語法 1.8、`ImageFileName` 住在 `WaferRecord`、`.I01` 是 MM 多頁
   TIFF 64×64 8-bit、列尾 `Images 2 {id "30", id "31"}` 的 **id 全檔連號、page = id − 1**
   —— 正是 `defect_image_map` 既有的 imagelist 模式，對映零改動（`FAB-VALIDATION.md`
-  #8 當天開、當天結）。順手補兩件：`defect_image_filename` 不再把 `"30"` 當檔名；
+  #8 當天開、當天結）。使用者接著確認 **`"30"` = test、`"31"` = ref，「以後 pair 的都預設
+  第一張為 test」** —— 跟 `Load images` 預設的 `1:test, 2:ref` 一致，零改動。順手補兩件：`defect_image_filename` 不再把 `"30"` 當檔名；
   `.I01` 不在旁邊時 `load_dataset` 講出 KLARF 點名的那個檔名。
 * **假設錯的那一天**（`.I01` 內容不是 TIFF）：`load_dataset` 先
   `tiff_index.check_header`（8 個位元組），不是就 warnings 講一次「哪個檔、為什麼、
