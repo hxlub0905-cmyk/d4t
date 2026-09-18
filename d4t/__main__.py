@@ -105,8 +105,10 @@ def _open_raw_folder(folder: str, raw: Any):
         return load_raw_folder(folder, _parse_raw_layout(raw))
     names = [n for n in sorted(os.listdir(folder))
              if os.path.splitext(n)[1].lower() in RAW_EXTS]
-    size = os.path.getsize(os.path.join(folder, names[0]))
-    picks = guess_layouts(size)
+    probe = os.path.join(folder, names[0])
+    size = os.path.getsize(probe)
+    # 檔頭裡寫著寬高的那一種讀得出唯一解（F115），所以 CLI 連 `--raw` 都不必。
+    picks = guess_layouts(size, path=probe)
     if len(picks) != 1:
         raise SystemExit(
             "%s is %d bytes and a .raw file does not say how it is laid out.\n"

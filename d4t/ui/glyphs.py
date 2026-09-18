@@ -70,6 +70,9 @@ CHIP_ICONS = (
     "pick_centre", "pick_none",
     # CD：邊在哪裡（都畫在同一條邊的亮度剖面上）
     "crit_threshold", "crit_gradient", "crit_fit",
+    # Focus index：OP-301 那四個步驟跑在哪一張圖上（同一張影像，
+    # 實心的是**在量的那個東西**：一整片灰階 vs 兩片之間那條邊）
+    "iqi_pixel", "iqi_gradient",
     # Output：圖檔格式、其他框畫不畫、KLARF 怎麼寫回
     "fmt_jpeg", "fmt_png",
     "drawn_all", "drawn_none", "drawn_near",
@@ -602,6 +605,30 @@ def _crit_fit(g: _Pad) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# IQI：那四個步驟跑在哪一張圖上（F115）
+#
+# 共用的底是**一張左右分成兩半的影像**（一邊亮一邊暗）。兩顆的差別只在
+# 「哪一部分是實心的」—— §1 那條規矩：淡的是原本就在那裡的東西，實心的才是
+# 這個選項在講的那件事。
+# --------------------------------------------------------------------------- #
+def _iqi_base(g: _Pad) -> None:
+    g.frame(0.06, 0.06, 0.94, 0.94, False, 0.07)
+
+
+def _iqi_pixel(g: _Pad) -> None:
+    # 量的是**亮度本身**：半張圖實心地填起來（那一整片灰階就是要量的東西）。
+    _iqi_base(g)
+    g.blk(0.14, 0.14, 0.50, 0.86, True)
+
+
+def _iqi_gradient(g: _Pad) -> None:
+    # 量的是**邊**：同一張圖，兩半都留淡的，只有中間那條交界是實心的。
+    _iqi_base(g)
+    g.blk(0.14, 0.14, 0.50, 0.86, False)
+    g.line(0.50, 0.14, 0.50, 0.86, True, 0.13)
+
+
+# --------------------------------------------------------------------------- #
 # Output
 # --------------------------------------------------------------------------- #
 def _fmt_jpeg(g: _Pad) -> None:
@@ -1007,6 +1034,8 @@ _DRAW = {
     "crit_threshold": _crit_threshold,
     "crit_gradient": _crit_gradient,
     "crit_fit": _crit_fit,
+    "iqi_pixel": _iqi_pixel,
+    "iqi_gradient": _iqi_gradient,
     "fmt_jpeg": _fmt_jpeg,
     "fmt_png": _fmt_png,
     "drawn_all": lambda g: _drawn(g, "all"),

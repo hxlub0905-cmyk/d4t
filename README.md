@@ -200,6 +200,7 @@ git add -A && python tools/release.py && git add -A
 | 給使用者的操作手冊：EBI ↔ API characterization 怎麼做 | [`docs/USING-CHARACTERIZATION.md`](docs/USING-CHARACTERIZATION.md) |
 | 給使用者的操作手冊：一群框之間差多少、有沒有斜掉 | [`docs/USING-UNIFORMITY.md`](docs/USING-UNIFORMITY.md) |
 | 給使用者的操作手冊：貼一張 Golden Cell 產一整批模擬資料 | [`docs/USING-SIMGEN.md`](docs/USING-SIMGEN.md) |
+| 給使用者的操作手冊：對焦分數怎麼看、怎麼跟機台的 F.I. 對齊 | [`docs/USING-FOCUS.md`](docs/USING-FOCUS.md) |
 | 已知的坑（**只增不減**） | [`docs/PITFALLS.md`](docs/PITFALLS.md) |
 | 設計緣由：需求訪談結論、名稱由來、六個來源專案 | [`docs/HANDOVER.md`](docs/HANDOVER.md) |
 | **授權與來源**：d4t 的授權狀態、vendoring 來源、第三方相依 | [`docs/LICENSING.md`](docs/LICENSING.md) |

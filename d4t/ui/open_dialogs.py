@@ -108,7 +108,9 @@ def ask_raw_layout(parent: Any, probe: str) -> Optional[Any]:
     from d4t.core.ingest.rawfile import RawSpec, guess_layouts
 
     size = os.path.getsize(probe)
-    picks = guess_layouts(size)
+    # ⚠ **要把檔案本身交出去**，不是只交大小（F115）：有一種 `.raw` 的檔頭裡
+    # 就寫著寬高，而那個答案不必猜。只給 size 的話那條路永遠走不到。
+    picks = guess_layouts(size, path=probe)
     labels = [s.describe() for s in picks] + [OTHER_LAYOUT]
     choice, ok = QInputDialog.getItem(
         parent, "How is this .raw laid out?",
