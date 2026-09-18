@@ -104,9 +104,9 @@ def test_you_can_still_get_to_the_features(window):
     src = first_source(window)
     _nid = window.add_card_after(src, "align")
     window._on_edge_added(src, _nid, "test")
-    window.show_bottom_page(1)
+    window.gauges.show_bottom_page(1)
     assert window.bottom_page() == 1
-    window.show_bottom_page(0)
+    window.gauges.show_bottom_page(0)
     assert window.bottom_page() == 0
 
 

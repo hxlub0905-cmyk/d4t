@@ -183,7 +183,12 @@ FILE_CEILINGS = {
     # `_on_open_<key>` 出來，不然那顆鈕按下去是 AttributeError。
     # 2026-09-18（F114）：7,717 → **7,686**（−31）。stack 拿掉，`load_stack_path`
     # 跟著走 —— 見下面 `HARD_CAPS` 那一段。
-    "d4t/ui/studio.py": 7686,
+    # 2026-09-18（F116 第 1 步）：7,686 → **7,388**（−298）。右下角那一族
+    # （卡片儀表：換儀表、一鍵校正、圖的視窗、曲線背景）整族搬進
+    # `ui/gauge_panel.py`，`studio.py` 只留三行門面與 `self.gauges = GaugePanel(self)`。
+    # 這是 F116「`StudioWindow` 只留組裝與接線」的第一步，見
+    # `docs/plans/F116-split-studio.md`。
+    "d4t/ui/studio.py": 7388,
     # 19 道 `_migrate_*` 住在這裡（見下面 `recipe_migrations`）。它會用跟
     # `studio.py` 完全一樣的機制長成第二個 `studio.py`。
     #
@@ -374,7 +379,10 @@ COUNT_CEILINGS = {
     ),
     # god object 的兩個投影。261 → 268（六天）。
     "studio_window_methods": (
-        293,
+        280,
+        # 2026-09-18（F116 第 1 步）：293 → 280。右下角那一族 16 支搬進
+        # `ui/gauge_panel.py`，回來三支門面（`inspector` / `bottom_page` /
+        # `_on_calibrated` —— 測試用得多的那幾個，見 F116 §3-3）。
         # 2026-09-18（F114）：294 → 293。使用者把 stack 拿掉（「我們用不到」），
         # `load_stack_path` 跟著走。**刪掉也要把尺調下來**（反向測試在守）。
         # 2026-09-09：294 → 298。`write_outputs`（跑與寫拆開）、`rerun`
@@ -417,7 +425,10 @@ COUNT_CEILINGS = {
         lambda: _class_shape("d4t/ui/studio.py", "StudioWindow")[0],
     ),
     "studio_window_attributes": (
-        433,
+        418,
+        # 2026-09-18（F116 第 1 步）：433 → 418。儀表那一族用到的名字跟著它
+        # 的行為走（`_inspector` / `_charts_window` 的家搬進 `GaugePanel`），
+        # 進來的只有 `gauges` 一個。
         # 2026-09-18（F114）：434 → 433。同上 —— `load_stack_path` 帶走一個名字。
         # 2026-09-09（第二次）：431 → 437。`_last_run`（上一批的底稿：rows／
         # 量測簽章／被停掉／幾顆，一個 dict 不是四個名字）、`_tree_focus`
@@ -495,9 +506,13 @@ HARD_CAPS = {
     # 而 `load_stack_path` 是 `StudioWindow` 上的一支 —— 行 7,717 → 7,686、
     # 方法 294 → 293、`self.*` 434 → 433。**刪掉東西也要把尺跟著調** ——
     # 留著那段餘裕就是留給下一個人偷偷用掉的空間。
-    "d4t/ui/studio.py": 7686,
-    "studio_window_methods": 293,
-    "studio_window_attributes": 433,
+    # 2026-09-18（F116 第 1 步）：三格一起往下。右下角那一族整族搬進
+    # `ui/gauge_panel.py` —— 行 7,686 → 7,388、方法 293 → 280、`self.*`
+    # 433 → 418。這是 F116 六步裡的第一步（`docs/plans/F116-split-studio.md`），
+    # 而那一份的驗收正是「每一步都要讓這三格**明顯**往下」。
+    "d4t/ui/studio.py": 7388,
+    "studio_window_methods": 280,
+    "studio_window_attributes": 418,
 }
 
 

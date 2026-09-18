@@ -425,9 +425,9 @@ def test_the_studio_sends_it_to_the_right_axis(cross_window):
     nid = wire_up(win.model, add_region_step(win.model, "roi_cross"))
     win.select_node(nid)
 
-    win._on_select_requested("x", "darkest")
+    win.gauges._on_select_requested("x", "darkest")
     assert win.model.nodes[nid].params["vertical_select"] == "darkest"
-    win._on_select_requested("y", "second_brightest")
+    win.gauges._on_select_requested("y", "second_brightest")
     assert win.model.nodes[nid].params["horizontal_select"] == "second_brightest"
     assert win.model.nodes[nid].params["vertical_select"] == "darkest"
 
