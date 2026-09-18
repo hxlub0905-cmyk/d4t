@@ -368,6 +368,10 @@ d4t/
     ├── feature_panel.py      #   Preview 的特徵面板：四胞胎橫過來（一列一個統計量、一欄一個 variant）
     ├── gallery.py region_check.py      #   縮圖網格（虛擬捲動，撐 10k+）／區域畫在很多顆上
     ├── inspectors.py         #   每張卡自己的儀表（依 `Step.key` 註冊）
+    ├── gauge_panel.py        #   右下角那一塊的 controller：儀表那頁與特徵表那頁
+    │                         #     （`bottom_stack` 的兩頁 ＋ 一鍵校正 ＋ 圖的視窗，F116）
+    ├── preview_overlays.py   #   預覽區的 controller：看哪一條流、區域框／量測標記／
+    │                         #     熱色磚怎麼畫、並排比對與兩張圖互跟（F116）
     ├── template_dialog.py    #   從大圖疊 Golden Cell 模板（模板存進 recipe）
     ├── crop_dialog.py        #   載入大圖時先框一塊（或整張）再疊（F102；F104 起每次都問）
     ├── lattice_dialog.py     #   「Grid」開關：把引擎真的用的格線鋪回原圖看週期對不對（F103/F104）

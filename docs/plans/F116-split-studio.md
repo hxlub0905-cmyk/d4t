@@ -1,6 +1,8 @@
 # F116 — 拆 `studio.py`：`StudioWindow` 只留組裝與接線，內容搬進 controller
 
-狀態：**計畫中（2026-09-18）** —— 分析做完、順序定了，一步一個 PR，從第 1 步開始。
+狀態：**進行中（2026-09-19）** —— **第 1 步做完**（1a／1b／1c 三個 commit）。
+下一步是第 2 步（介面組裝 → `ui/studio_layout.py`）。第 1 步量到的東西已經
+寫回 §3、§4、§6、§7（見那幾節的「第 1 步的結果」）。
 
 > 起點 commit `3329659`。下面的數字都是那一刻量的；動手前用 §6 那支腳本重量一次，
 > 對不上就以重量的為準（這一份不是數字的家，`tests/test_size_ceilings.py` 才是）。
@@ -94,10 +96,17 @@ class GaugePanel(QObject):
    把一個大球拆成幾個互相纏住的小球。
 3. **門面**：測試或別的模組用到的名字，在 `StudioWindow` 留一行轉呼叫
    `def inspector(self): return self.gauges.inspector()`。
-   用得少（≤3 處）的名字**改測試**不留門面 —— 門面也算方法數。
+   用得少的名字**改測試**不留門面 —— 門面也算方法數。
+   **判準改成「用到它的測試**檔案**數」**（第 1 步量出來的）：≥2 個檔案就留門面，
+   只有一個檔案就改測試。呼叫點數答錯過兩次 —— `_feature_sections` 4 處但全在
+   同一檔（改測試比留門面便宜），`region_overlay` 8 處也全在同一檔。
+   ⚠ **門面的簽章要跟 controller 那一支一模一樣**：憑印象寫會得到一個
+   `takes 1 positional argument but 2 were given`，而它只在跑到那一條測試時才現形。
    門面集中放在 `StudioWindow` 最後一段 `# 門面（F116）`，一眼看得出哪些是轉呼叫。
 4. **signal 的接線留在 `studio.py`**（`_connect` 那一段），controller 只提供 slot。
-   那正是 `studio.py` 該留的東西。
+   那正是 `studio.py` 該留的東西。接在**門面**上的那一條（例
+   `calibrate_worker.ready.connect(self._on_calibrated)`）可以留在原地不動 ——
+   門面是類別屬性，建構順序碰不到它。
 5. 模組頂部照慣例寫 `# d4t UI — authored <日期> (F116 第 n 步).` 與一段「為什麼自己一個模組」。
 
 ---
@@ -106,8 +115,15 @@ class GaugePanel(QObject):
 
 每一步 = 一個 PR，照 §6 的檢查清單走。**一步做完、CI 綠、合進 main，再開下一步。**
 
-**第 1 步：卡片儀表**（§2 的 1a／1b／1c）。最大、最獨立，也用來驗證 §3 的寫法順不順手。
-做完如果發現 §3 有哪條不好用，**先改這份計畫書再做第 2 步**。
+**第 1 步：卡片儀表**（§2 的 1a／1b／1c）。✅ **做完**（2026-09-19）。
+
+第 1 步的結果：`studio.py` 7,686 → **6,782**（−904）、方法 293 → **256**、
+`self.*` 433 → **389**。三個模組：`ui/gauge_panel.py`（儀表 ＋ 特徵表，
+`bottom_stack` 的兩頁）、`ui/preview_overlays.py`（影像流選擇 ＋ 畫在圖上的東西），
+以及**沒有新開的那一個** —— 區域跨顆檢視那四支進了既有的 `ui/region_check.py`
+（它用的每一個東西本來就在那裡，而那顆按鈕住在預覽區）。原本寫的
+`ui/feature_pane.py` **沒有出現**：併進去是 609 行，剛好踩線，而回頭問
+「那一塊該不該是一塊」得到的答案是照**畫面上的位置**分，不是照行數分。
 
 **第 2 步：介面組裝** → `ui/studio_layout.py`。
 `_build_toolbar`（275 行）、`_build_preview_pane`（374）、`_build_body`（120）、
@@ -153,12 +169,31 @@ class GaugePanel(QObject):
 動手前：
 
 - [ ] `python tools/freeze_golden.py --check` 三份全綠（`CLAUDE.md` §4 的前置條件）
+      ⚠ **2026-09-19 在家用機上第三份紅**，而那**不是**這個 repo 的行為變了：
+      `dual_route_basic__make_sample` 的 `align_score` 差在第 4 位，而
+      `align_dx`／`align_dy`（17 位）與每一個下游特徵逐位元組相同，
+      `d4t/core/algo/align.py`（算那個分數的地方）自從凍結以來一個位元都沒動
+      —— 同樣的程式碼配同樣的輸入吐不同的數字，剩下的變數只有這台機器的
+      OpenCV build（`final_score` 吃 `cv2.warpAffine` 的殘差）。
+      `freeze_golden.py` 的說明本來就寫著「用途是同一台機器上、重構前後的比較」。
+      所以第 1 步的基準**凍在 scratchpad**（不覆蓋 repo 裡那三份，它們帶著
+      跨環境的歷史），三個 commit 每一個都對過、逐項相同。
 - [ ] `python tools/studio_surface.py --save before.json`（腳本見下，第 1 步順手加進 `tools/`）
 - [ ] 在 `docs/PITFALLS.md` 搜 `Qt`、`segfault`、`parent`、`signal`、`deleteLater`、`scroll_host`
 
 搬的時候：
 
 - [ ] 方法本體逐字搬；diff 裡除了 `self.`→`self.w.` 與縮排，**不應有別的變化**
+      （§3 的範例把 `_refresh_inspector` 寫成 `refresh` —— **不要照那個做**，
+      §1 說改名另開一輪，而這一條才是檢查得出來的）
+- [ ] **切區間要從裝飾器那一行開始**：`ast` 的 `lineno` 指的是 `def`，照它切會
+      把 `@property`／`@staticmethod` 留在原地，而症狀是門面回一個 bound method
+      （不是 ImportError）。第 1 步兩支：`profile_panel`、`_overlay_region_names`
+- [ ] **單獨當參數傳出去的 `self`** 機械式取代抓不到：`UniformityWindow(self)`、
+      `ProfilePanel(self)`、`RegionCheckWindow(self)` 的 parent 要是**視窗**
+      （controller 是 QObject，不是 QWidget）。搬完 grep 一次 `self(?!\s*\.)`
+- [ ] 搬完 grep 一次每一個 `self.w.<名字>`，確認它真的還在 `StudioWindow` 上
+      —— 跨 controller 的狀態（第 1 步是 `_compare_on`）要走門面（§3-2）
 - [ ] 每個搬走的名字：測試用得多 → 留門面；用得少 → 改測試
 - [ ] 新模組不 import `studio`（型別註記用 `TYPE_CHECKING` 或字串）
 
@@ -166,6 +201,11 @@ class GaugePanel(QObject):
 
 - [ ] `python tools/studio_surface.py --check before.json` —— 測試用到的名字 `hasattr` 都還答得出來
 - [ ] `ruff check`、`python tools/typecheck.py`
+      ⚠ ruff 會報一批 `F401`（搬走之後 `studio.py` 那幾個 import 沒人用了）。
+      **`--fix` 之前一個一個查**（`CLAUDE.md` §4）：第 1 步有一個是
+      `tests/` 用 `studio_mod.FEATURE_OWNER_KEY` **別名**拿的，grep
+      `studio.FEATURE_OWNER_KEY` 掃不到。那一個修的是測試（那個鍵的家在引擎，
+      `ui.studio` 只是剛好 import 過它），不是加 `# noqa`
 - [ ] 相關的 `test_ui_*` 逐檔跑（`python tools/run_tests.py` 或只挑那幾支），再跑核心批
 - [ ] `python tools/freeze_golden.py --check` 再一次
 - [ ] **開 Studio 手動走一遍**那一塊：載範例資料 → 選卡 → 看儀表／Gallery／試跑。測試全綠而畫面壞掉（signal 沒接、物件被回收）是這種搬家最常見的死法

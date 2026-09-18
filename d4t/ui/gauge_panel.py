@@ -318,7 +318,7 @@ class GaugePanel(QObject):
         # 儀表要跟著**畫面上正在看的東西**走：並排比對打開時是左右那兩條流，
         # 所以底下的直方圖也是兩張、順序一樣（使用者是拿它們互相對照的）。
         shown = [self.w.stream_combo.currentText()]
-        if self.w._compare_on:
+        if self.w.compare_enabled():
             shown.append(self.w.stream_combo_b.currentText())
         # 寫回的儀表要**真的乾跑一次**才講得出「會改幾列」，而那需要 KlarfDoc。
         # 儀表不自己去讀檔（它連檔名都不該知道）—— 由這裡遞過去。

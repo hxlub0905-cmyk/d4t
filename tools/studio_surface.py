@@ -40,6 +40,11 @@ STUDIO = REPO / "d4t" / "ui" / "studio.py"
 #: 測試裡指向 StudioWindow 的常見變數名；漏抓的話加在這裡。
 _VAR = r"(?:w|win|window|studio|sw|ran|mixed_window|self\.w|self\.win)"
 
+#: `monkeypatch.setattr(type(win), "_picks_a_center", …)` 這一種：名字是**字串**，
+#: 上面那條認屬性存取的樣式看不到它。漏掉的代價是測試打在一個**已經沒有人叫**的
+#: 方法上（斷言照過，而它守的事情沒有在守）—— F116 第 1 步踩到 7 處。
+_PATCHED = re.compile(r'(?:set|get|has)attr\([^)]*?["\'](\w+)["\']')
+
 
 def shape() -> tuple:
     """`StudioWindow` 現在有哪些方法、哪些 `self.*` 被賦值過。"""
@@ -61,7 +66,11 @@ def used_by_tests(names: set) -> dict:
     pat = re.compile(r"\b%s\.(\w+)" % _VAR)
     hits: dict = {}
     for f in sorted((REPO / "tests").glob("*.py")):
-        for m in pat.findall(f.read_text(encoding="utf-8")):
+        text = f.read_text(encoding="utf-8")
+        for m in pat.findall(text):
+            if m in names:
+                hits[m] = hits.get(m, 0) + 1
+        for m in _PATCHED.findall(text):      # 字串形式（見 `_PATCHED`）
             if m in names:
                 hits[m] = hits.get(m, 0) + 1
     return hits

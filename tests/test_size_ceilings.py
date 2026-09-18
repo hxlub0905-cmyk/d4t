@@ -192,7 +192,10 @@ FILE_CEILINGS = {
     # 的另一頁（特徵表）跟著儀表進 `ui/gauge_panel.py`；區域跨顆檢視那四支進
     # **既有的** `ui/region_check.py`（它用的每一個東西本來就在那裡，而那顆按鈕
     # 住在預覽區，不在右下角）。
-    "d4t/ui/studio.py": 7149,
+    # 2026-09-19（F116 第 1 步之 1c）：7,149 → **6,782**（−367）。影像流選擇與
+    # 畫在圖上的東西（區域框、量測標記、熱色磚、並排比對、兩張圖互跟）整族進
+    # `ui/preview_overlays.py`。第 1 步做完：7,686 → 6,782，−904。
+    "d4t/ui/studio.py": 6782,
     # 19 道 `_migrate_*` 住在這裡（見下面 `recipe_migrations`）。它會用跟
     # `studio.py` 完全一樣的機制長成第二個 `studio.py`。
     #
@@ -383,7 +386,12 @@ COUNT_CEILINGS = {
     ),
     # god object 的兩個投影。261 → 268（六天）。
     "studio_window_methods": (
-        272,
+        256,
+        # 2026-09-19（F116 第 1 步之 1c）：272 → 256。搬走 21 支，回來五支門面
+        # （`set_compare` / `compare_enabled` / `region_overlay_names` /
+        # `heat_tiles` / `_focus_box_index`）。`compare_enabled` 不只是給測試的：
+        # `GaugePanel` 要知道畫面上是一條流還是兩條，而 controller 之間不直接
+        # 互叫（F116 §3-2），它走的就是那一行。
         # 2026-09-19（F116 第 1 步之 1b）：280 → 272。搬走 11 支，回來三支門面
         # （`open_region_check` / `profile_panel` / `profile_panel_visible` ——
         # 兩個測試檔都在用）。
@@ -432,7 +440,10 @@ COUNT_CEILINGS = {
         lambda: _class_shape("d4t/ui/studio.py", "StudioWindow")[0],
     ),
     "studio_window_attributes": (
-        409,
+        389,
+        # 2026-09-19（F116 第 1 步之 1c）：409 → 389。`_compare_on` 與
+        # `_view_syncing` 的家跟著行為走；`_user_stream` / `_user_stream_b`
+        # 留在視窗（前者在換卡片時被別段重設 —— §3-1），進來的是 `overlays`。
         # 2026-09-19（F116 第 1 步之 1b）：418 → 409。`_no_profile` 的家跟著
         # `profile_panel` 走，`region_window` / `_region_regions` 仍然是視窗的
         # （`ui/region_check.py` 的函式明寫 `win.xxx = ...`，同 `open_dialogs`）。
@@ -522,9 +533,12 @@ HARD_CAPS = {
     # 而那一份的驗收正是「每一步都要讓這三格**明顯**往下」。
     # 2026-09-19（F116 第 1 步之 1b）：行 7,388 → 7,149、方法 280 → 272、
     # `self.*` 418 → 409。
-    "d4t/ui/studio.py": 7149,
-    "studio_window_methods": 272,
-    "studio_window_attributes": 409,
+    # 2026-09-19（F116 第 1 步之 1c）：行 7,149 → 6,782、方法 272 → 256、
+    # `self.*` 409 → 389。**第 1 步整步做完**：7,686 → 6,782（−904）、
+    # 293 → 256（−37）、433 → 389（−44）。
+    "d4t/ui/studio.py": 6782,
+    "studio_window_methods": 256,
+    "studio_window_attributes": 389,
 }
 
 

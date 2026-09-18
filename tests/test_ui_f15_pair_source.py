@@ -614,10 +614,10 @@ def test_studio_asks_the_card_not_itself(window):
     """「幾條線算少」是卡片自己才知道的事。"""
     h2h = window.model.add_step("align_to")
     window.select_node(h2h)
-    assert window._marks_solid() is True
+    assert window.overlays._marks_solid() is True
     glv = window.model.add_step("glv_stats")
     window.select_node(glv)
-    assert window._marks_solid() is False
+    assert window.overlays._marks_solid() is False
 
 
 def test_the_two_marks_are_different_colours(qapp):
