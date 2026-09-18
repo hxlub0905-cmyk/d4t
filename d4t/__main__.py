@@ -75,7 +75,50 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     return 1 if bad else 0
 
 
-def _open_input(path: str, tiff_path: Any = None):
+def _parse_raw_layout(text: str):
+    """``--raw`` 的值 → :class:`RawSpec`。格式 ``WxH[+header][@bits]``。
+
+    例：``3584x3584+65536@16``。省略 ``+header`` 是沒有檔頭、省略 ``@bits``
+    是 16-bit（``.raw`` 幾乎都是；8-bit 的請明寫）。
+    """
+    from d4t.core.ingest.rawfile import RawSpec
+
+    t = str(text or "").strip().lower()
+    bits = 16
+    if "@" in t:
+        t, _, b = t.partition("@")
+        bits = int(b)
+    hdr = 0
+    if "+" in t:
+        t, _, hh = t.partition("+")
+        hdr = int(hh)
+    w, _, h = t.partition("x")
+    return RawSpec(width=int(w), height=int(h), header=hdr, bits=bits)
+
+
+def _open_raw_folder(folder: str, raw: Any):
+    """一個資料夾的 `.raw` —— 版面由 ``--raw`` 給，或從檔案大小推。"""
+    from d4t.core.ingest.dataset import load_raw_folder
+    from d4t.core.ingest.rawfile import RAW_EXTS, guess_layouts
+
+    if raw:
+        return load_raw_folder(folder, _parse_raw_layout(raw))
+    names = [n for n in sorted(os.listdir(folder))
+             if os.path.splitext(n)[1].lower() in RAW_EXTS]
+    size = os.path.getsize(os.path.join(folder, names[0]))
+    picks = guess_layouts(size)
+    if len(picks) != 1:
+        raise SystemExit(
+            "%s is %d bytes and a .raw file does not say how it is laid out.\n"
+            "%s\nSay so with  --raw WxH[+header][@bits]   e.g. "
+            "--raw 3584x3584+65536@16"
+            % (names[0], size,
+               ("These fit: " + "; ".join(s.describe() for s in picks))
+               if picks else "No square layout fits that size."))
+    return load_raw_folder(folder, picks[0])
+
+
+def _open_input(path: str, tiff_path: Any = None, raw: Any = None):
     """CLI 的輸入 —— **四種都認**（F85），照 `scope.INPUT_SOURCES` 那張表。
 
     以前這裡只呼叫 `load_dataset`，也就是只認 KLARF；給它一個資料夾的下場是
@@ -109,6 +152,12 @@ def _open_input(path: str, tiff_path: Any = None):
     p = str(path)
     if os.path.isdir(p):
         names = sorted(os.listdir(p))
+        # `.raw` **不進 `_IMAGE_EXTS`**（它解不開），所以這一條要自己問一次。
+        # 版面由 `--raw` 給，或從檔案大小推 —— 推不出唯一解就當場說清楚，
+        # 不挑一個「最像的」（猜錯的話每一個像素都錯，而且不會報錯）。
+        from d4t.core.ingest.rawfile import RAW_EXTS as _RAW_EXTS
+        if any(os.path.splitext(n)[1].lower() in _RAW_EXTS for n in names):
+            return _open_raw_folder(p, raw)
         loose = any(os.path.splitext(n)[1].lower() in dataset_mod._IMAGE_EXTS
                     and os.path.isfile(os.path.join(p, n)) for n in names)
         if not loose and any(os.path.isdir(os.path.join(p, n)) for n in names):
@@ -134,7 +183,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         attach_file(args.log)
         print(f"紀錄：{args.log}")
 
-    ds = _open_input(args.klarf, args.tiff)
+    ds = _open_input(args.klarf, args.tiff, getattr(args, "raw", None))
     print(f"資料集：kind={ds.kind}，{len(ds.items)} 顆 defect")
     for w in ds.warnings:
         print(f"  △ {w}")
@@ -619,6 +668,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                        help="KLARF 檔、一個資料夾（每張圖一顆）、"
                             "或單獨一張圖（F85）")
     p_run.add_argument("--tiff", default=None, help="patch 影像檔路徑（.tif 或 .I01，內容都是多頁 TIFF；預設在 KLARF 旁邊自動尋找）")
+    p_run.add_argument("--raw", default=None, metavar="WxH[+header][@bits]",
+                       help="`.raw` 的版面（headerless 原始影像沒有檔頭可以看）"
+                            "，例 3584x3584+65536@16。省略時從檔案大小推 —— "
+                            "推不出唯一解就會停下來並把候選列出來")
     p_run.add_argument("--gds", default="",
                        help="GLAS 匯出資料夾（`<id>_label.png` + "
                             "overlay_manifest.json）—— 掛上去之後 "

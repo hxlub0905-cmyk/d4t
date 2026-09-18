@@ -46,6 +46,8 @@ GLYPH_ICONS = (
     # 工具列那五顆（F7-24）＋ 兩個沒有 KLARF 的入口（F11 Input-2／Input-3）
     "folder", "document", "save", "templates", "export", "stack",
     "folder_open", "layers",
+    # F113：`.raw` 那個入口 —— **一格一格的裸資料**（沒有檔頭可以看）。
+    "raw",
     # F110：DOE 那個入口（`Open conditions…`）—— **資料夾裡還有資料夾**。
     # 五顆 Open 並排，所以它的輪廓要跟另外四顆都不一樣：它是唯一畫成
     # 「一個資料夾裝著兩個小資料夾」的。
@@ -378,6 +380,18 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         # 前片：從左下往右斜出去
         p.drawLine(QPointF(m, h * 0.80), QPointF(w - m * 0.6, h * 0.80))
         p.drawLine(QPointF(w - m, h * 0.44), QPointF(w - m * 0.6, h * 0.80))
+    elif n == "raw":
+        # 一格一格的裸資料：外框 + 裡面一片棋盤格。六顆 Open 並排，所以它的
+        # 輪廓要跟另外五顆都不一樣 —— 它是唯一畫成「格子」的。
+        p.drawRect(QRectF(m, h * 0.20, w - 2 * m, h * 0.60))
+        cw = (w - 2 * m) / 4.0
+        ch = h * 0.60 / 3.0
+        for r in range(3):
+            for c in range(4):
+                if (r + c) % 2:
+                    continue
+                p.fillRect(QRectF(m + c * cw, h * 0.20 + r * ch, cw, ch),
+                           p.pen().color())
     elif n == "folder_stack":
         # 一個資料夾裝著兩個小資料夾 —— DOE：一個子目錄一顆、裡面是 condition。
         # 跟 ``folder``／``folder_open`` 的差別是**裡面有東西**，跟 ``stack``

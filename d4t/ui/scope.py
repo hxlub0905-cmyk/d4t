@@ -338,6 +338,16 @@ INPUT_SOURCES: Tuple[InputSource, ...] = (
         short="Folder…",
         what="A folder of single images: every image file becomes one defect.",
         icon="folder_open", has_klarf=False),
+    # ⚠ `kind` 是 **folder**，不是第六種：`.raw` 跟 PNG／TIFF 的差別只在「怎麼
+    # 把 byte 變成像素」，而那件事 ingest 就做完了 —— 一顆一張、沒有 KLARF、
+    # 寫不回 KLARF，形狀跟 `folder` 一模一樣。**新的是入口，不是 kind**
+    # （`folder` 與 `image` 早就是兩個入口共用一個 kind 的先例）。
+    InputSource(
+        key="raw", kinds=("folder",), title="Open raw…",
+        short="Raw…",
+        what=("A folder of headerless .raw images: it asks how they are laid "
+              "out, because a .raw file does not say."),
+        icon="raw", has_klarf=False),
     InputSource(
         key="doe_folder", kinds=("doe_folder",), title="Open conditions…",
         short="Conditions…",

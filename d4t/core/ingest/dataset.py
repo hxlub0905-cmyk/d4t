@@ -33,12 +33,13 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
 from . import imageio, tiff_index
+from .rawfile import RAW_EXTS, RawSpec, read_raw, suggest_shift
 from . import klarf_core
 from .klarf_core import KlarfDoc
 
@@ -101,6 +102,13 @@ class ImageRef:
     path: str
     page: Optional[int]
     channel: str
+    #: `.raw` 專用：**這個檔要怎麼讀**（寬高、位元深度、檔頭長度、降位位移）。
+    #:
+    #: 為什麼幾何住在**資料**上而不是卡片的參數上（F113）：`.raw` 裡沒有任何
+    #: 一個 byte 在講寬高，那是**這一批檔案的性質**，不是「這份 recipe 想怎麼
+    #: 量」。放進 recipe 的話，同一份 recipe 換一批不同尺寸的 raw 就會安靜地
+    #: 讀出一張斜掉的圖；放在這裡，載入的當下就對得起來或當場報錯。
+    raw: Optional["RawSpec"] = None
 
 
 @dataclass
@@ -172,7 +180,10 @@ class DefectItem:
 
     def _read(self, ref: "ImageRef", what: str,
               exact: bool = False) -> np.ndarray:
-        if ref.page is not None:
+        spec = ref.raw
+        if spec is not None:
+            arr = read_raw(ref.path, spec)
+        elif ref.page is not None:
             arr = tiff_index.read_page(ref.path, ref.page)
         elif exact:
             arr = imageio.load_exact(ref.path)
@@ -561,6 +572,66 @@ _DOE_EMPTY_WARNING = (
 _DOE_DUPLICATE_WARNING = (
     "%d folder name(s) appear more than once, and a defect id has to be "
     "unique (%s). Only the first one of each was loaded - rename the others.")
+
+
+#: `.raw` 一個檔案都湊不出來時說的那一句。
+_RAW_EMPTY_WARNING = (
+    "No .raw files in: %s. This entry reads headerless raw images - a folder "
+    "of PNG/TIFF is \u201cOpen folder\u2026\u201d instead.")
+
+
+def load_raw_folder(folder, spec: "RawSpec") -> Dataset:
+    """一個資料夾的 **`.raw`** → ``Dataset(kind="folder")``，每個檔案一顆 defect。
+
+    ⚠ **kind 仍然是 ``folder``，不是第六種。** `.raw` 跟 PNG／TIFF 的差別只在
+    「怎麼把 byte 變成像素」，而那件事在這裡就做完了 —— 一顆一張、沒有 KLARF、
+    寫不回 KLARF，那些**形狀**跟 ``folder`` 一模一樣。新開一種 kind 的話，
+    `SINGLE_IMAGE_KINDS`／起手卡／每一條 kind lint 都要多一格，而它們的答案會
+    跟 ``folder`` 逐字相同 —— 那是抄第二份出來，而抄出來的那份會漂。
+    **新的是入口，不是 kind**（`scope.INPUT_SOURCES` 上 ``folder`` 與 ``image``
+    早就是兩個入口共用一個 kind 的先例）。
+
+    ``spec.shift`` 是 ``None`` 時**當場量一次並整批共用**：讀第一個檔案，看實際
+    用到幾位元（12-in-16 還是滿量程），之後每一張都用同一個位移。
+    逐張量會讓兩張圖不再可比，而「比」是這個工具的全部（見 `rawfile` 的說明）。
+    """
+    d = str(folder)
+    if not os.path.isdir(d):
+        return Dataset(kind="folder", klarf=None, items=[],
+                       warnings=[f"Not a directory: {d}"])
+    names = [n for n in sorted(os.listdir(d))
+             if os.path.isfile(os.path.join(d, n))
+             and os.path.splitext(n)[1].lower() in RAW_EXTS]
+    if not names:
+        return Dataset(kind="folder", klarf=None, items=[],
+                       warnings=[_RAW_EMPTY_WARNING % d])
+
+    warnings: List[str] = []
+    use = spec
+    if use.shift is None:
+        first = os.path.join(d, names[0])
+        try:
+            probe = read_raw(first, replace(use, shift=None))
+        except IOError as e:
+            return Dataset(kind="folder", klarf=None, items=[],
+                           warnings=[str(e)])
+        shift = suggest_shift(probe, use.bits)
+        use = replace(use, shift=shift)
+        # **決定了什麼要講出來**（同 `require_8bit` 的原則：不准安靜地硬套）。
+        warnings.append(
+            "Read as %s. The brightest pixel in %s uses %d bits, so every "
+            "image in this folder is shifted down by %d bit(s) to 8-bit - the "
+            "same shift for all of them, so they stay comparable."
+            % (use.describe(), names[0],
+               max(1, int(np.asarray(probe).max()).bit_length()), shift))
+
+    items = [DefectItem(defect_id=os.path.splitext(n)[0], die=None,
+                        xrel_nm=None, yrel_nm=None,
+                        images={"single": ImageRef(
+                            path=os.path.join(d, n), page=None,
+                            channel="single", raw=use)})
+             for n in names]
+    return Dataset(kind="folder", klarf=None, items=items, warnings=warnings)
 
 
 def load_doe_folder(root) -> Dataset:

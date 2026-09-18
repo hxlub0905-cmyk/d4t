@@ -263,7 +263,7 @@ git add -A && python tools/release.py && git add -A
 | `ebi_patch` | KLARF + patch TIFF（每顆連續幾頁；檔名 `.tif` 或 `.I01`，**內容都是 TIFF**，副檔名只住在 `klarf_core.PATCH_IMAGE_EXTS`）| `Open KLARF…` |
 | `rsem` | KLARF + 每顆一個影像檔 | `Open KLARF…`（自動判別）|
 | `tiff_stack` | 一個多頁 TIFF、**沒有 KLARF** | `Open stack…` |
-| `folder` | 一個資料夾的單張影像、沒有 KLARF | `Open folder…` |
+| `folder` | 一個資料夾的單張影像、沒有 KLARF | `Open folder…`；**headerless `.raw` 走 `Open raw…`**（同一種 kind，第二個入口 —— `.raw` 裡沒有寬高與位元深度，所以那顆會問，或從檔案大小推）|
 | `doe_folder` | **一個子目錄一顆、裡面每個檔案一個 imaging condition**（DOE）、沒有 KLARF | `Open conditions…` |
 
 後三種**寫不回 KLARF**，那句話**常駐在資料集標籤上**。第二份 lot 走 `pair_source`

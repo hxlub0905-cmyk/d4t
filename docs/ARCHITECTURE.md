@@ -281,6 +281,7 @@ d4t/
 │   │   ├── tiff_index.py     #   免解碼 TIFF/BigTIFF 盤點 ＋ tifffile 讀 page
 │   │   ├── imageio.py        #   CJK-safe 影像讀寫（`np.fromfile` ＋ `cv2.imdecode`）
 │   │   ├── dataset.py        #   五種 source → 統一的 `DefectItem` 清單
+│   │   ├── rawfile.py        #   headerless `.raw`：版面、從檔案大小反推、16→8 bit（F113）
 │   │   ├── pair_source.py    #   **另一份 lot** 掛上來（`Dataset.sources[代號]`，F15）
 │   │   └── glas_export.py    #   GLAS 匯出（`<id>_label.png`）掛上來 → 一條影像流
 │   ├── algo/                 # 純 numpy/cv2 數學（卡片包這些，**不要在卡片裡重寫數學**）
