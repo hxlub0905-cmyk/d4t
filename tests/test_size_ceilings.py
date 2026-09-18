@@ -188,7 +188,11 @@ FILE_CEILINGS = {
     # `ui/gauge_panel.py`，`studio.py` 只留三行門面與 `self.gauges = GaugePanel(self)`。
     # 這是 F116「`StudioWindow` 只留組裝與接線」的第一步，見
     # `docs/plans/F116-split-studio.md`。
-    "d4t/ui/studio.py": 7388,
+    # 2026-09-19（F116 第 1 步之 1b）：7,388 → **7,149**（−239）。`bottom_stack`
+    # 的另一頁（特徵表）跟著儀表進 `ui/gauge_panel.py`；區域跨顆檢視那四支進
+    # **既有的** `ui/region_check.py`（它用的每一個東西本來就在那裡，而那顆按鈕
+    # 住在預覽區，不在右下角）。
+    "d4t/ui/studio.py": 7149,
     # 19 道 `_migrate_*` 住在這裡（見下面 `recipe_migrations`）。它會用跟
     # `studio.py` 完全一樣的機制長成第二個 `studio.py`。
     #
@@ -379,7 +383,10 @@ COUNT_CEILINGS = {
     ),
     # god object 的兩個投影。261 → 268（六天）。
     "studio_window_methods": (
-        280,
+        272,
+        # 2026-09-19（F116 第 1 步之 1b）：280 → 272。搬走 11 支，回來三支門面
+        # （`open_region_check` / `profile_panel` / `profile_panel_visible` ——
+        # 兩個測試檔都在用）。
         # 2026-09-18（F116 第 1 步）：293 → 280。右下角那一族 16 支搬進
         # `ui/gauge_panel.py`，回來三支門面（`inspector` / `bottom_page` /
         # `_on_calibrated` —— 測試用得多的那幾個，見 F116 §3-3）。
@@ -425,7 +432,10 @@ COUNT_CEILINGS = {
         lambda: _class_shape("d4t/ui/studio.py", "StudioWindow")[0],
     ),
     "studio_window_attributes": (
-        418,
+        409,
+        # 2026-09-19（F116 第 1 步之 1b）：418 → 409。`_no_profile` 的家跟著
+        # `profile_panel` 走，`region_window` / `_region_regions` 仍然是視窗的
+        # （`ui/region_check.py` 的函式明寫 `win.xxx = ...`，同 `open_dialogs`）。
         # 2026-09-18（F116 第 1 步）：433 → 418。儀表那一族用到的名字跟著它
         # 的行為走（`_inspector` / `_charts_window` 的家搬進 `GaugePanel`），
         # 進來的只有 `gauges` 一個。
@@ -510,9 +520,11 @@ HARD_CAPS = {
     # `ui/gauge_panel.py` —— 行 7,686 → 7,388、方法 293 → 280、`self.*`
     # 433 → 418。這是 F116 六步裡的第一步（`docs/plans/F116-split-studio.md`），
     # 而那一份的驗收正是「每一步都要讓這三格**明顯**往下」。
-    "d4t/ui/studio.py": 7388,
-    "studio_window_methods": 280,
-    "studio_window_attributes": 418,
+    # 2026-09-19（F116 第 1 步之 1b）：行 7,388 → 7,149、方法 280 → 272、
+    # `self.*` 418 → 409。
+    "d4t/ui/studio.py": 7149,
+    "studio_window_methods": 272,
+    "studio_window_attributes": 409,
 }
 
 

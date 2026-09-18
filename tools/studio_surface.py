@@ -38,7 +38,7 @@ REPO = Path(__file__).resolve().parent.parent
 STUDIO = REPO / "d4t" / "ui" / "studio.py"
 
 #: 測試裡指向 StudioWindow 的常見變數名；漏抓的話加在這裡。
-_VAR = r"(?:w|win|window|studio|sw|self\.w|self\.win)"
+_VAR = r"(?:w|win|window|studio|sw|ran|mixed_window|self\.w|self\.win)"
 
 
 def shape() -> tuple:

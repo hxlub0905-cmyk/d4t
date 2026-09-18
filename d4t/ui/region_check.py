@@ -22,7 +22,7 @@ Qt 的部分只負責把它算出來的東西畫出來。
 from __future__ import annotations
 from d4t.core.log import swallowed
 
-from typing import Any, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence
 
 import numpy as np
 from PySide6.QtCore import QRectF, Qt, Signal
@@ -47,6 +47,9 @@ from .gallery import make_thumb, thumb_placement
 from . import theme
 from .theme import TOKENS, region_hex
 from .widgets import _qimage_from_uint8, apply_button_cursors
+
+if TYPE_CHECKING:                  # 只給型別看：這一支不 import studio
+    from .studio import StudioWindow
 
 __all__ = ["check_regions", "regions_of_node", "RegionThumb", "RegionCheckWindow"]
 
@@ -361,3 +364,92 @@ class RegionCheckWindow(QDialog):
             cell.clicked.connect(self.defect_activated)
             self._grid.addWidget(cell, i // self._COLUMNS, i % self._COLUMNS)
             self._cells.append(cell)
+
+
+# --------------------------------------------------------------------------- #
+# 從 Studio 打開它（F116 第 1 步之 1b）
+# --------------------------------------------------------------------------- #
+# 這四支以前住在 `StudioWindow` 上。搬過來的理由不是「那一支太長」，是**它們
+# 本來就屬於這裡**：它們用的每一個東西（`MAX_CHECK`、`RegionCheckWindow`、
+# `regions_of_node`、`REGION_THUMB`）都在這個模組裡，而那顆按鈕住在預覽區，
+# 不在右下角的儀表那一塊 —— 把它們併進 `ui/gauge_panel.py` 會是一個名字
+# 講不出內容的模組（`CLAUDE.md` §4：先問那一塊該不該是一塊）。
+#
+# 形狀照 `ui/open_dialogs.py` 的慣例：模組層函式吃 `win`，該設在視窗上的屬性
+# （`region_window`、`_region_regions`）就明寫 `win.xxx = ...`。
+# 行為零改動（F116 §1）—— 本體逐字，只有 `self` → `win`。
+
+#: 區域跨顆檢視的縮圖邊長（px）。原本在 `ui/studio.py`，跟著用它的人搬過來。
+REGION_THUMB = 120
+
+
+def refresh_region_button(win: "StudioWindow") -> None:
+    regions = win.selected_regions()
+    has_data = bool(win._items())
+    win.btn_region_check.setVisible(bool(regions))
+    win.btn_region_check.setEnabled(bool(regions) and has_data)
+    if regions and not has_data:
+        win.btn_region_check.setToolTip(
+            "No dataset loaded yet — use “Open KLARF…” first.")
+
+
+def open_region_check(win: "StudioWindow", n: Optional[int] = None,
+                      sync: bool = False) -> bool:
+    """把選取節點定義的區域畫到前 N 顆上。
+
+    為什麼要有這個視窗
+    ------------------
+    區域設定對不對是一個**關於整批**的問題：patch 是以缺陷為中心裁的，
+    所以結構在每張 patch 裡的位置本來就不一樣 —— 在第 1 顆剛好的框，
+    第 50 顆可能整個偏掉。看單顆永遠看不出這件事。
+    """
+    regions = win.selected_regions()
+    if not regions:
+        win._status("Select a card that defines a region first.", "error")
+        return False
+    items = win._items()
+    if not items:
+        win._status("No dataset loaded yet — use “Open KLARF…” first.",
+                    "error")
+        return False
+
+    limit = int(n if n is not None else win.spin_trial_n.value())
+    limit = max(1, min(limit, MAX_CHECK, len(items)))
+    node = win.model.nodes[win.selected_node]
+    source = str(node.params.get("source", "") or "") or None
+    args = (win.model.to_recipe(), items[:limit], win.model.kind,
+            win.selected_node, regions, REGION_THUMB, source,
+            win.sources_for_run())
+
+    if win.region_window is None:
+        win.region_window = RegionCheckWindow(win)
+        win.region_window.defect_activated.connect(win._on_defect_activated)
+
+    if sync:
+        from .workers import RegionCheckWorker      # 迴圈 import：workers 也讀這裡
+        apply_region_results(win, regions, RegionCheckWorker.run_sync(*args))
+        return True
+    win._region_regions = regions
+    if not win.region_check_worker.start(*args):
+        win._status("Still checking the previous region — please wait.")
+        return False
+    win._status("Checking “%s” on %d defects…"
+                % (", ".join(regions), limit))
+    return True
+
+
+def on_region_ready(win: "StudioWindow", results: Any) -> None:
+    apply_region_results(win,
+                         list(getattr(win, "_region_regions", []) or []),
+                         list(results or []))
+
+
+def apply_region_results(win: "StudioWindow", regions: Sequence[str],
+                         results: Sequence[Dict[str, Any]]) -> None:
+    if win.region_window is None:
+        win.region_window = RegionCheckWindow(win)
+        win.region_window.defect_activated.connect(win._on_defect_activated)
+    win.region_window.set_results(list(regions), list(results))
+    win.region_window.show()
+    win.region_window.raise_()
+    win._status(win.region_window.summary_text())

@@ -11,17 +11,31 @@
 ``self.x`` 換成 ``self.w.x``；屬於這一塊自己的狀態（``_inspector``、
 ``_charts_window``）跟著行為一起搬進來。
 
+**2026-09-19（F116 第 1 步之 1b）**：`bottom_stack` 的**另一頁**（特徵表）也
+搬進來了 —— `_feature_sections` 那一族把「這張卡產出哪些數字」排成畫得出來的
+段落，而 `show_bottom_page` 本來就在這裡管兩頁誰在前面。同一塊畫面、同一個
+狀態機，分成兩個 controller 的話 `show_bottom_page` 會變成跨物件呼叫
+（F116 §3-2 不准 controller 互叫）。
+
+`profile_panel` 也在這裡，理由一樣：它回的是**現在掛著的儀表**身上那塊面板
+（`_inspector.panel`），而那個狀態的家在這一支。
+
 接線仍然留在 `studio.py`（`_wire_widgets` / `_wire_workers`）—— 這一支只提供
 slot（F116 §3-4）。
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import QObject
 
+from d4t.core.log import swallowed
 from d4t.core.pipeline import get_step
+from d4t.core.pipeline.engine import FEATURE_OWNER_KEY, feature_prefixes
+from d4t.core.pipeline.step import REGISTRY
+from . import theme
 from .inspectors import inspector_for
+from .widgets import ProfilePanel
 
 if TYPE_CHECKING:                      # 只給型別看：這一支不 import studio
     from .studio import StudioWindow
@@ -37,6 +51,8 @@ class GaugePanel(QObject):
         super().__init__(win)
         self.w = win
         self._inspector: Optional[Any] = None      # 原 StudioWindow._inspector
+        #: 沒有投影曲線面板時回的那個**空的替身**（原 StudioWindow._no_profile）。
+        self._no_profile: Optional[Any] = None
 
     def show_bottom_page(self, index: int) -> None:
         """0 = 這張卡的儀表，1 = 特徵表。"""
@@ -361,3 +377,184 @@ class GaugePanel(QObject):
                 self.w.param_form.set_histogram(list(rec["before"]))
                 return
         self.w.param_form.set_histogram([])
+
+    @property
+    def profile_panel(self) -> Any:
+        """投影曲線面板 —— 現在住在 ``ProfileInspector`` 裡面（F7-17）。
+
+        保留這個名字是因為它是「這張卡的面板」的對外身分（測試與狀態列都用
+        它）。選的不是投影定位卡時回一個**空的替身**，這樣呼叫端不必到處
+        寫 ``if is None``。
+        """
+        insp = self._inspector
+        panel = getattr(insp, "panel", None)
+        if panel is not None:
+            return panel
+        if getattr(self, "_no_profile", None) is None:
+            self._no_profile = ProfilePanel(self.w)
+            self._no_profile.setVisible(False)
+        return self._no_profile
+
+    def profile_panel_visible(self) -> bool:
+        """面板現在開著嗎（用明確狀態，不要問 ``isVisible()``）。"""
+        node = self.w.model.nodes.get(self.w.selected_node or "")
+        return self.w._is_method(node, self.w.PROFILE_STEP,
+                               self.w.PROFILE_METHOD)
+
+    def _feature_about(self, result: Any) -> Dict[str, str]:
+        """哪一個相對量是**跟誰**比出來的（特徵表中間那一欄要用）。
+
+        名字裡沒有這件事 —— ``epi_cmp_delta_median`` 不講 mg，而把它塞進名字
+        會變成 ``epi_vs_mg_cmp_delta_median`` 那種長度。引擎在
+        ``meta["compares"]`` 已經記著（那一份本來就是給儀表用的），
+        這裡只是讀出來，**不重算**。
+        """
+        ctx = getattr(result, "context", None)
+        rows = (getattr(ctx, "meta", {}) or {}).get("compares") or {}
+        out: Dict[str, str] = {}
+        for rec in rows.values():
+            ref = str((rec or {}).get("reference") or "")
+            for name in (rec or {}).get("names") or []:
+                out[str(name)] = ref
+        return out
+
+    def _feature_model(self, result: Any,
+                       highlight: Sequence[str] = ()) -> List[Dict[str, Any]]:
+        """特徵面板要畫的那幾段（F76 刀 4）—— **跟結果表同一棵樹**。
+
+        分組不是在這裡發明的：`verdict_features.bound_specs` 給每個名字的
+        結構化身分（卡、區域、統計量、變體），`feature_panel.panel_model`
+        把它排成「一張卡 × 一個區域」的段。Results 是 *N 顆 × M 特徵*，
+        這裡是 *一顆* —— 同一棵樹的轉置。
+
+        ⚠ 這一支取代了 `_feature_sections()` 與 `_feature_specs()`：那兩支
+        各自從 `meta["feature_owner"]` 與逐張卡的 `resolve_feature_specs`
+        重建了一次分組，而**那份說法跟結果表那份已經漂開了** —— 區域顏色
+        在同一張表上出現兩種就是漂出來的第一個症狀（F76 刀 1）。
+        """
+        from .feature_panel import panel_model
+        from ..core.pipeline.verdict_features import (
+            bound_specs, diagnostic_columns,
+        )
+
+        try:
+            recipe = self.w.model.to_recipe()
+            bounds = bound_specs(recipe, self.w.model.kind)
+            diags = diagnostic_columns(recipe, self.w.model.kind)
+        except Exception:  # 顯示層，壞了就不分組
+            bounds, diags = [], []
+        return panel_model(getattr(result, "features", {}) or {}, bounds,
+                           highlight=highlight,
+                           about=self._feature_about(result),
+                           diagnostics=diags)
+
+    def _feature_specs(self) -> Dict[str, Any]:
+        """特徵名 → 誕生處宣告的身分（`FeatureSpec`，PR-3；前身 F37 A4 的
+        `_feature_parts`）。
+
+        **問每一張卡，不自己拆字串**：``test_epi_hot_glv_median`` 這一串裡哪
+        一段是流、哪一段是區域、哪一段是使用者自己取的名字，三者都是任意識別
+        字，UI 只能猜 —— 而猜錯會把區域畫成流，顏色跟著錯，而顏色正是這件事的
+        重點。組名字的規則住在卡片上，身分就宣告在同一個地方
+        （`Step.resolve_feature_specs`；上下標的拆解 = ``spec.parts()``）。
+
+        先出現的贏（同 `feature_owners`）：撞名的時候引擎留的是先寫那一份的
+        救援名，而畫面上那一格顯示的是後寫的值 —— 兩邊都指同一個人比較不會錯。
+        """
+        out: Dict[str, Any] = {}
+        for nid in self.w.model.node_order:
+            node = self.w.model.nodes.get(nid)
+            if node is None or not node.enabled:
+                continue
+            try:
+                got = get_step(node.step).resolve_feature_specs(node.params)
+            except Exception:  # 顯示用，壞了就不拆
+                swallowed("gauge_panel._feature_specs")
+                continue
+            for s in got:
+                out.setdefault(str(s.name), s)
+        return out
+
+    def _feature_sections(self, result: Any) -> List[Dict[str, Any]]:
+        """特徵表要怎麼分組（F13-1 ①）—— **照引擎已經記下來的事分**。
+
+        兩份資料都早就在了，只是 UI 沒用：
+
+        * ``ctx.meta["feature_owner"]`` —— 每個特徵是**哪張卡**寫的（engine 在
+          救援撞名的那一段順手記的）；
+        * ``Step.diagnostic_features()`` —— 哪幾個是「這張卡自己做了什麼」
+          （`clip_frac` 那類），不是在量缺陷。
+
+        所以這裡不發明分類規則。發明一份的話它會跟引擎漂 —— 而漂掉的症狀是
+        「這個數字被歸到錯的卡底下」，畫面上完全看不出來。
+
+        順序 = **執行順序**（讀起來跟畫布一樣，由前到後），診斷那一組排最後
+        而且**預設收起來**：它每張 Enhance 卡都會產出，攤開來會把真正在量的
+        那幾個數字擠到看不見。
+        """
+        ctx = getattr(result, "context", None)
+        owner = dict(getattr(ctx, "meta", {}).get(FEATURE_OWNER_KEY, {})
+                     or {}) if ctx is not None else {}
+        features = dict(getattr(result, "features", {}) or {})
+        if not owner:
+            return []
+
+        diagnostics: List[str] = []
+        sections: List[Dict[str, Any]] = []
+        # 救回來的那份叫什麼，**跟引擎用同一支**（F17-②）。以前這裡自己用
+        # `qualified_feature_name(nid, f)` 組（節點 id 前綴），而引擎改成流名
+        # 前綴之後兩邊就對不上了 —— 症狀是那個值以「量測值」的身分排到最上面，
+        # 而它量的是那張卡自己。兩份說法必然有一份會漂（CLAUDE.md §0）。
+        try:
+            recipe = self.w.model.to_recipe()
+            prefixes = feature_prefixes(list(self.w.model.node_order), recipe,
+                                        REGISTRY)
+        except Exception:  # 顯示用，壞了就退回節點 id
+            prefixes = {}
+        for nid in self.w.model.node_order:
+            node = self.w.model.nodes.get(nid)
+            if node is None:
+                continue
+            mine = [f for f in features if owner.get(f) == nid]
+            if not mine:
+                continue
+            try:
+                step_cls = get_step(node.step)
+                label = step_cls.label
+                colour = theme.group_hex(step_cls.resolve_group())
+                diag = set(step_cls.diagnostic_features(node.params))
+                # **救回來的那一份也是診斷數字**：兩張 Enhance 卡都寫
+                # `clip_frac`，engine 把先寫的留成 `<那條流>_clip_frac`。
+                # 救援名用 `FeatureSpec.qualified`（跟引擎、binder 同一支）。
+                pfx = prefixes.get(nid, nid)
+                diag |= {s.qualified(pfx).name
+                         for s in step_cls.resolve_feature_specs(node.params)
+                         if s.name in diag}
+            except Exception:  # 顯示用，壞了就當一般的
+                label, colour, diag = node.step, "", set()
+            measured = [f for f in mine if f not in diag]
+            diagnostics.extend(f for f in mine if f in diag)
+            if measured:
+                sections.append({"title": label, "color": colour,
+                                 "names": measured, "node": nid})
+        # **同一張卡放兩次時才把 id 帶出來**（畫布的副標用的是同一條規則）：
+        # 兩組都叫 `Normalize` 的話，使用者分不出哪一組是哪一張卡；而每一組都
+        # 掛一個 node id 又是在每一份正常的 recipe 上加噪音。
+        seen_titles = [sec["title"] for sec in sections]
+        for sec in sections:
+            if seen_titles.count(sec["title"]) > 1:
+                sec["title"] = "%s · %s" % (sec["title"], sec["node"])
+        if diagnostics:
+            sections.append({"title": "Diagnostics", "color": "",
+                             "names": diagnostics, "collapsed": True})
+        return sections
+
+    def _highlight_features(self, result: Any) -> Sequence[str]:
+        """選取節點這一步新增/改值的特徵 → 在特徵表裡標色。"""
+        nid = self.w.selected_node
+        if not nid:
+            return ()
+        for tr in getattr(result, "traces", []) or []:
+            if getattr(tr, "node_id", None) == nid:
+                return list(getattr(tr, "features_added", {}) or {})
+        return ()
