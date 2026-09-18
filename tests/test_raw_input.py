@@ -21,7 +21,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from d4t.core.ingest.dataset import load_folder, load_raw_folder  # noqa: E402
 from d4t.core.ingest.rawfile import (  # noqa: E402
-    RAW_EXTS, RawSpec, guess_layouts, read_raw, suggest_shift,
+    RAW_EXTS, RawSpec, guess_layouts, layout_from_header, read_raw,
+    suggest_shift,
 )
 
 W = H = 64
@@ -70,6 +71,103 @@ def test_only_square_answers_are_offered():
     """非正方形有無限多組解（任何一組因數都行），列出來只會讓人在數字裡挑。"""
     for s in guess_layouts(1024 + W * H * 2):
         assert s.width == s.height
+
+
+# --------------------------------------------------------------------------- #
+# 1b. 檔頭裡就寫著寬高的那一種（F115）—— **先讀，讀不懂才猜**
+# --------------------------------------------------------------------------- #
+#: 廠外驗證逐位元組確認過的那個格式（2026-09-18，兩批真檔）：64 KiB 檔頭，
+#: 開頭四個 little-endian u16 是 ``W, 0, H, 0``。
+HDR_W, HDR_H = 3584, 7680
+
+
+def _with_header(path, side, header=65536, words=None):
+    """側邊 ``side`` 的一張**那個格式**的 `.raw`（像素全 0，只驗版面）。
+
+    ⚠ 像素那一段用 ``truncate`` 撐出來，**不真的寫 118 MB 的 0**：7680² 是
+    118,030,336 byte，而這幾條測試只讀前 8 個 byte ＋ 問一次檔案大小。公司機
+    的可寫空間是一個固定額度（`AGENTS.md`），一支測試不該吃掉它。
+    """
+    head = bytearray(b"\x00" * int(header))
+    w = np.array(words if words is not None else [side, 0, side, 0], dtype="<u2")
+    head[0:8] = w.tobytes()
+    with open(path, "wb") as f:
+        f.write(bytes(head))
+        f.truncate(int(header) + side * side * 2)
+    return str(path)
+
+
+def test_the_two_measured_sizes_decode_from_their_own_header(tmp_path):
+    """**兩批真檔量到的那兩個邊長**（2026-09-18，廠外驗證）。
+
+    數字照抄：``65536 + 3584 × 3584 × 2 = 25,755,648``。這一條同時是那個算式
+    的可執行形式 —— 檔案大小與版面對不上的話 `guess_layouts` 就不會回它。
+    """
+    for side, want in ((HDR_W, 25_755_648), (HDR_H, 118_030_336)):
+        p = _with_header(tmp_path / ("s%d.raw" % side), side)
+        assert os.path.getsize(p) == want
+        got = guess_layouts(want, path=p)
+        assert len(got) == 1, [s.describe() for s in got]
+        s = got[0]
+        assert (s.width, s.height, s.bits, s.header) == (side, side, 16, 65536)
+        assert s.from_header is True
+
+
+def test_it_says_the_number_was_read_and_not_guessed(tmp_path):
+    """**猜出來的與讀出來的不能長得一樣。**
+
+    使用者對這兩者要做的事不一樣：讀出來的確認一下就好，猜出來的要去問機台。
+    對話框上唯一講得出這件事的地方就是 `describe()`。
+    """
+    p = _with_header(tmp_path / "a.raw", HDR_W)
+    said = guess_layouts(os.path.getsize(p), path=p)[0].describe()
+    assert "read 3584 x 3584 from the file header" in said, said
+    # 反面：同一個大小用猜的（不給 path），那句話**不准**出現。
+    guessed = guess_layouts(25_755_648)
+    assert len(guessed) == 1 and not guessed[0].from_header
+    assert "from the file header" not in guessed[0].describe()
+
+
+def test_the_signature_is_the_two_zeros_not_just_two_numbers(tmp_path):
+    """**前 8 個 byte 本來就可能是像素**，所以中間那兩個 0 才是證據。
+
+    少了這一關，一張開頭剛好是四個小數字的 headerless 圖會被當成「檔頭說它是
+    3584×3584」—— 而那正是這個模組檔頭警告的那件事：每一個像素都錯，不報錯。
+    """
+    p = _with_header(tmp_path / "a.raw", HDR_W, words=[HDR_W, 7, HDR_W, 0])
+    assert layout_from_header(p) is None
+    q = _with_header(tmp_path / "b.raw", HDR_W, words=[HDR_W, 0, HDR_W, 9])
+    assert layout_from_header(q) is None
+
+
+def test_a_header_that_does_not_add_up_is_not_believed(tmp_path):
+    """第三關：``65536 + W × H × 2`` **逐位元組**要等於檔案大小。
+
+    對不上的意思是「那四個數字不是這個檔案的寬高」，而硬信它的下場是一張斜掉
+    的圖。⚠ 這一條也是「越界的邊長」那一關的反面 —— 兩者都回 ``None``。
+    """
+    p = _with_header(tmp_path / "a.raw", HDR_W)
+    with open(p, "ab") as f:
+        f.write(b"\x00" * 2)               # 多兩個 byte，算式就不成立了
+    assert layout_from_header(p) is None
+    # 邊長越界（一張 512×512 的圖不會用這個格式）
+    small = _with_header(tmp_path / "b.raw", 512)
+    assert layout_from_header(small) is None
+
+
+def test_a_file_without_that_header_behaves_exactly_as_before(tmp_path):
+    """**黃金值那一半**：檔頭讀不懂的時候，這一支回的要跟以前逐項相同。"""
+    p = _write(tmp_path / "a.raw", np.zeros((H, W), "<u2"))
+    size = os.path.getsize(p)
+    assert layout_from_header(p) is None
+    assert guess_layouts(size, path=p) == guess_layouts(size)
+
+
+def test_a_file_too_short_to_have_a_header_does_not_raise(tmp_path):
+    """4 個 byte 的檔案讀不出四個 u16 —— 那是一句 ``None``，不是一個例外。"""
+    (tmp_path / "tiny.raw").write_bytes(b"\x00\x04")
+    assert layout_from_header(str(tmp_path / "tiny.raw")) is None
+    assert layout_from_header(str(tmp_path / "nope.raw")) is None
 
 
 # --------------------------------------------------------------------------- #

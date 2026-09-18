@@ -471,6 +471,7 @@ docs/
 ├── USING-CHARACTERIZATION.md # 給使用者：EBI ↔ API characterization 怎麼做
 ├── USING-UNIFORMITY.md       # 給使用者：一群框之間差多少、有沒有斜掉
 ├── USING-SIMGEN.md          # 給使用者：貼一張 Golden Cell 產一整批模擬資料
+├── USING-FOCUS.md            # 給使用者：對焦分數怎麼看、怎麼跟機台的 F.I. 對齊
 ├── NO-GIT-SETUP.md           # 受限機器：怎麼把程式碼弄上去
 ├── OFFLINE-INSTALL.md        # 受限機器：怎麼離線裝相依套件
 └── history/                  # 封存（**不進搬運包**）：按月的 SESSION_LOG、做完的計畫書

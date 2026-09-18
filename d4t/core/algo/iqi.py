@@ -53,6 +53,19 @@ pattern 的邊緣落在中頻。
 決定**（`CLAUDE.md` 的最高指導原則：站點差異封裝進 recipe，不封裝進程式碼）。
 上面那張表就是那一格的說明書。
 
+**實測的答案（2026-09-18，廠外驗證）：``noise_percent`` 是一格站點參數，
+而預設的 0 在 logic 區是對的。** 兩台機台各一批真實 raw、每張帶機台自己的
+F.I. 真值（機台 A ＝ 高密度重複圖案（array）區、機台 B ＝ logic（不重複）區
+—— **代號與層別一律遮蔽**，鐵則 8；數字一律照抄，完整那一份與校正流程見
+`docs/USING-FOCUS.md`）：
+
+* **機台 B（logic 區、u16）**：預設那一組（``noise=0``、``cutoff=10``、8×8、
+  前 30%）對機台 F.I. 的 Pearson **r = 0.959**、Spearman **rho = 0.989**。
+  把 ``noise`` 開到 20，r **崩到 0.06** —— 在 logic 區，高頻是**真的訊號**，
+  壓掉它等於把要量的東西量掉。所以那一格在這種站點要留 0。
+* HD／u8 那一類的機台仍然需要壓（上面那張合成資料的表就是它的形狀），
+  **但先讀 ② 的實測答案** —— array 區有一個更前面的問題。
+
 **② 梯度圖是「篩選塊」還是「只是知道一下」？**
 
 * 詳細版把它列成獨立的 Step 2，說是「讓你知道哪些塊落在 pattern 區域」，
@@ -72,6 +85,18 @@ pattern 的邊緣落在中頻。
   **卡片自動做的每一個決定，都要變成一個使用者畫得出分布的數字**。
   一個算了卻沒有人讀的步驟，是這個 repo 記過六次的那種形狀。
 
+**實測的答案（2026-09-18，廠外驗證）：在重複 array 區，前 30% 那一刀與梯度
+預篩兩個都是 no-op —— 因為 64 塊是同質的。** 把留下來的塊數從 19 掃到 40，
+兩台機台的 r **一動都不動**。那不是 bug，是**前提不成立**：這兩步的設計前提
+是「有些塊有 pattern、有些塊是空背景」，而 array 區每一塊長得一樣。分數照樣
+算得出來，只是它的**鑑別力有限**（機台 A 上每一種量得出來的方法都卡在
+r ≈ 0.5：整張帶通 0.29、pattern 諧波能量 0.16、十七個古典對焦指標最高 0.51、
+整份 OP-301 參數網格最高 0.31；局部最好的是梯度域的 0.49，那就是
+``domain="gradient"`` 的由來）。
+
+順帶把規格措辭的一個歧義也結掉了：投影片寫「前 30」、詳細版寫「前 30%」——
+既然塊數從 19 掃到 40 分數不動，**兩種讀法在實務上沒有差別**。
+
 其餘照詳細版的預設：Sobel、cutoff = Nyquist × 10%、能量除以像素數、
 前 30% 取 floor、不乘 scale 不加 offset。
 
@@ -86,6 +111,30 @@ Step 3 的逆轉換**對最終數字沒有貢獻**（64 塊 × 一次多餘的�
 這裡仍然做 iFFT，兩個理由：規格的驗收標準要四個獨立步驟；而空間域那張圖
 是之後要畫在儀表上的東西。``test_parseval_says_the_ifft_is_optional``
 把兩條路的數值釘在一起 —— 哪天嫌慢，那條測試就是刪掉 Step 3 的許可證。
+
+四個步驟跑在**哪一張圖**上（``domain``，2026-09-18）
+=====================================================
+
+``domain="pixel"``（預設）＝ 跑在影像本身，逐位元組就是上面描述的那一個。
+``domain="gradient"`` ＝ 先把影像換成梯度強度 ``G = √(Gx² + Gy²)``
+（:func:`gradient_magnitude`），**四個步驟一個字都不改**地跑在 G 上。
+
+為什麼是一格參數而不是一個 ``method``：`CLAUDE.md` §3 那條「**改變『量得出
+什麼』的選擇是岔路，不是 method**」。這一格問的是**樣品**（你的區域是重複的
+array 還是 logic），不是問軟體要用哪個公式。
+
+⚠ **它不是一個「比較好的預設」，是 array 區的一個起點。** 廠外實測
+（2026-09-18）：機台 A（array 區）r 0.31 → **0.49**，是那台機台上量到的局部
+最好；機台 B（logic）0.9593 → **0.9596**，也就是**沒有變差**。而 0.49 仍然
+不是一個可以出貨的相關 —— array 區真正的問題（機台 A 的 F.I. 是在哪一個影像
+階段算的、它的正規化會不會跟同批其他張有關）要機台方回答，那個答案可能會把
+整條路換掉。
+
+⚠ **梯度只有一份定義。** G 就是 :func:`pattern_density` 拿去數「哪裡有
+pattern」的那一張圖（同一組 Sobel 核、同一次卷積）—— 同一個模組裡有兩個
+「梯度」的話，那兩個遲早會不一樣。廠外那一輪用的是 ``cv2.Sobel(CV_32F)``
+（邊界 reflect），這裡是 float64 ＋ edge padding：差別只落在最外面那一圈
+像素，而不為了對齊一個小數點多養一支 Sobel。
 """
 from __future__ import annotations
 
@@ -94,10 +143,12 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 
-__all__ = ["slice_blocks", "pattern_density", "fft_denoise", "ifft_block",
+__all__ = ["slice_blocks", "pattern_density", "gradient_magnitude",
+           "fft_denoise", "ifft_block",
            "block_energy", "focus_index", "DEFAULT_BLOCKS",
            "DEFAULT_KEEP_PERCENT", "DEFAULT_CUTOFF_PERCENT",
-           "DEFAULT_NOISE_PERCENT"]
+           "DEFAULT_NOISE_PERCENT", "DOMAIN_PIXEL", "DOMAIN_GRADIENT",
+           "DOMAINS", "DEFAULT_DOMAIN"]
 
 #: 每邊切幾塊。**固定 64 塊（8×8）不隨影像大小改變** —— 那是規格的重點設計：
 #: 1024 的圖與 2000 的圖都是「64 塊取前 30%」，所以分數互相比較得起來。
@@ -116,6 +167,17 @@ DEFAULT_CUTOFF_PERCENT = 10.0
 #: 的「filter out high-frequency noise」差在哪，測試量得出來
 #: （`test_a_noisy_blank_block_scores_like_a_sharp_one_until_you_denoise`）。
 DEFAULT_NOISE_PERCENT = 0.0
+
+#: 四個步驟跑在影像本身。**預設**，逐位元組是規格描述的那一個。
+DOMAIN_PIXEL = "pixel"
+
+#: 四個步驟跑在梯度強度 ``√(Gx² + Gy²)`` 上（見模組說明最後一節）。
+DOMAIN_GRADIENT = "gradient"
+
+#: 兩條路。**順序就是 UI 上那一排膠囊的順序**（預設排第一個）。
+DOMAINS = (DOMAIN_PIXEL, DOMAIN_GRADIENT)
+
+DEFAULT_DOMAIN = DOMAIN_PIXEL
 
 
 # --------------------------------------------------------------------------- #
@@ -170,21 +232,34 @@ def _convolve3(arr: Any, kernel: Any) -> Any:
     return out
 
 
+def gradient_magnitude(img: Any) -> Any:
+    """整張圖的梯度強度 ``√(Gx² + Gy²)``（Sobel）—— **這個模組唯一的一份**。
+
+    兩個下游讀它，而它們必須讀到同一張圖：:func:`pattern_density` 拿它數
+    「哪裡有 pattern」，``domain="gradient"`` 拿它當四個步驟的輸入
+    （見模組說明最後一節）。梯度大 = 灰階變化劇烈 = 那裡是 pattern 邊緣；
+    梯度小 = 平坦 = 空背景。
+
+    回傳的是 ``float64``、跟輸入同尺寸（``_convolve3`` 邊緣用 edge padding，
+    所以最外面那一圈也有值）。
+    """
+    arr = np.asarray(img, dtype=np.float64)
+    gx, gy = _convolve3(arr, _SOBEL_X), _convolve3(arr, _SOBEL_Y)
+    return np.sqrt(gx * gx + gy * gy)
+
+
 def pattern_density(img: Any, blocks: int = DEFAULT_BLOCKS,
                     threshold: float = 0.0) -> Tuple[Any, Any]:
     """**Step 1 的第二半** —— 哪些地方有 pattern。
 
-    整張圖算 ``magnitude = √(Gx² + Gy²)``（Sobel）：梯度大 = 灰階變化劇烈 =
-    那裡是 pattern 邊緣；梯度小 = 平坦 = 空背景。
+    梯度圖由 :func:`gradient_magnitude` 算（同一份，不在這裡抄第二次）。
 
     回 ``(每一塊的密度, 整張圖的梯度圖)``。密度 = 那一塊裡梯度超過門檻的像素
     佔幾成；``threshold=0`` 時門檻取**整張圖梯度的中位數**（一個不必使用者
     發明數字的自適應門檻 —— 而它同時保證「全灰的圖」密度是 0，因為那時候
     整張圖的梯度都是 0）。
     """
-    arr = np.asarray(img, dtype=np.float64)
-    gx, gy = _convolve3(arr, _SOBEL_X), _convolve3(arr, _SOBEL_Y)
-    mag = np.sqrt(gx * gx + gy * gy)
+    mag = gradient_magnitude(img)
     cut = float(threshold) if threshold > 0 else float(np.median(mag))
     hot = mag > max(cut, 1e-12)
     return (np.array([float(np.mean(b)) for b in slice_blocks(hot, blocks)],
@@ -266,7 +341,8 @@ def focus_index(img: Any, blocks: int = DEFAULT_BLOCKS,
                 keep_percent: float = DEFAULT_KEEP_PERCENT,
                 cutoff_percent: float = DEFAULT_CUTOFF_PERCENT,
                 min_pattern: float = 0.0,
-                noise_percent: float = DEFAULT_NOISE_PERCENT) -> Dict[str, Any]:
+                noise_percent: float = DEFAULT_NOISE_PERCENT,
+                domain: str = DEFAULT_DOMAIN) -> Dict[str, Any]:
     """**Step 4 的後半** —— 排序、取前 ``keep_percent``%、平均。
 
     回一個 dict 而不是一個裸數字，因為**這支自動做的每一個決定都要看得見**
@@ -282,9 +358,18 @@ def focus_index(img: Any, blocks: int = DEFAULT_BLOCKS,
     ``min_pattern > 0`` 時先用梯度密度篩掉沒有 pattern 的塊（投影片那條路，
     見模組說明 ②）。篩到一塊都不剩就**退回不篩** —— 那時候的答案是「這張圖
     沒有 pattern」，而那件事由 ``pattern_frac`` 講，不該變成一個錯誤。
+
+    ``domain`` 決定四個步驟跑在哪一張圖上（見模組說明最後一節）。
+    ⚠ **``pattern_frac`` 兩條路上是同一個數字**：它講的是「這張**影像**有多少
+    地方有 pattern」，那是影像的性質，不是這一格選了什麼的性質。
     """
-    pieces = slice_blocks(img, blocks)
-    density, _mag = pattern_density(img, blocks)
+    if str(domain) not in DOMAINS:
+        raise ValueError("unknown IQI domain %r - it is one of %s"
+                         % (domain, ", ".join(DOMAINS)))
+    density, mag = pattern_density(img, blocks)
+    # ⚠ 梯度那條路吃的正是 `pattern_density` 剛剛算完的那一張圖 —— 不多算一次，
+    # 也**不可能**跟它不一樣（模組說明最後一節：梯度只有一份定義）。
+    pieces = slice_blocks(mag if str(domain) == DOMAIN_GRADIENT else img, blocks)
     scores = np.array(
         [block_energy(ifft_block(fft_denoise(b, cutoff_percent, noise_percent)))
          for b in pieces], dtype=np.float64)

@@ -136,6 +136,38 @@ class FocusQualityStep(MultiSourceStep):
                         "are averaged. 0 keeps every block - the sharpest-30% "
                         "cut already pushes empty blocks out on its own. "
                         "Raise it when a lot of the image is blank.")),
+        # F115：**這一格問的是樣品，不是問軟體**（`CLAUDE.md` §3：改變「量得出
+        # 什麼」的選擇是岔路，不是 method）。廠外實測 2026-09-18：重複 array 區
+        # 上灰階那條路每一種調法都卡在 r ≈ 0.3，換到梯度上是那台機台量到的局部
+        # 最好（0.49）；logic 區上兩條路一樣好，所以預設不動。
+        ParamSpec(name="iqi_domain", type="chip_choice",
+                  default=algo_iqi.DEFAULT_DOMAIN,
+                  choices=list(algo_iqi.DOMAINS),
+                  icons=["iqi_pixel", "iqi_gradient"],
+                  # 例外表（`CLAUDE.md` §3：只放拼不出人話的那幾個）。
+                  # ``pixel`` / ``gradient`` 是 recipe 的鍵，不是給人看的字 ——
+                  # 而畫面上那一排問的是「量亮度還是量邊」。
+                  choice_labels={"pixel": "The image", "gradient": "Its edges"},
+                  label="Measure on", show_when=IQI_WHEN,
+                  section="2 · IQI (OP-301)", advanced=True,
+                  choice_help={
+                      "pixel": "The brightness of the image itself. This is "
+                               "the OP-301 method as written, and what every "
+                               "recipe saved before today does.",
+                      "gradient": "The edges instead of the brightness - the "
+                                  "image is turned into edge strength first, "
+                                  "then measured exactly the same way. Try it "
+                                  "on a repeating array, where every block "
+                                  "looks alike and the brightness route "
+                                  "barely separates in-focus from out.",
+                  },
+                  help=("Whether the score is taken from the brightness of "
+                        "the image or from its edges. This is a question "
+                        "about your sample, not about the software: a "
+                        "repeating array gives the brightness route very "
+                        "little to work with, while on a logic area the two "
+                        "come out the same. Leave it on the image unless the "
+                        "numbers say otherwise.")),
         _named(output_prefix_spec("test"), "3 · Output"),
     ]
     reads = ["test"]
@@ -212,7 +244,8 @@ class FocusQualityStep(MultiSourceStep):
                                    or algo_iqi.DEFAULT_KEEP_PERCENT),
                 cutoff_percent=float(p.get("iqi_cutoff_percent") or 0.0),
                 noise_percent=float(p.get("iqi_noise_percent") or 0.0),
-                min_pattern=float(p.get("iqi_min_pattern") or 0.0))
+                min_pattern=float(p.get("iqi_min_pattern") or 0.0),
+                domain=str(p.get("iqi_domain") or algo_iqi.DEFAULT_DOMAIN))
         except ValueError as e:
             raise StepError(self.key, str(e)) from None
         # 逐塊的分數留給儀表（同上面那份 `focus` note 的理由）—— 面板要畫
@@ -221,6 +254,9 @@ class FocusQualityStep(MultiSourceStep):
             "stream": str(p.get(self.CURRENT_STREAM, "") or ""),
             "prefix": str(p.get(self.CURRENT_PREFIX, "") or ""),
             "blocks": int(p.get("iqi_blocks") or algo_iqi.DEFAULT_BLOCKS),
+            # **這幾塊的分數是從哪一張圖來的**（F115）。少了這一格，儀表會把
+            # 梯度域的分數畫成亮度的分數 —— 兩者差一個數量級，而圖上看不出來。
+            "domain": str(p.get("iqi_domain") or algo_iqi.DEFAULT_DOMAIN),
             "scores": list(got["scores"]),
             "kept": int(got["blocks"]),
         })

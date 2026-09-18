@@ -4,13 +4,24 @@
 規格（使用者 2026-09-02 給的三份說明）明列了驗收條件，所以這一份就是那張
 清單的可執行形式。另外兩支測的是兩份說明**互相矛盾**的地方 —— 那兩條不是
 規格要的，是這一輪量出來的，而它們正是「兩種選法都跑得完、都有數字」的證據。
+
+最後一節（F115，2026-09-18）測的是第三件事：**同一個指標換一種區域型態就
+換一種行為**。那一輪的資料不能進這個 repo（鐵則 8），所以用的是合成出來的
+形狀（`tests/iqi_fixtures.py`）；廠外量到的那些相關係數住在
+`docs/USING-FOCUS.md`，一個都不會出現在斷言裡。
 """
 from __future__ import annotations
+
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
 
-from d4t.core.algo import iqi
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import tests.iqi_fixtures as fixtures  # noqa: E402
+from d4t.core.algo import iqi  # noqa: E402
 
 
 def _checker(size=512, pitch=16, blur=0, noise=0.0, seed=0):
@@ -158,3 +169,148 @@ def test_a_block_too_small_to_measure_says_so():
     with pytest.raises(ValueError) as e:
         iqi.slice_blocks(np.zeros((12, 12)), 8)
     assert "per block" in str(e.value) and "fewer blocks" in str(e.value)
+
+
+# --------------------------------------------------------------------------- #
+# F115：四個步驟跑在哪一張圖上（``domain``）
+#
+# 2026-09-18 的廠外驗證量到一件事：這個指標**在兩種區域上的表現差一個數量級**，
+# 而差別不在參數，在區域型態。那一輪的資料不能進這個 repo（鐵則 8），所以下面
+# 用的是兩張合成出來的**形狀**（`tests/iqi_fixtures.py`），斷言的是結構 ——
+# 廠外那些相關係數一個都不會出現在斷言裡，它們住在 `docs/USING-FOCUS.md`。
+# --------------------------------------------------------------------------- #
+def _sep(gen, domain, blur=2):
+    """這張圖「對焦準 ÷ 失焦」差幾倍 —— 一個指標的鑑別力就是這個數字。"""
+    sharp = iqi.focus_index(gen(blur=0), domain=domain)["iqi"]
+    soft = iqi.focus_index(gen(blur=blur), domain=domain)["iqi"]
+    return sharp / soft
+
+
+def test_measuring_on_the_image_is_byte_for_byte_what_it_always_was():
+    """**黃金值的守門。** 預設那條路多了一格參數，數字一個位元都不准動。
+
+    ⚠ 這一條不是形式主義：新的那一格是在 ``pattern_density`` **之後**才分岔
+    的，而那一步原本排在切塊後面。順序換了而答案沒換，只有逐項相等講得出來。
+    """
+    for img in (_checker(), _checker(blur=3), fixtures.logic_blocks(),
+                fixtures.array_blocks()):
+        base = iqi.focus_index(img)
+        named = iqi.focus_index(img, domain=iqi.DOMAIN_PIXEL)
+        assert named["iqi"] == base["iqi"]
+        assert named["scores"] == base["scores"]
+        assert named["pattern_frac"] == base["pattern_frac"]
+        assert named["blocks"] == base["blocks"]
+
+
+def test_the_gradient_route_runs_the_same_four_steps_on_the_gradient():
+    """規格沒有第二套步驟 —— 換的只有**餵進去的那張圖**。
+
+    手動走完「換圖 → 四個步驟」要跟 ``domain="gradient"`` 逐項相同；不同的話
+    就是那條路上偷偷多做或少做了一件事。
+    """
+    img = fixtures.array_blocks()
+    got = iqi.focus_index(img, domain=iqi.DOMAIN_GRADIENT)
+    want = iqi.focus_index(iqi.gradient_magnitude(img), domain=iqi.DOMAIN_PIXEL)
+    assert got["scores"] == want["scores"]
+    assert got["iqi"] == want["iqi"]
+
+
+def test_the_gradient_has_exactly_one_definition_in_this_module():
+    """`pattern_density` 數的那張梯度圖，跟梯度那條路吃的是**同一張**。
+
+    兩份定義的下場是它們遲早不一樣，而那時候 ``pattern_frac`` 講的就不再是
+    分數是從哪裡來的（見模組說明最後一節）。
+    """
+    img = fixtures.logic_blocks()
+    _density, mag = iqi.pattern_density(img, 8)
+    assert np.array_equal(mag, iqi.gradient_magnitude(img))
+
+
+def test_which_image_it_measured_does_not_change_how_much_pattern_there_is():
+    """``pattern_frac`` 講的是**這張影像**有多少地方有 pattern。
+
+    那是影像的性質，不是這一格選了什麼的性質 —— 兩條路上要是同一個數字。
+    """
+    for gen in (fixtures.logic_blocks, fixtures.array_blocks):
+        a = iqi.focus_index(gen(), domain=iqi.DOMAIN_PIXEL)["pattern_frac"]
+        b = iqi.focus_index(gen(), domain=iqi.DOMAIN_GRADIENT)["pattern_frac"]
+        assert a == b
+
+
+def test_blur_still_makes_the_score_go_down_on_the_gradient():
+    """換了一張圖不代表可以換一個定義：失焦 → 分數低，**兩條路都要成立**。"""
+    for gen in (fixtures.logic_blocks, fixtures.array_blocks):
+        for domain in iqi.DOMAINS:
+            scores = [iqi.focus_index(gen(blur=b), domain=domain)["iqi"]
+                      for b in (0, 1, 2, 3, 5, 8)]
+            assert scores == sorted(scores, reverse=True), (gen, domain, scores)
+
+
+def test_on_a_repeating_array_the_gradient_separates_more():
+    """**這一格為什麼存在**，寫成一條測試。
+
+    array 區上灰階那條路鑑別力很低（廠外實測每一種調法都卡在 r ≈ 0.3），
+    而梯度是那台機台上量到的局部最好。這裡量的是同一件事的合成版：同一張圖、
+    同一個模糊量，梯度那條路「準 ÷ 糊」的倍數要明顯大一些。
+    """
+    pixel = _sep(fixtures.array_blocks, iqi.DOMAIN_PIXEL)
+    grad = _sep(fixtures.array_blocks, iqi.DOMAIN_GRADIENT)
+    assert grad > pixel * 1.5, (pixel, grad)
+
+
+def test_on_a_logic_area_the_gradient_is_not_worse():
+    """**反面**：它不准是一個「在別處變差」的選項。
+
+    廠外實測機台 B（logic 區）0.9593 → 0.9596 —— 也就是沒有變差。合成版問的
+    是同一句話：梯度那條路的鑑別力不准比灰階那條**差過 5%**。
+    """
+    pixel = _sep(fixtures.logic_blocks, iqi.DOMAIN_PIXEL)
+    grad = _sep(fixtures.logic_blocks, iqi.DOMAIN_GRADIENT)
+    assert grad >= pixel * 0.95, (pixel, grad)
+
+
+def test_a_domain_that_does_not_exist_says_so():
+    """打錯的那一格要當場講，而且講得出有哪幾條路（鐵則 4）。"""
+    with pytest.raises(ValueError) as e:
+        iqi.focus_index(_checker(size=128), domain="edges")
+    assert "edges" in str(e.value) and "gradient" in str(e.value)
+
+
+# --------------------------------------------------------------------------- #
+# F115：前 30% 那一刀與梯度預篩，在哪一種區域上**有作用**
+# --------------------------------------------------------------------------- #
+def test_on_a_logic_area_the_sharpest_30_percent_picks_the_blocks_with_pattern():
+    """logic 區 = 這兩步的**前提成立**的樣子：一半的塊有東西、一半是空的。
+
+    那一刀要挑中的**全部**是有圖案的那些 —— 空背景塊一塊都不准混進平均裡，
+    因為它們分數低不是因為失焦，是因為那裡本來就沒有東西。
+    """
+    textured = fixtures.logic_textured_blocks()
+    for domain in iqi.DOMAINS:
+        got = iqi.focus_index(fixtures.logic_blocks(), domain=domain)
+        order = np.argsort(np.array(got["scores"]))[::-1][:got["blocks"]]
+        assert got["blocks"] == 19
+        assert textured[order].all(), (domain, sorted(order.tolist()))
+
+
+def test_on_a_repeating_array_keeping_19_or_40_blocks_is_the_same_answer():
+    """array 區 = 這兩步的**前提不成立**的樣子：64 塊長得一模一樣。
+
+    廠外實測（2026-09-18）：留下來的塊數從 19 掃到 40，兩台機台的相關係數
+    一動都不動。**那不是 bug，是前提不成立** —— 挑 19 個一樣的東西跟挑 40 個
+    一樣的東西是同一件事。它同時結掉了規格「前 30」與「前 30%」的措辭歧義。
+
+    ⚠ 反面在上面那一條：同樣的掃法在 logic 區會把分數改掉三成以上。
+    """
+    for domain in iqi.DOMAINS:
+        kept = [iqi.focus_index(fixtures.array_blocks(), keep_percent=p,
+                                domain=domain)
+                for p in (30.0, 62.5)]          # 64 × 30% = 19、× 62.5% = 40
+        assert [k["blocks"] for k in kept] == [19, 40]
+        moved = abs(kept[0]["iqi"] - kept[1]["iqi"]) / kept[0]["iqi"]
+        assert moved < 0.01, (domain, moved, [k["iqi"] for k in kept])
+
+    logic = [iqi.focus_index(fixtures.logic_blocks(), keep_percent=p)
+             for p in (30.0, 62.5)]
+    assert abs(logic[0]["iqi"] - logic[1]["iqi"]) / logic[0]["iqi"] > 0.2, \
+        "同樣的掃法在 logic 區要**明顯**動到分數 —— 不然上面那條沒有在測東西"
