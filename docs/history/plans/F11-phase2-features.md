@@ -1,8 +1,8 @@
 # F11 — Phase 2：逐段把功能做完（Input → ADC）
 
-**狀態：七段裡六段已收斂，只剩 Compare。**（2026-08-17 開工；狀態逐段的表在
-[`../ROADMAP.md`](../ROADMAP.md) 的 Phase 2 那一節 —— **進度的唯一出處是那一份**，
-不是這一份。）
+**狀態：已收斂（2026-09-18，七段全部）。**（2026-08-17 開工；狀態逐段的表在
+[`../../ROADMAP.md`](../../ROADMAP.md) 的 Phase 2 那一節 —— **進度的唯一出處是
+那一份**，不是這一份。）
 
 > ### ⚠ 這一份現在有兩種讀法，不要混
 >
@@ -14,7 +14,9 @@
 >   `roi_cross` / `roi_template` 是獨立的卡（F30 折進 `roi_reference`）。
 >   **要知道某張卡今天長什麼樣，去問 registry，不要問這一份。**
 >
-> 這一份**不搬進封存**正是因為那前一半還在用。Phase 2 收斂的那天連同它一起搬。
+> 這一份本來**不搬進封存**，因為那前一半還在用，而檔頭寫著「Phase 2 收斂的那天
+> 連同它一起搬」。**那一天是 2026-09-18**（F110 收掉最後一段 Compare），所以它
+> 在這裡了 —— 前一半仍然有效，只是它不再是一份「進行中」的議程。
 
 Phase 2 的定調是使用者的兩句話：
 
@@ -123,7 +125,7 @@ manifest 的 `label_map`（label id → layer 名）與 alignment CSV/JSON；
 **join key 兩邊同源**（都是 KLARF 的 `DEFECTID`）。
 
 契約與「上游要小改什麼」（多頁 TIFF 的 page 對應是必要的那一條）全部寫在
-[`../GLAS-INTERFACE.md`](../GLAS-INTERFACE.md) —— 那一份的 §4 可以直接複製給 GLAS。
+[`../GLAS-INTERFACE.md`](../../GLAS-INTERFACE.md) —— 那一份的 §4 可以直接複製給 GLAS。
 
 ---
 
@@ -134,7 +136,7 @@ manifest 的 `label_map`（label id → layer 名）與 alignment CSV/JSON；
 | 開發順序 | **從左側功能一步一步往下**（F16 起是 Input → Enhance → ROI → Measure → Algo → Compare → ADC → Output），**每張卡的功能／UI／設定放哪都要先討論** |
 | 週期 | **會拉很長**（新功能 + 完善舊功能）—— 所以這一份是議程，不是待辦清單 |
 | 演算法 | **不照抄 vendored 的**：「演算法請幫我移除，我要重新來，基本上不用照抄就有 vendor 的算法（我基本會想要優化改良）」。範圍見 §7.1 |
-| GDS ROI | **d4t 不解析 layout**，只吃上游 GLAS 的 mask（一一對應）。契約見 [`../GLAS-INTERFACE.md`](../GLAS-INTERFACE.md) |
+| GDS ROI | **d4t 不解析 layout**，只吃上游 GLAS 的 mask（一一對應）。契約見 [`../GLAS-INTERFACE.md`](../../GLAS-INTERFACE.md) |
 | 多通道 | **⏸ 暫時不做**（2026-08-17 下午：「我決定我暫時不做 multi channel（多通道的），暫時 focus 在 patch 跟 RSEM Image」）。事實記著：1 BSE + 4 SE、BSE 固定第 2 頁、沒有 ref。**做出來的兩個機制不是多通道專用的**，見 §3.1.14 |
 | ML Classify | Phase 2 後半 |
 
@@ -219,7 +221,7 @@ ingest（檔案 I/O、配對）→ 流：test / bse / se1..4 / layout_label / la
   —— 五通道進來時，「哪一條算 `test`」要有答案，而它**不該再是一個寫死的特例**。
 - Compare 段要比什麼？三個候選，都不是白做的：
   **① Golden Cell**（已經有，需要 layout 有週期）、
-  **② GLAS 的合成 `gray`**（die-to-database，見 [`../GLAS-INTERFACE.md`](../GLAS-INTERFACE.md) §5）、
+  **② GLAS 的合成 `gray`**（die-to-database，見 [`../GLAS-INTERFACE.md`](../../GLAS-INTERFACE.md) §5）、
   **③ 通道之間互比**（BSE vs SE：不同 detector 對同一個結構的反應不同 ——
   這是 Fusi³ 融合那條路真正的用途，不只是「多一張圖」）。
 - 好消息：**blob 分割那條保底路線**（單張、沒有 ref、沒有週期，§7.1）
@@ -412,7 +414,7 @@ lint                 「這份 recipe 需要一個 rsem 來源，你還沒有指
 
 `<DEFECTID>_label.png`（uint8 label map）、`<DEFECTID>_gray.png`、
 manifest JSON（`label_map`）、alignment CSV／JSON。契約已經寫好在
-[`../GLAS-INTERFACE.md`](../GLAS-INTERFACE.md)，接頭 D。
+[`../GLAS-INTERFACE.md`](../../GLAS-INTERFACE.md)，接頭 D。
 
 ##### 格式問題的答案（使用者 2026-08-17）
 
@@ -740,7 +742,7 @@ RSEM Image。」
 
 - **patch ↔ RSEM 的配對規則**與「對位之後要什麼」（§3.1.9 的兩題）。
 - `layout_label` / `layout_gray` 的配對規則等 GLAS 的樣本到（見
-  [`../GLAS-INTERFACE.md`](../GLAS-INTERFACE.md) §5）—— 但機制與 RSEM 那條共用（Input-3）。
+  [`../GLAS-INTERFACE.md`](../../GLAS-INTERFACE.md) §5）—— 但機制與 RSEM 那條共用（Input-3）。
 - 五頁的順序（假設 #5）與 TIFF 壓縮方式要不要寫一支探測腳本帶回來。
   位元深度（假設 #4）使用者已答 **8-bit**，所以那條降級成一道防呆。
 
@@ -2135,7 +2137,7 @@ Template 要有週期、Profile 要有條紋，**GDS 就是兩者都沒有時的
 ##### 第一步不是寫卡片，是寫健檢
 
 真實資料在只能複製文字出來的那台機器上，而猜不出來的東西全是文字。
-所以先有 **`tools/check_glas_export.py`**（見 [`../GLAS-INTERFACE.md`](../GLAS-INTERFACE.md) §3.5）：
+所以先有 **`tools/check_glas_export.py`**（見 [`../GLAS-INTERFACE.md`](../../GLAS-INTERFACE.md) §3.5）：
 預設遮蔽、可以直接貼出來的報告，19 條 PASS / FAIL 對照 d4t 真正需要的東西。
 
 它的四條核心檢查是**讀 GLAS 程式碼讀出來的**，四件都不在契約文件裡、

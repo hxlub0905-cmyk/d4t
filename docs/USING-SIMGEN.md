@@ -40,7 +40,7 @@ python -m d4t simgen
 | 怎麼給 | 什麼時候用 |
 |---|---|
 | **Paste image (Ctrl+V)** | 最快 —— 螢幕截圖直接貼，不必先存檔 |
-| **Open image…** | 手上已經有 PNG／TIF |
+| **Open images…** | 手上已經有 PNG／TIF |
 | **Open recipe…** | 從 recipe 的模板那一格（`gc2:…`）取，跟你正在跑的 pipeline 用同一張 |
 | 底下那個文字框 | 別人把 `gc2:205x73:205x73:eJx…` 這串貼給你 |
 

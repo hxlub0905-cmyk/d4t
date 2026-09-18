@@ -28,6 +28,43 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F114-3：文件收尾 —— 這幾輪的改動在 md 上留下的漂移（2026-09-18）
+
+使用者：「整理相關 md 檔案後 merge 回 Main」。合併前把 F109～F114-2 在文件上
+留下的**每一處對不上**掃掉。
+
+### 掃出來的（全部是「數字或名字已經不是現在這樣」）
+
+| 哪 | 說的 | 現在 |
+|---|---|---|
+| `docs/ARCHITECTURE.md` | `dataset.py` = **五種** source | 四種（`tiff_stack` F114 拿掉）|
+| `docs/ARCHITECTURE.md` | `open_dialogs.py` = **五顆** Open | 三顆（F114-2）|
+| `docs/ARCHITECTURE.md` | docs 樹少畫 `USING-UNIFORMITY.md` | **這一份從來沒被畫上去過** |
+| `docs/USING-UNIFORMITY.md`／`USING-SIMGEN.md` | `Open image…` | `Open images…` |
+| `docs/ROADMAP.md` Input 那列 | `tiff_stack` 做齊了 | 補一句「F114 從產品面拿掉」|
+| `scope.py`／`dataset.py`／兩支測試 | 「不是**第五種** source／kind」 | 改成不帶數字 |
+
+⚠ **有數字的句子分兩種，只改其中一種**：講**現在**的（「五種 source」）要改；
+講**那一天**的（F110 的「第五種 kind 出現時…」、`test_size_ceilings` 裡
+「第五顆 Open 鈕要加，所以先搬走等量的東西」）是**紀錄**，一個字都不動。
+
+### `docs/plans/` 空了，資料夾也拿掉了
+
+`docs/plans/F11-phase2-features.md` 的檔頭寫著**狀態：七段裡六段已收斂，
+只剩 Compare**，而 Compare **2026-09-18（F110）收掉了** —— 那一份自己的字
+就寫著「這一份不搬進封存正是因為那前一半還在用。**Phase 2 收斂的那天連同它
+一起搬**」。那一天到了，所以它搬進 `docs/history/plans/`。
+
+搬完 `docs/plans/` 是空的 —— `test_plan_docs::test_there_are_plans_or_the_folder_is_gone`
+要的正是「有計畫書，或資料夾不在」（空資料夾會讓底下兩條變成「什麼都沒測
+而且是綠的」），所以資料夾一起拿掉。下一個新功能照 `CLAUDE.md` §4 開回來就好。
+
+跟著要動的四處：`docs/ROADMAP.md` 與 `docs/FAB-VALIDATION.md`（兩處）指向舊位置
+的連結、`docs/history/README.md` 的「只剩一份活的」那句話與新的一列、
+以及**搬過去那一份自己的相對連結**（從 `docs/plans/` 到 `docs/history/plans/`
+深了一層，`../GLAS-INTERFACE.md` 這種要變成 `../../`）——
+`tests/test_docs_links.py` 兩邊都抓得出來，這一輪就是它抓的。
+
 ## F114-2：五顆入口併成三顆（2026-09-18）
 
 使用者：「目前的 input 入口搞得我很亂（**user 可能會被嚇掉**）…可否整合?」

@@ -491,7 +491,7 @@ def load_image_file(path) -> Dataset:
     唯一的入口是 :func:`load_folder` —— 也就是**得先把那張圖放進一個資料夾**。
     那一步沒有換到任何東西。
 
-    ⚠ **``kind`` 仍然是 ``folder``，不新增第五種。** 資料形狀跟
+    ⚠ **``kind`` 仍然是 ``folder``，不新增一種。** 資料形狀跟
     :func:`load_folder` 逐項相同（``images={"single": …}``、沒有座標、寫不回
     KLARF），而多一個 kind 要同時動 `scope.SUPPORTED_KINDS`、
     `recipe_is_supported` 與那幾支測試 —— 換到的是零。代價是資料集標籤上會

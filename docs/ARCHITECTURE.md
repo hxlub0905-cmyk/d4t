@@ -280,7 +280,7 @@ d4t/
 │   │   ├── klarf_core.py     #   KLARF 1.2/1.8 無損讀寫引擎（vendored from KLIP，最重要的資產）
 │   │   ├── tiff_index.py     #   免解碼 TIFF/BigTIFF 盤點 ＋ tifffile 讀 page
 │   │   ├── imageio.py        #   CJK-safe 影像讀寫（`np.fromfile` ＋ `cv2.imdecode`）
-│   │   ├── dataset.py        #   五種 source → 統一的 `DefectItem` 清單
+│   │   ├── dataset.py        #   四種 source → 統一的 `DefectItem` 清單
 │   │   ├── rawfile.py        #   headerless `.raw`：版面、從檔案大小反推、16→8 bit（F113）
 │   │   ├── pair_source.py    #   **另一份 lot** 掛上來（`Dataset.sources[代號]`，F15）
 │   │   └── glas_export.py    #   GLAS 匯出（`<id>_label.png`）掛上來 → 一條影像流
@@ -445,7 +445,7 @@ d4t/
     ├── card_menu.py          #   空白處右鍵、拖線到空白處的「加一張卡」選單（F99 P1-1）
     │                         #     —— 分組與相容性住這裡，畫布只發訊號
     ├── clipboard.py          #   Ctrl+C／V／D 的內容（F99 P1-8）：設定帶走、接線不帶
-    ├── open_dialogs.py       #   五顆 Open 的檔案對話框與「按下去要做什麼」的分岔（F110）
+    ├── open_dialogs.py       #   三顆 Open 的檔案對話框與「按下去要做什麼」的分岔（F110／F114-2）
     │                         #   —— 加一個入口只要改 `scope.INPUT_SOURCES` 與這裡的 `OPENABLE`
     ├── windows_menu.py       #   Help 鈕的小箭頭列出開著的頂層視窗（F99 P2-6）——
     │                         #     工具列在 1366 上裝不下第十三顆鈕
@@ -469,10 +469,10 @@ docs/
 ├── GLAS-INTERFACE.md         # 上游 GLAS 的介面契約（d4t 不解析 layout）
 ├── USING-CD.md               # 給使用者：CD 那張卡每一格什麼時候動
 ├── USING-CHARACTERIZATION.md # 給使用者：EBI ↔ API characterization 怎麼做
+├── USING-UNIFORMITY.md       # 給使用者：一群框之間差多少、有沒有斜掉
 ├── USING-SIMGEN.md          # 給使用者：貼一張 Golden Cell 產一整批模擬資料
 ├── NO-GIT-SETUP.md           # 受限機器：怎麼把程式碼弄上去
 ├── OFFLINE-INSTALL.md        # 受限機器：怎麼離線裝相依套件
-├── plans/                    # **進行中**的計畫書（`F0-master-plan.md` 是總表）
 └── history/                  # 封存（**不進搬運包**）：按月的 SESSION_LOG、做完的計畫書
 ```
 

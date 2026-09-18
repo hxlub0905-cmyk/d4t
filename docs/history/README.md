@@ -26,8 +26,9 @@
 
 ## 計畫書（做完的）
 
-**`docs/plans/` 現在只剩一份活的**（`F11` —— Phase 2 的議程）。其餘全部在
-[`plans/`](plans/) 底下，照編號排：
+**`docs/plans/` 現在是空的、資料夾也拿掉了**（2026-09-18：Phase 2 的七段全部
+收斂，最後一份活的 `F11` 跟著搬進來）。下一個新功能照 `CLAUDE.md` §4 把它開回來
+就好。做完的全部在 [`plans/`](plans/) 底下，照編號排：
 
 | 計畫書 | 是什麼 |
 |---|---|
@@ -36,6 +37,7 @@
 | [`F8-rule-based-roi.md`](plans/F8-rule-based-roi.md) | 純規則的 ROI 定位（兩組條紋的交會處）✅ |
 | [`F9-dag-streams.md`](plans/F9-dag-streams.md) | 影像流變成 DAG 上的線 ✅ —— `CLAUDE.md` 鐵則 10 引用它 |
 | [`F10-canvas-tells-the-truth.md`](plans/F10-canvas-tells-the-truth.md) | 畫布要符合現實（剛加的卡前後都是空的、埠點得到、多連一）✅ |
+| [`F11-phase2-features.md`](plans/F11-phase2-features.md) | **Phase 2 的議程**（Input → ADC 逐段把功能做完）✅ 七段 2026-09-18 全部收斂。⚠ 兩種讀法：§0 的「一張卡要回答的四題」與「設定要放哪」是**方法**，加任何一張新卡都適用；六段的逐張討論寫的是**當時**的決定，其中有些後來被推翻了 —— 要知道某張卡今天長什麼樣，去問 registry |
 | [`F12-region-edges.md`](plans/F12-region-edges.md) | 具名區域也有線了（虛線＋菱形埠）✅。⚠ **§3 於 F42 被推翻**（線改成住在 `recipe.edges`），其他部分仍然成立 |
 | [`F15-pair-sources.md`](plans/F15-pair-sources.md) | 配對分析：兩筆資料逐顆對起來。2026-08-20 使用者叫停（「太快了」），08-25 由 F33 續完 ✅ |
 | [`F18-glv.md`](plans/F18-glv.md) | Measure 第一張：Gray level ✅（三個互相獨立的問題、名字分家族、量得準不準是明講的）|

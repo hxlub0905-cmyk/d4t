@@ -11,7 +11,7 @@
 ## 0. 一分鐘上手
 
 **最快的路是不要自己搭**：工具列 `Open recipe…` → **`one-image-uniformity`**，
-然後 `Open image…` 挑你那張圖。跑一次就有四張圖。
+然後 `Open images…` 挑你那張圖。跑一次就有四張圖。
 
 > ⚠ **那張卡以前叫 `Write uniformity`**（2026-09-07 改名 `Write charts` ——
 > 它現在還畫一張**你自己配的圖**，不只均勻度那四張）。**recipe 裡的鍵沒有
@@ -34,7 +34,7 @@
 
 （`ROI` 到 `Gray level` 那一條是**虛線**：區域走的是菱形埠。）
 
-1. **`Open image…`** 挑一張圖（不需要 KLARF）。
+1. **`Open images…`** 挑一張圖（不需要 KLARF）。
 2. **ROI** 卡把框鋪滿整張圖（`Find them by` = `stripes in the image`，
    `Pick` = `none`）。
 3. **Gray level**：卡片**最上面**那排 `What to measure` 按

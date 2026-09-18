@@ -148,7 +148,7 @@ def test_the_entry_is_on_the_one_table_that_grows_the_buttons():
     assert row[0].has_klarf is False, "沒有 KLARF ⇒ 寫不回 KLARF"
     assert "doe_folder" in open_dialogs.OPENABLE
     icons = [s.icon for s in scope.INPUT_SOURCES]
-    assert len(set(icons)) == len(icons), "五顆 Open 的輪廓要各不相同：%s" % icons
+    assert len(set(icons)) == len(icons), "每顆 Open 的輪廓要各不相同：%s" % icons
 
 
 # --------------------------------------------------------------------------- #

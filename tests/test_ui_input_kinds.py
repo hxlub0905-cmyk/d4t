@@ -139,7 +139,7 @@ def test_one_image_on_its_own_loads_as_a_single_defect(window, tmp_path):
     f = tmp_path / "field.png"
     imageio.save_gray(str(f), np.full((32, 48), 90, np.uint8))
     assert window.load_image_path(str(f), sync=True) is True
-    assert window.dataset.kind == "folder"        # 形狀相同，不新增第五種 kind
+    assert window.dataset.kind == "folder"        # 形狀相同，不新增一種 kind
     assert len(window.dataset.items) == 1
     assert window.dataset.items[0].defect_id == "field"
     # 沒有 KLARF ⇒ 寫不回 —— 那句話跟另外兩條路走同一個地方（常駐標籤）

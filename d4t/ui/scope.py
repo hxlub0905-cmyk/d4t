@@ -356,7 +356,7 @@ INPUT_SOURCES: Tuple[InputSource, ...] = (
 
 
 class Attachment(NamedTuple):
-    """掛在**已經載好的** lot 上的附加檔（不是第五種 source）。"""
+    """掛在**已經載好的** lot 上的附加檔（**不是另一種 source**）。"""
 
     key: str
     title: str
