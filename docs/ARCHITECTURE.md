@@ -280,7 +280,7 @@ d4t/
 │   │   ├── klarf_core.py     #   KLARF 1.2/1.8 無損讀寫引擎（vendored from KLIP，最重要的資產）
 │   │   ├── tiff_index.py     #   免解碼 TIFF/BigTIFF 盤點 ＋ tifffile 讀 page
 │   │   ├── imageio.py        #   CJK-safe 影像讀寫（`np.fromfile` ＋ `cv2.imdecode`）
-│   │   ├── dataset.py        #   四種 source → 統一的 `DefectItem` 清單
+│   │   ├── dataset.py        #   五種 source → 統一的 `DefectItem` 清單
 │   │   ├── pair_source.py    #   **另一份 lot** 掛上來（`Dataset.sources[代號]`，F15）
 │   │   └── glas_export.py    #   GLAS 匯出（`<id>_label.png`）掛上來 → 一條影像流
 │   ├── algo/                 # 純 numpy/cv2 數學（卡片包這些，**不要在卡片裡重寫數學**）
@@ -317,12 +317,13 @@ d4t/
 │   │                         #     `chart_style` 分家：畫什麼 vs 長什麼樣。
 │   │                         #     ⚠ 驗的是形狀，**不驗欄位存不存在**（存 recipe
 │   │                         #     的時候沒有資料）
-│   ├── steps/                # 步驟卡片 —— **註冊 19 張，卡片庫可見 19 張**（`HIDDEN_STEPS` 空著）
+│   ├── steps/                # 步驟卡片 —— **註冊 20 張，卡片庫可見 20 張**（`HIDDEN_STEPS` 空著）
 │   │                         #   ⚠ 卡片庫由上而下的順序 ＝ `__init__.py` 的 import 順序
 │   │   ├── load.py           #   load_patch／load_single（**一種 source 一張卡**）
 │   │   ├── load_sidecar.py pair_source.py               #   別的程式產的圖／另一份 lot 的那一顆
 │   │   ├── normalize.py tone.py denoise.py flatten.py   #   Enhance 段
-│   │   ├── align.py arith.py align_to.py                #   Compare 段（align 整數平移、裁共同重疊區）
+│   │   ├── align.py arith.py combine.py align_to.py    #   Compare 段（align 整數平移裁重疊區、
+│   │   │                                               #   arith 比較、combine 融合 N 條流、align_to 小圖對大圖）
 │   │   ├── roi_reference.py   #   Region 段（**只有這一張**，畫面上叫「ROI」）：三種找法 → 具名區域
 │   │   ├── roi_cross.py roi_template.py  #   ⚠ **不是卡片**：折進 `roi_reference` 的兩個 method（F30）
 │   │   ├── glv_stats.py cd.py quality.py #   Measure 段：GLV → CD → Focus index（**順序有意義**）
@@ -443,6 +444,8 @@ d4t/
     ├── card_menu.py          #   空白處右鍵、拖線到空白處的「加一張卡」選單（F99 P1-1）
     │                         #     —— 分組與相容性住這裡，畫布只發訊號
     ├── clipboard.py          #   Ctrl+C／V／D 的內容（F99 P1-8）：設定帶走、接線不帶
+    ├── open_dialogs.py       #   五顆 Open 的檔案對話框與「按下去要做什麼」的分岔（F110）
+    │                         #   —— 加一個入口只要改 `scope.INPUT_SOURCES` 與這裡的 `OPENABLE`
     ├── windows_menu.py       #   Help 鈕的小箭頭列出開著的頂層視窗（F99 P2-6）——
     │                         #     工具列在 1366 上裝不下第十三顆鈕
     └── assets/               #   `d4t.svg` 與兩份字標（pyproject 的 package-data 帶著它們走）

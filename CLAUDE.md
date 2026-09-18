@@ -255,7 +255,7 @@ git add -A && python tools/release.py && git add -A
 ## 5. 產品範圍開關
 
 **一種 source 一張載入卡**：`load_patch`「Load images」（一顆好幾張）與 `load_single`
-「Load one image」（一顆一張），**兩張都不看資料型別**。四種 source：
+「Load one image」（一顆一張），**兩張都不看資料型別**。五種 source：
 
 | kind | 什麼樣的資料 | 入口 |
 |---|---|---|
@@ -263,8 +263,9 @@ git add -A && python tools/release.py && git add -A
 | `rsem` | KLARF + 每顆一個影像檔 | `Open KLARF…`（自動判別）|
 | `tiff_stack` | 一個多頁 TIFF、**沒有 KLARF** | `Open stack…` |
 | `folder` | 一個資料夾的單張影像、沒有 KLARF | `Open folder…` |
+| `doe_folder` | **一個子目錄一顆、裡面每個檔案一個 imaging condition**（DOE）、沒有 KLARF | `Open conditions…` |
 
-後兩種**寫不回 KLARF**，那句話**常駐在資料集標籤上**。第二份 lot 走 `pair_source`
+後三種**寫不回 KLARF**，那句話**常駐在資料集標籤上**。第二份 lot 走 `pair_source`
 卡的 `Open data…`（掛在 `Dataset.sources[代號]`，不取代目前的資料集；CLI
 `--source 代號=路徑`）；**卡片不自己 `open()`**，讀檔在 ingest 層，第二份的身分要進
 快取簽章。
@@ -278,7 +279,8 @@ SUPPORTED_KINDS = ("ebi_patch", "tiff_stack", "rsem", "folder")
 HIDDEN_STEPS = ()                # 目前沒有收起來的卡（`align` F109 拿回來了）
 SHOW_TEMPLATE_LIBRARY = True     # 工具列的 Templates…（2026-09-08 打開）
 SHOW_SAMPLE_DATA = True          # 「用範例資料試一次」（2026-09-09 隨 ebi-die-to-die.json 打開）
-INPUT_SOURCES = (...)            # 三顆 Open 的字、圖示、一句白話說明
+INPUT_SOURCES = (...)            # 五顆 Open 的字、圖示、一句白話說明
+                                 # （加一列就好 —— 分岔在 ui/open_dialogs.open_source）
 ATTACHMENTS = (...)              # 掛在已載入 lot 上的附加檔（GLAS 匯出）
 ```
 

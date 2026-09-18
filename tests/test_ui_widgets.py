@@ -566,13 +566,16 @@ def test_param_form_bool_choice_and_str(qapp):
     edits = []
     form.param_edited.connect(lambda n, v: edits.append((n, v)))
 
-    # bool -> QCheckBox（subtract.absolute 預設 True）
-    form.set_step(_describe("subtract"), {}, ["test", "ref_aligned"])
-    absolute = form.editor("absolute")
-    assert isinstance(absolute, QCheckBox)
-    assert absolute.isChecked() is True
-    absolute.setChecked(False)
-    assert edits[-1] == ("absolute", False)
+    # bool -> QCheckBox（flatten.keep_level 預設 True）
+    # ⚠ 證人 2026-09-18（F110）換過：本來是 `subtract.absolute`，而那一格拆卡
+    # 那一輪變成三選一的 `sign`（兩個值的格子答不出第三種答案）。
+    # 這裡問的是「bool 這個型別畫成勾選框」，不是那一張卡 —— 換一個 bool 就好。
+    form.set_step(_describe("flatten"), {}, ["test", "ref"])
+    keep_level = form.editor("keep_level")
+    assert isinstance(keep_level, QCheckBox)
+    assert keep_level.isChecked() is True
+    keep_level.setChecked(False)
+    assert edits[-1] == ("keep_level", False)
     assert isinstance(edits[-1][1], bool)
 
     # chip_choice -> 一排膠囊，值就是 spec.choices 裡那個字
@@ -900,8 +903,14 @@ def test_every_report_metric_the_card_offers_has_a_face(qapp):
         groups.add(group)
     # **「哪幾個需要參照的格子」要在畫面上分得出來** —— 那是「為什麼我的 snr
     # 是空的」唯一的線索。
-    assert groups == {"Difference", "Vs boxes", "Distributions"}
+    #
+    # ⚠ 2026-09-18（F110）多了一群 `Vs pixels`，而**那一群只有一顆的時候最
+    # 需要它**：`snr_px` 與 `snr` 差的正是分母（參照自己的像素 vs 格與格之間），
+    # 而群名是使用者唯一看得到的線索。掛進 `Vs boxes` 的話畫面會說它是 by-box 的。
+    assert groups == {"Difference", "Vs pixels", "Vs boxes", "Distributions"}
     assert widgets_mod.metric_face("pct_rank")[0] == "Vs boxes"
+    assert widgets_mod.metric_face("snr_px")[0] == "Vs pixels"
+    assert widgets_mod.metric_face("snr")[0] == "Vs boxes"
 
 
 def test_a_hidden_metric_is_still_shown_when_a_recipe_has_it(qapp):

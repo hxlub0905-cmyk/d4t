@@ -53,7 +53,14 @@ __all__ = [
 #: 「目前 d4t 可以支援 patch + 對應 KLARF，我需要他也能支援 **RSEM image +
 #: KLARF，或單純圖片**」。四條路對應四種 source，而「一種 source 一個入口」
 #: 是使用者定的分類原則 —— 見 `StudioWindow` 工具列的三顆 Open。
-SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder")
+#: **2026-09-18（F110）：第五種。** ``doe_folder`` —— 一個子目錄一顆 defect、
+#: 裡面每個檔案是一個 imaging condition（DOE）。它跟 ``folder`` **正好相反**
+#: （那邊是一個檔案一顆），所以是自己一種 kind 而不是那條路上的一個開關：
+#: 同一個 kind 兩種形狀的下場是畫布說謊 —— `SINGLE_IMAGE_KINDS` 裡寫著
+#: ``folder``，而 DOE 的一顆有好幾張，畫布上那張預設的 `load_single` 對它
+#: 一定報錯。
+SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder",
+                                  "doe_folder")
 
 #: 只有在不支援的型別下才有意義、因此不列進卡片庫的 step key。
 #:
@@ -277,7 +284,7 @@ class InputSource(NamedTuple):
     空白狀態上的那一句話、導覽對話框上的那顆鈕。三份會漂 —— 而且已經漂了：
     工具列有三顆 Open，空白狀態只講 KLARF（「Open a KLARF to see your patches
     here.」），於是**帶著一個資料夾的圖片進來的人，在最大的那一塊畫面上找不到
-    自己那條路**。第四種（GLAS 匯出）更慘：卡片庫裡有一張 `Load layout labels`，
+    自己那條路**。第四種（GLAS 匯出）更慘：卡片庫裡有一張 `Load layout`，
     而它的入口那一顆鈕根本沒被 `addWidget` 到工具列上（見
     `test_every_button_built_for_the_toolbar_is_actually_on_it`）。
 
@@ -331,6 +338,12 @@ INPUT_SOURCES: Tuple[InputSource, ...] = (
         short="Folder…",
         what="A folder of single images: every image file becomes one defect.",
         icon="folder_open", has_klarf=False),
+    InputSource(
+        key="doe_folder", kinds=("doe_folder",), title="Open conditions…",
+        short="Conditions…",
+        what=("A folder of folders: every sub-folder is one defect, and the "
+              "images inside it are that defect's imaging conditions."),
+        icon="folder_stack", has_klarf=False),
     # F85（2026-09-07）：**一張大圖**那條路。使用者要的是 PEAR 的用法
     # （一張圖、鋪一組 ROI、看均勻度），而在這之前唯一的入口是上面那一顆
     # —— 也就是得先把那張圖放進一個資料夾，而那一步沒有換到任何東西。

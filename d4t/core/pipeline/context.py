@@ -4,7 +4,6 @@
 設計原則（見 docs/history/plans/F0-master-plan.md §3.2）：
 - ``images``   命名影像流（"test"、"ref"、"ref_aligned"、"diff"、"snr_map"…）。
 - ``rois``     MultiROISet（正規化座標；M3 起由 ROI 卡填入）。
-- ``labels``   整數 ROI label map（0=背景, 1..N；GLAS 契約 gray[labels==k]）。
 - ``features`` 扁平特徵區 —— **score 表達式的唯一變數空間**。
   任何卡塞進來的數字（CD、SNR、GLV、focus…）一視同仁。
 - ``meta``     診斷與雜項（nm_per_px、對位 dx/dy、fallback_reason…）。
@@ -43,7 +42,12 @@ class ContextError(RuntimeError):
 class Context:
     images: Dict[str, np.ndarray] = field(default_factory=dict)
     rois: Optional[Any] = None            # d4t.core.algo.roi.MultiROISet
-    labels: Optional[np.ndarray] = None
+    #: ⚠ ``labels`` **2026-09-18（F110）刪掉了。** 它從 F7-9 起就在引擎與快取
+    #: 快照裡被搬來搬去，而**沒有任何一張卡寫過它** —— GLAS 的 label map 走的
+    #: 是影像流（`load_sidecar` 的 `out` → `roi_reference` 的 `label_source`），
+    #: 那條路上的每一格都看得見、畫得出線。一個沒有人寫的欄位不是「還沒用到」，
+    #: 是一條**看起來存在的第二條路**：下一個要傳 label 的人會挑它，而它不進
+    #: 快取簽章、畫布上也沒有線。
     features: Dict[str, float] = field(default_factory=dict)
     meta: Dict[str, Any] = field(default_factory=dict)
     #: 現在正在跑的是哪一張卡（引擎每跑一張之前設好；F17-②）。

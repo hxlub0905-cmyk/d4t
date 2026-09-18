@@ -53,8 +53,12 @@ CHIP_ICONS = (
     # Flatten：要拿掉的是什麼（都畫在同一張影像上，實心的就是要拿掉的東西）
     "fl_background", "fl_stripes_h", "fl_stripes_v",
     "fl_bright_spots", "fl_dark_spots",
-    # Image Combination：兩張圖怎麼合成一張（畫的是那個運算的符號）
-    "op_subtract", "op_ratio", "op_max", "op_min", "op_mean",
+    # Compare：兩張圖怎麼比（畫的是那個運算的符號）
+    "op_subtract", "op_ratio", "op_normalized", "op_over_sigma",
+    # Compare：亮的與暗的怎麼處理
+    "sign_abs", "sign_signed", "sign_split",
+    # Image Combination：好幾張怎麼併成一張（F110 從上面那一排拆出來）
+    "op_max", "op_min", "op_mean", "op_trimmed",
     # Pair：兩份資料的同一顆怎麼認出來
     "match_position", "match_id", "match_order",
     # Region：哪裡該長得一樣，是從哪裡知道的
@@ -431,6 +435,53 @@ def _op_mean(g: _Pad) -> None:
     g.blk(0.02, 0.26, 0.58, 0.74, False)
     g.blk(0.42, 0.26, 0.98, 0.74, False)
     g.blk(0.42, 0.26, 0.58, 0.74, True)
+
+
+def _op_normalized(g: _Pad) -> None:
+    # 正規化差 = 差**除以和**：上面一條減號、下面一條加號，中間一條分隔線。
+    _two_images(g)
+    g.blk(0.36, 0.30, 0.64, 0.38, True)                  # 減號（分子）
+    g.blk(0.34, 0.47, 0.66, 0.53, True)                  # 分隔線
+    g.blk(0.36, 0.62, 0.64, 0.70, True)                  # 加號的橫
+    g.blk(0.46, 0.58, 0.54, 0.74, True)                  # 加號的直
+
+
+def _op_over_sigma(g: _Pad) -> None:
+    # 「差了幾個 σ」= 減號底下一條分隔線，下面是分布的那一座小山。
+    _two_images(g)
+    g.blk(0.36, 0.32, 0.64, 0.40, True)                  # 減號（分子）
+    g.blk(0.34, 0.47, 0.66, 0.53, True)                  # 分隔線
+    g.poly([(0.36, 0.74), (0.43, 0.60), (0.50, 0.58),
+            (0.57, 0.60), (0.64, 0.74)], True, 0.07)     # 分母：一座鐘形
+
+
+def _sign_abs(g: _Pad) -> None:
+    # 取絕對值 = 亮的與暗的**都往同一邊**：兩支箭頭指向同一條基線的上方。
+    g.blk(0.04, 0.74, 0.96, 0.80, True)                  # 基線
+    g.poly([(0.20, 0.66), (0.32, 0.30), (0.44, 0.66)], True, 0.09)
+    g.poly([(0.56, 0.66), (0.68, 0.30), (0.80, 0.66)], True, 0.09)
+
+
+def _sign_signed(g: _Pad) -> None:
+    # 留正負號 = 一支往上、一支往下，基線在中間。
+    g.blk(0.04, 0.47, 0.96, 0.53, True)                  # 基線
+    g.poly([(0.20, 0.42), (0.32, 0.12), (0.44, 0.42)], True, 0.09)
+    g.poly([(0.56, 0.58), (0.68, 0.88), (0.80, 0.58)], True, 0.09)
+
+
+def _sign_split(g: _Pad) -> None:
+    # 拆兩條 = 兩個**分開的框**，一個裝往上的、一個裝往下的。
+    g.blk(0.02, 0.06, 0.46, 0.94, False)
+    g.blk(0.54, 0.06, 0.98, 0.94, False)
+    g.poly([(0.12, 0.62), (0.24, 0.32), (0.36, 0.62)], True, 0.09)
+    g.poly([(0.64, 0.38), (0.76, 0.68), (0.88, 0.38)], True, 0.09)
+
+
+def _op_trimmed(g: _Pad) -> None:
+    # 修剪平均 = 五張裡**兩端各丟掉一張**：中間三條實心、兩端兩條空心。
+    for i, solid in enumerate((False, True, True, True, False)):
+        x = 0.06 + i * 0.19
+        g.blk(x, 0.24, x + 0.13, 0.76, solid)
 
 
 # --------------------------------------------------------------------------- #
@@ -929,9 +980,15 @@ _DRAW = {
     "fl_dark_spots": _fl_dark_spots,
     "op_subtract": _op_subtract,
     "op_ratio": _op_ratio,
+    "op_normalized": _op_normalized,
+    "op_over_sigma": _op_over_sigma,
+    "sign_abs": _sign_abs,
+    "sign_signed": _sign_signed,
+    "sign_split": _sign_split,
     "op_max": _op_max,
     "op_min": _op_min,
     "op_mean": _op_mean,
+    "op_trimmed": _op_trimmed,
     "match_position": _match_position,
     "match_id": _match_id,
     "match_order": _match_order,

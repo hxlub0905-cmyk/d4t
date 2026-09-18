@@ -46,6 +46,10 @@ GLYPH_ICONS = (
     # 工具列那五顆（F7-24）＋ 兩個沒有 KLARF 的入口（F11 Input-2／Input-3）
     "folder", "document", "save", "templates", "export", "stack",
     "folder_open", "layers",
+    # F110：DOE 那個入口（`Open conditions…`）—— **資料夾裡還有資料夾**。
+    # 五顆 Open 並排，所以它的輪廓要跟另外四顆都不一樣：它是唯一畫成
+    # 「一個資料夾裝著兩個小資料夾」的。
+    "folder_stack",
     # F85：**一張大圖**那個入口（`Open image…`）。四顆 Open 並排，所以它是
     # 唯一內部有東西的那一個 —— 外框空的話它跟 `stack` 的最上層一樣。
     "image",
@@ -374,6 +378,16 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         # 前片：從左下往右斜出去
         p.drawLine(QPointF(m, h * 0.80), QPointF(w - m * 0.6, h * 0.80))
         p.drawLine(QPointF(w - m, h * 0.44), QPointF(w - m * 0.6, h * 0.80))
+    elif n == "folder_stack":
+        # 一個資料夾裝著兩個小資料夾 —— DOE：一個子目錄一顆、裡面是 condition。
+        # 跟 ``folder``／``folder_open`` 的差別是**裡面有東西**，跟 ``stack``
+        # 的差別是**外面有容器**（stack 是同一個東西的好幾層）。
+        p.drawLine(QPointF(m, h * 0.26), QPointF(w * 0.40, h * 0.26))
+        p.drawLine(QPointF(w * 0.40, h * 0.26), QPointF(w * 0.50, h * 0.38))
+        p.drawRect(QRectF(m, h * 0.38, w - 2 * m, h * 0.46))
+        inner = (w - 2 * m) * 0.34
+        for x in (m + (w - 2 * m) * 0.10, m + (w - 2 * m) * 0.54):
+            p.drawRect(QRectF(x, h * 0.52, inner, h * 0.22))
     elif n == "stack":
         # 三張疊起來的紙 —— 「一個檔案裡有好幾張圖」（F11 Input-2）。
         # 跟 ``folder`` 對比得出來：folder 是容器，stack 是**同一個東西的好幾層**。

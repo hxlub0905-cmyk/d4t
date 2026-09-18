@@ -33,7 +33,8 @@ import numpy as np
 from ..ingest.glas_export import SIDECAR_LABEL
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_IMAGE, GROUP_INPUT, ParamSpec, Step, StepError, register_step,
+    CATEGORY_IMAGE, GROUP_INPUT, LABEL, ParamSpec, Step, StepError,
+    register_step,
 )
 
 
@@ -42,7 +43,9 @@ class LoadSidecarStep(Step):
     """GLAS 的 label map → 一條影像流。"""
 
     key = "load_sidecar"
-    label = "Load layout labels"
+    # F110：18 → 11。留 `layout` 而不是留 `labels`：分得出它跟缺陷分類的
+    # label 不是同一件事的，是「layout」那個字。
+    label = "Load layout"
     category = CATEGORY_IMAGE
     group = GROUP_INPUT
     help = ("Load the layout label map that GLAS exported for this defect - "
@@ -57,6 +60,10 @@ class LoadSidecarStep(Step):
         ParamSpec(
             name="out", type="image_key", direction="out",
             default=SIDECAR_LABEL, label="Name this image",
+            # F110：**這是全 repo 唯一一格宣告自己吐 label map 的**。上面那一段
+            # 「label 一個像素都不能動」以前只是一句話 —— 它擋不住畫布上一條
+            # 從這裡拉到 Normalize 的線，而那條線今天完全合法。現在 lint 擋得住。
+            content=LABEL,
             help=("Name of the image stream this card produces. It is what "
                   "the Region card connects to."),
         ),

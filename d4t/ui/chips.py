@@ -85,6 +85,11 @@ METRIC_GROUPS: Dict[str, Tuple[str, str, str]] = {
     "ratio": ("Difference", "Ratio", "ratio"),
     "percent": ("Difference", "Percent", "percent"),
     "contrast": ("Difference", "Contrast", "contrast"),
+    # ⚠ **自己一群，不是掛在「Vs boxes」底下**（F110）：那個群名講的正是
+    # `snr` 的分母（格與格之間），而 `snr_px` 的分母是參照自己的像素 ——
+    # 把它擺進那一群，畫面上就會說它是 by-box 的，而那是這兩個數字**唯一**
+    # 的差別。同一格膠囊列旁邊放兩個不同的分母，群名是使用者唯一看得到的線索。
+    "snr_px": ("Vs pixels", "SNR px", "snr"),
     "snr": ("Vs boxes", "SNR", "snr"),
     "tstat": ("Vs boxes", "t-stat", "tstat"),
     "pct_rank": ("Vs boxes", "Rank %", "pct_rank"),
@@ -131,8 +136,9 @@ METRIC_GROUPS: Dict[str, Tuple[str, str, str]] = {
 #: （2026-09-02，F77 加 Focus 那一族時漏了 "Sharpness"）：設定區說一個都沒選，
 #: 底下的特徵表列出三個值。守著它的是
 #: `tests/test_ui_widgets.py::test_every_metric_group_can_actually_be_drawn`。
+#: ⚠ **一個群名沒加進這裡，那一群的膠囊就安靜地不畫**（F77 真的踩過）。
 METRIC_GROUP_ORDER = ("Center", "Spread", "Ends", "Shape", "Counts",
-                      "Difference", "Vs boxes", "Distributions",
+                      "Difference", "Vs pixels", "Vs boxes", "Distributions",
                       "Width", "Roughness", "Vs target",
                       "Size", "Outline", "Sharpness", "Other")
 

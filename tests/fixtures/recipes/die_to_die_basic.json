@@ -1,6 +1,6 @@
 {
   "recipe_id": "die_to_die_basic",
-  "version": 4,
+  "version": 5,
   "app_version": "0.1.0.dev0",
   "author": "HX",
   "description": "測試用的最小 recipe（不是給使用者看的範例）。ROI 卡在 F8 第五輪收斂成 Profile / Template / GDS，所以這裡量的是整張圖 —— 這幾條 e2e 測的是**引擎跑不跑得完、分數算不算得出來**，不是某一張 ROI 卡的行為。",

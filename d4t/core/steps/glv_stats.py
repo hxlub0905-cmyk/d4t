@@ -183,6 +183,11 @@ COMPARE_STAT_CHOICES = (
 
 COMPARE_CHOICES = (
     "delta", "abs_delta", "ratio", "contrast",
+    # ⚠ `snr_px` 與 `snr` **是兩個定義，不是同一個的兩種寫法**（F110）：
+    # `snr` 的分母是格與格之間（使用者 2026-08-21 定調的 by-box），那個定義在
+    # 參照只有一格的時候沒有答案；`snr_px` 的分母是參照自己的像素，一格就算得
+    # 出來。DOE（一個 target box、一個 ref box）永遠落在後者。
+    "snr_px",
     "snr", "tstat", "pct_rank",
     "overlap", "spread_ratio",
 )
@@ -964,7 +969,7 @@ class GlvStatsStep(MultiSourceStep):
         # 相對量（`cmp_*`）—— metric 那一層
         "delta": "gray", "abs_delta": "gray",
         "ratio": "\u00d7", "spread_ratio": "\u00d7",
-        "snr": "\u03c3", "tstat": "\u03c3",
+        "snr": "\u03c3", "tstat": "\u03c3", "snr_px": "\u03c3",
         "pct_rank": "%", "overlap": "ratio", "percent": "%",
         # ⚠ `glv_worst_value` 跟著 judge 走（judge 可以是 cmp_* 的量），
         # 所以**這裡不寫** —— 一個猜錯的單位比沒有單位糟。

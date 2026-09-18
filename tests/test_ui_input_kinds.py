@@ -183,14 +183,24 @@ def test_the_image_entry_is_on_the_one_table_that_grows_the_buttons():
 
     工具列那顆鈕、空白狀態那一列、以及它的處理函式全部從這張表長出來，
     所以這一條同時守住三個地方 —— 少接一個的下場實測過（F11 Input-5：
-    `Load layout labels` 的入口鈕根本沒被 addWidget 到工具列上）。
+    `Load layout` 的入口鈕根本沒被 addWidget 到工具列上）。
     """
     from d4t.ui import studio as studio_mod
     src = [s for s in scope_mod.INPUT_SOURCES if s.key == "image"]
     assert len(src) == 1, "Open image… 不在那張表上"
     assert src[0].kinds == ("folder",)
     assert src[0].has_klarf is False
-    assert hasattr(studio_mod.StudioWindow, "_on_open_image")
+    # ⚠ **2026-09-18（F110）起問的是機制，不是那一支方法。** 以前一種入口一支
+    # `StudioWindow._on_open_<key>`，而那正好讓這條測試上面那句話（「改一張表
+    # 就好」）**在程式碼裡是假的**：加一列要同時長一支方法出來。現在五種共用
+    # `open_dialogs.open_source`，所以這裡驗的是「表上每一個 key 這一支都答得
+    # 出來」—— 加一列真的只要加一列。
+    from d4t.ui import open_dialogs
+
+    for src in scope_mod.INPUT_SOURCES:
+        assert src.key in open_dialogs.OPENABLE, (
+            "`%s` 在 INPUT_SOURCES 上，但 open_source 不認得它 —— "
+            "那顆鈕按下去只會講一句「還沒有辦法開」。" % src.key)
     # 四顆 Open 的圖示要各不相同（F7-24）——「輪廓要分得出來」那一條
     icons = [s.icon for s in scope_mod.INPUT_SOURCES]
     assert len(set(icons)) == len(icons)

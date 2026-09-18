@@ -52,6 +52,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import statistics
 import subprocess
 import sys
 from pathlib import Path
@@ -819,8 +820,14 @@ def test_a_card_survives_a_different_patch_size(key, dataset, big_dataset):
 # --------------------------------------------------------------------------- #
 # 卡片名的長度 —— 一列讀得完
 # --------------------------------------------------------------------------- #
-#: 目前最長的那一個（``Remove background / stripes``）。這不是一個猜出來的美感
-#: 數字，是**現況的天花板**：新卡片超過它，就要先看一眼卡片庫再決定。
+#: 目前最長的那一個。這不是一個猜出來的美感數字，是**現況的天花板**：
+#: 新卡片超過它，就要先看一眼卡片庫再決定。
+#:
+#: ⚠ **它跟著現況往下走**（F110，2026-09-17）：27 → 17。27 那一版的持有者是
+#: ``flatten`` 的 ``Remove background / stripes``，而 2026-09-17 量出來只有
+#: **三張離群**（27／24／18，中位數 11），三張一起剪短了 ——
+#: ``Flatten`` / ``Pair source`` / ``Load layout``。天花板掉下去就要跟著降
+#: （`CLAUDE.md` §4 那條反向規矩），不然它擋的是一個已經沒有人站的高度。
 #:
 #: 為什麼要有這條：卡片庫是一列一張卡讀下去的，名字長到要換行、或被 ``…``
 #: 截掉，那一列就不再是一眼的事 —— 而目標使用者正是靠掃過那一列找卡的。
@@ -830,7 +837,7 @@ def test_a_card_survives_a_different_patch_size(key, dataset, big_dataset):
 #:
 #: 掉出去的字（那張卡的 ``repeating``）該去 ``help``：名字回答「這張卡做什麼」，
 #: 前提與細節回答「我能不能用它」，兩者不是同一個問題。
-MAX_LABEL_CHARS = 27
+MAX_LABEL_CHARS = 17
 
 
 @pytest.mark.parametrize("key", CARDS)
@@ -841,6 +848,27 @@ def test_a_card_name_fits_on_one_line(key):
         "%s 的名字 %r 有 %d 個字元，超過現況的天花板 %d —— 卡片庫是一列一張卡"
         "讀下去的。把前提／細節搬進 help，名字只留「這張卡做什麼」。"
         % (key, label, len(label), MAX_LABEL_CHARS))
+
+
+def test_the_name_ceiling_is_the_real_maximum_not_a_round_number():
+    """**反向**：天花板掉下去要跟著降（`CLAUDE.md` §4）。
+
+    `MAX_LABEL_CHARS` 說的是「現況最長的那一個」。它比真的最長值高的時候，
+    擋的是一個**已經沒有人站的高度** —— 於是下一張卡可以取一個比現況所有卡
+    都長的名字而不被問一句話，而那正是這條規矩要防的事。
+
+    訊息裡帶中位數：下一個取名字的人看得到自己離群多遠（2026-09-17 量到的是
+    三張離群 27／24／18，中位數 11 —— 那個對比才是「太長了」的證據）。
+    """
+    lens = sorted(((len(str(c.label)), k, str(c.label))
+                   for k, c in REGISTRY.items()), reverse=True)
+    longest = lens[0][0]
+    mid = statistics.median(n for n, _k, _l in lens)
+    assert MAX_LABEL_CHARS == longest, (
+        "天花板寫著 %d，而現在最長的是 %d（%s《%s》）。中位數 %g。\n"
+        "  長了 → 有人取了更長的名字，先看一眼卡片庫；\n"
+        "  短了 → 把 MAX_LABEL_CHARS 改成 %d，把成果鎖住。"
+        % (MAX_LABEL_CHARS, longest, lens[0][1], lens[0][2], mid, longest))
 
 
 # --------------------------------------------------------------------------- #

@@ -53,7 +53,7 @@ def _subtract_ctx():
                           "ref": rng.normal(100, 6, (48, 48)).astype(np.float32)})
     ctx.track_changes = True
     get_step("subtract")().run(ctx, {"a": "test", "b": "ref",
-                                     "op": "subtract", "absolute": False,
+                                     "op": "subtract", "sign": "signed",
                                      "out": "diff"})
     return ctx
 

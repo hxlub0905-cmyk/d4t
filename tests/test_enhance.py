@@ -198,9 +198,19 @@ def test_only_two_new_cards_were_added_for_six_new_abilities():
                                                  "bilateral", "nlm",
                                                  "hot_pixels"}
 
-    # 雙流運算塞進既有的 Compare 卡，不另開卡
+    # 雙流運算塞進既有的 Compare 卡，不另開卡。
+    #
+    # ⚠ **2026-09-18（F110）分家了，而那不推翻上面那句話。** 「不要開太多卡片」
+    # 講的是「**相似的**能力放同一張卡」，而 max/min/mean 跟相減**不相似**：
+    # 判準是訊號形狀 —— 比較是 2 條進 1 條出，融合是 N 條進 1 條出。
+    # 擠在一起的代價實際看得見：那張卡只有 `a`/`b` 兩顆埠，所以想把三張
+    # condition 併成一張 reference 的人得放兩張卡串起來。
     sub = {p["name"]: p for p in get_step("subtract").describe()["params"]}
-    assert set(sub["op"]["choices"]) == {"subtract", "ratio", "max", "min", "mean"}
+    assert set(sub["op"]["choices"]) == {"subtract", "ratio", "normalized",
+                                         "over_sigma"}
+    comb = {p["name"]: p for p in get_step("combine").describe()["params"]}
+    assert set(comb["method"]["choices"]) == {"median", "mean", "trimmed",
+                                              "max", "min"}
 
 
 def test_the_new_cards_are_in_the_enhance_stage_and_visible_in_the_gui():
@@ -262,8 +272,10 @@ def test_denoise_card_runs_every_method(method):
 
 
 @pytest.mark.parametrize("op,expect", [
-    ("subtract", 40.0), ("ratio", 1.0), ("max", 100.0), ("min", 60.0),
-    ("mean", 80.0),
+    ("subtract", 40.0), ("ratio", 100.0 / 60.0),
+    # F110 新增的兩個：正規化差（Michelson）與「差了幾個 σ」。
+    # b 是常數所以 σ=0 → over_sigma 回 0（**不是 inf**，同 ratio 那條）。
+    ("normalized", 40.0 / 160.0), ("over_sigma", 0.0),
 ])
 def test_compare_card_supports_every_two_stream_operation(op, expect):
     a = np.full((8, 8), 100.0, np.float32)
@@ -271,10 +283,25 @@ def test_compare_card_supports_every_two_stream_operation(op, expect):
     ctx = Context(images={"a": a, "b": b})
     _run("subtract", ctx, a="a", b="b", op=op, out="r")
     got = float(ctx.images["r"].mean())
-    if op == "ratio":
-        assert got == pytest.approx(100.0 / 60.0, rel=1e-3)
-    else:
-        assert got == pytest.approx(expect, rel=1e-3)
+    assert got == pytest.approx(expect, rel=1e-3, abs=1e-6)
+    assert ctx.images["r"].dtype == np.float32
+
+
+@pytest.mark.parametrize("method,expect", [
+    ("max", 100.0), ("min", 60.0), ("mean", 80.0), ("median", 80.0),
+    ("trimmed", 80.0),
+])
+def test_the_merging_operations_moved_to_their_own_card(method, expect):
+    """**同樣的三個數字，只是換了一張卡**（F110）—— 拆卡沒有改任何算術。
+
+    ⚠ 兩張流的 median 是「中間那個」= 兩個的平均（`np.median`），所以它跟
+    `mean` 在這裡同值；分得開的情境在 `tests/test_combine_card.py`
+    （三張裡有一張帶著缺陷）。
+    """
+    ctx = Context(images={"a": np.full((8, 8), 100.0, np.float32),
+                          "b": np.full((8, 8), 60.0, np.float32)})
+    _run("combine", ctx, streams="a,b", method=method, out="r")
+    assert float(ctx.images["r"].mean()) == pytest.approx(expect, rel=1e-3)
     assert ctx.images["r"].dtype == np.float32
 
 

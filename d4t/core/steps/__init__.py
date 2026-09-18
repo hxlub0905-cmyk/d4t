@@ -89,6 +89,7 @@ from . import tone           # tone（亮度/對比/gamma/曲線/反相）
 from . import flatten        # flatten
 from . import align          # align
 from . import arith          # subtract（``invert`` F7-20 併進 tone）
+from . import combine        # combine（N 條流併成一條；F110 從 arith 拆出來）
 from . import align_to       # 小圖在大圖裡的位置（F15-C）
 from . import pair_source    # 另一份資料的對應那一顆（F15）
 # Region 段只剩**一張**（F30 收成兩張，2026-09-02 再收成一張）。
@@ -107,7 +108,7 @@ from . import quality        # focus_quality（Focus index）
 from . import output         # Output 段（report / klarf / comparison / charts）
 
 __all__ = [
-    "load", "load_sidecar", "normalize", "denoise", "tone", "flatten", "align", "arith",
+    "load", "load_sidecar", "normalize", "denoise", "tone", "flatten", "align", "arith", "combine",
     "quality", "glv_stats",
     "output",
 ]

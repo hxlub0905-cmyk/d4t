@@ -28,6 +28,141 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F110：Compare 段收斂 —— 拆卡、第五種 kind、流的內容型別（2026-09-18）
+
+使用者說「**全部**」：F109 之後定案但沒做的六件一次做完。Compare 是 Phase 2 七段裡
+最後一段，這一輪之後**七段全部收斂**。
+
+**Compare 段現在四張卡**：`align`（Align）、`subtract`（Compare two images）、
+**`combine`（Image Combination，新）**、`align_to`（H2H）。註冊 19 → 20 張。
+
+### ① Image Combination 拆成兩張
+
+`subtract` 的五個 `op` 是**兩個問題**擠在一張卡上，而判準是 F109 定的那條 ——
+**訊號形狀**：`subtract`/`ratio` 問「這兩張哪裡不一樣」（2 條進 1 條出），
+`max`/`min`/`mean` 問「把這幾張併成一張」（N 條進 1 條出）。
+
+擠在一起的代價實際看得見：那張卡只有 `a` 與 `b` **兩顆埠**，所以想把三張 condition
+併成一張 reference 的人得放兩張卡串起來，而畫布上那兩張卡看起來是在比較兩次。
+
+* **比較卡**留著 `subtract` 這個 key（使用者定的 —— 出貨的三份與 fixture 都只用
+  `op: "subtract"`，所以那一邊一個字都不用遷移），label 換成 `Compare two images`。
+  ⚠ 名字換過兩次而**兩次的理由是同一個**：F16 從 `Compare two streams` 改叫
+  `Image Combination`（「五個 op 只有一個是相減」），F110 又改回去 —— 因為那四個
+  「不是相減」的裡有三個已經搬走了。名字跟著卡片真的在做的事走。
+* 比較卡加兩個 op：`normalized`（`(a−b)/(a+b)`，參照接近黑時不會爆）與
+  `over_sigma`（`(a−b)/σ(b)`，讓門檻在安靜的圖與有顆粒的圖上意思一樣）。
+* `absolute`（bool）→ `sign`（`abs`／`signed`／**`split`**）。兩個值的格子答不出
+  第三種答案，而第三種是使用者真的要的：**亮的缺陷與暗的缺陷分兩條流出去**
+  （`<out>_bright` / `<out>_dark`），讓下游各給一個門檻。
+* **融合卡** `combine` 拿走 `max`/`min`/`mean` 並加 `median`/`trimmed`。
+  **median 是預設**：它是唯一拿得掉「只有一張有」的那個東西的，而那正是缺陷 ——
+  「用好幾張造一張乾淨的 reference」是這張卡最常見的用途。
+
+### ② DOE 的輸入：第五種 kind
+
+`folder` 是「一個檔案一顆」，DOE 要的是**正好相反**的「一個子目錄一顆、裡面每個
+檔案一個 imaging condition」。使用者選了**開第五種 kind**（`doe_folder`），而那是
+對的：同一個 kind 兩種形狀會讓畫布說謊 —— `SINGLE_IMAGE_KINDS` 裡寫著 `folder`，
+而 DOE 一顆有好幾張，畫布上那張預設的 `load_single` 對它一定報錯。
+
+⚠ **流的順序是檔名排序，而那是一個契約**：這些 `ImageRef` 的 `page` 是 `None`，
+所以 `_in_defect_order` 退回 dict 插入順序 —— 也就是 `sorted()` 的順序，而
+`load_patch` 的 `channel_map`（1-based）正是照它數的。湊不成一顆的空目錄與撞名的
+目錄**不吞掉**，進 `warnings`（同 `load_tiff_stack` 對零頭的處置）。
+
+CLI 那一條**由內容判斷不是多一個旗標**：一個目錄裡裝的是影像檔還是資料夾是看得
+出來的事實，而使用者在命令列重打一次那個事實沒有道理（推廣鐵則）。
+
+### ③ `snr_px` —— DOE 真正要的那個數字
+
+現有 `snr` 的分母是**框與框之間**（使用者 2026-08-21：「SNR 全線改成 by box，
+by pixel 會太小」），而**參照少於兩格時整格不寫**。DOE 只有一個 target box、
+一個 ref box —— 所以 `snr` 對它永遠是空的，而那正是 `snr_px` 存在的理由。
+
+`snr_px = |μT − μR| / σR`，直接用 `algo/snr.snr_signed`（這個 repo 帶正負號慣例的
+**規範出處**，而它到今天為止只有一個 `hasattr` 測試在守 —— 現在它有第一個真的
+呼叫者）。⚠ 算在 `if len(boxes) < 2: return out` 那個提前返回的**上面**，否則它在
+唯一需要它的情況下被安靜地丟掉。**現有 `snr` 一個位元組都沒動。**
+
+畫面上它自己一群（`Vs pixels`），不掛在 `Vs boxes` 底下：那個群名講的正是 `snr`
+的分母，而**分母是這兩個數字唯一的差別**。⚠ 新群名沒加進 `METRIC_GROUP_ORDER` 的
+下場是那一群的膠囊**安靜地不畫**（F77 真的踩過）。
+
+### ④ 流的「內容型別」（Q1）
+
+**把 layout label map 接進 Normalize，今天是一條完全合法的線**，而 lint／畫布／
+引擎三層都沒擋。它的像素值就是層號，正規化會把 1、2、3 混成 1.7 —— 跑得完、
+不報錯、預覽上那張圖看起來還變漂亮了，而下游每一個區域都是錯的。
+`load_sidecar.py` 從 2026-08-18 起就逐字寫著這件事，但那句話擋不住一條線。
+
+`ParamSpec.content`（`gray`／`label`）由產出那一格宣告、沿著線傳下去，
+只收灰階的輸入格吃到 label 就是一條 **`wrong-content`**（error 級）。
+**沒宣告 = 只收灰階**，保守的預設是刻意的：加新卡的人不必想這件事就受保護。
+
+順手刪掉 **`Context.labels`** —— 量過了：**沒有任何一張卡寫過它**，只有引擎與快取
+快照在搬運它。一個沒有人寫的欄位不是「還沒用到」，是一條**看起來存在的第二條路**：
+下一個要傳 label 的人會挑它，而它不進快取簽章、畫布上也沒有線。
+快照欄位集合改了 → `cache.FORMAT_VERSION` 4 → 5。
+
+### ⑤ `focus_quality` 吃區域（Q4）＋ ⑥ 三個 label 剪短（Q5）
+
+`MultiSourceStep` **本來就有整個區域迴圈**（`REGION = "roi"`），所以前者是加一格
+參數。⚠ 裁的必須是**二維的一塊**（`crop_to_roi`）不是 `roi_pixels`：銳利度量的是
+相鄰像素之間的變化，攤平之後「相鄰」是假的，而四個數字照樣算得出來。
+多框區域走既有那條路（報錯並指名 `<name>_center`，CD 卡同一條），不自己發明規矩。
+
+label：`Remove background / stripes` → `Flatten`、`Pair with another source` →
+`Pair source`、`Load layout labels` → `Load layout`。天花板跟著從 27 降到 17，
+外加一條**反向**測試把「上限＝真的最大值」釘住。
+
+### `studio.py` 那三格只准往下的 —— 這一輪是往下
+
+第五顆 Open 鈕要加，而規矩是「先從它手上搬走等量的東西」。搬的是**五顆 Open 的
+對話框與那個「按下去要做什麼」的分岔**（→ `ui/open_dialogs.py`）：
+行 7,753 → **7,717**、方法 298 → **294**、`self.*` 437 → **434**，三格一起往下。
+
+**順便讓一句話變成真的**：`CLAUDE.md` §5 寫著「加／改一個入口＝改 `INPUT_SOURCES`，
+不要動 UI」，而在這之前加一列就得同時在 `studio.py` 上長一支 `_on_open_<key>`
+出來，不然那顆鈕按下去是 `AttributeError`。現在五種共用
+`open_dialogs.open_source`，那句話第一次成立。
+
+### 黃金值：這一輪的驗收是「**沒有變**」
+
+跟 F109 相反（那一輪是行為真的改了）。`freeze_golden.py --check` 三份全綠**而且
+沒有重凍** —— 兩道新遷移必須跑出逐位元組相同的數字，變了就是遷移寫錯。
+
+⚠ **一個被測試當場擋下來的錯誤**：`absolute → sign` 那一道第一版寫成版本閘
+（照抄 F109 的 align），而 `test_reading_a_recipe_never_invents_a_parameter` 立刻紅了。
+它是對的 —— 舊的 `absolute=True` 跟新的 `sign="abs"` **是同一件事**，所以檔案裡
+沒寫就什麼都不該寫進去。三道遷移三種判準，差別在**預設值的意思有沒有變**：
+
+| 遷移 | 判準 | 為什麼 |
+|---|---|---|
+| align（F109）| 版本號 | 舊預設與新預設是兩種行為，從「缺一個 key」分不出來 |
+| `subtract` 拆卡 | 舊的**值**（`op` 是不是 max/min/mean）| 鐵則 9 正牌 |
+| `absolute` → `sign` | 舊**鍵**在不在 | 同上，而且預設值的意思沒變 |
+
+### 沒做完的那一件（誠實回報）
+
+**`recipes/doe-conditions.json` 出不了貨**，而理由不是時間：三種找 ROI 的方法
+（條紋／我標的 cell ＋ 模板比對／GDS label map）**都要有東西可以鎖**，而 DOE
+**不需要找** —— defect 本來就固定在 FOV 正中間，要的是「把框放在這個固定位置」。
+那是第四種 method（或一張新卡），是**卡片層的決定**，不是一份 recipe 寫得出來的。
+硬用 `roi_template` 的話要在 recipe 裡塞一張模板圖，而 DOE 的影像未必有可重複的
+pattern 給它鎖 —— 那份 recipe 會在 `test_shipped_recipes` 裡真的跑，然後真的失敗。
+
+寫進 `docs/ROADMAP.md` 的 Compare 那一列了。DOE 的其他每一塊都通了
+（輸入、對齊、`snr_px`、contrast、報表）。
+
+### 天花板
+
+`recipe.py` 3,949 → 4,101（兩批：`wrong-content` 的兩支 ＋ 第 21、22 道遷移），
+遷移道數 20 → 22，`RECIPE_VERSION` 4 → 5，`cache.FORMAT_VERSION` 4 → 5，
+卡片 label 上限 27 → 17（往下），`studio.py` 三格往下（見上）。
+
+---
+
 ## F109：align 重做並拿回卡片庫 —— **對齊不動灰階**（2026-09-17）
 
 使用者定調把 `align` 拿回來，而且講清楚了用途：**DOE**。同一顆 defect、位置固定在

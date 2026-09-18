@@ -3107,7 +3107,7 @@ class H2HInspector(MeasureInspector):
 
 
 class SubtractInspector(Inspector):
-    """Image Combination：**差影像是什麼做的**（PR-2 2d）。
+    """Compare：**差影像是什麼做的**（PR-2 2d）。
 
     `diff` 是 D2D 的心臟，而它以前一格儀表都沒有。三樣東西，全部來自卡片
     自己 note 的那一份（`arith._note_diagnostics`，預覽就有 —— 跟 Enhance

@@ -143,7 +143,11 @@ def test_i01_is_in_the_tiff_family_everywhere():
     assert {".i01", ".I01"} <= set(klarf_core.patch_image_ext_variants())
     assert ".i01" in dataset._TIFF_EXTS
     assert dataset._TIFF_EXTS <= dataset._IMAGE_EXTS
-    src = open(os.path.join(REPO, "d4t", "ui", "studio.py"), encoding="utf-8").read()
+    # ⚠ 對話框 2026-09-18（F110）搬去 `ui/open_dialogs.py` 了 —— 那一輪要加
+    # 第五顆 Open 鈕，而 `studio.py` 那格天花板只准往下，所以整族搬家。
+    # 這裡跟著搬：問的是「那些過濾字串認不認得 .I01」，不是它們住在哪個檔案。
+    src = open(os.path.join(REPO, "d4t", "ui", "open_dialogs.py"),
+               encoding="utf-8").read()
     filters = re.findall(r'"(?:Multi-page TIFF|Images) \(([^)]*)\)', src)
     assert len(filters) >= 2, filters
     for f in filters:

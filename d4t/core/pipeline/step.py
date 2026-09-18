@@ -69,7 +69,11 @@ CATEGORY_BATCH = "batch"
 #: 這兩張表。⚠ 跟 `ui/scope.py` 的 `SUPPORTED_KINDS` 要合起來剛好蓋滿 ——
 #: core 不能 import ui，所以由一條 UI 測試 cross-check（第五種 kind 出現時
 #: 兩邊一起紅，而不是安靜地漏掉分群）。
-PATCH_KINDS = ("ebi_patch", "tiff_stack")
+#:
+#: ⚠ ``doe_folder`` 在 **patch 那一群**（F110）：DOE 的每一張都是「以 defect
+#: 為中心、FOV 固定」拍出來的 —— 那正是 patch 形的定義，跟它是不是機台裁的
+#: 無關。`_center` 在它身上有幾何意義，而那是這張表唯一在回答的問題。
+PATCH_KINDS = ("ebi_patch", "tiff_stack", "doe_folder")
 SINGLE_IMAGE_KINDS = ("rsem", "folder")
 
 # --------------------------------------------------------------------------- #
@@ -255,6 +259,20 @@ RUNTIME_CHOICES = ("sources", "source_images", "source_columns",
 #: 一顆輸入埠的**角色**（F68）—— 見 :attr:`ParamSpec.role`。
 MEASURE, REFERENCE = "measure", "reference"
 PORT_ROLES = (MEASURE, REFERENCE)
+
+#: 一條影像流**裝的是什麼**（F110，2026-09-18）—— 見 :attr:`ParamSpec.content`。
+#:
+#: ``GRAY``：像素值是亮度。所有 Enhance／Compare／Measure 卡吃的都是這個。
+#: ``LABEL``：像素值**就是層號**（GLAS 的 GDS label map，0 = 背景、1..N = 第
+#: N 個 POI 層）。
+#:
+#: 為什麼要分這兩種，而不是讓卡片自己看資料：**看不出來**。一張 label map
+#: 是合法的單通道 8-bit 影像，正規化它、拉對比、平滑它，四件事都跑得完、
+#: 都不會報錯 —— 而 1、2、3 被混成 1.7 這種不存在的層號之後，下游的每一個
+#: 區域都是錯的。這是這個 repo 最貴的那種失敗（「跑得完、有數字、而且是錯的」），
+#: 而唯一擋得住它的時機是**接線的當下**。
+GRAY, LABEL = "gray", "label"
+CONTENT_KINDS = (GRAY, LABEL)
 
 IMAGE_TYPES = ("image_key", "image_keys")
 
@@ -516,6 +534,20 @@ class ParamSpec:
     #: 宣告不推導，跟 :attr:`direction` 同一個理由：推導看的是**值**，而值是
     #: 會被清空的（剛加進來的卡輸入本來就是空的）—— 一清空就推不回來了。
     role: str = ""
+    #: 這條影像流**裝的是什麼**（F110）：:data:`GRAY`（預設）或 :data:`LABEL`。
+    #:
+    #: 只有影像格用得到，而且**兩個方向都用得到，意思不一樣**：
+    #:
+    #: * ``direction="out"``：這張卡寫出去的是什麼（``load_sidecar`` 的 ``out``
+    #:   是 ``LABEL``）。這是**唯一的來源** —— 一條流的內容由產出它的那一格宣告，
+    #:   之後沿著線傳下去。
+    #: * ``direction="in"``：這一格**收得下**什麼。預設只收灰階，所以「把 label
+    #:   map 接進 Normalize」在 lint 就是一條 ``wrong-content``，而不是一批
+    #:   跑得完的錯數字。
+    #:
+    #: 宣告不推導，跟 :attr:`direction` / :attr:`role` 同一個理由：推導看的是
+    #: **值**，而值是會被清空的。
+    content: str = ""
     #: 這一列預設收起來，按「Show advanced settings」才出現（F8 第六輪）。
     #:
     #: 跟 ``section`` 的差別是**軸不一樣**：``section`` 講「這一列在回答哪個
@@ -652,6 +684,16 @@ class ParamSpec:
             raise ParamError(
                 f"parameter '{self.name}': direction only applies to "
                 f"image / region parameters")
+        if self.content:
+            if self.content not in CONTENT_KINDS:
+                raise ParamError(
+                    f"parameter '{self.name}': unknown content "
+                    f"'{self.content}' (allowed: {CONTENT_KINDS}, or leave it "
+                    f"empty for plain gray)")
+            if self.type not in IMAGE_TYPES:
+                raise ParamError(
+                    f"parameter '{self.name}': content says what an image "
+                    f"stream holds, and this one is '{self.type}'")
 
     # -- 輸入／輸出（F10；區域是 F12）---------------------------------------
     def is_input(self) -> bool:
@@ -667,6 +709,21 @@ class ParamSpec:
     def is_region_input(self) -> bool:
         """吃**具名區域**的輸入格（畫布上的菱形埠、虛線；F12）。"""
         return self.direction == "in" and self.type in REGION_TYPES
+
+    def content_written(self) -> str:
+        """這一格寫出去的流裝的是什麼（不是輸出格就是空字串）。"""
+        return (str(self.content or GRAY)
+                if self.direction == "out" and self.type in IMAGE_TYPES else "")
+
+    def accepts(self, content: str) -> bool:
+        """這一格收不收得下裝著 ``content`` 的流。
+
+        **沒宣告 = 只收灰階。** 預設保守是刻意的：加一張新卡的人不必想這件事，
+        而想收 label map 的那一張要明講 —— 忘了宣告的下場是一條 lint，不是
+        一批安靜算錯的數字。
+        """
+        want = str(content or GRAY)
+        return want == GRAY or want == str(self.content or GRAY)
 
     def required_input(self, params: Optional[Dict[str, Any]] = None) -> bool:
         """這一格**非有來源不可**嗎（在這組參數下）。
@@ -1666,6 +1723,7 @@ class Step(ABC):
                     "section": p.section,
                     "advanced": p.advanced,
                     "direction": p.direction,
+                    "content": p.content,
                     "role": p.role,
                     "extent": p.extent,
                     "row_kind": p.row_kind,

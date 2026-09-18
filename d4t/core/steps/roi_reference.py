@@ -90,7 +90,7 @@ from ..ingest.glas_export import SIDECAR_LABEL
 from ..pipeline.channels import ChannelMapError, parse_channel_map
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, GROUP_REGION, FeatureSpec, ParamSpec, Step, StepError,
+    CATEGORY_ALGO, GROUP_REGION, LABEL, FeatureSpec, ParamSpec, Step, StepError,
     register_step,
     show_when_conditions,
 )
@@ -297,7 +297,11 @@ class RoiReferenceStep(Step):
             name="label_source", type="image_key", direction="in",
             default=SIDECAR_LABEL, section="1 · How to find them",
             label="Layout labels", show_when=("method", (METHOD_GDS,)),
-            help=("The label map stream, from the “Load layout labels” card. "
+            # F110：**這是全 repo 唯一一格收得下 label map 的輸入。** 其餘每一格
+            # 影像輸入都只收灰階（`ParamSpec.accepts` 的保守預設），所以把
+            # `load_layout` 接到 Normalize 上是一條 `wrong-content`。
+            content=LABEL,
+            help=("The label map stream, from the “Load layout” card. "
                   "Every pixel value in it is a layer number - it is not a "
                   "picture of the wafer."),
         ),
@@ -513,7 +517,7 @@ class RoiReferenceStep(Step):
                     "regions yet."]
         if not _layers_of(params):
             return ["This card has no layers yet. Use “Open GDS export…” on "
-                    "the “Load layout labels” card — attaching the export "
+                    "the “Load layout” card — attaching the export "
                     "fills in the layer numbers and the layout's own names "
                     "for them; then rename them to something you will "
                     "recognise. Or switch “Find them by” to “%s”, which "
@@ -550,7 +554,7 @@ class RoiReferenceStep(Step):
             raise StepError(
                 self.key,
                 "no layers are named yet. Use “Open GDS export…” on the "
-                "“Load layout labels” card - "
+                "“Load layout” card - "
                 "attaching the export fills in the layer numbers and names "
                 "from it. On the command line, pass --gds <export folder>.")
 

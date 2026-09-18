@@ -1,6 +1,6 @@
 {
   "recipe_id": "dual_route_basic",
-  "version": 4,
+  "version": 5,
   "app_version": "0.1.0.dev0",
   "author": "HX",
   "description": "測試用的最小 recipe（不是給使用者看的範例）。ebi_patch 那條有機台附的 ref，所以走「相減 → 去噪 → Z-map → CD → GLV」。rsem 那條**沒有 ref**：F16 拿掉 `pattern_ref` 之後，單張影像再也造不出參考圖，所以它改成直接量單張影像（Z-map → CD → GLV）。那條 route 因此**不再是一個準確率的證據** —— 見 tests/test_e2e_dual_route.py。 rsem 那條的影像流叫 `test` 不是 `single`：那條 route 上的 load 卡是由 `_migrate_split_load_cards` 從共用的 `load_patch` 換成 `load_single` 的，而它把輸出名設成 `test`（見那支遷移的 docstring）——這份 fixture 同時是**那道遷移的共用節點案例**。",
