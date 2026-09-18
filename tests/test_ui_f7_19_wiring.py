@@ -504,7 +504,7 @@ def test_every_button_built_for_the_toolbar_is_actually_on_it(window):
     是兩段文字重疊成一團，而所有既有測試都是綠的 —— 沒有一條在問「這顆鈕在
     工具列上嗎」，只問了它存不存在、文字對不對。
 
-    所以這條逐顆掃：``_build_toolbar`` 建出來的每一顆 ``btn_*``，要嘛在工具列
+    所以這條逐顆掃：``studio_layout.build_toolbar`` 建出來的每一顆 ``btn_*``，要嘛在工具列
     的 action 清單上，要嘛在工具列上某個容器裡（試跑那兩顆）。
     """
     from PySide6.QtWidgets import QToolButton

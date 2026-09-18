@@ -380,7 +380,7 @@ def test_both_entries_are_visible_and_the_dialog_agrees(window):
     ⚠ **工具列上那顆要 `show()` 過再問。** ``QToolBar.addWidget`` 把 widget
     包進一個 QWidgetAction，而 Qt 在工具列真的顯示之前把它們**全部**藏著
     —— 於是 `btn_examples.isHidden()` 在開關打開的時候照樣答 True
-    （`studio._build_toolbar` 那段分隔線的註解記著同一件事）。
+    （`studio_layout.build_toolbar` 那段分隔線的註解記著同一件事）。
     不在工具列上的那顆（`btn_empty_sample`）沒有這個問題。
     """
     from d4t.ui import scope

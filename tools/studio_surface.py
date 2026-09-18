@@ -46,18 +46,50 @@ _VAR = r"(?:w|win|window|studio|sw|ran|mixed_window|self\.w|self\.win)"
 _PATCHED = re.compile(r'(?:set|get|has)attr\([^)]*?["\'](\w+)["\']')
 
 
+def _stores(node: ast.AST, is_window) -> set:
+    """``<視窗>.名字 = …`` 裡的那些名字。``is_window`` 判斷「點的左邊是視窗嗎」。"""
+    out = set()
+    for n in ast.walk(node):
+        if (isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store)
+                and is_window(n.value)):
+            out.add(n.attr)
+    return out
+
+
+def _is_self(v) -> bool:
+    return isinstance(v, ast.Name) and v.id == "self"
+
+
+def _is_win(v) -> bool:
+    """`win`（模組層函式吃的那個）或 `self.w`（controller 握著的那個）。"""
+    if isinstance(v, ast.Name) and v.id == "win":
+        return True
+    return (isinstance(v, ast.Attribute) and v.attr == "w" and _is_self(v.value))
+
+
 def shape() -> tuple:
-    """`StudioWindow` 現在有哪些方法、哪些 `self.*` 被賦值過。"""
+    """`StudioWindow` 現在有哪些方法、哪些名字被設在視窗上。
+
+    ⚠ **不只看 `studio.py`**：F116 把內容搬進 `ui/gauge_panel.py`、
+    `ui/preview_overlays.py`、`ui/studio_layout.py` 那一族之後，`win.toolbar`、
+    `win.btn_trial`、`self.w.xxx` 這些**仍然是視窗上的名字**，只是賦值那一行
+    住在別的檔案裡。只讀 `studio.py` 的話它們會被當成「不見了」——
+    第 2 步一次誤報 69 個（`pipeline`、`param_form`、`results` …），而那些名字
+    一個都沒有動過。
+    """
     tree = ast.parse(STUDIO.read_text(encoding="utf-8"))
     cls = next(c for c in tree.body
                if isinstance(c, ast.ClassDef) and c.name == "StudioWindow")
     meths = {f.name for f in cls.body
              if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
-    attrs = set()
-    for node in ast.walk(cls):
-        if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
-                and node.value.id == "self" and isinstance(node.ctx, ast.Store)):
-            attrs.add(node.attr)
+    attrs = _stores(cls, _is_self)
+    for f in sorted((REPO / "d4t" / "ui").glob("*.py")):
+        if f.name == "studio.py":
+            continue
+        try:
+            attrs |= _stores(ast.parse(f.read_text(encoding="utf-8")), _is_win)
+        except SyntaxError:                       # 壞檔案不該讓這支掛掉
+            continue
     return meths, attrs
 
 

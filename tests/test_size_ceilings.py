@@ -195,7 +195,9 @@ FILE_CEILINGS = {
     # 2026-09-19（F116 第 1 步之 1c）：7,149 → **6,782**（−367）。影像流選擇與
     # 畫在圖上的東西（區域框、量測標記、熱色磚、並排比對、兩張圖互跟）整族進
     # `ui/preview_overlays.py`。第 1 步做完：7,686 → 6,782，−904。
-    "d4t/ui/studio.py": 6782,
+    # 2026-09-19（F116 第 2 步）：6,782 → **5,792**（−990）。介面組裝那一族整族
+    # 進 `ui/studio_layout.py`（見下面 `HARD_CAPS` 那一段）。
+    "d4t/ui/studio.py": 5792,
     # 19 道 `_migrate_*` 住在這裡（見下面 `recipe_migrations`）。它會用跟
     # `studio.py` 完全一樣的機制長成第二個 `studio.py`。
     #
@@ -386,7 +388,10 @@ COUNT_CEILINGS = {
     ),
     # god object 的兩個投影。261 → 268（六天）。
     "studio_window_methods": (
-        256,
+        248,
+        # 2026-09-19（F116 第 2 步）：256 → 248。七支 `_build_*` ＋ `_tool_button`
+        # 變成 `ui/studio_layout.py` 的模組層函式（沒有留門面 —— 沒有人從外面
+        # 叫它們，`__init__` 改成 `studio_layout.build_toolbar(self)`）。
         # 2026-09-19（F116 第 1 步之 1c）：272 → 256。搬走 21 支，回來五支門面
         # （`set_compare` / `compare_enabled` / `region_overlay_names` /
         # `heat_tiles` / `_focus_box_index`）。`compare_enabled` 不只是給測試的：
@@ -410,7 +415,7 @@ COUNT_CEILINGS = {
         # 2026-09-08（U5 ＋ U8）：284 → 286。**淨值 +2，而它換掉了三支**：
         # 走的是 `open_canvas_window` / `_on_canvas_popout_closed` /
         # `canvas_popout_open`，來的是 `layout_mode` / `set_layout_mode` /
-        # `toggle_layout_mode` / `_sync_layout_button` / `_build_params_row`。
+        # `toggle_layout_mode` / `_sync_layout_button` / `_build_params_row`（F116 第 2 步起在 `ui/studio_layout.py`）。
         # 2026-09-08（U18 ＋ X3）：280 → 284。四支：`_delete_selected_on_canvas`
         # 與 `_clear_canvas_selection`（快捷鍵表上那兩格 → 畫布已經有的實作，
         # 刪除仍然只有一份）、`set_sample_mode`（換模式**並且**把工具列的字
@@ -440,7 +445,10 @@ COUNT_CEILINGS = {
         lambda: _class_shape("d4t/ui/studio.py", "StudioWindow")[0],
     ),
     "studio_window_attributes": (
-        389,
+        323,
+        # 2026-09-19（F116 第 2 步）：389 → 323。**不是視窗上的名字變少**：那一族
+        # 照舊在 `win` 上設同樣的 86 個名字，只是那一千行 `self.x = …` 住到
+        # `ui/studio_layout.py` 去了，而這一格數的是**這個檔案裡**的 `self.*`。
         # 2026-09-19（F116 第 1 步之 1c）：409 → 389。`_compare_on` 與
         # `_view_syncing` 的家跟著行為走；`_user_stream` / `_user_stream_b`
         # 留在視窗（前者在換卡片時被別段重設 —— §3-1），進來的是 `overlays`。
@@ -536,9 +544,16 @@ HARD_CAPS = {
     # 2026-09-19（F116 第 1 步之 1c）：行 7,149 → 6,782、方法 272 → 256、
     # `self.*` 409 → 389。**第 1 步整步做完**：7,686 → 6,782（−904）、
     # 293 → 256（−37）、433 → 389（−44）。
-    "d4t/ui/studio.py": 6782,
-    "studio_window_methods": 256,
-    "studio_window_attributes": 389,
+    # 2026-09-19（F116 第 2 步）：介面組裝那一族（工具列、主體、預覽區、進度列、
+    # 快捷鍵，七支 `_build_*` ＋ `_tool_button`）整族進 `ui/studio_layout.py`。
+    # 行 6,782 → 5,792、方法 248、`self.*` 389 → 323。
+    # ⚠ **`self.*` 這一格會掉是因為那一千行的 `self.x = …` 不在這個檔案裡了，
+    # 不是因為視窗上的名字變少** —— 那 86 個名字一個都沒動（計畫書 §4 寫著
+    # 這一步減的是行數與方法數）。`tools/studio_surface.py` 現在也讀
+    # `ui/*.py` 裡的 `win.x = …`，問「那個名字還在不在」要用它，不要用這一格。
+    "d4t/ui/studio.py": 5792,
+    "studio_window_methods": 248,
+    "studio_window_attributes": 323,
 }
 
 

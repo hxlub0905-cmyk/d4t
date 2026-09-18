@@ -368,6 +368,9 @@ d4t/
     ├── feature_panel.py      #   Preview 的特徵面板：四胞胎橫過來（一列一個統計量、一欄一個 variant）
     ├── gallery.py region_check.py      #   縮圖網格（虛擬捲動，撐 10k+）／區域畫在很多顆上
     ├── inspectors.py         #   每張卡自己的儀表（依 `Step.key` 註冊）
+    ├── studio_layout.py      #   `StudioWindow` 的**介面組裝**：工具列、主體、預覽區、
+    │                         #     進度列、快捷鍵（F116 第 2 步；模組層函式吃 `win`，
+    │                         #     照舊在 `win` 上設同樣那些名字）
     ├── gauge_panel.py        #   右下角那一塊的 controller：儀表那頁與特徵表那頁
     │                         #     （`bottom_stack` 的兩頁 ＋ 一鍵校正 ＋ 圖的視窗，F116）
     ├── preview_overlays.py   #   預覽區的 controller：看哪一條流、區域框／量測標記／

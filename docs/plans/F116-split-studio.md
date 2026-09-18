@@ -1,8 +1,9 @@
 # F116 — 拆 `studio.py`：`StudioWindow` 只留組裝與接線，內容搬進 controller
 
-狀態：**進行中（2026-09-19）** —— **第 1 步做完**（1a／1b／1c 三個 commit）。
-下一步是第 2 步（介面組裝 → `ui/studio_layout.py`）。第 1 步量到的東西已經
-寫回 §3、§4、§6、§7（見那幾節的「第 1 步的結果」）。
+狀態：**進行中（2026-09-19）** —— **第 1、2 步做完**。
+`studio.py` 7,686 → **5,792**（−1,894）、方法 293 → **248**。
+下一步是第 3 步（Gallery ＋ 回溯 → `ui/gallery_controller.py`）。
+前兩步量到的東西已經寫回 §3、§4、§6（見那幾節）。
 
 > 起點 commit `3329659`。下面的數字都是那一刻量的；動手前用 §6 那支腳本重量一次，
 > 對不上就以重量的為準（這一份不是數字的家，`tests/test_size_ceilings.py` 才是）。
@@ -125,7 +126,26 @@ class GaugePanel(QObject):
 `ui/feature_pane.py` **沒有出現**：併進去是 609 行，剛好踩線，而回頭問
 「那一塊該不該是一塊」得到的答案是照**畫面上的位置**分，不是照行數分。
 
-**第 2 步：介面組裝** → `ui/studio_layout.py`。
+**第 2 步：介面組裝** → `ui/studio_layout.py`。✅ **做完**（2026-09-19）。
+
+第 2 步的結果：`studio.py` 6,782 → **5,792**（−990）、方法 256 → **248**。
+搬的是**七支** `_build_*`（計畫書原本只列五支 —— `_build_score_pane` 與
+`_build_params_row` 是 `_build_body` / `_build_preview_pane` 叫的，同一族）
+加上 `_tool_button` 與它唯一的使用者 `_GlyphToolButton`，以及四個版面常數
+（`COLUMN_SIZES`、`DEFAULT_TRIAL_N`、`DEFECT_COMBO_MAX`、`STREAM_COMBO_MAX`）。
+**沒有留任何門面** —— 沒有人從外面叫那幾支，`__init__` 改成
+`studio_layout.build_toolbar(self)`。`COLUMN_SIZES` / `DEFAULT_TRIAL_N` 在
+`studio.py` 用 `# noqa: F401` 轉出去，因為測試是用 `studio_mod.` 拿的。
+
+`_load_sizes` / `_save_sizes` **留在 `studio.py`**：它們要問
+`_running_under_pytest()`（那一支的家在 studio.py，而且測試會 monkeypatch 它），
+所以 `build_body` 在**函式裡** import 它們。
+
+⚠ **這一步之後，「那個名字還在不在視窗上」不能再問 `studio_window_attributes`
+那一格。** 那一格數的是 `studio.py` 這個檔案裡的 `self.*`，而那 86 個名字現在是
+在 `studio_layout.py` 裡用 `win.x = …` 設的 —— 數字掉了 66 個，名字一個都沒動。
+要問名字用 `tools/studio_surface.py`（它現在會讀 `d4t/ui/*.py` 裡的 `win.x = …`
+與 `self.w.x = …`）。
 `_build_toolbar`（275 行）、`_build_preview_pane`（374）、`_build_body`（120）、
 `_build_progress`、`_build_shortcuts` 變成模組層函式 `build_toolbar(win) -> None`，
 照 `open_dialogs.py` 的慣例吃 `window`。它們**照舊在 win 上設屬性**（86 個名字不動，
@@ -194,6 +214,10 @@ class GaugePanel(QObject):
       （controller 是 QObject，不是 QWidget）。搬完 grep 一次 `self(?!\s*\.)`
 - [ ] 搬完 grep 一次每一個 `self.w.<名字>`，確認它真的還在 `StudioWindow` 上
       —— 跨 controller 的狀態（第 1 步是 `_compare_on`）要走門面（§3-2）
+- [ ] **搬到模組層函式的時候，`self` 一律變成 `win`（連當參數傳的也是）**，而
+      那一族沒有自己的狀態 —— 全部設在視窗上。⚠ 先用 `tokenize` 確認要搬的
+      區間裡**沒有任何字串含 `self`**，再做整段取代（第 2 步搬 922 行，靠這一步
+      才敢一次換掉）
 - [ ] 每個搬走的名字：測試用得多 → 留門面；用得少 → 改測試
 - [ ] 新模組不 import `studio`（型別註記用 `TYPE_CHECKING` 或字串）
 
