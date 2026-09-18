@@ -16,9 +16,16 @@ F116 把 `StudioWindow` 的內容一塊一塊搬進 controller。這種搬家最
     ...搬家...
     python tools/studio_surface.py --check before.json
 
-`--check` 對 `before.json` 裡**每一個被測試用到的名字**，確認它仍是
-`StudioWindow` 的方法、或仍在某個方法裡被 `self.x = ...` 設過；答不出來的
-列出來並回非零 —— 那就是「要嘛留一行門面、要嘛改測試」的清單。
+`--check` 問兩件事：
+
+1. `before.json` 裡**每一個被測試用到的名字**，現在還在不在視窗上（是方法、
+   或被 `self.x = …` / 別的模組的 `win.x = …` 設過）。答不出來的列出來 ——
+   那就是「要嘛留一行門面、要嘛改測試」的清單。
+2. **這一輪搬走的名字，`d4t/ui/` 裡還有沒有人在 `win.<名字>` 上叫它。**
+   那種呼叫是**接線**，只有在使用者真的按下那一顆的那一刻才會炸 —— import
+   過、視窗開得起來、而測試大多不會碰到。F116 第 3 步漏掉三處
+   （`region_check.py` 兩處、`studio_layout.py` 一處），而它們是「按下
+   Results 裡的一列就 AttributeError」那種。
 
 ⚠ 這是**靜態**的近似：屬性若是在 controller 裡 `setattr(self.w, ...)` 設的它
 看不到，會誤報。誤報就改成在那一支裡明寫 `win.xxx = ...`（本來就該這樣寫）。
@@ -83,6 +90,11 @@ def shape() -> tuple:
     meths = {f.name for f in cls.body
              if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
     attrs = _stores(cls, _is_self)
+    for node in cls.body:                     # 類別層的常數也是視窗上的名字
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            attrs.add(node.target.id)
+        elif isinstance(node, ast.Assign):
+            attrs |= {t.id for t in node.targets if isinstance(t, ast.Name)}
     for f in sorted((REPO / "d4t" / "ui").glob("*.py")):
         if f.name == "studio.py":
             continue
@@ -108,6 +120,34 @@ def used_by_tests(names: set) -> dict:
     return hits
 
 
+def dangling_calls(gone: set) -> list:
+    """`d4t/ui/*.py` 裡還在叫**這一輪搬走的那些名字**的那幾行。
+
+    為什麼需要這一條：`--check` 只看 `tests/`，而搬走一個名字之後，**別的
+    UI 模組**也可能還在叫它 —— `region_check.py` 的
+    `win.region_window.defect_activated.connect(win._on_defect_activated)`
+    與 `studio_layout.py` 的 `lambda name: win._on_why_item(…)` 就是這樣漏掉的
+    （F116 第 3 步）。它們是**接線**，只有在使用者真的按下那一顆的那一刻才會
+    炸，所以 import 過、開得起來、而且測試大多不會碰到。
+
+    ⚠ 判準是「**搬走的**名字」而不是「視窗上沒有的名字」：後者會把每一個
+    繼承來的 Qt 方法（`show`、`statusBar`…）、每一個類別層的常數，以及每一個
+    剛好也叫 `win` 的區域變數都報成紅的（實測 26 個全是誤報）。
+    """
+    if not gone:
+        return []
+    pat = re.compile(r"\b(?:win|self\.w)\.(\w+)")
+    out = []
+    for f in sorted((REPO / "d4t" / "ui").glob("*.py")):
+        if f.name == "studio.py":
+            continue
+        for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            for name in pat.findall(line):
+                if name in gone:
+                    out.append((f.name, i, name, line.strip()[:70]))
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     g = ap.add_mutually_exclusive_group(required=True)
@@ -119,7 +159,8 @@ def main(argv=None) -> int:
     if a.save:
         used = used_by_tests(meths | attrs)
         Path(a.save).write_text(json.dumps(
-            {"methods": len(meths), "attrs": len(attrs), "used": used},
+            {"methods": len(meths), "attrs": len(attrs), "used": used,
+             "names": sorted(meths | attrs)},
             ensure_ascii=False, indent=1, sort_keys=True), encoding="utf-8")
         print("methods=%d attrs=%d used_by_tests=%d"
               % (len(meths), len(attrs), len(used)))
@@ -133,6 +174,17 @@ def main(argv=None) -> int:
     for n in missing:
         print("  x 測試用到 %s（%d 處），StudioWindow 上已經沒有"
               % (n, before["used"][n]))
+
+    # 這一輪從視窗上消失的名字（舊的 JSON 沒有 `names`，就跳過這一關）
+    gone = set(before.get("names") or ()) - (meths | attrs)
+    if "names" not in before:
+        print("  （這份基準沒有 names，跳過「別的模組還在叫它嗎」那一關）")
+    dangling = dangling_calls(gone)
+    for fname, line_no, name, text in dangling:
+        print("  x %s:%d 指到 win.%s，而 StudioWindow 上沒有這個名字\n      %s"
+              % (fname, line_no, name, text))
+    if dangling:
+        return 1
     return 1 if missing else 0
 
 

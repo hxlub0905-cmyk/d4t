@@ -146,7 +146,7 @@ def test_gallery_populates_after_trial(ran):
     # **重新 populate 一次再看**：原本是跑完直接斷言，而那是在賭「背景那批
     # 還沒回來」—— 它賭的是 event loop 轉了幾圈，不是這裡要守的性質。
     # 要守的是「populate 自己不解碼」，所以就地 populate 再問。
-    window._populate_gallery(window.trial_results)
+    window.gallery_ctl._populate_gallery(window.trial_results)
     assert all(item["thumb"] is None for item in window.gallery.grid.items())
     # bin 一定寫在說明文字裡（不是只有顏色）
     assert "bin" in window.gallery.caption_at(0)
@@ -183,7 +183,7 @@ def test_thumbs_requested_leads_to_thumbs(ran, qapp):
     #
     # **也要把已經貼上的縮圖清掉**：背景那批可能已經回來了（那取決於 event
     # loop 轉了幾圈，不是這裡要守的性質），而已經有縮圖的顆本來就不必再要。
-    window._populate_gallery(window.trial_results)
+    window.gallery_ctl._populate_gallery(window.trial_results)
     window.gallery.grid._last_request = None
     window.gallery.grid.resize(860, 520)
     qapp.processEvents()
@@ -193,7 +193,7 @@ def test_thumbs_requested_leads_to_thumbs(ran, qapp):
     assert all(w in window.gallery.displayed_ids() for w in wanted)
 
     # 同步驅動（測試不靠 event loop）：真的去讀 TIFF 頁 + make_thumb
-    n = window.request_thumbs(wanted, sync=True)
+    n = window.gallery_ctl.request_thumbs(wanted, sync=True)
     assert n == len(wanted)
 
     by_id = {i["defect_id"]: i for i in window.gallery.grid.items()}
@@ -205,8 +205,8 @@ def test_thumbs_requested_leads_to_thumbs(ran, qapp):
         assert arr.dtype == np.uint8
 
     # 認不得的 id 靜靜略過，不炸
-    assert window.request_thumbs(["沒有這顆"], sync=True) == 0
-    window.show_preview()
+    assert window.gallery_ctl.request_thumbs(["沒有這顆"], sync=True) == 0
+    window.gallery_ctl.show_preview()
 
 
 def test_thumb_worker_run_sync_and_channel_pick(ran):
@@ -264,7 +264,7 @@ def test_gallery_selection_shows_count(ran):
 # --------------------------------------------------------------------------- #
 def test_bar_clicked_filters_gallery_and_switches_tab(ran):
     window = ran
-    window.show_preview()
+    window.gallery_ctl.show_preview()
     window.gallery.clear_filter()
     lo, hi = window.histogram.bar_range(0)
 
@@ -412,11 +412,11 @@ def test_close_stops_thumb_worker(qapp, synlot):
     win.load_dataset_path(synlot["klarf"], sync=True)
     win.load_recipe_path(str(EXAMPLE_RECIPE), sync=True)
     win.run_trial(N, workers=1, sync=True)
-    win.request_thumbs(win.gallery.displayed_ids())        # 非同步：真的開執行緒
+    win.gallery_ctl.request_thumbs(win.gallery.displayed_ids())        # 非同步：真的開執行緒
     win.close()
-    assert win.thumb_worker.is_running() is False
-    assert win.thumb_worker.thread_obj is None
-    assert win.thumb_worker.pending_count() == 0
+    assert win.gallery_ctl.thumb_worker.is_running() is False
+    assert win.gallery_ctl.thumb_worker.thread_obj is None
+    assert win.gallery_ctl.thumb_worker.pending_count() == 0
 
 
 # --------------------------------------------------------------------------- #

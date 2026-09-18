@@ -1018,8 +1018,8 @@ def build_preview_pane(win: "StudioWindow") -> QWidget:
     win.why_preview.setMaximumHeight(220)
     win.why_preview.hide()
     win.why_preview.item_activated.connect(
-        lambda name: win._on_why_item(win.why_preview.defect_id(),
-                                       str(name)))
+        lambda name: win.gallery_ctl._on_why_item(win.why_preview.defect_id(),
+                                                  str(name)))
     lay.addWidget(win.why_preview)
     # Verdict 列住在影像下面（F100 v2）：這一顆判成什麼，跟這一顆的圖挨著。
     lay.addWidget(win.verdict_strip)

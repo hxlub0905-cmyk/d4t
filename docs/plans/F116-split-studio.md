@@ -1,9 +1,9 @@
 # F116 — 拆 `studio.py`：`StudioWindow` 只留組裝與接線，內容搬進 controller
 
-狀態：**進行中（2026-09-19）** —— **第 1、2 步做完**。
-`studio.py` 7,686 → **5,792**（−1,894）、方法 293 → **248**。
-下一步是第 3 步（Gallery ＋ 回溯 → `ui/gallery_controller.py`）。
-前兩步量到的東西已經寫回 §3、§4、§6（見那幾節）。
+狀態：**進行中（2026-09-19）** —— **第 1、2、3 步做完**。
+`studio.py` 7,686 → **5,434**（−2,252）、方法 293 → **235**。
+下一步是第 4 步（第二份 lot ＋ recipe 的存開對話框）。
+前三步量到的東西已經寫回 §3、§4、§6（見那幾節）。
 
 > 起點 commit `3329659`。下面的數字都是那一刻量的；動手前用 §6 那支腳本重量一次，
 > 對不上就以重量的為準（這一份不是數字的家，`tests/test_size_ceilings.py` 才是）。
@@ -153,9 +153,26 @@ class GaugePanel(QObject):
 可選附加（**另一個 commit**，要使用者點頭）：toolbar 改成一張資料表驅動，跟
 `scope.INPUT_SOURCES` 同一個模式。
 
-**第 3 步：Gallery ＋ 回溯面板** → `ui/gallery_controller.py`。
-`thumb_worker` 與 `_items_by_id` 跟著搬。`_on_defect_activated`／`show_gallery`
-被別段叫，留門面。
+**第 3 步：Gallery ＋ 回溯面板** → `ui/gallery_controller.py`。✅ **做完**（2026-09-19）。
+
+第 3 步的結果：`studio.py` 5,792 → **5,434**（−358）、方法 248 → **235**。
+15 支方法，加上**縮圖那一條鏈**（`THUMB_CHANNEL_PRIORITY` → `thumb_channel` →
+`load_thumb` → `ThumbWorker`，原本散在 `studio.py` 的模組層，而唯一的使用者是
+Gallery）。`studio.py` 用 `# noqa: F401` 把那三個名字轉出去 —— 前兩個在它的
+`__all__` 裡，而測試是用 `studio_mod.` 拿的。
+
+`thumb_worker` 跟著搬，而且**由 controller 自己建、自己接**：它兩端都在自己家裡，
+不是 §3-4 講的那種「視窗的 widget 發、controller 收」。
+
+⚠ **`_items_by_id` 沒有跟著搬**（這一份原本寫它要搬）：它是 `_on_dataset_loaded`
+寫的，而那一段不在這一族裡 —— §3-1 說被別段也寫的留在視窗。搬了的話會變成
+別的段落往 controller 裡塞一個欄位，那比留著更難讀。
+
+門面兩支：`show_gallery`（工具列那顆鈕與 `Ctrl+Shift+R` 都接它，而且
+`studio_layout.py` 用 `win.show_gallery`）、`results_visible`（14 處／2 個檔案）。
+`_on_defect_activated` **沒有**留門面 —— 這一份原本寫它要留，但它的三個呼叫端
+全部是 `_wire_widgets` 裡的接線，而接線本來就留在 `studio.py`，直接指到
+`self.gallery_ctl._on_defect_activated` 就好，測試一處都沒有用到它。
 
 **第 4 步：第二份 lot ＋ recipe 的存開對話框** → recipe 那半併進 `ui/open_dialogs.py`
 （同一個「只問問題、不自己載」的契約），pair source 那半 → `ui/pair_source_ui.py`。
@@ -214,6 +231,11 @@ class GaugePanel(QObject):
       （controller 是 QObject，不是 QWidget）。搬完 grep 一次 `self(?!\s*\.)`
 - [ ] 搬完 grep 一次每一個 `self.w.<名字>`，確認它真的還在 `StudioWindow` 上
       —— 跨 controller 的狀態（第 1 步是 `_compare_on`）要走門面（§3-2）
+- [ ] **`d4t/ui/` 裡別的模組也可能在叫搬走的那個名字**（不只 `studio.py` 與
+      `tests/`）：`region_check.py` 與 `studio_layout.py` 都是吃 `win` 的模組，
+      而它們的 `win.<名字>(…)` 是**接線** —— 只有使用者真的按下那一顆才會炸。
+      第 3 步漏了三處。`tools/studio_surface.py --check` 現在會掃這一關
+      （判準是「這一輪搬走的名字」，所以 `--save` 的基準要是新版的）
 - [ ] **搬到模組層函式的時候，`self` 一律變成 `win`（連當參數傳的也是）**，而
       那一族沒有自己的狀態 —— 全部設在視窗上。⚠ 先用 `tokenize` 確認要搬的
       區間裡**沒有任何字串含 `self`**，再做整段取代（第 2 步搬 922 行，靠這一步

@@ -84,7 +84,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
@@ -104,7 +104,6 @@ from d4t.core.pipeline.step import SCALE_DEFECT, SCALE_LOT
 from d4t.core.pipeline.recipe import (
     describe_migration, is_region_edge, version_skew,
 )
-from d4t.core.pipeline import verdict_features
 from d4t.core.pipeline.verdict_trace import verdict_trace
 
 from . import autosave
@@ -120,6 +119,13 @@ from .canvas import NODE_H, NODE_W, SUMMARY_SEP, PipelineCanvas, run_status_from
 from .gauge_panel import GaugePanel
 from .preview_overlays import PreviewOverlays
 from . import studio_layout
+from .gallery_controller import GalleryController
+# ⚠ 縮圖那一條鏈的家在 `ui/gallery_controller.py`（F116 第 3 步）。這裡拿
+# 回來是因為前兩個在下面的 `__all__` 裡、而三個都有測試用 `studio_mod.`
+# 拿 —— 它們是對外的名字，不是實作細節。
+from .gallery_controller import (  # noqa: F401
+    THUMB_CHANNEL_PRIORITY, ThumbWorker, thumb_channel,
+)
 # ⚠ 這兩個常數的家在 `ui/studio_layout.py`（F116 第 2 步跟著用它們的
 # 程式碼搬過去了）。這裡拿回來是因為 **`studio.DEFAULT_TRIAL_N` 與
 # `studio.COLUMN_SIZES` 是對外的名字**：載入資料集時要夾那個預設值
@@ -128,12 +134,10 @@ from .studio_layout import COLUMN_SIZES, DEFAULT_TRIAL_N  # noqa: F401
 from . import strings
 from .status_action import StatusAction, open_folder
 from .status_log import StatusHistory
-from .gallery import make_thumb
 from .region_check import regions_of_node
 from . import region_check
 from .template_dialog import TemplateDialog
 from .results import extra_only, summarize_run
-from . import results_table
 from . import scope
 from . import truth_marks
 from .scope import (
@@ -156,7 +160,6 @@ from .widgets import (
 from .workers import (
     CalibrateWorker, DatasetLoadWorker, OutputWorker, PreviewWorker,
     RegionCheckWorker, TrialWorker,
-    _ThreadedWorker,
 )
 
 
@@ -224,9 +227,6 @@ PREVIEW_DEBOUNCE_MS = 300
 TAB_PREVIEW = 0
 TAB_GALLERY = 1
 
-#: Gallery 縮圖要用哪個 channel（依序找第一個有的；都沒有就用第一個 channel）。
-THUMB_CHANNEL_PRIORITY = ("test", "single")
-
 _FEATURE_PLACEHOLDER = "Insert feature ▾"
 _SCORE_HELP = ("The score is an expression whose variables are the feature names "
                "produced by the pipeline above (e.g. snr_max, area_px, "
@@ -242,29 +242,6 @@ def _fmt(value: Any) -> str:
         return ("%g" % value)
     return str(value)
 
-
-def thumb_channel(item: Any) -> Optional[str]:
-    """這顆 defect 的縮圖要讀哪個 channel：``test`` → ``single`` → 第一個有的。"""
-    images = dict(getattr(item, "images", {}) or {})
-    for name in THUMB_CHANNEL_PRIORITY:
-        if name in images:
-            return name
-    for name in images:
-        return str(name)
-    return None
-
-
-def load_thumb(item: Any, size: int) -> Optional[Any]:
-    """一顆 defect → ``size`` × ``size`` 的縮圖 ndarray（**Qt-free**，可跑在背景）。
-
-    讀不到圖（沒有 channel / 檔案不見了 / TIFF 壞頁）一律回 ``None`` ——
-    Gallery 會繼續畫「載入中…」的佔位磚，不會有人看到 traceback（鐵則 7 的精神）。
-    """
-    channel = thumb_channel(item)
-    if channel is None:
-        return None
-    arr = item.load(channel)
-    return make_thumb(arr, int(size))
 
 
 def _source_id_from(path: Any) -> str:
@@ -362,92 +339,6 @@ def generate_demo_lot(out_dir: Any = None, n: int = DEMO_DEFECTS,
     return generate(out, n=int(n), seed=int(seed))
 
 
-class ThumbWorker(_ThreadedWorker):
-    """Gallery 縮圖的背景解碼工（沿用 ``workers.py`` 的一次性 QThread 樣式）。
-
-    為什麼要有它：``make_thumb`` 前面那一步是**讀檔 + 解 TIFF 頁**，在 GUI
-    執行緒上做會讓捲動一格一格卡。所以 Gallery 只發「我要這些 id 的縮圖」，
-    真正的解碼在這裡。
-
-    **請求合併**：忙碌時 :meth:`request` 只是把 id 併進待跑集合（不排隊、
-    不阻塞、也不會為每次捲動各開一條執行緒），目前這批做完再一次做掉。
-    正在做的那批用 ``_inflight`` 記著，重複請求不會做第二次。
-
-    訊號：``ready(dict)``（``{defect_id: ndarray}``，回到 GUI 執行緒）、
-    ``failed(str)``（整批都讀不出來時才發，單顆失敗只是靜靜略過）。
-    """
-
-    ready = Signal(object)
-    failed = Signal(str)
-
-    #: 一批最多做幾張（做完立刻回 UI，剩下的下一批繼續 —— 縮圖要「陸續」出現）。
-    BATCH = 48
-
-    def __init__(self, parent: Optional[Any] = None) -> None:
-        super().__init__(parent)
-        self._pending: Dict[str, Any] = {}      # defect_id -> DefectItem
-        self._inflight: List[str] = []
-        self._size = 96
-
-    # ---- 對外 -------------------------------------------------------------
-    def request(self, jobs: Sequence[Any], size: int) -> None:
-        """要求做這些縮圖；``jobs`` 是 ``(defect_id, DefectItem)`` 的序列。"""
-        self._size = int(size)
-        for did, item in jobs or ():
-            did = str(did)
-            if did in self._inflight:
-                continue
-            self._pending[did] = item
-        if not self.is_running():
-            self._launch()
-
-    def pending_count(self) -> int:
-        """還沒開始做的縮圖張數（測試 / statusbar 用）。"""
-        return len(self._pending)
-
-    @staticmethod
-    def run_sync(jobs: Sequence[Any], size: int) -> Dict[str, Any]:
-        """同步做一批縮圖（不開執行緒），回傳 ``{defect_id: ndarray}``。"""
-        out: Dict[str, Any] = {}
-        for did, item in jobs or ():
-            try:
-                arr = load_thumb(item, int(size))
-            except Exception:  # 單顆壞掉不該殺整批
-                swallowed("studio.run_sync")
-                continue
-            if arr is not None:
-                out[str(did)] = arr
-        return out
-
-    # ---- 內部 -------------------------------------------------------------
-    def _launch(self) -> None:
-        if not self._pending:
-            return
-        ids = list(self._pending)[:self.BATCH]
-        batch = [(i, self._pending.pop(i)) for i in ids]
-        self._inflight = [i for i, _ in batch]
-        size = int(self._size)
-
-        def work() -> None:
-            out = ThumbWorker.run_sync(batch, size)
-            if out:
-                self.ready.emit(out)
-            elif batch:
-                self.failed.emit("Could not read thumbnails for %d defects "
-                                 "(the image files may be missing)." % len(batch))
-
-        self._start_job(work)
-
-    def _job_finished(self) -> None:
-        """一批做完（GUI 執行緒）：還有待做的就接著做。"""
-        self._inflight = []
-        if self._pending:
-            self._launch()
-
-    def _before_stop(self) -> None:
-        self._pending = {}                  # 關窗：待做的縮圖全部作廢
-        self._inflight = []
-
 
 
 def verdict_note(selected_node: Optional[str], verdict_bin: Any,
@@ -543,7 +434,6 @@ class StudioWindow(QMainWindow):
         #: 這一次執行要不要寫出輸出。**跟著那一次執行走**，不是讀當下的 UI
         #: 狀態 —— 使用者按了 Run all 之後可以馬上去改別的東西。
         self._write_outputs_this_run = False
-        self.thumb_worker = ThumbWorker(self)
         self.region_check_worker = RegionCheckWorker(self)
         self.calibrate_worker = CalibrateWorker(self)
         self.calibrate_worker.ready.connect(self._on_calibrated)
@@ -579,6 +469,7 @@ class StudioWindow(QMainWindow):
         # slot）。
         self.gauges = GaugePanel(self)
         self.overlays = PreviewOverlays(self)
+        self.gallery_ctl = GalleryController(self)
 
         self._wire_widgets()
         self._wire_workers()
@@ -868,20 +759,26 @@ class StudioWindow(QMainWindow):
         self.results.shown_feature_changed.connect(self._on_spread_feature_changed)
         self.histogram.threshold_changed.connect(self._on_threshold_changed)
         self.histogram.threshold_committed.connect(self._on_threshold_committed)
-        self.histogram.bar_clicked.connect(self._on_bar_clicked)
+        self.histogram.bar_clicked.connect(self.gallery_ctl._on_bar_clicked)
 
-        self.gallery.thumbs_requested.connect(self._on_thumbs_requested)
-        self.gallery.defect_activated.connect(self._on_defect_activated)
+        self.gallery.thumbs_requested.connect(
+            self.gallery_ctl._on_thumbs_requested)
+        self.gallery.defect_activated.connect(
+            self.gallery_ctl._on_defect_activated)
         # 表格上雙擊一列跟縮圖上雙擊一張是同一件事（R7）—— 同一支處理常式。
-        self.results.table.defect_activated.connect(self._on_defect_activated)
+        self.results.table.defect_activated.connect(
+            self.gallery_ctl._on_defect_activated)
         # 單擊（或方向鍵）一顆 → 主畫面帶過去，但**不搶焦點**（2026-09-09）。
-        self.results.defect_selected.connect(self._on_defect_selected)
-        self.gallery.selection_changed.connect(self._on_gallery_selection)
+        self.results.defect_selected.connect(
+            self.gallery_ctl._on_defect_selected)
+        self.gallery.selection_changed.connect(
+            self.gallery_ctl._on_gallery_selection)
         # 回溯（PR-3）：點 score/bin/class → 算 trace 開面板；點面板上一項 →
         # 跳到產出它的卡（有區域就把那一塊亮起來）。
-        self.results.trace_requested.connect(self._on_trace_requested)
+        self.results.trace_requested.connect(
+            self.gallery_ctl._on_trace_requested)
         self.results.truth_marked.connect(self._on_truth_marked)
-        self.results.why_item_activated.connect(self._on_why_item)
+        self.results.why_item_activated.connect(self.gallery_ctl._on_why_item)
 
     def _wire_workers(self) -> None:
         self.dataset_worker.loaded.connect(self._on_dataset_loaded)
@@ -909,8 +806,6 @@ class StudioWindow(QMainWindow):
             lambda msg: (self._progress_done(),
                          self._status("Trial run failed: %s" % msg, "error")))
 
-        self.thumb_worker.ready.connect(self._on_thumbs_ready)
-        self.thumb_worker.failed.connect(self._status)
 
     # ==================================================================== #
     # 狀態列
@@ -4841,7 +4736,7 @@ class StudioWindow(QMainWindow):
         # 決定過了，而這一行無條件用二元那條老路算一次，正好把它蓋掉。
         # 這是同一個 bug 的第二個入口 —— 第一個在 `_refresh_spread` 裡面。
         self._refresh_spread()
-        self._populate_gallery(results)
+        self.gallery_ctl._populate_gallery(results)
         self.gauges._refresh_inspector(self._last_result)   # 儀表吃的是整批（F7-17）
         self._update_action_states()
         ok = sum(1 for r in results if r.get("ok"))
@@ -4922,266 +4817,6 @@ class StudioWindow(QMainWindow):
     # ==================================================================== #
     # Gallery（M5）
     # ==================================================================== #
-    def _populate_gallery(self, results: Sequence[Dict[str, Any]]) -> None:
-        """試跑/全跑結果 → Gallery。縮圖一律先給 ``None``，之後背景補上。
-
-        排序欄位 = ``score`` + 這批結果實際出現過的特徵名（沒跑到的特徵不會
-        出現在下拉裡 —— 使用者只看得到「這一批真的有的東西」）。
-        """
-        results = list(results or [])
-        feats: List[str] = []
-        for r in results:
-            for k in (r.get("features") or {}):
-                if k not in feats:
-                    feats.append(str(k))
-        self.gallery.set_sort_keys(["score"] + sorted(feats))
-        # **每一顆判成了哪一類**（R5，2026-08-24）。縮圖底下第一行寫的是這個字
-        # —— 使用者在樹上親手取的名字，而不是 `bin 3`（那是 KLARF 的實作細節）。
-        # 名字從判定段那一份算出來（`verdict_rows`），所以整個 Results 視窗
-        # 講的是同一份東西，不是兩份各自數出來的。
-        names = self._class_names(results)
-        # 表格的分層與徽章（PR-1）：判定層、按卡分組、診斷欄、警示布林 ——
-        # 全部由 recipe 推導（`core/pipeline/verdict_features.py` 是唯一出處）。
-        # 顯示層：推不出來就退回平鋪，不准因此沒有表。
-        layout = alarms = None
-        try:
-            recipe = self.model.to_recipe()
-            kind = self.model.kind
-            layout = results_table.column_tree(
-                results,
-                verdict_features.features_in_verdict(recipe, kind),
-                verdict_features.bound_specs(recipe, kind),
-                verdict_features.diagnostic_columns(recipe, kind))
-            alarms = verdict_features.diagnostic_alarm_map(recipe, kind)
-        except Exception:  # 顯示層，見上
-            layout = alarms = None
-        # ⚠ 答案卷**一律傳**（沒有就是空 dict，不是 ``None``）：``None`` 的意思是
-        # 「這個宿主沒有標注這回事」，而 Studio 永遠有 —— 那一欄消失的話，
-        # 使用者標完之後畫面上不會有任何變化（X2）。
-        self.results.set_table(results, names, layout, alarms,
-                               dict(self.ground_truth or {}))  # 表格那一半（R7）
-        self.gallery.set_items([
-            {
-                "defect_id": str(r.get("defect_id", "")),
-                "ok": bool(r.get("ok", True)),
-                "score": r.get("score"),
-                "bin": r.get("bin"),
-                "cls": names.get(str(r.get("defect_id", "")), ""),
-                "features": dict(r.get("features") or {}),
-                "thumb": None,
-            }
-            for r in results
-        ])
-        # 新的一批 = 分數分佈變了：舊的分數篩選一定要清掉，不然使用者會看到
-        # 一個對不上新直方圖的區間（而且 chip 還掛在那裡）。
-        self.results.clear_filter()
-        self._score_filter = None
-
-    def _class_names(self, results: Sequence[Dict[str, Any]]) -> Dict[str, str]:
-        """``defect_id → 這一顆判成了哪一類的名字``（沒取名字的那一類是空的）。
-
-        ⚠ **不自己走一次樹**：判定段已經算好每一類是哪幾顆
-        （`verdict_rows` 的 ``ids``），這裡只是把它翻過來。兩邊各走一次的話，
-        縮圖上的名字跟判定段上的顆數會是兩份會漂的東西。
-        """
-        from .verdict_band import verdict_rows
-
-        out: Dict[str, str] = {}
-        for row in verdict_rows(getattr(self.model, "decide", None),
-                                list(results or []), self.ground_truth):
-            if row.get("kind") != "class":
-                continue
-            name = str(row.get("name") or "").strip()
-            for did in (row.get("ids") or ()):
-                out[str(did)] = name
-        return out
-
-    def show_gallery(self) -> None:
-        """把 Results 視窗叫出來（Gallery 與分數分佈都在那裡）。
-
-        **還沒跑過也叫得出來**（F48，2026-08-28）：工具列那顆「Results」與
-        `Ctrl+Shift+R` 走的是這一支，而它們不要求先跑一批。空的時候視窗自己
-        要講得出為什麼是空的 —— 那是 F44 的 empty_reason 巡檢同一條規矩：
-        **一塊空白要嘛有東西，要嘛有一句話說它在等什麼。**
-
-        工具列左邊的摘要本來就寫著 `No results yet.`，但那句話回答不了
-        「所以我現在該做什麼」，而狀態列是這個視窗唯一會講整句話的地方。
-        """
-        if not self.trial_results:
-            self.results.status(
-                "Nothing to show yet — press “Run trial” in the main window "
-                "and the score distribution, thumbnails and table fill in here.")
-        self.results.present()
-
-    def show_preview(self) -> None:
-        """回到主視窗的單顆預覽。"""
-        self.raise_()
-        self.activateWindow()
-
-    def results_visible(self) -> bool:
-        """Results 視窗現在開著嗎（測試用）。"""
-        return bool(self.results.isVisible())
-
-    # ---- 縮圖（永遠不在 GUI 執行緒解碼）------------------------------------
-    def _on_thumbs_requested(self, ids: Any) -> None:
-        self.request_thumbs(list(ids or []))
-
-    def request_thumbs(self, ids: Sequence[str], sync: bool = False) -> int:
-        """做這些 defect 的縮圖。``sync=True`` 直接算完（測試 / headless 用）。
-
-        回傳實際排進去（或同步做好）的張數；認不得的 id 靜靜略過。
-        """
-        jobs = [(str(i), self._items_by_id[str(i)])
-                for i in (ids or []) if str(i) in self._items_by_id]
-        if not jobs:
-            return 0
-        size = int(self.gallery.thumb_size())
-        if sync:
-            mapping = ThumbWorker.run_sync(jobs, size)
-            self._on_thumbs_ready(mapping)
-            return len(mapping)
-        self.thumb_worker.request(jobs, size)
-        return len(jobs)
-
-    def _on_thumbs_ready(self, mapping: Any) -> None:
-        """背景做好的縮圖回到 GUI 執行緒 —— 只有這裡碰 Gallery。"""
-        self.gallery.set_thumbs(dict(mapping or {}))
-
-    # ---- Gallery 的互動 ---------------------------------------------------
-    def _on_defect_selected(self, defect_id: str) -> None:
-        """Results 裡單擊（或方向鍵走到）某顆 → 主畫面跳過去，**不搶焦點**
-        （2026-09-09）。使用者正在 Results 視窗裡一顆一顆看，主視窗每次都跳到
-        前面的話，他每看一顆就要再點回去一次。已經在那一顆上就不動。"""
-        did = str(defect_id)
-        items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
-        for i, it in enumerate(items):
-            if str(getattr(it, "defect_id", "")) == did:
-                if i != int(self.defect_index):
-                    self.set_defect_index(i)
-                return
-
-    def _on_defect_activated(self, defect_id: str) -> None:
-        """Gallery 雙擊某顆 → 切回單顆預覽並跳過去。"""
-        did = str(defect_id)
-        items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
-        index = None
-        for i, it in enumerate(items):
-            if str(getattr(it, "defect_id", "")) == did:
-                index = i
-                break
-        self.show_preview()
-        if index is None:
-            self._status("Defect “%s” is not in the current dataset." % did)
-            return
-        self.set_defect_index(index)
-        self._status("Jumped to defect “%s” (%d / %d)"
-                     % (did, index + 1, len(items)))
-
-    def _on_gallery_selection(self, ids: Any) -> None:
-        self._status("%d selected" % len(list(ids or [])))
-
-    # ---- 回溯面板（PR-3）：這一顆為什麼判成這樣 ---------------------------
-    def _on_trace_requested(self, defect_id: str) -> None:
-        """結果表點了 score / bin / class → 重放那一顆的判定並開面板。
-
-        trace 吃**那一列的 features**（引擎判定後的快照，let 值都在）——
-        不重跑影像、不重算任何值（`verdict_trace` 的立身規矩）。
-        """
-        did = str(defect_id)
-        row = next((r for r in (self.trial_results or [])
-                    if str(r.get("defect_id", "")) == did), None)
-        if row is None:
-            return
-        if not row.get("ok"):
-            self._status("Defect “%s” failed before the decision — the error "
-                         "column says why." % did, "error")
-            return
-        feats = dict(row.get("features") or {})
-        # score-only 的 recipe：bin 只在列上（引擎不寫進 features）——
-        # 補給 trace 顯示；decide 模式的 leaf_bin 是重放樹算的，不看這一格。
-        if row.get("bin") is not None:
-            feats.setdefault("bin", float(row["bin"]))
-        try:
-            trace = verdict_trace(self.model.to_recipe(), self.model.kind,
-                                  feats)
-        except Exception as e:  # 顯示層
-            self._status("Could not replay the decision: %s" % e, "error")
-            return
-        if trace.mode == "none":
-            self._status("This recipe has no score and no decision — "
-                         "there is nothing to replay.")
-            return
-        self.results.show_why(did, trace)
-
-    def _on_why_item(self, defect_id: str, name: str) -> None:
-        """面板上點了一項 → 跳到產出那個數字的卡。
-
-        身分查 `bound_specs`（跟結果表的分組同一份）：有區域的項把那一塊
-        **亮**在影像上（`highlight_region`），引擎的項（let / score）對映
-        Score / Bin 偽卡＝打開判定區。
-        """
-        try:
-            bound = {b.spec.name: b for b in verdict_features.bound_specs(
-                self.model.to_recipe(), self.model.kind)}
-        except Exception:  # 顯示層
-            swallowed("studio._on_why_item")
-            return
-        b = bound.get(str(name))
-        if b is None:
-            return
-        if not b.node_id:
-            # 引擎的名字（let、score、decide_unanswered）：去編判定區 ——
-            # 跟畫布上點 ADC 那一格走同一條。
-            self._on_tree_step_clicked("")
-            return
-        if b.spec.region:
-            self.highlight_region(defect_id, b.node_id, b.spec.region)
-        else:
-            self.select_node(b.node_id)
-
-    def highlight_region(self, defect_id: str, node_id: str,
-                         region: str) -> bool:
-        """跳到那一顆、選產出的卡，並把**那一塊區域**亮在影像上。
-
-        亮法住在 `ImageView.set_overlay_emphasis`：命中的框全強度、其餘降
-        alpha —— 顏色仍然說「哪一塊」、粗細仍然說「缺陷格」，**不 overload
-        focus**。`set_overlay` 會清掉強調，所以先刷新預覽再點亮。
-        """
-        did = str(defect_id)
-        items = list(getattr(self.dataset, "items", []) or []) \
-            if self.dataset else []
-        index = next((i for i, it in enumerate(items)
-                      if str(getattr(it, "defect_id", "")) == did), None)
-        if index is not None:
-            self.set_defect_index(index)
-        if not self.select_node(str(node_id)):
-            return False
-        self.refresh_preview(sync=True)
-        for view in (self.image_view, self.image_view_b):
-            view.set_overlay_emphasis([str(region)])
-        return True
-
-    # ---- 直方圖點長條 → Gallery 篩選 --------------------------------------
-    def _on_bar_clicked(self, lo: float, hi: float) -> None:
-        """點一根長條：只看那個分數區間；再點同一根就取消。
-
-        「同一根」的判斷要連 Gallery 目前**真的還在篩**一起看 —— 使用者可能
-        已經按掉 Gallery 上的條件 chip 了，那時候再點同一根當然是重新篩選。
-        """
-        rng = (float(lo), float(hi))
-        if self._score_filter == rng and self.gallery.filter_text():
-            self.results.clear_filter()
-            self._score_filter = None
-            self._status("Score filter cleared (showing all %d)"
-                         % self.gallery.displayed_count())
-            return
-        self.results.set_filter({"mode": "score_range",
-                                 "lo": rng[0], "hi": rng[1]})
-        self._score_filter = rng
-        self.show_gallery()
-        self._status("Filtered to score %.3g–%.3g (%d defects)"
-                     % (rng[0], rng[1], self.gallery.displayed_count()))
-
     # ==================================================================== #
     # 首次開啟導覽 + 範例 recipe 庫（M6）
     # ==================================================================== #
@@ -5741,6 +5376,13 @@ class StudioWindow(QMainWindow):
         """開／關並排的第二張圖（內容在 `ui/preview_overlays.py`）。"""
         return self.overlays.set_compare(on)
 
+    def show_gallery(self) -> None:
+        """開 Results 視窗（工具列那顆鈕與 Ctrl+Shift+R 接的就是這一行）。"""
+        self.gallery_ctl.show_gallery()
+
+    def results_visible(self) -> bool:
+        return self.gallery_ctl.results_visible()
+
     def compare_enabled(self) -> bool:
         """並排比對開著嗎。
 
@@ -5784,7 +5426,7 @@ class StudioWindow(QMainWindow):
                 swallowed("studio.closeEvent")
         for worker in (self.preview_worker, self.trial_worker,
                        self.dataset_worker, self.pair_worker,
-                       self.thumb_worker, self.output_worker):
+                       self.gallery_ctl.thumb_worker, self.output_worker):
             try:
                 worker.stop()
             except Exception:  # 關窗不准擋路

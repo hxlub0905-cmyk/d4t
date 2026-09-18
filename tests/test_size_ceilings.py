@@ -197,7 +197,11 @@ FILE_CEILINGS = {
     # `ui/preview_overlays.py`。第 1 步做完：7,686 → 6,782，−904。
     # 2026-09-19（F116 第 2 步）：6,782 → **5,792**（−990）。介面組裝那一族整族
     # 進 `ui/studio_layout.py`（見下面 `HARD_CAPS` 那一段）。
-    "d4t/ui/studio.py": 5792,
+    # 2026-09-19（F116 第 3 步）：5,792 → **5,434**（−358）。Gallery／Results／
+    # 回溯那一族進 `ui/gallery_controller.py`，縮圖那一條鏈
+    # （`THUMB_CHANNEL_PRIORITY` → `thumb_channel` → `load_thumb` →
+    # `ThumbWorker`）跟著走 —— 它們的唯一使用者就是 Gallery。
+    "d4t/ui/studio.py": 5434,
     # 19 道 `_migrate_*` 住在這裡（見下面 `recipe_migrations`）。它會用跟
     # `studio.py` 完全一樣的機制長成第二個 `studio.py`。
     #
@@ -388,7 +392,10 @@ COUNT_CEILINGS = {
     ),
     # god object 的兩個投影。261 → 268（六天）。
     "studio_window_methods": (
-        248,
+        235,
+        # 2026-09-19（F116 第 3 步）：248 → 235。搬走 15 支，回來兩支門面
+        # （`show_gallery` —— 工具列那顆鈕與 Ctrl+Shift+R 都接它；
+        # `results_visible` —— 14 處／2 個測試檔）。
         # 2026-09-19（F116 第 2 步）：256 → 248。七支 `_build_*` ＋ `_tool_button`
         # 變成 `ui/studio_layout.py` 的模組層函式（沒有留門面 —— 沒有人從外面
         # 叫它們，`__init__` 改成 `studio_layout.build_toolbar(self)`）。
@@ -445,7 +452,10 @@ COUNT_CEILINGS = {
         lambda: _class_shape("d4t/ui/studio.py", "StudioWindow")[0],
     ),
     "studio_window_attributes": (
-        323,
+        308,
+        # 2026-09-19（F116 第 3 步）：323 → 308。`thumb_worker` 的家跟著它唯一的
+        # 使用者走；`_items_by_id` **留在視窗**（`_on_dataset_loaded` 在寫它 ——
+        # §3-1：被別段也寫的留在視窗），進來的是 `gallery_ctl`。
         # 2026-09-19（F116 第 2 步）：389 → 323。**不是視窗上的名字變少**：那一族
         # 照舊在 `win` 上設同樣的 86 個名字，只是那一千行 `self.x = …` 住到
         # `ui/studio_layout.py` 去了，而這一格數的是**這個檔案裡**的 `self.*`。
@@ -551,9 +561,13 @@ HARD_CAPS = {
     # 不是因為視窗上的名字變少** —— 那 86 個名字一個都沒動（計畫書 §4 寫著
     # 這一步減的是行數與方法數）。`tools/studio_surface.py` 現在也讀
     # `ui/*.py` 裡的 `win.x = …`，問「那個名字還在不在」要用它，不要用這一格。
-    "d4t/ui/studio.py": 5792,
-    "studio_window_methods": 248,
-    "studio_window_attributes": 323,
+    # 2026-09-19（F116 第 3 步）：Gallery／Results／回溯那一族進
+    # `ui/gallery_controller.py`，縮圖那一條鏈跟著走。行 5,792 → 5,434、
+    # 方法 248 → 235、`self.*` 323 → 308。
+    # **前三步合計**：7,686 → 5,434（−2,252）、293 → 235（−58）、433 → 308。
+    "d4t/ui/studio.py": 5434,
+    "studio_window_methods": 235,
+    "studio_window_attributes": 308,
 }
 
 

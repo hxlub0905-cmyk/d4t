@@ -423,7 +423,8 @@ def open_region_check(win: "StudioWindow", n: Optional[int] = None,
 
     if win.region_window is None:
         win.region_window = RegionCheckWindow(win)
-        win.region_window.defect_activated.connect(win._on_defect_activated)
+        win.region_window.defect_activated.connect(
+            win.gallery_ctl._on_defect_activated)
 
     if sync:
         from .workers import RegionCheckWorker      # 迴圈 import：workers 也讀這裡
@@ -448,7 +449,8 @@ def apply_region_results(win: "StudioWindow", regions: Sequence[str],
                          results: Sequence[Dict[str, Any]]) -> None:
     if win.region_window is None:
         win.region_window = RegionCheckWindow(win)
-        win.region_window.defect_activated.connect(win._on_defect_activated)
+        win.region_window.defect_activated.connect(
+            win.gallery_ctl._on_defect_activated)
     win.region_window.set_results(list(regions), list(results))
     win.region_window.show()
     win.region_window.raise_()

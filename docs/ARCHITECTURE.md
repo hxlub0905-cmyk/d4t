@@ -367,6 +367,8 @@ d4t/
     ├── feature_tree.py       #   卡 › 區域 › 統計量那棵樹 —— **結果表與 Preview 共用一份**（F76）
     ├── feature_panel.py      #   Preview 的特徵面板：四胞胎橫過來（一列一個統計量、一欄一個 variant）
     ├── gallery.py region_check.py      #   縮圖網格（虛擬捲動，撐 10k+）／區域畫在很多顆上
+    ├── gallery_controller.py #   Gallery／Results 視窗／回溯的 controller，加上**縮圖那一條鏈**
+    │                         #     （哪個 channel → 讀圖 → `ThumbWorker` 背景解碼）（F116 第 3 步）
     ├── inspectors.py         #   每張卡自己的儀表（依 `Step.key` 註冊）
     ├── studio_layout.py      #   `StudioWindow` 的**介面組裝**：工具列、主體、預覽區、
     │                         #     進度列、快捷鍵（F116 第 2 步；模組層函式吃 `win`，
