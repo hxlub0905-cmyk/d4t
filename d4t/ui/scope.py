@@ -9,7 +9,6 @@
 |---|---|---|
 | ``ebi_patch`` | KLARF + patch TIFF（每顆連續幾頁）| ``Open KLARF…`` |
 | ``rsem`` | KLARF + 每顆一個影像檔 | ``Open KLARF…``（自動判別）|
-| ``tiff_stack`` | 一個多頁 TIFF、**沒有 KLARF** | ``Open stack…`` |
 | ``folder`` | 一個資料夾的單張影像、沒有 KLARF | ``Open folder…`` |
 
 後兩者沒有 KLARF → 沒有座標、**寫不回 KLARF**，而那件事在載入的當下就講
@@ -59,7 +58,11 @@ __all__ = [
 #: 同一個 kind 兩種形狀的下場是畫布說謊 —— `SINGLE_IMAGE_KINDS` 裡寫著
 #: ``folder``，而 DOE 的一顆有好幾張，畫布上那張預設的 `load_single` 對它
 #: 一定報錯。
-SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder",
+#: **2026-09-18（F114）：``tiff_stack`` 拿掉了。** 使用者：「stack 功能請幫我
+#: 拿掉 我們用不到」。拿掉的是**產品面**（入口與這張清單）—— `ingest` 那一支
+#: `load_tiff_stack` 一個位元都沒動，CLI 照樣讀得動，要回來只是把字串加回
+#: 這裡與 `INPUT_SOURCES`。六個入口對使用者太多是他原話裡的另一半。
+SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "rsem", "folder",
                                   "doe_folder")
 
 #: 只有在不支援的型別下才有意義、因此不列進卡片庫的 step key。
@@ -284,7 +287,7 @@ class InputSource(NamedTuple):
     空白狀態上的那一句話、導覽對話框上的那顆鈕。三份會漂 —— 而且已經漂了：
     工具列有三顆 Open，空白狀態只講 KLARF（「Open a KLARF to see your patches
     here.」），於是**帶著一個資料夾的圖片進來的人，在最大的那一塊畫面上找不到
-    自己那條路**。第四種（GLAS 匯出）更慘：卡片庫裡有一張 `Load layout`，
+    自己那條路**。第四種（GLAS 匯出）更慘：卡片庫裡有一張 `layout(GDS)`，
     而它的入口那一顆鈕根本沒被 `addWidget` 到工具列上（見
     `test_every_button_built_for_the_toolbar_is_actually_on_it`）。
 
@@ -326,13 +329,6 @@ INPUT_SOURCES: Tuple[InputSource, ...] = (
               "pages per defect, or one image file per defect. Which one it "
               "is comes from the KLARF, you do not have to say."),
         icon="folder", has_klarf=True),
-    InputSource(
-        key="stack", kinds=("tiff_stack",), title="Open stack…",
-        short="Stack…",
-        what=("One multi-page TIFF and nothing else - you say how many pages "
-              "there are per defect, and every group of that many becomes "
-              "one defect."),
-        icon="stack", has_klarf=False),
     InputSource(
         key="folder", kinds=("folder",), title="Open folder…",
         short="Folder…",
@@ -427,8 +423,8 @@ def recipe_is_supported(info: Dict[str, Any]) -> bool:
 def unsupported_kind_message(kind: Any) -> str:
     """載到不支援的資料集時，狀態列要說的話（白話 + 講得出替代路徑）。"""
     return ("d4t Studio does not know this kind of input: “%s”. It reads "
-            "KLARF datasets (patch pairs or one image per defect), multi-page "
-            "image stacks, and folders of single images. The command line can "
+            "KLARF datasets (patch pairs or one image per defect) and "
+            "folders of images. The command line can "
             "still run it: python -m d4t run <recipe> <data>."
             % (kind or "unknown"))
 

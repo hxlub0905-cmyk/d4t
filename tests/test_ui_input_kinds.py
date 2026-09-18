@@ -8,8 +8,8 @@
 
 **那個判斷現在被驗證了，所以這支測試換一個方向鎖同一件事**：
 
-1. 四種 kind 都進得來（`ebi_patch` / `rsem` / `tiff_stack` / `folder`），
-   而每一種有自己的入口；
+1. `SUPPORTED_KINDS` 上的每一種都進得來，而每一種有自己的入口
+   （⚠ **不寫死那張清單** —— F114 拿掉 `tiff_stack` 時付過這筆錢）；
 2. 沒有 KLARF 的那兩種**當場講**「寫不回 KLARF」；
 3. 收起來的機制還在（`HIDDEN_STEPS` 現在收著 `align`，見 §4）——
    下一次要暫時藏一張卡時，加一個字串就好；
@@ -69,12 +69,29 @@ def window(qapp):
 
 
 # --------------------------------------------------------------------------- #
-# 1. 四種輸入都進得來
+# 1. 支援的輸入都進得來，而且每一種都有入口
 # --------------------------------------------------------------------------- #
-def test_all_four_kinds_are_supported():
+def test_every_supported_kind_is_supported_and_has_a_way_in():
+    """**這一條刻意不寫死任何一種 kind 的名字。**
+
+    它本來抄著 `("ebi_patch", "rsem", "tiff_stack", "folder")`，而 2026-09-18
+    （F114）使用者把 stack 拿掉（「我們用不到」）的那一刻，這支測試紅了 ——
+    紅得沒有道理：**壞掉的不是「支援的 kind 都進得來」這個機制**，只是那張清單
+    短了一個。把值抄進測試裡的下場，是每一次產品範圍的決定都要順手改一次測試
+    （`test_ui_scope_profiles.py` 付過同一筆錢）。
+
+    問的改成機制本身：`SUPPORTED_KINDS` 上的每一種都要 (a) 被認得、(b) **有一個
+    入口打得開**。少了 (b) 就是「支援一種使用者點不到的資料」。
+    """
     from d4t.ui import scope          # Qt-free，不必等 qapp
-    for kind in ("ebi_patch", "rsem", "tiff_stack", "folder"):
+
+    assert scope.SUPPORTED_KINDS, "一種都不支援的話這支測試問不出任何事"
+    reachable = {k for src in scope.INPUT_SOURCES for k in src.kinds}
+    for kind in scope.SUPPORTED_KINDS:
         assert scope.is_supported_kind(kind), kind
+        assert kind in reachable, (
+            "%s 在 SUPPORTED_KINDS 上，但沒有任何一個 INPUT_SOURCES 打得開它"
+            % kind)
     assert not scope.is_supported_kind("something_else")
 
 

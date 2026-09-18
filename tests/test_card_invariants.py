@@ -826,7 +826,7 @@ def test_a_card_survives_a_different_patch_size(key, dataset, big_dataset):
 #: ⚠ **它跟著現況往下走**（F110，2026-09-17）：27 → 17。27 那一版的持有者是
 #: ``flatten`` 的 ``Remove background / stripes``，而 2026-09-17 量出來只有
 #: **三張離群**（27／24／18，中位數 11），三張一起剪短了 ——
-#: ``Flatten`` / ``Pair source`` / ``Load layout``。天花板掉下去就要跟著降
+#: ``Flatten`` / ``Pair source`` / ``layout(GDS)``。天花板掉下去就要跟著降
 #: （`CLAUDE.md` §4 那條反向規矩），不然它擋的是一個已經沒有人站的高度。
 #:
 #: 為什麼要有這條：卡片庫是一列一張卡讀下去的，名字長到要換行、或被 ``…``

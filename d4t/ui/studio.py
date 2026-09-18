@@ -4534,37 +4534,6 @@ class StudioWindow(QMainWindow):
         self._status("Loading: %s" % os.path.basename(path))
         return True
 
-    def load_stack_path(self, path: Any, per_defect: int = 1,
-                        sync: bool = False) -> bool:
-        """載入一個**多頁 TIFF、沒有 KLARF**（F11 Input-2）。
-
-        ``per_defect`` 是「一顆 defect 幾張圖」—— 那是**資料的屬性**（機台怎麼收
-        的），所以在這裡問，不放進 recipe。recipe 只負責**命名**那幾張
-        （`load_patch` 的 `channel_map`）。分組與命名分開，同一批資料的「一顆幾張」
-        才不會因為換一份 recipe 而改變。
-        """
-        path = str(path)
-        n = max(1, int(per_defect))
-        if not os.path.isfile(path):
-            self._status("File not found: %s" % path)
-            return False
-        self._pending_dataset_name = os.path.basename(path)
-        if sync:
-            try:
-                ds = DatasetLoadWorker.run_sync_stack(path, n)
-            except Exception as e:  # UI 邊界，一律回報
-                self._status("Could not load image stack: %s: %s"
-                             % (type(e).__name__, e), "error")
-                return False
-            return self._on_dataset_loaded(ds)
-        if not self.dataset_worker.start_stack(path, n):
-            self._status("A dataset is already loading — please wait.")
-            return False
-        self._progress_busy("Loading %s…" % os.path.basename(path))
-        self._status("Loading: %s (%d image(s) per defect)"
-                     % (os.path.basename(path), n))
-        return True
-
     def load_folder_path(self, folder: Any, sync: bool = False,
                          doe: bool = False) -> bool:
         """載入一個**資料夾的單張影像**（F11 Input-3），或 DOE 的一疊 condition。

@@ -60,9 +60,8 @@
 
 **出貨的 recipe 在 [`recipes/`](recipes/)**，**每一份都有測試真的跑一次**
 （`tests/test_shipped_recipes.py`；舊的 `examples/` 就是因為沒人測而爛掉的）。
-加一份新的就在那支測試裡加一段。**目前四份**：RSEM 逐框挑最異常的那一格、
-一張影像的均勻度、EBI die-to-die（也是「用範例資料試一次」背後那份）、
-DOE 逐 condition 比 SNR。
+加一份新的就在那支測試裡加一段。**目前三份**：RSEM 逐框挑最異常的那一格、
+一張影像的均勻度、EBI die-to-die（也是「用範例資料試一次」背後那份）。
 那支測試的 `ALLOWED_ERRORS` 配著一支反向測試 —— **任何「例外清單」都要有
 反向測試**，不然它就是一張只會變長的紙。
 
@@ -255,14 +254,14 @@ git add -A && python tools/release.py && git add -A
 
 ## 5. 產品範圍開關
 
-**一種 source 一張載入卡**：`load_patch`「Load images」（一顆好幾張）與 `load_single`
-「Load one image」（一顆一張），**兩張都不看資料型別**。五種 source：
+**一種 source 一張載入卡**：`load_patch`「Patch」（一顆好幾張）與 `load_single`
+「SEM image」（一顆一張），**兩張都不看資料型別**（2026-09-18 使用者改的名；
+`key` 與 feature 名一個都沒動）。四種 source：
 
 | kind | 什麼樣的資料 | 入口 |
 |---|---|---|
 | `ebi_patch` | KLARF + patch TIFF（每顆連續幾頁；檔名 `.tif` 或 `.I01`，**內容都是 TIFF**，副檔名只住在 `klarf_core.PATCH_IMAGE_EXTS`）| `Open KLARF…` |
 | `rsem` | KLARF + 每顆一個影像檔 | `Open KLARF…`（自動判別）|
-| `tiff_stack` | 一個多頁 TIFF、**沒有 KLARF** | `Open stack…` |
 | `folder` | 一個資料夾的單張影像、沒有 KLARF | `Open folder…`；**headerless `.raw` 走 `Open raw…`**（同一種 kind，第二個入口 —— `.raw` 裡沒有寬高與位元深度，所以那顆會問，或從檔案大小推）|
 | `doe_folder` | **一個子目錄一顆、裡面每個檔案一個 imaging condition**（DOE）、沒有 KLARF | `Open conditions…` |
 
@@ -276,11 +275,13 @@ profile 設（`fab` 預設／`dev`／`demo`，看 `D4T_PROFILE`）。⚠ **旗�
 （`scope.SHOW_ROUTE_BY`），不准 `from .scope import SHOW_…`（拿到的是複本）。
 
 ```python
-SUPPORTED_KINDS = ("ebi_patch", "tiff_stack", "rsem", "folder")
+SUPPORTED_KINDS = ("ebi_patch", "rsem", "folder", "doe_folder")
 HIDDEN_STEPS = ()                # 目前沒有收起來的卡（`align` F109 拿回來了）
 SHOW_TEMPLATE_LIBRARY = True     # 工具列的 Templates…（2026-09-08 打開）
 SHOW_SAMPLE_DATA = True          # 「用範例資料試一次」（2026-09-09 隨 ebi-die-to-die.json 打開）
 INPUT_SOURCES = (...)            # 五顆 Open 的字、圖示、一句白話說明
+                                 # （`tiff_stack` F114 拿掉 —— 使用者「我們用不到」；
+                                 #   `ingest.load_tiff_stack` 還在，CLI 讀得動）
                                  # （加一列就好 —— 分岔在 ui/open_dialogs.open_source）
 ATTACHMENTS = (...)              # 掛在已載入 lot 上的附加檔（GLAS 匯出）
 ```

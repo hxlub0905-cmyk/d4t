@@ -149,7 +149,12 @@ def test_i01_is_in_the_tiff_family_everywhere():
     src = open(os.path.join(REPO, "d4t", "ui", "open_dialogs.py"),
                encoding="utf-8").read()
     filters = re.findall(r'"(?:Multi-page TIFF|Images) \(([^)]*)\)', src)
-    assert len(filters) >= 2, filters
+    # ⚠ 2026-09-18（F114）從兩條變一條：`Open stack…` 拿掉了，
+    # `STACK_FILTER` 跟著走。數量不是重點（寫死數字的話下一次加／減一顆
+    # Open 鈕就要來改它）—— 重點是**還在的每一條都認得 `.I01`**。
+    assert filters, "一條過濾字串都沒抓到 —— 這支測試問不出任何事"
+    for f in filters:
+        assert ".I01" in f or ".i01" in f, f
     for f in filters:
         assert "*.I01" in f, f
 

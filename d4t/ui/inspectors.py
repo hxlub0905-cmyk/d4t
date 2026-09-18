@@ -2673,7 +2673,7 @@ class CdInspector(Inspector):
 
 
 class InputInspector(Inspector):
-    """Load images：**哪一頁變成哪一條流**，以及每一頁載進來長什麼樣。
+    """Patch：**哪一頁變成哪一條流**，以及每一頁載進來長什麼樣。
 
     頁序已經確認（2026-07-30）
     --------------------------

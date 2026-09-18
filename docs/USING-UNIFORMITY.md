@@ -28,7 +28,7 @@
 
 ```
                               ┌──→ [Write charts]   那幾張圖
-[Load one image] ─→ [ROI] ┄┄→ [Gray level]
+[SEM image] ─→ [ROI] ┄┄→ [Gray level]
         └──────實線───────────→ ┘   └──→ [Write report]      defects.csv
 ```
 

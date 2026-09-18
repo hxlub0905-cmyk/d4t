@@ -45,7 +45,7 @@ class LoadSidecarStep(Step):
     key = "load_sidecar"
     # F110：18 → 11。留 `layout` 而不是留 `labels`：分得出它跟缺陷分類的
     # label 不是同一件事的，是「layout」那個字。
-    label = "Load layout"
+    label = "layout(GDS)"
     category = CATEGORY_IMAGE
     group = GROUP_INPUT
     help = ("Load the layout label map that GLAS exported for this defect - "

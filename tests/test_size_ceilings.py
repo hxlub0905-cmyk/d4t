@@ -181,7 +181,9 @@ FILE_CEILINGS = {
     # **順便讓一句話變成真的**：`CLAUDE.md` §5 寫著「加／改一個入口＝改
     # `INPUT_SOURCES`，不要動 UI」，而在這之前加一列就得同時在這裡長一支
     # `_on_open_<key>` 出來，不然那顆鈕按下去是 AttributeError。
-    "d4t/ui/studio.py": 7717,
+    # 2026-09-18（F114）：7,717 → **7,686**（−31）。stack 拿掉，`load_stack_path`
+    # 跟著走 —— 見下面 `HARD_CAPS` 那一段。
+    "d4t/ui/studio.py": 7686,
     # 19 道 `_migrate_*` 住在這裡（見下面 `recipe_migrations`）。它會用跟
     # `studio.py` 完全一樣的機制長成第二個 `studio.py`。
     #
@@ -372,7 +374,9 @@ COUNT_CEILINGS = {
     ),
     # god object 的兩個投影。261 → 268（六天）。
     "studio_window_methods": (
-        294,
+        293,
+        # 2026-09-18（F114）：294 → 293。使用者把 stack 拿掉（「我們用不到」），
+        # `load_stack_path` 跟著走。**刪掉也要把尺調下來**（反向測試在守）。
         # 2026-09-09：294 → 298。`write_outputs`（跑與寫拆開）、`rerun`
         # （邏輯在 `batch.rerun_decision`）、`_on_defect_selected`（Results
         # 單擊帶過去）、`_preview_whole_route`（Output 卡／判定樹跑到底）。
@@ -413,7 +417,8 @@ COUNT_CEILINGS = {
         lambda: _class_shape("d4t/ui/studio.py", "StudioWindow")[0],
     ),
     "studio_window_attributes": (
-        434,
+        433,
+        # 2026-09-18（F114）：434 → 433。同上 —— `load_stack_path` 帶走一個名字。
         # 2026-09-09（第二次）：431 → 437。`_last_run`（上一批的底稿：rows／
         # 量測簽章／被停掉／幾顆，一個 dict 不是四個名字）、`_tree_focus`
         # （編樹時預覽跑到底），以及下面那四支方法的名字。
@@ -486,9 +491,13 @@ HARD_CAPS = {
     # `_on_open_<key>` 收成模組層的一支）、`self.*` 437 → 434。
     # 那一輪要**加**第五顆 Open 鈕，而這三格只准往下：規矩就是先從它手上
     # 搬走等量的東西，而搬完之後多出來的餘裕要鎖住，不是留著下次偷偷用掉。
-    "d4t/ui/studio.py": 7717,
-    "studio_window_methods": 294,
-    "studio_window_attributes": 434,
+    # 2026-09-18（F114）：三格再往下。使用者把 stack 拿掉（「我們用不到」），
+    # 而 `load_stack_path` 是 `StudioWindow` 上的一支 —— 行 7,717 → 7,686、
+    # 方法 294 → 293、`self.*` 434 → 433。**刪掉東西也要把尺跟著調** ——
+    # 留著那段餘裕就是留給下一個人偷偷用掉的空間。
+    "d4t/ui/studio.py": 7686,
+    "studio_window_methods": 293,
+    "studio_window_attributes": 433,
 }
 
 

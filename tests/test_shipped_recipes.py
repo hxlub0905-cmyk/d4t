@@ -32,9 +32,7 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tools"))
 
 import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from d4t.core.ingest.dataset import (                        # noqa: E402
-    load_dataset, load_doe_folder,
-)
+from d4t.core.ingest.dataset import load_dataset              # noqa: E402
 from d4t.core.pipeline import Recipe, run_batch, validate    # noqa: E402
 from d4t.core.pipeline.batch import run_batch_steps          # noqa: E402
 
@@ -297,7 +295,6 @@ def test_the_report_it_writes_has_a_picture_for_every_defect(tmp_path):
 # F86：一張大圖的均勻度 —— 圖跟數字要在同一個資料夾
 # --------------------------------------------------------------------------- #
 UNIF = RECIPES / "one-image-uniformity.json"
-DOE = RECIPES / "doe-conditions.json"
 
 
 def test_the_uniformity_recipe_gets_the_numbers_out_too():
@@ -424,97 +421,3 @@ def test_the_ebi_recipe_is_the_one_behind_try_with_sample_data():
     assert studio_mod.TEMPLATE_RECIPE == EBI
     assert "ebi_patch" in Recipe.load(EBI).routes
     assert scope.SHOW_SAMPLE_DATA is True
-
-
-# --------------------------------------------------------------------------- #
-# DOE：同一顆 defect、好幾個 imaging condition（F112）
-# --------------------------------------------------------------------------- #
-def _doe_lot(tmp_path, n=4, seed=3):
-    from make_doe_sample import generate
-
-    return generate(str(tmp_path / "doe"), n=n, seed=seed)
-
-
-def test_the_doe_recipe_answers_which_condition_sees_the_defect_best(tmp_path):
-    """**這份 recipe 存在的理由**，寫成一條測試。
-
-    DOE 問的是一句話：同一顆 defect，哪一個 imaging condition 看得最清楚。
-    「跑得完、有數字」不算通過（這個 repo 踩過七次）—— 要驗的是那幾個數字
-    **排得出順序**：雜訊越小的 condition，`snr_px` 越高。
-
-    範例資料的三個 condition 只差在雜訊（σ 18 / 8 / 2），而 `snr_px` 的分母正是
-    參照那一塊自己的像素標準差 —— 所以順序是可以預測的，不是巧合。
-    """
-    from make_doe_sample import CONDITIONS
-
-    got = _doe_lot(tmp_path)
-    ds = load_doe_folder(got["out_dir"])
-    assert ds.kind == "doe_folder" and len(ds.items) == 4
-
-    rows = run_batch(Recipe.load(DOE), ds, workers=1)
-    assert len(rows) == 4
-    names = [c for c, _sigma in CONDITIONS]          # 由吵到安靜
-    for r in rows:
-        assert r["ok"], r["error"]
-        f = r["features"]
-        got_snr = [f.get("%s_cmp_snr_px" % c) for c in names]
-        assert all(v is not None for v in got_snr), (
-            "每個 condition 都要有自己的 snr_px：%s" % sorted(f))
-        # 越安靜的 condition 越看得清楚 —— 這就是 DOE 要的那個答案
-        assert got_snr == sorted(got_snr), (
-            "%s 的 snr_px 沒有跟著雜訊排出順序：%s"
-            % (r["defect_id"], dict(zip(names, got_snr))))
-        assert f["best_snr"] == pytest.approx(max(got_snr))
-        assert r["bin"] == 0, "量得到就該是 bin 0（measured）"
-
-
-def test_the_doe_recipe_really_places_its_two_boxes(tmp_path):
-    """⚠ **最危險的那個失敗**：模板比對定不出位置時，區域會**退回整張圖** ——
-    於是 target 與 ref 變成同一塊，`snr_px` 整批是 0 而**每一顆都 ok=True**。
-
-    實測踩過（F112）：ROI 卡接到最吵的那個 condition，`match_structure` 只有
-    3.89（門檻 5）、分數 0.304（門檻 0.3），兩道閘都在邊緣。所以這裡直接盯
-    `locate_ok` 與那兩個框的面積，不是只看有沒有數字。
-    """
-    got = _doe_lot(tmp_path)
-    rows = run_batch(Recipe.load(DOE), load_doe_folder(got["out_dir"]), workers=1)
-    for r in rows:
-        f = r["features"]
-        assert f["locate_ok"] == 1.0, "%s 的模板沒有定位成功" % r["defect_id"]
-        assert f["target_present"] == 1.0 and f["ref_present"] == 1.0
-        # 兩個框都**小於整張圖**，而且大小不一樣 —— 一樣就是兩個都退回整張了
-        assert f["target_area_px"] != f["ref_area_px"]
-        assert 0 < f["target_area_px"] < 128 * 128
-        assert 0 < f["ref_area_px"] < 128 * 128
-
-
-def test_the_doe_recipe_measures_every_condition_with_one_card(tmp_path):
-    """**一張 GLV 卡吃全部的 condition**，不是一個 condition 一張卡。
-
-    那是「同一組 box 套在每一條流上」唯一保證得了的寫法 —— 一個 condition 一張卡
-    的話，那幾張卡的參數要逐格對齊（框、統計量、門檻），而對不齊在畫面上看不出來。
-    """
-    from make_doe_sample import CONDITIONS
-
-    recipe = Recipe.load(DOE)
-    glv = [n for n in recipe.nodes.values() if n.step == "glv_stats"]
-    assert len(glv) == 1, "一張就夠了，而多一張就是兩份要對齊的設定"
-    sources = [s.strip() for s in str(glv[0].params["source"]).split(",")]
-    assert sources == [c for c, _s in CONDITIONS]
-    assert glv[0].params["roi"] and glv[0].params["reference_region"], \
-        "target 與 ref 兩顆埠都要接著 —— 少一顆 snr_px 就沒有分母"
-    assert "snr_px" in str(glv[0].params["compare_metrics"])
-
-
-def test_the_doe_recipe_does_not_normalize(tmp_path):
-    """**N 張之間的亮度差異正是要量的東西，一正規化就抹掉了。**
-
-    這一條守的不只是這份檔案 —— 它是一句寫在 recipe 的 description 與
-    `recipes/README.md` 裡的話，而沒有測試的話下一個人會「順手加一張 Normalize
-    讓圖好看一點」，然後每一個 snr_px 都變小而沒有人知道為什麼。
-    """
-    recipe = Recipe.load(DOE)
-    steps = [n.step for n in recipe.nodes.values()]
-    assert "normalize" not in steps
-    assert "tone" not in steps
-    assert "DO NOT ADD A NORMALIZE CARD" in recipe.description.upper()

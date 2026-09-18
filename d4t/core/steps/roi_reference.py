@@ -301,7 +301,7 @@ class RoiReferenceStep(Step):
             # 影像輸入都只收灰階（`ParamSpec.accepts` 的保守預設），所以把
             # `load_layout` 接到 Normalize 上是一條 `wrong-content`。
             content=LABEL,
-            help=("The label map stream, from the “Load layout” card. "
+            help=("The label map stream, from the “layout(GDS)” card. "
                   "Every pixel value in it is a layer number - it is not a "
                   "picture of the wafer."),
         ),
@@ -517,7 +517,7 @@ class RoiReferenceStep(Step):
                     "regions yet."]
         if not _layers_of(params):
             return ["This card has no layers yet. Use “Open GDS export…” on "
-                    "the “Load layout” card — attaching the export "
+                    "the “layout(GDS)” card — attaching the export "
                     "fills in the layer numbers and the layout's own names "
                     "for them; then rename them to something you will "
                     "recognise. Or switch “Find them by” to “%s”, which "
@@ -554,7 +554,7 @@ class RoiReferenceStep(Step):
             raise StepError(
                 self.key,
                 "no layers are named yet. Use “Open GDS export…” on the "
-                "“Load layout” card - "
+                "“layout(GDS)” card - "
                 "attaching the export fills in the layer numbers and names "
                 "from it. On the command line, pass --gds <export folder>.")
 

@@ -73,7 +73,11 @@ CATEGORY_BATCH = "batch"
 #: ⚠ ``doe_folder`` 在 **patch 那一群**（F110）：DOE 的每一張都是「以 defect
 #: 為中心、FOV 固定」拍出來的 —— 那正是 patch 形的定義，跟它是不是機台裁的
 #: 無關。`_center` 在它身上有幾何意義，而那是這張表唯一在回答的問題。
-PATCH_KINDS = ("ebi_patch", "tiff_stack", "doe_folder")
+#: ⚠ ``tiff_stack`` 2026-09-18（F114）從 `scope.SUPPORTED_KINDS` 拿掉了
+#: （使用者：「stack 功能請幫我拿掉 我們用不到」），所以也從這裡拿掉 ——
+#: 這兩張表分的是**支援的** kind，多一個沒人載得進來的字串只會讓那條
+#: cross-check 測試永遠紅。`ingest.load_tiff_stack` 本身沒動。
+PATCH_KINDS = ("ebi_patch", "doe_folder")
 SINGLE_IMAGE_KINDS = ("rsem", "folder")
 
 # --------------------------------------------------------------------------- #

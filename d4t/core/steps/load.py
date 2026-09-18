@@ -6,8 +6,8 @@
 
 | 卡 | 一顆給什麼 | 吐什麼 |
 |---|---|---|
-| ``load_patch``「Load images」| 好幾張（EBI patch、多通道 stack）| ``channel_map`` 表格裡的名字 |
-| ``load_single``「Load one image」| 一張（RSEM、資料夾）| 一條，名字由 ``out`` 決定 |
+| ``load_patch``「Patch」| 好幾張（EBI patch、多通道）| ``channel_map`` 表格裡的名字 |
+| ``load_single``「SEM image」| 一張（RSEM、資料夾）| 一條，名字由 ``out`` 決定 |
 
 為什麼要拆（使用者回報 2026-08-17）
 -----------------------------------
@@ -77,12 +77,12 @@ class LoadPatchStep(Step):
     """把 DefectItem 的**好幾張**影像載入成 Context 影像流（一律 uint8 灰階）。"""
 
     key = "load_patch"
-    label = "Load images"
+    label = "Patch"
     category = CATEGORY_IMAGE
     group = GROUP_INPUT
     help = ("Load this defect's images into the pipeline (a test/reference pair, "
             "or several detector channels), always converted to 8-bit "
-            "grayscale. One image per defect? Use “Load one image” instead.")
+            "grayscale. One image per defect? Use “SEM image” instead.")
     params = [
         ParamSpec(
             name="channel_map", type="channel_map", default=DEFAULT_CHANNEL_MAP,
@@ -172,7 +172,7 @@ class LoadPatchStep(Step):
         if pairs:
             need = highest_image_number(pairs)
             if need > len(order):
-                hint = ("Use “Load one image” for data with one image per "
+                hint = ("Use “SEM image” for data with one image per "
                         "defect. " if len(order) == 1 else "")
                 raise StepError(
                     self.key,
@@ -241,12 +241,12 @@ class LoadSingleStep(Step):
     """
 
     key = "load_single"
-    label = "Load one image"
+    label = "SEM image"
     category = CATEGORY_IMAGE
     group = GROUP_INPUT
     help = ("Load this defect's single image into the pipeline (Review SEM, or "
             "a folder of images), converted to 8-bit grayscale. Several images "
-            "per defect? Use “Load images” instead.")
+            "per defect? Use “Patch” instead.")
     params = [
         ParamSpec(
             name="out", type="image_key", direction="out", default="single",
@@ -311,7 +311,7 @@ class LoadSingleStep(Step):
             raise StepError(
                 self.key,
                 "defect %s has %d images (%s), and this card loads exactly one. "
-                "Use “Load images” — it names each image and gives you one "
+                "Use “Patch” — it names each image and gives you one "
                 "output per name."
                 % (getattr(item, "defect_id", "?"), len(order), ", ".join(order)))
 

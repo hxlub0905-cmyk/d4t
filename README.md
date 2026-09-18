@@ -32,14 +32,14 @@ d4t 的第一原則是：
 
 | | |
 |---|---|
-| **輸入** | 五種 source，各有各的入口：`ebi_patch`（KLARF ＋ 多頁 patch TIFF，`.tif` 或 `.I01`）、`rsem`（KLARF ＋ 每顆一個影像檔）、`tiff_stack`（多頁 TIFF，無 KLARF）、`folder`（單張影像資料夾，無 KLARF）、`doe_folder`（一個子目錄一顆、裡面每個檔案一個 imaging condition，無 KLARF） |
+| **輸入** | 四種 source：`ebi_patch`（KLARF ＋ 多頁 patch TIFF，`.tif` 或 `.I01`）、`rsem`（KLARF ＋ 每顆一個影像檔）、`folder`（單張影像資料夾，無 KLARF —— `.raw` 走自己的入口）、`doe_folder`（一個子目錄一顆、裡面每個檔案一個 imaging condition，無 KLARF）。⚠ `tiff_stack` 2026-09-18 從產品面拿掉（使用者「我們用不到」），`ingest` 那一支還在 |
 | **組裝** | 20 張步驟卡片（卡片庫現行可見 20 張 —— `HIDDEN_STEPS` 目前是空的）；節點畫布拉線接卡，recipe 即 DAG |
 | **量測** | GLV 統計與區域對比（含 SNR）、逐框比較找出最異常的那一格（`worst_*`，框即 ROI 自己）、CD 次像素邊緣定位（同一趟給 LWR／LER）、對焦品質指標 |
 | **輸出** | 四張 Output 卡（跑完先看 Results，按 `Write outputs` 才寫、只跑一次）：**報表資料夾**（`Write report` —— 勾選決定裡面有什麼：`report.html`／`defects.csv`／`report.xlsx`／`spread.html` box plot／`images/*.jpg`／`recipe.json`，6000 顆量級一次出得完）、**寫回 KLARF**（class／bin／DSIZE，或 Top-N 新檔）、**點對點比較報表**（`Write comparison`，一顆一列兩張圖）、**均勻度圖**（`Write charts` —— 一顆一頁、一個點是一格量測框，見 [`docs/USING-UNIFORMITY.md`](docs/USING-UNIFORMITY.md)）|
 | **介面** | PySide6 桌面編輯器（Studio）＋ CLI（可排程、可腳本化）。Results 視窗：縮圖與表格同一份排序／篩選、點一顆主畫面跟著跳、`Re-run` 改了判定樹只重判（秒級）、`Write outputs` 看過了才寫 |
 | **執行** | 多行程批次、影像段快取；設計目標為單批 10,000 顆 defect 仍流暢 |
 
-無 KLARF 的兩種 source（`tiff_stack`、`folder`）沒有座標，因此**無法寫回 KLARF**。
+無 KLARF 的兩種 source（`folder`、`doe_folder`）沒有座標，因此**無法寫回 KLARF**。
 這句話常駐在資料集標籤上，不是等使用者按下 Export 才告知。
 
 ---
@@ -112,9 +112,9 @@ python -m d4t export  <run_id> --db /tmp/runs.db --mode annotate \
     --klarf-out out.001 --csv feat.csv --excel report.xlsx
 ```
 
-> **出貨的 recipe 在 [`recipes/`](recipes/)，目前四份**（每一份都有測試真的跑
+> **出貨的 recipe 在 [`recipes/`](recipes/)，目前三份**（每一份都有測試真的跑
 > 一次）：EBI die-to-die、RSEM 逐框挑最異常的那一格、一張影像的均勻度。
-> 四份都到得了：工具列的 `Templates…`、`Open recipe…`、以及空白狀態那顆
+> 三份都到得了：工具列的 `Templates…`、`Open recipe…`、以及空白狀態那顆
 > 「用範例資料試一次」（載的是 `ebi-die-to-die.json`）。
 > 若僅需確認引擎可運作，`python tools/doctor.py` 會以內建的最小 pipeline
 > 端到端跑完一顆並自檢環境。

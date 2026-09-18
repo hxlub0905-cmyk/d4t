@@ -113,15 +113,16 @@ class AlignStep(Step):
             "honest. They all come out cropped to the part they share.")
     params = [
         ParamSpec(name="streams", type="image_keys", direction="in",
-                  default=DEFAULT_STREAMS,
+                  default=DEFAULT_STREAMS, label="Line these up",
                   help=("Which image streams to line up. Include the one you "
                         "are lining the others up on - it gets cropped the "
                         "same way, so they all end up the same size.")),
         ParamSpec(name="fixed", type="image_key", direction="in",
-                  default=DEFAULT_FIXED,
+                  default=DEFAULT_FIXED, label="…on this one",
                   help=("The one that stays put; everything else moves onto it. "
                         "It has to be one of the streams above.")),
         ParamSpec(name="method", type="chip_choice", default="phase",
+                  label="Find the shift by",
                   choices=["phase", "hybrid", "ncc", "ecc", "template"],
                   icons=["al_phase", "al_hybrid", "al_ncc", "al_ecc",
                          "al_template"],
@@ -130,11 +131,12 @@ class AlignStep(Step):
                         "ncc = exhaustive correlation; ecc = iterative refinement; "
                         "template = central template match; hybrid behaves like phase.")),
         ParamSpec(name="search_radius", type="int", default=8, min=1, max=64,
-                  extent="radius",
+                  extent="radius", label="Largest shift to expect",
                   help=("Search radius in pixels: the largest shift you expect. "
                         "Too small and it will not find the shift, too large "
                         "and it gets slow.")),
         ParamSpec(name="suffix", type="str", default="", pattern=r"^[A-Za-z0-9_]*$",
+                  label="Add to the names",
                   help=("Leave this empty and each stream is written back under "
                         "its own name. Give it something like _aligned and the "
                         "results are written beside the originals instead.")),

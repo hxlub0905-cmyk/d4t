@@ -22,7 +22,6 @@ _UNKNOWN_PAGE_CAP = 999
 
 IMAGE_FILTER = ("Images (*.png *.tif *.tiff *.I01 *.jpg *.jpeg *.bmp);;"
                 "All files (*)")
-STACK_FILTER = "Multi-page TIFF (*.tif *.tiff *.I01);;All files (*)"
 KLARF_FILTER = "KLARF (*.001 *.klarf *.txt);;All files (*)"
 
 #: 「以上都不是，我自己填」那一項的字。
@@ -34,7 +33,7 @@ _MAX_SIDE = 65536
 #: :func:`open_source` 認得的 key。**`scope.INPUT_SOURCES` 上的每一個 key 都要
 #: 在這裡**，不然那顆鈕按下去只會講一句「還沒有辦法開」——
 #: `tests/test_ui_input_kinds.py` 兩個方向都守。
-OPENABLE = ("klarf", "stack", "folder", "doe_folder", "image", "raw")
+OPENABLE = ("klarf", "folder", "doe_folder", "image", "raw")
 
 
 def ask_klarf(parent: Any) -> Optional[str]:
@@ -123,32 +122,6 @@ def ask_raw_folder(parent: Any) -> Optional[Tuple[str, Any]]:
                       bits=16 if bits.startswith("16") else 8)
 
 
-def ask_stack(parent: Any) -> Optional[Tuple[str, int]]:
-    """`Open stack…` —— 一個多頁 TIFF ＋「一顆幾張」。
-
-    「一顆幾張」問一次就好，而且**預設值要是這個檔案自己的頁數線索**：問這一格
-    的時候使用者手上唯一的事實是「這個檔案有幾頁」，所以先講出來。
-    """
-    path, _ = QFileDialog.getOpenFileName(parent, "Open image stack", "",
-                                          STACK_FILTER)
-    if not path:
-        return None
-    pages = 0
-    try:
-        from d4t.core.ingest import tiff_index
-        pages = int(tiff_index.n_pages(path))
-    except Exception:            # 只是拿來寫提示
-        pages = 0
-    prompt = ("How many images make up one defect?\n\n"
-              "%s\nEvery N consecutive pages become one defect; enter 1 if "
-              "each page is its own defect. Name them afterwards on the "
-              "Load images card." % ("This file has %d page(s)." % pages
-                                     if pages else ""))
-    n, ok = QInputDialog.getInt(parent, "Images per defect", prompt, 1, 1,
-                                max(1, pages) if pages else _UNKNOWN_PAGE_CAP)
-    return (path, int(n)) if ok else None
-
-
 def open_source(window: Any, key: str) -> None:
     """`INPUT_SOURCES` 裡那一顆按鈕按下去 —— **五種入口共用這一支**（F110）。
 
@@ -167,10 +140,6 @@ def open_source(window: Any, key: str) -> None:
         path = ask_klarf(window)
         if path:
             window.load_dataset_path(path)
-    elif key == "stack":
-        got = ask_stack(window)
-        if got:
-            window.load_stack_path(got[0], got[1])
     elif key in ("folder", "doe_folder"):
         doe = key == "doe_folder"
         d = ask_conditions_folder(window) if doe else ask_folder(window)

@@ -22,7 +22,7 @@
 判定只問一句：那個峰有沒有高過「安靜」的水位（`quiet`，預設 32）。
 
 ```
-Load images ──test─┬──> Normalize (test)           ──test──┐
+Patch ──test─┬──> Normalize (test)           ──test──┐
                    ├──> Normalize (ref, range from test) ──ref──┤
             ──ref──┘                                            ▼
                                                     Subtract |test − ref| ──diff──> Denoise (median 3) ──diff──> GLV (glv_max)
@@ -44,7 +44,7 @@ Load images ──test─┬──> Normalize (test)           ──test──�
 **沒有第二張圖可以比的時候，同一張圖上的其他框就是參照**。
 
 ```
-Load one image ──single─┬──> ROI (stripes, crossing)          → on_pattern ───────┐
+SEM image ──single─┬──> ROI (stripes, crossing)          → on_pattern ───────┐
                         ├──> ROI (stripes, between_vertical)   → between_columns ─┤
                         ├──> ROI (stripes, between_horizontal) → between_rows ────┤
                         └──single──────────────────────────────────> GLV (each box) <─────────┘
@@ -135,7 +135,7 @@ python -m d4t run recipes/rsem-worst-box.json <你的.001> --workers 4
 
 ```
                                         ┌──→ Write charts    四張圖 + 一張自己配的
-Load one image ──single─┬──> ROI (stripes) ┄cells┄> GLV (across boxes)
+SEM image ──single─┬──> ROI (stripes) ┄cells┄> GLV (across boxes)
                         └──single──────────────────→ ┘   └──→ Write report   defects.csv + recipe
 ```
 
@@ -174,67 +174,3 @@ python -m d4t run recipes/one-image-uniformity.json <一個放影像的資料夾
 ```
 
 ---
-
-## `doe-conditions.json`
-
-**同一顆 defect、好幾個 imaging condition**：用 **`Open conditions…`** 打開一個
-「資料夾裡還有資料夾」的 lot —— **一個子目錄一顆 defect，裡面每個檔案是一個
-condition**（不同的 Landing energy／電流）。對標廠內 imageY 的那個流程：一次載入
-許多條件的影像，在上面設一組 target／ref box，對齊之後**一起**量 SNR 與 contrast。
-
-```
-Load images ─┬─le300─┐
-             ├─le500─┼──> Align ─┬─le800──> ROI (a cell I mark myself) ┄target┄┐
-             └─le800─┘  （整數平移） └─le300,le500,le800─────────────> GLV <┄ref┄┘
-                                                                        └──> Write report
-```
-
-**它的每一格都在回答 DOE 那個問題：哪一個 condition 看這顆 defect 看得最清楚。**
-
-* **`Load images` 的「Name the images」** 就是 condition 的名字（`1:le300, 2:le500,
-  3:le800`）。編號照**檔名排序**數 —— 那是 `doe_folder` 這條路的契約。
-* **`Align` 只搬整數像素、而且不重採樣**，所以幾張圖的灰階一個位元都沒動 ——
-  那正是「比它們的 SNR」這件事成立的前提。⚠ 它會把幾條流一起裁成共同重疊區，
-  所以 **ROI 卡一定要接在它後面**（裁切改變了正規化座標的意義）。
-* **`ROI` 走 `a cell I mark myself`**：模板就是**整張 FOV**（DOE 的 FOV 固定、
-  defect 置中，所以沒有東西要「找」），兩個框直接畫在上面 —— `target` 貼著正中央
-  那顆 defect，`ref` 在角落的乾淨背景。
-* **`GLV` 一張卡吃全部的 condition**：同一組框套在每一條流上，每個 condition 各出
-  一份 `<condition>_cmp_snr_px` 與 `<condition>_cmp_contrast_mean`。
-
-**`snr_px` 而不是 `snr`**：`snr` 的分母是**框與框之間**的 σ（使用者 2026-08-21
-定調的 by-box），而 DOE 只有一個 target box、一個 ref box —— 一格沒有「之間」，
-所以 `snr` 對這份資料**永遠是空的**。`snr_px = |μT − μR| / σR` 的分母是參照那一塊
-**自己的像素**，一格就算得出來。兩個是兩個定義，誰都不准退回誰。
-
-判定樹只分兩類（跟均勻度那一份同一個形狀）：`best_snr < 0`（一個 condition 都沒量到，
-`fill` 補 −1）→ bin 9「nothing to measure」，其餘 → bin 0「measured」。
-`best_snr = max(每個 condition 的 snr_px)` 也是排序用的分數。
-
-### ⚠ 拿去用在自己的資料上，先做這兩件
-
-1. **重畫那兩個框。** 出貨的模板與框是從範例資料來的（`tools/make_doe_sample.py`
-   產的）。在 Studio 選 ROI 卡 → **`Edit template & regions…`** → 丟一張**你自己的**
-   condition 影像進去當模板，然後把 `target` 與 `ref` 重新框一次。
-2. **改 condition 的名字**（`Load images` 那一格）—— 它們會變成特徵名的前綴，
-   也是判定樹那條 `max(...)` 裡的名字。
-
-### ⚠ 不要加 `Normalize`
-
-N 張影像之間的**亮度差異正是你要量的東西**，一正規化就抹掉了。
-（對齊**內部**需要正規化，但那只餵給相關性、不寫出去 —— 見 `align` 的說明。）
-
-### 要調的幾格
-
-| 卡 | 格 | 什麼時候動 |
-|---|---|---|
-| Align | **Line these up on** | 預設是**最安靜的那個 condition**。相關性是拿訊號去找的，而雜訊最大的那一張訊號最少 |
-| ROI | **Image** | 同上：定位也用最安靜的那一張。實測拿最吵的那張定位，模板比對的兩道閘都在邊緣，區域會退回整張圖而 `snr_px` 整批變 0 |
-| GLV | **Compare their** | 預設 `glv_mean`。`snr_px` 不看這一格（它的定義裡沒有 stat），但 `contrast` 看 |
-
-### 命令列
-
-```bash
-python tools/make_doe_sample.py /tmp/doe --n 6        # 產一份範例資料
-python -m d4t run recipes/doe-conditions.json /tmp/doe --workers 4
-```

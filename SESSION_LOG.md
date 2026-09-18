@@ -28,6 +28,106 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F114：Align 的格子變成人話、DOE 的 recipe 刪掉、stack 拿掉、載入卡改名（2026-09-18）
+
+使用者四句話，四件事。
+
+### 1. 「目前 DOE 的 rcp 要怎麼操作?」→ check 出三個問題
+
+回頭驗一次操作流程，撞到三件**文件與畫面對不起來**的事：
+
+* **Align 卡的每一格在畫面上都是 recipe 的鍵，不是人話。** 全庫 8 個沒有
+  `label` 的參數裡，**5 個在 `align` 上** —— 使用者看到的是 `streams`、`fixed`、
+  `method`、`search_radius`、`suffix`。`CLAUDE.md` §3 寫著「參數名是 recipe 的鍵，
+  不是給人看的字 —— 顯示用 `label`」，而 F109 重寫這張卡時沒補。
+  補成 `Line these up` / `…on this one` / `Find the shift by` /
+  `Largest shift to expect` / `Add to the names`（`…` 開頭那個接續式是
+  ROI 卡 `…and every other one is` 的既有慣例）。
+* **`recipes/README.md` 指了一個畫面上不存在的欄位名**（`Line these up on`）——
+  那句話是從卡片的 `help` 第一句抄來的。隨第 2 件一起走了。
+* **ROI 的 `Find them by` 說明停在只有兩個選項的年代**（開頭 "Both answer the
+  same question"，但現在有三個，而那句話描述的兩個不含 DOE 走的
+  `a cell I mark myself`）。**這一件沒動** —— 使用者選的範圍只有第一件。
+
+### 2. 「出貨的那隻 rcp 你先幫我刪掉好了，我自己先接好再丟上來給你」
+
+`recipes/doe-conditions.json` 刪掉，**出貨的 recipe 四份回到三份**。
+
+刪的理由是使用者的：出貨的那一份要從**真的資料**長出來。F112 那一份的模板與
+兩個框是從 `tools/make_doe_sample.py` 的範例資料來的 —— 拿去套真資料的第一件事
+就是整組重畫，那它作為「出貨」的價值只剩下接線的形狀。
+
+⚠ **跟著走的與留著的**：四條 F112 的行為測試隨那份檔案一起刪（它們斷言的是
+那份檔案）；`tools/make_doe_sample.py`、`tests/test_doe_folder.py`、`doe_folder`
+這條 kind、`snr_px` 這個 metric **一個都沒動** —— 刪掉的是那一份接線，不是那條路。
+
+### 3. 「stack 功能請幫我拿掉 我們用不到」
+
+`tiff_stack` 從**產品面**拿掉：`scope.SUPPORTED_KINDS` 與 `INPUT_SOURCES` 各少
+一格，`ask_stack`／`open_source` 的分岔／`OPENABLE`／`StudioWindow.load_stack_path`
+／`DatasetLoadWorker.start_stack`＋`run_sync_stack` 全部拿掉。
+**`d4t/core/ingest/dataset.load_tiff_stack` 一個位元都沒動** —— CLI 讀得動，
+要回來只是把字串加回那兩張表。六個入口對使用者太多，是同一則訊息的另一半。
+
+`step.PATCH_KINDS` 也拿掉 `tiff_stack`：那兩張表分的是**支援的** kind，
+留一個沒人載得進來的字串只會讓 `test_doe_folder` 那條 cross-check 永遠紅。
+
+**兩支測試紅得有道理，而修的是測試本身**：
+
+* `test_ui_input_kinds::test_all_four_kinds_are_supported` 把
+  `("ebi_patch","rsem","tiff_stack","folder")` 抄進測試裡了。改成問機制：
+  **`SUPPORTED_KINDS` 上的每一種都要 (a) 被認得、(b) 有一個入口打得開它**。
+  （`test_ui_scope_profiles.py` F109 付過同一筆錢 —— 把具體對象抄進測試，
+  那個對象一被拿掉，紅的理由就跟壞掉的東西無關。）
+* `test_i01_companion` 斷言 `len(filters) >= 2`，而少一顆 Open 鈕就只剩一條。
+  數量不是重點，改成**還在的每一條都要認得 `.I01`**。
+
+**`test_ui_f11_tiff_stack.py` 沒有刪掉，是改寫。** 它守的三件事裡只有第一件
+（「多一顆 `Open stack…`」）是 stack 自己的；另外兩件 ——
+**「沒有 KLARF」那句話要常駐在資料集標籤上、不能只在狀態列講一次**（載完就被
+"Computing preview…" 蓋掉）與**命名表格的列數來自資料** —— 對
+`folder`／`doe_folder`／`raw` 一字不差。改接在 `doe_folder` 上，檔名改成
+`tests/test_ui_no_klarf_label.py`。
+
+### 4. 「Load image 改成 Patch、Load images 改成 SEM image、Load layout 改成 layout(GDS)」
+
+⚠ **字面讀起來是反的，所以先問了再改。** 使用者寫「Load image → Patch、
+Load images → SEM image」，而現在的兩張卡是 `load_patch`「Load images」
+（一顆好幾張）與 `load_single`「Load one image」（一顆一張）。照字面對的話，
+**一顆好幾張那張會叫 SEM image、一顆一張那張會叫 Patch** —— 跟兩張卡實際做的事
+正好相反。問了，使用者選「按意思對」：
+
+| key | 舊 | 新 |
+|---|---|---|
+| `load_patch`（一顆好幾張）| `Load images` | **`Patch`** |
+| `load_single`（一顆一張）| `Load one image` | **`SEM image`** |
+| `load_sidecar` | `Load layout` | **`layout(GDS)`** |
+| `pair_source` | `Pair source` | 不變 |
+
+**只改 `label`，代價是零**（`CLAUDE.md` §5 那張表最後一列）：`key`、feature 名、
+recipe JSON 一個位元都沒動，舊檔案照開。
+
+**跟著改的是「一張卡的 help 指名另一張卡」那幾句** —— 那是使用者讀完會去卡片庫
+裡找的名字，不改就是指向一張不存在的卡（`load.py` 四處、`roi_reference.py`
+三處）。`tests/test_card_invariants.py` 有一條正是在守這個（help 裡引號括起來的
+卡片名要真的存在），所以它會自己抓。
+
+⚠ **`tests/test_steps.py` 有一條把 `"Load images"` 抄進斷言裡**，改名當場紅。
+紅得沒道理 —— 壞掉的不是「錯誤訊息講得出該用哪一張卡」這件事。改成
+`get_step("load_patch").label in str(e.value)`：**問機制，不問那一個字串**
+（這一輪第三次付同一筆錢，見上面第 3 件）。
+
+歷史紀錄裡的舊名字**一律不動**：`docs/plans/F11-phase2-features.md`、
+`studio.py`／`viewmodel.py` 裡逐字引述使用者原話的那幾段 —— 那是「他當時說了什麼」，
+改掉就不是紀錄了。
+
+### 三把尺
+
+`studio.py` 那三格**往下**（只准往下的那三格）：行 7,717 → 7,686、
+方法 294 → 293、`self.*` 434 → 433。**刪掉東西也要把尺調下來** ——
+留著那段餘裕就是留給下一個人偷偷用掉的空間（反向測試在守）。
+pyright 停在 128（上限 128），**黃金值三份逐項相同**。
+
 ## F113：讀得了 `.raw` —— 第六個入口，一種 kind（2026-09-18）
 
 使用者：「目前讀的圖檔 input 也要能讀取 `.raw` 的原始圖檔」，接著定調

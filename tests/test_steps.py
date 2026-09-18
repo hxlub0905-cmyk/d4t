@@ -115,7 +115,11 @@ def test_load_single_refuses_data_with_several_images(patch_tiff):
     ctx = Context(meta={"_defect_item": item, "_dataset_kind": "ebi_patch"})
     with pytest.raises(StepError) as e:
         run_step("load_single", ctx)
-    assert "Load images" in str(e.value)          # 講得出該用哪一張卡
+    # ⚠ **卡片名不寫死在這裡**：2026-09-18 使用者把它從「Load images」改成
+    # 「Patch」，而這一條當場紅了 —— 紅得沒道理，壞掉的不是「講得出該用
+    # 哪一張卡」這件事。問的改成：那句話裡**真的有那張卡現在的名字**。
+    from d4t.core.pipeline.step import get_step
+    assert get_step("load_patch").label in str(e.value)
 
 
 def test_load_patch_explicit_and_errors(patch_tiff):
